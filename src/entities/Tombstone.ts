@@ -41,6 +41,8 @@ export function getTombstoneCanvas(): HTMLCanvasElement {
 export class Tombstone extends Entity {
   w = 14; h = 14;
   angle = 0;           // 当前倾角（弧度，0 = 直立）
+  /** 原版墓碑样式：Tiles_85 偶数列起的 2×2 样式块（21 列 → 11 种） */
+  styleCol = 0;
   private angVel = 0;  // 空中翻滚角速度
   private restAngle = 0;  // 安放目标角（最近的 90° 倍数）
   private settled = false;
@@ -53,6 +55,7 @@ export class Tombstone extends Entity {
     this.vx = (Math.random() - 0.5) * 2.4;   // 随机水平抛出
     this.vy = -1.2 - Math.random();          // 小幅上抛再坠落
     this.angVel = (Math.random() - 0.5) * 0.32;
+    this.styleCol = 2 * Math.floor(Math.random() * 11); // 随机样式块
   }
 
   fixedUpdate(dt: number, game: GameHooks) {

@@ -388,14 +388,21 @@ export class Renderer {
     }
   }
 
-  /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣） */
+  /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
+   *  优先原版 Tiles_85 样式块（2×2 格 = 34×34px），程序化仅兜底 */
   private drawTombstone(t: Tombstone) {
     const ctx = this.ctx;
-    const img = getTombstoneCanvas();
     ctx.save();
     ctx.translate(t.cx, t.y + t.h);
     ctx.rotate(t.angle);
-    ctx.drawImage(img, -8, -22, 16, 22);
+    const fr = this.atlas ? this.atlas.vrect(85, t.styleCol * 18, 0, 34, 34) : null;
+    if (fr) {
+      // 原版样式块：底对齐，宽按 2 格视觉（比碰撞盒宽，正常）
+      ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -17, -34, 34, 34);
+    } else {
+      const img = getTombstoneCanvas();
+      ctx.drawImage(img, -8, -22, 16, 22);
+    }
     ctx.restore();
   }
 

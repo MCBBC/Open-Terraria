@@ -148,6 +148,16 @@ export class SpriteAtlas {
     return { img, sx: fx, sy: fy, sw: m.grid[0], sh: m.grid[1] };
   }
 
+  /** 原版表内任意矩形（多格物体整体取图，如墓碑 2×2 = 34×34px） */
+  vrect(sheetId: number, fx: number, fy: number, w: number, h: number): DrawRect | null {
+    const m = this.vmeta(sheetId);
+    if (!m) return null;
+    const img = this.vimages.get(m.sheet);
+    if (!img) return null;
+    if (fx < 0 || fy < 0 || fx + w > img.width || fy + h > img.height) return null;
+    return { img, sx: fx, sy: fy, sw: w, sh: h };
+  }
+
   /** 原版物品图标（整图） */
   vicon(itemId: number): DrawRect | null {
     const m = this.vanilla.items[String(itemId)];

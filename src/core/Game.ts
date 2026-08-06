@@ -788,6 +788,15 @@ export class Game implements GameHooks {
     for (const b of branchSpots) {
       this.spawnDrop(b.x * TILE + 8, b.y * TILE + 8, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
     }
+    // 橡实：较大概率（75%）掉 2-3 颗，沿树冠区域散落供补种
+    if (Math.random() < 0.75) {
+      const nAcorn = 2 + Math.floor(Math.random() * 2);
+      for (let a = 0; a < nAcorn; a++) {
+        const ax = x + (Math.random() - 0.5) * 2.5;
+        const ay = top + Math.random() * height * 0.4;
+        this.spawnDrop(ax * TILE + 8, ay * TILE, 'acorn', 1, (Math.random() - 0.5) * 3, -3 - Math.random());
+      }
+    }
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
     // 从登记表移除
     const t = this.world.trees.findIndex((tr) => tr.x === x && Math.abs(tr.y - top) <= 2);
