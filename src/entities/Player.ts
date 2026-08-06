@@ -40,6 +40,7 @@ export class Player extends Entity {
   private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
   private regenAccum = 0;
+  stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
 
   constructor(x: number, y: number, inv: Inventory) {
     super();
@@ -213,6 +214,28 @@ export class Player extends Entity {
     this.dropThrough = !!this.inputDown;
     moveAndCollide(this, world, this.vx, this.vy);
 
+    // 边缘滑落：站在方块极边缘（脚下实心支撑 ≤4px）时向悬空侧滑出并下坠
+    if (this.onGround && this.vy >= 0) {
+      const fy = Math.floor((this.y + this.h + 1) / TILE);
+      const fx0 = Math.floor(this.x / TILE), fx1 = Math.floor((this.x + this.w - 0.01) / TILE);
+      let support = 0;
+      let supportX = 0; // 支撑面积加权重心
+      for (let tx = fx0; tx <= fx1; tx++) {
+        if (!world.store.isSolid(tx, fy)) continue;
+        const left = Math.max(this.x, tx * TILE);
+        const right = Math.min(this.x + this.w, tx * TILE + TILE);
+        const ov = Math.max(0, right - left);
+        support += ov;
+        supportX += (left + right) / 2 * ov;
+      }
+      if (support > 0 && support <= 4) {
+        const cen = supportX / support;
+        const dir = cen < this.cx ? 1 : -1; // 支撑在身体哪侧，就往反侧滑
+        this.x += dir * 1.2;
+        this.onGround = false; // 失去支撑开始下坠
+      }
+    }
+
     // 自动上台阶：贴地行走撞 1 格高台阶且上方净空 → 直接踏上去（无需跳跃）
     // 注意碰撞后 vx 已清零，用输入方向判断
     if (this.onGround && this.hitWall && this.inputX !== 0) {
@@ -237,9 +260,13 @@ export class Player extends Entity {
           this.y = ny;
           this.x += dir * 2.5;
           this.onGround = true;
+          this.stepRenderY = TILE; // 渲染补偿：从旧高度缓升，消除瞬移顿挫
         }
       }
     }
+    // 台阶视觉缓动：每帧向 0 收敛
+    if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;
+    else this.stepRenderY = 0;
 
     // 落地摔伤结算（幸运马掌免疫）
     if (this.onGround && this.fallStartY !== null) {
@@ -254,6 +281,7 @@ export class Player extends Entity {
       }
     }
 
+    // 走跑动画计时（仅地面；空中贴图静态不参与动画）
     if (Math.abs(this.vx) > 0.3 && this.onGround) this.animTime += Math.abs(this.vx);
     else this.animTime = 0;
 

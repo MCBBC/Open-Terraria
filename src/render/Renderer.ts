@@ -618,7 +618,8 @@ export class Renderer {
     // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
-    ctx.translate(p.cx, p.y + p.h); // 锚点：脚底中心
+    // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感
+    ctx.translate(p.cx, p.y + p.h + p.stepRenderY); // 锚点：脚底中心
     ctx.scale(p.facing, 1);
 
     // ---- Maples 主角帧（40×58，Run 11 帧循环）----
@@ -628,7 +629,7 @@ export class Renderer {
       const runFrames = this.runFramesCache ??= this.atlas.animFrames('Player/Run');
       let frame: typeof idle = null;
       if (!p.onGround) {
-        frame = runFrames[1] ?? idle; // 跳跃借用跑步帧
+        frame = runFrames[0] ?? idle; // 起跳/空中：静态走路首帧（不做动画）
       } else if (Math.abs(p.vx) > 0.3) {
         const idx = Math.floor(p.animTime / 6) % runFrames.length;
         frame = runFrames[idx] ?? idle;
