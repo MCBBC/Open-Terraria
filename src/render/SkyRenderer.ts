@@ -257,7 +257,9 @@ export class SkyRenderer {
 
   private buildMountains() {
     const W = 1600;
-    // 双倍频值噪声脊线：大山势 + 小起伏，平滑插值
+    // 双倍频值噪声脊线。控制点按周期取样（首尾同值）→ 图案无缝平铺，
+    // 消除接缝处的垂直悬崖（"被一刀砍"的根源）；pow 收尖山峰、压平谷底
+    const SEGS1 = 8, SEGS2 = 40;
     const mk = (seed: number, amp: number, oct2: number): number[] => {
       let h = seed >>> 0;
       const rnd = () => {
@@ -266,19 +268,20 @@ export class SkyRenderer {
         return ((h >>> 0) % 1000) / 1000;
       };
       const ctrl1: number[] = [], ctrl2: number[] = [];
-      for (let i = 0; i <= 8; i++) ctrl1.push(rnd());
-      for (let i = 0; i <= 40; i++) ctrl2.push(rnd());
+      for (let i = 0; i < SEGS1; i++) ctrl1.push(rnd());
+      for (let i = 0; i < SEGS2; i++) ctrl2.push(rnd());
       const pts: number[] = [];
       for (let x = 0; x <= W; x++) {
-        const f1 = (x / W) * 8;
+        const f1 = (x / W) * SEGS1;
         const i0 = Math.floor(f1), s1 = f1 - i0;
         const sm1 = s1 * s1 * (3 - 2 * s1);
-        const v1 = ctrl1[i0] * (1 - sm1) + ctrl1[Math.min(8, i0 + 1)] * sm1;
-        const f2 = (x / W) * 40;
+        const v1 = ctrl1[i0 % SEGS1] * (1 - sm1) + ctrl1[(i0 + 1) % SEGS1] * sm1;
+        const f2 = (x / W) * SEGS2;
         const j0 = Math.floor(f2), s2 = f2 - j0;
         const sm2 = s2 * s2 * (3 - 2 * s2);
-        const v2 = ctrl2[j0] * (1 - sm2) + ctrl2[Math.min(40, j0 + 1)] * sm2;
-        pts.push((v1 * 0.75 + v2 * oct2 * 0.25) * amp + amp * 0.25);
+        const v2 = ctrl2[j0 % SEGS2] * (1 - sm2) + ctrl2[(j0 + 1) % SEGS2] * sm2;
+        const v = v1 * 0.75 + v2 * oct2 * 0.25;
+        pts.push(Math.pow(v, 1.25) * amp + amp * 0.2);
       }
       return pts;
     };
