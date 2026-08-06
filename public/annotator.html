@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>贴图标注工具</title>
+<style>
+  body { margin:0; background:#1a1626; color:#e8e4f0; font-family:sans-serif; }
+  #toolbar { position:fixed; top:0; left:0; right:0; background:#241e38; padding:8px 12px;
+    display:flex; gap:6px; flex-wrap:wrap; align-items:center; z-index:10; border-bottom:2px solid #4a3a6a; }
+  .tag-btn { padding:6px 10px; border-radius:5px; border:1px solid #6a5a8a; background:#3a2f52;
+    color:#fff; cursor:pointer; font-size:13px; }
+  .tag-btn:hover { background:#4a3f66; }
+  #grid { display:flex; flex-wrap:wrap; gap:6px; padding:64px 12px 12px; }
+  .cell { width:96px; background:#141020; border:2px solid #332a4a; border-radius:4px;
+    cursor:pointer; text-align:center; padding:4px 0 2px; }
+  .cell:hover { border-color:#888; }
+  .cell.sel { border-color:#ffd75a; }
+  .cell canvas { image-rendering:pixelated; width:64px; height:64px; background:
+    repeating-conic-gradient(#2a2440 0% 25%, #201a30 0% 50%) 0 0 / 16px 16px; }
+  .cell .nm { font-size:9px; color:#9a8ab8; overflow:hidden; white-space:nowrap; }
+  .cell .tg { font-size:10px; font-weight:bold; min-height:14px; }
+  #pvWrap { display:flex; align-items:center; gap:6px; background:#141020;
+    border:2px solid #4a3a6a; border-radius:6px; padding:3px 6px; }
+  #pv { image-rendering:pixelated; width:44px; height:44px; }
+  #pvName { font-size:11px; color:#9a8ab8; max-width:110px; overflow:hidden; }
+  .hint { font-size:12px; color:#9a8ab8; }
+  #saved { font-size:11px; color:#8ad0a0; min-width:52px; }
+</style>
+</head>
+<body>
+<div id="toolbar">
+  <b>贴图标注</b>
+  <span class="hint" id="sheetName"></span>
+  <div id="pvWrap"><canvas id="pv" width="16" height="16"></canvas><div id="pvName">未选择</div></div>
+</div>
+<div id="grid"></div>
+<script type="module">
+const TAGS = [
+  ['full', '完整/内'],
+  ['top', '顶暴露'],
+  ['bottom', '底暴露'],
+  ['left', '左暴露'],
+  ['right', '右暴露'],
+  ['tl', '角-上左'],
+  ['tr', '角-上右'],
+  ['bl', '角-下左'],
+  ['br', '角-下右'],
+  ['clear', '清除'],
+];
+const params = new URLSearchParams(location.search);
+const sheet = params.get('sheet') || '地形/Tiles_2.png';
+const LS_KEY = 'annotator:' + sheet;
+
+const state = { sel: null, tags: {} };
+
+// 加载：远端 annotations.json 为底 → localStorage 覆盖（本地更新）
+try {
+  const r = await fetch('sprites/annotations.json');
+  if (r.ok) {
+    const j = await r.json();
+    Object.assign(state.tags, j[sheet] || {});
+  }
+} catch {}
+try {
+  const ls = localStorage.getItem(LS_KEY);
+  if (ls) Object.assign(state.tags, JSON.parse(ls));
+} catch {}
+
+const saveLocal = () => {
+  localStorage.setItem(LS_KEY, JSON.stringify(state.tags));
+};
+
+const atlas = await fetch('sprites/atlas.json').then(r => r.json());
+const entry = atlas.files[sheet];
+const img = new Image();
+img.src = 'sprites/' + encodeURI(sheet);
+await img.decode();
+document.getElementById('sheetName').textContent = sheet + `（${entry.sprites.length} 块 · 已标 ` + Object.keys(state.tags).length + '）';
+
+const TAG_BORDER = { full:'#8ad0a0', top:'#7ac0ff', bottom:'#e0a070', left:'#c090e0', right:'#e0e07a',
+  tl:'#ff9090', tr:'#ffa0c0', bl:'#90d0d0', br:'#b0b0ff' };
+
+const grid = document.getElementById('grid');
+const pv = document.getElementById('pv');
+const pvName = document.getElementById('pvName');
+
+function refresh(cell, name) {
+  const t = state.tags[name];
+  cell.querySelector('.tg').textContent = t && t !== 'clear' ? t : '';
+  cell.style.borderColor = t && t !== 'clear' ? TAG_BORDER[t] : (cell.classList.contains('sel') ? '#ffd75a' : '#332a4a');
+}
+
+for (const s of entry.sprites) {
+  const cell = document.createElement('div');
+  cell.className = 'cell';
+  const cv = document.createElement('canvas');
+  cv.width = s.w; cv.height = s.h;
+  const cx = cv.getContext('2d');
+  // 与游戏一致的 Y 翻转显示
+  cx.drawImage(img, s.x, img.height - s.y - s.h, s.w, s.h, 0, 0, s.w, s.h);
+  cell.appendChild(cv);
+  cell.appendChild(Object.assign(document.createElement('div'), { className: 'nm', textContent: s.name }));
+  cell.appendChild(Object.assign(document.createElement('div'), { className: 'tg' }));
+  cell.onclick = () => {
+    if (state.sel) state.sel.classList.remove('sel');
+    state.sel = cell;
+    cell.classList.add('sel');
+    pv.width = s.w; pv.height = s.h;
+    pv.getContext('2d').drawImage(cv, 0, 0);
+    pvName.textContent = s.name;
+    refresh(cell, s.name);
+  };
+  grid.appendChild(cell);
+  refresh(cell, s.name);
+}
+
+const bar = document.getElementById('toolbar');
+const applyTag = (tag) => {
+  if (!state.sel) { pvName.textContent = '请先点选精灵'; return; }
+  const name = state.sel.querySelector('.nm').textContent;
+  if (tag === 'clear') delete state.tags[name];
+  else state.tags[name] = tag;
+  saveLocal();
+  refresh(state.sel, name);
+  document.getElementById('sheetName').textContent = sheet + `（${entry.sprites.length} 块 · 已标 ` + Object.keys(state.tags).length + '）';
+  flashSaved();
+};
+for (const [tag, label] of TAGS) {
+  const b = document.createElement('button');
+  b.className = 'tag-btn';
+  b.textContent = label;
+  if (TAG_BORDER[tag]) b.style.borderColor = TAG_BORDER[tag];
+  b.onclick = () => applyTag(tag);
+  bar.appendChild(b);
+}
+// 本地状态指示 + 清空本地
+const saved = document.createElement('span');
+saved.id = 'saved';
+bar.appendChild(saved);
+let savedTimer;
+function flashSaved() {
+  saved.textContent = '✓ 已存本地';
+  clearTimeout(savedTimer);
+  savedTimer = setTimeout(() => (saved.textContent = ''), 1200);
+}
+const wipe = document.createElement('button');
+wipe.className = 'tag-btn';
+wipe.textContent = '清空本表';
+wipe.style.borderColor = '#c05050';
+wipe.onclick = () => {
+  if (!confirm('清空本表的全部本地标注？（不影响已导出的文件）')) return;
+  state.tags = {};
+  saveLocal();
+  for (const cell of document.querySelectorAll('.cell')) refresh(cell, cell.querySelector('.nm').textContent);
+  document.getElementById('sheetName').textContent = sheet + `（${entry.sprites.length} 块 · 已标 0）`;
+};
+bar.appendChild(wipe);
+
+// 导出
+const exp = document.createElement('button');
+exp.className = 'tag-btn';
+exp.style.borderColor = '#ffd75a';
+exp.textContent = '⬇ 导出 annotations.json';
+exp.onclick = () => {
+  const out = { [sheet]: state.tags };
+  const blob = new Blob([JSON.stringify(out, null, 1)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'annotations.json';
+  a.click();
+  alert(`已导出 ${Object.keys(state.tags).length} 条标注。\n请把文件放到 game/public/sprites/annotations.json`);
+};
+bar.appendChild(exp);
+</script>
+</body>
+</html>

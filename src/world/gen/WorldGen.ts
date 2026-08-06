@@ -1,0 +1,503 @@
+// 程序化世界生成管线：地形 → 洞穴 → 矿石 → 液体 → 表面 → 结构
+// 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
+import { createNoise2D } from 'simplex-noise';
+import { RNG, hashString } from '../../core/rng';
+import { T, W, TILE_DEFS } from '../../data/tiles';
+import { World } from '../World';
+
+export interface GenConfig {
+  width: number;
+  height: number;
+  seedText: string;
+  name?: string;
+  structures?: boolean;
+}
+
+export interface Pass {
+  name: string;
+  run: (ctx: GenCtx, report: (p: number) => void) => void;
+}
+
+export interface GenCtx {
+  world: World;
+  store: World['store'];
+  rng: RNG;
+  noise2D: (x: number, y: number) => number;
+  surface: Float32Array;   // 每列地表高度（tile y）
+  cfg: GenConfig;
+}
+
+/** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
+export async function generateWorld(cfg: GenConfig, onProgress?: (label: string, p: number) => void): Promise<World> {
+  const seed = hashString(cfg.seedText || String(Date.now()));
+  const world = new World(cfg.width, cfg.height, seed, cfg.name ?? '新世界');
+  const rng = new RNG(seed);
+  const noise2D = createNoise2D(() => rng.next());
+  const ctx: GenCtx = {
+    world, store: world.store, rng, noise2D,
+    surface: new Float32Array(cfg.width),
+    cfg,
+  };
+
+  const passes: Pass[] = [
+    { name: '地形', run: terrainPass },
+    { name: '洞穴', run: cavePass },
+    { name: '矿石', run: orePass },
+    { name: '液体', run: liquidPass },
+    { name: '地狱', run: hellPass },
+    { name: '清浮空', run: floatCleanupPass },
+    { name: '表面', run: surfacePass },
+    ...(cfg.structures === false ? [] : [{ name: '结构', run: structurePass }]),
+  ];
+
+  for (let i = 0; i < passes.length; i++) {
+    onProgress?.(passes[i].name, i / passes.length);
+    await nextFrame();
+    passes[i].run(ctx, () => {});
+  }
+
+  finalize(ctx);
+  onProgress?.('完成', 1);
+  return world;
+}
+
+function nextFrame(): Promise<void> {
+  return new Promise((r) => setTimeout(r, 0));
+}
+
+// ---------- 地形 ----------
+function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
+  const { w, h } = store;
+  const base = Math.floor(h * 0.28);
+  // 多 octave 地表高度
+  const o1 = createNoise1Dish(rng, 0.012);
+  const o2 = createNoise1Dish(rng, 0.05);
+  const o3 = createNoise1Dish(rng, 0.11);
+  for (let x = 0; x < w; x++) {
+    const hill = (x > w * 0.18 && x < w * 0.82) ? 1 : 1.6; // 边缘更陡（近似海崖）
+    surface[x] = base + (o1(x) * 34 + o2(x) * 10 + o3(x) * 4) * hill;
+  }
+  const rockLevel = Math.floor(h * 0.33);
+  const nBlend = createNoise1Dish(rng, 0.05);
+  for (let x = 0; x < w; x++) {
+    const sy = Math.floor(surface[x]);
+    // 每列岩石线带噪声起伏（±8 格），形成犬牙交错的土石过渡带
+    const rl = rockLevel + nBlend(x) * 8;
+    for (let y = 0; y < h; y++) {
+      if (y < sy) continue;
+      let type: number = T.DIRT;
+      if (y >= rl) type = T.STONE;
+      else if (y > rl - 14) {
+        // 过渡带：噪声混入石块夹层
+        if (fbm(noise2D, x * 0.09, y * 0.09, 2) > 0.12) type = T.STONE;
+      }
+      store.setTileSilent(x, y, type);
+      // 自然墙：地下土/石区背景
+      if (y > sy + 3) store.setWallSilent(x, y, type === T.STONE ? W.STONE : W.DIRT);
+    }
+  }
+  // 世界最底部 3 行基岩（不可破坏 → 用 STONE 代替，破坏规则由硬度统一处理，简化）
+}
+
+// 伪 1D 噪声：借用 2D 噪声 y=0
+function createNoise1Dish(rng: RNG, freq: number) {
+  const n = createNoise2D(() => rng.next());
+  return (x: number) => n(x * freq, 0);
+}
+
+// ---------- 洞穴 ----------
+function cavePass({ store, surface, noise2D, rng, cfg }: GenCtx) {
+  const { w, h } = store;
+  // 1) 噪声挖空
+  for (let x = 0; x < w; x++) {
+    const sy = surface[x];
+    for (let y = Math.floor(sy) + 6; y < h - 3; y++) {
+      const depth = (y - sy) / (h - sy);
+      const threshold = 0.30 - depth * 0.06; // 越深洞越多
+      const v = fbm(noise2D, x * 0.028, y * 0.028, 3);
+      if (v > threshold) store.setTileSilent(x, y, 0);
+    }
+  }
+  // 2) 蠕虫隧道（连通大洞穴）
+  const worms = 16 + Math.floor(rng.range(0, 8));
+  for (let i = 0; i < worms; i++) {
+    let wx = rng.range(w * 0.08, w * 0.92);
+    let wy = rng.range(h * 0.35, h * 0.92);
+    let angle = rng.range(0, Math.PI * 2);
+    const len = rng.int(60, 200);
+    for (let s = 0; s < len; s++) {
+      angle += (noise2D(s * 0.05, i * 10) * 0.6 + rng.range(-0.3, 0.3));
+      wx += Math.cos(angle) * 1.2;
+      wy += Math.sin(angle) * 0.8;
+      if (wx < 4 || wx > w - 5 || wy < h * 0.25 || wy > h - 6) break;
+      const r = 2.2 + noise2D(s * 0.03, i * 5) * 1.8;
+      carveCircle(store, wx, wy, Math.max(1.2, r));
+    }
+  }
+}
+
+function carveCircle(store: GenCtx['store'], cx: number, cy: number, r: number) {
+  const x0 = Math.floor(cx - r), x1 = Math.ceil(cx + r);
+  const y0 = Math.floor(cy - r), y1 = Math.ceil(cy + r);
+  for (let x = x0; x <= x1; x++) {
+    for (let y = y0; y <= y1; y++) {
+      if (!store.inBounds(x, y)) continue;
+      const dx = x - cx, dy = y - cy;
+      if (dx * dx + dy * dy <= r * r) store.setTileSilent(x, y, 0);
+    }
+  }
+}
+
+function fbm(n2: (x: number, y: number) => number, x: number, y: number, oct: number): number {
+  let v = 0, amp = 1, freq = 1, norm = 0;
+  for (let i = 0; i < oct; i++) {
+    v += n2(x * freq, y * freq) * amp;
+    norm += amp;
+    amp *= 0.5; freq *= 2;
+  }
+  return v / norm; // -1..1
+}
+
+// ---------- 地狱层 ----------
+// 底部 14%：灰烬块 + 岩浆湖 + 岩浆滴落装饰（简化为岩浆池）
+function hellPass({ store, rng }: GenCtx) {
+  const st = store;
+  const hellTop = Math.floor(st.h * 0.86);
+  for (let x = 0; x < st.w; x++) {
+    for (let y = hellTop; y < st.h; y++) {
+      if (!store_inBounds(st, x, y)) continue;
+      const i = st.idx(x, y);
+      if (st.type[i] !== 0) st.type[i] = T.ASH;
+      st.wall[i] = 2; // 石墙背景
+    }
+  }
+  // 洞穴 + 岩浆湖
+  for (let x = 4; x < st.w - 4; x++) {
+    for (let y = hellTop + 2; y < st.h - 4; y++) {
+      const i = st.idx(x, y);
+      // 水平条带状洞穴
+      const band = Math.sin(x * 0.09 + y * 0.05) + Math.sin(x * 0.03 - y * 0.11) > 0.9;
+      if (band) {
+        st.type[i] = 0;
+        if (y > st.h - 8) { st.liquid[i] = 255; st.liquidType[i] = 2; } // 深处岩浆
+      }
+    }
+  }
+  // 大岩浆湖：随机 6 处
+  for (let k = 0; k < 6; k++) {
+    const lx = rng.int(6, st.w - 20);
+    const lw = rng.int(10, 24);
+    const ly = rng.int(hellTop + 4, st.h - 14);
+    const lh = rng.int(2, 4);
+    for (let dx = 0; dx < lw; dx++) {
+      for (let dy = 0; dy < lh + 2; dy++) {
+        const i = st.idx(lx + dx, ly + dy);
+        if (dy < 2) { st.type[i] = 0; }
+        else { st.type[i] = 0; st.liquid[i] = 255; st.liquidType[i] = 2; }
+      }
+    }
+  }
+}
+
+function store_inBounds(st: { w: number; h: number }, x: number, y: number) {
+  return x >= 0 && y >= 0 && x < st.w && y < st.h;
+}
+
+// ---------- 浮空方块清理 ----------
+// 迭代剥离无支撑的孤立土/石块（下方三格全空且左右也空 → 移除），重复数次处理小簇
+function floatCleanupPass({ store, surface }: GenCtx) {
+  const st = store;
+  for (let iter = 0; iter < 4; iter++) {
+    let removed = 0;
+    for (let x = 2; x < st.w - 2; x++) {
+      const surfY = Math.floor(surface[x]);
+      for (let y = surfY + 2; y < st.h - 2; y++) {
+        const t = st.get(x, y);
+        if (t !== T.DIRT && t !== T.STONE && t !== T.GRASS) continue;
+        const below = st.isSolid(x, y + 1) || st.isSolid(x - 1, y + 1) || st.isSolid(x + 1, y + 1);
+        const beside = st.isSolid(x - 1, y) || st.isSolid(x + 1, y);
+        const above = st.isSolid(x, y - 1);
+        if (!below && !beside && !above) {
+          st.setTileSilent(x, y, 0);
+          removed++;
+        }
+      }
+    }
+    if (removed === 0) break;
+  }
+}
+
+// ---------- 矿石 ----------
+function orePass({ store, surface, rng, cfg }: GenCtx) {
+  const { w, h } = store;
+  const ores: Array<{ type: number; depthMin: number; depthMax: number; tries: number; size: [number, number] }> = [
+    { type: T.ORE_COPPER, depthMin: 0.02, depthMax: 0.45, tries: 340, size: [4, 10] },
+    { type: T.ORE_IRON, depthMin: 0.10, depthMax: 0.62, tries: 300, size: [4, 9] },
+    { type: T.ORE_SILVER, depthMin: 0.30, depthMax: 0.85, tries: 220, size: [3, 7] },
+    { type: T.ORE_GOLD, depthMin: 0.50, depthMax: 1.0, tries: 160, size: [3, 7] },
+  ];
+  for (const ore of ores) {
+    for (let i = 0; i < ore.tries; i++) {
+      const x = rng.int(2, w - 3);
+      const yMin = Math.floor(surface[x] + 6 + (h - surface[x]) * ore.depthMin);
+      const yMax = Math.min(h - 4, Math.floor(surface[x] + 6 + (h - surface[x]) * ore.depthMax));
+      if (yMax <= yMin) continue;
+      const y = rng.int(yMin, yMax);
+      growOreBlob(store, x, y, ore.type, rng.int(ore.size[0], ore.size[1]), rng);
+    }
+  }
+}
+
+function growOreBlob(store: GenCtx['store'], x: number, y: number, type: number, size: number, rng: RNG) {
+  let cx = x, cy = y;
+  for (let i = 0; i < size; i++) {
+    if (store.inBounds(cx, cy) && store.type[store.idx(cx, cy)] === T.STONE) {
+      store.setTileSilent(cx, cy, type);
+    }
+    cx += rng.int(-1, 1);
+    cy += rng.int(-1, 1);
+  }
+}
+
+// ---------- 液体 ----------
+function liquidPass({ store, surface, rng }: GenCtx) {
+  const { w, h } = store;
+  // 地表洼地灌水
+  let x = 8;
+  while (x < w - 8) {
+    const sy = surface[x];
+    // 局部极小值
+    if (sy > surface[x - 3] + 2 && sy > surface[x + 3] + 2) {
+      const lakeW = rng.int(10, 26);
+      // 找洼地范围内的最高岸
+      let basinFloor = sy;
+      for (let dx = 0; dx < lakeW; dx++) basinFloor = Math.max(basinFloor, surface[Math.min(w - 1, x + dx)]);
+      const waterTop = Math.max(sy - 2, basinFloor - rng.int(2, 5));
+      for (let dx = 0; dx < lakeW && x + dx < w; dx++) {
+        // 逐列只填到该列自己的地表之上（waterTop < y < 该列 surface），
+        // 绝不灌进实心地面内部
+        const colFloor = surface[x + dx];
+        for (let y = Math.floor(waterTop); y < Math.floor(colFloor); y++) {
+          if (!store.inBounds(x + dx, y)) continue;
+          // 只清非实心内容（杂草等），不动实心块
+          const t = store.get(x + dx, y);
+          if (t !== 0 && !TILE_DEFS[t]?.solid) store.setTileSilent(x + dx, y, 0);
+          if (t === 0 || !TILE_DEFS[t]?.solid) store.setLiquid(x + dx, y, 255, 1);
+        }
+      }
+      x += lakeW + 6;
+    } else {
+      x++;
+    }
+  }
+  // 地下洞穴低处静水
+  for (let i = 0; i < 60; i++) {
+    const lx = rng.int(10, w - 10);
+    const ly = rng.int(Math.floor(h * 0.5), h - 30);
+    const poolW = rng.int(5, 14), poolH = rng.int(2, 4);
+    for (let dx = 0; dx < poolW; dx++) {
+      for (let dy = 0; dy < poolH; dy++) {
+        const px = lx + dx, py = ly + dy;
+        if (!store.inBounds(px, py)) continue;
+        if (!store.isActive(px, py) && store.isSolid(px, py + 1)) {
+          store.setLiquid(px, py, 255, 1);
+        }
+      }
+    }
+  }
+}
+
+// ---------- 表面 ----------
+function surfacePass({ store, surface, rng, world }: GenCtx) {
+  const { w } = store;
+  for (let x = 0; x < w; x++) {
+    const sy = Math.floor(surface[x]);
+    if (store.get(x, sy) === T.DIRT) {
+      store.setTileSilent(x, sy, T.GRASS);
+    }
+    // 装饰：蘑菇/花/草丛
+    if (sy + 1 < store.h && !store.isActive(x, sy) && store.isSolid(x, sy + 1)) {
+      const r = rng.next();
+      if (r < 0.10) store.setTileSilent(x, sy, T.TALLGRASS, x % 3 * 16, 0);
+      else if (r < 0.13) store.setTileSilent(x, sy, T.FLOWER, x % 3 * 16, 0);
+      else if (r < 0.15) store.setTileSilent(x, sy, T.MUSHROOM, 0, 0);
+    }
+  }
+  // 树：正常间距 6-14；连续 24 格无树则放宽条件强制补种，保证顶部林区连续
+  let x = rng.int(6, 14);
+  let sinceLast = 0;
+  while (x < w - 6) {
+    const sy = Math.floor(surface[x]);
+    const relaxed = sinceLast >= 24;
+    if (store.get(x, sy) === T.GRASS && !store.isActive(x, sy - 1)) {
+      const th = rng.int(7, 14);
+      let ok = true;
+      for (let dy = 1; dy <= th; dy++) if (store.isActive(x, sy - dy)) { ok = false; break; }
+      // 树冠 80×80 外扩 2 格：要求 ±2 列上方净空、地面实心；放宽时只查本列±1
+      const range = relaxed ? 1 : 2;
+      for (let dx = -range; dx <= range; dx++) {
+        if (store.isActive(x + dx, sy - 1) || !(store.get(x + dx, sy) === T.GRASS || store.isSolid(x + dx, sy))) {
+          ok = false; break;
+        }
+      }
+      if (ok) {
+        for (let dy = 1; dy <= th; dy++) {
+          store.setTileSilent(x, sy - dy, T.TREE, 0, dy === th ? 16 : 0);
+        }
+        // 树根底座（基座行两侧各 60% 出根（双侧率 ~36%），先于枝干放置——
+        // 枝干的"下方无树"检查会自然避开根位，防止枝干叠在根上。
+        // 渲染端规则表 #1/#2 自动匹配 X2Y7-9(右斜)/X3Y7-9(左斜) 底座贴图）
+        for (const s of [-1, 1]) {
+          if (rng.int(0, 99) >= 60) continue;
+          const rx = x + s, ry = sy - 1;
+          const rt = store.get(rx, ry);
+          const soft = rt === T.TALLGRASS || rt === T.FLOWER || rt === T.MUSHROOM || rt === T.SAPLING;
+          if (store.isSolid(rx, ry + 1) && (!store.isActive(rx, ry) || soft)) {
+            store.setTileSilent(rx, ry, T.TREE, 0, 0);
+          }
+        }
+        // 树枝（Maples GameManager.PlaceTree：干高 2..h-3 段两侧各 40% 出枝，
+        // 下方无树才放（含根位）、可覆盖杂草装饰，每棵上限 3-9 枝。
+        // 渲染端按切片 pivot 锚定绘制 Tree_Branches 贴图）
+        const maxBranches = rng.int(3, 9);
+        let branchCount = 0;
+        for (let dy = 2; dy <= th - 3 && branchCount < maxBranches; dy++) {
+          for (const side of [-1, 1]) {
+            if (branchCount >= maxBranches) break;
+            if (rng.int(0, 99) >= 40) continue;
+            const bx = x + side, by = sy - dy;
+            const bt = store.get(bx, by);
+            const soft = bt === T.TALLGRASS || bt === T.FLOWER || bt === T.MUSHROOM || bt === T.SAPLING;
+            // 下方无树才放（循环自下而上，查下方=查已放的枝干/树根）
+            if ((!store.isActive(bx, by) || soft) && store.get(bx, by + 1) !== T.TREE) {
+              store.setTileSilent(bx, by, T.TREE, 0, 0);
+              branchCount++;
+            }
+          }
+        }
+        world.registerTree(x, sy - th, th);
+        x += rng.int(6, 14);
+        sinceLast = 0;
+        continue;
+      }
+    }
+    x++;
+    sinceLast++;
+  }
+}
+
+// ---------- 结构（地下小屋 + 宝箱） ----------
+function placeChest(store: GenCtx['store'], x: number, y: number) {
+  // 2×2 宝箱 object（锚点在左上）
+  store.setTileSilent(x, y, T.CHEST, 0, 0);
+  store.setTileSilent(x + 1, y, T.CHEST, 1, 0);
+  store.setTileSilent(x, y + 1, T.CHEST, 0, 1);
+  store.setTileSilent(x + 1, y + 1, T.CHEST, 1, 1);
+}
+
+function structurePass({ store, surface, rng, world }: GenCtx) {
+  const { w, h } = store;
+  const hutCount = 4;
+  for (let i = 0; i < hutCount; i++) {
+    const hx = rng.int(20, w - 30);
+    const hy = rng.int(Math.floor(h * 0.45), h - 40);
+    buildHut(store, hx, hy, rng);
+    // 小屋中心宝箱（坐在地板上：地板在 hy+6）
+    placeChest(store, hx + 4, hy + 4);
+    world.chests.push({ x: hx + 4, y: hy + 4, items: Array(10).fill(null) });
+  }
+  // 地表/浅层散落宝箱
+  for (let i = 0; i < 8; i++) {
+    const cx = rng.int(10, w - 12);
+    // 放在洞穴空地的地上（需要 2×2 空间）
+    for (let y = Math.floor(surface[cx]) + 8; y < h - 10; y++) {
+      const clear =
+        !store.isActive(cx, y) && !store.isActive(cx + 1, y) &&
+        !store.isActive(cx, y - 1) && !store.isActive(cx + 1, y - 1) &&
+        !store.isActive(cx, y + 1) && !store.isActive(cx + 1, y + 1);
+      if (clear && store.isSolid(cx, y + 2) && store.isSolid(cx + 1, y + 2)) {
+        placeChest(store, cx, y);
+        world.chests.push({ x: cx, y, items: Array(10).fill(null) });
+        break;
+      }
+    }
+  }
+}
+
+function buildHut(store: GenCtx['store'], hx: number, hy: number, rng: RNG) {
+  const rw = 9, rh = 6;
+  // 清空内部
+  for (let x = hx; x < hx + rw; x++) {
+    for (let y = hy; y < hy + rh; y++) {
+      store.setTileSilent(x, y, 0);
+      store.setWallSilent(x, y, W.WOOD);
+    }
+  }
+  // 地板与墙
+  for (let x = hx - 1; x <= hx + rw; x++) {
+    store.setTileSilent(x, hy + rh, T.WOOD);
+    store.setTileSilent(x, hy - 1, T.WOOD);
+  }
+  for (let y = hy; y <= hy + rh; y++) {
+    store.setTileSilent(hx - 1, y, T.WOOD);
+    store.setTileSilent(hx + rw, y, T.WOOD);
+  }
+  // 门洞（左侧地板上方 3 格）
+  for (let y = hy + rh - 3; y < hy + rh; y++) store.setTileSilent(hx - 1, y, 0);
+  store.setTileSilent(hx - 1, hy + rh - 3, T.DOOR_CLOSED, 0, 0);
+  // 内部陈设
+  store.setTileSilent(hx + 1, hy + rh - 1, T.WORKBENCH, 0, 0);
+  store.setTileSilent(hx + 3, hy + rh - 1, T.TORCH, 0, 0);
+  if (rng.chance(0.5)) store.setTileSilent(hx + 5, hy + rh - 1, T.FURNACE, 0, 0);
+}
+
+// ---------- 收尾：出生点（选最平坦区域并整平） ----------
+function finalize({ store, surface, world, cfg }: GenCtx) {
+  const cx = Math.floor(store.w / 2);
+  // 在中心 ±60 列内找 9 列窗口高度方差最小的位置（平坦出生点，#14）
+  let bestX = cx, bestVar = Infinity;
+  for (let d = -60; d <= 60; d += 3) {
+    const x0 = cx + d - 4;
+    if (x0 < 4 || x0 + 8 > store.w - 5) continue;
+    const hs: number[] = [];
+    for (let k = 0; k < 9; k++) hs.push(surface[x0 + k]);
+    const avg = hs.reduce((a, b) => a + b, 0) / 9;
+    const v = hs.reduce((a, b) => a + (b - avg) ** 2, 0);
+    if (v < bestVar) { bestVar = v; bestX = x0 + 4; }
+  }
+  const sx = bestX;
+  const flatY = Math.round(surface.slice(sx - 4, sx + 5).reduce((a, b) => a + b, 0) / 9);
+  // 整平：±5 列统一到 flatY（填/挖），草皮封顶，上方 5 格清空，清除区内树木（防浮空树）
+  for (let dx = -5; dx <= 5; dx++) {
+    const x = sx + dx;
+    for (let y = 0; y < store.h; y++) {
+      const syF = flatY;
+      if (y < syF) {
+        if (store.isActive(x, y)) store.setTileSilent(x, y, 0);
+        store.setLiquid(x, y, 0, 0);
+      } else if (y === syF) {
+        store.setTileSilent(x, y, T.GRASS);
+        store.setLiquid(x, y, 0, 0);
+      } else if (y > syF && y < flatY + 20 && !store.isActive(x, y)) {
+        store.setTileSilent(x, y, T.DIRT);
+      }
+    }
+    surface[x] = flatY;
+  }
+  const sy = flatY;
+  world.spawnX = sx;
+  world.spawnY = Math.max(4, sy - 3);
+  world.groundLevel = Math.floor(store.h * 0.28);
+  world.rockLevel = Math.floor(store.h * 0.33);
+  // 出生点上空净空
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = 1; dy <= 5; dy++) {
+      if (store.isActive(sx + dx, sy - dy)) {
+        const t = store.get(sx + dx, sy - dy);
+        if (t !== T.GRASS) store.setTileSilent(sx + dx, sy - dy, 0);
+      }
+    }
+  }
+  // 清除整平区内登记的树（防幽灵树）
+  world.trees = world.trees.filter((t) => Math.abs(t.x - sx) > 5);
+}

@@ -1,0 +1,365 @@
+// 敌人实体：统一类 + 按 key 分支行为（史莱姆/僵尸/恶魔眼/蝙蝠/克苏鲁之眼及其仆从）
+import { Entity } from './Entity';
+import type { GameHooks } from './types';
+import type { Player } from './Player';
+import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
+import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+import { moveAndCollide } from '../physics/TileCollision';
+import { RNG } from '../core/rng';
+
+export class Enemy extends Entity {
+  def: EnemyDef;
+  hp: number;
+  maxHp: number;
+  iframes = 0;
+  animT = 0;
+  facing = 1;
+  aiT = 0;               // 通用 AI 计时
+  state = 0;             // 行为状态
+  phase = 1;             // Boss 阶段
+  target: { x: number; y: number } | null = null;
+  squash = 0;            // 史莱姆挤压动画 -1..1
+  stuckT = 0;            // 飞行怪卡墙计时（脱困用）
+  stuckCd = 0;           // 脱困后的游荡冷却
+  chargesLeft = 0;       // EoC 剩余冲撞次数
+  dashing = false;       // EoC 冲撞中（无视地形）
+  visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
+  spin = 0;              // EoC 变身旋转进度 0..1
+  hpBarT = 0;            // 受击后血条显示计时（tick）
+
+  constructor(public key: string, x: number, y: number) {
+    super();
+    this.def = ENEMY_DEFS[key];
+    this.hp = this.def.hp;
+    this.maxHp = this.def.hp;
+    this.w = this.def.width;
+    this.h = this.def.height;
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+  }
+
+  fixedUpdate(dt: number, game: GameHooks) {
+    this.aiT++;
+    if (this.iframes > 0) this.iframes--;
+    if (this.hpBarT > 0) this.hpBarT--;
+    if (this.squash !== 0) this.squash *= 0.85;
+    this.animT++;
+
+    const player = (game as unknown as { player: Player }).player;
+    const hasPlayer = !!player && !player.dead;
+
+    switch (this.key) {
+      case 'slime_green':
+      case 'slime_blue': this.slimeAI(game, hasPlayer ? player : null); break;
+      case 'zombie': this.zombieAI(game, hasPlayer ? player : null); break;
+      case 'demon_eye':
+      case 'cave_bat': this.flyAI(game, hasPlayer ? player : null, 0.09); break;
+      case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
+      case 'eye_of_cthulhu': this.eocAI(game, hasPlayer ? player : null); break;
+    }
+
+    // 接触伤害（带上攻击者引用，供荆棘反伤）
+    if (hasPlayer && this.aabbOverlaps(player)) {
+      game.damagePlayer(this.def.damage, this.cx, this.cy, this);
+    }
+
+    // 白天烧夜间怪（恶魔眼/僵尸在白天消失）
+    if ((this.def.nightOnly) && game.world.clock.isDay && !this.def.boss) {
+      if (game.world.clock.dayFactor > 0.85) this.dead = true;
+    }
+    // 距玩家过远清除
+    if (hasPlayer) {
+      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      if (!this.def.boss && d > TILE * 90) this.dead = true;
+    }
+  }
+
+  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx + accel * Math.sign(this.vx || 1) * 0));
+    if (jumpV && this.onGround) this.vy = -jumpV;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    this.vx *= this.onGround ? 0.8 : 0.98;
+  }
+
+  private slimeAI(game: GameHooks, player: Player | null) {
+    // 状态机：0 蓄力 → 1 跳跃
+    if (this.state === 0) {
+      this.vx = 0;
+      if (this.onGround) this.squash = Math.min(1, this.squash + 0.08);
+      if (this.aiT % 50 === 0 || (player && this.aiT > 40 && Math.abs(player.cx - this.cx) < TILE * 12 && this.onGround)) {
+        // 起跳，朝玩家或随机方向
+        let dir = this.facing;
+        if (player) {
+          const dx = player.cx - this.cx;
+          if (Math.abs(dx) > 8) dir = Math.sign(dx);
+        }
+        this.facing = dir;
+        const dist = player ? Math.min(1, Math.abs(player.cx - this.cx) / (TILE * 10)) : 0.4;
+        this.vx = dir * (1.2 + dist * 2.2);
+        this.vy = -(3.4 + dist * 2.4);
+        this.state = 1;
+        this.squash = -0.7;
+      }
+    } else {
+      if (this.onGround && this.vy >= 0 && this.aiT > 10) {
+        this.state = 0;
+        this.aiT = 0;
+      }
+    }
+    this.groundPhysics(game, 0);
+  }
+
+  private zombieAI(game: GameHooks, player: Player | null) {
+    let dir = this.facing;
+    if (player) {
+      dir = Math.sign(player.cx - this.cx) || 1;
+      // 跳过障碍
+      if (this.onGround && this.hitWall) this.vy = -6;
+      // 门：会尝试跳，不做开门
+    } else if (this.hitWall) {
+      dir = -this.facing;
+    }
+    this.facing = dir;
+    this.vx += dir * 0.08;
+    this.vx = Math.max(-0.9, Math.min(0.9, this.vx));
+    this.groundPhysics(game, 0);
+  }
+
+  private flyAI(game: GameHooks, player: Player | null, steer: number) {
+    // 恶魔眼式飞行 AI：
+    // 游荡时自主调整航向（朝巡航点平滑转向、到点即换新目标、撞墙自动绕开）；
+    // 玩家进入索敌范围后：朝向玩家明显加速逼近；脱离后回落游荡。
+    const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
+    const aggro = 18 * 16; // 18 格索敌
+    // 卡墙脱困：追击中持续撞墙/贴地/顶头 → 暂时退回游荡重新选航向（冷却内不再贴脸），
+    // 防止顶在崖壁/坑洞里原地抖动
+    if (this.stuckCd > 0) this.stuckCd--;
+    if (this.state === 1 && (this.hitWall || this.onGround || this.hitHead)) {
+      if (++this.stuckT > 18) { this.stuckT = 0; this.stuckCd = 45; this.state = 0; this.target = null; }
+    } else this.stuckT = 0;
+    if (player && dist < aggro && this.stuckCd === 0) {
+      // ---- 追击：朝向玩家，加速逼近 ----
+      const dx = player.cx - this.cx, dy = player.cy - this.cy;
+      const d = dist || 1;
+      this.vx += (dx / d) * steer * 4.5;
+      this.vy += (dy / d) * steer * 4.5;
+      this.facing = dx > 0 ? 1 : -1;
+      this.state = 1; // 标记追击态（脱离后回到游荡时重新选巡航点）
+    } else {
+      // ---- 游荡：自主巡航，到点换向 ----
+      if (this.state === 1 || !this.target || Math.hypot(this.target.x - this.cx, this.target.y - this.cy) < 32) {
+        this.state = 0;
+        this.target = { x: this.cx + (Math.random() - 0.5) * 320, y: this.cy + (Math.random() - 0.5) * 220 };
+      }
+      const dx = this.target.x - this.cx, dy = this.target.y - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      this.vx += (dx / d) * steer * 1.4;
+      this.vy += (dy / d) * steer * 1.4;
+      this.facing = dx > 0 ? 1 : -1;
+    }
+    const damp = 0.96;
+    this.vx *= damp; this.vy *= damp;
+    const spd = Math.hypot(this.vx, this.vy);
+    // 追击上限略高于游荡：游荡 1.8，追击 2.2（太快会贴脸躲不开）
+    const maxSpd = this.key === 'servant_of_cthulhu' ? 4.2 : (this.state === 1 ? 2.2 : 1.8);
+    if (spd > maxSpd) { this.vx = (this.vx / spd) * maxSpd; this.vy = (this.vy / spd) * maxSpd; }
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) { this.vx = -this.vx * 0.7; this.state = 0; this.target = null; } // 撞墙重新选向
+    if (this.hitHead) this.vy = -this.vy * 0.7;
+    if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
+  }
+
+  private eocAI(game: GameHooks, player: Player | null) {
+    if (!player) return;
+    const T = TILE;
+    const dx = player.cx - this.cx, dy = player.cy - this.cy;
+    const dist = Math.hypot(dx, dy) || 1;
+
+    // ---- 二阶段触发：半血以下且不处于冲刺/前摇 → 原地旋转三圈变身 ----
+    if (this.phase === 1 && this.hp <= this.maxHp * 0.5 && (this.state === 0 || this.state === 3 || this.state === 4)) {
+      this.state = 5; this.aiT = 0; this.spin = 0;
+      this.vx = 0; this.vy = 0;
+      game.spawnParticles(this.cx, this.cy, '#C02020', 24, 3);
+    }
+
+    // ---- 玩家跑太远（含被地形隔开追不上）→ 传送到视口外上空，从远处飞回来 ----
+    if (this.state !== 5 && !this.dashing && dist > 55 * T) {
+      const cam = (game as unknown as { camera?: { viewW: number; viewH: number; zoom: number } }).camera;
+      const halfX = cam ? cam.viewW / 2 / cam.zoom / T : 40;  // 视口半宽（格）
+      const halfY = cam ? cam.viewH / 2 / cam.zoom / T : 25;  // 视口半高（格）
+      const side = this.cx < player.cx ? -1 : 1;
+      const maxX = game.world.w * T - this.w, maxY = game.world.h * T - this.h;
+      // 水平超出视口边缘 6 格 + 垂直高于视口上缘 4 格（保证完全在画面外）
+      this.x = Math.max(0, Math.min(maxX, player.cx + side * (halfX + 6) * T - this.w / 2));
+      this.y = Math.max(2 * T, Math.min(maxY, player.cy - Math.max(halfY + 4, 14) * T));
+      this.vx = 0; this.vy = 0;
+      this.state = 0; this.aiT = 0;
+      game.spawnParticles(this.cx, this.cy, '#802020', 20, 3);
+    }
+
+    this.dashing = false;
+    switch (this.state) {
+      case 0: {
+        // 悬浮/进场：远处直线飞近，近处绕玩家侧上方悬浮（带起伏）
+        if (dist > 20 * T) {
+          this.vx += (dx / dist) * 0.3;
+          this.vy += (dy / dist) * 0.3;
+        } else {
+          const tx = player.cx - this.facing * 6 * T;
+          const ty = player.cy - 4 * T;
+          this.vx += Math.sign(tx - this.cx) * 0.12 + Math.sin(this.aiT * 0.05) * 0.04;
+          this.vy += Math.sign(ty - this.cy) * 0.12 + Math.cos(this.aiT * 0.07) * 0.06;
+        }
+        this.facing = dx > 0 ? 1 : -1;
+        this.vx *= 0.95; this.vy *= 0.95;
+        // 仆从召唤
+        const servantEvery = this.phase === 2 ? 260 : 420;
+        if (this.aiT > 0 && this.aiT % servantEvery === 0) {
+          game.spawnEnemy('servant_of_cthulhu', this.cx, this.cy);
+        }
+        // 就位 → 进入冲撞连段（3 连冲；二阶段蓄力更短）
+        if (dist <= 24 * T && this.aiT > (this.phase === 2 ? 45 : 90)) {
+          this.state = 1; this.aiT = 0; this.chargesLeft = 3;
+        }
+        break;
+      }
+      case 1: {
+        // 前摇：短暂悬停后锁定玩家位置迅猛冲出
+        this.vx *= 0.8; this.vy *= 0.8;
+        if (this.aiT > (this.phase === 2 ? 8 : 14)) {
+          this.state = 2; this.aiT = 0;
+          const d2 = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
+          const p2 = this.phase === 2 ? 1.6 : 1; // 二阶段更快更强
+          this.vx = ((player.cx - this.cx) / d2) * 7 * p2;
+          this.vy = ((player.cy - this.cy) / d2) * 7 * p2;
+          this.facing = this.vx > 0 ? 1 : -1;
+          this.dashing = true;
+        }
+        break;
+      }
+      case 2: {
+        // 冲撞：无视地形直接穿透，冲过一段距离后回头
+        this.dashing = true;
+        // 速度感拖尾粒子
+        if (this.aiT % 2 === 0) {
+          game.spawnParticles(
+            this.cx - Math.sign(this.vx || 1) * 20, this.cy - Math.sign(this.vy || 1) * 14,
+            this.phase === 2 ? '#FF4040' : '#D0D0D0', 2, 2,
+          );
+        }
+        const spd = 7 * (this.phase === 2 ? 1.6 : 1);
+        if (this.aiT * spd > 20 * T || this.aiT > 70) {
+          this.chargesLeft--;
+          this.state = 3; this.aiT = 0;
+        }
+        break;
+      }
+      case 3: {
+        // 回头悬停：减速 → 还有剩余次数再冲，否则收招拉开距离
+        this.vx *= 0.82; this.vy *= 0.82;
+        if (this.aiT > (this.phase === 2 ? 12 : 20)) {
+          if (this.chargesLeft > 0) { this.state = 1; this.aiT = 0; }
+          else {
+            // 收招落点：进入状态时一次性锁定（玩家反方向 10 格、抬高 3 格）。
+            // 若每帧从当前位置重算，目标会随 Boss 一起外退 → 一直飞到计时上限
+            const d0 = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
+            this.target = {
+              x: player.cx + ((this.cx - player.cx) / d0) * 10 * T,
+              y: player.cy + ((this.cy - player.cy) / d0) * 10 * T - 3 * T,
+            };
+            this.state = 4; this.aiT = 0;
+          }
+        }
+        break;
+      }
+      case 4: {
+        // 收招：飞到锁定落点（贴近玩家 10 格处）后立刻回到悬浮，保持压迫感
+        const away = this.target;
+        if (away) {
+          const adx = away.x - this.cx, ady = away.y - this.cy;
+          const ad = Math.hypot(adx, ady) || 1;
+          this.vx += (adx / ad) * 0.16;
+          this.vy += (ady / ad) * 0.16;
+          this.vx *= 0.96; this.vy *= 0.96;
+          if (ad < 2.5 * T || this.aiT > 90) {
+            this.state = 0; this.aiT = 0; this.target = null;
+          }
+        } else {
+          this.state = 0; this.aiT = 0;
+        }
+        break;
+      }
+      case 5: {
+        // 变身：原地旋转六圈（比三圈更快——100 tick 转 12π，角速度翻倍多）
+        this.spin = Math.min(1, this.aiT / 100);
+        this.vx *= 0.85; this.vy *= 0.85;
+        this.visAngle += (Math.PI * 12) / 100; // 六圈自转
+        if (this.aiT % 4 === 0) game.spawnParticles(this.cx, this.cy, '#C02020', 3, 2);
+        if (this.aiT >= 100) {
+          this.phase = 2;
+          this.state = 0; this.aiT = 0; this.spin = 0;
+          game.spawnParticles(this.cx, this.cy, '#FF3030', 30, 3);
+        }
+        break;
+      }
+    }
+
+    // 显示角度平滑追踪移动方向（最短弧插值；悬浮低速时保持原朝向不抖动）
+    if (this.state !== 5) {
+      const spd = Math.hypot(this.vx, this.vy);
+      if (spd > 0.6) {
+        const target = Math.atan2(this.vy, this.vx) + Math.PI * 1.5; // 素材默认朝左偏下 90°
+        let diff = target - this.visAngle;
+        while (diff > Math.PI) diff -= Math.PI * 2;
+        while (diff < -Math.PI) diff += Math.PI * 2;
+        this.visAngle += diff * 0.18;
+      }
+    }
+
+    // 移动：EoC 全程无视地形——悬浮飞行体贴图块边缘会卡顿、冲撞后残留在
+    // 图块内也会受碰撞影响，统一直接积分 + 世界边界钳制（撞墙/嵌入问题全部消除）
+    this.x += this.vx; this.y += this.vy;
+    this.onGround = false; this.hitWall = false; this.hitHead = false;
+    const maxX = game.world.w * T - this.w, maxY = game.world.h * T - this.h;
+    this.x = Math.max(0, Math.min(maxX, this.x));
+    this.y = Math.max(0, Math.min(maxY, this.y));
+  }
+
+  /** 受击。返回是否死亡 */
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks): boolean {
+    if (this.iframes > 0) return false;
+    this.hp -= dmg;
+    this.iframes = 8;
+    this.hpBarT = 240; // 受击后血条持续显示 4 秒
+    const resist = this.def.knockbackResist;
+    if (resist < 0.9) {
+      this.vx += kbx * (1 - resist);
+      this.vy += kby * (1 - resist);
+    }
+    if (this.hp <= 0) {
+      this.dead = true;
+      // 掉落
+      const rng = new RNG(Math.floor(Math.random() * 1e9));
+      for (const d of this.def.drops) {
+        if (rng.next() < d.chance) {
+          const n = rng.int(d.min, d.max);
+          if (n > 0) game.spawnDrop(this.cx, this.cy, d.item, n, rng.range(-1.5, 1.5), -2);
+        }
+      }
+      game.onEnemyKilled(this.key);
+      // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
+      const [c1, c2, c3] = this.def.gore;
+      const big = this.def.boss || this.w > 40;
+      game.spawnParticles(this.cx, this.y + this.h * 0.3, c1, big ? 26 : 12, big ? 3.4 : 2.6, { life: 240, damp: 0.988, grav: 0.09 });
+      game.spawnParticles(this.cx, this.cy, c2, big ? 18 : 8, big ? 2.6 : 2.0, { life: 220, damp: 0.985, grav: 0.09 });
+      game.spawnParticles(this.cx, this.cy - this.h * 0.2, c3, big ? 12 : 6, big ? 3.0 : 2.3, { life: 200, damp: 0.988, grav: 0.09 });
+      return true;
+    }
+    // 受击：少量碎屑零散溅落（不大面积）
+    game.spawnParticles(this.cx, this.cy, this.def.gore[0], 5, 1.4, { life: 60 });
+    return false;
+  }
+
+  draw() { /* Renderer 统一绘制 */ }
+}

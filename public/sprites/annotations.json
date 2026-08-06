@@ -1,0 +1,31 @@
+{
+ "地形/Tiles_2.png": {
+  "Tiles_2_0": "left",
+  "Tiles_2_1": "top",
+  "Tiles_2_2": "top",
+  "Tiles_2_3": "top",
+  "Tiles_2_4": "right",
+  "Tiles_2_13": "left",
+  "Tiles_2_26": "left",
+  "Tiles_2_27": "bottom",
+  "Tiles_2_28": "bottom",
+  "Tiles_2_29": "bottom",
+  "Tiles_2_30": "right",
+  "Tiles_2_39": "tl",
+  "Tiles_2_40": "tr",
+  "Tiles_2_41": "tl",
+  "Tiles_2_42": "tr",
+  "Tiles_2_43": "tl",
+  "Tiles_2_44": "tr",
+  "Tiles_2_51": "bl",
+  "Tiles_2_52": "br",
+  "Tiles_2_53": "bl",
+  "Tiles_2_54": "br",
+  "Tiles_2_55": "bl",
+  "Tiles_2_56": "br",
+  "Tiles_2_17": "right",
+  "Tiles_2_49": "full",
+  "Tiles_2_48": "full",
+  "Tiles_2_50": "full"
+ }
+}
