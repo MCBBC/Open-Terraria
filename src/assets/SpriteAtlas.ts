@@ -36,6 +36,9 @@ export interface ResourcesData {
 export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number; }
 
 // ---- 原版素材命名空间（vanilla.json，TEdit 数据驱动） ----
+
+// 杂项单图素材（非表驱动，直接整图使用）
+export const VANILLA_MISC = ['vanilla/Bubble.png'];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
   solid: boolean; blend: boolean; framed: boolean; light: boolean;
@@ -89,6 +92,7 @@ export class SpriteAtlas {
       ...Object.values(this.vanilla.tiles).map((t) => t.sheet),
       ...Object.values(this.vanilla.items).map((i) => i.icon),
       ...Object.values(this.vanilla.walls).map((w) => w.sheet),
+      ...VANILLA_MISC, // 杂项单图（呼吸气泡等）
     ];
     let done = 0;
     const total = files.length + vfiles.length;
@@ -158,6 +162,13 @@ export class SpriteAtlas {
     return { img, sx: fx, sy: fy, sw: w, sh: h };
   }
 
+  /** 原版杂项单图（呼吸气泡等） */
+  vmisc(path: string): DrawRect | null {
+    const img = this.vimages.get(path);
+    if (!img) return null;
+    return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
+  }
+
   /** 原版物品图标（整图） */
   vicon(itemId: number): DrawRect | null {
     const m = this.vanilla.items[String(itemId)];
@@ -218,9 +229,7 @@ export const ITEM_ICON_MAP: Record<string, string> = {
 };
 
 // 特殊手动映射（无 .asset 登记的图标）
-const ITEM_DIRECT_MAP: Record<string, { file: string; sprite: string }> = {
-  acorn: { file: 'UI/工具/Item_62.png', sprite: 'Item_62_0' }, // 树种
-};
+const ITEM_DIRECT_MAP: Record<string, { file: string; sprite: string }> = {};
 
 /** 按我们的 item key 取 Maples 图标矩形（搜索 items + potions + accessories 三个来源）。
  *  Maples 没有的回退原版 Item_N 图标（第二查找层，id 实读自 TEdit items.json） */

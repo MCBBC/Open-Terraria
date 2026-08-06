@@ -706,24 +706,32 @@ export class Renderer {
         if (icon) drawTool(icon, 0, 0, icon.width, icon.height);
       }
     }
-    // 气口气泡：头部浸水时显示，单行放大，随气量消散
+    ctx.restore();
+    // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
+    // 随气量消散；整体更透明
     if (p.headUnderwater || p.breath < 6) {
+      const baseX = p.cx - 27, baseY = p.y - p.h * 0.4 - 14;
+      // 优先原版 Bubble.png（22×22），程序化圆仅兜底
+      const bub = this.atlas ? this.atlas.vmisc('vanilla/Bubble.png') : null;
       for (let b = 0; b < 6; b++) {
-        const bx = -27 + b * 10.5;
-        const by = -p.h * 1.4 - 12;
-        ctx.globalAlpha = b < p.breath ? 0.9 : 0.15;
-        ctx.fillStyle = '#BFE3FF';
-        ctx.beginPath();
-        ctx.arc(bx, by, 4.5, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.fillStyle = 'rgba(255,255,255,0.85)';
-        ctx.beginPath();
-        ctx.arc(bx - 1.5, by - 1.5, 1.5, 0, Math.PI * 2);
-        ctx.fill();
+        const bx = baseX + b * 10.5;
+        const by = baseY;
+        ctx.globalAlpha = b < p.breath ? 0.55 : 0.1;
+        if (bub) {
+          ctx.drawImage(bub.img, bub.sx, bub.sy, bub.sw, bub.sh, bx - 5.5, by - 5.5, 11, 11);
+        } else {
+          ctx.fillStyle = '#BFE3FF';
+          ctx.beginPath();
+          ctx.arc(bx, by, 4.5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = 'rgba(255,255,255,0.5)';
+          ctx.beginPath();
+          ctx.arc(bx - 1.5, by - 1.5, 1.5, 0, Math.PI * 2);
+          ctx.fill();
+        }
       }
       ctx.globalAlpha = 1;
     }
-    ctx.restore();
 
     // 挥舞动画：物品绕肩旋转
     if (swing && swing.item >= 0) {

@@ -156,8 +156,9 @@ export class Player extends Entity {
       this.drownAccum = 0;
     }
 
-    // 死亡等待重生
+    // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
     if (this.hp <= 0) {
+      if (!this.dead) game.playSfx('pkilled');
       this.dead = true;
       return;
     }
@@ -290,7 +291,8 @@ export class Player extends Entity {
         const dmgPercent = 10 + 90 * t * t * t; // 10%~100% 三次方曲线（Maples 公式）
         const dmg = Math.max(1, Math.round((dmgPercent / 100) * this.hp));
         this.damage(dmg, this.cx, this.y - 10);
-        game.addDamageNumber(this.cx, this.y, dmg, false, '#FF8050');
+        game.playSfx('hurt');
+        game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');
       }
     }
 

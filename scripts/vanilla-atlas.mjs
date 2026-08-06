@@ -29,6 +29,13 @@ const wallById = new Map(walls.map((w) => [w.id, w]));
 
 mkdirSync(OUT_DIR, { recursive: true });
 
+// 杂项单图素材（呼吸气泡等，非表驱动）
+const MISC = ['Bubble.png'];
+for (const m of MISC) {
+  const src = join(ASSETS, m);
+  if (existsSync(src)) copyFileSync(src, join(OUT_DIR, m));
+}
+
 const hex = (c) => (c ? '#' + c.replace('#', '').slice(0, 6).toUpperCase() : '#808080');
 
 const out = { tiles: {}, items: {}, walls: {} };

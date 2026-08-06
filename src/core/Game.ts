@@ -1162,7 +1162,7 @@ export class Game implements GameHooks {
       if (p.hp <= 0) {
         p.dead = true;
         p.respawnTimer = 0;
-        this.sfx.play('pkilled');
+        // 死亡音由 Player 中央逻辑统一发声（覆盖所有死法），此处不重复
         this.cb.onToast('你死了…');
         // 掉一半铜币
         const coins = p.inv.countOf(ITEM_BY_KEY['coin_copper']);
