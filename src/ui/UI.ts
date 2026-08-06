@@ -193,7 +193,7 @@ export class UI {
 
   /** 兼容报告弹窗：降级/清空/跳过内容列表 + 导出详情 JSON */
   showCompatReport(rpt: CompatReport) {
-    this.closeAll();
+    // 不 closeAll：会把已初始化的 HUD（快捷栏等）一起拆掉，报告只叠加一层
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:480px; max-height:80vh; overflow:auto;';
     panel.appendChild(el('div', 'sw-title', '⚠ 导入兼容报告'));

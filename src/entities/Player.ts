@@ -17,7 +17,7 @@ const FALL_SAFE_TILES = 22;
 const FALL_FATAL_TILES = 45;
 
 export class Player extends Entity {
-  w = 14; h = 30;        // 宽 <1 格（可入单格竖井），高 ≤2 格（可入两格通道）
+  w = 24; h = 38;        // 2 格宽×75% = 24px，3 格高×80% = 38px（不满格，可穿窄道）
   facing = 1;            // 1 右 -1 左
   baseMaxHp = 100;
   hp = 100;
@@ -114,21 +114,21 @@ export class Player extends Entity {
     // 上限收缩时钳制
     if (this.hp > this.maxHp) this.hp = this.maxHp;
 
-    // 液体检测（身体中心 + 头部）
+    // 液体检测：身体采样在脚底上方固定 4px（贴脚即入水，不随身高缩放）
     const liq = world.store.liquid[world.store.idx(
-      Math.floor(this.cx / TILE), Math.floor((this.y + this.h * 0.6) / TILE),
+      Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE),
     )];
     const wasInWater = this.inWater;
     this.inWater = liq > 100;
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
-    const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h * 0.6) / TILE));
+    const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
     this.inLava = world.store.liquidType[centerIdx] === 2 && world.store.liquid[centerIdx] > 60;
     const headLiq = world.store.liquid[world.store.idx(
-      Math.floor(this.cx / TILE), Math.floor((this.y + 2) / TILE),
+      Math.floor(this.cx / TILE), Math.floor((this.y + 8) / TILE), // 鼻子位置（头顶下方半格）
     )];
     const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
-    this.headUnderwater = headLiq > 100;
+    this.headUnderwater = headLiq > 40; // 液面漫过鼻子（低阈值——部分液体也浸没）
     // 岩浆伤害：每半秒 15
     if (this.inLava) {
       this.lavaAccum += dt;
@@ -240,10 +240,8 @@ export class Player extends Entity {
     this.dropThrough = !!this.inputDown;
     moveAndCollide(this, world, this.vx, this.vy);
 
-    // 边缘滑落：两级渐进——支撑 <70% 体重时向悬空侧持续滑动（站边缘会缓缓滑出），
-    // 支撑 ≤2px 彻底失撑下坠。
-    // 台阶宽限：自动上台阶后身体大半悬在台阶后的空气上，立即判定会把它推回台阶下
-    if (this.onGround && this.vy >= 0 && this.stepRenderY <= 0.5) {
+    // 边缘滑落：已移除（改为收窄支撑判定宽度——本质相同但无侧推力）
+    if (false) {
       const fy = Math.floor((this.y + this.h + 1) / TILE);
       const fx0 = Math.floor(this.x / TILE), fx1 = Math.floor((this.x + this.w - 0.01) / TILE);
       let support = 0;
@@ -259,8 +257,9 @@ export class Player extends Entity {
       // 主动移动（上行爬坡/走动）时只在彻底失撑（≤2px）才坠落，不参与缓滑——
       // 爬台阶时身体经常大半悬空，缓滑会把人往回推；静止站边缘才触发缓滑
       const moving = this.inputX !== 0 && Math.abs(this.vx) > 0.3;
-      const slideThresh = moving ? 2.1 : this.w * 0.7;
-      if (support > 0 && support < slideThresh) {
+      // 固定 3px 阈值：几乎完全悬空才滑落（比例阈值对放大后的宽碰撞盒过敏）
+      void moving;
+      if (support > 0 && support < 3) {
         const cen = supportX / support;
         const dir = cen < this.cx ? 1 : -1; // 支撑在身体哪侧，就往反侧滑
         if (support <= 2) {

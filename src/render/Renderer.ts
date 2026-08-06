@@ -708,9 +708,24 @@ export class Renderer {
     if (this.atlas) {
       const idle = this.atlas.rect('角色/Player.png', 'Player_0');
       const runFrames = this.runFramesCache ??= this.atlas.animFrames('Player/Run');
+      // 动作帧池（Player.png 12-22 号帧）
+      if (!this.actionFramesCache) {
+        const pool: Record<string, ReturnType<SpriteAtlas['rect']>> = {};
+        for (let k = 12; k <= 22; k++) {
+          const fr = this.atlas!.rect('角色/Player.png', 'Player_' + k);
+          if (fr) pool['Player_' + k] = fr;
+        }
+        this.actionFramesCache = pool;
+      }
+      const af = this.actionFramesCache;
       let frame: typeof idle = null;
-      if (!p.onGround) {
-        frame = runFrames[0] ?? idle; // 起跳/空中：静态走路首帧（不做动画）
+      // 挥砍/使用中：身体切换到动作姿态（帧 16-18 循环——挥砍前倾伸手）
+      if (swing) {
+        const swingIdx = 16 + (Math.floor((1 - swing.t / swing.dur) * 3) % 3);
+        frame = af['Player_' + swingIdx] ?? idle;
+      } else if (!p.onGround) {
+        // 空中：上升用 12（收腿）、下落用 14（张腿）
+        frame = (p.vy < 0 ? af['Player_12'] : af['Player_14']) ?? runFrames[0] ?? idle;
       } else if (Math.abs(p.vx) > 0.3) {
         const idx = Math.floor(p.animTime / 6) % runFrames.length;
         frame = runFrames[idx] ?? idle;
@@ -718,8 +733,9 @@ export class Renderer {
         frame = idle;
       }
       if (frame) {
-        // 视觉身高放大 1.4 倍于碰撞盒（碰撞盒 30px 可进 2 格，形象保持高大）
-        const h = p.h * 1.4;
+        // 精灵视觉高度固定 56px（≈3.5 格）——与碰撞盒解耦，
+        // 碰撞盒缩小只影响物理，贴图保持高大观感不变
+        const h = 56;
         const w = (frame.sw / frame.sh) * h;
         // 脚踏实地：按精灵最低不透明行对齐脚底（消除底部透明留白导致的浮空）
         const pad = this.spriteBottomPad(frame);
@@ -739,29 +755,6 @@ export class Renderer {
       ctx.drawImage(sheet, frame * fw, 0, fw, fh, -fw / 2, -fh, fw, fh);
     }
 
-    // 手持物 idle（非挥舞）：任何物品都持在手中（#2），
-    // 工具/武器倾斜持握、其它物品直立微偏，按原比例缩放到约 1 格
-    const held = p.inv.heldItem();
-    if (held && !swing) {
-      const isTool = !!ITEM_DEFS[held.id].tool;
-      const drawTool = (img: CanvasImageSource, sx: number, sy: number, sw: number, sh: number) => {
-        const target = 16; // 约 1 格
-        const k = target / Math.max(sw, sh);
-        const w = sw * k, h = sh * k;
-        ctx.save();
-        ctx.translate(9, -p.h * 1.4 + 25); // 手部：身前、腰部高度
-        if (isTool) ctx.rotate(-Math.PI / 5);    // 工具/武器倾斜持握
-        else ctx.rotate(-Math.PI / 10);           // 其它物品直立微偏
-        ctx.drawImage(img, sx, sy, sw, sh, -w / 2, -h / 2, w, h);
-        ctx.restore();
-      };
-      const ar = this.atlasIcon(held.id);
-      if (ar) drawTool(ar.img, ar.sx, ar.sy, ar.sw, ar.sh);
-      else {
-        const icon = this.itemIcon(held.id);
-        if (icon) drawTool(icon, 0, 0, icon.width, icon.height);
-      }
-    }
     ctx.restore();
     // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
     // 随气量消散；整体更透明
@@ -810,12 +803,12 @@ export class Renderer {
       const icon = ar ? null : this.itemIcon(swing.item);
       const prog = 1 - swing.t / swing.dur; // 0..1
       const arc = -2.2 + prog * 3.4;        // -126° → +69°
-      const shX = p.cx + p.facing * 4, shY = p.y + 16;
+      const shX = p.cx + p.facing * p.w * 0.28, shY = p.y + p.h * 0.53; // 肩部按比例
       ctx.save();
       ctx.translate(shX, shY);
       ctx.rotate(p.facing === 1 ? arc : Math.PI - arc);
       if (ar) {
-        const s = 20 / Math.max(ar.sw, ar.sh);
+        const s = 40 / Math.max(ar.sw, ar.sh); // 主角放大后挥舞物同步×2
         ctx.scale(s, s);
         ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 2, -ar.sh, ar.sw, ar.sh);
       } else if (icon) {
@@ -827,6 +820,7 @@ export class Renderer {
   }
 
   private runFramesCache: ReturnType<SpriteAtlas['animFrames']> | null = null;
+  private actionFramesCache: Record<string, ReturnType<SpriteAtlas['rect']>> | null = null;
 
   /** 精灵底部透明留白行数（缓存）：用于脚底对齐 */
   private bottomPadCache = new Map<string, number>();

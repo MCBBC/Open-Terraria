@@ -54,16 +54,16 @@ def({ key: 'ore_silver', name: '银矿', solid: true, opacity: 1, pick: 20, mapC
 def({ key: 'ore_gold', name: '金矿', solid: true, opacity: 1, pick: 40, mapColor: '#B9A417', blend: false, drop: 'gold_ore', vanilla: { sheet: 8, frame: 'auto' } });
 def({ key: 'tree', name: '树干', solid: false, framed: true, opacity: 0.1, axe: 0, mapColor: '#6B4A2B', drop: 'wood' });
 def({ key: 'leaves', name: '树叶', decor: true, framed: true, opacity: 0.05, pick: 0, axe: 0, mapColor: '#2E8B3D', drop: null as unknown as string });
-def({ key: 'wood', name: '木材块', solid: true, opacity: 1, pick: 0, mapColor: '#A97D4E', blend: true, drop: 'wood' });
+def({ key: 'wood', name: '木材块', solid: true, opacity: 1, pick: 0, mapColor: '#A97D4E', blend: true, drop: 'wood', vanilla: { sheet: 30, frame: 'auto' } });
 def({ key: 'platform', name: '木平台', platform: true, opacity: 0.15, pick: 0, axe: 0, mapColor: '#B0885A', drop: 'platform' });
 def({ key: 'torch', name: '火把', decor: true, framed: true, opacity: 0, pick: 0, light: [255, 225, 150], mapColor: '#FDDD03', drop: 'torch', vanilla: { sheet: 4, frame: 'style', fw: 1, fh: 1 } });
 // 注：火把光值见下（更亮版本）
-def({ key: 'workbench', name: '工作台', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A97D4E', drop: 'workbench' });
+def({ key: 'workbench', name: '工作台', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A97D4E', drop: 'workbench', vanilla: { sheet: 18, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'furnace', name: '熔炉', solid: true, framed: true, opacity: 1, pick: 0, w: 3, h: 2, light: [255, 140, 70], mapColor: '#5A5A5A', drop: 'furnace' });
-def({ key: 'anvil', name: '铁砧', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#6E6E78', drop: 'anvil' });
-def({ key: 'chest', name: '宝箱', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#D4A017', drop: 'chest' });
-def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#A97D4E', drop: 'door' });
-def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#A97D4E', drop: 'door' });
+def({ key: 'anvil', name: '铁砧', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#6E6E78', drop: 'anvil', vanilla: { sheet: 16, frame: 'style', fw: 2, fh: 1 } });
+def({ key: 'chest', name: '宝箱', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#D4A017', drop: 'chest', vanilla: { sheet: 21, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#A97D4E', drop: 'door', vanilla: { sheet: 10, frame: 'style', fw: 1, fh: 3 } });
+def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#A97D4E', drop: 'door', vanilla: { sheet: 11, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#C36927', drop: 'mushroom_item' });
 def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#D0699E', drop: null as unknown as string });
 def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1E9648', drop: 'acorn' });
@@ -365,3 +365,20 @@ def({ key: 'v_578_mushroom_beam', name: 'Mushroom Beam', decor: true, opacity: 0
 def({ key: 'v_52_vines', name: 'Vines', decor: true, opacity: 0, pick: 0, mapColor: '#3E7A2E', drop: null as unknown as string, vanilla: { sheet: 52, frame: 'auto' } });
 def({ key: 'v_62_jungle_vines', name: 'Jungle Vines', decor: true, opacity: 0, pick: 0, mapColor: '#2E8B3D', drop: null as unknown as string, vanilla: { sheet: 62, frame: 'auto' } });
 def({ key: 'v_69_jungle_thorns', name: 'Jungle Thorns', decor: true, opacity: 0, pick: 0, mapColor: '#4A5E3E', drop: null as unknown as string, vanilla: { sheet: 69, frame: 'auto' } });
+
+// ===================== FTW_V2 兼容补全 =====================
+def({ key: 'v_625_neon_moss_block', name: 'Neon Moss Block', solid: true, opacity: 1, pick: 0, mapColor: '#906094', blend: true, drop: null as unknown as string, vanilla: { sheet: 625, frame: 'auto' } });
+def({ key: 'v_151_sandstone_brick', name: 'Sandstone Brick', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: null as unknown as string, vanilla: { sheet: 151, frame: 'auto' } });
+def({ key: 'v_234_crimsand_block', name: 'Crimsand Block', solid: true, opacity: 1, pick: 0, mapColor: '#352C29', blend: true, drop: null as unknown as string, vanilla: { sheet: 234, frame: 'auto' } });
+def({ key: 'v_182_blue_moss_block', name: 'Blue Moss Block', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: null as unknown as string, vanilla: { sheet: 182, frame: 'auto' } });
+def({ key: 'v_205_crimson_vines', name: 'Crimson Vines', solid: true, opacity: 1, pick: 0, mapColor: '#BA3234', blend: true, drop: null as unknown as string, vanilla: { sheet: 205, frame: 'auto' } });
+def({ key: 'v_45_gold_brick', name: 'Gold Brick', solid: true, opacity: 1, pick: 0, mapColor: '#B9A417', blend: true, drop: null as unknown as string, vanilla: { sheet: 45, frame: 'auto' } });
+def({ key: 'v_399_crimson_hardened_sand_block', name: 'Crimson Hardened Sand Block', solid: true, opacity: 1, pick: 0, mapColor: '#4D4C42', blend: true, drop: null as unknown as string, vanilla: { sheet: 399, frame: 'auto' } });
+def({ key: 'v_352_crimtane_thorns', name: 'Crimtane Thorns', solid: true, opacity: 1, pick: 0, mapColor: '#EE615E', blend: true, drop: null as unknown as string, vanilla: { sheet: 352, frame: 'auto' } });
+def({ key: 'v_248_palladium_column', name: 'Palladium Column', solid: true, opacity: 1, pick: 0, mapColor: '#DB4726', blend: true, drop: null as unknown as string, vanilla: { sheet: 248, frame: 'auto' } });
+def({ key: 'v_340_living_cursed_fire_block', name: 'Living Cursed Fire Block', solid: true, opacity: 1, pick: 0, mapColor: '#60F802', blend: true, drop: null as unknown as string, vanilla: { sheet: 340, frame: 'auto' } });
+def({ key: 'v_207_water_fountains', name: 'Water Fountains', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 4, mapColor: '#909490', drop: null as unknown as string, vanilla: { sheet: 207, frame: 'style', fw: 2, fh: 4 } });
+def({ key: 'v_144_timers', name: 'Timers', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: null as unknown as string, vanilla: { sheet: 144, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_475_hat_rack', name: 'Hat Rack', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#6B4F3B', drop: null as unknown as string, vanilla: { sheet: 475, frame: 'style', fw: 3, fh: 4 } });
+def({ key: 'v_175_tin_brick', name: 'Tin Brick', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: null as unknown as string, vanilla: { sheet: 175, frame: 'auto' } });
+def({ key: 'v_132_lever', name: 'Lever', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null as unknown as string, vanilla: { sheet: 132, frame: 'style', fw: 2, fh: 2 } });

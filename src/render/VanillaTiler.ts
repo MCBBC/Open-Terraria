@@ -89,18 +89,44 @@ export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: nu
 }
 
 /** 绘制一格原版图块。
- *  auto：现场算帧；style：直接用存储的 18px 帧偏移（wld 导入/放置时写入） */
+ *  auto：现场算帧；style：显式 18px 帧偏移。
+ *  重要修正：wld 里多格家具每格 frameX 往往全 0（不是 0/18 交错），
+ *  直接用存储帧会让 2 格宽家具两格都画锚点帧（重复左侧贴图）。
+ *  style 模式改为：若本格帧偏移为 0，向左/上扫描同类同物体格子，
+ *  按到锚点的格距重算帧偏移（锚点=左侧或上方最近格） */
 export function drawVanillaCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   sheet: number, frame: 'auto' | 'style', fw: number, fh: number,
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
 ): void {
-  let r: DrawRect | null;
+  let r: DrawRect | null = null;
   if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
   } else {
-    r = atlas.vframeAt(sheet, fx, fy);
+    // 重建帧偏移：0 偏移且左边/上边是同类 → 该格是锚点，但可能是锚点在左的延伸格
+    let ofx = fx, ofy = fy;
+    if (ofx === 0 && ofy === 0 && (fw > 1 || fh > 1)) {
+      // 向左扫描最多 fw-1 格找同物体（frameY 相同视为同一物体）
+      let ax = 0;
+      for (let k = 1; k < fw; k++) {
+        if (st.inBounds(x - k, y) && st.type[st.idx(x - k, y)] === type && st.frameY[st.idx(x - k, y)] === fy) ax = k;
+        else break;
+      }
+      ofx = ax * 18;
+      // 向上扫描最多 fh-1 格
+      let ay = 0;
+      for (let k = 1; k < fh; k++) {
+        if (st.inBounds(x, y - k) && st.type[st.idx(x, y - k)] === type && st.frameX[st.idx(x, y - k)] === ofx) ay = k;
+        else break;
+      }
+      ofy = ay * 18;
+    }
+    // 宝箱表（Tiles_21）特判：3 组状态带高 38px（含 2px 边距），不是标准 18 stride
+    if (sheet === 21) {
+      r = atlas.vrect(sheet, ofx * 18, Math.floor(ofy / 18) * 38 + 2, 16, 16);
+    }
+    if (!r) r = atlas.vframeAt(sheet, ofx, ofy);
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
   }
   if (!r) return;

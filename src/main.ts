@@ -2,6 +2,7 @@
 import { Game } from './core/Game';
 import { UI } from './ui/UI';
 import { saveGame, loadSave } from './save/SaveFile';
+import { kvGet, kvSet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { TILE_BY_KEY, T } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
@@ -140,9 +141,10 @@ function showMenu() {
         showMenu();
       }
     },
-    onQuickLoad: localStorage.getItem(QUICK_SAVE_KEY)
+    onQuickLoad: quickSaveExists
       ? async () => {
-          const text = localStorage.getItem(QUICK_SAVE_KEY)!;
+          const text = await kvGet(QUICK_SAVE_KEY);
+          if (!text) return;
           const { world, player } = loadSave(text);
           const g = new Game(root, {
             onWorldReady: () => { ui.hideProgress(); enterGame(g); },
@@ -219,16 +221,24 @@ window.addEventListener('keydown', (e) => {
 function doSave() {
   if (!game) return;
   const json = saveGame(game.world, game.player, Date.now() - playStart);
-  try {
-    localStorage.setItem(QUICK_SAVE_KEY, json);
-    ui.toast('已保存');
-  } catch {
-    ui.toast('保存失败：存储空间不足');
-  }
+  // 大地图存档可能超 localStorage 5MB 限制 → 优先 IndexedDB（数百 MB）
+  const mb = json.length / 1024 / 1024;
+  kvSet(QUICK_SAVE_KEY, json).then((where) => {
+    if (where === 'fail') ui.toast('保存失败：存储不可用');
+    else ui.toast(`已保存（${where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : '本地'}）`);
+  });
 }
 
 // 暴露 tile/key 常量给调试控制台
 void TILE_BY_KEY; void T;
 void game;
 
-loadAssets().then(() => showMenu());
+// 快速存档存在性（IndexedDB 异步）——查完再进菜单
+let quickSaveExists = false;
+kvHas(QUICK_SAVE_KEY).then((v) => {
+  quickSaveExists = v;
+  return loadAssets();
+}).then(() => showMenu());
+
+// 供 showMenu 引用的存在性（初次菜单在 Promise 完成后才弹出，值已就绪）
+void 0;

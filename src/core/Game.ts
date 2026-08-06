@@ -259,7 +259,7 @@ export class Game implements GameHooks {
     this.camera = new Camera(w.w, w.h);
     this.renderer.minimap = new Minimap(w);
     this.entities.clear();
-    this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 2) * TILE, new Inventory());
+    this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备（铁器三件套与 Maples 素材对齐；含药水与配饰便于体验 Buff/配饰系统）
     this.player.inv.add(ITEM_BY_KEY['iron_pickaxe'], 1);
     this.player.inv.add(ITEM_BY_KEY['iron_axe'], 1);
@@ -1010,12 +1010,13 @@ export class Game implements GameHooks {
 
   private toggleDoor(x: number, y: number, open: boolean, flipLeft: boolean) {
     const st = this.world.store;
-    // 找锚点
-    let ax = x, ay = y;
-    if (!(st.frameX[st.idx(x, y)] === 0 && st.frameY[st.idx(x, y)] === 0)) {
-      ax = x - st.frameX[st.idx(x, y)];
-      ay = y - st.frameY[st.idx(x, y)];
-    }
+    // 找锚点（帧可能是格偏移或 vanilla 18px 偏移——统一按格归一）
+    const defClosed = TILE_DEFS[T.DOOR_CLOSED];
+    const step = defClosed.vanilla ? 18 : 1;
+    const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
+    const ax = (fx === 0 && fy === 0) ? x : x - Math.floor(fx / step);
+    const ay = (fx === 0 && fy === 0) ? y : y - Math.floor(fy / step);
+    void flipLeft;
     // 开门状态占 2 列，全部清掉再放新状态
     for (let dx = 0; dx < 2; dx++) {
       for (let dy = 0; dy < 3; dy++) {
@@ -1025,12 +1026,12 @@ export class Game implements GameHooks {
     if (open) {
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 3; dy++) {
-          if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, dx, dy);
+          if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, dx * 18, dy * 18);
         }
       }
       this.sfx.play('door_open');
     } else {
-      for (let dy = 0; dy < 3; dy++) st.setTile(ax, ay + dy, T.DOOR_CLOSED, 0, dy);
+      for (let dy = 0; dy < 3; dy++) st.setTile(ax, ay + dy, T.DOOR_CLOSED, 0, dy * 18);
       this.sfx.play('door_close');
     }
   }
@@ -1688,7 +1689,7 @@ export class Game implements GameHooks {
     p.iframes = 90;
     p.respawnTimer = 0;
     p.x = this.world.spawnX * TILE + 8;
-    p.y = (this.world.spawnY - 2) * TILE;
+    p.y = (this.world.spawnY - 3) * TILE;
     p.vx = 0; p.vy = 0;
   }
 
