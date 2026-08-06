@@ -78,6 +78,7 @@ const CSS = `
 `;
 
 export class UI {
+  devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
   root: HTMLElement;
   game!: Game;
   hotbarEl!: HTMLElement;
@@ -169,6 +170,17 @@ export class UI {
     wldWrap.appendChild(bWld);
     wldWrap.appendChild(wldInput);
     panel.appendChild(wldWrap);
+
+    // 开发者模式开关：进世界时全道具入包 + 出生点摆放全部可放置图块
+    const devRow = el('div');
+    devRow.style.cssText = 'display:flex; align-items:center; gap:6px; margin-top:8px; font-size:12px; color:#9a8ab8;';
+    const devCb = el('input') as HTMLInputElement;
+    devCb.type = 'checkbox';
+    devCb.checked = this.devMode;
+    devCb.onchange = () => { this.devMode = devCb.checked; };
+    devRow.appendChild(devCb);
+    devRow.appendChild(el('span', '', '开发者模式（全道具入包 + 出生点展示区）'));
+    panel.appendChild(devRow);
 
     this.root.appendChild(panel);
   }

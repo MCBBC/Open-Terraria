@@ -46,4 +46,38 @@ export const RECIPES: Recipe[] = [
   { out: 'agility_potion', count: 1, station: 'workbench', inputs: [['mushroom_item', 1], ['iron_bar', 1]] },
   { out: 'ironskin_potion', count: 1, station: 'workbench', inputs: [['stone_block', 5], ['iron_bar', 1]] },
   { out: 'thorns_potion', count: 1, station: 'workbench', inputs: [['wood', 5], ['lens', 1]] },
+  // ---- 原版素材批次：方块 / 家具 / 熔炼 ----
+  // 替代矿熔炼
+  { out: 'tin_bar', count: 1, station: 'furnace', inputs: [['tin_ore', 3]] },
+  { out: 'lead_bar', count: 1, station: 'furnace', inputs: [['lead_ore', 3]] },
+  { out: 'tungsten_bar', count: 1, station: 'furnace', inputs: [['tungsten_ore', 4]] },
+  { out: 'platinum_bar', count: 1, station: 'furnace', inputs: [['platinum_ore', 4]] },
+  // 方块加工
+  { out: 'glass', count: 1, station: 'furnace', inputs: [['sand_block', 2]] },
+  { out: 'gray_brick', count: 2, station: 'furnace', inputs: [['stone_block', 2]] },
+  { out: 'red_brick', count: 2, station: 'furnace', inputs: [['clay_block', 2]] },
+  { out: 'sandstone_block', count: 1, station: 'furnace', inputs: [['sand_block', 4]] },
+  { out: 'ice_brick', count: 1, station: 'furnace', inputs: [['ice_block', 1]] },
+  { out: 'snow_brick', count: 1, station: 'furnace', inputs: [['snow_block', 1]] },
+  // 家具
+  { out: 'table', count: 1, station: 'workbench', inputs: [['wood', 8]] },
+  { out: 'chair', count: 1, station: 'workbench', inputs: [['wood', 4]] },
+  { out: 'bed', count: 1, station: 'workbench', inputs: [['wood', 15]] },
+  { out: 'bookcase', count: 1, station: 'workbench', inputs: [['wood', 20]] },
+  { out: 'grandfather_clock', count: 1, station: 'workbench', inputs: [['wood', 10], ['iron_bar', 3]] },
+  { out: 'piano', count: 1, station: 'workbench', inputs: [['wood', 15], ['iron_bar', 2]] },
+  { out: 'dresser', count: 1, station: 'workbench', inputs: [['wood', 12]] },
+  { out: 'bench', count: 1, station: 'workbench', inputs: [['wood', 8]] },
+  { out: 'bathtub', count: 1, station: 'workbench', inputs: [['clay_block', 6]] },
+  { out: 'keg', count: 1, station: 'workbench', inputs: [['wood', 14]] },
+  { out: 'cooking_pot', count: 1, station: 'workbench', inputs: [['iron_bar', 2], ['wood', 4]] },
+  { out: 'clay_pot', count: 1, station: 'workbench', inputs: [['clay_block', 5]] },
+  { out: 'tombstone', count: 1, station: 'workbench', inputs: [['stone_block', 5]] },
+  // 灯具
+  { out: 'candle', count: 4, station: 'workbench', inputs: [['torch', 1], ['gel', 1]] },
+  { out: 'chandelier', count: 1, station: 'anvil', inputs: [['torch', 4], ['iron_bar', 3]] },
+  { out: 'lantern', count: 1, station: 'anvil', inputs: [['torch', 1], ['iron_bar', 1]] },
+  { out: 'candelabra', count: 1, station: 'anvil', inputs: [['torch', 3], ['iron_bar', 1]] },
+  { out: 'chinese_lantern', count: 1, station: 'workbench', inputs: [['torch', 1], ['wood', 3]] },
+  { out: 'skull_lantern', count: 1, station: 'anvil', inputs: [['torch', 2], ['iron_bar', 1]] },
 ];

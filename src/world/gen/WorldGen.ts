@@ -2,7 +2,7 @@
 // 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
 import { createNoise2D } from 'simplex-noise';
 import { RNG, hashString } from '../../core/rng';
-import { T, W, TILE_DEFS } from '../../data/tiles';
+import { T, W, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World } from '../World';
 
 export interface GenConfig {
@@ -121,6 +121,33 @@ function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
       for (let y = sy; y < sy + 4 && y < store.h; y++) {
         const t = store.get(x, y);
         if (t === T.DIRT || t === T.GRASS) store.setTileSilent(x, y, T.SAND);
+      }
+    }
+    // 沙漠地下层：海洋区沙层之下换沙岩/硬化沙（5-14 格深处随机夹层）
+    if (edge < oceanW) {
+      const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
+      for (let y = sy + 5; y < sy + 14 && y < store.h; y++) {
+        const t = store.get(x, y);
+        if ((t === T.DIRT || t === T.STONE) && rng.next() < 0.45) {
+          store.setTileSilent(x, y, y < sy + 9 ? SANDSTONE : HARDSAND);
+        }
+      }
+    }
+  }
+  // 雪原带：随机一侧的 10%-24% 区间 —— 地表雪化 + 浅层冰夹层（无树：surfacePass 只在草上种树）
+  {
+    const ICE = TILE_BY_KEY['ice']!;
+    const snowLeft = rng.next() < 0.5;
+    const xs0 = snowLeft ? Math.floor(w * 0.10) : Math.floor(w * 0.76);
+    const xs1 = snowLeft ? Math.floor(w * 0.24) : Math.floor(w * 0.90);
+    for (let x = xs0; x <= xs1; x++) {
+      const sy = Math.floor(surface[x]);
+      for (let y = sy; y < sy + 4 && y < store.h; y++) {
+        const t = store.get(x, y);
+        if (t === T.GRASS || t === T.DIRT) store.setTileSilent(x, y, T.SNOW);
+      }
+      for (let y = sy + 4; y < sy + 12 && y < store.h; y++) {
+        if (store.get(x, y) === T.DIRT && rng.next() < 0.45) store.setTileSilent(x, y, ICE);
       }
     }
   }
@@ -260,11 +287,19 @@ function floatCleanupPass({ store, surface }: GenCtx) {
 // ---------- 矿石 ----------
 function orePass({ store, surface, rng, cfg }: GenCtx) {
   const { w, h } = store;
+  // 替代矿对（按种子二选一，同原版每世界固定一种）
+  const pair = (a: string, b: string) => TILE_BY_KEY[rng.next() < 0.5 ? a : b]!;
   const ores: Array<{ type: number; depthMin: number; depthMax: number; tries: number; size: [number, number] }> = [
-    { type: T.ORE_COPPER, depthMin: 0.02, depthMax: 0.45, tries: 340, size: [4, 10] },
-    { type: T.ORE_IRON, depthMin: 0.10, depthMax: 0.62, tries: 300, size: [4, 9] },
-    { type: T.ORE_SILVER, depthMin: 0.30, depthMax: 0.85, tries: 220, size: [3, 7] },
-    { type: T.ORE_GOLD, depthMin: 0.50, depthMax: 1.0, tries: 160, size: [3, 7] },
+    { type: pair('ore_copper', 'ore_tin'), depthMin: 0.02, depthMax: 0.45, tries: 340, size: [4, 10] },
+    { type: pair('ore_iron', 'ore_lead'), depthMin: 0.10, depthMax: 0.62, tries: 300, size: [4, 9] },
+    { type: pair('ore_silver', 'ore_tungsten'), depthMin: 0.30, depthMax: 0.85, tries: 220, size: [3, 7] },
+    { type: pair('ore_gold', 'ore_platinum'), depthMin: 0.50, depthMax: 1.0, tries: 160, size: [3, 7] },
+    // 宝石脉：小而散，全深度零星分布
+    ...['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond']
+      .map((k) => ({ type: TILE_BY_KEY[k]!, depthMin: 0.15, depthMax: 0.95, tries: 30, size: [3, 6] as [number, number] })),
+    // 粘土/淤泥团（浅层大块）
+    { type: TILE_BY_KEY['clay']!, depthMin: 0.03, depthMax: 0.3, tries: 60, size: [8, 16] },
+    { type: TILE_BY_KEY['silt']!, depthMin: 0.25, depthMax: 0.6, tries: 40, size: [6, 12] },
   ];
   for (const ore of ores) {
     for (let i = 0; i < ore.tries; i++) {
@@ -281,8 +316,9 @@ function orePass({ store, surface, rng, cfg }: GenCtx) {
 function growOreBlob(store: GenCtx['store'], x: number, y: number, type: number, size: number, rng: RNG) {
   let cx = x, cy = y;
   for (let i = 0; i < size; i++) {
-    if (store.inBounds(cx, cy) && store.type[store.idx(cx, cy)] === T.STONE) {
-      store.setTileSilent(cx, cy, type);
+    if (store.inBounds(cx, cy)) {
+      const t = store.type[store.idx(cx, cy)];
+      if (t === T.STONE || t === T.DIRT) store.setTileSilent(cx, cy, type);
     }
     cx += rng.int(-1, 1);
     cy += rng.int(-1, 1);

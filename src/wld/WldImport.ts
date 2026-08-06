@@ -5,8 +5,9 @@ import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { TILE_BY_KEY, WALL_BY_KEY, T } from '../data/tiles';
 import { ITEM_BY_KEY } from '../data/items';
 
-// wld tile id → 内部 tile key（null = 清空丢弃）
-const TILE_MAP: Record<number, string | null> = {
+// wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
+type MapEntry = string | { key: string; copyFrame?: boolean } | null;
+const TILE_MAP: Record<number, MapEntry> = {
   0: 'dirt',          // Dirt
   1: 'stone',         // Stone
   2: 'grass',         // Grass
@@ -24,23 +25,56 @@ const TILE_MAP: Record<number, string | null> = {
   19: 'platform',     // Wood Platform
   21: 'chest',        // Chest
   53: 'sand',         // Sand
-  59: 'dirt',         // Mud → dirt
+  59: 'mud',          // Mud
   60: 'grass',        // Jungle Grass
   73: 'tallgrass',    // Plants 2
   147: 'snow',        // Snow
+  // ---- 原版素材批次（Tiles_N 表 + TEdit framing） ----
+  57: 'ash', 123: 'silt', 40: 'clay', 54: 'glass', 56: 'obsidian',
+  38: 'gray_brick', 39: 'red_brick',
+  161: 'ice', 162: 'thin_ice', 206: 'ice_brick', 148: 'snow_brick',
+  396: 'sandstone', 397: 'hardened_sand', 404: 'desert_fossil',
+  166: 'ore_tin', 167: 'ore_lead', 168: 'ore_tungsten', 169: 'ore_platinum',
+  22: 'ore_demonite', 37: 'ore_meteorite', 58: 'ore_hellstone', 204: 'ore_crimtane',
+  107: 'ore_cobalt', 108: 'ore_mythril', 111: 'ore_adamantite',
+  221: 'ore_palladium', 222: 'ore_orichalcum', 223: 'ore_titanium', 211: 'ore_chlorophyte',
+  63: 'gem_sapphire', 64: 'gem_ruby', 65: 'gem_emerald',
+  66: 'gem_topaz', 67: 'gem_amethyst', 68: 'gem_diamond',
+  // 家具（framed：18px 帧/样式直拷，渲染端原样使用）
+  14: { key: 'table', copyFrame: true },
+  15: { key: 'chair', copyFrame: true },
+  79: { key: 'bed', copyFrame: true },
+  33: { key: 'candle', copyFrame: true },
+  34: { key: 'chandelier', copyFrame: true },
+  42: { key: 'lantern', copyFrame: true },
+  100: { key: 'candelabra', copyFrame: true },
+  101: { key: 'bookcase', copyFrame: true },
+  104: { key: 'grandfather_clock', copyFrame: true },
+  87: { key: 'piano', copyFrame: true },
+  88: { key: 'dresser', copyFrame: true },
+  89: { key: 'bench', copyFrame: true },
+  90: { key: 'bathtub', copyFrame: true },
+  94: { key: 'keg', copyFrame: true },
+  95: { key: 'chinese_lantern', copyFrame: true },
+  96: { key: 'cooking_pot', copyFrame: true },
+  98: { key: 'skull_lantern', copyFrame: true },
+  78: { key: 'clay_pot', copyFrame: true },
+  85: { key: 'tombstone_v', copyFrame: true },
+  12: { key: 'crystal_heart', copyFrame: true },
+  49: { key: 'water_candle', copyFrame: true },
   // 降级为 stone 的常见方块
-  22: 'stone', 23: 'stone', 24: 'stone', 25: 'stone',  // corruption
-  31: 'stone', 32: 'stone', 27: 'stone',               // crimson
-  41: 'stone', 43: 'stone', 44: 'stone',               // dungeon bricks
-  57: 'stone', 75: 'stone', 161: 'stone', 162: 'stone', // ash/obsidian/ice/snow brick
-  199: 'stone', 200: 'stone', 201: 'stone', 202: 'stone', 203: 'stone', 204: 'stone',
+  23: 'stone', 24: 'stone', 25: 'stone',  // corruption
+  31: 'stone', 32: 'stone', 27: 'stone',  // crimson
+  41: 'stone', 43: 'stone', 44: 'stone',  // dungeon bricks
+  75: 'stone',
+  199: 'stone', 200: 'stone', 201: 'stone', 202: 'stone', 203: 'stone',
   // 清空的装饰/不可表示物
   11: null,    // Open Door
   28: null, 29: null, 30: null,  // pots
-  52: null, 54: null, 55: null, 56: null, 58: null,  // vines
-  61: null, 62: null, 63: null, 64: null, 65: null, 66: null, 67: null, 68: null, 69: null, // jungle plants
+  52: null, 55: null,  // vines
+  61: null, 62: null, 69: null, // jungle plants
   70: 'grass', 71: null, 72: 'tree',   // mushroom grass / plants / mushroom tree
-  74: null, 76: null, 77: null, 78: null, 79: null, 80: null, // plants2/bushes/cactus
+  74: null, 76: null, 77: null, 80: null, // plants2/bushes/cactus
   83: null, 84: null, // shiverthorn
 };
 
@@ -62,6 +96,15 @@ const ITEM_MAP: Record<number, string> = {
   20: 'copper_bar', 22: 'iron_bar', 23: 'gel',
   28: 'lesser_healing_potion', 38: 'lens',
   71: 'coin_copper', 72: 'coin_copper', 73: 'coin_copper', 74: 'coin_copper',
+  // 原版批次材料
+  699: 'tin_ore', 700: 'lead_ore', 701: 'tungsten_ore', 702: 'platinum_ore',
+  703: 'tin_bar', 704: 'lead_bar', 705: 'tungsten_bar', 706: 'platinum_bar',
+  177: 'sapphire', 178: 'ruby', 179: 'emerald', 180: 'topaz', 181: 'amethyst', 182: 'diamond',
+  664: 'ice_block', 883: 'ice_brick', 594: 'snow_brick',
+  133: 'clay_block', 170: 'glass', 173: 'obsidian', 129: 'gray_brick', 131: 'red_brick',
+  32: 'table', 34: 'chair', 224: 'bed', 354: 'bookcase', 359: 'grandfather_clock',
+  105: 'candle', 136: 'lantern', 349: 'candelabra', 222: 'clay_pot', 29: 'life_crystal',
+  5: 'mushroom_item', 27: 'acorn',
 };
 
 export interface ImportResult { save: SaveData; warnings: string[]; }
@@ -92,8 +135,15 @@ export function parseWldToSave(buf: Uint8Array): SaveData {
         type[i] = T.STONE;
       } else if (mapped === null) {
         type[i] = 0;
-      } else {
+      } else if (typeof mapped === 'string') {
         type[i] = TILE_BY_KEY[mapped] ?? 0;
+      } else {
+        // 原版 framed 家具：18px 帧/样式偏移直拷（与 .wld 原生一致，渲染端零换算）
+        type[i] = TILE_BY_KEY[mapped.key] ?? 0;
+        if (mapped.copyFrame) {
+          frameX[i] = wld.tiles.frameX[i];
+          frameY[i] = wld.tiles.frameY[i];
+        }
       }
     }
     const ww = wld.tiles.wall[i];

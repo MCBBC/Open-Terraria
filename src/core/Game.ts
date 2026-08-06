@@ -74,6 +74,71 @@ export class Game implements GameHooks {
   // 敌人生成
   private spawnTimer = 0;
   boss: Enemy | null = null;
+  /** tile key → id 反查表（调试句柄/wld 导入映射用） */
+  tileByKey = TILE_BY_KEY;
+
+  /** 开发者模式：全部道具入包（溢出的落在展示区上方）+ 出生点右侧摆放所有可放置图块供检验 */
+  setupDevMode() {
+    const p = this.player;
+    const st = this.world.store;
+    // ---- 1) 全道具入包 ----
+    const overflow: Array<[string, number]> = [];
+    for (const def of ITEM_DEFS) {
+      const n = def.maxStack === 1 ? 1 : Math.min(def.maxStack, 99);
+      const left = p.inv.add(ITEM_BY_KEY[def.key], n);
+      if (left > 0) overflow.push([def.key, left]);
+    }
+    // ---- 2) 展示区：出生点右侧清空并逐行摆放全部可放置图块 ----
+    const sx = this.world.spawnX, sy = this.world.spawnY;
+    const x0 = sx + 6, x1 = sx + 70, yBot = sy - 2, yTop = sy - 40;
+    for (let x = x0; x <= x1; x++) {
+      for (let y = yTop; y <= yBot; y++) {
+        st.setTile(x, y, 0);
+        st.setLiquid(x, y, 0, 0);
+      }
+      st.setTile(x, yBot, T.STONE);
+      st.setTile(x, yBot + 1, T.STONE);
+    }
+    // 收集可放置 tile（有物品指向，去重）
+    const placeable: number[] = [];
+    const seen = new Set<number>();
+    for (const def of ITEM_DEFS) {
+      if (!def.tile) continue;
+      const tid = TILE_BY_KEY[def.tile];
+      if (tid === undefined || tid === 0 || seen.has(tid)) continue;
+      seen.add(tid);
+      placeable.push(tid);
+    }
+    // 逐行摆放：行高 7（最高家具 5 格 + 间隙），每行放满换行并铺新地板
+    let cx = x0 + 1, cy = yBot - 1;
+    const rowH = 7;
+    for (const tid of placeable) {
+      const td = TILE_DEFS[tid];
+      const w = td.vanilla?.fw ?? td.w ?? 1;
+      const h = td.vanilla?.fh ?? td.h ?? 1;
+      if (cx + w > x1 - 1) {
+        cx = x0 + 1;
+        cy -= rowH;
+        for (let x = x0; x <= x1; x++) st.setTile(x, cy, T.STONE);
+      }
+      for (let dx = 0; dx < w; dx++) {
+        for (let dy = 0; dy < h; dy++) {
+          st.setTile(cx + dx, cy - dy, tid, td.vanilla ? dx * 18 : dx, td.vanilla ? dy * 18 : dy);
+        }
+      }
+      cx += w + 1;
+    }
+    // ---- 3) 溢出道具以掉落物排在展示区上方（背包 40 格装不下的部分） ----
+    let dxDrop = x0;
+    let dyDrop = yTop + 3;
+    for (const [key, n] of overflow) {
+      this.spawnDrop(dxDrop * TILE + 8, dyDrop * TILE, key, n, 0, 0);
+      dxDrop += 2;
+      if (dxDrop > x1 - 1) { dxDrop = x0; dyDrop += 3; }
+    }
+    this.cb.onInventoryChanged();
+    this.cb.onToast(`开发者模式：${overflow.length} 种道具背包装不下，已排在展示区上方；全部可放置图块在出生点右侧`);
+  }
 
   // NPC 系统
   private housingCheckTimer = 0;
@@ -638,8 +703,13 @@ export class Game implements GameHooks {
     }
     // object：找锚点整体移除
     if ((def.w ?? 1) > 1 || (def.h ?? 1) > 1) {
-      const ax = st.frameX[st.idx(x, y)] === 0 && st.frameY[st.idx(x, y)] === 0 ? x : x - st.frameX[st.idx(x, y)];
-      const ay = st.frameX[st.idx(x, y)] === 0 && st.frameY[st.idx(x, y)] === 0 ? y : y - st.frameY[st.idx(x, y)];
+      const fi = st.idx(x, y);
+      const fv = st.frameX[fi], fyv = st.frameY[fi];
+      // 原版家具帧是 18px 像素偏移，先归一成格偏移再找锚点
+      const gx = def.vanilla ? Math.floor(fv / 18) : fv;
+      const gy = def.vanilla ? Math.floor(fyv / 18) : fyv;
+      const ax = gx === 0 && gy === 0 ? x : x - gx;
+      const ay = gx === 0 && gy === 0 ? y : y - gy;
       for (let dx = 0; dx < (def.w ?? 1); dx++) {
         for (let dy = 0; dy < (def.h ?? 1); dy++) {
           st.setTile(ax + dx, ay + dy, 0);
@@ -734,10 +804,16 @@ export class Game implements GameHooks {
     if (this.player.useTime > 0) return;
 
     // 放置
+    const isVanillaStyle = !!def.vanilla && def.vanilla.frame === 'style';
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
         const px = tx + dx2, py = ty + dy2;
-        st.setTile(px, py, tileId, dx2, dy2);
+        // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）
+        if (isVanillaStyle) {
+          st.setTile(px, py, tileId, dx2 * 18, dy2 * 18);
+        } else {
+          st.setTile(px, py, tileId, dx2, dy2);
+        }
         // 水被方块挤出：水量转移到相邻可容纳的格子（上/左/右），
         // 而不是被方块吞掉消失。封闭无处可去时才消失
         const pi = st.idx(px, py);

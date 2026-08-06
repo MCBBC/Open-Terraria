@@ -2,6 +2,7 @@
 import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { hash2 } from '../core/rng';
+import { drawVanillaCell } from './VanillaTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
@@ -201,6 +202,17 @@ export class ChunkCache {
         // 树枝：TREE 且仅横向连接树干 → 跳过常规路径（第二遍半按 pivot 锚定专用绘制，
         // 规则表变体池混有树干碎片贴图，hash 选变体会 50% 画出残片）
         if (type === T.TREE && this.isBranchTile(st, x, y)) continue;
+        // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
+        if (def.vanilla && this.autotiler) {
+          drawVanillaCell(
+            ctx, this.autotiler.atlas, def.vanilla.sheet, def.vanilla.frame,
+            def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
+            st, x, y, type,
+            (t) => t === type, // 同 id 融合判定（后续可扩 mergeWith）
+            px, py, st.frameX[i], st.frameY[i],
+          );
+          continue;
+        }
         // 树苗：Tree_Bodys 树干段作小苗（底部对齐）
         if (type === T.SAPLING && this.autotiler) {
           const r = this.autotiler.saplingSprite(x, y);

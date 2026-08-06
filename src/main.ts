@@ -5,6 +5,8 @@ import { saveGame, loadSave } from './save/SaveFile';
 import { ITEM_BY_KEY } from './data/items';
 import { TILE_BY_KEY, T } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
+// 调试句柄：页面内直接测 .wld 转换
+(window as unknown as { __parseWld?: (b: Uint8Array) => unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
 import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 
@@ -42,6 +44,10 @@ function enterGame(g: Game) {
   ui.toast(`欢迎来到 ${g.world.name}！A/D 移动，空格跳跃，E 背包，Esc 暂停`);
 }
 
+function maybeDev(g: Game) {
+  if (ui.devMode) g.setupDevMode();
+}
+
 function quitToMenu() {
   inGame = false;
   pausePanel = null;
@@ -60,6 +66,7 @@ function showMenu() {
         onWorldReady: () => {
           ui.hideProgress();
           enterGame(g);
+          maybeDev(g);
         },
         onInventoryChanged: () => ui.refreshAll(),
         onBuffsChanged: () => ui.refreshBuffs(),
@@ -88,6 +95,7 @@ function showMenu() {
         g.player.y = player.y;
         g.player.inv.slots = player.inventory;
         g.player.inv.selected = player.selected;
+        maybeDev(g);
         ui.refreshAll();
       } catch (e) {
         console.error(e);
@@ -105,6 +113,7 @@ function showMenu() {
           onWorldReady: () => {
             ui.hideProgress();
             enterGame(g);
+            maybeDev(g);
             ui.toast(`成功导入「${save.header.name}」(v${save.header.wldVersion})`);
           },
           onInventoryChanged: () => ui.refreshAll(),
@@ -143,6 +152,7 @@ function showMenu() {
           g.player.y = player.y;
           g.player.inv.slots = player.inventory;
           g.player.inv.selected = player.selected;
+          maybeDev(g);
         }
       : null,
   });
