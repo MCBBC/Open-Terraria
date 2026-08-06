@@ -149,14 +149,24 @@ export class Player extends Entity {
         this.drownAccum += dt;
         if (this.drownAccum >= 1) {
           this.drownAccum -= 1;
-          this.damage(10, this.cx, this.y - 10);
-          game.addDamageNumber(this.cx, this.y, 10, false, '#60A0FF');
+          this.damage(10, this.cx, this.y - 10, false); // 窒息环境伤害：只掉血，无击退
+          game.playSfx('drown');
+          game.addDamageNumber(this.cx, this.y, 10, false, '#FF5050'); // 与受击同色
         }
       }
     } else if (this.breath < Player.BREATH_BUBBLES) {
+      // 出水补气：1.11s 从零充满，剩余越多越快（线性按缺口比例）
+      const missing = 1 - this.breath / Player.BREATH_BUBBLES;
       this.breath = Player.BREATH_BUBBLES;
       this.breathAccum = 0;
       this.drownAccum = 0;
+      this.refillDur = Math.max(0.1, 1.11 * missing);
+      this.refillT = 0;
+    }
+    // 补气动画推进（补满后归 -1 隐藏）
+    if (this.refillT >= 0) {
+      this.refillT += dt;
+      if (this.refillT >= this.refillDur) this.refillT = -1;
     }
 
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
@@ -306,6 +316,13 @@ export class Player extends Entity {
     // 越界保护
     const maxY = world.h * TILE;
     if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
+  }
+
+  /** 出水补气动画进度 0..1（-1 = 未在补气） */
+  refillT = -1;
+  refillDur = 1.11; // 本次补气总时长（按出水时的缺口比例：1.11s × 缺口）
+  get refill01(): number {
+    return this.refillT < 0 ? 1 : Math.min(1, this.refillT / this.refillDur);
   }
 
   /** 当前正在消耗的那口气泡进度 0..1（1=满，趋 0 渐隐）；头部浸水外为 0 */

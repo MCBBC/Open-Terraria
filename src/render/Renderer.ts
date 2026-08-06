@@ -709,15 +709,22 @@ export class Renderer {
     ctx.restore();
     // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
     // 随气量消散；整体更透明
-    if (p.headUnderwater || p.breath < 5) {
+    if (p.headUnderwater || p.breath < 5 || p.refillT >= 0) {
       const gap = 12.5; // 间距 12.5px，气泡直径 11px，留 ~1.5px 视觉分隔
       const baseX = p.cx - (5 * gap) / 2 + gap / 2, baseY = p.y - p.h * 0.4 - 14;
       // 优先原版 Bubble.png（22×22，不透明），程序化圆仅兜底
       const bub = this.atlas ? this.atlas.vmisc('vanilla/Bubble.png') : null;
       // 平滑气量 = (气口-1) + 当前正在消耗那颗的剩余比例 → 逐个渐隐（不画已耗尽的）。
       // 直接 breath+drain 会在扣气瞬间把气泡重新顶满一格
-      const drain = p.headUnderwater && p.breath > 0 ? p.breathDrain01 : 1;
-      const display = p.breath - 1 + drain;
+      // 水下：平滑消耗（当前颗渐隐）；出水：0.8s 快速补满动画
+      let display: number;
+      if (p.refillT >= 0) {
+        display = Math.ceil(5 * p.refill01); // 逐个快速补足
+      } else {
+        const drain = p.headUnderwater && p.breath > 0 ? p.breathDrain01 : 1;
+        display = p.breath - 1 + drain;
+      }
+      // 5 个槽位固定占位（消耗时槽位不挪动，只是该槽的气泡渐隐消失）
       for (let b = 0; b < 5; b++) {
         const v = display - b; // 该颗的可见度：≥1 满，0..1 渐隐，≤0 跳过
         if (v <= 0) continue;

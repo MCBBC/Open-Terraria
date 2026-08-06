@@ -557,11 +557,17 @@ export class Game implements GameHooks {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
         this.swingHitSet.clear();
-        // 每次挥砍一声：斧砍植物纤维、镐按材质区分土闷/石金（跟随挥砍节奏，不再密集连响）
-        const hovered = TILE_DEFS[this.world.store.get(tx, ty)];
-        if (tool.type === 'axe') this.sfx.play('chop');
-        else if (hovered && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(hovered.key)) this.sfx.play('tink');
-        else this.sfx.play('dig');
+        // 每次挥砍一声：斧砍植物纤维、镐按材质区分土闷/石金（跟随挥砍节奏，不再密集连响）。
+        // 没有生效对象（镐没对准可挖方块 / 斧没对准树）则不出声
+        const hType = this.world.store.get(tx, ty);
+        const hovered = TILE_DEFS[hType];
+        const axeOnTarget = hType === T.TREE || (hovered?.decor ?? false);
+        const pickOnTarget = hType !== 0 && this.toolCanBreak(hType, tool.power ?? 10, tool.type);
+        if (tool.type === 'axe' ? axeOnTarget : pickOnTarget) {
+          if (tool.type === 'axe') this.sfx.play('chop');
+          else if (hovered && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(hovered.key)) this.sfx.play('tink');
+          else this.sfx.play('dig');
+        }
       }
       // 挖掘速率固定基数（tool.speed 已改为纯挥舞时长，两者解耦）；
       // 挖掘快慢仍由镐/斧力(power)体现
