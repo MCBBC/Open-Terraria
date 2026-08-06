@@ -214,8 +214,10 @@ export class Player extends Entity {
     this.dropThrough = !!this.inputDown;
     moveAndCollide(this, world, this.vx, this.vy);
 
-    // 边缘滑落：站在方块极边缘（脚下实心支撑 ≤4px）时向悬空侧滑出并下坠
-    if (this.onGround && this.vy >= 0) {
+    // 边缘滑落：两级渐进——支撑 <70% 体重时向悬空侧持续滑动（站边缘会缓缓滑出），
+    // 支撑 ≤2px 彻底失撑下坠。
+    // 台阶宽限：自动上台阶后身体大半悬在台阶后的空气上，立即判定会把它推回台阶下
+    if (this.onGround && this.vy >= 0 && this.stepRenderY <= 0.5) {
       const fy = Math.floor((this.y + this.h + 1) / TILE);
       const fx0 = Math.floor(this.x / TILE), fx1 = Math.floor((this.x + this.w - 0.01) / TILE);
       let support = 0;
@@ -228,11 +230,19 @@ export class Player extends Entity {
         support += ov;
         supportX += (left + right) / 2 * ov;
       }
-      if (support > 0 && support <= 4) {
+      // 主动移动（上行爬坡/走动）时只在彻底失撑（≤2px）才坠落，不参与缓滑——
+      // 爬台阶时身体经常大半悬空，缓滑会把人往回推；静止站边缘才触发缓滑
+      const moving = this.inputX !== 0 && Math.abs(this.vx) > 0.3;
+      const slideThresh = moving ? 2.1 : this.w * 0.7;
+      if (support > 0 && support < slideThresh) {
         const cen = supportX / support;
         const dir = cen < this.cx ? 1 : -1; // 支撑在身体哪侧，就往反侧滑
-        this.x += dir * 1.2;
-        this.onGround = false; // 失去支撑开始下坠
+        if (support <= 2) {
+          this.x += dir * 1.2;
+          this.onGround = false; // 彻底失撑，下坠
+        } else {
+          this.x += dir * 0.9; // 缓慢滑向悬空侧
+        }
       }
     }
 
