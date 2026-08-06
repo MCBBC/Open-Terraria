@@ -26,7 +26,6 @@ const TILE_MAP: Record<number, MapEntry> = {
   21: 'chest',  // Chest（帧按格距重建，不直拷——wld 存的是格偏移 0/1 不是像素）
   53: 'sand',         // Sand
   59: 'mud',          // Mud
-  60: 'grass',        // Jungle Grass
   73: 'tallgrass',    // Plants 2
   147: 'snow',        // Snow
   // ---- 原版素材批次（Tiles_N 表 + TEdit framing） ----
@@ -63,11 +62,6 @@ const TILE_MAP: Record<number, MapEntry> = {
   12: { key: 'crystal_heart', copyFrame: true },
   49: { key: 'water_candle', copyFrame: true },
   // 降级为 stone 的常见方块
-  23: 'stone', 24: 'stone', 25: 'stone',  // corruption
-  31: 'stone', 32: 'stone', 27: 'stone',  // crimson
-  41: 'stone', 43: 'stone', 44: 'stone',  // dungeon bricks
-  75: 'stone',
-  199: 'stone', 200: 'stone', 201: 'stone', 202: 'stone', 203: 'stone',
   // ---- 全量补全（compat-report 驱动，187 种）----
   165: { key: 'v_165_cave_decos', copyFrame: true },  // Cave Decos
   51: 'v_51_cobweb',  // Cobweb
@@ -261,7 +255,6 @@ const TILE_MAP: Record<number, MapEntry> = {
   28: { key: 'pot', copyFrame: true }, 29: null, 30: 'wood',  // Pots(原版) / Piggy Bank(暂无) / Wood→木材
   52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
   61: 'tallgrass', 62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // jungle plants(草化)/藤蔓/荆棘
-  70: 'grass', 71: 'mushroom', 72: 'tree',   // mushroom grass / Mushroom Plant→蘑菇 / mushroom tree
   74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'flower', // plants2→草 / Hellforge→熔炉 / 陨铁 / herbs bloom→花
   83: 'flower', 84: 'flower', // herbs mature→花 / bloom→花
   // ---- FTW_V2 补全 ----
@@ -280,6 +273,25 @@ const TILE_MAP: Record<number, MapEntry> = {
   475: { key: 'v_475_hat_rack', copyFrame: true },  // Hat Rack
   175: 'v_175_tin_brick',  // Tin Brick
   132: { key: 'v_132_lever', copyFrame: true },  // Lever
+  // ---- 不负责任的女妖啤酒厂 补全 ----
+  539: 'v_539_argon_moss_block',  // Argon Moss Block
+  481: 'v_481_cracked_blue_brick',  // Cracked Blue Brick
+  120: 'v_120_mudstone_brick',  // Mudstone Brick
+  714: { key: 'v_714_spider_boulder', copyFrame: true },  // Spider Boulder
+  752: { key: 'v_752_chillet_egg', copyFrame: true },  // Chillet Egg
+  751: { key: 'v_751_sleeping_digtoise', copyFrame: true },  // Sleeping Digtoise
+  664: { key: 'v_664_bouncy_boulder', copyFrame: true },  // Bouncy Boulder
+  711: { key: 'v_711_rainbow_boulder', copyFrame: true },  // Rainbow Boulder
+  715: { key: 'v_715_ghoulder', copyFrame: true },  // Ghoulder
+  716: { key: 'v_716_friendly_boulder', copyFrame: true },  // Friendly Boulder
+  713: { key: 'v_713_lava_boulder', copyFrame: true },  // Lava Boulder
+  23: 'v_23_corrupt_grass_block',
+  31: 'v_31_orb_heart',
+  41: 'v_41_blue_brick',
+  60: 'v_60_jungle_grass_block',
+  70: 'v_70_mushroom_grass_block',
+  75: 'v_75_obsidian_brick',
+  199: 'v_199_crimson_grass_block',
 };
 
 // wld wall id → 内部 wall key
@@ -313,7 +325,6 @@ const ITEM_MAP: Record<number, string> = {
   2350: 'vi_2350_recall_potion',  // Recall Potion
   188: 'vi_188_healing_potion',  // Healing Potion
   282: 'vi_282_glowstick',  // Glowstick
-  41: 'vi_41_flaming_arrow',  // Flaming Arrow
   167: 'vi_167_dynamite',  // Dynamite
   279: 'vi_279_throwing_knife',  // Throwing Knife
   51: 'vi_51_jester_s_arrow',  // Jester's Arrow
@@ -362,7 +373,6 @@ const ITEM_MAP: Record<number, string> = {
   939: 'vi_939_web_slinger',  // Web Slinger
   4870: 'vi_4870_potion_of_return',  // Potion of Return
   288: 'vi_288_obsidian_skin_potion',  // Obsidian Skin Potion
-  31: 'vi_31_bottle',  // Bottle
   211: 'vi_211_feral_claws',  // Feral Claws
   4404: 'vi_4404_inner_tube',  // Inner Tube
   187: 'vi_187_flipper',  // Flipper
@@ -483,7 +493,6 @@ const ITEM_MAP: Record<number, string> = {
   94: 'vi_94_wood_platform',  // Wood Platform
   2757: 'vi_2757_vortex_helmet',  // Vortex Helmet
   4989: 'vi_4989_soaring_insignia',  // Soaring Insignia
-  75: 'vi_75_fallen_star',  // Fallen Star
   3383: 'vi_3383_stardust_leggings',  // Stardust Leggings
   4914: 'vi_4914_kaleidoscope',  // Kaleidoscope
   26: 'vi_26_stone_wall',  // Stone Wall
@@ -664,6 +673,23 @@ const ITEM_MAP: Record<number, string> = {
   2292: 'vi_2292_fiberglass_fishing_pole',  // Fiberglass Fishing Pole
   5238: 'vi_5238_constellation',  // Constellation
   753: 'vi_753_seaweed',  // Seaweed
+  5120: 'vi_5120_deer_thing',  // Deer Thing
+  5508: 'vi_5508_grim_old_barb',  // Grim Old Barb
+  5465: 'vi_5465_ram_rune',  // Ram Rune
+  5500: 'vi_5500_goat_s_tuft',  // Goat\'s Tuft
+  5499: 'vi_5499_froggy_neckband',  // Froggy Neckband
+  5507: 'vi_5507_balloony_beads',  // Balloony Beads
+  5485: 'vi_5485_chicken_charm',  // Chicken Charm
+  5502: 'vi_5502_cat_chime',  // Cat Chime
+  5504: 'vi_5504_turkey_wattle_necklace',  // Turkey Wattle Necklace
+  5506: 'vi_5506_crow_s_beak',  // Crow\'s Beak
+  5503: 'vi_5503_dog_collar',  // Dog Collar
+  5534: 'vi_5534_fairy_choker',  // Fairy Choker
+  5484: 'vi_5484_cow_bell',  // Cow Bell
+  5501: 'vi_5501_old_companion_locket',  // Old Companion Locket
+  5509: 'vi_5509_vampire_pendant',  // Vampire Pendant
+  5505: 'vi_5505_mean_goblin_s_spikes',  // Mean Goblin\'s Spikes
+  5525: 'vi_5525_cursed_piper_flute',  // Cursed Piper Flute
 };
 
 export interface CompatEntry { id: number; name: string | null; count: number; action: string }
@@ -690,6 +716,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const frameY = new Uint16Array(n);
   const wall = new Uint8Array(n);
   const liquidArr = new Uint8Array(n);
+  const liquidTypeArr = new Uint8Array(n);
 
   const chestAt = new Map<string, { x: number; y: number }>();
   for (const c of wld.chests) chestAt.set(`${c.x},${c.y}`, c);
@@ -724,6 +751,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     }
     const lq = wld.tiles.liquid[i];
     if (lq > 0) liquidArr[i] = lq;
+    // 液体类型：parser 已按内部编码输出（1水 2岩浆 3蜂蜜），直拷
+    if (lq > 0) liquidTypeArr[i] = wld.tiles.liquidType[i] || 1;
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -780,6 +809,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     tiles: bytesToB64(rleTiles({ type, frameX, frameY })),
     walls: bytesToB64(rlePairs(wall)),
     liquid: bytesToB64(rlePairs(liquidArr)),
+    liquidType: bytesToB64(rlePairs(liquidTypeArr)),
     chests,
     player: {
       hp: 100,

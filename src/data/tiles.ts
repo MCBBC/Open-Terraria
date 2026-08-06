@@ -59,7 +59,7 @@ def({ key: 'platform', name: '木平台', platform: true, opacity: 0.15, pick: 0
 def({ key: 'torch', name: '火把', decor: true, framed: true, opacity: 0, pick: 0, light: [255, 225, 150], mapColor: '#FDDD03', drop: 'torch', vanilla: { sheet: 4, frame: 'style', fw: 1, fh: 1 } });
 // 注：火把光值见下（更亮版本）
 def({ key: 'workbench', name: '工作台', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#A97D4E', drop: 'workbench', vanilla: { sheet: 18, frame: 'style', fw: 2, fh: 1 } });
-def({ key: 'furnace', name: '熔炉', solid: true, framed: true, opacity: 1, pick: 0, w: 3, h: 2, light: [255, 140, 70], mapColor: '#5A5A5A', drop: 'furnace' });
+def({ key: 'furnace', name: '熔炉', solid: true, framed: true, opacity: 1, pick: 0, w: 3, h: 2, light: [255, 140, 70], mapColor: '#5A5A5A', drop: 'furnace', vanilla: { sheet: 17, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'anvil', name: '铁砧', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#6E6E78', drop: 'anvil', vanilla: { sheet: 16, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'chest', name: '宝箱', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#D4A017', drop: 'chest', vanilla: { sheet: 21, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#A97D4E', drop: 'door', vanilla: { sheet: 10, frame: 'style', fw: 1, fh: 3 } });
@@ -148,8 +148,8 @@ def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity
 def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#974F50', drop: null as unknown as string, vanilla: { sheet: 28, frame: 'style', fw: 2, fh: 2 } });
 
 export const TILE_BY_KEY: Record<string, number> = {};
-TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
-
+// 注意：构建必须放在文件末尾（所有 def() 之后），v_ 批量补全定义在下方，
+// 此处先注册占位，末尾 rebuildTILE_BY_KEY() 统一回填
 export function isSolidTile(type: number): boolean {
   const d = TILE_DEFS[type];
   return !!d && d.solid;
@@ -382,3 +382,28 @@ def({ key: 'v_144_timers', name: 'Timers', solid: false, framed: true, opacity: 
 def({ key: 'v_475_hat_rack', name: 'Hat Rack', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#6B4F3B', drop: null as unknown as string, vanilla: { sheet: 475, frame: 'style', fw: 3, fh: 4 } });
 def({ key: 'v_175_tin_brick', name: 'Tin Brick', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: null as unknown as string, vanilla: { sheet: 175, frame: 'auto' } });
 def({ key: 'v_132_lever', name: 'Lever', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null as unknown as string, vanilla: { sheet: 132, frame: 'style', fw: 2, fh: 2 } });
+
+// ===================== 不负责任的女妖啤酒厂 兼容补全 =====================
+def({ key: 'v_539_argon_moss_block', name: 'Argon Moss Block', solid: true, opacity: 1, pick: 0, mapColor: '#9A6387', blend: true, drop: null as unknown as string, vanilla: { sheet: 539, frame: 'auto' } });
+def({ key: 'v_481_cracked_blue_brick', name: 'Cracked Blue Brick', solid: true, opacity: 1, pick: 0, mapColor: '#383E50', blend: true, drop: null as unknown as string, vanilla: { sheet: 481, frame: 'auto' } });
+def({ key: 'v_120_mudstone_brick', name: 'Mudstone Brick', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: null as unknown as string, vanilla: { sheet: 120, frame: 'auto' } });
+def({ key: 'v_714_spider_boulder', name: 'Spider Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 714, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_752_chillet_egg', name: 'Chillet Egg', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 752, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_751_sleeping_digtoise', name: 'Sleeping Digtoise', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#baa854', drop: null as unknown as string, vanilla: { sheet: 751, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_664_bouncy_boulder', name: 'Bouncy Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#497811', drop: null as unknown as string, vanilla: { sheet: 664, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_711_rainbow_boulder', name: 'Rainbow Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#b6af82', drop: null as unknown as string, vanilla: { sheet: 711, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_715_ghoulder', name: 'Ghoulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 715, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_716_friendly_boulder', name: 'Friendly Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 716, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_713_lava_boulder', name: 'Lava Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 713, frame: 'style', fw: 2, fh: 2 } });
+
+// ===================== wld 独立映射修复（原为错误复用） =====================
+def({ key: 'v_23_corrupt_grass_block', name: 'Corrupt Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null as unknown as string, vanilla: { sheet: 23, frame: 'auto' } });
+def({ key: 'v_31_orb_heart', name: 'Orb Heart', solid: true, opacity: 1, pick: 0, mapColor: '#8D78A8', blend: true, drop: null as unknown as string, vanilla: { sheet: 31, frame: 'auto' } });
+def({ key: 'v_41_blue_brick', name: 'Blue Brick', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null as unknown as string, vanilla: { sheet: 41, frame: 'auto' } });
+def({ key: 'v_75_obsidian_brick', name: 'Obsidian Brick', solid: true, opacity: 1, pick: 0, mapColor: '#242424', blend: true, drop: null as unknown as string, vanilla: { sheet: 75, frame: 'auto' } });
+def({ key: 'v_199_crimson_grass_block', name: 'Crimson Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null as unknown as string, vanilla: { sheet: 199, frame: 'auto' } });
+def({ key: 'v_60_jungle_grass_block', name: 'Jungle Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: null as unknown as string, vanilla: { sheet: 60, frame: 'auto' } });
+def({ key: 'v_70_mushroom_grass_block', name: 'Mushroom Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: null as unknown as string, vanilla: { sheet: 70, frame: 'auto' } });
+
+// 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）
+TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));

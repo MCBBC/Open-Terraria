@@ -553,3 +553,22 @@ item({ key: 'vi_529_red_pressure_plate', name: 'Red Pressure Plate', maxStack: 9
 item({ key: 'vi_183_glowing_mushroom', name: 'Glowing Mushroom', maxStack: 999, value: 1 });
 item({ key: 'vi_130_gray_brick_wall', name: 'Gray Brick Wall', maxStack: 999, value: 1 });
 item({ key: 'vi_352_keg', name: 'Keg', maxStack: 999, value: 1 });
+
+// 不负责任的女妖啤酒厂 补全物品（占位收集品）
+item({ key: 'vi_5120_deer_thing', name: 'Deer Thing', maxStack: 999, value: 1 });
+item({ key: 'vi_5508_grim_old_barb', name: 'Grim Old Barb', maxStack: 999, value: 1 });
+item({ key: 'vi_5465_ram_rune', name: 'Ram Rune', maxStack: 999, value: 1 });
+item({ key: 'vi_5500_goat_s_tuft', name: 'Goat\'s Tuft', maxStack: 999, value: 1 });
+item({ key: 'vi_5499_froggy_neckband', name: 'Froggy Neckband', maxStack: 999, value: 1 });
+item({ key: 'vi_5507_balloony_beads', name: 'Balloony Beads', maxStack: 999, value: 1 });
+item({ key: 'vi_5485_chicken_charm', name: 'Chicken Charm', maxStack: 999, value: 1 });
+item({ key: 'vi_5502_cat_chime', name: 'Cat Chime', maxStack: 999, value: 1 });
+item({ key: 'vi_5504_turkey_wattle_necklace', name: 'Turkey Wattle Necklace', maxStack: 999, value: 1 });
+item({ key: 'vi_5506_crow_s_beak', name: 'Crow\'s Beak', maxStack: 999, value: 1 });
+item({ key: 'vi_5503_dog_collar', name: 'Dog Collar', maxStack: 999, value: 1 });
+item({ key: 'vi_5534_fairy_choker', name: 'Fairy Choker', maxStack: 999, value: 1 });
+item({ key: 'vi_5484_cow_bell', name: 'Cow Bell', maxStack: 999, value: 1 });
+item({ key: 'vi_5501_old_companion_locket', name: 'Old Companion Locket', maxStack: 999, value: 1 });
+item({ key: 'vi_5509_vampire_pendant', name: 'Vampire Pendant', maxStack: 999, value: 1 });
+item({ key: 'vi_5505_mean_goblin_s_spikes', name: 'Mean Goblin\'s Spikes', maxStack: 999, value: 1 });
+item({ key: 'vi_5525_cursed_piper_flute', name: 'Cursed Piper Flute', maxStack: 999, value: 1 });
