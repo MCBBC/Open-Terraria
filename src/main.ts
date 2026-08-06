@@ -6,7 +6,7 @@ import { ITEM_BY_KEY } from './data/items';
 import { TILE_BY_KEY, T } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
 // 调试句柄：页面内直接测 .wld 转换
-(window as unknown as { __parseWld?: (b: Uint8Array) => unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
+(window as unknown as { __parseWld?: (b: Uint8Array) => unknown; __lastCompatReport?: unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
 import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 
@@ -107,7 +107,8 @@ function showMenu() {
       ui.showProgress('正在解析 .wld 地图…', 0.1);
       try {
         const buf = new Uint8Array(await file.arrayBuffer());
-        const save = parseWldToSave(buf);
+        const { save, report } = parseWldToSave(buf);
+        (window as unknown as { __lastCompatReport?: import('./ui/UI').CompatReport }).__lastCompatReport = report;
         ui.showProgress('正在转换世界…', 0.7);
         const g = new Game(root, {
           onWorldReady: () => {
@@ -115,6 +116,11 @@ function showMenu() {
             enterGame(g);
             maybeDev(g);
             ui.toast(`成功导入「${save.header.name}」(v${save.header.wldVersion})`);
+            // 兼容报告：有降级/跳过内容时弹窗 + 支持导出
+            const rpt = (window as unknown as { __lastCompatReport?: import('./ui/UI').CompatReport }).__lastCompatReport;
+            if (rpt && (rpt.tilesDegraded.length || rpt.tilesCleared.length || rpt.itemsSkipped.length)) {
+              ui.showCompatReport(rpt);
+            }
           },
           onInventoryChanged: () => ui.refreshAll(),
         onBuffsChanged: () => ui.refreshBuffs(),

@@ -16,7 +16,7 @@ export const ENEMY_GRAVITY = 0.32;
 export const CHUNK = 16; // chunk 边长（tile）
 
 // ---- 光照 ----
-export const LIGHT_AIR_COST = 15; // 光穿过空气每格衰减（最大传播 ~17 格）
+export const LIGHT_AIR_COST = 12; // 光穿过空气每格衰减（最大传播 ~21 格；火把照明半径加大）
 export const SKY_LIGHT = 255;
 
 // ---- 时间 ----

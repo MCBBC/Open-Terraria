@@ -509,6 +509,19 @@ export class Renderer {
       let anchor: 'feet' | 'center' = 'feet';
       if (e.key.startsWith('slime')) { frames = this.enemyAnim(e.key); anchor = 'feet'; }
       else if (e.key === 'zombie') { frames = this.enemyAnim(e.key); anchor = 'feet'; }
+      else if (e.key === 'cave_bat') {
+        // 洞穴蝙蝠：原版 NPC_49（44x32×5 帧扑翼），逐帧动画
+        if (!this.enemyAnimCache.has('bat49')) {
+          const list: ReturnType<SpriteAtlas['animFrames']> = [];
+          for (let k = 0; k < 5; k++) {
+            const r = this.atlas!.vnpc(49, k);
+            if (r) list.push(r);
+          }
+          this.enemyAnimCache.set('bat49', list);
+        }
+        frames = this.enemyAnimCache.get('bat49') ?? [];
+        anchor = 'center';
+      }
       else if (e.key === 'demon_eye') {
         // 恶魔之眼：NPC_2 双帧
         frames = this.enemyAnimCache.get('deye') ?? [];

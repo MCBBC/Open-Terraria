@@ -60,6 +60,8 @@ export interface VanillaData {
   items: Record<string, VanillaItemMeta>;
   walls: Record<string, VanillaWallMeta>;
   npcs?: Record<string, VanillaNpcMeta>;
+  tileNames?: Record<string, string>;  // 全量原版 tile id → 英文名（兼容报告用）
+  itemNames?: Record<string, string>;
 }
 
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
@@ -175,6 +177,10 @@ export class SpriteAtlas {
     const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
     return { img, sx: 0, sy: idx * m.frameH, sw: m.frameW, sh: m.frameH };
   }
+
+  /** 原版 tile/item 英文名（全量表，未白名单的也有） */
+  vTileName(id: number): string | null { return this.vanilla.tileNames?.[String(id)] ?? null; }
+  vItemName(id: number): string | null { return this.vanilla.itemNames?.[String(id)] ?? null; }
 
   vnpcMeta(npcId: number): VanillaNpcMeta | null {
     return this.vanilla.npcs?.[String(npcId)] ?? null;

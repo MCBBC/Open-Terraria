@@ -77,6 +77,12 @@ const CSS = `
 .sw-progress .fill { height:100%; width:0%; background:linear-gradient(90deg,#6a8ae0,#8ad0e0); transition:width 0.2s; }
 `;
 
+export interface CompatEntry { id: number; name: string | null; count: number; action: string }
+export interface CompatReport {
+  worldName: string; wldVersion: number; size: [number, number];
+  tilesDegraded: CompatEntry[]; tilesCleared: CompatEntry[]; itemsSkipped: CompatEntry[];
+}
+
 export class UI {
   devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
   root: HTMLElement;
@@ -182,6 +188,50 @@ export class UI {
     devRow.appendChild(el('span', '', '开发者模式（全道具入包 + 出生点展示区）'));
     panel.appendChild(devRow);
 
+    this.root.appendChild(panel);
+  }
+
+  /** 兼容报告弹窗：降级/清空/跳过内容列表 + 导出详情 JSON */
+  showCompatReport(rpt: CompatReport) {
+    this.closeAll();
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:480px; max-height:80vh; overflow:auto;';
+    panel.appendChild(el('div', 'sw-title', '⚠ 导入兼容报告'));
+    const info = el('div', '', `「${rpt.worldName}」 v${rpt.wldVersion} · ${rpt.size[0]}×${rpt.size[1]}<br>以下内容在本版本中被降级或跳过：`);
+    info.style.cssText = 'font-size:12px; color:#9a8ab8; margin-bottom:8px;';
+    panel.appendChild(info);
+    const section = (title: string, entries: CompatEntry[], desc: string) => {
+      if (!entries.length) return;
+      panel.appendChild(el('div', '', title));
+      const ul = el('div');
+      ul.style.cssText = 'font-size:12px; margin:4px 0 8px 0; line-height:1.7;';
+      for (const e of entries.slice(0, 40)) {
+        ul.appendChild(el('div', '', `· id ${e.id} ${e.name ? `「${e.name}」` : ''} ×${e.count} <span style="color:#7a6a9a">(${desc})</span>`));
+      }
+      if (entries.length > 40) ul.appendChild(el('div', '', `… 共 ${entries.length} 种（导出查看全部）`));
+      panel.appendChild(ul);
+    };
+    section('🧱 方块 → 降级为石块', rpt.tilesDegraded, 'degraded-to-stone');
+    section('🚫 方块 → 清空丢弃', rpt.tilesCleared, 'cleared');
+    section('🎒 宝箱物品 → 跳过', rpt.itemsSkipped, 'skipped');
+    const row = el('div');
+    row.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
+    const bExport = el('button', 'sw-btn', '导出详情 JSON');
+    bExport.style.flex = '1';
+    bExport.onclick = () => {
+      const blob = new Blob([JSON.stringify({ ...rpt, exportedAt: new Date().toISOString(), note: '把此文件交回开发者即可补全缺失内容' }, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `compat-report-${rpt.worldName.replace(/\s+/g, '_')}-${rpt.wldVersion}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    };
+    const bClose = el('button', 'sw-btn', '关闭');
+    bClose.style.flex = '1';
+    bClose.onclick = () => panel.remove();
+    row.appendChild(bExport);
+    row.appendChild(bClose);
+    panel.appendChild(row);
     this.root.appendChild(panel);
   }
 

@@ -107,11 +107,22 @@ const ITEM_MAP: Record<number, string> = {
   5: 'mushroom_item', 27: 'acorn',
 };
 
-export interface ImportResult { save: SaveData; warnings: string[]; }
+export interface CompatEntry { id: number; name: string | null; count: number; action: string }
+export interface CompatReport {
+  worldName: string; wldVersion: number; size: [number, number];
+  tilesDegraded: CompatEntry[];  // 未映射 tile → 降级石块
+  tilesCleared: CompatEntry[];   // 映射为 null → 清空丢弃
+  itemsSkipped: CompatEntry[];   // 宝箱内未映射物品 → 跳过
+}
+export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport }
 
-export function parseWldToSave(buf: Uint8Array): SaveData {
+export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wld: WldWorld = parseWld(buf);
   const warnings: string[] = [];
+  const tileNames = vanillaTileNames;
+  const itemNames = vanillaItemNames;
+  const deg = new Map<number, number>(), clr = new Map<number, number>(), itm = new Map<number, number>();
+  const bump = (m: Map<number, number>, id: number) => m.set(id, (m.get(id) ?? 0) + 1);
 
   const w = wld.tilesWide, h = wld.tilesHigh;
   const n = w * h;
@@ -132,8 +143,10 @@ export function parseWldToSave(buf: Uint8Array): SaveData {
       if (mapped === undefined) {
         // 未映射：framed 物体丢弃，方块降级为 stone（保持地形完整可玩）
         unmapped++;
+        bump(deg, wt);
         type[i] = T.STONE;
       } else if (mapped === null) {
+        bump(clr, wt);
         type[i] = 0;
       } else if (typeof mapped === 'string') {
         type[i] = TILE_BY_KEY[mapped] ?? 0;
@@ -172,6 +185,7 @@ export function parseWldToSave(buf: Uint8Array): SaveData {
       if (key && ITEM_BY_KEY[key] !== undefined) {
         items.push({ id: ITEM_BY_KEY[key], stack: Math.min(999, it.stack) });
       } else {
+        bump(itm, it.id);
         items.push(null);
       }
     }
@@ -218,7 +232,24 @@ export function parseWldToSave(buf: Uint8Array): SaveData {
     npcs: [],
     flags: { downedEyeOfCthulhu: false },
   };
+  const toEntries = (m: Map<number, number>, names: Record<string, string>): CompatEntry[] =>
+    [...m.entries()].map(([id, count]) => ({ id, name: names[String(id)] ?? null, count, action: '' }))
+      .sort((a, b) => b.count - a.count);
+  const report: CompatReport = {
+    worldName: wld.title || '导入的地图',
+    wldVersion: wld.version,
+    size: [w, h],
+    tilesDegraded: toEntries(deg, tileNames).map((e) => ({ ...e, action: 'degraded-to-stone' })),
+    tilesCleared: toEntries(clr, tileNames).map((e) => ({ ...e, action: 'cleared' })),
+    itemsSkipped: toEntries(itm, itemNames).map((e) => ({ ...e, action: 'skipped' })),
+  };
   void warnings;
   void chestAt;
-  return save;
+  return { save, warnings, report };
 }
+
+// 全量名称表（vanilla.json 生成时从 TEdit tiles/items.json 提取）
+import vanillaJson from '../../public/sprites/vanilla.json';
+const vanillaData = vanillaJson as unknown as { tileNames?: Record<string, string>; itemNames?: Record<string, string> };
+const vanillaTileNames = vanillaData.tileNames ?? {};
+const vanillaItemNames = vanillaData.itemNames ?? {};

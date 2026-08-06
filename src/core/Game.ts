@@ -1163,6 +1163,7 @@ export class Game implements GameHooks {
     } else if (isDay) {
       key = 'slime_green';
     } else {
+      // 夜间地表：僵尸/恶魔眼/史莱姆——洞穴蝙蝠不在此列（只在洞里）
       const r = rng.next();
       key = r < 0.4 ? 'zombie' : r < 0.75 ? 'demon_eye' : 'slime_blue';
     }

@@ -46,6 +46,7 @@ const NPC_FRAME_H = {
   46: 40, 74: 24, 299: 32, 300: 16, 355: 16, 356: 24,
   359: 20, 361: 22, 362: 40, 377: 12,
   442: 24, 443: 40, 444: 24, 445: 22, 446: 12, 447: 16,
+  49: 32, // 洞穴蝙蝠：44x160，5 帧扑翼（带探测起始 ≈ 0/32/64/96/128）
 };
 
 let copied = 0, missing = [];
@@ -118,6 +119,12 @@ for (const id of whitelist.npcs ?? []) {
     count: Math.max(1, Math.floor(h / frameH)),
   };
 }
+
+// 全量 tile/item 名称表（仅 id→name，约 30KB——兼容报告显示用，不拷 PNG）
+out.tileNames = {};
+for (const t of tiles) out.tileNames[t.id] = t.name;
+out.itemNames = {};
+for (const it of items) out.itemNames[it.id] = it.name;
 
 writeFileSync(OUT_JSON, JSON.stringify(out));
 console.log(`vanilla-atlas: tiles=${Object.keys(out.tiles).length} items=${Object.keys(out.items).length} walls=${Object.keys(out.walls).length} copied=${copied}`);

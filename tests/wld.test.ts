@@ -242,7 +242,7 @@ describe('.wld 解析器（v279 固件）', () => {
   });
 
   it('转换为自有存档格式并加载', () => {
-    const save = parseWldToSave(buf);
+    const { save } = parseWldToSave(buf);
     expect(save.header.width).toBe(4);
     expect(save.header.wldVersion).toBe(279);
     const { world } = loadSave(JSON.stringify(save));
