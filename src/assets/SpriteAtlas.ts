@@ -53,10 +53,13 @@ export interface VanillaWallMeta {
   name: string; key: string; sheet: string; color: string;
   grid: [number, number]; stride: [number, number]; cols: number; rows: number;
 }
+// NPC 贴图表（纵向帧条：小动物等）
+export interface VanillaNpcMeta { sheet: string; frameW: number; frameH: number; count: number; }
 export interface VanillaData {
   tiles: Record<string, VanillaTileMeta>;
   items: Record<string, VanillaItemMeta>;
   walls: Record<string, VanillaWallMeta>;
+  npcs?: Record<string, VanillaNpcMeta>;
 }
 
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
@@ -92,6 +95,7 @@ export class SpriteAtlas {
       ...Object.values(this.vanilla.tiles).map((t) => t.sheet),
       ...Object.values(this.vanilla.items).map((i) => i.icon),
       ...Object.values(this.vanilla.walls).map((w) => w.sheet),
+      ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
       ...VANILLA_MISC, // 杂项单图（呼吸气泡等）
     ];
     let done = 0;
@@ -160,6 +164,20 @@ export class SpriteAtlas {
     if (!img) return null;
     if (fx < 0 || fy < 0 || fx + w > img.width || fy + h > img.height) return null;
     return { img, sx: fx, sy: fy, sw: w, sh: h };
+  }
+
+  /** 原版 NPC 贴图表取帧（小动物：纵向帧条，frameIdx 0-based） */
+  vnpc(npcId: number, frameIdx: number): DrawRect | null {
+    const m = this.vanilla.npcs?.[String(npcId)];
+    if (!m) return null;
+    const img = this.vimages.get(m.sheet);
+    if (!img) return null;
+    const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
+    return { img, sx: 0, sy: idx * m.frameH, sw: m.frameW, sh: m.frameH };
+  }
+
+  vnpcMeta(npcId: number): VanillaNpcMeta | null {
+    return this.vanilla.npcs?.[String(npcId)] ?? null;
   }
 
   /** 原版杂项单图（呼吸气泡等） */

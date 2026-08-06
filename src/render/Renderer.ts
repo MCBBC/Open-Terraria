@@ -14,6 +14,7 @@ import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
+import { Critter } from '../entities/Critter';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -247,6 +248,7 @@ export class Renderer {
       else if (e instanceof ItemDrop) this.drawDrop(e);
       else if (e instanceof TownNPC) this.drawTownNPC(e);
       else if (e instanceof Tombstone) this.drawTombstone(e);
+      else if (e instanceof Critter) this.drawCritter(e);
       else (e as Player).draw && null;
     }
     this.drawPlayer(player, world, swing);
@@ -421,6 +423,38 @@ export class Renderer {
       const pc = getTombstoneCanvas();
       ctx.drawImage(pc, -8, -22, 16, 22);
     }
+    ctx.restore();
+  }
+
+  /** 小动物：原版 NPC 纵向帧条动画（移动时循环全帧，静止首帧；贴图默认朝左镜像） */
+  private drawCritter(c: Critter) {
+    if (!this.atlas) return;
+    const meta = this.atlas.vnpcMeta(c.def.npc);
+    if (!meta) return;
+    // 鸟类栖息用末帧（NPC_74 第 5 帧即落地姿态）；移动时循环动画，静止首帧。
+    // 蝴蝶表含 8 物种 × 3 帧：animLen > 0 时只播 animBase 起的窗口
+    let frame: number;
+    if (c.perchState === 1 && meta.count > 1) frame = meta.count - 1;
+    else {
+      const moving = Math.abs(c.vx) > 0.15 || !c.onGround;
+      if (c.animLen > 0) frame = c.animBase + (moving ? Math.floor(c.animT / 8) % c.animLen : 0);
+      else frame = moving ? Math.floor(c.animT / 8) % meta.count : 0;
+    }
+    const fr = this.atlas.vnpc(c.def.npc, frame);
+    if (!fr) return;
+    const ctx = this.ctx;
+    // 缩放贴合碰撞盒；按帧最低不透明行对齐脚底（帧底透明内边距会导致悬浮）
+    const h = c.h * 1.25;
+    const w = (fr.sw / fr.sh) * h;
+    const pad = this.spriteBottomPad(fr); // 帧内底部透明行数
+    ctx.save();
+    ctx.translate(c.cx, c.y + c.h); // 脚底中心
+    ctx.scale(c.facing >= 0 ? -1 : 1, 1); // 贴图默认朝左
+    if (c.def.glow) {
+      ctx.shadowColor = 'rgba(220,255,140,0.9)';
+      ctx.shadowBlur = 6; // 萤火虫发光
+    }
+    ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + pad * (h / fr.sh), w, h);
     ctx.restore();
   }
 
@@ -719,7 +753,8 @@ export class Renderer {
       // 水下：平滑消耗（当前颗渐隐）；出水：0.8s 快速补满动画
       let display: number;
       if (p.refillT >= 0) {
-        display = Math.ceil(5 * p.refill01); // 逐个快速补足
+        // 从余量处起填：refillFrom + 缺口 × 进度（不从第一颗重新冒）
+        display = p.refillFrom + (5 - p.refillFrom) * p.refill01;
       } else {
         const drain = p.headUnderwater && p.breath > 0 ? p.breathDrain01 : 1;
         display = p.breath - 1 + drain;

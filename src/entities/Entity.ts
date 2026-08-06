@@ -31,14 +31,15 @@ export class EntityManager {
   npcs: Entity[] = [];
   projectiles: Entity[] = [];
   props: Entity[] = [];   // 场景物件（墓碑等不可拾取物理实体）
+  critters: Entity[] = []; // 小动物（无害被动生物）
 
-  add(e: Entity, bucket: 'enemies' | 'drops' | 'npcs' | 'projectiles' | 'props') {
+  add(e: Entity, bucket: 'enemies' | 'drops' | 'npcs' | 'projectiles' | 'props' | 'critters') {
     e.id = this.nextId++;
     this[bucket].push(e);
   }
 
   update(dt: number, game: GameHooks) {
-    for (const list of [this.enemies, this.drops, this.npcs, this.projectiles, this.props]) {
+    for (const list of [this.enemies, this.drops, this.npcs, this.projectiles, this.props, this.critters]) {
       for (const e of list) e.fixedUpdate(dt, game);
     }
     this.enemies = this.enemies.filter((e) => !e.dead);
@@ -46,6 +47,7 @@ export class EntityManager {
     this.npcs = this.npcs.filter((e) => !e.dead);
     this.projectiles = this.projectiles.filter((e) => !e.dead);
     this.props = this.props.filter((e) => !e.dead);
+    this.critters = this.critters.filter((e) => !e.dead);
   }
 
   clear() {
@@ -54,9 +56,10 @@ export class EntityManager {
     this.npcs.length = 0;
     this.projectiles.length = 0;
     this.props.length = 0;
+    this.critters.length = 0;
   }
 
   all(): Entity[] {
-    return [...this.enemies, ...this.drops, ...this.npcs, ...this.projectiles, ...this.props];
+    return [...this.enemies, ...this.drops, ...this.npcs, ...this.projectiles, ...this.props, ...this.critters];
   }
 }

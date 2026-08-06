@@ -12,8 +12,9 @@ import { BuffState } from '../stats/Buffs';
 import { ITEM_DEFS } from '../data/items';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
-const FALL_SAFE_TILES = 6;
-const FALL_FATAL_TILES = 20;
+// 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
+const FALL_SAFE_TILES = 22;
+const FALL_FATAL_TILES = 45;
 
 export class Player extends Entity {
   w = 14; h = 30;        // 宽 <1 格（可入单格竖井），高 ≤2 格（可入两格通道）
@@ -126,6 +127,7 @@ export class Player extends Entity {
     const headLiq = world.store.liquid[world.store.idx(
       Math.floor(this.cx / TILE), Math.floor((this.y + 2) / TILE),
     )];
+    const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
     this.headUnderwater = headLiq > 100;
     // 岩浆伤害：每半秒 15
     if (this.inLava) {
@@ -138,6 +140,7 @@ export class Player extends Entity {
     } else this.lavaAccum = 0;
 
     // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复
+    const wasHead = prevHeadUnderwater;
     if (this.headUnderwater) {
       this.breathAccum += dt;
       const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
@@ -154,19 +157,25 @@ export class Player extends Entity {
           game.addDamageNumber(this.cx, this.y, 10, false, '#FF5050'); // 与受击同色
         }
       }
-    } else if (this.breath < Player.BREATH_BUBBLES) {
-      // 出水补气：1.11s 从零充满，剩余越多越快（线性按缺口比例）
-      const missing = 1 - this.breath / Player.BREATH_BUBBLES;
+    } else if (wasHead || this.breath < Player.BREATH_BUBBLES) {
+      // 出水补气。关键：刚出水时 breath 可能仍为满值但有一颗正在渐隐消耗中
+      // （breathAccum > 0）——只判 breath==5 会跳过补气导致气泡瞬间消失。
+      // 余量取「整口气 + 正在消耗那颗的剩余比例」的精确小数，从该状态回满
+      const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
+      const drainRemain = wasHead ? Math.max(0, Math.min(1, 1 - this.breathAccum / per)) : 1;
+      this.refillFrom = Math.min(Player.BREATH_BUBBLES, this.breath - 1 + drainRemain);
+      const missing = 1 - this.refillFrom / Player.BREATH_BUBBLES;
       this.breath = Player.BREATH_BUBBLES;
       this.breathAccum = 0;
       this.drownAccum = 0;
-      this.refillDur = Math.max(0.1, 1.11 * missing);
+      // 补气时长：缺口比例（1.11s × 缺口），保底 0.55s 能看清；满后停留 0.35s 再隐藏
+      this.refillDur = Math.max(0.55, 1.11 * missing);
       this.refillT = 0;
     }
-    // 补气动画推进（补满后归 -1 隐藏）
+    // 补气动画推进（补满后停留 REFILL_HOLD 再隐藏）
     if (this.refillT >= 0) {
       this.refillT += dt;
-      if (this.refillT >= this.refillDur) this.refillT = -1;
+      if (this.refillT >= this.refillDur + 0.15) this.refillT = -1;
     }
 
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
@@ -295,11 +304,14 @@ export class Player extends Entity {
     if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;
     else this.stepRenderY = 0;
 
-    // 落地摔伤结算（幸运马掌免疫）
+    // 落地摔伤结算（幸运马掌免疫；落在水里豁免——水有缓冲）
     if (this.onGround && this.fallStartY !== null) {
       const fallTiles = (this.y - this.fallStartY) / TILE;
       this.fallStartY = null;
-      if (fallTiles > FALL_SAFE_TILES && !this.hasHorseshoe) {
+      const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
+      const landedInWater = feetLiq > 60 || this.inWater;
+      if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
+      else if (fallTiles > FALL_SAFE_TILES && !this.hasHorseshoe) {
         const t = Math.min(1, (fallTiles - FALL_SAFE_TILES) / (FALL_FATAL_TILES - FALL_SAFE_TILES));
         const dmgPercent = 10 + 90 * t * t * t; // 10%~100% 三次方曲线（Maples 公式）
         const dmg = Math.max(1, Math.round((dmgPercent / 100) * this.hp));
@@ -321,6 +333,8 @@ export class Player extends Entity {
   /** 出水补气动画进度 0..1（-1 = 未在补气） */
   refillT = -1;
   refillDur = 1.11; // 本次补气总时长（按出水时的缺口比例：1.11s × 缺口）
+  refillFrom = 0;   // 出水时的余量（补气动画从此处起填）
+  static readonly REFILL_HOLD = 0.35; // 补满后满格停留时长
   get refill01(): number {
     return this.refillT < 0 ? 1 : Math.min(1, this.refillT / this.refillDur);
   }

@@ -69,27 +69,37 @@ export class Tombstone extends Entity {
 
     const impact = this.vy; // 碰撞前的下落速度（反弹力度依据）
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
-    this.vx *= 0.99;
+    this.vx *= 0.995;
     moveAndCollide(this, game.world, this.vx, this.vy);
     this.angle += this.angVel;
 
     if (this.onGround) {
-      if (impact > 2.5 && this.bounces < 4) {
-        // 落地弹跳：按冲击力反弹，翻滚角速度扰动衰减
+      const energy = Math.abs(impact) + Math.abs(this.vx) * 0.5 + Math.abs(this.angVel);
+      if (impact > 2.2 && energy > 3) {
+        // 落地弹跳：弹性 0.5，翻滚角速度反弹 + 随机扰动（四处乱蹦的喜感）
+        // 不设次数上限——由能量耗尽收敛（每跳冲击递减，数学上必停）
         this.vy = -impact * 0.5;
-        this.angVel = this.angVel * -0.6 + (Math.random() - 0.5) * 0.12;
-        this.vx *= 0.75;
+        this.angVel = this.angVel * -0.6 + (Math.random() - 0.5) * 0.14;
+        this.vx = this.vx * 0.8 + (Math.random() - 0.5) * 0.8;
         this.bounces++;
         this.onGround = false;
       } else {
-        // 能量耗尽 → 安放到最近的 90° 朝向（直立 / 左右侧躺 / 倒扣）
-        this.vx = 0; this.vy = 0; this.angVel = 0;
-        const q = Math.PI / 2;
-        this.restAngle = Math.round(this.angle / q) * q;
-        this.settled = true;
+        // 地面滚停期：摩擦消耗残余动量（位移与角速度同步衰减，防无限微抖）
+        this.vx *= 0.82;
+        this.angVel *= 0.82;
+        if (Math.abs(this.vx) < 0.08 && Math.abs(this.angVel) < 0.02) {
+          // 完全静止 → 安放。直立偏好：偏离直立 <35° 一律立正（动静不大不侧躺），
+          // 超过才倒向最近的 90°（侧躺/倒扣）
+          this.vx = 0; this.vy = 0; this.angVel = 0;
+          const q = Math.PI / 2;
+          const turns = Math.round(this.angle / q);
+          const off = this.angle - turns * q; // -90°..90° 偏离
+          this.restAngle = Math.abs(off) < (35 * Math.PI) / 180 ? turns * q : turns * q + Math.sign(off || 1) * q;
+          this.settled = true;
+        }
       }
     }
-    if (this.hitWall) { this.vx = -this.vx * 0.5; this.angVel *= -0.5; }
+    if (this.hitWall) { this.vx = -this.vx * 0.55; this.angVel *= -0.55; }
     void dt;
   }
 

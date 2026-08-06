@@ -14,6 +14,8 @@ import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { Tombstone } from '../entities/Tombstone';
+import { Critter } from '../entities/Critter';
+import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 import { ChunkCache } from '../render/ChunkCache';
@@ -447,6 +449,24 @@ export class Game implements GameHooks {
 
     // ---- 粒子与飘字 ----
     this.flushInvNotify();
+    // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
+    if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
+      this.spawnCritter();
+    }
+    // 怪物碾压小动物：任意敌人身体接触即杀死（不视为交战）
+    if (this.tickCount % 4 === 0 && this.entities.critters.length) {
+      for (const cent of this.entities.critters) {
+        const c = cent as Critter;
+        if (c.dead) continue;
+        for (const eent of this.entities.enemies) {
+          const e = eent as Enemy;
+          if (c.x < e.x + e.w && c.x + c.w > e.x && c.y < e.y + e.h && c.y + c.h > e.y) {
+            c.hurt(this);
+            break;
+          }
+        }
+      }
+    }
     // 僵尸环境呻吟：附近有僵尸时偶发（每 ~4-8 秒）
     if (this.tickCount % 300 === 0) {
       for (const ent of this.entities.enemies) {
@@ -1009,6 +1029,16 @@ export class Game implements GameHooks {
     }
     // 弧线判定：玩家前方扇形
     const prog = 1 - this.swing.t / this.swing.dur;
+    // 小动物：任何挥击一击致死
+    for (const cent of this.entities.critters) {
+      const c = cent as Critter;
+      if (this.swingHitSet.has(c.id)) continue;
+      const cdx = c.cx - this.player.cx, cdy = c.cy - this.player.cy;
+      if (Math.hypot(cdx, cdy) <= reach + c.w / 2) {
+        this.swingHitSet.add(c.id);
+        c.hurt(this);
+      }
+    }
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (this.swingHitSet.has(e.id)) continue;
@@ -1162,7 +1192,9 @@ export class Game implements GameHooks {
     if (p.dead) return;
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
-      this.sfx.play('hurt');
+      // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
+      if (p.hp <= 0) this.sfx.play('pkilled');
+      else this.sfx.play('hurt');
       // 实际扣血 = max(1, dmg - defense*0.5)（在 Player.damage 内）
       const dealt = Math.max(1, dmg - p.defense * 0.5);
       this.addDamageNumber(p.cx, p.y, Math.round(dealt), false, '#FF5050');
@@ -1192,6 +1224,89 @@ export class Game implements GameHooks {
   onEnemyKilled(key: string) {
     if (key === 'eye_of_cthulhu') {
       this.world.flags.downedEyeOfCthulhu = true;
+    }
+  }
+
+  /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。
+   *  地面种：脚底精确贴地表格顶（此前高度>1格的实体被埋进地里卡死）；
+   *  飞行种：仅开阔天空（向上 30 格无实心）且地表无水（鸭子除外）；
+   *  蝴蝶：低空（地表上 1-4 格），优先附近有花的列 */
+  private spawnCritter() {
+    const st = this.world.store;
+    const isDay = this.world.clock.isDay;
+    const halfView = Math.ceil((this.camera.viewW / (this.camera.zoom || 1)) / 2 / TILE) + 8;
+    const side = Math.random() < 0.5 ? -1 : 1;
+    // 找列：蝴蝶优先附近 8 格内有 FLOWER 的列
+    let tx = Math.floor(this.player.cx / TILE) + side * (halfView + Math.floor(Math.random() * 18));
+    const isButterflyTentative = isDay && Math.random() < 0.35;
+    if (isButterflyTentative) {
+      for (let attempt = 0; attempt < 6; attempt++) {
+        const fx = tx + Math.floor((Math.random() - 0.5) * 16);
+        if (fx < 4 || fx >= st.w - 4) continue;
+        let found = false;
+        for (let dx = -4; dx <= 4 && !found; dx++) {
+          for (let y = Math.max(4, Math.floor(this.player.cy / TILE) - 24); y < Math.min(st.h - 4, Math.floor(this.player.cy / TILE) + 30); y++) {
+            if (st.type[st.idx(fx + dx, y)] === T.FLOWER) { found = true; break; }
+          }
+        }
+        if (found) { tx = fx; break; }
+      }
+    }
+    if (tx < 4 || tx >= st.w - 4) return;
+    // 找地表
+    const startY = Math.max(4, Math.floor(this.player.cy / TILE) - 24);
+    let groundY = -1;
+    for (let y = startY; y < Math.min(st.h - 4, startY + 70); y++) {
+      if (st.isSolid(tx, y)) { groundY = y; break; }
+    }
+    if (groundY < 0) return;
+    const surfaceWater = st.liquid[st.idx(tx, groundY - 1)] > 80;
+    // 生态判定
+    const gTile = st.type[st.idx(tx, groundY)];
+    let biome: 'forest' | 'snow' | 'sand' = 'forest';
+    if (gTile === T.SNOW) biome = 'snow';
+    else if (gTile === T.SAND || gTile === TILE_BY_KEY['sandstone'] || gTile === TILE_BY_KEY['hardened_sand']) biome = 'sand';
+    const nearWater = surfaceWater || (() => {
+      for (let dx = -2; dx <= 2; dx++) {
+        for (let dy = 0; dy <= 2; dy++) {
+          if (st.liquid[st.idx(tx + dx, groundY + dy)] > 80) return true;
+        }
+      }
+      return false;
+    })();
+    // 按昼夜 + 栖息生态过滤（水面列只出 water 生态或飞行种）
+    const pool = CRITTER_DEFS.filter((c) => {
+      if (c.dayOnly && !isDay) return false;
+      if (c.nightOnly && isDay) return false;
+      if (surfaceWater && !c.water && c.kind !== 'fly') return false;
+      if (!c.biomes.includes(biome) && !(nearWater && c.biomes.includes('water'))) return false;
+      return true;
+    });
+    if (!pool.length) return;
+    const total = pool.reduce((s2, c) => s2 + c.weight, 0);
+    let r = Math.random() * total;
+    let pick = pool[0];
+    for (const c of pool) { r -= c.weight; if (r <= 0) { pick = c; break; } }
+
+    if (pick.kind === 'fly') {
+      // 飞行种：地表不能是水（水面飞鸟/蝴蝶不合理，鸭子除外但鸭子不是 fly）
+      if (surfaceWater) return;
+      // 开阔天空检查（洞穴/地底不生成）
+      for (let k = 2; k <= 30; k++) {
+        if (groundY - k < 4) return;
+        if (st.isSolid(tx, groundY - k)) return;
+      }
+      // 蝴蝶低空（1-4 格）、鸟/萤火虫中高空
+      const lowFly = pick.key === 'butterfly' || pick.key === 'gold_butterfly';
+      const flyY = lowFly ? (groundY - 1 - Math.random() * 3) * TILE : (groundY - 8 - Math.random() * 12) * TILE;
+      this.entities.add(new Critter(pick.key, tx * TILE + 8, flyY), 'critters');
+    } else {
+      // 地面种：参数即脚底 y（构造器内减 h），精确站上地表格顶
+      const c = new Critter(pick.key, tx * TILE + 8, groundY * TILE);
+      // 安全兜底：身体中心在实心块内则放弃（防卡死）
+      const ci = st.idx(Math.floor(c.cx / TILE), Math.floor(c.cy / TILE));
+      if (st.type[ci] !== 0 && st.isSolid(Math.floor(c.cx / TILE), Math.floor(c.cy / TILE))) return;
+      this.entities.add(c, 'critters');
     }
   }
 

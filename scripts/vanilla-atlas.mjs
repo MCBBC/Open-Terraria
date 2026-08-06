@@ -38,7 +38,16 @@ for (const m of MISC) {
 
 const hex = (c) => (c ? '#' + c.replace('#', '').slice(0, 6).toUpperCase() : '#808080');
 
-const out = { tiles: {}, items: {}, walls: {} };
+const out = { tiles: {}, items: {}, walls: {}, npcs: {} };
+
+// NPC 贴图表（纵向帧条）的帧高：原版帧数在二进制里，按已知贴图规格手配
+const NPC_FRAME_H = {
+  // 按透明分隔行实测（analyze-frames.mjs 探测）：帧高必须整除表高且对齐内容带
+  46: 40, 74: 24, 299: 32, 300: 16, 355: 16, 356: 24,
+  359: 20, 361: 22, 362: 40, 377: 12,
+  442: 24, 443: 40, 444: 24, 445: 22, 446: 12, 447: 16,
+};
+
 let copied = 0, missing = [];
 
 for (const id of whitelist.tiles) {
@@ -92,6 +101,21 @@ for (const id of whitelist.walls) {
     name: w.name, key: w.key, sheet: `vanilla/Wall_${id}.png`,
     color: hex(w.color), grid, stride: [grid[0] + gap[0], grid[1] + gap[1]],
     cols: Math.floor(pw / (grid[0] + gap[0])), rows: Math.floor(ph / (grid[1] + gap[1])),
+  };
+}
+
+
+// NPC 贴图表（纵向帧条）：帧高手配（原版帧数存于二进制，按贴图规格配）
+for (const id of whitelist.npcs ?? []) {
+  const src = join(ASSETS, `NPC_${id}.png`);
+  if (!existsSync(src)) { missing.push(`NPC_${id}`); continue; }
+  copyFileSync(src, join(OUT_DIR, `NPC_${id}.png`)); copied++;
+  const { w, h } = pngSize(src);
+  const frameH = NPC_FRAME_H[id] ?? h;
+  out.npcs[id] = {
+    sheet: `vanilla/NPC_${id}.png`,
+    frameW: w, frameH,
+    count: Math.max(1, Math.floor(h / frameH)),
   };
 }
 

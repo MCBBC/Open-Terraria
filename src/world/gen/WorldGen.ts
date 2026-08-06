@@ -382,12 +382,20 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
     if (store.get(x, sy) === T.DIRT) {
       store.setTileSilent(x, sy, T.GRASS);
     }
-    // 装饰：蘑菇/花/草丛
+    // 装饰：草丛/花/蘑菇——草地繁盛（草 ~34%、花 ~14% 且成簇、蘑菇 ~3%）
     if (sy + 1 < store.h && !store.isActive(x, sy) && store.isSolid(x, sy + 1)) {
       const r = rng.next();
-      if (r < 0.10) store.setTileSilent(x, sy, T.TALLGRASS, x % 3 * 16, 0);
-      else if (r < 0.13) store.setTileSilent(x, sy, T.FLOWER, x % 3 * 16, 0);
-      else if (r < 0.15) store.setTileSilent(x, sy, T.MUSHROOM, 0, 0);
+      if (r < 0.34) store.setTileSilent(x, sy, T.TALLGRASS, x % 3 * 16, 0);
+      else if (r < 0.48) {
+        store.setTileSilent(x, sy, T.FLOWER, x % 3 * 16, 0);
+        // 花簇：50% 概率向两侧蔓延 1 格
+        for (const dx of [-1, 1]) {
+          if (Math.random() < 0.5 && store.get(x + dx, sy) === 0 && store.isSolid(x + dx, sy + 1)) {
+            store.setTileSilent(x + dx, sy, T.FLOWER, (x + dx) % 3 * 16, 0);
+          }
+        }
+      }
+      else if (r < 0.51) store.setTileSilent(x, sy, T.MUSHROOM, 0, 0);
     }
   }
   // 树：正常间距 6-14；连续 24 格无树则放宽条件强制补种，保证顶部林区连续
