@@ -693,6 +693,12 @@ export class Game implements GameHooks {
     if (this.mining.progress >= hardness) {
       this.breakTile(tx, ty);
       this.mining = null;
+      // 破坏完成音：按材质区分（此前普通方块破坏无声——挖掘声只在挥砍开始，
+      // 破坏后的空挥被"无目标不出声"挡掉，只剩拾取声可闻）
+      const td = TILE_DEFS[type];
+      if (toolType === 'axe') this.sfx.play('chop');
+      else if (td && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(td.key)) this.sfx.play('tink');
+      else this.sfx.play('dig');
     }
   }
 

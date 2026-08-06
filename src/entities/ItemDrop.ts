@@ -44,7 +44,8 @@ export class ItemDrop extends Entity {
           this.dead = true;
           game.notifyInventoryChanged();
           // 铜币拾取用专属音效，其余走通用拾取
-          game.playSfx(ITEM_DEFS[this.itemId]?.key === 'coin_copper' ? 'coin' : 'pickup');
+          // 音量略低（0.75）：拾取与挖掘声同时触发时两者都可闻，不被 Grab 盖住
+          game.playSfx(ITEM_DEFS[this.itemId]?.key === 'coin_copper' ? 'coin' : 'pickup', 0.75);
           const def = ITEM_DEFS[this.itemId];
           if (def) game.showPickupLabel(def.key);
           return;
