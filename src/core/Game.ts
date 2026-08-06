@@ -733,7 +733,30 @@ export class Game implements GameHooks {
     // 放置
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
-        st.setTile(tx + dx2, ty + dy2, tileId, dx2, dy2);
+        const px = tx + dx2, py = ty + dy2;
+        st.setTile(px, py, tileId, dx2, dy2);
+        // 水被方块挤出：水量转移到相邻可容纳的格子（上/左/右），
+        // 而不是被方块吞掉消失。封闭无处可去时才消失
+        const pi = st.idx(px, py);
+        const liq = st.liquid[pi];
+        if (liq > 0) {
+          const ltype = st.liquidType[pi];
+          st.setLiquid(px, py, 0, 0);
+          let remaining = liq;
+          for (const [ox, oy] of [[0, -1], [-1, 0], [1, 0]] as const) {
+            if (remaining <= 0) break;
+            const nx = px + ox, ny = py + oy;
+            if (!st.inBounds(nx, ny)) continue;
+            const nd = TILE_DEFS[st.type[st.idx(nx, ny)]];
+            if (nd && nd.solid) continue;
+            const ni = st.idx(nx, ny);
+            const cap = 255 - st.liquid[ni];
+            if (cap <= 0) continue;
+            const t = Math.min(remaining, cap);
+            st.setLiquid(nx, ny, st.liquid[ni] + t, ltype || st.liquidType[ni] || 1);
+            remaining -= t;
+          }
+        }
       }
     }
     if (tileId === T.CHEST) {
@@ -874,8 +897,8 @@ export class Game implements GameHooks {
       if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
       this.swingHitSet.add(e.id);
       const crit = Math.random() < 0.08;
-      // 工具（镐/斧）也有攻击力但远弱于剑：功率/6（铁镐 8 / 铁斧 10，铁剑 16）
-      const baseDmg = tool?.damage ?? Math.max(3, Math.ceil((tool?.power ?? 10) / 6));
+      // 工具（镐/斧）也有攻击力但远弱于剑：功率/10（铁镐 5 / 铁斧 6，铁剑 16）
+      const baseDmg = tool?.damage ?? Math.max(2, Math.ceil((tool?.power ?? 10) / 10));
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (0.9 + Math.random() * 0.2)));
       const kdir = Math.sign(dx) || this.player.facing;
       const killed = e.hurt(dmg, kdir * 3.2, -2.5, this);

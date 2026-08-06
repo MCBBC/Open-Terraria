@@ -431,6 +431,9 @@ export class Renderer {
     const spr = this.assets.enemySprites.get(e.key);
     // 受击闪白
     const flash = e.iframes > 0 && e.iframes % 4 < 2;
+    // 水下滤镜：与主角一致的蓝色调（检查怪物头部位置是否浸水）
+    const headI = world.store.idx(Math.floor(e.cx / TILE), Math.floor((e.y + 2) / TILE));
+    const underwater = world.store.liquid[headI] > 100;
     // ---- Maples 精灵优先 ----
     if (this.atlas) {
       let frames: ReturnType<SpriteAtlas['animFrames']> = [];
@@ -475,6 +478,7 @@ export class Renderer {
         const fr = frames[idx];
         ctx.save();
         if (flash) ctx.filter = 'brightness(2.5)';
+        else if (underwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
         // 缩放贴合碰撞盒
         const h = anchor === 'feet' ? e.h * 1.25 : e.h;
         const w = (fr.sw / fr.sh) * h;
@@ -511,6 +515,7 @@ export class Renderer {
       const w = e.w * 1.3 * sq, h = e.h * 1.25 / sq;
       ctx.save();
       if (flash) ctx.filter = 'brightness(2.5)';
+      else if (underwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
       ctx.translate(e.cx, e.y + e.h);
       ctx.scale(e.facing, 1);
       ctx.drawImage(spr.canvas, -w / 2, -h, w, h);
