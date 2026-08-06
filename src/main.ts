@@ -204,6 +204,11 @@ window.addEventListener('keydown', (e) => {
         ui.openInventory();
       }
       break;
+    case 'F3':
+      e.preventDefault();
+      game.renderer.debugMode = !game.renderer.debugMode;
+      ui.toast(game.renderer.debugMode ? '调试面板已开启（碰撞盒高亮）' : '调试面板已关闭');
+      break;
     case 'F5':
       e.preventDefault();
       doSave();

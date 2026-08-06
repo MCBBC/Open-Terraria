@@ -93,6 +93,8 @@ export class Minimap {
 }
 
 export class Renderer {
+  /** 调试面板开关（F3 切换）：碰撞盒高亮等 */
+  debugMode = false;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   sky = new SkyRenderer();
@@ -314,6 +316,9 @@ export class Renderer {
       this.drawFullMap(ctx, world, this._mouseX, this._mouseY, this._mouseDown);
       return; // 全屏地图时跳过其余 HUD
     }
+
+    // 9.8 调试面板：碰撞盒高亮（F3 切换）
+    if (this.debugMode) this.drawDebugOverlay(ctx, cam, viewW, viewH, player, entities, mouseX, mouseY, hover);
 
     // 10. Boss 血条
     if (boss) this.drawBossBar(ctx, viewW, boss);
@@ -700,7 +705,7 @@ export class Renderer {
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
     // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感
-    ctx.translate(p.cx, p.y + p.h + p.stepRenderY); // 锚点：脚底中心
+    ctx.translate(p.cx - p.facing * 2.5, p.y + p.h + p.stepRenderY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
     // ---- Maples 主角帧（40×58，Run 11 帧循环）----
@@ -719,9 +724,9 @@ export class Renderer {
       }
       const af = this.actionFramesCache;
       let frame: typeof idle = null;
-      // 挥砍/使用中：身体切换到动作姿态（帧 16-18 循环——挥砍前倾伸手）
+      // 挥砍/使用中：身体切换到动作姿态（Player.png 倒数 4 帧 = Player_19-22）
       if (swing) {
-        const swingIdx = 16 + (Math.floor((1 - swing.t / swing.dur) * 3) % 3);
+        const swingIdx = 19 + (Math.floor((1 - swing.t / swing.dur) * 4) % 4);
         frame = af['Player_' + swingIdx] ?? idle;
       } else if (!p.onGround) {
         // 空中：上升用 12（收腿）、下落用 14（张腿）
@@ -802,17 +807,18 @@ export class Renderer {
       const ar = this.atlasIcon(swing.item);
       const icon = ar ? null : this.itemIcon(swing.item);
       const prog = 1 - swing.t / swing.dur; // 0..1
-      const arc = -2.2 + prog * 3.4;        // -126° → +69°
-      const shX = p.cx + p.facing * p.w * 0.28, shY = p.y + p.h * 0.53; // 肩部按比例
+      const arc = -1.1 + prog * 2.0;        // -63° → +57°：自然手臂挥砍弧（跟手）
+      const shX = p.cx + p.facing * p.w * 0.45, shY = p.y + p.h * 0.62; // 持握点右移下移
       ctx.save();
       ctx.translate(shX, shY);
       ctx.rotate(p.facing === 1 ? arc : Math.PI - arc);
       if (ar) {
-        const s = 40 / Math.max(ar.sw, ar.sh); // 主角放大后挥舞物同步×2
+        const s = 28 / Math.max(ar.sw, ar.sh); // 挥舞物缩小一档
         ctx.scale(s, s);
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 2, -ar.sh, ar.sw, ar.sh);
+        // 物品沿挥砍方向从手中伸出（径向对齐——旋转后始终"握着"）
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -ar.sh, ar.sw, ar.sh); // 左下角握把旋转
       } else if (icon) {
-        ctx.drawImage(icon, 2, -16, 16, 16);
+        ctx.drawImage(icon, 0, -14, 14, 14);
       }
       ctx.restore();
     }
@@ -1116,6 +1122,67 @@ export class Renderer {
   private _lastPlayer: Player | null = null;
   /** 传送预选标记（Game 写入） */
   tpMark: { x: number; y: number } | null = null;
+
+  /** 调试叠加层：碰撞盒高亮 + 状态信息 */
+  private drawDebugOverlay(
+    ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number,
+    player: Player, entities: Entity[], mouseX: number, mouseY: number,
+    hover: { x: number; y: number } | null,
+  ) {
+    const z = cam.zoom;
+    const [mx, my] = cam.worldToScreen(mouseX, mouseY);
+    const box = (e: { x: number; y: number; w: number; h: number; cx: number }, color: string, label?: string) => {
+      const [sx, sy] = cam.worldToScreen(e.x, e.y);
+      const sw = e.w * z, sh = e.h * z;
+      ctx.strokeStyle = color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 3]);
+      ctx.strokeRect(sx, sy, sw, sh);
+      ctx.setLineDash([]);
+      if (label) {
+        ctx.font = '10px monospace';
+        ctx.fillStyle = color;
+        ctx.fillText(label, sx + 2, sy - 3);
+      }
+    };
+    // 主角碰撞盒（亮绿）
+    box(player, '#00FF66', `player ${player.w}x${player.h} og:${player.onGround} vy:${player.vy.toFixed(1)}`);
+    // 主角中心点
+    const [pcx, pcy] = cam.worldToScreen(player.cx, player.cy);
+    ctx.fillStyle = '#FF6600';
+    ctx.fillRect(pcx - 2, pcy - 2, 4, 4);
+    // 实体碰撞盒
+    for (const e of entities) {
+      const ent = e as Entity;
+      if (ent instanceof Enemy) box(ent, '#FF4444', (ent as Enemy).key);
+      else if (ent instanceof Critter) box(ent, '#44AAFF', ent.key);
+      else if (ent instanceof ItemDrop) box(ent, '#FFAA00');
+      else if (ent instanceof Tombstone) box(ent, '#AA88FF', 'tomb');
+    }
+    // 鼠标指向 tile
+    const [htx, hty] = cam.tileUnder(mouseX, mouseY);
+    const [hsx, hsy] = cam.worldToScreen(htx * TILE, hty * TILE);
+    ctx.strokeStyle = '#FFFF00';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(hsx, hsy, TILE * z, TILE * z);
+    // 信息面板
+    ctx.fillStyle = 'rgba(0,0,0,0.75)';
+    ctx.fillRect(8, 8, 260, 130);
+    ctx.font = '12px monospace';
+    ctx.fillStyle = '#00FF66';
+    ctx.fillText(`pos: ${player.cx.toFixed(0)}, ${player.cy.toFixed(0)}  tile: ${Math.floor(player.cx / TILE)}, ${Math.floor(player.cy / TILE)}`, 14, 26);
+    ctx.fillStyle = '#88FF88';
+    ctx.fillText(`box: ${player.w}x${player.h}  onGround: ${player.onGround}  vy: ${player.vy.toFixed(2)}`, 14, 44);
+    ctx.fillText(`mouse: ${mouseX}, ${mouseY}  tile: ${htx}, ${hty}`, 14, 62);
+    ctx.fillStyle = '#AAA';
+    ctx.fillText(`zoom: ${z.toFixed(2)}  entities: ${entities.length}`, 14, 80);
+    ctx.fillText(`inWater: ${player.inWater}  headUnder: ${player.headUnderwater}`, 14, 98);
+    ctx.fillStyle = '#FF6600';
+    ctx.fillText('F3 关闭调试面板', 14, 118);
+    // 图例
+    ctx.fillStyle = '#666';
+    ctx.fillText('绿=主角 橙=中心 红=怪物 蓝=动物 黄=鼠标', 14, 136);
+  }
 
   private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number }) {
     const w = Math.min(560, viewW - 200);

@@ -17,7 +17,7 @@ const FALL_SAFE_TILES = 22;
 const FALL_FATAL_TILES = 45;
 
 export class Player extends Entity {
-  w = 24; h = 38;        // 2 格宽×75% = 24px，3 格高×80% = 38px（不满格，可穿窄道）
+  w = 16; h = 39;        // 16×39：1 格宽碰撞盒 + 前向偏移
   facing = 1;            // 1 右 -1 左
   baseMaxHp = 100;
   hp = 100;
