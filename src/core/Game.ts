@@ -1174,10 +1174,13 @@ export class Game implements GameHooks {
     for (let dy = -8; dy <= 12; dy++) {
       const yy = ty + dy;
       if (yy < 2 || yy > st.h - 3) continue;
-      const clear = !st.isSolid(tx, yy) && !st.isSolid(tx, yy - 1);
+      // 落脚点必须无液体（方块之上有水 = 水下/水面，非鱼类不生成——
+      // 否则史莱姆会从湖/海底生成然后浮上来）
+      const dry = st.liquid[st.idx(tx, yy)] <= 40 && st.liquid[st.idx(tx, yy - 1)] <= 40;
+      const clear = !st.isSolid(tx, yy) && !st.isSolid(tx, yy - 1) && dry;
       const ground = st.isSolid(tx, yy + 1) || st.isSolid(tx, yy + 2);
       if (def.flying) {
-        if (!st.isSolid(tx, yy)) { spawnY = yy; break; }
+        if (!st.isSolid(tx, yy) && dry) { spawnY = yy; break; }
       } else if (clear && ground) {
         spawnY = yy;
         break;
