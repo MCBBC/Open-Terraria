@@ -1,6 +1,7 @@
 {
   "_comment": "原版素材白名单：构建脚本按此拷贝 PNG + 提取 TEdit 元数据。tiles=Tiles_N 表 id，items=Item_N 图标 id，walls=Wall_N 表 id",
   "tiles": [
+    4,
     7, 8, 9,
     22, 37, 58,
     38, 39, 40, 54, 56, 57, 59, 123,

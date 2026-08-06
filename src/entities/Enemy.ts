@@ -27,6 +27,7 @@ export class Enemy extends Entity {
   visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
   spin = 0;              // EoC 变身旋转进度 0..1
   hpBarT = 0;            // 受击后血条显示计时（tick）
+  inWater = false;       // 入水检测（溅落声用）
 
   constructor(public key: string, x: number, y: number) {
     super();
@@ -57,6 +58,18 @@ export class Enemy extends Entity {
       case 'cave_bat': this.flyAI(game, hasPlayer ? player : null, 0.09); break;
       case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
       case 'eye_of_cthulhu': this.eocAI(game, hasPlayer ? player : null); break;
+    }
+
+    // 入水溅落声（与主角一致）：音量随与主角距离衰减，Boss 更响
+    const eli = game.world.store.liquid[game.world.store.idx(
+      Math.floor(this.cx / TILE), Math.floor(this.cy / TILE),
+    )];
+    const wasWater = this.inWater;
+    this.inWater = eli > 80;
+    if (this.inWater && !wasWater && hasPlayer) {
+      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      const vol = Math.max(0.12, Math.min(1, 1 - d / (TILE * 45))) * (this.def.boss ? 1.2 : 0.9);
+      game.playSfx('splash', vol);
     }
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）
@@ -391,6 +404,7 @@ export class Enemy extends Entity {
         if (this.aiT >= 100) {
           this.phase = 2;
           this.state = 0; this.aiT = 0; this.spin = 0;
+          game.playSfx('roar');
           game.spawnParticles(this.cx, this.cy, '#FF3030', 30, 3);
         }
         break;
@@ -440,6 +454,7 @@ export class Enemy extends Entity {
         }
       }
       game.onEnemyKilled(this.key);
+      game.playSfx(this.def.boss ? 'roar' : 'killed');
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
       const [c1, c2, c3] = this.def.gore;
       const big = this.def.boss || this.w > 40;

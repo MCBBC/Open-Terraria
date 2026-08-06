@@ -43,7 +43,8 @@ export class ItemDrop extends Entity {
         if (left === 0) {
           this.dead = true;
           game.notifyInventoryChanged();
-          game.playSfx('pickup');
+          // 铜币拾取用专属音效，其余走通用拾取
+          game.playSfx(ITEM_DEFS[this.itemId]?.key === 'coin_copper' ? 'coin' : 'pickup');
           const def = ITEM_DEFS[this.itemId];
           if (def) game.showPickupLabel(def.key);
           return;
@@ -67,8 +68,16 @@ export class ItemDrop extends Entity {
     this.vy = Math.min(this.vy + g, MAX_FALL_SPEED);
     this.vx *= 0.96;
     moveAndCollide(this, game.world, this.vx, this.vy);
+    // 入水小水花声（掉落物轻，音量小）
+    const st = game.world.store;
+    const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
+    const wasWater = this.inWater;
+    this.inWater = li > 80;
+    if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 0.35);
     void ITEM_DEFS;
   }
+
+  inWater = false;
 
   draw() { /* Renderer 统一绘制 */ }
 }

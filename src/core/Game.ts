@@ -154,6 +154,7 @@ export class Game implements GameHooks {
     }
     this.renderer = new Renderer(this.assets, atlas);
     this.renderer.attach(root);
+    this.sfx.load(); // 原版 wav 预解码（挂起态也可解码）
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）
@@ -442,6 +443,19 @@ export class Game implements GameHooks {
 
     // ---- 粒子与飘字 ----
     this.flushInvNotify();
+    // 僵尸环境呻吟：附近有僵尸时偶发（每 ~4-8 秒）
+    if (this.tickCount % 300 === 0) {
+      for (const ent of this.entities.enemies) {
+        const e = ent as Enemy;
+        if (e.key !== 'zombie' && e.key !== 'magma_zombie') continue;
+        if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < TILE * 30) {
+          this.sfx.playWav('zombie', 0.6);
+          break;
+        }
+      }
+    }
+    // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
+    this.emitTorchSparks();
     for (const p of this.particles) {
       p.life--;
       p.vy += p.grav ?? 0.12;
@@ -661,7 +675,10 @@ export class Game implements GameHooks {
     // 粒子反馈 + 挖掘音
     if (this.tickCount % 6 === 0) {
       this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
-      this.sfx.play(toolType === 'axe' ? 'chop' : 'dig');
+      // 石系（石/矿/砖/黑曜石等）敲击是金属 tink，土系是闷 dig
+      const td = TILE_DEFS[type];
+      const stony = td && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(td.key);
+      this.sfx.play(toolType === 'axe' ? 'chop' : (stony ? 'tink' : 'dig'));
     }
     if (this.mining.progress >= hardness) {
       this.breakTile(tx, ty);
@@ -914,8 +931,10 @@ export class Game implements GameHooks {
           if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, dx, dy);
         }
       }
+      this.sfx.play('door_open');
     } else {
       for (let dy = 0; dy < 3; dy++) st.setTile(ax, ay + dy, T.DOOR_CLOSED, 0, dy);
+      this.sfx.play('door_close');
     }
   }
 
@@ -1128,6 +1147,7 @@ export class Game implements GameHooks {
       if (p.hp <= 0) {
         p.dead = true;
         p.respawnTimer = 0;
+        this.sfx.play('pkilled');
         this.cb.onToast('你死了…');
         // 掉一半铜币
         const coins = p.inv.countOf(ITEM_BY_KEY['coin_copper']);
@@ -1198,8 +1218,8 @@ export class Game implements GameHooks {
     });
   }
 
-  playSfx(name: string) {
-    this.sfx.play(name as SfxName);
+  playSfx(name: string, vol?: number) {
+    this.sfx.play(name as SfxName, vol ?? 1);
   }
 
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */
@@ -1252,6 +1272,37 @@ export class Game implements GameHooks {
       this.invNotifyAt = this.tickCount;
       this.invNotifyPending = false;
       this.cb.onInventoryChanged();
+    }
+  }
+
+  /** 火把火星：视区内点燃的火把按概率在火点处飘出上浮火粒 */
+  private emitTorchSparks() {
+    if (this.tickCount % 3 !== 0) return; // 20Hz 足够，省扫描
+    const st = this.world.store;
+    const cam = this.camera;
+    const z = cam.zoom || 1;
+    const tx0 = Math.max(0, Math.floor((cam.x - cam.viewW / 2 / z) / TILE));
+    const tx1 = Math.min(this.world.w - 1, Math.ceil((cam.x + cam.viewW / 2 / z) / TILE));
+    const ty0 = Math.max(0, Math.floor((cam.y - cam.viewH / 2 / z) / TILE));
+    const ty1 = Math.min(this.world.h - 1, Math.ceil((cam.y + cam.viewH / 2 / z) / TILE));
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = st.idx(x, y);
+        if (st.type[i] !== T.TORCH) continue;
+        if (Math.random() >= 0.14) continue;
+        // 帧为 0(地面) 时火点在格顶上方；墙面变体也近似取格顶
+        this.particles.push({
+          x: x * TILE + 5 + Math.random() * 6,
+          y: y * TILE - 2 + Math.random() * 4,
+          vx: (Math.random() - 0.5) * 0.25,
+          vy: -0.35 - Math.random() * 0.4,
+          life: 16 + Math.random() * 12, maxLife: 28,
+          color: Math.random() < 0.55 ? '#FFB642' : Math.random() < 0.5 ? '#FF8A2A' : '#FFD97A',
+          size: 1 + Math.random() * 1.2,
+          grav: -0.015,  // 微浮力：火星徐徐上飘
+          damp: 0.985,
+        });
+      }
     }
   }
 
@@ -1328,6 +1379,7 @@ export class Game implements GameHooks {
     const spawnY = Math.max(4, ty - 12) * TILE;
     const e = this.spawnEnemy('eye_of_cthulhu', tx * TILE + 8, spawnY);
     void e;
+    this.sfx.playWav('roar');
     this.cb.onToast('你感到有个邪恶的东西在看着你……');
   }
 

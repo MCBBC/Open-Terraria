@@ -21,7 +21,7 @@ export interface GameHooks {
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
   /** 播放音效 */
-  playSfx(name: string): void;
+  playSfx(name: string, vol?: number): void; // vol 0-1 按距离衰减
   /** 拾取物品时在主角旁飘出物品名 */
   showPickupLabel(itemKey: string): void;
 }

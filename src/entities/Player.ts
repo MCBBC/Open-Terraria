@@ -114,7 +114,10 @@ export class Player extends Entity {
     const liq = world.store.liquid[world.store.idx(
       Math.floor(this.cx / TILE), Math.floor((this.y + this.h * 0.6) / TILE),
     )];
+    const wasInWater = this.inWater;
     this.inWater = liq > 100;
+    // 入水瞬间：水花声（出水不响）
+    if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h * 0.6) / TILE));
     this.inLava = world.store.liquidType[centerIdx] === 2 && world.store.liquid[centerIdx] > 60;
     const headLiq = world.store.liquid[world.store.idx(
