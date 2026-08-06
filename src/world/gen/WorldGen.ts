@@ -77,6 +77,16 @@ function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
     const hill = (x > w * 0.18 && x < w * 0.82) ? 1 : 1.6; // 边缘更陡（近似海崖）
     surface[x] = base + (o1(x) * 34 + o2(x) * 10 + o3(x) * 4) * hill;
   }
+  // 左右海洋：最外侧 6% 下挖成海盆（岸边浅、世界缘深），后续灌水铺沙
+  const oceanW = Math.max(24, Math.floor(w * 0.06));
+  const seaLevel = base + 4; // 海平面（水表高度）
+  for (let x = 0; x < w; x++) {
+    const edge = Math.min(x, w - 1 - x);
+    if (edge >= oceanW) continue;
+    const t = 1 - edge / oceanW; // 0 岸边 → 1 世界缘
+    const floorY = base + 2 + t * 16 + Math.sin(x * 0.3) * 1.5;
+    surface[x] = Math.max(surface[x], Math.max(seaLevel + 2, floorY));
+  }
   const rockLevel = Math.floor(h * 0.33);
   const nBlend = createNoise1Dish(rng, 0.05);
   for (let x = 0; x < w; x++) {
@@ -96,6 +106,24 @@ function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
       if (y > sy + 3) store.setWallSilent(x, y, type === T.STONE ? W.STONE : W.DIRT);
     }
   }
+  // 海洋灌水 + 沙滩铺沙：海盆内从海平面灌满水；盆底与近岸滩涂表层铺沙
+  for (let x = 0; x < w; x++) {
+    const edge = Math.min(x, w - 1 - x);
+    const sy = Math.floor(surface[x]);
+    if (edge < oceanW) {
+      for (let y = seaLevel; y < sy; y++) store.setLiquid(x, y, 255, 1);
+      for (let y = sy; y < sy + 5 && y < store.h; y++) {
+        const t = store.get(x, y);
+        if (t === T.DIRT || t === T.GRASS) store.setTileSilent(x, y, T.SAND);
+      }
+    } else if (edge < oceanW + 8 && surface[x] >= seaLevel - 1) {
+      // 近岸滩涂：海平面附近的陆地表面沙化过渡
+      for (let y = sy; y < sy + 4 && y < store.h; y++) {
+        const t = store.get(x, y);
+        if (t === T.DIRT || t === T.GRASS) store.setTileSilent(x, y, T.SAND);
+      }
+    }
+  }
   // 世界最底部 3 行基岩（不可破坏 → 用 STONE 代替，破坏规则由硬度统一处理，简化）
 }
 
@@ -108,8 +136,10 @@ function createNoise1Dish(rng: RNG, freq: number) {
 // ---------- 洞穴 ----------
 function cavePass({ store, surface, noise2D, rng, cfg }: GenCtx) {
   const { w, h } = store;
-  // 1) 噪声挖空
+  // 1) 噪声挖空（海洋列跳过：保护海床，防止海水灌进洞穴系统）
+  const caveOceanW = Math.max(24, Math.floor(w * 0.06)) + 2;
   for (let x = 0; x < w; x++) {
+    if (Math.min(x, w - 1 - x) < caveOceanW) continue;
     const sy = surface[x];
     for (let y = Math.floor(sy) + 6; y < h - 3; y++) {
       const depth = (y - sy) / (h - sy);
@@ -262,9 +292,10 @@ function growOreBlob(store: GenCtx['store'], x: number, y: number, type: number,
 // ---------- 液体 ----------
 function liquidPass({ store, surface, rng }: GenCtx) {
   const { w, h } = store;
-  // 地表洼地灌水
-  let x = 8;
-  while (x < w - 8) {
+  // 地表洼地灌水（边缘海洋区已有水，跳过避免重复判定）
+  const lakeOceanW = Math.max(24, Math.floor(w * 0.06)) + 6;
+  let x = lakeOceanW;
+  while (x < w - lakeOceanW) {
     const sy = surface[x];
     // 局部极小值
     if (sy > surface[x - 3] + 2 && sy > surface[x + 3] + 2) {

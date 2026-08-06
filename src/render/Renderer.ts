@@ -335,6 +335,7 @@ export class Renderer {
     };
     for (let y = ty0; y <= ty1; y++) {
       for (let x = tx0; x <= tx1; x++) {
+        ctx.fillStyle = 'rgba(61,111,209,0.62)'; // 每格重设：波光块会改 fillStyle，不重设会把水体画白
         const i = world.store.idx(x, y);
         const lq = world.store.liquid[i];
         // 渲染阈值：模拟残留（<40）不绘制 —— 水流过后不留"藏在图块里"的浸润残影
@@ -342,6 +343,8 @@ export class Renderer {
         const hPx = (lq / 255) * ts;
         // 上方有"可见"液体时整格连通（残留 <40 不可见，不触发连通填充）
         const above = y > 0 ? world.store.liquid[world.store.idx(x, y - 1)] : 0;
+        // 水顶面判定：上方是空气（无液体且无实心块）——封闭水格不参与波光
+        const aboveAir = above < 40 && !solidAt(x, y - 1) && world.store.type[world.store.idx(x, y - 1)] === 0;
         const top = above >= 40 ? y * ts : y * ts + (ts - hPx);
         // 渲染浸润：按水量分 6 档量化（每档 1/6 格），不同水平面用不同浸润占用，
         // 避免水面贴近格顶时连续比例把整个邻格刷满。只改绘制矩形，液体数据不变。
@@ -359,6 +362,27 @@ export class Renderer {
         // 把对角角落也填掉（变成方形/八方向浸润），水不应渗进斜对角块
         ctx.fillRect(px0, top, px1 - px0, y * ts + ts - top); // 横条
         ctx.fillRect(x * ts, py0, ts, py1 - py0);             // 竖条
+        // 波光粼粼：水面之上的白色闪光薄膜 —— 水体本身不动，
+        // 只在水顶面上缘覆盖一层呼吸明灭的白膜 + 跳动的碎光
+        if (aboveAir) {
+          const surfY = y * ts + (ts - hPx);
+          const t = performance.now() * 0.0016; // 慢速波相
+          const ph = ((x * 2654435761) >>> 0) % 628;
+          // 薄膜白光：跨在水面线上下 2px 的白膜（盖住水体顶缘），亮度缓慢呼吸
+          const a = 0.22 + 0.28 * (0.5 + 0.5 * Math.sin(t * 1.1 + ph * 0.02));
+          ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
+          ctx.fillRect(px0, surfY - 1, px1 - px0, 2);
+          // 碎光：贴着水面线滑动的亮斑（不悬空，随微起伏贴面移动）
+          for (let k = 0; k < 2; k++) {
+            const tw = Math.sin(t * 1.4 + (ph + k * 317) * 0.013 + k * 2);
+            if (tw > 0.5) {
+              const gx = x * ts + ((ph % 11) + t * 2.5) % Math.max(1, ts - 5);
+              const gy = surfY + Math.sin(t * 1.2 + k * 1.4) * 0.6; // ±0.6px 贴面起伏
+              ctx.fillStyle = `rgba(255,255,255,${(0.7 * (tw - 0.5) / 0.5).toFixed(3)})`;
+              ctx.fillRect(gx, gy, 3 + k * 2, 1);
+            }
+          }
+        }
       }
     }
   }
@@ -583,6 +607,8 @@ export class Renderer {
     if (p.dead) return;
     // 无敌帧闪烁：半透明而非消失（主角本体永不全隐）
     ctx.save();
+    // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
+    if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
     ctx.translate(p.cx, p.y + p.h); // 锚点：脚底中心
     ctx.scale(p.facing, 1);
@@ -1015,9 +1041,28 @@ export class Renderer {
     const hearts = 6;
     const per = p.maxHp / hearts;
     const s = 4, wHeart = 5 * s, gap = 7;
+    // 自然回血中：当前正在恢复的那颗心带呼吸动效（渐显渐隐 + 微放大缩小）
+    const regenActive = p.sinceHurt > 300 && p.hp > 0 && p.hp < p.maxHp;
+    const activeIdx = regenActive ? Math.min(hearts - 1, Math.floor(p.hp / per)) : -1;
+    const t = performance.now() * 0.004;
     for (let i = 0; i < hearts; i++) {
       const fill = Math.max(0, Math.min(1, (p.hp - i * per) / per));
-      this.drawPixelHeart(ctx, 14 + i * (wHeart + gap), 14, fill);
+      const hx = 14 + i * (wHeart + gap), hy = 14;
+      if (i === activeIdx && fill > 0 && fill < 1) {
+        // 呼吸：0→1→0 缓动驱动 alpha 与缩放
+        const br = 0.5 + 0.5 * Math.sin(t * 2.4);      // 呼吸相位
+        const alpha = 0.72 + 0.28 * br;
+        const k = 1 + 0.09 * br;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.translate(hx + wHeart / 2, hy + 2 * s);
+        ctx.scale(k, k);
+        ctx.translate(-(hx + wHeart / 2), -(hy + 2 * s));
+        this.drawPixelHeart(ctx, hx, hy, fill);
+        ctx.restore();
+      } else {
+        this.drawPixelHeart(ctx, hx, hy, fill);
+      }
     }
   }
 }

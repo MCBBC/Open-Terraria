@@ -38,6 +38,8 @@ export class Player extends Entity {
   // 摔伤追踪
   private fallStartY: number | null = null;
   private surfaceJumpCd = 0;  // 水面起跳冷却
+  sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
+  private regenAccum = 0;
 
   constructor(x: number, y: number, inv: Inventory) {
     super();
@@ -95,6 +97,15 @@ export class Player extends Entity {
     // Buff tick：自然回复（恢复 Buff）
     const buffHeal = this.buffs.tick(dt);
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
+    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点
+    this.sinceHurt++;
+    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp) {
+      this.regenAccum += dt;
+      if (this.regenAccum >= 1) {
+        this.regenAccum -= 1;
+        this.hp = Math.min(this.maxHp, this.hp + 1);
+      }
+    }
     // 上限收缩时钳制
     if (this.hp > this.maxHp) this.hp = this.maxHp;
 
@@ -262,6 +273,7 @@ export class Player extends Entity {
     const reduction = Math.max(1, dmg - this.defense * 0.5);
     this.hp -= reduction;
     this.iframes = PLAYER_IFRAME_TICKS;
+    this.sinceHurt = 0; // 受击打断自然回血
     // 击退
     const dir = this.cx < srcX ? -1 : 1;
     this.vx = dir * 3.4;

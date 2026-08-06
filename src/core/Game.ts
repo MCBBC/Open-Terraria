@@ -874,8 +874,8 @@ export class Game implements GameHooks {
       if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
       this.swingHitSet.add(e.id);
       const crit = Math.random() < 0.08;
-      // 工具（镐/斧）也有攻击力：约为剑的一半（功率/4 取整）
-      const baseDmg = tool?.damage ?? Math.max(4, Math.ceil((tool?.power ?? 10) / 4));
+      // 工具（镐/斧）也有攻击力但远弱于剑：功率/6（铁镐 8 / 铁斧 10，铁剑 16）
+      const baseDmg = tool?.damage ?? Math.max(3, Math.ceil((tool?.power ?? 10) / 6));
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (0.9 + Math.random() * 0.2)));
       const kdir = Math.sign(dx) || this.player.facing;
       const killed = e.hurt(dmg, kdir * 3.2, -2.5, this);
