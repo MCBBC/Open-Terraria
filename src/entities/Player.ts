@@ -26,7 +26,10 @@ export class Player extends Entity {
   jumpHold = 0;          // 长按跳跃剩余加速 tick
   inWater = false;
   headUnderwater = false;
-  breath = 6;            // 气口：6 个气泡（#6）
+  // 气口：5 个气泡，共 23.33 秒（原版参数），每颗 ≈4.67 秒
+  static readonly BREATH_BUBBLES = 5;
+  static readonly BREATH_SECONDS = 23.33;
+  breath = Player.BREATH_BUBBLES;
   private breathAccum = 0;
   private drownAccum = 0;
   inLava = false;
@@ -134,10 +137,10 @@ export class Player extends Entity {
       }
     } else this.lavaAccum = 0;
 
-    // 气口：头部浸水时 12 秒耗尽 6 口，耗尽后每秒掉 10 血；出水立即恢复
+    // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复
     if (this.headUnderwater) {
       this.breathAccum += dt;
-      const per = 2; // 每口气 2 秒
+      const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
       while (this.breathAccum >= per && this.breath > 0) {
         this.breathAccum -= per;
         this.breath--;
@@ -150,8 +153,8 @@ export class Player extends Entity {
           game.addDamageNumber(this.cx, this.y, 10, false, '#60A0FF');
         }
       }
-    } else if (this.breath < 6) {
-      this.breath = 6;
+    } else if (this.breath < Player.BREATH_BUBBLES) {
+      this.breath = Player.BREATH_BUBBLES;
       this.breathAccum = 0;
       this.drownAccum = 0;
     }
@@ -305,22 +308,32 @@ export class Player extends Entity {
     if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
   }
 
+  /** 当前正在消耗的那口气泡进度 0..1（1=满，趋 0 渐隐）；头部浸水外为 0 */
+  get breathDrain01(): number {
+    if (!this.headUnderwater || this.breath <= 0) return 0;
+    const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
+    return Math.max(0, Math.min(1, 1 - this.breathAccum / per));
+  }
+
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
   inputDown = false;
 
-  /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked） */
-  damage(dmg: number, srcX: number, srcY: number): boolean {
+  /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked）。
+   *  knockback=false 用于窒息等环境伤害（只掉血不击退） */
+  damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
     if (this.iframes > 0 || this.dead) return false;
     const reduction = Math.max(1, dmg - this.defense * 0.5);
     this.hp -= reduction;
     this.iframes = PLAYER_IFRAME_TICKS;
     this.sinceHurt = 0; // 受击打断自然回血
     // 击退
-    const dir = this.cx < srcX ? -1 : 1;
-    this.vx = dir * 3.4;
-    this.vy = -3;
+    if (knockback) {
+      const dir = this.cx < srcX ? -1 : 1;
+      this.vx = dir * 3.4;
+      this.vy = -3;
+    }
     return true;
   }
 

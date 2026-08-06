@@ -709,14 +709,21 @@ export class Renderer {
     ctx.restore();
     // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
     // 随气量消散；整体更透明
-    if (p.headUnderwater || p.breath < 6) {
-      const baseX = p.cx - 27, baseY = p.y - p.h * 0.4 - 14;
-      // 优先原版 Bubble.png（22×22），程序化圆仅兜底
+    if (p.headUnderwater || p.breath < 5) {
+      const gap = 12.5; // 间距 12.5px，气泡直径 11px，留 ~1.5px 视觉分隔
+      const baseX = p.cx - (5 * gap) / 2 + gap / 2, baseY = p.y - p.h * 0.4 - 14;
+      // 优先原版 Bubble.png（22×22，不透明），程序化圆仅兜底
       const bub = this.atlas ? this.atlas.vmisc('vanilla/Bubble.png') : null;
-      for (let b = 0; b < 6; b++) {
-        const bx = baseX + b * 10.5;
+      // 平滑气量 = (气口-1) + 当前正在消耗那颗的剩余比例 → 逐个渐隐（不画已耗尽的）。
+      // 直接 breath+drain 会在扣气瞬间把气泡重新顶满一格
+      const drain = p.headUnderwater && p.breath > 0 ? p.breathDrain01 : 1;
+      const display = p.breath - 1 + drain;
+      for (let b = 0; b < 5; b++) {
+        const v = display - b; // 该颗的可见度：≥1 满，0..1 渐隐，≤0 跳过
+        if (v <= 0) continue;
+        const bx = baseX + b * gap;
         const by = baseY;
-        ctx.globalAlpha = b < p.breath ? 0.55 : 0.1;
+        ctx.globalAlpha = Math.min(1, v);
         if (bub) {
           ctx.drawImage(bub.img, bub.sx, bub.sy, bub.sw, bub.sh, bx - 5.5, by - 5.5, 11, 11);
         } else {
