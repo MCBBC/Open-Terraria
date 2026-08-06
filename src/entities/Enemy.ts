@@ -5,6 +5,7 @@ import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { avoidWater } from './waterAvoid';
 import { RNG } from '../core/rng';
 
 export class Enemy extends Entity {
@@ -257,17 +258,11 @@ export class Enemy extends Entity {
     // 追击上限略高于游荡：游荡 1.8，追击 2.2（太快会贴脸躲不开）
     const maxSpd = this.key === 'servant_of_cthulhu' ? 4.2 : (this.state === 1 ? 2.2 : 1.8);
     if (spd > maxSpd) { this.vx = (this.vx / spd) * maxSpd; this.vy = (this.vy / spd) * maxSpd; }
-    // 蝙蝠/恶魔眼不入水：前方是液体则向上弹开并重选航向
-    if (this.key === 'cave_bat' || this.key === 'demon_eye') {
-      const st = game.world.store;
-      const ax = Math.floor((this.cx + this.vx * 4) / TILE), ay = Math.floor((this.cy + this.vy * 4) / TILE);
-      if (st.inBounds(ax, ay) && st.liquid[st.idx(ax, ay)] > 40) {
-        this.vx = -this.vx * 0.5;
-        this.vy = -Math.abs(this.vy || 1) * 0.8 - 0.8;
-        this.state = 0;
-        this.target = null;
-        return;
-      }
+    // 通用飞行避水（def.avoidWater 声明式开启）：避让时重选航向
+    if (this.def.avoidWater && avoidWater(this, game.world)) {
+      this.state = 0;
+      this.target = null;
+      return;
     }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) { this.vx = -this.vx * 0.7; this.state = 0; this.target = null; } // 撞墙重新选向

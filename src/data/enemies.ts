@@ -14,6 +14,7 @@ export interface EnemyDef {
   xp?: number;
   fireImmune?: boolean;
   hellOnly?: boolean;
+  avoidWater?: boolean;   // 飞行避水行为（前方液体上抛脱离）
   mapColor: string;
   gore: [string, string, string];  // 死亡碎裂粒子配色（主色/深色/亮色）
   // 专属受击/死亡音效（原版 NPC_Hit/Killed 槽位；家族区分，具体槽位为近似分配）
@@ -50,7 +51,7 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
   },
   demon_eye: {
     key: 'demon_eye', name: '恶魔眼', hp: 80, damage: 12, knockbackResist: 0.1,
-    width: 26, height: 22, flying: true, nightOnly: true, mapColor: '#D0D0D0',
+    width: 26, height: 22, flying: true, nightOnly: true, avoidWater: true, mapColor: '#D0D0D0',
     gore: ['#D0D0D0', '#909098', '#E85050'],
     hitSound: ['NPC_Hit_7', 'NPC_Hit_8'], killedSound: ['NPC_Killed_6'],
     drops: [
@@ -60,7 +61,7 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
   },
   cave_bat: {
     key: 'cave_bat', name: '洞穴蝙蝠', hp: 30, damage: 10, knockbackResist: 0,
-    width: 18, height: 14, flying: true, underground: true, mapColor: '#7A5A8C',
+    width: 18, height: 14, flying: true, underground: true, avoidWater: true, mapColor: '#7A5A8C',
     gore: ['#7A5A8C', '#5A3A6C', '#A58AB5'],
     hitSound: ['NPC_Hit_9'], killedSound: ['NPC_Killed_4'],
     drops: [{ item: 'coin_copper', min: 1, max: 4, chance: 0.5 }],

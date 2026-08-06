@@ -435,11 +435,12 @@ export class Renderer {
     let frame: number;
     const anim = c.def.anim;
     if (anim) {
-      // 状态选段：空中=飞 / 水中=游水 / 移动=走 / 静止=站立
-      const seg = !c.onGround ? (anim.fly ?? anim.walk) : c.inWater ? (anim.swim ?? anim.walk)
+      // 状态选段（游水只认滞回锁：flying 后 inWater 冻结的历史 bug 不会再影响显示）
+      const seg = c.swimLatch > 0 ? (anim.swim ?? anim.walk)
+        : !c.onGround ? (anim.fly ?? anim.walk)
         : Math.abs(c.vx) > 0.15 ? (anim.walk ?? anim.idle) : (anim.idle ?? anim.walk);
       if (seg) {
-        const active = Math.abs(c.vx) > 0.15 || !c.onGround || c.inWater;
+        const active = Math.abs(c.vx) > 0.15 || !c.onGround || c.swimLatch > 0;
         frame = seg[0] + (active ? Math.floor(c.animT / 8) % seg[1] : 0);
       } else frame = 0;
     } else if (c.perchState === 1 && meta.count > 1) frame = meta.count - 1;
@@ -1081,14 +1082,33 @@ export class Renderer {
     if (p) {
       this.drawPlayerMarker(ctx, cx0 + p.cx / TILE * fm.zoom, cy0 + p.cy / TILE * fm.zoom, Math.max(14, 10 * fm.zoom));
     }
+    // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
+    const tp = this.tpMark;
+    if (tp) {
+      const blink = 0.55 + 0.45 * Math.sin(performance.now() * 0.008);
+      ctx.globalAlpha = blink;
+      ctx.strokeStyle = '#FF5050';
+      ctx.lineWidth = 3;
+      const mx = cx0 + (tp.x + 0.5) * fm.zoom, my = cy0 + (tp.y + 0.5) * fm.zoom;
+      ctx.beginPath();
+      ctx.arc(mx, my, Math.max(8, 10 * fm.zoom), 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(mx - 14, my); ctx.lineTo(mx + 14, my);
+      ctx.moveTo(mx, my - 14); ctx.lineTo(mx, my + 14);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+    }
     // 操作提示
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#C8C0D8';
     ctx.textAlign = 'center';
-    ctx.fillText('滚轮缩放 · 拖动平移 · 再次点击右上角小地图或按 M 关闭', viewW / 2, viewH - 16);
+    ctx.fillText('滚轮缩放 · 拖动平移 · 点击两点传送（首次预选/再点确认）· M 关闭', viewW / 2, viewH - 16);
   }
   private _mapInit = false;
   private _lastPlayer: Player | null = null;
+  /** 传送预选标记（Game 写入） */
+  tpMark: { x: number; y: number } | null = null;
 
   private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number }) {
     const w = Math.min(560, viewW - 200);

@@ -147,6 +147,8 @@ export class Game implements GameHooks {
   guideSpawned = false;
   private lastWasDay: boolean | null = null;
   private _mapClickLatch = false;
+  private _mapClickLatch2 = false;
+  private _tpTarget: { x: number; y: number } | null = null;
 
   constructor(root: HTMLElement, cb: GameCallbacks, atlas?: SpriteAtlas | null) {
     this.assets = buildAssets();
@@ -346,6 +348,34 @@ export class Game implements GameHooks {
       }
     }
     if (!inp.mouseDown) this._mapClickLatch = false;
+    // 全屏地图：点击传送（两次确认）——第一次预选标记，第二次传送
+    if (inp.mouseDown && !this._mapClickLatch2 && this.renderer.fullMap.open && !inp.uiBlocking) {
+      this._mapClickLatch2 = true;
+      const fm = this.renderer.fullMap;
+      // 屏幕坐标 → 地图源坐标（与 zoomFullMapAt 的逆变换一致）
+      const viewW = this.renderer.canvas.width, viewH = this.renderer.canvas.height;
+      const cx0 = viewW / 2 - (this.world.w * fm.zoom) / 2 + fm.panX;
+      const cy0 = viewH / 2 - (this.world.h * fm.zoom) / 2 + fm.panY;
+      // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
+      const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
+      const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
+      if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+        if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
+          // 第二次点击同一点 → 传送；失败不关图、保留标记可重试
+          if (this.teleportNear(tx, ty)) {
+            this._tpTarget = null;
+            this.renderer.tpMark = null;
+            this.renderer.fullMap.open = false;
+            this.cb.onToast('传送完成');
+          }
+        } else {
+          this._tpTarget = { x: tx, y: ty };
+          this.renderer.tpMark = { x: tx, y: ty };
+          this.cb.onToast(`已选传送点 (${tx}, ${ty})，再次点击确认`);
+        }
+      }
+    }
+    if (!inp.mouseDown) this._mapClickLatch2 = false;
     player.inputX = (inp.down('KeyA') || inp.down('ArrowLeft') ? -1 : 0) + (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0);
     player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
     player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
@@ -1107,6 +1137,22 @@ export class Game implements GameHooks {
     if (!st.inBounds(tx, ty) || tx < 2 || tx > st.w - 3) return;
 
     const isUnderground = st.wall[st.idx(tx, ty)] !== 0 || ty > w.rockLevel;
+    // 海洋/水域排除：该列从天空到 rockLevel 全是液体 = 海里——除鱼类外不生成
+    // （蝙蝠等飞行怪在海面上盘旋也不合理，一并排除）
+    {
+      let liquidTop = -1;
+      for (let y = 2; y < Math.min(w.rockLevel, st.h); y++) {
+        if (st.liquid[st.idx(tx, y)] > 40) { liquidTop = y; break; }
+      }
+      if (liquidTop >= 0) {
+        // 水面之下 10 格仍是液体 → 判定为海/深水区
+        let deep = true;
+        for (let y = liquidTop; y < Math.min(liquidTop + 10, st.h); y++) {
+          if (st.liquid[st.idx(tx, y)] <= 40) { deep = false; break; }
+        }
+        if (deep) return;
+      }
+    }
     // 地狱区：熔岩史莱姆 / 熔岩僵尸（不怕岩浆）
     const hellTop = Math.floor(st.h * 0.86);
     let key: string | null = null;
@@ -1323,6 +1369,12 @@ export class Game implements GameHooks {
       const lowFly = pick.key === 'butterfly' || pick.key === 'gold_butterfly';
       const flyY = lowFly ? (groundY - 1 - Math.random() * 3) * TILE : (groundY - 8 - Math.random() * 12) * TILE;
       this.entities.add(new Critter(pick.key, tx * TILE + 8, flyY), 'critters');
+    } else if (pick.water && surfaceWater) {
+      // 水生种（鸭子）：落在水面上（自上而下第一个液体格），不是湖底
+      let surfY = 4;
+      while (surfY < st.h - 4 && st.liquid[st.idx(tx, surfY)] <= 80) surfY++;
+      if (surfY >= st.h - 4) return;
+      this.entities.add(new Critter(pick.key, tx * TILE + 8, surfY * TILE), 'critters');
     } else {
       // 地面种：参数即脚底 y（构造器内减 h），精确站上地表格顶
       const c = new Critter(pick.key, tx * TILE + 8, groundY * TILE);
@@ -1550,6 +1602,64 @@ export class Game implements GameHooks {
     void e;
     this.sfx.playWav('roar');
     this.cb.onToast('你感到有个邪恶的东西在看着你……');
+  }
+
+  /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。
+   *  优先目标点自身，然后螺旋外扩到 24 格内就近安置 */
+  private teleportNear(tx: number, ty: number): boolean {
+    const st = this.world.store;
+    const p = this.player;
+    // 空中落点：2 格净空即可（无地面要求）
+    const fitsAir = (x: number, y: number) => {
+      for (let dy = 0; dy <= 1; dy++) {
+        if (!st.inBounds(x, y - dy) || st.isSolid(x, y - dy)) return false;
+      }
+      return true;
+    };
+    const fits = (x: number, y: number) => {
+      // (x, y-1..y) 两格净空（无实心/无液体），y+1 格实心站立
+      for (let dy = 0; dy <= 1; dy++) {
+        if (!st.inBounds(x, y - dy) || st.isSolid(x, y - dy)) return false;
+        if (st.liquid[st.idx(x, y - dy)] > 100) return false;
+      }
+      return st.inBounds(x, y + 1) && st.isSolid(x, y + 1);
+    };
+    if (fits(tx, ty)) {
+      p.x = tx * TILE + 1; p.y = (ty - 1) * TILE;
+    } else {
+      // 螺旋外扩找最近可站位置
+      let found = false;
+      for (let r = 1; r <= 24 && !found; r++) {
+        for (let dx = -r; dx <= r && !found; dx++) {
+          for (let dy = -r; dy <= r && !found; dy++) {
+            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+            if (fits(tx + dx, ty + dy)) {
+              p.x = (tx + dx) * TILE + 1;
+              p.y = (ty + dy - 1) * TILE;
+              found = true;
+            }
+          }
+        }
+      }
+      if (!found) {
+        // 高空/无地面：允许落在空中（目标列上下找 2 格净空，重力会带下来）
+        for (let dy = 0; dy <= 6; dy++) {
+          for (const sy of [ty - dy, ty + dy]) {
+            if (fitsAir(tx, sy)) {
+              p.x = tx * TILE + 1; p.y = (sy - 1) * TILE;
+              p.vx = 0; p.vy = 0;
+              this.camera.x = p.cx; this.camera.y = p.cy;
+              return true;
+            }
+          }
+        }
+        this.cb.onToast('传送失败：目标区域完全实心');
+        return false;
+      }
+    }
+    p.vx = 0; p.vy = 0;
+    this.camera.x = p.cx; this.camera.y = p.cy;
+    return true;
   }
 
   // ================= 重生 =================
