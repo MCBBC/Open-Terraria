@@ -557,6 +557,11 @@ export class Game implements GameHooks {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
         this.swingHitSet.clear();
+        // 每次挥砍一声：斧砍植物纤维、镐按材质区分土闷/石金（跟随挥砍节奏，不再密集连响）
+        const hovered = TILE_DEFS[this.world.store.get(tx, ty)];
+        if (tool.type === 'axe') this.sfx.play('chop');
+        else if (hovered && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(hovered.key)) this.sfx.play('tink');
+        else this.sfx.play('dig');
       }
       // 挖掘速率固定基数（tool.speed 已改为纯挥舞时长，两者解耦）；
       // 挖掘快慢仍由镐/斧力(power)体现
@@ -645,8 +650,7 @@ export class Game implements GameHooks {
       this.hardnessCache = 150;
       this.mining.progress += speed * (0.6 + power / 50);
       if (this.tickCount % 8 === 0) {
-        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2);
-        this.sfx.play('dig');
+        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2); // 粒子保留，声音已移到挥砍
       }
       if (this.mining.progress >= 150) {
         this.world.store.setWall(tx, ty, 0);
@@ -676,13 +680,9 @@ export class Game implements GameHooks {
     // 工具等级加速（镐：木 1.0x → 金 4.5x；斧对树：木 1.1x → 金 4.1x）
     const factor = toolType === 'axe' ? 0.5 + power / 25 : 0.5 + power / 20;
     this.mining.progress += speed * factor;
-    // 粒子反馈 + 挖掘音
+    // 粒子反馈（挖掘音已移到挥砍开始，跟随挥砍节奏）
     if (this.tickCount % 6 === 0) {
       this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
-      // 石系（石/矿/砖/黑曜石等）敲击是金属 tink，土系是闷 dig
-      const td = TILE_DEFS[type];
-      const stony = td && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(td.key);
-      this.sfx.play(toolType === 'axe' ? 'chop' : (stony ? 'tink' : 'dig'));
     }
     if (this.mining.progress >= hardness) {
       this.breakTile(tx, ty);

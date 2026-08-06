@@ -389,19 +389,37 @@ export class Renderer {
   }
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
-   *  优先原版 Tiles_85 样式块（2×2 格 = 34×34px），程序化仅兜底 */
+   *  优先原版 Tiles_85 样式块——四格 16×16 无缝拼到离屏画布再绘制
+   *  （直接取 34×34 矩形会把表内 2px 间隙画成十字缝），程序化仅兜底 */
+  private tombstoneCache = new Map<number, HTMLCanvasElement>();
   private drawTombstone(t: Tombstone) {
     const ctx = this.ctx;
     ctx.save();
     ctx.translate(t.cx, t.y + t.h);
     ctx.rotate(t.angle);
-    const fr = this.atlas ? this.atlas.vrect(85, t.styleCol * 18, 0, 34, 34) : null;
-    if (fr) {
-      // 原版样式块：底对齐，宽按 2 格视觉（比碰撞盒宽，正常）
-      ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -17, -34, 34, 34);
+    const scale = 0.72; // 约 23×23px，比一格略大不突兀
+    let img: CanvasImageSource | null = this.tombstoneCache.get(t.styleCol) ?? null;
+    if (!img && this.atlas) {
+      // 无缝拼接四格（表内 stride 18：格间有 2px 间隙需跳过）
+      const c = document.createElement('canvas');
+      c.width = 32; c.height = 32;
+      const cx = c.getContext('2d')!;
+      let ok = true;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          const fr = this.atlas.vframeAt(85, (t.styleCol + dx) * 18, dy * 18);
+          if (!fr) { ok = false; break; }
+          cx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, dx * 16, dy * 16, 16, 16);
+        }
+      }
+      if (ok) { this.tombstoneCache.set(t.styleCol, c); img = c; }
+    }
+    if (img) {
+      const w = 32 * scale, h = 32 * scale;
+      ctx.drawImage(img, -w / 2, -h, w, h);
     } else {
-      const img = getTombstoneCanvas();
-      ctx.drawImage(img, -8, -22, 16, 22);
+      const pc = getTombstoneCanvas();
+      ctx.drawImage(pc, -8, -22, 16, 22);
     }
     ctx.restore();
   }
