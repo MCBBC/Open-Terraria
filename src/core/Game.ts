@@ -155,6 +155,10 @@ export class Game implements GameHooks {
     this.renderer = new Renderer(this.assets, atlas);
     this.renderer.attach(root);
     this.sfx.load(); // 原版 wav 预解码（挂起态也可解码）
+    // 怪物专属声效文件追加载入
+    const extra = new Set<string>();
+    for (const d of Object.values(ENEMY_DEFS)) for (const f of [...d.hitSound, ...d.killedSound]) extra.add(f);
+    this.sfx.addFiles([...extra]);
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）
@@ -994,6 +998,8 @@ export class Game implements GameHooks {
       // 朝向检查（挥舞半程后命中判定放宽）
       if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
       this.swingHitSet.add(e.id);
+      // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
+      if (!this.sfx.playFiles(e.def.hitSound)) this.sfx.play('hit');
       const crit = Math.random() < 0.08;
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急
       const baseDmg = tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
@@ -1220,6 +1226,10 @@ export class Game implements GameHooks {
 
   playSfx(name: string, vol?: number) {
     this.sfx.play(name as SfxName, vol ?? 1);
+  }
+
+  playSfxFiles(files: string[], vol?: number) {
+    if (!this.sfx.playFiles(files, vol ?? 1)) this.sfx.play('hit', vol ?? 1);
   }
 
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */

@@ -22,6 +22,7 @@ export interface GameHooks {
   notifyInventoryChanged(): void;
   /** 播放音效 */
   playSfx(name: string, vol?: number): void; // vol 0-1 按距离衰减
+  playSfxFiles(files: string[], vol?: number): void; // 怪物专属声效（原版文件名列表）
   /** 拾取物品时在主角旁飘出物品名 */
   showPickupLabel(itemKey: string): void;
 }

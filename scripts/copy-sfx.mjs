@@ -12,9 +12,11 @@ mkdirSync(DST, { recursive: true });
 const FILES = [
   // 玩家
   'Player_Hit_0', 'Player_Hit_1', 'Player_Hit_2', 'Player_Killed',
-  // 怪物受击/死亡
+  // 怪物受击/死亡（更多槽位：不同怪物家族用不同声效）
   'NPC_Hit_1', 'NPC_Hit_2', 'NPC_Hit_3', 'NPC_Hit_4', 'NPC_Hit_5',
+  'NPC_Hit_6', 'NPC_Hit_7', 'NPC_Hit_8', 'NPC_Hit_9', 'NPC_Hit_10',
   'NPC_Killed_1', 'NPC_Killed_2', 'NPC_Killed_3',
+  'NPC_Killed_4', 'NPC_Killed_5', 'NPC_Killed_6', 'NPC_Killed_7', 'NPC_Killed_8',
   // 僵尸环境声
   'Zombie_1', 'Zombie_2', 'Zombie_3', 'Zombie_4', 'Zombie_5', 'Zombie_6',
   // 挖掘/砍击/拾取/放置

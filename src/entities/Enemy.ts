@@ -454,7 +454,10 @@ export class Enemy extends Entity {
         }
       }
       game.onEnemyKilled(this.key);
-      game.playSfx(this.def.boss ? 'roar' : 'killed');
+      // 死亡专属声：Boss 咆哮；普通怪优先专属 killedSound，无则通用
+      if (this.def.boss) game.playSfx('roar');
+      else if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound);
+      else game.playSfx('killed');
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
       const [c1, c2, c3] = this.def.gore;
       const big = this.def.boss || this.w > 40;

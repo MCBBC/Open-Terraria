@@ -33,12 +33,28 @@ export class Sfx {
   private buffers = new Map<string, AudioBuffer>();
   muted = false;
 
+  private extraFiles = new Set<string>();
+  /** 追加加载额外 wav 文件（怪物专属声效等） */
+  addFiles(files: string[]) {
+    for (const f of files) this.extraFiles.add(f);
+    const ctx = this.ctx;
+    if (!ctx) return;
+    for (const f of files) {
+      if (this.buffers.has(f)) continue;
+      fetch(`sounds/${f}.wav`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((ab) => {
+        if (!ab) return;
+        ctx.decodeAudioData(ab).then((buf) => this.buffers.set(f, buf)).catch(() => {});
+      }).catch(() => {});
+    }
+  }
+
   /** 预加载全部 wav（在用户手势后调用可获得最佳兼容；挂起态 decodeAudioData 也可用） */
   async load(): Promise<void> {
     const ctx = this.ensure(true);
     if (!ctx) return;
     const files = new Set<string>();
     for (const list of Object.values(WAV_MAP)) for (const f of list) files.add(f);
+    for (const f of this.extraFiles) files.add(f);
     await Promise.all([...files].map(async (f) => {
       try {
         const r = await fetch(`sounds/${f}.wav`);
@@ -62,16 +78,26 @@ export class Sfx {
 
   /** 播放原版 wav（随机变体 + 轻微音高扰动）；vol 0-1 */
   playWav(name: SfxName, vol = 1): boolean {
-    const ctx = this.ensure();
-    if (!ctx) return false;
     const list = WAV_MAP[name];
     if (!list || !list.length) return false;
-    const file = list[Math.floor(Math.random() * list.length)];
+    return this.playWavFile(list[Math.floor(Math.random() * list.length)], vol);
+  }
+
+  /** 播放任意 wav 文件列表（随机选 + 音高扰动）；供怪物专属声效用 */
+  playFiles(files: string[], vol = 1): boolean {
+    if (!files.length) return false;
+    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol);
+  }
+
+  /** 按文件名直播 */
+  playWavFile(file: string, vol = 1): boolean {
+    const ctx = this.ensure();
+    if (!ctx) return false;
     const buf = this.buffers.get(file);
     if (!buf) return false;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.playbackRate.value = 0.92 + Math.random() * 0.16; // 音高扰动避免机械感
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
     const g = ctx.createGain();
     g.gain.value = Math.min(1, vol);
     src.connect(g).connect(ctx.destination);
