@@ -774,6 +774,28 @@ export class Game implements GameHooks {
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
+    // 瓦罐：碎裂音 + 随机战利品（火把/炸弹/绳/小血瓶/铜币）
+    if (TILE_BY_KEY['pot'] !== undefined && type === TILE_BY_KEY['pot']) {
+      st.setTile(x, y, 0);
+      this.sfx.play('shatter');
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#974F50', 10, 2);
+      const loot: Array<[string, number, number, number]> = [
+        // [itemKey, min, max, 概率]
+        ['torch', 3, 8, 0.55],
+        ['bomb', 1, 3, 0.22],
+        ['rope', 5, 15, 0.20],
+        ['lesser_healing_potion', 1, 1, 0.22],
+        ['coin_copper', 5, 20, 0.45],
+        ['gel', 1, 2, 0.15],
+      ];
+      for (const [key, mn, mx, ch] of loot) {
+        if (Math.random() < ch) {
+          this.spawnDrop(x * TILE + 8, y * TILE, key, mn + Math.floor(Math.random() * (mx - mn + 1)),
+            (Math.random() - 0.5) * 2.5, -2.5 - Math.random());
+        }
+      }
+      return;
+    }
     // 普通
     st.setTile(x, y, 0);
     // 破坏树木正下方的支撑方块 → 整棵树倒下（掉木材）
@@ -1278,7 +1300,8 @@ export class Game implements GameHooks {
     const pool = CRITTER_DEFS.filter((c) => {
       if (c.dayOnly && !isDay) return false;
       if (c.nightOnly && isDay) return false;
-      if (surfaceWater && !c.water && c.kind !== 'fly') return false;
+      // 鸭子是两栖：水面列可生成（落在岸边浅水/滩涂），其余地面种不能在水列
+      if (surfaceWater && !c.water && c.kind !== 'fly' && c.key !== 'duck') return false;
       if (!c.biomes.includes(biome) && !(nearWater && c.biomes.includes('water'))) return false;
       return true;
     });

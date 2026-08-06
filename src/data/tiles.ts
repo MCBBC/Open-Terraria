@@ -143,6 +143,8 @@ def({ key: 'candelabra', name: '烛台', decor: true, framed: true, opacity: 0, 
 def({ key: 'chinese_lantern', name: '中式灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FFA21F', drop: 'chinese_lantern', light: [255, 160, 70], ...VAN(95, 2, 2) });
 def({ key: 'skull_lantern', name: '骷髅灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: 'skull_lantern', light: [255, 160, 70], ...VAN(98, 2, 2) });
 def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#2B8FFF', drop: 'water_candle', light: [140, 180, 255], ...VAN(49, 1, 1) });
+// 瓦罐（世界生成散布）：打破掉随机常用道具（breakTile 特判），不做放置物
+def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#974F50', drop: null as unknown as string, vanilla: { sheet: 28, frame: 'style', fw: 2, fh: 2 } });
 
 export const TILE_BY_KEY: Record<string, number> = {};
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));

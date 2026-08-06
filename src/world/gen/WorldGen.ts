@@ -46,6 +46,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '液体', run: liquidPass },
     { name: '地狱', run: hellPass },
     { name: '清浮空', run: floatCleanupPass },
+    { name: '瓦罐', run: potPass },
     { name: '表面', run: surfacePass },
     ...(cfg.structures === false ? [] : [{ name: '结构', run: structurePass }]),
   ];
@@ -69,13 +70,16 @@ function nextFrame(): Promise<void> {
 function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
   const { w, h } = store;
   const base = Math.floor(h * 0.28);
-  // 多 octave 地表高度
+  // 多 octave 地表高度。平坦为主、偶发高峰：
+  // 大势噪声幂次塑形（|v|^1.8）——噪声近 0 的大片区域被压平成平原，
+  // 只有噪声较强处才隆起成峰；小起伏幅度减半避免处处尖刺
   const o1 = createNoise1Dish(rng, 0.012);
   const o2 = createNoise1Dish(rng, 0.05);
   const o3 = createNoise1Dish(rng, 0.11);
   for (let x = 0; x < w; x++) {
     const hill = (x > w * 0.18 && x < w * 0.82) ? 1 : 1.6; // 边缘更陡（近似海崖）
-    surface[x] = base + (o1(x) * 34 + o2(x) * 10 + o3(x) * 4) * hill;
+    const shape = (v: number, amp: number) => Math.sign(v) * Math.pow(Math.abs(v), 1.8) * amp;
+    surface[x] = base + (shape(o1(x), 30) + o2(x) * 5 + o3(x) * 2) * hill;
   }
   // 左右海洋：最外侧 6% 下挖成海盆（岸边浅、世界缘深），后续灌水铺沙
   const oceanW = Math.max(24, Math.floor(w * 0.06));
@@ -281,6 +285,51 @@ function floatCleanupPass({ store, surface }: GenCtx) {
       }
     }
     if (removed === 0) break;
+  }
+}
+
+// ---------- 瓦罐散布 ----------
+function potPass({ store, surface, rng }: GenCtx) {
+  const { w, h } = store;
+  const POT = TILE_BY_KEY['pot']!;
+  // 尝试次数随世界宽度；洞穴/浅层洞的地面（下方实心、上方 2x2 净空）放 1-3 个一组
+  const tries = Math.floor(w / 6);
+  for (let i = 0; i < tries; i++) {
+    const x = rng.int(4, w - 5);
+    const yMin = Math.floor(surface[x]) + 8;
+    const yMax = Math.min(h - 6, Math.floor(surface[x]) + Math.floor(h * 0.45));
+    if (yMax <= yMin) continue;
+    const y = rng.int(yMin, yMax);
+    // 2x2 净空 + 底部实心 = 洞内地面
+    let ok = true;
+    for (let dx = 0; dx < 2 && ok; dx++) {
+      for (let dy = 1; dy <= 2; dy++) {
+        if (store.isActive(x + dx, y - dy)) { ok = false; break; }
+      }
+    }
+    if (!ok || !store.isSolid(x, y) || !store.isSolid(x + 1, y)) continue;
+    // 该点 12 格内有其他瓦罐则跳过（避免扎堆）
+    let nearby = false;
+    for (let dx = -6; dx <= 6 && !nearby; dx++) {
+      for (let dy = -4; dy <= 2; dy++) {
+        if (store.get(x + dx, y + dy) === POT) { nearby = true; break; }
+      }
+    }
+    if (nearby) continue;
+    // 放 1-3 个（间距 2-3 格，各自需独立净空）
+    const n = rng.int(1, 3);
+    let px = x;
+    for (let k = 0; k < n; k++) {
+      if (store.get(px, y - 1) === 0 && store.get(px + 1, y - 1) === 0 &&
+          store.get(px, y - 2) === 0 && store.get(px + 1, y - 2) === 0 && store.isSolid(px, y)) {
+        store.setTileSilent(px, y - 1, POT, 0, 0);
+        store.setTileSilent(px + 1, y - 1, POT, 18, 0);
+        store.setTileSilent(px, y - 2, POT, 0, 18);
+        store.setTileSilent(px + 1, y - 2, POT, 18, 18);
+      }
+      px += rng.int(2, 4);
+      if (px > w - 4) break;
+    }
   }
 }
 

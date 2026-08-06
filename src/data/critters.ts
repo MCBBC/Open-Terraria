@@ -17,6 +17,9 @@ export interface CritterDef {
   water?: boolean;        // 可游泳（鸭子）
   glow?: boolean;         // 自发光（萤火虫）
   perch?: boolean;        // 飞行种会落地栖息（鸟）
+  fleeFly?: boolean;      // 地面种受惊会起飞逃离（鸭子）
+  /** 状态动画分段 [起始帧, 帧数]（缺省=全表循环） */
+  anim?: { idle?: [number, number]; swim?: [number, number]; walk?: [number, number]; fly?: [number, number] };
   biomes: Array<'forest' | 'snow' | 'sand' | 'water'>; // 栖息生态（控制生成地点）
 }
 
@@ -29,7 +32,9 @@ export const CRITTER_DEFS: CritterDef[] = [
   { key: 'butterfly', name: '蝴蝶', npc: 356, kind: 'fly', w: 12, h: 11, speed: 1.0, fleeRange: 80, weight: 8, dayOnly: true, biomes: ['forest'] },
   { key: 'snail', name: '蜗牛', npc: 359, kind: 'walk', w: 14, h: 10, speed: 0.25, fleeRange: 0, weight: 4, biomes: ['forest'] },
   { key: 'frog', name: '青蛙', npc: 361, kind: 'hop', w: 15, h: 12, speed: 1.6, fleeRange: 96, weight: 6, biomes: ['water', 'forest'] },
-  { key: 'duck', name: '鸭子', npc: 362, kind: 'hop', w: 28, h: 24, speed: 1.2, fleeRange: 112, weight: 5, water: true, biomes: ['water'] },
+  { key: 'duck', name: '鸭子', npc: 362, kind: 'hop', w: 20, h: 17, speed: 1.2, fleeRange: 112, weight: 5, water: true, fleeFly: true, biomes: ['water'],
+    // NPC_362 分段：0 站立 / 1-2 游水 / 3-10 走路 / 11-14 飞行
+    anim: { idle: [0, 1], swim: [1, 2], walk: [3, 8], fly: [11, 4] } },
   { key: 'grasshopper', name: '蚱蜢', npc: 377, kind: 'hop', w: 12, h: 8, speed: 2.2, fleeRange: 80, weight: 6, dayOnly: true, biomes: ['forest', 'sand'] },
   // 金色变种（稀有，生态同本体）
   { key: 'gold_bird', name: '金鸟', npc: 442, kind: 'fly', w: 18, h: 12, speed: 1.8, fleeRange: 144, weight: 1, dayOnly: true, gold: true, perch: true, biomes: ['forest', 'snow', 'sand'] },

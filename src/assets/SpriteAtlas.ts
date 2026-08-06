@@ -300,4 +300,5 @@ export const VANILLA_ITEM_ICON_MAP: Record<string, number> = {
   clay_pot: 222, tombstone: 321, life_crystal: 29,
   candle: 105, chandelier: 106, lantern: 136, candelabra: 349,
   chinese_lantern: 344, skull_lantern: 347, water_candle: 148,
+  bomb: 166, rope: 965,
 };

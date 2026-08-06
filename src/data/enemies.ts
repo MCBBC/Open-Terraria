@@ -62,7 +62,7 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
     key: 'cave_bat', name: '洞穴蝙蝠', hp: 30, damage: 10, knockbackResist: 0,
     width: 18, height: 14, flying: true, underground: true, mapColor: '#7A5A8C',
     gore: ['#7A5A8C', '#5A3A6C', '#A58AB5'],
-    hitSound: ['NPC_Hit_9'], killedSound: ['NPC_Killed_7'],
+    hitSound: ['NPC_Hit_9'], killedSound: ['NPC_Killed_4'],
     drops: [{ item: 'coin_copper', min: 1, max: 4, chance: 0.5 }],
   },
   lava_slime: {

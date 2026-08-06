@@ -183,6 +183,9 @@ item({ key: 'candelabra', name: '烛台', tile: 'candelabra', maxStack: 99 });
 item({ key: 'chinese_lantern', name: '中式灯笼', tile: 'chinese_lantern', maxStack: 99 });
 item({ key: 'skull_lantern', name: '骷髅灯笼', tile: 'skull_lantern', maxStack: 99 });
 item({ key: 'water_candle', name: '水蜡烛', tile: 'water_candle', maxStack: 99 });
+// 瓦罐战利品
+item({ key: 'bomb', name: '小型炸弹', maxStack: 99, desc: '用力扔出去会爆炸…（待实装）', value: 5 });
+item({ key: 'rope', name: '攀爬绳', maxStack: 999, desc: '用于垂降（待实装）', value: 1 });
 
 export interface ItemStack { id: number; stack: number; }
 export function mkStack(key: string, stack = 1): ItemStack | null {

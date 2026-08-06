@@ -431,10 +431,18 @@ export class Renderer {
     if (!this.atlas) return;
     const meta = this.atlas.vnpcMeta(c.def.npc);
     if (!meta) return;
-    // 鸟类栖息用末帧（NPC_74 第 5 帧即落地姿态）；移动时循环动画，静止首帧。
-    // 蝴蝶表含 8 物种 × 3 帧：animLen > 0 时只播 animBase 起的窗口
+    // 帧选择优先级：分段动画（鸭子） > 鸟类栖息末帧 > 蝴蝶物种窗口 > 全表循环
     let frame: number;
-    if (c.perchState === 1 && meta.count > 1) frame = meta.count - 1;
+    const anim = c.def.anim;
+    if (anim) {
+      // 状态选段：空中=飞 / 水中=游水 / 移动=走 / 静止=站立
+      const seg = !c.onGround ? (anim.fly ?? anim.walk) : c.inWater ? (anim.swim ?? anim.walk)
+        : Math.abs(c.vx) > 0.15 ? (anim.walk ?? anim.idle) : (anim.idle ?? anim.walk);
+      if (seg) {
+        const active = Math.abs(c.vx) > 0.15 || !c.onGround || c.inWater;
+        frame = seg[0] + (active ? Math.floor(c.animT / 8) % seg[1] : 0);
+      } else frame = 0;
+    } else if (c.perchState === 1 && meta.count > 1) frame = meta.count - 1;
     else {
       const moving = Math.abs(c.vx) > 0.15 || !c.onGround;
       if (c.animLen > 0) frame = c.animBase + (moving ? Math.floor(c.animT / 8) % c.animLen : 0);

@@ -18,6 +18,9 @@ export class Critter extends Entity {
   perchState = 0;         // 0 飞行 1 栖息中
   perchT = 0;             // 栖息剩余 tick
   perchCd = 200 + Math.floor(Math.random() * 300); // 下次想落地倒计时
+  inWater = false;        // 在水中（鸭子游水动画判定）
+  flying = false;         // 起飞逃离中（鸭子）
+  wantLand = false;      // 飞行中想降落
   // 动画帧窗口（蝴蝶表含 8 物种 × 3 帧，只播本物种）
   animBase = 0;
   animLen = 0; // 0 = 用全表
@@ -49,7 +52,22 @@ export class Critter extends Entity {
     const flee = !!player && !player.dead && this.def.fleeRange > 0 &&
       Math.hypot(player.cx - this.cx, player.cy - this.cy) < this.def.fleeRange;
 
-    if (this.def.kind === 'fly') {
+    // 鸭子式两栖飞行：平时地面走/水里游，受惊起飞逃离，安全后降落
+    if (this.def.fleeFly) {
+      if (this.flying) {
+        if (flee) this.wantLand = false;
+        else this.wantLand = true;
+        this.flyMove(game, flee, player, this.wantLand);
+        if (this.wantLand && this.onGround) { this.flying = false; this.wantLand = false; }
+      } else {
+        if (flee && (this.onGround || this.inWater)) {
+          this.flying = true;
+          this.vy = -3.2;
+        } else {
+          this.groundAI(game, flee, player);
+        }
+      }
+    } else if (this.def.kind === 'fly') {
       if (this.def.perch) {
         // 鸟类：偶尔落地栖息；玩家靠近立即起飞逃离
         if (this.perchState === 1) {
@@ -98,6 +116,7 @@ export class Critter extends Entity {
   private groundAI(game: GameHooks, flee: boolean, player: Player | null) {
     const st = game.world.store;
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    this.inWater = inWater;
 
     if (flee && player) this.facing = player.cx < this.cx ? 1 : -1;
     else if (--this.wanderT <= 0) {
@@ -132,6 +151,11 @@ export class Critter extends Entity {
 
   /** 飞行 AI：绕巡航点飘，玩家靠近飞离 */
   private flyAI(game: GameHooks, flee: boolean, player: Player | null) {
+    this.flyMove(game, flee, player, false);
+  }
+
+  /** 飞行移动核心。landing=true 时关闭悬停改用重力下落找地面 */
+  private flyMove(game: GameHooks, flee: boolean, player: Player | null, landing: boolean) {
     const steer = 0.09;
     if (flee && player) {
       const dx = this.cx - player.cx, dy = this.cy - player.cy;
@@ -168,6 +192,12 @@ export class Critter extends Entity {
     const spd = Math.hypot(this.vx, this.vy);
     const max = this.def.speed * (flee ? 2 : 1);
     if (spd > max) { this.vx = (this.vx / spd) * max; this.vy = (this.vy / spd) * max; }
+    if (landing) {
+      // 降落模式：重力下落 + 保留水平漂移，落地由外层接管
+      this.vy = Math.min(this.vy + GRAVITY * 0.5, MAX_FALL_SPEED * 0.6);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) this.vx = -this.vx * 0.6;
     if (this.hitHead) this.vy = -Math.abs(this.vy) * 0.6;
@@ -180,7 +210,9 @@ export class Critter extends Entity {
     this.dead = true;
     game.spawnParticles(this.cx, this.cy, '#C03030', 6, 1.8);
     game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
-    game.playSfx('killed', 0.8);
+    // 小动物死亡声：与史莱姆一致（NPC_Killed_1）；
+    // 主角击杀与怪物碾压都走这里，两条路径音效完全一致
+    game.playSfxFiles(['NPC_Killed_1'], 0.8);
     return true;
   }
 
