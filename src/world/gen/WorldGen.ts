@@ -360,7 +360,8 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
   while (x < w - 6) {
     const sy = Math.floor(surface[x]);
     const relaxed = sinceLast >= 24;
-    if (store.get(x, sy) === T.GRASS && !store.isActive(x, sy - 1)) {
+    // 不种在水里：树干基座格（地面上一格）必须无液体
+    if (store.get(x, sy) === T.GRASS && !store.isActive(x, sy - 1) && store.liquid[store.idx(x, sy - 1)] === 0) {
       const th = rng.int(7, 14);
       let ok = true;
       for (let dy = 1; dy <= th; dy++) if (store.isActive(x, sy - dy)) { ok = false; break; }

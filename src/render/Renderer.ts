@@ -41,14 +41,15 @@ export class Minimap {
       const d = TILE_DEFS[st.type[i]];
       return d ? d.mapColor : '#808080';
     }
+    // 液体：水蓝 / 岩浆橙
+    if (st.liquid[i] > 40) return st.liquidType[i] === 2 ? '#E8622C' : '#3D6FD1';
     if (st.wall[i] !== 0) {
-      const wd = TILE_DEFS[st.type[i]];
-      void wd;
-      // 墙色 = 深化
+      // 墙色 = 深化（地下洞穴空气）
       const w = st.wall[i];
       return w === 1 ? '#3A2A1A' : w === 2 ? '#2E2E2E' : '#3A2812';
     }
-    return null;
+    // 探索过的天空 = 亮蓝（未探索区域由迷雾层另盖黑）
+    return '#7EB6E8';
   }
 
   redrawAll() {
@@ -487,7 +488,9 @@ export class Renderer {
           // 素材默认朝左：向右移动时镜像（僵尸实测需要与其它怪一致的翻转）
           const flip = -e.facing;
           ctx.scale(flip, 1);
-          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h, w, h);
+          // 贴底：按精灵最低不透明行对齐脚底（史莱姆贴图底部有透明留白会浮空）
+          const pad = this.spriteBottomPad(fr);
+          ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h + pad * (h / fr.sh), w, h);
         } else if (e.key === 'demon_eye') {
           // 恶魔之眼：以眼球为原点按移动方向自由旋转（贴图默认朝左，与 NPC 系素材一致）
           const ang = Math.atan2(e.vy, e.vx) + Math.PI;

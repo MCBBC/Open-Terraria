@@ -21,6 +21,7 @@ export class Enemy extends Entity {
   squash = 0;            // 史莱姆挤压动画 -1..1
   stuckT = 0;            // 飞行怪卡墙计时（脱困用）
   stuckCd = 0;           // 脱困后的游荡冷却
+  jumpStartX = 0;        // 史莱姆本次起跳的 x（落地时判定是否白跳）
   chargesLeft = 0;       // EoC 剩余冲撞次数
   dashing = false;       // EoC 冲撞中（无视地形）
   visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
@@ -74,7 +75,26 @@ export class Enemy extends Entity {
     }
   }
 
-  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
+  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {
+    // 浮力生物（史莱姆）：水中上浮 + 阻尼，漂在水面而不是沉底
+    if (buoyant) {
+      const st = game.world.store;
+      const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
+      if (li > 80) {
+        if (this.state === 1) {
+          // 跳跃中：弱重力助其跃出水面（浮力阻尼会把起跳速度吃掉导致困在水里）
+          this.vy = Math.min(this.vy + GRAVITY * 0.3, MAX_FALL_SPEED);
+          moveAndCollide(this, game.world, this.vx, this.vy);
+          this.vx *= 0.98;
+          return;
+        }
+        this.vy -= 0.32;
+        this.vy *= 0.92;
+        this.vx *= 0.95;
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        return;
+      }
+    }
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx + accel * Math.sign(this.vx || 1) * 0));
     if (jumpV && this.onGround) this.vy = -jumpV;
@@ -83,42 +103,97 @@ export class Enemy extends Entity {
   }
 
   private slimeAI(game: GameHooks, player: Player | null) {
+    // 水中漂浮状态：漂在水面时也可蓄力起跳
+    const st = game.world.store;
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    const surfaced = inWater && Math.abs(this.vy) < 0.8; // 漂在水面附近（准地面）
     // 状态机：0 蓄力 → 1 跳跃
     if (this.state === 0) {
-      this.vx = 0;
+      this.vx *= 0.6;
       if (this.onGround) this.squash = Math.min(1, this.squash + 0.08);
-      if (this.aiT % 50 === 0 || (player && this.aiT > 40 && Math.abs(player.cx - this.cx) < TILE * 12 && this.onGround)) {
-        // 起跳，朝玩家或随机方向
+      const canAct = this.onGround || surfaced;
+      // 脱困冷却内（stuckCd>0）落地/浮面立刻再跳，不在原地等 50 tick 空转
+      if (canAct && (this.aiT % 50 === 0 || this.stuckCd > 0 || (player && this.aiT > 40 && Math.abs(player.cx - this.cx) < TILE * 12))) {
+        // 起跳方向：掉头冷却内用当前朝向（不再朝玩家死磕同一堵墙）
         let dir = this.facing;
-        if (player) {
+        if (player && this.stuckCd === 0) {
           const dx = player.cx - this.cx;
           if (Math.abs(dx) > 8) dir = Math.sign(dx);
         }
         this.facing = dir;
         const dist = player ? Math.min(1, Math.abs(player.cx - this.cx) / (TILE * 10)) : 0.4;
-        this.vx = dir * (1.2 + dist * 2.2);
-        this.vy = -(3.4 + dist * 2.4);
+        // 前方障碍高度探测（1-2 格）→ 按需起跳力度。
+        // 普通跳 vy-4.2 在 GRAVITY=0.36 下脚底只升 24.5px（1.5 格）——
+        // 精灵贴图放大 1.25 倍看着跳很高，但碰撞盒过不了 32px 的两格墙
+        const fx = Math.floor((this.cx + dir * (this.w / 2 + 2)) / TILE);
+        const fy = Math.floor((this.y + this.h - 1) / TILE);
+        let obsH = 0;
+        for (let k = 0; k < 3; k++) {
+          if (st.isSolid(fx, fy - k)) obsH = k + 1; else break;
+        }
+        const headroom = obsH > 0 && obsH <= 2 && !st.isSolid(fx, fy - obsH) && !st.isSolid(fx, fy - obsH - 1);
+        if (headroom) {
+          // 障碍跳：1 格 -4.6（脚底升 29px）/ 2 格 -6.0（升 50px），慢速横移保证越过块面
+          this.vx = dir * (obsH === 1 ? 1.6 : 1.2);
+          this.vy = obsH === 1 ? -4.6 : -6.0;
+        } else {
+          this.vx = dir * (1.6 + dist * 2.6);
+          // 水中起跳加力：跃出水面爬上岸（普通力度会被浮力吃掉困在水里）
+          this.vy = inWater ? -(5.6 + dist * 1.6) : -(4.2 + dist * 2.4);
+        }
+        this.jumpStartX = this.cx;
         this.state = 1;
         this.squash = -0.7;
       }
     } else {
-      if (this.onGround && this.vy >= 0 && this.aiT > 10) {
+      // 空中转向（与主角空操一致）：跳跃中持续朝面向水平加速——
+      // 没有它起跳瞬间 vx 被墙清零后就只剩原地垂直跳，永远出不去
+      this.vx = Math.max(-2.6, Math.min(2.6, this.vx + this.facing * 0.12));
+      const landed = this.onGround && this.vy >= 0 && this.aiT > 10;
+      if (landed || (surfaced && this.aiT > 20)) {
+        // 起跳后几乎没位移（被墙弹回）→ 直接记一次失败，快速累计触发翻面
+        if (Math.abs(this.cx - this.jumpStartX) < 6) this.stuckT += 10;
         this.state = 0;
         this.aiT = 0;
       }
     }
-    this.groundPhysics(game, 0);
+    this.groundPhysics(game, 0, 0.12, 1, true);
+    // 卡墙脱困（水中/陆地通用）：撞墙计数用"缓慢衰减"而非硬清零——
+    // 史莱姆是"跳一下撞墙→落回水中漂离"的循环，撞墙帧之间 hitWall 为 false，
+    // 硬重置会让跨跳跃的撞墙永远攒不满阈值。累计 24 → 翻面 + 逃亡冷却
+    // （水中 240 tick：足够连续多跳横渡水域脱离，否则冷却一到又朝墙对面的玩家折返死磕）
+    if (this.stuckCd > 0) this.stuckCd--;
+    if (this.hitWall) {
+      this.stuckT += 3;
+    } else {
+      this.stuckT = Math.max(0, this.stuckT - 1);
+    }
+    if (this.stuckT > 24) {
+      this.stuckT = 0;
+      this.stuckCd = inWater ? 240 : 90;
+      this.facing = -this.facing;
+    }
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
+    // 卡墙脱困：朝玩家走却持续撞墙（高墙跳不过去）→ 掉头往另一侧探索
+    if (this.onGround && this.hitWall && player) {
+      if (++this.stuckT > 80) {
+        this.stuckT = 0;
+        this.stuckCd = 90; // 掉头冷却：期间不再朝玩家折返
+      }
+    } else if (!this.hitWall) {
+      this.stuckT = 0;
+    }
+    if (this.stuckCd > 0) this.stuckCd--;
     let dir = this.facing;
-    if (player) {
+    if (player && this.stuckCd === 0) {
       dir = Math.sign(player.cx - this.cx) || 1;
       // 跳过障碍
       if (this.onGround && this.hitWall) this.vy = -6;
       // 门：会尝试跳，不做开门
-    } else if (this.hitWall) {
-      dir = -this.facing;
+    } else if (this.hitWall && this.onGround) {
+      dir = -this.facing; // 掉头期间撞墙就反向
     }
     this.facing = dir;
     this.vx += dir * 0.08;
@@ -150,7 +225,12 @@ export class Enemy extends Entity {
       // ---- 游荡：自主巡航，到点换向 ----
       if (this.state === 1 || !this.target || Math.hypot(this.target.x - this.cx, this.target.y - this.cy) < 32) {
         this.state = 0;
-        this.target = { x: this.cx + (Math.random() - 0.5) * 320, y: this.cy + (Math.random() - 0.5) * 220 };
+        // 脱困冷却内：重选目标强制向上（120-260px）——困在谷底时随机目标仍在低位，永远飞不出去
+        const escape = this.stuckCd > 0;
+        this.target = {
+          x: this.cx + (Math.random() - 0.5) * (escape ? 200 : 320),
+          y: this.cy + (escape ? -(100 + Math.random() * 160) : (Math.random() - 0.5) * 220),
+        };
       }
       const dx = this.target.x - this.cx, dy = this.target.y - this.cy;
       const d = Math.hypot(dx, dy) || 1;
@@ -164,6 +244,18 @@ export class Enemy extends Entity {
     // 追击上限略高于游荡：游荡 1.8，追击 2.2（太快会贴脸躲不开）
     const maxSpd = this.key === 'servant_of_cthulhu' ? 4.2 : (this.state === 1 ? 2.2 : 1.8);
     if (spd > maxSpd) { this.vx = (this.vx / spd) * maxSpd; this.vy = (this.vy / spd) * maxSpd; }
+    // 蝙蝠/恶魔眼不入水：前方是液体则向上弹开并重选航向
+    if (this.key === 'cave_bat' || this.key === 'demon_eye') {
+      const st = game.world.store;
+      const ax = Math.floor((this.cx + this.vx * 4) / TILE), ay = Math.floor((this.cy + this.vy * 4) / TILE);
+      if (st.inBounds(ax, ay) && st.liquid[st.idx(ax, ay)] > 40) {
+        this.vx = -this.vx * 0.5;
+        this.vy = -Math.abs(this.vy || 1) * 0.8 - 0.8;
+        this.state = 0;
+        this.target = null;
+        return;
+      }
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) { this.vx = -this.vx * 0.7; this.state = 0; this.target = null; } // 撞墙重新选向
     if (this.hitHead) this.vy = -this.vy * 0.7;

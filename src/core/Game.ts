@@ -653,6 +653,9 @@ export class Game implements GameHooks {
     }
     // 普通
     st.setTile(x, y, 0);
+    // 破坏树木正下方的支撑方块 → 整棵树倒下（掉木材）
+    const treeOnTop = this.world.trees.find((t) => t.x === x && t.y + t.h === y);
+    if (treeOnTop) this.fellTree(x, y - 1);
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, def.drop, 1);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
   }
@@ -897,8 +900,8 @@ export class Game implements GameHooks {
       if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
       this.swingHitSet.add(e.id);
       const crit = Math.random() < 0.08;
-      // 工具（镐/斧）也有攻击力但远弱于剑：功率/10（铁镐 5 / 铁斧 6，铁剑 16）
-      const baseDmg = tool?.damage ?? Math.max(2, Math.ceil((tool?.power ?? 10) / 10));
+      // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急
+      const baseDmg = tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (0.9 + Math.random() * 0.2)));
       const kdir = Math.sign(dx) || this.player.facing;
       const killed = e.hurt(dmg, kdir * 3.2, -2.5, this);
