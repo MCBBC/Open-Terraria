@@ -361,11 +361,17 @@ export class Renderer {
       const d = TILE_DEFS[world.store.type[world.store.idx(xx, yy)]];
       return !!d && d.solid;
     };
+    // 液体按类型配色（TEdit 同款透明度档：岩浆 0.85 近实心 / 水·蜂蜜半透明）
+    const liquidStyle = (t: number) =>
+      t === 2 ? 'rgba(232,98,44,0.85)'   // 岩浆
+      : t === 3 ? 'rgba(233,166,43,0.8)' // 蜂蜜
+      : 'rgba(61,111,209,0.62)';         // 水
     for (let y = ty0; y <= ty1; y++) {
       for (let x = tx0; x <= tx1; x++) {
-        ctx.fillStyle = 'rgba(61,111,209,0.62)'; // 每格重设：波光块会改 fillStyle，不重设会把水体画白
         const i = world.store.idx(x, y);
         const lq = world.store.liquid[i];
+        const ltype = world.store.liquidType[i];
+        ctx.fillStyle = liquidStyle(ltype); // 每格按类型重设：波光块会改 fillStyle
         // 渲染阈值：模拟残留（<40）不绘制 —— 水流过后不留"藏在图块里"的浸润残影
         if (lq < 40) continue;
         const hPx = (lq / 255) * ts;
@@ -390,9 +396,8 @@ export class Renderer {
         // 把对角角落也填掉（变成方形/八方向浸润），水不应渗进斜对角块
         ctx.fillRect(px0, top, px1 - px0, y * ts + ts - top); // 横条
         ctx.fillRect(x * ts, py0, ts, py1 - py0);             // 竖条
-        // 波光粼粼：水面之上的白色闪光薄膜 —— 水体本身不动，
-        // 只在水顶面上缘覆盖一层呼吸明灭的白膜 + 跳动的碎光
-        if (aboveAir) {
+        // 波光粼粼：水面之上的白色闪光薄膜（仅水；岩浆/蜂蜜不适用）
+        if (aboveAir && ltype <= 1) {
           const surfY = y * ts + (ts - hPx);
           const t = performance.now() * 0.0016; // 慢速波相
           const ph = ((x * 2654435761) >>> 0) % 628;
