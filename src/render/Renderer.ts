@@ -726,7 +726,7 @@ export class Renderer {
     }
 
     // 挥舞动画（工具/武器）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
-    // 使用类物品（药水/方块等托举）改在身体前方绘制（见 drawPlayer 后段），否则被身体挡住
+    // 静持物品 + 工具/武器挥砍：人物身后图层（挥砍在前太露馅，收回身后）
     if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
       this.drawUseItem(ctx, p, swing);
     }
@@ -758,7 +758,9 @@ export class Renderer {
       let frame: typeof idle = null;
       // 挥砍/使用中：身体切换到动作姿态（Player.png 倒数 4 帧 = Player_19-22）
       if (swing) {
-        const swingIdx = 19 + (Math.floor((1 - swing.t / swing.dur) * 4) % 4);
+        // 手部动作帧比道具旋转慢约 16%（跟手），并钳在末帧——
+        // 原来的 %4 会让手在 prog=1 时跳回第一帧，比工具"快半拍"
+        const swingIdx = 19 + Math.min(3, Math.floor((1 - swing.t / swing.dur) * 0.84 * 4));
         frame = af['Player_' + swingIdx] ?? idle;
       } else if (!p.onGround) {
         // 空中：上升用 12（收腿）、下落用 14（张腿）
@@ -847,7 +849,7 @@ export class Renderer {
    *  使用类物品（托举）：前半程旋转举起（与已验证效果一致），
    *  后半程沿同一路径转回（三角波往返），收尾回到起始位——
    *  不会继续向前转导致"放下时飘到身前一格"。
-   *  调用时机决定图层：工具/武器在身体绘制之前调用，使用类物品之后调用 */
+   *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
   private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number }) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
@@ -858,15 +860,18 @@ export class Renderer {
     const pa = 1 - (1 - prog) ** 3;
     const pb = prog + (0.6 * Math.sin(2 * Math.PI * prog)) / (2 * Math.PI);
     // 使用类：锚点随进程从挥砍位过渡到静持位（收尾与静持姿势逐像素衔接，无顿挫）
+    // 工具/武器挥砍锚点：更高更外（Y 0.62 / X 0.75）
     const idleAX = 0.48, idleAY = 0.80; // 静持锚点（与上方持有物显示一致）
-    const ax = isTool ? 0.62 : 0.62 + (idleAX - 0.62) * pb;
-    const ay = isTool ? 0.74 : 0.74 + (idleAY - 0.74) * pb;
+    const ax = isTool ? 0.75 : 0.62 + (idleAX - 0.62) * pb;
+    const ay = isTool ? 0.62 : 0.74 + (idleAY - 0.74) * pb;
     const shX = p.cx + p.facing * p.w * ax, shY = p.y + p.h * ay; // 持握点右移下移
     ctx.save();
     ctx.translate(shX, shY);
     if (p.facing === -1) ctx.scale(-1, 1); // 整体镜像（贴图+姿态），左右完全对称
-    // 工具：完整挥砍弧；使用类：从 -47° 举到静持角 +26°（终点与静持完全一致）
-    const arc = isTool ? -1.1 + prog * 2.0 : -0.825 + (0.45 + 0.825) * pa;
+    // 工具：完整挥砍弧，尾段轻微加速（斜率 ≈1.2 倍线性）与手部动作收尾对齐；
+    // 使用类：从 -47° 举到静持角 +26°（终点与静持完全一致）
+    const pt = (prog + 0.3 * prog * prog) / 1.3;
+    const arc = isTool ? -1.1 + pt * 2.0 : -0.825 + (0.45 + 0.825) * pa;
     ctx.rotate(arc);
     if (ar) {
       const s = 0.9;
