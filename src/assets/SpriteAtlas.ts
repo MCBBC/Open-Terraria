@@ -45,6 +45,8 @@ export const VANILLA_MISC = [
   ...Array.from({ length: 11 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
+  'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
+  'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png',
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;

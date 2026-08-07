@@ -39,10 +39,15 @@ const MISC = [
   ...Array.from({ length: 7 }, (_, i) => `Tiles_5_${i}.png`),
   // 仙人掌生物群系变体（腐化/神圣/猩红，与 Tiles_80 同 18px 网格）
   'Evil_Cactus.png', 'Good_Cactus.png', 'Crimson_Cactus.png',
+  // 液体贴图（TEdit GetLiquid：0 水 / 1 岩浆 / 11 蜂蜜 / 14 微光）
+  'Liquid_0.png', 'Liquid_1.png', 'Liquid_11.png', 'Liquid_14.png',
+  // 1.4 原版液体主表（LiquidRenderer：0 水 / 1 岩浆 / 11 蜂蜜，48×1360）
+  'Misc/water_0.png', 'Misc/water_1.png', 'Misc/water_11.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);
-  if (existsSync(src)) copyFileSync(src, join(OUT_DIR, m));
+  // 子目录展平（Misc/water_0 → Misc_water_0，目标目录无子目录结构）
+  if (existsSync(src)) copyFileSync(src, join(OUT_DIR, m.replace(/\//g, '_')));
 }
 
 const hex = (c) => (c ? '#' + c.replace('#', '').slice(0, 6).toUpperCase() : '#808080');

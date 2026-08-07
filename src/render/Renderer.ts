@@ -7,6 +7,7 @@ import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import type { Player } from '../entities/Player';
@@ -348,76 +349,13 @@ export class Renderer {
   }
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
-    const ctx = this.ctx;
+    // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）
     const ts = TILE;
-    const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / ts));
-    const tx1 = Math.min(world.w - 1, Math.ceil((cam.x + viewW / 2 / z) / ts));
-    const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts));
-    const ty1 = Math.min(world.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts));
-    ctx.fillStyle = 'rgba(61,111,209,0.62)';
-    // 渲染外扩判定：邻格是否实心（仅向实心方块浸润，不漏进空气）
-    const solidAt = (xx: number, yy: number) => {
-      if (!world.store.inBounds(xx, yy)) return false;
-      const d = TILE_DEFS[world.store.type[world.store.idx(xx, yy)]];
-      return !!d && d.solid;
-    };
-    // 液体按类型配色（TEdit 同款透明度档：岩浆 0.85 近实心 / 水·蜂蜜半透明）
-    const liquidStyle = (t: number) =>
-      t === 2 ? 'rgba(232,98,44,0.85)'   // 岩浆
-      : t === 3 ? 'rgba(233,166,43,0.8)' // 蜂蜜
-      : 'rgba(61,111,209,0.62)';         // 水
-    for (let y = ty0; y <= ty1; y++) {
-      for (let x = tx0; x <= tx1; x++) {
-        const i = world.store.idx(x, y);
-        const lq = world.store.liquid[i];
-        const ltype = world.store.liquidType[i];
-        ctx.fillStyle = liquidStyle(ltype); // 每格按类型重设：波光块会改 fillStyle
-        // 渲染阈值：模拟残留（<40）不绘制 —— 水流过后不留"藏在图块里"的浸润残影
-        if (lq < 40) continue;
-        const hPx = (lq / 255) * ts;
-        // 上方有"可见"液体时整格连通（残留 <40 不可见，不触发连通填充）
-        const above = y > 0 ? world.store.liquid[world.store.idx(x, y - 1)] : 0;
-        // 水顶面判定：上方是空气（无液体且无实心块）——封闭水格不参与波光
-        const aboveAir = above < 40 && !solidAt(x, y - 1) && world.store.type[world.store.idx(x, y - 1)] === 0;
-        const top = above >= 40 ? y * ts : y * ts + (ts - hPx);
-        // 渲染浸润：按水量分 6 档量化（每档 1/6 格），不同水平面用不同浸润占用，
-        // 避免水面贴近格顶时连续比例把整个邻格刷满。只改绘制矩形，液体数据不变。
-        const level = Math.min(6, Math.max(1, Math.ceil(((lq - 40) / 215) * 6)));
-        const bleed = (ts * level) / 6;
-        let px0 = x * ts, px1 = (x + 1) * ts;
-        if (solidAt(x - 1, y)) px0 -= bleed;
-        if (solidAt(x + 1, y)) px1 += bleed;
-        let py0 = top, py1 = y * ts + ts;
-        // 上方浸润只在满档（6/6 封闭水格）时生效；浅水层只画自己的 hPx，不上渗
-        if (solidAt(x, y - 1) && above < 40 && level === 6) py0 = y * ts - bleed;
-        if (solidAt(x, y + 1)) py1 += bleed;
-        // 十字浸润：横条（左右外扩，本格纵向范围）∪ 竖条（本格横向范围，上下外扩）。
-        // 用两个矩形的并集而非一个大矩形 —— 大矩形会在左右+上下同时浸润时
-        // 把对角角落也填掉（变成方形/八方向浸润），水不应渗进斜对角块
-        ctx.fillRect(px0, top, px1 - px0, y * ts + ts - top); // 横条
-        ctx.fillRect(x * ts, py0, ts, py1 - py0);             // 竖条
-        // 波光粼粼：水面之上的白色闪光薄膜（仅水；岩浆/蜂蜜不适用）
-        if (aboveAir && ltype <= 1) {
-          const surfY = y * ts + (ts - hPx);
-          const t = performance.now() * 0.0016; // 慢速波相
-          const ph = ((x * 2654435761) >>> 0) % 628;
-          // 薄膜白光：跨在水面线上下 2px 的白膜（盖住水体顶缘），亮度缓慢呼吸
-          const a = 0.22 + 0.28 * (0.5 + 0.5 * Math.sin(t * 1.1 + ph * 0.02));
-          ctx.fillStyle = `rgba(255,255,255,${a.toFixed(3)})`;
-          ctx.fillRect(px0, surfY - 1, px1 - px0, 2);
-          // 碎光：贴着水面线滑动的亮斑（不悬空，随微起伏贴面移动）
-          for (let k = 0; k < 2; k++) {
-            const tw = Math.sin(t * 1.4 + (ph + k * 317) * 0.013 + k * 2);
-            if (tw > 0.5) {
-              const gx = x * ts + ((ph % 11) + t * 2.5) % Math.max(1, ts - 5);
-              const gy = surfY + Math.sin(t * 1.2 + k * 1.4) * 0.6; // ±0.6px 贴面起伏
-              ctx.fillStyle = `rgba(255,255,255,${(0.7 * (tw - 0.5) / 0.5).toFixed(3)})`;
-              ctx.fillRect(gx, gy, 3 + k * 2, 1);
-            }
-          }
-        }
-      }
-    }
+    const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
+    const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
+    const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
+    const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
+    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, performance.now());
   }
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
