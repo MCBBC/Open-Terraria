@@ -29,7 +29,7 @@ const IMPORTED_TREE_TYPES = new Set<number>(
     'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
     'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
     'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree',
-    'v_72_mushroom_tree']
+    'v_72_mushroom_tree', 'v_323_palm_trees']
     .map((k) => TILE_BY_KEY[k])
     .filter((v): v is number => v !== undefined),
 );

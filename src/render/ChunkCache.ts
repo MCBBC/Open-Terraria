@@ -241,10 +241,11 @@ export class ChunkCache {
       }
     }
     // ---- 第四遍：原版树冠/树枝（tile 5 标记帧，跨 chunk 外扩绘制） ----
-    // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪
-    // 所有树类 tile（5/583-589/596/616/634）的树冠/树枝标记帧
+    // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪。
+    // 棕榈（323）整棵都在此绘制：干身 frameY 是倾斜偏移（最大 ±12px 跨列），
+    // 主遍画会在 chunk 边缘列被裁剪 → 干+冠全部走外扩遍
     if (this.autotiler) {
-      const treeIds = ['tree', 'v_72_mushroom_tree', 'v_5_trees',
+      const treeIds = ['tree', 'v_72_mushroom_tree', 'v_323_palm_trees', 'v_5_trees',
         'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
         'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
         'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
@@ -257,12 +258,23 @@ export class ChunkCache {
             const i = st.idx(tx, ty);
             if (st.type[i] !== v5) continue;
             const fx = st.frameX[i], fy = st.frameY[i];
-            if (fy < 198 || fx < 22) continue; // 树干由主遍绘制
             const def = TILE_DEFS[st.type[i]];
-            drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, def?.vanilla?.sheet ?? 5, true,
-              { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
-              worldSurface: this.world.groundLevel, worldW: this.world.w });
+            const sheet = def?.vanilla?.sheet ?? 5;
+            const isPalm = sheet === 323;
+            const isCrown = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198 && fx >= 22);
+            if (isPalm) {
+              // 棕榈：干+冠都画（干身倾斜跨列，必须外扩遍）
+              drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, isCrown,
+                { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
+                worldSurface: this.world.groundLevel, worldW: this.world.w });
+            } else if (isCrown) {
+              // 其他树：仅标记帧（干身由主遍绘制）
+              drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true,
+                { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
+                worldSurface: this.world.groundLevel, worldW: this.world.w });
+            }
           }
         }
       }

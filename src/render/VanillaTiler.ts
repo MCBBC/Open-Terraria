@@ -220,6 +220,46 @@ export function drawTreeCell(
   trees?: TreeStyleData,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
+  // 棕榈树（tile 323）：树冠帧藏在树干列内（frameX 88-132，无独立标记格）。
+  //  TEdit：Tree_Tops_15（80×80、82px 步长），srcX = 变体×82、srcY = 沙型×82，
+  //  底部锚定 + X 偏移 frameY/16 格；沙型 = 下方沙块种类（普通0/猩红1/珍珠2/腐化3）
+  if (sheet === 323) {
+    if (fx >= 88 && fx <= 132) {
+      if (!foliageOnly) return; // 树冠/干身全部由外扩遍绘制（倾斜跨列/跨 chunk 防裁剪）
+      const img15 = atlas.vimages.get('vanilla/Tree_Tops_15.png');
+      if (!img15) return;
+      // 沙型：向下扫沙块
+      let palmType = 0;
+      for (let i = 0; i < 100; i++) {
+        const ty = y + i;
+        if (ty >= st.h) break;
+        const t = st.type[st.idx(x, ty)];
+        if (t === 0) continue;
+        const tk = TILE_DEFS[t]?.key;
+        palmType = tk === 'v_234_crimsand_block' ? 1 : tk === 'v_116_pearlsand_block' ? 2
+          : tk === 'v_112_ebonsand_block' ? 3 : 0;
+        break;
+      }
+      const v323 = Math.floor((fx - 88) / 22); // 0/1/2 变体
+      const sx15 = v323 * 82, sy15 = palmType * 82;
+      if (sx15 + 80 > img15.width || sy15 + 80 > img15.height) return;
+      // 底部锚定居中 + X 偏移 = frameY【像素·有符号】（原版 dest.X += V*zoom/16，
+      // zoom=16 即 V 像素；65534 = -2 的 u16 回绕）
+      const leanCrown = fy >= 32768 ? fy - 65536 : fy;
+      ctx.drawImage(img15, sx15, sy15, 80, 80,
+        px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
+      return;
+    }
+    // 干身（原版 TileDrawing case 323：20×20 帧 22px 步长，底部对齐；
+    // frameY 是**有符号像素偏移**——棕榈树干随高度倾斜，65534 = -2 的 u16 回绕）
+    const img323 = atlas.vimages.get('vanilla/Tiles_323.png');
+    if (!img323 || fx + 20 > img323.width) return;
+    const lean = fy >= 32768 ? fy - 65536 : fy; // 原版 vector2.X += frameY
+    const pad323 = treeFrameBottomPad(img323, fx, 0);
+    const artH323 = 20 - pad323;
+    ctx.drawImage(img323, fx, 0, 20, 20, px - 2 + lean, py + TILE - artH323, 20, 20);
+    return;
+  }
   // 蘑菇树（tile 72）：独立渲染路径——U≥36 标记帧 = 巨蘑菇顶（Shroom_Tops，60×42、62px 步长、底部锚定）
   if (sheet === 72) {
     if (foliageOnly === false && fx >= 36) return; // 顶格由外扩遍画
@@ -411,10 +451,11 @@ export function drawVanillaCell(
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
   trees?: TreeStyleData,
 ): void {
-  // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634）：
-  // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）
-  if (frame === 'style' && TREE_SHEET_STYLES[sheet] !== undefined) {
-    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py, sheet, false, trees);
+  // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634 + 棕榈 323 + 蘑菇树 72）：
+  // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）。
+  // 棕榈干身 frameY 是倾斜偏移（跨列）——主遍跳过，整棵由树族外扩遍绘制防裁剪
+  if (frame === 'style' && (TREE_SHEET_STYLES[sheet] !== undefined || sheet === 323)) {
+    if (sheet !== 323) drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py, sheet, false, trees);
     return;
   }
   // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体
