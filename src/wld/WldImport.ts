@@ -11,7 +11,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   0: 'dirt',          // Dirt
   1: 'stone',         // Stone
   2: 'grass',         // Grass
-  3: 'tallgrass',     // Plants（地表植物）
+  3: { key: 'v_3_forest_short_plants', copyFrame: true },  // Plants（花草杂草变体帧直拷）
   4: { key: 'torch', copyFrame: true },  // Torch（保留原版墙面/熄灭变体帧）
   5: { key: 'v_5_trees', copyFrame: true },  // Tree（原版 Tiles_5，22px 步长样式帧直拷）
   6: 'ore_iron',      // Iron
@@ -26,7 +26,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   21: 'chest',  // Chest（帧按格距重建，不直拷——wld 存的是格偏移 0/1 不是像素）
   53: 'sand',         // Sand
   59: 'mud',          // Mud
-  73: 'tallgrass',    // Plants 2
+  73: { key: 'v_73_forest_tall_plants', copyFrame: true },  // Plants 2（高草，16×32 帧）
   147: 'snow',        // Snow
   // ---- 原版素材批次（Tiles_N 表 + TEdit framing） ----
   57: 'ash', 123: 'silt', 40: 'clay', 54: 'glass', 56: 'obsidian',
@@ -256,7 +256,8 @@ const TILE_MAP: Record<number, MapEntry> = {
   52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
   61: 'tallgrass', 62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // jungle plants(草化)/藤蔓/荆棘
   74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / Hellforge→熔炉 / 仙人掌（渲染端现场分帧）
-  83: 'flower', 84: 'flower', // herbs mature→花 / bloom→花
+  83: { key: 'v_83_herbs_mature', copyFrame: true },  // Herbs (Mature)
+  84: { key: 'v_84_herbs_bloom', copyFrame: true },  // Herbs (Bloom)
   // ---- FTW_V2 补全 ----
   625: 'v_625_neon_moss_block',  // Neon Moss Block
   151: 'v_151_sandstone_brick',  // Sandstone Brick
