@@ -1080,19 +1080,22 @@ export class Game implements GameHooks {
     const held = this.player.inv.heldItem();
     if (!held) return;
     const tool = ITEM_DEFS[held.id].tool;
-    const reach = tool?.reach ?? TILE * 3;
+    // 近战判定范围因武器而异：剑用完整 reach；镐/斧/锤当武器不顺手（×0.8）；
+    // 空手默认 3 格
+    const reach = (tool?.reach ?? TILE * 3) * (tool?.type === 'sword' ? 1 : tool ? 0.8 : 1);
     // 剑/工具挥舞顺带清除鼠标处的杂草
     {
       const [htx, hty] = this.camera.tileUnder(this.input.mouseX, this.input.mouseY);
       if (this.world.store.get(htx, hty) === T.TALLGRASS) this.breakTile(htx, hty);
     }
-    // 弧线判定：玩家前方扇形
+    // 弧线判定：圆心向朝向方向平移（身后不再被波及；小动物/怪物共用同一判定圆）
+    const arcX = this.player.cx + this.player.facing * reach * 0.35;
     const prog = 1 - this.swing.t / this.swing.dur;
     // 小动物：任何挥击一击致死
     for (const cent of this.entities.critters) {
       const c = cent as Critter;
       if (this.swingHitSet.has(c.id)) continue;
-      const cdx = c.cx - this.player.cx, cdy = c.cy - this.player.cy;
+      const cdx = c.cx - arcX, cdy = c.cy - this.player.cy;
       if (Math.hypot(cdx, cdy) <= reach + c.w / 2) {
         this.swingHitSet.add(c.id);
         c.hurt(this);
@@ -1101,7 +1104,7 @@ export class Game implements GameHooks {
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (this.swingHitSet.has(e.id)) continue;
-      const dx = e.cx - this.player.cx;
+      const dx = e.cx - arcX;
       const dy = e.cy - this.player.cy;
       const dist = Math.hypot(dx, dy);
       if (dist > reach + e.w / 2) continue;

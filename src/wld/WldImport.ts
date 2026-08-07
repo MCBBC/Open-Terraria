@@ -290,6 +290,12 @@ const TILE_MAP: Record<number, MapEntry> = {
   41: 'v_41_blue_brick',
   60: 'v_60_jungle_grass_block',
   70: 'v_70_mushroom_grass_block',
+  25: 'v_25_ebonstone_block',  // Ebonstone Block
+  202: 'v_202_sunplate_block', // Sunplate Block
+  71: { key: 'v_71_mushroom_plant', copyFrame: true }, // Mushroom Plant
+  24: { key: 'v_24_corruption_short_plants', copyFrame: true }, // Corruption Short Plants
+  32: { key: 'v_32_corruption_thorns', copyFrame: true }, // Corruption Thorns
+  27: { key: 'v_27_sunflower', copyFrame: true }, // Sunflower (2x4)
   75: 'v_75_obsidian_brick',
   199: 'v_199_crimson_grass_block',
 };
@@ -688,6 +694,8 @@ const ITEM_MAP: Record<number, string> = {
   5484: 'vi_5484_cow_bell',  // Cow Bell
   5501: 'vi_5501_old_companion_locket',  // Old Companion Locket
   5509: 'vi_5509_vampire_pendant',  // Vampire Pendant
+  31: 'vi_31_bottle',  // Bottle
+  41: 'vi_41_flaming_arrow',  // Flaming Arrow
   5505: 'vi_5505_mean_goblin_s_spikes',  // Mean Goblin\'s Spikes
   5525: 'vi_5525_cursed_piper_flute',  // Cursed Piper Flute
 };

@@ -405,5 +405,12 @@ def({ key: 'v_199_crimson_grass_block', name: 'Crimson Grass Block', solid: true
 def({ key: 'v_60_jungle_grass_block', name: 'Jungle Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: null as unknown as string, vanilla: { sheet: 60, frame: 'auto' } });
 def({ key: 'v_70_mushroom_grass_block', name: 'Mushroom Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: null as unknown as string, vanilla: { sheet: 70, frame: 'auto' } });
 
+def({ key: 'v_25_ebonstone_block', name: 'Ebonstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#6D5A80', blend: true, drop: null as unknown as string, vanilla: { sheet: 25, frame: 'auto' } });
+def({ key: 'v_202_sunplate_block', name: 'Sunplate Block', solid: true, opacity: 1, pick: 0, mapColor: '#D5B21C', blend: true, drop: null as unknown as string, vanilla: { sheet: 202, frame: 'auto' } });
+def({ key: 'v_71_mushroom_plant', name: 'Mushroom Plant', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#B6AF82', drop: null as unknown as string, vanilla: { sheet: 71, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_24_corruption_short_plants', name: 'Corruption Short Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#7A74DA', drop: null as unknown as string, vanilla: { sheet: 24, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_32_corruption_thorns', name: 'Corruption Thorns', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#9787B7', drop: null as unknown as string, vanilla: { sheet: 32, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_27_sunflower', name: 'Sunflower', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 4, mapColor: '#E2C431', drop: null as unknown as string, vanilla: { sheet: 27, frame: 'style', fw: 2, fh: 4 } });
+
 // 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));

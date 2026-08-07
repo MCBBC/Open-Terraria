@@ -1212,6 +1212,39 @@ export class Renderer {
     const [pcx, pcy] = cam.worldToScreen(player.cx, player.cy);
     ctx.fillStyle = '#FF6600';
     ctx.fillRect(pcx - 2, pcy - 2, 4, 4);
+    // 手持工具/武器的范围显示（与 Game 判定一致）：
+    // 1) 近战判定圆：剑 = 完整 reach，镐/斧/锤 ×0.8，空手 3 格；圆心向朝向平移 reach×0.35
+    // 2) 挖掘圆（镐/锤）：4.5 格（tryMine 范围）
+    // 3) 砍树圆（斧）：4.5 格（同一 tryMine 通路，斧作用对象为树）
+    {
+      const held = player.inv.heldItem();
+      const tool = held ? ITEM_DEFS[held.id]?.tool : undefined;
+      const reach = (tool?.reach ?? TILE * 3) * (tool?.type === 'sword' ? 1 : tool ? 0.8 : 1);
+      const circle = (cx: number, r: number, color: string, label: string) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(cx, pcy, r * z, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.font = '10px monospace';
+        ctx.fillStyle = color;
+        ctx.fillText(label, cx + 6, pcy - 6);
+      };
+      // 近战判定圆（朝向前移）
+      const acx = pcx + player.facing * reach * 0.35 * z;
+      circle(acx, reach, tool ? 'rgba(0,255,200,0.55)' : 'rgba(120,120,160,0.4)',
+        `attack ${(reach / TILE).toFixed(1)} tiles${tool ? '' : ' (no tool)'}`);
+      // 挖掘范围（镐/锤）
+      if (tool && (tool.type === 'pick' || tool.type === 'hammer')) {
+        circle(pcx, TILE * 4.5, 'rgba(255,170,60,0.5)', 'mine 4.5 tiles');
+      }
+      // 砍树范围（斧）
+      if (tool && tool.type === 'axe') {
+        circle(pcx, TILE * 4.5, 'rgba(120,230,90,0.5)', 'chop 4.5 tiles');
+      }
+    }
     // 实体碰撞盒
     for (const e of entities) {
       const ent = e as Entity;
