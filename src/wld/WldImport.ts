@@ -294,6 +294,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   25: 'v_25_ebonstone_block',  // Ebonstone Block
   202: 'v_202_sunplate_block', // Sunplate Block
   71: { key: 'v_71_mushroom_plant', copyFrame: true }, // Mushroom Plant
+  72: { key: 'v_72_mushroom_tree', copyFrame: true },  // Mushroom Tree（U≥36 标记帧走 ShroomTop）
   24: { key: 'v_24_corruption_short_plants', copyFrame: true }, // Corruption Short Plants
   32: { key: 'v_32_corruption_thorns', copyFrame: true }, // Corruption Thorns
   27: { key: 'v_27_sunflower', copyFrame: true }, // Sunflower (2x4)
@@ -794,7 +795,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
 
   const save: SaveData = {
     format: 'sandboxworld.save',
-    version: 1,
+    version: 2, // 墙已是原版 id 语义——不能低于 2，否则 loadSave 触发旧墙值迁移翻转
     header: {
       name: wld.title || '导入的地图',
       seed: 0,
@@ -806,6 +807,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       created: Date.now(),
       playTimeMs: 0,
       wldVersion: wld.version,
+      treeX: wld.treeX,
+      treeStyle: wld.treeStyle,
+      treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
     },
     clock: { timeOfDay, dayCount: 1 },
     tiles: bytesToB64(rleTiles({ type, frameX, frameY })),

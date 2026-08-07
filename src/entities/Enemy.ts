@@ -430,6 +430,9 @@ export class Enemy extends Entity {
   /** 受击。返回是否死亡 */
   hurt(dmg: number, kbx: number, kby: number, game: GameHooks): boolean {
     if (this.iframes > 0) return false;
+    // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
+    const def = this.def.defense ?? 0;
+    dmg = Math.max(1, Math.round(dmg - def * 0.5));
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒

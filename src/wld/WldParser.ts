@@ -31,6 +31,9 @@ export interface WldWorld {
   dayTime: boolean;
   isCrimson: boolean;
   hardMode: boolean;
+  treeX: number[];
+  treeStyle: number[];
+  treeTops: number[];
   tiles: WldTileData;
   chests: WldChest[];
   npcs: WldNPC[];
@@ -102,8 +105,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 141) r.i64(); // creationTime
   if (version >= 284) r.i64(); // lastPlayed
   r.u8(); // moonType
-  for (let i = 0; i < 3; i++) r.i32(); // treeX
-  for (let i = 0; i < 4; i++) r.i32(); // treeStyle
+  const treeX = [r.i32(), r.i32(), r.i32()];       // 世界横向 4 区分界（树样式用）
+  let treeTops: number[] = [];                    // TreeTops 13 区域变体（v≥211 优先于 header treeStyle）
+  const treeStyle = [r.i32(), r.i32(), r.i32(), r.i32()]; // 各区森林树样式
   for (let i = 0; i < 3; i++) r.i32(); // caveBackX
   for (let i = 0; i < 4; i++) r.i32(); // caveBackStyle
   r.i32(); r.i32(); r.i32(); // ice/jungle/hell back style
@@ -174,8 +178,10 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 204) r.boolean(); // combat book
   if (version >= 207) { r.i32(); r.boolean(); r.boolean(); r.boolean(); }
   if (version >= 211) {
+    // TreeTops 变体表（WorldGen.TreeTops.Load：13 个区域树样式，v≥211 世界用这个）
     const n = r.i32();
-    for (let i = 0; i < n; i++) r.i32();
+    treeTops = [];
+    for (let i = 0; i < n; i++) treeTops.push(r.i32());
   }
   if (version >= 212) { r.boolean(); r.boolean(); }
   if (version >= 216) { r.i32(); r.i32(); r.i32(); r.i32(); }
@@ -259,6 +265,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   return {
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY,
     groundLevel, rockLevel, time, dayTime, isCrimson, hardMode,
+    treeX, treeStyle, treeTops,
     tiles, chests, npcs,
   };
 }

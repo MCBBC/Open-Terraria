@@ -4,6 +4,7 @@ export interface EnemyDef {
   name: string;
   hp: number;
   damage: number;        // 接触伤害
+  defense?: number;      // 防御（原版 NPC.cs SetDefaults；受伤 = max(1, dmg - def*0.5)）
   knockbackResist: number; // 0-1（越高越抗击退）
   width: number; height: number; // px
   flying?: boolean;
@@ -25,49 +26,49 @@ export interface EnemyDef {
 
 export const ENEMY_DEFS: Record<string, EnemyDef> = {
   slime_green: {
-    key: 'slime_green', name: '绿史莱姆', hp: 35, damage: 6, knockbackResist: 0,
+    key: 'slime_green', name: '绿史莱姆', hp: 14, damage: 6, defense: 0, knockbackResist: 1.2,
     width: 20, height: 14, dayOnly: true, mapColor: '#5FD35F',
     gore: ['#5FD35F', '#3E9E3E', '#8FEF8F'],
     hitSound: ['NPC_Hit_1', 'NPC_Hit_2'], killedSound: ['NPC_Killed_1'],
     drops: [{ item: 'gel', min: 1, max: 2, chance: 1 }],
   },
   slime_blue: {
-    key: 'slime_blue', name: '蓝史莱姆', hp: 55, damage: 9, knockbackResist: 0,
+    key: 'slime_blue', name: '蓝史莱姆', hp: 25, damage: 7, defense: 2, knockbackResist: 1.0,
     width: 22, height: 16, mapColor: '#4FA8E0',
     gore: ['#4FA8E0', '#2F78B0', '#8FCFF0'],
     hitSound: ['NPC_Hit_1', 'NPC_Hit_2'], killedSound: ['NPC_Killed_1'],
     drops: [{ item: 'gel', min: 1, max: 2, chance: 1 }],
   },
   zombie: {
-    key: 'zombie', name: '僵尸', hp: 90, damage: 14, knockbackResist: 0.3,
+    key: 'zombie', name: '僵尸', hp: 45, damage: 14, defense: 6, knockbackResist: 0.5,
     width: 16, height: 30, nightOnly: true, mapColor: '#6E8B5E',
     gore: ['#6E8B5E', '#4A5E3E', '#9E7860'],
     hitSound: ['NPC_Hit_3', 'NPC_Hit_4'], killedSound: ['NPC_Killed_2', 'NPC_Killed_3'],
     drops: [
-      { item: 'coin_copper', min: 3, max: 12, chance: 0.8 },
+      { item: 'coin_copper', min: 40, max: 80, chance: 1 },
       { item: 'iron_ore', min: 1, max: 2, chance: 0.15 },
       { item: 'lesser_healing_potion', min: 1, max: 1, chance: 0.04 },
     ],
   },
   demon_eye: {
-    key: 'demon_eye', name: '恶魔眼', hp: 80, damage: 12, knockbackResist: 0.1,
+    key: 'demon_eye', name: '恶魔眼', hp: 60, damage: 18, defense: 2, knockbackResist: 0.8,
     width: 26, height: 22, flying: true, nightOnly: true, avoidWater: true, mapColor: '#D0D0D0',
     gore: ['#D0D0D0', '#909098', '#E85050'],
     hitSound: ['NPC_Hit_7', 'NPC_Hit_8'], killedSound: ['NPC_Killed_6'],
     drops: [
       { item: 'lens', min: 1, max: 1, chance: 0.33 },
-      { item: 'coin_copper', min: 2, max: 8, chance: 0.7 },
+      { item: 'coin_copper', min: 50, max: 100, chance: 1 },
     ],
   },
   cave_bat: {
-    key: 'cave_bat', name: '洞穴蝙蝠', hp: 30, damage: 10, knockbackResist: 0,
+    key: 'cave_bat', name: '洞穴蝙蝠', hp: 16, damage: 13, defense: 2, knockbackResist: 0.8,
     width: 18, height: 14, flying: true, underground: true, avoidWater: true, mapColor: '#7A5A8C',
     gore: ['#7A5A8C', '#5A3A6C', '#A58AB5'],
     hitSound: ['NPC_Hit_9'], killedSound: ['NPC_Killed_4'],
     drops: [{ item: 'coin_copper', min: 1, max: 4, chance: 0.5 }],
   },
   lava_slime: {
-    key: 'lava_slime', name: '熔岩史莱姆', hp: 60, damage: 14, knockbackResist: 0,
+    key: 'lava_slime', name: '熔岩史莱姆', hp: 50, damage: 15, defense: 10, knockbackResist: 1.0,
     width: 24, height: 18, fireImmune: true, hellOnly: true, mapColor: '#E8622C',
     gore: ['#E8622C', '#B03A2E', '#FFA050'],
     hitSound: ['NPC_Hit_1', 'NPC_Hit_2'], killedSound: ['NPC_Killed_1'],
@@ -81,17 +82,17 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
     drops: [{ item: 'iron_ore', min: 1, max: 2, chance: 0.3 }, { item: 'coin_copper', min: 5, max: 15, chance: 0.8 }],
   },
   eye_of_cthulhu: {
-    key: 'eye_of_cthulhu', name: '克苏鲁之眼', hp: 1400, damage: 15, knockbackResist: 1,
+    key: 'eye_of_cthulhu', name: '克苏鲁之眼', hp: 2800, damage: 15, defense: 12, knockbackResist: 0,
     width: 110, height: 110, flying: true, boss: true, mapColor: '#C02020',
     gore: ['#C02020', '#801010', '#FF5050'],
     hitSound: ['NPC_Hit_7', 'NPC_Hit_8'], killedSound: [],
     drops: [
       { item: 'lesser_healing_potion', min: 2, max: 4, chance: 1 },
-      { item: 'coin_copper', min: 80, max: 150, chance: 1 },
+      { item: 'coin_gold', min: 3, max: 3, chance: 1 },
     ],
   },
   servant_of_cthulhu: {
-    key: 'servant_of_cthulhu', name: '克苏鲁之仆', hp: 8, damage: 10, knockbackResist: 0.8,
+    key: 'servant_of_cthulhu', name: '克苏鲁之仆', hp: 8, damage: 12, defense: 0, knockbackResist: 1.0,
     width: 16, height: 16, flying: true, mapColor: '#A03030',
     gore: ['#A03030', '#701818', '#D06060'],
     hitSound: ['NPC_Hit_10'], killedSound: ['NPC_Killed_8'],

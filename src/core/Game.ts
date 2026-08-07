@@ -28,7 +28,8 @@ const IMPORTED_TREE_TYPES = new Set<number>(
   ['v_5_trees',
     'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
     'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
-    'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
+    'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree',
+    'v_72_mushroom_tree']
     .map((k) => TILE_BY_KEY[k])
     .filter((v): v is number => v !== undefined),
 );
@@ -38,6 +39,7 @@ import { SpriteAtlas } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { Sfx, SfxName } from './Sfx';
+import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
 
 const FIXED_DT = 1 / 60;
@@ -76,6 +78,9 @@ export class Game implements GameHooks {
   private mining: { x: number; y: number; progress: number } | null = null;
   /** 当前挖掘目标的硬度缓存（进度归一化用） */
   private hardnessCache = 1;
+  /** 原版 HitTile 伤害积累（劈砍/挖掘通用，阈值 100） */
+  private hitTiles = new HitTile();
+  private lastMineHitTick = -999;
   swing: { t: number; dur: number; item: number } | null = null;
   private swingHitSet = new Set<number>();
 
@@ -333,6 +338,9 @@ export class Game implements GameHooks {
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
+    // 原版 HitTile 衰减（每 2 tick 一次——原版按帧衰减配原版 ~27 帧挥速；
+    // 我们的挥击间隔更长，等比减半保持"连击可积累、停手会消退"）
+    if (this.tickCount % 2 === 0) this.hitTiles.update();
     const w = this.world;
     w.clock.tick(dt * 1000);
     // 昼夜切换：提示 + BGM 变奏
@@ -651,9 +659,8 @@ export class Game implements GameHooks {
           else this.sfx.play('dig');
         }
       }
-      // 挖掘速率固定基数（tool.speed 已改为纯挥舞时长，两者解耦）；
-      // 挖掘快慢仍由镐/斧力(power)体现
-      this.tryMine(tx, ty, tool.power ?? 10, tool.type, 22);
+      // HitTile 节流窗 = 实际挥击间隔（含攻速配饰加成），保证一挥一击
+      this.tryMine(tx, ty, tool.power ?? 10, tool.type, spd);
       return;
     }
 
@@ -731,16 +738,19 @@ export class Game implements GameHooks {
         return;
       }
       if (!wall) { this.mining = null; return; }
-      const key = `${tx},${ty},wall`;
-      if (!this.mining || `${this.mining.x},${this.mining.y},wall` !== key) {
-        this.mining = { x: tx, y: ty, progress: 0 };
+      // HitTile 制（type 2 = 墙）：每挥一击，阈值 100
+      if (this.tickCount - this.lastMineHitTick < Math.max(8, speed)) {
+        this.hardnessCache = 100;
+        this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty, 2) };
+        return;
       }
-      this.hardnessCache = 150;
-      this.mining.progress += speed * (0.6 + power / 50);
-      if (this.tickCount % 8 === 0) {
-        this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2); // 粒子保留，声音已移到挥砍
-      }
-      if (this.mining.progress >= 150) {
+      this.lastMineHitTick = this.tickCount;
+      const total = this.hitTiles.addDamage(tx, ty, Math.round(power * 2), 2); // 锤墙：木 5 击 / 铜 2 击
+      this.hardnessCache = 100;
+      this.mining = { x: tx, y: ty, progress: total };
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2);
+      if (total >= 100) {
+        this.hitTiles.clear(tx, ty, 2);
         this.world.store.setWall(tx, ty, 0);
         this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 8, 1.8);
         this.sfx.play('chop');
@@ -759,27 +769,43 @@ export class Game implements GameHooks {
       this.mining = null;
       return;
     }
-    const hardness = this.tileHardness(type);
-    this.hardnessCache = hardness;
-    const key = `${tx},${ty}`;
-    if (!this.mining || `${this.mining.x},${this.mining.y}` !== key) {
-      this.mining = { x: tx, y: ty, progress: 0 };
+    // ---- 原版 HitTile 制（Player.PickTile 移植）：每挥一击积累伤害，阈值 100 破坏 ----
+    // 每挥一击（按工具速度节流），伤害 = 工具力 × 材质系数（GetPickaxeDamage 简化）
+    if (this.tickCount - this.lastMineHitTick < Math.max(8, speed)) {
+      // 节流窗内：只刷新裂缝显示，不积累
+      this.hardnessCache = 100;
+      this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
+      return;
     }
-    // 工具等级加速（镐：木 1.0x → 金 4.5x；斧对树：木 1.1x → 金 4.1x）
-    const factor = toolType === 'axe' ? 0.5 + power / 25 : 0.5 + power / 20;
-    this.mining.progress += speed * factor;
-    // 粒子反馈（挖掘音已移到挥砍开始，跟随挥砍节奏）
-    if (this.tickCount % 6 === 0) {
-      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, TILE_DEFS[type].mapColor, 2, 1.2);
+    this.lastMineHitTick = this.tickCount;
+    const d = TILE_DEFS[type];
+    // 原版 GetPickaxeDamage：普通块 = 镐力；泥土族（0/40/53/57/59/123/147/224/397）= 镐力×2。
+    // 矿石无系数（只靠镐力门槛 gate）；家具软质 ×2 保持原版 tileNoFail 方向。
+    // 斧 = 斧力×1.2（原版 Player.cs:29576）——绝对值配原版节奏需十击太多，
+    // 按同比例放大（≈斧力×5.5）适配我们的挥击间隔+衰减：铜斧 7→39（3 击）/ 金斧 11→61（2 击）
+    let dmg: number;
+    if (type === T.TREE || IMPORTED_TREE_TYPES.has(type)) {
+      dmg = toolType === 'axe' ? Math.round(power * 5.5) : power;
+    } else if (toolType === 'axe') {
+      dmg = Math.round(power * 5.5);
+    } else if (d.decor || (d.framed && !d.solid)) {
+      dmg = power * 2;
+    } else {
+      const dirtFamily = /^(dirt|grass|sand|snow|mud|silt|clay|ash|slush|ebonsand|crimsand|pearlsand|hardened_sand)/i.test(d.key)
+        || d.key === 'v_123_silt' || d.key === 'v_224_slush_block' || d.key === 'v_397_hardened_sand' || d.key === 'v_112_ebonsand_block';
+      dmg = power * (dirtFamily ? 2 : 1);
     }
-    if (this.mining.progress >= hardness) {
+    const total = this.hitTiles.addDamage(tx, ty, dmg);
+    this.hardnessCache = 100;
+    this.mining = { x: tx, y: ty, progress: total }; // 裂缝显示 = 积累进度
+    this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
+    if (total >= 100) {
+      this.hitTiles.clear(tx, ty);
       this.breakTile(tx, ty);
       this.mining = null;
-      // 破坏完成音：按材质区分（此前普通方块破坏无声——挖掘声只在挥砍开始，
-      // 破坏后的空挥被"无目标不出声"挡掉，只剩拾取声可闻）
-      const td = TILE_DEFS[type];
+      // 破坏完成音：按材质区分
       if (toolType === 'axe') this.sfx.play('chop');
-      else if (td && /stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(td.key)) this.sfx.play('tink');
+      else if (/stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(d.key)) this.sfx.play('tink');
       else this.sfx.play('dig');
     }
   }
@@ -946,6 +972,15 @@ export class Game implements GameHooks {
     for (let p = 0; p < wood; p++) {
       const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
       this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+    }
+    // 橡实：与自有树同规则（75% 掉 2-3 颗，沿树冠区域散落供补种）
+    if (Math.random() < 0.75) {
+      const nAcorn = 2 + Math.floor(Math.random() * 2);
+      for (let a = 0; a < nAcorn; a++) {
+        const ax = x + (Math.random() - 0.5) * 2.5;
+        const ay = top + Math.random() * height * 0.4;
+        this.spawnDrop(ax * TILE + 8, ay * TILE, 'acorn', 1, (Math.random() - 0.5) * 3, -3 - Math.random());
+      }
     }
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
   }
@@ -1170,12 +1205,15 @@ export class Game implements GameHooks {
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
       if (!this.sfx.playFiles(e.def.hitSound)) this.sfx.play('hit');
-      const crit = Math.random() < 0.08;
+      const crit = Math.random() < 0.04; // 原版近战基础暴击 4%（Player.meleeCrit）
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急
       const baseDmg = tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
-      const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (0.9 + Math.random() * 0.2)));
+      // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
+      const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(dx) || this.player.facing;
-      const killed = e.hurt(dmg, kdir * 3.2, -2.5, this);
+      // 击退 = 工具官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）
+      const kb = (tool?.knockback ?? 3) * 0.65;
+      const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
@@ -1487,7 +1525,7 @@ export class Game implements GameHooks {
       for (let dy2 = 1; dy2 <= th; dy2++) {
         if (!st.inBounds(x, groundY - dy2)) break;
         if (st.isActive(x, groundY - dy2)) break;
-        st.setTile(x, groundY - dy2, T.TREE, 0, dy2 === th ? 16 : 0);
+        st.setTile(x, groundY - dy2, T.TREE, dy2 === th ? 22 : 0, dy2 === th ? 198 : 0); // 原版帧：顶标记(22,198)+干身(0,0)
       }
       this.world.registerTree(x, groundY - th, th);
       this.chunks.markDirtyArea(x - 4, groundY - th - 4, x + 4, groundY);

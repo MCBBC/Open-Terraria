@@ -43,6 +43,8 @@ const MISC = [
   'Liquid_0.png', 'Liquid_1.png', 'Liquid_11.png', 'Liquid_14.png',
   // 1.4 原版液体主表（LiquidRenderer：0 水 / 1 岩浆 / 11 蜂蜜，48×1360）
   'Misc/water_0.png', 'Misc/water_1.png', 'Misc/water_11.png',
+  // 蘑菇树树冠（tile 72 专用 ShroomTop）
+  'Shroom_Tops.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

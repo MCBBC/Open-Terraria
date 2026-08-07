@@ -131,46 +131,146 @@ function frameHasContent(r: DrawRect): boolean {
 // 装饰树 596 樱花→29、616 柳→30 / 灰烬树 634 → 31）
 const TREE_SHEET_STYLES: Record<number, number> = { 5: 0, 596: 29, 616: 30, 634: 31 };
 for (let i = 583; i <= 589; i++) TREE_SHEET_STYLES[i] = 22 + (i - 583);
-// 样式 → 树冠/树枝帧尺寸（TEdit：默认 80×80；宝石/灰烬 116×96；装饰 118×96）
-function treeStyleSize(style: number): [number, number] {
-  if (style === 29 || style === 30) return [118, 96];
-  if (style >= 22 && style <= 31) return [116, 96];
-  return [80, 80];
+/** 树冠帧尺寸按 PNG 实际宽度推导（3 变体等分 + 2px 间隔；高度 -2）：
+ *  自动覆盖全部样式（森林 80×80 / 丛林·宝石 114-116×96 / 装饰 118×96 / 神圣 80-114×140） */
+function treeTopSize(img: HTMLImageElement): [number, number] {
+  return [Math.floor(img.width / 3) - 2, img.height - 2];
 }
 // 树下草地 → 生物群系树干变体（TEdit treeType；-1 = 基础 Tiles_5）
 const TREE_GROUND: Array<[string, number]> = [
   ['v_23_corrupt_grass_block', 0],
   ['v_60_jungle_grass_block', 1],
-  ['v_70_mushroom_grass_block', 6],
+  ['v_109_hallowed_grass_block', 2],
   ['snow', 3],
   ['v_199_crimson_grass_block', 4],
+  ['v_70_mushroom_grass_block', 6],
 ];
+/** 原版 WorldGen.GetCommonTreeFoliageData 样式选择移植（WorldGen.cs:37381-37496）。
+ *  trees = { treeX, treeStyle(header), treeTops(v≥211 权威 13 变体), worldSurface, worldW }
+ *  变体来源优先 treeTops（GetTreeStyle(areaId)），空表回退 header treeStyle[0..3] */
+function areaStyle(trees: TreeStyleData, areaId: number): number {
+  if (trees.treeTops?.length) return trees.treeTops[areaId] ?? 0;
+  return trees.treeStyle?.[areaId] ?? 0;
+}
+
+export function crownStyleFor(x: number, treeType: number, floorY: number, trees: TreeStyleData): number {
+  const gs = (id: number) => areaStyle(trees, id);
+  switch (treeType) {
+    case 0: return 1;   // 23 腐化草
+    case 1: {           // 60 丛林草：v[5]==1 → 11；深处 → 13（覆盖）；否则 2
+      let st = gs(5) === 1 ? 11 : 2;
+      if (floorY > (trees.worldSurface ?? 0)) st = 13;
+      return st;
+    }
+    case 2: {           // 109/492 神圣草：hallowBG 未解析 → 固定 3
+      return 3;
+    }
+    case 3: {           // 147 雪原：完整 case-147 逻辑
+      let st = 4;
+      const v6 = gs(6);
+      if (v6 === 0) { st = 12; if (x % 10 === 0) st = 18; }
+      if (v6 === 2 || v6 === 3 || v6 === 32 || v6 === 4 || v6 === 42 || v6 === 5 || v6 === 7) {
+        st = v6 % 2 !== 0
+          ? (x <= (trees.worldW ?? 0) / 2 ? 17 : 16)
+          : (x >= (trees.worldW ?? 0) / 2 ? 17 : 16);
+      }
+      return st;
+    }
+    case 4: return 5;   // 199 猩红草
+    case 6: return 14;  // 70 蘑菇草
+    default: {          // 2/477 普通草：四区 + 0→0/5→10/其余 5+s
+      const num = x > (trees.treeX?.[0] ?? 0) ? (x > (trees.treeX?.[1] ?? 0) ? (x > (trees.treeX?.[2] ?? 0) ? gs(3) : gs(2)) : gs(1)) : gs(0);
+      if (num === 0) return 0;
+      return num === 5 ? 10 : 5 + num;
+    }
+  }
+}
+
+/** 向下扫描树下的草地定生物群系树型（原版 GetCommonTreeFoliageData 扫描）。
+ *  返回 treeType（-1 普通草/森林）与发现草地的深度 floorY（丛林深处判定用） */
+export function scanTreeType(st: TileStore, x: number, y: number): { type: number; floorY: number } {
+  let type = -1;
+  let floorY = y;
+  for (let i = 0; i < 100; i++) {
+    const ty = y + i;
+    if (ty >= st.h) break;
+    floorY = ty;
+    const t = st.type[st.idx(x, ty)];
+    if (t === 0) continue;
+    if (t === TILE_BY_KEY['grass']) { type = -1; break; }
+    const hit = TREE_GROUND.find(([k]) => TILE_BY_KEY[k] === t);
+    if (hit) { type = hit[1]; break; }
+  }
+  return { type, floorY };
+}
+
+export interface TreeStyleData {
+  treeX: number[];
+  treeStyle: number[];
+  treeTops?: number[];
+  worldSurface?: number;
+  worldW?: number;
+}
+
 export function drawTreeCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, fx: number, fy: number, px: number, py: number,
   sheet = 5,
   foliageOnly = false,
+  trees?: TreeStyleData,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
+  // 蘑菇树（tile 72）：独立渲染路径——U≥36 标记帧 = 巨蘑菇顶（Shroom_Tops，60×42、62px 步长、底部锚定）
+  if (sheet === 72) {
+    if (foliageOnly === false && fx >= 36) return; // 顶格由外扩遍画
+    if (fx >= 36) {
+      const img72 = atlas.vimages.get('vanilla/Shroom_Tops.png');
+      if (img72 && fx + 60 <= img72.width && fy + 42 <= img72.height) {
+        // TEdit：source.X = (V/18)*62；60×42 底部锚定居中
+        const sx72 = Math.floor(fy / 18) * 62;
+        if (sx72 + 60 <= img72.width) {
+          ctx.drawImage(img72, sx72, 0, 60, 42, px + (TILE - 60) / 2, py + TILE - 42, 60, 42);
+        }
+      }
+      return;
+    }
+    // 干身：Tiles_72 直取（54×54 表，2×2 帧 18px 网格）
+    const img72 = atlas.vimages.get('vanilla/Tiles_72.png');
+    if (img72 && fx + 16 <= img72.width && fy + 16 <= img72.height) {
+      ctx.drawImage(img72, fx, fy, 16, 16, px, py, TILE, TILE);
+    }
+    return;
+  }
   if (fy >= 198 && fx >= 22) {
     // 树冠/树枝标记帧（仅由 ChunkCache 的外扩遍绘制，防跨 chunk 裁剪）
     if (foliageOnly === false) return;
-    const frame = ((x % 3) + 3) % 3;
-    const [topW, topH] = treeStyleSize(style);
-    const brW = Math.round(topW * 0.4), brH = Math.round(topH * 0.42); // 80×80→40×34 档
-    let img: HTMLImageElement | null = null;
+    // 变体来源 = 标记帧自身 frameY（原版 WorldGen.GetTreeFrame：198→0/220→1/242→2）
+    const frame = fy >= 242 ? 2 : fy >= 220 ? 1 : 0;
+    // 样式选择（原版 GetCommonTreeFoliageData；树族 tile 用固定样式映射）
+    // 树型扫描列：左枝在右侧树干列找地 / 右枝在左侧（原版 xoffset）
+    const scanX = x + (fx === 44 ? 1 : fx === 66 ? -1 : 0);
+    const scan = scanTreeType(st, scanX, y);
+    const crown = sheet === 5 && trees
+      ? crownStyleFor(scanX, scan.type, scan.floorY, trees)
+      : style;
+    let img: HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22) {
-      img = atlas.vimages.get(`vanilla/Tree_Tops_${style}.png`) ?? null;
-      sw = topW; sh = topH; sx = frame * (sw + 2); anchor = 0;
-    } else if (fx === 44) {
-      img = atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
-      sw = brW; sh = brH; sx = 0; sy = frame * (sh + 2); anchor = 1;
-    } else if (fx === 66) {
-      img = atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
-      sw = brW; sh = brH; sx = Math.round(sw * 1.05); sy = frame * (sh + 2); anchor = 2;
+      img = atlas.vimages.get(`vanilla/Tree_Tops_${crown}.png`)
+        ?? atlas.vimages.get(`vanilla/Tree_Tops_${style}.png`) ?? null;
+      if (!img) return;
+      // 帧尺寸按 PNG 实宽推导（3 变体 + 2px 间隔），自动覆盖全部样式（含神圣 140 高）
+      [sw, sh] = treeTopSize(img);
+      sx = frame * (sw + 2); anchor = 0;
+    } else {
+      // 分叉枝（原版固定 40×40 帧、42px 步长；左枝 X=0 / 右枝 X=42；Y = frame*42）
+      img = atlas.vimages.get(`vanilla/Tree_Branches_${crown}.png`)
+        ?? atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
+      if (!img) return;
+      sw = 40; sh = 40;
+      sx = fx === 44 ? 0 : 42;
+      sy = frame * 42; anchor = fx === 44 ? 1 : 2;
     }
-    if (!img) return;
     if (sx + sw > img.width || sy + sh > img.height) return;
     let dx = px, dy = py;
     if (anchor === 0) { dx = px + (TILE - sw) / 2; dy = py + TILE - sh; }
@@ -180,22 +280,13 @@ export function drawTreeCell(
     return;
   }
   if (foliageOnly) return; // 外扩遍只画树冠/树枝
-  // 树干：向下扫描找草地定生物群系（TEdit baseX 奇偶修正 + 100 格深扫描）
+  // 树干：TEdit baseX 奇偶修正（特殊帧横向偏一列扫草地）+ 100 格深扫描
   let baseX = 0;
   if (fx === 66 && fy <= 45) baseX++;
   if (fx === 88 && fy >= 66 && fy <= 110) baseX--;
   if (fx === 22 && fy >= 132 && fy < 198) baseX--;
   if (fx === 44 && fy >= 132 && fy < 198) baseX++;
-  let type = -1;
-  for (let i = 0; i < 100; i++) {
-    const ty = y + i;
-    if (ty >= st.h) break;
-    const t = st.type[st.idx(x + baseX, ty)];
-    if (t === 0) continue;
-    if (t === TILE_BY_KEY['grass']) { type = -1; break; }
-    const hit = TREE_GROUND.find(([k]) => TILE_BY_KEY[k] === t);
-    if (hit) { type = hit[1]; break; }
-  }
+  const type = scanTreeType(st, x + baseX, y).type;
   const img = type >= 0
     ? atlas.vimages.get(`vanilla/Tiles_5_${type}.png`) ?? atlas.vimages.get('vanilla/Tiles_5.png')
     : atlas.vimages.get('vanilla/Tiles_5.png');
@@ -318,11 +409,12 @@ export function drawVanillaCell(
   sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
+  trees?: TreeStyleData,
 ): void {
   // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634）：
   // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）
   if (frame === 'style' && TREE_SHEET_STYLES[sheet] !== undefined) {
-    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py, sheet);
+    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py, sheet, false, trees);
     return;
   }
   // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体

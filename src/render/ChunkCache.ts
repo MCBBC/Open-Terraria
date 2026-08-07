@@ -13,7 +13,6 @@ import type { World } from '../world/World';
 // Grass 走人工标注（'@grass'）：Tiles_2.png 是多 tile 混排图集，自动分类不可靠；
 // 用 public/annotator.html 标注后写入 sprites/annotations.json。无标注时回退程序化。
 const TILE_RULES: Record<number, string> = {
-  8: 'Tree',
   // 泥土/石/草走原版 BlendRules；铁矿走原版表——均不再用 Maples 规则
   13: '工作台', 14: '熔炉', 15: '铁砧',
 };
@@ -99,11 +98,6 @@ export class ChunkCache {
 
   /** 树枝判定：TREE 且上下皆非 TREE、恰好一侧为 TREE（横向独连树干）。
    *  下方是实心地面的属于树根底座 —— 走规则表渲染底座贴图，不算枝干 */
-  private isBranchTile(st: World['store'], x: number, y: number): boolean {
-    const at = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === T.TREE;
-    const up = at(x, y - 1), dn = at(x, y + 1), lf = at(x - 1, y), rt = at(x + 1, y);
-    return !up && !dn && lf !== rt && !st.isSolid(x, y + 1);
-  }
 
   private neighborMask(x: number, y: number, type: number): number {
     const st = this.world.store;
@@ -173,9 +167,6 @@ export class ChunkCache {
         if (type === 0) continue;
         const def = TILE_DEFS[type];
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
-        // 树枝：TREE 且仅横向连接树干 → 跳过常规路径（第二遍半按 pivot 锚定专用绘制，
-        // 规则表变体池混有树干碎片贴图，hash 选变体会 50% 画出残片）
-        if (type === T.TREE && this.isBranchTile(st, x, y)) continue;
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
           drawVanillaCell(
@@ -184,6 +175,8 @@ export class ChunkCache {
             st, x, y, type,
             (t) => t === type, // 同 id 融合判定（后续可扩 mergeWith）
             px, py, st.frameX[i], st.frameY[i],
+            { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
+              worldSurface: this.world.groundLevel, worldW: this.world.w },
           );
           continue;
         }
@@ -247,59 +240,11 @@ export class ChunkCache {
         }
       }
     }
-    // ---- 第二遍半：树枝（pivot 锚定专用绘制） ----
-    // Unity 切片 pivot：左向枝 0/2/4 = x0.8，右向枝 1/3/5 = x0.2（pivot 对齐格子中心），
-    // 按 0.5 居中画会整体偏移 12-24px。外扩扫描防跨 chunk 裁剪（右向枝外伸 24px）。
-    if (this.autotiler) {
-      const EXT = 3;
-      for (let ty = y0 - EXT; ty < y0 + CHUNK + EXT; ty++) {
-        for (let tx = x0 - EXT; tx < x0 + CHUNK + EXT; tx++) {
-          if (!st.inBounds(tx, ty)) continue;
-          if (st.type[st.idx(tx, ty)] !== T.TREE) continue;
-          if (!this.isBranchTile(st, tx, ty)) continue;
-          // 树干在右 → 左向枝；树干在左 → 右向枝。
-          // 只用朝上变体：_1/_4 的美术在下半部（下垂朝地），正常枝干应朝上
-          const left = st.type[st.idx(tx + 1, ty)] === T.TREE;
-          const names = left ? ['Tree_Branches_0', 'Tree_Branches_2']
-            : ['Tree_Branches_3', 'Tree_Branches_5'];
-          const name = names[Math.floor(hash2(tx, ty, 71) * names.length) % names.length];
-          const r = this.autotiler.atlas.rect('地形/Tree_Branches.png', name);
-          if (!r) continue;
-          const pivX = left ? 0.8 : 0.2;
-          const pivY = name === 'Tree_Branches_2' ? 0.475 : name === 'Tree_Branches_5' ? 0.4 : 0.5;
-          const dx = tx * TILE + TILE / 2 - pivX * r.sw - x0 * TILE;
-          const dy = ty * TILE + TILE / 2 - pivY * r.sh - y0 * TILE;
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
-        }
-      }
-    }
-
-    // ---- 第三遍：树冠大图最上层 ----
-    // 扫描本 chunk 及外扩 5 格的树顶格（上空气、下树干），绘制整幅树冠。
-    // 外扩保证树冠跨 chunk 时不被裁剪（右边缺一块/头上缺一块的根因）。
-    if (this.autotiler) {
-      const EXT = 5;
-      for (let ty = y0 - EXT; ty < y0 + CHUNK + EXT; ty++) {
-        for (let tx = x0 - EXT; tx < x0 + CHUNK + EXT; tx++) {
-          if (!st.inBounds(tx, ty)) continue;
-          if (st.type[st.idx(tx, ty)] !== T.TREE) continue;
-          if (st.inBounds(tx, ty - 1) && st.type[st.idx(tx, ty - 1)] === T.TREE) continue; // 非树顶
-          if (!st.inBounds(tx, ty + 1) || st.type[st.idx(tx, ty + 1)] !== T.TREE) continue; // 下方须为树干
-          const r = this.autotiler.tile('Tree', st, tx, ty, T.TREE);
-          if (!r || r.sw <= TILE * 2) continue;
-          const wx = tx * TILE, wy = ty * TILE; // 世界像素
-          const dx = wx + (TILE - r.sw) / 2 - x0 * TILE;
-          const dy = wy + (TILE - r.sh) / 2 - y0 * TILE;
-          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
-        }
-      }
-    }
-
     // ---- 第四遍：原版树冠/树枝（tile 5 标记帧，跨 chunk 外扩绘制） ----
     // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪
     // 所有树类 tile（5/583-589/596/616/634）的树冠/树枝标记帧
     if (this.autotiler) {
-      const treeIds = ['v_5_trees',
+      const treeIds = ['tree', 'v_72_mushroom_tree', 'v_5_trees',
         'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
         'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
         'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
@@ -315,7 +260,9 @@ export class ChunkCache {
             if (fy < 198 || fx < 22) continue; // 树干由主遍绘制
             const def = TILE_DEFS[st.type[i]];
             drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, def?.vanilla?.sheet ?? 5, true);
+              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, def?.vanilla?.sheet ?? 5, true,
+              { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
+              worldSurface: this.world.groundLevel, worldW: this.world.w });
           }
         }
       }

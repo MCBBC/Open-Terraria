@@ -39,6 +39,11 @@ export class World {
   trees: Array<{ x: number; y: number; h: number }> = [];
   /** 战争迷雾：1 = 已探索。按 tile 粒度。 */
   explored: Uint8Array;
+  /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
+  treeX: number[] = [];
+  treeStyle: number[] = [0, 0, 0, 0];
+  /** TreeTops 13 区域变体（v≥211 wld 权威；索引 0-3 森林/5 丛林/6 雪/7 神圣） */
+  treeTops: number[] = [];
 
   exploredVersion = 0;
   markExplored(cx: number, cy: number, radius: number) {

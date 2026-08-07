@@ -52,7 +52,7 @@ def({ key: 'ore_copper', name: '铜矿', solid: true, opacity: 1, pick: 0, mapCo
 def({ key: 'ore_iron', name: '铁矿', solid: true, opacity: 1, pick: 0, mapColor: '#8C6A56', blend: false, drop: 'iron_ore', vanilla: { sheet: 6, frame: 'auto' } });
 def({ key: 'ore_silver', name: '银矿', solid: true, opacity: 1, pick: 20, mapColor: '#B9C2C3', blend: false, drop: 'silver_ore', vanilla: { sheet: 9, frame: 'auto' } });
 def({ key: 'ore_gold', name: '金矿', solid: true, opacity: 1, pick: 40, mapColor: '#B9A417', blend: false, drop: 'gold_ore', vanilla: { sheet: 8, frame: 'auto' } });
-def({ key: 'tree', name: '树干', solid: false, framed: true, opacity: 0.1, axe: 0, mapColor: '#6B4A2B', drop: 'wood' });
+def({ key: 'tree', name: '树干', solid: false, framed: true, opacity: 0.1, axe: 0, mapColor: '#6B4A2B', drop: 'wood', vanilla: { sheet: 5, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'leaves', name: '树叶', decor: true, framed: true, opacity: 0.05, pick: 0, axe: 0, mapColor: '#2E8B3D', drop: null as unknown as string });
 def({ key: 'wood', name: '木材块', solid: true, opacity: 1, pick: 0, mapColor: '#A97D4E', blend: true, drop: 'wood', vanilla: { sheet: 30, frame: 'auto' } });
 def({ key: 'platform', name: '木平台', platform: true, opacity: 0.15, pick: 0, axe: 0, mapColor: '#B0885A', drop: 'platform', vanilla: { sheet: 19, frame: 'style', fw: 1, fh: 1 } });
@@ -413,6 +413,7 @@ def({ key: 'v_3_forest_short_plants', name: 'Forest Short Plants', decor: true, 
 def({ key: 'v_73_forest_tall_plants', name: 'Forest Tall Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#3D7A2E', drop: null as unknown as string, vanilla: { sheet: 73, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_83_herbs_mature', name: 'Herbs (Mature)', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#9BC924', drop: null as unknown as string, vanilla: { sheet: 83, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_84_herbs_bloom', name: 'Herbs (Bloom)', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#9BC924', drop: null as unknown as string, vanilla: { sheet: 84, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_72_mushroom_tree', name: 'Mushroom Tree', decor: true, framed: true, opacity: 0, pick: -1, axe: 0, mapColor: '#5D7FFF', drop: null as unknown as string, vanilla: { sheet: 72, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_44_pink_brick', name: 'Pink Brick', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null as unknown as string, vanilla: { sheet: 44, frame: 'auto' } });
 def({ key: 'v_203_crimstone_block', name: 'Crimstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#802C2D', blend: true, drop: null as unknown as string, vanilla: { sheet: 203, frame: 'blend' } });
 def({ key: 'v_201_crimson_short_plants', name: 'Crimson Short Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#CB3D40', drop: null as unknown as string, vanilla: { sheet: 201, frame: 'style', fw: 1, fh: 1 } });

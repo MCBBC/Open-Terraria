@@ -475,25 +475,13 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
       }
       if (ok) {
         if (isSoft(store.get(x, sy - 1))) store.setTile(x, sy - 1, 0); // 清基座装饰
+        // 原版 Tiles_5 22px 网格帧：树顶标记 (22,198) + 树干身 (0,0)
         for (let dy = 1; dy <= th; dy++) {
-          store.setTileSilent(x, sy - dy, T.TREE, 0, dy === th ? 16 : 0);
+          store.setTileSilent(x, sy - dy, T.TREE, dy === th ? 22 : 0, dy === th ? 198 : 0);
         }
-        // 树根底座（基座行两侧各 60% 出根（双侧率 ~36%），先于枝干放置——
-        // 枝干的"下方无树"检查会自然避开根位，防止枝干叠在根上。
-        // 渲染端规则表 #1/#2 自动匹配 X2Y7-9(右斜)/X3Y7-9(左斜) 底座贴图）
-        for (const s of [-1, 1]) {
-          if (rng.int(0, 99) >= 60) continue;
-          const rx = x + s, ry = sy - 1;
-          const rt = store.get(rx, ry);
-          const soft = rt === T.TALLGRASS || rt === T.FLOWER || rt === T.MUSHROOM || rt === T.SAPLING;
-          if (store.isSolid(rx, ry + 1) && (!store.isActive(rx, ry) || soft)) {
-            store.setTileSilent(rx, ry, T.TREE, 0, 0);
-          }
-        }
-        // 树枝（Maples GameManager.PlaceTree：干高 2..h-3 段两侧各 40% 出枝，
-        // 下方无树才放（含根位）、可覆盖杂草装饰，每棵上限 3-9 枝。
-        // 渲染端按切片 pivot 锚定绘制 Tree_Branches 贴图）
-        const maxBranches = rng.int(3, 9);
+        // 侧枝：原版标记帧（44=左枝 / 66=右枝，y=198），干高 2..h-3 段两侧各 40%，
+        // 每棵上限 2-4 枝（Tree_Branches 贴图由渲染端按标记帧绘制）
+        const maxBranches = rng.int(2, 4);
         let branchCount = 0;
         for (let dy = 2; dy <= th - 3 && branchCount < maxBranches; dy++) {
           for (const side of [-1, 1]) {
@@ -502,9 +490,8 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
             const bx = x + side, by = sy - dy;
             const bt = store.get(bx, by);
             const soft = bt === T.TALLGRASS || bt === T.FLOWER || bt === T.MUSHROOM || bt === T.SAPLING;
-            // 下方无树才放（循环自下而上，查下方=查已放的枝干/树根）
             if ((!store.isActive(bx, by) || soft) && store.get(bx, by + 1) !== T.TREE) {
-              store.setTileSilent(bx, by, T.TREE, 0, 0);
+              store.setTileSilent(bx, by, T.TREE, side < 0 ? 44 : 66, 198);
               branchCount++;
             }
           }
@@ -623,6 +610,9 @@ function finalize({ store, surface, world, cfg }: GenCtx) {
   world.spawnY = Math.max(4, sy - 3);
   world.groundLevel = Math.floor(store.h * 0.28);
   world.rockLevel = Math.floor(store.h * 0.33);
+  // 原版树样式：4 等分横向区，全部森林样式 0
+  world.treeX = [Math.floor(store.w / 4), Math.floor(store.w / 2), Math.floor(store.w * 3 / 4)];
+  world.treeStyle = [0, 0, 0, 0];
   // 出生点上空净空
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 5; dy++) {

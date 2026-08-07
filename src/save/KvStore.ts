@@ -33,21 +33,20 @@ export async function kvHas(key: string): Promise<boolean> {
   }
 }
 
-/** 读取（IndexedDB 优先，回退 localStorage） */
+/** 读取（IndexedDB 优先——大存档只进 IDB，localStorage 可能留着旧的小存档；
+   读取顺序必须与写入优先级一致，否则会读到过期档） */
 export async function kvGet(key: string): Promise<string | null> {
-  const local = localStorage.getItem(key);
-  if (local !== null) return local;
   try {
     const db = await openDb();
-    return await new Promise<string | null>((resolve) => {
+    const idbVal = await new Promise<string | null>((resolve) => {
       const tx = db.transaction(STORE, 'readonly');
       const req = tx.objectStore(STORE).get(key);
       req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null);
       req.onerror = () => resolve(null);
     });
-  } catch {
-    return null;
-  }
+    if (idbVal !== null) return idbVal;
+  } catch { /* IDB 不可用 → 回退 localStorage */ }
+  return localStorage.getItem(key);
 }
 
 /** 写入：字符串 ≤ 2MB 进 localStorage（快速路径），否则只进 IndexedDB */

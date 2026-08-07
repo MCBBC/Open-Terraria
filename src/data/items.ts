@@ -74,16 +74,16 @@ item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
 item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });
 
 // ---- 药水（Buff 来源，数值移植自 Maples Potions/*.asset）----
-item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 80, desc: '回复 80 生命',
+item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 100, desc: '回复 100 生命',
   potion: { buff: 'resistance', duration: 60, isHealType: true } });
-item({ key: 'agility_potion', name: '敏捷药水', maxStack: 30, desc: '移速 +25%，持续 3 分钟',
-  potion: { buff: 'agility', duration: 180, isHealType: false } });
-item({ key: 'ironskin_potion', name: '铁皮药水', maxStack: 30, desc: '防御 +6，持续 3 分钟',
-  potion: { buff: 'ironskin', duration: 180, isHealType: false } });
-item({ key: 'thorns_potion', name: '荆棘药水', maxStack: 30, desc: '受击反弹 2 伤害，持续 3 分钟',
-  potion: { buff: 'thorns', duration: 180, isHealType: false } });
-item({ key: 'regen_potion', name: '恢复药水', maxStack: 30, desc: '每 5 秒回复 10 生命，持续 30 秒',
-  potion: { buff: 'regen', duration: 30, isHealType: true } });
+item({ key: 'agility_potion', name: '敏捷药水', maxStack: 30, desc: '移速 +25%，持续 4 分钟',
+  potion: { buff: 'agility', duration: 240, isHealType: false } });
+item({ key: 'ironskin_potion', name: '铁皮药水', maxStack: 30, desc: '防御 +6，持续 5 分钟',
+  potion: { buff: 'ironskin', duration: 300, isHealType: false } });
+item({ key: 'thorns_potion', name: '荆棘药水', maxStack: 30, desc: '受击反弹 2 伤害，持续 2 分钟',
+  potion: { buff: 'thorns', duration: 120, isHealType: false } });
+item({ key: 'regen_potion', name: '恢复药水', maxStack: 30, desc: '每 5 秒回复 10 生命，持续 2 分钟',
+  potion: { buff: 'regen', duration: 120, isHealType: true } });
 
 // ---- 配饰（移植自 Maples Accessory）----
 item({ key: 'lucky_horseshoe', name: '幸运马掌', maxStack: 1, accessory: 'lucky_horseshoe',
@@ -112,35 +112,57 @@ for (const [prefix, cn, defs] of armorTiers) {
   });
 }
 
-// ---- 工具（power：镐力/斧力；damage：武器伤害）----
-const tiers: Array<[string, string, number, number, number]> = [
-  // key 前缀, 显示前缀, 颜色档, 镐力, 斧力
-  ['wood', '木', 0, 10, 15],
-  ['copper', '铜', 1, 30, 40],
-  ['iron', '铁', 2, 45, 55],
-  ['silver', '银', 3, 60, 70],
-  ['gold', '金', 4, 80, 90],
-];
-const swordDmg = [8, 12, 16, 21, 27];
-for (const [prefix, cn, tier, pickP, axeP] of tiers) {
-  item({
-    key: `${prefix}_pickaxe`, name: `${cn}镐`, maxStack: 1,
-    tool: { type: 'pick', power: pickP, speed: 46, reach: 2.6 * 16 },
-  });
-  item({
-    key: `${prefix}_axe`, name: `${cn}斧`, maxStack: 1,
-    tool: { type: 'axe', power: axeP, speed: 50, reach: 2.4 * 16 },
-  });
-  item({
-    key: `${prefix}_sword`, name: `${cn}剑`, maxStack: 1,
-    tool: { type: 'sword', damage: swordDmg[tier], speed: 42, knockback: 3.5, reach: 2.2 * 16 },
-  });
-  item({
-    key: `${prefix}_hammer`, name: `${cn}锤`, maxStack: 1,
-    tool: { type: 'hammer', power: pickP, speed: 48, reach: 2.4 * 16 },
-    desc: '敲除背景墙',
-  });
-}
+// ---- 工具/武器（数值 = 官方原版 1.4.0.5 Item.cs SetDefaults，铜币价值）----
+// 木镐/木斧为自定义低档（原版无对应）；木剑(24)=官方 7 伤、木锤(196)=官方 25 锤力
+item({ key: 'wood_pickaxe', name: '木镐', maxStack: 1, value: 50,
+  tool: { type: 'pick', power: 12, damage: 2, speed: 23, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'wood_axe', name: '木斧', maxStack: 1, value: 50,
+  tool: { type: 'axe', power: 4, damage: 2, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'wood_sword', name: '木剑', maxStack: 1, value: 100,
+  tool: { type: 'sword', damage: 7, speed: 25, knockback: 4, reach: 2.2 * 16 } });
+item({ key: 'wood_hammer', name: '木锤', maxStack: 1, value: 50,
+  tool: { type: 'hammer', power: 25, damage: 2, speed: 37, knockback: 5.5, reach: 2.4 * 16 },
+  desc: '敲除背景墙' });
+// 铜（3509/3506/3508/3505）
+item({ key: 'copper_pickaxe', name: '铜镐', maxStack: 1, value: 500,
+  tool: { type: 'pick', power: 35, damage: 4, speed: 23, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'copper_axe', name: '铜斧', maxStack: 1, value: 400,
+  tool: { type: 'axe', power: 7, damage: 3, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'copper_sword', name: '铜剑', maxStack: 1, value: 450,
+  tool: { type: 'sword', damage: 8, speed: 23, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'copper_hammer', name: '铜锤', maxStack: 1, value: 400,
+  tool: { type: 'hammer', power: 35, damage: 4, speed: 33, knockback: 5.5, reach: 2.4 * 16 },
+  desc: '敲除背景墙' });
+// 铁（1/10/4/7）
+item({ key: 'iron_pickaxe', name: '铁镐', maxStack: 1, value: 2000,
+  tool: { type: 'pick', power: 40, damage: 5, speed: 20, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'iron_axe', name: '铁斧', maxStack: 1, value: 1600,
+  tool: { type: 'axe', power: 9, damage: 5, speed: 27, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'iron_sword', name: '铁剑', maxStack: 1, value: 1800,
+  tool: { type: 'sword', damage: 10, speed: 21, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'iron_hammer', name: '铁锤', maxStack: 1, value: 1600,
+  tool: { type: 'hammer', power: 40, damage: 7, speed: 30, knockback: 5.5, reach: 2.4 * 16 },
+  desc: '敲除背景墙' });
+// 银（3515/3512/3514/3511）
+item({ key: 'silver_pickaxe', name: '银镐', maxStack: 1, value: 5000,
+  tool: { type: 'pick', power: 45, damage: 6, speed: 19, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'silver_axe', name: '银斧', maxStack: 1, value: 4000,
+  tool: { type: 'axe', power: 10, damage: 6, speed: 26, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'silver_sword', name: '银剑', maxStack: 1, value: 4500,
+  tool: { type: 'sword', damage: 11, speed: 21, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'silver_hammer', name: '银锤', maxStack: 1, value: 4000,
+  tool: { type: 'hammer', power: 45, damage: 9, speed: 29, knockback: 5.5, reach: 2.4 * 16 },
+  desc: '敲除背景墙' });
+// 金（3521/3518/3520/3517）
+item({ key: 'gold_pickaxe', name: '金镐', maxStack: 1, value: 10000,
+  tool: { type: 'pick', power: 55, damage: 6, speed: 20, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'gold_axe', name: '金斧', maxStack: 1, value: 8000,
+  tool: { type: 'axe', power: 11, damage: 7, speed: 26, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'gold_sword', name: '金剑', maxStack: 1, value: 9000,
+  tool: { type: 'sword', damage: 13, speed: 20, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'gold_hammer', name: '金锤', maxStack: 1, value: 8000,
+  tool: { type: 'hammer', power: 55, damage: 9, speed: 28, knockback: 5.5, reach: 2.4 * 16 },
+  desc: '敲除背景墙' });
 
 // ===================== 原版素材批次：新材料 / 方块 / 家具 =====================
 // ---- 替代矿与困难模式矿（先做美术/掉落） ----

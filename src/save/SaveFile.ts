@@ -48,6 +48,7 @@ export interface SaveData {
   header: {
     name: string; seed: number; width: number; height: number;
     spawn: [number, number]; groundLevel: number; rockLevel: number;
+    treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
     wldVersion?: number;
   };
@@ -108,6 +109,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     header: {
       name: world.name, seed: world.seed, width: st.w, height: st.h,
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
+      treeX: world.treeX, treeStyle: world.treeStyle,
       created: Date.now(), playTimeMs,
     },
     clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount },
@@ -133,6 +135,9 @@ export function loadSave(json: string): { world: World; player: { hp: number; x:
   world.spawnY = data.header.spawn[1];
   world.groundLevel = data.header.groundLevel;
   world.rockLevel = data.header.rockLevel;
+  if (data.header.treeX) world.treeX = data.header.treeX;
+  if (data.header.treeStyle) world.treeStyle = data.header.treeStyle;
+  if (data.header.treeTops?.length) world.treeTops = data.header.treeTops;
   world.clock.timeOfDay = data.clock.timeOfDay;
   world.clock.dayCount = data.clock.dayCount;
   world.chests = data.chests;
