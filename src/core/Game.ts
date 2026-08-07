@@ -140,7 +140,9 @@ export class Game implements GameHooks {
       }
       for (let dx = 0; dx < w; dx++) {
         for (let dy = 0; dy < h; dy++) {
-          st.setTile(cx + dx, cy - dy, tid, td.vanilla ? dx * 18 : dx, td.vanilla ? dy * 18 : dy);
+          // 原版帧语义（TileObject.Place）：顶行 frameY=0，底行最大——
+          // 此处 cy 是底部行，dy=0 是底行 → frameY = (h-1-dy)*18
+          st.setTile(cx + dx, cy - dy, tid, td.vanilla ? dx * 18 : dx, td.vanilla ? (h - 1 - dy) * 18 : dy);
         }
       }
       cx += w + 1;
@@ -1020,7 +1022,9 @@ export class Game implements GameHooks {
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
         const px = tx + dx2, py = ty + dy2;
-        // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）
+        // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）。
+        // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
+        // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确
         if (isVanillaStyle) {
           st.setTile(px, py, tileId, dx2 * 18, dy2 * 18);
         } else {
