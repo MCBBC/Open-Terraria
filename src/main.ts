@@ -6,6 +6,7 @@ import { kvGet, kvSet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { TILE_BY_KEY, T } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
+import { INV_SIZE } from './items/Inventory';
 // 调试句柄：页面内直接测 .wld 转换
 (window as unknown as { __parseWld?: (b: Uint8Array) => unknown; __lastCompatReport?: unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
 import { SpriteAtlas } from './assets/SpriteAtlas';
@@ -94,11 +95,11 @@ function showMenu() {
         }, atlas);
         ui.showProgress('读取存档…', 0.3);
         await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
-        // 恢复玩家状态
+        // 恢复玩家状态（旧存档 45 长度 → 补齐到当前 INV_SIZE，防止 UI 越界）
         g.player.hp = player.hp;
         g.player.x = player.x;
         g.player.y = player.y;
-        g.player.inv.slots = player.inventory;
+        g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
         g.player.inv.selected = player.selected;
         maybeDev(g);
         ui.refreshAll();
@@ -162,7 +163,7 @@ function showMenu() {
           g.player.hp = player.hp;
           g.player.x = player.x;
           g.player.y = player.y;
-          g.player.inv.slots = player.inventory;
+          g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
           g.player.inv.selected = player.selected;
           maybeDev(g);
         }

@@ -4,7 +4,7 @@ import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { RECIPES } from '../data/recipes';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS } from '../stats/Buffs';
-import { ACCESSORY_START, INV_SIZE, isAccessoryItem, isAccessorySlot as isAccessorySlotIdx } from '../items/Inventory';
+import { ACCESSORY_START, ARMOR_START, COIN_START, INV_SIZE, VANITY_START } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 
 const iconCache = new Map<number, string>();
@@ -44,21 +44,35 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
 
 const CSS = `
 .sw-root { position:fixed; inset:0; pointer-events:none; font-family:inherit; z-index:10; }
-.sw-panel { pointer-events:auto; background:rgba(20,16,28,0.92); border:2px solid #5a4a7a;
-  border-radius:8px; color:#e8e4f0; padding:12px; box-shadow:0 4px 24px rgba(0,0,0,0.6); }
+/* ---- 原版风格：深蓝面板 + 浅蓝描边 ---- */
+.sw-panel { pointer-events:auto;
+  background:linear-gradient(rgba(38,50,90,0.96), rgba(22,30,58,0.97));
+  border:2px solid #7d92d6; border-radius:6px; color:#e8ecf8; padding:12px;
+  box-shadow:0 0 0 2px rgba(10,14,30,0.8), 0 6px 28px rgba(0,0,0,0.65),
+    inset 0 0 18px rgba(90,120,220,0.12); }
 .sw-btn { pointer-events:auto; display:block; width:100%; margin:6px 0; padding:10px 16px;
   background:linear-gradient(#4a3a6a,#3a2a5a); color:#fff; border:1px solid #6a5a8a;
   border-radius:6px; cursor:pointer; font-size:15px; text-align:center; }
 .sw-btn:hover { background:linear-gradient(#5a4a7e,#4a3a6e); }
 .sw-btn:disabled { opacity:0.45; cursor:default; }
-.sw-slot { pointer-events:auto; width:44px; height:44px; background:rgba(60,50,80,0.85);
-  border:2px solid #6a5a8a; border-radius:4px; position:relative; cursor:pointer; }
-.sw-slot:hover { border-color:#c8b8e8; }
+.sw-slot { pointer-events:auto; width:44px; height:44px; background:rgba(24,34,70,0.9);
+  border:2px solid #4d5f9e; border-radius:4px; position:relative; cursor:pointer; }
+.sw-slot:hover { border-color:#aebfe8; background:rgba(40,56,110,0.95); }
 .sw-slot.sel { border-color:#ffd75a; box-shadow:0 0 8px rgba(255,215,90,0.5); }
 .sw-slot img { position:absolute; inset:4px; width:36px; height:36px; image-rendering:pixelated; }
 .sw-slot .cnt { position:absolute; right:3px; bottom:1px; font-size:12px; font-weight:bold; color:#fff;
   text-shadow:1px 1px 0 #000; }
+.sw-slot.trash::after { content:'🗑'; position:absolute; left:50%; top:50%;
+  transform:translate(-50%,-52%); font-size:18px; opacity:0.55; pointer-events:none; }
+.sw-slot.trash:hover { border-color:#e08a8a; }
+.sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
+.sw-drag-ghost { position:fixed; z-index:200; pointer-events:none; width:40px; height:40px; }
+.sw-drag-ghost img { width:40px; height:40px; image-rendering:pixelated;
+  filter:drop-shadow(2px 3px 2px rgba(0,0,0,0.6)); }
+.sw-drag-ghost .cnt { position:absolute; right:-2px; bottom:-4px; font-size:12px; font-weight:bold;
+  color:#fff; text-shadow:1px 1px 0 #000; }
+.sw-drop-ok { border-color:#7de08a !important; }
 .sw-toast { position:fixed; left:50%; top:64px; transform:translateX(-50%);
   background:rgba(20,16,28,0.9); color:#ffe8a0; padding:8px 18px; border-radius:6px;
   border:1px solid #6a5a8a; font-size:14px; transition:opacity 0.4s; pointer-events:none; }
@@ -104,6 +118,13 @@ export class UI {
     document.head.appendChild(style);
     this.root = el('div', 'sw-root');
     parent.appendChild(this.root);
+    this.installDragListeners();
+    (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
+  }
+
+  private slotContent(where: 'inv' | 'chest', i: number): { id: number; stack: number } | null {
+    if (where === 'inv') return this.game.player.inv.slots[i];
+    return this.openChest?.items[i] ?? null;
   }
 
   // ============ 主菜单 ============
@@ -297,7 +318,11 @@ export class UI {
     s.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      this.onSlotClick(i, where, e.button === 2);
+      if (e.button === 2) {
+        this.splitHalf(i, where);
+      } else {
+        this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
+      }
     });
     s.addEventListener('mouseenter', () => this.showTooltipFor(i, where));
     s.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
@@ -305,81 +330,102 @@ export class UI {
     return s;
   }
 
-  private slotContent(where: 'inv' | 'chest', i: number): { id: number; stack: number } | null {
-    if (where === 'inv') return this.game.player.inv.slots[i];
-    return this.openChest?.items[i] ?? null;
-  }
+  // ---- 拖拽系统：按下起点 + 光标持有物（ghost 跟随） ----
+  private dragFrom: { i: number; where: 'inv' | 'chest'; sx: number; sy: number } | null = null;
+  private ghostEl: HTMLElement | null = null;
+  private mouseX = 0; private mouseY = 0;
 
-  /** 拾取物品时光标换成物品图（放下还原） */
-  private updateCursor() {
-    if (this.heldStack) {
-      const url = iconUrl(this.game, this.heldStack.id);
-      if (url) {
-        document.body.style.cursor = `url("${url}") 16 16, auto`;
-        return;
+  private installDragListeners() {
+    // 点击面板外的世界区域：光标持有物直接丢出（原版行为）
+    document.addEventListener('mousedown', (e) => {
+      if (!this.heldStack) return;
+      const t = e.target as HTMLElement | null;
+      if (t?.closest?.('.sw-slot') || t?.closest?.('.sw-panel') || t?.closest?.('.sw-btn')) return;
+      this.throwHeldToWorld();
+      this.refreshAll();
+    });
+    document.addEventListener('mousemove', (e) => {
+      this.mouseX = e.clientX; this.mouseY = e.clientY;
+      this.moveGhost();
+      // 未持有物品时按下并移动 >4px → 整叠拾取开始拖拽
+      if (this.dragFrom && !this.heldStack) {
+        const d = Math.hypot(e.clientX - this.dragFrom.sx, e.clientY - this.dragFrom.sy);
+        if (d > 4) this.pickUp(this.dragFrom.i, this.dragFrom.where);
       }
-    }
-    document.body.style.cursor = '';
-  }
-
-  private onSlotClick(i: number, where: 'inv' | 'chest', rightClick: boolean) {
-    const game = this.game;
-    if (where === 'inv') {
-      const inv = game.player.inv;
-      if (this.openChest && this.heldStack === null) {
-        // 背包打开且开着宝箱：shift 不做，直接点击拿放
-      }
+    });
+    document.addEventListener('mouseup', (e) => {
+      if (!this.dragFrom) return;
+      const from = this.dragFrom;
+      this.dragFrom = null;
+      if (e.button !== 0) return;
       if (this.heldStack) {
-        // 放下（配饰位校验：只有配饰能进）
-        if (isAccessorySlotIdx(i) && !isAccessoryItem(this.heldStack.id)) {
-          this.refreshAll();
-          return;
-        }
-        const cur = inv.slots[i];
-        if (!cur) {
-          inv.slots[i] = this.heldStack;
-          this.heldStack = null;
-        } else if (cur.id === this.heldStack.id) {
-          const max = ITEM_DEFS[cur.id].maxStack;
-          const put = Math.min(max - cur.stack, this.heldStack.stack);
-          cur.stack += put;
-          this.heldStack.stack -= put;
-          if (this.heldStack.stack <= 0) this.heldStack = null;
-        } else {
-          inv.slots[i] = this.heldStack;
-          this.heldStack = cur;
-        }
-        this.refreshAll();
-        return;
-      }
-      if (rightClick) {
-        // 右键：拆半到手上 / 放回一个
-        const cur = inv.slots[i];
-        if (cur) {
-          this.heldStack = { id: cur.id, stack: Math.ceil(cur.stack / 2) };
-          cur.stack -= this.heldStack.stack;
-          if (cur.stack <= 0) inv.slots[i] = null;
-        }
-        this.refreshAll();
-        return;
-      }
-      if (!this.invPanel.style.display || this.invPanel.style.display === 'none') {
-        inv.selected = i;
-        this.refreshHotbar();
+        this.resolveDrop(from);
       } else {
-        const cur = inv.slots[i];
-        if (cur) {
-          this.heldStack = cur;
-          inv.slots[i] = null;
+        // 无拖动的普通点击：快捷栏（面板关）选中；否则拾取到光标（点击移动仍可用）
+        const panelOpen = this.invPanel && this.invPanel.style.display === 'block';
+        if (from.where === 'inv' && from.i < 10 && !panelOpen) {
+          this.game.player.inv.selected = from.i;
+          this.refreshHotbar();
+        } else {
+          this.pickUp(from.i, from.where);
         }
-        this.refreshAll();
       }
-      return;
+      this.refreshAll();
+    });
+  }
+
+  /** 整叠拾取到光标 */
+  private pickUp(i: number, where: 'inv' | 'chest') {
+    const cur = this.slotContent(where, i);
+    if (!cur) return;
+    if (this.heldStack && this.heldStack.id !== cur.id) return;
+    if (where === 'inv') this.game.player.inv.slots[i] = null;
+    else if (this.openChest) this.openChest.items[i] = null;
+    if (this.heldStack) this.heldStack.stack += cur.stack;
+    else this.heldStack = { id: cur.id, stack: cur.stack };
+    this.refreshAll();
+  }
+
+  /** 右键：拆半到光标 */
+  private splitHalf(i: number, where: 'inv' | 'chest') {
+    if (this.heldStack) return;
+    const cur = this.slotContent(where, i);
+    if (!cur) return;
+    const half = Math.ceil(cur.stack / 2);
+    if (where === 'inv') this.game.player.inv.removeAt(i, half);
+    else if (this.openChest) {
+      cur.stack -= half;
+      if (cur.stack <= 0) this.openChest.items[i] = null;
     }
-    // chest
-    const chest = this.openChest;
-    if (!chest) return;
-    if (this.heldStack) {
+    this.heldStack = { id: cur.id, stack: half };
+    this.refreshAll();
+  }
+
+  /** 放下到背包/宝箱格（合并→交换，装备位校验） */
+  private placeHeld(i: number, where: 'inv' | 'chest'): void {
+    if (!this.heldStack) return;
+    if (where === 'inv') {
+      const inv = this.game.player.inv;
+      if (!inv.canAccept(i, this.heldStack.id)) return; // 装备位校验失败：弹回原处
+      const cur = inv.slots[i];
+      if (!cur) {
+        inv.slots[i] = this.heldStack;
+        this.heldStack = null;
+      } else if (cur.id === this.heldStack.id) {
+        const max = ITEM_DEFS[cur.id].maxStack;
+        const put = Math.min(max - cur.stack, this.heldStack.stack);
+        cur.stack += put;
+        this.heldStack.stack -= put;
+        if (this.heldStack.stack <= 0) this.heldStack = null;
+      } else if (inv.canAccept(i, cur.id) === false) {
+        return; // 占位物品放不回普通格（理论不发生，防御）
+      } else {
+        inv.slots[i] = this.heldStack;
+        this.heldStack = cur;
+      }
+    } else {
+      const chest = this.openChest;
+      if (!chest) return;
       const cur = chest.items[i];
       if (!cur) {
         chest.items[i] = this.heldStack;
@@ -394,14 +440,71 @@ export class UI {
         chest.items[i] = this.heldStack;
         this.heldStack = cur;
       }
-    } else {
-      const cur = chest.items[i];
-      if (cur) {
-        chest.items[i] = null;
-        this.heldStack = cur;
-      }
     }
-    this.refreshAll();
+  }
+
+  /** 拖拽松手：判定落点（格子/垃圾桶/面板外丢弃/面板空白放回） */
+  private resolveDrop(from: { i: number; where: 'inv' | 'chest' }) {
+    const target = document.elementFromPoint(this.mouseX, this.mouseY) as HTMLElement | null;
+    const slotEl = target?.closest?.('.sw-slot') as HTMLElement | null;
+    if (slotEl?.dataset.idx !== undefined && slotEl?.dataset.where) {
+      const ti = Number(slotEl.dataset.idx);
+      const tw = slotEl.dataset.where as 'inv' | 'chest';
+      if (tw === 'chest' && !this.openChest) return;
+      this.placeHeld(ti, tw);
+      return;
+    }
+    if (target?.closest?.('.sw-trash')) {
+      this.placeTrash();
+      return;
+    }
+    // 面板外：丢进世界；面板内空白：放回原格
+    const inPanel = target?.closest?.('.sw-panel');
+    if (!inPanel) {
+      this.throwHeldToWorld();
+    } else {
+      this.placeHeld(from.i, from.where);
+    }
+  }
+
+  /** 垃圾桶：丢弃暂存（关闭背包时结算删除） */
+  private trashHeld() {
+    this.placeTrash();
+  }
+
+  /** 拖出面板：以掉落物形式丢在角色面前 */
+  private throwHeldToWorld() {
+    if (!this.heldStack || !this.game) return;
+    const p = this.game.player;
+    const key = ITEM_DEFS[this.heldStack.id].key;
+    this.game.spawnDrop(p.cx + p.facing * 18, p.y + 6, key, this.heldStack.stack, p.facing * 1.5, -2);
+    this.heldStack = null;
+  }
+
+  /** 光标持有物的 ghost 跟随 */
+  private moveGhost() {
+    if (!this.heldStack) {
+      if (this.ghostEl) { this.ghostEl.remove(); this.ghostEl = null; }
+      return;
+    }
+    if (!this.ghostEl) {
+      this.ghostEl = el('div', 'sw-drag-ghost');
+      const img = el('img') as HTMLImageElement;
+      img.src = iconUrl(this.game, this.heldStack.id);
+      img.draggable = false;
+      this.ghostEl.appendChild(img);
+      document.body.appendChild(this.ghostEl);
+    }
+    const img = this.ghostEl.querySelector('img') as HTMLImageElement;
+    const url = iconUrl(this.game, this.heldStack.id);
+    if (img.src !== url) img.src = url;
+    let cnt = this.ghostEl.querySelector('.cnt') as HTMLElement | null;
+    if (this.heldStack.stack > 1) {
+      if (!cnt) { cnt = el('span', 'cnt'); this.ghostEl.appendChild(cnt); }
+      cnt.textContent = String(this.heldStack.stack);
+    } else cnt?.remove();
+    this.ghostEl.style.left = `${this.mouseX - 20}px`;
+    this.ghostEl.style.top = `${this.mouseY - 20}px`;
   }
 
   private showTooltipFor(i: number, where: 'inv' | 'chest') {
@@ -443,27 +546,112 @@ export class UI {
       this.game.player.inv.add(this.heldStack.id, this.heldStack.stack);
       this.heldStack = null;
     }
+    // 垃圾桶结算：关闭背包才真正删除
+    if (this.trashStack) {
+      const def = ITEM_DEFS[this.trashStack.id];
+      this.toast(`已丢弃 ${def.name} ×${this.trashStack.stack}`);
+      this.trashStack = null;
+      this.paintTrash();
+    }
+    this.moveGhost();
     this.game.input.uiBlocking = false;
   }
+
+  /** 垃圾桶暂存（关闭背包才删除；可取回） */
+  trashStack: { id: number; stack: number } | null = null;
+
+  private placeTrash(): void {
+    if (!this.heldStack) return;
+    const t = this.trashStack;
+    if (!t) {
+      this.trashStack = this.heldStack;
+      this.heldStack = null;
+    } else if (t.id === this.heldStack.id) {
+      const max = ITEM_DEFS[t.id].maxStack;
+      const put = Math.min(max - t.stack, this.heldStack.stack);
+      t.stack += put;
+      this.heldStack.stack -= put;
+      if (this.heldStack.stack <= 0) this.heldStack = null;
+    } else {
+      this.trashStack = this.heldStack; // 交换：可把误放的东西取回
+      this.heldStack = t;
+    }
+    this.paintTrash();
+  }
+
+  private paintTrash() {
+    if (!this.trashEl) return;
+    const img = this.trashEl.querySelector('img');
+    const cnt = this.trashEl.querySelector('.cnt');
+    img?.remove();
+    cnt?.remove();
+    if (this.trashStack) {
+      const im = el('img') as HTMLImageElement;
+      im.src = iconUrl(this.game, this.trashStack.id);
+      im.draggable = false;
+      this.trashEl.appendChild(im);
+      if (this.trashStack.stack > 1) {
+        this.trashEl.appendChild(el('span', 'cnt', String(this.trashStack.stack)));
+      }
+    }
+  }
+
+  trashEl: HTMLElement | null = null;
 
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
     this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
-    this.invPanel.appendChild(el('div', 'sw-title', '背包'));
+    this.invPanel.appendChild(el('div', 'sw-title', '🎒 背包'));
+
+    // 主体：左纸娃娃列（装备/时装/垃圾桶/配饰/金钱） + 右背包 10×4
+    const body = el('div');
+    body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
+    const left = el('div');
+    left.style.cssText = 'width:152px; flex:none;';
+    const equipRow = (label: string, from: number, n: number, cols = 3) => {
+      const wrap = el('div');
+      wrap.appendChild(el('div', 'sw-lbl', label));
+      const row = el('div');
+      row.style.cssText = `display:grid; grid-template-columns:repeat(${cols},44px); gap:4px; margin-bottom:6px;`;
+      for (let k = 0; k < n; k++) row.appendChild(this.makeSlotEl(from + k, 'inv'));
+      wrap.appendChild(row);
+      return wrap;
+    };
+    left.appendChild(equipRow('🛡 装备', ARMOR_START, 3));
+    left.appendChild(equipRow('👑 时装', VANITY_START, 3));
+    // 垃圾桶（暂存，关闭背包时才真正删除；可交换取回）
+    left.appendChild(el('div', 'sw-lbl', '丢弃'));
+    const trash = el('div', 'sw-slot trash sw-trash');
+    trash.style.cssText = 'width:44px; height:44px; flex:none;';
+    trash.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (this.heldStack) {
+        this.placeTrash();
+      } else if (this.trashStack) {
+        this.heldStack = this.trashStack; // 取回
+        this.trashStack = null;
+        this.paintTrash();
+      }
+      this.refreshAll();
+    });
+    this.trashEl = trash;
+    left.appendChild(trash);
+    left.appendChild(equipRow('💫 配饰', ACCESSORY_START, 5)); // 3 列自动换行
+    left.appendChild(equipRow('💰 金钱', COIN_START, 3));
+    body.appendChild(left);
+
+    // 背包 10×4（10-39）
+    const right = el('div');
+    right.appendChild(el('div', 'sw-lbl', '背包'));
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(5,48px); gap:5px; margin-bottom:8px;';
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:4px;';
     for (let i = 10; i < ACCESSORY_START; i++) {
       grid.appendChild(this.makeSlotEl(i, 'inv'));
     }
-    this.invPanel.appendChild(grid);
-    // 配饰栏（40-44，只有配饰可放入）
-    this.invPanel.appendChild(el('div', 'sw-title', '配饰'));
-    const acc = el('div');
-    acc.style.cssText = 'display:flex; gap:5px; margin-bottom:10px;';
-    for (let i = ACCESSORY_START; i < INV_SIZE; i++) {
-      acc.appendChild(this.makeSlotEl(i, 'inv'));
-    }
-    this.invPanel.appendChild(acc);
+    right.appendChild(grid);
+    body.appendChild(right);
+    this.invPanel.appendChild(body);
+
     // 合成区
     this.invPanel.appendChild(el('div', 'sw-title', '合成'));
     const stations = el('div', '', '');
@@ -471,7 +659,7 @@ export class UI {
     stations.dataset.role = 'stations';
     this.invPanel.appendChild(stations);
     this.craftListEl = el('div');
-    this.craftListEl.style.cssText = 'max-height:260px; overflow-y:auto; width:340px;';
+    this.craftListEl.style.cssText = 'max-height:240px; overflow-y:auto; width:520px;';
     this.invPanel.appendChild(this.craftListEl);
     this.root.appendChild(this.invPanel);
   }
@@ -578,7 +766,8 @@ export class UI {
 
   refreshAll() {
     if (!this.game) return;
-    this.updateCursor();
+    this.moveGhost();
+    this.paintTrash();
     this.refreshHotbar();
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {

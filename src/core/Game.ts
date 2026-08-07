@@ -21,7 +21,7 @@ import { Camera } from '../render/Camera';
 import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
-import { Inventory } from '../items/Inventory';
+import { Inventory, ACCESSORY_START, ARMOR_START } from '../items/Inventory';
 import { LiquidSim } from '../world/liquid/LiquidSim';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -265,16 +265,22 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY['iron_axe'], 1);
     this.player.inv.add(ITEM_BY_KEY['iron_sword'], 1);
     this.player.inv.add(ITEM_BY_KEY['torch'], 12);
-    this.player.inv.add(ITEM_BY_KEY['agility_potion'], 2);
-    this.player.inv.add(ITEM_BY_KEY['ironskin_potion'], 2);
-    this.player.inv.add(ITEM_BY_KEY['thorns_potion'], 2);
-    this.player.inv.add(ITEM_BY_KEY['regen_potion'], 2);
-    this.player.inv.add(ITEM_BY_KEY['heal_potion'], 2);
-    this.player.inv.add(ITEM_BY_KEY['suspicious_eye'], 3);
-    this.player.inv.add(ITEM_BY_KEY['lens'], 6);
+    // 药水/召唤物放入背包格（10 起），不占快捷栏
+    const bag: Array<[string, number]> = [
+      ['heal_potion', 2], ['agility_potion', 2], ['ironskin_potion', 2],
+      ['thorns_potion', 2], ['regen_potion', 2], ['suspicious_eye', 3], ['lens', 6],
+    ];
+    let bi = 10;
+    for (const [key, n] of bag) {
+      this.player.inv.slots[bi++] = { id: ITEM_BY_KEY[key], stack: n };
+    }
+    // 开局体验盔甲：铁三件套穿上
+    this.player.inv.slots[ARMOR_START] = { id: ITEM_BY_KEY['iron_helmet'], stack: 1 };
+    this.player.inv.slots[ARMOR_START + 1] = { id: ITEM_BY_KEY['iron_chainmail'], stack: 1 };
+    this.player.inv.slots[ARMOR_START + 2] = { id: ITEM_BY_KEY['iron_greaves'], stack: 1 };
     // 配饰直接放入配饰栏（槽 40-44）
-    this.player.inv.slots[40] = { id: ITEM_BY_KEY['lucky_horseshoe'], stack: 1 };
-    this.player.inv.slots[41] = { id: ITEM_BY_KEY['feral_claws'], stack: 1 };
+    this.player.inv.slots[ACCESSORY_START] = { id: ITEM_BY_KEY['lucky_horseshoe'], stack: 1 };
+    this.player.inv.slots[ACCESSORY_START + 1] = { id: ITEM_BY_KEY['feral_claws'], stack: 1 };
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;

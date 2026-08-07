@@ -2,6 +2,8 @@
 export type ToolType = 'pick' | 'axe' | 'sword' | 'hammer';
 // Buff 类型（药水饮用后生效）
 export type PotionBuff = 'agility' | 'ironskin' | 'resistance' | 'thorns' | 'regen';
+// 盔甲部位：0 头盔 1 胸甲 2 胫甲（与 Inventory.armorSlotReq 的格位对应）
+export type ArmorSlot = 0 | 1 | 2;
 
 export interface ItemDef {
   key: string;
@@ -24,6 +26,7 @@ export interface ItemDef {
     isHealType: boolean;  // 受"耐药性"封锁
   };
   accessory?: 'lucky_horseshoe' | 'feral_claws'; // 配饰效果
+  armor?: { slot: ArmorSlot; defense: number };   // 盔甲（可穿装备/时装格，仅装备格计防御）
   value?: number;         // 钱币价值（铜币）
   desc?: string;
 }
@@ -67,6 +70,8 @@ item({ key: 'lens', name: '晶状体', desc: '恶魔眼的眼睛' });
 item({ key: 'suspicious_eye', name: '可疑的眼球', desc: '夜间使用会召唤不祥之物…', maxStack: 20 });
 item({ key: 'lesser_healing_potion', name: '弱效治疗药水', heal: 50, maxStack: 30 });
 item({ key: 'coin_copper', name: '铜币', maxStack: 999, value: 1 });
+item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
+item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });
 
 // ---- 药水（Buff 来源，数值移植自 Maples Potions/*.asset）----
 item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 80, desc: '回复 80 生命',
@@ -85,6 +90,27 @@ item({ key: 'lucky_horseshoe', name: '幸运马掌', maxStack: 1, accessory: 'lu
   desc: '免疫摔落伤害' });
 item({ key: 'feral_claws', name: '猛爪手套', maxStack: 1, accessory: 'feral_claws',
   desc: '近战攻速 ×2，伤害 +5' });
+
+// ---- 盔甲（铜/铁/银/金三件套，防御取原版）----
+const armorTiers: Array<[string, string, [number, number, number]]> = [
+  // key 前缀, 显示前缀, [头盔, 胸甲, 胫甲] 防御
+  ['copper', '铜', [1, 2, 1]],
+  ['iron', '铁', [2, 3, 2]],
+  ['silver', '银', [3, 4, 3]],
+  ['gold', '金', [4, 5, 4]],
+];
+const armorParts: Array<[string, string, ArmorSlot]> = [
+  ['helmet', '头盔', 0], ['chainmail', '胸甲', 1], ['greaves', '胫甲', 2],
+];
+for (const [prefix, cn, defs] of armorTiers) {
+  armorParts.forEach(([suffix, cnPart, slot], k) => {
+    item({
+      key: `${prefix}_${suffix}`, name: `${cn}${cnPart}`, maxStack: 1,
+      armor: { slot, defense: defs[k] },
+      desc: `防御 +${defs[k]}`,
+    });
+  });
+}
 
 // ---- 工具（power：镐力/斧力；damage：武器伤害）----
 const tiers: Array<[string, string, number, number, number]> = [

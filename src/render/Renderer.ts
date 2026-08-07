@@ -699,6 +699,38 @@ export class Renderer {
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number } | null) {
     const ctx = this.ctx;
     if (p.dead) return;
+    // ---- 持有物/挥舞物：先画（人物身后图层） ----
+    // 持有物显示：当前快捷栏选中物品静态握在手中（挥舞时由下方动画覆盖）
+    // 尺寸按物品图标原始像素比例（×0.9）：镐/剑等大件大、凝胶等小件小，不再统一归一化
+    {
+      const held = p.inv.heldItem();
+      if (!swing && held) {
+        const ar = this.atlasIcon(held.id);
+        const icon = ar ? null : this.itemIcon(held.id);
+        // 静持锚点比挥砍更低更贴身（火把类小件已验证合适的位置基准）
+        const shX = p.cx + p.facing * p.w * 0.48, shY = p.y + p.h * 0.8;
+        ctx.save();
+        ctx.translate(shX, shY);
+        if (p.facing === -1) ctx.scale(-1, 1); // 整体镜像（贴图+姿态），左右完全对称
+        ctx.rotate(0.45);
+        if (ar) {
+          const s = 0.9;
+          const w = ar.sw * s, h = ar.sh * s;
+          // 握把在左下角，并向手内侧收回 35%：避免整件往外杵
+          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -w * 0.35, -h, w, h);
+        } else if (icon) {
+          ctx.drawImage(icon, -3.5, -9, 9, 9);
+        }
+        ctx.restore();
+      }
+    }
+
+    // 挥舞动画（工具/武器）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
+    // 使用类物品（药水/方块等托举）改在身体前方绘制（见 drawPlayer 后段），否则被身体挡住
+    if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
+      this.drawUseItem(ctx, p, swing);
+    }
+
     // 无敌帧闪烁：半透明而非消失（主角本体永不全隐）
     ctx.save();
     // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
@@ -761,6 +793,11 @@ export class Renderer {
     }
 
     ctx.restore();
+    // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住
+    if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool) {
+      this.drawUseItem(ctx, p, swing);
+    }
+
     // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
     // 随气量消散；整体更透明
     if (p.headUnderwater || p.breath < 5 || p.refillT >= 0) {
@@ -802,27 +839,46 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
 
-    // 挥舞动画：物品绕肩旋转
-    if (swing && swing.item >= 0) {
-      const ar = this.atlasIcon(swing.item);
-      const icon = ar ? null : this.itemIcon(swing.item);
-      const prog = 1 - swing.t / swing.dur; // 0..1
-      const arc = -1.1 + prog * 2.0;        // -63° → +57°：自然手臂挥砍弧（跟手）
-      const shX = p.cx + p.facing * p.w * 0.45, shY = p.y + p.h * 0.62; // 持握点右移下移
-      ctx.save();
-      ctx.translate(shX, shY);
-      ctx.rotate(p.facing === 1 ? arc : Math.PI - arc);
-      if (ar) {
-        const s = 28 / Math.max(ar.sw, ar.sh); // 挥舞物缩小一档
-        ctx.scale(s, s);
-        // 物品沿挥砍方向从手中伸出（径向对齐——旋转后始终"握着"）
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -ar.sh, ar.sw, ar.sh); // 左下角握把旋转
-      } else if (icon) {
-        ctx.drawImage(icon, 0, -14, 14, 14);
-      }
-      ctx.restore();
-    }
     void world;
+  }
+
+  /** 使用/挥舞动画（与静持同尺寸：原始像素比例 ×0.9，不放大）。
+   *  工具/武器：绕持握点旋转挥砍（-63° → +57° 完整弧，身后图层）。
+   *  使用类物品（托举）：前半程旋转举起（与已验证效果一致），
+   *  后半程沿同一路径转回（三角波往返），收尾回到起始位——
+   *  不会继续向前转导致"放下时飘到身前一格"。
+   *  调用时机决定图层：工具/武器在身体绘制之前调用，使用类物品之后调用 */
+  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number }) {
+    const ar = this.atlasIcon(swing.item);
+    const icon = ar ? null : this.itemIcon(swing.item);
+    const prog = 1 - swing.t / swing.dur; // 0..1
+    const isTool = !!ITEM_DEFS[swing.item]?.tool;
+    // 旋转：前载 ease-out（快速举起）；X 回拉：两端快、中间慢的正弦调制曲线
+    // （导数 1+0.6cos(2πp)：起止 1.6 倍速、中段 0.4 倍速，全程单调、终点归一）
+    const pa = 1 - (1 - prog) ** 3;
+    const pb = prog + (0.6 * Math.sin(2 * Math.PI * prog)) / (2 * Math.PI);
+    // 使用类：锚点随进程从挥砍位过渡到静持位（收尾与静持姿势逐像素衔接，无顿挫）
+    const idleAX = 0.48, idleAY = 0.80; // 静持锚点（与上方持有物显示一致）
+    const ax = isTool ? 0.62 : 0.62 + (idleAX - 0.62) * pb;
+    const ay = isTool ? 0.74 : 0.74 + (idleAY - 0.74) * pb;
+    const shX = p.cx + p.facing * p.w * ax, shY = p.y + p.h * ay; // 持握点右移下移
+    ctx.save();
+    ctx.translate(shX, shY);
+    if (p.facing === -1) ctx.scale(-1, 1); // 整体镜像（贴图+姿态），左右完全对称
+    // 工具：完整挥砍弧；使用类：从 -47° 举到静持角 +26°（终点与静持完全一致）
+    const arc = isTool ? -1.1 + prog * 2.0 : -0.825 + (0.45 + 0.825) * pa;
+    ctx.rotate(arc);
+    if (ar) {
+      const s = 0.9;
+      const w = ar.sw * s, h = ar.sh * s;
+      // 工具/武器：沿挥砍方向从手中伸出；
+      // 使用类：起始向外举起（0.62w），X 回拉用平方曲线，收尾落到静持位（-0.35w）
+      const ox = isTool ? 0 : w * (0.62 - 0.97 * pb);
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ox, -h, w, h);
+    } else if (icon) {
+      ctx.drawImage(icon, isTool ? 0 : 14 * (1 - 0.97 * pb), -14, 14, 14);
+    }
+    ctx.restore();
   }
 
   private runFramesCache: ReturnType<SpriteAtlas['animFrames']> | null = null;

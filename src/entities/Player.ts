@@ -67,9 +67,13 @@ export class Player extends Entity {
     }
     return false;
   }
-  /** 防御 = 基础(0) + 铁皮 Buff(+6) */
+  /** 防御 = 基础(0) + 盔甲 + 铁皮 Buff(+6)（时装不计） */
   get defense(): number {
-    return this.buffs.defenseBonus;
+    let d = this.buffs.defenseBonus;
+    for (const id of this.inv.equippedArmor()) {
+      if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? 0;
+    }
+    return d;
   }
   get maxHp(): number {
     return this.baseMaxHp + this.buffs.healthBonus;

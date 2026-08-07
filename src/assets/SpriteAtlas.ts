@@ -290,6 +290,11 @@ export const VANILLA_ITEM_ICON_MAP: Record<string, number> = {
   copper_pickaxe: 3509, copper_axe: 3506, copper_sword: 3508, copper_hammer: 3505,
   iron_pickaxe: 1, iron_axe: 10, silver_pickaxe: 3515, silver_axe: 3512,
   silver_hammer: 3511, gold_pickaxe: 3521, gold_axe: 3518, gold_hammer: 3517,
+  // 盔甲三件套（原版 id：胫甲 76-79 / 胸甲 80-83 / 头盔 89-92）
+  copper_greaves: 76, iron_greaves: 77, silver_greaves: 78, gold_greaves: 79,
+  copper_chainmail: 80, iron_chainmail: 81, silver_chainmail: 82, gold_chainmail: 83,
+  copper_helmet: 89, iron_helmet: 90, silver_helmet: 91, gold_helmet: 92,
+  coin_silver: 72, coin_gold: 73,
   // ---- 原版批次新材料 / 方块 / 家具 ----
   tin_ore: 699, lead_ore: 700, tungsten_ore: 701, platinum_ore: 702,
   tin_bar: 703, lead_bar: 704, tungsten_bar: 705, platinum_bar: 706,
