@@ -1,6 +1,8 @@
 // DOM overlay UI：主菜单 / HUD 快捷栏 / 背包+配饰栏 / 合成 / 宝箱 / Buff栏 / 暂停 / Tooltip / Toast
 import type { Game } from '../core/Game';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { TILE_DEFS } from '../data/tiles';
+import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { RECIPES } from '../data/recipes';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS } from '../stats/Buffs';
@@ -256,17 +258,22 @@ export class UI {
     this.root.appendChild(panel);
   }
 
-  /** 方块标注面板（F5 标注模式）：下载标注 / 下载地图 / 清空 */
+  /** 方块标注面板（F5 标注模式）：下载标注 / 下载地图 / 贴图纠错 / 清空 */
   annotatePanel: HTMLElement | null = null;
+  texFixes: Array<{ x: number; y: number; typeKey: string; sheet: number; frameX: number; frameY: number }> = [];
+  private fixModeBtn: HTMLButtonElement | null = null;
+  private fixesCountEl: HTMLElement | null = null;
   showAnnotatePanel(handlers: {
     onExportMarks: () => void;
     onExportMap: () => void;
     onClear: () => void;
     onClose: () => void;
+    onToggleFix: () => void;
+    onExportFixes: () => void;
   }) {
     this.closeAnnotatePanel();
     const panel = el('div', 'sw-panel');
-    panel.style.cssText = 'pointer-events:auto; position:fixed; left:14px; top:90px; width:190px; padding:10px;';
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:14px; top:90px; width:200px; padding:10px;';
     panel.appendChild(el('div', 'sw-title', '📍 方块标注模式'));
     const hint = el('div', '', '点击方块标记/取消，导出后发给开发者');
     hint.style.cssText = 'font-size:11px; color:#9fb0dd; margin-bottom:6px;';
@@ -274,18 +281,153 @@ export class UI {
     this.annotateCountEl = el('div', '', '已标记：0 处');
     this.annotateCountEl.style.cssText = 'font-size:12px; color:#ffe8a0; margin-bottom:6px;';
     panel.appendChild(this.annotateCountEl);
+    this.fixesCountEl = el('div', '', '贴图纠错：0 处');
+    this.fixesCountEl.style.cssText = 'font-size:12px; color:#8ad0a0; margin-bottom:6px;';
+    panel.appendChild(this.fixesCountEl);
     const mk = (label: string, fn: () => void) => {
       const b = el('button', 'sw-btn', label);
       b.style.margin = '4px 0';
       b.onclick = fn;
       panel.appendChild(b);
+      return b;
     };
     mk('⬇ 下载标注 JSON', handlers.onExportMarks);
     mk('⬇ 下载地图存档', handlers.onExportMap);
+    this.fixModeBtn = mk('🔧 贴图纠错模式：关', handlers.onToggleFix) as HTMLButtonElement;
+    mk('⬇ 下载贴图纠错', handlers.onExportFixes);
     mk('🗑 清空标注', handlers.onClear);
     mk('✕ 关闭（再按 F5）', handlers.onClose);
     this.annotatePanel = panel;
     this.root.appendChild(panel);
+  }
+
+  setFixModeLabel(on: boolean) {
+    if (this.fixModeBtn) this.fixModeBtn.textContent = `🔧 贴图纠错模式：${on ? '开' : '关'}`;
+  }
+
+  updateFixesCount(n: number) {
+    if (this.fixesCountEl) this.fixesCountEl.textContent = `贴图纠错：${n} 处`;
+  }
+
+  /** 贴图纠错：点击方块后弹出该图块的完整原版贴图表，选正确帧 */
+  openTexPicker(tx: number, ty: number) {
+    this.closeTexPicker();
+    const g = this.game;
+    const st = g.world.store;
+    if (!st.inBounds(tx, ty)) return;
+    const i = st.idx(tx, ty);
+    const t = st.type[i];
+    const def = TILE_DEFS[t];
+    const sheetId = def?.vanilla?.sheet;
+    if (sheetId === undefined) { this.toast('该图块没有原版贴图表'); return; }
+    const atlas = g.renderer.atlas;
+    const meta = atlas ? atlas.vmeta(sheetId) : null;
+    if (!atlas || !meta) { this.toast('贴图表加载失败'); return; }
+    // 实际渲染用的贴图：仙人掌按生物群系换变体（腐化/猩红/神圣）
+    let img: HTMLImageElement | null = atlas.vimages.get(meta.sheet) ?? null;
+    if (sheetId === 80) img = cactusTextureFor(atlas, st, tx, ty) ?? img;
+    if (!img) { this.toast('贴图表加载失败'); return; }
+    // 当前实际渲染帧：
+    // - auto 类不存储帧 → 渲染端同一查找表现算
+    // - 仙人掌不存储帧 → 列角色判定现算
+    // - 其余 style 类 → 存储帧
+    let curCol: number, curRow: number;
+    let autoNote = '';
+    if (sheetId === 80) {
+      const f = cactusFrameAt(st, tx, ty, t);
+      curCol = f.col; curRow = f.row;
+      autoNote = '（仙人掌：列角色现算）';
+    } else if (def.vanilla!.frame === 'auto') {
+      const f = autoFrameAt(st, tx, ty, t);
+      curCol = f.col; curRow = f.row;
+      autoNote = '（auto 分帧：按邻居现算）';
+    } else {
+      curCol = Math.floor(st.frameX[i] / meta.stride[0]);
+      curRow = Math.floor(st.frameY[i] / meta.stride[1]);
+    }
+    const panel = el('div', 'sw-panel sw-texpicker');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; right:14px; top:60px; width:420px; max-height:86vh; overflow:auto; padding:10px;';
+    panel.appendChild(el('div', 'sw-title', `🔧 纠错 (${tx}, ${ty})`));
+    const info = el('div', '', `${def.key} · sheet ${sheetId} · 当前帧 第${curCol}列 第${curRow}行${autoNote} · 网格 ${meta.grid}×${meta.stride}`);
+    info.style.cssText = 'font-size:11px; color:#9fb0dd; margin-bottom:6px;';
+    panel.appendChild(info);
+
+    const scale = Math.max(2, Math.min(4, Math.floor(400 / Math.max(1, meta.stride[0]))));
+    const cv = document.createElement('canvas');
+    cv.width = img.width * scale; cv.height = img.height * scale;
+    cv.style.cssText = `image-rendering:pixelated; border:1px solid #4d5f9e; cursor:crosshair;`;
+    // 可双向滚动的视口（大表不压缩，保持可读比例）
+    const viewport = el('div');
+    viewport.style.cssText = 'overflow:auto; max-height:56vh; border-radius:4px;';
+    viewport.appendChild(cv);
+    const cx = cv.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    let sel: { col: number; row: number } | null = { col: curCol, row: curRow };
+    const redraw = () => {
+      cx.drawImage(img, 0, 0, cv.width, cv.height);
+      // 网格
+      cx.strokeStyle = 'rgba(160,180,255,0.25)';
+      cx.lineWidth = 1;
+      for (let x = 0; x <= img.width; x += meta.stride[0]) {
+        cx.beginPath(); cx.moveTo(x * scale + 0.5, 0); cx.lineTo(x * scale + 0.5, cv.height); cx.stroke();
+      }
+      for (let y = 0; y <= img.height; y += meta.stride[1]) {
+        cx.beginPath(); cx.moveTo(0, y * scale + 0.5); cx.lineTo(cv.width, y * scale + 0.5); cx.stroke();
+      }
+      // 选中帧高亮（绿）
+      if (sel) {
+        cx.strokeStyle = '#40FF80'; cx.lineWidth = 2;
+        cx.strokeRect(sel.col * meta.stride[0] * scale, sel.row * meta.stride[1] * scale, meta.grid[0] * scale, meta.grid[1] * scale);
+      }
+    };
+    redraw();
+    cv.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      const r = cv.getBoundingClientRect();
+      const px = (e.clientX - r.left) * (cv.width / r.width);
+      const py = (e.clientY - r.top) * (cv.height / r.height);
+      sel = { col: Math.floor(px / scale / meta.stride[0]), row: Math.floor(py / scale / meta.stride[1]) };
+      redraw();
+      selInfo.textContent = `选中：第 ${sel.col} 列 第 ${sel.row} 行 → 像素偏移 (${sel.col * meta.stride[0]}, ${sel.row * meta.stride[1]})`;
+    });
+    panel.appendChild(viewport);
+    const selInfo = el('div', '', '');
+    selInfo.style.cssText = 'font-size:11px; color:#40FF80; margin:6px 0; min-height:14px;';
+    if (sel) selInfo.textContent = `当前（已预选）：第 ${sel.col} 列 第 ${sel.row} 行 → 像素偏移 (${sel.col * meta.stride[0]}, ${sel.row * meta.stride[1]})`;
+    panel.appendChild(selInfo);
+    // 滚动定位到预选帧（视口中部）
+    requestAnimationFrame(() => {
+      if (sel) {
+        viewport.scrollTop = Math.max(0, sel.row * meta.stride[1] * scale - viewport.clientHeight / 3);
+        viewport.scrollLeft = Math.max(0, sel.col * meta.stride[0] * scale - viewport.clientWidth / 3);
+      }
+    });
+    const mk2 = (label: string, fn: () => void) => {
+      const b = el('button', 'sw-btn', label);
+      b.style.margin = '4px 0';
+      b.onclick = fn;
+      panel.appendChild(b);
+    };
+    mk2('✓ 记录此纠错', () => {
+      if (!sel) { this.toast('先在表上点选一帧'); return; }
+      // 单选：只保留一条纠错记录，新的覆盖旧的
+      this.texFixes = [{
+        x: tx, y: ty, typeKey: def.key, sheet: sheetId,
+        frameX: sel!.col * meta.stride[0], frameY: sel!.row * meta.stride[1],
+      }];
+      this.updateFixesCount(this.texFixes.length);
+      this.toast(`已记录纠错：(${tx},${ty}) → (${sel!.col},${sel!.row})`);
+      this.closeTexPicker();
+    });
+    mk2('✕ 取消', () => this.closeTexPicker());
+    this.texPickerPanel = panel;
+    this.root.appendChild(panel);
+  }
+
+  private texPickerPanel: HTMLElement | null = null;
+  closeTexPicker() {
+    this.texPickerPanel?.remove();
+    this.texPickerPanel = null;
   }
 
   private annotateCountEl: HTMLElement | null = null;
@@ -297,6 +439,9 @@ export class UI {
     this.annotatePanel?.remove();
     this.annotatePanel = null;
     this.annotateCountEl = null;
+    this.fixModeBtn = null;
+    this.fixesCountEl = null;
+    this.closeTexPicker();
   }
 
   showProgress(label: string, p: number) {

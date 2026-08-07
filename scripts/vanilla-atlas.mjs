@@ -37,6 +37,8 @@ const MISC = [
   ...Array.from({ length: 11 }, (_, i) => `Tree_Branches_${i}.png`),
   // 各生物群系树干（TEdit GetTree → Images/Tiles_5_N）
   ...Array.from({ length: 7 }, (_, i) => `Tiles_5_${i}.png`),
+  // 仙人掌生物群系变体（腐化/神圣/猩红，与 Tiles_80 同 18px 网格）
+  'Evil_Cactus.png', 'Good_Cactus.png', 'Crimson_Cactus.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

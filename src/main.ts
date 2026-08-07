@@ -228,6 +228,11 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault();
       doSave();
       break;
+    case 'F8':
+      e.preventDefault();
+      game.enemySpawnEnabled = !game.enemySpawnEnabled;
+      ui.toast(game.enemySpawnEnabled ? '怪物生成已开启' : '怪物生成已关闭（已有怪物不受影响）');
+      break;
     case 'KeyM':
       if (game.renderer.fullMap.open) {
         game.renderer.fullMap.open = false;
@@ -272,6 +277,13 @@ function toggleAnnotate() {
         ui.updateAnnotateCount(0);
       },
       onClose: () => toggleAnnotate(),
+      onToggleFix: () => {
+        if (!game) return;
+        game.fixTexMode = !game.fixTexMode;
+        ui.setFixModeLabel(game.fixTexMode);
+        ui.toast(game.fixTexMode ? '贴图纠错模式：点击方块打开其贴图表' : '已关闭贴图纠错模式');
+      },
+      onExportFixes: exportTexFixes,
     });
     ui.updateAnnotateCount(game.marks.length);
     ui.toast('标注模式已开启：点击方块标记，F5 关闭');
@@ -311,6 +323,20 @@ function exportMap() {
   const json = saveGame(game.world, game.player, Date.now() - playStart);
   downloadText(`map-${game.world.name.replace(/\s+/g, '_')}.json`, json);
   ui.toast('已导出地图存档');
+}
+
+function exportTexFixes() {
+  if (!game) return;
+  const fixes = ui.texFixes;
+  if (!fixes.length) { ui.toast('还没有记录任何贴图纠错'); return; }
+  const out = {
+    worldName: game.world.name, size: [game.world.w, game.world.h],
+    exportedAt: new Date().toISOString(),
+    note: '每条 = 地图坐标处应使用的正确帧偏移（对应 Tiles_N 表的像素偏移）',
+    fixes,
+  };
+  downloadText(`texfix-${game.world.name.replace(/\s+/g, '_')}.json`, JSON.stringify(out, null, 2));
+  ui.toast(`已导出 ${fixes.length} 处贴图纠错`);
 }
 
 // 暴露 tile/key 常量给调试控制台

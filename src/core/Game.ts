@@ -151,6 +151,10 @@ export class Game implements GameHooks {
   private _tpTarget: { x: number; y: number } | null = null;
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
+  // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
+  fixTexMode = false;
+  // 敌人生成开关（F8）：关闭后不再生成新怪物（已有的不受影响）
+  enemySpawnEnabled = true;
   marks: Array<{ x: number; y: number }> = [];
   private _annoLatch = false;
 
@@ -390,9 +394,12 @@ export class Game implements GameHooks {
     if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
-      if (this.world.store.inBounds(tx, ty)) {
-        const i = this.world.store.idx(tx, ty);
-        void i;
+      if (this.fixTexMode) {
+        // 贴图纠错子模式：点击弹出该图块的完整原版贴图表
+        if (this.world.store.inBounds(tx, ty)) {
+          (window as unknown as { __swUI?: { openTexPicker?: (x: number, y: number) => void } }).__swUI?.openTexPicker?.(tx, ty);
+        }
+      } else if (this.world.store.inBounds(tx, ty)) {
         const existed = this.marks.some((m) => m.x === tx && m.y === ty);
         this.marks = this.marks.filter((m) => m.x !== tx || m.y !== ty); // 同格重复点 = 取消
         if (!existed) this.marks.push({ x: tx, y: ty });
@@ -449,9 +456,9 @@ export class Game implements GameHooks {
       this.liquid.activateRegion(ptx - halfW, pty - halfH, ptx + halfW, pty + halfH);
     }
 
-    // ---- 敌人生成 ----
+    // ---- 敌人生成（F8 可关闭） ----
     this.spawnTimer++;
-    if (this.spawnTimer >= SPAWN_CHECK_INTERVAL) {
+    if (this.enemySpawnEnabled && this.spawnTimer >= SPAWN_CHECK_INTERVAL) {
       this.spawnTimer = 0;
       this.trySpawnEnemy();
     }

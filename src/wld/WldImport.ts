@@ -255,7 +255,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   28: { key: 'pot', copyFrame: true }, 29: null, 30: 'wood',  // Pots(原版) / Piggy Bank(暂无) / Wood→木材
   52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
   61: 'tallgrass', 62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // jungle plants(草化)/藤蔓/荆棘
-  74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'flower', // plants2→草 / Hellforge→熔炉 / 陨铁 / herbs bloom→花
+  74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / Hellforge→熔炉 / 仙人掌（渲染端现场分帧）
   83: 'flower', 84: 'flower', // herbs mature→花 / bloom→花
   // ---- FTW_V2 补全 ----
   625: 'v_625_neon_moss_block',  // Neon Moss Block

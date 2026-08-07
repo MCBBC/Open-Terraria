@@ -78,6 +78,14 @@ export function mask8(st: TileStore, x: number, y: number, type: number, same: (
   return m;
 }
 
+/** auto 帧格的实际渲染帧（col,row）——与渲染端同一查找表，供纠错面板定位 */
+export function autoFrameAt(st: TileStore, x: number, y: number, type: number): { col: number; row: number } {
+  const entry = LOOKUP[mask8(st, x, y, type, (t) => t === type)];
+  if (!entry) return { col: DEFAULT_FRAME[0], row: DEFAULT_FRAME[1] };
+  const v = ((x * 7) + (y * 11)) % 3 % entry.length;
+  return { col: entry[v][0], row: entry[v][1] };
+}
+
 /** 'auto' 帧：查表 + 变体。返回 (col,row) 或 null（回退默认帧由调用方处理） */
 export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: number, y: number, type: number, same: (t: number) => boolean): DrawRect | null {
   const entry = LOOKUP[mask8(st, x, y, type, same)];
@@ -154,11 +162,102 @@ export function drawTreeCell(
     ? atlas.vimages.get(`vanilla/Tiles_5_${type}.png`) ?? atlas.vimages.get('vanilla/Tiles_5.png')
     : atlas.vimages.get('vanilla/Tiles_5.png');
   if (!img) return;
-  // 20×20 帧原尺寸绘制、整体偏移 (-2,-2)：帧内树干艺术像素只占中间 16px 宽
-  // （两侧各 2px 透明边距），压缩进 16px 格会把透明边压入导致格间缝隙；
-  // 原尺寸 + 偏移后艺术像素精确落在本格内，纵向与上下格自然交叠 4px（原版行为）
   if (fx + 20 <= img.width && fy + 20 <= img.height) {
-    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py - 2, 20, 20);
+    // 水平：帧内美术像素占中间 16px（两侧 2px 透明边距），整体 -2 后精确落满本格
+    // 垂直：各帧美术高度不一（满高 20 行 / 短帧仅顶部 16 行）——按实际美术高度
+    // 底部对齐：满高帧向上溢出 4px 与上格交叠，短帧贴齐格底，任何上下组合都无缝
+    const pad = treeFrameBottomPad(img, fx, fy);
+    const artH = 20 - pad;
+    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py + TILE - artH, 20, 20);
+  }
+}
+
+/** 树干帧底部透明行数（缓存）：扫描 20×20 区域最下方不透明行 */
+const treePadCache = new Map<string, number>();
+function treeFrameBottomPad(img: HTMLImageElement, fx: number, fy: number): number {
+  const key = `${img.width}:${fx},${fy}`;
+  const hit = treePadCache.get(key);
+  if (hit !== undefined) return hit;
+  let pad = 20;
+  try {
+    const c = document.createElement('canvas');
+    c.width = 20; c.height = 20;
+    const cx = c.getContext('2d', { willReadFrequently: true })!;
+    cx.drawImage(img, fx, fy, 20, 20, 0, 0, 20, 20);
+    const d = cx.getImageData(0, 0, 20, 20).data;
+    outer: for (let y = 19; y >= 0; y--) {
+      for (let x = 0; x < 20; x++) {
+        if (d[(y * 20 + x) * 4 + 3] > 40) { pad = 19 - y; break outer; }
+      }
+    }
+  } catch { /* 跨域等异常时按满高处理 */ }
+  treePadCache.set(key, pad);
+  return pad;
+}
+
+/** 仙人掌渲染（tile 80，移植 TEdit WorldRenderXna 5467-5706）：
+ *  wld 不存仙人掌帧——按邻接关系现场判定角色并取 Tiles_80（18px 网格）对应帧：
+ *  - 列高比较：相邻列更高 → 本列是手臂（左臂 X=3 / 右臂 X=2；顶端 X=6）
+ *  - 主干：顶格 Y=0（含手臂连接位 X=1/4/5），身格 (0,1)
+ *  - 生物群系变体：向下扫 100 格沙类 → Evil/Good/Crimson_Cactus 独立贴图 */
+/** 仙人掌生物群系贴图（向下扫沙类：腐化/猩红/神圣 → 独立变体贴图） */
+export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): HTMLImageElement | null {
+  let img = atlas.vimages.get('vanilla/Tiles_80.png');
+  const ebonsand = TILE_BY_KEY['v_112_ebonsand_block'] ?? -1;
+  const crimsand = TILE_BY_KEY['v_234_crimsand_block'] ?? -1;
+  const pearlsand = TILE_BY_KEY['v_116_pearlsand_block'] ?? -1;
+  for (let i = 0; i < 100 && y + i < st.h; i++) {
+    const t = st.type[st.idx(x, y + i)];
+    if (t === 0) continue;
+    if (t === ebonsand) { img = atlas.vimages.get('vanilla/Evil_Cactus.png') ?? img; break; }
+    if (t === crimsand) { img = atlas.vimages.get('vanilla/Crimson_Cactus.png') ?? img; break; }
+    if (t === pearlsand) { img = atlas.vimages.get('vanilla/Good_Cactus.png') ?? img; break; }
+  }
+  return img ?? null;
+}
+
+/** 仙人掌实际渲染帧（列角色判定，与 drawCactusCell 共用）——供渲染与纠错面板定位 */
+export function cactusFrameAt(st: TileStore, x: number, y: number, type: number): { col: number; row: number } {
+  const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === type;
+  // 本列顶部与各列下行高度（同一行起算，对齐 TEdit 的 length1/length2 比较）
+  let top = y;
+  while (isC(x, top - 1)) top--;
+  const colH = (ax: number) => { let n = 0; while (isC(ax, top + n)) n++; return n; };
+  const hSelf = colH(x), hR = colH(x + 1), hL = colH(x - 1);
+  const hasN = isC(x, y - 1), hasS = isC(x, y + 1);
+  let ux = 0, uy = 0;
+  if (hR > hSelf) {
+    // 左臂（右侧有更高主干）
+    if (!hasN) { ux = 6; uy = 2; }
+    else { ux = 3; uy = hasS ? 1 : 2; }
+  } else if (hL > hSelf) {
+    // 右臂（左侧有更高主干）
+    if (!hasN) { ux = 6; uy = 1; }
+    else { ux = 2; uy = hasS ? 1 : 2; }
+  } else if (!hasN) {
+    // 主干顶格：手臂连接位判定（w/e/sw/se）
+    uy = 0;
+    const w = isC(x - 1, y), sw = isC(x - 1, y + 1), e = isC(x + 1, y), se = isC(x + 1, y + 1);
+    if (w && !sw && (!e || se)) ux = 4;
+    else if (e && !se && (!w || sw)) ux = 1;
+    else if (w && !sw && e && !se) ux = 5;
+    else ux = 0;
+  } else {
+    ux = 0; uy = 1; // 主干身格
+  }
+  return { col: ux, row: uy };
+}
+
+export function drawCactusCell(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  st: TileStore, x: number, y: number, type: number, px: number, py: number,
+): void {
+  const { col: ux, row: uy } = cactusFrameAt(st, x, y, type);
+  // 生物群系变体：向下扫沙类（腐化/猩红/神圣）
+  const img = cactusTextureFor(atlas, st, x, y);
+  if (!img) return;
+  if (ux * 18 + 16 <= img.width && uy * 18 + 16 <= img.height) {
+    ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py, TILE, TILE);
   }
 }
 
@@ -177,6 +276,11 @@ export function drawVanillaCell(
   // 树木（tile 5）：专用渲染（树冠/树枝标记帧 + 生物群系树干）
   if (sheet === 5 && frame === 'style') {
     drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py);
+    return;
+  }
+  // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体
+  if (sheet === 80 && frame === 'style') {
+    drawCactusCell(ctx, atlas, st, x, y, type, px, py);
     return;
   }
   let r: DrawRect | null = null;

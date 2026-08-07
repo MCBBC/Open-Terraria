@@ -412,6 +412,7 @@ def({ key: 'v_24_corruption_short_plants', name: 'Corruption Short Plants', deco
 def({ key: 'v_32_corruption_thorns', name: 'Corruption Thorns', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#9787B7', drop: null as unknown as string, vanilla: { sheet: 32, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_27_sunflower', name: 'Sunflower', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 4, mapColor: '#E2C431', drop: null as unknown as string, vanilla: { sheet: 27, frame: 'style', fw: 2, fh: 4 } });
 def({ key: 'v_5_trees', name: 'Trees', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#6B4A2B', drop: null as unknown as string, vanilla: { sheet: 5, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_80_cactus', name: 'Cactus Plant', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#5A7A3A', drop: null as unknown as string, vanilla: { sheet: 80, frame: 'style', fw: 1, fh: 1 } });
 
 // 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
