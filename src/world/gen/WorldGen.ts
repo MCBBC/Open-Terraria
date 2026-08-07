@@ -431,20 +431,24 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
     if (store.get(x, sy) === T.DIRT) {
       store.setTileSilent(x, sy, T.GRASS);
     }
-    // 装饰：草丛/花/蘑菇——草地繁盛（草 ~34%、花 ~14% 且成簇、蘑菇 ~3%）
-    if (sy + 1 < store.h && !store.isActive(x, sy) && store.isSolid(x, sy + 1)) {
+    // 装饰：草丛/花/蘑菇——放在草块上方空气格（sy 是首个实心行，装饰在 sy-1）
+    // 帧为 Tiles_3 表的像素偏移（TEdit frames 数据）：草丛 6 变体 / 花 9 色 / 蘑菇 (144,0)
+    if (sy - 1 >= 0 && !store.isActive(x, sy - 1) && store.isSolid(x, sy)) {
+      const GRASS_FX = [0, 18, 36, 54, 72, 90];
+      const FLOWER_FX = [108, 126, 162, 180, 216, 252, 342, 540, 594];
       const r = rng.next();
-      if (r < 0.34) store.setTileSilent(x, sy, T.TALLGRASS, x % 3 * 16, 0);
+      if (r < 0.34) store.setTileSilent(x, sy - 1, T.TALLGRASS, GRASS_FX[Math.floor(rng.next() * GRASS_FX.length) % 6], 0);
       else if (r < 0.48) {
-        store.setTileSilent(x, sy, T.FLOWER, x % 3 * 16, 0);
-        // 花簇：50% 概率向两侧蔓延 1 格
+        store.setTileSilent(x, sy - 1, T.FLOWER, FLOWER_FX[Math.floor(rng.next() * FLOWER_FX.length) % 9], 0);
+        // 花簇：50% 概率向两侧蔓延 1 格（同簇同帧）
+        const fx = store.frameX[store.idx(x, sy - 1)];
         for (const dx of [-1, 1]) {
-          if (Math.random() < 0.5 && store.get(x + dx, sy) === 0 && store.isSolid(x + dx, sy + 1)) {
-            store.setTileSilent(x + dx, sy, T.FLOWER, (x + dx) % 3 * 16, 0);
+          if (Math.random() < 0.5 && store.get(x + dx, sy - 1) === 0 && store.isSolid(x + dx, sy)) {
+            store.setTileSilent(x + dx, sy - 1, T.FLOWER, fx, 0);
           }
         }
       }
-      else if (r < 0.51) store.setTileSilent(x, sy, T.MUSHROOM, 0, 0);
+      else if (r < 0.51) store.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
     }
   }
   // 树：正常间距 6-14；连续 24 格无树则放宽条件强制补种，保证顶部林区连续
@@ -453,19 +457,24 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
   while (x < w - 6) {
     const sy = Math.floor(surface[x]);
     const relaxed = sinceLast >= 24;
+    // 软装饰（草丛/花/蘑菇/树苗）不挡树：基座格判定忽略，种前清掉
+    const isSoft = (t: number) => t === T.TALLGRASS || t === T.FLOWER || t === T.MUSHROOM || t === T.SAPLING;
     // 不种在水里：树干基座格（地面上一格）必须无液体
-    if (store.get(x, sy) === T.GRASS && !store.isActive(x, sy - 1) && store.liquid[store.idx(x, sy - 1)] === 0) {
+    if (store.get(x, sy) === T.GRASS && (!store.isActive(x, sy - 1) || isSoft(store.get(x, sy - 1))) && store.liquid[store.idx(x, sy - 1)] === 0) {
       const th = rng.int(7, 14);
       let ok = true;
-      for (let dy = 1; dy <= th; dy++) if (store.isActive(x, sy - dy)) { ok = false; break; }
+      for (let dy = 1; dy <= th; dy++) {
+        if (store.isActive(x, sy - dy) && !(dy === 1 && isSoft(store.get(x, sy - dy)))) { ok = false; break; }
+      }
       // 树冠 80×80 外扩 2 格：要求 ±2 列上方净空、地面实心；放宽时只查本列±1
       const range = relaxed ? 1 : 2;
       for (let dx = -range; dx <= range; dx++) {
-        if (store.isActive(x + dx, sy - 1) || !(store.get(x + dx, sy) === T.GRASS || store.isSolid(x + dx, sy))) {
+        if ((store.isActive(x + dx, sy - 1) && !isSoft(store.get(x + dx, sy - 1))) || !(store.get(x + dx, sy) === T.GRASS || store.isSolid(x + dx, sy))) {
           ok = false; break;
         }
       }
       if (ok) {
+        if (isSoft(store.get(x, sy - 1))) store.setTile(x, sy - 1, 0); // 清基座装饰
         for (let dy = 1; dy <= th; dy++) {
           store.setTileSilent(x, sy - dy, T.TREE, 0, dy === th ? 16 : 0);
         }

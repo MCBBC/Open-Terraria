@@ -22,6 +22,16 @@ import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { Inventory, ACCESSORY_START, ARMOR_START } from '../items/Inventory';
+
+// 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
+const IMPORTED_TREE_TYPES = new Set<number>(
+  ['v_5_trees',
+    'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
+    'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
+    'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
+    .map((k) => TILE_BY_KEY[k])
+    .filter((v): v is number => v !== undefined),
+);
 import { LiquidSim } from '../world/liquid/LiquidSim';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas } from '../assets/SpriteAtlas';
@@ -801,9 +811,13 @@ export class Game implements GameHooks {
     if (type === 0) return;
     const def = TILE_DEFS[type];
 
-    // 树：砍树干 → 整棵树倒下
+    // 树：砍树干 → 整棵树倒下（自有树 + 导入的原版树族）
     if (type === T.TREE) {
       this.fellTree(x, y);
+      return;
+    }
+    if (IMPORTED_TREE_TYPES.has(type)) {
+      this.fellImportedTree(x, y, type);
       return;
     }
     // object：找锚点整体移除
@@ -907,6 +921,33 @@ export class Game implements GameHooks {
     // 从登记表移除
     const t = this.world.trees.findIndex((tr) => tr.x === x && Math.abs(tr.y - top) <= 2);
     if (t >= 0) this.world.trees.splice(t, 1);
+  }
+
+  /** 砍导入的原版树（tile 5 / 宝石树 / 装饰树 / 灰烬树）：
+   *  同列同类型连续段 = 整棵树（含顶部树冠标记格），整棵移除 + 掉木材。
+   *  首击即倒（不做倒树动画——动画实体绑定自有树的登记表结构） */
+  private fellImportedTree(x: number, y: number, type: number) {
+    const st = this.world.store;
+    let top = y;
+    while (st.get(x, top - 1) === type) top--;
+    let bottom = y;
+    while (st.get(x, bottom + 1) === type) bottom++;
+    const height = bottom - top + 1;
+    this.chunks.markDirtyArea(x - 6, top - 7, x + 6, bottom + 1);
+    // 清树干列 + 紧邻的侧枝（同类型，仅 ±1 防 "格洞" 残留）
+    for (let yy = top; yy <= bottom; yy++) {
+      st.setTile(x, yy, 0);
+      for (const s of [-1, 1]) {
+        if (st.get(x + s, yy) === type) st.setTile(x + s, yy, 0);
+      }
+    }
+    // 掉木材（与自有树同比例）+ 树顶枝条额外几份
+    const wood = Math.max(1, Math.floor(height * 0.8));
+    for (let p = 0; p < wood; p++) {
+      const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
+      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+    }
+    this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
   }
 
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {

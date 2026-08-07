@@ -127,7 +127,16 @@ function frameHasContent(r: DrawRect): boolean {
  *    U=22 树顶（Tree_Tops_style 80×80 底部锚定）、U=44 左枝（Tree_Branches 40×40 右锚定）、
  *    U=66 右枝（左锚定）；变体 x%3
  *  treeStyle 固定 0（wld 树样式段未解析，默认森林） */
-const TREE_STYLE = 0;
+// 树类 tile → Tree_Tops/Branches 样式（TEdit：5 森林 0 / 宝石树 583-589 → 22-28 /
+// 装饰树 596 樱花→29、616 柳→30 / 灰烬树 634 → 31）
+const TREE_SHEET_STYLES: Record<number, number> = { 5: 0, 596: 29, 616: 30, 634: 31 };
+for (let i = 583; i <= 589; i++) TREE_SHEET_STYLES[i] = 22 + (i - 583);
+// 样式 → 树冠/树枝帧尺寸（TEdit：默认 80×80；宝石/灰烬 116×96；装饰 118×96）
+function treeStyleSize(style: number): [number, number] {
+  if (style === 29 || style === 30) return [118, 96];
+  if (style >= 22 && style <= 31) return [116, 96];
+  return [80, 80];
+}
 // 树下草地 → 生物群系树干变体（TEdit treeType；-1 = 基础 Tiles_5）
 const TREE_GROUND: Array<[string, number]> = [
   ['v_23_corrupt_grass_block', 0],
@@ -139,25 +148,30 @@ const TREE_GROUND: Array<[string, number]> = [
 export function drawTreeCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, fx: number, fy: number, px: number, py: number,
+  sheet = 5,
   foliageOnly = false,
 ): void {
+  const style = TREE_SHEET_STYLES[sheet] ?? 0;
   if (fy >= 198 && fx >= 22) {
     // 树冠/树枝标记帧（仅由 ChunkCache 的外扩遍绘制，防跨 chunk 裁剪）
     if (foliageOnly === false) return;
     const frame = ((x % 3) + 3) % 3;
+    const [topW, topH] = treeStyleSize(style);
+    const brW = Math.round(topW * 0.4), brH = Math.round(topH * 0.42); // 80×80→40×34 档
     let img: HTMLImageElement | null = null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22) {
-      img = atlas.vimages.get(`vanilla/Tree_Tops_${TREE_STYLE}.png`) ?? null;
-      sw = 80; sh = 80; sx = frame * (sw + 2); anchor = 0;
+      img = atlas.vimages.get(`vanilla/Tree_Tops_${style}.png`) ?? null;
+      sw = topW; sh = topH; sx = frame * (sw + 2); anchor = 0;
     } else if (fx === 44) {
-      img = atlas.vimages.get(`vanilla/Tree_Branches_${TREE_STYLE}.png`) ?? null;
-      sw = 40; sh = 40; sx = 0; sy = frame * (sh + 2); anchor = 1;
+      img = atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
+      sw = brW; sh = brH; sx = 0; sy = frame * (sh + 2); anchor = 1;
     } else if (fx === 66) {
-      img = atlas.vimages.get(`vanilla/Tree_Branches_${TREE_STYLE}.png`) ?? null;
-      sw = 40; sh = 40; sx = 42; sy = frame * (sh + 2); anchor = 2;
+      img = atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
+      sw = brW; sh = brH; sx = Math.round(sw * 1.05); sy = frame * (sh + 2); anchor = 2;
     }
     if (!img) return;
+    if (sx + sw > img.width || sy + sh > img.height) return;
     let dx = px, dy = py;
     if (anchor === 0) { dx = px + (TILE - sw) / 2; dy = py + TILE - sh; }
     else if (anchor === 1) { dx = px + TILE - sw; dy = py + (TILE - sh) / 2; }
@@ -305,9 +319,10 @@ export function drawVanillaCell(
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
 ): void {
-  // 树木（tile 5）：专用渲染（树冠/树枝标记帧 + 生物群系树干）
-  if (sheet === 5 && frame === 'style') {
-    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py);
+  // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634）：
+  // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）
+  if (frame === 'style' && TREE_SHEET_STYLES[sheet] !== undefined) {
+    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py, sheet);
     return;
   }
   // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体

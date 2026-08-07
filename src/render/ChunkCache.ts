@@ -13,8 +13,8 @@ import type { World } from '../world/World';
 // Grass 走人工标注（'@grass'）：Tiles_2.png 是多 tile 混排图集，自动分类不可靠；
 // 用 public/annotator.html 标注后写入 sprites/annotations.json。无标注时回退程序化。
 const TILE_RULES: Record<number, string> = {
-  5: 'Iron', 8: 'Tree',
-  // 泥土/石/草已改走原版 BlendRules（VanillaTiler blend 分支），不再走 Maples 规则
+  8: 'Tree',
+  // 泥土/石/草走原版 BlendRules；铁矿走原版表——均不再用 Maples 规则
   13: '工作台', 14: '熔炉', 15: '铁砧',
 };
 
@@ -297,9 +297,14 @@ export class ChunkCache {
 
     // ---- 第四遍：原版树冠/树枝（tile 5 标记帧，跨 chunk 外扩绘制） ----
     // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪
+    // 所有树类 tile（5/583-589/596/616/634）的树冠/树枝标记帧
     if (this.autotiler) {
-      const v5 = TILE_BY_KEY['v_5_trees'];
-      if (v5 !== undefined) {
+      const treeIds = ['v_5_trees',
+        'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
+        'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
+        'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
+        .map((k) => TILE_BY_KEY[k]).filter((id) => id !== undefined);
+      for (const v5 of treeIds) {
         const EXT = 6;
         for (let ty = y0 - EXT; ty < y0 + CHUNK + EXT; ty++) {
           for (let tx = x0 - EXT; tx < x0 + CHUNK + EXT; tx++) {
@@ -308,8 +313,9 @@ export class ChunkCache {
             if (st.type[i] !== v5) continue;
             const fx = st.frameX[i], fy = st.frameY[i];
             if (fy < 198 || fx < 22) continue; // 树干由主遍绘制
+            const def = TILE_DEFS[st.type[i]];
             drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, true);
+              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, def?.vanilla?.sheet ?? 5, true);
           }
         }
       }
