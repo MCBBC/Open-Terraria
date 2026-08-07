@@ -538,6 +538,27 @@ export function drawVanillaCell(
       }
       ofy = ay * 18;
     }
+    // 旧版素材表【分带布局】兼容：wld 帧按新游戏单行布局存储（样式全部横排一行），
+    // 而素材包里的表较窄、样式分多带排列（一行放不下就换到下一带）。
+    // 样式索引超出一带容量 → 换带重算（如 Tiles_187：带宽 35 样式×54px，
+    // 样式 52 头骨 wld 帧 (2808,0) → 实际 (52%35)*54=918, y+36）。
+    // 带 = 物体占格宽×步长；带高 = 物体占格高×步长
+    const meta = atlas.vmeta(sheet);
+    if (meta && fw > 0) {
+      const imgW = atlas.vimages.get(meta.sheet)?.width ?? 0;
+      if (imgW > 0 && ofx + meta.grid[0] > imgW) {
+        const objW = fw * meta.stride[0];
+        const bandH = (fh || 1) * meta.stride[1];
+        const colsPerBand = Math.floor(imgW / objW);
+        if (colsPerBand > 0) {
+          const styleIdx = Math.floor(ofx / objW);
+          if (styleIdx >= colsPerBand) {
+            ofx = (styleIdx % colsPerBand) * objW + (ofx % objW);
+            ofy += Math.floor(styleIdx / colsPerBand) * bandH;
+          }
+        }
+      }
+    }
     // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
     r = atlas.vframeAt(sheet, ofx, ofy);

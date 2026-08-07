@@ -4,7 +4,7 @@ import { UI } from './ui/UI';
 import { saveGame, loadSave } from './save/SaveFile';
 import { kvGet, kvSet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
-import { TILE_BY_KEY, T, TILE_DEFS } from './data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS, WALL_DEFS } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
 import { INV_SIZE } from './items/Inventory';
 // 调试句柄：页面内直接测 .wld 转换
@@ -306,11 +306,37 @@ function exportMarks() {
     const idx = st.idx(m.x, m.y);
     const t = st.type[idx];
     const def = TILE_DEFS[t];
+    // 诊断增强：8 邻居（类型+帧）、液体、贴图表尺寸与帧越界检测
+    const nb: Record<string, { key: string | null; fx: number; fy: number } | null> = {};
+    const dirs: Array<[string, number, number]> = [['n', 0, -1], ['s', 0, 1], ['w', -1, 0], ['e', 1, 0],
+      ['nw', -1, -1], ['ne', 1, -1], ['sw', -1, 1], ['se', 1, 1]];
+    for (const [tag, dx, dy] of dirs) {
+      const nx = m.x + dx, ny = m.y + dy;
+      if (!st.inBounds(nx, ny)) { nb[tag] = null; continue; }
+      const ni = st.idx(nx, ny);
+      const nt = st.type[ni];
+      nb[tag] = nt === 0 ? null : { key: TILE_DEFS[nt]?.key ?? String(nt), fx: st.frameX[ni], fy: st.frameY[ni] };
+    }
+    // 贴图表元数据 + 越界检测（style 帧超出 PNG = 素材包版本旧）
+    let sheetInfo: { sheet: number; name: string; png: string; oob: boolean } | null = null;
+    const sheetId = def?.vanilla?.sheet;
+    if (sheetId !== undefined && g.renderer.atlas) {
+      const meta = g.renderer.atlas.vmeta(sheetId);
+      const img = meta ? g.renderer.atlas.vimages.get(meta.sheet) : null;
+      if (meta && img) {
+        const oob = def!.vanilla!.frame === 'style'
+          && (st.frameX[idx] + meta.grid[0] > img.width || st.frameY[idx] + meta.grid[1] > img.height);
+        sheetInfo = { sheet: sheetId, name: meta.name, png: `${img.width}×${img.height}`, oob };
+      }
+    }
     return {
       no: i + 1, x: m.x, y: m.y,
       typeId: t, typeKey: def?.key ?? null, typeName: def?.name ?? null,
       frameX: st.frameX[idx], frameY: st.frameY[idx],
       wall: st.wall[idx],
+      liquid: st.liquid[idx], liquidType: st.liquidType[idx],
+      wallName: WALL_DEFS[st.wall[idx]]?.name ?? null,
+      neighbors: nb, sheetInfo,
     };
   });
   const out = {
