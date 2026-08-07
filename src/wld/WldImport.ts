@@ -756,16 +756,17 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
-  // 宝箱：转内部格式（锚点 + 战利品）
+  // 宝箱：转内部格式（锚点 + 战利品）。帧统一 18px 像素偏移（vanilla style 规范语义，
+  // 与 tryPlace / breakTile 的 floor(f/18) 归一化一致）
   const chests: SaveData['chests'] = [];
   for (const c of wld.chests) {
     // 在 chest 周围找锚点（wld chest 坐标可能是左上）
     type[c.y * w + c.x] = TILE_BY_KEY['chest'];
     frameX[c.y * w + c.x] = 0;
     frameY[c.y * w + c.x] = 0;
-    if (c.x + 1 < w) { type[c.y * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[c.y * w + c.x + 1] = 1; frameY[c.y * w + c.x + 1] = 0; }
-    if (c.y + 1 < h) { type[(c.y + 1) * w + c.x] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x] = 0; frameY[(c.y + 1) * w + c.x] = 1; }
-    if (c.x + 1 < w && c.y + 1 < h) { type[(c.y + 1) * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x + 1] = 1; frameY[(c.y + 1) * w + c.x + 1] = 1; }
+    if (c.x + 1 < w) { type[c.y * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[c.y * w + c.x + 1] = 18; frameY[c.y * w + c.x + 1] = 0; }
+    if (c.y + 1 < h) { type[(c.y + 1) * w + c.x] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x] = 0; frameY[(c.y + 1) * w + c.x] = 18; }
+    if (c.x + 1 < w && c.y + 1 < h) { type[(c.y + 1) * w + c.x + 1] = TILE_BY_KEY['chest']; frameX[(c.y + 1) * w + c.x + 1] = 18; frameY[(c.y + 1) * w + c.x + 1] = 18; }
     const items: Array<{ id: number; stack: number } | null> = [];
     for (const it of c.items.slice(0, 10)) {
       if (!it) { items.push(null); continue; }

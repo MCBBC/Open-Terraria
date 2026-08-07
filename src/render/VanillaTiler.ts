@@ -104,29 +104,31 @@ export function drawVanillaCell(
   if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
   } else {
-    // 重建帧偏移：0 偏移且左边/上边是同类 → 该格是锚点，但可能是锚点在左的延伸格
+    // 重建帧偏移：只针对帧数据全 0 的残缺物体（wld 部分家具）。
+    // 邻居必须同样存 (0,0) 才视为同物体的待重建格——已带 18px 偏移的邻居
+    // 一定是相邻物体的格子（如并排宝箱的 (18,0)），必须挡住扫描
     let ofx = fx, ofy = fy;
     if (ofx === 0 && ofy === 0 && (fw > 1 || fh > 1)) {
-      // 向左扫描最多 fw-1 格找同物体（frameY 相同视为同一物体）
+      // 向左扫描最多 fw-1 格：同类且帧全 0
       let ax = 0;
       for (let k = 1; k < fw; k++) {
-        if (st.inBounds(x - k, y) && st.type[st.idx(x - k, y)] === type && st.frameY[st.idx(x - k, y)] === fy) ax = k;
+        const li = st.idx(x - k, y);
+        if (st.inBounds(x - k, y) && st.type[li] === type && st.frameX[li] === 0 && st.frameY[li] === 0) ax = k;
         else break;
       }
       ofx = ax * 18;
-      // 向上扫描最多 fh-1 格
+      // 向上扫描最多 fh-1 格：同类且帧全 0
       let ay = 0;
       for (let k = 1; k < fh; k++) {
-        if (st.inBounds(x, y - k) && st.type[st.idx(x, y - k)] === type && st.frameX[st.idx(x, y - k)] === ofx) ay = k;
+        const ui2 = st.idx(x, y - k);
+        if (st.inBounds(x, y - k) && st.type[ui2] === type && st.frameX[ui2] === 0 && st.frameY[ui2] === 0) ay = k;
         else break;
       }
       ofy = ay * 18;
     }
-    // 宝箱表（Tiles_21）特判：3 组状态带高 38px（含 2px 边距），不是标准 18 stride
-    if (sheet === 21) {
-      r = atlas.vrect(sheet, ofx * 18, Math.floor(ofy / 18) * 38 + 2, 16, 16);
-    }
-    if (!r) r = atlas.vframeAt(sheet, ofx, ofy);
+    // 标准 18px stride 像素偏移直取（宝箱 Tiles_21 也是标准网格：
+    // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
+    r = atlas.vframeAt(sheet, ofx, ofy);
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
   }
   if (!r) return;
