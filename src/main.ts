@@ -214,6 +214,12 @@ window.addEventListener('keydown', (e) => {
       game.renderer.debugMode = !game.renderer.debugMode;
       ui.toast(game.renderer.debugMode ? '调试面板已开启（碰撞盒高亮）' : '调试面板已关闭');
       break;
+    case 'F4':
+      e.preventDefault();
+      game.world.explored.fill(1);
+      game.world.exploredVersion++; // 使迷雾缓存失效重建
+      ui.toast('已消除全图迷雾');
+      break;
     case 'F5':
       e.preventDefault();
       doSave();

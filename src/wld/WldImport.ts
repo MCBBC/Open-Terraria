@@ -22,7 +22,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   16: 'anvil',        // Anvil
   17: 'anvil',        // Mythril Anvil
   18: 'workbench',    // Work Bench
-  19: 'platform',     // Wood Platform
+  19: { key: 'platform', copyFrame: true },  // Wood Platform（原版帧直拷）
   21: 'chest',  // Chest（帧按格距重建，不直拷——wld 存的是格偏移 0/1 不是像素）
   53: 'sand',         // Sand
   59: 'mud',          // Mud
