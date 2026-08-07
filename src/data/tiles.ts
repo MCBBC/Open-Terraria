@@ -414,5 +414,9 @@ def({ key: 'v_27_sunflower', name: 'Sunflower', decor: true, framed: true, opaci
 def({ key: 'v_5_trees', name: 'Trees', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#6B4A2B', drop: null as unknown as string, vanilla: { sheet: 5, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_80_cactus', name: 'Cactus Plant', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#5A7A3A', drop: null as unknown as string, vanilla: { sheet: 80, frame: 'style', fw: 1, fh: 1 } });
 
+def({ key: 'v_44_pink_brick', name: 'Pink Brick', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null as unknown as string, vanilla: { sheet: 44, frame: 'auto' } });
+def({ key: 'v_203_crimstone_block', name: 'Crimstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#802C2D', blend: true, drop: null as unknown as string, vanilla: { sheet: 203, frame: 'auto' } });
+def({ key: 'v_201_crimson_short_plants', name: 'Crimson Short Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#CB3D40', drop: null as unknown as string, vanilla: { sheet: 201, frame: 'style', fw: 1, fh: 1 } });
+
 // 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));

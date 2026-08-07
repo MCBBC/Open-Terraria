@@ -296,6 +296,9 @@ const TILE_MAP: Record<number, MapEntry> = {
   24: { key: 'v_24_corruption_short_plants', copyFrame: true }, // Corruption Short Plants
   32: { key: 'v_32_corruption_thorns', copyFrame: true }, // Corruption Thorns
   27: { key: 'v_27_sunflower', copyFrame: true }, // Sunflower (2x4)
+  44: 'v_44_pink_brick',  // Pink Brick
+  203: 'v_203_crimstone_block',  // Crimstone Block
+  201: { key: 'v_201_crimson_short_plants', copyFrame: true }, // Crimson Short Plants
   75: 'v_75_obsidian_brick',
   199: 'v_199_crimson_grass_block',
 };
@@ -696,6 +699,7 @@ const ITEM_MAP: Record<number, string> = {
   5509: 'vi_5509_vampire_pendant',  // Vampire Pendant
   31: 'vi_31_bottle',  // Bottle
   41: 'vi_41_flaming_arrow',  // Flaming Arrow
+  75: 'vi_75_fallen_star',  // Fallen Star
   5505: 'vi_5505_mean_goblin_s_spikes',  // Mean Goblin\'s Spikes
   5525: 'vi_5525_cursed_piper_flute',  // Cursed Piper Flute
 };
