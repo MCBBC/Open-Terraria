@@ -89,12 +89,35 @@ export function autoFrameAt(st: TileStore, x: number, y: number, type: number): 
 /** 'auto' 帧：查表 + 变体。返回 (col,row) 或 null（回退默认帧由调用方处理） */
 export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: number, y: number, type: number, same: (t: number) => boolean): DrawRect | null {
   const entry = LOOKUP[mask8(st, x, y, type, same)];
+  let r: DrawRect | null = null;
   if (entry) {
     const v = entry[((x * 7) + (y * 11)) % 3 % entry.length];
-    const r = atlas.vframe(sheet, v[0], v[1]);
-    if (r) return r;
+    r = atlas.vframe(sheet, v[0], v[1]);
+    if (r && !frameHasContent(r)) r = null; // 空帧（如草皮表缺 13-17 列的边缘帧）→ 回退
   }
-  return atlas.vframe(sheet, DEFAULT_FRAME[0], DEFAULT_FRAME[1]);
+  if (!r) r = atlas.vframe(sheet, DEFAULT_FRAME[0], DEFAULT_FRAME[1]);
+  return r;
+}
+
+/** auto 帧内容检测缓存：key = 图像:像素偏移。查找表引用的帧在部分表（草皮族等
+ *  窄表）上是空像素，直画会整格空白 → 检出后回退默认帧 */
+const frameContentCache = new Map<string, boolean>();
+function frameHasContent(r: DrawRect): boolean {
+  const key = `${r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
+  const hit = frameContentCache.get(key);
+  if (hit !== undefined) return hit;
+  let ok = false;
+  try {
+    const c = document.createElement('canvas');
+    c.width = r.sw; c.height = r.sh;
+    const cx = c.getContext('2d', { willReadFrequently: true })!;
+    cx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, 0, 0, r.sw, r.sh);
+    const d = cx.getImageData(0, 0, r.sw, r.sh).data;
+    let n = 0;
+    for (let i = 3; i < d.length; i += 16) { if (d[i] > 40 && ++n >= 4) { ok = true; break; } }
+  } catch { ok = true; /* 采样失败按有内容处理 */ }
+  frameContentCache.set(key, ok);
+  return ok;
 }
 
 /** 树木专用渲染（tile 5，移植 TEdit WorldRenderXna 树逻辑）：
