@@ -393,7 +393,7 @@ def({ key: 'v_713_lava_boulder', name: 'Lava Boulder', solid: true, framed: true
 
 // ===================== wld 独立映射修复（原为错误复用） =====================
 def({ key: 'v_23_corrupt_grass_block', name: 'Corrupt Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null as unknown as string, vanilla: { sheet: 23, frame: 'blend' } });
-def({ key: 'v_31_orb_heart', name: 'Orb Heart', solid: true, opacity: 1, pick: 0, mapColor: '#8D78A8', blend: true, drop: null as unknown as string, vanilla: { sheet: 31, frame: 'auto' } });
+def({ key: 'v_31_orb_heart', name: 'Orb Heart', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#8D78A8', drop: null as unknown as string, vanilla: { sheet: 31, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_41_blue_brick', name: 'Blue Brick', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null as unknown as string, vanilla: { sheet: 41, frame: 'auto' } });
 def({ key: 'v_75_obsidian_brick', name: 'Obsidian Brick', solid: true, opacity: 1, pick: 0, mapColor: '#242424', blend: true, drop: null as unknown as string, vanilla: { sheet: 75, frame: 'auto' } });
 def({ key: 'v_199_crimson_grass_block', name: 'Crimson Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null as unknown as string, vanilla: { sheet: 199, frame: 'blend' } });

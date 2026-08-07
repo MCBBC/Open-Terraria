@@ -34,7 +34,7 @@ export class World {
   clock: Clock;
   chests: ChestData[] = [];
   // Boss 进度旗标
-  flags: Record<string, boolean> = { downedEyeOfCthulhu: false };
+  flags: Record<string, boolean> = { downedEyeOfCthulhu: false, shadowOrbSmashed: false };
   // 树登记：砍树干时找到整棵树（roots → 范围）
   trees: Array<{ x: number; y: number; h: number }> = [];
   /** 战争迷雾：1 = 已探索。按 tile 粒度。 */

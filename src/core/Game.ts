@@ -844,6 +844,11 @@ export class Game implements GameHooks {
       this.fellTree(x, y);
       return;
     }
+    // 暗影之球/恶魔之心：整体破碎（原版 WorldGen.CheckOrb 移植）
+    if (type === TILE_BY_KEY['v_31_orb_heart']) {
+      this.smashOrbHeart(x, y);
+      return;
+    }
     if (IMPORTED_TREE_TYPES.has(type)) {
       this.fellImportedTree(x, y, type);
       return;
@@ -954,6 +959,37 @@ export class Game implements GameHooks {
   /** 砍导入的原版树（tile 5 / 宝石树 / 装饰树 / 灰烬树）：
    *  同列同类型连续段 = 整棵树（含顶部树冠标记格），整棵移除 + 掉木材。
    *  首击即倒（不做倒树动画——动画实体绑定自有树的登记表结构） */
+  /** 暗影之球/恶魔之心整体破碎（原版 WorldGen.CheckOrb 移植，WorldGen.cs:31813-31960）：
+   *  帧锚点定位（frameX∈{0,36} 是左列）→ 2×2 四格一起清除；
+   *  战利品：首破固定（暗影之球:恶魔之心 + 凝胶100；恶魔之心:生命水晶 + 凝胶100），
+   *  之后 5 选 1 随机；无原版物品的部分用现有道具近似 */
+  private smashOrbHeart(x: number, y: number) {
+    const st = this.world.store;
+    const orbId = TILE_BY_KEY['v_31_orb_heart'];
+    const i = st.idx(x, y);
+    const fx = st.frameX[i];
+    const isDemonHeart = fx >= 36; // 原版：frameX ≥ 36 = 恶魔之心（猩红世界）
+    const ax = (fx === 0 || fx === 36) ? x : x - 1;
+    const ay = st.frameY[i] !== 0 ? y - 1 : y;
+    this.chunks.markDirtyArea(ax - 1, ay - 1, ax + 2, ay + 2);
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) st.setTile(ax + dx, ay + dy, 0);
+    }
+    // 战利品（近似：首破固定 + 之后随机）
+    const drops: Array<[string, number]> = !this.world.flags.shadowOrbSmashed
+      ? (isDemonHeart ? [['coin_gold', 1], ['gel', 100]] : [['suspicious_eye', 1], ['gel', 100]])
+      : [['coin_silver', 5], ['gel', 60]];
+    for (const [key, n] of drops) {
+      this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, n, (Math.random() - 0.5) * 3, -3);
+    }
+    this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
+    this.sfx.play('tink');
+    this.cb.onToast(isDemonHeart ? '恶魔之心被击碎了！' : '暗影之球被击碎了！');
+    if (!this.world.flags.shadowOrbSmashed) {
+      this.world.flags.shadowOrbSmashed = true;
+    }
+  }
+
   private fellImportedTree(x: number, y: number, type: number) {
     const st = this.world.store;
     let top = y;
