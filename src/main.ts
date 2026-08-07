@@ -4,7 +4,7 @@ import { UI } from './ui/UI';
 import { saveGame, loadSave } from './save/SaveFile';
 import { kvGet, kvSet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
-import { TILE_BY_KEY, T } from './data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS } from './data/tiles';
 import { parseWldToSave } from './wld/WldImport';
 import { INV_SIZE } from './items/Inventory';
 // 调试句柄：页面内直接测 .wld 转换
@@ -222,6 +222,10 @@ window.addEventListener('keydown', (e) => {
       break;
     case 'F5':
       e.preventDefault();
+      toggleAnnotate();
+      break;
+    case 'F6':
+      e.preventDefault();
       doSave();
       break;
     case 'KeyM':
@@ -243,6 +247,70 @@ function doSave() {
     if (where === 'fail') ui.toast('保存失败：存储不可用');
     else ui.toast(`已保存（${where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : '本地'}）`);
   });
+}
+
+function downloadText(filename: string, text: string) {
+  const blob = new Blob([text], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ---- 方块标注模式（F5）：标记问题方块，导出标注 + 地图给开发者 ----
+function toggleAnnotate() {
+  if (!game) return;
+  game.annotateMode = !game.annotateMode;
+  if (game.annotateMode) {
+    ui.showAnnotatePanel({
+      onExportMarks: exportMarks,
+      onExportMap: exportMap,
+      onClear: () => {
+        if (!game) return;
+        game.marks = [];
+        ui.updateAnnotateCount(0);
+      },
+      onClose: () => toggleAnnotate(),
+    });
+    ui.updateAnnotateCount(game.marks.length);
+    ui.toast('标注模式已开启：点击方块标记，F5 关闭');
+  } else {
+    ui.closeAnnotatePanel();
+    ui.toast('标注模式已关闭');
+  }
+}
+
+function exportMarks() {
+  if (!game) return;
+  const g = game;
+  const st = g.world.store;
+  const marks = g.marks.map((m, i) => {
+    const idx = st.idx(m.x, m.y);
+    const t = st.type[idx];
+    const def = TILE_DEFS[t];
+    return {
+      no: i + 1, x: m.x, y: m.y,
+      typeId: t, typeKey: def?.key ?? null, typeName: def?.name ?? null,
+      frameX: st.frameX[idx], frameY: st.frameY[idx],
+      wall: st.wall[idx],
+    };
+  });
+  const out = {
+    worldName: g.world.name, size: [g.world.w, g.world.h],
+    player: { x: Math.floor(g.player.x / 16), y: Math.floor(g.player.y / 16) },
+    exportedAt: new Date().toISOString(),
+    marks,
+  };
+  downloadText(`marks-${g.world.name.replace(/\s+/g, '_')}.json`, JSON.stringify(out, null, 2));
+  ui.toast(`已导出 ${marks.length} 处标注`);
+}
+
+function exportMap() {
+  if (!game) return;
+  const json = saveGame(game.world, game.player, Date.now() - playStart);
+  downloadText(`map-${game.world.name.replace(/\s+/g, '_')}.json`, json);
+  ui.toast('已导出地图存档');
 }
 
 // 暴露 tile/key 常量给调试控制台

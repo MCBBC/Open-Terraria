@@ -95,6 +95,8 @@ export class Minimap {
 export class Renderer {
   /** 调试面板开关（F3 切换）：碰撞盒高亮等 */
   debugMode = false;
+  /** 方块标注（F5 标注模式）：标记的问题方块，非空时叠加绘制 */
+  annotateMarks: Array<{ x: number; y: number }> | null = null;
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   sky = new SkyRenderer();
@@ -318,6 +320,24 @@ export class Renderer {
     }
 
     // 9.8 调试面板：碰撞盒高亮（F3 切换）
+    // 方块标注叠加（F5 标注模式）：红圈 + 序号
+    if (this.annotateMarks && this.annotateMarks.length && !this.fullMap.open) {
+      const z = cam.zoom;
+      ctx.save();
+      ctx.font = `bold ${Math.max(10, 12 * z)}px monospace`;
+      ctx.textAlign = 'center';
+      this.annotateMarks.forEach((m, idx) => {
+        const [sx, sy] = cam.worldToScreen(m.x * TILE + TILE / 2, m.y * TILE + TILE / 2);
+        ctx.strokeStyle = '#FF3355';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 10 * z + 4, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.fillStyle = '#FF3355';
+        ctx.fillText(String(idx + 1), sx, sy - 12 * z - 6);
+      });
+      ctx.restore();
+    }
     if (this.debugMode) this.drawDebugOverlay(ctx, cam, viewW, viewH, player, entities, mouseX, mouseY, hover);
 
     // 10. Boss 血条

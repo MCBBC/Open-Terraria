@@ -256,6 +256,49 @@ export class UI {
     this.root.appendChild(panel);
   }
 
+  /** 方块标注面板（F5 标注模式）：下载标注 / 下载地图 / 清空 */
+  annotatePanel: HTMLElement | null = null;
+  showAnnotatePanel(handlers: {
+    onExportMarks: () => void;
+    onExportMap: () => void;
+    onClear: () => void;
+    onClose: () => void;
+  }) {
+    this.closeAnnotatePanel();
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:14px; top:90px; width:190px; padding:10px;';
+    panel.appendChild(el('div', 'sw-title', '📍 方块标注模式'));
+    const hint = el('div', '', '点击方块标记/取消，导出后发给开发者');
+    hint.style.cssText = 'font-size:11px; color:#9fb0dd; margin-bottom:6px;';
+    panel.appendChild(hint);
+    this.annotateCountEl = el('div', '', '已标记：0 处');
+    this.annotateCountEl.style.cssText = 'font-size:12px; color:#ffe8a0; margin-bottom:6px;';
+    panel.appendChild(this.annotateCountEl);
+    const mk = (label: string, fn: () => void) => {
+      const b = el('button', 'sw-btn', label);
+      b.style.margin = '4px 0';
+      b.onclick = fn;
+      panel.appendChild(b);
+    };
+    mk('⬇ 下载标注 JSON', handlers.onExportMarks);
+    mk('⬇ 下载地图存档', handlers.onExportMap);
+    mk('🗑 清空标注', handlers.onClear);
+    mk('✕ 关闭（再按 F5）', handlers.onClose);
+    this.annotatePanel = panel;
+    this.root.appendChild(panel);
+  }
+
+  private annotateCountEl: HTMLElement | null = null;
+  updateAnnotateCount(n: number) {
+    if (this.annotateCountEl) this.annotateCountEl.textContent = `已标记：${n} 处`;
+  }
+
+  closeAnnotatePanel() {
+    this.annotatePanel?.remove();
+    this.annotatePanel = null;
+    this.annotateCountEl = null;
+  }
+
   showProgress(label: string, p: number) {
     let prog = this.root.querySelector('.sw-progress') as HTMLElement | null;
     if (!prog) {

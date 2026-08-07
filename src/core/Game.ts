@@ -149,6 +149,10 @@ export class Game implements GameHooks {
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
   private _tpTarget: { x: number; y: number } | null = null;
+  // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
+  annotateMode = false;
+  marks: Array<{ x: number; y: number }> = [];
+  private _annoLatch = false;
 
   constructor(root: HTMLElement, cb: GameCallbacks, atlas?: SpriteAtlas | null) {
     this.assets = buildAssets();
@@ -382,6 +386,21 @@ export class Game implements GameHooks {
       }
     }
     if (!inp.mouseDown) this._mapClickLatch2 = false;
+    // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用） ----
+    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open) {
+      this._annoLatch = true;
+      const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
+      if (this.world.store.inBounds(tx, ty)) {
+        const i = this.world.store.idx(tx, ty);
+        void i;
+        const existed = this.marks.some((m) => m.x === tx && m.y === ty);
+        this.marks = this.marks.filter((m) => m.x !== tx || m.y !== ty); // 同格重复点 = 取消
+        if (!existed) this.marks.push({ x: tx, y: ty });
+        this.cb.onToast(existed ? `已取消标记 (${tx}, ${ty})` : `已标记 (${tx}, ${ty})，再次点击取消`);
+        (window as unknown as { __swUI?: { updateAnnotateCount: (n: number) => void } }).__swUI?.updateAnnotateCount(this.marks.length);
+      }
+    }
+    if (!inp.mouseDown) this._annoLatch = false;
     player.inputX = (inp.down('KeyA') || inp.down('ArrowLeft') ? -1 : 0) + (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0);
     player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
     player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
@@ -589,7 +608,7 @@ export class Game implements GameHooks {
       }
     }
 
-    if (!inp.mouseDown) {
+    if (!inp.mouseDown || this.annotateMode) {
       this.mining = null;
       return;
     }
@@ -1707,6 +1726,7 @@ export class Game implements GameHooks {
   render() {
     const cam = this.camera;
     const L = this.lighting;
+    this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
     const hover = this.input.uiBlocking ? null : (() => {
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;
