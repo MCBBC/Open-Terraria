@@ -13,7 +13,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   2: 'grass',         // Grass
   3: 'tallgrass',     // Plants（地表植物）
   4: { key: 'torch', copyFrame: true },  // Torch（保留原版墙面/熄灭变体帧）
-  5: 'tree',          // Tree
+  5: { key: 'v_5_trees', copyFrame: true },  // Tree（原版 Tiles_5，22px 步长样式帧直拷）
   6: 'ore_iron',      // Iron
   7: 'ore_copper',    // Copper
   8: 'ore_gold',      // Gold

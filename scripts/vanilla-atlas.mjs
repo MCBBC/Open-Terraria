@@ -29,8 +29,15 @@ const wallById = new Map(walls.map((w) => [w.id, w]));
 
 mkdirSync(OUT_DIR, { recursive: true });
 
-// 杂项单图素材（呼吸气泡等，非表驱动）
-const MISC = ['Bubble.png'];
+// 杂项单图素材（呼吸气泡等，非表驱动）+ 树木专用贴图（TEdit WorldRenderXna 逻辑）
+const MISC = [
+  'Bubble.png',
+  // 树冠/树枝（style 0 起步；TEdit GetTreeTops/GetTreeBranches）
+  ...Array.from({ length: 11 }, (_, i) => `Tree_Tops_${i}.png`),
+  ...Array.from({ length: 11 }, (_, i) => `Tree_Branches_${i}.png`),
+  // 各生物群系树干（TEdit GetTree → Images/Tiles_5_N）
+  ...Array.from({ length: 7 }, (_, i) => `Tiles_5_${i}.png`),
+];
 for (const m of MISC) {
   const src = join(ASSETS, m);
   if (existsSync(src)) copyFileSync(src, join(OUT_DIR, m));

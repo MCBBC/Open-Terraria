@@ -38,7 +38,13 @@ export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: numbe
 // ---- 原版素材命名空间（vanilla.json，TEdit 数据驱动） ----
 
 // 杂项单图素材（非表驱动，直接整图使用）
-export const VANILLA_MISC = ['vanilla/Bubble.png'];
+// 树木专用：Tree_Tops/Branches（树冠树枝，TEdit style 0-10）+ Tiles_5_N（生物群系树干）
+export const VANILLA_MISC = [
+  'vanilla/Bubble.png',
+  ...Array.from({ length: 11 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
+  ...Array.from({ length: 11 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
+  ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),
+];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
   solid: boolean; blend: boolean; framed: boolean; light: boolean;

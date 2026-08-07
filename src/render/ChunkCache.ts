@@ -1,8 +1,8 @@
 // chunk 静态缓存：每 chunk 16×16 tile 预渲染到离屏 canvas（墙层+tile 层）
 import { CHUNK, TILE } from '../core/constants';
-import { T, TILE_DEFS, WALL_DEFS } from '../data/tiles';
+import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
-import { drawVanillaCell } from './VanillaTiler';
+import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
@@ -317,6 +317,26 @@ export class ChunkCache {
           const dx = wx + (TILE - r.sw) / 2 - x0 * TILE;
           const dy = wy + (TILE - r.sh) / 2 - y0 * TILE;
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dx, dy, r.sw, r.sh);
+        }
+      }
+    }
+
+    // ---- 第四遍：原版树冠/树枝（tile 5 标记帧，跨 chunk 外扩绘制） ----
+    // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪
+    if (this.autotiler) {
+      const v5 = TILE_BY_KEY['v_5_trees'];
+      if (v5 !== undefined) {
+        const EXT = 6;
+        for (let ty = y0 - EXT; ty < y0 + CHUNK + EXT; ty++) {
+          for (let tx = x0 - EXT; tx < x0 + CHUNK + EXT; tx++) {
+            if (!st.inBounds(tx, ty)) continue;
+            const i = st.idx(tx, ty);
+            if (st.type[i] !== v5) continue;
+            const fx = st.frameX[i], fy = st.frameY[i];
+            if (fy < 198 || fx < 22) continue; // 树干由主遍绘制
+            drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
+              tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, true);
+          }
         }
       }
     }

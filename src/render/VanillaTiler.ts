@@ -5,6 +5,7 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { TILE_BY_KEY } from '../data/tiles';
 
 type Frame = [number, number];
 
@@ -88,6 +89,79 @@ export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: nu
   return atlas.vframe(sheet, DEFAULT_FRAME[0], DEFAULT_FRAME[1]);
 }
 
+/** 树木专用渲染（tile 5，移植 TEdit WorldRenderXna 树逻辑）：
+ *  - 树干帧（frameY < 198）：按树下草地生物群系选 Tiles_5_0..6 变体，取 (U,V,20,20) 压入 16px 格
+ *  - 标记帧（frameX >= 22 且 frameY >= 198）：不采样 Tiles_5——
+ *    U=22 树顶（Tree_Tops_style 80×80 底部锚定）、U=44 左枝（Tree_Branches 40×40 右锚定）、
+ *    U=66 右枝（左锚定）；变体 x%3
+ *  treeStyle 固定 0（wld 树样式段未解析，默认森林） */
+const TREE_STYLE = 0;
+// 树下草地 → 生物群系树干变体（TEdit treeType；-1 = 基础 Tiles_5）
+const TREE_GROUND: Array<[string, number]> = [
+  ['v_23_corrupt_grass_block', 0],
+  ['v_60_jungle_grass_block', 1],
+  ['v_70_mushroom_grass_block', 6],
+  ['snow', 3],
+  ['v_199_crimson_grass_block', 4],
+];
+export function drawTreeCell(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  st: TileStore, x: number, y: number, fx: number, fy: number, px: number, py: number,
+  foliageOnly = false,
+): void {
+  if (fy >= 198 && fx >= 22) {
+    // 树冠/树枝标记帧（仅由 ChunkCache 的外扩遍绘制，防跨 chunk 裁剪）
+    if (foliageOnly === false) return;
+    const frame = ((x % 3) + 3) % 3;
+    let img: HTMLImageElement | null = null;
+    let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
+    if (fx === 22) {
+      img = atlas.vimages.get(`vanilla/Tree_Tops_${TREE_STYLE}.png`) ?? null;
+      sw = 80; sh = 80; sx = frame * (sw + 2); anchor = 0;
+    } else if (fx === 44) {
+      img = atlas.vimages.get(`vanilla/Tree_Branches_${TREE_STYLE}.png`) ?? null;
+      sw = 40; sh = 40; sx = 0; sy = frame * (sh + 2); anchor = 1;
+    } else if (fx === 66) {
+      img = atlas.vimages.get(`vanilla/Tree_Branches_${TREE_STYLE}.png`) ?? null;
+      sw = 40; sh = 40; sx = 42; sy = frame * (sh + 2); anchor = 2;
+    }
+    if (!img) return;
+    let dx = px, dy = py;
+    if (anchor === 0) { dx = px + (TILE - sw) / 2; dy = py + TILE - sh; }
+    else if (anchor === 1) { dx = px + TILE - sw; dy = py + (TILE - sh) / 2; }
+    else { dy = py + (TILE - sh) / 2; }
+    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+    return;
+  }
+  if (foliageOnly) return; // 外扩遍只画树冠/树枝
+  // 树干：向下扫描找草地定生物群系（TEdit baseX 奇偶修正 + 100 格深扫描）
+  let baseX = 0;
+  if (fx === 66 && fy <= 45) baseX++;
+  if (fx === 88 && fy >= 66 && fy <= 110) baseX--;
+  if (fx === 22 && fy >= 132 && fy < 198) baseX--;
+  if (fx === 44 && fy >= 132 && fy < 198) baseX++;
+  let type = -1;
+  for (let i = 0; i < 100; i++) {
+    const ty = y + i;
+    if (ty >= st.h) break;
+    const t = st.type[st.idx(x + baseX, ty)];
+    if (t === 0) continue;
+    if (t === TILE_BY_KEY['grass']) { type = -1; break; }
+    const hit = TREE_GROUND.find(([k]) => TILE_BY_KEY[k] === t);
+    if (hit) { type = hit[1]; break; }
+  }
+  const img = type >= 0
+    ? atlas.vimages.get(`vanilla/Tiles_5_${type}.png`) ?? atlas.vimages.get('vanilla/Tiles_5.png')
+    : atlas.vimages.get('vanilla/Tiles_5.png');
+  if (!img) return;
+  // 20×20 帧原尺寸绘制、整体偏移 (-2,-2)：帧内树干艺术像素只占中间 16px 宽
+  // （两侧各 2px 透明边距），压缩进 16px 格会把透明边压入导致格间缝隙；
+  // 原尺寸 + 偏移后艺术像素精确落在本格内，纵向与上下格自然交叠 4px（原版行为）
+  if (fx + 20 <= img.width && fy + 20 <= img.height) {
+    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py - 2, 20, 20);
+  }
+}
+
 /** 绘制一格原版图块。
  *  auto：现场算帧；style：显式 18px 帧偏移。
  *  重要修正：wld 里多格家具每格 frameX 往往全 0（不是 0/18 交错），
@@ -100,6 +174,11 @@ export function drawVanillaCell(
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
 ): void {
+  // 树木（tile 5）：专用渲染（树冠/树枝标记帧 + 生物群系树干）
+  if (sheet === 5 && frame === 'style') {
+    drawTreeCell(ctx, atlas, st, x, y, fx, fy, px, py);
+    return;
+  }
   let r: DrawRect | null = null;
   if (frame === 'auto') {
     r = frameFor(atlas, sheet, st, x, y, type, same);
