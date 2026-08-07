@@ -46,7 +46,11 @@ function enterGame(g: Game) {
 }
 
 function maybeDev(g: Game) {
-  if (ui.devMode) g.setupDevMode();
+  if (!ui.devMode) return;
+  g.setupDevMode();
+  // 开发者模式：全图迷雾点亮（小地图/大地图不再有未探索黑区）
+  g.world.explored.fill(1);
+  g.world.exploredVersion++; // 使 Renderer 的迷雾缓存失效重建
 }
 
 function quitToMenu() {
