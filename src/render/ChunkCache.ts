@@ -13,7 +13,8 @@ import type { World } from '../world/World';
 // Grass 走人工标注（'@grass'）：Tiles_2.png 是多 tile 混排图集，自动分类不可靠；
 // 用 public/annotator.html 标注后写入 sprites/annotations.json。无标注时回退程序化。
 const TILE_RULES: Record<number, string> = {
-  1: 'Dirt', 2: 'Stone', 3: '@grass', 5: 'Iron', 8: 'Tree',
+  5: 'Iron', 8: 'Tree',
+  // 泥土/石/草已改走原版 BlendRules（VanillaTiler blend 分支），不再走 Maples 规则
   13: '工作台', 14: '熔炉', 15: '铁砧',
 };
 

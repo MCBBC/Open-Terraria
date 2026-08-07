@@ -19,7 +19,7 @@ export interface TileDef {
   w?: number; h?: number;     // framed 物体占格数
   vanilla?: {                 // 原版素材渲染（terraria-assets + TEdit 数据）
     sheet: number;            // Tiles_N 表 id
-    frame: 'auto' | 'style';  // auto=1x1 实心块现场 8 向 framing；style=多格家具用显式 18px 帧偏移
+    frame: 'auto' | 'style' | 'blend'; // auto=47 表 8 向；style=显式帧；blend=BlendRules 合并分帧（泥土/石/草族）
     fw?: number; fh?: number; // style 类的占格数（TEdit frameSize）
   };
 }
@@ -45,9 +45,9 @@ function def(d: Partial<TileDef> & { key: string }): number {
 }
 // 保证 id 与 T 常量一致（按顺序注册）
 def({ key: 'empty', name: '空气' });
-def({ key: 'dirt', name: '泥土', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 'dirt_block' });
-def({ key: 'stone', name: '石块', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 'stone_block' });
-def({ key: 'grass', name: '草块', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 'dirt_block' });
+def({ key: 'dirt', name: '泥土', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 'dirt_block', vanilla: { sheet: 0, frame: 'blend' } });
+def({ key: 'stone', name: '石块', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 'stone_block', vanilla: { sheet: 1, frame: 'blend' } });
+def({ key: 'grass', name: '草块', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 'dirt_block', vanilla: { sheet: 2, frame: 'blend' } });
 def({ key: 'ore_copper', name: '铜矿', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: false, drop: 'copper_ore', vanilla: { sheet: 7, frame: 'auto' } });
 def({ key: 'ore_iron', name: '铁矿', solid: true, opacity: 1, pick: 0, mapColor: '#8C6A56', blend: false, drop: 'iron_ore' });
 def({ key: 'ore_silver', name: '银矿', solid: true, opacity: 1, pick: 20, mapColor: '#B9C2C3', blend: false, drop: 'silver_ore', vanilla: { sheet: 9, frame: 'auto' } });
@@ -67,8 +67,8 @@ def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0,
 def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#C36927', drop: 'mushroom_item' });
 def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#D0699E', drop: null as unknown as string });
 def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1E9648', drop: 'acorn' });
-def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#FFDA38', blend: true, drop: 'sand_block', vanilla: { sheet: 53, frame: 'auto' } });
-def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#E8F0F4', blend: true, drop: 'snow_block' });
+def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#FFDA38', blend: true, drop: 'sand_block', vanilla: { sheet: 53, frame: 'blend' } });
+def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#E8F0F4', blend: true, drop: 'snow_block', vanilla: { sheet: 147, frame: 'blend' } });
 def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#6B4A2B', drop: 'acorn' });
 def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 'stone_block', vanilla: { sheet: 57, frame: 'auto' } });
 
@@ -116,7 +116,7 @@ def({ key: 'glass', name: '玻璃', solid: true, opacity: 0.15, pick: 0, mapColo
 def({ key: 'obsidian', name: '黑曜石', solid: true, opacity: 1, pick: 40, mapColor: '#2B2854', blend: true, drop: 'obsidian', vanilla: { sheet: 56, frame: 'auto' } });
 def({ key: 'gray_brick', name: '灰砖', solid: true, opacity: 1, pick: 0, mapColor: '#909090', blend: true, drop: 'gray_brick', vanilla: { sheet: 38, frame: 'auto' } });
 def({ key: 'red_brick', name: '红砖', solid: true, opacity: 1, pick: 0, mapColor: '#B53E3B', blend: true, drop: 'red_brick', vanilla: { sheet: 39, frame: 'auto' } });
-def({ key: 'mud', name: '泥块', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 'mud_block', vanilla: { sheet: 59, frame: 'auto' } });
+def({ key: 'mud', name: '泥块', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 'mud_block', vanilla: { sheet: 59, frame: 'blend' } });
 def({ key: 'silt', name: '淤泥块', solid: true, opacity: 1, pick: 0, mapColor: '#6A6B76', blend: true, drop: 'silt_block', vanilla: { sheet: 123, frame: 'auto' } });
 
 // 4b：家具 / 装饰（多格 framed，frame:'style' 显式 18px 帧；w/h = TEdit frameSize）
@@ -199,7 +199,7 @@ def({ key: 'v_190_glowing_mushroom_block', name: 'Glowing Mushroom Block', solid
 def({ key: 'v_350_martian_conduit_plating', name: 'Martian Conduit Plating', solid: true, opacity: 1, pick: 0, mapColor: '#37619B', blend: true, drop: null as unknown as string, vanilla: { sheet: 350, frame: 'auto' } });
 def({ key: 'v_369_smooth_granite_block', name: 'Smooth Granite Block', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: null as unknown as string, vanilla: { sheet: 369, frame: 'auto' } });
 def({ key: 'v_137_traps', name: 'Traps', solid: true, opacity: 1, pick: 0, mapColor: '#909490', blend: true, drop: null as unknown as string, vanilla: { sheet: 137, frame: 'auto' } });
-def({ key: 'v_117_pearlstone_block', name: 'Pearlstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#B5ACBE', blend: true, drop: null as unknown as string, vanilla: { sheet: 117, frame: 'auto' } });
+def({ key: 'v_117_pearlstone_block', name: 'Pearlstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#B5ACBE', blend: true, drop: null as unknown as string, vanilla: { sheet: 117, frame: 'blend' } });
 def({ key: 'v_112_ebonsand_block', name: 'Ebonsand Block', solid: true, opacity: 1, pick: 0, mapColor: '#67627A', blend: true, drop: null as unknown as string, vanilla: { sheet: 112, frame: 'auto' } });
 def({ key: 'v_232_wooden_spike', name: 'Wooden Spike', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: null as unknown as string, vanilla: { sheet: 232, frame: 'auto' } });
 def({ key: 'v_274_sandstone_slab', name: 'Sandstone Slab', solid: true, opacity: 1, pick: 0, mapColor: '#BEAB5E', blend: true, drop: null as unknown as string, vanilla: { sheet: 274, frame: 'auto' } });
@@ -392,15 +392,15 @@ def({ key: 'v_716_friendly_boulder', name: 'Friendly Boulder', solid: true, fram
 def({ key: 'v_713_lava_boulder', name: 'Lava Boulder', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#7ad9e8', drop: null as unknown as string, vanilla: { sheet: 713, frame: 'style', fw: 2, fh: 2 } });
 
 // ===================== wld 独立映射修复（原为错误复用） =====================
-def({ key: 'v_23_corrupt_grass_block', name: 'Corrupt Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null as unknown as string, vanilla: { sheet: 23, frame: 'auto' } });
+def({ key: 'v_23_corrupt_grass_block', name: 'Corrupt Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8D89DF', blend: true, drop: null as unknown as string, vanilla: { sheet: 23, frame: 'blend' } });
 def({ key: 'v_31_orb_heart', name: 'Orb Heart', solid: true, opacity: 1, pick: 0, mapColor: '#8D78A8', blend: true, drop: null as unknown as string, vanilla: { sheet: 31, frame: 'auto' } });
 def({ key: 'v_41_blue_brick', name: 'Blue Brick', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null as unknown as string, vanilla: { sheet: 41, frame: 'auto' } });
 def({ key: 'v_75_obsidian_brick', name: 'Obsidian Brick', solid: true, opacity: 1, pick: 0, mapColor: '#242424', blend: true, drop: null as unknown as string, vanilla: { sheet: 75, frame: 'auto' } });
-def({ key: 'v_199_crimson_grass_block', name: 'Crimson Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null as unknown as string, vanilla: { sheet: 199, frame: 'auto' } });
-def({ key: 'v_60_jungle_grass_block', name: 'Jungle Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: null as unknown as string, vanilla: { sheet: 60, frame: 'auto' } });
-def({ key: 'v_70_mushroom_grass_block', name: 'Mushroom Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: null as unknown as string, vanilla: { sheet: 70, frame: 'auto' } });
+def({ key: 'v_199_crimson_grass_block', name: 'Crimson Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#D05050', blend: true, drop: null as unknown as string, vanilla: { sheet: 199, frame: 'blend' } });
+def({ key: 'v_60_jungle_grass_block', name: 'Jungle Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#8FD71D', blend: true, drop: null as unknown as string, vanilla: { sheet: 60, frame: 'blend' } });
+def({ key: 'v_70_mushroom_grass_block', name: 'Mushroom Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#5D7FFF', blend: true, drop: null as unknown as string, vanilla: { sheet: 70, frame: 'blend' } });
 
-def({ key: 'v_25_ebonstone_block', name: 'Ebonstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#6D5A80', blend: true, drop: null as unknown as string, vanilla: { sheet: 25, frame: 'auto' } });
+def({ key: 'v_25_ebonstone_block', name: 'Ebonstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#6D5A80', blend: true, drop: null as unknown as string, vanilla: { sheet: 25, frame: 'blend' } });
 def({ key: 'v_202_sunplate_block', name: 'Sunplate Block', solid: true, opacity: 1, pick: 0, mapColor: '#D5B21C', blend: true, drop: null as unknown as string, vanilla: { sheet: 202, frame: 'auto' } });
 def({ key: 'v_71_mushroom_plant', name: 'Mushroom Plant', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#B6AF82', drop: null as unknown as string, vanilla: { sheet: 71, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_24_corruption_short_plants', name: 'Corruption Short Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#7A74DA', drop: null as unknown as string, vanilla: { sheet: 24, frame: 'style', fw: 1, fh: 1 } });
@@ -410,7 +410,7 @@ def({ key: 'v_5_trees', name: 'Trees', decor: true, framed: true, opacity: 0, pi
 def({ key: 'v_80_cactus', name: 'Cactus Plant', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#5A7A3A', drop: null as unknown as string, vanilla: { sheet: 80, frame: 'style', fw: 1, fh: 1 } });
 
 def({ key: 'v_44_pink_brick', name: 'Pink Brick', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null as unknown as string, vanilla: { sheet: 44, frame: 'auto' } });
-def({ key: 'v_203_crimstone_block', name: 'Crimstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#802C2D', blend: true, drop: null as unknown as string, vanilla: { sheet: 203, frame: 'auto' } });
+def({ key: 'v_203_crimstone_block', name: 'Crimstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#802C2D', blend: true, drop: null as unknown as string, vanilla: { sheet: 203, frame: 'blend' } });
 def({ key: 'v_201_crimson_short_plants', name: 'Crimson Short Plants', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#CB3D40', drop: null as unknown as string, vanilla: { sheet: 201, frame: 'style', fw: 1, fh: 1 } });
 
 // 所有 def() 注册完毕后统一回填 key→id 映射（必须位于文件末尾）

@@ -86,6 +86,9 @@ for (const id of whitelist.tiles) {
     grid, // 帧像素尺寸（蜡烛类 [16,20]）
     stride: [grid[0] + gap[0], grid[1] + gap[1]], // 表内帧步长
     frameSize: t.frameSize ?? [[1, 1]], // 每个占格数（多格家具）
+    isStone: !!t.isStone,   // 石族（同类互连判定）
+    isGrass: !!t.isGrass,   // 草族（strictness 2 草规则）
+    mergeWith: t.mergeWith ?? null, // 合并目标（blend framing）
     cols: Math.floor(w / (grid[0] + gap[0])),
     rows: Math.floor(h / (grid[1] + gap[1])),
   };

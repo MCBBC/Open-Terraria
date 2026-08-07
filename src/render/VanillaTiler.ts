@@ -5,7 +5,8 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
-import { TILE_BY_KEY } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+import { getUVForMasks } from './BlendFraming';
 
 type Frame = [number, number];
 
@@ -300,7 +301,7 @@ export function drawCactusCell(
  *  按到锚点的格距重算帧偏移（锚点=左侧或上方最近格） */
 export function drawVanillaCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
-  sheet: number, frame: 'auto' | 'style', fw: number, fh: number,
+  sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
 ): void {
@@ -312,6 +313,55 @@ export function drawVanillaCell(
   // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体
   if (sheet === 80 && frame === 'style') {
     drawCactusCell(ctx, atlas, st, x, y, type, px, py);
+    return;
+  }
+  // blend 类（泥土/石族/草族/沙/泥/雪）：TEdit BlendRules 移植
+  // （掩码位序：E=0x1 N=0x10 W=0x100 S=0x1000；角 TR/TL/BL/BR <<16）
+  if (frame === 'blend') {
+    const myMeta = atlas.vmeta(sheet);
+    const myMerge = myMeta?.mergeWith ?? null;
+    const myStone = !!myMeta?.isStone;
+    const nMeta = (t: number) => {
+      const d = TILE_DEFS[t];
+      return d?.vanilla ? atlas.vmeta(d.vanilla.sheet) : null;
+    };
+    // Merges() 链（TEdit TileProperty.Merges）：对方 mergeWith 指向我 / 我指向对方 / 双方同指
+    const merges = (ot: number) => {
+      if (ot === type) return true;
+      const om = nMeta(ot);
+      if (!om) return false;
+      const oid = TILE_DEFS[ot]?.vanilla?.sheet ?? -1;
+      if (om.mergeWith != null && om.mergeWith === sheet) return true;
+      if (myMerge != null && myMerge === oid) return true;
+      if (myMerge != null && om.mergeWith != null && myMerge === om.mergeWith) return true;
+      return false;
+    };
+    const dirs: Array<[number, number, number]> = [
+      [1, 0, 0x1], [0, -1, 0x10], [-1, 0, 0x100], [0, 1, 0x1000],          // E N W S
+      [1, -1, 0x10000], [-1, -1, 0x100000], [-1, 1, 0x1000000], [1, 1, 0x10000000], // NE NW SW SE
+    ];
+    let same = 0, mergeMask = 0;
+    for (const [dx, dy, bit] of dirs) {
+      const ax = x + dx, ay = y + dy;
+      if (!st.inBounds(ax, ay)) continue;
+      const oi = st.idx(ax, ay);
+      const ot = st.type[oi];
+      if (ot === 0) continue;
+      const om = nMeta(ot);
+      // 同型：石族按 isStone 互认，其余走 Merges 链
+      if (myStone ? !!om?.isStone : merges(ot)) same |= bit;
+      // 合并位：邻居是 mergeWith 目标
+      if (myMerge != null && (TILE_DEFS[ot]?.vanilla?.sheet ?? -1) === myMerge) mergeMask |= bit;
+    }
+    const strictness = myMeta?.isGrass ? 2 : myMerge != null ? 1 : 0;
+    const uv = getUVForMasks(same, mergeMask, strictness, ((x * 7) + (y * 11)) % 3);
+    const r = atlas.vframe(sheet, uv.col, uv.row);
+    if (r) {
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+      return;
+    }
+    const fb = atlas.vframe(sheet, 1, 1);
+    if (fb) ctx.drawImage(fb.img, fb.sx, fb.sy, fb.sw, fb.sh, px, py, TILE, TILE);
     return;
   }
   let r: DrawRect | null = null;

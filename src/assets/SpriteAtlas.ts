@@ -56,6 +56,7 @@ export interface VanillaTileMeta {
   stride: [number, number];    // 表内帧步长（grid+gap，如 [18,18]）
   frameSize: Array<[number, number]>; // 每个 style 的占格数
   cols: number; rows: number;
+  isStone?: boolean; isGrass?: boolean; mergeWith?: number | null;
 }
 export interface VanillaItemMeta { name: string; key: string; icon: string; createTile: number | null; }
 export interface VanillaWallMeta {
