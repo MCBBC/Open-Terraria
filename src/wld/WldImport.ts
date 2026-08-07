@@ -2,7 +2,7 @@
 // tile/wall/item 的 id 映射基于 Terraria 1.4 的事实数据；未映射内容做可玩性降级。
 import { parseWld, WldWorld } from './WldParser';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
-import { TILE_BY_KEY, WALL_BY_KEY, T } from '../data/tiles';
+import { TILE_BY_KEY, T } from '../data/tiles';
 import { ITEM_BY_KEY } from '../data/items';
 
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
@@ -303,16 +303,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   199: 'v_199_crimson_grass_block',
 };
 
-// wld wall id → 内部 wall key
-const WALL_MAP: Record<number, string> = {
-  1: 'stone_wall',   // Stone (natural)
-  2: 'dirt_wall',    // Dirt (natural)
-  3: 'stone_wall',   // Ebonstone
-  4: 'wood_wall',    // Wood
-  5: 'stone_wall', 6: 'stone_wall', 7: 'stone_wall', 8: 'stone_wall', 9: 'stone_wall',
-  10: 'stone_wall', 11: 'stone_wall', 12: 'stone_wall', 13: 'stone_wall', 14: 'stone_wall',
-  15: 'dirt_wall', 16: 'dirt_wall',
-};
+// 墙 id 直用原版 wld 墙 id（WALL_DEFS 已按 TEdit walls.json 全量注册 367 种）
 
 // wld item id → 内部 item key（宝箱战利品用）
 const ITEM_MAP: Record<number, string> = {
@@ -726,7 +717,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const type = new Uint16Array(n);
   const frameX = new Uint16Array(n);
   const frameY = new Uint16Array(n);
-  const wall = new Uint8Array(n);
+  const wall = new Uint16Array(n); // 原版墙 id 直存（0-366）
   const liquidArr = new Uint8Array(n);
   const liquidTypeArr = new Uint8Array(n);
 
@@ -757,10 +748,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         }
       }
     }
-    const ww = wld.tiles.wall[i];
-    if (ww !== 0) {
-      wall[i] = WALL_BY_KEY[WALL_MAP[ww] ?? 'stone_wall'] ?? 0;
-    }
+    wall[i] = wld.tiles.wall[i]; // 直拷原版墙 id
     const lq = wld.tiles.liquid[i];
     if (lq > 0) liquidArr[i] = lq;
     // 液体类型：parser 已按内部编码输出（1水 2岩浆 3蜂蜜），直拷

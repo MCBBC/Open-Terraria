@@ -104,7 +104,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
   const st = world.store;
   const data: SaveData = {
     format: 'sandboxworld.save',
-    version: 1,
+    version: 2,
     header: {
       name: world.name, seed: world.seed, width: st.w, height: st.h,
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
@@ -158,14 +158,16 @@ export function loadSave(json: string): { world: World; player: { hp: number; x:
       }
     }
   }
-  // walls
+  // walls（version<2 的旧档墙值迁移：1=土→2, 2=石→1, 3=木→4（现为原版 id））
   {
+    const legacy = (data.version ?? 1) < 2;
+    const migrate = (v: number) => (legacy ? (v === 1 ? 2 : v === 2 ? 1 : v === 3 ? 4 : v) : v);
     const u8 = b64ToBytes(data.walls);
     const pos = { i: 0 };
     let i = 0;
     while (i < st.wall.length && pos.i < u8.length) {
       const run = readVarint(u8, pos) + 1;
-      const v = readVarint(u8, pos);
+      const v = migrate(readVarint(u8, pos));
       for (let k = 0; k < run && i < st.wall.length; k++, i++) st.wall[i] = v;
     }
   }

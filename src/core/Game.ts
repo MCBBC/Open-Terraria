@@ -26,7 +26,7 @@ import { LiquidSim } from '../world/liquid/LiquidSim';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
-import { WallTiler } from '../render/WallTiler';
+import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { Sfx, SfxName } from './Sfx';
 import type { GameHooks } from '../entities/types';
 
@@ -249,19 +249,9 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
-    // 墙体贴合器（按墙类型分 sheet；alpha 轮廓分类，规避 Maples 错误规则表）
-    const wallTilers = new Map<number, WallTiler>();
-    if (this.atlas) {
-      const sheetByWall: Record<number, string> = { 1: '地形/Wall_2.png', 2: '地形/Wall_1.png' };
-      for (const [wallId, file] of Object.entries(sheetByWall)) {
-        if (!this.atlas.has(file)) continue;
-        const tiler = new WallTiler(this.atlas, [file]);
-        tiler.analyze();
-        tiler.buildPatterns();
-        wallTilers.set(Number(wallId), tiler);
-      }
-    }
-    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTilers);
+    // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
+    const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
+    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
     this.lighting = new LightingEngine(w);
     this.liquid = new LiquidSim(w);
     this.camera = new Camera(w.w, w.h);

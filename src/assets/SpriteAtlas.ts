@@ -59,6 +59,7 @@ export interface VanillaItemMeta { name: string; key: string; icon: string; crea
 export interface VanillaWallMeta {
   name: string; key: string; sheet: string; color: string;
   grid: [number, number]; stride: [number, number]; cols: number; rows: number;
+  largeFrame?: number;
 }
 // NPC 贴图表（纵向帧条：小动物等）
 export interface VanillaNpcMeta { sheet: string; frameW: number; frameH: number; count: number; }

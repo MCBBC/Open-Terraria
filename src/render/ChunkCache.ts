@@ -3,10 +3,10 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { VanillaWallTiler } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
-import type { WallTiler } from './WallTiler';
 import type { World } from '../world/World';
 
 // 我们的 tile → Maples RuleTile 规则名（有规则的走素材自动贴合，无规则回退程序化）
@@ -28,13 +28,18 @@ export class ChunkCache {
   sheets: Map<number, TileSheetEntry>;
   world: World;
   autotiler: AutoTiler | null;
-  wallTilers: Map<number, WallTiler>;
+  wallTiler: VanillaWallTiler | null;
+  truncatesWalls: number[] = [];
 
-  constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTilers: Map<number, WallTiler> = new Map()) {
+  constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null) {
     this.world = world;
     this.sheets = sheets;
     this.autotiler = autotiler;
-    this.wallTilers = wallTilers;
+    this.wallTiler = wallTiler;
+    // 原版 TileID.Sets.TruncatesWalls（54 玻璃 / 328 暗影宝箱 / 459 / 748）→ 内部 tile id
+    this.truncatesWalls = ['glass', 'v_328_shadow_chest', 'v_459_', 'v_748_']
+      .map((k) => TILE_BY_KEY[k] ?? -1)
+      .filter((id) => id >= 0);
     world.store.onTileChanged((x, y) => this.markDirtyAround(x, y));
   }
 
@@ -126,61 +131,29 @@ export class ChunkCache {
     const x0 = cx * CHUNK, y0 = cy * CHUNK;
 
     // ---- 第一遍：背景墙全部先画（避免后格的墙盖住跨格物体如宝箱/树冠）----
-    for (let ly = 0; ly < CHUNK; ly++) {
-      for (let lx = 0; lx < CHUNK; lx++) {
-        const x = x0 + lx, y = y0 + ly;
-        if (!st.inBounds(x, y)) continue;
-        const i = st.idx(x, y);
-        const px = lx * TILE, py = ly * TILE;
-
-        // 背景墙：原版"骰子5"（梅花/丁砌）排布
-        const wall = st.wall[i];
-        if (wall !== 0) {
-          const wallTiler = this.wallTilers.get(wall);
-          if (wallTiler) {
-            // 砖锚点：行对齐 2 格；行序 (y&2) 决定横向错开 0/1 格
-            const by = y & ~1;
-            const rowOff = (y & 2) >> 1;
-            const bx = ((x - rowOff) & ~1) + rowOff;
-            const qx = x - bx, qy = y - by; // 0/1 象限
-            // 砖四侧封闭状态（周界任一格有同类墙即封闭）
-            const wAt = (xx: number, yy: number) => (st.inBounds(xx, yy) ? st.wall[st.idx(xx, yy)] : 0);
-            const same = (v: number) => v === wall;
-            const cellClosed: [boolean, boolean, boolean, boolean] = [
-              same(wAt(x, y - 1)),   // 上
-              same(wAt(x + 1, y)),   // 右
-              same(wAt(x, y + 1)),   // 下
-              same(wAt(x - 1, y)),   // 左
-            ];
-            const allClosed = cellClosed[0] && cellClosed[1] && cellClosed[2] && cellClosed[3];
-            if (allClosed) {
-              // 内墙：梅花格连续图案按世界坐标取样（双轴交错的骰子5排布）
-              const pat = wallTiler.patternSample(x, y);
-              if (pat) {
-                ctx.drawImage(pat.canvas, pat.sx, pat.sy, TILE, TILE, px, py, TILE, TILE);
-              }
-            } else {
-              // 边界格：按砖锚点敞开方向选收窄变体，画对应象限
-              const closed: [boolean, boolean, boolean, boolean] = [
-                same(wAt(bx, by - 1)) || same(wAt(bx + 1, by - 1)),   // 上
-                same(wAt(bx + 2, by)) || same(wAt(bx + 2, by + 1)),   // 右
-                same(wAt(bx, by + 2)) || same(wAt(bx + 1, by + 2)),   // 下
-                same(wAt(bx - 1, by)) || same(wAt(bx - 1, by + 1)),   // 左
-              ];
-              const r = wallTiler.pick(closed, bx, by)
-                ?? wallTiler.pick([false, false, false, false], x, y);
-              if (r) {
-                const hw = r.sw / 2, hh = r.sh / 2;
-                ctx.drawImage(r.img, r.sx + qx * hw, r.sy + qy * hh, hw, hh, px, py, TILE, TILE);
-              }
-            }
+    // 原版墙 framing（VanillaWallTiler）：32×32 帧以格为中心外溢 8px →
+    // 扫描范围外扩 1 格，跨 chunk 边界的帧由相邻 chunk 补齐（像素一致无副作用）
+    if (this.wallTiler) {
+      const EXT = 1;
+      for (let ly = -EXT; ly < CHUNK + EXT; ly++) {
+        for (let lx = -EXT; lx < CHUNK + EXT; lx++) {
+          const x = x0 + lx, y = y0 + ly;
+          if (!st.inBounds(x, y)) continue;
+          const i = st.idx(x, y);
+          const wallId = st.wall[i];
+          if (wallId === 0) continue;
+          const px = lx * TILE, py = ly * TILE;
+          if (this.wallTiler.hasTexture(wallId)) {
+            this.wallTiler.draw(ctx, st, x, y, wallId, this.truncatesWalls, px, py);
           } else {
-            const wd = WALL_DEFS[wall];
-            ctx.fillStyle = wd.mapColor;
-            ctx.fillRect(px, py, TILE, TILE);
-            ctx.fillStyle = shade(wd.mapColor, 0.8);
-            ctx.fillRect(px, py + TILE - 1, TILE, 1);
-            ctx.fillRect(px + TILE - 1, py, 1, TILE);
+            const wd = WALL_DEFS[wallId];
+            if (wd) {
+              ctx.fillStyle = wd.mapColor;
+              ctx.fillRect(px, py, TILE, TILE);
+              ctx.fillStyle = shade(wd.mapColor, 0.8);
+              ctx.fillRect(px, py + TILE - 1, TILE, 1);
+              ctx.fillRect(px + TILE - 1, py, 1, TILE);
+            }
           }
         }
       }

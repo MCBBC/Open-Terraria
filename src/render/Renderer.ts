@@ -7,7 +7,7 @@ import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
-import { TILE_DEFS } from '../data/tiles';
+import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import type { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
@@ -47,7 +47,7 @@ export class Minimap {
     if (st.wall[i] !== 0) {
       // 墙色 = 深化（地下洞穴空气）
       const w = st.wall[i];
-      return w === 1 ? '#3A2A1A' : w === 2 ? '#2E2E2E' : '#3A2812';
+      return WALL_DEFS[w]?.mapColor ?? '#2E2E2E'; // 全量权威墙色（TEdit walls.json）
     }
     // 探索过的天空 = 亮蓝（未探索区域由迷雾层另盖黑）
     return '#7EB6E8';
@@ -938,11 +938,15 @@ export class Renderer {
     return t;
   })();
 
+  /** 全亮模式（F9）：跳过光照合成，画面无暗影 */
+  fullbright = false;
+
   private compositeLight(
     cam: Camera, viewW: number, viewH: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
     rx: number, ry: number, rw: number, rh: number,
   ) {
+    if (this.fullbright) return; // 开灯：不做 multiply，全部原色
     const z = cam.zoom;
     const ts = TILE;
     const tilesX = Math.ceil(viewW / z / ts) + 2;

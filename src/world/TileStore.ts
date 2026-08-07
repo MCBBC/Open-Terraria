@@ -8,7 +8,7 @@ export class TileStore {
   readonly flags: Uint8Array; // bit0 active bit1 framedDecor占位(预留)
   readonly frameX: Uint16Array;
   readonly frameY: Uint16Array;
-  readonly wall: Uint8Array;
+  readonly wall: Uint16Array; // 原版 wld 墙 id（0-366）
   readonly liquid: Uint8Array;   // 0-255 液量
   readonly liquidType: Uint8Array; // 0无 1水
 
@@ -22,7 +22,7 @@ export class TileStore {
     this.flags = new Uint8Array(n);
     this.frameX = new Uint16Array(n);
     this.frameY = new Uint16Array(n);
-    this.wall = new Uint8Array(n);
+    this.wall = new Uint16Array(n);
     this.liquid = new Uint8Array(n);
     this.liquidType = new Uint8Array(n);
   }

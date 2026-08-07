@@ -229,7 +229,7 @@ function hellPass({ store, rng }: GenCtx) {
       if (!store_inBounds(st, x, y)) continue;
       const i = st.idx(x, y);
       if (st.type[i] !== 0) st.type[i] = T.ASH;
-      st.wall[i] = 2; // 石墙背景
+      st.wall[i] = 1; // 石墙背景（原版墙 id：1=石）
     }
   }
   // 洞穴 + 岩浆湖

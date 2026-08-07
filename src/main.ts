@@ -233,6 +233,11 @@ window.addEventListener('keydown', (e) => {
       game.enemySpawnEnabled = !game.enemySpawnEnabled;
       ui.toast(game.enemySpawnEnabled ? '怪物生成已开启' : '怪物生成已关闭（已有怪物不受影响）');
       break;
+    case 'F9':
+      e.preventDefault();
+      game.renderer.fullbright = !game.renderer.fullbright;
+      ui.toast(game.renderer.fullbright ? '已开灯：全画面无暗影' : '已关灯：恢复正常光照');
+      break;
     case 'KeyM':
       if (game.renderer.fullMap.open) {
         game.renderer.fullMap.open = false;

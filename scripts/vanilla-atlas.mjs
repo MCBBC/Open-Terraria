@@ -104,13 +104,14 @@ for (const id of whitelist.walls) {
   const src = join(ASSETS, `Wall_${id}.png`);
   if (!w || !existsSync(src)) { missing.push(`Wall_${id}`); continue; }
   copyFileSync(src, join(OUT_DIR, `Wall_${id}.png`)); copied++;
-  const grid = w.textureGrid ?? [16, 16];
-  const gap = w.frameGap ?? [2, 2];
+  // 墙表固定 32px 帧 + 4px 间隔（TEdit WorldRenderXna texsize=32, stride=36）
+  const grid = [32, 32], stride = [36, 36];
   const { w: pw, h: ph } = pngSize(src);
   out.walls[id] = {
     name: w.name, key: w.key, sheet: `vanilla/Wall_${id}.png`,
-    color: hex(w.color), grid, stride: [grid[0] + gap[0], grid[1] + gap[1]],
-    cols: Math.floor(pw / (grid[0] + gap[0])), rows: Math.floor(ph / (grid[1] + gap[1])),
+    color: hex(w.color), grid, stride,
+    cols: Math.floor(pw / stride[0]), rows: Math.floor(ph / stride[1]),
+    largeFrame: w.largeFrameType ?? 0,
   };
 }
 
