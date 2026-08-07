@@ -200,14 +200,23 @@ function treeFrameBottomPad(img: HTMLImageElement, fx: number, fy: number): numb
  *  - 列高比较：相邻列更高 → 本列是手臂（左臂 X=3 / 右臂 X=2；顶端 X=6）
  *  - 主干：顶格 Y=0（含手臂连接位 X=1/4/5），身格 (0,1)
  *  - 生物群系变体：向下扫 100 格沙类 → Evil/Good/Crimson_Cactus 独立贴图 */
-/** 仙人掌生物群系贴图（向下扫沙类：腐化/猩红/神圣 → 独立变体贴图） */
+/** 仙人掌生物群系贴图（向下扫沙类：腐化/猩红/神圣 → 独立变体贴图）。
+ *  扫描带 baseX 偏移（TEdit 同款）：手臂格朝主干列方向扫——手臂列自身下方
+ *  可能没有沙（如浮空装饰/黑檀石地基），直下扫会漏判 */
 export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): HTMLImageElement | null {
   let img = atlas.vimages.get('vanilla/Tiles_80.png');
+  // 角色判定：与 cactusFrameAt 同一列高比较 → 决定扫描列偏移
+  const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === TILE_BY_KEY['v_80_cactus'];
+  let top = y;
+  while (isC(x, top - 1)) top--;
+  const colH = (ax: number) => { let n = 0; while (isC(ax, top + n)) n++; return n; };
+  const hSelf = colH(x), hR = colH(x + 1), hL = colH(x - 1);
+  const baseX = hR > hSelf ? 1 : hL > hSelf ? -1 : 0; // 左臂扫 x+1 / 右臂扫 x-1 / 主干扫 x
   const ebonsand = TILE_BY_KEY['v_112_ebonsand_block'] ?? -1;
   const crimsand = TILE_BY_KEY['v_234_crimsand_block'] ?? -1;
   const pearlsand = TILE_BY_KEY['v_116_pearlsand_block'] ?? -1;
   for (let i = 0; i < 100 && y + i < st.h; i++) {
-    const t = st.type[st.idx(x, y + i)];
+    const t = st.type[st.idx(x + baseX, y + i)];
     if (t === 0) continue;
     if (t === ebonsand) { img = atlas.vimages.get('vanilla/Evil_Cactus.png') ?? img; break; }
     if (t === crimsand) { img = atlas.vimages.get('vanilla/Crimson_Cactus.png') ?? img; break; }
@@ -227,23 +236,22 @@ export function cactusFrameAt(st: TileStore, x: number, y: number, type: number)
   const hasN = isC(x, y - 1), hasS = isC(x, y + 1);
   let ux = 0, uy = 0;
   if (hR > hSelf) {
-    // 左臂（右侧有更高主干）
-    if (!hasN) { ux = 6; uy = 2; }
-    else { ux = 3; uy = hasS ? 1 : 2; }
+    // 左臂（西侧手臂，贴图靠右桥接主干）：顶格 (3,0) / 身格 (3,1) /
+    // 底格 (3,2) / 单格孤立手臂才是尖帽 (6,2)
+    if (!hasN && !hasS) { ux = 6; uy = 2; }
+    else { ux = 3; uy = !hasN ? 0 : hasS ? 1 : 2; }
   } else if (hL > hSelf) {
-    // 右臂（左侧有更高主干）
-    if (!hasN) { ux = 6; uy = 1; }
-    else { ux = 2; uy = hasS ? 1 : 2; }
-  } else if (!hasN) {
-    // 主干顶格：手臂连接位判定（w/e/sw/se）
-    uy = 0;
+    // 右臂（东侧手臂，贴图靠左桥接主干）：(2,0)/(2,1)/(2,2)，单格尖帽 (6,1)
+    if (!hasN && !hasS) { ux = 6; uy = 1; }
+    else { ux = 2; uy = !hasN ? 0 : hasS ? 1 : 2; }
+  } else {
+    // 主干：顶格 Y=0 / 身格 Y=2，两者都做手臂连接位判定（w/e/sw/se）
+    uy = hasN ? 2 : 0;
     const w = isC(x - 1, y), sw = isC(x - 1, y + 1), e = isC(x + 1, y), se = isC(x + 1, y + 1);
     if (w && !sw && (!e || se)) ux = 4;
     else if (e && !se && (!w || sw)) ux = 1;
     else if (w && !sw && e && !se) ux = 5;
     else ux = 0;
-  } else {
-    ux = 0; uy = 1; // 主干身格
   }
   return { col: ux, row: uy };
 }
