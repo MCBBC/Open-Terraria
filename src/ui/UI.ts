@@ -151,7 +151,7 @@ export class UI {
 
     const sizeSel = el('select') as HTMLSelectElement;
     sizeSel.style.cssText = 'width:100%; padding:8px; margin:4px 0; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px;';
-    for (const [label, w, h] of [['小世界 1200×400', 1200, 400], ['中世界 2100×700', 2100, 700], ['大世界 4200×1200', 4200, 1200]] as const) {
+    for (const [label, w, h] of [['小世界 4200×1200', 4200, 1200], ['中世界 6400×1800', 6400, 1800], ['大世界 8400×2400', 8400, 2400]] as const) {
       const o = el('option', '', label);
       o.value = `${w}x${h}`;
       sizeSel.appendChild(o);

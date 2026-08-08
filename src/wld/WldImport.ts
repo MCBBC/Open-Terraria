@@ -810,6 +810,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       treeX: wld.treeX,
       treeStyle: wld.treeStyle,
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
+      crimson: wld.isCrimson,
     },
     clock: { timeOfDay, dayCount: 1 },
     tiles: bytesToB64(rleTiles({ type, frameX, frameY })),

@@ -102,7 +102,7 @@ export class ChunkCache {
   private neighborMask(x: number, y: number, type: number): number {
     const st = this.world.store;
     let mask = 0;
-    const same = (nx: number, ny: number) => st.inBounds(nx, ny) && st.type[st.idx(nx, ny)] === type ? 1 : 0;
+    const same = (nx: number, ny: number) => st.inBounds(nx, ny) && st.flags[st.idx(nx, ny)] && st.type[st.idx(nx, ny)] === type ? 1 : 0;
     mask |= same(x, y - 1);        // N
     mask |= same(x + 1, y) << 1;   // E
     mask |= same(x, y + 1) << 2;   // S
@@ -164,7 +164,8 @@ export class ChunkCache {
         const i = st.idx(x, y);
         const px = lx * TILE, py = ly * TILE;
         const type = st.type[i];
-        if (type === 0) continue;
+        // 原版语义:非活性格不渲染(TileRunner 会给空气格写幽灵 type)
+        if (type === 0 || !st.flags[i]) continue;
         const def = TILE_DEFS[type];
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）

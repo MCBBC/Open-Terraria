@@ -48,6 +48,7 @@ export interface SaveData {
   header: {
     name: string; seed: number; width: number; height: number;
     spawn: [number, number]; groundLevel: number; rockLevel: number;
+    crimson?: boolean; dungeonX?: number; jungleX?: number;
     treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
     wldVersion?: number;
@@ -103,6 +104,11 @@ export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: U
 
 export function saveGame(world: World, player: Player, playTimeMs: number): string {
   const st = world.store;
+  // 幽灵净化:存档格式不携带 active 位(加载时 type≠0 即激活),
+  // 非活性格上的残留 type 必须归零,否则重读后全部变成浮空实体块
+  for (let i = 0; i < st.type.length; i++) {
+    if (!st.flags[i] && st.type[i] !== 0) st.type[i] = 0;
+  }
   const data: SaveData = {
     format: 'sandboxworld.save',
     version: 2,
@@ -110,6 +116,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
       name: world.name, seed: world.seed, width: st.w, height: st.h,
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
       treeX: world.treeX, treeStyle: world.treeStyle,
+      crimson: world.crimson, dungeonX: world.dungeonX, jungleX: world.jungleX,
       created: Date.now(), playTimeMs,
     },
     clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount },
@@ -138,6 +145,9 @@ export function loadSave(json: string): { world: World; player: { hp: number; x:
   if (data.header.treeX) world.treeX = data.header.treeX;
   if (data.header.treeStyle) world.treeStyle = data.header.treeStyle;
   if (data.header.treeTops?.length) world.treeTops = data.header.treeTops;
+  if (data.header.crimson !== undefined) world.crimson = data.header.crimson;
+  if (data.header.dungeonX !== undefined) world.dungeonX = data.header.dungeonX;
+  if (data.header.jungleX !== undefined) world.jungleX = data.header.jungleX;
   world.clock.timeOfDay = data.clock.timeOfDay;
   world.clock.dayCount = data.clock.dayCount;
   world.chests = data.chests;

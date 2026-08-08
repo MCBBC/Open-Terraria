@@ -42,6 +42,10 @@ export class World {
   /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
   treeX: number[] = [];
   treeStyle: number[] = [0, 0, 0, 0];
+  /** 世界级生物群系常量(原版 header,生成期 Reset pass 掷出) */
+  crimson = false;          // true=猩红 false=腐化
+  dungeonX = 0;            // 地牢位置
+  jungleX = 0;             // 丛林位置
   /** TreeTops 13 区域变体（v≥211 wld 权威；索引 0-3 森林/5 丛林/6 雪/7 神圣） */
   treeTops: number[] = [];
 
