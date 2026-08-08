@@ -288,7 +288,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   713: { key: 'v_713_lava_boulder', copyFrame: true },  // Lava Boulder
   23: 'v_23_corrupt_grass_block',
   31: { key: 'v_31_orb_heart', copyFrame: true },  // Orb Heart（2×2 style 帧直拷）
-  41: 'v_41_blue_brick',
+  41: 'v_41_blue_brick', 43: 'v_43_green_brick',
   60: 'v_60_jungle_grass_block',
   70: 'v_70_mushroom_grass_block',
   25: 'v_25_ebonstone_block',  // Ebonstone Block

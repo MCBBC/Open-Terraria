@@ -8,6 +8,7 @@ import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
+import { WaterfallRenderer } from './WaterfallRenderer';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import type { Player } from '../entities/Player';
@@ -104,6 +105,8 @@ export class Renderer {
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
+  /** 原版瀑布贴图系统（WaterfallManager 移植）：液体倾泻的长条水流柱 */
+  waterfalls = new WaterfallRenderer();
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
   fullMap = {
@@ -235,8 +238,9 @@ export class Renderer {
       }
     }
 
-    // 2b. 液体（墙之上、图块之下；向实心邻格浸润外扩一格遮住贴图透明缝隙）
-    this.drawLiquids(world, cam, viewW, viewH, z);
+    // 2b. 液体背景 pass（原版 DrawWaters(true)：不透明水画在方块层之前，
+    //     方块贴图的透明像素处露出这层水 → 浸润效果）
+    this.drawLiquids(world, cam, viewW, viewH, z, true);
 
     // 2c. 前景 tile/物体层
     for (let cy = y0; cy <= y1; cy++) {
@@ -245,6 +249,10 @@ export class Renderer {
         ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts);
       }
     }
+
+    // 2d. 液体前景 pass（原版 DrawWaters(false)：方块之后，乘 DEFAULT_OPACITY 水 0.6；
+    //     露出水面与水内非实心方块都由这层给出半透明质感）
+    this.drawLiquids(world, cam, viewW, viewH, z, false);
 
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
@@ -348,14 +356,21 @@ export class Renderer {
     this.drawHp(ctx, player);
   }
 
-  private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
-    // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）
+  private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
+    // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
+    // isBackground：背景 pass（墙层之后、方块层之前，不透明）或前景 pass（方块之后，0.6）
     const ts = TILE;
     const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
     const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
     const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
-    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, performance.now());
+    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, performance.now(), isBackground);
+    if (!isBackground) {
+      // 瀑布贴图（原版在液体前景 pass 之后、光照之前绘制；扫描 30 帧节流在内部）
+      const now = performance.now();
+      this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
+      this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);
+    }
   }
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
@@ -1075,7 +1090,8 @@ export class Renderer {
     this._fmWorldW = world.w;
     this._fmWorldH = world.h;
     // 拖动平移：按下首帧只同步基准点不位移（防地图瞬移）
-    if (mouseDown) {
+    // _mapOpenClick：打开地图的那次点击（Game 置位）不参与拖拽，松开后才允许拖
+    if (mouseDown && !this._mapOpenClick) {
       if (!this.mapDragging) {
         this.mapDragging = true;
       } else {
@@ -1089,6 +1105,7 @@ export class Renderer {
         fm.anchorMY = mouseY;
       }
     } else {
+      if (!mouseDown) this._mapOpenClick = false; // 松开后恢复正常拖拽
       this.mapDragging = false;
     }
     this.lastMouse = { x: mouseX, y: mouseY };
@@ -1118,10 +1135,10 @@ export class Renderer {
     ctx.imageSmoothingEnabled = false;
     // 迷雾
     this.drawFog(ctx, world, cx0, cy0, fm.zoom, 2 * fm.zoom);
-    // 玩家图标标记
+    // 玩家位置标记（醒目：脉冲圆环 + 白箭头 + 文字）
     const p = this._lastPlayer;
     if (p) {
-      this.drawPlayerMarker(ctx, cx0 + p.cx / TILE * fm.zoom, cy0 + p.cy / TILE * fm.zoom, Math.max(14, 10 * fm.zoom));
+      this.drawFullMapPlayerMarker(ctx, cx0 + p.cx / TILE * fm.zoom, cy0 + p.cy / TILE * fm.zoom);
     }
     // 传送预选标记（第一次点击的点，闪烁提示再次点击确认）
     const tp = this.tpMark;
@@ -1147,6 +1164,54 @@ export class Renderer {
     ctx.fillText('滚轮缩放 · 拖动平移 · 点击两点传送（首次预选/再点确认）· M 关闭', viewW / 2, viewH - 16);
   }
   private _mapInit = false;
+
+  /** 全屏地图主角标记：脉冲圆环 + 原版风格白箭头（黑描边）+ 坐标文字 */
+  private drawFullMapPlayerMarker(ctx: CanvasRenderingContext2D, x: number, y: number) {
+    const t = performance.now() * 0.004;
+    const pulse = 0.5 + 0.5 * Math.sin(t);
+    // 外圈脉冲环（由内向外扩散渐隐）
+    ctx.strokeStyle = `rgba(255,255,255,${0.7 * (1 - pulse)})`;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(x, y, 16 + 14 * pulse, 0, Math.PI * 2);
+    ctx.stroke();
+    // 常驻细环
+    ctx.strokeStyle = 'rgba(0,0,0,0.65)';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = '#FFFFFF';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y, 13, 0, Math.PI * 2);
+    ctx.stroke();
+    // 原版风格向下箭头（黑描边白填充，指示"我在这里"）
+    const s = 9;
+    ctx.beginPath();
+    ctx.moveTo(x, y + s * 1.6);
+    ctx.lineTo(x - s * 0.85, y - s * 0.5);
+    ctx.lineTo(x + s * 0.85, y - s * 0.5);
+    ctx.closePath();
+    ctx.fillStyle = '#000';
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 3;
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    ctx.fillStyle = '#FFF';
+    ctx.fill();
+    // 文字标注（黑描边保证任何底色上可读）
+    const label = '主角';
+    ctx.font = 'bold 13px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+    ctx.strokeText(label, x, y - 22);
+    ctx.fillStyle = '#FFF';
+    ctx.fillText(label, x, y - 22);
+  }
+  /** 打开地图的那次点击不参与拖拽（Game 打开时置位，松开后清除） */
+  _mapOpenClick = false;
   private _lastPlayer: Player | null = null;
   /** 传送预选标记（Game 写入） */
   tpMark: { x: number; y: number } | null = null;

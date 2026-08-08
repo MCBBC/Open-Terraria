@@ -26,7 +26,7 @@ export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number,
-  nowMs: number,
+  nowMs: number, isBackground = false,
 ): void {
   if (!atlas) return;
   const PAD = 2;
@@ -186,9 +186,10 @@ export function drawVanillaLiquids(
       if (!hasLiquidA[i]) continue;
       const ui = at(lx, ly - 1), di = at(lx, ly + 1), li = at(lx - 1, ly), ri = at(lx + 1, ly);
       if (!hasBE[i] && !hasLE[i] && !hasTE[i] && !hasRE[i]) {
-        if (hasTE[ui] && hasLE[li]) {
-          fx[i] = Math.max(4, Math.floor(16 - vlW[li] * 16)) - 4;
-          fy[i] = 48 + Math.max(4, Math.floor(16 - vtW[ui] * 16)) - 4;
+        // 原版 LiquidRenderer.cs:342-346：left.HasTopEdge && up.HasLeftEdge，墙面取 up.vlW / left.vtW
+        if (hasTE[li] && hasLE[ui]) {
+          fx[i] = Math.max(4, Math.floor(16 - vlW[ui] * 16)) - 4;
+          fy[i] = 48 + Math.max(4, Math.floor(16 - vtW[li] * 16)) - 4;
           vlW[i] = 0; vtW[i] = 0; vrW[i] = 1; vbW[i] = 1;
         } else if (hasTE[ri] && hasRE[ui]) {
           fx[i] = 32 - Math.min(16, Math.floor(vrW[ui] * 16) - 4);
@@ -225,7 +226,10 @@ export function drawVanillaLiquids(
       const isSurface = fx[i] === 16 && fy[i] === 0 && y > groundLevel - 40;
       const srcY = isSurface ? 1280 : sy + animFrame * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
-      ctx.globalAlpha = Math.min(1, opacity[i] * (DEFAULT_OPACITY[vt] ?? 0.6));
+      // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
+      // 背景 pass（isBackground）画在墙/方块层之前、透明度因子 1.0 —— 方块贴图透明像素
+      // 处露出这层水 = 浸润效果；前景 pass 画在方块之后、乘 DEFAULT_OPACITY（水 0.6）
+      ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
       ctx.drawImage(tex, sx, srcY, sw, sh,
         x * 16 + Math.floor(n2 * 16), y * 16 + Math.floor(n4 * 16), sw, sh);
     }

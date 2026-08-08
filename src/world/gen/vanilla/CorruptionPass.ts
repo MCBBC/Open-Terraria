@@ -251,8 +251,8 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         for (let y = y0; y < y1; y++) {
           const ti = st.idx(x, y);
           if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
-            && st.type[ti] !== ORB && st.type[ti] !== EBONSTONE) {
-            st.type[ti] = 0; st.flags[ti] = 0;
+            && st.type[ti] !== ORB) {
+            st.flags[ti] = 0; // 只清 active 保留 type(原版 KillTile)——壳层才不会回填隧道
           }
         }
       }
@@ -336,8 +336,8 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
       for (let y = y0; y < y1; y++) {
         const ti = st.idx(x, y);
         if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
-          && st.type[ti] !== ORB && st.type[ti] !== EBONSTONE) {
-          st.type[ti] = 0; st.flags[ti] = 0;
+          && st.type[ti] !== ORB) {
+          st.flags[ti] = 0; // 只清 active(原版 KillTile)——壳层不回填
         }
       }
     }

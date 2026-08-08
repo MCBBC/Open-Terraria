@@ -7,6 +7,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { digTunnel } from './TileRunner';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 const EBONSAND = TILE_BY_KEY['v_112_ebonsand_block']!;
@@ -314,3 +315,65 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
     }
   }
 }
+
+const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
+const CHEST = TILE_BY_KEY['chest']!;
+
+/** 金字塔(pass 38 Pyramids 简化):gs.pyramidSpots 候选 → 地下沙岩砖金字塔 + 宝箱 */
+export function runPyramidPass(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+): void {
+  for (const spot of gs.pyramidSpots.slice(0, 2)) {
+    const size = rng.int(14, 20); // 半宽
+    const baseY = Math.min(st.h - 260, spot.y + rng.int(60, 90));
+    if (spot.x < size + 5 || spot.x > st.w - size - 5) continue;
+    // 金字塔主体(逐层收窄)
+    for (let layer = 0; layer < size; layer++) {
+      const halfW = size - layer;
+      for (let x = spot.x - halfW; x <= spot.x + halfW; x++) {
+        for (let y = baseY - layer; y <= baseY - layer; y++) {
+          const i = st.idx(x, y);
+          st.type[i] = SANDSTONE_BRICK; st.flags[i] = 1;
+          st.wall[i] = 34; // SandstoneBrickUnsafe
+        }
+      }
+    }
+    // 内腔(倒阶梯掏空)
+    for (let layer = 2; layer < size - 2; layer++) {
+      const halfW = size - layer - 2;
+      for (let x = spot.x - halfW; x <= spot.x + halfW; x++) {
+        const i = st.idx(x, baseY - layer);
+        st.type[i] = 0; st.flags[i] = 0;
+      }
+    }
+    // 宝箱(内腔底部)
+    const bx = spot.x, by = baseY - 2;
+    st.setTileSilent(bx, by, CHEST, 0, 0);
+    st.setTileSilent(bx + 1, by, CHEST, 18, 0);
+    st.setTileSilent(bx, by + 1, CHEST, 0, 18);
+    st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
+    chests.push({ x: bx, y: by, items: Array(10).fill(null) });
+  }
+}
+
+/** Wet Jungle(pass 43 简化):从丛林草 tile 起挖湿隧道(灌水) */
+export function runWetJunglePass(st: TileStore, rng: RNG, gs: GenState): void {
+  const core = (gs as any).jungleCoreX ?? gs.jungleX;
+  const JG = JUNGLE_GRASS;
+  const tunnels = Math.max(4, Math.round(st.w / 500));
+  let dug = 0;
+  for (let n = 0; n < tunnels * 60 && dug < tunnels; n++) {
+    const x = core + rng.int(-Math.floor(st.w * 0.12), Math.floor(st.w * 0.12));
+    const y = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, st.h - 500));
+    if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== JG || !st.flags[st.idx(x, y)]) continue;
+    const dx = rng.int(-100, 100) * 0.01, dy = rng.int(-100, 100) * 0.01;
+    digTunnel(st, rng, x, y, dx, dy, rng.int(30, 120), rng.int(3, 6), true);
+    dug++;
+  }
+}
+
+const HIVE = TILE_BY_KEY['v_225_hive_block']!;
+const HONEY = TILE_BY_KEY['v_229_honey_block']!;
+const COBWEB = TILE_BY_KEY['v_51_cobweb']!;
+

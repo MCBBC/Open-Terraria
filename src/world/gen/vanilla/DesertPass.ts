@@ -84,50 +84,80 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 
-  // ---- DesertHive(场强分层的格阵简化)----
+  // ---- DesertHive(DesertHive.cs 场强分层 1:1)----
+  // 腔室簇:椭圆掩码 50% 密度散点(CA 平滑一次)+ 抖动 ±0.25 → 场强 = Σ 1/dist²(前二大)
+  // 阈值:>3.5 腔室(清空+墙187+化石) / >1.8 隧道(墙187+沙岩396) / >0.7 或 !边缘 壳(墙216+沙/硬化沙)
   const cellW = 4, cellH = 2;
   const cols = Math.floor(width / cellW);
   const rows = Math.max(4, Math.floor((hiveBottom - hiveTop) / cellH));
-  const grid = new Uint8Array(cols * rows);
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) grid[r * cols + c] = rng.next() < 0.52 ? 1 : 0;
-  }
-  for (let pass = 0; pass < 2; pass++) {
-    const next = new Uint8Array(grid);
+  // 簇中心(椭圆内 50% 概率散点,保留稀疏化)
+  const clusters: Array<{ bx: number; by: number }> = [];
+  {
+    const cx0 = cols / 2 - 1, cy0 = rows / 2 - 1;
+    const radX = cols / 2 - 1, radY = rows / 2 - 1;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        let n = 0;
-        for (let dr = -1; dr <= 1; dr++) for (let dc = -1; dc <= 1; dc++) {
-          const rr = r + dr, cc = c + dc;
-          if (rr >= 0 && rr < rows && cc >= 0 && cc < cols && grid[rr * cols + cc]) n++;
-        }
-        next[r * cols + c] = n >= 5 ? 1 : n <= 3 ? 0 : grid[r * cols + c];
+        if (rng.next() >= 0.5) continue;
+        const nx = (c - cx0) / radX, ny = (r - cy0) / radY;
+        if (nx * nx + ny * ny > 1) continue;
+        clusters.push({ bx: c + rng.next() * 0.5 - 0.25, by: r + rng.next() * 0.5 - 0.25 });
       }
     }
-    grid.set(next);
   }
-  let clusterIdx = 0;
-  for (let r = 0; r < rows; r++) {
-    for (let c = 0; c < cols; c++) {
-      const x0 = ox + c * cellW, y0 = hiveTop + r * cellH;
-      const chamber = grid[r * cols + c] === 1;
-      clusterIdx++;
-      for (let dx = 0; dx < cellW && x0 + dx < ox + width; dx++) {
-        for (let dy = 0; dy < cellH && y0 + dy < hiveBottom; dy++) {
-          if (!st.inBounds(x0 + dx, y0 + dy)) continue;
-          const i = st.idx(x0 + dx, y0 + dy);
-          if (chamber) {
-            st.type[i] = 0; st.flags[i] = 0;
-            st.wall[i] = 187;
-            // 每 15 簇第 2 个 → 化石点缀
-            if (clusterIdx % 15 === 2) { st.flags[i] = 1; st.type[i] = FOSSIL; }
-          } else {
-            const border = c === 0 || r === 0 || c === cols - 1 || r === rows - 1;
-            st.flags[i] = 1;
-            st.type[i] = border ? SANDSTONE : (rng.next() < 1 / 3 ? HARDSAND : SAND);
-            st.wall[i] = 216;
+  const hiveW = width, hiveH = hiveBottom - hiveTop;
+  // 空间桶:簇按块坐标分桶,每格只查 ±3 窗口(1/d² 在 d>3 时贡献<0.11,低于全部阈值)
+  const bucket = new Map<number, Array<{ bx: number; by: number; k: number }>>();
+  clusters.forEach((cl, k) => {
+    const key = Math.floor(cl.bx) * 4096 + Math.floor(cl.by);
+    const arr = bucket.get(key);
+    if (arr) arr.push({ ...cl, k });
+    else bucket.set(key, [{ ...cl, k }]);
+  });
+  for (let dx = -20; dx < hiveW + 20; dx++) {
+    for (let dy = -20; dy < hiveH + 20; dy++) {
+      const px = ox + dx, py = hiveTop + dy;
+      if (!st.inBounds(px, py)) continue;
+      // 场强:前二大 1/dist²(块坐标,±3 桶窗口)
+      let m1 = 0, m2 = 0, m1Idx = -1;
+      const bx = (px - ox) / cellW - 0.5, by = (py - hiveTop) / cellH - 0.5;
+      const bxi = Math.floor(bx), byi = Math.floor(by);
+      for (let ax = -3; ax <= 3; ax++) {
+        for (let ay = -3; ay <= 3; ay++) {
+          const arr = bucket.get((bxi + ax) * 4096 + (byi + ay));
+          if (!arr) continue;
+          for (const cl of arr) {
+            const ddx = cl.bx - bx, ddy = cl.by - by;
+            const f = 1 / (ddx * ddx + ddy * ddy);
+            if (f > m1) { m2 = m1; m1 = f; m1Idx = cl.k; } else if (f > m2) m2 = f;
           }
         }
+      }
+      const field = m1 + m2;
+      const ex = ((px - ox) / hiveW) * 2 - 1, ey = ((py - hiveTop) / hiveH) * 2 - 1;
+      const isEdge = ex * ex + ey * ey >= 0.64; // 0.8 半径带外
+      const i = st.idx(px, py);
+      if (field > 3.5) {
+        // 腔室:清空 + 墙187(化石点缀)
+        st.type[i] = 0; st.flags[i] = 0; st.liquid[i] = 0;
+        st.wall[i] = 187;
+        if (m1Idx % 15 === 2 && rng.next() < 0.3) { st.flags[i] = 1; st.type[i] = FOSSIL; }
+      } else if (field > 1.8) {
+        // 隧道带:墙187 + 沙岩
+        st.wall[i] = 187;
+        if (py < gs.worldSurface) st.liquid[i] = 0;
+        if (!isEdge || st.flags[i]) { st.type[i] = SANDSTONE; st.flags[i] = 1; }
+      } else if (field > 0.7 || !isEdge) {
+        // 硬化沙壳:墙216 + 沙/硬化沙(1/3)
+        st.wall[i] = 216;
+        st.liquid[i] = 0;
+        if (!isEdge || st.flags[i]) {
+          st.type[i] = rng.next() < 1 / 3 ? HARDSAND : SAND;
+          st.flags[i] = 1;
+        }
+      } else if (field > 0.25 && rng.next() < (field - 0.25) / 0.45) {
+        // 隧道外缘噪声
+        st.wall[i] = 187;
+        if (st.flags[i]) { st.type[i] = rng.next() < 1 / 3 ? HARDSAND : SAND; st.flags[i] = 1; }
       }
     }
   }

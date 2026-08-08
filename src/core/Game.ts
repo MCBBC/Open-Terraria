@@ -165,6 +165,9 @@ export class Game implements GameHooks {
   private lastWasDay: boolean | null = null;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
+  /** 地图内按压起点（松开时与当前位置比对 <6px 判定为点击，否则是拖动） */
+  private _mapPressX = 0;
+  private _mapPressY = 0;
   private _tpTarget: { x: number; y: number } | null = null;
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
@@ -214,44 +217,30 @@ export class Game implements GameHooks {
     this.cb.onWorldReady();
   }
 
-  /** 全图液体预沉降：只激活有液体的格子及其邻域 + 步进至收敛（活动队列清空）。
-   *  注意不能全图激活——世界格数远超 MAX_ACTIVE(2万)，FIFO 会把大量湿格丢出队列，
-   *  沉降"假收敛"，进游戏后水才被运行时激活开始流动 */
+  /** 全图液体沉降：原版 WorldFile.cs:365-389 读档时序 1:1 移植。
+   *  QuickWater 自底向上直接搬运 → WaterCheck 重建活动列表 →
+   *  quickSettle 循环 UpdateLiquid 至收敛 → 复位后再次 WaterCheck。
+   *  收敛后世界液体即达最终静止状态，进游戏不再有"靠近才流动" */
   private async settleLiquids(onProgress?: (p: number) => void) {
-    const w = this.world;
-    const sim = new LiquidSim(w);
-    const st = w.store;
-    // 分带扫描湿格（保持 UI 可喘息），只入队有液体及其四邻
-    const bandH = 128;
-    const bands = Math.ceil(st.h / bandH);
-    for (let b = 0; b < bands; b++) {
-      const y0 = b * bandH, y1 = Math.min(st.h - 1, (b + 1) * bandH - 1);
-      for (let y = y0; y <= y1; y++) {
-        for (let x = 0; x < st.w; x++) {
-          if (st.liquid[st.idx(x, y)] > 0) {
-            sim.activate(x, y);
-            sim.activate(x, y - 1);
-            sim.activate(x, y + 1);
-            sim.activate(x - 1, y);
-            sim.activate(x + 1, y);
-          }
-        }
-      }
-      onProgress?.((b / bands) * 0.2);
-      await new Promise((r) => setTimeout(r, 0));
-    }
-    const MAX_STEPS = 30000;
-    let step = 0;
-    while (step < MAX_STEPS) {
-      sim.step();
-      step++;
-      if (step % 120 === 0) {
-        onProgress?.(0.2 + Math.min(0.8, (step / MAX_STEPS) * 0.8));
+    const sim = new LiquidSim(this.world);
+    onProgress?.(0.05);
+    sim.quickWater();
+    onProgress?.(0.35);
+    await new Promise((r) => setTimeout(r, 0));
+    sim.waterCheck();
+    sim.quickSettle = true;
+    const MAX_ITER = 100000; // 原版 WorldFile 同上限
+    let iter = 0;
+    while (sim.numLiquid > 0 && iter < MAX_ITER) {
+      sim.updateLiquid();
+      iter++;
+      if (iter % 500 === 0) {
+        onProgress?.(0.35 + Math.min(0.6, iter / 20000));
         await new Promise((r) => setTimeout(r, 0));
-        if (!sim.hasActive()) break; // 收敛：队列空（湿格全部入队后此判定才真实）
       }
-      if (!sim.hasActive() && step % 10 === 0) break;
     }
+    sim.quickSettle = false;
+    sim.waterCheck();
     sim.dispose(); // 丢弃临时模拟器（注销监听，避免泄漏到运行期）
     onProgress?.(1);
   }
@@ -271,6 +260,7 @@ export class Game implements GameHooks {
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
     this.lighting = new LightingEngine(w);
     this.liquid = new LiquidSim(w);
+    this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
     this.renderer.minimap = new Minimap(w);
     this.entities.clear();
@@ -365,41 +355,64 @@ export class Game implements GameHooks {
       const inMap = inp.mouseX >= r.x && inp.mouseX <= r.x + r.w && inp.mouseY >= r.y && inp.mouseY <= r.y + r.h;
       if (!fm.open && inMap && !inp.uiBlocking) {
         fm.open = true;
-        fm.zoom = 0.5; fm.zoomTarget = 0.5;   // 默认最小缩放，留足放大空间
-        fm.panX = 0; fm.panY = 0;
+        // 打开即放大到主角：锚点 = 主角 tile 坐标 → 屏幕中心，
+        // zoom 从 0.5 缓动到 2，缓动期间 applyMapAnchor 每帧补偿 pan，主角始终居中
+        fm.zoom = 0.5;
+        fm.zoomTarget = 2;
+        fm.anchorU = player.cx / TILE;
+        fm.anchorV = player.cy / TILE;
+        fm.anchorMX = this.renderer.canvas.width / 2;
+        fm.anchorMY = this.renderer.canvas.height / 2;
+        // 预置 pan（此时 _fmWorldW 可能还是 0，不能等 easeFullMap 反解，首帧会跳）
+        fm.panX = (this.world.w * fm.zoom) / 2 - fm.anchorU * fm.zoom;
+        fm.panY = (this.world.h * fm.zoom) / 2 - fm.anchorV * fm.zoom;
         this.renderer['_mapInit'] = false;
+        // 打开地图的这次点击不算拖拽（否则按住期间 drawFullMap 会把锚点重设到点击处，飞向主角变飞向点击处）
+        this.renderer['_mapOpenClick'] = true;
         this._mapClickLatch = true;
       }
     }
     if (!inp.mouseDown) this._mapClickLatch = false;
-    // 全屏地图：点击传送（两次确认）——第一次预选标记，第二次传送
-    if (inp.mouseDown && !this._mapClickLatch2 && this.renderer.fullMap.open && !inp.uiBlocking) {
-      this._mapClickLatch2 = true;
-      const fm = this.renderer.fullMap;
-      // 屏幕坐标 → 地图源坐标（与 zoomFullMapAt 的逆变换一致）
-      const viewW = this.renderer.canvas.width, viewH = this.renderer.canvas.height;
-      const cx0 = viewW / 2 - (this.world.w * fm.zoom) / 2 + fm.panX;
-      const cy0 = viewH / 2 - (this.world.h * fm.zoom) / 2 + fm.panY;
-      // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
-      const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
-      const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
-      if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
-        if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
-          // 第二次点击同一点 → 传送；失败不关图、保留标记可重试
-          if (this.teleportNear(tx, ty)) {
-            this._tpTarget = null;
-            this.renderer.tpMark = null;
-            this.renderer.fullMap.open = false;
-            this.cb.onToast('传送完成');
+    // 全屏地图：点击传送（两次确认）——第一次预选标记，第二次传送。
+    // 按下只记起点，松开时位移 < 6px 才算"点击"（拖动平移、打开地图的按压都不误触传送）
+    if (this.renderer.fullMap.open && !inp.uiBlocking) {
+      if (inp.mouseDown && !this._mapClickLatch2 && !this._mapClickLatch && !this.renderer['_mapOpenClick']) {
+        this._mapClickLatch2 = true;
+        this._mapPressX = inp.mouseX;
+        this._mapPressY = inp.mouseY;
+      }
+      if (!inp.mouseDown && this._mapClickLatch2) {
+        this._mapClickLatch2 = false;
+        const moved = Math.hypot(inp.mouseX - this._mapPressX, inp.mouseY - this._mapPressY);
+        if (moved < 6) {
+          const fm = this.renderer.fullMap;
+          // 屏幕坐标 → 地图源坐标（与 zoomFullMapAt 的逆变换一致）
+          const viewW = this.renderer.canvas.width, viewH = this.renderer.canvas.height;
+          const cx0 = viewW / 2 - (this.world.w * fm.zoom) / 2 + fm.panX;
+          const cy0 = viewH / 2 - (this.world.h * fm.zoom) / 2 + fm.panY;
+          // 地图绘制：mapW = world.w * zoom（1 tile = zoom 像素）——直接除 zoom 得 tile 坐标
+          const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
+          const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
+          if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
+            if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
+              // 第二次点击同一点 → 传送；失败不关图、保留标记可重试
+              if (this.teleportNear(tx, ty)) {
+                this._tpTarget = null;
+                this.renderer.tpMark = null;
+                this.renderer.fullMap.open = false;
+                this.cb.onToast('传送完成');
+              }
+            } else {
+              this._tpTarget = { x: tx, y: ty };
+              this.renderer.tpMark = { x: tx, y: ty };
+              this.cb.onToast(`已选传送点 (${tx}, ${ty})，再次点击确认`);
+            }
           }
-        } else {
-          this._tpTarget = { x: tx, y: ty };
-          this.renderer.tpMark = { x: tx, y: ty };
-          this.cb.onToast(`已选传送点 (${tx}, ${ty})，再次点击确认`);
         }
       }
+    } else {
+      this._mapClickLatch2 = false;
     }
-    if (!inp.mouseDown) this._mapClickLatch2 = false;
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用） ----
     if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open) {
       this._annoLatch = true;
@@ -455,15 +468,11 @@ export class Game implements GameHooks {
     // ---- 实体 ----
     this.entities.update(dt, this);
 
-    // ---- 液体（每 tick 步进）----
-    this.liquid.step();
-    // 每 60 tick 激活可视区外扩 2.5 倍的液体：水在远离画面时就开始流动，
-    // 进入视野时已接近稳定，不会"进画面才开始动"
-    if (this.tickCount % 60 === 0) {
-      const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
-      const halfW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE / 2) * 2.5 + 4;
-      const halfH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE / 2) * 2.5 + 4;
-      this.liquid.activateRegion(ptx - halfW, pty - halfH, ptx + halfW, pty + halfH);
+    // ---- 液体（原版每 2 tick 一次 UpdateLiquid）----
+    if (this.tickCount % 2 === 0) {
+      this.liquid.step();
+      // 液体直接写数组绕过 store 监听：有活动液体时手动通知光照衰减变化
+      if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
     }
 
     // ---- 敌人生成（F8 可关闭） ----
@@ -594,7 +603,8 @@ export class Game implements GameHooks {
 
   private updateUse(dt: number) {
     const inp = this.input;
-    if (inp.uiBlocking || this.player.dead) {
+    // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用
+    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open) {
       this.mining = null;
       return;
     }

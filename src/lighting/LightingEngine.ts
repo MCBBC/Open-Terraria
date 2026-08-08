@@ -16,7 +16,7 @@ export class LightingEngine {
   g: Uint8Array = new Uint8Array(0);
   b: Uint8Array = new Uint8Array(0);
   dirty = true;
-  private liquidDirty = false; // 仅液体变化（水流频繁触发，重算限频 20Hz）
+  liquidDirty = false; // 仅液体变化（水流频繁触发，重算限频 20Hz）；模拟器直写数组时由 Game 置位
   private tick = 0;
   private lastCamCX = -9999; private lastCamCY = -9999;
 

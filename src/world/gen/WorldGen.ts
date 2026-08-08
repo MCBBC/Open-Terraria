@@ -90,8 +90,14 @@ import { runMushroomPass } from './vanilla/MushroomPass';
 import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
-import { runFloatingIslandsPass, runLifeCrystalsPass, runHellHousesPass, runSurfaceDecorPass } from './vanilla/StructuresPass';
+import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
+import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
+import { runDungeonPass } from './vanilla/DungeonPass';
+import { runTemplePass } from './vanilla/TemplePass';
+import { runIslandHousePass } from './vanilla/IslandHousePass';
+import { runHellFortPass } from './vanilla/HellFortPass';
+import { runSwordShrinePass } from './vanilla/SwordShrinePass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
 
 function vanillaTerrain({ store, rng, world, surface }: GenCtx) {
@@ -195,6 +201,14 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runMarbleGranitePass(store, rng, gs);  // 21/22 Marble/Granite
   runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
+  runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
+  runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
+  runBeehivePass(store, rng, gs);               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
+  runSpiderNestPass(store, rng, gs);            // 蜘蛛巢(蛛网+蜘蛛墙腔)
+  runTemplePass(store, rng, gs, world.chests);  // 44 Jungle Temple(之字形房间链+走廊+门+宝箱)
+  runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
+  runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)
 }
 
 // 原版 pass 37 Clean Up Dirt:表层墙清理 + 连通小块(<20)清除
@@ -211,11 +225,11 @@ function vanillaLifeCrystals({ store, rng }: GenCtx) {
   runLifeCrystalsPass(store, rng, gs);
 }
 
-// 地狱屋——地狱层就绪后
+// 地狱要塞 HellFort(5列×10行网格塔)——地狱层就绪后
 function vanillaHellHouses({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runHellHousesPass(store, rng, gs);
+  runHellFortPass(store, rng, gs);
 }
 
 // 生物群系感知地表装饰(替代旧 surfacePass 的种树部分)
