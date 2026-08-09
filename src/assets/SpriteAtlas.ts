@@ -6,6 +6,7 @@ import atlasJson from '../../public/sprites/atlas.json';
 import resourcesJson from '../../public/sprites/resources.json';
 import vanillaJson from '../../public/sprites/vanilla.json';
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
+import vanillaUiJson from '../../public/sprites/vanilla-ui.json';
 
 /** npc id → 动画帧数（SetDefaults 提取数据派生；懒加载 NPC 表用） */
 const vanillaNpcFrames: Record<string, number> = Object.fromEntries(
@@ -107,6 +108,9 @@ export class SpriteAtlas {
   vanilla = vanillaJson as unknown as VanillaData;
   images = new Map<string, HTMLImageElement | HTMLCanvasElement>();
   vimages = new Map<string, HTMLImageElement>(); // 原版 PNG（干净像素，不做 hardAlpha）
+  /** UI 贴图（vanilla-ui/，干净像素不 hardAlpha——UI 有抗锯齿边缘） */
+  uiimages = new Map<string, HTMLImageElement>();
+  private uiFiles = (vanillaUiJson as { files: Record<string, string> }).files;
   /** 人工标注（annotator.html 导出）：sheet → spriteName → 方位标签 */
   annotations: Record<string, Record<string, string>> = {};
 
@@ -119,8 +123,9 @@ export class SpriteAtlas {
       ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
       ...VANILLA_MISC, // 杂项单图（呼吸气泡等）
     ];
+    const uifiles = Object.values(this.uiFiles);
     let done = 0;
-    const total = files.length + vfiles.length;
+    const total = files.length + vfiles.length + uifiles.length;
     await Promise.all([
       ...files.map((f) => new Promise<void>((resolve) => {
         const img = new Image();
@@ -139,6 +144,13 @@ export class SpriteAtlas {
       ...vfiles.map((f) => new Promise<void>((resolve) => {
         const img = new Image();
         img.onload = () => { this.vimages.set(f, img); done++; onProgress?.(done / total); resolve(); };
+        img.onerror = () => resolve();
+        img.src = `sprites/${encodeURI(f)}`;
+      })),
+      // UI 贴图（vanilla-ui/，独立 Map）
+      ...uifiles.map((f) => new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => { this.uiimages.set(f, img); done++; onProgress?.(done / total); resolve(); };
         img.onerror = () => resolve();
         img.src = `sprites/${encodeURI(f)}`;
       })),
@@ -228,6 +240,15 @@ export class SpriteAtlas {
   /** 原版杂项单图（呼吸气泡等） */
   vmisc(path: string): DrawRect | null {
     const img = this.vimages.get(path);
+    if (!img) return null;
+    return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
+  }
+
+  /** UI 贴图（vanilla-ui/ 命名空间）。name 为白名单键，如 'UI_PanelBackground' */
+  vui(name: string): DrawRect | null {
+    const path = this.uiFiles[name];
+    if (!path) return null;
+    const img = this.uiimages.get(path);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }

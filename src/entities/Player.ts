@@ -225,11 +225,19 @@ export class Player extends Entity {
       && TILE_DEFS[st.type[st.idx(ropeTx, ropeTy)]]?.rope);
     this.onRope = ropeHere;
     if (ropeHere && !this.inWater) {
-      // 上爬 2.2 / 下滑 3.0(原版攀爬速度),静止缓降 0.6
-      if (this.inputJump) this.vy = Math.max(this.vy - 0.62, -2.2);
-      else if (this.inputDown) this.vy = Math.min(this.vy + 0.5, 3.0);
-      else this.vy = Math.min(this.vy + 0.08, 0.6);
-      this.vy = Math.max(-2.2, Math.min(3.0, this.vy));
+      // 原版攀爬(Player.cs:17169-17212):上爬 vy>0 先阻尼×0.7,-3 以上每 tick -0.2
+      // (之下 -0.02,下限 -8);下滑镜像(+0.2/+0.1,上限 maxFallSpeed);静止 vy*=0.7
+      if (this.inputJump) {
+        if (this.vy > 0) this.vy *= 0.7;
+        this.vy -= this.vy > -3 ? 0.2 : 0.02;
+        if (this.vy < -8) this.vy = -8;
+      } else if (this.inputDown) {
+        if (this.vy < 0) this.vy *= 0.7;
+        this.vy += this.vy < 3 ? 0.2 : 0.1;
+        if (this.vy > MAX_FALL_SPEED) this.vy = MAX_FALL_SPEED;
+      } else {
+        this.vy *= 0.7;
+      }
       this.fallStartY = null; // 绳上不计摔伤
     } else
     // 跳跃 / 游泳

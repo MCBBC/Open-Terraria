@@ -22,8 +22,11 @@ export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒
   regenAccum = 0;
   campfireAccum = 0;
+  lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
+  /** 心灯(lifeRegen+2 = 1 HP/s,Player.cs:12247):Game 扫描写入 0/1 */
+  lanternHeal = 0;
   /** 重置为满时长（叠加 = 刷新，效果幂等） */
   apply(type: BuffType, durationSec: number) {
     this.active.set(type, durationSec);
@@ -50,10 +53,18 @@ export class BuffState {
       }
     }
     if (this.active.has(BuffType.Campfire)) {
+      // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:12244-12245/12310-12324)→ 每 2 秒 1 HP
       this.campfireAccum += dt;
-      if (this.campfireAccum >= 1) {
-        this.campfireAccum -= 1;
+      if (this.campfireAccum >= 2) {
+        this.campfireAccum -= 2;
         heal += this.campfireHeal;
+      }
+    }
+    if (this.lanternHeal > 0) {
+      this.lanternAccum += dt;
+      if (this.lanternAccum >= 1) {
+        this.lanternAccum -= 1;
+        heal += this.lanternHeal;
       }
     }
     return heal;

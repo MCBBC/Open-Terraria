@@ -115,7 +115,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     header: {
       name: world.name, seed: world.seed, width: st.w, height: st.h,
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
-      treeX: world.treeX, treeStyle: world.treeStyle,
+      treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
       crimson: world.crimson, dungeonX: world.dungeonX, jungleX: world.jungleX,
       created: Date.now(), playTimeMs,
     },

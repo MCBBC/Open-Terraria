@@ -177,6 +177,7 @@ export class Game implements GameHooks {
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
   waterCandleNear = false;
+  heldWaterCandle = false;
   trackTile = TILE_BY_KEY['v_314_minecart_track'] ?? 0;
   minecart: import('../entities/Minecart').Minecart | null = null;
   trapCooldown = new Map<string, number>();
@@ -497,6 +498,7 @@ export class Game implements GameHooks {
     // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率 ×2(间隔减半)
     const held2 = this.player.inv.heldItem();
     const heldWC = !!held2 && ITEM_DEFS[held2.id]?.key === 'water_candle';
+    this.heldWaterCandle = heldWC;
     let nearWC = false;
     if (this.tickCount % 30 === 0) {
       nearWC = false;
@@ -510,21 +512,30 @@ export class Game implements GameHooks {
       }
       this.waterCandleNear = nearWC;
     }
-    // 篝火/心灯光环(Main.campfire 语义:170 格内篝火=1hp/s;心灯 BuffID115 再+1)
-    // 和平蜡烛(peaceCandleNear):刷怪率减半
+    // 篝火/心灯光环:篝火 lifeRegen+1 = 0.5 HP/s;心灯(灯笼 tile42 frameY 324-358,
+    // SceneMetrics.cs:207-208)lifeRegen+2 = 1 HP/s,两者独立
     if (this.tickCount % 20 === 0) {
       const ptx2 = Math.floor(this.player.cx / TILE), pty2 = Math.floor(this.player.cy / TILE);
-      let fire = 0, heart = 0, peace = false;
+      let fire = false, heart = false;
       const FIRE = TILE_BY_KEY['v_215_campfires'];
-      for (let dx = -48; dx <= 48 && fire === 0; dx += 3) {
+      const LANTERN = TILE_BY_KEY['lantern'];
+      const st3 = this.world.store;
+      for (let dx = -48; dx <= 48 && !(fire && heart); dx += 3) {
         for (let dy = -36; dy <= 36; dy += 3) {
-          if (this.world.store.get(ptx2 + dx, pty2 + dy) === FIRE) { fire = 1; break; }
+          const lx = ptx2 + dx, ly = pty2 + dy;
+          if (!st3.inBounds(lx, ly)) continue;
+          const li = st3.idx(lx, ly);
+          if (st3.type[li] === FIRE && st3.frameX[li] < 18) fire = true;
+          if (st3.type[li] === LANTERN && st3.frameY[li] >= 324 && st3.frameY[li] <= 358) heart = true;
+          if (fire && heart) break;
         }
       }
-      if (fire > 0) this.player.buffs.apply(BuffType.Campfire, 0.5);
+      if (fire) this.player.buffs.apply(BuffType.Campfire, 0.5);
+      this.player.buffs.lanternHeal = heart ? 1 : 0;
     }
     const wcBoost = heldWC || this.waterCandleNear;
-    const interval = wcBoost ? Math.ceil(SPAWN_CHECK_INTERVAL / 2) : SPAWN_CHECK_INTERVAL;
+    // 原版 spawnRate×0.75(≈间隔×4/3)
+    const interval = wcBoost ? Math.ceil(SPAWN_CHECK_INTERVAL / 0.75) : SPAWN_CHECK_INTERVAL;
     if (this.enemySpawnEnabled && this.spawnTimer >= interval) {
       this.spawnTimer = 0;
       this.trySpawnEnemy();
@@ -1075,6 +1086,7 @@ export class Game implements GameHooks {
     const treeOnTop = this.world.trees.find((t) => t.x === x && t.y + t.h === y);
     if (treeOnTop) this.fellTree(x, y - 1);
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, def.drop, 1);
+    else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
   }
 
@@ -1347,9 +1359,9 @@ export class Game implements GameHooks {
       // 拉杆/开关:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
       this.toggleSwitch(tx, ty, type);
     } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
-      // 药草收获:成熟/开花态右键 → 掉种子(style 对应 frameX/36)
+      // 药草收获:成熟/开花态右键 → 掉种子(style = frameX/18,WorldGen.cs:38731)
       const i = st.idx(tx, ty);
-      const style = Math.floor(st.frameX[i] / 36);
+      const style = Math.floor(st.frameX[i] / 18);
       st.setTile(tx, ty, 0);
       const seedKeys = ['vi_307_daybloom_seeds', 'vi_308_moonglow_seeds', 'vi_309_blinkroot_seeds',
         'vi_311_waterleaf_seeds', 'vi_310_deathweed_seeds', 'vi_312_fireblossom_seeds', 'vi_2357_shiverthorn_seeds'];
@@ -1603,7 +1615,9 @@ export class Game implements GameHooks {
     if (p.dead) return;
     const isDay = w.clock.isDay;
     const count = this.entities.enemies.filter((e) => !(e as Enemy).def.boss && !(e as Enemy).wormFollow).length;
-    if (count >= ENEMY_CAP) return;
+    // 水蜡烛(NPC.cs:43241-43247):spawnRate×0.75 且 maxSpawns×1.5
+    const cap = this.heldWaterCandle || this.waterCandleNear ? Math.floor(ENEMY_CAP * 1.5) : ENEMY_CAP;
+    if (count >= cap) return;
     if (this.boss) return;
 
     const rng = new RNG((Math.random() * 1e9) | 0);

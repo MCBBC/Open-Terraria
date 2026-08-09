@@ -1,19 +1,29 @@
-// 原版 "Jungle Temple"(WorldGen.cs:7190 + makeTemple L17158)移植。
-// 之字形下沉房间链(10-16 间,25-49×20-34,末间放大为祭坛房),砖 226 实心+墙 87 挖空,
-// templePather 走廊(半径 2-4 清空+墙87),入口水平隧道+蜥蜴砖门(tile 10 style 11),
-// 祭坛 237(末间中心),蜥蜴砖宝箱(chest style 16)。
+// 原版 "Jungle Temple"(WorldGen.cs:7190 + makeTemple L17158)1:1 移植。
+// 之字形下沉房间链(重投至与旧房不相交;锚点=中心;行程 1-2 递增)→ 全房对实心砖连线
+// → 房内双遍游走挖腔(墙 87)→ templePather 通道 → outerTempled 封壳 → 入口隧道+门框
+// → templeCleaner → 祭坛 237(末间中心 ±15)。宝箱为简化保留(原版在陷阱段之后放置)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_BY_KEY } from '../../../data/tiles';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 const DOOR = TILE_BY_KEY['door_closed']!;
 const CHEST = TILE_BY_KEY['chest']!;
-const MUD = TILE_BY_KEY['mud']!;
-const JG = TILE_BY_KEY['v_60_jungle_grass_block']!;
+const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 
 interface Room { x: number; y: number; w: number; h: number }
+
+function inter(a: Room, b: Room): boolean {
+  // C# Rectangle.Intersects:仅边接触不算相交
+  return a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+}
+
+function setBrick(st: TileStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  const i = st.idx(x, y);
+  st.type[i] = BRICK; st.flags[i] = 1; st.liquid[i] = 0; st.liquidType[i] = 0;
+}
 
 export function runTemplePass(
   st: TileStore, rng: RNG, gs: GenState,
@@ -21,7 +31,7 @@ export function runTemplePass(
 ): void {
   const { w, h } = st;
   const s = w / 4200;
-  // 种子点:丛林侧(地牢异侧)深层丛林草
+  // 种子点:丛林侧(地牢异侧)深层
   let sx = -1, sy = -1;
   for (let attempt = 0; attempt < 4000 && sx < 0; attempt++) {
     const y = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, h - 800));
@@ -32,135 +42,351 @@ export function runTemplePass(
     }
   }
   if (sx < 0) return;
-  // 房间链(之字形下沉)
-  const roomCount = rng.int(Math.floor(10 * s), Math.floor(16 * s));
+  // ---- 房间链(L17185-17231):重投至与全部旧房不相交;overlap 每次相交测试 1% 递增 ----
+  const roomCount = rng.int(Math.max(2, Math.floor(10 * s)), Math.floor(16 * s) - 1);
   const rooms: Room[] = [];
-  let dir = rng.next() < 0.5 ? -1 : 1;
-  let runLeft = rng.int(1, 2);
-  let overlap = -10;
-  let cx = sx, cy = sy;
+  let dir = rng.next() < 0.5 ? 1 : -1;   // num2
+  const startDir = dir;                   // num3
+  let runLen = rng.int(1, 2);             // num8:行程阈值,每次换向后 +1
+  let runStep = 0;                        // num9
+  let cx = sx, cy = sy;                   // num6/num7:上一间中心
+  let overlap = -10;                      // num13
   for (let n = 0; n < roomCount; n++) {
+    runStep++;
     const last = n === roomCount - 1;
-    let rw: number, rh: number;
-    if (last) {
-      rw = Math.floor(rng.int(55, 64) * 1.6);
-      rh = Math.floor(rng.int(45, 49) * 1.35);
-    } else {
-      rw = rng.int(25, 49);
-      rh = Math.min(rng.int(20, 34), rw);
-    }
-    // 位置:水平步进(带重叠)或换向下沉
-    let rx: number, ry: number;
-    for (let t = 0; t < 60; t++) {
-      if (runLeft > 0) {
-        rx = cx + (rw + 2 + overlap) * dir + rng.int(-5, 5);
-        ry = cy + rng.int(-5, 5);
-      } else {
-        rx = cx + rng.int(-5, 5);
-        ry = cy + (rh + 2 + overlap) + rng.int(0, 4) + (last ? rng.int(5, 9) : 0);
+    let rect: Room = { x: cx, y: cy, w: 0, h: 0 };
+    let newDir = dir;
+    let rx = cx, ry = cy;
+    let ok = false;
+    for (let t = 0; t < 5000 && !ok; t++) {
+      let rw = rng.int(25, 49);
+      let rh = Math.min(rng.int(20, 34), rw);
+      let baseY = cy;
+      if (last) {
+        const w0 = rng.int(55, 64), h0 = rng.int(45, 49);
+        rw = Math.floor(w0 * 1.6);
+        rh = Math.floor(Math.min(h0, w0) * 1.35);
+        baseY += rng.int(5, 9);
       }
-      rx = Math.max(30, Math.min(w - 30 - rw, rx));
-      ry = Math.max(gs.rockLevel, Math.min(h - 260 - rh, ry));
-      rooms.push({ x: rx, y: ry, w: rw, h: rh });
-      cx = rx; cy = ry;
-      break;
+      if (runStep > runLen) {
+        // 换向下沉
+        ry = baseY + rng.int(rh + 1, rh + 2) + overlap;
+        rx = cx + rng.int(-5, 5);
+        newDir = -dir;
+      } else {
+        rx = cx + (rng.int(rw + 1, rw + 2) + overlap) * dir;
+        ry = baseY + rng.int(-5, 5);
+      }
+      rect = { x: rx - Math.floor(rw / 2), y: ry - Math.floor(rh / 2), w: rw, h: rh };
+      ok = true;
+      for (const o of rooms) {
+        if (inter(rect, o)) ok = false;
+        if (rng.int(0, 99) === 0) overlap++;
+      }
     }
-    runLeft--;
-    if (runLeft <= 0) { dir = -dir as 1 | -1; runLeft = rng.int(1, 2) + (roomCount - n > 10 ? 1 : 2); }
+    rooms.push(rect);
+    if (runStep > runLen) { runLen++; runStep = 1; }
+    dir = newDir as 1 | -1;
+    cx = rx; cy = ry;
   }
   if (rooms.length < 3) return;
-  // 实心房 + 挖空(内边距 3-7 游走)
-  for (const r of rooms) {
-    for (let x = r.x; x < r.x + r.w; x++) {
-      for (let y = r.y; y < r.y + r.h; y++) {
-        if (!st.inBounds(x, y)) continue;
-        const i = st.idx(x, y);
-        st.type[i] = BRICK; st.flags[i] = 1; st.wall[i] = 87; st.liquid[i] = 0;
+  // ---- 全房对实心砖连线(L17240-17278):四角组合插值走,每步铺整列砖 ----
+  for (let a = 0; a < rooms.length; a++) {
+    for (let b = 0; b < rooms.length; b++) {
+      if (a === b) continue;
+      for (let ea = 0; ea < 2; ea++) {
+        for (let eb = 0; eb < 2; eb++) {
+          let x1 = rooms[a].x + (ea === 1 ? rooms[a].w - 1 : 0);
+          let y1 = rooms[a].y;
+          let y1b = y1 + rooms[a].h;
+          let x2 = rooms[b].x + (eb === 1 ? rooms[b].w - 1 : 0);
+          let y2 = rooms[b].y;
+          let y2b = y2 + rooms[b].h;
+          let guard = 0;
+          while ((x1 !== x2 || y1 !== y2 || y1b !== y2b) && guard++ < 3000) {
+            if (x1 < x2) x1++;
+            if (x1 > x2) x1--;
+            if (y1 < y2) y1++;
+            if (y1 > y2) y1--;
+            if (y1b < y2b) y1b++;
+            if (y1b > y2b) y1b--;
+            for (let y = y1; y < y1b; y++) setBrick(st, x1, y);
+          }
+        }
       }
     }
-    const inX = rng.int(3, 7), inY = rng.int(3, 7);
-    let l = inX + rng.int(0, Math.floor(r.w / 2 - inX));
-    let rr = r.w - inX - rng.int(0, Math.floor(r.w / 2 - inX));
-    let t = inY + rng.int(0, Math.floor(r.h / 2 - inY));
-    let b = r.h - inY - rng.int(0, Math.floor(r.h / 2 - inY));
-    for (let x = r.x + l; x < r.x + rr; x++) {
-      for (let y = r.y + t; y < r.y + b; y++) {
-        if (!st.inBounds(x, y)) continue;
+  }
+  // ---- 房间实心 + 双遍游走挖腔(L17280-17381)----
+  for (const r of rooms) {
+    for (let x = r.x; x < r.x + r.w; x++) {
+      for (let y = r.y; y < r.y + r.h; y++) setBrick(st, x, y);
+    }
+    const l0 = r.x + rng.int(3, 7), r0 = r.x + r.w - rng.int(3, 7);
+    const t0 = r.y + rng.int(3, 7), b0 = r.y + r.h - rng.int(3, 7);
+    let l = l0, rr = r0, t = t0, b = b0;
+    const midX = Math.floor((l0 + r0) / 2), midY = Math.floor((t0 + b0) / 2);
+    const carveCell = (x: number, y: number) => {
+      if (!st.inBounds(x, y)) return;
+      const i = st.idx(x, y);
+      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+    };
+    // 正向(列优先)
+    for (let x = l0; x < r0; x++) {
+      for (let y = t0; y < b0; y++) {
+        if (rng.int(0, 19) === 0) t += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) b += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) l += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) rr += rng.int(-1, 1);
+        if (l < l0) l = l0;
+        if (rr > r0) rr = r0;
+        if (t < t0) t = t0;
+        if (b > b0) b = b0;
+        if (l > midX) l = midX;
+        if (rr < midX) rr = midX;
+        if (t > midY) t = midY;
+        if (b < midY) b = midY;
+        if (x >= l && x < rr && y >= t && y <= b) carveCell(x, y);
+      }
+    }
+    // 反向(行优先)
+    l = l0; rr = r0; t = t0; b = b0;
+    for (let y = b0; y > t0; y--) {
+      for (let x = r0; x > l0; x--) {
+        if (rng.int(0, 19) === 0) t += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) b += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) l += rng.int(-1, 1);
+        if (rng.int(0, 19) === 0) rr += rng.int(-1, 1);
+        if (l < l0) l = l0;
+        if (rr > r0) rr = r0;
+        if (t < t0) t = t0;
+        if (b > b0) b = b0;
+        if (l > midX) l = midX;
+        if (rr < midX) rr = midX;
+        if (t > midY) t = midY;
+        if (b < midY) b = midY;
+        if (x >= l && x < rr && y >= t && y <= b) carveCell(x, y);
+      }
+    }
+  }
+  // ---- templePather 通道(L17392-17458):从种子游走穿各房,方块清空+墙 87 ----
+  const pather = (px: number, py: number, destX: number, destY: number): [number, number] => {
+    let x = px, y = py;
+    let steps = rng.int(5, 19);
+    const rad = rng.int(2, 4);
+    while (steps > 0 && (x !== destX || y !== destY)) {
+      steps--;
+      if (x > destX) x--;
+      if (x < destX) x++;
+      if (y > destY) y--;
+      if (y < destY) y++;
+      for (let ix = x - rad; ix < x + rad; ix++) {
+        for (let iy = y - rad; iy < y + rad; iy++) {
+          if (!st.inBounds(ix, iy)) continue;
+          const i = st.idx(ix, iy);
+          st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+        }
+      }
+    }
+    return [x, y];
+  };
+  let tpx = sx, tpy = sy;
+  for (let n = 0; n < rooms.length; n++) {
+    const r = rooms[n];
+    const inner: Room = { x: r.x + 8, y: r.y + 8, w: Math.max(1, r.w - 16), h: Math.max(1, r.h - 16) };
+    for (;;) {
+      let destX: number, destY: number;
+      if (n === rooms.length - 1) {
+        destX = inner.x + Math.floor(inner.w / 2) + rng.int(-10, 9);
+        destY = inner.y + Math.floor(inner.h / 2) + rng.int(-10, 9);
+      } else {
+        destX = rng.int(inner.x, inner.x + inner.w - 1);
+        destY = rng.int(inner.y, inner.y + inner.h - 1);
+      }
+      [tpx, tpy] = pather(tpx, tpy, destX, destY);
+      if (tpx === destX && tpy === destY) break;
+    }
+    // 通向下一间的附加通道(2/3 概率近旁绕行,1/3 中点)
+    if (n < rooms.length - 1) {
+      const a = rooms[n], b2 = rooms[n + 1];
+      let tx: number, ty: number;
+      if (rng.int(0, 2) !== 0) {
+        if (b2.y >= a.y + a.h) {
+          tx = b2.x + (n === 0
+            ? (startDir > 0 ? Math.floor(b2.w * 0.8) : Math.floor(b2.w * 0.2))
+            : (b2.x < a.x ? Math.floor(b2.w * 0.2) : Math.floor(b2.w * 0.8)));
+          ty = b2.y;
+        } else {
+          tx = Math.floor((a.x + Math.floor(a.w / 2) + b2.x + Math.floor(b2.w / 2)) / 2);
+          ty = Math.floor(b2.y + b2.h * 0.8);
+        }
+      } else {
+        tx = Math.floor((a.x + Math.floor(a.w / 2) + b2.x + Math.floor(b2.w / 2)) / 2);
+        ty = Math.floor((a.y + Math.floor(a.h / 2) + b2.y + Math.floor(b2.h / 2)) / 2);
+      }
+      for (;;) {
+        const destX = rng.int(tx - 6, tx + 6);
+        const destY = rng.int(ty - 6, ty + 6);
+        [tpx, tpy] = pather(tpx, tpy, destX, destY);
+        if (tpx === destX && tpy === destY) break;
+      }
+    }
+  }
+  // ---- 外壳范围 + outerTempled 四遍扫描(L17461-17499)----
+  let bx0 = w - 20, bx1 = 20, by0 = h - 20, by1 = 20;
+  for (const r of rooms) {
+    if (r.x < bx0) bx0 = r.x;
+    if (r.x + r.w > bx1) bx1 = r.x + r.w;
+    if (r.y < by0) by0 = r.y;
+    if (r.y + r.h > by1) by1 = r.y + r.h;
+  }
+  const ox0 = bx0 - 10, ox1 = bx1 + 10, oy0 = by0 - 10, oy1 = by1 + 10;
+  const outerTempled = (x: number, y: number) => {
+    if (!st.inBounds(x, y)) return;
+    const i0 = st.idx(x, y);
+    if ((st.flags[i0] && st.type[i0] === BRICK) || st.wall[i0] === 87) return;
+    for (let ix = x - 6; ix <= x + 6; ix++) {
+      for (let iy = y - 6; iy <= y + 6; iy++) {
+        if (!st.inBounds(ix, iy)) continue;
+        const j = st.idx(ix, iy);
+        if (!st.flags[j] && st.wall[j] === 87) { setBrick(st, x, y); return; }
+      }
+    }
+  };
+  for (let x = ox0; x < ox1; x++) for (let y = oy0; y < oy1; y++) outerTempled(x, y);
+  for (let x = ox1; x >= ox0; x--) for (let y = oy0; y < Math.floor(oy1 / 2); y++) outerTempled(x, y);
+  for (let y = oy0; y < oy1; y++) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
+  for (let y = oy1; y >= oy0; y--) for (let x = ox0; x < ox1; x++) outerTempled(x, y);
+  // ---- 入口隧道(L17500-17527):固定高度、固定间隔下沉,穿出神庙即停 ----
+  const edir = -startDir;
+  let ex = sx + 0.0, ey = sy + 0.0;
+  const tunH = rng.int(2, 4);
+  const dropEvery = rng.int(9, 13);
+  let tick = 0;
+  for (;;) {
+    tick++;
+    if (tick >= dropEvery) { tick = 0; ey--; }
+    ex += edir;
+    const xi = Math.floor(ex);
+    if (xi < 1 || xi >= st.w - 1) break;
+    let inside = false;
+    for (let y = Math.floor(ey) - tunH; y < ey + tunH; y++) {
+      if (!st.inBounds(xi, y)) continue;
+      const i = st.idx(xi, y);
+      if (st.wall[i] === 87 || (st.flags[i] && st.type[i] === BRICK)) inside = true;
+      if (st.flags[i] && st.type[i] === BRICK) {
+        st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+      }
+    }
+    if (!inside) break;
+  }
+  // ---- 门框(L17528-17578):柱/洞/门 tile 10 style 11 ----
+  const i1 = sx;
+  let jy = sy;
+  if (!st.inBounds(i1, jy)) return;
+  while (jy < st.h - 2 && !st.flags[st.idx(i1, jy)]) jy++;
+  jy -= 4;   // j1
+  if (jy < 2) return;
+  let yUp = jy;
+  while (yUp > 1 && ((st.flags[st.idx(i1, yUp)] && st.type[st.idx(i1, yUp)] === BRICK) || st.wall[st.idx(i1, yUp)] === 87)) yUp--;
+  const yFrom = yUp + 2;
+  for (let x = i1 - 1; x <= i1 + 1; x++) {
+    for (let y = yFrom; y <= jy; y++) setBrick(st, x, y);
+  }
+  for (let x = i1 - 4; x <= i1 + 4; x++) {
+    for (let y = jy - 1; y < jy + 3; y++) {
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+    }
+  }
+  for (let x = i1 - 1; x <= i1 + 1; x++) {
+    for (let y = jy - 5; y <= jy + 8; y++) setBrick(st, x, y);
+  }
+  for (let x = i1 - 3; x <= i1 + 3; x++) {
+    for (let y = jy - 2; y < jy + 3; y++) {
+      if (!st.inBounds(x, y)) continue;
+      if (y >= jy || x < sx - 1 || x > sx + 1) {
         const i = st.idx(x, y);
         st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
       }
     }
   }
-  // 走廊(房间中心链,半径 2-4 清空+墙 87)
-  const carve = (x0: number, y0: number, x1: number, y1: number) => {
-    let px = x0, py = y0;
-    let guard = 0;
-    while ((px !== x1 || py !== y1) && guard++ < 2000) {
-      const steps = rng.int(5, 19);
-      for (let k = 0; k < steps && (px !== x1 || py !== y1); k++) {
-        if (px !== x1 && (py === y1 || rng.next() < 0.6)) px += Math.sign(x1 - px);
-        else if (py !== y1) py += Math.sign(y1 - py);
-        const r = rng.int(2, 4);
-        for (let dx = -r; dx <= r; dx++) {
-          for (let dy = -r; dy <= r; dy++) {
-            if (!st.inBounds(px + dx, py + dy)) continue;
-            const i = st.idx(px + dx, py + dy);
-            if (st.type[i] === BRICK || st.wall[i] === 87) {
-              st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
-            }
-          }
-        }
-      }
+  st.setTileSilent(i1, jy, DOOR, 11 * 54, 0);
+  // ---- templeCleaner 两遍(L17579-17588)----
+  const cleaner = (x: number, y: number) => {
+    if (!st.inBounds(x, y)) return;
+    const nbr = (dx: number, dy: number) => {
+      if (!st.inBounds(x + dx, y + dy)) return 0;
+      const j = st.idx(x + dx, y + dy);
+      return st.flags[j] && st.type[j] === BRICK ? 1 : 0;
+    };
+    const num = nbr(1, 0) + nbr(-1, 0) + nbr(0, 1) + nbr(0, -1);
+    const i = st.idx(x, y);
+    if (st.flags[i] && st.type[i] === BRICK) {
+      if (num > 1) return;
+      st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 87;
+    } else {
+      if (st.flags[i] || num !== 3) return;
+      setBrick(st, x, y);
     }
   };
-  for (let n = 0; n < rooms.length - 1; n++) {
-    const a = rooms[n], b = rooms[n + 1];
-    carve(a.x + Math.floor(a.w / 2), a.y + Math.floor(a.h / 2), b.x + Math.floor(b.w / 2), b.y + Math.floor(b.h / 2));
-  }
-  // 入口:从种子点水平开凿(4-8 高),穿出神庙
-  let ex = sx, ey = sy;
-  const edir = -Math.sign(dir) as 1 | -1;
-  let tunnelY = ey;
-  for (let step = 0; step < 400; step++) {
-    const hh = rng.int(2, 4);
-    for (let dy = -hh; dy < hh; dy++) {
-      if (!st.inBounds(ex, tunnelY + dy)) continue;
-      const i = st.idx(ex, tunnelY + dy);
-      st.type[i] = 0; st.flags[i] = 0;
+  for (let x = ox0; x < ox1; x++) for (let y = oy0; y < oy1; y++) cleaner(x, y);
+  for (let y = oy1; y >= oy0; y--) for (let x = ox1; x >= ox0; x--) cleaner(x, y);
+  // ---- 封闭格刷墙 87(L17589-17608):3×3 全是砖或墙 87 ----
+  for (let x = ox0; x < ox1; x++) {
+    for (let y = oy0; y < oy1; y++) {
+      if (!st.inBounds(x, y)) continue;
+      let all = true;
+      for (let dx = -1; dx <= 1 && all; dx++) {
+        for (let dy = -1; dy <= 1; dy++) {
+          if (!st.inBounds(x + dx, y + dy)) { all = false; break; }
+          const j = st.idx(x + dx, y + dy);
+          if (!(st.flags[j] && st.type[j] === BRICK) && st.wall[j] !== 87) { all = false; break; }
+        }
+      }
+      if (all) st.wall[st.idx(x, y)] = 87;
     }
-    ex += edir;
-    if (step % rng.int(9, 13) === 0) tunnelY++;
-    // 穿出判定:该列已无神庙砖/墙
-    let inside = false;
-    for (let y = Math.max(0, tunnelY - 30); y < Math.min(st.h, tunnelY + 30); y++) {
-      if (st.type[st.idx(ex, y)] === BRICK || st.wall[st.idx(ex, y)] === 87) { inside = true; break; }
+  }
+  // ---- 祭坛 237(L17609-17678):末间中心 ±15 重试,直接 3×2 帧放置 ----
+  const lastR = rooms[rooms.length - 1];
+  const acx = lastR.x + Math.floor(lastR.w / 2);
+  const acy = lastR.y + Math.floor(lastR.h / 2);
+  let altarPlaced = false;
+  for (let tries = 0; tries < 1000 && !altarPlaced; tries++) {
+    const ax = acx + 15 - rng.int(0, 29);
+    const ay = acy + 15 - rng.int(0, 29);
+    if (!st.inBounds(ax, ay) || st.wall[st.idx(ax, ay)] !== 87) continue;
+    // PlaceTile 语义:落点须在挖空区(墙 87 且非实心)
+    if (st.flags[st.idx(ax, ay)]) continue;
+    let clear = true;
+    for (let dx = 0; dx <= 2 && clear; dx++) {
+      for (let dy = 0; dy <= 1; dy++) {
+        if (!st.inBounds(ax + dx, ay + dy) || st.flags[st.idx(ax + dx, ay + dy)]) { clear = false; break; }
+      }
     }
-    if (!inside && step > 10) break;
+    if (!clear) continue;
+    for (let dx = 0; dx <= 2; dx++) {
+      for (let dy = 0; dy <= 1; dy++) {
+        st.setTileSilent(ax + dx, ay + dy, ALTAR, dx * 18, dy * 18);
+      }
+    }
+    altarPlaced = true;
   }
-  // 门(蜥蜴砖门 tile 10 style 11)
-  if (st.inBounds(ex, tunnelY)) {
-    let dy = 0;
-    while (dy < 20 && !st.flags[st.idx(ex, tunnelY + dy)]) dy++;
-    const jy = tunnelY + dy - 1;
-    st.setTileSilent(ex, jy, DOOR, 11 * 54, 0);
-  }
-  // 祭坛(末间中心 3×2,tile 237 用 crystal_heart 近似?不——直接用 v_237 若有,否则跳过)
-  const last = rooms[rooms.length - 1];
-  const altarX = last.x + Math.floor(last.w / 2), altarY = last.y + Math.floor(last.h / 2);
-  // 宝箱(蜥蜴砖箱 style 16 → 帧重排;我们的 chest 用 18px 帧,style16 用 frameY 偏移近似)
-  for (let n = 0; n < Math.max(1, Math.floor(rooms.length * 0.35)); n++) {
+  // ---- 宝箱(简化保留:原版在尖刺陷阱段之后,数量 = 房数×1.1×(1±0.25))----
+  const chestCount = Math.max(1, Math.round(rooms.length * 1.1 * (1 + rng.int(-25, 25) * 0.01)));
+  for (let n = 0; n < chestCount; n++) {
     const r = rooms[rng.int(0, rooms.length - 1)];
-    const bx = r.x + rng.int(4, Math.max(5, r.w - 6));
-    const by = r.y + rng.int(4, Math.max(5, r.h - 6));
-    if (!st.inBounds(bx, by) || st.flags[st.idx(bx, by)]) continue;
+    const bx = rng.int(r.x, r.x + r.w - 2);
+    const by = rng.int(r.y, r.y + r.h - 2);
+    if (!st.inBounds(bx, by)) continue;
+    if (st.wall[st.idx(bx, by)] !== 87 || st.flags[st.idx(bx, by)]) continue;
+    if (!st.inBounds(bx + 1, by + 1)) continue;
+    if (st.flags[st.idx(bx + 1, by)] || st.flags[st.idx(bx, by + 1)] || st.flags[st.idx(bx + 1, by + 1)]) continue;
     st.setTileSilent(bx, by, CHEST, 0, 0);
     st.setTileSilent(bx + 1, by, CHEST, 18, 0);
     st.setTileSilent(bx, by + 1, CHEST, 0, 18);
     st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
     chests.push({ x: bx, y: by, items: Array(10).fill(null) });
   }
-  // 记录祭坛位置供后续(暂用 marker)
-  void altarX; void altarY;
+  void altarPlaced;
 }
-
-void T;

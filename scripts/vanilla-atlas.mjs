@@ -147,6 +147,38 @@ for (const t of tiles) out.tileNames[t.id] = t.name;
 out.itemNames = {};
 for (const it of items) out.itemNames[it.id] = it.name;
 
+// ---- UI 贴图段（vui 框架专用，独立目录 vanilla-ui/ 避免与旧 sprites/UI/ 冲突） ----
+const UI_OUT_DIR = join(ROOT, 'public', 'sprites', 'vanilla-ui');
+const UI_OUT_JSON = join(ROOT, 'public', 'sprites', 'vanilla-ui.json');
+mkdirSync(UI_OUT_DIR, { recursive: true });
+const uiList = JSON.parse(readFileSync(join(here, 'vanilla-ui-whitelist.json'), 'utf8'));
+const uiOut = { files: {} };
+const uiKeys = new Set();
+let uiCopied = 0;
+const uiMissing = [];
+for (const rel of uiList) {
+  const src = join(ASSETS, rel);
+  if (!existsSync(src)) { uiMissing.push(rel); continue; }
+  // 子目录下划线展平：UI/CharCreation/ColorHair.png → CharCreation_ColorHair.png
+  const key = rel.replace(/\//g, '_');
+  if (uiKeys.has(key)) throw new Error(`vanilla-ui 重名键: ${key}`);
+  uiKeys.add(key);
+  copyFileSync(src, join(UI_OUT_DIR, key));
+  uiOut.files[key] = `vanilla-ui/${key}`;
+  uiCopied++;
+}
+// 发型表（228 张，逐张单文件）
+for (let i = 1; i <= 228; i++) {
+  const src = join(ASSETS, `Player_Hair_${i}.png`);
+  if (!existsSync(src)) { uiMissing.push(`Player_Hair_${i}`); continue; }
+  copyFileSync(src, join(UI_OUT_DIR, `Player_Hair_${i}.png`));
+  uiOut.files[`Player_Hair_${i}.png`] = `vanilla-ui/Player_Hair_${i}.png`;
+  uiCopied++;
+}
+writeFileSync(UI_OUT_JSON, JSON.stringify(uiOut));
+console.log(`vanilla-ui: copied=${uiCopied}`);
+if (uiMissing.length) console.warn('UI 缺失:', uiMissing.join(', '));
+
 writeFileSync(OUT_JSON, JSON.stringify(out));
 console.log(`vanilla-atlas: tiles=${Object.keys(out.tiles).length} items=${Object.keys(out.items).length} walls=${Object.keys(out.walls).length} copied=${copied}`);
 if (missing.length) console.warn('缺失（白名单有但文件/数据不存在）:', missing.join(', '));

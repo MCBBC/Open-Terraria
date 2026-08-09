@@ -83,7 +83,7 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
   },
   eye_of_cthulhu: {
     key: 'eye_of_cthulhu', name: '克苏鲁之眼', hp: 2800, damage: 15, defense: 12, knockbackResist: 0,
-    width: 110, height: 110, flying: true, boss: true, mapColor: '#C02020',
+    width: 100, height: 110, flying: true, boss: true, mapColor: '#C02020',
     gore: ['#C02020', '#801010', '#FF5050'],
     hitSound: ['NPC_Hit_7', 'NPC_Hit_8'], killedSound: [],
     drops: [
@@ -99,22 +99,23 @@ export const ENEMY_DEFS: Record<string, EnemyDef> = {
     drops: [{ item: 'lens', min: 1, max: 1, chance: 0.25 }],
   },
 
-  // ---- 阶段 6 第九轮:Boss(官方数值 NPC.cs SetDefaults) ----
+  // ---- 阶段 6 第九轮:Boss(官方数值 NPC.cs SetDefaults:EoW头 L3341=150/22/2/38×38;
+  //      克脑 L7138=1000/30/14/kb0.5,一阶段免疫伤害;史莱姆王 L3874=2000/40/10/98×92) ----
   eater_of_worlds_head: {
-    key: 'eater_of_worlds_head', name: '世界吞噬者(头)', hp: 80, damage: 30, defense: 8, knockbackResist: 0,
-    width: 32, height: 32, flying: false, boss: true, underground: true, mapColor: '#604080',
+    key: 'eater_of_worlds_head', name: '世界吞噬者(头)', hp: 150, damage: 22, defense: 2, knockbackResist: 0,
+    width: 38, height: 38, flying: false, boss: true, underground: true, mapColor: '#604080',
     gore: ['#604080', '#402060', '#301040'], hitSound: ['NPC_Hit_1'], killedSound: [],
     drops: [{ item: 'ore_demonite', min: 8, max: 24, chance: 1 }],
   },
   brain_of_cthulhu: {
-    key: 'brain_of_cthulhu', name: '克苏鲁之脑', hp: 1000, damage: 30, defense: 7, knockbackResist: 0,
+    key: 'brain_of_cthulhu', name: '克苏鲁之脑', hp: 1000, damage: 30, defense: 14, knockbackResist: 0.5,
     width: 80, height: 60, flying: true, boss: true, underground: true, mapColor: '#A03050',
     gore: ['#A03050', '#701030', '#501020'], hitSound: ['NPC_Hit_6'], killedSound: [],
     drops: [{ item: 'ore_crimtane', min: 8, max: 24, chance: 1 }],
   },
   king_slime: {
     key: 'king_slime', name: '史莱姆王', hp: 2000, damage: 40, defense: 10, knockbackResist: 0,
-    width: 96, height: 60, flying: false, boss: true, mapColor: '#3080FF',
+    width: 98, height: 92, flying: false, boss: true, mapColor: '#3080FF',
     gore: ['#3080FF', '#2060C0', '#104080'], hitSound: ['NPC_Hit_3'], killedSound: [],
     drops: [{ item: 'coin_gold', min: 1, max: 1, chance: 1 }],
   },

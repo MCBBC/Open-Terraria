@@ -701,9 +701,9 @@ item({ key: 'platinum_axe', name: '铂金斧', maxStack: 1, value: 3200,
 item({ key: 'platinum_sword', name: '铂金剑', maxStack: 1, value: 3600,
   tool: { type: 'sword', damage: 15, speed: 22, knockback: 6, reach: 2.2 * 16 } });
 
-// ---- 阶段 6 第五轮:弓箭系统(官方数值:木弓 9 伤/UseTime 28;箭伤 4 木/5 燃烧) ----
+// ---- 阶段 6 第五轮:弓箭系统(官方数值 Item.cs:2996-3010:木弓伤4/UseTime30/射速6.1/击退0) ----
 item({ key: 'wooden_bow', name: '木弓', maxStack: 1, value: 100,
-  ranged: { damage: 9, speed: 28, knockback: 1, ammo: 'wooden_arrow', projSpeed: 11 } });
+  ranged: { damage: 4, speed: 30, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.1 } });
 item({ key: 'wooden_arrow', name: '木箭', maxStack: 999, value: 1 });
 item({ key: 'flaming_arrow', name: '燃烧箭', maxStack: 999, value: 1 });
 item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360,
@@ -712,9 +712,9 @@ item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360,
 // ---- 阶段 6 第六轮:矿车 ----
 item({ key: 'minecart_item', name: '矿车', maxStack: 99, value: 1, desc: '右键轨道放置并骑乘' });
 
-// ---- 阶段 6 第八轮:魔法武器(官方数值:火花法杖 ItemID 3067 伤12/魔力15/UseTime 21/射速 9) ----
+// ---- 阶段 6 第八轮:魔法武器(官方 Item.cs:30765-30778,火花法杖=ItemID 3069:伤14/魔力2/UseTime26/射速7/暴击10) ----
 item({ key: 'wand_of_sparking', name: '火花法杖', maxStack: 1, value: 100,
-  magic: { damage: 12, speed: 21, manaCost: 5, projSpeed: 9, proj: 'spark' } });
+  magic: { damage: 14, speed: 26, manaCost: 2, projSpeed: 7, proj: 'spark' } });
 item({ key: 'amethyst_bolt', name: '紫晶法杖', maxStack: 1, value: 900,
   magic: { damage: 14, speed: 26, manaCost: 5, projSpeed: 9, proj: 'bolt' } });
 

@@ -56,7 +56,7 @@ if (!out.e) {
   check('生成出冲锋族', false);
 } else {
   check('生成出冲锋族', true, out.name);
-  check('高速冲锋位移（>400px）', Math.abs(out.moved) > 400, `moved=${out.moved}px`);
+  check('高速冲锋位移（|moved|>400px）', Math.abs(out.moved) > 400, `moved=${out.moved}px`);
   check('冲锋速度档 ≈6', out.maxVx > 3 && out.maxVx <= 6.2, `maxVx=${out.maxVx}`);
   check('卡墙折返（撞死墙后掉头）', out.flips > 0, `flips=${out.flips}`);
 }

@@ -116,7 +116,7 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
   for (let side = 0; side < 2; side++) {
     if (side === 0) {
       // 左海盆:从 beachLeftEnd-50 之左往世界缘挖
-      let waterX = rng.int(oceanWaterMin, oceanWaterMax);
+      let waterX = rng.int(oceanWaterMin, oceanWaterMax - 1);  // 原版 Next(220,260) 上界开
       if (gs.dungeonSide === 1) waterX = forcedJungleLen; // 丛林侧强制 275(缩放)
       const cap = gs.beachLeftEnd - minSand;
       if (waterX > cap) waterX = Math.max(2, cap);
@@ -144,7 +144,7 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     } else {
       // 右海盆:镜像
-      let waterX = w - rng.int(oceanWaterMin, oceanWaterMax);
+      let waterX = w - rng.int(oceanWaterMin, oceanWaterMax - 1);  // 上界开,同原版 Next
       if (gs.dungeonSide === -1) waterX = w - forcedJungleLen;
       const cap = gs.beachRightStart + minSand;
       if (waterX < cap) waterX = Math.min(w - 2, cap);

@@ -51,21 +51,34 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
 export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const area = w * h;
-  // 11 Small Holes(L5238):每轮两个 runner,1/5 液体
+  // 位置避让(cs:4733):beachSandRandomCenter(320)+20 = 340
+  const avoidBeach = 340;
+  // 11 Small Holes(L5238):每轮两个 runner,1/5 液体;
+  // 避让:海滩 340 内且浅于 worldSurfaceHigh、或中部 45-55% 且浅于 worldSurface → 重掷
   for (let n = 0; n < area * 0.0015; n++) {
     const type = rng.next() * 5 < 1 ? -2 : -1;
-    const x1 = rng.int(0, w - 1), y1 = rng.int(gs.worldSurfaceHigh, h - 1);
+    let x1 = rng.int(0, w - 1), y1 = rng.int(gs.worldSurfaceHigh, h - 1);
+    for (let a = 0; a < 40 && (((x1 < avoidBeach || x1 > w - avoidBeach) && y1 < gs.worldSurfaceHigh)
+      || (x1 > w * 0.45 && x1 < w * 0.55 && y1 < gs.worldSurface)); a++) {
+      x1 = rng.int(0, w - 1);
+      y1 = rng.int(gs.worldSurfaceHigh, h - 1);
+    }
     tileRunner(st, rng, gs, x1, y1, { strength: rng.int(2, 4), steps: rng.int(2, 19), type });
-    const x2 = rng.int(0, w - 1), y2 = rng.int(gs.worldSurfaceHigh, h - 1);
+    let x2 = rng.int(0, w - 1), y2 = rng.int(gs.worldSurfaceHigh, h - 1);
+    for (let a = 0; a < 40 && (((x2 < avoidBeach || x2 > w - avoidBeach) && y2 < gs.worldSurfaceHigh)
+      || (x2 > w * 0.45 && x2 < w * 0.55 && y2 < gs.worldSurface)); a++) {
+      x2 = rng.int(0, w - 1);
+      y2 = rng.int(gs.worldSurfaceHigh, h - 1);
+    }
     tileRunner(st, rng, gs, x2, y2, { strength: rng.int(8, 14), steps: rng.int(7, 29), type });
   }
-  // 12 Dirt Layer Caves(L5262):1/6 液体;浅于 worldSurface 时避开中部 45-55%
+  // 12 Dirt Layer Caves(L5262):1/6 液体;中部条件为闭区间 >=45% <=55%
   for (let n = 0; n < area * 0.00003; n++) {
     const type = rng.next() * 6 < 1 ? -2 : -1;
     let i = rng.int(0, w - 1);
     let j = rng.int(gs.worldSurfaceLow, gs.rockLevelHigh);
-    for (let a = 0; a < 20 && ((i < gs.beachDistance || i > w - gs.beachDistance) && j < gs.worldSurfaceHigh
-      || (i > w * 0.45 && i < w * 0.55 && j < gs.worldSurface)); a++) {
+    for (let a = 0; a < 40 && ((i < avoidBeach || i > w - avoidBeach) && j < gs.worldSurfaceHigh
+      || (i >= w * 0.45 && i <= w * 0.55 && j < gs.worldSurface)); a++) {
       i = rng.int(0, w - 1);
       j = rng.int(gs.worldSurfaceLow, gs.rockLevelHigh);
     }
@@ -117,11 +130,11 @@ export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   surfaceCave(Math.floor(w * 0.0004), 0.40, 0.60, [[(x) => {
     tileRunner(st, rng, gs, x, firstSolid(st, gs, x), { strength: rng.int(7, 11), steps: rng.int(150, 249), type: -1, speedY: 1, noYChange: true });
   }]]);
-  // 14e Caverer(L5365):5×w/4200 个大洞穴系统(digTunnel 链,两种模式)
-  const cavCount = Math.max(1, Math.round(5 * (w / 4200)));
+  // 14e Caverer(L5360):5×(w/4200 整除截断) 个大洞穴系统;起点边距 340、y 上界 h-400 开
+  const cavCount = 5 * Math.floor(w / 4200);
   for (let n = 0; n < cavCount; n++) {
-    const cx = rng.int(gs.beachDistance + 20, w - gs.beachDistance - 21);
-    const cy = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, h - 400));
+    const cx = rng.int(340, w - 341);
+    const cy = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, h - 401));
     caverer(st, rng, gs, cx, cy);
   }
 }

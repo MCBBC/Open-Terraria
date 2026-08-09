@@ -79,7 +79,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       // 地表转换:猩红石/猩红草/猩红沙 + 墙 216→218、187→221;丛林泥/草清除
       convertSurface(st, rng, gs, zLo, zHi, true);
       // 祭坛 10-14 个(v_26 style 1)
-      placeAltars(st, rng, zLo, zHi, 1, CRIMSTONE);
+      placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
     } else {
       // 腐化裂隙:主裂隙(cx, 150-300 步) + 35 分之一支裂隙(50-100 步带球)
       let cooldown = 0;
@@ -154,7 +154,7 @@ function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi:
 }
 
 /** 恶魔祭坛:10-14 个,落在邪恶石地表上(Place3x2) */
-function placeAltars(st: TileStore, rng: RNG, zLo: number, zHi: number, style: number, stoneType: number): void {
+function placeAltars(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: number, style: number, stoneType: number): void {
   const count = rng.int(10, 14);
   for (let n = 0; n < count; n++) {
     let widen = 0, tries = 0, done = false;

@@ -1,11 +1,12 @@
 // 原版地牢 1:1 复刻(MakeDungeon L18006 + DungeonHalls L20255 + DungeonRoom L20622
 // + DungeonStairs L19855 + DungeonEnt L20726,算法文档 docs/vanilla-algos/dungeon.md)。
 // 主链随机游走(每5步1/3概率分支/房间)+ 曲线房 + 到地表竖井 + 垛口锯齿入口塔
-// + 门(style13)+ 尖刺(48)+ 金箱序列。绿砖 43 素材暂缺,蓝 41/粉 44 二选一。
+// + 门(style13)+ 尖刺(48)+ 金箱序列。砖 41/43/44 三主题(绿砖 43 素材已补入白名单)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { tileRunner } from './TileRunner';
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
@@ -27,6 +28,10 @@ class DungeonCtx {
   rooms: DRoom[] = [];
   entranceX = 0;
   lastHall: [number, number] = [0, 0];
+  // 原版 L18045-18048:入口塔尺寸强度(竖井出口探测偏移用)
+  dxS1 = 0; dyS1 = 0; dxS2 = 0; dyS2 = 0;
+  // 门候选(cs L18158-18179 房左右墙 + L20500 水平走廊端点):pos 0=取最窄,-1=取最右,+1=取最左
+  dDoors: Array<{ x: number; y: number; pos: number }> = [];
   constructor(brick: number, wall: number, x: number, y: number) {
     this.brick = brick; this.wall = wall;
     this.minX = this.maxX = x; this.minYY = this.maxY = y;
@@ -60,6 +65,9 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   }
   y0 = Math.max(gs.worldSurface + 10, Math.min(h - 220, y0));
   const dc = new DungeonCtx(brick, wallId, x0, y0);
+  // 原版 L18045-18048:入口塔尺寸强度(DungeonEnt 与竖井出口探测共用)
+  dc.dxS1 = rng.int(25, 29); dc.dyS1 = rng.int(20, 24);
+  dc.dxS2 = rng.int(35, 49); dc.dyS2 = rng.int(10, 14);
   // ---- 主链随机游走(L18053)----
   let budget = w / 60 + rng.int(0, Math.max(1, Math.floor(w / 180)));
   let dx = x0, dy = y0;
@@ -230,6 +238,8 @@ function dungeonHalls(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix:
     // 出界截断
     if ((vx > 0 && px > st.w - 100) || (vx < 0 && px < 100) || (vy > 0 && py > st.h - 100) || (vy < 0 && py < gs.rockLevel + 50)) steps = 0;
   }
+  // 水平走廊端点记为门候选(cs L20496-20501)
+  if (vy === 0) dc.dDoors.push({ x: Math.floor(px), y: Math.floor(py), pos: 0 });
   return [Math.floor(px), Math.floor(py)];
 }
 
@@ -270,6 +280,15 @@ function dungeonRoom(st: TileStore, rng: RNG, _gs: GenState, dc: DungeonCtx, ix:
     vx = Math.max(-1, Math.min(1, vx)); vy = Math.max(-1, Math.min(1, vy));
   }
   dc.rooms.push({ cx: Math.floor(px), cy: Math.floor(py), l: rl, r: rr, t: rt, b: rb });
+  // 门候选(cs L18158-18179):房左右墙外侧列的首个空格
+  if (rl > 1 && rr < st.w - 2) {
+    for (let y = rt; y <= rb; y++) {
+      if (st.inBounds(rl - 1, y) && !st.flags[st.idx(rl - 1, y)]) { dc.dDoors.push({ x: rl - 1, y, pos: -1 }); break; }
+    }
+    for (let y = rt; y <= rb; y++) {
+      if (st.inBounds(rr + 1, y) && !st.flags[st.idx(rr + 1, y)]) { dc.dDoors.push({ x: rr + 1, y, pos: 1 }); break; }
+    }
+  }
 }
 
 /** DungeonStairs(L19855):向上竖井到地表,返回 [x, y, reachedSurface] */
@@ -280,10 +299,10 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
   if (ix > st.w - 400) vx = -1;
   if (ix < 400) vx = 1;
   let vy = -1;
-  const roll = rng.next();
-  if (roll < 2 / 3) vx *= 1 + rng.int(0, 199) * 0.01;
-  else if (roll < 5 / 6) vx *= rng.int(50, 75) * 0.01;
-  else vy = -2;
+  // 原版嵌套概率(cs L19871-19876):2/3 加速;否则 1/3 减速;再否则 1/6 快速上升
+  if (rng.next() < 2 / 3) vx *= 1 + rng.int(0, 199) * 0.01;
+  else if (rng.next() < 1 / 3) vx *= rng.int(50, 75) * 0.01;
+  else if (rng.next() < 1 / 6) vy = -2;
   if (ix < st.w / 2 && vx < 0 && vx > -0.5) vx = -0.5;
   if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
   // dungeonX 回拉:漂移超 ±60 强制折返(原版中线回拉的加强,入口落在地牢标记附近)
@@ -293,6 +312,24 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
   let px = ix + 0.0, py = iy + 0.0;
   let reached = false;
   for (let k = 0; k < steps && !reached; k++) {
+    // ---- 出口探测(cs L19900-19910):探测点偏移 X + (dxS1*0.6+dxS2)*朝地图中心方向 ----
+    const toCenter = px > st.w / 2 ? -1 : 1;
+    const probeX = Math.floor(px + dc.dxS1 * 0.6 * toCenter + dc.dxS2 * toCenter);
+    const probeOff = Math.floor(dc.dyS2 * 0.5);
+    if (py < gs.worldSurface - 5) {
+      let open = true;
+      for (let d = 0; d < 3; d++) {
+        const yy = Math.floor(py - radius - 6 + probeOff - d);
+        if (!st.inBounds(probeX, yy) || st.wall[st.idx(probeX, yy)] !== 0) { open = false; break; }
+      }
+      if (open) {
+        reached = true;
+        // 地表土丘(原版 TileRunner type -1 挖出,cs L19909)
+        tileRunner(st, rng, gs, probeX, Math.floor(py - radius - 6 + probeOff), {
+          strength: rng.int(25, 34), steps: rng.int(10, 19), type: -1, speedY: -1,
+        });
+      }
+    }
     const padX = radius + 4 + rng.int(0, 5);
     const padY = radius + 4 + rng.int(0, 5);
     for (let x = Math.floor(px - padX); x <= Math.floor(px + padX); x++) {
@@ -301,6 +338,12 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
         const i = st.idx(x, y);
         st.liquid[i] = 0;
         if (!dc.isDungeonWall(st, x, y)) { st.type[i] = dc.brick; st.flags[i] = 1; }
+      }
+    }
+    // 竖井外壳刷墙(cs L19924-19928):外框内缩 1 整片刷地牢墙
+    for (let x = Math.floor(px - padX) + 1; x <= Math.floor(px + padX) - 1; x++) {
+      for (let y = Math.floor(py - padY) + 1; y <= Math.floor(py + padY) - 1; y++) {
+        if (st.inBounds(x, y)) st.wall[st.idx(x, y)] = dc.wall;
       }
     }
     // 内框挖空
@@ -316,28 +359,6 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
     dc.updateBBox(Math.floor(px), Math.floor(py));
     px += vx; py += vy;
     if (py < gs.worldSurface) vy *= 0.98;
-    // 到地表判定:上方无地牢墙
-    if (py < gs.worldSurface - 5) {
-      let open = true;
-      for (let d = 1; d <= 3; d++) {
-        const yy = Math.floor(py - radius - 6 - d);
-        if (st.inBounds(Math.floor(px), yy) && st.wall[st.idx(Math.floor(px), yy)] !== 0) { open = false; break; }
-      }
-      if (open) {
-        reached = true;
-        // 地表土丘
-        for (let n = 0; n < 1; n++) {
-          const hx = Math.floor(px), hy = Math.floor(py - radius - 6);
-          for (let dx2 = -rng.int(25, 34); dx2 <= rng.int(25, 34); dx2++) {
-            for (let dy2 = 0; dy2 < rng.int(10, 19); dy2++) {
-              if (!st.inBounds(hx + dx2, hy + dy2)) continue;
-              const i = st.idx(hx + dx2, hy + dy2);
-              if (!st.flags[i]) { st.type[i] = T.DIRT; st.flags[i] = 1; }
-            }
-          }
-        }
-      }
-    }
   }
   return [Math.floor(px), Math.floor(py), reached];
 }
@@ -612,28 +633,72 @@ function placeSpikes(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, coun
 }
 
 /** 门(L18311):房间左右边开口装门 */
+/** 门(L18302-18430 1:1):±10 列扫描择优(span∈[3,20)、±20 内无他门、底部上 3 行净空),
+ *  门柱填砖,style 13(1/3 概率按墙换 16/17/18) */
 function placeDoors(st: TileStore, rng: RNG, dc: DungeonCtx): void {
-  for (const room of dc.rooms) {
-    if (rng.next() < 0.5) continue;
-    const side = rng.next() < 0.5 ? -1 : 1;
-    const dx2 = side < 0 ? room.l - 1 : room.r + 1;
-    // 找竖直净空
-    let yTop = -1, yBot = -1;
-    for (let y = room.cy; y >= room.t - 5; y--) {
-      if (st.inBounds(dx2, y) && st.flags[st.idx(dx2, y)]) { yTop = y; break; }
+  for (const d of dc.dDoors) {
+    if (d.y < 2 || d.y >= st.h - 2) continue;
+    let bestSpan = 100, bestX = 0;
+    for (let x = d.x - 10; x < d.x + 10; x++) {
+      if (x < 2 || x >= st.w - 2) continue;
+      let yTop = d.y;
+      while (yTop > 10 && !st.flags[st.idx(x, yTop)]) yTop--;
+      if (st.type[st.idx(x, yTop)] !== dc.brick) continue;
+      let yBot = d.y;
+      while (yBot < st.h - 1 && !st.flags[st.idx(x, yBot)]) yBot++;
+      if (st.type[st.idx(x, yBot)] !== dc.brick) continue;
+      const span = yBot - yTop;
+      if (span < 3 || span >= 20) continue;
+      // ±20×(底±10) 内不得已有门
+      let doorNear = false;
+      for (let ix = x - 20; ix < x + 20 && !doorNear; ix++) {
+        for (let iy = yBot - 10; iy < yBot + 10; iy++) {
+          if (st.inBounds(ix, iy) && st.flags[st.idx(ix, iy)] && st.type[st.idx(ix, iy)] === DOOR) { doorNear = true; break; }
+        }
+      }
+      if (doorNear) continue;
+      // 底部上方 3 行 x±3 须净空
+      let clear = true;
+      for (let iy = yBot - 3; iy < yBot && clear; iy++) {
+        for (let ix = x - 3; ix <= x + 3; ix++) {
+          if (st.inBounds(ix, iy) && st.flags[st.idx(ix, iy)]) { clear = false; break; }
+        }
+      }
+      if (!clear) continue;
+      let better = false;
+      if (d.pos === 0 && span < bestSpan) better = true;
+      else if (d.pos === -1 && x > bestX) better = true;
+      else if (d.pos === 1 && (bestX === 0 || x < bestX)) better = true;
+      if (better) { bestX = x; bestSpan = span; }
     }
-    for (let y = room.cy; y <= room.b + 5; y++) {
-      if (st.inBounds(dx2, y) && st.flags[st.idx(dx2, y)]) { yBot = y; break; }
+    if (bestSpan >= 20) continue;
+    const x = bestX;
+    // 门洞:从候选 y 向下清到实心,向上找到实心顶
+    let yDown = d.y;
+    while (yDown < st.h - 1 && !st.flags[st.idx(x, yDown)]) yDown++;
+    let yUp = d.y;
+    while (yUp > 1 && !st.flags[st.idx(x, yUp)]) yUp--;
+    const j2 = yDown - 1;
+    const yFrom = yUp + 1;
+    for (let y = yFrom; y < j2 - 2; y++) {
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      st.type[i] = dc.brick; st.flags[i] = 1;
     }
-    if (yTop < 0 || yBot < 0 || yBot - yTop < 3 || yBot - yTop > 20) continue;
-    const dy2 = yBot - 1;
-    if (!st.inBounds(dx2, dy2)) continue;
-    // 清门洞 3 格
-    for (let dy3 = 1; dy3 <= 3; dy3++) {
-      const i = st.idx(dx2, dy2 - dy3 + 1);
-      st.type[i] = 0; st.flags[i] = 0;
+    const style = rng.next() < 1 / 3 ? (dc.wall === 7 ? 16 : dc.wall === 8 ? 17 : 18) : 13;
+    st.setTileSilent(x, j2, DOOR, style * 54, 0);
+    // 两侧门柱补砖(cs L18403-18429)
+    for (const side of [x - 1, x + 1]) {
+      if (side < 1 || side >= st.w - 1) continue;
+      let yy = j2 - 3;
+      while (yy > 1 && !st.flags[st.idx(side, yy)]) yy--;
+      if (j2 - yy < j2 - yFrom + 5 && st.type[st.idx(side, yy)] === dc.brick) {
+        for (let y = j2 - 4 - rng.int(0, 2); y > yy; y--) {
+          const i = st.idx(side, y);
+          st.type[i] = dc.brick; st.flags[i] = 1;
+        }
+      }
     }
-    st.setTileSilent(dx2, dy2, DOOR, 13 * 54, 0);
   }
 }
 

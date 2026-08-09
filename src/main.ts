@@ -12,6 +12,11 @@ import { INV_SIZE } from './items/Inventory';
 import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
 import { setDebugPool } from './data/vanillaNpcs';
+import { VUI } from './vui/VUI';
+import { UITextures } from './vui/assets/UITextures';
+import { UIFont } from './vui/draw/UIFont';
+import { Lang } from './i18n/Lang';
+import { VuiDemoState } from './vui/states/VuiDemoState';
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);
@@ -388,7 +393,25 @@ let quickSaveExists = false;
 kvHas(QUICK_SAVE_KEY).then((v) => {
   quickSaveExists = v;
   return loadAssets();
-}).then(() => showMenu());
+}).then(async () => {
+  // M0 验收：?vuidemo=1 只跑 VUI 框架演示（M1 主菜单接管后移除）
+  if (new URLSearchParams(location.search).has('vuidemo')) {
+    if (atlas) UITextures.setAtlas(atlas);
+    await Promise.all([UIFont.load(), Lang.load()]);
+    VUI.init(root);
+    VUI.setState(new VuiDemoState());
+    let last = performance.now();
+    const loop = () => {
+      const now = performance.now();
+      VUI.frame(now - last);
+      last = now;
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+    return;
+  }
+  showMenu();
+});
 
 // 供 showMenu 引用的存在性（初次菜单在 Promise 完成后才弹出，值已就绪）
 void 0;
