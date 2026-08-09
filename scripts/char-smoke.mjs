@@ -33,28 +33,44 @@ await waitState('UICharacterSelectState');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: 'shots/m2-2-charselect.png' });
 
-// 新建角色
+// 新建角色 → DOM 版创建页
 const SEL = { x: 200, y: 70, pad: 14 };
 await click(SEL.x + SEL.pad + 60, SEL.y + SEL.pad + 379);
-await waitState('UICharacterCreationState');
+await page.waitForSelector('.sw-char-panel', { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 600));
 await page.screenshot({ path: 'shots/m2-3-creation.png' });
 
-// 名字（Click 两帧后 focus，打字前留足时间）
-await click(554, 193);
-await new Promise((r) => setTimeout(r, 400));
+// 名字（原生 input）
+await page.click('.sw-char-row input[type=text]');
 await page.keyboard.type('测试勇者');
+await new Promise((r) => setTimeout(r, 200));
+
+// 外观页：点第 3 个衣服样式
+await page.click('[data-tab=look]');
+await new Promise((r) => setTimeout(r, 300));
+const styleBtns = await page.$$('.sw-char-stylebtn');
+if (styleBtns[2]) await styleBtns[2].click();
 await new Promise((r) => setTimeout(r, 300));
 
-// 点一个取色器图标 → 应进入取色视图（HSL 滑条）
-await click(200 + 14 + 180 + 3 * 38 + 19, 80 + 14 + 36 + 19);
+// 发型页：点第 5 个发型
+await page.click('[data-tab=hair]');
 await new Promise((r) => setTimeout(r, 400));
+const hairBtns = await page.$$('.sw-char-hairbtn');
+if (hairBtns[4]) await hairBtns[4].click();
+await new Promise((r) => setTimeout(r, 300));
+
+// 颜色页：改发色
+await page.click('[data-tab=color]');
+await new Promise((r) => setTimeout(r, 300));
+const colorInput = await page.$('.sw-char-row input[type=color]');
+if (colorInput) {
+  await colorInput.evaluate((el, v) => { el.value = v; el.dispatchEvent(new Event('input', { bubbles: true })); }, '#ff5500');
+}
+await new Promise((r) => setTimeout(r, 300));
 await page.screenshot({ path: 'shots/m2-3c-color.png' });
 
-// 回信息页签 → 创建角色
-await click(200 + 14 + 180 + 22, 80 + 14 + 23);
-await new Promise((r) => setTimeout(r, 300));
-await click(200 + 14 + 410 + 23, 80 + 14 + 396 + 19);
+// 创建
+await page.click('[data-act=create]');
 await waitState('UICharacterSelectState');
 await new Promise((r) => setTimeout(r, 1000));
 await page.screenshot({ path: 'shots/m2-4-charselect-after.png' });

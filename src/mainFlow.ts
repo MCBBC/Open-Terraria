@@ -13,7 +13,7 @@ import { VUI } from './vui/VUI';
 import { TitleState } from './vui/states/TitleState';
 import { DataState } from './vui/states/DataState';
 import { UICharacterSelectState } from './vui/states/UICharacterSelectState';
-import { UICharacterCreationState } from './vui/states/UICharacterCreationState';
+import { CharCreation } from './ui/CharCreation';
 import { UIWorldSelectState } from './vui/states/UIWorldSelectState';
 import { UIWorldCreationState } from './vui/states/UIWorldCreationState';
 import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
@@ -238,13 +238,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         showWorldSelect();
       },
       onNew: () => {
-        VUI.setState(new UICharacterCreationState({
+        // DOM 版创建页（手绘 Canvas 版命中/交互脆弱，已废弃）
+        VUI.setState(null);
+        VUI.clear();
+        new CharCreation(root, {
           onCreate: async (a) => {
             await charStore.create(a);
             showCharacterSelect();
           },
           onCancel: () => showCharacterSelect(),
-        }));
+        });
       },
       onBack: () => showTitle(),
     }));

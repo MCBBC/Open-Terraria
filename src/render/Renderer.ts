@@ -11,6 +11,7 @@ import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
+import { townExtraFrames } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -47,6 +48,15 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
   }
   // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
   if (ai === 1) return Math.floor(t / 8) % frames;
+  // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 L70172-70262）：腾空=1；站定=0；
+  // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1、>6 推进、越界回卷帧2）
+  if (ai === 7) {
+    if (!e.onGround) return 1;
+    if (!walking) return 0;
+    const extra = townExtraFrames(id);
+    const len = Math.max(1, frames - extra - 2);
+    return 2 + (Math.floor((e.walkCycleT * 2 + t) / 6) % len);
+  }
   // 战士族/107（L70155-70252）：站定=0；行走从帧 2 起按 |vx|*2+1 累加、>6 推进、循环回 2
   if (ai === 3 || ai === 26 || ai === 107) {
     if (!e.onGround) return frames - 1; // 腾空取末帧（原版 ai[0]==2 在 0/末帧间交替）
@@ -611,18 +621,25 @@ export class Renderer {
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
       if (r) {
-        const flying = e.vanilla?.noGravity || e.vanilla?.aiStyle === 2 || e.vanilla?.aiStyle === 5 || e.vanilla?.aiStyle === 14;
-        const scale = e.vanilla?.scale ?? 1;        // 原版 SetDefaults 缩放（母史莱姆 1.25 等）
-        const alpha = e.vanilla?.alpha;
+        const flying = !!e.vanilla?.noGravity;
+        // 原版 NPC.scale（SetDefaults base × netID scale）——作用于碰撞盒与渲染
+        const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
         ctx.save();
         ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
         ctx.scale(scale, scale);
         if (e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
-        // 原版 alpha（史莱姆 120-175 半透明）；受击帧再降透明度近似闪白
-        ctx.globalAlpha = Math.min(1, (alpha != null ? alpha / 255 : 1) * (flash ? 0.55 : 1));
+        // 原版 alpha = 出生淡入（逐 tick 衰减到 0），非永久半透明——Enemy.spawnAlpha 已衰减
+        ctx.globalAlpha = Math.min(1, Math.max(e.spawnAlpha / 255, 0));
+        // 原版 color 字段（绿史莱姆 -3 的 Color(0,220,40,100) 等）：乘法着色精灵像素
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+        if (e.tint) {
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.fillStyle = e.tint;
+          ctx.fillRect(-r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+        }
         ctx.restore();
         ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
         return;
       }
       return; // 表未加载完成：本帧不画（下帧懒加载完成）
@@ -776,21 +793,21 @@ export class Renderer {
 
   private drawTownNPC(n: TownNPC) {
     const ctx = this.ctx;
-    // Maples NPC 精灵（NPC_1 首帧）
+    // ---- 原版贴图条（Images/NPC_{id}，40×56 帧、默认朝左）：帧语义见 TownNPC.fixedUpdate ----
+    // 注意：不再回退 Maples 角色/NPC_1.png——那是原版绿史莱姆贴图（Maples 沿用原版命名），
+    // 曾导致全部城镇 NPC 显示为史莱姆
     if (this.atlas) {
-      const file = this.atlas.data.files['角色/NPC_1.png'];
-      const fr = file ? this.atlas.rect('角色/NPC_1.png', file.sprites[0]?.name ?? '') : null;
-      if (fr) {
-        const h = n.h;
-        const w = (fr.sw / fr.sh) * h;
+      const r = this.atlas.vnpc(n.vanillaId, n.frame);
+      if (r) {
         ctx.save();
-        ctx.translate(n.cx, n.y + n.h);
-        ctx.scale(n.facing >= 0 ? 1 : -1, 1);
-        ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h, w, h);
+        ctx.translate(n.cx, n.y + n.h); // 脚底中心
+        if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh, r.sw, r.sh);
         ctx.restore();
-        if (n.bubble) this.drawNpcBubble(n);
+        this.drawNpcBubble(n);
         return;
       }
+      // 贴图条懒加载首帧未就绪：落入下方程序化兜底，本帧后懒加载完成
     }
     const spr = this.assets.enemySprites.get(n.npcKey);
     if (!spr) return;

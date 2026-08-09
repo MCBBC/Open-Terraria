@@ -1,17 +1,25 @@
-// 城镇 NPC（向导）：游走、夜间回家、对话气泡
+// 城镇 NPC：游走、夜间回家、对话气泡
+// 贴图 = 原版 Images/NPC_{id}（Terarria1456 素材条），帧语义按原版 FindFrame 城镇分支
+// （NPC.cs:69152+）：地面站定=帧0；腾空=帧1；行走帧 2..frames-extra-1 循环
+// （frameCounter += |vx|*2+1 每 tick，>6 推进一帧，越界回卷帧2）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 
 export interface NpcHome { x: number; y: number; }
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
   npcKey: string; // 'guide'
+  /** 原版 NPCID（TOWN_NPC_IDS；Renderer 经 atlas.vnpc 取 NPC_{id}.png 贴图条） */
+  vanillaId: number;
   facing = 1;
   animT = 0;
+  frame = 0;       // 当前贴图帧（原版 frame.Y/帧高）
+  frameT = 0;      // 行走帧累加器（≈原版 frameCounter）
   wanderT = 0;
   home: NpcHome | null = null;
   talkCooldown = 0;
@@ -23,6 +31,8 @@ export class TownNPC extends Entity {
     this.npcKey = key;
     this.x = x;
     this.y = y - this.h;
+    const town = TOWN_NPC_IDS[key];
+    this.vanillaId = town?.id ?? 22; // 未登记 key 兜底向导贴图
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -55,6 +65,27 @@ export class TownNPC extends Entity {
     moveAndCollide(this, world, this.vx, this.vy);
     if (this.hitWall) this.vx *= 0.5;
     if (wantDir !== 0) this.facing = wantDir;
+
+    // ---- 原版 FindFrame 城镇分支（NPC.cs:70172-70262）----
+    // 腾空=帧1；地面站定=帧0、计数清零；行走 frameCounter += |vx|*2+1，>6 推进，
+    // 帧区间 2..frames-extra-1（越界回卷帧2）
+    if (!this.onGround) {
+      this.frame = 1;
+      this.frameT = 0;
+    } else if (Math.abs(this.vx) < 0.05) {
+      this.frame = 0;
+      this.frameT = 0;
+    } else {
+      const total = VANILLA_NPCS[String(this.vanillaId)]?.frames ?? 1;
+      const extra = TOWN_NPC_IDS[this.npcKey]?.extra ?? 2;
+      this.frameT += Math.abs(this.vx) * 2 + 1;
+      if (this.frame < 2) this.frame = 2;
+      if (this.frameT > 6) {
+        this.frameT = 0;
+        this.frame++;
+      }
+      if (this.frame >= total - extra) this.frame = 2;
+    }
 
     // 对话气泡：玩家靠近时偶发展示
     if (player && !player.dead && this.talkCooldown === 0) {

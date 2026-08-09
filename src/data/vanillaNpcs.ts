@@ -73,6 +73,44 @@ export function vanillaNpc(id: number): VanillaNpc | null {
   return VANILLA_NPCS[String(id)] ?? null;
 }
 
+// ================= 城镇 NPC（TownNPC 实体用） =================
+// key → 原版 NPCID（Terarria1456/Terraria.ID/NPCID.cs:11099+）；
+// extra = NPCID.Sets.ExtraFramesCount（NPCID.cs:4831）——
+// 行走帧循环区间的回卷上界：帧 >= frames-extra 时回帧 2（NPC.cs FindFrame L70244）
+export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
+  guide: { id: 22, extra: 10 },
+  merchant: { id: 17, extra: 9 },
+  nurse: { id: 18, extra: 9 },
+  arms_dealer: { id: 19, extra: 9 },
+  dryad: { id: 20, extra: 7 },
+  demolitionist: { id: 38, extra: 9 },
+  clothier: { id: 54, extra: 7 },
+  goblin_tinkerer: { id: 107, extra: 9 },
+  wizard: { id: 108, extra: 7 },
+  mechanic: { id: 124, extra: 9 },
+  santa_claus: { id: 142, extra: 9 },
+  truffle: { id: 160, extra: 7 },
+  steampunker: { id: 178, extra: 9 },
+  dyer: { id: 207, extra: 9 },
+  party_girl: { id: 208, extra: 9 },
+  cyborg: { id: 209, extra: 10 },
+  painter: { id: 227, extra: 9 },
+  witch_doctor: { id: 228, extra: 10 },
+  pirate: { id: 229, extra: 10 },
+  stylist: { id: 353, extra: 9 },
+  tax_collector: { id: 441, extra: 9 },
+  golfer: { id: 588, extra: 9 },
+  zoologist: { id: 633, extra: 9 },   // BestiaryGirl
+  princess: { id: 663, extra: 7 },
+};
+
+const TOWN_EXTRA_BY_ID = new Map(Object.values(TOWN_NPC_IDS).map((t) => [t.id, t.extra]));
+
+/** npc id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */
+export function townExtraFrames(id: number): number {
+  return TOWN_EXTRA_BY_ID.get(id) ?? 2;
+}
+
 /** SoundID 名 → public/sounds 文件名（NPCHit37 → NPC_Hit_37；NPCDeath40 → NPC_Killed_40） */
 export function vanillaSoundName(soundIdName: string | undefined): string | null {
   if (!soundIdName) return null;

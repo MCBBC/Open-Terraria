@@ -1,4 +1,4 @@
-// 移植 UICharacterListItem.cs：列表项 = 纸娃娃预览 + 名字 + 难度颜色角标
+// 移植 UICharacterListItem.cs：列表项 = 纸娃娃预览 + 名字 + 难度颜色
 import { UIElement } from '../core/UIElement';
 import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch } from '../draw/UISpriteBatch';
@@ -28,7 +28,6 @@ export class UICharacterListItem extends UIElement {
     this.nameText.setTextColor({ ...rgb(dc.r, dc.g, dc.b), a: 255 });
     this.append(this.nameText);
 
-    // 点击/双击（命中整个条目）
     this.onClick(() => onClick());
     this.onDoubleClick(() => onDoubleClick());
   }
