@@ -20,6 +20,8 @@ import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
+import { scanScene, type SceneFlags } from '../world/SceneMetrics';
+import { pickMusic, newMusicState, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
@@ -56,12 +58,23 @@ import { MagicProj } from '../entities/MagicProj';
 
 const FIXED_DT = 1 / 60;
 
+/** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
+function compactByLife<T extends { life: number }>(list: T[]): void {
+  let w = 0;
+  for (let r = 0; r < list.length; r++) {
+    if (list[r].life > 0) list[w++] = list[r];
+  }
+  list.length = w;
+}
+
 export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
   onBuffsChanged?: () => void;
   onDayNight?: (isDay: boolean) => void;
+  /** 环境选曲变化（MusicID；0=静音）。原版 UpdateAudio_DecideOnNewMusic 驱动 */
+  onMusic?: (musicId: number) => void;
 }
 
 export class Game implements GameHooks {
@@ -177,6 +190,10 @@ export class Game implements GameHooks {
   private housingCheckTimer = 0;
   guideSpawned = false;
   private lastWasDay: boolean | null = null;
+  /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
+  scene: SceneFlags = { tileX: 0, tileY: 0, belowSurface: false, zoneSkyHeight: false, zoneOverworldHeight: false, zoneDirtLayerHeight: false, zoneRockLayerHeight: false, zoneUnderworldHeight: false, zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false, zoneSnow: false, zoneDesert: false, zoneGlowshroom: false, zoneMeteor: false, zoneGraveyard: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false, zoneUndergroundDesert: false, townNPCCount: 0 };
+  private musicState: MusicState = newMusicState();
+  private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
   /** 地图内按压起点（松开时与当前位置比对 <6px 判定为点击，否则是拖动） */
@@ -191,6 +208,10 @@ export class Game implements GameHooks {
   minecart: import('../entities/Minecart').Minecart | null = null;
   trapCooldown = new Map<string, number>();
   plateLatch = new Set<string>();
+  /** 压板/测重板每 tick 复用缓冲(2026-08 审计 G9,清零复用) */
+  private _platePressed = new Set<string>();
+  private _weightedStanding = new Set<number>();
+  private _entityPlatePressed = new Set<string>();
   /** 电路系统(Wiring.cs 移植) */
   wiring: Wiring | null = null;
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
@@ -416,6 +437,26 @@ export class Game implements GameHooks {
         this.triggerDayNightSensors();
       }
       this.lastWasDay = isDay;
+    }
+    // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
+    if (this.tickCount % 15 === 0) {
+      const townNPCCount = this.entities.npcs.filter((n) => !(n as TownNPC).dead).length;
+      this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount);
+      let bossNearby = false;
+      for (const e of this.entities.enemies) {
+        const en = e as unknown as { x: number; y: number; def?: { boss?: boolean } };
+        if (en.def?.boss && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) { bossNearby = true; break; }
+      }
+      const music = pickMusic({
+        scene: this.scene, isDay, bossNearby,
+        worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
+        maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
+        state: this.musicState,
+      });
+      if (music !== this.lastMusic) {
+        this.lastMusic = music;
+        this.cb.onMusic?.(music);
+      }
     }
     const player = this.player;
 
@@ -708,13 +749,14 @@ export class Game implements GameHooks {
       }
       p.x = nx; p.y = ny;
     }
-    this.particles = this.particles.filter((p) => p.life > 0);
+    // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
+    compactByLife(this.particles);
     for (const d of this.dmgNumbers) {
       d.life--;
       d.y += d.vy;
       d.vy *= 0.94;
     }
-    this.dmgNumbers = this.dmgNumbers.filter((d) => d.life > 0);
+    compactByLife(this.dmgNumbers);
 
     inp.endFrame();
 
@@ -1603,7 +1645,8 @@ export class Game implements GameHooks {
     const p = this.player;
     const x0 = Math.floor(p.x / TILE), x1 = Math.floor((p.x + p.w - 1) / TILE);
     const y0 = Math.floor(p.y / TILE), y1 = Math.floor((p.y + p.h - 1) / TILE);
-    const pressed = new Set<string>();
+    // 复用 Set(2026-08 审计 G9:此前每 tick new Set + [...spread],60Hz 恒定分配)
+    const pressed = this._platePressed; pressed.clear();
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
         if (this.wiring?.sheetOf(tx, ty) === 135) {
@@ -1614,7 +1657,8 @@ export class Game implements GameHooks {
       }
     }
     for (const key of pressed) this.plateLatch.add(key);
-    for (const key of [...this.plateLatch]) {
+    // Set 迭代中删除当前元素是安全的——省去 [...spread] 复制
+    for (const key of this.plateLatch) {
       if (!pressed.has(key)) this.plateLatch.delete(key);
     }
   }
@@ -1627,7 +1671,7 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const p = this.player;
     // 测重板:玩家 AABB 覆盖格(原版 PressurePlateHelper 16×10 底部判定)
-    const standing = new Set<number>();
+    const standing = this._weightedStanding; standing.clear();
     const px0 = Math.floor(p.x / TILE), px1 = Math.floor((p.x + p.w - 1) / TILE);
     const py0 = Math.floor(p.y / TILE), py1 = Math.floor((p.y + p.h - 1) / TILE);
     for (const idx of this.triggerTiles428) {
@@ -1681,7 +1725,7 @@ export class Game implements GameHooks {
   private updateEntityPlates(): void {
     const w = this.wiring;
     if (!w) return;
-    const pressed = new Set<string>();
+    const pressed = this._entityPlatePressed; pressed.clear();
     const scan = (e: Entity, checkPad: boolean) => {
       const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 1) / TILE);
       const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 1) / TILE);
@@ -1702,7 +1746,7 @@ export class Game implements GameHooks {
       if ((e as TrapShot).kind === 'boulder') scan(e, true);
     }
     for (const key of pressed) this.entityPlateLatch.add(key);
-    for (const key of [...this.entityPlateLatch]) {
+    for (const key of this.entityPlateLatch) {
       if (!pressed.has(key)) this.entityPlateLatch.delete(key);
     }
   }
@@ -2207,6 +2251,10 @@ export class Game implements GameHooks {
     if (id === undefined) return null;
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     this.entities.add(drop, 'drops');
+    // 原版 Main.item 槽位上限 400,超出移除最旧掉落(Main.UpdateItems 空 slot 回收)——
+    // 此前无上限:dev 模式一次 ~500 实体/雕像农场线性堆积(2026-08 审计 #10)
+    const drops = this.entities.drops;
+    while (drops.length > 400) drops.shift();
     return drop;
   }
 
@@ -2681,6 +2729,7 @@ export class Game implements GameHooks {
   render() {
     const cam = this.camera;
     const L = this.lighting;
+    this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
     this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
     // 导线可见性:手持电路工具(mech)或 F7 强制(Main.cs:43548 DrawWires 开关语义)
     const held = this.player.inv.heldItem();

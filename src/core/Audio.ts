@@ -1,57 +1,102 @@
-// 音频系统：BGM（标题曲/主曲）循环播放 + 音量/静音开关
-// 音乐来自 Terraia_Maples 项目资源
+// 原版 BGM 系统（LegacyAudioSystem.cs 交叉淡化语义 1:1）：
+// BGM 池按 MusicID 懒建 <audio loop>（audios/music/Music_<id>.ogg，tools/xwb-extract.mjs
+// 从原版 XACT Wave Bank 提取），musicFade[id] ±0.005/帧 逼近目标曲（:281 UpdateCommonTrack /
+// :309 UpdateCommonTrackTowardStopping，60fps ≈ 3.3s 完成淡入）。
+// Maples main/title.mp3 已弃用：标题页用原版 Title(JourneysBeginningWithIntro=50)，
+// 游戏内曲目由 Music.pickMusic 按环境选择链驱动。
+import { MUSIC } from '../data/Music';
+
+const TITLE_ID = MUSIC.TitleIntro; // 50
+
+interface Track {
+  el: HTMLAudioElement;
+  fade: number;   // 0..1（≈原版 Main.musicFade[id]）
+}
+
 export class AudioSystem {
-  private current: HTMLAudioElement | null = null;
-  private title: HTMLAudioElement;
-  private main: HTMLAudioElement;
+  private pool = new Map<number, Track>();
+  /** 目标曲目（≈原版 Main.curMusic；0 = 静音） */
+  curMusic = 0;
   muted = false;
-  /** 主音量 0..1（M6 设置页） */
+  /** 音乐音量 0..1（options.musicVol，M6 设置页） */
   volume = 0.35;
-  private night = false;
+  private rafId = 0;
+  private lastTs = 0;
 
   constructor() {
-    this.title = new Audio('audios/title.mp3');
-    this.main = new Audio('audios/main.mp3');
-    for (const a of [this.title, this.main]) {
-      a.loop = true;
-      a.volume = this.volume;
+    this.startLoop();
+  }
+
+  private track(id: number): Track {
+    let t = this.pool.get(id);
+    if (!t) {
+      const el = new Audio(`audios/music/Music_${id}.mp3`);
+      el.loop = true;
+      el.volume = 0;
+      t = { el, fade: 0 };
+      this.pool.set(id, t);
+    }
+    return t;
+  }
+
+  /** rAF 驱动淡化（原版按游戏帧 ±0.005，这里按 60fps 归一时间步进） */
+  private startLoop() {
+    if (this.rafId) return;
+    const step = (ts: number) => {
+      const dt = this.lastTs ? Math.min(100, ts - this.lastTs) : 16.7;
+      this.lastTs = ts;
+      const frames = dt / (1000 / 60);
+      this.tickFade(frames * 0.005);
+      this.rafId = requestAnimationFrame(step);
+    };
+    this.rafId = requestAnimationFrame(step);
+  }
+
+  /** 步进淡化量 d（0.005/帧）：目标曲 fade+=d 至 1，其余 -=d 至 0 并停播 */
+  private tickFade(d: number) {
+    if (this.muted) {
+      for (const t of this.pool.values()) {
+        if (t.fade > 0) { t.fade = 0; t.el.volume = 0; t.el.pause(); }
+      }
+      return;
+    }
+    for (const [id, t] of this.pool) {
+      const target = id === this.curMusic ? 1 : 0;
+      if (t.fade < target) {
+        t.fade = Math.min(target, t.fade + d);
+        if (t.el.paused) t.el.play().catch(() => { /* 手势前播放被拒，淡入重试 */ });
+      } else if (t.fade > target) {
+        t.fade = Math.max(target, t.fade - d);
+        if (t.fade === 0) { t.el.pause(); continue; }
+      }
+      t.el.volume = Math.min(1, t.fade) * this.volume;
     }
   }
 
   setVolume(v: number) {
     this.volume = Math.max(0, Math.min(1, v));
-    this.applyVolume();
   }
 
-  private applyVolume() {
-    // 夜晚变奏保持相对更低音量（0.2/0.35 ≈ 0.57 倍）
-    const base = this.night ? this.volume * 0.57 : this.volume;
-    this.main.volume = base;
-    this.title.volume = this.volume;
+  /** 切换目标曲目（≈原版 curMusic 赋值；实际音量由淡化循环渐变） */
+  playMusic(id: number) {
+    if (this.muted) return;
+    if (this.curMusic === id) return;
+    this.curMusic = id;
+    if (id !== 0) this.track(id); // 预建元素开始缓冲
   }
 
+  /** 兼容旧调用：'title' = 原版标题曲；'main' = 交由环境选曲接管（此处仅解除标题曲） */
   play(which: 'title' | 'main') {
     if (this.muted) return;
-    const next = which === 'title' ? this.title : this.main;
-    if (this.current === next) return;
-    this.current?.pause();
-    this.current = next;
-    next.currentTime = 0;
-    this.applyVolume();
-    next.play().catch(() => { /* 浏览器需用户交互后才能播放，忽略 */ });
+    if (which === 'title') this.playMusic(TITLE_ID);
+    else if (this.curMusic === TITLE_ID) this.playMusic(0);
   }
 
-  /** 昼夜 BGM 变奏：白天正常速度，夜晚放慢+降调+减音量 */
-  setDayNight(isDay: boolean) {
-    if (this.muted) return;
-    this.night = !isDay;
-    this.main.playbackRate = isDay ? 1 : 0.88;
-    this.applyVolume();
-  }
+  /** 旧昼夜变奏钩子：曲目切换已由选曲链接管（昼/夜曲不同 id），无操作 */
+  setDayNight(_isDay: boolean) { /* no-op */ }
 
   stop() {
-    this.current?.pause();
-    this.current = null;
+    this.curMusic = 0;
   }
 
   toggleMute(): boolean {

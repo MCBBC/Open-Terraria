@@ -25,10 +25,13 @@ describe('真实 .wld 地图导入（用户提供）', () => {
     expect(solid + empty).toBeGreaterThan(100);
 
     // 完整导入链路
-    const save = parseWldToSave(buf);
+    const { save, seedText, gameMode } = parseWldToSave(buf);
     const { world } = loadSave(JSON.stringify(save));
     expect(world.w).toBe(wld.tilesWide);
     expect(world.chests.length).toBe(wld.chests.length);
+    // 槽位登记元数据（WldParser gameMode / wld seed 原文）
+    expect(typeof seedText).toBe('string');
+    expect(gameMode).toBeGreaterThanOrEqual(0);
 
     // ---- 方向性校验（防转置/面条 bug 回归）----
     // 1) 出生点所在列：地面线以上应几乎全是空气

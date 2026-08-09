@@ -34,6 +34,11 @@ const ARM_FRAME: ReadonlyArray<readonly [number, number]> = [
   [5, 1], [6, 1], [6, 1], [5, 1], [3, 1], [3, 1],
 ];
 
+/** GetHairSettings（1456 Player.cs:16645-16760，switch(head) 精确提取）：
+ *  fullHair 头盔露出完整发型 / hatHair 露出特制帽子发型(Player_HairAlt) / 其余完全隐藏 */
+const FULL_HAIR_HEADS = new Set([10, 12, 28, 42, 62, 97, 106, 113, 116, 119, 133, 138, 139, 163, 178, 181, 191, 198, 217, 218, 220, 222, 224, 225, 228, 229, 230, 232, 235, 238, 242, 243, 244, 245, 272, 273, 274, 277, 284, 290]);
+const HAT_HAIR_HEADS = new Set([13, 14, 15, 16, 18, 21, 24, 25, 26, 29, 40, 44, 51, 56, 59, 60, 63, 64, 65, 67, 68, 69, 81, 92, 94, 95, 100, 114, 121, 126, 130, 136, 140, 143, 145, 158, 159, 161, 182, 184, 190, 195, 215, 216, 219, 223, 226, 227, 231, 233, 234, 262, 263, 264, 265, 267, 275, 279, 280, 281, 286, 289, 292]);
+
 const cache = new Map<string, HTMLCanvasElement>();
 const tintCache = new Map<string, HTMLCanvasElement>();
 
@@ -86,10 +91,15 @@ export function compositePaperDoll(a: Appearance, equip?: { head?: number | null
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
 
-  // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
-  const hasBackHair = backHairDraw(a.hair);
-  const hairRect = UITextures.get(`Player_Hair_${a.hair + 1}.png`);
+  // 发型模式（GetHairSettings）：无头盔=完整；fullHair 头盔=完整；hatHair=帽子发型；其余=隐藏
+  const headIdx = equip?.head ?? 0;
+  const hairMode: 'full' | 'alt' | 'none' = headIdx === 0 || FULL_HAIR_HEADS.has(headIdx) ? 'full'
+    : HAT_HAIR_HEADS.has(headIdx) ? 'alt' : 'none';
+  const hairSrc = hairMode === 'alt' ? `Player_HairAlt_${a.hair + 1}.png` : `Player_Hair_${a.hair + 1}.png`;
+  const hasBackHair = hairMode !== 'none' && backHairDraw(a.hair);
+  const hairRect = hairMode !== 'none' ? UITextures.get(hairSrc) : null;
   const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;
+  // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
   if (hairTinted && hasBackHair) {
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));

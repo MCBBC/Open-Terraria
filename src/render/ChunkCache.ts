@@ -30,6 +30,9 @@ export class ChunkCache {
   autotiler: AutoTiler | null;
   wallTiler: VanillaWallTiler | null;
   truncatesWalls: number[] = [];
+  /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
+   *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
+  static readonly MAX_CHUNKS = 384;
 
   constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null) {
     this.world = world;
@@ -86,13 +89,24 @@ export class ChunkCache {
     }
   }
 
-  /** 取 chunk 双层画布（惰性生成） */
+  /** 取 chunk 双层画布（惰性生成，LRU 淘汰最久未用） */
   get(cx: number, cy: number): ChunkPair {
     const k = ChunkCache.key(cx, cy);
     let c = this.chunks.get(k);
-    if (c) return c;
+    if (c) {
+      // LRU:命中即刷新 recency(delete+set 移到 Map 尾部)。渲染循环每帧都 get
+      // 可视 chunk,故屏上 chunk 永远最新、不会被误淘汰
+      this.chunks.delete(k);
+      this.chunks.set(k, c);
+      return c;
+    }
     c = this.renderChunk(cx, cy);
     this.chunks.set(k, c);
+    while (this.chunks.size > ChunkCache.MAX_CHUNKS) {
+      const oldest = this.chunks.keys().next().value as number | undefined;
+      if (oldest === undefined) break;
+      this.chunks.delete(oldest);
+    }
     return c;
   }
 

@@ -185,13 +185,19 @@ for (const rel of uiList) {
   uiOut.files[key] = `vanilla-ui/${key}`;
   uiCopied++;
 }
-// 发型表（228 张，逐张单文件）
+// 发型表（228 张，逐张单文件）+ 帽子发型（Player_HairAlt，hatHair 头盔露出用）
 for (let i = 1; i <= 228; i++) {
   const src = join(ASSETS, `Player_Hair_${i}.png`);
   if (!existsSync(src)) { uiMissing.push(`Player_Hair_${i}`); continue; }
   copyFileSync(src, join(UI_OUT_DIR, `Player_Hair_${i}.png`));
   uiOut.files[`Player_Hair_${i}.png`] = `vanilla-ui/Player_Hair_${i}.png`;
   uiCopied++;
+  const altSrc = join(ASSETS, `Player_HairAlt_${i}.png`);
+  if (existsSync(altSrc)) {
+    copyFileSync(altSrc, join(UI_OUT_DIR, `Player_HairAlt_${i}.png`));
+    uiOut.files[`Player_HairAlt_${i}.png`] = `vanilla-ui/Player_HairAlt_${i}.png`;
+    uiCopied++;
+  }
 }
 // 玩家身体帧表（skinVariant_clothStyle，40×~1120 = 20 帧×56px，灰度通道素材供纸娃娃调色）
 for (let v = 0; v <= 11; v++) {

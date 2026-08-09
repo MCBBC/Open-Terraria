@@ -22,6 +22,19 @@ function waterSheet(vt: number): string {
   return vt === 1 ? 'vanilla/Misc_water_1.png' : vt === 2 ? 'vanilla/Misc_water_11.png' : 'vanilla/Misc_water_0.png';
 }
 
+// ---- 类型数组池(2026-08 审计 G1):此前每 pass 分配 24 个数组 ×2 pass/帧
+// ≈ 744KB/帧 ≈ 45MB/s 的 GC 压力。容量只增不减;每调用前 fill(0) 保持与
+// "新分配数组"完全相同的语义(未写格一律 0) ----
+let _liqCap = 0;
+let _level: Float32Array, _visLevel: Float32Array, _opacity: Float32Array;
+let _isSolidA: Uint8Array, _hasLiquidA: Uint8Array, _hasWallA: Uint8Array;
+let _hasVisA: Uint8Array, _typeA: Uint8Array, _visTypeA: Uint8Array;
+let _lW: Float32Array, _rW: Float32Array, _bW: Float32Array, _tW: Float32Array;
+let _vlW: Float32Array, _vrW: Float32Array, _vbW: Float32Array, _vtW: Float32Array;
+let _hasLE: Uint8Array, _hasRE: Uint8Array, _hasTE: Uint8Array, _hasBE: Uint8Array;
+let _isHalfA: Uint8Array;
+let _fx: Int16Array, _fy: Int16Array;
+
 export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
@@ -33,15 +46,37 @@ export function drawVanillaLiquids(
   const px0 = tx0 - PAD, py0 = ty0 - PAD;
   const pw = tx1 - tx0 + 1 + PAD * 2, ph = ty1 - ty0 + 1 + PAD * 2;
   const n = pw * ph;
-  // 平行类型数组（每帧分配，视图 ~5000 格，量级可控）
-  const level = new Float32Array(n), visLevel = new Float32Array(n), opacity = new Float32Array(n).fill(1);
-  const isSolidA = new Uint8Array(n), hasLiquidA = new Uint8Array(n), hasWallA = new Uint8Array(n);
-  const hasVisA = new Uint8Array(n), typeA = new Uint8Array(n), visTypeA = new Uint8Array(n);
-  const lW = new Float32Array(n), rW = new Float32Array(n), bW = new Float32Array(n), tW = new Float32Array(n);
-  const vlW = new Float32Array(n), vrW = new Float32Array(n), vbW = new Float32Array(n), vtW = new Float32Array(n);
-  const hasLE = new Uint8Array(n), hasRE = new Uint8Array(n), hasTE = new Uint8Array(n), hasBE = new Uint8Array(n);
-  const isHalfA = new Uint8Array(n);
-  const fx = new Int16Array(n), fy = new Int16Array(n);
+  if (n > _liqCap) {
+    // 只增不减(缩放变化按最大视图分配一次)
+    _liqCap = n;
+    _level = new Float32Array(n); _visLevel = new Float32Array(n); _opacity = new Float32Array(n);
+    _isSolidA = new Uint8Array(n); _hasLiquidA = new Uint8Array(n); _hasWallA = new Uint8Array(n);
+    _hasVisA = new Uint8Array(n); _typeA = new Uint8Array(n); _visTypeA = new Uint8Array(n);
+    _lW = new Float32Array(n); _rW = new Float32Array(n); _bW = new Float32Array(n); _tW = new Float32Array(n);
+    _vlW = new Float32Array(n); _vrW = new Float32Array(n); _vbW = new Float32Array(n); _vtW = new Float32Array(n);
+    _hasLE = new Uint8Array(n); _hasRE = new Uint8Array(n); _hasTE = new Uint8Array(n); _hasBE = new Uint8Array(n);
+    _isHalfA = new Uint8Array(n);
+    _fx = new Int16Array(n); _fy = new Int16Array(n);
+  }
+  // 归零(等价新分配数组;未写格语义为 0)。
+  // 例外:opacity 原为 .fill(1)——P3 只写到 ph-10 行,底缘 8 行依赖初始 1,
+  // 必须保持 fill(1) 否则视口底缘水体透明度归零(渲染结果变化)
+  _level.fill(0); _visLevel.fill(0); _opacity.fill(1);
+  _isSolidA.fill(0); _hasLiquidA.fill(0); _hasWallA.fill(0);
+  _hasVisA.fill(0); _typeA.fill(0); _visTypeA.fill(0);
+  _lW.fill(0); _rW.fill(0); _bW.fill(0); _tW.fill(0);
+  _vlW.fill(0); _vrW.fill(0); _vbW.fill(0); _vtW.fill(0);
+  _hasLE.fill(0); _hasRE.fill(0); _hasTE.fill(0); _hasBE.fill(0);
+  _isHalfA.fill(0);
+  _fx.fill(0); _fy.fill(0);
+  const level = _level, visLevel = _visLevel, opacity = _opacity;
+  const isSolidA = _isSolidA, hasLiquidA = _hasLiquidA, hasWallA = _hasWallA;
+  const hasVisA = _hasVisA, typeA = _typeA, visTypeA = _visTypeA;
+  const lW = _lW, rW = _rW, bW = _bW, tW = _tW;
+  const vlW = _vlW, vrW = _vrW, vbW = _vbW, vtW = _vtW;
+  const hasLE = _hasLE, hasRE = _hasRE, hasTE = _hasTE, hasBE = _hasBE;
+  const isHalfA = _isHalfA;
+  const fx = _fx, fy = _fy;
 
   // ---- P1：原始缓存 ----
   for (let lx = 0; lx < pw; lx++) {

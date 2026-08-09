@@ -4,7 +4,7 @@ import { Game } from './core/Game';
 import { UI } from './ui/UI';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
-import { saveGame, loadSave } from './save/SaveFile';
+import { saveGame, loadSave, loadSaveData } from './save/SaveFile';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { parseWldToSave } from './wld/WldImport';
@@ -43,6 +43,7 @@ export interface FlowHandle {
 
 export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI, audio: AudioSystem): FlowHandle {
   let game: Game | null = null;
+  (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
   let playStart = 0;
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;
@@ -104,6 +105,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
       onDayNight: (isDay) => audio.setDayNight(isDay),
+      onMusic: (id) => audio.playMusic(id),
     }, atlas);
     return g;
   }
@@ -149,17 +151,34 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function importWld(buf: Uint8Array) {
     ui.showProgress('正在解析 .wld 地图…', 0.1);
     try {
-      const { save, report } = parseWldToSave(buf);
+      const { save, report, seedText, gameMode } = parseWldToSave(buf);
       (window as unknown as { __lastCompatReport?: unknown }).__lastCompatReport = report;
       ui.showProgress('正在转换世界…', 0.7);
       const g = makeGame();
-      const { world } = loadSave(JSON.stringify(save));
+      // 直接消费内存 SaveData(2026-08 审计 #3:此前的 stringify→parse 双拷贝
+      // 每次导入多出 2×20~50MB 峰值,且让 5 份全图副本并存更久)
+      const { world } = loadSaveData(save);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.7 + p * 0.3));
       g.player.inv.add(ITEM_BY_KEY['copper_pickaxe'], 1);
       g.player.inv.add(ITEM_BY_KEY['copper_axe'], 1);
       g.player.inv.add(ITEM_BY_KEY['copper_sword'], 1);
       g.player.inv.add(ITEM_BY_KEY['torch'], 20);
       ui.toast(`成功导入「${save.header.name}」(v${save.header.wldVersion})`);
+      // 登记世界槽位并持久化：导入不再是一次性的，重进游戏可在世界列表中看到并继续游玩
+      await worldStore.ensureLoaded();
+      const names = new Set(worldStore.list().map((m) => m.name));
+      let name = save.header.name;
+      if (names.has(name)) {
+        let i = 2;
+        while (names.has(`${name} (${i})`)) i++;
+        name = `${name} (${i})`;
+      }
+      currentWorld = await worldStore.register({
+        name, seed: seedText || String(save.header.seed),
+        w: save.header.width, h: save.header.height,
+        difficulty: gameMode, evil: save.header.crimson ? 1 : 0,
+      });
+      doSave();
       // 兼容报告：有降级/跳过内容时弹窗
       const rpt = (window as unknown as { __lastCompatReport?: import('./ui/UI').CompatReport }).__lastCompatReport;
       if (rpt && (rpt.tilesDegraded.length || rpt.tilesCleared.length || rpt.itemsSkipped.length)) {

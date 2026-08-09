@@ -32,6 +32,8 @@ export interface WldWorld {
   dayTime: boolean;
   isCrimson: boolean;
   hardMode: boolean;
+  /** 原版 gameMode（0 经典 1 专家 2 大师 3 旅程；v<209 无此字段=0） */
+  gameMode: number;
   treeX: number[];
   treeStyle: number[];
   treeTops: number[];
@@ -89,8 +91,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const tilesHigh = r.i32();
   const tilesWide = r.i32();
   // gameMode
+  let gameMode = 0;
   if (version >= 209) {
-    r.i32();
+    gameMode = r.i32();
     if (version >= 222) r.boolean(); // drunk
     if (version >= 227) r.boolean(); // good
     if (version >= 238) r.boolean();
@@ -265,7 +268,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
 
   return {
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY,
-    groundLevel, rockLevel, time, dayTime, isCrimson, hardMode,
+    groundLevel, rockLevel, time, dayTime, isCrimson, hardMode, gameMode,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
   };

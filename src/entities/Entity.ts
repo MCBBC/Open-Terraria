@@ -24,6 +24,16 @@ export abstract class Entity {
   }
 }
 
+/** 就地剔除 dead 实体(保持顺序,零分配) */
+function compact(list: Entity[]): void {
+  let w = 0;
+  for (let r = 0; r < list.length; r++) {
+    const e = list[r];
+    if (!e.dead) list[w++] = e;
+  }
+  list.length = w;
+}
+
 export class EntityManager {
   nextId = 1;
   enemies: Entity[] = [];
@@ -39,15 +49,11 @@ export class EntityManager {
   }
 
   update(dt: number, game: GameHooks) {
+    // 就地压缩替代 6×filter(2026-08 审计 G9:每 tick 6 个新数组,60Hz 恒定分配)
     for (const list of [this.enemies, this.drops, this.npcs, this.projectiles, this.props, this.critters]) {
       for (const e of list) e.fixedUpdate(dt, game);
+      compact(list);
     }
-    this.enemies = this.enemies.filter((e) => !e.dead);
-    this.drops = this.drops.filter((e) => !e.dead);
-    this.npcs = this.npcs.filter((e) => !e.dead);
-    this.projectiles = this.projectiles.filter((e) => !e.dead);
-    this.props = this.props.filter((e) => !e.dead);
-    this.critters = this.critters.filter((e) => !e.dead);
   }
 
   clear() {

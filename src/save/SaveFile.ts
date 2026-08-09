@@ -4,19 +4,41 @@ import { World as WorldClass } from '../world/World';
 import type { Player } from '../entities/Player';
 
 // ---- varint / base64 工具 ----
-function writeVarint(out: number[], v: number) {
-  v = v < 0 ? 0 : v;
-  while (v >= 0x80) {
-    out.push((v & 0x7f) | 0x80);
-    v >>>= 7;
+// 性能(2026-08 审计 #2):RLE 输出此前是裸 number[](boxed,8B/元素,push 增长),
+// 6400×1800 世界存档瞬时 64~192MB;现改为密度增长的 Uint8Array(varint 字节流,
+// 输出字节与旧实现逐位一致,存档格式不变)
+class ByteWriter {
+  buf = new Uint8Array(1 << 16);
+  len = 0;
+  private grow(need: number) {
+    if (this.len + need <= this.buf.length) return;
+    let cap = this.buf.length;
+    while (cap < this.len + need) cap *= 2;
+    const nb = new Uint8Array(cap);
+    nb.set(this.buf.subarray(0, this.len));
+    this.buf = nb;
   }
-  out.push(v);
+  varint(v: number) {
+    v = v < 0 ? 0 : v;
+    this.grow(5);  // 32 位 varint 至多 5 字节
+    while (v >= 0x80) {
+      this.buf[this.len++] = (v & 0x7f) | 0x80;
+      v >>>= 7;
+    }
+    this.buf[this.len++] = v;
+  }
+  bytes(): Uint8Array {
+    return this.buf.subarray(0, this.len);
+  }
 }
 
-export function bytesToB64(bytes: number[]): string {
-  const u8 = new Uint8Array(bytes);
+export function bytesToB64(u8: Uint8Array): string {
+  // 分块拼接(8192)避免逐字符 += 的 ConsString 链;输出与逐字符版一致
   let s = '';
-  for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]);
+  const CH = 8192;
+  for (let i = 0; i < u8.length; i += CH) {
+    s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CH, u8.length)) as unknown as number[]);
+  }
   return btoa(s);
 }
 
@@ -69,38 +91,38 @@ export interface SaveData {
   flags: Record<string, boolean>;
 }
 
-export function rlePairs(values: ArrayLike<number>): number[] {
-  const out: number[] = [];
+export function rlePairs(values: ArrayLike<number>): Uint8Array {
+  const out = new ByteWriter();
   const n = values.length;
   let i = 0;
   while (i < n) {
     const v = values[i];
     let run = 1;
     while (i + run < n && values[i + run] === v && run < 0x7fffffff) run++;
-    writeVarint(out, run - 1);
-    writeVarint(out, v);
+    out.varint(run - 1);
+    out.varint(v);
     i += run;
   }
-  return out;
+  return out.bytes();
 }
 
-export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array }): number[] {
-  const out: number[] = [];
+export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array }): Uint8Array {
+  const out = new ByteWriter();
   const n = st.type.length;
   let i = 0;
   while (i < n) {
     const t = st.type[i], fx = st.frameX[i], fy = st.frameY[i];
     let run = 1;
     while (i + run < n && st.type[i + run] === t && st.frameX[i + run] === fx && st.frameY[i + run] === fy) run++;
-    writeVarint(out, run - 1);
-    writeVarint(out, t);
+    out.varint(run - 1);
+    out.varint(t);
     if (t !== 0) {
-      writeVarint(out, fx);
-      writeVarint(out, fy);
+      out.varint(fx);
+      out.varint(fy);
     }
     i += run;
   }
-  return out;
+  return out.bytes();
 }
 
 export function saveGame(world: World, player: Player, playTimeMs: number): string {
@@ -138,8 +160,13 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
   return JSON.stringify(data);
 }
 
-export function loadSave(json: string): { world: World; player: { hp: number; x: number; y: number; inventory: Array<{ id: number; stack: number } | null>; selected: number } } {
-  const data = JSON.parse(json) as SaveData;
+export function loadSave(json: string): ReturnType<typeof loadSaveData> {
+  return loadSaveData(JSON.parse(json) as SaveData);
+}
+
+/** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
+ *  2026-08 审计 #3:该往返单次 20~50MB×2) */
+export function loadSaveData(data: SaveData): { world: World; player: { hp: number; x: number; y: number; inventory: Array<{ id: number; stack: number } | null>; selected: number } } {
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
   world.spawnX = data.header.spawn[0];
   world.spawnY = data.header.spawn[1];

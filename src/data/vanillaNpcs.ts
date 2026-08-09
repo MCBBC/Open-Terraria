@@ -32,15 +32,22 @@ const vanillaItemKey = (() => {
   };
 })();
 
-/** npc id → 本仓库可用的掉落表（{item: key, chance, min, max}[]；未注册物品过滤） */
+/** npc id → 本仓库可用的掉落表（{item: key, chance, min, max}[]；未注册物品过滤）。
+ *  按 id 缓存(2026-08 审计 #9):此前每只怪新建数组+对象——掉落表只读,
+ *  共享实例即可(蠕虫 30 段 = 30 份克隆纯属浪费) */
+const _dropsCache = new Map<number, Array<{ item: string; min: number; max: number; chance: number }>>();
 export function vanillaNpcDrops(id: number): Array<{ item: string; min: number; max: number; chance: number }> {
+  const hit = _dropsCache.get(id);
+  if (hit) return hit;
   const raw = VANILLA_NPC_LOOT[String(id)];
-  if (!raw) return [];
   const out: Array<{ item: string; min: number; max: number; chance: number }> = [];
-  for (const d of raw) {
-    const key = vanillaItemKey(d.item);
-    if (key) out.push({ item: key, min: d.min, max: d.max, chance: d.chance });
+  if (raw) {
+    for (const d of raw) {
+      const key = vanillaItemKey(d.item);
+      if (key) out.push({ item: key, min: d.min, max: d.max, chance: d.chance });
+    }
   }
+  _dropsCache.set(id, out);
   return out;
 }
 

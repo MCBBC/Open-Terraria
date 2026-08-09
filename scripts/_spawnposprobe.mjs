@@ -38,7 +38,8 @@ const out = await page.evaluate(async () => {
     const halfW = Math.ceil(g.camera.viewW / (g.camera.zoom || 1) / 2 / 16);
     const halfH = Math.ceil(g.camera.viewH / (g.camera.zoom || 1) / 2 / 16);
     const ptx = Math.floor(g.player.cx / 16), pty = Math.floor(g.player.cy / 16);
-    rec.dTiles = Math.max(Math.abs(rec.x - ptx) - halfW, Math.abs(rec.y - pty) - halfH); // >0 屏外
+    const dxIn = Math.abs(rec.x - ptx) - halfW, dyIn = Math.abs(rec.y - pty) - halfH;
+    rec.dTiles = Math.max(dxIn, dyIn); // <0 = 两方向均屏内（视觉屏内）；原版 safeArea=任一方向出安全区即可
     spawnLog.push(rec);
     return origAdd(ent, bucket);
   };

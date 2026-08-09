@@ -31,6 +31,8 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 }
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { WaterfallRenderer } from './WaterfallRenderer';
+import { BiomeBackground } from './BiomeBackground';
+import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames } from '../data/vanillaNpcs';
@@ -43,6 +45,9 @@ import { Critter } from '../entities/Critter';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
+
+// 光照合成 4-tap 标量缓冲(替代每像素 [r,g,b] 元组,2026-08 审计 G2)
+const _lightTap = new Uint8Array(12);
 
 // ============ 原版 FindFrame 分族帧引擎（1.4.5.6 Terarria1456/Terraria/NPC.cs:67295+） ============
 // 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
@@ -185,6 +190,9 @@ export class Renderer {
   minimap: Minimap | null = null;
   /** 原版瀑布贴图系统（WaterfallManager 移植）：液体倾泻的长条水流柱 */
   waterfalls = new WaterfallRenderer();
+  /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
+  biomeBg = new BiomeBackground();
+  scene: SceneFlags | null = null;
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
   fullMap = {
@@ -292,6 +300,22 @@ export class Renderer {
 
     // 1. 天空
     this.sky.draw(ctx, clock, viewW, viewH, cam.x);
+
+    // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
+    if (this.scene) {
+      // 昼夜色调（≈ColorOfTheSkies：白天白、夜晚压暗偏蓝、晨昏暖色）
+      const df = clock.dayFactor;
+      const t = clock.timeOfDay;
+      let tr = 1, tg = 1, tb = 1;
+      if (df < 1) {
+        const dusk = t > 0.68 && t < 0.82 ? 1 - Math.abs(t - 0.75) / 0.07 : t > 0.18 && t < 0.32 ? 1 - Math.abs(t - 0.25) / 0.07 : 0;
+        const night = 1 - df;
+        tr = 1 - 0.70 * night + 0.10 * dusk;
+        tg = 1 - 0.66 * night - 0.22 * dusk;
+        tb = 1 - 0.50 * night - 0.40 * dusk;
+      }
+      this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
+    }
 
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
@@ -552,6 +576,8 @@ export class Renderer {
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;
+  /** 光照合成 ImageData 复用(尺寸变化才重建) */
+  private _lightImg: ImageData | null = null;
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
    *  优先原版 Tiles_85 样式块——四格 16×16 无缝拼到离屏画布再绘制
@@ -1167,13 +1193,6 @@ export class Renderer {
     return pad;
   }
 
-  /** 光照 gamma 曲线 LUT（指数 0.78）：提亮中间调，柔化光源边缘的"切黑"硬边 */
-  private static lightLUT: Uint8Array = (() => {
-    const t = new Uint8Array(256);
-    for (let i = 0; i < 256; i++) t[i] = Math.round(255 * Math.pow(i / 255, 0.78));
-    return t;
-  })();
-
   /** 全亮模式（F9）：跳过光照合成，画面无暗影 */
   fullbright = false;
 
@@ -1198,17 +1217,14 @@ export class Renderer {
       this.lightCanvas.height = h2;
     }
     const lc = this.lightCtx;
-    const img = lc.createImageData(w2, h2);
-    const lut = Renderer.lightLUT;
-    // tile 中心光值采样（区域外 0，由环境光下限兜底）
-    const tap = (gx: number, gy: number): [number, number, number] => {
-      const tx = tx0 + gx, ty = ty0 + gy;
-      if (tx >= rx && ty >= ry && tx < rx + rw && ty < ry + rh) {
-        const li = (ty - ry) * rw + (tx - rx);
-        return [lightR[li], lightG[li], lightB[li]];
-      }
-      return [0, 0, 0];
-    };
+    // ImageData 复用(尺寸不变时)——此前每帧 createImageData ≈87KB 分配
+    if (!this._lightImg || this._lightImg.width !== w2 || this._lightImg.height !== h2) {
+      this._lightImg = lc.createImageData(w2, h2);
+    }
+    const img = this._lightImg;
+    // 4 tap 双线性。此前 tap 每像素返回 4 个 [r,g,b] 元组 ≈ 5.3M 小对象/s
+    // (2026-08 审计 G2);现采样写入模块级标量缓冲,运算顺序不变、结果逐位一致
+    const tapBuf = _lightTap;
     for (let py = 0; py < h2; py++) {
       const gy = py / SS - 0.5;              // 亚格坐标（tile 中心在整数处）
       const y0 = Math.floor(gy), fy = gy - y0;
@@ -1217,18 +1233,28 @@ export class Renderer {
         const gx = px / SS - 0.5;
         const x0 = Math.floor(gx), fx = gx - x0;
         const wx0 = 1 - fx, wx1 = fx;
-        // 4 tap 双线性
-        const a = tap(x0, y0), b = tap(x0 + 1, y0), c = tap(x0, y0 + 1), d = tap(x0 + 1, y0 + 1);
         const w00 = wx0 * wy0, w10 = wx1 * wy0, w01 = wx0 * wy1, w11 = wx1 * wy1;
-        let r = a[0] * w00 + b[0] * w10 + c[0] * w01 + d[0] * w11;
-        let g = a[1] * w00 + b[1] * w10 + c[1] * w01 + d[1] * w11;
-        let b2 = a[2] * w00 + b[2] * w10 + c[2] * w01 + d[2] * w11;
-        // gamma 柔化 + 最低可见度
-        const amb = 10;
+        // 4 tap:每 tap 3 通道写 tapBuf[k..k+2],区域外 0(由环境光下限兜底)
+        for (let t = 0; t < 4; t++) {
+          const sx = x0 + (t & 1), sy = y0 + (t >> 1);
+          const tx = tx0 + sx, ty = ty0 + sy;
+          const k = t * 3;
+          if (tx >= rx && ty >= ry && tx < rx + rw && ty < ry + rh) {
+            const li = (ty - ry) * rw + (tx - rx);
+            tapBuf[k] = lightR[li]; tapBuf[k + 1] = lightG[li]; tapBuf[k + 2] = lightB[li];
+          } else {
+            tapBuf[k] = 0; tapBuf[k + 1] = 0; tapBuf[k + 2] = 0;
+          }
+        }
+        let r = tapBuf[0] * w00 + tapBuf[3] * w10 + tapBuf[6] * w01 + tapBuf[9] * w11;
+        let g = tapBuf[1] * w00 + tapBuf[4] * w10 + tapBuf[7] * w01 + tapBuf[10] * w11;
+        let b2 = tapBuf[2] * w00 + tapBuf[5] * w10 + tapBuf[8] * w01 + tapBuf[11] * w11;
+        // 原版语义:无 gamma LUT、无环境光下限(原版光照输出直乘;
+        // 夜晚亮度由天空种子+月相地板决定,洞穴真黑)
         const i = (py * w2 + px) * 4;
-        img.data[i] = Math.max(lut[Math.min(255, Math.round(r))], amb);
-        img.data[i + 1] = Math.max(lut[Math.min(255, Math.round(g))], amb);
-        img.data[i + 2] = Math.max(lut[Math.min(255, Math.round(b2))], amb);
+        img.data[i] = Math.min(255, Math.round(r));
+        img.data[i + 1] = Math.min(255, Math.round(g));
+        img.data[i + 2] = Math.min(255, Math.round(b2));
         img.data[i + 3] = 255;
       }
     }

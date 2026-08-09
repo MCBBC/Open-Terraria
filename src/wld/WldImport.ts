@@ -765,7 +765,7 @@ export interface CompatReport {
   tilesCleared: CompatEntry[];   // 映射为 null → 清空丢弃
   itemsSkipped: CompatEntry[];   // 宝箱内未映射物品 → 跳过
 }
-export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport }
+export interface ImportResult { save: SaveData; warnings: string[]; report: CompatReport; seedText: string; gameMode: number }
 
 export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wld: WldWorld = parseWld(buf);
@@ -906,7 +906,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   };
   void warnings;
   void chestAt;
-  return { save, warnings, report };
+  return { save, warnings, report, seedText: wld.seed, gameMode: wld.gameMode };
 }
 
 // 全量名称表（vanilla.json 生成时从 TEdit tiles/items.json 提取）

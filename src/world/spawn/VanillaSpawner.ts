@@ -63,7 +63,7 @@ export function rollCavernMonsterType(rng: RNG): void {
 
 // ---- 原版 netID（负数）→ SetDefaultsFromNetId（L7633-7820）：基底 id + scale + 属性覆盖 ----
 // scale/color/alpha 一律取源数据（public/sprites/vanilla-npcnetid.json，extract-npccolors.mjs 提取）
-import vanillaNetIdJson from '../../../public/sprites/vanilla-npcnetid.json';
+import vanillaNetIdJson from '../../data/vanilla-npcnetid.json';
 const NET_ID_OVERRIDE: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
 
 const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number }> = {
@@ -113,6 +113,8 @@ export class VanillaSpawner {
   private ZoneHallow = false; private ZoneJungle = false; private ZoneGlowshroom = false;
   private ZoneDungeon = false; private ZoneGraveyard = false; private ZoneBeach = false;
   private spawnTileX = 0; private spawnTileY = 0;
+  /** FindSpawnTile 的 xRange 输出（L911：落脚点横向在 safeArea 内，传给 SpawnAnNPC） */
+  private xRange = false;
   private spawnTileType = 0;
   /** 落脚点（Game 放置用） */
   currentSpawnX = 0;
@@ -199,34 +201,76 @@ export class VanillaSpawner {
   }
 
   // ---- FindSpawnTile（L879-920）----
+  /** FindSpawnTile（L879-927）+ GetSpawnArea（L841-877）1:1：
+   *  spawnArea = 玩家 ±(0.7×全屏格)（均匀取点，不是环带外扩！），
+   *  safeArea = 玩家 ±(0.52×全屏格)——生成点必须落在画面外（!safeArea.Contains）。
+   *  viewHalfW/H = 半屏格数 → 0.7×全屏 = ×1.4 半屏；0.52×全屏 = ×1.04 半屏 */
   private findSpawnTile(rng: RNG, viewHalfW: number, viewHalfH: number): boolean {
     const st = this.world.store;
     const px = this.pX, py = this.pY;
+    const rangeX = Math.max(1, Math.floor(viewHalfW * 1.4));
+    const rangeY = Math.max(1, Math.floor(viewHalfH * 1.4));
+    const safeX = Math.max(1, Math.floor(viewHalfW * 1.04));
+    const safeY = Math.max(1, Math.floor(viewHalfH * 1.04));
+    // WorldUtils.ClampToWorld
+    const areaL = Math.max(2, px - rangeX), areaR = Math.min(st.w - 3, px + rangeX);
+    const areaT = Math.max(2, py - rangeY), areaB = Math.min(st.h - 3, py + rangeY);
     for (let attempt = 0; attempt < 50; attempt++) {
-      // 生成区 = 视口外扩（原版 GetSpawnArea L841-877：±(viewHalfW+11~44) 随机）
-      const rngW = rng.int(viewHalfW + 11, viewHalfW + 44);
-      const rngH = rng.int(viewHalfH + 11, viewHalfH + 44);
-      let tx = px + rng.int(-rngW, rngW);
-      let ty = py + rng.int(-rngH, rngH);
-      if (tx < 2 || tx > st.w - 3 || ty < 2 || ty > st.h - 3) continue;
-      // 原版 L886：点在实心/房屋墙内 → 重试
+      const tx = rng.int(areaL, areaR);
+      let ty = rng.int(areaT, areaB);
+      // L886-888：点在实心格 → 重试（wallHouse 房屋墙检查我们无房屋墙数据，略）
       if (st.isSolid(tx, ty)) continue;
-      // skyMob 判定（L890-897）：高于地表 35% 且在世界两侧 45% 外 → 天空怪
-      this.skyMob = ty < this.world.groundLevel * 0.35 &&
-        (tx < st.w * 0.45 || tx > st.w * 0.55);
-      // L900-902：向下找第一个实心格 = 落脚面
-      if (!this.skyMob) {
+      this.skyMob = false;
+      // L890-897：天空怪——高于 worldSurface×0.35 且在世界两侧 45% 之外（肉前非 hardMode 分支）
+      if (ty < this.world.groundLevel * 0.35 && (tx < st.w * 0.45 || tx > st.w * 0.55)) {
+        this.skyMob = true;
+      } else {
+        // L900-906：向下找第一个实心格 = 落脚面（扫描上限 = spawnArea.Bottom，非世界底）
         let j = ty;
-        while (j < st.h - 2 && !st.isSolid(tx, j)) j++;
-        if (j >= st.h - 2) continue;
+        while (j < areaB && !st.isSolid(tx, j)) j++;
+        if (j >= areaB) continue;
         ty = j;
       }
-      // 落脚处 tile type = 下方实心格类型（原版 GetProperGroundSpawnTileTypeAndWallType）
+      // L910：safeArea 内（画面内）一律拒绝 + HasTileSpawnSpace 落点空间校验
+      if (Math.abs(tx - px) < safeX && Math.abs(ty - py) < safeY) continue;
+      if (!this.hasTileSpawnSpace(tx, ty)) continue;
+      // L911：xRange = 落脚点在 safeArea 横向范围内（原版传给 SpawnAnNPC 的水生成判定）
+      this.xRange = tx >= px - safeX && tx < px + safeX;
+      this.spawnTileX = tx; this.spawnTileY = ty;
+      // 落脚处 tile type（原版 GetProperGroundSpawnTileTypeAndWallType）
       const groundType = this.skyMob ? 0 : st.type[st.idx(tx, ty)];
       this.setFlagsForChosenTile(tx, ty, groundType);
       return true;
     }
     return false;
+  }
+
+  /** HasTileSpawnSpace（L5306+5330）：落脚格上方 spawnSpaceX=2 × spawnSpaceY=3 区域
+   *  逐格 CanSpawnInTile——非实心且非岩浆（防刷进实心/岩浆里） */
+  private hasTileSpawnSpace(tx: number, ty: number): boolean {
+    const st = this.world.store;
+    for (let dx = -1; dx <= 0; dx++) {
+      for (let dy = -3; dy <= -1; dy++) {
+        const x = tx + dx, y = ty + dy;
+        if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+        const i = st.idx(x, y);
+        if (st.isSolid(x, y)) return false;
+        if (st.liquid[i] > 0 && st.liquidType[i] === 2) return false;
+      }
+    }
+    return true;
+  }
+
+  /** CheckNotSpawningOnScreen（L5344-5366）像素级双保险：
+   *  落脚格 16×16 与"玩家屏幕 ±safeRange"矩形相交 → 拒绝。
+   *  注意原版单位混用（L5354）：safeRangeX/Y 是格数但直接当像素偏移加——实际外扩仅 ~2 格 */
+  private checkNotSpawningOnScreen(px: number, py: number, viewHalfW: number, viewHalfH: number): boolean {
+    const sW = viewHalfW * 2 * TILE, sH = viewHalfH * 2 * TILE;
+    const safePxX = viewHalfW * 1.04, safePxY = viewHalfH * 1.04; // 格数直接当像素（原版 L5354 原样）
+    const rectX = px - sW / 2 - safePxX, rectY = py - sH / 2 - safePxY;
+    const rectW = sW + safePxX * 2, rectH = sH + safePxY * 2;
+    const tX = this.spawnTileX * TILE, tY = this.spawnTileY * TILE;
+    return !(tX < rectX + rectW && tX + TILE > rectX && tY < rectY + rectH && tY + TILE > rectY);
   }
 
   // ---- SpawnAnNPC（L1186-5144）——肉前分支 1:1，hardMode 分支保留 ----
@@ -463,6 +507,8 @@ export class VanillaSpawner {
     this.noWorms = false;
     this.skyMob = false;
     if (!this.findSpawnTile(rng, viewHalfW, viewHalfH)) return null;
+    // TrySpawnAnNPC L220：CheckNotSpawningOnScreen 像素级二次校验（画面内/贴屏拒绝）
+    if (!this.checkNotSpawningOnScreen(playerX, playerY, viewHalfW, viewHalfH)) return null;
     this.currentSpawnX = this.spawnTileX;
     this.currentSpawnY = this.spawnTileY;
     // 探针调试覆盖：debugPoolOverride 非空时绕过原版链直接从池选（确定性验证）

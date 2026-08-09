@@ -209,8 +209,11 @@ export class LiquidSim {
         e.delay = 0;
       }
     } else {
-      // 水格：唤醒岩浆邻居，让对方自己的 Update 处理交互（Liquid.cs:342-349）
-      for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+      // 水格：唤醒岩浆邻居，让对方自己的 Update 处理交互（Liquid.cs:342-349）。
+      // 标量展开(2026-08 审计 G4):元组数组+迭代器在此热路径 ≈2.5M 对象/s
+      for (let t = 0; t < 4; t++) {
+        const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
+        const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
         if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
         const ni = this.idx(nx, ny);
         if (st.liquid[ni] > 0 && st.liquidType[ni] === 2) this.addWater(nx, ny);
@@ -222,8 +225,10 @@ export class LiquidSim {
           e.delay = 0;
         }
       } else {
-        // 唤醒蜂蜜邻居（Liquid.cs:365-372）
-        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]] as const) {
+        // 唤醒蜂蜜邻居（Liquid.cs:365-372）——标量展开,同上
+        for (let t = 0; t < 4; t++) {
+          const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
+          const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
           if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
           const ni = this.idx(nx, ny);
           if (st.liquid[ni] > 0 && st.liquidType[ni] === 3) this.addWater(nx, ny);
