@@ -93,4 +93,20 @@ export const RECIPES: Recipe[] = [
   { out: 'candelabra', count: 1, station: 'anvil', inputs: [['torch', 3], ['iron_bar', 1]] },
   { out: 'chinese_lantern', count: 1, station: 'workbench', inputs: [['torch', 1], ['wood', 3]] },
   { out: 'skull_lantern', count: 1, station: 'anvil', inputs: [['torch', 2], ['iron_bar', 1]] },
+
+// ---- 阶段 6:替代矿熔炼与工具链(与主矿同档配方) ----
+  { out: 'tungsten_bar', count: 1, station: 'furnace', inputs: [['tungsten_ore', 4]] },
+  { out: 'platinum_bar', count: 1, station: 'furnace', inputs: [['platinum_ore', 4]] },
+  { out: 'tin_pickaxe', count: 1, station: 'anvil', inputs: [['tin_bar', 8], ['wood', 3]] },
+  { out: 'tin_axe', count: 1, station: 'anvil', inputs: [['tin_bar', 6], ['wood', 3]] },
+  { out: 'tin_sword', count: 1, station: 'anvil', inputs: [['tin_bar', 7]] },
+  { out: 'lead_pickaxe', count: 1, station: 'anvil', inputs: [['lead_bar', 8], ['wood', 3]] },
+  { out: 'lead_axe', count: 1, station: 'anvil', inputs: [['lead_bar', 6], ['wood', 3]] },
+  { out: 'lead_sword', count: 1, station: 'anvil', inputs: [['lead_bar', 7]] },
+  { out: 'tungsten_pickaxe', count: 1, station: 'anvil', inputs: [['tungsten_bar', 8], ['wood', 3]] },
+  { out: 'tungsten_axe', count: 1, station: 'anvil', inputs: [['tungsten_bar', 6], ['wood', 3]] },
+  { out: 'tungsten_sword', count: 1, station: 'anvil', inputs: [['tungsten_bar', 7]] },
+  { out: 'platinum_pickaxe', count: 1, station: 'anvil', inputs: [['platinum_bar', 8], ['wood', 3]] },
+  { out: 'platinum_axe', count: 1, station: 'anvil', inputs: [['platinum_bar', 6], ['wood', 3]] },
+  { out: 'platinum_sword', count: 1, station: 'anvil', inputs: [['platinum_bar', 7]] },
 ];

@@ -36,8 +36,10 @@ export class LiquidSim {
   private quickFall = false;
   private stuck = false;
   private stuckCount = 0;
-  private stuckAmount = -99999;
+  private stuckAmount = 0; // 原版 ReInit 置 0（Liquid.cs:69）
   private disposed = false;
+  /** LiquidBuffer 溢出缓冲（Liquid.cs:840-843 入队 / 799-807 清扫轮回灌，上限 49998） */
+  private buffer: Array<{ x: number; y: number }> = [];
 
   constructor(world: World) {
     this.world = world;
@@ -78,6 +80,18 @@ export class LiquidSim {
     return !!d && d.solid && !d.platform;
   }
 
+  /** WorldGen.SolidTile 语义（WorldGen.cs:42370）：实心 && !平台 && !半砖 && !坡面。
+   *  仅 LavaCheck/HoneyCheck 入口使用——半砖格允许发生交互（Liquid.cs:898/1020） */
+  private solidTileFull(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
+    const i = this.idx(x, y);
+    const t = st.type[i];
+    if (t === 0) return false;
+    const d = TILE_DEFS[t];
+    return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+  }
+
   // ================= AddWater（Liquid.cs:835-872） =================
 
   addWater(x: number, y: number) {
@@ -90,7 +104,11 @@ export class LiquidSim {
       const d = TILE_DEFS[t];
       if (d && d.solid && !d.platform) return;
     }
-    if (this.numLiquid >= this.curMaxLiquid - 1) return; // 无 buffer：超限丢弃（原版走 LiquidBuffer）
+    if (this.numLiquid >= this.curMaxLiquid - 1) {
+      // 原版走 LiquidBuffer 缓冲、清扫轮回灌（Liquid.cs:840-843），超缓冲上限才丢
+      if (this.buffer.length < 49998) this.buffer.push({ x, y });
+      return;
+    }
     this.checking[i] = 1;
     this.skip[i] = 0;
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
@@ -106,8 +124,10 @@ export class LiquidSim {
     const st = this.world.store;
     const killThreshold = 8; // 单机 num1（Liquid.cs:693）
     const quickSettle = this.quickSettle;
-    this.quickFall = quickSettle; // 客户端：quickFall = quickSettle（Liquid.cs:752-755）
-    const cycles = quickSettle ? 1 : this.cycles; // quickSettle 时 cycles=1（Main.cs:12251）
+    // quickFall 跟随 quickSettle（Liquid.cs:752-755，未受 gen 门限）；但 cycles=1 的
+    // Main.cs:12251 分支被 !WorldGen.gen 限定——读档沉降期 gen=true 不生效，保持分片
+    this.quickFall = quickSettle;
+    const cycles = this.cycles;
     this.wetCounter++;
     const slice = Math.floor(this.curMaxLiquid / cycles);
     const start = slice * (this.wetCounter - 1);
@@ -138,6 +158,15 @@ export class LiquidSim {
           const i = this.idx(e.x, e.y);
           if (st.liquid[i] === 254) st.liquid[i] = 255;
           this.delWater(l);
+        }
+      }
+      // LiquidBuffer 回灌：按剩余空位逐个重新入列（Liquid.cs:799-807）
+      if (this.buffer.length > 0) {
+        const free = Math.min(this.curMaxLiquid - this.numLiquid, this.buffer.length);
+        for (let n = 0; n < free; n++) {
+          const b = this.buffer.shift()!;
+          this.checking[this.idx(b.x, b.y)] = 0;
+          this.addWater(b.x, b.y);
         }
       }
       // 卡死检测：活动量长期不变 → 清空列表靠唤醒自愈（Liquid.cs:808-824）
@@ -259,10 +288,6 @@ export class LiquidSim {
     let num1 = 0;
     if (st.liquid[i5] < 3) num1 = -1;         // 薄层蒸发偏置（Liquid.cs:424-426）
     if (st.liquid[i5] > 250) { f3 = false; f4 = false; }
-    const setCell = (i: number, ax: number, m: number, centerAmt: number) => {
-      st.liquidType[i] = myType;
-      if (st.liquid[i] !== m) { st.liquid[i] = m; this.addWater(ax, y); }
-    };
     if (f1 && f2) {
       if (f3 && f4) {
         // ±3 延伸判定（Liquid.cs:436-449）
@@ -283,6 +308,13 @@ export class LiquidSim {
           if (st.liquid[ip2] !== m) { st.liquidType[ip2] = myType; st.liquid[ip2] = m; this.addWater(x + 2, y); } else { st.liquidType[ip2] = myType; same++; }
           if (st.liquid[im3] !== m) { st.liquidType[im3] = myType; st.liquid[im3] = m; this.addWater(x - 3, y); } else { st.liquidType[im3] = myType; same++; }
           if (st.liquid[ip3] !== m) { st.liquidType[ip3] = myType; st.liquid[ip3] = m; this.addWater(x + 3, y); } else { st.liquidType[ip3] = myType; same++; }
+          // 补偿唤醒：中心可能保持原值，邻居需按"邻居≠均值或中心≠均值"重唤醒（Liquid.cs:502-513）
+          if (st.liquid[il] !== m || st.liquid[i5] !== m) this.addWater(x - 1, y);
+          if (st.liquid[ir] !== m || st.liquid[i5] !== m) this.addWater(x + 1, y);
+          if (st.liquid[im2] !== m || st.liquid[i5] !== m) this.addWater(x - 2, y);
+          if (st.liquid[ip2] !== m || st.liquid[i5] !== m) this.addWater(x + 2, y);
+          if (st.liquid[im3] !== m || st.liquid[i5] !== m) this.addWater(x - 3, y);
+          if (st.liquid[ip3] !== m || st.liquid[i5] !== m) this.addWater(x + 3, y);
           // 中心例外：六邻全等于均值且上方有液 → 保持原值（Liquid.cs:514）
           if (same !== 6 || st.liquid[iu] <= 0) st.liquid[i5] = m;
         } else {
@@ -293,21 +325,32 @@ export class LiquidSim {
           if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else { st.liquidType[ir] = myType; same++; }
           if (st.liquid[im2] !== m) { st.liquidType[im2] = myType; st.liquid[im2] = m; this.addWater(x - 2, y); } else { st.liquidType[im2] = myType; same++; }
           if (st.liquid[ip2] !== m) { st.liquidType[ip2] = myType; st.liquid[ip2] = m; this.addWater(x + 2, y); } else { st.liquidType[ip2] = myType; same++; }
+          // 补偿唤醒（Liquid.cs:553-560）
+          if (st.liquid[il] !== m || st.liquid[i5] !== m) this.addWater(x - 1, y);
+          if (st.liquid[ir] !== m || st.liquid[i5] !== m) this.addWater(x + 1, y);
+          if (st.liquid[im2] !== m || st.liquid[i5] !== m) this.addWater(x - 2, y);
+          if (st.liquid[ip2] !== m || st.liquid[i5] !== m) this.addWater(x + 2, y);
           if (same !== 4 || st.liquid[iu] <= 0) st.liquid[i5] = m;
         }
       } else if (f3) {
-        // 4 格：左延伸（Liquid.cs:567-587）
+        // 4 格：左延伸（Liquid.cs:567-587）。类型写在条件判断之前（原版 L568 无条件写）
         const m = Math.round((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4);
-        if (lq !== m || st.liquid[i5] !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); }
-        if (rq !== m || st.liquid[i5] !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); }
-        if (st.liquid[im2] !== m || st.liquid[i5] !== m) { st.liquidType[im2] = myType; st.liquid[im2] = m; this.addWater(x - 2, y); }
+        st.liquidType[il] = myType;
+        if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
+        st.liquidType[ir] = myType;
+        if (rq !== m || st.liquid[i5] !== m) { st.liquid[ir] = m; this.addWater(x + 1, y); }
+        st.liquidType[im2] = myType;
+        if (st.liquid[im2] !== m || st.liquid[i5] !== m) { st.liquid[im2] = m; this.addWater(x - 2, y); }
         st.liquid[i5] = m;
       } else if (f4) {
-        // 4 格：右延伸（Liquid.cs:590-609）
+        // 4 格：右延伸（Liquid.cs:590-609）。类型写在条件判断之前（原版 L591 无条件写）
         const m = Math.round((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4);
-        if (lq !== m || st.liquid[i5] !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); }
-        if (rq !== m || st.liquid[i5] !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); }
-        if (st.liquid[ip2] !== m || st.liquid[i5] !== m) { st.liquidType[ip2] = myType; st.liquid[ip2] = m; this.addWater(x + 2, y); }
+        st.liquidType[il] = myType;
+        if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
+        st.liquidType[ir] = myType;
+        if (rq !== m || st.liquid[i5] !== m) { st.liquid[ir] = m; this.addWater(x + 1, y); }
+        st.liquidType[ip2] = myType;
+        if (st.liquid[ip2] !== m || st.liquid[i5] !== m) { st.liquid[ip2] = m; this.addWater(x + 2, y); }
         st.liquid[i5] = m;
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
@@ -339,7 +382,7 @@ export class LiquidSim {
   /** 岩浆格与水/蜂蜜接触 → 黑曜石 56 / 脆蜂蜜块 230（阈值 24） */
   private lavaCheck(x: number, y: number) {
     const st = this.world.store;
-    if (this.blocksLiquid(x, y)) return;
+    if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:898）
     const i5 = this.idx(x, y);
     const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
     const lq = st.liquid[il], rq = st.liquid[ir], uq = st.liquid[iu], dq = st.liquid[id];
@@ -382,7 +425,7 @@ export class LiquidSim {
   /** 蜂蜜格与水接触 → 蜂蜜块 229（阈值 32） */
   private honeyCheck(x: number, y: number) {
     const st = this.world.store;
-    if (this.blocksLiquid(x, y)) return;
+    if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:1020）
     const i5 = this.idx(x, y);
     const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
     const lq = st.liquid[il], rq = st.liquid[ir], uq = st.liquid[iu], dq = st.liquid[id];
@@ -466,10 +509,11 @@ export class LiquidSim {
         this.honeyCheck(x, y);
       }
     }
-    // swap-remove（Liquid.cs:1193-1197）
+    // swap-remove（Liquid.cs:1193-1197）：只搬 x/y/kill，delay 保留本槽旧值（原版语义）
     this.numLiquid--;
     this.checking[i5] = 0;
-    this.liquids[l] = this.liquids[this.numLiquid];
+    const tail = this.liquids[this.numLiquid];
+    e.x = tail.x; e.y = tail.y; e.kill = tail.kill;
     this.liquids.length = this.numLiquid;
   }
 
@@ -514,11 +558,22 @@ export class LiquidSim {
       let hitR = false;      // flag3：右边界
       let dropped = false;   // flag5：本轮发生下落
       for (;;) {
-        const ci = this.idx(X + step * dir, Y);
+        const probeX = X + step * dir;
+        // 越界防护：原版 C# 越界会抛异常，JS 的 idx 会静默回绕到上一行——
+        // 超出 [0, w-1] 的探测一律视为边界命中，不再读取
+        if (probeX < 0 || probeX >= st.w) {
+          if (dir === -1) hitL = true; else hitR = true;
+          if (hitL && hitR) break;
+          if (hitR) { dir = -1; step++; }
+          else if (hitL) { if (dir === 1) step++; dir = 1; }
+          else { if (dir === 1) step++; dir = -dir; }
+          continue;
+        }
+        const ci = this.idx(probeX, Y);
         if (st.liquid[ci] === 0) { lastDir = dir; lastStep = step; }
-        if (dir === -1 && X + step * dir < 5) hitL = true;
-        else if (dir === 1 && X + step * dir > st.w - 5) hitR = true;
-        const bi = this.idx(X + step * dir, Y + 1);
+        if (dir === -1 && probeX < 5) hitL = true;
+        else if (dir === 1 && probeX > st.w - 5) hitR = true;
+        const bi = this.idx(probeX, Y + 1);
         // 侧下方同类型未满 → 直接灌入（Liquid.cs:149-159）
         if (st.liquid[bi] !== 0 && st.liquid[bi] !== 255 && st.liquidType[bi] === srcType) {
           let t = 255 - st.liquid[bi];
@@ -527,11 +582,13 @@ export class LiquidSim {
           liquid -= t;
           if (liquid === 0) break;
         }
-        if (Y >= st.h - 5 || st.liquid[bi] !== 0 || this.blocksLiquid(X + step * dir, Y + 1)) {
+        if (Y >= st.h - 5 || st.liquid[bi] !== 0 || this.blocksLiquid(probeX, Y + 1)) {
           // 下方堵住 → 沿行继续 / 折返（Liquid.cs:162-191）
-          const ni = this.idx(X + (step + 1) * dir, Y);
-          const nAmt = st.liquid[ni];
-          const nSolid = this.blocksLiquid(X + (step + 1) * dir, Y);
+          const aheadX = X + (step + 1) * dir;
+          const inRange = aheadX >= 0 && aheadX < st.w;
+          const ni = inRange ? this.idx(aheadX, Y) : -1;
+          const nAmt = ni >= 0 ? st.liquid[ni] : 0;
+          const nSolid = inRange ? this.blocksLiquid(aheadX, Y) : true;
           if ((nAmt !== 0 && (!flag1 || dir !== 1)) || nSolid) {
             if (dir === 1) hitR = true; else hitL = true;
           }
@@ -544,7 +601,8 @@ export class LiquidSim {
           break;
         }
       }
-      X += lastStep * lastDir;
+      // 落点写回钳制到有效列（防 lastDir/lastStep 记录异常时把液体写出世界）
+      X = Math.max(2, Math.min(st.w - 3, X + lastStep * lastDir));
       if (liquid !== 0 && dropped) Y++;
       else break;
     }
@@ -584,6 +642,7 @@ export class LiquidSim {
     const st = this.world.store;
     this.liquids.length = 0;
     this.numLiquid = 0;
+    this.buffer.length = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {

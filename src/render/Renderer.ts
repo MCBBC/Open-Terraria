@@ -205,6 +205,7 @@ export class Renderer {
     this._mouseX = mouseX;
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
+    this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
     this.easeFullMap();
     const ctx = this.ctx;
     const viewW = this.canvas.width, viewH = this.canvas.height;
@@ -222,7 +223,7 @@ export class Renderer {
     ctx.scale(z, z);
     ctx.translate(-cam.x, -cam.y);
 
-    // 2. chunks（双层画布：墙层 → 水 → tile 层，水夹在墙与图块之间）
+    // 2. chunks 绘制序列（对照原版 Main.cs 帧序：背景水 → 墙 → 方块 → 瀑布 → 实体 → 前景水）
     const ts = TILE;
     const x0 = Math.floor((cam.x - viewW / 2 / z) / (CHUNK * ts)) - 1;
     const x1 = Math.floor((cam.x + viewW / 2 / z) / (CHUNK * ts)) + 1;
@@ -230,17 +231,18 @@ export class Renderer {
     const y1 = Math.floor((cam.y + viewH / 2 / z) / (CHUNK * ts)) + 1;
     const chunkVisible = (cx: number, cy: number) =>
       cx >= 0 && cy >= 0 && cx * CHUNK < world.w && cy * CHUNK < world.h;
-    // 2a. 背景墙层
+    // 2a. 液体背景 pass（原版 backWaterTarget 先于墙合成，Main.cs:46619）：
+    //     不透明水画在墙/方块之前——方块贴图透明像素处露出这层水 = 浸润，
+    //     有墙的水格由墙盖住、只留前景 0.6 层 → 墙在水中可见
+    this.drawLiquids(world, cam, viewW, viewH, z, true);
+
+    // 2b. 背景墙层
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         if (!chunkVisible(cx, cy)) continue;
         ctx.drawImage(chunks.get(cx, cy).wall, cx * CHUNK * ts, cy * CHUNK * ts);
       }
     }
-
-    // 2b. 液体背景 pass（原版 DrawWaters(true)：不透明水画在方块层之前，
-    //     方块贴图的透明像素处露出这层水 → 浸润效果）
-    this.drawLiquids(world, cam, viewW, viewH, z, true);
 
     // 2c. 前景 tile/物体层
     for (let cy = y0; cy <= y1; cy++) {
@@ -250,9 +252,8 @@ export class Renderer {
       }
     }
 
-    // 2d. 液体前景 pass（原版 DrawWaters(false)：方块之后，乘 DEFAULT_OPACITY 水 0.6；
-    //     露出水面与水内非实心方块都由这层给出半透明质感）
-    this.drawLiquids(world, cam, viewW, viewH, z, false);
+    // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
+    this.drawWaterfalls(world, cam, viewW, viewH, z);
 
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
@@ -265,6 +266,10 @@ export class Renderer {
       else (e as Player).draw && null;
     }
     this.drawPlayer(player, world, swing);
+
+    // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720）：
+    //     水 0.6 半透明盖在实体上——水中角色带水色
+    this.drawLiquids(world, cam, viewW, viewH, z, false);
 
     // 5. 粒子
     for (const p of particles) {
@@ -358,20 +363,32 @@ export class Renderer {
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
-    // isBackground：背景 pass（墙层之后、方块层之前，不透明）或前景 pass（方块之后，0.6）
+    // isBackground：背景 pass（墙层之前，不透明）或前景 pass（实体之后，0.6）
+    const ts = TILE;
+    const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
+    const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
+    const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
+    // 底边 +5 行（原版 Main.cs:42900-42908 屏下 +5/+4 边距）：P3 不处理窗口底部 10 行，
+    // 外扩后未构建带落在屏幕外，防止视口底缘液体类型错画
+    const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
+    // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
+    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground);
+  }
+
+  /** 瀑布贴图（tile 层后、实体前；扫描窗口外扩 100 格在内部，30 帧节流） */
+  private drawWaterfalls(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    if (!this.atlas) return;
     const ts = TILE;
     const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
     const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
     const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
-    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, performance.now(), isBackground);
-    if (!isBackground) {
-      // 瀑布贴图（原版在液体前景 pass 之后、光照之前绘制；扫描 30 帧节流在内部）
-      const now = performance.now();
-      this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
-      this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);
-    }
+    const now = this._liquidNow; // 与液体双 pass 同帧同时刻
+    this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
+    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);
   }
+  /** 本帧液体动画时刻（双 pass 共享） */
+  private _liquidNow = 0;
 
   /** 墓碑：以底部中心为支点按倾角旋转绘制（翻滚/侧躺/倒扣）。
    *  优先原版 Tiles_85 样式块——四格 16×16 无缝拼到离屏画布再绘制
@@ -486,6 +503,28 @@ export class Renderer {
     // 水下滤镜：与主角一致的蓝色调（检查怪物头部位置是否浸水）
     const headI = world.store.idx(Math.floor(e.cx / TILE), Math.floor((e.y + 2) / TILE));
     const underwater = world.store.liquid[headI] > 100;
+    // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
+    if (e.vanillaId != null && this.atlas) {
+      const frames = Math.max(1, e.vanilla?.frames ?? 1);
+      const frameIdx = Math.floor(e.animT / 8) % frames;
+      const r = this.atlas.vnpc(e.vanillaId, frameIdx);
+      if (r) {
+        const flying = e.vanilla?.noGravity || e.vanilla?.aiStyle === 2 || e.vanilla?.aiStyle === 5 || e.vanilla?.aiStyle === 14;
+        const scale = e.vanilla?.scale ?? 1;        // 原版 SetDefaults 缩放（母史莱姆 1.25 等）
+        const alpha = e.vanilla?.alpha;
+        ctx.save();
+        ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
+        ctx.scale(scale, scale);
+        if (e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
+        // 原版 alpha（史莱姆 120-175 半透明）；受击帧再降透明度近似闪白
+        ctx.globalAlpha = Math.min(1, (alpha != null ? alpha / 255 : 1) * (flash ? 0.55 : 1));
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        return;
+      }
+      return; // 表未加载完成：本帧不画（下帧懒加载完成）
+    }
     // ---- Maples 精灵优先 ----
     if (this.atlas) {
       let frames: ReturnType<SpriteAtlas['animFrames']> = [];

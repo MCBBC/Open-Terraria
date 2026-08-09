@@ -10,7 +10,9 @@ export class TileStore {
   readonly frameY: Uint16Array;
   readonly wall: Uint16Array; // 原版 wld 墙 id（0-366）
   readonly liquid: Uint8Array;   // 0-255 液量
-  readonly liquidType: Uint8Array; // 0无 1水
+  readonly liquidType: Uint8Array; // 0无 1水 2岩浆 3蜂蜜
+  readonly half: Uint8Array;      // halfBrick 位（原版 Tile.cs bTileHeader bit1）：下半 8px 实心
+  readonly slope: Uint8Array;     // 坡面 0-4（原版编码；渲染暂未支持，生成期少用）
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
@@ -25,6 +27,8 @@ export class TileStore {
     this.wall = new Uint16Array(n);
     this.liquid = new Uint8Array(n);
     this.liquidType = new Uint8Array(n);
+    this.half = new Uint8Array(n);
+    this.slope = new Uint8Array(n);
   }
 
   idx(x: number, y: number): number { return y * this.w + x; }
@@ -70,6 +74,23 @@ export class TileStore {
     this.flags[i] = type !== 0 ? 1 : 0;
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
+    if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除清半砖/坡面
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
+  /** 运行期改半砖/坡面位（锤子交互用；生成期直接写数组即可） */
+  setHalfBrick(x: number, y: number, v: boolean) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.half[i] = v ? 1 : 0;
+    this.listeners.forEach((fn) => fn(x, y));
+  }
+
+  setSlope(x: number, y: number, s: number) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    this.slope[i] = s;
+    this.half[i] = 0; // 原版 SlopeTile 无条件 halfBrick(false)（WorldGen.cs:49174），slope=0 复位时同样
     this.listeners.forEach((fn) => fn(x, y));
   }
 
@@ -80,6 +101,7 @@ export class TileStore {
     this.flags[i] = type !== 0 ? 1 : 0;
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
+    if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除同步清位（防生成期脏残留）
   }
 
   setWall(x: number, y: number, wall: number) {

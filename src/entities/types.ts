@@ -3,6 +3,10 @@ import type { World } from '../world/World';
 
 export interface GameHooks {
   world: World;
+  /** 主角(投射物命中判定用) */
+  player: import('./Player').Player;
+  /** 敌人列表(投射物命中判定用) */
+  enemies(): unknown[];
   /** 在世界上生成掉落物 */
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): void;
   /** 对玩家造成伤害（attacker 用于荆棘反伤） */

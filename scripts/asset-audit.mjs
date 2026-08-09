@@ -27,18 +27,31 @@ for (const id of whitelist.tiles) {
   const grid = t.textureGrid ?? [16, 16];
   const gap = t.frameGap ?? [2, 2];
   const stride = [grid[0] + gap[0], grid[1] + gap[1]];
-  // 帧需求：TEdit frames uv 最大值 + 帧尺寸；无 frames 的用 PNG 可容纳数（跳过）
-  let needW = 0, needH = 0;
+  // 帧需求：TEdit frames uv 最大值 + 帧尺寸。
+  // textureWrap（换行纹理）：超出 wrapThreshold 的帧换算回带内坐标，
+  // 实际需求 = 带内最大值 + 一带宽度/高度（渲染端已实现带换行兼容，非素材缺失）
+  const wrap = t.textureWrap ?? null;
+  const wrapMax = wrap ? wrap.wrapThreshold : Infinity;
+  const inc = wrap ? wrap.offsetIncrement : 0;
+  const isU = wrap?.axis === 'U';
+  let needW = 0, needH = 0, wrappedStyles = 0;
   for (const f of t.frames ?? []) {
     if (!f?.uv) continue;
-    needW = Math.max(needW, f.uv[0] + grid[0]);
-    needH = Math.max(needH, f.uv[1] + grid[1]);
+    let ux = f.uv[0], uy = f.uv[1];
+    if (wrap) {
+      if (isU) { if (ux >= wrapMax) { ux = inc + (ux - wrapMax) % (Math.max(1, size.w - inc)); wrappedStyles++; } }
+      else { if (uy >= wrapMax) { uy = inc + (uy - wrapMax) % (Math.max(1, size.h - inc)); wrappedStyles++; } }
+    }
+    needW = Math.max(needW, ux + grid[0]);
+    needH = Math.max(needH, uy + grid[1]);
   }
+  if (wrappedStyles) t._wrapped = wrappedStyles;
   if (needW > size.w || needH > size.h) {
     bad.push({
       id, name: t.name,
       png: `${size.w}×${size.h}`, need: `${needW}×${needH}`,
       short: needW > size.w ? `宽缺 ${needW - size.w}px` : `高缺 ${needH - size.h}px`,
+      reason: t._wrapped ? `（${t._wrapped} 个换行样式）` : undefined,
     });
   }
 }
@@ -48,3 +61,5 @@ if (bad.length) {
 } else {
   console.log('全部达标');
 }
+const wrappedCount = tiles.filter((t) => t._wrapped).length;
+if (wrappedCount) console.log(`（${wrappedCount} 张为换行纹理 textureWrap，渲染端带换行兼容，非素材缺失）`);

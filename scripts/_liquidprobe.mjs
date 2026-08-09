@@ -89,8 +89,13 @@ const flow = await page.evaluate(() => {
   const cx = Math.floor(g.player.cx / 16);
   let gy = 0;
   while (gy < st.h - 10 && !st.isSolid(cx, gy)) gy++;
-  // 在地下 30 格处人工挖一个 3 宽 8 高空腔，顶部注一格水
+  // 在地下 30 格处人工挖一个 3 宽 8 高空腔（四周石壁密封，防撞洞穴漏水），顶部注一格水
   const x0 = cx, y0 = gy + 20;
+  for (let dy = -1; dy <= 9; dy++) for (let dx = -1; dx <= 4; dx++) {
+    st.setTile(x0 + dx, y0 + dy, 2);  // 石壁
+    st.liquid[st.idx(x0 + dx, y0 + dy)] = 0;
+    st.liquidType[st.idx(x0 + dx, y0 + dy)] = 0;
+  }
   for (let dy = 0; dy < 8; dy++) for (let dx = 0; dx < 3; dx++) st.setTile(x0 + dx, y0 + dy, 0);
   st.setLiquid(x0 + 1, y0 - 1, 255, 1);   // 腔上方水（会先落进腔）
   st.setTile(x0 + 1, y0 - 1, 0);
@@ -119,7 +124,12 @@ const obs = await page.evaluate(() => {
   let gy = 0;
   while (gy < st.h - 10 && !st.isSolid(cx, gy)) gy++;
   const x = cx + 10, y = gy + 30;
-  // 造空腔：左岩浆右水，中间隔墙
+  // 造密封石腔：左岩浆右水，中间隔墙（外圈石壁防撞洞穴漏液）
+  for (let dy = -1; dy <= 4; dy++) for (let dx = -2; dx <= 4; dx++) {
+    st.setTile(x + dx, y + dy, 2);
+    st.liquid[st.idx(x + dx, y + dy)] = 0;
+    st.liquidType[st.idx(x + dx, y + dy)] = 0;
+  }
   for (let dy = 0; dy < 3; dy++) {
     st.setTile(x, y + dy, 0); st.setTile(x + 2, y + dy, 0); st.setTile(x + 1, y + dy, 0);
     st.setTile(x - 1, y + dy, 0);

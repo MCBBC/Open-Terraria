@@ -75,7 +75,8 @@ console.log('samples:', JSON.stringify(s, (k, v) => Array.isArray(v) ? v.join(',
 // 判定：平台下半透明区应为水色（蓝 > 红，且接近纯水参照色）
 const waterish = (px) => px[2] > px[0] + 20 && px[2] > 60;
 check('平台透明区域显示水色（浸润）', waterish(s.platBottom), `platBottom=${s.platBottom} openWater=${s.openWater}`);
-check('平台本体贴图仍可见（上半非水色）', !waterish(s.platTop), `platTop=${s.platTop}`);
+// 原版行为：前景 0.6 水膜叠在非实心方块上 → 贴图被染蓝但仍可分辨（与纯水色不同）
+check('平台贴图在水膜下仍可分辨', s.platTop.join(',') !== s.openWater.join(','), `platTop=${s.platTop}`);
 check('水面可见（表层有水色）', s.surface[2] + s.surface[1] > s.surface[0], `surface=${s.surface}`);
 
 console.log(`\n${pass} passed, ${fail} failed`);

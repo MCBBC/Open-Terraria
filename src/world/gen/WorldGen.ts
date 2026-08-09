@@ -56,6 +56,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     ]),
     { name: '矿石', run: orePass },
     { name: '液体', run: liquidPass },
+    ...(useVanillaTerrain ? [
+      // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
+      // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
+      { name: '半砖平滑', run: halfBrickSmoothPass },
+      { name: '瀑布唇缘', run: waterfallLipPass },
+    ] as Pass[] : []),
     { name: '地狱', run: hellPass },
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [{ name: '清浮空', run: floatCleanupPass }] : []),
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地狱屋', run: vanillaHellHouses }]),
@@ -90,6 +96,7 @@ import { runMushroomPass } from './vanilla/MushroomPass';
 import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
+import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
 import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -223,6 +230,20 @@ function vanillaLifeCrystals({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runLifeCrystalsPass(store, rng, gs);
+}
+
+// 原版 "Smooth World"(L7568)：地表凸起 → 半砖/削除（HalfBrickPass）
+function halfBrickSmoothPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runSmoothWorldPass(store, rng, gs);
+}
+
+// 原版 "Waterfalls"(L7697)：水边唇缘砸半砖（瀑布触发来源）
+function waterfallLipPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runWaterfallLipPass(store, rng, gs);
 }
 
 // 地狱要塞 HellFort(5列×10行网格塔)——地狱层就绪后

@@ -6,9 +6,11 @@ export enum BuffType {
   Resistance = 2, // 耐药性：立即回 80 HP，期间禁用治疗药水（60s）
   Thorns = 3,     // 荆棘：受击反弹 2 伤害（180s）
   Regen = 4,      // 恢复：每 5 秒 +10 HP（30s）
+  Campfire = 5,   // 篝火：范围光环(由附近篝火/心灯实体驱动,Game 每帧续期)
 }
 
 export const BUFF_DEFS: Record<BuffType, { name: string; desc: string }> = {
+  [BuffType.Campfire]: { name: '篝火', desc: '附近篝火:每秒回 1 HP(心灯再+1)' },
   [BuffType.Agility]: { name: '敏捷', desc: '移动速度 +25%' },
   [BuffType.Ironskin]: { name: '铁皮', desc: '防御 +6' },
   [BuffType.Resistance]: { name: '耐药性', desc: '生命上限 +80，无法使用治疗药水' },
@@ -19,6 +21,9 @@ export const BUFF_DEFS: Record<BuffType, { name: string; desc: string }> = {
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒
   regenAccum = 0;
+  campfireAccum = 0;
+  /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
+  campfireHeal = 1;
   /** 重置为满时长（叠加 = 刷新，效果幂等） */
   apply(type: BuffType, durationSec: number) {
     this.active.set(type, durationSec);
@@ -42,6 +47,13 @@ export class BuffState {
       if (this.regenAccum >= 5) {
         this.regenAccum -= 5;
         heal += 10;
+      }
+    }
+    if (this.active.has(BuffType.Campfire)) {
+      this.campfireAccum += dt;
+      if (this.campfireAccum >= 1) {
+        this.campfireAccum -= 1;
+        heal += this.campfireHeal;
       }
     }
     return heal;

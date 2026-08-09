@@ -96,10 +96,11 @@ for (const id of whitelist.tiles) {
   };
 }
 
-for (const id of whitelist.items) {
-  const it = itemById.get(id);
+// 阶段5:物品全量——有 Item_<id>.png 图标的全部注册(6146 件中约 6085 有图)
+for (const it of items) {
+  const id = it.id;
   const src = join(ASSETS, `Item_${id}.png`);
-  if (!it || !existsSync(src)) { missing.push(`Item_${id}`); continue; }
+  if (!existsSync(src)) { missing.push(`Item_${id}`); continue; }
   copyFileSync(src, join(OUT_DIR, `Item_${id}.png`)); copied++;
   out.items[id] = {
     name: it.name,

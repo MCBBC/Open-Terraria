@@ -83,9 +83,21 @@ const diag = await page.evaluate((s) => {
   };
   const tileTransparency = [];
   for (let dx = -2; dx <= 9; dx++) tileTransparency.push({ dx, t: +(transp(s.x + dx, s.y)).toFixed(2) });
-  return { boundary, vseam, tileTransparency };
+  // 4) 浸润验证：方块格(y)透明缺口像素（从 chunk tile 画布找出 alpha=0 的像素）现在应显示水色
+  const ccx2 = Math.floor(s.x / cs), ccy2 = Math.floor(s.y / cs);
+  const c2 = chunk.get(ccx2, ccy2).tile;
+  const c2ctx = c2.getContext('2d');
+  const notchPx = [];
+  const lx0 = (s.x - ccx2 * cs) * 16, ly0 = (s.y - ccy2 * cs) * 16;
+  const td = c2ctx.getImageData(lx0, ly0, 16, 16).data;
+  for (let yy = 0; yy < 16; yy++) for (let xx = 0; xx < 16; xx++) {
+    if (td[(yy * 16 + xx) * 4 + 3] === 0) notchPx.push([xx, yy]);
+  }
+  const notchColors = notchPx.slice(0, 10).map(([xx, yy]) => px(s.x, s.y, xx, yy));
+  return { boundary, vseam, tileTransparency, notchCount: notchPx.length, notchColors };
 }, shore);
 console.log('boundary[0..3]:', JSON.stringify(diag.boundary.slice(0, 4)));
 console.log('vseam:', JSON.stringify(diag.vseam));
 console.log('tile transparency (waterline row):', JSON.stringify(diag.tileTransparency));
+console.log('notchCount:', diag.notchCount, 'notchColors:', JSON.stringify(diag.notchColors));
 await browser.close();

@@ -2,7 +2,7 @@
 import { TileStore } from './TileStore';
 import { T, TILE_DEFS } from '../data/tiles';
 
-export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; }
+export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
 export class Clock {
   timeOfDay: number = 0.3;   // 0-1，0=午夜 0.5=正午（起始上午 7:12 ≈ 0.3）
@@ -83,7 +83,8 @@ export class World {
     if (t === 0) return null;
     const d = TILE_DEFS[t];
     this.store.setTile(x, y, 0);
-    return d.drop ?? null;
+    // v_ 图块无显式 drop → 回退同名放置物品(阶段5 自动注册)
+    return d.drop ?? (d.key.startsWith('v_') ? 'place_' + d.key : null);
   }
 
   isSolidPx(px: number, py: number): boolean {

@@ -14,6 +14,7 @@ export interface TileDef {
   axe: number;           // 所需斧力
   mapColor: string;      // 小地图颜色
   drop?: string;         // 破坏掉落 item key（缺省掉同名 key）
+  rope?: boolean;        // 绳索类（攀爬判定）
   blend: boolean;        // 是否参与同类边缘融合
   attach?: 'ground' | 'wall'; // 装饰物附着需求
   w?: number; h?: number;     // framed 物体占格数
@@ -209,7 +210,7 @@ def({ key: 'v_312_red_dynasty_shingles', name: 'Red Dynasty Shingles', solid: tr
 def({ key: 'v_422_conveyor_belt_ccw', name: 'Conveyor Belt (CCW)', solid: true, opacity: 1, pick: 0, mapColor: '#494646', blend: true, drop: null as unknown as string, vanilla: { sheet: 422, frame: 'auto' } });
 def({ key: 'v_495_shell_pile_block', name: 'Shell Pile Block', solid: true, opacity: 1, pick: 0, mapColor: '#AF976E', blend: true, drop: null as unknown as string, vanilla: { sheet: 495, frame: 'auto' } });
 def({ key: 'v_479_smooth_sandstone_block', name: 'Smooth Sandstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#BC7347', blend: true, drop: null as unknown as string, vanilla: { sheet: 479, frame: 'auto' } });
-def({ key: 'v_353_vine_rope', name: 'Vine Rope', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: null as unknown as string, vanilla: { sheet: 353, frame: 'auto' } });
+def({ key: 'v_353_vine_rope', name: 'Vine Rope', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', blend: true, drop: null as unknown as string, rope: true, vanilla: { sheet: 353, frame: 'auto' } });
 def({ key: 'v_477_mowed_grass_block', name: 'Mowed Grass Block', solid: true, opacity: 1, pick: 0, mapColor: '#607044', blend: true, drop: null as unknown as string, vanilla: { sheet: 477, frame: 'auto' } });
 def({ key: 'v_380_planter_boxes', name: 'Planter Boxes', solid: true, opacity: 1, pick: 0, mapColor: '#BF8E6F', blend: true, drop: null as unknown as string, vanilla: { sheet: 380, frame: 'auto' } });
 def({ key: 'v_230_crispy_honey_block', name: 'Crispy Honey Block', solid: true, opacity: 1, pick: 0, mapColor: '#834F0D', blend: true, drop: null as unknown as string, vanilla: { sheet: 230, frame: 'auto' } });
@@ -345,7 +346,7 @@ def({ key: 'v_528_mushroom_vines', name: 'Mushroom Vines', decor: true, opacity:
 def({ key: 'v_382_flower_vines', name: 'Flower Vines', decor: true, opacity: 0, pick: 0, mapColor: '#1CD85E', drop: null as unknown as string, vanilla: { sheet: 382, frame: 'auto' } });
 def({ key: 'v_124_wooden_beam', name: 'Wooden Beam', decor: true, opacity: 0, pick: 0, mapColor: '#493324', drop: null as unknown as string, vanilla: { sheet: 124, frame: 'auto' } });
 def({ key: 'v_575_rich_mahogany_beam', name: 'Rich Mahogany Beam', decor: true, opacity: 0, pick: 0, mapColor: '#60393C', drop: null as unknown as string, vanilla: { sheet: 575, frame: 'auto' } });
-def({ key: 'v_213_rope', name: 'Rope', decor: true, opacity: 0, pick: 0, mapColor: '#897843', drop: null as unknown as string, vanilla: { sheet: 213, frame: 'auto' } });
+def({ key: 'v_213_rope', name: 'Rope', decor: true, opacity: 0, pick: 0, mapColor: '#897843', drop: null as unknown as string, rope: true, vanilla: { sheet: 213, frame: 'auto' } });
 def({ key: 'v_636_corrupt_vines', name: 'Corrupt Vines', decor: true, opacity: 0, pick: 0, mapColor: '#746CA3', drop: null as unknown as string, vanilla: { sheet: 636, frame: 'auto' } });
 def({ key: 'v_574_boreal_beam', name: 'Boreal Beam', decor: true, opacity: 0, pick: 0, mapColor: '#44372F', drop: null as unknown as string, vanilla: { sheet: 574, frame: 'auto' } });
 def({ key: 'v_333_platinum_coin_pile', name: 'Platinum Coin Pile', decor: true, opacity: 0, pick: 0, mapColor: '#BEBEB2', drop: null as unknown as string, vanilla: { sheet: 333, frame: 'auto' } });

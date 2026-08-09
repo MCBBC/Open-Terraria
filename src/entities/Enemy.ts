@@ -1,14 +1,108 @@
 // 敌人实体：统一类 + 按 key 分支行为（史莱姆/僵尸/恶魔眼/蝙蝠/克苏鲁之眼及其仆从）
+// + 原版 NPC 数据驱动路径（vanillaId）：属性/AI/音效/贴图来自 vanilla-npcs.json（SetDefaults 提取）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
+import { vanillaNpc, vanillaSoundName, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
 import { RNG } from '../core/rng';
 
+/** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
+const PLACEHOLDER_DEF: EnemyDef = {
+  key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
+  width: 16, height: 16, mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
+  hitSound: ['NPC_Hit_1'], killedSound: ['NPC_Killed_1'], drops: [],
+};
+
 export class Enemy extends Entity {
+  /** 原版 NPC id（数据驱动路径启用时非空） */
+  vanillaId: number | null = null;
+  vanilla: VanillaNpc | null = null;
+  // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
+  /** 链上紧随本段的一段（头 → 身×n → 尾） */
+  wormNext: Enemy | null = null;
+  /** 本段跟随的前一段（非空 = 本段是身体段，跳过 AI 只做跟随） */
+  wormFollow: Enemy | null = null;
+  /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
+  prevX = 0; prevY = 0;
+
+  /** AI_006 头部（L18645 通用常数 maxSpd=8 accel=0.07；穿墙直行；段链跟随） */
+  private wormAI(game: GameHooks, player: Player | null) {
+    const maxSpd = 8, accel = 0.07;
+    // 朝向：有玩家朝玩家，无玩家缓慢巡游
+    let dx: number, dy: number;
+    if (player) { dx = player.cx - this.cx; dy = player.cy - this.cy; }
+    else { dx = Math.cos(this.aiT * 0.02) * 10; dy = Math.sin(this.aiT * 0.013) * 10; }
+    const d = Math.hypot(dx, dy) || 1;
+    this.vx += (dx / d) * accel;
+    this.vy += (dy / d) * accel;
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd > maxSpd) { this.vx = (this.vx / spd) * maxSpd; this.vy = (this.vy / spd) * maxSpd; }
+    this.facing = this.vx > 0 ? 1 : -1;
+    // 蠕虫穿墙：直接位移（原版 noTileCollide）
+    this.x += this.vx;
+    this.y += this.vy;
+    // 段链跟随：每段贴前一段的上一位置
+    for (let s = this.wormNext; s; s = s.wormNext) {
+      const fx = s.wormFollow!;
+      s.x = fx.prevX;
+      s.y = fx.prevY;
+      s.facing = fx.facing;
+    }
+  }
+
+  /** 由头生成段链（原版各 worm 的 NewNPC 链，NPC.cs:18174+）：body×n + tail */
+  static spawnWormChain(head: Enemy, segCount: number): Enemy[] {
+    const segs: Enemy[] = [];
+    const bodyId = head.vanillaId! + 1, tailId = head.vanillaId! + 2;
+    let prev = head;
+    for (let k = 0; k < segCount; k++) {
+      const id = k === segCount - 1 ? tailId : bodyId;
+      const s = Enemy.fromVanilla(id, head.cx, head.cy);
+      if (!s) continue;
+      s.wormFollow = prev;
+      prev.wormNext = s;
+      prev = s;
+      segs.push(s);
+    }
+    return segs;
+  }
+
+
+  /** 用原版数据造怪：属性/碰撞/音效全部来自 SetDefaults 提取值 */
+  static fromVanilla(id: number, x: number, y: number): Enemy | null {
+    const v = vanillaNpc(id);
+    if (!v) return null;
+    const e = new Enemy(`v_${id}`, x, y);
+    e.vanillaId = id;
+    e.vanilla = v;
+    const hit = vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1';
+    const kill = vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1';
+    const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14;
+    e.def = {
+      ...e.def,
+      name: v.name, hp: v.lifeMax, damage: v.damage, defense: v.defense,
+      // 原版 knockBackResist 是"承受击退的比例"（0.5=吃一半）；本仓库语义是
+      // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
+      knockbackResist: Math.max(0, Math.min(0.89, 1 - (v.knockBackResist ?? 0.5))),
+      width: v.width, height: v.height, flying,
+      nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
+      mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
+      hitSound: [hit], killedSound: [kill], drops: [],
+    };
+    e.hp = v.lifeMax;
+    e.maxHp = v.lifeMax;
+    e.w = v.width;
+    e.h = v.height;
+    e.x = x - e.w / 2;
+    e.y = y - e.h / 2;
+    return e;
+  }
+
   def: EnemyDef;
   hp: number;
   maxHp: number;
@@ -32,7 +126,7 @@ export class Enemy extends Entity {
 
   constructor(public key: string, x: number, y: number) {
     super();
-    this.def = ENEMY_DEFS[key];
+    this.def = ENEMY_DEFS[key] ?? PLACEHOLDER_DEF;
     this.hp = this.def.hp;
     this.maxHp = this.def.hp;
     this.w = this.def.width;
@@ -42,6 +136,7 @@ export class Enemy extends Entity {
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
+    this.prevX = this.x; this.prevY = this.y;
     this.aiT++;
     if (this.iframes > 0) this.iframes--;
     if (this.hpBarT > 0) this.hpBarT--;
@@ -51,7 +146,21 @@ export class Enemy extends Entity {
     const player = (game as unknown as { player: Player }).player;
     const hasPlayer = !!player && !player.dead;
 
-    switch (this.key) {
+    // ---- 原版数据驱动路径：按 aiStyle 分发到已移植的 AI 家族（分发后落入共享尾段） ----
+    // 蠕虫身体段（wormFollow 非空）无 AI：位置由头部 wormAI 沿链驱动，但仍走共享尾段（接触伤害等）
+    if (this.vanilla && !this.wormFollow) {
+      const p = hasPlayer ? player : null;
+      switch (this.vanilla.aiStyle) {
+        case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
+        case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
+        case 3: this.fighterAI(game, p); break;                        // AI_003 战士族（原版通用核）
+        case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
+        case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
+        case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
+        case 14: this.flyAI(game, p, 0.09); break;                     // AI_014 蝙蝠（近似）
+        default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
+      }
+    } else switch (this.key) {
       case 'slime_green':
       case 'slime_blue': this.slimeAI(game, hasPlayer ? player : null); break;
       case 'zombie': this.zombieAI(game, hasPlayer ? player : null); break;
@@ -215,6 +324,195 @@ export class Enemy extends Entity {
     this.groundPhysics(game, 0);
   }
 
+  /** AI_003_Fighters 通用核（NPC.cs:24559-24733，剥离 per-type 特例）：
+   *  前方 tile 探测 + 四级跳（2 格墙 -8 / 1 格墙 -7 / 卡半格 -5 / 前方悬空且目标在上 -8 加速），
+   *  加速度 0.1、最大速度 1.0（原版 num1/num2 常量），门/高门交互待移植 */
+  private fighterAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    // 方向：朝玩家（无玩家则保持）
+    if (player) this.facing = player.cx > this.cx ? 1 : -1;
+    const dir = this.facing;
+    // 前方探测点（L24561-24562）：体中心前 15px、脚底上 15px
+    const fx = Math.floor((this.x + this.w / 2 + 15 * dir) / TILE);
+    const fy = Math.floor((this.y + this.h - 15) / TILE);
+    const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
+    // 加速度 + 限速（原版通用核）
+    this.vx += dir * 0.1;
+    if (this.vx > 1) this.vx = 1;
+    if (this.vx < -1) this.vx = -1;
+    // 原版跳跃判定用碰撞前的速度符号（NPC 碰撞在 AI 之后）——
+    // 此处必须先捕获再碰撞，否则撞墙清零 vx 后 movingInto 恒假、战士永不跳墙
+    const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
+    // ---- 台阶自动步升（L24512-24554）：前方高差 ≤16.1px 直接跨上（gfxOffY 视觉补偿略）----
+    if (this.vy >= 0 && vxSign !== 0) {
+      const ax = Math.floor((this.x + this.vx + this.w / 2 + (this.w / 2 + 1) * vxSign) / TILE);
+      const fr = Math.floor((this.y + this.h - 1) / TILE);
+      if (ax >= 0 && fr >= 2 && ax < st.w && fr < st.h
+        && solidAt(ax, fr) && !st.half[st.idx(ax, fr)]
+        && !solidAt(ax, fr - 1) && !solidAt(ax, fr - 2) && !solidAt(ax, fr - 3)) {
+        const top = fr * TILE;
+        const rise = this.y + this.h - top;
+        if (rise > 0 && rise <= 16.1) this.y = top - this.h;
+      }
+    }
+    // 重力 + 碰撞（原版 SteepSlowing/WalkDownSlope 略）
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
+    const movingInto = vxSign === dir && vxSign !== 0;
+    if (movingInto) {
+      if (this.h >= 32 && solidAt(fx, fy - 2)) {
+        // 胸口前 2 格墙：上方再 1 格也堵 → -8，否则 -7
+        this.vy = solidAt(fx, fy - 3) ? -8 : -7;
+      } else if (solidAt(fx, fy - 1)) {
+        this.vy = -6;                       // 脚前 1 格墙
+      } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy) && !st.half[st.idx(fx, fy)]) {
+        this.vy = -5;                       // 卡在格内下部（非半砖）
+      } else if (player && player.y + player.h < this.y
+        && !solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1)) {
+        this.vy = -8;                       // 前方悬空且目标在上方 → 大跳 + 冲刺
+        this.vx *= 1.5;
+      }
+    }
+    // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
+    if (this.onGround) this.vx *= 0.85;
+  }
+
+  /** AI_008 法师族（Fire Imp 24 / Goblin Sorcerer 29 / Dark Caster 32）：
+   *  悬浮 + 周期传送（原版 ai[0] 计时到阈值或目标不可见时 TeleportSearch）+ 三连弹幕（原版 ai[1] volley）。
+   *  弹幕复用 Dart（命中玩家）；传送条件：4-16 格内有地面 + 上下净空（原版 100 次随机试探） */
+  /** AI_002_FloatingEye 通用核（NPC.cs:19118-19440）：
+   *  分轴非对称加速 X±4 / Y±2.5（Wandering Eye 133 半血以下激怒 ±6/±4）；
+   *  撞墙/撞地按 旧速度*-0.5 反弹并保证最小弹速（L19124-19140）；
+   *  白天 DespawnEncouragement：向上远离（L19147-19153 近似） */
+  private floatEyeAI(game: GameHooks, player: Player | null) {
+    // 撞墙反弹（collideX/Y → hitWall/hitHead/onGround + 上一帧速度近似 oldVelocity）
+    const oldVx = this.vx, oldVy = this.vy;
+    // ---- 白天逃离（direction=远离、directionY=-1 向上）----
+    const day = game.world.clock.isDay;
+    let dirX: number, dirY: number, cx: number, cy: number;
+    if (day || !player) {
+      dirX = -Math.sign(oldVx || 1);
+      dirY = -1;
+      cx = 4; cy = 2.5;
+    } else {
+      dirX = player.cx > this.cx ? 1 : -1;
+      dirY = player.cy > this.cy ? 1 : -1;
+      const rage = this.vanillaId === 133 && this.hp < this.maxHp * 0.5;
+      cx = rage ? 6 : 4;
+      cy = rage ? 4 : 2.5;
+    }
+    this.facing = dirX;
+    // X 轴（L19211-19237 结构）：未越过目标且未达上限 → 朝目标加速，带两档修正
+    if (dirX === -1 && this.vx > -cx) {
+      this.vx -= 0.1;
+      if (this.vx > 0) this.vx -= 0.1;
+      if (this.vx < -cx) this.vx = -cx;
+    } else if (dirX === 1 && this.vx < cx) {
+      this.vx += 0.1;
+      if (this.vx < 0) this.vx += 0.1;
+      if (this.vx > cx) this.vx = cx;
+    }
+    // Y 轴（步长 0.1/0.04，档位简化为 0.1+逆风修正）
+    if (dirY === -1 && this.vy > -cy) {
+      this.vy -= 0.1;
+      if (this.vy > 0) this.vy -= 0.05;
+      if (this.vy < -cy) this.vy = -cy;
+    } else if (dirY === 1 && this.vy < cy) {
+      this.vy += 0.1;
+      if (this.vy < 0) this.vy += 0.05;
+      if (this.vy > cy) this.vy = cy;
+    }
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // 碰撞反弹（在碰撞后按旧速度算）
+    if (this.hitWall) {
+      this.vx = -oldVx * 0.5;
+      if (this.facing === -1 && this.vx > 0 && this.vx < 2) this.vx = 2;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -2) this.vx = -2;
+    }
+    if (this.hitHead || this.onGround) {
+      this.vy = -oldVy * 0.5;
+      if (this.vy > 0 && this.vy < 1) this.vy = 1;
+      if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    }
+  }
+
+  /** AI_005 噬魂怪族（NPC.cs:17567-17790）"蜂群"AI：
+   *  目标方向 8px 网格量化 → 期望速度 = 归一化方向 × maxSpd；
+   *  ai[0] 环绕摆动（>0 加 vy、|>100| 加 vx，±200 循环）产生盘旋蜂群感（L17742-17752）；
+   *  近距(<150) 附加 0.007×期望速度制导（L17754-17757）；
+   *  各轴以 accel 步进逼近期望速度（L17774-17789）。
+   *  速度表（L17610-17617）：Eater of Souls(6)/Crimera(173) 4/0.02，默认 6/0.05 */
+  private swarmerAI(game: GameHooks, player: Player | null) {
+    const isEater = this.vanillaId === 6 || this.vanillaId === 173 || this.vanillaId === 139;
+    const maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
+    const accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03 : 0.05;
+    const tx = player ? player.cx : this.cx + this.facing * 100;
+    const ty = player ? player.cy : this.cy - 100;
+    // 8px 网格量化（L17705-17710）
+    const dx = Math.floor(tx / 8) * 8 - Math.floor(this.cx / 8) * 8;
+    const dy = Math.floor(ty / 8) * 8 - Math.floor(this.cy / 8) * 8;
+    const dist = Math.hypot(dx, dy) || 1;
+    const sx = (dx / dist) * maxSpd;
+    const sy = (dy / dist) * maxSpd;
+    // 摆动项：ai[0] 的 -200..200 循环用 aiT 取模近似（同周期同幅度）
+    if (dist > 100) {
+      const wob = (this.aiT % 400) - 200;
+      this.vy += wob > 0 ? 0.023 : -0.023;
+      this.vx += Math.abs(wob) > 100 ? 0.023 : -0.023;
+    }
+    // 近距制导（6/94/173/619）
+    if (dist < 150 && (isEater || this.vanillaId === 94 || this.vanillaId === 619)) {
+      this.vx += sx * 0.007;
+      this.vy += sy * 0.007;
+    }
+    // 各轴步进逼近期望速度（eater 族 flag4=0：单步）
+    if (this.vx < sx) this.vx += accel;
+    else if (this.vx > sx) this.vx -= accel;
+    if (this.vy < sy) this.vy += accel;
+    else if (this.vy > sy) this.vy -= accel;
+    this.facing = this.vx > 0 ? 1 : -1;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // 撞墙/撞地反弹（方法尾部 collide 处理，眼睛同款近似）
+    if (this.hitWall) this.vx = -this.vx * 0.5;
+    if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
+    if (this.hitHead) this.vy = Math.abs(this.vy) * 0.5 + 0.5;
+  }
+
+  private casterAI(game: GameHooks, player: Player | null) {
+    this.vx *= 0.9; this.vy *= 0.9;
+    this.x += this.vx; this.y += this.vy; // noGravity 悬浮直移
+    if (!player) return;
+    this.facing = player.cx > this.cx ? 1 : -1;
+    // 传送计时（原版阈值 ~200 tick；用 aiT 累计）
+    if (this.aiT > 200) {
+      const st = game.world.store;
+      const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+      for (let tries = 0; tries < 100; tries++) {
+        const tx = ptx + (Math.random() < 0.5 ? -1 : 1) * (4 + ((Math.random() * 13) | 0));
+        const ty = pty + (((Math.random() * 21) | 0) - 10);
+        if (tx < 3 || ty < 3 || tx > st.w - 4 || ty > st.h - 4) continue;
+        if (!st.isSolid(tx, ty + 1) || st.isSolid(tx, ty) || st.isSolid(tx, ty - 1)) continue;
+        if (Math.hypot(tx - ptx, ty - pty) < 4) continue;
+        this.x = tx * TILE + (TILE - this.w) / 2;
+        this.y = ty * TILE + TILE - this.h;
+        this.aiT = 0;
+        this.chargesLeft = 3; // 三连弹幕
+        break;
+      }
+      if (this.chargesLeft === 0) this.aiT = 160; // 没找到点：缩短重试间隔
+    }
+    // 三连弹幕：传送后第 15/40/65 tick 各一发（原版 volley 间隔）
+    if (this.chargesLeft > 0 && (this.aiT === 15 || this.aiT === 40 || this.aiT === 65)) {
+      const dx = player.cx - this.cx, dy = player.cy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const spd = 3.4;
+      const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.def.damage);
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
+      this.chargesLeft--;
+    }
+  }
+
   private flyAI(game: GameHooks, player: Player | null, steer: number) {
     // 恶魔眼式飞行 AI：
     // 游荡时自主调整航向（朝巡航点平滑转向、到点即换新目标、撞墙自动绕开）；
@@ -262,6 +560,12 @@ export class Enemy extends Entity {
     if (this.def.avoidWater && avoidWater(this, game.world)) {
       this.state = 0;
       this.target = null;
+      return;
+    }
+    // 原版 noTileCollide（穿墙族）：直接位移不走碰撞
+    if (this.vanilla?.noTileCollide) {
+      this.x += this.vx;
+      this.y += this.vy;
       return;
     }
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -443,6 +747,12 @@ export class Enemy extends Entity {
     }
     if (this.hp <= 0) {
       this.dead = true;
+      // 蠕虫任一段死亡 → 整链同死（原版 realLife 共享生命，L18152-18156）
+      if (this.wormNext || this.wormFollow) {
+        let head: Enemy = this;
+        while (head.wormFollow) head = head.wormFollow;
+        for (let s: Enemy | null = head; s; s = s.wormNext) s.dead = true;
+      }
       // 掉落
       const rng = new RNG(Math.floor(Math.random() * 1e9));
       for (const d of this.def.drops) {

@@ -10,6 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { Inventory, ACCESSORY_START } from '../items/Inventory';
 import { BuffState } from '../stats/Buffs';
 import { ITEM_DEFS } from '../data/items';
+import { TILE_DEFS } from '../data/tiles';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
 // 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
@@ -20,6 +21,9 @@ export class Player extends Entity {
   w = 16; h = 39;        // 16×39：1 格宽碰撞盒 + 前向偏移
   facing = 1;            // 1 右 -1 左
   baseMaxHp = 100;
+  baseMaxMana = 20;   // 原版 statManaMax2 起步 20,坠落之星 +20/颗(上限 200)
+  mana = 20;
+  manaRegenAccum = 0;
   hp = 100;
   inv: Inventory;
   buffs = new BuffState();
@@ -78,6 +82,9 @@ export class Player extends Entity {
   get maxHp(): number {
     return this.baseMaxHp + this.buffs.healthBonus;
   }
+  get maxMana(): number {
+    return this.baseMaxMana;
+  }
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
   }
@@ -117,6 +124,14 @@ export class Player extends Entity {
     }
     // 上限收缩时钳制
     if (this.hp > this.maxHp) this.hp = this.maxHp;
+    // 魔力自然回复(原版 Player.manaRegen:越满越快,简化为每秒 maxMana*0.08+0.5)
+    if (this.mana < this.maxMana) {
+      this.manaRegenAccum += dt;
+      if (this.manaRegenAccum >= 1) {
+        this.manaRegenAccum -= 1;
+        this.mana = Math.min(this.maxMana, this.mana + Math.ceil(this.maxMana * 0.08) + 1);
+      }
+    }
 
     // 液体检测：身体采样在脚底上方固定 4px（贴脚即入水，不随身高缩放）
     const liq = world.store.liquid[world.store.idx(
@@ -202,6 +217,21 @@ export class Player extends Entity {
     const maxSpd = PLAYER_WALK_MAX * (this.inWater ? 0.55 : 1) * speedMult;
     this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx));
 
+    // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
+    const st = world.store;
+    const ropeTx = Math.floor((this.x + this.w / 2) / TILE);
+    const ropeTy = Math.floor((this.y + this.h / 2) / TILE);
+    const ropeHere = !!(st.inBounds(ropeTx, ropeTy) && st.flags[st.idx(ropeTx, ropeTy)]
+      && TILE_DEFS[st.type[st.idx(ropeTx, ropeTy)]]?.rope);
+    this.onRope = ropeHere;
+    if (ropeHere && !this.inWater) {
+      // 上爬 2.2 / 下滑 3.0(原版攀爬速度),静止缓降 0.6
+      if (this.inputJump) this.vy = Math.max(this.vy - 0.62, -2.2);
+      else if (this.inputDown) this.vy = Math.min(this.vy + 0.5, 3.0);
+      else this.vy = Math.min(this.vy + 0.08, 0.6);
+      this.vy = Math.max(-2.2, Math.min(3.0, this.vy));
+      this.fallStartY = null; // 绳上不计摔伤
+    } else
     // 跳跃 / 游泳
     if (this.inWater) {
       // 头部露出水面（踩水状态）→ 允许正常力度起跳跃上岸块（带冷却防连跳）
@@ -353,6 +383,8 @@ export class Player extends Entity {
   inputX = 0;
   inputJump = false;
   inputDown = false;
+  inputUp = false;
+  onRope = false;
 
   /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked）。
    *  knockback=false 用于窒息等环境伤害（只掉血不击退） */

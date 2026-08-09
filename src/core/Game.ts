@@ -7,6 +7,7 @@ import { World, ChestData } from '../world/World';
 import { generateWorld } from '../world/gen/WorldGen';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { poolFor, vanillaNpc } from '../data/vanillaNpcs';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { Player } from '../entities/Player';
@@ -41,6 +42,10 @@ import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
+import { Dart } from '../entities/Dart';
+import { Arrow } from '../entities/Arrow';
+import { Minecart } from '../entities/Minecart';
+import { MagicProj } from '../entities/MagicProj';
 
 const FIXED_DT = 1 / 60;
 
@@ -171,6 +176,11 @@ export class Game implements GameHooks {
   private _tpTarget: { x: number; y: number } | null = null;
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
+  waterCandleNear = false;
+  trackTile = TILE_BY_KEY['v_314_minecart_track'] ?? 0;
+  minecart: import('../entities/Minecart').Minecart | null = null;
+  trapCooldown = new Map<string, number>();
+  plateLatch = new Set<string>();
   // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
   fixTexMode = false;
   // 敌人生成开关（F8）：关闭后不再生成新怪物（已有的不受影响）
@@ -290,6 +300,12 @@ export class Game implements GameHooks {
     this.camera.y = this.player.cy;
     this.boss = null;
     this.guideSpawned = true; // 向导已移除；保留字段避免存档兼容问题
+    // 商人 NPC(原版 Merchant 语义简化:出生点旁常驻,对话=购买)
+    const merch = new TownNPC('merchant', this.world.spawnX * 16 - 40, (this.world.spawnY - 2) * 16);
+    this.entities.add(merch, 'npcs');
+    // 护士(原版:击败任一 Boss 后入住;checkNpcArrival 每帧判定)
+    const nurse = new TownNPC('nurse', this.world.spawnX * 16 + 40, (this.world.spawnY - 2) * 16);
+    this.entities.add(nurse, 'npcs');
     this.cb.onInventoryChanged();
   }
 
@@ -434,6 +450,7 @@ export class Game implements GameHooks {
     player.inputX = (inp.down('KeyA') || inp.down('ArrowLeft') ? -1 : 0) + (inp.down('KeyD') || inp.down('ArrowRight') ? 1 : 0);
     player.inputJump = inp.down('Space') || inp.down('KeyW') || inp.down('ArrowUp');
     player.inputDown = inp.down('KeyS') || inp.down('ArrowDown');
+    player.inputUp = inp.down('KeyW') || inp.down('ArrowUp');
 
     // 滚轮：全屏地图打开时缩放地图，否则缩放游戏画面
     if (inp.wheelDelta !== 0) {
@@ -477,10 +494,44 @@ export class Game implements GameHooks {
 
     // ---- 敌人生成（F8 可关闭） ----
     this.spawnTimer++;
-    if (this.enemySpawnEnabled && this.spawnTimer >= SPAWN_CHECK_INTERVAL) {
+    // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率 ×2(间隔减半)
+    const held2 = this.player.inv.heldItem();
+    const heldWC = !!held2 && ITEM_DEFS[held2.id]?.key === 'water_candle';
+    let nearWC = false;
+    if (this.tickCount % 30 === 0) {
+      nearWC = false;
+      const st2 = this.world.store;
+      const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
+      const WCT = TILE_BY_KEY['water_candle'];
+      for (let dx = -32; dx <= 32 && !nearWC; dx += 4) {
+        for (let dy = -24; dy <= 24; dy += 4) {
+          if (st2.get(ptx + dx, pty + dy) === WCT) { nearWC = true; break; }
+        }
+      }
+      this.waterCandleNear = nearWC;
+    }
+    // 篝火/心灯光环(Main.campfire 语义:170 格内篝火=1hp/s;心灯 BuffID115 再+1)
+    // 和平蜡烛(peaceCandleNear):刷怪率减半
+    if (this.tickCount % 20 === 0) {
+      const ptx2 = Math.floor(this.player.cx / TILE), pty2 = Math.floor(this.player.cy / TILE);
+      let fire = 0, heart = 0, peace = false;
+      const FIRE = TILE_BY_KEY['v_215_campfires'];
+      for (let dx = -48; dx <= 48 && fire === 0; dx += 3) {
+        for (let dy = -36; dy <= 36; dy += 3) {
+          if (this.world.store.get(ptx2 + dx, pty2 + dy) === FIRE) { fire = 1; break; }
+        }
+      }
+      if (fire > 0) this.player.buffs.apply(BuffType.Campfire, 0.5);
+    }
+    const wcBoost = heldWC || this.waterCandleNear;
+    const interval = wcBoost ? Math.ceil(SPAWN_CHECK_INTERVAL / 2) : SPAWN_CHECK_INTERVAL;
+    if (this.enemySpawnEnabled && this.spawnTimer >= interval) {
       this.spawnTimer = 0;
       this.trySpawnEnemy();
     }
+
+    // ---- 压力板触发 ----
+    this.checkPressurePlates();
 
     // ---- Boss 逻辑 ----
     if (this.boss) {
@@ -603,6 +654,28 @@ export class Game implements GameHooks {
 
   private updateUse(dt: number) {
     const inp = this.input;
+    // 矿车骑乘驱动:左右加速,跳车
+    if (this.minecart) {
+      const cart = this.minecart;
+      const ix = this.player.inputX;
+      if (ix !== 0) cart.vx = Math.max(-8, Math.min(8, cart.vx + ix * 0.15));
+      if (inp.down('KeyR')) {
+        // 跳车(原版 R 键下车;Space 与跳跃共用会误触)
+        this.player.x = cart.x;
+        this.player.y = cart.y - 24;
+        this.player.vy = -4;
+        cart.mounted = false;
+        this.minecart = null;
+        this.input.rightDown = false;
+      }
+      // 玩家跟随车位置
+      this.player.x = cart.x;
+      this.player.y = cart.y - 26;
+      this.player.vx = cart.vx;
+      this.player.vy = 0;
+      if (cart.dead) { this.minecart = null; }
+      return;
+    }
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用
     if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open) {
       this.mining = null;
@@ -612,12 +685,28 @@ export class Game implements GameHooks {
     const heldDef = held ? ITEM_DEFS[held.id] : null;
     const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
     const tool = heldDef?.tool;
+    const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
 
-    // 右键：附近宝箱（3×3 容差）→ NPC 交谈 → 开门/宝箱/召唤物
+    // 右键：手持矿车点轨道(最优先,防 NPC 交谈拦截)→ 附近宝箱 → NPC 交谈 → 交互
+    const type = this.world.store.get(tx, ty);
+    if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0) {
+      const h = this.player.inv.heldItem();
+      if (h && ITEM_DEFS[h.id]?.key === 'minecart_item') {
+        const cart = new Minecart();
+        cart.x = tx * TILE; cart.y = (ty - 1) * TILE;
+        this.entities.add(cart, 'props');
+        this.minecart = cart;
+        cart.mounted = true;
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onInventoryChanged();
+        this.input.rightDown = false;
+        return;
+      }
+    }
     if (inp.rightDown) {
       const nearChest = this.findChestNear(tx, ty);
       if (nearChest) {
-        this.openChest?.(nearChest);
+        this.tryOpenChest(nearChest);
         this.input.rightDown = false;
       } else if (this.talkToNearbyNpc()) {
         this.input.rightDown = false;
@@ -722,6 +811,71 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
         this.cb.onToast(`${heldDef.name}：${p.duration} 秒`);
       }
+    } else if (heldDef && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
+      // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
+      if (this.player.baseMaxHp >= 400) {
+        this.cb.onToast('生命上限已达到 400');
+      } else {
+        this.player.baseMaxHp += 20;
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#40E080');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef?.ranged && inp.mouseDown && this.player.useTime === 0) {
+      // 远程武器(弓):消耗弹药 → 沿鼠标方向发射箭(Player.ItemCheck_Shoot 语义)
+      const rg = heldDef.ranged;
+      const ammoId = ITEM_BY_KEY[rg.ammo];
+      let ammoSlot = -1;
+      for (let i = 0; i < this.player.inv.slots.length; i++) {
+        const sl = this.player.inv.slots[i];
+        if (sl && sl.id === ammoId && sl.stack > 0) { ammoSlot = i; break; }
+      }
+      if (ammoSlot >= 0) {
+        const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+        const ax = this.player.cx + Math.cos(ang) * 14;
+        const ay = this.player.cy - 4 + Math.sin(ang) * 14;
+        const arrow = new Arrow(ax, ay, Math.cos(ang) * rg.projSpeed, Math.sin(ang) * rg.projSpeed, rg.damage, rg.ammo);
+        this.entities.add(arrow, 'projectiles');
+        this.player.inv.removeAt(ammoSlot, 1);
+        this.player.useTime = rg.speed;
+        this.sfx.play('tink');
+        this.cb.onInventoryChanged();
+      }
+    } else if (heldDef && (heldDef.key === 'worm_food' || heldDef.key === 'bloody_spine' || heldDef.key === 'slime_crown')
+      && inp.mouseDown && this.player.useTime === 0) {
+      // Boss 召唤物(原版 worm food/bloody spine/slime crown)
+      if (heldDef.key === 'worm_food') this.summonBoss('eater_of_worlds_head');
+      else if (heldDef.key === 'bloody_spine') this.summonBoss('brain_of_cthulhu');
+      else this.summonBoss('king_slime');
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.player.useTime = 60;
+      this.cb.onInventoryChanged();
+      this.input.mouseDown = false;
+    } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
+      // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
+      const mg = heldDef.magic;
+      if (this.player.mana < mg.manaCost) {
+        this.cb.onToast('魔力不足');
+        this.input.mouseDown = false;
+      } else {
+        this.player.mana -= mg.manaCost;
+        const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
+        const mx = this.player.cx + Math.cos(ang) * 14;
+        const my = this.player.cy - 4 + Math.sin(ang) * 14;
+        const color = mg.proj === 'bolt' ? '#A040FF' : '#FFB040';
+        const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color);
+        this.entities.add(proj, 'projectiles');
+        this.player.useTime = mg.speed;
+        this.sfx.play('tink');
+        this.input.mouseDown = false;
+      }
+    } else if (heldDef && (heldDef.key === 'empty_bucket' || heldDef.key === 'water_bucket'
+      || heldDef.key === 'lava_bucket' || heldDef.key === 'honey_bucket')) {
+      this.useBucket(heldDef.key, tx, ty);
     }
     this.mining = null;
   }
@@ -742,6 +896,16 @@ export class Game implements GameHooks {
     const type = this.world.store.get(tx, ty);
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
+      // 原版语义:锤子优先循环实心块状态(整块→半砖→整块;坡面渲染未实现暂两态)
+      if (type !== 0 && this.world.store.isSolid(tx, ty) && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
+        this.lastMineHitTick = this.tickCount;
+        const i = this.world.store.idx(tx, ty);
+        const cur = this.world.store.half[i];
+        this.world.store.setHalfBrick(tx, ty, !cur);
+        this.sfx.play('tink');
+        this.mining = null;
+        return;
+      }
       const wall = this.world.store.get(tx, ty) === 0 ? this.world.store.wall[this.world.store.idx(tx, ty)] : 0;
       if (type !== 0 && TILE_DEFS[type]?.decor) {
         this.breakTile(tx, ty);
@@ -877,7 +1041,7 @@ export class Game implements GameHooks {
           st.setTile(ax + dx, ay + dy, 0);
         }
       }
-      this.spawnDrop(ax * TILE + 8, ay * TILE, def.drop ?? '', 1);
+      this.spawnDrop(ax * TILE + 8, ay * TILE, def.drop ?? (def.key.startsWith('v_') ? 'place_' + def.key : ''), 1);
       // 宝箱内容物掉出
       if (type === T.CHEST) this.dumpChest(ax, ay);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
@@ -1048,6 +1212,23 @@ export class Game implements GameHooks {
       return;
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
+    // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
+    if (itemDef.key === 'rope') {
+      const ropeTile = TILE_BY_KEY['v_213_rope']!;
+      let placed = 0;
+      for (let y = ty; y < ty + 10; y++) {
+        if (!st.inBounds(tx, y) || st.isActive(tx, y)) break;
+        st.setTile(tx, y, ropeTile, 0, 0);
+        placed++;
+      }
+      if (placed > 0) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 14;
+        this.sfx.play('place');
+        this.cb.onInventoryChanged();
+      }
+      return;
+    }
     // 放置空间检查
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
@@ -1072,7 +1253,9 @@ export class Game implements GameHooks {
         // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
         // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确
         if (isVanillaStyle) {
-          st.setTile(px, py, tileId, dx2 * 18, dy2 * 18);
+          // placeStyle:样式索引 → X 偏移 style*fw*18(2 宽物件步长 36,3 宽 54)
+          const strideX = (def.vanilla?.fw ?? 1) * 18;
+          st.setTile(px, py, tileId, (itemDef.placeStyle ?? 0) * strideX + dx2 * 18, dy2 * 18);
         } else {
           st.setTile(px, py, tileId, dx2, dy2);
         }
@@ -1149,9 +1332,151 @@ export class Game implements GameHooks {
     } else if (type === T.CHEST) {
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
-      if (chest) {
-        this.openChest?.(chest);
-        this.input.rightDown = false;
+      if (chest) this.tryOpenChest(chest);
+    } else if (type === TILE_BY_KEY['crystal_heart']) {
+      // 生命水晶(放置态):右键使用(Player.cs ItemCheck_UseLifeCrystal L29358)
+      // statLifeMax<400 → +20 上限并回满该部分,放置物消耗
+      this.usePlacedLifeCrystal(tx, ty);
+    } else if (type === TILE_BY_KEY['bed']) {
+      // 床:设重生点(vanilla Player.FindBed 语义;敌怪环绕检查略)
+      this.world.spawnX = tx + 1;
+      this.world.spawnY = ty - 1;
+      this.cb.onToast('重生点已设置');
+      this.input.rightDown = false;
+    } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch']) {
+      // 拉杆/开关:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
+      this.toggleSwitch(tx, ty, type);
+    } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
+      // 药草收获:成熟/开花态右键 → 掉种子(style 对应 frameX/36)
+      const i = st.idx(tx, ty);
+      const style = Math.floor(st.frameX[i] / 36);
+      st.setTile(tx, ty, 0);
+      const seedKeys = ['vi_307_daybloom_seeds', 'vi_308_moonglow_seeds', 'vi_309_blinkroot_seeds',
+        'vi_311_waterleaf_seeds', 'vi_310_deathweed_seeds', 'vi_312_fireblossom_seeds', 'vi_2357_shiverthorn_seeds'];
+      const sk = seedKeys[style] ?? seedKeys[0];
+      this.spawnDrop(tx * 16 + 8, ty * 16, sk, 1);
+      this.input.rightDown = false;
+    }
+  }
+
+  /** 放置态生命水晶使用(Player.cs:29358:statLifeMax≥400 拒绝,+20 上限+回复,消耗) */
+  private usePlacedLifeCrystal(tx: number, ty: number): void {
+    const st = this.world.store;
+    const def = TILE_DEFS[st.get(tx, ty)];
+    if (this.player.baseMaxHp >= 400) {
+      this.cb.onToast('生命上限已达到 400');
+      this.input.rightDown = false;
+      return;
+    }
+    this.player.baseMaxHp += 20;
+    this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+    this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#40E080');
+    // 消耗放置物(2×2)
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (st.get(tx + dx, ty + dy) === TILE_BY_KEY['crystal_heart']) st.setTile(tx + dx, ty + dy, 0);
+      }
+    }
+    this.sfx.play('drink');
+    this.input.rightDown = false;
+    void def;
+  }
+
+  /** 开宝箱统一入口:锁定箱(原版 Chest.locked)需金钥匙,首次开启消耗 */
+  private tryOpenChest(chest: { locked?: boolean }): void {
+    if (chest.locked) {
+      const keyId = ITEM_BY_KEY['vi_327_golden_key'];
+      let keySlot = -1;
+      for (let i = 0; i < this.player.inv.slots.length; i++) {
+        const sl = this.player.inv.slots[i];
+        if (sl && sl.id === keyId && sl.stack > 0) { keySlot = i; break; }
+      }
+      if (keySlot < 0) { this.cb.onToast('宝箱被锁住了,需要金钥匙'); this.input.rightDown = false; return; }
+      this.player.inv.removeAt(keySlot, 1);
+      chest.locked = false;
+      this.sfx.play('tink');
+      this.cb.onToast('用金钥匙打开了宝箱');
+      this.cb.onInventoryChanged();
+    }
+    this.openChest?.(chest as never);
+    this.input.rightDown = false;
+  }
+
+  /** 拉杆/开关切换:帧翻转(原版 style 内 on/off 两态),直线驱动陷阱 */
+  private toggleSwitch(x: number, y: number, type: number): void {
+    const st = this.world.store;
+    const i = st.idx(x, y);
+    const on = st.frameX[i] >= 18;
+    st.setTile(x, y, type, on ? 0 : 18, st.frameY[i]);
+    this.sfx.play('tink');
+    this.fireTrapsFrom(x, y, !on);
+    this.input.rightDown = false;
+  }
+
+  /** 从电源点向四方向直线扫描 ≤60 格,遇陷阱(无实心阻挡)发射飞镖 */
+  private fireTrapsFrom(px: number, py: number, powerOn: boolean): void {
+    if (!powerOn) return;
+    const st = this.world.store;
+    const TRAP = TILE_BY_KEY['v_137_traps'];
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+      for (let d = 1; d <= 60; d++) {
+        const x = px + dx * d, y = py + dy * d;
+        if (!st.inBounds(x, y)) break;
+        if (st.isSolid(x, y) && st.get(x, y) !== TRAP) break;
+        if (st.get(x, y) === TRAP) {
+          const key = x + ',' + y;
+          const last = this.trapCooldown.get(key) ?? -999;
+          if (this.tickCount - last < 40) return;
+          this.trapCooldown.set(key, this.tickCount);
+          const dart = new Dart(x * TILE + 8 + dx * 10, y * TILE + 8 + dy * 10, dx * 9, dy * 9, 20);
+          this.entities.add(dart, 'projectiles');
+          this.sfx.play('tink');
+          return;
+        }
+      }
+    }
+  }
+
+  /** 压力板:玩家踩上瞬间触发(原版 PressurePlate 语义,人触发灰板) */
+  private checkPressurePlates(): void {
+    const st = this.world.store;
+    const p = this.player;
+    const tx = Math.floor(p.cx / TILE), ty = Math.floor((p.y + p.h) / TILE);
+    const key = tx + ',' + ty;
+    if (st.get(tx, ty) === TILE_BY_KEY['v_135_pressure_plates'] && !this.plateLatch.has(key)) {
+      this.plateLatch.add(key);
+      this.fireTrapsFrom(tx, ty, true);
+    } else if (st.get(tx, ty) !== TILE_BY_KEY['v_135_pressure_plates']) {
+      this.plateLatch.delete(key);
+    }
+  }
+
+  /** 桶三态(Player.cs ItemCheck_Buckets L28137 语义):
+   *  空桶点液体 → 舀成对应满桶;满桶点空格 → 放置液体变空桶 */
+  private useBucket(key: string, tx: number, ty: number): void {
+    const st = this.world.store;
+    const liqTypeMap: Record<string, number> = { water_bucket: 1, lava_bucket: 2, honey_bucket: 3 };
+    const swap = (toKey: string) => {
+      // 原版语义:桶在手中原格替换(不跳格)
+      this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[toKey], stack: 1 };
+      this.cb.onInventoryChanged();
+      this.player.useTime = 30;
+      this.input.rightDown = false;
+    };
+    if (key === 'empty_bucket') {
+      const i = st.idx(tx, ty);
+      if (st.liquid[i] > 0) {
+        const t = st.liquidType[i] || 1;
+        st.setLiquid(tx, ty, 0, 0);
+        swap(t === 2 ? 'lava_bucket' : t === 3 ? 'honey_bucket' : 'water_bucket');
+      }
+    } else {
+      // 满桶:目标格须空且(相邻可铺展/有底)——简化:空即可
+      const i = st.idx(tx, ty);
+      if (!st.flags[i]) {
+        const lt = liqTypeMap[key];
+        st.setLiquid(tx, ty, 255, lt);
+        swap('empty_bucket');
       }
     }
   }
@@ -1277,7 +1602,7 @@ export class Game implements GameHooks {
     const p = this.player;
     if (p.dead) return;
     const isDay = w.clock.isDay;
-    const count = this.entities.enemies.filter((e) => !(e as Enemy).def.boss).length;
+    const count = this.entities.enemies.filter((e) => !(e as Enemy).def.boss && !(e as Enemy).wormFollow).length;
     if (count >= ENEMY_CAP) return;
     if (this.boss) return;
 
@@ -1327,6 +1652,24 @@ export class Game implements GameHooks {
     if (def.dayOnly && !isDay && !isUnderground) { /* 史莱姆夜间也可少量 */ }
     // 找落脚点：从 ty 向下找空中有地面的位置
     let spawnY = -1;
+    // 原版数据驱动怪（50% 概率从原版生成池选，属性/AI/贴图全走 vanilla-npcs.json）
+    let vanillaSpawn: Enemy | null = null;
+    if (rng.chance(0.5)) {
+      const pool = poolFor(Math.floor(w.groundLevel), st.h - 200, ty, isDay);
+      const vid = pool[(rng.next() * pool.length) | 0];
+      vanillaSpawn = Enemy.fromVanilla(vid, 0, 0);
+    }
+    const effDef = vanillaSpawn?.def ?? def;
+    // 蠕虫族（aiStyle 6）穿墙钻地：直接用环带点生成，不找空中落脚位
+    if (vanillaSpawn?.vanilla?.aiStyle === 6) {
+      vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
+      vanillaSpawn.y = ty * TILE + 8 - vanillaSpawn.h / 2;
+      vanillaSpawn.id = this.entities.nextId++;
+      this.entities.enemies.push(vanillaSpawn);
+      const segs = Enemy.spawnWormChain(vanillaSpawn, 5 + ((rng.next() * 4) | 0));
+      for (const s of segs) { s.id = this.entities.nextId++; this.entities.enemies.push(s); }
+      return;
+    }
     for (let dy = -8; dy <= 12; dy++) {
       const yy = ty + dy;
       if (yy < 2 || yy > st.h - 3) continue;
@@ -1335,7 +1678,7 @@ export class Game implements GameHooks {
       const dry = st.liquid[st.idx(tx, yy)] <= 40 && st.liquid[st.idx(tx, yy - 1)] <= 40;
       const clear = !st.isSolid(tx, yy) && !st.isSolid(tx, yy - 1) && dry;
       const ground = st.isSolid(tx, yy + 1) || st.isSolid(tx, yy + 2);
-      if (def.flying) {
+      if (effDef.flying) {
         if (!st.isSolid(tx, yy) && dry) { spawnY = yy; break; }
       } else if (clear && ground) {
         spawnY = yy;
@@ -1344,6 +1687,18 @@ export class Game implements GameHooks {
     }
     if (spawnY < 0) return;
     // 地表暗处不生成（夜间地表有天空光 0.12，算可见）
+    if (vanillaSpawn) {
+      vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
+      vanillaSpawn.y = spawnY * TILE + TILE - vanillaSpawn.h;
+      vanillaSpawn.id = this.entities.nextId++;
+      this.entities.enemies.push(vanillaSpawn);
+      // 蠕虫族（aiStyle 6）：生成身×n+尾的段链（原版 NewNPC 链 NPC.cs:18174+）
+      if (vanillaSpawn.vanilla?.aiStyle === 6 && vanillaNpc(vanillaSpawn.vanillaId! + 1)) {
+        const segs = Enemy.spawnWormChain(vanillaSpawn, 5 + ((rng.next() * 4) | 0));
+        for (const s of segs) { s.id = this.entities.nextId++; this.entities.enemies.push(s); }
+      }
+      return;
+    }
     this.spawnEnemy(key, tx * TILE + 8, spawnY * TILE);
   }
 
@@ -1380,12 +1735,76 @@ export class Game implements GameHooks {
         '手持火把也能照亮周围，不用非得放置。',
         '想知道更多？去地下找找宝箱吧！',
       ];
+      if (npc.npcKey === 'nurse') {
+        // 护士:50 铜币治疗至满(原版 Nurse 治疗费随缺失血量;简化固定)
+        if (npc.talkCooldown <= 0) {
+          if (p.hp >= p.maxHp) { this.cb.onToast('护士:你很健康,不需要我'); }
+          else {
+            const coinId2 = ITEM_BY_KEY['coin_copper'];
+            let coins2 = 0;
+            for (const sl of this.player.inv.slots) if (sl && sl.id === coinId2) coins2 += sl.stack;
+            if (coins2 < 50) { this.cb.onToast('护士:治疗要 50 铜币'); }
+            else {
+              let left2 = 50;
+              for (let i = 0; i < this.player.inv.slots.length && left2 > 0; i++) {
+                const sl = this.player.inv.slots[i];
+                if (!sl || sl.id !== coinId2) continue;
+                const take = Math.min(sl.stack, left2);
+                sl.stack -= take; left2 -= take;
+                if (sl.stack <= 0) this.player.inv.slots[i] = null;
+              }
+              p.hp = p.maxHp;
+              this.cb.onInventoryChanged();
+              this.addDamageNumber(p.cx, p.y, p.maxHp - p.hp, false, '#40E080');
+              this.cb.onToast('护士:治疗完成(-50 铜币)');
+            }
+          }
+          npc.talkCooldown = 120;
+        }
+        return true;
+      }
+      if (npc.npcKey === 'merchant') {
+        if (npc.talkCooldown <= 0) {
+          this.merchantTrade();
+          npc.talkCooldown = 120;
+        }
+        return true;
+      }
       npc.bubble = tips[Math.floor(Math.random() * tips.length)];
       npc.bubbleT = 360;
       npc.talkCooldown = 600;
       return true;
     }
     return false;
+  }
+
+  /** 商人交易(简化商店):铜币买固定商品——火把10/木材20/铜镐/次级治疗药水 */
+  private merchantTrade(): void {
+    const inv = this.player.inv;
+    const coinId = ITEM_BY_KEY['coin_copper'];
+    let coins = 0;
+    for (const sl of inv.slots) if (sl && sl.id === coinId) coins += sl.stack;
+    const stock: Array<[string, number, number]> = [
+      ['torch', 10, 50], ['wood', 20, 20], ['copper_pickaxe', 1, 500], ['lesser_healing_potion', 3, 150],
+    ];
+    const affordable = stock.filter(([, , cost]) => cost <= coins);
+    if (affordable.length === 0) {
+      this.cb.onToast('商人:铜币不够呀(最便宜木材 20)');
+      return;
+    }
+    const [key, n, cost] = affordable[Math.floor(Math.random() * affordable.length)];
+    // 扣币
+    let left = cost;
+    for (let i = 0; i < inv.slots.length && left > 0; i++) {
+      const sl = inv.slots[i];
+      if (!sl || sl.id !== coinId) continue;
+      const take = Math.min(sl.stack, left);
+      sl.stack -= take; left -= take;
+      if (sl.stack <= 0) inv.slots[i] = null;
+    }
+    inv.add(ITEM_BY_KEY[key], n);
+    this.cb.onInventoryChanged();
+    this.cb.onToast(`商人:买到 ${n} × ${ITEM_DEFS[ITEM_BY_KEY[key]].name}(-${cost} 铜币)`);
   }
 
   private isValidHouse(doorX: number, doorY: number): boolean {
@@ -1406,6 +1825,10 @@ export class Game implements GameHooks {
   }
 
   // ================= GameHooks 实现 =================
+
+  enemies() {
+    return this.entities.enemies;
+  }
 
   spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2) {
     const id = ITEM_BY_KEY[itemKey];
@@ -1742,6 +2165,37 @@ export class Game implements GameHooks {
   }
 
   // ================= 召唤 Boss =================
+
+  /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
+  summonBoss(key: string): void {
+    if (this.boss) { this.cb.onToast('已有 Boss 在场'); return; }
+    const side = Math.random() < 0.5 ? -1 : 1;
+    const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
+    let ty = 10;
+    for (; ty < this.world.h; ty++) {
+      if (this.world.store.type[this.world.store.idx(tx, ty)] !== 0) break;
+    }
+    const spawnY = Math.max(4, ty - 12) * TILE;
+    const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266 : -1;
+    if (vanillaId >= 0 && Enemy.fromVanilla) {
+      const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
+      if (head) {
+        this.entities.add(head, 'enemies');
+        this.boss = head;
+        if (vanillaId === 13) {
+          // 世吞体节链(原版 15-30 段)
+          const segs = Enemy.spawnWormChain(head, 15 + Math.floor(Math.random() * 16));
+          for (const sg of segs) this.entities.add(sg, 'enemies');
+        }
+        this.sfx.playWav('roar');
+        this.cb.onToast('你感到有个邪恶的东西在看着你……');
+        return;
+      }
+    }
+    this.spawnEnemy(key, tx * TILE + 8, spawnY);
+    this.sfx.playWav('roar');
+    this.cb.onToast('你感到有个邪恶的东西在看着你……');
+  }
 
   useSuspiciousEye() {
     if (this.world.clock.isDay) {

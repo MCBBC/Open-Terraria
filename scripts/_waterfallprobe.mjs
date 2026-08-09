@@ -1,4 +1,4 @@
-// 瀑布贴图验证：制造一个"悬崖边水池倾泻"场景，检查 WaterfallRenderer 触发与绘制
+// 瀑布贴图验证（原版 halfBrick 唇缘触发）：找生成期唇缘 → 触发 → 像素验证水柱
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -17,95 +17,58 @@ await new Promise((r) => setTimeout(r, 1500));
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
 
-// 造场景：空中平台 + 平台上一池水，紧贴悬崖（右侧深井），水会从边缘倾泻
-const scene = await page.evaluate(() => {
+// 找生成期唇缘（原版条件：half + 上干/上实 + 一侧水>160 + 对侧空）
+const lip = await page.evaluate(() => {
   const g = window.__swGame;
   const st = g.world.store;
-  const cx = Math.floor(g.player.cx / 16);
-  let gy = 0;
-  while (gy < st.h - 50 && !st.isSolid(cx, gy)) gy++;
-  const px = cx + 30, py = gy + 15; // 平台左端
-  // 清出大空域
-  for (let dy = -5; dy <= 60; dy++) for (let dx = -5; dx <= 15; dx++) {
-    st.setTile(px + dx, py + dy, 0);
-    st.liquid[st.idx(px + dx, py + dy)] = 0;
-    st.liquidType[st.idx(px + dx, py + dy)] = 0;
-  }
-  // 平台：x ∈ [px, px+6]，顶在 py；右侧 px+7 起是悬崖（空）
-  for (let dx = 0; dx <= 6; dx++) st.setTile(px + dx, py, 2);
-  // 池：平台上 8 格深的水（x ∈ [px, px+6]，大水量保证持续倾泻）
-  for (let dy = -4; dy <= 3; dy++) for (let dx = 0; dx <= 6; dx++) {
-    st.liquid[st.idx(px + dx, py - dy)] = 255;
-    st.liquidType[st.idx(px + dx, py - dy)] = 1;
-  }
-  // 井底：py+50 处放地板接水
-  for (let dx = 0; dx <= 14; dx++) st.setTile(px + dx, py + 50, 2);
-  g.liquid.waterCheck();
-  // 相机对准悬崖边
-  g.player.x = (px + 8) * 16;
-  g.player.y = (py - 10) * 16;
-  return { px, py };
-});
-console.log('scene:', JSON.stringify(scene));
-
-// 持续采样 count（扫描 30 帧一扫，取最大值）
-let wf = { count: 0, active: 0 };
-for (let i = 0; i < 8; i++) {
-  await new Promise((r) => setTimeout(r, 400));
-  const s2 = await page.evaluate(() => ({
-    count: window.__swGame.renderer.waterfalls.count,
-    active: window.__swGame.liquid.numLiquid,
-  }));
-  console.log('  sample', i, JSON.stringify(s2));
-  wf = { count: Math.max(wf.count, s2.count), active: s2.active };
-}
-check('瀑布触发（倾泻点被识别）', wf.count > 0, JSON.stringify(wf));
-
-// 像素验证：悬崖下方 10 格处应有瀑布贴图像素（非纯背景）
-// 重新注水，趁倾泻进行中做像素检查
-await page.evaluate((s) => {
-  const g = window.__swGame;
-  const st = g.world.store;
-  // 清掉底部积水，重注平台上方 8 格深
-  for (let dy = -5; dy <= 55; dy++) for (let dx = -5; dx <= 15; dx++) {
-    st.liquid[st.idx(s.px + dx, s.py + dy)] = 0;
-    st.liquidType[st.idx(s.px + dx, s.py + dy)] = 0;
-  }
-  for (let dy = 1; dy <= 8; dy++) for (let dx = 0; dx <= 6; dx++) {
-    st.liquid[st.idx(s.px + dx, s.py - dy)] = 255;
-    st.liquidType[st.idx(s.px + dx, s.py - dy)] = 1;
-  }
-  g.liquid.waterCheck();
-  g.camera.x = (s.px + 8) * 16;
-  g.camera.y = (s.py + 10) * 16;
-  g.camera.zoom = 1.0; g.camera.zoomTarget = 1.0;
-  g.renderer.fullbright = true;
-}, scene);
-await new Promise((r) => setTimeout(r, 900));
-const mid = await page.evaluate(() => window.__swGame.renderer.waterfalls.count);
-console.log('mid-pour count:', mid);
-const px = await page.evaluate((s) => {
-  const g = window.__swGame;
-  const st = g.world.store;
-  // 倾泻列：悬崖右侧有液体的列
-  let colX = -1;
-  for (let dx = 7; dx <= 13; dx++) {
-    for (let dy = -2; dy < 45; dy++) {
-      if (st.liquid[st.idx(s.px + dx, s.py + dy)] > 0) { colX = s.px + dx; break; }
+  for (let y = 30; y < st.h - 30; y++) {
+    for (let x = 30; x < st.w - 30; x++) {
+      const i = st.idx(x, y);
+      if (!st.half[i]) continue;
+      const uq = st.liquid[i - st.w];
+      if (!(uq < 16 || st.isSolid(x, y - 1))) continue;
+      const lq = st.liquid[i - 1], rq = st.liquid[i + 1];
+      const lOpen = lq === 0 && !st.isSolid(x - 1, y);
+      const rOpen = rq === 0 && !st.isSolid(x + 1, y);
+      if ((lq > 160 || rq > 160) && (lOpen || rOpen)) {
+        // 唇缘下方要有落程（至少 8 格净空）才有可见水柱
+        let drop = 0;
+        while (drop < 8 && y + 1 + drop < st.h - 2 && !st.isSolid(x, y + 1 + drop)) drop++;
+        if (drop >= 8) return { x, y, drop };
+      }
     }
-    if (colX >= 0) break;
   }
-  if (colX < 0) return { colX };
-  // 采样倾泻列中段（py+15）：瀑布贴图覆盖处应有半透明亮色像素
-  const [sx, sy] = g.camera.worldToScreen(colX * 16 + 8, (s.py + 15) * 16 + 8);
+  return null;
+});
+console.log('lip:', JSON.stringify(lip));
+check('找到带落程的生成期唇缘', !!lip);
+if (!lip) { console.log(`\n0 passed, 1 failed`); await browser.close(); process.exit(1); }
+
+// 相机对准唇缘（主角在上方，跟随）
+await page.evaluate((l) => {
+  const g = window.__swGame;
+  g.world.explored.fill(1); g.world.exploredVersion++;
+  g.renderer.fullbright = true;
+  g.player.x = l.x * 16 - 8;
+  g.player.y = (l.y - 8) * 16;
+}, lip);
+await new Promise((r) => setTimeout(r, 1200)); // 等瀑布扫描（30 帧节流）
+const count = await page.evaluate(() => window.__swGame.renderer.waterfalls.count);
+check('瀑布唇缘触发（原版 halfBrick 条件）', count > 0, `count=${count}`);
+
+// 像素验证：唇缘下方 6 格处应有瀑布贴图覆盖（非纯背景）
+const px = await page.evaluate((l) => {
+  const g = window.__swGame;
+  const st = g.world.store;
+  // 落柱列：唇缘格或其空侧列
+  const colX = !st.isSolid(l.x, l.y + 1) ? l.x : (st.liquid[st.idx(l.x - 1, l.y)] > 0 ? l.x + 1 : l.x - 1);
+  const [sx, sy] = g.camera.worldToScreen(colX * 16 + 8, (l.y + 6) * 16 + 8);
   const d = g.renderer.ctx.getImageData(Math.round(sx) - 8, Math.round(sy) - 8, 16, 16).data;
-  let bright = 0, n = 0;
-  for (let i = 0; i < d.length; i += 4) {
-    if (d[i + 3] > 30) { bright += (d[i] + d[i + 1] + d[i + 2]) / 3; n++; }
-  }
-  return { colX, cover: +(n / (d.length / 4)).toFixed(2), bright: n ? (bright / n) | 0 : 0 };
-}, scene);
-check('瀑布贴图像素可见（倾泻中段有亮色覆盖）', px.colX >= 0 && px.cover > 0.3, JSON.stringify(px));
+  let n = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 30) n++;
+  return { colX, cover: +(n / (d.length / 4)).toFixed(2) };
+}, lip);
+check('瀑布水柱像素可见（唇缘下方有贴图覆盖）', px.cover > 0.3, JSON.stringify(px));
 
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) console.log('页面异常:', errors.slice(0, 5));

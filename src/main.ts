@@ -11,6 +11,7 @@ import { INV_SIZE } from './items/Inventory';
 (window as unknown as { __parseWld?: (b: Uint8Array) => unknown; __lastCompatReport?: unknown }).__parseWld = parseWldToSave as unknown as (b: Uint8Array) => unknown;
 import { SpriteAtlas } from './assets/SpriteAtlas';
 import { AudioSystem } from './core/Audio';
+import { setDebugPool } from './data/vanillaNpcs';
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);
@@ -36,6 +37,10 @@ async function loadAssets() {
 function enterGame(g: Game) {
   game = g;
   (window as unknown as { __swGame: Game }).__swGame = g;
+  (window as unknown as { __swTiles: typeof TILE_BY_KEY }).__swTiles = TILE_BY_KEY;
+  (window as unknown as { __swItems: typeof ITEM_BY_KEY }).__swItems = ITEM_BY_KEY;
+  // 探针调试：强制原版生成池（确定性验证生成路径；传 null 恢复环境池）
+  (window as unknown as { __swSetPool?: (p: number[] | null) => void }).__swSetPool = setDebugPool;
   inGame = true;
   playStart = Date.now();
   ui.game = g;
@@ -80,6 +85,10 @@ function showMenu() {
         onDayNight: (isDay) => audio.setDayNight(isDay),
       }, atlas);
       (window as unknown as { __swGame: Game }).__swGame = g;
+      (window as unknown as { __swTiles: typeof TILE_BY_KEY }).__swTiles = TILE_BY_KEY;
+      (window as unknown as { __swItems: typeof ITEM_BY_KEY }).__swItems = ITEM_BY_KEY;
+  (window as unknown as { __swTiles: typeof TILE_BY_KEY }).__swTiles = TILE_BY_KEY;
+  (window as unknown as { __swItems: typeof ITEM_BY_KEY }).__swItems = ITEM_BY_KEY;
       ui.showProgress('正在生成世界…', 0.05);
       await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(label, p));
     },

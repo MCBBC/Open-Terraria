@@ -40,6 +40,7 @@ export function drawVanillaLiquids(
   const lW = new Float32Array(n), rW = new Float32Array(n), bW = new Float32Array(n), tW = new Float32Array(n);
   const vlW = new Float32Array(n), vrW = new Float32Array(n), vbW = new Float32Array(n), vtW = new Float32Array(n);
   const hasLE = new Uint8Array(n), hasRE = new Uint8Array(n), hasTE = new Uint8Array(n), hasBE = new Uint8Array(n);
+  const isHalfA = new Uint8Array(n);
   const fx = new Int16Array(n), fy = new Int16Array(n);
 
   // ---- P1：原始缓存 ----
@@ -55,27 +56,46 @@ export function drawVanillaLiquids(
       hasLiquidA[i] = lq > 0 ? 1 : 0;
       hasWallA[i] = st.wall[si] > 0 ? 1 : 0;
       typeA[i] = toVanillaType(st.liquidType[si]);
+      visTypeA[i] = typeA[i]; // P3 只跑到底部 10 行外（同原版 L152）——预填本格类型兜底，
+                              // 否则底带格子 visTypeA=0 被当水画（原版靠跨帧残留缓存掩蔽）
       const d = TILE_DEFS[st.type[si]];
       isSolidA[i] = d && d.solid ? 1 : 0;
     }
   }
   const at = (lx: number, ly: number) => lx * ph + ly; // padding 内坐标
+  // 半砖缓存（LiquidRenderer.cs:103-110）：halfBrick && 上格有液体 && 非平台；
+  // 无液体时类型继承上格（109-110）。注意 ptr[-1] = y-1 = 上格
+  for (let lx = 0; lx < pw; lx++) {
+    for (let ly = 1; ly < ph; ly++) {
+      const i = at(lx, ly);
+      if (!st.inBounds(px0 + lx, py0 + ly)) continue;
+      const si = st.idx(px0 + lx, py0 + ly);
+      const d = TILE_DEFS[st.type[si]];
+      if (st.half[si] && hasLiquidA[at(lx, ly - 1)] && !(d && d.platform)) {
+        isHalfA[i] = 1;
+        if (!hasLiquidA[i]) typeA[i] = typeA[at(lx, ly - 1)];
+      }
+    }
+  }
 
   // ---- P2：可见液位（内区 = 真实视图区） ----
   for (let lx = PAD; lx < pw - PAD; lx++) {
     for (let ly = PAD; ly < ph - PAD; ly++) {
       const i = at(lx, ly);
       let v: number;
-      if (!hasLiquidA[i]) {
+      if (isHalfA[i] && hasLiquidA[at(lx, ly - 1)]) {
+        v = 1; // 半砖 + 上格有液体：可视液面拉满（LiquidRenderer.cs:121-122）
+      } else if (!hasLiquidA[i]) {
         const li = at(lx - 1, ly), ri = at(lx + 1, ly), ui = at(lx, ly - 1), di = at(lx, ly + 1);
         let val = 0;
-        if (hasLiquidA[li] && hasLiquidA[ri] && typeA[li] === typeA[ri] && !isSolidA[li] && !isSolidA[ri]) {
-          val = level[li] + level[ri];
-          typeA[i] = typeA[li];
-        }
+        // 原版先判 ptr[-1]/[+1]（上下），后判 ptr[-H]/[+H]（左右）→ 左右命中时 Type 覆盖（L129-138）
         if (hasLiquidA[ui] && hasLiquidA[di] && typeA[ui] === typeA[di] && !isSolidA[ui] && !isSolidA[di]) {
-          val = Math.max(val, level[ui] + level[di]);
+          val = level[ui] + level[di];
           typeA[i] = typeA[ui];
+        }
+        if (hasLiquidA[li] && hasLiquidA[ri] && typeA[li] === typeA[ri] && !isSolidA[li] && !isSolidA[ri]) {
+          val = Math.max(val, level[li] + level[ri]);
+          typeA[i] = typeA[li];
         }
         v = val * 0.5;
       } else {
@@ -90,7 +110,7 @@ export function drawVanillaLiquids(
   for (let lx = 0; lx < pw; lx++) {
     for (let ly = 0; ly < ph - 10; ly++) {
       const i = at(lx, ly);
-      if (hasVisA[i] && !isSolidA[i]) {
+      if (hasVisA[i] && (!isSolidA[i] || isHalfA[i])) {
         opacity[i] = 1;
         visTypeA[i] = typeA[i];
         const len = WATERFALL_LENGTH[typeA[i]] ?? 3;
@@ -107,9 +127,12 @@ export function drawVanillaLiquids(
           } else break;
         }
       }
-      if (isSolidA[i]) {
+      if (isSolidA[i] && !isHalfA[i]) {
         visLevel[i] = 1;
         hasVisA[i] = 0;
+      } else {
+        // 原版 L178-179：非实心格在此重算可见性——P3 拖尾写入的干格因此变为可见
+        hasVisA[i] = visLevel[i] !== 0 ? 1 : 0;
       }
     }
   }
@@ -123,9 +146,9 @@ export function drawVanillaLiquids(
       let nT = 0, nB = 1, nL = 0, nR = 1;
       const my = visLevel[i];
       if (!hasVisA[ui]) nT += visLevel[di] * (1 - my);
-      if (!hasVisA[di] && !isSolidA[di]) nB -= visLevel[ui] * (1 - my);
-      if (!hasVisA[li] && !isSolidA[li]) nL += visLevel[ri] * (1 - my);
-      if (!hasVisA[ri] && !isSolidA[ri]) nR -= visLevel[li] * (1 - my);
+      if (!hasVisA[di] && !isSolidA[di] && !isHalfA[di]) nB -= visLevel[ui] * (1 - my);
+      if (!hasVisA[li] && !isSolidA[li] && !isHalfA[li]) nL += visLevel[ri] * (1 - my);
+      if (!hasVisA[ri] && !isSolidA[ri] && !isHalfA[ri]) nR -= visLevel[li] * (1 - my);
       tW[i] = nT; bW[i] = nB; lW[i] = nL; rW[i] = nR;
       hasTE[i] = (!hasVisA[ui] && !isSolidA[ui]) || nT !== 0 ? 1 : 0;
       hasBE[i] = (!hasVisA[di] && !isSolidA[di]) || nB !== 1 ? 1 : 0;
@@ -209,6 +232,8 @@ export function drawVanillaLiquids(
   };
   const animFrame = Math.floor((nowMs / 1000) * 6) % 16; // 原版 _frameState（风+6 基速）
   ctx.imageSmoothingEnabled = false;
+
+  // 主循环（双 pass 共用：背景 pass 画在方块层前、透明度 1.0；前景 pass 画在方块后、乘 DEFAULT_OPACITY）
   for (let lx = PAD; lx < pw - PAD; lx++) {
     const x = px0 + lx;
     for (let ly = PAD; ly < ph - PAD; ly++) {
@@ -219,7 +244,12 @@ export function drawVanillaLiquids(
       const tex = texFor(vt);
       if (!tex) continue;
       const n2 = Math.min(0.75, vlW[i]), n3 = Math.max(0.25, vrW[i]);
-      const n4 = Math.min(0.75, vtW[i]), n5 = Math.max(0.25, vbW[i]);
+      const n4 = Math.min(0.75, vtW[i]);
+      let n5 = Math.max(0.25, vbW[i]);
+      // 半砖可视底边截到半格（LiquidRenderer.cs:382-383）
+      if (isHalfA[i] && isSolidA[i] && n5 > 0.5) n5 = 0.5;
+      // IsVisible（LiquidRenderer.cs:384）：半砖格自身有半液且无墙 → 不画（交给上格溢流）
+      if (isHalfA[i] && hasLiquidA[i] && level[i] < 1 && !hasWallA[i]) continue;
       const sx = Math.floor(16 - n3 * 16) + fx[i];
       const sy = Math.floor(16 - n5 * 16) + fy[i];
       const sw = Math.ceil((n3 - n2) * 16), sh = Math.ceil((n5 - n4) * 16);
@@ -227,8 +257,7 @@ export function drawVanillaLiquids(
       const srcY = isSurface ? 1280 : sy + animFrame * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
-      // 背景 pass（isBackground）画在墙/方块层之前、透明度因子 1.0 —— 方块贴图透明像素
-      // 处露出这层水 = 浸润效果；前景 pass 画在方块之后、乘 DEFAULT_OPACITY（水 0.6）
+      // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
       ctx.drawImage(tex, sx, srcY, sw, sh,
         x * 16 + Math.floor(n2 * 16), y * 16 + Math.floor(n4 * 16), sw, sh);

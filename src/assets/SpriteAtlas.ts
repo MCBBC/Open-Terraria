@@ -5,6 +5,12 @@
 import atlasJson from '../../public/sprites/atlas.json';
 import resourcesJson from '../../public/sprites/resources.json';
 import vanillaJson from '../../public/sprites/vanilla.json';
+import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
+
+/** npc id → 动画帧数（SetDefaults 提取数据派生；懒加载 NPC 表用） */
+const vanillaNpcFrames: Record<string, number> = Object.fromEntries(
+  Object.entries(vanillaNpcsJson as Record<string, { frames?: number }>).map(([k, v]) => [k, v.frames ?? 1]),
+);
 
 export interface SpriteRect { name: string; x: number; y: number; w: number; h: number; }
 export interface SpriteRef { file: string; sprite: string; }
@@ -181,10 +187,30 @@ export class SpriteAtlas {
     return { img, sx: fx, sy: fy, sw: w, sh: h };
   }
 
-  /** 原版 NPC 贴图表取帧（小动物：纵向帧条，frameIdx 0-based） */
+  /** 原版 NPC 贴图表取帧（纵向帧条，frameIdx 0-based）。
+   *  未登记的 id 懒加载 vanilla/NPC_{id}.png（帧数来自 vanilla-npcs.json），首帧返回 null 下一帧生效 */
+  private lazyNpcMeta = new Map<string, VanillaNpcMeta>();
   vnpc(npcId: number, frameIdx: number): DrawRect | null {
-    const m = this.vanilla.npcs?.[String(npcId)];
-    if (!m) return null;
+    let m: VanillaNpcMeta | undefined = this.vanilla.npcs?.[String(npcId)];
+    if (!m) {
+      const key = String(npcId);
+      m = this.lazyNpcMeta.get(key);
+      if (!m) {
+        const sheet = `vanilla/NPC_${npcId}.png`;
+        const img = this.vimages.get(sheet);
+        if (!img) {
+          const im = new Image();
+          im.onload = () => this.vimages.set(sheet, im);
+          im.src = `sprites/${sheet}`;
+          return null;
+        }
+        const frames = (vanillaNpcFrames as Record<string, number>)[key] ?? 1;
+        const fh = Math.max(1, Math.floor(img.height / frames));
+        const meta: VanillaNpcMeta = { sheet, frameW: img.width, frameH: fh, count: frames };
+        this.lazyNpcMeta.set(key, meta);
+        m = meta;
+      }
+    }
     const img = this.vimages.get(m.sheet);
     if (!img) return null;
     const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
@@ -270,6 +296,8 @@ const ITEM_DIRECT_MAP: Record<string, { file: string; sprite: string }> = {};
 
 /** 按我们的 item key 取 Maples 图标矩形（搜索 items + potions + accessories 三个来源）。
  *  Maples 没有的回退原版 Item_N 图标（第二查找层，id 实读自 TEdit items.json） */
+import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
+
 export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | null {
   const direct = ITEM_DIRECT_MAP[key];
   if (direct) return atlas.rect(direct.file, direct.sprite);
@@ -285,6 +313,20 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
   }
   const vid = VANILLA_ITEM_ICON_MAP[key];
   if (vid !== undefined) return atlas.vicon(vid);
+  // 阶段 5:vi_<id>_* 全量物品回退原版图标
+  if (key.startsWith('vi_')) {
+    const id = parseInt(key.slice(3), 10);
+    if (Number.isFinite(id)) return atlas.vicon(id);
+  }
+  // 阶段 5:place_v_* 放置物品回退用图块贴图首帧作图标
+  if (key.startsWith('place_v_')) {
+    const tk = key.slice('place_'.length);
+    const tid = TILE_BY_KEY[tk];
+    if (tid !== undefined) {
+      const td = TILE_DEFS[tid];
+      if (td?.vanilla) return atlas.vframe(td.vanilla.sheet, 0, 0);
+    }
+  }
   return null;
 }
 

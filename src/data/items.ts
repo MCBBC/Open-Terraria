@@ -10,6 +10,21 @@ export interface ItemDef {
   name: string;
   maxStack: number;
   tile?: string;          // 放置的 tile key
+  placeStyle?: number;     // 放置的样式索引(vanilla style 帧 X 偏移 = style*fw*18)
+  magic?: {               // 魔法武器:消耗 mana 发射投射物
+    damage: number;
+    speed: number;        // 使用冷却 tick
+    manaCost: number;
+    projSpeed: number;
+    proj?: 'spark' | 'bolt'; // 投射物外观
+  };
+  ranged?: {              // 远程武器:消耗 ammo 弹药发射投射物
+    damage: number;
+    speed: number;        // 使用冷却 tick
+    knockback: number;
+    ammo: string;         // 弹药 item key(箭)
+    projSpeed: number;    // 投射物速度 px/tick
+  };
   wall?: string;          // 放置的 wall key
   tool?: {
     type: ToolType;
@@ -233,7 +248,7 @@ item({ key: 'skull_lantern', name: '骷髅灯笼', tile: 'skull_lantern', maxSta
 item({ key: 'water_candle', name: '水蜡烛', tile: 'water_candle', maxStack: 99 });
 // 瓦罐战利品
 item({ key: 'bomb', name: '小型炸弹', maxStack: 99, desc: '用力扔出去会爆炸…（待实装）', value: 5 });
-item({ key: 'rope', name: '攀爬绳', maxStack: 999, desc: '用于垂降（待实装）', value: 1 });
+item({ key: 'rope', name: '攀爬绳', maxStack: 999, desc: '左键放置绳列,触碰可攀爬', value: 1, tile: 'v_213_rope' });
 
 export interface ItemStack { id: number; stack: number; }
 export function mkStack(key: string, stack = 1): ItemStack | null {
@@ -394,13 +409,13 @@ item({ key: 'vi_1845_necromantic_scroll', name: 'Necromantic Scroll', maxStack: 
 item({ key: 'vi_1864_papyrus_scarab', name: 'Papyrus Scarab', maxStack: 999, value: 1 });
 item({ key: 'vi_1158_pygmy_necklace', name: 'Pygmy Necklace', maxStack: 999, value: 1 });
 item({ key: 'vi_3034_coin_ring', name: 'Coin Ring', maxStack: 999, value: 1 });
-item({ key: 'vi_308_moonglow_seeds', name: 'Moonglow Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_312_fireblossom_seeds', name: 'Fireblossom Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_310_deathweed_seeds', name: 'Deathweed Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_307_daybloom_seeds', name: 'Daybloom Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_309_blinkroot_seeds', name: 'Blinkroot Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_2357_shiverthorn_seeds', name: 'Shiverthorn Seeds', maxStack: 999, value: 1 });
-item({ key: 'vi_311_waterleaf_seeds', name: 'Waterleaf Seeds', maxStack: 999, value: 1 });
+item({ key: 'vi_308_moonglow_seeds', name: 'Moonglow Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 1 });
+item({ key: 'vi_312_fireblossom_seeds', name: 'Fireblossom Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 5 });
+item({ key: 'vi_310_deathweed_seeds', name: 'Deathweed Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 4 });
+item({ key: 'vi_307_daybloom_seeds', name: 'Daybloom Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 0 });
+item({ key: 'vi_309_blinkroot_seeds', name: 'Blinkroot Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 2 });
+item({ key: 'vi_2357_shiverthorn_seeds', name: 'Shiverthorn Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 6 });
+item({ key: 'vi_311_waterleaf_seeds', name: 'Waterleaf Seeds', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 3 });
 item({ key: 'vi_1828_pumpkin_seed', name: 'Pumpkin Seed', maxStack: 999, value: 1 });
 item({ key: 'vi_126_bottled_water', name: 'Bottled Water', maxStack: 999, value: 1 });
 item({ key: 'vi_1134_bottled_honey', name: 'Bottled Honey', maxStack: 999, value: 1 });
@@ -620,3 +635,90 @@ item({ key: 'vi_5501_old_companion_locket', name: 'Old Companion Locket', maxSta
 item({ key: 'vi_5509_vampire_pendant', name: 'Vampire Pendant', maxStack: 999, value: 1 });
 item({ key: 'vi_5505_mean_goblin_s_spikes', name: 'Mean Goblin\'s Spikes', maxStack: 999, value: 1 });
 item({ key: 'vi_5525_cursed_piper_flute', name: 'Cursed Piper Flute', maxStack: 999, value: 1 });
+
+
+// ---- 阶段 5:v_ 图块放置物品自动注册 + 掉落连线 ----
+// 每个 v_ 图块注册 place_v_<key> 放置物品(tryPlace 走 vanilla style 帧语义);
+// 无掉落的 v_ 图块 drop 连到该物品(破坏可回收再放置)。
+import { TILE_DEFS } from './tiles';
+for (const td of TILE_DEFS) {
+  if (!td.key.startsWith('v_')) continue;
+  const ik = 'place_' + td.key;
+  if (byKey[ik] === undefined) {
+    item({ key: ik, name: td.name, maxStack: 999, value: 1, tile: td.key });
+  }
+  // 掉落连线在读取端回退(World.breakTileAt),避免多模块实例下改写失效
+}
+void 0;
+
+// ---- 阶段 5:生物群系草种子(种出对应草块)----
+item({ key: 'corrupt_grass_seeds', name: '腐化草地种子', maxStack: 999, value: 1, tile: 'v_23_corrupt_grass_block' });
+item({ key: 'crimson_grass_seeds', name: '猩红草地种子', maxStack: 999, value: 1, tile: 'v_199_crimson_grass_block' });
+item({ key: 'jungle_grass_seeds', name: '丛林草地种子', maxStack: 999, value: 1, tile: 'v_60_jungle_grass_block' });
+item({ key: 'mushroom_grass_seeds', name: '蘑菇草地种子', maxStack: 999, value: 1, tile: 'v_70_mushroom_grass_block' });
+
+
+// ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
+import vanillaItemMeta from '../../public/sprites/vanilla.json';
+const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
+for (const [idStr, m] of Object.entries(_vim)) {
+  if (!m || typeof m.key !== 'string' || !m.key) continue;
+  const ik = 'vi_' + idStr + '_' + m.key.replace(/[^A-Za-z0-9]/g, '');
+  if (byKey[ik] !== undefined) continue;
+  item({ key: ik, name: m.name, maxStack: 999, value: 1 });
+}
+void 0;
+
+// ---- 阶段 6:功能道具(桶三态/绳圈) ----
+item({ key: 'empty_bucket', name: '空桶', maxStack: 99, value: 1, desc: '右键舀取液体' });
+item({ key: 'water_bucket', name: '水桶', maxStack: 1, value: 1, desc: '右键放置水' });
+item({ key: 'lava_bucket', name: '岩浆桶', maxStack: 1, value: 1, desc: '右键放置岩浆' });
+item({ key: 'honey_bucket', name: '蜂蜜桶', maxStack: 1, value: 1, desc: '右键放置蜂蜜' });
+
+// ---- 阶段 6 第三轮:替代矿工具链(官方数值,与铜/铁/银/金同档) ----
+item({ key: 'tin_pickaxe', name: '锡镐', maxStack: 1, value: 400,
+  tool: { type: 'pick', power: 35, damage: 4, speed: 23, knockback: 2, reach: 2.6 * 16 } });
+item({ key: 'tin_axe', name: '锡斧', maxStack: 1, value: 350,
+  tool: { type: 'axe', power: 7, damage: 3, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
+item({ key: 'tin_sword', name: '锡剑', maxStack: 1, value: 450,
+  tool: { type: 'sword', damage: 8, speed: 23, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'lead_pickaxe', name: '铅镐', maxStack: 1, value: 900,
+  tool: { type: 'pick', power: 45, damage: 5, speed: 22, knockback: 2.5, reach: 2.6 * 16 } });
+item({ key: 'lead_axe', name: '铅斧', maxStack: 1, value: 800,
+  tool: { type: 'axe', power: 9, damage: 4, speed: 30, knockback: 5, reach: 2.4 * 16 } });
+item({ key: 'lead_sword', name: '铅剑', maxStack: 1, value: 900,
+  tool: { type: 'sword', damage: 10, speed: 23, knockback: 5, reach: 2.2 * 16 } });
+item({ key: 'tungsten_pickaxe', name: '钨镐', maxStack: 1, value: 1800,
+  tool: { type: 'pick', power: 55, damage: 6, speed: 21, knockback: 2.5, reach: 2.6 * 16 } });
+item({ key: 'tungsten_axe', name: '钨斧', maxStack: 1, value: 1600,
+  tool: { type: 'axe', power: 11, damage: 5, speed: 29, knockback: 5.5, reach: 2.4 * 16 } });
+item({ key: 'tungsten_sword', name: '钨剑', maxStack: 1, value: 1800,
+  tool: { type: 'sword', damage: 13, speed: 22, knockback: 5.5, reach: 2.2 * 16 } });
+item({ key: 'platinum_pickaxe', name: '铂金镐', maxStack: 1, value: 3600,
+  tool: { type: 'pick', power: 59, damage: 7, speed: 20, knockback: 3, reach: 2.6 * 16 } });
+item({ key: 'platinum_axe', name: '铂金斧', maxStack: 1, value: 3200,
+  tool: { type: 'axe', power: 13, damage: 6, speed: 28, knockback: 6, reach: 2.4 * 16 } });
+item({ key: 'platinum_sword', name: '铂金剑', maxStack: 1, value: 3600,
+  tool: { type: 'sword', damage: 15, speed: 22, knockback: 6, reach: 2.2 * 16 } });
+
+// ---- 阶段 6 第五轮:弓箭系统(官方数值:木弓 9 伤/UseTime 28;箭伤 4 木/5 燃烧) ----
+item({ key: 'wooden_bow', name: '木弓', maxStack: 1, value: 100,
+  ranged: { damage: 9, speed: 28, knockback: 1, ammo: 'wooden_arrow', projSpeed: 11 } });
+item({ key: 'wooden_arrow', name: '木箭', maxStack: 999, value: 1 });
+item({ key: 'flaming_arrow', name: '燃烧箭', maxStack: 999, value: 1 });
+item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360,
+  ranged: { damage: 11, speed: 25, knockback: 1.5, ammo: 'wooden_arrow', projSpeed: 11 } });
+
+// ---- 阶段 6 第六轮:矿车 ----
+item({ key: 'minecart_item', name: '矿车', maxStack: 99, value: 1, desc: '右键轨道放置并骑乘' });
+
+// ---- 阶段 6 第八轮:魔法武器(官方数值:火花法杖 ItemID 3067 伤12/魔力15/UseTime 21/射速 9) ----
+item({ key: 'wand_of_sparking', name: '火花法杖', maxStack: 1, value: 100,
+  magic: { damage: 12, speed: 21, manaCost: 5, projSpeed: 9, proj: 'spark' } });
+item({ key: 'amethyst_bolt', name: '紫晶法杖', maxStack: 1, value: 900,
+  magic: { damage: 14, speed: 26, manaCost: 5, projSpeed: 9, proj: 'bolt' } });
+
+// ---- 阶段 6 第九轮:Boss 召唤物(官方:蠕虫食物 70/血腥脊椎 1331/史莱姆王冠 560) ----
+item({ key: 'worm_food', name: '蠕虫食物', maxStack: 20, value: 1, desc: '腐化之地使用:召唤世界吞噬者' });
+item({ key: 'bloody_spine', name: '血腥脊椎', maxStack: 20, value: 1, desc: '猩红之地使用:召唤克苏鲁之脑' });
+item({ key: 'slime_crown', name: '史莱姆王冠', maxStack: 20, value: 1, desc: '任意时刻:召唤史莱姆王' });
