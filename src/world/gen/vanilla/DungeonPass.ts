@@ -2,10 +2,11 @@
 // + DungeonStairs L19855 + DungeonEnt L20726,算法文档 docs/vanilla-algos/dungeon.md)。
 // 主链随机游走(每5步1/3概率分支/房间)+ 曲线房 + 到地表竖井 + 垛口锯齿入口塔
 // + 门(style13)+ 尖刺(48)+ 金箱序列。砖 41/43/44 三主题(绿砖 43 素材已补入白名单)。
-import type { TileStore } from '../../TileStore';
+import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { ITEM_BY_KEY } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { placeDoorClosed } from '../../Door';
 
@@ -20,6 +21,30 @@ const WORKBENCH = TILE_BY_KEY['workbench']!;
 const TABLE = TILE_BY_KEY['table']!;
 const CHAIR = TILE_BY_KEY['chair']!;
 const CANDLE = TILE_BY_KEY['candle']!;
+const PLATFORM = TILE_BY_KEY['platform']!;
+const LANTERN = TILE_BY_KEY['lantern']!;
+const CHANDELIER = TILE_BY_KEY['chandelier']!;
+const WATER_CANDLE = TILE_BY_KEY['water_candle']!;
+const BOOKS = TILE_BY_KEY['v_50_books']!;
+const BOWLS = TILE_BY_KEY['v_103_bowls']!;
+const STATUE = TILE_BY_KEY['v_105_statue']!;
+const CANDELABRA = TILE_BY_KEY['candelabra']!;
+const PIANO = TILE_BY_KEY['piano']!;
+const DRESSER = TILE_BY_KEY['dresser']!;
+const BENCH = TILE_BY_KEY['bench']!;
+const BATHTUB = TILE_BY_KEY['bathtub']!;
+const BED = TILE_BY_KEY['bed']!;
+const LAMP = TILE_BY_KEY['v_93_lamps']!;
+const CLOCK = TILE_BY_KEY['grandfather_clock']!;
+const DSWITCH = TILE_BY_KEY['v_136_switch']!;
+const HANGING = TILE_BY_KEY['v_240_wall_hangings_3x3']!;
+const CATACOMB = TILE_BY_KEY['v_241_catacombs']!;
+const PAINTING = TILE_BY_KEY['v_242_paintings_6x4']!;
+const ALCHEMY = TILE_BY_KEY['v_355_alchemy_table']!;
+const BEWITCH = TILE_BY_KEY['v_354_bewitching_table']!;
+const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
+const TRAP = TILE_BY_KEY['v_137_traps']!;
+const BANNER = TILE_BY_KEY['v_91_banners']!;
 
 interface DRoom { cx: number; cy: number; l: number; r: number; t: number; b: number }
 
@@ -33,6 +58,8 @@ class DungeonCtx {
   dxS1 = 0; dyS1 = 0; dxS2 = 0; dyS2 = 0;
   // 门候选(cs L18158-18179 房左右墙 + L20500 水平走廊端点):pos 0=取最窄,-1=取最右,+1=取最左
   dDoors: Array<{ x: number; y: number; pos: number }> = [];
+  // 房口平台候选(cs L18141-18156):房顶/房底首个开口列
+  dPlatforms: Array<[number, number]> = [];
   constructor(brick: number, wall: number, x: number, y: number) {
     this.brick = brick; this.wall = wall;
     this.minX = this.maxX = x; this.minYY = this.maxY = y;
@@ -50,6 +77,47 @@ class DungeonCtx {
 
 export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
   const { w, h } = st;
+  // ---- 1456 入口位置预计算(DungeonCrawler.cs L280-326):锚点 ±300 内拒绝采样地表点
+  // (从 y=10 下扫到首个"有内容"格:实心/液体/墙),校验无云块(±15 方框 + 上方 50 带)
+  // 与头顶余量(ny-40-RoughHeight40>0);成功则锚点迁移到入口旁(±25),爬升改为
+  // 沿直线分段走向入口(Precalculated),否则回退 legacy 盲爬。根治:盲爬探测点落在
+  // 高坡时楼梯被迫越坡堆积、后一次外壳埋掉前一次挖空 → 实心砖瘤封死下行通道 ----
+  let entPos: [number, number] | null = null;
+  {
+    const CLOUD = new Set<number>(
+      ['v_189_cloud_block', 'v_196_rain_cloud_block', 'v_460_snow_cloud_block']
+        .map((k) => TILE_BY_KEY[k])
+        .filter((v): v is number => v !== undefined),
+    );
+    let found = false, nx = 0, ny = 0;
+    for (let t = 0; t < 3000 && !found; t++) {
+      nx = gs.dungeonLocation - 300 + rng.int(0, 599);
+      if (nx <= gs.beachDistance || nx >= w - gs.beachDistance) continue;
+      ny = 10;
+      while (ny < st.h - 2) {
+        const i = st.idx(nx, ny);
+        if (st.flags[i] || st.liquid[i] > 0 || st.wall[i] > 0) break;
+        ny++;
+      }
+      let cloud = false;
+      for (let dx = -15; dx <= 15 && !cloud; dx++) {
+        for (let dy = -15; dy <= 15; dy++) {
+          if (st.inBounds(nx + dx, ny + dy) && CLOUD.has(st.type[st.idx(nx + dx, ny + dy)])) { cloud = true; break; }
+        }
+      }
+      for (let dx = -50; dx < 50 && !cloud; dx++) {
+        for (let y = Math.max(50, ny - 50); y < ny; y++) {
+          if (st.inBounds(nx + dx, y) && CLOUD.has(st.type[st.idx(nx + dx, y)])) { cloud = true; break; }
+        }
+      }
+      if (cloud || ny - 80 <= 0) continue;
+      found = true;
+    }
+    if (found) {
+      gs.dungeonLocation = nx + 25 - rng.int(0, 49);
+      entPos = [nx, ny];
+    }
+  }
   const x0 = gs.dungeonLocation;
   if (x0 < 30 || x0 > w - 30) return;
   // 原版主题:Next(3) → 蓝41/墙7、绿43/墙8、粉44/墙9
@@ -95,60 +163,97 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
     }
   }
   dungeonRoom(st, rng, gs, dc, dx, dy);
-  // ---- 竖井到地表(L18088)----
+  // ---- 爬升到地表(1456 语义,DungeonCrawler.cs L400-449):上限 100;num8 到 0 后
+  // 每轮 1/5 概率 halls(forceX)+room 分支(原版 num8 保持在 0) ----
   let best = dc.rooms[0];
   for (const r of dc.rooms) if (r.t < best.t) best = r;
   dc.entranceX = best.cx;
   dx = best.cx; dy = best.cy;
-  let shaft5 = 5;
-  let guard = 0;
-  while (guard++ < 500) {
-    shaft5--;
-    if (shaft5 === 0 && rng.next() * 5 < 1 && dy > gs.worldSurface + 100) {
-      shaft5 = 10;
-      const sx = dx, sy = dy;
-      [dx, dy] = dungeonHalls(st, rng, gs, dc, dx, dy, true);
-      dungeonRoom(st, rng, gs, dc, dx, dy);
-      dx = sx; dy = sy;
-    }
-    const res = dungeonStairs(st, rng, gs, dc, dx, dy);
-    dx = res[0]; dy = res[1];
-    if (res[2]) break;
-  }
-  // ---- 入口(原版 L18088-18121 语义):塔建在楼梯出口正上方,天然连通下方竖井 ----
-  // 兜底:楼梯没到地表则从当前位置直挖竖井到地表(垂直,保证衔接)
-  if (dy > gs.worldSurface - 5) {
-    let sx2 = dx, sy2 = dy;
-    let guard2 = 0;
-    while (sy2 > gs.worldSurface - 5 && guard2++ < 800) {
-      for (let ax = -3; ax <= 3; ax++) {
-        for (let ay = -3; ay <= 3; ay++) {
-          if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
-          const i = st.idx(sx2 + ax, sy2 + ay);
-          st.flags[i] = 0; st.wall[i] = dc.wall;
-        }
+  if (entPos) {
+    // 预计算模式:沿直线分段走向入口,每段 10-29 步,剩余距离耗尽即达(确定性终止)
+    let remaining = Math.hypot(entPos[0] - dx, entPos[1] - dy);
+    let delay = 5, guard = 0;
+    while (remaining > 0 && guard++ < 100) {
+      if (delay > 0) delay--;
+      if (delay === 0 && rng.next() < 0.2 && dy > gs.worldSurface + 100) {
+        delay = 10;
+        const sx = dx, sy = dy;
+        [dx, dy] = dungeonHalls(st, rng, gs, dc, dx, dy, true);
+        dungeonRoom(st, rng, gs, dc, dx, dy);
+        dx = sx; dy = sy;
       }
-      for (let ax = -4; ax <= 4; ax++) {
-        for (let ay = -4; ay <= 4; ay++) {
-          if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
-          const i = st.idx(sx2 + ax, sy2 + ay);
-          if (!dc.isDungeonWall(st, sx2 + ax, sy2 + ay)) { st.type[i] = dc.brick; st.flags[i] = 1; }
-        }
-      }
-      sy2--;
+      let steps = rng.int(10, 29);
+      if (steps > remaining) steps = Math.max(1, Math.floor(remaining));
+      const d = Math.hypot(entPos[0] - dx, entPos[1] - dy) || 1;
+      const res = dungeonStairs(st, rng, gs, dc, dx, dy, {
+        vx: (entPos[0] - dx) / d, vy: (entPos[1] - dy) / d, steps,
+      });
+      dx = res[0]; dy = res[1];
+      remaining -= steps;
     }
-    dx = sx2; dy = sy2;
+    dx = entPos[0]; dy = entPos[1];
+    dungeonEnt(st, rng, gs, dc, dx, dy);
+  } else {
+    // legacy 盲爬(1405 结构 + 1456 的 100 上限):外壳探测到开放天空即停
+    let reached = false;
+    let delay = 5, guard = 0;
+    while (!reached && guard++ < 100) {
+      if (delay > 0) delay--;
+      if (delay === 0 && rng.next() < 0.2 && dy > gs.worldSurface + 100) {
+        delay = 10;
+        const sx = dx, sy = dy;
+        [dx, dy] = dungeonHalls(st, rng, gs, dc, dx, dy, true);
+        dungeonRoom(st, rng, gs, dc, dx, dy);
+        dx = sx; dy = sy;
+      }
+      const res = dungeonStairs(st, rng, gs, dc, dx, dy);
+      dx = res[0]; dy = res[1];
+      reached = res[2];
+    }
+    // 兜底:楼梯没到地表则从当前位置直挖竖井到地表(垂直,保证衔接)
+    if (dy > gs.worldSurface - 5) {
+      let sx2 = dx, sy2 = dy;
+      let guard2 = 0;
+      while (sy2 > gs.worldSurface - 5 && guard2++ < 800) {
+        for (let ax = -3; ax <= 3; ax++) {
+          for (let ay = -3; ay <= 3; ay++) {
+            if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
+            const i = st.idx(sx2 + ax, sy2 + ay);
+            st.flags[i] = 0; st.wall[i] = dc.wall;
+          }
+        }
+        for (let ax = -4; ax <= 4; ax++) {
+          for (let ay = -4; ay <= 4; ay++) {
+            if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
+            const i = st.idx(sx2 + ax, sy2 + ay);
+            if (!dc.isDungeonWall(st, sx2 + ax, sy2 + ay)) { st.type[i] = dc.brick; st.flags[i] = 1; }
+          }
+        }
+        sy2--;
+      }
+      dx = sx2; dy = sy2;
+    }
+    // 找楼梯出口列的真实地表,塔吸附其上
+    let gY = 0;
+    while (gY < st.h - 2 && !st.flags[st.idx(dx, gY)]) gY++;
+    dungeonEnt(st, rng, gs, dc, dx, gY);
   }
-  // 找楼梯出口列的真实地表,塔吸附其上
-  let gY = 0;
-  while (gY < st.h - 2 && !st.flags[st.idx(dx, gY)]) gY++;
-  dungeonEnt(st, rng, gs, dc, dx, gY);
+  // ---- 房口平台候选(cs L18137-18180,与门候选同期收集)----
+  for (const room of dc.rooms) {
+    for (let x = room.l; x <= room.r; x++) {
+      if (st.inBounds(x, room.t - 1) && !st.flags[st.idx(x, room.t - 1)]) { dc.dPlatforms.push([x, room.t - 1]); break; }
+    }
+    for (let x = room.l; x <= room.r; x++) {
+      if (st.inBounds(x, room.b + 1) && !st.flags[st.idx(x, room.b + 1)]) { dc.dPlatforms.push([x, room.b + 1]); break; }
+    }
+  }
   // ---- 尖刺(L18188)----
   placeSpikes(st, rng, gs, dc, Math.floor(w / 100));
   // ---- 门(L18311)----
   placeDoors(st, rng, dc);
-  // ---- 家具+金箱(L18792)----
-  placeFurniture(st, rng, gs, dc, chests);
+  // ---- 陈设管线(L18441-19613):墙变体→房口平台→特殊宝箱→书架平台→房间金箱→
+  //      灯具+开关布线→陷阱→地面家具→墙饰→旗帜 ----
+  placeFurnishing(st, rng, gs, dc, chests);
 }
 
 /** DungeonHalls(L20255):走廊随机游走 */
@@ -293,45 +398,54 @@ function dungeonRoom(st: TileStore, rng: RNG, _gs: GenState, dc: DungeonCtx, ix:
 }
 
 /** DungeonStairs(L19855):向上竖井到地表,返回 [x, y, reachedSurface] */
-function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix: number, iy: number): [number, number, boolean] {
+function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix: number, iy: number, precalc?: { vx: number; vy: number; steps: number }): [number, number, boolean] {
   const radius = rng.int(5, 8);
-  const steps = rng.int(10, 29);
-  let vx = ix <= dc.entranceX ? 1 : -1;
-  if (ix > st.w - 400) vx = -1;
-  if (ix < 400) vx = 1;
-  let vy = -1;
-  // 原版嵌套概率(cs L19871-19876):2/3 加速;否则 1/3 减速;再否则 1/6 快速上升
-  if (rng.next() < 2 / 3) vx *= 1 + rng.int(0, 199) * 0.01;
-  else if (rng.next() < 1 / 3) vx *= rng.int(50, 75) * 0.01;
-  else if (rng.next() < 1 / 6) vy = -2;
-  if (ix < st.w / 2 && vx < 0 && vx > -0.5) vx = -0.5;
-  if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
-  // dungeonX 回拉:漂移超 ±60 强制折返(原版中线回拉的加强,入口落在地牢标记附近)
-  const loc = gs.dungeonLocation;
-  if (ix > loc + 60) vx = -Math.abs(vx || 0.5);
-  if (ix < loc - 60) vx = Math.abs(vx || 0.5);
+  const steps = precalc ? precalc.steps : rng.int(10, 29);
+  let vx: number, vy: number;
+  if (precalc) {
+    // 1456 预计算模式:方向由直线段给定,跳过方向抽取/钳制/探测
+    vx = precalc.vx; vy = precalc.vy;
+  } else {
+    vx = ix <= dc.entranceX ? 1 : -1;
+    if (ix > st.w - 400) vx = -1;
+    if (ix < 400) vx = 1;
+    vy = -1;
+    // 原版嵌套概率(cs L19871-19876):2/3 加速;否则 1/3 减速;再否则 1/6 快速上升
+    if (rng.next() < 2 / 3) vx *= 1 + rng.int(0, 199) * 0.01;
+    else if (rng.next() < 1 / 3) vx *= rng.int(50, 75) * 0.01;
+    else if (rng.next() < 1 / 6) vy = -2;
+    if (ix < st.w / 2 && vx < 0 && vx > -0.5) vx = -0.5;
+    if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
+    // dungeonX 回拉:漂移超 ±60 强制折返(原版中线回拉的加强,入口落在地牢标记附近)
+    const loc = gs.dungeonLocation;
+    if (ix > loc + 60) vx = -Math.abs(vx || 0.5);
+    if (ix < loc - 60) vx = Math.abs(vx || 0.5);
+  }
   let px = ix + 0.0, py = iy + 0.0;
   let reached = false;
   for (let k = 0; k < steps && !reached; k++) {
-    // ---- 出口探测(cs L19900-19910):探测点偏移 X + (dxS1*0.6+dxS2)*朝地图中心方向 ----
-    const toCenter = px > st.w / 2 ? -1 : 1;
-    const probeX = Math.floor(px + dc.dxS1 * 0.6 * toCenter + dc.dxS2 * toCenter);
-    const probeOff = Math.floor(dc.dyS2 * 0.5);
-    if (py < gs.worldSurface - 5) {
-      let open = true;
-      for (let d = 0; d < 3; d++) {
-        const yy = Math.floor(py - radius - 6 + probeOff - d);
-        if (!st.inBounds(probeX, yy) || st.wall[st.idx(probeX, yy)] !== 0) { open = false; break; }
-      }
-      if (open) {
-        reached = true;
-        // 地表土丘(原版 TileRunner type -1 挖出,cs L19909)
-        tileRunner(st, rng, gs, probeX, Math.floor(py - radius - 6 + probeOff), {
-          strength: rng.int(25, 34), steps: rng.int(10, 19), type: -1, speedY: -1,
-        });
+    // ---- 出口探测(cs L19900-19910,仅 legacy):探测点偏移 X+(dxS1*0.6+dxS2) 朝中心 ----
+    if (!precalc) {
+      const toCenter = px > st.w / 2 ? -1 : 1;
+      const probeX = Math.floor(px + dc.dxS1 * 0.6 * toCenter + dc.dxS2 * toCenter);
+      const probeOff = Math.floor(dc.dyS2 * 0.5);
+      if (py < gs.worldSurface - 5) {
+        let open = true;
+        for (let d = 0; d < 3; d++) {
+          const yy = Math.floor(py - radius - 6 + probeOff - d);
+          if (!st.inBounds(probeX, yy) || st.wall[st.idx(probeX, yy)] !== 0) { open = false; break; }
+        }
+        if (open) {
+          reached = true;
+          // 地表土丘(原版 TileRunner type -1 挖出,cs L19909)
+          tileRunner(st, rng, gs, probeX, Math.floor(py - radius - 6 + probeOff), {
+            strength: rng.int(25, 34), steps: rng.int(10, 19), type: -1, speedY: -1,
+          });
+        }
       }
     }
-    const padX = radius + 4 + rng.int(0, 5);
+    // 原版外壳:X 无抖动(cs L19891-19892),Y 带 Next(6) 抖动
+    const padX = radius + 4;
     const padY = radius + 4 + rng.int(0, 5);
     for (let x = Math.floor(px - padX); x <= Math.floor(px + padX); x++) {
       for (let y = Math.floor(py - padY); y <= Math.floor(py + padY); y++) {
@@ -359,7 +473,7 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
     }
     dc.updateBBox(Math.floor(px), Math.floor(py));
     px += vx; py += vy;
-    if (py < gs.worldSurface) vy *= 0.98;
+    if (!precalc && py < gs.worldSurface) vy *= 0.98;
   }
   return [Math.floor(px), Math.floor(py), reached];
 }
@@ -706,37 +820,721 @@ function placeDoors(st: TileStore, rng: RNG, dc: DungeonCtx): void {
 }
 
 /** 家具+金箱(L18792 简化保留:工作台/桌椅/蜡烛 + 每房金箱) */
-function placeFurniture(st: TileStore, rng: RNG, _gs: GenState, dc: DungeonCtx, chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
-  for (const room of dc.rooms) {
-    // 找房内空地(墙=地牢墙 且非实心)
-    for (let n = 0; n < 8; n++) {
-      const fx = rng.int(room.l + 1, Math.max(room.l + 2, room.r - 1));
-      let fy = -1;
-      for (let y = room.t; y <= room.b; y++) {
-        if (st.inBounds(fx, y) && st.flags[st.idx(fx, y)]) { fy = y - 1; break; }
-      }
-      if (fy < 0 || !st.inBounds(fx, fy) || st.flags[st.idx(fx, fy)]) continue;
-      const pick = rng.int(0, 2);
-      if (pick === 0) st.setTileSilent(fx, fy, WORKBENCH, 0, 0);
-      else if (pick === 1) st.setTileSilent(fx, fy, TABLE, 0, 0);
-      else if (pick === 2) st.setTileSilent(fx, fy, CHAIR, rng.next() < 0.5 ? 18 : 0, 0);
-      else st.setTileSilent(fx, fy, CANDLE, 0, 0);
-      break;
-    }
-    // 金箱
-    if (rng.next() < 0.75) {
-      const bx = rng.int(room.l + 2, Math.max(room.l + 3, room.r - 2));
-      let by = -1;
-      for (let y = room.t; y <= room.b; y++) {
-        if (st.inBounds(bx, y) && st.flags[st.idx(bx, y)]) { by = y - 1; break; }
-      }
-      if (by >= 1 && st.inBounds(bx, by) && !st.flags[st.idx(bx, by)] && st.inBounds(bx + 1, by)) {
-        st.setTileSilent(bx, by, CHEST, 0, 0);
-        st.setTileSilent(bx + 1, by, CHEST, 18, 0);
-        st.setTileSilent(bx, by + 1, CHEST, 0, 18);
-        st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
-        chests.push({ x: bx, y: by, items: Array(10).fill(null) });
+// ============================================================================
+// 地牢陈设管线(WorldGen.cs L18441-19613 1:1)
+// 墙变体→房口平台→特殊宝箱(上锁)→书架平台+蜡烛/书→房间金箱→
+// 灯具(吊灯/灯笼+墙上开关+布线)→飞镖陷阱→地面家具 13 类→墙饰(画/骨)→旗帜
+// ============================================================================
+type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
+
+function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, chests: ChestSink): void {
+  const { w } = st;
+  const wallType = dc.wall;
+  // 墙变体表(cs L18441-18458):7→94/95,9→96/97,8→98/99
+  const roomWall = wallType === 7 ? [7, 94, 95] : wallType === 9 ? [9, 96, 97] : [8, 98, 99];
+  const bx0 = dc.minX, bx1 = dc.maxX, by0 = dc.minYY, by1 = dc.maxY;
+  const isBrick = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    return !!(st.flags[i] && (st.type[i] === dc.brick || st.type[i] === CRACKED[0]));
+  };
+  const isDWall = (x: number, y: number): boolean => st.inBounds(x, y) && dc.isDungeonWall(st, x, y);
+  const airDW = (x: number, y: number) => st.inBounds(x, y) && !st.flags[st.idx(x, y)] && dc.isDungeonWall(st, x, y);
+  const solidAt = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
+
+  // ---- 1. 墙变体(cs L18460-18481):5 轮 × 3 变体,圆内种子点 WallDungeon BFS 扩散 ----
+  for (let round = 0; round < 5; round++) {
+    for (let k = 0; k < 3; k++) {
+      const rad = rng.int(40, 239);
+      const cx0 = rng.int(bx0, bx1), cy0 = rng.int(by0, by1);
+      for (let x = cx0 - rad; x < cx0 + rad; x++) {
+        for (let y = cy0 - rad; y < cy0 + rad; y++) {
+          if (y <= gs.worldSurface) continue;
+          if (Math.hypot(x - cx0, y - cy0) >= rad * 0.4) continue;
+          if (!isDWall(x, y)) continue;
+          wallDungeonSpread(st, x, y, roomWall[k]);
+        }
       }
     }
   }
+
+  // ---- 2. 房口平台(cs L18483-18598):候选行 ±5 找两侧皆砖的窄口,铺平台到两侧砖 ----
+  const platFrameY = wallType === 7 ? 108 : wallType === 8 ? 144 : 126;
+  for (const [px0, py0] of dc.dPlatforms) {
+    let row = -1;
+    const maxSpan = py0 < gs.worldSurface + 50 ? 20 : 10;
+    for (let y = py0 - 5; y <= py0 + 5; y++) {
+      if (!st.inBounds(px0, y)) continue;
+      let bad = false;
+      let xL = px0, xR = px0;
+      if (st.flags[st.idx(px0, y)]) bad = true;
+      else {
+        while (st.inBounds(xL, y) && !st.flags[st.idx(xL, y)]) {
+          xL--;
+          if (!st.inBounds(xL, y) || !isBrick(xL, y)) { bad = true; break; }
+        }
+        while (st.inBounds(xR, y) && !st.flags[st.idx(xR, y)]) {
+          xR++;
+          if (!st.inBounds(xR, y) || !isBrick(xR, y)) { bad = true; break; }
+        }
+      }
+      if (bad || xR - xL > maxSpan) continue;
+      // 附近不得已有平台;本列上下 ±5/上下 8 格净空
+      let hasPlat = false;
+      for (let x = px0 - maxSpan / 2 - 2; x <= px0 + maxSpan / 2 + 2 && !hasPlat; x++) {
+        for (let yy = y - 5; yy <= y + 5; yy++) {
+          if (st.inBounds(x, yy) && st.type[st.idx(x, yy)] === PLATFORM && st.flags[st.idx(x, yy)]) { hasPlat = true; break; }
+        }
+      }
+      for (let yy = y + 3; yy >= y - 5 && !hasPlat; yy--) {
+        if (st.inBounds(px0, yy) && st.flags[st.idx(px0, yy)]) { hasPlat = true; break; }
+      }
+      if (hasPlat) continue;
+      row = y;
+      break;
+    }
+    if (row < 0 || row <= py0 - 10 || row >= py0 + 10) continue;
+    // 向两侧铺平台直到实心
+    for (let x = px0; st.inBounds(x, row) && !st.flags[st.idx(x, row)]; x--) {
+      st.setTileSilent(x, row, PLATFORM, 0, platFrameY);
+    }
+    for (let x = px0 + 1; st.inBounds(x, row) && !st.flags[st.idx(x, row)]; x++) {
+      st.setTileSilent(x, row, PLATFORM, 0, platFrameY);
+    }
+  }
+
+  // ---- 3. 特殊宝箱(cs L18599-18657):5 个上锁箱(含生物群系箱) ----
+  const specChests: Array<{ tile: number; style: number; item: string }> = [
+    { tile: CHEST, style: 23, item: 'vi_1156_piranha_gun' },
+    gs.crimson
+      ? { tile: CHEST, style: 24, item: 'vi_1571_scourge_of_the_corruptor' }
+      : { tile: CHEST, style: 25, item: 'vi_1569_vampire_knives' },
+    { tile: CHEST, style: 26, item: 'vi_1260_rainbow_gun' },
+    { tile: CHEST, style: 27, item: 'vi_1572_staff_of_the_frost_hydra' },
+    { tile: CHEST2, style: 13, item: 'vi_4607_desert_tiger_staff' },
+  ];
+  for (const spec of specChests) {
+    for (let tries = 0; tries < 5000; tries++) {
+      const x = rng.int(bx0, bx1);
+      const y = rng.int(Math.floor(gs.worldSurface), by1);
+      if (airDW(x, y) && addChest(st, chests, x, y, spec.tile, spec.style, ITEM_BY_KEY[spec.item], true)) break;
+    }
+  }
+
+  // ---- 4. 书架平台 + 蜡烛/书(cs L18658-18764):平台样式 9-12 三选不重复 ----
+  const bookStyles = [rng.int(9, 12), 0, 0];
+  do { bookStyles[1] = rng.int(9, 12); } while (bookStyles[1] === bookStyles[0]);
+  do { bookStyles[2] = rng.int(9, 12); } while (bookStyles[2] === bookStyles[0] || bookStyles[2] === bookStyles[1]);
+  {
+    let added = 0, fail = 0;
+    while (added < Math.floor(w / 20)) {
+      fail++;
+      let x = rng.int(bx0, bx1);
+      const y = rng.int(by0, by1);
+      let ok = true;
+      if (airDW(x, y)) {
+        const dir = rng.int(0, 1) === 0 ? -1 : 1;
+        // 侧向走到实心(须地牢砖)
+        while (ok && !st.flags[st.idx(x, y)]) {
+          x -= dir;
+          if (x < 5 || x > st.w - 5) ok = false;
+          else if (st.flags[st.idx(x, y)] && !isBrick(x, y)) ok = false;
+        }
+        if (ok && isBrick(x, y) && isBrick(x, y - 1) && isBrick(x, y + 1)) {
+          const openX = x + dir;
+          // ±3 内无平台
+          let hasPlat = false;
+          for (let dx = -3; dx <= 3 && !hasPlat; dx++) {
+            for (let dy = -3; dy <= 3; dy++) {
+              if (st.inBounds(openX + dx, y + dy) && st.type[st.idx(openX + dx, y + dy)] === PLATFORM && st.flags[st.idx(openX + dx, y + dy)]) { hasPlat = true; break; }
+            }
+          }
+          if (!hasPlat && !st.flags[st.idx(openX, y - 1)] && !st.flags[st.idx(openX, y - 2)] && !st.flags[st.idx(openX, y - 3)]) {
+            // 量开口跨度
+            let spanX = openX;
+            while (spanX > bx0 && spanX < bx1 && !st.flags[st.idx(spanX, y)] && !st.flags[st.idx(spanX, y - 1)] && !st.flags[st.idx(spanX, y + 1)]) spanX += dir;
+            const span = Math.abs(openX - spanX);
+            if (span > 5) {
+              const styleIdx = st.wall[st.idx(openX, y)] === roomWall[0] ? 0
+                : st.wall[st.idx(openX, y)] === roomWall[1] ? 1 : 2;
+              const withBooks = rng.int(0, 1) === 0;
+              const runLen = rng.int(1, 3);
+              for (let k = 0; k < runLen; k++) {
+                const fx = openX + k * dir;
+                if (!st.inBounds(fx, y) || st.flags[st.idx(fx, y)]) break;
+                st.setTileSilent(fx, y, PLATFORM, 0, bookStyles[styleIdx] * 18);
+                if (withBooks) {
+                  st.setTileSilent(fx, y - 1, BOOKS, rng.int(0, 49) === 0 ? 90 : 0, 0);
+                }
+              }
+              fail = 0;
+              added++;
+              if (!withBooks && rng.int(0, 1) === 0) {
+                // 蜡烛/水蜡烛放在靠墙的开格上方(cs L18735-18754)
+                if (rng.int(0, 3) !== 0) {
+                  st.setTileSilent(openX, y - 1, CANDLE, rng.int(0, 1) !== 0 ? 36 : 18, 0);
+                } else {
+                  st.setTileSilent(openX, y - 1, WATER_CANDLE, 0, 0);
+                }
+              }
+            }
+          }
+        }
+      }
+      if (fail > 1000) { fail = 0; added++; }
+    }
+  }
+
+  // ---- 5. 房间金箱(cs L18765-18820):战利品序 155/156/157/163/113/3317/327/164 ----
+  {
+    let seq = 1;
+    const lootSeq: Array<{ item: string; style: number }> = [
+      { item: 'vi_155_muramasa', style: 2 },
+      { item: 'vi_156_cobalt_shield', style: 2 },
+      { item: 'vi_157_aqua_scepter', style: 2 },
+      { item: 'vi_163_blue_moon', style: 2 },
+      { item: 'vi_113_magic_missile', style: 2 },
+      { item: 'vi_3317_valor', style: 2 },
+      { item: 'vi_327_golden_key', style: 0 },
+      { item: 'vi_164_handgun', style: 2 },
+    ];
+    for (const room of dc.rooms) {
+      const half = Math.floor((room.r - room.l) * 0.4);
+      for (let tries = 0; tries < 1000; tries++) {
+        const x = Math.floor((room.l + room.r) / 2) + rng.int(-half, half);
+        const y = Math.floor((room.t + room.b) / 2) + rng.int(-half, half);
+        if (seq === 1) seq = 2;
+        let loot = lootSeq[Math.min(seq - 2, lootSeq.length - 1)];
+        if (seq > lootSeq.length + 1) seq = 0;
+        if (seq === 0) loot = lootSeq[lootSeq.length - 1];
+        if (y < gs.worldSurface + 50) loot = { item: 'vi_327_golden_key', style: 0 };
+        if (addChest(st, chests, x, y, CHEST, loot.style, ITEM_BY_KEY[loot.item], false)) {
+          seq++;
+          break;
+        }
+      }
+    }
+  }
+
+  // ---- 边界外扩 ±25(cs L18821-18832),后续阶段用 ----
+  const ex0 = Math.max(0, bx0 - 25), ex1 = Math.min(st.w - 1, bx1 + 25);
+  const ey0 = Math.max(0, by0 - 25), ey1 = Math.min(st.h - 1, by1 + 25);
+
+  // ---- 6. 灯具(cs L18865-19040):吊灯/灯笼 + 墙上开关 + 红线布线 ----
+  {
+    const lampStyles = [rng.int(0, 6), 0, 0];
+    do { lampStyles[1] = rng.int(0, 6); } while (lampStyles[1] === lampStyles[0]);
+    do { lampStyles[2] = rng.int(0, 6); } while (lampStyles[2] === lampStyles[0] || lampStyles[2] === lampStyles[1]);
+    let added = 0, fail = 0;
+    while (added < Math.floor(w / 150)) {
+      fail++;
+      const x = rng.int(ex0, ex1);
+      const yStart = rng.int(ey0, ey1);
+      if (isDWall(x, yStart)) {
+        for (let y = yStart; y > ey0; y--) {
+          if (!isBrick(x, y - 1)) break;
+          // 附近 ±15 无灯具;灯位周围净空
+          let near = false;
+          for (let dx = -15; dx < 15 && !near; dx++) {
+            for (let dy = -15; dy < 15; dy++) {
+              const t = st.inBounds(x + dx, y + dy) && st.flags[st.idx(x + dx, y + dy)] ? st.type[st.idx(x + dx, y + dy)] : 0;
+              if (t === LANTERN || t === CHANDELIER) { near = true; break; }
+            }
+          }
+          if (st.flags[st.idx(x - 1, y)] || st.flags[st.idx(x + 1, y)]
+            || st.flags[st.idx(x - 1, y + 1)] || st.flags[st.idx(x + 1, y + 1)]
+            || st.flags[st.idx(x, y + 2)]) near = true;
+          if (!near) {
+            let placedLight = false;
+            if (rng.int(0, 6) === 0) {
+              // 吊灯:下方 15 格内无实心才放(cs L18927-18936)
+              let blocked = false;
+              for (let k = 0; k < 15; k++) if (solidAt(x, y + k)) { blocked = true; break; }
+              if (!blocked && placeFurn(st, x, y, CHANDELIER, roomWall[0] === 7 ? 27 : roomWall[0] === 8 ? 28 : 29, 'top')) {
+                placedLight = true;
+                fail = 0; added++;
+                wireToSwitch(st, rng, dc, x, y, ex0, ex1, ey0, ey1, isDWall, isBrick, true);
+              }
+            }
+            if (!placedLight) {
+              const styleIdx = st.wall[st.idx(x, y)] === roomWall[1] ? 1 : st.wall[st.idx(x, y)] === roomWall[2] ? 2 : 0;
+              if (placeFurn(st, x, y, LANTERN, lampStyles[styleIdx], 'top')) {
+                fail = 0; added++;
+                wireToSwitch(st, rng, dc, x, y, ex0, ex1, ey0, ey1, isDWall, isBrick, false);
+              }
+            }
+          }
+          break;  // 只取第一个天花板
+        }
+      }
+      if (fail > 1000) { fail = 0; added++; }
+    }
+  }
+
+  // ---- 7. 飞镖陷阱(cs L18846-18863,w/500;placeTrap 简化为飞镖陷阱无布线) ----
+  {
+    let added = 0, fail = 0;
+    while (added < Math.floor(w / 500)) {
+      fail++;
+      let x = rng.int(ex0, ex1);
+      let y = rng.int(ey0, ey1);
+      while (y < gs.worldSurface && y < ey1) y = rng.int(ey0, ey1);
+      if (airDW(x, y)) {
+        // 找侧向砖墙,朝开口放陷阱
+        for (const dir of [-1, 1]) {
+          const wx = x + dir;
+          if (isBrick(wx, y) && !st.flags[st.idx(x - dir, y)]) {
+            st.setTileSilent(x, y, TRAP, dir < 0 ? 18 : 0, 0);
+            fail = 0; added++;
+            break;
+          }
+        }
+      }
+      if (fail > 1000) { fail = 0; added++; }
+    }
+  }
+
+  // ---- 8. 地面家具(cs L19287-19613):13 类,2000×w/4200 次尝试 ----
+  {
+    // 样式表(cs L19317-19365):墙 7 / 8 / 9
+    const S = wallType === 7
+      ? [13, 10, 11, 1, 46, 1, 5, 11, 5, 6, 21, 22, 24, 30]
+      : wallType === 8
+        ? [14, 11, 12, 2, 47, 2, 6, 12, 6, 7, 22, 23, 25, 31]
+        : [15, 12, 13, 3, 48, 3, 7, 13, 7, 8, 23, 24, 26, 32];
+    const [sChair, sTable, sDresser, sCandle, sStatue, sCandelabra, sBed, sPiano, sDresser2, sBench, sTub, sLamp, sCandelabra2, sClock] = S;
+    let alchemyLeft = 1 + Math.floor(w / 4200);
+    let bewitchLeft = 1 + Math.floor(w / 4200);
+    const attempts = Math.floor(2000 * (w / 4200));
+    for (let n = 0; n < attempts; n++) {
+      if (alchemyLeft > 0 || bewitchLeft > 0) n--;
+      let x = rng.int(ex0, ex1);
+      let y = 0;
+      for (let t = 0; t < 200; t++) {
+        y = rng.int(Math.floor(gs.worldSurface) + 10, ey1);
+        if (airDW(x, y)) break;
+        x = rng.int(ex0, ex1);
+      }
+      if (!airDW(x, y)) continue;
+      // 落到地面
+      while (!solidAt(x, y) && y < st.h - 200) y++;
+      const floorY = y - 1;
+      // 量地板跨度
+      let xL = x, xR = x;
+      while (!st.flags[st.idx(xL, floorY)] && solidAt(xL, floorY + 1)) xL--;
+      while (!st.flags[st.idx(xR, floorY)] && solidAt(xR, floorY + 1)) xR++;
+      const span = xR - xL - 1;
+      const cx0 = Math.floor((xR + xL) / 2);
+      if (st.flags[st.idx(cx0, floorY)] || !isDWall(cx0, floorY) || !solidAt(cx0, floorY + 1)
+        || (st.flags[st.idx(cx0, floorY + 1)] && st.type[st.idx(cx0, floorY + 1)] === SPIKE)) continue;
+      // 家具类型与占地(cs L19383-19454)
+      const sizes: Array<[number, number]> = [[5, 4], [4, 3], [3, 5], [4, 6], [3, 3], [5, 3], [5, 4], [5, 4], [5, 4], [5, 3], [2, 4], [3, 3], [2, 5]];
+      let ftype = rng.int(0, 12);
+      if ((ftype === 10 || ftype === 11 || ftype === 12) && rng.int(0, 3) !== 0) ftype = rng.int(0, 12);
+      const wv = st.wall[st.idx(cx0, floorY)];
+      const limited = wv >= 94 && wv <= 105;  // 变体墙只允许桌/梳妆台
+      const allowed = limited ? ftype === 0 || ftype === 1 || ftype === 4 : true;
+      if (!allowed) continue;
+      const [halfW, hgt] = sizes[ftype];
+      // 清空检查
+      let clear = true;
+      for (let dx = cx0 - halfW; dx <= cx0 + halfW && clear; dx++) {
+        for (let dy = floorY - hgt; dy <= floorY; dy++) {
+          if (st.inBounds(dx, dy) && st.flags[st.idx(dx, dy)]) { clear = false; break; }
+        }
+      }
+      if (!clear || span < halfW * 1.75) continue;
+      // 优先:炼金台/施法台(cs L19468-19482)
+      if (alchemyLeft > 0 || bewitchLeft > 0) {
+        if (alchemyLeft > 0) {
+          if (placeFurn(st, cx0, floorY, ALCHEMY, 0)) alchemyLeft--;
+        } else if (placeFurn(st, cx0, floorY, BEWITCH, 0)) bewitchLeft--;
+        continue;
+      }
+      switch (ftype) {
+        case 0: {
+          // 桌+双椅+桌上摆件
+          if (!placeFurn(st, cx0, floorY, TABLE, sTable)) break;
+          if (!st.flags[st.idx(cx0 - 2, floorY)]) {
+            if (placeFurn(st, cx0 - 2, floorY, CHAIR, sChair)) flipFurn(st, cx0 - 2, floorY, CHAIR);
+          }
+          if (!st.flags[st.idx(cx0 + 2, floorY)]) placeFurn(st, cx0 + 2, floorY, CHAIR, sChair);
+          for (let i = cx0 - 1; i <= cx0 + 1; i++) {
+            if (rng.int(0, 1) === 0 && !st.flags[st.idx(i, floorY - 2)]) {
+              const pick = rng.int(0, 4);
+              if (pick <= 1) st.setTileSilent(i, floorY - 2, CANDLE, sCandle * 18, 0);
+              else if (pick === 2) st.setTileSilent(i, floorY - 2, WATER_CANDLE, 0, 0);
+              else if (pick === 3) st.setTileSilent(i, floorY - 2, BOOKS, 0, 0);
+              else st.setTileSilent(i, floorY - 2, BOWLS, 0, 0);
+            }
+          }
+          break;
+        }
+        case 1: {
+          if (!placeFurn(st, cx0, floorY, WORKBENCH, sDresser)) break;
+          if (rng.int(0, 1) === 0) {
+            if (!st.flags[st.idx(cx0 - 1, floorY)] && placeFurn(st, cx0 - 1, floorY, CHAIR, sChair)) {
+              flipFurn(st, cx0 - 1, floorY, CHAIR);
+            }
+          } else placeFurn(st, cx0 + 2, floorY, CHAIR, sChair);
+          for (let i = cx0; i <= cx0 + 1; i++) {
+            if (rng.int(0, 1) === 0 && !st.flags[st.idx(i, floorY - 1)]) {
+              const pick = rng.int(0, 4);
+              if (pick <= 1) st.setTileSilent(i, floorY - 1, CANDLE, sCandle * 18, 0);
+              else if (pick === 2) st.setTileSilent(i, floorY - 1, WATER_CANDLE, 0, 0);
+              else if (pick === 3) st.setTileSilent(i, floorY - 1, BOOKS, 0, 0);
+              else st.setTileSilent(i, floorY - 1, BOWLS, 0, 0);
+            }
+          }
+          break;
+        }
+        case 2: placeFurn(st, cx0, floorY, STATUE, sStatue); break;
+        case 3: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra); break;
+        case 4: {
+          if (placeFurn(st, cx0, floorY, CHAIR, sChair) && rng.int(0, 1) === 0) flipFurn(st, cx0, floorY, CHAIR);
+          break;
+        }
+        case 5: placeFurn(st, cx0, floorY, BED, sBed, 'bottom', rng.int(0, 1) === 0 ? 1 : -1); break;
+        case 6: placeFurn(st, cx0, floorY, PIANO, sPiano); break;
+        case 7: placeFurn(st, cx0, floorY, DRESSER, sDresser2); break;
+        case 8: placeFurn(st, cx0, floorY, BENCH, sBench); break;
+        case 9: placeFurn(st, cx0, floorY, BATHTUB, sTub, 'bottom', rng.int(0, 1) === 0 ? 1 : -1); break;
+        case 10: placeFurn(st, cx0, floorY, LAMP, sLamp); break;
+        case 11: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra2); break;
+        case 12: placeFurn(st, cx0, floorY, CLOCK, sClock); break;
+      }
+    }
+  }
+
+  // ---- 9. 墙饰:画/骨(cs L19080-19285),420000/w 个 ----
+  {
+    const count = Math.floor(420000 / w);
+    for (let n = 0; n < count; n++) {
+      let x = rng.int(ex0, ex1);
+      let y = 0;
+      for (let t = 0; t < 200; t++) {
+        y = rng.int(Math.floor(gs.worldSurface), ey1);
+        if (airDW(x, y)) break;
+        x = rng.int(ex0, ex1);
+      }
+      if (!airDW(x, y)) continue;
+      // 两次重定心(cs L19089-19109)
+      for (let k = 0; k < 2; k++) {
+        let a = x, b = x;
+        while (st.inBounds(a, y) && !st.flags[st.idx(a, y)] && isDWall(a, y)) a--;
+        while (st.inBounds(b, y) && !st.flags[st.idx(b, y)] && isDWall(b, y)) b++;
+        x = Math.floor((a + 1 + b - 1) / 2);
+        let c = y, d = y;
+        while (st.inBounds(x, c) && !st.flags[st.idx(x, c)] && isDWall(x, c)) c--;
+        while (st.inBounds(x, d) && !st.flags[st.idx(x, d)] && isDWall(x, d)) d++;
+        y = Math.floor((c + 1 + d - 1) / 2);
+      }
+      // 量净空跨度(三向无实心)
+      const spanH = (xx: number, yy: number) => {
+        let a = xx, b = xx;
+        while (st.inBounds(a, yy) && !st.flags[st.idx(a, yy)] && !st.flags[st.idx(a, yy - 1)] && !st.flags[st.idx(a, yy + 1)]) a--;
+        while (st.inBounds(b, yy) && !st.flags[st.idx(b, yy)] && !st.flags[st.idx(b, yy - 1)] && !st.flags[st.idx(b, yy + 1)]) b++;
+        return { w: b - a - 1, x0: a + 1, x1: b - 1 };
+      };
+      const spanV = (xx: number, yy: number) => {
+        let a = yy, b = yy;
+        while (st.inBounds(xx, a) && !st.flags[st.idx(xx, a)] && !st.flags[st.idx(xx - 1, a)] && !st.flags[st.idx(xx + 1, a)]) a--;
+        while (st.inBounds(xx, b) && !st.flags[st.idx(xx, b)] && !st.flags[st.idx(xx - 1, b)] && !st.flags[st.idx(xx + 1, b)]) b++;
+        return { h: b - a - 1, y0: a + 1, y1: b - 1 };
+      };
+      const sh = spanH(x, y), sv = spanV(x, y);
+      if (sh.w <= 7 || sv.h <= 5) continue;
+      const canH = sh.w > sv.h * 3 && sh.w > 21;
+      const canV = sv.h > sh.w * 3 && sv.h > 21;
+      let kind = rng.int(0, 2);
+      if (st.wall[st.idx(x, y)] === roomWall[0]) kind = 0;
+      let guard = 0;
+      while (!((kind === 0) || (kind === 1 && canH) || (kind === 2 && canV)) && guard++ < 20) kind = rng.int(0, 2);
+      if (!((kind === 0) || (kind === 1 && canH) || (kind === 2 && canV))) continue;
+      if (nearPicture2(st, x, y, roomWall[0])) continue;
+      const isMain = st.wall[st.idx(x, y)] === roomWall[0];
+      const randPic = (): [number, number] => {
+        if (rng.int(0, 2) < 2) {
+          const map = [12, 13, 14, 15, 18, 19, 23];
+          return [HANGING, map[rng.int(0, 6)]];
+        }
+        const r = rng.int(0, 16);
+        const style = r > 13 ? (r === 14 ? 15 : r === 15 ? 16 : 30) : r;
+        return [PAINTING, style];
+      };
+      const randBone = (): [number, number] => rng.int(0, 1) === 0
+        ? [HANGING, rng.int(0, 1) === 0 ? 16 : 17]
+        : [CATACOMB, rng.int(0, 8)];
+      const placeAt = (px: number, py: number) => {
+        const [tile, style] = isMain ? randPic() : randBone();
+        if (!nearPicture(st, px, py)) placeWallArt(st, px, py, tile, style);
+      };
+      placeAt(x, y);
+      if (kind === 1) {
+        // 横向 ±7 续画
+        for (const dir of [1, -1]) {
+          let px = x, py = y;
+          for (let k = 0; k < 2; k++) {
+            px += 7 * dir;
+            const sv2 = spanV(px, py);
+            py = Math.floor((sv2.y0 + sv2.y1) / 2);
+            if (Math.abs(y - py) >= 4) break;
+            placeAt(px, py);
+          }
+        }
+      } else if (kind === 2) {
+        for (const dir of [1, -1]) {
+          let px = x, py = y;
+          for (let k = 0; k < 3; k++) {
+            py += 7 * dir;
+            const sh2 = spanH(px, py);
+            px = Math.floor((sh2.x0 + sh2.x1) / 2);
+            if (Math.abs(x - px) >= 4) break;
+            placeAt(px, py);
+          }
+        }
+      }
+    }
+  }
+
+  // ---- 10. 旗帜(cs L19042-19078),840000/w 个 ----
+  {
+    const count = Math.floor(840000 / w);
+    for (let n = 0; n < count; n++) {
+      let x = rng.int(ex0, ex1);
+      let y = 0;
+      for (let t = 0; t < 200; t++) {
+        y = rng.int(ey0, ey1);
+        if (airDW(x, y)) break;
+        x = rng.int(ex0, ex1);
+      }
+      if (!airDW(x, y)) continue;
+      // 向上找顶
+      let j1 = y;
+      while (!solidAt(x, j1) && j1 > 10) j1--;
+      const j2 = j1 + 1;
+      if (!isDWall(x, j2)) continue;
+      if (st.flags[st.idx(x, j2 - 1)] && st.type[st.idx(x, j2 - 1)] === SPIKE) continue;
+      let clear = true;
+      for (let k = 0; k < 4; k++) if (st.flags[st.idx(x, j2 + k)]) { clear = false; break; }
+      if (!clear) continue;
+      let bad = false;
+      for (let dx = -1; dx <= 1 && !bad; dx++) {
+        for (let dy = 0; dy <= 3; dy++) {
+          if (!st.inBounds(x + dx, j2 + dy)) continue;
+          const t = st.flags[st.idx(x + dx, j2 + dy)] ? st.type[st.idx(x + dx, j2 + dy)] : 0;
+          if (t === DOOR || t === BANNER) { bad = true; break; }
+        }
+      }
+      if (bad) continue;
+      const base = st.wall[st.idx(x, j2)] === roomWall[1] ? 12 : st.wall[st.idx(x, j2)] === roomWall[2] ? 14 : 10;
+      st.setTileSilent(x, j2, BANNER, (base + rng.int(0, 1)) * 18, 0);
+      st.setTileSilent(x, j2 + 1, BANNER, (base + rng.int(0, 1)) * 18, 18);
+      st.setTileSilent(x, j2 + 2, BANNER, (base + rng.int(0, 1)) * 18, 36);
+    }
+  }
+}
+
+/** WallDungeon 扩散(cs L54737):非实心格连通域内任意墙(≠244)→ 目标变体 */
+function wallDungeonSpread(st: TileStore, sx: number, sy: number, wallType: number): void {
+  const seen = new Set<number>();
+  const q: Array<[number, number]> = [[sx, sy]];
+  seen.add(sx * 100000 + sy);
+  while (q.length) {
+    const [x, y] = q.shift()!;
+    if (!st.inBounds(x, y)) continue;
+    const i = st.idx(x, y);
+    if (!st.flags[i] && st.wall[i] !== wallType && st.wall[i] > 0 && st.wall[i] !== 244) {
+      st.wall[i] = wallType;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const k = (x + dx) * 100000 + (y + dy);
+        if (!seen.has(k)) { seen.add(k); q.push([x + dx, y + dy]); }
+      }
+    } else if (st.flags[i]) {
+      st.wall[i] = wallType;
+    }
+  }
+}
+
+/**
+ * 家具放置:锚点语义 bottom(底行=floorY,水平居中)或 top(顶行=topY,居中)。
+ * 成功条件:fw×fh 全净空 + 底行下方全实心(bottom 时)。帧 = style*fw*18 + dx*18 / dy*18。
+ * flip=-1 时水平镜像帧。返回是否放置成功。
+ */
+function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1): boolean {
+  const def = TILE_DEFS[tile];
+  if (!def) return false;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const x0 = cx - Math.floor(fw / 2);
+  const yTop = anchor === 'bottom' ? anchorY - fh + 1 : anchorY;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, yTop + dy) || st.flags[st.idx(x0 + dx, yTop + dy)]) return false;
+    }
+  }
+  if (anchor === 'bottom') {
+    for (let dx = 0; dx < fw; dx++) {
+      if (!st.inBounds(x0 + dx, yTop + fh) || !st.flags[st.idx(x0 + dx, yTop + fh)]
+        || !TILE_DEFS[st.type[st.idx(x0 + dx, yTop + fh)]]?.solid) return false;
+    }
+  }
+  const stride = fw * 18;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      const fx = flip < 0 ? fw - 1 - dx : dx;
+      st.setTileSilent(x0 + dx, yTop + dy, tile, style * stride + fx * 18, dy * 18);
+    }
+  }
+  return true;
+}
+
+/** 家具水平镜像(帧 X 翻转:桌椅等 1-3 宽物件整体 +18*fw) */
+function flipFurn(st: TileStore, cx: number, floorY: number, tile: number): void {
+  const def = TILE_DEFS[tile];
+  if (!def) return;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const x0 = cx - Math.floor(fw / 2);
+  const yTop = floorY - fh + 1;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, yTop + dy)) continue;
+      const i = st.idx(x0 + dx, yTop + dy);
+      if (st.type[i] === tile) st.frameX[i] += fw * 18;
+    }
+  }
+}
+
+/** 墙饰(画/骨/挂毯):顶行=topY,锚点左上;须净空 */
+function placeWallArt(st: TileStore, x: number, y: number, tile: number, style: number): void {
+  const def = TILE_DEFS[tile];
+  if (!def) return;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const x0 = x - Math.floor(fw / 2);
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, y + dy) || st.flags[st.idx(x0 + dx, y + dy)]) return;
+    }
+  }
+  const stride = fw * 18;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      st.setTileSilent(x0 + dx, y + dy, tile, style * stride + dx * 18, dy * 18);
+    }
+  }
+}
+
+/** nearPicture(cs L17966):±4×±3 有任意实心 */
+function nearPicture(st: TileStore, x: number, y: number): boolean {
+  for (let dx = -4; dx <= 3; dx++) {
+    for (let dy = -3; dy <= 2; dy++) {
+      if (st.inBounds(x + dx, y + dy) && st.flags[st.idx(x + dx, y + dy)]) return true;
+    }
+  }
+  return false;
+}
+
+/** nearPicture2(cs L17979):±15/±10(主墙)或 ±8/±5(变体墙)内已有墙饰 */
+function nearPicture2(st: TileStore, x: number, y: number, mainWall: number): boolean {
+  const wall = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;
+  const rx = wall === mainWall ? 15 : 8;
+  const ry = wall === mainWall ? 10 : 5;
+  for (let dx = -rx; dx <= rx; dx++) {
+    for (let dy = -ry; dy <= ry; dy++) {
+      if (!st.inBounds(x + dx, y + dy) || !st.flags[st.idx(x + dx, y + dy)]) continue;
+      const t = st.type[st.idx(x + dx, y + dy)];
+      if (t === HANGING || t === CATACOMB || t === PAINTING) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 灯具→墙上开关 + 红线布线(cs L18942-18975/18990-19023):
+ * 在灯具 ±12/+3..20 内找两侧皆砖的嵌墙位放开关(136),沿曼哈顿路径铺红线。
+ * chandelier=true 时开关位禁邻尖刺(原版两分支条件差异)。
+ */
+function wireToSwitch(
+  st: TileStore, rng: RNG, dc: DungeonCtx,
+  lx: number, ly: number,
+  ex0: number, ex1: number, ey0: number, ey1: number,
+  isDWall: (x: number, y: number) => boolean,
+  isBrick: (x: number, y: number) => boolean,
+  chandelier: boolean,
+): void {
+  for (let tries = 0; tries < 1000; tries++) {
+    let x = lx + rng.int(-12, 12);
+    let y = ly + rng.int(3, 20);
+    if (x < ex0 || x > ex1 || y < ey0 || y > ey1) continue;
+    if (!st.inBounds(x, y) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y + 1)]) continue;
+    if (!isBrick(x - 1, y) || !isBrick(x + 1, y)) continue;
+    if (!hasLineOfSight(st, x, y, lx, ly)) continue;
+    const solidSide = (st.inBounds(x - 1, y) && st.flags[st.idx(x - 1, y)] && st.type[st.idx(x - 1, y)] !== DOOR && TILE_DEFS[st.type[st.idx(x - 1, y)]]?.solid)
+      || (st.inBounds(x + 1, y) && st.flags[st.idx(x + 1, y)] && st.type[st.idx(x + 1, y)] !== DOOR && TILE_DEFS[st.type[st.idx(x + 1, y)]]?.solid)
+      || (st.inBounds(x, y + 1) && st.flags[st.idx(x, y + 1)] && TILE_DEFS[st.type[st.idx(x, y + 1)]]?.solid);
+    if (!solidSide || !isDWall(x, y)) continue;
+    if (!chandelier) {
+      const tL = st.inBounds(x - 1, y) && st.flags[st.idx(x - 1, y)] ? st.type[st.idx(x - 1, y)] : 0;
+      const tR = st.inBounds(x + 1, y) && st.flags[st.idx(x + 1, y)] ? st.type[st.idx(x + 1, y)] : 0;
+      if (tL === SPIKE || tR === SPIKE) continue;
+    }
+    // 放开关(2/3 关态帧 18)并布线
+    st.setTileSilent(x, y, DSWITCH, rng.int(0, 2) > 0 ? 18 : 0, 0);
+    let wx = x, wy = y;
+    while (wx !== lx || wy !== ly) {
+      st.wire[st.idx(wx, wy)] |= TileStore.WIRE_RED;
+      if (wx > lx) wx--;
+      else if (wx < lx) wx++;
+      else if (wy > ly) wy--;
+      else if (wy < ly) wy++;
+    }
+    st.wire[st.idx(lx, ly)] |= TileStore.WIRE_RED;
+    return;
+  }
+  void dc;
+}
+
+/** 简易视线(Collision.CanHit 近似):两点连线采样无实心阻挡 */
+function hasLineOfSight(st: TileStore, x0: number, y0: number, x1: number, y1: number): boolean {
+  const dx = x1 - x0, dy = y1 - y0;
+  const steps = Math.max(Math.abs(dx), Math.abs(dy)) * 4;
+  for (let k = 1; k < steps; k++) {
+    const t = k / steps;
+    const x = Math.floor(x0 + dx * t);
+    const y = Math.floor(y0 + dy * t);
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (st.flags[i] && TILE_DEFS[st.type[i]]?.solid) return false;
+  }
+  return true;
+}
+
+/** AddBuriedChest 近似:从 (x,y) 向下找地面,2×2 箱落其上;推入 chests */
+function addChest(st: TileStore, chests: ChestSink, x: number, y: number, tile: number, style: number, itemId: number | undefined, locked: boolean): boolean {
+  const def = TILE_DEFS[tile];
+  if (!def) return false;
+  let gy = y;
+  let guard = 0;
+  while (guard++ < 60 && st.inBounds(x, gy) && !st.flags[st.idx(x, gy)]) gy++;
+  if (!st.inBounds(x, gy) || !st.flags[st.idx(x, gy)]) return false;
+  const topY = gy - 2;
+  if (topY < 1) return false;
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 2; dy++) {
+      if (!st.inBounds(x + dx, topY + dy) || st.flags[st.idx(x + dx, topY + dy)]) return false;
+    }
+  }
+  const fw = def.vanilla?.fw ?? 2;
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 2; dy++) {
+      st.setTileSilent(x + dx, topY + dy, tile, style * fw * 18 + dx * 18, dy * 18);
+    }
+  }
+  chests.push({
+    x, y: topY, locked,
+    items: itemId !== undefined ? [{ id: itemId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null),
+  });
+  return true;
 }

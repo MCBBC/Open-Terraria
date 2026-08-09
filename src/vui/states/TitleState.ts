@@ -15,6 +15,8 @@ export interface TitleFlow {
   onSinglePlayer(): void;
   onSettings(): void;
   onQuit(): void;
+  /** 1.4.5.6 CreditsRoll（M6 设置期可替换为滚动制作人员页） */
+  onCredits(): void;
 }
 
 /** 原版风格纯文字菜单按钮（hover 金色心跳 + Menu_Tick/Menu_Open 音效） */
@@ -61,14 +63,19 @@ export class TitleState extends UIState {
   private logoScaleSpeed = 0;
   private logoScaleDirection = 1;
   private versionText = `SandboxWorld ${'v0.1.0'}`;
+  /** 巨石 logo（1.4.5.6 boulderLogo：noTraps 强制或 1/200 随机 → Logo5/Logo6） */
+  private boulderLogo = Math.random() < 1 / 200;
 
   constructor(private flow: TitleFlow) {
     super();
-    const y0 = 250;   // 原版 num2
-    const step = 80;  // 原版 num4
+    // 1.4.5.6 菜单几何（Main.cs:48340-48342）：y 起点 220、步长 52
+    const y0 = 220;
+    const step = 52;
     const labels: Array<[string, () => void]> = [
       [Lang.has('Legacy.LegacyMenu.12') ? Lang.text('Legacy.LegacyMenu.12') : '单人游戏', () => flow.onSinglePlayer()],
+      [Lang.has('Legacy.LegacyMenu.13') ? Lang.text('Legacy.LegacyMenu.13') : '多人模式', () => flow.onQuit()],
       [Lang.has('Legacy.LegacyMenu.14') ? Lang.text('Legacy.LegacyMenu.14') : '设置', () => flow.onSettings()],
+      ['制作人员', () => flow.onCredits()],
       [Lang.has('Legacy.LegacyMenu.15') ? Lang.text('Legacy.LegacyMenu.15') : '退出', () => flow.onQuit()],
     ];
     labels.forEach(([label, fn], i) => {
@@ -97,8 +104,8 @@ export class TitleState extends UIState {
     if (this.logoScaleSpeed < 50 && this.logoScaleDirection === 1) this.logoScaleSpeed += 1;
     else if (this.logoScaleSpeed > -50 && this.logoScaleDirection === -1) this.logoScaleSpeed -= 1;
 
-    const logo = UITextures.get('Logo.png');
-    const glow = UITextures.get('Logo2.png');
+    const logo = UITextures.get(this.boulderLogo ? 'Logo5.png' : 'Logo.png');
+    const glow = UITextures.get(this.boulderLogo ? 'Logo6.png' : 'Logo2.png');
     if (!logo) return;
     const cx = this.getDimensions().width / 2;
     const cy = 100;

@@ -199,7 +199,7 @@ def({ key: 'v_193_slime_block', name: 'Slime Block', solid: true, opacity: 1, pi
 def({ key: 'v_190_glowing_mushroom_block', name: 'Glowing Mushroom Block', solid: true, opacity: 1, pick: 0, mapColor: '#B6AF82', blend: true, drop: null as unknown as string, light: [120, 110, 180], vanilla: { sheet: 190, frame: 'auto' } });
 def({ key: 'v_350_martian_conduit_plating', name: 'Martian Conduit Plating', solid: true, opacity: 1, pick: 0, mapColor: '#37619B', blend: true, drop: null as unknown as string, vanilla: { sheet: 350, frame: 'auto' } });
 def({ key: 'v_369_smooth_granite_block', name: 'Smooth Granite Block', solid: true, opacity: 1, pick: 0, mapColor: '#322E68', blend: true, drop: null as unknown as string, vanilla: { sheet: 369, frame: 'auto' } });
-def({ key: 'v_137_traps', name: 'Traps', solid: true, opacity: 1, pick: 0, mapColor: '#909490', blend: true, drop: null as unknown as string, vanilla: { sheet: 137, frame: 'auto' } });
+def({ key: 'v_137_traps', name: 'Traps', solid: true, framed: true, opacity: 1, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: null as unknown as string, vanilla: { sheet: 137, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_117_pearlstone_block', name: 'Pearlstone Block', solid: true, opacity: 1, pick: 0, mapColor: '#B5ACBE', blend: true, drop: null as unknown as string, vanilla: { sheet: 117, frame: 'blend' } });
 def({ key: 'v_112_ebonsand_block', name: 'Ebonsand Block', solid: true, opacity: 1, pick: 0, mapColor: '#67627A', blend: true, drop: null as unknown as string, vanilla: { sheet: 112, frame: 'auto' } });
 def({ key: 'v_232_wooden_spike', name: 'Wooden Spike', solid: true, opacity: 1, pick: 0, mapColor: '#915155', blend: true, drop: null as unknown as string, vanilla: { sheet: 232, frame: 'auto' } });

@@ -16,6 +16,8 @@ function packed(v: number): Color {
 const CORRUPT_COLOR = packed(4283888223);
 const CRIMSON_COLOR = packed(4286836223);
 const SMALL_COLOR = packed(4290947159);
+/** 1.4.5.6 新增：随机邪恶（generatingRandomEvil）填充色 */
+const RANDOM_COLOR = packed(4292696893);
 const EMPTY_LONG = rgb(0x30, 0x30, 0x30);
 const EMPTY_SMALL = rgb(0x21, 0x21, 0x21);
 
@@ -26,6 +28,8 @@ export class UIGenProgressBar extends UIElement {
   currentProgress = 0;
   /** 猩红世界用猩红配色（WorldGen.crimson） */
   crimson = false;
+  /** 1.4.5.6：随机邪恶（Outer_Random + 专属填充色） */
+  randomEvil = false;
 
   constructor() {
     super();
@@ -45,7 +49,9 @@ export class UIGenProgressBar extends UIElement {
     const y = Math.round(d.y);
 
     // 外框（随邪恶类型；Outer 画在 (x-8,y)，Outer_Lower 画在 (x+44,y+60)）
-    const outer = UITextures.get(this.crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt');
+    const outerKey = this.randomEvil ? 'UI_WorldGen_Outer_Random'
+      : this.crimson ? 'UI_WorldGen_Outer_Crimson' : 'UI_WorldGen_Outer_Corrupt';
+    const outer = UITextures.get(outerKey);
     if (outer) batch.draw(outer, x - 8, y);
     const lower = UITextures.get('UI_WorldGen_Outer_Lower');
     if (lower) batch.draw(lower, x + 44, y + 60);
@@ -53,7 +59,8 @@ export class UIGenProgressBar extends UIElement {
     // 长条空槽 + 填充
     batch.fillRect(x + 20, y + 40, LONG_BAR_WIDTH, 16, EMPTY_LONG);
     const longFill = Math.round(LONG_BAR_WIDTH * Math.max(0, Math.min(1, this.totalProgress)));
-    if (longFill > 0) batch.fillRect(x + 20, y + 40, longFill, 16, this.crimson ? CRIMSON_COLOR : CORRUPT_COLOR);
+    const fillColor = this.randomEvil ? RANDOM_COLOR : this.crimson ? CRIMSON_COLOR : CORRUPT_COLOR;
+    if (longFill > 0) batch.fillRect(x + 20, y + 40, longFill, 16, fillColor);
     // 短条空槽 + 填充
     batch.fillRect(x + 50, y + 60, SMALL_BAR_WIDTH, 8, EMPTY_SMALL);
     const smallFill = Math.round(SMALL_BAR_WIDTH * Math.max(0, Math.min(1, this.currentProgress)));

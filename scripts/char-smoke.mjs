@@ -28,7 +28,7 @@ mkdirSync('shots', { recursive: true });
 await page.screenshot({ path: 'shots/m2-1-title.png' });
 
 // 标题 → 角色列表
-await click(ui.w / 2, 258);
+await click(ui.w / 2, 228);
 await waitState('UICharacterSelectState');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: 'shots/m2-2-charselect.png' });

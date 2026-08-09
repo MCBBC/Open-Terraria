@@ -15,6 +15,14 @@ const STATE_CHANGE_CLICK_DISABLE_TIME = 200; // ms
 const MAX_HISTORY_SIZE = 32;
 const HISTORY_PRUNE_SIZE = 4;
 
+/** 1.4.5.6 InputPointerCache：左右键各一套独立的按下/双击状态 */
+class InputPointerCache {
+  wasDown = false;
+  lastDown: UIElement | null = null;
+  lastClicked: UIElement | null = null;
+  lastTimeDown = 0;
+}
+
 export class UserInterface {
   static activeInstance: UserInterface | null = null;
 
@@ -22,11 +30,9 @@ export class UserInterface {
   isVisible = false;
 
   private history: UIState[] = [];
-  private wasMouseDown = false;
   private lastElementHover: UIElement | null = null;
-  private lastElementDown: UIElement | null = null;
-  private lastElementClicked: UIElement | null = null;
-  private lastMouseDownTime = 0;         // 累积时钟 ms（不用 Date.now，帧暂停安全）
+  private left = new InputPointerCache();
+  private right = new InputPointerCache();
   private clickDisabledTimeRemaining = 0;
   private isStateDirty = false;
   private currentState: UIState | null = null;
@@ -44,8 +50,8 @@ export class UserInterface {
   resetLasts() {
     this.lastElementHover?.mouseOut(new UIMouseEvent(this.lastElementHover, this.mousePosition));
     this.lastElementHover = null;
-    this.lastElementDown = null;
-    this.lastElementClicked = null;
+    this.left = new InputPointerCache();
+    this.right = new InputPointerCache();
   }
 
   use() {
@@ -59,9 +65,8 @@ export class UserInterface {
     this.updateMousePosition();
     this.lastElementHover?.mouseOut(new UIMouseEvent(this.lastElementHover, this.mousePosition));
     this.lastElementHover = null;
-    this.lastElementDown = null;
-    this.lastElementClicked = null;
-    this.lastMouseDownTime = 0;
+    this.left = new InputPointerCache();
+    this.right = new InputPointerCache();
     this.clickDisabledTimeRemaining = Math.max(this.clickDisabledTimeRemaining, STATE_CHANGE_CLICK_DISABLE_TIME);
   }
 
@@ -70,12 +75,43 @@ export class UserInterface {
     this.mousePosition.y = UIScale.mouseY;
   }
 
-  /** @param mouseLeft 当前帧鼠标左键是否按下 @param hasFocus 窗口聚焦 */
-  update(dtMs: number, mouseLeft: boolean, hasFocus: boolean, wheelDelta: number) {
+  /** 单个指针的点击处理（1.4.5.6 HandleClick 语义：抑制期整体跳过且不更新 WasDown） */
+  private handlePointer(
+    cache: InputPointerCache,
+    isDown: boolean,
+    disabled: boolean,
+    evtName: { down: 'mouseDown' | 'rightMouseDown'; up: 'mouseUp' | 'rightMouseUp'; click: 'click' | 'rightClick'; dbl: 'doubleClick' | 'rightDoubleClick' },
+  ) {
+    const target = this.lastElementHover;
+    if (disabled) return; // 抑制期：连 WasDown 都不更新（1456:209-213）
+    if (isDown && !cache.wasDown && target != null) {
+      cache.lastDown = target;
+      const evt = new UIMouseEvent(target, this.mousePosition);
+      target[evtName.down](evt);
+      if (cache.lastClicked === target) {
+        if (this.clock - cache.lastTimeDown < DOUBLE_CLICK_TIME) {
+          target[evtName.dbl](evt);
+          cache.lastClicked = null;
+        }
+      }
+      cache.lastTimeDown = this.clock;
+    } else if (!isDown && cache.wasDown && cache.lastDown != null) {
+      const down = cache.lastDown;
+      if (down.containsPoint(this.mousePosition)) {
+        down[evtName.click](new UIMouseEvent(down, this.mousePosition));
+        cache.lastClicked = cache.lastDown;
+      }
+      down[evtName.up](new UIMouseEvent(down, this.mousePosition));
+      cache.lastDown = null;
+    }
+    cache.wasDown = isDown;
+  }
+
+  /** @param mouseLeft/mouseRight 当前帧左右键是否按下 @param hasFocus 窗口聚焦 */
+  update(dtMs: number, mouseLeft: boolean, mouseRight: boolean, hasFocus: boolean, wheelDelta: number) {
     if (this.currentState == null) return;
     this.clock += dtMs;
     this.updateMousePosition();
-    const flag1 = mouseLeft && hasFocus;
     const target = hasFocus ? this.currentState.getElementAt(this.mousePosition) : null;
     this.clickDisabledTimeRemaining = Math.max(0, this.clickDisabledTimeRemaining - dtMs);
     const disabled = this.clickDisabledTimeRemaining > 0;
@@ -84,29 +120,11 @@ export class UserInterface {
       target?.mouseOver(new UIMouseEvent(target, this.mousePosition));
       this.lastElementHover = target;
     }
-    if (flag1 && !this.wasMouseDown && target != null && !disabled) {
-      this.lastElementDown = target;
-      target.mouseDown(new UIMouseEvent(target, this.mousePosition));
-      if (this.lastElementClicked === target) {
-        if (this.clock - this.lastMouseDownTime < DOUBLE_CLICK_TIME) {
-          target.doubleClick(new UIMouseEvent(target, this.mousePosition));
-          this.lastElementClicked = null;
-        }
-      }
-      this.lastMouseDownTime = this.clock;
-    } else if (!flag1 && this.wasMouseDown && this.lastElementDown != null && !disabled) {
-      const down = this.lastElementDown;
-      if (down.containsPoint(this.mousePosition)) {
-        down.click(new UIMouseEvent(down, this.mousePosition));
-        this.lastElementClicked = this.lastElementDown;
-      }
-      down.mouseUp(new UIMouseEvent(down, this.mousePosition));
-      this.lastElementDown = null;
-    }
+    this.handlePointer(this.left, mouseLeft && hasFocus, disabled, { down: 'mouseDown', up: 'mouseUp', click: 'click', dbl: 'doubleClick' });
+    this.handlePointer(this.right, mouseRight && hasFocus, disabled, { down: 'rightMouseDown', up: 'rightMouseUp', click: 'rightClick', dbl: 'rightDoubleClick' });
     if (wheelDelta !== 0) {
       target?.scrollWheel(new UIScrollWheelEvent(target, this.mousePosition, wheelDelta));
     }
-    this.wasMouseDown = flag1;
     if (this.currentState == null) return;
     this.currentState.update();
   }

@@ -1058,4 +1058,15 @@ export class UI {
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }
+
+  /** M5：背包/快捷栏已 Canvas 化，DOM 仅保留 Buff 栏 + Toast */
+  initInGameLite() {
+    this.buildBuffBar();
+    const map: Array<[BuffType, string]> = [
+      [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
+      [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
+      [BuffType.Regen, 'regen_potion'],
+    ];
+    for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
+  }
 }

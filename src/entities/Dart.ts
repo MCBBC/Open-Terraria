@@ -35,13 +35,12 @@ export class TrapShot extends Entity {
     if (kind === 'spiky') this.life = 1800; // 原版尖刺球 timeLeft 1800
   }
 
-  draw(r: Renderer, cam: Camera): void {
+  draw(r: Renderer, _cam: Camera): void {
+    // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const x = (this.x - cam.x) * cam.zoom + r.canvas.width / 2;
-    const y = (this.y - cam.y) * cam.zoom + r.canvas.height / 2;
     ctx.fillStyle = TRAP_SHOT_STYLE[this.kind].color;
-    ctx.fillRect(x, y, this.w * cam.zoom, this.h * cam.zoom);
+    ctx.fillRect(this.x, this.y, this.w, this.h);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -82,13 +81,12 @@ export class Dart extends Entity {
     this.damage = damage;
   }
 
-  draw(r: Renderer, cam: Camera): void {
+  draw(r: Renderer, _cam: Camera): void {
+    // 世界坐标绘制(同 TrapShot)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const x = (this.x - cam.x) * cam.zoom + r.canvas.width / 2;
-    const y = (this.y - cam.y) * cam.zoom + r.canvas.height / 2;
     ctx.fillStyle = '#C8B89A';
-    ctx.fillRect(x, y, this.w * cam.zoom, this.h * cam.zoom);
+    ctx.fillRect(this.x, this.y, this.w, this.h);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

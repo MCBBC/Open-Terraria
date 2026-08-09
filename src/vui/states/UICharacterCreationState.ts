@@ -18,8 +18,8 @@ import { rgb, type Color } from '../draw/UISpriteBatch';
 import { UITextures } from '../assets/UITextures';
 import { UISfx } from '../UISfx';
 import {
-  type Appearance, type RGBColor, randomAppearance, HAIR_COUNT,
-  DIFFICULTY_INFO, rgbToHsl, hslToRgb, VALID_CLOTH_STYLES,
+  type Appearance, type RGBColor, randomAppearance,
+  DIFFICULTY_INFO, rgbToHsl, hslToRgb, VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS,
 } from '../../player/Appearance';
 import { compositePaperDoll } from '../../player/PaperDoll';
 import { UserInterface } from '../core/UserInterface';
@@ -31,6 +31,11 @@ export interface CharacterCreationFlow {
 
 type Category = 'info' | 'clothing' | 'hair' | 'color';
 type ColorKey = 'hairColor' | 'eyeColor' | 'skinColor' | 'shirtColor' | 'undershirtColor' | 'pantsColor' | 'shoeColor';
+
+/** 1.4.5.6 UICharacterCreation._defaultHairstylesForClothStyle（服装 → 自动发型） */
+const DEFAULT_HAIR_FOR_STYLE: Record<number, number> = {
+  0: 0, 2: 1, 1: 12, 3: 2, 8: 28, 9: 68, 7: 18, 5: 22, 6: 81, 4: 5,
+};
 
 const COLOR_ENTRIES: Array<{ key: ColorKey; icon: string; label: string }> = [
   { key: 'hairColor', icon: 'UI_CharCreation_ColorHair', label: '发色' },
@@ -84,6 +89,8 @@ export class UICharacterCreationState extends UIState {
   private appearance: Appearance;
   /** 复制/粘贴模板（原版 Click_Copy/PastePlayerTemplate） */
   private clipboard: Appearance | null = null;
+  /** 用户手动选过发型后，切服装不再自动配发型（1.4.5.6 TryAutoAssigningHair 语义） */
+  private hairManuallySet = false;
   private preview: UICharacterPreview;
   private content = new UIElement();
   private nameBox: UITextBox;
@@ -249,6 +256,11 @@ export class UICharacterCreationState extends UIState {
         const row = Math.floor(i / 5), col = i % 5;
         const b = new ClothStyleButton(() => this.appearance, styleId, () => {
           this.appearance.skinVariant = styleId;
+          // 1.4.5.6 _defaultHairstylesForClothStyle：未手动选发型时自动配发型
+          if (!this.hairManuallySet) {
+            const auto = DEFAULT_HAIR_FOR_STYLE[styleId];
+            if (auto !== undefined) this.appearance.hair = auto;
+          }
           this.refresh();
         });
         b.top = StyleDimension.fromPixels(y0 + row * 88);
@@ -293,9 +305,10 @@ export class UICharacterCreationState extends UIState {
       list.setScrollbar(scrollbar);
       this.content.append(scrollbar);
       this.content.append(list);
-      for (let i = 1; i <= HAIR_COUNT; i++) {
-        const b = new HairStyleButton(this.appearance, i, () => {
-          this.appearance.hair = i;
+      for (const hairId of CHAR_CREATION_HAIRS) {
+        const b = new HairStyleButton(this.appearance, hairId, () => {
+          this.appearance.hair = hairId;
+          this.hairManuallySet = true;
           this.refresh();
         });
         list.add(b);

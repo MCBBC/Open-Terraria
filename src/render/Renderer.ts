@@ -20,6 +20,52 @@ import { Critter } from '../entities/Critter';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
+
+// ============ 原版 FindFrame 分族帧引擎（1.4.5.6 Terarria1456/Terraria/NPC.cs:67295+） ============
+// 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
+const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
+// 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
+const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
+
+/** 按原版 FindFrame 分族规则算当前帧 index */
+function vanillaFrameIdx(e: Enemy, frames: number): number {
+  const id = e.vanillaId ?? 0;
+  const ai = e.vanilla?.aiStyle ?? 0;
+  const t = e.animT; // tick 计数（≈原版 frameCounter 驱动源）
+  const walking = Math.abs(e.vx) > 0.05;
+  // 僵尸族（L77049-77085）：行走 0,1,2,1 按 |vx| 累加；腾空=2；站定=0
+  if (ZOMBIE_FRAME_TYPES.has(id)) {
+    if (!e.onGround) return Math.min(2, frames - 1);
+    if (!walking) return 0;
+    const phase = (e.walkCycleT + Math.abs(e.vx) * 8) % 32; // 每 tick +|vx|，32 一循环
+    return phase < 8 ? 0 : phase < 16 ? 1 : phase < 24 ? 2 : 1;
+  }
+  // 蝙蝠族（L75585）：每 6 tick 推进，全循环（部分类型不含末帧）
+  if (ai === 14) {
+    const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
+    return Math.max(1, Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap)));
+  }
+  // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
+  if (ai === 1) return Math.floor(t / 8) % frames;
+  // 战士族/107（L70155-70252）：站定=0；行走从帧 2 起按 |vx|*2+1 累加、>6 推进、循环回 2
+  if (ai === 3 || ai === 26 || ai === 107) {
+    if (!e.onGround) return frames - 1; // 腾空取末帧（原版 ai[0]==2 在 0/末帧间交替）
+    if (!walking) return 0;
+    const cycLen = Math.max(1, frames - 2);
+    const step = Math.floor((e.walkCycleT * (Math.abs(e.vx) * 2 + 1)) / 6);
+    return 2 + (step % cycLen);
+  }
+  // 游泳族（case 65 鲨鱼 L75386+）：frame = (counter/4) % 4
+  if (ai === 16) return frames > 3 ? Math.floor(t / 4) % Math.min(4, frames) : Math.floor(t / 6) % frames;
+  // 水母（case 63 L74621+）：追击脉冲循环 [4..6]，漂移循环 [0..]
+  if (ai === 18) {
+    const active = t % 90 < 30; // 脉冲周期近似
+    if (active && frames > 6) return 4 + (Math.floor(t / 5) % 3);
+    return Math.floor(t / 8) % Math.min(4, frames);
+  }
+  // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
+  return Math.floor(t / 6) % frames;
+}
 export interface DamageNumber { x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number; label?: string; }
 
 export class Minimap {
@@ -266,7 +312,10 @@ export class Renderer {
       else if (e instanceof TownNPC) this.drawTownNPC(e);
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (e instanceof Critter) this.drawCritter(e);
-      else (e as Player).draw && null;
+      else if (typeof (e as { draw?: unknown }).draw === 'function') {
+        // 投射物等自带 draw 的实体(飞镖/陷阱弹/箭/法弹):世界变换内绘制
+        (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
+      }
     }
     this.drawPlayer(player, world, swing);
 
@@ -559,10 +608,7 @@ export class Renderer {
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
-      // 行走/飞行循环段：原版每类型动画帧表（NPCAnimation）不同——骷髅 15 帧中仅 0-2 是行走，
-      // 其余是攻击/死亡姿势；无逐类型帧表前先钳制到前 4 帧（绝大多数怪行走循环 ≤4 帧）
-      const cyc = Math.max(1, Math.min(frames, 4));
-      const frameIdx = Math.floor(e.animT / 8) % cyc;
+      const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
       if (r) {
         const flying = e.vanilla?.noGravity || e.vanilla?.aiStyle === 2 || e.vanilla?.aiStyle === 5 || e.vanilla?.aiStyle === 14;

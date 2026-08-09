@@ -12,7 +12,8 @@ import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { poolFor, vanillaNpc, biomeAt, VANILLA_SPAWN_POOLS } from '../data/vanillaNpcs';
+import { vanillaNpc } from '../data/vanillaNpcs';
+import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { Player } from '../entities/Player';
@@ -102,6 +103,8 @@ export class Game implements GameHooks {
   // 敌人生成
   private spawnTimer = 0;
   boss: Enemy | null = null;
+  /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
+  vanillaSpawner: VanillaSpawner | null = null;
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
   tileByKey = TILE_BY_KEY;
 
@@ -1578,16 +1581,24 @@ export class Game implements GameHooks {
 
   /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles 玩家语义;敌人触发见 Enemy 侧) */
   private checkPressurePlates(): void {
-    const st = this.world.store;
+    // 原版 Collision.SwitchTiles(Player.cs:18439):扫玩家 AABB 覆盖的全部格,
+    // 命中压板 135 边沿触发(踩上/离开各一次,plateLatch 按格去重)
     const p = this.player;
-    const tx = Math.floor(p.cx / TILE), ty = Math.floor((p.y + p.h) / TILE);
-    const key = tx + ',' + ty;
-    const onPlate = this.wiring?.sheetOf(tx, ty) === 135;
-    if (onPlate && !this.plateLatch.has(key)) {
-      this.plateLatch.add(key);
-      this.wiring?.hitSwitch(tx, ty);
-    } else if (!onPlate) {
-      this.plateLatch.delete(key);
+    const x0 = Math.floor(p.x / TILE), x1 = Math.floor((p.x + p.w - 1) / TILE);
+    const y0 = Math.floor(p.y / TILE), y1 = Math.floor((p.y + p.h - 1) / TILE);
+    const pressed = new Set<string>();
+    for (let ty = y0; ty <= y1; ty++) {
+      for (let tx = x0; tx <= x1; tx++) {
+        if (this.wiring?.sheetOf(tx, ty) === 135) {
+          const key = tx + ',' + ty;
+          pressed.add(key);
+          if (!this.plateLatch.has(key)) this.wiring?.hitSwitch(tx, ty);
+        }
+      }
+    }
+    for (const key of pressed) this.plateLatch.add(key);
+    for (const key of [...this.plateLatch]) {
+      if (!pressed.has(key)) this.plateLatch.delete(key);
     }
   }
 
@@ -1598,14 +1609,13 @@ export class Game implements GameHooks {
     if (!w) return;
     const st = this.world.store;
     const p = this.player;
-    // 测重板:玩家 AABB 覆盖格(原版 16×10 底部判定,近似脚下 1 格)
+    // 测重板:玩家 AABB 覆盖格(原版 PressurePlateHelper 16×10 底部判定)
     const standing = new Set<number>();
-    for (let dx = 0; dx <= 0; dx++) {
-      const tx = Math.floor(p.cx / TILE) + dx, ty = Math.floor((p.y + p.h) / TILE);
-      for (const idx of this.triggerTiles428) {
-        const x = idx % st.w, y = (idx / st.w) | 0;
-        if (x === tx && y === ty) standing.add(idx);
-      }
+    const px0 = Math.floor(p.x / TILE), px1 = Math.floor((p.x + p.w - 1) / TILE);
+    const py0 = Math.floor(p.y / TILE), py1 = Math.floor((p.y + p.h - 1) / TILE);
+    for (const idx of this.triggerTiles428) {
+      const x = idx % st.w, y = (idx / st.w) | 0;
+      if (x >= px0 && x <= px1 && y >= py0 && y <= py1) standing.add(idx);
     }
     for (const idx of standing) {
       if (!this.weightedLatch.has(idx)) {
@@ -1931,133 +1941,73 @@ export class Game implements GameHooks {
     if (count >= cap) return;
     if (this.boss) return;
 
+    // 原版 Spawner 1:1（VanillaSpawner.ts）：选点+选怪全部按 SpawnAnNPC 链
+    if (!this.vanillaSpawner) this.vanillaSpawner = new VanillaSpawner(w);
+    const viewHalfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
+    const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);
-    // 生成点：玩家周围环带
-    const ang = rng.range(0, Math.PI * 2);
-    const dist = rng.range(SPAWN_MIN_DIST, SPAWN_MAX_DIST);
-    const ex = p.cx + Math.cos(ang) * dist;
-    const ey = p.cy + Math.sin(ang) * dist;
-    const tx = Math.floor(ex / TILE), ty = Math.floor(ey / TILE);
+    const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
+    if (!picked) return;
+    // 放置：原版 SpawnNPC 直接落位；水生/蠕虫分支由链内返回的怪自带 AI 处理落脚
     const st = w.store;
-    if (!st.inBounds(tx, ty) || tx < 2 || tx > st.w - 3) return;
-
-    const isUnderground = st.wall[st.idx(tx, ty)] !== 0 || ty > w.rockLevel;
-    // 深水列标记（原海洋排除守卫改造：水生池可生成，legacy 怪仍被拦）
-    let deepWaterCol = false;
-    // 海洋/水域排除：该列从天空到 rockLevel 全是液体 = 海里——除鱼类外不生成
-    // （蝙蝠等飞行怪在海面上盘旋也不合理，一并排除）
-    {
-      let liquidTop = -1;
-      for (let y = 2; y < Math.min(w.rockLevel, st.h); y++) {
-        if (st.liquid[st.idx(tx, y)] > 40) { liquidTop = y; break; }
-      }
-      if (liquidTop >= 0) {
-        // 水面之下 10 格仍是液体 → 判定为海/深水区：不再直接排除——
-        // 原版水生池（水母/鲨鱼，AI 16/18）可在此生成；非水生怪仍由 legacy 守卫拦截
-        let deep = true;
-        for (let y = liquidTop; y < Math.min(liquidTop + 10, st.h); y++) {
-          if (st.liquid[st.idx(tx, y)] <= 40) { deep = false; break; }
-        }
-        if (deep) deepWaterCol = true;
-      }
-    }
-    // 地狱区：熔岩史莱姆 / 熔岩僵尸（不怕岩浆）
-    const hellTop = Math.floor(st.h * 0.86);
-    let key: string | null = null;
-    if (ty > hellTop) {
-      key = rng.chance(0.55) ? 'lava_slime' : 'magma_zombie';
-    } else if (isUnderground) {
-      key = rng.chance(0.6) ? 'cave_bat' : (rng.chance(0.5) ? 'slime_blue' : 'slime_green');
-    } else if (isDay) {
-      key = 'slime_green';
-    } else {
-      // 夜间地表：僵尸/恶魔眼/史莱姆——洞穴蝙蝠不在此列（只在洞里）
-      const r = rng.next();
-      key = r < 0.4 ? 'zombie' : r < 0.75 ? 'demon_eye' : 'slime_blue';
-    }
-    const def = ENEMY_DEFS[key];
-    if (def.nightOnly && isDay) return;
-    if (def.dayOnly && !isDay && !isUnderground) { /* 史莱姆夜间也可少量 */ }
-    // 找落脚点：从 ty 向下找空中有地面的位置
-    let spawnY = -1;
-    // 原版数据驱动怪（50% 概率从原版生成池选，属性/AI/贴图全走 vanilla-npcs.json）
-    let vanillaSpawn: Enemy | null = null;
-    if (rng.chance(0.5)) {
-      // 水域（spawn 列向下 40 格内有深水）→ 水生池：水母/鲨鱼/食人鱼（AI 16/18 已移植）
-      let inWaterCol = false;
-      for (let dy = 0; dy < 100 && ty + dy < st.h - 2; dy++) {
-        if (st.liquid[st.idx(tx, ty + dy)] > 80) { inWaterCol = true; break; }
-      }
-      const pool = inWaterCol || deepWaterCol
-        ? VANILLA_SPAWN_POOLS.water
-        : poolFor(Math.floor(w.groundLevel), st.h - 200, ty, isDay, biomeAt(st, tx, ty) ?? undefined);
-      const vid = pool[(rng.next() * pool.length) | 0];
-      vanillaSpawn = Enemy.fromVanilla(vid, 0, 0);
-    }
-    const effDef = vanillaSpawn?.def ?? def;
-    // 蠕虫族（aiStyle 6）穿墙钻地：直接用环带点生成，不找空中落脚位
-    if (vanillaSpawn?.vanilla?.aiStyle === 6) {
-      vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
-      vanillaSpawn.y = ty * TILE + 8 - vanillaSpawn.h / 2;
-      vanillaSpawn.id = this.entities.nextId++;
-      this.entities.enemies.push(vanillaSpawn);
-      const segs = Enemy.spawnWormChain(vanillaSpawn, 5 + ((rng.next() * 4) | 0));
-      for (const s of segs) { s.id = this.entities.nextId++; this.entities.enemies.push(s); }
+    const ptx = this.vanillaSpawner.currentSpawnX;
+    const pty = this.vanillaSpawner.currentSpawnY;
+    if (ptx < 2 || pty < 2 || ptx > st.w - 3 || pty > st.h - 3) return;
+    if (picked.vanilla?.aiStyle === 6) {
+      // 蠕虫族：段链（AI_006 的 NewNPC 链）
+      picked.x = ptx * TILE + 8 - picked.w / 2;
+      picked.y = pty * TILE + 8 - picked.h / 2;
+      picked.id = this.entities.nextId++;
+      this.entities.enemies.push(picked);
+      const segs = Enemy.spawnWormChain(picked, 5 + ((rng.next() * 4) | 0));
+      for (const seg of segs) { seg.id = this.entities.nextId++; this.entities.enemies.push(seg); }
       return;
     }
-    // 水生族（aiStyle 16 游泳 / 18 水母）：找水下格生成（不找干燥落脚位）
-    if (vanillaSpawn?.vanilla && (vanillaSpawn.vanilla.aiStyle === 16 || vanillaSpawn.vanilla.aiStyle === 18)) {
+    if (picked.vanilla?.aiStyle === 16 || picked.vanilla?.aiStyle === 18) {
+      // 水生族：找水下格
       for (let dy = -8; dy <= 100; dy++) {
-        const yy = ty + dy;
+        const yy = pty + dy;
         if (yy < 2 || yy > st.h - 3) continue;
-        // 下方还需连续 5 格液体 = 真水体（防鲨鱼生成在陆地一滩小水洼里）
-        if (st.liquid[st.idx(tx, yy)] > 150 && !st.isSolid(tx, yy)) {
-          let deepEnough = yy + 5 < st.h - 2;
-          for (let k = 1; deepEnough && k <= 5; k++) {
-            if (st.liquid[st.idx(tx, yy + k)] <= 100 || st.isSolid(tx, yy + k)) deepEnough = false;
-          }
-          if (!deepEnough) continue;
-          vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
-          vanillaSpawn.y = yy * TILE;
-          vanillaSpawn.id = this.entities.nextId++;
-          this.entities.enemies.push(vanillaSpawn);
+        if (st.liquid[st.idx(ptx, yy)] > 150 && !st.isSolid(ptx, yy)) {
+          picked.x = ptx * TILE + 8 - picked.w / 2;
+          picked.y = yy * TILE;
+          picked.id = this.entities.nextId++;
+          this.entities.enemies.push(picked);
           return;
         }
       }
       return;
     }
-    for (let dy = -8; dy <= 12; dy++) {
-      const yy = ty + dy;
+    if (picked.vanilla?.critter) {
+      // 小动物进 critters 桶（不计怪上限）
+      let groundY = pty;
+      while (groundY > 2 && st.isSolid(ptx, groundY)) groundY--;
+      picked.x = ptx * TILE + 8 - picked.w / 2;
+      picked.y = groundY * TILE - picked.h;
+      picked.id = this.entities.nextId++;
+      this.entities.add(picked, 'critters');
+      return;
+    }
+    // 普通怪：落脚位（原版 HasTileSpawnSpace：上方两格净空）
+    let spawnY = -1;
+    for (let dy = -4; dy <= 8; dy++) {
+      const yy = pty + dy;
       if (yy < 2 || yy > st.h - 3) continue;
-      // 落脚点必须无液体（方块之上有水 = 水下/水面，非鱼类不生成——
-      // 否则史莱姆会从湖/海底生成然后浮上来）
-      const dry = st.liquid[st.idx(tx, yy)] <= 40 && st.liquid[st.idx(tx, yy - 1)] <= 40;
-      const clear = !st.isSolid(tx, yy) && !st.isSolid(tx, yy - 1) && dry;
-      const ground = st.isSolid(tx, yy + 1) || st.isSolid(tx, yy + 2);
-      if (effDef.flying) {
-        if (!st.isSolid(tx, yy) && dry) { spawnY = yy; break; }
+      const dry = st.liquid[st.idx(ptx, yy)] <= 40 && st.liquid[st.idx(ptx, yy - 1)] <= 40;
+      const clear = !st.isSolid(ptx, yy) && !st.isSolid(ptx, yy - 1) && dry;
+      const ground = st.isSolid(ptx, yy + 1) || st.isSolid(ptx, yy + 2);
+      const flying = picked.def.flying;
+      if (flying) {
+        if (!st.isSolid(ptx, yy) && dry) { spawnY = yy; break; }
       } else if (clear && ground) {
-        spawnY = yy;
-        break;
+        spawnY = yy; break;
       }
     }
     if (spawnY < 0) return;
-    // 地表暗处不生成（夜间地表有天空光 0.12，算可见）
-    if (vanillaSpawn) {
-      vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
-      vanillaSpawn.y = spawnY * TILE + TILE - vanillaSpawn.h;
-      vanillaSpawn.id = this.entities.nextId++;
-      this.entities.enemies.push(vanillaSpawn);
-      // 蠕虫族（aiStyle 6）：生成身×n+尾的段链（原版 NewNPC 链 NPC.cs:18174+）
-      if (vanillaSpawn.vanilla?.aiStyle === 6 && vanillaNpc(vanillaSpawn.vanillaId! + 1)) {
-        const segs = Enemy.spawnWormChain(vanillaSpawn, 5 + ((rng.next() * 4) | 0));
-        for (const s of segs) { s.id = this.entities.nextId++; this.entities.enemies.push(s); }
-      }
-      return;
-    }
-    // 深水列的 legacy 守卫：未走 vanilla 水生怪时保持老行为（非鱼类不入海）
-    if (deepWaterCol) return;
-    this.spawnEnemy(key, tx * TILE + 8, spawnY * TILE);
+    picked.x = ptx * TILE + 8 - picked.w / 2;
+    picked.y = spawnY * TILE + TILE - picked.h;
+    picked.id = this.entities.nextId++;
+    this.entities.enemies.push(picked);
   }
 
   // ================= NPC =================
@@ -2295,18 +2245,8 @@ export class Game implements GameHooks {
       return true;
     });
     if (!pool.length) return;
-    // 原版小动物迁移（CountsAsCritter）：白天地表 45% 概率改走原版数据驱动
-    // （兔子/鸟/松鼠/鼠/蚱蜢/蚯蚓——vanilla-npcs.json 带属性+贴图，Enemy 走 critterWanderAI）
-    if (isDay && !surfaceWater && Math.random() < 0.45) {
-      const v = Enemy.fromVanilla(VANILLA_SPAWN_POOLS.critters[(Math.random() * VANILLA_SPAWN_POOLS.critters.length) | 0], 0, 0);
-      if (v) {
-        v.x = tx * TILE + 8 - v.w / 2;
-        v.y = groundY * TILE - v.h;
-        v.id = this.entities.nextId++;
-        this.entities.add(v, 'critters');
-        return;
-      }
-    }
+    // 小动物已由 VanillaSpawner 的 spawnFriendly 段（SpawnAnNPC L2006-2535）接管，
+    // 此处仅保留自研 Critter 兜底（过渡期）
     const total = pool.reduce((s2, c) => s2 + c.weight, 0);
     let r = Math.random() * total;
     let pick = pool[0];

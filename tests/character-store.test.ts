@@ -12,7 +12,7 @@ const mem = new Map<string, string>();
 } as Storage;
 
 const { CharacterStore } = await import('../src/save/CharacterStore');
-const { validateAppearance, defaultAppearance, randomAppearance } = await import('../src/player/Appearance');
+const { validateAppearance, defaultAppearance, randomAppearance, MALE_VARIANTS, FEMALE_VARIANTS } = await import('../src/player/Appearance');
 
 describe('Appearance', () => {
   it('默认值 = 原版色（Player.cs:199-205）', () => {
@@ -28,7 +28,7 @@ describe('Appearance', () => {
   it('校验：损坏数据补默认并钳制', () => {
     const a = validateAppearance({ name: 'x'.repeat(50), hair: 9999, difficulty: 9 as 0, hairColor: { r: 300, g: -5, b: 'a' as unknown as number } });
     expect(a.name.length).toBe(20);
-    expect(a.hair).toBe(228);          // 钳到上限
+    expect(a.hair).toBe(227);          // 钳到上限（1.4.5.6：0 基 0..227）
     expect(a.difficulty).toBe(0);
     expect(a.hairColor).toEqual({ r: 255, g: 0, b: 0 });
     expect(validateAppearance(null)).toEqual(defaultAppearance());
@@ -37,9 +37,9 @@ describe('Appearance', () => {
   it('随机外观落在合法范围', () => {
     for (let i = 0; i < 20; i++) {
       const a = randomAppearance();
-      expect(a.hair).toBeGreaterThanOrEqual(1);
-      expect(a.hair).toBeLessThanOrEqual(228);
-      expect([0, 1]).toContain(a.skinVariant);
+      expect(a.hair).toBeGreaterThanOrEqual(0);   // 0 基
+      expect(a.hair).toBeLessThanOrEqual(227);
+      expect(MALE_VARIANTS.includes(a.skinVariant) || FEMALE_VARIANTS.includes(a.skinVariant)).toBe(true);
     }
   });
 });

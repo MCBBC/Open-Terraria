@@ -129,14 +129,14 @@ describe('UserInterface 状态机', () => {
     btn.onClick(() => clicks++);
     // btn 内按下、抬起 → 1 次 Click
     mouseAt(50, 25);
-    ui.update(250, true, true, 0);  // 等 200ms 抑制结束再按
-    ui.update(16, false, true, 0);
+    ui.update(250, true, false, true, 0);  // 等 200ms 抑制结束再按
+    ui.update(16, false, false, true, 0);
     expect(clicks).toBe(1);
     // btn 内按下、移出后抬起 → 不产生 Click
     mouseAt(50, 25);
-    ui.update(16, true, true, 0);
+    ui.update(16, true, false, true, 0);
     mouseAt(500, 500);
-    ui.update(16, false, true, 0);
+    ui.update(16, false, false, true, 0);
     expect(clicks).toBe(1);
   });
 
@@ -151,13 +151,52 @@ describe('UserInterface 状态机', () => {
     let doubles = 0;
     btn.onDoubleClick(() => doubles++);
     mouseAt(50, 25);
-    ui.update(250, true, true, 0);  // 跨过抑制期
-    ui.update(16, false, true, 0);
-    for (const pressed of [true, false]) ui.update(100, pressed, true, 0); // 间隔 <500ms
+    ui.update(250, true, false, true, 0);  // 跨过抑制期
+    ui.update(16, false, false, true, 0);
+    for (const pressed of [true, false]) ui.update(100, pressed, false, true, 0); // 间隔 <500ms
     expect(doubles).toBe(1);
     // 间隔 >500ms 不算双击
-    for (const pressed of [true, false]) ui.update(600, pressed, true, 0);
+    for (const pressed of [true, false]) ui.update(600, pressed, false, true, 0);
     expect(doubles).toBe(1);
+  });
+
+  it('右键独立事件（1.4.5.6 Left*/Right* 拆分）', () => {
+    const ui = setupUI();
+    const st = new UIState();
+    const btn = new UIElement();
+    btn.width = StyleDimension.fromPixels(100);
+    btn.height = StyleDimension.fromPixels(50);
+    st.append(btn);
+    ui.setState(st);
+    let leftClicks = 0, rightClicks = 0;
+    btn.onClick(() => leftClicks++);
+    btn.onRightClick(() => rightClicks++);
+    mouseAt(50, 25);
+    ui.update(250, true, false, true, 0);  // 左键按下
+    ui.update(16, false, false, true, 0);  // 左键抬起
+    ui.update(16, false, true, true, 0);   // 右键按下
+    ui.update(16, false, false, true, 0);  // 右键抬起
+    expect(leftClicks).toBe(1);
+    expect(rightClicks).toBe(1);
+  });
+
+  it('PassThroughMouseInteraction 命中穿透（1.4.5.6 GetElementAt）', () => {
+    const ui = setupUI();
+    const st = new UIState();
+    const back = new UIElement();
+    back.width = StyleDimension.fromPixels(100);
+    back.height = StyleDimension.fromPixels(50);
+    const front = new UIElement();
+    front.width = StyleDimension.fromPixels(100);
+    front.height = StyleDimension.fromPixels(50);
+    front.passThroughMouseInteraction = true;
+    st.append(back);
+    st.append(front); // 后添加的通常优先，但 passThrough → 命中 back
+    mouseAt(50, 25);
+    const hit = st.getElementAt({ x: 50, y: 25 });
+    expect(hit).toBe(back);
+    front.passThroughMouseInteraction = false;
+    expect(st.getElementAt({ x: 50, y: 25 })).toBe(front);
   });
 
   it('状态切换后 200ms 点击抑制', () => {
@@ -171,11 +210,11 @@ describe('UserInterface 状态机', () => {
     btn.onClick(() => clicks++);
     ui.setState(st); // 切换瞬间置 200ms 抑制
     mouseAt(50, 25);
-    ui.update(16, true, true, 0);
-    ui.update(16, false, true, 0);
+    ui.update(16, true, false, true, 0);
+    ui.update(16, false, false, true, 0);
     expect(clicks).toBe(0); // 被抑制
-    ui.update(200, true, true, 0);
-    ui.update(16, false, true, 0);
+    ui.update(200, true, false, true, 0);
+    ui.update(16, false, false, true, 0);
     expect(clicks).toBe(1); // 200ms 后恢复
   });
 });

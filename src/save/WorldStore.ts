@@ -66,10 +66,13 @@ export class WorldStore {
     await kvSet(INDEX_KEY, JSON.stringify(this.index));
   }
 
-  /** 收藏优先 + 最近游玩在前 */
+  /** 1.4.5.6 UIWorldSelect 排序键序：收藏 → 最后游玩 → 名称 → 文件名(即 id) */
   list(): WorldMeta[] {
     return [...this.index].sort((a, b) =>
-      (Number(b.favorite) - Number(a.favorite)) || (b.lastPlayed - a.lastPlayed));
+      (Number(b.favorite) - Number(a.favorite))
+      || (b.lastPlayed - a.lastPlayed)
+      || a.name.localeCompare(b.name, 'zh')
+      || (a.id - b.id));
   }
 
   async register(m: Omit<WorldMeta, 'id' | 'createdAt' | 'lastPlayed' | 'playTimeMs' | 'favorite'>): Promise<WorldMeta> {

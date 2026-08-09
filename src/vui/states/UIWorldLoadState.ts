@@ -26,9 +26,11 @@ export class UIWorldLoadState extends UIState {
   private pct = 0;
   private time = 0;
 
-  constructor() {
+  constructor(evil?: -1 | 0 | 1) {
     super();
     const logicalH = this.getDimensions().height;
+    // 1.4.5.6：随机邪恶（generatingRandomEvil）用 Outer_Random 专属配色
+    this.bar.randomEvil = evil === undefined || evil === -1;
 
     this.header = new UIHeader('');
     this.header.hAlign = 0.5;

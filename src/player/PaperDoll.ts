@@ -2,7 +2,7 @@
 // 40×(20×56) 的完整帧表，缓存复用。通道映射实测自 PlayerDrawLayers.cs：
 //   0 头/3,5,7,9 身体/10 腿 = skinColor；4,8 = undershirt；6,13,14 = shirt；
 //   11 = pants；12 = shoes；1 = 眼白(白)；2 = 瞳孔(eyeColor)；发型表 14 帧对齐身体帧 6-19。
-import type { Appearance } from './Appearance';
+import { type Appearance, backHairDraw } from './Appearance';
 import { UITextures } from '../vui/assets/UITextures';
 
 export const BODY_FRAMES = 20;     // 身体帧数
@@ -81,6 +81,17 @@ export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
 
+  // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
+  const hasBackHair = backHairDraw(a.hair);
+  const hairRect = UITextures.get(`Player_Hair_${a.hair + 1}.png`);
+  const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;
+  if (hairTinted && hasBackHair) {
+    for (let row = 0; row < BODY_FRAMES; row++) {
+      const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
+      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+    }
+  }
+
   for (const ch of CHANNELS) {
     const img = sheetRect(a.skinVariant, ch.sheet);
     if (!img) continue;
@@ -88,14 +99,12 @@ export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
     ctx.drawImage(tint(img, color), 0, 0);
   }
 
-  // 发型（14 帧 → 身体帧 6-19）
-  const hairRect = UITextures.get(`Player_Hair_${a.hair}.png`);
-  if (hairRect) {
-    const hairImg = hairRect.img as HTMLImageElement;
-    const tinted = tint(hairImg, a.hairColor);
+  // 前发层（1.4.4+ PlayerDrawSet:1751-1753：backHairDraw 时裁 26px 高，与后发层分离）
+  if (hairTinted) {
+    const frontH = hasBackHair ? 26 : FRAME_H;
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
-      ctx.drawImage(tinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+      ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, frontH, 0, row * FRAME_H, FRAME_W, frontH);
     }
   }
 

@@ -188,6 +188,7 @@ export class UIWorldCreationState extends UIState {
       : flags.notTheBees ? 'Seed_NotTheBees'
       : flags.getGoodWorld ? 'Seed_ForTheWorthy'
       : flags.theConstant ? 'Seed_TheConstant'
+      : flags.skyblock ? 'Seed_Skyblock'
       : flags.tenthAnniversary ? 'Seed_Celebration'
       : flags.noTraps ? 'Seed_NoTraps'
       : flags.remix ? 'Seed_Remix'

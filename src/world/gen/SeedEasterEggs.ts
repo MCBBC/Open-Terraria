@@ -5,10 +5,11 @@ export interface SeedFlags {
   getGoodWorld?: boolean;    // for the worthy
   drunkWorld?: boolean;      // 05162020 / drunk world
   noTraps?: boolean;         // no traps
-  theConstant?: boolean;     // the constant
+  theConstant?: boolean;     // the constant（dontstarve）
   tenthAnniversary?: boolean;// celebrationmk10
-  remix?: boolean;           // don't dig up / rem625?（先记 flag）
-  everything?: boolean;      // getfixedboi / don't tackle（组合种子）
+  remix?: boolean;           // don't dig up
+  everything?: boolean;      // getfixedboi（组合种子）
+  skyblock?: boolean;        // 1.4.5.6 新增 skyblock
   notTheBees?: boolean;
 }
 
@@ -17,10 +18,11 @@ const TABLE: Array<[RegExp, (f: SeedFlags) => void]> = [
   [/^fortheworthy$/i, (f) => { f.getGoodWorld = true; }],
   [/^(05162020|drunkworld)$/i, (f) => { f.drunkWorld = true; }],
   [/^notraps$/i, (f) => { f.noTraps = true; }],
-  [/^theconstant(ck)?$/i, (f) => { f.theConstant = true; }],
-  [/^celebrationmk10$/i, (f) => { f.tenthAnniversary = true; }],
-  [/^(dontdigup|remix)$/i, (f) => { f.remix = true; }],
-  [/^(getfixedboi|donttackle)$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; }],
+  [/^(theconstant|constant|eye4aneye|eyeforaneye)$/i, (f) => { f.theConstant = true; }],
+  [/^(celebrationmk10|5162021|5162011)$/i, (f) => { f.tenthAnniversary = true; }],
+  [/^dontdigup$/i, (f) => { f.remix = true; }],
+  [/^getfixedboi$/i, (f) => { f.everything = true; f.drunkWorld = true; f.getGoodWorld = true; f.notTheBees = true; }],
+  [/^skyblock$/i, (f) => { f.skyblock = true; }],  // 1.4.5.6 WorldGenerationOptions 新增
 ];
 
 export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string; /** UI 展示用特殊世界名（无则 null） */ specialName: string | null } {
@@ -39,6 +41,7 @@ export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string
     : flags.getGoodWorld ? 'for the worthy'
     : flags.theConstant ? 'the constant'
     : flags.remix ? "don't dig up"
+    : flags.skyblock ? 'skyblock'
     : flags.tenthAnniversary ? 'celebrationmk10'
     : flags.noTraps ? 'no traps'
     : null;

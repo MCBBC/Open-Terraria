@@ -128,6 +128,12 @@ export class Enemy extends Entity {
   visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
   spin = 0;              // EoC 变身旋转进度 0..1
   hpBarT = 0;            // 受击后血条显示计时（tick）
+  walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
+  /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
+  vanillaScale = 1;
+  tint: string | null = null;
+  /** 出生 alpha（原版逐 tick 衰减 = 淡入渐显，非永久半透明） */
+  spawnAlpha = 0;
   inWater = false;       // 入水检测（溅落声用）
 
   constructor(public key: string, x: number, y: number) {
@@ -148,6 +154,8 @@ export class Enemy extends Entity {
     if (this.hpBarT > 0) this.hpBarT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
+    this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
+    if (this.spawnAlpha > 0) this.spawnAlpha = Math.max(0, this.spawnAlpha - 8); // 原版 alpha 出生渐隐
 
     const player = (game as unknown as { player: Player }).player;
     const hasPlayer = !!player && !player.dead;

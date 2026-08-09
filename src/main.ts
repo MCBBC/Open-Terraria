@@ -58,15 +58,21 @@ window.addEventListener('keydown', (e) => {
         game.renderer.fullMap.open = false;
         break;
       }
+      if (flow.isInventoryOpen()) {
+        // M5 Canvas 背包：Esc/E 关闭（含宝箱/持有物结算）
+        flow.closeInventory();
+        break;
+      }
+      if (e.code === 'KeyE') {
+        flow.toggleInventory();
+        break;
+      }
       if (pausePanel) {
         pausePanel.remove();
         pausePanel = null;
         game.paused = false;
-        ui.closeInventory();
         game.input.uiBlocking = false;
-      } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
-        ui.closeInventory();
-      } else if (e.code === 'Escape') {
+      } else {
         game.paused = true;
         pausePanel = ui.showPause({
           onResume: () => {
@@ -82,8 +88,6 @@ window.addEventListener('keydown', (e) => {
             flow.quitToMenu();
           },
         });
-      } else {
-        ui.openInventory();
       }
       break;
     case 'F3':
