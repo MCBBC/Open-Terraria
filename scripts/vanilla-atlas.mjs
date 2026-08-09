@@ -2,7 +2,7 @@
 // 原版 Tiles 表无 .meta（不同于 Maples Unity 项目），按 textureGrid+frameGap 网格寻址：
 //   帧 (col,row) 位于 (col*(gridX+gapX), row*(gridY+gapY))，帧尺寸 = textureGrid
 // 用法：node scripts/vanilla-atlas.mjs
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -51,6 +51,9 @@ const MISC = [
   // 电路陷阱弹幕(Wiring.cs:1495-1743)
   'Projectile_98.png', 'Projectile_99.png', 'Projectile_184.png',
   'Projectile_185.png', 'Projectile_186.png', 'Projectile_187.png', 'Projectile_654.png',
+  // 世界背景图全量（地表视差层/地下层/地狱层；仅落盘，运行时由 BiomeBackground 懒加载——
+  // 不进 SpriteAtlas VANILLA_MISC 常驻表，避免 344 张整图常驻内存）
+  ...Array.from({ length: 344 }, (_, i) => `Background_${i}.png`),
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);
@@ -148,6 +151,15 @@ for (const id of whitelist.npcs ?? []) {
 }
 
 // 全量 tile/item 名称表（仅 id→name，约 30KB——兼容报告显示用，不拷 PNG）
+// 盔甲贴图索引表：原版 Armor_Head/Armor_Body(Armor_Armor)/Armor_Legs 贴图按 item.head/body/legs
+// 槽位序号索引（非物品 id！铁甲三件都是 2）。供纸娃娃装备渲染用。
+out.armorIndex = {};
+for (const it of items) {
+  if (it.head || it.body || it.legs) {
+    out.armorIndex[it.id] = { head: it.head || 0, body: it.body || 0, legs: it.legs || 0 };
+  }
+}
+
 out.tileNames = {};
 for (const t of tiles) out.tileNames[t.id] = t.name;
 out.itemNames = {};
@@ -189,6 +201,23 @@ for (let v = 0; v <= 11; v++) {
     if (!existsSync(src)) continue;
     copyFileSync(src, join(UI_OUT_DIR, name));
     uiOut.files[name] = `vanilla-ui/${name}`;
+    uiCopied++;
+  }
+}
+// 盔甲贴图（纸娃娃装备渲染）：Armor_Head_{itemId}（20帧竖条）/ Armor_Legs_{itemId}（竖条）/
+// Armor/Armor_{itemId}（9×4 复合网格，与玩家复合通道同构）
+const armorFiles = readdirSync(ASSETS).filter((f) => /^Armor_(Head|Legs)_\d+\.png$/.test(f));
+for (const f of armorFiles) {
+  copyFileSync(join(ASSETS, f), join(UI_OUT_DIR, f));
+  uiOut.files[f] = `vanilla-ui/${f}`;
+  uiCopied++;
+}
+const armorDir = join(ASSETS, 'Armor');
+if (existsSync(armorDir)) {
+  for (const f of readdirSync(armorDir).filter((f) => /^Armor_\d+\.png$/.test(f))) {
+    const key = `Armor_${f}`; // Armor/Armor_81.png → Armor_Armor_81.png（展平加前缀防撞名）
+    copyFileSync(join(armorDir, f), join(UI_OUT_DIR, key));
+    uiOut.files[key] = `vanilla-ui/${key}`;
     uiCopied++;
   }
 }

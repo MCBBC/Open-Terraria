@@ -74,9 +74,9 @@ function sheetRect(variant: number, sheet: number): HTMLImageElement | null {
   return r ? (r.img as HTMLImageElement) : null;
 }
 
-/** 合成完整帧表（含发型）。失败（素材缺失）返回 null */
-export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
-  const key = appearanceKey(a);
+/** 合成完整帧表（含发型+装备）。equip 为原版物品 id（Armor_Head_/Armor_Legs_/Armor_Armor_ 贴图索引） */
+export function compositePaperDoll(a: Appearance, equip?: { head?: number | null; body?: number | null; legs?: number | null }): HTMLCanvasElement | null {
+  const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -98,7 +98,9 @@ export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
   }
 
   // ---- 竖条通道（腿/裤/鞋/头/眼：20 帧直排） ----
+  const legsArmor = equip?.legs ? UITextures.get(`Armor_Legs_${equip.legs}.png`) : null;
   for (const ch of VERTICAL_CHANNELS) {
+    if (legsArmor && (ch.sheet === 11 || ch.sheet === 12)) continue; // 腿甲替代裤+鞋
     const img = sheetRect(a.skinVariant, ch.sheet);
     if (!img) continue;
     const color = ch.color === 'white' ? { r: 255, g: 255, b: 255 } : (a[ch.color] as { r: number; g: number; b: number });
@@ -107,36 +109,69 @@ export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
       ctx.drawImage(tinted, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
     }
   }
+  // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes）
+  if (legsArmor) {
+    for (let row = 0; row < BODY_FRAMES; row++) {
+      ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+    }
+  }
 
   // ---- 复合网格通道（躯干/手臂/肩：9×4 网格，按 CreateCompositeData 逐行映射） ----
   const female = !MALE_VARIANTS.includes(a.skinVariant);
   const dy = female ? 2 : 0;
   const under = a.undershirtColor, shirt = a.shirtColor;
+  // 身甲（Armor/Armor_{id} 复合网格，与玩家复合通道同构；有身甲时替代全部衣着层）
+  const bodyArmor = equip?.body ? UITextures.get(`Armor_Armor_${equip.body}.png`) : null;
+  const bodyArmorImg = bodyArmor ? (bodyArmor.img as HTMLImageElement) : null;
   const gridRect = (sheet: number, x: number, y: number, color: { r: number; g: number; b: number }) => {
     return { sheet, x, y, color };
   };
   for (let row = 0; row < BODY_FRAMES; row++) {
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
+    // 部件像素偏移（PlayerDrawLayers:4189-4197：后臂 +6/+2、前臂 -5/0；肩默认 0 仅特殊盔甲非零）
+    const BACK_ARM_OFF = { x: 6, y: 2 };
+    const FRONT_ARM_OFF = { x: -5, y: 0 };
+    const drawTinted = (img: HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }, off?: { x: number; y: number }) => {
+      ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
+        (off?.x ?? 0), row * FRAME_H + (off?.y ?? 0), FRAME_W, FRAME_H);
+    };
+    const drawArmorCell = (img: HTMLImageElement, x: number, y: number, off?: { x: number; y: number }) => {
+      ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
+        (off?.x ?? 0), row * FRAME_H + (off?.y ?? 0), FRAME_W, FRAME_H);
+    };
+    if (bodyArmorImg) {
+      // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
+      drawArmorCell(bodyArmorImg, 1, 1 + dy);                          // 后肩
+      drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2, BACK_ARM_OFF);    // 后臂
+      drawArmorCell(bodyArmorImg, torsoX, dy);                          // 躯干
+      drawArmorCell(bodyArmorImg, 0, 1 + dy);                           // 前肩
+      drawArmorCell(bodyArmorImg, arm[0], arm[1], FRONT_ARM_OFF);       // 前臂
+      continue;
+    }
     // 无盔甲复合绘制顺序（PlayerDrawLayers:1374-1398 后臂 / 前臂同构）：
     // 皮肤臂(7,5) → 底衫臂(8) → 衬衫臂(13)；肩/躯干为 4/6 双层
     const draws = [
-      gridRect(3, torsoX, dy, a.skinColor),                                  // 躯干皮肤
-      gridRect(7, arm[0], arm[1] + 2, a.skinColor),                          // 后臂皮肤 A
-      gridRect(5, arm[0], arm[1] + 2, a.skinColor),                          // 后臂皮肤 B
-      gridRect(8, arm[0], arm[1] + 2, under), gridRect(13, arm[0], arm[1] + 2, shirt), // 后臂衣着
-      gridRect(4, 1, 1 + dy, under), gridRect(6, 1, 1 + dy, shirt),          // 后肩
-      gridRect(4, torsoX, dy, under), gridRect(6, torsoX, dy, shirt),        // 躯干
-      gridRect(4, 0, 1 + dy, under), gridRect(6, 0, 1 + dy, shirt),          // 前肩
-      gridRect(7, arm[0], arm[1], a.skinColor),                              // 前臂皮肤 A
-      gridRect(5, arm[0], arm[1], a.skinColor),                              // 前臂皮肤 B
-      gridRect(8, arm[0], arm[1], under), gridRect(13, arm[0], arm[1], shirt), // 前臂衣着
+      { d: gridRect(3, torsoX, dy, a.skinColor) },
+      { d: gridRect(7, arm[0], arm[1] + 2, a.skinColor), off: BACK_ARM_OFF },   // 后臂皮肤 A
+      { d: gridRect(5, arm[0], arm[1] + 2, a.skinColor), off: BACK_ARM_OFF },   // 后臂皮肤 B
+      { d: gridRect(8, arm[0], arm[1] + 2, under), off: BACK_ARM_OFF },         // 后臂底衫
+      { d: gridRect(13, arm[0], arm[1] + 2, shirt), off: BACK_ARM_OFF },        // 后臂衬衫
+      { d: gridRect(4, 1, 1 + dy, under) },                                     // 后肩
+      { d: gridRect(6, 1, 1 + dy, shirt) },
+      { d: gridRect(4, torsoX, dy, under) },                                    // 躯干
+      { d: gridRect(6, torsoX, dy, shirt) },
+      { d: gridRect(4, 0, 1 + dy, under) },                                     // 前肩
+      { d: gridRect(6, 0, 1 + dy, shirt) },
+      { d: gridRect(7, arm[0], arm[1], a.skinColor), off: FRONT_ARM_OFF },      // 前臂皮肤 A
+      { d: gridRect(5, arm[0], arm[1], a.skinColor), off: FRONT_ARM_OFF },      // 前臂皮肤 B
+      { d: gridRect(8, arm[0], arm[1], under), off: FRONT_ARM_OFF },            // 前臂底衫
+      { d: gridRect(13, arm[0], arm[1], shirt), off: FRONT_ARM_OFF },           // 前臂衬衫
     ];
-    for (const d of draws) {
+    for (const { d, off } of draws) {
       const img = sheetRect(a.skinVariant, d.sheet);
       if (!img) continue;
-      const tinted = tint(img, d.color);
-      ctx.drawImage(tinted, d.x * FRAME_W, d.y * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+      drawTinted(img, d.x, d.y, d.color, off);
     }
   }
 
@@ -146,6 +181,16 @@ export function compositePaperDoll(a: Appearance): HTMLCanvasElement | null {
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
       ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, frontH, 0, row * FRAME_H, FRAME_W, frontH);
+    }
+  }
+
+  // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）
+  if (equip?.head) {
+    const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
+    if (headArmor) {
+      for (let row = 0; row < BODY_FRAMES; row++) {
+        ctx.drawImage(headArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
+      }
     }
   }
 

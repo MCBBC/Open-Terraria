@@ -27,7 +27,28 @@ const T = (() => {
     CACTUS: get('v_80_cactus'), SNOW_BRICK: get('v_161_snow_brick'),
     CORRUPT_ICE: get('v_163_corrupt_ice'), CRIMSON_ICE: get('v_200_frozen_crimson'),
     HOLLOW_ICE: get('v_164_hallowed_ice'), DUNGEON_BLUE: get('v_41_blue_brick'),
+    // 恶土系计数(SceneMetrics.cs:613-615 的 _tileCounts 公式)
+    EBONSTONE: get('v_25_ebonstone_block'), CORRUPT_PLANT: get('v_24_corruption_short_plants'),
+    CORRUPT_THORN: get('v_32_corruption_thorns'), CORRUPT_HARDSAND: get('v_398_corrupt_hardened_sand_block'),
+    CRIMSTONE: get('v_203_crimstone_block'), CRIMSON_PLANT: get('v_201_crimson_short_plants'),
+    CRIMSAND_THORN: get('v_352_crimtane_thorns'), CRIMSON_HARDSAND: get('v_399_crimson_hardened_sand_block'),
+    SUNFLOWER: get('v_27_sunflower'),
   };
+})();
+/** EvilTileCount 计数表(SceneMetrics.cs:613):23/661/24/25/32/112/163/400/398 计 1,27 向日葵 −10。
+ *  661/400 等引擎无 def 的按 0 计 */
+const EVIL_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.CORRUPT_GRASS, T.EBONSTONE, T.CORRUPT_PLANT, T.CORRUPT_THORN,
+    T.EBONSAND, T.CORRUPT_ICE, T.CORRUPT_HARDSAND]) if (id) t[id] = 1;
+  return t;
+})();
+/** BloodTileCount 计数表(SceneMetrics.cs:615):199/662/201/203/200/401/399/234/352 计 1 */
+const BLOOD_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.CRIMSON_GRASS, T.CRIMSTONE, T.CRIMSON_PLANT, T.CRIMSON_ICE,
+    T.CRIMSAND, T.CRIMSAND_THORN, T.CRIMSON_HARDSAND]) if (id) t[id] = 1;
+  return t;
 })();
 
 // ---- 洞穴主池 cavernMonsterType 表（NPC.cs:6498 + 世界生成时 18058-18064 填充） ----
@@ -105,6 +126,10 @@ export class VanillaSpawner {
     const baseId = map?.base ?? netId;
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
+    // 原版 NewNPC 锚点(NPC.cs:46596-46597):X-width/2, Y-height(底部贴格顶)。
+    // 此前 fromVanilla 中心锚(y-h/2)把怪埋进落脚实心格半格高——飞行怪沿地面内沿
+    // 漂移穿过侧壁,看起来像穿墙(噬魂怪等 ai5 族)
+    e.y = y - e.h;
     const ov = NET_ID_OVERRIDE[String(netId)];
     e.vanillaNetId = netId;
     if (map) {
@@ -145,14 +170,32 @@ export class VanillaSpawner {
     // isOcean（L1104）：边缘 + 沙 tile + 岩石层上
     this.isOcean = (spawnTileX < 250 || spawnTileX > st.w - 250) && spawnTileType === T.SAND && spawnTileY < this.world.rockLevel;
     this.isBeach = spawnTileY <= this.world.groundLevel && (spawnTileX < 340 || spawnTileX > st.w - 340);
-    // Zone 判定（L289-334 取自 player.Zone；此处按 spawn tile 类型采样）
+    // Zone 判定（SceneMetrics.cs:16/613-615/678）：以玩家为中心 169×123 窗口计数 ≥300。
+    // 旧实现只看落脚格类型且漏黑檀石 25——腐化地表大量铺黑檀石导致噬魂怪永不触发
     this.ZoneSnow = spawnTileType === T.SNOW || spawnTileType === T.ICE || spawnTileType === T.SNOW_BRICK;
-    this.ZoneCorrupt = spawnTileType === T.CORRUPT_GRASS || spawnTileType === T.EBONSAND || spawnTileType === T.CORRUPT_ICE;
-    this.ZoneCrimson = spawnTileType === T.CRIMSON_GRASS || spawnTileType === T.CRIMSAND || spawnTileType === T.CRIMSON_ICE;
+    this.ZoneCorrupt = this.countTiles(EVIL_LOOKUP, this.pX, this.pY) >= 300;
+    this.ZoneCrimson = this.countTiles(BLOOD_LOOKUP, this.pX, this.pY) >= 300;
     this.ZoneHallow = spawnTileType === T.PEARLSAND || spawnTileType === T.HOLLOW_ICE;
     this.ZoneJungle = spawnTileType === T.MUD || spawnTileType === T.JUNGLE_GRASS;
     this.ZoneGlowshroom = spawnTileType === T.MUSHROOM_GRASS;
     this.ZoneDungeon = spawnTileType === T.DUNGEON_BLUE;
+  }
+
+  /** SceneMetrics.ScanTiles 近似:中心 169×123 窗口(zoneScanSize=120×75+padding 25×2−1)计数 */
+  private countTiles(lookup: Uint8Array, cx: number, cy: number): number {
+    const st = this.world.store;
+    const x0 = Math.max(2, cx - 84), x1 = Math.min(st.w - 3, cx + 84);
+    const y0 = Math.max(2, cy - 61), y1 = Math.min(st.h - 3, cy + 61);
+    let n = 0;
+    for (let y = y0; y <= y1; y++) {
+      const row = y * st.w;
+      for (let x = x0; x <= x1; x++) {
+        const t = st.type[row + x];
+        if (lookup[t]) n++;
+        else if (t === T.SUNFLOWER) n -= 10; // 向日葵每株 −10(SceneMetrics.cs:588 num=-10)
+      }
+    }
+    return n;
   }
 
   // ---- FindSpawnTile（L879-920）----

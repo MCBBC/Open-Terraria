@@ -92,6 +92,8 @@ export interface VanillaData {
   npcs?: Record<string, VanillaNpcMeta>;
   tileNames?: Record<string, string>;  // 全量原版 tile id → 英文名（兼容报告用）
   itemNames?: Record<string, string>;
+  /** 盔甲贴图槽位序号（Armor_Head/Armor_Armor/Armor_Legs 的索引，非物品 id） */
+  armorIndex?: Record<string, { head: number; body: number; legs: number }>;
 }
 
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */

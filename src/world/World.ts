@@ -31,6 +31,8 @@ export class World {
   seed: number;
   spawnX = 0; spawnY = 0;
   groundLevel = 0; rockLevel = 0;   // tile 坐标
+  /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
+  lavaLine = 0;
   clock: Clock;
   chests: ChestData[] = [];
   // Boss 进度旗标

@@ -14,6 +14,9 @@ const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block']!;
 const CRIMSON_GRASS = TILE_BY_KEY['v_199_crimson_grass_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
 const CORRUPT_HARDSAND = TILE_BY_KEY['v_398_corrupt_hardened_sand_block']!;
+const SNOW_BRICK = TILE_BY_KEY['v_161_snow_brick']!;
+const CORRUPT_ICE = TILE_BY_KEY['v_163_corrupt_ice']!;
+const CRIMSON_ICE = TILE_BY_KEY['v_200_frozen_crimson']!;
 const CRIMSON_HARDSAND = TILE_BY_KEY['v_399_crimson_hardened_sand_block']!;
 const ICE = TILE_BY_KEY['ice']!;
 const MUD = TILE_BY_KEY['mud']!;
@@ -146,7 +149,7 @@ function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi:
       if (t === T.STONE) {
         if (inCore) st.type[i] = crimson ? CRIMSTONE : EBONSTONE;
       } else if (t === T.GRASS) st.type[i] = crimson ? CRIMSON_GRASS : CORRUPT_GRASS;
-      else if (t === ICE) { /* 腐化冰 v_163 暂缺,保持冰 */ }
+      else if (t === SNOW_BRICK) st.type[i] = crimson ? CRIMSON_ICE : CORRUPT_ICE; // 原版 161→163/200(cs L6397)
       else if (t === SANDSTONE) { /* 腐化沙岩 v_400/v_401 暂缺 */ }
       else if (t === HARDSAND) st.type[i] = crimson ? CRIMSON_HARDSAND : CORRUPT_HARDSAND;
     }

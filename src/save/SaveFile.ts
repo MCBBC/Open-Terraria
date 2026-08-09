@@ -47,7 +47,7 @@ export interface SaveData {
   version: number;
   header: {
     name: string; seed: number; width: number; height: number;
-    spawn: [number, number]; groundLevel: number; rockLevel: number;
+    spawn: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
     crimson?: boolean; dungeonX?: number; jungleX?: number;
     treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
@@ -116,6 +116,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     header: {
       name: world.name, seed: world.seed, width: st.w, height: st.h,
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
+      lavaLine: world.lavaLine,
       treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
       crimson: world.crimson, dungeonX: world.dungeonX, jungleX: world.jungleX,
       created: Date.now(), playTimeMs,
@@ -144,6 +145,8 @@ export function loadSave(json: string): { world: World; player: { hp: number; x:
   world.spawnY = data.header.spawn[1];
   world.groundLevel = data.header.groundLevel;
   world.rockLevel = data.header.rockLevel;
+  // 旧档缺 lavaLine（原版 UnderworldLayer = maxTilesY-200）
+  world.lavaLine = data.header.lavaLine ?? data.header.height - 200;
   if (data.header.treeX) world.treeX = data.header.treeX;
   if (data.header.treeStyle) world.treeStyle = data.header.treeStyle;
   if (data.header.treeTops?.length) world.treeTops = data.header.treeTops;

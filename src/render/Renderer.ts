@@ -6,9 +6,29 @@ import { ChunkCache } from './ChunkCache';
 import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
-import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { atlasIconForKey, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
+import type { Inventory } from '../items/Inventory';
+
+/** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
+ *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表 */
+function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas').SpriteAtlas | null): { head: number | null; body: number | null; legs: number | null } {
+  const idx = (itemId: number | null | undefined): number | null => {
+    if (itemId == null) return null;
+    const def = ITEM_DEFS[itemId];
+    if (!def?.armor) return null;
+    const key = def.key;
+    const vid = VANILLA_ITEM_ICON_MAP[key] ?? (key.startsWith('vi_') ? parseInt(key.slice(3), 10) : NaN);
+    if (!Number.isFinite(vid)) return null;
+    const entry = atlas?.vanilla.armorIndex?.[String(vid)];
+    if (!entry) return null;
+    const slot = def.armor.slot; // 0头 1胸 2腿
+    return slot === 0 ? (entry.head || null) : slot === 1 ? (entry.body || null) : (entry.legs || null);
+  };
+  const disp = inv.displayArmor();
+  return { head: idx(disp[0]), body: idx(disp[1]), legs: idx(disp[2]) };
+}
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
@@ -615,12 +635,19 @@ export class Renderer {
     // 优先 Maples 图标
     const ar = this.atlasIcon(d.itemId);
     if (ar) {
-      // 原版 Item.color（彩色凝胶等）：同贴图逐像素乘 color，贴轮廓（Item.GetAlpha 同 NPC 机制）
+      const ctx = this.ctx;
+      const drawH = 14 * ar.sh / ar.sw;
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, drawH);
+      // 原版 Item.color（彩色凝胶）：同贴图逐像素乘 color，XNA 预乘两步（同 NPC color pass）
       if (d.color && d.color[3] > 0) {
         const tinted = this.tintedSprite(`item${d.itemId}`, ar, d.color);
-        this.ctx.drawImage(tinted, d.x, d.y + bob, 14, 14 * ar.sh / ar.sw);
-      } else {
-        this.ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, 14 * ar.sh / ar.sw);
+        ctx.globalCompositeOperation = 'destination-out';
+        ctx.globalAlpha = d.color[3] / 255;
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, drawH);
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = 1;
+        ctx.drawImage(tinted, d.x, d.y + bob, 14, drawH);
+        ctx.globalCompositeOperation = 'source-over';
       }
       return;
     }
@@ -673,9 +700,18 @@ export class Renderer {
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
         if (e.colorRGBA && e.colorRGBA[3] > 0) {
+          // XNA 预乘混合等价（BlendState.AlphaBlend：out = texel×colorRGB + D×(1-colorA/255)）。
+          // 普通 drawImage 会把染色 RGB 再乘 alpha（蓝色糊成灰绿）——改为两步：
+          // ① 原始精灵 destination-out 按 colorA 削弱底下内容 ② lighter 全量加染色精灵
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
+          const anchorY = flying ? -r.sh / 2 : -r.sh;
+          ctx.globalCompositeOperation = 'destination-out';
+          ctx.globalAlpha = e.colorRGBA[3] / 255;
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
+          ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = 1;
-          ctx.drawImage(tinted, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+          ctx.drawImage(tinted, -r.sw / 2, anchorY, r.sw, r.sh);
+          ctx.globalCompositeOperation = 'source-over';
         }
         ctx.restore();
         ctx.globalAlpha = 1;
@@ -921,7 +957,7 @@ export class Renderer {
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
     let drawn = false;
     if (p.appearance) {
-      const doll = compositePaperDoll(p.appearance);
+      const doll = compositePaperDoll(p.appearance, dollEquipFromInv(p.inv, this.atlas));
       if (doll) {
         let row = 0; // 0 站立
         if (swing) row = 3;
@@ -1083,10 +1119,10 @@ export class Renderer {
   private bottomPadCache = new Map<string, number>();
 
   /** 逐像素染色缓存（原版 XNA SpriteBatch 的 color 乘法等价实现）：
-   *  ① multiply 把 RGB 乘上 color —— 但 canvas multiply 会把精灵透明区也铺色（方形伪影）
+   *  ① multiply 把 RGB 乘上 color —— canvas multiply 会把精灵透明区也铺色（方形伪影）
    *  ② destination-in 重画精灵本体 → alpha 恢复为精灵轮廓，裁掉①的方形
-   *  ③ destination-in 再乘 color.A/255 → 整体强度（GetColor 的 alpha 通道）
-   *  （GetColor 二次绘制语义，Main.cs:24527 / NPC.cs:94903） */
+   *  alpha 保持精灵原样（XNA 预乘混合的 RGB 贡献不随 color.A 缩减，见 drawEnemy color pass）
+   *  （GetColor 二次绘制语义，Main.cs:24986 / NPC.cs:94903） */
   private tintCache = new Map<string, HTMLCanvasElement>();
   private tintedSprite(
     key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
@@ -1106,11 +1142,6 @@ export class Renderer {
     // ② 用精灵本体当 destination-in 的源：alpha 恢复为轮廓形状
     cx.globalCompositeOperation = 'destination-in';
     cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
-    // ③ 整体 alpha × color.A/255
-    cx.globalAlpha = color[3] / 255;
-    cx.fillStyle = '#000';
-    cx.fillRect(0, 0, c.width, c.height);
-    cx.globalAlpha = 1;
     cx.globalCompositeOperation = 'source-over';
     if (this.tintCache.size > 1024) this.tintCache.clear();
     this.tintCache.set(k, c);

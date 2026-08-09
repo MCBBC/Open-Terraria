@@ -169,6 +169,7 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   // 世界级常量同步
   world.groundLevel = gs.worldSurface;
   world.rockLevel = gs.rockLevel;
+  world.lavaLine = gs.lavaLine;
 }
 
 function vanillaCaves({ store, rng }: GenCtx) {
