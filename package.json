@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "start": "vite build && vite preview"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"

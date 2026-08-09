@@ -1,0 +1,185 @@
+// 从 ItemDropDatabase.cs 提取全怪掉落表 v3（语句级解析）：
+//  - 按 ';' 切语句（链式 OnSuccess/OnFailedRoll 同属一条语句 → 同一 NPC）
+//  - NPC id 来源：RegisterToNPC(N,...) 首参 / (int) num 变量（追踪 short/int num = N 赋值）
+//    / RegisterToMultipleNPCs(rule, ids...) 规则后参数（支持数组变量）
+//  - 规则：Common(item, outOfX, min, max)；ByCondition(notExpert, item, outOfX, min, max) 视作普通掉落；
+//    OneFromOptions(outOf, items) 按 1/(outOf×n) 独立近似。
+//  - 已知近似：OnSuccess/OnFailedRoll 条件链拍平为独立掉落（略偏慷慨）。
+import { readFileSync, writeFileSync } from 'node:fs';
+
+const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const raw = readFileSync(`${ROOT}/Terarria1405/GameContent/ItemDropRules/ItemDropDatabase.cs`, 'utf8');
+// 去注释/去换行
+const src = raw.replace(/\/\/[^\n]*/g, '').replace(/\n\s*/g, ' ');
+
+// 数组变量
+const arrays = {};
+for (const m of src.matchAll(/int\[\]\s*(\w+)\s*=\s*new int\[\d*\]\s*\{([^}]*)\}/g)) {
+  arrays[m[1]] = m[3 - 1].split(',').map((s) => parseInt(s.trim(), 10)).filter((n) => !Number.isNaN(n));
+}
+// 数值变量（short/int num = N;）顺序覆盖
+const numVars = {};
+const statements = src.split(';');
+
+const loot = {};
+let ruleCount = 0;
+const push = (npcId, item, chance, min, max) => {
+  if (!(npcId >= 1 && npcId < 680)) return;
+  (loot[npcId] ??= []).push({ item, chance: +chance.toFixed(4), min: Math.max(min, 1), max: Math.max(max, min, 1) });
+  ruleCount++;
+};
+const idsFrom = (str) => {
+  const out = [];
+  for (const t of str.split(',').map((s) => s.trim()).filter(Boolean)) {
+    if (/^\d+$/.test(t)) out.push(parseInt(t, 10));
+    else if (arrays[t]) out.push(...arrays[t]);
+    else if (numVars[t] != null) out.push(numVars[t]);
+  }
+  return out;
+};
+const intVar = (name) => (/^\d+$/.test(name) ? parseInt(name, 10) : numVars[name] ?? null);
+// 规则变量（IItemDropRule X = Common(...); X.OnSuccess(...)）：名字 → 累积规则
+const ruleVars = {};
+
+for (let si = 0; si < statements.length; si++) {
+  const stmt = statements[si].trim();
+  // 追踪赋值（本语句可能同时声明）
+  const assign = stmt.match(/(?:short|int)\s+(\w+)\s*=\s*(\d+)\s*$/);
+  let npcIds = [];
+  if (stmt.includes('RegisterToNPC(')) {
+    const m = stmt.match(/RegisterToNPC\(\s*(?:(?:\(int\)\s*)?(\w+))\s*,/);
+    if (m) { const v = intVar(m[1]); if (v != null) npcIds.push(v); }
+  } else if (stmt.includes('RegisterToMultipleNPCs(')) {
+    // 规则首参结束位置：从 "RegisterToMultipleNPCs(" 后配平一层括号
+    const open = stmt.indexOf('RegisterToMultipleNPCs(') + 'RegisterToMultipleNPCs('.length;
+    let depth = 0, end = -1;
+    for (let i = open; i < stmt.length; i++) {
+      if (stmt[i] === '(') depth++;
+      else if (stmt[i] === ')') { if (depth === 0) { end = i; break; } depth--; }
+    }
+    if (end > 0) {
+      // id 段只到本调用的闭括号为止（之后的 .OnSuccess/.OnFailedRoll 链不是 id）
+      let idsStr = stmt.slice(end + 1);
+      const cut = idsStr.search(/[).]/);
+      if (cut >= 0) idsStr = idsStr.slice(0, cut);
+      npcIds.push(...idsFrom(idsStr));
+    }
+  } else {
+    // 非注册语句：仍追踪变量赋值
+    if (assign) numVars[assign[1]] = parseInt(assign[2], 10);
+    continue;
+  }
+  if (assign) numVars[assign[1]] = parseInt(assign[2], 10);
+  if (!npcIds.length) {
+    // 规则变量声明/链：IItemDropRule X = Common(...); X.OnSuccess(Common(...));
+    const decl = stmt.match(/IItemDropRule\s+(\w+)\s*=\s*$/);
+    const chainVar = stmt.match(/^(\w+)\.(?:OnSuccess|OnFailedRoll)\(/);
+    const target = decl ? decl[1] : chainVar ? chainVar[1] : null;
+    if (target) collectRules(stmt, (r) => { (ruleVars[target] ??= []).push(r); });
+    continue;
+  }
+  // 注册语句：直接规则 + 语句中出现的规则变量展开
+  const allRules = [];
+  collectRules(stmt, (r) => allRules.push(r));
+  for (const v of Object.keys(ruleVars)) {
+    if (new RegExp('\\b' + v + '\\b').test(stmt)) allRules.push(...ruleVars[v]);
+  }
+  for (const r of allRules) for (const id of npcIds) push(id, r.item, r.chance, r.min, r.max);
+  continue;
+}
+
+// 语句内规则收集（Common / ByCondition / OneFromOptions / Food → 通用掉落）
+function collectRules(stmt, emit) {
+  for (const r of stmt.matchAll(/ItemDropRule\.Common\((\d+)(?:,\s*(\d+))?(?:,\s*(\d+))?(?:,\s*(\d+))?\)/g)) {
+    const outOfX = r[2] != null ? +r[2] : 1;
+    const min = r[3] != null ? +r[3] : 1;
+    const max = r[4] != null ? +r[4] : min;
+    emit({ item: +r[1], chance: 1 / outOfX, min, max });
+  }
+  for (const r of stmt.matchAll(/(?:ByCondition|Food)\([^,]+,\s*(\d+)(?:,\s*(\d+))?(?:,\s*(\d+))?(?:,\s*(\d+))?(?:,\s*(\d+))?\)/g)) {
+    const outOfX = r[3] != null ? +r[3] : 1;
+    const min = r[4] != null ? +r[4] : 1;
+    const max = r[5] != null ? +r[5] : min;
+    emit({ item: +r[1], chance: 1 / outOfX, min, max });
+  }
+  for (const r of stmt.matchAll(/OneFromOptions\((\d+)((?:,\s*\d+)+)\)/g)) {
+    const outOfX = +r[1];
+    const items = r[2].split(',').map((x) => parseInt(x.trim(), 10)).filter((n) => !Number.isNaN(n));
+    const n = Math.max(1, items.length);
+    for (const itemId of items) emit({ item: itemId, chance: 1 / (outOfX * n), min: 1, max: 1 });
+  }
+}
+// ---- NPCLootOld 遗留链（经典怪：凝胶/镣铐/镜片等）：if/else-if type 块 + NewItem 直调 ----
+const npcCs = readFileSync(`${ROOT}/Terarria1405/NPC.cs`, 'utf8'); // NPCLootOld 在 NPC.cs
+const oldStart = npcCs.indexOf('public void NPCLootOld()');
+const oldEnd = npcCs.indexOf('\n    public ', oldStart + 100);
+const oldBody = npcCs.slice(oldStart, oldEnd).replace(/\/\/[^\n]*/g, '').replace(/\n\s*/g, ' ');
+const ifReO = /(?:else\s+)?if\s*\(/g;
+let om;
+let oldCount = 0;
+while ((om = ifReO.exec(oldBody))) {
+  // 括号配平取完整条件（混合 || 条件不再被首个 ')' 截断）
+  const openIdx = om.index + om[0].length - 1;
+  let depth = 0, condEnd = -1;
+  for (let i = openIdx; i < oldBody.length; i++) {
+    if (oldBody[i] === '(') depth++;
+    else if (oldBody[i] === ')') { depth--; if (depth === 0) { condEnd = i; break; } }
+  }
+  if (condEnd < 0) break;
+  const cond = oldBody.slice(openIdx + 1, condEnd);
+  if (!cond.includes('this.type')) { continue; }
+  const braceIdx = oldBody.indexOf('{', condEnd);
+  if (braceIdx < 0 || oldBody.slice(condEnd + 1, braceIdx).includes(';')) { continue; }
+  let bd = 0, end2 = -1;
+  for (let i = braceIdx; i < oldBody.length; i++) {
+    if (oldBody[i] === '{') bd++;
+    else if (oldBody[i] === '}') { bd--; if (bd === 0) { end2 = i; break; } }
+  }
+  if (end2 < 0) break;
+  const block = oldBody.slice(braceIdx + 1, end2);
+  // id 解析：全部 == N + 区间（完整条件内所有命中）
+  const ids = [];
+  for (const t of cond.matchAll(/this\.type\s*==\s*(\d+)/g)) ids.push(+t[1]);
+  for (const t of cond.matchAll(/this\.type\s*>=\s*(\d+)\s*&&\s*this\.type\s*<=\s*(\d+)/g)) {
+    for (let id = +t[1]; id <= +t[2]; id++) ids.push(id);
+  }
+  if (!ids.length) { ifReO.lastIndex = end2; continue; }
+  const rng = [Math.min(...ids), Math.max(...ids)];
+  // NewItem(...) 调用：配平括号取完整参数表，找首个纯数字参数=itemId、次个纯数字=stack
+  for (const ni of block.matchAll(/NewItem\(/g)) {
+    let depth = 0, end3 = -1;
+    for (let i = ni.index + ni[0].length; i < block.length; i++) {
+      if (block[i] === '(') depth++;
+      else if (block[i] === ')') { if (depth === 0) { end3 = i; break; } depth--; }
+    }
+    if (end3 < 0) break;
+    const args = block.slice(ni.index + ni[0].length, end3);
+    // 顶层逗号切分
+    const parts = [];
+    let d2 = 0, cur = '';
+    for (const ch of args) {
+      if (ch === '(' || ch === '[') d2++;
+      if (ch === ')' || ch === ']') d2--;
+      if (ch === ',' && d2 === 0) { parts.push(cur.trim()); cur = ''; } else cur += ch;
+    }
+    parts.push(cur.trim());
+    let itemId = null, stack = 1;
+    for (const pt of parts) {
+      if (/^\d+$/.test(pt)) {
+        if (itemId === null) itemId = parseInt(pt, 10);
+        else { stack = parseInt(pt, 10); break; }
+      }
+      if (itemId !== null && !/^\d+$/.test(pt)) break; // itemId 后第一个参数就是 stack 位（可能非数字 → 1）
+    }
+    if (itemId === null || itemId < 1 || itemId > 5500) { continue; }
+    const before = block.slice(0, ni.index);
+    const luck = [...before.matchAll(/RollLuck\((\d+)\) == 0|rand\.Next\((\d+)\) == 0/g)].pop();
+    const chance = luck ? 1 / +(luck[1] ?? luck[2]) : 1;
+    for (const id of ids) { push(id, itemId, chance, stack, stack); oldCount++; }
+  }
+  ifReO.lastIndex = end2;
+}
+console.log('NPCLootOld rules:', oldCount);
+console.log('npcs:', Object.keys(loot).length, 'rules:', ruleCount);
+writeFileSync(`${ROOT}/game/public/sprites/vanilla-npcloot.json`, JSON.stringify(loot));
+for (const id of ['1', '3', '16', '49', '86', '21']) console.log(id, JSON.stringify(loot[id]));

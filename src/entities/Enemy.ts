@@ -4,7 +4,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
-import { vanillaNpc, vanillaSoundName, type VanillaNpc } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaSoundName, vanillaNpcDrops, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
@@ -92,7 +92,7 @@ export class Enemy extends Entity {
       width: v.width, height: v.height, flying,
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
-      hitSound: [hit], killedSound: [kill], drops: [],
+      hitSound: [hit], killedSound: [kill], drops: vanillaNpcDrops(id),
     };
     e.hp = v.lifeMax;
     e.maxHp = v.lifeMax;
@@ -157,7 +157,8 @@ export class Enemy extends Entity {
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
-        case 14: this.flyAI(game, p, 0.09); break;                     // AI_014 蝙蝠（近似）
+        case 14: this.flyAI(game, p, 0.09); break;                     // AI_014 蝙蝠（近似，反编译缺源码）
+        case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -477,6 +478,61 @@ export class Enemy extends Entity {
     if (this.hitWall) this.vx = -this.vx * 0.5;
     if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
     if (this.hitHead) this.vy = Math.abs(this.vy) * 0.5 + 0.5;
+  }
+
+  /** AI_026 独角兽/冲锋族（NPC.cs:25863-26292）：
+   *  冲锋 walker：accel 0.07 / maxSpd 6（num7/num8，独角兽 315 配置 L26100-26116）；
+   *  逆向阻尼 0.95、超速落地 ×0.8；卡墙 30 tick 折返（ai[3]≥num1，玩家 <200px 重置 L25936-25941）；
+   *  台阶步升 16.1 同战士（L26182-26207）；跳梯 -8.5/-7.5/-7/-6/-8（L26245-26279，
+   *  前方探测含 (w/2+2)×dir + 5×vx 提前量 L26226-26227） */
+  private chargerAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
+    // 方向：卡墙 ≥30 tick 折返；玩家 200px 内重置计数并朝玩家冲
+    if (this.stuckT >= 30) { this.facing *= -1; this.stuckT = 0; }
+    if (player && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 200) {
+      this.stuckT = 0;
+      this.facing = player.cx > this.cx ? 1 : -1;
+    }
+    const dir = this.facing;
+    const maxSpd = 6, accel = 0.07;
+    // 逆向阻尼（L26105-26108）
+    if ((this.vx > 0 && dir < 0) || (this.vx < 0 && dir > 0)) this.vx *= 0.95;
+    if (dir === 1 && this.vx < maxSpd) { this.vx += accel; if (this.vx > maxSpd) this.vx = maxSpd; }
+    else if (dir === -1 && this.vx > -maxSpd) { this.vx -= accel; if (this.vx < -maxSpd) this.vx = -maxSpd; }
+    const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
+    // 台阶步升（同战士：前方高差 ≤16.1 直接抬升）
+    if (this.vy >= 0 && vxSign !== 0) {
+      const ax = Math.floor((this.x + this.vx + this.w / 2 + (this.w / 2 + 1) * vxSign) / TILE);
+      const fr = Math.floor((this.y + this.h - 1) / TILE);
+      if (ax >= 0 && fr >= 2 && ax < st.w && fr < st.h
+        && solidAt(ax, fr) && !st.half[st.idx(ax, fr)]
+        && !solidAt(ax, fr - 1) && !solidAt(ax, fr - 2) && !solidAt(ax, fr - 3)) {
+        const rise = this.y + this.h - fr * TILE;
+        if (rise > 0 && rise <= 16.1) this.y = fr * TILE - this.h;
+      }
+    }
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    const xBefore = this.x;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // 卡墙计数（X 未动，原版 position.X == oldPosition.X 判定）
+    if (Math.abs(this.x - xBefore) < 0.01) this.stuckT++;
+    // 跳梯（前方探测带 5×vx 提前量）
+    if (vxSign === dir && vxSign !== 0) {
+      const fx = Math.floor((this.x + this.w / 2 + (this.w / 2 + 2) * dir + this.vx * 5) / TILE);
+      const fy = Math.floor((this.y + this.h - 15) / TILE);
+      if (this.h >= 32 && solidAt(fx, fy - 2)) {
+        this.vy = solidAt(fx, fy - 3) ? -8.5 : -7.5;
+      } else if (solidAt(fx, fy - 1)) {
+        this.vy = -7;
+      } else if (this.y + this.h - fy * TILE > 20 && solidAt(fx, fy)) {
+        this.vy = -6;
+      } else if (!solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1) && !solidAt(fx + dir, fy + 2)) {
+        this.vy = -8; // 前方悬空（悬崖/沟）大跳
+      }
+    }
+    // 注意：原版 AI_026 无逐帧地面摩擦（速度持续加到 maxSpd，只有逆向阻尼/超速落地衰减）——
+    // 不能带 fighterAI 的 onGround *=0.9，否则平衡点被压到 0.63 远低于 6
   }
 
   private casterAI(game: GameHooks, player: Player | null) {

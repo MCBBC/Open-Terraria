@@ -169,8 +169,10 @@ function dungeonHalls(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix:
       if (ix < 200) vx = Math.abs(vx || 1);
       if (iy > st.h - 300) vy = -Math.abs(vy || 1);
       if (iy < gs.rockLevel + 100) vy = Math.abs(vy || 1);
-      if (ix > st.w / 2 && ix < st.w * 0.75) vx = -Math.abs(vx || 0.5);
-      if (ix > st.w * 0.25 && ix < st.w / 2) vx = Math.abs(vx || 0.5);
+      // 边界三分带强制(cs L20474-20485):走廊被推向外侧——
+      // 0.5w-0.75w → +1、0.25w-0.5w → -1(原版语义,铺向外侧三分而非向中心聚集)
+      if (ix > st.w / 2 && ix < st.w * 0.75) vx = Math.abs(vx || 0.5);
+      if (ix > st.w * 0.25 && ix < st.w / 2) vx = -Math.abs(vx || 0.5);
     }
     if (vx === 0 && vy === 0) vx = 1;
   }

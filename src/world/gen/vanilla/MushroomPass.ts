@@ -20,7 +20,8 @@ const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const van = w / 4200;
-  const maxBiomes = Math.min(Math.floor(w / 700), 13);
+  // 原版:min(w/700, maxMushroomBiomes=50, WorldGen.cs:111/5637)
+  const maxBiomes = Math.min(Math.floor(w / 700), 50);
   const placed: Array<[number, number]> = [];
 
   for (let n = 0; n < maxBiomes; n++) {
@@ -38,6 +39,9 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (!st.inBounds(x, y)) { bad = true; break; }
           const t = st.type[st.idx(x, y)];
           if (t === SNOW || t === ICE || t === THIN_ICE || t === JUNGLE_GRASS || t === GRANITE || t === MARBLE) { bad = true; break; }
+          // 原版:落在地下沙漠范围内也重掷(cs L5673)
+          if (gs.undergroundDesert && x >= gs.undergroundDesert.x0 && x <= gs.undergroundDesert.x1
+            && y >= gs.undergroundDesert.y0 && y <= gs.undergroundDesert.y1) { bad = true; break; }
         }
       }
       if (!bad) {
@@ -96,17 +100,18 @@ function shroomPatch(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
     if (vx > -0.5 && vx < 0.5) vx = vx >= 0 ? 0.5 : -0.5;
     vx = Math.max(-0.5, Math.min(0.5, vx));
     vy = Math.max(-0.5, Math.min(0.5, vy));
-    // 尾端两支向下泥 runner
+    // 尾端两支向下泥 runner(cs L48722-48729:落点无界重掷)
     for (let k = 0; k < 2; k++) {
-      let i1 = Math.floor(px) + rng.int(-19, 19);
+      let i1 = Math.floor(px) + rng.int(-20, 19);
       let j1 = Math.floor(py) + rng.int(0, 19);
       let found = false;
-      for (let a = 0; a < 30; a++) {
-        if (st.inBounds(i1, j1) && (st.flags[st.idx(i1, j1)] || st.type[st.idx(i1, j1)] === MUD)) { found = true; break; }
-        i1 = Math.floor(px) + rng.int(-19, 19);
+      while (!found) {
+        if (!st.inBounds(i1, j1)) { found = true; break; }  // 越界保护,跳过本支
+        if (st.flags[st.idx(i1, j1)] || st.type[st.idx(i1, j1)] === MUD) { found = true; break; }
+        i1 = Math.floor(px) + rng.int(-20, 19);
         j1 = Math.floor(py) + rng.int(0, 19);
       }
-      if (!found) continue;
+      if (!st.inBounds(i1, j1)) continue;
       tileRunner(st, rng, gs, i1, j1, { strength: rng.int(10, 19), steps: rng.int(10, 19), type: MUD, speedY: 2, noYChange: true });
     }
   }

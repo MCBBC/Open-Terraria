@@ -708,7 +708,7 @@ export class Game implements GameHooks {
       if (nearChest) {
         this.tryOpenChest(nearChest);
         this.input.rightDown = false;
-      } else if (this.talkToNearbyNpc()) {
+      } else if (this.talkToNearbyNpc(tx, ty)) {
         this.input.rightDown = false;
       } else if (heldDef?.key === 'suspicious_eye') {
         if (!this.world.clock.isDay) {
@@ -1721,12 +1721,13 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 右键与附近 NPC 交谈（#13） */
-  private talkToNearbyNpc(): boolean {
+  /** 右键与附近 NPC 交谈(#13):点击目标须在 NPC 4 格内(否则不拦截右键交互) */
+  private talkToNearbyNpc(ctX: number, ctY: number): boolean {
     const p = this.player;
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
       if (Math.hypot(npc.cx - p.cx, npc.cy - p.cy) > TILE * 3.5) continue;
+      if (Math.hypot(npc.cx - (ctX + 0.5) * TILE, npc.cy - (ctY + 1) * TILE) > TILE * 2) continue;
       const tips = [
         '你好！我是向导。按 E 打开背包，那里可以合成物品。',
         '用镐挖矿、斧砍树。木头+凝胶可以做火把！',

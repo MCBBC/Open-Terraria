@@ -39,10 +39,13 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   const avoid = 10;
   const jLo = jMin - avoid, jHi = jMax + avoid, sLo = sMin - avoid, sHi = sMax + avoid;
-  const beachAvoid = Math.max(30, Math.floor(380 * van));
-  const minCenter = Math.max(30, Math.floor(500 * van));
-  const midAvoid = Math.max(30, Math.floor(200 * van));
-  const dungeonAvoid = Math.max(20, Math.floor(100 * van));
+  // 原版全部为固定常数(cs:4720-4731/6092-6095):beachAvoidance=275+5+40+60=380、
+  // minCenter=500、中央回避=200、地牢回避=100、midFixer=50
+  const beachAvoid = 380;
+  const minCenter = 500;
+  const midAvoid = 200;
+  const dungeonAvoid = 100;
+  const midFixer = 50;
   const groups = Math.max(1, Math.floor(w * 0.00045));
 
   for (let g = 0; g < groups; g++) {
@@ -57,10 +60,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       zHi = cx + rng.int(0, 199) + 100;
       if (zLo < beachAvoid) zLo = beachAvoid;
       if (zHi > w - beachAvoid) zHi = w - beachAvoid;
-      if (cx < zLo + 60) cx = zLo + 60;
-      if (cx > zHi - 60) cx = zHi - 60;
-      if (gs.dungeonSide < 0 && zLo < 40) zLo = 40;
-      else if (gs.dungeonSide > 0 && zLo > w - 40) zLo = w - 40;
+      if (cx < zLo + midFixer) cx = zLo + midFixer;
+      if (cx > zHi - midFixer) cx = zHi - midFixer;
+      if (gs.dungeonSide < 0 && zLo < 400) zLo = 400;
+      else if (gs.dungeonSide > 0 && zLo > w - 400) zLo = w - 400;
       const mid = w / 2;
       if (Math.abs(cx - mid) < midAvoid || Math.abs(zLo - mid) < midAvoid || Math.abs(zHi - mid) < midAvoid) ok = false;
       const ud = gs.undergroundDesert;
@@ -158,13 +161,14 @@ function placeAltars(st: TileStore, rng: RNG, zLo: number, zHi: number, style: n
     while (!done) {
       tries++;
       let x = rng.int(zLo - widen, zHi - 1 + widen);
-      let y = rng.int(Math.floor(st.h * 0.3), st.h - 2);
+      // 原版 y 带(cs L6243-6244):worldSurface-widen/2 .. worldSurface+100+widen
+      let y = rng.int(Math.max(2, Math.floor(gs.worldSurface - widen / 2)), Math.floor(gs.worldSurface + 100 + widen) - 1);
       if (x < 2) x = 2; if (x > st.w - 3) x = st.w - 3;
       if (!st.flags[st.idx(x, y)]) {
         while (!st.flags[st.idx(x, y)] && y < st.h - 2) y++;
         y--;
       } else {
-        while (st.flags[st.idx(x, y)] && y > 4) y--;
+        while (st.flags[st.idx(x, y)] && y > gs.worldSurface) y--;
       }
       if ((widen > 10 || (st.flags[st.idx(x, y + 1)] && st.type[st.idx(x, y + 1)] === stoneType)) && !isTileNearby(st, x, y, ALTAR, 3)) {
         place3x2(st, x, y, ALTAR, style);
@@ -319,7 +323,8 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
   let num1 = steps;
   let px = i + 0.0, py = j + 0.0;
   let vx = rng.int(10, 20) * 0.1 * direction;
-  let vy = rng.int(-9, 9) * 0.01;
+  // 原版初速 vy = Next(-10,10)*0.01 = -0.10..-0.01(恒向下,cs L45321)
+  let vy = rng.int(-10, -1) * 0.01;
   let radius = rng.int(0, 4) + 7;
   while (radius > 0) {
     if (num1 > 0) {
@@ -400,6 +405,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
   let vx = rng.int(-20, 20) * 0.1;
   let vy = rng.int(20, 200) * 0.01;
   let radius = rng.int(15, 25);
+  let recenter = 0;  // cs L45517 num4:X 回中状态(漂离入口 ±50 后反向修正)
   // 主通道随机走(向下椭圆隧道)
   while (true) {
     radius += rng.int(-50, 50) * 0.01;
@@ -423,13 +429,40 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
         }
       }
     }
-    px += vx; py += vy;
-    vx += rng.int(-50, 50) * 0.01;
+    // X 回中(cs L45494-45503):漂离入口 ±50 后设反向偏置,未漂时正常随机走
+    if (px > entryX + 50) recenter = -100;
+    if (px < entryX - 50) recenter = 100;
+    if (recenter < 0) vx -= rng.int(20, 50) * 0.01;
+    else if (recenter > 0) vx += rng.int(20, 50) * 0.01;
+    else vx += rng.int(-50, 50) * 0.01;
     vy += rng.int(-50, 50) * 0.01;
     vy = Math.max(0.25, Math.min(2, vy));
     vx = Math.max(-2, Math.min(2, vx));
+    px += vx; py += vy;
     if (py > gs.worldSurface + 100) break;
     if (py > st.h - 10 || px < 5 || px > st.w - 5) break;
+  }
+  // ---- 隧道终点囊群(cs L45551-45585):50 个半径 40-54 球,核心 0.25R 清空、壳 0.4R 猩红石 ----
+  const endR = rng.int(40, 54);
+  for (let n = 0; n < 50; n++) {
+    const cx = Math.floor(px) + rng.int(-20, 20);
+    const cy = Math.floor(py) + rng.int(-20, 20);
+    for (let x = Math.floor(cx - endR / 2); x < cx + endR / 2; x++) {
+      for (let y = Math.floor(cy - endR / 2); y < cy + endR / 2; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const d = Math.hypot(
+          Math.abs(x - cx) * (1 + rng.int(-20, 20) * 0.01),
+          Math.abs(y - cy) * (1 + rng.int(-20, 20) * 0.01),
+        );
+        const ti = st.idx(x, y);
+        if (d < endR * 0.25) {
+          st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = 83;
+        } else if (d < endR * 0.4 && st.wall[ti] !== 83) {
+          st.flags[ti] = 1; st.type[ti] = CRIMSTONE;
+          if (d < endR * 0.35) st.wall[ti] = 83;
+        }
+      }
+    }
   }
   // ---- CrimVein:5-8 条血管从通道终点出发(Y 只向下/水平),终点记录为心位 ----
   const veinCount = rng.int(5, 8);
@@ -449,8 +482,9 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
   }
   // ---- 地表囊群(CrimStart 末段:从入口点向上漂移的 25-35 半径球)----
   let sx = entryX + 0.0, sy = startY + 0.0;
-  let rise = rng.next() * 6;
+  let rise = rng.int(0, 5);
   const pocketR = rng.int(25, 34);
+  let shellMinX = st.w, shellMaxX = 0;  // 壳层覆盖范围(列填充用,cs L45587-45589)
   for (let n = 0; n < 50; n++) {
     if (rise > 0) {
       const step = rng.int(10, 29) * 0.01;
@@ -459,20 +493,39 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number):
     }
     const cx = Math.floor(sx) + rng.int(-2, 2);
     const cy = Math.floor(sy) + rng.int(-2, 2);
-    for (let x = cx - Math.floor(pocketR / 2); x < cx + pocketR / 2; x++) {
-      for (let y = cy - Math.floor(pocketR / 2); y < cy + pocketR / 2; y++) {
+    for (let x = Math.floor(cx - pocketR / 2); x < cx + pocketR / 2; x++) {
+      for (let y = Math.floor(cy - pocketR / 2); y < cy + pocketR / 2; y++) {
         if (!st.inBounds(x, y)) continue;
-        const d = Math.hypot((x - cx) * (1 + rng.int(-20, 20) * 0.01), (y - cy) * (1 + rng.int(-20, 20) * 0.01));
+        const d = Math.hypot(
+          Math.abs(x - cx) * (1 + rng.int(-20, 20) * 0.005),
+          Math.abs(y - cy) * (1 + rng.int(-20, 20) * 0.005),
+        );
         const ti = st.idx(x, y);
         if (d < pocketR * 0.2 * (rng.int(90, 110) * 0.01)) {
           st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = 83;
         } else if (d < pocketR * 0.45) {
+          if (x < shellMinX) shellMinX = x;
+          if (x > shellMaxX) shellMaxX = x;
           if (st.wall[ti] !== 83) {
             st.flags[ti] = 1; st.type[ti] = CRIMSTONE;
             if (d < pocketR * 0.35) st.wall[ti] = 83;
           }
         }
       }
+    }
+  }
+  // ---- 列填充(cs L45629-45640):囊群覆盖范围内每列向下补 15-19 格猩红石 ----
+  for (let x = shellMinX; x <= shellMaxX; x++) {
+    if (x < 1 || x >= st.w - 1) continue;
+    let y = startY;
+    if (y < 0) y = 0;
+    while (y < st.h - 1 && ((st.type[st.idx(x, y)] === CRIMSTONE && st.flags[st.idx(x, y)]) || st.wall[st.idx(x, y)] === 83)) y++;
+    let fill = rng.int(15, 19);
+    while (y < st.h - 1 && !st.flags[st.idx(x, y)] && fill > 0 && st.wall[st.idx(x, y)] !== 83) {
+      fill--;
+      st.type[st.idx(x, y)] = CRIMSTONE;
+      st.flags[st.idx(x, y)] = 1;
+      y++;
     }
   }
   // ---- CrimEnt:水平入口(半径 6-10,只挖猩红石,20 步无肉即停)----

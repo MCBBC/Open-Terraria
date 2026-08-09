@@ -2,6 +2,43 @@
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
+import vanillaLootJson from '../../public/sprites/vanilla-npcloot.json';
+import vanillaDataJson from '../../public/sprites/vanilla.json';
+import { ITEM_BY_KEY } from './items';
+
+/** 全怪掉落表（tools/extract-npcloot.mjs 提取：ItemDropDatabase + NPCLootOld 双源） */
+export const VANILLA_NPC_LOOT = vanillaLootJson as unknown as Record<string, Array<{ item: number; chance: number; min: number; max: number }>>;
+
+/** 原版物品 id → 本仓库 item key（vanilla.json 的 key 是 PascalCase，ITEM_BY_KEY 多为 snake_case；
+ *  未注册的返回 null 跳过） */
+const vanillaItemKey = (() => {
+  const map = new Map<number, string | null>();
+  const items = (vanillaDataJson as unknown as { items: Record<string, { key?: string }> }).items ?? {};
+  return (itemId: number): string | null => {
+    if (map.has(itemId)) return map.get(itemId)!;
+    const meta = items[String(itemId)];
+    let key: string | null = null;
+    if (meta?.key) {
+      const snake = meta.key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
+      if (ITEM_BY_KEY[snake] != null) key = snake;
+      else if (ITEM_BY_KEY[meta.key] != null) key = meta.key;
+    }
+    map.set(itemId, key);
+    return key;
+  };
+})();
+
+/** npc id → 本仓库可用的掉落表（{item: key, chance, min, max}[]；未注册物品过滤） */
+export function vanillaNpcDrops(id: number): Array<{ item: string; min: number; max: number; chance: number }> {
+  const raw = VANILLA_NPC_LOOT[String(id)];
+  if (!raw) return [];
+  const out: Array<{ item: string; min: number; max: number; chance: number }> = [];
+  for (const d of raw) {
+    const key = vanillaItemKey(d.item);
+    if (key) out.push({ item: key, min: d.min, max: d.max, chance: d.chance });
+  }
+  return out;
+}
 
 export interface VanillaNpc {
   id: number;

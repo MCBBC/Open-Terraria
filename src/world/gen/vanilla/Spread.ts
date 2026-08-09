@@ -2,6 +2,7 @@
 // 泥/石完全被包住(3×3 全实心)不转;岩浆邻接不转;向日葵上方不转腐化/猩红/神圣草。
 import type { TileStore } from '../../TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { NOT_CLEARABLE } from './TileRunner';
 
 /** 把 (x,y) 及相邻同源 tile 转 grass 类型;repeat=true 时 BFS 式向四周扩散 */
 export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, depth = 0): void {
@@ -9,16 +10,23 @@ export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, g
   if (!st.inBounds(x, y)) return;
   const i = st.idx(x, y);
   if (st.type[i] !== dirt) return;
-  // 完全封闭(3×3 全实心)不转——原版 flag
+  // 完全封闭(3×3 全实心)不转;岩浆邻接恒不转(cs L45269-45273:flag 强制 true)
   let enclosed = true;
-  for (let dx = -1; dx <= 1 && enclosed; dx++) {
-    for (let dy = -1; dy <= 1 && enclosed; dy++) {
+  let lavaNear = false;
+  for (let dx = -1; dx <= 1 && !lavaNear; dx++) {
+    for (let dy = -1; dy <= 1; dy++) {
+      const nx = x + dx, ny = y + dy;
+      if (!st.inBounds(nx, ny)) continue;
+      const j = st.idx(nx, ny);
+      if (st.liquidType[j] === 2 && st.liquid[j] > 0) { lavaNear = true; break; }
       if (dx === 0 && dy === 0) continue;
-      const j = st.idx(x + dx, y + dy);
-      if (st.inBounds(x + dx, y + dy) && (!st.flags[j] || !TILE_DEFS[st.type[j]]?.solid)) enclosed = false;
+      if ((!st.flags[j] || !TILE_DEFS[st.type[j]]?.solid)) enclosed = false;
     }
   }
+  if (lavaNear) return;
   if (enclosed) return;
+  // 原版:CanBeClearedDuringGeneration 为 false 的泥(沙漠沙岩族等)不转
+  if (NOT_CLEARABLE.has(st.type[i])) return;
   st.type[i] = grass;
   if (!repeat) return;
   for (let dx = -1; dx <= 1; dx++) {
