@@ -7,10 +7,10 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
+import { placeDoorClosed } from '../../Door';
 
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
 const HELL_BRICK = TILE_BY_KEY['v_76_obsidian_brick'] ?? OBS_BRICK;
-const DOOR = TILE_BY_KEY['door_closed']!;
 const PLATFORM = TILE_BY_KEY['platform']!;
 const TORCH = TILE_BY_KEY['torch']!;
 
@@ -178,8 +178,8 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           const ti = st.idx(colR[c], y);
           st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        if (st.inBounds(colR[c], rowB[r] - 1)) {
-          st.setTileSilent(colR[c], rowB[r] - 1, DOOR, 19 * 54, 0);
+        if (st.inBounds(colR[c], rowB[r] - 3)) {
+          placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
         }
       }
     }
@@ -215,8 +215,8 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
           const ti = st.idx(colR[c], y);
           st.type[ti] = 0; st.flags[ti] = 0; st.wall[ti] = wallType;
         }
-        if (st.inBounds(colR[c], rowB[r] - 1)) {
-          st.setTileSilent(colR[c], rowB[r] - 1, DOOR, 19 * 54, 0);
+        if (st.inBounds(colR[c], rowB[r] - 3)) {
+          placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
         }
       }
     }
@@ -249,8 +249,8 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             const ti = st.idx(colL[c], y);
             st.type[ti] = 0; st.flags[ti] = 0;
           }
-          if (st.inBounds(colL[c], rowB[r] - 1)) {
-            st.setTileSilent(colL[c], rowB[r] - 1, DOOR, 19 * 54, 0);
+          if (st.inBounds(colL[c], rowB[r] - 3)) {
+            placeDoorClosed(st, colL[c], rowB[r] - 3, 19);
           }
         }
       }
@@ -285,8 +285,8 @@ function hellFort(st: TileStore, rng: RNG, i: number, j: number, tileType: numbe
             const ti = st.idx(colR[c], y);
             st.type[ti] = 0; st.flags[ti] = 0;
           }
-          if (st.inBounds(colR[c], rowB[r] - 1)) {
-            st.setTileSilent(colR[c], rowB[r] - 1, DOOR, 19 * 54, 0);
+          if (st.inBounds(colR[c], rowB[r] - 3)) {
+            placeDoorClosed(st, colR[c], rowB[r] - 3, 19);
           }
         }
       }

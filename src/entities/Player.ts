@@ -27,6 +27,8 @@ export class Player extends Entity {
   hp = 100;
   inv: Inventory;
   buffs = new BuffState();
+  /** 角色外观（来自角色系统；渲染层 M7 切换 PaperDoll 时使用） */
+  appearance?: import('../player/Appearance').Appearance;
   iframes = 0;
   jumpHold = 0;          // 长按跳跃剩余加速 tick
   inWater = false;

@@ -8,8 +8,8 @@ let atlas: SpriteAtlas | null = null;
 export const UITextures = {
   setAtlas(a: SpriteAtlas) { atlas = a; },
 
-  /** 按白名单键取贴图，缺失返回 null（控件须自兜底） */
+  /** 按白名单键取贴图（自动补 .png 后缀），缺失返回 null（控件须自兜底） */
   get(name: string): DrawRect | null {
-    return atlas?.vui(name) ?? null;
+    return atlas?.vui(name) ?? atlas?.vui(`${name}.png`) ?? null;
   },
 };

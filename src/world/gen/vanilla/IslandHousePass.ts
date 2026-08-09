@@ -6,9 +6,9 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
+import { placeDoorClosed } from '../../Door';
 
 const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
-const DOOR = TILE_BY_KEY['door_closed']!;
 const CHEST = TILE_BY_KEY['chest']!;
 const TABLE = TILE_BY_KEY['table']!;
 const CHAIR = TILE_BY_KEY['chair']!;
@@ -72,7 +72,8 @@ function islandHouse(
       st.type[idx] = 0; st.flags[idx] = 0;
     }
   }
-  if (st.inBounds(doorX, floorY)) st.setTileSilent(doorX, floorY, DOOR, 9 * 54, 0);
+  // 原版 L48263 PlaceTile(i1, y) → 门顶在 y-2（占 y-2..y，门洞已清 y-2..y）
+  if (st.inBounds(doorX, floorY - 2)) placeDoorClosed(st, doorX, floorY - 2, 9);
   // 对侧补柱(cs L48264-48273)
   const pillarX = i + (halfW + 1) * -dir - dir;
   for (let y = j1; y <= j2 + 1; y++) {

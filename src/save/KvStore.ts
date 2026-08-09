@@ -70,3 +70,17 @@ export async function kvSet(key: string, value: string): Promise<'local' | 'idb'
     return 'fail';
   }
 }
+
+/** 删除（两处都清） */
+export async function kvDelete(key: string): Promise<void> {
+  localStorage.removeItem(key);
+  try {
+    const db = await openDb();
+    await new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE, 'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch { /* IDB 不可用则忽略 */ }
+}

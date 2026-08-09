@@ -6,9 +6,9 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
+import { placeDoorClosed } from '../../Door';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
-const DOOR = TILE_BY_KEY['door_closed']!;
 const CHEST = TILE_BY_KEY['chest']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 
@@ -311,7 +311,8 @@ export function runTemplePass(
       }
     }
   }
-  st.setTileSilent(i1, jy, DOOR, 11 * 54, 0);
+  // 原版 L17578 PlaceTile(i1, j1) → 门顶在 jy-2
+  placeDoorClosed(st, i1, jy - 2, 11);
   // ---- templeCleaner 两遍(L17579-17588)----
   const cleaner = (x: number, y: number) => {
     if (!st.inBounds(x, y)) return;

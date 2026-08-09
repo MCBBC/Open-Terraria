@@ -13,6 +13,11 @@ export class VUI {
   static batch: UISpriteBatch | null = null;
 
   private static leftDown = false;
+  /** 按下/抬起事件计数（事件驱动）：同一帧间隙内的快速点击不丢。
+   *  语义：press 计数在 update 前消费（当帧视为按下）；release 计数在 update 后消费
+   *  （下一帧才视为抬起）→ 任何点击至少被观察到「按下一帧 + 抬起一帧」 */
+  private static presses = 0;
+  private static releases = 0;
   private static hasFocus = true;
   private static wheel = 0;
   private static enabled = true;
@@ -33,8 +38,8 @@ export class VUI {
       UIScale.mouseX = (e.clientX - r.left) / UIScale.scale;
       UIScale.mouseY = (e.clientY - r.top) / UIScale.scale;
     });
-    window.addEventListener('mousedown', (e) => { if (e.button === 0) VUI.leftDown = true; });
-    window.addEventListener('mouseup', (e) => { if (e.button === 0) VUI.leftDown = false; });
+    window.addEventListener('mousedown', (e) => { if (e.button === 0) VUI.presses++; });
+    window.addEventListener('mouseup', (e) => { if (e.button === 0) VUI.releases++; });
     window.addEventListener('blur', () => { VUI.hasFocus = false; VUI.leftDown = false; });
     window.addEventListener('focus', () => { VUI.hasFocus = true; });
     // wheel 记 UI 侧增量；游戏侧 Input 另有自己的监听（分流在 main.ts 编排）
@@ -62,8 +67,20 @@ export class VUI {
   /** 每帧驱动（菜单期 rAF / 游戏内 Game 渲染末尾各调一次） */
   static frame(dtMs: number) {
     if (!VUI.canvas || !VUI.batch) return;
+    // 边沿处理：按下计数在 update 前消费（当帧视为按下）；抬起计数在 update 后消费
+    // （下一帧才视为抬起）→ 快速点击（down/up 同帧间隙）至少被观察到
+    // 「按下一帧 + 抬起一帧」，Click 不丢
+    if (VUI.presses > 0) {
+      VUI.presses--;
+      VUI.leftDown = true;
+    }
     if (VUI.enabled) VUI.ui.update(dtMs, VUI.leftDown, VUI.hasFocus, VUI.wheel);
     VUI.wheel = 0;
+    if (VUI.releases > 0 && VUI.leftDown) {
+      VUI.releases--;
+      VUI.leftDown = false;
+    }
+    if (!VUI.leftDown && VUI.presses === 0) VUI.releases = 0; // 清理无主 release
     VUI.draw();
   }
 

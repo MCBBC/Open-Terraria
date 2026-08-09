@@ -175,6 +175,17 @@ for (let i = 1; i <= 228; i++) {
   uiOut.files[`Player_Hair_${i}.png`] = `vanilla-ui/Player_Hair_${i}.png`;
   uiCopied++;
 }
+// 玩家身体帧表（skinVariant_clothStyle，40×~1120 = 20 帧×56px，灰度通道素材供纸娃娃调色）
+for (let v = 0; v <= 11; v++) {
+  for (let c = 0; c <= 15; c++) {
+    const name = `Player_${v}_${c}.png`;
+    const src = join(ASSETS, name);
+    if (!existsSync(src)) continue;
+    copyFileSync(src, join(UI_OUT_DIR, name));
+    uiOut.files[name] = `vanilla-ui/${name}`;
+    uiCopied++;
+  }
+}
 writeFileSync(UI_OUT_JSON, JSON.stringify(uiOut));
 console.log(`vanilla-ui: copied=${uiCopied}`);
 if (uiMissing.length) console.warn('UI 缺失:', uiMissing.join(', '));

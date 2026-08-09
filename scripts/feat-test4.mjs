@@ -26,6 +26,10 @@ const out = await page.evaluate(async () => {
   };
   const px = Math.floor(p.cx / 16), py = Math.floor((p.y + p.h) / 16);
   const results = {};
+  // 隔离城镇 NPC(商人/护士出生在玩家旁,会游走进测试区抢右键对话)
+  for (const n of g.entities.npcs) {
+    n.x = (px - 300) * 16; n.y = py * 16;
+  }
 
   // ===== 1. 开关切换(帧 0↔18) =====
   const SW = tiles['v_136_switch'];

@@ -106,6 +106,7 @@ import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runSwordShrinePass } from './vanilla/SwordShrinePass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
+import { placeDoorClosed } from '../Door';
 
 function vanillaTerrain({ store, rng, world, surface }: GenCtx) {
   const gs = newGenState(store.w, store.h);
@@ -818,7 +819,7 @@ function buildHut(store: GenCtx['store'], hx: number, hy: number, rng: RNG) {
   }
   // 门洞（左侧地板上方 3 格）
   for (let y = hy + rh - 3; y < hy + rh; y++) store.setTileSilent(hx - 1, y, 0);
-  store.setTileSilent(hx - 1, hy + rh - 3, T.DOOR_CLOSED, 0, 0);
+  placeDoorClosed(store, hx - 1, hy + rh - 3, 0);
   // 内部陈设
   store.setTileSilent(hx + 1, hy + rh - 1, T.WORKBENCH, 0, 0);
   store.setTileSilent(hx + 3, hy + rh - 1, T.TORCH, 0, 0);

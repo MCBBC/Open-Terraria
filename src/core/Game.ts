@@ -5,6 +5,7 @@ import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { World, ChestData } from '../world/World';
 import { generateWorld } from '../world/gen/WorldGen';
+import { openDoor, closeDoor, clearDoorAt } from '../world/Door';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { poolFor, vanillaNpc } from '../data/vanillaNpcs';
@@ -1038,6 +1039,13 @@ export class Game implements GameHooks {
       this.fellImportedTree(x, y, type);
       return;
     }
+    // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
+    const doorAnchor = clearDoorAt(st, x, y);
+    if (doorAnchor) {
+      this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE, def.drop ?? 'door', 1);
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
+      return;
+    }
     // object：找锚点整体移除
     if ((def.w ?? 1) > 1 || (def.h ?? 1) > 1) {
       const fi = st.idx(x, y);
@@ -1334,13 +1342,9 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const type = st.get(tx, ty);
     if (type === T.DOOR_CLOSED) {
-      // 切换为开门
-      const isOpen = st.get(tx + 1, ty) !== 0 || st.get(tx + 1, ty + 1) !== 0 || st.get(tx + 1, ty + 2) !== 0;
-      this.toggleDoor(tx, ty, true, isOpen);
-      this.input.rightDown = false;
+      this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
-      this.toggleDoor(tx, ty, false, false);
-      this.input.rightDown = false;
+      this.toggleDoor(tx, ty, false);
     } else if (type === T.CHEST) {
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
@@ -1493,32 +1497,19 @@ export class Game implements GameHooks {
     }
   }
 
-  private toggleDoor(x: number, y: number, open: boolean, flipLeft: boolean) {
+  /** 门交互：开门按玩家朝向、失败换反向（原版 Player.cs L20965-20974）；
+   *  帧算法/样式保留/方向锚点见 world/Door.ts（原版 OpenDoor L22384 / CloseDoor L15901 语义） */
+  private toggleDoor(x: number, y: number, open: boolean) {
     const st = this.world.store;
-    // 找锚点（帧可能是格偏移或 vanilla 18px 偏移——统一按格归一）
-    const defClosed = TILE_DEFS[T.DOOR_CLOSED];
-    const step = defClosed.vanilla ? 18 : 1;
-    const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
-    const ax = (fx === 0 && fy === 0) ? x : x - Math.floor(fx / step);
-    const ay = (fx === 0 && fy === 0) ? y : y - Math.floor(fy / step);
-    void flipLeft;
-    // 开门状态占 2 列，全部清掉再放新状态
-    for (let dx = 0; dx < 2; dx++) {
-      for (let dy = 0; dy < 3; dy++) {
-        if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, 0);
-      }
-    }
     if (open) {
-      for (let dx = 0; dx < 2; dx++) {
-        for (let dy = 0; dy < 3; dy++) {
-          if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, T.DOOR_OPEN, dx * 18, dy * 18);
-        }
-      }
+      const dir = this.player.facing >= 0 ? 1 : -1;
+      if (!openDoor(st, x, y, dir) && !openDoor(st, x, y, -dir)) return;
       this.sfx.play('door_open');
     } else {
-      for (let dy = 0; dy < 3; dy++) st.setTile(ax, ay + dy, T.DOOR_CLOSED, 0, dy * 18);
+      if (!closeDoor(st, x, y, Math.random, (bx, by) => this.overlapsEntity(bx, by))) return;
       this.sfx.play('door_close');
     }
+    this.input.rightDown = false;
   }
 
   openChest: ((c: ChestData) => void) | null = null;
@@ -1740,8 +1731,10 @@ export class Game implements GameHooks {
     const p = this.player;
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
+      // 原版 ObjectData.Chat 语义:光标须落在 NPC 身上(命中盒 ±8px 容差),不是旁边
       if (Math.hypot(npc.cx - p.cx, npc.cy - p.cy) > TILE * 3.5) continue;
-      if (Math.hypot(npc.cx - (ctX + 0.5) * TILE, npc.cy - (ctY + 1) * TILE) > TILE * 2) continue;
+      const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
+      if (mx < npc.x - 8 || mx > npc.x + npc.w + 8 || my < npc.y - 8 || my > npc.y + npc.h + 8) continue;
       const tips = [
         '你好！我是向导。按 E 打开背包，那里可以合成物品。',
         '用镐挖矿、斧砍树。木头+凝胶可以做火把！',

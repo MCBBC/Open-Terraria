@@ -11,8 +11,8 @@ const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
-await page.goto(URL, { waitUntil: 'networkidle0' });
-await page.waitForFunction(() => window.__swVUI && window.__swVUI.ui && window.__swVUI.ui.current, { timeout: 30000 });
+await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.waitForFunction(() => window.__swVUI && window.__swVUI.ui && window.__swVUI.ui.current, { timeout: 120000 });
 await new Promise((r) => setTimeout(r, 1200)); // 等字体与首帧
 
 mkdirSync('shots', { recursive: true });

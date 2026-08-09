@@ -7,6 +7,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
+import { placeDoorClosed } from '../../Door';
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
@@ -589,8 +590,9 @@ function dungeonEnt(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, i: nu
     }
   }
   if (dir < 0) cx -= 1;
-  if (st.inBounds(Math.floor(cx), Math.floor(cy) + 1)) {
-    st.setTileSilent(Math.floor(cx), Math.floor(cy) + 1, DOOR, 13 * 54, 0);
+  // 原版 L21242 PlaceTile(x, Y+1) → PlaceDoor 门顶在 Y-1（占 Y-1..Y+1，底格 = 旧单格位置）
+  if (st.inBounds(Math.floor(cx), Math.floor(cy) - 1)) {
+    placeDoorClosed(st, Math.floor(cx), Math.floor(cy) - 1, 13);
   }
   dc.minYY = Math.min(dc.minYY, Math.floor(j - dy1 / 2 - dy1 * 0.6) - 6);
   dc.entranceX = Math.floor(cx);
@@ -686,7 +688,8 @@ function placeDoors(st: TileStore, rng: RNG, dc: DungeonCtx): void {
       st.type[i] = dc.brick; st.flags[i] = 1;
     }
     const style = rng.next() < 1 / 3 ? (dc.wall === 7 ? 16 : dc.wall === 8 ? 17 : 18) : 13;
-    st.setTileSilent(x, j2, DOOR, style * 54, 0);
+    // 原版 L18404 PlaceTile(i2, j2) → 门顶在 j2-2（占 j2-2..j2）
+    placeDoorClosed(st, x, j2 - 2, style);
     // 两侧门柱补砖(cs L18403-18429)
     for (const side of [x - 1, x + 1]) {
       if (side < 1 || side >= st.w - 1) continue;

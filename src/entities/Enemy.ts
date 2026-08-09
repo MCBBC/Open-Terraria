@@ -11,6 +11,9 @@ import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
 import { RNG } from '../core/rng';
 
+/** 原版 Boss NPC id（EoC 4/世吞 13-15/史莱姆王 50/骷髅王 66/血肉墙 127/双子 125-127 外的旧三王 66,113-115/蜂后 262/克脑 266 等） */
+const VANILLA_BOSS_IDS = new Set([4, 13, 14, 15, 50, 66, 113, 114, 115, 127, 134, 135, 136, 222, 262, 266, 370, 398, 625, 636, 657]);
+
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
   key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
@@ -90,6 +93,7 @@ export class Enemy extends Entity {
       // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
       knockbackResist: Math.max(0, Math.min(0.89, 1 - (v.knockBackResist ?? 0.5))),
       width: v.width, height: v.height, flying,
+      boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
       hitSound: [hit], killedSound: [kill], drops: vanillaNpcDrops(id),
@@ -157,7 +161,7 @@ export class Enemy extends Entity {
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
-        case 14: this.flyAI(game, p, 0.09); break;                     // AI_014 蝙蝠（近似，反编译缺源码）
+        case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
@@ -533,6 +537,54 @@ export class Enemy extends Entity {
     }
     // 注意：原版 AI_026 无逐帧地面摩擦（速度持续加到 maxSpd，只有逆向阻尼/超速落地衰减）——
     // 不能带 fighterAI 的 onGround *=0.9，否则平衡点被压到 0.63 远低于 6
+  }
+
+  /** AI_014 蝙蝠/飞行族（1.4.5.6 完整反编译 NPC.145.cs:22895+）：
+   *  noGravity；撞墙旧速×-0.5 反弹（X 最小弹速朝向 ±2 / Y ±1）；
+   *  通用分轴加速 X 0.1/±4、Y 0.04/±1.5（逆转修正 0.05/0.03）；
+   *  Giant Bat(158) 0.2/±7；血乌贼(660) X 0.35/±6、Y 0.3/±5。
+   *  （1.4.0.5 反编译包 AI() 空壳，此处以 1.4.5.6 源为准——旧编号行为两版未变） */
+  private batAI(game: GameHooks, player: Player | null) {
+    const oldVx = this.vx, oldVy = this.vy;
+    let ax = 0.1, ay = 0.04, cx = 4, cy = 1.5;
+    if (this.vanillaId === 158) { ax = 0.2; ay = 0.2; cx = 7; cy = 7; }
+    else if (this.vanillaId === 660) { ax = 0.35; ay = 0.3; cx = 6; cy = 5; }
+    let dirX: number, dirY: number;
+    if (player) { dirX = player.cx > this.cx ? 1 : -1; dirY = player.cy > this.cy ? 1 : -1; }
+    else { dirX = this.facing; dirY = -1; }
+    this.facing = dirX;
+    // X 轴（L23314-23345）
+    if (dirX === -1 && this.vx > -cx) {
+      this.vx -= ax;
+      if (this.vx > cx) this.vx -= ax; else if (this.vx > 0) this.vx += ax * 0.5;
+      if (this.vx < -cx) this.vx = -cx;
+    } else if (dirX === 1 && this.vx < cx) {
+      this.vx += ax;
+      if (this.vx < -cx) this.vx += ax; else if (this.vx < 0) this.vx -= ax * 0.5;
+      if (this.vx > cx) this.vx = cx;
+    }
+    // Y 轴（L23346-23377）
+    if (dirY === -1 && this.vy > -cy) {
+      this.vy -= ay;
+      if (this.vy > cy) this.vy -= 0.05; else if (this.vy > 0) this.vy += 0.03;
+      if (this.vy < -cy) this.vy = -cy;
+    } else if (dirY === 1 && this.vy < cy) {
+      this.vy += ay;
+      if (this.vy < -cy) this.vy += 0.05; else if (this.vy < 0) this.vy -= 0.03;
+      if (this.vy > cy) this.vy = cy;
+    }
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // 撞墙/撞地反弹（L22899-22923：collideX/Y → oldVelocity*-0.5 + 最小弹速）
+    if (this.hitWall) {
+      this.vx = -oldVx * 0.5;
+      if (this.facing === -1 && this.vx > 0 && this.vx < 2) this.vx = 2;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -2) this.vx = -2;
+    }
+    if (this.hitHead || this.onGround) {
+      this.vy = -oldVy * 0.5;
+      if (this.vy > 0 && this.vy < 1) this.vy = 1;
+      if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    }
   }
 
   private casterAI(game: GameHooks, player: Player | null) {
