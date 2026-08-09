@@ -67,6 +67,38 @@ export class VUI {
     UIScale.resize(cssW, cssH, dpr);
   }
 
+  // ================= 自愈帧循环 =================
+  // 循环本体放在 VUI 模块内（而非 mainFlow）：HMR 热替换业务模块时循环不死；
+  // 另设心跳看门狗——任何原因导致 rAF 停摆（如被外部 cancel）1 秒内自动重启。
+  private static loopRaf = 0;
+  private static lastBeat = 0;
+  /** 每帧回调（menuBg 背景驱动 / uiBlocking 同步等，由 mainFlow 注入） */
+  static frameHook: ((dtMs: number) => void) | null = null;
+
+  static startLoop() {
+    if (VUI.loopRaf) return;
+    let last = performance.now();
+    const loop = () => {
+      const now = performance.now();
+      const dt = Math.min(100, now - last);
+      last = now;
+      VUI.lastBeat = now;
+      VUI.frameHook?.(dt);
+      VUI.frame(dt);
+      VUI.loopRaf = requestAnimationFrame(loop);
+    };
+    VUI.loopRaf = requestAnimationFrame(loop);
+    // 看门狗：心跳停摆或循环被杀 → 重启（幂等）
+    window.setInterval(() => {
+      if (!VUI.loopRaf) { VUI.startLoop(); return; }
+      if (performance.now() - VUI.lastBeat > 1000) {
+        cancelAnimationFrame(VUI.loopRaf);
+        VUI.loopRaf = 0;
+        VUI.startLoop();
+      }
+    }, 1000);
+  }
+
   static setState(state: UIState | null) {
     VUI.ui.setState(state);
     VUI.syncCursor();

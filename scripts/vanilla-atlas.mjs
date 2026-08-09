@@ -48,6 +48,9 @@ const MISC = [
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
   'WiresNew.png',
   'Actuator.png',
+  // 电路陷阱弹幕(Wiring.cs:1495-1743)
+  'Projectile_98.png', 'Projectile_99.png', 'Projectile_184.png',
+  'Projectile_185.png', 'Projectile_186.png', 'Projectile_187.png', 'Projectile_654.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

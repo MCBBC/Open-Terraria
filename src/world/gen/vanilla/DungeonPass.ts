@@ -1071,25 +1071,96 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
     }
   }
 
-  // ---- 7. 飞镖陷阱(cs L18846-18863,w/500;placeTrap 简化为飞镖陷阱无布线) ----
+  // ---- 7. 飞镖陷阱(MakeDungeon_Traps cs L18846-18863, w/500; placeTrap(x,y,0) 1:1) ----
   {
+    // placeTrap type=0 分支（WorldGen.cs:3324-3420）：
+    // 自采样点下扫首个实心格，其上方放压板(135)；压板行向两侧扫至锚墙（实心或裂砖
+    // 481/482/483），挖一格嵌飞镖陷阱(137)；红线沿 L 路径（先 x 后 y）连板→陷阱。
+    const CRACKED_SET = new Set<number>(
+      ['v_481_cracked_blue_brick', 'v_482_cracked_green_brick', 'v_483_cracked_pink_brick']
+        .map((k) => TILE_BY_KEY[k]).filter((t): t is number => t != null));
+    const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
+    const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block'] ?? 0;   // L3339 邻格回避
+    const GLOW_SHROOM = TILE_BY_KEY['v_190_glowing_mushroom_block']!;   // L3385 锚墙回避
+    const WOODEN_SPIKE = TILE_BY_KEY['v_232_wooden_spike']!;            // L3363 下方回避
+    const typeAt = (x: number, y: number) => (st.inBounds(x, y) && st.flags[st.idx(x, y)] ? st.type[st.idx(x, y)] : 0);
+    // SolidTile 或 tileCracked（cs L3366/L3374 侧扫把裂砖当锚）
+    const trapSolid = (x: number, y: number) =>
+      solidAt(x, y) || (st.inBounds(x, y) && st.flags[st.idx(x, y)] && CRACKED_SET.has(st.type[st.idx(x, y)]));
+    const placeTrap0 = (x: number, y: number): boolean => {
+      // L3326-3335: 下扫首个实心格（越界放弃）
+      let j1 = y;
+      while (!solidAt(x, j1)) {
+        j1++;
+        if (j1 > st.h - 10) return false;
+      }
+      const px = x, py = j1 - 1;
+      const pi = st.idx(px, py);
+      // L3339: 20 格内有蘑菇草(70)不放；蜥蜴砖unsafe墙(87)不放
+      if (st.wall[pi] === 87) return false;
+      for (let yy = py - 20; yy <= py + 20; yy++) {
+        for (let xx = px - 20; xx <= px + 20; xx++) {
+          if (typeAt(xx, yy) === MUSH_GRASS) return false;
+        }
+      }
+      // L3341+L3345: 岩浆上不放（type 0）
+      if (st.liquid[pi] > 0 && st.liquidType[pi] === 2) return false;
+      if (px < 3 || py < 3 || px > st.w - 4 || py > st.h - 4) return false; // InWorld(,3)
+      // L3352-3356: 压板落点 + 上方两行 3 列须全空（nactive 检查）
+      for (const [ax, ay] of [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]] as const) {
+        if (st.flags[st.idx(px + ax, py + ay)]) return false;
+      }
+      // L3357: 下方不能是尖刺(48)/木尖刺(232)
+      const below = typeAt(px, py + 1);
+      if (below === SPIKE || below === WOODEN_SPIKE) return false;
+      // L3365-3420: type 0 —— 压板行 j2 = py - Next(3)
+      const j2 = py - rng.int(0, 2);
+      let i1 = px;
+      while (!trapSolid(i1, j2)) { i1--; if (i1 < 0) return false; }
+      const i2 = i1;
+      let i3 = px;
+      while (!trapSolid(i3, j2)) { i3++; if (i3 > st.w) return false; }
+      const i4 = i3;
+      // L3379-3391: 锚墙距离 5..49、脚下须实心、锚位非门(10)/尖刺(48)；双墙随机选边
+      const num1 = px - i2, num2 = i4 - px;
+      let f3 = num1 > 5 && num1 < 50;
+      let f4 = num2 > 5 && num2 < 50;
+      if (f3 && !solidAt(i2, j2 + 1)) f3 = false;
+      if (f4 && !solidAt(i4, j2 + 1)) f4 = false;
+      const badAnchor = (t: number) => t === DOOR || t === SPIKE;
+      if (f3 && (badAnchor(typeAt(i2, j2)) || badAnchor(typeAt(i2, j2 + 1)))) f3 = false;
+      if (f4 && (badAnchor(typeAt(i4, j2)) || badAnchor(typeAt(i4, j2 + 1)))) f4 = false;
+      let i5: number, num3: number;
+      if (f3 && f4) {
+        num3 = 1; i5 = i2;
+        if (rng.int(0, 1) === 0) { i5 = i4; num3 = -1; }
+      } else if (f4) { i5 = i4; num3 = -1; }
+      else if (f3) { i5 = i2; num3 = 1; }
+      else return false;
+      if (typeAt(i5, j2) === GLOW_SHROOM) return false;
+      // L3391-3396: 压板(135)——背后有墙 style 2（frameX 36），否则 Next(2,4)；地牢恒有墙
+      st.setTileSilent(px, py, PLATE, st.wall[pi] > 0 ? 36 : rng.int(2, 3) * 18, 0);
+      // L3397-3399: 锚墙挖一格嵌飞镖陷阱(137)；墙在左(frameX 18)朝右，墙在右(frameX 0)朝左
+      st.setTileSilent(i5, j2, TRAP, num3 === 1 ? 18 : 0, 0);
+      // L3400-3415: 红线 L 路径（先 x 后 y，三段 wire 同原版逐段置位）
+      let wx = px, wy = py;
+      while (wx !== i5 || wy !== j2) {
+        st.wire[st.idx(wx, wy)] |= TileStore.WIRE_RED;
+        if (wx > i5) wx--; else if (wx < i5) wx++;
+        st.wire[st.idx(wx, wy)] |= TileStore.WIRE_RED;
+        if (wy > j2) wy--; else if (wy < j2) wy++;
+        st.wire[st.idx(wx, wy)] |= TileStore.WIRE_RED;
+      }
+      return true;
+    };
+    // MakeDungeon_Traps：随机点须是地牢墙，placeTrap 成功或连败 1000 次计数
     let added = 0, fail = 0;
     while (added < Math.floor(w / 500)) {
       fail++;
-      let x = rng.int(ex0, ex1);
+      const x = rng.int(ex0, ex1);
       let y = rng.int(ey0, ey1);
       while (y < gs.worldSurface && y < ey1) y = rng.int(ey0, ey1);
-      if (airDW(x, y)) {
-        // 找侧向砖墙,朝开口放陷阱
-        for (const dir of [-1, 1]) {
-          const wx = x + dir;
-          if (isBrick(wx, y) && !st.flags[st.idx(x - dir, y)]) {
-            st.setTileSilent(x, y, TRAP, dir < 0 ? 18 : 0, 0);
-            fail = 0; added++;
-            break;
-          }
-        }
-      }
+      if (isDWall(x, y) && placeTrap0(x, y)) { fail = 0; added++; }
       if (fail > 1000) { fail = 0; added++; }
     }
   }
@@ -1328,9 +1399,11 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
       }
       if (bad) continue;
       const base = st.wall[st.idx(x, j2)] === roomWall[1] ? 12 : st.wall[st.idx(x, j2)] === roomWall[2] ? 14 : 10;
-      st.setTileSilent(x, j2, BANNER, (base + rng.int(0, 1)) * 18, 0);
-      st.setTileSilent(x, j2 + 1, BANNER, (base + rng.int(0, 1)) * 18, 18);
-      st.setTileSilent(x, j2 + 2, BANNER, (base + rng.int(0, 1)) * 18, 36);
+      // 整条旗帜同一 style(原版 PlaceTile 一次抽取,此前每格独立重摇会混样式)
+      const bannerStyle = base + rng.int(0, 1);
+      st.setTileSilent(x, j2, BANNER, bannerStyle * 18, 0);
+      st.setTileSilent(x, j2 + 1, BANNER, bannerStyle * 18, 18);
+      st.setTileSilent(x, j2 + 2, BANNER, bannerStyle * 18, 36);
     }
   }
 }
@@ -1361,7 +1434,7 @@ function wallDungeonSpread(st: TileStore, sx: number, sy: number, wallType: numb
  * 成功条件:fw×fh 全净空 + 底行下方全实心(bottom 时)。帧 = style*fw*18 + dx*18 / dy*18。
  * flip=-1 时水平镜像帧。返回是否放置成功。
  */
-function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1): boolean {
+export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true): boolean {
   const def = TILE_DEFS[tile];
   if (!def) return false;
   const fw = def.vanilla?.fw ?? def.w ?? 1;
@@ -1373,7 +1446,7 @@ function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, sty
       if (!st.inBounds(x0 + dx, yTop + dy) || st.flags[st.idx(x0 + dx, yTop + dy)]) return false;
     }
   }
-  if (anchor === 'bottom') {
+  if (anchor === 'bottom' && support) {
     for (let dx = 0; dx < fw; dx++) {
       if (!st.inBounds(x0 + dx, yTop + fh) || !st.flags[st.idx(x0 + dx, yTop + fh)]
         || !TILE_DEFS[st.type[st.idx(x0 + dx, yTop + fh)]]?.solid) return false;
@@ -1390,7 +1463,7 @@ function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, sty
 }
 
 /** 家具水平镜像(帧 X 翻转:桌椅等 1-3 宽物件整体 +18*fw) */
-function flipFurn(st: TileStore, cx: number, floorY: number, tile: number): void {
+export function flipFurn(st: TileStore, cx: number, floorY: number, tile: number): void {
   const def = TILE_DEFS[tile];
   if (!def) return;
   const fw = def.vanilla?.fw ?? def.w ?? 1;

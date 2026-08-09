@@ -7,6 +7,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { ITEM_BY_KEY } from '../../../data/items';
 import { digTunnel } from './TileRunner';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
@@ -158,10 +159,11 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
       }
     }
     if (!clear || !st.isSolid(x, y + 1) || !st.isSolid(x + 1, y + 1)) continue;
-    st.setTileSilent(x, y, HEART, 0, 0);
-    st.setTileSilent(x + 1, y, HEART, 18, 0);
-    st.setTileSilent(x, y - 1, HEART, 0, 18);
-    st.setTileSilent(x + 1, y - 1, HEART, 18, 18);
+    // 原版 AddLifeCrystal(cs:16023-16038):顶行 frameY=0、底行 18(此前写反致贴图上下颠倒)
+    st.setTileSilent(x, y - 1, HEART, 0, 0);
+    st.setTileSilent(x + 1, y - 1, HEART, 18, 0);
+    st.setTileSilent(x, y, HEART, 0, 18);
+    st.setTileSilent(x + 1, y, HEART, 18, 18);
     placed++;
   }
 }
@@ -347,13 +349,19 @@ export function runPyramidPass(
         st.type[i] = 0; st.flags[i] = 0;
       }
     }
-    // 宝箱(内腔底部)
+    // 宝箱(内腔底部,cs L12417-12426):style1 金箱,战利品三选一
+    // (857 沙暴瓶/848 法老面具/934 飞毯)
     const bx = spot.x, by = baseY - 2;
-    st.setTileSilent(bx, by, CHEST, 0, 0);
-    st.setTileSilent(bx + 1, by, CHEST, 18, 0);
-    st.setTileSilent(bx, by + 1, CHEST, 0, 18);
-    st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
-    chests.push({ x: bx, y: by, items: Array(10).fill(null) });
+    st.setTileSilent(bx, by, CHEST, 1 * 36, 0);
+    st.setTileSilent(bx + 1, by, CHEST, 1 * 36 + 18, 0);
+    st.setTileSilent(bx, by + 1, CHEST, 1 * 36, 18);
+    st.setTileSilent(bx + 1, by + 1, CHEST, 1 * 36 + 18, 18);
+    const lootKeys = ['vi_857_sandstorm_in_a_bottle', 'vi_848_PharaohsMask', 'vi_934_FlyingCarpet'];
+    const lootId = ITEM_BY_KEY[lootKeys[rng.int(0, 2)]];
+    chests.push({
+      x: bx, y: by,
+      items: lootId !== undefined ? [{ id: lootId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null),
+    });
   }
 }
 

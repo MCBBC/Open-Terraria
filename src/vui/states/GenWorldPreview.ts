@@ -6,6 +6,7 @@ import { UIElement } from '../core/UIElement';
 import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch } from '../draw/UISpriteBatch';
 import { rgb } from '../draw/UISpriteBatch';
+import { UIScale } from '../draw/UIScale';
 import { mapColor24 } from '../../render/MapColors';
 import type { World } from '../../world/World';
 
@@ -25,13 +26,15 @@ export class GenWorldPreview extends UIElement {
     this.off.height = world.h;
     this.offCtx = this.off.getContext('2d')!;
     this.colImg = this.offCtx.createImageData(1, world.h);
-    // 左侧全高：x=8；宽 300（逻辑 px）；上下留 8px 边距（margin 收缩 Fill 高度）
-    this.left = StyleDimension.fromPixels(8);
-    this.top = StyleDimension.fromPixels(8);
-    this.width = StyleDimension.fromPixels(300);
-    this.height = StyleDimension.Fill;
-    this.marginTop = 8;
-    this.marginBottom = 8;
+    // 底部居中：宽度取屏宽 55%（上限 520），高度按世界纵横比等比缩放（不变形）；
+    // 底部留 56px 避开小贴士行
+    const w = Math.min(UIScale.logicalW * 0.55, 520);
+    const h = w * (world.h / world.w);
+    this.width = StyleDimension.fromPixels(w);
+    this.height = StyleDimension.fromPixels(h);
+    this.hAlign = 0.5;
+    this.vAlign = 1;
+    this.marginBottom = 56;
   }
 
   update(): void {

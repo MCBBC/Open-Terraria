@@ -7,8 +7,8 @@ export interface GameHooks {
   player: import('./Player').Player;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
-  /** 在世界上生成掉落物 */
-  spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): void;
+  /** 在世界上生成掉落物（返回实体便于染色等后处理） */
+  spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
   /** 对玩家造成伤害（attacker 用于荆棘反伤） */
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown): void;
   /** 伤害数字飘字 */

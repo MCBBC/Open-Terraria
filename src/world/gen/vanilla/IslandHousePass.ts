@@ -7,6 +7,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeDoorClosed } from '../../Door';
+import { placeFurn, flipFurn } from './DungeonPass';
 
 const SUNPLATE = TILE_BY_KEY['v_202_sunplate_block']!;
 const CHEST = TILE_BY_KEY['chest']!;
@@ -81,16 +82,17 @@ function islandHouse(
     const idx = st.idx(pillarX, y);
     st.type[idx] = SUNPLATE; st.flags[idx] = 1; st.wall[idx] = 0;
   }
-  // 天空宝箱(cs L48274-48293):战利品序 0=气球/1=星怒/2=马蹄铁,第 3 间起随机
+  // 天空宝箱(cs L48274-48293):style13 Skyware(战利品序 0=气球/1=星怒/2=马蹄铁,第 3 间起随机)
   let loot = houseIdx;
   if (loot > 2) loot = rng.int(0, 2);
   const lootKeys = ['vi_159_shiny_red_balloon', 'vi_65_starfury', 'vi_158_lucky_horseshoe'];
   const lootId = ITEM_BY_KEY[lootKeys[loot]] ?? ITEM_BY_KEY[lootKeys[0]];
   const bx = i, by = floorY - 1;
-  st.setTileSilent(bx, by, CHEST, 0, 0);
-  st.setTileSilent(bx + 1, by, CHEST, 18, 0);
-  st.setTileSilent(bx, by + 1, CHEST, 0, 18);
-  st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
+  // PlaceChestDirect 语义:frameX = 36*style + dx*18,顶行 frameY=0
+  st.setTileSilent(bx, by, CHEST, 13 * 36, 0);
+  st.setTileSilent(bx + 1, by, CHEST, 13 * 36 + 18, 0);
+  st.setTileSilent(bx, by + 1, CHEST, 13 * 36, 18);
+  st.setTileSilent(bx + 1, by + 1, CHEST, 13 * 36 + 18, 18);
   chests.push({ x: bx, y: by, items: [{ id: lootId, stack: 1 }, ...Array(9).fill(null)] });
   // 窗(Glass Wall 21,cs L48312-48327):halfW>10 → ±2 宽,否则 ±1;
   // 中心 x = i∓halfW/2±1,y = (j1+j2)/2 - 1 ± 1
@@ -104,19 +106,19 @@ function islandHouse(
       }
     }
   }
-  // 桌+两椅(cs L48328-48333):桌 style7,桌对侧再往内一格
+  // 桌+两椅(cs L48328-48333):桌 style7(步长 54),椅 style10(左椅翻转 +18)——
+  // 此前是单格残件 + 错误步长(桌 36/旗 36),现为完整多格放置
   const tableX = i + (Math.floor(halfW / 2) + 1) * -dir;
-  if (st.inBounds(tableX, j2)) {
-    st.setTileSilent(tableX, j2, TABLE, 7 * 36, 0);
-    if (st.inBounds(tableX - 2, j2)) st.setTileSilent(tableX - 2, j2, CHAIR, 18, 0);
-    if (st.inBounds(tableX + 2, j2)) st.setTileSilent(tableX + 2, j2, CHAIR, 0, 0);
+  if (placeFurn(st, tableX, j2, TABLE, 7)) {
+    if (placeFurn(st, tableX - 2, j2, CHAIR, 10)) flipFurn(st, tableX - 2, j2, CHAIR);
+    placeFurn(st, tableX + 2, j2, CHAIR, 10);
   }
-  // 横幅(cs L48334-48348):天花板两角 + dir 异侧墙
+  // 横幅(cs L48334-48348):1×3 顶锚,style 7-9(步长 18)
   for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
-    if (st.inBounds(bx2, j1)) st.setTileSilent(bx2, j1, BANNER, rng.int(7, 9) * 36, 0);
+    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top');
   }
   const bannerX = dir > 0 ? i - halfW : i + halfW;
-  if (st.inBounds(bannerX, j1 + 1)) st.setTileSilent(bannerX, j1 + 1, BANNER, rng.int(7, 9) * 36, 0);
+  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top');
 }
 
 void T;

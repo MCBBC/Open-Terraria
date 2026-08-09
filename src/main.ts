@@ -58,21 +58,15 @@ window.addEventListener('keydown', (e) => {
         game.renderer.fullMap.open = false;
         break;
       }
-      if (flow.isInventoryOpen()) {
-        // M5 Canvas 背包：Esc/E 关闭（含宝箱/持有物结算）
-        flow.closeInventory();
-        break;
-      }
-      if (e.code === 'KeyE') {
-        flow.toggleInventory();
-        break;
-      }
       if (pausePanel) {
         pausePanel.remove();
         pausePanel = null;
         game.paused = false;
+        ui.closeInventory();
         game.input.uiBlocking = false;
-      } else {
+      } else if (ui.invPanel && ui.invPanel.style.display === 'block') {
+        ui.closeInventory();
+      } else if (e.code === 'Escape') {
         game.paused = true;
         pausePanel = ui.showPause({
           onResume: () => {
@@ -81,6 +75,7 @@ window.addEventListener('keydown', (e) => {
             game!.paused = false;
           },
           onSave: () => flow.doSave(),
+          onSettings: () => flow.openSettings(true),
           onQuit: () => {
             pausePanel = null;
             game!.paused = false;
@@ -88,6 +83,8 @@ window.addEventListener('keydown', (e) => {
             flow.quitToMenu();
           },
         });
+      } else {
+        ui.openInventory();
       }
       break;
     case 'F3':
@@ -274,19 +271,12 @@ kvHas('sandboxworld.quicksave').then(async () => {
   if (atlas) UITextures.setAtlas(atlas);
   await Promise.all([UIFont.load(), Lang.load()]);
   VUI.init(root);
+  VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
   flow = createFlow(root, atlas, ui, audio);
 
   // M0 验收入口：?vuidemo=1 只跑 VUI 框架演示
   if (new URLSearchParams(location.search).has('vuidemo')) {
     VUI.setState(new VuiDemoState());
-    let last = performance.now();
-    const loop = () => {
-      const now = performance.now();
-      VUI.frame(now - last);
-      last = now;
-      requestAnimationFrame(loop);
-    };
-    requestAnimationFrame(loop);
     return;
   }
 

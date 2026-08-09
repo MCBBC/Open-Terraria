@@ -58,6 +58,14 @@ export const VANILLA_MISC = [
   'vanilla/Shroom_Tops.png',
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
   'vanilla/WiresNew.png', 'vanilla/Actuator.png',
+  // 电路陷阱弹幕贴图(Wiring.cs:1495-1743 的 projectile id;帧尺寸取 Projectile.cs SetDefaults)
+  'vanilla/Projectile_98.png',   // 毒镖 10×10
+  'vanilla/Projectile_99.png',   // 巨石 32×32
+  'vanilla/Projectile_184.png',  // 火焰陷阱 10×10
+  'vanilla/Projectile_185.png',  // 尖刺球 14×14
+  'vanilla/Projectile_186.png',  // 长矛机关 10×16
+  'vanilla/Projectile_187.png',  // 超级飞镖 6×6
+  'vanilla/Projectile_654.png',  // 热喷泉 16×16
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
@@ -278,62 +286,16 @@ export class SpriteAtlas {
     return { img, sx: s.x, sy: img.height - s.y - s.h, sw: s.w, sh: s.h };
   }
 
-  /** 按资源名取整图（物品/Buff 图标等单图资源） */
-  byGuid(guid: string | null | undefined): DrawRect | null {
-    if (!guid) return null;
-    const file = this.data.guidToFile[guid];
-    if (!file) return null;
-    const img = this.images.get(file);
-    if (!img) return null;
-    return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
-  }
-
   animFrames(anim: string): DrawRect[] {
     const frames = this.resources.anims[anim] ?? [];
     return frames.map((f) => this.rect(f.file, f.sprite)).filter(Boolean) as DrawRect[];
   }
 }
 
-// ---- 资源名（resources.json 的 name 字段是 \uXXXX 转义，JSON.parse 已还原）----
-export function itemIconByType(atlas: SpriteAtlas, typeNum: number): DrawRect | null {
-  const it = atlas.resources.items.find((x) => Number(x.type) === typeNum);
-  return atlas.byGuid(it?.iconGuid ?? null);
-}
-
-export function findItem(atlas: SpriteAtlas, name: string) {
-  return atlas.resources.items.find((x) => x.name === name);
-}
-
-// 我们的 item key → Maples 物品资源名（图标替换表）
-export const ITEM_ICON_MAP: Record<string, string> = {
-  dirt_block: '泥土', stone_block: '石头', wood: '木材', torch: '火把',
-  workbench: '工作台', furnace: '熔炉', anvil: '铁砧',
-  iron_sword: '铁剑', iron_pickaxe: '铁镐', iron_axe: '铁斧', iron_ore: '铁矿', iron_bar: '铁锭',
-  heal_potion: '治疗药水', agility_potion: '敏捷药水', ironskin_potion: '铁皮药水',
-  thorns_potion: '荆棘药水', regen_potion: '恢复药水',
-  lucky_horseshoe: '幸运马掌', feral_claws: '猛爪手套',
-};
-
-// 特殊手动映射（无 .asset 登记的图标）
-const ITEM_DIRECT_MAP: Record<string, { file: string; sprite: string }> = {};
-
-/** 按我们的 item key 取 Maples 图标矩形（搜索 items + potions + accessories 三个来源）。
- *  Maples 没有的回退原版 Item_N 图标（第二查找层，id 实读自 TEdit items.json） */
+// ---- 物品图标：一律原版 Item_N（旧 Maples UI/ 图标层已整体移除） ----
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 
 export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | null {
-  const direct = ITEM_DIRECT_MAP[key];
-  if (direct) return atlas.rect(direct.file, direct.sprite);
-  const resName = ITEM_ICON_MAP[key];
-  if (resName) {
-    const r = atlas.resources;
-    const res =
-      r.items.find((x) => x.name === resName) ??
-      (r.potions ?? []).find((x) => x.name === resName) ??
-      (r.accessories ?? []).find((x) => x.name === resName);
-    const m = atlas.byGuid(res?.iconGuid ?? null);
-    if (m) return m;
-  }
   const vid = VANILLA_ITEM_ICON_MAP[key];
   if (vid !== undefined) return atlas.vicon(vid);
   // 阶段 5:vi_<id>_* 全量物品回退原版图标
@@ -362,6 +324,7 @@ export const VANILLA_ITEM_ICON_MAP: Record<string, number> = {
   copper_ore: 12, iron_ore: 11, silver_ore: 14, gold_ore: 13,
   copper_bar: 20, iron_bar: 22, silver_bar: 21, gold_bar: 19,
   lens: 38, suspicious_eye: 43,
+  iron_sword: 4,   // IronBroadsword（ItemID.cs:1547）
   // 电路工具(id-maps items.json 核实:530 电线/509,850,851,3612 四色扳手/510 钢丝钳/
   // 849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图)
   wire: 530, red_wrench: 509, blue_wrench: 850, green_wrench: 851, yellow_wrench: 3612,
@@ -768,4 +731,20 @@ vi_678_red_potion: 678,
   vi_5509_vampire_pendant: 5509,
   vi_5505_mean_goblin_s_spikes: 5505,
   vi_5525_cursed_piper_flute: 5525,
+  // ---- 旧 UI 移除迁移补全（2026-08-09，全部 id 经 TEdit items.json 核实；
+  //      木镐/木斧原版不存在，用铜镐 3509/铜斧 3506 代位） ----
+  wood: 9, workbench: 36, furnace: 33, anvil: 35,
+  wood_pickaxe: 3509, wood_axe: 3506, iron_hammer: 7,
+  silver_sword: 3514, gold_sword: 3520, iron_bow: 99,
+  wooden_bow: 39, wooden_arrow: 40, flaming_arrow: 41,
+  tin_pickaxe: 3503, tin_axe: 3500, tin_sword: 3502,
+  lead_pickaxe: 3497, lead_axe: 3494, lead_sword: 3496,
+  tungsten_pickaxe: 3491, tungsten_axe: 3488, tungsten_sword: 3490,
+  platinum_pickaxe: 3485, platinum_axe: 3482, platinum_sword: 3484,
+  corrupt_grass_seeds: 59, crimson_grass_seeds: 2171,
+  jungle_grass_seeds: 195, mushroom_grass_seeds: 194,
+  empty_bucket: 205, water_bucket: 206, lava_bucket: 207, honey_bucket: 1128,
+  lucky_horseshoe: 158, feral_claws: 211,
+  minecart_item: 2343, wand_of_sparking: 3069, amethyst_bolt: 739,  // 紫晶法杖=Amethyst Staff
+  worm_food: 70, bloody_spine: 1331, slime_crown: 560,
 };

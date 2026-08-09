@@ -23,7 +23,9 @@ const frameCount = fcMatch[1].replace(/\/\/[^\n]*/g, '').split(',').map((s) => p
 // 3) SetDefaults if-else 链（与 extract-npcs 相同手法）
 const sdStart = npcCs.indexOf('public void SetDefaults(int Type');
 const sdEnd = npcCs.indexOf('\n\tpublic ', sdStart + 100);
-const body = npcCs.slice(sdStart, sdEnd < 0 ? undefined : sdEnd).replace(/\/\/[^\n]*/g, '').replace(/\n\s*/g, ' ');
+// 只去注释、不压平换行：parseBlock 按行 ^ 锚点匹配，压平后每块只剩第一个赋值被捕获
+// （曾致 64 条小动物缺 height/aiStyle/defense——bunny 只有 width 没有 height=20）
+const body = npcCs.slice(sdStart, sdEnd < 0 ? undefined : sdEnd).replace(/\/\/[^\n]*/g, '');
 const chainStart = body.indexOf('if (aiStyle');
 const chainStart2 = body.indexOf('if (type');
 const chain = body.slice(chainStart2 >= 0 && (chainStart < 0 || chainStart2 < chainStart) ? chainStart2 : chainStart);

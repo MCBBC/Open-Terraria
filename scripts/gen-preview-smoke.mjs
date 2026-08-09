@@ -1,4 +1,4 @@
-// M4 验收：世界创建 → 生成页（双进度条/阶段文案）+ 实时地图预览增量刷新 → 进游戏
+// M4 验收（DOM 流程版）：标题 → 角色列表 → 世界列表 → 建世界 → 生成页（双进度条+实时地图预览）→ 进游戏
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
 
@@ -12,62 +12,51 @@ page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
 
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
-await page.waitForFunction(() => window.__swVUI?.ui?.current?.constructor?.name === 'TitleState', { timeout: 120000 });
+await page.waitForFunction(() => document.querySelector('.sw-title-menu'), { timeout: 120000 });
 await new Promise((r) => setTimeout(r, 500));
-
-const ui = await page.evaluate(() => window.innerWidth / window.__swVUI.ui.getDimensions().width);
-const click = async (x, y) => page.mouse.click(Math.round(x * ui), Math.round(y * ui));
-const waitState = (name, ms = 10000) => page.waitForFunction(
-  (n) => window.__swVUI.ui.current?.constructor?.name === n, { timeout: ms }, name);
 
 mkdirSync('shots', { recursive: true });
 
-// 直接用垫片建小世界 —— 但垫片走 DOM 进度路径。改走 UI：标题→单人→选第一个角色→新建世界→小→创建
-// 为省时间：若无角色先创建一个默认角色
-await click(480, 258);
-await waitState('UICharacterSelectState');
+// 标题 → 角色列表（DOM）
+await page.click('[data-act=sp]');
+await page.waitForSelector('.sw-list-panel', { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 800));
-let hasChar = await page.evaluate(() => {
-  const st = window.__swVUI.ui.current;
-  const find = (el, name) => { for (const c of el.children) { if (c.constructor.name === name) return true; const r = find(c, name); if (r) return r; } return false; };
-  return find(st, 'UICharacterListItem');
-});
-if (!hasChar) {
-  await click(200 + 14 + 60, 70 + 14 + 379);
-  await waitState('UICharacterCreationState');
+if (!(await page.evaluate(() => !!document.querySelector('.sw-item')))) {
+  await page.click('.sw-list-footer [data-act=new]');
+  await page.waitForSelector('.sw-char-panel', { timeout: 10000 });
   await new Promise((r) => setTimeout(r, 500));
-  await click(647, 499); // 直接创建（随机名）
-  await waitState('UICharacterSelectState');
+  await page.click('[data-act=create]');
+  await page.waitForSelector('.sw-item', { timeout: 10000 });
   await new Promise((r) => setTimeout(r, 800));
 }
-const charItem = await page.evaluate(() => {
-  const st = window.__swVUI.ui.current;
-  const find = (el, name) => { for (const c of el.children) { if (c.constructor.name === name) return c; const r = find(c, name); if (r) return r; } return null; };
-  const d = find(st, 'UICharacterListItem').getDimensions();
-  return { x: d.x + d.width / 2, y: d.y + d.height / 2 };
-});
-await click(charItem.x, charItem.y);
-await new Promise((r) => setTimeout(r, 150));
-await click(charItem.x, charItem.y);
-await waitState('UIWorldSelectState');
+// 点角色 → 世界列表（DOM）
+await page.click('.sw-item');
+await page.waitForFunction(() => {
+  const t = document.querySelector('.sw-list-title');
+  return t && t.textContent === '选择世界';
+}, { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 800));
 
-// 新建世界 → 创建页 → 小 → 创建
-await click(200 + 14 + 60, 70 + 14 + 379);
-await waitState('UIWorldCreationState');
+// 新建世界（DOM）→ 小 → 创建
+await page.click('.sw-list-footer [data-act=new]');
+await page.waitForSelector('.sw-wc-panel', { timeout: 10000 });
 await new Promise((r) => setTimeout(r, 600));
-await click(200 + 14 + 48, 70 + 14 + 119);
-await new Promise((r) => setTimeout(r, 300));
-await click(200 + 14 + 433, 70 + 14 + 415);
+await page.click('[data-g=size] .sw-wc-opt');
+await new Promise((r) => setTimeout(r, 200));
+await page.click('[data-act=create]');
 
-// 生成页出现
-await waitState('UIWorldLoadState');
+// 生成页（VUI）+ 预览
+await page.waitForFunction(() => window.__swVUI?.ui?.current?.constructor?.name === 'UIWorldLoadState', { timeout: 10000 });
 await page.waitForFunction(() => window.__swVUI.ui.current && window.__swVUI.ui.current.hasPreview === true, { timeout: 30000 });
-// 立即采样（小世界生成快，state 可能随时被清空进游戏）
 const sample = () => page.evaluate(() => {
   const st = window.__swVUI.ui.current;
   if (!st) return null;
-  return { pct: st.pct, header: st.header.text, hasPreview: st.hasPreview };
+  const prev = st.children.find((c) => c.constructor.name === 'GenWorldPreview');
+  const d = prev ? prev.getDimensions() : null;
+  return {
+    pct: st.pct, header: st.header.text, hasPreview: st.hasPreview,
+    preview: d ? { x: Math.round(d.x), y: Math.round(d.y), w: Math.round(d.width), h: Math.round(d.height) } : null,
+  };
 });
 await page.screenshot({ path: 'shots/m4-1-gen-early.png' });
 const early = await sample();
@@ -88,10 +77,6 @@ console.log('mid:  ', JSON.stringify(mid));
 console.log('final:', JSON.stringify(final));
 console.log('errors:', errors.length ? errors : 'none');
 await browser.close();
-// hasPreview 已由 waitForFunction 断言；这里只看最终进游戏 + 无错误
-const ok = errors.length === 0 && final.inGame;
-if (!ok) {
-  console.error('GEN PREVIEW SMOKE FAILED');
-  process.exit(1);
-}
+const ok = errors.length === 0 && final.inGame && early && early.preview;
+if (!ok) { console.error('GEN PREVIEW SMOKE FAILED'); process.exit(1); }
 console.log('GEN PREVIEW SMOKE OK');

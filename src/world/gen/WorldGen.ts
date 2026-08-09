@@ -111,6 +111,7 @@ import { runTemplePass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runSwordShrinePass } from './vanilla/SwordShrinePass';
+import { runBuriedChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
 import { placeDoorClosed } from '../Door';
 
@@ -220,6 +221,9 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
   runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
+  runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
+  runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
+  runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
   runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
   runBeehivePass(store, rng, gs);               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
   runSpiderNestPass(store, rng, gs);            // 蜘蛛巢(蛛网+蜘蛛墙腔)

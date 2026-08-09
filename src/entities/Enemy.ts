@@ -49,12 +49,20 @@ export class Enemy extends Entity {
     // 蠕虫穿墙：直接位移（原版 noTileCollide）
     this.x += this.vx;
     this.y += this.vy;
-    // 段链跟随：每段贴前一段的上一位置
+    // 段链跟随（原版 L52271-52308）：方向向量收缩维持 linkDist 间距——
+    // shrink = (dist - linkDist)/dist；position += dxC*shrink（原版 num63/num64）
     for (let s = this.wormNext; s; s = s.wormNext) {
       const fx = s.wormFollow!;
-      s.x = fx.prevX;
-      s.y = fx.prevY;
-      s.facing = fx.facing;
+      const dxC = fx.cx - s.cx;
+      const dyC = fx.cy - s.cy;
+      const dist = Math.hypot(dxC, dyC);
+      if (dist > 0.01) {
+        const linkDist = s.w;               // 原版 num64 = width
+        const shrink = (dist - linkDist) / dist;
+        s.x += dxC * shrink;
+        s.y += dyC * shrink;
+        s.facing = dxC < 0 ? 1 : -1;         // 原版 spriteDirection（L52305）
+      }
     }
   }
 
@@ -104,6 +112,8 @@ export class Enemy extends Entity {
     e.maxHp = v.lifeMax;
     e.w = v.width;
     e.h = v.height;
+    e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
+    e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -131,9 +141,23 @@ export class Enemy extends Entity {
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
-  tint: string | null = null;
-  /** 出生 alpha（原版逐 tick 衰减 = 淡入渐显，非永久半透明） */
+  /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
+  vanillaNetId = 0;
+  /** 原版 NPC.color 当前值（SetDefaults/SetDefaultsFromNetId 初值，AI_001 逐 tick 渐变）。
+   *  渲染语义（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用同贴图二次绘制，
+   *  逐像素乘 color（贴轮廓）；通道 A 决定该 pass 强度 */
+  colorRGBA: [number, number, number, number] | null = null;
+  /** 原版 SetDefaults alpha：每类型静态不透明度基线（渲染 1-alpha/255，NPC.Opacity）。
+   *  多数为 0=不透明；史莱姆 175/120=半透明凝胶、水母 20、蝙蝠 30 等。
+   *  无通用渐隐——仅特定家族（幽灵/怨灵等）在自己的 AI 内衰减 */
   spawnAlpha = 0;
+  /** 原版 ai[0] 跳跳计数器（史莱姆 hop 节奏）；ai[2] 卡墙禁追冷却 */
+  ai0 = -1120;
+  ai2 = 0;
+  /** 原版 ai[1]（史莱姆体内物品 id，驱动 SLIME_ITEM_COLORS 渐变色；0=无） */
+  ai1 = 0;
+  /** 原版 timeLeft（默认 7500 tick，离屏递减；飘浮眼白天 EncourageDespawn(10)） */
+  despawnTimer = 7500;
   inWater = false;       // 入水检测（溅落声用）
 
   constructor(public key: string, x: number, y: number) {
@@ -155,7 +179,6 @@ export class Enemy extends Entity {
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
-    if (this.spawnAlpha > 0) this.spawnAlpha = Math.max(0, this.spawnAlpha - 8); // 原版 alpha 出生渐隐
 
     const player = (game as unknown as { player: Player }).player;
     const hasPlayer = !!player && !player.dead;
@@ -210,14 +233,23 @@ export class Enemy extends Entity {
       game.damagePlayer(this.def.damage, this.cx, this.cy, this);
     }
 
-    // 白天烧夜间怪（恶魔眼/僵尸在白天消失）
-    if ((this.def.nightOnly) && game.world.clock.isDay && !this.def.boss) {
-      if (game.world.clock.dayFactor > 0.85) this.dead = true;
-    }
-    // 距玩家过远清除
+    // Despawn 系统（原版 timeLeft/EncourageDespawn L7228-7241）：
+    // 飘浮眼(2) 白天 DespawnEncouraged_AIStyle2（L19147）→ EncourageDespawn(10)；
+    // 夜行怪白天离屏清除；其余离屏 timeLeft 递减到 0 清除（原版默认 7500 tick，回屏重置）
+    const day = game.world.clock.isDay;
     if (hasPlayer) {
       const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
-      if (!this.def.boss && d > TILE * 90) this.dead = true;
+      if (!this.def.boss) {
+        if ((day && this.def.nightOnly) || (day && this.vanilla?.aiStyle === 2)) {
+          // 白天夜行怪/飘浮眼：离屏 >90 格即清
+          if (d > TILE * 90) this.dead = true;
+        } else if (d > TILE * 120) {
+          this.despawnTimer--;
+          if (this.despawnTimer <= 0) this.dead = true;
+        } else {
+          this.despawnTimer = 7500; // 原版默认 timeLeft，回屏重置
+        }
+      }
     }
   }
 
@@ -248,80 +280,64 @@ export class Enemy extends Entity {
     this.vx *= this.onGround ? 0.8 : 0.98;
   }
 
+  /** AI_001_Slimes 原版核（1.4.5.6 NPC.cs:60735+）：
+   *  站定 vx*=0.8；ai[0] 每 tick +1（激愤 +1 额外）；
+   *  阶段判定（num54=-1000）：ai0>=0 → 小跳（vy=-6, vx+=2*dir, ai0=-1120）；
+   *  -1000..-500 → 小跳（ai0=-2120）；-2000..-1500 → 大跳（vy=-8, vx+=3*dir, ai0=-200）。
+   *  即：小跳→小跳→大跳循环，约 5-10 秒节奏。
+   *  flag3 激愤（L61446）= 夜晚 || 受过伤 || 地下 → 追玩家；白天满血地表 = 被动保持方向。
+   *  卡墙（L61937）：落地 X == 起跳 X → direction 反转 + ai[2]=200 冷却（期间不索敌）。
+   *  蚱蜢(377/446) 复用本 AI（ai0 额外 +3，跳得更频繁） */
   private slimeAI(game: GameHooks, player: Player | null) {
-    // 水中漂浮状态：漂在水面时也可蓄力起跳
     const st = game.world.store;
+    const underground = this.cy / TILE > game.world.groundLevel;
+    // flag3 激愤判定（L61446-61448）
+    const hurt = this.hp < this.maxHp;
+    const flag3 = !game.world.clock.isDay || hurt || underground;
+    const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
+    // ai[2] 卡墙冷却期间不索敌（L61938）
+    if (this.ai2 > 0) this.ai2--;
+    // 激愤时索敌：direction 朝玩家；被动时保持现方向
+    if (flag3 && this.ai2 === 0 && player) {
+      this.facing = player.cx > this.cx ? 1 : -1;
+    }
+    const dir = this.facing;
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
-    const surfaced = inWater && Math.abs(this.vy) < 0.8; // 漂在水面附近（准地面）
-    // 状态机：0 蓄力 → 1 跳跃
-    if (this.state === 0) {
-      this.vx *= 0.6;
-      if (this.onGround) this.squash = Math.min(1, this.squash + 0.08);
-      const canAct = this.onGround || surfaced;
-      // 脱困冷却内（stuckCd>0）落地/浮面立刻再跳，不在原地等 50 tick 空转
-      // 索敌：受击后（iframes 刚触发过）或玩家贴近 <6 格才追；否则随机方向游荡跳
-      const hurt = this.iframes > 0;
-      const close = !!player && Math.abs(player.cx - this.cx) < TILE * 6;
-      if (canAct && (this.aiT % 50 === 0 || this.stuckCd > 0 || ((hurt || close) && this.aiT > 40))) {
-        // 起跳方向：掉头冷却内用当前朝向（不再朝玩家死磕同一堵墙）
-        let dir = this.facing;
-        if (player && this.stuckCd === 0) {
-          const dx = player.cx - this.cx;
-          if (Math.abs(dx) > 8) dir = Math.sign(dx);
-        }
-        this.facing = dir;
-        const dist = player ? Math.min(1, Math.abs(player.cx - this.cx) / (TILE * 10)) : 0.4;
-        // 前方障碍高度探测（1-2 格）→ 按需起跳力度。
-        // 普通跳 vy-4.2 在 GRAVITY=0.36 下脚底只升 24.5px（1.5 格）——
-        // 精灵贴图放大 1.25 倍看着跳很高，但碰撞盒过不了 32px 的两格墙
-        const fx = Math.floor((this.cx + dir * (this.w / 2 + 2)) / TILE);
-        const fy = Math.floor((this.y + this.h - 1) / TILE);
-        let obsH = 0;
-        for (let k = 0; k < 3; k++) {
-          if (st.isSolid(fx, fy - k)) obsH = k + 1; else break;
-        }
-        const headroom = obsH > 0 && obsH <= 2 && !st.isSolid(fx, fy - obsH) && !st.isSolid(fx, fy - obsH - 1);
-        if (headroom) {
-          // 障碍跳：1 格 -4.6（脚底升 29px）/ 2 格 -6.0（升 50px），慢速横移保证越过块面
-          this.vx = dir * (obsH === 1 ? 1.6 : 1.2);
-          this.vy = obsH === 1 ? -4.6 : -6.0;
+    const grounded = this.onGround || (inWater && Math.abs(this.vy) < 0.8);
+    if (grounded) {
+      // 落地卡墙检测（L61937-61939）：起跳位置没变 = 白跳 → 反转
+      if (this.jumpStartX !== 0 && Math.abs(this.cx - this.jumpStartX) < 1) {
+        this.facing *= -1;
+        this.ai2 = 200;
+      }
+      this.jumpStartX = 0;
+      this.vx *= 0.8;
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      // ai[0] 递增（L61954-61956：基础+1；激愤额外+1；蚱蜢+3）
+      this.ai0 += 1 + (flag3 ? 1 : 0) + (grasshopper ? 3 : 0);
+      // 阶段判定（L62029-62040）
+      const num54 = -1000;
+      let stage = 0;
+      if (this.ai0 >= 0) stage = 1;
+      else if (this.ai0 >= num54 && this.ai0 <= num54 * 0.5) stage = 2;
+      else if (this.ai0 >= num54 * 2 && this.ai0 <= num54 * 1.5) stage = 3;
+      if (stage > 0) {
+        if (stage === 3) {
+          // 大跳（L62055-62059）
+          this.vy = -8;
+          this.vx += 3 * dir;
+          this.ai0 = -200;
         } else {
-          this.vx = dir * (1.6 + dist * 2.6);
-          // 水中起跳加力：跃出水面爬上岸（普通力度会被浮力吃掉困在水里）
-          this.vy = inWater ? -(5.6 + dist * 1.6) : -(4.2 + dist * 2.4);
+          // 小跳（L62062-62070）
+          this.vy = -6;
+          this.vx += 2 * dir;
+          this.ai0 = stage === 1 ? -120 + num54 : -120 + num54 * 2;
         }
-        this.jumpStartX = this.cx;
-        this.state = 1;
-        this.squash = -0.7;
-      }
-    } else {
-      // 空中转向（与主角空操一致）：跳跃中持续朝面向水平加速——
-      // 没有它起跳瞬间 vx 被墙清零后就只剩原地垂直跳，永远出不去
-      this.vx = Math.max(-2.6, Math.min(2.6, this.vx + this.facing * 0.12));
-      const landed = this.onGround && this.vy >= 0 && this.aiT > 10;
-      if (landed || (surfaced && this.aiT > 20)) {
-        // 起跳后几乎没位移（被墙弹回）→ 直接记一次失败，快速累计触发翻面
-        if (Math.abs(this.cx - this.jumpStartX) < 6) this.stuckT += 10;
-        this.state = 0;
-        this.aiT = 0;
+        this.jumpStartX = this.cx;  // ai[3] = position.X（L62059）
       }
     }
+    // 重力+碰撞（原版经由 NPC 碰撞；水中浮力为原版 wet 行为）
     this.groundPhysics(game, 0, 0.12, 1, true);
-    // 卡墙脱困（水中/陆地通用）：撞墙计数用"缓慢衰减"而非硬清零——
-    // 史莱姆是"跳一下撞墙→落回水中漂离"的循环，撞墙帧之间 hitWall 为 false，
-    // 硬重置会让跨跳跃的撞墙永远攒不满阈值。累计 24 → 翻面 + 逃亡冷却
-    // （水中 240 tick：足够连续多跳横渡水域脱离，否则冷却一到又朝墙对面的玩家折返死磕）
-    if (this.stuckCd > 0) this.stuckCd--;
-    if (this.hitWall) {
-      this.stuckT += 3;
-    } else {
-      this.stuckT = Math.max(0, this.stuckT - 1);
-    }
-    if (this.stuckT > 24) {
-      this.stuckT = 0;
-      this.stuckCd = inWater ? 240 : 90;
-      this.facing = -this.facing;
-    }
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
@@ -348,6 +364,26 @@ export class Enemy extends Entity {
     this.vx += dir * 0.08;
     this.vx = Math.max(-0.9, Math.min(0.9, this.vx));
     this.groundPhysics(game, 0);
+    this.slimeColorTick();
+  }
+
+  // ---- AI_001 颜色渐变（NPC.cs:60973-61105）：每 tick (c*19+target)/20 向目标色靠拢 ----
+  // ai[1] = 体内物品 id → 目标色表（蛆/凝胶/铂金币等占位色的 1:1 表）；踩油漆色 lerp 暂缺（无油漆系统）
+  private static SLIME_ITEM_COLORS: Record<number, [number, number, number, number]> = {
+    751: [185, 235, 255, 100], 2: [169, 125, 93, 150], 3: [128, 128, 128, 150], 9: [229, 149, 93, 150],
+    150: [193, 202, 203, 100], 3086: [59, 28, 136, 150], 3081: [138, 145, 170, 150], 147: [189, 159, 139, 150],
+    29: [220, 36, 117, 125], 3609: [232, 172, 162, 150], 3736: [255, 66, 152, 125], 3737: [179, 132, 255, 125],
+    3738: [0, 206, 180, 125], 1345: [200, 200, 200, 50], 5395: [198, 72, 12, 150], 1124: [255, 158, 49, 150],
+    1125: [255, 156, 12, 150], 314: [79, 163, 241, 75], 364: [37, 118, 172, 100], 1104: [227, 52, 14, 100],
+    365: [22, 119, 125, 100], 1105: [205, 30, 199, 100], 366: [173, 15, 13, 100], 1106: [91, 90, 119, 100],
+  };
+
+  private slimeColorTick() {
+    if (this.vanillaId !== 1 || this.ai1 <= 0 || !this.colorRGBA) return;
+    const t = Enemy.SLIME_ITEM_COLORS[this.ai1];
+    if (!t) return;
+    for (let k = 0; k < 3; k++) this.colorRGBA[k] = (this.colorRGBA[k] * 19 + t[k]) / 20;
+    this.colorRGBA[3] = (this.colorRGBA[3] * 19 + t[3]) / 20;
   }
 
   /** AI_003_Fighters 通用核（NPC.cs:24559-24733，剥离 per-type 特例）：
@@ -481,11 +517,14 @@ export class Enemy extends Entity {
     const dist = Math.hypot(dx, dy) || 1;
     const sx = (dx / dist) * maxSpd;
     const sy = (dy / dist) * maxSpd;
-    // 摆动项：ai[0] 的 -200..200 循环用 aiT 取模近似（同周期同幅度）
+    // 摆动项（L17742-17752）：真实 ai[0] 环绕计数（>0 加 vy、|>100| 加 vx、超 200 翻回 -200）
     if (dist > 100) {
-      const wob = (this.aiT % 400) - 200;
-      this.vy += wob > 0 ? 0.023 : -0.023;
-      this.vx += Math.abs(wob) > 100 ? 0.023 : -0.023;
+      this.ai0 += 1;
+      if (this.ai0 > 200) this.ai0 = -200;
+      this.vy += this.ai0 > 0 ? 0.023 : -0.023;
+      this.vx += Math.abs(this.ai0) > 100 ? 0.023 : -0.023;
+    } else {
+      this.ai0 = 0; // 近距无摆动
     }
     // 近距制导（6/94/173/619）
     if (dist < 150 && (isEater || this.vanillaId === 94 || this.vanillaId === 619)) {
@@ -680,7 +719,97 @@ export class Enemy extends Entity {
 
   /** 小动物被动 AI（原版 critter 语义近似）：间歇游荡 + 受击逃离玩家。
    *  各家族原版行为（蚱蜢 ai1 跳/鸟 ai24 飞/蚯蚓 ai66 爬）后续逐族 1:1，先统一温和地面行为 */
+  /** AI_024 鸟（1.4.5.6 NPC.cs:25396+）：三态——0 地面踱步 / 1 飞行 / 2 降落。
+   *  飞行：X 轴同飘浮眼（0.1 步进 ±4 cap）；Y 轴探测前方下方 15 格——
+   *  全空 vy+=0.05 缓沉，受阻 vy-=0.1，近障 5 格内再 -0.2（L25568-25605）；
+   *  撞墙 direction 反转 + 旧速×-0.5（最小 ±3/±1，L25500+）；落水上浮 */
+  private birdAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const oldVx = this.vx, oldVy = this.vy;
+    if (this.ai0 === 0) {
+      // 地面态：重力踱步；玩家贴近/受击 → 起飞（远离方向）
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.onGround && this.aiT % 60 === 0) this.vx = (Math.random() < 0.5 ? -1 : 1) * 0.7;
+      if (this.onGround) this.vx *= 0.85;
+      const flee = player && Math.abs(player.cx - this.cx) < 48;
+      if ((flee || this.iframes > 0) && this.onGround) {
+        this.ai0 = 1;
+        this.vy = -6;
+        if (player) this.facing = player.cx > this.cx ? -1 : 1; // 远离玩家起飞
+      }
+      return;
+    }
+    if (this.ai0 === 2) {
+      // 降落态：缓降，落地回地面
+      this.vx *= 0.98;
+      this.vy = Math.min(this.vy + 0.05, 2);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.onGround) { this.ai0 = 0; this.vx = 0; }
+      return;
+    }
+    // 飞行态：X 轴
+    const dir = this.facing;
+    const cap = 4;
+    if (dir === -1 && this.vx > -cap) {
+      this.vx -= 0.1;
+      if (this.vx > 0) this.vx -= 0.05;
+      if (this.vx < -cap) this.vx = -cap;
+    } else if (dir === 1 && this.vx < cap) {
+      this.vx += 0.1;
+      if (this.vx < 0) this.vx += 0.05;
+      if (this.vx > cap) this.vx = cap;
+    }
+    // Y 轴：前方 15 格下探（L25569-25602）
+    const aheadX = Math.floor(this.cx / TILE) + dir;
+    const footY = Math.floor((this.y + this.h) / TILE);
+    let allClear = true, nearBlock = false;
+    for (let k = 0; k < 15; k++) {
+      const yy = footY + k;
+      if (yy >= st.h) continue;
+      if (st.isSolid(aheadX, yy) || st.liquid[st.idx(aheadX, yy)] > 0) {
+        if (k < 5) nearBlock = true;
+        allClear = false;
+        break;
+      }
+    }
+    if (allClear) this.vy += 0.05;
+    else this.vy -= 0.1;
+    if (nearBlock) this.vy -= 0.2;
+    this.vy = Math.max(-4, Math.min(2, this.vy));
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) {
+      this.facing *= -1;
+      this.vx = -oldVx * 0.5;
+      if (this.facing === -1 && this.vx > 0 && this.vx < cap - 1) this.vx = cap - 1;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -(cap - 1)) this.vx = -(cap - 1);
+    }
+    if (this.hitHead || this.onGround) {
+      this.vy = -oldVy * 0.5;
+      if (this.vy > 0 && this.vy < 1) this.vy = 1;
+      if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    }
+  }
+
+  /** AI_065 蝶/萤（NPC.cs:34488 AI_065_Butterflies）：正弦游荡漂移 */
+  private butterflyAI(game: GameHooks, _player: Player | null) {
+    const t = this.aiT;
+    this.vx = Math.sin(t * 0.03) * 1.5;
+    this.vy = Math.cos(t * 0.05) * 0.8;
+    this.facing = this.vx > 0 ? 1 : -1;
+    this.x += this.vx;
+    this.y += this.vy;
+    if (game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
+      this.vx *= -1; this.vy *= -1;
+      this.x += this.vx * 4; this.y += this.vy * 4;
+    }
+  }
+
   private critterWanderAI(game: GameHooks, player: Player | null) {
+    // 飞行/漂浮家族走专属 AI（鸟 24 / 蝶萤 64/65）；蚱蜢 1 复用 slimeAI（ai0 额外+3）
+    const ai = this.vanilla?.aiStyle ?? 0;
+    if (ai === 24) { this.birdAI(game, player); return; }
+    if (ai === 64 || ai === 65) { this.butterflyAI(game, player); return; }
     // 受击逃离（iframes 刚触发时朝远离玩家方向窜）
     if (this.iframes > 6 && player) {
       const flee = player.cx > this.cx ? -1 : 1;
@@ -984,7 +1113,16 @@ export class Enemy extends Entity {
       for (const d of this.def.drops) {
         if (rng.next() < d.chance) {
           const n = rng.int(d.min, d.max);
-          if (n > 0) game.spawnDrop(this.cx, this.cy, d.item, n, rng.range(-1.5, 1.5), -2);
+          if (n > 0) {
+            const drop = game.spawnDrop(this.cx, this.cy, d.item, n, rng.range(-1.5, 1.5), -2);
+            // 凝胶染色（CommonCode.ModifyItemDropFromNPC）：gel(item 23) 由 type 1 掉落且
+            // netID∉{-1,-2,-5,-6} → item.color = npc.color（当前渐变色）
+            if (drop && d.item === 'gel' && this.vanillaId === 1
+              && this.vanillaNetId !== -1 && this.vanillaNetId !== -2
+              && this.vanillaNetId !== -5 && this.vanillaNetId !== -6 && this.colorRGBA) {
+              drop.color = [...this.colorRGBA];
+            }
+          }
         }
       }
       game.onEnemyKilled(this.key);

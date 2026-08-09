@@ -16,7 +16,7 @@ export interface DeviceCtx {
   /** Item.MechSpawn 近似 */
   itemSpawnOk(px: number, py: number): boolean;
   /** 投射物(飞镖/火焰/尖刺球/炮弹近似):vx/vy px/tick */
-  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'flame' | 'spiky' | 'boulder' | 'geyser'): void;
+  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser'): void;
   /** 统计附近某类投射物数量(尖刺球惩罚表用) */
   countProjectiles(kind: 'spiky', px: number, py: number, radius: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
@@ -29,7 +29,7 @@ export interface DeviceCtx {
   /** 爆炸(炸药/地雷/炮弹):范围伤害+清格+粒子 */
   explode(tx: number, ty: number, damage: number): void;
   toast(msg: string): void;
-  sfx(name: string): void;
+  sfx(name: string, x?: number, y?: number): void; // 带坐标时按距离衰减/超距静音
   /** worldSurface(部分器件判定) */
   worldSurface: number;
 }
@@ -86,7 +86,8 @@ function flipCell(w: Wiring, x: number, y: number, delta: number): void {
   st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
 }
 
-/** 陷阱(137)发射(Wiring.cs:1495-1743)。frameY/18=种类:0飞镖 1火焰 2超钻 3尖刺球 4下向火焰 */
+/** 陷阱(137)发射(Wiring.cs:1495-1743 + Item.cs placeStyle)。frameY/18=种类:
+ *  0飞镖(98) 1超级飞镖(184) 2烈焰(187,隐形+尘埃) 3尖刺球(185) 4长矛(186) */
 function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   const st = w.st;
   const i = st.idx(x, y);
@@ -99,7 +100,7 @@ function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     const speed = kind === 0 ? 12 : kind === 1 ? 12 : 5;
     const dmg = kind === 0 ? 20 : 40;
     const px = x * 16 + 8 + 10 * dirX, py = y * 16 + 8 + 10 * dirY;
-    ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg, kind === 0 ? 'dart' : 'flame');
+    ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg, kind === 0 ? 'dart' : kind === 1 ? 'superdart' : 'flame');
   } else if (kind === 3) {
     // 尖刺球:CheckMech 300 + 同场数量惩罚表(Wiring.cs:1536-1599)
     if (!w.checkMech(x, y, 300)) return;
@@ -128,7 +129,7 @@ function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
       case 2: dy = -1; break;
       case 3: dy = 1; break;
     }
-    ctx.shootProjectile(x * 16 + 8 + 10 * dx, y * 16 + 8 + 10 * dy, dx * 8, dy * 8, 60, 'flame');
+    ctx.shootProjectile(x * 16 + 8 + 10 * dx, y * 16 + 8 + 10 * dy, dx * 8, dy * 8, 60, 'spear');
   }
 }
 
@@ -275,7 +276,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     case 15: { // 马桶(frameY/40 判定,:1194-1204;喷水近似粒子)
       if (Math.floor(st.frameY[i] / 40) !== 1 && Math.floor(st.frameY[i] / 40) !== 20) return true;
-      if (w.checkMech(x, y, 60)) ctx.sfx('splash');
+      if (w.checkMech(x, y, 60)) ctx.sfx('splash', x * 16 + 8, y * 16 + 8);
       return true;
     }
     case 33: case 174: case 49: case 372: // 蜡烛族 frameX ±18(:1472-1480)
@@ -351,7 +352,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     case 216: // 烟花火箭(:1189-1192;近似粒子升空)
       w.skipCell(x, y);
-      ctx.sfx('roar');
+      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
     case 244: // 泡泡机 3×2 frameX ±54(:1272-1293)
       flipBlock(w, x, y, 54, 36, 3, 2, 'x', 54, 54);
@@ -373,11 +374,11 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     case 335: // 烟花盒 2×2(:1294-1304)
       w.skipCell(x, y); w.skipCell(x + 1, y);
-      if (w.checkMech(x, y, 30)) ctx.sfx('roar');
+      if (w.checkMech(x, y, 30)) ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
     case 338: // 烟花喷泉 1×2(:1305-1324)
       w.skipCell(x, y);
-      if (w.checkMech(x, y, 30)) ctx.sfx('roar');
+      if (w.checkMech(x, y, 30)) ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
     case 386: case 387: { // 活板门开/关互换(ShiftTrapdoor;帧近似)
       const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
@@ -441,7 +442,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     case 476: return true; // 高尔夫球洞(无高尔夫系统)
     case 497: // 马桶(frameY/40,同 case 15 分支)
-      if (w.checkMech(x, y, 60)) ctx.sfx('splash');
+      if (w.checkMech(x, y, 60)) ctx.sfx('splash', x * 16 + 8, y * 16 + 8);
       return true;
     case 506: // 巴斯特雕像 2×3 frameX ±72(:2239-2261)
       flipBlock(w, x, y, 72, 54, 2, 3, 'x', 72, 72);
@@ -457,11 +458,11 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       return true;
     case 593: // 小火山 frameX ±18(:1434-1445;动画近似粒子)
       flipCell(w, x, y, 18);
-      ctx.sfx('roar');
+      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
     case 594: // 大火山 2×2 frameX ±36(:1446-1470)
       flipBlock(w, x, y, 72, 36, 2, 2, 'x', 36, 36);
-      ctx.sfx('roar');
+      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
       return true;
   }
   return false;

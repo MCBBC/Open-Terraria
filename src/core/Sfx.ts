@@ -37,6 +37,8 @@ export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
   muted = false;
+  /** 主音量 0..1（M6 设置页） */
+  master = 1;
 
   private extraFiles = new Set<string>();
   /** 追加加载额外 wav 文件（怪物专属声效等） */
@@ -104,14 +106,14 @@ export class Sfx {
     src.buffer = buf;
     src.playbackRate.value = 0.92 + Math.random() * 0.16;
     const g = ctx.createGain();
-    g.gain.value = Math.min(1, vol);
+    g.gain.value = Math.min(1, vol * this.master);
     src.connect(g).connect(ctx.destination);
     src.start();
     return true;
   }
 
   play(name: SfxName, vol = 1) {
-    // 优先原版素材，失败回退合成
+    // 优先原版素材，失败回退合成（master 在 playWavFile/osc 各自生效一次）
     if (this.playWav(name, vol)) return;
     const ctx = this.ensure();
     if (!ctx) return;
@@ -122,7 +124,7 @@ export class Sfx {
       o.type = type;
       o.frequency.setValueAtTime(f0, t + delay);
       o.frequency.exponentialRampToValueAtTime(Math.max(1, f1), t + delay + dur);
-      g.gain.setValueAtTime(vol, t + delay);
+      g.gain.setValueAtTime(vol * this.master, t + delay);
       g.gain.exponentialRampToValueAtTime(0.001, t + delay + dur);
       o.connect(g).connect(ctx.destination);
       o.start(t + delay);

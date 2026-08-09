@@ -202,6 +202,8 @@ export class Game implements GameHooks {
   /** 触发源登记(idx):428 测重板 / 423 感应器 */
   triggerTiles428 = new Set<number>();
   triggerTiles423 = new Set<number>();
+  /** 实体踩板去重键(实体id|格):小动物触发压板 + 巨石触发压板/弹幕垫板 */
+  private entityPlateLatch = new Set<string>();
   /** F7 强制显示导线 */
   forceShowWires = false;
   // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
@@ -601,6 +603,7 @@ export class Game implements GameHooks {
     // ---- 电路系统:冷却注册递减(计时器周期) + 测重板/感应器 ----
     this.wiring?.updateMech();
     this.updateTriggerTiles();
+    this.updateEntityPlates();
 
     // ---- Boss 逻辑 ----
     if (this.boss) {
@@ -1498,7 +1501,8 @@ export class Game implements GameHooks {
       this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
       this.toggleDoor(tx, ty, false);
-    } else if (type === T.CHEST) {
+    } else if (type === T.CHEST || this.wiring?.sheetOf(tx, ty) === 441 || this.wiring?.sheetOf(tx, ty) === 468) {
+      // 陷阱箱 441/468 也走开箱流程(tryOpenChest 内触发电路+射镖)
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
       if (chest) this.tryOpenChest(chest);
@@ -1566,6 +1570,19 @@ export class Game implements GameHooks {
       this.sfx.play('tink');
       this.cb.onToast('用金钥匙打开了宝箱');
       this.cb.onInventoryChanged();
+    }
+    // 陷阱箱 441/468(Player.cs:21303 语义):开启即触发电路 + 向玩家八方射镖
+    const cxy = chest as { x?: number; y?: number };
+    const csh = cxy.x !== undefined && cxy.y !== undefined ? this.wiring?.sheetOf(cxy.x, cxy.y) ?? -1 : -1;
+    if ((csh === 441 || csh === 468) && cxy.x !== undefined && cxy.y !== undefined) {
+      this.wiring?.hitSwitch(cxy.x, cxy.y);
+      const cxp = cxy.x * TILE + 16, cyp = cxy.y * TILE + 16;
+      for (let k = 0; k < 8; k++) {
+        const ang = (k / 8) * Math.PI * 2;
+        this.entities.add(new TrapShot(cxp, cyp, Math.cos(ang) * 6, Math.sin(ang) * 6, 20, 'dart'), 'projectiles');
+      }
+      this.sfx.play('tink');
+      this.cb.onToast('⚠ 这是陷阱箱!');
     }
     this.openChest?.(chest as never);
     this.input.rightDown = false;
@@ -1658,6 +1675,38 @@ export class Game implements GameHooks {
     }
   }
 
+  /** 实体踩板(Collision.SwitchTiles objType 2/3 语义):
+   *  小动物族触发压板 135(NPC.cs:47613 白名单由 critters 桶近似);
+   *  巨石弹幕(原版 type 99,Projectile.cs:11833)触发 135 与弹幕垫板 442 */
+  private updateEntityPlates(): void {
+    const w = this.wiring;
+    if (!w) return;
+    const pressed = new Set<string>();
+    const scan = (e: Entity, checkPad: boolean) => {
+      const x0 = Math.floor(e.x / TILE), x1 = Math.floor((e.x + e.w - 1) / TILE);
+      const y0 = Math.floor(e.y / TILE), y1 = Math.floor((e.y + e.h - 1) / TILE);
+      for (let ty = y0; ty <= y1; ty++) {
+        for (let tx = x0; tx <= x1; tx++) {
+          const sh = w.sheetOf(tx, ty);
+          if (sh === 135 || (checkPad && sh === 442)) {
+            const key = e.id + '|' + tx + ',' + ty;
+            pressed.add(key);
+            if (!this.entityPlateLatch.has(key)) w.hitSwitch(tx, ty);
+          }
+        }
+      }
+    };
+    for (const c of this.entities.critters) scan(c, false);
+    for (const e of this.entities.projectiles) {
+      // duck-typing 判巨石(勿用 instanceof:跨模块实例会判失败)
+      if ((e as TrapShot).kind === 'boulder') scan(e, true);
+    }
+    for (const key of pressed) this.entityPlateLatch.add(key);
+    for (const key of [...this.entityPlateLatch]) {
+      if (!pressed.has(key)) this.entityPlateLatch.delete(key);
+    }
+  }
+
   /** 全图扫描测重板/感应器登记(读档/生成后一次);增量维护见 worldReadyListener */
   private scanTriggerTiles(): void {
     const st = this.world.store;
@@ -1678,6 +1727,15 @@ export class Game implements GameHooks {
       if (t === s423) this.triggerTiles423.add(i);
       else this.triggerTiles423.delete(i);
     });
+  }
+
+  /** 位置感知音效(原版 SoundEngine.PlaySound(type,x,y) 语义):
+   *  超过视野 1.5 倍即静音,范围内线性衰减——世界远处的机关不再全图可闻 */
+  private sfxAt(name: SfxName, x: number, y: number): void {
+    const R = Math.max(this.camera?.viewW ?? 1280, this.camera?.viewH ?? 800) * 1.5;
+    const d = Math.hypot(x - this.player.cx, y - this.player.cy);
+    if (d > R) return;
+    this.sfx.play(name, Math.max(0, 1 - d / R));
   }
 
   /** DeviceCtx:器件表与引擎侧能力对接(devices.ts) */
@@ -1709,9 +1767,9 @@ export class Game implements GameHooks {
         }
         return n < 20;
       },
-      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'flame' | 'spiky' | 'boulder' | 'geyser') => {
+      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser') => {
         this.entities.add(new TrapShot(px, py, vx, vy, damage, kind), 'projectiles');
-        this.sfx.play('tink');
+        this.sfxAt('tink', px, py); // 陷阱发射:按距离衰减
       },
       countProjectiles: (kind: 'spiky', px: number, py: number, radius: number) => {
         let n = 0;
@@ -1746,7 +1804,10 @@ export class Game implements GameHooks {
       },
       explode: (tx: number, ty: number, damage: number) => this.explodeAt(tx, ty, damage),
       toast: (m: string) => this.cb.onToast(m),
-      sfx: (n: string) => this.sfx.play(n as SfxName),
+      sfx: (n: string, x?: number, y?: number) => {
+        if (x !== undefined && y !== undefined) this.sfxAt(n as SfxName, x, y);
+        else this.sfx.play(n as SfxName);
+      },
     };
   }
 
@@ -1794,7 +1855,7 @@ export class Game implements GameHooks {
     const p = this.player;
     if (Math.hypot(p.cx - cx, p.cy - cy) < R * TILE + 16) p.damage(damage, cx, cy);
     this.spawnParticles(cx, cy, '#FFA040', 26, 4);
-    this.sfx.play('roar');
+    this.sfxAt('roar', cx, cy); // 爆炸:按距离衰减
   }
 
   /** 桶三态(Player.cs ItemCheck_Buckets L28137 语义):
@@ -2141,11 +2202,12 @@ export class Game implements GameHooks {
     return this.entities.enemies;
   }
 
-  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2) {
+  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2): ItemDrop | null {
     const id = ITEM_BY_KEY[itemKey];
-    if (id === undefined) return;
+    if (id === undefined) return null;
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
     this.entities.add(drop, 'drops');
+    return drop;
   }
 
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy) {
@@ -2627,6 +2689,10 @@ export class Game implements GameHooks {
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;
     })();
+    // 宏伟蓝图拖拽预览:锚点已按下且鼠标悬停有效格时,把 L 路径交给渲染器
+    this.renderer.grandPreview = this.grandAnchor && hover
+      ? { from: this.grandAnchor, to: [hover.x, hover.y], mode: this.wireToolMode }
+      : null;
     this.renderer.render(
       cam, this.world, this.world.clock, this.chunks,
       L.r, L.g, L.b, L.rx, L.ry, L.rw, L.rh,

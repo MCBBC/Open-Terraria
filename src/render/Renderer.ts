@@ -7,6 +7,8 @@ import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { TOOL_CUTTER } from '../world/Wiring';
+import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
@@ -310,6 +312,8 @@ export class Renderer {
 
     // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)
     this.drawWires(world, cam, viewW, viewH, z);
+    // 2c''. 宏伟蓝图拖拽预览(锚点→悬停格的 L 路径,与 massWireOperation 同构:先纵后横+端点)
+    this.drawGrandPreview();
 
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
@@ -439,6 +443,8 @@ export class Renderer {
 
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
   showWires = false;
+  /** 宏伟蓝图拖拽预览(Game.render 注入;世界坐标 tile) */
+  grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
   private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
     if (!this.showWires || !this.atlas) return;
     const wires = this.atlas.vimages.get('vanilla/WiresNew.png');
@@ -485,6 +491,31 @@ export class Renderer {
         }
       }
     }
+  }
+
+  /** 宏伟蓝图 L 路径预览:先纵后横 + 端点(massWireOperation dir=true 同构);
+   *  剪线=蓝、致动器=绿、四色铺线=红,半透明格覆盖 */
+  private drawGrandPreview() {
+    const gp = this.grandPreview;
+    if (!gp) return;
+    const ctx = this.ctx;
+    const ts = TILE;
+    const cells: Array<[number, number]> = [];
+    const [fx, fy] = gp.from;
+    const [tx, ty] = gp.to;
+    const sy = Math.sign(ty - fy), sx = Math.sign(tx - fx);
+    for (let y = fy; y !== ty; y += sy) cells.push([fx, y]);
+    for (let x = fx; x !== tx; x += sx) cells.push([x, ty]);
+    cells.push([tx, ty]);
+    const color = gp.mode & TOOL_CUTTER
+      ? 'rgba(140,160,255,0.30)'
+      : (gp.mode & 15) === 0 ? 'rgba(80,220,120,0.30)' // 仅致动器
+        : 'rgba(255,70,70,0.30)';
+    ctx.fillStyle = color;
+    for (const [x, y] of cells) ctx.fillRect(x * ts, y * ts, ts, ts);
+    ctx.strokeStyle = 'rgba(255,255,255,0.8)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(tx * ts + 0.5, ty * ts + 0.5, ts - 1, ts - 1);
   }
 
   /** 瀑布贴图（tile 层后、实体前；扫描窗口外扩 100 格在内部，30 帧节流） */
@@ -584,7 +615,13 @@ export class Renderer {
     // 优先 Maples 图标
     const ar = this.atlasIcon(d.itemId);
     if (ar) {
-      this.ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, 14 * ar.sh / ar.sw);
+      // 原版 Item.color（彩色凝胶等）：同贴图逐像素乘 color，贴轮廓（Item.GetAlpha 同 NPC 机制）
+      if (d.color && d.color[3] > 0) {
+        const tinted = this.tintedSprite(`item${d.itemId}`, ar, d.color);
+        this.ctx.drawImage(tinted, d.x, d.y + bob, 14, 14 * ar.sh / ar.sw);
+      } else {
+        this.ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, 14 * ar.sh / ar.sw);
+      }
       return;
     }
     const icon = this.itemIcon(d.itemId);
@@ -628,14 +665,17 @@ export class Renderer {
         ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
         ctx.scale(scale, scale);
         if (e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
-        // 原版 alpha = 出生淡入（逐 tick 衰减到 0），非永久半透明——Enemy.spawnAlpha 已衰减
-        ctx.globalAlpha = Math.min(1, Math.max(e.spawnAlpha / 255, 0));
-        // 原版 color 字段（绿史莱姆 -3 的 Color(0,220,40,100) 等）：乘法着色精灵像素
+        // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
+        // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
+        ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
-        if (e.tint) {
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = e.tint;
-          ctx.fillRect(-r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+        // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
+        // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
+        // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
+        if (e.colorRGBA && e.colorRGBA[3] > 0) {
+          const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
+          ctx.globalAlpha = 1;
+          ctx.drawImage(tinted, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
         }
         ctx.restore();
         ctx.globalAlpha = 1;
@@ -802,7 +842,9 @@ export class Renderer {
         ctx.save();
         ctx.translate(n.cx, n.y + n.h); // 脚底中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
+        if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh, r.sw, r.sh);
+        ctx.filter = 'none';
         ctx.restore();
         this.drawNpcBubble(n);
         return;
@@ -876,9 +918,21 @@ export class Renderer {
     ctx.translate(p.cx - p.facing * 2.5, p.y + p.h + p.stepRenderY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
-    // ---- Maples 主角帧（40×58，Run 11 帧循环）----
+    // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
     let drawn = false;
-    if (this.atlas) {
+    if (p.appearance) {
+      const doll = compositePaperDoll(p.appearance);
+      if (doll) {
+        let row = 0; // 0 站立
+        if (swing) row = 3;
+        else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
+        else if (Math.abs(p.vx) > 0.3) row = 6 + Math.floor(p.animTime / 6) % 14; // 行走循环 6-19
+        const f = dollFrame(doll, row);
+        ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh, f.sw, f.sh);
+        drawn = true;
+      }
+    }
+    if (!drawn && this.atlas) {
       const idle = this.atlas.rect('角色/Player.png', 'Player_0');
       const runFrames = this.runFramesCache ??= this.atlas.animFrames('Player/Run');
       // 动作帧池（Player.png 12-22 号帧）
@@ -1027,6 +1081,41 @@ export class Renderer {
 
   /** 精灵底部透明留白行数（缓存）：用于脚底对齐 */
   private bottomPadCache = new Map<string, number>();
+
+  /** 逐像素染色缓存（原版 XNA SpriteBatch 的 color 乘法等价实现）：
+   *  ① multiply 把 RGB 乘上 color —— 但 canvas multiply 会把精灵透明区也铺色（方形伪影）
+   *  ② destination-in 重画精灵本体 → alpha 恢复为精灵轮廓，裁掉①的方形
+   *  ③ destination-in 再乘 color.A/255 → 整体强度（GetColor 的 alpha 通道）
+   *  （GetColor 二次绘制语义，Main.cs:24527 / NPC.cs:94903） */
+  private tintCache = new Map<string, HTMLCanvasElement>();
+  private tintedSprite(
+    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, color: number[],
+  ): HTMLCanvasElement {
+    const k = `${key}|${frame.sx},${frame.sy},${frame.sw},${frame.sh}|${color.join(',')}`;
+    let c = this.tintCache.get(k);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = Math.max(1, frame.sw);
+    c.height = Math.max(1, frame.sh);
+    const cx = c.getContext('2d')!;
+    cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
+    // ① RGB 乘 color（multiply 的 alpha 取并集 → 透明区被铺色，下一步裁掉）
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${color[0]},${color[1]},${color[2]})`;
+    cx.fillRect(0, 0, c.width, c.height);
+    // ② 用精灵本体当 destination-in 的源：alpha 恢复为轮廓形状
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(frame.img, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
+    // ③ 整体 alpha × color.A/255
+    cx.globalAlpha = color[3] / 255;
+    cx.fillStyle = '#000';
+    cx.fillRect(0, 0, c.width, c.height);
+    cx.globalAlpha = 1;
+    cx.globalCompositeOperation = 'source-over';
+    if (this.tintCache.size > 1024) this.tintCache.clear();
+    this.tintCache.set(k, c);
+    return c;
+  }
   private spriteBottomPad(frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }): number {
     const key = `${frame.img instanceof HTMLCanvasElement ? 'c' : 'i'}:${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
     let pad = this.bottomPadCache.get(key);

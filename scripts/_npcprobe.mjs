@@ -7,8 +7,7 @@ const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
-await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
-await page.click('button');
+await page.evaluate(() => { const _s = document.querySelector('select'); _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); });
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
 await new Promise((r) => setTimeout(r, 1500));
 

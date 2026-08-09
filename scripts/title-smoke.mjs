@@ -12,7 +12,7 @@ page.on('pageerror', (e) => errors.push(e.message));
 
 await page.goto(URL, { waitUntil: 'domcontentloaded', timeout: 60000 });
 // 全量素材加载较慢（6000+ PNG），给足等待
-await page.waitForFunction(() => window.__swVUI && window.__swVUI.ui && window.__swVUI.ui.current, { timeout: 120000 });
+await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await new Promise((r) => setTimeout(r, 800));
 mkdirSync('shots', { recursive: true });
 await page.screenshot({ path: 'shots/m1-title.png' });

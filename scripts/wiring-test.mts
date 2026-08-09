@@ -248,5 +248,23 @@ console.log('== 12. 接线灯光照门控:关灯帧不再发光 ==');
   check('非灯器件恒亮', lightIsOn(137, 999, 999) === true);
 }
 
+console.log('== 13. 器件音效坐标透传(距离衰减前提) ==');
+{
+  const { st, wr } = makeWorld();
+  const sfxCalls: Array<[string, number?, number?]> = [];
+  const base = stubCtx();
+  wr.device = (ww, sheet, x, y) => deviceTable(ww, {
+    ...base,
+    sfx: (n: string, sx?: number, sy?: number) => { sfxCalls.push([n, sx, sy]); },
+  } as never, sheet, x, y);
+  const FW = TILE_BY_KEY['v_216_firework']!;
+  st.setTileSilent(8, 30, LEVER, 0, 0);
+  st.setTileSilent(12, 30, FW, 0, 0); // 烟花:deviceTable case 216 直调 ctx.sfx('roar', x, y)
+  for (let x = 8; x <= 12; x++) st.wire[st.idx(x, 30)] |= R;
+  wr.hitSwitch(8, 30);
+  const roar = sfxCalls.find((c) => c[0] === 'roar');
+  check('器件 sfx 携带世界坐标', !!roar && roar[1] === 12 * 16 + 8 && roar[2] === 30 * 16 + 8, roar);
+}
+
 console.log(`\n结果: ${pass} 通过, ${fail} 失败`);
 process.exit(fail ? 1 : 0);

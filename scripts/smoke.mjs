@@ -26,9 +26,11 @@ const seedInput = await page.$('input');
 if (seedInput) await seedInput.type('smoketest');
 await page.evaluate(() => {
   const sel = document.querySelector('select');
-  if (sel) sel.selectedIndex = 0; // 小世界
+  if (sel) {
+    sel.selectedIndex = 0; // 小世界
+    sel.parentElement.querySelector('button').click(); // vui 菜单后垫片按钮在 select 父容器内
+  }
 });
-await page.click('button');
 await page.waitForFunction(() => !document.querySelector('.sw-progress'), { timeout: 60000 });
 await new Promise((r) => setTimeout(r, 2500));
 await page.screenshot({ path: `${OUT}/01-spawn.png` });

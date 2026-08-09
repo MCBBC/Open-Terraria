@@ -63,7 +63,10 @@ export interface VanillaNpc {
   HitSound: string;   // SoundID 名（NPCHitN / NPCDeathN）
   DeathSound: string;
   scale: number;
-  alpha?: number;     // 出生透明度（史莱姆 120-175 半透明）
+  /** SetDefaults alpha：每类型静态不透明度基线（渲染 1-alpha/255，NPC.Opacity；无通用渐隐） */
+  alpha?: number;
+  /** SetDefaults color：非 default 时 Main.DrawNPC 二次绘制同贴图（GetColor 逐像素乘法贴轮廓） */
+  color?: number[];  // [r, g, b, a]
   critter?: boolean;  // NPCID.Sets.CountsAsCritter 小动物（tools/extract-critters.mjs 提取）
 }
 

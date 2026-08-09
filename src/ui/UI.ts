@@ -466,9 +466,9 @@ export class UI {
 
   buildHud(game: Game) {
     this.game = game;
-    // 快捷栏
+    // 快捷栏（原版位置：左上角，首行与背包对齐）
     this.hotbarEl = el('div');
-    this.hotbarEl.style.cssText = 'pointer-events:auto; position:fixed; bottom:12px; left:50%; transform:translateX(-50%); display:flex; gap:5px;';
+    this.hotbarEl.style.cssText = 'pointer-events:auto; position:fixed; top:14px; left:14px; display:flex; gap:2px;';
     for (let i = 0; i < 10; i++) {
       this.hotbarEl.appendChild(this.makeSlotEl(i, 'inv'));
     }
@@ -479,16 +479,6 @@ export class UI {
     this.tooltip = el('div', 'sw-tooltip');
     this.tooltip.style.display = 'none';
     this.root.appendChild(this.tooltip);
-
-    // 背包入口按钮（#12）
-    const bag = el('button', 'sw-btn', '🎒 背包 (E)');
-    bag.style.cssText = 'pointer-events:auto; position:fixed; right:14px; bottom:14px; width:auto; margin:0; font-size:14px; z-index:11;';
-    bag.onclick = (ev) => {
-      ev.stopPropagation();
-      if (this.invPanel.style.display === 'block') this.closeInventory();
-      else this.openInventory();
-    };
-    this.root.appendChild(bag);
 
     game.openChest = (c) => this.openChestPanel(c);
   }
@@ -1023,7 +1013,7 @@ export class UI {
 
   // ============ 暂停菜单 ============
 
-  showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void }) {
+  showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void; onSettings?: () => void }) {
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:280px;';
     panel.appendChild(el('div', 'sw-title', '已暂停'));
@@ -1031,9 +1021,11 @@ export class UI {
     bRes.onclick = () => { panel.remove(); handlers.onResume(); };
     const bSave = el('button', 'sw-btn', '保存存档');
     bSave.onclick = () => handlers.onSave();
+    const bSet = el('button', 'sw-btn', '设置');
+    bSet.onclick = () => handlers.onSettings?.();
     const bQuit = el('button', 'sw-btn', '回到主菜单');
     bQuit.onclick = () => { panel.remove(); handlers.onQuit(); };
-    panel.append(bRes, bSave, bQuit);
+    panel.append(bRes, bSave, bSet, bQuit);
     this.root.appendChild(panel);
     return panel;
   }

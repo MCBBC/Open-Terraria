@@ -4,8 +4,10 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { placeFurn } from './DungeonPass';
 
 const SWORD_TILE = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
+const FAKE_TILE = TILE_BY_KEY['v_186_decos_3x2']!;
 const VINE = TILE_BY_KEY['v_52_vines']!;
 
 export function runSwordShrinePass(st: TileStore, rng: RNG, gs: GenState): void {
@@ -80,11 +82,18 @@ export function runSwordShrinePass(st: TileStore, rng: RNG, gs: GenState): void 
       st.type[i] = 0; st.flags[i] = 0;
       st.liquid[i] = 0;
     }
-    // 剑插土丘顶(真 1/3:187 style17,假:186 style15 → v_187 帧 15*36 近似)——
-    // 必须在竖井之后放,否则被同列清理删掉
+    // 剑插土丘上方(cs L76-78):真 1/3 → tile187 style17,假 → tile186 style15。
+    // 原版 PlaceTile force=true 强制覆盖;3×2 完整放置(底行锚点,居中),
+    // 样式步长 fw*18=54(此前单格残件 + 36 步长 + 净空校验致常年放不上)
     const real = rng.next() < 1 / 3;
-    if (st.inBounds(x, sy - 10)) {
-      st.setTileSilent(x, sy - 10, SWORD_TILE, (real ? 17 : 15) * 36, 0);
+    const swordTile = real ? SWORD_TILE : FAKE_TILE;
+    const swordStyle = real ? 17 : 15;
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (st.inBounds(x - 1 + dx, sy - 13 + dy)) {
+          st.setTileSilent(x - 1 + dx, sy - 13 + dy, swordTile, swordStyle * 54 + dx * 18, dy * 18);
+        }
+      }
     }
     return; // 每世界一处足矣
   }

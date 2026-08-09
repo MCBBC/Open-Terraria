@@ -11,6 +11,7 @@ import { RNG } from '../../core/rng';
 import type { World } from '../World';
 import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { Enemy } from '../../entities/Enemy';
+import { debugPoolOverride } from '../../data/vanillaNpcs';
 
 // ---- 原版 tile type 常量（TileID），我们通过 TILE_BY_KEY 反查内部 id ----
 const T = (() => {
@@ -40,17 +41,21 @@ export function rollCavernMonsterType(rng: RNG): void {
 }
 
 // ---- 原版 netID（负数）→ SetDefaultsFromNetId（L7633-7820）：基底 id + scale + 属性覆盖 ----
-const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number; color?: string }> = {
+// scale/color/alpha 一律取源数据（public/sprites/vanilla-npcnetid.json，extract-npccolors.mjs 提取）
+import vanillaNetIdJson from '../../../public/sprites/vanilla-npcnetid.json';
+const NET_ID_OVERRIDE: Record<string, { scale?: number; color?: number[]; alpha?: number }> = vanillaNetIdJson;
+
+const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg?: number; def?: number }> = {
   '-1': { base: 16, scale: 0.6, hp: 90, dmg: 45, def: 10 },   // 母史莱姆
   '-2': { base: 16, scale: 0.9, hp: 90, dmg: 45, def: 20 },
-  '-3': { base: 1, scale: 0.9, hp: 14, dmg: 6, def: 0, color: '#00DC28' },   // 绿史莱姆
-  '-4': { base: 1, scale: 0.6, hp: 150, dmg: 5, def: 5, color: '#FA1E5A' },
-  '-5': { base: 1, scale: 0.9, hp: 30, dmg: 13, def: 4, color: '#000000' },  // 黑史莱姆
-  '-6': { base: 1, scale: 1.05, hp: 45, dmg: 15, def: 4, color: '#000000' },
-  '-7': { base: 1, scale: 1.2, hp: 40, dmg: 12, def: 6, color: '#C800FF' },
-  '-8': { base: 1, scale: 1.025, hp: 35, dmg: 12, def: 4, color: '#FF1E00' }, // 红（母史莱姆子代）
-  '-9': { base: 1, scale: 1.2, hp: 45, dmg: 15, def: 7, color: '#FFFF00' },   // 黄
-  '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6, color: '#8FD75D' },  // 丛林
+  '-3': { base: 1, scale: 0.9, hp: 14, dmg: 6, def: 0 },   // 绿史莱姆
+  '-4': { base: 1, scale: 0.6, hp: 150, dmg: 5, def: 5 },
+  '-5': { base: 1, scale: 0.9, hp: 30, dmg: 13, def: 4 },  // 黑史莱姆
+  '-6': { base: 1, scale: 1.05, hp: 45, dmg: 15, def: 4 },
+  '-7': { base: 1, scale: 1.2, hp: 40, dmg: 12, def: 6 },
+  '-8': { base: 1, scale: 1.025, hp: 35, dmg: 12, def: 4 }, // 红（母史莱姆子代）
+  '-9': { base: 1, scale: 1.2, hp: 45, dmg: 15, def: 7 },   // 黄
+  '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6 },  // 丛林
   '-11': { base: 6, scale: 0.85 },   // 小噬魂怪
   '-12': { base: 6, scale: 1.15 },   // 大噬魂怪
   '-15': { base: 1, scale: 1.15 },   // 史莱姆王子
@@ -100,13 +105,19 @@ export class VanillaSpawner {
     const baseId = map?.base ?? netId;
     const e = Enemy.fromVanilla(baseId, x, y);
     if (!e) return null;
+    const ov = NET_ID_OVERRIDE[String(netId)];
+    e.vanillaNetId = netId;
     if (map) {
-      e.vanillaScale = map.scale;             // scale 作用于渲染+碰撞盒
+      e.vanillaScale = ov?.scale ?? map.scale;   // scale 优先源数据（SetDefaults_ForNetId 第 3 参）
       if (map.hp != null) e.hp = e.maxHp = map.hp;
       if (map.dmg != null) e.def.damage = map.dmg;
       if (map.def != null) e.def.defense = map.def;
-      if (map.color) e.tint = map.color;       // 史莱姆变种色（原版 color 字段）
+    } else if (ov?.scale != null) {
+      e.vanillaScale = ov.scale;
     }
+    // SetDefaultsFromNetId 覆盖 color/alpha（L7633+：color = new Color(...) / alpha = N）
+    if (ov?.color) e.colorRGBA = [ov.color[0], ov.color[1], ov.color[2], ov.color[3] ?? 255];
+    if (ov?.alpha != null) e.spawnAlpha = ov.alpha;
     e.id = this.world.store.w; // 占位，Game 侧会重编
     return e;
   }
@@ -411,6 +422,11 @@ export class VanillaSpawner {
     if (!this.findSpawnTile(rng, viewHalfW, viewHalfH)) return null;
     this.currentSpawnX = this.spawnTileX;
     this.currentSpawnY = this.spawnTileY;
+    // 探针调试覆盖：debugPoolOverride 非空时绕过原版链直接从池选（确定性验证）
+    if (debugPoolOverride && debugPoolOverride.length) {
+      return this.spawnNPC(this.spawnTileX * 16 + 8, this.spawnTileY * 16,
+        debugPoolOverride[rng.int(0, debugPoolOverride.length - 1)], rng);
+    }
     return this.spawnAnNPC(rng);
   }
 }

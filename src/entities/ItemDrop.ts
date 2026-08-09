@@ -12,6 +12,8 @@ export class ItemDrop extends Entity {
   stack: number;
   age = 0;
   bobPhase: number;
+  /** 原版 Item.color（凝胶等掉落继承怪物色，逐像素乘法贴轮廓渲染） */
+  color?: number[]; // [r, g, b, a]
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();

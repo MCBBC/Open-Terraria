@@ -10,18 +10,19 @@ import { ITEM_BY_KEY } from './data/items';
 import { parseWldToSave } from './wld/WldImport';
 import { INV_SIZE } from './items/Inventory';
 import { VUI } from './vui/VUI';
-import { TitleState } from './vui/states/TitleState';
-import { DataState } from './vui/states/DataState';
-import { UICharacterSelectState } from './vui/states/UICharacterSelectState';
+import { TitleMenu } from './ui/TitleMenu';
+import { SettingsPanel } from './ui/Settings';
+import { CharSelectPanel } from './ui/CharSelect';
+import { WorldSelectPanel } from './ui/WorldSelect';
+import { WorldCreationPanel } from './ui/WorldCreation';
 import { CharCreation } from './ui/CharCreation';
-import { UIWorldSelectState } from './vui/states/UIWorldSelectState';
-import { UIWorldCreationState } from './vui/states/UIWorldCreationState';
 import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
-import { UIInventoryState } from './vui/states/UIInventoryState';
-import { HotbarState } from './vui/states/HotbarState';
 import { MenuBackground } from './render/MenuBackground';
 import { CharacterStore } from './save/CharacterStore';
 import { WorldStore, type WorldMeta } from './save/WorldStore';
+import { options } from './core/Options';
+import { UIScale } from './vui/draw/UIScale';
+import { UISfx } from './vui/UISfx';
 import type { Appearance } from './player/Appearance';
 
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
@@ -35,9 +36,7 @@ export interface FlowHandle {
   importWld(buf: Uint8Array): Promise<void>;
   quitToMenu(): void;
   doSave(): void;
-  toggleInventory(): void;
-  closeInventory(): void;
-  isInventoryOpen(): boolean;
+  openSettings(inGame: boolean): void;
   game: Game | null;
   playStart: number;
 }
@@ -47,10 +46,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let playStart = 0;
   let menuBg: MenuBackground | null = null;
   let menuRunning = false;
-  let uiLoopRunning = false;
-  let lastFrame = 0;
-  let rafId = 0;
+  let titleMenu: TitleMenu | null = null;
   let devMode = false;
+  // 设置项加载 + 下发（M6）
+  void options.load();
+  options.onChange((d) => {
+    audio.setVolume(d.musicVol);
+    UISfx.sfx.master = d.sfxVol;
+    UIScale.userScale = d.uiScale;
+    devMode = d.devMode;
+  });
   let quickSaveExists = false;
   let selectedAppearance: Appearance | null = null;
   let currentWorld: WorldMeta | null = null;
@@ -76,44 +81,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     (window as unknown as { __swGame: Game }).__swGame = g;
     playStart = Date.now();
     stopMenu();
+    titleMenu?.destroy();
+    titleMenu = null;
     ui.game = g;
-    ui.initInGameLite(); // DOM 只保留 Buff 栏/Toast；快捷栏与背包已 Canvas 化（M5）
-    // 游戏内 VUI：常驻快捷栏
-    VUI.setState(new HotbarState(g));
-    // 宝箱钩子 → 打开 Canvas 背包（带宝箱格）
-    g.openChest = (c) => {
-      VUI.setState(new UIInventoryState(g, c));
-      g.input.uiBlocking = true;
-    };
+    ui.initInGame(); // DOM 版游戏内 UI（道具栏/背包/合成/宝箱/Buff）——用户指定 web 技术路线
     g.start();
     audio.play('main');
     ui.toast(`欢迎来到 ${g.world.name}！A/D 移动，空格跳跃，E 背包，Esc 暂停`);
-  }
-
-  /** E 键开关背包（M5 Canvas 版） */
-  function toggleInventory() {
-    if (!game) return;
-    if (VUI.ui.current instanceof UIInventoryState) {
-      closeInventory();
-    } else {
-      VUI.setState(new UIInventoryState(game));
-      game.input.uiBlocking = true;
-    }
-  }
-
-  function closeInventory() {
-    if (!game) return;
-    const st = VUI.ui.current;
-    if (st instanceof UIInventoryState) {
-      const held = st.onClose();
-      if (held) game.player.inv.add(held.id, held.stack);
-    }
-    VUI.setState(new HotbarState(game));
-    game.input.uiBlocking = false;
-  }
-
-  function isInventoryOpen(): boolean {
-    return VUI.ui.current instanceof UIInventoryState;
   }
 
   function maybeDev(g: Game) {
@@ -126,8 +100,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function makeGame(): Game {
     const g = new Game(root, {
       onWorldReady: () => { ui.hideProgress(); enterGame(g); maybeDev(g); applyAppearance(g); },
-      // M5：背包/合成已 Canvas 化（每帧自绘），DOM 刷新仅剩 Buff 栏
-      onInventoryChanged: () => { /* Canvas UI 自绘 */ },
+      onInventoryChanged: () => ui.refreshAll(),
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
       onDayNight: (isDay) => audio.setDayNight(isDay),
@@ -201,46 +174,33 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   // ---- 菜单 ----
 
-  /** 统一 UI 循环（菜单/游戏共用，进程级常驻） */
-  function ensureUiLoop() {
-    if (uiLoopRunning) return;
-    uiLoopRunning = true;
-    lastFrame = performance.now();
-    const loop = () => {
-      const now = performance.now();
-      const dt = Math.min(100, now - lastFrame);
-      lastFrame = now;
-      menuBg?.tick(dt);
-      VUI.frame(dt);
-      // 游戏内输入分流：背包全屏捕获 或 悬停 UI 元素（快捷栏格）时屏蔽游戏输入
-      if (game) {
-        game.input.uiBlocking = VUI.ui.current instanceof UIInventoryState || !!VUI.elementUnderMouse();
-      }
-      rafId = requestAnimationFrame(loop);
-    };
-    rafId = requestAnimationFrame(loop);
-  }
+  /** 帧回调注入 VUI 自愈循环（VUI.startLoop 持有 rAF，HMR 杀不死） */
+  VUI.frameHook = (dt) => {
+    menuBg?.tick(dt);
+  };
 
   function stopMenu() {
     menuBg?.destroy();
     menuBg = null;
     legacyShim?.remove();
     legacyShim = null;
-    // 进游戏前清空菜单 UI（游戏内由 HotbarState/背包接管）
+    // 进游戏前清空 VUI（游戏内 UI 走 DOM，生成页仍用 VUI）
     VUI.setState(null);
     VUI.clear();
   }
 
+  /** 角色列表（DOM）。切页前清 VUI 防穿透 */
   function showCharacterSelect() {
-    VUI.setState(new UICharacterSelectState(charStore, {
-      onSelect: (a) => {
+    VUI.setState(null);
+    VUI.clear();
+    titleMenu?.destroy();
+    titleMenu = null;
+    new CharSelectPanel(root, charStore, {
+      onPlay: (a) => {
         selectedAppearance = a;
         showWorldSelect();
       },
       onNew: () => {
-        // DOM 版创建页（手绘 Canvas 版命中/交互脆弱，已废弃）
-        VUI.setState(null);
-        VUI.clear();
         new CharCreation(root, {
           onCreate: async (a) => {
             await charStore.create(a);
@@ -250,20 +210,26 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         });
       },
       onBack: () => showTitle(),
-    }));
+    });
   }
 
+  /** 世界列表（DOM） */
   function showWorldSelect() {
-    VUI.setState(new UIWorldSelectState(worldStore, {
+    VUI.setState(null);
+    VUI.clear();
+    new WorldSelectPanel(root, worldStore, {
       onPlay: (meta) => void loadWorldFlow(meta),
       onNew: () => {
-        VUI.setState(new UIWorldCreationState({
+        // 世界创建页（DOM）
+        VUI.setState(null);
+        VUI.clear();
+        new WorldCreationPanel(root, {
           onCreate: (cfg) => void createWorldFlow(cfg),
           onCancel: () => showWorldSelect(),
-        }));
+        });
       },
       onBack: () => showCharacterSelect(),
-    }));
+    });
   }
 
   /** 从世界槽位读取并进入游戏 */
@@ -295,48 +261,53 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doSave();
   }
 
+  /** 设置面板（主菜单含数据栏；游戏内不显示数据栏） */
+  function openSettings(inGame: boolean) {
+    new SettingsPanel(root, {
+      ...(inGame ? {} : {
+        onQuickLoad: () => void quickLoad(),
+        onLoadFile: () => {
+          fileInput.onchange = () => {
+            const f = fileInput.files?.[0];
+            if (f) void f.text().then(loadFromJson);
+            fileInput.value = '';
+          };
+          fileInput.click();
+        },
+        onImportWld: () => {
+          wldInput.onchange = () => {
+            const f = wldInput.files?.[0];
+            if (f) void f.arrayBuffer().then((ab) => importWld(new Uint8Array(ab)));
+            wldInput.value = '';
+          };
+          wldInput.click();
+        },
+      }),
+      onBack: () => { /* 面板自毁 */ },
+    });
+  }
+
   function showTitle() {
     audio.play('title');
     ui.closeAll();
     if (!menuBg) menuBg = new MenuBackground(root);
-    VUI.setState(new TitleState({
+    titleMenu?.destroy();
+    titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => showCharacterSelect(),
-      onSettings: () => {
-        VUI.setState(new DataState({
-          onQuickLoad: () => void quickLoad(),
-          onLoadFile: () => {
-            fileInput.onchange = () => {
-              const f = fileInput.files?.[0];
-              if (f) void f.text().then(loadFromJson);
-              fileInput.value = '';
-            };
-            fileInput.click();
-          },
-          onImportWld: () => {
-            wldInput.onchange = () => {
-              const f = wldInput.files?.[0];
-              if (f) void f.arrayBuffer().then((ab) => importWld(new Uint8Array(ab)));
-              wldInput.value = '';
-            };
-            wldInput.click();
-          },
-          devMode,
-          onToggleDev: () => { devMode = !devMode; },
-          onBack: () => VUI.goBack(),
-        }));
-      },
+      onSettings: () => openSettings(false),
       onQuit: () => ui.toast('网页版暂不支持退出，直接关闭标签页即可'),
       onCredits: () => ui.toast('SandboxWorld · 泰拉瑞亚 UI 复刻'),
-    }));
+    });
     installLegacyShim();
-    ensureUiLoop();
   }
 
-  /** 旧 puppeteer 脚本兼容垫片：select(尺寸)+button(创建) 隐藏 DOM（M7 移除） */
+  /** 旧 puppeteer 脚本兼容垫片：select(尺寸)+button(创建) 隐藏 DOM（M7 移除）。
+   *  挂 root 末尾（在天空画布之上）；标题页按钮在屏幕中央不与垫片（左上角）重叠，
+   *  querySelector('button') 仍命中垫片——旧探针脚本零修改。 */
   function installLegacyShim() {
     if (legacyShim) return;
     const div = document.createElement('div');
-    div.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:0.01;z-index:0;';
+    div.style.cssText = 'position:absolute;left:0;top:0;width:2px;height:2px;opacity:0.01;z-index:1;';
     const sel = document.createElement('select');
     sel.innerHTML = '<option value="4200x1200">小</option><option value="6400x1800" selected>中</option><option value="8400x2400">大</option>';
     const btn = document.createElement('button');
@@ -389,9 +360,6 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     quitToMenu,
     backToTitle: showTitle,
     devMode: () => devMode,
-    toggleInventory,
-    closeInventory,
-    isInventoryOpen,
   };
 
   return {
@@ -401,9 +369,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     importWld,
     quitToMenu,
     doSave,
-    toggleInventory,
-    closeInventory,
-    isInventoryOpen,
+    openSettings,
     get game() { return game; },
     playStart: 0,
     get playStartNow() { return Date.now() - playStart; },

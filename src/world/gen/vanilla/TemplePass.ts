@@ -6,6 +6,7 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { ITEM_BY_KEY } from '../../../data/items';
 import { placeDoorClosed } from '../../Door';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
@@ -383,11 +384,13 @@ export function runTemplePass(
     if (st.wall[st.idx(bx, by)] !== 87 || st.flags[st.idx(bx, by)]) continue;
     if (!st.inBounds(bx + 1, by + 1)) continue;
     if (st.flags[st.idx(bx + 1, by)] || st.flags[st.idx(bx, by + 1)] || st.flags[st.idx(bx + 1, by + 1)]) continue;
-    st.setTileSilent(bx, by, CHEST, 0, 0);
-    st.setTileSilent(bx + 1, by, CHEST, 18, 0);
-    st.setTileSilent(bx, by + 1, CHEST, 0, 18);
-    st.setTileSilent(bx + 1, by + 1, CHEST, 18, 18);
-    chests.push({ x: bx, y: by, items: Array(10).fill(null) });
+    // cs L17876-17880:style16 Lihzahrd 箱,每箱含蜥蜴能量电池(1293)
+    st.setTileSilent(bx, by, CHEST, 16 * 36, 0);
+    st.setTileSilent(bx + 1, by, CHEST, 16 * 36 + 18, 0);
+    st.setTileSilent(bx, by + 1, CHEST, 16 * 36, 18);
+    st.setTileSilent(bx + 1, by + 1, CHEST, 16 * 36 + 18, 18);
+    const cellId = ITEM_BY_KEY['vi_1293_lihzahrd_power_cell'];
+    chests.push({ x: bx, y: by, items: cellId !== undefined ? [{ id: cellId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null) });
   }
   void altarPlaced;
 
