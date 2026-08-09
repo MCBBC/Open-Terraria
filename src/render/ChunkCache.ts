@@ -166,6 +166,10 @@ export class ChunkCache {
         const type = st.type[i];
         // 原版语义:非活性格不渲染(TileRunner 会给空气格写幽灵 type)
         if (type === 0 || !st.flags[i]) continue;
+        // 已致动(inActive):幽灵态淡显(原版 DrawInactiveSorter,Main.cs:2828 附近)
+        // 每格开头统一设定 alpha(各 continue 路径无需逐个恢复,下一格自愈)
+        const actuated = (st.wire[i] & 32) !== 0;
+        ctx.globalAlpha = actuated ? 0.3 : 1;
         const def = TILE_DEFS[type];
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
@@ -241,6 +245,8 @@ export class ChunkCache {
         }
       }
     }
+    ctx.globalAlpha = 1; // 致动幽灵 alpha 复位(防影响后续 pass)
+
     // ---- 第三遍：半砖（halfBrick）——主绘制后清掉上半 8px ----
     // 原版 TileDrawing.cs:689-690：源矩形高度 -8、目标下移 8（贴图上半画进格下半）。
     // 此处统一后处理 clearRect 上半（对 blend/auto/rule 全部绘制路径生效；

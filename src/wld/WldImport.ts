@@ -8,6 +8,67 @@ import { ITEM_BY_KEY } from '../data/items';
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
 type MapEntry = string | { key: string; copyFrame?: boolean } | null;
 const TILE_MAP: Record<number, MapEntry> = {
+  594: { key: 'v_594_volcanolarge', copyFrame: true },
+  593: { key: 'v_593_volcanosmall', copyFrame: true },
+  565: { key: 'v_565_fogmachine', copyFrame: true },
+  564: { key: 'v_564_plasmalamp', copyFrame: true },
+  557: { key: 'v_557_grateclosed', copyFrame: true },
+  546: { key: 'v_546_grate', copyFrame: true },
+  531: { key: 'v_531_boulderstatue', copyFrame: true },
+  509: { key: 'v_509_voidmonolith', copyFrame: true },
+  497: { key: 'v_497_toilets', copyFrame: true },
+  480: { key: 'v_480_bloodmoonmonolith', copyFrame: true },
+  476: { key: 'v_476_golfhole', copyFrame: true },
+  468: { key: 'v_468_fakecontainers2', copyFrame: true },
+  455: { key: 'v_455_partymonolith', copyFrame: true },
+  452: { key: 'v_452_sillyballoonmachine', copyFrame: true },
+  445: { key: 'v_445_pixelbox', copyFrame: true },
+  442: { key: 'v_442_projectilepressurepad', copyFrame: true },
+  441: { key: 'v_441_fakecontainers', copyFrame: true },
+  440: { key: 'v_440_gemlocks', copyFrame: true },
+  429: { key: 'v_429_wirebulb', copyFrame: true },
+  428: { key: 'v_428_weightedpressureplate', copyFrame: true },
+  425: { key: 'v_425_announcementbox', copyFrame: true },
+  424: { key: 'v_424_wirepipe', copyFrame: true },
+  423: { key: 'v_423_logicsensor', copyFrame: true },
+  421: { key: 'v_421_conveyorbeltleft', copyFrame: true },
+  420: { key: 'v_420_logicgate', copyFrame: true },
+  419: { key: 'v_419_logicgatelamp', copyFrame: true },
+  410: { key: 'v_410_lunarmonolith', copyFrame: true },
+  389: { key: 'v_389_tallgateopen', copyFrame: true },
+  386: { key: 'v_386_trapdooropen', copyFrame: true },
+  372: { key: 'v_372_peacecandle', copyFrame: true },
+  338: { key: 'v_338_fireworkfountain', copyFrame: true },
+  335: { key: 'v_335_fireworksbox', copyFrame: true },
+  268: { key: 'v_268_ambergemspark', copyFrame: true },
+  267: { key: 'v_267_diamondgemspark', copyFrame: true },
+  266: { key: 'v_266_rubygemspark', copyFrame: true },
+  265: { key: 'v_265_emeraldgemspark', copyFrame: true },
+  264: { key: 'v_264_sapphiregemspark', copyFrame: true },
+  263: { key: 'v_263_topazgemspark', copyFrame: true },
+  262: { key: 'v_262_amethystgemspark', copyFrame: true },
+  261: { key: 'v_261_ambergemsparkoff', copyFrame: true },
+  260: { key: 'v_260_diamondgemsparkoff', copyFrame: true },
+  259: { key: 'v_259_rubygemsparkoff', copyFrame: true },
+  258: { key: 'v_258_emeraldgemsparkoff', copyFrame: true },
+  257: { key: 'v_257_sapphiregemsparkoff', copyFrame: true },
+  256: { key: 'v_256_topazgemsparkoff', copyFrame: true },
+  255: { key: 'v_255_amethystgemsparkoff', copyFrame: true },
+  244: { key: 'v_244_bubblemachine', copyFrame: true },
+  216: { key: 'v_216_firework', copyFrame: true },
+  212: { key: 'v_212_snowballlauncher', copyFrame: true },
+  210: { key: 'v_210_landmine', copyFrame: true },
+  209: { key: 'v_209_cannon', copyFrame: true },
+  174: { key: 'v_174_platinumcandle', copyFrame: true },
+  173: { key: 'v_173_platinumcandelabra', copyFrame: true },
+  149: { key: 'v_149_holidaylights', copyFrame: true },
+  143: { key: 'v_143_outletpump', copyFrame: true },
+  142: { key: 'v_142_inletpump', copyFrame: true },
+  139: { key: 'v_139_musicboxes', copyFrame: true },
+  131: { key: 'v_131_inactivestoneblock', copyFrame: true },
+  126: { key: 'v_126_discoball', copyFrame: true },
+  92: { key: 'v_92_lampposts', copyFrame: true },
+  35: { key: 'v_35_jackolanterns', copyFrame: true },
   0: 'dirt',          // Dirt
   1: 'stone',         // Stone
   2: 'grass',         // Grass
@@ -308,7 +369,7 @@ const TILE_MAP: Record<number, MapEntry> = {
 // 墙 id 直用原版 wld 墙 id（WALL_DEFS 已按 TEdit walls.json 全量注册 367 种）
 
 // wld item id → 内部 item key（宝箱战利品用）
-const ITEM_MAP: Record<number, string> = {
+export const ITEM_MAP: Record<number, string> = {
   2: 'dirt_block', 8: 'torch', 9: 'wood', 175: 'stone_block',
   11: 'iron_ore', 12: 'copper_ore', 13: 'gold_ore', 14: 'silver_ore',
   20: 'copper_bar', 22: 'iron_bar', 23: 'gel',
@@ -722,6 +783,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const wall = new Uint16Array(n); // 原版墙 id 直存（0-366）
   const liquidArr = new Uint8Array(n);
   const liquidTypeArr = new Uint8Array(n);
+  const wireArr = new Uint8Array(n);
 
   const chestAt = new Map<string, { x: number; y: number }>();
   for (const c of wld.chests) chestAt.set(`${c.x},${c.y}`, c);
@@ -755,6 +817,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (lq > 0) liquidArr[i] = lq;
     // 液体类型：parser 已按内部编码输出（1水 2岩浆 3蜂蜜），直拷
     if (lq > 0) liquidTypeArr[i] = wld.tiles.liquidType[i] || 1;
+    // 电路位直拷（parser 已从 header2 提取 bit0-5）
+    wireArr[i] = wld.tiles.wire[i];
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -817,6 +881,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     walls: bytesToB64(rlePairs(wall)),
     liquid: bytesToB64(rlePairs(liquidArr)),
     liquidType: bytesToB64(rlePairs(liquidTypeArr)),
+    wire: bytesToB64(rlePairs(wireArr)),
     chests,
     player: {
       hp: 100,

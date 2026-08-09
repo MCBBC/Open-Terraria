@@ -13,6 +13,15 @@ export class TileStore {
   readonly liquidType: Uint8Array; // 0无 1水 2岩浆 3蜂蜜
   readonly half: Uint8Array;      // halfBrick 位（原版 Tile.cs bTileHeader bit1）：下半 8px 实心
   readonly slope: Uint8Array;     // 坡面 0-4（原版编码；渲染暂未支持，生成期少用）
+  readonly wire: Uint8Array;      // 电路位（原版 Tile.cs sTileHeader）：bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动(inActive)
+  // wire 位掩码常量（对应原版 Tile.cs:396-459 的 wire/wire2/wire3/wire4/actuator/inActive）
+  static readonly WIRE_RED = 1;
+  static readonly WIRE_BLUE = 2;
+  static readonly WIRE_GREEN = 4;
+  static readonly WIRE_YELLOW = 8;
+  static readonly WIRE_ACTUATOR = 16;
+  static readonly WIRE_ACTUATED = 32;
+  static readonly WIRE_COLORS = 15; // 四色掩码
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
@@ -29,6 +38,7 @@ export class TileStore {
     this.liquidType = new Uint8Array(n);
     this.half = new Uint8Array(n);
     this.slope = new Uint8Array(n);
+    this.wire = new Uint8Array(n);
   }
 
   idx(x: number, y: number): number { return y * this.w + x; }
@@ -40,11 +50,19 @@ export class TileStore {
   get(x: number, y: number): number { return this.inBounds(x, y) ? this.type[this.idx(x, y)] : 0; }
 
   isActive(x: number, y: number): boolean {
-    return this.inBounds(x, y) && this.type[this.idx(x, y)] !== 0;
+    // 原版 nactive() = active && !inActive（Tile.cs:383-394）：已致动格视为不活跃
+    return this.inBounds(x, y) && this.type[this.idx(x, y)] !== 0
+      && (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) === 0;
+  }
+
+  /** 原版 inActive()：致动器翻转后的"缩入地下"态（有 type 但不碰撞不阻挡） */
+  isActuated(x: number, y: number): boolean {
+    return this.inBounds(x, y) && (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) !== 0;
   }
 
   isSolid(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false; // 世界外视为空（边缘自由）
+    if (this.wire[this.idx(x, y)] & TileStore.WIRE_ACTUATED) return false; // 已致动不碰撞
     const d = TILE_DEFS[this.type[this.idx(x, y)]];
     return !!d && d.solid;
   }
@@ -116,6 +134,27 @@ export class TileStore {
   setWallSilent(x: number, y: number, wall: number) {
     if (!this.inBounds(x, y)) return;
     this.wall[this.idx(x, y)] = wall;
+  }
+
+  /** 导线/致动位写入（Wiring 系统）。不发 listeners：导线不进 chunk 烘焙画布，
+   *  走 Renderer 动态覆盖层；致动位变化才需要标脏 chunk（调用方负责） */
+  setWire(x: number, y: number, bits: number) {
+    if (!this.inBounds(x, y)) return;
+    this.wire[this.idx(x, y)] = bits & 63;
+  }
+
+  setWireSilent(x: number, y: number, bits: number) {
+    this.setWire(x, y, bits);
+  }
+
+  /** 致动器翻转 inActive 态（Wiring.DeActive/ReActive 用）：影响碰撞与渲染，须发 listeners */
+  setActuated(x: number, y: number, v: boolean) {
+    if (!this.inBounds(x, y)) return;
+    const i = this.idx(x, y);
+    const b = v ? (this.wire[i] | TileStore.WIRE_ACTUATED) : (this.wire[i] & ~TileStore.WIRE_ACTUATED);
+    if (this.wire[i] === b) return;
+    this.wire[i] = b;
+    this.listeners.forEach((fn) => fn(x, y));
   }
 
   setLiquid(x: number, y: number, amount: number, type: number) {

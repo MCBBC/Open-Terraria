@@ -7,7 +7,8 @@ export type Difficulty = 0 | 1 | 2 | 3; // 0 软核 1 中核 2 硬核 3 旅程
 export interface Appearance {
   name: string;
   hair: number;              // 1..228 → Player_Hair_N
-  skinVariant: 0 | 1;        // 0 男 1 女
+  /** 皮肤/衣服组合变体（0 男 1 女 2-9 特殊套装；UICharacterCreation._validClothStyles） */
+  skinVariant: number;
   hairColor: RGBColor;
   skinColor: RGBColor;
   eyeColor: RGBColor;
@@ -62,7 +63,7 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
   return {
     name: typeof a.name === 'string' ? a.name.slice(0, 20) : d.name,
     hair: clampInt(a.hair, 1, HAIR_COUNT, d.hair),
-    skinVariant: a.skinVariant === 1 ? 1 : 0,
+    skinVariant: clampInt(a.skinVariant, 0, 11, d.skinVariant),
     hairColor: c(a.hairColor, d.hairColor),
     skinColor: c(a.skinColor, d.skinColor),
     eyeColor: c(a.eyeColor, d.eyeColor),
@@ -73,6 +74,9 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
     difficulty: ([0, 1, 2, 3] as number[]).includes(a.difficulty as number) ? (a.difficulty as Difficulty) : 0,
   };
 }
+
+/** UICharacterCreation.cs:31 的有效衣服样式（前 5 男装系 / 后 5 女装系） */
+export const VALID_CLOTH_STYLES = [0, 2, 1, 3, 8, 4, 6, 5, 7, 9];
 
 /** 随机外观（对齐原版 CreateCharacter 的随机范围：低饱和肤色、随机发型与衣色） */
 export function randomAppearance(name = ''): Appearance {

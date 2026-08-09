@@ -2,10 +2,10 @@
 // 之字形下沉房间链(重投至与旧房不相交;锚点=中心;行程 1-2 递增)→ 全房对实心砖连线
 // → 房内双遍游走挖腔(墙 87)→ templePather 通道 → outerTempled 封壳 → 入口隧道+门框
 // → templeCleaner → 祭坛 237(末间中心 ±15)。宝箱为简化保留(原版在陷阱段之后放置)。
-import type { TileStore } from '../../TileStore';
+import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeDoorClosed } from '../../Door';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
@@ -390,4 +390,140 @@ export function runTemplePass(
     chests.push({ x: bx, y: by, items: Array(10).fill(null) });
   }
   void altarPlaced;
+
+  // ---- 陷阱电路(templePart2 L17837-17860 + mayanTrap L2945-3235):压板+陷阱+三色随机布线 ----
+  {
+    let tLeft = Infinity, tRight = -Infinity, tTop = Infinity, tBottom = -Infinity;
+    for (const r of rooms) {
+      tLeft = Math.min(tLeft, r.x); tRight = Math.max(tRight, r.x + r.w);
+      tTop = Math.min(tTop, r.y); tBottom = Math.max(tBottom, r.y + r.h);
+    }
+    // 原版 num1 = 房数×1.9×(1±15%)
+    let budget = rooms.length * 1.9 * (1 + rng.int(-15, 15) * 0.01);
+    let fails = 0;
+    while (budget > 0 && fails < 100000) {
+      const x2 = rng.int(Math.floor(tLeft), Math.ceil(tRight) - 1);
+      const y2 = rng.int(Math.floor(tTop), Math.ceil(tBottom) - 1);
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+        if (mayanTrap(st, rng, gs, x2, y2)) budget -= 1;
+        else fails++;
+      } else fails++;
+    }
+  }
+}
+
+/** 玛雅陷阱(WorldGen.cs:2945-3235):压板 135(style6)→ 陷阱 137,路径铺三色随机导线 */
+function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number): boolean {
+  const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
+  const TRAP = TILE_BY_KEY['v_137_traps']!;
+  const solid = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+  const wireBit = (n: number) => n === 0 ? TileStore.WIRE_RED : n === 1 ? TileStore.WIRE_BLUE : TileStore.WIRE_GREEN;
+  const setW = (x: number, y: number, n: number) => { st.wire[st.idx(x, y)] |= wireBit(n); };
+  const getW = (x: number, y: number) => {
+    const b = st.wire[st.idx(x, y)];
+    if (b & TileStore.WIRE_RED) return 0;
+    if (b & TileStore.WIRE_BLUE) return 1;
+    if (b & TileStore.WIRE_GREEN) return 2;
+    return -1;
+  };
+  const pickColor = (x: number, y: number) => {
+    const ex = getW(x, y);
+    return ex >= 0 ? ex : rng.int(0, 2);
+  };
+  // num1:1/3 概率横向(L2947-2949)
+  const kind = rng.int(0, 2) === 0 ? 0 : 1;
+  // 落点向下找实心(L2950-2962)
+  const px = x2;
+  let fy = y2;
+  while (!solid(px, fy)) {
+    fy++;
+    if (fy >= st.h - 300) return false;
+  }
+  const sh = TILE_BY_KEY['v_226_lihzahrd_brick']!;
+  if (st.type[st.idx(px, fy)] === sh || TILE_DEFS[st.type[st.idx(px, fy)]]?.vanilla?.sheet === 10) return false;
+  const j = fy - 1;
+  if (st.liquid[st.idx(px, j)] > 0 && st.liquidType[st.idx(px, j)] === 2) return false;
+  // 周围须净空(L2967)
+  const nactive = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+  if (nactive(px, j) || nactive(px - 1, j) || nactive(px + 1, j) || nactive(px, j - 1)
+    || nactive(px - 1, j - 1) || nactive(px + 1, j - 1) || nactive(px, j - 2)
+    || nactive(px - 1, j - 2) || nactive(px + 1, j - 2)) return false;
+
+  if (kind === 0) {
+    // 横向:同高走廊两端墙装飞镖陷阱,压板居中(L2971-3119)
+    const ty = j - rng.int(0, 2);
+    let lx = px;
+    while (!solid(lx, ty)) lx--;
+    let rx = px;
+    while (!solid(rx, ty)) rx++;
+    let flagL = (px - lx) > 5 && (px - lx) < 50 && solid(lx, ty + 1);
+    let flagR = (rx - px) > 5 && (rx - px) < 50 && solid(rx, ty + 1);
+    if (!flagL && !flagR) return false;
+    let dir: number, tx: number;
+    if (flagL && flagR) {
+      dir = 1; tx = lx;
+      if (rng.int(0, 1) === 0) { tx = rx; dir = -1; }
+    } else if (flagR) { tx = rx; dir = -1; }
+    else { tx = lx; dir = 1; }
+    if (st.type[st.idx(tx, ty)] === PLATE || st.type[st.idx(tx, ty)] === TRAP) return false;
+    if (st.wall[st.idx(tx, ty)] !== 87) return false;
+    // 压板 + 陷阱(L3013-3051)。style:近距(<10)2/3 概率超级飞镖,否则飞镖
+    const style1 = Math.abs(tx - px) < 10 && rng.int(0, 2) !== 0 ? 2 : 1;
+    st.setTileSilent(px, j, PLATE, 6 * 18, 0);
+    st.setTileSilent(tx, ty, TRAP, dir === 1 ? 18 : 0, style1 * 18);
+    // L 形铺线:压板 → 陷阱(L3068-3118,含两端点)
+    const num5 = pickColor(px, j);
+    let wx = px, wy = j;
+    while (wx !== tx || wy !== ty) {
+      setW(wx, wy, num5);
+      if (wx > tx) wx--;
+      else if (wx < tx) wx++;
+      setW(wx, wy, num5);
+      if (wy > ty) wy--;
+      else if (wy < ty) wy++;
+      setW(wx, wy, num5);
+    }
+    setW(tx, ty, num5);
+    return true;
+  }
+  // 纵向:头顶找天花板,天花板装下向火焰陷阱,两侧墙追加同排陷阱(L3120-3235)
+  let uy = j;
+  while (!solid(px, uy)) {
+    uy--;
+    if (uy < gs.rockLevel) return false;
+  }
+  const dist = Math.abs(uy - j);
+  if (dist < 3) return false;
+  if (st.type[st.idx(px, uy)] === PLATE || st.type[st.idx(px, uy)] === TRAP
+    || TILE_DEFS[st.type[st.idx(px, uy)]]?.vanilla?.sheet === 10 || st.wall[st.idx(px, uy)] !== 87) return false;
+  const num9 = pickColor(px, j);
+  const style2 = dist < 16 && rng.int(0, 2) !== 0 ? 4 : 3;
+  st.setTileSilent(px, j, PLATE, 6 * 18, 0);
+  st.setTileSilent(px, uy, TRAP, 0, style2 * 18);
+  // 两侧墙追加陷阱(L3146-3178)
+  for (let side = 0; side < 2; side++) {
+    let steps = rng.int(1, 4);
+    let ix = px;
+    const d = side === 1 ? 1 : -1;
+    while (steps > 0) {
+      steps--;
+      ix += d;
+      if (solid(ix, uy - 1) && !solid(ix, uy + 1)) {
+        st.setTileSilent(ix, uy, TRAP, d === 1 ? 18 : 0, style2 * 18);
+        st.wire[st.idx(ix, uy)] |= wireBit(num9);
+      } else break;
+    }
+  }
+  // 竖向铺线:压板 → 天花板陷阱(L3179-3235)
+  {
+    let wx = px, wy = j;
+    while (wx !== px || wy !== uy) {
+      setW(wx, wy, num9);
+      if (wy > uy) wy--;
+      else if (wy < uy) wy++;
+      setW(wx, wy, num9);
+    }
+    setW(px, uy, num9);
+  }
+  return true;
 }

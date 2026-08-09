@@ -56,6 +56,8 @@ export const VANILLA_MISC = [
   'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png',
   'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
   'vanilla/Shroom_Tops.png',
+  // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
+  'vanilla/WiresNew.png', 'vanilla/Actuator.png',
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
@@ -345,7 +347,8 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
     const tid = TILE_BY_KEY[tk];
     if (tid !== undefined) {
       const td = TILE_DEFS[tid];
-      if (td?.vanilla) return atlas.vframe(td.vanilla.sheet, 0, 0);
+      // vframeAt 而非 vframe:窄条表(如压板 135 的 16×200 竖条)cols=0 会让 vframe 判越界
+      if (td?.vanilla) return atlas.vframeAt(td.vanilla.sheet, 0, 0) ?? atlas.vframe(td.vanilla.sheet, 0, 0);
     }
   }
   return null;
@@ -359,6 +362,11 @@ export const VANILLA_ITEM_ICON_MAP: Record<string, number> = {
   copper_ore: 12, iron_ore: 11, silver_ore: 14, gold_ore: 13,
   copper_bar: 20, iron_bar: 22, silver_bar: 21, gold_bar: 19,
   lens: 38, suspicious_eye: 43,
+  // 电路工具(id-maps items.json 核实:530 电线/509,850,851,3612 四色扳手/510 钢丝钳/
+  // 849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图)
+  wire: 530, red_wrench: 509, blue_wrench: 850, green_wrench: 851, yellow_wrench: 3612,
+  wire_cutter: 510, actuator_item: 849, actuation_rod: 3620,
+  multicolor_wrench: 3625, grand_design: 3611,
   lesser_healing_potion: 28, coin_copper: 71,
   heal_potion: 188, agility_potion: 290, ironskin_potion: 292,
   thorns_potion: 301, regen_potion: 289,

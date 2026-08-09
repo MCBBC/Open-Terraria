@@ -5,6 +5,7 @@
 import { UIState } from '../core/UIState';
 import { UIPanel } from '../elements/UIPanel';
 import { UITextPanel } from '../elements/UITextPanel';
+import { UIText } from '../elements/UIText';
 import { UIList } from '../elements/UIList';
 import { UIScrollbar } from '../elements/UIScrollbar';
 import { UIImageButton } from '../elements/UIImage';
@@ -15,9 +16,10 @@ import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch } from '../draw/UISpriteBatch';
 import { rgb, type Color } from '../draw/UISpriteBatch';
 import { UITextures } from '../assets/UITextures';
+import { UISfx } from '../UISfx';
 import {
   type Appearance, type RGBColor, randomAppearance, HAIR_COUNT,
-  DIFFICULTY_INFO, rgbToHsl, hslToRgb,
+  DIFFICULTY_INFO, rgbToHsl, hslToRgb, VALID_CLOTH_STYLES,
 } from '../../player/Appearance';
 import { compositePaperDoll } from '../../player/PaperDoll';
 import { UserInterface } from '../core/UserInterface';
@@ -27,7 +29,7 @@ export interface CharacterCreationFlow {
   onCancel(): void;
 }
 
-type Category = 'info' | 'clothing' | 'hair';
+type Category = 'info' | 'clothing' | 'hair' | 'color';
 type ColorKey = 'hairColor' | 'eyeColor' | 'skinColor' | 'shirtColor' | 'undershirtColor' | 'pantsColor' | 'shoeColor';
 
 const COLOR_ENTRIES: Array<{ key: ColorKey; icon: string; label: string }> = [
@@ -80,12 +82,15 @@ class HslSlider extends UIElement {
 
 export class UICharacterCreationState extends UIState {
   private appearance: Appearance;
+  /** 复制/粘贴模板（原版 Click_Copy/PastePlayerTemplate） */
+  private clipboard: Appearance | null = null;
   private preview: UICharacterPreview;
   private content = new UIElement();
   private nameBox: UITextBox;
   private activeCategory: Category = 'info';
   private activeColor: ColorKey = 'hairColor';
   private hslContainer = new UIElement();
+  private tabs = new Map<Category, UITextPanel>();
 
   constructor(private flow: CharacterCreationFlow) {
     super();
@@ -113,17 +118,21 @@ export class UICharacterCreationState extends UIState {
       b.left = StyleDimension.fromPixels(180 + i * 90);
       b.minWidth = StyleDimension.fromPixels(80);
       b.onClick(() => this.setCategory(cat));
+      this.tabs.set(cat, b);
       panel.append(b);
     });
 
-    // 7 取色器入口
+    // 7 取色器入口（常显当前颜色；点击即进入取色视图——对齐原版取色器行为）
     COLOR_ENTRIES.forEach((e, i) => {
       const btn = new UIImageButton(e.icon, 1);
       btn.top = StyleDimension.fromPixels(36);
       btn.left = StyleDimension.fromPixels(180 + i * 38);
       btn.onClick(() => this.setColorKey(e.key));
       btn.onUpdate((el) => {
-        (el as UIImageButton).setHoverColor(this.rgbToColor(this.appearance[e.key]));
+        const b2 = el as UIImageButton;
+        const c = this.rgbToColor(this.appearance[e.key]);
+        b2.setHoverColor(c);
+        b2.setNormalColor(c);
       });
       panel.append(btn);
     });
@@ -142,17 +151,7 @@ export class UICharacterCreationState extends UIState {
     this.nameBox.onChange = (v) => { this.appearance.name = v; };
     this.content.append(this.nameBox);
 
-    // 底部：随机 / 返回 / 创建
-    const rand = new UIImageButton('UI_CharCreation_Randomize', 1);
-    rand.top = StyleDimension.fromPixels(396);
-    rand.left = StyleDimension.fromPixels(20);
-    rand.onClick(() => {
-      const name = this.appearance.name;
-      this.appearance = randomAppearance(name);
-      this.refresh();
-    });
-    panel.append(rand);
-
+    // 底部：返回 / 创建（随机按钮在衣服页签，对齐原版布局）
     const back = new UITextPanel('返回', 0.9);
     back.top = StyleDimension.fromPixels(396);
     back.left = StyleDimension.fromPixels(300);
@@ -180,9 +179,18 @@ export class UICharacterCreationState extends UIState {
     this.buildContent();
   }
 
+  /** 点击取色器图标 → 切到取色视图（对齐原版：任何页签下点取色器都弹出 HSL 编辑） */
   private setColorKey(key: ColorKey) {
     this.activeColor = key;
+    this.activeCategory = 'color';
     this.buildContent();
+  }
+
+  /** 页签高亮（选中项加背景，颜色页签时三个页签都不亮） */
+  private refreshTabHighlight() {
+    for (const [cat, tab] of this.tabs) {
+      tab.backgroundColor = cat === this.activeCategory ? rgb(90, 110, 180, 220) : rgb(63, 82, 151, 200);
+    }
   }
 
   private refresh() {
@@ -195,9 +203,30 @@ export class UICharacterCreationState extends UIState {
     this.content.removeAllChildren();
     this.content.append(this.nameBox);
     const y0 = 44;
+    this.refreshTabHighlight();
 
-    if (this.activeCategory === 'info') {
-      // 难度四选（UIDifficultyButton：图标+颜色+描述）
+    if (this.activeCategory === 'color') {
+      // 取色视图：HSL 三滑条 + 当前颜色标签（文字用当前颜色）
+      const label = COLOR_ENTRIES.find((e) => e.key === this.activeColor)?.label ?? '';
+      const title = new UITextPanel(`${label} 颜色`, 0.9);
+      title.top = StyleDimension.fromPixels(y0);
+      title.width = StyleDimension.fromPixels(150);
+      title.textColor = this.rgbToColor(this.appearance[this.activeColor]);
+      this.content.append(title);
+      this.appendHslSliders(y0 + 44);
+    } else if (this.activeCategory === 'info') {
+      // 难度四选（UIDifficultyButton：颜色 + 悬停描述）
+      const DIFF_DESC = [
+        '软核：掉落一半金币。',
+        '中核：掉落所有金币和物品。',
+        '硬核：死亡后掉落全部物品并变为幽灵。',
+        '旅程：研究物品、复制、控制时间与难度。',
+      ];
+      const diffDesc = new UIText('', 0.7);
+      diffDesc.top = StyleDimension.fromPixels(y0 + 160);
+      diffDesc.left = StyleDimension.fromPixels(0);
+      diffDesc.width = StyleDimension.fromPixels(320);
+      diffDesc.setTextColor(rgb(200, 200, 225));
       DIFFICULTY_INFO.forEach((d, i) => {
         const b = new UITextPanel(d.label, 0.9);
         b.top = StyleDimension.fromPixels(y0 + i * 40);
@@ -208,25 +237,48 @@ export class UICharacterCreationState extends UIState {
           this.appearance.difficulty = i as Appearance['difficulty'];
           this.buildContent();
         });
+        b.onMouseOver(() => diffDesc.setText(DIFF_DESC[i]));
+        b.onMouseOut(() => diffDesc.setText(''));
         if (this.appearance.difficulty === i) b.backgroundColor = rgb(90, 110, 180, 220);
         this.content.append(b);
       });
+      this.content.append(diffDesc);
     } else if (this.activeCategory === 'clothing') {
-      // 性别 + HSL 滑条
-      const male = new UITextPanel('♂ 男', 0.9);
-      male.top = StyleDimension.fromPixels(y0);
-      male.width = StyleDimension.fromPixels(80);
-      male.onClick(() => { this.appearance.skinVariant = 0; this.refresh(); });
-      if (this.appearance.skinVariant === 0) male.backgroundColor = rgb(90, 110, 180, 220);
-      this.content.append(male);
-      const female = new UITextPanel('♀ 女', 0.9);
-      female.top = StyleDimension.fromPixels(y0);
-      female.left = StyleDimension.fromPixels(90);
-      female.width = StyleDimension.fromPixels(80);
-      female.onClick(() => { this.appearance.skinVariant = 1; this.refresh(); });
-      if (this.appearance.skinVariant === 1) female.backgroundColor = rgb(90, 110, 180, 220);
-      this.content.append(female);
-      this.appendHslSliders(y0 + 44);
+      // 衣服样式（UIClothStyleButton：44×80，内嵌该变体的小预览；两行各 5）
+      VALID_CLOTH_STYLES.forEach((styleId, i) => {
+        const row = Math.floor(i / 5), col = i % 5;
+        const b = new ClothStyleButton(() => this.appearance, styleId, () => {
+          this.appearance.skinVariant = styleId;
+          this.refresh();
+        });
+        b.top = StyleDimension.fromPixels(y0 + row * 88);
+        b.left = StyleDimension.fromPixels(col * 66);
+        this.content.append(b);
+      });
+      // 模板按钮行（原版 Cloth 页底部：复制/粘贴/随机）
+      const copy = new UIImageButton('UI_CharCreation_Copy', 1);
+      copy.top = StyleDimension.fromPixels(y0 + 190);
+      copy.left = StyleDimension.fromPixels(0);
+      copy.onClick(() => { this.clipboard = { ...this.appearance }; });
+      this.content.append(copy);
+      const paste = new UIImageButton('UI_CharCreation_Paste', 1);
+      paste.top = StyleDimension.fromPixels(y0 + 190);
+      paste.left = StyleDimension.fromPixels(40);
+      paste.onClick(() => {
+        if (!this.clipboard) return;
+        this.appearance = { ...this.clipboard, name: this.appearance.name };
+        this.refresh();
+      });
+      this.content.append(paste);
+      const rand = new UIImageButton('UI_CharCreation_Randomize', 1);
+      rand.top = StyleDimension.fromPixels(y0 + 190);
+      rand.left = StyleDimension.fromPixels(80);
+      rand.onClick(() => {
+        const name = this.appearance.name;
+        this.appearance = randomAppearance(name);
+        this.refresh();
+      });
+      this.content.append(rand);
     } else {
       // 发型列表（44×44 按钮网格 6 列）
       const list = new UIList();
@@ -318,4 +370,43 @@ class HairStyleButton extends UIElement {
     return this._doll;
   }
   private _dollKey = '';
+}
+
+/** 衣服样式按钮（UIClothStyleButton：44×80 面板 + 该变体的站立小预览，选中高亮框） */
+class ClothStyleButton extends UIElement {
+  private char: UICharacterPreview;
+  private soundedHover = false;
+
+  constructor(private getParentAppearance: () => Appearance, public styleId: number, onPick: () => void) {
+    super();
+    this.width = StyleDimension.fromPixels(44);
+    this.height = StyleDimension.fromPixels(80);
+    this.char = new UICharacterPreview({ ...getParentAppearance(), skinVariant: styleId }, false, false, 0.7);
+    this.char.hAlign = 0.5;
+    this.char.vAlign = 0.5;
+    this.append(this.char);
+    this.onClick(onPick);
+    this.onMouseOver(() => { if (!this.soundedHover) UISfx.hover(); this.soundedHover = true; });
+    this.onMouseOut(() => { this.soundedHover = false; });
+  }
+
+  update(): void {
+    // 实时跟随父级外观颜色（换色后小预览同步）
+    this.char.setAppearance({ ...this.getParentAppearance(), skinVariant: this.styleId });
+    super.update();
+  }
+
+  protected drawSelf(batch: UISpriteBatch): void {
+    const d = this.getDimensions();
+    const panel = UITextures.get('UI_CharCreation_CategoryPanel');
+    if (panel) batch.draw(panel, d.x, d.y, { alpha: 0.5 });
+    if (this.getParentAppearance().skinVariant === this.styleId) {
+      const sel = UITextures.get('UI_CharCreation_CategoryPanelHighlight');
+      if (sel) batch.draw(sel, d.x + 3, d.y + 3);
+    }
+    if (this.isMouseHovering) {
+      const border = UITextures.get('UI_CharCreation_CategoryPanelBorder');
+      if (border) batch.draw(border, d.x, d.y);
+    }
+  }
 }

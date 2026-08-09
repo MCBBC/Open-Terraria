@@ -54,7 +54,7 @@ const out = await page.evaluate(async () => {
   st.setTile(lx, ly, LEVER, 0, 0);
   st.setTile(tx2, ty2, TRAP, 0, 0);
   await rightClick(lx, ly);
-  await sleep(300);
+  await sleep(60);  // 飞镖撞走廊尽头墙即消失——采样必须紧跟触发,否则竞态
   const darts = g.entities.projectiles.filter((e) => e.constructor.name === 'Dart');
   results.trapFires = { dartCount: darts.length, ok: darts.length > 0 };
 
@@ -68,7 +68,7 @@ const out = await page.evaluate(async () => {
   for (let x = plx - 1; x >= t2x; x--) { if (st.isActive(x, ply)) st.setTile(x, ply, 0); if (st.isActive(x, ply + 1)) st.setTile(x, ply + 1, 0); }
   st.setTile(t2x, ply, TRAP, 0, 0);
   p.x = plx * 16 + 2; p.y = (ply - 3) * 16; p.vy = 0;
-  await sleep(400);
+  await sleep(120);  // 同上:飞镖存活窗口短,尽早采样
   const darts2 = g.entities.projectiles.filter((e) => e.constructor.name === 'Dart');
   results.plateTriggers = { dartTotal: darts2.length, ok: darts2.length > 0 };
 

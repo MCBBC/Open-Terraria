@@ -3,7 +3,8 @@
 // + killed 怪物死亡 / zombie 僵尸环境声 / roar Boss咆哮 / coin 拾币 / door_open door_close / tink 敲石 / shatter 玻璃破碎 / drown 溺水
 export type SfxName =
   | 'hit' | 'hurt' | 'pickup' | 'dig' | 'place' | 'drink' | 'chop' | 'splash'
-  | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown';
+  | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
+  | 'menuOpen' | 'menuClose' | 'menuTick';
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -24,6 +25,10 @@ const WAV_MAP: Record<SfxName, string[]> = {
   door_close: ['Door_Closed'],
   splash: ['Splash_0', 'Splash_1'],
   drown: ['Drown'],
+  // 菜单 UI（原版 id 10=Menu_Open / id 11=Menu_Close / id 12=Menu_Tick）
+  menuOpen: ['Menu_Open'],
+  menuClose: ['Menu_Close'],
+  menuTick: ['Menu_Tick'],
   // 以下无原版素材，走合成
   drink: [],
 };

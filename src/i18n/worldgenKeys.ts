@@ -1,14 +1,24 @@
-// 世界生成 pass 名（world/gen/vanilla/* 的 pass key）→ LegacyWorldGen 条目 id。
-// 对齐依据：Terarria1405/WorldGen.cs 各 pass 内 progress.Message = Lang.gen[N] 的设置点，
-// 与本仓库 105 pass 移植清单（docs/vanilla-worldgen-passes）逐条人工核对。
-// 未知 pass 回退使用 pass 中文名，后续补表。
+// 世界生成 pass 名（WorldGen.ts 的 pass.name）→ LegacyWorldGen 条目 id。
+// 中文文案 = zh-Hans.Legacy.LegacyWorldGen.<id>；人工对齐原版各 pass 的 progress.Message 语义。
 export const worldgenProgressKey: Record<string, number> = {
-  // 地形
-  terrain: 0,                 // "Generating world"（总标题，pass 级无直接对应，占位）
-  contourTerrain: 1,          // 沙滩沙地
-  // 洞穴与通道
-  carveCaves: 5,              // 挖掘洞穴（对齐原版 Caves pass 附近文案，后续细调）
-  carveTunnels: 5,
-  // 水体沉降（本仓库自有）
-  settleLiquids: -1,
+  '原版地形': 0,    // 正在生成世界地形
+  '地形': 0,
+  '洞穴': 9,        // 正在生成大洞穴
+  '海滩': 22,       // 正在创建沙滩
+  '生物群系': 11,   // 正在生成丛林
+  '清理': 25,       // 正在清理土背景
+  '生命水晶': 28,   // 正在放置生命水晶
+  '矿石': 16,       // 正在添加闪亮之物
+  '液体': 27,       // 正在安置液体
+  '半砖平滑': 60,   // 正在让世界变得更平顺
+  '瀑布唇缘': 69,   // 正在创建瀑布
+  '地狱': 18,       // 正在创建地狱
+  '地狱屋': 36,     // 正在放置地狱熔炉
+  '瓦罐': 35,       // 正在放置可破坏物
+  '表面': 89,       // 正在放置物体
+  '地表装饰': 37,   // 正在铺草
+  '结构': 76,       // 正在生成建筑物
+  '清浮空': 84,     // 清理
+  '水体沉降': 27,   // 正在安置液体
+  '完成': 87,       // 正在对世界做最后的润饰
 };

@@ -97,6 +97,9 @@ export class UICharacterSelectState extends UIState {
 
   private async doDelete() {
     if (this.selectedId == null || this.deleting) return;
+    const v = this.items.get(this.selectedId);
+    if (!v) return;
+    if (!confirm(`确定要删除角色「${v.appearance.name || '无名角色'}」吗？此操作不可撤销。`)) return;
     this.deleting = true;
     await this.store.delete(this.selectedId);
     this.deleting = false;

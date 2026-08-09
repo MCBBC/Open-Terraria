@@ -5,6 +5,7 @@ import type { UISpriteBatch, Color } from '../draw/UISpriteBatch';
 import { PixelText } from '../draw/PixelText';
 import { rgb } from '../draw/UISpriteBatch';
 import { StyleDimension } from '../core/StyleDimension';
+import { UISfx } from '../UISfx';
 
 export class UITextPanel extends UIPanel {
   protected text = '';
@@ -18,6 +19,7 @@ export class UITextPanel extends UIPanel {
   constructor(text: string, textScale = 1, large = false) {
     super();
     this.setText(text, textScale, large);
+    this.onClick(() => UISfx.click());
   }
 
   get textValue(): string { return this.text; }

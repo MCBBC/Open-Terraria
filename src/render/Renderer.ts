@@ -252,6 +252,9 @@ export class Renderer {
       }
     }
 
+    // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)
+    this.drawWires(world, cam, viewW, viewH, z);
+
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
 
@@ -373,6 +376,56 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
     drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground);
+  }
+
+  /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
+  showWires = false;
+  private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    if (!this.showWires || !this.atlas) return;
+    const wires = this.atlas.vimages.get('vanilla/WiresNew.png');
+    const actuatorImg = this.atlas.vimages.get('vanilla/Actuator.png');
+    if (!wires) return;
+    const st = world.store;
+    const ts = TILE;
+    const tx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
+    const tx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
+    const ty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
+    const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
+    const ctx = this.ctx;
+    const has = (x: number, y: number, bit: number) => st.inBounds(x, y) && (st.wire[st.idx(x, y)] & bit) !== 0;
+    for (let ty = ty0; ty <= ty1; ty++) {
+      for (let tx = tx0; tx <= tx1; tx++) {
+        const i = st.idx(tx, ty);
+        const b = st.wire[i];
+        const colors = b & 15;
+        if (!colors && !(b & 16)) continue;
+        let n = 0;
+        for (let c = 0; c < 4; c++) if (colors & (1 << c)) n++;
+        let drawn = 0;
+        for (let c = 0; c < 4; c++) {
+          const bit = 1 << c; // 红0 蓝1 绿2 黄3(图集行序,Main.cs:43641 等)
+          if (!(colors & bit)) continue;
+          drawn++;
+          // 行 Y = 色行*18;分线盒/像素盒额外行偏移(Main.cs:43596-43616)
+          let rowY = c * 18;
+          const sh = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+          if (sh === 424) rowY += 72 + Math.floor(st.frameX[i] / 18) * 72;
+          else if (sh === 445) rowY += 72;
+          // 连接掩码(Main.cs:43621-43640):上+18 右+36 下+72 左+144
+          let mask = 0;
+          if (has(tx, ty - 1, bit)) mask += 18;
+          if (has(tx + 1, ty, bit)) mask += 36;
+          if (has(tx, ty + 1, bit)) mask += 72;
+          if (has(tx - 1, ty, bit)) mask += 144;
+          if (n > 1) ctx.globalAlpha = 1 / n; // 多色同格淡化(桥带略)
+          ctx.drawImage(wires, mask, rowY, 16, 16, tx * ts, ty * ts, ts, ts);
+          ctx.globalAlpha = 1;
+        }
+        if ((b & 16) && actuatorImg) {
+          ctx.drawImage(actuatorImg, 0, 0, 16, 16, tx * ts, ty * ts, ts, ts);
+        }
+      }
+    }
   }
 
   /** 瀑布贴图（tile 层后、实体前；扫描窗口外扩 100 格在内部，30 帧节流） */
@@ -506,7 +559,10 @@ export class Renderer {
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
-      const frameIdx = Math.floor(e.animT / 8) % frames;
+      // 行走/飞行循环段：原版每类型动画帧表（NPCAnimation）不同——骷髅 15 帧中仅 0-2 是行走，
+      // 其余是攻击/死亡姿势；无逐类型帧表前先钳制到前 4 帧（绝大多数怪行走循环 ≤4 帧）
+      const cyc = Math.max(1, Math.min(frames, 4));
+      const frameIdx = Math.floor(e.animT / 8) % cyc;
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
       if (r) {
         const flying = e.vanilla?.noGravity || e.vanilla?.aiStyle === 2 || e.vanilla?.aiStyle === 5 || e.vanilla?.aiStyle === 14;

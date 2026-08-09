@@ -105,6 +105,11 @@ window.addEventListener('keydown', (e) => {
       e.preventDefault();
       flow.doSave();
       break;
+    case 'F7':
+      e.preventDefault();
+      game.forceShowWires = !game.forceShowWires;
+      ui.toast(game.forceShowWires ? '导线显示:强制开启' : '导线显示:手持电路工具时');
+      break;
     case 'F8':
       e.preventDefault();
       game.enemySpawnEnabled = !game.enemySpawnEnabled;

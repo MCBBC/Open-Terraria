@@ -8,6 +8,7 @@ import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch, Color } from '../draw/UISpriteBatch';
 import { UITextures } from '../assets/UITextures';
 import { rgb } from '../draw/UISpriteBatch';
+import { UISfx } from '../UISfx';
 import { Lang } from '../../i18n/Lang';
 
 export interface TitleFlow {
@@ -16,14 +17,17 @@ export interface TitleFlow {
   onQuit(): void;
 }
 
-/** 原版风格纯文字菜单按钮（hover 金色心跳） */
+/** 原版风格纯文字菜单按钮（hover 金色心跳 + Menu_Tick/Menu_Open 音效） */
 class MenuTextButton extends UIText {
   pulse = 0;
+  private soundedHover = false;
   constructor(text: string, onClick: () => void) {
     super(text, 1);
     this.setTextColor(rgb(255, 255, 255));
     this.hAlign = 0.5;
-    this.onClick(() => onClick());
+    this.onClick(() => { UISfx.menuOpen(); onClick(); });
+    this.onMouseOver(() => { if (!this.soundedHover) UISfx.hover(); this.soundedHover = true; });
+    this.onMouseOut(() => { this.soundedHover = false; });
   }
 
   protected drawSelf(batch: UISpriteBatch): void {

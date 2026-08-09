@@ -42,6 +42,9 @@ export class UITextBox extends UITextPanel {
   /** 文本变化回调 */
   onChange: ((v: string) => void) | null = null;
 
+  /** 当前文本（外部读取用） */
+  get value(): string { return this.text; }
+
   update(): void {
     this.caretTime += 1 / 60;
     super.update();

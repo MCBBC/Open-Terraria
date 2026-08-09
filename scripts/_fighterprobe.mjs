@@ -50,7 +50,7 @@ const out = await page.evaluate(() => {
     ex: (e.x / 16 - px0) | 0, ey: ((e.y + e.h) / 16 - py0) | 0, dead: e.dead,
     wallCol: px0,
     tiles: (() => { const rows = []; for (let dy = 2; dy >= -2; dy--) { let r = ''; for (let dx = -3; dx <= 1; dx++) r += st.isSolid(px0 + dx, py0 + dy) ? '#' : '.'; rows.push(r); } return rows; })(),
-    playerSide: p.cx > t0.x ? 'right' : 'left', facing: e.facing > 0 ? 'right' : 'left',
+    playerSide: p.cx > e.cx ? 'right' : 'left', facing: e.facing > 0 ? 'right' : 'left',
     vx: +e.vx.toFixed(2), onG: e.onGround,
   };
 });

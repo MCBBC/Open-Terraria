@@ -6,9 +6,13 @@ import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { World, ChestData } from '../world/World';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt } from '../world/Door';
+import { TileStore } from '../world/TileStore';
+import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
+import { attachDevices, geyserTrap } from '../world/wiring/devices';
+import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { poolFor, vanillaNpc } from '../data/vanillaNpcs';
+import { poolFor, vanillaNpc, biomeAt, VANILLA_SPAWN_POOLS } from '../data/vanillaNpcs';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { Player } from '../entities/Player';
@@ -44,6 +48,7 @@ import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
 import { Dart } from '../entities/Dart';
+import { TrapShot } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { Minecart } from '../entities/Minecart';
 import { MagicProj } from '../entities/MagicProj';
@@ -183,6 +188,19 @@ export class Game implements GameHooks {
   minecart: import('../entities/Minecart').Minecart | null = null;
   trapCooldown = new Map<string, number>();
   plateLatch = new Set<string>();
+  /** 电路系统(Wiring.cs 移植) */
+  wiring: Wiring | null = null;
+  /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
+  wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
+  /** 宏伟蓝图拖拽锚点(tile 坐标) */
+  grandAnchor: [number, number] | null = null;
+  /** 测重板踩踏状态(原版 PressurePlateHelper 进/离双触发) */
+  weightedLatch = new Set<number>();
+  /** 触发源登记(idx):428 测重板 / 423 感应器 */
+  triggerTiles428 = new Set<number>();
+  triggerTiles423 = new Set<number>();
+  /** F7 强制显示导线 */
+  forceShowWires = false;
   // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
   fixTexMode = false;
   // 敌人生成开关（F8）：关闭后不再生成新怪物（已有的不受影响）
@@ -214,13 +232,30 @@ export class Game implements GameHooks {
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);
       if (code === 'Minus' || code === 'NumpadSubtract') this.setZoom(this.camera?.zoomTarget - 0.15);
+      // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
+      if (code === 'KeyR') {
+        const held = this.player?.inv.heldItem();
+        if (held && ITEM_DEFS[held.id]?.wireTool && (ITEM_DEFS[held.id]?.key === 'multicolor_wrench' || ITEM_DEFS[held.id]?.key === 'grand_design')) {
+          const modes = [
+            [TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
+            [TOOL_CUTTER, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
+            [TOOL_ACTUATOR],
+            [TOOL_CUTTER, TOOL_ACTUATOR],
+          ];
+          const cur = modes.findIndex((m) => m.reduce((a, b) => a | b, 0) === this.wireToolMode);
+          const next = modes[(cur + 1) % modes.length].reduce((a, b) => a | b, 0);
+          this.wireToolMode = next;
+          const name = next & TOOL_CUTTER ? (next & TOOL_ACTUATOR ? '剪致动器' : '剪线') : next & TOOL_ACTUATOR ? '致动器' : '四色铺线';
+          this.cb.onToast(`工具模式:${name}`);
+        }
+      }
     });
   }
 
   // ================= 生命周期 =================
 
-  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void) {
-    this.world = await generateWorld({ width, height, seedText }, (label, p) => onProgress?.(label, p * 0.7));
+  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void }) {
+    this.world = await generateWorld({ width, height, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
     // 水体预沉降：创建世界时全图激活+步进至稳定，带进度条
     onProgress?.('水体沉降', 0.72);
     await this.settleLiquids((p) => onProgress?.('水体沉降', 0.72 + p * 0.27));
@@ -270,6 +305,11 @@ export class Game implements GameHooks {
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
+    // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
+    this.wiring = new Wiring(w.store);
+    this.wiring.worldSurface = w.groundLevel;
+    attachDevices(this.wiring, this.makeDeviceCtx());
+    this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
     this.liquid = new LiquidSim(w);
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
@@ -286,6 +326,14 @@ export class Game implements GameHooks {
     const bag: Array<[string, number]> = [
       ['heal_potion', 2], ['agility_potion', 2], ['ironskin_potion', 2],
       ['thorns_potion', 2], ['regen_potion', 2], ['suspicious_eye', 3], ['lens', 6],
+      // 电路工具(Wiring 移植验证用):扳手/线/钳/致动器/魔杖/多彩/蓝图 + 常用器件
+      ['red_wrench', 1], ['blue_wrench', 1], ['green_wrench', 1], ['yellow_wrench', 1],
+      ['wire', 300], ['wire_cutter', 1], ['actuator_item', 30], ['actuation_rod', 1],
+      ['multicolor_wrench', 1], ['grand_design', 1],
+      ['place_v_132_lever', 10], ['place_v_136_switch', 10], ['place_v_144_timers', 5],
+      ['place_v_135_pressure_plates', 5], ['place_v_137_traps', 5], ['place_v_105_statue', 3],
+      ['place_v_419_logicgatelamp', 10], ['place_v_420_logicgate', 5],
+      ['place_v_235_teleporter', 2], ['place_v_142_inletpump', 2], ['place_v_143_outletpump', 2],
     ];
     let bi = 10;
     for (const [key, n] of bag) {
@@ -359,6 +407,8 @@ export class Game implements GameHooks {
       if (this.lastWasDay !== null) {
         this.cb.onToast(isDay ? '☀ 太阳升起来了，新的一天开始了' : '🌙 夜幕降临，小心出没的怪物…');
         this.cb.onDayNight?.(isDay);
+        // 昼/夜逻辑感应器(423)触发
+        this.triggerDayNightSensors();
       }
       this.lastWasDay = isDay;
     }
@@ -544,6 +594,10 @@ export class Game implements GameHooks {
 
     // ---- 压力板触发 ----
     this.checkPressurePlates();
+
+    // ---- 电路系统:冷却注册递减(计时器周期) + 测重板/感应器 ----
+    this.wiring?.updateMech();
+    this.updateTriggerTiles();
 
     // ---- Boss 逻辑 ----
     if (this.boss) {
@@ -774,6 +828,12 @@ export class Game implements GameHooks {
       }
       // HitTile 节流窗 = 实际挥击间隔（含攻速配饰加成），保证一挥一击
       this.tryMine(tx, ty, tool.power ?? 10, tool.type, spd);
+      return;
+    }
+
+    // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
+    if (heldDef?.wireTool && inp.mouseDown && !inp.rightDown) {
+      this.useWireTool(tx, ty, heldDef);
       return;
     }
 
@@ -1217,6 +1277,96 @@ export class Game implements GameHooks {
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
   }
 
+  /** 电路工具使用(原版 Player.cs:30289-30444 ItemCheck_UseWiringTools) */
+  private useWireTool(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    const w = this.wiring;
+    if (!w) return;
+    const st = this.world.store;
+    const dx = tx - Math.floor(this.player.cx / TILE);
+    const dy = ty - Math.floor(this.player.cy / TILE);
+    if (Math.hypot(dx, dy) > 8.5) return; // 原版 tileBoost 20,放宽到 8.5 格
+    if (this.player.useTime > 0) return;
+    const wt = itemDef.wireTool!;
+    const inv = this.player.inv;
+
+    // 致动魔杖:手动翻转(useTime 防连按)
+    if (wt.rod) {
+      if (w.actuate(tx, ty)) {
+        this.player.useTime = 15;
+        this.sfx.play('tink');
+      }
+      return;
+    }
+    // 剪线钳:按优先级移除一件(致动器>黄>绿>蓝>红)
+    if (wt.cutter) {
+      const done =
+        w.killActuator(tx, ty) ||
+        w.killWire(tx, ty, TileStore.WIRE_YELLOW) ||
+        w.killWire(tx, ty, TileStore.WIRE_GREEN) ||
+        w.killWire(tx, ty, TileStore.WIRE_BLUE) ||
+        w.killWire(tx, ty, TileStore.WIRE_RED);
+      if (done) { this.player.useTime = 5; this.sfx.play('dig'); }
+      return;
+    }
+    // 宏伟蓝图:按下记锚点,松开执行 L 形批量
+    if (wt.grand) {
+      if (!this.grandAnchor) { this.grandAnchor = [tx, ty]; return; }
+      const a = this.grandAnchor;
+      this.grandAnchor = null;
+      const mode = this.wireToolMode;
+      const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
+      const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(ITEM_BY_KEY['actuator_item'] ?? -1);
+      const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators);
+      if (!(mode & TOOL_CUTTER)) {
+        if (res.wire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, res.wire);
+        if (res.actuator > 0) inv.remove(ITEM_BY_KEY['actuator_item'] ?? -1, res.actuator);
+      }
+      this.player.useTime = 10;
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
+      return;
+    }
+    // 五彩扳手:单点,用当前模式
+    const mode = itemDef.key === 'multicolor_wrench' ? this.wireToolMode : (wt.place ?? 0);
+    if (mode & TOOL_CUTTER) {
+      const done =
+        (mode & TOOL_ACTUATOR ? w.killActuator(tx, ty) : false) ||
+        (mode & TOOL_YELLOW ? w.killWire(tx, ty, TileStore.WIRE_YELLOW) : false) ||
+        (mode & TOOL_GREEN ? w.killWire(tx, ty, TileStore.WIRE_GREEN) : false) ||
+        (mode & TOOL_BLUE ? w.killWire(tx, ty, TileStore.WIRE_BLUE) : false) ||
+        (mode & TOOL_RED ? w.killWire(tx, ty, TileStore.WIRE_RED) : false);
+      if (done) { this.player.useTime = 5; this.sfx.play('dig'); }
+      return;
+    }
+    // 扳手/致动器放置
+    let needWire = 0, needActuator = 0;
+    const colorBits: Array<[number, number]> = [
+      [TOOL_RED, TileStore.WIRE_RED], [TOOL_GREEN, TileStore.WIRE_GREEN],
+      [TOOL_BLUE, TileStore.WIRE_BLUE], [TOOL_YELLOW, TileStore.WIRE_YELLOW],
+    ];
+    for (const [m, bit] of colorBits) if (mode & m && !(st.wire[st.idx(tx, ty)] & bit)) needWire++;
+    if (mode & TOOL_ACTUATOR && !(st.wire[st.idx(tx, ty)] & TileStore.WIRE_ACTUATOR)) needActuator++;
+    const wireHave = inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
+    const actHave = inv.countOf(ITEM_BY_KEY['actuator_item'] ?? -1);
+    if (needWire > wireHave || needActuator > actHave) {
+      this.cb.onToast(needActuator > actHave ? '致动器不够了' : '电线不够了');
+      return;
+    }
+    let placed = false;
+    for (const [m, bit] of colorBits) {
+      if (mode & m && w.placeWire(tx, ty, bit)) placed = true;
+    }
+    if (mode & TOOL_ACTUATOR && w.placeActuator(tx, ty)) placed = true;
+    if (placed) {
+      if (needWire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, needWire);
+      if (needActuator > 0) inv.remove(ITEM_BY_KEY['actuator_item'] ?? -1, needActuator);
+      this.player.useTime = 5;
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
+    }
+    void dy;
+  }
+
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
@@ -1359,7 +1509,7 @@ export class Game implements GameHooks {
       this.world.spawnY = ty - 1;
       this.cb.onToast('重生点已设置');
       this.input.rightDown = false;
-    } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch']) {
+    } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']) {
       // 拉杆/开关:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
       this.toggleSwitch(tx, ty, type);
     } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
@@ -1418,53 +1568,223 @@ export class Game implements GameHooks {
     this.input.rightDown = false;
   }
 
-  /** 拉杆/开关切换:帧翻转(原版 style 内 on/off 两态),直线驱动陷阱 */
+  /** 拉杆/开关/计时器:右键 → Wiring.HitSwitch(Wiring.cs:163-252) */
   private toggleSwitch(x: number, y: number, type: number): void {
-    const st = this.world.store;
-    const i = st.idx(x, y);
-    const on = st.frameX[i] >= 18;
-    st.setTile(x, y, type, on ? 0 : 18, st.frameY[i]);
+    void type;
+    this.wiring?.hitSwitch(x, y);
     this.sfx.play('tink');
-    this.fireTrapsFrom(x, y, !on);
     this.input.rightDown = false;
   }
 
-  /** 从电源点向四方向直线扫描 ≤60 格,遇陷阱(无实心阻挡)发射飞镖 */
-  private fireTrapsFrom(px: number, py: number, powerOn: boolean): void {
-    if (!powerOn) return;
-    const st = this.world.store;
-    const TRAP = TILE_BY_KEY['v_137_traps'];
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-      for (let d = 1; d <= 60; d++) {
-        const x = px + dx * d, y = py + dy * d;
-        if (!st.inBounds(x, y)) break;
-        if (st.isSolid(x, y) && st.get(x, y) !== TRAP) break;
-        if (st.get(x, y) === TRAP) {
-          const key = x + ',' + y;
-          const last = this.trapCooldown.get(key) ?? -999;
-          if (this.tickCount - last < 40) return;
-          this.trapCooldown.set(key, this.tickCount);
-          const dart = new Dart(x * TILE + 8 + dx * 10, y * TILE + 8 + dy * 10, dx * 9, dy * 9, 20);
-          this.entities.add(dart, 'projectiles');
-          this.sfx.play('tink');
-          return;
-        }
-      }
-    }
-  }
-
-  /** 压力板:玩家踩上瞬间触发(原版 PressurePlate 语义,人触发灰板) */
+  /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles 玩家语义;敌人触发见 Enemy 侧) */
   private checkPressurePlates(): void {
     const st = this.world.store;
     const p = this.player;
     const tx = Math.floor(p.cx / TILE), ty = Math.floor((p.y + p.h) / TILE);
     const key = tx + ',' + ty;
-    if (st.get(tx, ty) === TILE_BY_KEY['v_135_pressure_plates'] && !this.plateLatch.has(key)) {
+    const onPlate = this.wiring?.sheetOf(tx, ty) === 135;
+    if (onPlate && !this.plateLatch.has(key)) {
       this.plateLatch.add(key);
-      this.fireTrapsFrom(tx, ty, true);
-    } else if (st.get(tx, ty) !== TILE_BY_KEY['v_135_pressure_plates']) {
+      this.wiring?.hitSwitch(tx, ty);
+    } else if (!onPlate) {
       this.plateLatch.delete(key);
     }
+  }
+
+  /** 测重板 428(原版 PressurePlateHelper 进/离双触发)+ 感应器 423(玩家上方/昼夜)。
+   *  触发源由 scanTriggerTiles 登记,onTileChanged 增量维护 */
+  private updateTriggerTiles(): void {
+    const w = this.wiring;
+    if (!w) return;
+    const st = this.world.store;
+    const p = this.player;
+    // 测重板:玩家 AABB 覆盖格(原版 16×10 底部判定,近似脚下 1 格)
+    const standing = new Set<number>();
+    for (let dx = 0; dx <= 0; dx++) {
+      const tx = Math.floor(p.cx / TILE) + dx, ty = Math.floor((p.y + p.h) / TILE);
+      for (const idx of this.triggerTiles428) {
+        const x = idx % st.w, y = (idx / st.w) | 0;
+        if (x === tx && y === ty) standing.add(idx);
+      }
+    }
+    for (const idx of standing) {
+      if (!this.weightedLatch.has(idx)) {
+        this.weightedLatch.add(idx);
+        w.blockPlayerTeleportationForOneIteration = true; // 原版 MoveInto(:135-142)
+        w.hitSwitch(idx % st.w, (idx / st.w) | 0);
+      }
+    }
+    for (const idx of this.weightedLatch) {
+      if (!standing.has(idx)) {
+        this.weightedLatch.delete(idx);
+        w.blockPlayerTeleportationForOneIteration = true; // 原版 MoveAwayFrom 双触发
+        w.hitSwitch(idx % st.w, (idx / st.w) | 0);
+      }
+    }
+    // 感应器 423:玩家上方(frameY 0=昼 36=夜 72=玩家出入上方,placeStyle 0-2 → frameY/18%3)
+    const ptx = Math.floor(p.cx / TILE), pty = Math.floor((p.y + p.h) / TILE);
+    for (const idx of this.triggerTiles423) {
+      const x = idx % st.w, y = (idx / st.w) | 0;
+      const mode = Math.floor(st.frameY[idx] / 18) % 3;
+      if (mode === 2 && x === ptx && pty > y && pty - y <= 8) {
+        w.hitSwitch(x, y);
+      }
+      // 昼/夜感应由 onDayNight 回调驱动(见 triggerDayNightSensors)
+    }
+  }
+
+  /** 昼/夜切换时触发全部对应感应器(原版逻辑在 Projectile.LogicSensor 驱动) */
+  triggerDayNightSensors() {
+    const w = this.wiring;
+    if (!w) return;
+    const st = this.world.store;
+    const isDay = this.world.clock.isDay;
+    for (const idx of this.triggerTiles423) {
+      const mode = Math.floor(st.frameY[idx] / 18) % 3;
+      // mode 0=昼感应器:日出触发;1=夜:日落触发
+      if ((mode === 0 && isDay) || (mode === 1 && !isDay)) {
+        w.hitSwitch(idx % st.w, (idx / st.w) | 0);
+      }
+    }
+  }
+
+  /** 全图扫描测重板/感应器登记(读档/生成后一次);增量维护见 worldReadyListener */
+  private scanTriggerTiles(): void {
+    const st = this.world.store;
+    this.triggerTiles428.clear();
+    this.triggerTiles423.clear();
+    const s428 = TILE_BY_KEY['v_428_weightedpressureplate'] ?? 0;
+    const s423 = TILE_BY_KEY['v_423_logicsensor'] ?? 0;
+    if (!s428 && !s423) return;
+    for (let i = 0; i < st.type.length; i++) {
+      if (s428 && st.type[i] === s428) this.triggerTiles428.add(i);
+      else if (s423 && st.type[i] === s423) this.triggerTiles423.add(i);
+    }
+    st.onTileChanged((x, y) => {
+      const i = st.idx(x, y);
+      const t = st.type[i];
+      if (t === s428) this.triggerTiles428.add(i);
+      else this.triggerTiles428.delete(i);
+      if (t === s423) this.triggerTiles423.add(i);
+      else this.triggerTiles423.delete(i);
+    });
+  }
+
+  /** DeviceCtx:器件表与引擎侧能力对接(devices.ts) */
+  private makeDeviceCtx() {
+    return {
+      worldSurface: this.world.groundLevel,
+      dropItem: (vanillaItemId: number, px: number, py: number) => {
+        const key = ITEM_MAP[vanillaItemId];
+        if (key) this.spawnDrop(px, py, key, 1);
+      },
+      spawnNpc: (vanillaNpcId: number, px: number, py: number) => {
+        const e = Enemy.fromVanilla(vanillaNpcId, px, py);
+        if (e) { this.entities.add(e, 'enemies'); return true; }
+        return false;
+      },
+      mechSpawnOk: (px: number, py: number) => {
+        // NPC.MechSpawn 近似:25 格半径内敌人 < 6
+        let n = 0;
+        for (const e of this.entities.enemies) {
+          if (Math.abs(e.x - px) < 400 && Math.abs(e.y - py) < 400) n++;
+        }
+        return n < 6;
+      },
+      itemSpawnOk: (px: number, py: number) => {
+        // Item.MechSpawn 近似:20 格半径内掉落物 < 20
+        let n = 0;
+        for (const d of this.entities.drops) {
+          if (Math.abs(d.x - px) < 320 && Math.abs(d.y - py) < 320) n++;
+        }
+        return n < 20;
+      },
+      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'flame' | 'spiky' | 'boulder' | 'geyser') => {
+        this.entities.add(new TrapShot(px, py, vx, vy, damage, kind), 'projectiles');
+        this.sfx.play('tink');
+      },
+      countProjectiles: (kind: 'spiky', px: number, py: number, radius: number) => {
+        let n = 0;
+        for (const e of this.entities.projectiles) {
+          if (e instanceof TrapShot && e.kind === kind && Math.hypot(e.x - px, e.y - py) < radius) n++;
+        }
+        return n;
+      },
+      doorOpen: (x: number, y: number) => {
+        // 原版 HitWireSingle 10/11:随机方向 + 反向重试(WorldGen.OpenDoor)
+        const dir = Math.random() < 0.5 ? 1 : -1;
+        if (!openDoor(this.world.store, x, y, dir)) return openDoor(this.world.store, x, y, -dir) ;
+        return true;
+      },
+      doorClose: (x: number, y: number) => closeDoor(this.world.store, x, y),
+      teleportPair: (a: [number, number], b: [number, number]) => this.teleportPairImpl(a, b),
+      relocateTownNpc: (group: 0 | 1, px: number, py: number) => {
+        // 雕像 40/41 城镇 NPC 白名单(原版两组;此处按 NPC 图鉴顺序取前几个存在的)
+        const groups: Array<Array<string>> = [
+          ['guide', 'merchant', 'nurse', 'demolitionist', 'dyer', 'arms_dealer'],
+          ['dryad', 'painter', 'golfer', 'zoologist', 'pirate', 'stylist'],
+        ];
+        for (const key of groups[group]) {
+          const npc = this.entities.npcs.find((n) => (n as TownNPC).npcKey === key);
+          if (npc) {
+            npc.x = px - npc.w / 2;
+            npc.y = py - npc.h - 1;
+            return true;
+          }
+        }
+        return false;
+      },
+      explode: (tx: number, ty: number, damage: number) => this.explodeAt(tx, ty, damage),
+      toast: (m: string) => this.cb.onToast(m),
+      sfx: (n: string) => this.sfx.play(n as SfxName),
+    };
+  }
+
+  /** 传送器对(Wiring.cs:2314-2365):板上 48×48 判定框内实体双向搬迁 */
+  private teleportPairImpl(a: [number, number], b: [number, number]) {
+    // 太近的竖叠板拒绝(:2316)
+    if (Math.abs(a[0] - b[0]) < 3 && a[1] > b[1] - 3 && a[1] < b[1]) return;
+    const rect = (pad: [number, number]) => ({
+      x: pad[0] * TILE, y: pad[1] * TILE - 48, w: 48, h: 48,
+    });
+    const hit = (r: { x: number; y: number; w: number; h: number }, e: { x: number; y: number; w: number; h: number }) =>
+      e.x < r.x + r.w && e.x + e.w > r.x && e.y < r.y + r.h && e.y + e.h > r.y;
+    const ra = rect(a), rb = rect(b);
+    const dx = rb.x - ra.x, dy = rb.y - ra.y;
+    if (!this.wiring?.blockPlayerTeleportationForOneIteration) {
+      const p = this.player;
+      if (!p.dead && hit(ra, p)) { p.x += dx; p.y += dy; p.vx = 0; p.vy = 0; this.sfx.play('tink'); }
+      else if (!p.dead && hit(rb, p)) { p.x -= dx; p.y -= dy; p.vx = 0; p.vy = 0; this.sfx.play('tink'); }
+    }
+    for (const e of this.entities.enemies) {
+      if (hit(ra, e)) { e.x += dx; e.y += dy; }
+      else if (hit(rb, e)) { e.x -= dx; e.y -= dy; }
+    }
+  }
+
+  /** 爆炸(炸药/地雷/巨石近似):半径 3 清软块 + 范围伤害 + 粒子 */
+  private explodeAt(tx: number, ty: number, damage: number) {
+    const st = this.world.store;
+    const R = 3;
+    for (let dx = -R; dx <= R; dx++) {
+      for (let dy = -R; dy <= R; dy++) {
+        if (dx * dx + dy * dy > R * R) continue;
+        const x = tx + dx, y = ty + dy;
+        if (!st.inBounds(x, y)) continue;
+        const d = TILE_DEFS[st.get(x, y)];
+        if (d && d.pick >= 0 && d.pick < 200 && !d.key.startsWith('v_75') && !d.key.startsWith('v_76')) {
+          st.setTile(x, y, 0);
+        }
+      }
+    }
+    const cx = tx * TILE + 8, cy = ty * TILE + 8;
+    for (const e of this.entities.enemies) {
+      if (Math.hypot(e.x - cx, e.y - cy) < R * TILE + 16) { const en = e as Enemy; if (en.hurt) en.hurt(damage, cx - (e.cx ?? cx), cy - (e.cy ?? cy), this); }
+    }
+    const p = this.player;
+    if (Math.hypot(p.cx - cx, p.cy - cy) < R * TILE + 16) p.damage(damage, cx, cy);
+    this.spawnParticles(cx, cy, '#FFA040', 26, 4);
+    this.sfx.play('roar');
   }
 
   /** 桶三态(Player.cs ItemCheck_Buckets L28137 语义):
@@ -1622,6 +1942,8 @@ export class Game implements GameHooks {
     if (!st.inBounds(tx, ty) || tx < 2 || tx > st.w - 3) return;
 
     const isUnderground = st.wall[st.idx(tx, ty)] !== 0 || ty > w.rockLevel;
+    // 深水列标记（原海洋排除守卫改造：水生池可生成，legacy 怪仍被拦）
+    let deepWaterCol = false;
     // 海洋/水域排除：该列从天空到 rockLevel 全是液体 = 海里——除鱼类外不生成
     // （蝙蝠等飞行怪在海面上盘旋也不合理，一并排除）
     {
@@ -1630,12 +1952,13 @@ export class Game implements GameHooks {
         if (st.liquid[st.idx(tx, y)] > 40) { liquidTop = y; break; }
       }
       if (liquidTop >= 0) {
-        // 水面之下 10 格仍是液体 → 判定为海/深水区
+        // 水面之下 10 格仍是液体 → 判定为海/深水区：不再直接排除——
+        // 原版水生池（水母/鲨鱼，AI 16/18）可在此生成；非水生怪仍由 legacy 守卫拦截
         let deep = true;
         for (let y = liquidTop; y < Math.min(liquidTop + 10, st.h); y++) {
           if (st.liquid[st.idx(tx, y)] <= 40) { deep = false; break; }
         }
-        if (deep) return;
+        if (deep) deepWaterCol = true;
       }
     }
     // 地狱区：熔岩史莱姆 / 熔岩僵尸（不怕岩浆）
@@ -1660,7 +1983,14 @@ export class Game implements GameHooks {
     // 原版数据驱动怪（50% 概率从原版生成池选，属性/AI/贴图全走 vanilla-npcs.json）
     let vanillaSpawn: Enemy | null = null;
     if (rng.chance(0.5)) {
-      const pool = poolFor(Math.floor(w.groundLevel), st.h - 200, ty, isDay);
+      // 水域（spawn 列向下 40 格内有深水）→ 水生池：水母/鲨鱼/食人鱼（AI 16/18 已移植）
+      let inWaterCol = false;
+      for (let dy = 0; dy < 100 && ty + dy < st.h - 2; dy++) {
+        if (st.liquid[st.idx(tx, ty + dy)] > 80) { inWaterCol = true; break; }
+      }
+      const pool = inWaterCol || deepWaterCol
+        ? VANILLA_SPAWN_POOLS.water
+        : poolFor(Math.floor(w.groundLevel), st.h - 200, ty, isDay, biomeAt(st, tx, ty) ?? undefined);
       const vid = pool[(rng.next() * pool.length) | 0];
       vanillaSpawn = Enemy.fromVanilla(vid, 0, 0);
     }
@@ -1673,6 +2003,27 @@ export class Game implements GameHooks {
       this.entities.enemies.push(vanillaSpawn);
       const segs = Enemy.spawnWormChain(vanillaSpawn, 5 + ((rng.next() * 4) | 0));
       for (const s of segs) { s.id = this.entities.nextId++; this.entities.enemies.push(s); }
+      return;
+    }
+    // 水生族（aiStyle 16 游泳 / 18 水母）：找水下格生成（不找干燥落脚位）
+    if (vanillaSpawn?.vanilla && (vanillaSpawn.vanilla.aiStyle === 16 || vanillaSpawn.vanilla.aiStyle === 18)) {
+      for (let dy = -8; dy <= 100; dy++) {
+        const yy = ty + dy;
+        if (yy < 2 || yy > st.h - 3) continue;
+        // 下方还需连续 5 格液体 = 真水体（防鲨鱼生成在陆地一滩小水洼里）
+        if (st.liquid[st.idx(tx, yy)] > 150 && !st.isSolid(tx, yy)) {
+          let deepEnough = yy + 5 < st.h - 2;
+          for (let k = 1; deepEnough && k <= 5; k++) {
+            if (st.liquid[st.idx(tx, yy + k)] <= 100 || st.isSolid(tx, yy + k)) deepEnough = false;
+          }
+          if (!deepEnough) continue;
+          vanillaSpawn.x = tx * TILE + 8 - vanillaSpawn.w / 2;
+          vanillaSpawn.y = yy * TILE;
+          vanillaSpawn.id = this.entities.nextId++;
+          this.entities.enemies.push(vanillaSpawn);
+          return;
+        }
+      }
       return;
     }
     for (let dy = -8; dy <= 12; dy++) {
@@ -1704,6 +2055,8 @@ export class Game implements GameHooks {
       }
       return;
     }
+    // 深水列的 legacy 守卫：未走 vanilla 水生怪时保持老行为（非鱼类不入海）
+    if (deepWaterCol) return;
     this.spawnEnemy(key, tx * TILE + 8, spawnY * TILE);
   }
 
@@ -1942,6 +2295,18 @@ export class Game implements GameHooks {
       return true;
     });
     if (!pool.length) return;
+    // 原版小动物迁移（CountsAsCritter）：白天地表 45% 概率改走原版数据驱动
+    // （兔子/鸟/松鼠/鼠/蚱蜢/蚯蚓——vanilla-npcs.json 带属性+贴图，Enemy 走 critterWanderAI）
+    if (isDay && !surfaceWater && Math.random() < 0.45) {
+      const v = Enemy.fromVanilla(VANILLA_SPAWN_POOLS.critters[(Math.random() * VANILLA_SPAWN_POOLS.critters.length) | 0], 0, 0);
+      if (v) {
+        v.x = tx * TILE + 8 - v.w / 2;
+        v.y = groundY * TILE - v.h;
+        v.id = this.entities.nextId++;
+        this.entities.add(v, 'critters');
+        return;
+      }
+    }
     const total = pool.reduce((s2, c) => s2 + c.weight, 0);
     let r = Math.random() * total;
     let pick = pool[0];
@@ -2315,6 +2680,9 @@ export class Game implements GameHooks {
     const cam = this.camera;
     const L = this.lighting;
     this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
+    // 导线可见性:手持电路工具(mech)或 F7 强制(Main.cs:43548 DrawWires 开关语义)
+    const held = this.player.inv.heldItem();
+    this.renderer.showWires = this.forceShowWires || !!held && !!ITEM_DEFS[held.id]?.wireTool;
     const hover = this.input.uiBlocking ? null : (() => {
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;

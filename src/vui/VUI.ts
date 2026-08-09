@@ -58,8 +58,25 @@ export class VUI {
     UIScale.resize(cssW, cssH, dpr);
   }
 
-  static setState(state: UIState | null) { VUI.ui.setState(state); }
+  static setState(state: UIState | null) {
+    VUI.ui.setState(state);
+    VUI.syncCursor();
+  }
   static goBack() { VUI.ui.goBack(); }
+
+  /** 系统光标可见性：VUI 有状态时全屏隐藏系统光标（只留 Canvas 绘制的原版光标） */
+  private static syncCursor() {
+    document.body.style.cursor = VUI.ui.current ? 'none' : '';
+  }
+
+  /** 清空 UI 层画布（进游戏/退出菜单时调用，避免残留冻结帧叠加在游戏画面上） */
+  static clear() {
+    if (!VUI.canvas || !VUI.batch) return;
+    const ctx = VUI.batch.ctx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, VUI.canvas.width, VUI.canvas.height);
+    document.body.style.cursor = '';
+  }
 
   /** 显示开关（游戏内全屏地图打开等场景可临时隐藏 UI 层输入） */
   static setEnabled(v: boolean) { VUI.enabled = v; }

@@ -1,6 +1,7 @@
 // 光照引擎：天空光列缓存 + 区域内 BFS 三通道衰减传播。
 // 只维护「可视区 + 边距」的区域光照，脏时或相机跨阈值时重算。
 import { TILE_DEFS } from '../data/tiles';
+import { lightIsOn } from '../world/wiring/devices';
 import { LIGHT_AIR_COST, SKY_LIGHT, TILE } from '../core/constants';
 import type { World } from '../world/World';
 
@@ -150,16 +151,19 @@ export class LightingEngine {
           b[li] = Math.max(b[li], 40);
           push(li);
         }
-        // 自发光源
+        // 自发光源(可接线灯器件按开关帧判定:接线关灯后不再发光)
         const type = st.type[wi];
         if (type !== 0) {
           const d = TILE_DEFS[type];
           if (d && d.light) {
-            const [lr, lg, lb] = d.light;
-            r[li] = Math.max(r[li], Math.round(lr));
-            g[li] = Math.max(g[li], Math.round(lg));
-            b[li] = Math.max(b[li], Math.round(lb));
-            push(li);
+            const on = !d.vanilla || lightIsOn(d.vanilla.sheet, st.frameX[wi], st.frameY[wi]);
+            if (on) {
+              const [lr, lg, lb] = d.light;
+              r[li] = Math.max(r[li], Math.round(lr));
+              g[li] = Math.max(g[li], Math.round(lg));
+              b[li] = Math.max(b[li], Math.round(lb));
+              push(li);
+            }
           }
         }
         // 液体微光（水下的折射感由 cost 体现，这里不加源）

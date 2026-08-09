@@ -26,7 +26,7 @@ describe('Appearance', () => {
   });
 
   it('校验：损坏数据补默认并钳制', () => {
-    const a = validateAppearance({ name: 'x'.repeat(50), hair: 9999, difficulty: 9, hairColor: { r: 300, g: -5, b: 'a' } });
+    const a = validateAppearance({ name: 'x'.repeat(50), hair: 9999, difficulty: 9 as 0, hairColor: { r: 300, g: -5, b: 'a' as unknown as number } });
     expect(a.name.length).toBe(20);
     expect(a.hair).toBe(228);          // 钳到上限
     expect(a.difficulty).toBe(0);

@@ -5,6 +5,7 @@ import type { DrawRect } from '../../assets/SpriteAtlas';
 import { UITextures } from '../assets/UITextures';
 import { rgb } from '../draw/UISpriteBatch';
 import { StyleDimension } from '../core/StyleDimension';
+import { UISfx } from '../UISfx';
 
 /** 图片元素（保持原尺寸） */
 export class UIImage extends UIElement {
@@ -26,10 +27,11 @@ export class UIImage extends UIElement {
   }
 }
 
-/** 可点击图片按钮（hover 泛白） */
+/** 可点击图片按钮（hover 泛白 + Menu_Tick 音效） */
 export class UIImageButton extends UIElement {
   protected hoverColor: Color = rgb(255, 255, 255);
   protected normalColor: Color = rgb(153, 153, 153);
+  private soundedHover = false;
 
   constructor(public textureKey: string, public scale = 1) {
     super();
@@ -38,9 +40,12 @@ export class UIImageButton extends UIElement {
       this.width = StyleDimension.fromPixels(t.sw * scale);
       this.height = StyleDimension.fromPixels(t.sh * scale);
     }
+    this.onMouseOver(() => { if (!this.soundedHover) UISfx.hover(); this.soundedHover = true; });
+    this.onMouseOut(() => { this.soundedHover = false; });
   }
 
   setHoverColor(c: Color) { this.hoverColor = c; }
+  setNormalColor(c: Color) { this.normalColor = c; }
 
   protected drawSelf(batch: UISpriteBatch): void {
     const t = UITextures.get(this.textureKey);

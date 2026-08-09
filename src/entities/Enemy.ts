@@ -96,7 +96,9 @@ export class Enemy extends Entity {
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
-      hitSound: [hit], killedSound: [kill], drops: vanillaNpcDrops(id),
+      hitSound: [hit], killedSound: [kill], drops: v.critter ? [] : vanillaNpcDrops(id),
+      // 小动物：无接触伤害、不夜行
+      ...(v.critter ? { damage: 0, nightOnly: false } : {}),
     };
     e.hp = v.lifeMax;
     e.maxHp = v.lifeMax;
@@ -152,7 +154,10 @@ export class Enemy extends Entity {
 
     // ---- 原版数据驱动路径：按 aiStyle 分发到已移植的 AI 家族（分发后落入共享尾段） ----
     // 蠕虫身体段（wormFollow 非空）无 AI：位置由头部 wormAI 沿链驱动，但仍走共享尾段（接触伤害等）
-    if (this.vanilla && !this.wormFollow) {
+    // 小动物（critter）优先走被动游荡，绝不落入 default 的追击 fallback
+    if (this.vanilla && !this.wormFollow && this.vanilla.critter) {
+      this.critterWanderAI(game, hasPlayer ? player : null);
+    } else if (this.vanilla && !this.wormFollow) {
       const p = hasPlayer ? player : null;
       switch (this.vanilla.aiStyle) {
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
@@ -162,7 +167,11 @@ export class Enemy extends Entity {
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
         case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
+        case 16: this.swimAI(game, p); break;                           // AI_016 游泳族（鲨鱼/食人鱼）
+        case 18: this.jellyfishAI(game, p); break;                      // AI_018 水母族（脉冲游动）
+        case 22: this.ghostAI(game, p); break;                          // AI_022 幽灵族（穿墙缓速）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
+        case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -187,8 +196,9 @@ export class Enemy extends Entity {
       game.playSfx('splash', vol);
     }
 
-    // 接触伤害（带上攻击者引用，供荆棘反伤）
-    if (hasPlayer && this.aabbOverlaps(player)) {
+    // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
+    // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"
+    if (hasPlayer && this.aabbOverlaps(player) && this.def.damage > 0) {
       game.damagePlayer(this.def.damage, this.cx, this.cy, this);
     }
 
@@ -241,7 +251,10 @@ export class Enemy extends Entity {
       if (this.onGround) this.squash = Math.min(1, this.squash + 0.08);
       const canAct = this.onGround || surfaced;
       // 脱困冷却内（stuckCd>0）落地/浮面立刻再跳，不在原地等 50 tick 空转
-      if (canAct && (this.aiT % 50 === 0 || this.stuckCd > 0 || (player && this.aiT > 40 && Math.abs(player.cx - this.cx) < TILE * 12))) {
+      // 索敌：受击后（iframes 刚触发过）或玩家贴近 <6 格才追；否则随机方向游荡跳
+      const hurt = this.iframes > 0;
+      const close = !!player && Math.abs(player.cx - this.cx) < TILE * 6;
+      if (canAct && (this.aiT % 50 === 0 || this.stuckCd > 0 || ((hurt || close) && this.aiT > 40))) {
         // 起跳方向：掉头冷却内用当前朝向（不再朝玩家死磕同一堵墙）
         let dir = this.facing;
         if (player && this.stuckCd === 0) {
@@ -489,7 +502,7 @@ export class Enemy extends Entity {
    *  逆向阻尼 0.95、超速落地 ×0.8；卡墙 30 tick 折返（ai[3]≥num1，玩家 <200px 重置 L25936-25941）；
    *  台阶步升 16.1 同战士（L26182-26207）；跳梯 -8.5/-7.5/-7/-6/-8（L26245-26279，
    *  前方探测含 (w/2+2)×dir + 5×vx 提前量 L26226-26227） */
-  private chargerAI(game: GameHooks, player: Player | null) {
+  private chargerAI(game: GameHooks, player: Player | null, maxSpd = 6) {
     const st = game.world.store;
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
     // 方向：卡墙 ≥30 tick 折返；玩家 200px 内重置计数并朝玩家冲
@@ -499,7 +512,7 @@ export class Enemy extends Entity {
       this.facing = player.cx > this.cx ? 1 : -1;
     }
     const dir = this.facing;
-    const maxSpd = 6, accel = 0.07;
+    const accel = 0.07;
     // 逆向阻尼（L26105-26108）
     if ((this.vx > 0 && dir < 0) || (this.vx < 0 && dir > 0)) this.vx *= 0.95;
     if (dir === 1 && this.vx < maxSpd) { this.vx += accel; if (this.vx > maxSpd) this.vx = maxSpd; }
@@ -585,6 +598,97 @@ export class Enemy extends Entity {
       if (this.vy > 0 && this.vy < 1) this.vy = 1;
       if (this.vy < 0 && this.vy > -1) this.vy = -1;
     }
+  }
+
+  /** AI_016 游泳族（1.4.5.6 NPC.145.cs:23549+）：鲨鱼/食人鱼/琵琶鱼等
+   *  通用档水中 accel 0.1/0.1、上限 X±3/Y±2（L23883-23897）；Arapaima(157) 0.25/0.2、±7/±4（L23831+）；
+   *  撞墙掉头；离水缓慢上浮。螺旋转向/专家模式特化略 */
+  private swimAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    if (player) this.facing = player.cx > this.cx ? 1 : -1;
+    const dirX = player ? this.facing : (this.vx >= 0 ? 1 : -1);
+    const dirY = player ? (player.cy > this.cy ? 1 : -1) : 0;
+    const ara = this.vanillaId === 157;
+    const ax = ara ? 0.25 : 0.1, ay = ara ? 0.2 : 0.1;
+    const cx = ara ? 7 : 3, cy = ara ? 4 : 2;
+    if (inWater) {
+      this.vx += dirX * ax;
+      this.vy += dirY * ay;
+      this.vx = Math.max(-cx, Math.min(cx, this.vx));
+      this.vy = Math.max(-cy, Math.min(cy, this.vy));
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.hitWall) { this.facing *= -1; this.vx = -this.vx * 0.8; } // 撞墙掉头
+    } else {
+      // 离水：重力下坠 + 落地拍打挣扎（原版鱼离水不会飞——之前误写成持续上浮导致飞天）
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      this.vx *= 0.9;
+      if (this.onGround && this.aiT % 30 === 0) {   // 拍打：小跳 + 随机方向
+        this.vy = -2.5;
+        this.vx = (Math.random() - 0.5) * 3;
+      }
+    }
+  }
+
+  /** AI_018 水母族（NPC.145.cs:24210+）：阻尼漂移 + 周期性脉冲游向目标
+   *  速度 *=0.98 阻尼（L24349）；静止阈值内（num277 0.2-3）触发脉冲，脉冲速度 7-9（L24374+）。
+   *  离水：重力下坠拍打（脉冲只在水中生效——否则水母会飞） */
+  private jellyfishAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    this.vx *= 0.98; this.vy *= 0.98;
+    if (inWater) {
+      if (++this.aiT % 90 === 0 && player) {
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        this.vx = (dx / d) * 7;       // 脉冲速度 7（大体型 9）
+        this.vy = (dy / d) * 7;
+      } else if (!player) {
+        this.vy -= 0.02;              // 缓慢下沉漂移
+      }
+    } else {
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED); // 离水受重力
+      if (this.onGround && this.aiT % 30 === 0) this.vy = -2.5; // 拍打
+    }
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) this.vx *= -0.8;
+    if (this.onGround && inWater) this.vy = -Math.abs(this.vy) - 0.5;
+  }
+
+  /** AI_022 幽灵族（NPC.145.cs:24726+）：穿墙缓速追击
+   *  目标速度 = 归一化方向×7（num312），Lerp 系数 0.0125（num317）——飘忽逼近的手感 */
+  private ghostAI(game: GameHooks, player: Player | null) {
+    if (!player) { this.vx *= 0.95; this.vy *= 0.95; return; }
+    const dx = player.cx - this.cx, dy = player.cy - this.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    this.vx += ((dx / d) * 7 - this.vx) * 0.0125;
+    this.vy += ((dy / d) * 7 - this.vy) * 0.0125;
+    this.facing = this.vx > 0 ? 1 : -1;
+    // 幽灵族 noTileCollide：直接位移
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** 小动物被动 AI（原版 critter 语义近似）：间歇游荡 + 受击逃离玩家。
+   *  各家族原版行为（蚱蜢 ai1 跳/鸟 ai24 飞/蚯蚓 ai66 爬）后续逐族 1:1，先统一温和地面行为 */
+  private critterWanderAI(game: GameHooks, player: Player | null) {
+    // 受击逃离（iframes 刚触发时朝远离玩家方向窜）
+    if (this.iframes > 6 && player) {
+      const flee = player.cx > this.cx ? -1 : 1;
+      this.facing = flee;
+      this.vx = flee * 2.2;
+      if (this.onGround) this.vy = -3;
+    } else if (this.onGround && this.aiT % 90 === 0) {
+      // 随机踱步/停驻
+      const r = Math.random();
+      if (r < 0.4) { this.facing = Math.random() < 0.5 ? -1 : 1; this.vx = this.facing * 0.7; }
+      else this.vx = 0;
+    }
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.onGround) this.vx *= 0.85;
+    if (this.hitWall) this.facing *= -1;
   }
 
   private casterAI(game: GameHooks, player: Player | null) {
@@ -841,6 +945,12 @@ export class Enemy extends Entity {
 
   /** 受击。返回是否死亡 */
   hurt(dmg: number, kbx: number, kby: number, game: GameHooks): boolean {
+    // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
+    // 原版小动物是 Enemy 进该桶，这里把 Game 对象重映射回 game 参、伤害取固定 5
+    if (typeof dmg === 'object' && dmg !== null) {
+      game = dmg as unknown as GameHooks;
+      dmg = 5; kbx = 0; kby = 0;
+    }
     if (this.iframes > 0) return false;
     // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
     const def = this.def.defense ?? 0;

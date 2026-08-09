@@ -45,6 +45,9 @@ const MISC = [
   'Misc/water_0.png', 'Misc/water_1.png', 'Misc/water_11.png',
   // 蘑菇树树冠（tile 72 专用 ShroomTop）
   'Shroom_Tops.png',
+  // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
+  'WiresNew.png',
+  'Actuator.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

@@ -12,6 +12,7 @@ export interface WldTileData {
   wall: Uint16Array;
   liquid: Uint8Array;
   liquidType: Uint8Array; // 1水 2岩浆 3蜂蜜
+  wire: Uint8Array;       // 电路位 bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动（header2 0x02-0x40）
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
@@ -283,6 +284,7 @@ function decodeTiles(
   const wall = new Uint16Array(n);
   const liquid = new Uint8Array(n);
   const liquidType = new Uint8Array(n);
+  const wire = new Uint8Array(n);
 
   let idx = 0; // y * w + x，列优先推进
   for (let x = 0; x < w; x++) {
@@ -318,6 +320,8 @@ function decodeTiles(
           wl |= r.u8() << 8;
         }
       }
+      // 电路位（原版 Tile.cs flags2）：0x02红 0x04蓝 0x08绿 0x10黄 0x20致动器 0x40已致动
+      const wireBits = (header2 & 0x3E) >> 1;
       const lqType = (header1 & 0x18) >> 3;
       let lqAmount = 0, lqKind = 0;
       if (lqType !== 0) {
@@ -340,10 +344,11 @@ function decodeTiles(
         wall[i] = wl;
         liquid[i] = lqAmount;
         liquidType[i] = lqKind;
+        wire[i] = wireBits;
       }
       y += rle;
     }
   }
   void idx;
-  return { active, type, frameX, frameY, wall, liquid, liquidType };
+  return { active, type, frameX, frameY, wall, liquid, liquidType, wire };
 }

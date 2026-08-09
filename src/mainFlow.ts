@@ -14,8 +14,12 @@ import { TitleState } from './vui/states/TitleState';
 import { DataState } from './vui/states/DataState';
 import { UICharacterSelectState } from './vui/states/UICharacterSelectState';
 import { UICharacterCreationState } from './vui/states/UICharacterCreationState';
+import { UIWorldSelectState } from './vui/states/UIWorldSelectState';
+import { UIWorldCreationState } from './vui/states/UIWorldCreationState';
+import { UIWorldLoadState } from './vui/states/UIWorldLoadState';
 import { MenuBackground } from './render/MenuBackground';
 import { CharacterStore } from './save/CharacterStore';
+import { WorldStore, type WorldMeta } from './save/WorldStore';
 import type { Appearance } from './player/Appearance';
 
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
@@ -43,7 +47,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   let devMode = false;
   let quickSaveExists = false;
   let selectedAppearance: Appearance | null = null;
+  let currentWorld: WorldMeta | null = null;
   const charStore = new CharacterStore();
+  const worldStore = new WorldStore();
 
   // 隐藏文件输入（DOM 能力，VUI 按钮触发）
   const fileInput = document.createElement('input');
@@ -179,14 +185,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     menuBg = null;
     legacyShim?.remove();
     legacyShim = null;
+    // 进游戏前清空 UI 层：避免冻结的菜单帧叠加在游戏画面上（M5 游戏内 UI 上线后移除）
+    VUI.setState(null);
+    VUI.clear();
   }
 
   function showCharacterSelect() {
     VUI.setState(new UICharacterSelectState(charStore, {
-      // M3 前临时：选完角色直接开中世界（M3 换成世界列表）
       onSelect: (a) => {
         selectedAppearance = a;
-        void newWorld('', 6400, 1800);
+        showWorldSelect();
       },
       onNew: () => {
         VUI.setState(new UICharacterCreationState({
@@ -199,6 +207,48 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
       onBack: () => showTitle(),
     }));
+  }
+
+  function showWorldSelect() {
+    VUI.setState(new UIWorldSelectState(worldStore, {
+      onPlay: (meta) => void loadWorldFlow(meta),
+      onNew: () => {
+        VUI.setState(new UIWorldCreationState({
+          onCreate: (cfg) => void createWorldFlow(cfg),
+          onCancel: () => showWorldSelect(),
+        }));
+      },
+      onBack: () => showCharacterSelect(),
+    }));
+  }
+
+  /** 从世界槽位读取并进入游戏 */
+  async function loadWorldFlow(meta: WorldMeta) {
+    const text = await worldStore.load(meta);
+    if (!text) { ui.toast('世界数据缺失或损坏'); return; }
+    currentWorld = meta;
+    await loadFromJson(text);
+  }
+
+  /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
+  async function createWorldFlow(cfg: { name: string; seed: string; w: number; h: number; difficulty: number; evil: -1 | 0 | 1 }) {
+    const loadState = new UIWorldLoadState();
+    VUI.setState(loadState);
+    const g = makeGame();
+    await g.newWorld(cfg.seed || String(Date.now()), cfg.w, cfg.h,
+      (label, p) => loadState.setProgress(label, p),
+      {
+        name: cfg.name,
+        evil: cfg.evil,
+        onWorldPartial: (world) => loadState.attachWorld(world),
+      });
+    // onWorldReady 已进游戏；登记世界槽位并保存初始数据
+    const meta = await worldStore.register({
+      name: cfg.name, seed: cfg.seed, w: cfg.w, h: cfg.h,
+      difficulty: cfg.difficulty, evil: cfg.evil,
+    });
+    currentWorld = meta;
+    doSave();
   }
 
   function showTitle() {
@@ -258,6 +308,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function quitToMenu() {
     game?.destroy();
     game = null;
+    currentWorld = null;
     ui.closeAll();
     showTitle();
   }
@@ -270,6 +321,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (where === 'fail') ui.toast('保存失败：存储不可用');
       else ui.toast(`已保存（${where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : '本地'}）`);
     });
+    // 多世界槽位（M3）：登记到 WorldStore
+    if (currentWorld) {
+      void worldStore.save(currentWorld, json, Date.now() - playStart);
+    }
   }
 
   // KvStore 延迟引入避免顶层副作用顺序问题

@@ -58,6 +58,7 @@ export interface SaveData {
   walls: string;
   liquid: string;
   liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜）
+  wire?: string;       // base64 RLE 电路位（bit0-3 四色线 bit4 致动器 bit5 已致动；旧档缺此字段=全 0）
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
   player: {
     hp: number; x: number; y: number;
@@ -124,6 +125,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),
     liquidType: bytesToB64(rlePairs(st.liquidType)),
+    wire: bytesToB64(rlePairs(st.wire)),
     chests: world.chests,
     player: {
       hp: player.hp, x: player.x, y: player.y,
@@ -184,6 +186,17 @@ export function loadSave(json: string): { world: World; player: { hp: number; x:
       const run = readVarint(u8, pos) + 1;
       const v = migrate(readVarint(u8, pos));
       for (let k = 0; k < run && i < st.wall.length; k++, i++) st.wall[i] = v;
+    }
+  }
+  // wire 电路位（旧存档缺此字段 → 全 0 = 无导线，缺字段容忍同 liquidType）
+  {
+    const u8 = b64ToBytes(data.wire ?? '');
+    const pos = { i: 0 };
+    let i = 0;
+    while (i < st.wire.length && pos.i < u8.length) {
+      const run = readVarint(u8, pos) + 1;
+      const v = readVarint(u8, pos);
+      for (let k = 0; k < run && i < st.wire.length; k++, i++) st.wire[i] = v;
     }
   }
   // liquid type（旧存档缺此字段 → 全 0，由液体模拟按 1=水 补全）

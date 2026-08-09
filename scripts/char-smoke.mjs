@@ -1,4 +1,4 @@
-// M2 验收：主菜单 → 单人 → 角色列表 → 创建角色 → 回列表 → 双击进游戏
+// M2+M3 验收：主菜单 → 单人 → 创建角色 → 世界列表 → 创建世界 → 进游戏
 // 坐标以 dump 实测为准：选择面板 [200,70 560x460]、创建面板 [200,80 560x440]（padding 14）
 import puppeteer from 'puppeteer-core';
 import { mkdirSync } from 'node:fs';
@@ -33,79 +33,80 @@ await waitState('UICharacterSelectState');
 await new Promise((r) => setTimeout(r, 800));
 await page.screenshot({ path: 'shots/m2-2-charselect.png' });
 
-// 新建 → 创建页（选择面板按钮：y=70+14+360+19, 新建 x=200+14+16+44）
+// 新建角色
 const SEL = { x: 200, y: 70, pad: 14 };
-await click(SEL.x + SEL.pad + 16 + 44, SEL.y + SEL.pad + 360 + 19);
+await click(SEL.x + SEL.pad + 60, SEL.y + SEL.pad + 379);
 await waitState('UICharacterCreationState');
 await new Promise((r) => setTimeout(r, 600));
 await page.screenshot({ path: 'shots/m2-3-creation.png' });
 
-// 名字框（创建面板：[200,80]，内容区 top=80 left=180，名字框 top=0 高38）
-const CR = { x: 200, y: 80, pad: 14 };
-await click(CR.x + CR.pad + 180 + 160, CR.y + CR.pad + 80 + 19);
+// 名字（Click 两帧后 focus，打字前留足时间）
+await click(554, 193);
+await new Promise((r) => setTimeout(r, 400));
 await page.keyboard.type('测试勇者');
-await new Promise((r) => setTimeout(r, 200));
-console.log('nameBox after type:', await page.evaluate(() => {
-  const st = window.__swVUI.ui.current;
-  const find = (el, pred) => { if (pred(el)) return el; for (const c of el.children) { const r = find(c, pred); if (r) return r; } return null; };
-  const box = find(st, (el) => el.constructor.name === 'UITextBox');
-  return box ? box.text : null;
-}));
-
-// 切发型页签（top=4, left=180+2*90）
-await click(CR.x + CR.pad + 180 + 2 * 90 + 22, CR.y + CR.pad + 4 + 19);
-await new Promise((r) => setTimeout(r, 500));
-await page.screenshot({ path: 'shots/m2-3b-hair.png' });
-
-// 回信息页签 → 创建（top=396 left=410 宽46）
-await click(CR.x + CR.pad + 180 + 0 * 90 + 22, CR.y + CR.pad + 4 + 19);
 await new Promise((r) => setTimeout(r, 300));
-console.log('nameBox before create:', await page.evaluate(() => {
-  const st = window.__swVUI.ui.current;
-  const find = (el, pred) => { if (pred(el)) return el; for (const c of el.children) { const r = find(c, pred); if (r) return r; } return null; };
-  const box = find(st, (el) => el.constructor.name === 'UITextBox');
-  return box ? box.text : null;
-}));
-await click(CR.x + CR.pad + 410 + 23, CR.y + CR.pad + 396 + 19);
+
+// 点一个取色器图标 → 应进入取色视图（HSL 滑条）
+await click(200 + 14 + 180 + 3 * 38 + 19, 80 + 14 + 36 + 19);
+await new Promise((r) => setTimeout(r, 400));
+await page.screenshot({ path: 'shots/m2-3c-color.png' });
+
+// 回信息页签 → 创建角色
+await click(200 + 14 + 180 + 22, 80 + 14 + 23);
+await new Promise((r) => setTimeout(r, 300));
+await click(200 + 14 + 410 + 23, 80 + 14 + 396 + 19);
 await waitState('UICharacterSelectState');
 await new Promise((r) => setTimeout(r, 1000));
 await page.screenshot({ path: 'shots/m2-4-charselect-after.png' });
 
-// 双击第一个角色条目（列表首项）
-const firstItemY = await page.evaluate(() => {
-  // 从布局树找 UICharacterListItem
+// 双击角色 → 世界列表
+const charItem = await page.evaluate(() => {
   const st = window.__swVUI.ui.current;
-  const find = (el) => {
-    for (const c of el.children) {
-      if (c.constructor.name === 'UICharacterListItem') return c;
-      const r = find(c);
-      if (r) return r;
-    }
-    return null;
-  };
-  const it = find(st);
-  if (!it) return null;
+  const find = (el, name) => { for (const c of el.children) { if (c.constructor.name === name) return c; const r = find(c, name); if (r) return r; } return null; };
+  const it = find(st, 'UICharacterListItem');
   const d = it.getDimensions();
   return { x: d.x + d.width / 2, y: d.y + d.height / 2 };
 });
-if (!firstItemY) throw new Error('列表中没有角色');
-await click(firstItemY.x, firstItemY.y);
+await click(charItem.x, charItem.y);
 await new Promise((r) => setTimeout(r, 150));
-await click(firstItemY.x, firstItemY.y);
+await click(charItem.x, charItem.y);
+await waitState('UIWorldSelectState');
+await new Promise((r) => setTimeout(r, 800));
+await page.screenshot({ path: 'shots/m3-1-worldselect.png' });
+
+// 新建世界 → 世界创建页
+await click(SEL.x + SEL.pad + 60, SEL.y + SEL.pad + 379);
+await waitState('UIWorldCreationState');
+await new Promise((r) => setTimeout(r, 600));
+await page.screenshot({ path: 'shots/m3-2-worldcreation.png' });
+
+// 选小世界（第一行 GroupOptionButton：top=100, left=0）
+await click(SEL.x + SEL.pad + 48, SEL.y + SEL.pad + 100 + 19);
+await new Promise((r) => setTimeout(r, 300));
+// 提交创建
+await click(SEL.x + SEL.pad + 410 + 23, SEL.y + SEL.pad + 396 + 19);
+
+// 生成小世界 → 进游戏
 await page.waitForFunction(() => window.__swGame && window.__swGame.player, { timeout: 180000 });
-await new Promise((r) => setTimeout(r, 2000));
-await page.screenshot({ path: 'shots/m2-5-ingame.png' });
+await new Promise((r) => setTimeout(r, 2500));
+await page.screenshot({ path: 'shots/m3-3-ingame.png' });
 
 const finalState = await page.evaluate(() => ({
-  state: window.__swVUI.ui.current ? window.__swVUI.ui.current.constructor.name : null,
   inGame: !!window.__swGame,
   charName: window.__swGame?.player?.appearance?.name ?? null,
+  worldName: window.__swGame?.world?.name ?? null,
+  worldSize: window.__swGame ? [window.__swGame.world.w, window.__swGame.world.h] : null,
+  worldsIndex: localStorage.getItem('sandboxworld.worlds.index'),
 }));
-console.log('final:', JSON.stringify(finalState));
+console.log('final:', JSON.stringify(finalState, null, 1));
 console.log('errors:', errors.length ? errors : 'none');
 await browser.close();
-if (errors.length || !finalState.inGame || finalState.charName !== '测试勇者') {
-  console.error('CHAR SMOKE FAILED');
+const ok = errors.length === 0 && finalState.inGame
+  && finalState.charName === '测试勇者'
+  && finalState.worldSize && finalState.worldSize[0] === 4200
+  && !!finalState.worldsIndex;
+if (!ok) {
+  console.error('CHAR+WORLD SMOKE FAILED');
   process.exit(1);
 }
-console.log('CHAR SMOKE OK');
+console.log('CHAR+WORLD SMOKE OK');

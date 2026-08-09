@@ -11,6 +11,10 @@ export interface GenConfig {
   seedText: string;
   name?: string;
   structures?: boolean;
+  /** 邪恶群系：-1 随机（默认） 0 腐化 1 猩红（UIWorldCreation 对应原版 WorldGenParam_Evil） */
+  evil?: -1 | 0 | 1;
+  /** 每 pass 完成后回调部分世界（生成期实时地图预览用；无需等 finalize） */
+  onWorldPartial?: (world: World, passIndex: number, passName: string) => void;
 }
 
 export interface Pass {
@@ -75,6 +79,8 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     onProgress?.(passes[i].name, i / passes.length);
     await nextFrame();
     passes[i].run(ctx, () => {});
+    // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
+    if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
   }
 
   finalize(ctx);
@@ -108,7 +114,7 @@ import { runSwordShrinePass } from './vanilla/SwordShrinePass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
 import { placeDoorClosed } from '../Door';
 
-function vanillaTerrain({ store, rng, world, surface }: GenCtx) {
+function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   const gs = newGenState(store.w, store.h);
   // Reset pass 掷骰(WorldGen.cs L4780-4880,掷骰顺序 = RNG 契约不可调换)
   // 矿石替代对:Next(2)==0 → 替代矿(内部 id)
@@ -119,6 +125,9 @@ function vanillaTerrain({ store, rng, world, surface }: GenCtx) {
     gold: rng.next() < 0.5 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
   };
   gs.crimson = rng.next() < 0.5;
+  // 邪恶群系覆盖（RNG 契约：骰照掷，仅覆盖结果）
+  if (cfg.evil === 0) gs.crimson = false;
+  else if (cfg.evil === 1) gs.crimson = true;
   world.crimson = gs.crimson;
   gs.dungeonSide = rng.next() < 0.5 ? -1 : 1;
   // 丛林:与地牢异侧(Next(15,30) 即 15-29)
