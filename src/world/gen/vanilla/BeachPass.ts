@@ -104,9 +104,9 @@ function tuneOceanDepth(rng: RNG, count: number, depth: number, van: number, flo
 export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w;
   const van = w / 4200;
-  const sc = (n: number) => Math.max(1, Math.round(n * van));
+  const sc = (n: number) => Math.max(1, Math.floor(n * van)); // C# (int) 截断
   const oceanWaterMin = sc(220), oceanWaterMax = sc(260), forcedJungleLen = sc(275), minSand = sc(50);
-  const edgeWall = Math.max(4, Math.round(30 * van));
+  const edgeWall = Math.max(4, Math.floor(30 * van));
 
   let floridaL = false, floridaR = false;
   if (rng.next() < 0.25) {

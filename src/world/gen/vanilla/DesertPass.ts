@@ -34,7 +34,9 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
 
   // DesertDescription.CreateFromPlacement
   const blockCols = Math.max(16, Math.floor(80 * factor));
-  const blockRows = Math.max(40, Math.floor((rng.next() + 1) * 170 * factor));
+  // DesertDescription.cs:53：(NextDouble()*0.5+1.5)*170*factor → 深度范围 255-340·factor。
+  // 曾误写 (next+1)*170 → 范围 170-340，最浅时蜂巢只有原版 2/3 深
+  const blockRows = Math.max(40, Math.floor((rng.next() * 0.5 + 1.5) * 170 * factor));
   const width = Math.min(w - 20, Math.floor(4 * blockCols));
   const ox = Math.max(10, Math.min(w - 10 - width, x - Math.floor(width / 2)));
   // SurfaceMap:平均/最底(钳到 worldSurface-10)

@@ -33,9 +33,13 @@ async function loadAssets() {
   atlas = new SpriteAtlas();
   try {
     await atlas.load();
+    // 菜单首帧所需的 UI 贴图(面板/按钮/光标/logo,~100 张几 MB)在显示主菜单前
+    // 就位——否则 vui 懒加载下首帧控件用兜底样式闪一帧
+    await atlas.preloadUiPrefix(['UI_', 'Inventory_', 'logo', 'Logo']);
   } catch {
     atlas = null; // 素材缺失时回退程序化生成
   }
+  (window as unknown as { __swAtlas?: SpriteAtlas | null }).__swAtlas = atlas; // 调试/探针句柄
 }
 
 function enterGameHooks() {

@@ -128,14 +128,13 @@ export class SpriteAtlas {
 
   async load(onProgress?: (p: number) => void): Promise<void> {
     const files = Object.keys(this.data.files);
-    const vfiles = [
-      ...Object.values(this.vanilla.tiles).map((t) => t.sheet),
-      ...Object.values(this.vanilla.items).map((i) => i.icon),
-      ...Object.values(this.vanilla.walls).map((w) => w.sheet),
-      ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
-      ...VANILLA_MISC, // 杂项单图（呼吸气泡等）
-    ];
-    const uifiles = Object.values(this.uiFiles);
+    // 原版 vanilla 素材与 vanilla-ui 贴图全部不在启动预载(8550 请求/主菜单 2GB 根因):
+    // 图块/墙/NPC 表 → Game.newWorld/loadWorld 里 preloadVanillaWorld() 预载
+    // (onWorldReady 之前完成,首帧 chunk 烘焙无回退);物品图标 → vicon 按需
+    // 懒加载 + 进世界后 prefetchIcons() 后台补齐;UI 贴图 → vui() 按需
+    // 懒加载(全部 11 处消费方每帧重查,首帧 null 自兜底)
+    const vfiles: string[] = [];
+    const uifiles: string[] = [];
     let done = 0;
     const total = files.length + vfiles.length + uifiles.length;
     await Promise.all([
@@ -149,20 +148,6 @@ export class SpriteAtlas {
           onProgress?.(done / total);
           resolve();
         };
-        img.onerror = () => resolve();
-        img.src = `sprites/${encodeURI(f)}`;
-      })),
-      // 原版素材：并行加载，失败跳过（vframe/vicon 返回 null 兜底）
-      ...vfiles.map((f) => new Promise<void>((resolve) => {
-        const img = new Image();
-        img.onload = () => { this.vimages.set(f, img); done++; onProgress?.(done / total); resolve(); };
-        img.onerror = () => resolve();
-        img.src = `sprites/${encodeURI(f)}`;
-      })),
-      // UI 贴图（vanilla-ui/，独立 Map）
-      ...uifiles.map((f) => new Promise<void>((resolve) => {
-        const img = new Image();
-        img.onload = () => { this.uiimages.set(f, img); done++; onProgress?.(done / total); resolve(); };
         img.onerror = () => resolve();
         img.src = `sprites/${encodeURI(f)}`;
       })),
@@ -185,7 +170,7 @@ export class SpriteAtlas {
   vframe(sheetId: number, col: number, row: number): DrawRect | null {
     const m = this.vmeta(sheetId);
     if (!m) return null;
-    const img = this.vimages.get(m.sheet);
+    const img = this.ensureVImage(m.sheet);  // 懒加载兜底(正常路径 preloadVanillaWorld 已就绪)
     if (!img) return null;
     if (col < 0 || row < 0 || col >= m.cols || row >= m.rows) return null;
     return { img, sx: col * m.stride[0], sy: row * m.stride[1], sw: m.grid[0], sh: m.grid[1] };
@@ -205,7 +190,7 @@ export class SpriteAtlas {
   vrect(sheetId: number, fx: number, fy: number, w: number, h: number): DrawRect | null {
     const m = this.vmeta(sheetId);
     if (!m) return null;
-    const img = this.vimages.get(m.sheet);
+    const img = this.ensureVImage(m.sheet);
     if (!img) return null;
     if (fx < 0 || fy < 0 || fx + w > img.width || fy + h > img.height) return null;
     return { img, sx: fx, sy: fy, sw: w, sh: h };
@@ -256,22 +241,113 @@ export class SpriteAtlas {
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }
 
-  /** UI 贴图（vanilla-ui/ 命名空间）。name 为白名单键，如 'UI_PanelBackground' */
+  /** UI 贴图（vanilla-ui/ 命名空间）。name 为白名单键，如 'UI_PanelBackground'。
+   *  按需懒加载(消费方每帧重查,未就绪返回 null 自兜底) */
   vui(name: string): DrawRect | null {
     const path = this.uiFiles[name];
     if (!path) return null;
-    const img = this.uiimages.get(path);
+    const img = this.ensureUiImage(path);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }
 
-  /** 原版物品图标（整图） */
+  private _uiPending = new Set<string>();
+  private ensureUiImage(file: string): HTMLImageElement | null {
+    const hit = this.uiimages.get(file);
+    if (hit) return hit;
+    if (this._uiPending.has(file)) return null;
+    this._uiPending.add(file);
+    const im = new Image();
+    im.onload = () => { this.uiimages.set(file, im); this._uiPending.delete(file); };
+    im.onerror = () => { this._uiPending.delete(file); };
+    im.src = `sprites/${encodeURI(file)}`;
+    return null;
+  }
+
+  /** 原版物品图标（整图）。未加载时触发后台懒加载并返回 null(下帧生效) */
   vicon(itemId: number): DrawRect | null {
     const m = this.vanilla.items[String(itemId)];
     if (!m) return null;
-    const img = this.vimages.get(m.icon);
+    const img = this.ensureVImage(m.icon);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
+  }
+
+  private _iconPending = new Set<string>();
+  private _worldPreloaded = false;
+  /** 预载世界渲染所需原版表(图块 378 + 墙 366 + NPC 表 + 杂项,~750 张/磁盘 ~20MB)。
+   *  Game.newWorld/loadWorld 在 onWorldReady 前 await,保证首帧 chunk 烘焙用真贴图 */
+  async preloadVanillaWorld(): Promise<void> {
+    if (this._worldPreloaded) return;
+    this._worldPreloaded = true;
+    const sheets = new Set<string>([
+      ...Object.values(this.vanilla.tiles).map((t) => t.sheet),
+      ...Object.values(this.vanilla.walls).map((w) => w.sheet),
+      ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
+      ...VANILLA_MISC,
+    ]);
+    await Promise.all([...sheets].map((f) => new Promise<void>((resolve) => {
+      if (this.vimages.has(f)) return resolve();
+      const img = new Image();
+      img.onload = () => {
+        this.vimages.set(f, img);
+        // decode():预载阶段完成解码,否则 Chrome 延迟到首次 draw 才解码,
+        // 大表(2000px 级)首帧仍会卡一拍——"预载"语义要求字节+解码双就绪
+        img.decode().then(() => resolve(), () => resolve());
+      };
+      img.onerror = () => resolve();
+      img.src = `sprites/${encodeURI(f)}`;
+    })));
+  }
+  /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null */
+  private ensureVImage(file: string): HTMLImageElement | null {
+    const hit = this.vimages.get(file);
+    if (hit) return hit;
+    if (this._iconPending.has(file)) return null;
+    this._iconPending.add(file);
+    const im = new Image();
+    im.onload = () => { this.vimages.set(file, im); this._iconPending.delete(file); };
+    im.onerror = () => { this._iconPending.delete(file); };
+    im.src = `sprites/${encodeURI(file)}`;
+    return null;
+  }
+  /** 后台预取全部物品图标(保留兼容入口;预载流程请用 awaited 的 preloadIcons) */
+  prefetchIcons(): void {
+    void this.preloadIcons();
+  }
+
+  private _iconsPromise: Promise<void> | null = null;
+  /** 预载全部物品图标(6059 张,解码合计 ~18MB)。进图前流程调用,
+   *  保证道具栏/背包首帧即有原版图标。缓存 Promise——并发 await 的调用者
+   *  都会等到同一批加载完成(此前旗标早退会让第二个调用者拿到假完成) */
+  preloadIcons(onProgress?: (p: number) => void): Promise<void> {
+    if (this._iconsPromise) return this._iconsPromise;
+    const icons = [...new Set(Object.values(this.vanilla.items).map((m) => m.icon))];
+    let done = 0;
+    this._iconsPromise = Promise.all(icons.map((f) => new Promise<void>((resolve) => {
+      if (this.vimages.has(f)) { done++; onProgress?.(done / icons.length); return resolve(); }
+      const im = new Image();
+      im.onload = () => { this.vimages.set(f, im); done++; onProgress?.(done / icons.length); resolve(); };
+      im.onerror = () => resolve();
+      im.src = `sprites/${encodeURI(f)}`;
+    }))).then(() => undefined);
+    return this._iconsPromise;
+  }
+
+  /** 预载 UI 贴图按 key 前缀(如 ['Player_','Armor_'] = 纸娃娃身体/发型/装备,1293 张)。
+   *  进图前流程调用,保证角色渲染首帧无闪空 */
+  async preloadUiPrefix(prefixes: string[], onProgress?: (p: number) => void): Promise<void> {
+    const files = Object.entries(this.uiFiles)
+      .filter(([k]) => prefixes.some((p) => k.startsWith(p)))
+      .map(([, f]) => f);
+    let done = 0;
+    await Promise.all(files.map((f) => new Promise<void>((resolve) => {
+      if (this.uiimages.has(f)) { done++; onProgress?.(done / files.length); return resolve(); }
+      const im = new Image();
+      im.onload = () => { this.uiimages.set(f, im); done++; onProgress?.(done / files.length); resolve(); };
+      im.onerror = () => resolve();
+      im.src = `sprites/${encodeURI(f)}`;
+    })));
   }
 
   has(file: string): boolean {

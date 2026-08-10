@@ -85,17 +85,30 @@ export function compositePaperDoll(a: Appearance, equip?: { head?: number | null
   const hit = cache.get(key);
   if (hit) return hit;
 
+  // 发型模式（GetHairSettings）：无头盔=完整；fullHair 头盔=完整；hatHair=帽子发型；其余=隐藏
+  const headIdx = equip?.head ?? 0;
+  const hairMode: 'full' | 'alt' | 'none' = headIdx === 0 || FULL_HAIR_HEADS.has(headIdx) ? 'full'
+    : HAT_HAIR_HEADS.has(headIdx) ? 'alt' : 'none';
+  const hairSrc = hairMode === 'alt' ? `Player_HairAlt_${a.hair + 1}.png` : `Player_Hair_${a.hair + 1}.png`;
+
+  // ---- 懒加载就绪预检(vanilla-ui 按需加载后必需):任一必需贴图未就绪 → 返回 null
+  // 且【不缓存】(查询本身触发后台加载,消费方下帧重试)。否则首帧的空纸娃娃会被
+  // 永久缓存——角色选择界面人物贴图就再也出不来了
+  const needSheets = new Set<number>([...VERTICAL_CHANNELS.map((ch) => ch.sheet), 3, 4, 5, 6, 7, 8, 13]);
+  for (const s of needSheets) {
+    if (!sheetRect(a.skinVariant, s)) return null;
+  }
+  if (hairMode !== 'none' && !UITextures.get(hairSrc)) return null;
+  if (equip?.legs && !UITextures.get(`Armor_Legs_${equip.legs}.png`)) return null;
+  if (equip?.body && !UITextures.get(`Armor_Armor_${equip.body}.png`)) return null;
+  if (equip?.head && !UITextures.get(`Armor_Head_${equip.head}.png`)) return null;
+
   const c = document.createElement('canvas');
   c.width = FRAME_W;
   c.height = BODY_FRAMES * FRAME_H;
   const ctx = c.getContext('2d')!;
   ctx.imageSmoothingEnabled = false;
 
-  // 发型模式（GetHairSettings）：无头盔=完整；fullHair 头盔=完整；hatHair=帽子发型；其余=隐藏
-  const headIdx = equip?.head ?? 0;
-  const hairMode: 'full' | 'alt' | 'none' = headIdx === 0 || FULL_HAIR_HEADS.has(headIdx) ? 'full'
-    : HAT_HAIR_HEADS.has(headIdx) ? 'alt' : 'none';
-  const hairSrc = hairMode === 'alt' ? `Player_HairAlt_${a.hair + 1}.png` : `Player_Hair_${a.hair + 1}.png`;
   const hasBackHair = hairMode !== 'none' && backHairDraw(a.hair);
   const hairRect = hairMode !== 'none' ? UITextures.get(hairSrc) : null;
   const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;

@@ -16,7 +16,7 @@ const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
 
 export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.max(2, Math.round(st.w / 700));
+  const count = Math.max(2, Math.floor(st.w / 700)); // C# (int)
   // 大理石带:xPad 80;花岗岩带:xPad 100
   placeMarbleCaves(st, rng, gs, count, 80);
   placeGraniteCaves(st, rng, gs, count, 100);

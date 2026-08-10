@@ -5,6 +5,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
+import { fround } from '../../../core/csCompat';
 import { T, W } from '../../../data/tiles';
 
 const enum Feature { Plateau, Hill, Dale, Mountain, Valley }
@@ -63,14 +64,16 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
       feature = rng.int(0, 2);
     }
     if (x > w * 0.48 && x < w * 0.52) feature = Feature.Plateau;
-    num2 += genSurfaceOffset(rng, feature);
+    num2 = fround(num2 + genSurfaceOffset(rng, feature)); // C# float：每步舍 float32
     if (x < leftBeach + flatBeachPadding || x > w - rightBeach - flatBeachPadding) {
       num2 = Math.max(h * 0.17, Math.min(num2, maxSurf)); // 海滩 clamp
     } else if (num2 < h * 0.17) { num2 = h * 0.17; runLen = 0; }
     else if (num2 > h * 0.26) { num2 = h * 0.26; runLen = 0; }
+    num2 = fround(num2);
     while (rng.int(0, 2) === 0) num3 += rng.int(-2, 2);
     if (num3 < num2 + h * 0.06) num3++;
     if (num3 > num2 + h * 0.35) num3--;
+    num3 = fround(num3);
     history.push(num2);
     if (history.length > 500) history.shift();
     // 填列:地表以上空气,到 rockLayer 为泥土,以下石头 + 自然墙

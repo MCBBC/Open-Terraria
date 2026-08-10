@@ -15,7 +15,7 @@ export const VANILLA_NPC_LOOT = vanillaLootJson as unknown as Record<string, Arr
 
 /** 原版物品 id → 本仓库 item key（vanilla.json 的 key 是 PascalCase，ITEM_BY_KEY 多为 snake_case；
  *  未注册的返回 null 跳过） */
-const vanillaItemKey = (() => {
+export const vanillaItemKey = (() => {
   const map = new Map<number, string | null>();
   const items = (vanillaDataJson as unknown as { items: Record<string, { key?: string }> }).items ?? {};
   return (itemId: number): string | null => {

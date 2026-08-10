@@ -58,7 +58,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
       { name: '地形', run: terrainPass },
       { name: '洞穴', run: cavePass },
     ]),
-    { name: '矿石', run: orePass },
+    { name: '矿石', run: vanillaShinies },
     { name: '液体', run: liquidPass },
     ...(useVanillaTerrain ? [
       // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
@@ -103,6 +103,8 @@ import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
+import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
+import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
 import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -172,10 +174,19 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   world.lavaLine = gs.lavaLine;
 }
 
+function vanillaShinies({ store, rng }: GenCtx) {
+  // 原版 pass 27 Shinies（替换自研 orePass）+ pass 36 Gems
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runShiniesPass(store, rng, gs);
+  runGemsPass(store, rng, gs);
+}
+
 function vanillaCaves({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runOceanSandPass(store, rng, gs); // 原版 pass 3(顺序上先于泥石/洞穴)
+  if (gs) runMountCavesPass(store, rng, gs); // 原版 pass 7 Mount Caves(山丘本体)
   runRocksAndClayPass(store, rng, gs);
   runCavesPass(store, rng, gs);
 }
@@ -183,6 +194,7 @@ function vanillaCaves({ store, rng }: GenCtx) {
 function vanillaBeaches({ store, rng, surface }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  runMountainCavesPass(store, rng, gs); // 原版 pass 34 Mountain Caves(山侧开口+蜿蜒,先于海滩)
   runBeachesPass(store, rng, gs);
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖)
   for (let x = 0; x < store.w; x++) {
@@ -277,6 +289,8 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
 const ctxGs: [GenState | null] = [null];
+/** 探针/测试用：最近一次生成的 GenState（山丘坐标等） */
+export function lastGenState(): GenState | null { return ctxGs[0]; }
 
 function nextFrame(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
@@ -602,45 +616,7 @@ function potPass({ store, surface, rng }: GenCtx) {
 }
 
 // ---------- 矿石 ----------
-function orePass({ store, surface, rng, cfg }: GenCtx) {
-  const { w, h } = store;
-  // 替代矿对（按种子二选一，同原版每世界固定一种）
-  const pair = (a: string, b: string) => TILE_BY_KEY[rng.next() < 0.5 ? a : b]!;
-  const ores: Array<{ type: number; depthMin: number; depthMax: number; tries: number; size: [number, number] }> = [
-    { type: pair('ore_copper', 'ore_tin'), depthMin: 0.02, depthMax: 0.45, tries: 340, size: [4, 10] },
-    { type: pair('ore_iron', 'ore_lead'), depthMin: 0.10, depthMax: 0.62, tries: 300, size: [4, 9] },
-    { type: pair('ore_silver', 'ore_tungsten'), depthMin: 0.30, depthMax: 0.85, tries: 220, size: [3, 7] },
-    { type: pair('ore_gold', 'ore_platinum'), depthMin: 0.50, depthMax: 1.0, tries: 160, size: [3, 7] },
-    // 宝石脉：小而散，全深度零星分布
-    ...['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond']
-      .map((k) => ({ type: TILE_BY_KEY[k]!, depthMin: 0.15, depthMax: 0.95, tries: 30, size: [3, 6] as [number, number] })),
-    // 粘土/淤泥团（浅层大块）
-    { type: TILE_BY_KEY['clay']!, depthMin: 0.03, depthMax: 0.3, tries: 60, size: [8, 16] },
-    { type: TILE_BY_KEY['silt']!, depthMin: 0.25, depthMax: 0.6, tries: 40, size: [6, 12] },
-  ];
-  for (const ore of ores) {
-    for (let i = 0; i < ore.tries; i++) {
-      const x = rng.int(2, w - 3);
-      const yMin = Math.floor(surface[x] + 6 + (h - surface[x]) * ore.depthMin);
-      const yMax = Math.min(h - 4, Math.floor(surface[x] + 6 + (h - surface[x]) * ore.depthMax));
-      if (yMax <= yMin) continue;
-      const y = rng.int(yMin, yMax);
-      growOreBlob(store, x, y, ore.type, rng.int(ore.size[0], ore.size[1]), rng);
-    }
-  }
-}
-
-function growOreBlob(store: GenCtx['store'], x: number, y: number, type: number, size: number, rng: RNG) {
-  let cx = x, cy = y;
-  for (let i = 0; i < size; i++) {
-    if (store.inBounds(cx, cy)) {
-      const t = store.type[store.idx(cx, cy)];
-      if (t === T.STONE || t === T.DIRT) store.setTileSilent(cx, cy, type);
-    }
-    cx += rng.int(-1, 1);
-    cy += rng.int(-1, 1);
-  }
-}
+// 已由 vanilla/ShiniesPass.ts（原版 pass 27/36）整体替换，旧 orePass/growOreBlob 删除
 
 // ---------- 液体 ----------
 function liquidPass({ store, surface, rng }: GenCtx) {

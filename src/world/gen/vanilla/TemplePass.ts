@@ -375,7 +375,7 @@ export function runTemplePass(
     altarPlaced = true;
   }
   // ---- 宝箱(简化保留:原版在尖刺陷阱段之后,数量 = 房数×1.1×(1±0.25))----
-  const chestCount = Math.max(1, Math.round(rooms.length * 1.1 * (1 + rng.int(-25, 25) * 0.01)));
+  const chestCount = Math.max(1, Math.floor(rooms.length * 1.1 * (1 + rng.int(-25, 25) * 0.01))); // C# (int)
   for (let n = 0; n < chestCount; n++) {
     const r = rooms[rng.int(0, rooms.length - 1)];
     const bx = rng.int(r.x, r.x + r.w - 2);

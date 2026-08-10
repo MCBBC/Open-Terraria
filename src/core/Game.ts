@@ -12,7 +12,7 @@ import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { vanillaNpc } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaItemKey } from '../data/vanillaNpcs';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
@@ -57,6 +57,20 @@ import { Minecart } from '../entities/Minecart';
 import { MagicProj } from '../entities/MagicProj';
 
 const FIXED_DT = 1 / 60;
+
+// ---- 原版 Main.tileCut 可砍集合（Main.cs:7312-7754 全表 38 项，经 vanilla.sheet 反查内部 id） ----
+// 挥击范围内命中即 KillTile：杂草/藤蔓/药草芽等直接碎，瓦罐(28)走整罐碎裂+掉落
+const TILE_CUT_VANILLA = new Set([
+  654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
+  71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
+]);
+const TILE_CUT = new Set<number>(
+  TILE_DEFS.reduce<number[]>((acc, d, id) => {
+    if (d.vanilla && TILE_CUT_VANILLA.has(d.vanilla.sheet)) acc.push(id);
+    return acc;
+  }, []),
+);
+const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
 
 /** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
 function compactByLife<T extends { life: number }>(list: T[]): void {
@@ -108,6 +122,8 @@ export class Game implements GameHooks {
   private lastMineHitTick = -999;
   swing: { t: number; dur: number; item: number } | null = null;
   private swingHitSet = new Set<number>();
+  /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
+  private swingTileCutSet = new Set<number>();
 
   // 弹药
   particles: Particle[] = [];
@@ -283,10 +299,29 @@ export class Game implements GameHooks {
     this.world = await generateWorld({ width, height, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
     // 水体预沉降：创建世界时全图激活+步进至稳定，带进度条
     onProgress?.('水体沉降', 0.72);
-    await this.settleLiquids((p) => onProgress?.('水体沉降', 0.72 + p * 0.27));
+    await this.settleLiquids((p) => onProgress?.('水体沉降', 0.72 + p * 0.15));
+    // 进图前贴图预载(用户要求:不进图后才动态加载)
+    await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
     onProgress?.('完成', 1);
     this.afterWorldLoad();
     this.cb.onWorldReady();
+  }
+
+  /** 进图前统一预载:onWorldReady 之前把首帧画面涉及的贴图全部就位——
+   *  图块/墙表(chunk 烘焙)、物品图标(道具栏)、Player_/Armor_(角色纸娃娃)、
+   *  出生点森林背景。任何一项缺载都会在首帧闪空/兜底 */
+  private async preloadSceneAssets(onProgress?: (label: string, p: number) => void): Promise<void> {
+    const a = this.atlas;
+    if (!a) return;
+    onProgress?.('加载世界贴图', 0.05);
+    await a.preloadVanillaWorld();
+    onProgress?.('加载物品图标', 0.15);
+    await a.preloadIcons();
+    onProgress?.('加载角色贴图', 0.7);
+    await a.preloadUiPrefix(['Player_', 'Armor_']);
+    onProgress?.('加载背景图', 0.9);
+    await this.renderer.biomeBg.preloadInitial(this.world);
+    onProgress?.('加载背景图', 1);
   }
 
   /** 全图液体沉降：原版 WorldFile.cs:365-389 读档时序 1:1 移植。
@@ -320,7 +355,8 @@ export class Game implements GameHooks {
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void) {
     this.world = world;
     onProgress?.('水体沉降', 0.5);
-    await this.settleLiquids((p) => onProgress?.('水体沉降', p));
+    await this.settleLiquids((p) => onProgress?.('水体沉降', p * 0.8));
+    await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
     this.afterWorldLoad();
     this.cb.onWorldReady();
   }
@@ -441,6 +477,9 @@ export class Game implements GameHooks {
     if (this.tickCount % 15 === 0) {
       const townNPCCount = this.entities.npcs.filter((n) => !(n as TownNPC).dead).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount);
+      // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
+      // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
+      this.renderer.biomeBg.warm(this.scene);
       let bossNearby = false;
       for (const e of this.entities.enemies) {
         const en = e as unknown as { x: number; y: number; def?: { boss?: boolean } };
@@ -847,6 +886,7 @@ export class Game implements GameHooks {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
         this.swingHitSet.clear();
+        this.swingTileCutSet.clear();
       }
       this.mining = null;
       return;
@@ -859,6 +899,7 @@ export class Game implements GameHooks {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
         this.swingHitSet.clear();
+        this.swingTileCutSet.clear();
         // 每次挥砍一声：斧砍植物纤维、镐按材质区分土闷/石金（跟随挥砍节奏，不再密集连响）。
         // 没有生效对象（镐没对准可挖方块 / 斧没对准树）则不出声
         const hType = this.world.store.get(tx, ty);
@@ -893,6 +934,7 @@ export class Game implements GameHooks {
       const spd = 30;
       this.swing = { t: spd, dur: spd, item: held!.id };
       this.swingHitSet.clear();
+        this.swingTileCutSet.clear();
       // 召唤道具（原版左键使用）
       if (heldDef.key === 'suspicious_eye') {
         if (!this.world.clock.isDay) {
@@ -1975,6 +2017,126 @@ export class Game implements GameHooks {
 
   // ================= 战斗 =================
 
+  /** 瓦罐碎裂（WorldGen.CheckPot L56807 + SpawnThingsFromPot L57100，肉前普通世界主干）：
+   *  任意一格被打破 → 整罐 2×2 碎裂 + 掉落表（稀有药水 / 蘑菇 / 火把 / 箭 / 凝胶 / 绳 / 钱币）。
+   *  原版瓦罐自身不掉（KillTile_GetItemDrops 无 case 28），掉落全在本表内 */
+  private smashPot(x: number, y: number) {
+    const st = this.world.store;
+    if (!st.inBounds(x, y) || st.get(x, y) !== POT_TILE) return;
+    // CheckPot L56820-56834：2×2 锚点 = 当前格 - frameX/18%2、- frameY/18%2；style = frameY/36
+    const i = st.idx(x, y);
+    const ax = x - (st.frameX[i] / 18 | 0) % 2;
+    const ay = y - (st.frameY[i] / 18 | 0) % 2;
+    const ai = st.inBounds(ax, ay) ? st.idx(ax, ay) : i;
+    const style = Math.floor(st.frameY[ai] / 36);
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === POT_TILE) {
+          this.breakTile(ax + dx, ay + dy);
+        }
+      }
+    }
+    // CheckPot 音效（普通瓦罐 SoundID 13）+ 陶瓷碎片粒子
+    this.sfx.play('dig');
+    this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
+    this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#C4A48C', 6, 2.0, { life: 180, damp: 0.985, grav: 0.09 });
+    this.potLoot(ax, ay, style);
+  }
+
+  /** 瓦罐掉落（SpawnThingsFromPot 肉前普通世界分支，WorldGen.cs:57100-57760） */
+  private potLoot(x: number, y: number, style: number) {
+    const w = this.world;
+    const underworldY = w.store.h - 200; // UnderworldLayer ≈ maxTilesY-200
+    const flag = y < w.rockLevel;         // 原版 flag：j < rockLayer（地表+泥土层）
+    // item id → 我们 key：vanillaItemKey 解析 + 自研 key 覆盖（vi 表缺的 5 项）
+    const drop = (itemId: number, n = 1) => {
+      const override: Record<number, string> = { 58: 'mushroom_item', 8: 'torch', 73: 'coin_copper' };
+      const key = override[itemId] ?? vanillaItemKey(itemId);
+      if (key) this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n, (Math.random() - 0.5) * 2.4, -2 - Math.random());
+    };
+    const R = (n: number) => (Math.random() * n) | 0;
+    // L57213：1/45 稀有 → 按深度三张药水表
+    if (R(45) === 0) {
+      if (y < w.groundLevel) {
+        const n = R(10);
+        if (n <= 3) drop([292, 298, 299, 290][n]);
+        else if (n === 4) drop(2322);
+        else if (n === 5) drop(2324);
+        else if (n === 6) drop(2325);
+        else drop(2350, 1 + R(2));
+      } else if (flag) {
+        const n = R(11);
+        if (n === 0) drop(289);
+        else if (n <= 6) drop([298, 299, 290, 303, 291, 304][n - 1]);
+        else if (n === 7) drop(2322);
+        else if (n === 8) drop(2329);
+        else drop(2350, 1 + R(2));
+        if (R(15) === 0) drop(4870);
+      } else {
+        const n = R(15);
+        if (n === 0) drop(296);
+        else if (n === 1) drop(295);
+        else if (n <= 13) drop([299, 302, 303, 305, 301, 302, 297, 304, 2322, 2323, 2327, 2329][n - 2]);
+        else drop(2350, 1 + R(2));
+        if (R(15) === 0) drop(4870);
+      }
+      return;
+    }
+    // L57505：num10 = rand(7)（expert 才 -1）
+    const num10 = R(7);
+    if (num10 === 0 && this.player.hp < this.player.maxHp) {
+      drop(58); // 蘑菇
+      if (R(2) === 0) drop(58);
+      return;
+    }
+    if (num10 === 1 || num10 === 0) {
+      // 火把（原版 num10==0 时需背包火把<20，火把计数略；液体中→荧光棒 282）
+      const inLiquid = w.store.liquid[w.store.idx(x, y)] > 0;
+      drop(inLiquid ? 282 : 8, 2 + R(5));
+      return;
+    }
+    switch (num10) {
+      case 2: { // 箭 40×10-20；泥土层半数 42；地狱 265（L57617）
+        let t = 40;
+        if (flag && R(2) === 0) t = 42;
+        if (y > underworldY) t = 265;
+        drop(t, 10 + R(11));
+        return;
+      }
+      case 3: // 凝胶 28（地狱→治疗药水 188）（L57653）
+        drop(y > underworldY ? 188 : 28, 1);
+        return;
+      case 4:
+      case 5: // 绳 965×20-40（仅非地狱肉前，L57683）
+        if (y < underworldY) { drop(965, 20 + R(21)); return; }
+        break;
+    }
+    // 默认：钱币 num16（L57688+：200±100 × 深度系数 × style 系数 × 多级随机加成）
+    let coins = 200 + R(201) - 100;
+    if (y < w.groundLevel) coins *= 0.5;
+    else if (flag) coins *= 0.75;
+    else if (y > w.store.h - 250) coins *= 1.25;
+    for (const [den, lo, hi] of [[4, 5, 11], [8, 10, 21], [12, 20, 41], [16, 40, 81], [20, 50, 101]] as const) {
+      if (R(den) === 0) coins *= 1 + (lo + R(hi - lo)) / 100;
+    }
+    // style 系数 num（L57113-57160）→ coins *= (num*2+1)/3
+    let num = 1;
+    if (style >= 4 && style <= 6) num = 1.25;
+    else if (style >= 7 && style <= 9) num = 1.75;
+    else if (style >= 10 && style <= 12) num = 1.9;
+    else if (style >= 13 && style <= 15) num = 2.1;
+    else if (style >= 16 && style <= 18) num = 1.6;
+    else if (style >= 19 && style <= 21) num = 3.5;
+    else if (style >= 22 && style <= 24) num = 1.6;
+    else if (style >= 25 && style <= 27) num = 10;
+    else if (style >= 28 && style <= 30) num = 4; // hardMode 才 ×4，肉前应为 1——此处取肉前
+    else if (style >= 31 && style <= 33) num = 2;
+    else if (style >= 34 && style <= 36) num = 1.25;
+    coins *= (num * 2 + 1) / 3;
+    if (coins > 1000) coins = 1000; // 防御性上限（原版由 Item.NewItem 内部面值转换）
+    drop(73, Math.max(1, Math.round(coins)));
+  }
+
   private updateSwingHits() {
     if (!this.swing) return;
     this.swing.t--;
@@ -1985,13 +2147,28 @@ export class Game implements GameHooks {
     // 近战判定范围因武器而异：剑用完整 reach；镐/斧/锤当武器不顺手（×0.8）；
     // 空手默认 3 格
     const reach = (tool?.reach ?? TILE * 3) * (tool?.type === 'sword' ? 1 : tool ? 0.8 : 1);
-    // 剑/工具挥舞顺带清除鼠标处的杂草
+    // 原版 Player.ItemCheck_CutTiles（Player.cs:44002）：挥击覆盖矩形内所有 Main.tileCut
+    // tile → KillTile（杂草/藤蔓/药草直接碎；瓦罐整罐碎裂掉 loot；同一挥击每格只处理一次）
+    const arcX = this.player.cx + this.player.facing * reach * 0.35;
     {
-      const [htx, hty] = this.camera.tileUnder(this.input.mouseX, this.input.mouseY);
-      if (this.world.store.get(htx, hty) === T.TALLGRASS) this.breakTile(htx, hty);
+      const half = Math.ceil(reach / TILE);
+      const acx = Math.floor(arcX / TILE), acy = Math.floor(this.player.cy / TILE);
+      for (let ty = acy - half; ty <= acy + half; ty++) {
+        for (let tx = acx - half; tx <= acx + half; tx++) {
+          const tk = tx * 100000 + ty;
+          if (this.swingTileCutSet.has(tk)) continue;
+          const t = this.world.store.get(tx, ty);
+          if (t === POT_TILE) {
+            this.swingTileCutSet.add(tk);
+            this.smashPot(tx, ty);
+          } else if (TILE_CUT.has(t)) {
+            this.swingTileCutSet.add(tk);
+            this.breakTile(tx, ty);
+          }
+        }
+      }
     }
     // 弧线判定：圆心向朝向方向平移（身后不再被波及；小动物/怪物共用同一判定圆）
-    const arcX = this.player.cx + this.player.facing * reach * 0.35;
     const prog = 1 - this.swing.t / this.swing.dur;
     // 小动物：任何挥击一击致死
     for (const cent of this.entities.critters) {

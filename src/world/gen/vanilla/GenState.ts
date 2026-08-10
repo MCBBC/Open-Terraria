@@ -25,8 +25,12 @@ export interface GenState {
   beachRightStart: number;    // 右海滩左界
 
   // 各 pass 记录给后续 pass 用的区域
-  snowMinX: Float32Array | null; // 每行雪原左边界（Ice Biome pass 写）
-  snowMaxX: Float32Array | null;
+  // Mount Caves（pass 7）记录的山丘坐标（pass 34/Webs 消费）
+  mCaveX: Int32Array;
+  mCaveY: Int32Array;
+  numMCaves: number;
+  snowMinX: Int32Array | null; // 每行雪原左边界（C# int[]；Ice Biome pass 写）
+  snowMaxX: Int32Array | null;
   snowTop: number; snowBottom: number;
   jungleBounds: [number, number] | null; // [minX, maxX]
   evilZones: Array<{ x0: number; x1: number }>;
@@ -48,6 +52,7 @@ export function newGenState(w: number, h: number): GenState {
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
+    mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     snowMinX: null, snowMaxX: null, snowTop: 0, snowBottom: 0,
     jungleBounds: null,
     evilZones: [],

@@ -13,7 +13,7 @@ const iconCache = new Map<number, string>();
 function iconUrl(game: Game, id: number): string {
   let url = iconCache.get(id);
   if (!url) {
-    // 优先 Maples 素材图标（合成 32×32 dataURL）
+    // 优先原版素材图标（合成 32×32 dataURL）
     const def = ITEM_DEFS[id];
     if (game.atlas && def) {
       const ar = atlasIconForKey(game.atlas, def.key);
@@ -29,10 +29,14 @@ function iconUrl(game: Game, id: number): string {
         iconCache.set(id, url);
         return url;
       }
+      // 懒加载未就绪:返回程序化兜底但【不缓存】(此前把空串/兜底缓存死,
+      // 图标加载完成后道具栏永远不升级为原版图标)。预载流程完成后此路径不再触发
+      const c = game.assets.itemIcons.get(id);
+      return c ? c.toDataURL() : '';
     }
     const c = game.assets.itemIcons.get(id);
     url = c ? c.toDataURL() : '';
-    iconCache.set(id, url);
+    if (url) iconCache.set(id, url);  // 无 atlas(永久)才缓存兜底;空串不缓存
   }
   return url;
 }

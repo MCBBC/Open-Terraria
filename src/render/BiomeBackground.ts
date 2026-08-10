@@ -167,6 +167,46 @@ export class BiomeBackground {
     return im;
   }
 
+  /** 进图前预载出生点场景背景(森林初始风格的山+树 5 张,~47MB 解码)。
+   *  Game.preloadSceneAssets 在 onWorldReady 前调用——否则首帧背景图动态加载有闪空 */
+  async preloadInitial(world: World): Promise<void> {
+    this.seedFor(world);
+    const st = FOREST_STYLES[this.forestStyles[0] % FOREST_STYLES.length];
+    const ids = [...st.m, ...st.t].filter((n) => n >= 0);
+    await this.loadBg(ids);
+  }
+
+  /** 群系预测性预热(Game 场景扫描 15 tick 调用):当前群系对应的视差贴图
+   *  后台取齐,跨群系旅行不闪空。fire-and-forget */
+  warm(scene: SceneFlags): void {
+    if (this.seededFor === -1) return; // 尚未播种(preloadInitial/draw 先行),跳过防取错风格
+    const styles: Array<[number, number, number]> = [];
+    if (scene.zoneCorrupt) styles.push(CORRUPT_STYLES[this.corruptStyle]);
+    else if (scene.zoneCrimson) styles.push(CRIMSON_STYLES[this.crimsonStyle]);
+    else if (scene.zoneJungle) styles.push(JUNGLE_STYLES[this.jungleStyle]);
+    else if (scene.zoneSnow) styles.push(SNOW_STYLES[this.snowStyle]);
+    else if (scene.zoneHallow) styles.push(HALLOW_STYLES[this.hallowStyle]);
+    else if (scene.zoneGlowshroom) styles.push(MUSHROOM_STYLES[this.mushroomStyle]);
+    else if (scene.zoneDesert || scene.zoneBeach) styles.push(DESERT_STYLES[this.desertStyle]);
+    if (!styles.length) return; // 森林已在 preloadInitial 就位
+    void this.loadBg(styles[0].filter((n) => n >= 0));
+  }
+
+  /** 后台加载背景贴图集(去重 + decode 预热) */
+  private loadBg(ids: number[]): Promise<void> {
+    return Promise.all(ids.map((n) => new Promise<void>((resolve) => {
+      if (this.imgs.has(n)) return resolve();
+      const im = new Image();
+      im.onload = () => {
+        this.imgs.set(n, im);
+        // decode():背景图 2048px 级,首帧 draw 才解码会卡一拍——预载阶段完成解码
+        im.decode().then(() => resolve(), () => resolve());
+      };
+      im.onerror = () => { this.imgs.set(n, im); resolve(); };
+      im.src = `sprites/vanilla/Background_${n}.png`;
+    }))).then(() => undefined);
+  }
+
   private seedFor(world: World) {
     if (this.seededFor === world.seed) return;
     this.seededFor = world.seed;

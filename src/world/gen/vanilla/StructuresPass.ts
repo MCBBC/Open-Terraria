@@ -173,7 +173,7 @@ export function runHellHousesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const hellTop = h - 200; // 地狱层顶部(Underworld 边界 h-190..h-160)
   if (hellTop >= h - 60) return;
-  const count = Math.max(2, Math.round(w / 4200 * 6));
+  const count = Math.max(2, Math.floor(w / 4200 * 6)); // C# (int)
   for (let n = 0; n < count; n++) {
     const hx = rng.int(Math.floor(w * 0.15), Math.floor(w * 0.85) - 14);
     const hy = rng.int(hellTop + 20, h - 90);
@@ -369,7 +369,7 @@ export function runPyramidPass(
 export function runWetJunglePass(st: TileStore, rng: RNG, gs: GenState): void {
   const core = (gs as any).jungleCoreX ?? gs.jungleX;
   const JG = JUNGLE_GRASS;
-  const tunnels = Math.max(4, Math.round(st.w / 500));
+  const tunnels = Math.max(4, Math.floor(st.w / 500)); // C# (int)
   let dug = 0;
   for (let n = 0; n < tunnels * 60 && dug < tunnels; n++) {
     const x = core + rng.int(-Math.floor(st.w * 0.12), Math.floor(st.w * 0.12));

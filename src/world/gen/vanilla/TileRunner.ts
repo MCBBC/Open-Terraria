@@ -15,7 +15,7 @@ const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
 
 /** 按 vanilla sheet id 收集本仓库 tile id(缺失的自动跳过) */
-function idsByVanillaSheet(...sheets: number[]): Set<number> {
+export function idsByVanillaSheet(...sheets: number[]): Set<number> {
   const out = new Set<number>();
   for (const d of TILE_DEFS) {
     const vs = d.vanilla?.sheet;
@@ -174,6 +174,14 @@ export function tileRunner(
     } else if (type !== MUD && num1 < 3) {
       if (vy > 1) vy = 1;
       if (vy < -1) vy = -1;
+    }
+    // 泥专用 vy 规则(1456 cs L77484-77500)：±0.5 钳 + 岩层上界/地狱带上界定向推挤——
+    // 丛林首轮泥 runner(vy 初始 ±1)靠它被压进 [rockLayer+100, maxTilesY-300] 带；缺失时泥漂出丛林
+    if (type === MUD && !noYChange) {
+      if (vy > 0.5) vy = 0.5;
+      if (vy < -0.5) vy = -0.5;
+      if (py < gs.rockLevel + 100) vy = 1;
+      if (py > st.h - 300) vy = -1;
     }
   }
 }

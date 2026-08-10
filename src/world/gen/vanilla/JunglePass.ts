@@ -60,7 +60,9 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const num2 = rng.int(Math.floor(400 * scale), Math.floor(600 * scale));
   const num3 = Math.floor(25 * scale);
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
-  tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, mudWall: true });
+  // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
+  // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
+  tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);

@@ -20,152 +20,212 @@ function lerpColor(a: string, b: string, t: number): string {
   return mix(a, b, t);
 }
 
-/** 像素太阳贴图：24×24，硬边日盘 + 环形暗纹 + 8 条块状射线 */
-function makeSunSprite(): HTMLCanvasElement {
-  const S = 24, R = 8;
-  const c = document.createElement('canvas');
-  c.width = S; c.height = S;
-  const ctx = c.getContext('2d')!;
-  // 射线（块状）
-  ctx.fillStyle = '#FFD05A';
-  const rays = [[12, 0], [12, 23], [0, 12], [23, 12], [4, 4], [19, 4], [4, 19], [19, 19]];
-  for (const [rx, ry] of rays) ctx.fillRect(rx - 1, ry - 1, 3, 3);
-  // 日盘
-  for (let y = 0; y < S; y++) {
-    for (let x = 0; x < S; x++) {
-      const dx = x - 11.5, dy = y - 11.5;
-      const d = Math.sqrt(dx * dx + dy * dy);
-      if (d > R + 0.5) continue;
-      let col = '#FFF3C4'; // 内核
-      if (d > R - 1.5) col = '#FFC94A'; // 外环
-      else if (d > R - 3) col = '#FFE084';
-      // 太阳黑子暗纹（十字分布）
-      if (d < R - 3 && ((x === 9 || x === 14) && y >= 9 && y <= 14)) col = '#F8D878';
-      ctx.fillStyle = col;
-      ctx.fillRect(x, y, 1, 1);
-    }
-  }
-  return c;
+/** 原版日月贴图(Main.cs:62279 DrawSunAndMoon):Sun.png 整图 114×114;
+ *  Moon_N.png 50×400 竖条 = 8 个相位帧(moonType 0-8 选表,moonPhase 选帧) */
+function loadTex(name: string): HTMLImageElement {
+  const im = new Image();
+  im.src = `sprites/vanilla/${name}`;
+  return im;
 }
 
-/** 筋斗云风格像素贴图：下排大卷云 + 上排小卷云叠落，平底，端头收小 */
-function makeCloudSprite(variant: number): HTMLCanvasElement {
-  const W = 64, H = 26;
-  const baseY = 23;
-  const c = document.createElement('canvas');
-  c.width = W; c.height = H;
-  const ctx = c.getContext('2d')!;
-  const rng = (n: number) => {
-    let h = (n + variant * 7919 + 13) >>> 0;
-    h = Math.imul(h ^ (h >>> 15), 2246822519);
-    return ((h ^ (h >>> 13)) >>> 0) / 4294967296;
-  };
-  const solid = new Uint8Array(W * H);
-  // 半圆卷（平底半圆：上半圆 + 底切平）
-  const roll = (cx: number, r: number, topY: number) => {
-    for (let y = -r; y <= 0; y++) {
-      for (let x = -r; x <= r; x++) {
-        if (x * x + y * y > r * r) continue;
-        const px = cx + x, py = topY + y;
-        if (px < 0 || px >= W || py < 0 || py >= H) continue;
-        solid[py * W + px] = 1;
-      }
-    }
-    // 卷底切平到 baseY
-    for (let x = -r; x <= r; x++) {
-      for (let py = topY; py <= baseY; py++) {
-        const px = cx + x;
-        if (px < 0 || px >= W || py >= H) continue;
-        solid[py * W + px] = 1;
-      }
-    }
-  };
-  // 布局随变体：卷数 / 尺寸 / 中心偏移 / 是否双层
-  const nBottom = 4 + (variant % 3);          // 4-6 个底卷
-  const rBase = 5 + Math.floor(rng(7) * 3);   // 5-7
-  const centerBias = Math.floor(rng(11) * 5) - 2;
-  const twoTier = variant % 2 === 0;
-  const margin = 8;
-  const span = W - margin * 2;
-  const lobes: Array<[number, number]> = [];  // [cx, r]
-  for (let i = 0; i < nBottom; i++) {
-    const f = nBottom === 1 ? 0.5 : i / (nBottom - 1);
-    // 中间大、两端小的钟形尺寸 + 中心偏移 + 抖动
-    const bell = 1 - Math.pow(Math.abs(f - 0.5) * 2, 1.6) * 0.55;
-    const r = Math.max(3, Math.round(rBase * bell + (rng(i) - 0.5)));
-    const cx = Math.round(margin + f * span + centerBias + (rng(i + 30) - 0.5) * 3);
-    lobes.push([cx, r]);
-    roll(cx, r, baseY - r);
-  }
-  // 上排小卷：嵌在底卷间隙上方
-  if (twoTier) {
-    for (let i = 0; i < lobes.length - 1; i++) {
-      const [cx1, r1] = lobes[i];
-      const [cx2] = lobes[i + 1];
-      const gapX = Math.round((cx1 + cx2) / 2);
-      const r = Math.max(2, Math.min(r1 - 1, 3 + Math.floor(rng(i + 60) * 3)));
-      roll(gapX, r, baseY - r1 - r + 2);
-    }
-    // 中央大卷上再叠一个小卷（筋斗云的"云头"）
-    const mid = lobes[Math.floor(lobes.length / 2)];
-    roll(mid[0] + (rng(90) > 0.5 ? 2 : -2), 3, baseY - mid[1] - 4);
-  }
-  // 行填充后处理：每行最左到最右实心填满（卷间隙闭合，消除横向断层）
-  for (let y = 0; y < H; y++) {
-    let lo = -1, hi = -1;
-    for (let x = 0; x < W; x++) {
-      if (solid[y * W + x]) { if (lo < 0) lo = x; hi = x; }
-    }
-    if (lo < 0) continue;
-    for (let x = lo; x <= hi; x++) solid[y * W + x] = 1;
-  }
-  // 按轮廓上色：顶缘高光 / 底缘阴影 / 主体
-  const img = ctx.createImageData(W, H);
-  for (let y = 0; y < H; y++) {
-    for (let x = 0; x < W; x++) {
-      const i = (y * W + x) * 4;
-      if (!solid[y * W + x]) continue;
-      const above = y > 0 && solid[(y - 1) * W + x];
-      const below = y < H - 1 && solid[(y + 1) * W + x];
-      const left = x > 0 && solid[y * W + x - 1];
-      let col: [number, number, number];
-      if (!above) col = [255, 255, 255];
-      else if (!below) col = [176, 190, 208];
-      else if (!left) col = [248, 250, 253];
-      else col = [238, 242, 249];
-      img.data[i] = col[0]; img.data[i + 1] = col[1]; img.data[i + 2] = col[2]; img.data[i + 3] = 255;
-    }
-  }
-  ctx.putImageData(img, 0, 0);
-  return c;
+/** 原版云（Cloud.cs 语义）：贴图 Cloud_0..3、scale 0.70-1.31、风驱动 ±9*parallax px/帧、
+ *  旋转微摆 ±0.02、按 scale 三层深度（远景压暗 R 通道）、AABB 拒绝重叠生成、淡入淡出。 */
+interface VanillaCloud {
+  type: number;
+  x: number; y: number;         // 像素（y 为屏幕上部带）
+  scale: number;
+  rot: number; rSpeed: number;
+  alpha: number;
+  flip: boolean;
+  kill: boolean;
 }
 
 export class SkyRenderer {
   private stars: Array<{ x: number; y: number; s: number }> = [];
-  private clouds: Array<{ x: number; y: number; w: number; sp: number; layer: number; variant: number }> = [];
+  /** 原版云贴图（Cloud_0..3，懒加载） */
+  private cloudTexs: Array<HTMLImageElement | null> = [null, null, null, null];
+  private vclouds: VanillaCloud[] = [];
+  /** 风——原版风场模型(Main.cs:10800/58222-58310):
+   *  windSpeedTarget 随机游走 ±0.001 步、钳 ±0.35;windSpeedCurrent 以
+   *  0.0003+|diff|*0.0015 /帧 向目标缓动。旧实现是满幅正弦(±1),云速快 3~10 倍。 */
+  private wind = 0;            // windSpeedCurrent
+  private windTarget = 0;      // windSpeedTarget
+  private windCounter = 0;     // 重掷计数(帧)
+  private windRng: () => number = Math.random;
 
   constructor() {
     for (let i = 0; i < 120; i++) {
       this.stars.push({ x: Math.random(), y: Math.random() * 0.7, s: Math.random() < 0.2 ? 2 : 1 });
     }
-    for (let i = 0; i < 12; i++) {
-      // 三层视差：远(小/慢/淡) 中 近(大/快/实)
-      const layer = i % 3;
-      const wBase = [0.05, 0.09, 0.14][layer];
-      this.clouds.push({
-        x: Math.random(), y: 0.04 + Math.random() * 0.32,
-        w: wBase + Math.random() * wBase * 0.7,
-        sp: [0.0012, 0.0025, 0.0045][layer] * (0.7 + Math.random() * 0.6),
-        layer,
-        variant: Math.floor(Math.random() * 6),
-      });
+    for (let i = 0; i < 4; i++) {
+      const im = new Image();
+      im.src = `sprites/vanilla/Cloud_${i}.png`;
+      this.cloudTexs[i] = im;
     }
-    this.sunSprite = makeSunSprite();
-    this.cloudSprites = [0, 1, 2, 3, 4, 5].map((i) => makeCloudSprite(i));
+    this.sunTex = loadTex('Sun.png');
+    for (let i = 0; i <= 8; i++) this.moonTexs[i] = loadTex(`Moon_${i}.png`);
+    // 风场初值(Main.cs:10800):current = ±0.8 随机,计数 7200-28800 帧
+    this.wind = (Math.floor(Math.random() * 1601) - 800) * 0.001;
+    this.windCounter = 7200 + Math.floor(Math.random() * 21601);
   }
 
-  sunSprite: HTMLCanvasElement;
-  cloudSprites: HTMLCanvasElement[];
+  sunTex: HTMLImageElement;
+  moonTexs: Array<HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
+  /** 世界月亮样式(原版 header moonType 0-8;默认 0 标准月) */
+  moonType = 0;
+
+  /** 原版 GetParallax（Cloud.cs:324-343） */
+  private cloudParallax(scale: number): number {
+    let base: number, s: number;
+    if (scale < 1) { base = 0.07; s = (scale + 0.15 + 1) / 2; }
+    else if (scale <= 1.15) { base = 0.19; s = scale - 0.075; }
+    else { base = 0.23; s = scale - 0.15 - 0.075; }
+    return base * s * s;
+  }
+
+  /** 原版 SpawnCloud（Cloud.cs:60-170）：scale/rotation/flip/位置/重叠拒绝 */
+  private spawnCloud(viewW: number, viewH: number, initial: boolean): VanillaCloud | null {
+    const c: VanillaCloud = {
+      type: Math.floor(Math.random() * 4),
+      x: 0, y: 0,
+      scale: (70 + Math.random() * 61) / 100,
+      rot: (Math.random() * 21 - 10) / 100,
+      rSpeed: 0,
+      alpha: initial ? 1 : 0,
+      flip: Math.random() < 0.5,
+      kill: false,
+    };
+    c.y = -viewH * 0.25 + Math.random() * viewH * 0.4;
+    // 顺风侧留出屏外缓冲（原版 num3/num4 ±200 + 300 随机带）
+    const margin = 300 + (this.wind > 0 ? 200 : 0);
+    const lo = this.wind > 0 ? -margin - 200 : -margin;
+    c.x = lo + Math.random() * (viewW + margin * 2 + (this.wind < 0 ? 200 : 0));
+    // AABB 重叠拒绝
+    const tex = this.cloudTexs[c.type];
+    const w = (tex?.naturalWidth ?? 200) * c.scale, h = (tex?.naturalHeight ?? 80) * c.scale;
+    for (const o of this.vclouds) {
+      const ot = this.cloudTexs[o.type];
+      const ow = (ot?.naturalWidth ?? 200) * o.scale, oh = (ot?.naturalHeight ?? 80) * o.scale;
+      if (c.x < o.x + ow && c.x + w > o.x && c.y < o.y + oh && c.y + h > o.y) return null;
+    }
+    return c;
+  }
+
+  /** 原版风场步进(Main.cs:58270-58310):每帧目标随机游走/重掷,钳 ±0.35;
+   *  当前值以 0.0003+|diff|*0.0015 /帧缓动(L58222-58245) */
+  private updateWind(frames: number): void {
+    for (let f = 0; f < Math.ceil(frames); f++) {
+      // 目标随机游走(L58270-58276):1/4 ±0.025 / 1/2 ±0.05 / 其余 ±0.1(×0.001)
+      if (this.windRng() < 0.25) this.windTarget += (Math.floor(this.windRng() * 51) - 25) * 0.001;
+      else if (this.windRng() < 0.5) this.windTarget += (Math.floor(this.windRng() * 101) - 50) * 0.001;
+      else this.windTarget += (Math.floor(this.windRng() * 201) - 100) * 0.001;
+      this.windTarget = Math.max(-0.35, Math.min(0.35, this.windTarget));
+      // 重掷计数(L58284-58310):多数落在 0/±0.2,少数 ±0.4,极端 ±0.85
+      if (--this.windCounter <= 0) {
+        this.windCounter = 7200 + Math.floor(this.windRng() * 21601); // 7200-28800 帧
+        const r = this.windRng();
+        if (r < 13 / 30) {
+          this.windTarget = this.windRng() < 0.5 ? 0 : (Math.floor(this.windRng() * 401) - 200) * 0.001;
+        } else if (r < 13 / 30 + 13 / 20 * 17 / 30) {
+          this.windTarget = (Math.floor(this.windRng() * 801) - 400) * 0.001;
+        } else {
+          this.windTarget = (Math.floor(this.windRng() * 1701) - 850) * 0.001;
+        }
+        this.windTarget = Math.max(-0.35, Math.min(0.35, this.windTarget));
+      }
+      // 当前值缓动(L58228-58244)
+      const step = 0.0003 + Math.abs(this.windTarget - this.wind) * 0.0015;
+      this.wind += Math.max(-step, Math.min(step, this.windTarget - this.wind));
+    }
+  }
+
+  /** 原版 Update（Cloud.cs:348-443）：风驱动位移 + 淡入淡出 + 旋转微摆 + 越界回收 */
+  private updateClouds(dtMs: number, viewW: number) {
+    const frames = dtMs / (1000 / 60);
+    this.updateWind(frames);
+    for (const c of this.vclouds) {
+      c.x += this.wind * 9 * this.cloudParallax(c.scale) * frames;
+      if (!c.kill && c.alpha < 1) c.alpha = Math.min(1, c.alpha + 0.001 * frames);
+      if (c.kill) {
+        c.alpha -= 0.001 * frames;
+        if (c.alpha <= 0) c.alpha = 0;
+      }
+      c.rSpeed += (Math.random() * 21 - 10) * 2e-5 * frames;
+      c.rSpeed = Math.max(-0.0002, Math.min(0.0002, c.rSpeed));
+      c.rot = Math.max(-0.02, Math.min(0.02, c.rot + c.rSpeed * frames));
+    }
+    const off = 600;
+    this.vclouds = this.vclouds.filter((c) => {
+      const tex = this.cloudTexs[c.type];
+      const w = (tex?.naturalWidth ?? 200) * c.scale;
+      return c.alpha > 0 && c.x + w > -off && c.x < viewW + off;
+    });
+  }
+
+  /** 维持云量（原版每帧尝试 SpawnCloud；初始铺满，之后顺风补充） */
+  private maintainClouds(viewW: number, viewH: number) {
+    let guard = 0;
+    while (this.vclouds.length < 12 && guard++ < 30) {
+      const c = this.spawnCloud(viewW, viewH, this.vclouds.length < 8);
+      if (c) this.vclouds.push(c);
+    }
+  }
+
+  /** 原版三层绘制（DrawClouds_Distant/Closer/Closest + NextHorizonRenderer.DrawCloud）：
+   *  按视口宽缩放（cloud.position.Y*(H/600) 语义近似为 y 带），远景(scale<1)压暗 R/G 通道。 */
+  private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number) {
+    this.updateClouds(dtMs, viewW);
+    this.maintainClouds(viewW, viewH);
+    // 近→远排序绘制（近的在上）
+    const sorted = [...this.vclouds].sort((a, b) => b.scale - a.scale);
+    ctx.save();
+    ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放
+    for (const c of sorted) {
+      const tex = this.cloudTexs[c.type];
+      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
+      const w = tex.naturalWidth * c.scale, h = tex.naturalHeight * c.scale;
+      const dim = c.scale < 1 ? c.scale * 0.8 : 1; // 原版远景压暗（OriginalColorsForCloud pass1）
+      const nightDim = isNight ? 0.25 : 1;
+      const r = Math.round(255 * dim * nightDim);
+      const g = Math.round(255 * (c.scale < 1 ? ((c.scale + 1) / 2) * 0.9 : 1) * nightDim);
+      const b = Math.round(255 * nightDim);
+      ctx.save();
+      ctx.globalAlpha = c.alpha;
+      ctx.translate(c.x + w / 2, c.y + h / 2);
+      ctx.rotate(c.rot);
+      if (c.flip) ctx.scale(-1, 1);
+      // tint：先画原图再叠色保留形状（云端白色为主，直接 source-atop 着色近似原版 cloudColor）
+      const tinted = this.cloudTint(tex, r, g, b);
+      ctx.drawImage(tinted, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  private cloudTintCache = new Map<string, HTMLCanvasElement>();
+  /** 云朵着色缓存（multiply + destination-in 保形） */
+  private cloudTint(tex: HTMLImageElement, r: number, g: number, b: number): HTMLCanvasElement {
+    const key = `${tex.src}|${r},${g},${b}`;
+    const hit = this.cloudTintCache.get(key);
+    if (hit) return hit;
+    const c = document.createElement('canvas');
+    c.width = tex.naturalWidth; c.height = tex.naturalHeight;
+    const cx = c.getContext('2d')!;
+    cx.imageSmoothingEnabled = true;
+    cx.drawImage(tex, 0, 0);
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${r},${g},${b})`;
+    cx.fillRect(0, 0, c.width, c.height);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(tex, 0, 0);
+    this.cloudTintCache.set(key, c);
+    if (this.cloudTintCache.size > 64) {
+      const first = this.cloudTintCache.keys().next().value;
+      if (first !== undefined) this.cloudTintCache.delete(first);
+    }
+    return c;
+  }
 
   skyColors(t: number): [string, string] {
     for (let i = 0; i < SKY_KEYS.length - 1; i++) {
@@ -179,7 +239,7 @@ export class SkyRenderer {
     return [SKY_KEYS[0][1], SKY_KEYS[0][2]];
   }
 
-  draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number) {
+  draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7) {
     const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
     const grad = ctx.createLinearGradient(0, 0, 0, viewH);
@@ -202,51 +262,52 @@ export class SkyRenderer {
       ctx.globalAlpha = 1;
     }
 
-    // 太阳/月亮沿圆弧
-    const dayT = (t - 0.25) / 0.5;   // 0..1 白天
-    const nightT = t >= 0.75 ? (t - 0.75) / 0.5 : (t + 0.25) / 0.5; // 0..1 夜
-    if (dayT >= 0 && dayT <= 1) {
-      const sx = viewW * (0.1 + dayT * 0.8);
-      const sy = viewH * (0.75 - Math.sin(dayT * Math.PI) * 0.55);
-      // 柔和光晕（背景层）
-      const glow = ctx.createRadialGradient(sx, sy, 10, sx, sy, 80);
-      glow.addColorStop(0, 'rgba(255,240,180,0.45)');
-      glow.addColorStop(1, 'rgba(255,220,130,0)');
-      ctx.fillStyle = glow;
-      ctx.beginPath(); ctx.arc(sx, sy, 80, 0, Math.PI * 2); ctx.fill();
-      // 像素太阳贴图（3 倍放大、无平滑）
-      const S = this.sunSprite;
-      ctx.save();
-      ctx.imageSmoothingEnabled = false;
-      ctx.translate(sx, sy);
-      ctx.rotate(Math.sin(t * 0.4) * 0.03);
-      ctx.drawImage(S, -S.width * 1.5, -S.height * 1.5, S.width * 3, S.height * 3);
-      ctx.restore();
+    // ---- 原版太阳/月亮(Main.cs:62279 DrawSunAndMoon 一比一)----
+    // 昼夜时间(我们 0.25/0.75 边界 → 原版 day 0-54000 / night 0-32400)
+    const isDay = t > 0.25 && t < 0.75;
+    const dayTime = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
+    const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (isDay) {
+      const tex = this.sunTex;
+      if (tex.complete && tex.naturalWidth > 0) {
+        // 原版:x = time/54000*(屏宽+图宽*2)-图宽(横穿);y = bgTopY + |t*2-1|²*250+180(正午最高);
+        // scale = (1.2-|t*2-1|²*0.4)*1.1;rotation = t*2-7.3(t=time/54000)
+        const ft = dayTime / 54000;
+        const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+        const x = ft * (viewW + tex.width * 2) - tex.width;
+        const y = dip * 250 + 180;
+        const scale = (1.2 - dip * 0.4) * 1.1;
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ft * 2 - 7.3);
+        ctx.drawImage(tex, -tex.width / 2 * scale, -tex.height / 2 * scale, tex.width * scale, tex.height * scale);
+        ctx.restore();
+      }
+    } else {
+      const tex = this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
+      if (tex && tex.complete && tex.naturalWidth > 0) {
+        const mw = tex.width; // 相位帧宽(50)
+        const ft = nightTime / 32400;
+        const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+        const x = ft * (viewW + mw * 2) - mw;
+        const y = dip * 250 + 180;
+        const scale = 1.2 - dip * 0.4;
+        const phase = Math.max(0, Math.min(7, clock.dayCount % 8));
+        ctx.save();
+        ctx.translate(x, y);
+        ctx.rotate(ft * 2 - 7.3);
+        // 原版:竖条第 moonPhase 帧(0,MW*moonPhase,MW,MW),原点为中心
+        ctx.drawImage(tex, 0, mw * phase, mw, mw,
+          -mw / 2 * scale, -mw / 2 * scale, mw * scale, mw * scale);
+        ctx.restore();
+      }
     }
-    if (isNight) {
-      const sx = viewW * (0.1 + nightT * 0.8);
-      const sy = viewH * (0.7 - Math.sin(nightT * Math.PI) * 0.5);
-      const mg = ctx.createRadialGradient(sx, sy, 6, sx, sy, 60);
-      mg.addColorStop(0, 'rgba(200,210,255,0.25)');
-      mg.addColorStop(1, 'rgba(200,210,255,0)');
-      ctx.fillStyle = mg;
-      ctx.beginPath(); ctx.arc(sx, sy, 60, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#ECECF4';
-      ctx.beginPath(); ctx.arc(sx, sy, 16, 0, Math.PI * 2); ctx.fill();
-      // 环形山阴影（偏一侧的暗斑，制造立体感）
-      ctx.fillStyle = 'rgba(180,185,205,0.7)';
-      ctx.beginPath(); ctx.arc(sx + 6, sy + 2, 11, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#E4E4EC';
-      ctx.beginPath(); ctx.arc(sx, sy, 15, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = '#D5D5E0';
-      ctx.beginPath(); ctx.arc(sx - 3, sy + 5, 3.5, 0, Math.PI * 2); ctx.fill();
-      ctx.beginPath(); ctx.arc(sx + 4, sy - 5, 2.5, 0, Math.PI * 2); ctx.fill();
-    }
+    ctx.restore();
 
-    // 云：三层视差（远→近），像素贴图
-    for (const layer of [0, 1, 2]) {
-      this.drawCloudLayer(ctx, viewW, viewH, isNight, layer);
-    }
+    // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）
+    this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs);
 
     // 远山最后绘制（最前层）：太阳和云在山后，不会出现在山前
     this.drawMountains(ctx, viewW, viewH, camX);
@@ -341,26 +402,5 @@ export class SkyRenderer {
     fog.addColorStop(1, 'rgba(200,216,214,0.45)');
     ctx.fillStyle = fog;
     ctx.fillRect(0, viewH * 0.6, viewW, viewH * 0.22);
-  }
-
-  private drawCloudLayer(
-    ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
-    isNight: boolean, layer: number,
-  ) {
-    const layerAlpha = [0.4, 0.65, 0.95][layer];
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    for (const c of this.clouds) {
-      if (c.layer !== layer) continue;
-      c.x += c.sp / 60;
-      if (c.x > 1.2) c.x = -c.w - 0.05;
-      const spr = this.cloudSprites[c.variant % this.cloudSprites.length];
-      const cw = c.w * viewW;
-      const scale = cw / spr.width;
-      ctx.globalAlpha = (isNight ? 0.1 + layer * 0.03 : layerAlpha);
-      ctx.drawImage(spr, c.x * viewW, c.y * viewH, cw, spr.height * scale);
-    }
-    ctx.restore();
-    ctx.globalAlpha = 1;
   }
 }

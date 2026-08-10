@@ -13,8 +13,10 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
   const num2 = gs.lavaLine - rng.int(160, 199); // 完整转换深度线
   let left = gs.snowOriginLeft, right = gs.snowOriginRight;
   let thickness = 10;
-  gs.snowMinX = new Float32Array(h);
-  gs.snowMaxX = new Float32Array(h);
+  // C# 是 int[]：边界与厚度全程整数、`/2` 为整除截断（cs L5408-5411）。
+  // 曾用 Float32Array 浮点累积 → 边界逐行漂移、雪原范围与原版不符
+  gs.snowMinX = new Int32Array(h);
+  gs.snowMaxX = new Int32Array(h);
 
   const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
   const CLAY = TILE_BY_KEY['clay']!;
@@ -24,8 +26,9 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
     left += rng.int(-4, 3);
     right += rng.int(-3, 4);
     if (y > 0) {
-      left = (left + gs.snowMinX[y - 1]) / 2;
-      right = (right + gs.snowMaxX[y - 1]) / 2;
+      // C# int[] 整除截断（非负 → Math.floor 等价）
+      left = Math.floor((left + gs.snowMinX[y - 1]) / 2);
+      right = Math.floor((right + gs.snowMaxX[y - 1]) / 2);
     }
     // 雪原整体向地牢侧缓慢漂移
     if (gs.dungeonSide > 0) {

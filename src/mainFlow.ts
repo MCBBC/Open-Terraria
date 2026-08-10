@@ -81,6 +81,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
     playStart = Date.now();
+    // 物品图标后台预取(主菜单不载图标=省 6059 请求;进世界补齐,游戏内显示不变)
+    atlas?.prefetchIcons();
     stopMenu();
     titleMenu?.destroy();
     titleMenu = null;
@@ -309,7 +311,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function showTitle() {
     audio.play('title');
     ui.closeAll();
-    if (!menuBg) menuBg = new MenuBackground(root);
+    if (!menuBg) {
+      menuBg = new MenuBackground(root);
+      (window as unknown as { __swMenuBg?: MenuBackground }).__swMenuBg = menuBg; // 调试句柄
+    }
     titleMenu?.destroy();
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => showCharacterSelect(),

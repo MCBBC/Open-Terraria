@@ -32,6 +32,8 @@ mkdirSync(OUT_DIR, { recursive: true });
 // 杂项单图素材（呼吸气泡等，非表驱动）+ 树木专用贴图（TEdit WorldRenderXna 逻辑）
 const MISC = [
   'Bubble.png',
+  // 原版云朵（Cloud.cs 常用 0-3；9-13 雨云/18-21 风暴云随天气系统后补）
+  'Cloud_0.png', 'Cloud_1.png', 'Cloud_2.png', 'Cloud_3.png',
   // 树冠/树枝（style 0 起步；TEdit GetTreeTops/GetTreeBranches）
   ...Array.from({ length: 32 }, (_, i) => `Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `Tree_Branches_${i}.png`),
@@ -51,6 +53,9 @@ const MISC = [
   // 电路陷阱弹幕(Wiring.cs:1495-1743)
   'Projectile_98.png', 'Projectile_99.png', 'Projectile_184.png',
   'Projectile_185.png', 'Projectile_186.png', 'Projectile_187.png', 'Projectile_654.png',
+  // 日月(Main.cs:62279 DrawSunAndMoon):太阳整图 + 月亮 8 相位竖条(Moon_N 50×400)
+  'Sun.png',
+  ...Array.from({ length: 9 }, (_, i) => `Moon_${i}.png`),
   // 世界背景图全量（地表视差层/地下层/地狱层；仅落盘，运行时由 BiomeBackground 懒加载——
   // 不进 SpriteAtlas VANILLA_MISC 常驻表，避免 344 张整图常驻内存）
   ...Array.from({ length: 344 }, (_, i) => `Background_${i}.png`),

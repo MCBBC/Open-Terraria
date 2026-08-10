@@ -305,7 +305,7 @@ export class LiquidSim {
         else if (st.liquidType[ip3] !== myType) f6 = false;
         if (f5 && f6) {
           // 7 格均分（Liquid.cs:452-515）
-          const m = Math.round((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[im3] + st.liquid[ip3] + st.liquid[i5] + num1) / 7);
+          const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[im3] + st.liquid[ip3] + st.liquid[i5] + num1) / 7);
           let same = 0;
           if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else { st.liquidType[il] = myType; same++; }
           if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else { st.liquidType[ir] = myType; same++; }
@@ -324,7 +324,7 @@ export class LiquidSim {
           if (same !== 6 || st.liquid[iu] <= 0) st.liquid[i5] = m;
         } else {
           // 5 格均分（Liquid.cs:519-562）
-          const m = Math.round((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[i5] + num1) / 5);
+          const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[i5] + num1) / 5);
           let same = 0;
           if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else { st.liquidType[il] = myType; same++; }
           if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else { st.liquidType[ir] = myType; same++; }
@@ -339,7 +339,7 @@ export class LiquidSim {
         }
       } else if (f3) {
         // 4 格：左延伸（Liquid.cs:567-587）。类型写在条件判断之前（原版 L568 无条件写）
-        const m = Math.round((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4);
+        const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4);
         st.liquidType[il] = myType;
         if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
         st.liquidType[ir] = myType;
@@ -349,7 +349,7 @@ export class LiquidSim {
         st.liquid[i5] = m;
       } else if (f4) {
         // 4 格：右延伸（Liquid.cs:590-609）。类型写在条件判断之前（原版 L591 无条件写）
-        const m = Math.round((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4);
+        const m = Math.floor((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4);
         st.liquidType[il] = myType;
         if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
         st.liquidType[ir] = myType;
@@ -359,7 +359,7 @@ export class LiquidSim {
         st.liquid[i5] = m;
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
-        let m = Math.round((lq + rq + st.liquid[i5] + num1) / 3);
+        let m = Math.floor((lq + rq + st.liquid[i5] + num1) / 3);
         if (m === 254 && Math.random() * 30 < 1) m = 255;
         if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else st.liquidType[il] = myType;
         if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else st.liquidType[ir] = myType;
@@ -367,14 +367,14 @@ export class LiquidSim {
       }
     } else if (f1) {
       // 2 格：向左（Liquid.cs:633-639）
-      const m = Math.round((lq + st.liquid[i5] + num1) / 2);
+      const m = Math.floor((lq + st.liquid[i5] + num1) / 2);
       if (lq !== m) st.liquid[il] = m;
       st.liquidType[il] = myType;
       if (st.liquid[i5] !== m || st.liquid[il] !== m) this.addWater(x - 1, y);
       st.liquid[i5] = m;
     } else if (f2) {
       // 2 格：向右（Liquid.cs:643-649）
-      const m = Math.round((rq + st.liquid[i5] + num1) / 2);
+      const m = Math.floor((rq + st.liquid[i5] + num1) / 2);
       if (rq !== m) st.liquid[ir] = m;
       st.liquidType[ir] = myType;
       if (st.liquid[i5] !== m || st.liquid[ir] !== m) this.addWater(x + 1, y);
