@@ -2,6 +2,7 @@
 import { CharacterStore, type CharacterMeta } from '../save/CharacterStore';
 import { type Appearance, DIFFICULTY_INFO } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
+import { Lang } from '../i18n/Lang';
 
 export interface CharSelectFlow {
   onPlay(a: Appearance): void;
@@ -67,11 +68,11 @@ export class CharSelectPanel {
     this.panel = document.createElement('div');
     this.panel.className = 'sw-list-panel';
     this.panel.innerHTML = `
-      <div class="sw-list-title">选择角色</div>
+      <div class="sw-list-title">${Lang.text('UI.SelectPlayer')}</div>
       <div class="sw-list-body"></div>
       <div class="sw-list-footer">
-        <button data-act="back">返回</button>
-        <button data-act="new" class="primary">新建角色</button>
+        <button data-act="back">${Lang.text('UI.Back')}</button>
+        <button data-act="new" class="primary">${Lang.text('Mods.SandboxWorld.CharSelect.New')}</button>
       </div>
     `;
     this.body = this.panel.querySelector('.sw-list-body')!;
@@ -80,7 +81,15 @@ export class CharSelectPanel {
     parent.appendChild(this.panel);
     void this.reload();
     this.loop();
+    this.unsubLang = Lang.onChange(() => {
+      (this.panel.querySelector('.sw-list-title') as HTMLElement).textContent = Lang.text('UI.SelectPlayer');
+      (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent = Lang.text('UI.Back');
+      (this.panel.querySelector('[data-act=new]') as HTMLElement).textContent = Lang.text('Mods.SandboxWorld.CharSelect.New');
+      void this.reload();
+    });
   }
+
+  private unsubLang: (() => void) | null = null;
 
   private async reload() {
     await this.store.ensureLoaded();
@@ -100,7 +109,7 @@ export class CharSelectPanel {
       info.style.flex = '1';
       const name = document.createElement('div');
       name.className = 'name';
-      name.textContent = appearance.name || '无名角色';
+      name.textContent = appearance.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
       name.style.color = `rgb(${dc.r},${dc.g},${dc.b})`;
       const sub = document.createElement('div');
       sub.className = 'sub';
@@ -117,17 +126,17 @@ export class CharSelectPanel {
         ops.appendChild(b);
       };
       const a = appearance;
-      mk('进入', true, () => this.close(() => this.flow.onPlay(a)));
-      mk('重命名', false, async () => {
-        const name2 = prompt('输入新名字：', a.name);
+      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Enter'), true, () => this.close(() => this.flow.onPlay(a)));
+      mk(Lang.text('Mods.SandboxWorld.CharSelect.Rename'), false, async () => {
+        const name2 = prompt(Lang.text('Mods.SandboxWorld.CharSelect.RenamePrompt'), a.name);
         if (name2 == null) return;
         a.name = name2.slice(0, 20);
         await this.store.update(meta.id, a);
         await this.reload();
       });
-      mk('复制', false, async () => { await this.store.copy(meta.id); await this.reload(); });
-      mk('删除', false, async () => {
-        if (!confirm(`确定删除角色「${a.name || '无名角色'}」？不可撤销。`)) return;
+      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Copy'), false, async () => { await this.store.copy(meta.id); await this.reload(); });
+      mk(Lang.text('UI.Delete'), false, async () => {
+        if (!confirm(Lang.text('Mods.SandboxWorld.CharSelect.ConfirmDelete', a.name || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed')))) return;
         await this.store.delete(meta.id);
         await this.reload();
       });
@@ -142,7 +151,7 @@ export class CharSelectPanel {
     if (!this.items.length) {
       const empty = document.createElement('div');
       empty.className = 'sw-list-empty';
-      empty.textContent = '还没有角色，点击下方「新建角色」创建';
+      empty.textContent = Lang.text('Mods.SandboxWorld.CharSelect.Empty');
       this.body.appendChild(empty);
     }
   }
@@ -163,6 +172,7 @@ export class CharSelectPanel {
 
   close(fn?: () => void) {
     cancelAnimationFrame(this.raf);
+    this.unsubLang?.();
     this.panel.remove();
     fn?.();
   }

@@ -496,8 +496,8 @@ export class Renderer {
   grandPreview: { from: [number, number]; to: [number, number]; mode: number } | null = null;
   private drawWires(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
     if (!this.showWires || !this.atlas) return;
-    const wires = this.atlas.vimages.get('vanilla/WiresNew.png');
-    const actuatorImg = this.atlas.vimages.get('vanilla/Actuator.png');
+    const wires = this.atlas.ensureVImage('vanilla/WiresNew.png');
+    const actuatorImg = this.atlas.ensureVImage('vanilla/Actuator.png');
     if (!wires) return;
     const st = world.store;
     const ts = TILE;
@@ -1274,6 +1274,29 @@ export class Renderer {
     ctx.globalCompositeOperation = 'source-over';
   }
 
+  // ---- 原版小地图框（MinimapFrame/MinimapFrameManager 1:1，Default 皮肤） ----
+  // DrawBackground: MinimapPosition-6 处 244×244 黑底；DrawForeground: 框贴图(256×264)
+  // 画在 MinimapPosition+frameOffset(-8,-15)；按钮(18×18)仅悬停时显示（IsHighlighted）
+  private minimapFrameTex = this.loadUiTex('UI_Minimap_Default_MinimapFrame');
+  private minimapBtnReset = this.loadUiTex('UI_Minimap_Default_MinimapButton_Reset');
+  private minimapBtnZoomIn = this.loadUiTex('UI_Minimap_Default_MinimapButton_ZoomIn');
+  private minimapBtnZoomOut = this.loadUiTex('UI_Minimap_Default_MinimapButton_ZoomOut');
+  /** 小地图缩放（原版 mapMinimapScale，默认 1.05；钳 0.2..3，Main.cs:54953-54959） */
+  minimapZoom = 1.05;
+  /** 本帧鼠标悬停在小地图框按钮上（Game 据此拦下"点地图开全屏"）——原版 mouseInterface 语义 */
+  minimapUiHover = false;
+
+  private loadUiTex(name: string): HTMLImageElement {
+    const img = new Image();
+    img.src = `sprites/vanilla-ui/${name}.png`;
+    return img;
+  }
+
+  /** Default 皮肤按钮位（MinimapFrameManager.CreateAndAdd "Default"：+num 2/6 修正） */
+  private static readonly MINIMAP_BTN_POS = {
+    reset: [150, 240], zoomIn: [202, 240], zoomOut: [176, 240],
+  } as const;
+
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock) {
     if (!this.minimap) return;
     this.minimap.flushDirty();
@@ -1282,36 +1305,50 @@ export class Renderer {
     // miniMapX = screenWidth - (52+240) = 屏宽-292，miniMapY = 90
     // —— 让位右上角生命/魔力资源条（心行 y≤80、星列 x≈屏宽-25）
     const ox = ctx.canvas.width - size - 52, oy = 90;
-    const viewTilesW = 220, viewTilesH = Math.floor(220 * world.h / world.w);
+    // 原版取景：num14/15 = miniMapWidth/scale —— 正方形窗口（此前按世界纵横比压扁，非原版）
+    const viewTiles = Math.max(40, Math.round(size / this.minimapZoom));
     const px = player.cx / TILE, py = player.cy / TILE;
-    const sx = Math.max(0, Math.min(world.w - viewTilesW, Math.floor(px - viewTilesW / 2)));
-    const sy = Math.max(0, Math.min(world.h - viewTilesH, Math.floor(py - viewTilesH / 2)));
-    const mmH = size * viewTilesH / viewTilesW;
+    const sx = Math.max(0, Math.min(world.w - viewTiles, Math.floor(px - viewTiles / 2)));
+    const sy = Math.max(0, Math.min(world.h - viewTiles, Math.floor(py - viewTiles / 2)));
     ctx.save();
-    // 边框
-    ctx.strokeStyle = '#5A4A7A';
-    ctx.lineWidth = 3;
-    ctx.strokeRect(ox - 2, oy - 2, size + 4, mmH + 4);
-    ctx.strokeStyle = 'rgba(0,0,0,0.5)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(ox - 4, oy - 4, size + 8, mmH + 8);
-    // 底色：天空色（非黑）
-    ctx.fillStyle = '#7EB6E8';
-    ctx.fillRect(ox, oy, size, mmH);
-    ctx.globalAlpha = 0.92;
     ctx.imageSmoothingEnabled = false;
-    ctx.drawImage(this.minimap.canvas, sx, sy, viewTilesW, viewTilesH, ox, oy, size, mmH);
-    ctx.globalAlpha = 1;
-    // 迷雾（缩略图 1 tile = size/viewTilesW px；世界→屏幕偏移）
+    // 框底黑垫（MinimapFrame.DrawBackground：MinimapPosition=(ox+4,oy+4)，-6 → 244×244 黑 * mapMinimapAlpha）
+    ctx.fillStyle = '#000';
+    ctx.fillRect(ox - 2, oy - 2, size + 4, size + 4);
+    // 地图内容（alpha=mapMinimapAlpha=1）
+    ctx.drawImage(this.minimap.canvas, sx, sy, viewTiles, viewTiles, ox, oy, size, size);
+    // 迷雾（缩略图 1 tile = size/viewTiles px；世界→屏幕偏移）
     this.drawFog(ctx, world,
-      ox - sx * size / viewTilesW, oy - sy * mmH / viewTilesH,
-      size / viewTilesW, 2 * size / viewTilesW,
-      { x: ox, y: oy, w: size, h: mmH });
+      ox - sx * size / viewTiles, oy - sy * size / viewTiles,
+      size / viewTiles, 2 * size / viewTiles,
+      { x: ox, y: oy, w: size, h: size });
     // 玩家图标
     this.drawPlayerMarker(ctx,
-      ox + (px - sx) / viewTilesW * size, oy + (py - sy) / viewTilesH * mmH, 10);
-    // 记录小地图区域供点击检测
-    this.minimapRect = { x: ox - 4, y: oy - 4, w: size + 8, h: mmH + 8 };
+      ox + (px - sx) / viewTiles * size, oy + (py - sy) / viewTiles * size, 10);
+    // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset(-8,-15)）
+    const fx = ox + 4 - 8, fy = oy + 4 - 15;
+    if (this.minimapFrameTex.complete) ctx.drawImage(this.minimapFrameTex, fx, fy);
+    // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
+    this.minimapUiHover = false;
+    const btns: Array<[HTMLImageElement, readonly [number, number], 'in' | 'out' | 'reset']> = [
+      [this.minimapBtnZoomIn, Renderer.MINIMAP_BTN_POS.zoomIn, 'in'],
+      [this.minimapBtnZoomOut, Renderer.MINIMAP_BTN_POS.zoomOut, 'out'],
+      [this.minimapBtnReset, Renderer.MINIMAP_BTN_POS.reset, 'reset'],
+    ];
+    for (const [tex, [bx, by], kind] of btns) {
+      const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
+      const hovering = Math.abs(this._mouseX - cx) < 11 && Math.abs(this._mouseY - cy) < 11;
+      if (!hovering || !tex.complete) continue;
+      this.minimapUiHover = true;
+      ctx.drawImage(tex, fx + bx, fy + by);
+      if (this._mouseDown) {
+        if (kind === 'in') this.minimapZoom = Math.min(3, this.minimapZoom * 1.025);
+        else if (kind === 'out') this.minimapZoom = Math.max(0.2, this.minimapZoom * 0.975);
+        else this.minimapZoom = 1.05;
+      }
+    }
+    // 记录小地图区域供点击检测（黑垫外沿）
+    this.minimapRect = { x: ox - 2, y: oy - 2, w: size + 4, h: size + 4 };
     // 时间显示
     const hFloat = clock.hourFloat;
     const hh = String(Math.floor(hFloat)).padStart(2, '0');
@@ -1322,8 +1359,8 @@ export class Renderer {
     ctx.lineWidth = 3;
     ctx.textAlign = 'center';
     const timeText = `\u65f6\u95f4 ${hh}:${mm2}`;
-    ctx.strokeText(timeText, ox + size / 2, oy + mmH + 18);
-    ctx.fillText(timeText, ox + size / 2, oy + mmH + 18);
+    ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
+    ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
     ctx.restore();
   }
 

@@ -38,8 +38,9 @@ const METEOR_THRESHOLD = 75;
 const DUNGEON_THRESHOLD = 250;
 const GRAVEYARD_THRESHOLD = 28;
 
-/** 地牢墙集合（Main.wallDungeon 近似：主题墙 7/8/9 + 本仓库 unsafe 变体 94-99 + 蜥蜴墙 87 排除——神庙独立判定） */
-const DUNGEON_WALLS = new Set([7, 8, 9, 41, 43, 44]);
+/** 地牢墙集合（Main.cs:10507-10514 wallDungeon 全表：主题墙 7/8/9 + 1.4 变体墙 94-99；
+ *  41/43/44 是地牢"砖 tile"的 id,不是墙——此前误混入导致变体墙区域 zoneDungeon 永假） */
+const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 /** 地下沙漠墙（WallID.Sets.Conversion.Sandstone 216/217 + HardenedSand 187-189 近似） */
 const SANDSTONE_WALLS = new Set([216, 217, 187, 188, 189]);
 

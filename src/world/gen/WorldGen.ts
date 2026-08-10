@@ -107,6 +107,7 @@ import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
+import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
 import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -302,6 +303,7 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runSurfaceDecorPass(store, rng, gs);
+  runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（地表装饰后、Piles 前）
 }
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
@@ -636,53 +638,7 @@ function potPass({ store, surface, rng }: GenCtx) {
 // 已由 vanilla/ShiniesPass.ts（原版 pass 27/36）整体替换，旧 orePass/growOreBlob 删除
 
 // ---------- 液体 ----------
-function liquidPass({ store, surface, rng }: GenCtx) {
-  const { w, h } = store;
-  // 地表洼地灌水（边缘海洋区已有水，跳过避免重复判定）
-  const lakeOceanW = Math.max(24, Math.floor(w * 0.06)) + 6;
-  let x = lakeOceanW;
-  while (x < w - lakeOceanW) {
-    const sy = surface[x];
-    // 局部极小值
-    if (sy > surface[x - 3] + 2 && sy > surface[x + 3] + 2) {
-      const lakeW = rng.int(10, 26);
-      // 找洼地范围内的最高岸
-      let basinFloor = sy;
-      for (let dx = 0; dx < lakeW; dx++) basinFloor = Math.max(basinFloor, surface[Math.min(w - 1, x + dx)]);
-      const waterTop = Math.max(sy - 2, basinFloor - rng.int(2, 5));
-      for (let dx = 0; dx < lakeW && x + dx < w; dx++) {
-        // 逐列只填到该列自己的地表之上（waterTop < y < 该列 surface），
-        // 绝不灌进实心地面内部
-        const colFloor = surface[x + dx];
-        for (let y = Math.floor(waterTop); y < Math.floor(colFloor); y++) {
-          if (!store.inBounds(x + dx, y)) continue;
-          // 只清非实心内容（杂草等），不动实心块
-          const t = store.get(x + dx, y);
-          if (t !== 0 && !TILE_DEFS[t]?.solid) store.setTileSilent(x + dx, y, 0);
-          if (t === 0 || !TILE_DEFS[t]?.solid) store.setLiquid(x + dx, y, 255, 1);
-        }
-      }
-      x += lakeW + 6;
-    } else {
-      x++;
-    }
-  }
-  // 地下洞穴低处静水
-  for (let i = 0; i < 60; i++) {
-    const lx = rng.int(10, w - 10);
-    const ly = rng.int(Math.floor(h * 0.5), h - 30);
-    const poolW = rng.int(5, 14), poolH = rng.int(2, 4);
-    for (let dx = 0; dx < poolW; dx++) {
-      for (let dy = 0; dy < poolH; dy++) {
-        const px = lx + dx, py = ly + dy;
-        if (!store.inBounds(px, py)) continue;
-        if (!store.isActive(px, py) && store.isSolid(px, py + 1)) {
-          store.setLiquid(px, py, 255, 1);
-        }
-      }
-    }
-  }
-}
+// 已由 vanilla/LakesPass.ts（原版 pass 31）替换，旧 liquidPass 删除
 
 // ---------- 表面 ----------
 function surfacePass({ store, surface, rng, world }: GenCtx) {
@@ -793,47 +749,48 @@ function buildHut(store: GenCtx['store'], hx: number, hy: number, rng: RNG) {
 }
 
 // ---------- 收尾：出生点（选最平坦区域并整平） ----------
-function finalize({ store, surface, world, cfg }: GenCtx) {
+function finalize({ store, surface, world, cfg, rng }: GenCtx) {
   // 幽灵净化:生成期 TileRunner 会在空气格写残留 type(原版语义,渲染不可见),
   // 但我们的存档格式无 active 位——进入存档前归零(防重读激活成浮空块)
   for (let i = 0; i < store.type.length; i++) {
     if (!store.flags[i] && store.type[i] !== 0) store.type[i] = 0; // 幽灵 type
     if (store.type[i] === 0) store.flags[i] = 0; // 幻影活性(type 0 不可有 flags)
   }
-  const cx = Math.floor(store.w / 2);
-  // 在中心 ±60 列内找 9 列窗口高度方差最小的位置（平坦出生点，#14）
-  let bestX = cx, bestVar = Infinity;
-  for (let d = -60; d <= 60; d += 3) {
-    const x0 = cx + d - 4;
-    if (x0 < 4 || x0 + 8 > store.w - 5) continue;
-    const hs: number[] = [];
-    for (let k = 0; k < 9; k++) hs.push(surface[x0 + k]);
-    const avg = hs.reduce((a, b) => a + b, 0) / 9;
-    const v = hs.reduce((a, b) => a + (b - avg) ** 2, 0);
-    if (v < bestVar) { bestVar = v; bestX = x0 + 4; }
-  }
-  const sx = bestX;
-  const flatY = Math.round(surface.slice(sx - 4, sx + 5).reduce((a, b) => a + b, 0) / 9);
-  // 整平：±5 列统一到 flatY（填/挖），草皮封顶，上方 5 格清空，清除区内树木（防浮空树）
-  for (let dx = -5; dx <= 5; dx++) {
-    const x = sx + dx;
+  // ---- 原版 pass 78 Spawn Point（cs:9471-9508）：中心随机扩张采样，自然地表，不改地形 ----
+  // 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符
+  let range = 5;
+  let sx = Math.floor(store.w / 2), sy = 0;
+  for (;;) {
+    const x = Math.floor(store.w / 2) + rng.int(-range, range); // Next(-num2, num2+1)
     for (let y = 0; y < store.h; y++) {
-      const syF = flatY;
-      if (y < syF) {
-        if (store.isActive(x, y)) store.setTileSilent(x, y, 0);
-        store.setLiquid(x, y, 0, 0);
-      } else if (y === syF) {
-        store.setTileSilent(x, y, T.GRASS);
-        store.setLiquid(x, y, 0, 0);
-      } else if (y > syF && y < flatY + 20 && !store.isActive(x, y)) {
-        store.setTileSilent(x, y, T.DIRT);
-      }
+      if (store.flags[store.idx(x, y)]) { sx = x; sy = y; break; }
     }
-    surface[x] = flatY;
+    let bad = false;
+    range++;
+    const gs2 = ctxGs[0];
+    if (gs2 && sy > gs2.worldSurface) bad = true;
+    if (store.liquid[store.idx(sx, Math.max(0, sy - 1))] > 0) bad = true;
+    if (!bad) break;
   }
-  const sy = flatY;
+  let widen = 10;
+  const gs0 = ctxGs[0];
+  while (gs0 && sy > gs0.worldSurface) {
+    const x = rng.int(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
+    for (let y = 0; y < store.h; y++) {
+      if (store.flags[store.idx(x, y)]) { sx = x; sy = y; break; }
+    }
+    widen++;
+  }
   world.spawnX = sx;
   world.spawnY = Math.max(4, sy - 3);
+  // 出生点上空净空保留（防卡块；不整平地形）
+  for (let dx = -1; dx <= 1; dx++) {
+    for (let dy = 1; dy <= 3; dy++) {
+      const i = store.idx(sx + dx, sy - dy);
+      if (store.flags[i]) store.setTileSilent(sx + dx, sy - dy, 0);
+    }
+  }
+
   // 原版管线的地表/岩石线来自 TerrainPass 输出,旧 fbm 常数仅作回退
   const gs = ctxGs[0];
   if (gs) {

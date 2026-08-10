@@ -17,7 +17,13 @@ export function flattenDeep(obj, path = []) {
   const out = {};
   for (const [k, v] of Object.entries(obj)) {
     if (v !== null && typeof v === 'object') {
-      Object.assign(out, flattenDeep(v, [...path, k]));
+      // 注意:逐类别 Object.assign 合并,不能整体替换 out[cat]
+      // (Object.assign(out, sub) 会丢弃同类别已累计的键——曾致自定义文案只剩最后一组)
+      const sub = flattenDeep(v, [...path, k]);
+      for (const [cat, entries] of Object.entries(sub)) {
+        out[cat] ??= {};
+        Object.assign(out[cat], entries);
+      }
     } else {
       const [cat, ...rest] = [...path, k];
       (out[cat] ??= {})[rest.join('.')] = v;
@@ -99,7 +105,7 @@ export function stripConditionMarkers(table) {
   for (const [cat, entries] of Object.entries(table)) {
     for (const key of Object.keys(entries)) {
       const value = entries[key];
-      if (typeof value === 'string' && /\{[?!]\w/.test(value)) {
+      if (typeof value === 'string' && /\{[?!]+\w/.test(value)) {
         entries[key] = value.replace(/\{[?!]+\w+\}/g, '');
         touched.push(`${cat}.${key}`);
       }

@@ -141,12 +141,13 @@ class LanguageManager {
     }
   }
 
-  /** 重置为测试初始态 */
+  /** 重置为测试初始态(含 pack 缓存) */
   resetForTest() {
     this.pack = { texts: new Map(), groupedKeys: new Map(), variations: new Map() };
     this.activeCulture = null;
     this.loaded = false;
     this.warned.clear();
+    this.packCache.clear();
   }
 
   exists(key: string): boolean {

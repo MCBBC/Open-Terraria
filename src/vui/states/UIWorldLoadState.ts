@@ -10,13 +10,7 @@ import { GenWorldPreview } from './GenWorldPreview';
 import { Lang } from '../../i18n/Lang';
 import type { World } from '../../world/World';
 
-const TIPS = [
-  '提示：按住空格键可以跳得更高。',
-  '提示：火把是探索洞穴的必备品。',
-  '提示：把生命水晶捏在手里使用可以提升生命上限。',
-  '提示：按 E 打开背包查看合成配方。',
-  '提示：在沙子上行走要小心，下面可能什么都没有。',
-];
+// 原版语义:LoadingTips_Default 类别随机(109 键,构建期已剥离 {? 条件标记)
 
 export class UIWorldLoadState extends UIState {
   private header: UIHeader;
@@ -41,7 +35,7 @@ export class UIWorldLoadState extends UIState {
     this.bar.top = StyleDimension.fromPixels(UIGenProgressBar.topForScreenH(logicalH));
     this.append(this.bar);
 
-    const tip = new UIText(TIPS[Math.floor(Math.random() * TIPS.length)], 0.8);
+    const tip = new UIText(Lang.randomFromCategory('LoadingTips_Default') ?? '', 0.8);
     tip.hAlign = 0.5;
     tip.top = StyleDimension.fromPixels(logicalH - 40);
     tip.setTextColor(rgb(210, 210, 230));

@@ -5,7 +5,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { RECIPES } from '../data/recipes';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
-import { BuffType, BUFF_DEFS } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
+import { Lang } from '../i18n/Lang';
 import { ACCESSORY_START, ARMOR_START, COIN_START, INV_SIZE, VANITY_START } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 
@@ -227,20 +228,21 @@ export class UI {
     const info = el('div', '', `「${rpt.worldName}」 v${rpt.wldVersion} · ${rpt.size[0]}×${rpt.size[1]}<br>以下内容在本版本中被降级或跳过：`);
     info.style.cssText = 'font-size:12px; color:#9a8ab8; margin-bottom:8px;';
     panel.appendChild(info);
-    const section = (title: string, entries: CompatEntry[], desc: string) => {
+    const section = (title: string, entries: CompatEntry[], desc: string, nameOf?: (id: number) => string | null) => {
       if (!entries.length) return;
       panel.appendChild(el('div', '', title));
       const ul = el('div');
       ul.style.cssText = 'font-size:12px; margin:4px 0 8px 0; line-height:1.7;';
       for (const e of entries.slice(0, 40)) {
-        ul.appendChild(el('div', '', `· id ${e.id} ${e.name ? `「${e.name}」` : ''} ×${e.count} <span style="color:#7a6a9a">(${desc})</span>`));
+        const name = nameOf?.(e.id) ?? e.name;
+        ul.appendChild(el('div', '', `· id ${e.id} ${name ? `「${name}」` : ''} ×${e.count} <span style="color:#7a6a9a">(${desc})</span>`));
       }
       if (entries.length > 40) ul.appendChild(el('div', '', `… 共 ${entries.length} 种（导出查看全部）`));
       panel.appendChild(ul);
     };
-    section('🧱 方块 → 降级为石块', rpt.tilesDegraded, 'degraded-to-stone');
-    section('🚫 方块 → 清空丢弃', rpt.tilesCleared, 'cleared');
-    section('🎒 宝箱物品 → 跳过', rpt.itemsSkipped, 'skipped');
+    section('🧱 方块 → 降级为石块', rpt.tilesDegraded, 'degraded-to-stone', (id) => Lang.tileName(id));
+    section('🚫 方块 → 清空丢弃', rpt.tilesCleared, 'cleared', (id) => Lang.tileName(id));
+    section('🎒 宝箱物品 → 跳过', rpt.itemsSkipped, 'skipped', (id) => Lang.itemName(id));
     const row = el('div');
     row.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
     const bExport = el('button', 'sw-btn', '导出详情 JSON');
@@ -693,10 +695,10 @@ export class UI {
     const s = this.slotContent(where, i);
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
-    let html = `<b style="color:#ffe8a0">${def.name}</b> ×${s.stack}`;
-    if (def.tool?.damage) html += `<br>伤害 ${def.tool.damage}`;
-    if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${def.tool.type === 'pick' ? '镐力' : '斧力'} ${def.tool.power}`;
-    if (def.heal) html += `<br>回复 ${def.heal} 生命`;
+    let html = `<b style="color:#ffe8a0">${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
+    if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', def.tool.damage)}`;
+    if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
+    if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
@@ -731,7 +733,7 @@ export class UI {
     // 垃圾桶结算：关闭背包才真正删除
     if (this.trashStack) {
       const def = ITEM_DEFS[this.trashStack.id];
-      this.toast(`已丢弃 ${def.name} ×${this.trashStack.stack}`);
+      this.toast(Lang.text('Mods.SandboxWorld.UI.Dropped', Lang.itemNameByKey(def.key), this.trashStack.stack));
       this.trashStack = null;
       this.paintTrash();
     }
@@ -783,7 +785,7 @@ export class UI {
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
     this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
-    this.invPanel.appendChild(el('div', 'sw-title', '🎒 背包'));
+    this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Inventory')));
 
     // 主体：左纸娃娃列（装备/时装/垃圾桶/配饰/金钱） + 右背包 10×4
     const body = el('div');
@@ -799,10 +801,10 @@ export class UI {
       wrap.appendChild(row);
       return wrap;
     };
-    left.appendChild(equipRow('🛡 装备', ARMOR_START, 3));
-    left.appendChild(equipRow('👑 时装', VANITY_START, 3));
+    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Equipment'), ARMOR_START, 3));
+    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Vanity'), VANITY_START, 3));
     // 垃圾桶（暂存，关闭背包时才真正删除；可交换取回）
-    left.appendChild(el('div', 'sw-lbl', '丢弃'));
+    left.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
     const trash = el('div', 'sw-slot trash sw-trash');
     trash.style.cssText = 'width:44px; height:44px; flex:none;';
     trash.addEventListener('mousedown', (e) => {
@@ -819,12 +821,12 @@ export class UI {
     this.trashEl = trash;
     left.appendChild(trash);
     left.appendChild(equipRow('💫 配饰', ACCESSORY_START, 5)); // 3 列自动换行
-    left.appendChild(equipRow('💰 金钱', COIN_START, 3));
+    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Coins'), COIN_START, 3));
     body.appendChild(left);
 
     // 背包 10×4（10-39）
     const right = el('div');
-    right.appendChild(el('div', 'sw-lbl', '背包'));
+    right.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
     const grid = el('div');
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:4px;';
     for (let i = 10; i < ACCESSORY_START; i++) {
@@ -835,7 +837,7 @@ export class UI {
     this.invPanel.appendChild(body);
 
     // 合成区
-    this.invPanel.appendChild(el('div', 'sw-title', '合成'));
+    this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
     const stations = el('div', '', '');
     stations.style.cssText = 'font-size:12px; color:#8ad0a0; margin-bottom:6px;';
     stations.dataset.role = 'stations';
@@ -881,7 +883,7 @@ export class UI {
         continue;
       }
       ui.block.style.display = 'flex';
-      ui.block.title = `${BUFF_DEFS[t].name}：${BUFF_DEFS[t].desc}`;
+      ui.block.title = `${buffName(t)}：${buffDesc(t)}`;
       const iconId = this.buffIconItem.get(t);
       if (iconId && !ui.icon.src) ui.icon.src = iconUrl(this.game, iconId);
       const s = Math.ceil(left);
@@ -895,7 +897,7 @@ export class UI {
   private buildChestPanel() {
     this.chestPanel = el('div', 'sw-panel');
     this.chestPanel.style.cssText = 'position:fixed; left:50%; top:16%; transform:translateX(-50%); display:none;';
-    this.chestPanel.appendChild(el('div', 'sw-title', '宝箱'));
+    this.chestPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Chest')));
     const grid = el('div');
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(5,48px); gap:5px;';
     for (let i = 0; i < 10; i++) {
@@ -972,7 +974,8 @@ export class UI {
     const stations = game.stationsNearby();
     const stationsEl = this.invPanel.querySelector('[data-role="stations"]') as HTMLElement;
     if (stationsEl) {
-      stationsEl.textContent = `可用合成站：${[...stations].map((s) => ({ hand: '徒手', workbench: '🛠 工作台', furnace: '🔥 熔炉', anvil: '⚒ 铁砧' } as Record<string, string>)[s] ?? s).join('、')}`;
+      const stName: Record<string, string> = { hand: Lang.text('Mods.SandboxWorld.UI.StationHand'), workbench: '🛠 ' + Lang.text('ItemName.WorkBench'), furnace: '🔥 ' + Lang.text('ItemName.Furnace'), anvil: '⚒ ' + Lang.text('ItemName.IronAnvil') };
+      stationsEl.textContent = Lang.text('Mods.SandboxWorld.UI.CraftStations', [...stations].map((s) => stName[s] ?? s).join('、'));
     }
     this.craftListEl.innerHTML = '';
     for (const r of RECIPES) {
@@ -983,11 +986,11 @@ export class UI {
       const img = el('img') as HTMLImageElement;
       img.src = iconUrl(game, game.itemId(r.out));
       row.appendChild(img);
-      const label = el('span', '', `${outDef.name}${r.count > 1 ? ` ×${r.count}` : ''}`);
+      const label = el('span', '', `${Lang.itemNameByKey(outDef.key)}${r.count > 1 ? ` ×${r.count}` : ''}`);
       row.appendChild(label);
       const mats = el('span', '', r.inputs.map(([k, n]) => {
         const have = game.player.inv.countOf(game.itemId(k));
-        return ` ${ITEM_DEFS[game.itemId(k)].name} ${have}/${n}`;
+        return ` ${Lang.itemNameByKey(ITEM_DEFS[game.itemId(k)].key)} ${have}/${n}`;
       }).join(' ·'));
       mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
       row.appendChild(mats);
@@ -1020,14 +1023,14 @@ export class UI {
   showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void; onSettings?: () => void }) {
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:280px;';
-    panel.appendChild(el('div', 'sw-title', '已暂停'));
-    const bRes = el('button', 'sw-btn', '继续游戏');
+    panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Paused')));
+    const bRes = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Resume'));
     bRes.onclick = () => { panel.remove(); handlers.onResume(); };
-    const bSave = el('button', 'sw-btn', '保存存档');
+    const bSave = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.SaveGame'));
     bSave.onclick = () => handlers.onSave();
-    const bSet = el('button', 'sw-btn', '设置');
+    const bSet = el('button', 'sw-btn', Lang.text('LegacyMenu.14'));
     bSet.onclick = () => handlers.onSettings?.();
-    const bQuit = el('button', 'sw-btn', '回到主菜单');
+    const bQuit = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.BackToMenu'));
     bQuit.onclick = () => { panel.remove(); handlers.onQuit(); };
     panel.append(bRes, bSave, bSet, bQuit);
     this.root.appendChild(panel);

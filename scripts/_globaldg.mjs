@@ -3,7 +3,12 @@ import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 await page.goto('http://localhost:5199', { waitUntil: 'networkidle0', timeout: 120000 });
-await page.evaluate(() => { const _s = document.querySelector('select'); _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); });
+for (let a = 0; a < 3; a++) {
+  try {
+    await page.evaluate(() => { const _s = document.querySelector('select'); _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); });
+    break;
+  } catch { await new Promise((r) => setTimeout(r, 1500)); }
+}
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
 const out = await page.evaluate(async () => {
   const g = window.__swGame;

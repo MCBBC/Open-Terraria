@@ -24,7 +24,13 @@ export interface ItemDef {
     knockback: number;
     ammo: string;         // 弹药 item key(箭)
     projSpeed: number;    // 投射物速度 px/tick
+    /** 原版 item id（PickAmmo/ItemCheck_Shoot 数值以 vanilla-itemcombat.json 为准） */
+    vid?: number;
   };
+  /** 原版 AmmoID（40=箭；弹药物品自身标识，PickAmmo 匹配弓 useAmmo） */
+  ammoId?: number;
+  /** 原版 item id（战斗数值数据源） */
+  vid?: number;
   wall?: string;          // 放置的 wall key
   tool?: {
     type: ToolType;
@@ -711,12 +717,12 @@ item({ key: 'platinum_sword', name: '铂金剑', maxStack: 1, value: 3600,
   tool: { type: 'sword', damage: 15, speed: 22, knockback: 6, reach: 2.2 * 16 } });
 
 // ---- 阶段 6 第五轮:弓箭系统(官方数值 Item.cs:2996-3010:木弓伤4/UseTime30/射速6.1/击退0) ----
-item({ key: 'wooden_bow', name: '木弓', maxStack: 1, value: 100,
-  ranged: { damage: 4, speed: 30, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.1 } });
-item({ key: 'wooden_arrow', name: '木箭', maxStack: 999, value: 1 });
-item({ key: 'flaming_arrow', name: '燃烧箭', maxStack: 999, value: 1 });
-item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360,
-  ranged: { damage: 11, speed: 25, knockback: 1.5, ammo: 'wooden_arrow', projSpeed: 11 } });
+item({ key: 'wooden_bow', name: '木弓', maxStack: 1, value: 100, vid: 39,
+  ranged: { damage: 4, speed: 30, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.1, vid: 39 } });
+item({ key: 'wooden_arrow', name: '木箭', maxStack: 999, value: 1, vid: 40, ammoId: 40 });
+item({ key: 'flaming_arrow', name: '燃烧箭', maxStack: 999, value: 1, vid: 41, ammoId: 40 });
+item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360, vid: 99,
+  ranged: { damage: 8, speed: 28, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.6, vid: 99 } });
 
 // ---- 阶段 6 第六轮:矿车 ----
 item({ key: 'minecart_item', name: '矿车', maxStack: 99, value: 1, desc: '右键轨道放置并骑乘' });

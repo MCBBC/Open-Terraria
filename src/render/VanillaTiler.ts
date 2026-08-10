@@ -226,7 +226,7 @@ export function drawTreeCell(
   if (sheet === 323) {
     if (fx >= 88 && fx <= 132) {
       if (!foliageOnly) return; // 树冠/干身全部由外扩遍绘制（倾斜跨列/跨 chunk 防裁剪）
-      const img15 = atlas.vimages.get('vanilla/Tree_Tops_15.png');
+      const img15 = atlas.ensureVImage('vanilla/Tree_Tops_15.png');
       if (!img15) return;
       // 沙型：向下扫沙块
       let palmType = 0;
@@ -252,7 +252,7 @@ export function drawTreeCell(
     }
     // 干身（原版 TileDrawing case 323：20×20 帧 22px 步长，底部对齐；
     // frameY 是**有符号像素偏移**——棕榈树干随高度倾斜，65534 = -2 的 u16 回绕）
-    const img323 = atlas.vimages.get('vanilla/Tiles_323.png');
+    const img323 = atlas.ensureVImage('vanilla/Tiles_323.png');
     if (!img323 || fx + 20 > img323.width) return;
     const lean = fy >= 32768 ? fy - 65536 : fy; // 原版 vector2.X += frameY
     const pad323 = treeFrameBottomPad(img323, fx, 0);
@@ -264,7 +264,7 @@ export function drawTreeCell(
   if (sheet === 72) {
     if (foliageOnly === false && fx >= 36) return; // 顶格由外扩遍画
     if (fx >= 36) {
-      const img72 = atlas.vimages.get('vanilla/Shroom_Tops.png');
+      const img72 = atlas.ensureVImage('vanilla/Shroom_Tops.png');
       if (img72 && fx + 60 <= img72.width && fy + 42 <= img72.height) {
         // TEdit：source.X = (V/18)*62；60×42 底部锚定居中
         const sx72 = Math.floor(fy / 18) * 62;
@@ -275,7 +275,7 @@ export function drawTreeCell(
       return;
     }
     // 干身：Tiles_72 直取（54×54 表，2×2 帧 18px 网格）
-    const img72 = atlas.vimages.get('vanilla/Tiles_72.png');
+    const img72 = atlas.ensureVImage('vanilla/Tiles_72.png');
     if (img72 && fx + 16 <= img72.width && fy + 16 <= img72.height) {
       ctx.drawImage(img72, fx, fy, 16, 16, px, py, TILE, TILE);
     }
@@ -296,16 +296,16 @@ export function drawTreeCell(
     let img: HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
     if (fx === 22) {
-      img = atlas.vimages.get(`vanilla/Tree_Tops_${crown}.png`)
-        ?? atlas.vimages.get(`vanilla/Tree_Tops_${style}.png`) ?? null;
+      img = atlas.ensureVImage(`vanilla/Tree_Tops_${crown}.png`)
+        ?? atlas.ensureVImage(`vanilla/Tree_Tops_${style}.png`) ?? null;
       if (!img) return;
       // 帧尺寸按 PNG 实宽推导（3 变体 + 2px 间隔），自动覆盖全部样式（含神圣 140 高）
       [sw, sh] = treeTopSize(img);
       sx = frame * (sw + 2); anchor = 0;
     } else {
       // 分叉枝（原版固定 40×40 帧、42px 步长；左枝 X=0 / 右枝 X=42；Y = frame*42）
-      img = atlas.vimages.get(`vanilla/Tree_Branches_${crown}.png`)
-        ?? atlas.vimages.get(`vanilla/Tree_Branches_${style}.png`) ?? null;
+      img = atlas.ensureVImage(`vanilla/Tree_Branches_${crown}.png`)
+        ?? atlas.ensureVImage(`vanilla/Tree_Branches_${style}.png`) ?? null;
       if (!img) return;
       sw = 40; sh = 40;
       sx = fx === 44 ? 0 : 42;
@@ -328,8 +328,8 @@ export function drawTreeCell(
   if (fx === 44 && fy >= 132 && fy < 198) baseX++;
   const type = scanTreeType(st, x + baseX, y).type;
   const img = type >= 0
-    ? atlas.vimages.get(`vanilla/Tiles_5_${type}.png`) ?? atlas.vimages.get('vanilla/Tiles_5.png')
-    : atlas.vimages.get('vanilla/Tiles_5.png');
+    ? atlas.ensureVImage(`vanilla/Tiles_5_${type}.png`) ?? atlas.ensureVImage('vanilla/Tiles_5.png')
+    : atlas.ensureVImage('vanilla/Tiles_5.png');
   if (!img) return;
   if (fx + 20 <= img.width && fy + 20 <= img.height) {
     // 水平：帧内美术像素占中间 16px（两侧 2px 透明边距），整体 -2 后精确落满本格
@@ -373,7 +373,7 @@ function treeFrameBottomPad(img: HTMLImageElement, fx: number, fy: number): numb
  *  扫描带 baseX 偏移（TEdit 同款）：手臂格朝主干列方向扫——手臂列自身下方
  *  可能没有沙（如浮空装饰/黑檀石地基），直下扫会漏判 */
 export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y: number): HTMLImageElement | null {
-  let img = atlas.vimages.get('vanilla/Tiles_80.png');
+  let img = atlas.ensureVImage('vanilla/Tiles_80.png');
   // 角色判定：与 cactusFrameAt 同一列高比较 → 决定扫描列偏移
   const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === TILE_BY_KEY['v_80_cactus'];
   let top = y;
@@ -387,9 +387,9 @@ export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y
   for (let i = 0; i < 100 && y + i < st.h; i++) {
     const t = st.type[st.idx(x + baseX, y + i)];
     if (t === 0) continue;
-    if (t === ebonsand) { img = atlas.vimages.get('vanilla/Evil_Cactus.png') ?? img; break; }
-    if (t === crimsand) { img = atlas.vimages.get('vanilla/Crimson_Cactus.png') ?? img; break; }
-    if (t === pearlsand) { img = atlas.vimages.get('vanilla/Good_Cactus.png') ?? img; break; }
+    if (t === ebonsand) { img = atlas.ensureVImage('vanilla/Evil_Cactus.png') ?? img; break; }
+    if (t === crimsand) { img = atlas.ensureVImage('vanilla/Crimson_Cactus.png') ?? img; break; }
+    if (t === pearlsand) { img = atlas.ensureVImage('vanilla/Good_Cactus.png') ?? img; break; }
   }
   return img ?? null;
 }
@@ -545,7 +545,7 @@ export function drawVanillaCell(
     // 带 = 物体占格宽×步长；带高 = 物体占格高×步长
     const meta = atlas.vmeta(sheet);
     if (meta && fw > 0) {
-      const imgW = atlas.vimages.get(meta.sheet)?.width ?? 0;
+      const imgW = atlas.ensureVImage(meta.sheet)?.width ?? 0;
       if (imgW > 0 && ofx + meta.grid[0] > imgW) {
         const objW = fw * meta.stride[0];
         const bandH = (fh || 1) * meta.stride[1];

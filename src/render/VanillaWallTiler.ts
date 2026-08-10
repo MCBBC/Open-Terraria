@@ -62,7 +62,7 @@ export class VanillaWallTiler {
     let img = this.imgCache.get(wallId);
     if (img === undefined) {
       const m = this.atlas ? this.atlas.vanilla.walls[String(wallId)] : null;
-      img = m && this.atlas ? this.atlas.vimages.get(m.sheet) ?? null : null;
+      img = m && this.atlas ? this.atlas.ensureVImage(m.sheet) ?? null : null;
       this.imgCache.set(wallId, img);
     }
     return img;

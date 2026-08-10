@@ -1,22 +1,35 @@
 // Buff 系统（移植自 Maples 的 Buff 三段生命周期，改为幂等属性聚合）
 // 数值来源：Assets/Scripts/Buff/impl/*.cs 与 Potions/*.asset
+// 名称/描述走原版 l10n(M8):BuffName.<Internal> + 自有 Mods.SandboxWorld.Buff.* 描述
+import { Lang } from '../i18n/Lang';
+
 export enum BuffType {
-  Agility = 0,    // 敏捷：移速 +25%（180s）
-  Ironskin = 1,   // 铁皮：防御 +6（180s）
-  Resistance = 2, // 耐药性：立即回 80 HP，期间禁用治疗药水（60s）
-  Thorns = 3,     // 荆棘：受击反弹 2 伤害（180s）
-  Regen = 4,      // 恢复：每 5 秒 +10 HP（30s）
-  Campfire = 5,   // 篝火：范围光环(由附近篝火/心灯实体驱动,Game 每帧续期)
+  Agility = 0,    // 敏捷：移速 +25%（180s）→ Swiftness(3)
+  Ironskin = 1,   // 铁皮：防御 +6（180s）→ Ironskin(5)
+  Resistance = 2, // 耐药性：立即回 80 HP，期间禁用治疗药水（60s）→ PotionSickness(21)
+  Thorns = 3,     // 荆棘：受击反弹 2 伤害（180s）→ Thorns(14)
+  Regen = 4,      // 恢复：每 5 秒 +10 HP（30s）→ Regeneration(2)
+  Campfire = 5,   // 篝火：范围光环(由附近篝火/心灯实体驱动,Game 每帧续期) → Campfire(87)
 }
 
-export const BUFF_DEFS: Record<BuffType, { name: string; desc: string }> = {
-  [BuffType.Campfire]: { name: '篝火', desc: '附近篝火:每秒回 1 HP(心灯再+1)' },
-  [BuffType.Agility]: { name: '敏捷', desc: '移动速度 +25%' },
-  [BuffType.Ironskin]: { name: '铁皮', desc: '防御 +6' },
-  [BuffType.Resistance]: { name: '耐药性', desc: '生命上限 +80，无法使用治疗药水' },
-  [BuffType.Thorns]: { name: '荆棘', desc: '受击时反弹 2 点伤害' },
-  [BuffType.Regen]: { name: '恢复', desc: '每 5 秒回复 10 点生命' },
+export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
+  [BuffType.Campfire]: { vanillaBuff: 87, descKey: 'Mods.SandboxWorld.Buff.Campfire.Desc', fallbackName: '篝火' },
+  [BuffType.Agility]: { vanillaBuff: 3, descKey: 'Mods.SandboxWorld.Buff.Agility.Desc', fallbackName: '敏捷' },
+  [BuffType.Ironskin]: { vanillaBuff: 5, descKey: 'Mods.SandboxWorld.Buff.Ironskin.Desc', fallbackName: '铁皮' },
+  [BuffType.Resistance]: { vanillaBuff: 21, descKey: 'Mods.SandboxWorld.Buff.Resistance.Desc', fallbackName: '耐药性' },
+  [BuffType.Thorns]: { vanillaBuff: 14, descKey: 'Mods.SandboxWorld.Buff.Thorns.Desc', fallbackName: '荆棘' },
+  [BuffType.Regen]: { vanillaBuff: 2, descKey: 'Mods.SandboxWorld.Buff.Regen.Desc', fallbackName: '恢复' },
 };
+
+/** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
+export function buffName(t: BuffType): string {
+  return Lang.buffName(BUFF_DEFS[t].vanillaBuff) ?? BUFF_DEFS[t].fallbackName;
+}
+
+/** Buff 描述:自有键(机制数值是本仓库实现,不用原版通用描述) */
+export function buffDesc(t: BuffType): string {
+  return Lang.text(BUFF_DEFS[t].descKey);
+}
 
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒

@@ -92,6 +92,7 @@ export function vanillaNpc(id: number): VanillaNpc | null {
 // 行走帧循环区间的回卷上界：帧 >= frames-extra 时回帧 2（NPC.cs FindFrame L70244）
 export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
   guide: { id: 22, extra: 10 },
+  old_man: { id: 37, extra: 2 },   // 守卫老人(地牢门口;夜晚诅咒召唤骷髅王)
   merchant: { id: 17, extra: 9 },
   nurse: { id: 18, extra: 9 },
   arms_dealer: { id: 19, extra: 9 },

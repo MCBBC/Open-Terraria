@@ -6,20 +6,21 @@ import {
   VALID_CLOTH_STYLES, CHAR_CREATION_HAIRS, hslToRgb,
 } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
+import { Lang } from '../i18n/Lang';
 
 export interface CharCreationCallbacks {
   onCreate(a: Appearance): void;
   onCancel(): void;
 }
 
-const COLOR_ROWS: Array<{ key: keyof Appearance; label: string }> = [
-  { key: 'hairColor', label: '发色' },
-  { key: 'eyeColor', label: '瞳色' },
-  { key: 'skinColor', label: '肤色' },
-  { key: 'shirtColor', label: '上衣' },
-  { key: 'undershirtColor', label: '底衫' },
-  { key: 'pantsColor', label: '裤子' },
-  { key: 'shoeColor', label: '鞋子' },
+const COLOR_ROWS: Array<{ key: keyof Appearance; labelKey: string }> = [
+  { key: 'hairColor', labelKey: 'UI.PlayerCreateCategoryHairColor' },
+  { key: 'eyeColor', labelKey: 'UI.PlayerCreateCategoryEyeColor' },
+  { key: 'skinColor', labelKey: 'UI.PlayerCreateCategorySkinColor' },
+  { key: 'shirtColor', labelKey: 'UI.PlayerCreateCategoryShirtColor' },
+  { key: 'undershirtColor', labelKey: 'UI.PlayerCreateCategoryUndershirtColor' },
+  { key: 'pantsColor', labelKey: 'UI.PlayerCreateCategoryPantsColor' },
+  { key: 'shoeColor', labelKey: 'UI.PlayerCreateCategoryShoesColor' },
 ];
 
 const CSS = `
@@ -109,29 +110,29 @@ export class CharCreation {
     this.panel = document.createElement('div');
     this.panel.className = 'sw-char-panel';
     this.panel.innerHTML = `
-      <div class="sw-char-title">创建角色</div>
+      <div class="sw-char-title">${Lang.text('LegacyMenu.16')}</div>
       <div class="sw-char-body">
         <div class="sw-char-left">
           <canvas class="sw-char-preview" width="120" height="150"></canvas>
           <div class="sw-char-leftbtns">
-            <button data-act="copy" title="复制模板">📋</button>
-            <button data-act="paste" title="粘贴模板">📎</button>
-            <button data-act="random" title="随机">🎲</button>
+            <button data-act="copy" title="${Lang.text('Mods.SandboxWorld.CharCreate.CopyTemplate')}">📋</button>
+            <button data-act="paste" title="${Lang.text('Mods.SandboxWorld.CharCreate.PasteTemplate')}">📎</button>
+            <button data-act="random" title="${Lang.text('Mods.SandboxWorld.CharCreate.Random')}">🎲</button>
           </div>
         </div>
         <div class="sw-char-right">
           <div class="sw-char-tabs">
-            <button data-tab="info">信息</button>
-            <button data-tab="look">外观</button>
-            <button data-tab="hair">发型</button>
-            <button data-tab="color">颜色</button>
+            <button data-tab="info">${Lang.text('UI.PlayerCreateCategoryInfo')}</button>
+            <button data-tab="look">${Lang.text('Mods.SandboxWorld.CharCreate.Appearance')}</button>
+            <button data-tab="hair">${Lang.text('UI.PlayerCreateCategoryHairStyle')}</button>
+            <button data-tab="color">${Lang.text('Mods.SandboxWorld.CharCreate.Colors')}</button>
           </div>
           <div class="sw-char-content"></div>
         </div>
       </div>
       <div class="sw-char-footer">
-        <button data-act="back">返回</button>
-        <button data-act="create" class="primary">创建</button>
+        <button data-act="back">${Lang.text('UI.Back')}</button>
+        <button data-act="create" class="primary">${Lang.text('UI.Create')}</button>
       </div>
     `;
     this.root.appendChild(this.panel);
@@ -146,7 +147,7 @@ export class CharCreation {
     });
     this.panel.querySelector('[data-act=back]')!.addEventListener('click', () => this.close(this.cb.onCancel));
     this.panel.querySelector('[data-act=create]')!.addEventListener('click', () => {
-      this.appearance.name = (this.appearance.name || '').trim() || '无名角色';
+      this.appearance.name = (this.appearance.name || '').trim() || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
       const a = this.appearance;
       this.close(() => this.cb.onCreate(a));
     });
@@ -170,6 +171,29 @@ export class CharCreation {
       if (e.code === 'Escape') this.close(this.cb.onCancel);
     };
     window.addEventListener('keydown', this.escHandler);
+    this.unsubLang = Lang.onChange(() => this.refreshTexts());
+  }
+
+  private unsubLang: (() => void) | null = null;
+
+  /** 语言切换:静态框架文案重取 + 内容区重建(保留 appearance 与页签) */
+  private refreshTexts() {
+    (this.panel.querySelector('.sw-char-title') as HTMLElement).textContent = Lang.text('LegacyMenu.16');
+    const tabText: Record<string, string> = {
+      info: Lang.text('UI.PlayerCreateCategoryInfo'),
+      look: Lang.text('Mods.SandboxWorld.CharCreate.Appearance'),
+      hair: Lang.text('UI.PlayerCreateCategoryHairStyle'),
+      color: Lang.text('Mods.SandboxWorld.CharCreate.Colors'),
+    };
+    this.panel.querySelectorAll('[data-tab]').forEach((b) => {
+      (b as HTMLElement).textContent = tabText[(b as HTMLElement).dataset.tab!];
+    });
+    (this.panel.querySelector('[data-act=copy]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.CopyTemplate');
+    (this.panel.querySelector('[data-act=paste]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.PasteTemplate');
+    (this.panel.querySelector('[data-act=random]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.Random');
+    (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent = Lang.text('UI.Back');
+    (this.panel.querySelector('[data-act=create]') as HTMLElement).textContent = Lang.text('UI.Create');
+    this.buildContent();
   }
 
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -194,6 +218,7 @@ export class CharCreation {
   private close(fn: () => void) {
     cancelAnimationFrame(this.raf);
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
+    this.unsubLang?.();
     this.panel.remove();
     fn();
   }
@@ -219,28 +244,28 @@ export class CharCreation {
     // 名字
     const nameRow = document.createElement('label');
     nameRow.className = 'sw-char-row';
-    nameRow.innerHTML = '<span>名字</span>';
+    nameRow.innerHTML = `<span>${Lang.text('UI.PlayerNameSlot')}</span>`;
     const name = document.createElement('input');
     name.type = 'text';
     name.maxLength = 20;
     name.value = this.appearance.name;
-    name.placeholder = '输入角色名…';
+    name.placeholder = Lang.text('Mods.SandboxWorld.CharCreate.NamePlaceholder');
     name.addEventListener('input', () => { this.appearance.name = name.value; });
     nameRow.appendChild(name);
     box.appendChild(nameRow);
     // 难度
     const diffTitle = document.createElement('div');
     diffTitle.className = 'sw-char-subtitle';
-    diffTitle.textContent = '难度';
+    diffTitle.textContent = Lang.text('Mods.SandboxWorld.CharCreate.Difficulty');
     box.appendChild(diffTitle);
     const diffRow = document.createElement('div');
     diffRow.className = 'sw-char-diffs';
     DIFFICULTY_INFO.forEach((d, i) => {
       const b = document.createElement('button');
-      b.textContent = d.label;
+      b.textContent = Lang.text(['UI.Softcore', 'UI.Mediumcore', 'UI.Hardcore', 'UI.Creative'][i]);
       b.style.color = hex(d.color);
       b.classList.toggle('active', this.appearance.difficulty === i);
-      b.title = ['掉落一半金币', '掉落所有金币和物品', '死亡掉落全部物品', '研究/复制/控制时间'].join('')[i] ?? '';
+      b.title = Lang.text(`Mods.SandboxWorld.CharCreate.DiffDesc.${i}`);
       b.addEventListener('click', () => { this.appearance.difficulty = i as Appearance['difficulty']; this.buildContent(); });
       diffRow.appendChild(b);
     });
@@ -248,15 +273,15 @@ export class CharCreation {
     // 性别（皮肤变体男/女组）
     const genderTitle = document.createElement('div');
     genderTitle.className = 'sw-char-subtitle';
-    genderTitle.textContent = '性别';
+    genderTitle.textContent = Lang.text('Mods.SandboxWorld.CharCreate.Gender');
     box.appendChild(genderTitle);
     const gRow = document.createElement('div');
     gRow.className = 'sw-char-diffs';
     const MALE = [0, 1, 2, 3, 8, 10];
     const FEMALE = [4, 5, 6, 7, 9, 11];
-    for (const [label, pool] of [['♂ 男', MALE], ['♀ 女', FEMALE]] as Array<[string, number[]]>) {
+    for (const [label, pool] of [['Mods.SandboxWorld.CharCreate.Male', MALE], ['Mods.SandboxWorld.CharCreate.Female', FEMALE]] as Array<[string, number[]]>) {
       const b = document.createElement('button');
-      b.textContent = label;
+      b.textContent = Lang.text(label);
       b.classList.toggle('active', pool.includes(this.appearance.skinVariant));
       b.addEventListener('click', () => {
         // 同性别的样式索引尽量保留（0↔4, 1↔5, 2↔6, 3↔7, 8↔9, 10↔11）
@@ -277,7 +302,7 @@ export class CharCreation {
     VALID_CLOTH_STYLES.forEach((styleId) => {
       const b = document.createElement('button');
       b.className = 'sw-char-stylebtn';
-      b.title = `样式 ${styleId}`;
+      b.title = Lang.text('Mods.SandboxWorld.CharCreate.StyleId', styleId);
       b.classList.toggle('active', this.appearance.skinVariant === styleId);
       const c = document.createElement('canvas');
       c.width = 40; c.height = 56;
@@ -301,7 +326,7 @@ export class CharCreation {
     for (const hairId of CHAR_CREATION_HAIRS) {
       const b = document.createElement('button');
       b.className = 'sw-char-hairbtn';
-      b.title = `发型 ${hairId}`;
+      b.title = Lang.text('Mods.SandboxWorld.CharCreate.HairId', hairId);
       b.classList.toggle('active', this.appearance.hair === hairId);
       const c = document.createElement('canvas');
       c.width = 40; c.height = 44;
@@ -326,7 +351,7 @@ export class CharCreation {
       const el = document.createElement('label');
       el.className = 'sw-char-row';
       const span = document.createElement('span');
-      span.textContent = row.label;
+      span.textContent = Lang.text(row.labelKey);
       const key = row.key as keyof Appearance;
       const input = document.createElement('input');
       input.type = 'color';
@@ -338,7 +363,7 @@ export class CharCreation {
       this.colorInputs.set(key, input);
       const rand = document.createElement('button');
       rand.textContent = '🎲';
-      rand.title = '随机此颜色';
+      rand.title = Lang.text('Mods.SandboxWorld.CharCreate.RandomColor');
       rand.addEventListener('click', () => {
         const c = { r: 0, g: 0, b: 0 };
         const [r, g, b] = hslToRgb(Math.random(), 0.35 + Math.random() * 0.45, 0.3 + Math.random() * 0.35);

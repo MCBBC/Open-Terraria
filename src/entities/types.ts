@@ -13,6 +13,8 @@ export interface GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown): void;
   /** 伤害数字飘字 */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string): void;
+  /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
+  cutTile(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string): void;
   /** 出生敌人 */

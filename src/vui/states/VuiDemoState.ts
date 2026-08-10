@@ -30,7 +30,7 @@ export class VuiDemoState extends UIState {
     header.hAlign = 0.5;
     root.append(header);
 
-    const play = new UITextPanel(Lang.loaded ? Lang.text('UI.Play') : 'Play 开始游戏', 0.85);
+    const play = new UITextPanel(Lang.text('UI.Play'), 0.85);
     play.top = StyleDimension.fromPixels(70);
     play.hAlign = 0.5;
     play.onClick(() => {

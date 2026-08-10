@@ -51,6 +51,7 @@ export const VANILLA_MISC = [
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),
+  'vanilla/Tiles_323.png', 'vanilla/Tiles_72.png',  // 棕榈/发光蘑菇树干(群系专属但极小,常驻防传送闪失)
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
   'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
   'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png',
@@ -335,8 +336,10 @@ export class SpriteAtlas {
       this.preloadMiscAndNpcs(),
     ]);
   }
-  /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null */
-  private ensureVImage(file: string): HTMLImageElement | null {
+  /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null。
+   *  渲染路径一律用此入口(经 vimg 别名)——直接 vimages.get 会绕过懒加载与
+   *  onVImageLoaded 重烘焙钩子(棕榈树干传送消失的根因) */
+  ensureVImage(file: string): HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
     if (this._iconPending.has(file)) return null;

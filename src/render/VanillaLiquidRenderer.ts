@@ -262,7 +262,10 @@ export function drawVanillaLiquids(
   const texCache = new Map<number, HTMLImageElement | null>();
   const texFor = (vt: number) => {
     let t = texCache.get(vt);
-    if (t === undefined) { t = atlas.vimages.get(waterSheet(vt)) ?? null; texCache.set(vt, t); }
+    if (t === undefined) {
+      t = atlas.ensureVImage(waterSheet(vt)) ?? null;
+      if (t) texCache.set(vt, t);  // 只缓存命中(缓存 null 会把未就绪永久化)
+    }
     return t;
   };
   const animFrame = Math.floor((nowMs / 1000) * 6) % 16; // 原版 _frameState（风+6 基速）

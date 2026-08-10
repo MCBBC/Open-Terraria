@@ -13,6 +13,7 @@ import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { vanillaNpc, vanillaItemKey } from '../data/vanillaNpcs';
+import { itemCombat, AMMO_ARROW } from '../data/vanillaItemCombat';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
@@ -23,6 +24,7 @@ import { TownNPC } from '../entities/TownNPC';
 import { scanScene, type SceneFlags } from '../world/SceneMetrics';
 import { pickMusic, newMusicState, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
+import { Lang } from '../i18n/Lang';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
@@ -227,6 +229,8 @@ export class Game implements GameHooks {
   private _platePressed = new Set<string>();
   private _weightedStanding = new Set<number>();
   private _entityPlatePressed = new Set<string>();
+  /** 守卫老人「诅咒」二次确认计时(原版对话框 Curse 按钮;两次对话间窗 600 tick) */
+  private oldManCurseArm = -9999;
   /** 电路系统(Wiring.cs 移植) */
   wiring: Wiring | null = null;
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
@@ -318,25 +322,7 @@ export class Game implements GameHooks {
     onProgress?.('加载世界贴图', 0.05);
     // 出生点半径类型扫描:只预载画面涉及的图块/墙表
     const st = this.world.store;
-    const sx = this.world.spawnX, sy = this.world.spawnY;
-    const R = 240;
-    const tileSheets = new Set<number>();
-    const wallIds = new Set<number>();
-    for (let x = Math.max(0, sx - R); x < Math.min(st.w, sx + R); x++) {
-      for (let y = Math.max(0, sy - R); y < Math.min(st.h, sy + R); y++) {
-        const i = st.idx(x, y);
-        if (st.flags[i]) {
-          const vs = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
-          if (vs !== undefined) tileSheets.add(vs);
-        }
-        if (st.wall[i] > 0) wallIds.add(st.wall[i]);
-      }
-    }
-    // 兜底常驻:草/泥/石表全时有(暴露地表转草、autotile 邻接)
-    for (const k of ['dirt', 'stone', 'grass']) {
-      const vs = TILE_DEFS[TILE_BY_KEY[k]]?.vanilla?.sheet;
-      if (vs !== undefined) tileSheets.add(vs);
-    }
+    const { tileSheets, wallIds } = this.collectSheetsAround(this.world.spawnX, this.world.spawnY, 240);
     await Promise.all([
       a.preloadTileSheetsFor(tileSheets, wallIds),
       a.preloadMiscAndNpcs(),
@@ -365,6 +351,29 @@ export class Game implements GameHooks {
     onProgress?.('加载背景图', 1);
   }
 
+  /** 区域类型扫描:中心 ±R 内出现的图块 sheet id + 墙 id 集合(出生点预载/传送门共用) */
+  private collectSheetsAround(cx: number, cy: number, R: number): { tileSheets: Set<number>; wallIds: Set<number> } {
+    const st = this.world.store;
+    const tileSheets = new Set<number>();
+    const wallIds = new Set<number>();
+    for (let x = Math.max(0, cx - R); x < Math.min(st.w, cx + R); x++) {
+      for (let y = Math.max(0, cy - R); y < Math.min(st.h, cy + R); y++) {
+        const i = st.idx(x, y);
+        if (st.flags[i]) {
+          const vs = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
+          if (vs !== undefined) tileSheets.add(vs);
+        }
+        if (st.wall[i] > 0) wallIds.add(st.wall[i]);
+      }
+    }
+    // 兜底常驻:草/泥/石表全时有(暴露地表转草、autotile 邻接)
+    for (const k of ['dirt', 'stone', 'grass']) {
+      const vs = TILE_DEFS[TILE_BY_KEY[k]]?.vanilla?.sheet;
+      if (vs !== undefined) tileSheets.add(vs);
+    }
+    return { tileSheets, wallIds };
+  }
+
   /** 预载期的装备槽位(此时 player 尚未创建,读初始装备常量:afterWorldLoad 同源) */
   private playerPreviewArmor(): Array<number | null> {
     // 与 afterWorldLoad 初始装备一致:铁三件(头/胸/腿)
@@ -382,6 +391,9 @@ export class Game implements GameHooks {
    *  quickSettle 循环 UpdateLiquid 至收敛 → 复位后再次 WaterCheck。
    *  收敛后世界液体即达最终静止状态，进游戏不再有"靠近才流动" */
   private async settleLiquids(onProgress?: (p: number) => void) {
+    // 原版 pass 49/97 Settle Liquids（WorldGen.cs:7395/10247 同构）：
+    // QuickWater(3,-1,-1)+WaterCheck，quickSettle 下外层 10 轮，每轮跑到 numLiquid==0。
+    // 曾只沉降 1 轮——晚到的液体（漏斗入口回流等）残留边界水洼
     const sim = new LiquidSim(this.world);
     onProgress?.(0.05);
     sim.quickWater();
@@ -389,15 +401,20 @@ export class Game implements GameHooks {
     await new Promise((r) => setTimeout(r, 0));
     sim.waterCheck();
     sim.quickSettle = true;
-    const MAX_ITER = 100000; // 原版 WorldFile 同上限
+    const MAX_ITER = 100000; // 原版 WorldFile 同上限（单轮保险）
     let iter = 0;
-    while (sim.numLiquid > 0 && iter < MAX_ITER) {
-      sim.updateLiquid();
-      iter++;
-      if (iter % 500 === 0) {
-        onProgress?.(0.35 + Math.min(0.6, iter / 20000));
-        await new Promise((r) => setTimeout(r, 0));
+    for (let round = 0; round < 10; round++) {
+      let roundIter = 0;
+      while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
+        sim.updateLiquid();
+        iter++; roundIter++;
+        if (iter % 500 === 0) {
+          onProgress?.(0.35 + Math.min(0.6, iter / 20000));
+          await new Promise((r) => setTimeout(r, 0));
+        }
       }
+      sim.waterCheck();
+      if (sim.numLiquid === 0) break; // 收敛即止（原版 10 轮上限）
     }
     sim.quickSettle = false;
     sim.waterCheck();
@@ -475,6 +492,16 @@ export class Game implements GameHooks {
     // 护士(原版:击败任一 Boss 后入住;checkNpcArrival 每帧判定)
     const nurse = new TownNPC('nurse', this.world.spawnX * 16 + 40, (this.world.spawnY - 2) * 16);
     this.entities.add(nurse, 'npcs');
+    // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王(NPC.cs GetChat/Lang.dialog 语义)
+    if (this.world.dungeonX > 0) {
+      const st = this.world.store;
+      const dx = this.world.dungeonX;
+      let dy = Math.max(4, Math.floor(this.world.groundLevel) - 30);
+      while (dy < this.world.h - 3 && !st.isSolid(dx, dy)) dy++;
+      const oldMan = new TownNPC('old_man', dx * 16 - 8, (dy - 3) * 16);
+      oldMan.home = { x: dx, y: dy - 3 }; // 锚定地牢门口不游荡远走
+      this.entities.add(oldMan, 'npcs');
+    }
     this.cb.onInventoryChanged();
   }
 
@@ -563,7 +590,7 @@ export class Game implements GameHooks {
       const r = this.renderer.minimapRect;
       const fm = this.renderer.fullMap;
       const inMap = inp.mouseX >= r.x && inp.mouseX <= r.x + r.w && inp.mouseY >= r.y && inp.mouseY <= r.y + r.h;
-      if (!fm.open && inMap && !inp.uiBlocking) {
+      if (!fm.open && inMap && !inp.uiBlocking && !this.renderer.minimapUiHover) {
         fm.open = true;
         // 打开即放大到主角：锚点 = 主角 tile 坐标 → 屏幕中心，
         // zoom 从 0.5 缓动到 2，缓动期间 applyMapAnchor 每帧补偿 pan，主角始终居中
@@ -605,13 +632,9 @@ export class Game implements GameHooks {
           const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
           if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
             if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
-              // 第二次点击同一点 → 传送；失败不关图、保留标记可重试
-              if (this.teleportNear(tx, ty)) {
-                this._tpTarget = null;
-                this.renderer.tpMark = null;
-                this.renderer.fullMap.open = false;
-                this.cb.onToast('传送完成');
-              }
+              // 第二次点击同一点 → 先就位目标区域贴图再传送(落地即完美,
+              // 不出现 fallback 色块闪烁);失败不关图、保留标记可重试
+              void this.teleportWhenReady(tx, ty);
             } else {
               this._tpTarget = { x: tx, y: ty };
               this.renderer.tpMark = { x: tx, y: ty };
@@ -1073,23 +1096,38 @@ export class Game implements GameHooks {
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef?.ranged && inp.mouseDown && this.player.useTime === 0) {
-      // 远程武器(弓):消耗弹药 → 沿鼠标方向发射箭(Player.ItemCheck_Shoot 语义)
+      // 远程武器（弓）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
+      //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
+      //   击退 = 弓 kb + 弹药 kb；投射物类型 = 弹药 shoot；音效 = 弓 UseSound(Item5)
+      //   弹药查找：原版先扫 54-57 弹药栏（我们无弹药栏），再扫背包 0-53 第一组
       const rg = heldDef.ranged;
-      const ammoId = ITEM_BY_KEY[rg.ammo];
+      const bowC = rg.vid != null ? itemCombat(rg.vid) : null;
+      const useAmmo = bowC?.useAmmo ?? AMMO_ARROW;
+      // PickAmmo：背包顺序第一组 useAmmo 匹配的弹药物品
       let ammoSlot = -1;
+      let ammoDef: (typeof ITEM_DEFS)[number] | null = null;
       for (let i = 0; i < this.player.inv.slots.length; i++) {
         const sl = this.player.inv.slots[i];
-        if (sl && sl.id === ammoId && sl.stack > 0) { ammoSlot = i; break; }
+        if (!sl || sl.stack <= 0) continue;
+        const d = ITEM_DEFS[sl.id];
+        if (d?.ammoId === useAmmo) { ammoSlot = i; ammoDef = d; break; }
       }
-      if (ammoSlot >= 0) {
+      if (ammoSlot >= 0 && ammoDef) {
+        const ammoC = ammoDef.vid != null ? itemCombat(ammoDef.vid) : null;
+        const speed = (bowC?.shootSpeed ?? rg.projSpeed) + (ammoC?.shootSpeed ?? 0);
+        const damage = (bowC?.damage ?? rg.damage) + (ammoC?.damage ?? 0);
+        const knockback = (bowC?.knockBack ?? rg.knockback) + (ammoC?.knockBack ?? 0);
+        const projId = ammoC?.shoot ?? 1; // PickAmmo：projToShoot = item.shoot（1 木箭 2 燃烧箭）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         const ax = this.player.cx + Math.cos(ang) * 14;
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
-        const arrow = new Arrow(ax, ay, Math.cos(ang) * rg.projSpeed, Math.sin(ang) * rg.projSpeed, rg.damage, rg.ammo);
-        this.entities.add(arrow, 'projectiles');
+        // 回收掉落：仅非点燃弹（原版燃烧箭 Kill 不掉）
+        const dropKey = projId === 1 ? ammoDef.key : null;
+        this.entities.add(new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
+          damage, knockback, projId, dropKey), 'projectiles');
         this.player.inv.removeAt(ammoSlot, 1);
-        this.player.useTime = rg.speed;
-        this.sfx.play('tink');
+        this.player.useTime = bowC?.useTime ?? rg.speed;
+        this.sfx.play('bowShoot');
         this.cb.onInventoryChanged();
       }
     } else if (heldDef && (heldDef.key === 'worm_food' || heldDef.key === 'bloody_spine' || heldDef.key === 'slime_crown')
@@ -1270,6 +1308,14 @@ export class Game implements GameHooks {
       this.smashOrbHeart(x, y);
       return;
     }
+    // 瓦罐：统一走 smashPot（整罐洪水填充 + loot）。
+    // 不能落入下方 object 锚点分支——瓦罐帧编码是【底行 frameY=0、顶行 frameY=18】
+    // （贴图表视觉 Y 偏移，与家具的"顶行 0"相反），锚点公式会按 gy 上移 →
+    // 清掉罐底下一格的地面、罐体留在原地 → 可重复破坏刷战利品
+    if (type === POT_TILE) {
+      this.smashPot(x, y);
+      return;
+    }
     if (IMPORTED_TREE_TYPES.has(type)) {
       this.fellImportedTree(x, y, type);
       return;
@@ -1281,17 +1327,31 @@ export class Game implements GameHooks {
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
-    // object：找锚点整体移除
+    // object：找锚点整体移除。锚点 = 命中格 (2w-1)×(2h-1) 邻域内同类型、帧相位为 (0,0)
+    // （fv%(w*18)==0 且 fyv%(h*18)==0，兼容 style 偏移）、且 w×h 框包含命中格的候选中
+    // 帧最小的格——两个同款物体紧邻时也能选对所属的那件（全局最小帧会误选隔壁那件）；
+    // 候选落空回退帧最小格（约定无关：家具顶行锚/陶罐底行锚均可）
     if ((def.w ?? 1) > 1 || (def.h ?? 1) > 1) {
-      const fi = st.idx(x, y);
-      const fv = st.frameX[fi], fyv = st.frameY[fi];
-      // 原版家具帧是 18px 像素偏移，先归一成格偏移再找锚点
-      const gx = def.vanilla ? Math.floor(fv / 18) : fv;
-      const gy = def.vanilla ? Math.floor(fyv / 18) : fyv;
-      const ax = gx === 0 && gy === 0 ? x : x - gx;
-      const ay = gx === 0 && gy === 0 ? y : y - gy;
-      for (let dx = 0; dx < (def.w ?? 1); dx++) {
-        for (let dy = 0; dy < (def.h ?? 1); dy++) {
+      const ow = def.w ?? 1, oh = def.h ?? 1;
+      let ax = x, ay = y, best = Infinity, hasCandidate = false;
+      for (let dx = -(ow - 1); dx <= ow - 1; dx++) {
+        for (let dy = -(oh - 1); dy <= oh - 1; dy++) {
+          const nx = x + dx, ny = y + dy;
+          if (!st.inBounds(nx, ny) || st.type[st.idx(nx, ny)] !== type) continue;
+          const ni = st.idx(nx, ny);
+          const key = st.frameY[ni] * 4096 + st.frameX[ni];
+          const phaseAnchor = st.frameX[ni] % (ow * 18) === 0 && st.frameY[ni] % (oh * 18) === 0;
+          const boxContains = nx <= x && nx + ow > x && ny <= y && ny + oh > y;
+          if (phaseAnchor && boxContains) {
+            // 合格候选：相位 (0,0) 且框包含命中格
+            if (!hasCandidate || key < best) { hasCandidate = true; best = key; ax = nx; ay = ny; }
+          } else if (!hasCandidate && key < best) {
+            best = key; ax = nx; ay = ny;
+          }
+        }
+      }
+      for (let dx = 0; dx < ow; dx++) {
+        for (let dy = 0; dy < oh; dy++) {
           st.setTile(ax + dx, ay + dy, 0);
         }
       }
@@ -1309,8 +1369,7 @@ export class Game implements GameHooks {
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
       return;
     }
-    // 瓦罐：仅清格——碎裂音效/粒子/掉落表全由 smashPot 统一处理（防双重掉落）；
-    // 挥击路径走 smashPot（整罐 2×2 + loot），其他路径（挖掘等）直接清格
+    // 瓦罐分支已上移到函数顶部（smashPot 统一处理）；此处到达即防御性清格
     if (type === POT_TILE) {
       st.setTile(x, y, 0);
       return;
@@ -2000,13 +2059,36 @@ export class Game implements GameHooks {
   private explodeAt(tx: number, ty: number, damage: number) {
     const st = this.world.store;
     const R = 3;
+    // 半径内被炸的格：多格 framed 物体按整件清除（锚点邻域扫描，同 breakTile 语义），
+    // 防半件残留可重复破坏；炸药(141/142)收集后链式引爆（原版连爆语义，上限 32 防递归）
+    const chain: Array<[number, number]> = [];
     for (let dx = -R; dx <= R; dx++) {
       for (let dy = -R; dy <= R; dy++) {
         if (dx * dx + dy * dy > R * R) continue;
         const x = tx + dx, y = ty + dy;
         if (!st.inBounds(x, y)) continue;
-        const d = TILE_DEFS[st.get(x, y)];
-        if (d && d.pick >= 0 && d.pick < 200 && !d.key.startsWith('v_75') && !d.key.startsWith('v_76')) {
+        const t = st.get(x, y);
+        const d = TILE_DEFS[t];
+        if (!d || d.pick < 0 || d.pick >= 200 || d.key.startsWith('v_75') || d.key.startsWith('v_76')) continue;
+        if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
+        if ((d.w ?? 1) > 1 || (d.h ?? 1) > 1) {
+          // 多格物体：找锚点整件清（无掉落——原版爆炸摧毁不掉物品）
+          const ow = d.w ?? 1, oh = d.h ?? 1;
+          let ax = x, ay = y;
+          for (let sx = -(ow - 1); sx <= ow - 1 && st.inBounds(x, y); sx++) {
+            for (let sy = -(oh - 1); sy <= oh - 1; sy++) {
+              const nx = x + sx, ny = y + sy;
+              if (!st.inBounds(nx, ny) || st.type[st.idx(nx, ny)] !== t) continue;
+              const ni = st.idx(nx, ny);
+              const phaseAnchor = st.frameX[ni] % (ow * 18) === 0 && st.frameY[ni] % (oh * 18) === 0;
+              const boxContains = nx <= x && nx + ow > x && ny <= y && ny + oh > y;
+              if (phaseAnchor && boxContains) { ax = nx; ay = ny; sx = ow; break; }
+            }
+          }
+          for (let cdx = 0; cdx < ow; cdx++) {
+            for (let cdy = 0; cdy < oh; cdy++) st.setTile(ax + cdx, ay + cdy, 0);
+          }
+        } else {
           st.setTile(x, y, 0);
         }
       }
@@ -2019,6 +2101,15 @@ export class Game implements GameHooks {
     if (Math.hypot(p.cx - cx, p.cy - cy) < R * TILE + 16) p.damage(damage, cx, cy);
     this.spawnParticles(cx, cy, '#FFA040', 26, 4);
     this.sfxAt('roar', cx, cy); // 爆炸:按距离衰减
+    // 链式引爆（延后到本爆结算后，防爆心递归；上限防炸药墙死循环）
+    let chained = 0;
+    while (chain.length && chained < 32) {
+      const [ex, ey] = chain.pop()!;
+      if (st.get(ex, ey) !== TILE_BY_KEY['v_141_explosives']) continue;
+      st.setTile(ex, ey, 0);
+      chained++;
+      this.explodeAt(ex, ey, 500);
+    }
   }
 
   /** 桶三态(Player.cs ItemCheck_Buckets L28137 语义):
@@ -2123,7 +2214,9 @@ export class Game implements GameHooks {
       }
     }
     const style = Math.floor(minFY / 36);
-    for (const [cx, cy] of cells) this.breakTile(cx, cy);
+    // 直接逐格清除（不再回调 breakTile——那会落入 object 锚点分支清错位置；
+    // 瓦罐 frameY=0 在底行，与家具顶行相反）。瓦罐不掉自身（原版 SpawnThingsFromPot 只掉内容物）
+    for (const [cx, cy] of cells) st.setTile(cx, cy, 0);
     // CheckPot 音效（普通瓦罐 SoundID 13 = Shatter.wav）+ 陶瓷碎片粒子
     this.sfx.play('shatter');
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
@@ -2425,6 +2518,40 @@ export class Game implements GameHooks {
         '手持火把也能照亮周围，不用非得放置。',
         '想知道更多？去地下找找宝箱吧！',
       ];
+      if (npc.npcKey === 'old_man') {
+        // 守卫老人(原版 Lang.dialog + OldMan 交互):
+        // 白天只闲聊("你为什么还想和这副可怜的骨头说话?");夜晚出现「诅咒」选项召唤骷髅王
+        const oldManDay = [
+          '走开!这地牢的阴影无法在我活着的时候夺走我的灵魂!',
+          '你得让我一个人待着。我身中可怕的诅咒,因为我主人的意志就是我的意志。',
+          '你是怎么知道我——我的意思是,谢谢你的关心,不过我没事。我好得很。',
+          '为什么你还想和这副可怜的骨头说话?',
+          '我的主人不让别人进来。现在,在我变得丑恶之前快离开!',
+          '夜晚来临时再来找我吧……如果你胆子够大的话。',
+        ];
+        if (this.world.clock.isDay || this.world.flags.hardMode) {
+          npc.bubble = oldManDay[Math.floor(Math.random() * oldManDay.length)];
+          npc.bubbleT = 360;
+          npc.talkCooldown = 120;
+        } else if (this.boss) {
+          npc.bubble = '别来烦我!没看到天上有东西在飞吗?';
+          npc.bubbleT = 240;
+        } else {
+          // 夜晚:二次确认召唤骷髅王(原版对话框「诅咒」按钮)
+          if (this.tickCount - this.oldManCurseArm < 600) {
+            this.oldManCurseArm = -9999;
+            npc.dead = true; // 原版:召唤骷髅王时守卫老人消失(击败后转为裁缝)
+            this.cb.onToast('守卫老人发出一声凄厉的惨叫……');
+            this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
+          } else {
+            this.oldManCurseArm = this.tickCount;
+            npc.bubble = '你想要我释放诅咒,还是想见到我的主人?…再和我说一次话来确认。';
+            npc.bubbleT = 400;
+            npc.talkCooldown = 30;
+          }
+        }
+        return true;
+      }
       if (npc.npcKey === 'nurse') {
         // 护士:50 铜币治疗至满(原版 Nurse 治疗费随缺失血量;简化固定)
         if (npc.talkCooldown <= 0) {
@@ -2518,6 +2645,15 @@ export class Game implements GameHooks {
 
   enemies() {
     return this.entities.enemies;
+  }
+
+  /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile */
+  cutTile(x: number, y: number) {
+    const st = this.world.store;
+    if (!st.inBounds(x, y)) return;
+    const t = st.get(x, y);
+    if (t === POT_TILE) this.smashPot(x, y);
+    else if (TILE_CUT.has(t)) this.breakTile(x, y);
   }
 
   spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2): ItemDrop | null {
@@ -2710,7 +2846,7 @@ export class Game implements GameHooks {
     this.dmgNumbers = this.dmgNumbers.filter((d) => !d.label);
     this.dmgNumbers.push({
       x: this.player.cx, y: this.player.y - 8, vy: -0.7,
-      value: 0, crit: false, color: '#F0F0F0', life: 55, label: def.name,
+      value: 0, crit: false, color: '#F0F0F0', life: 55, label: Lang.itemNameByKey(def.key),
     });
   }
 
@@ -2749,7 +2885,7 @@ export class Game implements GameHooks {
         if (def) {
           this.dmgNumbers.push({
             x: this.player.cx, y: this.player.y - 6, vy: -0.9,
-            value: 0, crit: false, color: '#FFFFFF', life: 60, label: def.name,
+            value: 0, crit: false, color: '#FFFFFF', life: 60, label: Lang.itemNameByKey(def.key),
           } as DamageNumber & { label: string });
         }
         break; // 每次 refresh 只飘一个
@@ -2868,12 +3004,21 @@ export class Game implements GameHooks {
     if (this.boss) { this.cb.onToast('已有 Boss 在场'); return; }
     const side = Math.random() < 0.5 ? -1 : 1;
     const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
+    this.summonBossAtTx(key, tx);
+  }
+
+  /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王) */
+  private summonBossAtTx(key: string, tx: number): void {
+    if (this.boss) { this.cb.onToast('已有 Boss 在场'); return; }
+    const st = this.world.store;
+    tx = Math.max(2, Math.min(st.w - 3, tx));
     let ty = 10;
     for (; ty < this.world.h; ty++) {
-      if (this.world.store.type[this.world.store.idx(tx, ty)] !== 0) break;
+      if (st.type[st.idx(tx, ty)] !== 0) break;
     }
     const spawnY = Math.max(4, ty - 12) * TILE;
-    const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266 : -1;
+    const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
+      : key === 'skeletron_head' ? 35 : -1;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
@@ -2916,6 +3061,31 @@ export class Game implements GameHooks {
 
   /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。
    *  优先目标点自身，然后螺旋外扩到 24 格内就近安置 */
+  /** 传送前贴图就位门:目标区域 ±160 类型扫描 → 预载 → 再落位。
+   *  多数表已加载时扫描+命中检查 <10ms(无感);跨群系首传才真正等待加载 */
+  private async teleportWhenReady(tx: number, ty: number): Promise<void> {
+    const a = this.atlas;
+    if (a) {
+      const { tileSheets, wallIds } = this.collectSheetsAround(tx, ty, 160);
+      // 全部已就位 → 零延迟直传;有缺 → 提示并等待(通常 <1s)
+      const missing = [...tileSheets].some((id) => {
+        const m = a.vanilla.tiles[String(id)];
+        return m && !a.vimages.has(m.sheet);
+      }) || [...wallIds].some((id) => {
+        const m = a.vanilla.walls[String(id)];
+        return m && !a.vimages.has(m.sheet);
+      });
+      if (missing) this.cb.onToast('加载目标区域贴图…');
+      await a.preloadTileSheetsFor(tileSheets, wallIds);
+    }
+    if (this.teleportNear(tx, ty)) {
+      this._tpTarget = null;
+      this.renderer.tpMark = null;
+      this.renderer.fullMap.open = false;
+      this.cb.onToast('传送完成');
+    }
+  }
+
   private teleportNear(tx: number, ty: number): boolean {
     const st = this.world.store;
     const p = this.player;
@@ -3023,7 +3193,7 @@ export class Game implements GameHooks {
       this.entities.all(),
       this.particles, this.dmgNumbers,
       this.swing, hover,
-      this.boss ? { name: this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp } : null,
+      this.boss ? { name: this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) ?? this.boss.def.name : this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp } : null,
       this.input.mouseX, this.input.mouseY, this.input.mouseDown,
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
       this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）

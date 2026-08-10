@@ -1,30 +1,33 @@
 // 世界创建页（DOM 版，替代 VUI UIWorldCreationState）：
 // 世界名/种子 + 大小/难度/邪恶三组选项 + 彩蛋种子图标 + 多层预览图 + 描述。
 import { parseSeed, randomWorldName } from '../world/gen/SeedEasterEggs';
+import { Lang } from '../i18n/Lang';
 
 export interface WorldCreationFlow {
   onCreate(cfg: { name: string; seed: string; w: number; h: number; difficulty: number; evil: -1 | 0 | 1 }): void;
   onCancel(): void;
 }
 
-interface Opt { label: string; icon: string; desc: string; }
+// 选项 = 键引用(语言切换时重取,不留硬编码文案)。
+// label/desc 全用原版键(UI.*),邪恶三项短标签原版无现成键 → 自有键。
+interface Opt { labelKey: string; icon: string; descKey: string; }
 interface SizeOpt extends Opt { w: number; h: number; }
 
 const SIZES: SizeOpt[] = [
-  { label: '小', w: 4200, h: 1200, icon: 'UI_WorldCreation_IconSizeSmall', desc: '小世界：适合快速探索，生成最快。' },
-  { label: '中', w: 6400, h: 1800, icon: 'UI_WorldCreation_IconSizeMedium', desc: '中等世界：体验均衡。' },
-  { label: '大', w: 8400, h: 2400, icon: 'UI_WorldCreation_IconSizeLarge', desc: '大世界：广袤辽阔，探索耗时最长。' },
+  { labelKey: 'UI.WorldSizeSmall', w: 4200, h: 1200, icon: 'UI_WorldCreation_IconSizeSmall', descKey: 'UI.WorldDescriptionSizeSmall' },
+  { labelKey: 'UI.WorldSizeMedium', w: 6400, h: 1800, icon: 'UI_WorldCreation_IconSizeMedium', descKey: 'UI.WorldDescriptionSizeMedium' },
+  { labelKey: 'UI.WorldSizeLarge', w: 8400, h: 2400, icon: 'UI_WorldCreation_IconSizeLarge', descKey: 'UI.WorldDescriptionSizeLarge' },
 ];
 const DIFFS: Opt[] = [
-  { label: '经典', icon: 'UI_WorldCreation_IconDifficultyNormal', desc: '经典模式：标准体验。' },
-  { label: '专家', icon: 'UI_WorldCreation_IconDifficultyExpert', desc: '专家模式：更难的敌怪，更好的战利品。' },
-  { label: '大师', icon: 'UI_WorldCreation_IconDifficultyMaster', desc: '大师模式：为高玩准备的终极考验。' },
-  { label: '旅程', icon: 'UI_WorldCreation_IconDifficultyCreative', desc: '旅程模式：以自己的节奏研究和游玩。' },
+  { labelKey: 'UI.Normal', icon: 'UI_WorldCreation_IconDifficultyNormal', descKey: 'UI.WorldDescriptionNormal' },
+  { labelKey: 'GameUI.Expert', icon: 'UI_WorldCreation_IconDifficultyExpert', descKey: 'UI.WorldDescriptionExpert' },
+  { labelKey: 'UI.Master', icon: 'UI_WorldCreation_IconDifficultyMaster', descKey: 'UI.WorldDescriptionMaster' },
+  { labelKey: 'UI.Creative', icon: 'UI_WorldCreation_IconDifficultyCreative', descKey: 'UI.WorldDescriptionCreative' },
 ];
 const EVILS: Array<Opt & { value: -1 | 0 | 1 }> = [
-  { label: '随机', icon: 'UI_WorldCreation_IconEvilRandom', desc: '让命运决定世界的邪恶形态。', value: -1 },
-  { label: '腐化', icon: 'UI_WorldCreation_IconEvilCorruption', desc: '腐化之地：噬魂怪与诅咒之地。', value: 0 },
-  { label: '猩红', icon: 'UI_WorldCreation_IconEvilCrimson', desc: '猩红之地：血肉与恐怖的噩梦。', value: 1 },
+  { labelKey: 'Mods.SandboxWorld.WorldCreation.EvilRandom', icon: 'UI_WorldCreation_IconEvilRandom', descKey: 'UI.WorldDescriptionEvilRandom', value: -1 },
+  { labelKey: 'Mods.SandboxWorld.WorldCreation.EvilCorrupt', icon: 'UI_WorldCreation_IconEvilCorruption', descKey: 'UI.WorldDescriptionEvilCorrupt', value: 0 },
+  { labelKey: 'Mods.SandboxWorld.WorldCreation.EvilCrimson', icon: 'UI_WorldCreation_IconEvilCrimson', descKey: 'UI.WorldDescriptionEvilCrimson', value: 1 },
 ];
 
 const CSS = `
@@ -82,7 +85,9 @@ export class WorldCreationPanel {
   private preview: HTMLCanvasElement;
   private previewCtx: CanvasRenderingContext2D;
   private seedIcon: HTMLImageElement;
-  private sel = { size: 1, diff: 0, evil: 0 };
+  // 模块级:语言切换重建面板时恢复用户选择
+  private static lastSel = { size: 1, diff: 0, evil: 0 };
+  private sel = { ...WorldCreationPanel.lastSel };
 
   constructor(parent: HTMLElement, private flow: WorldCreationFlow) {
     if (!document.getElementById('sw-wc-style')) {
@@ -94,19 +99,19 @@ export class WorldCreationPanel {
     this.panel = document.createElement('div');
     this.panel.className = 'sw-wc-panel';
     this.panel.innerHTML = `
-      <div class="sw-wc-title">创建世界</div>
+      <div class="sw-wc-title">${Lang.text('LegacyMenu.47')}</div>
       <div class="sw-wc-body">
         <div class="sw-wc-main">
-          <div class="sw-wc-row"><span>世界名</span><input type="text" data-f="name" maxlength="27"><button class="sw-wc-rand" data-act="randname" title="随机名"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomName.png"></button></div>
+          <div class="sw-wc-row"><span>${Lang.text('UI.WorldCreationName')}</span><input type="text" data-f="name" maxlength="27"><button class="sw-wc-rand" data-act="randname" title="${Lang.text('Mods.SandboxWorld.WorldCreation.RandomName')}"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomName.png"></button></div>
           <div class="sw-wc-row"><span>种子</span><input type="text" data-f="seed" maxlength="40" placeholder="可选…"><button class="sw-wc-rand" data-act="randseed" title="随机种子"><img src="sprites/vanilla-ui/UI_WorldCreation_IconRandomSeed.png"></button><img class="sw-wc-seedicon" src="sprites/vanilla-ui/UI_WorldCreation_Seed_Normal.png"></div>
-          <div class="sw-wc-group"><div class="sw-wc-grouplabel">大小</div><div class="sw-wc-opts" data-g="size"></div></div>
-          <div class="sw-wc-group"><div class="sw-wc-grouplabel">难度</div><div class="sw-wc-opts" data-g="diff"></div></div>
-          <div class="sw-wc-group"><div class="sw-wc-grouplabel">邪恶群系</div><div class="sw-wc-opts" data-g="evil"></div></div>
+          <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('Mods.SandboxWorld.WorldCreation.Size')}</div><div class="sw-wc-opts" data-g="size"></div></div>
+          <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationDifficulty')}</div><div class="sw-wc-opts" data-g="diff"></div></div>
+          <div class="sw-wc-group"><div class="sw-wc-grouplabel">${Lang.text('UI.WorldCreationEvil')}</div><div class="sw-wc-opts" data-g="evil"></div></div>
           <div class="sw-wc-desc"></div>
         </div>
-        <div class="sw-wc-side"><canvas class="sw-wc-preview" width="120" height="120"></canvas></div>
+        <div class="sw-wc-side"><canvas class="sw-wc-preview" width="84" height="84"></canvas></div>
       </div>
-      <div class="sw-wc-footer"><button data-act="back">返回</button><button data-act="create" class="primary">创建</button></div>
+      <div class="sw-wc-footer"><button data-act="back">${Lang.text('Mods.SandboxWorld.WorldCreation.Back')}</button><button data-act="create" class="primary">${Lang.text('Mods.SandboxWorld.WorldCreation.Create')}</button></div>
     `;
     (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value = randomWorldName();
     this.desc = this.panel.querySelector('.sw-wc-desc')!;
@@ -133,7 +138,26 @@ export class WorldCreationPanel {
     this.panel.querySelector('[data-act=create]')!.addEventListener('click', () => this.submit());
     this.escHandler = (e: KeyboardEvent) => { if (e.code === 'Escape') this.close(flow.onCancel); };
     window.addEventListener('keydown', this.escHandler);
+    this.unsubLang = Lang.onChange(() => this.rebuild());
     parent.appendChild(this.panel);
+  }
+
+  private unsubLang: (() => void) | null = null;
+
+  /** 语言切换 → 重建面板(保留 sel/世界名/种子输入) */
+  private rebuild() {
+    const name = (this.panel.querySelector('[data-f=name]') as HTMLInputElement).value;
+    const seed = (this.panel.querySelector('[data-f=seed]') as HTMLInputElement).value;
+    WorldCreationPanel.lastSel = { ...this.sel };
+    const parent = this.panel.parentElement;
+    this.close(() => {});
+    if (parent) new WorldCreationPanel(parent, this.flow);
+    requestAnimationFrame(() => {
+      const p = document.querySelector('.sw-wc-panel');
+      if (!p) return;
+      (p.querySelector('[data-f=name]') as HTMLInputElement).value = name;
+      (p.querySelector('[data-f=seed]') as HTMLInputElement).value = seed;
+    });
   }
 
   private escHandler: ((e: KeyboardEvent) => void) | null = null;
@@ -143,9 +167,9 @@ export class WorldCreationPanel {
     opts.forEach((o, i) => {
       const b = document.createElement('div');
       b.className = 'sw-wc-opt';
-      b.innerHTML = `<img src="sprites/vanilla-ui/${o.icon}.png"><span>${o.label}</span>`;
+      b.innerHTML = `<img src="sprites/vanilla-ui/${o.icon}.png"><span>${Lang.text(o.labelKey)}</span>`;
       b.addEventListener('click', () => { this.sel[g] = i; this.refresh(); });
-      b.addEventListener('mouseenter', () => { this.desc.textContent = o.desc; });
+      b.addEventListener('mouseenter', () => { this.desc.textContent = Lang.text(o.descKey); });
       box.appendChild(b);
     });
   }
@@ -163,24 +187,38 @@ export class WorldCreationPanel {
     this.refreshSeedIcon();
   }
 
-  /** 多层预览图（UIWorldCreationPreview：地形剪影 + 难度/邪恶图标 + 边框） */
+  /** 多层预览图（UIWorldCreationPreview.cs 1:1：元素 84×84，
+   *  边框 (0,0)、内容层 (4,4)——76×76 恰好嵌在 84 边框的 4px 边内。
+   *  曾把 120×120 画布按原尺寸画 → 内容层只有 76²、边框 84²，图小框大） */
+  private previewImgs = new Map<string, HTMLImageElement>();
   private drawPreview() {
     const ctx = this.previewCtx;
-    ctx.clearRect(0, 0, 120, 120);
-    const layers = [
+    ctx.clearRect(0, 0, 84, 84);
+    const content = [
       ['UI_WorldCreation_PreviewSizeSmall', 'UI_WorldCreation_PreviewSizeMedium', 'UI_WorldCreation_PreviewSizeLarge'][this.sel.size],
+      // 此前误写 UI_WWorldCreation_*(双 W)→ 四个难度层 404,预览缺难度层像"错位"
       ['UI_WorldCreation_PreviewDifficultyNormal2', 'UI_WorldCreation_PreviewDifficultyExpert2', 'UI_WorldCreation_PreviewDifficultyMaster2', 'UI_WorldCreation_PreviewDifficultyCreative2'][this.sel.diff],
-      ['UI_WorldCreation_PreviewEvilRandom', 'UI_WorldCreation_PreviewEvilCorruption', 'UI_WorldCreation_PreviewEvilCrimson'][this.sel.evil],
-      'UI_WorldCreation_PreviewBorder',
+      ['UI_WWorldCreation_PreviewEvilRandom', 'UI_WWorldCreation_PreviewEvilCorruption', 'UI_WWorldCreation_PreviewEvilCrimson'][this.sel.evil],
     ];
-    // 同步绘制（贴图加载完毕后下一帧重画）
-    let pending = layers.length;
-    for (const key of layers) {
-      const img = new Image();
-      img.onload = () => { ctx.drawImage(img, 0, 0); };
-      img.src = `sprites/vanilla-ui/${key}.png`;
-      void pending--;
+    const border = 'UI_WorldCreation_PreviewBorder';
+    // 贴图缓存 + 全层重画（onload 乱序到达也不串层）
+    const draw = () => {
+      ctx.clearRect(0, 0, 84, 84);
+      for (const key of content) {
+        const im = this.previewImgs.get(key);
+        if (im?.complete && im.naturalWidth) ctx.drawImage(im, 4, 4);
+      }
+      const b = this.previewImgs.get(border);
+      if (b?.complete && b.naturalWidth) ctx.drawImage(b, 0, 0);
+    };
+    for (const key of [...content, border]) {
+      if (this.previewImgs.has(key)) continue;
+      const im = new Image();
+      im.onload = () => draw();
+      im.src = `sprites/vanilla-ui/${key}.png`;
+      this.previewImgs.set(key, im);
     }
+    draw();
   }
 
   private refreshSeedIcon() {
@@ -209,6 +247,7 @@ export class WorldCreationPanel {
 
   private close(fn: () => void) {
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
+    this.unsubLang?.();
     this.panel.remove();
     fn();
   }
