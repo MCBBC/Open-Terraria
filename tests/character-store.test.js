@@ -1,0 +1,80 @@
+// 角色存储 CRUD + Appearance 校验（node 环境需 stub localStorage）
+import { describe, it, expect, beforeEach } from 'vitest';
+const mem = new Map();
+globalThis.localStorage = {
+    getItem: (k) => mem.get(k) ?? null,
+    setItem: (k, v) => void mem.set(k, v),
+    removeItem: (k) => void mem.delete(k),
+    clear: () => mem.clear(),
+    key: (i) => [...mem.keys()][i] ?? null,
+    get length() { return mem.size; },
+};
+const { CharacterStore } = await import('../src/save/CharacterStore');
+const { validateAppearance, defaultAppearance, randomAppearance, MALE_VARIANTS, FEMALE_VARIANTS } = await import('../src/player/Appearance');
+describe('Appearance', () => {
+    it('默认值 = 原版色（Player.cs:199-205）', () => {
+        const a = defaultAppearance();
+        expect(a.hairColor).toEqual({ r: 215, g: 90, b: 55 });
+        expect(a.skinColor).toEqual({ r: 255, g: 125, b: 90 });
+        expect(a.shirtColor).toEqual({ r: 175, g: 165, b: 140 });
+        expect(a.undershirtColor).toEqual({ r: 160, g: 180, b: 215 });
+        expect(a.pantsColor).toEqual({ r: 255, g: 230, b: 175 });
+        expect(a.shoeColor).toEqual({ r: 160, g: 105, b: 60 });
+    });
+    it('校验：损坏数据补默认并钳制', () => {
+        const a = validateAppearance({ name: 'x'.repeat(50), hair: 9999, difficulty: 9, hairColor: { r: 300, g: -5, b: 'a' } });
+        expect(a.name.length).toBe(20);
+        expect(a.hair).toBe(227); // 钳到上限（1.4.5.6：0 基 0..227）
+        expect(a.difficulty).toBe(0);
+        expect(a.hairColor).toEqual({ r: 255, g: 0, b: 0 });
+        expect(validateAppearance(null)).toEqual(defaultAppearance());
+    });
+    it('随机外观落在合法范围', () => {
+        for (let i = 0; i < 20; i++) {
+            const a = randomAppearance();
+            expect(a.hair).toBeGreaterThanOrEqual(0); // 0 基
+            expect(a.hair).toBeLessThanOrEqual(227);
+            expect(MALE_VARIANTS.includes(a.skinVariant) || FEMALE_VARIANTS.includes(a.skinVariant)).toBe(true);
+        }
+    });
+});
+describe('CharacterStore', () => {
+    beforeEach(() => mem.clear());
+    it('创建/列表/读取', async () => {
+        const s = new CharacterStore();
+        const a = defaultAppearance('小明');
+        a.difficulty = 2;
+        const m = await s.create(a);
+        expect(m.name).toBe('小明');
+        expect(m.difficulty).toBe(2);
+        expect(s.list()).toHaveLength(1);
+        const got = await s.get(m.id);
+        expect(got?.name).toBe('小明');
+        expect(got?.difficulty).toBe(2);
+    });
+    it('id 单调递增（删除后不复用）', async () => {
+        const s = new CharacterStore();
+        const m1 = await s.create(defaultAppearance('a'));
+        const m2 = await s.create(defaultAppearance('b'));
+        expect(m2.id).toBeGreaterThan(m1.id);
+        await s.delete(m1.id);
+        const m3 = await s.create(defaultAppearance('c'));
+        expect(m3.id).toBeGreaterThan(m2.id);
+        expect(s.list().map((x) => x.id)).toEqual([m2.id, m3.id]);
+    });
+    it('复制带「副本」后缀', async () => {
+        const s = new CharacterStore();
+        const m = await s.create(defaultAppearance('abc'));
+        const c = await s.copy(m.id);
+        expect(c?.name).toBe('abc 副本');
+        expect(s.list()).toHaveLength(2);
+    });
+    it('重载后索引持久（localStorage 模拟）', async () => {
+        const s1 = new CharacterStore();
+        await s1.create(defaultAppearance('p1'));
+        const s2 = new CharacterStore();
+        await s2.ensureLoaded(); // list() 同步：先确保索引已载入
+        expect(s2.list()).toHaveLength(1);
+        expect(s2.list()[0].name).toBe('p1');
+    });
+});

@@ -75,11 +75,11 @@ export class TitleMenu {
         <img class="logo-night" src="${nightSrc}" alt="">
       </div>
       <div class="sw-title-btns">
-        <div class="sw-title-btn" data-act="sp">${t('Legacy.LegacyMenu.12', '单人游戏')}</div>
-        <div class="sw-title-btn" data-act="mp">${t('Legacy.LegacyMenu.13', '多人模式')}</div>
-        <div class="sw-title-btn" data-act="set">${t('Legacy.LegacyMenu.14', '设置')}</div>
+        <div class="sw-title-btn" data-act="sp">${t('LegacyMenu.12', '单人游戏')}</div>
+        <div class="sw-title-btn" data-act="mp">${t('LegacyMenu.13', '多人模式')}</div>
+        <div class="sw-title-btn" data-act="set">${t('LegacyMenu.14', '设置')}</div>
         <div class="sw-title-btn" data-act="credits">制作人员</div>
-        <div class="sw-title-btn" data-act="quit">${t('Legacy.LegacyMenu.15', '退出')}</div>
+        <div class="sw-title-btn" data-act="quit">${t('LegacyMenu.15', '退出')}</div>
       </div>
       <div class="sw-title-version">SandboxWorld v0.1.0</div>
     `;
@@ -97,19 +97,21 @@ export class TitleMenu {
     this.startLogoFade();
   }
 
-  /** LogoA/LogoB 昼夜交叉淡化（白天亮 Logo、夜晚发光层；随 menuTimeInfo 同步） */
+  /** LogoA/LogoB 昼夜交叉淡化（1456 Main.cs:47773-47799 一比一）：
+   *  驱动源是 dayTime 布尔（翻转即换向），积分速率 ±2/帧（60fps ≈ 120/s，
+   *  0↔255 全程约 2.1 秒线性渐变）；日层 LogoA、夜发光层 LogoB 互为消长。 */
   private startLogoFade() {
+    let logoA = 255; // 初始白天
+    let last = performance.now();
     const step = () => {
-      const { timeOfDay } = menuTimeInfo;
-      // 夜系数：午夜 0→1；0.20 日出淡出；0.72-0.80 日落淡入；昼为 0
-      let night: number;
-      if (timeOfDay < 0.20) night = 1 - timeOfDay / 0.20;
-      else if (timeOfDay > 0.80) night = Math.min(1, (timeOfDay - 0.80) / 0.05);
-      else if (timeOfDay >= 0.72) night = 1 - (timeOfDay - 0.72) / 0.08;
-      else night = 0;
-      night = Math.max(0, Math.min(1, night));
-      this.logoDay.style.opacity = String(1 - night * 0.85);
-      this.logoNight.style.opacity = String(night);
+      const now = performance.now();
+      const dt = Math.min(100, now - last);
+      last = now;
+      const frames = dt / (1000 / 60);
+      const isDay = menuTimeInfo.timeOfDay > 0.25 && menuTimeInfo.timeOfDay < 0.75;
+      logoA = Math.max(0, Math.min(255, logoA + (isDay ? 2 : -2) * frames));
+      this.logoDay.style.opacity = String(logoA / 255);
+      this.logoNight.style.opacity = String((255 - logoA) / 255);
       this.rafId = requestAnimationFrame(step);
     };
     this.rafId = requestAnimationFrame(step);

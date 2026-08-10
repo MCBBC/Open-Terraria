@@ -141,6 +141,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       g.player.hp = player.hp;
       g.player.x = player.x;
       g.player.y = player.y;
+      // 上限扩容进度（水晶之心/生命果/魔力水晶；旧档缺省 100/20/20）
+      if (player.baseMaxHp !== undefined) g.player.baseMaxHp = player.baseMaxHp;
+      if (player.baseMaxMana !== undefined) g.player.baseMaxMana = player.baseMaxMana;
+      if (player.mana !== undefined) g.player.mana = player.mana;
       g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
       g.player.inv.selected = player.selected;
     } catch (e) {

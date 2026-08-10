@@ -419,6 +419,11 @@ export class Game implements GameHooks {
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
+    // 懒加载晚到的新图块/墙表 → 全量标脏重烘焙:出生点子集预载后,远行遇到
+    // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正
+    if (this.atlas) {
+      this.atlas.onVImageLoaded = () => this.chunks.invalidateAll();
+    }
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
     this.wiring = new Wiring(w.store);
     this.wiring.worldSurface = w.groundLevel;
@@ -1031,6 +1036,36 @@ export class Game implements GameHooks {
         this.player.baseMaxHp += 20;
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
         this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#40E080');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef?.key === 'vi_109_mana_crystal') {
+      // 魔力水晶(Player.cs:44655:statManaMax<200 → +20 上限并回复)
+      if (this.player.baseMaxMana >= 200) {
+        this.cb.onToast('魔力上限已达到 200');
+      } else {
+        this.player.baseMaxMana += 20;
+        this.player.mana = Math.min(this.player.maxMana, this.player.mana + 20);
+        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#4080FF');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef?.key === 'vi_1291_life_fruit') {
+      // 生命果(Player.cs:44665:statLifeMax≥400 且 <500 → +5)
+      if (this.player.baseMaxHp < 400) {
+        this.cb.onToast('需要先用水晶之心把生命上限提升到 400');
+      } else if (this.player.baseMaxHp >= 500) {
+        this.cb.onToast('生命上限已达到 500');
+      } else {
+        this.player.baseMaxHp += 5;
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 5);
+        this.addDamageNumber(this.player.cx, this.player.y, 5, false, '#40E080');
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 30;
         this.sfx.play('drink');
@@ -2270,6 +2305,9 @@ export class Game implements GameHooks {
 
     // 原版 Spawner 1:1（VanillaSpawner.ts）：选点+选怪全部按 SpawnAnNPC 链
     if (!this.vanillaSpawner) this.vanillaSpawner = new VanillaSpawner(w);
+    // 原版 Spawner.SetSpawnFlags：地牢旗标取玩家 SceneMetrics（15 tick 刷新的 scene），
+    // downedBoss3（杀过骷髅王）决定地牢出 守卫/常规池
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron);
     // TrySpawnAnNPC L23：nearbyActiveNPCs >= maxSpawns 拒绝
     // （原版 nearbyActiveNPCs = 附近 NPC 的 npcSlots 加权和；我们的怪全部由 spawner 生成
     //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
@@ -2988,6 +3026,7 @@ export class Game implements GameHooks {
       this.boss ? { name: this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp } : null,
       this.input.mouseX, this.input.mouseY, this.input.mouseDown,
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
+      this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）
     );
   }
 

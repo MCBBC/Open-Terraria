@@ -16,6 +16,7 @@ import { VUI } from './vui/VUI';
 import { UITextures } from './vui/assets/UITextures';
 import { UIFont } from './vui/draw/UIFont';
 import { Lang } from './i18n/Lang';
+import { options } from './core/Options';
 import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
@@ -273,7 +274,10 @@ setInterval(() => {
 kvHas('sandboxworld.quicksave').then(async () => {
   await loadAssets();
   if (atlas) UITextures.setAtlas(atlas);
-  await Promise.all([UIFont.load(), Lang.load()]);
+  // options 先行(语言设置在 options 里),Lang.init 按 options.data.lang 加载语言包;
+  // mainFlow 内的 options.load() 幂等,此处已加载则直接返回
+  await options.load();
+  await Promise.all([UIFont.load(), Lang.init(options.data.lang)]);
   VUI.init(root);
   VUI.startLoop(); // 自愈帧循环（HMR 杀不死，看门狗 1s 内重启）
   flow = createFlow(root, atlas, ui, audio);

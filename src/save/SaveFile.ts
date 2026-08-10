@@ -86,6 +86,9 @@ export interface SaveData {
     hp: number; x: number; y: number;
     inventory: Array<{ id: number; stack: number } | null>;
     selected: number;
+    baseMaxHp?: number;   // 生命上限（水晶之心/生命果扩容；旧档缺省 100）
+    baseMaxMana?: number; // 魔力上限（魔力水晶扩容；旧档缺省 20）
+    mana?: number;        // 当前魔力
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
   flags: Record<string, boolean>;
@@ -153,6 +156,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     player: {
       hp: player.hp, x: player.x, y: player.y,
       inventory: player.inv.slots, selected: player.inv.selected,
+      baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
     },
     npcs: [],
     flags: world.flags,
@@ -166,7 +170,7 @@ export function loadSave(json: string): ReturnType<typeof loadSaveData> {
 
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
-export function loadSaveData(data: SaveData): { world: World; player: { hp: number; x: number; y: number; inventory: Array<{ id: number; stack: number } | null>; selected: number } } {
+export function loadSaveData(data: SaveData): { world: World; player: SaveData['player'] } {
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
   world.spawnX = data.header.spawn[0];
   world.spawnY = data.header.spawn[1];

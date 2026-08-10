@@ -59,7 +59,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
       { name: '洞穴', run: cavePass },
     ]),
     { name: '矿石', run: vanillaShinies },
-    { name: '液体', run: liquidPass },
+    { name: '液体', run: vanillaLakes },
     ...(useVanillaTerrain ? [
       // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
       // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
@@ -106,6 +106,7 @@ import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
+import { runLakesPass } from './vanilla/LakesPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
 import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -179,6 +180,13 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   world.lavaLine = gs.lavaLine;
 }
 
+function vanillaLakes({ store, rng }: GenCtx) {
+  // 原版 pass 31 Lakes（替换自研 liquidPass 洼地灌水/地下水池）
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runLakesPass(store, rng, gs);
+}
+
 function vanillaShinies({ store, rng }: GenCtx) {
   // 原版 pass 27 Shinies（替换自研 orePass）+ pass 36 Gems
   const gs = ctxGs[0];
@@ -238,6 +246,9 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
   runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
+  // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)
+  world.dungeonX = gs.dungeonLocation;
   world.dungeonY = gs.dungeonY || 0;            // 入口 Y（0=未知，使用处回退 groundLevel）
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
   runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
@@ -290,7 +301,6 @@ function vanillaHellHouses({ store, rng }: GenCtx) {
 function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runTreePass(store, rng, gs); // 原版 pass 82 Planting Trees（EpicTree 林区 + AddTrees 逐列）
   runSurfaceDecorPass(store, rng, gs);
 }
 
@@ -677,11 +687,23 @@ function liquidPass({ store, surface, rng }: GenCtx) {
 // ---------- 表面 ----------
 function surfacePass({ store, surface, rng, world }: GenCtx) {
   const { w } = store;
+  // 铺草（原版 pass 73 Spreading Grass 尾段 L8731-8755：每列首个实心格为泥土 → SpreadGrass）
+  // 旧实现用生成早期 surface[] 数组定位列顶——山坡/洞穴口露石露土全漏，树密度被卡死
+  for (let x = 10; x < w - 10; x++) {
+    for (let y = 0; y < world.groundLevel - 1; y++) {
+      const i = store.idx(x, y);
+      if (!store.flags[i]) continue;
+      if (store.type[i] === T.DIRT) store.setTileSilent(x, y, T.GRASS);
+      break; // 只处理首个实心格
+    }
+  }
+  // 原版 pass 82 Planting Trees（铺草之后、杂草之前——原版 73<82<86 顺序）
+  {
+    const gs = ctxGs[0];
+    if (gs) runTreePass(store, rng, gs);
+  }
   for (let x = 0; x < w; x++) {
     const sy = Math.floor(surface[x]);
-    if (store.get(x, sy) === T.DIRT) {
-      store.setTileSilent(x, sy, T.GRASS);
-    }
     // 装饰：草丛/花/蘑菇——放在草块上方空气格（sy 是首个实心行，装饰在 sy-1）
     // 帧为 Tiles_3 表的像素偏移（TEdit frames 数据）：草丛 6 变体 / 花 9 色 / 蘑菇 (144,0)
     if (sy - 1 >= 0 && !store.isActive(x, sy - 1) && store.isSolid(x, sy)) {

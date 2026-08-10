@@ -1,5 +1,5 @@
 // 世界生成 pass 名（WorldGen.ts 的 pass.name）→ LegacyWorldGen 条目 id。
-// 中文文案 = zh-Hans.Legacy.LegacyWorldGen.<id>；人工对齐原版各 pass 的 progress.Message 语义。
+// 中文文案 = zh-Hans.LegacyWorldGen.<id>；人工对齐原版各 pass 的 progress.Message 语义。
 export const worldgenProgressKey: Record<string, number> = {
   '原版地形': 0,    // 正在生成世界地形
   '地形': 0,

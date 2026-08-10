@@ -76,12 +76,16 @@ export function skySeed(timeOfDay: number, dayCount: number): [number, number, n
 }
 
 // ---- 全局闪烁驱动(火把动态时钟源,由引擎每 tick 推进) ----
-// 三态全部封装在一个小状态机里,等价原版 Main.DoUpdate_AnimateCursorColors(18064-18076)/
-// DoUpdate_AnimateTileGlows(18087-18101)/DoUpdate_AnimateDiscoRGB(19442-19502)。
+// 四态全部封装在一个小状态机里,等价原版 Main.CursorColor(51896-51905)+
+// DoUpdate_AnimateCursorColors(18064-18076)/DoUpdate_AnimateTileGlows(18087-18101)/
+// DoUpdate_AnimateDiscoRGB(19442-19502)。
 export class FlickerClock {
   /** mouseTextColor:190↔255 步进 1/帧(字节环绕) */
   mouseTextColor = 255;
   private mouseDir = -1;
+  /** cursorAlpha(Main.cs:51897-51904):0.6↔1 步进 0.015/帧,驱动光标/心/星呼吸 */
+  cursorAlpha = 1;
+  private cursorDir = -1;
   /** demonTorch:0↔1 步进 0.01/帧 */
   demonTorch = 0;
   private demonDir = 1;
@@ -89,7 +93,14 @@ export class FlickerClock {
   discoR = 255; discoG = 0; discoB = 0;
   private discoStyle = 0;
 
+  /** cursorScale(Main.cs:51905):= cursorAlpha*0.3 + 0.8,资源条 flag 心/星缩放脉冲源 */
+  get cursorScale(): number { return this.cursorAlpha * 0.3 + 0.8; }
+
   tick(): void {
+    this.cursorAlpha += this.cursorDir * 0.015;
+    if (this.cursorAlpha >= 1) { this.cursorAlpha = 1; this.cursorDir = -1; }
+    else if (this.cursorAlpha <= 0.6) { this.cursorAlpha = 0.6; this.cursorDir = 1; }
+
     this.mouseTextColor += this.mouseDir;
     if (this.mouseTextColor >= 255) this.mouseDir = -1;
     else if (this.mouseTextColor <= 190) this.mouseDir = 1;

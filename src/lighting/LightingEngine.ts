@@ -41,6 +41,9 @@ export class LightingEngine {
   private work = new LightMap();
   private active = new LightMap();
   private flicker = new FlickerClock();
+
+  /** 全局闪烁时钟(mouseTextColor/cursorScale 等),资源条 HUD 等渲染层读取 */
+  get clock(): FlickerClock { return this.flicker; }
   private scanner: TileLightScanner;
   private perFrame: PerFrameLight[] = [];
   private liqTick = 0;

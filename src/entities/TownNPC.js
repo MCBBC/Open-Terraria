@@ -1,0 +1,218 @@
+// 城镇 NPC：游走、夜间回家、对话气泡
+// 贴图 = 原版 Images/NPC_{id}（Terarria1456 素材条），帧语义按原版 FindFrame 城镇分支
+// （NPC.cs:69152+）：地面站定=帧0；腾空=帧1；行走帧 2..frames-extra-1 循环
+// （frameCounter += |vx|*2+1 每 tick，>6 推进一帧，越界回卷帧2）
+import { Entity } from './Entity';
+import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+import { moveAndCollide } from '../physics/TileCollision';
+import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
+export class TownNPC extends Entity {
+    constructor(key, x, y) {
+        super();
+        Object.defineProperty(this, "w", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 20
+        });
+        Object.defineProperty(this, "h", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 42
+        });
+        Object.defineProperty(this, "npcKey", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        }); // 'guide'
+        /** 原版 NPCID（TOWN_NPC_IDS；Renderer 经 atlas.vnpc 取 NPC_{id}.png 贴图条） */
+        Object.defineProperty(this, "vanillaId", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "facing", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 1
+        });
+        Object.defineProperty(this, "animT", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "frame", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        }); // 当前贴图帧（原版 frame.Y/帧高）
+        Object.defineProperty(this, "frameT", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        }); // 行走帧累加器（≈原版 frameCounter）
+        Object.defineProperty(this, "wanderT", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "home", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "talkCooldown", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "bubble", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        Object.defineProperty(this, "bubbleT", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
+        Object.defineProperty(this, "hp", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "maxHp", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "iframes", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        this.npcKey = key;
+        this.x = x;
+        this.y = y - this.h;
+        const town = TOWN_NPC_IDS[key];
+        this.vanillaId = town?.id ?? 22; // 未登记 key 兜底向导贴图
+        const v = VANILLA_NPCS[String(this.vanillaId)];
+        this.maxHp = this.hp = v?.lifeMax ?? 250;
+    }
+    /** 被陷阱弹幕等命中：dmg - defense*0.5（下限 1），8 tick 无敌帧；
+     *  死亡即移除（原版次日重生系统未移植，暂不重生） */
+    hurt(dmg, kbx, _kby, game) {
+        if (this.iframes > 0 || this.dead)
+            return false;
+        const def = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;
+        dmg = Math.max(1, Math.round(dmg - def * 0.5));
+        this.hp -= dmg;
+        this.iframes = 8;
+        game.addDamageNumber(this.cx, this.y, dmg, false, '#FFD060');
+        this.vx += kbx * 0.6;
+        if (this.hp <= 0) {
+            this.dead = true;
+            game.spawnParticles(this.cx, this.cy, '#C03030', 8, 2);
+            game.spawnParticles(this.cx, this.cy, '#8A1818', 4, 1.2);
+            game.playSfxFiles(['NPC_Killed_1'], 0.8);
+        }
+        else {
+            game.playSfxFiles(['NPC_Hit_1'], 0.6);
+        }
+        return true;
+    }
+    fixedUpdate(dt, game) {
+        this.animT++;
+        if (this.iframes > 0)
+            this.iframes--;
+        if (this.talkCooldown > 0)
+            this.talkCooldown--;
+        if (this.bubbleT > 0) {
+            this.bubbleT--;
+            if (this.bubbleT === 0)
+                this.bubble = null;
+        }
+        const world = game.world;
+        const player = game.player;
+        let wantDir = 0;
+        if (world.clock.isDay) {
+            // 白天家门口附近游走
+            this.wanderT--;
+            if (this.wanderT <= 0) {
+                this.wanderT = 90 + Math.random() * 180;
+                this.facing = Math.random() < 0.5 ? -1 : 1;
+                if (Math.random() < 0.35)
+                    this.facing = 0;
+            }
+            wantDir = this.facing;
+        }
+        else if (this.home) {
+            // 夜间回家
+            const dx = this.home.x * TILE + 8 - this.cx;
+            if (Math.abs(dx) > TILE)
+                wantDir = Math.sign(dx);
+        }
+        this.vx += wantDir * 0.06;
+        this.vx = Math.max(-0.8, Math.min(0.8, this.vx));
+        if (this.onGround && this.hitWall && wantDir !== 0)
+            this.vy = -6; // 跳台阶
+        this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+        moveAndCollide(this, world, this.vx, this.vy);
+        if (this.hitWall)
+            this.vx *= 0.5;
+        if (wantDir !== 0)
+            this.facing = wantDir;
+        // ---- 原版 FindFrame 城镇分支（NPC.cs:70172-70262）----
+        // 腾空=帧1；地面站定=帧0、计数清零；行走 frameCounter += |vx|*2+1，>6 推进，
+        // 帧区间 2..frames-extra-1（越界回卷帧2）
+        if (!this.onGround) {
+            this.frame = 1;
+            this.frameT = 0;
+        }
+        else if (Math.abs(this.vx) < 0.05) {
+            this.frame = 0;
+            this.frameT = 0;
+        }
+        else {
+            const total = VANILLA_NPCS[String(this.vanillaId)]?.frames ?? 1;
+            const extra = TOWN_NPC_IDS[this.npcKey]?.extra ?? 2;
+            this.frameT += Math.abs(this.vx) * 2 + 1;
+            if (this.frame < 2)
+                this.frame = 2;
+            if (this.frameT > 6) {
+                this.frameT = 0;
+                this.frame++;
+            }
+            if (this.frame >= total - extra)
+                this.frame = 2;
+        }
+        // 对话气泡：玩家靠近时偶发展示
+        if (player && !player.dead && this.talkCooldown === 0) {
+            const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+            if (d < TILE * 4 && Math.random() < 0.004) {
+                this.bubble = this.npcKey === 'guide'
+                    ? '你好！用镐挖矿，用工作台做工具。'
+                    : '……';
+                this.bubbleT = 240;
+                this.talkCooldown = 1200;
+            }
+        }
+    }
+    draw() { }
+}

@@ -5,7 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "l10n": "node scripts/build-l10n.mjs",
+    "build": "node scripts/build-l10n.mjs && tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
     "start": "vite build && vite preview"

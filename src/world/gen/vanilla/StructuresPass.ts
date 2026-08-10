@@ -22,31 +22,104 @@ const HELL_BRICK = TILE_BY_KEY['v_76_obsidian_brick'] ?? OBSIDIAN_BRICK;
 
 /** 浮空岛:数量 w×0.0008,避开中部 ±150(缩放)与其他岛 ±180 */
 export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w, h } = st;
-  const van = w / 4200;
-  const count = Math.max(1, Math.floor(w * 0.0008));
+  const { w } = st;
+  // 原版 pass 21（L5552-5637）：岛数 = w*0.0008，另加 skyLakes（1 + w>8000 + w>6000）。
+  // 前 num2 个 = CloudIsland，其余 = CloudLake；间距/中心避让为固定值（不缩放）
+  const islands = Math.floor(w * 0.0008);
+  let skyLakes = 1;
+  if (w > 8000) skyLakes++;
+  if (w > 6000) skyLakes++;
+  const total = islands + skyLakes;
   const placed: number[] = [];
-  for (let n = 0; n < count; n++) {
+  let lakeIdx = 0;
+  for (let n = 0; n < total; n++) {
     let x = 0, ok = false;
     for (let attempt = 0; attempt < 200 && !ok; attempt++) {
       x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
-      while (x > w / 2 - 150 * Math.max(0.4, van) && x < w / 2 + 150 * Math.max(0.4, van)) {
+      while (x > w / 2 - 150 && x < w / 2 + 150) {
         x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
       }
-      ok = placed.every((px) => Math.abs(px - x) >= 180 * Math.max(0.4, van));
+      ok = placed.every((px) => Math.abs(px - x) >= 180);
     }
-    // 该列地表
+    // 该列地表（原版从 y=200 起扫）
     let surf = 0;
     let found = false;
-    for (let y = Math.floor(200 * Math.max(0.3, van)); y < gs.worldSurface; y++) {
+    for (let y = 200; y < gs.worldSurface; y++) {
       if (st.flags[st.idx(x, y)]) { surf = y; found = true; break; }
     }
     if (!found) continue;
     const y = Math.min(rng.int(90, Math.max(91, surf - 100)), gs.worldSurfaceLow - 50);
-    cloudIsland(st, rng, x, y);
+    const isLake = lakeIdx >= islands;
+    if (isLake) cloudLake(st, rng, x, y);
+    else cloudIsland(st, rng, x, y);
     placed.push(x);
-    gs.floatingIslands.push({ x, y, style: 0, isLake: false });
+    gs.floatingIslands.push({ x, y, style: 0, isLake });
+    if (!isLake) lakeIdx++;
   }
+}
+
+/** 雨云凸包（CloudIsland L47484-47522 / CloudLake 尾段同构）：
+ *  自 bbox 左+Next(5) 起，步进 Next(r, 1.5r)；每步从岛底向上找实心面，
+ *  中心下移 Next(-3,4)，椭圆 r=Next(4,8)（纵压×2），1/4 雨云 196 其余云 189 */
+function rainBumps(st: TileStore, rng: RNG, bx0: number, bx1: number, by0: number, by1: number): void {
+  const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
+  const RAIN = TILE_BY_KEY['v_196_rain_cloud_block']!;
+  let r = rng.int(4, 7);
+  for (let x = bx0 + rng.int(0, 4); x < bx1; x += rng.int(r, Math.floor(r * 1.5))) {
+    let y = by1;
+    while (y > 1 && !st.flags[st.idx(x, y)]) y--;
+    const cy = y + rng.int(-3, 3);
+    r = rng.int(4, 7);
+    const mat = rng.int(0, 3) === 0 ? RAIN : CLOUD;
+    for (let dx = -r; dx <= r; dx++) {
+      for (let dy = -r; dy <= r; dy++) {
+        const tx = x + dx, ty = cy + dy;
+        if (ty <= by0 || !st.inBounds(tx, ty)) continue;
+        if (Math.hypot(dx, dy * 2) < r + rng.int(0, 1)) {
+          const ti = st.idx(tx, ty);
+          st.type[ti] = mat; st.flags[ti] = 1;
+        }
+      }
+    }
+  }
+}
+
+/** CloudLake（L47704）：天湖 = 纯云盘 + 雨云凸包（无土芯/无墙/无水池） */
+function cloudLake(st: TileStore, rng: RNG, i: number, j: number): void {
+  const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
+  let num1 = rng.int(100, 149);
+  let steps = rng.int(20, 29);
+  let px = i + 0.0, py = j + 0.0;
+  let vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  let vy = rng.int(-20, -11) * 0.02;
+  let bx0 = i, bx1 = i, by0 = j, by1 = j;
+  while (num1 > 0 && steps > 0) {
+    num1 -= rng.int(0, 3);
+    steps--;
+    const x0 = Math.max(0, Math.floor(px - num1 * 0.5)), x1 = Math.min(st.w, Math.floor(px + num1 * 0.5));
+    const y0 = Math.max(0, Math.floor(py - num1 * 0.5)), y1 = Math.min(st.h, Math.floor(py + num1 * 0.5));
+    const r = num1 * rng.int(80, 119) * 0.01;
+    let top = py + 1;
+    for (let x = x0; x < x1; x++) {
+      if (rng.next() < 0.5) top += rng.int(-1, 1);
+      top = Math.max(py, Math.min(py + 2, top));
+      for (let y = y0; y < y1; y++) {
+        if (y <= top || !st.inBounds(x, y)) continue;
+        if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
+          const ti = st.idx(x, y);
+          st.type[ti] = CLOUD; st.flags[ti] = 1;
+          bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x);
+          by0 = Math.min(by0, y); by1 = Math.max(by1, y);
+        }
+      }
+    }
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    vx = Math.max(-1, Math.min(1, vx));
+    vy = Math.max(-0.2, Math.min(0.2, vy));
+  }
+  if (bx1 > bx0) rainBumps(st, rng, bx0, bx1, by0, by1);
 }
 
 /** CloudIsland(L47397)七阶段移植(核心部分):扁平云盘(纵压3+顶面游走)→
@@ -88,6 +161,8 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
     vy = Math.max(-0.2, Math.min(0.2, vy));
   }
   if (bboxX1 <= bboxX0) return;
+  // ---- 阶段2:雨云凸包（L47484-47522）：岛底随机椭圆鼓包，1/4 为雨云 196 ----
+  rainBumps(st, rng, bboxX0, bboxX1, bboxY0, bboxY1);
   // ---- 阶段3:土芯(80-95,只把云换土)----
   let dR = rng.int(80, 94);
   let dSteps = rng.int(10, 14);

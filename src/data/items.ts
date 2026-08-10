@@ -245,6 +245,9 @@ item({ key: 'cooking_pot', name: '汤锅', tile: 'cooking_pot', maxStack: 99 });
 item({ key: 'clay_pot', name: '陶盆', tile: 'clay_pot', maxStack: 99 });
 item({ key: 'tombstone', name: '墓碑', tile: 'tombstone_v', maxStack: 99 });
 item({ key: 'life_crystal', name: '水晶之心', maxStack: 99, desc: '古老的生命结晶' });
+// 上限扩容三件套（Player.cs:44655-44700 ItemCheck_Use*；vi_ 前缀自动映射原版图标）
+item({ key: 'vi_109_mana_crystal', name: '魔力水晶', maxStack: 99, desc: '使用：魔力上限 +20（上限 200）' });
+item({ key: 'vi_1291_life_fruit', name: '生命果', maxStack: 99, desc: '生命上限 ≥400 时使用：+5（上限 500）' });
 item({ key: 'candle', name: '蜡烛', tile: 'candle', maxStack: 99 });
 item({ key: 'chandelier', name: '吊灯', tile: 'chandelier', maxStack: 99 });
 item({ key: 'lantern', name: '吊挂灯笼', tile: 'lantern', maxStack: 99 });

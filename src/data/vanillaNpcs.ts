@@ -26,6 +26,9 @@ export const vanillaItemKey = (() => {
       const snake = meta.key.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase();
       if (ITEM_BY_KEY[snake] != null) key = snake;
       else if (ITEM_BY_KEY[meta.key] != null) key = meta.key;
+      // vi_NNN 导入物品（items.ts 的全量原版物品命名）：vi_<id> 或 vi_<id>_<snake>
+      else if (ITEM_BY_KEY[`vi_${itemId}`] != null) key = `vi_${itemId}`;
+      else if (ITEM_BY_KEY[`vi_${itemId}_${snake}`] != null) key = `vi_${itemId}_${snake}`;
     }
     map.set(itemId, key);
     return key;

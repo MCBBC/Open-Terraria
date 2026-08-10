@@ -135,8 +135,9 @@ export class VanillaSpawner {
     this.downedBoss3 = downedSkeletron;
   }
 
-  /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射） */
-  private spawnNPC(x: number, y: number, netId: number, rng: RNG): Enemy | null {
+  /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射）；
+   *  ai0/ai1 = 原版 SpawnNPC 第 6/7 参（如攀爬者 101 的锚点格，NPC.cs:4040） */
+  private spawnNPC(x: number, y: number, netId: number, rng: RNG, ai0?: number, ai1?: number): Enemy | null {
     const map = NET_ID_MAP[netId];
     const baseId = map?.base ?? netId;
     const e = Enemy.fromVanilla(baseId, x, y);
@@ -158,6 +159,8 @@ export class VanillaSpawner {
     // SetDefaultsFromNetId 覆盖 color/alpha（L7633+：color = new Color(...) / alpha = N）
     if (ov?.color) e.colorRGBA = [ov.color[0], ov.color[1], ov.color[2], ov.color[3] ?? 255];
     if (ov?.alpha != null) e.spawnAlpha = ov.alpha;
+    // 植物族锚点（aiStyle 13：锚点格存 ai0/ai1）
+    if (ai0 !== undefined && ai1 !== undefined) { e.ai0 = ai0; e.ai1 = ai1; }
     e.id = this.world.store.w; // 占位，Game 侧会重编
     return e;
   }
@@ -472,9 +475,19 @@ export class VanillaSpawner {
       if (N(2)) return D(181);
       return D(173);  // 默认 Crimera
     }
-    // ---- 腐化（L4032-4074）----
-    if (this.ZoneCorrupt) {
-      if (N(3)) return D(101);
+    // ---- 腐化(NPC.cs:4032-4074 一比一)----
+    // 门禁 = 落脚面 tile:腐化草 23 / 黑檀石 25 / 黑沙 112 / 腐化冰 163 / 腐化丛林草 661,
+    // 或(黄沙 22 && ZoneCorrupt)。攀爬者 101 仅困难模式+岩石层下 1/3,锚点格随 spawn 传入
+    const corruptFloor = t === T.CORRUPT_GRASS || t === T.EBONSTONE || t === T.EBONSAND
+      || t === T.CORRUPT_ICE || ((t === T.SAND) && this.ZoneCorrupt);
+    const ugRock = this.spawnTileY >= this.world.rockLevel; // flag16
+    if (corruptFloor) {
+      if (hardMode && ugRock && N(40)) return D(83);       // World Feeder(蠕虫,1/40)
+      if (hardMode && ugRock && N(3)) {
+        return this.spawnNPC(x, y, 101, rng, this.spawnTileX, this.spawnTileY); // 攀爬者(锚点格)
+      }
+      if (hardMode && N(3)) return D(N(3) ? 121 : 81);     // 史莱姆法师/腐化史莱姆
+      if (hardMode && (N(2) || ugRock)) return D(94);      // 腐化史莱姆
       if (N(3)) return D(-11);   // 小噬魂怪
       if (N(3)) return D(-12);   // 大噬魂怪
       return D(6);               // 默认 Eater of Souls

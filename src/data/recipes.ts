@@ -109,4 +109,6 @@ export const RECIPES: Recipe[] = [
   { out: 'platinum_pickaxe', count: 1, station: 'anvil', inputs: [['platinum_bar', 8], ['wood', 3]] },
   { out: 'platinum_axe', count: 1, station: 'anvil', inputs: [['platinum_bar', 6], ['wood', 3]] },
   { out: 'platinum_sword', count: 1, station: 'anvil', inputs: [['platinum_bar', 7]] },
+  // 魔力水晶（原版：坠落之星×3 徒手合成）
+  { out: 'vi_109_mana_crystal', count: 1, station: 'hand', inputs: [['vi_75_fallen_star', 3]] },
 ];

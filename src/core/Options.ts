@@ -1,11 +1,13 @@
 // 设置项单例 + KvStore 持久化（M6）。变更通过监听器下发到 Audio/Sfx/UIScale。
 import { kvGet, kvSet } from '../save/KvStore';
+import { DEFAULT_LANG, normalizeLang } from '../i18n/GameCulture';
 
 export interface OptionsData {
   musicVol: number;   // 0..1
   sfxVol: number;     // 0..1
   uiScale: number;    // 0.75..1.5（作用于 UIScale.userScale）
   devMode: boolean;
+  lang: string;       // culture 名(如 zh-Hans);兼容旧数字 legacyId(对齐原版 config.json)
 }
 
 const KEY = 'sandboxworld.options';
@@ -16,6 +18,7 @@ export class OptionsStore {
     sfxVol: 1,
     uiScale: 1,
     devMode: false,
+    lang: DEFAULT_LANG,
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];
@@ -31,6 +34,8 @@ export class OptionsStore {
     try {
       const raw = await kvGet(KEY);
       if (raw) Object.assign(this.data, JSON.parse(raw));
+      // 语言归一化:旧数字 legacyId → culture 名;非法值落 en-US(对齐原版 LoadSettings)
+      this.data.lang = normalizeLang(this.data.lang);
     } catch { /* 无存档用默认 */ }
     this.emit();
   }

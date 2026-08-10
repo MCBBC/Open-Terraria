@@ -44,6 +44,30 @@ describe('自有存档格式', () => {
     expect(back.player.inventory[0]?.stack).toBe(77);
   });
 
+  it('上限扩容进度（水晶之心/生命果/魔力水晶）往返保持', () => {
+    const world = new World(64, 32, 42, '测试');
+    const player = new Player(100, 100, new Inventory());
+    player.baseMaxHp = 420;  // 400 水晶 + 4 颗生命果
+    player.baseMaxMana = 160; // 7 颗魔力水晶
+    player.mana = 88;
+    player.hp = 400;
+
+    const back = loadSave(saveGame(world, player, 0));
+    expect(back.player.baseMaxHp).toBe(420);
+    expect(back.player.baseMaxMana).toBe(160);
+    expect(back.player.mana).toBe(88);
+  });
+
+  it('旧档缺省上限字段不炸（100/20/20 由加载方兜底）', () => {
+    const data = JSON.parse(saveGame(new World(64, 32, 1, '测试'), new Player(0, 0, new Inventory()), 0));
+    delete data.player.baseMaxHp;
+    delete data.player.baseMaxMana;
+    delete data.player.mana;
+    const back = loadSave(JSON.stringify(data));
+    expect(back.player.baseMaxHp).toBeUndefined();
+    expect(back.player.baseMaxMana).toBeUndefined();
+  });
+
   it('存档体积可控', () => {
     const world = new World(4200, 1200, 1, '大世界');
     const st = world.store;

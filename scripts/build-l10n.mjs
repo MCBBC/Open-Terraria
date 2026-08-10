@@ -1,27 +1,175 @@
-// 合并 tools/l10n/zh-Hans* 为单文件 → game/public/l10n/zh-Hans.json
-// 原版 JSON 带尾逗号，容错解析（参考 tools/build-id-maps.mjs）。
-// 用法：node scripts/build-l10n.mjs
-import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
+// 构建语言包:tools/l10n/(原版 12 语言 × 7 分片)+ tools/l10n-custom/(自有文案)
+// → game/public/l10n/<culture>.json(扁平 { [category]: { [key]: value } })+ index.json
+// 并生成 game/src/i18n/idNames.generated.ts(id → 原版常量名,id-maps internal 字段)。
+//
+// 合并顺序(键级,后者覆盖前者,等价于原版 ReloadLanguage 的"英文兜底→目标语言"语义,
+// LanguageManager.cs:102):en 7 分片 → custom en → custom <target> → <target> 7 分片。
+// {$Key} 复制构建期展开;含 {? 的键剔除(见 l10n-merge.mjs)。
+//
+// 用法:node scripts/build-l10n.mjs [--cultures=zh-Hans,en-US] [--skip-idnames]
+import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseLenient, flattenDeep, mergePacks, expandCopyCommands, stripConditionMarkers } from './l10n-merge.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const L10N = join(here, '..', '..', 'tools', 'l10n');
-const OUT = join(here, '..', 'public', 'l10n', 'zh-Hans.json');
+const TOOLS = join(here, '..', '..', 'tools');
+const L10N = join(TOOLS, 'l10n');
+const CUSTOM = join(TOOLS, 'l10n-custom');
+const OUT_DIR = join(here, '..', 'public', 'l10n');
+const IDMAPS = join(TOOLS, 'id-maps');
+const IDNAMES_OUT = join(here, '..', 'src', 'i18n', 'idNames.generated.ts');
 
-function parseLenient(file) {
-  const raw = readFileSync(file, 'utf8').replace(/^﻿/, '');
-  return JSON.parse(raw.replace(/,\s*([}\]])/g, '$1'));
+// GameCulture.cs:67-121(枚举值 = LegacyId);displayNameKey = 各语言包 Language 类别自带本地化名
+export const CULTURES = [
+  { name: 'en-US', legacyId: 1, displayNameKey: 'Language.English' },
+  { name: 'de-DE', legacyId: 2, displayNameKey: 'Language.German' },
+  { name: 'it-IT', legacyId: 3, displayNameKey: 'Language.Italian' },
+  { name: 'fr-FR', legacyId: 4, displayNameKey: 'Language.French' },
+  { name: 'es-ES', legacyId: 5, displayNameKey: 'Language.Spanish' },
+  { name: 'ru-RU', legacyId: 6, displayNameKey: 'Language.Russian' },
+  { name: 'zh-Hans', legacyId: 7, displayNameKey: 'Language.Chinese' },
+  { name: 'pt-BR', legacyId: 8, displayNameKey: 'Language.Portuguese' },
+  { name: 'pl-PL', legacyId: 9, displayNameKey: 'Language.Polish' },
+  { name: 'ja-JP', legacyId: 10, displayNameKey: 'Language.Japanese' },
+  { name: 'ko-KR', legacyId: 11, displayNameKey: 'Language.Korean' },
+  { name: 'zh-Hant', legacyId: 12, displayNameKey: 'Language.ChineseTraditional' },
+];
+
+const SHARDS = ['', '.Game', '.Items', '.Legacy', '.NPCs', '.Projectiles', '.Town'];
+
+const args = process.argv.slice(2);
+const onlyArg = args.find((a) => a.startsWith('--cultures='));
+const skipIdnames = args.includes('--skip-idnames');
+const selected = onlyArg
+  ? onlyArg.slice('--cultures='.length).split(',').map((s) => s.trim()).filter(Boolean)
+  : CULTURES.map((c) => c.name);
+const selectedCultures = CULTURES.filter((c) => selected.includes(c.name));
+
+function readShards(culture) {
+  return SHARDS.map((s) => {
+    const f = join(L10N, `${culture}${s}.json`);
+    if (!existsSync(f)) throw new Error(`缺分片: ${f}`);
+    return parseLenient(readFileSync(f, 'utf8'));
+  });
 }
 
-const parts = ['zh-Hans.json', 'zh-Hans.Game.json', 'zh-Hans.Items.json', 'zh-Hans.Legacy.json', 'zh-Hans.NPCs.json'];
-const out = {};
-for (const p of parts) {
-  const name = p === 'zh-Hans.json' ? 'UI' : p.replace('zh-Hans.', '').replace('.json', '');
-  out[name] = parseLenient(join(L10N, p));
+function readCustom(culture) {
+  const f = join(CUSTOM, `${culture}.json`);
+  if (!existsSync(f)) return null;
+  return flattenDeep(parseLenient(readFileSync(f, 'utf8')));
 }
 
-mkdirSync(dirname(OUT), { recursive: true });
-writeFileSync(OUT, JSON.stringify(out));
-const keys = Object.fromEntries(Object.entries(out).map(([k, v]) => [k, Object.keys(v).length]));
-console.log('build-l10n:', JSON.stringify(keys), '→', OUT);
+mkdirSync(OUT_DIR, { recursive: true });
+
+// en 基线(7 分片 + custom en)。同语言分片间的键冲突才是真告警,
+// en→target 的"冲突"是翻译 overlay 的预期语义,不报告。
+function mergeShards(culture) {
+  const { out, conflicts } = mergePacks(readShards(culture));
+  return { out, conflicts: conflicts.map((c) => `[${culture}] ${c}`) };
+}
+const enMerged = mergeShards('en-US');
+const customEn = readCustom('en-US');
+const enPacks = customEn ? [enMerged.out, customEn] : [enMerged.out];
+const enBase = mergePacks(enPacks).out;
+
+const report = { conflicts: enMerged.conflicts, unresolved: [], stripped: [] };
+const index = [];
+
+for (const cult of selectedCultures) {
+  let table;
+  if (cult.name === 'en-US') {
+    table = enBase;
+  } else {
+    const targetMerged = mergeShards(cult.name);
+    report.conflicts.push(...targetMerged.conflicts);
+    const customTarget = readCustom(cult.name);
+    const packs = customTarget ? [enBase, customTarget, targetMerged.out] : [enBase, targetMerged.out];
+    table = mergePacks(packs).out;
+  }
+
+  const { unresolved } = expandCopyCommands(table);
+  report.unresolved.push(...unresolved.map((u) => `[${cult.name}] ${u}`));
+  report.stripped.push(...stripConditionMarkers(table).map((r) => `${cult.name}|${r}`));
+
+  const text = JSON.stringify(table);
+  writeFileSync(join(OUT_DIR, `${cult.name}.json`), text);
+  const bytes = Buffer.byteLength(text, 'utf8');
+  index.push({ name: cult.name, legacyId: cult.legacyId, displayNameKey: cult.displayNameKey, bytes });
+  const cats = Object.keys(table).length;
+  const keys = Object.values(table).reduce((n, e) => n + Object.keys(e).length, 0);
+  console.log(`build-l10n: ${cult.name} ${cats} 类别 ${keys} 键 ${(bytes / 1024).toFixed(0)}KB`);
+}
+
+index.sort((a, b) => a.legacyId - b.legacyId);
+writeFileSync(join(OUT_DIR, 'index.json'), JSON.stringify(index));
+
+if (report.conflicts.length) console.warn(`[l10n] 同语言分片键冲突 ${report.conflicts.length} 条:\n  ` + report.conflicts.slice(0, 20).join('\n  '));
+if (report.stripped.length) console.log(`[l10n] 剥离 {? 条件标记 ${report.stripped.length} 处(涉及类别: ${[...new Set(report.stripped.map((r) => r.replace(/^[^|]*\|/, '').split('.')[0]))].join(', ')})`);
+if (report.unresolved.length) console.warn(`[l10n] {$} 未解析引用 ${report.unresolved.length} 条(保留原样):\n  ` + [...new Set(report.unresolved)].slice(0, 20).join('\n  '));
+
+if (skipIdnames) {
+  console.log('build-l10n: done');
+} else {
+  genIdNames();
+  console.log('build-l10n: done (含 idNames.generated.ts)');
+}
+
+// ---- id → 原版常量名映射表生成 ----
+function genIdNames() {
+  const load = (f) => {
+    const p = join(IDMAPS, f);
+    if (!existsSync(p)) return {};
+    const d = JSON.parse(readFileSync(p, 'utf8'));
+    const out = {};
+    for (const [id, v] of Object.entries(d)) {
+      if (v && typeof v.internal === 'string' && v.internal) out[Number(id)] = v.internal;
+    }
+    return out;
+  };
+  const write = (name, map) => {
+    // 键一律引号化:projectiles 含负数 id(-65),裸写会是语法错误
+    const body = Object.entries(map).map(([id, n]) => `  '${id}': '${n}',`).join('\n');
+    return `export const ${name}: Record<number, string> = {\n${body}\n};\n`;
+  };
+
+  const items = load('items.json');
+  const npcs = load('npcs.json');
+  const buffs = load('buffs.json');
+  const projectiles = load('projectiles.json');
+  const tiles = load('tiles.json');
+  const walls = load('walls.json');
+
+  // ITEM_KEY_TO_ID:items.ts 的 key → vanilla id
+  // ① vi_<id>_<slug> 直接取 id;② snake_case key 反推(internal PascalCase→snake)匹配
+  const itemsSrc = readFileSync(join(here, '..', 'src', 'data', 'items.ts'), 'utf8');
+  const keys = [...itemsSrc.matchAll(/key: '([a-z0-9_]+)'/g)].map((m) => m[1]);
+  const internalSnake = new Map();
+  for (const n of Object.values(items)) {
+    internalSnake.set(n.replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase(), 0);
+  }
+  const itemKeyToId = {};
+  let matched = 0;
+  for (const k of keys) {
+    const vi = k.match(/^vi_(\d+)_/);
+    if (vi) {
+      const id = Number(vi[1]);
+      if (items[id]) { itemKeyToId[k] = id; matched++; }
+      continue;
+    }
+    const id = Number(Object.keys(items).find((id) => items[id].replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() === k));
+    if (id) { itemKeyToId[k] = id; matched++; }
+  }
+  console.log(`[idNames] ITEM_KEY_TO_ID 匹配率 ${matched}/${keys.length}`);
+
+  const header = `// 本文件由 scripts/build-l10n.mjs 生成,勿手改。来源:tools/id-maps/*.json(1.4.5.6)。\n`;
+  const body =
+    write('ITEM_NAME_BY_ID', items) +
+    write('NPC_NAME_BY_ID', npcs) +
+    write('BUFF_NAME_BY_ID', buffs) +
+    write('PROJECTILE_NAME_BY_ID', projectiles) +
+    write('TILE_NAME_BY_ID', tiles) +
+    write('WALL_NAME_BY_ID', walls) +
+    `export const ITEM_KEY_TO_ID: Record<string, number> = ${JSON.stringify(itemKeyToId)};\n`;
+  writeFileSync(IDNAMES_OUT, header + body);
+}

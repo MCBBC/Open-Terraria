@@ -25,12 +25,21 @@ export class VUI {
   private static wheel = 0;
   private static enabled = true;
 
-  /** 创建 ui-canvas 并接输入。z-index 10（低于 DevUI DOM） */
+  /** 创建 ui-canvas 并接输入。z-index 300（高于全部 DOM 面板：设置 25/tooltip 100/拖拽幽灵 200），
+   *  保证 Canvas 绘制的原版光标永远浮在最上层（本层 pointer-events:none，不影响 DOM 点击） */
   static init(parent: HTMLElement) {
     const c = document.createElement('canvas');
     c.id = 'ui-canvas';
-    c.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:10;cursor:none;';
+    c.style.cssText = 'position:absolute;inset:0;pointer-events:none;z-index:300;cursor:none;';
     parent.appendChild(c);
+    // 全屏隐藏系统光标（原版整窗由游戏画 Cursor_*）：各 DOM 面板自带 cursor:auto/pointer 会盖掉
+    // body 继承的 none，必须 !important 全树压制 —— 全程只留 Canvas 原版光标
+    if (!document.getElementById('sw-cursor-style')) {
+      const style = document.createElement('style');
+      style.id = 'sw-cursor-style';
+      style.textContent = '#game-root, #game-root * { cursor: none !important; }';
+      document.head.appendChild(style);
+    }
     VUI.canvas = c;
     VUI.batch = new UISpriteBatch(c.getContext('2d')!);
     VUI.resize();
@@ -101,14 +110,8 @@ export class VUI {
 
   static setState(state: UIState | null) {
     VUI.ui.setState(state);
-    VUI.syncCursor();
   }
   static goBack() { VUI.ui.goBack(); }
-
-  /** 系统光标可见性：VUI 有状态时全屏隐藏系统光标（只留 Canvas 绘制的原版光标） */
-  private static syncCursor() {
-    document.body.style.cursor = VUI.ui.current ? 'none' : '';
-  }
 
   /** 清空 UI 层画布（进游戏/退出菜单时调用，避免残留冻结帧叠加在游戏画面上） */
   static clear() {
@@ -116,7 +119,6 @@ export class VUI {
     const ctx = VUI.batch.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, VUI.canvas.width, VUI.canvas.height);
-    document.body.style.cursor = '';
   }
 
   /** 显示开关（游戏内全屏地图打开等场景可临时隐藏 UI 层输入） */
@@ -162,7 +164,7 @@ export class VUI {
     VUI.drawCursor();
   }
 
-  /** Canvas 光标（cursor:none + 绘制 Cursor_0） */
+  /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏） */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
     const tex = UITextures.get('UI_Cursor_0');

@@ -209,6 +209,7 @@ export class Enemy extends Entity {
         case 16: this.swimAI(game, p); break;                           // AI_016 游泳族（鲨鱼/食人鱼）
         case 18: this.jellyfishAI(game, p); break;                      // AI_018 水母族（脉冲游动）
         case 22: this.ghostAI(game, p); break;                          // AI_022 幽灵族（穿墙缓速）
+        case 13: this.plantAI(game, p); break;                          // AI_013 植物/攀爬者族（锚点伸展）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -513,6 +514,57 @@ export class Enemy extends Entity {
    *  近距(<150) 附加 0.007×期望速度制导（L17754-17757）；
    *  各轴以 accel 步进逼近期望速度（L17774-17789）。
    *  速度表（L17610-17617）：Eater of Souls(6)/Crimera(173) 4/0.02，默认 6/0.05 */
+  /** AI_013 植物/攀爬者族(NPC.cs:22604-22700 一比一):锚点格(ai0/ai1)固定,
+   *  朝玩家伸展(range 内钳制),逆向加速 ×1.5;锚点格被挖掉即死;300-450 tick 周期 range ×1.3。
+   *  攀爬者 101: range 175、accel 0.035、noTileCollide 幽灵位移(穿墙摆动)。 */
+  private plantAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    // 锚点格失活 → 死亡(原版 :22608-22620)
+    if (this.ai0 < 0 || this.ai1 < 0 || !st.inBounds(this.ai0, this.ai1)
+      || st.type[st.idx(this.ai0, this.ai1)] === 0) {
+      this.dead = true;
+      return;
+    }
+    let range = 175;  // Clinger num218(:22631);食人花 43 为 250
+    let accel = 0.035;
+    if (this.vanillaId === 43) range = 250;
+    // ai2:300-450 tick 周期 → range ×1.3(:22644-22653)
+    this.ai2 += 1;
+    if (this.ai2 > 300) {
+      range = Math.floor(range * 1.3);
+      if (this.ai2 > 450) this.ai2 = 0;
+    }
+    const ax = this.ai0 * 16 + 8, ay = this.ai1 * 16 + 8;
+    // 目标点 = 锚点 + 朝玩家偏移(钳制在 range 内,:22655-22665)
+    let ox = 0, oy = 0;
+    if (player) {
+      ox = player.cx - this.w / 2 - ax;
+      oy = player.cy - this.h / 2 - ay;
+      const d = Math.hypot(ox, oy);
+      if (d > range) { ox = ox / d * range; oy = oy / d * range; }
+    }
+    // 各轴逼近,逆向 ×1.5(:22666-22699)
+    const tx = ax + ox, ty = ay + oy;
+    if (this.x < tx) {
+      this.vx += accel;
+      if (this.vx < 0 && ox > 0) this.vx += accel * 1.5;
+    } else if (this.x > tx) {
+      this.vx -= accel;
+      if (this.vx > 0 && ox < 0) this.vx -= accel * 1.5;
+    }
+    if (this.y < ty) {
+      this.vy += accel;
+      if (this.vy < 0 && oy > 0) this.vy += accel * 1.5;
+    } else if (this.y > ty) {
+      this.vy -= accel;
+      if (this.vy > 0 && oy < 0) this.vy -= accel * 1.5;
+    }
+    this.facing = this.vx > 0 ? 1 : -1;
+    // noTileCollide:幽灵位移(原版 plants 不做 tile 碰撞)
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
   private swarmerAI(game: GameHooks, player: Player | null) {
     const isEater = this.vanillaId === 6 || this.vanillaId === 173 || this.vanillaId === 139;
     const maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
@@ -589,15 +641,17 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
-  /** AI_011 骷髅王头/地牢守卫（NPC.145.cs:21904+；type 68 守卫路径——骷髅王战斗分支不可达）：
+  /** AI_011 骷髅王头(35)/地牢守卫(68)（NPC.145.cs:21904+）：
    *  守卫恒 ai[1]=2（L21937-21941）：伤害/防御 9999（L22277-22278）、恒速 8 直线追击
    *  （L22282-22288）；玩家死亡/超 2000px → ai[1]=3 下坠脱场（L21925-21935, L22289-22296）。
-   *  noTileCollide 直移 */
+   *  骷髅王战斗状态机（旋转/冲撞/手 NPC）未移植：35 走 ai[1]==0 悬浮追击近似
+   *  （L22026-22091：悬浮玩家上方 250px、X 轴 0.05/±8 追击） */
   private skeletronHeadAI(game: GameHooks, player: Player | null) {
     if (this.ai0 === 0) this.ai0 = 1; // 初始化（L21910；68 无手 NPC 生成）
+    const isGuardian = this.vanillaId === 68;
     if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
       this.ai1 = 3;
-    } else if (this.ai1 !== 3) {
+    } else if (this.ai1 !== 3 && isGuardian) {
       this.ai1 = 2;
     }
     if (this.ai1 === 2) {
@@ -606,6 +660,26 @@ export class Enemy extends Entity {
       const d = Math.hypot(dx, dy) || 1;
       this.vx = (dx / d) * 8;
       this.vy = (dy / d) * 8;
+    } else if (!isGuardian && this.ai1 !== 3 && player) {
+      // 悬浮段（L22046-22091 简化）：Y 拉向玩家上方 250px，X 朝玩家加速 0.05/限 8
+      if (this.y > player.y - 250) {
+        if (this.vy > 0) this.vy *= 0.98;
+        this.vy -= 0.02;
+        if (this.vy > 2) this.vy = 2;
+      } else {
+        if (this.vy < 0) this.vy *= 0.98;
+        this.vy += 0.02;
+        if (this.vy < -2) this.vy = -2;
+      }
+      if (this.cx > player.cx) {
+        if (this.vx > 0) this.vx *= 0.98;
+        this.vx -= 0.05;
+        if (this.vx > 8) this.vx = 8;
+      } else {
+        if (this.vx < 0) this.vx *= 0.98;
+        this.vx += 0.05;
+        if (this.vx < -8) this.vx = -8;
+      }
     } else {
       this.vy += 0.1;
       if (this.vy < 0) this.vy *= 0.95;

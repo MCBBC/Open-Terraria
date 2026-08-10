@@ -1,0 +1,240 @@
+// 光照引擎(Terarria1456 Terraria.Graphics.Light/LightingEngine.cs 一比一)。
+// 4 状态轮转(MinimapUpdate→ExportMetrics→Scan→Blur),每 tick 推进一态;
+// dirty(tile 改动/区域移动/手持光)→ 同 tick 快进整个周期(原版传送双 LightTiles 技巧);
+// liquidDirty → 同快进但 3 tick 节流(20Hz)。
+// 替换原 BFS 引擎(备份见 docs/backup/LightingEngine.legacy.bak.ts)。
+import { TILE } from '../core/constants';
+import { AREA_PADDING, GLOBAL_BRIGHTNESS, NON_VISIBLE_PADDING } from './lightTables';
+import { FlickerClock } from './SkyColor';
+import { LightMap } from './LightMap';
+import { TileLightScanner } from './TileLightScanner';
+var State;
+(function (State) {
+    State[State["MinimapUpdate"] = 0] = "MinimapUpdate";
+    State[State["ExportMetrics"] = 1] = "ExportMetrics";
+    State[State["Scan"] = 2] = "Scan";
+    State[State["Blur"] = 3] = "Blur";
+})(State || (State = {}));
+export class LightingEngine {
+    /** 动态点光 API(原版 Lighting.AddLight;0-1 RGB)——每周期消费后清空 */
+    addLight(x, y, r, g, b) {
+        this.perFrame.push({ x, y, r, g, b });
+        this.dirty = true;
+    }
+    constructor(world) {
+        Object.defineProperty(this, "world", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        // ---- 公共面(与 Game.ts/Renderer.ts 契约,勿改) ----
+        Object.defineProperty(this, "rx", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "ry", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "rw", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "rh", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        Object.defineProperty(this, "r", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Uint8Array(0)
+        });
+        Object.defineProperty(this, "g", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Uint8Array(0)
+        });
+        Object.defineProperty(this, "b", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new Uint8Array(0)
+        });
+        Object.defineProperty(this, "dirty", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: true
+        });
+        Object.defineProperty(this, "liquidDirty", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: false
+        });
+        Object.defineProperty(this, "heldLight", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: null
+        });
+        // ---- 内部 ----
+        Object.defineProperty(this, "state", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: State.MinimapUpdate
+        });
+        Object.defineProperty(this, "work", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new LightMap()
+        });
+        Object.defineProperty(this, "active", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new LightMap()
+        });
+        Object.defineProperty(this, "flicker", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: new FlickerClock()
+        });
+        Object.defineProperty(this, "scanner", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: void 0
+        });
+        Object.defineProperty(this, "perFrame", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: []
+        });
+        Object.defineProperty(this, "liqTick", {
+            enumerable: true,
+            configurable: true,
+            writable: true,
+            value: 0
+        });
+        this.world = world;
+        this.scanner = new TileLightScanner(this.flicker);
+        world.store.onTileChanged(() => { this.dirty = true; });
+        world.store.onLiquidChanged(() => { this.liquidDirty = true; });
+    }
+    /**
+     * 区域 = 相机视口 ± AREA_PADDING(原版 GetAreaToLight 边界 1..2 + ProcessScan 膨胀 28 合并)。
+     * camCX/camCY 为像素;viewW/viewH 为 tile 数(Game 现有调用约定)。
+     */
+    ensureRegion(camCX, camCY, viewW, viewH) {
+        const st = this.world.store;
+        const x0 = Math.max(0, Math.floor(camCX / TILE) - Math.ceil(viewW / 2) - 1 - AREA_PADDING);
+        const y0 = Math.max(0, Math.floor(camCY / TILE) - Math.ceil(viewH / 2) - 1 - AREA_PADDING);
+        const x1 = Math.min(st.w - 1, Math.floor(camCX / TILE) + Math.ceil(viewW / 2) + 2 + AREA_PADDING);
+        const y1 = Math.min(st.h - 1, Math.floor(camCY / TILE) + Math.ceil(viewH / 2) + 2 + AREA_PADDING);
+        const rw = x1 - x0 + 1, rh = y1 - y0 + 1;
+        if (rw !== this.rw || rh !== this.rh || x0 !== this.rx || y0 !== this.ry) {
+            // 原点只在重算时原子移动(防光影相对世界平移)
+            this.rx = x0;
+            this.ry = y0;
+            if (rw !== this.rw || rh !== this.rh) {
+                this.rw = rw;
+                this.rh = rh;
+                this.r = new Uint8Array(rw * rh);
+                this.g = new Uint8Array(rw * rh);
+                this.b = new Uint8Array(rw * rh);
+            }
+            this.dirty = true;
+        }
+    }
+    /** 每帧调用。dayFactor 参数弃用(天空色改由 clock 内部推导;旧调用方签名兼容)。 */
+    compute(_dayFactor) {
+        if (this.rw === 0)
+            return;
+        this.flicker.tick();
+        if (this.dirty) {
+            this.runFullCycle();
+            return;
+        }
+        if (this.liquidDirty) {
+            this.liqTick++;
+            if (this.liqTick % 3 !== 0)
+                return; // 20Hz 节流
+            this.runFullCycle();
+            return;
+        }
+        // 空闲:每 tick 一态(完整周期 4 tick,原版 4 帧节奏)
+        this.step();
+    }
+    /** 快进:同 tick 完成 Scan→Blur→Present(状态回 0) */
+    runFullCycle() {
+        this.dirty = false;
+        this.liquidDirty = false;
+        this.liqTick = 0;
+        this.processScan();
+        this.processBlurAndPresent();
+        this.state = State.MinimapUpdate;
+    }
+    step() {
+        switch (this.state) {
+            case State.MinimapUpdate: // 空槽(小地图导出未移植;保留维持 4 tick 周期)
+            case State.ExportMetrics: // 空槽(SceneMetrics 在 VanillaSpawner 独立实现)
+                break;
+            case State.Scan:
+                this.processScan();
+                break;
+            case State.Blur:
+                this.processBlurAndPresent();
+                break;
+        }
+        this.state = (this.state + 1) % 4;
+    }
+    processScan() {
+        const w = this.world;
+        this.work.setSize(this.rw, this.rh);
+        this.work.nonVisiblePadding = Math.min(NON_VISIBLE_PADDING, (Math.min(this.rw, this.rh) - 1) >> 1);
+        // 手持火把 ×0.5(Player.cs:44413 语义;默认火把色)
+        const perFrame = this.perFrame;
+        if (this.heldLight)
+            perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: 0.5, g: 0.475, b: 0.4 });
+        this.scanner.exportTo(w, this.work, this.rx, this.ry, perFrame);
+        perFrame.length = 0;
+    }
+    processBlurAndPresent() {
+        this.work.blur();
+        // Present(LightingEngine.cs:131-135):交换双缓冲 + 导出 ×1.2 到公共面
+        const tmp = this.active;
+        this.active = this.work;
+        this.work = tmp;
+        const outR = this.r, outG = this.g, outB = this.b;
+        const ar = this.active.r, ag = this.active.g, ab = this.active.b;
+        const scale = GLOBAL_BRIGHTNESS * 255;
+        for (let i = 0; i < outR.length; i++) {
+            outR[i] = Math.min(255, Math.round(ar[i] * scale));
+            outG[i] = Math.min(255, Math.round(ag[i] * scale));
+            outB[i] = Math.min(255, Math.round(ab[i] * scale));
+        }
+    }
+    /** 取某 tile 光照(区域外返回 0;原版 GetColor 区域外语义) */
+    lightAt(tx, ty, _dayFactor = 0) {
+        if (tx < this.rx || ty < this.ry || tx >= this.rx + this.rw || ty >= this.ry + this.rh)
+            return [0, 0, 0];
+        const i = (ty - this.ry) * this.rw + (tx - this.rx);
+        return [this.r[i], this.g[i], this.b[i]];
+    }
+}

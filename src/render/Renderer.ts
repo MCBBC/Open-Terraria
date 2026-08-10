@@ -10,6 +10,8 @@ import { atlasIconForKey, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
+import { VanillaResourceBars } from './ResourceBars';
+import type { FlickerClock } from '../lighting/SkyColor';
 
 /** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
  *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表 */
@@ -192,6 +194,8 @@ export class Renderer {
   waterfalls = new WaterfallRenderer();
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
+  /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
+  resourceBars = new VanillaResourceBars();
   scene: SceneFlags | null = null;
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
@@ -287,6 +291,7 @@ export class Renderer {
     boss: { name: string; hp: number; maxHp: number } | null,
     mouseX = 0, mouseY = 0, mouseDown = false,
     mineProgress = 0,
+    flicker: FlickerClock | null = null,
   ) {
     this._mouseX = mouseX;
     this._mouseY = mouseY;
@@ -467,8 +472,8 @@ export class Renderer {
     // 10. Boss 血条
     if (boss) this.drawBossBar(ctx, viewW, boss);
 
-    // 11. HP 显示
-    this.drawHp(ctx, player);
+    // 11. 生命/魔力资源条（原版 ClassicPlayerResourcesDisplaySet：右上红心排 + 右缘魔力星）
+    this.resourceBars.draw(ctx, player, viewW, flicker);
   }
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
@@ -1273,8 +1278,10 @@ export class Renderer {
     if (!this.minimap) return;
     this.minimap.flushDirty();
     const size = 240;                 // 放大
-    const pad = 12;
-    const ox = ctx.canvas.width - size - pad, oy = pad;
+    // 原版锚点（Main.cs:54696-54706 UpdateMinimapAnchors + 54944-54949，MapScale=1）：
+    // miniMapX = screenWidth - (52+240) = 屏宽-292，miniMapY = 90
+    // —— 让位右上角生命/魔力资源条（心行 y≤80、星列 x≈屏宽-25）
+    const ox = ctx.canvas.width - size - 52, oy = 90;
     const viewTilesW = 220, viewTilesH = Math.floor(220 * world.h / world.w);
     const px = player.cx / TILE, py = player.cy / TILE;
     const sx = Math.max(0, Math.min(world.w - viewTilesW, Math.floor(px - viewTilesW / 2)));
@@ -1629,63 +1636,4 @@ export class Renderer {
     ctx.fillText(`${boss.name}  ${Math.ceil(boss.hp)} / ${boss.maxHp}`, viewW / 2, y + 15);
   }
 
-  /** 像素心：5×4 模板放大（s=4）+ 黑色描边；fill 0-1 为填充比例 */
-  private drawPixelHeart(ctx: CanvasRenderingContext2D, x: number, y: number, fill: number) {
-    const s = 4;
-    const inHeart = (r: number, c: number) =>
-      (r === 0 && (c === 1 || c === 3)) || r === 1 || (r === 2 && c >= 1 && c <= 3) || (r === 3 && c === 2);
-    // 描边：8 方向偏移画黑色底
-    ctx.fillStyle = '#000';
-    const outline = (ox: number, oy: number) => {
-      for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) {
-        if (inHeart(r, c)) ctx.fillRect(x + c * s + ox, y + r * s + oy, s, s);
-      }
-    };
-    outline(-1, 0); outline(1, 0); outline(0, -1); outline(0, 1);
-    outline(-1, -1); outline(1, -1); outline(-1, 1); outline(1, 1);
-    // 空心底
-    ctx.fillStyle = '#4A2830';
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) if (inHeart(r, c)) ctx.fillRect(x + c * s, y + r * s, s, s);
-    if (fill <= 0) return;
-    // 按比例填充（从左往右裁剪）
-    ctx.save();
-    ctx.beginPath();
-    ctx.rect(x, y, 5 * s * Math.min(1, fill), 4 * s);
-    ctx.clip();
-    ctx.fillStyle = '#E83048';
-    for (let r = 0; r < 4; r++) for (let c = 0; c < 5; c++) if (inHeart(r, c)) ctx.fillRect(x + c * s, y + r * s, s, s);
-    ctx.fillStyle = '#FF8090';
-    ctx.fillRect(x + s, y + s, s, s);
-    ctx.restore();
-  }
-
-  private drawHp(ctx: CanvasRenderingContext2D, p: Player) {
-    // 左上角 6 颗像素心平分 maxHp，每颗按百分比填充
-    const hearts = 6;
-    const per = p.maxHp / hearts;
-    const s = 4, wHeart = 5 * s, gap = 7;
-    // 自然回血中：当前正在恢复的那颗心带呼吸动效（渐显渐隐 + 微放大缩小）
-    const regenActive = p.sinceHurt > 300 && p.hp > 0 && p.hp < p.maxHp;
-    const activeIdx = regenActive ? Math.min(hearts - 1, Math.floor(p.hp / per)) : -1;
-    const t = performance.now() * 0.004;
-    for (let i = 0; i < hearts; i++) {
-      const fill = Math.max(0, Math.min(1, (p.hp - i * per) / per));
-      const hx = 14 + i * (wHeart + gap), hy = 14;
-      if (i === activeIdx && fill > 0 && fill < 1) {
-        // 呼吸：0→1→0 缓动驱动 alpha 与缩放
-        const br = 0.5 + 0.5 * Math.sin(t * 2.4);      // 呼吸相位
-        const alpha = 0.72 + 0.28 * br;
-        const k = 1 + 0.09 * br;
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        ctx.translate(hx + wHeart / 2, hy + 2 * s);
-        ctx.scale(k, k);
-        ctx.translate(-(hx + wHeart / 2), -(hy + 2 * s));
-        this.drawPixelHeart(ctx, hx, hy, fill);
-        ctx.restore();
-      } else {
-        this.drawPixelHeart(ctx, hx, hy, fill);
-      }
-    }
-  }
 }
