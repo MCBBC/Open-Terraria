@@ -63,13 +63,15 @@ export class VanillaWallTiler {
   constructor(private atlas: SpriteAtlas | null) {}
 
   private wallImg(wallId: number): HTMLImageElement | null {
-    let img = this.imgCache.get(wallId);
-    if (img === undefined) {
-      const m = this.atlas ? this.atlas.vanilla.walls[String(wallId)] : null;
-      img = m && this.atlas ? this.atlas.ensureVImage(m.sheet) ?? null : null;
-      this.imgCache.set(wallId, img);
-    }
-    return img;
+    // ★ 只缓存命中：懒加载未就绪时 ensureVImage 返回 null，若把 null 也缓存，
+    //   图片晚到后 onVImageLoaded→invalidateAll 重烘焙也永远查到 null → 永久色块回退
+    //   （与 VanillaLiquidRenderer null-texCache / PaperDoll 同款缓存投毒）
+    const cached = this.imgCache.get(wallId);
+    if (cached) return cached;
+    const m = this.atlas ? this.atlas.vanilla.walls[String(wallId)] : null;
+    const img = m && this.atlas ? this.atlas.ensureVImage(m.sheet) : null;
+    if (img) this.imgCache.set(wallId, img);
+    return img ?? null;
   }
 
   /** 邻居判定（TEdit HasWallNeighbor）：wall>0 任意 id 都算，或截断墙方块。

@@ -122,7 +122,17 @@ export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
 
 const TOWN_EXTRA_BY_ID = new Map(Object.values(TOWN_NPC_IDS).map((t) => [t.id, t.extra]));
 
-/** npc id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */
+/** NPC id → 头像贴图索引（原版 NPC.cs:7489 TypeToDefaultHeadIndex 全表——
+ *  head 索引 ≠ NPC id！旗帜头像 NPC_Head_{headIndex}） */
+export const TOWN_NPC_HEAD_INDEX: Record<number, number> = {
+  17: 2, 18: 3, 19: 6, 20: 5, 22: 1, 38: 4, 54: 7, 107: 9, 108: 10, 124: 8,
+  142: 11, 160: 12, 178: 13, 207: 14, 208: 15, 209: 16, 227: 17, 228: 18, 229: 19,
+  353: 20, 368: 21, 369: 22, 441: 23, 550: 24, 588: 25, 633: 26, 663: 45,
+  637: 27, 638: 33, 656: 39, 670: 46, 678: 47, 679: 48, 680: 49, 681: 50,
+  682: 51, 683: 52, 684: 53,
+};
+
+/** NPC id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */
 export function townExtraFrames(id: number): number {
   return TOWN_EXTRA_BY_ID.get(id) ?? 2;
 }

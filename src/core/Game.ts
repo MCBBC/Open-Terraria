@@ -2499,6 +2499,16 @@ export class Game implements GameHooks {
       const ti = st.idx(tx, ty);
       st.setTile(tx, ty, tileId, st.frameX[ti] + 18, st.frameY[ti]);
     }
+    // 椅子(15)朝向同款（Player.cs:40193 PlaceThing_Tiles_PlaceIt_SpinChairs）：
+    // direction==1 → 上下两格 frameX 各 += 18（1×2 两行都要）
+    if (def.vanilla?.sheet === 15 && this.player.facing === 1) {
+      for (let dy2 = 0; dy2 < oh; dy2++) {
+        const py = ty + dy2;
+        if (!st.inBounds(tx, py)) continue;
+        const ti = st.idx(tx, py);
+        st.setTile(tx, py, tileId, st.frameX[ti] + 18, st.frameY[ti]);
+      }
+    }
     // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
     if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
     this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -3741,7 +3751,8 @@ export class Game implements GameHooks {
     this.dialogNpc = npc;
     npc.talkCooldown = 30;
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
-    const name = npc.givenName ? `${npc.givenName} ${typeName}` : typeName;
+    // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
+    const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
     const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }> = [];
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
@@ -4013,7 +4024,7 @@ export class Game implements GameHooks {
       const inst = this.entities.npcs.find(
         (n) => n instanceof TownNPC && !n.dead && (n as TownNPC).npcKey === key) as TownNPC | undefined;
       const base = Lang.npcName(TOWN_NPC_IDS[key]?.id ?? 0) ?? key;
-      return inst?.givenName ? `${inst.givenName} ${base}` : base;
+      return inst?.givenName ? Lang.text('Game.NPCTitle', inst.givenName, base) : base;
     };
     return s
       .replace(/\{PlayerName\}/g, this.player.appearance?.name || '泰拉瑞亚')

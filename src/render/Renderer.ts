@@ -49,7 +49,7 @@ const HOLD_STYLE_ITEMS = new Set([
 ]);
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
-import { townExtraFrames } from '../data/vanillaNpcs';
+import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -830,11 +830,14 @@ export class Renderer {
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
       if (r) {
-        const flying = !!e.vanilla?.noGravity;
+        const flying = !!e.vanilla?.noGravity; void flying; // 中心锚后地面/飞行统一,仅保留语义注释
         // 原版 NPC.scale（SetDefaults base × netID scale）——作用于碰撞盒与渲染
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
         ctx.save();
-        ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
+        // 锚点:原版 DrawNPC 默认分支(Main.cs:23635-23638)帧中心==碰撞盒中心——
+        // 地面型曾用底锚(精灵底=盒底),NPC 帧底部普遍有 ~2px 透明边距,
+        // 视觉脚悬空 2px("浮空"感);中心锚由美术边距自然补偿,与原版一致
+        ctx.translate(e.cx, e.cy);
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
@@ -852,9 +855,9 @@ export class Renderer {
         // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
         // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
         // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
-        let anchorY = flying ? -r.sh / 2 : -r.sh;
-        if (e.vanillaId === 4) anchorY += frameIdx < 3 ? 23 : 30;
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
+        const anchorY = -r.sh / 2; // 中心锚(地面/飞行统一,原版默认分支语义)
+        const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
@@ -863,7 +866,8 @@ export class Renderer {
           // 普通 drawImage 会把染色 RGB 再乘 alpha（蓝色糊成灰绿）——改为两步：
           // ① 原始精灵 destination-out 按 colorA 削弱底下内容 ② lighter 全量加染色精灵
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
-          const anchorY = flying ? -r.sh / 2 : -r.sh;
+          const anchorY = -r.sh / 2 + eocOff; // 与基础层同锚(中心锚+EoC 修正)——
+          // 曾残留旧底锚条件,基础/染色两层错位 → 史莱姆"彩色+灰影"双画
           ctx.globalCompositeOperation = 'destination-out';
           ctx.globalAlpha = e.colorRGBA[3] / 255;
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
@@ -1116,8 +1120,9 @@ export class Renderer {
       const by = (cy + 1) * 16 + 18 + dup * 26;         // num9=18（平台 -8 略）+ 重复偏移
       ctx.drawImage(cloth.img, cloth.sx + fx, cloth.sy + fy, 16, 20,
         bx - 8, by - 10, 16, 20);
-      // 头像叠画（原版 NpcHead，fit 24）
-      const head = this.atlas.vmisc(`vanilla/NPC_Head_${n.vanillaId}.png`);
+      // 头像叠画（原版 TownNPCProfiles/TypeToDefaultHeadIndex NPC.cs:7489——head 索引≠NPC id）
+      const headIdx = TOWN_NPC_HEAD_INDEX[n.vanillaId];
+      const head = headIdx != null ? this.atlas.vmisc(`vanilla/NPC_Head_${headIdx}.png`) : null;
       if (head) {
         const hs = Math.min(1, 24 / Math.max(head.sw, head.sh));
         const hw = head.sw * hs, hh = head.sh * hs;
@@ -1144,7 +1149,10 @@ export class Renderer {
       if (this._mouseX >= 0) {
         const [mwx, mwy] = cam.screenToWorld(this._mouseX, this._mouseY);
         if (mwx >= bx - rectW / 2 && mwx <= bx + rectW / 2 && mwy >= by - rectH / 2 && mwy <= by + rectH / 2) {
-          const label = n.givenName || Lang.npcName(n.vanillaId) || n.npcKey;
+          // FullName 语义（Lang.cs:416 GetNPCHouseBannerText → NPC.FullName:6657）：
+          //  有个人名 → Game.NPCTitle（zh "{1}{0}"=类型名+个人名）；无 → 类型名
+          const typeName = Lang.npcName(n.vanillaId) ?? n.npcKey;
+          const label = n.givenName ? Lang.text('Game.NPCTitle', n.givenName, typeName) : typeName;
           ctx.font = '12px "Fusion Pixel 12px", sans-serif';
           const tw = ctx.measureText(label).width;
           ctx.fillStyle = 'rgba(20,16,28,0.85)';
@@ -1167,10 +1175,12 @@ export class Renderer {
       const r = this.atlas.vnpc(n.vanillaId, n.frame);
       if (r) {
         ctx.save();
-        ctx.translate(n.cx, n.y + n.h); // 脚底中心
+        // 中心锚(原版 DrawNPC 默认分支):帧底 ~2px 透明边距由中心锚自然补偿,
+        // 底锚会让 NPC 视觉悬空 2px
+        ctx.translate(n.cx, n.cy);
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh, r.sw, r.sh);
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
         ctx.filter = 'none';
         ctx.restore();
         return;
