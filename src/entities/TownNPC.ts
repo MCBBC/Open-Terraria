@@ -8,6 +8,7 @@ import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
+import { newNpcName } from '../i18n/RandomText';
 
 export interface NpcHome { x: number; y: number; }
 

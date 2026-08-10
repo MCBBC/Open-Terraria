@@ -2670,7 +2670,7 @@ export class Game implements GameHooks {
         }
         return true;
       }
-      npc.bubble = tips[Math.floor(Math.random() * tips.length)];
+      npc.bubble = (npc.givenName ? `${npc.givenName}：` : '') + tips[Math.floor(Math.random() * tips.length)];
       npc.bubbleT = 360;
       npc.talkCooldown = 600;
       return true;
