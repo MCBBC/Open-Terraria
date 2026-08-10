@@ -1,15 +1,29 @@
-// Buff 系统（移植自 Maples 的 Buff 三段生命周期，改为幂等属性聚合）
-// 数值来源：Assets/Scripts/Buff/impl/*.cs 与 Potions/*.asset
-// 名称/描述走原版 l10n(M8):BuffName.<Internal> + 自有 Mods.SandboxWorld.Buff.* 描述
+// Buff 系统（1.4.5.6 原版框架语义移植：Player.cs AddBuff / UpdateBuffs）
+//  - AddBuff 合并规则（AddBuff_TryUpdatingExistingBuffTime L5138+）：同类 buff 时间
+//    取 max——续期不缩短（蜂蜜浸入每 tick AddBuff(48,1800) 因此天然成立：浸着恒 30s，
+//    离开后从 30s 倒计时自然消退）。
+//  - 效果聚合按 UpdateBuffs L9640+ 逐 case，数值一律取 1456：
+//      Regeneration(2): lifeRegen += 4（=2 HP/s）
+//      Swiftness(3): moveSpeed += 0.25
+//      Ironskin(5): statDefense += 8
+//      Thorns(14): thorns = 1 → 反弹接触伤害全额（cap 1000，StrikeNPC 侧 L30940-30944）
+//      PotionSickness(21): 封锁治疗药水
+//      Honey(48): lifeRegenTime += 2、lifeRegen += 2（=1 HP/s）；lifeRegen<0 时 +4 对冲
+//      （debuff 系统未移植，对冲分支暂缺）；授予来源 = 浸蜜（Player.cs:27436
+//      AddBuff(48,1800)）/ 蜂蜜史莱姆接触（:30904）/ 蜂窝饰品受击（:37905 AddBuff(48,300)）
+//      Campfire(87)：原版为 SceneMetrics.HasCampfire 光环 lifeRegen++（:18990）——
+//      本仓库沿用 Game 每 20tick 扫描写入的持续小时长 buff 表达
+// 名称/描述走原版 l10n：BuffName.<Internal> + 自有 Mods.SandboxWorld.Buff.* 描述
 import { Lang } from '../i18n/Lang';
 
 export enum BuffType {
-  Agility = 0,    // 敏捷：移速 +25%（180s）→ Swiftness(3)
-  Ironskin = 1,   // 铁皮：防御 +6（180s）→ Ironskin(5)
+  Agility = 0,    // 敏捷：移速 +25% → Swiftness(3)
+  Ironskin = 1,   // 铁皮：防御 +8 → Ironskin(5)
   Resistance = 2, // 耐药性：立即回 80 HP，期间禁用治疗药水（60s）→ PotionSickness(21)
-  Thorns = 3,     // 荆棘：受击反弹 2 伤害（180s）→ Thorns(14)
-  Regen = 4,      // 恢复：每 5 秒 +10 HP（30s）→ Regeneration(2)
+  Thorns = 3,     // 荆棘：反弹接触伤害全额（cap 1000）→ Thorns(14)
+  Regen = 4,      // 恢复：2 HP/s → Regeneration(2)
   Campfire = 5,   // 篝火：范围光环(由附近篝火/心灯实体驱动,Game 每帧续期) → Campfire(87)
+  Honey = 6,      // 蜂蜜：1 HP/s（浸蜜授予，30s）→ Honey(48)
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -19,6 +33,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Resistance]: { vanillaBuff: 21, descKey: 'Mods.SandboxWorld.Buff.Resistance.Desc', fallbackName: '耐药性' },
   [BuffType.Thorns]: { vanillaBuff: 14, descKey: 'Mods.SandboxWorld.Buff.Thorns.Desc', fallbackName: '荆棘' },
   [BuffType.Regen]: { vanillaBuff: 2, descKey: 'Mods.SandboxWorld.Buff.Regen.Desc', fallbackName: '恢复' },
+  [BuffType.Honey]: { vanillaBuff: 48, descKey: 'Mods.SandboxWorld.Buff.Honey.Desc', fallbackName: '蜂蜜' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -31,18 +46,24 @@ export function buffDesc(t: BuffType): string {
   return Lang.text(BUFF_DEFS[t].descKey);
 }
 
+/** HP/s 汇总表（UpdateBuffs lifeRegen 项换算：lifeRegen N = N/2 HP/s） */
+const HP_PER_SEC: Partial<Record<BuffType, number>> = {
+  [BuffType.Regen]: 2,   // lifeRegen+4
+  [BuffType.Honey]: 1,   // lifeRegen+2
+};
+
 export class BuffState {
-  active = new Map<BuffType, number>(); // 剩余秒
-  regenAccum = 0;
+  active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
   /** 心灯(lifeRegen+2 = 1 HP/s,Player.cs:12247):Game 扫描写入 0/1 */
   lanternHeal = 0;
-  /** 重置为满时长（叠加 = 刷新，效果幂等） */
+  /** AddBuff 语义（Player.cs:5138-5150）：同类取 max 不缩短——浸入类 buff 可每帧无脑续期 */
   apply(type: BuffType, durationSec: number) {
-    this.active.set(type, durationSec);
+    const cur = this.active.get(type);
+    if (cur === undefined || cur < durationSec) this.active.set(type, durationSec);
   }
   has(type: BuffType): boolean {
     return this.active.has(type);
@@ -58,15 +79,11 @@ export class BuffState {
       if (left <= 0) this.active.delete(t);
       else this.active.set(t, left);
     }
-    if (this.active.has(BuffType.Regen)) {
-      this.regenAccum += dt;
-      if (this.regenAccum >= 5) {
-        this.regenAccum -= 5;
-        heal += 10;
-      }
-    }
+    // 定额 HP/s buff（Regeneration 2 HP/s / Honey 1 HP/s）
+    heal += this.rateAccum(BuffType.Regen, 2, dt);
+    heal += this.rateAccum(BuffType.Honey, 1, dt);
     if (this.active.has(BuffType.Campfire)) {
-      // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:12244-12245/12310-12324)→ 每 2 秒 1 HP
+      // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:18990/12244-12245)→ 每 2 秒 1 HP
       this.campfireAccum += dt;
       if (this.campfireAccum >= 2) {
         this.campfireAccum -= 2;
@@ -82,12 +99,22 @@ export class BuffState {
     }
     return heal;
   }
+  /** 定额回复 buff 的独立累加器（Map 存每 buff 的秒余数） */
+  private rateLeft = new Map<BuffType, number>();
+  private rateAccum(t: BuffType, hpPerSec: number, dt: number): number {
+    if (!this.active.has(t)) { this.rateLeft.delete(t); return 0; }
+    let left = (this.rateLeft.get(t) ?? 0) + hpPerSec * dt;
+    let heal = 0;
+    while (left >= 1) { left -= 1; heal += 1; }
+    this.rateLeft.set(t, left);
+    return heal;
+  }
   // ---- 属性聚合（幂等读取，不做副作用写入）----
   get moveSpeedMult(): number {
-    return this.active.has(BuffType.Agility) ? 1.25 : 1;
+    return this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
   }
   get defenseBonus(): number {
-    return this.active.has(BuffType.Ironskin) ? 6 : 0;
+    return this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
   }
   get healthBonus(): number {
     return this.active.has(BuffType.Resistance) ? 80 : 0;

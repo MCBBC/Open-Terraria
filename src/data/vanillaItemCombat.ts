@@ -91,8 +91,8 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base };
     return null;
   }
-  // 纯近战（剑等：melee 且非 noMelee）
-  if (c.melee && !c.noMelee) return { kind: 'melee', ...base };
+  // 纯近战（剑等：melee 且非 noMelee；无 shootSpeed 语义）
+  if (c.melee && !c.noMelee) return { kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime };
   return null;
 }
 

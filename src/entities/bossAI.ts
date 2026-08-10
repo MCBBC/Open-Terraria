@@ -11,7 +11,7 @@ import { Arrow } from './Arrow';
 const addProj = (game: GameHooks, p: MagicProj) => {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(p, 'projectiles');
 };
-const addEnemy = (game: GameHooks, e: Enemy) => {
+export const addEnemy = (game: GameHooks, e: Enemy) => {
   const em = (game as unknown as { entities?: { nextId?: number; add?: (en: unknown, b: string) => void } }).entities;
   if (em?.nextId !== undefined) e.id = em.nextId++;
   em?.add?.(e, 'enemies');
@@ -107,7 +107,7 @@ let enemyCtor: (typeof import('./Enemy'))['Enemy'] | null = null;
 /** Enemy 构造注入(Enemy.ts import 时回填,避免循环依赖) */
 export function bindEnemyCtor(c: (typeof import('./Enemy'))['Enemy']) { enemyCtor = c; }
 
-function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null {
+export function spawnPart(game: GameHooks, src: Enemy, id: number): Enemy | null {
   if (!enemyCtor) return null;
   const p = enemyCtor.fromVanilla(id, src.cx, src.cy);
   if (!p) return null;
@@ -246,20 +246,20 @@ export function creeperAI(e: Enemy, game: GameHooks, player: Player | null) {
 // 经典模式参数 1:1;专家/大师/FTW 分支仅注释保留。
 
 /** 原版速度逼近(L26539-26670 雏形):朝目标速度单轴步进,符号翻转时双倍步进 */
-function accelTo(v: number, target: number, a: number): number {
+export function accelTo(v: number, target: number, a: number): number {
   if (v < target) { v += a; if (v < 0 && target > 0) v += a; }
   else if (v > target) { v -= a; if (v > 0 && target < 0) v -= a; }
   return v;
 }
 /** 朝 (tx,ty) 以速度 spd/加速度 acc 追赶(vanilla numXXX = spd/dist 归一后 accelTo) */
-function seek(e: Enemy, tx: number, ty: number, spd: number, acc: number): void {
+export function seek(e: Enemy, tx: number, ty: number, spd: number, acc: number): void {
   const dx = tx - e.cx, dy = ty - e.cy;
   const d = Math.hypot(dx, dy) || 1;
   e.vx = accelTo(e.vx, (dx / d) * spd, acc);
   e.vy = accelTo(e.vy, (dy / d) * spd, acc);
 }
 /** 直线视线(原版 Collision.CanHit 近似:8px 采样无实心块) */
-function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1: number): boolean {
+export function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1: number): boolean {
   const st = game.world.store;
   const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 8));
   for (let i = 1; i < steps; i++) {
@@ -270,7 +270,7 @@ function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1: numbe
   return true;
 }
 /** Boss 弹幕:直飞(grav 0)+ 原版 Projectile_N 贴图 */
-function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300): void {
+export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
     new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1 }), 'projectiles');
 }
@@ -761,7 +761,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
 }
 
 /** 原版"逼近目标速度"舵(:28161-28192 锯/激光共用):目标 = dir*spd,0.97 阻尼 ±0.05 步进 */
-function seekSteer(e: Enemy, target: { cx: number; cy: number }, spd: number, acc: number): void {
+export function seekSteer(e: Enemy, target: { cx: number; cy: number }, spd: number, acc: number): void {
   const dx = target.cx - e.cx, dy = target.cy - e.cy;
   const d = Math.hypot(dx, dy) || 1;
   const tx = (dx / d) * spd, ty = (dy / d) * spd;
@@ -771,7 +771,7 @@ function seekSteer(e: Enemy, target: { cx: number; cy: number }, spd: number, ac
   if (e.vy < ty) { if (e.vy < 0) e.vy *= 0.97; e.vy += acc; }
 }
 /** 同上但 X/Y 不同步进(钳/炮悬停态,:28817-28848/:29052-29083),0.9 阻尼 */
-function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX: number, accY: number): void {
+export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX: number, accY: number): void {
   const dx = tx0 - e.cx, dy = ty0 - e.cy;
   const d = Math.hypot(dx, dy) || 1;
   const tx = (dx / d) * spd, ty = (dy / d) * spd;
@@ -889,13 +889,13 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
 }
 
 /** 生成蠕虫段链(Enemy.spawnWormChain 的外部包装;Destroyer 用 135/136) */
-function enemySpawnChain(head: Enemy, count: number): Enemy[] {
+export function enemySpawnChain(head: Enemy, count: number): Enemy[] {
   const Ctor = enemyCtor;
   if (!Ctor) return [];
   return Ctor.spawnWormChain(head, count);
 }
 /** 头驱动段链收缩跟随(原版 :50374-50414,linkDist 可配) */
-function driveChain(head: Enemy, linkDist: number): void {
+export function driveChain(head: Enemy, linkDist: number): void {
   for (let s = head.wormNext; s; s = s.wormNext) {
     const fx = s.wormFollow!;
     const dxC = fx.cx - s.cx;

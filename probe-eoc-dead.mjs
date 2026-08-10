@@ -8,6 +8,7 @@ const b = await puppeteer.launch({
 });
 const p = await b.newPage();
 p.on('pageerror', e => console.log('ERR:', String(e).slice(0, 200)));
+p.on('framenavigated', f => { if (f === p.mainFrame()) console.log('NAV ->', f.url()); });
 await p.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await p.waitForFunction(() => window.__swGame && window.__swGame.liquid, { timeout: 600000 });
 await new Promise(r => setTimeout(r, 1500));

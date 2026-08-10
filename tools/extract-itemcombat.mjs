@@ -22,6 +22,8 @@ const bodies = [
   methodBody('public void SetDefaults1(int type)'),
   methodBody('public void SetDefaults2(int type)'),
   methodBody('public void SetDefaults3(int type)'),
+  methodBody('public void SetDefaults4(int type)'),
+  methodBody('public void SetDefaults5(int type)'),
 ];
 
 // ---- switch-case 块拆分 ----
@@ -30,12 +32,46 @@ const bodies = [
 //     相邻 case 标签之间只有空白/注释则并入同组，共享体赋给组内全部 id；
 //  ② 块内嵌套 `switch (type)`（贯穿组内按 id 二次覆盖 damage/knockBack/shoot 等）——
 //     嵌套 case 块的深度 1（相对嵌套 switch）赋值按其自身 id 合并进全局表
+// 注意：case 标签过滤——嵌套 switch 内部的 `case N:` 不算外层组（否则其块会覆盖
+// 同 id 组首的 groupShared 共享体，悠悠球 3262 曾被内层 case 覆盖成 damage/shoot 小记录）
+function switchSpans(body) {
+  const spans = [];
+  const re = /\bswitch\s*\(/g;
+  let m;
+  while ((m = re.exec(body))) {
+    const open = body.indexOf('{', m.index);
+    if (open < 0) continue;
+    let depth = 0, close = open;
+    for (let i = open; i < body.length; i++) {
+      if (body[i] === '{') depth++;
+      else if (body[i] === '}') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    // 关键字处花括号深度（方法体语句 = 0 → 顶层 switch；case 块内 = ≥1 → 嵌套）
+    let d0 = 0;
+    for (let i = 0; i < m.index; i++) {
+      if (body[i] === '{') d0++;
+      else if (body[i] === '}') d0--;
+    }
+    spans.push({ start: m.index, open, close, depth: d0 });
+  }
+  return spans;
+}
 function parseSwitch(body) {
   const out = [];
+  const spans = switchSpans(body);
+  const isNestedCase = (pos) => {
+    let inner = null;
+    for (const s of spans) {
+      if (s.open < pos && pos < s.close && (!inner || s.open > inner.open)) inner = s;
+    }
+    return !!inner && inner.depth > 0;
+  };
   const caseRe = /\bcase (\d+):/g;
   let m;
   const marks = [];
-  while ((m = caseRe.exec(body))) marks.push([+m[1], m.index]);
+  while ((m = caseRe.exec(body))) {
+    if (!isNestedCase(m.index)) marks.push([+m[1], m.index]);
+  }
   let k = 0;
   while (k < marks.length) {
     // 收集贯穿组：当前 case 的冒号到下一个 case 标签之间只有空白/注释
@@ -104,9 +140,17 @@ const BOOL_FIELDS = ['consumable', 'noMelee', 'autoReuse', 'melee', 'ranged', 'm
 
 const literal = new Map(); // id -> rec（字面 case）
 const delegates = [];      // id, targetId, block
-function applyRec(id, lines) {
+const groupShared = new Map(); // 组首 id → 共享体字段（goto case 别名族回补用）
+function fieldsFromLines(id, lines) {
   const rec = {};
   for (const f of NUM_FIELDS) {
+    // 表达式形如 `shoot = 541 + type - 3278;`（悠悠球族批量投射物）——按 id 求值
+    const eLine = lines.find((l) => new RegExp(`^${f} = (-?\\d+)\\s*\\+\\s*type\\s*-\\s*(\\d+);`).test(l));
+    if (eLine) {
+      const em = eLine.match(new RegExp(`^${f} = (-?\\d+)\\s*\\+\\s*type\\s*-\\s*(\\d+);`));
+      rec[f] = Number(em[1]) + id - Number(em[2]);
+      continue;
+    }
     const line = lines.find((l) => new RegExp(`^${f} = -?[\\d.]+f?;`).test(l) || (f === 'useAmmo' && /^useAmmo = AmmoID\.\w+;/.test(l)) || (f === 'ammo' && /^ammo = AmmoID\.\w+;/.test(l)));
     if (!line) continue;
     const am = line.match(/AmmoID\.(\w+)/);
@@ -116,6 +160,10 @@ function applyRec(id, lines) {
     if (lines.some((l) => l === `${f} = true;`)) rec[f] = true;
     else if (lines.some((l) => l === `${f} = false;`)) rec[f] = false;
   }
+  return rec;
+}
+function applyRec(id, lines) {
+  const rec = fieldsFromLines(id, lines);
   if (!Object.keys(rec).length) return;
   const dl = lines.find((l) => /^SetDefaults\d?\(\d+\);/.test(l));
   if (dl) {
@@ -127,21 +175,35 @@ function applyRec(id, lines) {
 }
 for (const body of bodies) {
   for (const { ids, block } of parseSwitch(body)) {
+    const lines = depth1Lines(block);
+    const shared = fieldsFromLines(ids[0], lines);
+    if (Object.keys(shared).length) groupShared.set(ids[0], shared);
     // 贯穿组：共享体赋给组内全部 id
-    for (const id of ids) applyRec(id, depth1Lines(block));
+    for (const id of ids) applyRec(id, lines);
     // 嵌套 switch(type)：按其自身 id 合并（悠悠球 per-id damage/shoot 在这里）
     for (const { id, block: nb } of nestedSwitchCases(block)) {
       applyRec(id, depth1Lines(nb));
     }
   }
+  // `default: if (type < A || type > B) break; goto case T;` —— 区间 A..B 别名进 T 组
+  //（悠悠球 3315-3317 goto case 3262：吃 T 组共享体 + 自身嵌套 case 覆盖）
+  for (const gm of body.matchAll(/if\s*\(type\s*<\s*(\d+)\s*\|\|\s*type\s*>\s*(\d+)\)\s*\{\s*break;\s*\}\s*goto\s+case\s*(\d+);/g)) {
+    const [lo, hi, target] = [+gm[1], +gm[2], +gm[3]];
+    const shared = groupShared.get(target) || groupShared.get([...groupShared.keys()].find((k) => Math.abs(k - target) < 30)) || null;
+    if (!shared) continue;
+    for (let id = lo; id <= hi; id++) {
+      literal.set(id, { ...shared, ...(literal.get(id) || {}) });
+    }
+  }
 }
 
 // ---- 委托合并（迭代至收敛，处理委托链） ----
+// 与既有记录合并（非覆盖）：goto 别名族/嵌套 case 先写入的字段不能被委托基底冲掉
 const data = new Map(literal);
 for (let round = 0; round < 4; round++) {
   for (const d of delegates) {
     const base = data.get(d.targetId);
-    if (base) data.set(d.id, { ...base, ...d.rec });
+    if (base) data.set(d.id, { ...data.get(d.id), ...base, ...d.rec });
   }
 }
 

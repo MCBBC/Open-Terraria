@@ -162,6 +162,27 @@ function genIdNames() {
   }
   console.log(`[idNames] ITEM_KEY_TO_ID 匹配率 ${matched}/${keys.length}`);
 
+  // TILE_NAME_ITEM_BY_SHEET:方块 sheet → 显示名来源物品 id。
+  // 原版语义(1.4.4+):方块无独立显示名(Tiles 分节为空),方块名 = 放置它的物品
+  // (Item.createTile 反查,TEdit items.json)。取该 sheet 最小物品 id(基础材质款优先);
+  // 个别 sheet 人工指定(12 生命水晶 tile 取 LifeCrystal 29,而非 RepairedLifeCrystal)。
+  const teditItemsPath = join(here, '..', '..', 'Terraria-Map-Editor', 'src', 'TEdit.Terraria', 'Data', 'items.json');
+  const tileNameItem = {};
+  if (existsSync(teditItemsPath)) {
+    const teditItems = JSON.parse(readFileSync(teditItemsPath, 'utf8'));
+    for (const it of teditItems) {
+      if (it.createTile === undefined) continue;
+      if (tileNameItem[it.createTile] === undefined || it.id < tileNameItem[it.createTile]) {
+        tileNameItem[it.createTile] = it.id;
+      }
+    }
+    const overrides = { 12: 29 }; // Heart → LifeCrystal
+    for (const [t, id] of Object.entries(overrides)) tileNameItem[t] = id;
+    console.log(`[idNames] TILE_NAME_ITEM_BY_SHEET ${Object.keys(tileNameItem).length} 条`);
+  } else {
+    console.warn('[idNames] TEdit items.json 缺失,TILE_NAME_ITEM_BY_SHEET 未生成');
+  }
+
   const header = `// 本文件由 scripts/build-l10n.mjs 生成,勿手改。来源:tools/id-maps/*.json(1.4.5.6)。\n`;
   const body =
     write('ITEM_NAME_BY_ID', items) +
@@ -170,6 +191,7 @@ function genIdNames() {
     write('PROJECTILE_NAME_BY_ID', projectiles) +
     write('TILE_NAME_BY_ID', tiles) +
     write('WALL_NAME_BY_ID', walls) +
+    write('TILE_NAME_ITEM_BY_SHEET', tileNameItem) +
     `export const ITEM_KEY_TO_ID: Record<string, number> = ${JSON.stringify(itemKeyToId)};\n`;
   writeFileSync(IDNAMES_OUT, header + body);
 }

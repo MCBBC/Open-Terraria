@@ -626,9 +626,9 @@ export class Enemy extends Entity {
       accel = 0.1 * ramp;
     }
     // flag4（L50829）：非 173/6/42/231-235/94/139/619 = 双步加速（蜂族真；eater 族假）
-    const flag4 = !isEater && this.vanillaId !== 94 && this.vanillaId !== 619
-      && this.vanillaId !== 42 && !(this.vanillaId >= 231 && this.vanillaId <= 235)
-      && this.vanillaId !== 139;
+    const vid = this.vanillaId ?? 0;   // swarmerAI 仅数据驱动路径可达，vanillaId 恒非空
+    const flag4 = !isEater && vid !== 94 && vid !== 619
+      && vid !== 42 && !(vid >= 231 && vid <= 235) && vid !== 139;
     const tx = player ? player.cx : this.cx + this.facing * 100;
     const ty = player ? player.cy : this.cy - 100;
     // 8px 网格量化（L17705-17710）
@@ -640,8 +640,8 @@ export class Enemy extends Entity {
     // 摆动项（L50837-50848）：num8 族（6/139/173/205）需 dist>100；flag3 族
     // （42/94/619/176/210/211/231-235，含蜜蜂）无条件摆动
     const swarmGated = isEater || this.vanillaId === 205;
-    const swarmAlways = this.vanillaId === 42 || this.vanillaId === 94 || this.vanillaId === 619
-      || this.vanillaId === 176 || isBee || (this.vanillaId >= 231 && this.vanillaId <= 235);
+    const swarmAlways = vid === 42 || vid === 94 || vid === 619
+      || vid === 176 || isBee || (vid >= 231 && vid <= 235);
     if ((swarmGated && dist > 100) || swarmAlways) {
       this.ai0 += 1;
       if (this.ai0 > 200) this.ai0 = -200;
@@ -1245,6 +1245,9 @@ export class Enemy extends Entity {
       this.vy -= 0.04;
       this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, 0.02);
       this.x += this.vx; this.y += this.vy;
+      // 原版此处 return 在状态机之前:ai[2](本作 aiT)不推进 = 冲刺/悬浮计时冻结,
+      // 复活后从冻结处继续(fixedUpdate 头部的 aiT++ 在此抵消)
+      this.aiT--;
       if (dist > T * 120) this.dead = true;   // 漂远后消失(原版按距玩家 40~80 格剔除)
       return;
     }

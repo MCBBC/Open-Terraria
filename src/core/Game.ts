@@ -689,7 +689,7 @@ export class Game implements GameHooks {
       this._mapClickLatch2 = false;
     }
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用） ----
-    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open) {
+    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -957,8 +957,9 @@ export class Game implements GameHooks {
       if (cart.dead) { this.minecart = null; }
       return;
     }
-    // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用
-    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open) {
+    // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
+    // 时间调整按钮/面板悬停同理（renderer.timeUiHover 渲染期写入）
+    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover) {
       this.mining = null;
       return;
     }
@@ -2875,7 +2876,7 @@ export class Game implements GameHooks {
     }
     inv.add(ITEM_BY_KEY[key], n);
     this.cb.onInventoryChanged();
-    this.cb.onToast(`商人:买到 ${n} × ${ITEM_DEFS[ITEM_BY_KEY[key]].name}(-${cost} 铜币)`);
+    this.cb.onToast(`商人:买到 ${n} × ${Lang.itemNameByKey(key)}(-${cost} 铜币)`);
   }
 
   private isValidHouse(doorX: number, doorY: number): boolean {
@@ -2934,10 +2935,12 @@ export class Game implements GameHooks {
       // 实际扣血 = max(1, dmg - defense*0.5)（在 Player.damage 内）
       const dealt = Math.max(1, dmg - p.defense * 0.5);
       this.addDamageNumber(p.cx, p.y, Math.round(dealt), false, '#FF5050');
-      // 荆棘 Buff：受击反弹 2 伤害（移植自 Maples Player.Thorn）
+      // 荆棘 Buff（1.4.5.6 Player.cs:30910-30944）：thorns=1 → 反弹接触伤害全额
+      // （num4 × thorns，上限 1000；num4=接触伤害原值，取受伤前的 dmg 而非扣血后 dealt）
       if (p.thornsActive && attacker && !attacker.dead) {
-        attacker.hurt(2, Math.sign(attacker.cx - p.cx) || 1, -1.5, this);
-        this.addDamageNumber(attacker.cx, attacker.y, 2, false, '#80FF80');
+        const reflect = Math.min(1000, Math.round(dmg));
+        attacker.hurt(reflect, Math.sign(attacker.cx - p.cx) || 1, -1.5, this);
+        this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
       }
       if (p.hp <= 0) {
         p.dead = true;
@@ -3462,7 +3465,7 @@ export class Game implements GameHooks {
     // 导线可见性:手持电路工具(mech)或 F7 强制(Main.cs:43548 DrawWires 开关语义)
     const held = this.player.inv.heldItem();
     this.renderer.showWires = this.forceShowWires || !!held && !!ITEM_DEFS[held.id]?.wireTool;
-    const hover = this.input.uiBlocking ? null : (() => {
+    const hover = (this.input.uiBlocking || this.renderer.timeUiHover) ? null : (() => {
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;
     })();

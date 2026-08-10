@@ -8,7 +8,7 @@ import {
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Inventory, ACCESSORY_START } from '../items/Inventory';
-import { BuffState } from '../stats/Buffs';
+import { BuffState, BuffType } from '../stats/Buffs';
 import { ITEM_DEFS } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 
@@ -35,6 +35,8 @@ export class Player extends Entity {
   jumpHold = 0;          // 长按跳跃剩余加速 tick
   inWater = false;
   headUnderwater = false;
+  /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
+  inHoney = false;
   // 气口：5 个气泡，共 23.33 秒（原版参数），每颗 ≈4.67 秒
   static readonly BREATH_BUBBLES = 5;
   static readonly BREATH_SECONDS = 23.33;
@@ -147,11 +149,16 @@ export class Player extends Entity {
     if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
     this.inLava = world.store.liquidType[centerIdx] === 2 && world.store.liquid[centerIdx] > 60;
-    const headLiq = world.store.liquid[world.store.idx(
-      Math.floor(this.cx / TILE), Math.floor((this.y + 8) / TILE), // 鼻子位置（头顶下方半格）
-    )];
+    // 蜂蜜浸入（Player.cs:27436）：湿判定命中蜂蜜 → AddBuff(48, 1800t=30s) + honeyWet。
+    // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
+    this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
+    if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
+    const headIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 8) / TILE), // 鼻子位置（头顶下方半格）
+    );
+    const headLiq = world.store.liquid[headIdx];
     const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
-    this.headUnderwater = headLiq > 40; // 液面漫过鼻子（低阈值——部分液体也浸没）
+    // 气口消耗只对水（原版 DrownCollision 不含水蜜/岩浆——蜂蜜和岩浆不会淹死）
+    this.headUnderwater = headLiq > 40 && world.store.liquidType[headIdx] === 1;
     // 岩浆伤害：每半秒 15
     if (this.inLava) {
       this.lavaAccum += dt;
@@ -210,8 +217,8 @@ export class Player extends Entity {
       return;
     }
 
-    // 水平（敏捷 Buff 提速）
-    const speedMult = this.buffs.moveSpeedMult;
+    // 水平（敏捷 Buff 提速；蜂蜜比水更黏滞——原版蜂蜜重力 0.1/落速 3，Player.cs:24131-24135）
+    const speedMult = this.buffs.moveSpeedMult * (this.inHoney ? 0.5 : 1);
     const ix = this.inputX;
     if (ix !== 0) {
       this.vx += ix * PLAYER_WALK_ACCEL * (this.inWater ? 0.6 : 1) * speedMult;

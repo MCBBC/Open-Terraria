@@ -13,6 +13,10 @@ await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; 
 await page.click('button');
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
 await new Promise((r) => setTimeout(r, 2000));
+await page.waitForSelector('select', { timeout: 120000 }).catch(() => {});
+await page.evaluate(() => { const _s = document.querySelector('select'); if (_s) { _s.selectedIndex = 0; _s.parentElement.querySelector('button').click(); } });
+await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.liquid, { timeout: 300000 });
+await new Promise((r) => setTimeout(r, 1500));
 
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };

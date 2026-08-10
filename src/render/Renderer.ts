@@ -1299,6 +1299,12 @@ export class Renderer {
   minimapZoom = 1.05;
   /** 本帧鼠标悬停在小地图框按钮上（Game 据此拦下"点地图开全屏"）——原版 mouseInterface 语义 */
   minimapUiHover = false;
+  /** 时间调整面板开关（时间文本旁 ± 按钮切换） */
+  timePanelOpen = false;
+  /** 本帧指针位于时间按钮/面板上（渲染期写入、下帧 Game 消费：吞掉挖掘/放置/攻击点击） */
+  timeUiHover = false;
+  /** UI 点击边沿检测（render 存 _mouseDown，drawMinimap 末尾更新） */
+  private _uiPrevMouseDown = false;
 
   private loadUiTex(name: string): HTMLImageElement {
     const img = new Image();
@@ -1375,6 +1381,54 @@ export class Renderer {
     const timeText = `\u65f6\u95f4 ${hh}:${mm2}`;
     ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
     ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
+
+    // ---- \u65f6\u95f4\u8c03\u6574\u6309\u94ae + \u9762\u677f\uff08\u00b1 \u5207\u6362\uff1b\u547d\u4e2d\u533a\u6574\u4f53\u4e0a\u62a5 timeUiHover \u4f9b Game \u541e\u70b9\u51fb\uff09 ----
+    const mx = this._mouseX, my = this._mouseY;
+    const clicked = this._mouseDown && !this._uiPrevMouseDown; // \u6309\u4e0b\u8fb9\u6cbf\uff08\u4e0e\u7f29\u653e\u6309\u94ae\u7684\u6301\u7eed\u6309\u4f4f\u533a\u5206\uff09
+    const hit = (x: number, y: number, w: number, h: number) =>
+      mx >= x && mx <= x + w && my >= y && my <= y + h;
+    const btnX = ox + size - 22, btnY = oy + 252, btnS = 20;
+    const btnHover = hit(btnX, btnY, btnS, btnS);
+    this.timeUiHover = btnHover || (this.timePanelOpen && hit(ox, oy + 276, size, 64));
+    ctx.fillStyle = btnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
+    ctx.fillRect(btnX, btnY, btnS, btnS);
+    ctx.strokeStyle = btnHover ? '#ffd76e' : '#4a5aa0';
+    ctx.strokeRect(btnX + 0.5, btnY + 0.5, btnS - 1, btnS - 1);
+    ctx.fillStyle = '#e8e8f4';
+    ctx.font = 'bold 13px monospace';
+    ctx.fillText('\u00b1', btnX + btnS / 2, btnY + 15);
+    if (clicked && btnHover) this.timePanelOpen = !this.timePanelOpen;
+    if (this.timePanelOpen) {
+      const px = ox, py = oy + 276, pw = size, ph = 64;
+      ctx.fillStyle = 'rgba(8,10,26,0.92)';
+      ctx.fillRect(px, py, pw, ph);
+      ctx.strokeStyle = '#4a5aa0';
+      ctx.strokeRect(px + 0.5, py + 0.5, pw - 1, ph - 1);
+      // \u5c0f\u6309\u94ae\u76d2\uff1a\u60ac\u505c\u9ad8\u4eae + \u70b9\u51fb\u52a8\u4f5c
+      const box = (x: number, y: number, w: number, h: number, label: string, act: () => void) => {
+        const hov = hit(x, y, w, h);
+        ctx.fillStyle = hov ? '#3a4680' : '#232c52';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = hov ? '#ffd76e' : '#3a4680';
+        ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+        ctx.fillStyle = '#e8e8f4';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(label, x + w / 2, y + h / 2 + 4);
+        if (clicked && hov) act();
+      };
+      const setT = (t: number) => { clock.timeOfDay = ((t % 1) + 1) % 1; };
+      box(px + 8, py + 8, 76, 22, '\u2212 1 \u5c0f\u65f6', () => setT(clock.timeOfDay - 1 / 24));
+      ctx.fillStyle = '#9aa2cc';
+      ctx.font = '12px sans-serif';
+      ctx.fillText(`\u7b2c ${clock.dayCount} \u5929`, px + pw / 2, py + 23);
+      box(px + pw - 84, py + 8, 76, 22, '+ 1 \u5c0f\u65f6', () => setT(clock.timeOfDay + 1 / 24));
+      // \u5feb\u6377\u9884\u8bbe\uff08clock \u8bed\u4e49\uff1a0=\u5348\u591c 0.25=06:00 0.5=\u6b63\u5348 0.75=18:00\uff09
+      const presets: Array<[string, number]> = [['\u6e05\u6668', 0.27], ['\u6b63\u5348', 0.5], ['\u9ec4\u660f', 0.73], ['\u5348\u591c', 0.0]];
+      presets.forEach(([label, t], i) => {
+        box(px + 10 + i * 56, py + 38, 52, 20, label, () => setT(t));
+      });
+    }
+    this._uiPrevMouseDown = this._mouseDown;
     ctx.restore();
   }
 

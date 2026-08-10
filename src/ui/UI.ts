@@ -223,7 +223,7 @@ export class UI {
   showSign(text: string) {
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:360px; max-height:70vh; overflow:auto;';
-    panel.appendChild(el('div', 'sw-title', '🪦 墓碑'));
+    panel.appendChild(el('div', 'sw-title', `🪦 ${Lang.tileName(85) ?? '墓碑'}`));
     const body = el('div');
     body.style.cssText = 'font-size:13px; line-height:1.8; white-space:pre-wrap; color:#d8d4e4; margin:8px 0;';
     body.textContent = text;

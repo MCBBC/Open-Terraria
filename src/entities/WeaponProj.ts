@@ -313,18 +313,21 @@ export class GrenadeProj extends Entity {
       this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
       return;
     }
-    // AI_016：重力 + 弹跳（碰墙法向反弹，保部分动能）
+    // AI_016：重力 + 弹跳（碰墙法向反弹，保部分动能）。
+    // 碰撞探测用「底边中点」而非中心——中心探测会让 14px 弹体在地面沉降 ~4px 嵌入
     this.vy = Math.min(this.vy + 0.3, 16);
     let nx = this.x + this.vx;
     let ny = this.y + this.vy;
     const st = game.world.store;
-    const solid = (x: number, y: number) => {
-      const tx = Math.floor((x + this.w / 2) / TILE);
-      const ty = Math.floor((y + this.h / 2) / TILE);
+    const solidAt = (px: number, py: number) => {
+      const tx = Math.floor(px / TILE);
+      const ty = Math.floor(py / TILE);
       return st.inBounds(tx, ty) && st.isSolid(tx, ty);
     };
-    if (solid(nx, this.y)) { this.vx *= -0.85; nx = this.x; }
-    if (solid(nx, ny)) {
+    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, this.y + this.h - 1)) {
+      this.vx *= -0.85; nx = this.x;
+    }
+    if (solidAt(nx + this.w / 2, ny + this.h - 1)) {
       if (this.vy > 1) { this.vy = -this.vy * 0.5; } else { this.vy = 0; }
       this.vx *= 0.92;
       ny = this.y;

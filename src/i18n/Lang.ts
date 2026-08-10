@@ -5,7 +5,7 @@
 // { [category]: { [key]: value } },全键 = category + '.' + key,已做英文兜底 overlay)。
 // 例:Lang.text('UI.Play')、Lang.text('ItemName.HealingPotion')、Lang.text('LegacyWorldGen.9')
 import { languageManager } from './LanguageManager';
-import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID } from './idNames.generated';
+import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET } from './idNames.generated';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
 import { worldgenProgressKey } from './worldgenKeys';
 
@@ -99,8 +99,19 @@ export const Lang = {
     return internal && Lang.has(`ProjectileName.${internal}`) ? Lang.text(`ProjectileName.${internal}`) : null;
   },
 
-  /** 图块名(Lang.cs:77 GetMapObjectName 系;MapObject 仅 79 键,缺失回退 null 走自定义键) */
+  /**
+   * 图块名。解析链(1.4.4+ 原版语义:方块无独立显示名——Tiles 分节为空)：
+   * ① 放置它的物品名(TILE_NAME_ITEM_BY_SHEET:Item.createTile 反查,取基础款最小 id；
+   *    如 tile14 表 → 木桌 WoodenTable)——官方译名权威来源
+   * ② MapObject 族名(Lang.cs:77 GetMapObjectName 系,仅 79 键,族级泛称如"桌子")
+   * ③ null(调用方回退 TILE_DEFS[].name)
+   */
   tileName(id: number): string | null {
+    const placer = TILE_NAME_ITEM_BY_SHEET[id];
+    if (placer !== undefined) {
+      const n = Lang.itemName(placer);
+      if (n) return n;
+    }
     const internal = TILE_NAME_BY_ID[id];
     return internal && Lang.has(`MapObject.${internal}`) ? Lang.text(`MapObject.${internal}`) : null;
   },

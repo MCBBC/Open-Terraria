@@ -17,6 +17,9 @@ import { TILE_DEFS } from '../../../data/tiles';
 export function solidTile(st: TileStore, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
   const i = st.idx(x, y);
+  // 原版 SolidTile 检查 active()（=flags）：TileRunner 幽灵 tile（有 type 无 flags）
+  // 不得当实心——曾致补角分支实体化天空幽灵块成浮空半砖（2583 个）
+  if (!st.flags[i]) return false;
   const t = st.type[i];
   if (t === 0) return false;
   const d = TILE_DEFS[t];
@@ -25,7 +28,9 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
 
 /** 可砸判定（WorldGen.cs:49122 CanPoundTile 简化）：实心非平台非框架物 */
 function canPoundTile(st: TileStore, x: number, y: number): boolean {
-  const t = st.type[st.idx(x, y)];
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false; // 同 solidTile：幽灵 tile 不可砸
+  const t = st.type[i];
   if (t === 0) return false;
   const d = TILE_DEFS[t];
   return !!d && d.solid && !d.platform && !d.framed;
@@ -51,7 +56,7 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
       const d = TILE_DEFS[t];
       // 原版跳过 48/137/232/191/151/274（雕像/树木/蜂巢类）≈ framed 物体跳过
       if (d && d.framed) continue;
-      if (st.type[st.idx(i, j - 1)] === 0) {
+      if (!st.flags[st.idx(i, j - 1)]) {
         // 上方无块：对凸起顶端做半砖/削除
         if (solidTile(st, i, j)) {
           const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
@@ -60,32 +65,32 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
               // 模式 A（L7598-7605）：左凸 → 右坡/半砖；模式 B（L7606-7616）：右凸 → 左坡/半砖
               if (!solidTile(st, i - 1, j) && !st.half[st.idx(i - 1, j + 1)]
                 && solidTile(st, i - 1, j + 1) && solidTile(st, i + 1, j)
-                && st.type[st.idx(i + 1, j - 1)] === 0) {
+                && !st.flags[st.idx(i + 1, j - 1)]) {
                 poundTile(st, i, j); // 原版另一半走 SlopeTile(2)（坡面未实现，统一半砖）
               } else if (!solidTile(st, i + 1, j) && !st.half[st.idx(i + 1, j + 1)]
                 && solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
-                && st.type[st.idx(i - 1, j - 1)] === 0) {
+                && !st.flags[st.idx(i - 1, j - 1)]) {
                 poundTile(st, i, j); // 原版另一半走 SlopeTile(1)
               } else if (solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j + 1)
-                && st.type[st.idx(i + 1, j)] === 0 && st.type[st.idx(i - 1, j)] === 0) {
+                && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i - 1, j)]) {
                 // 孤立凸起（L7629）：直接半砖
                 poundTile(st, i, j);
               }
               // 悬空支脚削除（L7634-7668）：两侧下方空 + 对角支撑 → 删
               if (solidTile(st, i, j)) {
                 if (solidTile(st, i - 1, j) && solidTile(st, i + 1, j + 2)
-                  && st.type[st.idx(i + 1, j)] === 0 && st.type[st.idx(i + 1, j + 1)] === 0
-                  && st.type[st.idx(i - 1, j - 1)] === 0) {
+                  && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i + 1, j + 1)]
+                  && !st.flags[st.idx(i - 1, j - 1)]) {
                   st.setTileSilent(i, j, 0);
                 } else if (solidTile(st, i + 1, j) && solidTile(st, i - 1, j + 2)
-                  && st.type[st.idx(i - 1, j)] === 0 && st.type[st.idx(i - 1, j + 1)] === 0
-                  && st.type[st.idx(i + 1, j - 1)] === 0) {
+                  && !st.flags[st.idx(i - 1, j)] && !st.flags[st.idx(i - 1, j + 1)]
+                  && !st.flags[st.idx(i + 1, j - 1)]) {
                   st.setTileSilent(i, j, 0);
-                } else if (st.type[st.idx(i - 1, j + 1)] === 0 && st.type[st.idx(i - 1, j)] === 0
+                } else if (!st.flags[st.idx(i - 1, j + 1)] && !st.flags[st.idx(i - 1, j)]
                   && solidTile(st, i + 1, j) && solidTile(st, i, j + 2)) {
                   if (rng.chance(0.2)) st.setTileSilent(i, j, 0);
                   else if (rng.chance(0.25)) poundTile(st, i, j);
-                } else if (st.type[st.idx(i + 1, j + 1)] === 0 && st.type[st.idx(i + 1, j)] === 0
+                } else if (!st.flags[st.idx(i + 1, j + 1)] && !st.flags[st.idx(i + 1, j)]
                   && solidTile(st, i - 1, j) && solidTile(st, i, j + 2)) {
                   if (rng.chance(0.2)) st.setTileSilent(i, j, 0);
                   else if (rng.chance(0.25)) poundTile(st, i, j);
@@ -93,20 +98,21 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
               }
             }
             // 顶部单格立柱（L7662）：两侧皆空 → 删
-            if (solidTile(st, i, j) && st.type[st.idx(i - 1, j)] === 0 && st.type[st.idx(i + 1, j)] === 0) {
+            if (solidTile(st, i, j) && !st.flags[st.idx(i - 1, j)] && !st.flags[st.idx(i + 1, j)]) {
               st.setTileSilent(i, j, 0);
             }
           }
         } else if (st.type[ti] === 0) {
           // 空位补角（L7669-7695）：下方实心 + 单侧实心 → 补一块并半砖（原版另一半 SlopeTile）
-          const belowType = st.type[st.idx(i, j + 1)];
+          const bi = st.idx(i, j + 1);
+          const belowType = solidTile(st, i, j + 1) ? st.type[bi] : 0;
           if (belowType !== 0 && !TILE_DEFS[belowType]?.framed) {
             if (solidTile(st, i - 1, j + 1) && solidTile(st, i + 1, j)
-              && st.type[st.idx(i - 1, j)] === 0 && st.type[st.idx(i + 1, j - 1)] === 0) {
+              && !st.flags[st.idx(i - 1, j)] && !st.flags[st.idx(i + 1, j - 1)]) {
               st.setTileSilent(i, j, belowType);
               poundTile(st, i, j);
             } else if (solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
-              && st.type[st.idx(i + 1, j)] === 0 && st.type[st.idx(i - 1, j - 1)] === 0) {
+              && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i - 1, j - 1)]) {
               st.setTileSilent(i, j, belowType);
               poundTile(st, i, j);
             }
@@ -121,10 +127,10 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
       const ti = st.idx(i, j);
       const d = TILE_DEFS[st.type[ti]];
       if (d && d.framed) continue;
-      if (rng.chance(0.5) && st.type[st.idx(i, j - 1)] === 0 && solidTile(st, i, j)) {
-        if (solidTile(st, i, j + 1) && solidTile(st, i + 1, j) && st.type[st.idx(i - 1, j)] === 0) {
+      if (rng.chance(0.5) && !st.flags[st.idx(i, j - 1)] && solidTile(st, i, j)) {
+        if (solidTile(st, i, j + 1) && solidTile(st, i + 1, j) && !st.flags[st.idx(i - 1, j)]) {
           poundTile(st, i, j); // 原版 SlopeTile(2)
-        } else if (solidTile(st, i, j + 1) && solidTile(st, i - 1, j) && st.type[st.idx(i + 1, j)] === 0) {
+        } else if (solidTile(st, i, j + 1) && solidTile(st, i - 1, j) && !st.flags[st.idx(i + 1, j)]) {
           poundTile(st, i, j); // 原版 SlopeTile(1)
         }
       }

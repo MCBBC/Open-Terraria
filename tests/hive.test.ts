@@ -97,6 +97,28 @@ describe('幼虫破坏（KillTile case 231）', () => {
   });
 });
 
+describe('蜜蜂 AI（AI_005 210/211 分支）', () => {
+  it('向玩家追击、速度档 5（含暖机 ±6 限速）', async () => {
+    const { TILE } = await import('../src/core/constants');
+    const { Enemy } = await import('../src/entities/Enemy');
+    const w = new World(120, 120, 7, 'bee');
+    const st = w.store;
+    for (let x = 0; x < 120; x++) { st.setTile(x, 100, 1); st.setTile(x, 101, 1); }
+    const game = {
+      world: w,
+      player: { cx: 80 * TILE, cy: 60 * TILE, x: 80 * TILE, y: 60 * TILE, w: 16, h: 28, hp: 100, maxHp: 100, dead: false, aabbOverlaps: () => false },
+      playSfx: () => {}, damagePlayer: () => {}, spawnParticles: () => {},
+    } as never;
+    const bee = Enemy.fromVanilla(210, 20 * TILE, 60 * TILE)!;
+    for (let k = 0; k < 200; k++) bee.fixedUpdate(1 / 60, game);
+    // 靠近了 + 全程逐轴 ≤6（暖机钳）/ 稳态 ≤5
+    expect(bee.cx).toBeGreaterThan(20 * TILE);
+    expect(Math.hypot(bee.vx, bee.vy)).toBeLessThanOrEqual(5.2);
+    // 环绕摆动计数在推进（flag3 无条件摆动）
+    expect(bee.ai0).not.toBe(-1120);
+  });
+});
+
 describe('蜂蜜流动（LiquidSim type 3）', () => {
   it('空中蜂蜜下落并铺开', () => {
     const w = new World(60, 60, 7, 'honey');
