@@ -31,6 +31,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
   const disp = inv.displayArmor();
   return { head: idx(disp[0]), body: idx(disp[1]), legs: idx(disp[2]) };
 }
+import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
@@ -125,6 +126,15 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
   if (id === 4) {
     const blink = Math.floor(t / 7) % 3;
     return Math.min(frames - 1, blink + (e.phase > 1 ? 3 : 0));
+  }
+  // 训练假人 488（FindFrame case 488，cs:71516-71544）：摇晃动画帧由受击强度驱动——
+  // num140 = 方向==-1 ? 4 : 6；帧 = ceil(shake/num140)（dir==1 再 +5）；shake 每帧 -1
+  if (id === 488) {
+    const dir = e.dummyHitDir;
+    const step = dir === -1 ? 4 : 6;
+    let idx = Math.ceil(e.dummyShake / step);
+    if (idx > 0 && dir === 1) idx += 5;
+    return Math.min(frames - 1, idx);
   }
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
@@ -240,6 +250,10 @@ export class Renderer {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   sky = new SkyRenderer();
+  /** 天气渲染器（雨/沙尘；Game.afterWorldLoad 时 attach，destroy 时 detach） */
+  weatherFx = new WeatherRenderer();
+  /** weatherFx 已 attach（避免每帧空调用开销） */
+  weatherFxActive = false;
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
@@ -362,6 +376,7 @@ export class Renderer {
     mineProgress = 0,
     flicker: FlickerClock | null = null,
     remotePlayers: Player[] = [],
+    invasion: { name: string; pct: number } | null = null,
   ) {
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
@@ -445,6 +460,12 @@ export class Renderer {
 
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
+
+    // 2d'. 天气层（雨滴池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
+    if (this.weatherFxActive) {
+      this.weatherFx.update(world, viewW, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
+      this.weatherFx.draw(this, world);
+    }
 
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
@@ -552,6 +573,9 @@ export class Renderer {
 
     // 10. Boss 血条
     if (boss) this.drawBossBar(ctx, viewW, boss);
+    // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
+    // 原版右下角黄条——偏差记录）
+    if (invasion) this.drawInvasionBar(ctx, viewW, invasion);
 
     // 11. 生命/魔力资源条（原版 ClassicPlayerResourcesDisplaySet：右上红心排 + 右缘魔力星）
     this.resourceBars.draw(ctx, player, viewW, flicker);
@@ -1092,16 +1116,17 @@ export class Renderer {
           const icon = ar ? null : this.itemIcon(held.id);
           if (ar || icon) {
             ctx.save();
-            // 竖举姿势：锚在手部上方，贴图转正（图标默认 45° 朝上 → -0.8rad 归竖）
-            ctx.translate(p.cx + p.facing * p.w * 0.22, p.y + p.h * 0.42);
+            // 原版 holdStyle=1（ItemCheck_ApplyHoldStyle :49671/:49720）：
+            // itemLocation = (中心 + (frameW*0.5+2)*dir, 顶 + 24)；**itemRotation = 0**——
+            // 贴图以原生 45° 倾角呈现（贴图本身斜指右上），握把=左下角锚在手部，
+            // 朝左时整图镜像。此前归竖(-0.8rad)是错的：原版就不转。
+            ctx.translate(p.cx + p.facing * 7, p.y + p.h * 0.57);
             ctx.scale(p.facing, 1);
-            ctx.rotate(-0.8);
             if (ar) {
-              const s = 1;
-              const w = ar.sw * s, h = ar.sh * s;
-              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -w * 0.5, -h * 0.15, w, h);
+              const w = ar.sw, h = ar.sh;
+              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -h, w, h);
             } else if (icon) {
-              ctx.drawImage(icon, -4.5, -9, 9, 9);
+              ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
             }
             ctx.restore();
           }
@@ -1128,7 +1153,12 @@ export class Renderer {
       const doll = compositePaperDoll(p.appearance, dollEquipFromInv(p.inv, this.atlas));
       if (doll) {
         let row = 0; // 0 站立
-        if (swing) row = 3;
+        if (swing) {
+          // 原版 useStyle=1 三段 use 姿势（Player.cs:35876-35890）：
+          // p>2/3 行1（举）/1/3-2/3 行2（挥）/p<1/3 行3（收）——手臂烘焙在帧内随行切换
+          const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
+          row = pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+        }
         else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
         else if (Math.abs(p.vx) > 0.3) row = 6 + Math.floor(p.animTime / 6) % 14; // 行走循环 6-19
         const f = dollFrame(doll, row);
@@ -1247,35 +1277,43 @@ export class Renderer {
   private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number }) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
-    const prog = 1 - swing.t / swing.dur; // 0..1
-    const isTool = !!ITEM_DEFS[swing.item]?.tool;
-    // 旋转：前载 ease-out（快速举起）；X 回拉：两端快、中间慢的正弦调制曲线
-    // （导数 1+0.6cos(2πp)：起止 1.6 倍速、中段 0.4 倍速，全程单调、终点归一）
-    const pa = 1 - (1 - prog) ** 3;
-    const pb = prog + (0.6 * Math.sin(2 * Math.PI * prog)) / (2 * Math.PI);
-    // 使用类：锚点随进程从挥砍位过渡到静持位（收尾与静持姿势逐像素衔接，无顿挫）
-    // 工具/武器挥砍锚点：更高更外（Y 0.62 / X 0.75）
-    const idleAX = 0.48, idleAY = 0.80; // 静持锚点（与上方持有物显示一致）
-    const ax = isTool ? 0.75 : 0.62 + (idleAX - 0.62) * pb;
-    const ay = isTool ? 0.62 : 0.74 + (idleAY - 0.74) * pb;
-    const shX = p.cx + p.facing * p.w * ax, shY = p.y + p.h * ay; // 持握点右移下移
+    // 原版 useStyle=1（ItemCheck_ApplyUseStyle Player.cs:49939-50108）1:1：
+    // p = itemAnimation/itemAnimationMax（起 1 收 0）——swing.t 从 dur 递减到 0，同向
+    const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
+    // itemRotation = (p-0.5)*(-dir)*3.5 - dir*0.3（:50105）——约 200° 线性挥砍弧
+    const rot = (pAnim - 0.5) * -3.5 - 0.3;
+    // itemLocation 三段（早 p>2/3 / 中 1/3-2/3 / 晚 <1/3），X 档位按帧宽、Y 按帧高
+    const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
+    // X 档位（:49948 早 / :49990 中 / :50038 晚，各自独立阈值表）
+    const xTier = (w: number, phase: 0 | 1 | 2) => phase === 0
+      ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
+      : phase === 1
+        ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
+        : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
+    // Y 档位：早=顶+24（:49958）；中按帧高（:50000）；晚按帧高（:50078）
+    const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
+      : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
+    let offX: number, offY: number;
+    if (pAnim > 2 / 3) {
+      offX = fw * 0.5 - xTier(fw, 0);
+      offY = yTier(fh, 0);
+    } else if (pAnim > 1 / 3) {
+      offX = fw * 0.5 - xTier(fw, 1);
+      offY = yTier(fh, 1);
+    } else {
+      // 晚段：X 反向（:50071 -(...)*direction）——挥过身前收到另一侧
+      offX = -(fw * 0.5 - xTier(fw, 2));
+      offY = yTier(fh, 2);
+    }
     ctx.save();
-    ctx.translate(shX, shY);
-    if (p.facing === -1) ctx.scale(-1, 1); // 整体镜像（贴图+姿态），左右完全对称
-    // 工具：完整挥砍弧，尾段轻微加速（斜率 ≈1.2 倍线性）与手部动作收尾对齐；
-    // 使用类：从 -47° 举到静持角 +26°（终点与静持完全一致）
-    const pt = (prog + 0.3 * prog * prog) / 1.3;
-    const arc = isTool ? -1.1 + pt * 2.0 : -0.825 + (0.45 + 0.825) * pa;
-    ctx.rotate(arc);
+    ctx.translate(p.cx + p.facing * offX, p.y + offY);
+    if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
+    ctx.rotate(rot);
     if (ar) {
-      const s = 0.9;
-      const w = ar.sw * s, h = ar.sh * s;
-      // 工具/武器：沿挥砍方向从手中伸出；
-      // 使用类：起始向外举起（0.62w），X 回拉用平方曲线，收尾落到静持位（-0.35w）
-      const ox = isTool ? 0 : w * (0.62 - 0.97 * pb);
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, ox, -h, w, h);
+      // 原版 origin = (fw*0.5*-dir, fh)（DrawPlayer_HeldItem）→ 贴图左上 = 握点 - origin
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, fw / 2, -fh, ar.sw, ar.sh);
     } else if (icon) {
-      ctx.drawImage(icon, isTool ? 0 : 14 * (1 - 0.97 * pb), -14, 14, 14);
+      ctx.drawImage(icon, 7, -14, 14, 14);
     }
     ctx.restore();
   }
@@ -1892,6 +1930,22 @@ export class Renderer {
     // 图例
     ctx.fillStyle = '#666';
     ctx.fillText('绿=主角 橙=中心 红=怪物 蓝=动物 黄=鼠标', 14, 136);
+  }
+
+  /** 入侵进度条（原版进度已完成的百分比；Boss 条下方 30px） */
+  private drawInvasionBar(ctx: CanvasRenderingContext2D, viewW: number, invasion: { name: string; pct: number }) {
+    const w = Math.min(560, viewW - 200);
+    const x = (viewW - w) / 2, y = 28 + 30;
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x - 3, y - 3, w + 6, 26);
+    ctx.fillStyle = '#10305A';
+    ctx.fillRect(x, y, w, 20);
+    ctx.fillStyle = '#D0A020';
+    ctx.fillRect(x, y, w * Math.max(0, Math.min(1, invasion.pct)), 20);
+    ctx.font = 'bold 13px sans-serif';
+    ctx.fillStyle = '#FFF';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${invasion.name}  ${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`, viewW / 2, y + 15);
   }
 
   private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number }) {

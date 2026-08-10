@@ -308,9 +308,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   if (rot < 0) rot += 6.283; else if (rot > 6.283) rot -= 6.283;
   e.spin = rot;
 
-  // 白天/玩家死:上飞离场(Game.ts 日出剔除发"逃走"提示)
+  // 白天/玩家死:上飞离场(原版 :26585/:27208 vy-=0.04 + EncourageDespawn(10))
   if (game.world.clock.isDay || player.dead) {
     e.vy -= 0.04;
+    e.encourageDespawn(10); // 离屏即消(Enemy 打 bossFled,Game 不播击败/不记账)
     e.x += e.vx; e.y += e.vy;
     return;
   }
@@ -552,6 +553,7 @@ export function skeletronPrimeAI(e: Enemy, game: GameHooks, player: Player | nul
     if (e.vy < 0) e.vy *= 0.95;
     e.vx *= 0.95;
     if (e.vy > 13) e.vy = 13;
+    e.encourageDespawn(10); // 离屏即消(bossFled,不播击败)
   }
   e.facing = e.vx > 0 ? 1 : -1;
   e.x += e.vx;
@@ -830,6 +832,7 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.x += e.vx; e.y += e.vy;
     driveChain(e, 44);
     if (e.y > game.world.rockLevel * TILE) {
+      e.bossFled = true; // 黎明钻地撤离=非击杀(Game 不播击败/不记账)
       for (let s: Enemy | null = e; s; s = s.wormNext) s.dead = true;
     }
     return;

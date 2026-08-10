@@ -293,10 +293,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function showMultiplayerSelect() {
     ui.closeAll();
+    titleMenu?.destroy();
+    titleMenu = null;
+    let panelRoot: HTMLElement | null = null;
+    const closePanel = () => { panelRoot?.remove(); panelRoot = null; };
     const panel = new MultiplayerSelect({
-      onJoin: (ip) => {
-        const url = `ws://${ip}:7777`;
-        ui.closeAll();
+      onJoin: (ipRaw) => {
+        // R12：允许 host / host:port 两种输入；面板先移除（R13：防堆叠 + 进游戏挡输入）
+        const ip = ipRaw.trim();
+        const url = ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`;
+        closePanel();
         ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
         makeGame().joinNetGame(url, (label, p) => {
           ui.showProgress(label, 0.1 + p * 0.8);
@@ -308,9 +314,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           showTitle();
         });
       },
-      onBack: () => showTitle(),
+      onBack: () => { closePanel(); showTitle(); },
     });
-    root.appendChild(panel.root);
+    panelRoot = panel.root;
+    root.appendChild(panelRoot);
   }
 
   function showCharacterSelect() {
@@ -503,6 +510,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     backToTitle: showTitle,
     devMode: () => devMode,
     joinGame: (ip: string) => joinGame(ip), // 探针/联机调试桥
+    loadJson: (text: string) => loadFromJson(text), // 读自有 json 存档（探针）
   };
 
   return {

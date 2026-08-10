@@ -41,6 +41,8 @@ export interface WorldPacket {
   crimson: boolean; dungeonX: number; dungeonY: number; jungleX: number;
   exploredVersion: number;
   clock: { timeOfDay: number; dayCount: number };
+  /** 入侵五元组（主线程生成 worker 不产生入侵，恒为 0；读档路径不走此包） */
+  invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   chests: ChestData[];
   signs: Array<{ x: number; y: number; text: string }>;
   trees: Array<{ x: number; y: number; h: number }>;

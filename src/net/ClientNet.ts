@@ -23,6 +23,8 @@ export interface RemotePlayerState {
 export interface ClientNetHooks {
   /** 世界组装完成（全部初始 strip 到齐 + PlayerSpawn）——Game 进 loadWorld */
   onWorldReady: (world: World) => void;
+  /** 运行期晚到 strip 的落地区域（Game 负责整块标脏 chunk + 小地图） */
+  onSectionArrived?: (rect: { x0: number; y0: number; w: number; h: number }) => void;
   /** 进度（label, p 0..1） */
   onProgress?: (label: string, p: number) => void;
   /** 聊天 */
@@ -44,6 +46,7 @@ export class ClientNet {
   /** 组装中的世界（收到 msg7 建骨架，strip 到齐后交给 onWorldReady） */
   private pendingWorld: World | null = null;
   private pendingStrips = 0;
+  private pendingStripsTotal = 0;
   private worldDelivered = false;
   /** 本地 tile 变更上报队列（TileStore.netReporter 收集） */
   private tileQueue: TileOp[] = [];
@@ -58,11 +61,25 @@ export class ClientNet {
     this.hooks = hooks;
   }
 
+  private pingTimer: ReturnType<typeof setInterval> | null = null;
+
   connect(url: string) {
     this.active = true;
-    const ws = new WebSocket(url);
+    let ws: WebSocket;
+    try {
+      ws = new WebSocket(url);
+    } catch (e) {
+      // R12 修复：非法 URL 同步抛异常 → 转为 reject 语义（onKick）而非穿透调用栈
+      this.active = false;
+      this.hooks.onKick?.(`地址无效：${(e as Error).message}`);
+      return;
+    }
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
+    // R9：独立 30s 心跳——暂停/后台（fixedUpdate 停跑）也不再被服务器 120s 看门狗踢
+    this.pingTimer = setInterval(() => {
+      this.send(new NetWriter(Msg.Ping).f64(performance.now()).finish());
+    }, 30000);
     ws.onopen = () => {
       // Hello（对齐原版 msg1：版本校验）。连接时 Game.player 可能尚未创建（joinNetGame
       // 先连后 loadWorld）——外观名走可选链兜底
@@ -87,8 +104,14 @@ export class ClientNet {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(frame);
   }
 
+  /** 请求玩家位置周围的 strip（R3 移动续传：跨条带边界时由 Game 调用） */
+  requestSection(cx: number, cy: number) {
+    this.send(new NetWriter(Msg.SpawnTileData).i32(Math.floor(cx)).i32(Math.floor(cy)).finish());
+  }
+
   disconnect() {
     this.active = false;
+    if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.ws?.close();
     this.ws = null;
   }
@@ -117,15 +140,23 @@ export class ClientNet {
       }
       case Msg.StatusText: {
         this.pendingStrips = r.u16();
+        this.pendingStripsTotal = Math.max(1, this.pendingStrips);
         this.hooks.onProgress?.('接收世界数据', 0);
         return;
       }
       case Msg.TileSection: {
-        if (!this.pendingWorld) return;
-        decodeStrip(this.pendingWorld.store, r);
-        if (this.pendingStrips > 0) {
-          this.pendingStrips--;
-          this.hooks.onProgress?.('接收世界数据', 0.5);
+        // R3 修复：初始组装期写入 pendingWorld；运行期（已进世界）晚到的 strip
+        // 直写 gameWorld 并返回区域（调用方负责整块标脏——见 requestSection 回调）
+        if (this.pendingWorld) {
+          decodeStrip(this.pendingWorld.store, r);
+          if (this.pendingStrips > 0) {
+            this.pendingStrips--;
+            // 进度按剩余比例推进（此前恒 0.5 不动）
+            this.hooks.onProgress?.('接收世界数据', this.pendingStripsTotal > 0 ? 1 - this.pendingStrips / this.pendingStripsTotal : 0.5);
+          }
+        } else if (this.gameWorld) {
+          const rect = decodeStrip(this.gameWorld.store, r);
+          if (rect && this.hooks.onSectionArrived) this.hooks.onSectionArrived(rect);
         }
         return;
       }
@@ -139,6 +170,12 @@ export class ClientNet {
           this.hooks.onProgress?.('完成', 1);
           this.hooks.onWorldReady(this.pendingWorld);
           this.pendingWorld = null;
+          // R2 修复：进世界后重发外观——连接时 player 可能尚未创建/外观未应用，
+          // 此刻 Game.player 必然就绪（onWorldReady 已被 loadWorld 消费）
+          const p3 = this.game.player as { appearance?: unknown } | undefined;
+          if (p3?.appearance) {
+            this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(JSON.stringify(p3.appearance)).finish());
+          }
         }
         return;
       }
@@ -250,9 +287,17 @@ export class ClientNet {
   /** TileStore.netReporter 注入点；netSuppress 期间（应用远端操作）不收集 */
   reportTileOp(op: TileOp) {
     if (!this.active) return;
-    if (this.tileQueue.length >= 256) return; // 防爆
+    if (this.tileQueue.length >= 256) {
+      // R4：超限不再静默丢（静默分叉不可恢复）——告警后仍丢但留下痕迹
+      if (!this._overflowWarned) {
+        this._overflowWarned = true;
+        console.warn('[net] tile 上报队列溢出（单 tick >256 op），丢弃后续——本地与远端将分叉');
+      }
+      return;
+    }
     this.tileQueue.push(op);
   }
+  private _overflowWarned = false;
 
   /** Game 每 fixedUpdate 调用：冲洗 tile 队列 + 玩家状态上报（变化驱动 + 66ms 节流） */
   tick() {
@@ -296,18 +341,21 @@ export class ClientNet {
     const st = this.gameWorld?.store;
     if (!st) return;
     st.netSuppress = true;
-    for (const o of ops) {
-      if (o.x < 0 || o.y < 0 || o.x >= st.w || o.y >= st.h) continue;
-      switch (o.a) {
-        case TileOpAction.SetTile: st.setTile(o.x, o.y, o.v, o.fx, o.fy); break;
-        case TileOpAction.SetWall: st.setWall(o.x, o.y, o.v); break;
-        case TileOpAction.SetHalfBrick: st.setHalfBrick(o.x, o.y, !!o.v); break;
-        case TileOpAction.SetSlope: st.setSlope(o.x, o.y, o.v); break;
-        case TileOpAction.SetActuated: st.setActuated(o.x, o.y, !!o.v); break;
-        case TileOpAction.SetWire: st.setWire(o.x, o.y, o.v); break;
+    try {
+      for (const o of ops) {
+        if (o.x < 0 || o.y < 0 || o.x >= st.w || o.y >= st.h) continue;
+        switch (o.a) {
+          case TileOpAction.SetTile: st.setTile(o.x, o.y, o.v, o.fx, o.fy); break;
+          case TileOpAction.SetWall: st.setWall(o.x, o.y, o.v); break;
+          case TileOpAction.SetHalfBrick: st.setHalfBrick(o.x, o.y, !!o.v); break;
+          case TileOpAction.SetSlope: st.setSlope(o.x, o.y, o.v); break;
+          case TileOpAction.SetActuated: st.setActuated(o.x, o.y, !!o.v); break;
+          case TileOpAction.SetWire: st.setWire(o.x, o.y, o.v); break;
+        }
       }
+    } finally {
+      st.netSuppress = false; // R5：异常安全复位（否则 suppress 永久卡死上报）
     }
-    st.netSuppress = false;
   }
 
   /** 聊天发送 */

@@ -11,7 +11,8 @@ export type SfxName =
   | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
   | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
   | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
-  | 'beeSummon'; // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
+  | 'beeSummon'  // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
+  | 'thunder';   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -40,6 +41,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
   throw: ['Item_1'],
   explosion: ['Item_14'],
   beeSummon: ['Item_173'],
+  thunder: ['Thunder_0', 'Thunder_1', 'Thunder_2', 'Thunder_3', 'Thunder_4', 'Thunder_5'],
   // 以下无原版素材，走合成
   drink: [],
 };
@@ -83,6 +85,41 @@ export class Sfx {
   /** 按逻辑名预热（WAV_MAP 展开到具体文件） */
   preloadNames(names: SfxName[]) {
     for (const n of names) for (const f of WAV_MAP[n] ?? []) this.ensureBuffer(f);
+  }
+
+  // ---- 雨声层（原版 XACT 循环层的程序化近似：白噪 + lowpass，gain=cloudAlpha 驱动） ----
+  private rainGain: GainNode | null = null;
+  private rainSrc: AudioBufferSourceNode | null = null;
+  /** 设置雨声强度 0-1（每帧调用；0 时静音不拆节点——重启有冷启动开销） */
+  setRain(vol: number) {
+    const ctx = this.ensure(true);
+    if (!ctx) return;
+    if (!this.rainGain) {
+      // 2 秒白噪循环 → lowpass(900Hz) → gain
+      const len = ctx.sampleRate * 2;
+      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
+      const d = buf.getChannelData(0);
+      let last = 0;
+      for (let i = 0; i < len; i++) {
+        // 简单一阶低通白噪（棕噪声听感更接近雨）
+        last = last * 0.94 + (Math.random() * 2 - 1) * 0.06;
+        d[i] = last * 3;
+      }
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = 900;
+      const g = ctx.createGain();
+      g.gain.value = 0;
+      src.connect(lp).connect(g).connect(ctx.destination);
+      src.start();
+      this.rainGain = g;
+      this.rainSrc = src;
+    }
+    const v = Math.max(0, Math.min(1, vol)) * this.master * 0.5;
+    this.rainGain.gain.setTargetAtTime(v, ctx.currentTime, 0.4);
   }
 
   /** 世界声距离衰减（LegacySoundPlayer.cs:160 SoundAttenuationDistance = 2500px） */

@@ -8,6 +8,7 @@ import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
+import { weatherToSave } from '../world/weather/Weather';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -45,6 +46,9 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
     timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
     chests: world.chests, signs: world.signs, flags: world.flags,
+    weather: weatherToSave(world.weather),
+    invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
+      x: world.invasionX, delay: world.invasionDelay },
   };
   const playerData: SaveData['player'] = {
     hp: player.hp, x: player.x, y: player.y,
@@ -94,7 +98,15 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   if (data.header.jungleX !== undefined) world.jungleX = data.header.jungleX;
   world.clock.timeOfDay = data.clock.timeOfDay;
   world.clock.dayCount = data.clock.dayCount;
+  if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
+    world.invasionType = data.invasion.type;
+    world.invasionSize = data.invasion.size;
+    world.invasionSizeStart = data.invasion.sizeStart;
+    world.invasionX = data.invasion.x;
+    world.invasionDelay = data.invasion.delay;
+  }
   world.chests = data.chests;
+  if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;
   if (data.signs) world.signs = data.signs;
 

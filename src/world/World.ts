@@ -1,5 +1,6 @@
 // 世界门面：TileStore + 元数据 + 实体容器 + 昼夜时钟
 import { TileStore } from './TileStore';
+import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
@@ -42,6 +43,9 @@ export class World {
   /** 地狱顶（原版 UnderworldLayer = maxTilesY-200；TerrainPass 设定，SceneMetrics/BGM/背景共用） */
   lavaLine = 0;
   clock: Clock;
+  /** 天气系统（WeatherState 状态机；存档/wld 导入经 applyWeatherSave 回填） */
+  weather = new WeatherState();
+  applyWeather(s: Partial<WeatherSave>) { applyWeatherSave(this.weather, s); }
   chests: ChestData[] = [];
   /** 墓碑碑文（原版 Sign 系统的最小子集）：锚点 = 墓碑 tile 左上格 */
   signs: Array<{ x: number; y: number; text: string }> = [];
@@ -61,6 +65,17 @@ export class World {
    *  缺省 0=未知，使用处以 groundLevel 回退 */
   dungeonY = 0;
   jungleX = 0;             // 丛林位置
+  // ---- 入侵系统持久化状态（原版 WorldFile.cs:1306-1339 存档五元组）----
+  /** 当前入侵类型（InvasionID：0=无 1=哥布林 2=雪人军团 3=海盗；4=火星后续） */
+  invasionType = 0;
+  /** 剩余入侵点数（击杀扣减，≤0 即胜利） */
+  invasionSize = 0;
+  /** 入侵开始总点数（进度条分母） */
+  invasionSizeStart = 0;
+  /** 入侵前线图块 X（向 spawnX 推进；启动时 = 世界左右边缘） */
+  invasionX = 0;
+  /** 入侵冷却天数（黎明 -1；1.4.5.6 事实闲置，仅存档位） */
+  invasionDelay = 0;
   /** TreeTops 13 区域变体（v≥211 wld 权威；索引 0-3 森林/5 丛林/6 雪/7 神圣） */
   treeTops: number[] = [];
 

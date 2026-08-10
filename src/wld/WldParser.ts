@@ -42,6 +42,11 @@ export interface WldWorld {
   tiles: WldTileData;
   chests: WldChest[];
   npcs: WldNPC[];
+  /** 天气头字段（v>273 才有；更早版本晴天） */
+  weather?: {
+    raining: boolean; rainTime: number; maxRaining: number;
+    cloudBGActive: number; numClouds: number; windSpeedTarget: number;
+  };
 }
 
 export class WldParseError extends Error {}
@@ -139,10 +144,10 @@ export function parseWld(buf: Uint8Array): WldWorld {
   r.i32(); r.i32(); r.i32(); r.f64(); // invasion
   if (version >= 118) r.f64(); // slime rain
   if (version >= 113) r.u8(); // sundial
-  r.boolean(); r.i32(); r.f32(); // rain
+  const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
   r.i32(); r.i32(); r.i32(); // ore tiers
   for (let i = 0; i < 8; i++) r.u8(); // bg styles
-  r.i32(); r.i16(); r.f32(); // clouds/wind
+  const cloudBGActive = r.i32(); const numClouds = r.i16(); const windSpeedTarget = r.f32(); // clouds/wind
   // angler
   {
     const n = r.i32();
@@ -273,6 +278,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     groundLevel, rockLevel, time, dayTime, isCrimson, hardMode, gameMode,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
+    weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget },
   };
 }
 

@@ -140,10 +140,27 @@ export class VanillaSpawner {
   constructor(private world: World) {}
 
   /** 玩家级 Zone 旗标（原版 Spawner.SetSpawnFlags L300：ZoneDungeon = player.ZoneDungeon——
-   *  SceneMetrics 按玩家中心窗口判定，与落脚点无关）。Game 每帧刷怪前调用 */
-  setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean): void {
+   *  SceneMetrics 按玩家中心窗口判定，与落脚点无关）。Game 每帧刷怪前调用。
+   *  invaders = ShouldSpawnInvasionEnemies(NPC.cs:352，入侵前线 3000px 内的地表玩家)；
+   *  activeIds = 场上存活 NPC 的 vanillaId 集（选表 AnyNPCs 去重用） */
+  invaders = false;
+  activeIds: Set<number> = new Set();
+  setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
+    invaders = false, activeIds: Set<number> = new Set()): void {
     this.ZoneDungeon = zoneDungeon;
     this.downedBoss3 = downedSkeletron;
+    this.invaders = invaders;
+    this.activeIds = activeIds;
+  }
+
+  /** 天气注入（Game 每 15 tick 下发）：cloudAlpha（雨强度，雪原刷怪修正）与沙尘暴态（怪池） */
+  rainCloudAlpha = 0;
+  sandstormHappening = false;
+  zoneSandstorm = false;
+  setWeather(cloudAlpha: number, sandstormHappening: boolean, zoneSandstorm: boolean): void {
+    this.rainCloudAlpha = cloudAlpha;
+    this.sandstormHappening = sandstormHappening;
+    this.zoneSandstorm = zoneSandstorm;
   }
 
   /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射）；
@@ -286,6 +303,10 @@ export class VanillaSpawner {
    *  血月/日食/南瓜月/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number): { spawnRate: number; maxSpawns: number } {
+    // 入侵覆盖（L691-695）：rate=20（每帧 1/20 尝试），上限 5*(2+0.3n)（单人 11）
+    if (this.invaders) {
+      return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
+    }
     let spawnRate = 600;
     let maxSpawns = 5;
     const w = this.world;
@@ -335,6 +356,11 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.3);
       maxSpawns = Math.floor(maxSpawns * 1.8);
       if (!this.downedBoss3) spawnRate = 10;
+    }
+    // 雨天雪原（NPC.cs:494-496）：ZoneSnow 且玩家在地表 → max×(1+cloudAlpha) / rate×(1-cloudAlpha+1)/2
+    if (this.ZoneSnow && this.rainCloudAlpha > 0 && playerYpx / 16 < w.groundLevel) {
+      maxSpawns = Math.floor(maxSpawns * (1 + this.rainCloudAlpha));
+      spawnRate = Math.floor(spawnRate * (1 - this.rainCloudAlpha + 1) / 2);
     }
     return { spawnRate, maxSpawns };
   }
@@ -438,6 +464,37 @@ export class VanillaSpawner {
     const hardMode = this.hardMode;
     const t = this.spawnTileType;
     const D = (id: number) => this.spawnNPC(x, y, id, rng);
+    const any = (id: number) => this.activeIds.has(id);
+
+    // ---- 入侵分支（L1333-1401：else if (invaders)，与普通链互斥）----
+    if (this.invaders) {
+      const it = this.world.invasionType;
+      if (it === 1) {
+        // 哥布林（L1335-1360）：召唤师(1/30,困难,唯一)→法师→小兵→弓手→盗贼→兜底战士
+        if (hardMode && !any(471) && N(30)) return D(471);
+        if (N(9)) return D(29);
+        if (N(5)) return D(26);
+        if (N(3)) return D(111);
+        if (N(3)) return D(27);
+        return D(28);
+      }
+      if (it === 2) {
+        // 雪人军团（L1362-1372）：雪球怪 1/7 → 黑帮雪人 1/3 → 兜底 刺客雪人
+        if (N(7)) return D(145);
+        if (N(3)) return D(143);
+        return D(144);
+      }
+      if (it === 3) {
+        // 海盗（L1377-1401；491 飞船为多部件飞行体暂缺，跳过其分支）：
+        // 船长(1/30,唯一)→弩手→鹦鹉→神枪手→海盗→兜底 甲板水手
+        if (N(30) && !any(216)) return D(216);
+        if (N(11)) return D(215);
+        if (N(9)) return D(252);
+        if (N(7)) return D(214);
+        if (N(3)) return D(213);
+        return D(212);
+      }
+    }
 
     // ---- 蜘蛛巢（L1569-1587）：落点墙 62 或 spawnSpider 旗标 ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
@@ -545,6 +602,23 @@ export class VanillaSpawner {
       // 浅层：1/4 丛林蝙蝠 / 1/8 魔腾怪(锚点)
       if (N(4)) return D(51);
       if (N(8)) return this.spawnNPC(x, y, 56, rng, this.spawnTileX, this.spawnTileY);
+    }
+    // ---- 沙尘暴怪池（NPC.cs:3859-3885：Happening && ZoneSandstorm && 沙格落脚）----
+    //  肉前：1/2 雨蚁狮(546)，否则 1/2 秃鹫(61)，否则蚁狮(69)；
+    //  困难：1/20 沙尘元素(541)（场上≤1），1/3 沙虫(510)（≤4 段），其余落常规池
+    if (this.sandstormHappening && this.zoneSandstorm && (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE)) {
+      const any541 = (id: number) => [...this.activeIds].includes(id);
+      if (!hardMode) {
+        if (N(2)) return D(546);
+        else if (N(2)) return D(61);
+        else return D(69);
+      } else {
+        if (N(20) && !any541(541)) return D(541);
+        // 沙虫 510 段数检查以 activeIds 近似（>4 不出）
+        let seg510 = 0;
+        for (const id of this.activeIds) if (id === 510) seg510++;
+        if (seg510 < 4 && N(3)) return D(510);
+      }
     }
     // ---- 沙漠地表（L3859-3928，沙尘暴外简化为沙漠 tile 段）----
     if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE) {

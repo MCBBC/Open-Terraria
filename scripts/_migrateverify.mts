@@ -4,7 +4,7 @@ import { TILE_DEFS, TILE_BY_KEY, TILE_INTERNAL_OF_STABLE } from '../src/data/til
 import fs from 'fs';
 let ok = 0, bad = 0;
 const check = (n: string, c: boolean, x?: unknown) => { if (c) { ok++; console.log('  ✓ ' + n); } else { bad++; console.log('  ✗ ' + n, x ?? ''); } };
-const raw = fs.readFileSync('/tmp/migrated.v3.json', 'utf8');
+const raw = fs.readFileSync(process.argv[2] ?? '/tmp/migrated.v3.json', 'utf8');
 const data = JSON.parse(raw);
 check('version=3 + idScheme', data.version === 3 && data.idScheme === 'sheet');
 const { world } = loadSaveData(data);

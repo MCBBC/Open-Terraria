@@ -6,6 +6,7 @@ import type { World } from '../world/World';
 import type { Player } from '../entities/Player';
 import type { SaveData, SaveMeta } from '../save/serialize';
 import { saveGame } from '../save/SaveFile';
+import { weatherToSave } from '../world/weather/Weather';
 
 const HANDSHAKE_MS = 2000;
 const SAVE_TIMEOUT_MS = 20000;
@@ -44,6 +45,9 @@ export class SaveClient {
       crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
       timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
       chests: world.chests, signs: world.signs, flags: world.flags,
+      weather: weatherToSave(world.weather),
+      invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
+        x: world.invasionX, delay: world.invasionDelay },
     };
     const playerData: SaveData['player'] = {
       hp: player.hp, x: player.x, y: player.y,

@@ -738,6 +738,10 @@ item({ key: 'amethyst_bolt', name: '紫晶法杖', maxStack: 1, value: 900,
 
 // ---- 阶段 6 第九轮:Boss 召唤物(官方:蠕虫食物 70/血腥脊椎 1331/史莱姆王冠 560) ----
 item({ key: 'worm_food', name: '蠕虫食物', maxStack: 20, value: 1, desc: '腐化之地使用:召唤世界吞噬者' });
+// 入侵触发物品（Player.ItemCheck_UseEventItems，Player.cs:43243/43260/43277）
+item({ key: 'goblin_battle_standard', name: '哥布林战旗', vid: 361, maxStack: 20, value: 1, desc: '任意时刻:召唤哥布林军队' });
+item({ key: 'snow_globe', name: '雪球', vid: 602, maxStack: 20, value: 1, desc: '使用:召唤雪人军团' });
+item({ key: 'pirate_map', name: '海盗地图', vid: 1301, maxStack: 20, value: 1, desc: '使用:召唤海盗入侵' });
 item({ key: 'bloody_spine', name: '血腥脊椎', maxStack: 20, value: 1, desc: '猩红之地使用:召唤克苏鲁之脑' });
 item({ key: 'slime_crown', name: '史莱姆王冠', maxStack: 20, value: 1, desc: '任意时刻:召唤史莱姆王' });
 
@@ -887,6 +891,7 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'red_wrench': 10480, 'blue_wrench': 10481, 'green_wrench': 10482, 'yellow_wrench': 10483,
   'wire_cutter': 10484, 'actuator_item': 10485, 'actuation_rod': 10486, 'multicolor_wrench': 10487,
   'grand_design': 10488,
+  'goblin_battle_standard': 10489, 'snow_globe': 10490, 'pirate_map': 10491,
 };
 /** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);

@@ -6,6 +6,7 @@
 
 import { TILE_STABLE_OF_INTERNAL } from '../data/tiles';
 import { ITEM_STABLE_OF_INTERNAL } from '../data/items';
+import type { WeatherSave } from '../world/weather/Weather';
 
 class ByteWriter {
   buf = new Uint8Array(1 << 16);
@@ -60,6 +61,8 @@ export interface SaveData {
     wldVersion?: number;
   };
   clock: { timeOfDay: number; dayCount: number };
+  /** 入侵状态（原版 WorldFile.cs:1306-1339 五元组；旧档缺省=无入侵） */
+  invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   tiles: string;   // base64 RLE
   walls: string;
   liquid: string;
@@ -78,6 +81,7 @@ export interface SaveData {
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   flags: Record<string, boolean>;
+  weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
 }
 
 /** 序列化所需的 tilestore 视图(worker 路径=副本包装;主线程=活存储) */
@@ -94,6 +98,8 @@ export interface SaveMeta {
   crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
   timeOfDay: number; dayCount: number;
   chests: SaveData['chests']; signs?: SaveData['signs']; flags: Record<string, boolean>;
+  weather?: WeatherSave;
+  invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
 }
 
 export function rlePairs(values: ArrayLike<number>): Uint8Array {
@@ -161,6 +167,7 @@ export function serializeSave(
       created: Date.now(), playTimeMs,
     },
     clock: { timeOfDay: meta.timeOfDay, dayCount: meta.dayCount },
+    invasion: meta.invasion ?? { type: 0, size: 0, sizeStart: 0, x: 0, delay: 0 },
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),
@@ -171,6 +178,7 @@ export function serializeSave(
     npcs: [],
     signs: meta.signs,
     flags: meta.flags,
+    weather: meta.weather,
     idScheme: 'sheet',
   };
   return JSON.stringify(data);

@@ -34,6 +34,46 @@ export const WIND_MAX = 0.4;
 export const RAIN_MIN = 0.4;
 export const RAIN_MAX = 0.5;
 
+// ================= 存档持久化（纯数据，旧档缺省=晴） =================
+
+/** wld 头与本存档共用的天气快照 */
+export interface WeatherSave {
+  raining: boolean;
+  rainTime: number;
+  maxRaining: number;
+  cloudBGActive: number;
+  numClouds: number;
+  windSpeedTarget: number;
+  sand: { happening: boolean; timeLeft: number; severity: number; intendedSeverity: number };
+}
+
+export function weatherToSave(w: WeatherState): WeatherSave {
+  return {
+    raining: w.raining, rainTime: w.rainTime, maxRaining: w.maxRaining,
+    cloudBGActive: w.cloudBGActive, numClouds: w.numClouds, windSpeedTarget: w.windSpeedTarget,
+    sand: {
+      happening: w.sandstorm.happening, timeLeft: w.sandstorm.timeLeft,
+      severity: w.sandstorm.severity, intendedSeverity: w.sandstorm.intendedSeverity,
+    },
+  };
+}
+
+/** 回填（读档/wld 导入）；cloudAlpha/windCurrent 由缓动自然收敛 */
+export function applyWeatherSave(w: WeatherState, s: Partial<WeatherSave>): void {
+  if (s.raining !== undefined) w.raining = s.raining;
+  if (s.rainTime !== undefined) w.rainTime = s.rainTime;
+  if (s.maxRaining !== undefined) w.maxRaining = s.maxRaining;
+  if (s.cloudBGActive !== undefined) w.cloudBGActive = s.cloudBGActive;
+  if (s.numClouds !== undefined) { w.numClouds = s.numClouds; w.numCloudsTemp = s.numClouds; }
+  if (s.windSpeedTarget !== undefined) w.windSpeedTarget = s.windSpeedTarget;
+  if (s.sand) {
+    if (s.sand.happening !== undefined) w.sandstorm.happening = s.sand.happening;
+    if (s.sand.timeLeft !== undefined) w.sandstorm.timeLeft = s.sand.timeLeft;
+    if (s.sand.severity !== undefined) w.sandstorm.severity = s.sand.severity;
+    if (s.sand.intendedSeverity !== undefined) w.sandstorm.intendedSeverity = s.sand.intendedSeverity;
+  }
+}
+
 export class WeatherState {
   /** 天气周期计数（到点落盘云量并重掷 3600-10800，UpdateWeather 尾段） */
   weatherCounter = 3600;
@@ -45,6 +85,8 @@ export class WeatherState {
   cloudAlpha = 0;
   /** 阴天覆盖（updateCloudLayer：0→大正数衰减到 1→负数消散回 0） */
   cloudBGActive = 0;
+  /** 阴天渐变 0-1（Main.cs:58778-58791：由 cloudBGActive 正负驱动 ±0.0005×dayRate） */
+  cloudBGAlpha = 0;
   numClouds = 200;
   numCloudsTemp = this.numClouds;
   windSpeedTarget = 0;
@@ -256,7 +298,7 @@ export class WeatherState {
     if (resetExtreme) this.extremeWindCounter = this.rng.int(10, 30);
   }
 
-  /** cloudAlpha 缓动（Main.cs:17142-17168，每帧；menuX20 系数我们无菜单场景=不用） */
+  /** cloudAlpha/cloudBGAlpha 缓动（Main.cs:17142-17168 + 58778-58791，每帧） */
   private updateCloudAlpha(ctx: WeatherCtx) {
     const step = 0.0005 * Math.max(1, ctx.dayRate);
     if (this.raining) {
@@ -270,6 +312,16 @@ export class WeatherState {
     } else {
       this.cloudAlpha -= step;
       if (this.cloudAlpha < 0) this.cloudAlpha = 0;
+    }
+    // cloudBGAlpha（阴天渐变）：地表才有（我们按 atmo>0.5 近似 BackgroundEnabled 门）
+    if (ctx.atmo > 0.5) {
+      if (this.cloudBGActive > 0) {
+        this.cloudBGAlpha += step;
+        if (this.cloudBGAlpha > 1) this.cloudBGAlpha = 1;
+      } else {
+        this.cloudBGAlpha -= step;
+        if (this.cloudBGAlpha < 0) this.cloudBGAlpha = 0;
+      }
     }
   }
 

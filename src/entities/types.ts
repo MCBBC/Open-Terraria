@@ -18,7 +18,7 @@ export interface GameHooks {
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
   /** 敌人死亡 */
-  onEnemyKilled(key: string): void;
+  onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 出生敌人 */
   spawnEnemy(key: string, x: number, y: number): void;
   /** 粒子 */

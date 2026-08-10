@@ -40,6 +40,18 @@ export interface MusicInput {
   /** Boss 专属 BGM（MusicID；0=无 Boss）。原版屏幕±5000px 盒内 Boss 链（Main.cs:12155-12312）
    *  先于全部群系分支；每 Boss 一曲，未列入表的 Boss 一律 Boss1(5) */
   bossMusic: number;
+  /** 入侵 BGM（MusicID；0=无）。原版屏内 ±5000px 入侵 NPC 驱动（Main.cs:12186-12192,
+   *  12478-12566 链：海盗 35 > 哥布林 39 > 日食），优先级仅次于 Boss 曲 */
+  invasionMusic?: number;
+  /** 天气（原版 UpdateAudio 天气链 Main.cs:12708/12799）：storm(52) > rain(19) > windy(44)。
+   *  storm=_shouldUseStormMusic（cloudAlpha≥0.5 && |wind|≥0.4 且地表）；rain=cloudAlpha>0；
+   *  windy=cloudAlpha==0 且白天中段 && |windTarget|≥0.4（updateMusicGates 维护） */
+  weather?: {
+    storm: boolean;
+    rain: boolean;
+    windy: boolean;
+    timeOfDay01: number;
+  };
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -97,6 +109,18 @@ export function pickMusic(inp: MusicInput): number {
 
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
+  if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;
+
+  // ---- 天气链（原版 UpdateAudio Main.cs:12708-12712/12799-12803：先于群系、后于 Boss） ----
+  //  暴雨曲 52：_shouldUseStormMusic 且玩家在地表（Center.Y < worldSurface×16 + halfScreen）
+  //  雨曲 19：下雨（cloudAlpha>0）且地表——原版 12035 段
+  //  风日曲 44：_shouldUseWindyDayMusic（白天中段 && |windTarget|≥0.4）
+  if (inp.weather) {
+    const atSurface = inp.centerY < inp.worldSurface * 16 + halfScreen;
+    if (inp.weather.storm && atSurface) return MUSIC.Storm;
+    if (inp.weather.rain && atSurface) return MUSIC.Rain;
+    if (inp.weather.windy) return MUSIC.WindyDay;
+  }
 
   // 城镇曲（L12602-12609：≥3 城镇 NPC 且非墓地；无雨风判定省略）
   if (s.townNPCCount >= 3 && !s.zoneGraveyard) {

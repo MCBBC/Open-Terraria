@@ -952,6 +952,7 @@ export class UI {
     this.root.appendChild(this.chestPanel);
   }
   private chestTitle!: HTMLElement;
+  private weatherLabel: HTMLElement | null = null;
   private chestGrid!: HTMLElement;
 
   private openChestPanel(c: ChestData) {
@@ -1009,6 +1010,17 @@ export class UI {
     this.moveGhost();
     this.paintTrash();
     this.refreshHotbar();
+    // 天气词（statusText 八档 → 中文；沙尘暴叠加）
+    if (this.weatherLabel) {
+      const ZH: Record<string, string> = {
+        Storm: '⛈ 风暴', HeavyRain: '🌧 大雨', Rain: '🌧 雨', LightRain: '🌦 小雨',
+        Overcast: '☁ 阴天', MostlyCloudy: '☁ 多云', Cloudy: '🌤 局部多云',
+        Clear: '☀ 晴朗', PartlyCloudy: '🌤 局部多云',
+      };
+      const w = this.game.world.weather;
+      const sand = w.sandstorm.happening && this.game.scene?.zoneDesert ? '  🏜 沙尘暴' : '';
+      this.weatherLabel.textContent = (ZH[w.statusText()] ?? '') + sand;
+    }
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');
@@ -1107,6 +1119,11 @@ export class UI {
     // 原版左下角消息列(Main.NewText → LegacyChatMonitor;NewText 播 SoundID 12)
     this.chatMonitor?.clear();
     this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
+    // 天气状态标签（原版小地图信息区 GameUI 天气词，Main.cs:46236 八档链）
+    this.weatherLabel?.remove();
+    this.weatherLabel = el('div', '', '');
+    this.weatherLabel.style.cssText = 'position:fixed; right:8px; top:8px; transform:translateX(-254px); font-size:12px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; z-index:5;';
+    this.root.appendChild(this.weatherLabel);
     this.buildInventoryPanel();
     this.buildChestPanel();
     this.buildBuffBar();

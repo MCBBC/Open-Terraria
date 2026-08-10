@@ -9,6 +9,11 @@ import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
 import { findFreeHouse } from '../world/Housing';
+import {
+  INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION,
+  INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
+  tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
+} from '../world/Invasion';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
@@ -153,6 +158,8 @@ export class Game implements GameHooks {
   private lastTime = 0;
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
+  /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
+  private invasionWarn = 0;
   private tickCount = 0;
 
   // 挖掘状态
@@ -491,7 +498,35 @@ export class Game implements GameHooks {
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
-      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar']);
+      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar', 'thunder']);
+    // ---- 天气系统接线：状态机已在 world.weather（存档/wld 导入回填）；
+    //  天空云联动 + 雨滴/沙尘渲染器 attach；hooks 字段每帧由 fixedUpdate 刷新 ----
+    this.renderer.sky.attachWeather(w.weather);
+    this.weatherHooks = {
+      lightAt: (tx, ty) => this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255],
+      atmo: 1,
+      snowRatio: 0,
+      bossDanger: false,
+      sandstormVisuals: false,
+      desertSandTiles: 0,
+      emitSand: (x, y, vx, vy, color) => {
+        this.particles.push({
+          x, y, vx, vy, life: 40 + Math.random() * 30, maxLife: 70,
+          color, size: 2, damp: 0.995, grav: 0,
+        });
+      },
+      sandColors: () => {
+        const s = this.scene;
+        return [
+          { color: '#C8A014', weight: 1 },
+          { color: '#67627A', weight: s.zoneHallow ? 1 : 0.02 },
+          { color: '#872B22', weight: s.zoneCrimson ? 1 : 0.02 },
+          { color: '#D5C4C5', weight: s.zoneCorrupt ? 1 : 0.02 },
+        ];
+      },
+    };
+    this.renderer.weatherFx.attach(w.weather, this.weatherHooks);
+    this.renderer.weatherFxActive = true;
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
@@ -520,6 +555,10 @@ export class Game implements GameHooks {
     this.renderer.minimap = new Minimap(w);
     // 火把锚定（TileObjectData tile4）：支撑被挖掉时火把掉落（WorldGen.TileFrame 火把语义）
     w.store.onTileChanged((x, y) => this.checkTorchDetach(x, y));
+    // 训练假人（tile 378 + NPC 488，TETrainingDummy L131 语义）：
+    // 世界就绪时全图扫描锚点（frameX%36==0 && frameY==0）生成静止假人 NPC；
+    // 放置时单点生成；锚 tile 破坏时由 dummyAI 自行消亡
+    this.spawnAllDummies();
     // 下落沙:任何格变化 → 检查其上方是否为失去支撑的沙族(级联由转换时的
     // setTile 再次触发本监听器自然完成;生成/导入期 setTileSilent 不触发)
     this.sandQueue.length = 0;
@@ -742,7 +781,16 @@ export class Game implements GameHooks {
 
   /** 销毁：停止循环并移除画布（退出到主菜单时调用） */
   destroy() {
+    // R7：联机断开（否则幽灵玩家 + gameWorld 数百 MB 无法回收）
+    this.net?.disconnect();
+    this.net = null;
+    this.remotePlayerProxies = [];
     this.running = false;
+    // 天气：雨声层静音 + 渲染器 detach（防下个世界复用旧状态）
+    this.sfx.setRain(0);
+    this.renderer.weatherFxActive = false;
+    this.renderer.weatherFx.detach();
+    this.renderer.sky.weatherRef = null;
     // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
     // 累积数百 MB 显存 → contextlost/contextrestored 风暴卡死(2026-08-10 trace)
     this.input.destroy();
@@ -799,6 +847,8 @@ export class Game implements GameHooks {
     // 下落沙:消费候选队列(有界,防止沙漠整柱同帧转换尖峰)
     if (this.sandQueue.length) this.drainSandQueue();
     w.clock.tick(dt * 1000);
+    // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
+    this.updateWeather();
     // 昼夜切换：提示 + BGM 变奏
     const isDay = w.clock.isDay;
     if (isDay !== this.lastWasDay) {
@@ -849,11 +899,31 @@ export class Game implements GameHooks {
           break;
         }
       }
+      // 入侵 BGM（Main.cs:12186-12192+12478-12566：屏内 ±5000px 入侵组 NPC 驱动；
+      // 海盗 35 > 哥布林 39，雪人走 Boss3 13）
+      let invasionMusic = 0;
+      if (w.invasionType > 0) {
+        for (const e of this.entities.enemies) {
+          const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
+          if (en.vanillaId == null) continue;
+          const g = INVASION_GROUP[en.vanillaId];
+          if (g !== w.invasionType) continue;
+          if (Math.abs(en.x - this.player.cx) >= 5000 || Math.abs(en.y - this.player.cy) >= 5000) continue;
+          invasionMusic = g === INVASION_PIRATE ? 35 : g === INVASION_SNOW_LEGION ? 13 : 39;
+          break;
+        }
+      }
       const music = pickMusic({
-        scene: this.scene, isDay, bossMusic,
+        scene: this.scene, isDay, bossMusic, invasionMusic,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState,
+        weather: {
+          storm: w.weather.shouldUseStormMusic,
+          rain: w.weather.cloudAlpha > 0,
+          windy: w.weather.shouldUseWindyDayMusic,
+          timeOfDay01: w.clock.timeOfDay,
+        },
       });
       if (music !== this.lastMusic) {
         this.lastMusic = music;
@@ -1049,10 +1119,14 @@ export class Game implements GameHooks {
       // 其余 Boss（史莱姆王/世吞/克脑/蜂后/机械三王…）白天照常战斗——
       // 此前的通用 dayKill 会把白天召唤的史莱姆王秒删（史莱姆王冠原版任意时间可用）
       if (this.boss.dead) {
-        // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
-        {
-          // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
-          const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
+        // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
+        const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
+        if (this.boss.bossFled) {
+          // 离场逃走(天亮撤离/玩家死后 EncourageDespawn 消散/毁灭者黎明钻地):
+          // 非击杀——不播击败公告、不写 downed 标志(原版 EncourageDespawn 语义)
+          this.newText(`${bname}逃走了…`, 150, 150, 150);
+        } else {
+          // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
           // NPC.cs:79833 BroadcastChatMessage("Announcement.HasBeenDefeated_Single", ChatColors.BossOrEvent)
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
@@ -1082,6 +1156,23 @@ export class Game implements GameHooks {
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
         this.checkSeasonal();
+        // 入侵冷却递减（Main.cs:64846-64849；1.4.5.6 无置位点，仅保留语义）
+        if (w.invasionDelay > 0) w.invasionDelay--;
+        // 哥布林军队自然 roll（Main.cs:64927-64936）：需砸过暗影珠/猩红之心；
+        // 未击败过 1/3，已击败 hardMode 1/60 否则 1/30
+        if (w.flags.shadowOrbSmashed && w.invasionType === INVASION_NONE
+          && canStartInvasion(w, player.maxHp)) {
+          const p = w.flags['downedGoblins']
+            ? (w.flags.hardMode ? 1 / 60 : 1 / 30) : 1 / 3;
+          if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_GOBLIN);
+        }
+        // 海盗自然 roll（Main.cs:64938-64944）：hardMode（原版还要求砸过祭坛
+        // altarCount>0——祭坛计数未移植，暂以 hardMode 替代）；已击败 1/60 否则 1/30
+        if (w.flags.hardMode && w.invasionType === INVASION_NONE
+          && canStartInvasion(w, player.maxHp)) {
+          const p = w.flags['downedPirates'] ? 1 / 60 : 1 / 30;
+          if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_PIRATE);
+        }
       }
       if (crossed(0.75)
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
@@ -1099,6 +1190,20 @@ export class Game implements GameHooks {
         this.player.taxTimer -= 3600;
         const housed = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead && (n as TownNPC).home).length;
         this.player.taxMoney = Math.min(250000, this.player.taxMoney + 50 * housed);
+      }
+    }
+    // ---- 入侵状态推进（Main.cs:63775 UpdateInvasion：前线推进+胜利判定+周期公告） ----
+    {
+      const inv = tickInvasion(w, this.invasionWarn);
+      this.invasionWarn = inv.warn;
+      if (inv.announce != null && inv.announce >= 0) {
+        this.newText(Lang.misc(inv.announce), 175, 75, 255);   // ChatColors.BossOrEvent 紫
+      }
+      if (inv.won) {
+        // SetEventFlagCleared（NPC.cs:79557-79564）：首次胜利置旗（灯笼夜奖励无系统，跳过）
+        if (inv.won === INVASION_GOBLIN) w.flags['downedGoblins'] = true;
+        else if (inv.won === INVASION_SNOW_LEGION) w.flags['downedFrost'] = true;
+        else if (inv.won === INVASION_PIRATE) w.flags['downedPirates'] = true;
       }
     }
     // ---- 旅行商人（Main.cs:64484-64505 + WorldGen.SpawnTravelNPC :5188）：
@@ -1216,7 +1321,7 @@ export class Game implements GameHooks {
         const e = ent as Enemy;
         if (e.key !== 'zombie' && e.key !== 'magma_zombie') continue;
         if (Math.hypot(e.cx - this.player.cx, e.cy - this.player.cy) < TILE * 30) {
-          this.sfx.playWav('zombie', 0.6);
+          this.sfx.playWav('zombie', 0.6, e.cx, e.cy);
           break;
         }
       }
@@ -1568,6 +1673,18 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
+    } else if (heldDef && (heldDef.key === 'goblin_battle_standard' || heldDef.key === 'snow_globe' || heldDef.key === 'pirate_map')
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 入侵触发物品（Player.ItemCheck_UseEventItems，Player.cs:43243/43260/43277：
+      // 战旗 ignoreDelay，成功才消耗）
+      const type = heldDef.key === 'goblin_battle_standard' ? INVASION_GOBLIN
+        : heldDef.key === 'snow_globe' ? INVASION_SNOW_LEGION : INVASION_PIRATE;
+      if (this.startInvasionAndAnnounce(type, true)) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 60;
+        this.cb.onInventoryChanged();
+      }
+      this.input.mouseDown = false;
     } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
@@ -1911,7 +2028,7 @@ export class Game implements GameHooks {
     //   tile 201 帧 270（血腥蘑菇）→ item 2887——其余 plant 类无掉落
     if (type !== POT_TILE && TILE_CUT.has(type)) {
       st.setTile(x, y, 0);
-      this.sfx.play('chop');
+      this.sfx.play('chop', 1, x * TILE + 8, y * TILE + 8);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
       const sheet = def.vanilla?.sheet;
       const fx = st.frameX[st.idx(x, y)];
@@ -2289,6 +2406,8 @@ export class Game implements GameHooks {
     if (tileId === T.CHEST) {
       this.world.chests.push({ x: tx, y: ty, items: Array(10).fill(null) });
     }
+    // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
+    if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
     this.player.inv.removeAt(this.player.inv.selected, 1);
     this.player.useTime = 14;
     this.sfx.play('place');
@@ -2557,6 +2676,54 @@ export class Game implements GameHooks {
     for (const key of pressed) this.entityPlateLatch.add(key);
     for (const key of this.entityPlateLatch) {
       if (!pressed.has(key)) this.entityPlateLatch.delete(key);
+    }
+  }
+
+  /** 天气 hooks（afterWorldLoad 构造；字段每帧在 updateWeather 刷新） */
+  private weatherHooks: import('../render/WeatherRenderer').WeatherFxHooks | null = null;
+
+  /** 天气推进（原版 Main.UpdateWeather + updateCloudLayer + 雨调度/沙尘暴，60Hz）：
+   *  atmo = 玩家深度线性近似（worldSurface 以上 1 / rockLevel 以下 0）；雷声按距离衰减；
+   *  雨声层 gain = cloudAlpha×atmo；渲染 hooks（雪区比例/沙尘门）随 scene 刷新 */
+  private updateWeather(): void {
+    const w = this.world;
+    const weather = w.weather;
+    const pty = Math.floor(this.player.cy / TILE);
+    const gl = w.groundLevel;
+    const rl = Math.max(gl + 1, w.rockLevel);
+    const atmo = pty <= gl ? 1 : pty >= rl ? 0 : 1 - (pty - gl) / (rl - gl);
+    weather.update({
+      dayRate: 1,
+      dayTime: w.clock.isDay,
+      playerStrongEnough: this.player.maxHp >= 120,
+      atmo,
+      aboveRockLayer: pty < rl,
+      graveyardIntensity: 0,
+      hardMode: !!w.flags.hardMode,
+      onThunder: (distPx) => {
+        // 原版 SoundID 43：thunderDistance×15px 处发声——按距离衰减近似
+        const vol = Math.max(0.15, 1 - distPx / 2400);
+        this.sfx.play('thunder', vol);
+      },
+      onSandstormToggle: (happening) => {
+        this.cb.onToast(happening ? '🏜 沙尘暴来了！' : '沙尘暴平息了');
+      },
+    });
+    // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]）
+    if (weather.coinRainPending) {
+      weather.coinRainPending = false;
+      this.cb.onToast('💰 天上掉金币了！');
+    }
+    // 雨声层（程序化棕噪近似 XACT 循环层）
+    this.sfx.setRain(weather.cloudAlpha * atmo);
+    // 渲染 hooks 刷新
+    const hooks = this.weatherHooks;
+    if (hooks) {
+      hooks.atmo = atmo;
+      hooks.bossDanger = !!this.boss;
+      hooks.snowRatio = this.scene.zoneSnow ? 0.7 : 0; // zone 级近似（SceneMetrics 无雪格计数）
+      hooks.sandstormVisuals = weather.sandstorm.happening && this.scene.zoneDesert && pty < gl + 30;
+      hooks.desertSandTiles = this.scene.zoneDesert ? 400 : 0; // zone 级近似（EmitDust 门 ≥100）
     }
   }
 
@@ -3013,7 +3180,7 @@ export class Game implements GameHooks {
       if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
-      if (!this.sfx.playFiles(e.def.hitSound)) this.sfx.play('hit');
+      if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
       const crit = Math.random() < 0.04; // 原版近战基础暴击 4%（Player.meleeCrit）
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）
@@ -3042,8 +3209,22 @@ export class Game implements GameHooks {
     // 原版 Spawner 1:1（VanillaSpawner.ts）：选点+选怪全部按 SpawnAnNPC 链
     if (!this.vanillaSpawner) this.vanillaSpawner = new VanillaSpawner(w);
     // 原版 Spawner.SetSpawnFlags：地牢旗标取玩家 SceneMetrics（15 tick 刷新的 scene），
-    // downedBoss3（杀过骷髅王）决定地牢出 守卫/常规池
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron);
+    // downedBoss3（杀过骷髅王）决定地牢出 守卫/常规池；
+    // invaders = ShouldSpawnInvasionEnemies（NPC.cs:352：入侵前线 3000px 内的地表玩家）；
+    // activeIds = 场上存活 NPC 集（入侵选表 AnyNPCs 去重）
+    const invaders = shouldSpawnInvasionEnemies(w, p.cx, p.cy, this.camera.viewH / (this.camera.zoom || 1));
+    const activeIds = new Set<number>();
+    for (const e of this.entities.enemies) {
+      const en = e as Enemy;
+      if (!en.dead && en.vanillaId != null) activeIds.add(en.vanillaId);
+    }
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds);
+    // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
+    this.vanillaSpawner.setWeather(
+      w.weather.cloudAlpha,
+      w.weather.sandstorm.happening,
+      !!this.scene?.zoneDesert && p.cy / 16 < w.groundLevel + 30,
+    );
     // TrySpawnAnNPC L23：nearbyActiveNPCs >= maxSpawns 拒绝
     // （原版 nearbyActiveNPCs = 附近 NPC 的 npcSlots 加权和；我们的怪全部由 spawner 生成
     //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
@@ -3250,6 +3431,8 @@ export class Game implements GameHooks {
   /** 入驻轮（每 7200 tick）：①无家 NPC 见空房入住（QuickFindHome）
    *  ②按优先级链选一名待入驻者 ③有房则入住房内、无房但有入住者则流浪生成 */
   private updateTownNpcArrival() {
+    // 入侵进行中暂停城镇 NPC 入驻（SpawnHomelessNPC :4987 门）
+    if (invasionActive(this.world)) return;
     const npcs = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead) as TownNPC[];
     const has = (key: string) => npcs.some((n) => n.npcKey === key);
     const homes = npcs.filter((n) => n.home).map((n) => n.home!);
@@ -3753,14 +3936,14 @@ export class Game implements GameHooks {
     this.openNpcShop();
   }
 
-  /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失（CheckActive 语义） */
   /** 骷髅商离屏计时（CheckActive timeLeft=750 语义） */
   private skeletonMerchantDespawnT = 0;
-  /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失 */
+  /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失（CheckActive 语义） */
   private updateTravellingMerchant(): void {
     const w = this.world;
     const t = w.clock.timeOfDay;
-    // 骷髅商：离屏累计 750 tick 消失（在屏重置——CheckActive 屏内矩形语义）
+    // 骷髅商：离屏累计 750 tick 消失（在屏重置——CheckActive 屏内矩形语义；
+    // 入侵不影响其消散）
     const sm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant') as TownNPC | undefined;
     if (sm) {
@@ -3769,6 +3952,8 @@ export class Game implements GameHooks {
         if (++this.skeletonMerchantDespawnT >= 750) { sm.dead = true; this.skeletonMerchantDespawnT = 0; }
       } else this.skeletonMerchantDespawnT = 0;
     }
+    // 入侵进行中旅行商不到访（SpawnTravelNPC :5189 门）
+    if (invasionActive(w)) return;
     const tm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'travelling_merchant') as TownNPC | undefined;
     if (tm) {
@@ -3849,6 +4034,22 @@ export class Game implements GameHooks {
       if (canAdd(it)) { stock.push(it); break; }
     }
     return stock.map((id) => [id, ITEM_VALUES[String(id)] ?? 100]);
+  }
+
+  /** 开启入侵并广播 approaching 公告（StartInvasion + InvasionWarning）。
+   *  探针/物品触发共用入口；已进行中返回 false */
+  startInvasionAndAnnounce(type: number, ignoreDelay = false): boolean {
+    const w = this.world;
+    if (!canStartInvasion(w, this.player.maxHp, ignoreDelay)) {
+      if (this.player.maxHp < 200) this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.Need200Hp'));
+      else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
+      return false;
+    }
+    const misc = startInvasion(w, type);
+    if (misc == null || misc < 0) return false;
+    this.invasionWarn = 3600;
+    this.newText(Lang.misc(misc), 175, 75, 255);
+    return true;
   }
 
   /** 季节旗标（checkXMas Main.cs:13054 / checkHalloween :13093：按现实日期） */
@@ -3990,9 +4191,14 @@ export class Game implements GameHooks {
     this.dmgNumbers.push({ x, y, vy: -1.6, value: amount, crit, color, life: 50 });
   }
 
-  onEnemyKilled(key: string) {
-    // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>);此处仅保留旧调用兼容
+  onEnemyKilled(key: string, enemy?: Enemy) {
+    // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>)
     void key;
+    // 入侵击杀扣分（NPC.cs:79021-79054：组号匹配当前入侵类型才计分，加权扣减）
+    if (!enemy || this.world.invasionType <= 0 || enemy.vanillaId == null) return;
+    const group = INVASION_GROUP[enemy.vanillaId];
+    if (!group || group !== this.world.invasionType) return;
+    this.world.invasionSize = Math.max(0, this.world.invasionSize - (KILL_WEIGHT[enemy.vanillaId] ?? 1));
   }
 
   /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。
@@ -4309,6 +4515,36 @@ export class Game implements GameHooks {
       st.setTile(x, y, 0);
       this.entities.add(new FallingBlock(x * TILE + 3, y * TILE + 3, TILE_DEFS[t].key), 'projectiles');
     }
+  }
+
+  // ================= 训练假人（tile 378 + NPC 488，TETrainingDummy 1:1） =================
+  /** 全图扫描 tile 378 锚点生成假人（原版 WorldFile 加载后的 TileEntity 激活） */
+  private spawnAllDummies() {
+    const st = this.world.store;
+    const DUMMY = TILE_BY_KEY['v_378_target_dummy'];
+    if (!DUMMY) return;
+    for (let y = 0; y < st.h; y++) {
+      for (let x = 0; x < st.w; x++) {
+        const i = st.idx(x, y);
+        if (st.type[i] !== DUMMY || st.frameX[i] % 36 !== 0 || st.frameY[i] !== 0) continue;
+        this.spawnDummyAt(x, y);
+      }
+    }
+  }
+
+  /** 在锚点生成假人 NPC（TETrainingDummy.Activate L131：NewNPC(x*16+16, y*16+48, 488)；
+   *  ai0/ai1 = 锚点坐标）。已存在同锚点假人则跳过。 */
+  spawnDummyAt(x: number, y: number) {
+    const dup = this.entities.enemies.some((e) => (e as Enemy).vanillaId === 488
+      && (e as Enemy).dummyAnchor?.[0] === x && (e as Enemy).dummyAnchor?.[1] === y && !e.dead);
+    if (dup) return;
+    const e = Enemy.fromVanilla(488, x * 16 + 16, y * 16 + 48);
+    if (!e) return;
+    e.dummyAnchor = [x, y];
+    e.x = x * 16 + 16 - e.w / 2;
+    e.y = y * 16 + 48 - e.h;
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'enemies');
   }
 
   private checkTorchDetach(x: number, y: number) {
@@ -4654,12 +4890,34 @@ export class Game implements GameHooks {
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
       this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）
       this.remotePlayerProxies,
+      // 入侵进度条（DrawInvasionProgress :47071；nearInvasion 显示门=屏内 ±5000px 有本组 NPC）
+      (() => {
+        const w = this.world;
+        if (w.invasionType <= 0 || w.invasionSizeStart <= 0) return null;
+        const nameKey = w.invasionType === INVASION_PIRATE ? 86 : w.invasionType === INVASION_SNOW_LEGION ? 87 : 88;
+        for (const e of this.entities.enemies) {
+          const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
+          if (en.vanillaId != null && INVASION_GROUP[en.vanillaId] === w.invasionType
+            && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
+            return { name: Lang.inter(nameKey), pct: (w.invasionSizeStart - w.invasionSize) / w.invasionSizeStart };
+          }
+        }
+        return null;
+      })(),
     );
   }
 
   /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld） */
   joinNetGame(url: string, onProgress?: (label: string, p: number) => void): Promise<void> {
     return new Promise((resolve, reject) => {
+      let settled = false;
+      const fail = (reason: string) => {
+        if (settled) return;
+        settled = true;
+        net.disconnect();
+        if (this.net === net) this.net = null;
+        reject(new Error(reason));
+      };
       const net = new ClientNet(this, {
         onProgress: (label, p) => onProgress?.(label, p),
         onWorldReady: (world) => {
@@ -4667,29 +4925,55 @@ export class Game implements GameHooks {
           net.gameWorld = world;
           // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
           world.store.netReporter = (op) => net.reportTileOp(op);
-          this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(resolve, reject);
+          this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
+            if (settled) return;
+            settled = true;
+            resolve();
+          }, (e) => fail(`世界加载失败：${(e as Error).message}`));
+        },
+        onSectionArrived: (rect) => {
+          // R3：晚到 strip 标脏（chunk 重烘焙 + 光照；200×20 逐格 mark 低频可接受）
+          const st = this.world.store;
+          for (let y = rect.y0; y < rect.y0 + rect.h; y += 4) {
+            for (let x = rect.x0; x < rect.x0 + rect.w; x += 4) {
+              if (st.inBounds(x, y)) this.chunks.markDirtyAround(x, y);
+            }
+          }
+          this.lighting.dirty = true;
         },
         onChat: (text, r, g, b) => this.newText(text, r, g, b),
         onKick: (reason) => {
           this.cb.onToast?.(reason);
-          reject(new Error(reason));
+          fail(reason);
         },
       });
       net.connect(url);
-      // 连接失败兜底（10s 未完成握手）
-      setTimeout(() => {
-        if (!net.gameWorld) {
-          net.disconnect();
-          reject(new Error('连接超时'));
-        }
+      // R10：30s 握手超时（计时器在 settle 后清除，不再空跑）
+      const timer = setTimeout(() => {
+        if (!settled && !net.gameWorld) fail('连接超时');
       }, 30000);
+      void timer;
     });
   }
+
+  private lastStripReq = '';
 
   /** 每逻辑帧后处理挥舞命中（在 fixedUpdate 实体更新后调用） */
   postUpdate() {
     // 联机 pump：tile 上报冲洗 + 玩家状态节流发送（docs §4.2）
-    this.net?.tick();
+    if (this.net?.active) {
+      this.net.tick();
+      // R3 移动续传：跨条带（200×20）边界时向服务器请求周围 strip
+      if (this.tickCount % 30 === 0 && this.net.gameWorld) {
+        const sx = Math.floor(this.player.cx / 16 / 200);
+        const sy = Math.floor(this.player.cy / 16 / 20);
+        const key = sx + ',' + sy;
+        if (key !== this.lastStripReq) {
+          this.lastStripReq = key;
+          this.net.requestSection(this.player.cx, this.player.cy);
+        }
+      }
+    }
     this.updateSwingHits();
     // 远端玩家代理同步（渲染前；每 15 帧重建以接纳新进/离场玩家）
     if (this.net && this.tickCount % 15 === 0) this.syncRemotePlayerProxies();
@@ -4703,7 +4987,7 @@ export class Game implements GameHooks {
       if (!rp.active || slot === net.mySlot) continue;
       let proxy = this.remotePlayerProxies.find((p) => (p as unknown as { __netSlot?: number }).__netSlot === slot);
       if (!proxy) {
-        proxy = new Player(rp.x, rp.y, this.player.inv); // 远程共享本地 inv 引用仅作渲染兜底（外观走 appearance）
+        proxy = new Player(rp.x, rp.y, new Inventory()); // R11：独立空背包——不共享本地 inv（否则全员画着本地手持/盔甲）
         (proxy as unknown as { __netSlot?: number }).__netSlot = slot;
       }
       proxy.x = rp.x; proxy.y = rp.y;
@@ -4711,7 +4995,12 @@ export class Game implements GameHooks {
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
       proxy.animTime = (proxy.animTime + 1) % 1e9;
-      try { proxy.appearance = JSON.parse(rp.appearance); } catch { /* 保持默认 */ }
+      // R11'.外观合并：网络侧可能为 {} 或缺字段——仅接受含 hair 的完整对象，
+      // 否则保留 Player 构造的默认外观（空对象会令纸娃娃读 X.r 崩溃）
+      try {
+        const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
+        if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
+      } catch { /* 保持默认外观 */ }
       list.push(proxy);
     }
     this.remotePlayerProxies = list;

@@ -112,8 +112,14 @@ export class SkyRenderer {
   }
 
   /** 原版风场步进(Main.cs:58270-58310):每帧目标随机游走/重掷,钳 ±0.35;
-   *  当前值以 0.0003+|diff|*0.0015 /帧缓动(L58222-58245) */
+   *  当前值以 0.0003+|diff|*0.0015 /帧缓动(L58222-58245)。
+   *  天气系统接入后弃用（weather.update 每帧推进权威风场，此处只读） */
   private updateWind(frames: number): void {
+    if (this.weatherRef) {
+      this.wind = this.weatherRef.windSpeedCurrent;
+      this.windTarget = this.weatherRef.windSpeedTarget;
+      return;
+    }
     for (let f = 0; f < Math.ceil(frames); f++) {
       // 目标随机游走(L58270-58276):1/4 ±0.025 / 1/2 ±0.05 / 其余 ±0.1(×0.001)
       if (this.windRng() < 0.25) this.windTarget += (Math.floor(this.windRng() * 51) - 25) * 0.001;
@@ -162,13 +168,37 @@ export class SkyRenderer {
     });
   }
 
-  /** 维持云量（原版每帧尝试 SpawnCloud；初始铺满，之后顺风补充） */
+  /** 维持云量（原版每帧尝试 SpawnCloud；初始铺满，之后顺风补充）。
+   *  天气联动：attachWeather 后目标云数由 numClouds 驱动（0-200 → 2-14 朵），雨/阴天加密 */
+  private targetCloudCount(viewW: number): number {
+    const base = Math.max(8, Math.round(viewW / 90));
+    if (!this.weatherRef) return base;
+    const density = Math.max(0, Math.min(1, this.weatherRef.numClouds / 200));
+    return Math.max(1, Math.round(base * (0.15 + 0.95 * density)));
+  }
   private maintainClouds(viewW: number, viewH: number) {
+    const target = this.targetCloudCount(viewW);
     let guard = 0;
-    while (this.vclouds.length < 12 && guard++ < 30) {
-      const c = this.spawnCloud(viewW, viewH, this.vclouds.length < 8);
+    while (this.vclouds.length < target && guard++ < 30) {
+      const c = this.spawnCloud(viewW, viewH, this.vclouds.length < target * 0.6);
       if (c) this.vclouds.push(c);
     }
+    // 超出目标：标记回收（淡出后移除）
+    if (this.vclouds.length > target + 2) {
+      const excess = this.vclouds.length - target;
+      let killed = 0;
+      for (const c of this.vclouds) {
+        if (killed >= excess) break;
+        if (!c.kill) { c.kill = true; killed++; }
+      }
+    }
+  }
+
+  /** 天气联动（Game.afterWorldLoad 注入）：风场以 weather 为权威（弃用内部迷你模型），
+   *  云染色在下雨时向灰过渡（原版 cloudAlpha 下云变暗），闪电读 weather.lightning */
+  weatherRef: import('../world/weather/Weather').WeatherState | null = null;
+  attachWeather(w: import('../world/weather/Weather').WeatherState) {
+    this.weatherRef = w;
   }
 
   /** 原版三层绘制（DrawClouds_Distant/Closer/Closest + NextHorizonRenderer.DrawCloud）：
@@ -186,9 +216,17 @@ export class SkyRenderer {
       const w = tex.naturalWidth * c.scale, h = tex.naturalHeight * c.scale;
       const dim = c.scale < 1 ? c.scale * 0.8 : 1; // 原版远景压暗（OriginalColorsForCloud pass1）
       const nightDim = isNight ? 0.25 : 1;
-      const r = Math.round(255 * dim * nightDim);
-      const g = Math.round(255 * (c.scale < 1 ? ((c.scale + 1) / 2) * 0.9 : 1) * nightDim);
-      const b = Math.round(255 * nightDim);
+      let r = Math.round(255 * dim * nightDim);
+      let g = Math.round(255 * (c.scale < 1 ? ((c.scale + 1) / 2) * 0.9 : 1) * nightDim);
+      let b = Math.round(255 * nightDim);
+      // 天气联动：雨/阴天云向灰过渡（原版 cloudAlpha 下云变暗变灰）
+      const wr = this.weatherRef;
+      if (wr && wr.cloudAlpha > 0) {
+        const rainK = wr.cloudAlpha * 0.55;
+        r = Math.round(r * (1 - rainK) + 158 * rainK);
+        g = Math.round(g * (1 - rainK) + 162 * rainK);
+        b = Math.round(b * (1 - rainK) + 168 * rainK);
+      }
       ctx.save();
       ctx.globalAlpha = c.alpha;
       ctx.translate(c.x + w / 2, c.y + h / 2);
@@ -247,6 +285,11 @@ export class SkyRenderer {
     grad.addColorStop(1, bottom);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, viewW, viewH);
+    // 闪电白（原版 Main.cs:63346：bgColor 向白 lerp lightning——纯闪白不画贴图）
+    if (this.weatherRef && this.weatherRef.lightning > 0) {
+      ctx.fillStyle = `rgba(255,255,255,${Math.min(1, this.weatherRef.lightning * 0.85)})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+    }
 
     const isNight = t < 0.27 || t > 0.78;
     // 星星

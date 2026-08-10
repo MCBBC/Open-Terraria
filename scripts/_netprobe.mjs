@@ -38,7 +38,7 @@ console.log('server up');
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const mkPage = async (browser) => {
   const page = await browser.newPage();
-  page.on('pageerror', (e) => console.log('[pageerror]', String(e.message).slice(0, 150)));
+  page.on('pageerror', (e) => console.log('[pageerror]', String(e.message + ' | ' + (e.stack || '')).slice(0, 400)));
   await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await new Promise((r) => setTimeout(r, 2000));
   return page;

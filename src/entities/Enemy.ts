@@ -1,6 +1,7 @@
 // 敌人实体：统一类 + 按 key 分支行为（史莱姆/僵尸/恶魔眼/蝙蝠/克苏鲁之眼及其仆从）
 // + 原版 NPC 数据驱动路径（vanillaId）：属性/AI/音效/贴图来自 vanilla-npcs.json（SetDefaults 提取）
 import { Entity } from './Entity';
+import { TILE_BY_KEY } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
@@ -22,6 +23,8 @@ import { RNG } from '../core/rng';
  *  血肉墙113/双子125,126/骷髅Prime127/毁灭者134/蜂后222/石巨人245/世纪之花262/克脑266/
  *  猪鲨370/月总核心398/异教徒439/光皇636/史莱姆皇后657 */
 const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 398, 439, 636, 657]);
+/** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
+const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
 // AI_003 战士族昼行豁免表（DespawnEncouragement_AIStyle3_Fighters_NotDiscouraged 排除表
 // NPC.cs:60694-60724 + switch 保留集 :60712-60721）：白天地表仍索敌的类型
@@ -30,6 +33,8 @@ const FIGHTER_DAY_ACTIVE = new Set([
   73, 624, 631, 31, 294, 295, 296, 47, 67, 77, 78, 79, 80, 630, 110, 120, 168, 181, 185,
   198, 199, 206, 217, 218, 219, 220, 239, 243, 254, 255, 257, 258, 291, 292, 293,
   379, 380, 464, 470, 424, 411, 409, 415, 419, 425, 427, 428, 429, 508, 524, 525, 526, 527, 580, 582,
+  // 入侵怪（原版昼行：入侵期间不被驱散——哥布林 26-29/111/471、海盗 212-216、雪人 143-145）
+  26, 27, 28, 29, 111, 471, 212, 213, 214, 215, 216, 143, 144, 145,
 ]);
 // AI_002 飘浮眼昼散表（DespawnEncouragement_AIStyle2_FloatingEye_IsDiscouraged, cs:53152-53165）：
 // 白天 && y≤worldSurface → EncourageDespawn(10) + 保持水平方向向上飞离
@@ -159,7 +164,7 @@ export class Enemy extends Entity {
   jumpStartX = 0;        // 史莱姆本次起跳的 x（落地时判定是否白跳）
   chargesLeft = 0;       // EoC 剩余冲撞次数
   dashing = false;       // EoC 冲撞中（无视地形）
-  visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
+  visAngle = Math.PI;    // EoC 显示角度（素材正面朝下:瞳孔角=π/2+θ,盯玩家须 θ=φ−π/2）
   spin = 0;              // EoC 变身旋转进度 0..1
   hpBarT = 0;            // 受击后血条显示计时（tick）
   // ---- EoC(AI_004)专属 ----
@@ -194,6 +199,9 @@ export class Enemy extends Entity {
   aiInit = false;
   /** 原版 timeLeft（CheckActive 屏内每 tick 重置；activeTime=750，非 7500） */
   despawnTimer = 750;
+  /** Boss 离场逃走标记（EncourageDespawn/天亮撤离等非击杀消亡）：
+   *  Game 记账分支据此区分「逃走」（不播击败公告、不写 downed 标志）与「被击败」 */
+  bossFled = false;
   /** 原版 despawnEncouraged（EncourageDespawn 置位，屏内重置清除） */
   despawnEncouraged = false;
   inWater = false;       // 入水检测（溅落声用）
@@ -239,6 +247,7 @@ export class Enemy extends Entity {
     } else if (this.vanilla && !this.wormFollow) {
       const p = hasPlayer ? player : null;
       switch (this.vanilla.aiStyle) {
+        case 92: this.dummyAI(game); break;                            // AI_092 训练假人（NPC 488）
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
         case 3: this.fighterAI(game, p); break;                        // AI_003 战士族（原版通用核）
@@ -330,7 +339,9 @@ export class Enemy extends Entity {
     // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
     // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
     // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
-    if (!this.def.boss || this.despawnEncouraged) {
+    if (this.vanillaId === 488) {
+      // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）
+    } else if (!this.def.boss || this.despawnEncouraged) {
       const dxp = player ? Math.abs(player.cx - this.cx) : Infinity;
       const dyp = player ? Math.abs(player.cy - this.cy) : Infinity;
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
@@ -339,7 +350,10 @@ export class Enemy extends Entity {
         this.despawnEncouraged = false;
       } else {
         this.despawnTimer--;
-        if (this.despawnTimer <= 0) this.dead = true;
+        if (this.despawnTimer <= 0) {
+          if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/玩家死后撤离
+          this.dead = true;
+        }
       }
     }
   }
@@ -486,8 +500,30 @@ export class Enemy extends Entity {
   /** AI_003_Fighters 通用核（NPC.cs:24559-24733，剥离 per-type 特例）：
    *  前方 tile 探测 + 四级跳（2 格墙 -8 / 1 格墙 -7 / 卡半格 -5 / 前方悬空且目标在上 -8 加速），
    *  加速度 0.1、最大速度 1.0（原版 num1/num2 常量），门/高门交互待移植 */
-  private fighterAI(game: GameHooks, player: Player | null) {
+  /** AI_092 训练假人（NPC 488，NPC.cs:40871-40914）：静止站立于锚定 tile（tile 378，
+   *  ai0/ai1 = 锚点 tile 坐标）；锚 tile 被破坏 → 消失。受击显示伤害数字+播声音+
+   *  摇晃动画（shake = clamp(dmg,20,120)，帧由渲染层读取），永不死亡（immortal）。 */
+  dummyShake = 0;          // localAI[0]：受击摇晃强度（20..120，每 tick -1）
+  dummyHitDir = 0;         // localAI[1]：受击方向
+  dummyAnchor: [number, number] | null = null;  // ai[0]/ai[1]：tile 378 锚点
+  private dummyAI(game: GameHooks) {
     const st = game.world.store;
+    const [ax, ay] = this.dummyAnchor ?? [-1, -1];
+    // 锚 tile 378 消失 → 失活（cs:40886-40889）
+    if (ax < 0 || !st.inBounds(ax, ay) || st.type[st.idx(ax, ay)] !== DUMMY_TILE_ID) {
+      this.dead = true;
+      return;
+    }
+    // 摇晃衰减（FindFrame 488 分支 cs:71516-71544 同步逻辑在渲染帧端）
+    if (this.dummyShake > 0) this.dummyShake--;
+    // 静止：仅重力站立
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    this.vx = 0;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    this.hp = this.maxHp; // immortal：血量恒满（cs:14535 lifeMax=1000 + immortal）
+  }
+
+  private fighterAI(game: GameHooks, player: Player | null) {    const st = game.world.store;
     // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
     // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除
@@ -554,7 +590,59 @@ export class Enemy extends Entity {
     }
     // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
     if (this.onGround) this.vx *= 0.85;
+    // ---- 入侵远程攻击（NPC.cs:59464-60085 战士族射击段，入侵弓手/枪手专属）----
+    // ai[1]=瞄准冷却(ai0)、ai[2]=瞄准姿态(ai3)：地面站定 + 有视线 + 距离 < 射程时举枪，
+    // 半程处朝预判点发射（重力下坠补偿 |dx|×0.1，Deadeye 214 为 0 直射）
+    if (player && this.vanillaId != null && Enemy.RANGED_FIGHTERS.has(this.vanillaId)) {
+      const R = Enemy.RANGED_TABLE[this.vanillaId];
+      if (this.ai3 > 0) {           // 瞄准中：减速 + 半程发射
+        if (this.ai0 > 0) this.ai0--;
+        this.vx *= 0.9;
+        this.facing = player.cx > this.cx ? 1 : -1;
+        if (this.ai0 === R.cooldown >> 1 && this.ai0 > 0) {
+          const ox = this.cx, oy = this.cy;
+          // 预判点（cs:59700-59790）：目标中心 + 重力下坠补偿（|dx|×0.1；Deadeye 214 直射）
+          // + 散布 ±40px（原版 rand.Next(-40,41)）——弹体直飞（Dart 敌我对全敌对）
+          let tx = player.cx - ox;
+          let ty = player.cy - oy - (R.drop ? Math.abs(tx) * 0.1 : 0);
+          tx += Math.random() * 80 - 40;
+          ty += Math.random() * 80 - 40;
+          const d = Math.hypot(tx, ty) || 1;
+          const spd = R.speed / d;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
+            .add(new Dart(ox, oy, tx * spd, ty * spd, R.dmg), 'projectiles');
+        }
+        // 移动/冷却尽 → 解除瞄准（cs:60005-60009）
+        if ((this.vy !== 0 && R.drop) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
+      } else if (this.vy === 0 && this.ai0 <= 0 && !player.dead && this.onGround) {
+        // 开瞄（cs:60013-60095）：视线 + 距离 < 射程（Collision.CanHit 简化为同高程无实心格）
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        let los = true;
+        const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 2));
+        for (let s = 1; s < steps; s++) {
+          const lx = Math.floor((this.cx + (dx * s) / steps) / TILE);
+          const ly = Math.floor((this.cy + (dy * s) / steps) / TILE);
+          if (lx >= 0 && ly >= 0 && lx < st.w && ly < st.h && solidAt(lx, ly)) { los = false; break; }
+        }
+        if (los && Math.hypot(dx, dy) < R.range) {
+          this.ai3 = 3;               // 姿态（cs:60080 起的 1-5 分档，本处仅作标记）
+          this.ai0 = R.cooldown;
+          this.vx *= 0.5;
+        }
+      }
+    }
   }
+
+  /** 入侵远程战士参数（NPC.cs:59524-59930 各 type 修正汇总）：
+   *  cooldown=开瞄时长（半程发射，cs:59524 num163）/ speed=弹速（num166）/
+   *  dmg=弹伤（num171）/ range=开瞄距离（num181）/ drop=重力下坠补偿（num168 开关） */
+  private static readonly RANGED_FIGHTERS = new Set([111, 214, 215, 216]);
+  private static readonly RANGED_TABLE: Record<number, { cooldown: number; speed: number; dmg: number; range: number; drop: boolean }> = {
+    111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: true },
+    214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: false },
+    215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: true },
+    216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: true },
+  };
 
   /** AI_008 法师族（Fire Imp 24 / Goblin Sorcerer 29 / Dark Caster 32）：
    *  悬浮 + 周期传送（原版 ai[0] 计时到阈值或目标不可见时 TeleportSearch）+ 三连弹幕（原版 ai[1] volley）。
@@ -1319,7 +1407,7 @@ export class Enemy extends Entity {
     // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(cs:20020-20025) ----
     if (game.world.clock.isDay || player.dead) {
       this.vy -= 0.04;
-      this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, 0.02);
+      this.applyEocRotation(Math.atan2(dy, dx) - Math.PI * 0.5, 0.02);
       this.x += this.vx; this.y += this.vy;
       // 原版此处 return 在状态机之前:ai[2](本作 aiT)不推进 = 冲刺/悬浮计时冻结,
       // 复活后从冻结处继续(fixedUpdate 头部的 aiT++ 在此抵消)
@@ -1373,7 +1461,7 @@ export class Enemy extends Entity {
       }
       case 1: {
         // ---- 冲刺预备(cs:20148-20169/20452-20478):锁定方向即发,P2 起手吼声 ----
-        this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, 0.05);
+        this.applyEocRotation(Math.atan2(dy, dx) - Math.PI * 0.5, 0.05);
         const dashSpd = this.phase === 1 ? 6 : 6.8;
         this.vx = (dx / dist) * dashSpd;
         this.vy = (dy / dist) * dashSpd;
@@ -1439,7 +1527,7 @@ export class Enemy extends Entity {
 
     // ---- 悬浮/非冲刺态的旋转追踪(最短弧;速率分档) ----
     if (this.state !== 2 && this.state !== 5) {
-      this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, rotRate);
+      this.applyEocRotation(Math.atan2(dy, dx) - Math.PI * 0.5, rotRate);
     }
 
     // 移动：EoC 全程无视地形——悬浮飞行体贴图块边缘会卡顿、冲撞后残留在
@@ -1460,6 +1548,14 @@ export class Enemy extends Entity {
       dmg = 5; kbx = 0; kby = 0;
     }
     if (this.iframes > 0) return false;
+    // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，
+    // 受击只记摇晃强度+方向（渲染帧端消费），掉血由 dummyAI 回满
+    if (this.vanillaId === 488) {
+      this.dummyShake = Math.max(20, Math.min(120, dmg));
+      this.dummyHitDir = Math.sign(kbx) || this.dummyHitDir;
+      this.iframes = 8;
+      return true;
+    }
     // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
     const def = this.def.defense ?? 0;
     dmg = Math.max(1, Math.round(dmg - def * 0.5));
@@ -1521,11 +1617,11 @@ export class Enemy extends Entity {
           }
         }
       }
-      game.onEnemyKilled(this.key);
+      game.onEnemyKilled(this.key, this);
       // 死亡专属声：Boss 咆哮；普通怪优先专属 killedSound，无则通用
-      if (this.def.boss) game.playSfx('roar');
-      else if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound);
-      else game.playSfx('killed');
+      if (this.def.boss) game.playSfx('roar', 1, this.cx, this.cy);
+      else if (this.def.killedSound.length) game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
+      else game.playSfx('killed', 1, this.cx, this.cy);
       // 死亡碎裂：与主角同款物理粒子（喷溅/落地反弹/停驻淡出），颜色按怪物类型
       const [c1, c2, c3] = this.def.gore;
       const big = this.def.boss || this.w > 40;
