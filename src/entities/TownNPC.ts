@@ -17,6 +17,8 @@ export class TownNPC extends Entity {
   /** 原版 NPCID（TOWN_NPC_IDS；Renderer 经 atlas.vnpc 取 NPC_{id}.png 贴图条） */
   vanillaId: number;
   facing = 1;
+  /** 随机名字（NPC.getNewNPCNameInner 名字池；无池类型如守卫老人为空串） */
+  givenName = '';
   animT = 0;
   frame = 0;       // 当前贴图帧（原版 frame.Y/帧高）
   frameT = 0;      // 行走帧累加器（≈原版 frameCounter）
@@ -38,6 +40,7 @@ export class TownNPC extends Entity {
     this.y = y - this.h;
     const town = TOWN_NPC_IDS[key];
     this.vanillaId = town?.id ?? 22; // 未登记 key 兜底向导贴图
+    this.givenName = newNpcName(this.vanillaId);
     const v = VANILLA_NPCS[String(this.vanillaId)];
     this.maxHp = this.hp = v?.lifeMax ?? 250;
   }

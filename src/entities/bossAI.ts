@@ -11,8 +11,9 @@ const addProj = (game: GameHooks, p: MagicProj) => {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(p, 'projectiles');
 };
 const addEnemy = (game: GameHooks, e: Enemy) => {
-  e.id = ((game as unknown as { entities: { nextId: number } }).entities.nextId)++;
-  (game as unknown as { entities: { add: (en: unknown, b: string) => void } }).entities.add(e, 'enemies');
+  const em = (game as unknown as { entities?: { nextId?: number; add?: (en: unknown, b: string) => void } }).entities;
+  if (em?.nextId !== undefined) e.id = em.nextId++;
+  em?.add?.(e, 'enemies');
   return e;
 };
 

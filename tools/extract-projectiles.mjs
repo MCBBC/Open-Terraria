@@ -107,7 +107,7 @@ for (const { id, block } of blocks) {
     }
   }
   apply(lines);
-  if (Object.keys(rec).length) data[id] = rec;
+  if (Object.keys(rec).length) data[id] = { ...(data[id] || {}), ...rec }; // 区间与单值重叠时合并（后设覆盖）
 }
 
 writeFileSync(`${ROOT}/game/src/data/vanilla-projectiles.json`, JSON.stringify(data));

@@ -46,14 +46,15 @@ describe('地牢 AI 族', () => {
     expect(e.cx).toBeGreaterThan(20 * TILE); // 朝玩家(+x)移动
   });
 
-  it('火轮(70)：首段竖直后转为水平弹跳，逐轴速度 ≤ 6×1.15', () => {
+  it('火轮(70)：首段竖直后转为水平弹跳，逐轴速度 ≤ 6×2.4', () => {
     const w = makeWorld();
     const e = Enemy.fromVanilla(70, 60 * TILE, 10 * TILE)!;
     tick(e, stubGame(w), 200);
     expect(Math.abs(e.vx) + Math.abs(e.vy)).toBeGreaterThan(1); // 在动
-    // 原版逐轴限速（velocity.X/Y 各 ≤ spd），对角合成可达 √2×spd
-    expect(Math.abs(e.vx)).toBeLessThanOrEqual(6 * 1.15 + 0.01);
-    expect(Math.abs(e.vy)).toBeLessThanOrEqual(6 * 1.15 + 0.01);
+    // 原版速度档 ai[3]=1+Next(15)*0.1 ∈ [1.0,2.4]，逐轴限速（对角合成可达 √2×）
+    const cap = 6 * 2.4 + 0.01;
+    expect(Math.abs(e.vx)).toBeLessThanOrEqual(cap);
+    expect(Math.abs(e.vy)).toBeLessThanOrEqual(cap);
   });
 
   it('刺球(72)：对角移动并在撞墙/撞地后反弹（vy 有翻转）', () => {
