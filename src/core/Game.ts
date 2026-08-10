@@ -914,26 +914,18 @@ export class Game implements GameHooks {
 
     // ---- Boss 逻辑 ----
     if (this.boss) {
-      // EoC(AI_004)白天自漂离,漂远自灭后走 dead 分支出提示;
-      // 35 骷髅王/68 守卫/127 机械骷髅王白天走 AI 内狂暴(伤/防 9999)不剔除;
-      // 其余 Boss 通用日出剔除
-      const eocFlees = this.boss.vanillaId === 4;
-      const skeletronRages = this.boss.vanillaId === 35 || this.boss.vanillaId === 68 || this.boss.vanillaId === 127;
-      const dayKill = w.clock.isDay && !eocFlees && !skeletronRages;
-      if (this.boss.dead || dayKill) {
+      // 原版无通用"日出剔除 Boss"机制：EoC 白天走 AI_004 自漂离、骷髅王族白天狂暴、
+      // 其余 Boss（史莱姆王/世吞/克脑/蜂后/机械三王…）白天照常战斗——
+      // 此前的通用 dayKill 会把白天召唤的史莱姆王秒删（史莱姆王冠原版任意时间可用）
+      if (this.boss.dead) {
         // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
-        if (this.boss.dead) {
+        {
           // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
           const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
           // NPC.cs:79833 BroadcastChatMessage("Announcement.HasBeenDefeated_Single", ChatColors.BossOrEvent)
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
-        }
-        if (dayKill && !this.boss.dead) {
-          this.boss.dead = true;
-          // 黎明逃离(自定义文案,走消息列,BossOrEvent 紫)
-          this.newText(Lang.text('Mods.SandboxWorld.Toast.BossFledAtDawn', ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss'), 175, 75, 255);
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
