@@ -29,6 +29,7 @@ import { scanScene, type SceneFlags } from '../world/SceneMetrics';
 import { pickMusic, newMusicState, bossMusicFor, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
+import { clearPaperDollCache } from '../player/PaperDoll';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
@@ -625,6 +626,9 @@ export class Game implements GameHooks {
     this.chunks?.dispose();
     this.renderer.dispose();
     this.renderer.canvas.remove();
+    // 纸娃娃合成缓存:contextlost 后缓存内容归零且不重画——不清则
+    // "角色/装备/时装全部隐形"(选人界面与游戏内 alike)
+    clearPaperDollCache();
   }
 
   start() {

@@ -16,7 +16,7 @@ log('等待世界就绪...');
 await page.waitForFunction('!!window.__swGame?.world', { timeout: 300000, polling: 1000 });
 log('第一次进世界完成');
 
-// 存档 + 退出
+// 存档 + 退出（走真实 doSave——同步 quickSaveExists 闭包标志，quickLoad 才会执行）
 await page.evaluate(() => { (window as any).__swFlow.doSave(); });
 await new Promise((r) => setTimeout(r, 1000));
 log('quitToMenu');
@@ -38,9 +38,27 @@ await page.evaluate(() => {
 });
 log('quickLoad(第二次,快路径)');
 const t2 = Date.now();
-await page.evaluate(() => (window as any).__swFlow.quickLoad());
-await page.waitForFunction('!!window.__swGame?.world', { timeout: 300000, polling: 500 });
-log(`第二次进世界完成 ${Date.now() - t2}ms`);
+await page.evaluate(() => { (window as any).__quickLoadPromise = (window as any).__swFlow.quickLoad(); });
+// 轮询观察：进度条文本 / 世界就绪 / quickLoad promise 状态
+let entered = false;
+for (let i = 0; i < 90; i++) {
+  await new Promise((r) => setTimeout(r, 2000));
+  const s = await page.evaluate(() => {
+    const g = (window as any).__swGame;
+    const prog = document.querySelector('.sw-progress, [class*=progress]')?.textContent?.trim().slice(0, 60) ?? null;
+    return {
+      hasWorld: !!g?.world,
+      worldW: g?.world?.w ?? 0,
+      prog,
+      settled: (window as any).__quickLoadPromiseSettled ?? null,
+    };
+  }).catch(() => ({ hasWorld: false, worldW: 0, prog: 'EVAL-FAIL', settled: null }));
+  if (i % 5 === 0 || s.hasWorld) log(`poll ${i * 2}s: world=${s.hasWorld}(${s.worldW}) prog="${s.prog}"`);
+  if (s.hasWorld && s.worldW > 0) { entered = true; break; }
+  if (i === 89) log('poll 超时 180s：quickLoad 未完成');
+}
+log(`第二次进世界 ${entered ? '完成' : '未完成'} ${Date.now() - t2}ms`);
+if (!entered) { await browser.close(); process.exit(1); }
 
 // 阶段3：运行 15s（rAF 帧间隔采样 + 模拟走动）
 log('运行采样 15s');

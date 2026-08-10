@@ -425,7 +425,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const mb = json.length / 1024 / 1024;
     void kvSetCompat(json).then((where) => {
       if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
-      else ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+      else {
+        quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+      }
     });
     // 多世界槽位（M3）：登记到 WorldStore
     if (currentWorld) {
@@ -448,6 +451,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     quickLoad,
     importWld,
     quitToMenu,
+    doSave,
     backToTitle: showTitle,
     devMode: () => devMode,
   };

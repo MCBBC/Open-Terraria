@@ -42,6 +42,16 @@ const HAT_HAIR_HEADS = new Set([13, 14, 15, 16, 18, 21, 24, 25, 26, 29, 40, 44, 
 const cache = new Map<string, HTMLCanvasElement>();
 const tintCache = new Map<string, HTMLCanvasElement>();
 
+/** 清空全部合成/调色缓存。
+ *  缓存 canvas 在 GPU contextlost 后内容归零且不会自动重画——不失效就
+ *  "角色/装备/时装全部隐形"(选人界面与游戏内 alike)。退出世界与进世界时调用。 */
+export function clearPaperDollCache(): void {
+  for (const c of cache.values()) { c.width = 0; c.height = 0; }
+  for (const c of tintCache.values()) { c.width = 0; c.height = 0; }
+  cache.clear();
+  tintCache.clear();
+}
+
 function colorKey(color: { r: number; g: number; b: number }): string {
   return `${color.r},${color.g},${color.b}`;
 }
