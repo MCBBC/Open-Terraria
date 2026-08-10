@@ -1,20 +1,23 @@
 // 原版 BGM 系统（LegacyAudioSystem.cs 交叉淡化语义 1:1）：
-// BGM 池按 MusicID 懒建 <audio loop>（audios/music/Music_<id>.ogg，tools/xwb-extract.mjs
-// 从原版 XACT Wave Bank 提取），musicFade[id] ±0.005/帧 逼近目标曲（:281 UpdateCommonTrack /
-// :309 UpdateCommonTrackTowardStopping，60fps ≈ 3.3s 完成淡入）。
-// Maples main/title.mp3 已弃用：标题页用原版 Title(JourneysBeginningWithIntro=50)，
-// 游戏内曲目由 Music.pickMusic 按环境选择链驱动。
+// WebAudio AudioBufferSourceNode 无缝循环（loop=true，解码后内存播放，零接缝）——
+// 修复 <audio loop> 播 mp3 的循环点卡顿 + 切曲冷启动顿挫（原版 XACT 同为解码循环）。
+// musicFade[id] ±0.005/帧 逼近目标曲（:281 UpdateCommonTrack / :309 TowardStopping）。
+// audios/music/Music_<id>.mp3（tools/xwb-extract.mjs 提取）。
 import { MUSIC } from '../data/Music';
 
 const TITLE_ID = MUSIC.TitleIntro; // 50
 
 interface Track {
-  el: HTMLAudioElement;
+  src: AudioBufferSourceNode;
+  gain: GainNode;
   fade: number;   // 0..1（≈原版 Main.musicFade[id]）
 }
 
 export class AudioSystem {
+  private ac: AudioContext | null = null;
   private pool = new Map<number, Track>();
+  private buffers = new Map<number, AudioBuffer>();
+  private decoding = new Set<number>();
   /** 目标曲目（≈原版 Main.curMusic；0 = 静音） */
   curMusic = 0;
   muted = false;
@@ -27,16 +30,51 @@ export class AudioSystem {
     this.startLoop();
   }
 
-  private track(id: number): Track {
-    let t = this.pool.get(id);
-    if (!t) {
-      const el = new Audio(`audios/music/Music_${id}.mp3`);
-      el.loop = true;
-      el.volume = 0;
-      t = { el, fade: 0 };
-      this.pool.set(id, t);
+  private audio(): AudioContext | null {
+    if (!this.ac) {
+      const AC = window.AudioContext ?? (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      if (!AC) return null;
+      this.ac = new AC();
     }
-    return t;
+    if (this.ac.state === 'suspended') this.ac.resume().catch(() => { /* 手势前恢复被拒，播放时重试 */ });
+    return this.ac;
+  }
+
+  /** 解码缓存（每曲一次；解码失败标记 null 防重复请求） */
+  private async buffer(id: number): Promise<AudioBuffer | null> {
+    const hit = this.buffers.get(id);
+    if (hit !== undefined) return hit;
+    if (this.decoding.has(id)) return null; // 解码中：本帧跳过，就绪后 track() 会补建
+    this.decoding.add(id);
+    try {
+      const r = await fetch(`audios/music/Music_${id}.mp3`);
+      if (!r.ok) throw new Error(String(r.status));
+      const buf = await this.ac!.decodeAudioData(await r.arrayBuffer());
+      this.buffers.set(id, buf);
+      return buf;
+    } catch {
+      this.buffers.set(id, null as unknown as AudioBuffer); // 永久失败标记
+      return null;
+    } finally {
+      this.decoding.delete(id);
+    }
+  }
+
+  /** 建立播放源（目标曲就绪后调用；重复调用幂等） */
+  private track(id: number) {
+    const ac = this.audio();
+    if (!ac) return;
+    if (this.pool.has(id)) return;
+    const buf = this.buffers.get(id);
+    if (!buf) return; // 未就绪：ensureTrack 的解码回调里补建
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const gain = ac.createGain();
+    gain.gain.value = 0;
+    src.connect(gain).connect(ac.destination);
+    src.start();
+    this.pool.set(id, { src, gain, fade: 0 });
   }
 
   /** rAF 驱动淡化（原版按游戏帧 ±0.005，这里按 60fps 归一时间步进） */
@@ -55,8 +93,8 @@ export class AudioSystem {
   /** 步进淡化量 d（0.005/帧）：目标曲 fade+=d 至 1，其余 -=d 至 0 并停播 */
   private tickFade(d: number) {
     if (this.muted) {
-      for (const t of this.pool.values()) {
-        if (t.fade > 0) { t.fade = 0; t.el.volume = 0; t.el.pause(); }
+      for (const [id, t] of this.pool) {
+        if (t.fade > 0) { t.fade = 0; t.gain.gain.value = 0; }
       }
       return;
     }
@@ -64,12 +102,16 @@ export class AudioSystem {
       const target = id === this.curMusic ? 1 : 0;
       if (t.fade < target) {
         t.fade = Math.min(target, t.fade + d);
-        if (t.el.paused) t.el.play().catch(() => { /* 手势前播放被拒，淡入重试 */ });
+        // AudioContext 挂起态（浏览器手势前）：gain 无声但源持续跑，恢复后即出声
       } else if (t.fade > target) {
         t.fade = Math.max(target, t.fade - d);
-        if (t.fade === 0) { t.el.pause(); continue; }
+        if (t.fade === 0) {
+          t.src.stop();
+          this.pool.delete(id);
+          continue;
+        }
       }
-      t.el.volume = Math.min(1, t.fade) * this.volume;
+      t.gain.gain.value = Math.min(1, t.fade) * this.volume;
     }
   }
 
@@ -82,7 +124,15 @@ export class AudioSystem {
     if (this.muted) return;
     if (this.curMusic === id) return;
     this.curMusic = id;
-    if (id !== 0) this.track(id); // 预建元素开始缓冲
+    if (id === 0) return;
+    const ac = this.audio();
+    if (!ac) return;
+    // 缓冲未就绪：解码完成后补建源（此时才真正起播，无冷启动顿挫）
+    if (!this.buffers.has(id)) {
+      void this.buffer(id).then((buf) => { if (buf && this.curMusic === id) this.track(id); });
+    } else {
+      this.track(id);
+    }
   }
 
   /** 兼容旧调用：'title' = 原版标题曲；'main' = 交由环境选曲接管（此处仅解除标题曲） */

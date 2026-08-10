@@ -630,11 +630,10 @@ export class Game implements GameHooks {
       if (fire) this.player.buffs.apply(BuffType.Campfire, 0.5);
       this.player.buffs.lanternHeal = heart ? 1 : 0;
     }
-    const wcBoost = heldWC || this.waterCandleNear;
-    // 原版 spawnRate×0.75(≈间隔×4/3)
-    const interval = wcBoost ? Math.ceil(SPAWN_CHECK_INTERVAL / 0.75) : SPAWN_CHECK_INTERVAL;
-    if (this.enemySpawnEnabled && this.spawnTimer >= interval) {
-      this.spawnTimer = 0;
+    // 原版 Main.SpawnNPC 每帧调用（Main.cs:17724），概率门在 TrySpawnAnNPC L30
+    // （Next(spawnRate)==0；spawnRate 修正表见 VanillaSpawner.getSpawnRate）。
+    // 水蜡烛（heldWaterCandle/waterCandleNear）在 getSpawnRate 内修正，不再改节流
+    if (this.enemySpawnEnabled) {
       this.trySpawnEnemy();
     }
 
@@ -2039,15 +2038,24 @@ export class Game implements GameHooks {
     const w = this.world;
     const p = this.player;
     if (p.dead) return;
-    const isDay = w.clock.isDay;
-    const count = this.entities.enemies.filter((e) => !(e as Enemy).def.boss && !(e as Enemy).wormFollow).length;
-    // 水蜡烛(NPC.cs:43241-43247):spawnRate×0.75 且 maxSpawns×1.5
-    const cap = this.heldWaterCandle || this.waterCandleNear ? Math.floor(ENEMY_CAP * 1.5) : ENEMY_CAP;
-    if (count >= cap) return;
     if (this.boss) return;
 
     // 原版 Spawner 1:1（VanillaSpawner.ts）：选点+选怪全部按 SpawnAnNPC 链
     if (!this.vanillaSpawner) this.vanillaSpawner = new VanillaSpawner(w);
+    // TrySpawnAnNPC L23：nearbyActiveNPCs >= maxSpawns 拒绝
+    // （原版 nearbyActiveNPCs = 附近 NPC 的 npcSlots 加权和；我们的怪全部由 spawner 生成
+    //  在玩家附近，直接全量求和。蠕虫段也是独立 NPC，原版同样计入）
+    const nearby = this.entities.enemies.reduce((s, e) => {
+      const en = e as Enemy;
+      if (en.def.boss) return s;
+      return s + (en.vanilla?.npcSlots ?? 1);
+    }, 0);
+    const sHeightPx = this.camera.viewH / (this.camera.zoom || 1);
+    const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
+      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx);
+    if (nearby >= maxSpawns) return;
+    // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
+    if (Math.floor(Math.random() * spawnRate) !== 0) return;
     const viewHalfW = Math.ceil(this.camera.viewW / (this.camera.zoom || 1) / 2 / TILE);
     const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);

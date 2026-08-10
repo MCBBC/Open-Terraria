@@ -201,6 +201,47 @@ export class VanillaSpawner {
   }
 
   // ---- FindSpawnTile（L879-920）----
+  /** GetSpawnRate（L383-668，单机非 remix 分支）：
+   *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
+   *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
+   *  血月/日食/南瓜月/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
+   *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
+  getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number): { spawnRate: number; maxSpawns: number } {
+    let spawnRate = 600;
+    let maxSpawns = 5;
+    const w = this.world;
+    const underworldY = (w.store.h - 200) * 16;
+    if (playerYpx > underworldY) {
+      // L389-392：地狱 maxSpawns×2
+      maxSpawns = Math.floor(maxSpawns * 2);
+    } else if (playerYpx > w.rockLevel * 16 + sHeightPx) {
+      // L402-407：洞穴层 spawnRate×0.4 / max×1.9
+      spawnRate = Math.floor(spawnRate * 0.4);
+      maxSpawns = Math.floor(maxSpawns * 1.9);
+    } else if (playerYpx > w.groundLevel * 16 + sHeightPx) {
+      // L418-422：地下层 spawnRate×0.5 / max×1.7
+      spawnRate = Math.floor(spawnRate * 0.5);
+      maxSpawns = Math.floor(maxSpawns * 1.7);
+    } else if (!this.dayTime) {
+      // L455-459：夜晚 spawnRate×0.6 / max×1.3（血月 ×0.3/×1.8 未实现）
+      spawnRate = Math.floor(spawnRate * 0.6);
+      maxSpawns = Math.floor(maxSpawns * 1.3);
+    }
+    // L596-602：附近怪低于上限 20%/40% 时加速补怪
+    if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
+    else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
+    // L640-646：水蜡烛 spawnRate×0.75 / max×1.5；天空层再 ×0.5
+    if (waterCandle) {
+      spawnRate = Math.floor(spawnRate * 0.75);
+      maxSpawns = Math.floor(maxSpawns * 1.5);
+      if (playerYpx / TILE < w.groundLevel * 0.35) spawnRate = Math.floor(spawnRate * 0.5);
+    }
+    // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
+    if (spawnRate < 60) spawnRate = 60;
+    if (maxSpawns > 15) maxSpawns = 15;
+    return { spawnRate, maxSpawns };
+  }
+
   /** FindSpawnTile（L879-927）+ GetSpawnArea（L841-877）1:1：
    *  spawnArea = 玩家 ±(0.7×全屏格)（均匀取点，不是环带外扩！），
    *  safeArea = 玩家 ±(0.52×全屏格)——生成点必须落在画面外（!safeArea.Contains）。
