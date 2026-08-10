@@ -3163,7 +3163,7 @@ export class Game implements GameHooks {
       .replace(/\{ArmsDealer\}/g, townName('arms_dealer'))
       .replace(/\{Merchant\}/g, townName('merchant'))
       .replace(/\{WorldEvilStone\}/g,
-        Lang.itemName(this.world.crimson ? 203 : 25)   // 原版物品 id：Crimstone/Ebonstone
+        Lang.itemName(this.world.crimson ? 836 : 61)   // ItemID.cs:3211/1661：Crimstone/Ebonstone Block
         ?? (this.world.crimson ? '猩红石' : '黑檀石'));
   }
 
