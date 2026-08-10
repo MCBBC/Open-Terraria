@@ -2670,7 +2670,11 @@ export class Game implements GameHooks {
     }
     // L57505：num10 = rand(7)（expert 才 -1）
     const num10 = R(7);
-    if (num10 === 0 && this.player.hp < this.player.maxHp) {
+    // 载入期液体收敛(waterCheck→killTile→breakTile→smashPot)可能砸水边瓦罐,
+    // 此时 player 尚未创建(afterWorldLoad 尾部)——无主角视为"受伤"走蘑菇分支,
+    // 掉落物随后被 entities.clear() 清掉,无泄漏
+    const pl = this.player;
+    if (num10 === 0 && (!pl || pl.hp < pl.maxHp)) {
       drop(58); // 蘑菇
       if (R(2) === 0) drop(58);
       return;
@@ -3045,17 +3049,25 @@ export class Game implements GameHooks {
     this.cb.onNpcDialog?.(name, this.townNpcChat(npc), buttons);
   }
 
-  /** 台词 = NPC.GetChat(NPC.cs:94974+)type 17/18 分支 1:1。
-   *  事件系统未移植:血月/特殊事件段跳过,走常规池 */
+  /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
+   *  事件系统未移植:血月/灯笼夜/日食/史莱姆雨/DD2/特殊事件段跳过,走常规池。
+   *  曾把未覆盖类型全部落到守卫老人自建文案池——向导会说出"解除诅咒"台词,已修 */
   private townNpcChat(npc: TownNPC): string {
     const p = this.player;
     const w = this.world;
     const dialog = (n: number) => Lang.text(`LegacyDialog.${n}`);
     const r3 = () => Math.floor(Math.random() * 3);
     const r2 = () => (Math.random() < 0.5 ? 0 : 1);
+    // GetChat 在场旗标(cs:94996-95046):其他城镇 NPC 是否在场
+    const present = (id: number) =>
+      this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.vanillaId === id);
+    // downedBoss1/2/3(cs 全局):EoC / 世吞|克脑 / 骷髅王
+    const boss1 = !!(w.flags['downed_4'] || w.flags.downedEyeOfCthulhu);
+    const boss2 = !!(w.flags['downed_13'] || w.flags['downed_266']);
+    const boss3 = !!(w.flags['downed_35'] || w.flags.downedSkeletron);
     if (npc.vanillaId === 17) {
       // 商人(NPC.cs:95077-95105)
-      if (!w.flags.downedEyeOfCthulhu && r3() === 0) {
+      if (!boss1 && r3() === 0) {
         if (p.maxHp < 200) return dialog(1);
         if (p.defense > 10) return dialog(3);
         return dialog(2);
@@ -3073,16 +3085,58 @@ export class Game implements GameHooks {
     }
     if (npc.vanillaId === 18) {
       // 护士(NPC.cs:95104-95190):三成概率提醒老人(!downedBoss3);按血量分档
-      if (r3() === 0 && !w.flags.downedSkeletron) return dialog(32);
+      if (r3() === 0 && !boss3) return dialog(32);
       const ratio = p.hp / p.maxHp;
       if (ratio < 0.33) return dialog(36 + Math.floor(Math.random() * 5)); // 36-40
       if (ratio < 0.66) return dialog(41 + Math.floor(Math.random() * 7)); // 41-47
       return dialog(48 + Math.floor(Math.random() * 4));                   // 48-51
     }
-    // 守卫老人:自有文案(白天闲聊);Boss 在场时专用台词
-    if (npc.npcKey === 'old_man' && this.boss) return Lang.text('Mods.SandboxWorld.NPC.OldManBusy');
-    const pool = [1, 2, 3, 4, 5, 6].map((i) => Lang.text(`Mods.SandboxWorld.NPC.OldMan${i}`));
-    return pool[Math.floor(Math.random() * pool.length)];
+    if (npc.vanillaId === 22) {
+      // 向导(cs:95473):夜晚 173;白天 174-176(血月 170-172/灯笼夜/日食/史莱姆雨未实现)
+      if (!w.clock.isDay) return dialog(173);
+      return dialog(174 + r3());
+    }
+    if (npc.vanillaId === 37) {
+      // 守卫老人(cs:95224-95240):白天 82-84;夜晚(生命<300 或防御<10)85-88,否则 89-92
+      if (!w.clock.isDay) {
+        return dialog(p.maxHp < 300 || p.defense < 10 ? 85 + Math.floor(Math.random() * 4) : 89 + Math.floor(Math.random() * 4));
+      }
+      return dialog(82 + r3());
+    }
+    if (npc.vanillaId === 19) {
+      // 军火商(cs:95195-95203):向导在场+已败骷髅王+非困难 58;护士/树妖/爆破手在场随机互cue;
+      // 常规池 66-68(血月 64/65 未实现)
+      if (present(22) && boss3 && !w.flags.hardMode) return dialog(58);
+      if (present(18) && Math.floor(Math.random() * 5) === 0) return dialog(59);
+      if (present(18) && Math.floor(Math.random() * 5) === 0) return dialog(60);
+      if (present(20) && Math.floor(Math.random() * 5) === 0) return dialog(61);
+      if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(62);
+      if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(63);
+      return dialog(66 + r3());
+    }
+    if (npc.vanillaId === 20) {
+      // 树妖(cs:95204-95245):未败邪恶 Boss 69/332(猩红);军火商/商人/老人在场互cue;
+      // 常规池 77-81(非猩红 77 / 猩红 333 起手)
+      if (!boss2 && r3() === 0) return dialog(w.crimson ? 332 : 69);
+      if (present(19) && Math.floor(Math.random() * 6) === 0) return dialog(70);
+      if (present(17) && Math.floor(Math.random() * 6) === 0) return dialog(71);
+      if (present(37) && Math.floor(Math.random() * 6) === 0) return dialog(72);
+      const r = Math.floor(Math.random() * 5); // 血月 73-76 未实现跳过
+      return r === 0 ? dialog(w.crimson ? 333 : 77) : dialog(77 + r);
+    }
+    if (npc.vanillaId === 38) {
+      // 爆破手(cs:95246-95266):未败邪恶 Boss 93;军火商/护士/树妖在场互cue;
+      // 夜晚 101-104;白天 105-109
+      if (!boss2 && r3() === 0) return dialog(93);
+      if (present(19) && Math.floor(Math.random() * 5) === 0) return dialog(97);
+      if (present(19) && Math.floor(Math.random() * 5) === 0) return dialog(98);
+      if (present(18) && Math.floor(Math.random() * 4) === 0) return dialog(99);
+      if (present(20) && Math.floor(Math.random() * 4) === 0) return dialog(100);
+      if (!w.clock.isDay) return dialog(101 + Math.floor(Math.random() * 4));
+      return dialog(105 + Math.floor(Math.random() * 5));
+    }
+    // 其余类型(依赖未移植系统的 NPC)暂用中性占位
+    return '……';
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */

@@ -223,10 +223,9 @@ function vanillaBeaches({ store, rng, surface }: GenCtx) {
 function vanillaBiomes({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  const __t = <X>(label: string, fn: () => X): X => { const t0 = Date.now(); const r = fn(); console.error(`[biomes] ${label} ${Date.now() - t0}ms`); return r; };
-  __t('ice', () => runIceBiomePass(store, rng, gs));       // 15 Generate Ice Biome
-  __t('grass', () => runGrassPass(store, rng, gs));          // 16 Grass
-  const jx = __t('jungle', () => runJunglePass(store, rng, gs)); // JunglePass
+  runIceBiomePass(store, rng, gs);       // 15 Generate Ice Biome
+  runGrassPass(store, rng, gs);          // 16 Grass
+  const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
   // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
   // 覆盖表面所致;我们补这一步让丛林表面成草皮而非裸土)
@@ -241,35 +240,33 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
       }
     }
   }
-  __t('mudify+grass', () => {
   spreadGrassAll(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!, world.jungleX, Math.floor(store.w * 0.21)); // 17 Mud Caves To Grass(丛林核心区)
-  });
-  __t('desert', () => runDesertPass(store, rng, gs));         // 18 Full Desert
-  __t('islands', () => runFloatingIslandsPass(store, rng, gs)); // 19 Floating Islands
-  __t('mushroom', () => runMushroomPass(store, rng, gs));       // 20 Mushroom Patches
-  __t('marble', () => runMarbleGranitePass(store, rng, gs));  // 21/22 Marble/Granite
-  __t('dirtmud', () => runDirtToMudAndSiltPass(store, rng, gs)); // 23 Dirt To Mud / 24 Silt
-  __t('slush', () => runSlushPass(store, gs));                 // 原版 pass 33 Slush（在 DirtToMud/Silt(25/26) 之后——泥已生成）
-  __t('corruption', () => runCorruptionPass(store, rng, gs));     // 28 Corruption/Crimson
-  __t('dungeon', () => runDungeonPass(store, rng, gs, world.chests)); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  runDesertPass(store, rng, gs);         // 18 Full Desert
+  runFloatingIslandsPass(store, rng, gs); // 19 Floating Islands
+  runMushroomPass(store, rng, gs);       // 20 Mushroom Patches
+  runMarbleGranitePass(store, rng, gs);  // 21/22 Marble/Granite
+  runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
+  runSlushPass(store, gs);                 // 原版 pass 33 Slush（在 DirtToMud/Silt(25/26) 之后——泥已生成）
+  runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
+  runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
   // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
   // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
   // 守卫老人出生/游走锚)——塔心锚点会把老人漏进塔内
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
-  __t('pyramid', () => runPyramidPass(store, rng, gs, world.chests)); // 38 Pyramids(沙岩砖金字塔+宝箱)
-  __t('buriedChests', () => runBuriedChestsPass(store, rng, gs, world.chests)); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
-  __t('surfaceChests', () => runSurfaceChestsPass(store, rng, gs, world.chests)); // 36 Surface Chests(地表木箱)
-  __t('waterChests', () => runWaterChestsPass(store, rng, gs, world.chests)); // 39 Water Chests(水中 style17)
-  __t('wetJungle', () => runWetJunglePass(store, rng, gs));             // 43 Wet Jungle(丛林湿隧道灌水)
-  __t('beehive', () => runBeehivePass(store, rng, gs));               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
-  __t('webs', () => runWebsPass(store, rng, gs));                  // 58 Webs(全局天花板蛛网 runner 51;原版序:Hives后/SpiderCaves前)
-  __t('spiderNest', () => runSpiderNestPass(store, rng, gs, world.chests)); // 63 Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
-  __t('websInSpider', () => runWebsInSpiderCavesPass(store, rng, gs));     // 64 Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
-  __t('temple', () => runTemplePass(store, rng, gs, world.chests));  // 44 Jungle Temple(之字形房间链+走廊+门+宝箱)
-  __t('islandHouse', () => runIslandHousePass(store, rng, gs, world.chests)); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
-  __t('swordShrine', () => runSwordShrinePass(store, rng, gs));          // 附魔剑圣地(竖井+水潭洞+土丘剑)
+  runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
+  runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
+  runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
+  runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
+  runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
+  runBeehivePass(store, rng, gs);               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
+  runWebsPass(store, rng, gs);                  // 58 Webs(全局天花板蛛网 runner 51;原版序:Hives后/SpiderCaves前)
+  runSpiderNestPass(store, rng, gs, world.chests); // 63 Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
+  runWebsInSpiderCavesPass(store, rng, gs);     // 64 Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
+  runTemplePass(store, rng, gs, world.chests);  // 44 Jungle Temple(之字形房间链+走廊+门+宝箱)
+  runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
+  runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)
 }
 
 // 原版 pass 37 Clean Up Dirt:表层墙清理 + 连通小块(<20)清除

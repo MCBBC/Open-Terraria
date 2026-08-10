@@ -16,9 +16,11 @@ const out = await page.evaluate(async () => {
   // 把玩家放到开阔平地上，召唤 KS 到近处（summonBoss 选 55 格外——直接手动放 12 格外）
   const st = g.world.store;
   const px = Math.floor(g.player.cx / 16);
-  let gy = Math.floor(g.world.groundLevel) + 30;
+  g.world.clock.timeOfDay = 0.5;   // 正午：地表全亮，排除黑暗干扰
+  g.world.explored.fill(1); g.world.exploredVersion++;  // 战争迷雾全开（等同 devMode）
+  let gy = Math.floor(g.world.groundLevel);
   while (gy < st.h - 10 && !st.isSolid(px, gy)) gy++;
-  for (let dy = -8; dy <= 1; dy++) for (let dx = -14; dx <= 14; dx++) st.setTile(px + dx, gy + dy, dy === 1 ? 2 : 0);
+  for (let dy = -8; dy <= 1; dy++) for (let dx = -30; dx <= 30; dx++) st.setTile(px + dx, gy + dy, dy === 1 ? 2 : 0);
   g.player.x = px * 16 - g.player.w / 2;
   g.player.y = (gy - 3) * 16;
   // 直接 fromVanilla 造 KS 放近处

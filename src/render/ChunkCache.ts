@@ -3,7 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
-import { TILE_ANIM_RATE, tileAnim, animFrameIdx } from './TileAnim';
+import { TILE_ANIM_RATE, tileAnim, animYOffset } from './TileAnim';
 import { VanillaWallTiler } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
@@ -213,13 +213,12 @@ export class ChunkCache {
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
-          // 动画陈设（原版 AnimateTiles）：frameY += 帧索引 * (fh*18)；登记 chunk 供换帧重建
+          // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch
+          // （pitch 默认 38，3 格高特例组 54——熔炉/篝火/磨刀站走 38，勿用 fh*18 近似）
           let fy = st.frameY[i];
           if (TILE_ANIM_RATE[def.vanilla.sheet]) {
-            const fhA = def.vanilla.fh ?? 1;
-            const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? fhA;
-            const idx = animFrameIdx(def.vanilla.sheet, fhA, rows);
-            if (idx > 0) fy += idx * fhA * 18;
+            const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? 0;
+            fy += animYOffset(def.vanilla.sheet, rows * 18);
             let set = this.animChunksBySheet.get(def.vanilla.sheet);
             if (!set) { set = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, set); }
             set.add(ChunkCache.key(cx, cy));

@@ -12,7 +12,10 @@ async function makeWorld(): Promise<World> {
   return generateWorld({ width: 4200, height: 1200, seedText: 'dungeon-spawn-chain' });
 }
 
-/** 找地牢内部落脚点：本人格有地牢墙(7/8/9/94-99) + 下方实心 + 上方 3 格净空 + 地表线以下 */
+/** 找地牢内部落脚点：本人格有地牢墙(7/8/9/94-99) + 下方实心 + 上方 3 格净空 + 地表线以下。
+ *  须为干燥点——SpawnAnNPC 水域分支(水池 L1839)在地牢分支(L2536)之前，
+ *  水点会出水母 63 而非守卫（原版顺序如此）；生成流任何变动都会平移世界形态，
+ *  选点加干燥条件保证测试稳定命中地牢分支 */
 function findDungeonSpot(world: World): { x: number; y: number } | null {
   const st = world.store;
   const dY = world.dungeonY || Math.floor(world.groundLevel);
@@ -24,6 +27,7 @@ function findDungeonSpot(world: World): { x: number; y: number } | null {
       if (!isDW(st.wall[i])) continue;
       if (!st.isSolid(x, y)) continue;
       if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2) || st.isSolid(x, y - 3)) continue;
+      if (st.liquid[st.idx(x, y - 1)] > 40 || st.liquid[st.idx(x, y - 2)] > 40) continue; // 干燥点
       return { x, y };
     }
   }
@@ -48,7 +52,11 @@ describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
     }
     console.log('未杀骷髅王出怪:', [...guardianIds]);
     expect(guardianIds.size).toBeGreaterThan(0);
-    for (const id of guardianIds) expect(id).toBe(68);
+    // 63=蓝水母：SpawnAnNPC 水域分支(L1839)在地牢分支(L2536)之前——生成点采样环
+    // 内有水格时出水母是原版顺序的正确行为（地牢连水洞属正常世界形态）；
+    // 核心断言 = 绝不漏常规怪池（31/32/34/70/71/72/294-296）
+    for (const id of guardianIds) expect(id === 68 || id === 63).toBe(true);
+    expect(guardianIds.has(68)).toBe(true);
 
     // 杀过骷髅王：常规池（294/295/296/31/-13→31基底/32/34/70/71/72）
     spawner.setPlayerFlags(true, true);
