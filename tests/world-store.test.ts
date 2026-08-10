@@ -12,7 +12,8 @@ const mem = new Map<string, string>();
 } as Storage;
 
 const { WorldStore } = await import('../src/save/WorldStore');
-const { parseSeed, randomWorldName } = await import('../src/world/gen/SeedEasterEggs');
+const { parseSeed } = await import('../src/world/gen/SeedEasterEggs');
+const { randomWorldName } = await import('../src/i18n/RandomText');
 
 describe('WorldStore', () => {
   beforeEach(() => mem.clear());

@@ -178,6 +178,8 @@ export class Enemy extends Entity {
   /** 原版 timeLeft（默认 7500 tick，离屏递减；飘浮眼白天 EncourageDespawn(10)） */
   despawnTimer = 7500;
   inWater = false;       // 入水检测（溅落声用）
+  /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
+  bInit = false;
 
   constructor(public key: string, x: number, y: number) {
     super();

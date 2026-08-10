@@ -23,13 +23,13 @@ const addEnemy = (game: GameHooks, e: Enemy) => {
  *  朝玩家 1.5 倍速、伤害 ×1.3、防御 -10(:22026-22179)。 */
 export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null) {
   const isGuardian = e.vanillaId === 68;
-  // 初始化:生成双手 36(:21914-21931;Enemy.ai0 默认 -1120,用 despawnTimer<0 借位标记)
-  if (e.despawnTimer === -1) {
-    e.despawnTimer = 7500;
+  // 初始化:生成双手 36(:21914-21931)
+  if (!e.bInit) {
+    e.bInit = true;
     if (!isGuardian) {
       for (const side of [-1, 1]) {
         const h = spawnPart(game, e, 36);
-        if (h) { h.ai0 = side; h.ai1 = e.id; h.ai3 = 150; h.despawnTimer = 7500; }
+        if (h) { h.ai0 = side; h.ai1 = e.id; h.ai3 = 150; h.bInit = true; }
       }
     }
   }
@@ -173,24 +173,25 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
 export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!player) return;
   const enemies = game.enemies() as unknown[];
+  // 初次:补生成爬行者(原版 371-393 只)——必须先于爬行者计数,
+  // 否则首 tick 爬行者为 0 直接落二阶段,永远不生成
+  if (!e.bInit) {
+    e.bInit = true;
+    for (let k = 0; k < 8; k++) {
+      const c = spawnPart(game, e, 267);
+      if (c) {
+        const ang = (k / 8) * Math.PI * 2;
+        c.x = player.cx + Math.cos(ang) * 150;
+        c.y = player.cy + Math.sin(ang) * 150;
+      }
+    }
+  }
   const creepers = enemies.filter((n) => (n as Enemy).vanillaId === 267 && !(n as Enemy).dead);
   if (creepers.length > 0) {
     // 一阶段:无敌 + 悬浮微移(原版 ai[0]=0 悬空不动;爬行者环攻击)
     e.iframes = 2;
     e.vx *= 0.9; e.vy *= 0.9;
     e.x += e.vx; e.y += e.vy;
-    // 初次:补生成爬行者(原版 371-393 只;despawnTimer=-1 借位标记已初始化)
-    if (e.despawnTimer !== -1) {
-      e.despawnTimer = -1;
-      for (let k = 0; k < 8; k++) {
-        const c = spawnPart(game, e, 267);
-        if (c) {
-          const ang = (k / 8) * Math.PI * 2;
-          c.x = player.cx + Math.cos(ang) * 150;
-          c.y = player.cy + Math.sin(ang) * 150;
-        }
-      }
-    }
     return;
   }
   // 二阶段:瞬移冲刺循环(ai0 计 60t 一冲)

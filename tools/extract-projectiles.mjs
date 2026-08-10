@@ -27,7 +27,11 @@ const marks = [];
 let m;
 while ((m = pat.exec(body))) {
   if (m[1] !== undefined) marks.push([[+m[1]], m.index]);
-  else marks.push([[+m[2], +m[3]], m.index]);
+  else {
+    const range = [];
+    for (let t = +m[2]; t <= +m[3]; t++) range.push(t);
+    marks.push([range, m.index]);
+  }
 }
 const blocks = [];
 for (let k = 0; k < marks.length; k++) {

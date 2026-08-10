@@ -14,7 +14,13 @@ const game = {
   spawnDrop: () => null, damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
   onEnemyKilled: () => {}, spawnEnemy: () => {}, enemies: () => enemies,
   spawnParticles: () => {}, notifyInventoryChanged: () => {}, playSfx: () => {}, playSfxFiles: () => {},
-  showPickupLabel: () => {}, add: (e: Enemy) => { e.id = enemies.length + 1; enemies.push(e); },
+  showPickupLabel: () => {},
+  // bossAI.addEnemy 读 game.entities.add/nextId(与真实 EntityManager 同构)
+  entities: (() => {
+    const wrap = { nextId: 2, add: (e: Enemy, _b?: string) => { e.id = wrap.nextId++; enemies.push(e); } };
+    return wrap;
+  })(),
+  add: (e: Enemy) => { e.id = enemies.length + 1; enemies.push(e); },
 } as never;
 let ok = 0, bad = 0;
 const check = (n: string, c: boolean, x?: unknown) => { if (c) { ok++; console.log('  ✓ ' + n); } else { bad++; console.log('  ✗ ' + n, x ?? ''); } };
@@ -24,8 +30,7 @@ console.log('== Skeletron 35 ==');
 {
   enemies.length = 0;
   const head = Enemy.fromVanilla(35, 40 * 16, 60 * 16)!;
-  head.despawnTimer = -1; // 触发初始化标记
-  head.id = 1; enemies.push(head);
+    head.id = 1; enemies.push(head);
   world.clock.timeOfDay = 0.0; // 夜晚(白天会切守卫态)
   head.fixedUpdate(1 / 60, game); // 初始化 tick → 应生成 2 手
   check('初始化生成 2 双手', enemies.filter((e) => e.vanillaId === 36).length === 2, enemies.length);
@@ -65,8 +70,7 @@ console.log('== Brain 266 ==');
 {
   enemies.length = 0;
   const b = Enemy.fromVanilla(266, 40 * 16, 100 * 16)!;
-  b.despawnTimer = -1;
-  b.id = 1; enemies.push(b);
+    b.id = 1; enemies.push(b);
   b.fixedUpdate(1 / 60, game); // 初始 → 应补 8 爬行者
   check('初始生成爬行者环', enemies.filter((e) => e.vanillaId === 267).length === 8, enemies.length);
   for (let i = 0; i < 100; i++) for (const e of enemies) e.fixedUpdate(1 / 60, game);

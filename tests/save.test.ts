@@ -68,6 +68,15 @@ describe('自有存档格式', () => {
     expect(back.player.baseMaxMana).toBeUndefined();
   });
 
+  it('墓碑碑文（signs）往返保持', () => {
+    const world = new World(64, 32, 42, '测试');
+    world.signs.push({ x: 10, y: 20, text: '泰拉瑞亚人摔死了。\n2026年8月10日' });
+    const back = loadSave(saveGame(world, new Player(0, 0, new Inventory()), 0));
+    expect(back.world.signs).toHaveLength(1);
+    expect(back.world.signs[0]?.text).toContain('摔死了');
+    expect(back.world.signs[0]?.x).toBe(10);
+  });
+
   it('存档体积可控', () => {
     const world = new World(4200, 1200, 1, '大世界');
     const st = world.store;

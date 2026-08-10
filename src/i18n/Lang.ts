@@ -46,24 +46,9 @@ export const Lang = {
     return legacyKey != null ? Lang.text(`LegacyWorldGen.${legacyKey}`) : passKey;
   },
 
-  /** 取整个本地化分节（对象形态：名字池/死亡文本等）。缺失返回 null */
-  section(path: string): Record<string, string> | null {
-    let node: unknown = data;
-    for (const seg of path.split('.')) {
-      node = (node as Record<string, unknown>)?.[seg];
-      if (node === undefined) return null;
-    }
-    return node && typeof node === 'object' ? node as Record<string, string> : null;
-  },
-
-  /** Language.RandomFromCategory 1:1：分节内等概率随机一条（键序无关）。
-   *  分节缺失返回 fallback */
+  /** Language.RandomFromCategory 便捷门面：类别内等概率随机一条。缺失返回 fallback */
   randomFrom(path: string, fallback = ''): string {
-    const sec = Lang.section(path);
-    if (!sec) return fallback;
-    const keys = Object.keys(sec);
-    if (!keys.length) return fallback;
-    return sec[keys[Math.floor(Math.random() * keys.length)]];
+    return languageManager.randomFromCategory(path) ?? fallback;
   },
 
   // ---- 名字类便捷方法(Lang.cs FillNameCacheArray:键 = category + ID 常量名)----
