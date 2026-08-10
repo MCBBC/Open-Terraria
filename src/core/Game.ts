@@ -7,6 +7,7 @@ import { World, ChestData } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt } from '../world/Door';
+import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
@@ -95,6 +96,11 @@ export interface GameCallbacks {
   onToast: (msg: string) => void;
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   onChat?: (text: string, r: number, g: number, b: number) => void;
+  /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'close'; label: string }>) => void;
+  onNpcDialogClose?: () => void;
+  /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币 */
+  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number) => void;
   onBuffsChanged?: () => void;
   /** 读墓碑/告示牌（Sign 阅读界面） */
   onReadSign?: (text: string) => void;
@@ -243,8 +249,6 @@ export class Game implements GameHooks {
   private _platePressed = new Set<string>();
   private _weightedStanding = new Set<number>();
   private _entityPlatePressed = new Set<string>();
-  /** 守卫老人「诅咒」二次确认计时(原版对话框 Curse 按钮;两次对话间窗 600 tick) */
-  private oldManCurseArm = -9999;
   /** 电路系统(Wiring.cs 移植) */
   wiring: Wiring | null = null;
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
@@ -437,13 +441,15 @@ export class Game implements GameHooks {
     return settleWorldLiquids(this.world, mode, onProgress);
   }
 
-  async loadWorld(world: World, onProgress?: (label: string, p: number) => void) {
+  async loadWorld(world: World, onProgress?: (label: string, p: number) => void, opts?: { settled?: boolean }) {
     this.freshlyCreated = false;
     this.world = world;
-    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), 0.5);
-    // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
-    // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
-    await this.settleLiquids((p) => onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), p * 0.8), 'load');
+    if (!opts?.settled) {
+      onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), 0.5);
+      // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
+      // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
+      await this.settleLiquids((p) => onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), p * 0.8), 'load');
+    }
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
     this.afterWorldLoad();
     this.cb.onWorldReady();
@@ -475,6 +481,8 @@ export class Game implements GameHooks {
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
     this.renderer.minimap = new Minimap(w);
+    // 火把锚定（TileObjectData tile4）：支撑被挖掉时火把掉落（WorldGen.TileFrame 火把语义）
+    w.store.onTileChanged((x, y) => this.checkTorchDetach(x, y));
     this.entities.clear();
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备（铁器三件套与 Maples 素材对齐；含药水与配饰便于体验 Buff/配饰系统）
@@ -527,14 +535,48 @@ export class Game implements GameHooks {
         this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, Lang.npcName(id) ?? key), 50, 125, 255);
       }
     }
-    // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王(NPC.cs GetChat/Lang.dialog 语义)
+    // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
+    // 原版锚定 home=(dungeonX,dungeonY)(NPC.cs:53755 UpdateHomeTileState)自由游荡;
+    // 我们的 dungeonEnt 塔心地面是 3 宽竖井口(通楼梯),落位在塔心会把老人漏进地牢——
+    // 改为站到入口外廊的门外(placeDoors 放的门 tile,外廊朝背离地图中心方向延伸 ~40 格)
     if (this.world.dungeonX > 0) {
       const st = this.world.store;
-      const dx = this.world.dungeonX;
-      let dy = Math.max(4, Math.floor(this.world.groundLevel) - 30);
-      while (dy < this.world.h - 3 && !st.isSolid(dx, dy)) dy++;
-      const oldMan = new TownNPC('old_man', dx * 16 - 8, (dy - 3) * 16);
-      oldMan.home = { x: dx, y: dy - 3 }; // 锚定地牢门口不游荡远走
+      const dX = this.world.dungeonX;
+      const dY = this.world.dungeonY || Math.floor(this.world.groundLevel);
+      // 双侧由外向内扫门 tile(外廊门或塔基门),取最外侧一扇
+      let doorX = -1, doorY = -1;
+      for (let r = 70; r >= 3 && doorX < 0; r--) {
+        for (const sd of [1, -1]) {
+          const x = dX + sd * r;
+          if (x < 3 || x > st.w - 4) continue;
+          for (let y = Math.max(4, dY - 45); y < Math.min(st.h - 3, dY + 45); y++) {
+            if (st.type[st.idx(x, y)] === T.DOOR_CLOSED) { doorX = x; doorY = y; break; }
+          }
+          if (doorX > 0) break;
+        }
+      }
+      // 落位候选(按优先级):门外开阔侧 3 格 > 门内 1 格 > 门外 6/10 格 > 门内 4 格 >
+      // 塔心入口扫描 > 裸兜底。每候选:向下 ≤10 格找地面 + 头顶 3 格净空(身高 40px)
+      // + 3 宽地板(左右也实心,防站在竖井/悬崖边缘)
+      const standSpot = (sx: number, syTop: number): { x: number; y: number } | null => {
+        if (sx < 3 || sx > st.w - 4) return null;
+        let yy = Math.max(4, syTop);
+        const limit = Math.min(st.h - 3, syTop + 10);
+        while (yy < limit && !st.isSolid(sx, yy)) yy++;
+        if (yy >= limit) return null;
+        if (!st.isSolid(sx - 1, yy) || !st.isSolid(sx + 1, yy)) return null;
+        for (let k = 1; k <= 3; k++) if (st.isSolid(sx, yy - k)) return null;
+        return { x: sx, y: yy - 3 };
+      };
+      const side = doorX >= dX ? 1 : -1; // 门相对塔心的方位,外侧 = 再往外
+      const cands: Array<[number, number]> = doorX > 0
+        ? [[doorX + side * 3, doorY - 2], [doorX - side, doorY - 2], [doorX + side * 6, doorY - 2],
+          [doorX + side * 10, doorY - 2], [doorX - side * 4, doorY - 2], [dX, dY - 10]]
+        : [[dX, dY - 10]];
+      const spot = cands.map(([cx0, cy0]) => standSpot(cx0, cy0)).find((s) => s) ?? { x: dX, y: dY - 3 };
+      const oldMan = new TownNPC('old_man', spot.x * 16 - 8, spot.y * 16);
+      oldMan.home = { x: spot.x, y: spot.y }; // 锚定门口
+      oldMan.stationary = true; // 定点站岗(防游走坠入塔心竖井)
       this.entities.add(oldMan, 'npcs');
     }
     this.cb.onInventoryChanged();
@@ -577,6 +619,13 @@ export class Game implements GameHooks {
 
   private fixedUpdate(dt: number) {
     this.tickCount++;
+    // 对话距离保持:离开 NPC 超过 6 格自动关闭(原版 SetTalkNPC(-1) 语义)
+    if (this.dialogNpc) {
+      const dn = this.dialogNpc;
+      if (dn.dead || Math.hypot(dn.cx - this.player.cx, dn.cy - this.player.cy) > TILE * 6) {
+        this.closeNpcDialog();
+      }
+    }
     // 原版 HitTile 衰减（每 2 tick 一次——原版按帧衰减配原版 ~27 帧挥速；
     // 我们的挥击间隔更长，等比减半保持"连击可积累、停手会消退"）
     if (this.tickCount % 2 === 0) this.hitTiles.update();
@@ -1906,6 +1955,20 @@ export class Game implements GameHooks {
       }
       return;
     }
+    // 火把锚定（TileObjectData tile4 + TileObject.CanPlace 1:1）：
+    // 底锚(0)→左锚(22)→右锚(44)→墙锚(0)；液体中拒绝（水炬样式 8/11/17 未实装）
+    if (tileId === T.TORCH) {
+      if (this.player.useTime > 0) return;
+      if (st.isActive(tx, ty)) return;
+      const frame = torchAnchorFrame(st, tx, ty);
+      if (frame < 0 || st.liquid[st.idx(tx, ty)] > 0) return;
+      st.setTile(tx, ty, tileId, frame, 0);
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.player.useTime = 14;
+      this.sfx.play('place');
+      this.cb.onInventoryChanged();
+      return;
+    }
     // 放置空间检查
     for (let dx2 = 0; dx2 < ow; dx2++) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
@@ -2795,127 +2858,192 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 右键与附近 NPC 交谈(#13):点击目标须在 NPC 4 格内(否则不拦截右键交互) */
+  /** 右键与附近 NPC 交谈(Player.SetTalkNPC Player.cs:4180 语义:
+ *  光标命中 NPC 命中盒(±8px)+ 距离 3.5 格内)→ 打开原版对话框 */
   private talkToNearbyNpc(ctX: number, ctY: number): boolean {
     const p = this.player;
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
-      // 原版 ObjectData.Chat 语义:光标须落在 NPC 身上(命中盒 ±8px 容差),不是旁边
       if (Math.hypot(npc.cx - p.cx, npc.cy - p.cy) > TILE * 3.5) continue;
       const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
       if (mx < npc.x - 8 || mx > npc.x + npc.w + 8 || my < npc.y - 8 || my > npc.y + npc.h + 8) continue;
-      const tips = [
-        Lang.text('Mods.SandboxWorld.NPC.Guide1'),
-        Lang.text('Mods.SandboxWorld.NPC.Guide2'),
-        Lang.text('Mods.SandboxWorld.NPC.Guide3'),
-        Lang.text('Mods.SandboxWorld.NPC.Guide4'),
-        Lang.text('Mods.SandboxWorld.NPC.Guide5'),
-        Lang.text('Mods.SandboxWorld.NPC.Guide6'),
-      ];
-      if (npc.npcKey === 'old_man') {
-        // 守卫老人(原版 Lang.dialog + OldMan 交互):
-        // 白天只闲聊("你为什么还想和这副可怜的骨头说话?");夜晚出现「诅咒」选项召唤骷髅王
-        const oldManDay = [
-          Lang.text('Mods.SandboxWorld.NPC.OldMan1'),
-          Lang.text('Mods.SandboxWorld.NPC.OldMan2'),
-          Lang.text('Mods.SandboxWorld.NPC.OldMan3'),
-          Lang.text('Mods.SandboxWorld.NPC.OldMan4'),
-          Lang.text('Mods.SandboxWorld.NPC.OldMan5'),
-          Lang.text('Mods.SandboxWorld.NPC.OldMan6'),
-        ];
-        if (this.world.clock.isDay || this.world.flags.hardMode) {
-          npc.bubble = oldManDay[Math.floor(Math.random() * oldManDay.length)];
-          npc.bubbleT = 360;
-          npc.talkCooldown = 120;
-        } else if (this.boss) {
-          npc.bubble = Lang.text('Mods.SandboxWorld.NPC.OldManBusy');
-          npc.bubbleT = 240;
-        } else {
-          // 夜晚:二次确认召唤骷髅王(原版对话框「诅咒」按钮)
-          if (this.tickCount - this.oldManCurseArm < 600) {
-            this.oldManCurseArm = -9999;
-            npc.dead = true; // 原版:召唤骷髅王时守卫老人消失(击败后转为裁缝)
-            this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.OldManScream'));
-            this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
-          } else {
-            this.oldManCurseArm = this.tickCount;
-            npc.bubble = Lang.text('Mods.SandboxWorld.NPC.OldManConfirm');
-            npc.bubbleT = 400;
-            npc.talkCooldown = 30;
-          }
-        }
-        return true;
-      }
-      if (npc.npcKey === 'nurse') {
-        // 护士:50 铜币治疗至满(原版 Nurse 治疗费随缺失血量;简化固定)
-        if (npc.talkCooldown <= 0) {
-          if (p.hp >= p.maxHp) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy')); }
-          else {
-            const coinId2 = ITEM_BY_KEY['coin_copper'];
-            let coins2 = 0;
-            for (const sl of this.player.inv.slots) if (sl && sl.id === coinId2) coins2 += sl.stack;
-            if (coins2 < 50) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseFee')); }
-            else {
-              let left2 = 50;
-              for (let i = 0; i < this.player.inv.slots.length && left2 > 0; i++) {
-                const sl = this.player.inv.slots[i];
-                if (!sl || sl.id !== coinId2) continue;
-                const take = Math.min(sl.stack, left2);
-                sl.stack -= take; left2 -= take;
-                if (sl.stack <= 0) this.player.inv.slots[i] = null;
-              }
-              p.hp = p.maxHp;
-              this.cb.onInventoryChanged();
-              this.addDamageNumber(p.cx, p.y, p.maxHp - p.hp, false, '#40E080');
-              this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
-            }
-          }
-          npc.talkCooldown = 120;
-        }
-        return true;
-      }
-      if (npc.npcKey === 'merchant') {
-        if (npc.talkCooldown <= 0) {
-          this.merchantTrade();
-          npc.talkCooldown = 120;
-        }
-        return true;
-      }
-      npc.bubble = (npc.givenName ? `${npc.givenName}：` : '') + tips[Math.floor(Math.random() * tips.length)];
-      npc.bubbleT = 360;
-      npc.talkCooldown = 600;
+      this.openNpcDialog(npc);
       return true;
     }
     return false;
   }
 
-  /** 商人交易(简化商店):铜币买固定商品——火把10/木材20/铜镐/次级治疗药水 */
-  private merchantTrade(): void {
-    const inv = this.player.inv;
-    const coinId = ITEM_BY_KEY['coin_copper'];
-    let coins = 0;
-    for (const sl of inv.slots) if (sl && sl.id === coinId) coins += sl.stack;
-    const stock: Array<[string, number, number]> = [
-      ['torch', 10, 50], ['wood', 20, 20], ['copper_pickaxe', 1, 500], ['lesser_healing_potion', 3, 150],
-    ];
-    const affordable = stock.filter(([, , cost]) => cost <= coins);
-    if (affordable.length === 0) {
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.MerchantPoor'));
+  // ================= NPC 对话系统(SetTalkNPC + NPC.GetChat NPC.cs:94974 1:1) =================
+
+  private dialogNpc: TownNPC | null = null;
+
+  /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
+  private openNpcDialog(npc: TownNPC) {
+    this.dialogNpc = npc;
+    npc.talkCooldown = 30;
+    const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
+    const name = npc.givenName ? `${npc.givenName} ${typeName}` : typeName;
+    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'close'; label: string }> = [];
+    if (npc.npcKey === 'merchant') buttons.push({ id: 'shop', label: Lang.inter(28) });   // 商店
+    if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
+    // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
+    if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
+      buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
+    }
+    buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
+    this.cb.onNpcDialog?.(name, this.townNpcChat(npc), buttons);
+  }
+
+  /** 台词 = NPC.GetChat(NPC.cs:94974+)type 17/18 分支 1:1。
+   *  事件系统未移植:血月/特殊事件段跳过,走常规池 */
+  private townNpcChat(npc: TownNPC): string {
+    const p = this.player;
+    const w = this.world;
+    const dialog = (n: number) => Lang.text(`LegacyDialog.${n}`);
+    const r3 = () => Math.floor(Math.random() * 3);
+    const r2 = () => (Math.random() < 0.5 ? 0 : 1);
+    if (npc.vanillaId === 17) {
+      // 商人(NPC.cs:95077-95105)
+      if (!w.flags.downedEyeOfCthulhu && r3() === 0) {
+        if (p.maxHp < 200) return dialog(1);
+        if (p.defense > 10) return dialog(3);
+        return dialog(2);
+      }
+      if (w.clock.isDay) {
+        const f = (w.clock.timeOfDay - 0.25) / 0.5; // 昼内进度 0-1(原版 Main.time/43200)
+        if (f < 16200 / 43200) return dialog(4 + r3());   // 清晨 4-6
+        if (f > 37800 / 43200) return dialog(7 + r3());   // 傍晚 7-9
+        return dialog(10 + r3());                          // 白昼 10-12
+      }
+      const nf = w.clock.timeOfDay < 0.25 ? w.clock.timeOfDay / 0.25 : (w.clock.timeOfDay - 0.75) / 0.25;
+      if (nf < 9720 / 43200) return dialog(r2() ? 19 : 18);
+      if (nf > 22680 / 43200) return dialog(r2() ? 21 : 20);
+      return dialog(22 + r3());                            // 深夜 22-24
+    }
+    if (npc.vanillaId === 18) {
+      // 护士(NPC.cs:95104-95190):三成概率提醒老人(!downedBoss3);按血量分档
+      if (r3() === 0 && !w.flags.downedSkeletron) return dialog(32);
+      const ratio = p.hp / p.maxHp;
+      if (ratio < 0.33) return dialog(36 + Math.floor(Math.random() * 5)); // 36-40
+      if (ratio < 0.66) return dialog(41 + Math.floor(Math.random() * 7)); // 41-47
+      return dialog(48 + Math.floor(Math.random() * 4));                   // 48-51
+    }
+    // 守卫老人:自有文案(白天闲聊);Boss 在场时专用台词
+    if (npc.npcKey === 'old_man' && this.boss) return Lang.text('Mods.SandboxWorld.NPC.OldManBusy');
+    const pool = [1, 2, 3, 4, 5, 6].map((i) => Lang.text(`Mods.SandboxWorld.NPC.OldMan${i}`));
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+
+  /** 对话框按钮(SetTalkNPC 后 UI 回调) */
+  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'close'): void {
+    const npc = this.dialogNpc;
+    if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
+    if (id === 'shop') { this.openMerchantShop(); return; }
+    if (id === 'heal') { this.nurseHeal(); return; }
+    if (id === 'curse' && npc.npcKey === 'old_man') {
+      if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
+      // 原版:释放诅咒时老人消失,击败骷髅王后转为裁缝
+      npc.dead = true;
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.OldManScream'));
+      this.closeNpcDialog();
+      this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
+    }
+  }
+
+  closeNpcDialog(): void {
+    this.dialogNpc = null;
+    this.cb.onNpcDialogClose?.();
+  }
+
+  // ---- 商店(Chest.SetupShop case 1 = Merchant,Chest.cs:1325+) ----
+
+  /** [原版物品 id, 铜币价(item.value)] 基础款;条件款(困难模式/夜晚/downedBoss3)建表时附加 */
+  private static readonly MERCHANT_BASE: ReadonlyArray<readonly [number, number]> = [
+    [88, 40000],  // 挖矿头盔 buyPrice(0,4)
+    [87, 10000],  // 猪猪存钱罐
+    [35, 5000],   // 铁砧
+    [1991, 2500], // 虫网 buyPrice(0,0,25)
+    [3509, 500],  // 铜镐
+    [3506, 400],  // 铜斧
+    [8, 50],      // 火把
+    [28, 300],    // 弱效治疗药水
+    [110, 100],   // 弱效魔力药水 buyPrice(0,0,1)
+    [40, 5],      // 木箭
+    [42, 15],     // 手里剑
+    [965, 10],    // 绳
+    [1786, 6000], // 镰刀 buyPrice(0,0,60)
+  ];
+
+  private merchantShopList(): Array<[number, number]> {
+    const list: Array<[number, number]> = Game.MERCHANT_BASE.map((e) => [e[0], e[1]]);
+    if (this.world.flags.hardMode) list.push([188, 1000], [189, 250]); // 治疗/魔力药水
+    if (!this.world.clock.isDay) list.push([282, 10]);                 // 夜晚:荧光棒
+    if (this.world.flags.downedSkeletron) list.push([346, 200000]);    // downedBoss3:保险箱
+    return list;
+  }
+
+  private openMerchantShop() {
+    const entries = this.merchantShopList().map(([vid, price]) => ({
+      key: vanillaItemKey(vid) ?? '',
+      vanillaId: vid,
+      name: Lang.itemName(vid) ?? vanillaItemKey(vid) ?? String(vid),
+      price,
+    }));
+    this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned());
+  }
+
+  /** 商店购买:扣币 + 入包 + 刷新商店面板(可购态/余额) */
+  npcShopBuy(vanillaId: number): void {
+    const entry = this.merchantShopList().find(([id]) => id === vanillaId);
+    if (!entry) return;
+    const price = entry[1];
+    if (this.coinsOwned() < price || !this.spendCopper(price)) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
+      this.openMerchantShop();
       return;
     }
-    const [key, n, cost] = affordable[Math.floor(Math.random() * affordable.length)];
-    // 扣币
-    let left = cost;
-    for (let i = 0; i < inv.slots.length && left > 0; i++) {
-      const sl = inv.slots[i];
-      if (!sl || sl.id !== coinId) continue;
-      const take = Math.min(sl.stack, left);
-      sl.stack -= take; left -= take;
-      if (sl.stack <= 0) inv.slots[i] = null;
-    }
-    inv.add(ITEM_BY_KEY[key], n);
+    const key = vanillaItemKey(vanillaId);
+    if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 1);
+    this.sfx.play('coin');
     this.cb.onInventoryChanged();
-    this.cb.onToast(`商人:买到 ${n} × ${Lang.itemNameByKey(key)}(-${cost} 铜币)`);
+    this.openMerchantShop();
+  }
+
+  /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */
+  private nurseHeal() {
+    const p = this.player;
+    if (p.hp >= p.maxHp) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy')); return; }
+    const cost = Math.max(3, Math.round((p.maxHp - p.hp) * 0.75));
+    if (this.coinsOwned() < cost || !this.spendCopper(cost)) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
+      return;
+    }
+    p.hp = p.maxHp;
+    this.sfx.play('drink');
+    this.cb.onInventoryChanged();
+    this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
+  }
+
+  /** 扣铜币:全背包三种币换算清点,整额清空后按面额找零(vanilla BuyItem 语义近似) */
+  private spendCopper(n: number): boolean {
+    const inv = this.player.inv;
+    if (this.coinsOwned() < n) return false;
+    const change = this.coinsOwned() - n;
+    for (let i = 0; i < inv.slots.length; i++) {
+      const sl = inv.slots[i];
+      if (!sl) continue;
+      if (sl.id === ITEM_BY_KEY['coin_copper'] || sl.id === ITEM_BY_KEY['coin_silver'] || sl.id === ITEM_BY_KEY['coin_gold']) {
+        inv.slots[i] = null;
+      }
+    }
+    // 按面额回流(金→银→铜,栈内合并)
+    const gold = Math.floor(change / 10000);
+    const silver = Math.floor((change % 10000) / 100);
+    const copper = change % 100;
+    if (gold) inv.add(ITEM_BY_KEY['coin_gold'], gold);
+    if (silver) inv.add(ITEM_BY_KEY['coin_silver'], silver);
+    if (copper) inv.add(ITEM_BY_KEY['coin_copper'], copper);
+    return true;
   }
 
   private isValidHouse(doorX: number, doorY: number): boolean {
@@ -3233,13 +3361,15 @@ export class Game implements GameHooks {
       for (let x = tx0; x <= tx1; x++) {
         const i = st.idx(x, y);
         if (st.type[i] !== T.TORCH) continue;
-        if (Math.random() >= 0.14) continue;
-        // 帧为 0(地面) 时火点在格顶上方；墙面变体也近似取格顶
+        if (Math.random() >= 0.075) continue; // 原版 1/40/帧@60Hz（TileDrawing:7220）≈ 每 3 tick 0.075
+        // 火点位置按锚定帧（TileDrawing.cs:7227-7231）：左锚 22→+6、右锚 44→+2、底/墙→+4
+        const fx = st.frameX[i];
+        const sparkX = fx === 22 ? 6 : fx === 44 ? 2 : 4;
         this.particles.push({
-          x: x * TILE + 5 + Math.random() * 6,
-          y: y * TILE - 2 + Math.random() * 4,
+          x: x * TILE + sparkX + Math.random() * 4,
+          y: y * TILE + Math.random() * 4,
           vx: (Math.random() - 0.5) * 0.25,
-          vy: -0.35 - Math.random() * 0.4,
+          vy: -0.35 - Math.random() * 0.4,   // 原版 velocity.Y -= 1.5（上飘）
           life: 16 + Math.random() * 12, maxLife: 28,
           color: Math.random() < 0.55 ? '#FFB642' : Math.random() < 0.5 ? '#FF8A2A' : '#FFD97A',
           size: 1 + Math.random() * 1.2,
@@ -3247,6 +3377,22 @@ export class Game implements GameHooks {
           damp: 0.985,
         });
       }
+    }
+  }
+
+  /** 火把锚定检查：格 (x,y) 变化后，检查其四邻与自身的火把是否失去支撑 → 掉落 */
+  private checkTorchDetach(x: number, y: number) {
+    const st = this.world.store;
+    const TORCH_ID = T.TORCH;
+    for (const [dx, dy] of [[0, 0], [0, -1], [-1, 0], [1, 0]] as const) {
+      const tx = x + dx, ty = y + dy;
+      if (!st.inBounds(tx, ty)) continue;
+      const i = st.idx(tx, ty);
+      if (st.type[i] !== TORCH_ID) continue;
+      if (torchStillAnchored(st, tx, ty, st.frameX[i])) continue;
+      st.setTile(tx, ty, 0);
+      this.spawnDrop(tx * TILE + 8, ty * TILE, 'torch', 1);
+      this.sfx.play('dig');
     }
   }
 

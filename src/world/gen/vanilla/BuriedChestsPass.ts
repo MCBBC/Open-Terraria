@@ -19,7 +19,7 @@ const THIN_ICE = TILE_BY_KEY['thin_ice']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
 const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 
-type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
+export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 
 const iceLoot = [
   'vi_670_ice_boomerang', 'vi_724_ice_blade', 'vi_950_ice_skates',
@@ -31,7 +31,7 @@ const hellLoot = ['vi_274_dark_lance', 'vi_112_flower_of_fire', 'vi_218_flamelas
 const waterLoot = ['vi_186_breathing_reed', 'vi_4404_inner_tube', 'vi_277_trident', 'vi_187_flipper'];
 
 /** AddBuriedChest 近似:从 (i,j) 向下落,按上下文解析样式与战利品,2×2 放置 */
-function placeBuriedChest(
+export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
   i: number, j: number, opts: { style?: number; tile?: number; loot?: string } = {},
 ): boolean {

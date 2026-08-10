@@ -25,6 +25,9 @@ export class TownNPC extends Entity {
   frameT = 0;      // 行走帧累加器（≈原版 frameCounter）
   wanderT = 0;
   home: NpcHome | null = null;
+  /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
+   *  原版观感也是整日守在门口走廊 */
+  stationary = false;
   talkCooldown = 0;
   bubble: string | null = null;
   bubbleT = 0;
@@ -76,7 +79,7 @@ export class TownNPC extends Entity {
     const player = (game as unknown as { player: Player }).player;
 
     let wantDir = 0;
-    if (world.clock.isDay) {
+    if (!this.stationary && world.clock.isDay) {
       // 白天家门口附近游走
       this.wanderT--;
       if (this.wanderT <= 0) {

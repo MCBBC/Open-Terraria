@@ -570,7 +570,9 @@ export function drawVanillaCell(
   // 原版 TileObjectData DrawYOffset：落地家具普遍 +2（腿部插入地面 2px）、
   // 挂墙/特殊件为负。从反编译 ObjectData/TileObjectData.cs 全量提取。
   const dyOff = DRAW_Y_OFFSET[sheet] ?? 0;
-  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, Math.max(py, dy) + dyOff, r.sw, r.sh);
+  // 火把 X 偏移（TileDrawing.cs:1084 case 4 vector.X += 6 + 基础绘制的 20px 居中 -2 → 净 +4）
+  const dxOff = sheet === 4 ? 4 : 0;
+  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px + dxOff, Math.max(py, dy) + dyOff, r.sw, r.sh);
   void fw; void fh;
 }
 

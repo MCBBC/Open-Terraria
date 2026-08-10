@@ -19,13 +19,14 @@ const T = (() => {
   return {
     DIRT: get('dirt'), GRASS: get('grass'), STONE: get('stone'),
     SAND: get('sand'), SNOW: get('snow'), ICE: get('ice'), MUD: get('mud'),
-    JUNGLE_GRASS: get('v_60_jungle_grass'), CORRUPT_GRASS: get('v_23_corrupt_grass_block'),
-    CRIMSON_GRASS: get('v_199_crimson_grass_block'), MUSHROOM_GRASS: get('v_70_mushroom_grass'),
+    JUNGLE_GRASS: get('v_60_jungle_grass_block'), CORRUPT_GRASS: get('v_23_corrupt_grass_block'),
+    CRIMSON_GRASS: get('v_199_crimson_grass_block'), MUSHROOM_GRASS: get('v_70_mushroom_grass_block'),
     EBONSAND: get('v_112_ebonsand_block'), CRIMSAND: get('v_234_crimsand_block'),
-    PEARLSAND: get('v_116_pearlsand'), HARDENED_SAND: get('hardened_sand'),
-    SANDSTONE: get('sandstone'), MARBLE: get('v_367_marble'), GRANITE: get('v_368_smooth_granite'),
-    CACTUS: get('v_80_cactus'), SNOW_BRICK: get('v_161_snow_brick'),
-    CORRUPT_ICE: get('v_163_corrupt_ice'), CRIMSON_ICE: get('v_200_frozen_crimson'),
+    PEARLSAND: get('v_116_pearlsand_block'), HARDENED_SAND: get('hardened_sand'),
+    SANDSTONE: get('sandstone'), MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
+    CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'),
+    CORRUPT_ICE: get('v_163_purple_ice_block'), CRIMSON_ICE: get('v_200_red_ice_block'),
+    // 164 粉冰(神圣冰)引擎未注册 → 0(ZoneHallow 冰分支暂不触发,与已知缺口一致)
     HOLLOW_ICE: get('v_164_hallowed_ice'), DUNGEON_BLUE: get('v_41_blue_brick'),
     DUNGEON_GREEN: get('v_43_green_brick'), DUNGEON_PINK: get('v_44_pink_brick'),
     // 恶土系计数(SceneMetrics.cs:613-615 的 _tileCounts 公式)

@@ -1435,19 +1435,61 @@ export class Renderer {
   }
 
   /** 迷雾遮罩：未探索区域黑色覆盖（世界坐标 → 目标矩形） */
-  // 迷雾缓存：探索版本号变化时才重绘半分辨率画布（避免每帧百万格循环卡顿）
+  // 迷雾缓存：探索版本号变化时才重绘半分辨率画布（避免每帧百万格循环卡顿）。
+  // 增量更新（2026-08-10，修 wld 导入白屏崩溃）：markExplored 只 bump 真正点亮新格的
+  // 版本并给出脏包围盒 → 此处仅对脏区（雾坐标 ~14×14 块）putImageData。
+  // 旧版每 15 tick 无条件整幅重建 4200×1200（20MB createImageData + 500 万格循环 ≈
+  // 672ms 长任务），首次导入大世界时每秒 4 次 × 20MB 垃圾 → GC 风暴 → 白屏闪烁 + OOM
   private fogCanvas: HTMLCanvasElement | null = null;
   private fogVersion = -1;
+  private fogWorld: World | null = null;
 
   private getFogCanvas(world: World): HTMLCanvasElement | null {
     const ex = world.explored;
     if (!ex) return null;
+    // 世界实例切换（读档/导入另一世界）：版本号数值可能巧合相等，必须按实例强制重建
+    if (this.fogWorld !== world) { this.fogWorld = world; this.fogVersion = -1; }
     if (this.fogCanvas && this.fogVersion === world.exploredVersion) return this.fogCanvas;
     const st = world.store;
     const w = Math.ceil(st.w / 2), h = Math.ceil(st.h / 2);
-    if (!this.fogCanvas) this.fogCanvas = document.createElement('canvas');
-    this.fogCanvas.width = w; this.fogCanvas.height = h;
+    if (!this.fogCanvas) {
+      this.fogCanvas = document.createElement('canvas');
+      this.fogCanvas.width = w;
+      this.fogCanvas.height = h;
+    }
     const fc = this.fogCanvas.getContext('2d')!;
+    // 脏矩形增量：有画布 + 有脏包围盒（markExplored 记录）→ 只更新受影响块；
+    // 全图点亮（F4/devMode 手动 bump，无脏信息）或首帧 → 整幅重建
+    const dirty = world.exploredDirty;
+    if (this.fogVersion !== -1 && dirty) {
+      const bx0 = Math.max(0, dirty.x0 >> 1), by0 = Math.max(0, dirty.y0 >> 1);
+      const bx1 = Math.min(w - 1, dirty.x1 >> 1), by1 = Math.min(h - 1, dirty.y1 >> 1);
+      const dw = bx1 - bx0 + 1, dh = by1 - by0 + 1;
+      if (dw > 0 && dh > 0) {
+        const img = fc.createImageData(dw, dh);
+        for (let by = 0; by < dh; by++) {
+          for (let bx = 0; bx < dw; bx++) {
+            const x0 = (bx0 + bx) * 2, y0 = (by0 + by) * 2;
+            let seen = false;
+            for (let dy = 0; dy < 2 && !seen; dy++) for (let dx = 0; dx < 2; dx++) {
+              const xx = x0 + dx, yy = y0 + dy;
+              if (xx < st.w && yy < st.h && ex[yy * st.w + xx]) { seen = true; break; }
+            }
+            if (!seen) {
+              const i = (by * dw + bx) * 4;
+              img.data[i] = 5; img.data[i + 1] = 5; img.data[i + 2] = 8; img.data[i + 3] = 255;
+            }
+          }
+        }
+        fc.putImageData(img, bx0, by0);
+        this.fogVersion = world.exploredVersion;
+        return this.fogCanvas;
+      }
+    }
+    // 整幅重建（首帧 / 全图点亮 / 版本跳跃无脏信息）
+    if (this.fogCanvas.width !== w || this.fogCanvas.height !== h) {
+      this.fogCanvas.width = w; this.fogCanvas.height = h;
+    }
     fc.clearRect(0, 0, w, h);
     fc.fillStyle = '#050508';
     const img = fc.createImageData(w, h);

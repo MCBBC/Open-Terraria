@@ -109,7 +109,7 @@ import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
-import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
+import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runWebsPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
 import { runTemplePass } from './vanilla/TemplePass';
@@ -223,7 +223,6 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runIceBiomePass(store, rng, gs);       // 15 Generate Ice Biome
-  runSlushPass(store, gs);                 // 原版 pass 33 Slush（雪原石→冰/泥→雪泥）
   runGrassPass(store, rng, gs);          // 16 Grass
   const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
@@ -246,6 +245,7 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runMushroomPass(store, rng, gs);       // 20 Mushroom Patches
   runMarbleGranitePass(store, rng, gs);  // 21/22 Marble/Granite
   runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
+  runSlushPass(store, gs);                 // 原版 pass 33 Slush（在 DirtToMud/Silt(25/26) 之后——泥已生成）
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
   runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
@@ -258,7 +258,9 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
   runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
   runBeehivePass(store, rng, gs);               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
-  runSpiderNestPass(store, rng, gs);            // 蜘蛛巢(蛛网+蜘蛛墙腔)
+  runWebsPass(store, rng, gs);                  // 58 Webs(全局天花板蛛网 runner 51;原版序:Hives后/SpiderCaves前)
+  runSpiderNestPass(store, rng, gs, world.chests); // 63 Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
+  runWebsInSpiderCavesPass(store, rng, gs);     // 64 Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
   runTemplePass(store, rng, gs, world.chests);  // 44 Jungle Temple(之字形房间链+走廊+门+宝箱)
   runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
   runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)

@@ -6,6 +6,8 @@ import { generateWorld } from '../world/gen/WorldGen';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { packWorld } from './worldPacket';
 import { renderPreviewBitmap } from './previewBitmap';
+import { loadSaveData } from '../save/SaveFile';
+import { kvGetIdb } from '../save/KvStore';
 import type { WorldWorkerRequest, WorldWorkerEvent } from './protocol';
 
 const ctx = self as unknown as {
@@ -46,7 +48,18 @@ ctx.onmessage = async (e) => {
       return;
     }
     if (req.type === 'saveParse') {
-      ctx.postMessage({ id: req.id, type: 'error', message: 'saveParse: 阶段 2 实现' });
+      // 三源：key=worker 内直读 IDB（主路径，免大字符串 clone）；json=小档/调试；save=.wld 导入
+      const data = req.save
+        ? req.save
+        : JSON.parse(req.json ?? (await kvGetIdb(req.key ?? '')) ?? 'null') as import('../save/SaveFile').SaveData | null;
+      if (!data) throw new Error('存档数据缺失');
+      ctx.postMessage({ id: req.id, type: 'progress', phase: 'parse', p: 0.3 });
+      const { world, player } = loadSaveData(data);
+      await settleWorldLiquids(world, 'load',
+        (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p: 0.3 + p * 0.5 }));
+      const { packet, transfer } = packWorld(world);
+      ctx.postMessage({ id: req.id, type: 'result', world: packet, player }, transfer);
+      return;
     }
   } catch (err) {
     ctx.postMessage({

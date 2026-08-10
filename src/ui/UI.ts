@@ -8,6 +8,7 @@ import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ChatMonitor } from './ChatMonitor';
+import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
 import { ACCESSORY_START, ARMOR_START, COIN_START, INV_SIZE, VANITY_START } from '../items/Inventory';
 import type { ChestData } from '../world/World';
@@ -1108,6 +1109,41 @@ export class UI {
   private chatMonitor: ChatMonitor | null = null;
   chatMessage(text: string, r = 255, g = 255, b = 255): void {
     this.chatMonitor?.message(text, r, g, b);
+  }
+
+  // ---- NPC 对话系统(SetTalkNPC + GetChat;内容在 Game 生成,此处纯渲染) ----
+  private npcDialog: NpcDialog | null = null;
+  private npcShop: NpcShop | null = null;
+
+  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>): void {
+    if (!this.npcDialog) {
+      this.npcDialog = new NpcDialog(this.root, (id) => {
+        this.npcShop?.close();
+        this.npcShop = null;
+        this.game?.npcDialogButton(id);
+      });
+    }
+    this.npcDialog.open(name, chat, buttons);
+  }
+
+  closeNpcDialog(): void {
+    this.npcDialog?.close();
+    this.npcShop?.close();
+    this.npcShop = null;
+  }
+
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number): void {
+    if (!this.npcShop) {
+      this.npcShop = new NpcShop(this.root,
+        (vid) => this.game?.npcShopBuy(vid),
+        () => { this.npcShop?.close(); this.npcShop = null; });
+    }
+    // 图标由 UI 侧按原版 id 补(atlas 管线)
+    const entries: ShopEntry[] = items.map((it) => ({
+      ...it,
+      iconUrl: this.game ? iconUrl(this.game, it.vanillaId) || '' : '',
+    }));
+    this.npcShop.open(title, entries, copper);
   }
 
   /** M5：背包/快捷栏已 Canvas 化，DOM 仅保留 Buff 栏 + Toast */

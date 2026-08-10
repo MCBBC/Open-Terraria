@@ -1,10 +1,14 @@
-// 蜂巢(pass 45,HiveBiome.cs 1:1)+ 蜘蛛巢(WorldGen.cs:8138 Spread.Spider 1:1)。
+// 蜂巢(pass 45,HiveBiome.cs 1:1)+ 蜘蛛巢(1456 SpiderCaves L17455 / Spread.Spider L3653 1:1)
+// + Webs 全局蛛网 pass(L13659)+ WebsInSpiderCavesAndHoney(L20140)。
 // 蜂巢:主巢+卫星巢+隧道链(每巢各不相同);剖面=核心40%蜂蜜/0.6墙86空腔/0.75实心蜂壳;
-// 链终点幼虫托台(BOSS 房)。蜘蛛巢:洪泛既有洞穴刷墙62,9/10 蛛网密度(Webs pass)。
+// 链终点幼虫托台(BOSS 房)。蜘蛛巢:countTiles 门(500≤空腔≤3499)采样 + 波前 BFS 刷墙62
+// + 内饰(蛛网罐28/蛛网宝箱939/垂网165/覆饰187/小堆185);后续 pass 补 9/10 蛛网51+蜂巢钟乳石。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
+import { tileRunner } from './TileRunner';
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -196,53 +200,242 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 }
 
-/** Spider Caves(WorldGen.cs:8138):w*0.005 个,洪泛既有洞穴(≥100 格)刷墙 62+蛛网 */
-export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.floor(st.w * 0.005);
-  const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
-  let placed = 0;
-  for (let n = 0; n < count * 60 && placed < count; n++) {
-    const x = rng.int(200, st.w - 201);
-    const y = rng.int(yMin, st.h - 231);
-    if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) continue;
-    // 洪泛既有洞穴(上限 3500):只沿非实心且无墙蔓延——巢形=天然洞穴形状
-    const seen = new Set<number>();
-    const q: Array<[number, number]> = [[x, y]];
-    const cavity: Array<[number, number]> = [];
-    while (q.length && cavity.length < 3500) {
-      const [cx, cy] = q.pop()!;
-      const key = cx * 100000 + cy;
-      if (seen.has(key)) continue;
-      if (!st.inBounds(cx, cy)) continue;
-      const i = st.idx(cx, cy);
-      const wl = st.wall[i];
-      if (st.flags[i] || (wl !== 0 && wl !== 1 && wl !== 2)) continue; // 天然洞穴墙也蔓延
-      seen.add(key);
-      cavity.push([cx, cy]);
-      q.push([cx + 1, cy], [cx - 1, cy], [cx, cy + 1], [cx, cy - 1]);
+// ===================== 蜘蛛巢（1456 SpiderCaves L17455 + Spread.Spider L3653 1:1） =====================
+const POT = TILE_BY_KEY['pot']!;
+const DECO165 = TILE_BY_KEY['v_165_cave_decos']!;
+const DECO187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
+const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
+const MUSHROOM_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
+const MAX_TILE_COUNT = 3500; // 原版 maxTileCount（countTiles 硬顶）
+
+/** 原版 SolidTile 语义：active(flags) + tileSolid。生成期幽灵 tile（有 type 无 flags）不算实心 */
+function solidTile(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[st.type[i]];
+  return !!d && d.solid;
+}
+
+/** countTiles（L9493）1:1：洪泛计数非实心格，硬顶 3500；
+ *  触界/遇墙 → 直接判满（reject）；shroom 按访问次数计（蘑菇草地邻接>1 即拒绝） */
+function countTiles(st: TileStore, x: number, y: number): { count: number; shroom: number } {
+  let count = 0, shroom = 0;
+  const seen = new Set<number>();
+  const stack: Array<[number, number]> = [];
+  if (!(x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1)) stack.push([x, y]);
+  while (stack.length) {
+    if (count >= MAX_TILE_COUNT) break;
+    const [cx, cy] = stack.pop()!;
+    if (cx <= 1 || cx >= st.w - 1 || cy <= 1 || cy >= st.h - 1) return { count: MAX_TILE_COUNT, shroom };
+    const k = cx * 100000 + cy;
+    if (seen.has(k)) continue;
+    const i = st.idx(cx, cy);
+    if (st.wall[i] !== 0) return { count: MAX_TILE_COUNT, shroom };
+    seen.add(k);
+    if (st.flags[i] && st.type[i] === MUSHROOM_GRASS) shroom++;
+    if (!solidTile(st, cx, cy)) {
+      count++;
+      stack.push([cx - 1, cy], [cx + 1, cy], [cx, cy - 1], [cx, cy + 1]);
     }
-    if (cavity.length < 100) continue;
-    for (const [cx, cy] of cavity) {
+  }
+  return { count, shroom };
+}
+
+/** PlacePot（L?）1:1：2×2（y-1..y 行），随机 3 变体在 X 轴、style 在 Y 轴；占用格须空、脚下须实心 */
+function placePot(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
+  for (let k = 0; k < 2; k++) {
+    for (let l = -1; l < 1; l++) {
+      if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
+    }
+    if (!solidTile(st, x + k, y + 1)) return false;
+  }
+  const variant = rng.int(0, 2) * 36; // 原版仅在放置成功时消费 Next(3)
+  for (let k = 0; k < 2; k++) {
+    for (let l = -1; l < 1; l++) {
+      st.setTileSilent(x + k, y + l, POT, k * 18 + variant, (l + 1) * 18 + style * 36);
+    }
+  }
+  return true;
+}
+
+/** PlaceTight(spiders:true)（L?）1:1：垂挂蛛网 165（1×2，fx=108+variation*18）；
+ *  消耗 Next(2)+Next(3)（与原版参数求值顺序一致） */
+function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean {
+  rng.int(0, 1); // preferSmall
+  const variation = rng.int(0, 2);
+  if (!solidTile(st, x, y - 1)) return false;
+  if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
+  if (!st.inBounds(x, y + 1) || st.flags[st.idx(x, y + 1)]) return false;
+  const fx = 108 + variation * 18;
+  st.setTileSilent(x, y, DECO165, fx, 0);
+  st.setTileSilent(x, y + 1, DECO165, fx, 18);
+  return true;
+}
+
+/** PlaceTile(187, style) 近似：3×2 覆饰（fx=style*54 单行，Tiles_187 1890×72 实证） */
+function placeDeco187(st: TileStore, x: number, y: number, style: number): boolean {
+  for (let k = 0; k < 3; k++) {
+    for (let l = 0; l < 2; l++) {
+      if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
+    }
+  }
+  for (let k = 0; k < 3; k++) {
+    for (let l = 0; l < 2; l++) {
+      st.setTileSilent(x + k, y + l, DECO187, style * 54 + k * 18, l * 18);
+    }
+  }
+  return true;
+}
+
+/** PlaceSmallPile（L?）1:1：size0=1×1（fx=style*18）；size1=2×1（fx=style*36，fy=18） */
+function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): boolean {
+  if (pileSize === 1) {
+    if (!solidTile(st, x, y + 1) || !solidTile(st, x + 1, y + 1)) return false;
+    if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
+    if (!st.inBounds(x + 1, y) || st.flags[st.idx(x + 1, y)]) return false;
+    st.setTileSilent(x, y, SMALL185, pileStyle * 36, 18);
+    st.setTileSilent(x + 1, y, SMALL185, pileStyle * 36 + 18, 18);
+    return true;
+  }
+  if (!solidTile(st, x, y + 1)) return false;
+  if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return false;
+  st.setTileSilent(x, y, SMALL185, pileStyle * 18, 0);
+  return true;
+}
+
+/** Spread.Spider（L3653）1:1：波前 BFS 逐层扩散。
+ *  每格：地狱线/地表线随机带（Next(5)×2）双重拦截；实心或已有墙 → 实心且无墙时背面刷 62 后止步；
+ *  空格无墙 → 刷 62+清液体+内饰（地面 1/3：1/15 蛛网宝箱(939/箱型15)否则蛛网罐 style19-20；
+ *  天花板 1/3 垂网 165；否则地面放覆饰 187 style9-13 + 1/3 小堆 185×2） */
+function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, x: number, y: number): void {
+  const seen = new Set<number>();
+  const key = (px: number, py: number) => px * 100000 + py;
+  let frontier: Array<[number, number]> = [[x, y]];
+  const DIRS: Array<[number, number]> = [[-1, 0], [1, 0], [0, -1], [0, 1]];
+  while (frontier.length) {
+    const layer = frontier;
+    frontier = [];
+    for (const [cx, cy] of layer) {
+      if (cx < 1 || cx >= st.w - 1 || cy < 1 || cy >= st.h - 1) continue;
+      if (cy >= gs.lavaLine - rng.int(0, 4)) continue; // UnderworldLayer(h-200) - Next(5)
+      if (cy < gs.worldSurface + rng.int(0, 4)) continue;
+      seen.add(key(cx, cy));
       const i = st.idx(cx, cy);
+      if (solidTile(st, cx, cy) || st.wall[i] !== 0) {
+        if (st.flags[i] && st.wall[i] === 0) st.wall[i] = 62;
+        continue;
+      }
       st.wall[i] = 62;
-      st.liquid[i] = 0;
-      // Webs pass 密度:9/10 蛛网(近实心)
-      if (!st.flags[i] && st.type[i] === 0 && rng.next() * 10 < 9) {
-        let nearSolid = false;
-        for (let dx = -3; dx <= 3 && !nearSolid; dx++) {
-          for (let dy = -3; dy <= 3; dy++) {
-            if (st.inBounds(cx + dx, cy + dy) && st.flags[st.idx(cx + dx, cy + dy)]) { nearSolid = true; break; }
+      if (!st.flags[i]) {
+        st.liquid[i] = 0; st.liquidType[i] = 0;
+        if (solidTile(st, cx, cy + 1) && rng.int(0, 2) === 0) {
+          if (rng.int(0, 14) === 0) {
+            placeBuriedChest(st, rng, gs, chests, cx, cy, { style: 15, loot: 'vi_939_web_slinger' });
+          } else {
+            placePot(st, rng, cx, cy, rng.int(19, 20));
           }
         }
-        if (nearSolid) st.setTileSilent(cx, cy, COBWEB, 0, 0);
+        if (!st.flags[i]) {
+          if (solidTile(st, cx, cy - 1) && rng.int(0, 2) === 0) {
+            placeTightWebs(st, rng, cx, cy);
+          } else if (solidTile(st, cx, cy + 1)) {
+            placeDeco187(st, cx, cy, 9 + rng.int(0, 4));
+            if (rng.int(0, 2) === 0) {
+              if (!st.flags[i]) placeSmallPile(st, cx, cy, 34 + rng.int(0, 3), 1);
+              if (!st.flags[i]) placeSmallPile(st, cx, cy, 48 + rng.int(0, 5), 0);
+            }
+          }
+        }
       }
-      // 实心邻块背后刷墙
-      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        if (!st.inBounds(cx + dx, cy + dy)) continue;
-        const j = st.idx(cx + dx, cy + dy);
-        if (st.flags[j] && st.wall[j] === 0) st.wall[j] = 62;
+      for (const [dx, dy] of DIRS) {
+        if (!seen.has(key(cx + dx, cy + dy))) frontier.push([cx + dx, cy + dy]);
       }
     }
-    placed++;
+  }
+}
+
+/** SpiderCaves pass（L17455）1:1：w*0.005 个巢；采样 x∈[200,w-200) y∈[(ws+rock)/2,h-230)；
+ *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢） */
+export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  const count = Math.floor(st.w * 0.005);
+  const retryCap = Math.floor(st.w / 2);
+  const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
+  for (let n = 0; n < count; n++) {
+    let x = rng.int(200, st.w - 201);
+    let y = rng.int(yMin, st.h - 231);
+    let c = countTiles(st, x, y);
+    let tries = 0;
+    while ((c.count >= MAX_TILE_COUNT || c.count < 500) && tries < retryCap) {
+      tries++;
+      x = rng.int(200, st.w - 201);
+      y = rng.int(yMin, st.h - 231);
+      c = countTiles(st, x, y);
+      if (c.shroom > 1) c.count = 0;
+    }
+    if (tries < retryCap) spreadSpider(st, rng, gs, chests, x, y);
+  }
+}
+
+/** WebsInSpiderCavesAndHoney pass（L20140）1:1：
+ *  墙86 蜂巢腔 → 液体转蜂蜜 + 1/3 钟乳石(165)；墙62 蜘蛛巢 → 清液体 +
+ *  空格 9/10 放蛛网 51（±2-4 内有实心才放） */
+export function runWebsInSpiderCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
+  for (let i = 100; i < st.w - 100; i++) {
+    for (let j = Math.floor(gs.worldSurface); j < st.h - 100; j++) {
+      const idx = st.idx(i, j);
+      if (st.wall[idx] === 86) {
+        if (st.liquid[idx] > 0) st.liquidType[idx] = 3; // honey
+        if (rng.int(0, 2) === 0) {
+          // PlaceTight(spiders:false)：普通钟乳石，样式 0-2（近似）
+          if (solidTile(st, i, j - 1) && st.inBounds(i, j) && !st.flags[st.idx(i, j)]
+            && st.inBounds(i, j + 1) && !st.flags[st.idx(i, j + 1)]) {
+            const fx = rng.int(0, 2) * 18;
+            st.setTileSilent(i, j, DECO165, fx, 0);
+            st.setTileSilent(i, j + 1, DECO165, fx, 18);
+          }
+        }
+      }
+      if (st.wall[idx] === 62) {
+        st.liquid[idx] = 0; st.liquidType[idx] = 0;
+      }
+      if (st.wall[idx] === 62 && !st.flags[idx] && rng.int(0, 9) !== 0) {
+        const r = rng.int(2, 4);
+        let nearSolid = false;
+        for (let k = i - r; k <= i + r && !nearSolid; k++) {
+          for (let l = j - r; l <= j + r; l++) {
+            if (solidTile(st, k, l)) { nearSolid = true; break; }
+          }
+        }
+        if (nearSolid) st.setTileSilent(i, j, COBWEB, 0, 0);
+      }
+    }
+  }
+}
+
+/** Webs pass（L13659）1:1：w*h*0.0006 次天花板蛛网 runner（前 numMCaves 次锚定山洞口）。
+ *  TileRunner(51, addTile:true, ±1 横速, -1 升速, 4-10 半径, 2-3 步) */
+export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const count = Math.floor(st.w * st.h * 0.0006);
+  const numMCaves = gs.numMCaves ?? 0;
+  for (let i = 0; i < count; i++) {
+    let j = rng.int(20, st.w - 21);
+    let num = rng.int(Math.floor(gs.worldSurfaceHigh), st.h - 21);
+    if (i < numMCaves && gs.mCaveX && gs.mCaveY) {
+      j = gs.mCaveX[i]; num = gs.mCaveY[i];
+    }
+    if (!st.inBounds(j, num) || st.flags[st.idx(j, num)]) continue;
+    if (!(num > gs.worldSurface || st.wall[st.idx(j, num)] > 0)) continue;
+    while (num > Math.floor(gs.worldSurfaceLow) && !st.flags[st.idx(j, num)]) num--;
+    num++;
+    const dir = rng.int(0, 1) === 0 ? -1 : 1;
+    while (j > 10 && j < st.w - 10 && !st.flags[st.idx(j, num)]) j += dir;
+    j -= dir;
+    if (!st.inBounds(j, num)) continue;
+    if (!(num > gs.worldSurface || st.wall[st.idx(j, num)] > 0)) continue;
+    tileRunner(st, rng, gs, j, num, {
+      strength: rng.int(4, 10), steps: rng.int(2, 3), type: COBWEB,
+      addTile: true, speedX: dir, speedY: -1,
+    });
   }
 }

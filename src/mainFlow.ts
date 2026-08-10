@@ -98,6 +98,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (!devMode) return;
     g.setupDevMode();
     g.world.explored.fill(1);
+    g.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
     g.world.exploredVersion++;
   }
 
@@ -109,6 +110,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onToast: (m) => ui.toast(m),
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)
       onChat: (t, r, g, b) => ui.chatMessage(t, r, g, b),
+      // NPC 对话系统(SetTalkNPC + GetChat)
+      onNpcDialog: (name, chat, buttons) => ui.showNpcDialog(name, chat, buttons),
+      onNpcDialogClose: () => ui.closeNpcDialog(),
+      onNpcShop: (title, items, copper) => ui.showNpcShop(title, items, copper),
       onReadSign: (text) => ui.showSign(text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
@@ -136,21 +141,43 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     await loadFromJson(text);
   }
 
+  /** 玩家状态回填（worker/主线程两路共用） */
+  function applyPlayer(g: Game, player: ReturnType<typeof loadSaveData>['player']) {
+    g.player.hp = player.hp;
+    g.player.x = player.x;
+    g.player.y = player.y;
+    // 上限扩容进度（水晶之心/生命果/魔力水晶；旧档缺省 100/20/20）
+    if (player.baseMaxHp !== undefined) g.player.baseMaxHp = player.baseMaxHp;
+    if (player.baseMaxMana !== undefined) g.player.baseMaxMana = player.baseMaxMana;
+    if (player.mana !== undefined) g.player.mana = player.mana;
+    g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
+    g.player.inv.selected = player.selected;
+  }
+
   async function loadFromJson(text: string) {
     try {
+      // worker 路径：JSON 解析 + RLE 解码 + load 模式沉降全在后台（json 源传入）
+      const { WorldGenClient } = await import('./workers/WorldGenClient');
+      const client = new WorldGenClient();
+      if (await client.probe()) {
+        try {
+          const { world, player } = await client.loadSave({ json: text }, {
+            onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
+          });
+          const g = makeGame();
+          await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
+          applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          return;
+        } catch (e) {
+          if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
+          // worker 失败 → 主线程 fallback
+        }
+      }
       const { world, player } = loadSave(text);
       const g = makeGame();
       ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
-      g.player.hp = player.hp;
-      g.player.x = player.x;
-      g.player.y = player.y;
-      // 上限扩容进度（水晶之心/生命果/魔力水晶；旧档缺省 100/20/20）
-      if (player.baseMaxHp !== undefined) g.player.baseMaxHp = player.baseMaxHp;
-      if (player.baseMaxMana !== undefined) g.player.baseMaxMana = player.baseMaxMana;
-      if (player.mana !== undefined) g.player.mana = player.mana;
-      g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
-      g.player.inv.selected = player.selected;
+      applyPlayer(g, player);
     } catch (e) {
       console.error(e);
       ui.hideProgress();

@@ -3,7 +3,7 @@
 import { parseWld, WldWorld } from './WldParser';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { TILE_BY_KEY, T } from '../data/tiles';
-import { ITEM_BY_KEY } from '../data/items';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
 type MapEntry = string | { key: string; copyFrame?: boolean } | null;
@@ -836,7 +836,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     const items: Array<{ id: number; stack: number } | null> = [];
     for (const it of c.items.slice(0, 10)) {
       if (!it) { items.push(null); continue; }
-      const key = ITEM_MAP[it.id];
+      const key = ITEM_MAP[it.id] ?? VANILLA_ITEM_KEY_BY_ID[it.id];
       if (key && ITEM_BY_KEY[key] !== undefined) {
         items.push({ id: ITEM_BY_KEY[key], stack: Math.min(999, it.stack) });
       } else {

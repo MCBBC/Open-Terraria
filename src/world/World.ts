@@ -57,18 +57,30 @@ export class World {
   treeTops: number[] = [];
 
   exploredVersion = 0;
+  /** 最近一次 markExplored 新点亮格的包围盒（tile 坐标；null = 无新探索）。
+   *  渲染端雾画布按此做脏矩形增量更新——旧版无条件 bump 版本导致每 15 tick
+   *  整幅重建 4200×1200 雾画布（20MB 分配 + 500 万格循环 ≈ 672ms 长任务），
+   *  首次导入大世界开地图时主线程持续阻塞 → 白屏闪烁 + 标签页 OOM 崩溃 */
+  exploredDirty: { x0: number; y0: number; x1: number; y1: number } | null = null;
   markExplored(cx: number, cy: number, radius: number) {
-    this.exploredVersion++;
     const st = this.store;
     const x0 = Math.max(0, cx - radius), x1 = Math.min(st.w - 1, cx + radius);
     const y0 = Math.max(0, cy - radius), y1 = Math.min(st.h - 1, cy + radius);
+    let changed = false;
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
-        if ((x - cx) ** 2 + (y - cy) ** 2 <= radius * radius) {
-          this.explored[y * st.w + x] = 1;
+        const i = y * st.w + x;
+        if (!this.explored[i] && (x - cx) ** 2 + (y - cy) ** 2 <= radius * radius) {
+          this.explored[i] = 1;
+          changed = true;
+          // 脏包围盒与新点亮格取并（渲染帧间多次 mark 不丢更新）
+          const d = this.exploredDirty;
+          if (d) { if (x < d.x0) d.x0 = x; if (x > d.x1) d.x1 = x; if (y < d.y0) d.y0 = y; if (y > d.y1) d.y1 = y; }
+          else this.exploredDirty = { x0: x, y0: y, x1: x, y1: y };
         }
       }
     }
+    if (changed) this.exploredVersion++;
   }
 
   constructor(w: number, h: number, seed: number, name = '新世界') {

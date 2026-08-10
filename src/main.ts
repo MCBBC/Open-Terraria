@@ -100,6 +100,7 @@ window.addEventListener('keydown', (e) => {
     case 'F4':
       e.preventDefault();
       game.world.explored.fill(1);
+      game.world.exploredDirty = null; // 全图变化无脏信息 → 渲染端整幅重建
       game.world.exploredVersion++; // 使迷雾缓存失效重建
       ui.toast('已消除全图迷雾');
       break;

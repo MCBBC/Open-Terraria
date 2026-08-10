@@ -675,10 +675,13 @@ item({ key: 'mushroom_grass_seeds', name: '蘑菇草地种子', maxStack: 999, v
 
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
 import vanillaItemMeta from '../../public/sprites/vanilla.json';
+/** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
+export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
 for (const [idStr, m] of Object.entries(_vim)) {
   if (!m || typeof m.key !== 'string' || !m.key) continue;
   const ik = 'vi_' + idStr + '_' + m.key.replace(/[^A-Za-z0-9]/g, '');
+  VANILLA_ITEM_KEY_BY_ID[Number(idStr)] = ik; // 已注册的同样入表（wld 导入按 id 反查）
   if (byKey[ik] !== undefined) continue;
   item({ key: ik, name: '', maxStack: 999, value: 1 });
 }

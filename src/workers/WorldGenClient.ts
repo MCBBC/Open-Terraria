@@ -21,6 +21,8 @@ interface Pending {
   onProgress?: (phase: string, label: string, p: number) => void;
   onPreview?: (f: PreviewFrame) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** loadSave 专用结果处理器（world + player） */
+  onLoadResult?: (ev: Extract<WorldWorkerEvent, { type: 'result' }>) => void;
 }
 
 /** 握手超时：覆盖老 Safari 无 module worker / CSP 禁 worker / file:// 全挂 */
@@ -100,10 +102,37 @@ export class WorldGenClient {
       }, cb?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
       this.pending.set(id, {
         resolve, reject,
-        onProgress: cb?.onProgress, onPreview: cb?.onPreview,
+        onProgress: cb?.onProgress as Pending['onProgress'], onPreview: cb?.onPreview,
         timer,
       });
       w.postMessage({ id, type: 'generate', cfg } satisfies WorldWorkerRequest);
+    });
+  }
+
+  /** 读档解析（worker 内 IDB 直读/JSON 解析/RLE 解码 + load 模式沉降，transfer 回传） */
+  async loadSave(
+    args: { key?: string; json?: string; save?: unknown },
+    cb?: {
+      onProgress?: (phase: string, p: number) => void;
+      timeoutMs?: number;
+    },
+  ): Promise<{ world: World; player: unknown }> {
+    const w = await this.ensureWorker();
+    const id = this.nextId++;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        this.teardown();
+        reject(new WorldGenUnavailable('读档超时'));
+      }, cb?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
+      this.pending.set(id, {
+        resolve: () => undefined, // loadSave 走 onLoadResult
+        reject,
+        onProgress: cb?.onProgress as Pending['onProgress'],
+        timer,
+        onLoadResult: (ev) => resolve({ world: World.fromPacket(ev.world), player: ev.player }),
+      });
+      w.postMessage({ id, type: 'saveParse', key: args.key, json: args.json, save: args.save as never } satisfies WorldWorkerRequest);
     });
   }
 
@@ -113,7 +142,8 @@ export class WorldGenClient {
       if (!p) return;
       clearTimeout(p.timer);
       this.pending.delete(ev.id);
-      p.resolve(World.fromPacket(ev.world));
+      if (p.onLoadResult) p.onLoadResult(ev);
+      else p.resolve(World.fromPacket(ev.world));
       return;
     }
     if (ev.type === 'error') {
