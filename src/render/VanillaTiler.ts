@@ -577,9 +577,13 @@ export function drawVanillaCell(
   const dy = py + TILE - r.sh;
   // 原版 TileObjectData DrawYOffset：落地家具普遍 +2（腿部插入地面 2px）、
   // 挂墙/特殊件为负。从反编译 ObjectData/TileObjectData.cs 全量提取。
-  const dyOff = DRAW_Y_OFFSET[sheet] ?? 0;
-  // 火把 X 偏移（TileDrawing.cs:1084 case 4 vector.X += 6 + 基础绘制的 20px 居中 -2 → 净 +4）
-  const dxOff = sheet === 4 ? 4 : 0;
+  let dyOff = DRAW_Y_OFFSET[sheet] ?? 0;
+  // 火把（tile 4）：原版 GetTileDrawData case 4(:4724-4731) tileWidth=20 → 主绘制
+  // X = tileX*16 - (20-16)/2(:1020-1025 num5) = 格内居中 -2(左右各溢 2px);
+  // Y:上方实心 = 天花板火把 tileTop=4 下移(:4727-4730),地面/墙面为 0。
+  // (此前的 +4 引用了 :1084 的 case 4 —— 那是 tile 726 的半砖坡面分支,不是火把)
+  const dxOff = sheet === 4 ? -2 : 0;
+  if (sheet === 4 && st.inBounds(x, y - 1) && st.isSolid(x, y - 1)) dyOff += 4;
   ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px + dxOff, Math.max(py, dy) + dyOff, r.sw, r.sh);
   void fw; void fh;
 }

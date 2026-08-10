@@ -6,7 +6,7 @@ import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { openDoor, closeDoor as closeDoorTile } from '../world/Door';
+import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES } from '../data/tiles';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 import { newNpcName } from '../i18n/RandomText';
@@ -154,40 +154,55 @@ export class TownNPC extends Entity {
 
   }
 
-  /** 城镇 NPC 开关门（原版 NPC.cs:54478-54500/54243-54252） */
+  /** 城镇 NPC 开关门（原版 NPC.cs:54478-54500/54243-54252，含高门 389 族 ShiftTallGate） */
   private npcDoorUpdate(world: import('../world/World').World, game: GameHooks) {
     const st = world.store;
-    // 过门关门：中心距门 >2 格 → 关；>4 格或换层 → 放弃
+    const DOOR_OPEN = TILE_BY_KEY_DOOR_TILES['door_open'] ?? -1;
+    const GATE_OPEN = TILE_BY_KEY_DOOR_TILES['tall_gate_open'] ?? -1;
+    // 过门关门：中心距门 >2 格 → 关；>4 格或换层 → 放弃（原版 54243-54252）
     if (this.closeDoor) {
       const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
       if (Math.abs(tx - this.doorX) > 2 || Math.abs(ty - this.doorY) > 4) {
         const doorType = st.type[st.idx(this.doorX, this.doorY)];
-        const isStillDoor = doorType === (TILE_BY_KEY_DOOR_TILES['tall_gate_open'] ?? TILE_BY_KEY_DOOR_TILES['door_open'])
-          || doorType === (TILE_BY_KEY_DOOR_TILES['door_open'] ?? -1);
-        if (Math.abs(tx - this.doorX) <= 4 && isStillDoor) {
-          closeDoorTile(st, this.doorX, this.doorY);
+        if (Math.abs(tx - this.doorX) <= 4 && Math.abs(ty - this.doorY) <= 4) {
+          if (doorType === DOOR_OPEN) closeDoorTile(st, this.doorX, this.doorY);
+          else if (doorType === GATE_OPEN) {
+            // 高门关门（原版 54266-54274：ShiftTallGate(closing:true)，tile 389 → 388）
+            shiftTallGate(st, this.doorX, this.doorY, true, () => game.playSfx('door_close', 0.8, this.cx, this.cy));
+          }
         }
         this.closeDoor = false;
       }
       return;
     }
-    // 撞门开门：前方碰撞点是关着的门（tile 10/388 族）
+    // 撞门开门：前方碰撞点是关着的普通门（10）或高门（388）
+    // （原版 54478-54500：Next(10)==0；普通门两方向回退，高门 ShiftTallGate(closing:false)）
     if (!this.hitWall) return;
     const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
     const fy = Math.floor((this.y + this.h - 8) / TILE);
     for (const dy of [0, -1]) {
       const x = fx, y = fy + dy;
       if (x < 1 || y < 1 || x >= st.w - 1 || y >= st.h - 1) continue;
-      if (st.type[st.idx(x, y)] !== TILE_BY_KEY_DOOR_TILES['door_closed']) continue;
+      const t = st.type[st.idx(x, y)];
       if (Math.random() >= 0.1) return;   // 原版 Next(10)==0
-      const before = st.type[st.idx(x, y)];
-      const opened = openDoor(st, x, y, this.facing) || openDoor(st, x, y, -this.facing);
-      if (opened && before !== st.type[st.idx(x, y)]) {
-        this.closeDoor = true;
-        this.doorX = x; this.doorY = y;
-        game.playSfx('door_open', 0.8, this.cx, this.cy);
+      if (t === TILE_BY_KEY_DOOR_TILES['door_closed']) {
+        const before = st.type[st.idx(x, y)];
+        const opened = openDoor(st, x, y, this.facing) || openDoor(st, x, y, -this.facing);
+        if (opened && before !== st.type[st.idx(x, y)]) {
+          this.closeDoor = true;
+          this.doorX = x; this.doorY = y;
+          game.playSfx('door_open', 0.8, this.cx, this.cy);
+        }
+        return;
       }
-      return;
+      if (t === TILE_BY_KEY_DOOR_TILES['tall_gate_closed']) {
+        const anchor = shiftTallGate(st, x, y, false, () => game.playSfx('door_open', 0.8, this.cx, this.cy));
+        if (anchor) {
+          this.closeDoor = true;
+          this.doorX = anchor[0]; this.doorY = anchor[1];
+        }
+        return;
+      }
     }
   }
 

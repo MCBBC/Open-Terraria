@@ -469,7 +469,7 @@ export class Renderer {
 
     // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
     // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
-    this.drawHouseBanners(entities, world);
+    this.drawHouseBanners(entities, world, cam);
 
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
@@ -1088,7 +1088,7 @@ export class Renderer {
    *  （2×2 帧 16×20：X=单/双人旗、Y=housingCategory——城镇 NPC 全 0）+ 头像
    *  叠画（NPC_Head_{id} 24×24）。同房多 NPC 每面旗下移 26px。锚点=帧中心。
    *  位置 = home.x*16+8，y = 首个实心格下沿+18 */
-  private drawHouseBanners(entities: unknown[], world: World) {
+  private drawHouseBanners(entities: unknown[], world: World, cam: Camera) {
     if (!this.atlas) return;
     const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
     if (!cloth) return;
@@ -1123,6 +1123,37 @@ export class Renderer {
         const hw = head.sw * hs, hh = head.sh * hs;
         ctx.drawImage(head.img, head.sx, head.sy, head.sw, head.sh,
           bx - hw / 2, by - hh / 2 + 2, hw, hh);
+      }
+      // 光照色调（原版 Lighting.GetColor(homeTileX, num3)：旗布头像受所在格光照染色。
+      //  lightCanvas 为屏幕空间 2× 超采样光照图（合成在本层之后，此处取上一帧数据——
+      //  光照变化平缓一帧滞后无感；首帧全黑跳过）
+      const rectW = 16, rectH = 24;
+      const [lsx, lsy] = cam.worldToScreen(bx, by - 12);
+      const lx = Math.round(lsx * 2), ly = Math.round(lsy * 2);
+      if (lx >= 0 && ly >= 0 && lx < this.lightCanvas.width && ly < this.lightCanvas.height) {
+        const ld = this.lightCtx.getImageData(lx, ly, 1, 1).data;
+        if (ld[0] + ld[1] + ld[2] > 0) {
+          ctx.save();
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.fillStyle = `rgb(${ld[0]},${ld[1]},${ld[2]})`;
+          ctx.fillRect(bx - rectW / 2, by - rectH / 2, rectW, rectH);
+          ctx.restore();
+        }
+      }
+      // hover 名条（原版 40255+：鼠标悬停旗帜显示 NPC 名）
+      if (this._mouseX >= 0) {
+        const [mwx, mwy] = cam.screenToWorld(this._mouseX, this._mouseY);
+        if (mwx >= bx - rectW / 2 && mwx <= bx + rectW / 2 && mwy >= by - rectH / 2 && mwy <= by + rectH / 2) {
+          const label = n.givenName || Lang.npcName(n.vanillaId) || n.npcKey;
+          ctx.font = '12px "Fusion Pixel 12px", sans-serif';
+          const tw = ctx.measureText(label).width;
+          ctx.fillStyle = 'rgba(20,16,28,0.85)';
+          ctx.fillRect(bx - tw / 2 - 5, by - rectH / 2 - 20, tw + 10, 15);
+          ctx.fillStyle = '#E8E4F0';
+          ctx.textAlign = 'center';
+          ctx.fillText(label, bx, by - rectH / 2 - 9);
+          ctx.textAlign = 'left';
+        }
       }
     }
   }
@@ -1521,6 +1552,11 @@ export class Renderer {
   minimapUiHover = false;
   /** 时间调整面板开关（时间文本旁 ± 按钮切换） */
   timePanelOpen = false;
+  /** 天气面板开合 + 命中上报（同 timeUiHover 模式，Game 吞点击用） */
+  weatherPanelOpen = false;
+  weatherUiHover = false;
+  /** 天气预设回调（Game.applyWeatherPreset 注入；name = clear/cloudy/.../random） */
+  weatherPreset: ((name: string) => void) | null = null;
   /** 本帧指针位于时间按钮/面板上（渲染期写入、下帧 Game 消费：吞掉挖掘/放置/攻击点击） */
   timeUiHover = false;
   /** UI 点击边沿检测（render 存 _mouseDown，drawMinimap 末尾更新） */
@@ -1601,6 +1637,24 @@ export class Renderer {
     const timeText = `\u65f6\u95f4 ${hh}:${mm2}`;
     ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
     ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
+    // \u5929\u6c14\u6587\u672c\uff08\u539f\u7248 DrawInfoAccs 46236 \u516b\u6863\u94fe\uff1a\u5c0f\u5730\u56fe\u4e0b\u65b9 InfoAccs \u56fe\u6807\u5217\u65c1\u7684\u6587\u672c\uff0c
+    // GameUI.Storm/HeavyRain/.../Clear + \u98ce\u5411\uff08EastWind/WestWind = windSpeedCurrent\u00d750 \u53d6\u6574\uff09
+    // + \u6c99\u5c18\u66b4\u95ea\u70c1"Sandstorm +"\u3002\u5e03\u5c40\u5bf9\u9f50\uff1a\u65f6\u95f4\u884c\u4e0b\u65b9\u4e00\u884c\u5c45\u4e2d\uff08\u539f\u7248\u540c\u4e3a minimap \u4e0b\u533a\uff09
+    if (world.weather) {
+      const ZH: Record<string, string> = {
+        SlimeRain: '\u53f2\u83b1\u59c6\u96e8', Storm: '\u98ce\u66b4', HeavyRain: '\u5927\u96e8', Rain: '\u96e8', LightRain: '\u5c0f\u96e8',
+        Overcast: '\u9634\u5929', MostlyCloudy: '\u591a\u4e91', Cloudy: '\u5c11\u4e91', Clear: '\u6674\u6717', PartlyCloudy: '\u5c40\u90e8\u591a\u4e91',
+      };
+      const w = world.weather;
+      let wt = ZH[w.statusText()] ?? '';
+      const wind = Math.round(w.windSpeedCurrent * 50);
+      if (wind !== 0) wt += ` ${wind > 0 ? '\u897f\u98ce' : '\u4e1c\u98ce'}${Math.abs(wind)}`;
+      const sand = w.sandstorm.happening ? (Math.floor(performance.now() / 500) % 2 === 0 ? ' +\u6c99\u5c18\u66b4' : ' +') : '';
+      ctx.font = 'bold 12px sans-serif';
+      const wtText = wt + sand;
+      ctx.strokeText(wtText, ox + size / 2, oy + 253 + 32);
+      ctx.fillText(wtText, ox + size / 2, oy + 253 + 32);
+    }
 
     // ---- \u65f6\u95f4\u8c03\u6574\u6309\u94ae + \u9762\u677f\uff08\u00b1 \u5207\u6362\uff1b\u547d\u4e2d\u533a\u6574\u4f53\u4e0a\u62a5 timeUiHover \u4f9b Game \u541e\u70b9\u51fb\uff09 ----
     const mx = this._mouseX, my = this._mouseY;
@@ -1647,6 +1701,54 @@ export class Renderer {
       presets.forEach(([label, t], i) => {
         box(px + 10 + i * 56, py + 38, 52, 20, label, () => setT(t));
       });
+    }
+
+    // ---- 天气调整按钮 + 面板（同时间按钮模式；预设回调由 Game 注入 weatherPreset） ----
+    const wBtnX = ox + size - 46, wBtnY = oy + 252;
+    const wBtnHover = hit(wBtnX, wBtnY, btnS, btnS);
+    const wPanelY = oy + 276 + (this.timePanelOpen ? 72 : 0);
+    const wPanelH = 112;
+    this.weatherUiHover = wBtnHover || (this.weatherPanelOpen && hit(ox, wPanelY, size, wPanelH));
+    ctx.fillStyle = wBtnHover ? 'rgba(90,110,180,0.95)' : 'rgba(20,26,60,0.85)';
+    ctx.fillRect(wBtnX, wBtnY, btnS, btnS);
+    ctx.strokeStyle = wBtnHover ? '#ffd76e' : '#4a5aa0';
+    ctx.strokeRect(wBtnX + 0.5, wBtnY + 0.5, btnS - 1, btnS - 1);
+    ctx.fillStyle = '#e8e8f4';
+    ctx.font = 'bold 12px sans-serif';
+    ctx.fillText('⛅', wBtnX + btnS / 2, wBtnY + 15);
+    if (clicked && wBtnHover) this.weatherPanelOpen = !this.weatherPanelOpen;
+    if (this.weatherPanelOpen) {
+      const px2 = ox, py2 = wPanelY, pw2 = size;
+      ctx.fillStyle = 'rgba(8,10,26,0.92)';
+      ctx.fillRect(px2, py2, pw2, wPanelH);
+      ctx.strokeStyle = '#4a5aa0';
+      ctx.strokeRect(px2 + 0.5, py2 + 0.5, pw2 - 1, wPanelH - 1);
+      const box2 = (x: number, y: number, w2: number, h2: number, label: string, act: () => void) => {
+        const hov = hit(x, y, w2, h2);
+        ctx.fillStyle = hov ? '#3a4680' : '#232c52';
+        ctx.fillRect(x, y, w2, h2);
+        ctx.strokeStyle = hov ? '#ffd76e' : '#3a4680';
+        ctx.strokeRect(x + 0.5, y + 0.5, w2 - 1, h2 - 1);
+        ctx.fillStyle = '#e8e8f4';
+        ctx.font = '12px sans-serif';
+        ctx.fillText(label, x + w2 / 2, y + h2 / 2 + 4);
+        if (clicked && hov) act();
+      };
+      const presetsW: Array<[string, string]> = [
+        ['晴朗', 'clear'], ['多云', 'cloudy'], ['小雨', 'lightrain'], ['大雨', 'heavyrain'],
+        ['风暴', 'storm'], ['沙尘暴', 'sandstorm'], ['史莱姆雨', 'slimerain'], ['随机', 'random'],
+      ];
+      presetsW.forEach(([label, name], i) => {
+        const col = i % 4, row = Math.floor(i / 4);
+        box2(px2 + 10 + col * 56, py2 + 10 + row * 26, 52, 22, label, () => this.weatherPreset?.(name));
+      });
+      // 风力调节（±0.2，钳 ±0.8）
+      const wd = world.weather;
+      if (wd) {
+        box2(px2 + 10, py2 + 64, 100, 20, `风 ${Math.round(wd.windSpeedTarget * 100) / 100}`, () => {});
+        box2(px2 + 8, py2 + 88, 52, 18, '− 风', () => { wd.windSpeedTarget = Math.max(-0.8, wd.windSpeedTarget - 0.2); });
+        box2(px2 + pw2 - 60, py2 + 88, 52, 18, '+ 风', () => { wd.windSpeedTarget = Math.min(0.8, wd.windSpeedTarget + 0.2); });
+      }
     }
     this._uiPrevMouseDown = this._mouseDown;
     ctx.restore();

@@ -32,6 +32,9 @@ export interface ItemDef {
   /** 原版 item id（战斗数值数据源） */
   vid?: number;
   wall?: string;          // 放置的 wall key
+  /** 原版 createWall（Item.cs SetDefaults）：放置的背景墙 vanilla id。
+   *  vanilla-wallitems.json 全量 124 项（tools/extract-wallitems.mjs 提取） */
+  wallId?: number;
   tool?: {
     type: ToolType;
     power?: number;       // 工具力（镐/斧/锤）
@@ -895,6 +898,15 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'goblin_battle_standard': 10489, 'snow_globe': 10490, 'pirate_map': 10491,
   'coin_platinum': 10492,
 };
+
+// ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取，124 项）：
+// 已注册的 vi_ 墙物品补 wallId；缺的按 vi_ 命名注册（稳定 id = 物品 id 自动派生）
+import wallItemsJson from './vanilla-wallitems.json';
+for (const wi of Object.values(wallItemsJson as Record<string, { wall: number; key: string }>)) {
+  const existing = byKey[wi.key];
+  if (existing !== undefined) { ITEM_DEFS[existing].wallId = wi.wall; continue; }
+  item({ key: wi.key, name: '', maxStack: 999, value: 1, wallId: wi.wall });
+}
 /** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);
 /** 稳定 id → internal id(加载方向;同 vid 重复注册时归一到首个 def——内容等价) */

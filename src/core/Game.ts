@@ -527,6 +527,8 @@ export class Game implements GameHooks {
     };
     this.renderer.weatherFx.attach(w.weather, this.weatherHooks);
     this.renderer.weatherFxActive = true;
+    // 天气预设回调（小地图天气面板按钮 → applyWeatherPreset）
+    this.renderer.weatherPreset = (name) => this.applyWeatherPreset(name);
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
@@ -570,39 +572,11 @@ export class Game implements GameHooks {
     });
     this.entities.clear();
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
-    // 初始装备（铁器三件套与 Maples 素材对齐；含药水与配饰便于体验 Buff/配饰系统）
-    this.player.inv.add(ITEM_BY_KEY['iron_pickaxe'], 1);
-    this.player.inv.add(ITEM_BY_KEY['iron_axe'], 1);
-    this.player.inv.add(ITEM_BY_KEY['iron_sword'], 1);
-    // 铁弓 + 木箭（射击系统测试；PickAmmo 会自动按 ammoId 找背包任意箭）
-    this.player.inv.add(ITEM_BY_KEY['iron_bow'], 1);
-    this.player.inv.add(ITEM_BY_KEY['wooden_arrow'], 250);
-    this.player.inv.add(ITEM_BY_KEY['torch'], 12);
-    // 药水/召唤物放入背包格（10 起），不占快捷栏
-    const bag: Array<[string, number]> = [
-      ['heal_potion', 2], ['agility_potion', 2], ['ironskin_potion', 2],
-      ['thorns_potion', 2], ['regen_potion', 2], ['suspicious_eye', 3], ['lens', 6],
-      ['slime_crown', 3], // 史莱姆王冠（召唤史莱姆王 NPC 50）
-      // 电路工具(Wiring 移植验证用):扳手/线/钳/致动器/魔杖/多彩/蓝图 + 常用器件
-      ['red_wrench', 1], ['blue_wrench', 1], ['green_wrench', 1], ['yellow_wrench', 1],
-      ['wire', 300], ['wire_cutter', 1], ['actuator_item', 30], ['actuation_rod', 1],
-      ['multicolor_wrench', 1], ['grand_design', 1],
-      ['place_v_132_lever', 10], ['place_v_136_switch', 10], ['place_v_144_timers', 5],
-      ['place_v_135_pressure_plates', 5], ['place_v_137_traps', 5], ['place_v_105_statue', 3],
-      ['place_v_419_logicgatelamp', 10], ['place_v_420_logicgate', 5],
-      ['place_v_235_teleporter', 2], ['place_v_142_inletpump', 2], ['place_v_143_outletpump', 2],
-    ];
-    let bi = 10;
-    for (const [key, n] of bag) {
-      this.player.inv.slots[bi++] = { id: ITEM_BY_KEY[key], stack: n };
-    }
-    // 开局体验盔甲：铁三件套穿上
-    this.player.inv.slots[ARMOR_START] = { id: ITEM_BY_KEY['iron_helmet'], stack: 1 };
-    this.player.inv.slots[ARMOR_START + 1] = { id: ITEM_BY_KEY['iron_chainmail'], stack: 1 };
-    this.player.inv.slots[ARMOR_START + 2] = { id: ITEM_BY_KEY['iron_greaves'], stack: 1 };
-    // 配饰直接放入配饰栏（槽 40-44）
-    this.player.inv.slots[ACCESSORY_START] = { id: ITEM_BY_KEY['lucky_horseshoe'], stack: 1 };
-    this.player.inv.slots[ACCESSORY_START + 1] = { id: ITEM_BY_KEY['feral_claws'], stack: 1 };
+    // 初始装备 = 原版经典开局三件套（铜镐/铜斧/铜剑），其余一概不给——
+    // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
+    this.player.inv.add(ITEM_BY_KEY['copper_pickaxe'], 1);
+    this.player.inv.add(ITEM_BY_KEY['copper_axe'], 1);
+    this.player.inv.add(ITEM_BY_KEY['copper_sword'], 1);
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;
@@ -1017,7 +991,7 @@ export class Game implements GameHooks {
       this._mapClickLatch2 = false;
     }
     // ---- 标注模式：点击标记方块（优先于挖掘/放置/使用） ----
-    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover) {
+    if (this.annotateMode && inp.mouseDown && !this._annoLatch && !inp.uiBlocking && !this.renderer.fullMap.open && !this.renderer.timeUiHover && !this.renderer.weatherUiHover) {
       this._annoLatch = true;
       const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
       if (this.fixTexMode) {
@@ -1327,20 +1301,30 @@ export class Game implements GameHooks {
         l, l, l,
       );
     }
-    // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461）：
-    // createTile==4 火把族 → TorchColor；蜡烛(105) → [1,0.95,0.8]；均 !wet
+    // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461 + :1684-1703）：
+    // createTile==4 火把族 → TorchColor；蜡烛(105) → [1,0.95,0.8]；均 !wet。
+    // 荧光棒族（282/286/3002）：水中也发光（原版分支无 !wet 门控）
     for (const dent of this.entities.drops) {
       const d = dent as ItemDrop;
       const def = ITEM_DEFS[d.itemId];
       if (!def) continue;
-      const isTorch = def.tile === 'torch';
-      const isCandle = def.tile === 'candle';
-      if (!isTorch && !isCandle) continue;
       const tx = Math.floor((d.x + d.w / 2) / TILE), ty = Math.floor((d.y + d.h / 2) / TILE);
       const dst = this.world.store;
       if (!dst.inBounds(tx, ty)) continue;
-      if (dst.liquid[dst.idx(tx, ty)] > 100) continue; // !wet
-      this.lighting.addLight(tx, ty, 1, 0.95, 0.8);
+      const isTorch = def.tile === 'torch';
+      const isCandle = def.tile === 'candle';
+      if (isTorch || isCandle) {
+        if (dst.liquid[dst.idx(tx, ty)] > 100) continue; // !wet
+        this.lighting.addLight(tx, ty, 1, 0.95, 0.8);
+        continue;
+      }
+      // 荧光棒族（vi id → 原版色；无 wet 门控）
+      const vid = viIdFromKey(def.key);
+      if (vid === 282) this.lighting.addLight(tx, ty, 0.7, 1, 0.8);
+      else if (vid === 286) this.lighting.addLight(tx, ty, 0.7, 0.8, 1);
+      else if (vid === 3002) this.lighting.addLight(tx, ty, 1.05, 0.95, 0.55);
+      else if (vid === 75) this.lighting.addLight(tx, ty, 0.8, 0.7, 0.1);      // 坠落之星 :1719
+      else if (vid === 183) this.lighting.addLight(tx, ty, 0.15, 0.45, 0.9);   // 陨石锭 :1715
     }
     this.lighting.compute(w.clock.dayFactor);
 
@@ -1444,7 +1428,7 @@ export class Game implements GameHooks {
     }
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
     // 时间调整按钮/面板悬停同理（renderer.timeUiHover 渲染期写入）
-    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover) {
+    if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover) {
       this.mining = null;
       return;
     }
@@ -1546,6 +1530,11 @@ export class Game implements GameHooks {
     }
 
     // 可放置物品：左键放置
+    // 墙面物品（Player.PlaceThing_Walls，Player.cs:38937）：左键铺墙
+    if (heldDef?.wallId != null && inp.mouseDown && !inp.rightDown) {
+      this.tryPlaceWall(tx, ty, heldDef);
+      return;
+    }
     if (heldDef?.tile && !inp.rightDown) {
       this.tryPlace(tx, ty, heldDef);
       return;
@@ -2076,11 +2065,13 @@ export class Game implements GameHooks {
     //   tile 3 帧 144（蘑菇）→ item 5 / tile 24 帧 144（邪恶蘑菇）→ item 60
     //   tile 201 帧 270（血腥蘑菇）→ item 2887——其余 plant 类无掉落
     if (type !== POT_TILE && TILE_CUT.has(type)) {
+      // ★ 帧必须在清格前捕获：setTile(0) 会把 frameX/frameY 归零，
+      //   曾在清格后读帧 → fx 恒 0，蘑菇（帧 144）永远判不中 → 不掉落
+      const sheet = def.vanilla?.sheet;
+      const fx = st.frameX[st.idx(x, y)];
       st.setTile(x, y, 0);
       this.sfx.play('chop', 1, x * TILE + 8, y * TILE + 8);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
-      const sheet = def.vanilla?.sheet;
-      const fx = st.frameX[st.idx(x, y)];
       const mushroomDrop =
         sheet === 3 && fx === 144 ? 'mushroom_item'
           : sheet === 24 && fx === 144 ? VANILLA_ITEM_KEY_BY_ID[60]
@@ -2352,6 +2343,53 @@ export class Game implements GameHooks {
     void dy;
   }
 
+  /**
+   * 铺设背景墙（Player.PlaceThing_Walls，Player.cs:38937-39005 + WorldGen.PlaceWall :75189 1:1）：
+   *  ①射程内 && useTime 冷却 ②邻接门：四邻至少一格有实心 tile 或已有墙（防悬空墙）
+   *  ③目标格无墙（TileReplacement 替换他墙未实现）④PlaceWall 成功 → 消耗 + useTime
+   *  ⑤FillEmptySpace（:38973）：stack>1 时，四邻中"空墙且其四邻全是本墙"的格自动补铺
+   *  （消耗逐格扣）——原版铺墙手感"一笔涂一片"的核心
+   */
+  private tryPlaceWall(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty)) return;
+    // 射程（ItemReach，与 tryPlace 一致 5.5 格）
+    const dx = tx - Math.floor(this.player.cx / TILE);
+    const dy = ty - Math.floor(this.player.cy / TILE);
+    if (Math.hypot(dx, dy) > 5.5) return;
+    if (this.player.useTime > 0) return;
+    const wallId = itemDef.wallId!;
+    const i0 = st.idx(tx, ty);
+    if (st.wall[i0] === wallId) return;  // 已是同墙
+    // 邻接门（cs:38943-38952）：四邻至少一格 active 或 wall>0
+    const adj = (ax: number, ay: number) =>
+      st.inBounds(ax, ay) && ((st.flags[st.idx(ax, ay)] && st.type[st.idx(ax, ay)] !== 0) || st.wall[st.idx(ax, ay)] > 0);
+    if (!adj(tx + 1, ty) && !adj(tx - 1, ty) && !adj(tx, ty + 1) && !adj(tx, ty - 1)) return;
+    // WorldGen.PlaceWall（:75189-75205）：仅 wall==0 可放；成功才继续
+    if (st.wall[i0] !== 0) return;
+    st.setWall(tx, ty, wallId);
+    this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
+    this.player.inv.removeAt(this.player.inv.selected, 1);
+    this.player.useTime = 15;           // wallSpeed=1（Player.cs:2336），铺墙节奏 ≈ 常规放置
+    this.cb.onInventoryChanged();
+    // FillEmptySpace（cs:38973-39025）：stack>1 时补铺被本墙四面包围的空洞
+    if (this.player.inv.heldItem()?.stack ?? 0 > 1) {
+      for (const [ox, oy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = tx + ox, ny = ty + oy;
+        if (!st.inBounds(nx, ny) || st.wall[st.idx(nx, ny)] !== 0) continue;
+        let surround = 0;
+        for (const [qx, qy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+          const qx2 = nx + qx, qy2 = ny + qy;
+          if (st.inBounds(qx2, qy2) && st.wall[st.idx(qx2, qy2)] === wallId) surround++;
+        }
+        if (surround !== 4) continue;
+        st.setWall(nx, ny, wallId);
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onInventoryChanged();
+      }
+    }
+  }
+
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
@@ -2454,6 +2492,12 @@ export class Game implements GameHooks {
     }
     if (tileId === T.CHEST) {
       this.world.chests.push({ x: tx, y: ty, items: Array(10).fill(null) });
+    }
+    // 陷阱(137)朝向 = 放置时玩家面朝方向（Player.cs:40209 PlaceThing_Tiles_PlaceIt_SpinTraps：
+    // direction==1 → frameX += 18）。全样式通用（frameY=种类，frameX=方向）；放置后不可再调向
+    if (def.vanilla?.sheet === 137 && this.player.facing === 1) {
+      const ti = st.idx(tx, ty);
+      st.setTile(tx, ty, tileId, st.frameX[ti] + 18, st.frameY[ti]);
     }
     // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
     if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
@@ -2736,6 +2780,57 @@ export class Game implements GameHooks {
    *  雨声层 gain = cloudAlpha×atmo；渲染 hooks（雪区比例/沙尘门）随 scene 刷新 */
   /** 墓园视觉强度（SceneState.UpdateGraveyard：lerp(16,36,count) 向目标 0.02/0.1 逼近——持久缓动） */
   private graveyardIntensity = 0;
+
+  /** 天气预设（小地图天气面板按钮；面板见 Renderer.drawMinimap 天气段）：
+   *  clear=停雨停沙尘停史莱姆 / cloudy=云量 120 / lightrain=0.15 / heavyrain=0.65 /
+   *  storm=0.85+大风 / sandstorm=立即沙尘暴 / slimerain=立即史莱姆雨 / random=重掷 */
+  applyWeatherPreset(name: string): void {
+    const wd = this.world.weather;
+    switch (name) {
+      case 'clear':
+        wd.stopRain(true);
+        wd.sandstorm.happening = false; wd.sandstorm.timeLeft = 0;
+        wd.sandstorm.severity = 0; wd.sandstorm.intendedSeverity = 0;
+        if (wd.slimeRain) wd.stopSlimeRain();
+        this.cb.onToast('天气：晴朗');
+        break;
+      case 'cloudy':
+        wd.stopRain(true);
+        wd.numClouds = 120; wd.numCloudsTemp = 120;
+        this.cb.onToast('天气：多云');
+        break;
+      case 'lightrain':
+        wd.startRain(true, 0.15);
+        this.cb.onToast('天气：小雨');
+        break;
+      case 'heavyrain':
+        wd.startRain(true, 0.65);
+        this.cb.onToast('天气：大雨');
+        break;
+      case 'storm':
+        wd.startRain(true, 0.85);
+        wd.windSpeedTarget = 0.6;
+        this.cb.onToast('天气：风暴');
+        break;
+      case 'sandstorm':
+        wd.sandstorm.happening = true;
+        wd.sandstorm.timeLeft = 86400;
+        wd.sandstorm.intendedSeverity = 0.8;
+        wd.sandstorm.severity = Math.max(wd.sandstorm.severity, 0.5);
+        this.cb.onToast('天气：沙尘暴');
+        break;
+      case 'slimerain':
+        wd.startSlimeRain();
+        this.cb.onToast('天气：史莱姆雨');
+        break;
+      case 'random':
+        wd.weatherCounter = 1; // 云量周期立即落盘重掷
+        if (wd.raining || Math.random() < 0.5) wd.stopRain();
+        else wd.startRain();
+        this.cb.onToast('天气：随机重掷');
+        break;
+    }
+  }
 
   private updateWeather(): void {
     const w = this.world;

@@ -18,7 +18,9 @@ const FALL_SAFE_TILES = 22;
 const FALL_FATAL_TILES = 45;
 
 export class Player extends Entity {
-  w = 16; h = 39;        // 16×39：1 格宽碰撞盒 + 前向偏移
+  w = 20; h = 42;        // 原版 Player 构造(Player.cs:55083-55084 width=20 height=42;
+                         // ResizeHitbox :28744 同值)。曾 16×39(窄 4px 矮 3px)——
+                         // 精灵帧 40×56 已对齐,盒偏小导致判定区比视觉小一圈
   facing = 1;            // 1 右 -1 左
   baseMaxHp = 100;
   baseMaxMana = 20;   // 原版 statManaMax2 起步 20,坠落之星 +20/颗(上限 200)

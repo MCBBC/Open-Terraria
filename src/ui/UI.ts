@@ -742,6 +742,7 @@ export class UI {
 
   closeInventory() {
     this.invPanel.style.display = 'none';
+    this.closeItemSearch();
     this.closeChest();
     // 放回手上物品
     if (this.heldStack) {
@@ -757,6 +758,90 @@ export class UI {
     }
     this.moveGhost();
     this.game.input.uiBlocking = false;
+  }
+
+  // ============ 调试用：道具搜索器（背包面板"🔍 道具搜索"按钮） ============
+  private itemSearchEl: HTMLDivElement | null = null;
+
+  /** 打开搜索面板：按 名称/key/原版id 过滤 ITEM_DEFS，点击条目入包 */
+  openItemSearch() {
+    if (!this.game) return;
+    this.closeItemSearch();
+    const overlay = el('div') as HTMLDivElement;
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
+    const panel = el('div');
+    panel.style.cssText = 'width:560px; max-height:70vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
+    const titleRow = el('div');
+    titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+    titleRow.appendChild(el('div', 'sw-lbl', '🔍 道具搜索（点击加入背包）'));
+    const closeBtn = el('button', 'sw-btn');
+    closeBtn.textContent = Lang.text('Mods.SandboxWorld.UI.Close');
+    closeBtn.style.cssText = 'cursor:pointer;';
+    closeBtn.addEventListener('click', () => this.closeItemSearch());
+    titleRow.appendChild(closeBtn);
+    panel.appendChild(titleRow);
+    const input = el('input') as HTMLInputElement;
+    input.placeholder = '名称 / key / 原版 id…';
+    input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:14px;';
+    panel.appendChild(input);
+    const list = el('div');
+    list.style.cssText = 'overflow-y:auto; display:flex; flex-wrap:wrap; gap:4px; align-content:flex-start;';
+    panel.appendChild(list);
+    overlay.appendChild(panel);
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) this.closeItemSearch();
+    });
+    document.body.appendChild(overlay);
+    this.itemSearchEl = overlay;
+
+    // 全量条目缓存（一次性构建：id/显示名/小写匹配串）
+    const entries = ITEM_DEFS.map((d, id) => {
+      const vid = d.key.startsWith('vi_') ? d.key.slice(3, d.key.indexOf('_', 3)) : '';
+      const name = Lang.itemNameByKey(d.key) || d.key;
+      return { id, d, name, lc: (name + ' ' + d.key + ' ' + vid).toLowerCase() };
+    });
+    const render = () => {
+      const q = input.value.trim().toLowerCase();
+      list.textContent = '';
+      let shown = 0;
+      for (const e of entries) {
+        if (q && !e.lc.includes(q)) continue;
+        if (++shown > 80) {
+          list.appendChild(el('div', 'sw-lbl', `…更多结果请细化搜索`));
+          break;
+        }
+        const item = el('div');
+        item.title = `${e.name}  [${e.d.key}]`;
+        item.style.cssText = 'display:flex; align-items:center; gap:4px; width:170px; padding:3px 5px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd;';
+        const img = el('img') as HTMLImageElement;
+        img.src = iconUrl(this.game!, e.id);
+        img.style.cssText = 'width:24px; height:24px; image-rendering:pixelated; flex:none;';
+        item.appendChild(img);
+        const lbl = el('span');
+        lbl.textContent = e.name;
+        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        item.appendChild(lbl);
+        item.addEventListener('click', () => {
+          // 可堆叠给一组(≤99)，不可堆叠给 1；溢出由 inv.add 处理
+          const n = e.d.maxStack > 1 ? Math.min(e.d.maxStack, 99) : 1;
+          this.game!.player.inv.add(e.id, n);
+          this.game!.cb.onInventoryChanged?.();
+          this.refreshAll();
+        });
+        list.appendChild(item);
+      }
+      if (!shown) list.appendChild(el('div', 'sw-lbl', '无匹配'));
+    };
+    input.addEventListener('input', render);
+    render();
+    input.focus();
+  }
+
+  closeItemSearch() {
+    if (this.itemSearchEl) {
+      this.itemSearchEl.remove();
+      this.itemSearchEl = null;
+    }
   }
 
   /** 垃圾桶暂存（关闭背包才删除；可取回） */
@@ -844,7 +929,19 @@ export class UI {
 
     // 背包 10×4（10-39）
     const right = el('div');
-    right.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
+    // 背包标签行 + 调试搜索按钮（原版无此按钮——调试用道具检索器）
+    {
+      const lblRow = el('div');
+      lblRow.style.cssText = 'display:flex; align-items:center; justify-content:space-between; width:100%;';
+      lblRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
+      const searchBtn = el('button', 'sw-btn');
+      // 调试专用按钮：不入 l10n 包（生成产物 12 语言），标签硬编码
+      searchBtn.textContent = '🔍 道具搜索';
+      searchBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
+      searchBtn.addEventListener('click', () => this.openItemSearch());
+      lblRow.appendChild(searchBtn);
+      right.appendChild(lblRow);
+    }
     const grid = el('div');
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:4px;';
     for (let i = 10; i < ACCESSORY_START; i++) {
@@ -952,7 +1049,6 @@ export class UI {
     this.root.appendChild(this.chestPanel);
   }
   private chestTitle!: HTMLElement;
-  private weatherLabel: HTMLElement | null = null;
   private chestGrid!: HTMLElement;
 
   private openChestPanel(c: ChestData) {
@@ -1010,17 +1106,6 @@ export class UI {
     this.moveGhost();
     this.paintTrash();
     this.refreshHotbar();
-    // 天气词（statusText 八档 → 中文；沙尘暴叠加）
-    if (this.weatherLabel) {
-      const ZH: Record<string, string> = {
-        Storm: '⛈ 风暴', HeavyRain: '🌧 大雨', Rain: '🌧 雨', LightRain: '🌦 小雨',
-        Overcast: '☁ 阴天', MostlyCloudy: '☁ 多云', Cloudy: '🌤 局部多云',
-        Clear: '☀ 晴朗', PartlyCloudy: '🌤 局部多云',
-      };
-      const w = this.game.world.weather;
-      const sand = w.sandstorm.happening && this.game.scene?.zoneDesert ? '  🏜 沙尘暴' : '';
-      this.weatherLabel.textContent = (ZH[w.statusText()] ?? '') + sand;
-    }
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');
@@ -1119,11 +1204,7 @@ export class UI {
     // 原版左下角消息列(Main.NewText → LegacyChatMonitor;NewText 播 SoundID 12)
     this.chatMonitor?.clear();
     this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
-    // 天气状态标签（原版小地图信息区 GameUI 天气词，Main.cs:46236 八档链）
-    this.weatherLabel?.remove();
-    this.weatherLabel = el('div', '', '');
-    this.weatherLabel.style.cssText = 'position:fixed; right:8px; top:8px; transform:translateX(-254px); font-size:12px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; z-index:5;';
-    this.root.appendChild(this.weatherLabel);
+
     this.buildInventoryPanel();
     this.buildChestPanel();
     this.buildBuffBar();
