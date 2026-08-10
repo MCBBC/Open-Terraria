@@ -31,7 +31,7 @@ export class Input {
       this.keydownHandlers.forEach((fn) => fn(e.code));
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
     }) as EventListener);
-    onWin('keyup', ((e: KeyboardEvent) => this.keys.delete(e.code)) as EventListener);
+    onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
     onWin('blur', (() => this.keys.clear()) as EventListener);
     onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
@@ -50,10 +50,10 @@ export class Input {
       if (e.button === 2) this.rightDown = false;
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());
-    onEl('wheel', (e) => {
+    onEl('wheel', ((e: WheelEvent) => {
       this.wheelDelta += Math.sign(e.deltaY);
       e.preventDefault();
-    }, { passive: false });
+    }) as EventListener, { passive: false });
   }
 
   /** 移除全部监听(退出世界时 Game.destroy 调用) */
