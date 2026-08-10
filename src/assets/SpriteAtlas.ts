@@ -78,7 +78,11 @@ export interface VanillaTileMeta {
   cols: number; rows: number;
   isStone?: boolean; isGrass?: boolean; mergeWith?: number | null;
 }
-export interface VanillaItemMeta { name: string; key: string; icon: string; createTile: number | null; }
+export interface VanillaItemMeta {
+  name: string; key: string; icon: string; createTile: number | null;
+  /** 图集子矩形(vanilla-atlas.mjs shelf-pack 后携带;旧单体条目无此组) */
+  ix?: number; iy?: number; iw?: number; ih?: number;
+}
 export interface VanillaWallMeta {
   name: string; key: string; sheet: string; color: string;
   grid: [number, number]; stride: [number, number]; cols: number; rows: number;
@@ -265,12 +269,17 @@ export class SpriteAtlas {
     return null;
   }
 
-  /** 原版物品图标（整图）。未加载时触发后台懒加载并返回 null(下帧生效) */
+  /** 原版物品图标。构建期已 shelf-pack 进少数 Item_Atlas_k.png 图集(ix/iy/iw/ih
+   *  子矩形,见 scripts/vanilla-atlas.mjs);旧单体条目(无矩形字段)回退整图语义。
+   *  未加载时触发后台懒加载并返回 null(下帧生效) */
   vicon(itemId: number): DrawRect | null {
     const m = this.vanilla.items[String(itemId)];
     if (!m) return null;
     const img = this.ensureVImage(m.icon);
     if (!img) return null;
+    if (m.ix !== undefined && m.iw !== undefined && m.ih !== undefined) {
+      return { img, sx: m.ix, sy: m.iy ?? 0, sw: m.iw, sh: m.ih };
+    }
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }
 
@@ -360,8 +369,8 @@ export class SpriteAtlas {
   }
 
   private _iconsPromise: Promise<void> | null = null;
-  /** 预载全部物品图标(6059 张,解码合计 ~18MB)。进图前流程调用,
-   *  保证道具栏/背包首帧即有原版图标。缓存 Promise——并发 await 的调用者
+  /** 预载全部物品图标素材。图集化后清单 = 去重后的 ~3 张 Item_Atlas_k.png
+   *  (此前 6059 张单体逐张请求);缓存 Promise——并发 await 的调用者
    *  都会等到同一批加载完成(此前旗标早退会让第二个调用者拿到假完成) */
   preloadIcons(onProgress?: (p: number) => void): Promise<void> {
     if (this._iconsPromise) return this._iconsPromise;

@@ -3,6 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { TILE_ANIM_RATE, tileAnim, animFrameIdx } from './TileAnim';
 import { VanillaWallTiler } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
@@ -30,6 +31,8 @@ export class ChunkCache {
   autotiler: AutoTiler | null;
   wallTiler: VanillaWallTiler | null;
   truncatesWalls: number[] = [];
+  /** 含动画 tile 的 chunk，按 sheet 分组（换帧时只重建对应 chunk，避免全量重烘焙） */
+  private animChunksBySheet = new Map<number, Set<number>>();
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
   static readonly MAX_CHUNKS = 384;
@@ -96,6 +99,18 @@ export class ChunkCache {
       if (this.chunks.get(k) !== undefined) continue; // 已重建
       this.get(cx, cy);
       n++;
+    }
+  }
+
+  /** 动画时钟推进（Game 每帧调用）：sheet 到达换帧 tick → 只重建含该 sheet 的 chunk。
+   *  原版语义 = AnimateTiles 每 rate tick 推进 tileFrame；帧内 chunk 复用零开销 */
+  advanceAnim(): void {
+    tileAnim.tick++;
+    if (!this.animChunksBySheet.size) return;
+    for (const [sheet, set] of this.animChunksBySheet) {
+      const rate = TILE_ANIM_RATE[sheet];
+      if (!rate || tileAnim.tick % rate !== 0) continue;
+      for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
     }
   }
 
@@ -198,12 +213,23 @@ export class ChunkCache {
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
+          // 动画陈设（原版 AnimateTiles）：frameY += 帧索引 * (fh*18)；登记 chunk 供换帧重建
+          let fy = st.frameY[i];
+          if (TILE_ANIM_RATE[def.vanilla.sheet]) {
+            const fhA = def.vanilla.fh ?? 1;
+            const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? fhA;
+            const idx = animFrameIdx(def.vanilla.sheet, fhA, rows);
+            if (idx > 0) fy += idx * fhA * 18;
+            let set = this.animChunksBySheet.get(def.vanilla.sheet);
+            if (!set) { set = new Set(); this.animChunksBySheet.set(def.vanilla.sheet, set); }
+            set.add(ChunkCache.key(cx, cy));
+          }
           drawVanillaCell(
             ctx, this.autotiler.atlas, def.vanilla.sheet, def.vanilla.frame,
             def.vanilla.fw ?? 1, def.vanilla.fh ?? 1,
             st, x, y, type,
             (t) => t === type, // 同 id 融合判定（后续可扩 mergeWith）
-            px, py, st.frameX[i], st.frameY[i],
+            px, py, st.frameX[i], fy,
             { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
               worldSurface: this.world.groundLevel, worldW: this.world.w },
           );

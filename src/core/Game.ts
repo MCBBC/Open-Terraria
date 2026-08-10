@@ -6,7 +6,7 @@ import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { World, ChestData } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
-import { openDoor, closeDoor, clearDoorAt } from '../world/Door';
+import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
@@ -831,6 +831,7 @@ export class Game implements GameHooks {
     }
 
     player.fixedUpdate(dt, this);
+    this.updateTallGateAuto();
     if (player.dead) {
       // 死亡瞬间：红色粉碎粒子 + 原地留墓碑（只处理一次）
       if (!this._deathHandled) {
@@ -959,6 +960,7 @@ export class Game implements GameHooks {
     this.camera.easeZoom();
     this.camera.clamp();
     this.chunks.flushDirty();
+    this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
@@ -3451,6 +3453,39 @@ export class Game implements GameHooks {
           grav: -0.015,  // 微浮力：火星徐徐上飘
           damp: 0.985,
         });
+      }
+    }
+  }
+
+  // ================= 高门自动通行（DoorOpeningHelper.cs 1:1 简化） =================
+  // 玩家 hitbox 与关闭高门(388)矩形 (16×96) 相交且垂直容纳 → 自动 ShiftTallGate 开门；
+  // 离开门区（矩形外扩 1px）→ 自动关闭。仅玩家（NPC/敌怪不触发——原版同）。
+  private openTallGates = new Map<number, number>(); // 锚点 idx → 开门时刻（tick）
+  private updateTallGateAuto() {
+    const st = this.world.store;
+    const p = this.player;
+    if (p.dead) return;
+    const CLOSED = TILE_BY_KEY['v_388_tall_gate_closed'];
+    const OPEN = TILE_BY_KEY['v_389_tall_gate_open'];
+    if (!CLOSED || !OPEN) return;
+    // 玩家覆盖格 ±1 扫关闭高门 → 自动开
+    const tx0 = Math.floor((p.x - 2) / TILE), tx1 = Math.floor((p.x + p.w + 2) / TILE);
+    const ty0 = Math.floor((p.y - 2) / TILE), ty1 = Math.floor((p.y + p.h + 2) / TILE);
+    for (let x = tx0; x <= tx1; x++) {
+      for (let y = ty0; y <= ty1; y++) {
+        if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== CLOSED) continue;
+        const anchor = shiftTallGate(st, x, y, false, (n: string) => this.sfx.play(n as SfxName));
+        if (anchor) this.openTallGates.set(st.idx(anchor[0], anchor[1]), this.tickCount);
+      }
+    }
+    // 已开门离开检测：门矩形（外扩 1px）与玩家 hitbox 不相交 → 关
+    for (const ai of Array.from(this.openTallGates.keys())) {
+      const ax = ai % st.w, ay = Math.floor(ai / st.w);
+      if (st.get(ax, ay) !== OPEN) { this.openTallGates.delete(ai); continue; }
+      const rect = { x: ax * TILE - 1, y: ay * TILE, w: TILE + 2, h: 5 * TILE };
+      const overlap = p.x < rect.x + rect.w && p.x + p.w > rect.x && p.y < rect.y + rect.h && p.y + p.h > rect.y;
+      if (!overlap) {
+        if (shiftTallGate(st, ax, ay, true, (n: string) => this.sfx.play(n as SfxName))) this.openTallGates.delete(ai);
       }
     }
   }

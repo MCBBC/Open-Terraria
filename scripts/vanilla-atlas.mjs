@@ -2,7 +2,7 @@
 // 原版 Tiles 表无 .meta（不同于 Maples Unity 项目），按 textureGrid+frameGap 网格寻址：
 //   帧 (col,row) 位于 (col*(gridX+gapX), row*(gridY+gapY))，帧尺寸 = textureGrid
 // 用法：node scripts/vanilla-atlas.mjs
-import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
+import { readFileSync, writeFileSync, copyFileSync, mkdirSync, existsSync, readdirSync, unlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -174,7 +174,7 @@ for (const { it, src, w: iw0, h: ih0 } of itemFiles) {
   const iw = png.width, ih = png.height;
   if (atlasX + iw + GUTTER > ATLAS_W) { atlasX = GUTTER; atlasY += shelfH + GUTTER; shelfH = 0; }
   if (atlasY + ih + GUTTER > ATLAS_H) newAtlasPage();
-  png.bitblt(atlasPage, 0, 0, iw, ih, atlasX, atlasY);
+  PNG.bitblt(png, atlasPage, 0, 0, iw, ih, atlasX, atlasY);
   out.items[id] = {
     ...base,
     icon: `vanilla/Item_Atlas_${atlasIdx}.png`,
@@ -185,6 +185,14 @@ for (const { it, src, w: iw0, h: ih0 } of itemFiles) {
 }
 flushAtlas();
 console.log(`item atlas pages: ${atlasIdx + 1}`);
+// 清理旧单体残留(图集化前的产物,已无任何引用;readdirSync+unlinkSync 避免与白名单拷贝混淆)
+{
+  let removed = 0;
+  for (const f of readdirSync(OUT_DIR)) {
+    if (/^Item_\d+\.png$/.test(f)) { unlinkSync(join(OUT_DIR, f)); removed++; }
+  }
+  if (removed) console.log(`removed ${removed} legacy Item monoliths`);
+}
 
 for (const id of whitelist.walls) {
   const w = wallById.get(id);

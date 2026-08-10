@@ -4,7 +4,7 @@
 //   开门 frameX = 72*列 + (direction==-1 ? 36 : 0)（%72 后 0/36 为锚点列、18/54 为右侧列）。
 // 本项目曾误用 frameX = style*54（横排），越界导致门贴图不可见/错位。
 import type { TileStore } from './TileStore';
-import { T } from '../data/tiles';
+import { T, TILE_BY_KEY } from '../data/tiles';
 
 /** 关门锚点帧（顶格）：[frameX, frameY] */
 export function doorClosedFrame(style: number, variant = 0): [number, number] {
@@ -113,4 +113,31 @@ export function closeDoor(st: TileStore, x: number, y: number, rng: () => number
     st.setTile(closedX, ay + dy, T.DOOR_CLOSED, cfx, 54 * row + dy * 18);
   }
   return true;
+}
+
+// ================= 高门（Tall Gate 388/389，WorldGen.ShiftTallGate L51747 1:1） =================
+// 关(388)/开(389) 两张表同布局（18×188）：切换 = 保帧换 type；开门声 SoundID 8。
+// 锚点回溯：frameY % 90（CoordinateFullHeight）→ 行内偏移 /18 = 距顶格格数。
+
+/** 切换高门（closing=true 关、false 开）。锚点可为门内任意格；返回锚点坐标或 null */
+export function shiftTallGate(
+  st: TileStore, x: number, y: number, closing: boolean,
+  sfx?: (name: string) => void,
+): [number, number] | null {
+  const CLOSED = TILE_BY_KEY['v_388_tall_gate_closed'];
+  const OPEN = TILE_BY_KEY['v_389_tall_gate_open'];
+  if (!CLOSED || !OPEN) return null;
+  const from = closing ? OPEN : CLOSED;
+  const to = closing ? CLOSED : OPEN;
+  const i0 = st.idx(x, y);
+  if (st.type[i0] !== from) return null;
+  const fy = st.frameY[i0];
+  const anchorY = y - Math.floor((fy % 90) / 18); // CoordinateFullHeight 90 / 18
+  for (let dy = 0; dy < 5; dy++) {
+    const ii = st.idx(x, anchorY + dy);
+    if (!st.inBounds(x, anchorY + dy) || st.type[ii] !== from) return null; // ValidateTileSquare
+  }
+  for (let dy = 0; dy < 5; dy++) st.setTile(x, anchorY + dy, to, st.frameX[i0], st.frameY[st.idx(x, anchorY + dy)]);
+  sfx?.('door'); // SoundID 8
+  return [x, anchorY];
 }

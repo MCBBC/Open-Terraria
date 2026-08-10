@@ -2,7 +2,7 @@
 // tile/wall/item 的 id 映射基于 Terraria 1.4 的事实数据；未映射内容做可玩性降级。
 import { parseWld, WldWorld } from './WldParser';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
-import { TILE_BY_KEY, T } from '../data/tiles';
+import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
@@ -35,7 +35,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   420: { key: 'v_420_logicgate', copyFrame: true },
   419: { key: 'v_419_logicgatelamp', copyFrame: true },
   410: { key: 'v_410_lunarmonolith', copyFrame: true },
-  389: { key: 'v_389_tallgateopen', copyFrame: true },
+  389: { key: 'v_389_tall_gate_open', copyFrame: true }, /* Tall Gate (Open) */
   386: { key: 'v_386_trapdooropen', copyFrame: true },
   372: { key: 'v_372_peacecandle', copyFrame: true },
   338: { key: 'v_338_fireworkfountain', copyFrame: true },
@@ -80,8 +80,8 @@ const TILE_MAP: Record<number, MapEntry> = {
   8: 'ore_gold',      // Gold
   9: 'ore_silver',    // Silver
   10: { key: 'door_closed', copyFrame: true },  // Closed Door（原版变体帧）
-  16: 'anvil',        // Anvil
-  17: 'anvil',        // Mythril Anvil
+  16: 'anvil',        // Anvil(2×1,铁/铅两款 style)
+  17: 'furnace',      // Furnace(3×2!曾误映射 anvil——导入的熔炉渲染成半格铁砧/拆除波及邻砧)
   18: 'workbench',    // Work Bench
   19: { key: 'platform', copyFrame: true },  // Wood Platform（原版帧直拷）
   21: 'chest',  // Chest（帧按格距重建，不直拷——wld 存的是格偏移 0/1 不是像素）
@@ -803,6 +803,13 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
         type[i] = 0;
       } else if (typeof mapped === 'string') {
         type[i] = TILE_BY_KEY[mapped] ?? 0;
+        // ★framed 图块(铁砧/工作台/火把/v_ 家具)同样要直拷原版帧——
+        // 纯字符串映射此前不拷帧,2×1 铁砧右半格 (18,0) 丢失,每格都画左半边
+        // ("只有一半的铁砧");火把墙挂变体/家具 style 帧也全丢。非 framed 方块帧无意义
+        if (TILE_DEFS[type[i]]?.framed) {
+          frameX[i] = wld.tiles.frameX[i];
+          frameY[i] = wld.tiles.frameY[i];
+        }
       } else {
         // 原版 framed 家具：18px 帧/样式偏移直拷（与 .wld 原生一致，渲染端零换算）
         type[i] = TILE_BY_KEY[mapped.key] ?? 0;
