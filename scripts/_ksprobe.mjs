@@ -32,7 +32,7 @@ const out = await page.evaluate(async () => {
   g.boss = e;
   // 跑 120 tick 让 KS 落地
   for (let k = 0; k < 120; k++) g.fixedUpdate(1 / 60);
-  await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+  for (let k = 0; k < 60; k++) await new Promise((r) => requestAnimationFrame(r));  // 等光照/渲染收敛
   // 采样 KS 中心区域：找深色忍者像素（r<60,g<60,b<70）
   const [sx, sy] = g.camera.worldToScreen(e.cx, e.cy);
   const cv = g.renderer.canvas;
@@ -50,6 +50,8 @@ const out = await page.evaluate(async () => {
   const kScale = cv.width / (g.camera.viewW || cv.width);
   const ksRegion = { raw: [Math.round(sx), Math.round(sy)], cw: cv.width, ch: cv.height, k: kScale, ...countDark(
     Math.max(0, Math.round(sx * kScale) - 100), Math.max(0, Math.round(sy * kScale) - 100), 200, 200) };
+  const [plx, ply] = g.camera.worldToScreen(g.player.cx, g.player.cy);
+  const ctrl = countDark(Math.max(0, Math.round(plx) - 20), Math.max(0, Math.round(ply) - 20), 40, 40);
   // 小史莱姆：跑 600 tick 等落地出小怪（30% 概率），找 16 号
   for (let k = 0; k < 900; k++) {
     g.fixedUpdate(1 / 60);
@@ -75,7 +77,7 @@ const out = await page.evaluate(async () => {
       canvas: { total, opaqueRatio: +(opaque / Math.max(1, total)).toFixed(2), darkRatio: +(darkTint / Math.max(1, total)).toFixed(2) },
     };
   }
-  return { ksRegion, babyInfo, babyCount: babies.length };
+  return { ksRegion, ctrl, babyInfo, babyCount: babies.length };
 });
 console.log(JSON.stringify(out, null, 1));
 await browser.close();

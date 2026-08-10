@@ -37,6 +37,19 @@ export class ChunkCache {
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
   static readonly MAX_CHUNKS = 384;
 
+  /** 释放全部 chunk 画布 GPU 背板并清表(退出世界必须调用)。
+   *  detached canvas 的回收依赖 GC 且明显滞后——连续多次读档累积数百 MB
+   *  显存,最终 contextlost/contextrestored 风暴卡死(2026-08-10 trace 实证) */
+  dispose(): void {
+    for (const pair of this.chunks.values()) {
+      pair.wall.width = 0; pair.wall.height = 0;
+      pair.tile.width = 0; pair.tile.height = 0;
+    }
+    this.chunks.clear();
+    this.dirtyQueue.length = 0;
+    this.animChunksBySheet.clear();
+  }
+
   constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null) {
     this.world = world;
     this.sheets = sheets;

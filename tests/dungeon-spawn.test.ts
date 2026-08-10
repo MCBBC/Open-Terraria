@@ -67,7 +67,7 @@ describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
       if (e) { spawned++; pool.add(e.vanillaId ?? -1); }
     }
     console.log('杀过骷髅王出怪:', [...pool], '共', spawned);
-    const expected = new Set([294, 295, 296, 31, 32, 34, 70, 71, 72]);
+    const expected = new Set([294, 295, 296, 31, 32, 34, 70, 71, 72, 63]); // 63=水母:水域分支先于地牢分支（原版链序）
     expect(spawned).toBeGreaterThan(50);
     for (const id of pool) expect(expected.has(id)).toBe(true);
     // 主力（愤怒骨怪系 + 黑魔法师）应命中
@@ -80,7 +80,7 @@ describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
       const e = spawner.spawn(playerX, playerY, new RNG(k * 31 + 3), 60, 35);
       if (e) outside.add(e.vanillaId ?? -1);
     }
-    for (const id of outside) expect(expected.has(id) && id !== 71).toBe(false);
+    for (const id of outside) expect(expected.has(id) && id !== 71 && id !== 63).toBe(false); // 71/63 与地牢旗标无关（史莱姆/水域分支）
   }, 120000);
 
   it('地牢刷怪率修正：ZoneDungeon ×0.3/×1.8，未杀骷髅王 spawnRate=10', () => {

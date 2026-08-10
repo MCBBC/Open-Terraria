@@ -619,6 +619,11 @@ export class Game implements GameHooks {
   /** 销毁：停止循环并移除画布（退出到主菜单时调用） */
   destroy() {
     this.running = false;
+    // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
+    // 累积数百 MB 显存 → contextlost/contextrestored 风暴卡死(2026-08-10 trace)
+    this.input.destroy();
+    this.chunks?.dispose();
+    this.renderer.dispose();
     this.renderer.canvas.remove();
   }
 
@@ -3046,7 +3051,7 @@ export class Game implements GameHooks {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
     buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
-    this.cb.onNpcDialog?.(name, this.townNpcChat(npc), buttons);
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)), buttons);
   }
 
   /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
@@ -3137,6 +3142,29 @@ export class Game implements GameHooks {
     }
     // 其余类型(依赖未移植系统的 NPC)暂用中性占位
     return '……';
+  }
+
+  /** LegacyDialog 命名占位符替换（原版 LocalizedText 显示期 Format 语义）：
+   *  {PlayerName}=主角名；{Guide} 等 = 对应城镇 NPC 当前名（在场实例带随机名，否则类型名）；
+   *  {WorldEvilStone}=黑檀石/猩红石（按世界邪恶） */
+  private formatDialogTags(s: string): string {
+    const townName = (key: string): string => {
+      const inst = this.entities.npcs.find(
+        (n) => n instanceof TownNPC && !n.dead && (n as TownNPC).npcKey === key) as TownNPC | undefined;
+      const base = Lang.npcName(TOWN_NPC_IDS[key]?.id ?? 0) ?? key;
+      return inst?.givenName ? `${inst.givenName} ${base}` : base;
+    };
+    return s
+      .replace(/\{PlayerName\}/g, this.player.appearance?.name || '泰拉瑞亚')
+      .replace(/\{Guide\}/g, townName('guide'))
+      .replace(/\{Nurse\}/g, townName('nurse'))
+      .replace(/\{Dryad\}/g, townName('dryad'))
+      .replace(/\{Demolitionist\}/g, townName('demolitionist'))
+      .replace(/\{ArmsDealer\}/g, townName('arms_dealer'))
+      .replace(/\{Merchant\}/g, townName('merchant'))
+      .replace(/\{WorldEvilStone\}/g,
+        Lang.itemName(this.world.crimson ? 203 : 25)   // 原版物品 id：Crimstone/Ebonstone
+        ?? (this.world.crimson ? '猩红石' : '黑檀石'));
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */

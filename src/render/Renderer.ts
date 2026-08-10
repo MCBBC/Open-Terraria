@@ -136,6 +136,13 @@ export class Minimap {
     });
   }
 
+  /** 释放全幅小地图画布(6400×1800 ≈ 46MB;退出世界时调用防累积) */
+  dispose(): void {
+    this.canvas.width = 0;
+    this.canvas.height = 0;
+    this.dirtyChunks.clear();
+  }
+
   colorFor(x: number, y: number): string | null {
     const st = this.world.store;
     const i = st.idx(x, y);
@@ -280,13 +287,29 @@ export class Renderer {
   private mapDragging = false;
   private lastMouse = { x: 0, y: 0 };
 
+  /** resize 监听句柄(destroy 必须移除——window 强引用曾把旧 Game 整图钉死不释放) */
+  private onResize = () => this.resize();
+
   constructor(public assets: AssetBundle, public atlas: SpriteAtlas | null = null) {
     this.canvas = document.createElement('canvas');
     this.ctx = this.canvas.getContext('2d')!;
     this.lightCanvas = document.createElement('canvas');
     this.lightCtx = this.lightCanvas.getContext('2d')!;
-    window.addEventListener('resize', () => this.resize());
+    window.addEventListener('resize', this.onResize);
     this.resize();
+  }
+
+  /** 释放本实例全部画布与全局监听(退出世界时 Game.destroy 调用)。
+   *  主画布/lightCanvas/迷雾全幅画布立即清零背板;不移除 resize 监听则
+   *  window 强引用导致整个旧 Game(含 ChunkCache 数百张 chunk 画布)无法回收,
+   *  连续多次读档累积显存 → contextlost 风暴(2026-08-10 trace 实证) */
+  dispose(): void {
+    window.removeEventListener('resize', this.onResize);
+    this.canvas.width = 0; this.canvas.height = 0;
+    this.lightCanvas.width = 0; this.lightCanvas.height = 0;
+    if (this.fogCanvas) { this.fogCanvas.width = 0; this.fogCanvas.height = 0; this.fogCanvas = null; }
+    this.minimap?.dispose();
+    this.minimap = null;
   }
 
   /** 物品图标：优先 Maples 素材，缺省回退程序化 */

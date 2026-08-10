@@ -9,38 +9,59 @@ export class Input {
   keydownHandlers: Array<(code: string) => void> = [];
 
   private el: HTMLElement;
+  /** 已注册监听(destroy 时全部移除——window 强引用曾把整个旧 Game 钉死,
+   *  连续多次读档 GPU 内存累积 → contextlost 风暴卡死,2026-08-10 trace 实证) */
+  private winListeners: Array<[string, EventListener, AddEventListenerOptions?]> = [];
+  private elListeners: Array<[string, EventListener, AddEventListenerOptions?]> = [];
 
   constructor(el: HTMLElement) {
     this.el = el;
-    window.addEventListener('keydown', (e) => {
+    const onWin = (type: string, fn: EventListener, opts?: AddEventListenerOptions) => {
+      window.addEventListener(type, fn, opts);
+      this.winListeners.push([type, fn, opts]);
+    };
+    const onEl = (type: string, fn: EventListener, opts?: AddEventListenerOptions) => {
+      el.addEventListener(type, fn, opts);
+      this.elListeners.push([type, fn, opts]);
+    };
+
+    onWin('keydown', ((e: KeyboardEvent) => {
       if (e.repeat) return;
       this.keys.add(e.code);
       this.keydownHandlers.forEach((fn) => fn(e.code));
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
-    });
-    window.addEventListener('keyup', (e) => this.keys.delete(e.code));
-    window.addEventListener('blur', () => this.keys.clear());
-    el.addEventListener('mousemove', (e) => {
+    }) as EventListener);
+    onWin('keyup', ((e: KeyboardEvent) => this.keys.delete(e.code)) as EventListener);
+    onWin('blur', (() => this.keys.clear()) as EventListener);
+    onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
       this.mouseX = e.clientX - r.left;
       this.mouseY = e.clientY - r.top;
-    });
+    }) as EventListener);
     // mousedown 挂 window：不依赖事件目标是否恰好是 canvas
-    window.addEventListener('mousedown', (e) => {
+    onWin('mousedown', ((e: MouseEvent) => {
       // UI 面板上的点击不穿透为游戏输入
       if ((e.target as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn')) return;
       if (e.button === 0) this.mouseDown = true;
       if (e.button === 2) this.rightDown = true;
-    });
-    window.addEventListener('mouseup', (e) => {
+    }) as EventListener);
+    onWin('mouseup', ((e: MouseEvent) => {
       if (e.button === 0) this.mouseDown = false;
       if (e.button === 2) this.rightDown = false;
-    });
-    el.addEventListener('contextmenu', (e) => e.preventDefault());
-    el.addEventListener('wheel', (e) => {
+    }) as EventListener);
+    onEl('contextmenu', (e) => e.preventDefault());
+    onEl('wheel', (e) => {
       this.wheelDelta += Math.sign(e.deltaY);
       e.preventDefault();
     }, { passive: false });
+  }
+
+  /** 移除全部监听(退出世界时 Game.destroy 调用) */
+  destroy(): void {
+    for (const [t, fn, opts] of this.winListeners) window.removeEventListener(t, fn, opts);
+    for (const [t, fn, opts] of this.elListeners) this.el.removeEventListener(t, fn, opts);
+    this.winListeners = [];
+    this.elListeners = [];
   }
 
   down(code: string): boolean {
