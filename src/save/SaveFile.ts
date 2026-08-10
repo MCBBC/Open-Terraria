@@ -48,6 +48,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
     hp: player.hp, x: player.x, y: player.y,
     inventory: player.inv.slots, selected: player.inv.selected,
     baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
+    banks: player.banks,
   };
   return serializeSave(view, meta, playerData, playTimeMs);
 }

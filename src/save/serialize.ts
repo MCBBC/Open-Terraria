@@ -66,6 +66,7 @@ export interface SaveData {
     baseMaxHp?: number;   // 生命上限（水晶之心/生命果扩容；旧档缺省 100）
     baseMaxMana?: number; // 魔力上限（魔力水晶扩容；旧档缺省 20）
     mana?: number;        // 当前魔力
+    banks?: Array<Array<{ id: number; stack: number } | null>>; // 玩家储物×4（29/97/463/491；旧档缺省全空）
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）

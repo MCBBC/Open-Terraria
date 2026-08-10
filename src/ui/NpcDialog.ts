@@ -3,7 +3,7 @@
 // 按钮标签 = Lang.inter[](LegacyInterface):28 商店 / 52 关闭 / 54 治疗 / 50 诅咒。
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'close';
 
 export interface ShopEntry {
   /** 本仓库 item key(vi_ 系) */

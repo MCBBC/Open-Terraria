@@ -152,6 +152,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.mana !== undefined) g.player.mana = player.mana;
     g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
     g.player.inv.selected = player.selected;
+    // 玩家储物×4 回填（29/97/463/491；旧档缺省全空）
+    if (player.banks) {
+      for (let b = 0; b < 4; b++) {
+        const src = player.banks[b] ?? [];
+        g.player.banks[b] = src.concat(Array(Math.max(0, 40 - src.length)).fill(null)).slice(0, 40);
+      }
+    }
   }
 
   /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到

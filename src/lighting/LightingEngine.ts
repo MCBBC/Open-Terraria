@@ -127,9 +127,9 @@ export class LightingEngine {
     const w = this.world as ScannerWorld;
     this.work.setSize(this.rw, this.rh);
     this.work.nonVisiblePadding = Math.min(NON_VISIBLE_PADDING, (Math.min(this.rw, this.rh) - 1) >> 1);
-    // 手持火把 ×0.5(Player.cs:44413 语义;默认火把色)
+    // 手持火把:原版 TorchID.TorchColor(0)=1/0.95/0.8 全亮(与放置火把同亮度;此前的 ×0.5 是压暗偏差)
     const perFrame = this.perFrame;
-    if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: 0.5, g: 0.475, b: 0.4 });
+    if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: 1, g: 0.95, b: 0.8 });
     this.scanner.exportTo(w, this.work, this.rx, this.ry, perFrame);
     perFrame.length = 0;
   }

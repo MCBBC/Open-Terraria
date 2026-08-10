@@ -349,12 +349,16 @@ export class BiomeBackground {
       ctx.save();
       ctx.globalAlpha = alpha;
       const [tr, tg, tb] = tint;
+      // ★+1px 保险重叠:浮点视差位置(startX 取模 cam.x*parallax)+非整数缩放
+      // (naturalWidth×1.25)下,相邻背景图独立光栅化在接缝处留 1px 缺口(发丝缝),
+      // 双线性平滑还会把边缘混透明放大缝。外扩 1px 让邻图覆盖接缝
+      const dw = wScaled + 1;
       for (let i = 0; i < loops; i++) {
         if (tr >= 0.999 && tg >= 0.999 && tb >= 0.999) {
-          ctx.drawImage(im, startX + i * wScaled, topY, wScaled, im.naturalHeight * l.scale);
+          ctx.drawImage(im, startX + i * wScaled, topY, dw, im.naturalHeight * l.scale);
         } else {
           // 先画原图再叠 tint（保持边缘 alpha）：用 offscreen 缓存避免每帧 getImageData
-          this.drawTiledTinted(ctx, im, tr, tg, tb, startX + i * wScaled, topY, wScaled, im.naturalHeight * l.scale);
+          this.drawTiledTinted(ctx, im, tr, tg, tb, startX + i * wScaled, topY, dw, im.naturalHeight * l.scale);
         }
       }
       ctx.restore();
@@ -445,7 +449,6 @@ export class BiomeBackground {
     const alpha = this.ugAlpha;
     // 垂直分层边界（屏幕空间 y；原版 bgTopY 语义 = 层世界 y - screenPosition.Y）
     const dirtTop = world.groundLevel * 16 - camTopY + 16;             // DrawBackground_DirtBackground :52824
-    const rockTop = (world.rockLevel + 60) * 16 - camTopY - 16;        // DrawBackground_DrawRockLayer :52521
     const magmaTop = lavaLine - camTopY + 16 + 600 - 8;                // DrawBackground_DrawMagmaLayer :52276
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
@@ -468,30 +471,53 @@ export class BiomeBackground {
           }
         }
       };
-      // 泥土带（slot1，从 dirtTop 到 rockTop）
+      // 岩石带（GetRockTransitionPoint :52532 + DrawRockLayer/53127 语义）：
+      // 带顶 = worldSurface*16 + ceil((rockLevel-worldSurface)*16 / slot3纹理高)*slot3纹理高 + 32
+      //（泥土带按 slot3 纹理高整数倍对齐收口）；
+      // slot2 仅是带顶上一条 16px 过渡条（纹理只取第 0 行，画一次——
+      // 此前误当"岩石带上 1/3"平铺，深层时整屏都是过渡条纹理=错误贴图）；
+      // slot3 = 岩石带主体，按自身纹理高平铺至 magmaTop。
+      const rockTop2 = (() => {
+        const im3 = slots[3] ? this.img(slots[3]) : null;
+        const h3 = im3 && im3.complete && im3.naturalHeight ? im3.naturalHeight : 96;
+        const span = (world.rockLevel - world.groundLevel) * 16;
+        const steps = Math.ceil(span / h3);
+        return world.groundLevel * 16 + steps * h3 + 32 - camTopY;
+      })();
+      // 泥土带（slot1）：dirtTop → 岩石带顶
       const dirtIm = slots[1] ? this.img(slots[1]) : null;
       if (dirtIm && dirtIm.complete && dirtIm.naturalWidth) {
         const wS = dirtIm.naturalWidth;
         const loops = Math.ceil(viewW / wS) + 1;
         for (let i = 0; i < loops; i++) {
           let yy = dirtTop;
-          while (yy < Math.min(rockTop, viewH)) {
+          while (yy < Math.min(rockTop2, viewH)) {
             ctx.drawImage(dirtIm, i * wS, yy, wS, dirtIm.naturalHeight);
             yy += dirtIm.naturalHeight;
           }
         }
       }
-      // 岩石带：slot2（上 1/3）→ slot3（其余），从 rockTop 到 magmaTop
-      for (const [slot, fromY, toY] of [[slots[2], rockTop, rockTop + (magmaTop - rockTop) / 3], [slots[3], rockTop + (magmaTop - rockTop) / 3, magmaTop]] as Array<[number, number, number]>) {
-        const im = slot ? this.img(slot) : null;
-        if (!im || !im.complete || !im.naturalWidth) continue;
-        const wS = im.naturalWidth;
-        const loops = Math.ceil(viewW / wS) + 1;
-        for (let i = 0; i < loops; i++) {
-          let yy = Math.max(fromY, -im.naturalHeight);
-          while (yy < Math.min(toY, viewH)) {
-            ctx.drawImage(im, i * wS, yy, wS, im.naturalHeight);
-            yy += im.naturalHeight;
+      {
+        // slot3 主体
+        const im3 = slots[3] ? this.img(slots[3]) : null;
+        if (im3 && im3.complete && im3.naturalWidth) {
+          const wS = im3.naturalWidth;
+          const loops = Math.ceil(viewW / wS) + 1;
+          for (let i = 0; i < loops; i++) {
+            let yy = Math.max(rockTop2, -im3.naturalHeight);
+            while (yy < Math.min(magmaTop, viewH)) {
+              ctx.drawImage(im3, i * wS, yy, wS, im3.naturalHeight);
+              yy += im3.naturalHeight;
+            }
+          }
+        }
+        // slot2 单条过渡条（带顶 -16px，仅纹理第 0 行 16px 高）
+        const im2 = slots[2] ? this.img(slots[2]) : null;
+        if (im2 && im2.complete && im2.naturalWidth && rockTop2 - 16 > -32 && rockTop2 - 16 < viewH) {
+          const wS = im2.naturalWidth;
+          const loops = Math.ceil(viewW / wS) + 1;
+          for (let i = 0; i < loops; i++) {
+            ctx.drawImage(im2, 0, 0, wS, Math.min(16, im2.naturalHeight), i * wS, rockTop2 - 16, wS, Math.min(16, im2.naturalHeight));
           }
         }
       }

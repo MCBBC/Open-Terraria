@@ -108,6 +108,14 @@ export class TownNPC extends Entity {
 
     this.vx += wantDir * 0.06;
     this.vx = Math.max(-0.8, Math.min(0.8, this.vx));
+    if (wantDir === 0) {
+      // 原版驻留刹车（NPC.cs:54096-54106）：不走路时每 tick ±0.1 主动减速。
+      // 缺此刹车时 facing=0（站立意图）仍以 0.8px/tick 惯性滑行且贴图不镜像
+      // → 向右滑行显示朝左贴图（偶发"太空步"）
+      if (this.vx > 0.1) this.vx -= 0.1;
+      else if (this.vx < -0.1) this.vx += 0.1;
+      else this.vx = 0;
+    }
     if (this.onGround && this.hitWall && wantDir !== 0) this.vy = -6; // 跳台阶
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, world, this.vx, this.vy);

@@ -103,7 +103,7 @@ export interface GameCallbacks {
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'close'; label: string }>) => void;
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }>) => void;
   onNpcDialogClose?: () => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币 */
   onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number) => void;
@@ -1038,6 +1038,16 @@ export class Game implements GameHooks {
     // ---- 城镇 NPC 入驻评估（原版 Main.cs:65021 每 7200 tick 一轮；载入后 10s 首轮
     //      ≈ UpdateTime_SpawnTownNPCs(forceUpdate)） ----
     if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
+    // ---- 税务员税款累积（Main.cs:64462-64470：在场时每 3600 tick(游戏 1 小时)
+    //      +50 铜 × 已入住城镇 NPC 数，上限 25 金(250000 铜)；Player.CollectTaxes :23854） ----
+    if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'tax_collector')) {
+      this.player.taxTimer++;
+      if (this.player.taxTimer >= 3600) {
+        this.player.taxTimer -= 3600;
+        const housed = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead && (n as TownNPC).home).length;
+        this.player.taxMoney = Math.min(250000, this.player.taxMoney + 50 * housed);
+      }
+    }
 
     // ---- 战争迷雾：玩家周围探索标记（每 15 tick） ----
     if (this.tickCount % 15 === 0) {
@@ -1058,7 +1068,9 @@ export class Game implements GameHooks {
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 手持火把照明：选中火把即点亮周围（#11）
     const heldDef = player.inv.heldDef();
-    const torchOn = !!heldDef && heldDef.key === 'torch';
+    // 原版 ItemCheck_EmitHeldItemLight(Player.cs:48997):(Torches[type] && !wet) 才发光——
+    // 入水(任何液体,含岩浆/蜂蜜)手持火把熄灭;仅水火把(WaterTorches)水下也亮(未实装)
+    const torchOn = !!heldDef && heldDef.key === 'torch' && !player.inWater;
     const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
     const prevLight = this.lighting.heldLight;
     this.lighting.heldLight = torchOn ? { tx: ptx, ty: pty } : null;
@@ -2215,6 +2227,20 @@ export class Game implements GameHooks {
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
     const type = st.get(tx, ty);
+    // ---- 玩家储物族（原版 Player.cs:32598+）：29→bank / 97→bank2 / 463→bank3 / 491→bank4。
+    //  内容随玩家存档（banks[0..3]），不随方块；复用宝箱面板（x 用 -2..-5 标识容器来源，
+    //  与原版 player.chest = -2..-5 同约定）----
+    const BANK_TILES: Array<[string, number]> = [
+      ['v_29_piggy_bank', 0], ['v_97_safe', 1], ['v_463_defenders_forge', 2], ['v_491_void_vault', 3],
+    ];
+    for (const [key, bi] of BANK_TILES) {
+      if (type === (TILE_BY_KEY[key] ?? -1)) {
+        this.openChest?.({ x: -2 - bi, y: 0, items: this.player.banks[bi] });
+        this.sfx.play('tink');
+        this.input.rightDown = false;
+        return;
+      }
+    }
     if (type === T.DOOR_CLOSED) {
       this.toggleDoor(tx, ty, true);
     } else if (type === T.DOOR_OPEN) {
@@ -3228,10 +3254,11 @@ export class Game implements GameHooks {
     npc.talkCooldown = 30;
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     const name = npc.givenName ? `${npc.givenName} ${typeName}` : typeName;
-    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'close'; label: string }> = [];
+    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }> = [];
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
+    if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
     // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
     if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
@@ -3496,11 +3523,12 @@ export class Game implements GameHooks {
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */
-  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'close'): void {
+  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'): void {
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
     if (id === 'shop') { this.openNpcShop(); return; }
     if (id === 'heal') { this.nurseHeal(); return; }
+    if (id === 'collect' && npc.npcKey === 'tax_collector') { this.taxCollect(); return; }
     if (id === 'curse' && npc.npcKey === 'old_man') {
       if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
       // 原版:释放诅咒时老人消失,击败骷髅王后转为裁缝
@@ -3582,6 +3610,29 @@ export class Game implements GameHooks {
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
     this.openNpcShop();
+  }
+
+  /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes + Player.CollectTaxes :23854）：
+   *  税款由 update 每游戏小时累积（50 铜 × 已入住城镇 NPC 数，上限 25 金），对话领取 */
+  private taxCollect() {
+    const t = this.player.taxMoney;
+    if (t <= 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.TaxEmpty')); return; }
+    this.player.taxMoney = 0;
+    this.gainCopper(t);
+    this.sfx.play('coin');
+    this.cb.onInventoryChanged();
+    this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.TaxCollected', t));
+  }
+
+  /** 铜币入包（按面额拆分；spendCopper 的镜像） */
+  private gainCopper(n: number): void {
+    const inv = this.player.inv;
+    const gold = Math.floor(n / 10000);
+    const silver = Math.floor((n % 10000) / 100);
+    const copper = n % 100;
+    if (gold) inv.add(ITEM_BY_KEY['coin_gold'], gold);
+    if (silver) inv.add(ITEM_BY_KEY['coin_silver'], silver);
+    if (copper) inv.add(ITEM_BY_KEY['coin_copper'], copper);
   }
 
   /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */

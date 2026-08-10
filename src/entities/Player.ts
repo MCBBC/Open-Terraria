@@ -28,6 +28,13 @@ export class Player extends Entity {
   /** 最近一次伤害死因（PlayerDeathReason 语义子集）——死亡瞬间由 Game 消费生成原版死亡文本 */
   lastDamageCause: import('../i18n/RandomText').DeathCause | null = null;
   inv: Inventory;
+  /** 玩家储物（原版 Player.cs:1468-1474 Chest.CreateBank(-2..-5)，各 40 槽）：
+   *  [0]=bank 存钱罐(29) / [1]=bank2 保险箱(97) / [2]=bank3 守护者熔炉(463) /
+   *  [3]=bank4 虚空保险库(491)——右键绑定见 Player.cs:32598+。内容随玩家存档，
+   *  方块破坏不丢内容（原版同语义，掉落回收 place_v_ 物品） */
+  banks: Array<Array<{ id: number; stack: number } | null>> = [
+    Array(40).fill(null), Array(40).fill(null), Array(40).fill(null), Array(40).fill(null),
+  ];
   buffs = new BuffState();
   /** 角色外观（来自角色系统；渲染层 M7 切换 PaperDoll 时使用） */
   appearance?: import('../player/Appearance').Appearance;
@@ -35,6 +42,10 @@ export class Player extends Entity {
   jumpHold = 0;          // 长按跳跃剩余加速 tick
   inWater = false;
   headUnderwater = false;
+  /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
+  taxMoney = 0;
+  /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
+  taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
   inHoney = false;
   // 气口：5 个气泡，共 23.33 秒（原版参数），每颗 ≈4.67 秒

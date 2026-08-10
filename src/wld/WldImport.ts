@@ -279,6 +279,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   306: { key: 'v_306_ice_machine', copyFrame: true },  // Ice Machine
   247: { key: 'v_247_autohammer', copyFrame: true },  // Autohammer
   491: { key: 'v_491_void_vault', copyFrame: true },  // Void Vault
+  463: { key: 'v_463_defenders_forge', copyFrame: true },  // Defender's Forge（bank3 储物）
   106: { key: 'v_106_sawmill', copyFrame: true },  // Sawmill
   642: { key: 'v_642_chlorophyte_extractinator', copyFrame: true },  // Chlorophyte Extractinator
   319: { key: 'v_319_ship_in_a_bottle', copyFrame: true },  // Ship in a Bottle
