@@ -129,19 +129,62 @@ for (const id of whitelist.tiles) {
   };
 }
 
-// 阶段5:物品全量——有 Item_<id>.png 图标的全部注册(6146 件中约 6085 有图)
+// 阶段5:物品全量——shelf-pack 打包成少数 Item_Atlas_k.png 图集(6059 张单体 → ~3 张)。
+//  请求粒度优化:运行时 preloadIcons 只取图集,不再逐张 Item_N.png(此前 6000+ 网络请求)。
+//  2048² 货架,按高度降序;2px gutter 防 UI 32×32 缩小采样串色;解码失败回退单体路径。
+import { PNG } from 'pngjs';
+const ATLAS_W = 2048, ATLAS_H = 2048, GUTTER = 2;
+// 先 IHDR 读尺寸(不解码)→ 按高度降序排序,货架密度更高
+const itemFiles = [];
 for (const it of items) {
+  const src = join(ASSETS, `Item_${it.id}.png`);
+  if (!existsSync(src)) { missing.push(`Item_${it.id}`); continue; }
+  try { itemFiles.push({ it, src, ...pngSize(src) }); } catch { missing.push(`Item_${it.id}(IHDR)`); }
+}
+itemFiles.sort((a, b) => b.h - a.h);
+let atlasPage = null, atlasX = 0, atlasY = 0, shelfH = 0, atlasIdx = -1;
+const flushAtlas = () => {
+  if (!atlasPage) return;
+  writeFileSync(join(OUT_DIR, `Item_Atlas_${atlasIdx}.png`), PNG.sync.write(atlasPage));
+  atlasPage = null;
+};
+const newAtlasPage = () => {
+  flushAtlas();
+  atlasIdx++;
+  atlasPage = new PNG({ width: ATLAS_W, height: ATLAS_H });
+  atlasX = GUTTER; atlasY = GUTTER; shelfH = 0;
+  console.log(`item atlas #${atlasIdx} open`);
+};
+for (const { it, src, w: iw0, h: ih0 } of itemFiles) {
   const id = it.id;
-  const src = join(ASSETS, `Item_${id}.png`);
-  if (!existsSync(src)) { missing.push(`Item_${id}`); continue; }
-  copyFileSync(src, join(OUT_DIR, `Item_${id}.png`)); copied++;
-  out.items[id] = {
+  let png = null;
+  try { png = PNG.sync.read(readFileSync(src)); } catch { png = null; }
+  const base = {
     name: it.name,
     key: it.key,
-    icon: `vanilla/Item_${id}.png`,
     createTile: it.createTile ?? null,
   };
+  if (!png) {
+    // 解码失败兜底:保持旧单体路径(同时拷贝单体)
+    copyFileSync(src, join(OUT_DIR, `Item_${id}.png`)); copied++;
+    out.items[id] = { ...base, icon: `vanilla/Item_${id}.png` };
+    continue;
+  }
+  if (!atlasPage) newAtlasPage();
+  const iw = png.width, ih = png.height;
+  if (atlasX + iw + GUTTER > ATLAS_W) { atlasX = GUTTER; atlasY += shelfH + GUTTER; shelfH = 0; }
+  if (atlasY + ih + GUTTER > ATLAS_H) newAtlasPage();
+  png.bitblt(atlasPage, 0, 0, iw, ih, atlasX, atlasY);
+  out.items[id] = {
+    ...base,
+    icon: `vanilla/Item_Atlas_${atlasIdx}.png`,
+    ix: atlasX, iy: atlasY, iw, ih,
+  };
+  atlasX += iw + GUTTER;
+  if (ih > shelfH) shelfH = ih;
 }
+flushAtlas();
+console.log(`item atlas pages: ${atlasIdx + 1}`);
 
 for (const id of whitelist.walls) {
   const w = wallById.get(id);

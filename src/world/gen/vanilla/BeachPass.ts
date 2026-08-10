@@ -182,7 +182,7 @@ function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: 
   if (X < 1 || Y < 1 || X >= st.w - 1 || Y >= st.h - 1) return false;
   let y = Y;
   while (y < st.h && !st.flags[st.idx(X, y)]) y++;
-  if (y > worldSurface || y >= st.h) return false;          // 原版：仅地表内
+  if (y > worldSurface || y >= st.h) return false;          // 原版：仅地表内（海盆深度容差已放宽）
   if (st.type[st.idx(X, y)] !== T.SAND) return false;       // 必须沙面
   if (st.wall[st.idx(X, y)] !== 0) return false;            // 无背景墙
   y--;
@@ -238,8 +238,9 @@ export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
     // 贝壳堆：50% 概率，锚点 = 海滩边界附近沙面（原版 shellStart 扫描近似）
     if (rng.next() < 0.5) {
       const baseX = dir === 1 ? gs.beachLeftEnd - rng.int(0, 5) : gs.beachRightStart + rng.int(0, 5);
+      // 全列扫沙面（真实海盆深浅不一，固定窗口会漏锚）
       let by = -1;
-      for (let y = Math.max(1, Math.floor(gs.worldSurface) - 60); y < gs.worldSurface + 30 && y < st.h - 4; y++) {
+      for (let y = 2; y < gs.worldSurface + 120 && y < st.h - 4; y++) {
         if (st.flags[st.idx(baseX, y)] && st.type[st.idx(baseX, y)] === T.SAND) { by = y; break; }
       }
       if (by > 0) {
@@ -247,7 +248,7 @@ export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
         for (const off of offsets) {
           if (off !== 0 && rng.next() >= 0.5) continue; // 原版 Next(maxValue 2..3) 门
           const x = dir === 1 ? baseX - off : baseX + off;
-          shellPile(st, rng, x, by - 50, gs.worldSurface + 60);
+          shellPile(st, rng, x, Math.max(2, by - 50), gs.worldSurface + 120);
         }
       }
     }

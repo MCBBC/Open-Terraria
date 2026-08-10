@@ -463,7 +463,7 @@ export class Game implements GameHooks {
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
-      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw']);
+      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar']);
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
@@ -550,58 +550,6 @@ export class Game implements GameHooks {
     if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
       this.maybeRespawnOldMan();
     }
-      // 双侧由外向内扫门 tile(外廊门或塔基门),取最外侧一扇
-      let doorX = -1, doorY = -1;
-      for (let r = 70; r >= 3 && doorX < 0; r--) {
-        for (const sd of [1, -1]) {
-          const x = dX + sd * r;
-          if (x < 3 || x > st.w - 4) continue;
-          for (let y = Math.max(4, dY - 45); y < Math.min(st.h - 3, dY + 45); y++) {
-            if (st.type[st.idx(x, y)] === T.DOOR_CLOSED) { doorX = x; doorY = y; break; }
-          }
-          if (doorX > 0) break;
-        }
-      }
-      // 落位候选(按优先级):门外开阔侧 3 格 > 门内 1 格 > 门外 6/10 格 > 门内 4 格 >
-      // 塔心入口扫描 > 裸兜底。每候选:向下 ≤10 格找地面 + 头顶 3 格净空(身高 40px)
-      // + 3 宽地板(左右也实心,防站在竖井/悬崖边缘)
-      const standSpot = (sx: number, syTop: number): { x: number; y: number } | null => {
-        if (sx < 3 || sx > st.w - 4) return null;
-        let yy = Math.max(4, syTop);
-        const limit = Math.min(st.h - 3, syTop + 10);
-        while (yy < limit && !st.isSolid(sx, yy)) yy++;
-        if (yy >= limit) return null;
-        if (!st.isSolid(sx - 1, yy) || !st.isSolid(sx + 1, yy)) return null;
-        for (let k = 1; k <= 3; k++) if (st.isSolid(sx, yy - k)) return null;
-        return { x: sx, y: yy - 3 };
-      };
-      const side = doorX >= dX ? 1 : -1; // 门相对塔心的方位,外侧 = 再往外
-      const baseY = (doorY > 0 ? doorY : dY) - 2;
-      // 首选 dungeonX/Y 本身(=门厅站立点);其余候选为门扫描兜底
-      const cands: Array<[number, number]> = [[dX, dY - 3], [doorX + side * 3, baseY],
-        [doorX - side, baseY], [doorX + side * 6, baseY],
-        [doorX + side * 10, baseY], [doorX - side * 4, baseY], [dX, dY - 10]];
-      let spot = cands.map(([cx0, cy0]) => standSpot(cx0, cy0)).find((s) => s) ?? null;
-      if (!spot) {
-        // 末级兜底①:门高平面 ±70 列扫任一有效落脚
-        for (let r = 1; r <= 70 && !spot; r++) {
-          for (const sd of [1, -1]) {
-            spot = standSpot(dX + sd * r, baseY);
-            if (spot) break;
-          }
-        }
-      }
-      if (!spot) {
-        // 末级兜底②:门口悬空(地牢在陡坡上) → 塔外 20-70 列从天空向下扫地表,
-        // 站到门外山坡(依然在门口视野内);再不行站塔顶
-        for (let r = 20; r <= 70 && !spot; r++) {
-          for (const sd of [1, -1]) {
-            spot = standSpot(dX + sd * r, 8);
-            if (spot) break;
-          }
-        }
-      }
-      if (!spot) spot = standSpot(dX, 8) ?? { x: dX, y: dY - 3 };
     this.cb.onInventoryChanged();
   }
 

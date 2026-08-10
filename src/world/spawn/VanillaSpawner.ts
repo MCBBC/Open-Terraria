@@ -452,6 +452,8 @@ export class VanillaSpawner {
     }
     // ---- 海洋（L1705-1834）----
     if (this.waterTile && this.isOcean) {
+      // 海鸥 602（L1767：水面上方有干格时 1/10；落点由 Game 的 critter 放置抬到水面线）
+      if (N(10)) return D(602);
       if (N(10)) return D(220);
       if (N(18)) return D(221);
       if (N(3)) return D(67);   // 螃蟹

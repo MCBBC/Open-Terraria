@@ -1,63 +1,55 @@
-// 二次进世界崩溃复现探针：进世界→存档→退出→快速读档（贴图全缓存=快），
-// 挂 getImageData/longtask/帧间隔计数器找运行期元凶
+// 二次进世界复现探针 v2：分段 evaluate，node 侧逐步打日志定位
 import puppeteer from 'puppeteer-core';
 
-console.error('[probe] launching');
-const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MACOS/Google Chrome', headless: true, defaultViewport: { width: 800, height: 600 }, timeout: 60000, dumpio: true });
+const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: true, defaultViewport: { width: 800, height: 600 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message));
-page.on('console', (m) => { if (m.type() === 'error') console.log('CONSOLE_ERR:', m.text().slice(0, 200)); });
-console.error('[probe] goto');
+const log = (s: string) => console.log(`[probe] ${new Date().toISOString().slice(14, 23)} ${s}`);
+log('goto');
 await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 120000 });
 await new Promise((r) => setTimeout(r, 3000));
 
-console.error('[probe] evaluating');
-let out: unknown;
-try {
-  out = await page.evaluate(async () => {
-  const res: Record<string, unknown> = {};
-  const flow = (window as any).__swFlow;
-  const waitGame = async (ms = 240000) => {
-    const t0 = Date.now();
-    while (!(window as any).__swGame?.world && Date.now() - t0 < ms) await new Promise((r) => setTimeout(r, 500));
-    return !!(window as any).__swGame?.world;
-  };
+// 阶段1：第一次进世界
+log('newWorld(第一次,慢路径)');
+await page.evaluate(() => (window as any).__swFlow.newWorld('probe-crash', 1200, 400));
+log('等待世界就绪...');
+await page.waitForFunction('!!window.__swGame?.world', { timeout: 300000, polling: 1000 });
+log('第一次进世界完成');
 
-  // ---- 第一次进世界（生成小世界，慢路径=贴图加载）----
-  const t1 = Date.now();
-  await flow.newWorld('probe-crash', 1200, 400);
-  if (!(await waitGame())) { res.err = 'first world not ready'; return res; }
-  res.firstEntryMs = Date.now() - t1;
+// 存档 + 退出
+await page.evaluate(() => { (window as any).__swFlow.doSave(); });
+await new Promise((r) => setTimeout(r, 1000));
+log('quitToMenu');
+await page.evaluate(() => (window as any).__swFlow.quitToMenu());
+await new Promise((r) => setTimeout(r, 1500));
 
-  // 存档 → 退出 → 快速读档（同会话贴图全缓存）
-  flow.doSave();
-  await new Promise((r) => setTimeout(r, 1000));
-  flow.quitToMenu();
-  await new Promise((r) => setTimeout(r, 1500));
-
-  // ---- 挂诊断钩子 ----
-  const diag: Record<string, number> = { getImageData: 0, putImageData: 0, createImageData: 0 };
+// 阶段2：挂诊断钩子 + 第二次进世界
+log('挂诊断钩子');
+await page.evaluate(() => {
+  (window as any).__diag = { getImageData: 0, putImageData: 0 };
   const proto = CanvasRenderingContext2D.prototype as any;
-  for (const k of Object.keys(diag)) {
+  for (const k of ['getImageData', 'putImageData']) {
     const orig = proto[k];
-    proto[k] = function (...args: unknown[]) { diag[k]++; return orig.apply(this, args); };
+    proto[k] = function (...args: unknown[]) { (window as any).__diag[k]++; return orig.apply(this, args); };
   }
-  const longTasks: number[] = [];
-  new PerformanceObserver((list) => { for (const e of list.getEntries()) longTasks.push(e.duration); })
+  (window as any).__longTasks = [];
+  new PerformanceObserver((list) => { for (const e of list.getEntries()) (window as any).__longTasks.push(e.duration); })
     .observe({ entryTypes: ['longtask'] });
+});
+log('quickLoad(第二次,快路径)');
+const t2 = Date.now();
+await page.evaluate(() => (window as any).__swFlow.quickLoad());
+await page.waitForFunction('!!window.__swGame?.world', { timeout: 300000, polling: 500 });
+log(`第二次进世界完成 ${Date.now() - t2}ms`);
 
-  // ---- 第二次进世界（快路径）----
-  const t2 = Date.now();
-  await flow.quickLoad();
-  if (!(await waitGame())) { res.err = 'second world not ready'; return res; }
-  res.secondEntryMs = Date.now() - t2;
+// 阶段3：运行 15s（rAF 帧间隔采样 + 模拟走动）
+log('运行采样 15s');
+const run = await page.evaluate(async () => {
   const game = (window as any).__swGame;
-  res.critters = game.entities.critters.length;
-  res.bottomPadAfterEntry = game.renderer.bottomPadCache?.size ?? -1;
-
-  // ---- 运行 15s：模拟移动（走来走去让小动物/渲染全链路跑起来）----
   const frames: number[] = [];
   let last = performance.now();
+  // 模拟向右走（推动小动物/渲染/探索全链路）
+  game.input.down = () => true; // 占位防误用——实际用键盘事件路径之外的直接驱动
   await new Promise<void>((done) => {
     const total = 900;
     let n = 0;
@@ -65,32 +57,35 @@ try {
       const now = performance.now();
       frames.push(now - last); last = now;
       n++;
-      if (n % 240 === 0) game.input.keydownHandlers?.[0]?.('KeyD'); // 占位，直接驱动 inputX
       if (n >= total) { done(); return; }
       requestAnimationFrame(tick);
     };
     requestAnimationFrame(tick);
   });
-  // 采样时刻的关键状态
-  res.getImageDataCalls = diag.getImageData;
-  res.putImageDataCalls = diag.putImageData;
-  res.bottomPadAfterRun = game.renderer.bottomPadCache?.size ?? -1;
-  res.crittersAfter = game.entities.critters.length;
-  res.numLiquid = game.liquid.numLiquid;
-  res.longTaskCount = longTasks.length;
-  res.worstLongMs = Math.round(Math.max(0, ...longTasks));
-  res.worstFrameMs = Math.round(Math.max(...frames));
-  const sorted = [...frames].sort((a, b) => a - b);
-  res.p99FrameMs = Math.round(sorted[Math.floor(sorted.length * 0.99)]);
-  res.medianFrameMs = Math.round(sorted[Math.floor(sorted.length / 2)]);
-  // 内存
-  if (performance.memory) {
-    res.heapMB = Math.round(performance.memory.usedJSHeapSize / 1048576);
-  }
-  return res;
+  return {
+    frames,
+    critters: game.entities.critters.length,
+    numLiquid: game.liquid.numLiquid,
+    bottomPad: game.renderer.bottomPadCache.size,
+    diag: (window as any).__diag,
+    longTasks: (window as any).__longTasks,
+    heapMB: performance.memory ? Math.round(performance.memory.usedJSHeapSize / 1048576) : -1,
+  };
 });
-} catch (e) {
-  out = { probeError: String(e).slice(0, 500) };
-}
-console.log(JSON.stringify(out, null, 1));
+const sorted = [...run.frames].sort((a, b) => a - b);
+console.log(JSON.stringify({
+  secondEntryMs: Date.now() - t2 - 15000,
+  critters: run.critters,
+  numLiquid: run.numLiquid,
+  bottomPadCache: run.bottomPad,
+  getImageData: run.diag.getImageData,
+  putImageData: run.diag.putImageData,
+  longTaskCount: run.longTasks.length,
+  worstLongMs: Math.round(Math.max(0, ...run.longTasks)),
+  worstFrameMs: Math.round(Math.max(...run.frames)),
+  p99FrameMs: Math.round(sorted[Math.floor(sorted.length * 0.99)]),
+  medianFrameMs: Math.round(sorted[Math.floor(sorted.length / 2)]),
+  heapMB: run.heapMB,
+}, null, 1));
 await browser.close();
+log('done');
