@@ -302,9 +302,13 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.5);
       maxSpawns = Math.floor(maxSpawns * 1.7);
     } else if (!this.dayTime) {
-      // L455-459：夜晚 spawnRate×0.6 / max×1.3（血月 ×0.3/×1.8 未实现）
+      // L455-459：夜晚 spawnRate×0.6 / max×1.3；血月再 ×0.3/×1.8（L447-450）
       spawnRate = Math.floor(spawnRate * 0.6);
       maxSpawns = Math.floor(maxSpawns * 1.3);
+      if (w.clock.bloodMoon) {
+        spawnRate = Math.floor(spawnRate * 0.3);
+        maxSpawns = Math.floor(maxSpawns * 1.8);
+      }
     }
     // L583-591（无条件）：附近怪 <20%/40%/60%/80% 上限时 ×0.6/×0.7/×0.8/×0.9
     if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.6);
@@ -653,7 +657,9 @@ export class VanillaSpawner {
     }
     if (N(2)) {
       // 洞穴主池（L4896+）
-      if (N(35) && !this.waterTile) return D(453);  // Creeper Egg
+      // 骷髅商 453（L4906-4910）：1/35，非水域（影烛未实现），场上无 453
+      // —— Game.trySpawnEnemy 把 453 转成 TownNPC 放 npcs 桶
+      if (N(35) && !this.waterTile) return D(453);
       if (N(80)) return D(195);                     // Tim（罕）
       if (N(200)) return D(45);                     // Bound Goblin
       if (this.nearMarble && !N(4)) {

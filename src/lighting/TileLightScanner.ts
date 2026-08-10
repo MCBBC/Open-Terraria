@@ -21,6 +21,51 @@ export interface ScannerWorld {
 /** 动态点光(原版 Lighting.AddLight;0-1 RGB) */
 export interface PerFrameLight { x: number; y: number; r: number; g: number; b: number }
 
+/**
+ * 动态发光特例（原版 ApplyTileLight 帧条件/动态色 case 1:1）：
+ * - 126 迪斯科球：frameX<36 → Disco RGB（TileLightScanner.cs:3057）
+ * - 429 导线灯泡：frameX/18 位段 → 各线色 +0.5、致动器 +0.2R/G（cs:881-905）
+ * - 209 传送门炮：frameX 234/252（紫）306/324（橙）×0.65（cs:432，PortalHelper 色近似）
+ * - 84 开花药草：style2 死亡草随闪烁暗红 / style5 火焰草橙 / style6 颤骨草淡蓝（cs:3009）
+ */
+export function specialTileLight(
+  sheet: number, frameX: number, _frameY: number, flicker: FlickerClock,
+): [number, number, number] | null {
+  switch (sheet) {
+    case 126:
+      if (frameX < 36) {
+        const [r, g, b] = flicker.discoColor();
+        return [r, g, b];
+      }
+      return null;
+    case 429: {
+      const n = Math.floor(frameX / 18);
+      let r = 0, g = 0, b = 0;
+      if (n % 2 >= 1) r += 0.5;
+      if (n % 4 >= 2) g += 0.5;
+      if (n % 8 >= 4) b += 0.5;
+      if (n % 16 >= 8) { r += 0.2; g += 0.2; }
+      return [r, g, b];
+    }
+    case 209:
+      if (frameX === 234 || frameX === 252) return [0.42, 0.2, 0.65];   // 传送门 1 紫 ×0.65
+      if (frameX === 306 || frameX === 324) return [0.65, 0.26, 0];     // 传送门 2 橙 ×0.65
+      return null;
+    case 84: {
+      const style = Math.floor(frameX / 18);
+      if (style === 2) {
+        const n = Math.max(0, Math.min(1, (270 - flicker.mouseTextColor) / 400));
+        return [n * 1.4, n * 1.2, n / 2];
+      }
+      if (style === 5) return [0.9, 0.72, 0.18];
+      if (style === 6) return [0, 0.08 * 0.8, 0.08];
+      return null;
+    }
+    default:
+      return null;
+  }
+}
+
 export class TileLightScanner {
   private blocksLight: Uint8Array;
   private random = new FastRandom(0x9e3779b9);
@@ -133,6 +178,12 @@ export class TileLightScanner {
               }
               lr = Math.max(lr, er); lg = Math.max(lg, eg); lb = Math.max(lb, eb);
             }
+          }
+          // ③b 动态发光特例（原版 ApplyTileLight 帧条件/动态色 case，def.light 静态表无法表达）
+          const spSheet = d?.vanilla?.sheet ?? -1;
+          const sp = specialTileLight(spSheet, st.frameX[i], st.frameY[i], this.flicker);
+          if (sp) {
+            lr = Math.max(lr, sp[0]); lg = Math.max(lg, sp[1]); lb = Math.max(lb, sp[2]);
           }
         }
         // ④ 液体光(:107;岩浆发光,水/蜂蜜不发光)

@@ -939,18 +939,32 @@ export class UI {
   private buildChestPanel() {
     this.chestPanel = el('div', 'sw-panel');
     this.chestPanel.style.cssText = 'position:fixed; left:50%; top:16%; transform:translateX(-50%); display:none;';
-    this.chestPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Chest')));
+    this.chestTitle = el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Chest'));
+    this.chestPanel.appendChild(this.chestTitle);
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(5,48px); gap:5px;';
-    for (let i = 0; i < 10; i++) {
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:5px;';
+    // 按 40 槽上限构建（玩家储物 bank×4）；打开时按容器实际长度显隐（宝箱 10 / 储物 40）
+    for (let i = 0; i < 40; i++) {
       grid.appendChild(this.makeSlotEl(i, 'chest'));
     }
+    this.chestGrid = grid;
     this.chestPanel.appendChild(grid);
     this.root.appendChild(this.chestPanel);
   }
+  private chestTitle!: HTMLElement;
+  private chestGrid!: HTMLElement;
 
   private openChestPanel(c: ChestData) {
     this.openChest = c;
+    // 容器来源标识（原版 player.chest 约定）：-2 存钱罐 / -3 保险箱 / -4 守护者熔炉 / -5 虚空保险库
+    const bankNames: Record<number, string> = { [-2]: '存钱罐', [-3]: '保险箱', [-4]: "守护者熔炉", [-5]: '虚空保险库' };
+    this.chestTitle.textContent = bankNames[c.x] ?? Lang.text('Mods.SandboxWorld.UI.Chest');
+    // 按容器实际槽位数显隐（宝箱 10 / 玩家储物 40）
+    const n = Math.min(40, c.items.length);
+    for (let i = 0; i < 40; i++) {
+      const s = this.chestGrid.children[i] as HTMLElement | undefined;
+      if (s) s.style.display = i < n ? '' : 'none';
+    }
     this.chestPanel.style.display = 'block';
     this.openInventory();
     this.refreshAll();
@@ -1002,7 +1016,8 @@ export class UI {
     }
     this.refreshBuffs();
     if (this.openChest) {
-      for (let i = 0; i < 10; i++) {
+      const n = Math.min(40, this.openChest.items.length);
+      for (let i = 0; i < n; i++) {
         const slotEl = this.slotEl(i, 'chest');
         if (slotEl) this.paintSlot(slotEl, this.openChest.items[i]);
       }

@@ -7,6 +7,14 @@ export interface ChestData { x: number; y: number; items: Array<{ id: number; st
 export class Clock {
   timeOfDay: number = 0.3;   // 0-1，0=午夜 0.5=正午（起始上午 7:12 ≈ 0.3）
   dayCount: number = 1;
+  /** 月相 0-7（0=满月 4=新月；每黎明 +1 mod 8，Main.cs:64877）。对话月相池/血月门用 */
+  moonPhase: number = 0;
+  /** 血月旗标（dusk roll / dawn 清除，Main.cs:64817-64831） */
+  bloodMoon: boolean = false;
+  /** 圣诞季（现实日期 12/15-31，checkXMas Main.cs:13054） */
+  xMas: boolean = false;
+  /** 万圣季（现实日期 10/20-11/10，checkHalloween Main.cs:13093） */
+  halloween: boolean = false;
   readonly dayLengthMs: number;
   constructor(dayLengthMs: number) { this.dayLengthMs = dayLengthMs; }
   tick(dtMs: number) {

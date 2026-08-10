@@ -286,6 +286,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   /** 角色列表（DOM）。切页前清 VUI 防穿透 */
+  async function joinGame(ip: string): Promise<void> {
+    const g = makeGame();
+    await g.joinNetGame(ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`, () => {});
+  }
+
   function showMultiplayerSelect() {
     ui.closeAll();
     const panel = new MultiplayerSelect({
@@ -497,6 +502,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doSave,
     backToTitle: showTitle,
     devMode: () => devMode,
+    joinGame: (ip: string) => joinGame(ip), // 探针/联机调试桥
   };
 
   return {

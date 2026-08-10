@@ -36,6 +36,16 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
+import { viIdFromKey } from '../data/vanillaItemCombat';
+
+/** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
+ *  火把族（8/彩色 427-433/群系 523..5353）+ 荧光棒族 ItemID.Sets.Glowsticks(282,286,3112,3002,4776,5643)。
+ *  PlayerDrawLayers.cs:3857：holdStyle!=0 → 静持也渲染（手臂抬起） */
+const HOLD_STYLE_ITEMS = new Set([
+  8, 427, 428, 429, 430, 431, 432, 433, 523, 974, 1245, 1333, 2274, 3004, 3045, 3114,
+  4383, 4384, 4385, 4386, 4387, 4388, 5293, 5353,
+  282, 286, 3112, 3002, 4776, 5643,
+]);
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames } from '../data/vanillaNpcs';
@@ -1067,34 +1077,38 @@ export class Renderer {
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number } | null) {
     const ctx = this.ctx;
     if (p.dead) return;
-    // ---- 持有物/挥舞物：先画（人物身后图层） ----
-    // 持有物显示：当前快捷栏选中物品静态握在手中（挥舞时由下方动画覆盖）
-    // 尺寸按物品图标原始像素比例（×0.9）：镐/剑等大件大、凝胶等小件小，不再统一归一化
-    {
+    // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
+    // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1
+    // → 静持时也渲染、手臂抬起（ItemCheck_ApplyHoldStyle 近似：竖举在身前）；
+    // noWet（火把 noWet=true）→ 水下不显示（与手持光源熄灭同步）。
+    if (!swing) {
       const held = p.inv.heldItem();
-      if (!swing && held) {
-        const ar = this.atlasIcon(held.id);
-        const icon = ar ? null : this.itemIcon(held.id);
-        // 静持锚点比挥砍更低更贴身（火把类小件已验证合适的位置基准）
-        const shX = p.cx + p.facing * p.w * 0.48, shY = p.y + p.h * 0.8;
-        ctx.save();
-        ctx.translate(shX, shY);
-        if (p.facing === -1) ctx.scale(-1, 1); // 整体镜像（贴图+姿态），左右完全对称
-        ctx.rotate(0.45);
-        if (ar) {
-          const s = 0.9;
-          const w = ar.sw * s, h = ar.sh * s;
-          // 握把在左下角，并向手内侧收回 35%：避免整件往外杵
-          ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -w * 0.35, -h, w, h);
-        } else if (icon) {
-          ctx.drawImage(icon, -3.5, -9, 9, 9);
+      const def = held ? ITEM_DEFS[held.id] : undefined;
+      if (held && def && !p.inWater) {
+        const vid = def.key === 'torch' ? 8 : viIdFromKey(def.key);
+        const holdStyle = Number.isFinite(vid) && HOLD_STYLE_ITEMS.has(vid) ? 1 : 0;
+        if (holdStyle) {
+          const ar = this.atlasIcon(held.id);
+          const icon = ar ? null : this.itemIcon(held.id);
+          if (ar || icon) {
+            ctx.save();
+            // 竖举姿势：锚在手部上方，贴图转正（图标默认 45° 朝上 → -0.8rad 归竖）
+            ctx.translate(p.cx + p.facing * p.w * 0.22, p.y + p.h * 0.42);
+            ctx.scale(p.facing, 1);
+            ctx.rotate(-0.8);
+            if (ar) {
+              const s = 1;
+              const w = ar.sw * s, h = ar.sh * s;
+              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, -w * 0.5, -h * 0.15, w, h);
+            } else if (icon) {
+              ctx.drawImage(icon, -4.5, -9, 9, 9);
+            }
+            ctx.restore();
+          }
         }
-        ctx.restore();
       }
     }
-
-    // 挥舞动画（工具/武器）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
-    // 静持物品 + 工具/武器挥砍：人物身后图层（挥砍在前太露馅，收回身后）
+    // 挥舞动画（工具）：人物身后图层——挥砍弧大部分在身体轮廓外，身后不遮挡
     if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
       this.drawUseItem(ctx, p, swing);
     }

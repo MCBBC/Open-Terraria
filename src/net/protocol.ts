@@ -73,9 +73,10 @@ export class NetWriter {
     return this.bytes(b);
   }
 
-  /** 回填长度前缀并返回完整帧（含 [u16 len][u8 id]） */
+  /** 回填长度前缀并返回完整帧（含 [u16 len][u8 id]）。finish 后禁止再写入（subarray 视图） */
   finish(): Uint8Array {
-    if (this.len - 3 > 65535) throw new Error(`net: 包超限 ${this.len}`);
+    // Q3 修复：守卫含头总长（此前 len-3 在 65533..65535 区间漏检 → setUint16 回绕 → 接收端脏流）
+    if (this.len > 65535) throw new Error(`net: 包超限 ${this.len}`);
     this.dv.setUint16(0, this.len, true);
     this.buf[2] = this.msgId & 255;
     return this.buf.subarray(0, this.len);
@@ -120,9 +121,13 @@ export class FrameParser {
     this.total += data.length;
   }
 
-  /** 解析所有完整帧；返回 false 表示缓冲为空 */
+  /** 解析所有完整帧；返回 false 表示缓冲为空。
+   *  脏流防护：len 非法时按字节重同步（此前 break 不前进 → 永久失步 + 缓冲无限增长）。
+   *  缓冲上限 256KB：超限重置（半包攻击防御） */
+  private static readonly MAX_BUFFER = 256 * 1024;
   drain(cb: (msgId: number, r: NetReader) => void): boolean {
     if (this.total < 3) return this.total > 0;
+    if (this.total > FrameParser.MAX_BUFFER) { this.chunks = []; this.total = 0; return false; }
     // 合并缓冲
     let buf = new Uint8Array(this.total);
     let off = 0;
@@ -131,10 +136,10 @@ export class FrameParser {
     this.total = 0;
     let p = 0;
     let any = false;
+    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     while (p + 3 <= buf.length) {
-      const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
       const len = dv.getUint16(p, true);
-      if (len < 3 || len > 65535) { break; } // 脏流：丢弃
+      if (len < 3 || len > 65535) { p += 1; continue; } // 脏字节：跳过重同步
       if (p + len > buf.length) break; // 半包
       const msgId = buf[p + 2];
       cb(msgId, new NetReader(buf.subarray(p + 3, p + len)));
@@ -245,6 +250,8 @@ export function decodeStrip(
   let written = 0;
   while (written < w * h) {
     const count = r.u16();
+    // C2 防死循环：count=0（恶意/损坏数据）或 payload 已尽（截断）→ 终止并返回已写区域
+    if (count === 0) break;
     const type = r.u16(), flags = r.u8(), fx = r.u16(), fy = r.u16(), wall = r.u16();
     const liq = r.u8(), lt = r.u8(), half = r.u8(), slope = r.u8(), wire = r.u8();
     for (let k = 0; k < count && written < w * h; k++) {

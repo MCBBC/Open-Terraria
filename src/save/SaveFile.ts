@@ -6,6 +6,8 @@ import { World as WorldClass } from '../world/World';
 import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
+import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
+import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -60,6 +62,20 @@ export function loadSave(json: string): ReturnType<typeof loadSaveData> {
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
 export function loadSaveData(data: SaveData): { world: World; player: SaveData['player'] } {
+  // v3 物品稳定 id → internal(箱子/背包/储物就地重写;v2 旧档直读)
+  const v3 = (data.version ?? 1) >= 3;
+  const mapItem = (it: { id: number; stack: number } | null) =>
+    it && v3 ? { id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0, stack: it.stack } : it;
+  const v3Chests = v3
+    ? data.chests.map((c) => ({ x: c.x, y: c.y, items: c.items.map(mapItem) }))
+    : data.chests;
+  if (v3 && data.player) {
+    data.player = {
+      ...data.player,
+      inventory: data.player.inventory.map(mapItem),
+      banks: data.player.banks?.map((b) => b.map(mapItem)),
+    };
+  }
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);
   world.spawnX = data.header.spawn[0];
   world.spawnY = data.header.spawn[1];
@@ -83,14 +99,16 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   if (data.signs) world.signs = data.signs;
 
   const st = world.store;
-  // tiles
+  // tiles(v3:RLE 里的 type 是稳定 id,查 INTERNAL_OF_STABLE 还原;v2 旧档=内部下标直读)
   {
+    const v3 = (data.version ?? 1) >= 3;
     const u8 = b64ToBytes(data.tiles);
     const pos = { i: 0 };
     let i = 0;
     while (i < st.type.length && pos.i < u8.length) {
       const run = readVarint(u8, pos) + 1;
-      const t = readVarint(u8, pos);
+      const tRaw = readVarint(u8, pos);
+      const t = v3 ? (tRaw === 0 ? 0 : TILE_INTERNAL_OF_STABLE[tRaw]) : tRaw;
       let fx = 0, fy = 0;
       if (t !== 0) {
         fx = readVarint(u8, pos);

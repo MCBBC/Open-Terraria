@@ -316,8 +316,8 @@ const TILE_MAP: Record<number, MapEntry> = {
   11: { key: 'door_open', copyFrame: true },  // Open Door（原版变体帧）
   28: { key: 'pot', copyFrame: true }, 29: { key: 'v_29_piggy_bank', copyFrame: true }, 30: 'wood',  // Pots(原版) / Piggy Bank(2×1 framed) / Wood→木材
   52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
-  61: 'tallgrass', 62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // jungle plants(草化)/藤蔓/荆棘
-  74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / Hellforge→熔炉 / 仙人掌（渲染端现场分帧）
+  62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // 丛林藤蔓/荆棘（61/74 丛林草在下行）
+  61: 'v_61_jungle_short_plants', 74: 'v_74_jungle_tall_plants', 76: 'v_76_hellstone_brick', 77: { key: 'v_77_hellforge', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / 76=狱石砖 / 77=地狱熔炉(专属表) / 仙人掌
   83: { key: 'v_83_herbs_mature', copyFrame: true },  // Herbs (Mature)
   84: { key: 'v_84_herbs_bloom', copyFrame: true },  // Herbs (Bloom)
   // ---- FTW_V2 补全 ----

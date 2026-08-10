@@ -29,7 +29,7 @@ export class LightingEngine {
   b: Uint8Array = new Uint8Array(0);
   dirty = true;
   liquidDirty = false;
-  heldLight: { tx: number; ty: number } | null = null;
+  heldLight: { tx: number; ty: number; r: number; g: number; b: number } | null = null;
   /** 动态点光 API(原版 Lighting.AddLight;0-1 RGB)——每周期消费后清空 */
   addLight(x: number, y: number, r: number, g: number, b: number): void {
     this.perFrame.push({ x, y, r, g, b });
@@ -127,9 +127,9 @@ export class LightingEngine {
     const w = this.world as ScannerWorld;
     this.work.setSize(this.rw, this.rh);
     this.work.nonVisiblePadding = Math.min(NON_VISIBLE_PADDING, (Math.min(this.rw, this.rh) - 1) >> 1);
-    // 手持火把:原版 TorchID.TorchColor(0)=1/0.95/0.8 全亮(与放置火把同亮度;此前的 ×0.5 是压暗偏差)
+    // 手持光源:RGB 来自 TorchID.TorchColor(原版 ItemCheck_EmitHeldItemLight 按火把种类取色)
     const perFrame = this.perFrame;
-    if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: 1, g: 0.95, b: 0.8 });
+    if (this.heldLight) perFrame.push({ x: this.heldLight.tx, y: this.heldLight.ty, r: this.heldLight.r, g: this.heldLight.g, b: this.heldLight.b });
     this.scanner.exportTo(w, this.work, this.rx, this.ry, perFrame);
     perFrame.length = 0;
   }

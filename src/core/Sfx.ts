@@ -85,6 +85,20 @@ export class Sfx {
     for (const n of names) for (const f of WAV_MAP[n] ?? []) this.ensureBuffer(f);
   }
 
+  /** 世界声距离衰减（LegacySoundPlayer.cs:160 SoundAttenuationDistance = 2500px） */
+  static readonly ATTEN = 2500;
+  /** 监听器（原版 Main.Camera.Center，相机中心非玩家）；Game 每帧更新。未进世界=(0,0) */
+  private lx = 0; private ly = 0;
+  setListener(x: number, y: number) { this.lx = x; this.ly = y; }
+  /** 原版距离衰减（LegacySoundPlayer.cs:381-401）：dist ≥2500 → 不播；
+   *  vol × (1 - dist/2500)。不传坐标（x=-1 语义）→ 全量（UI/玩家自身动作声） */
+  private atten(vol: number, x?: number, y?: number): number {
+    if (x == null || y == null) return vol;
+    const d = Math.hypot(x - this.lx, y - this.ly);
+    if (d >= Sfx.ATTEN) return 0;
+    return vol * (1 - d / Sfx.ATTEN);
+  }
+
   private ensure(silent = false): AudioContext | null {
     if (this.muted && !silent) return null;
     if (!this.ctx) {
@@ -97,22 +111,25 @@ export class Sfx {
   }
 
   /** 播放原版 wav（随机变体 + 轻微音高扰动）；vol 0-1 */
-  playWav(name: SfxName, vol = 1): boolean {
+  playWav(name: SfxName, vol = 1, x?: number, y?: number): boolean {
     const list = WAV_MAP[name];
     if (!list || !list.length) return false;
-    return this.playWavFile(list[Math.floor(Math.random() * list.length)], vol);
+    return this.playWavFile(list[Math.floor(Math.random() * list.length)], vol, x, y);
   }
 
   /** 播放任意 wav 文件列表（随机选 + 音高扰动）；供怪物专属声效用 */
-  playFiles(files: string[], vol = 1): boolean {
+  playFiles(files: string[], vol = 1, x?: number, y?: number): boolean {
     if (!files.length) return false;
-    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol);
+    return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol, x, y);
   }
 
   /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底） */
-  playWavFile(file: string, vol = 1): boolean {
+  playWavFile(file: string, vol = 1, x?: number, y?: number): boolean {
     const ctx = this.ensure();
     if (!ctx) return false;
+    const v = this.atten(vol, x, y);
+    if (v <= 0) return false;
+    vol = v;
     const buf = this.ensureBuffer(file);
     if (!buf) return false;
     const src = ctx.createBufferSource();
@@ -125,9 +142,11 @@ export class Sfx {
     return true;
   }
 
-  play(name: SfxName, vol = 1) {
-    // 优先原版素材，失败回退合成（master 在 playWavFile/osc 各自生效一次）
-    if (this.playWav(name, vol)) return;
+  play(name: SfxName, vol = 1, x?: number, y?: number) {
+    // 优先原版素材，失败回退合成（master 在 playWavFile/osc 各自生效一次）。
+    // 带坐标时衰减（atten），≤0 直接不播——合成回退也不触发
+    if (x != null && y != null && this.atten(vol, x, y) <= 0) return;
+    if (this.playWav(name, vol, x, y)) return;
     const ctx = this.ensure();
     if (!ctx) return;
     const t = ctx.currentTime;

@@ -116,6 +116,8 @@ export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
   golfer: { id: 588, extra: 9 },
   zoologist: { id: 633, extra: 9 },   // BestiaryGirl
   princess: { id: 663, extra: 7 },
+  travelling_merchant: { id: 368, extra: 10 },  // 旅行商人（上午随机到访，黄昏离场）
+  skeleton_merchant: { id: 453, extra: 9 },     // 骷髅商（洞穴随机出现，随 timeLeft 消失）
 };
 
 const TOWN_EXTRA_BY_ID = new Map(Object.values(TOWN_NPC_IDS).map((t) => [t.id, t.extra]));

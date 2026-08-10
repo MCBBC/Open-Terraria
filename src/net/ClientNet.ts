@@ -64,8 +64,10 @@ export class ClientNet {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     ws.onopen = () => {
-      // Hello（对齐原版 msg1：版本校验）
-      const name = (this.game.player.appearance as { name?: string } | undefined)?.name ?? '玩家';
+      // Hello（对齐原版 msg1：版本校验）。连接时 Game.player 可能尚未创建（joinNetGame
+      // 先连后 loadWorld）——外观名走可选链兜底
+      const p = this.game.player as { appearance?: { name?: string } } | undefined | null;
+      const name = p?.appearance?.name ?? '玩家';
       this.send(new NetWriter(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(name).finish());
     };
     ws.onmessage = (e) => {
@@ -103,7 +105,8 @@ export class ClientNet {
       case Msg.PlayerSlot: {
         this.mySlot = r.u8();
         // 全量上传自身（对齐原版 msg3 后立刻 SyncPlayer + RequestWorldData）
-        const app = JSON.stringify(this.game.player.appearance ?? {});
+        const p2 = this.game.player as { appearance?: unknown } | undefined | null;
+        const app = JSON.stringify(p2?.appearance ?? {});
         this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(app).finish());
         this.send(new NetWriter(Msg.RequestWorldData).finish());
         return;

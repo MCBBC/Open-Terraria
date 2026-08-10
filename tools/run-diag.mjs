@@ -57,7 +57,9 @@ if (argv[0] === '--_child') {
   const path = await import('node:path');
   const target = path.resolve(process.cwd(), rest[0]);
 
-  const child = spawn(process.execPath, [import.meta.url, '--_child', target, ...rest.slice(1)], {
+  const { fileURLToPath } = await import('node:url');
+  const self = fileURLToPath(import.meta.url);
+  const child = spawn(process.execPath, [self, '--_child', target, ...rest.slice(1)], {
     stdio: 'inherit',
   });
 

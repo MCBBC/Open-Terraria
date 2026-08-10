@@ -1,6 +1,11 @@
 // 存档序列化纯核心(无任何 DOM/World 依赖——save.worker.ts 直接引用,
 // 主线程 SaveFile.ts 与存档 worker 共用同一份字节级实现,输出逐位一致)。
 // 性能(2026-08 审计 #2):RLE 输出为密度增长 Uint8Array(varint 字节流)。
+// 【v3 稳定 id 方案】磁盘 tile/item id 不再存数组下标:TILE_STABLE_OF_INTERNAL /
+// ITEM_STABLE_OF_INTERNAL 内联映射(data/tiles.ts + data/items.ts 末段,根治顺序漂移)。
+
+import { TILE_STABLE_OF_INTERNAL } from '../data/tiles';
+import { ITEM_STABLE_OF_INTERNAL } from '../data/items';
 
 class ByteWriter {
   buf = new Uint8Array(1 << 16);
@@ -44,6 +49,8 @@ export function bytesToB64(u8: Uint8Array): string {
 export interface SaveData {
   format: 'sandboxworld.save';
   version: number;
+  /** v3: tile/item 磁盘 id = 原版 sheet/item id + 私有段(见 data/tiles.ts 稳定表);v2=旧内部下标 */
+  idScheme?: 'sheet';
   header: {
     name: string; seed: number; width: number; height: number;
     spawn: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
@@ -104,14 +111,19 @@ export function rlePairs(values: ArrayLike<number>): Uint8Array {
   return out.bytes();
 }
 
-export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array }): Uint8Array {
+/** RLE tiles。stableMap 非空时逐元素映射为稳定 id(v3 存档路径) */
+export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array }, stableMap?: Uint16Array): Uint8Array {
   const out = new ByteWriter();
   const n = st.type.length;
   let i = 0;
   while (i < n) {
-    const t = st.type[i], fx = st.frameX[i], fy = st.frameY[i];
+    const raw = st.type[i];
+    const t = stableMap ? (raw === 0 ? 0 : stableMap[raw]) : raw;
+    const fx = st.frameX[i], fy = st.frameY[i];
     let run = 1;
-    while (i + run < n && st.type[i + run] === t && st.frameX[i + run] === fx && st.frameY[i + run] === fy) run++;
+    // 游程比较必须 raw 对 raw（t 是映射后的稳定 id，与原始 id 比较恒不等 →
+    // 自定义 tile（stable≠internal）游程全断，4200x1200 规则地形 17B 膨胀到 21MB）
+    while (i + run < n && st.type[i + run] === raw && st.frameX[i + run] === fx && st.frameY[i + run] === fy) run++;
     out.varint(run - 1);
     out.varint(t);
     if (t !== 0) {
@@ -134,9 +146,12 @@ export function serializeSave(
   for (let i = 0; i < st.type.length; i++) {
     if (!st.flags[i] && st.type[i] !== 0) st.type[i] = 0;
   }
+  // 物品 id → 稳定 id(箱子/背包/储物;量小直接遍历)
+  const mapItem = (it: { id: number; stack: number } | null) =>
+    it ? { id: it.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[it.id] ?? 0, stack: it.stack } : null;
   const data: SaveData = {
     format: 'sandboxworld.save',
-    version: 2,
+    version: 3,
     header: {
       name: meta.name, seed: meta.seed, width: meta.w, height: meta.h,
       spawn: [meta.spawnX, meta.spawnY], groundLevel: meta.groundLevel, rockLevel: meta.rockLevel,
@@ -146,16 +161,17 @@ export function serializeSave(
       created: Date.now(), playTimeMs,
     },
     clock: { timeOfDay: meta.timeOfDay, dayCount: meta.dayCount },
-    tiles: bytesToB64(rleTiles(st)),
+    tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),
     liquidType: bytesToB64(rlePairs(st.liquidType)),
     wire: bytesToB64(rlePairs(st.wire)),
-    chests: meta.chests,
-    player,
+    chests: meta.chests.map((c) => ({ x: c.x, y: c.y, items: c.items.map(mapItem) })),
+    player: { ...player, inventory: player.inventory.map(mapItem), banks: player.banks?.map((b) => b.map(mapItem)) },
     npcs: [],
     signs: meta.signs,
     flags: meta.flags,
+    idScheme: 'sheet',
   };
   return JSON.stringify(data);
 }

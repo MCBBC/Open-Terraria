@@ -10,6 +10,7 @@ import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
 import { findFreeHouse } from '../world/Housing';
 import shopstockJson from '../data/vanilla-shopstock.json';
+import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
@@ -67,11 +68,20 @@ import { TrapShot } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponProj';
 import { Minecart } from '../entities/Minecart';
+import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
 const AMMO_BULLET = 14;
+
+/** 旅行商人动态商店池（Chest.SetupTravelShop_GetItem/GetPainting 提取，tools/extract-travelshop.mjs） */
+const TRAVEL_POOL = travelshopJson as {
+  items: Array<{ id: number; tier: number; cond: string | null }>;
+  paintings: Array<{ id: number; tier: number; cond: string | null }>;
+};
+/** 物品 value 表（vanilla-shopstock.json 附带；旅行商定价用） */
+const ITEM_VALUES = (shopstockJson as { values: Record<string, number> }).values;
 
 // ---- 原版 Main.tileCut 可砍集合（Main.cs:7312-7754 全表 38 项，经 vanilla.sheet 反查内部 id） ----
 // 挥击范围内命中即 KillTile：杂草/藤蔓/药草芽等直接碎，瓦罐(28)走整罐碎裂+掉落
@@ -86,6 +96,12 @@ const TILE_CUT = new Set<number>(
   }, []),
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
+
+/** 玩家储物族 tile key → bank 索引（原版 Player.cs:32598+：29→bank / 97→bank2 /
+ *  463→bank3 / 491→bank4，chest 槽位约定 -2..-5） */
+const BANK_TILES: ReadonlyArray<readonly [string, number]> = [
+  ['v_29_piggy_bank', 0], ['v_97_safe', 1], ['v_463_defenders_forge', 2], ['v_491_void_vault', 3],
+];
 
 /** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
 function compactByLife<T extends { life: number }>(list: T[]): void {
@@ -135,6 +151,8 @@ export class Game implements GameHooks {
   paused = false;
   private acc = 0;
   private lastTime = 0;
+  /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
+  private _lastClockT = 0.3;
   private tickCount = 0;
 
   // 挖掘状态
@@ -502,6 +520,15 @@ export class Game implements GameHooks {
     this.renderer.minimap = new Minimap(w);
     // 火把锚定（TileObjectData tile4）：支撑被挖掉时火把掉落（WorldGen.TileFrame 火把语义）
     w.store.onTileChanged((x, y) => this.checkTorchDetach(x, y));
+    // 下落沙:任何格变化 → 检查其上方是否为失去支撑的沙族(级联由转换时的
+    // setTile 再次触发本监听器自然完成;生成/导入期 setTileSilent 不触发)
+    this.sandQueue.length = 0;
+    w.store.onTileChanged((x, y) => {
+      const above = TILE_DEFS[w.store.type[w.store.idx(x, Math.max(0, y - 1))]];
+      if (above && Game.FALLING_TILES.has(w.store.type[w.store.idx(x, Math.max(0, y - 1))])) {
+        this.sandQueue.push([x, y - 1]);
+      }
+    });
     this.entities.clear();
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备（铁器三件套与 Maples 素材对齐；含药水与配饰便于体验 Buff/配饰系统）
@@ -555,6 +582,9 @@ export class Game implements GameHooks {
     // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
     // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
     this.placeBoundRescueNpcs();
+    // 昼夜事件基线：季节旗标 + 时钟快照
+    this.checkSeasonal();
+    this._lastClockT = this.world.clock.timeOfDay;
     this.cb.onInventoryChanged();
   }
 
@@ -766,6 +796,8 @@ export class Game implements GameHooks {
     // 我们的挥击间隔更长，等比减半保持"连击可积累、停手会消退"）
     if (this.tickCount % 2 === 0) this.hitTiles.update();
     const w = this.world;
+    // 下落沙:消费候选队列(有界,防止沙漠整柱同帧转换尖峰)
+    if (this.sandQueue.length) this.drainSandQueue();
     w.clock.tick(dt * 1000);
     // 昼夜切换：提示 + BGM 变奏
     const isDay = w.clock.isDay;
@@ -798,6 +830,8 @@ export class Game implements GameHooks {
         if (v <= 0) this.geyserCd.delete(k); else this.geyserCd.set(k, v);
       }
     }
+    // 世界声监听器（原版 Main.Camera.Center）：世界坐标声按此衰减（2500px，LegacySoundPlayer）
+    this.sfx.setListener(this.camera.x, this.camera.y);
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
       const townNPCCount = this.entities.npcs.filter((n) => !(n as TownNPC).dead).length;
@@ -1038,6 +1072,25 @@ export class Game implements GameHooks {
     // ---- 城镇 NPC 入驻评估（原版 Main.cs:65021 每 7200 tick 一轮；载入后 10s 首轮
     //      ≈ UpdateTime_SpawnTownNPCs(forceUpdate)） ----
     if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
+    // ---- 昼夜事件（UpdateTime_StartNight :64817 / StartDay :64876 语义） ----
+    {
+      const ct = w.clock.timeOfDay, pt = this._lastClockT;
+      this._lastClockT = ct;
+      const crossed = (a: number) => pt < a && ct >= a;
+      if (crossed(0.25)) {
+        // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
+        w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
+        w.clock.bloodMoon = false;
+        this.checkSeasonal();
+      }
+      if (crossed(0.75)
+        && !w.clock.bloodMoon && w.clock.moonPhase !== 4
+        && player.maxHp > 120 && Math.random() < 1 / 9) {
+        // 黄昏血月 roll（Main.cs:64813-64831：1/9，新月不行，需生命上限>120）
+        w.clock.bloodMoon = true;
+        this.newText(Lang.misc(8), 50, 255, 130);
+      }
+    }
     // ---- 税务员税款累积（Main.cs:64462-64470：在场时每 3600 tick(游戏 1 小时)
     //      +50 铜 × 已入住城镇 NPC 数，上限 25 金(250000 铜)；Player.CollectTaxes :23854） ----
     if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'tax_collector')) {
@@ -1048,6 +1101,10 @@ export class Game implements GameHooks {
         this.player.taxMoney = Math.min(250000, this.player.taxMoney + 50 * housed);
       }
     }
+    // ---- 旅行商人（Main.cs:64484-64505 + WorldGen.SpawnTravelNPC :5188）：
+    // 白天上午(昼内进度<27000/54000)每 tick 1/108000、城镇 NPC≥2(不含老人/骷髅商)→
+    // 在随机入住者家旁生成；白天过 48600(=0.65)或入夜后离屏消失 ----
+    this.updateTravellingMerchant();
 
     // ---- 战争迷雾：玩家周围探索标记（每 15 tick） ----
     if (this.tickCount % 15 === 0) {
@@ -1066,16 +1123,56 @@ export class Game implements GameHooks {
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
-    // 手持火把照明：选中火把即点亮周围（#11）
+    // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
+    // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
+    // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：
+    // 火把 0=(1,0.95,0.8) 蓝 1=(0,0.1,1.3) 红 2=(1,0.1,0.1) 绿 3=(0,1,0.1) 紫 4=(0.9,0,0.9)
+    // 超亮 5=(1.4³) 黄 6=(0.9,0.9,0) 恶魔 8=(1,1.6,0.5) 冰 9=(0.75,0.85,1.4) 沙漠 10=(1,0.5,0)
+    // 丛林 11=(1.4,1.4,0.7) 腐化 12/猩红 13/神圣 15 …）；蜡烛 105/713 = (1,0.95,0.8)。
+    // 生物群系火把映射（EmitHeldItemLight 显式 case + item≥427 → torchId=item-426）
     const heldDef = player.inv.heldDef();
-    // 原版 ItemCheck_EmitHeldItemLight(Player.cs:48997):(Torches[type] && !wet) 才发光——
-    // 入水(任何液体,含岩浆/蜂蜜)手持火把熄灭;仅水火把(WaterTorches)水下也亮(未实装)
-    const torchOn = !!heldDef && heldDef.key === 'torch' && !player.inWater;
+    const TORCH_LIGHT: Record<number, [number, number, number]> = {
+      0: [1, 0.95, 0.8], 1: [0, 0.1, 1.3], 2: [1, 0.1, 0.1], 3: [0, 1, 0.1], 4: [0.9, 0, 0.9],
+      5: [1.4, 1.4, 1.4], 6: [0.9, 0.9, 0], 8: [1, 1.6, 0.5], 9: [0.75, 0.85, 1.4],
+      10: [1, 0.5, 0], 11: [1.4, 1.4, 0.7], 12: [0.75, 1.35, 1.5], 13: [0.95, 0.75, 1.3],
+      15: [1, 0, 1], 16: [1.4, 0.85, 0.55], 17: [0.25, 1.3, 0.8], 18: [0.95, 0.4, 1.4],
+      19: [1.4, 0.7, 0.5], 20: [1.25, 0.6, 1.2], 21: [0.75, 1.45, 0.9], 22: [0.3, 0.78, 1.2],
+    };
+    let heldRGB: [number, number, number] | null = null;
+    if (heldDef && !player.inWater) {
+      const vid = heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key);
+      if (Number.isFinite(vid)) {
+        // 蜡烛（ItemCheck 尾段 type 105/713）：同火把基色
+        if (vid === 105 || vid === 713) heldRGB = [1, 0.95, 0.8];
+        else if (vid === 8) heldRGB = TORCH_LIGHT[0]!;
+        else {
+          // 火把物品集（ItemID.Sets.Torches；TEdit items 实名核对）→ torchId：
+          // 彩色火把 427-433 = id-426；群系火把显式 case（523→8,974→9,1245→10,1333→11,
+          // 2274→12,3004→13,3045→14,3114→15,4383-4388→16-21,5293→22,5353→23）
+          const BIOME_TORCH_ITEM: Record<number, number> = {
+            523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
+            4383: 16, 4384: 17, 4385: 18, 4386: 19, 4387: 20, 4388: 21, 5293: 22, 5353: 23,
+          };
+          const torchId = vid >= 427 && vid <= 433 ? vid - 426 : BIOME_TORCH_ITEM[vid];
+          if (torchId !== undefined) {
+            const c = TORCH_LIGHT[torchId];
+            if (c) heldRGB = c;
+            else if (torchId === 7) heldRGB = [1, 1.6, 0.5];      // 恶魔火把(动画光源近似)
+            else if (torchId === 14) {                             // 彩虹火把:Disco 轮转近似
+              const ph = Math.floor(this.tickCount / 10) % 6;
+              heldRGB = ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[ph];
+            } else if (torchId === 23) heldRGB = [0.4, 0.85, 1.4]; // 微光火把(Shimmer 近似)
+          }
+        }
+      }
+    }
+    const torchOn = !!heldRGB;
     const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
     const prevLight = this.lighting.heldLight;
-    this.lighting.heldLight = torchOn ? { tx: ptx, ty: pty } : null;
+    this.lighting.heldLight = heldRGB ? { tx: ptx, ty: pty, r: heldRGB[0], g: heldRGB[1], b: heldRGB[2] } : null;
     if (torchOn !== !!prevLight ||
-      (torchOn && prevLight && (prevLight.tx !== ptx || prevLight.ty !== pty))) {
+      (torchOn && prevLight && (prevLight.tx !== ptx || prevLight.ty !== pty
+        || prevLight.r !== heldRGB![0] || prevLight.g !== heldRGB![1] || prevLight.b !== heldRGB![2]))) {
       this.lighting.dirty = true;
     }
     // 弹幕动态点光(原版 Lighting.AddLight + Projectile.light 数据):
@@ -2226,13 +2323,17 @@ export class Game implements GameHooks {
 
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
+    // 距离门（原版 Player.IsInTileInteractionRange Simple：约 5 格）——此前整个
+    // interactAt 无距离检查，隔全图右键可开储物/设床重生点
+    {
+      const dx = tx - Math.floor(this.player.cx / TILE);
+      const dy = ty - Math.floor(this.player.cy / TILE);
+      if (Math.hypot(dx, dy) > 5.5) { this.input.rightDown = false; return; }
+    }
     const type = st.get(tx, ty);
     // ---- 玩家储物族（原版 Player.cs:32598+）：29→bank / 97→bank2 / 463→bank3 / 491→bank4。
     //  内容随玩家存档（banks[0..3]），不随方块；复用宝箱面板（x 用 -2..-5 标识容器来源，
     //  与原版 player.chest = -2..-5 同约定）----
-    const BANK_TILES: Array<[string, number]> = [
-      ['v_29_piggy_bank', 0], ['v_97_safe', 1], ['v_463_defenders_forge', 2], ['v_491_void_vault', 3],
-    ];
     for (const [key, bi] of BANK_TILES) {
       if (type === (TILE_BY_KEY[key] ?? -1)) {
         this.openChest?.({ x: -2 - bi, y: 0, items: this.player.banks[bi] });
@@ -2962,6 +3063,13 @@ export class Game implements GameHooks {
     const rng = new RNG((Math.random() * 1e9) | 0);
     const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
     if (!picked) return;
+    // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
+    if (picked.vanillaId === 453) {
+      if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant')) return;
+      const sm = new TownNPC('skeleton_merchant', this.vanillaSpawner.currentSpawnX * TILE + 8, (this.vanillaSpawner.currentSpawnY + 1) * TILE);
+      this.entities.add(sm, 'npcs');
+      return;
+    }
     // 放置：原版 SpawnNPC 直接落位；水生/蠕虫分支由链内返回的怪自带 AI 处理落脚
     const st = w.store;
     const ptx = this.vanillaSpawner.currentSpawnX;
@@ -3095,8 +3203,8 @@ export class Game implements GameHooks {
         // 海盗(cs:65316)：海盗入侵已胜（入侵系统未移植 → 恒不可达，保留原版门）
         return !!this.world.flags['downedPirates'];
       case 'santa_claus':
-        // 圣诞老人(cs:65277)：圣诞季（现实日期系统未移植 → 恒不可达，保留原版门）
-        return !!this.world.flags['xMas'];
+        // 圣诞老人(cs:65277)：圣诞季（现实日期 12/15-31，checkXMas）
+        return this.world.clock.xMas;
       case 'zoologist':
         // 动物学家(cs:65327)：图鉴完成度 ≥10%（图鉴系统未移植 → 恒不可达，保留原版门）
         return !!this.world.flags['bestiaryTenPercent'];
@@ -3248,6 +3356,17 @@ export class Game implements GameHooks {
 
   private dialogNpc: TownNPC | null = null;
 
+  // ---- 下落沙族(原版 SandBallFalling 系,AI_010) ----
+  /** 会下落的 tile(原版 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/123 淤泥/224 雪泥) */
+  private static readonly FALLING_TILES = new Set<number>(
+    ['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block', 'silt', 'v_224_slush_block']
+      .map((k) => TILE_BY_KEY[k])
+      .filter((v): v is number => v !== undefined),
+  );
+  /** 待检查的下落候选格(监听器入队,fixedUpdate 消费;级联自然发生:
+   *  沙转投射物时的 setTile 会再次触发监听器 → 上方沙继续入队) */
+  private sandQueue: Array<[number, number]> = [];
+
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
   private openNpcDialog(npc: TownNPC) {
     this.dialogNpc = npc;
@@ -3311,7 +3430,8 @@ export class Game implements GameHooks {
       return dialog(48 + Math.floor(Math.random() * 4));                   // 48-51
     }
     if (npc.vanillaId === 22) {
-      // 向导(cs:95473):夜晚 173;白天 174-176(血月 170-172/灯笼夜/日食/史莱姆雨未实现)
+      // 向导(cs:95473):血月 170-172;夜晚 173;白天 174-176(灯笼夜/日食/史莱姆雨未实现)
+      if (w.clock.bloodMoon) return dialog(170 + r3());
       if (!w.clock.isDay) return dialog(173);
       return dialog(174 + r3());
     }
@@ -3331,6 +3451,7 @@ export class Game implements GameHooks {
       if (present(20) && Math.floor(Math.random() * 5) === 0) return dialog(61);
       if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(62);
       if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(63);
+      if (w.clock.bloodMoon) return dialog(rN(2) === 0 ? 64 : 65);   // 血月(cs:95195)
       return dialog(66 + r3());
     }
     if (npc.vanillaId === 20) {
@@ -3340,13 +3461,15 @@ export class Game implements GameHooks {
       if (present(19) && Math.floor(Math.random() * 6) === 0) return dialog(70);
       if (present(17) && Math.floor(Math.random() * 6) === 0) return dialog(71);
       if (present(37) && Math.floor(Math.random() * 6) === 0) return dialog(72);
-      const r = Math.floor(Math.random() * 5); // 血月 73-76 未实现跳过
+      if (w.clock.bloodMoon) return dialog(73 + rN(4));              // 血月(cs:95204)
+      const r = Math.floor(Math.random() * 5);
       return r === 0 ? dialog(w.crimson ? 333 : 77) : dialog(77 + r);
     }
     if (npc.vanillaId === 38) {
       // 爆破手(cs:95246-95266):未败邪恶 Boss 93;军火商/护士/树妖在场互cue;
       // 夜晚 101-104;白天 105-109
       if (!boss2 && r3() === 0) return dialog(93);
+      if (w.clock.bloodMoon) return dialog(94 + rN(3));              // 血月(cs:95246)
       if (present(19) && Math.floor(Math.random() * 5) === 0) return dialog(97);
       if (present(19) && Math.floor(Math.random() * 5) === 0) return dialog(98);
       if (present(18) && Math.floor(Math.random() * 4) === 0) return dialog(99);
@@ -3359,6 +3482,7 @@ export class Game implements GameHooks {
       // (血月 111 / 玩家头部时装 113 未实现跳过)
       if (!present(124) && Math.floor(Math.random() * 2) === 0) return dialog(110);
       if (present(160) && Math.floor(Math.random() * 6) === 0) return dialog(237);
+      if (w.clock.bloodMoon) return dialog(111);                     // 血月(cs:95267)
       if (present(18) && Math.floor(Math.random() * 4) === 0) return dialog(112);
       return dialog(114 + rN(6));
     }
@@ -3392,6 +3516,7 @@ export class Game implements GameHooks {
     if (npc.vanillaId === 124) {
       // 机械师(cs:95377-95420):流浪 157-160;哥布林/军火商互cue 165/166;常规 167-169 + Chatter 池
       if (!npc.home) return dialog(157 + rN(4));
+      if (w.clock.bloodMoon) return dialog(161 + rN(4));             // 血月(cs:95377)
       if (present(107) && Math.floor(Math.random() * 6) === 0) return dialog(165);
       if (present(19) && Math.floor(Math.random() * 6) === 0) return dialog(166);
       const r = rN(4); // 3 常规 + Chatter 池 1 条
@@ -3455,7 +3580,8 @@ export class Game implements GameHooks {
     if (npc.vanillaId === 353) {
       // 造型师(cs:95810-95958):清晨 311;男性 293/300、女性 291/292/312;
       // 四人组(派对女孩+机械师+护士+军火商)307;派对女孩/爆破手/电子人互cue 302/303/308;
-      // 月相常规池(287-290/294 | 295-298 | 299/301/313/314)+ StylistChatter 池(血月段未实现)
+      // 月相常规池(287-290/294 | 295-298 | 299/301/313/314)+ StylistChatter 池
+      if (w.clock.bloodMoon) return dialog(304 + rN(3));             // 血月(cs:95820)
       if (w.clock.isDay && (w.clock.timeOfDay - 0.25) / 0.5 < 16200 / 43200 && r3() === 0) return dialog(311);
       const male = (p.appearance?.skinVariant ?? 0) === 0;
       if (male && r3() === 0) return dialog([293, 300][rN(2)]);
@@ -3464,7 +3590,7 @@ export class Game implements GameHooks {
       if (present(208) && Math.floor(Math.random() * 5) === 0) return dialog(302);
       if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(303);
       if (present(209) && Math.floor(Math.random() * 5) === 0) return dialog(308);
-      const mp = (w.clock.dayCount - 1) % 8; // moonPhase 近似（无月相系统：8 天一轮）
+      const mp = w.clock.moonPhase;
       const pool = mp < 3 ? [287, 288, 289, 290, 294] : mp < 6 ? [295, 296, 297, 298] : [299, 301, 313, 314];
       const r = rN(pool.length + 1);
       if (r >= pool.length) return Lang.chatter('StylistChatter') ?? dialog(pool[0]);
@@ -3485,14 +3611,26 @@ export class Game implements GameHooks {
       return Lang.chatter('GolferChatter') ?? '……';
     }
     if (npc.vanillaId === 633) {
-      // 动物学家(cs:96005-96006):夜晚满月(moonPhase==0)变身狐狸用 Lycantrope 池
-      // （血月未实现；8 天一轮的满月近似）
-      const lycan = !w.clock.isDay && (w.clock.dayCount - 1) % 8 === 0;
+      // 动物学家(cs:96005-96006):血月或满月(moonPhase==0)夜晚变身狐狸用 Lycantrope 池
+      const lycan = w.clock.bloodMoon || (!w.clock.isDay && w.clock.moonPhase === 0);
       return Lang.chatter(lycan ? 'BestiaryGirlLycantropeChatter' : 'BestiaryGirlChatter') ?? '……';
     }
     if (npc.vanillaId === 663) {
       // 公主(cs:96007-96008):PrincessChatter 池
       return Lang.chatter('PrincessChatter') ?? '……';
+    }
+    if (npc.vanillaId === 368) {
+      // 旅行商人(cs:95962-95964):向导/商人/裁缝在场互cue 319-321;常规 322-330
+      if (present(22) && Math.floor(Math.random() * 5) === 0) return dialog(319);
+      if (present(17) && Math.floor(Math.random() * 5) === 0) return dialog(320);
+      if (present(54) && Math.floor(Math.random() * 5) === 0) return dialog(321);
+      return dialog(322 + rN(9));
+    }
+    if (npc.vanillaId === 453) {
+      // 骷髅商(cs:95948-95959):常规 356-363 + SkeletonMerchantChatter 池
+      const r = rN(9); // 8 常规 + Chatter 池 1 条
+      if (r >= 8) return Lang.chatter('SkeletonMerchantChatter') ?? dialog(356);
+      return dialog(356 + r);
     }
     // 其余类型(旅行商人368/骷髅商453/钓鱼娃369 等非房屋 NPC 未注册,不可达)
     return '……';
@@ -3553,6 +3691,7 @@ export class Game implements GameHooks {
 
   /** 当前对话 NPC 的商店商品表（Chest.SetupShop 数据驱动提取，tools/extract-shops.mjs） */
   private shopStockFor(npc: TownNPC): Array<[number, number]> {
+    if (npc.npcKey === 'travelling_merchant') return this.travelStock.slice();  // 动态股票
     const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
     if (!stock) return [];
     return stock.filter((s) => this.shopCondOk(s.cond)).map((s) => [s.id, s.price ?? 100]);
@@ -3578,7 +3717,9 @@ export class Game implements GameHooks {
       case 'zoneMeteor': return !!this.scene?.zoneMeteor;
       case 'zoneUnderworld': return !!this.scene?.zoneUnderworldHeight;
       case 'crimson': return this.world.crimson;
-      default: return false; // xMas/bloodMoon/eclipse/party：事件系统未移植 → 不上架
+      case 'bloodMoon': return this.world.clock.bloodMoon;
+      case 'xMas': return this.world.clock.xMas;
+      default: return false; // eclipse/party：事件系统未移植 → 不上架
     }
   }
 
@@ -3610,6 +3751,112 @@ export class Game implements GameHooks {
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
     this.openNpcShop();
+  }
+
+  /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失（CheckActive 语义） */
+  /** 骷髅商离屏计时（CheckActive timeLeft=750 语义） */
+  private skeletonMerchantDespawnT = 0;
+  /** 旅行商人到访/离场轮（每 tick）。顺带：骷髅商离屏 timeLeft 消失 */
+  private updateTravellingMerchant(): void {
+    const w = this.world;
+    const t = w.clock.timeOfDay;
+    // 骷髅商：离屏累计 750 tick 消失（在屏重置——CheckActive 屏内矩形语义）
+    const sm = this.entities.npcs.find(
+      (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant') as TownNPC | undefined;
+    if (sm) {
+      const ds = Math.max(Math.abs(sm.cx - this.player.cx), Math.abs(sm.cy - this.player.cy));
+      if (ds > TILE * 62) {
+        if (++this.skeletonMerchantDespawnT >= 750) { sm.dead = true; this.skeletonMerchantDespawnT = 0; }
+      } else this.skeletonMerchantDespawnT = 0;
+    }
+    const tm = this.entities.npcs.find(
+      (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'travelling_merchant') as TownNPC | undefined;
+    if (tm) {
+      // 离场：白天过 48600（昼内进度 0.8）或入夜，且玩家离屏后移除（UnspawnTravelNPC）
+      if (!w.clock.isDay || t > 0.25 + 0.8 * 0.5) {
+        const d = Math.hypot(tm.cx - this.player.cx, tm.cy - this.player.cy);
+        if (d > TILE * 62) {
+          tm.dead = true;
+          this.newText(Lang.text('LegacyMisc.35', Lang.npcName(368) ?? ''), 50, 125, 255);
+        }
+      }
+      return;
+    }
+    if (!w.clock.isDay || t >= 0.5) return;                       // 仅上午（Main.time<27000）
+    if (Math.random() >= 1 / 108000) return;                      // 每 tick 1/(27000*4)
+    const others = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead
+      && !['old_man', 'skeleton_merchant', 'travelling_merchant'].includes((n as TownNPC).npcKey));
+    if (others.length < 2) return;                                // 需 ≥2 名城镇 NPC
+    const housed = others.filter((n) => (n as TownNPC).home);
+    const src = housed.length ? housed : others;
+    const anchor = src[Math.floor(Math.random() * src.length)] as TownNPC;
+    const hx = anchor.home ? anchor.home.x : Math.floor(anchor.cx / TILE);
+    const hy = anchor.home ? anchor.home.y : Math.floor(anchor.cy / TILE);
+    // 锚点旁 ±(30..80) 列找落脚地（同流浪生成锚定逻辑）
+    const st = w.store;
+    const ax = hx + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
+    if (ax < 3 || ax > st.w - 4) return;
+    let ay = Math.max(4, hy - 20);
+    const limit = Math.min(st.h - 3, hy + 20);
+    while (ay < limit && !st.isSolid(ax, ay)) ay++;
+    if (ay >= limit) return;
+    const npc = new TownNPC('travelling_merchant', ax * TILE + 8, (ay + 1) * TILE);
+    this.entities.add(npc, 'npcs');
+    this.travelStock = this.buildTravelStock();                   // SetupTravelShop
+    this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);
+  }
+
+  /** 旅行商人当期股票（Chest.SetupTravelShop :1240 结构 1:1；运气加成未实现）：
+   *  4-6 件商品（首件高稀有起步）+ 1 幅画；池内按原版 if 链顺序、后命中覆盖 */
+  private travelStock: Array<[number, number]> = [];
+  private buildTravelStock(): Array<[number, number]> {
+    const rarity = [100, 200, 300, 400, 500, 600];
+    const condOk = (c: string | null): boolean => {
+      const f = this.world.flags;
+      switch (c) {
+        case null: return true;
+        case 'hardMode': return !!f.hardMode;
+        case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
+        case 'shadowOrbSmashed': return !!f.shadowOrbSmashed;
+        default: return false; // hardModeMech/moonlord/martians/frost/pirates/dontStarve 未达
+      }
+    };
+    const pick = (pool: Array<{ id: number; tier: number; cond: string | null }>, minimumRarity: number): number => {
+      let it = 0;
+      for (const e of pool) {
+        if (e.tier < minimumRarity || e.cond === 'skip' || !condOk(e.cond)) continue;
+        if (Math.random() * rarity[e.tier] < 1) it = e.id;  // RollLuck(N)==0，无运气修正
+      }
+      return it;
+    };
+    const stock: number[] = [];
+    const canAdd = (id: number) => id > 0 && !stock.includes(id);
+    // 首件：minRarity=2 起步，失败渐放宽（AdjustSlotRarities 近似）
+    for (let tries = 0; stock.length < 1 && tries < 60; tries++) {
+      const it = pick(TRAVEL_POOL.items, tries > 40 ? 0 : tries > 20 ? 1 : 2);
+      if (canAdd(it)) stock.push(it);
+    }
+    // 其余件：全域稀有度（num 只掷一次，SetupTravelShop :1244）
+    const num = 4 + Math.floor(Math.random() * 3);
+    let guard = 0;
+    while (stock.length < num && guard++ < 500) {
+      const it = pick(TRAVEL_POOL.items, 0);
+      if (canAdd(it)) stock.push(it);
+    }
+    // 一幅画
+    for (let tries = 0; tries < 60; tries++) {
+      const it = pick(TRAVEL_POOL.paintings, 0);
+      if (canAdd(it)) { stock.push(it); break; }
+    }
+    return stock.map((id) => [id, ITEM_VALUES[String(id)] ?? 100]);
+  }
+
+  /** 季节旗标（checkXMas Main.cs:13054 / checkHalloween :13093：按现实日期） */
+  private checkSeasonal() {
+    const now = new Date();
+    this.world.clock.xMas = now.getMonth() === 11 && now.getDate() >= 15;
+    this.world.clock.halloween = (now.getMonth() === 9 && now.getDate() >= 10)
+      || (now.getMonth() === 10 && now.getDate() <= 1);
   }
 
   /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes + Player.CollectTaxes :23854）：
@@ -3913,12 +4160,12 @@ export class Game implements GameHooks {
     });
   }
 
-  playSfx(name: string, vol?: number) {
-    this.sfx.play(name as SfxName, vol ?? 1);
+  playSfx(name: string, vol?: number, x?: number, y?: number) {
+    this.sfx.play(name as SfxName, vol ?? 1, x, y);
   }
 
-  playSfxFiles(files: string[], vol?: number) {
-    if (!this.sfx.playFiles(files, vol ?? 1)) this.sfx.play('hit', vol ?? 1);
+  playSfxFiles(files: string[], vol?: number, x?: number, y?: number) {
+    if (!this.sfx.playFiles(files, vol ?? 1, x, y)) this.sfx.play('hit', vol ?? 1, x, y);
   }
 
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */
@@ -4041,6 +4288,29 @@ export class Game implements GameHooks {
   }
 
   /** 火把锚定检查：格 (x,y) 变化后，检查其四邻与自身的火把是否失去支撑 → 掉落 */
+  // ================= 下落沙族(原版 SandBallFalling 系触发侧) =================
+
+  /** 消费下落候选队列(每 tick 上限 128,防沙漠整柱同帧尖峰) */
+  private drainSandQueue() {
+    const st = this.world.store;
+    let n = 0;
+    while (this.sandQueue.length && n < 128) {
+      const [x, y] = this.sandQueue.shift()!;
+      n++;
+      const t = st.get(x, y);
+      if (!Game.FALLING_TILES.has(t)) continue; // 已转换/被挖走
+      // 支撑判定:下方实心或平台 → 稳;液体/空气/非实心装饰 → 坠落
+      const below = st.get(x, y + 1);
+      if (below !== 0) {
+        const bd = TILE_DEFS[below];
+        if (bd && (bd.solid || bd.platform)) continue;
+      }
+      // 转 FallingBlock(AI_010):移除 tile(触发监听器 → 上方级联入队)
+      st.setTile(x, y, 0);
+      this.entities.add(new FallingBlock(x * TILE + 3, y * TILE + 3, TILE_DEFS[t].key), 'projectiles');
+    }
+  }
+
   private checkTorchDetach(x: number, y: number) {
     const st = this.world.store;
     const TORCH_ID = T.TORCH;
@@ -4428,13 +4698,12 @@ export class Game implements GameHooks {
   /** net.players → Player 渲染代理（外观/位置/朝向；动画帧由 vx 派生——与本地一致） */
   private syncRemotePlayerProxies() {
     const net = this.net!;
-    const { Player: PlayerCtor } = require('../entities/Player') as typeof import('../entities/Player');
-    const list: import('../entities/Player').Player[] = [];
+    const list: Player[] = [];
     for (const [slot, rp] of net.players) {
       if (!rp.active || slot === net.mySlot) continue;
       let proxy = this.remotePlayerProxies.find((p) => (p as unknown as { __netSlot?: number }).__netSlot === slot);
       if (!proxy) {
-        proxy = new PlayerCtor(rp.x, rp.y, this.player.inv); // 远程共享本地 inv 引用仅作渲染兜底（外观走 appearance）
+        proxy = new Player(rp.x, rp.y, this.player.inv); // 远程共享本地 inv 引用仅作渲染兜底（外观走 appearance）
         (proxy as unknown as { __netSlot?: number }).__netSlot = slot;
       }
       proxy.x = rp.x; proxy.y = rp.y;

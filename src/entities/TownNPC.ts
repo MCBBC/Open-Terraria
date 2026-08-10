@@ -52,7 +52,8 @@ export class TownNPC extends Entity {
   }
 
   /** 被陷阱弹幕等命中：dmg - defense*0.5（下限 1），8 tick 无敌帧；
-   *  死亡即移除（原版次日重生系统未移植，暂不重生） */
+   *  死亡即移除——"重生"由入驻轮承担（原版 UpdateTime_SpawnTownNPCs：不在场且
+   *  条件满足 → 重新入驻，≈次日回归），无需独立重生系统 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks): boolean {
     if (this.iframes > 0 || this.dead) return false;
     const def = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;

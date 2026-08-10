@@ -52,13 +52,14 @@ try {
   const pageA = await mkPage(browser);
   // A 加入
   const joinA = await pageA.evaluate(async (port) => {
-    const g = window.__swGame;
-    if (!g) return { err: 'no game' };
+    const flow = window.__swFlow;
+    if (!flow || !flow.joinGame) return { err: 'no flow' };
     try {
-      await g.joinNetGame(`ws://127.0.0.1:${port}`, () => {});
+      await flow.joinGame('127.0.0.1:' + port);
     } catch (e) {
       return { err: String(e) };
     }
+    const g = window.__swGame;
     return {
       ok: !!g.world && g.world.w > 1000,
       w: g.world?.w, h: g.world?.h,
@@ -87,8 +88,8 @@ try {
     // B 加入
     const pageB = await mkPage(browser);
     const joinB = await pageB.evaluate(async (port) => {
+      try { await window.__swFlow.joinGame('127.0.0.1:' + port); } catch (e) { return { err: String(e) }; }
       const g = window.__swGame;
-      try { await g.joinNetGame(`ws://127.0.0.1:${port}`, () => {}); } catch (e) { return { err: String(e) }; }
       return { ok: !!g.world && g.world.w > 1000, slot: g.net?.mySlot };
     }, PORT);
     console.log('B:', JSON.stringify(joinB));
