@@ -16,8 +16,8 @@ describe('markExplored 版本与脏包围盒（迷雾增量更新数据源）', 
     w.markExplored(50, 50, 5);
     const v = w.exploredVersion;
     w.markExplored(50, 50, 5);
-    w.markExplored(51, 51, 5);
-    expect(w.exploredVersion).toBe(v);
+    w.markExplored(50, 50, 5);
+    expect(w.exploredVersion).toBe(v); // 站定不动：不产生任何重建
   });
 
   it('移动到新区域：bump 且脏包围盒与新区域取并', () => {

@@ -53,6 +53,7 @@ class DungeonCtx {
   minX = 0; maxX = 0; minYY = 0; maxY = 0;
   rooms: DRoom[] = [];
   entranceX = 0;
+  entStand: [number, number] | null = null; // 开放门厅可站立点（原版 dungeonX/Y 语义）
   lastHall: [number, number] = [0, 0];
   // 原版 L18045-18048:入口塔尺寸强度(竖井出口探测偏移用)
   dxS1 = 0; dyS1 = 0; dxS2 = 0; dyS2 = 0;
@@ -239,6 +240,10 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
     while (gY < st.h - 2 && !st.flags[st.idx(dx, gY)]) gY++;
     dungeonEnt(st, rng, gs, dc, dx, gY);
     gs.dungeonY = gY;          // 入口地表 Y（刷怪门槛 CheckToSpawnDungeonEnemies）
+  }
+  if (dc.entStand) {
+    gs.dungeonEntX = dc.entStand[0];
+    gs.dungeonEntY = dc.entStand[1];
   }
   // ---- 房口平台候选(cs L18137-18180,与门候选同期收集)----
   for (const room of dc.rooms) {
@@ -709,6 +714,15 @@ function dungeonEnt(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, i: nu
   // 原版 L21242 PlaceTile(x, Y+1) → PlaceDoor 门顶在 Y-1（占 Y-1..Y+1，底格 = 旧单格位置）
   if (st.inBounds(Math.floor(cx), Math.floor(cy) - 1)) {
     placeDoorClosed(st, Math.floor(cx), Math.floor(cy) - 1, 13);
+  }
+  // 开放门厅可站立点（原版 dungeonX/Y 语义 cs L72510-72527：入口结构上 3 宽净空可站处；
+  // 老头 NPC 出生/游走锚）。取门厅中心列，向下找地板
+  {
+    const sx = Math.floor((n51 + n52) / 2);
+    let sy = n54 - 1;
+    const limit = Math.min(st.h - 3, n54 + 12);
+    while (sy < limit && !st.isSolid(sx, sy)) sy++;
+    if (sy < limit) dc.entStand = [sx, sy];
   }
   dc.minYY = Math.min(dc.minYY, Math.floor(j - dy1 / 2 - dy1 * 0.6) - 6);
   dc.entranceX = Math.floor(cx);

@@ -207,6 +207,9 @@ const DECO187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
 const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
 const MUSHROOM_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const MAX_TILE_COUNT = 3500; // 原版 maxTileCount（countTiles 硬顶）
+/** 原版 pass 63 时洞穴尚无自然墙（CaveWalls pass 67 才刷）。我方 TerrainPass 预填了
+ *  墙 1/2——此处按原版时序语义视作"无墙"（可穿行、可覆写为 62） */
+const treatAsNoWall = (wl: number) => wl === 0 || wl === 1 || wl === 2;
 
 /** 原版 SolidTile 语义：active(flags) + tileSolid。生成期幽灵 tile（有 type 无 flags）不算实心 */
 function solidTile(st: TileStore, x: number, y: number): boolean {
@@ -231,7 +234,7 @@ function countTiles(st: TileStore, x: number, y: number): { count: number; shroo
     const k = cx * 100000 + cy;
     if (seen.has(k)) continue;
     const i = st.idx(cx, cy);
-    if (st.wall[i] !== 0) return { count: MAX_TILE_COUNT, shroom };
+    if (!treatAsNoWall(st.wall[i])) return { count: MAX_TILE_COUNT, shroom };
     seen.add(k);
     if (st.flags[i] && st.type[i] === MUSHROOM_GRASS) shroom++;
     if (!solidTile(st, cx, cy)) {
@@ -273,16 +276,16 @@ function placeTightWebs(st: TileStore, rng: RNG, x: number, y: number): boolean 
   return true;
 }
 
-/** PlaceTile(187, style) 近似：3×2 覆饰（fx=style*54 单行，Tiles_187 1890×72 实证） */
+/** PlaceTile(187, style) 近似：3×2 覆饰，底行=air 格 y、顶行 y-1（fx=style*54 单行，Tiles_187 1890×72 实证） */
 function placeDeco187(st: TileStore, x: number, y: number, style: number): boolean {
   for (let k = 0; k < 3; k++) {
-    for (let l = 0; l < 2; l++) {
+    for (let l = -1; l < 1; l++) {
       if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
     }
   }
   for (let k = 0; k < 3; k++) {
-    for (let l = 0; l < 2; l++) {
-      st.setTileSilent(x + k, y + l, DECO187, style * 54 + k * 18, l * 18);
+    for (let l = -1; l < 1; l++) {
+      st.setTileSilent(x + k, y + l, DECO187, style * 54 + k * 18, (l + 1) * 18);
     }
   }
   return true;
@@ -322,8 +325,8 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
       if (cy < gs.worldSurface + rng.int(0, 4)) continue;
       seen.add(key(cx, cy));
       const i = st.idx(cx, cy);
-      if (solidTile(st, cx, cy) || st.wall[i] !== 0) {
-        if (st.flags[i] && st.wall[i] === 0) st.wall[i] = 62;
+      if (solidTile(st, cx, cy) || !treatAsNoWall(st.wall[i])) {
+        if (st.flags[i] && treatAsNoWall(st.wall[i])) st.wall[i] = 62;
         continue;
       }
       st.wall[i] = 62;

@@ -20,6 +20,8 @@ const CSS = `
 .sw-npc-dialog {
   position: fixed; left: 50%; bottom: 120px; transform: translateX(-50%);
   width: 560px; max-width: 94vw; z-index: 22; cursor: auto;
+  /* ★sw-root 是 pointer-events:none(防挡画布),子面板必须显式 auto 否则按钮点不到 */
+  pointer-events: auto;
   background: linear-gradient(160deg, #2b3664, #1c2444);
   border: 2px solid #7d92d6; border-radius: 6px; padding: 10px 14px; color: #e8e8f4;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
@@ -37,6 +39,7 @@ const CSS = `
 .sw-npc-shop {
   position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%);
   width: 520px; max-width: 94vw; z-index: 23; cursor: auto;
+  pointer-events: auto; /* 同上:sw-root 穿透关闭,子面板须显式开启 */
   background: linear-gradient(160deg, #2b3664, #1c2444);
   border: 2px solid #7d92d6; border-radius: 6px; padding: 12px 14px; color: #e8e8f4;
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;

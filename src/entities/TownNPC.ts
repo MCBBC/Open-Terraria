@@ -28,6 +28,8 @@ export class TownNPC extends Entity {
   /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
    *  原版观感也是整日守在门口走廊 */
   stationary = false;
+  /** 白天游走但不远离 home(守卫老人:锚地牢门口走廊,防走失) */
+  leashHome = false;
   talkCooldown = 0;
   bubble: string | null = null;
   bubbleT = 0;
@@ -80,14 +82,19 @@ export class TownNPC extends Entity {
 
     let wantDir = 0;
     if (!this.stationary && world.clock.isDay) {
-      // 白天家门口附近游走
-      this.wanderT--;
-      if (this.wanderT <= 0) {
-        this.wanderT = 90 + Math.random() * 180;
-        this.facing = Math.random() < 0.5 ? -1 : 1;
-        if (Math.random() < 0.35) this.facing = 0;
+      // 白天家门口附近游走;leashHome 者离 home 超过 ~10 格时折返(守卫老人不离地牢)
+      if (this.leashHome && this.home
+        && Math.abs(this.cx - (this.home.x * TILE + 8)) > 10 * TILE) {
+        wantDir = Math.sign(this.home.x * TILE + 8 - this.cx);
+      } else {
+        this.wanderT--;
+        if (this.wanderT <= 0) {
+          this.wanderT = 90 + Math.random() * 180;
+          this.facing = Math.random() < 0.5 ? -1 : 1;
+          if (Math.random() < 0.35) this.facing = 0;
+        }
+        wantDir = this.facing;
       }
-      wantDir = this.facing;
     } else if (this.home) {
       // 夜间回家
       const dx = this.home.x * TILE + 8 - this.cx;

@@ -377,7 +377,10 @@ export class Game implements GameHooks {
       a.preloadMiscAndNpcs(),
     ]);
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadItemIcons'), 0.15);
-    await a.preloadIcons();
+    // 物品图标（6059 张/24MB）改为后台补齐——不再阻塞进图：渲染/道具栏走
+    // vicon→ensureVImage 懒加载（未就绪回退程序化图标，paintSlot 每次刷新自愈升级）；
+    // 补齐完成后触发一次背包刷新，把兜底图标原地替换为原版图标
+    void a.preloadIcons().then(() => this.cb.onInventoryChanged?.());
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadCharTex'), 0.7);
     // Player_ 全量(纸娃娃全部身体通道) + 仅当前装备的 Armor 表;
     // 换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
@@ -536,9 +539,9 @@ export class Game implements GameHooks {
       }
     }
     // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
-    // 原版锚定 home=(dungeonX,dungeonY)(NPC.cs:53755 UpdateHomeTileState)自由游荡;
-    // 我们的 dungeonEnt 塔心地面是 3 宽竖井口(通楼梯),落位在塔心会把老人漏进地牢——
-    // 改为站到入口外廊的门外(placeDoors 放的门 tile,外廊朝背离地图中心方向延伸 ~40 格)
+    // 原版 dungeonX/Y = 入口结构上可站立点(cs L72510-72527),锚定 home 自由游荡
+    // (NPC.cs:53755 UpdateHomeTileState)。生成侧已把 dungeonX/Y 回写为入口门厅站立点,
+    // 老人锚在那里、白天在门口走廊附近游走(leashHome 栓绳防走远);导入 wld 同语义。
     if (this.world.dungeonX > 0) {
       const st = this.world.store;
       const dX = this.world.dungeonX;
@@ -569,14 +572,35 @@ export class Game implements GameHooks {
         return { x: sx, y: yy - 3 };
       };
       const side = doorX >= dX ? 1 : -1; // 门相对塔心的方位,外侧 = 再往外
-      const cands: Array<[number, number]> = doorX > 0
-        ? [[doorX + side * 3, doorY - 2], [doorX - side, doorY - 2], [doorX + side * 6, doorY - 2],
-          [doorX + side * 10, doorY - 2], [doorX - side * 4, doorY - 2], [dX, dY - 10]]
-        : [[dX, dY - 10]];
-      const spot = cands.map(([cx0, cy0]) => standSpot(cx0, cy0)).find((s) => s) ?? { x: dX, y: dY - 3 };
+      const baseY = (doorY > 0 ? doorY : dY) - 2;
+      // 首选 dungeonX/Y 本身(=门厅站立点);其余候选为门扫描兜底
+      const cands: Array<[number, number]> = [[dX, dY - 3], [doorX + side * 3, baseY],
+        [doorX - side, baseY], [doorX + side * 6, baseY],
+        [doorX + side * 10, baseY], [doorX - side * 4, baseY], [dX, dY - 10]];
+      let spot = cands.map(([cx0, cy0]) => standSpot(cx0, cy0)).find((s) => s) ?? null;
+      if (!spot) {
+        // 末级兜底①:门高平面 ±70 列扫任一有效落脚
+        for (let r = 1; r <= 70 && !spot; r++) {
+          for (const sd of [1, -1]) {
+            spot = standSpot(dX + sd * r, baseY);
+            if (spot) break;
+          }
+        }
+      }
+      if (!spot) {
+        // 末级兜底②:门口悬空(地牢在陡坡上) → 塔外 20-70 列从天空向下扫地表,
+        // 站到门外山坡(依然在门口视野内);再不行站塔顶
+        for (let r = 20; r <= 70 && !spot; r++) {
+          for (const sd of [1, -1]) {
+            spot = standSpot(dX + sd * r, 8);
+            if (spot) break;
+          }
+        }
+      }
+      if (!spot) spot = standSpot(dX, 8) ?? { x: dX, y: dY - 3 };
       const oldMan = new TownNPC('old_man', spot.x * 16 - 8, spot.y * 16);
       oldMan.home = { x: spot.x, y: spot.y }; // 锚定门口
-      oldMan.stationary = true; // 定点站岗(防游走坠入塔心竖井)
+      oldMan.leashHome = true; // 白天在门口走廊附近游走,不远离(原版老人不离地牢)
       this.entities.add(oldMan, 'npcs');
     }
     this.cb.onInventoryChanged();
@@ -3475,7 +3499,7 @@ export class Game implements GameHooks {
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
       : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
       : key === 'lunatic_cultist' ? 439 : key === 'empress_of_light' ? 636 : key === 'queen_slime' ? 657
-      : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : -1;
+      : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : key === 'golem' ? 245 : -1;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {

@@ -249,9 +249,11 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
   runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
-  // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)
-  world.dungeonX = gs.dungeonLocation;
-  world.dungeonY = gs.dungeonY || 0;            // 入口 Y（0=未知，使用处回退 groundLevel）
+  // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
+  // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
+  // 守卫老人出生/游走锚)——塔心锚点会把老人漏进塔内
+  world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
+  world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
   runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
   runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)

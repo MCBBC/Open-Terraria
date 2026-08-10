@@ -293,6 +293,7 @@ function isOre(t: number): boolean {
 
 /** pass 76 Traps 主体（cs:8936-8984）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap */
 export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  bouldersPlaced.length = 0; // 模块级状态须按次生成重置，否则同种子双生成发散
   const trapTries = Math.floor(st.w * 0.05);
   for (let n = 0; n < trapTries; n++) {
     for (let k = 0; k < 1150; k++) {

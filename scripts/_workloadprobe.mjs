@@ -33,8 +33,10 @@ const out = await page.evaluate(async () => {
   const t0 = performance.now();
   const { world: wWorker, player: pWorker } = await client.loadSave({ json }, {});
   const loadMs = Math.round(performance.now() - t0);
-  // 主线程读档对照
+  // 主线程读档对照（同样跑 load 模式沉降——与 worker 链等价）
   const { world: wMain } = loadSave(json);
+  const { settleWorldLiquids } = await import('/src/world/liquid/settle.ts');
+  await settleWorldLiquids(wMain, 'load', () => {});
   const arraysEq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
   return {
     probe: true, loadMs,
