@@ -98,7 +98,7 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
 }
 
 /** GrowTree（L14171）：常规树。height=Next(5,17)；丛林草基座净空 +5 */
-function growTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
+function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
@@ -118,7 +118,7 @@ function growTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
 }
 
 /** GrowEpicTree（L11850）：巨型树。基座严格草(2)、邻格草族、净空 55、height=Next(20,30) */
-function growEpicTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
+function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): boolean {
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
@@ -178,7 +178,7 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
     const cx = rng.int(50, st.w - 51);            // Next(50, maxTilesX-50)
     const hw = rng.int(25, 49);                  // Next(25, 50)
     for (let x = cx - hw; x < cx + hw; x++) {
-      for (let y = 20; y < gs.worldSurface; y++) growEpicTree(st, rng, x, y);
+      for (let y = 20; y < gs.worldSurface; y++) growEpicTree(st, rng, gs, x, y);
     }
   }
   const palmL = 0.1 + rng.next() * 0.35;          // 每侧棕榈概率（L15644-45）
@@ -190,7 +190,7 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
       } else if (x > st.w - 380) {
         if (rng.next() < palmR && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y);
       }
-      growTree(st, rng, x, y);
+      growTree(st, rng, gs, x, y);
     }
     if (rng.int(0, 2) === 0) x++;                 // Next(3)==0 跳列
     if (rng.int(0, 3) === 0) x++;                 // Next(4)==0 跳列
