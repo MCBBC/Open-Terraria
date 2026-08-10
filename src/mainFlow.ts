@@ -468,7 +468,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, Date.now() - playStart).then((json) => {
+    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave()).then((json) => {
       const mb = json.length / 1024 / 1024;
       void kvSetCompat(json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));

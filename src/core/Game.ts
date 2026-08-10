@@ -606,21 +606,42 @@ export class Game implements GameHooks {
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;
-    // 向导(NPC 22)随世界出生(WorldGen.cs:20036 NewNPC(spawnTileX, spawnTileY, 22))——
-    // 新世界的唯一初始城镇 NPC,无家(homeless)。商人/护士等不再开局直刷:
-    // 由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)
+    // ---- 城镇 NPC 恢复（原版 WorldFile 加载：存档里的 town NPC 原位生成）----
+    const savedNpcs = this.world.pendingTownNpcs ?? [];
+    this.world.pendingTownNpcs = [];
     this.guideSpawned = true;
-    if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'guide' && !n.dead)) {
-      this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+    if (savedNpcs.length > 0) {
+      for (const n of savedNpcs) {
+        const t = new TownNPC(n.key, n.x, n.y);
+        t.bound = !!n.bound;
+        if (n.givenName) t.givenName = n.givenName;
+        if (n.home) { t.home = { x: n.home[0], y: n.home[1] }; t.leashHome = true; }
+        this.entities.add(t, 'npcs');
+      }
+      // 向导：存档无向导条目才按新世界语义出生（WorldGen.cs:20036）
+      if (!savedNpcs.some((n) => n.key === 'guide')) {
+        this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+      }
+      // 守卫老人：存档未击败骷髅王时按原地牢口位置恢复（存档无条目则重扫地牢口）
+      if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron
+        && !savedNpcs.some((n) => n.key === 'old_man')) {
+        this.maybeRespawnOldMan();
+      }
+      // bound 救援 NPC 已由存档条目覆盖（含 bound 态与已获救态），不再重新放置
+    } else {
+      // 新世界：向导随世界出生(WorldGen.cs:20036)——唯一初始城镇 NPC,无家(homeless)。
+      // 商人/护士等由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)
+      if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'guide' && !n.dead)) {
+        this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
+      }
+      // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
+      if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
+        this.maybeRespawnOldMan();
+      }
+      // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
+      // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
+      this.placeBoundRescueNpcs();
     }
-    // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
-    // 原版：击败骷髅王（downedBoss3）后老人转为裁缝消失——不再生成
-    if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
-      this.maybeRespawnOldMan();
-    }
-    // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
-    // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
-    this.placeBoundRescueNpcs();
     // 昼夜事件基线：季节旗标 + 时钟快照
     this.checkSeasonal();
     this._lastClockT = this.world.clock.timeOfDay;
@@ -4391,6 +4412,19 @@ export class Game implements GameHooks {
       this.world.registerTree(x, groundY - th, th);
       this.chunks.markDirtyArea(x - 4, groundY - th - 4, x + 4, groundY);
     }
+  }
+
+  /** 城镇 NPC 存档快照（原版 WorldFile town NPC 段：位置+home+bound+自定义名） */
+  townNpcsForSave(): Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }> {
+    return this.entities.npcs
+      .filter((n): n is TownNPC => n instanceof TownNPC && !n.dead)
+      .map((n) => ({
+        key: n.npcKey,
+        x: Math.round(n.x), y: Math.round(n.y),
+        home: n.home ? [n.home.x, n.home.y] : null,
+        bound: n.bound || undefined,
+        givenName: n.givenName,
+      }));
   }
 
   /** 拾取物品飘名（主角旁浅白文本）。同一时间只保留一个，

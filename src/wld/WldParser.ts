@@ -46,6 +46,7 @@ export interface WldWorld {
   weather?: {
     raining: boolean; rainTime: number; maxRaining: number;
     cloudBGActive: number; numClouds: number; windSpeedTarget: number;
+    slimeRainTime?: number;
   };
 }
 
@@ -142,7 +143,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const hardMode = r.boolean();
   if (version >= 257) r.boolean(); // party of doom
   r.i32(); r.i32(); r.i32(); r.f64(); // invasion
-  if (version >= 118) r.f64(); // slime rain
+  const slimeRainTime = version >= 118 ? r.f64() : 0; // slime rain（Main.slimeRainTime：>0 进行中 <0 冷却）
   if (version >= 113) r.u8(); // sundial
   const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
   r.i32(); r.i32(); r.i32(); // ore tiers
@@ -278,7 +279,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     groundLevel, rockLevel, time, dayTime, isCrimson, hardMode, gameMode,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
-    weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget },
+    weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },
   };
 }
 

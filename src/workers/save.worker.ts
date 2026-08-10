@@ -33,7 +33,7 @@ self.onmessage = (e: MessageEvent<SaveRequest>) => {
       wire: new Uint8Array(req.bufs.wire),
     };
     const meta: SaveMeta = { ...req.meta, w: req.w, h: req.h };
-    const json = serializeSave(view, meta, req.player, req.playTimeMs);
+    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs);
     (self as unknown as Worker).postMessage({ type: 'saved', id: req.id, json });
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });

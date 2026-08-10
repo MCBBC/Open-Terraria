@@ -78,7 +78,7 @@ export interface SaveData {
     mana?: number;        // 当前魔力
     banks?: Array<Array<{ id: number; stack: number } | null>>; // 玩家储物×4（29/97/463/491；旧档缺省全空）
   };
-  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
+  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   flags: Record<string, boolean>;
   weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
@@ -146,6 +146,7 @@ export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: U
 export function serializeSave(
   st: SaveStoreView, meta: SaveMeta,
   player: SaveData['player'], playTimeMs: number,
+  townNpcs?: SaveData['npcs'],
 ): string {
   // 幽灵净化:存档格式不携带 active 位(加载时 type≠0 即激活),
   // 非活性格上的残留 type 必须归零,否则重读后全部变成浮空实体块

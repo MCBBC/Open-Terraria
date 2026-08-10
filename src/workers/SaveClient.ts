@@ -24,19 +24,21 @@ export class SaveClient {
   private chain: Promise<unknown> = Promise.resolve();
 
   /** 后台存档(串行):成功返回与 saveGame 逐位一致的 JSON;任何失败回退同步路径 */
-  save(world: World, player: Player, playTimeMs: number): Promise<string> {
+  save(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs']): Promise<string> {
     const run = this.chain
       .catch(() => undefined) // 前序失败不阻塞本次
-      .then(() => this.doSave(world, player, playTimeMs));
+      .then(() => this.doSave(world, player, playTimeMs, townNpcs));
     this.chain = run;
     return run;
   }
 
-  private async doSave(world: World, player: Player, playTimeMs: number): Promise<string> {
+  private async doSave(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs']): Promise<string> {
     const w = this.worker;
-    if (this.broken || !w) return saveGame(world, player, playTimeMs);
+    if (this.broken || !w) return saveGame(world, player, playTimeMs, townNpcs);
     const st = world.store;
     const id = this.nextId++;
+    void townNpcs; // 附进 meta 消息（下方展开处）
+    void 0;
     const meta: Omit<SaveMeta, 'w' | 'h'> = {
       name: world.name, seed: world.seed,
       spawnX: world.spawnX, spawnY: world.spawnY,
@@ -71,7 +73,7 @@ export class SaveClient {
       }, SAVE_TIMEOUT_MS);
     });
     try {
-      w.postMessage({ type: 'save', id, w: st.w, h: st.h, bufs, meta, player: playerData, playTimeMs });
+      w.postMessage({ type: 'save', id, w: st.w, h: st.h, bufs, meta, player: playerData, playTimeMs, townNpcs });
     } catch {
       const p = this.pending.get(id);
       if (p) { this.pending.delete(id); }

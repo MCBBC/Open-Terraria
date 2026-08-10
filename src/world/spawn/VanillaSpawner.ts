@@ -37,6 +37,11 @@ const T = (() => {
     SUNFLOWER: get('v_27_sunflower'),
   };
 })();
+/** 房屋墙表（Main.cs wallHouse[N]=true 全提取，265 项）：可由玩家放置的墙。
+ *  FindSpawnTile L886：落点格带房屋墙 → 弃选（房屋内不刷怪的主守卫）；
+ *  SetSpawnFlags L321：玩家所站格带房屋墙 → noWorms（房屋内不出蠕虫） */
+const WALL_HOUSE = new Set([1, 4, 5, 6, 10, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 60, 66, 67, 68, 72, 73, 74, 75, 76, 77, 78, 82, 84, 85, 88, 89, 90, 91, 92, 93, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 167, 168, 169, 172, 173, 174, 175, 176, 177, 179, 181, 182, 183, 184, 186, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366]);
+
 /** EvilTileCount 计数表(SceneMetrics.cs:613):23/661/24/25/32/112/163/400/398 计 1,27 向日葵 −10。
  *  661/400 等引擎无 def 的按 0 计 */
 const EVIL_LOOKUP = (() => {
@@ -382,8 +387,9 @@ export class VanillaSpawner {
     for (let attempt = 0; attempt < 50; attempt++) {
       const tx = rng.int(areaL, areaR);
       let ty = rng.int(areaT, areaB);
-      // L886-888：点在实心格 → 重试（wallHouse 房屋墙检查我们无房屋墙数据，略）
+      // L886-888：点在实心格 或 带房屋墙 → 重试（房屋内不刷怪的主守卫）
       if (st.isSolid(tx, ty)) continue;
+      if (WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) continue;
       this.skyMob = false;
       // L890-897：天空怪——高于 worldSurface×0.35 且在世界两侧 45% 之外（肉前非 hardMode 分支）
       if (ty < this.world.groundLevel * 0.35 && (tx < st.w * 0.45 || tx > st.w * 0.55)) {
@@ -785,7 +791,9 @@ export class VanillaSpawner {
     this.pY = Math.floor(playerY / TILE);
     this.dayTime = this.world.clock.isDay;
     this.hardMode = !!this.world.flags.hardMode;
-    this.noWorms = false;
+    // SetSpawnFlags L321：noWorms = 玩家所站格带房屋墙（房屋内不出蠕虫）
+    this.noWorms = this.world.store.inBounds(this.pX, this.pY)
+      && WALL_HOUSE.has(this.world.store.wall[this.world.store.idx(this.pX, this.pY)]);
     this.skyMob = false;
     this.spawnSpider = false;
     // 邻近旗标每尝试复位(原版每次 TrySpawnAnNPC 全新置旗;

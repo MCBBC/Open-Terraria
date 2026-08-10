@@ -1,9 +1,26 @@
 // .wld → 自有存档格式转换（导入后即可进入游戏）
 // tile/wall/item 的 id 映射基于 Terraria 1.4 的事实数据；未映射内容做可玩性降级。
 import { parseWld, WldWorld } from './WldParser';
+import { TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { SaveData, rleTiles, rlePairs, bytesToB64 } from '../save/SaveFile';
 import { TILE_BY_KEY, T, TILE_DEFS } from '../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+
+/** wld NPC spriteId → 存档 key（正常态反查 TOWN_NPC_IDS；bound 型单独映射，id-maps 核实：
+ *  105 BoundGoblin→goblin_tinkerer、106 BoundWizard→wizard、123 BoundMechanic→mechanic、
+ *  354 WebbedStylist→stylist、589 GolferRescue→golfer；534 DemonTaxCollector→tax_collector） */
+const BOUND_ID_MAP: Record<number, { key: string; bound: boolean }> = {
+  105: { key: 'goblin_tinkerer', bound: true },
+  106: { key: 'wizard', bound: true },
+  123: { key: 'mechanic', bound: true },
+  354: { key: 'stylist', bound: true },
+  589: { key: 'golfer', bound: true },
+  534: { key: 'tax_collector', bound: true },
+};
+const TOWN_NPC_KEY_BY_ID: Record<number, { key: string; bound: boolean }> = {
+  ...BOUND_ID_MAP,
+  ...Object.fromEntries(Object.entries(TOWN_NPC_IDS).map(([k, v]) => [v.id, { key: k, bound: false }])),
+};
 
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
 type MapEntry = string | { key: string; copyFrame?: boolean } | null;
@@ -894,6 +911,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       numClouds: wld.weather.numClouds,
       windSpeedTarget: wld.weather.windSpeedTarget,
       sand: { happening: false, timeLeft: 0, severity: 0, intendedSeverity: 0 },
+      slimeRainTime: wld.weather.slimeRainTime ?? 0,
+      slimeRain: (wld.weather.slimeRainTime ?? 0) > 0,
     } : undefined,
     tiles: bytesToB64(rleTiles({ type, frameX, frameY })),
     walls: bytesToB64(rlePairs(wall)),
@@ -908,7 +927,15 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       inventory: Array(40).fill(null),
       selected: 0,
     },
-    npcs: [],
+    // 城镇 NPC（原版 WorldFile town NPC 段）：spriteId→key（bound 型映射并置 bound），
+    // 坐标=像素，home=tile（-1=homeless）。原版 Starter_World 等 wld 自带的已入驻 NPC
+    // 此前被丢弃——读档只剩"向导+五人组"，入住系统重复搬入出生房
+    npcs: wld.npcs.flatMap((n): NonNullable<SaveData['npcs']> => {
+      const entry = TOWN_NPC_KEY_BY_ID[n.spriteId];
+      if (!entry) return [];   // 旅商/骷髅商等不落存档的类型跳过
+      const home = n.homeX >= 0 && n.homeY >= 0 ? [n.homeX, n.homeY] as [number, number] : null;
+      return [{ key: entry.key, x: n.x, y: n.y, home, bound: entry.bound, givenName: n.name || undefined }];
+    }),
     flags: { downedEyeOfCthulhu: false },
   };
   const toEntries = (m: Map<number, number>, names: Record<string, string>): CompatEntry[] =>
