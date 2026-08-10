@@ -1,6 +1,9 @@
 // 原版背景墙渲染器：TEdit WallFraming.cs 精确移植（= vanilla Framing.WallFrame 1.4.5.4）。
 // 墙 id 直用原版 wld id，贴图为 Wall_N.png（13 列 × 36px 步长 = 32px 帧 + 4 间隔）。
-// 绘制以格子为中心的 32×32（2×2 格大小），相邻帧半格交叠 → 原版柔和边缘。
+// 绘制以格子为中心的 32×32（2×2 格大小）。★实测(2026-08-10 逐像素 alpha):
+// 内部帧(mask15-19)的 8px 外圈全透明,不透明核心恰好是中心 16×16——相邻格核心
+// 精确贴合、零重叠零容错(并非"半格交叠");故渲染端任何半像素偏移都会显缝,
+// 相机像素吸附见 Renderer.draw。边缘变体帧的轮廓是硬边抖动,全表无半透明 alpha。
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
@@ -30,7 +33,8 @@ const WALL_LOOKUP: Array<[number, number][]> = [
   /* 19 ALL center4 */ [[11, 0], [11, 1], [11, 2], [11, 5]],
 ];
 
-// 全邻时的中心子模式：CenterWallFrameLookup[y%3][x%3]（TEdit 源序）
+// 全邻时的中心子模式：原版 Framing.cs:399 centerWallFrameLookup[i%3][j%3],i=x j=y
+// (曾照抄 TEdit 写成 [y%3][x%3]——转置,3×3 平铺图案与原版镜像)
 const CENTER = [
   [2, 0, 0],
   [0, 1, 4],
@@ -89,7 +93,7 @@ export class VanillaWallTiler {
     if (this.hasNeighbor(st, x + 1, y, truncates)) mask |= 4;
     if (this.hasNeighbor(st, x, y + 1, truncates)) mask |= 8;
     // 全邻 → 中心子模式
-    if (mask === 15) mask += CENTER[y % 3][x % 3];
+    if (mask === 15) mask += CENTER[x % 3][y % 3];
     // 变体（largeFrame 三模式）
     const lf = this.atlas ? this.atlas.vanilla.walls[String(wallId)]?.largeFrame ?? 0 : 0;
     let v: number;
@@ -111,7 +115,7 @@ export class VanillaWallTiler {
     if (this.hasNeighbor(st, x - 1, y, truncates)) mask |= 2;
     if (this.hasNeighbor(st, x + 1, y, truncates)) mask |= 4;
     if (this.hasNeighbor(st, x, y + 1, truncates)) mask |= 8;
-    if (mask === 15) mask += CENTER[y % 3][x % 3];
+    if (mask === 15) mask += CENTER[x % 3][y % 3];
     const lf = this.atlas ? this.atlas.vanilla.walls[String(wallId)]?.largeFrame ?? 0 : 0;
     let v: number;
     if (lf === 1) v = PHLEBAS[y % 4][x % 3] - 1;

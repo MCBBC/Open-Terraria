@@ -351,8 +351,10 @@ export class Renderer {
     mouseX = 0, mouseY = 0, mouseDown = false,
     mineProgress = 0,
     flicker: FlickerClock | null = null,
+    remotePlayers: Player[] = [],
   ) {
     this._mouseX = mouseX;
+    this.remotePlayers = remotePlayers;
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
@@ -384,10 +386,16 @@ export class Renderer {
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
     // 像素风关键：tile/实体用最近邻采样保持锐利（光照层单独用平滑）
+    // ★像素吸附：相机坐标吸附到 1/zoom 网格——整数世界坐标(全部 chunk/tile 绘制位)
+    // 变换后精确落在整数 canvas 像素。浮点相机 + 非整数 zoom(默认 1.25)下,相邻
+    // chunk 各自独立光栅化会在接缝处产生 1px 缺口(每 256 世界 px 一条发丝缝,
+    // 2026-08-10 实证);吸附后相机以 z 像素步进,像素风反而更稳
     ctx.imageSmoothingEnabled = false;
-    ctx.translate(viewW / 2, viewH / 2);
+    const camRX = Math.round(cam.x * z) / z;
+    const camRY = Math.round(cam.y * z) / z;
+    ctx.translate(Math.round(viewW / 2), Math.round(viewH / 2));
     ctx.scale(z, z);
-    ctx.translate(-cam.x, -cam.y);
+    ctx.translate(-camRX, -camRY);
 
     // 2. chunks 绘制序列（对照原版 Main.cs 帧序：背景水 → 墙 → 方块 → 瀑布 → 实体 → 前景水）
     const ts = TILE;
@@ -402,19 +410,21 @@ export class Renderer {
     //     有墙的水格由墙盖住、只留前景 0.6 层 → 墙在水中可见
     this.drawLiquids(world, cam, viewW, viewH, z, true);
 
-    // 2b. 背景墙层
+    // 2b. 背景墙层(+1 canvas px 保险重叠:相邻 chunk 独立光栅化接缝的兜底,
+    //      nearest 采样下重叠=复制边缘像素,视觉无感)
+    const over = 1;
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         if (!chunkVisible(cx, cy)) continue;
-        ctx.drawImage(chunks.get(cx, cy).wall, cx * CHUNK * ts, cy * CHUNK * ts);
+        ctx.drawImage(chunks.get(cx, cy).wall, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
       }
     }
 
-    // 2c. 前景 tile/物体层
+    // 2c. 前景 tile/物体层(同款保险重叠)
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
         if (!chunkVisible(cx, cy)) continue;
-        ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts);
+        ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
       }
     }
 
@@ -440,6 +450,8 @@ export class Renderer {
       }
     }
     this.drawPlayer(player, world, swing);
+    // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
+    for (const rp of this.remotePlayers) this.drawPlayer(rp, world, null);
 
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720）：
     //     水 0.6 半透明盖在实体上——水中角色带水色
@@ -640,6 +652,8 @@ export class Renderer {
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;
+  /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
+  remotePlayers: Player[] = [];
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
   private _lightImg: ImageData | null = null;
 
@@ -813,8 +827,7 @@ export class Renderer {
         }
         // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
         // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
-        // 帧顶 120/360/480 的挤压帧 y 修正（+2/-2/-6）。KS 贴图本身无王冠——
-        // 金冠是 Gore 734，仅在专家模式传送瞬间抛出（经典模式全程无冠，原版如此）
+        // 帧顶 120/360/480 的挤压帧 y 修正（+2/-2/-6）
         if (e.vanillaId === 50) {
           const ninja = this.atlas.vmisc('vanilla/Ninja.png');
           if (ninja) {
@@ -825,6 +838,16 @@ export class Renderer {
             ctx.rotate(e.vx * 0.05);
             ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
             ctx.restore();
+          }
+          // 头顶金冠（Main.cs:25571-25595 case 50，1:1）：贴图 Extra_39（82×56，
+          // wiki"the crown...separate image files...Extra_39 internally"）。锚点 =
+          // KS Center 上移 (70-num223)×scale，num223 按帧序 [2,-6,2,10,2,0]；
+          // 朝向翻转继承外层 facing scale。gfxOffY 恒 0（KS 无悬浮偏移）
+          const crown = this.atlas.vmisc('vanilla/Extra_39.png');
+          if (crown) {
+            const frameIdx2 = Math.round(r.sy / r.sh);
+            const num223 = [2, -6, 2, 10, 2, 0][frameIdx2] ?? 0;
+            ctx.drawImage(crown.img, -crown.sw / 2, -e.h / 2 - (70 - num223) * scale - crown.sh / 2, crown.sw, crown.sh);
           }
         }
         ctx.restore();

@@ -1,0 +1,259 @@
+// 多人联机共享协议层（客户端与 Node 服务器共用，docs/multiplayer-design.md §1-2）。
+// 帧格式对齐原版：[u16 len][u8 msgId][payload...]，小端，包上限 65535B。
+// 消息 ID 尽量沿用原版 MessageID 编号（Hello=1/SLOT=3/WorldData=7/TileSection=10/
+// PlayerSpawn=12/PlayerControls=13/TileManipulation=17/SetTime=18/NetModules=82/Ping=154）；
+// 编码字段为本仓库 v1 简化集（protoVer 门禁，protoVer=1）。
+
+export const PROTO_MAGIC = 'SW1';
+export const PROTO_VER = 1;
+
+/** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
+export const enum Msg {
+  Hello = 1,          // C→S {magic, protoVer, name}
+  Kick = 2,           // S→C {reason}
+  PlayerSlot = 3,     // S→C {slot, seed 随机}
+  SyncPlayer = 4,     // 双向 {slot, appearanceJson}
+  RequestWorldData = 6, // C→S {}
+  WorldData = 7,      // S→C {时间/尺寸/出生点/层线/flags/seed/name}
+  SpawnTileData = 8,  // C→S {x, y}（客户端请求出生点周围 section）
+  StatusText = 9,     // S→C {count}（将发的 strip 数，进度条）
+  TileSection = 10,   // S→C {x0,y0,w,h, rleBytes}（200×20 条带）
+  PlayerSpawn = 12,   // S→C {slot, x, y}（进房落点确认）
+  PlayerState = 13,   // C→S→广播 {slot,x,y,vx,vy,facing,sel,dead}
+  PlayerActive = 14,  // S→C 广播 {slot, active, name}
+  TileBatch = 17,     // C→S→广播 {count, ops[]}（tile 操作批量，对齐 msg17 语义）
+  SetTime = 18,       // S→C {timeOfDay, dayCount}
+  NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
+  Ping = 154,         // 简化独立心跳（module2 并存预留）
+}
+
+/** NetModule 表（对齐原版注册顺序，显式建表防错位） */
+export const enum NetModule {
+  Liquid = 0,   // 预留（v1 液体客户端本地）
+  Text = 1,     // 聊天 {authorSlot, text, r, g, b}
+  PingModule = 2, // 预留
+}
+
+// ================= Writer（小端，定宽；字符串 = u16 长度 + UTF-8） =================
+
+export class NetWriter {
+  private buf = new Uint8Array(256);
+  private len = 0;
+  private dv: DataView;
+
+  constructor(private readonly msgId: number) {
+    // 预留 [u16 len][u8 msgId]
+    this.len = 3;
+    this.dv = new DataView(this.buf.buffer);
+  }
+
+  private grow(need: number) {
+    if (this.len + need <= this.buf.length) return;
+    let cap = this.buf.length;
+    while (cap < this.len + need) cap *= 2;
+    const nb = new Uint8Array(cap);
+    nb.set(this.buf.subarray(0, this.len));
+    this.buf = nb;
+    this.dv = new DataView(this.buf.buffer);
+  }
+
+  u8(v: number): this { this.grow(1); this.buf[this.len++] = v & 255; return this; }
+  i8(v: number): this { return this.u8(v < 0 ? v + 256 : v); }
+  u16(v: number): this { this.grow(2); this.dv.setUint16(this.len, v, true); this.len += 2; return this; }
+  i16(v: number): this { this.grow(2); this.dv.setInt16(this.len, v, true); this.len += 2; return this; }
+  u32(v: number): this { this.grow(4); this.dv.setUint32(this.len, v >>> 0, true); this.len += 4; return this; }
+  i32(v: number): this { this.grow(4); this.dv.setInt32(this.len, v, true); this.len += 4; return this; }
+  f32(v: number): this { this.grow(4); this.dv.setFloat32(this.len, v, true); this.len += 4; return this; }
+  f64(v: number): this { this.grow(8); this.dv.setFloat64(this.len, v, true); this.len += 8; return this; }
+  bool(v: boolean): this { return this.u8(v ? 1 : 0); }
+  bytes(b: Uint8Array): this { this.grow(b.length); this.buf.set(b, this.len); this.len += b.length; return this; }
+  str(s: string): this {
+    const b = new TextEncoder().encode(s);
+    this.u16(b.length);
+    return this.bytes(b);
+  }
+
+  /** 回填长度前缀并返回完整帧（含 [u16 len][u8 id]） */
+  finish(): Uint8Array {
+    if (this.len - 3 > 65535) throw new Error(`net: 包超限 ${this.len}`);
+    this.dv.setUint16(0, this.len, true);
+    this.buf[2] = this.msgId & 255;
+    return this.buf.subarray(0, this.len);
+  }
+}
+
+// ================= Reader =================
+
+export class NetReader {
+  private dv: DataView;
+  private p = 0;
+  constructor(private readonly buf: Uint8Array) {
+    this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+  }
+  get pos() { return this.p; }
+  u8(): number { return this.buf[this.p++]; }
+  i8(): number { const v = this.buf[this.p++]; return v >= 128 ? v - 256 : v; }
+  u16(): number { const v = this.dv.getUint16(this.p, true); this.p += 2; return v; }
+  i16(): number { const v = this.dv.getInt16(this.p, true); this.p += 2; return v; }
+  u32(): number { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
+  i32(): number { const v = this.dv.getInt32(this.p, true); this.p += 4; return v; }
+  f32(): number { const v = this.dv.getFloat32(this.p, true); this.p += 4; return v; }
+  f64(): number { const v = this.dv.getFloat64(this.p, true); this.p += 8; return v; }
+  bool(): boolean { return this.u8() !== 0; }
+  bytes(n: number): Uint8Array { const b = this.buf.subarray(this.p, this.p + n); this.p += n; return b; }
+  str(): string {
+    const n = this.u16();
+    return new TextDecoder().decode(this.bytes(n));
+  }
+}
+
+// ================= 帧流解析（粘包；对齐原版 CheckBytes 语义） =================
+
+/** 字节流帧解析器：append 后逐帧回调 {msgId, payloadReader}，自动处理半包 */
+export class FrameParser {
+  private chunks: Uint8Array[] = [];
+  private total = 0;
+
+  append(data: Uint8Array) {
+    // 拷贝（ws 回调数据可能被复用）
+    this.chunks.push(new Uint8Array(data));
+    this.total += data.length;
+  }
+
+  /** 解析所有完整帧；返回 false 表示缓冲为空 */
+  drain(cb: (msgId: number, r: NetReader) => void): boolean {
+    if (this.total < 3) return this.total > 0;
+    // 合并缓冲
+    let buf = new Uint8Array(this.total);
+    let off = 0;
+    for (const c of this.chunks) { buf.set(c, off); off += c.length; }
+    this.chunks = [];
+    this.total = 0;
+    let p = 0;
+    let any = false;
+    while (p + 3 <= buf.length) {
+      const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+      const len = dv.getUint16(p, true);
+      if (len < 3 || len > 65535) { break; } // 脏流：丢弃
+      if (p + len > buf.length) break; // 半包
+      const msgId = buf[p + 2];
+      cb(msgId, new NetReader(buf.subarray(p + 3, p + len)));
+      p += len;
+      any = true;
+    }
+    if (p < buf.length) { this.chunks.push(buf.subarray(p)); this.total = buf.length - p; }
+    return any || this.total > 0;
+  }
+}
+
+// ================= tile 操作批量（msg17，对齐原版单点操作语义的批量变体） =================
+
+export const enum TileOpAction {
+  SetTile = 0,    // v=type, fx, fy
+  SetWall = 1,    // v=wall
+  SetHalfBrick = 5,
+  SetSlope = 6,
+  SetActuated = 3,
+  SetWire = 4,    // v=bits
+}
+
+export interface TileOp {
+  a: TileOpAction;
+  x: number; y: number;
+  v: number;
+  fx: number; fy: number;
+}
+
+export function writeTileBatch(ops: TileOp[]): Uint8Array {
+  const w = new NetWriter(Msg.TileBatch);
+  w.u16(ops.length);
+  for (const o of ops) {
+    w.u8(o.a);
+    w.i32(o.x); w.i32(o.y);
+    w.u16(o.v & 0xffff);
+    if (o.a === TileOpAction.SetTile) { w.u16(o.fx); w.u16(o.fy); }
+  }
+  return w.finish();
+}
+
+export function readTileBatch(r: NetReader): TileOp[] {
+  const n = r.u16();
+  const ops: TileOp[] = [];
+  for (let i = 0; i < n; i++) {
+    const a = r.u8() as TileOpAction;
+    const x = r.i32(), y = r.i32(), v = r.u16();
+    let fx = 0, fy = 0;
+    if (a === TileOpAction.SetTile) { fx = r.u16(); fy = r.u16(); }
+    ops.push({ a, x, y, v, fx, fy });
+  }
+  return ops;
+}
+
+// ================= tile strip RLE 编解码（msg10，codecVer=0 裸 RLE） =================
+// 每 tile 完整状态 = type/flags/frameX/frameY/wall/liquid/liquidType/half/slope/wire
+// 11B 裸；RLE 按"全状态相同"连续段编码 [u16 count][11B 状态]，地下均质区压缩比极高。
+// 条带默认 200×20（4400 格，最坏 57KB < 64KB 包上限）。
+
+export interface StripRect { x0: number; y0: number; w: number; h: number; }
+
+/** 编码一条 strip（读 store 指定矩形） */
+export function encodeStrip(
+  st: { w: number; h: number; type: Uint16Array; flags: Uint8Array; frameX: Uint16Array; frameY: Uint16Array;
+        wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array; wire: Uint8Array },
+  rect: StripRect,
+): Uint8Array {
+  const w = new NetWriter(Msg.TileSection);
+  w.i32(rect.x0); w.i32(rect.y0); w.u16(rect.w); w.u16(rect.h);
+  const idx = (x: number, y: number) => y * st.w + x;
+  let run = 0;
+  let rType = 0, rFlags = 0, rFx = 0, rFy = 0, rWall = 0, rLiq = 0, rLt = 0, rHalf = 0, rSlope = 0, rWire = 0;
+  const flushRun = () => {
+    if (run === 0) return;
+    w.u16(run);
+    w.u16(rType); w.u8(rFlags); w.u16(rFx); w.u16(rFy); w.u16(rWall);
+    w.u8(rLiq); w.u8(rLt); w.u8(rHalf); w.u8(rSlope); w.u8(rWire);
+    run = 0;
+  };
+  for (let y = rect.y0; y < rect.y0 + rect.h; y++) {
+    for (let x = rect.x0; x < rect.x0 + rect.w; x++) {
+      const i = idx(x, y);
+      if (run > 0 && (
+        st.type[i] !== rType || st.flags[i] !== rFlags || st.frameX[i] !== rFx || st.frameY[i] !== rFy
+        || st.wall[i] !== rWall || st.liquid[i] !== rLiq || st.liquidType[i] !== rLt
+        || st.half[i] !== rHalf || st.slope[i] !== rSlope || st.wire[i] !== rWire
+      )) flushRun();
+      if (run === 0) {
+        rType = st.type[i]; rFlags = st.flags[i]; rFx = st.frameX[i]; rFy = st.frameY[i];
+        rWall = st.wall[i]; rLiq = st.liquid[i]; rLt = st.liquidType[i];
+        rHalf = st.half[i]; rSlope = st.slope[i]; rWire = st.wire[i];
+      }
+      run++;
+    }
+  }
+  flushRun();
+  return w.finish();
+}
+
+/** 解码一条 strip 直写目标 store（批量路径：绕过事件，调用方负责事后整块标脏） */
+export function decodeStrip(
+  st: { w: number; h: number; type: Uint16Array; flags: Uint8Array; frameX: Uint16Array; frameY: Uint16Array;
+        wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; half: Uint8Array; slope: Uint8Array; wire: Uint8Array },
+  r: NetReader,
+): StripRect | null {
+  const x0 = r.i32(), y0 = r.i32(), w = r.u16(), h = r.u16();
+  if (x0 < 0 || y0 < 0 || x0 + w > st.w || y0 + h > st.h) return null;
+  let written = 0;
+  while (written < w * h) {
+    const count = r.u16();
+    const type = r.u16(), flags = r.u8(), fx = r.u16(), fy = r.u16(), wall = r.u16();
+    const liq = r.u8(), lt = r.u8(), half = r.u8(), slope = r.u8(), wire = r.u8();
+    for (let k = 0; k < count && written < w * h; k++) {
+      const x = x0 + (written % w), y = y0 + Math.floor(written / w);
+      const i = y * st.w + x;
+      st.type[i] = type; st.flags[i] = flags; st.frameX[i] = fx; st.frameY[i] = fy; st.wall[i] = wall;
+      st.liquid[i] = liq; st.liquidType[i] = lt; st.half[i] = half; st.slope[i] = slope; st.wire[i] = wire;
+      written++;
+    }
+  }
+  return { x0, y0, w, h };
+}

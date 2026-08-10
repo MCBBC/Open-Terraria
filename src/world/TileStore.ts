@@ -1,5 +1,6 @@
 // SoA 多通道平面数组存储。所有热点代码只碰 TypedArray。
 import { TILE_DEFS } from '../data/tiles';
+import { TileOpAction } from '../net/protocol';
 
 export class TileStore {
   readonly w: number;
@@ -25,6 +26,12 @@ export class TileStore {
 
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
+
+  // ---- 多人联机上报钩子（ClientNet 注入；单机为 null 零开销） ----
+  /** 本地 tile 变更上报（协议层 TileOp 收集器）。liquid 通道不报（客户端本地模拟） */
+  netReporter: ((op: import('../net/protocol').TileOp) => void) | null = null;
+  /** 应用远端操作期间置位：上报钩子静默（防回环） */
+  netSuppress = false;
 
   constructor(w: number, h: number, bufs?: import('../workers/protocol').TileBuffers) {
     this.w = w; this.h = h;
@@ -108,6 +115,7 @@ export class TileStore {
     this.frameX[i] = frameX;
     this.frameY[i] = frameY;
     if (type === 0) { this.half[i] = 0; this.slope[i] = 0; } // 挖除清半砖/坡面
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetTile, x, y, v: type, fx: frameX, fy: frameY });
     this.listeners.forEach((fn) => fn(x, y));
   }
 
@@ -116,6 +124,7 @@ export class TileStore {
     if (!this.inBounds(x, y)) return;
     const i = this.idx(x, y);
     this.half[i] = v ? 1 : 0;
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetHalfBrick, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
 
@@ -124,6 +133,7 @@ export class TileStore {
     const i = this.idx(x, y);
     this.slope[i] = s;
     this.half[i] = 0; // 原版 SlopeTile 无条件 halfBrick(false)（WorldGen.cs:49174），slope=0 复位时同样
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetSlope, x, y, v: s, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
 
@@ -142,6 +152,7 @@ export class TileStore {
     const i = this.idx(x, y);
     if (this.wall[i] !== wall) {
       this.wall[i] = wall;
+      if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWall, x, y, v: wall, fx: 0, fy: 0 });
       this.listeners.forEach((fn) => fn(x, y));
     }
   }
@@ -156,6 +167,7 @@ export class TileStore {
   setWire(x: number, y: number, bits: number) {
     if (!this.inBounds(x, y)) return;
     this.wire[this.idx(x, y)] = bits & 63;
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetWire, x, y, v: bits & 63, fx: 0, fy: 0 });
   }
 
   setWireSilent(x: number, y: number, bits: number) {
@@ -169,6 +181,7 @@ export class TileStore {
     const b = v ? (this.wire[i] | TileStore.WIRE_ACTUATED) : (this.wire[i] & ~TileStore.WIRE_ACTUATED);
     if (this.wire[i] === b) return;
     this.wire[i] = b;
+    if (this.netReporter && !this.netSuppress) this.netReporter({ a: TileOpAction.SetActuated, x, y, v: v ? 1 : 0, fx: 0, fy: 0 });
     this.listeners.forEach((fn) => fn(x, y));
   }
 

@@ -12,6 +12,7 @@ import { parseWldToSave } from './wld/WldImport';
 import { INV_SIZE } from './items/Inventory';
 import { VUI } from './vui/VUI';
 import { TitleMenu } from './ui/TitleMenu';
+import { MultiplayerSelect } from './ui/MultiplayerSelect';
 import { SettingsPanel } from './ui/Settings';
 import { CharSelectPanel } from './ui/CharSelect';
 import { WorldSelectPanel } from './ui/WorldSelect';
@@ -278,6 +279,28 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   /** 角色列表（DOM）。切页前清 VUI 防穿透 */
+  function showMultiplayerSelect() {
+    ui.closeAll();
+    const panel = new MultiplayerSelect({
+      onJoin: (ip) => {
+        const url = `ws://${ip}:7777`;
+        ui.closeAll();
+        ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
+        makeGame().joinNetGame(url, (label, p) => {
+          ui.showProgress(label, 0.1 + p * 0.8);
+        }).then(() => {
+          // loadWorld 内部已 onWorldReady（enterGame 由 makeGame 回调完成）
+        }, (e) => {
+          ui.hideProgress();
+          ui.toast(`联机失败：${(e as Error).message}`);
+          showTitle();
+        });
+      },
+      onBack: () => showTitle(),
+    });
+    root.appendChild(panel.root);
+  }
+
   function showCharacterSelect() {
     VUI.setState(null);
     VUI.clear();
@@ -388,6 +411,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onSettings: () => openSettings(false),
       onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
+      onMultiplayer: () => showMultiplayerSelect(),
     });
     installLegacyShim();
   }

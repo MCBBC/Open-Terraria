@@ -8,6 +8,7 @@ export interface TitleMenuFlow {
   onSettings(): void;
   onCredits(): void;
   onQuit(): void;
+  onMultiplayer(): void;
 }
 
 const CSS = `
@@ -89,7 +90,7 @@ export class TitleMenu {
       this.root.querySelector(`[data-act=${act}]`)!.addEventListener('click', fn);
     };
     on('sp', () => flow.onSinglePlayer());
-    on('mp', () => flow.onQuit()); // 多人占位（同退出提示）
+    on('mp', () => flow.onMultiplayer());
     on('set', () => flow.onSettings());
     on('credits', () => flow.onCredits());
     on('quit', () => flow.onQuit());

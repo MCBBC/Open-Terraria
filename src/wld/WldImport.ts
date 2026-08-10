@@ -313,7 +313,7 @@ const TILE_MAP: Record<number, MapEntry> = {
   618: 'v_618_stone_accent_slab',  // Stone Accent Slab
   // 清空的装饰/不可表示物
   11: { key: 'door_open', copyFrame: true },  // Open Door（原版变体帧）
-  28: { key: 'pot', copyFrame: true }, 29: null, 30: 'wood',  // Pots(原版) / Piggy Bank(暂无) / Wood→木材
+  28: { key: 'pot', copyFrame: true }, 29: { key: 'v_29_piggy_bank', copyFrame: true }, 30: 'wood',  // Pots(原版) / Piggy Bank(2×1 framed) / Wood→木材
   52: 'v_52_vines', 55: null,  // 藤蔓 / 乐器架
   61: 'tallgrass', 62: 'v_62_jungle_vines', 69: 'v_69_jungle_thorns', // jungle plants(草化)/藤蔓/荆棘
   74: 'tallgrass', 76: { key: 'furnace', copyFrame: true }, 77: { key: 'furnace', copyFrame: true }, 80: 'v_80_cactus', // plants2→草 / Hellforge→熔炉 / 仙人掌（渲染端现场分帧）

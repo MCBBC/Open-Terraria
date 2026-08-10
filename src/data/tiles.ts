@@ -147,6 +147,7 @@ def({ key: 'skull_lantern', name: '骷髅灯笼', decor: true, framed: true, opa
 def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#2B8FFF', drop: 'water_candle', light: [140, 180, 255], ...VAN(49, 1, 1) });
 // 瓦罐（世界生成散布）：打破掉随机常用道具（breakTile 特判），不做放置物
 def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#974F50', drop: null, vanilla: { sheet: 28, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_29_piggy_bank', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#AF6980', drop: null, vanilla: { sheet: 29, frame: 'style', fw: 2, fh: 1 } }); // 存钱罐（compat-report 补全：导入曾清空丢弃）
 
 export const TILE_BY_KEY: Record<string, number> = {};
 // 注意：构建必须放在文件末尾（所有 def() 之后），v_ 批量补全定义在下方，

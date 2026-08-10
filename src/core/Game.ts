@@ -9,6 +9,7 @@ import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
 import { findFreeHouse } from '../world/Housing';
+import shopstockJson from '../data/vanilla-shopstock.json';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
@@ -53,6 +54,7 @@ const IMPORTED_TREE_TYPES = new Set<number>(
 import { LiquidSim } from '../world/liquid/LiquidSim';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
+import { ClientNet, RemotePlayerState } from '../net/ClientNet';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
@@ -159,6 +161,10 @@ export class Game implements GameHooks {
   vanillaSpawner: VanillaSpawner | null = null;
   /** 世界生成 worker 客户端（懒建；不可用时 newWorld 走主线程 fallback） */
   private genClient: WorldGenClient | null = null;
+  /** 多人联机客户端（netMode==1；单机 null）。docs/multiplayer-design.md §4 */
+  net: ClientNet | null = null;
+  /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
+  private remotePlayerProxies: import('../entities/Player').Player[] = [];
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
   tileByKey = TILE_BY_KEY;
 
@@ -2900,6 +2906,7 @@ export class Game implements GameHooks {
   // ================= 生成 =================
 
   private trySpawnEnemy() {
+    if (this.net) return; // 联机模式：刷怪归服务器权威（v1 未接入 NPC 同步，客户端不本地刷怪）
     const w = this.world;
     const p = this.player;
     if (p.dead) return;
@@ -3222,7 +3229,8 @@ export class Game implements GameHooks {
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     const name = npc.givenName ? `${npc.givenName} ${typeName}` : typeName;
     const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'close'; label: string }> = [];
-    if (npc.npcKey === 'merchant') buttons.push({ id: 'shop', label: Lang.inter(28) });   // 商店
+    // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
+    if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
     // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
     if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
@@ -3491,7 +3499,7 @@ export class Game implements GameHooks {
   npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'close'): void {
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
-    if (id === 'shop') { this.openMerchantShop(); return; }
+    if (id === 'shop') { this.openNpcShop(); return; }
     if (id === 'heal') { this.nurseHeal(); return; }
     if (id === 'curse' && npc.npcKey === 'old_man') {
       if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
@@ -3510,33 +3518,46 @@ export class Game implements GameHooks {
 
   // ---- 商店(Chest.SetupShop case 1 = Merchant,Chest.cs:1325+) ----
 
-  /** [原版物品 id, 铜币价(item.value)] 基础款;条件款(困难模式/夜晚/downedBoss3)建表时附加 */
-  private static readonly MERCHANT_BASE: ReadonlyArray<readonly [number, number]> = [
-    [88, 40000],  // 挖矿头盔 buyPrice(0,4)
-    [87, 10000],  // 猪猪存钱罐
-    [35, 5000],   // 铁砧
-    [1991, 2500], // 虫网 buyPrice(0,0,25)
-    [3509, 500],  // 铜镐
-    [3506, 400],  // 铜斧
-    [8, 50],      // 火把
-    [28, 300],    // 弱效治疗药水
-    [110, 100],   // 弱效魔力药水 buyPrice(0,0,1)
-    [40, 5],      // 木箭
-    [42, 15],     // 手里剑
-    [965, 10],    // 绳
-    [1786, 6000], // 镰刀 buyPrice(0,0,60)
-  ];
+  /** 各 NPC 商店商品表（Chest.SetupShop 1:1 提取，tools/extract-shops.mjs 生成；
+   *  NPCInteractions.cs:489-513 的 type→shop 槽位映射） */
+  private static readonly SHOPSTOCK: Record<string, Array<{ id: number; price: number | null; cond: string | null }>> =
+    (shopstockJson as { shops: Record<string, Array<{ id: number; price: number | null; cond: string | null }>> }).shops;
 
-  private merchantShopList(): Array<[number, number]> {
-    const list: Array<[number, number]> = Game.MERCHANT_BASE.map((e) => [e[0], e[1]]);
-    if (this.world.flags.hardMode) list.push([188, 1000], [189, 250]); // 治疗/魔力药水
-    if (!this.world.clock.isDay) list.push([282, 10]);                 // 夜晚:荧光棒
-    if (this.world.flags.downedSkeletron) list.push([346, 200000]);    // downedBoss3:保险箱
-    return list;
+  /** 当前对话 NPC 的商店商品表（Chest.SetupShop 数据驱动提取，tools/extract-shops.mjs） */
+  private shopStockFor(npc: TownNPC): Array<[number, number]> {
+    const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
+    if (!stock) return [];
+    return stock.filter((s) => this.shopCondOk(s.cond)).map((s) => [s.id, s.price ?? 100]);
   }
 
-  private openMerchantShop() {
-    const entries = this.merchantShopList().map(([vid, price]) => ({
+  /** 商店上架门（Chest.SetupShop if 门 → 本作状态映射；未实现事件门不上架） */
+  private shopCondOk(cond: string | null): boolean {
+    if (!cond) return true;
+    const f = this.world.flags;
+    switch (cond) {
+      case 'hardMode': return !!f.hardMode;
+      case 'downedBoss1': return !!(f['downed_4'] || f.downedEyeOfCthulhu);
+      case 'downedBoss2': return !!(f['downed_13'] || f['downed_266']);
+      case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
+      case 'downedMechBossAny':
+        return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
+      case 'moonPhase': return true; // 月相门(造型师染发剂分档等):8 天月相轮未分档,近似恒真
+      case 'night': return !this.world.clock.isDay;
+      case 'day': return this.world.clock.isDay;
+      case 'zoneSnow': return !!this.scene?.zoneSnow;
+      case 'zoneJungle': return !!this.scene?.zoneJungle;
+      case 'zoneGraveyard': return !!this.scene?.zoneGraveyard;
+      case 'zoneMeteor': return !!this.scene?.zoneMeteor;
+      case 'zoneUnderworld': return !!this.scene?.zoneUnderworldHeight;
+      case 'crimson': return this.world.crimson;
+      default: return false; // xMas/bloodMoon/eclipse/party：事件系统未移植 → 不上架
+    }
+  }
+
+  private openNpcShop() {
+    const npc = this.dialogNpc;
+    if (!npc) return;
+    const entries = this.shopStockFor(npc).map(([vid, price]) => ({
       key: vanillaItemKey(vid) ?? '',
       vanillaId: vid,
       name: Lang.itemName(vid) ?? vanillaItemKey(vid) ?? String(vid),
@@ -3547,19 +3568,20 @@ export class Game implements GameHooks {
 
   /** 商店购买:扣币 + 入包 + 刷新商店面板(可购态/余额) */
   npcShopBuy(vanillaId: number): void {
-    const entry = this.merchantShopList().find(([id]) => id === vanillaId);
+    const list = this.dialogNpc ? this.shopStockFor(this.dialogNpc) : [];
+    const entry = list.find(([id]) => id === vanillaId);
     if (!entry) return;
     const price = entry[1];
     if (this.coinsOwned() < price || !this.spendCopper(price)) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
-      this.openMerchantShop();
+      this.openNpcShop();
       return;
     }
     const key = vanillaItemKey(vanillaId);
     if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 1);
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
-    this.openMerchantShop();
+    this.openNpcShop();
   }
 
   /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */
@@ -4310,11 +4332,68 @@ export class Game implements GameHooks {
       this.input.mouseX, this.input.mouseY, this.input.mouseDown,
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
       this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）
+      this.remotePlayerProxies,
     );
+  }
+
+  /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld） */
+  joinNetGame(url: string, onProgress?: (label: string, p: number) => void): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const net = new ClientNet(this, {
+        onProgress: (label, p) => onProgress?.(label, p),
+        onWorldReady: (world) => {
+          this.net = net;
+          net.gameWorld = world;
+          // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
+          world.store.netReporter = (op) => net.reportTileOp(op);
+          this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(resolve, reject);
+        },
+        onChat: (text, r, g, b) => this.newText(text, r, g, b),
+        onKick: (reason) => {
+          this.cb.onToast?.(reason);
+          reject(new Error(reason));
+        },
+      });
+      net.connect(url);
+      // 连接失败兜底（10s 未完成握手）
+      setTimeout(() => {
+        if (!net.gameWorld) {
+          net.disconnect();
+          reject(new Error('连接超时'));
+        }
+      }, 30000);
+    });
   }
 
   /** 每逻辑帧后处理挥舞命中（在 fixedUpdate 实体更新后调用） */
   postUpdate() {
+    // 联机 pump：tile 上报冲洗 + 玩家状态节流发送（docs §4.2）
+    this.net?.tick();
     this.updateSwingHits();
+    // 远端玩家代理同步（渲染前；每 15 帧重建以接纳新进/离场玩家）
+    if (this.net && this.tickCount % 15 === 0) this.syncRemotePlayerProxies();
+  }
+
+  /** net.players → Player 渲染代理（外观/位置/朝向；动画帧由 vx 派生——与本地一致） */
+  private syncRemotePlayerProxies() {
+    const net = this.net!;
+    const { Player: PlayerCtor } = require('../entities/Player') as typeof import('../entities/Player');
+    const list: import('../entities/Player').Player[] = [];
+    for (const [slot, rp] of net.players) {
+      if (!rp.active || slot === net.mySlot) continue;
+      let proxy = this.remotePlayerProxies.find((p) => (p as unknown as { __netSlot?: number }).__netSlot === slot);
+      if (!proxy) {
+        proxy = new PlayerCtor(rp.x, rp.y, this.player.inv); // 远程共享本地 inv 引用仅作渲染兜底（外观走 appearance）
+        (proxy as unknown as { __netSlot?: number }).__netSlot = slot;
+      }
+      proxy.x = rp.x; proxy.y = rp.y;
+      proxy.vx = rp.vx; proxy.vy = rp.vy;
+      proxy.facing = rp.facing;
+      proxy.dead = rp.dead;
+      proxy.animTime = (proxy.animTime + 1) % 1e9;
+      try { proxy.appearance = JSON.parse(rp.appearance); } catch { /* 保持默认 */ }
+      list.push(proxy);
+    }
+    this.remotePlayerProxies = list;
   }
 }

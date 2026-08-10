@@ -1478,6 +1478,26 @@ export class Enemy extends Entity {
       // 石巨人族(245/246/247/248):血尽转换在各 AI 首行(本体死亡演出/头转自由态),同样放行
       if (this.vanillaId === 245 || this.vanillaId === 246 || this.vanillaId === 247 || this.vanillaId === 248) return false;
       this.dead = true;
+      // 母史莱姆死亡分裂（Wiki 权威：1-3 只 Baby Slime，netID -5 = 半透明灰黑小史莱姆；
+      // SetDefaultsFromNetId -5：base 1 × scale 0.9 + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）
+      if (this.vanillaId === 16) {
+        const n = 1 + Math.floor(Math.random() * 3);
+        const add = (game as unknown as { entities?: { add: (en: unknown, bucket: string) => void; nextId?: number } }).entities;
+        for (let k = 0; k < n; k++) {
+          const b = Enemy.fromVanilla(1, this.cx + (Math.random() - 0.5) * 28, this.cy - 6);
+          if (!b) continue;
+          b.vanillaNetId = -5;
+          b.vanillaScale = 0.9;
+          b.colorRGBA = [0, 0, 0, 50];
+          b.spawnAlpha = 120;
+          b.hp = b.maxHp = 30;
+          b.def.damage = 13;
+          b.def.defense = 4;
+          b.vx = (Math.random() - 0.5) * 4;
+          b.vy = -3 - Math.random() * 2;
+          add?.add(b, 'enemies');
+        }
+      }
       // 蠕虫任一段死亡 → 整链同死（原版 realLife 共享生命，L18152-18156）
       if (this.wormNext || this.wormFollow) {
         let head: Enemy = this;
