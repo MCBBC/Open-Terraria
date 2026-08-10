@@ -168,6 +168,46 @@ export class VanillaSpawner {
     this.zoneSandstorm = zoneSandstorm;
   }
 
+  /** SlimeRainSpawns（NPC.cs:5829-5898 1:1）：史莱姆雨天空落怪。
+   *  独立于常规 spawnRate 概率门（原版每玩家每帧先调本函数再 TrySpawnAnNPC）。
+   *  nearbySlots>15 / 玩家过深直接拒绝；num3=45+450×(nearby/15)（专家 ×0.85）。
+   *  落点：x=玩家±viewW、y=玩家上方 (1.5~0.75)×viewH 带 → 格门：
+   *  x∈[10,w+10]、y∈[surface×0.3, surface]、周围 7×8 无实心、落点无房屋墙。
+   *  选怪：1/200 蓝(-4)；专家 1/7 大(-7)、1/3 绿(-3)；普通 1/10 大、2/5 绿；默认蓝(1) */
+  slimeRainSpawns(px: number, py: number, nearbySlots: number, viewW: number, viewH: number, rng: RNG, expert: boolean): Enemy | null {
+    const w = this.world;
+    const worldSurface = w.groundLevel;
+    if (py > worldSurface * 16 + viewH / 2 || nearbySlots > 15) return null;
+    const num2 = nearbySlots / 15;
+    let num3 = 45 + Math.floor(450 * num2);
+    if (expert) num3 = Math.floor(num3 * 0.85);
+    if (num3 < 1) num3 = 1;
+    if (rng.int(0, num3 - 1) !== 0) return null;
+    const x0 = Math.floor(px - viewW), x1 = x0 + viewW * 2;
+    const y0 = Math.floor(py - viewH * 1.5), y1 = Math.floor(py - viewH * 0.75);
+    const tx = Math.floor(rng.int(x0, x1 - 1) / 16);
+    const ty = Math.floor(rng.int(y0, y1 - 1) / 16);
+    const st = w.store;
+    if (tx < 10 || tx > st.w + 10 || ty < worldSurface * 0.3 || ty > worldSurface) return null;
+    if (!st.inBounds(tx, ty)) return null;
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -5; dy <= 2; dy++) {
+        if (st.inBounds(tx + dx, ty + dy) && st.isSolid(tx + dx, ty + dy)) return null;
+      }
+    }
+    if (WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) return null;
+    let netId = 1;
+    if (rng.int(0, 199) === 0) netId = -4;
+    else if (expert) {
+      if (rng.int(0, 6) === 0) netId = -7;
+      else if (rng.int(0, 2) === 0) netId = -3;
+    } else {
+      if (rng.int(0, 9) === 0) netId = -7;
+      else if (rng.int(0, 4) < 2) netId = -3;
+    }
+    return this.spawnNPC(tx * 16 + 8, ty * 16, netId, rng);
+  }
+
   /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射）；
    *  ai0/ai1 = 原版 SpawnNPC 第 6/7 参（如攀爬者 101 的锚点格，NPC.cs:4040） */
   private spawnNPC(x: number, y: number, netId: number, rng: RNG, ai0?: number, ai1?: number): Enemy | null {

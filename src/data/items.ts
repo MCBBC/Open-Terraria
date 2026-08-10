@@ -99,6 +99,7 @@ item({ key: 'lesser_healing_potion', name: '弱效治疗药水', heal: 50, maxSt
 item({ key: 'coin_copper', name: '铜币', maxStack: 999, value: 1 });
 item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
 item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });
+item({ key: 'coin_platinum', name: '铂金币', maxStack: 999, value: 1000000, vid: 73 }); // 金币雨（WorldGen.cs:71848）
 
 // ---- 药水（Buff 来源，数值移植自 Maples Potions/*.asset）----
 item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 100, desc: '回复 100 生命',

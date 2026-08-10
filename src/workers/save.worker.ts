@@ -16,6 +16,7 @@ interface SaveRequest {
   meta: Omit<SaveMeta, 'w' | 'h'>;
   player: SaveData['player'];
   playTimeMs: number;
+  townNpcs?: import('../save/serialize').SaveData['npcs'];
 }
 
 self.onmessage = (e: MessageEvent<SaveRequest>) => {

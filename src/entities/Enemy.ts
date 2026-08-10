@@ -835,6 +835,10 @@ export class Enemy extends Entity {
       if (flag4 && this.vy > 0 && sy < 0) this.vy -= accel;
     }
     this.facing = this.vx > 0 ? 1 : -1;
+    // 旋转(cs:51022):原版全族 rotation = atan2(vy,vx) − π/2(XNA 旋转方向与
+    // canvas 相反)→ canvas 等价 +π/2。★该族贴图正面朝上(实测 NPC_6 亮齿在上),
+    // 与 EoC(正面朝下,−π/2)相反——符号按贴图实测确定
+    this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
     // noTileCollide 成员(仆从 type 5 等)原版幽灵位移:直积分、无碰撞无反弹——
     // 曾对所有成员 moveAndCollide+反弹,仆从撞墙弹跳完全不像原版(穿墙追击)
     if (this.vanilla?.noTileCollide) {

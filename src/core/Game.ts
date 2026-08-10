@@ -1123,6 +1123,19 @@ export class Game implements GameHooks {
     // （Next(spawnRate)==0；spawnRate 修正表见 VanillaSpawner.getSpawnRate）。
     // 水蜡烛（heldWaterCandle/waterCandleNear）在 getSpawnRate 内修正，不再改节流
     if (this.enemySpawnEnabled) {
+      // 史莱姆雨天空落怪（NPC.cs:192-195：每帧先 SlimeRainSpawns 再常规链，独立概率门）
+      if (this.world.weather.slimeRain) {
+        const sp = this.vanillaSpawner ?? (this.vanillaSpawner = new VanillaSpawner(w));
+        const vw = this.camera.viewW / (this.camera.zoom || 1);
+        const vh = this.camera.viewH / (this.camera.zoom || 1);
+        const slime = sp.slimeRainSpawns(player.cx, player.cy,
+          this.entities.enemies.reduce((s, e) => s + ((e as Enemy).vanilla?.npcSlots ?? 1), 0),
+          vw, vh, new RNG((Math.random() * 1e9) | 0), false);
+        if (slime) {
+          slime.id = this.entities.nextId++;
+          this.entities.enemies.push(slime);
+        }
+      }
       this.trySpawnEnemy();
     }
 
@@ -2775,6 +2788,7 @@ export class Game implements GameHooks {
     }
     // 雨声层（程序化棕噪近似 XACT 循环层）
     this.sfx.setRain(weather.cloudAlpha * atmo);
+    weather.graveyardVisual = this.graveyardIntensity; // 渲染端 ProcessCloudAlpha 基准
     // 渲染 hooks 刷新
     const hooks = this.weatherHooks;
     if (hooks) {
@@ -3505,8 +3519,10 @@ export class Game implements GameHooks {
     }
 
     // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
+    // bound（被绑待救）不入住不搬动——原版 AI_007 bound 态原地，否则五个救援 NPC
+    // 会被塞进同一间空房叠在一点（读档/新世界 7200 tick 后必现）
     for (const n of npcs) {
-      if (n.home || n.npcKey === 'old_man') continue;
+      if (n.home || n.bound || n.npcKey === 'old_man') continue;
       const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY);
       if (!house) break;
       n.home = { x: house.standX, y: house.standY };
@@ -4254,6 +4270,12 @@ export class Game implements GameHooks {
   onEnemyKilled(key: string, enemy?: Enemy) {
     // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>)
     void key;
+    // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
+    if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
+      if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId) && !this.boss) {
+        this.summonBoss('king_slime');
+      }
+    }
     // 入侵击杀扣分（NPC.cs:79021-79054：组号匹配当前入侵类型才计分，加权扣减）
     if (!enemy || this.world.invasionType <= 0 || enemy.vanillaId == null) return;
     const group = INVASION_GROUP[enemy.vanillaId];

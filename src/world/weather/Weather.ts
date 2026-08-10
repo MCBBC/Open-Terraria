@@ -144,6 +144,8 @@ export class WeatherState {
   slimeRainKillCount = 0;
   /** 瓢虫雨 boost（Main.cs：ladyBug 幸运套装驱动；无幸运系统时恒 0——字段位保留） */
   ladyBugRainBoost = 0;
+  /** 墓园视觉强度镜像（Game 每帧从 graveyardIntensity 下发；渲染端 ProcessCloudAlpha 用） */
+  graveyardVisual = 0;
   /** RNG（可注入固定种子做单测） */
   private rng: RNG;
 

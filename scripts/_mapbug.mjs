@@ -18,7 +18,12 @@ const out = await page.evaluate(async (text) => {
   await window.__swFlow.loadJson(text);
   mark('loaded');
   const g = window.__swGame;
-  await new Promise((r) => setTimeout(r, 3000));
+  // 时序：加载完成瞬间 + 每 600ms 采样 bound NPC 位置（定位谁在搬）
+  const trace = [];
+  for (let s = 0; s <= 5; s++) {
+    trace.push({ s, npcs: g.entities.npcs.map((n) => ({ key: n.npcKey, x: Math.round(n.x / 16), y: Math.round(n.y / 16), bound: n.bound, home: n.home })) });
+    await new Promise((r) => setTimeout(r, 600));
+  }
   mark('idle3s');
   // 向导位置与出生点
   const guide = g.entities.npcs.find((n) => n.npcKey === 'guide');
@@ -42,9 +47,11 @@ const out = await page.evaluate(async (text) => {
     guide: guide && { x: Math.round(guide.x / 16), y: Math.round(guide.y / 16), dead: guide.dead, bound: guide.bound },
     spawn: [g.world.spawnX, g.world.spawnY],
     boundNpcs: bound.map((n) => ({ key: n.npcKey, x: Math.round(n.x / 16), y: Math.round(n.y / 16), id: n.vanillaId })),
+    trace: trace.slice(0, 2).concat([trace[trace.length - 1]]),
     frame588: fr588 && { sw: fr588.sw, sh: fr588.sh },
     tickCost: { avgMs: +(sum / 1200).toFixed(2), worstMs: +worst.toFixed(1) }, spikes,
     enemyCount: g.entities.enemies.length,
+    allNpcsAfterTicks: g.entities.npcs.map((n) => ({ key: n.npcKey, x: Math.round(n.x / 16), y: Math.round(n.y / 16), bound: n.bound, home: n.home, given: n.givenName })),
   };
 }, json);
 console.log(JSON.stringify(out, null, 1));

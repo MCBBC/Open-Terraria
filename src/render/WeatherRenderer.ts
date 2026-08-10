@@ -194,25 +194,44 @@ export class WeatherRenderer {
       const tx = Math.floor((d.x + 4) / TILE);
       const ty = Math.floor((d.y + 4) / TILE);
       const [lr, lg, lb] = hooks.lightAt(tx, ty);
-      const k = 0.85;
       ctx.save();
       ctx.translate(d.x + 1, d.y);
       ctx.rotate(d.rotation);
       if (texOk) {
-        ctx.globalAlpha = 1;
-        ctx.drawImage(tex, d.type * 4, 0, 2, 40, 0, -20 * d.scale, 2 * d.scale, 40 * d.scale);
-        ctx.globalCompositeOperation = 'source-atop';
+        // 光照着色（原版 GetColor×0.85）：量化 8 级 × 3 型预烘焙乘色条（multiply+destination-in），
+        // 每滴一次 drawImage——精确到 1/8 亮度量化，替代旧黑罩近似
+        const lvl = Math.max(0, Math.min(7, Math.floor(((lr + lg + lb) / (3 * 255)) * 8)));
+        const v = Math.round((lvl / 7) * 0.85 * 255);
+        const tinted = tintedRainStrip(tex!, d.type, v);
+        if (tinted) {
+          ctx.drawImage(tinted, 0, 0, 2, 40, 0, -20 * d.scale, 2 * d.scale, 40 * d.scale);
+        }
       }
-      // 光照着色（原版 GetColor×0.85）：无 per-drop 蒙版能力——用叠加半透明暗/亮矩形近似
-      const shade = Math.min(1, (lr + lg + lb) / (3 * 255)) * k;
-      ctx.globalAlpha = 1 - shade;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(0, -20 * d.scale, 2 * d.scale, 40 * d.scale);
       ctx.restore();
     }
     ctx.restore();
     void world;
   }
+}
+
+/** 乘色雨滴条缓存（type×8 级亮度）：multiply 灰阶 ×0.85 上限 + destination-in 保形 */
+const rainTintCache = new Map<string, HTMLCanvasElement>();
+function tintedRainStrip(tex: HTMLImageElement, type: number, v: number): HTMLCanvasElement | null {
+  const key = `${type}|${v}`;
+  const hit = rainTintCache.get(key);
+  if (hit) return hit;
+  if (typeof document === 'undefined') return null;
+  const c = document.createElement('canvas');
+  c.width = 2; c.height = 40;
+  const cx = c.getContext('2d')!;
+  cx.drawImage(tex, type * 4, 0, 2, 40, 0, 0, 2, 40);
+  cx.globalCompositeOperation = 'multiply';
+  cx.fillStyle = `rgb(${v},${v},${v})`;
+  cx.fillRect(0, 0, 2, 40);
+  cx.globalCompositeOperation = 'destination-in';
+  cx.drawImage(tex, type * 4, 0, 2, 40, 0, 0, 2, 40);
+  rainTintCache.set(key, c);
+  return c;
 }
 
 function stIn(world: World, tx: number, ty: number): boolean {

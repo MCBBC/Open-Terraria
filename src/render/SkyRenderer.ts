@@ -219,13 +219,16 @@ export class SkyRenderer {
       let r = Math.round(255 * dim * nightDim);
       let g = Math.round(255 * (c.scale < 1 ? ((c.scale + 1) / 2) * 0.9 : 1) * nightDim);
       let b = Math.round(255 * nightDim);
-      // 天气联动：雨/阴天云向灰过渡（原版 cloudAlpha 下云变暗变灰）
+      // 天气联动：云染灰基准 = ProcessCloudAlpha（Main.cs:59154：max(cloudAlpha, 墓园强度×0.92)）×atmo
       const wr = this.weatherRef;
-      if (wr && wr.cloudAlpha > 0) {
-        const rainK = wr.cloudAlpha * 0.55;
-        r = Math.round(r * (1 - rainK) + 158 * rainK);
-        g = Math.round(g * (1 - rainK) + 162 * rainK);
-        b = Math.round(b * (1 - rainK) + 168 * rainK);
+      if (wr) {
+        const basis = Math.max(wr.cloudAlpha, (wr.graveyardVisual ?? 0) * 0.92);
+        if (basis > 0) {
+          const rainK = basis * 0.55;
+          r = Math.round(r * (1 - rainK) + 158 * rainK);
+          g = Math.round(g * (1 - rainK) + 162 * rainK);
+          b = Math.round(b * (1 - rainK) + 168 * rainK);
+        }
       }
       ctx.save();
       ctx.globalAlpha = c.alpha;

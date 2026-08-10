@@ -835,6 +835,7 @@ export class Renderer {
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
+        else if (e.vanilla?.aiStyle === 5) ctx.rotate(e.visAngle); // AI_005 蜂群族:cs:51022 朝速度方向转头
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotId && e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
