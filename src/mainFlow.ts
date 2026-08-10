@@ -107,6 +107,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onInventoryChanged: () => ui.refreshAll(),
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
+      // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)
+      onChat: (t, r, g, b) => ui.chatMessage(t, r, g, b),
       onReadSign: (text) => ui.showSign(text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
@@ -278,7 +280,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       {
         name: cfg.name,
         evil: cfg.evil,
-        onWorldPartial: (world) => loadState.attachWorld(world),
+        onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
+        onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
       });
     // onWorldReady 已进游戏；登记世界槽位并保存初始数据
     const meta = await worldStore.register({

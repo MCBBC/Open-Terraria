@@ -58,12 +58,22 @@ export class UIWorldLoadState extends UIState {
     }
   }
 
-  /** WorldGen.onWorldPartial 回调：挂上部分世界，开启实时预览 */
+  /** WorldGen.onWorldPartial 回调：挂上部分世界，开启实时预览（主线程 fallback 路径） */
   attachWorld(world: World) {
     if (this.preview) return;
     this.preview = new GenWorldPreview(world);
     this.append(this.preview);
     this.bar.crimson = !!world.crimson;
+  }
+
+  /** worker 路径的降采样预览帧（PreviewFrame）：位图模式直接上屏 */
+  attachPreview(f: { width: number; height: number; rgba: Uint8ClampedArray }) {
+    if (!this.preview) {
+      this.preview = GenWorldPreview.fromFirstFrame(f.rgba, f.width, f.height);
+      this.append(this.preview);
+    } else if (this.preview instanceof GenWorldPreview) {
+      this.preview.setPreviewFrame(f.rgba, f.width, f.height);
+    }
   }
 
   update(): void {

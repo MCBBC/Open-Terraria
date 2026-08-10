@@ -5,8 +5,9 @@
 // { [category]: { [key]: value } },全键 = category + '.' + key,已做英文兜底 overlay)。
 // 例:Lang.text('UI.Play')、Lang.text('ItemName.HealingPotion')、Lang.text('LegacyWorldGen.9')
 import { languageManager } from './LanguageManager';
-import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET } from './idNames.generated';
+import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET, TILE_NAME_ZH_BY_ID, TILE_NAME_EN_BY_ID, ITEM_NAME_ZH_BY_ID, ITEM_NAME_EN_BY_ID, WALL_NAME_ITEM_BY_WALL, WALL_NAME_ZH_BY_ID, WALL_NAME_EN_BY_ID } from './idNames.generated';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
+import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { worldgenProgressKey } from './worldgenKeys';
 
 export const Lang = {
@@ -61,6 +62,8 @@ export const Lang = {
 
   /** 物品名(本仓库 item key)。解析链：
    *  ① vi_<id>_ 前缀/ITEM_KEY_TO_ID → 原版 ItemName（12 语言官方译文）
+   *  ①.5 place_v_* → 其放置的 tile sheet → Lang.tileName（放置物品无独立名，
+   *      原版语义=方块名，如 place_v_144_timers → 1秒计时器）
    *  ② Mods.SandboxWorld.ItemName.<PascalKey>（l10n-custom 自有物品——原版不存在的发明物）
    *  ③ ItemDef.name 硬编码兜底 */
   itemNameByKey(key: string): string {
@@ -69,10 +72,22 @@ export const Lang = {
     if (id != null) {
       const n = Lang.itemName(id);
       if (n) return n;
+      // id-maps 兜底（l10n 缺译的少数 id；zh 系取 zh 其余取 en）
+      const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
+      const fb = isZh ? ITEM_NAME_ZH_BY_ID[id] : ITEM_NAME_EN_BY_ID[id];
+      if (fb) return fb;
+    }
+    if (key.startsWith('place_v_')) {
+      const tileKey = ITEM_DEFS[ITEM_BY_KEY[key]]?.tile;
+      const sheet = tileKey !== undefined ? TILE_DEFS[TILE_BY_KEY[tileKey]]?.vanilla?.sheet : undefined;
+      if (sheet !== undefined) {
+        const n = Lang.tileName(sheet);
+        if (n) return n;
+      }
     }
     const custom = `Mods.SandboxWorld.ItemName.${key.replace(/(^|_)([a-z0-9])/g, (_, p, c) => (p ? c.toUpperCase() : c.toUpperCase()))}`;
     if (Lang.has(custom)) return Lang.text(custom);
-    return ITEM_DEFS[ITEM_BY_KEY[key]]?.name ?? key;
+    return ITEM_DEFS[ITEM_BY_KEY[key]]?.name || key;
   },
 
   /**
@@ -107,18 +122,40 @@ export const Lang = {
   /**
    * 图块名。解析链(1.4.4+ 原版语义:方块无独立显示名——Tiles 分节为空)：
    * ① 放置它的物品名(TILE_NAME_ITEM_BY_SHEET:Item.createTile 反查,取基础款最小 id；
-   *    如 tile14 表 → 木桌 WoodenTable)——官方译名权威来源
+   *    如 tile14 表 → 木桌 WoodenTable)——12 语言官方译名权威来源
    * ② MapObject 族名(Lang.cs:77 GetMapObjectName 系,仅 79 键,族级泛称如"桌子")
-   * ③ null(调用方回退 TILE_DEFS[].name)
+   * ③ id-maps 方块名(TILE_NAME_ZH/EN_BY_ID：世界生成专属块——树/藤蔓/药草等
+   *    无放置物品且 MapObject 缺失；原版对它们无 UI 显示名,此为唯一译名来源。
+   *    zh 系语言取 zh,其余语言取 en)
+   * ④ null(调用方回退 TILE_DEFS[].name)
    */
   tileName(id: number): string | null {
     const placer = TILE_NAME_ITEM_BY_SHEET[id];
     if (placer !== undefined) {
-      const n = Lang.itemName(placer);
+      const n = Lang.itemName(Number(placer));
       if (n) return n;
     }
     const internal = TILE_NAME_BY_ID[id];
-    return internal && Lang.has(`MapObject.${internal}`) ? Lang.text(`MapObject.${internal}`) : null;
+    if (internal && Lang.has(`MapObject.${internal}`)) return Lang.text(`MapObject.${internal}`);
+    const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
+    const fallback = isZh ? TILE_NAME_ZH_BY_ID[id] : TILE_NAME_EN_BY_ID[id];
+    return fallback ?? null;
+  },
+
+  /**
+   * 墙名。与 tileName 同构（原版墙无独立显示名）：
+   * ① 放置它的物品名（WALL_NAME_ITEM_BY_WALL：Item.createWall 反查，取最小 id）
+   * ② id-maps walls 的 zh/en（自然墙无放置物品——泥土墙/石墙等）
+   * ③ null（调用方回退 WALL_DEFS[].name）
+   */
+  wallName(id: number): string | null {
+    const placer = WALL_NAME_ITEM_BY_WALL[id];
+    if (placer !== undefined) {
+      const n = Lang.itemName(Number(placer));
+      if (n) return n;
+    }
+    const isZh = (languageManager.activeCulture?.name ?? '').startsWith('zh');
+    return (isZh ? WALL_NAME_ZH_BY_ID[id] : WALL_NAME_EN_BY_ID[id]) ?? null;
   },
 
   /** 类别内取模循环取值(原版 IndexedFromCategory) */

@@ -7,6 +7,8 @@ import { RECIPES } from '../data/recipes';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
+import { ChatMonitor } from './ChatMonitor';
+import { UISfx } from '../vui/UISfx';
 import { ACCESSORY_START, ARMOR_START, COIN_START, INV_SIZE, VANITY_START } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 
@@ -1077,6 +1079,8 @@ export class UI {
   }
 
   closeAll() {
+    this.chatMonitor?.clear(); // 消息列根节点随 root 清空,定时器必须同步清防泄漏
+    this.chatMonitor = null;
     this.root.innerHTML = '';
     this.heldStack = null;
     this.openChest = null;
@@ -1084,6 +1088,9 @@ export class UI {
 
   /** 初始化 HUD 相关面板（进入游戏后调用一次） */
   initInGame() {
+    // 原版左下角消息列(Main.NewText → LegacyChatMonitor;NewText 播 SoundID 12)
+    this.chatMonitor?.clear();
+    this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
     this.buildInventoryPanel();
     this.buildChestPanel();
     this.buildBuffBar();
@@ -1095,6 +1102,12 @@ export class UI {
       [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
+  }
+
+  /** 原版消息列(Main.NewText 入口) */
+  private chatMonitor: ChatMonitor | null = null;
+  chatMessage(text: string, r = 255, g = 255, b = 255): void {
+    this.chatMonitor?.message(text, r, g, b);
   }
 
   /** M5：背包/快捷栏已 Canvas 化，DOM 仅保留 Buff 栏 + Toast */

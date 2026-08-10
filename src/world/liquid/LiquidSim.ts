@@ -70,6 +70,16 @@ export class LiquidSim {
   private readonly dirtId: number;
   /** 液体冲毁方块（原版 AddWater 尾 KillTile）：Game 注入 breakTile（掉落+帧刷新） */
   killTile: ((x: number, y: number) => void) | null = null;
+  /** 确定性随机（原版 3 格分支用 WorldGen.genRand 而非 Main.rand——Liquid.cs:639。
+   *  mulberry32 与 world.seed 派生：同 seed 世界双路径沉降结果逐格一致） */
+  private genState: number;
+  private genRand(): number {
+    this.genState = (this.genState + 0x6d2b79f5) | 0;
+    let t = this.genState;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
   // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----
   private panicMode = false;
   private panicCounter = 0;
@@ -89,6 +99,8 @@ export class LiquidSim {
     this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
     this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
     this.dirtId = TILE_BY_KEY['dirt'];
+    // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
+    this.genState = (world.seed ^ 0x9e3779b9) | 0;
     // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater（WorldGen.cs:49664）
     st.onTileChanged((x, y) => {
       if (this.disposed) return;
@@ -445,7 +457,7 @@ export class LiquidSim {
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
         let m = csRound((lq + rq + st.liquid[i5] + num1) / 3); // 1456 Math.Round=取偶
-        if (m === 254 && Math.random() * 30 < 1) m = 255;
+        if (m === 254 && this.genRand() * 30 < 1) m = 255; // 原版 WorldGen.genRand.Next(30)==0（确定性）
         if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else st.liquidType[il] = myType;
         if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else st.liquidType[ir] = myType;
         st.liquid[i5] = m;

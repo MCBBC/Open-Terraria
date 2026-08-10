@@ -5,7 +5,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
@@ -65,5 +65,38 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     if (gs.snowBottom < y) gs.snowBottom = y;
+  }
+}
+
+/** 原版 pass 33 "Slush"（cs:6591-6624）：雪原带内 石→冰、泥/沙泥→雪泥(224)。
+ *  泥转雪泥前查 ±3 无丛林草/蘑菇草族（60/70/71/72）。无 RNG 消耗（与原版一致）。 */
+export function runSlushPass(st: TileStore, gs: GenState): void {
+  if (!gs.snowMinX || !gs.snowMaxX) return; // 雪原未生成（守卫）
+  const ICE = TILE_BY_KEY['ice']!;
+  const MUD = TILE_BY_KEY['mud']!;
+  const SILT = TILE_BY_KEY['silt']!;
+  const SLUSH = TILE_BY_KEY['v_224_slush_block']!;
+  const STONE = TILE_BY_KEY['stone']!;
+  for (let y = gs.snowTop; y <= gs.snowBottom && y < st.h; y++) {
+    for (let x = gs.snowMinX[y]; x < gs.snowMaxX[y]; x++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const t = st.type[i];
+      if (t === STONE) {
+        st.setTileSilent(x, y, ICE);
+      } else if (t === MUD || t === SILT) {
+        let nearGrass = false;
+        for (let dy = -3; dy <= 3 && !nearGrass; dy++) {
+          for (let dx = -3; dx <= 3; dx++) {
+            if (!st.inBounds(x + dx, y + dy)) continue;
+            const j = st.idx(x + dx, y + dy);
+            if (!st.flags[j]) continue;
+            const sh = TILE_DEFS[st.type[j]]?.vanilla?.sheet;
+            if (sh === 60 || sh === 70 || sh === 71 || sh === 72) { nearGrass = true; break; }
+          }
+        }
+        if (!nearGrass) st.setTileSilent(x, y, SLUSH);
+      }
+    }
   }
 }

@@ -22,6 +22,18 @@ import { RNG } from '../core/rng';
  *  猪鲨370/月总核心398/异教徒439/光皇636/史莱姆皇后657 */
 const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 398, 439, 636, 657]);
 
+// AI_003 战士族昼行豁免表（DespawnEncouragement_AIStyle3_Fighters_NotDiscouraged 排除表
+// NPC.cs:60694-60724 + switch 保留集 :60712-60721）：白天地表仍索敌的类型
+// （腐化/猩红战士、秃鹫、鸟妖、事件怪等群系原住民）。僵尸 3 不在表内 → 白天驱散。
+const FIGHTER_DAY_ACTIVE = new Set([
+  73, 624, 631, 31, 294, 295, 296, 47, 67, 77, 78, 79, 80, 630, 110, 120, 168, 181, 185,
+  198, 199, 206, 217, 218, 219, 220, 239, 243, 254, 255, 257, 258, 291, 292, 293,
+  379, 380, 464, 470, 424, 411, 409, 415, 419, 425, 427, 428, 429, 508, 524, 525, 526, 527, 580, 582,
+]);
+// AI_002 飘浮眼昼散表（DespawnEncouragement_AIStyle2_FloatingEye_IsDiscouraged, cs:53152-53165）：
+// 白天 && y≤worldSurface → EncourageDespawn(10) + 保持水平方向向上飞离
+const EYE_DAY_DESPAWN = new Set([2, 133, 190, 191, 192, 193, 194, 317, 318]);
+
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
   key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
@@ -179,8 +191,10 @@ export class Enemy extends Entity {
   dirY = 1;
   /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
   aiInit = false;
-  /** 原版 timeLeft（默认 7500 tick，离屏递减；飘浮眼白天 EncourageDespawn(10)） */
-  despawnTimer = 7500;
+  /** 原版 timeLeft（CheckActive 屏内每 tick 重置；activeTime=750，非 7500） */
+  despawnTimer = 750;
+  /** 原版 despawnEncouraged（EncourageDespawn 置位，屏内重置清除） */
+  despawnEncouraged = false;
   inWater = false;       // 入水检测（溅落声用）
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
@@ -304,24 +318,27 @@ export class Enemy extends Entity {
       game.damagePlayer(this.def.damage, this.cx, this.cy, this);
     }
 
-    // Despawn 系统（原版 timeLeft/EncourageDespawn L7228-7241）：
-    // 飘浮眼(2) 白天 DespawnEncouraged_AIStyle2（L19147）→ EncourageDespawn(10)；
-    // 夜行怪白天离屏清除；其余离屏 timeLeft 递减到 0 清除（原版默认 7500 tick，回屏重置）
-    const day = game.world.clock.isDay;
-    if (hasPlayer) {
-      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
-      if (!this.def.boss) {
-        if ((day && this.def.nightOnly) || (day && this.vanilla?.aiStyle === 2)) {
-          // 白天夜行怪/飘浮眼：离屏 >90 格即清
-          if (d > TILE * 90) this.dead = true;
-        } else if (d > TILE * 120) {
-          this.despawnTimer--;
-          if (this.despawnTimer <= 0) this.dead = true;
-        } else {
-          this.despawnTimer = 7500; // 原版默认 timeLeft，回屏重置
-        }
+    // Despawn 系统（原版 CheckActive, NPC.cs:78669-78798 + EncourageDespawn :7228-7235）：
+    // timeLeft(activeTime=750) 屏内矩形每 tick 重置+清鼓励旗；离屏从当前值倒数，归零即消失。
+    // EncourageDespawn(10) 封顶后离屏 ~10t 即消；屏内每 tick 被重置抵挡——
+    // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）
+    if (player && !this.def.boss) {
+      const dxp = Math.abs(player.cx - this.cx), dyp = Math.abs(player.cy - this.cy);
+      // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
+      if (dxp < TILE * 62 && dyp < TILE * 35) {
+        this.despawnTimer = 750;
+        this.despawnEncouraged = false;
+      } else {
+        this.despawnTimer--;
+        if (this.despawnTimer <= 0) this.dead = true;
       }
     }
+  }
+
+  /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7228-7235）：timeLeft 封顶 + 置鼓励旗 */
+  encourageDespawn(despawnTime: number): void {
+    if (this.despawnTimer > despawnTime) this.despawnTimer = despawnTime;
+    this.despawnEncouraged = true;
   }
 
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {
@@ -462,8 +479,25 @@ export class Enemy extends Entity {
    *  加速度 0.1、最大速度 1.0（原版 num1/num2 常量），门/高门交互待移植 */
   private fighterAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
-    // 方向：朝玩家（无玩家则保持）
-    if (player) this.facing = player.cx > this.cx ? 1 : -1;
+    // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
+    // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
+    // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除
+    const daySurface = game.world.clock.isDay && this.cy < game.world.groundLevel * TILE;
+    const discouraged = daySurface && this.vanillaId != null && !FIGHTER_DAY_ACTIVE.has(this.vanillaId);
+    if (discouraged) {
+      this.encourageDespawn(10);
+      // 游荡转向（原版 else 分支 ：57783-57797：站定累计 2t 反转 direction）
+      if (Math.abs(this.vx) < 0.1 && this.vy === 0) {
+        this.state += 1;
+        if (this.state >= 2) { this.facing *= -1; this.state = 0; }
+      } else {
+        this.state = 0;
+      }
+      if (this.facing === 0) this.facing = 1;
+    } else if (player) {
+      // 方向：朝玩家（无玩家则保持）
+      this.facing = player.cx > this.cx ? 1 : -1;
+    }
     const dir = this.facing;
     // 前方探测点（L24561-24562）：体中心前 15px、脚底上 15px
     const fx = Math.floor((this.x + this.w / 2 + 15 * dir) / TILE);
@@ -517,14 +551,23 @@ export class Enemy extends Entity {
   /** AI_002_FloatingEye 通用核（NPC.cs:19118-19440）：
    *  分轴非对称加速 X±4 / Y±2.5（Wandering Eye 133 半血以下激怒 ±6/±4）；
    *  撞墙/撞地按 旧速度*-0.5 反弹并保证最小弹速（L19124-19140）；
-   *  白天 DespawnEncouragement：向上远离（L19147-19153 近似） */
+   *  白天地表驱散（cs:52707/53152 昼散表）：EncourageDespawn(10)+保持水平方向上飞 */
   private floatEyeAI(game: GameHooks, player: Player | null) {
     // 撞墙反弹（collideX/Y → hitWall/hitHead/onGround + 上一帧速度近似 oldVelocity）
     const oldVx = this.vx, oldVy = this.vy;
-    // ---- 白天逃离（direction=远离、directionY=-1 向上）----
+    // ---- 白天地表驱散（cs:52707-52715 + IsDiscouraged :53152）：
+    // 白天 && y≤worldSurface && 类型 ∈ 眼族昼散表 → EncourageDespawn(10) +
+    // 保持水平运动方向、directionY=-1 向上飞离（离屏后 CheckActive ~10t 清除）
     const day = game.world.clock.isDay;
+    const eyeDiscouraged = day && this.cy <= game.world.groundLevel * TILE
+      && this.vanillaId != null && EYE_DAY_DESPAWN.has(this.vanillaId);
     let dirX: number, dirY: number, cx: number, cy: number;
-    if (day || !player) {
+    if (eyeDiscouraged) {
+      this.encourageDespawn(10);
+      dirX = oldVx > 0 ? 1 : -1;   // 原版保持水平方向（direction=-1，vx>0 时翻 1）
+      dirY = -1;
+      cx = 4; cy = 2.5;
+    } else if (!player) {
       dirX = -Math.sign(oldVx || 1);
       dirY = -1;
       cx = 4; cy = 2.5;

@@ -52,7 +52,8 @@ export class GenWorldPreview extends UIElement {
       this.previewAspect = height / width;
       this.applyLayout();
     }
-    const img = new ImageData(rgba, width, height);
+    const img = this.offCtx.createImageData(width, height);
+    img.data.set(rgba);
     this.offCtx.putImageData(img, 0, 0);
   }
 

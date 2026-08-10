@@ -9,7 +9,9 @@ export type SfxName =
   | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
   | 'menuOpen' | 'menuClose' | 'menuTick'
   | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
-  | 'throw';     // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
+  | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
+  | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
+  | 'beeSummon'; // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -36,6 +38,8 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuClose: ['Menu_Close'],
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
+  explosion: ['Item_14'],
+  beeSummon: ['Item_173'],
   // 以下无原版素材，走合成
   drink: [],
 };

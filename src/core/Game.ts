@@ -13,7 +13,7 @@ import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
-import { vanillaNpc, vanillaItemKey } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaItemKey, TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
@@ -24,7 +24,7 @@ import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, type SceneFlags } from '../world/SceneMetrics';
-import { pickMusic, newMusicState, type MusicState } from '../data/Music';
+import { pickMusic, newMusicState, bossMusicFor, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { createDeathText } from '../i18n/RandomText';
@@ -93,6 +93,8 @@ export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
+  /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
+  onChat?: (text: string, r: number, g: number, b: number) => void;
   onBuffsChanged?: () => void;
   /** 读墓碑/告示牌（Sign 阅读界面） */
   onReadSign?: (text: string) => void;
@@ -141,6 +143,8 @@ export class Game implements GameHooks {
 
   // 敌人生成
   boss: Enemy | null = null;
+  /** 本局世界是否新生成(NPC 入驻公告只在新世界播) */
+  private freshlyCreated = false;
   /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
   vanillaSpawner: VanillaSpawner | null = null;
   /** 世界生成 worker 客户端（懒建；不可用时 newWorld 走主线程 fallback） */
@@ -312,15 +316,17 @@ export class Game implements GameHooks {
 
   // ================= 生命周期 =================
 
-  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void }) {
+  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
+    this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
     const settleLabel = () => Lang.text('Mods.SandboxWorld.Progress.SettleLiquids');
     // ---- worker 路径（generate + settle 一条链在后台完成，UI 全程不卡） ----
     if (!this.genClient) this.genClient = new WorldGenClient();
     if (await this.genClient.probe()) {
       try {
         this.world = await this.genClient.generate(
-          { width, height, seedText, name: opts?.name, evil: opts?.evil },
+          { width, height, seedText, name: opts?.name, evil: opts?.evil, preview: !!opts?.onPreview },
           {
+            onPreview: opts?.onPreview,
             // 进度区间映射与主线程路径一致：generate 0–0.7、settle 0.72–0.87
             onProgress: (phase, label, p) => {
               if (phase === 'generate') onProgress?.(label, p * 0.7);
@@ -432,6 +438,7 @@ export class Game implements GameHooks {
   }
 
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void) {
+    this.freshlyCreated = false;
     this.world = world;
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), 0.5);
     // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
@@ -512,6 +519,14 @@ export class Game implements GameHooks {
     // 护士(原版:击败任一 Boss 后入住;checkNpcArrival 每帧判定)
     const nurse = new TownNPC('nurse', this.world.spawnX * 16 + 40, (this.world.spawnY - 2) * 16);
     this.entities.add(nurse, 'npcs');
+    // 入驻公告(WorldGen.cs:5138-5140):无家 NPC → HomelessArrived_{0-5} 随机变体,
+    // ChatColors.NPCTravel(50,125,255)。仅新世界播——读档时他们已"住"在这里
+    if (this.freshlyCreated) {
+      for (const key of ['merchant', 'nurse'] as const) {
+        const id = TOWN_NPC_IDS[key].id;
+        this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, Lang.npcName(id) ?? key), 50, 125, 255);
+      }
+    }
     // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王(NPC.cs GetChat/Lang.dialog 语义)
     if (this.world.dungeonX > 0) {
       const st = this.world.store;
@@ -605,13 +620,18 @@ export class Game implements GameHooks {
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
-      let bossNearby = false;
+      // Boss 专属 BGM（Main.cs:12155-12312：屏幕±5000px 盒内最近 Boss 的专属曲；
+      // 异教徒/光皇相位盒 1600 暂统一按 5000 近似）
+      let bossMusic = 0;
       for (const e of this.entities.enemies) {
-        const en = e as unknown as { x: number; y: number; def?: { boss?: boolean } };
-        if (en.def?.boss && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) { bossNearby = true; break; }
+        const en = e as unknown as { x: number; y: number; def?: { boss?: boolean }; vanillaId?: number | null };
+        if (en.def?.boss && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
+          bossMusic = bossMusicFor(en.vanillaId ?? 0);
+          break;
+        }
       }
       const music = pickMusic({
-        scene: this.scene, isDay, bossNearby,
+        scene: this.scene, isDay, bossMusic,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState,
@@ -813,14 +833,17 @@ export class Game implements GameHooks {
       if (this.boss.dead || dayKill) {
         // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
         if (this.boss.dead) {
-          const bname = this.boss.def.name || 'Boss';
-          this.cb.onToast(`${bname}已被击败！`);
+          // 注意:?? 与 || 混用必须加括号(esbuild 语法限制)
+          const bname = ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss';
+          // NPC.cs:79833 BroadcastChatMessage("Announcement.HasBeenDefeated_Single", ChatColors.BossOrEvent)
+          this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
         }
         if (dayKill && !this.boss.dead) {
           this.boss.dead = true;
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossFledAtDawn', this.boss.def.name || 'Boss'));
+          // 黎明逃离(自定义文案,走消息列,BossOrEvent 紫)
+          this.newText(Lang.text('Mods.SandboxWorld.Toast.BossFledAtDawn', ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss'), 175, 75, 255);
         }
         this.boss = null;
       }
@@ -854,6 +877,19 @@ export class Game implements GameHooks {
     if (torchOn !== !!prevLight ||
       (torchOn && prevLight && (prevLight.tx !== ptx || prevLight.ty !== pty))) {
       this.lighting.dirty = true;
+    }
+    // 弹幕动态点光(原版 Lighting.AddLight + Projectile.light 数据):
+    // 荧光棒/燃烧箭/火花/火焰镖等飞行中发光——Arrow/WeaponProj 系均暴露 projId
+    for (const p of this.entities.projectiles) {
+      const pid = (p as { projId?: number }).projId;
+      if (pid == null) continue;
+      const l = projectileData(pid)?.light;
+      if (!l || l <= 0) continue;
+      const pe = p as unknown as { x: number; y: number; w: number; h: number };
+      this.lighting.addLight(
+        Math.floor((pe.x + pe.w / 2) / TILE), Math.floor((pe.y + pe.h / 2) / TILE),
+        l, l, l,
+      );
     }
     this.lighting.compute(w.clock.dayFactor);
 
@@ -2352,7 +2388,9 @@ export class Game implements GameHooks {
     const p = this.player;
     if (Math.hypot(p.cx - cx, p.cy - cy) < R * TILE + 16) p.damage(damage, cx, cy);
     this.spawnParticles(cx, cy, '#FFA040', 26, 4);
-    this.sfxAt('roar', cx, cy); // 爆炸:按距离衰减
+    // 原版爆炸声 SoundID.Item14(Projectile.cs 手雷/炸弹/炸药等 20+ 处)——
+    // 曾误用 roar(Boss 咆哮)
+    this.sfxAt('explosion', cx, cy);
     // 链式引爆（延后到本爆结算后，防爆心递归；上限防炸药墙死循环）
     let chained = 0;
     while (chain.length && chained < 32) {
@@ -2932,7 +2970,7 @@ export class Game implements GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy) {
     const p = this.player;
     if (p.dead) return;
-    if (attacker) p.lastDamageCause = { kind: 'npc', name: attacker.def.name };
+    if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
       // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
@@ -2973,10 +3011,15 @@ export class Game implements GameHooks {
   /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。
    *  地面种：脚底精确贴地表格顶（此前高度>1格的实体被埋进地里卡死）；
    *  飞行种：仅开阔天空（向上 30 格无实心）且地表无水（鸭子除外）；
-   *  蝴蝶：低空（地表上 1-4 格），优先附近有花的列 */
+   *  蝴蝶：低空（地表上 1-4 格），优先附近有花的列。
+   *  地表限定（原版 surfaceSpawn 语义，NPC.cs L2277-2290 草丛小动物只在 worldSurface 上）：
+   *  玩家在地下/洞穴/地狱时不生成——此前以玩家为中心找地面且无深度守卫，
+   *  玩家下地狱后会在灰烬地面上刷出兔子/鸟（biome 兜底默认 forest） */
   private spawnCritter() {
     const st = this.world.store;
     const isDay = this.world.clock.isDay;
+    const pty = Math.floor(this.player.cy / TILE);
+    if (pty > this.world.groundLevel + 20) return; // 玩家不在地表（±20 容纳丘陵起伏）
     const halfView = Math.ceil((this.camera.viewW / (this.camera.zoom || 1)) / 2 / TILE) + 8;
     const side = Math.random() < 0.5 ? -1 : 1;
     // 找列：蝴蝶优先附近 8 格内有 FLOWER 的列
@@ -3003,6 +3046,9 @@ export class Game implements GameHooks {
       if (st.isSolid(tx, y)) { groundY = y; break; }
     }
     if (groundY < 0) return;
+    // 落点也必须在地表：扫描窗从玩家±24 起，玩家在洞口/悬崖时可能找到洞穴顶或
+    // 深层地面——直接拒绝（地狱地面 groundY≈h-200 远超 groundLevel+20）
+    if (groundY > this.world.groundLevel + 20) return;
     const surfaceWater = st.liquid[st.idx(tx, groundY - 1)] > 80;
     // 生态判定
     const gTile = st.type[st.idx(tx, groundY)];
@@ -3307,14 +3353,38 @@ export class Game implements GameHooks {
           // 血肉墙:地狱层落位(原版向导巫毒娃娃入熔岩;2 眼+11 饥饿者由 AI 首帧补)
           head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
         }
-        this.sfx.playWav('roar');
-        this.cb.onToast(Lang.misc(9));
+        // 召唤公告+音效（每 Boss 独立，见 bossSummonAnnounce/注释）
+        this.announceBossSummon(vanillaId);
         return;
       }
     }
     this.spawnEnemy(key, tx * TILE + 8, spawnY);
     this.sfx.playWav('roar');
     this.cb.onToast(Lang.misc(9));
+  }
+
+  /** Boss 召唤公告 + 音效（1.4.5.6 语义）：
+   *  文本：SpawnOnPlayer 末尾 switch（NPC.cs:81495-81511）——default 走
+   *  Announcement.HasAwoken（"{名}已苏醒！"）；双子 125 专项 Lang.misc[48]；
+   *  126/398（部件/第二只）不播；月总 398 用 Enemies.MoonLord（"月亮领主"）。
+   *  颜色 ChatColors.BossOrEvent = (175,75,255)（onChat 未接线时回退 toast）。
+   *  音效：ItemCheck_UseBossSpawners（Player.cs:43083+）统一 SoundID 15 Roar；
+   *  唯一例外 Abeemination(蜂后) → SoundID.Item173。 */
+  private announceBossSummon(vanillaId: number): void {
+    const announce = (text: string) => {
+      if (this.cb.onChat) this.cb.onChat(text, 175, 75, 255);
+      else this.cb.onToast(text);
+    };
+    if (vanillaId === 125) {
+      announce(Lang.misc(48));                              // 双子魔眼已苏醒！
+    } else if (vanillaId !== 126) {
+      // 398 月总：原版播 Enemies.MoonLord（NPC.cs:81358-81360），不取 MoonLordCore 名
+      const name = vanillaId === 398
+        ? Lang.text('Enemies.MoonLord')
+        : (Lang.npcName(vanillaId) ?? vanillaNpc(vanillaId)?.name ?? '???');
+      announce(Lang.text('Announcement.HasAwoken', name));
+    }
+    this.sfx.playWav(vanillaId === 222 ? 'beeSummon' : 'roar');
   }
 
   useSuspiciousEye() {
@@ -3338,8 +3408,8 @@ export class Game implements GameHooks {
       this.entities.add(e, 'enemies');
       this.boss = e;
     }
-    this.sfx.playWav('roar');
-    this.cb.onToast(Lang.misc(9));
+    // 公告+音效与 summonBoss 同语义（EoC → "克苏鲁之眼已苏醒！" + Roar）
+    this.announceBossSummon(4);
   }
 
   /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。
@@ -3425,6 +3495,16 @@ export class Game implements GameHooks {
     return true;
   }
 
+  /** Main.NewText(Main.cs:64095):左下角消息列。颜色 = ChatColors.cs 五色 */
+  newText(text: string, r = 255, g = 255, b = 255): void {
+    this.cb.onChat?.(text, r, g, b);
+  }
+
+  /** Announcement 类消息便捷封装(NPC.cs/WorldGen.cs BroadcastChatMessage 语义) */
+  announce(key: string, who: string, r: number, g: number, b: number): void {
+    this.newText(Lang.text(key, who), r, g, b);
+  }
+
   // ================= 重生 =================
 
   /** 玩家死亡瞬间：原版死亡文本 + 红色粉碎粒子 + 掉落物理墓碑（Player.DropTombstone） */
@@ -3434,7 +3514,8 @@ export class Game implements GameHooks {
     // 死亡文本（Lang.CreateDeathMessage 1:1：generic/摔落/溺水/岩浆/凶手 NPC）
     const cause = p.lastDamageCause ?? { kind: 'default' } as const;
     const deathText = createDeathText(this.playerName(), cause);
-    this.cb.onToast(deathText);
+    // 原版 Player.cs:38312-38313:死亡消息走消息列,色 (225,25,25)
+    this.newText(deathText, 225, 25, 25);
     // 红色粉碎粒子：身体范围多层爆散，喷溅落地反弹/停驻后缓慢淡出（约 5 秒）
     this.spawnParticles(p.cx, p.y + 8, '#C02020', 22, 3.2, { life: 300, damp: 0.988, grav: 0.09 });
     this.spawnParticles(p.cx, p.cy, '#8A1010', 16, 2.4, { life: 280, damp: 0.985, grav: 0.09 });

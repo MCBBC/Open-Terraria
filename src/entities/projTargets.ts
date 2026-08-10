@@ -28,3 +28,10 @@ export function hitCritters(self: { x: number; y: number; w: number; h: number }
   }
   return false;
 }
+
+/** 弹幕命中怪物:播受击音效(原版 NPC.StrikeNPC 语义——任意伤害来源都响,
+ *  近战挥砍早已如此;弹幕此前漏了) */
+export function playEnemyHitSound(game: GameHooks, e: { def?: { hitSound?: string[] } }): void {
+  const files = e.def?.hitSound;
+  if (files && files.length) game.playSfxFiles(files, 0.9);
+}

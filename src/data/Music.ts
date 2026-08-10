@@ -37,7 +37,9 @@ export function newMusicState(): MusicState {
 export interface MusicInput {
   scene: SceneFlags;
   isDay: boolean;
-  bossNearby: boolean;
+  /** Boss 专属 BGM（MusicID；0=无 Boss）。原版屏幕±5000px 盒内 Boss 链（Main.cs:12155-12312）
+   *  先于全部群系分支；每 Boss 一曲，未列入表的 Boss 一律 Boss1(5) */
+  bossMusic: number;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -49,6 +51,36 @@ export interface MusicInput {
   /** oceanDepths 结果（与背景共用；缺省内部重算近似） */
   ocean?: boolean;
   state: MusicState;
+}
+
+/** Boss 专属 BGM 表（Main.cs:12162-12280 type→num3 槽位 + :12474-12535 槽位→MusicID）：
+ *  EoW 13-15→99、骷髅王 35/36→104、血肉墙 113/114→12、双子 125/126→97、
+ *  Prime 127-131→98、毁灭者 134-136→92、蜂后 222→96、石巨人 245→17、世花 262-264→24、
+ *  克脑 266→13(Boss3)、猪鲨 370→58、月总 398→38、异教徒 439→94、光皇 636→57、
+ *  史莱姆皇后 657→56、鹿角怪 668→90、史莱姆王 50→93 */
+export const BOSS_MUSIC: Record<number, number> = {
+  13: 99, 14: 99, 15: 99,
+  35: 104, 36: 104,
+  50: 93,
+  113: 12, 114: 12,
+  125: 97, 126: 97,
+  127: 98, 128: 98, 129: 98, 130: 98, 131: 98,
+  134: 92, 135: 92, 136: 92,
+  222: 96,
+  245: 17,
+  262: 24, 263: 24, 264: 24,
+  266: 13,
+  370: 58,
+  398: 38,
+  439: 94,
+  636: 57,
+  657: 56,
+  668: 90,
+};
+
+/** Boss → BGM（Main.cs:12280-12284：未列入表的 boss num3=1 → Boss1(5)） */
+export function bossMusicFor(npcId: number): number {
+  return BOSS_MUSIC[npcId] ?? MUSIC.Boss1;
 }
 
 /** 太空系数（Main.cs:12466-12469）：(centerY/16 - (65+10*(w/4200)^2)) / (worldSurface/5)；<1 = 太空层 */
@@ -63,8 +95,8 @@ export function pickMusic(inp: MusicInput): number {
   const halfScreen = 400; // 原版 screenHeight/2（AssumedConstantScreenSize 1200/2≈600，本仓库视口 800/2）
   const belowHalf = inp.centerY > inp.worldSurface * 16 + halfScreen; // 原版 Center.Y > worldSurface*16 + screenHeight/2
 
-  // Boss（原版屏幕附近 Boss 旗标链 → Boss1；EoC 即 5）
-  if (inp.bossNearby) return MUSIC.Boss1;
+  // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
+  if (inp.bossMusic > 0) return inp.bossMusic;
 
   // 城镇曲（L12602-12609：≥3 城镇 NPC 且非墓地；无雨风判定省略）
   if (s.townNPCCount >= 3 && !s.zoneGraveyard) {

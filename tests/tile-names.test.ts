@@ -32,4 +32,15 @@ describe('方块名多语言解析（Lang.tileName）', () => {
   it('未知 tile 返回 null（调用方回退 TILE_DEFS.name）', () => {
     expect(Lang.tileName(999999)).toBeNull();
   });
+
+  it('电路族（Switch 136 / Timers 144）：放置物品译名（开关/1秒计时器）', () => {
+    expect(Lang.tileName(136)).toBe('开关');
+    expect(Lang.tileName(144)).toBe('1秒计时器');
+  });
+
+  it('世界生成专属块（树 5/宝石树 583）：id-maps 回退非空', () => {
+    // 测试环境未激活 culture（activeCulture=null）→ 第③级取 id-maps en
+    expect(Lang.tileName(5)).toBeTruthy();
+    expect(Lang.tileName(583)).toBeTruthy();
+  });
 });

@@ -3,7 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
-import { hitCritters } from './projTargets';
+import { hitCritters, playEnemyHitSound } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -112,13 +112,14 @@ export class Arrow extends Entity {
     if (hitCritters(this, game)) { this.dead = true; return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
         // 暴击：玩家远程基础 4%（原版 ranged 初始 4）
         const crit = Math.random() < 0.04;
         const dmg = crit ? this.damage * 2 : this.damage;
+        playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);

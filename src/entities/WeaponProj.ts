@@ -11,7 +11,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitCritters } from './projTargets';
+import { hitCritters, playEnemyHitSound } from './projTargets';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
@@ -63,13 +63,14 @@ function hitEnemies(
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
   hitCritters(self, game);
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     if (!hitCd.ready(e.id, cooldown)) continue;
     const crit = Math.random() < 0.04;
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
+    playEnemyHitSound(game, e);
     e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game);
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
   }

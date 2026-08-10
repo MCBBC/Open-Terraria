@@ -93,7 +93,7 @@ import { newGenState, type GenState } from './vanilla/GenState';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass } from './vanilla/BeachPass';
-import { runIceBiomePass } from './vanilla/IceBiomePass';
+import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
 import { spreadGrassAll } from './vanilla/Spread';
@@ -223,6 +223,7 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runIceBiomePass(store, rng, gs);       // 15 Generate Ice Biome
+  runSlushPass(store, gs);                 // 原版 pass 33 Slush（雪原石→冰/泥→雪泥）
   runGrassPass(store, rng, gs);          // 16 Grass
   const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;

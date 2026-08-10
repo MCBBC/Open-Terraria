@@ -128,8 +128,10 @@ function genIdNames() {
     return out;
   };
   const write = (name, map) => {
-    // 键一律引号化:projectiles 含负数 id(-65),裸写会是语法错误
-    const body = Object.entries(map).map(([id, n]) => `  '${id}': '${n}',`).join('\n');
+    // 键一律引号化:projectiles 含负数 id(-65),裸写会是语法错误;
+    // 值转义单引号(id-maps en 名含 "Jack 'O Lantern" 等)
+    const esc = (s) => String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const body = Object.entries(map).map(([id, n]) => `  '${id}': '${esc(n)}',`).join('\n');
     return `export const ${name}: Record<number, string> = {\n${body}\n};\n`;
   };
 
@@ -206,6 +208,54 @@ function genIdNames() {
     console.warn('[idNames] TEdit items.json 缺失,TILE_NAME_ITEM_BY_SHEET 未生成');
   }
 
+  // TILE_NAME_ZH/EN_BY_ID:id-maps 自带的方块 zh/en 名——第③级显示名回退。
+  // 仅用于世界生成专属块（树/藤蔓/药草等无放置物品、MapObject 也没有的 tile：
+  // 原版对它们没有 UI 显示名，这是唯一权威译名来源）。zh 系用 zh，其余语言英文兜底。
+  const tileZh = {}, tileEn = {};
+  const tilesRawPath = join(IDMAPS, 'tiles.json');
+  if (existsSync(tilesRawPath)) {
+    const tilesRaw = JSON.parse(readFileSync(tilesRawPath, 'utf8'));
+    for (const [id, v] of Object.entries(tilesRaw)) {
+      if (v?.zh) tileZh[id] = v.zh;
+      if (v?.en) tileEn[id] = v.en;
+    }
+    console.log(`[idNames] TILE_NAME_ZH/EN_BY_ID ${Object.keys(tileZh).length}/${Object.keys(tileEn).length} 条`);
+  }
+
+  // ITEM_NAME_ZH/EN_BY_ID:id-maps 自带的物品 zh/en 名——l10n ItemName 缺译 id 的兜底
+  const itemZh = {}, itemEn = {};
+  const itemsRawPath = join(IDMAPS, 'items.json');
+  if (existsSync(itemsRawPath)) {
+    const itemsRaw = JSON.parse(readFileSync(itemsRawPath, 'utf8'));
+    for (const [id, v] of Object.entries(itemsRaw)) {
+      if (v?.zh) itemZh[id] = v.zh;
+      if (v?.en) itemEn[id] = v.en;
+    }
+    console.log(`[idNames] ITEM_NAME_ZH/EN_BY_ID ${Object.keys(itemZh).length}/${Object.keys(itemEn).length} 条`);
+  }
+
+  // WALL_NAME_ITEM_BY_WALL:墙 sheet → 显示名来源物品 id（Item.createWall 反查,同 tile 语义）
+  // + WALL_NAME_ZH/EN_BY_ID（id-maps walls.json 兜底——自然墙无放置物品）
+  const wallNameItem = {}, wallZh = {}, wallEn = {};
+  if (existsSync(teditItemsPath)) {
+    const teditItems2 = JSON.parse(readFileSync(teditItemsPath, 'utf8'));
+    for (const it of teditItems2) {
+      if (it.createWall === undefined) continue;
+      if (wallNameItem[it.createWall] === undefined || it.id < wallNameItem[it.createWall]) {
+        wallNameItem[it.createWall] = it.id;
+      }
+    }
+  }
+  const wallsRawPath = join(IDMAPS, 'walls.json');
+  if (existsSync(wallsRawPath)) {
+    const wallsRaw = JSON.parse(readFileSync(wallsRawPath, 'utf8'));
+    for (const [id, v] of Object.entries(wallsRaw)) {
+      if (v?.zh) wallZh[id] = v.zh;
+      if (v?.en) wallEn[id] = v.en;
+    }
+  }
+  console.log(`[idNames] WALL 链 ${Object.keys(wallNameItem).length} placer / ${Object.keys(wallZh).length} zh`);
+
   const header = `// 本文件由 scripts/build-l10n.mjs 生成,勿手改。来源:tools/id-maps/*.json(1.4.5.6)。\n`;
   const body =
     write('ITEM_NAME_BY_ID', items) +
@@ -215,6 +265,13 @@ function genIdNames() {
     write('TILE_NAME_BY_ID', tiles) +
     write('WALL_NAME_BY_ID', walls) +
     write('TILE_NAME_ITEM_BY_SHEET', tileNameItem) +
+    write('TILE_NAME_ZH_BY_ID', tileZh) +
+    write('TILE_NAME_EN_BY_ID', tileEn) +
+    write('ITEM_NAME_ZH_BY_ID', itemZh) +
+    write('ITEM_NAME_EN_BY_ID', itemEn) +
+    write('WALL_NAME_ITEM_BY_WALL', wallNameItem) +
+    write('WALL_NAME_ZH_BY_ID', wallZh) +
+    write('WALL_NAME_EN_BY_ID', wallEn) +
     `export const ITEM_KEY_TO_ID: Record<string, number> = ${JSON.stringify(itemKeyToId)};\n`;
   writeFileSync(IDNAMES_OUT, header + body);
 }

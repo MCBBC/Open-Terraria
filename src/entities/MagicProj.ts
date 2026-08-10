@@ -1,7 +1,7 @@
 // 魔法投射物(原版 Projectile 14 Spark / 短命发光弹语义):
 // 直线飞行、撞块消失、命中伤害、寿命短(原版 spark 30tick)。
 import { Entity } from './Entity';
-import { hitCritters } from './projTargets';
+import { hitCritters, playEnemyHitSound } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -46,9 +46,10 @@ export class MagicProj extends Entity {
     // 小动物:一击致死并消耗弹体(近战挥砍同语义)
     if (hitCritters(this, game)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; dead: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; dead: boolean; def?: { hitSound?: string[] } };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        playEnemyHitSound(game, e);
         e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#C080FF');
         this.dead = true;

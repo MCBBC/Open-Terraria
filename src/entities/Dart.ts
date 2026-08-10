@@ -1,6 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
+import { playEnemyHitSound } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -129,9 +130,10 @@ export class TrapShot extends Entity {
       this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y;
     // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
       if (e.dead || !overlaps(e)) continue;
       if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
+        playEnemyHitSound(game, e);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
       }
       if (!pierce) { this.dead = true; return; }

@@ -113,6 +113,9 @@ export class VanillaSpawner {
   private nearMarble = false;
   private nearGranite = false;
   private spawnUndergroundDesert = false;
+  /** 蜘蛛巢旗标（L1066/L1074）：落点邻域 ±5..15 格内有墙 62（1/3 概率扫描），
+   *  或玩家所站格墙 62（2/3 概率查玩家位）——蜘蛛巢内/附近必出蜘蛛的真正触发器 */
+  private spawnSpider = false;
   private ZoneSnow = false; private ZoneCorrupt = false; private ZoneCrimson = false;
   private ZoneHallow = false; private ZoneJungle = false; private ZoneGlowshroom = false;
   private ZoneDungeon = false; private ZoneGraveyard = false; private ZoneBeach = false;
@@ -166,21 +169,50 @@ export class VanillaSpawner {
   }
 
   // ---- SetSpawnFlagsForChosenTile（L950-1185） ----
-  private setFlagsForChosenTile(spawnTileX: number, spawnTileY: number, spawnTileType: number): void {
+  private setFlagsForChosenTile(spawnTileX: number, spawnTileY: number, spawnTileType: number, rng: RNG): void {
     const st = this.world.store;
     this.spawnTileX = spawnTileX; this.spawnTileY = spawnTileY; this.spawnTileType = spawnTileType;
     // waterTile（L957）：落脚格上方两格都是液体且为水
     const above1 = st.idx(spawnTileX, spawnTileY - 1), above2 = st.idx(spawnTileX, spawnTileY - 2);
     this.waterTile = st.liquid[above1] > 0 && st.liquid[above2] > 0 && st.liquidType[above1] === 1;
-    // nearMarble/nearGranite（L958-1006）：tile 367/368 或玩家处
+    // nearMarble/nearGranite（L960-1046）：落点 tile → 玩家 tile → 两轮邻近扫描
+    // (落点 ±Next(20,30) 步长 Next(1,4) + 玩家 ±Next(30,60) 步长 Next(3,7) 抽样)。
+    // 只查落点/玩家两格会让小体量大理石/花岗岩洞几乎永远探测不到
     if (spawnTileType === T.MARBLE) this.nearMarble = true;
     else if (spawnTileType === T.GRANITE) this.nearGranite = true;
     else if (st.type[st.idx(this.pX, this.pY)] === T.MARBLE) this.nearMarble = true;
     else if (st.type[st.idx(this.pX, this.pY)] === T.GRANITE) this.nearGranite = true;
-    // 地下沙漠（L1077-1100）：墙 216/217（ AllowsUndergroundDesertEnemiesToSpawn）
-    const w = st.wall[st.idx(spawnTileX, spawnTileY)];
-    if (spawnTileY < this.world.rockLevel && spawnTileY > 200) {
-      this.spawnUndergroundDesert = w === 216 || w === 217 || w === 187;
+    else {
+      const scanType = (cx0: number, cy0: number, r: number, stepI: number, stepJ: number) => {
+        const x0 = Math.max(0, cx0 - r), x1 = Math.min(st.w - 1, cx0 + r);
+        const y0 = Math.max(0, cy0 - r), y1 = Math.min(st.h - 1, cy0 + r);
+        for (let i = x0; i <= x1; i += stepI) {
+          for (let j = y0; j <= y1; j += stepJ) {
+            const tt = st.type[st.idx(i, j)];
+            if (tt === T.MARBLE) this.nearMarble = true;
+            else if (tt === T.GRANITE) this.nearGranite = true;
+          }
+        }
+      };
+      scanType(spawnTileX, spawnTileY, rng.int(20, 30), rng.int(1, 3), 1 + (rng.next() * 3 | 0));
+      scanType(this.pX, this.pY, rng.int(30, 60), rng.int(3, 6), 3 + (rng.next() * 4 | 0));
+    }
+    // 地下沙漠（L1078-1100）：同蜘蛛巢的双路触发——1/3 扫落点 ±Next(5,15) 墙集
+    // {216,217,187};2/3 查玩家所站格墙。此前只查落点一格(巢腔墙多在空气格,地板格常是天然墙)
+    const DESERT_WALL = (w: number) => w === 216 || w === 217 || w === 187;
+    if (spawnTileY < this.world.rockLevel && spawnTileY > 200 && !this.ZoneDungeon) {
+      if (rng.next() < 1 / 3) {
+        const r = rng.int(5, 14);
+        const x0 = Math.max(0, spawnTileX - r), x1 = Math.min(st.w - 1, spawnTileX + r - 1);
+        const y0 = Math.max(0, spawnTileY - r), y1 = Math.min(st.h - 1, spawnTileY + r - 1);
+        for (let sx = x0; sx <= x1 && !this.spawnUndergroundDesert; sx++) {
+          for (let sy = y0; sy <= y1; sy++) {
+            if (DESERT_WALL(st.wall[st.idx(sx, sy)])) { this.spawnUndergroundDesert = true; break; }
+          }
+        }
+      } else if (DESERT_WALL(st.wall[st.idx(this.pX, this.pY)])) {
+        this.spawnUndergroundDesert = true;
+      }
     }
     this.surfaceSpawn = spawnTileY <= this.world.groundLevel;
     this.deeperThanRockLayer = spawnTileY >= this.world.rockLevel;
@@ -197,6 +229,23 @@ export class VanillaSpawner {
     this.ZoneJungle = spawnTileType === T.MUD || spawnTileType === T.JUNGLE_GRASS;
     this.ZoneGlowshroom = spawnTileType === T.MUSHROOM_GRASS;
     // ZoneDungeon 不在此设置：原版取玩家 SceneMetrics（SetSpawnFlags L300），见 setPlayerFlags
+    // ---- 蜘蛛巢旗标（L1045-1079）:岩石层~地狱层 && 非地牢时 ----
+    // 1/3 概率扫落点 ±Next(5,15) 立方盒内任意墙 62;否则查玩家所站格墙 62。
+    // 此前只查落点一格,玩家站巢里时屏幕外环带点几乎全在巢外 → 蜘蛛永不触发
+    if (spawnTileY > this.world.rockLevel && spawnTileY < st.h - 200 && !this.ZoneDungeon) {
+      if (rng.next() < 1 / 3) {
+        const r = rng.int(5, 14);
+        const x0 = Math.max(0, spawnTileX - r), x1 = Math.min(st.w - 1, spawnTileX + r - 1);
+        const y0 = Math.max(0, spawnTileY - r), y1 = Math.min(st.h - 1, spawnTileY + r - 1);
+        for (let sx = x0; sx <= x1 && !this.spawnSpider; sx++) {
+          for (let sy = y0; sy <= y1; sy++) {
+            if (st.wall[st.idx(sx, sy)] === 62) { this.spawnSpider = true; break; }
+          }
+        }
+      } else if (st.wall[st.idx(this.pX, this.pY)] === 62) {
+        this.spawnSpider = true;
+      }
+    }
   }
 
   /** tileDungeon 集（Main.cs:7941-7946）：41/43/44 主砖（677-679 安全变体未注册缺席=0）。
@@ -319,7 +368,7 @@ export class VanillaSpawner {
       // PostCheckChosenSpawnTile L924：地牢内刷怪点必须踩地牢砖且上方格有墙，否则换点重试
       if (this.ZoneDungeon &&
         (!this.isDungeonTile(groundType) || st.wall[st.idx(tx, ty)] === 0)) continue;
-      this.setFlagsForChosenTile(tx, ty, groundType);
+      this.setFlagsForChosenTile(tx, ty, groundType, rng);
       return true;
     }
     return false;
@@ -363,11 +412,12 @@ export class VanillaSpawner {
     const t = this.spawnTileType;
     const D = (id: number) => this.spawnNPC(x, y, id, rng);
 
-    // ---- 蜘蛛巢（L1569-1587）：墙 62 ----
+    // ---- 蜘蛛巢（L1569-1587）：落点墙 62 或 spawnSpider 旗标 ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
-    if (wall === 62) {
-      if (N(10)) return D(163);  // hardMode 蜘蛛；肉前爬行者
-      return D(164);
+    if (wall === 62 || this.spawnSpider) {
+      // 造型师 354（1/8,岩石层深处+场内无 354）：解绑城镇 NPC 救援链路,注释保留
+      if (this.hardMode && !N(10)) return D(163);  // hardMode 9/10 黑寡妇(L1577)
+      return D(164);                               // 爬墙者
     }
     // ---- 地下沙漠（L1589-1672）----
     if (this.spawnUndergroundDesert) {
@@ -626,6 +676,12 @@ export class VanillaSpawner {
     this.hardMode = !!this.world.flags.hardMode;
     this.noWorms = false;
     this.skyMob = false;
+    this.spawnSpider = false;
+    // 邻近旗标每尝试复位(原版每次 TrySpawnAnNPC 全新置旗;
+    // 泄漏会导致碰过大理石后全图永远出蛇发女妖)
+    this.nearMarble = false;
+    this.nearGranite = false;
+    this.spawnUndergroundDesert = false;
     if (!this.findSpawnTile(rng, viewHalfW, viewHalfH)) return null;
     // TrySpawnAnNPC L220：CheckNotSpawningOnScreen 像素级二次校验（画面内/贴屏拒绝）
     if (!this.checkNotSpawningOnScreen(playerX, playerY, viewHalfW, viewHalfH)) return null;
