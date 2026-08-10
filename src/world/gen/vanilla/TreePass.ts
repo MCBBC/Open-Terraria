@@ -75,9 +75,13 @@ function growTrunk(st: TileStore, rng: RNG, gs: GenState, i: number, index1: num
       st.setTileSilent(i + 1, y, TREE, bfx, bfy);
     }
   }
-  // 基座方向 num7（L14439-14543）：两侧地面适配 → 决定根部与基座帧
-  const fitSide = (dx: number) => st.inBounds(i + dx, index1)
-    && st.flags[st.idx(i + dx, index1)] && FIT.has(st.type[st.idx(i + dx, index1)]);
+  // 基座方向 num7（L14439-14543）：两侧地面适配 → 决定根部与基座帧。
+  //  侧根放置前提 = 邻格整砖(L30230/30234:!halfBrick && slope==0)——半砖/坡面侧不出根
+  const fitSide = (dx: number) => {
+    if (!st.inBounds(i + dx, index1)) return false;
+    const si = st.idx(i + dx, index1);
+    return !!st.flags[si] && !st.half[si] && st.slope[si] === 0 && FIT.has(st.type[si]);
+  };
   let num7 = rng.int(0, 2);
   const sideL = fitSide(-1), sideR = fitSide(1);
   if (!sideL) { if (num7 === 0) num7 = 2; else if (num7 === 1) num7 = 3; }
@@ -103,12 +107,16 @@ function growTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: number): 
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
   const gi = st.idx(i, index1);
-  // 头部适配检查：基座上一格三列无液体 / 基座活跃且适树 / 上格墙白名单 / 至少一侧邻格适树
+  // 头部适配检查：基座上一格三列无液体 / 基座活跃且适树且整砖(L29934:!halfBrick&&slope==0) /
+  // 上格墙白名单 / 至少一侧邻格适树（侧根前提同款整砖检查）
   if (st.liquid[st.idx(i - 1, index1 - 1)] > 0 || st.liquid[st.idx(i, index1 - 1)] > 0 || st.liquid[st.idx(i + 1, index1 - 1)] > 0) return false;
-  if (!st.flags[gi] || !FIT.has(st.type[gi])) return false;
+  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !FIT.has(st.type[gi])) return false;
   if (!TREE_WALLS.has(st.wall[st.idx(i, index1 - 1)])) return false;
-  const fitSide = (dx: number) => st.inBounds(i + dx, index1)
-    && st.flags[st.idx(i + dx, index1)] && FIT.has(st.type[st.idx(i + dx, index1)]);
+  const fitSide = (dx: number) => {
+    if (!st.inBounds(i + dx, index1)) return false;
+    const si = st.idx(i + dx, index1);
+    return !!st.flags[si] && !st.half[si] && st.slope[si] === 0 && FIT.has(st.type[si]);
+  };
   if (!fitSide(-1) && !fitSide(1)) return false;
   const height = rng.int(5, 16);                       // Next(5,17)
   let clear = height + 4;                              // num3
@@ -124,7 +132,8 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
   if (!st.inBounds(i, index1) || index1 < 1) return false;
   const gi = st.idx(i, index1);
   const GRASS = idsByVanillaSheet(2);
-  if (!st.flags[gi] || !GRASS.has(st.type[gi])) return false;
+  // 基座整砖检查(GrowEpicTree 同 GrowTree 头部语义:半砖/坡面拒绝)
+  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !GRASS.has(st.type[gi])) return false;
   if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
   const family = idsByVanillaSheet(2, 23, 60, 109);
   const fitSide = (dx: number) => st.inBounds(i + dx, index1)
@@ -141,7 +150,8 @@ function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
   if (!st.inBounds(i, index1) || index1 < 1) return false;
   const gi = st.idx(i, index1);
-  if (!st.flags[gi] || !PALM_GROUND.has(st.type[gi])) return false;
+  // 基座整砖检查(GrowPalmTree:27280-27285 active && !halfBrick && slope==0)
+  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !PALM_GROUND.has(st.type[gi])) return false;
   if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
   if (!emptyTileCheck(st, i, i, index1 - 2, index1 - 1)) return false;
   if (!emptyTileCheck(st, i - 1, i + 1, index1 - 30, index1 - 3)) return false;

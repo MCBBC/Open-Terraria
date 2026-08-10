@@ -72,6 +72,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '瓦罐', run: potPass },
     { name: '表面', run: surfacePass },
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地表装饰', run: vanillaSurfaceDecor }]),
+    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '海滩装饰', run: vanillaBeachDecor }]),
     ...(cfg.structures === false ? [] : [{ name: '结构', run: structurePass }]),
   ];
 
@@ -92,7 +93,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 import { newGenState, type GenState } from './vanilla/GenState';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
-import { runOceanSandPass, runBeachesPass } from './vanilla/BeachPass';
+import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
 import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
@@ -309,6 +310,13 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   if (!gs) return;
   runSurfaceDecorPass(store, rng, gs);
   runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
+}
+
+// 海滩装饰：贝壳堆 + 海藻（原版 ShellPiles pass + GrowCheckSeaweed）
+function vanillaBeachDecor({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runBeachDecorPass(store, rng, gs);
 }
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
@@ -663,26 +671,54 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
     const gs = ctxGs[0];
     if (gs) runTreePass(store, rng, gs);
   }
-  for (let x = 0; x < w; x++) {
-    const sy = Math.floor(surface[x]);
-    // 装饰：草丛/花/蘑菇——放在草块上方空气格（sy 是首个实心行，装饰在 sy-1）
-    // 帧为 Tiles_3 表的像素偏移（TEdit frames 数据）：草丛 6 变体 / 花 9 色 / 蘑菇 (144,0)
-    if (sy - 1 >= 0 && !store.isActive(x, sy - 1) && store.isSolid(x, sy)) {
-      const GRASS_FX = [0, 18, 36, 54, 72, 90];
-      const FLOWER_FX = [108, 126, 162, 180, 216, 252, 342, 540, 594];
-      const r = rng.next();
-      if (r < 0.34) store.setTileSilent(x, sy - 1, T.TALLGRASS, GRASS_FX[Math.floor(rng.next() * GRASS_FX.length) % 6], 0);
-      else if (r < 0.48) {
-        store.setTileSilent(x, sy - 1, T.FLOWER, FLOWER_FX[Math.floor(rng.next() * FLOWER_FX.length) % 9], 0);
-        // 花簇：50% 概率向两侧蔓延 1 格（同簇同帧）
-        const fx = store.frameX[store.idx(x, sy - 1)];
-        for (const dx of [-1, 1]) {
-          if (rng.next() < 0.5 && store.get(x + dx, sy - 1) === 0 && store.isSolid(x + dx, sy)) {
-            store.setTileSilent(x + dx, sy - 1, T.FLOWER, fx, 0);
-          }
+  // 地表植物装饰——原版 pass GrassPlantsEvilPlantsAndPumpkinsOnSurface（WorldGen.cs:20201-20266）+
+  // PlaceTile 液体拒绝（WorldGen.cs:59477：tile 3/24/201/637 在液体中不放）。
+  // 门禁 1:1：只铺在草族 tile 上方（普通草 2→tile 3 / 腐化草 23→24 / 猩红草 199→201 /
+  // 丛林草 60→73 / 蘑菇草 70→71 发光蘑菇株）；沙滩/海水自然无杂草。
+  {
+    const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block'] ?? 0;
+    const CRIMSON_GRASS = TILE_BY_KEY['v_199_crimson_grass_block'] ?? 0;
+    const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block'] ?? 0;
+    const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block'] ?? 0;
+    const CORRUPT_PLANTS = TILE_BY_KEY['v_24_corruption_short_plants'] ?? 0;
+    const CRIMSON_PLANTS = TILE_BY_KEY['v_201_crimson_short_plants'] ?? 0;
+    const JUNGLE_PLANTS = TILE_BY_KEY['v_73_forest_tall_plants'] ?? 0;
+    const GLOW_SHROOM = TILE_BY_KEY['v_71_mushroom_plant'] ?? 0;
+    const CORRUPT_THORNS = TILE_BY_KEY['v_32_corruption_thorns'] ?? 0;
+    const CRIMSON_THORNS = TILE_BY_KEY['v_352_crimtane_thorns'] ?? 0;
+    const GRASS_FX = [0, 18, 36, 54, 72, 90];
+    const FLOWER_FX = [108, 126, 162, 180, 216, 252, 342, 540, 594];
+    const plantAbove = (x: number, y: number, type: number, fx: number) => {
+      if (y < 1 || !store.inBounds(x, y)) return;
+      const i = store.idx(x, y);
+      if (store.flags[i] || store.liquid[i] > 0) return; // 上方格须空气且无液体
+      store.setTileSilent(x, y, type, fx, 0);
+    };
+    for (let x = 0; x < w; x++) {
+      for (let y = 1; y < store.h; y++) {
+        const bi = store.idx(x, y);
+        if (!store.flags[bi]) continue;
+        const below = store.type[bi];
+        if (below === T.GRASS) {
+          // 普通草：每格必铺（原版语义），变体 = 草丛 6 / 花 9 / 蘑菇(144)
+          const r = rng.next();
+          if (r < 0.82) plantAbove(x, y - 1, T.TALLGRASS, GRASS_FX[Math.floor(rng.next() * 6)]);
+          else if (r < 0.97) plantAbove(x, y - 1, T.FLOWER, FLOWER_FX[Math.floor(rng.next() * 9)]);
+          else plantAbove(x, y - 1, T.MUSHROOM, 144);
+        } else if (below === CORRUPT_GRASS) {
+          // 腐化草 13% → 荆棘 32（原版 IsFitToPlaceFlowerIn 分支）；帧 144 = 邪恶蘑菇
+          if (rng.next() < 0.13 && CORRUPT_THORNS) plantAbove(x, y - 1, CORRUPT_THORNS, 0);
+          else plantAbove(x, y - 1, CORRUPT_PLANTS, rng.next() < 0.08 ? 144 : Math.floor(rng.next() * 6) * 18);
+        } else if (below === CRIMSON_GRASS) {
+          if (rng.next() < 0.13 && CRIMSON_THORNS) plantAbove(x, y - 1, CRIMSON_THORNS, 0);
+          else plantAbove(x, y - 1, CRIMSON_PLANTS, Math.floor(rng.next() * 11) * 18);
+        } else if (below === JUNGLE_GRASS) {
+          plantAbove(x, y - 1, JUNGLE_PLANTS, Math.floor(rng.next() * 6) * 18);
+        } else if (below === MUSH_GRASS && GLOW_SHROOM) {
+          // 蘑菇草 → 发光蘑菇株（v_71 5 变体；GlowingMushroomPlants pass 语义）
+          plantAbove(x, y - 1, GLOW_SHROOM, Math.floor(rng.next() * 5) * 18);
         }
       }
-      else if (r < 0.51) store.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
     }
   }
   // 树已由 vanilla/TreePass.ts（原版 pass 82 AddTrees/GrowTree/GrowPalmTree/GrowEpicTree）替换

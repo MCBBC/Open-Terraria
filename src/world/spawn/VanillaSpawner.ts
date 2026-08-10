@@ -81,6 +81,13 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6 },  // 丛林
   '-11': { base: 6, scale: 0.85 },   // 小噬魂怪
   '-12': { base: 6, scale: 1.15 },   // 大噬魂怪
+  // 黄蜂族大小变体（FromNetId NetIdMap[55..64]：两两一族 231-235；scale 取 netid 表）
+  '-16': { base: 42, scale: 0.85 }, '-17': { base: 42, scale: 1.2 },    // Little/Big Stinger
+  '-56': { base: 231, scale: 0.85 }, '-57': { base: 231, scale: 1.25 },
+  '-58': { base: 232, scale: 0.8 }, '-59': { base: 232, scale: 1.17 },
+  '-60': { base: 233, scale: 0.83 }, '-61': { base: 233, scale: 1.21 },
+  '-62': { base: 234, scale: 0.78 }, '-63': { base: 234, scale: 1.16 },
+  '-64': { base: 235, scale: 0.87 }, '-65': { base: 235, scale: 1.21 },
   // 地牢骷髅变体（SetDefaultsFromNetId L7770-7788：scale 后再乘 stat）
   '-13': { base: 31, scale: 0.9, hp: 72, dmg: 23, def: 7 },    // Short Bones(80/26/8 ×0.9)
   '-14': { base: 31, scale: 1.15, hp: 101, dmg: 33, def: 10 }, // Big Boned(×1.15 再 ×1.1)
@@ -403,6 +410,21 @@ export class VanillaSpawner {
     return !(tX < rectX + rectW && tX + TILE > rectX && tY < rectY + rectH && tY + TILE > rectY);
   }
 
+  /** SpawnHornet（NPC.cs:5189-5255 1:1）：Next(8) 选族——
+   *  case0-4 黄蜂族 231-235（各 1/4 小 -2k/大 -2k+1 变体）；default(case5-7) 蜂刺族 42 */
+  private spawnHornet(x: number, y: number, rng: RNG): Enemy | null {
+    const v = rng.int(0, 8);
+    const table: Array<[number, number, number]> = [
+      [-56, -57, 231], [-58, -59, 232], [-60, -61, 233],
+      [-62, -63, 234], [-64, -65, 235],
+      [-16, -17, 42],
+    ];
+    const row = table[Math.min(v, 5)];
+    if (rng.next() < 0.25) return this.spawnNPC(x, y, row[0], rng);
+    if (rng.next() < 0.25) return this.spawnNPC(x, y, row[1], rng);
+    return this.spawnNPC(x, y, row[2], rng);
+  }
+
   // ---- SpawnAnNPC（L1186-5144）——肉前分支 1:1，hardMode 分支保留 ----
   private spawnAnNPC(rng: RNG): Enemy | null {
     const st = this.world.store;
@@ -503,14 +525,20 @@ export class VanillaSpawner {
       if (N(4)) return D(259);
       return D(257);
     }
-    // ---- 丛林地表（L3713-3740）----
+    // ---- 蜂巢墙 86（NPC.cs:3833-3835）：7/8 SpawnHornet ----
+    if (wall === 86 && !N(8)) return this.spawnHornet(x, y, rng);
+    // ---- 丛林草 tile 60（NPC.cs:3839-3856；旧实现误在肉前出 158 巨型蝙蝠，原版无此分支）----
     if (t === T.JUNGLE_GRASS) {
-      if (N(2)) {
-        // 丛林地表池
-        if (N(3)) return D(158);
-        return D(51);
+      const midY = (this.world.groundLevel + this.world.rockLevel) / 2;
+      if (this.spawnTileY > midY) {
+        // 深层丛林（原版 remix 分支省略）：1/4 棘刺丛林史莱姆 / 1/4 食人怪(锚点) / else 黄蜂族
+        if (N(4)) return D(204);
+        if (N(4)) return this.spawnNPC(x, y, 43, rng, this.spawnTileX, this.spawnTileY);
+        return this.spawnHornet(x, y, rng);
       }
-      return D(51);  // SpawnHornet
+      // 浅层：1/4 丛林蝙蝠 / 1/8 魔腾怪(锚点)
+      if (N(4)) return D(51);
+      if (N(8)) return this.spawnNPC(x, y, 56, rng, this.spawnTileX, this.spawnTileY);
     }
     // ---- 沙漠地表（L3859-3928，沙尘暴外简化为沙漠 tile 段）----
     if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE) {

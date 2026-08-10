@@ -199,6 +199,8 @@ export class Enemy extends Entity {
   inWater = false;       // 入水检测（溅落声用）
   /** Boss 专属初始化标记(部件生成等一次性动作;aiN 默认值有歧义故独立字段) */
   bInit = false;
+  /** 部件 → 主体引用（骷髅王手 36 → 头：渲染臂骨 IK 与存活判定用） */
+  master: Enemy | null = null;
 
   constructor(public key: string, x: number, y: number) {
     super();
@@ -325,9 +327,12 @@ export class Enemy extends Entity {
     // Despawn 系统（原版 CheckActive, NPC.cs:78669-78798 + EncourageDespawn :7228-7235）：
     // timeLeft(activeTime=750) 屏内矩形每 tick 重置+清鼓励旗；离屏从当前值倒数，归零即消失。
     // EncourageDespawn(10) 封顶后离屏 ~10t 即消；屏内每 tick 被重置抵挡——
-    // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）
-    if (player && !this.def.boss) {
-      const dxp = Math.abs(player.cx - this.cx), dyp = Math.abs(player.cy - this.cy);
+    // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
+    // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
+    // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
+    if (!this.def.boss || this.despawnEncouraged) {
+      const dxp = player ? Math.abs(player.cx - this.cx) : Infinity;
+      const dyp = player ? Math.abs(player.cy - this.cy) : Infinity;
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
       if (dxp < TILE * 62 && dyp < TILE * 35) {
         this.despawnTimer = 750;

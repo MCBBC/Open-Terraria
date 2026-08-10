@@ -40,15 +40,29 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
     if (!player || Math.abs(e.cx - player.cx) > 2000 || Math.abs(e.cy - player.cy) > 2000) e.ai1 = 3;
   }
   if (e.ai1 === 2) {
-    // 守卫恒速直追(伤害 9999 语义)
-    e.def.damage = isGuardian ? 9999 : e.def.damage;
-    const dx = player!.cx - e.cx, dy = player!.cy - e.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    e.vx = (dx / d) * 8; e.vy = (dy / d) * 8;
+    // 白天狂暴（:22247-22261）：damage/defense 均 9999、rotation+=0.3*direction、
+    // 8 速恒直追——此前只改了伤害没改防御，且玩家死后 null 解引用
+    e.def.damage = 9999;
+    e.def.defense = 9999;
+    e.spin += (e.facing || 1) * 0.3;
+    if (player) {
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      e.vx = (dx / d) * 8; e.vy = (dy / d) * 8;
+    }
     e.x += e.vx; e.y += e.vy;
     return;
   }
-  if (e.ai1 === 3) { e.y += 4; return; }
+  if (e.ai1 === 3) {
+    // 离场（:22262-22271）：vy+=0.1 下坠、vx 衰减、EncourageDespawn(50)——
+    // 此前 y+=4 直落且永不 despawn，导致玩家死后 Boss 血条永久残留
+    e.vy += 0.1;
+    if (e.vy < 0) e.vy *= 0.95;
+    e.vx *= 0.95;
+    e.x += e.vx; e.y += e.vy;
+    e.encourageDespawn(50);
+    return;
+  }
   if (!player) return;
 
   e.ai2 += 1;
@@ -122,6 +136,7 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
   const enemies = game.enemies() as unknown[];
   const head = enemies.find((n) => (n as Enemy).id === headId) as Enemy | undefined;
   if (!head || head.vanilla?.aiStyle !== 11 || head.dead) { e.dead = true; return; }
+  e.master = head; // 臂骨 IK 渲染用（Renderer.drawSkeletronArm）
   if (head.ai1 === 3) { e.dead = true; return; }
   e.facing = -(e.ai0 || 1);
   if (!player) { e.x += e.vx; e.y += e.vy; return; }

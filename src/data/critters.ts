@@ -18,6 +18,7 @@ export interface CritterDef {
   glow?: boolean;         // 自发光（萤火虫）
   avoidWater?: boolean;   // 飞行避水（鸭子/鸟：巡航中不扎进水里）
   perch?: boolean;        // 飞行种会落地栖息（鸟）
+  oceanOnly?: boolean;   // 海洋专属（螃蟹/海鸥：仅地图边缘海洋带，不进沙漠）
   fleeFly?: boolean;      // 地面种受惊会起飞逃离（鸭子）
   /** 状态动画分段 [起始帧, 帧数]（缺省=全表循环） */
   anim?: { idle?: [number, number]; swim?: [number, number]; walk?: [number, number]; fly?: [number, number] };
@@ -37,6 +38,9 @@ export const CRITTER_DEFS: CritterDef[] = [
     // NPC_362 分段：0 站立 / 1-2 游水 / 3-10 走路 / 11-14 飞行
     anim: { idle: [0, 1], swim: [1, 2], walk: [3, 8], fly: [11, 4] } },
   { key: 'grasshopper', name: '蚱蜢', npc: 377, kind: 'hop', w: 12, h: 8, speed: 2.2, fleeRange: 80, weight: 6, dayOnly: true, biomes: ['forest', 'sand'] },
+  // 海滩生态（原版 Crab 67 / Seagull 602：海边沙地专属）
+  { key: 'crab', name: '螃蟹', npc: 67, kind: 'walk', w: 20, h: 14, speed: 0.6, fleeRange: 80, weight: 9, avoidWater: true, oceanOnly: true, biomes: ['sand'] },
+  { key: 'seagull', name: '海鸥', npc: 602, kind: 'fly', w: 22, h: 16, speed: 1.8, fleeRange: 144, weight: 8, dayOnly: true, perch: true, avoidWater: true, oceanOnly: true, biomes: ['sand'] },
   // 金色变种（稀有，生态同本体）
   { key: 'gold_bird', name: '金鸟', npc: 442, kind: 'fly', w: 18, h: 12, speed: 1.8, fleeRange: 144, weight: 1, dayOnly: true, gold: true, perch: true, avoidWater: true, biomes: ['forest', 'snow', 'sand'] },
   { key: 'gold_bunny', name: '金兔', npc: 443, kind: 'hop', w: 18, h: 16, speed: 1.6, fleeRange: 112, weight: 1, dayOnly: true, gold: true, biomes: ['forest'] },

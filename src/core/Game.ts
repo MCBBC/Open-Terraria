@@ -13,7 +13,7 @@ import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TO
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
-import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
+import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, vanillaItemKey, TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
 import { projectileData } from '../data/vanillaProjectiles';
@@ -467,10 +467,16 @@ export class Game implements GameHooks {
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
-    // 懒加载晚到的新图块/墙表 → 全量标脏重烘焙:出生点子集预载后,远行遇到
-    // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正
+    // 懒加载晚到的【图块/墙表】→ 全量标脏重烘焙:出生点子集预载后,远行遇到
+    // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
+    // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk，此前任何 vimage 晚到都
+    // invalidateAll（后台补齐 6059 张图标 = 6059 次全图重烘焙标记，进图后持续帧尖峰）
     if (this.atlas) {
-      this.atlas.onVImageLoaded = () => this.chunks.invalidateAll();
+      this.atlas.onVImageLoaded = (file: string) => {
+        if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')) {
+          this.chunks.invalidateAll();
+        }
+      };
     }
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
     this.wiring = new Wiring(w.store);
@@ -500,6 +506,7 @@ export class Game implements GameHooks {
     const bag: Array<[string, number]> = [
       ['heal_potion', 2], ['agility_potion', 2], ['ironskin_potion', 2],
       ['thorns_potion', 2], ['regen_potion', 2], ['suspicious_eye', 3], ['lens', 6],
+      ['slime_crown', 3], // 史莱姆王冠（召唤史莱姆王 NPC 50）
       // 电路工具(Wiring 移植验证用):扳手/线/钳/致动器/魔杖/多彩/蓝图 + 常用器件
       ['red_wrench', 1], ['blue_wrench', 1], ['green_wrench', 1], ['yellow_wrench', 1],
       ['wire', 300], ['wire_cutter', 1], ['actuator_item', 30], ['actuation_rod', 1],
@@ -539,13 +546,10 @@ export class Game implements GameHooks {
       }
     }
     // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
-    // 原版 dungeonX/Y = 入口结构上可站立点(cs L72510-72527),锚定 home 自由游荡
-    // (NPC.cs:53755 UpdateHomeTileState)。生成侧已把 dungeonX/Y 回写为入口门厅站立点,
-    // 老人锚在那里、白天在门口走廊附近游走(leashHome 栓绳防走远);导入 wld 同语义。
-    if (this.world.dungeonX > 0) {
-      const st = this.world.store;
-      const dX = this.world.dungeonX;
-      const dY = this.world.dungeonY || Math.floor(this.world.groundLevel);
+    // 原版：击败骷髅王（downedBoss3）后老人转为裁缝消失——不再生成
+    if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
+      this.maybeRespawnOldMan();
+    }
       // 双侧由外向内扫门 tile(外廊门或塔基门),取最外侧一扇
       let doorX = -1, doorY = -1;
       for (let r = 70; r >= 3 && doorX < 0; r--) {
@@ -598,12 +602,75 @@ export class Game implements GameHooks {
         }
       }
       if (!spot) spot = standSpot(dX, 8) ?? { x: dX, y: dY - 3 };
-      const oldMan = new TownNPC('old_man', spot.x * 16 - 8, spot.y * 16);
-      oldMan.home = { x: spot.x, y: spot.y }; // 锚定门口
-      oldMan.leashHome = true; // 白天在门口走廊附近游走,不远离(原版老人不离地牢)
-      this.entities.add(oldMan, 'npcs');
-    }
     this.cb.onInventoryChanged();
+  }
+
+  /** 守卫老人(NPC 37)生成/重生（原版 dungeonX/Y = 入口站立点 cs L72510-72527）。
+   *  诅咒召唤时被置 dead；骷髅王离场/被击败未记账时原版会让他重新出现——
+   *  Boss 战斗结束块调用本方法（已在场/已击败时直接跳过） */
+  private maybeRespawnOldMan() {
+    if (this.world.dungeonX <= 0 || this.world.flags.downedSkeletron) return;
+    if (this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'old_man' && !n.dead)) return;
+    const st = this.world.store;
+    const dX = this.world.dungeonX;
+    const dY = this.world.dungeonY || Math.floor(this.world.groundLevel);
+    // 双侧由外向内扫门 tile(外廊门或塔基门),取最外侧一扇
+    let doorX = -1, doorY = -1;
+    for (let r = 70; r >= 3 && doorX < 0; r--) {
+      for (const sd of [1, -1]) {
+        const x = dX + sd * r;
+        if (x < 3 || x > st.w - 4) continue;
+        for (let y = Math.max(4, dY - 45); y < Math.min(st.h - 3, dY + 45); y++) {
+          if (st.type[st.idx(x, y)] === T.DOOR_CLOSED) { doorX = x; doorY = y; break; }
+        }
+        if (doorX > 0) break;
+      }
+    }
+    // 落位候选(按优先级):门外开阔侧 3 格 > 门内 1 格 > 门外 6/10 格 > 门内 4 格 >
+    // 塔心入口扫描 > 裸兜底。每候选:向下 ≤10 格找地面 + 头顶 3 格净空(身高 40px)
+    // + 3 宽地板(左右也实心,防站在竖井/悬崖边缘)
+    const standSpot = (sx: number, syTop: number): { x: number; y: number } | null => {
+      if (sx < 3 || sx > st.w - 4) return null;
+      let yy = Math.max(4, syTop);
+      const limit = Math.min(st.h - 3, syTop + 10);
+      while (yy < limit && !st.isSolid(sx, yy)) yy++;
+      if (yy >= limit) return null;
+      if (!st.isSolid(sx - 1, yy) || !st.isSolid(sx + 1, yy)) return null;
+      for (let k = 1; k <= 3; k++) if (st.isSolid(sx, yy - k)) return null;
+      return { x: sx, y: yy - 3 };
+    };
+    const side = doorX >= dX ? 1 : -1; // 门相对塔心的方位,外侧 = 再往外
+    const baseY = (doorY > 0 ? doorY : dY) - 2;
+    // 首选 dungeonX/Y 本身(=门厅站立点);其余候选为门扫描兜底
+    const cands: Array<[number, number]> = [[dX, dY - 3], [doorX + side * 3, baseY],
+      [doorX - side, baseY], [doorX + side * 6, baseY],
+      [doorX + side * 10, baseY], [doorX - side * 4, baseY], [dX, dY - 10]];
+    let spot = cands.map(([cx0, cy0]) => standSpot(cx0, cy0)).find((s) => s) ?? null;
+    if (!spot) {
+      // 末级兜底①:门高平面 ±70 列扫任一有效落脚
+      for (let r = 1; r <= 70 && !spot; r++) {
+        for (const sd of [1, -1]) {
+          spot = standSpot(dX + sd * r, baseY);
+          if (spot) break;
+        }
+      }
+    }
+    if (!spot) {
+      // 末级兜底②:门口悬空(地牢在陡坡上) → 塔外 20-70 列从天空向下扫地表,
+      // 站到门外山坡(依然在门口视野内);再不行站塔顶
+      for (let r = 20; r <= 70 && !spot; r++) {
+        for (const sd of [1, -1]) {
+          spot = standSpot(dX + sd * r, 8);
+          if (spot) break;
+        }
+      }
+    }
+    if (!spot) spot = standSpot(dX, 8) ?? { x: dX, y: dY - 3 };
+    const oldMan = new TownNPC('old_man', spot.x * 16 - 8, spot.y * 16);
+    oldMan.home = { x: spot.x, y: spot.y }; // 锚定门口
+    oldMan.leashHome = true; // 白天在门口走廊附近游走,不远离(原版老人不离地牢)
+    oldMan.id = this.entities.nextId++;
+    this.entities.add(oldMan, 'npcs');
   }
 
   /** 销毁：停止循环并移除画布（退出到主菜单时调用） */
@@ -899,10 +966,11 @@ export class Game implements GameHooks {
     // ---- Boss 逻辑 ----
     if (this.boss) {
       // EoC(AI_004)白天自漂离,漂远自灭后走 dead 分支出提示;
-      // 127 机械骷髅王白天走 AI 内狂暴(伤/防 9999)不剔除;其余 Boss 通用日出剔除
+      // 35 骷髅王/68 守卫/127 机械骷髅王白天走 AI 内狂暴(伤/防 9999)不剔除;
+      // 其余 Boss 通用日出剔除
       const eocFlees = this.boss.vanillaId === 4;
-      const primeRages = this.boss.vanillaId === 127;
-      const dayKill = w.clock.isDay && !eocFlees && !primeRages;
+      const skeletronRages = this.boss.vanillaId === 35 || this.boss.vanillaId === 68 || this.boss.vanillaId === 127;
+      const dayKill = w.clock.isDay && !eocFlees && !skeletronRages;
       if (this.boss.dead || dayKill) {
         // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
         if (this.boss.dead) {
@@ -917,6 +985,11 @@ export class Game implements GameHooks {
           this.boss.dead = true;
           // 黎明逃离(自定义文案,走消息列,BossOrEvent 紫)
           this.newText(Lang.text('Mods.SandboxWorld.Toast.BossFledAtDawn', ((this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) : null) ?? this.boss.def.name) || 'Boss'), 175, 75, 255);
+        }
+        // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
+        // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
+        if (this.boss.vanillaId === 35 && !w.flags.downedSkeletron) {
+          this.maybeRespawnOldMan();
         }
         this.boss = null;
       }
@@ -1672,18 +1745,33 @@ export class Game implements GameHooks {
           st.setTile(ax + dx, ay + dy, 0);
         }
       }
-      this.spawnDrop(ax * TILE + 8, ay * TILE, def.drop ?? (def.key.startsWith('v_') ? 'place_' + def.key : ''), 1);
+      // 掉落:drop:null = 显式无掉落(原版装饰类,如 165 冰凌/蛛网卵袋);仅 undefined
+      // 才走 v_ 回收兜底(place_v_ 再放置)。曾用 ?? ——null 同样触发兜底,null 语义失效
+      const dropKey = def.drop === undefined ? (def.key.startsWith('v_') ? 'place_' + def.key : '') : def.drop;
+      if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
       // 宝箱内容物掉出
       if (type === T.CHEST) this.dumpChest(ax, ay);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
-    // 可砍植物（Main.tileCut）：只清格 + 拂草声（SoundID 6 = Grass.wav），无掉落
-    // （原版 KillTile_GetItemDrops 对 tile 3/24/73/74/110/113 等 plant 类无 case → 不掉任何物品）
+    // 可砍植物（Main.tileCut）：清格 + 拂草声（SoundID 6 = Grass.wav）。
+    // 蘑菇类例外可采集（KillTile_GetItemDrops，WorldGen.cs:65041-65076）：
+    //   tile 3 帧 144（蘑菇）→ item 5 / tile 24 帧 144（邪恶蘑菇）→ item 60
+    //   tile 201 帧 270（血腥蘑菇）→ item 2887——其余 plant 类无掉落
     if (type !== POT_TILE && TILE_CUT.has(type)) {
       st.setTile(x, y, 0);
       this.sfx.play('chop');
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
+      const sheet = def.vanilla?.sheet;
+      const fx = st.frameX[st.idx(x, y)];
+      const mushroomDrop =
+        sheet === 3 && fx === 144 ? 'mushroom_item'
+          : sheet === 24 && fx === 144 ? VANILLA_ITEM_KEY_BY_ID[60]
+            : sheet === 201 && fx === 270 ? VANILLA_ITEM_KEY_BY_ID[2887]
+              : null;
+      if (mushroomDrop && ITEM_BY_KEY[mushroomDrop] !== undefined) {
+        this.spawnDrop(x * TILE + 8, y * TILE + 8, mushroomDrop, 1);
+      }
       return;
     }
     // 瓦罐分支已上移到函数顶部（smashPot 统一处理）；此处到达即防御性清格
@@ -3215,12 +3303,15 @@ export class Game implements GameHooks {
       }
       return false;
     })();
+    // 海洋带判定（地图外沿 8%——螃蟹/海鸥 oceanOnly 门，防止进沙漠）
+    const inOceanBand = tx < st.w * 0.08 || tx > st.w * 0.92;
     // 按昼夜 + 栖息生态过滤（水面列只出 water 生态或飞行种）
     const pool = CRITTER_DEFS.filter((c) => {
       if (c.dayOnly && !isDay) return false;
       if (c.nightOnly && isDay) return false;
       // 鸭子是两栖：水面列可生成（落在岸边浅水/滩涂），其余地面种不能在水列
       if (surfaceWater && !c.water && c.kind !== 'fly' && c.key !== 'duck') return false;
+      if (c.oceanOnly && !inOceanBand) return false;
       if (!c.biomes.includes(biome) && !(nearWater && c.biomes.includes('water'))) return false;
       return true;
     });
@@ -3286,6 +3377,18 @@ export class Game implements GameHooks {
     }
     for (const [x, y] of grown) {
       const groundY = y + 1;
+      // 原版橡实生长走 WorldGen.GrowTree 全套检查(NPC.cs 之外,WorldGen.cs:29924-29969):
+      // 基座整砖(!halfBrick&&slope==0)+ 草族适树 + 至少一侧邻格适树——缺侧根地面不长
+      const gi = st.idx(x, groundY);
+      const FIT_GRASS = new Set([T.GRASS, TILE_BY_KEY['v_23_corrupt_grass_block'], TILE_BY_KEY['v_199_crimson_grass_block'],
+        TILE_BY_KEY['v_60_jungle_grass_block'], TILE_BY_KEY['v_70_mushroom_grass_block'], T.SNOW]);
+      const fitTile = (xx: number, yy: number) => {
+        if (!st.inBounds(xx, yy)) return false;
+        const ii = st.idx(xx, yy);
+        return !!st.flags[ii] && !st.half[ii] && st.slope[ii] === 0 && FIT_GRASS.has(st.type[ii]);
+      };
+      if (!fitTile(x, groundY)) continue;
+      if (!fitTile(x - 1, groundY) && !fitTile(x + 1, groundY)) continue;
       const th = 5 + Math.floor(Math.random() * 4);
       st.setTile(x, y, 0);
       for (let dy2 = 1; dy2 <= th; dy2++) {

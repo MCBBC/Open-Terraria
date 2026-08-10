@@ -82,6 +82,9 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
   }
   // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
   if (ai === 1) return Math.floor(t / 8) % frames;
+  // 骷髅王头/手（case 35/36, L67378+）：仅 RedHatSkeletron（ai[3]==1 红帽变种）才切帧；
+  // 常规骷髅王恒帧 0——此前走通用全循环会闪到表内"红帽骷髅"帧
+  if (ai === 11 || ai === 12) return 0;
   // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 L70172-70262）：腾空=1；站定=0；
   // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1、>6 推进、越界回卷帧2）
   if (ai === 7) {
@@ -152,22 +155,44 @@ export class Minimap {
   }
 
   redrawAll() {
+    // 性能（2026-08-10，trace 实测 redrawAll 占 1.7s CPU/次进世界）：旧版每格走
+    // colorFor 字符串分配 + parseInt（1150 万格 ≈ 秒级冻结 + GC 压力）。改为
+    // 类型/墙 id 数值 LUT + Uint32 直写（小端 ABGR 打包），纯数组循环 ~50ms 级
     const { world, ctx } = this;
-    const img = ctx.createImageData(world.w, world.h);
-    for (let y = 0; y < world.h; y++) {
-      for (let x = 0; x < world.w; x++) {
-        const c = this.colorFor(x, y);
-        const i = (y * world.w + x) * 4;
-        if (c) {
-          const v = parseInt(c.slice(1), 16);
-          img.data[i] = (v >> 16) & 255; img.data[i + 1] = (v >> 8) & 255; img.data[i + 2] = v & 255;
-        }
-        img.data[i + 3] = 255;
+    const st = world.store;
+    if (!this._mapLUT || this._mapLUT.tiles.length < TILE_DEFS.length) {
+      const parse = (hex: string): number => {
+        const v = parseInt(hex.slice(1), 16);
+        return 0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >> 16) & 255); // 小端 ABGR
+      };
+      const tiles = new Uint32Array(Math.max(64, TILE_DEFS.length));
+      tiles.fill(parse('#808080'));
+      for (let id = 0; id < TILE_DEFS.length; id++) {
+        if (TILE_DEFS[id]?.mapColor) tiles[id] = parse(TILE_DEFS[id].mapColor);
       }
+      const walls = new Uint32Array(Math.max(64, WALL_DEFS.length));
+      walls.fill(parse('#2E2E2E'));
+      for (let id = 0; id < WALL_DEFS.length; id++) {
+        if (WALL_DEFS[id]?.mapColor) walls[id] = parse(WALL_DEFS[id].mapColor);
+      }
+      this._mapLUT = { tiles, walls, sky: parse('#7EB6E8'), water: parse('#3D6FD1'), lava: parse('#E8622C') };
+    }
+    const lut = this._mapLUT;
+    const img = ctx.createImageData(world.w, world.h);
+    const buf = new Uint32Array(img.data.buffer);
+    const { type, wall, liquid, liquidType } = st;
+    for (let i = 0, n = world.w * world.h; i < n; i++) {
+      const t = type[i];
+      if (t !== 0) { buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue; }
+      if (liquid[i] > 40) { buf[i] = liquidType[i] === 2 ? lut.lava : lut.water; continue; }
+      const wl = wall[i];
+      buf[i] = wl !== 0 ? (lut.walls[wl] ?? lut.walls[0]) : lut.sky;
     }
     ctx.putImageData(img, 0, 0);
     this.dirtyChunks.clear();
   }
+  /** redrawAll 用的颜色 LUT（tile/wall id → ABGR） */
+  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; sky: number; water: number; lava: number } | null = null;
 
   flushDirty() {
     if (this.dirtyChunks.size === 0) return;
@@ -660,7 +685,7 @@ export class Renderer {
     // 缩放贴合碰撞盒；按帧最低不透明行对齐脚底（帧底透明内边距会导致悬浮）
     const h = c.h * 1.25;
     const w = (fr.sw / fr.sh) * h;
-    const pad = this.spriteBottomPad(fr); // 帧内底部透明行数
+    const pad = this.spriteBottomPad(fr, `npc${c.def.npc}:f${frame}`); // 帧内底部透明行数（按 NPC+帧号稳定缓存）
     ctx.save();
     ctx.translate(c.cx, c.y + c.h); // 脚底中心
     ctx.scale(c.facing >= 0 ? -1 : 1, 1); // 贴图默认朝左
@@ -721,6 +746,9 @@ export class Renderer {
     // 水下滤镜：与主角一致的蓝色调（检查怪物头部位置是否浸水）
     const headI = world.store.idx(Math.floor(e.cx / TILE), Math.floor((e.y + 2) / TILE));
     const underwater = world.store.liquid[headI] > 100;
+    // 骷髅王手（36）的两节臂骨 IK（Main.cs:22543-22596 1:1）：从手部锚点向头
+    // 中心做两段收缩（92/60 缩比），段间旋转 atan2-π/2——贴图 Arm_Bone.png
+    if (e.vanillaId === 36 && e.master) this.drawSkeletronArm(e, e.master);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
@@ -893,6 +921,38 @@ export class Renderer {
     }
     this.drawEnemyHpBar(e);
     void world;
+  }
+
+  /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
+  private armBoneImg: HTMLImageElement | null | undefined;
+  private drawSkeletronArm(hand: Enemy, head: Enemy) {
+    if (this.armBoneImg === undefined) {
+      this.armBoneImg = new Image();
+      this.armBoneImg.src = 'sprites/vanilla/Arm_Bone.png';
+    }
+    const img = this.armBoneImg;
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const ctx = this.ctx;
+    const ai0 = hand.ai0 >= 0 ? 1 : -1; // ai[0]：-1 左手 / 1 右手
+    // vector5 = 手部锚点（Main.cs:22545：position + width/2 - 5*ai[0], +20）
+    let vx = hand.x + hand.w / 2 - 5 * ai0;
+    let vy = hand.y + 20;
+    for (let j = 0; j < 2; j++) {
+      // num14/num15 = 头中心（position + w/2, +h/2）相对锚点的向量（Main.cs:22547-22548）
+      let dx = head.x + head.w / 2 - vx;
+      let dy = head.y + head.h / 2 - vy;
+      let k: number;
+      if (j === 0) { dx -= 200 * ai0; dy += 130; const len = Math.hypot(dx, dy) || 1; k = 92 / len; }
+      else { dx -= 50 * ai0; dy += 80; const len = Math.hypot(dx, dy) || 1; k = 60 / len; }
+      vx += dx * k; vy += dy * k;
+      const rot = Math.atan2(dy, dx) - Math.PI / 2; // Main.cs:22572
+      ctx.save();
+      ctx.translate(vx, vy);
+      ctx.rotate(rot);
+      ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      ctx.restore();
+      if (j === 0) { vx += dx * k / 2; vy += dy * k / 2; } // Main.cs:22587 段间推进
+    }
   }
 
   private drawEnemyHpBar(e: Enemy) {
@@ -1194,8 +1254,11 @@ export class Renderer {
     this.tintCache.set(k, c);
     return c;
   }
-  private spriteBottomPad(frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }): number {
-    const key = `${frame.img instanceof HTMLCanvasElement ? 'c' : 'i'}:${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
+  private spriteBottomPad(frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }, keyHint?: string): number {
+    // keyHint：调用方已知的稳定标识（如 npc:帧号）。默认键只含类型+矩形，同尺寸
+    // 不同精灵会碰撞（错值），且来源矩形不稳定时每帧未命中 → 逐帧 getImageData
+    // 打满 CPU（trace2 实测 drawCritter 路径 100% 单核）
+    const key = keyHint ?? `${frame.img instanceof HTMLCanvasElement ? 'c' : 'i'}:${frame.sx},${frame.sy},${frame.sw},${frame.sh}`;
     let pad = this.bottomPadCache.get(key);
     if (pad === undefined) {
       pad = 0;

@@ -136,9 +136,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   async function quickLoad() {
     if (!quickSaveExists) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.NoQuickSave')); return; }
-    const text = await kvGet(QUICK_SAVE_KEY);
-    if (!text) return;
-    await loadFromJson(text);
+    await loadFromKey(QUICK_SAVE_KEY);
   }
 
   /** 玩家状态回填（worker/主线程两路共用） */
@@ -152,6 +150,38 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.mana !== undefined) g.player.mana = player.mana;
     g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
     g.player.inv.selected = player.selected;
+  }
+
+  /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到
+   *  worker 的主线程序列化开销——大存档实测秒级 100% CPU）；worker 不可用时
+   *  才在主线程 kvGet 走 fallback */
+  async function loadFromKey(key: string) {
+    try {
+      // worker 路径：IDB 读取 + JSON 解析 + RLE 解码 + load 模式沉降全在后台
+      const { WorldGenClient } = await import('./workers/WorldGenClient');
+      const client = new WorldGenClient();
+      if (await client.probe()) {
+        try {
+          const { world, player } = await client.loadSave({ key }, {
+            onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
+          });
+          const g = makeGame();
+          await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
+          applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          return;
+        } catch (e) {
+          if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
+          // worker 失败 → 主线程 fallback
+        }
+      }
+      const text = await kvGet(key);
+      if (!text) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', '存档数据缺失')); return; }
+      await loadFromJson(text);
+    } catch (e) {
+      console.error(e);
+      ui.hideProgress();
+      alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
+    }
   }
 
   async function loadFromJson(text: string) {
@@ -289,12 +319,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     });
   }
 
-  /** 从世界槽位读取并进入游戏 */
+  /** 从世界槽位读取并进入游戏（worker 内直读 IDB：免大 JSON 字符串主线程读取
+   *  + 结构化克隆双开销；fallback 时 worldStore.load 取回全文走 loadFromJson） */
   async function loadWorldFlow(meta: WorldMeta) {
-    const text = await worldStore.load(meta);
-    if (!text) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.WorldDataMissing')); return; }
     currentWorld = meta;
-    await loadFromJson(text);
+    await loadFromKey(`sandboxworld.world.${meta.id}`);
   }
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */

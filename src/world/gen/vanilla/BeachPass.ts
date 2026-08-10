@@ -172,3 +172,99 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 }
+
+// ---- 原版 ShellPiles pass（WorldGen.cs:16385-16450 + ShellPile L10307-10420）----
+// 每侧 50% 概率，最多 6 堆；ShellPile：沙面上椭圆随机漂移填 tile 495（贝壳堆块），
+// 下方悬空时补 495→沙 53→硬化沙 397（原版 10350-10403 逐层下探）
+import { TILE_BY_KEY } from '../../../data/tiles';
+
+function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: number): boolean {
+  if (X < 1 || Y < 1 || X >= st.w - 1 || Y >= st.h - 1) return false;
+  let y = Y;
+  while (y < st.h && !st.flags[st.idx(X, y)]) y++;
+  if (y > worldSurface || y >= st.h) return false;          // 原版：仅地表内
+  if (st.type[st.idx(X, y)] !== T.SAND) return false;       // 必须沙面
+  if (st.wall[st.idx(X, y)] !== 0) return false;            // 无背景墙
+  y--;
+  const SHELL = TILE_BY_KEY['v_495_shell_pile_block'] ?? 0;
+  const HARD_SAND = TILE_BY_KEY['hardened_sand'] ?? 0;
+  if (!SHELL) return false;
+  let cx = X, cy = y;
+  let vx = rng.next() * 0.6 - 0.3, vy = rng.next() * 0.5 + 0.5;
+  let radius = rng.int(2, 4);
+  if (rng.int(0, 9) === 0) radius += 1;
+  let layers = rng.int(3, 6);
+  const put = (x: number, yy: number, type: number) => {
+    if (!st.inBounds(x, yy)) return;
+    const i = st.idx(x, yy);
+    st.type[i] = type; st.flags[i] = 1; st.frameX[i] = 0; st.frameY[i] = 0;
+  };
+  while (layers-- > 0) {
+    const r = radius * (0.7 + rng.next() * 0.2);
+    for (let x = Math.floor(X - radius * 4); x <= X + radius * 4; x++) {
+      for (let yy = y + Math.floor(radius * 4); yy > y - radius * 4; yy--) {
+        const dx = (cx - x) * 0.6, dyy = cy - yy;
+        if (Math.hypot(dx, dyy) >= r) continue;
+        if (yy <= y + 1 || rng.int(0, 5) === 0) {
+          put(x, yy, SHELL);
+          // 下方悬空补壳/沙/硬化沙（原版 10373-10399 三层下探）
+          if (st.inBounds(x, yy + 1) && !st.flags[st.idx(x, yy + 1)]) {
+            put(x, yy + 1, SHELL);
+            if (st.inBounds(x, yy + 2) && !st.flags[st.idx(x, yy + 2)]) {
+              put(x, yy + 2, T.SAND);
+              if (st.inBounds(x, yy + 3) && !st.flags[st.idx(x, yy + 3)]) put(x, yy + 3, HARD_SAND);
+            }
+          }
+        } else if (st.type[st.idx(x, yy)] !== SHELL) {
+          put(x, yy, T.SAND);
+        }
+      }
+    }
+    cx += vx; cy += vy;
+    vx = Math.max(-0.3, Math.min(0.3, vx + (rng.next() * 0.2 - 0.1)));
+    vy = Math.max(0.5, Math.min(1.0, vy + (rng.next() * 0.2 - 0.1)));
+  }
+  return true;
+}
+
+/** 海滩装饰：贝壳堆 + 海藻（GrowCheckSeaweed 简化 1:1：沙面+上方 4 格全满水才长） */
+export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const SEAWEED = TILE_BY_KEY['v_549_seaweed'] ?? 0;
+  const sides: Array<[number, number, number]> = [
+    [1, Math.max(1, gs.beachLeftEnd - 120), gs.beachLeftEnd],
+    [-1, gs.beachRightStart, Math.min(st.w - 2, gs.beachRightStart + 120)],
+  ];
+  for (const [dir, x0, x1] of sides) {
+    // 贝壳堆：50% 概率，锚点 = 海滩边界附近沙面（原版 shellStart 扫描近似）
+    if (rng.next() < 0.5) {
+      const baseX = dir === 1 ? gs.beachLeftEnd - rng.int(0, 5) : gs.beachRightStart + rng.int(0, 5);
+      let by = -1;
+      for (let y = Math.max(1, Math.floor(gs.worldSurface) - 60); y < gs.worldSurface + 30 && y < st.h - 4; y++) {
+        if (st.flags[st.idx(baseX, y)] && st.type[st.idx(baseX, y)] === T.SAND) { by = y; break; }
+      }
+      if (by > 0) {
+        const offsets = [0, 10, 40, 70, 100, 25];
+        for (const off of offsets) {
+          if (off !== 0 && rng.next() >= 0.5) continue; // 原版 Next(maxValue 2..3) 门
+          const x = dir === 1 ? baseX - off : baseX + off;
+          shellPile(st, rng, x, by - 50, gs.worldSurface + 60);
+        }
+      }
+    }
+    // 海藻：每个海洋列找沙面，上方 4 格全满水 → 2/3 放（原版 GrowCheckSeaweed 深水条件）
+    if (SEAWEED) {
+      for (let x = x0; x < x1; x++) {
+        for (let y = 2; y < st.h - 4; y++) {
+          const i = st.idx(x, y);
+          if (!st.flags[i] || st.type[i] !== T.SAND) continue;
+          const deep = [1, 2, 3, 4].every((d) => st.liquid[st.idx(x, y - d)] === 255 && !st.flags[st.idx(x, y - d)]);
+          if (deep && rng.int(0, 2) !== 0) {
+            const ai = st.idx(x, y - 1);
+            st.type[ai] = SEAWEED; st.flags[ai] = 1; st.frameX[ai] = Math.floor(rng.next() * 3) * 18; st.frameY[ai] = 0;
+          }
+          break; // 每列只处理首个沙面
+        }
+      }
+    }
+  }
+}
