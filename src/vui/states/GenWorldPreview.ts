@@ -1,7 +1,9 @@
 // 生成期实时世界地图预览（用户特有需求；原版 1.4.0.5 无此功能）。
-// 策略：离屏 canvas（1px/tile）+ 每帧限量「列扫描」增量重绘（等价原版 DrawToMap 的
-// maxMapUpdates 限额思想）；生成中数据持续变化，扫描循环刷新而非脏块跟踪
-// （生成期 setTileSilent 不触发 onTileChanged）。
+// 两种模式：
+//  - 位图模式（worker 路径）：worldGen.worker 每个 pass 渲染降采样 RGBA（≤640px 宽）
+//    transfer 回主线程，此处直接 putImageData——零扫描、零主线程遍历；
+//  - 列扫描模式（主线程 fallback）：1px/tile 离屏 canvas + 每帧限量增量重绘
+//    （等价原版 DrawToMap 的 maxMapUpdates 限额思想；生成期 setTileSilent 不触发事件）。
 import { UIElement } from '../core/UIElement';
 import { StyleDimension } from '../core/StyleDimension';
 import type { UISpriteBatch } from '../draw/UISpriteBatch';
@@ -10,7 +12,7 @@ import { UIScale } from '../draw/UIScale';
 import { mapColor24 } from '../../render/MapColors';
 import type { World } from '../../world/World';
 
-/** 每帧重绘的列数（列 = 全高 1px 宽；8400 列大世界约 2 秒扫完一轮） */
+/** 每帧重绘的列数（列扫描 fallback；8400 列大世界约 2 秒扫完一轮） */
 const COLUMNS_PER_FRAME = 64;
 
 export class GenWorldPreview extends UIElement {
@@ -18,18 +20,46 @@ export class GenWorldPreview extends UIElement {
   private offCtx: CanvasRenderingContext2D;
   private colImg: ImageData;
   private sweepCol = 0;
+  /** 位图模式：worker 侧已渲染，收到帧直接 putImageData（不再列扫描） */
+  private bitmapMode = false;
+  private world: World | null = null;
+  private previewAspect = 0;
 
-  constructor(private world: World) {
+  constructor(world?: World) {
     super();
     this.off = document.createElement('canvas');
+    this.offCtx = this.off.getContext('2d')!;
+    this.colImg = this.offCtx.createImageData(1, 1);
+    if (world) this.initSweep(world);
+  }
+
+  /** 列扫描模式（fallback）：1px/tile 离屏 canvas */
+  private initSweep(world: World) {
+    this.world = world;
     this.off.width = world.w;
     this.off.height = world.h;
-    this.offCtx = this.off.getContext('2d')!;
     this.colImg = this.offCtx.createImageData(1, world.h);
-    // 底部居中：宽度取屏宽 55%（上限 520），高度按世界纵横比等比缩放（不变形）；
-    // 底部留 56px 避开小贴士行
+    this.previewAspect = world.h / world.w;
+    this.applyLayout();
+  }
+
+  /** 位图模式（worker 路径）：canvas 尺寸 = 首帧位图尺寸 */
+  setPreviewFrame(rgba: Uint8ClampedArray, width: number, height: number): void {
+    if (!this.bitmapMode || this.off.width !== width) {
+      this.bitmapMode = true;
+      this.off.width = width;
+      this.off.height = height;
+      this.previewAspect = height / width;
+      this.applyLayout();
+    }
+    const img = new ImageData(rgba, width, height);
+    this.offCtx.putImageData(img, 0, 0);
+  }
+
+  /** 布局：底部居中，宽取屏宽 55%（上限 520），等比缩放；底部留 56px 避开小贴士行 */
+  private applyLayout() {
     const w = Math.min(UIScale.logicalW * 0.55, 520);
-    const h = w * (world.h / world.w);
+    const h = w * this.previewAspect;
     this.width = StyleDimension.fromPixels(w);
     this.height = StyleDimension.fromPixels(h);
     this.hAlign = 0.5;
@@ -37,15 +67,23 @@ export class GenWorldPreview extends UIElement {
     this.marginBottom = 56;
   }
 
+  /** worker 路径首帧预览：在未知世界尺寸时先建预览容器 */
+  static fromFirstFrame(rgba: Uint8ClampedArray, width: number, height: number): GenWorldPreview {
+    const p = new GenWorldPreview();
+    p.setPreviewFrame(rgba, width, height);
+    return p;
+  }
+
   update(): void {
-    this.sweep();
+    if (!this.bitmapMode && this.world) this.sweep();
     super.update();
   }
 
-  /** 列扫描增量重绘（每帧限量防卡顿） */
+  /** 列扫描增量重绘（每帧限量防卡顿；仅 fallback 模式） */
   private sweep() {
-    const st = this.world.store;
-    const w = this.world.w, h = this.world.h;
+    const world = this.world!;
+    const st = world.store;
+    const w = world.w, h = world.h;
     const data = this.colImg.data;
     let n = COLUMNS_PER_FRAME;
     while (n-- > 0) {

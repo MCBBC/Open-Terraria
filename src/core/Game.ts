@@ -2603,6 +2603,9 @@ export class Game implements GameHooks {
     }
     // 弧线判定：圆心向朝向方向平移（身后不再被波及；小动物/怪物共用同一判定圆）
     const prog = 1 - this.swing.t / this.swing.dur;
+    // 法杖系 noMelee = true（原版 Item.cs case 739/3069 等共 449 处 noMelee）：
+    // 突刺动画不造成任何近战伤害——实体判定整体跳过（tileCut 砍草保留，原版 CutTiles 仍生效）
+    if (ITEM_DEFS[held.id].magic) { void prog; return; }
     // 小动物：任何挥击一击致死
     for (const cent of this.entities.critters) {
       const c = cent as Critter;
