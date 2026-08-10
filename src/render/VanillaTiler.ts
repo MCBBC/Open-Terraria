@@ -320,16 +320,24 @@ export function drawTreeCell(
     return;
   }
   if (foliageOnly) return; // 外扩遍只画树冠/树枝
-  // 树干：TEdit baseX 奇偶修正（特殊帧横向偏一列扫草地）+ 100 格深扫描
-  let baseX = 0;
-  if (fx === 66 && fy <= 45) baseX++;
-  if (fx === 88 && fy >= 66 && fy <= 110) baseX--;
-  if (fx === 22 && fy >= 132 && fy < 198) baseX--;
-  if (fx === 44 && fy >= 132 && fy < 198) baseX++;
-  const type = scanTreeType(st, x + baseX, y).type;
-  const img = type >= 0
-    ? atlas.ensureVImage(`vanilla/Tiles_5_${type}.png`) ?? atlas.ensureVImage('vanilla/Tiles_5.png')
-    : atlas.ensureVImage('vanilla/Tiles_5.png');
+  // 树干贴图来源（TileDrawing GetTileDrawData case 5 vs 583-589/596/616/634 实证）：
+  // 仅 tile 5 普通树按树下草地生物群系选 Tiles_5_N 变体（frameX += 176*(biome+1)）；
+  // 宝石树/装饰树/灰烬树的树干 = 自身 sheet（Tiles_596 等），不查生物群系——
+  // 此前一律套 Tiles_5(_N) 致樱花树长出普通树干（用户标注）
+  const img = sheet === 5
+    ? (() => {
+        // TEdit baseX 奇偶修正（特殊帧横向偏一列扫草地）+ 100 格深扫描
+        let baseX = 0;
+        if (fx === 66 && fy <= 45) baseX++;
+        if (fx === 88 && fy >= 66 && fy <= 110) baseX--;
+        if (fx === 22 && fy >= 132 && fy < 198) baseX--;
+        if (fx === 44 && fy >= 132 && fy < 198) baseX++;
+        const type = scanTreeType(st, x + baseX, y).type;
+        return type >= 0
+          ? atlas.ensureVImage(`vanilla/Tiles_5_${type}.png`) ?? atlas.ensureVImage('vanilla/Tiles_5.png')
+          : atlas.ensureVImage('vanilla/Tiles_5.png');
+      })()
+    : atlas.ensureVImage(`vanilla/Tiles_${sheet}.png`);
   if (!img) return;
   if (fx + 20 <= img.width && fy + 20 <= img.height) {
     // 水平：帧内美术像素占中间 16px（两侧 2px 透明边距），整体 -2 后精确落满本格

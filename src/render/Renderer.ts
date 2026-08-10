@@ -1180,11 +1180,10 @@ export class Renderer {
       }
       const af = this.actionFramesCache;
       let frame: typeof idle = null;
-      // 挥砍/使用中：身体切换到动作姿态（Player.png 倒数 4 帧 = Player_19-22）
+      // 挥砍/使用中：三段 use 姿势（原版 bodyFrame 行 1/2/3，Player.cs:35876）
       if (swing) {
-        // 手部动作帧比道具旋转慢约 16%（跟手），并钳在末帧——
-        // 原来的 %4 会让手在 prog=1 时跳回第一帧，比工具"快半拍"
-        const swingIdx = 19 + Math.min(3, Math.floor((1 - swing.t / swing.dur) * 0.84 * 4));
+        const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
+        const swingIdx = pAnim > 2 / 3 ? 19 : pAnim > 1 / 3 ? 20 : 21;
         frame = af['Player_' + swingIdx] ?? idle;
       } else if (!p.onGround) {
         // 空中：上升用 12（收腿）、下落用 14（张腿）

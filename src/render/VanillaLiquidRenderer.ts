@@ -12,7 +12,8 @@ import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜
-const DEFAULT_OPACITY = [0.6, 0.95, 0.95];  // 水 / 岩浆 / 蜂蜜（原版常量）
+const DEFAULT_OPACITY = [0.5, 0.9, 0.8];  // 水 / 岩浆 / 蜂蜜——原版 oldDrawWater num17:
+                                          // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150)
 
 // 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜）→ 原版 LiquidType（0/1/2）
 function toVanillaType(t: number): number {

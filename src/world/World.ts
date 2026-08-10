@@ -49,6 +49,8 @@ export class World {
   chests: ChestData[] = [];
   /** 墓碑碑文（原版 Sign 系统的最小子集）：锚点 = 墓碑 tile 左上格 */
   signs: Array<{ x: number; y: number; text: string }> = [];
+  /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
+  pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   // Boss 进度旗标
   flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
   // 树登记：砍树干时找到整棵树（roots → 范围）

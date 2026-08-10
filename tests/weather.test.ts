@@ -9,11 +9,19 @@ import { saveGame, loadSave } from '../src/save/SaveFile';
 const ctx = (over: Partial<WeatherCtx> = {}): WeatherCtx => ({
   dayRate: 1,
   dayTime: true,
+  dayTimeTicks: 10000,
   playerStrongEnough: true,
+  playerReadyForKingSlime: true,
+  expertMode: false,
   atmo: 1,
   aboveRockLayer: true,
   graveyardIntensity: 0,
   hardMode: false,
+  noOtherEvent: true,
+  downedSlimeKing: false,
+  maxTilesX: 4200,
+  worldSurface: 300,
+  viewCenterY: 3000,
   ...over,
 });
 

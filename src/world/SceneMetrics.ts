@@ -11,7 +11,7 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
   const d = TILE_DEFS[i];
   if (d?.vanilla && !SHEET_MAP.has(d.vanilla.sheet)) SHEET_MAP.set(d.vanilla.sheet, i);
 }
-const ids = (arr: number[]) => arr.map((n) => SHEET_MAP.get(n)).filter((v): v is number => v != null);
+const ids = (arr: number[]) => new Set(arr.map((n) => SHEET_MAP.get(n)).filter((v): v is number => v != null));
 
 /** 群系计数 tile 集合（SceneMetrics.cs:603-625 AggregateTileCounts 原表） */
 const HOLY_TILES = ids([109, 492, 110, 113, 117, 116, 164, 403, 402]);
@@ -58,6 +58,10 @@ export interface SceneFlags {
   zoneJungle: boolean;
   zoneSnow: boolean;
   zoneDesert: boolean;
+  /** 精确计数（SceneMetrics L604-665：视区扫描聚合计数，天气渲染/沙尘门用） */
+  snowTileCount: number;
+  desertSandTileCount: number;
+  graveyardTileCount: number;
   zoneGlowshroom: boolean;
   zoneMeteor: boolean;
   zoneGraveyard: boolean;
@@ -73,12 +77,13 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneSkyHeight: false, zoneOverworldHeight: false, zoneDirtLayerHeight: false,
   zoneRockLayerHeight: false, zoneUnderworldHeight: false,
   zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false,
-  zoneSnow: false, zoneDesert: false, zoneGlowshroom: false, zoneMeteor: false,
+  zoneSnow: false, zoneDesert: false, snowTileCount: 0, desertSandTileCount: 0, graveyardTileCount: 0,
+  zoneGlowshroom: false, zoneMeteor: false,
   zoneGraveyard: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
 };
 
-const countSet = (counts: Map<number, number>, set: number[]): number => {
+const countSet = (counts: Map<number, number>, set: Set<number>): number => {
   let n = 0;
   for (const t of set) n += counts.get(t) ?? 0;
   return n;
@@ -101,6 +106,9 @@ export function scanScene(
   const sy0 = Math.max(0, tileY - 61), sy1 = Math.min(h - 1, tileY + 62);
   const counts = new Map<number, number>();
   let sunflower = 0;
+  let oceanSand = 0;
+  const oceanTopY = (worldSurface + rockLevel) / 2 + 40; // oceanLevel（WorldGen.cs:4393）
+  const beachDist = Math.max(24, Math.floor(w * 0.06)); // beachDistance（WorldGen.cs:4407 近似）
   for (let y = sy0; y <= sy1; y++) {
     for (let x = sx0; x <= sx1; x++) {
       const i = st.idx(x, y);
@@ -108,6 +116,8 @@ export function scanScene(
       const t = st.type[i];
       counts.set(t, (counts.get(t) ?? 0) + 1);
       if (t === SUNFLOWER) sunflower++;
+      // isDesertBiomeSand && oceanDepths（SceneMetrics L376-380）：海洋沙不计入沙漠沙
+      if (SAND_TILES.has(t) && y <= oceanTopY && (x < beachDist || x > w - beachDist)) oceanSand++;
     }
   }
 
@@ -125,7 +135,8 @@ export function scanScene(
   const mushroom = countSet(counts, MUSHROOM_TILES);
   const meteor = countSet(counts, METEOR_TILES);
   const dungeonTiles = countSet(counts, DUNGEON_TILES);
-  const desert = Math.max(0, countSet(counts, SAND_TILES));
+  // DesertSandTileCount（SceneMetrics L665：sand - oceanSand；oceanSand 在扫描循环内按 oceanDepths 逐格计）
+  const desert = Math.max(0, countSet(counts, SAND_TILES) - oceanSand);
   const graveyard = Math.max(0, countSet(counts, GRAVEYARD_TILES) - (sunflower >> 1));
 
   // Zone 判定（CalculateZones L673-697）
@@ -154,6 +165,9 @@ export function scanScene(
     zoneJungle: jungle >= JUNGLE_THRESHOLD && !zoneUnderworldHeight,
     zoneSnow: snow >= SNOW_THRESHOLD,
     zoneDesert,
+    snowTileCount: snow,
+    desertSandTileCount: desert, // 已扣海洋沙（oceanDepths 门见上）近似——扫描窗内沙漠区不含海岸时与原版一致
+    graveyardTileCount: graveyard,
     zoneGlowshroom: mushroom >= MUSHROOM_THRESHOLD,
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,

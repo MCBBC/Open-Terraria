@@ -86,25 +86,36 @@ export function tickInvasion(w: World, warn: number): { warn: number; announce: 
     w.invasionDelay = 0;
     return { warn: 0, announce, won: wonType };
   }
-  // 前线推进（:63813-63845）：1 tile/帧 向 spawnTileX；首次抵达即公告 arrived
+  // 前线推进（:63813-63845）：1 tile/帧 向 spawnTileX；首次抵达即公告 arrived，
+  // 且 warn 只在推进中递减（抵达后冻结——原版 warn-- 在推进分支内，抵达不再周期重播）
   if (w.invasionX !== w.spawnX) {
     if (w.invasionX < w.spawnX) w.invasionX = Math.min(w.spawnX, w.invasionX + 1);
     else w.invasionX = Math.max(w.spawnX, w.invasionX - 1);
     if (w.invasionX === w.spawnX) announce = invasionWarningMisc(w);   // arrived
+    else warn--;
   }
   // 周期公告（:63846-63850）：warn<=0 → 重置 3600 并播报
-  const nw = warn - 1;
-  if (nw <= 0) {
+  if (warn <= 0) {
     announce = announce ?? invasionWarningMisc(w);
     return { warn: 3600, announce, won: 0 };
   }
-  return { warn: nw, announce, won: 0 };
+  return { warn, announce, won: 0 };
 }
 
 /** ShouldSpawnInvasionEnemies（NPC.cs:352-374）：玩家侧 invaders 判定。
- *  玩家在地面（地表+屏高内）且距前线 ±3000px */
-export function shouldSpawnInvasionEnemies(w: World, px: number, py: number, screenHPx: number): boolean {
+ *  玩家在地面（地表+屏高内）且距前线 ±3000px；
+ *  次级条件（:366-375）：前线已达地图中线 ±5 格时，玩家 ±3000px 内有城镇 NPC
+ *  → 2/3 概率也判 invaders（前线过半后城镇同样被袭击） */
+export function shouldSpawnInvasionEnemies(
+  w: World, px: number, py: number, screenHPx: number,
+  townNpcXs: number[] = [],
+): boolean {
   if (!invasionActive(w)) return false;
   if (py > w.groundLevel * 16 + screenHPx && w.spawnY <= w.groundLevel) return false; // 地下
-  return Math.abs(px - w.invasionX * 16) <= 3000;
+  if (Math.abs(px - w.invasionX * 16) <= 3000) return true;
+  const mid = w.store.w / 2;
+  if (Math.abs(w.invasionX - mid) <= 5 && townNpcXs.some((tx) => Math.abs(px - tx) < 3000)) {
+    return Math.random() >= 1 / 3;   // rand.Next(3)==0 → break（false）
+  }
+  return false;
 }

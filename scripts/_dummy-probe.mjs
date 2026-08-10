@@ -22,6 +22,7 @@ const res = await page.evaluate(() => {
   st.setTile(px, py, DUMMY, 0, 0); st.setTile(px + 1, py, DUMMY, 18, 0);
   st.setTile(px, py + 1, DUMMY, 0, 18); st.setTile(px + 1, py + 1, DUMMY, 18, 18);
   st.setTile(px, py + 2, DUMMY, 0, 36); st.setTile(px + 1, py + 2, DUMMY, 18, 36);
+  g.spawnDummyAt(px, py);
   return { px, py };
 });
 await new Promise((r) => setTimeout(r, 500));

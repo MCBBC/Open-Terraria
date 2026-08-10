@@ -23,6 +23,11 @@ const VERTICAL_CHANNELS: Array<{ sheet: number; color: keyof Appearance | 'white
 /**
  * 复合帧网格映射（1.4.5.6 PlayerDrawSet.CreateCompositeData：躯干/手臂/肩为 9列×4行 网格，
  * CreateCompositeFrameRect = x*40 + y*56；男用 0-1 行，女 +2 行）。
+ * ★ 臂部像素偏移勘误(2026-08-10,用户报"部件不够贴合"):原版 GetCompositeOffset
+ * (:4189-4197 的后臂 +6/+2、前臂 -5/0)是 DrawData 的 position 与 origin **共用**偏移——
+ * 两者相消,所有复合部件左上角一律对齐躯干锚点(headgear 微偏除外),偏移量只作旋转轴心
+ * (将来做 use 手臂旋转时 pivot = bodyVect(20,28)+偏移)。此前误当烘焙位移,导致后臂整体
+ * 偏右下 (6,2)、前臂偏左 (5,0)——已归零对齐。
  * 前臂帧表 frameIndex2（按 bodyFrame 行 0..19）：
  *   0→(2,0) 1→(3,0) 2→(4,0) 3→(5,0) 4→(6,0) 5→(2,1) 6→(3,1)
  *   7-10→(4,1) 11-13→(3,1) 14→(5,1) 15,16→(6,1) 17→(5,1) 18,19→(3,1)
@@ -162,49 +167,50 @@ export function compositePaperDoll(a: Appearance, equip?: { head?: number | null
   for (let row = 0; row < BODY_FRAMES; row++) {
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
-    // 部件像素偏移（PlayerDrawLayers:4189-4197：后臂 +6/+2、前臂 -5/0；肩默认 0 仅特殊盔甲非零）
-    const BACK_ARM_OFF = { x: 6, y: 2 };
-    const FRONT_ARM_OFF = { x: -5, y: 0 };
-    const drawTinted = (img: HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }, off?: { x: number; y: number }) => {
+    const drawTinted = (img: HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
+      // 全部部件左上角对齐帧锚点(原版 position-origin 相消;臂偏移仅是旋转 pivot,见文件头)
       ctx.drawImage(tint(img, color), x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        (off?.x ?? 0), row * FRAME_H + (off?.y ?? 0), FRAME_W, FRAME_H);
+        0, row * FRAME_H, FRAME_W, FRAME_H);
     };
-    const drawArmorCell = (img: HTMLImageElement, x: number, y: number, off?: { x: number; y: number }) => {
+    const drawArmorCell = (img: HTMLImageElement, x: number, y: number) => {
       ctx.drawImage(img, x * FRAME_W, y * FRAME_H, FRAME_W, FRAME_H,
-        (off?.x ?? 0), row * FRAME_H + (off?.y ?? 0), FRAME_W, FRAME_H);
+        0, row * FRAME_H, FRAME_W, FRAME_H);
     };
     if (bodyArmorImg) {
       // 身甲复合绘制（PlayerDrawLayers:1345-1366 同构）：后肩→后臂→躯干→前肩→前臂，不再画衣着层
       drawArmorCell(bodyArmorImg, 1, 1 + dy);                          // 后肩
-      drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2, BACK_ARM_OFF);    // 后臂
-      drawArmorCell(bodyArmorImg, torsoX, dy);                          // 躯干
-      drawArmorCell(bodyArmorImg, 0, 1 + dy);                           // 前肩
-      drawArmorCell(bodyArmorImg, arm[0], arm[1], FRONT_ARM_OFF);       // 前臂
+      drawArmorCell(bodyArmorImg, arm[0], arm[1] + 2);                 // 后臂
+      drawArmorCell(bodyArmorImg, torsoX, dy);                         // 躯干
+      drawArmorCell(bodyArmorImg, 0, 1 + dy);                          // 前肩
+      drawArmorCell(bodyArmorImg, arm[0], arm[1]);                     // 前臂
       continue;
     }
-    // 无盔甲复合绘制顺序（PlayerDrawLayers:1374-1398 后臂 / 前臂同构）：
-    // 皮肤臂(7,5) → 底衫臂(8) → 衬衫臂(13)；肩/躯干为 4/6 双层
+    // 无盔甲复合绘制（DrawPlayer_12_SkinComposite_BackArmShirt :1385-1403 /
+    // DrawPlayer_28_ArmOverItemComposite :3796-3803）：
+    //   后臂层序 = 皮肤7→皮肤5→底衫8→衬衫13（:1385-1403）；
+    //   前臂层序 = 皮肤7→底衫8→衬衫13→衬衫6（:3796-3803,第4层是 6 不是 5）；
+    //   肩/躯干按层序:底衫4(后肩→躯干→前肩) → 衬衫6(同序)——对应原版 13/14 两个 pass
     const draws = [
-      { d: gridRect(3, torsoX, dy, a.skinColor) },
-      { d: gridRect(7, arm[0], arm[1] + 2, a.skinColor), off: BACK_ARM_OFF },   // 后臂皮肤 A
-      { d: gridRect(5, arm[0], arm[1] + 2, a.skinColor), off: BACK_ARM_OFF },   // 后臂皮肤 B
-      { d: gridRect(8, arm[0], arm[1] + 2, under), off: BACK_ARM_OFF },         // 后臂底衫
-      { d: gridRect(13, arm[0], arm[1] + 2, shirt), off: BACK_ARM_OFF },        // 后臂衬衫
-      { d: gridRect(4, 1, 1 + dy, under) },                                     // 后肩
-      { d: gridRect(6, 1, 1 + dy, shirt) },
-      { d: gridRect(4, torsoX, dy, under) },                                    // 躯干
-      { d: gridRect(6, torsoX, dy, shirt) },
-      { d: gridRect(4, 0, 1 + dy, under) },                                     // 前肩
-      { d: gridRect(6, 0, 1 + dy, shirt) },
-      { d: gridRect(7, arm[0], arm[1], a.skinColor), off: FRONT_ARM_OFF },      // 前臂皮肤 A
-      { d: gridRect(5, arm[0], arm[1], a.skinColor), off: FRONT_ARM_OFF },      // 前臂皮肤 B
-      { d: gridRect(8, arm[0], arm[1], under), off: FRONT_ARM_OFF },            // 前臂底衫
-      { d: gridRect(13, arm[0], arm[1], shirt), off: FRONT_ARM_OFF },           // 前臂衬衫
+      { d: gridRect(3, torsoX, dy, a.skinColor) },                              // 躯干皮肤(:1280)
+      { d: gridRect(7, arm[0], arm[1] + 2, a.skinColor) },                      // 后臂皮肤 A
+      { d: gridRect(5, arm[0], arm[1] + 2, a.skinColor) },                      // 后臂皮肤 B
+      { d: gridRect(8, arm[0], arm[1] + 2, under) },                            // 后臂底衫
+      { d: gridRect(13, arm[0], arm[1] + 2, shirt) },                           // 后臂衬衫
+      { d: gridRect(4, 1, 1 + dy, under) },                                     // 后肩·底衫
+      { d: gridRect(4, torsoX, dy, under) },                                    // 躯干·底衫
+      { d: gridRect(4, 0, 1 + dy, under) },                                     // 前肩·底衫
+      { d: gridRect(6, 1, 1 + dy, shirt) },                                     // 后肩·衬衫
+      { d: gridRect(6, torsoX, dy, shirt) },                                    // 躯干·衬衫
+      { d: gridRect(6, 0, 1 + dy, shirt) },                                     // 前肩·衬衫
+      { d: gridRect(7, arm[0], arm[1], a.skinColor) },                          // 前臂皮肤
+      { d: gridRect(8, arm[0], arm[1], under) },                                // 前臂底衫
+      { d: gridRect(13, arm[0], arm[1], shirt) },                               // 前臂衬衫
+      { d: gridRect(6, arm[0], arm[1], shirt) },                                // 前臂衬衫 B(:3803)
     ];
-    for (const { d, off } of draws) {
+    for (const { d } of draws) {
       const img = sheetRect(a.skinVariant, d.sheet);
       if (!img) continue;
-      drawTinted(img, d.x, d.y, d.color, off);
+      drawTinted(img, d.x, d.y, d.color);
     }
   }
 

@@ -835,6 +835,13 @@ export class Enemy extends Entity {
       if (flag4 && this.vy > 0 && sy < 0) this.vy -= accel;
     }
     this.facing = this.vx > 0 ? 1 : -1;
+    // noTileCollide 成员(仆从 type 5 等)原版幽灵位移:直积分、无碰撞无反弹——
+    // 曾对所有成员 moveAndCollide+反弹,仆从撞墙弹跳完全不像原版(穿墙追击)
+    if (this.vanilla?.noTileCollide) {
+      this.x += this.vx;
+      this.y += this.vy;
+      return;
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     // 撞墙/撞地反弹（L51047-51066）：6/173 ×0.4，其余（含蜂）×0.7；
     // X 最小弹速 ±2 / Y 下方 +2 上方 -2（眼睛同款近似，最小值暂略）
@@ -1435,6 +1442,12 @@ export class Enemy extends Entity {
         const accel = this.phase === 1 ? 0.04 : 0.07;
         this.servoTo(player.cx, player.cy + hoverY, spd, accel);
         this.facing = dx > 0 ? 1 : -1;
+        // 残余自旋衰减(cs:20249-20256 else 支):变身后 ai2 保留 0.5,
+        // P2 悬浮期每帧 -0.005 → "边转边停"的标志性收尾
+        if (this.spinSpeed > 0) {
+          this.spinSpeed = Math.max(0, this.spinSpeed - 0.005);
+          this.visAngle += this.spinSpeed;
+        }
         // 仆从(P1 专属, cs:20096-20145):NPC 在玩家上方且 <500px 时累计,110t 召一只
         if (this.phase === 1) {
           if (this.y + this.h < player.y && dist < 500) {
@@ -1496,26 +1509,20 @@ export class Enemy extends Entity {
         break;
       }
       case 5: {
-        // ---- 自旋变身(cs:20238-20344):加速段 ai2+=0.005 钳 0.5(100t) →
-        //     减速段 ai2-=0.005 钳 0(再 100t) → 进 P2 悬浮;gore/尘/咆哮 ----
-        if (this.spinPhase === 0) {
-          this.spinSpeed = Math.min(0.5, this.spinSpeed + 0.005);
-        } else {
-          this.spinSpeed = Math.max(0, this.spinSpeed - 0.005);
-        }
+        // ---- 自旋变身(cs:20238-20344):★单段加速 100t(ai2 +=0.005 钳 0.5,
+        //     速度 0.98 阻尼)。100t 到点【立即变身】P2:SoundID 3 + gore×6 +
+        //     尘×20 + 吼声(15)——残余自旋在 P2 悬浮中按 -0.005/帧 衰减
+        //     (原版"边转边停")。曾做成 加速100t+减速100t 共 200t 才变身,节奏翻倍 ----
+        this.spinSpeed = Math.min(0.5, this.spinSpeed + 0.005);
         this.visAngle += this.spinSpeed;
         this.vx *= 0.98; this.vy *= 0.98;
-        if (this.aiT % 4 === 0) game.spawnParticles(this.cx, this.cy, '#C02020', 3, 2);
         if (this.aiT >= 100) {
           this.aiT = 0;
-          if (this.spinPhase === 0) {
-            this.spinPhase = 1;                      // 减速段
-          } else {
-            // 变身完成(cs:20310-20330):6 份 gore + 20 尘 + 吼声(15)
-            this.state = 0; this.spinPhase = 0;
-            game.playSfx('roar');
-            game.spawnParticles(this.cx, this.cy, '#FF3030', 30, 3);
-          }
+          this.state = 0;                       // 直接进 P2 悬浮(cs:20309)
+          this.spinPhase = 0;
+          game.playSfx('roar');                 // SoundID 15
+          game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 3×2 份
+          game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
         }
         break;
       }

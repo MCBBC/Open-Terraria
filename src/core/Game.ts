@@ -32,7 +32,7 @@ import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
-import { scanScene, type SceneFlags } from '../world/SceneMetrics';
+import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
 import { pickMusic, newMusicState, bossMusicFor, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
@@ -263,7 +263,7 @@ export class Game implements GameHooks {
   guideSpawned = false;
   private lastWasDay: boolean | null = null;
   /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
-  scene: SceneFlags = { tileX: 0, tileY: 0, belowSurface: false, zoneSkyHeight: false, zoneOverworldHeight: false, zoneDirtLayerHeight: false, zoneRockLayerHeight: false, zoneUnderworldHeight: false, zoneCorrupt: false, zoneCrimson: false, zoneHallow: false, zoneJungle: false, zoneSnow: false, zoneDesert: false, zoneGlowshroom: false, zoneMeteor: false, zoneGraveyard: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false, zoneUndergroundDesert: false, townNPCCount: 0 };
+  scene: SceneFlags = { ...EMPTY_SCENE };
   private musicState: MusicState = newMusicState();
   private lastMusic = -1;
   private _mapClickLatch = false;
@@ -2685,21 +2685,56 @@ export class Game implements GameHooks {
   /** 天气推进（原版 Main.UpdateWeather + updateCloudLayer + 雨调度/沙尘暴，60Hz）：
    *  atmo = 玩家深度线性近似（worldSurface 以上 1 / rockLevel 以下 0）；雷声按距离衰减；
    *  雨声层 gain = cloudAlpha×atmo；渲染 hooks（雪区比例/沙尘门）随 scene 刷新 */
+  /** 墓园视觉强度（SceneState.UpdateGraveyard：lerp(16,36,count) 向目标 0.02/0.1 逼近——持久缓动） */
+  private graveyardIntensity = 0;
+
   private updateWeather(): void {
     const w = this.world;
     const weather = w.weather;
     const pty = Math.floor(this.player.cy / TILE);
     const gl = w.groundLevel;
     const rl = Math.max(gl + 1, w.rockLevel);
-    const atmo = pty <= gl ? 1 : pty >= rl ? 0 : 1 - (pty - gl) / (rl - gl);
+    // atmo 精确公式（Main.cs:62622：(y/16-(65+10×(maxTilesX/4200)²))/(worldSurface/5)，y=视口中心）；
+    // 旧版深度线性近似已废弃
+    const cam = this.camera;
+    const viewCY = cam ? cam.y : this.player.cy;
+    const atmoBase = (viewCY / 16 - (65 + 10 * (w.w / 4200) ** 2)) / Math.max(1, gl / 5);
+    const atmo = Math.max(0, Math.min(1, atmoBase));
+    // 墓园强度逼近（SceneState.cs:415-418 MoveTowards 0.02/0.1）
+    const gyTarget = Math.max(0, Math.min(1, (this.scene.graveyardTileCount - 16) / (36 - 16)));
+    const gyStep = this.graveyardIntensity < gyTarget ? 0.02 : 0.1;
+    this.graveyardIntensity += Math.max(-gyStep, Math.min(gyStep, gyTarget - this.graveyardIntensity));
+    // 白天 tick 进度（原版 time 0-54000 ↔ 我们 timeOfDay 白天前半段 0.25-0.75 线性）
+    const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - 0.25) / 0.5) * 54000 : 0;
+    weather.setWorldSize(w.w, w.h);
     weather.update({
       dayRate: 1,
       dayTime: w.clock.isDay,
+      dayTimeTicks,
       playerStrongEnough: this.player.maxHp >= 120,
+      playerReadyForKingSlime: this.player.maxHp > 140 && this.player.defense > 8, // Main.cs:64645
+      expertMode: false,
       atmo,
       aboveRockLayer: pty < rl,
-      graveyardIntensity: 0,
+      graveyardIntensity: this.graveyardIntensity,
       hardMode: !!w.flags.hardMode,
+      noOtherEvent: !w.clock.bloodMoon && this.world.invasionType === 0,
+      downedSlimeKing: !!w.flags.downedSlimeKing,
+      maxTilesX: w.w,
+      worldSurface: gl,
+      viewCenterY: viewCY,
+      onCoinRain: (x, y, type, stack) => {
+        // 非实心 32×32 门（WorldGen.cs:71847）
+        const st = w.store;
+        const tx0 = Math.floor(x / 16), ty0 = Math.floor(y / 16);
+        let solid = false;
+        for (let dx = 0; dx <= 1 && !solid; dx++) for (let dy = 0; dy <= 1; dy++) {
+          if (st.inBounds(tx0 + dx, ty0 + dy) && st.isSolid(tx0 + dx, ty0 + dy)) { solid = true; break; }
+        }
+        if (solid) return;
+        const key = type === 71 ? 'coin_silver' : type === 72 ? 'coin_gold' : 'coin_platinum';
+        this.spawnDrop(x, y, key, stack, 0, 3);
+      },
       onThunder: (distPx) => {
         // 原版 SoundID 43：thunderDistance×15px 处发声——按距离衰减近似
         const vol = Math.max(0.15, 1 - distPx / 2400);
@@ -2707,6 +2742,9 @@ export class Game implements GameHooks {
       },
       onSandstormToggle: (happening) => {
         this.cb.onToast(happening ? '🏜 沙尘暴来了！' : '沙尘暴平息了');
+      },
+      onSlimeRainToggle: (happening) => {
+        this.cb.onToast(happening ? '🟢 史莱姆从天而降！' : '史莱姆雨停了');
       },
     });
     // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]）
@@ -3212,7 +3250,8 @@ export class Game implements GameHooks {
     // downedBoss3（杀过骷髅王）决定地牢出 守卫/常规池；
     // invaders = ShouldSpawnInvasionEnemies（NPC.cs:352：入侵前线 3000px 内的地表玩家）；
     // activeIds = 场上存活 NPC 集（入侵选表 AnyNPCs 去重）
-    const invaders = shouldSpawnInvasionEnemies(w, p.cx, p.cy, this.camera.viewH / (this.camera.zoom || 1));
+    const invaders = shouldSpawnInvasionEnemies(w, p.cx, p.cy, this.camera.viewH / (this.camera.zoom || 1),
+      this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).map((n) => (n as TownNPC).cx));
     const activeIds = new Set<number>();
     for (const e of this.entities.enemies) {
       const en = e as Enemy;

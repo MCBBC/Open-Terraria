@@ -32,7 +32,7 @@ function readVarint(u8: Uint8Array, pos: { i: number }): number {
 }
 
 /** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
-export function saveGame(world: World, player: Player, playTimeMs: number): string {
+export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs']): string {
   const st = world.store;
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,

@@ -10,22 +10,42 @@ export interface WeatherCtx {
   dayRate: number;
   /** 是否白天（原版 Main.dayTime） */
   dayTime: boolean;
+  /** 白天 tick 进度 0-54000（原版 Main.time；史莱姆雨自然触发门 time<27000） */
+  dayTimeTicks: number;
   /** 玩家生命上限 ≥120（雨/风的强度门，NPC.cs:64362/58248） */
   playerStrongEnough: boolean;
-  /** 地表开阔度 0-1（原版 atmo；玩家深度线性近似：worldSurface 以上 1 / rockLevel 以下 0） */
+  /** 任意玩家就绪打史莱姆王（Main.cs:64645：statLifeMax>140 且 defense>8） */
+  playerReadyForKingSlime: boolean;
+  /** 专家模式（史莱姆雨刷怪表/频率） */
+  expertMode: boolean;
+  /** 地表开阔度 0-1（原版 atmo = (y/16-(65+10×(maxTilesX/4200)²))/(worldSurface/5)，UpdateAtmosphereTransparencyToSkyColor Main.cs:62622） */
   atmo: number;
   /** 玩家在岩石层以上（闪电触发门，UpdateWeather L58202） */
   aboveRockLayer: boolean;
-  /** 墓园视觉强度 0-1（墓园闪电，无此系统传 0） */
+  /** 墓园视觉强度 0-1（SceneState.UpdateGraveyard：lerp(16,36,GraveyardTileCount) 向目标 0.02/0.1 逼近） */
   graveyardIntensity: number;
   /** 困难模式（沙尘暴频率门） */
   hardMode: boolean;
+  /** 事件冲突门（史莱姆雨不与血月/日食/入侵/南瓜霜月同开，Main.cs:7003） */
+  noOtherEvent: boolean;
+  /** 杀过史莱姆王（自然触发频率门） */
+  downedSlimeKing: boolean;
+  /** 世界宽 tile（金币雨数额/atmo 公式用） */
+  maxTilesX: number;
+  /** 世界地表线 tile（atmo 公式） */
+  worldSurface: number;
+  /** 视口中心 Y px（atmo 公式的 y） */
+  viewCenterY: number;
+  /** 金币雨掉落回调（WorldGen.cs:71817-71858：type 71 银/72 金/73 铂金） */
+  onCoinRain?: (x: number, y: number, type: 71 | 72 | 73, stack: number) => void;
   /** 雷声落点回调（thunderDelay 归零时；参数 = 与玩家的距离 px，已含方向由 Game 决定播放） */
   onThunder?: (distancePx: number) => void;
   /** 开始下雨（公告/toast；false=instant 切换不发） */
   onRainStart?: () => void;
   /** 沙尘暴开始/结束 */
   onSandstormToggle?: (happening: boolean) => void;
+  /** 史莱姆雨开始/结束公告 */
+  onSlimeRainToggle?: (happening: boolean) => void;
 }
 
 /** 原版风/暴雨判定阈值（Main.cs:66137-66140 MainCSS 构造区） */
@@ -45,6 +65,10 @@ export interface WeatherSave {
   numClouds: number;
   windSpeedTarget: number;
   sand: { happening: boolean; timeLeft: number; severity: number; intendedSeverity: number };
+  coinRain?: number;
+  slimeRain?: boolean;
+  slimeRainTime?: number;
+  slimeRainKillCount?: number;
 }
 
 export function weatherToSave(w: WeatherState): WeatherSave {
@@ -55,6 +79,10 @@ export function weatherToSave(w: WeatherState): WeatherSave {
       happening: w.sandstorm.happening, timeLeft: w.sandstorm.timeLeft,
       severity: w.sandstorm.severity, intendedSeverity: w.sandstorm.intendedSeverity,
     },
+    coinRain: w.coinRain,
+    slimeRain: w.slimeRain,
+    slimeRainTime: w.slimeRainTime,
+    slimeRainKillCount: w.slimeRainKillCount,
   };
 }
 
@@ -72,6 +100,10 @@ export function applyWeatherSave(w: WeatherState, s: Partial<WeatherSave>): void
     if (s.sand.severity !== undefined) w.sandstorm.severity = s.sand.severity;
     if (s.sand.intendedSeverity !== undefined) w.sandstorm.intendedSeverity = s.sand.intendedSeverity;
   }
+  if (s.coinRain !== undefined) w.coinRain = s.coinRain;
+  if (s.slimeRain !== undefined) w.slimeRain = s.slimeRain;
+  if (s.slimeRainTime !== undefined) w.slimeRainTime = s.slimeRainTime;
+  if (s.slimeRainKillCount !== undefined) w.slimeRainKillCount = s.slimeRainKillCount;
 }
 
 export class WeatherState {
@@ -104,6 +136,14 @@ export class WeatherState {
   shouldUseStormMusic = false;
 
   sandstorm = new SandstormState();
+  /** 金币雨余量（Main.cs:1266；StartRain 1/25 触发，雨停/风暴即清零） */
+  coinRain = 0;
+  /** 史莱姆雨（Main.cs:1115-1120）：flag/倒计时（正=进行中，负=冷却向 0 回升）/击杀计数 */
+  slimeRain = false;
+  slimeRainTime = 0;
+  slimeRainKillCount = 0;
+  /** 瓢虫雨 boost（Main.cs：ladyBug 幸运套装驱动；无幸运系统时恒 0——字段位保留） */
+  ladyBugRainBoost = 0;
   /** RNG（可注入固定种子做单测） */
   private rng: RNG;
 
@@ -128,10 +168,10 @@ export class WeatherState {
   }
 
   startRain(instant = false, strengthOverride?: number) {
-    // 金币雨 1/25（运气修正省略——单机 RollLuck(25) 期望一致，概率照抄）
+    // 金币雨 1/25（Main.cs:64131-64137：数额 = Next(75,151)×10000×maxTilesX/4200）
     const range = 25;
     if (this.rng.int(0, range - 1) === 0) {
-      // 金币雨公告：Game 侧在 onRainStart 里读 coinRain 标志；原版数额与 maxTilesX 成比例
+      this.coinRain = Math.round(this.rng.int(75, 150) * 100 * 100 * (this.maxTilesXRef / 4200));
       this.coinRainPending = true;
     }
     const num2 = 86400;
@@ -171,19 +211,98 @@ export class WeatherState {
 
   /** 金币雨公告待处理标志（StartRain 1/25；Game 消费后清零） */
   coinRainPending = false;
+  /** 世界宽（金币雨数额比例用；Game attach 时回填） */
+  maxTilesXRef = 4200;
 
   // ================= 每帧主更新（UpdateWeather L58124 + updateCloudLayer + 17142 段） =================
 
   /** 每 tick 调用（60Hz；暂停/菜单不调） */
   update(ctx: WeatherCtx) {
+    this.maxTilesXRef = ctx.maxTilesX;
     this.updateLightningTimers(ctx);
     this.updateWind(ctx);
     this.updateCloudAlpha(ctx);
     this.updateCloudBG();
     this.updateCloudCounts();
     this.updateRainSchedule(ctx);
-    this.updateMusicGates();
+    this.updateMusicGates(ctx.dayTimeTicks / 54000 * 0.5 + (ctx.dayTime ? 0.25 : 0.75) % 1 || 0.5);
     this.sandstorm.update(ctx, this.rng, this.windSpeedCurrent);
+    this.updateCoinRain(ctx);
+    this.updateSlimeRain(ctx);
+  }
+
+  /** 金币雨掉落（WorldGen.cs:71811-71858） */
+  private updateCoinRain(ctx: WeatherCtx) {
+    if (this.coinRain <= 0) return;
+    if (!this.raining || this.shouldUseStormMusic) { this.coinRain = 0; return; }
+    if (this.rng.int(0, 29) !== 0) return;
+    // 全图随机 x、顶部 5% 高度带；玩家附近 ±2400px 以 1/2 概率锚定
+    let x = this.rng.int(50, ctx.maxTilesX - 51) * 16;
+    const y = this.rng.int(0, Math.floor(this.maxTilesYRef * 0.05) - 1) * 16;
+    x = Math.max(800, Math.min((ctx.maxTilesX - 50) * 16, x));
+    // 非实心 32×32 门由 Game 落点回调侧判定（此处只出提案）
+    let type: 71 | 72 | 73 = 71;
+    let stack = this.rng.int(50, 99);
+    let worth = stack;
+    if (this.rng.int(0, 2) === 0) { type = 72; stack = this.rng.int(25, 99); worth = stack * 100; }
+    if (this.rng.int(0, 8) === 0) { type = 73; stack = 1; worth = 1 * 100 * 100; }
+    ctx.onCoinRain?.(x, y, type, stack);
+    this.coinRain -= worth;
+    if (this.coinRain < 0) this.coinRain = 0;
+  }
+  private maxTilesYRef = 1200;
+  /** 世界高（金币雨 y 带；Game attach 时回填） */
+  setWorldSize(w: number, h: number) { this.maxTilesXRef = w; this.maxTilesYRef = h; }
+
+  /** 史莱姆雨调度（Main.cs:64305-64323 时间推进 + 64368-64412 自然触发） */
+  private updateSlimeRain(ctx: WeatherCtx) {
+    if (this.slimeRainTime > 0) {
+      this.slimeRainTime -= ctx.dayRate;
+      if (this.slimeRainTime <= 0) this.stopSlimeRain(ctx);
+    } else if (this.slimeRainTime < 0) {
+      this.slimeRainTime += ctx.dayRate;
+      if (this.slimeRainTime > 0) this.slimeRainTime = 0;
+    }
+    if (this.slimeRain || !ctx.dayTime || ctx.dayTimeTicks >= 27000 || !ctx.noOtherEvent) return;
+    // 自然触发（L64373-64409）：num3 = 450000/dayRate；未杀王 /2；困难 ×1.5；
+    // 玩家未就绪 ×5；门 = (就绪 || 专家) 且掷中
+    let num3 = Math.floor(450000 / Math.max(1, ctx.dayRate));
+    if (!ctx.downedSlimeKing) num3 = Math.floor(num3 / 2);
+    if (ctx.hardMode) num3 = Math.floor(num3 * 1.5);
+    const ready = ctx.playerReadyForKingSlime;
+    if (!ready) num3 *= 5;
+    if (num3 > 0 && (ready || ctx.expertMode) && this.rng.int(0, num3 - 1) === 0) {
+      this.startSlimeRain(ctx);
+    }
+  }
+
+  /** StartSlimeRain（Main.cs:64213-64241 netMode 0 主干） */
+  startSlimeRain(ctx?: WeatherCtx) {
+    if (this.slimeRain) return;
+    this.slimeRainTime = this.rng.int(32400, 53999);
+    this.slimeRain = true;
+    this.slimeRainKillCount = 0;
+    ctx?.onSlimeRainToggle?.(true);
+  }
+
+  /** StopSlimeRain（Main.cs:64248-64273）：冷却 = -Next(3024,6047)×100 */
+  stopSlimeRain(ctx?: WeatherCtx) {
+    if (!this.slimeRain) return;
+    this.slimeRainTime = -this.rng.int(3024, 6047) * 100;
+    this.slimeRain = false;
+    ctx?.onSlimeRainToggle?.(false);
+  }
+
+  /** 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount++，≥150 出王） */
+  advanceSlimeRainKill(vanillaNpcId: number): boolean {
+    if (!this.slimeRain || vanillaNpcId !== 1) return false; // slimeRainNPC 表仅 [1]=true（Main.cs:8800）
+    let threshold = 150;
+    this.slimeRainKillCount++;
+    if (this.slimeRainKillCount >= threshold) {
+      this.slimeRainKillCount = -Math.floor(threshold / 2);
+      return true; // 召唤史莱姆王（场上无 50 时）
+    }
+    return false;
   }
 
   /** 闪电计时（UpdateWeather L58129-58170） */
@@ -435,6 +554,7 @@ export class WeatherState {
 
   /** UI 天气词（Main.cs:46236 八档链） */
   statusText(): string {
+    if (this.slimeRain) return 'SlimeRain';
     if (this.shouldUseStormMusic) return 'Storm';
     if (this.maxRaining > 0.6) return 'HeavyRain';
     if (this.maxRaining >= 0.2) return 'Rain';
