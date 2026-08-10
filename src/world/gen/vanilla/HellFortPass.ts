@@ -10,7 +10,7 @@ import { TILE_BY_KEY } from '../../../data/tiles';
 import { placeDoorClosed } from '../../Door';
 
 const OBS_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
-const HELL_BRICK = TILE_BY_KEY['v_76_obsidian_brick'] ?? OBS_BRICK;
+const HELL_BRICK = TILE_BY_KEY['v_76_hellstone_brick'] ?? OBS_BRICK;
 const PLATFORM = TILE_BY_KEY['platform']!;
 const TORCH = TILE_BY_KEY['torch']!;
 

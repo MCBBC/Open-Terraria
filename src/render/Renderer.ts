@@ -56,6 +56,9 @@ const _lightTap = new Uint8Array(12);
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
+// 旋转族 NPC（原版 npc.rotation 驱动绘制朝向；FindFrame 不做朝向翻转）：
+// 35/68=骷髅王头/守卫、125/126=双子、127-131=Prime 头+四部件、134-136=毁灭者链
+const ROTATION_NPC = new Set([35, 68, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136]);
 
 /** 按原版 FindFrame 分族规则算当前帧 index */
 function vanillaFrameIdx(e: Enemy, frames: number): number {
@@ -727,10 +730,13 @@ export class Renderer {
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
         ctx.save();
         ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
-        // EoC(AI_004)整体随 visAngle 旋转(原版 npc.rotation;其余 NPC 朝向翻转)
+        // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
+        // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
+        const rotId = ROTATION_NPC.has(e.vanillaId);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
+        else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
-        if (e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
+        if (!rotId && e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;

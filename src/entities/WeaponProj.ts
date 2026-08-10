@@ -12,22 +12,21 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 
-/** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致） */
-function drawProj(r: Renderer, cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string): void {
+/** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
+ *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string): void {
   const ctx = r.canvas.getContext('2d');
   if (!ctx) return;
-  const x = (e.x + e.w / 2 - cam.x) * cam.zoom + r.canvas.width / 2;
-  const y = (e.y + e.w / 2 - cam.y) * cam.zoom + r.canvas.height / 2;
   const img = projSprite(projId);
   ctx.save();
-  ctx.translate(x, y);
+  ctx.translate(e.x + e.w / 2, e.y + e.w / 2);
   ctx.rotate(ang);
   ctx.imageSmoothingEnabled = false;
   if (img && img.complete && img.naturalWidth > 0) {
-    ctx.drawImage(img, -e.w * cam.zoom / 2, -e.w * cam.zoom / 2, e.w * cam.zoom, e.w * cam.zoom * (img.naturalHeight / img.naturalWidth));
+    ctx.drawImage(img, -e.w / 2, -e.w / 2, e.w, e.w * (img.naturalHeight / img.naturalWidth));
   } else {
     ctx.fillStyle = fallbackColor;
-    ctx.fillRect(-e.w * cam.zoom / 2, -e.w * cam.zoom / 2, e.w * cam.zoom, e.w * cam.zoom);
+    ctx.fillRect(-e.w / 2, -e.w / 2, e.w, e.w);
   }
   ctx.restore();
 }
@@ -83,7 +82,7 @@ export class Boomerang extends Entity {
   private rot = 0;
   /** 飞出段累计；返回段置 true */
   private returning = false;
-  private hitCd = new Map<number, number>();
+  private hitCd = new HitCooldown();
   life = 900;
   dead = false;
 
@@ -101,10 +100,10 @@ export class Boomerang extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    bumpTick();
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
     this.rot += 0.35;
+    this.hitCd.tick();
     if (!this.returning) {
       // 飞出段：速度衰减（原版摩擦），衰减到阈值/撞墙 → 进入返回段
       this.vx *= 0.985;
@@ -150,7 +149,7 @@ export class SpearProj extends Entity {
   private reach: number;
   private t = 0;
   private dur: number;
-  private hitCd = new Map<number, number>();
+  private hitCd = new HitCooldown();
   dead = false;
 
   constructor(dirX: number, dirY: number, reach: number, dur: number, damage: number, knockback: number, projId: number) {
@@ -170,7 +169,6 @@ export class SpearProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    bumpTick();
     this.t++;
     if (this.t >= this.dur) { this.dead = true; return; }
     // 原版 AI_019：矛锚定在角色中心，沿出手方向伸缩（sin 曲线 0→reach→0）
@@ -198,7 +196,7 @@ export class YoyoProj extends Entity {
   private stringLen: number;
   /** 连枷头带重力（aiStyle 15 的链球比悠悠球更坠） */
   private flail: boolean;
-  private hitCd = new Map<number, number>();
+  private hitCd = new HitCooldown();
   private rot = 0;
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
   handX = 0;
@@ -221,18 +219,14 @@ export class YoyoProj extends Entity {
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // 线（原版 yoyo string / 连枷链：手部 → 球体）
+    // 线（原版 yoyo string / 连枷链：手部 → 球体）。世界坐标(实体循环在世界变换内)
     const c = r.canvas.getContext('2d');
     if (c) {
-      const px = (this.handX - cam.x) * cam.zoom + r.canvas.width / 2;
-      const py = (this.handY - cam.y) * cam.zoom + r.canvas.height / 2;
-      const bx = (this.x + this.w / 2 - cam.x) * cam.zoom + r.canvas.width / 2;
-      const by = (this.y + this.h / 2 - cam.y) * cam.zoom + r.canvas.height / 2;
       c.strokeStyle = this.flail ? '#605848' : '#D0D0D8';
-      c.lineWidth = 1.5 * cam.zoom;
+      c.lineWidth = 1.5;
       c.beginPath();
-      c.moveTo(px, py);
-      c.lineTo(bx, by);
+      c.moveTo(this.handX, this.handY);
+      c.lineTo(this.x + this.w / 2, this.y + this.h / 2);
       c.stroke();
     }
     this.rot += 0.25;
@@ -240,11 +234,11 @@ export class YoyoProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    bumpTick();
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
     this.handX = p.cx;
     this.handY = p.cy;
+    this.hitCd.tick();
     if (!this.channel()) {
       // 松手/切走：回收到手（原版 channel 结束语义）
       const dx = p.cx - (this.x + this.w / 2);

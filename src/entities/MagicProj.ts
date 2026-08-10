@@ -25,14 +25,13 @@ export class MagicProj extends Entity {
     this.color = color;
   }
 
-  draw(r: Renderer, cam: Camera): void {
+  draw(r: Renderer, _cam: Camera): void {
+    // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const x = (this.x - cam.x) * cam.zoom + r.canvas.width / 2;
-    const y = (this.y - cam.y) * cam.zoom + r.canvas.height / 2;
     ctx.fillStyle = this.color;
     ctx.beginPath();
-    ctx.arc(x + this.w / 2 * cam.zoom, y + this.h / 2 * cam.zoom, 4 * cam.zoom, 0, Math.PI * 2);
+    ctx.arc(this.x + this.w / 2, this.y + this.h / 2, 4, 0, Math.PI * 2);
     ctx.fill();
   }
 

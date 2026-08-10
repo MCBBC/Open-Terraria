@@ -60,26 +60,26 @@ export class Arrow extends Entity {
     this.pierce = opts?.pierce ?? 1;
   }
 
-  draw(r: Renderer, cam: Camera): void {
+  draw(r: Renderer, _cam: Camera): void {
+    // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标——
+    // 曾双变换把箭甩出屏幕,表现为"箭隐形但能命中")
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const x = (this.x + this.w / 2 - cam.x) * cam.zoom + r.canvas.width / 2;
-    const y = (this.y + this.h / 2 - cam.y) * cam.zoom + r.canvas.height / 2;
     const ang = Math.atan2(this.vy, this.vx);
     const img = projSprite(this.projId);
     ctx.save();
-    ctx.translate(x, y);
+    ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
     ctx.rotate(ang + Math.PI / 2); // 原版贴图纵向：rotation = atan2+π/2（AI_001 L54877）
     ctx.imageSmoothingEnabled = false;
     if (img && img.complete && img.naturalWidth > 0) {
-      ctx.drawImage(img, -this.w * cam.zoom / 2, -this.w * cam.zoom / 2, this.w * cam.zoom, this.w * cam.zoom * (img.naturalHeight / img.naturalWidth));
+      ctx.drawImage(img, -this.w / 2, -this.w / 2, this.w, this.w * (img.naturalHeight / img.naturalWidth));
     } else {
       // 贴图未就绪：短线兜底
       ctx.strokeStyle = this.projId === 2 ? '#FFB060' : '#D8C8A0';
-      ctx.lineWidth = 2 * cam.zoom;
+      ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.moveTo(0, 0);
-      ctx.lineTo(0, -Math.min(14, Math.hypot(this.vx, this.vy) * 1.4) * cam.zoom);
+      ctx.lineTo(0, -Math.min(14, Math.hypot(this.vx, this.vy) * 1.4));
       ctx.stroke();
     }
     ctx.restore();

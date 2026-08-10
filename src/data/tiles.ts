@@ -484,13 +484,15 @@ def({ key: 'v_565_fogmachine', name: 'Fog Machine', decor: true, framed: true, o
 def({ key: 'v_593_volcanosmall', name: 'Mini Volcano', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#684C43', drop: null as unknown as string, vanilla: { sheet: 593, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_594_volcanolarge', name: 'Large Volcano', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#745540', drop: null as unknown as string, vanilla: { sheet: 594, frame: 'style', fw: 2, fh: 2 } });
 
-TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
-
-// ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 def({ key: 'v_482_cracked_green_brick', name: 'Cracked Green Brick', solid: true, opacity: 1, pick: 0, mapColor: '#3E5E42', blend: true, drop: null as unknown as string, vanilla: { sheet: 482, frame: 'auto' } });
 def({ key: 'v_163_purple_ice_block', name: 'Purple Ice Block', solid: true, opacity: 1, pick: 0, mapColor: '#8A7AB8', blend: true, drop: null as unknown as string, vanilla: { sheet: 163, frame: 'auto' } });
 def({ key: 'v_200_red_ice_block', name: 'Red Ice Block', solid: true, opacity: 1, pick: 0, mapColor: '#A85A5A', blend: true, drop: null as unknown as string, vanilla: { sheet: 200, frame: 'auto' } });
 def({ key: 'v_116_pearlsand_block', name: 'Pearlsand Block', solid: true, opacity: 1, pick: 0, mapColor: '#C8C8D8', blend: true, drop: null as unknown as string, vanilla: { sheet: 116, frame: 'auto' } });
+def({ key: 'v_76_hellstone_brick', name: 'Hellstone Brick', solid: true, opacity: 1, pick: 0, mapColor: '#762427', blend: true, drop: null as unknown as string, vanilla: { sheet: 76, frame: 'auto' } });
+def({ key: 'v_55_signs', name: 'Signs', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#B08050', drop: null as unknown as string, vanilla: { sheet: 55, frame: 'style', fw: 2, fh: 2 } });
+TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
+
+// ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: 'Sky', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: 'Stone Wall', mapColor: '#353535', opacity: 1 });
 wallDef({ id: 2, key: 'w2_dirtunsafe', name: 'Dirt Wall (natural)', mapColor: '#573C30', opacity: 1 });

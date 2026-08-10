@@ -7,6 +7,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY } from '../../../data/tiles';
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
+const LARVA = TILE_BY_KEY['v_231_larva']!;
 const COBWEB = TILE_BY_KEY['v_51_cobweb']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const MUDT = TILE_BY_KEY['mud']!;
@@ -156,6 +157,7 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
     // 幼虫托台(BOSS 房):链终点 3 宽清空+蜂巢地板
+    // （AddBeeLarva WorldGen.cs:32215-32236 逐行对应；原版末尾 PlaceTile(x,y,231) 放幼虫）
     const lx = Math.floor(px), ly = Math.floor(py);
     if (st.inBounds(lx, ly + 1)) {
       for (let dx = -1; dx <= 1; dx++) {
@@ -167,6 +169,16 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
           } else {
             st.type[i] = HIVE; st.flags[i] = 1;
           }
+        }
+      }
+      // 幼虫 3×3（占 lx-1..lx+1 × ly-2..ly，底行贴蜂巢地板；顶行帧 (0,0)）
+      for (let dx = 0; dx < 3; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          const tx = lx - 1 + dx, ty = ly - 2 + dy;
+          if (!st.inBounds(tx, ty)) continue;
+          const i = st.idx(tx, ty);
+          st.type[i] = LARVA; st.flags[i] = 1;
+          st.frameX[i] = dx * 18; st.frameY[i] = dy * 18;
         }
       }
     }

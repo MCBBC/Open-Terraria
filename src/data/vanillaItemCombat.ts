@@ -16,6 +16,9 @@ export interface ItemCombat {
   noMelee?: boolean;
   autoReuse?: boolean;
   mana?: number;
+  melee?: boolean;
+  ranged?: boolean;
+  magic?: boolean;
 }
 
 const TABLE = combatJson as unknown as Record<string, ItemCombat>;

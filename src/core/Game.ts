@@ -4,6 +4,7 @@ import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
 import { World, ChestData } from '../world/World';
+import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt } from '../world/Door';
 import { TileStore } from '../world/TileStore';
@@ -13,7 +14,8 @@ import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { vanillaNpc, vanillaItemKey } from '../data/vanillaNpcs';
-import { itemCombat, AMMO_ARROW } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
+import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
@@ -56,6 +58,7 @@ import type { GameHooks } from '../entities/types';
 import { Dart } from '../entities/Dart';
 import { TrapShot } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponProj';
 import { Minecart } from '../entities/Minecart';
 import { MagicProj } from '../entities/MagicProj';
 
@@ -74,22 +77,6 @@ const TILE_CUT = new Set<number>(
   }, []),
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
-
-/** vi_<id>_<slug> key → 原版 item id（vi_ 批次未显式存 vid 时从 key 反解） */
-function viIdFromKey(key: string): number {
-  const m = key.match(/^vi_(\d+)_/);
-  return m ? Number(m[1]) : -1;
-}
-
-/** 消耗型投掷武器判定（vi_* 物品）：itemCombat 有 shoot+consumable+noMelee 且无 useAmmo/ammo。
- *  命中返回标准化数据（shoot/damage 以 combat 表为准），否则 null */
-function thrownCombat(def: (typeof ITEM_DEFS)[number]): { shoot: number; damage: number } | null {
-  const vid = def.vid ?? viIdFromKey(def.key);
-  if (vid < 0) return null;
-  const c = itemCombat(vid);
-  if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo || c.ammo) return null;
-  return { shoot: c.shoot, damage: c.damage ?? 0 };
-}
 
 /** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
 function compactByLife<T extends { life: number }>(list: T[]): void {
@@ -141,7 +128,7 @@ export class Game implements GameHooks {
   /** 原版 HitTile 伤害积累（劈砍/挖掘通用，阈值 100） */
   private hitTiles = new HitTile();
   private lastMineHitTick = -999;
-  swing: { t: number; dur: number; item: number } | null = null;
+  swing: { t: number; dur: number; item: number; dmg?: number; kb?: number } | null = null;
   private swingHitSet = new Set<number>();
   /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
   private swingTileCutSet = new Set<number>();
@@ -423,11 +410,12 @@ export class Game implements GameHooks {
     await new Promise((r) => setTimeout(r, 0));
     sim.waterCheck();
     sim.quickSettle = true;
-    const MAX_ITER = 100000; // 原版 WorldFile 单轮上限
+    // 轮上限：读档 = WorldFile 单轮 100000（L752）；生成期 = 每轮 活量×5（WorldGen.cs:16252 num5）
     const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
     let iter = 0;
     let lastYield = performance.now();
     for (let round = 0; round < MAX_ROUNDS; round++) {
+      const MAX_ITER = mode === 'gen' ? Math.max(1000, (sim.numLiquid + sim.bufferLen) * 5) : 100000;
       let roundIter = 0;
       while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
         sim.updateLiquid();
@@ -477,6 +465,8 @@ export class Game implements GameHooks {
     this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
     this.liquid = new LiquidSim(w);
+    // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
+    this.liquid.killTile = (x, y) => this.breakTile(x, y);
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
     this.renderer.minimap = new Minimap(w);
@@ -818,9 +808,10 @@ export class Game implements GameHooks {
     // ---- Boss 逻辑 ----
     if (this.boss) {
       // EoC(AI_004)白天自漂离,漂远自灭后走 dead 分支出提示;
-      // 其余 Boss 保留通用日出剔除
+      // 127 机械骷髅王白天走 AI 内狂暴(伤/防 9999)不剔除;其余 Boss 通用日出剔除
       const eocFlees = this.boss.vanillaId === 4;
-      const dayKill = w.clock.isDay && !eocFlees;
+      const primeRages = this.boss.vanillaId === 127;
+      const dayKill = w.clock.isDay && !eocFlees && !primeRages;
       if (this.boss.dead || dayKill) {
         // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
         if (this.boss.dead) {
@@ -1019,11 +1010,16 @@ export class Game implements GameHooks {
       return;
     }
 
-    // 近战挥剑（攻速配饰：猛爪手套 ×2）
-    if (tool?.type === 'sword') {
-      const spd = Math.max(12, Math.round((tool.speed ?? 42) / this.player.attackSpeedMult));
+    // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速配饰：猛爪手套 ×2）
+    const cw = heldDef ? combatWeapon(heldDef) : null;
+    if (tool?.type === 'sword' || cw?.kind === 'melee') {
+      const spd = Math.max(12, Math.round((tool?.speed ?? (cw?.kind === 'melee' ? cw.useTime : 42)) / this.player.attackSpeedMult));
       if (!this.swing && this.player.useTime === 0) {
-        this.swing = { t: spd, dur: spd, item: held!.id };
+        this.swing = {
+          t: spd, dur: spd, item: held!.id,
+          dmg: cw?.kind === 'melee' ? cw.damage : undefined,
+          kb: cw?.kind === 'melee' ? cw.knockback : undefined,
+        };
         this.player.useTime = spd;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
@@ -1189,6 +1185,10 @@ export class Game implements GameHooks {
         this.sfx.play('bowShoot');
         this.cb.onInventoryChanged();
       }
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw) {
+      // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
+      // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
+      this.useCombatWeapon(cw, heldDef);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)) {
       // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
       // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
@@ -1199,9 +1199,13 @@ export class Game implements GameHooks {
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
       const px = this.player.cx + Math.cos(ang) * 14;
       const py = this.player.cy - 4 + Math.sin(ang) * 14;
+      // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）
+      let pen = projectileData(tc.shoot)?.penetrate ?? 1;
+      if (pen < 0) pen = 6;
+      pen = Math.max(1, Math.min(pen, 6));
       this.entities.add(new Arrow(px, py,
         Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
-        tc.damage, c?.knockBack ?? 0, tc.shoot, heldDef.key), 'projectiles');
+        tc.damage, c?.knockBack ?? 0, tc.shoot, heldDef.key, { pierce: pen }), 'projectiles');
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
       this.sfx.play('throw');
@@ -1215,6 +1219,22 @@ export class Game implements GameHooks {
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = 60;
       this.cb.onInventoryChanged();
+      this.input.mouseDown = false;
+    } else if (heldDef && (heldDef.key === 'mechanical_worm' || heldDef.key === 'mechanical_eye' || heldDef.key === 'mechanical_skull')
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 机械三王召唤物(原版 556/544/557:需困难模式+夜晚)
+      if (!this.world.flags.hardMode) {
+        this.cb.onToast('古老的机械力量尚未苏醒(需困难模式)');
+      } else if (this.world.clock.isDay) {
+        this.cb.onToast('夜晚才能使用…');
+      } else {
+        if (heldDef.key === 'mechanical_worm') this.summonBoss('destroyer');
+        else if (heldDef.key === 'mechanical_eye') this.summonBoss('twins');
+        else this.summonBoss('skeletron_prime');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 60;
+        this.cb.onInventoryChanged();
+      }
       this.input.mouseDown = false;
     } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
@@ -1239,6 +1259,107 @@ export class Game implements GameHooks {
       this.useBucket(heldDef.key, tx, ty);
     }
     this.mining = null;
+  }
+
+  /** vi_* 数据驱动武器使用派发（combatWeapon 解析出的 aiStyle 家族）。
+   *  数值全部取 vanilla-itemcombat.json（damage/knockBack/useTime/shootSpeed/mana），
+   *  行为取 1456 aiStyle 语义（WeaponProj.ts 各实体） */
+  private useCombatWeapon(cw: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
+    const inp = this.input;
+    const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+    const px = this.player.cx + Math.cos(ang) * 14;
+    const py = this.player.cy - 4 + Math.sin(ang) * 14;
+    const consume = () => {
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.cb.onInventoryChanged();
+    };
+    switch (cw.kind) {
+      case 'grenade': {
+        // AI_016：引信（原版 timeLeft：手雷 180 / 炸弹 150 / 炸药 135）弹跳后爆炸；
+        // 伤害下限 60（手雷 item damage=0，威力在爆炸不在直击）
+        const fuse = cw.shoot === 29 ? 150 : cw.shoot === 30 ? 135 : 180;
+        const dmg = cw.shoot === 30 ? 250 : Math.max(cw.damage, 60);
+        this.entities.add(new GrenadeProj(px, py,
+          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg)), 'projectiles');
+        consume();
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        break;
+      }
+      case 'boomerang': {
+        // AI_003：飞出减速→返回主角（非消耗，回手即消失）
+        this.entities.add(new Boomerang(px, py,
+          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+          cw.damage, cw.knockback, cw.shoot), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        break;
+      }
+      case 'spear': {
+        // AI_019：随角色前刺（一个 useTime 周期伸缩一次）
+        const reach = Math.min(170, 60 + cw.shootSpeed * 12);
+        this.entities.add(new SpearProj(Math.cos(ang), Math.sin(ang), reach, cw.useTime,
+          cw.damage, cw.knockback, cw.shoot), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        break;
+      }
+      case 'yoyo':
+      case 'flail': {
+        // AI_099 channel：同物品已有悠悠球在场则不重复掷出（原版每把悠悠球仅一个）
+        const flail = cw.kind === 'flail';
+        const itemId = ITEM_BY_KEY[def.key];
+        for (const e of this.entities.projectiles) {
+          const y = e as YoyoProj;
+          if (y instanceof YoyoProj && y.projId === cw.shoot) return;
+        }
+        const stringLen = flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10;
+        this.entities.add(new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
+          () => this.input.mouseDown && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
+          () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
+          flail), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        this.input.mouseDown = false; // 本击只负责掷出，滞留由 channel 回调判定
+        break;
+      }
+      case 'magic': {
+        // 魔法：消耗 mana（原版 mana 字段）→ 发射 item.shoot（贴图/穿透/寿命取投射物表）
+        if (this.player.mana < (cw.mana ?? 0)) {
+          this.cb.onToast('魔力不足');
+          this.input.mouseDown = false;
+          return;
+        }
+        this.player.mana -= cw.mana ?? 0;
+        const pd = projectileData(cw.shoot);
+        let pen = pd?.penetrate ?? 1;
+        if (pen < 0) pen = 3;
+        pen = Math.max(1, Math.min(pen, 3));
+        this.entities.add(new Arrow(px, py,
+          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+          cw.damage, cw.knockback, cw.shoot, null,
+          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen }), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('tink');
+        this.input.mouseDown = false;
+        break;
+      }
+      case 'shot': {
+        // 兜底直射（附魔剑光束等 melee/ranged+shoot 未归族项）：重力按 aiStyle
+        const pd = projectileData(cw.shoot);
+        this.entities.add(new Arrow(px, py,
+          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+          cw.damage, cw.knockback, cw.shoot, null,
+          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: 1 }), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('bowShoot');
+        break;
+      }
+      default:
+        return;
+    }
+    void def;
   }
 
   private toolCanBreak(type: number, power: number, toolType: string): boolean {
@@ -1396,6 +1517,18 @@ export class Game implements GameHooks {
       this.fellImportedTree(x, y, type);
       return;
     }
+    // 幼虫（原版 KillTile case 231, WorldGen.cs:53254-53280）：整件破碎无掉落，
+    // 300 格内召蜂后——须在 object 锚点分支前拦（否则按家具掉 place_ 物品）
+    if (type === TILE_BY_KEY['v_231_larva']) {
+      this.breakLarva(x, y);
+      return;
+    }
+    // 蜂巢块（原版 KillTile case 225, WorldGen.cs:65524-65545）：1/3 变满蜂蜜
+    // （打破流蜜），否则掉蜂巢物品 + 1/2 概率出 1-2 只蜜蜂
+    if (type === TILE_BY_KEY['v_225_hive_block']) {
+      this.breakHive(x, y);
+      return;
+    }
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
     const doorAnchor = clearDoorAt(st, x, y);
     if (doorAnchor) {
@@ -1458,6 +1591,43 @@ export class Game implements GameHooks {
     if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, def.drop, 1);
     else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+  }
+
+  /** 蜂巢块破坏（KillTile case 225 → world/hive.ts）：流蜜或掉物+出蜂 */
+  private breakHive(x: number, y: number) {
+    const st = this.world.store;
+    const rng = new RNG((Math.random() * 1e9) | 0);
+    const hive = TILE_BY_KEY['v_225_hive_block']!;
+    breakHiveBlock(st, x, y, rng, {
+      dropHiveItem: (px, py) => this.spawnDrop(px, py, 'place_v_225_hive_block', 1),
+      spawnBee: (px, py, r) => {
+        // type=Next(210,212)；初速 ±0.4（Next(-200,201)*0.002）
+        const bee = Enemy.fromVanilla(r.next() < 0.5 ? 210 : 211, px, py);
+        if (!bee) return;
+        bee.vx = (r.next() - 0.5) * 0.8;
+        bee.vy = (r.next() - 0.5) * 0.8;
+        bee.id = this.entities.nextId++;
+        this.entities.add(bee, 'enemies');
+      },
+    });
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, TILE_DEFS[hive].mapColor, 6, 1.5);
+  }
+
+  /** 幼虫破坏（KillTile case 231）：3×3 整件清除 + 300 格内召蜂后（无掉落） */
+  private breakLarva(x: number, y: number) {
+    const st = this.world.store;
+    const larva = TILE_BY_KEY['v_231_larva']!;
+    // 命中格 ±2 邻域内同类型全清（幼虫恒为单件 3×3，紧邻第二件的场景不存在）
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        if (st.inBounds(x + dx, y + dy) && st.get(x + dx, y + dy) === larva) st.setTile(x + dx, y + dy, 0);
+      }
+    }
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E0C265', 10, 2);
+    // 距离判定 + 蜂后召唤（原版 SpawnOnPlayer(222)；boss 流程复用 summonBoss）
+    if (larvaSummonInRange(this.player.x, this.player.y, x, y)) {
+      this.summonBoss('queen_bee');
+    }
   }
 
   private fellTree(x: number, y: number) {
@@ -2457,13 +2627,14 @@ export class Game implements GameHooks {
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
       if (!this.sfx.playFiles(e.def.hitSound)) this.sfx.play('hit');
       const crit = Math.random() < 0.04; // 原版近战基础暴击 4%（Player.meleeCrit）
-      // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急
-      const baseDmg = tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
+      // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
+      // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）
+      const baseDmg = this.swing.dmg ?? tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(dx) || this.player.facing;
-      // 击退 = 工具官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）
-      const kb = (tool?.knockback ?? 3) * 0.65;
+      // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）
+      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65;
       const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
@@ -3100,7 +3271,8 @@ export class Game implements GameHooks {
     }
     const spawnY = Math.max(4, ty - 12) * TILE;
     const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
-      : key === 'skeletron_head' ? 35 : -1;
+      : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
+      : key === 'destroyer' ? 134 : key === 'twins' ? 125 : -1;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
@@ -3110,6 +3282,15 @@ export class Game implements GameHooks {
           // 世吞体节链(原版 15-30 段)
           const segs = Enemy.spawnWormChain(head, 15 + Math.floor(Math.random() * 16));
           for (const sg of segs) this.entities.add(sg, 'enemies');
+        }
+        if (vanillaId === 125) {
+          // 双子:同场生成第二只 126(原版机械魔眼双召;击败记账以 125 为准)
+          const twin = Enemy.fromVanilla(126, (tx + 4) * TILE + 8, spawnY);
+          if (twin) { twin.id = this.entities.nextId++; this.entities.add(twin, 'enemies'); }
+        }
+        if (vanillaId === 134) {
+          // 毁灭者:地下落位(原版 SpawnNPC 走地下生成;80 段链由 destroyerAI 首帧补)
+          head.y = Math.min(st.h - 10, Math.floor(this.world.rockLevel) + 30) * TILE;
         }
         this.sfx.playWav('roar');
         this.cb.onToast('你感到有个邪恶的东西在看着你……');

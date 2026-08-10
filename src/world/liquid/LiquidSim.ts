@@ -1,4 +1,4 @@
-// 液体模拟：Terraria 1.4.0.5 Liquid.cs 一比一移植。
+// 液体模拟：Terraria 1.4.5.6（Terarria1456/Terraria/Liquid.cs）一比一移植。
 // 核心结构（对照原版行号）：
 //  - 活动液体列表 liquids[{x,y,kill,delay}] + checkingLiquid/skipLiquid 位图（Liquid.cs:37-40）
 //  - UpdateLiquid() 分片调度 + kill 清扫（Liquid.cs:691-833）
@@ -6,10 +6,14 @@
 //  - LavaCheck/HoneyCheck：水+岩浆→黑曜石(56)、岩浆+蜂蜜→脆蜂蜜块(230)、水+蜂蜜→蜂蜜块(229)（Liquid.cs:888-1115）
 //  - QuickWater/SettleWaterAt 读档沉降搬运（Liquid.cs:85-212）+ WaterCheck 重建列表（WorldGen.cs:48955）
 // liquidType 编码沿用本仓库 store 约定：1=水 2=岩浆 3=蜂蜜（原版 0/1/2）。
-// 偏离原版处（无法直译的周边系统）：
-//  - 无 LiquidBuffer 溢出队列/panic 模式（curMaxLiquid 内直接入列，超限丢弃）
+// 偏离原版处（无法直译的周边系统，均有注释标注）：
+//  - shimmer 微光液（liquidType 4/块 659）：世界未生成 Aether 液体，ShimmerCheck 空实现
+//  - tilesIgnoreWater 的 boulder/树 tile 动态固态（379/546/10 等）：无对应系统
 //  - PlaceTile 的音效/网络广播省略；tileObsidianKill 近似为 decor 清除
-//  - AddWater 不做 CheckWaterDeath（火把等不会被水流冲毁）
+//  - DelWater 尾部 CheckAlch/睡莲(518) 帧检查省略
+// 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
+// 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
+// （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
 import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import type { World } from '../World';
 
@@ -18,6 +22,24 @@ interface LiquidEntry { x: number; y: number; kill: number; delay: number; }
 const OBSIDIAN = TILE_BY_KEY['obsidian'];
 const HONEY_BLOCK = TILE_BY_KEY['v_229_honey_block'];
 const CRISPY_HONEY = TILE_BY_KEY['v_230_crispy_honey_block'];
+
+/** C# Math.Round = banker's rounding（.5 取偶；JS Math.round 是四舍五入）——1456 均
+ *  分全程使用，直接换 Math.round 会在 x.5 时偏离 1 */
+function csRound(v: number): number {
+  const f = Math.floor(v);
+  const d = v - f;
+  if (d > 0.5) return f + 1;
+  if (d < 0.5) return f;
+  return f % 2 === 0 ? f : f + 1;
+}
+
+/** Main.tileWaterDeath 表（Main.cs:7182-7240 区段提取，vanilla tile id） */
+const WATER_DEATH_SHEETS = new Set([215, 4, 51, 697, 93, 98, 552, 405, 646, 372]);
+/** Main.tileLavaDeath 表（Main.cs 同区段，vanilla tile id） */
+const LAVA_DEATH_SHEETS = new Set([630, 631, 571, 579, 591, 538, 544, 629, 550, 551, 533, 553, 554, 555, 556, 558, 559, 599, 600, 601, 602, 603, 604, 605, 606, 607, 608, 609, 610, 611, 612, 632, 640, 643, 644, 645, 710, 568, 569, 570, 580, 582, 619, 620, 572, 560, 564, 567, 565, 654, 529, 530, 705, 484, 3, 5, 10, 11, 12, 13, 14, 469, 486, 488, 704, 487, 489, 490, 15, 497, 16, 17, 18, 19, 24, 27, 28, 29, 32, 33, 34, 35, 36, 42, 49, 50, 707, 51, 697, 52, 55, 61, 703, 62, 69, 655, 71, 72, 73, 74, 79, 80, 81, 86, 87, 88, 89, 90, 91, 92, 93, 94, 95, 96, 97, 98, 100, 101, 102, 103, 104, 106, 110, 113, 115, 125, 126, 128, 149, 172, 173, 174, 184, 201, 205, 209, 210, 212, 213, 353, 215, 216, 217, 218, 219, 642, 220, 227, 228, 233, 236, 702, 238, 240, 241, 242, 243, 244, 245, 246, 247, 254, 269, 270, 271, 581, 698, 660, 275, 413, 276, 277, 278, 279, 280, 281, 282, 283, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 532, 316, 317, 318, 319, 354, 355, 699, 499, 323, 335, 338, 339, 528, 636, 352, 382, 425, 453, 456, 463, 464, 465, 485, 511, 510, 547, 548, 552, 573, 621, 622, 623, 624, 700, 656, 701, 493, 395, 520, 471, 405, 406, 452, 457, 454, 494, 387, 386, 388, 389, 646, 372, 639, 668, 324, 427, 390]);
+/** 岩浆 3×3 烧除（1456 DelWater L1557+）：草族 tile → 空气；蘑菇草族 → 泥土 */
+const LAVA_BURN_TO_AIR = new Set([2, 23, 109, 199, 477, 492]);
+const LAVA_BURN_TO_DIRT = new Set([60, 70, 661, 662]);
 
 export class LiquidSim {
   world: World;
@@ -40,12 +62,33 @@ export class LiquidSim {
   private disposed = false;
   /** LiquidBuffer 溢出缓冲（Liquid.cs:840-843 入队 / 799-807 清扫轮回灌，上限 49998） */
   private buffer: Array<{ x: number; y: number }> = [];
+  /** 水死/岩浆死内部 tile id 集（Main.tileWaterDeath/tileLavaDeath 经 sheet 反查） */
+  private readonly waterDeathIds: Set<number>;
+  private readonly lavaDeathIds: Set<number>;
+  private readonly lavaBurnAirIds: Set<number>;
+  private readonly lavaBurnDirtIds: Set<number>;
+  private readonly dirtId: number;
+  /** 液体冲毁方块（原版 AddWater 尾 KillTile）：Game 注入 breakTile（掉落+帧刷新） */
+  killTile: ((x: number, y: number) => void) | null = null;
+  // ---- panic 模式（Liquid.cs:975-1070）：缓冲长期超限 → 逐行 QuickWater 强制收敛 ----
+  private panicMode = false;
+  private panicCounter = 0;
+  private panicY = 0;
 
   constructor(world: World) {
     this.world = world;
     const st = world.store;
     this.checking = new Uint8Array(st.w * st.h);
     this.skip = new Uint8Array(st.w * st.h);
+    // sheet → 内部 id 反查（死亡表/烧除表用）
+    const bySheet = (sheets: Set<number>): Set<number> => new Set(
+      TILE_DEFS.reduce<number[]>((acc, d, id) => { if (d.vanilla && sheets.has(d.vanilla.sheet)) acc.push(id); return acc; }, []),
+    );
+    this.waterDeathIds = bySheet(WATER_DEATH_SHEETS);
+    this.lavaDeathIds = bySheet(LAVA_DEATH_SHEETS);
+    this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
+    this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
+    this.dirtId = TILE_BY_KEY['dirt'];
     // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater（WorldGen.cs:49664）
     st.onTileChanged((x, y) => {
       if (this.disposed) return;
@@ -60,6 +103,9 @@ export class LiquidSim {
       this.addWater(x - 1, y); this.addWater(x + 1, y);
     });
   }
+
+  /** 溢出缓冲长度（Game 的生成期轮上限计算用，原版 LiquidBuffer.numLiquidBuffer） */
+  get bufferLen(): number { return this.buffer.length; }
 
   /** 丢弃模拟器：预沉降临时实例调用，停止响应唤醒 */
   dispose() {
@@ -113,6 +159,12 @@ export class LiquidSim {
     this.skip[i] = 0;
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
     this.numLiquid++;
+    // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）
+    if (t !== 0) {
+      const isLava = st.liquidType[i] === 2;
+      const dies = isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
+      if (dies) this.killTile?.(x, y);
+    }
   }
 
   // ================= UpdateLiquid 调度（Liquid.cs:691-833） =================
@@ -122,7 +174,40 @@ export class LiquidSim {
 
   updateLiquid() {
     const st = this.world.store;
-    const killThreshold = 8; // 单机 num1（Liquid.cs:693）
+    const killThreshold = 8; // 单机 num（1456 Liquid.cs:995）
+    // panic 模式（1456 Liquid.cs:1019-1070）：缓冲 ≥45000 持续 3600 次未解 →
+    // 自底向上逐行 QuickWater 强制沉降，每次调用处理 5 行，到顶后 WaterCheck 退出
+    if (!this.quickSettle) {
+      if (!this.panicMode) {
+        if (this.buffer.length >= 45000) {
+          this.panicCounter++;
+          if (this.panicCounter > 3600) {
+            this.panicMode = true;
+            this.panicCounter = 0;
+            this.panicY = st.h - 3;
+            this.liquids.length = 0;
+            this.numLiquid = 0;
+            this.buffer.length = 0;
+          }
+        } else {
+          this.panicCounter = 0;
+        }
+      }
+      if (this.panicMode) {
+        let n = 0;
+        while (this.panicY >= 3 && n < 5) {
+          n++;
+          this.quickWater(this.panicY, this.panicY);
+          this.panicY--;
+        }
+        if (this.panicY < 3) {
+          this.panicMode = false;
+          this.panicCounter = 0;
+          this.waterCheck();
+        }
+        return;
+      }
+    }
     const quickSettle = this.quickSettle;
     // quickFall 跟随 quickSettle（Liquid.cs:752-755，未受 gen 门限）；但 cycles=1 的
     // Main.cs:12251 分支被 !WorldGen.gen 限定——读档沉降期 gen=true 不生效，保持分片
@@ -305,7 +390,7 @@ export class LiquidSim {
         else if (st.liquidType[ip3] !== myType) f6 = false;
         if (f5 && f6) {
           // 7 格均分（Liquid.cs:452-515）
-          const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[im3] + st.liquid[ip3] + st.liquid[i5] + num1) / 7);
+          const m = csRound((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[im3] + st.liquid[ip3] + st.liquid[i5] + num1) / 7); // 1456 Math.Round=取偶
           let same = 0;
           if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else { st.liquidType[il] = myType; same++; }
           if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else { st.liquidType[ir] = myType; same++; }
@@ -324,7 +409,7 @@ export class LiquidSim {
           if (same !== 6 || st.liquid[iu] <= 0) st.liquid[i5] = m;
         } else {
           // 5 格均分（Liquid.cs:519-562）
-          const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[i5] + num1) / 5);
+          const m = csRound((lq + rq + st.liquid[im2] + st.liquid[ip2] + st.liquid[i5] + num1) / 5); // 1456 Math.Round=取偶
           let same = 0;
           if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else { st.liquidType[il] = myType; same++; }
           if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else { st.liquidType[ir] = myType; same++; }
@@ -339,7 +424,7 @@ export class LiquidSim {
         }
       } else if (f3) {
         // 4 格：左延伸（Liquid.cs:567-587）。类型写在条件判断之前（原版 L568 无条件写）
-        const m = Math.floor((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4);
+        const m = csRound((lq + rq + st.liquid[im2] + st.liquid[i5] + num1) / 4); // 1456 Math.Round=取偶
         st.liquidType[il] = myType;
         if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
         st.liquidType[ir] = myType;
@@ -349,7 +434,7 @@ export class LiquidSim {
         st.liquid[i5] = m;
       } else if (f4) {
         // 4 格：右延伸（Liquid.cs:590-609）。类型写在条件判断之前（原版 L591 无条件写）
-        const m = Math.floor((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4);
+        const m = csRound((lq + rq + st.liquid[ip2] + st.liquid[i5] + num1) / 4); // 1456 Math.Round=取偶
         st.liquidType[il] = myType;
         if (lq !== m || st.liquid[i5] !== m) { st.liquid[il] = m; this.addWater(x - 1, y); }
         st.liquidType[ir] = myType;
@@ -359,7 +444,7 @@ export class LiquidSim {
         st.liquid[i5] = m;
       } else {
         // 3 格均分（Liquid.cs:613-628）：随机 254→255 补满
-        let m = Math.floor((lq + rq + st.liquid[i5] + num1) / 3);
+        let m = csRound((lq + rq + st.liquid[i5] + num1) / 3); // 1456 Math.Round=取偶
         if (m === 254 && Math.random() * 30 < 1) m = 255;
         if (lq !== m) { st.liquidType[il] = myType; st.liquid[il] = m; this.addWater(x - 1, y); } else st.liquidType[il] = myType;
         if (rq !== m) { st.liquidType[ir] = myType; st.liquid[ir] = m; this.addWater(x + 1, y); } else st.liquidType[ir] = myType;
@@ -367,14 +452,14 @@ export class LiquidSim {
       }
     } else if (f1) {
       // 2 格：向左（Liquid.cs:633-639）
-      const m = Math.floor((lq + st.liquid[i5] + num1) / 2);
+      const m = csRound((lq + st.liquid[i5] + num1) / 2); // 1456 Math.Round=取偶
       if (lq !== m) st.liquid[il] = m;
       st.liquidType[il] = myType;
       if (st.liquid[i5] !== m || st.liquid[il] !== m) this.addWater(x - 1, y);
       st.liquid[i5] = m;
     } else if (f2) {
       // 2 格：向右（Liquid.cs:643-649）
-      const m = Math.floor((rq + st.liquid[i5] + num1) / 2);
+      const m = csRound((rq + st.liquid[i5] + num1) / 2); // 1456 Math.Round=取偶
       if (rq !== m) st.liquid[ir] = m;
       st.liquidType[ir] = myType;
       if (st.liquid[i5] !== m || st.liquid[ir] !== m) this.addWater(x + 1, y);
@@ -440,7 +525,7 @@ export class LiquidSim {
       if (lt === 1) { sum += lq; st.liquid[il] = 0; }
       if (rt === 1) { sum += rq; st.liquid[ir] = 0; }
       if (ut === 1) { sum += uq; st.liquid[iu] = 0; }
-      if (sum < 32) return;
+      if (sum < 24) return; // 1456 LiquidCheck 统一阈值 24
       const t = st.type[i5];
       if (t !== 0) {
         const d = TILE_DEFS[t];
@@ -458,7 +543,7 @@ export class LiquidSim {
         if (d && d.decor) st.setTile(x, y + 1, 0);
         else return;
       }
-      if (st.liquid[i5] < 32) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
       st.setTile(x, y + 1, HONEY_BLOCK);
@@ -500,14 +585,17 @@ export class LiquidSim {
       if (lq > 0 && lq < 250 && !this.blocksLiquid(x - 1, y) && st.liquid[i5] !== lq) this.addWater(x - 1, y);
       if (st.liquidType[i5] === 2) {
         this.lavaCheck(x, y);
-        // 3×3 草转泥土近似：岩浆旁 decor 植物清除（Liquid.cs:1160-1187 原版为草方块转换）
+        // 岩浆 3×3 烧除（1456 DelWater L1557-1587）：草族(2/23/109/199/477/492)→空气；
+        // 蘑菇草族(60/70/661/662)→泥土 59——经 sheet 反查内部 id 精确映射
         for (let dy = -1; dy <= 1; dy++) {
           for (let dx = -1; dx <= 1; dx++) {
             const nx = x + dx, ny = y + dy;
             if (nx < 1 || ny < 1 || nx >= st.w - 1 || ny >= st.h - 1) continue;
             const ni = this.idx(nx, ny);
-            const d = TILE_DEFS[st.type[ni]];
-            if (d && d.decor && d.attach === 'ground') st.setTile(nx, ny, 0);
+            const t = st.type[ni];
+            if (t === 0) continue;
+            if (this.lavaBurnAirIds.has(t)) st.setTile(nx, ny, 0);
+            else if (this.lavaBurnDirtIds.has(t)) st.setTile(nx, ny, this.dirtId);
           }
         }
       } else if (st.liquidType[i5] === 3) {
@@ -656,7 +744,10 @@ export class LiquidSim {
         const t = st.type[i];
         if (t !== 0) {
           const d = TILE_DEFS[t];
-          if (d && d.solid && !d.platform) { st.liquid[i] = 0; continue; } // 实心格内液体清零
+          if (d && d.solid && !d.platform) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例）
+          // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
+          if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTile?.(x, y); }
+          else if (this.waterDeathIds.has(t)) this.killTile?.(x, y);
         }
         const id = i + st.w;
         const dq = st.liquid[id];

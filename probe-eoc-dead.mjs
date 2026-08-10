@@ -38,15 +38,14 @@ const out = await p.evaluate(async () => {
   // 等进冲刺
   while (boss.state !== 2 && tick < 3000) await sleep(20);
   await sleep(500); // 冲刺中段
-  // 杀死玩家
-  g.player.hp = 1;
+  // 直接置死亡标记(eocAI 判定字段;避免触发真实死亡/重生流程导致页面跳转)
+  g.player.dead = true;
   samples.push({ t: tick, mark: 'kill-player', s: boss.state, aiT: boss.aiT });
   const frozenAiT = boss.aiT;
-  await sleep(1500); // 死亡期 90 ticks
+  await sleep(1500); // 死亡期 ~90 ticks
   const during = { t: tick, s: boss.state, aiT: boss.aiT, vy: +boss.vy.toFixed(2), pd: g.player.dead };
   // 复活
   g.player.dead = false;
-  g.player.hp = g.player.maxHp;
   samples.push({ t: tick, mark: 'revive' });
   // 等回悬浮
   const t0 = Date.now();

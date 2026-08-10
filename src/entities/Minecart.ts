@@ -21,17 +21,16 @@ export class Minecart extends Entity {
       && st.type[st.idx(tx, ty)] === (game as unknown as { trackTile: number }).trackTile);
   }
 
-  draw(r: Renderer, cam: Camera): void {
+  draw(r: Renderer, _cam: Camera): void {
+    // 世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const x = (this.x - cam.x) * cam.zoom + r.canvas.width / 2;
-    const y = (this.y - cam.y) * cam.zoom + r.canvas.height / 2;
     // 车身近似:灰底+深轮(素材暂无独立 cart sprite,用主色块)
     ctx.fillStyle = '#7A6A50';
-    ctx.fillRect(x, y + 6 * cam.zoom, this.w * cam.zoom, 8 * cam.zoom);
+    ctx.fillRect(this.x, this.y + 6, this.w, 8);
     ctx.fillStyle = '#3A3230';
-    ctx.fillRect(x + 2 * cam.zoom, y + 12 * cam.zoom, 4 * cam.zoom, 4 * cam.zoom);
-    ctx.fillRect(x + 10 * cam.zoom, y + 12 * cam.zoom, 4 * cam.zoom, 4 * cam.zoom);
+    ctx.fillRect(this.x + 2, this.y + 12, 4, 4);
+    ctx.fillRect(this.x + 10, this.y + 12, 4, 4);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

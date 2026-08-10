@@ -9,7 +9,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI } from './bossAI';
 import { RNG } from '../core/rng';
 
 /** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
@@ -245,6 +245,11 @@ export class Enemy extends Entity {
         case 15: kingSlimeAI(this, game, p); break;                       // AI_015 史莱姆王(大跳+小史莱姆)
         case 54: brainOfCthulhuAI(this, game, p); break;                  // AI_054 克脑(爬行者环→瞬移冲刺)
         case 55: creeperAI(this, game, p); break;                         // AI_055 爬行者(环绕漂移)
+        case 30: twinsAI(this, game, p, false); break;                    // AI_030 雷神之眼 125(悬浮/连冲/变身/激光)
+        case 31: twinsAI(this, game, p, true); break;                     // AI_031 魔神之眼 126(诅咒焰/火焰喷射)
+        case 32: skeletronPrimeAI(this, game, p); break;                  // AI_032 机械骷髅王头 127(4 部件/旋冲/白天狂暴)
+        case 33: case 34: case 35: case 36: primePartAI(this, game, p); break; // AI_033-036 Prime 部件(锯/激光/钳/炮)
+        case 37: destroyerAI(this, game, p); break;                       // AI_037 毁灭者 134(80 段链穿地/探针激光)
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -632,16 +637,17 @@ export class Enemy extends Entity {
     const dist = Math.hypot(dx, dy) || 1;
     const sx = (dx / dist) * maxSpd;
     const sy = (dy / dist) * maxSpd;
-    // 摆动项（L17742-17752）：真实 ai[0] 环绕计数（>0 加 vy、|>100| 加 vx、超 200 翻回 -200）
-    // ——仅 num8 族（6/139/173/205）与 flag3 族；蜜蜂两者皆非，无摆动
-    const swarm = isEater || this.vanillaId === 205 || this.vanillaId === 42
-      || (this.vanillaId >= 231 && this.vanillaId <= 235);
-    if (swarm && dist > 100) {
+    // 摆动项（L50837-50848）：num8 族（6/139/173/205）需 dist>100；flag3 族
+    // （42/94/619/176/210/211/231-235，含蜜蜂）无条件摆动
+    const swarmGated = isEater || this.vanillaId === 205;
+    const swarmAlways = this.vanillaId === 42 || this.vanillaId === 94 || this.vanillaId === 619
+      || this.vanillaId === 176 || isBee || (this.vanillaId >= 231 && this.vanillaId <= 235);
+    if ((swarmGated && dist > 100) || swarmAlways) {
       this.ai0 += 1;
       if (this.ai0 > 200) this.ai0 = -200;
       this.vy += this.ai0 > 0 ? 0.023 : -0.023;
       this.vx += Math.abs(this.ai0) > 100 ? 0.023 : -0.023;
-    } else if (swarm) {
+    } else if (swarmGated) {
       this.ai0 = 0; // 近距无摆动
     }
     // 近距制导（6/94/173/619）

@@ -738,6 +738,11 @@ item({ key: 'worm_food', name: '蠕虫食物', maxStack: 20, value: 1, desc: '�
 item({ key: 'bloody_spine', name: '血腥脊椎', maxStack: 20, value: 1, desc: '猩红之地使用:召唤克苏鲁之脑' });
 item({ key: 'slime_crown', name: '史莱姆王冠', maxStack: 20, value: 1, desc: '任意时刻:召唤史莱姆王' });
 
+// ---- 机械三王召唤物(官方 556 机械蠕虫/544 机械魔眼/557 机械骷髅头;需夜晚+困难模式) ----
+item({ key: 'mechanical_worm', name: '机械蠕虫', maxStack: 20, value: 1, vid: 556, desc: '夜晚使用:召唤毁灭者' });
+item({ key: 'mechanical_eye', name: '机械魔眼', maxStack: 20, value: 1, vid: 544, desc: '夜晚使用:召唤双子魔眼' });
+item({ key: 'mechanical_skull', name: '机械骷髅头', maxStack: 20, value: 1, vid: 557, desc: '夜晚使用:召唤机械骷髅王' });
+
 // ---- 电路工具(原版 530 电线/509,850,851,3612 扳手/510 剪线钳/849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图) ----
 // 位掩码见 world/Wiring.ts TOOL_*。扳手消耗背包中的 wire(原版语义:找第一组 530 扣 1)
 item({ key: 'wire', name: '电线', maxStack: 999, value: 1, desc: '四色扳手与宏伟蓝图的耗材' });
