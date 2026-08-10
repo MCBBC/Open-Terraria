@@ -1327,6 +1327,21 @@ export class Game implements GameHooks {
         l, l, l,
       );
     }
+    // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461）：
+    // createTile==4 火把族 → TorchColor；蜡烛(105) → [1,0.95,0.8]；均 !wet
+    for (const dent of this.entities.drops) {
+      const d = dent as ItemDrop;
+      const def = ITEM_DEFS[d.itemId];
+      if (!def) continue;
+      const isTorch = def.tile === 'torch';
+      const isCandle = def.tile === 'candle';
+      if (!isTorch && !isCandle) continue;
+      const tx = Math.floor((d.x + d.w / 2) / TILE), ty = Math.floor((d.y + d.h / 2) / TILE);
+      const dst = this.world.store;
+      if (!dst.inBounds(tx, ty)) continue;
+      if (dst.liquid[dst.idx(tx, ty)] > 100) continue; // !wet
+      this.lighting.addLight(tx, ty, 1, 0.95, 0.8);
+    }
     this.lighting.compute(w.clock.dayFactor);
 
     // ---- 粒子与飘字 ----

@@ -87,38 +87,36 @@ export class Sfx {
     for (const n of names) for (const f of WAV_MAP[n] ?? []) this.ensureBuffer(f);
   }
 
-  // ---- 雨声层（原版 XACT 循环层的程序化近似：白噪 + lowpass，gain=cloudAlpha 驱动） ----
+  // ---- 雨声层：原版 RainAmbience（Music_28.mp3，XACT Wave Bank 同源提取）循环 ----
   private rainGain: GainNode | null = null;
   private rainSrc: AudioBufferSourceNode | null = null;
+  private rainLoaded = false;
   /** 设置雨声强度 0-1（每帧调用；0 时静音不拆节点——重启有冷启动开销） */
   setRain(vol: number) {
     const ctx = this.ensure(true);
     if (!ctx) return;
     if (!this.rainGain) {
-      // 2 秒白噪循环 → lowpass(900Hz) → gain
-      const len = ctx.sampleRate * 2;
-      const buf = ctx.createBuffer(1, len, ctx.sampleRate);
-      const d = buf.getChannelData(0);
-      let last = 0;
-      for (let i = 0; i < len; i++) {
-        // 简单一阶低通白噪（棕噪声听感更接近雨）
-        last = last * 0.94 + (Math.random() * 2 - 1) * 0.06;
-        d[i] = last * 3;
-      }
-      const src = ctx.createBufferSource();
-      src.buffer = buf;
-      src.loop = true;
-      const lp = ctx.createBiquadFilter();
-      lp.type = 'lowpass';
-      lp.frequency.value = 900;
       const g = ctx.createGain();
       g.gain.value = 0;
-      src.connect(lp).connect(g).connect(ctx.destination);
-      src.start();
+      g.connect(ctx.destination);
       this.rainGain = g;
-      this.rainSrc = src;
+      // 原版雨环境音轨（RainAmbience）懒加载循环；加载失败静默（雨声可选）
+      fetch('audios/music/Music_28.mp3')
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+        .then((buf) => {
+          if (!buf) return;
+          const src = ctx.createBufferSource();
+          src.buffer = buf;
+          src.loop = true;
+          src.connect(this.rainGain!);
+          src.start();
+          this.rainSrc = src;
+          this.rainLoaded = true;
+        })
+        .catch(() => {});
     }
-    const v = Math.max(0, Math.min(1, vol)) * this.master * 0.5;
+    const v = Math.max(0, Math.min(1, vol)) * this.master * 0.6;
     this.rainGain.gain.setTargetAtTime(v, ctx.currentTime, 0.4);
   }
 

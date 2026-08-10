@@ -467,6 +467,10 @@ export class Renderer {
       this.weatherFx.draw(this, world);
     }
 
+    // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
+    // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
+    this.drawHouseBanners(entities, world);
+
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
     for (const e of sorted) {
@@ -836,13 +840,21 @@ export class Renderer {
         const rotId = ROTATION_NPC.has(e.vanillaId);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
         else if (e.vanilla?.aiStyle === 5) ctx.rotate(e.visAngle); // AI_005 蜂群族:cs:51022 朝速度方向转头
+        else if (e.vanilla?.aiStyle === 6) ctx.rotate(e.visAngle); // AI_006 蠕虫族:cs:51500 段随链方向旋转(贴图正面朝上,+π/2)
         else if (rotId) ctx.rotate(e.spin);
+        const worm = e.vanilla?.aiStyle === 6; // 旋转态不再叠加朝向镜像(垂直对称段贴图)
         ctx.scale(scale, scale);
-        if (!rotId && e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
+        if (!rotId && !worm && e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, flying ? -r.sh / 2 : -r.sh, r.sw, r.sh);
+        // EoC 锚点修正:NPC_4 每帧 110×166,眼球主体质心在帧内 y≈106(张嘴帧 113),
+        // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
+        // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
+        // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
+        let anchorY = flying ? -r.sh / 2 : -r.sh;
+        if (e.vanillaId === 4) anchorY += frameIdx < 3 ? 23 : 30;
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；
         // color.A 决定该 pass 强度（史莱姆贴图是白剪影，颜色全靠这层）
@@ -1068,6 +1080,50 @@ export class Renderer {
       const fw = wBar * (e.hp / e.maxHp);
       if (fw > 1) ctx.fillRect(e.cx - wBar / 2, e.y - 8, Math.min(2, fw), 4);
       ctx.globalAlpha = 1;
+    }
+  }
+
+  /** 入驻旗帜（Main.cs:40152-40236 DrawNPCHousesInWorld 1:1）：
+   *  有家非流浪城镇 NPC（bound/守卫老人除外）在家坐标上方挂 House_Banner_1
+   *  （2×2 帧 16×20：X=单/双人旗、Y=housingCategory——城镇 NPC 全 0）+ 头像
+   *  叠画（NPC_Head_{id} 24×24）。同房多 NPC 每面旗下移 26px。锚点=帧中心。
+   *  位置 = home.x*16+8，y = 首个实心格下沿+18 */
+  private drawHouseBanners(entities: unknown[], world: World) {
+    if (!this.atlas) return;
+    const cloth = this.atlas.vmisc('vanilla/House_Banner_1.png');
+    if (!cloth) return;
+    const ctx = this.ctx;
+    const st = world.store;
+    const banners: TownNPC[] = [];
+    for (const e of entities) {
+      if (e instanceof TownNPC && !e.dead && !e.bound && e.home && e.npcKey !== 'old_man') banners.push(e);
+    }
+    // 同房重复偏移（原版 num4：同 home 的排序在后计数 ×26）
+    for (const n of banners) {
+      const dup = banners.filter((o) => o !== n && o.home!.x === n.home!.x && o.home!.y === n.home!.y
+        && banners.indexOf(o) > banners.indexOf(n)).length;
+      // 从 home.y-1 向上找第一个实心格（天花板/上表面）
+      let cy = n.home!.y - 1;
+      let found = false;
+      while (cy >= 10) {
+        if (st.isSolid(n.home!.x, cy)) { found = true; break; }
+        cy--;
+      }
+      if (!found) continue;
+      const fx = (n.home!.x % 2) * 16;                 // 帧 X：单/双（双人=同房含自己类型，暂单）
+      const fy = 0;                                     // housingCategory 城镇 NPC 全 0
+      const bx = n.home!.x * 16 + 8;                    // 原版 num8=8 偏移
+      const by = (cy + 1) * 16 + 18 + dup * 26;         // num9=18（平台 -8 略）+ 重复偏移
+      ctx.drawImage(cloth.img, cloth.sx + fx, cloth.sy + fy, 16, 20,
+        bx - 8, by - 10, 16, 20);
+      // 头像叠画（原版 NpcHead，fit 24）
+      const head = this.atlas.vmisc(`vanilla/NPC_Head_${n.vanillaId}.png`);
+      if (head) {
+        const hs = Math.min(1, 24 / Math.max(head.sw, head.sh));
+        const hw = head.sw * hs, hh = head.sh * hs;
+        ctx.drawImage(head.img, head.sx, head.sy, head.sw, head.sh,
+          bx - hw / 2, by - hh / 2 + 2, hw, hh);
+      }
     }
   }
 

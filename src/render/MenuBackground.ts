@@ -74,7 +74,12 @@ export class MenuBackground {
     const ctx = this.ctx;
     ctx.save();
     ctx.globalAlpha = alpha;
-    for (let i = 0; i < loops; i++) ctx.drawImage(im, startX + i * w, y, w, h);
+    // 接缝修复：浮点 X/宽度平铺会在相邻贴图间露出亚像素缝隙——
+    // 坐标取整 + 每张多画 1px 重叠（背景层无感知，消除滚动接缝）
+    const yR = Math.round(y);
+    for (let i = 0; i < loops; i++) {
+      ctx.drawImage(im, Math.round(startX + i * w), yR, Math.ceil(w) + 1, h);
+    }
     ctx.restore();
   }
 

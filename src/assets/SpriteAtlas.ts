@@ -51,6 +51,8 @@ export const VANILLA_MISC = [
   'vanilla/Ninja.png',      // 史莱姆王体内忍者（Main.cs:22817 叠画）
   'vanilla/Extra_39.png',   // 史莱姆王头顶金冠（Main.cs:25571-25595 叠画；Extra_39.png 82×56）
   'vanilla/Gore_734.png',   // 史莱姆王王冠 Gore（专家模式传送时抛出，NPC.cs:43550）
+  'vanilla/House_Banner_1.png',  // 入驻旗帜布（Main.cs:40152 DrawNPCHousesInWorld，2×2 帧 16×20）
+  ...Array.from({ length: 121 }, (_, i) => `vanilla/NPC_Head_${i}.png`),  // 城镇 NPC 头像（旗帜上叠画）
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),

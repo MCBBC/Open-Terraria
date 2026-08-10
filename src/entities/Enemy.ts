@@ -72,6 +72,9 @@ export class Enemy extends Entity {
     const spd = Math.hypot(this.vx, this.vy);
     if (spd > maxSpd) { this.vx = (this.vx / spd) * maxSpd; this.vy = (this.vy / spd) * maxSpd; }
     this.facing = this.vx > 0 ? 1 : -1;
+    // 旋转（AI_006_Worms :52591 头/:51500 段）：贴图正面朝上 → rotation = atan2 + π/2。
+    // 头朝目标（:52591 num49/50 = 朝向分量，等价速度角）；段用速度角（:51500）
+    this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
     // 蠕虫穿墙：直接位移（原版 noTileCollide）
     this.x += this.vx;
     this.y += this.vy;
@@ -89,6 +92,8 @@ export class Enemy extends Entity {
         s.y += dyC * shrink;
         s.facing = dxC < 0 ? 1 : -1;         // 原版 spriteDirection（L52305）
       }
+      // 段旋转 = 指向前一段的方向（= 本段行进切向，与原版段速度角等价）
+      if (dist > 0.01) s.visAngle = Math.atan2(dyC, dxC) + Math.PI * 0.5;
     }
   }
 
@@ -126,7 +131,7 @@ export class Enemy extends Entity {
       // 原版 knockBackResist 是"承受击退的比例"（0.5=吃一半）；本仓库语义是
       // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
       knockbackResist: Math.max(0, Math.min(0.89, 1 - (v.knockBackResist ?? 0.5))),
-      width: v.width, height: v.height, flying,
+      width: Math.round(v.width * (v.scale ?? 1)), height: Math.round(v.height * (v.scale ?? 1)), flying,
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
@@ -136,8 +141,12 @@ export class Enemy extends Entity {
     };
     e.hp = v.lifeMax;
     e.maxHp = v.lifeMax;
-    e.w = v.width;
-    e.h = v.height;
+    // 碰撞盒乘 npc.scale(NPC.cs:17747-17748 width/height=(int)(×scale))——
+    // 史莱姆王/毁灭者 1.25、血肉墙 1.2:此前未乘,贴图放大了盒子没放大,
+    // 判定区比视觉小一圈(与渲染 scale 不一致的"盒贴图不匹配"来源)
+    const vScale = v.scale ?? 1;
+    e.w = Math.round(v.width * vScale);
+    e.h = Math.round(v.height * vScale);
     e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
     // EoW 族 alpha=255 = 出生全透明渐显标记（其余 alpha 为静态不透明度,勿动）：
     // 钳到 254 并置 alphaFade,由 fixedUpdate 逐 tick 减回 0（原版 AI_006 渐显）

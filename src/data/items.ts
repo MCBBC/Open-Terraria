@@ -893,6 +893,7 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'wire_cutter': 10484, 'actuator_item': 10485, 'actuation_rod': 10486, 'multicolor_wrench': 10487,
   'grand_design': 10488,
   'goblin_battle_standard': 10489, 'snow_globe': 10490, 'pirate_map': 10491,
+  'coin_platinum': 10492,
 };
 /** internal id → 稳定 id(保存方向;0=无映射,不应出现) */
 export const ITEM_STABLE_OF_INTERNAL = new Uint16Array(ITEM_DEFS.length);

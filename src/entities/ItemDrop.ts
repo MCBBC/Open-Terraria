@@ -31,15 +31,18 @@ export class ItemDrop extends Entity {
     if (this.age > 60 * 600) { this.dead = true; return; }
 
     const player = (game as unknown as { player: Player }).player;
-    let magnetized = false;
+    let beingGrabbed = false;
     if (player && !player.dead && this.age > PICKUP_DELAY) {
-      const dx = player.cx - this.cx, dy = player.cy - this.cy;
-      const dist = Math.hypot(dx, dy);
-      // 碰到身体直接拾取（AABB 重叠），避免中心点距离判定漏拾
+      // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
+      // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取
+      const GRAB_RANGE = 42;
       const touching =
         this.x < player.x + player.w && this.x + this.w > player.x &&
         this.y < player.y + player.h && this.y + this.h > player.y;
-      if (touching || dist < TILE * 1.7) {
+      const inGrabRange =
+        this.x < player.x + player.w + GRAB_RANGE && this.x + this.w > player.x - GRAB_RANGE &&
+        this.y < player.y + player.h + GRAB_RANGE && this.y + this.h > player.y - GRAB_RANGE;
+      if (touching) {
         const before = this.stack;
         const left = player.inv.add(this.itemId, this.stack);
         if (left === 0) {
@@ -54,23 +57,38 @@ export class ItemDrop extends Entity {
         }
         if (left !== before) game.notifyInventoryChanged();
         this.stack = left;
-      } else if (dist < MAGNET_RADIUS) {
-        // 磁吸：近处强拉（平方衰减），确保能战胜重力
-        magnetized = true;
-        const f = Math.pow(1 - dist / MAGNET_RADIUS, 1.5);
-        const pull = 0.35 + f * 1.1;
-        this.vx += (dx / (dist || 1)) * pull;
-        this.vy += (dy / (dist || 1)) * pull;
-        this.vx = Math.max(-5, Math.min(5, this.vx));
-        this.vy = Math.max(-6, Math.min(5, this.vy));
+      } else if (inGrabRange) {
+        // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
+        // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597
+        // else 分支仅 position+=velocity),物品穿墙飞向玩家
+        beingGrabbed = true;
+        const SPEED = 0.45, MAXV = 4, BACK = 0.75;
+        if (player.cx > this.cx) {
+          if (this.vx < MAXV + player.vx) this.vx += SPEED;
+          if (this.vx < 0) this.vx += SPEED * BACK;
+        } else {
+          if (this.vx > -MAXV + player.vx) this.vx -= SPEED;
+          if (this.vx > 0) this.vx -= SPEED * BACK;
+        }
+        if (player.cy > this.cy) {
+          if (this.vy < MAXV) this.vy += SPEED;
+          if (this.vy < 0) this.vy += SPEED * BACK;
+        } else {
+          if (this.vy > -MAXV) this.vy -= SPEED;
+          if (this.vy > 0) this.vy -= SPEED * BACK;
+        }
       }
     }
 
-    // 磁吸状态下大幅减重，保证能被吸向玩家
-    const g = magnetized ? GRAVITY * 0.25 : GRAVITY * 0.7;
-    this.vy = Math.min(this.vy + g, MAX_FALL_SPEED);
-    this.vx *= 0.96;
-    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (beingGrabbed) {
+      // 原版被抓取帧:无重力无碰撞,直接位移(WorldItem.cs:596 ApplyMovement)
+      this.x += this.vx;
+      this.y += this.vy;
+    } else {
+      this.vy = Math.min(this.vy + GRAVITY * 0.7, MAX_FALL_SPEED);
+      this.vx *= 0.96;
+      moveAndCollide(this, game.world, this.vx, this.vy);
+    }
     // 入水小水花声（掉落物轻，音量小）
     const st = game.world.store;
     const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];

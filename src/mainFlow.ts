@@ -315,6 +315,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         });
       },
       onBack: () => { closePanel(); showTitle(); },
+      listSaves: async () => {
+        // 列出世界槽位并读出存档 JSON（浏览器 IndexedDB → 下载给开服脚本用）
+        await worldStore.ensureLoaded();
+        return Promise.all(worldStore.list().map(async (m) => ({
+          id: m.id,
+          name: m.name,
+          json: await worldStore.load(m),
+        })));
+      },
     });
     panelRoot = panel.root;
     root.appendChild(panelRoot);
