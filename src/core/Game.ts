@@ -1,5 +1,5 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
-import { TILE, SPAWN_CHECK_INTERVAL, ENEMY_CAP, SPAWN_MIN_DIST, SPAWN_MAX_DIST } from './constants';
+import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST } from './constants';
 import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
@@ -114,7 +114,6 @@ export class Game implements GameHooks {
   dmgNumbers: DamageNumber[] = [];
 
   // 敌人生成
-  private spawnTimer = 0;
   boss: Enemy | null = null;
   /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
   vanillaSpawner: VanillaSpawner | null = null;
@@ -590,9 +589,8 @@ export class Game implements GameHooks {
       if (this.liquid.numLiquid > 0) this.lighting.liquidDirty = true;
     }
 
-    // ---- 敌人生成（F8 可关闭） ----
-    this.spawnTimer++;
-    // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率 ×2(间隔减半)
+    // ---- 敌人生成（F8 可关闭；频率语义见 trySpawnEnemy，每帧概率门） ----
+    // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率修正（getSpawnRate 内）
     const held2 = this.player.inv.heldItem();
     const heldWC = !!held2 && ITEM_DEFS[held2.id]?.key === 'water_candle';
     this.heldWaterCandle = heldWC;

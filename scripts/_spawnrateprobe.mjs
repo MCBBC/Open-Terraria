@@ -51,10 +51,16 @@ const out = await page.evaluate(() => {
 });
 console.log(JSON.stringify(out, null, 1));
 // 原版白天地表 spawnRate=600：3 分钟期望尝试 ~18 次、成功生成 ~5-18 只（概率窗）
-check('地表白天 spawnRate=600（默认值）', out.rateSurface.spawnRate === 600, JSON.stringify(out.rateSurface));
-check('洞穴层 spawnRate×0.4 + max×1.9', out.rateCavern.spawnRate === 240 && out.rateCavern.maxSpawns === 9, JSON.stringify(out.rateCavern));
+// 空场地表：600×0.6(附近<20%) = 360；洞穴空场：600×0.4×0.6×0.7(地下第二块) = 100
+check('地表空场 spawnRate=360（600×0.6 补怪加速）', out.rateSurface.spawnRate === 360, JSON.stringify(out.rateSurface));
+check('洞穴 spawnRate 修正链（×0.4×0.6×0.7=100）+ max×1.9', out.rateCavern.spawnRate === 100 && out.rateCavern.maxSpawns === 9, JSON.stringify(out.rateCavern));
 check('3 分钟生成数在原版期望区间（≈5-25）', out.surfaceSpawnedIn3min >= 3 && out.surfaceSpawnedIn3min <= 30, `spawned=${out.surfaceSpawnedIn3min}`);
-check('npcSlots 数据生效', out.sampleSlots.some((s) => typeof s[1] === 'number'), JSON.stringify(out.sampleSlots));
+// npcSlots 数据校验（直接读提取表：King Slime=5，普通怪缺省=1 由 ?? 1 兜底）
+const slotsCheck = await page.evaluate(async () => {
+  const j = await (await fetch('/sprites/vanilla-npcs.json')).json();
+  return { king: j['50']?.npcSlots, eye: j['2']?.npcSlots ?? 'default', count: Object.values(j).filter((e) => e.npcSlots != null).length };
+});
+check('npcSlots 数据生效（King Slime=5，表内 243 类型）', slotsCheck.king === 5 && slotsCheck.count > 200, JSON.stringify(slotsCheck));
 console.log(`\n${pass} passed, ${fail} failed`);
 if (errors.length) console.log('页面异常:', errors.slice(0, 3));
 await browser.close();

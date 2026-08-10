@@ -227,9 +227,16 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.6);
       maxSpawns = Math.floor(maxSpawns * 1.3);
     }
-    // L596-602：附近怪低于上限 20%/40% 时加速补怪
-    if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
-    else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
+    // L583-591（无条件）：附近怪 <20%/40%/60%/80% 上限时 ×0.6/×0.7/×0.8/×0.9
+    if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.6);
+    else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.7);
+    else if (nearbySlots < maxSpawns * 0.6) spawnRate = Math.floor(spawnRate * 0.8);
+    else if (nearbySlots < maxSpawns * 0.8) spawnRate = Math.floor(spawnRate * 0.9);
+    // L592-604：地下中点以下/腐化/猩红再叠加（Zone flags 为上次生成残留，同原版）
+    if (playerYpx / TILE > (w.groundLevel + w.rockLevel) / 2 || this.ZoneCorrupt || this.ZoneCrimson) {
+      if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
+      else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
+    }
     // L640-646：水蜡烛 spawnRate×0.75 / max×1.5；天空层再 ×0.5
     if (waterCandle) {
       spawnRate = Math.floor(spawnRate * 0.75);

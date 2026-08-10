@@ -67,14 +67,15 @@ const depth1Lines = (block) => {
 const data = JSON.parse(readFileSync(`${ROOT}/game/public/sprites/vanilla-npcs.json`, 'utf8'));
 const byId = new Map();
 for (const entry of Object.values(data)) byId.set(entry.id, entry);
-let colorCount = 0, alphaCount = 0;
+let colorCount = 0, alphaCount = 0, slotsCount = 0;
 for (const { cond, block } of blocks) {
   const ranges = matchIds(cond);
   if (!ranges) continue;
   const lines = depth1Lines(block);
   const colorLine = lines.find((l) => /^color = new Color\(/.test(l));
   const alphaLine = lines.find((l) => /^alpha = \d+;/.test(l));
-  if (!colorLine && !alphaLine) continue;
+  const slotsLine = lines.find((l) => /^npcSlots = [\d.]+f;/.test(l));
+  if (!colorLine && !alphaLine && !slotsLine) continue;
   let color = null;
   if (colorLine) {
     const nums = [...colorLine.matchAll(/(\d+)/g)].map((x) => +x[1]);
@@ -83,17 +84,19 @@ for (const { cond, block } of blocks) {
     color = [nums[0], nums[1], nums[2], nums[3] ?? 255].map((v) => Math.round(v * f));
   }
   const alpha = alphaLine ? +alphaLine.match(/(\d+)/)[1] : null;
+  const slots = slotsLine ? parseFloat(slotsLine.match(/[\d.]+/)[0]) : null;
   for (const [lo, hi] of ranges) {
     for (let id = Math.max(0, lo); id <= Math.min(700, hi); id++) {
       const entry = byId.get(id);
       if (!entry) continue;
       if (color) { entry.color = color; colorCount++; }
       if (alpha != null) { entry.alpha = alpha; alphaCount++; }
+      if (slots != null) { entry.npcSlots = slots; slotsCount++; }
     }
   }
 }
 writeFileSync(`${ROOT}/game/public/sprites/vanilla-npcs.json`, JSON.stringify(data));
-console.error(`color 写入 ${colorCount} 项 / alpha 更新 ${alphaCount} 项`);
+console.error(`color ${colorCount} 项 / alpha ${alphaCount} 项 / npcSlots ${slotsCount} 项`);
 
 // ---------- 2) SetDefaultsFromNetId 负 netID 覆盖 ----------
 const ndStart = npcCs.indexOf('private void SetDefaultsFromNetId(int id');
