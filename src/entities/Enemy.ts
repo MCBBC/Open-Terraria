@@ -9,10 +9,14 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI } from './bossAI';
 import { RNG } from '../core/rng';
 
-/** 原版 Boss NPC id（EoC 4/世吞 13-15/史莱姆王 50/骷髅王 66/血肉墙 127/双子 125-127 外的旧三王 66,113-115/蜂后 262/克脑 266 等） */
-const VANILLA_BOSS_IDS = new Set([4, 13, 14, 15, 50, 66, 113, 114, 115, 127, 134, 135, 136, 222, 262, 266, 370, 398, 625, 636, 657]);
+/** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
+ *  EoC4/世吞13-15(头13 为 Boss,身14尾15 不标)/骷髅王35+手36/地牢守卫68/史莱姆王50/
+ *  血肉墙113/双子125,126/骷髅Prime127/毁灭者134/蜂后222/石巨人245/世纪之花262/克脑266/
+ *  猪鲨370/月总核心398/异教徒439/光皇636/史莱姆皇后657 */
+const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 398, 439, 636, 657]);
 
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
@@ -113,6 +117,9 @@ export class Enemy extends Entity {
     e.w = v.width;
     e.h = v.height;
     e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
+    // EoW 族 alpha=255 = 出生全透明渐显标记（其余 alpha 为静态不透明度,勿动）：
+    // 钳到 254 并置 alphaFade,由 fixedUpdate 逐 tick 减回 0（原版 AI_006 渐显）
+    if (e.spawnAlpha >= 255) { e.spawnAlpha = 254; e.alphaFade = true; }
     e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
@@ -138,6 +145,10 @@ export class Enemy extends Entity {
   visAngle = Math.PI;    // EoC 显示角度（平滑追踪移动方向；素材默认朝左）
   spin = 0;              // EoC 变身旋转进度 0..1
   hpBarT = 0;            // 受击后血条显示计时（tick）
+  // ---- EoC(AI_004)专属 ----
+  servantT = 0;          // 悬浮时"位于玩家上方"累计(110t 召仆从)
+  spinSpeed = 0;         // 自旋角速度(cs ai[2]:0.005 步进钳 0.5)
+  spinPhase = 0;         // 自旋段:0 加速 / 1 减速
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
@@ -151,6 +162,8 @@ export class Enemy extends Entity {
    *  多数为 0=不透明；史莱姆 175/120=半透明凝胶、水母 20、蝙蝠 30 等。
    *  无通用渐隐——仅特定家族（幽灵/怨灵等）在自己的 AI 内衰减 */
   spawnAlpha = 0;
+  /** 出生渐显中（仅原版 alpha=255 的 EoW 族）;静态半透明(史莱姆 175 等)不参与 */
+  alphaFade = false;
   /** 原版 ai[0] 跳跳计数器（史莱姆 hop 节奏）；ai[2] 卡墙禁追冷却 */
   ai0 = -1120;
   ai2 = 0;
@@ -160,6 +173,8 @@ export class Enemy extends Entity {
   ai3 = 0;
   /** 原版 directionY（火轮/刺球对角弹跳的纵向方向） */
   dirY = 1;
+  /** AI 首帧初始化标记（原版 ai[0]==0 门在 ai0 初值 -1120 的史莱姆语义下不可用） */
+  aiInit = false;
   /** 原版 timeLeft（默认 7500 tick，离屏递减；飘浮眼白天 EncourageDespawn(10)） */
   despawnTimer = 7500;
   inWater = false;       // 入水检测（溅落声用）
@@ -184,6 +199,12 @@ export class Enemy extends Entity {
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
 
+    // EoW 族出生渐显（每 tick alpha-1;原版 AI_006）——静态半透明不受影响
+    if (this.alphaFade) {
+      this.spawnAlpha = Math.max(0, this.spawnAlpha - 1);
+      if (this.spawnAlpha === 0) this.alphaFade = false;
+    }
+
     const player = (game as unknown as { player: Player }).player;
     const hasPlayer = !!player && !player.dead;
 
@@ -198,11 +219,18 @@ export class Enemy extends Entity {
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
         case 3: this.fighterAI(game, p); break;                        // AI_003 战士族（原版通用核）
+        case 4: this.eocAI(game, p); break;                            // AI_004 克苏鲁之眼（NPC.cs:19909）
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
         case 10: this.cursedSkullAI(game, p); break;                     // AI_010 诅咒头骨（地牢飞行族）
-        case 11: this.skeletronHeadAI(game, p); break;                   // AI_011 骷髅王头/地牢守卫
+        case 11:
+          // 68 守卫走专用分支（bossAI.skeletronBossAI 注释"守卫分支已在 skeletronHeadAI"
+          // 即此拆分：守卫恒速追击与骷髅王战斗状态机互不混用）
+          if (this.vanillaId === 68) this.dungeonGuardianAI(game, p);
+          else skeletronBossAI(this, game, p);
+          break;                                                         // AI_011 骷髅王头战斗核/地牢守卫
+        case 12: skeletronHandAI(this, game, p); break;                    // AI_012 骷髅王手(锚定头)
         case 20: this.blazingWheelAI(); break;                           // AI_020 火轮（地牢陷阱）
         case 21: this.spikeBallAI(game); break;                          // AI_021 刺球（地牢陷阱）
         case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
@@ -210,6 +238,9 @@ export class Enemy extends Entity {
         case 18: this.jellyfishAI(game, p); break;                      // AI_018 水母族（脉冲游动）
         case 22: this.ghostAI(game, p); break;                          // AI_022 幽灵族（穿墙缓速）
         case 13: this.plantAI(game, p); break;                          // AI_013 植物/攀爬者族（锚点伸展）
+        case 15: kingSlimeAI(this, game, p); break;                       // AI_015 史莱姆王(大跳+小史莱姆)
+        case 54: brainOfCthulhuAI(this, game, p); break;                  // AI_054 克脑(爬行者环→瞬移冲刺)
+        case 55: creeperAI(this, game, p); break;                         // AI_055 爬行者(环绕漂移)
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -641,17 +672,16 @@ export class Enemy extends Entity {
     this.y += this.vy;
   }
 
-  /** AI_011 骷髅王头(35)/地牢守卫(68)（NPC.145.cs:21904+）：
-   *  守卫恒 ai[1]=2（L21937-21941）：伤害/防御 9999（L22277-22278）、恒速 8 直线追击
-   *  （L22282-22288）；玩家死亡/超 2000px → ai[1]=3 下坠脱场（L21925-21935, L22289-22296）。
-   *  骷髅王战斗状态机（旋转/冲撞/手 NPC）未移植：35 走 ai[1]==0 悬浮追击近似
-   *  （L22026-22091：悬浮玩家上方 250px、X 轴 0.05/±8 追击） */
-  private skeletronHeadAI(game: GameHooks, player: Player | null) {
-    if (this.ai0 === 0) this.ai0 = 1; // 初始化（L21910；68 无手 NPC 生成）
-    const isGuardian = this.vanillaId === 68;
+  // AI_011 骷髅王(35)战斗状态机在 bossAI.ts skeletronBossAI；68 守卫走下方专用分支
+
+  /** AI_011 地牢守卫(68)（NPC.145.cs:21937-21941, 22277-22288）：
+   *  恒 ai[1]=2：伤害 9999、恒速 8 直线追击；玩家死/超 2000px → ai[1]=3 下坠脱场。
+   *  noTileCollide 直移 */
+  private dungeonGuardianAI(game: GameHooks, player: Player | null) {
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = 1; } // 初始化（L21910；68 无手 NPC）
     if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
       this.ai1 = 3;
-    } else if (this.ai1 !== 3 && isGuardian) {
+    } else if (this.ai1 !== 3) {
       this.ai1 = 2;
     }
     if (this.ai1 === 2) {
@@ -660,26 +690,6 @@ export class Enemy extends Entity {
       const d = Math.hypot(dx, dy) || 1;
       this.vx = (dx / d) * 8;
       this.vy = (dy / d) * 8;
-    } else if (!isGuardian && this.ai1 !== 3 && player) {
-      // 悬浮段（L22046-22091 简化）：Y 拉向玩家上方 250px，X 朝玩家加速 0.05/限 8
-      if (this.y > player.y - 250) {
-        if (this.vy > 0) this.vy *= 0.98;
-        this.vy -= 0.02;
-        if (this.vy > 2) this.vy = 2;
-      } else {
-        if (this.vy < 0) this.vy *= 0.98;
-        this.vy += 0.02;
-        if (this.vy < -2) this.vy = -2;
-      }
-      if (this.cx > player.cx) {
-        if (this.vx > 0) this.vx *= 0.98;
-        this.vx -= 0.05;
-        if (this.vx > 8) this.vx = 8;
-      } else {
-        if (this.vx < 0) this.vx *= 0.98;
-        this.vx += 0.05;
-        if (this.vx < -8) this.vx = -8;
-      }
     } else {
       this.vy += 0.1;
       if (this.vy < 0) this.vy *= 0.95;
@@ -693,7 +703,7 @@ export class Enemy extends Entity {
    *  首段垂直俯冲 spd/acc/2≈15 tick（L24617-24622），随后恒速 ±spd 弹跳——
    *  noTileCollide 穿墙，"弹"靠 |v|≥spd 时 direction 翻转（L24637-24660）而非碰撞 */
   private blazingWheelAI() {
-    if (this.ai0 === 0) {
+    if (!this.aiInit) { this.aiInit = true;
       this.facing *= -1;
       this.y += this.h / 2 + 8;
       if (this.facing === 0) this.facing = 1;
@@ -730,7 +740,7 @@ export class Enemy extends Entity {
   /** AI_021 刺球（NPC.145.cs:24674+）：恒速 6 对角移动，撞轴翻转（collideX→dirY 翻、
    *  collideY→facing 翻），ai[1] 交替旋转相位（视觉态，渲染暂无旋转仅保留状态语义） */
   private spikeBallAI(game: GameHooks) {
-    if (this.ai0 === 0) {
+    if (!this.aiInit) { this.aiInit = true;
       if ((game as unknown as { player?: Player }).player) {
         const p = (game as unknown as { player: Player }).player;
         this.facing = p.cx > this.cx ? 1 : -1;
@@ -1134,152 +1144,178 @@ export class Enemy extends Entity {
     if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
   }
 
+  /**
+   * AI_004 克苏鲁之眼 1:1（1456 NPC.cs:19909-20757，普通模式数值；专家分支未启用）。
+   *  P1 悬浮(NPC 上方 200px, 5/0.04 伺服) → 600 tick → 3 连冲(6.0, 冲程 150t, 40t 后 0.98 摩擦);
+   *  悬浮期间 NPC 在玩家上方且 <500px 时累计 110t 召一只仆从(vel=dir*5);
+   *  HP≤50% → 自旋变速(0.005→0.5 rad/tick ×100t, 再减速 100t)+gore/咆哮 → P2;
+   *  P2 悬浮(上方 120px, 6/0.07) → 200 tick → 3 连冲(6.8, 冲程 130t);
+   *  白天/玩家死亡: vy-=0.04 漂离 + 远距 despawn(原版 EncourageDespawn 语义)。
+   *  旋转: 悬浮追 atan2(dy,dx)+π/2、冲刺锁 atan2(v)-π/2, 速率 0.02(新悬浮)/0.05(cs:19943-19966)
+   */
+
+  /** 原版轴伺服（cs:20050-20081）：分轴逼近期望速度,符号相反时双倍加速 */
+  private servoTo(tx: number, ty: number, spd: number, accel: number): void {
+    const d0 = Math.hypot(tx - this.cx, ty - this.cy) || 1;
+    const ex = ((tx - this.cx) / d0) * spd;
+    const ey = ((ty - this.cy) / d0) * spd;
+    if (this.vx < ex) {
+      this.vx += accel;
+      if (this.vx < 0 && ex > 0) this.vx += accel;
+    } else if (this.vx > ex) {
+      this.vx -= accel;
+      if (this.vx > 0 && ex < 0) this.vx -= accel;
+    }
+    if (this.vy < ey) {
+      this.vy += accel;
+      if (this.vy < 0 && ey > 0) this.vy += accel;
+    } else if (this.vy > ey) {
+      this.vy -= accel;
+      if (this.vy > 0 && ey < 0) this.vy -= accel;
+    }
+  }
+
+  /** EoC 旋转追踪：visAngle 向 target 以 rate 步进（最短弧，cs:19975-20000） */
+  private applyEocRotation(target: number, rate: number): void {
+    let t = target;
+    while (t < 0) t += Math.PI * 2;
+    while (t > Math.PI * 2) t -= Math.PI * 2;
+    let a = this.visAngle;
+    while (a < 0) a += Math.PI * 2;
+    while (a > Math.PI * 2) a -= Math.PI * 2;
+    let diff = t - a;
+    if (diff > Math.PI) diff -= Math.PI * 2;
+    if (diff < -Math.PI) diff += Math.PI * 2;
+    this.visAngle = a + diff * Math.min(1, rate * 10);
+  }
+
   private eocAI(game: GameHooks, player: Player | null) {
-    if (!player) return;
     const T = TILE;
+    if (!player) return;
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const dist = Math.hypot(dx, dy) || 1;
 
-    // ---- 二阶段触发：半血以下且不处于冲刺/前摇 → 原地旋转三圈变身 ----
-    if (this.phase === 1 && this.hp <= this.maxHp * 0.5 && (this.state === 0 || this.state === 3 || this.state === 4)) {
-      this.state = 5; this.aiT = 0; this.spin = 0;
-      this.vx = 0; this.vy = 0;
-      game.spawnParticles(this.cx, this.cy, '#C02020', 24, 3);
+    // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(cs:20020-20025) ----
+    if (game.world.clock.isDay || player.dead) {
+      this.vy -= 0.04;
+      this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, 0.02);
+      this.x += this.vx; this.y += this.vy;
+      if (dist > T * 120) this.dead = true;   // 漂远后消失(原版按距玩家 40~80 格剔除)
+      return;
     }
 
-    // ---- 玩家跑太远（含被地形隔开追不上）→ 传送到视口外上空，从远处飞回来 ----
-    if (this.state !== 5 && !this.dashing && dist > 55 * T) {
-      const cam = (game as unknown as { camera?: { viewW: number; viewH: number; zoom: number } }).camera;
-      const halfX = cam ? cam.viewW / 2 / cam.zoom / T : 40;  // 视口半宽（格）
-      const halfY = cam ? cam.viewH / 2 / cam.zoom / T : 25;  // 视口半高（格）
-      const side = this.cx < player.cx ? -1 : 1;
-      const maxX = game.world.w * T - this.w, maxY = game.world.h * T - this.h;
-      // 水平超出视口边缘 6 格 + 垂直高于视口上缘 4 格（保证完全在画面外）
-      this.x = Math.max(0, Math.min(maxX, player.cx + side * (halfX + 6) * T - this.w / 2));
-      this.y = Math.max(2 * T, Math.min(maxY, player.cy - Math.max(halfY + 4, 14) * T));
+    // ---- 二阶段触发：HP≤50%(cs:20228) → 自旋(加速段) ----
+    if (this.phase === 1 && this.hp <= this.maxHp * 0.5) {
+      this.phase = 2; this.state = 5; this.aiT = 0;
+      this.spinSpeed = 0;
       this.vx = 0; this.vy = 0;
-      this.state = 0; this.aiT = 0;
-      game.spawnParticles(this.cx, this.cy, '#802020', 20, 3);
+      game.spawnParticles(this.cx, this.cy, '#C02020', 20, 3);
     }
 
-    this.dashing = false;
+    // 旋转追踪速率(cs:19943-19966)：新悬浮 0.02;悬浮 40t 后/冲刺预备 0.05
+    let rotRate = 0.02;
+
     switch (this.state) {
       case 0: {
-        // 悬浮/进场：远处直线飞近，近处绕玩家侧上方悬浮（带起伏）
-        if (dist > 20 * T) {
-          this.vx += (dx / dist) * 0.3;
-          this.vy += (dy / dist) * 0.3;
-        } else {
-          const tx = player.cx - this.facing * 6 * T;
-          const ty = player.cy - 4 * T;
-          this.vx += Math.sign(tx - this.cx) * 0.12 + Math.sin(this.aiT * 0.05) * 0.04;
-          this.vy += Math.sign(ty - this.cy) * 0.12 + Math.cos(this.aiT * 0.07) * 0.06;
-        }
+        // ---- 悬浮：伺服逼近玩家上方(P1 -200px / P2 -120px, cs:20030-20044/20369-20373) ----
+        const hoverY = this.phase === 1 ? -200 : -120;
+        const spd = this.phase === 1 ? 5 : 6;
+        const accel = this.phase === 1 ? 0.04 : 0.07;
+        this.servoTo(player.cx, player.cy + hoverY, spd, accel);
         this.facing = dx > 0 ? 1 : -1;
-        this.vx *= 0.95; this.vy *= 0.95;
-        // 仆从召唤
-        const servantEvery = this.phase === 2 ? 260 : 420;
-        if (this.aiT > 0 && this.aiT % servantEvery === 0) {
-          game.spawnEnemy('servant_of_cthulhu', this.cx, this.cy);
+        // 仆从(P1 专属, cs:20096-20145):NPC 在玩家上方且 <500px 时累计,110t 召一只
+        if (this.phase === 1) {
+          if (this.y + this.h < player.y && dist < 500) {
+            if (++this.servantT >= 110) {
+              this.servantT = 0;
+              const d0 = dist;
+              const svx = (dx / d0) * 5, svy = (dy / d0) * 5;
+              const s = Enemy.fromVanilla(5, this.cx + (dx / d0) * 10, this.cy + (dy / d0) * 10);
+              if (s) {
+                s.vx = svx; s.vy = svy;
+                (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(s, 'enemies');
+                game.playSfx('spawn');
+                game.spawnParticles(s.cx, s.cy, '#9A8FA0', 10, 2);
+              }
+            }
+          }
         }
-        // 就位 → 进入冲撞连段（3 连冲；二阶段蓄力更短）
-        if (dist <= 24 * T && this.aiT > (this.phase === 2 ? 45 : 90)) {
-          this.state = 1; this.aiT = 0; this.chargesLeft = 3;
+        // 悬浮计时:600t(P1)/200t(P2) → 冲刺连段(cs:20083-20095/20430-20442)
+        if (this.aiT >= (this.phase === 1 ? 600 : 200)) {
+          this.state = 1; this.aiT = 0; this.chargesLeft = 0;
         }
+        if (this.aiT > 40) rotRate = 0.05;
         break;
       }
       case 1: {
-        // 前摇：短暂悬停后锁定玩家位置迅猛冲出
-        this.vx *= 0.8; this.vy *= 0.8;
-        if (this.aiT > (this.phase === 2 ? 8 : 14)) {
-          this.state = 2; this.aiT = 0;
-          const d2 = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
-          const p2 = this.phase === 2 ? 1.6 : 1; // 二阶段更快更强
-          this.vx = ((player.cx - this.cx) / d2) * 7 * p2;
-          this.vy = ((player.cy - this.cy) / d2) * 7 * p2;
-          this.facing = this.vx > 0 ? 1 : -1;
-          this.dashing = true;
-        }
+        // ---- 冲刺预备(cs:20148-20169/20452-20478):锁定方向即发,P2 起手吼声 ----
+        this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, 0.05);
+        const dashSpd = this.phase === 1 ? 6 : 6.8;
+        this.vx = (dx / dist) * dashSpd;
+        this.vy = (dy / dist) * dashSpd;
+        this.state = 2; this.aiT = 0;
+        this.dashing = true;
+        if (this.phase === 2) game.playSfx('roar', 0.7);
         break;
       }
       case 2: {
-        // 冲撞：无视地形直接穿透，冲过一段距离后回头
+        // ---- 冲刺(cs:20170-20222/20479-20534):40t 后 0.98/0.97 摩擦,
+        //     冲程 150t(P1)/130t(P2),3 连后回悬浮 ----
         this.dashing = true;
-        // 速度感拖尾粒子
         if (this.aiT % 2 === 0) {
-          game.spawnParticles(
-            this.cx - Math.sign(this.vx || 1) * 20, this.cy - Math.sign(this.vy || 1) * 14,
-            this.phase === 2 ? '#FF4040' : '#D0D0D0', 2, 2,
-          );
+          game.spawnParticles(this.cx, this.cy, this.phase === 1 ? '#D0D0D0' : '#FF4040', 2, 2);
         }
-        const spd = 7 * (this.phase === 2 ? 1.6 : 1);
-        if (this.aiT * spd > 20 * T || this.aiT > 70) {
-          this.chargesLeft--;
-          this.state = 3; this.aiT = 0;
+        if (this.aiT >= 40) {
+          this.vx *= this.phase === 1 ? 0.98 : 0.97;
+          this.vy *= this.phase === 1 ? 0.98 : 0.97;
         }
-        break;
-      }
-      case 3: {
-        // 回头悬停：减速 → 还有剩余次数再冲，否则收招拉开距离
-        this.vx *= 0.82; this.vy *= 0.82;
-        if (this.aiT > (this.phase === 2 ? 12 : 20)) {
-          if (this.chargesLeft > 0) { this.state = 1; this.aiT = 0; }
-          else {
-            // 收招落点：进入状态时一次性锁定（玩家反方向 10 格、抬高 3 格）。
-            // 若每帧从当前位置重算，目标会随 Boss 一起外退 → 一直飞到计时上限
-            const d0 = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
-            this.target = {
-              x: player.cx + ((this.cx - player.cx) / d0) * 10 * T,
-              y: player.cy + ((this.cy - player.cy) / d0) * 10 * T - 3 * T,
-            };
-            this.state = 4; this.aiT = 0;
+        // 冲刺中旋转锁移动方向(cs:20195/20505)
+        this.visAngle = Math.atan2(this.vy, this.vx) - Math.PI * 0.5;
+        const dashDur = this.phase === 1 ? 150 : 130;
+        if (this.aiT >= dashDur) {
+          this.chargesLeft++;
+          this.aiT = 0;
+          if (this.chargesLeft >= 3) {
+            this.state = 0; this.chargesLeft = 0;   // 3 连结束回悬浮(cs:20212-20216/20518-20521)
+          } else {
+            this.state = 1;                          // 再冲
           }
-        }
-        break;
-      }
-      case 4: {
-        // 收招：飞到锁定落点（贴近玩家 10 格处）后立刻回到悬浮，保持压迫感
-        const away = this.target;
-        if (away) {
-          const adx = away.x - this.cx, ady = away.y - this.cy;
-          const ad = Math.hypot(adx, ady) || 1;
-          this.vx += (adx / ad) * 0.16;
-          this.vy += (ady / ad) * 0.16;
-          this.vx *= 0.96; this.vy *= 0.96;
-          if (ad < 2.5 * T || this.aiT > 90) {
-            this.state = 0; this.aiT = 0; this.target = null;
-          }
-        } else {
-          this.state = 0; this.aiT = 0;
         }
         break;
       }
       case 5: {
-        // 变身：原地旋转六圈（比三圈更快——100 tick 转 12π，角速度翻倍多）
-        this.spin = Math.min(1, this.aiT / 100);
-        this.vx *= 0.85; this.vy *= 0.85;
-        this.visAngle += (Math.PI * 12) / 100; // 六圈自转
+        // ---- 自旋变身(cs:20238-20344):加速段 ai2+=0.005 钳 0.5(100t) →
+        //     减速段 ai2-=0.005 钳 0(再 100t) → 进 P2 悬浮;gore/尘/咆哮 ----
+        if (this.spinPhase === 0) {
+          this.spinSpeed = Math.min(0.5, this.spinSpeed + 0.005);
+        } else {
+          this.spinSpeed = Math.max(0, this.spinSpeed - 0.005);
+        }
+        this.visAngle += this.spinSpeed;
+        this.vx *= 0.98; this.vy *= 0.98;
         if (this.aiT % 4 === 0) game.spawnParticles(this.cx, this.cy, '#C02020', 3, 2);
         if (this.aiT >= 100) {
-          this.phase = 2;
-          this.state = 0; this.aiT = 0; this.spin = 0;
-          game.playSfx('roar');
-          game.spawnParticles(this.cx, this.cy, '#FF3030', 30, 3);
+          this.aiT = 0;
+          if (this.spinPhase === 0) {
+            this.spinPhase = 1;                      // 减速段
+          } else {
+            // 变身完成(cs:20310-20330):6 份 gore + 20 尘 + 吼声(15)
+            this.state = 0; this.spinPhase = 0;
+            game.playSfx('roar');
+            game.spawnParticles(this.cx, this.cy, '#FF3030', 30, 3);
+          }
         }
+        break;
+      }
+      default: {
+        this.state = 0; this.aiT = 0;
         break;
       }
     }
 
-    // 显示角度平滑追踪移动方向（最短弧插值；悬浮低速时保持原朝向不抖动）
-    if (this.state !== 5) {
-      const spd = Math.hypot(this.vx, this.vy);
-      if (spd > 0.6) {
-        const target = Math.atan2(this.vy, this.vx) + Math.PI * 1.5; // 素材默认朝左偏下 90°
-        let diff = target - this.visAngle;
-        while (diff > Math.PI) diff -= Math.PI * 2;
-        while (diff < -Math.PI) diff += Math.PI * 2;
-        this.visAngle += diff * 0.18;
-      }
+    // ---- 悬浮/非冲刺态的旋转追踪(最短弧;速率分档) ----
+    if (this.state !== 2 && this.state !== 5) {
+      this.applyEocRotation(Math.atan2(dy, dx) + Math.PI * 0.5, rotRate);
     }
 
     // 移动：EoC 全程无视地形——悬浮飞行体贴图块边缘会卡顿、冲撞后残留在
@@ -1356,3 +1392,4 @@ export class Enemy extends Entity {
 
   draw() { /* Renderer 统一绘制 */ }
 }
+bindEnemyCtor(Enemy);

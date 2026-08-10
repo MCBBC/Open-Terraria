@@ -25,6 +25,8 @@ export class Player extends Entity {
   mana = 20;
   manaRegenAccum = 0;
   hp = 100;
+  /** 最近一次伤害死因（PlayerDeathReason 语义子集）——死亡瞬间由 Game 消费生成原版死亡文本 */
+  lastDamageCause: import('../i18n/RandomText').DeathCause | null = null;
   inv: Inventory;
   buffs = new BuffState();
   /** 角色外观（来自角色系统；渲染层 M7 切换 PaperDoll 时使用） */
@@ -155,6 +157,7 @@ export class Player extends Entity {
       this.lavaAccum += dt;
       if (this.lavaAccum >= 0.5) {
         this.lavaAccum = 0;
+        this.lastDamageCause = { kind: 'lava' };
         this.damage(15, this.cx, this.y - 10);
         game.addDamageNumber(this.cx, this.y, 15, false, '#FF6020');
       }
@@ -173,6 +176,7 @@ export class Player extends Entity {
         this.drownAccum += dt;
         if (this.drownAccum >= 1) {
           this.drownAccum -= 1;
+          this.lastDamageCause = { kind: 'drowned' };
           this.damage(10, this.cx, this.y - 10, false); // 窒息环境伤害：只掉血，无击退
           game.playSfx('drown');
           game.addDamageNumber(this.cx, this.y, 10, false, '#FF5050'); // 与受击同色
@@ -358,6 +362,7 @@ export class Player extends Entity {
         const t = Math.min(1, (fallTiles - FALL_SAFE_TILES) / (FALL_FATAL_TILES - FALL_SAFE_TILES));
         const dmgPercent = 10 + 90 * t * t * t; // 10%~100% 三次方曲线（Maples 公式）
         const dmg = Math.max(1, Math.round((dmgPercent / 100) * this.hp));
+        this.lastDamageCause = { kind: 'fell' };
         this.damage(dmg, this.cx, this.y - 10);
         game.playSfx('hurt');
         game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');

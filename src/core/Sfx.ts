@@ -5,7 +5,8 @@ export type SfxName =
   | 'hit' | 'hurt' | 'pickup' | 'dig' | 'place' | 'drink' | 'chop' | 'splash'
   | 'killed' | 'pkilled' | 'zombie' | 'roar' | 'coin' | 'door_open' | 'door_close' | 'tink' | 'shatter' | 'drown'
   | 'menuOpen' | 'menuClose' | 'menuTick'
-  | 'bowShoot'; // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
+  | 'bowShoot'   // 原版 SoundID.Item5（弓弦，Item.cs case 99 UseSound）
+  | 'throw';     // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -31,6 +32,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuOpen: ['Menu_Open'],
   menuClose: ['Menu_Close'],
   menuTick: ['Menu_Tick'],
+  throw: ['Item_1'],
   // 以下无原版素材，走合成
   drink: [],
 };

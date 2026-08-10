@@ -102,6 +102,12 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
     if (active && frames > 6) return 4 + (Math.floor(t / 5) % 3);
     return Math.floor(t / 8) % Math.min(4, frames);
   }
+  // 克苏鲁之眼(FindFrame case 4, cs:77607-77631):0/1/2 三帧眨眼各 7 tick,
+  // ai[0]>1(二阶段)帧偏移 +3(张嘴形态)
+  if (id === 4) {
+    const blink = Math.floor(t / 7) % 3;
+    return Math.min(frames - 1, blink + (e.phase > 1 ? 3 : 0));
+  }
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
@@ -591,10 +597,11 @@ export class Renderer {
   private drawTombstone(t: Tombstone) {
     const ctx = this.ctx;
     ctx.save();
-    ctx.translate(t.cx, t.y + t.h);
+    // 投射物旋转原点 = 中心（Projectile.Draw 语义）
+    ctx.translate(t.cx, t.cy);
     ctx.rotate(t.angle);
-    const scale = 0.72; // 约 23×23px，比一格略大不突兀
-    let img: CanvasImageSource | null = this.tombstoneCache.get(t.styleCol) ?? null;
+    const styleCol = t.style * 2; // Tiles_85 样式块起点列（style 0-10 → 偶数列 0-20）
+    let img: CanvasImageSource | null = this.tombstoneCache.get(styleCol) ?? null;
     if (!img && this.atlas) {
       // 无缝拼接四格（表内 stride 18：格间有 2px 间隙需跳过）
       const c = document.createElement('canvas');
@@ -603,19 +610,18 @@ export class Renderer {
       let ok = true;
       for (let dy = 0; dy < 2; dy++) {
         for (let dx = 0; dx < 2; dx++) {
-          const fr = this.atlas.vframeAt(85, (t.styleCol + dx) * 18, dy * 18);
+          const fr = this.atlas.vframeAt(85, (styleCol + dx) * 18, dy * 18);
           if (!fr) { ok = false; break; }
           cx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, dx * 16, dy * 16, 16, 16);
         }
       }
-      if (ok) { this.tombstoneCache.set(t.styleCol, c); img = c; }
+      if (ok) { this.tombstoneCache.set(styleCol, c); img = c; }
     }
     if (img) {
-      const w = 32 * scale, h = 32 * scale;
-      ctx.drawImage(img, -w / 2, -h, w, h);
+      ctx.drawImage(img, -16, -16, 32, 32);
     } else {
       const pc = getTombstoneCanvas();
-      ctx.drawImage(pc, -8, -22, 16, 22);
+      ctx.drawImage(pc, -8, -11, 16, 22);
     }
     ctx.restore();
   }
@@ -721,8 +727,10 @@ export class Renderer {
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
         ctx.save();
         ctx.translate(e.cx, e.cy + (flying ? 0 : e.h / 2));
+        // EoC(AI_004)整体随 visAngle 旋转(原版 npc.rotation;其余 NPC 朝向翻转)
+        if (e.vanillaId === 4) ctx.rotate(e.visAngle);
         ctx.scale(scale, scale);
-        if (e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
+        if (e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;

@@ -37,6 +37,7 @@ const langChanged = await switched;
 await new Promise((r) => setTimeout(r, 600));
 const panelTitleEn = await page.evaluate(() => document.querySelector('.sw-set-title').textContent);
 const spText = await page.evaluate(() => document.querySelector('[data-act=sp]').textContent);
+const activeLang = await page.evaluate(() => document.querySelector('.sw-set-lang-grid button.active')?.dataset.lang ?? null);
 const stored = await page.evaluate(() => localStorage.getItem('sandboxworld.options'));
 
 // ④ 关面板 → 标题菜单按钮应已刷新为 Single Player
@@ -63,14 +64,14 @@ const restored = await page.evaluate(() => document.querySelector('[data-act=sp]
 
 console.log(JSON.stringify({
   zhSp, reqCount, langButtons: langButtons.length, hasZh, hasEn,
-  langChanged, panelTitleEn, spText, stored, spAfterClose, spAfterReload, reqCount2, restored,
+  langChanged, panelTitleEn, activeLang, spText, stored, spAfterClose, spAfterReload, reqCount2, restored,
 }, null, 1));
 console.log('errors:', errors.length ? errors : 'none');
 await browser.close();
 const ok = errors.length === 0
   && zhSp === '单人模式' && reqCount === 2 // index.json + zh-Hans.json
   && hasZh && hasEn && langChanged
-  && panelTitleEn === 'Settings' && spText === 'Single Player'
+  && panelTitleEn === 'Settings' && activeLang === 'en-US' && spText === 'Single Player'
   && spAfterClose === 'Single Player' && spAfterReload === 'Single Player' && reqCount2 === 2
   && restored === '单人模式';
 if (!ok) { console.error('L10N SMOKE FAILED'); process.exit(1); }

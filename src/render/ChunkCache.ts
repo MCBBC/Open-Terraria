@@ -303,7 +303,7 @@ export class ChunkCache {
             const def = TILE_DEFS[st.type[i]];
             const sheet = def?.vanilla?.sheet ?? 5;
             const isPalm = sheet === 323;
-            const isCrown = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198 && fx >= 22);
+            const isCrown = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198); // 原版只看 frameY
             if (isPalm) {
               // 棕榈：干+冠都画（干身倾斜跨列，必须外扩遍）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,

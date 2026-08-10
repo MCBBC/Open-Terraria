@@ -14,9 +14,9 @@ const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block']!;
 const CRIMSON_GRASS = TILE_BY_KEY['v_199_crimson_grass_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
 const CORRUPT_HARDSAND = TILE_BY_KEY['v_398_corrupt_hardened_sand_block']!;
-const SNOW_BRICK = TILE_BY_KEY['v_161_snow_brick']!;
-const CORRUPT_ICE = TILE_BY_KEY['v_163_corrupt_ice']!;
-const CRIMSON_ICE = TILE_BY_KEY['v_200_frozen_crimson']!;
+const SNOW_BRICK = TILE_BY_KEY['ice']!;   // sheet 161=Ice Block（旧 key v_161_snow_brick 误名）
+const CORRUPT_ICE = TILE_BY_KEY['v_163_purple_ice_block']!;   // 163=Purple Ice
+const CRIMSON_ICE = TILE_BY_KEY['v_200_red_ice_block']!;   // 200=Red Ice
 const CRIMSON_HARDSAND = TILE_BY_KEY['v_399_crimson_hardened_sand_block']!;
 const ICE = TILE_BY_KEY['ice']!;
 const MUD = TILE_BY_KEY['mud']!;

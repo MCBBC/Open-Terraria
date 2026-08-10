@@ -1141,7 +1141,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
       else return false;
       if (typeAt(i5, j2) === GLOW_SHROOM) return false;
       // L3391-3396: 压板(135)——背后有墙 style 2（frameX 36），否则 Next(2,4)；地牢恒有墙
-      st.setTileSilent(px, py, PLATE, st.wall[pi] > 0 ? 36 : rng.int(2, 3) * 18, 0);
+      st.setTileSilent(px, py, PLATE, 0, st.wall[pi] > 0 ? 36 : rng.int(2, 3) * 18);
       // L3397-3399: 锚墙挖一格嵌飞镖陷阱(137)；墙在左(frameX 18)朝右，墙在右(frameX 0)朝左
       st.setTileSilent(i5, j2, TRAP, num3 === 1 ? 18 : 0, 0);
       // L3400-3415: 红线 L 路径（先 x 后 y，三段 wire 同原版逐段置位）

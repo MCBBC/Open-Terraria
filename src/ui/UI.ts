@@ -219,6 +219,21 @@ export class UI {
     this.root.appendChild(panel);
   }
 
+  /** 墓碑/告示牌阅读弹窗（原版 Sign 阅读界面简化）：碑文 + 关闭 */
+  showSign(text: string) {
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:360px; max-height:70vh; overflow:auto;';
+    panel.appendChild(el('div', 'sw-title', '🪦 墓碑'));
+    const body = el('div');
+    body.style.cssText = 'font-size:13px; line-height:1.8; white-space:pre-wrap; color:#d8d4e4; margin:8px 0;';
+    body.textContent = text;
+    panel.appendChild(body);
+    const close = el('button', 'sw-btn', '关闭');
+    close.addEventListener('click', () => panel.remove());
+    panel.appendChild(close);
+    this.root.appendChild(panel);
+  }
+
   /** 兼容报告弹窗：降级/清空/跳过内容列表 + 导出详情 JSON */
   showCompatReport(rpt: CompatReport) {
     // 不 closeAll：会把已初始化的 HUD（快捷栏等）一起拆掉，报告只叠加一层

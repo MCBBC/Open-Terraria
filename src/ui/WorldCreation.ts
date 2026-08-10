@@ -1,6 +1,7 @@
 // 世界创建页（DOM 版，替代 VUI UIWorldCreationState）：
 // 世界名/种子 + 大小/难度/邪恶三组选项 + 彩蛋种子图标 + 多层预览图 + 描述。
-import { parseSeed, randomWorldName } from '../world/gen/SeedEasterEggs';
+import { parseSeed } from '../world/gen/SeedEasterEggs';
+import { randomWorldName } from '../i18n/RandomText';
 import { Lang } from '../i18n/Lang';
 
 export interface WorldCreationFlow {

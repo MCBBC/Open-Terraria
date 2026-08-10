@@ -472,7 +472,7 @@ function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number
     if (st.wall[st.idx(tx, ty)] !== 87) return false;
     // 压板 + 陷阱(L3013-3051)。style:近距(<10)2/3 概率超级飞镖,否则飞镖
     const style1 = Math.abs(tx - px) < 10 && rng.int(0, 2) !== 0 ? 2 : 1;
-    st.setTileSilent(px, j, PLATE, 6 * 18, 0);
+    st.setTileSilent(px, j, PLATE, 0, 6 * 18);
     st.setTileSilent(tx, ty, TRAP, dir === 1 ? 18 : 0, style1 * 18);
     // L 形铺线:压板 → 陷阱(L3068-3118,含两端点)
     const num5 = pickColor(px, j);
@@ -501,7 +501,7 @@ function mayanTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2: number
     || TILE_DEFS[st.type[st.idx(px, uy)]]?.vanilla?.sheet === 10 || st.wall[st.idx(px, uy)] !== 87) return false;
   const num9 = pickColor(px, j);
   const style2 = dist < 16 && rng.int(0, 2) !== 0 ? 4 : 3;
-  st.setTileSilent(px, j, PLATE, 6 * 18, 0);
+  st.setTileSilent(px, j, PLATE, 0, 6 * 18);
   st.setTileSilent(px, uy, TRAP, 0, style2 * 18);
   // 两侧墙追加陷阱(L3146-3178)
   for (let side = 0; side < 2; side++) {

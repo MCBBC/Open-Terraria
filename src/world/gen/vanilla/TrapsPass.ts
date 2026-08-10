@@ -1,18 +1,21 @@
 // 原版 pass 76 "Traps" 1:1（1405 WorldGen.cs:8932-8984 + placeTrap:3324 + PlaceSandTrap:19962）。
-// 全类型 placeTrap：0 飞镖（复用 DungeonPass 同构逻辑）/ 1 火焰 / 2 炸药桶 / 3 热喷泉，
-// type=-1 随机（1/20 巨石；lavaLine+30 以下 5/6 热喷泉；否则 50/50 飞镖|火焰）。
+// 全类型 placeTrap：0 飞镖 / 1 巨石陷阱（1456 cs:9151）/ 2 炸药桶 / 3 热喷泉，
+// type=-1 随机（1/20 炸药桶；lavaLine+30 以下 5/6 热喷泉；否则 50/50 飞镖|巨石）。
 // 地下沙漠 PlaceSandTrap（w*0.003）：蜂窝墙内砂岩顶掏沙穴——踩上即塌。
 // RNG 映射：Next(a,b) → rng.int(a, b-1)。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { TileStore as TS } from '../../TileStore';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 const TRAP = TILE_BY_KEY['v_137_traps']!;
 const PLATE = TILE_BY_KEY['v_135_pressure_plates']!;
 const EXPLOSIVES = TILE_BY_KEY['v_141_explosives']!;  // tile 141 = 炸药桶（type 2 陷阱,非巨石——原版 cs:3568 即 141）
 const GEYSER = TILE_BY_KEY['v_443_geyser']!;
+const BOULDER138 = TILE_BY_KEY['v_138_boulder']!;   // tile 138 巨石（2×2 帧）
+const WIRE_ACTUATOR = TileStore.WIRE_ACTUATOR;
+/** 已放巨石列（邻近回避用，cs:9173） */
+const bouldersPlaced: number[] = [];
 const SAND = TILE_BY_KEY['sand']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;   // 396
 const HARDSAND = TILE_BY_KEY['hardened_sand']!; // 397
@@ -21,7 +24,7 @@ const GATE = TILE_BY_KEY['door_closed']!;               // tile 10
 const SIGN = TILE_BY_KEY['sign'] ?? -1;
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
-const WIRE_RED = TS.WIRE_RED;
+const WIRE_RED = TileStore.WIRE_RED;
 
 const solidAt = (st: TileStore, x: number, y: number) =>
   st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && !!(TILE_DEFS[st.type[st.idx(x, y)]]?.solid);
@@ -61,43 +64,55 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
   if (st.type[st.idx(px, py + 1)] === TILE_BY_KEY['v_232_wooden_spike']) return false;
 
   if (type === 1) {
-    // 火焰陷阱（cs:3466-3537）：向上找实心底座 y=py-8±1，掏 2×N 竖井，铺大理石 1 顶
-    const colX = px + rng.int(-1, 1);
-    let y = py - 8;
+    // 巨石陷阱（1456 cs:9151-9345；1405 反编译曾误读为火焰陷阱——1456 无火焰分支）：
+    // 向上找实心底座掏 2 宽竖井，6×6 实心转石头壳，井底巨石 138 架在 2×3 致动石栅上，
+    // 触板→致动石失活→巨石落下（tile 重力未移植，致动语义数据 1:1）
+    const colX = px + rng.int(-1, 1);            // num4
+    let top = py - 8;                            // num5
+    // 邻近巨石回避（cs:9173 AreAnyTilesInSetNearby(Boulders,10)）
+    for (const b of bouldersPlaced) {
+      if (Math.abs(b - colX) < 10 && Math.abs(b - top) < 10) return false;
+    }
     for (;;) {
-      let solidRun = 0, n2 = 0;
-      for (let yy = y; yy <= y + 3; yy++) {
-        for (let xx = colX - 2; xx <= colX + 3; xx++) {
-          if (!solidAt(st, xx, yy)) solidRun = 0;
-          if (solidAt(st, xx, yy) && (st.type[st.idx(xx, yy)] === 1 || st.type[st.idx(xx, yy)] === 0 || st.type[st.idx(xx, yy)] === 59)) n2++;
+      let allSolid = true, n2 = 0;
+      for (let xx = colX - 2; xx <= colX + 3; xx++) {
+        for (let yy = top; yy <= top + 3; yy++) {
+          if (!solidAt(st, xx, yy)) allSolid = false;
+          const ii = st.idx(xx, yy);
+          if (st.flags[ii] && (st.type[ii] === 0 || st.type[ii] === 1 || st.type[ii] === 59)) n2++;
         }
       }
-      y--;
-      if (y < gs.worldSurface) return false;
-      if (solidRun === 0 && n2 > 2) break;
+      top--;
+      if (top < gs.worldSurface) return false;
+      if (allSolid && n2 > 2) break;
     }
-    if (py - y <= 5 || py - y >= 40) return false;
-    // 掏 2 宽竖井 y..py
+    if (py - top <= 5 || py - top >= 40) return false;
+    // 掏 2 宽竖井 top..py（cs:9232-9240）
     for (let xx = colX; xx <= colX + 1; xx++) {
-      for (let yy = y; yy <= py; yy++) st.setTileSilent(xx, yy, 0);
+      for (let yy = top; yy <= py; yy++) st.setTileSilent(xx, yy, 0);
     }
-    // 6×6 转大理石（cs:3489-3496）
-    const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
+    // 6×6 实心转石头（cs:9242-9247，type=1=石头非大理石）
     for (let xx = colX - 2; xx <= colX + 3; xx++) {
-      for (let yy = y - 2; yy <= y + 3; yy++) {
-        if (solidAt(st, xx, yy)) st.setTileSilent(xx, yy, MARBLE);
+      for (let yy = top - 2; yy <= top + 3; yy++) {
+        if (solidAt(st, xx, yy)) st.setTileSilent(xx, yy, T.STONE);   // 石头壳（内部 id 非 sheet）
       }
     }
-    // 火焰陷阱体（137 kind2=frameY 36，cs:3505-3511 同构四段竖排）+ 板 style 7(frameX 126)
-    st.setTileSilent(px, py, TRAP, 0, 36);
-    for (const seg of [2, 3, 4]) {
-      st.setTileSilent(colX, y + seg, TRAP, 0, 36);
-      st.setTileSilent(colX + 1, y + seg, TRAP, 18, 36);
-      wireV(st, colX, y + seg); wireV(st, colX + 1, y + seg);
+    // 压板 style 7（cs:9252）——style 在 frameY（真实世界 wld 实测：135 fx 恒 0）
+    st.setTileSilent(px, py, PLATE, 0, 126);
+    // 巨石（cs:9307 PlaceTile(colX+1, top+1, 138)）
+    st.setTileSilent(colX + 1, top + 1, BOULDER138, 0, 0);
+    bouldersPlaced.push(colX);
+    // 2×3 致动石栅（cs:9312-9322：石头+红线+致动器；触发时失活巨石落下）
+    top += 2;
+    for (let dx = 0; dx < 2; dx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        const gx = colX + dx, gy = top + dy;
+        st.setTileSilent(gx, gy, T.STONE);
+        st.wire[st.idx(gx, gy)] |= WIRE_RED | WIRE_ACTUATOR;
+      }
     }
-    // L 线 plate→trap（cs:3513-3530）；plate style 7（PlaceTile(135,...,7)）
-    st.setTileSilent(px, py, PLATE, 126, 0);
-    lWire(st, px, py, colX, y + 4);
+    // L 线 plate→栅（cs:9320-9343）
+    lWire(st, px, py, colX, top);
     return true;
   }
   if (type === 2) {
@@ -115,7 +130,7 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
       }
     }
     st.setTileSilent(bx, by, EXPLOSIVES, 0, rng.int(0, 1) * 18);
-    st.setTileSilent(px, py, PLATE, st.wall[st.idx(px, py)] > 0 ? 36 : rng.int(2, 3) * 18, 0);
+    st.setTileSilent(px, py, PLATE, 0, rng.int(2, 3) * 18);
     lWire(st, px, py, bx, by);
     return true;
   }
@@ -183,7 +198,7 @@ function placeTrapDart(st: TileStore, rng: RNG, gs: GenState, px: number, py: nu
   else return false;
   if (st.type[st.idx(i5, j2)] === TILE_BY_KEY['v_190_glowing_mushroom_block']) return false;
   // 压板 + 飞镖 + L 线
-  st.setTileSilent(px, py, PLATE, st.wall[st.idx(px, py)] > 0 ? 36 : rng.int(2, 3) * 18, 0);
+  st.setTileSilent(px, py, PLATE, 0, st.wall[st.idx(px, py)] > 0 ? 36 : rng.int(2, 3) * 18);
   st.setTileSilent(i5, j2, TRAP, dir === 1 ? 18 : 0, 0);
   lWire(st, px, py, i5, j2);
   return true;

@@ -1,12 +1,18 @@
-// 墓碑实体：死亡时从死亡点掉落，带重力/落地弹跳/空中翻滚物理，
-// 落地弹跳几次能量耗尽后安放到最近的 90° 朝向（直立/侧躺/倒扣都可能）。
-// 不可拾取、不消失（本局会话内持续存在）。
+// 墓碑实体：Player.DropTombstone + Projectile aiStyle 17（1.4.5.6）1:1。
+//   Player.cs:38427-38467  款式按身家：≤10 万铜币 → 43（1/6）或 200+rand(6)；
+//                           >10 万 → 527+rand(5)（金墓碑）；从玩家中心抛射
+//                           （vx = rand(10..30)*0.1*击退方向 + 随机游走修正；vy = rand(-40..-20)*0.1 上抛）
+//   Projectile.cs:23677-23718 aiStyle17 物理：vy+=0.2/帧；rotation+=vx*0.1（翻滚随位移）；
+//                           落地（vy==0）vx*=0.98 摩擦；无弹跳。每帧检查底缘中心下方格：
+//                           可放 2×2 墓碑(tile 85) → 放置 + 写碑文(死亡文本+日期) + 消失
+//   style 映射（Projectile.cs:23696-23700）：43→0；201-205→1-5；527-531→6-10（Tiles_85 偶数列）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import { GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { MAX_FALL_SPEED } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { TILE_BY_KEY } from '../data/tiles';
 
-/** 程序化像素墓碑贴图（16×22：圆顶石碑 + 底座 + 刻痕 + 左亮右暗） */
+/** 程序化像素墓碑贴图（16×22）——仅作贴图缺失时的兜底 */
 let tombstoneCanvas: HTMLCanvasElement | null = null;
 export function getTombstoneCanvas(): HTMLCanvasElement {
   if (!tombstoneCanvas) {
@@ -14,21 +20,17 @@ export function getTombstoneCanvas(): HTMLCanvasElement {
     c.width = 16; c.height = 22;
     const x = c.getContext('2d')!;
     const stone = '#A8A8B4', dark = '#70707E', light = '#C4C4D0', en = '#585864';
-    // 圆顶石碑
     x.fillStyle = stone;
     x.fillRect(4, 2, 8, 2);
     x.fillRect(3, 4, 10, 10);
     x.fillRect(2, 14, 12, 3);
-    // 底座
     x.fillStyle = dark;
     x.fillRect(1, 17, 14, 2);
     x.fillRect(2, 19, 12, 1);
-    // 立体感：左缘亮、右缘暗
     x.fillStyle = light;
     x.fillRect(3, 5, 1, 11);
     x.fillStyle = dark;
     x.fillRect(12, 5, 1, 11);
-    // 刻痕（三行短横，墓志铭感）
     x.fillStyle = en;
     x.fillRect(6, 6, 4, 1);
     x.fillRect(5, 9, 6, 1);
@@ -38,69 +40,89 @@ export function getTombstoneCanvas(): HTMLCanvasElement {
   return tombstoneCanvas;
 }
 
+/** DropTombstone 款式选择 → 原版 style（0-10） */
+function pickStyle(coinsOwned: number): number {
+  const roll = Math.floor(Math.random() * 6); // Main.rand.Next(6)
+  let type: number;
+  if (coinsOwned <= 100000) {
+    type = roll !== 0 ? 200 + roll : 43;
+  } else {
+    type = 527 + Math.floor(Math.random() * 5);
+  }
+  // Projectile.cs:23696-23700 的 type→style 换算
+  if (type === 43) return 0;
+  if (type >= 201 && type <= 205) return type - 200;
+  return type - 527 + 6; // 527-531 → 6-10
+}
+
+/** 原版长日期（en: "MMMM d, yyy"；zh culture: ToLongDate） */
+function longDate(): string {
+  return new Date().toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' });
+}
+
 export class Tombstone extends Entity {
   w = 14; h = 14;
-  angle = 0;           // 当前倾角（弧度，0 = 直立）
-  /** 原版墓碑样式：Tiles_85 偶数列起的 2×2 样式块（21 列 → 11 种） */
-  styleCol = 0;
-  private angVel = 0;  // 空中翻滚角速度
-  private restAngle = 0;  // 安放目标角（最近的 90° 倍数）
-  private settled = false;
-  private bounces = 0;
+  angle = 0;             // 翻滚角（aiStyle17：rotation += vx*0.1，落地随摩擦冻结）
+  /** 原版墓碑样式 0-10（Tiles_85 的 2×2 样式块起点列 = style*2） */
+  style = 0;
+  /** 碑文（原版 miscText = 死亡文本 + "\n" + 日期；安放时写入 world.signs） */
+  readonly epitaph: string;
+  /** 落格安放的墓碑 tile 左上角（安放成功后有效；渲染/交互用） */
+  placedAt: { x: number; y: number } | null = null;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, coinsOwned: number, deathText: string, hitDirection: number) {
     super();
+    this.style = pickStyle(coinsOwned);
+    this.epitaph = `${deathText}\n${longDate()}`;
+    // DropTombstone L38446-38449：随机游走修正直到 |num|≥2（范围 ±3.5）
+    let num = (Math.floor(Math.random() * 71) - 35) * 0.1;
+    while (num < 2 && num > -2) num += (Math.floor(Math.random() * 61) - 30) * 0.1;
     this.x = x - this.w / 2;
     this.y = y - this.h / 2;
-    this.vx = (Math.random() - 0.5) * 2.4;   // 随机水平抛出
-    this.vy = -1.2 - Math.random();          // 小幅上抛再坠落
-    this.angVel = (Math.random() - 0.5) * 0.32;
-    this.styleCol = 2 * Math.floor(Math.random() * 11); // 随机样式块
+    this.vx = (Math.floor(Math.random() * 21) + 10) * 0.1 * hitDirection + num;
+    this.vy = (Math.floor(Math.random() * 21) - 40) * 0.1; // -2 .. -4 上抛
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
-    // 已安放：缓慢转正到目标角后完全静止
-    if (this.settled) {
-      const diff = this.restAngle - this.angle;
-      this.angle += diff * 0.12;
-      if (Math.abs(diff) < 0.01) this.angle = this.restAngle;
+    // aiStyle17（Projectile.cs:23677-23686）：落地摩擦 → 翻滚 → 重力
+    if (this.vy === 0) this.vx *= 0.98;
+    this.angle += this.vx * 0.1;
+    // aiStyle17 专用重力 0.2/帧（Projectile.cs:23681，非全局 GRAVITY 0.36）
+    this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    // 落格检查（L23689-23717）：底缘中心下方格可放墓碑 → 放置 + 碑文 + 消失
+    const bx = Math.floor((this.x + this.w / 2) / 16);
+    const by = Math.floor((this.y + this.h - 4) / 16); // 脚下贴地的行
+    const top = by - 1;                                 // 2×2 物件顶行（底行与脚对齐）
+    if (this.tryPlace(game, bx, top)) {
+      this.dead = true;
       return;
     }
+    void dt;
+  }
 
-    const impact = this.vy; // 碰撞前的下落速度（反弹力度依据）
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
-    this.vx *= 0.995;
-    moveAndCollide(this, game.world, this.vx, this.vy);
-    this.angle += this.angVel;
-
-    if (this.onGround) {
-      const energy = Math.abs(impact) + Math.abs(this.vx) * 0.5 + Math.abs(this.angVel);
-      if (impact > 2.2 && energy > 3) {
-        // 落地弹跳：弹性 0.5，翻滚角速度反弹 + 随机扰动（四处乱蹦的喜感）
-        // 不设次数上限——由能量耗尽收敛（每跳冲击递减，数学上必停）
-        this.vy = -impact * 0.5;
-        this.angVel = this.angVel * -0.6 + (Math.random() - 0.5) * 0.14;
-        this.vx = this.vx * 0.8 + (Math.random() - 0.5) * 0.8;
-        this.bounces++;
-        this.onGround = false;
-      } else {
-        // 地面滚停期：摩擦消耗残余动量（位移与角速度同步衰减，防无限微抖）
-        this.vx *= 0.82;
-        this.angVel *= 0.82;
-        if (Math.abs(this.vx) < 0.08 && Math.abs(this.angVel) < 0.02) {
-          // 完全静止 → 安放。直立偏好：偏离直立 <35° 一律立正（动静不大不侧躺），
-          // 超过才倒向最近的 90°（侧躺/倒扣）
-          this.vx = 0; this.vy = 0; this.angVel = 0;
-          const q = Math.PI / 2;
-          const turns = Math.round(this.angle / q);
-          const off = this.angle - turns * q; // -90°..90° 偏离
-          this.restAngle = Math.abs(off) < (35 * Math.PI) / 180 ? turns * q : turns * q + Math.sign(off || 1) * q;
-          this.settled = true;
-        }
+  /** TileObject.CanPlace(85) 近似：2×2 全空 + 底下两格实心支撑 */
+  private tryPlace(game: GameHooks, x: number, y: number): boolean {
+    const st = game.world.store;
+    const tid = TILE_BY_KEY['tombstone_v'];
+    if (tid === undefined) return false;
+    if (x < 1 || y < 1 || x + 1 >= st.w || y + 2 >= st.h) return false;
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        if (st.isActive(x + dx, y + dy)) return false;
       }
     }
-    if (this.hitWall) { this.vx = -this.vx * 0.55; this.angVel *= -0.55; }
-    void dt;
+    if (!st.isSolid(x, y + 2) || !st.isSolid(x + 1, y + 2)) return false;
+    // 放置（TileObject.Place 帧语义：frameX = style*36 + dx*18，frameY = dy*18）
+    for (let dy = 0; dy < 2; dy++) {
+      for (let dx = 0; dx < 2; dx++) {
+        st.setTile(x + dx, y + dy, tid, this.style * 36 + dx * 18, dy * 18);
+      }
+    }
+    this.placedAt = { x, y };
+    game.world.signs.push({ x, y, text: this.epitaph });
+    game.playSfx('dig');
+    return true;
   }
 
   draw() { /* Renderer 统一绘制 */ }

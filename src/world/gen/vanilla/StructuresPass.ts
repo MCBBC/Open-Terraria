@@ -1,7 +1,7 @@
 // 阶段 4 结构 pass:
 // - FloatingIslands(pass 19,L5552 + CloudIsland L47397 简化):云岛(云 189 壳 + 土芯 + 草皮)
 // - LifeCrystals(pass 55,L7828):area×2e-5 个生命水晶(岩层空腔地上)
-// - HellHouses(L16085 AddHellHouses 简化):地狱中段黑曜石砖屋
+// - HellHouses 已由 HellFortPass.runHellFortPass 取代
 // - SurfaceDecor:生物群系感知地表(丛林/雪原树密度、沙漠仙人掌、丛林藤蔓/蘑菇)
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
@@ -17,14 +17,12 @@ const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const CACTUS = TILE_BY_KEY['v_80_cactus']!;
 const VINE = TILE_BY_KEY['v_52_vines']!;
 const HEART = TILE_BY_KEY['crystal_heart']!;
-const OBSIDIAN_BRICK = TILE_BY_KEY['v_75_obsidian_brick']!;
-const HELL_BRICK = TILE_BY_KEY['v_76_obsidian_brick'] ?? OBSIDIAN_BRICK;
 
-/** 浮空岛:数量 w×0.0008,避开中部 ±150(缩放)与其他岛 ±180 */
+
 export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
   // 原版 pass 21（L5552-5637）：岛数 = w*0.0008，另加 skyLakes（1 + w>8000 + w>6000）。
-  // 前 num2 个 = CloudIsland，其余 = CloudLake；间距/中心避让为固定值（不缩放）
+  // 前 islands 个 = CloudIsland，其余 = CloudLake；间距/中心避让为固定值（不缩放）
   const islands = Math.floor(w * 0.0008);
   let skyLakes = 1;
   if (w > 8000) skyLakes++;
@@ -62,7 +60,6 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
  *  自 bbox 左+Next(5) 起，步进 Next(r, 1.5r)；每步从岛底向上找实心面，
  *  中心下移 Next(-3,4)，椭圆 r=Next(4,8)（纵压×2），1/4 雨云 196 其余云 189 */
 function rainBumps(st: TileStore, rng: RNG, bx0: number, bx1: number, by0: number, by1: number): void {
-  const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
   const RAIN = TILE_BY_KEY['v_196_rain_cloud_block']!;
   let r = rng.int(4, 7);
   for (let x = bx0 + rng.int(0, 4); x < bx1; x += rng.int(r, Math.floor(r * 1.5))) {
@@ -86,7 +83,6 @@ function rainBumps(st: TileStore, rng: RNG, bx0: number, bx1: number, by0: numbe
 
 /** CloudLake（L47704）：天湖 = 纯云盘 + 雨云凸包（无土芯/无墙/无水池） */
 function cloudLake(st: TileStore, rng: RNG, i: number, j: number): void {
-  const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
   let num1 = rng.int(100, 149);
   let steps = rng.int(20, 29);
   let px = i + 0.0, py = j + 0.0;
@@ -122,11 +118,9 @@ function cloudLake(st: TileStore, rng: RNG, i: number, j: number): void {
   if (bx1 > bx0) rainBumps(st, rng, bx0, bx1, by0, by1);
 }
 
-/** CloudIsland(L47397)七阶段移植(核心部分):扁平云盘(纵压3+顶面游走)→
- * 土芯只嵌云内 → 内部云墙 73 → 10% 水池。岛屋由独立 pass 处理(暂缺)。 */
+/** CloudIsland(L47397)核心移植:扁平云盘(纵压3+顶面游走)→雨云凸包→
+ * 土芯只嵌云内 → 内部云墙 73 → 10% 水池。岛屋由独立 pass 处理。 */
 function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
-  const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
-  // ---- 阶段1:云壳(随机走椭圆,纵压 3,顶面 ±1 游走)----
   let num1 = rng.int(100, 149);
   let steps = rng.int(20, 29);
   let px = i + 0.0, py = j + 0.0;
@@ -145,23 +139,24 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
       if (rng.next() < 0.5) top += rng.int(-1, 1);
       top = Math.max(py, Math.min(py + 2, top));
       for (let y = y0; y < y1; y++) {
-        if (y <= top) continue;
-        if (!st.inBounds(x, y)) continue;
+        if (y <= top || !st.inBounds(x, y)) continue;
         if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
           const ti = st.idx(x, y);
-          st.type[ti] = CLOUD; st.flags[ti] = 1;
+          st.type[ti] = CLOUD;
+          st.flags[ti] = 1;
           bboxX0 = Math.min(bboxX0, x); bboxX1 = Math.max(bboxX1, x);
           bboxY0 = Math.min(bboxY0, y); bboxY1 = Math.max(bboxY1, y);
         }
       }
     }
-    px += vx; py += vy;
+    px += vx;
+    py += vy;
     vx += rng.int(-20, 20) * 0.05;
     vx = Math.max(-1, Math.min(1, vx));
     vy = Math.max(-0.2, Math.min(0.2, vy));
   }
   if (bboxX1 <= bboxX0) return;
-  // ---- 阶段2:雨云凸包（L47484-47522）：岛底随机椭圆鼓包，1/4 为雨云 196 ----
+  // ---- 阶段2:雨云凸包（L47484-47522） ----
   rainBumps(st, rng, bboxX0, bboxX1, bboxY0, bboxY1);
   // ---- 阶段3:土芯(80-95,只把云换土)----
   let dR = rng.int(80, 94);
@@ -185,7 +180,8 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
         }
       }
     }
-    dx0 += dvx; dy0 += dvy;
+    dx0 += dvx;
+    dy0 += dvy;
     dvx += rng.int(-20, 20) * 0.05;
     dvx = Math.max(-1, Math.min(1, dvx));
     dvy = Math.max(-0.2, Math.min(0.2, dvy));
@@ -216,7 +212,7 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
   }
 }
 
-/** 生命水晶(pass 55):area×2e-5,岩层空腔地面 */
+/** 生命水晶(pass 57):area×2e-5,岩层空腔地面 */
 export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
@@ -234,65 +230,12 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
       }
     }
     if (!clear || !st.isSolid(x, y + 1) || !st.isSolid(x + 1, y + 1)) continue;
-    // 原版 AddLifeCrystal(cs:16023-16038):顶行 frameY=0、底行 18(此前写反致贴图上下颠倒)
+    // 原版 AddLifeCrystal(cs:16023-16038):顶行 frameY=0、底行 18
     st.setTileSilent(x, y - 1, HEART, 0, 0);
     st.setTileSilent(x + 1, y - 1, HEART, 18, 0);
     st.setTileSilent(x, y, HEART, 0, 18);
     st.setTileSilent(x + 1, y, HEART, 18, 18);
     placed++;
-  }
-}
-
-/** 地狱屋(L16085 简化):地狱中段黑曜石砖小屋(空心 + 砖墙背景) */
-export function runHellHousesPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w, h } = st;
-  const hellTop = h - 200; // 地狱层顶部(Underworld 边界 h-190..h-160)
-  if (hellTop >= h - 60) return;
-  const count = Math.max(2, Math.floor(w / 4200 * 6)); // C# (int)
-  for (let n = 0; n < count; n++) {
-    const hx = rng.int(Math.floor(w * 0.15), Math.floor(w * 0.85) - 14);
-    const hy = rng.int(hellTop + 20, h - 90);
-    const rw = rng.int(10, 16), rh = rng.int(5, 7);
-    // 空心 + 墙
-    for (let x = hx; x < hx + rw; x++) {
-      for (let y = hy; y < hy + rh; y++) {
-        if (!st.inBounds(x, y)) continue;
-        const i = st.idx(x, y);
-        st.type[i] = 0; st.flags[i] = 0;
-        st.wall[i] = 14; // HellstoneBrickUnsafe
-      }
-    }
-    // 砖壳
-    for (let x = hx - 1; x <= hx + rw; x++) {
-      for (let y = hy - 1; y <= hy + rh; y++) {
-        if (!st.inBounds(x, y)) continue;
-        const border = x === hx - 1 || x === hx + rw || y === hy - 1 || y === hy + rh;
-        if (border) {
-          const i = st.idx(x, y);
-          st.type[i] = rng.next() < 0.8 ? OBSIDIAN_BRICK : HELL_BRICK;
-          st.flags[i] = 1;
-          st.liquid[i] = 0;
-        }
-      }
-    }
-    // 开口(左右各去 2 砖)
-    for (let y = hy + rh - 3; y <= hy + rh; y++) {
-      for (const dx of [hx - 1, hx + rw]) {
-        if (st.inBounds(dx, y)) {
-          const i = st.idx(dx, y);
-          st.type[i] = 0; st.flags[i] = 0;
-        }
-      }
-    }
-    // 灰烬基座(原版房屋坐落在地狱灰烬地表上,我们补一座墩)
-    const ash = T.ASH;
-    for (let x = hx - 1; x <= hx + rw; x++) {
-      for (let y = hy + rh + 1; y < Math.min(st.h, hy + rh + 30); y++) {
-        const i = st.idx(x, y);
-        if (st.flags[i]) break;
-        st.type[i] = ash; st.flags[i] = 1;
-      }
-    }
   }
 }
 
@@ -420,7 +363,4 @@ export function runWetJunglePass(st: TileStore, rng: RNG, gs: GenState): void {
   }
 }
 
-const HIVE = TILE_BY_KEY['v_225_hive_block']!;
-const HONEY = TILE_BY_KEY['v_229_honey_block']!;
-const COBWEB = TILE_BY_KEY['v_51_cobweb']!;
 

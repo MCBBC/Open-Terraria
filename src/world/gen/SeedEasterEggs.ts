@@ -1,6 +1,5 @@
 // 彩蛋种子解析（对齐原版 WorldGen.CheckSpecialWorldSeed / UIWorldCreation.ProcessSeed）。
 // 匹配规则：去分隔符后小写比较（原版语义）。
-import { RNG, hashString } from '../../core/rng';
 
 export interface SeedFlags {
   crimsonForce?: boolean;    // not the bees：强制猩红
@@ -48,15 +47,4 @@ export function parseSeed(rawSeed: string): { flags: SeedFlags; seedText: string
     : flags.noTraps ? 'no traps'
     : null;
   return { flags, seedText: rawSeed, specialName };
-}
-
-/** 随机世界名（原版随机命名池的小样本） */
-const WORLD_NAME_A = ['翠绿', '绯红', '幽暗', '黎明', '苍穹', '秘银', '曙光', '余烬', '苍翠', '深蓝'];
-const WORLD_NAME_B = ['之地', '之境', '领域', '平原', '王国', '秘境'];
-/** 由调用方传入种子派生 RNG——生成期不使用 Math.random（种子决定一切契约） */
-export function randomWorldName(seedText?: string): string {
-  const r = new RNG(hashString(seedText ?? String(Date.now())));
-  return WORLD_NAME_A[Math.floor(r.next() * WORLD_NAME_A.length)] +
-    WORLD_NAME_B[Math.floor(r.next() * WORLD_NAME_B.length)] +
-    (r.next() < 0.5 ? '' : String(Math.floor(r.next() * 90 + 10)));
 }

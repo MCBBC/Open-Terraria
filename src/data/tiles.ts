@@ -175,6 +175,10 @@ def({ key: 'v_189_cloud_block', name: 'Cloud Block', solid: true, opacity: 1, pi
 def({ key: 'v_183_purple_moss_block', name: 'Purple Moss Block', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: null as unknown as string, vanilla: { sheet: 183, frame: 'auto' } });
 def({ key: 'v_536_xenon_moss_block', name: 'Xenon Moss Block', solid: true, opacity: 1, pick: 0, mapColor: '#589498', blend: true, drop: null as unknown as string, vanilla: { sheet: 536, frame: 'auto' } });
 def({ key: 'v_225_hive_block', name: 'Hive Block', solid: true, opacity: 1, pick: 0, mapColor: '#E37D16', blend: true, drop: null as unknown as string, vanilla: { sheet: 225, frame: 'auto' } });
+def({ key: 'v_482_cracked_green_brick', name: 'Cracked Green Brick', solid: true, opacity: 1, pick: 0, mapColor: '#3E5E42', blend: true, drop: null as unknown as string, vanilla: { sheet: 482, frame: 'auto' } });
+def({ key: 'v_163_purple_ice_block', name: 'Purple Ice Block', solid: true, opacity: 1, pick: 0, mapColor: '#8A7AB8', blend: true, drop: null as unknown as string, vanilla: { sheet: 163, frame: 'auto' } });
+def({ key: 'v_200_red_ice_block', name: 'Red Ice Block', solid: true, opacity: 1, pick: 0, mapColor: '#A85A5A', blend: true, drop: null as unknown as string, vanilla: { sheet: 200, frame: 'auto' } });
+def({ key: 'v_116_pearlsand_block', name: 'Pearlsand Block', solid: true, opacity: 1, pick: 0, mapColor: '#C8C8D8', blend: true, drop: null as unknown as string, vanilla: { sheet: 116, frame: 'auto' } });
 def({ key: 'v_483_cracked_pink_brick', name: 'Cracked Pink Brick', solid: true, opacity: 1, pick: 0, mapColor: '#7A405F', blend: true, drop: null as unknown as string, vanilla: { sheet: 483, frame: 'auto' } });
 def({ key: 'v_224_slush_block', name: 'Slush Block', solid: true, opacity: 1, pick: 0, mapColor: '#6B848B', blend: true, drop: null as unknown as string, vanilla: { sheet: 224, frame: 'auto' } });
 def({ key: 'v_383_living_mahogany_block', name: 'Living Mahogany Block', solid: true, opacity: 1, pick: 0, mapColor: '#DD8890', blend: true, drop: null as unknown as string, vanilla: { sheet: 383, frame: 'auto' } });

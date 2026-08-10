@@ -25,6 +25,7 @@ import { scanScene, type SceneFlags } from '../world/SceneMetrics';
 import { pickMusic, newMusicState, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
+import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
@@ -74,6 +75,22 @@ const TILE_CUT = new Set<number>(
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
 
+/** vi_<id>_<slug> key → 原版 item id（vi_ 批次未显式存 vid 时从 key 反解） */
+function viIdFromKey(key: string): number {
+  const m = key.match(/^vi_(\d+)_/);
+  return m ? Number(m[1]) : -1;
+}
+
+/** 消耗型投掷武器判定（vi_* 物品）：itemCombat 有 shoot+consumable+noMelee 且无 useAmmo/ammo。
+ *  命中返回标准化数据（shoot/damage 以 combat 表为准），否则 null */
+function thrownCombat(def: (typeof ITEM_DEFS)[number]): { shoot: number; damage: number } | null {
+  const vid = def.vid ?? viIdFromKey(def.key);
+  if (vid < 0) return null;
+  const c = itemCombat(vid);
+  if (!c?.shoot || !c.consumable || !c.noMelee || c.useAmmo || c.ammo) return null;
+  return { shoot: c.shoot, damage: c.damage ?? 0 };
+}
+
 /** 就地剔除 life<=0 的粒子/飘字(保序零分配,2026-08 审计 G9) */
 function compactByLife<T extends { life: number }>(list: T[]): void {
   let w = 0;
@@ -88,6 +105,8 @@ export interface GameCallbacks {
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
   onBuffsChanged?: () => void;
+  /** 读墓碑/告示牌（Sign 阅读界面） */
+  onReadSign?: (text: string) => void;
   onDayNight?: (isDay: boolean) => void;
   /** 环境选曲变化（MusicID；0=静音）。原版 UpdateAudio_DecideOnNewMusic 驱动 */
   onMusic?: (musicId: number) => void;
@@ -241,6 +260,9 @@ export class Game implements GameHooks {
   weightedLatch = new Set<number>();
   /** 触发源登记(idx):428 测重板 / 423 感应器 */
   triggerTiles428 = new Set<number>();
+  /** 热喷泉 443 登记（原版岩浆流过自动喷发——Main 逐帧扫描上方格；此处 15 tick 采样近似） */
+  private geyserTiles = new Set<number>();
+  private geyserCd = new Map<number, number>();
   triggerTiles423 = new Set<number>();
   /** 实体踩板去重键(实体id|格):小动物触发压板 + 巨石触发压板/弹幕垫板 */
   private entityPlateLatch = new Set<string>();
@@ -386,14 +408,14 @@ export class Game implements GameHooks {
     return ids;
   }
 
-  /** 全图液体沉降：原版 WorldFile.cs:365-389 读档时序 1:1 移植。
-   *  QuickWater 自底向上直接搬运 → WaterCheck 重建活动列表 →
-   *  quickSettle 循环 UpdateLiquid 至收敛 → 复位后再次 WaterCheck。
-   *  收敛后世界液体即达最终静止状态，进游戏不再有"靠近才流动" */
-  private async settleLiquids(onProgress?: (p: number) => void) {
-    // 原版 pass 49/97 Settle Liquids（WorldGen.cs:7395/10247 同构）：
-    // QuickWater(3,-1,-1)+WaterCheck，quickSettle 下外层 10 轮，每轮跑到 numLiquid==0。
-    // 曾只沉降 1 轮——晚到的液体（漏斗入口回流等）残留边界水洼
+  /** 全图液体沉降。
+   *  mode='gen'（新建世界）：原版 WorldGen pass 49/97 Settle Liquids（WorldGen.cs:7395/10247）
+   *    ——外层 10 轮跑到收敛，清除生成期晚到的回流（漏斗入口等）。
+   *  mode='load'（读档）：原版 WorldFile.cs:738-770 时序 1:1——单轮上限 100000，
+   *    不收敛的少量残留活水交给运行时（尾部 WaterCheck），与原版一致（同帧完成，无外层循环）。
+   *  yield 按真实耗时让出（≥32ms 一次）——按次数让出会把上万次迭代拖成数千次 setTimeout
+   *  造成读档进度条"假慢" */
+  private async settleLiquids(onProgress?: (p: number) => void, mode: 'gen' | 'load' = 'gen') {
     const sim = new LiquidSim(this.world);
     onProgress?.(0.05);
     sim.quickWater();
@@ -401,31 +423,38 @@ export class Game implements GameHooks {
     await new Promise((r) => setTimeout(r, 0));
     sim.waterCheck();
     sim.quickSettle = true;
-    const MAX_ITER = 100000; // 原版 WorldFile 同上限（单轮保险）
+    const MAX_ITER = 100000; // 原版 WorldFile 单轮上限
+    const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
     let iter = 0;
-    for (let round = 0; round < 10; round++) {
+    let lastYield = performance.now();
+    for (let round = 0; round < MAX_ROUNDS; round++) {
       let roundIter = 0;
       while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
         sim.updateLiquid();
         iter++; roundIter++;
-        if (iter % 500 === 0) {
+        if (roundIter % 2000 === 0) {
           onProgress?.(0.35 + Math.min(0.6, iter / 20000));
-          await new Promise((r) => setTimeout(r, 0));
+          if (performance.now() - lastYield >= 32) {
+            await new Promise((r) => setTimeout(r, 0));
+            lastYield = performance.now();
+          }
         }
       }
       sim.waterCheck();
-      if (sim.numLiquid === 0) break; // 收敛即止（原版 10 轮上限）
+      if (sim.numLiquid === 0) break;
     }
     sim.quickSettle = false;
-    sim.waterCheck();
-    sim.dispose(); // 丢弃临时模拟器（注销监听，避免泄漏到运行期）
+    sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）
+    sim.dispose();
     onProgress?.(1);
   }
 
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void) {
     this.world = world;
     onProgress?.('水体沉降', 0.5);
-    await this.settleLiquids((p) => onProgress?.('水体沉降', p * 0.8));
+    // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
+    // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
+    await this.settleLiquids((p) => onProgress?.('水体沉降', p * 0.8), 'load');
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
     this.afterWorldLoad();
     this.cb.onWorldReady();
@@ -457,6 +486,9 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY['iron_pickaxe'], 1);
     this.player.inv.add(ITEM_BY_KEY['iron_axe'], 1);
     this.player.inv.add(ITEM_BY_KEY['iron_sword'], 1);
+    // 铁弓 + 木箭（射击系统测试；PickAmmo 会自动按 ammoId 找背包任意箭）
+    this.player.inv.add(ITEM_BY_KEY['iron_bow'], 1);
+    this.player.inv.add(ITEM_BY_KEY['wooden_arrow'], 250);
     this.player.inv.add(ITEM_BY_KEY['torch'], 12);
     // 药水/召唤物放入背包格（10 起），不占快捷栏
     const bag: Array<[string, number]> = [
@@ -557,6 +589,26 @@ export class Game implements GameHooks {
         this.triggerDayNightSensors();
       }
       this.lastWasDay = isDay;
+    }
+    // ---- 热喷泉自动喷发（原版 Main 扫描：上方格岩浆流过即喷；15 tick 采样 + 120 tick 冷却） ----
+    if (this.tickCount % 15 === 0 && this.geyserTiles.size) {
+      const st2 = w.store;
+      for (const gi of this.geyserTiles) {
+        if ((this.geyserCd.get(gi) ?? 0) > 0) continue;
+        const gx = gi % st2.w, gy = (gi / st2.w) | 0;
+        const above = st2.idx(gx, gy - 1);
+        if (st2.liquid[above] > 0 && st2.liquidType[above] === 2) {
+          this.geyserCd.set(gi, 120);
+          this.wiring?.hitSwitch(gx, gy);
+        }
+      }
+    }
+    if (this.tickCount % 15 === 0) {
+      for (const [, v] of this.geyserCd) { /* 冷却递减在下一行统一 */ }
+      for (const k of [...this.geyserCd.keys()]) {
+        const v = this.geyserCd.get(k)! - 15;
+        if (v <= 0) this.geyserCd.delete(k); else this.geyserCd.set(k, v);
+      }
     }
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
@@ -765,14 +817,21 @@ export class Game implements GameHooks {
 
     // ---- Boss 逻辑 ----
     if (this.boss) {
-      if (this.boss.dead || w.clock.isDay) {
-        if (this.boss.dead && !w.flags.downedEyeOfCthulhu) {
-          w.flags.downedEyeOfCthulhu = true;
-          this.cb.onToast('克苏鲁之眼已被击败！');
+      // EoC(AI_004)白天自漂离,漂远自灭后走 dead 分支出提示;
+      // 其余 Boss 保留通用日出剔除
+      const eocFlees = this.boss.vanillaId === 4;
+      const dayKill = w.clock.isDay && !eocFlees;
+      if (this.boss.dead || dayKill) {
+        // 通用记账:按 Boss 名写 downed 标志(原版 NPC.downedBoss 表)
+        if (this.boss.dead) {
+          const bname = this.boss.def.name || 'Boss';
+          this.cb.onToast(`${bname}已被击败！`);
+          const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
+          w.flags[downedKey] = true;
         }
-        if (w.clock.isDay && !this.boss.dead) {
+        if (dayKill && !this.boss.dead) {
           this.boss.dead = true;
-          this.cb.onToast('克苏鲁之眼在黎明逃走了…');
+          this.cb.onToast(`${this.boss.def.name || 'Boss'}在黎明逃走了…`);
         }
         this.boss = null;
       }
@@ -1130,6 +1189,23 @@ export class Game implements GameHooks {
         this.sfx.play('bowShoot');
         this.cb.onInventoryChanged();
       }
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && thrownCombat(heldDef)) {
+      // 消耗型投掷武器（手里剑/飞刀/毒刀等，Item.shoot + consumable + noMelee 且无 useAmmo）：
+      // 朝鼠标投出 item.shoot 投射物，消耗 1 个，数值全取 vanilla-itemcombat.json；
+      // 投射物复用 Arrow（重力 0.3/tick = 原版 aiStyle 2 抛物线同值；命中可回收）
+      const tc = thrownCombat(heldDef)!;
+      const vid = heldDef.vid ?? viIdFromKey(heldDef.key);
+      const c = itemCombat(vid);
+      const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+      const px = this.player.cx + Math.cos(ang) * 14;
+      const py = this.player.cy - 4 + Math.sin(ang) * 14;
+      this.entities.add(new Arrow(px, py,
+        Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
+        tc.damage, c?.knockBack ?? 0, tc.shoot, heldDef.key), 'projectiles');
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.player.useTime = c?.useTime ?? 15;
+      this.sfx.play('throw');
+      this.cb.onInventoryChanged();
     } else if (heldDef && (heldDef.key === 'worm_food' || heldDef.key === 'bloody_spine' || heldDef.key === 'slime_crown')
       && inp.mouseDown && this.player.useTime === 0) {
       // Boss 召唤物(原版 worm food/bloody spine/slime crown)
@@ -1726,6 +1802,12 @@ export class Game implements GameHooks {
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
       if (chest) this.tryOpenChest(chest);
+    } else if (type === TILE_BY_KEY['tombstone_v']) {
+      // 墓碑：读碑文（原版 Sign 阅读；碑文在 2×2 锚点登记，点任意一格都能读到）
+      const sign = this.world.signs.find((s) =>
+        tx >= s.x && tx <= s.x + 1 && ty >= s.y && ty <= s.y + 1);
+      if (sign) this.cb.onReadSign?.(sign.text);
+      this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['crystal_heart']) {
       // 生命水晶(放置态):右键使用(Player.cs ItemCheck_UseLifeCrystal L29358)
       // statLifeMax<400 → +20 上限并回满该部分,放置物消耗
@@ -1936,10 +2018,11 @@ export class Game implements GameHooks {
     this.triggerTiles423.clear();
     const s428 = TILE_BY_KEY['v_428_weightedpressureplate'] ?? 0;
     const s423 = TILE_BY_KEY['v_423_logicsensor'] ?? 0;
-    if (!s428 && !s423) return;
+    const s443 = TILE_BY_KEY['v_443_geyser'] ?? 0;
     for (let i = 0; i < st.type.length; i++) {
       if (s428 && st.type[i] === s428) this.triggerTiles428.add(i);
       else if (s423 && st.type[i] === s423) this.triggerTiles423.add(i);
+      else if (s443 && st.type[i] === s443) this.geyserTiles.add(i);
     }
     st.onTileChanged((x, y) => {
       const i = st.idx(x, y);
@@ -2671,6 +2754,7 @@ export class Game implements GameHooks {
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy) {
     const p = this.player;
     if (p.dead) return;
+    if (attacker) p.lastDamageCause = { kind: 'npc', name: attacker.def.name };
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
       // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
@@ -2687,8 +2771,7 @@ export class Game implements GameHooks {
       if (p.hp <= 0) {
         p.dead = true;
         p.respawnTimer = 0;
-        // 死亡音由 Player 中央逻辑统一发声（覆盖所有死法），此处不重复
-        this.cb.onToast('你死了…');
+        // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
         // 掉一半铜币
         const coins = p.inv.countOf(ITEM_BY_KEY['coin_copper']);
         if (coins > 0) {
@@ -2703,9 +2786,8 @@ export class Game implements GameHooks {
   }
 
   onEnemyKilled(key: string) {
-    if (key === 'eye_of_cthulhu') {
-      this.world.flags.downedEyeOfCthulhu = true;
-    }
+    // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>);此处仅保留旧调用兼容
+    void key;
   }
 
   /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。
@@ -3053,8 +3135,13 @@ export class Game implements GameHooks {
       if (this.world.store.type[this.world.store.idx(tx, ty)] !== 0) break;
     }
     const spawnY = Math.max(4, ty - 12) * TILE;
-    const e = this.spawnEnemy('eye_of_cthulhu', tx * TILE + 8, spawnY);
-    void e;
+    // fromVanilla(4) 取原版 NPC_4 贴图(6 帧)+rotation;数值与 ENEMY_DEFS 一致(2800/15/12/0)
+    const e = Enemy.fromVanilla(4, tx * TILE + 8, spawnY);
+    if (e) {
+      e.id = this.entities.nextId++;
+      this.entities.add(e, 'enemies');
+      this.boss = e;
+    }
     this.sfx.playWav('roar');
     this.cb.onToast('你感到有个邪恶的东西在看着你……');
   }
@@ -3144,16 +3231,32 @@ export class Game implements GameHooks {
 
   // ================= 重生 =================
 
-  /** 玩家死亡瞬间：红色粉碎粒子散落 + 脚下留一块墓碑 */
+  /** 玩家死亡瞬间：原版死亡文本 + 红色粉碎粒子 + 掉落物理墓碑（Player.DropTombstone） */
   private _deathHandled = false;
   private handlePlayerDeath() {
     const p = this.player;
+    // 死亡文本（Lang.CreateDeathMessage 1:1：generic/摔落/溺水/岩浆/凶手 NPC）
+    const cause = p.lastDamageCause ?? { kind: 'default' } as const;
+    const deathText = createDeathText(this.playerName(), cause);
+    this.cb.onToast(deathText);
     // 红色粉碎粒子：身体范围多层爆散，喷溅落地反弹/停驻后缓慢淡出（约 5 秒）
     this.spawnParticles(p.cx, p.y + 8, '#C02020', 22, 3.2, { life: 300, damp: 0.988, grav: 0.09 });
     this.spawnParticles(p.cx, p.cy, '#8A1010', 16, 2.4, { life: 280, damp: 0.985, grav: 0.09 });
     this.spawnParticles(p.cx, p.cy - 6, '#E85050', 10, 2.8, { life: 260, damp: 0.988, grav: 0.09 });
-    // 墓碑：作为物理实体从死亡点掉落（空中死亡则从空中坠落，落地弹跳翻滚后安放）
-    this.entities.add(new Tombstone(p.cx, p.cy), 'props');
+    // 墓碑（Player.DropTombstone 1:1）：按身家选款式，从死亡点抛射坠落，落格安放+碑文
+    this.entities.add(new Tombstone(p.cx, p.cy, this.coinsOwned(), deathText, p.facing), 'props');
+  }
+
+  /** 身家（铜币计价）——DropTombstone 的金币门槛（>100000 → 金墓碑 527-531） */
+  private coinsOwned(): number {
+    const p = this.player;
+    const n = (key: string, mult: number) => p.inv.countOf(ITEM_BY_KEY[key]) * mult;
+    return n('coin_copper', 1) + n('coin_silver', 100) + n('coin_gold', 10000);
+  }
+
+  /** 角色名（死亡文本/墓碑碑文用；未命名回退） */
+  playerName(): string {
+    return this.player.appearance?.name?.trim() || '泰拉瑞亚人';
   }
 
 

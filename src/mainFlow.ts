@@ -106,6 +106,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onInventoryChanged: () => ui.refreshAll(),
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
+      onReadSign: (text) => ui.showSign(text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
     }, atlas);

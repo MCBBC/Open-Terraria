@@ -29,8 +29,9 @@ describe('l10n 构建产物', () => {
       expect(d.Language?.Chinese).toBeTruthy();
       expect(d.UI?.WorldSizeSmall).toBeTruthy();
       expect(d.Mods?.['SandboxWorld.UI.Inventory']).toBeTruthy();
-      // {$} 已构建期展开;{? 标记已剥离(残留 {0} 位置参数合法)
-      expect(raw.includes('{$')).toBe(false);
+      // {$} 可解析引用已构建期展开(未命中引用按原版行为保留,如 NPCName.None)
+      expect(raw.includes('{$CommonItemTooltip.')).toBe(false);
+      // {? 条件标记已剥离(残留 {0} 位置参数合法)
       expect(raw.includes('{?')).toBe(false);
     });
   }

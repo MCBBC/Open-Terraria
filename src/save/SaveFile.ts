@@ -91,6 +91,7 @@ export interface SaveData {
     mana?: number;        // 当前魔力
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
+  signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   flags: Record<string, boolean>;
 }
 
@@ -159,6 +160,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
       baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
     },
     npcs: [],
+    signs: world.signs,
     flags: world.flags,
   };
   return JSON.stringify(data);
@@ -191,6 +193,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   world.clock.dayCount = data.clock.dayCount;
   world.chests = data.chests;
   world.flags = data.flags;
+  if (data.signs) world.signs = data.signs;
 
   const st = world.store;
   // tiles

@@ -184,15 +184,16 @@ export class SettingsPanel {
         if (c.name === options.data.lang) return;
         const prev = options.data.lang;
         b.disabled = true;
+        // 先写内存值:Lang.setLanguage 的 emit 会触发 rebuild 重建本网格,
+        // 高亮读 options.data.lang——后写会拿到旧值,激活态留在上一语言
+        options.data.lang = c.name;
         const ok = await Lang.setLanguage(c.name);
         b.disabled = false;
         if (ok) {
-          await options.set('lang', c.name);
+          await options.set('lang', c.name); // 持久化(值已同步,仅落盘)
         } else {
-          // 失败回滚高亮
-          grid.querySelectorAll('button').forEach((x) => {
-            x.classList.toggle('active', (x as HTMLElement).dataset.lang === prev);
-          });
+          options.data.lang = prev; // 失败回滚
+          this.rebuild();
         }
       });
       b.dataset.lang = c.name;

@@ -35,6 +35,8 @@ export class World {
   lavaLine = 0;
   clock: Clock;
   chests: ChestData[] = [];
+  /** 墓碑碑文（原版 Sign 系统的最小子集）：锚点 = 墓碑 tile 左上格 */
+  signs: Array<{ x: number; y: number; text: string }> = [];
   // Boss 进度旗标
   flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
   // 树登记：砍树干时找到整棵树（roots → 范围）

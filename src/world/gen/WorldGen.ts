@@ -182,18 +182,18 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
 }
 
 function vanillaLakes({ store, rng }: GenCtx) {
-  // 原版 pass 31 Lakes（替换自研 liquidPass 洼地灌水/地下水池）
+  // 原版 pass 31 Lakes + pass 36 Gems（cs 注册序 31<36）
   const gs = ctxGs[0];
   if (!gs) return;
   runLakesPass(store, rng, gs);
+  runGemsPass(store, rng, gs);
 }
 
 function vanillaShinies({ store, rng }: GenCtx) {
-  // 原版 pass 27 Shinies（替换自研 orePass）+ pass 36 Gems
+  // 原版 pass 27 Shinies（替换自研 orePass）
   const gs = ctxGs[0];
   if (!gs) return;
   runShiniesPass(store, rng, gs);
-  runGemsPass(store, rng, gs);
 }
 
 function vanillaCaves({ store, rng }: GenCtx) {
@@ -303,7 +303,7 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runSurfaceDecorPass(store, rng, gs);
-  runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（地表装饰后、Piles 前）
+  runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
 }
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
@@ -763,7 +763,9 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
   for (;;) {
     const x = Math.floor(store.w / 2) + rng.int(-range, range); // Next(-num2, num2+1)
     for (let y = 0; y < store.h; y++) {
-      if (store.flags[store.idx(x, y)]) { sx = x; sy = y; break; }
+      const i = store.idx(x, y);
+      // 首个【实心】格——首个 active 格可能是树干(solid:false)致浮空出生
+      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid) { sx = x; sy = y; break; }
     }
     let bad = false;
     range++;
@@ -777,7 +779,8 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
   while (gs0 && sy > gs0.worldSurface) {
     const x = rng.int(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
     for (let y = 0; y < store.h; y++) {
-      if (store.flags[store.idx(x, y)]) { sx = x; sy = y; break; }
+      const i = store.idx(x, y);
+      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid) { sx = x; sy = y; break; }
     }
     widen++;
   }

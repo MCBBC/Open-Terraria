@@ -7,6 +7,7 @@ import {
 } from '../player/Appearance';
 import { compositePaperDoll, dollFrame, walkFrame, IDLE_FRAME } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
+import { randomPlayerName } from '../i18n/RandomText';
 
 export interface CharCreationCallbacks {
   onCreate(a: Appearance): void;
@@ -252,6 +253,16 @@ export class CharCreation {
     name.placeholder = Lang.text('Mods.SandboxWorld.CharCreate.NamePlaceholder');
     name.addEventListener('input', () => { this.appearance.name = name.value; });
     nameRow.appendChild(name);
+    // 随机名（🎲）：取人类城镇 NPC 名字池并集随机（原版无玩家名字池——见 RandomText 注记）
+    const randName = document.createElement('button');
+    randName.textContent = '🎲';
+    randName.title = Lang.text('Mods.SandboxWorld.WorldCreation.RandomName');
+    randName.style.cssText = 'padding:4px 8px;cursor:pointer;';
+    randName.addEventListener('click', () => {
+      name.value = randomPlayerName();
+      this.appearance.name = name.value;
+    });
+    nameRow.appendChild(randName);
     box.appendChild(nameRow);
     // 难度
     const diffTitle = document.createElement('div');

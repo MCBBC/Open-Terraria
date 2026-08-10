@@ -107,7 +107,7 @@ describe('LanguageManager', () => {
   it('缺失语言包返回 false 不改变当前状态', async () => {
     languageManager.loadPackJson({ UI: { Play: '开始游戏' } });
     const origFetch = globalThis.fetch;
-    globalThis.fetch = (async () => ({ ok: false })) as typeof fetch;
+    globalThis.fetch = (async () => ({ ok: false })) as unknown as typeof fetch;
     try {
       const ok = await languageManager.setLanguage('en-US');
       expect(ok).toBe(false);

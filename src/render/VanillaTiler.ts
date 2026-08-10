@@ -281,7 +281,7 @@ export function drawTreeCell(
     }
     return;
   }
-  if (fy >= 198 && fx >= 22) {
+  if (fy >= 198) {   // 冠/枝标记帧（原版只看 frameY；fx 0/22=顶 44/66=枝）
     // 树冠/树枝标记帧（仅由 ChunkCache 的外扩遍绘制，防跨 chunk 裁剪）
     if (foliageOnly === false) return;
     // 变体来源 = 标记帧自身 frameY（原版 WorldGen.GetTreeFrame：198→0/220→1/242→2）
@@ -295,7 +295,7 @@ export function drawTreeCell(
       : style;
     let img: HTMLImageElement | null;
     let sx = 0, sy = 0, sw = 0, sh = 0, anchor = 0; // 0=底中(顶) 1=右中(左枝) 2=左中(右枝)
-    if (fx === 22) {
+    if (fx === 22 || fx === 0) {   // fx=0：1/13 概率的顶冠变体（TreePass 与原版一致）
       img = atlas.ensureVImage(`vanilla/Tree_Tops_${crown}.png`)
         ?? atlas.ensureVImage(`vanilla/Tree_Tops_${style}.png`) ?? null;
       if (!img) return;

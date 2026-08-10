@@ -28,7 +28,9 @@ export function idsByVanillaSheet(...sheets: number[]): Set<number> {
 // 只有这些"放置类型"触发 flag3(仅替换石头)
 const STONE_PLACED = idsByVanillaSheet(63, 64, 65, 66, 67, 68, 130, 131, 566);
 // TileID.Sets.CanBeClearedDuringGeneration 默认 true,仅这 11 种不可被生成期覆盖(TileID.cs:702)
-export const NOT_CLEARABLE = idsByVanillaSheet(396, 400, 401, 397, 398, 399, 404, 368, 367, 226, 237);
+export const NOT_CLEARABLE = idsByVanillaSheet(396, 400, 401, 397, 398, 399, 404, 368, 367, 226, 237,
+  135, 136, 137, 141, 443,   // 电路器件（压板/开关/陷阱/炸药/喷泉）：矿石 runner 不可覆盖
+  41, 43, 44);              // 地牢砖（原版顺序中矿石先于地牢，此处防反向覆盖）
 // 原版 switch case 45/147/189/190/196/460:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云)
 const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460);
 // TileID.Sets.Ore:铺设 396/397 时矿石可覆盖
