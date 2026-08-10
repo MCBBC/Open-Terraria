@@ -70,7 +70,7 @@ export interface SaveData {
   header: {
     name: string; seed: number; width: number; height: number;
     spawn: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
-    crimson?: boolean; dungeonX?: number; jungleX?: number;
+    crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
     treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
     wldVersion?: number;
@@ -140,7 +140,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number): stri
       spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
       lavaLine: world.lavaLine,
       treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
-      crimson: world.crimson, dungeonX: world.dungeonX, jungleX: world.jungleX,
+      crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
       created: Date.now(), playTimeMs,
     },
     clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount },
@@ -179,6 +179,9 @@ export function loadSaveData(data: SaveData): { world: World; player: { hp: numb
   if (data.header.treeTops?.length) world.treeTops = data.header.treeTops;
   if (data.header.crimson !== undefined) world.crimson = data.header.crimson;
   if (data.header.dungeonX !== undefined) world.dungeonX = data.header.dungeonX;
+  // dungeonY 缺省（旧档/导入）回退地表线：CheckToSpawnDungeonEnemies 的 pY<dungeonY+40 门槛近似成立
+  if (data.header.dungeonY !== undefined && data.header.dungeonY > 0) world.dungeonY = data.header.dungeonY;
+  else world.dungeonY = world.groundLevel;
   if (data.header.jungleX !== undefined) world.jungleX = data.header.jungleX;
   world.clock.timeOfDay = data.clock.timeOfDay;
   world.clock.dayCount = data.clock.dayCount;

@@ -18,6 +18,7 @@ export interface GenState {
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
   dungeonLocation: number;    // 地牢入口实际位置（Reset 末掷）
+  dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   jungleX: number;            // 丛林（与地牢异侧）
   snowOriginLeft: number;
   snowOriginRight: number;
@@ -25,6 +26,11 @@ export interface GenState {
   beachRightStart: number;    // 右海滩左界
 
   // 各 pass 记录给后续 pass 用的区域
+  // RandomizeTreeStyle（Reset 掷）：树冠样式边界与样式（finalize 写回 world）
+  treeX: number[];
+  treeStyle: number[];
+  /** 生成的树登记（{x, y=树顶, h}；finalize 写 world.trees 供砍伐整棵判定） */
+  genTrees: Array<{ x: number; y: number; h: number }>;
   // Mount Caves（pass 7）记录的山丘坐标（pass 34/Webs 消费）
   mCaveX: Int32Array;
   mCaveY: Int32Array;
@@ -49,9 +55,10 @@ export function newGenState(w: number, h: number): GenState {
     beachDistance: Math.max(24, Math.floor(w * 0.06)),
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
-    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, jungleX: 0,
+    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonY: 0, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
+    treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [],
     mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     snowMinX: null, snowMaxX: null, snowTop: 0, snowBottom: 0,
     jungleBounds: null,

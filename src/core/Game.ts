@@ -44,7 +44,7 @@ const IMPORTED_TREE_TYPES = new Set<number>(
 );
 import { LiquidSim } from '../world/liquid/LiquidSim';
 import { BuffType } from '../stats/Buffs';
-import { SpriteAtlas } from '../assets/SpriteAtlas';
+import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { Sfx, SfxName } from './Sfx';
@@ -307,21 +307,74 @@ export class Game implements GameHooks {
     this.cb.onWorldReady();
   }
 
-  /** 进图前统一预载:onWorldReady 之前把首帧画面涉及的贴图全部就位——
-   *  图块/墙表(chunk 烘焙)、物品图标(道具栏)、Player_/Armor_(角色纸娃娃)、
-   *  出生点森林背景。任何一项缺载都会在首帧闪空/兜底 */
+  /** 进图前统一预载:onWorldReady 之前把首帧画面涉及的贴图全部就位。
+   *  图块/墙表按【出生点区域类型扫描】精确预载(半径 240 实测仅 22/378 张表,
+   *  而非全量 ~250MB)——远行遇到的类型走懒加载,onVImageLoaded 回调全量标脏
+   *  chunk 自动重烘焙;物品图标全量(18MB);角色 = Player_ 全量 + 当前装备的
+   *  3 张 Armor 表(换装走懒加载);出生点森林背景 */
   private async preloadSceneAssets(onProgress?: (label: string, p: number) => void): Promise<void> {
     const a = this.atlas;
     if (!a) return;
     onProgress?.('加载世界贴图', 0.05);
-    await a.preloadVanillaWorld();
+    // 出生点半径类型扫描:只预载画面涉及的图块/墙表
+    const st = this.world.store;
+    const sx = this.world.spawnX, sy = this.world.spawnY;
+    const R = 240;
+    const tileSheets = new Set<number>();
+    const wallIds = new Set<number>();
+    for (let x = Math.max(0, sx - R); x < Math.min(st.w, sx + R); x++) {
+      for (let y = Math.max(0, sy - R); y < Math.min(st.h, sy + R); y++) {
+        const i = st.idx(x, y);
+        if (st.flags[i]) {
+          const vs = TILE_DEFS[st.type[i]]?.vanilla?.sheet;
+          if (vs !== undefined) tileSheets.add(vs);
+        }
+        if (st.wall[i] > 0) wallIds.add(st.wall[i]);
+      }
+    }
+    // 兜底常驻:草/泥/石表全时有(暴露地表转草、autotile 邻接)
+    for (const k of ['dirt', 'stone', 'grass']) {
+      const vs = TILE_DEFS[TILE_BY_KEY[k]]?.vanilla?.sheet;
+      if (vs !== undefined) tileSheets.add(vs);
+    }
+    await Promise.all([
+      a.preloadTileSheetsFor(tileSheets, wallIds),
+      a.preloadMiscAndNpcs(),
+    ]);
     onProgress?.('加载物品图标', 0.15);
     await a.preloadIcons();
     onProgress?.('加载角色贴图', 0.7);
-    await a.preloadUiPrefix(['Player_', 'Armor_']);
+    // Player_ 全量(纸娃娃全部身体通道) + 仅当前装备的 Armor 表;
+    // 换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
+    const armorFiles = new Set<string>();
+    for (const id of this.playerPreviewArmor()) {
+      if (id == null) continue;
+      const def = ITEM_DEFS[id];
+      if (!def) continue;
+      const vid = VANILLA_ITEM_ICON_MAP[def.key] ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : NaN);
+      const entry = Number.isFinite(vid) ? a.vanilla.armorIndex?.[String(vid)] : null;
+      if (!entry) continue;
+      if (entry.head) armorFiles.add(`Armor_Head_${entry.head}.png`);
+      if (entry.body) armorFiles.add(`Armor_Armor_${entry.body}.png`);
+      if (entry.legs) armorFiles.add(`Armor_Legs_${entry.legs}.png`);
+    }
+    await a.preloadUiPrefix(['Player_']);
+    await a.preloadUiFiles(armorFiles);
     onProgress?.('加载背景图', 0.9);
     await this.renderer.biomeBg.preloadInitial(this.world);
     onProgress?.('加载背景图', 1);
+  }
+
+  /** 预载期的装备槽位(此时 player 尚未创建,读初始装备常量:afterWorldLoad 同源) */
+  private playerPreviewArmor(): Array<number | null> {
+    // 与 afterWorldLoad 初始装备一致:铁三件(头/胸/腿)
+    const ids: Array<number | null> = [null, null, null];
+    const order = ['iron_helmet', 'iron_chainmail', 'iron_greaves'];
+    for (let k = 0; k < 3; k++) {
+      const id = ITEM_BY_KEY[order[k]];
+      ids[k] = id !== undefined ? id : null;
+    }
+    return ids;
   }
 
   /** 全图液体沉降：原版 WorldFile.cs:365-389 读档时序 1:1 移植。
@@ -1213,26 +1266,18 @@ export class Game implements GameHooks {
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
-    // 瓦罐：碎裂音 + 随机战利品（火把/炸弹/绳/小血瓶/铜币）
-    if (TILE_BY_KEY['pot'] !== undefined && type === TILE_BY_KEY['pot']) {
+    // 可砍植物（Main.tileCut）：只清格 + 拂草声（SoundID 6 = Grass.wav），无掉落
+    // （原版 KillTile_GetItemDrops 对 tile 3/24/73/74/110/113 等 plant 类无 case → 不掉任何物品）
+    if (type !== POT_TILE && TILE_CUT.has(type)) {
       st.setTile(x, y, 0);
-      this.sfx.play('shatter');
-      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#974F50', 10, 2);
-      const loot: Array<[string, number, number, number]> = [
-        // [itemKey, min, max, 概率]
-        ['torch', 3, 8, 0.55],
-        ['bomb', 1, 3, 0.22],
-        ['rope', 5, 15, 0.20],
-        ['lesser_healing_potion', 1, 1, 0.22],
-        ['coin_copper', 5, 20, 0.45],
-        ['gel', 1, 2, 0.15],
-      ];
-      for (const [key, mn, mx, ch] of loot) {
-        if (Math.random() < ch) {
-          this.spawnDrop(x * TILE + 8, y * TILE, key, mn + Math.floor(Math.random() * (mx - mn + 1)),
-            (Math.random() - 0.5) * 2.5, -2.5 - Math.random());
-        }
-      }
+      this.sfx.play('chop');
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
+      return;
+    }
+    // 瓦罐：仅清格——碎裂音效/粒子/掉落表全由 smashPot 统一处理（防双重掉落）；
+    // 挥击路径走 smashPot（整罐 2×2 + loot），其他路径（挖掘等）直接清格
+    if (type === POT_TILE) {
+      st.setTile(x, y, 0);
       return;
     }
     // 普通
@@ -2018,26 +2063,34 @@ export class Game implements GameHooks {
   // ================= 战斗 =================
 
   /** 瓦罐碎裂（WorldGen.CheckPot L56807 + SpawnThingsFromPot L57100，肉前普通世界主干）：
-   *  任意一格被打破 → 整罐 2×2 碎裂 + 掉落表（稀有药水 / 蘑菇 / 火把 / 箭 / 凝胶 / 绳 / 钱币）。
-   *  原版瓦罐自身不掉（KillTile_GetItemDrops 无 case 28），掉落全在本表内 */
+   *  任意一格被打破 → 整罐碎裂 + 掉落表（稀有药水 / 蘑菇 / 火把 / 箭 / 凝胶 / 绳 / 钱币），只掉一次。
+   *  原版瓦罐自身不掉（KillTile_GetItemDrops 无 case 28），掉落全在本表内。
+   *  整罐格收集用相邻聚集（frame 布局方向无关——我们 potPass 的 frameY 上下排与原版相反，
+   *  原版锚点公式会把上排漏清，残留格反复触发 = 无限刷 loot，故改为四邻洪水找齐） */
   private smashPot(x: number, y: number) {
     const st = this.world.store;
     if (!st.inBounds(x, y) || st.get(x, y) !== POT_TILE) return;
-    // CheckPot L56820-56834：2×2 锚点 = 当前格 - frameX/18%2、- frameY/18%2；style = frameY/36
-    const i = st.idx(x, y);
-    const ax = x - (st.frameX[i] / 18 | 0) % 2;
-    const ay = y - (st.frameY[i] / 18 | 0) % 2;
-    const ai = st.inBounds(ax, ay) ? st.idx(ax, ay) : i;
-    const style = Math.floor(st.frameY[ai] / 36);
-    for (let dy = 0; dy < 2; dy++) {
-      for (let dx = 0; dx < 2; dx++) {
-        if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === POT_TILE) {
-          this.breakTile(ax + dx, ay + dy);
+    const cells: Array<[number, number]> = [];
+    const stack: Array<[number, number]> = [[x, y]];
+    const seen = new Set<number>([x * 100000 + y]);
+    let ax = x, ay = y, minFY = Infinity;
+    while (stack.length) {
+      const [cx, cy] = stack.pop()!;
+      cells.push([cx, cy]);
+      const ci = st.idx(cx, cy);
+      if (st.frameY[ci] < minFY) { minFY = st.frameY[ci]; ax = cx; ay = cy; }
+      for (const [ddx, ddy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+        const nx = cx + ddx, ny = cy + ddy, k = nx * 100000 + ny;
+        if (!seen.has(k) && st.inBounds(nx, ny) && st.get(nx, ny) === POT_TILE) {
+          seen.add(k);
+          stack.push([nx, ny]);
         }
       }
     }
-    // CheckPot 音效（普通瓦罐 SoundID 13）+ 陶瓷碎片粒子
-    this.sfx.play('dig');
+    const style = Math.floor(minFY / 36);
+    for (const [cx, cy] of cells) this.breakTile(cx, cy);
+    // CheckPot 音效（普通瓦罐 SoundID 13 = Shatter.wav）+ 陶瓷碎片粒子
+    this.sfx.play('shatter');
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#C4A48C', 6, 2.0, { life: 180, damp: 0.985, grav: 0.09 });
     this.potLoot(ax, ay, style);

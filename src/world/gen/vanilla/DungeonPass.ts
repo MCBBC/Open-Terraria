@@ -193,6 +193,7 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
     }
     dx = entPos[0]; dy = entPos[1];
     dungeonEnt(st, rng, gs, dc, dx, dy);
+    gs.dungeonY = entPos[1];   // 入口地表 Y（刷怪门槛 CheckToSpawnDungeonEnemies）
   } else {
     // legacy 盲爬(1405 结构 + 1456 的 100 上限):外壳探测到开放天空即停
     let reached = false;
@@ -237,6 +238,7 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
     let gY = 0;
     while (gY < st.h - 2 && !st.flags[st.idx(dx, gY)]) gY++;
     dungeonEnt(st, rng, gs, dc, dx, gY);
+    gs.dungeonY = gY;          // 入口地表 Y（刷怪门槛 CheckToSpawnDungeonEnemies）
   }
   // ---- 房口平台候选(cs L18137-18180,与门候选同期收集)----
   for (const room of dc.rooms) {

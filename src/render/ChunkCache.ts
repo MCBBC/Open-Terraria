@@ -77,6 +77,16 @@ export class ChunkCache {
     if (y % CHUNK === CHUNK - 1) this.markDirty(cx, cy + 1);
   }
 
+  /** 全量标脏(atlas 懒加载晚到的新表 → 已烘焙的 chunk 里可能烤了 fallback)。
+   *  4/帧 的 flushDirty 会逐步重烘焙,dirtyQueue.includes 去重防重复入队 */
+  invalidateAll(): void {
+    for (const k of this.chunks.keys()) {
+      if (this.chunks.get(k) === undefined) continue; // 已是待重建哨兵
+      this.chunks.set(k, undefined as unknown as ChunkPair);
+      if (!this.dirtyQueue.includes(k)) this.dirtyQueue.push(k);
+    }
+  }
+
   /** 每帧最多重绘 maxN 个脏 chunk */
   flushDirty(maxN = 4) {
     let n = 0;

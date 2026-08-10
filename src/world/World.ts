@@ -36,7 +36,7 @@ export class World {
   clock: Clock;
   chests: ChestData[] = [];
   // Boss 进度旗标
-  flags: Record<string, boolean> = { downedEyeOfCthulhu: false, shadowOrbSmashed: false, hardMode: false };
+  flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
   // 树登记：砍树干时找到整棵树（roots → 范围）
   trees: Array<{ x: number; y: number; h: number }> = [];
   /** 战争迷雾：1 = 已探索。按 tile 粒度。 */
@@ -47,6 +47,9 @@ export class World {
   /** 世界级生物群系常量(原版 header,生成期 Reset pass 掷出) */
   crimson = false;          // true=猩红 false=腐化
   dungeonX = 0;            // 地牢位置
+  /** 地牢入口地表 Y（原版 Main.dungeonY：CheckToSpawnDungeonEnemies 要求玩家在其 +40 格以下才刷地牢怪）。
+   *  缺省 0=未知，使用处以 groundLevel 回退 */
+  dungeonY = 0;
   jungleX = 0;             // 丛林位置
   /** TreeTops 13 区域变体（v≥211 wld 权威；索引 0-3 森林/5 丛林/6 雪/7 神圣） */
   treeTops: number[] = [];

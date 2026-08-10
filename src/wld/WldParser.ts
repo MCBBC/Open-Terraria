@@ -26,6 +26,8 @@ export interface WldWorld {
   tilesHigh: number;
   spawnX: number;
   spawnY: number;
+  dungeonX: number;
+  dungeonY: number;
   groundLevel: number;
   rockLevel: number;
   time: number;
@@ -124,7 +126,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   r.i32(); // moonPhase
   r.boolean(); // blood moon
   r.boolean(); // eclipse
-  r.i32(); r.i32(); // dungeon xy
+  const dungeonX = r.i32(), dungeonY = r.i32(); // 地牢入口坐标（dungeonX/Y）
   const isCrimson = r.boolean();
   for (let i = 0; i < 10; i++) r.boolean(); // downed bosses
   if (version >= 118) r.boolean(); // slime king
@@ -267,7 +269,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   }
 
   return {
-    version, title, seed, tilesWide, tilesHigh, spawnX, spawnY,
+    version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, isCrimson, hardMode, gameMode,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,

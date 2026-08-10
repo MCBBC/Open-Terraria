@@ -156,6 +156,10 @@ export class Enemy extends Entity {
   ai2 = 0;
   /** 原版 ai[1]（史莱姆体内物品 id，驱动 SLIME_ITEM_COLORS 渐变色；0=无） */
   ai1 = 0;
+  /** 原版 ai[3]（地牢 AI 族用：诅咒头骨状态/火轮速度档/刺球相位） */
+  ai3 = 0;
+  /** 原版 directionY（火轮/刺球对角弹跳的纵向方向） */
+  dirY = 1;
   /** 原版 timeLeft（默认 7500 tick，离屏递减；飘浮眼白天 EncourageDespawn(10)） */
   despawnTimer = 7500;
   inWater = false;       // 入水检测（溅落声用）
@@ -197,6 +201,10 @@ export class Enemy extends Entity {
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
+        case 10: this.cursedSkullAI(game, p); break;                     // AI_010 诅咒头骨（地牢飞行族）
+        case 11: this.skeletronHeadAI(game, p); break;                   // AI_011 骷髅王头/地牢守卫
+        case 20: this.blazingWheelAI(); break;                           // AI_020 火轮（地牢陷阱）
+        case 21: this.spikeBallAI(game); break;                          // AI_021 刺球（地牢陷阱）
         case 14: this.batAI(game, p); break;                            // AI_014 蝙蝠/飞行族（1.4.5.6 原版核）
         case 16: this.swimAI(game, p); break;                           // AI_016 游泳族（鲨鱼/食人鱼）
         case 18: this.jellyfishAI(game, p); break;                      // AI_018 水母族（脉冲游动）
@@ -542,6 +550,135 @@ export class Enemy extends Entity {
     if (this.hitWall) this.vx = -this.vx * 0.5;
     if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
     if (this.hitHead) this.vy = Math.abs(this.vy) * 0.5 + 0.5;
+  }
+
+  /** AI_010 诅咒头骨（NPC.145.cs:21553+；type 34 路径，书怪 694/魔法骷髅 289 分支未达）：
+   *  距离分档速度（>350:5/0.3 >300:3/0.2 >250:1.5/0.1 其余 1/0.011，L21655-21672）；
+   *  <250 环绕摆动（ai[0] +=0.9、vy ±0.019、|ai0|>100 时 vx 反向，L21636-21651）；
+   *  ai[1] 追击计数 >600 加速档（×8/速度4）>650 清零；贴脸 <100 时 ai[1]=-60（L21620-21634）；
+   *  noTileCollide 穿墙直移 */
+  private cursedSkullAI(game: GameHooks, player: Player | null) {
+    let maxSpd = 1, accel = 0.011;
+    const dx = player ? player.cx - this.cx : this.facing * 100;
+    const dy = player ? player.cy - this.cy : -100;
+    const dist = Math.hypot(dx, dy) || 1;
+    this.ai1 += 1; // ai[3]≠3 恒真（34 无状态机）
+    if (this.ai1 > 600) {
+      accel *= 8; maxSpd = 4;
+      if (this.ai1 > 650) this.ai1 = 0;
+    } else if (player && dist < 100 && this.ai1 >= 0) {
+      this.ai1 = -60; // 贴脸冷却重置
+    } else if (dist < 250) {
+      this.ai0 += 0.9;
+      this.vy += this.ai0 > 0 ? 0.019 : -0.019;
+      this.vx += Math.abs(this.ai0) > 100 ? 0.019 : -0.019;
+      if (this.ai0 > 200) this.ai0 = -200;
+    }
+    // 距离分档（L21655-21672）
+    if (dist > 350) { maxSpd = 5; accel = 0.3; }
+    else if (dist > 300) { maxSpd = 3; accel = 0.2; }
+    else if (dist > 250) { maxSpd = 1.5; accel = 0.1; }
+    let sx = (dx / dist) * maxSpd, sy = (dy / dist) * maxSpd;
+    if (!player) { sx = this.facing * maxSpd / 2; sy = -maxSpd / 2; } // 玩家死亡漂移（L21686-21689）
+    if (this.vx < sx) this.vx += accel;
+    else if (this.vx > sx) this.vx -= accel;
+    if (this.vy < sy) this.vy += accel;
+    else if (this.vy > sy) this.vy -= accel;
+    if (player) this.facing = dx > 0 ? 1 : -1;
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** AI_011 骷髅王头/地牢守卫（NPC.145.cs:21904+；type 68 守卫路径——骷髅王战斗分支不可达）：
+   *  守卫恒 ai[1]=2（L21937-21941）：伤害/防御 9999（L22277-22278）、恒速 8 直线追击
+   *  （L22282-22288）；玩家死亡/超 2000px → ai[1]=3 下坠脱场（L21925-21935, L22289-22296）。
+   *  noTileCollide 直移 */
+  private skeletronHeadAI(game: GameHooks, player: Player | null) {
+    if (this.ai0 === 0) this.ai0 = 1; // 初始化（L21910；68 无手 NPC 生成）
+    if (!player || Math.abs(this.cx - player.cx) > 2000 || Math.abs(this.cy - player.cy) > 2000) {
+      this.ai1 = 3;
+    } else if (this.ai1 !== 3) {
+      this.ai1 = 2;
+    }
+    if (this.ai1 === 2) {
+      this.def.damage = 9999;
+      const dx = player!.cx - this.cx, dy = player!.cy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      this.vx = (dx / d) * 8;
+      this.vy = (dy / d) * 8;
+    } else {
+      this.vy += 0.1;
+      if (this.vy < 0) this.vy *= 0.95;
+      this.vx *= 0.95;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** AI_020 火轮（NPC.145.cs:24596+）：ai[3]=1+Next(15)*0.1 速度档；
+   *  首段垂直俯冲 spd/acc/2≈15 tick（L24617-24622），随后恒速 ±spd 弹跳——
+   *  noTileCollide 穿墙，"弹"靠 |v|≥spd 时 direction 翻转（L24637-24660）而非碰撞 */
+  private blazingWheelAI() {
+    if (this.ai0 === 0) {
+      this.facing *= -1;
+      this.y += this.h / 2 + 8;
+      if (this.facing === 0) this.facing = 1;
+      this.ai3 = 1 + Math.floor(Math.random() * 15) * 0.1;
+      this.vy = 6 * this.ai3 * this.dirY;
+      this.ai0 = 1;
+      this.x += this.vx;
+      this.y += this.vy;
+      return;
+    }
+    const spd = 6 * this.ai3, accel = 0.2 * this.ai3;
+    const phaseLen = Math.floor(spd / accel / 2); // num304（ai3 约掉=15）
+    if (this.ai0 >= 1 && this.ai0 < phaseLen) {
+      this.vy = this.dirY * spd;
+      this.ai0 += 1;
+    } else if (this.ai0 >= phaseLen) {
+      this.vy = 0;
+      this.dirY *= -1;
+      this.vx = spd * this.facing;
+      this.ai0 = -1;
+    } else {
+      // 常态弹跳（L24637-24660）：到 ±spd 翻向，持续加 accel
+      if (this.dirY > 0 && this.vy >= spd) { this.dirY *= -1; this.vy = spd; }
+      else if (this.dirY < 0 && this.vy <= -spd) { this.dirY *= -1; this.vy = -spd; }
+      if (this.facing > 0 && this.vx >= spd) { this.facing *= -1; this.vx = spd; }
+      else if (this.facing < 0 && this.vx <= -spd) { this.facing *= -1; this.vx = -spd; }
+      this.vx += accel * this.facing;
+      this.vy += accel * this.dirY;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** AI_021 刺球（NPC.145.cs:24674+）：恒速 6 对角移动，撞轴翻转（collideX→dirY 翻、
+   *  collideY→facing 翻），ai[1] 交替旋转相位（视觉态，渲染暂无旋转仅保留状态语义） */
+  private spikeBallAI(game: GameHooks) {
+    if (this.ai0 === 0) {
+      if ((game as unknown as { player?: Player }).player) {
+        const p = (game as unknown as { player: Player }).player;
+        this.facing = p.cx > this.cx ? 1 : -1;
+      }
+      this.dirY = 1;
+      this.ai0 = 1;
+    }
+    // 上一 tick moveAndCollide 留下的碰撞旗标（原版 AI 开头读 collideX/Y 同语义）
+    const collideX = this.hitWall;
+    const collideY = this.onGround || this.hitHead;
+    if (this.ai1 === 0) {
+      if (collideY) this.ai0 = 2;
+      if (!collideY && this.ai0 === 2) { this.facing *= -1; this.ai1 = 1; this.ai0 = 1; }
+      if (collideX) { this.dirY *= -1; this.ai1 = 1; }
+    } else {
+      if (collideX) this.ai0 = 2;
+      if (!collideX && this.ai0 === 2) { this.dirY *= -1; this.ai1 = 0; this.ai0 = 1; }
+      if (collideY) { this.facing *= -1; this.ai1 = 0; }
+    }
+    this.vx = 6 * this.facing;
+    this.vy = 6 * this.dirY;
+    moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
   /** AI_026 独角兽/冲锋族（NPC.cs:25863-26292）：

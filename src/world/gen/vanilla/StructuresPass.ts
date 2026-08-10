@@ -237,43 +237,7 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
     if (sy >= 0) {
       const ground = st.type[st.idx(x, sy)];
       const relaxed = sinceLast >= 24;
-      // ---- 树(草/丛林草/雪)----
-      if ((ground === T.GRASS || ground === JUNGLE_GRASS || ground === T.SNOW)
-        && (!st.flags[st.idx(x, sy - 1)] || isSoft(st.type[st.idx(x, sy - 1)]))) {
-        const jungle = ground === JUNGLE_GRASS;
-        const th = jungle ? rng.int(8, 16) : rng.int(7, 14);
-        let ok = true;
-        for (let dy = 1; dy <= th; dy++) {
-          if (st.flags[st.idx(x, sy - dy)] && !(dy === 1 && isSoft(st.type[st.idx(x, sy - dy)]))) { ok = false; break; }
-        }
-        const range = relaxed ? 1 : 2;
-        for (let dx = -range; dx <= range && ok; dx++) {
-          if ((st.flags[st.idx(x + dx, sy - 1)] && !isSoft(st.type[st.idx(x + dx, sy - 1)]))
-            || !st.flags[st.idx(x + dx, sy)]) { ok = false; break; }
-        }
-        if (ok) {
-          if (isSoft(st.type[st.idx(x, sy - 1)])) st.setTileSilent(x, sy - 1, 0);
-          for (let dy = 1; dy <= th; dy++) {
-            st.setTileSilent(x, sy - dy, T.TREE, dy === th ? 22 : 0, dy === th ? 198 : 0);
-          }
-          const maxBranches = rng.int(2, 4);
-          let branchCount = 0;
-          for (let dy = 2; dy <= th - 3 && branchCount < maxBranches; dy++) {
-            for (const side of [-1, 1]) {
-              if (branchCount >= maxBranches) break;
-              if (rng.int(0, 99) >= 40) continue;
-              const bx = x + side, by = sy - dy;
-              if ((!st.flags[st.idx(bx, by)] || isSoft(st.type[st.idx(bx, by)])) && st.type[st.idx(bx, by + 1)] !== T.TREE) {
-                st.setTileSilent(bx, by, T.TREE, side < 0 ? 44 : 66, 198);
-                branchCount++;
-              }
-            }
-          }
-          x += jungle ? rng.int(5, 10) : rng.int(6, 14);
-          sinceLast = 0;
-          continue;
-        }
-      }
+      // ---- 树已由 vanilla/TreePass.ts 替换（原版 AddTrees 逐列语义）----
       // ---- 仙人掌(沙漠沙/邪恶沙面)----
       if ((ground === T.SAND || ground === EBONSAND || ground === CRIMSAND) && inDesert(x)
         && !st.flags[st.idx(x, sy - 1)] && rng.next() < 0.12) {

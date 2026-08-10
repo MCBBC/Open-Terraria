@@ -1,41 +1,42 @@
-// 主菜单背景（原版语义对齐版）：
-//   昼夜循环（time 在 gameMenu 也推进，UpdateTime:64426 无条件 time+=dayRate）→
-//   天空/星星/太阳月亮随时间变化 + 夜间地表层整体压暗；
-//   生物群系主题轮换（原版标题屏固定森林，1.4.4 起轮换群系背景；贴图集表取自
-//   BiomeBackground 的 setBG 表）+ 过渡交叉淡化（bgAlpha 语义）；
-//   前景视差层贴底 + 横向平铺，缩放只跟屏高（bgScale=max(1,H/800)）。
+// 主菜单背景（1456 源码对齐版）：
+//   原版标题屏 = 森林背景专属（DrawBG:48035-48042 bgStyle = dayTime?0:1 = Forest1/Forest2），
+//   前景是【多套森林树型变体轮换】（treeBGSet1-4 + backgroundLayerTransitionSpeed=0.02 交叉淡化），
+//   不是不同生物群系！位置为绝对 UI 坐标（DrawSurfaceBG_Forest gameMenu 分支）：
+//     远山 treeMntBGSet[0] y=100（:59257）、treeMntBGSet[1] y=230（:59307）
+//     树层0 y=320（-50 若 50 / -100 若 53…:60815）、树层1 y=400、树层2 y=480
+//     树层 scale=1.25 parallax=0.4（:60710）；基准 UI 高 982（1920×1080 UIScale1.1）
+//   昼夜循环（UpdateTime:64426 菜单也走 time）→ 天空/日月/星 + 夜间 multiply 压暗。
 import { SkyRenderer } from './SkyRenderer';
 import { Clock } from '../world/World';
 
-/** 标题屏主题（远山层 + 前景三层；-1 = 无该层）。贴图 id 取自 BiomeBackground setBG 表 */
-interface TitleTheme { far: number; layers: [number, number, number] }
-const THEMES: TitleTheme[] = [
-  { far: 7, layers: [50, 51, 52] },        // 森林（默认组）
-  { far: 23, layers: [12, 13, 14] },       // 腐化
-  { far: 24, layers: [43, 44, 45] },       // 猩红
-  { far: 35, layers: [37, 38, 39] },       // 雪原
-  { far: 15, layers: [15, 16, 17] },       // 丛林
-  { far: 24, layers: [21, 20, -1] },       // 沙漠
-  { far: 29, layers: [29, 30, 31] },       // 神圣
-  { far: 7, layers: [26, 27, 28] },        // 发光蘑菇
+/** 森林背景变体（SetForestBGSet WorldGen.cs:7605 实表）：远山对 + 三树层 */
+interface ForestVariant { mnt: [number, number]; trees: [number, number, number] }
+const FOREST_VARIANTS: ForestVariant[] = [
+  { mnt: [7, 8], trees: [50, 51, 52] },      // style 1（默认）
+  { mnt: [7, 8], trees: [53, 54, 55] },      // style 2
+  { mnt: [7, 90], trees: [91, -1, 92] },     // style 3
+  { mnt: [171, 172], trees: [173, -1, -1] }, // style 6
+  { mnt: [176, 177], trees: [178, -1, -1] }, // style 7
 ];
-const THEME_HOLD_MS = 90_000;   // 每主题停留
-const THEME_FADE_MS = 4_000;    // 交叉淡化时长
+const VARIANT_HOLD_MS = 30_000;  // 原版约 30-40s 轮换
+const VARIANT_FADE_MS = 3_000;   // bgAlpha 交叉淡化
 
 /** 供 TitleMenu 读取的菜单时间状态（LogoA/LogoB 昼夜交叉淡化用） */
 export const menuTimeInfo = { timeOfDay: 0.3, dayFactor: 1 };
+
+/** 原版 gameMenu 绝对 Y 基准：1920×1080 @UIScale1.1 → UI 高 982 */
+const UI_H = 982;
 
 export class MenuBackground {
   canvas: HTMLCanvasElement;
   private ctx: CanvasRenderingContext2D;
   private sky = new SkyRenderer();
-  /** 菜单时钟：一圈 2.5 分钟（游戏内 30 分钟太慢，太阳 1.5px/s 肉眼不可见；
-   *  加速后约 75s 昼 + 75s 夜，日月升降与昼夜交替肉眼可见） */
+  /** 菜单时钟：一圈 2.5 分钟（原版 30min 太慢，日月升降肉眼不可见） */
   private clock = new Clock(150_000);
   private camX = 0;
   private imgs = new Map<number, HTMLImageElement>();
-  private themeIdx = Math.floor(Math.random() * THEMES.length);
-  private themeT = 0;
+  private variantIdx = Math.floor(Math.random() * FOREST_VARIANTS.length);
+  private variantT = 0;
 
   constructor(parent: HTMLElement) {
     this.canvas = document.createElement('canvas');
@@ -60,19 +61,16 @@ export class MenuBackground {
     return im;
   }
 
-  /** 缩放只跟屏高（与宽度无关；宽度不足横向平铺） */
-  private bgScale(): number {
-    return Math.max(1, this.canvas.height / 800);
-  }
+  /** UI 像素 → 当前屏幕像素（原版 UIScale 语义） */
+  private ui(): number { return this.canvas.height / UI_H; }
 
-  /** 单层横滚平铺 */
-  private drawLayer(n: number, parallax: number, y: number, alpha = 1) {
+  /** 单层横滚平铺（原版 DrawSurfaceBG 主循环） */
+  private drawLayer(n: number, parallax: number, y: number, scale: number, alpha = 1) {
     const im = this.img(n);
     if (!im || !im.complete || im.naturalWidth === 0 || alpha <= 0.01) return;
-    const scale = this.bgScale();
     const w = im.naturalWidth * scale, h = im.naturalHeight * scale;
-    const startX = -(((this.camX * parallax) % w) + w) % w;
-    const loops = Math.ceil(this.canvas.width / w) + 1;
+    const startX = -(((this.camX * parallax) % w) + w) % w - w / 2;
+    const loops = Math.ceil(this.canvas.width / w) + 2;
     const ctx = this.ctx;
     ctx.save();
     ctx.globalAlpha = alpha;
@@ -80,26 +78,30 @@ export class MenuBackground {
     ctx.restore();
   }
 
-  /** 主题绘制：远山 + 前景三层贴底（错层 1.10/1.03/0.94，最前层沉到屏底以下） */
-  private drawTheme(idx: number, alpha: number) {
-    const th = THEMES[idx % THEMES.length];
-    const H = this.canvas.height, s = this.bgScale();
-    this.drawLayer(th.far, 0.10, H * 0.18 * s, alpha);
-    const sinks = [1.10, 1.03, 0.94];
-    const pars = [0.25, 0.25, 0.27];
+  /** 画一套森林变体（绝对 UI 坐标 + 贴图特例偏移，:60815 起） */
+  private drawVariant(idx: number, alpha: number) {
+    const v = FOREST_VARIANTS[idx % FOREST_VARIANTS.length];
+    const u = this.ui();
+    // 远山（:59257 y=100 / :59307 y=230；parallax 0.1/0.18，scale 1）
+    this.drawLayer(v.mnt[0], 0.10, 100 * u, u, alpha);
+    this.drawLayer(v.mnt[1], 0.18, 230 * u, u, alpha);
+    // 树层（gameMenu: y=320/400/480；scale 1.25；parallax 0.4）
+    const treeYBase = [320, 400, 480];
     for (let i = 0; i < 3; i++) {
-      const tex = th.layers[i];
+      const tex = v.trees[i];
       if (tex < 0) continue;
-      const im = this.img(tex);
-      if (!im || !im.complete || im.naturalWidth === 0) continue;
-      const h = im.naturalHeight * this.bgScale();
-      this.drawLayer(tex, pars[i], H - h * sinks[i], alpha);
+      let y = treeYBase[i];
+      // 贴图特例（:60815-60854：50→-50、53→-100、91/173→+200、178→+75、52→-50、55→-100、92→+150）
+      if (tex === 50 || tex === 51 || tex === 52) y -= 50;
+      else if (tex === 53 || tex === 54 || tex === 55) y -= 100;
+      else if (tex === 91 || tex === 92 || tex === 173) y += 150 + (i === 0 ? 50 : 0);
+      else if (tex === 178) y += 75;
+      this.drawLayer(tex, 0.4, y * u, 1.25 * u, alpha);
     }
   }
 
   tick(dtMs: number) {
     this.clock.tick(dtMs);
-    this.lastDt = dtMs;
     this.camX += 4 * (dtMs / 16.7); // 原版 MenuXMovement(4f)/帧
     const W = this.canvas.width, H = this.canvas.height;
     menuTimeInfo.timeOfDay = this.clock.timeOfDay;
@@ -107,19 +109,19 @@ export class MenuBackground {
 
     this.sky.draw(this.ctx, this.clock, W, H, this.camX, dtMs);
 
-    // 主题轮换 + 交叉淡化（bgAlpha ±0.05/帧 语义的时长版）
-    this.themeT += dtMs;
-    const cycle = THEME_HOLD_MS + THEME_FADE_MS;
-    if (this.themeT >= cycle) {
-      this.themeT -= cycle;
-      this.themeIdx = (this.themeIdx + 1) % THEMES.length;
+    // 森林变体轮换 + 交叉淡化（bgAlpha 语义）
+    this.variantT += dtMs;
+    const cycle = VARIANT_HOLD_MS + VARIANT_FADE_MS;
+    if (this.variantT >= cycle) {
+      this.variantT -= cycle;
+      this.variantIdx = (this.variantIdx + 1) % FOREST_VARIANTS.length;
     }
-    const fade = Math.max(0, Math.min(1, (this.themeT - THEME_HOLD_MS) / THEME_FADE_MS));
-    this.drawTheme(this.themeIdx, 1 - fade);
-    if (fade > 0) this.drawTheme(this.themeIdx + 1, fade);
+    const fade = Math.max(0, Math.min(1, (this.variantT - VARIANT_HOLD_MS) / VARIANT_FADE_MS));
+    this.drawVariant(this.variantIdx, 1 - fade);
+    if (fade > 0) this.drawVariant(this.variantIdx + 1, fade);
 
-    // 夜间压暗（≈ ColorOfSurfaceBackgrounds 随 timeOfDay 变暗；只压地表层不压 UI——UI 在 DOM 层）
-    const dark = (1 - this.clock.dayFactor) * 0.72; // dayFactor 1→0.32
+    // 夜间压暗（ColorOfSurfaceBackgrounds 随昼夜变暗；只压背景不压 DOM UI）
+    const dark = (1 - this.clock.dayFactor) * 0.72;
     if (dark > 0.01) {
       this.ctx.save();
       this.ctx.globalCompositeOperation = 'multiply';

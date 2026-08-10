@@ -275,29 +275,65 @@ export class SpriteAtlas {
 
   private _iconPending = new Set<string>();
   private _worldPreloaded = false;
-  /** 预载世界渲染所需原版表(图块 378 + 墙 366 + NPC 表 + 杂项,~750 张/磁盘 ~20MB)。
-   *  Game.newWorld/loadWorld 在 onWorldReady 前 await,保证首帧 chunk 烘焙用真贴图 */
-  async preloadVanillaWorld(): Promise<void> {
-    if (this._worldPreloaded) return;
-    this._worldPreloaded = true;
-    const sheets = new Set<string>([
-      ...Object.values(this.vanilla.tiles).map((t) => t.sheet),
-      ...Object.values(this.vanilla.walls).map((w) => w.sheet),
-      ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
-      ...VANILLA_MISC,
-    ]);
-    await Promise.all([...sheets].map((f) => new Promise<void>((resolve) => {
-      if (this.vimages.has(f)) return resolve();
+  /** 懒加载完成回调(Game 注册 → ChunkCache 全量标脏:晚到的表重新烘焙
+   *  已缓存的 chunk,否则 fallback 会永久烤进 canvas) */
+  onVImageLoaded: ((file: string) => void) | null = null;
+
+  /** 预载文件清单(去重+decode)。tile/wall/NPC/misc 表与图标的统一底层 */
+  async preloadFiles(files: Iterable<string>, onProgress?: (p: number) => void): Promise<void> {
+    const list = [...new Set(files)];
+    let done = 0;
+    await Promise.all(list.map((f) => new Promise<void>((resolve) => {
+      if (this.vimages.has(f)) { done++; onProgress?.(done / list.length); return resolve(); }
       const img = new Image();
       img.onload = () => {
         this.vimages.set(f, img);
         // decode():预载阶段完成解码,否则 Chrome 延迟到首次 draw 才解码,
         // 大表(2000px 级)首帧仍会卡一拍——"预载"语义要求字节+解码双就绪
-        img.decode().then(() => resolve(), () => resolve());
+        img.decode().then(() => { done++; onProgress?.(done / list.length); resolve(); }, () => resolve());
+        this.onVImageLoaded?.(f);
       };
       img.onerror = () => resolve();
       img.src = `sprites/${encodeURI(f)}`;
     })));
+  }
+
+  /** 按图块 sheet id + 墙 id 预载对应贴图表。
+   *  Game 用出生点区域类型扫描调用——只载画面涉及的表(出生点半径内实测仅
+   *  22/378 张图块表),而不是全量 ~750 张(~250MB 解码) */
+  preloadTileSheetsFor(tileSheets: Iterable<number>, wallIds: Iterable<number>): Promise<void> {
+    const files = new Set<string>();
+    for (const id of tileSheets) {
+      const m = this.vanilla.tiles[String(id)];
+      if (m) files.add(m.sheet);
+    }
+    for (const id of wallIds) {
+      const m = this.vanilla.walls[String(id)];
+      if (m) files.add(m.sheet);
+    }
+    return this.preloadFiles(files);
+  }
+
+  /** 预载常驻杂项(树冠/液体/瀑布/电路)+ NPC 表(小动物)——出生点必有,量小全载 */
+  preloadMiscAndNpcs(): Promise<void> {
+    return this.preloadFiles([
+      ...VANILLA_MISC,
+      ...Object.values(this.vanilla.npcs ?? {}).map((n) => n.sheet),
+    ]);
+  }
+
+  /** 预载世界渲染所需原版表(全量,~750 张)。仅调试/兜底用;正常路径走
+   *  preloadTileSheetsFor + preloadMiscAndNpcs 的出生点子集 */
+  async preloadVanillaWorld(): Promise<void> {
+    if (this._worldPreloaded) return;
+    this._worldPreloaded = true;
+    await Promise.all([
+      this.preloadTileSheetsFor(
+        Object.keys(this.vanilla.tiles).map(Number),
+        Object.keys(this.vanilla.walls).map(Number),
+      ),
+      this.preloadMiscAndNpcs(),
+    ]);
   }
   /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null */
   private ensureVImage(file: string): HTMLImageElement | null {
@@ -306,7 +342,11 @@ export class SpriteAtlas {
     if (this._iconPending.has(file)) return null;
     this._iconPending.add(file);
     const im = new Image();
-    im.onload = () => { this.vimages.set(file, im); this._iconPending.delete(file); };
+    im.onload = () => {
+      this.vimages.set(file, im);
+      this._iconPending.delete(file);
+      this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
+    };
     im.onerror = () => { this._iconPending.delete(file); };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
@@ -334,17 +374,25 @@ export class SpriteAtlas {
     return this._iconsPromise;
   }
 
-  /** 预载 UI 贴图按 key 前缀(如 ['Player_','Armor_'] = 纸娃娃身体/发型/装备,1293 张)。
-   *  进图前流程调用,保证角色渲染首帧无闪空 */
+  /** 预载 UI 贴图按 key 前缀(如 ['Player_'] = 纸娃娃身体/发型,545 张)。 */
   async preloadUiPrefix(prefixes: string[], onProgress?: (p: number) => void): Promise<void> {
     const files = Object.entries(this.uiFiles)
       .filter(([k]) => prefixes.some((p) => k.startsWith(p)))
       .map(([, f]) => f);
+    return this.preloadUiFiles(files, onProgress);
+  }
+
+  /** 按 UI 文件路径预载(装备中的具体 Armor 表;decode 保证首帧无解码卡顿) */
+  async preloadUiFiles(files: Iterable<string>, onProgress?: (p: number) => void): Promise<void> {
+    const list = [...new Set(files)];
     let done = 0;
-    await Promise.all(files.map((f) => new Promise<void>((resolve) => {
-      if (this.uiimages.has(f)) { done++; onProgress?.(done / files.length); return resolve(); }
+    await Promise.all(list.map((f) => new Promise<void>((resolve) => {
+      if (this.uiimages.has(f)) { done++; onProgress?.(done / list.length); return resolve(); }
       const im = new Image();
-      im.onload = () => { this.uiimages.set(f, im); done++; onProgress?.(done / files.length); resolve(); };
+      im.onload = () => {
+        this.uiimages.set(f, im);
+        im.decode().then(() => { done++; onProgress?.(done / list.length); resolve(); }, () => resolve());
+      };
       im.onerror = () => resolve();
       im.src = `sprites/${encodeURI(f)}`;
     })));

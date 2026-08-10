@@ -46,8 +46,13 @@ const out = await page.evaluate(() => {
   // 模拟挥击：直接驱动 updateSwingHits 逻辑——置 swing 并步进（内部 swing.t 逐帧减）
   const beforePot = pots.every(([x, y]) => st.get(x, y) === POT);
   const beforeGrass = grass.every(([x, y]) => st.get(x, y) === TALL);
-  // 直接调用 smashPot 等价路径：先测手动 smashPot
-  g.smashPot(pots[0][0], pots[0][1]);
+  // 直接调用 smashPot 等价路径：先测手动 smashPot（带打点）
+  const dbg = {
+    potId: POT, internalPot: g.tileByKey['pot'],
+    inBounds: !!st.inBounds,
+    getAt: st.get(pots[0][0], pots[0][1]),
+  };
+  try { g.smashPot(pots[0][0], pots[0][1]); } catch (err) { dbg.err = String(err); }
   const pot1Gone = st.get(pots[0][0], pots[0][1]) !== POT && st.get(pots[0][0] + 1, pots[0][1] - 1) !== POT;
   // 挥击路径：swing + 面向右 + 步进（砍杂草 + 碎 x+6 罐）
   const dropsBefore = g.entities.drops.length;
@@ -60,7 +65,7 @@ const out = await page.evaluate(() => {
   const grassGone = grass.every(([x, y]) => st.get(x, y) !== TALL);
   const drops = g.entities.drops.slice(dropsBefore).map((d) => d.itemId);
   return {
-    beforePot, beforeGrass, pot1Gone, pot2Gone, grassGone, drops,
+    dbg, beforePot, beforeGrass, pot1Gone, pot2Gone, grassGone, drops,
     pot3Still: st.get(pots[2][0], pots[2][1]) === POT,
   };
 });

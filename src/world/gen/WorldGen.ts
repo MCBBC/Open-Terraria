@@ -105,6 +105,7 @@ import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
+import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
 import { runBeehivePass, runSpiderNestPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -128,6 +129,10 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
     gold: rng.next() < 0.5 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
   };
   gs.crimson = rng.next() < 0.5;
+  // RandomizeTreeStyle（原版 Reset L4837：worldID 之后）——树冠样式与边界
+  const ts = randomizeTreeStyle(rng, store.w);
+  gs.treeX = ts.treeX;
+  gs.treeStyle = ts.treeStyle;
   // 邪恶群系覆盖（RNG 契约：骰照掷，仅覆盖结果）
   if (cfg.evil === 0) gs.crimson = false;
   else if (cfg.evil === 1) gs.crimson = true;
@@ -233,6 +238,7 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
   runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
   runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  world.dungeonY = gs.dungeonY || 0;            // 入口 Y（0=未知，使用处回退 groundLevel）
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
   runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
   runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
@@ -284,6 +290,7 @@ function vanillaHellHouses({ store, rng }: GenCtx) {
 function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
+  runTreePass(store, rng, gs); // 原版 pass 82 Planting Trees（EpicTree 林区 + AddTrees 逐列）
   runSurfaceDecorPass(store, rng, gs);
 }
 
@@ -695,60 +702,7 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
       else if (r < 0.51) store.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
     }
   }
-  // 树：正常间距 6-14；连续 24 格无树则放宽条件强制补种，保证顶部林区连续
-  let x = rng.int(6, 14);
-  let sinceLast = 0;
-  while (x < w - 6) {
-    const sy = Math.floor(surface[x]);
-    const relaxed = sinceLast >= 24;
-    // 软装饰（草丛/花/蘑菇/树苗）不挡树：基座格判定忽略，种前清掉
-    const isSoft = (t: number) => t === T.TALLGRASS || t === T.FLOWER || t === T.MUSHROOM || t === T.SAPLING;
-    // 不种在水里：树干基座格（地面上一格）必须无液体
-    if (store.get(x, sy) === T.GRASS && (!store.isActive(x, sy - 1) || isSoft(store.get(x, sy - 1))) && store.liquid[store.idx(x, sy - 1)] === 0) {
-      const th = rng.int(7, 14);
-      let ok = true;
-      for (let dy = 1; dy <= th; dy++) {
-        if (store.isActive(x, sy - dy) && !(dy === 1 && isSoft(store.get(x, sy - dy)))) { ok = false; break; }
-      }
-      // 树冠 80×80 外扩 2 格：要求 ±2 列上方净空、地面实心；放宽时只查本列±1
-      const range = relaxed ? 1 : 2;
-      for (let dx = -range; dx <= range; dx++) {
-        if ((store.isActive(x + dx, sy - 1) && !isSoft(store.get(x + dx, sy - 1))) || !(store.get(x + dx, sy) === T.GRASS || store.isSolid(x + dx, sy))) {
-          ok = false; break;
-        }
-      }
-      if (ok) {
-        if (isSoft(store.get(x, sy - 1))) store.setTile(x, sy - 1, 0); // 清基座装饰
-        // 原版 Tiles_5 22px 网格帧：树顶标记 (22,198) + 树干身 (0,0)
-        for (let dy = 1; dy <= th; dy++) {
-          store.setTileSilent(x, sy - dy, T.TREE, dy === th ? 22 : 0, dy === th ? 198 : 0);
-        }
-        // 侧枝：原版标记帧（44=左枝 / 66=右枝，y=198），干高 2..h-3 段两侧各 40%，
-        // 每棵上限 2-4 枝（Tree_Branches 贴图由渲染端按标记帧绘制）
-        const maxBranches = rng.int(2, 4);
-        let branchCount = 0;
-        for (let dy = 2; dy <= th - 3 && branchCount < maxBranches; dy++) {
-          for (const side of [-1, 1]) {
-            if (branchCount >= maxBranches) break;
-            if (rng.int(0, 99) >= 40) continue;
-            const bx = x + side, by = sy - dy;
-            const bt = store.get(bx, by);
-            const soft = bt === T.TALLGRASS || bt === T.FLOWER || bt === T.MUSHROOM || bt === T.SAPLING;
-            if ((!store.isActive(bx, by) || soft) && store.get(bx, by + 1) !== T.TREE) {
-              store.setTileSilent(bx, by, T.TREE, side < 0 ? 44 : 66, 198);
-              branchCount++;
-            }
-          }
-        }
-        world.registerTree(x, sy - th, th);
-        x += rng.int(6, 14);
-        sinceLast = 0;
-        continue;
-      }
-    }
-    x++;
-    sinceLast++;
-  }
+  // 树已由 vanilla/TreePass.ts（原版 pass 82 AddTrees/GrowTree/GrowPalmTree/GrowEpicTree）替换
 }
 
 // ---------- 结构（地下小屋 + 宝箱） ----------
@@ -867,9 +821,12 @@ function finalize({ store, surface, world, cfg }: GenCtx) {
     world.groundLevel = Math.floor(store.h * 0.28);
     world.rockLevel = Math.floor(store.h * 0.33);
   }
-  // 原版树样式：4 等分横向区，全部森林样式 0
-  world.treeX = [Math.floor(store.w / 4), Math.floor(store.w / 2), Math.floor(store.w * 3 / 4)];
-  world.treeStyle = [0, 0, 0, 0];
+  // 原版树样式（RandomizeTreeStyle 掷出：边界 + 互异样式）
+  if (gs) {
+    world.treeX = gs.treeX;
+    world.treeStyle = gs.treeStyle;
+    world.trees = gs.genTrees; // 砍伐整棵判定（Player/Game 消费）
+  }
   // 出生点上空净空
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 5; dy++) {

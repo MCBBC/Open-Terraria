@@ -27,6 +27,7 @@ const T = (() => {
     CACTUS: get('v_80_cactus'), SNOW_BRICK: get('v_161_snow_brick'),
     CORRUPT_ICE: get('v_163_corrupt_ice'), CRIMSON_ICE: get('v_200_frozen_crimson'),
     HOLLOW_ICE: get('v_164_hallowed_ice'), DUNGEON_BLUE: get('v_41_blue_brick'),
+    DUNGEON_GREEN: get('v_43_green_brick'), DUNGEON_PINK: get('v_44_pink_brick'),
     // 恶土系计数(SceneMetrics.cs:613-615 的 _tileCounts 公式)
     EBONSTONE: get('v_25_ebonstone_block'), CORRUPT_PLANT: get('v_24_corruption_short_plants'),
     CORRUPT_THORN: get('v_32_corruption_thorns'), CORRUPT_HARDSAND: get('v_398_corrupt_hardened_sand_block'),
@@ -79,6 +80,9 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   '-10': { base: 1, scale: 1.1, hp: 60, dmg: 18, def: 6 },  // 丛林
   '-11': { base: 6, scale: 0.85 },   // 小噬魂怪
   '-12': { base: 6, scale: 1.15 },   // 大噬魂怪
+  // 地牢骷髅变体（SetDefaultsFromNetId L7770-7788：scale 后再乘 stat）
+  '-13': { base: 31, scale: 0.9, hp: 72, dmg: 23, def: 7 },    // Short Bones(80/26/8 ×0.9)
+  '-14': { base: 31, scale: 1.15, hp: 101, dmg: 33, def: 10 }, // Big Boned(×1.15 再 ×1.1)
   '-15': { base: 1, scale: 1.15 },   // 史莱姆王子
   '-22': { base: 223, scale: 1.0 }, '-23': { base: 223, scale: 1.0 },
   '-24': { base: 223, scale: 1.0 }, '-25': { base: 223, scale: 1.0 },
@@ -112,6 +116,8 @@ export class VanillaSpawner {
   private ZoneSnow = false; private ZoneCorrupt = false; private ZoneCrimson = false;
   private ZoneHallow = false; private ZoneJungle = false; private ZoneGlowshroom = false;
   private ZoneDungeon = false; private ZoneGraveyard = false; private ZoneBeach = false;
+  /** 原版 downedBoss3（杀过骷髅王）：地牢分支切换 守卫→常规怪池 */
+  private downedBoss3 = false;
   private spawnTileX = 0; private spawnTileY = 0;
   /** FindSpawnTile 的 xRange 输出（L911：落脚点横向在 safeArea 内，传给 SpawnAnNPC） */
   private xRange = false;
@@ -121,6 +127,13 @@ export class VanillaSpawner {
   currentSpawnY = 0;
 
   constructor(private world: World) {}
+
+  /** 玩家级 Zone 旗标（原版 Spawner.SetSpawnFlags L300：ZoneDungeon = player.ZoneDungeon——
+   *  SceneMetrics 按玩家中心窗口判定，与落脚点无关）。Game 每帧刷怪前调用 */
+  setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean): void {
+    this.ZoneDungeon = zoneDungeon;
+    this.downedBoss3 = downedSkeletron;
+  }
 
   /** 造怪入口：netId 可为负（SetDefaultsFromNetId 映射） */
   private spawnNPC(x: number, y: number, netId: number, rng: RNG): Enemy | null {
@@ -180,7 +193,13 @@ export class VanillaSpawner {
     this.ZoneHallow = spawnTileType === T.PEARLSAND || spawnTileType === T.HOLLOW_ICE;
     this.ZoneJungle = spawnTileType === T.MUD || spawnTileType === T.JUNGLE_GRASS;
     this.ZoneGlowshroom = spawnTileType === T.MUSHROOM_GRASS;
-    this.ZoneDungeon = spawnTileType === T.DUNGEON_BLUE;
+    // ZoneDungeon 不在此设置：原版取玩家 SceneMetrics（SetSpawnFlags L300），见 setPlayerFlags
+  }
+
+  /** tileDungeon 集（Main.cs:7941-7946）：41/43/44 主砖（677-679 安全变体未注册缺席=0）。
+   *  PostCheckChosenSpawnTile L924：ZoneDungeon 时落脚点必须踩地牢砖且头顶有墙 */
+  private isDungeonTile(t: number): boolean {
+    return t === T.DUNGEON_BLUE || t === T.DUNGEON_GREEN || t === T.DUNGEON_PINK;
   }
 
   /** SceneMetrics.ScanTiles 近似:中心 169×123 窗口(zoneScanSize=120×75+padding 25×2−1)计数 */
@@ -246,6 +265,13 @@ export class VanillaSpawner {
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
     if (spawnRate < 60) spawnRate = 60;
     if (maxSpawns > 15) maxSpawns = 15;
+    // 地牢（L502-506）：spawnRate×0.3 / max×1.8；未杀骷髅王再压到 10（L696，
+    // 在 clamp 之后赋值故不受 ≥60 下限影响——守卫快速轮换）
+    if (this.ZoneDungeon) {
+      spawnRate = Math.floor(spawnRate * 0.3);
+      maxSpawns = Math.floor(maxSpawns * 1.8);
+      if (!this.downedBoss3) spawnRate = 10;
+    }
     return { spawnRate, maxSpawns };
   }
 
@@ -287,6 +313,9 @@ export class VanillaSpawner {
       this.spawnTileX = tx; this.spawnTileY = ty;
       // 落脚处 tile type（原版 GetProperGroundSpawnTileTypeAndWallType）
       const groundType = this.skyMob ? 0 : st.type[st.idx(tx, ty)];
+      // PostCheckChosenSpawnTile L924：地牢内刷怪点必须踩地牢砖且上方格有墙，否则换点重试
+      if (this.ZoneDungeon &&
+        (!this.isDungeonTile(groundType) || st.wall[st.idx(tx, ty)] === 0)) continue;
       this.setFlagsForChosenTile(tx, ty, groundType);
       return true;
     }
@@ -375,6 +404,36 @@ export class VanillaSpawner {
         if (r < 0.8) return D(299);       // 松鼠
         if (r < 0.9) return D(300);       // 老鼠
         return D(74);                     // 鸟
+      }
+    }
+    // ---- 地牢（L2536-2706：CheckToSpawnDungeonEnemies = ZoneDungeon 且玩家在 dungeonY+40 以下）----
+    {
+      const dungeonY = this.world.dungeonY || Math.floor(this.world.groundLevel);
+      if (this.ZoneDungeon && !(this.pY < dungeonY + 40)) {
+        // 墙变体（L2540-2552）：94/96/98→1、95/97/99→2；RollLuck(7) 重掷（0.9 尺度下 1/7≈1/7）
+        const wallA = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
+        const wallB = st.wall[st.idx(this.spawnTileX, this.spawnTileY - 1)];
+        let variant = 0;
+        if (wallA === 94 || wallA === 96 || wallA === 98 || wallB === 94 || wallB === 96 || wallB === 98) variant = 1;
+        if (wallA === 95 || wallA === 97 || wallA === 99 || wallB === 95 || wallB === 97 || wallB === 99) variant = 2;
+        if (N(7)) variant = rng.int(0, 3);
+        // 未杀骷髅王（flag12）→ 地牢守卫 68（9999 伤，1:1 原版劝退机制）
+        if (!this.downedBoss3) return D(68);
+        // L2559 机械师(124)：savedMech/AnyNPCs 未实现，暂缺
+        // hardDungeon(hardMode && downedPlantBoss) 分支省略（无此旗标系统）
+        if (N(35)) return D(71);   // 地牢史莱姆
+        if (variant === 1 && N(3)) return D(70);   // 火轮
+        if (variant === 2 && N(5)) return D(72);   // 刺球
+        if (variant === 0 && N(7)) return D(34);   // 诅咒头骨
+        if (N(7)) return D(32);    // 黑魔法师
+        // 书架书怪 693/694（AI_FindNearbyBook）：书架实体系统未实现，暂缺
+        const av = rng.int(0, 5);
+        if (av === 0) return D(294);
+        if (av === 1) return D(295);
+        if (av === 2) return D(296);
+        if (N(4)) return D(-14);   // Big Boned
+        if (N(5)) return D(-13);   // Short Bones
+        return D(31);              // 愤怒骨怪
       }
     }
     // ---- 蘑菇地（L3540-3610，tile 70）----

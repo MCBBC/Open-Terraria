@@ -866,6 +866,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       width: w,
       height: h,
       spawn: [wld.spawnX, wld.spawnY],
+      dungeonX: wld.dungeonX, dungeonY: wld.dungeonY,
       groundLevel: Math.floor(wld.groundLevel),
       rockLevel: Math.floor(wld.rockLevel),
       created: Date.now(),

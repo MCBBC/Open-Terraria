@@ -198,6 +198,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   /** 帧回调注入 VUI 自愈循环（VUI.startLoop 持有 rAF，HMR 杀不死） */
   VUI.frameHook = (dt) => {
     menuBg?.tick(dt);
+    if (menuBg) menuBg.lastDt = dt;
   };
 
   function stopMenu() {
