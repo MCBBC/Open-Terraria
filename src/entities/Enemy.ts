@@ -221,7 +221,9 @@ export class Enemy extends Entity {
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
         case 3: this.fighterAI(game, p); break;                        // AI_003 战士族（原版通用核）
-        case 4: this.eocAI(game, p); break;                            // AI_004 克苏鲁之眼（NPC.cs:19909）
+        // EoC 传参例外:玩家死亡也要传原对象(cs:19931 dead 判定走逃离分支,
+        // 冲刺计时合法冻结;传 null 会让 aiT 照走、状态机停摆 → 首冲时长翻倍)
+        case 4: this.eocAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_004 克苏鲁之眼（NPC.cs:19909）
         case 5: this.swarmerAI(game, p); break;                         // AI_005 噬魂怪族（原版蜂群核）
         case 6: this.wormAI(game, p); break;                           // AI_006 蠕虫族（头）
         case 8: this.casterAI(game, p); break;                          // AI_008 法师族（传送+弹幕）
@@ -254,7 +256,7 @@ export class Enemy extends Entity {
       case 'demon_eye':
       case 'cave_bat': this.flyAI(game, hasPlayer ? player : null, 0.09); break;
       case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
-      case 'eye_of_cthulhu': this.eocAI(game, hasPlayer ? player : null); break;
+      case 'eye_of_cthulhu': this.eocAI(game, player ?? null); break;
     }
 
     // 入水溅落声（与主角一致）：音量随与主角距离衰减，Boss 更响
@@ -600,8 +602,28 @@ export class Enemy extends Entity {
 
   private swarmerAI(game: GameHooks, player: Player | null) {
     const isEater = this.vanillaId === 6 || this.vanillaId === 173 || this.vanillaId === 139;
-    const maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
-    const accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03 : 0.05;
+    // 蜜蜂（210/211，L50768-50784）：ai[1] 计数爬坡 num3=(ai1-60)/60≤1；
+    // 暖机期（num3<1）逐轴速度钳 ±6；速度档 5 / 加速 0.1×num3
+    const isBee = this.vanillaId === 210 || this.vanillaId === 211;
+    let maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
+    let accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03 : 0.05;
+    if (isBee) {
+      this.ai1 += 1;
+      let ramp = (this.ai1 - 60) / 60;
+      if (ramp > 1) ramp = 1;
+      else if (this.vx > 6) this.vx = 6;
+      else if (this.vx < -6) this.vx = -6;
+      if (ramp < 1) {
+        if (this.vy > 6) this.vy = 6;
+        else if (this.vy < -6) this.vy = -6;
+      }
+      maxSpd = 5;
+      accel = 0.1 * ramp;
+    }
+    // flag4（L50829）：非 173/6/42/231-235/94/139/619 = 双步加速（蜂族真；eater 族假）
+    const flag4 = !isEater && this.vanillaId !== 94 && this.vanillaId !== 619
+      && this.vanillaId !== 42 && !(this.vanillaId >= 231 && this.vanillaId <= 235)
+      && this.vanillaId !== 139;
     const tx = player ? player.cx : this.cx + this.facing * 100;
     const ty = player ? player.cy : this.cy - 100;
     // 8px 网格量化（L17705-17710）
@@ -611,12 +633,15 @@ export class Enemy extends Entity {
     const sx = (dx / dist) * maxSpd;
     const sy = (dy / dist) * maxSpd;
     // 摆动项（L17742-17752）：真实 ai[0] 环绕计数（>0 加 vy、|>100| 加 vx、超 200 翻回 -200）
-    if (dist > 100) {
+    // ——仅 num8 族（6/139/173/205）与 flag3 族；蜜蜂两者皆非，无摆动
+    const swarm = isEater || this.vanillaId === 205 || this.vanillaId === 42
+      || (this.vanillaId >= 231 && this.vanillaId <= 235);
+    if (swarm && dist > 100) {
       this.ai0 += 1;
       if (this.ai0 > 200) this.ai0 = -200;
       this.vy += this.ai0 > 0 ? 0.023 : -0.023;
       this.vx += Math.abs(this.ai0) > 100 ? 0.023 : -0.023;
-    } else {
+    } else if (swarm) {
       this.ai0 = 0; // 近距无摆动
     }
     // 近距制导（6/94/173/619）
@@ -624,17 +649,29 @@ export class Enemy extends Entity {
       this.vx += sx * 0.007;
       this.vy += sy * 0.007;
     }
-    // 各轴步进逼近期望速度（eater 族 flag4=0：单步）
-    if (this.vx < sx) this.vx += accel;
-    else if (this.vx > sx) this.vx -= accel;
-    if (this.vy < sy) this.vy += accel;
-    else if (this.vy > sy) this.vy -= accel;
+    // 各轴步进逼近期望速度（L50924-50961）：flag4 族逆向时追加一步（num2 再乘一次）
+    if (this.vx < sx) {
+      this.vx += accel;
+      if (flag4 && this.vx < 0 && sx > 0) this.vx += accel;
+    } else if (this.vx > sx) {
+      this.vx -= accel;
+      if (flag4 && this.vx > 0 && sx < 0) this.vx -= accel;
+    }
+    if (this.vy < sy) {
+      this.vy += accel;
+      if (flag4 && this.vy < 0 && sy > 0) this.vy += accel;
+    } else if (this.vy > sy) {
+      this.vy -= accel;
+      if (flag4 && this.vy > 0 && sy < 0) this.vy -= accel;
+    }
     this.facing = this.vx > 0 ? 1 : -1;
     moveAndCollide(this, game.world, this.vx, this.vy);
-    // 撞墙/撞地反弹（方法尾部 collide 处理，眼睛同款近似）
-    if (this.hitWall) this.vx = -this.vx * 0.5;
-    if (this.onGround) this.vy = -Math.abs(this.vy) - 0.5;
-    if (this.hitHead) this.vy = Math.abs(this.vy) * 0.5 + 0.5;
+    // 撞墙/撞地反弹（L51047-51066）：6/173 ×0.4，其余（含蜂）×0.7；
+    // X 最小弹速 ±2 / Y 下方 +2 上方 -2（眼睛同款近似，最小值暂略）
+    const bounce = isEater ? 0.4 : 0.7;
+    if (this.hitWall) this.vx = -this.vx * bounce;
+    if (this.onGround) this.vy = -Math.abs(this.vy) * bounce - 0.5;
+    if (this.hitHead) this.vy = Math.abs(this.vy) * bounce + 0.5;
   }
 
   /** AI_010 诅咒头骨（NPC.145.cs:21553+；type 34 路径，书怪 694/魔法骷髅 289 分支未达）：

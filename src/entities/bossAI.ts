@@ -54,6 +54,9 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   if (e.ai1 === 0) {
     // 悬浮段(:22046-22091)
     if (e.ai2 >= 800) { e.ai2 = 0; e.ai1 = 1; }
+    // 回悬浮:恢复冲撞前的伤害/防御基值
+    const base = skSpinBase.get(e);
+    if (base) { e.def.damage = base.dmg; e.def.defense = base.def; skSpinBase.delete(e); }
     if (e.y > player.y - 250) {
       if (e.vy > 0) e.vy *= 0.98;
       e.vy -= 0.02;
@@ -73,10 +76,13 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
       if (e.vx < -8) e.vx = -8;
     }
   } else if (e.ai1 === 1) {
-    // 旋冲段(:22115-22179):rot+=0.3*dir,1.5 倍速直冲,伤害 ×1.3,防御 -10
+    // 旋冲段(:22115-22179):rot+=0.3*dir,1.5 倍速直冲,伤害 ×1.3,防御 -10。
+    // 原版在进入冲撞时一次性应用——每 tick 重乘会把伤害放大 1.3^400,故缓存基值按基值设置
     if (e.ai2 >= 400) { e.ai2 = 0; e.ai1 = 0; }
-    e.def.defense = Math.max(0, (e.def.defense ?? 0) - 10);
-    e.def.damage = Math.round(e.def.damage * 1.3);
+    let base = skSpinBase.get(e);
+    if (!base) { base = { dmg: e.def.damage, def: e.def.defense ?? 0 }; skSpinBase.set(e, base); }
+    e.def.defense = Math.max(0, base.def - 10);
+    e.def.damage = Math.round(base.dmg * 1.3);
     e.spin += (e.facing || 1) * 0.3;
     const dx = player.cx - e.cx, dy = player.cy - e.cy;
     const d = Math.hypot(dx, dy) || 1;
@@ -87,6 +93,9 @@ export function skeletronBossAI(e: Enemy, game: GameHooks, player: Player | null
   e.facing = e.vx > 0 ? 1 : -1;
   e.x += e.vx; e.y += e.vy;
 }
+
+/** 骷髅王冲撞态的伤害/防御基值缓存(进冲撞一次性 ×1.3/-10,离场恢复) */
+const skSpinBase = new WeakMap<Enemy, { dmg: number; def: number }>();
 
 let enemyCtor: (typeof import('./Enemy'))['Enemy'] | null = null;
 /** Enemy 构造注入(Enemy.ts import 时回填,避免循环依赖) */
@@ -141,6 +150,8 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
  *  落地砸出小史莱姆(30% 概率)。经典模式无传送(专家专属),暂不移植传送。 */
 export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!player) return;
+  // Enemy.ai0 默认 -1120(史莱姆族约定);原版 AI_015 的 ai[0] 从 0 起步 → 首帧复位
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; }
   e.ai0 += 1;
   if (!e.onGround) {
     e.vy += 0.35; // 重力(原版大跳重力)

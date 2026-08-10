@@ -43,10 +43,14 @@ const out = await page.evaluate(async () => {
   const finalActive = sim.numLiquid;
   sim.dispose();
   const totalMs = Math.round(performance.now() - t0);
+  // 端到端：调 loadWorld（读档路径，含修复后的单轮 settle + 资产预载跳过）
+  const tL0 = performance.now();
+  await g.loadWorld(g.world, () => {});
+  const loadMs = Math.round(performance.now() - tL0);
   return {
     quickWaterMs: Math.round(tQuick),
     activeAfterCheck: afterCheck,
-    rounds, totalIter, totalMs, finalActive,
+    rounds, totalIter, totalMs, finalActive, loadMs,
     worldLiquidCells: (() => {
       const st = g.world.store; let n = 0;
       for (let i = 0; i < st.liquid.length; i++) if (st.liquid[i] > 0) n++;

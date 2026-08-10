@@ -786,11 +786,20 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
   }
   world.spawnX = sx;
   world.spawnY = Math.max(4, sy - 3);
-  // 出生点上空净空保留（防卡块；不整平地形）
+  // 出生点上空净空保留（防卡块；不整平地形）。
+  // ★必须豁免树干:树干非实心不会卡人,整格清空会把清理盒内的树干中段删掉
+  // (基座行 dy=0 与上部 dy>5 保留)→ 浮空断干"贴图透明"。
+  const clearSpawnCell = (x: number, y: number, keepGrass: boolean) => {
+    if (!store.inBounds(x, y)) return;
+    const i = store.idx(x, y);
+    const t = store.type[i];
+    if (!store.flags[i] || t === T.TREE) return;
+    if (keepGrass && t === T.GRASS) return;
+    store.setTileSilent(x, y, 0);
+  };
   for (let dx = -1; dx <= 1; dx++) {
     for (let dy = 1; dy <= 3; dy++) {
-      const i = store.idx(sx + dx, sy - dy);
-      if (store.flags[i]) store.setTileSilent(sx + dx, sy - dy, 0);
+      clearSpawnCell(sx + dx, sy - dy, false);
     }
   }
 
@@ -809,15 +818,12 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     world.treeStyle = gs.treeStyle;
     world.trees = gs.genTrees; // 砍伐整棵判定（Player/Game 消费）
   }
-  // 出生点上空净空
+  // 出生点上空净空（宽区:5×5,豁免草面/树干——草面保持地表,树干保持完整见上注）
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 5; dy++) {
-      if (store.isActive(sx + dx, sy - dy)) {
-        const t = store.get(sx + dx, sy - dy);
-        if (t !== T.GRASS) store.setTileSilent(sx + dx, sy - dy, 0);
-      }
+      clearSpawnCell(sx + dx, sy - dy, true);
     }
   }
-  // 清除整平区内登记的树（防幽灵树）
-  world.trees = world.trees.filter((t) => Math.abs(t.x - sx) > 5);
+  // 树登记保留:树干不再被清理盒删除,world.trees 与实际树一一对应
+  // (原 |t.x-sx|<=5 过滤是配合"清掉树干防幽灵树"的,已不适用)
 }

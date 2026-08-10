@@ -55,7 +55,7 @@ console.log('== King Slime 50 ==');
   enemies.length = 0;
   const ks = Enemy.fromVanilla(50, 40 * 16, 140 * 16)!;
   ks.id = 1; enemies.push(ks);
-  ks.y = 148 * 16;
+  ks.y = 150 * 16 - ks.h; // 底边贴地板行 150(h=92;放 148*16 会嵌进地板坠穿)
   let minY = ks.y, maxY = ks.y;
   for (let i = 0; i < 240; i++) {
     for (const e of enemies) e.fixedUpdate(1 / 60, game);

@@ -1,16 +1,16 @@
-// 箭矢投射物（原版 Projectile type 1/2、aiStyle 1 主干，Projectile.cs:546-566 + AI_001）：
-// 重力 0.3/tick（aiStyle1 通用常量）、timeLeft 1200、旋转 atan2(vy,vx)+π/2（AI_001 尾部 L54877）、
-// 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击；命中 tileCut 砍草/碎罐（Projectile.CutTiles）；
-// 命中实心块 1/3 概率回收掉落。
+// 箭矢/通用直飞·抛物线投射物（原版 Projectile type 1/2、aiStyle 1/2 主干，Projectile.cs:546-566 + AI_001/AI_002）：
+// 重力 0.3/tick（aiStyle1/2 通用常量；直飞弹传 0）、timeLeft 1200、旋转 atan2(vy,vx)+π/2（AI_001 尾部 L54877）、
+// 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
+// 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
-/** 原版箭贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭） */
+/** 原版投射物贴图懒加载（Projectile_1.png = 木箭、Projectile_2.png = 燃烧箭，泛用所有 id） */
 const spriteCache = new Map<number, HTMLImageElement>();
-function arrowSprite(projId: number): HTMLImageElement | null {
+export function projSprite(projId: number): HTMLImageElement | null {
   let img = spriteCache.get(projId);
   if (img !== undefined) return img ?? null;
   if (typeof Image === 'undefined') return null;
@@ -18,6 +18,15 @@ function arrowSprite(projId: number): HTMLImageElement | null {
   img.src = `sprites/vanilla/Projectile_${projId}.png`;
   spriteCache.set(projId, img);
   return img;
+}
+
+export interface ArrowOpts {
+  /** 重力/tick（aiStyle1/2 = 0.3；直飞魔法弹传 0）。默认 0.3 */
+  grav?: number;
+  /** 原版 timeLeft（Projectile.cs:554 默认 1200） */
+  life?: number;
+  /** 穿透次数（原版 penetrate：手里剑 4、箭 1；-1 视作 1） */
+  pierce?: number;
 }
 
 export class Arrow extends Entity {
@@ -30,12 +39,15 @@ export class Arrow extends Entity {
   projId: number;
   /** 回收掉落的 item key（null = 不回收，如燃烧箭） */
   dropKey: string | null;
-  /** 原版 timeLeft = 1200（Projectile.cs:554） */
-  life = 1200;
+  grav: number;
+  life: number;
+  pierce: number;
+  /** 穿透投射物的同敌免疫表（敌人 id 集合） */
+  private hitSet = new Set<number>();
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
-    knockback: number, projId = 1, dropKey: string | null = null) {
+    knockback: number, projId = 1, dropKey: string | null = null, opts?: ArrowOpts) {
     super();
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
@@ -43,6 +55,9 @@ export class Arrow extends Entity {
     this.knockback = knockback;
     this.projId = projId;
     this.dropKey = dropKey;
+    this.grav = opts?.grav ?? 0.3;
+    this.life = opts?.life ?? 1200;
+    this.pierce = opts?.pierce ?? 1;
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -51,7 +66,7 @@ export class Arrow extends Entity {
     const x = (this.x + this.w / 2 - cam.x) * cam.zoom + r.canvas.width / 2;
     const y = (this.y + this.h / 2 - cam.y) * cam.zoom + r.canvas.height / 2;
     const ang = Math.atan2(this.vy, this.vx);
-    const img = arrowSprite(this.projId);
+    const img = projSprite(this.projId);
     ctx.save();
     ctx.translate(x, y);
     ctx.rotate(ang + Math.PI / 2); // 原版贴图纵向：rotation = atan2+π/2（AI_001 L54877）
@@ -73,8 +88,8 @@ export class Arrow extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     if (--this.life <= 0) { this.dead = true; return; }
     const world = game.world;
-    // aiStyle 1 通用重力（原版箭 0.3/tick 抛物线）
-    this.vy = Math.min(this.vy + 0.3, 16);
+    // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）
+    if (this.grav !== 0) this.vy = Math.min(this.vy + this.grav, 16);
     this.x += this.vx;
     this.y += this.vy;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
@@ -90,18 +105,19 @@ export class Arrow extends Entity {
       this.dead = true;
       return;
     }
-    // 命中敌人（穿透 1：木箭射中即停，原版 arrow penetrate=1）
+    // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
         // 暴击：玩家远程基础 4%（原版 ranged 初始 4）
         const crit = Math.random() < 0.04;
         const dmg = crit ? this.damage * 2 : this.damage;
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
-        this.dead = true;
-        return;
+        this.hitSet.add(e.id);
+        if (--this.pierce <= 0) { this.dead = true; return; }
       }
     }
   }

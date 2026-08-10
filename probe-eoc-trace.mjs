@@ -26,24 +26,27 @@ const out = await p.evaluate(async () => {
   const trace = [];
   const orig = Enemy.prototype.fixedUpdate;
   let tick = 0;
+  let lastDead = g.player.dead;
   boss.fixedUpdate = function (...args) {
     const prevS = this.state, prevA = this.aiT, prevC = this.chargesLeft;
     const r = orig.apply(this, args);
     tick++;
-    if (this.state !== prevS || this.chargesLeft !== prevC || tick % 25 === 0) {
-      trace.push({ t: tick, s: this.state, aiT: this.aiT, c: this.chargesLeft, ph: this.phase });
+    const pd = g.player.dead;
+    if (this.state !== prevS || this.chargesLeft !== prevC || tick % 25 === 0 || pd !== lastDead) {
+      trace.push({ t: tick, s: this.state, aiT: this.aiT, c: this.chargesLeft, ph: this.phase, pd });
     }
+    lastDead = pd;
     return r;
   };
 
   const sleep = (ms) => new Promise(r => setTimeout(r, ms));
-  // 等 3 连冲结束（state 回 0 且 chargesLeft 清零后；总时长上限 30s 防挂）
+  // 等 3 连冲结束（state 回 0；总时长上限 60s 防挂——含玩家死亡冻结期）
   const t0 = Date.now();
   let seenDash = false;
-  while (Date.now() - t0 < 30000) {
+  while (Date.now() - t0 < 60000) {
     await sleep(100);
     if (boss.state === 2) seenDash = true;
-    if (seenDash && boss.state === 0) break;
+    if (seenDash && boss.state === 0 && !g.player.dead) break;
   }
   boss.fixedUpdate = orig;
   return { trace, finalPhase: boss.phase };
