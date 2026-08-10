@@ -491,6 +491,11 @@ def({ key: 'v_200_red_ice_block', name: '', solid: true, opacity: 1, pick: 0, ma
 def({ key: 'v_116_pearlsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#C8C8D8', blend: true, drop: null, vanilla: { sheet: 116, frame: 'auto' } });
 def({ key: 'v_76_hellstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#762427', blend: true, drop: null, vanilla: { sheet: 76, frame: 'auto' } });
 def({ key: 'v_55_signs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#B08050', drop: null, vanilla: { sheet: 55, frame: 'style', fw: 2, fh: 2 } });
+// 动画制作台补全（原版 AnimateTiles 300-308 组 + 499；TEdit 实名 301/307/308 曾在素材表提取缺口）
+def({ key: 'v_301_flesh_cloning_vat', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 301, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_307_steampunk_boiler', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 307, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_308_honey_dispenser', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#909490', drop: null, vanilla: { sheet: 308, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_499_decay_chamber', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#8F9475', drop: null, vanilla: { sheet: 499, frame: 'style', fw: 3, fh: 3 } });
 TILE_DEFS.forEach((d, i) => (TILE_BY_KEY[d.key] = i));
 
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================

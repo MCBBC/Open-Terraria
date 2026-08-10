@@ -1193,8 +1193,12 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
     let alchemyLeft = 1 + Math.floor(w / 4200);
     let bewitchLeft = 1 + Math.floor(w / 4200);
     const attempts = Math.floor(2000 * (w / 4200));
-    for (let n = 0; n < attempts; n++) {
-      if (alchemyLeft > 0 || bewitchLeft > 0) n--;
+    // 死循环防护（2026-08-10，"生成卡死在生物群系"根因）：旧版 n-- 在循环顶无条件
+    // 生效——炼金台/施法台未放完时，若有效性检查一直 continue（小世界地牢合法点位
+    // 稀少），n 永不前进 → 生成挂死。现改为：①n-- 只在实际尝试放置（过了全部有效性
+    // 检查）后才生效；②硬迭代上限兜底（placeFurn 持续失败也能终止）
+    let hardGuard = attempts * 50;
+    for (let n = 0; n < attempts && hardGuard-- > 0; n++) {
       let x = rng.int(ex0, ex1);
       let y = 0;
       for (let t = 0; t < 200; t++) {
@@ -1231,7 +1235,9 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
         }
       }
       if (!clear || span < halfW * 1.75) continue;
-      // 优先:炼金台/施法台(cs L19468-19482)
+      // 优先:炼金台/施法台(cs L19468-19482)。
+      // n-- 移到此处（实际尝试放置才回退计数）——有效性 continue 不再消耗重试预算
+      if (alchemyLeft > 0 || bewitchLeft > 0) n--;
       if (alchemyLeft > 0 || bewitchLeft > 0) {
         if (alchemyLeft > 0) {
           if (placeFurn(st, cx0, floorY, ALCHEMY, 0)) alchemyLeft--;

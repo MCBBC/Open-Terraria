@@ -8,6 +8,7 @@ import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
 import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
+import { findFreeHouse } from '../world/Housing';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
@@ -66,6 +67,8 @@ import { Minecart } from '../entities/Minecart';
 import { MagicProj } from '../entities/MagicProj';
 
 const FIXED_DT = 1 / 60;
+/** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
+const AMMO_BULLET = 14;
 
 // ---- 原版 Main.tileCut 可砍集合（Main.cs:7312-7754 全表 38 项，经 vanilla.sheet 反查内部 id） ----
 // 挥击范围内命中即 KillTile：杂草/藤蔓/药草芽等直接碎，瓦罐(28)走整罐碎裂+掉落
@@ -530,20 +533,12 @@ export class Game implements GameHooks {
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;
-    this.guideSpawned = true; // 向导已移除；保留字段避免存档兼容问题
-    // 商人 NPC(原版 Merchant 语义简化:出生点旁常驻,对话=购买)
-    const merch = new TownNPC('merchant', this.world.spawnX * 16 - 40, (this.world.spawnY - 2) * 16);
-    this.entities.add(merch, 'npcs');
-    // 护士(原版:击败任一 Boss 后入住;checkNpcArrival 每帧判定)
-    const nurse = new TownNPC('nurse', this.world.spawnX * 16 + 40, (this.world.spawnY - 2) * 16);
-    this.entities.add(nurse, 'npcs');
-    // 入驻公告(WorldGen.cs:5138-5140):无家 NPC → HomelessArrived_{0-5} 随机变体,
-    // ChatColors.NPCTravel(50,125,255)。仅新世界播——读档时他们已"住"在这里
-    if (this.freshlyCreated) {
-      for (const key of ['merchant', 'nurse'] as const) {
-        const id = TOWN_NPC_IDS[key].id;
-        this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, Lang.npcName(id) ?? key), 50, 125, 255);
-      }
+    // 向导(NPC 22)随世界出生(WorldGen.cs:20036 NewNPC(spawnTileX, spawnTileY, 22))——
+    // 新世界的唯一初始城镇 NPC,无家(homeless)。商人/护士等不再开局直刷:
+    // 由 checkTownArrival 按原版条件 + 房屋系统入住(见 updateTownNpcArrival)
+    this.guideSpawned = true;
+    if (!this.entities.npcs.some((n) => n instanceof TownNPC && n.npcKey === 'guide' && !n.dead)) {
+      this.entities.add(new TownNPC('guide', this.world.spawnX * 16 + 8, (this.world.spawnY - 2) * 16), 'npcs');
     }
     // 守卫老人(NPC 37):地牢门口常驻;白天只对话,夜晚对话「诅咒」召唤骷髅王。
     // 原版：击败骷髅王（downedBoss3）后老人转为裁缝消失——不再生成
@@ -938,6 +933,9 @@ export class Game implements GameHooks {
 
     // ---- 树苗生长（每 5 秒扫一次） ----
     if (this.tickCount % 300 === 0) this.growSaplings();
+    // ---- 城镇 NPC 入驻评估（原版 Main.cs:65021 每 7200 tick 一轮；载入后 10s 首轮
+    //      ≈ UpdateTime_SpawnTownNPCs(forceUpdate)） ----
+    if (this.tickCount % 7200 === 600) this.updateTownNpcArrival();
 
     // ---- 战争迷雾：玩家周围探索标记（每 15 tick） ----
     if (this.tickCount % 15 === 0) {
@@ -2895,20 +2893,119 @@ export class Game implements GameHooks {
 
   // ================= NPC =================
 
-  private checkHousing() {
-    // 向导已随世界出生；此处仅在有合格房屋时为其安家
-    const guide = this.entities.npcs.find((n) => (n as TownNPC).npcKey === 'guide') as TownNPC | undefined;
-    if (!guide || guide.home) return;
-    const st = this.world.store;
-    outer:
-    for (let x = 3; x < st.w - 3; x++) {
-      for (let y = 3; y < st.h - 4; y++) {
-        if (st.get(x, y) !== T.DOOR_CLOSED) continue;
-        if (this.isValidHouse(x, y)) {
-          guide.home = { x: x + 2, y: y - 2 };
-          break outer;
+  // ================= 城镇 NPC 入驻系统（Main.UpdateTime_SpawnTownNPCs :65021 +
+  // WorldGen.SpawnTownNPC :5345 / SpawnHomelessNPC :4992 语义；房屋判定 Housing.ts） =================
+
+  /** 各 NPC 入驻条件（NPC.SpawnAllowed_* , NPC.cs:7046-7170 1:1） */
+  private townNpcSpawnAllowed(key: string): boolean {
+    const p = this.player;
+    switch (key) {
+      case 'guide':
+        return true;
+      case 'merchant': {
+        // SpawnAllowed_Merchant：玩家硬币合计 ≥ 5000 铜（50 银；71铜/72银/73金/74铂）
+        let copper = 0;
+        for (const s of p.inv.slots) {
+          if (!s) continue;
+          const def = ITEM_DEFS[s.id];
+          if (!def) continue;
+          if (def.key === 'coin_copper') copper += s.stack;
+          else if (def.key === 'coin_silver') copper += s.stack * 100;
+          else if (def.key === 'coin_gold') copper += s.stack * 10000;
+          if (copper >= 5000) return true;
         }
+        return false;
       }
+      case 'nurse':
+        // SpawnAllowed_Nurse：statLifeMax/20 > 5（用过生命水晶，生命上限 >100）
+        return Math.floor(p.maxHp / 20) > 5;
+      case 'arms_dealer': {
+        // SpawnAllowed_ArmsDealer：背包有子弹系物品（ammo/useAmmo == AmmoID.Bullet 14）
+        for (const s of p.inv.slots) {
+          if (!s) continue;
+          const def = ITEM_DEFS[s.id];
+          if (!def) continue;
+          const vid = def.vid ?? viIdFromKey(def.key);
+          const c = vid >= 0 ? itemCombat(vid) : null;
+          if (c && (c.ammo === AMMO_BULLET || c.useAmmo === AMMO_BULLET)) return true;
+        }
+        return false;
+      }
+      case 'demolitionist': {
+        // SpawnAllowed_Demolitionist：背包有炸弹系物品（ItemsThatCountAsBombs 表近似）
+        const bombKeys = new Set(['bomb', 'vi_166_bomb', 'vi_167_dynamite', 'vi_168_grenade',
+          'vi_4423_scarab_bomb', 'vi_4824_wet_bomb', 'vi_453_bomb_statue']);
+        return p.inv.slots.some((s) => s && bombKeys.has(ITEM_DEFS[s.id]?.key ?? ''));
+      }
+      case 'dryad':
+        // 任意邪恶 Boss 已败（vanilla downedBoss1/2/3 = EoC/世吞|克脑/骷髅王）
+        return !!(this.world.flags['downed_4'] || this.world.flags['downed_13']
+          || this.world.flags['downed_266'] || this.world.flags['downed_35']
+          || this.world.flags.downedSkeletron || this.world.flags.downedEyeOfCthulhu);
+      default:
+        return false; // 其余 NPC（裁缝/哥布林/机械师等）依赖未移植的救援系统，暂不入驻
+    }
+  }
+
+  /** 入驻轮（每 7200 tick）：①无家 NPC 见空房入住（QuickFindHome）
+   *  ②按优先级链选一名待入驻者 ③有房则入住房内、无房但有入住者则流浪生成 */
+  private updateTownNpcArrival() {
+    const npcs = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead) as TownNPC[];
+    const has = (key: string) => npcs.some((n) => n.npcKey === key);
+    const homes = npcs.filter((n) => n.home).map((n) => n.home!);
+    const st = this.world.store;
+
+    // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
+    for (const n of npcs) {
+      if (n.home || n.npcKey === 'old_man') continue;
+      const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY);
+      if (!house) break;
+      n.home = { x: house.standX, y: house.standY };
+      n.leashHome = true; // 有家者白天在家附近游走
+      homes.push(n.home);
+      n.x = house.standX * TILE + 8 - n.w / 2;
+      n.y = (house.standY + 1) * TILE - n.h;
+    }
+
+    // ② 优先级链（Main.cs num42 顺序的可支持子集；护士/爆破手还要求商人已在场）
+    const merchantHere = has('merchant');
+    const prio: Array<[string, boolean]> = [
+      ['guide', !has('guide')],
+      ['merchant', !merchantHere && this.townNpcSpawnAllowed('merchant')],
+      ['nurse', !has('nurse') && merchantHere && this.townNpcSpawnAllowed('nurse')],
+      ['arms_dealer', !has('arms_dealer') && this.townNpcSpawnAllowed('arms_dealer')],
+      ['dryad', !has('dryad') && this.townNpcSpawnAllowed('dryad')],
+      ['demolitionist', !has('demolitionist') && merchantHere && this.townNpcSpawnAllowed('demolitionist')],
+    ];
+    const pick = prio.find(([, ok]) => ok)?.[0];
+    if (!pick) return;
+
+    // ③ 入住 / 流浪生成
+    const house = findFreeHouse(st, homes, this.world.spawnX, this.world.spawnY);
+    const id = TOWN_NPC_IDS[pick].id;
+    const name = Lang.npcName(id) ?? pick;
+    if (house) {
+      // SpawnTownNPC：房间合格且无人 → 生成在房内、安家（Announcement.HasArrived）
+      const npc = new TownNPC(pick, house.standX * TILE + 8, (house.standY + 1) * TILE);
+      npc.home = { x: house.standX, y: house.standY };
+      npc.leashHome = true;
+      this.entities.add(npc, 'npcs');
+      this.newText(Lang.text('Announcement.HasArrived', name), 50, 125, 255);
+    } else {
+      // SpawnHomelessNPC（:4992）：白天且当前无流浪 NPC 时，在已入住者的家附近生成；
+      // 无人入住（无锚点）则不生成——新世界只有向导（WorldGen.cs:20036 出生）
+      if (!this.world.clock.isDay || homes.length === 0) return;
+      if (npcs.some((n) => !n.home)) return;
+      const anchor = homes[Math.floor(Math.random() * homes.length)];
+      const ax = anchor.x + (Math.random() < 0.5 ? -1 : 1) * (30 + Math.floor(Math.random() * 50));
+      if (ax < 3 || ax > st.w - 4) return;
+      let ay = Math.max(4, anchor.y - 20);
+      const limit = Math.min(st.h - 3, anchor.y + 20);
+      while (ay < limit && !st.isSolid(ax, ay)) ay++;
+      if (ay >= limit) return;
+      const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
+      this.entities.add(npc, 'npcs');
+      this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
     }
   }
 
@@ -3100,22 +3197,8 @@ export class Game implements GameHooks {
     return true;
   }
 
-  private isValidHouse(doorX: number, doorY: number): boolean {
-    // 门占 3 格（doorY 为门顶），检查门内空间：有光源 + 有实心地板 + 有背景墙
-    // doorY+3 为地板行
-    const st = this.world.store;
-    let light = false, solidFloor = 0, walls = 0;
-    for (let dx = 1; dx <= 12; dx++) {
-      for (let dy = -6; dy <= 4; dy++) {
-        const x = doorX + dx, y = doorY + dy;
-        if (!st.inBounds(x, y)) continue;
-        if (st.get(x, y) === T.TORCH) light = true;
-        if (dy === 3 && st.isSolid(x, y)) solidFloor++;
-        if (dy >= -2 && dy <= 2 && st.wall[st.idx(x, y)] !== 0) walls++;
-      }
-    }
-    return light && solidFloor >= 6 && walls >= 20;
-  }
+  // （旧 isValidHouse 启发式已删除——房屋判定移至 src/world/Housing.ts，
+  //  泛洪填充 + 原版 wallHouse 墙表 + 桌椅灯需求，见 checkRoom/findFreeHouse）
 
   // ================= GameHooks 实现 =================
 

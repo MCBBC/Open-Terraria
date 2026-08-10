@@ -48,6 +48,8 @@ export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: numbe
 // 树木专用：Tree_Tops/Branches（树冠树枝，TEdit style 0-10）+ Tiles_5_N（生物群系树干）
 export const VANILLA_MISC = [
   'vanilla/Bubble.png',
+  'vanilla/Ninja.png',      // 史莱姆王体内忍者（Main.cs:22817 叠画）
+  'vanilla/Gore_734.png',   // 史莱姆王王冠 Gore（专家模式传送时抛出，NPC.cs:43550）
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),

@@ -535,7 +535,9 @@ export class Enemy extends Entity {
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
     // ---- 四级跳判定（L24651-24733）：仅在朝移动方向撞到东西时 ----
-    const movingInto = vxSign === dir && vxSign !== 0;
+    // 原版全部跳跃赋值都有 velocity.Y == 0f 前置（AI_003 内 44 处同款门）——
+    // 缺失此门时空中贴墙每帧 vy=-8 → 沿墙飞天贴天花板（主角靠近才掉落）
+    const movingInto = vxSign === dir && vxSign !== 0 && this.vy === 0;
     if (movingInto) {
       if (this.h >= 32 && solidAt(fx, fy - 2)) {
         // 胸口前 2 格墙：上方再 1 格也堵 → -8，否则 -7

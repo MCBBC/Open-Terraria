@@ -788,6 +788,22 @@ export class Renderer {
           ctx.drawImage(tinted, -r.sw / 2, anchorY, r.sw, r.sh);
           ctx.globalCompositeOperation = 'source-over';
         }
+        // 史莱姆王体内忍者（Main.cs:22798-22818 1:1）：独立贴图 Ninja.png 叠画在
+        // KS 中心，随速度反向摆动（zero=-vy / -vx*2）+ rotation=vx*0.05，
+        // 帧顶 120/360/480 的挤压帧 y 修正（+2/-2/-6）。KS 贴图本身无王冠——
+        // 金冠是 Gore 734，仅在专家模式传送瞬间抛出（经典模式全程无冠，原版如此）
+        if (e.vanillaId === 50) {
+          const ninja = this.atlas.vmisc('vanilla/Ninja.png');
+          if (ninja) {
+            const zeroY = -e.vy + (r.sy === 120 ? 2 : r.sy === 360 ? -2 : r.sy === 480 ? -6 : 0);
+            const zeroX = -e.vx * 2;
+            ctx.save();
+            ctx.translate(zeroX, -e.h / 2 + zeroY);   // 当前原点=KS 底心 → 中心=(0,-h/2)
+            ctx.rotate(e.vx * 0.05);
+            ctx.drawImage(ninja.img, -ninja.sw / 2, -ninja.sh / 2, ninja.sw, ninja.sh);
+            ctx.restore();
+          }
+        }
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
