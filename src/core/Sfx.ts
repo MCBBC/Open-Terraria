@@ -1,4 +1,7 @@
-// 音效：原版 wav 素材（public/sounds/）+ WebAudio 合成兜底
+// 音效：原版 wav 素材（public/sounds/）+ WebAudio 合成兜底。
+// **按需加载（与贴图懒加载同策略，2026-08-10）**：不预读任何文件——播放未命中时
+// 后台 fetch+decode（pending 防重入、failed 负缓存防 404 循环），首播走合成兜底/静默，
+// 解码完成后后续播放命中真声。定向预热用 preloadFiles（如 Boss 召唤前取咆哮声）。
 // hit 敌人受击 / hurt 玩家受击 / pickup 拾取 / dig 挖掘 / place 放置 / drink 饮用 / chop 砍树 / splash 落水
 // + killed 怪物死亡 / zombie 僵尸环境声 / roar Boss咆哮 / coin 拾币 / door_open door_close / tink 敲石 / shatter 玻璃破碎 / drown 溺水
 export type SfxName =
@@ -40,40 +43,42 @@ const WAV_MAP: Record<SfxName, string[]> = {
 export class Sfx {
   private ctx: AudioContext | null = null;
   private buffers = new Map<string, AudioBuffer>();
+  /** 在途解码中的文件（防重复 fetch） */
+  private pending = new Set<string>();
+  /** 取回失败/不存在的文件（负缓存，防 404 每次重试） */
+  private failed = new Set<string>();
   muted = false;
   /** 主音量 0..1（M6 设置页） */
   master = 1;
 
-  private extraFiles = new Set<string>();
-  /** 追加加载额外 wav 文件（怪物专属声效等） */
-  addFiles(files: string[]) {
-    for (const f of files) this.extraFiles.add(f);
-    const ctx = this.ctx;
-    if (!ctx) return;
-    for (const f of files) {
-      if (this.buffers.has(f)) continue;
-      fetch(`sounds/${f}.wav`).then((r) => (r.ok ? r.arrayBuffer() : null)).then((ab) => {
-        if (!ab) return;
-        ctx.decodeAudioData(ab).then((buf) => this.buffers.set(f, buf)).catch(() => {});
-      }).catch(() => {});
-    }
+  /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null */
+  private ensureBuffer(file: string): AudioBuffer | null {
+    const buf = this.buffers.get(file);
+    if (buf) return buf;
+    if (this.pending.has(file) || this.failed.has(file)) return null;
+    const ctx = this.ensure(true);
+    if (!ctx) return null;
+    this.pending.add(file);
+    fetch(`sounds/${file}.wav`)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((decoded) => {
+        if (decoded) this.buffers.set(file, decoded);
+        else this.failed.add(file);
+      })
+      .catch(() => { this.failed.add(file); })
+      .finally(() => { this.pending.delete(file); });
+    return null;
   }
 
-  /** 预加载全部 wav（在用户手势后调用可获得最佳兼容；挂起态 decodeAudioData 也可用） */
-  async load(): Promise<void> {
-    const ctx = this.ensure(true);
-    if (!ctx) return;
-    const files = new Set<string>();
-    for (const list of Object.values(WAV_MAP)) for (const f of list) files.add(f);
-    for (const f of this.extraFiles) files.add(f);
-    await Promise.all([...files].map(async (f) => {
-      try {
-        const r = await fetch(`sounds/${f}.wav`);
-        if (!r.ok) return;
-        const buf = await ctx.decodeAudioData(await r.arrayBuffer());
-        this.buffers.set(f, buf);
-      } catch { /* 单文件失败静默 */ }
-    }));
+  /** 定向预热（不阻塞）：把指定 wav 后台取齐，播放时即命中 */
+  preloadFiles(files: Iterable<string>) {
+    for (const f of files) this.ensureBuffer(f);
+  }
+
+  /** 按逻辑名预热（WAV_MAP 展开到具体文件） */
+  preloadNames(names: SfxName[]) {
+    for (const n of names) for (const f of WAV_MAP[n] ?? []) this.ensureBuffer(f);
   }
 
   private ensure(silent = false): AudioContext | null {
@@ -100,11 +105,11 @@ export class Sfx {
     return this.playWavFile(files[Math.floor(Math.random() * files.length)], vol);
   }
 
-  /** 按文件名直播 */
+  /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底） */
   playWavFile(file: string, vol = 1): boolean {
     const ctx = this.ensure();
     if (!ctx) return false;
-    const buf = this.buffers.get(file);
+    const buf = this.ensureBuffer(file);
     if (!buf) return false;
     const src = ctx.createBufferSource();
     src.buffer = buf;

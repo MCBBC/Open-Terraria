@@ -106,7 +106,7 @@ console.log('== Queen Slime 657 ==');
   const qs = Enemy.fromVanilla(657, 100 * 16, 140 * 16)!;
   qs.id = 1; enemies.push(qs);
   let sawJump = false, maxAir = 0;
-  for (let i = 0; i < 1500; i++) {
+  for (let i = 0; i < 3600; i++) { // 选招含 1/3 随机,拉长保证连跳态必现
     queenSlimeAI(qs, game, player as never);
     if (qs.ai0 === 3) sawJump = true;
     maxAir = Math.max(maxAir, FLOOR - (qs.y + qs.h));
@@ -117,20 +117,21 @@ console.log('== Queen Slime 657 ==');
   check('③ 一阶段弹幕(922/926)', p1ids.has(922) || p1ids.has(926), [...p1ids]);
   // ④ 血量降半 → 二阶段飞行(脱离地面);此后持续掉血验证 2%/1.5% 阈值撒仆从
   qs.hp = qs.maxHp * 0.4;
-  let airTicks = 0, groundedEnd = true, maxSpin = 0;
+  let airTicks = 0, groundedEnd = true, minHover = Infinity;
   for (let i = 0; i < 900; i++) {
     if (i % 60 === 0 && qs.hp > 1) qs.hp = Math.max(1, qs.hp - qs.maxHp * 0.03); // 持续掉血触发仆从阈值
     queenSlimeAI(qs, game, player as never);
     if (!qs.onGround && qs.y + qs.h < FLOOR - 100) airTicks++;
     if (i >= 600 && !qs.onGround && qs.y + qs.h < FLOOR - 100) groundedEnd = false;
-    maxSpin = Math.max(maxSpin, Math.abs(qs.spin));
+    // FlyMovement 悬停锚点 = 玩家上方 250(:45500),记录最近距离验证收敛
+    minHover = Math.min(minHover, Math.hypot(qs.cx - player.cx, qs.cy - (player.cy - 250)));
   }
   check('④ 半血后进飞行态(离地>100px 的 tick>100)', airTicks > 100, airTicks);
   check('④ 结束时仍在空中', !groundedEnd, [Math.round(qs.y + qs.h), FLOOR]);
+  check('④ FlyMovement 收敛玩家上方 250', minHover < 200, Math.round(minHover));
   check('④ 掉血撒仆从(vanilla 658-660,数据缺→史莱姆族兜底 535/537/16)',
     enemies.some((n) => n !== qs && [658, 659, 660, 535, 537, 16].includes(n.vanillaId ?? -1)),
     enemies.filter((n) => n !== qs).map((n) => n.vanillaId));
-  check('④ 飞行旋转有值', maxSpin > 0.001, maxSpin.toFixed(3));
 }
 // ⑤ 白天不自毁
 console.log('== Daytime survival ==');

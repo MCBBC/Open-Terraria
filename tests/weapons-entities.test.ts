@@ -22,6 +22,7 @@ function makeHooks(opts: { channel?: boolean; target?: { x: number; y: number } 
     world: { store } as never,
     player: player as never,
     enemies: () => enemies,
+    critters: () => [],
     spawnDrop: () => null,
     damagePlayer: (d) => events.push(`pHit:${d}`),
     addDamageNumber: (x, y, n) => events.push(`dmg:${n}@${Math.round(x)},${Math.round(y)}`),
@@ -49,8 +50,8 @@ function addEnemy(enemies: Array<Record<string, unknown>>, id: number, ex: numbe
 const events_track: number[] = [];
 
 const STEP = 300;
-function run(e: { fixedUpdate: (dt: number, g: GameHooks) => void }, g: GameHooks, n = STEP) {
-  for (let i = 0; i < n && !(e as { dead: boolean }).dead; i++) e.fixedUpdate(1 / 60, g);
+function run(e: { fixedUpdate: (dt: number, g: GameHooks) => void; dead?: boolean }, g: GameHooks, n = STEP) {
+  for (let i = 0; i < n && !e.dead; i++) e.fixedUpdate(1 / 60, g);
 }
 
 describe('回旋镖（aiStyle 3）', () => {

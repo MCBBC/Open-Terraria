@@ -59,7 +59,10 @@ export const Lang = {
     return internal && Lang.has(`ItemName.${internal}`) ? Lang.text(`ItemName.${internal}`) : null;
   },
 
-  /** 物品名(本仓库 item key):vi_<id>_ 前缀/ITEM_KEY_TO_ID 推断 → 原版名,终兜底 ItemDef.name */
+  /** 物品名(本仓库 item key)。解析链：
+   *  ① vi_<id>_ 前缀/ITEM_KEY_TO_ID → 原版 ItemName（12 语言官方译文）
+   *  ② Mods.SandboxWorld.ItemName.<PascalKey>（l10n-custom 自有物品——原版不存在的发明物）
+   *  ③ ItemDef.name 硬编码兜底 */
   itemNameByKey(key: string): string {
     const vi = key.match(/^vi_(\d+)_/);
     const id = vi ? Number(vi[1]) : ITEM_KEY_TO_ID[key];
@@ -67,6 +70,8 @@ export const Lang = {
       const n = Lang.itemName(id);
       if (n) return n;
     }
+    const custom = `Mods.SandboxWorld.ItemName.${key.replace(/(^|_)([a-z0-9])/g, (_, p, c) => (p ? c.toUpperCase() : c.toUpperCase()))}`;
+    if (Lang.has(custom)) return Lang.text(custom);
     return ITEM_DEFS[ITEM_BY_KEY[key]]?.name ?? key;
   },
 

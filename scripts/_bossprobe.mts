@@ -57,13 +57,13 @@ console.log('== King Slime 50 ==');
   ks.id = 1; enemies.push(ks);
   ks.y = 150 * 16 - ks.h; // 底边贴地板行 150(h=92;放 148*16 会嵌进地板坠穿)
   let minY = ks.y, maxY = ks.y;
-  for (let i = 0; i < 240; i++) {
+  for (let i = 0; i < 600; i++) {
     for (const e of enemies) e.fixedUpdate(1 / 60, game);
     minY = Math.min(minY, ks.y); maxY = Math.max(maxY, ks.y);
   }
   check('大跳起伏(峰值差 > 80px)', maxY - minY > 80, Math.round(maxY - minY));
   const slimeSpawned = enemies.some((e) => e !== ks && e.vanillaId === 16);
-  check('落地刷小史莱姆(概率性,240t 内)', slimeSpawned, enemies.length);
+  check('落地刷小史莱姆(概率性,600t 内)', slimeSpawned, enemies.length);
 }
 // 3) 克脑
 console.log('== Brain 266 ==');

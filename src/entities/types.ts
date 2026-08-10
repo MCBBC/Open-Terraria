@@ -7,6 +7,8 @@ export interface GameHooks {
   player: import('./Player').Player;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
+  /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
+  critters(): unknown[];
   /** 在世界上生成掉落物（返回实体便于染色等后处理） */
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
   /** 对玩家造成伤害（attacker 用于荆棘反伤） */

@@ -1,6 +1,7 @@
 // 魔法投射物(原版 Projectile 14 Spark / 短命发光弹语义):
 // 直线飞行、撞块消失、命中伤害、寿命短(原版 spark 30tick)。
 import { Entity } from './Entity';
+import { hitCritters } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -42,6 +43,8 @@ export class MagicProj extends Entity {
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }
+    // 小动物:一击致死并消耗弹体(近战挥砍同语义)
+    if (hitCritters(this, game)) { this.dead = true; return; }
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; dead: boolean };
       if (e.dead) continue;

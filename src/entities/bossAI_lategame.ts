@@ -99,7 +99,7 @@ const rot = (x: number, y: number, a: number): [number, number] =>
 // ===================== AI_084 拜月教邪教徒 439(NPC.cs:64921-65957) =====================
 // 状态机(ai0): -1 出生显形(420t) / 0 选招(40t) / 1 飞掠占位 / 2 冰雾 464 / 3 火球 467 /
 //   4 闪电 465 / 5 仪式瞬移(克隆体跳过) / 6 被打中真身后的硬直(克隆分支,跳过) /
-//   7 远古之光 NPC522 / 8 远古末日 NPC523(经典不被选中,保留状态体)。
+//   7 远古之光(原版 NPC522,收敛为 468 直飞弹)/ 8 远古末日 NPC523(经典不被选中,保留状态体)。
 // 经典数值: 冰 35 伤(:64930)/火 30 伤·18t×3(:64941-64946)/闪电 45 伤·20+80t(:64953-64958)/
 //   光 20t×2(:64963-64967)/末日 20t×3(:64970-64973);半血防御 ×0.65(:64982-64985)。
 // 选招表(:65160-65254 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环):
@@ -146,7 +146,8 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.spawnAlpha = Math.max(0, 254 - e.ai1 * 5); // :65066 alpha -= 5/tick
     e.iframes = 2; // flag3/flag4 → dontTakeDamage
     e.ai1 += 1;
-    if (e.ai1 > 300) { e.vy = -1; e.vx = 0; } // :65088-65091 velocity=-UnitY
+    if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65117-65123 收势阻尼
+    else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65126-65130 velocity=-UnitY
     flyIntegrate(e);
     if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.spawnAlpha = 0; }
     return;
@@ -377,6 +378,15 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     e.vx /= 4; e.vy /= 4;
   }
   if (player) e.facing = player.cx > e.cx ? 1 : -1;
+  if (!player) {
+    // 目标彻底失效:上方已强制 ai0=13,此处推进淡出自毁(:47236/:47264-47271)
+    e.spawnAlpha = Math.min(254, e.spawnAlpha + 5);
+    e.vx *= 0.95; e.vy *= 0.95;
+    e.ai1 += 1;
+    flyIntegrate(e);
+    if (e.ai1 >= 20 && e.spawnAlpha >= 254) e.dead = true;
+    return;
+  }
 
   // 冲刺窗口伤害倍率(num16,:46352/:47006):8/9 态 40-90t 时 ×1.5
   const dashBoost = (e.ai0 === 8 || e.ai0 === 9) && e.ai1 > 40 && e.ai1 <= 90;
@@ -689,8 +699,9 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
   // 原版 case 4 整段(含 ai2=0 升空)置 noGravity,故一阶段升空同样免重力
   const flying = e.ai0 === 5 || (e.ai0 === 4 && e.ai2 === 0) || (phase2 && e.ai0 === 0);
   if (!flying) {
-    // 通用重力(NPC.cs:91519-91524,!noGravity 时 +0.3 钳 maxFallSpeed 10)
-    if (!e.onGround && e.ai0 !== 4) e.vy += 0.3;
+    // 通用重力(NPC.cs:91519-91524,!noGravity 时 +0.3 钳 maxFallSpeed 10;
+    // 俯冲段(:45945)自身 +1 钳 14 与此叠加,实际仍受 10 上限——与原版一致)
+    if (!e.onGround) e.vy += 0.3;
     if (e.vy > 10) e.vy = 10;
   } else {
     e.onGround = false;
@@ -820,22 +831,25 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           e.ai0 = 0; e.ai1 = 0; e.ai2 = 0;
         }
       } else {
-        // ai2=0 升空(:45946-46004):目标 = 玩家上 384(超 500 格用自身),20 速直飞;60t 转 ai2=1
+        // ai2=0 升空(:45967-46005):前 30t 原地蓄势(:45972-45974),之后 20 速冲向
+        // 玩家上方 384(超 500 格用自身),满 60t 转 ai2=1 俯冲
         e.ai1 += 1;
-        let tx = e.cx, ty = e.cy - 384;
-        if (Math.abs(e.cx - player.cx) / 16 <= 500) { tx = player.cx; ty = player.cy - 384; }
-        const dx = tx - e.cx, dy = ty - e.cy;
-        const d = Math.hypot(dx, dy);
-        if (Math.abs(e.vy) < 0.5) { // 原版判 velocity.Y == 0;浮点残留放宽半格
-          const l = d || 1;
-          e.vx = (dx / l) * 20; e.vy = (dy / l) * 20;
-        } else {
-          e.vy *= 0.95;
-        }
-        if (e.ai1 >= 60) {
-          e.ai1 = 0; e.ai2 = 1;
-          e.vy = -3; // :45974-45979
-          e.vx *= 0.5;
+        if (e.ai1 >= 30) {
+          let tx = e.cx, ty = e.cy - 384;
+          if (Math.abs(e.cx - player.cx) / 16 <= 500) { tx = player.cx; ty = player.cy - 384; }
+          const dx = tx - e.cx, dy = ty - e.cy;
+          const d = Math.hypot(dx, dy);
+          if (Math.abs(e.vy) < 0.5) { // 原版判 velocity.Y == 0;浮点残留放宽半格
+            const l = d || 1;
+            e.vx = (dx / l) * 20; e.vy = (dy / l) * 20;
+          } else {
+            e.vy *= 0.95;
+          }
+          if (e.ai1 >= 60) {
+            e.ai1 = 0; e.ai2 = 1;
+            e.vy = -3; // :45982-45985
+            e.vx *= 0.5;
+          }
         }
       }
       break;
@@ -897,7 +911,68 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
 
 // ===================== 接线清单(主会话统一接线,本文件不改动已有文件) =====================
 // Enemy.fixedUpdate aiStyle 分发(Enemy.ts case 表)追加:
-//   case 84:  lunaticCultistAI(this, game, p); break;   // 439 拜月教邪教徒(克隆体 440/仆从 522/523)
-//   case 120: empressOfLightAI(this, game, p); break;   // 636 光之女皇(旋转渲染:无,仅 facing)
-//   case 121: queenSlimeAI(this, game, p); break;       // 657 史莱姆皇后(仆从 658-660→535-537)
-// 召唤 key: spawnPart(game, src, 522/523/658|659|660→535/536/537);弹幕 key: shoot(..., projId)。
+//   case 84:  lunaticCultistAI(this, game, p); break;   // 439 拜月教邪教徒(克隆体 440 未移植,任务简化)
+//   case 120: empressOfLightAI(this, game, p); break;   // 636 光之女皇(无 spin 渲染,仅 facing)
+//   case 121: queenSlimeAI(this, game, p); break;       // 657 史莱姆皇后(俯仰用 spin)
+// 召唤 key: spawnPart(game, src, id)——史后仆从 vanilla 658/659/660(数据缺→535/537/16 兜底);
+//   邪教徒 ai0=8 态撒 523(经典不可达)。弹幕 key: shoot(game, x, y, vx, vy, dmg, projId)——
+//   464 冰雾/465 闪电球/467 火球/468 光珠;872 永恒彩虹/873 虹迹/874 极光/919 光枪/923 日舞;
+//   922 砸地冲击/926 凝胶弹。
+// 注意:Projectile_464/465/467/468/872/873/874/919/922/923/926.png 尚未入 public/sprites/vanilla/,
+//   Arrow 会画兜底短线,素材补齐后自动生效。
+
+// ============================================================================
+// AI_100 远古之光 522(NPC.cs:42064-42142):直飞投射物型 NPC。
+// 初速 ai[2]/ai[3];ai[0]>60 后按 ai[1] 弯转、>120 阻尼;触地(ai0>=0 时)→ 停驻 5t 自灭。
+// (当前邪教徒远古之光已收敛为 468 直飞弹,本核供数据完整性/未来 1:1 替换)
+// ============================================================================
+export function ancientLightAI(e: Enemy, game: GameHooks, player: Player | null) {
+  if (!e.bInit) { e.bInit = true; e.vx = e.ai2; e.vy = e.ai3; }
+  if (e.vy === 0 && e.ai0 >= 0) { e.ai0 = -1; e.ai1 = 0; return; }
+  if (e.ai0 === -1) {
+    e.vx = 0; e.vy = 0;
+    e.ai1 += 1;
+    if (e.ai1 >= 5) e.dead = true;
+    return;
+  }
+  e.spin = Math.atan2(e.vy, e.vx) - Math.PI / 2;
+  if (e.ai0 >= 0) {
+    e.ai0 += 1;
+    if (e.ai0 > 60) {
+      const c = Math.cos(e.ai1), s = Math.sin(e.ai1);
+      const nvx = e.vx * c - e.vy * s, nvy = e.vx * s + e.vy * c;
+      e.vx = nvx; e.vy = nvy;
+    }
+    if (e.ai0 > 120) { e.vx *= 0.98; e.vy *= 0.98; }
+    if (Math.hypot(e.vx, e.vy) < 0.2) { e.vx = 0; e.vy = 0; }
+  }
+  e.x += e.vx;
+  e.y += e.vy;
+  void game; void player;
+}
+
+// ============================================================================
+// AI_101 远古末日 523(NPC.cs:42143-42221):锚定邪教徒(ai0=头 id)蓄能 420t 显形,
+// 蓄满朝四方喷 593 弹(damage)后消散;头失效/蓄满 → 自灭。
+// (经典模式邪教徒不可达,专家专属;专家档未开时仅作数据完整性)
+// ============================================================================
+export function ancientDoomAI(e: Enemy, game: GameHooks, player: Player | null) {
+  const CHARGE_MAX = 420;
+  const boss = (game.enemies() as Enemy[]).find((n) => !n.dead && n.id === e.ai0 && n.vanillaId === 439);
+  let rate = 1;
+  if (boss && boss.hp < boss.maxHp / 2) rate = 2;
+  if (boss && boss.hp < boss.maxHp / 4) rate = 3;
+  const gone = !boss || e.ai1 >= CHARGE_MAX;
+  e.ai1 += rate;
+  const prog = Math.max(0, Math.min(1, e.ai1 / 120)); // :42168 显形进度(前 120t)
+  e.vanillaScale = prog;                 // 原版 scale 0→1 显形
+  e.spawnAlpha = Math.round(255 - prog * 255); // 原版 alpha 255→0
+  if (e.ai1 >= CHARGE_MAX) {
+    for (let k = 0; k < 4; k++) {
+      const ang = -Math.PI / 2 + (Math.PI / 2) * k;
+      shoot(game, e.cx, e.cy, Math.cos(ang) * 4, Math.sin(ang) * 4, e.def.damage, 593);
+    }
+  }
+  if (gone) e.dead = true;
+  void player;
+}

@@ -11,6 +11,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
+import { hitCritters } from './projTargets';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
@@ -58,6 +59,9 @@ function hitEnemies(
   cooldown: number,
   dirX: number,
 ): void {
+  // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
+  // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
+  hitCritters(self, game);
   for (const ent of game.enemies()) {
     const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
     if (e.dead) continue;

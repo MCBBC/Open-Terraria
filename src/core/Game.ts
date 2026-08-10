@@ -48,6 +48,8 @@ const IMPORTED_TREE_TYPES = new Set<number>(
     .filter((v): v is number => v !== undefined),
 );
 import { LiquidSim } from '../world/liquid/LiquidSim';
+import { settleWorldLiquids } from '../world/liquid/settle';
+import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
@@ -141,6 +143,8 @@ export class Game implements GameHooks {
   boss: Enemy | null = null;
   /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
   vanillaSpawner: VanillaSpawner | null = null;
+  /** 世界生成 worker 客户端（懒建；不可用时 newWorld 走主线程 fallback） */
+  private genClient: WorldGenClient | null = null;
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
   tileByKey = TILE_BY_KEY;
 
@@ -270,11 +274,9 @@ export class Game implements GameHooks {
     }
     this.renderer = new Renderer(this.assets, atlas);
     this.renderer.attach(root);
-    this.sfx.load(); // 原版 wav 预解码（挂起态也可解码）
-    // 怪物专属声效文件追加载入
-    const extra = new Set<string>();
-    for (const d of Object.values(ENEMY_DEFS)) for (const f of [...d.hitSound, ...d.killedSound]) extra.add(f);
-    this.sfx.addFiles([...extra]);
+    // 音效按需加载（2026-08-10）：不在此预读——播放未命中时后台 fetch+decode、
+    // 首播合成兜底；常用战斗/交互声在世界就绪后小集合预热（见 afterWorldLoad），
+    // 怪物专属声效随首次受击懒加载
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
     // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）
@@ -299,8 +301,10 @@ export class Game implements GameHooks {
           const cur = modes.findIndex((m) => m.reduce((a, b) => a | b, 0) === this.wireToolMode);
           const next = modes[(cur + 1) % modes.length].reduce((a, b) => a | b, 0);
           this.wireToolMode = next;
-          const name = next & TOOL_CUTTER ? (next & TOOL_ACTUATOR ? '剪致动器' : '剪线') : next & TOOL_ACTUATOR ? '致动器' : '四色铺线';
-          this.cb.onToast(`工具模式:${name}`);
+          const name = next & TOOL_CUTTER
+            ? (next & TOOL_ACTUATOR ? Lang.text('Mods.SandboxWorld.Wire.CutActuator') : Lang.text('Mods.SandboxWorld.Wire.Cut'))
+            : next & TOOL_ACTUATOR ? Lang.text('Mods.SandboxWorld.Wire.Actuator') : Lang.text('Mods.SandboxWorld.Wire.All');
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Wire.ToolMode', name));
         }
       }
     });
@@ -309,13 +313,39 @@ export class Game implements GameHooks {
   // ================= 生命周期 =================
 
   async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void }) {
+    const settleLabel = () => Lang.text('Mods.SandboxWorld.Progress.SettleLiquids');
+    // ---- worker 路径（generate + settle 一条链在后台完成，UI 全程不卡） ----
+    if (!this.genClient) this.genClient = new WorldGenClient();
+    if (await this.genClient.probe()) {
+      try {
+        this.world = await this.genClient.generate(
+          { width, height, seedText, name: opts?.name, evil: opts?.evil },
+          {
+            // 进度区间映射与主线程路径一致：generate 0–0.7、settle 0.72–0.87
+            onProgress: (phase, label, p) => {
+              if (phase === 'generate') onProgress?.(label, p * 0.7);
+              else onProgress?.(settleLabel(), 0.72 + p * 0.15);
+            },
+          },
+        );
+        await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
+        onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
+        this.afterWorldLoad();
+        this.cb.onWorldReady();
+        return;
+      } catch (e) {
+        if (!(e instanceof WorldGenUnavailable)) throw e; // 真实业务错误（如 OOM）不吞
+        // worker 失败 → 落回主线程路径
+      }
+    }
+    // ---- 主线程 fallback（原路径原样保留：worker 不可用 + 探针依赖） ----
     this.world = await generateWorld({ width, height, seedText, name: opts?.name, evil: opts?.evil, onWorldPartial: opts?.onWorldPartial }, (label, p) => onProgress?.(label, p * 0.7));
     // 水体预沉降：创建世界时全图激活+步进至稳定，带进度条
-    onProgress?.('水体沉降', 0.72);
-    await this.settleLiquids((p) => onProgress?.('水体沉降', 0.72 + p * 0.15));
+    onProgress?.(settleLabel(), 0.72);
+    await this.settleLiquids((p) => onProgress?.(settleLabel(), 0.72 + p * 0.15));
     // 进图前贴图预载(用户要求:不进图后才动态加载)
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
-    onProgress?.('完成', 1);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
     this.afterWorldLoad();
     this.cb.onWorldReady();
   }
@@ -328,7 +358,7 @@ export class Game implements GameHooks {
   private async preloadSceneAssets(onProgress?: (label: string, p: number) => void): Promise<void> {
     const a = this.atlas;
     if (!a) return;
-    onProgress?.('加载世界贴图', 0.05);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadWorldTex'), 0.05);
     // 出生点半径类型扫描:只预载画面涉及的图块/墙表
     const st = this.world.store;
     const { tileSheets, wallIds } = this.collectSheetsAround(this.world.spawnX, this.world.spawnY, 240);
@@ -336,9 +366,9 @@ export class Game implements GameHooks {
       a.preloadTileSheetsFor(tileSheets, wallIds),
       a.preloadMiscAndNpcs(),
     ]);
-    onProgress?.('加载物品图标', 0.15);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadItemIcons'), 0.15);
     await a.preloadIcons();
-    onProgress?.('加载角色贴图', 0.7);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadCharTex'), 0.7);
     // Player_ 全量(纸娃娃全部身体通道) + 仅当前装备的 Armor 表;
     // 换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
     const armorFiles = new Set<string>();
@@ -355,9 +385,9 @@ export class Game implements GameHooks {
     }
     await a.preloadUiPrefix(['Player_']);
     await a.preloadUiFiles(armorFiles);
-    onProgress?.('加载背景图', 0.9);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadBg'), 0.9);
     await this.renderer.biomeBg.preloadInitial(this.world);
-    onProgress?.('加载背景图', 1);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadBg'), 1);
   }
 
   /** 区域类型扫描:中心 ±R 内出现的图块 sheet id + 墙 id 集合(出生点预载/传送门共用) */
@@ -395,54 +425,18 @@ export class Game implements GameHooks {
     return ids;
   }
 
-  /** 全图液体沉降。
-   *  mode='gen'（新建世界）：原版 WorldGen pass 49/97 Settle Liquids（WorldGen.cs:7395/10247）
-   *    ——外层 10 轮跑到收敛，清除生成期晚到的回流（漏斗入口等）。
-   *  mode='load'（读档）：原版 WorldFile.cs:738-770 时序 1:1——单轮上限 100000，
-   *    不收敛的少量残留活水交给运行时（尾部 WaterCheck），与原版一致（同帧完成，无外层循环）。
-   *  yield 按真实耗时让出（≥32ms 一次）——按次数让出会把上万次迭代拖成数千次 setTimeout
-   *  造成读档进度条"假慢" */
-  private async settleLiquids(onProgress?: (p: number) => void, mode: 'gen' | 'load' = 'gen') {
-    const sim = new LiquidSim(this.world);
-    onProgress?.(0.05);
-    sim.quickWater();
-    onProgress?.(0.35);
-    await new Promise((r) => setTimeout(r, 0));
-    sim.waterCheck();
-    sim.quickSettle = true;
-    // 轮上限：读档 = WorldFile 单轮 100000（L752）；生成期 = 每轮 活量×5（WorldGen.cs:16252 num5）
-    const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
-    let iter = 0;
-    let lastYield = performance.now();
-    for (let round = 0; round < MAX_ROUNDS; round++) {
-      const MAX_ITER = mode === 'gen' ? Math.max(1000, (sim.numLiquid + sim.bufferLen) * 5) : 100000;
-      let roundIter = 0;
-      while (sim.numLiquid > 0 && roundIter < MAX_ITER) {
-        sim.updateLiquid();
-        iter++; roundIter++;
-        if (roundIter % 2000 === 0) {
-          onProgress?.(0.35 + Math.min(0.6, iter / 20000));
-          if (performance.now() - lastYield >= 32) {
-            await new Promise((r) => setTimeout(r, 0));
-            lastYield = performance.now();
-          }
-        }
-      }
-      sim.waterCheck();
-      if (sim.numLiquid === 0) break;
-    }
-    sim.quickSettle = false;
-    sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）
-    sim.dispose();
-    onProgress?.(1);
+  /** 全图液体沉降（薄封装 → settleWorldLiquids，主线程 fallback 与 worker 共用同一实现）。
+   *  mode 语义见 src/world/liquid/settle.ts 头注释 */
+  private settleLiquids(onProgress?: (p: number) => void, mode: 'gen' | 'load' = 'gen') {
+    return settleWorldLiquids(this.world, mode, onProgress);
   }
 
   async loadWorld(world: World, onProgress?: (label: string, p: number) => void) {
     this.world = world;
-    onProgress?.('水体沉降', 0.5);
+    onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), 0.5);
     // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
     // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
-    await this.settleLiquids((p) => onProgress?.('水体沉降', p * 0.8), 'load');
+    await this.settleLiquids((p) => onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), p * 0.8), 'load');
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
     this.afterWorldLoad();
     this.cb.onWorldReady();
@@ -450,6 +444,10 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
+    // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
+    this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
+      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw']);
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
     this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
@@ -573,7 +571,7 @@ export class Game implements GameHooks {
     const isDay = w.clock.isDay;
     if (isDay !== this.lastWasDay) {
       if (this.lastWasDay !== null) {
-        this.cb.onToast(isDay ? '☀ 太阳升起来了，新的一天开始了' : '🌙 夜幕降临，小心出没的怪物…');
+        this.cb.onToast(isDay ? Lang.text('Mods.SandboxWorld.Toast.DayStart') : Lang.text('Mods.SandboxWorld.Toast.NightFall'));
         this.cb.onDayNight?.(isDay);
         // 昼/夜逻辑感应器(423)触发
         this.triggerDayNightSensors();
@@ -822,7 +820,7 @@ export class Game implements GameHooks {
         }
         if (dayKill && !this.boss.dead) {
           this.boss.dead = true;
-          this.cb.onToast(`${this.boss.def.name || 'Boss'}在黎明逃走了…`);
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossFledAtDawn', this.boss.def.name || 'Boss'));
         }
         this.boss = null;
       }
@@ -998,7 +996,7 @@ export class Game implements GameHooks {
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.cb.onInventoryChanged();
         } else {
-          this.cb.onToast('什么都没有发生...');
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
         this.input.rightDown = false;
       } else {
@@ -1079,7 +1077,7 @@ export class Game implements GameHooks {
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.cb.onInventoryChanged();
         } else {
-          this.cb.onToast('什么都没有发生...');
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NothingHappened'));
         }
         this.player.useTime = 30;
       }
@@ -1092,7 +1090,7 @@ export class Game implements GameHooks {
         resistance: BuffType.Resistance, thorns: BuffType.Thorns, regen: BuffType.Regen,
       };
       if (p.isHealType && this.player.buffs.healBlocked) {
-        this.cb.onToast('耐药性生效中，无法饮用治疗药水');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
         this.player.useTime = 30;
       } else {
         const bt = buffTypeMap[p.buff];
@@ -1110,7 +1108,7 @@ export class Game implements GameHooks {
     } else if (heldDef && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
       // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
       if (this.player.baseMaxHp >= 400) {
-        this.cb.onToast('生命上限已达到 400');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
       } else {
         this.player.baseMaxHp += 20;
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
@@ -1124,7 +1122,7 @@ export class Game implements GameHooks {
     } else if (heldDef?.key === 'vi_109_mana_crystal') {
       // 魔力水晶(Player.cs:44655:statManaMax<200 → +20 上限并回复)
       if (this.player.baseMaxMana >= 200) {
-        this.cb.onToast('魔力上限已达到 200');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ManaMaxReached'));
       } else {
         this.player.baseMaxMana += 20;
         this.player.mana = Math.min(this.player.maxMana, this.player.mana + 20);
@@ -1138,9 +1136,9 @@ export class Game implements GameHooks {
     } else if (heldDef?.key === 'vi_1291_life_fruit') {
       // 生命果(Player.cs:44665:statLifeMax≥400 且 <500 → +5)
       if (this.player.baseMaxHp < 400) {
-        this.cb.onToast('需要先用水晶之心把生命上限提升到 400');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedLifeCrystalFirst'));
       } else if (this.player.baseMaxHp >= 500) {
-        this.cb.onToast('生命上限已达到 500');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached500'));
       } else {
         this.player.baseMaxHp += 5;
         this.player.hp = Math.min(this.player.maxHp, this.player.hp + 5);
@@ -1225,9 +1223,9 @@ export class Game implements GameHooks {
       && inp.mouseDown && this.player.useTime === 0) {
       // 机械三王召唤物(原版 556/544/557:需困难模式+夜晚)
       if (!this.world.flags.hardMode) {
-        this.cb.onToast('古老的机械力量尚未苏醒(需困难模式)');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MechNotAwake'));
       } else if (this.world.clock.isDay) {
-        this.cb.onToast('夜晚才能使用…');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
         if (heldDef.key === 'mechanical_worm') this.summonBoss('destroyer');
         else if (heldDef.key === 'mechanical_eye') this.summonBoss('twins');
@@ -1241,7 +1239,7 @@ export class Game implements GameHooks {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
       if (this.player.mana < mg.manaCost) {
-        this.cb.onToast('魔力不足');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
         this.input.mouseDown = false;
       } else {
         this.player.mana -= mg.manaCost;
@@ -1328,7 +1326,7 @@ export class Game implements GameHooks {
       case 'magic': {
         // 魔法：消耗 mana（原版 mana 字段）→ 发射 item.shoot（贴图/穿透/寿命取投射物表）
         if (this.player.mana < (cw.mana ?? 0)) {
-          this.cb.onToast('魔力不足');
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
           this.input.mouseDown = false;
           return;
         }
@@ -1711,7 +1709,7 @@ export class Game implements GameHooks {
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
     this.sfx.play('tink');
-    this.cb.onToast(isDemonHeart ? '恶魔之心被击碎了！' : '暗影之球被击碎了！');
+    this.cb.onToast(isDemonHeart ? Lang.text('Mods.SandboxWorld.Toast.DemonHeartSmashed') : Lang.text('Mods.SandboxWorld.Toast.ShadowOrbSmashed'));
     if (!this.world.flags.shadowOrbSmashed) {
       this.world.flags.shadowOrbSmashed = true;
     }
@@ -1822,7 +1820,7 @@ export class Game implements GameHooks {
     const wireHave = inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
     const actHave = inv.countOf(ITEM_BY_KEY['actuator_item'] ?? -1);
     if (needWire > wireHave || needActuator > actHave) {
-      this.cb.onToast(needActuator > actHave ? '致动器不够了' : '电线不够了');
+      this.cb.onToast(needActuator > actHave ? Lang.text('Mods.SandboxWorld.Toast.NoActuator') : Lang.text('Mods.SandboxWorld.Toast.NoWire'));
       return;
     }
     let placed = false;
@@ -1851,7 +1849,7 @@ export class Game implements GameHooks {
     const def = TILE_DEFS[tileId];
     // 橡实: 只能种在草块正上方
     if (itemDef.key === 'acorn' && st.get(tx, ty + 1) !== T.GRASS) {
-      this.cb.onToast('橡实只能种在草块上');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
       return;
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
@@ -1987,7 +1985,7 @@ export class Game implements GameHooks {
       // 床:设重生点(vanilla Player.FindBed 语义;敌怪环绕检查略)
       this.world.spawnX = tx + 1;
       this.world.spawnY = ty - 1;
-      this.cb.onToast('重生点已设置');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']) {
       // 拉杆/开关:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
@@ -2010,7 +2008,7 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const def = TILE_DEFS[st.get(tx, ty)];
     if (this.player.baseMaxHp >= 400) {
-      this.cb.onToast('生命上限已达到 400');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
       this.input.rightDown = false;
       return;
     }
@@ -2037,11 +2035,11 @@ export class Game implements GameHooks {
         const sl = this.player.inv.slots[i];
         if (sl && sl.id === keyId && sl.stack > 0) { keySlot = i; break; }
       }
-      if (keySlot < 0) { this.cb.onToast('宝箱被锁住了,需要金钥匙'); this.input.rightDown = false; return; }
+      if (keySlot < 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestLocked')); this.input.rightDown = false; return; }
       this.player.inv.removeAt(keySlot, 1);
       chest.locked = false;
       this.sfx.play('tink');
-      this.cb.onToast('用金钥匙打开了宝箱');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestUnlocked'));
       this.cb.onInventoryChanged();
     }
     // 陷阱箱 441/468(Player.cs:21303 语义):开启即触发电路 + 向玩家八方射镖
@@ -2055,7 +2053,7 @@ export class Game implements GameHooks {
         this.entities.add(new TrapShot(cxp, cyp, Math.cos(ang) * 6, Math.sin(ang) * 6, 20, 'dart'), 'projectiles');
       }
       this.sfx.play('tink');
-      this.cb.onToast('⚠ 这是陷阱箱!');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestTrapped'));
     }
     this.openChest?.(chest as never);
     this.input.rightDown = false;
@@ -2766,41 +2764,41 @@ export class Game implements GameHooks {
       const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
       if (mx < npc.x - 8 || mx > npc.x + npc.w + 8 || my < npc.y - 8 || my > npc.y + npc.h + 8) continue;
       const tips = [
-        '你好！我是向导。按 E 打开背包，那里可以合成物品。',
-        '用镐挖矿、斧砍树。木头+凝胶可以做火把！',
-        '夜里会有僵尸和恶魔眼出现，小心行事。',
-        '挖到矿石后，用熔炉炼锭、铁砧做更好的装备。',
-        '手持火把也能照亮周围，不用非得放置。',
-        '想知道更多？去地下找找宝箱吧！',
+        Lang.text('Mods.SandboxWorld.NPC.Guide1'),
+        Lang.text('Mods.SandboxWorld.NPC.Guide2'),
+        Lang.text('Mods.SandboxWorld.NPC.Guide3'),
+        Lang.text('Mods.SandboxWorld.NPC.Guide4'),
+        Lang.text('Mods.SandboxWorld.NPC.Guide5'),
+        Lang.text('Mods.SandboxWorld.NPC.Guide6'),
       ];
       if (npc.npcKey === 'old_man') {
         // 守卫老人(原版 Lang.dialog + OldMan 交互):
         // 白天只闲聊("你为什么还想和这副可怜的骨头说话?");夜晚出现「诅咒」选项召唤骷髅王
         const oldManDay = [
-          '走开!这地牢的阴影无法在我活着的时候夺走我的灵魂!',
-          '你得让我一个人待着。我身中可怕的诅咒,因为我主人的意志就是我的意志。',
-          '你是怎么知道我——我的意思是,谢谢你的关心,不过我没事。我好得很。',
-          '为什么你还想和这副可怜的骨头说话?',
-          '我的主人不让别人进来。现在,在我变得丑恶之前快离开!',
-          '夜晚来临时再来找我吧……如果你胆子够大的话。',
+          Lang.text('Mods.SandboxWorld.NPC.OldMan1'),
+          Lang.text('Mods.SandboxWorld.NPC.OldMan2'),
+          Lang.text('Mods.SandboxWorld.NPC.OldMan3'),
+          Lang.text('Mods.SandboxWorld.NPC.OldMan4'),
+          Lang.text('Mods.SandboxWorld.NPC.OldMan5'),
+          Lang.text('Mods.SandboxWorld.NPC.OldMan6'),
         ];
         if (this.world.clock.isDay || this.world.flags.hardMode) {
           npc.bubble = oldManDay[Math.floor(Math.random() * oldManDay.length)];
           npc.bubbleT = 360;
           npc.talkCooldown = 120;
         } else if (this.boss) {
-          npc.bubble = '别来烦我!没看到天上有东西在飞吗?';
+          npc.bubble = Lang.text('Mods.SandboxWorld.NPC.OldManBusy');
           npc.bubbleT = 240;
         } else {
           // 夜晚:二次确认召唤骷髅王(原版对话框「诅咒」按钮)
           if (this.tickCount - this.oldManCurseArm < 600) {
             this.oldManCurseArm = -9999;
             npc.dead = true; // 原版:召唤骷髅王时守卫老人消失(击败后转为裁缝)
-            this.cb.onToast('守卫老人发出一声凄厉的惨叫……');
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.OldManScream'));
             this.summonBossAtTx('skeletron_head', Math.floor(npc.cx / TILE));
           } else {
             this.oldManCurseArm = this.tickCount;
-            npc.bubble = '你想要我释放诅咒,还是想见到我的主人?…再和我说一次话来确认。';
+            npc.bubble = Lang.text('Mods.SandboxWorld.NPC.OldManConfirm');
             npc.bubbleT = 400;
             npc.talkCooldown = 30;
           }
@@ -2810,12 +2808,12 @@ export class Game implements GameHooks {
       if (npc.npcKey === 'nurse') {
         // 护士:50 铜币治疗至满(原版 Nurse 治疗费随缺失血量;简化固定)
         if (npc.talkCooldown <= 0) {
-          if (p.hp >= p.maxHp) { this.cb.onToast('护士:你很健康,不需要我'); }
+          if (p.hp >= p.maxHp) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealthy')); }
           else {
             const coinId2 = ITEM_BY_KEY['coin_copper'];
             let coins2 = 0;
             for (const sl of this.player.inv.slots) if (sl && sl.id === coinId2) coins2 += sl.stack;
-            if (coins2 < 50) { this.cb.onToast('护士:治疗要 50 铜币'); }
+            if (coins2 < 50) { this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseFee')); }
             else {
               let left2 = 50;
               for (let i = 0; i < this.player.inv.slots.length && left2 > 0; i++) {
@@ -2828,7 +2826,7 @@ export class Game implements GameHooks {
               p.hp = p.maxHp;
               this.cb.onInventoryChanged();
               this.addDamageNumber(p.cx, p.y, p.maxHp - p.hp, false, '#40E080');
-              this.cb.onToast('护士:治疗完成(-50 铜币)');
+              this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
             }
           }
           npc.talkCooldown = 120;
@@ -2861,7 +2859,7 @@ export class Game implements GameHooks {
     ];
     const affordable = stock.filter(([, , cost]) => cost <= coins);
     if (affordable.length === 0) {
-      this.cb.onToast('商人:铜币不够呀(最便宜木材 20)');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.MerchantPoor'));
       return;
     }
     const [key, n, cost] = affordable[Math.floor(Math.random() * affordable.length)];
@@ -2900,6 +2898,11 @@ export class Game implements GameHooks {
 
   enemies() {
     return this.entities.enemies;
+  }
+
+  /** 小动物列表:弹幕命中用(GameHooks.critters) */
+  critters() {
+    return this.entities.critters;
   }
 
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义）：瓦罐→整罐碎裂，其余→breakTile */
@@ -3257,7 +3260,7 @@ export class Game implements GameHooks {
 
   /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
   summonBoss(key: string): void {
-    if (this.boss) { this.cb.onToast('已有 Boss 在场'); return; }
+    if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
     const side = Math.random() < 0.5 ? -1 : 1;
     const tx = Math.floor((this.player.cx + side * 55 * TILE) / TILE);
     this.summonBossAtTx(key, tx);
@@ -3265,7 +3268,7 @@ export class Game implements GameHooks {
 
   /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王) */
   private summonBossAtTx(key: string, tx: number): void {
-    if (this.boss) { this.cb.onToast('已有 Boss 在场'); return; }
+    if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
     const st = this.world.store;
     tx = Math.max(2, Math.min(st.w - 3, tx));
     let ty = 10;
@@ -3275,7 +3278,9 @@ export class Game implements GameHooks {
     const spawnY = Math.max(4, ty - 12) * TILE;
     const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
-      : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113 : -1;
+      : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
+      : key === 'lunatic_cultist' ? 439 : key === 'empress_of_light' ? 636 : key === 'queen_slime' ? 657
+      : key === 'plantera' ? 262 : key === 'duke_fishron' ? 370 : key === 'moon_lord' ? 398 : -1;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
@@ -3300,18 +3305,18 @@ export class Game implements GameHooks {
           head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
         }
         this.sfx.playWav('roar');
-        this.cb.onToast('你感到有个邪恶的东西在看着你……');
+        this.cb.onToast(Lang.misc(9));
         return;
       }
     }
     this.spawnEnemy(key, tx * TILE + 8, spawnY);
     this.sfx.playWav('roar');
-    this.cb.onToast('你感到有个邪恶的东西在看着你……');
+    this.cb.onToast(Lang.misc(9));
   }
 
   useSuspiciousEye() {
     if (this.world.clock.isDay) {
-      this.cb.onToast('夜晚才能使用…');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       return;
     }
     if (this.boss) return;
@@ -3331,7 +3336,7 @@ export class Game implements GameHooks {
       this.boss = e;
     }
     this.sfx.playWav('roar');
-    this.cb.onToast('你感到有个邪恶的东西在看着你……');
+    this.cb.onToast(Lang.misc(9));
   }
 
   /** 地图传送：在目标点附近找可容纳主角的空间（2 格高净空 + 站立地面）。
@@ -3350,14 +3355,14 @@ export class Game implements GameHooks {
         const m = a.vanilla.walls[String(id)];
         return m && !a.vimages.has(m.sheet);
       });
-      if (missing) this.cb.onToast('加载目标区域贴图…');
+      if (missing) this.cb.onToast(Lang.text('Mods.SandboxWorld.Progress.LoadTeleportTex'));
       await a.preloadTileSheetsFor(tileSheets, wallIds);
     }
     if (this.teleportNear(tx, ty)) {
       this._tpTarget = null;
       this.renderer.tpMark = null;
       this.renderer.fullMap.open = false;
-      this.cb.onToast('传送完成');
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.Teleported'));
     }
   }
 
@@ -3408,7 +3413,7 @@ export class Game implements GameHooks {
             }
           }
         }
-        this.cb.onToast('传送失败：目标区域完全实心');
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.TeleportSolid'));
         return false;
       }
     }
@@ -3444,7 +3449,7 @@ export class Game implements GameHooks {
 
   /** 角色名（死亡文本/墓碑碑文用；未命名回退） */
   playerName(): string {
-    return this.player.appearance?.name?.trim() || '泰拉瑞亚人';
+    return this.player.appearance?.name?.trim() || Lang.text('Mods.SandboxWorld.DefaultPlayerName');
   }
 
 

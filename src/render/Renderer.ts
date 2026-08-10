@@ -36,6 +36,7 @@ import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
+import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
@@ -57,8 +58,9 @@ const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
 // 旋转族 NPC（原版 npc.rotation 驱动绘制朝向；FindFrame 不做朝向翻转）：
-// 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、125/126=双子、127-131=Prime 头+四部件、134-136=毁灭者链
-const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136]);
+// 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、125/126=双子、127-131=Prime 头+四部件、
+// 134-136=毁灭者链、261-265=世花族(孢子/本体/钩蔓/触须)、370=猪鲨、396/397=月总头/手、657=史莱姆皇后(飞行倾斜)
+const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 261, 262, 263, 264, 265, 370, 396, 397, 657]);
 
 /** 按原版 FindFrame 分族规则算当前帧 index */
 function vanillaFrameIdx(e: Enemy, frames: number): number {
@@ -1577,7 +1579,7 @@ export class Renderer {
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#C8C0D8';
     ctx.textAlign = 'center';
-    ctx.fillText('滚轮缩放 · 拖动平移 · 点击两点传送（首次预选/再点确认）· M 关闭', viewW / 2, viewH - 16);
+    ctx.fillText(Lang.text('Mods.SandboxWorld.Map.Hint'), viewW / 2, viewH - 16);
   }
   private _mapInit = false;
 
@@ -1617,7 +1619,7 @@ export class Renderer {
     ctx.fillStyle = '#FFF';
     ctx.fill();
     // 文字标注（黑描边保证任何底色上可读）
-    const label = '主角';
+    const label = Lang.text('Mods.SandboxWorld.Map.PlayerLabel');
     ctx.font = 'bold 13px sans-serif';
     ctx.textAlign = 'center';
     ctx.lineWidth = 3;

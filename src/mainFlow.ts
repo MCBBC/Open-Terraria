@@ -22,6 +22,7 @@ import { CharacterStore } from './save/CharacterStore';
 import { WorldStore, type WorldMeta } from './save/WorldStore';
 import { options } from './core/Options';
 import { UIScale } from './vui/draw/UIScale';
+import { Lang } from './i18n/Lang';
 import { UISfx } from './vui/UISfx';
 import type { Appearance } from './player/Appearance';
 
@@ -90,7 +91,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     ui.initInGame(); // DOM 版游戏内 UI（道具栏/背包/合成/宝箱/Buff）——用户指定 web 技术路线
     g.start();
     audio.play('main');
-    ui.toast(`欢迎来到 ${g.world.name}！A/D 移动，空格跳跃，E 背包，Esc 暂停`);
+    ui.toast(Lang.text('Mods.SandboxWorld.Toast.Welcome', g.world.name));
   }
 
   function maybeDev(g: Game) {
@@ -117,7 +118,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   async function newWorld(seed: string, w: number, h: number) {
     const g = makeGame();
-    ui.showProgress('正在生成世界…', 0.05);
+    ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(label, p));
   }
 
@@ -127,7 +128,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   async function quickLoad() {
-    if (!quickSaveExists) { ui.toast('没有可用的快速存档'); return; }
+    if (!quickSaveExists) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.NoQuickSave')); return; }
     const text = await kvGet(QUICK_SAVE_KEY);
     if (!text) return;
     await loadFromJson(text);
@@ -137,7 +138,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     try {
       const { world, player } = loadSave(text);
       const g = makeGame();
-      ui.showProgress('读取存档…', 0.3);
+      ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
       g.player.hp = player.hp;
       g.player.x = player.x;
@@ -151,16 +152,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     } catch (e) {
       console.error(e);
       ui.hideProgress();
-      alert('存档读取失败：' + (e as Error).message);
+      alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     }
   }
 
   async function importWld(buf: Uint8Array) {
-    ui.showProgress('正在解析 .wld 地图…', 0.1);
+    ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ParsingWld'), 0.1);
     try {
       const { save, report, seedText, gameMode } = parseWldToSave(buf);
       (window as unknown as { __lastCompatReport?: unknown }).__lastCompatReport = report;
-      ui.showProgress('正在转换世界…', 0.7);
+      ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.ConvertingWld'), 0.7);
       const g = makeGame();
       // 直接消费内存 SaveData(2026-08 审计 #3:此前的 stringify→parse 双拷贝
       // 每次导入多出 2×20~50MB 峰值,且让 5 份全图副本并存更久)
@@ -170,7 +171,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       g.player.inv.add(ITEM_BY_KEY['copper_axe'], 1);
       g.player.inv.add(ITEM_BY_KEY['copper_sword'], 1);
       g.player.inv.add(ITEM_BY_KEY['torch'], 20);
-      ui.toast(`成功导入「${save.header.name}」(v${save.header.wldVersion})`);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.WldImported', save.header.name ?? '', save.header.wldVersion ?? 0));
       // 登记世界槽位并持久化：导入不再是一次性的，重进游戏可在世界列表中看到并继续游玩
       await worldStore.ensureLoaded();
       const names = new Set(worldStore.list().map((m) => m.name));
@@ -194,7 +195,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     } catch (e) {
       console.error(e);
       ui.hideProgress();
-      alert('.wld 导入失败：' + (e as Error).message);
+      alert(Lang.text('Mods.SandboxWorld.Toast.WldImportFailed', (e as Error).message));
     }
   }
 
@@ -262,7 +263,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   /** 从世界槽位读取并进入游戏 */
   async function loadWorldFlow(meta: WorldMeta) {
     const text = await worldStore.load(meta);
-    if (!text) { ui.toast('世界数据缺失或损坏'); return; }
+    if (!text) { ui.toast(Lang.text('Mods.SandboxWorld.Toast.WorldDataMissing')); return; }
     currentWorld = meta;
     await loadFromJson(text);
   }
@@ -325,8 +326,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     titleMenu = new TitleMenu(root, {
       onSinglePlayer: () => showCharacterSelect(),
       onSettings: () => openSettings(false),
-      onQuit: () => ui.toast('网页版暂不支持退出，直接关闭标签页即可'),
-      onCredits: () => ui.toast('SandboxWorld · 泰拉瑞亚 UI 复刻'),
+      onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
+      onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
     });
     installLegacyShim();
   }
@@ -364,8 +365,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     const json = saveGame(game.world, game.player, Date.now() - playStart);
     const mb = json.length / 1024 / 1024;
     void kvSetCompat(json).then((where) => {
-      if (where === 'fail') ui.toast('保存失败：存储不可用');
-      else ui.toast(`已保存（${where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : '本地'}）`);
+      if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+      else ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
     });
     // 多世界槽位（M3）：登记到 WorldStore
     if (currentWorld) {

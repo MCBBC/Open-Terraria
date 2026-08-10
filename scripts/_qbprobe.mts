@@ -3,7 +3,7 @@
 import { Enemy } from '../src/entities/Enemy.ts';
 import { TileStore } from '../src/world/TileStore.ts';
 import { World } from '../src/world/World.ts';
-import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI } from '../src/entities/bossAI_queenbee_plantera.ts';
+import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from '../src/entities/bossAI_queenbee_plantera.ts';
 import type { GameHooks } from '../src/entities/types.ts';
 
 const st = new TileStore(200, 300);
@@ -45,6 +45,7 @@ const run = (ticks: number) => {
       else if (style === 50) planteraHookAI(e, game as unknown as GameHooks, p);
       else if (style === 51) planteraAI(e, game as unknown as GameHooks, p);
       else if (style === 52) planteraTentacleAI(e, game as unknown as GameHooks, p);
+      else if (style === 53) planteraTentacle2AI(e, game as unknown as GameHooks, p);
       else e.fixedUpdate(1 / 60, game);
     }
   }

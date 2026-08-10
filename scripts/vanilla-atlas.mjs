@@ -63,6 +63,13 @@ const MISC = [
   'Projectile_441.png', 'Projectile_442.png', 'Projectile_545.png', 'Projectile_612.png',
   'Projectile_836.png', 'Projectile_838.png', 'Projectile_839.png', 'Projectile_840.png',
   'Projectile_950.png', 'Projectile_754.png', 'Projectile_755.png', 'Projectile_756.png',
+  // 邪教徒(464 冰雾/465 闪电/467 火球/468/490 仪式) + 光女(872 永恒彩虹/873 射线/874 极光/
+  // 919 光枪/922 王冠凝珠/923 太阳舞/926 凝胶珠)
+  'Projectile_464.png', 'Projectile_465.png', 'Projectile_467.png', 'Projectile_468.png', 'Projectile_490.png',
+  'Projectile_872.png', 'Projectile_873.png', 'Projectile_874.png', 'Projectile_919.png',
+  'Projectile_922.png', 'Projectile_923.png', 'Projectile_926.png',
+  // 蜂后毒刺 719 + 世花种子 275/276/277
+  'Projectile_719.png', 'Projectile_275.png', 'Projectile_276.png', 'Projectile_277.png',
   // 日月(Main.cs:62279 DrawSunAndMoon):太阳整图 + 月亮 8 相位竖条(Moon_N 50×400)
   'Sun.png',
   ...Array.from({ length: 9 }, (_, i) => `Moon_${i}.png`),

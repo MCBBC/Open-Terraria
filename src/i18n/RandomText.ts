@@ -56,7 +56,7 @@ export function randomPlayerName(): string {
     'WitchDoctorNames', 'PirateNames', 'StylistNames', 'StylistNames', 'TaxCollectorNames',
     'GolferNames', 'PrincessNames',
   ];
-  return Lang.randomFrom(pools[Math.floor(Math.random() * pools.length)], '泰拉瑞亚人');
+  return Lang.randomFrom(pools[Math.floor(Math.random() * pools.length)], Lang.text('Mods.SandboxWorld.DefaultPlayerName'));
 }
 
 // ===================== 死亡文本（Lang.cs:1010-1132 CreateDeathMessage） =====================

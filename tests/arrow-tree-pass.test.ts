@@ -12,6 +12,7 @@ function makeGame(): { game: GameHooks; world: World } {
     world,
     player: null,
     enemies: () => [],
+    critters: () => [],
     spawnDrop: () => null,
     damagePlayer: () => {},
     addDamageNumber: () => {},

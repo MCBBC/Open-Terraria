@@ -24,6 +24,12 @@ const rnd = (n: number): number => Math.floor(Math.random() * n);
 /** Main.rand.Next(a, b) → [a,b) */
 const rndRange = (a: number, b: number): number => a + Math.floor(Math.random() * (b - a));
 const clamp = (v: number, lo: number, hi: number): number => (v < lo ? lo : v > hi ? hi : v);
+/** 蜂后毒刺态悬浮步进(NPC.cs:30960-30977):与 accelTo 同构,但符号翻转时补步 ×2 */
+const step2 = (v: number, target: number, a: number): number => {
+  if (v < target) { v += a; if (v < 0 && target > 0) v += a * 2; }
+  else if (v > target) { v -= a; if (v > 0 && target < 0) v -= a * 2; }
+  return v;
+};
 
 // ============================================================================
 // AI_043 蜂后 222(NPC.cs:30312-30998)
@@ -203,7 +209,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
     const vy80 = e.y + e.h * 0.8;
     const num690 = player!.cx - e.cx;
     const num691 = player!.cy - 300 - e.cy;
-    let num692 = Math.hypot(num690, num691);
+    const num692 = Math.hypot(num690, num691);
     e.ai1 += 1;
     const num693 = 40 - Math.floor(5 * num658);   // expert 血量档 15/25/30/35 省略
     // 每隔 num693 tick 且位于玩家上方且视线通 → 毒刺 719
@@ -227,15 +233,13 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.vx = accelTo(e.vx, dx * t, 0.1);
       e.vy = accelTo(e.vy, dy * t, 0.1);
     } else if (num692 > 100) {
-      // 朝悬浮点(玩家上方 300)逼近 4 速 / 0.05 步进,符号翻转双步(:30935-30978)
+      // 朝悬浮点(玩家上方 300)逼近 4 速 / 0.05 步进(:30935-30978);
+      // 原版此分支符号翻转时步进 ×2(num689 * 2f),与 accelTo 单补步不同 → 专用步进
       direction = player!.cx < e.cx ? -1 : 1;
       e.facing = direction;
       const t = num688 / num692;
-      e.vx = accelTo(e.vx, num690 * t, num689);
-      e.vy = accelTo(e.vy, num691 * t, num689);
-      // 注:原版此处符号翻转时步进 ×2(velocity.X += num689 * 2f);
-      // accelTo 只单步,差异极小(0.05/tick)且仅反向瞬间,不单独展开
-      void num692;
+      e.vx = step2(e.vx, num690 * t, num689);
+      e.vy = step2(e.vy, num691 * t, num689);
     }
     const num703 = 20 - 5 * num658;
     if (e.ai1 > num693 * num703) {
@@ -376,8 +380,9 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     num795 *= s;
     num796 *= s;
   }
-  e.vx = accelTo(e.vx, num795, num794);
-  e.vy = accelTo(e.vy, num796, num794);
+  // 原版此段符号翻转时补步 ×2(num794 * 2f,:31984-32015)→ step2(同蜂后毒刺态)
+  e.vx = step2(e.vx, num795, num794);
+  e.vy = step2(e.vy, num796, num794);
   // 朝向玩家旋转(:32016-32019)
   e.spin = Math.atan2(p.cy - e.cy, p.cx - e.cx) + Math.PI / 2;
   e.x += e.vx;
@@ -548,6 +553,52 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
   }
   // 朝本体旋转(:32396-32405)
   e.spin = Math.atan2(boss.cy - e.cy, boss.cx - e.cx) - Math.PI / 2;
+  e.x += e.vx;
+  e.y += e.vy;
+}
+
+// ============================================================================
+// AI_053 世纪之花触须 264(NPC.cs:32406-32536):二阶段环绕本体漂移攻击。
+// ai[0]/ai[1] = 环绕偏移(px,每 120-480t 随机重掷 ±100);环绕半径 200,
+// 本体 <25%/10% 血各 +100;加速度 0.2(符号翻转 0.9 阻尼),速度钳 ±8;
+// ai[3]>0 时锚定 ai[3]-1 指定的 NPC(原版多人分割);本体消失 → 自毁。
+// ============================================================================
+export function planteraTentacle2AI(e: Enemy, game: GameHooks, player: Player | null) {
+  const l = la(e);
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; l[0] = 0; }
+  const boss = (game.enemies() as Enemy[]).find((n) => !n.dead && n.vanillaId === 262) ?? null;
+  if (!boss) { e.hp -= 9999; if (e.hp <= 0) e.dead = true; return; }
+  // 原版 :32426-32429:ai[3]>0 → 锚 ai[3]-1 的 NPC(本框架触须不设锚,恒随本体)
+  const anchor = e.ai3 > 0
+    ? (game.enemies() as Enemy[]).find((n) => !n.dead && n.id === e.ai3 - 1) ?? boss
+    : boss;
+  // 偏移重掷(:32432-32439)
+  l[0] -= 1;
+  if (l[0] <= 0) {
+    l[0] = rndRange(120, 480);
+    e.ai0 = rndRange(-100, 101);
+    e.ai1 = rndRange(-100, 101);
+  }
+  // 环绕半径随本体血量(:32442-32451;expert 动态半径省略)
+  let orbit = 200;
+  if (boss.hp < boss.maxHp * 0.25) orbit += 100;
+  if (boss.hp < boss.maxHp * 0.1) orbit += 100;
+  // 目标点 = 锚点 + 归一化偏移×半径;±0.2 步进,符号翻转 0.9 阻尼(:32467-32509)
+  let dx = anchor.cx + e.ai0 - anchor.cx;
+  let dy = anchor.cy + e.ai1 - anchor.cy;
+  const d = Math.hypot(dx, dy) || 1;
+  dx = (dx / d) * orbit;
+  dy = (dy / d) * orbit;
+  if (e.cx < anchor.cx + dx) { e.vx += 0.2; if (e.vx < 0 && dx > 0) e.vx *= 0.9; }
+  else if (e.cx > anchor.cx + dx) { e.vx -= 0.2; if (e.vx > 0 && dx < 0) e.vx *= 0.9; }
+  if (e.cy < anchor.cy + dy) { e.vy += 0.2; if (e.vy < 0 && dy > 0) e.vy *= 0.9; }
+  else if (e.cy > anchor.cy + dy) { e.vy -= 0.2; if (e.vy > 0 && dy < 0) e.vy *= 0.9; }
+  e.vx = Math.max(-8, Math.min(8, e.vx));
+  e.vy = Math.max(-8, Math.min(8, e.vy));
+  // 朝向旋转(:32526-32535)
+  if (dx > 0) { e.facing = 1; e.spin = Math.atan2(dy, dx); }
+  if (dx < 0) { e.facing = -1; e.spin = Math.atan2(dy, dx) + 3.14; }
+  void player;
   e.x += e.vx;
   e.y += e.vy;
 }

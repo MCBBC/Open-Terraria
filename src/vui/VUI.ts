@@ -81,13 +81,20 @@ export class VUI {
   // 另设心跳看门狗——任何原因导致 rAF 停摆（如被外部 cancel）1 秒内自动重启。
   private static loopRaf = 0;
   private static lastBeat = 0;
+  /** 循环代际：startLoop 重启时 +1，旧循环闭包发现不一致即自杀（防僵尸 rAF 并行累积） */
+  private static loopGen = 0;
+  /** 看门狗句柄：只注册一次——曾在 startLoop 内注册，rAF 停摆时每次重启各 +1 个定时器，
+   *  指数累积（实测挂机后 TimerFire 6300 次/秒、内存冲到 10.6GB） */
+  private static watchdogId = 0;
   /** 每帧回调（menuBg 背景驱动 / uiBlocking 同步等，由 mainFlow 注入） */
   static frameHook: ((dtMs: number) => void) | null = null;
 
   static startLoop() {
     if (VUI.loopRaf) return;
+    const gen = ++VUI.loopGen;
     let last = performance.now();
     const loop = () => {
+      if (VUI.loopGen !== gen) return; // 已被新循环取代：自杀，不再自我续期
       const now = performance.now();
       const dt = Math.min(100, now - last);
       last = now;
@@ -97,15 +104,17 @@ export class VUI {
       VUI.loopRaf = requestAnimationFrame(loop);
     };
     VUI.loopRaf = requestAnimationFrame(loop);
-    // 看门狗：心跳停摆或循环被杀 → 重启（幂等）
-    window.setInterval(() => {
-      if (!VUI.loopRaf) { VUI.startLoop(); return; }
-      if (performance.now() - VUI.lastBeat > 1000) {
-        cancelAnimationFrame(VUI.loopRaf);
-        VUI.loopRaf = 0;
-        VUI.startLoop();
-      }
-    }, 1000);
+    // 看门狗仅注册一次（幂等）
+    if (!VUI.watchdogId) {
+      VUI.watchdogId = window.setInterval(() => {
+        if (!VUI.loopRaf) { VUI.startLoop(); return; }
+        if (performance.now() - VUI.lastBeat > 1000) {
+          cancelAnimationFrame(VUI.loopRaf);
+          VUI.loopRaf = 0;
+          VUI.startLoop();
+        }
+      }, 1000);
+    }
   }
 
   static setState(state: UIState | null) {

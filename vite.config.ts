@@ -8,4 +8,7 @@ export default defineConfig({
   resolve: {
     extensions: ['.ts', '.mts', '.mjs', '.js', '.jsx', '.tsx', '.json'],
   },
+  // worker 打包格式：默认 'iife' 遇到 worker 图内代码分割/动态 import 会构建报错；
+  // 'es' 与 dev 态 module worker 一致（worldGen.worker 及其依赖全为静态 import）
+  worker: { format: 'es' },
 });

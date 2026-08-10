@@ -228,7 +228,7 @@ export class UI {
     body.style.cssText = 'font-size:13px; line-height:1.8; white-space:pre-wrap; color:#d8d4e4; margin:8px 0;';
     body.textContent = text;
     panel.appendChild(body);
-    const close = el('button', 'sw-btn', '关闭');
+    const close = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
     close.addEventListener('click', () => panel.remove());
     panel.appendChild(close);
     this.root.appendChild(panel);
@@ -239,7 +239,7 @@ export class UI {
     // 不 closeAll：会把已初始化的 HUD（快捷栏等）一起拆掉，报告只叠加一层
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:480px; max-height:80vh; overflow:auto;';
-    panel.appendChild(el('div', 'sw-title', '⚠ 导入兼容报告'));
+    panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.Compat.Title')));
     const info = el('div', '', `「${rpt.worldName}」 v${rpt.wldVersion} · ${rpt.size[0]}×${rpt.size[1]}<br>以下内容在本版本中被降级或跳过：`);
     info.style.cssText = 'font-size:12px; color:#9a8ab8; margin-bottom:8px;';
     panel.appendChild(info);
@@ -255,22 +255,22 @@ export class UI {
       if (entries.length > 40) ul.appendChild(el('div', '', `… 共 ${entries.length} 种（导出查看全部）`));
       panel.appendChild(ul);
     };
-    section('🧱 方块 → 降级为石块', rpt.tilesDegraded, 'degraded-to-stone', (id) => Lang.tileName(id));
-    section('🚫 方块 → 清空丢弃', rpt.tilesCleared, 'cleared', (id) => Lang.tileName(id));
-    section('🎒 宝箱物品 → 跳过', rpt.itemsSkipped, 'skipped', (id) => Lang.itemName(id));
+    section(Lang.text('Mods.SandboxWorld.Compat.TilesDegraded'), rpt.tilesDegraded, 'degraded-to-stone', (id) => Lang.tileName(id));
+    section(Lang.text('Mods.SandboxWorld.Compat.TilesCleared'), rpt.tilesCleared, 'cleared', (id) => Lang.tileName(id));
+    section(Lang.text('Mods.SandboxWorld.Compat.ItemsSkipped'), rpt.itemsSkipped, 'skipped', (id) => Lang.itemName(id));
     const row = el('div');
     row.style.cssText = 'display:flex; gap:8px; margin-top:8px;';
-    const bExport = el('button', 'sw-btn', '导出详情 JSON');
+    const bExport = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Compat.Export'));
     bExport.style.flex = '1';
     bExport.onclick = () => {
-      const blob = new Blob([JSON.stringify({ ...rpt, exportedAt: new Date().toISOString(), note: '把此文件交回开发者即可补全缺失内容' }, null, 2)], { type: 'application/json' });
+      const blob = new Blob([JSON.stringify({ ...rpt, exportedAt: new Date().toISOString(), note: Lang.text('Mods.SandboxWorld.Compat.Note') }, null, 2)], { type: 'application/json' });
       const a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
       a.download = `compat-report-${rpt.worldName.replace(/\s+/g, '_')}-${rpt.wldVersion}.json`;
       a.click();
       URL.revokeObjectURL(a.href);
     };
-    const bClose = el('button', 'sw-btn', '关闭');
+    const bClose = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
     bClose.style.flex = '1';
     bClose.onclick = () => panel.remove();
     row.appendChild(bExport);
@@ -835,7 +835,7 @@ export class UI {
     });
     this.trashEl = trash;
     left.appendChild(trash);
-    left.appendChild(equipRow('💫 配饰', ACCESSORY_START, 5)); // 3 列自动换行
+    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Accessories'), ACCESSORY_START, 5)); // 3 列自动换行
     left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Coins'), COIN_START, 3));
     body.appendChild(left);
 
@@ -876,7 +876,7 @@ export class UI {
     for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
-      block.style.cssText += 'width:32px; height:32px; background:none; cursor:pointer;';
+      block.style.cssText += 'width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer;';
       const icon = el('img') as HTMLImageElement;
       icon.draggable = false;
       icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block;';
@@ -903,10 +903,14 @@ export class UI {
   buffBar: HTMLElement | null = null;
   buffBlocks = new Map<BuffType, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
 
-  /** 每秒左右调用一次（由 Game 经 callbacks 驱动） */
+  /** 每秒左右调用一次（由 Game 经 callbacks 驱动）。
+   *  原版行为（Main.cs:42622）：背包/华美 UI 打开时整栏不画；时长文字用
+   *  LocalizedDuration 缩写格式（zh-Hans "30秒"/"2分30秒"），仅剩 >2 tick 时显示 */
   refreshBuffs() {
     if (!this.game || !this.buffBar) return;
     const buffs = this.game.player.buffs;
+    const invOpen = this.invPanel.style.display === 'block';
+    this.buffBar.style.display = invOpen ? 'none' : 'flex';
     for (const [t, ui] of this.buffBlocks) {
       const left = buffs.active.get(t);
       if (left === undefined) {
@@ -918,7 +922,11 @@ export class UI {
       const iconId = this.buffIconItem.get(t);
       if (iconId && !ui.icon.src) ui.icon.src = iconUrl(this.game, iconId);
       const s = Math.ceil(left);
-      ui.time.textContent = s >= 60 ? `${Math.floor(s / 60)}m${s % 60}` : String(s);
+      ui.time.textContent = s >= 60
+        ? (s % 60
+          ? Lang.text('Mods.SandboxWorld.Time.MinSec', Math.floor(s / 60), s % 60)
+          : Lang.text('Mods.SandboxWorld.Time.Minutes', Math.floor(s / 60)))
+        : Lang.text('Mods.SandboxWorld.Time.Seconds', s);
     }
   }
 

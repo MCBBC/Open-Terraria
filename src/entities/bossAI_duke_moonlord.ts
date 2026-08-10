@@ -128,7 +128,7 @@ const DUKE = {
   spinEvery: 4,        // num17 :49211
   spinBubbleSpd: 6,    // num18 :49212
   spinDashSpd: 20,     // num19 :49213
-} as const;
+};
 /** 旋转冲刺角速度 num20 = 2π/(num16/2) = 2π/60(:49214) */
 const DUKE_SPIN_RATE = TAU / (DUKE.spinT / 2);
 
@@ -219,7 +219,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
 
   // 玩家死/远离 5600px(:49218-49237):减速升空离场(原版另 EncourageDespawn(10);
   // 本工程 Boss 不参与 despawn 块,故仅保留升空)。原版此处无回血逻辑。
-  if (!player || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
+  if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     e.vy -= 0.4;
     e.ai0 = e.ai0 > 4 ? 5 : 0;
     e.ai2 = 0;
@@ -480,7 +480,8 @@ function dukeSharknado(e: Enemy, game: GameHooks, player: Player, st: DukeX, big
 
 /** AI_070 爆裂泡泡(NPC 371,NPC.cs:35122-35195):
  *  朝玩家漂移(风偏+微上浮),玩家贴近(外扩 40px)或 150t 后爆炸(体积扩到 100×100,
- *  4t 后消散)。原版命中是 justHit→爆炸而非死亡;本工程近似为 hp 受损即转爆炸。 */
+ *  4t 后消散)。原版命中是 justHit→爆炸而非死亡;本工程近似为 hp 受损即转爆炸。
+ *  简化:ai3 的随机 scale(:35134)无 Enemy 对应字段,仅记录不应用。 */
 export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   void game;
   if (e.ai0 !== 1 && e.hp < e.maxHp) { e.ai0 = 1; e.ai1 = 4; e.hp = e.maxHp; } // justHit→爆

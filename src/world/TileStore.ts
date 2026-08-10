@@ -26,8 +26,23 @@ export class TileStore {
   // tile 变更监听（chunk 缓存 / 光照脏标记 / 液体模拟统一从这里拿事件）
   private listeners: Array<(x: number, y: number) => void> = [];
 
-  constructor(w: number, h: number) {
+  constructor(w: number, h: number, bufs?: import('../workers/protocol').TileBuffers) {
     this.w = w; this.h = h;
+    // buffers 注入（worker transfer 重建路径）：直接以移交的 ArrayBuffer 包装 TypedArray，
+    // 跳过分配与拷贝。缺省 explored 由调用方（World.fromPacket）补齐
+    if (bufs) {
+      this.type = new Uint16Array(bufs.type);
+      this.flags = new Uint8Array(bufs.flags);
+      this.frameX = new Uint16Array(bufs.frameX);
+      this.frameY = new Uint16Array(bufs.frameY);
+      this.wall = new Uint16Array(bufs.wall);
+      this.liquid = new Uint8Array(bufs.liquid);
+      this.liquidType = new Uint8Array(bufs.liquidType);
+      this.half = new Uint8Array(bufs.half);
+      this.slope = new Uint8Array(bufs.slope);
+      this.wire = new Uint8Array(bufs.wire);
+      return;
+    }
     const n = w * h;
     this.type = new Uint16Array(n);
     this.flags = new Uint8Array(n);

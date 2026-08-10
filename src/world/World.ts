@@ -80,6 +80,26 @@ export class World {
     this.clock = new Clock(30 * 60 * 1000);
   }
 
+  /** 从 worker 数据包重建（buffer 已 transfer 移交，零拷贝包装）。
+   *  explored 未包含在包内（saveGame 不持久化、新生成/读档均全零）时按全零分配 */
+  static fromPacket(p: import('../workers/protocol').WorldPacket): World {
+    const w = new World(p.w, p.h, p.seed, p.name);
+    w.store = new TileStore(p.w, p.h, p.buf);
+    w.explored = p.buf.explored ? new Uint8Array(p.buf.explored) : new Uint8Array(p.w * p.h);
+    w.spawnX = p.spawnX; w.spawnY = p.spawnY;
+    w.groundLevel = p.groundLevel; w.rockLevel = p.rockLevel; w.lavaLine = p.lavaLine;
+    w.crimson = p.crimson; w.dungeonX = p.dungeonX; w.dungeonY = p.dungeonY; w.jungleX = p.jungleX;
+    w.exploredVersion = p.exploredVersion;
+    w.clock.timeOfDay = p.clock.timeOfDay;
+    w.clock.dayCount = p.clock.dayCount;
+    w.chests = p.chests;
+    w.signs = p.signs;
+    w.trees = p.trees;
+    w.flags = p.flags;
+    w.treeX = p.treeX; w.treeStyle = p.treeStyle; w.treeTops = p.treeTops;
+    return w;
+  }
+
   get w() { return this.store.w; }
   get h() { return this.store.h; }
   get tiles() { return this.store; }

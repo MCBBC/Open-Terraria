@@ -162,6 +162,13 @@ function genIdNames() {
     coin_copper: 71, coin_silver: 72, coin_gold: 73, sandstone_block: 3271, hardened_sand_block: 3272,
     table: 32, chair: 34, chandelier: 106, lantern: 136,
     corrupt_grass_seeds: 59, crimson_grass_seeds: 2171, minecart_item: 2343,
+    // 第二批：药水/剑/工具/扳手（全部有原版对应；剑按挥砍阔剑系取 Broadsword）
+    heal_potion: 188, agility_potion: 290, regen_potion: 289,
+    wood_sword: 24, wood_hammer: 196,
+    copper_sword: 3508, iron_sword: 4, silver_sword: 3514, gold_sword: 3520,
+    tin_sword: 3502, lead_sword: 3496, tungsten_sword: 3490, platinum_sword: 3484,
+    wand_of_sparking: 3069, amethyst_bolt: 739, red_wrench: 509,
+    actuator_item: 849, grand_design: 3625, // The Grand Design 的 internal 名即 MulticolorWrench
   };
   for (const k of keys) {
     const vi = k.match(/^vi_(\d+)_/);
