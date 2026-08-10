@@ -150,12 +150,28 @@ function genIdNames() {
   }
   const itemKeyToId = {};
   let matched = 0;
+  // snake_case 推断失败的人工别名(本仓库 key → 原版物品 id)。
+  // 全部有原版对应——名字一律走原版 12 语言译文,避免自造:
+  //   platform→WoodPlatform(94) door→WoodenDoor(25) workbench→WorkBench(36) anvil→IronAnvil(35)
+  //   mushroom_item→Mushroom(5) suspicious_eye→SuspiciousLookingEye(43)
+  //   coin_copper/silver/gold→71/72/73 sandstone_block→Sandstone(3271) hardened_sand_block→HardenedSand(3272)
+  //   table→WoodenTable(32) chair→WoodenChair(34) chandelier→CopperChandelier(106) lantern→ChainLantern(136)
+  //   corrupt/crimson_grass_seeds→59/2171 minecart_item→Minecart(2343)
+  const ITEM_KEY_ALIASES = {
+    platform: 94, door: 25, workbench: 36, anvil: 35, mushroom_item: 5, suspicious_eye: 43,
+    coin_copper: 71, coin_silver: 72, coin_gold: 73, sandstone_block: 3271, hardened_sand_block: 3272,
+    table: 32, chair: 34, chandelier: 106, lantern: 136,
+    corrupt_grass_seeds: 59, crimson_grass_seeds: 2171, minecart_item: 2343,
+  };
   for (const k of keys) {
     const vi = k.match(/^vi_(\d+)_/);
     if (vi) {
       const id = Number(vi[1]);
       if (items[id]) { itemKeyToId[k] = id; matched++; }
       continue;
+    }
+    if (ITEM_KEY_ALIASES[k] !== undefined && items[ITEM_KEY_ALIASES[k]]) {
+      itemKeyToId[k] = ITEM_KEY_ALIASES[k]; matched++; continue;
     }
     const id = Number(Object.keys(items).find((id) => items[id].replace(/([a-z0-9])([A-Z])/g, '$1_$2').toLowerCase() === k));
     if (id) { itemKeyToId[k] = id; matched++; }

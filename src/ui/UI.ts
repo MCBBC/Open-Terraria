@@ -863,22 +863,38 @@ export class UI {
     this.root.appendChild(this.invPanel);
   }
 
-  /** Buff 状态栏（常驻格 + 秒级倒计时，移植自 Maples BuffBar） */
+  /** Buff 状态栏（对齐原版 DrawInterface_Resources_Buffs，Main.cs:42618-42640）：
+   *  起点 (32,76)、每行 11 个（横距 38px）、行距 50px、裸 32×32 图标无背景板、
+   *  剩余时长文字在图标下方（ItemStack 字号 0.8 倍）、悬停高亮、右键取消
+   *  （TryRemovingBuff：非 debuff 播 SoundID 12=menuTick）、背包打开时隐藏 */
   private buildBuffBar() {
     this.buffBar = el('div');
-    this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:44px; left:14px; display:flex; gap:4px;';
+    // 32 + 10×38 宽容纳 11 个/行（wrap = 原版 num2=11 行卷绕，行距 50-32=18）
+    this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-wrap:wrap; width:412px; column-gap:6px; row-gap:18px;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
-    for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen]) {
+    for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
+      block.style.cssText += 'width:32px; height:32px; background:none; cursor:pointer;';
       const icon = el('img') as HTMLImageElement;
       icon.draggable = false;
-      icon.style.cssText = 'width:28px; height:28px; image-rendering:pixelated;';
+      icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block;';
       block.appendChild(icon);
       const time = el('span', '', '');
-      time.style.cssText = 'position:absolute; right:2px; bottom:0; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
+      time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
       block.appendChild(time);
+      // 悬停高亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4——CSS 渐变近似）
+      block.addEventListener('mouseenter', () => { icon.style.filter = 'brightness(1.35)'; });
+      block.addEventListener('mouseleave', () => { icon.style.filter = ''; });
+      // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12）
+      block.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        if (!this.game) return;
+        this.game.player.buffs.remove(t);
+        this.game.sfx.play('menuTick');
+        this.refreshBuffs();
+      });
       this.buffBar.appendChild(block);
       this.buffBlocks.set(t, { block, icon, time });
     }
@@ -1068,7 +1084,7 @@ export class UI {
     const map: Array<[BuffType, string]> = [
       [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
       [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
-      [BuffType.Regen, 'regen_potion'],
+      [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }
@@ -1079,7 +1095,7 @@ export class UI {
     const map: Array<[BuffType, string]> = [
       [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
       [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
-      [BuffType.Regen, 'regen_potion'],
+      [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

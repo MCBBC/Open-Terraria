@@ -6,8 +6,9 @@
 //
 // 与原版的两处结构性差异(无 Main 静态/无 whoAmI 槽位):
 //   1. 原版部件靠 Main.wofNPCIndex / realLife 锚定头(NewNPC 的 Start 只是槽位搜索
-//      起点,NPC.cs:81524-81559 不写 ai[])→ 这里统一用 ai1 = 头实体 id 锚定,
-//      与 bossAI.ts primePartAI 的 find head 模式一致;头失效/死亡 → 部件自毁。
+//      起点,NPC.cs:81524-81559 不写 ai[])→ 这里用闲置 ai 槽存头实体 id 锚定:
+//      之眼 ai1(其状态机只占 ai0)、饥饿者 ai3(其 ai1 被原版用作脱落倒计时),
+//      同 bossAI.ts primePartAI 的 find head 模式;头失效/死亡 → 部件自毁。
 //   2. Main.wofDrawAreaTop/Bottom 是 Main 静态(同屏只有一只血肉墙)→ 模块级变量,
 //      由墙初始化(localAI[0]==0 分支,:25726-25731)复位。
 import type { Enemy } from './Enemy';
@@ -22,7 +23,7 @@ let wofDrawAreaBottom = -1;
 
 // ---- 每实体辅助槽(原版 localAI[1..3],Enemy 只有 ai0-ai3 且 ai1/ai2 被 AI 主链占用) ----
 interface WallLocals { despawnT: number; roarT: number }        // localAI[1] / localAI[3]
-interface EyeLocals { charge: number; burst: number }           // localAI[1] / localAI[2]
+interface EyeLocals { charge: number; burst: number; lastHeadHp: number } // localAI[1]/[2] + 血量同步基线
 const wallLocals = new WeakMap<Enemy, WallLocals>();
 const eyeLocals = new WeakMap<Enemy, EyeLocals>();
 const wallLocalOf = (e: Enemy): WallLocals => {
@@ -32,7 +33,7 @@ const wallLocalOf = (e: Enemy): WallLocals => {
 };
 const eyeLocalOf = (e: Enemy): EyeLocals => {
   let l = eyeLocals.get(e);
-  if (!l) { l = { charge: 0, burst: 0 }; eyeLocals.set(e, l); }
+  if (!l) { l = { charge: 0, burst: 0, lastHeadHp: 0 }; eyeLocals.set(e, l); }
   return l;
 };
 
@@ -44,9 +45,12 @@ const baseOf = (e: Enemy) => {
   return b;
 };
 
-/** 按 ai1 锚定找血肉墙本体(原版 Main.wofNPCIndex;头失效 → 部件自毁) */
+/** 锚定槽:之眼用 ai1(其状态机只占 ai0),饥饿者用 ai3(其 ai1 被原版用作脱落倒计时) */
+const headAnchor = (e: Enemy): number => (e.vanillaId === 115 ? e.ai3 : e.ai1);
+
+/** 按锚定槽找血肉墙本体(原版 Main.wofNPCIndex;头失效 → 部件自毁) */
 const headOf = (e: Enemy, game: GameHooks): Enemy | null => {
-  const head = (game.enemies() as Enemy[]).find((n) => n.id === e.ai1 && !n.dead);
+  const head = (game.enemies() as Enemy[]).find((n) => n.id === headAnchor(e) && !n.dead);
   if (!head || head.vanilla?.aiStyle !== 27) return null;
   return head;
 };
@@ -112,9 +116,10 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
     if (countType(game, 117) < 10) {
       const leech = spawnPart(game, e, 117); // 117 aiStyle 6 蠕虫,已有实现
       if (leech) {
+        // :25818 坐标是底部中心(NewNPC Bottom 锚点,NPC.cs:81547):中心 X、墙中心下 20
         leech.x = e.cx - leech.w / 2;
-        leech.y = e.y + e.h / 2 + 20 - leech.h / 2; // (position + height/2 + 20,:25818)
-        leech.vx = e.facing * 8;                    // :25820 沿推进方向甩出
+        leech.y = e.y + e.h / 2 + 20 - leech.h;
+        leech.vx = e.facing * 8; // :25820 沿推进方向甩出
       }
     }
   }
@@ -212,23 +217,25 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
 
   // ---- 首帧部件生成(:26127-26140 localAI[0]==1 时执行一次):
   //      双眼 114(上眼 ai0=1 贴顶沿半程 / 下眼 ai0=-1 贴底沿半程)+ 11 只 Hungry 115
-  //      (ai0 = k*0.1-0.05 沿空腔竖向均布)。ai1 = 头实体 id 为锚定(见文件头说明) ----
+  //      (ai0 = k*0.1-0.05 沿空腔竖向均布)。眼 ai1 / Hungry ai3 = 头实体 id 锚定
+  //      (见文件头说明与 hungryAI 注释) ----
   if (e.ai3 === 1) {
     e.ai3 = 2;
+    // 生成坐标均为底部中心(NewNPC Bottom 锚点,NPC.cs:81547):X = 墙左沿,Y = 给定值
     const eyeTop = spawnPart(game, e, 114);
     if (eyeTop) {
-      eyeTop.x = e.x; eyeTop.y = (e.cy + wofDrawAreaTop) / 2 - eyeTop.h / 2;
+      eyeTop.x = e.x; eyeTop.y = (e.cy + wofDrawAreaTop) / 2 - eyeTop.h;
       eyeTop.ai0 = 1; eyeTop.ai1 = e.id; eyeTop.bInit = true;
     }
     const eyeBottom = spawnPart(game, e, 114);
     if (eyeBottom) {
-      eyeBottom.x = e.x; eyeBottom.y = (e.cy + wofDrawAreaBottom) / 2 - eyeBottom.h / 2;
+      eyeBottom.x = e.x; eyeBottom.y = (e.cy + wofDrawAreaBottom) / 2 - eyeBottom.h;
       eyeBottom.ai0 = -1; eyeBottom.ai1 = e.id; eyeBottom.bInit = true;
     }
     const hungryY = (e.cy + wofDrawAreaBottom) / 2;
     for (let k = 0; k < 11; k++) {
       const h = spawnPart(game, e, 115);
-      if (h) { h.x = e.x; h.y = hungryY - h.h / 2; h.ai0 = k * 0.1 - 0.05; h.ai1 = e.id; h.bInit = true; }
+      if (h) { h.x = e.x; h.y = hungryY - h.h; h.ai0 = k * 0.1 - 0.05; h.ai3 = e.id; h.bInit = true; }
     }
   }
 
@@ -254,11 +261,13 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
   const head = headOf(e, game);
   // :26142-26146 Main.wofNPCIndex<0(墙已不在)→ 自毁
   if (!head) { e.dead = true; return; }
-  // :26147-26152 realLife 血量共享:眼受到的伤害回流墙(原版 StrikeNPC 按 realLife 转移,
-  // 此处用"眼 hp 低于同步值 = 本 tick 受过击"等价模拟),再镜像墙血量
-  if (e.hp < head.hp) head.hp = e.hp;
-  if (head.hp > 0) { e.hp = head.hp; e.maxHp = head.maxHp; }
   const L = eyeLocalOf(e);
+  // :26147-26152 realLife 血量共享:眼受到的伤害回流墙(原版 StrikeNPC 按 realLife 转移),
+  // 再镜像墙血量。回流判定:仅当墙自身血量本 tick 未变(head.hp == 上次同步值)且眼血
+  // 低于同步值时才算"眼的独立伤害"(墙血只单调降,被回补/改档时不得误判)
+  if (head.hp === L.lastHeadHp && e.hp < head.hp) head.hp = e.hp;
+  L.lastHeadHp = head.hp;
+  if (head.hp > 0) { e.hp = head.hp; e.maxHp = head.maxHp; }
 
   // :26157-26159 X 钉在墙左沿,朝向随墙
   e.x = head.x;
@@ -315,7 +324,8 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ================= aiStyle 29 饥饿者 115(NPC.cs:26299-26496) =================
 
 /** ai0 = 沿空腔竖向的挂点比例(墙生成时 -0.05..0.95 均布),ai1 = 脱落倒计时(0=挂墙),
- *  ai2 = 环绕半径爆发计时(100-200 内 ×1.3,200 复位)。ai1 = 头实体 id 锚定(文件头说明)。
+ *  ai2 = 环绕半径爆发计时(100-200 内 ×1.3,200 复位)。ai3 = 头实体 id 锚定
+ *  (原版无此槽语义,靠 Main.wofNPCIndex;见文件头说明)。
  *  挂墙(ai1==0):绕锚点(墙中心 X, 空腔顶 + 跨度×ai0)以 ±0.1 步进追"锚点 + 朝玩家
  *  偏移(钳到半径 num415)",速度钳 ±4(经典);受击 → ai1=10 脱落数 tick 自由飞行;
  *  墙血 <75%/<50% 时半径 300→500→700、伤害 45/60、防御 20/30。 */

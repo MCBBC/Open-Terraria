@@ -33,7 +33,8 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Resistance]: { vanillaBuff: 21, descKey: 'Mods.SandboxWorld.Buff.Resistance.Desc', fallbackName: '耐药性' },
   [BuffType.Thorns]: { vanillaBuff: 14, descKey: 'Mods.SandboxWorld.Buff.Thorns.Desc', fallbackName: '荆棘' },
   [BuffType.Regen]: { vanillaBuff: 2, descKey: 'Mods.SandboxWorld.Buff.Regen.Desc', fallbackName: '恢复' },
-  [BuffType.Honey]: { vanillaBuff: 48, descKey: 'Mods.SandboxWorld.Buff.Honey.Desc', fallbackName: '蜂蜜' },
+  // 蜂蜜描述直接用原版 BuffDescription.Honey（12 语言现成，语义一致）
+  [BuffType.Honey]: { vanillaBuff: 48, descKey: 'BuffDescription.Honey', fallbackName: '蜂蜜' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

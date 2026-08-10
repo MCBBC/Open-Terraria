@@ -3275,7 +3275,7 @@ export class Game implements GameHooks {
     const spawnY = Math.max(4, ty - 12) * TILE;
     const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
-      : key === 'destroyer' ? 134 : key === 'twins' ? 125 : -1;
+      : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113 : -1;
     if (vanillaId >= 0 && Enemy.fromVanilla) {
       const head = Enemy.fromVanilla(vanillaId, tx * TILE + 8, spawnY);
       if (head) {
@@ -3294,6 +3294,10 @@ export class Game implements GameHooks {
         if (vanillaId === 134) {
           // 毁灭者:地下落位(原版 SpawnNPC 走地下生成;80 段链由 destroyerAI 首帧补)
           head.y = Math.min(st.h - 10, Math.floor(this.world.rockLevel) + 30) * TILE;
+        }
+        if (vanillaId === 113) {
+          // 血肉墙:地狱层落位(原版向导巫毒娃娃入熔岩;2 眼+11 饥饿者由 AI 首帧补)
+          head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
         }
         this.sfx.playWav('roar');
         this.cb.onToast('你感到有个邪恶的东西在看着你……');

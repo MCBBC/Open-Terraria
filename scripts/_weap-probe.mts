@@ -24,38 +24,52 @@ const out = await page.evaluate(async () => {
   if (!game?.world) { res.err = 'world not ready'; return res; }
   res.worldReadyMs = Date.now() - t0;
 
-  const ITEM_BY_KEY = await import('/src/data/items.ts').then((m: any) => m.ITEM_BY_KEY);
-  const fire = async (key: string, holdTicks = 0) => {
+  const itemsMod = await (new Function('return import("/src/data/items.ts")')() as Promise<any>);
+  const ITEM_BY_KEY = itemsMod.ITEM_BY_KEY;
+  const ITEM_DEFS = itemsMod.ITEM_DEFS;
+  // 按 vid 反查 key（slug 命名不稳定）
+  const keyByVid = (vid: number): string | null => {
+    const d = ITEM_DEFS.find((x: any) => x.vid === vid || (/^vi_(\d+)_/.exec(x.key)?.[1] | 0) === vid);
+    return d ? d.key : null;
+  };
+  const fire = async (vid: number, holdTicks = 0) => {
+    const key = keyByVid(vid);
+    if (!key) return { missing: true, vid };
     const id = ITEM_BY_KEY[key];
-    if (id === undefined) return { missing: true };
+    if (id === undefined) return { missing: true, key };
     const inv = game.player.inv;
     inv.slots[inv.selected] = { id, stack: 10 };
-    const before = game.entities.projectiles.length;
+    const seen = new Set<string>();
+    const sample = () => {
+      for (const p of game.entities.projectiles) seen.add(p.constructor.name + ':' + (p.projId ?? '?'));
+    };
     game.input.mouseDown = true;
     game.input.mouseX = game.renderer.canvas.width / 2 + 100;
     game.input.mouseY = game.renderer.canvas.height / 2;
-    for (let i = 0; i < (holdTicks || 5); i++) {
+    const total = holdTicks || 5;
+    for (let i = 0; i < total + 10; i++) {
+      game.input.mouseDown = true; // 模拟物理按住（游戏侧掷出会消费一次 mouseDown）
       await new Promise((r) => setTimeout(r, 16));
+      if (i >= total - 2) sample(); // 覆盖按住窗口与紧邻帧（短命投射物别漏采）
     }
-    if (!holdTicks) game.input.mouseDown = false;
-    await new Promise((r) => setTimeout(r, 400));
-    const after = game.entities.projectiles;
     game.input.mouseDown = false;
+    await new Promise((r) => setTimeout(r, 400));
+    sample();
     return {
-      spawned: after.length > before || after.some((p: any) => p.projId !== undefined && (p as any).vx !== 0),
-      projTypes: after.slice(-3).map((p: any) => p.constructor.name + ':' + (p.projId ?? '?')),
+      key,
+      seenTypes: [...seen],
       mana: game.player.mana,
       stackLeft: inv.slots[inv.selected]?.stack,
     };
   };
-  res.boomerang = await fire('vi_55_enchanted_boomerang');
-  res.spear = await fire('vi_274_spear');
-  res.yoyo = await fire('vi_3278', 40); // 木悠悠球，按住 40 tick
+  res.boomerang = await fire(55);
+  res.spear = await fire(274);
+  res.yoyo = await fire(3278, 40); // 木悠悠球，按住 40 tick
   game.input.mouseDown = false;
   await new Promise((r) => setTimeout(r, 500));
-  res.grenade = await fire('vi_166_grenade');
-  res.staff = await fire('vi_739_amethyst_staff');
-  res.sword = await fire('vi_4_iron_shortsword');
+  res.grenade = await fire(166);
+  res.staff = await fire(739);
+  res.sword = await fire(4);
   return res;
 });
 console.log(JSON.stringify(out, null, 1));

@@ -97,9 +97,11 @@ export class Arrow extends Entity {
     if (!world.store.inBounds(tx, ty)) { this.dead = true; return; }
     const tileType = world.store.get(tx, ty);
     if (tileType !== 0) {
-      // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍，箭继续飞行
+      // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍
       game.cutTile(tx, ty);
-      if (world.store.get(tx, ty) === 0) return; // 砍掉了（非实心）：箭不受阻挡
+      // 阻挡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格
+      // 箭直接穿过(此前 tileType!==0 一刀切,箭会被树挡住——树 solid:false)
+      if (!world.store.isSolid(tx, ty)) return;
       // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
       if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
       this.dead = true;

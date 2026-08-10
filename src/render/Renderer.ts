@@ -57,8 +57,8 @@ const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
 const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
 // 旋转族 NPC（原版 npc.rotation 驱动绘制朝向；FindFrame 不做朝向翻转）：
-// 35/68=骷髅王头/守卫、125/126=双子、127-131=Prime 头+四部件、134-136=毁灭者链
-const ROTATION_NPC = new Set([35, 68, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136]);
+// 35/68=骷髅王头/守卫、113-115=血肉墙/之眼/饥饿者、125/126=双子、127-131=Prime 头+四部件、134-136=毁灭者链
+const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136]);
 
 /** 按原版 FindFrame 分族规则算当前帧 index */
 function vanillaFrameIdx(e: Enemy, frames: number): number {
