@@ -31,6 +31,9 @@ export const Lang = {
 
   has(path: string): boolean { return languageManager.exists(path); },
 
+  /** 聊天池随机一条（XxxChatter 类目；原版 Language.SelectRandom(Lang.CreateDialogFilter)） */
+  chatter(category: string): string | null { return languageManager.randomFromCategory(category); },
+
   // ---- Legacy 数组等价物(Lang.cs:475-551 InitializeLegacyLocalization)----
   /** gen[i] → LegacyWorldGen.i */
   gen(i: number): string { return languageManager.getTextValue(`LegacyWorldGen.${i}`); },

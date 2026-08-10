@@ -1028,7 +1028,6 @@ export class Renderer {
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh, r.sw, r.sh);
         ctx.filter = 'none';
         ctx.restore();
-        this.drawNpcBubble(n);
         return;
       }
       // 贴图条懒加载首帧未就绪：落入下方程序化兜底，本帧后懒加载完成
@@ -1040,20 +1039,6 @@ export class Renderer {
     ctx.scale(n.facing >= 0 ? 1 : -1, 1);
     ctx.drawImage(spr.canvas, -spr.fw / 2, -spr.fh / 2, spr.fw, spr.fh);
     ctx.restore();
-    this.drawNpcBubble(n);
-  }
-
-  private drawNpcBubble(n: TownNPC) {
-    const ctx = this.ctx;
-    if (n.bubble) {
-      ctx.font = '12px sans-serif';
-      const wText = ctx.measureText(n.bubble).width + 10;
-      ctx.fillStyle = 'rgba(255,255,255,0.92)';
-      ctx.fillRect(n.cx - wText / 2, n.y - 26, wText, 18);
-      ctx.fillStyle = '#222';
-      ctx.textAlign = 'center';
-      ctx.fillText(n.bubble, n.cx, n.y - 13);
-    }
   }
 
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number } | null) {

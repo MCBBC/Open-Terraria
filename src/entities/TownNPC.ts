@@ -4,7 +4,6 @@
 // （frameCounter += |vx|*2+1 每 tick，>6 推进一帧，越界回卷帧2）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
-import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
@@ -28,11 +27,12 @@ export class TownNPC extends Entity {
   /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
    *  原版观感也是整日守在门口走廊 */
   stationary = false;
+  /** 被绑待救援（原版 BoundGoblin105/BoundWizard106/BoundMechanic123/WebbedStylist122/
+   *  Golfer589：原地不动，右键解救 → savedXxx 旗标置位成为正式城镇 NPC） */
+  bound = false;
   /** 白天游走但不远离 home(守卫老人:锚地牢门口走廊,防走失) */
   leashHome = false;
   talkCooldown = 0;
-  bubble: string | null = null;
-  bubbleT = 0;
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -75,10 +75,15 @@ export class TownNPC extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     this.animT++;
     if (this.iframes > 0) this.iframes--;
-    if (this.talkCooldown > 0) this.talkCooldown--;
-    if (this.bubbleT > 0) { this.bubbleT--; if (this.bubbleT === 0) this.bubble = null; }
     const world = game.world;
-    const player = (game as unknown as { player: Player }).player;
+
+    // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc
+    if (this.bound) {
+      this.vx = 0;
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, world, this.vx, this.vy);
+      return;
+    }
 
     let wantDir = 0;
     if (!this.stationary && world.clock.isDay) {
@@ -130,17 +135,6 @@ export class TownNPC extends Entity {
       if (this.frame >= total - extra) this.frame = 2;
     }
 
-    // 对话气泡：玩家靠近时偶发展示
-    if (player && !player.dead && this.talkCooldown === 0) {
-      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
-      if (d < TILE * 4 && Math.random() < 0.004) {
-        this.bubble = this.npcKey === 'guide'
-          ? '你好！用镐挖矿，用工作台做工具。'
-          : '……';
-        this.bubbleT = 240;
-        this.talkCooldown = 1200;
-      }
-    }
   }
 
   draw() { /* Renderer 统一绘制 */ }

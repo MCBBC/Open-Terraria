@@ -103,15 +103,18 @@ export class ChunkCache {
     }
   }
 
-  /** 每帧最多重绘 maxN 个脏 chunk */
-  flushDirty(maxN = 4) {
+  /** 每帧重绘脏 chunk:数量上限 maxN 之外再加时间预算 budgetMs——
+   *  跑图/全量标脏时烘焙突发不再挤占帧预算(实测 87ms 尖峰来源) */
+  flushDirty(maxN = 4, budgetMs = 6) {
     let n = 0;
+    const t0 = performance.now();
     while (this.dirtyQueue.length && n < maxN) {
       const k = this.dirtyQueue.shift()!;
       const cx = k & 0xffff, cy = (k >> 16) & 0xffff;
       if (this.chunks.get(k) !== undefined) continue; // 已重建
       this.get(cx, cy);
       n++;
+      if (performance.now() - t0 > budgetMs) break; // 单 chunk 烘焙超预算也至少完成 1 个
     }
   }
 

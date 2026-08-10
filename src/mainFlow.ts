@@ -4,7 +4,8 @@ import { Game } from './core/Game';
 import { UI } from './ui/UI';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
-import { saveGame, loadSave, loadSaveData } from './save/SaveFile';
+import { loadSave, loadSaveData } from './save/SaveFile';
+import { saveClient } from './workers/SaveClient';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { parseWldToSave } from './wld/WldImport';
@@ -421,19 +422,30 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   function doSave() {
     if (!game) return;
-    const json = saveGame(game.world, game.player, Date.now() - playStart);
-    const mb = json.length / 1024 / 1024;
-    void kvSetCompat(json).then((where) => {
-      if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
-      else {
-        quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
-        ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+    // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
+    // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
+    saveClient.ensure();
+    void saveClient.save(game.world, game.player, Date.now() - playStart).then((json) => {
+      const mb = json.length / 1024 / 1024;
+      void kvSetCompat(json).then((where) => {
+        if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+        else {
+          quickSaveExists = true; // 同会话存档后 quickLoad 立即可用（此前闭包标志只在建流时查一次）
+          ui.toast(Lang.text('Mods.SandboxWorld.Toast.Saved', where === 'idb' ? mb.toFixed(1) + ' MB → IndexedDB' : Lang.text('Mods.SandboxWorld.Save.Local')));
+        }
+      }).catch((e) => {
+        console.error('kvSet failed', e);
+        ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
+      });
+      // 多世界槽位（M3）：登记到 WorldStore
+      if (currentWorld) {
+        void worldStore.save(currentWorld, json, Date.now() - playStart).catch((e) => console.error('worldStore.save failed', e));
       }
+    }).catch((e) => {
+      // 回退同步 saveGame 也失败(异常世界状态)——如实报告,不留 unhandled rejection
+      console.error('save failed', e);
+      ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
     });
-    // 多世界槽位（M3）：登记到 WorldStore
-    if (currentWorld) {
-      void worldStore.save(currentWorld, json, Date.now() - playStart);
-    }
   }
 
   // KvStore 延迟引入避免顶层副作用顺序问题

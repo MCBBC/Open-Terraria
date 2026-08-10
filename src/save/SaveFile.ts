@@ -1,46 +1,14 @@
 // 自有存档格式：JSON 外壳（人可读）+ RLE 二进制 tile 段（base64）
+// 序列化纯核心在 ./serialize(无 DOM/World 依赖,主线程与 save.worker.ts 共用同一实现);
+// 本文件保留 SaveData 类型/读档解码与主线程同步 saveGame(兼容入口,worker 不可用时回退)。
 import type { World } from '../world/World';
 import { World as WorldClass } from '../world/World';
 import type { Player } from '../entities/Player';
+import { serializeSave } from './serialize';
+import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 
-// ---- varint / base64 工具 ----
-// 性能(2026-08 审计 #2):RLE 输出此前是裸 number[](boxed,8B/元素,push 增长),
-// 6400×1800 世界存档瞬时 64~192MB;现改为密度增长的 Uint8Array(varint 字节流,
-// 输出字节与旧实现逐位一致,存档格式不变)
-class ByteWriter {
-  buf = new Uint8Array(1 << 16);
-  len = 0;
-  private grow(need: number) {
-    if (this.len + need <= this.buf.length) return;
-    let cap = this.buf.length;
-    while (cap < this.len + need) cap *= 2;
-    const nb = new Uint8Array(cap);
-    nb.set(this.buf.subarray(0, this.len));
-    this.buf = nb;
-  }
-  varint(v: number) {
-    v = v < 0 ? 0 : v;
-    this.grow(5);  // 32 位 varint 至多 5 字节
-    while (v >= 0x80) {
-      this.buf[this.len++] = (v & 0x7f) | 0x80;
-      v >>>= 7;
-    }
-    this.buf[this.len++] = v;
-  }
-  bytes(): Uint8Array {
-    return this.buf.subarray(0, this.len);
-  }
-}
-
-export function bytesToB64(u8: Uint8Array): string {
-  // 分块拼接(8192)避免逐字符 += 的 ConsString 链;输出与逐字符版一致
-  let s = '';
-  const CH = 8192;
-  for (let i = 0; i < u8.length; i += CH) {
-    s += String.fromCharCode.apply(null, u8.subarray(i, Math.min(i + CH, u8.length)) as unknown as number[]);
-  }
-  return btoa(s);
-}
+export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
+export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 
 function b64ToBytes(b64: string): Uint8Array {
   const s = atob(b64);
@@ -60,110 +28,28 @@ function readVarint(u8: Uint8Array, pos: { i: number }): number {
   return v;
 }
 
-// ---- 正式 RLE 格式 ----
-// tiles 每条目: varint(run-1) varint(type) [varint(frameX) varint(frameY) 仅当 type!=0]
-// walls/liquid: varint(run-1) varint(value)
-
-export interface SaveData {
-  format: 'sandboxworld.save';
-  version: number;
-  header: {
-    name: string; seed: number; width: number; height: number;
-    spawn: [number, number]; groundLevel: number; rockLevel: number; lavaLine?: number;
-    crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
-    treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
-    created: number; playTimeMs: number;
-    wldVersion?: number;
-  };
-  clock: { timeOfDay: number; dayCount: number };
-  tiles: string;   // base64 RLE
-  walls: string;
-  liquid: string;
-  liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜）
-  wire?: string;       // base64 RLE 电路位（bit0-3 四色线 bit4 致动器 bit5 已致动；旧档缺此字段=全 0）
-  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
-  player: {
-    hp: number; x: number; y: number;
-    inventory: Array<{ id: number; stack: number } | null>;
-    selected: number;
-    baseMaxHp?: number;   // 生命上限（水晶之心/生命果扩容；旧档缺省 100）
-    baseMaxMana?: number; // 魔力上限（魔力水晶扩容；旧档缺省 20）
-    mana?: number;        // 当前魔力
-  };
-  npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null }>;
-  signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
-  flags: Record<string, boolean>;
-}
-
-export function rlePairs(values: ArrayLike<number>): Uint8Array {
-  const out = new ByteWriter();
-  const n = values.length;
-  let i = 0;
-  while (i < n) {
-    const v = values[i];
-    let run = 1;
-    while (i + run < n && values[i + run] === v && run < 0x7fffffff) run++;
-    out.varint(run - 1);
-    out.varint(v);
-    i += run;
-  }
-  return out.bytes();
-}
-
-export function rleTiles(st: { type: Uint16Array; frameX: Uint16Array; frameY: Uint16Array }): Uint8Array {
-  const out = new ByteWriter();
-  const n = st.type.length;
-  let i = 0;
-  while (i < n) {
-    const t = st.type[i], fx = st.frameX[i], fy = st.frameY[i];
-    let run = 1;
-    while (i + run < n && st.type[i + run] === t && st.frameX[i + run] === fx && st.frameY[i + run] === fy) run++;
-    out.varint(run - 1);
-    out.varint(t);
-    if (t !== 0) {
-      out.varint(fx);
-      out.varint(fy);
-    }
-    i += run;
-  }
-  return out.bytes();
-}
-
+/** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
 export function saveGame(world: World, player: Player, playTimeMs: number): string {
   const st = world.store;
-  // 幽灵净化:存档格式不携带 active 位(加载时 type≠0 即激活),
-  // 非活性格上的残留 type 必须归零,否则重读后全部变成浮空实体块
-  for (let i = 0; i < st.type.length; i++) {
-    if (!st.flags[i] && st.type[i] !== 0) st.type[i] = 0;
-  }
-  const data: SaveData = {
-    format: 'sandboxworld.save',
-    version: 2,
-    header: {
-      name: world.name, seed: world.seed, width: st.w, height: st.h,
-      spawn: [world.spawnX, world.spawnY], groundLevel: world.groundLevel, rockLevel: world.rockLevel,
-      lavaLine: world.lavaLine,
-      treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
-      crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
-      created: Date.now(), playTimeMs,
-    },
-    clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount },
-    tiles: bytesToB64(rleTiles(st)),
-    walls: bytesToB64(rlePairs(st.wall)),
-    liquid: bytesToB64(rlePairs(st.liquid)),
-    liquidType: bytesToB64(rlePairs(st.liquidType)),
-    wire: bytesToB64(rlePairs(st.wire)),
-    chests: world.chests,
-    player: {
-      hp: player.hp, x: player.x, y: player.y,
-      inventory: player.inv.slots, selected: player.inv.selected,
-      baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
-    },
-    npcs: [],
-    signs: world.signs,
-    flags: world.flags,
+  const view: SaveStoreView = {
+    type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
+    wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
   };
-  return JSON.stringify(data);
+  const meta: SaveMeta = {
+    name: world.name, seed: world.seed, w: st.w, h: st.h,
+    spawnX: world.spawnX, spawnY: world.spawnY,
+    groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
+    treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+    crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
+    timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
+    chests: world.chests, signs: world.signs, flags: world.flags,
+  };
+  const playerData: SaveData['player'] = {
+    hp: player.hp, x: player.x, y: player.y,
+    inventory: player.inv.slots, selected: player.inv.selected,
+    baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
+  };
+  return serializeSave(view, meta, playerData, playTimeMs);
 }
 
 export function loadSave(json: string): ReturnType<typeof loadSaveData> {

@@ -546,7 +546,94 @@ export class Game implements GameHooks {
     if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
       this.maybeRespawnOldMan();
     }
+    // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
+    // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
+    this.placeBoundRescueNpcs();
     this.cb.onInventoryChanged();
+  }
+
+  /** 救援 NPC 放置（原版世界生成放置 bound NPC：哥布林/巫师=洞穴层、机械师=地牢内部、
+   *  造型师=蜘蛛巢(墙62)、高尔夫球手=地下沙漠(墙216/217/187)、税务员=地狱；
+   *  巫师仅困难模式。原版为独立类型 105/106/122/123，此处以 TownNPC.bound 近似） */
+  private placeBoundRescueNpcs() {
+    const st = this.world.store;
+    // 机械师：地牢入口向下找地牢墙内空气落脚
+    if (this.world.dungeonX > 0) {
+      const DUNG_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+      const dx = this.world.dungeonX;
+      const y0 = (this.world.dungeonY || Math.floor(this.world.groundLevel)) + 60;
+      for (let y = y0; y < Math.min(st.h - 60, y0 + 300); y++) {
+        if (st.isSolid(dx, y) || !DUNG_WALLS.has(st.wall[st.idx(dx, y)])) continue;
+        if (st.isSolid(dx, y - 1) || st.isSolid(dx, y - 2)) continue;
+        if (this.placeBoundNpc('mechanic', 'savedMech', dx, y - 1)) break;
+      }
+    }
+    // 按墙类型扫描落脚（蜘蛛巢 62 / 地下沙漠 216/217/187）
+    const findByWall = (walls: Set<number>, key: string, flag: string): boolean => {
+      for (let x = 20; x < st.w - 20; x += 7) {
+        for (let y = Math.floor(this.world.rockLevel) + 20; y < st.h - 260; y += 3) {
+          if (st.isSolid(x, y) || !walls.has(st.wall[st.idx(x, y)])) continue;
+          if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2) || !st.isSolid(x, y + 1)) continue;
+          if (this.placeBoundNpc(key, flag, x, y - 1)) return true;
+        }
+      }
+      return false;
+    };
+    findByWall(new Set([62]), 'stylist', 'savedStylist');
+    findByWall(new Set([216, 217, 187]), 'golfer', 'savedGolfer');
+    // 哥布林：洞穴层（岩石层下 60..h-350）随机列扫落脚
+    const g = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
+    if (g) this.placeBoundNpc('goblin_tinkerer', 'savedGoblin', g[0], g[1]);
+    // 税务员：地狱层（h-170..h-60；原版为"酷刑者"NPC+净化粉转化，此处近似直接解救）
+    const t = this.findBoundSpotByDepth(st.h - 170, st.h - 60);
+    if (t) this.placeBoundNpc('tax_collector', 'savedTaxCollector', t[0], t[1]);
+    // 巫师：仅困难模式（入驻轮里 hardMode 开启后补放）
+    if (this.world.flags.hardMode) {
+      const wz = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
+      if (wz) this.placeBoundNpc('wizard', 'savedWizard', wz[0], wz[1]);
+    }
+  }
+
+  /** 深度带内找 bound 落脚点（空气×2 + 下方实心），返回 [x, 脚底上一格y] */
+  private findBoundSpotByDepth(yTop: number, yBot: number): [number, number] | null {
+    const st = this.world.store;
+    const x0 = Math.floor(st.w * 0.15), x1 = Math.floor(st.w * 0.85);
+    for (let x = x0; x < x1; x += 5) {
+      for (let y = yTop; y < yBot; y += 3) {
+        if (st.isSolid(x, y) || st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;
+        if (!st.isSolid(x, y + 1)) continue;
+        return [x, y - 1];
+      }
+    }
+    return null;
+  }
+
+  /** 放置一名 bound 救援 NPC（已解救/已在场/落点无效时跳过）。x,y = 脚底上一格 */
+  private placeBoundNpc(key: string, savedFlag: string, x: number, y: number): boolean {
+    const st = this.world.store;
+    if (this.world.flags[savedFlag]) return false;
+    if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === key)) return false;
+    if (x < 3 || y < 3 || x > st.w - 4 || y > st.h - 4) return false;
+    if (st.isSolid(x, y) || st.isSolid(x, y - 1)) return false;
+    const npc = new TownNPC(key, x * TILE + 8, (y + 1) * TILE);
+    npc.bound = true;
+    this.entities.add(npc, 'npcs');
+    return true;
+  }
+
+  /** 右键解救 bound NPC（原版 bound 类型右键 → 转正 + AI_007_UpdateSavedStates 置 saved 旗标） */
+  private freeBoundNpc(npc: TownNPC): void {
+    npc.bound = false;
+    const flagByKey: Record<string, string> = {
+      goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
+      stylist: 'savedStylist', tax_collector: 'savedTaxCollector', golfer: 'savedGolfer',
+    };
+    const flag = flagByKey[npc.npcKey];
+    if (flag) this.world.flags[flag] = true;
+    const name = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
+    this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
+    this.spawnParticles(npc.cx, npc.cy, '#9AE85A', 14, 2);
+    this.playSfxFiles(['NPC_Hit_1'], 0.6);
   }
 
   /** 守卫老人(NPC 37)生成/重生（原版 dungeonX/Y = 入口站立点 cs L72510-72527）。
@@ -2955,8 +3042,67 @@ export class Game implements GameHooks {
         return !!(this.world.flags['downed_4'] || this.world.flags['downed_13']
           || this.world.flags['downed_266'] || this.world.flags['downed_35']
           || this.world.flags.downedSkeletron || this.world.flags.downedEyeOfCthulhu);
+      case 'clothier':
+        // 裁缝(cs:65310)：骷髅王已败（击败后守卫老人消失，裁缝解锁）
+        return !!(this.world.flags['downed_35'] || this.world.flags.downedSkeletron);
+      case 'truffle':
+        // 松露人(cs:65322)：困难模式（原版还要求发光蘑菇生物群系有空房，暂按全域找房）
+        return !!this.world.flags.hardMode;
+      case 'steampunker':
+        // 蒸汽朋克(cs:65303)：任一机械 Boss 已败（双子 125/126 / 铁骷髅 127 / 毁灭者 134）
+        return !!(this.world.flags['downed_125'] || this.world.flags['downed_126']
+          || this.world.flags['downed_127'] || this.world.flags['downed_134']);
+      case 'witch_doctor':
+        // 巫医(cs:65298)：蜂后已败（NPC 222）
+        return !!this.world.flags['downed_222'];
+      case 'cyborg':
+        // 电子人(cs:65319)：困难模式 + 世纪之花已败（262）
+        return !!this.world.flags.hardMode && !!this.world.flags['downed_262'];
+      case 'pirate':
+        // 海盗(cs:65316)：海盗入侵已胜（入侵系统未移植 → 恒不可达，保留原版门）
+        return !!this.world.flags['downedPirates'];
+      case 'santa_claus':
+        // 圣诞老人(cs:65277)：圣诞季（现实日期系统未移植 → 恒不可达，保留原版门）
+        return !!this.world.flags['xMas'];
+      case 'zoologist':
+        // 动物学家(cs:65327)：图鉴完成度 ≥10%（图鉴系统未移植 → 恒不可达，保留原版门）
+        return !!this.world.flags['bestiaryTenPercent'];
+      case 'party_girl':
+        // 派对女孩(cs:65249-65253)：每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
+        return Math.random() < 1 / 40;
+      case 'dyer': {
+        // SpawnAllowed_DyeTrader（cs:7096）：背包有染料/染料物（dye>0 或 1107-1120/3385-3388）
+        for (const s of p.inv.slots) {
+          if (!s) continue;
+          const def = ITEM_DEFS[s.id];
+          if (!def) continue;
+          const vid = def.vid ?? viIdFromKey(def.key);
+          if ((vid >= 1107 && vid <= 1120) || (vid >= 3385 && vid <= 3388)) return true;
+        }
+        return false;
+      }
+      case 'goblin_tinkerer':
+        return !!this.world.flags['savedGoblin']; // 救援系统（bound NPC 解救）置位
+      case 'wizard':
+        return !!this.world.flags['savedWizard'];
+      case 'mechanic':
+        return !!this.world.flags['savedMech'];
+      case 'stylist':
+        return !!this.world.flags['savedStylist'];
+      case 'tax_collector':
+        return !!this.world.flags['savedTaxCollector'];
+      case 'golfer':
+        return !!this.world.flags['savedGolfer'];
+      case 'princess': {
+        // 公主(cs:65241 flag9)：下列全部在场才解锁
+        const all = ['merchant', 'nurse', 'dryad', 'arms_dealer', 'guide', 'demolitionist',
+          'clothier', 'steampunker', 'dyer', 'party_girl', 'cyborg', 'painter', 'witch_doctor',
+          'pirate', 'stylist', 'goblin_tinkerer', 'wizard', 'mechanic', 'truffle',
+          'tax_collector', 'golfer', 'zoologist'];
+        return all.every((k) => this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === k));
+      }
       default:
-        return false; // 其余 NPC（裁缝/哥布林/机械师等）依赖未移植的救援系统，暂不入驻
+        return false;
     }
   }
 
@@ -2967,6 +3113,12 @@ export class Game implements GameHooks {
     const has = (key: string) => npcs.some((n) => n.npcKey === key);
     const homes = npcs.filter((n) => n.home).map((n) => n.home!);
     const st = this.world.store;
+
+    // ①' 困难模式开启后补放被绑巫师（原版仅困难世界放置）
+    if (this.world.flags.hardMode) {
+      const s = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
+      if (s) this.placeBoundNpc('wizard', 'savedWizard', s[0], s[1]);
+    }
 
     // ① QuickFindHome（Main.cs:65072：每轮对未安家 NPC 找房入住）
     for (const n of npcs) {
@@ -2980,15 +3132,36 @@ export class Game implements GameHooks {
       n.y = (house.standY + 1) * TILE - n.h;
     }
 
-    // ② 优先级链（Main.cs num42 顺序的可支持子集；护士/爆破手还要求商人已在场）
+    // ② 优先级链（Main.cs num42 完整顺序；护士/爆破手要求商人在场，
+    //    染料商 ≥4 人、油漆工 ≥8 人、派对女孩 ≥20 人且 1/40 重掷）
     const merchantHere = has('merchant');
+    const allow = (key: string) => this.townNpcSpawnAllowed(key);
+    const n = npcs.length; // num40：在场城镇 NPC 总数（含守卫老人，原版同）
     const prio: Array<[string, boolean]> = [
       ['guide', !has('guide')],
-      ['merchant', !merchantHere && this.townNpcSpawnAllowed('merchant')],
-      ['nurse', !has('nurse') && merchantHere && this.townNpcSpawnAllowed('nurse')],
-      ['arms_dealer', !has('arms_dealer') && this.townNpcSpawnAllowed('arms_dealer')],
-      ['dryad', !has('dryad') && this.townNpcSpawnAllowed('dryad')],
-      ['demolitionist', !has('demolitionist') && merchantHere && this.townNpcSpawnAllowed('demolitionist')],
+      ['merchant', !merchantHere && allow('merchant')],
+      ['nurse', !has('nurse') && merchantHere && allow('nurse')],
+      ['arms_dealer', !has('arms_dealer') && allow('arms_dealer')],
+      ['goblin_tinkerer', !has('goblin_tinkerer') && allow('goblin_tinkerer')],
+      ['wizard', !has('wizard') && allow('wizard')],
+      ['dryad', !has('dryad') && allow('dryad')],
+      ['demolitionist', !has('demolitionist') && merchantHere && allow('demolitionist')],
+      ['witch_doctor', !has('witch_doctor') && allow('witch_doctor')],
+      ['steampunker', !has('steampunker') && allow('steampunker')],
+      ['mechanic', !has('mechanic') && allow('mechanic')],
+      ['stylist', !has('stylist') && allow('stylist')],
+      ['cyborg', !has('cyborg') && allow('cyborg')],
+      ['pirate', !has('pirate') && allow('pirate')],
+      ['clothier', !has('clothier') && allow('clothier')],
+      ['dyer', !has('dyer') && n >= 4 && allow('dyer')],
+      ['painter', !has('painter') && n >= 8],
+      ['party_girl', !has('party_girl') && n >= 20 && allow('party_girl')],
+      ['santa_claus', !has('santa_claus') && allow('santa_claus')],
+      ['golfer', !has('golfer') && allow('golfer')],
+      ['tax_collector', !has('tax_collector') && allow('tax_collector')],
+      ['truffle', !has('truffle') && allow('truffle')],
+      ['zoologist', !has('zoologist') && allow('zoologist')],
+      ['princess', !has('princess') && allow('princess')],
     ];
     const pick = prio.find(([, ok]) => ok)?.[0];
     if (!pick) return;
@@ -3031,6 +3204,7 @@ export class Game implements GameHooks {
       if (Math.hypot(npc.cx - p.cx, npc.cy - p.cy) > TILE * 3.5) continue;
       const mx = (ctX + 0.5) * TILE, my = (ctY + 0.5) * TILE;
       if (mx < npc.x - 8 || mx > npc.x + npc.w + 8 || my < npc.y - 8 || my > npc.y + npc.h + 8) continue;
+      if (npc.bound) { this.freeBoundNpc(npc); return true; } // 救援 NPC：右键直接解救
       this.openNpcDialog(npc);
       return true;
     }
@@ -3065,7 +3239,8 @@ export class Game implements GameHooks {
     const p = this.player;
     const w = this.world;
     const dialog = (n: number) => Lang.text(`LegacyDialog.${n}`);
-    const r3 = () => Math.floor(Math.random() * 3);
+    const rN = (n: number) => Math.floor(Math.random() * n);
+    const r3 = () => rN(3);
     const r2 = () => (Math.random() < 0.5 ? 0 : 1);
     // GetChat 在场旗标(cs:94996-95046):其他城镇 NPC 是否在场
     const present = (id: number) =>
@@ -3144,7 +3319,147 @@ export class Game implements GameHooks {
       if (!w.clock.isDay) return dialog(101 + Math.floor(Math.random() * 4));
       return dialog(105 + Math.floor(Math.random() * 5));
     }
-    // 其余类型(依赖未移植系统的 NPC)暂用中性占位
+    if (npc.vanillaId === 54) {
+      // 裁缝(cs:95267-95282):无机械师在场 110;树妖在场 237;护士在场 112;常规 114-119
+      // (血月 111 / 玩家头部时装 113 未实现跳过)
+      if (!present(124) && Math.floor(Math.random() * 2) === 0) return dialog(110);
+      if (present(160) && Math.floor(Math.random() * 6) === 0) return dialog(237);
+      if (present(18) && Math.floor(Math.random() * 4) === 0) return dialog(112);
+      return dialog(114 + rN(6));
+    }
+    if (npc.vanillaId === 107) {
+      // 哥布林工匠(cs:95283-95323):流浪 121-125;机械师/造型师在场互cue;
+      // 常规 夜 127-131 / 昼 132-136 + GoblinTinkererChatter 池
+      if (!npc.home) return dialog(121 + rN(5));
+      if (present(124) && Math.floor(Math.random() * 5) === 0) return dialog(126);
+      if (present(353) && Math.floor(Math.random() * 5) === 0) return dialog(309);
+      const r = rN(6); // 5 常规 + Chatter 池 1 条
+      if (r >= 5) return Lang.chatter('GoblinTinkererChatter') ?? dialog(127);
+      return dialog((w.clock.isDay ? 132 : 127) + r);
+    }
+    if (npc.vanillaId === 108) {
+      // 巫师(cs:95324-95377):流浪 138-141(女性角色 139);互cue 142-147(按角色性别分档);
+      // 夜 148-150 / 昼 151-155(幸运/DD2 文本未实现跳过)
+      const male = (p.appearance?.skinVariant ?? 0) === 0;
+      if (!npc.home) {
+        const n5 = rN(3);
+        return n5 === 0 ? dialog(138) : n5 === 1 && !male ? dialog(139) : dialog(138 + n5);
+      }
+      if (male && present(22) && Math.floor(Math.random() * 6) === 0) return dialog(142);
+      if (male && present(38) && Math.floor(Math.random() * 6) === 0) return dialog(143);
+      if (male && present(107) && Math.floor(Math.random() * 6) === 0) return dialog(144);
+      if (!male && present(18) && Math.floor(Math.random() * 6) === 0) return dialog(145);
+      if (!male && present(124) && Math.floor(Math.random() * 6) === 0) return dialog(146);
+      if (!male && present(20) && Math.floor(Math.random() * 6) === 0) return dialog(147);
+      if (w.clock.isDay) return dialog(151 + rN(5));
+      return dialog(148 + rN(3));
+    }
+    if (npc.vanillaId === 124) {
+      // 机械师(cs:95377-95420):流浪 157-160;哥布林/军火商互cue 165/166;常规 167-169 + Chatter 池
+      if (!npc.home) return dialog(157 + rN(4));
+      if (present(107) && Math.floor(Math.random() * 6) === 0) return dialog(165);
+      if (present(19) && Math.floor(Math.random() * 6) === 0) return dialog(166);
+      const r = rN(4); // 3 常规 + Chatter 池 1 条
+      if (r >= 3) return Lang.chatter('MechanicChatter') ?? dialog(167);
+      return dialog(167 + r);
+    }
+    if (npc.vanillaId === 142) {
+      // 圣诞老人(cs:95490-95509):224-226
+      return dialog(224 + rN(3));
+    }
+    if (npc.vanillaId === 160) {
+      // 松露人(cs:95510-95543):树妖/裁缝在场互cue 238/236;常规池 231/233/234/235/240/241
+      if (present(20) && Math.floor(Math.random() * 6) === 0) return dialog(238);
+      if (present(54) && Math.floor(Math.random() * 6) === 0) return dialog(236);
+      return dialog([231, 233, 234, 235, 240, 241][rN(6)]);
+    }
+    if (npc.vanillaId === 178) {
+      // 蒸汽朋克(cs:95544-95567):电子人/海盗在场互cue 246/247;常规池 242-244/248/249
+      if (present(209) && Math.floor(Math.random() * 6) === 0) return dialog(246);
+      if (present(229) && Math.floor(Math.random() * 6) === 0) return dialog(247);
+      return dialog([242, 243, 244, 248, 249][rN(5)]);
+    }
+    if (npc.vanillaId === 207) {
+      // 染料商(cs:95568-95581):海盗在场 260;常规 257-259
+      if (present(229) && Math.floor(Math.random() * 6) === 0) return dialog(260);
+      return dialog(257 + rN(3));
+    }
+    if (npc.vanillaId === 208) {
+      // 派对女孩(cs:95582-95606):男性角色 268;造型师在场 310;常规池 265-267/269-272
+      if ((p.appearance?.skinVariant ?? 0) === 0 && Math.floor(Math.random() * 5) === 0) return dialog(268);
+      if (present(353) && Math.floor(Math.random() * 5) === 0) return dialog(310);
+      return dialog([265, 266, 267, 269, 270, 271, 272][rN(7)]);
+    }
+    if (npc.vanillaId === 209) {
+      // 电子人(cs:95607-95637):海盗/蒸汽朋克在场互cue 284/283;常规池 280-282/285/286 + Chatter 池
+      if (present(229) && Math.floor(Math.random() * 6) === 0) return dialog(284);
+      if (present(178) && Math.floor(Math.random() * 6) === 0) return dialog(283);
+      const r = rN(6); // 5 常规 + Chatter 池 1 条
+      if (r >= 5) return Lang.chatter('CyborgChatter') ?? dialog(280);
+      return dialog([280, 281, 282, 285, 286][r]);
+    }
+    if (npc.vanillaId === 227) {
+      // 油漆工(cs:95638-95659):困难 250;派对女孩在场 251;常规 252-256
+      if (w.flags.hardMode && Math.floor(Math.random() * 7) === 0) return dialog(250);
+      if (present(208) && Math.floor(Math.random() * 6) === 0) return dialog(251);
+      return dialog(252 + rN(5));
+    }
+    if (npc.vanillaId === 228) {
+      // 巫医(cs:95660-95682):护士在场 263;常规 261/262/264(DD2 专项文本未实现,档位 3 回落 261)
+      if (present(18) && Math.floor(Math.random() * 4) === 0) return dialog(263);
+      const r = rN(4);
+      return r === 3 ? dialog(261) : dialog([261, 262, 264][r]);
+    }
+    if (npc.vanillaId === 229) {
+      // 海盗(cs:95683-95809):女性角色 276;常规池 273-275/277-279 + Chatter 池
+      const r = rN(7); // 6 常规 + Chatter 池 1 条
+      if (r >= 6) return Lang.chatter('PirateChatter') ?? dialog(273);
+      if ((p.appearance?.skinVariant ?? 0) !== 0 && Math.floor(Math.random() * 5) === 0) return dialog(276);
+      return dialog([273, 274, 275, 277, 278, 279][r]);
+    }
+    if (npc.vanillaId === 353) {
+      // 造型师(cs:95810-95958):清晨 311;男性 293/300、女性 291/292/312;
+      // 四人组(派对女孩+机械师+护士+军火商)307;派对女孩/爆破手/电子人互cue 302/303/308;
+      // 月相常规池(287-290/294 | 295-298 | 299/301/313/314)+ StylistChatter 池(血月段未实现)
+      if (w.clock.isDay && (w.clock.timeOfDay - 0.25) / 0.5 < 16200 / 43200 && r3() === 0) return dialog(311);
+      const male = (p.appearance?.skinVariant ?? 0) === 0;
+      if (male && r3() === 0) return dialog([293, 300][rN(2)]);
+      if (!male && r3() === 0) return dialog([291, 292, 312][rN(3)]);
+      if (present(208) && present(124) && present(18) && present(19) && Math.floor(Math.random() * 5) === 0) return dialog(307);
+      if (present(208) && Math.floor(Math.random() * 5) === 0) return dialog(302);
+      if (present(38) && Math.floor(Math.random() * 5) === 0) return dialog(303);
+      if (present(209) && Math.floor(Math.random() * 5) === 0) return dialog(308);
+      const mp = (w.clock.dayCount - 1) % 8; // moonPhase 近似（无月相系统：8 天一轮）
+      const pool = mp < 3 ? [287, 288, 289, 290, 294] : mp < 6 ? [295, 296, 297, 298] : [299, 301, 313, 314];
+      const r = rN(pool.length + 1);
+      if (r >= pool.length) return Lang.chatter('StylistChatter') ?? dialog(pool[0]);
+      return dialog(pool[r]);
+    }
+    if (npc.vanillaId === 441) {
+      // 税务员(cs:95980-95995):树妖/军火商/爆破手/商人在场互cue 371-374;常规 364-370
+      if (Math.floor(Math.random() * 6) === 0 && present(20)) return dialog(371);
+      if (Math.floor(Math.random() * 6) === 0 && present(19)) return dialog(372);
+      if (Math.floor(Math.random() * 6) === 0 && present(38)) return dialog(373);
+      if (Math.floor(Math.random() * 6) === 0 && present(17)) return dialog(374);
+      return dialog(364 + rN(7));
+    }
+    if (npc.vanillaId === 588) {
+      // 高尔夫球手(cs:95996-96004):1/3 任务分数档闲聊(分数系统未实现 → 初学者档),
+      // 其余 GolferChatter 池
+      if (r3() === 0) return Lang.chatter('GolferQuestsChatterBeginner') ?? Lang.chatter('GolferChatter') ?? '……';
+      return Lang.chatter('GolferChatter') ?? '……';
+    }
+    if (npc.vanillaId === 633) {
+      // 动物学家(cs:96005-96006):夜晚满月(moonPhase==0)变身狐狸用 Lycantrope 池
+      // （血月未实现；8 天一轮的满月近似）
+      const lycan = !w.clock.isDay && (w.clock.dayCount - 1) % 8 === 0;
+      return Lang.chatter(lycan ? 'BestiaryGirlLycantropeChatter' : 'BestiaryGirlChatter') ?? '……';
+    }
+    if (npc.vanillaId === 663) {
+      // 公主(cs:96007-96008):PrincessChatter 池
+      return Lang.chatter('PrincessChatter') ?? '……';
+    }
+    // 其余类型(旅行商人368/骷髅商453/钓鱼娃369 等非房屋 NPC 未注册,不可达)
     return '……';
   }
 
@@ -3166,6 +3481,7 @@ export class Game implements GameHooks {
       .replace(/\{Demolitionist\}/g, townName('demolitionist'))
       .replace(/\{ArmsDealer\}/g, townName('arms_dealer'))
       .replace(/\{Merchant\}/g, townName('merchant'))
+      .replace(/\{Bartender\}/g, Lang.npcName(550) ?? '酒馆老板') // 酒馆老板未实装,恒用类型名
       .replace(/\{WorldEvilStone\}/g,
         Lang.itemName(this.world.crimson ? 836 : 61)   // ItemID.cs:3211/1661：Crimstone/Ebonstone Block
         ?? (this.world.crimson ? '猩红石' : '黑檀石'));
