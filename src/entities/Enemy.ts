@@ -74,7 +74,10 @@ const STATUE_DROP_RARITY: Record<number, number> = {
  *  血肉墙113/双子125,126/骷髅Prime127/毁灭者134/蜂后222/石巨人245/世纪之花262/克脑266/
  *  猪鲨370/火星飞碟395(SetDefaults boss=true,:13993)/月总核心398/异教徒439/光皇636/
  *  史莱姆皇后657 */
-const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657]);
+const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657,
+  // 月事件 Boss（原版 NPCID.boss 族,SetDefaults boss=true）：哀木 325 / 南瓜王 327 /
+  // 常绿尖叫怪 344 之外的三王——冰女王 345 / 圣诞坦克 346（血条/咆哮/击败记账）
+  325, 327, 345, 346]);
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -1275,7 +1278,13 @@ export class Enemy extends Entity {
       const near = player && !player.dead
         && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
         && Math.abs(player.cy - this.cy) < 100 + (this.h + player.h) / 2;
-      if (this.vx !== 0 || preVy < 0 || preVy > 0.3 || near || this.hp < this.maxHp) {
+      if (this.vx !== 0 || preVy < 0 || preVy > 0.3) {
+        // 速度触发唤醒(:24091):置 ai[0]=1 但不跳(无 vy-=6)
+        this.ai0 = 1;
+        return;
+      }
+      if (near || this.hp < this.maxHp) {
+        // 玩家靠近/掉血唤醒(:24101-24105):起身跳 vy-=6
         this.ai0 = 1;
         this.vy = -6;
         return;

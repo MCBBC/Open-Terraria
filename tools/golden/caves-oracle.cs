@@ -245,11 +245,13 @@ void TileRunner(double i, double j, double strength, int steps, int type,
     double num1 = strength, num2 = steps;
     double px = i, py = j;
     var GP2C = steps == 10000 ? new List<string>() : null;
+    int ITRN = 0;
     long GP2C_N = 0;
     double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(-10, 11) * 0.1;
     if (speedX != 0.0 || speedY != 0.0) { vx = speedX; vy = speedY; }
     int num3l = 0;
     r.Next(4); // num3 液体类型（普通世界结果弃用）
+    if (GP2C != null) GP2C.Add($"CALL i={i:R} j={j:R} s={strength} st={steps} t={type} at={addTile} ny={noYChange} ov={overRide} mw={mudWallFlag}");
     while (num1 > 0.0 && num2 > 0.0)
     {
         if (py < 0.0 && num2 > 0.0 && type == 59) num2 = 0.0;
@@ -267,7 +269,7 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 int ti = y * W + x;
                 if (GP2C != null) {
                     GP2C_N++;
-                    if ((GP2C_N >= 1114600 && GP2C_N <= 1114700) || GP2C_N % 50000 == 0) {
+                    if ((GP2C_N >= 673000 && GP2C_N <= 674100) || GP2C_N % 50000 == 0) {
                         GP2C.Add($"c{GP2C_N}@{x},{y}a{act[ti]}t{typ[ti]}=pk{(int)r.Peek()}");
                     }
                 }
@@ -328,6 +330,8 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             }
         }
         px += vx; py += vy;
+        ITRN++;
+        if (GP2C != null && ITRN <= 210) GP2C.Add($"it{ITRN} px={px:R} py={py:R} vx={vx:R} vy={vy:R} n1={num1:R} n2={num2:R} pk={(int)r.Peek()}");
         // 大半径阶梯（cs:77370-77450）：50..900 每档 val+=vel, num2-=1, 2 发速度骰（Y 先 X 后）
         double[] thrs = { 50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900 };
         foreach (var thr in thrs)

@@ -3,7 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
-import { hitCritters, playEnemyHitSound } from './projTargets';
+import { hitCritters, hitPlayer, playEnemyHitSound } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -28,6 +28,12 @@ export interface ArrowOpts {
   life?: number;
   /** 穿透次数（原版 penetrate：手里剑 4、箭 1；-1 视作 1） */
   pierce?: number;
+  /** 敌对弹（原版 Projectile.hostile，Damage_EVP :13708 门禁）：
+   *  Boss/敌怪发射的弹传 true → 命中玩家结算伤害；玩家武器弹默认 false 不伤玩家。 */
+  hostile?: boolean;
+  /** aiStyle 14 弹跳弹（希腊火/装饰球等月事件弹幕，Projectile.cs 碰撞反弹
+   *  cs:18314-18327 档）：撞实心块法向反弹 ×0.5 衰减而非消亡。 */
+  bounce?: boolean;
 }
 
 export class Arrow extends Entity {
@@ -43,6 +49,10 @@ export class Arrow extends Entity {
   grav: number;
   life: number;
   pierce: number;
+  /** 敌对弹（原版 Projectile.hostile）：命中玩家结算（Damage_EVP 语义） */
+  hostile: boolean;
+  /** aiStyle 14 弹跳：撞块反弹不消亡 */
+  bounce: boolean;
   /** 穿透投射物的同敌免疫表（敌人 id 集合） */
   private hitSet = new Set<number>();
   dead = false;
@@ -59,6 +69,8 @@ export class Arrow extends Entity {
     this.grav = opts?.grav ?? 0.3;
     this.life = opts?.life ?? 1200;
     this.pierce = opts?.pierce ?? 1;
+    this.hostile = opts?.hostile ?? false;
+    this.bounce = opts?.bounce ?? false;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -105,11 +117,16 @@ export class Arrow extends Entity {
       // 阻挡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格
       // 箭直接穿过(此前 tileType!==0 一刀切,箭会被树挡住——树 solid:false)
       if (!world.store.isSolid(tx, ty)) return;
+      // aiStyle 14 弹跳弹（希腊火 326-328 / 装饰球 346）：撞块法向反弹不消亡
+      if (this.bounce && this.bounceOff(game)) return;
       // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
       if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
       this.dead = true;
       return;
     }
+    // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
+    // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）
+    if (this.hostile) hitPlayer(this, game, this.damage);
     // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
     if (hitCritters(this, game)) { this.dead = true; return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
@@ -128,5 +145,28 @@ export class Arrow extends Entity {
         if (--this.pierce <= 0) { this.dead = true; return; }
       }
     }
+  }
+
+  /** aiStyle 14 撞块反弹（Projectile.cs:18314-18327 默认档：法向 ×-0.5，低速归零）。
+   *  逐轴回退探测穿透轴并反弹；两轴均无法脱困（嵌入过深）则返回 false 交还消亡。 */
+  private bounceOff(game: GameHooks): boolean {
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
+      return st.inBounds(t0, t1) && st.isSolid(t0, t1);
+    };
+    let bounced = false;
+    // X 轴：回退一步脱离实心 → 穿透轴是 X，反弹并退回
+    if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
+      this.x -= this.vx;
+      this.vx *= -0.5;
+      bounced = true;
+    }
+    if (!solidAt(this.x + this.w / 2, this.y + this.h / 2 - this.vy)) {
+      this.y -= this.vy;
+      this.vy = this.vy > 1 ? -this.vy * 0.5 : 0;
+      bounced = true;
+    }
+    return bounced;
   }
 }

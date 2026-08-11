@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { playEnemyHitSound } from './projTargets';
+import { hitPlayer, playEnemyHitSound, projOverlap } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -219,12 +219,11 @@ export class TrapShot extends Entity {
         return;
       }
     }
-    // 友方弹幕（炮弹族 friendly=true）：不伤玩家，直接进敌怪判定
+    // 友方弹幕（炮弹族 friendly=true）：不伤玩家，直接进敌怪判定。
+    // 敌对陷阱：伤害走 damagePlayer(防御减算/受击音/iframes 去重);除巨石外命中即碎
     if (!st.friendly) {
-      const p = game.player;
-      if (!p.dead && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-        p.damage(this.damage, this.x, this.y);
-        game.addDamageNumber(p.cx, p.y, this.damage, false, '#FF8060');
+      if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
+        hitPlayer(this, game, this.damage);
         if (this.kind !== 'boulder') this.dead = true;
         if (this.dead) return;
       }
@@ -338,11 +337,10 @@ export class Dart extends Entity {
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (world.store.isSolid(tx, ty)) { this.dead = true; return; }
-    // 命中玩家(敌对陷阱):矩形相交
-    const p = game.player;
-    if (!p.dead && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-      p.damage(this.damage, this.x, this.y);
-      game.addDamageNumber(p.cx, p.y, this.damage, false, '#FF8060');
+    // 命中玩家(敌对陷阱):矩形相交即消耗弹体;伤害走 damagePlayer(防御减算/受击音/
+    // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义)
+    if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
+      hitPlayer(this, game, this.damage);
       this.dead = true;
     }
   }

@@ -62,16 +62,21 @@ function solidTileAt(game: GameHooks, x: number, y: number): boolean {
 // 348 FrostWave / 349 FrostShard / 350 Missile / 351 Present / 352 Spike /
 // 180 BulletDeadeye / 109 SnowBallHostile / 110 BulletSnowman。
 // ---------------------------------------------------------------------------
-/** 弹体行为近似登记：349 FrostShard 原版 vy+=0.2/t 下坠（Projectile.cs:53360），
- *  其余月事件弹幕原版自带 aiStyle 14（希腊火/装饰球弹跳）等次级运动——Arrow 直飞近似 */
-const PROJ_GRAV: Record<number, number> = { 349: 0.2 };
+/** 弹体行为登记（Projectile.cs SetDefaults 逐条）：
+ *  重力：aiStyle 1/14 族通用 0.3——349 FrostShard 原版 vy+=0.2/t 下坠（:53360）、
+ *  aiStyle 14 弹跳族（希腊火 326-328 / 装饰球 346，:3937/:4092）重力 0.2（:23496）。
+ *  弹跳：aiStyle 14 族撞块法向反弹 ×-0.5（碰撞反弹表 :18314-18327 默认档），
+ *  此前近似直飞/直坠消亡 */
+const PROJ_GRAV: Record<number, number> = { 349: 0.2, 326: 0.2, 327: 0.2, 328: 0.2, 346: 0.2 };
+const PROJ_BOUNCE = new Set([326, 327, 328, 346]);
 
 function shootE(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1 }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null,
+      { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1, hostile: true, bounce: PROJ_BOUNCE.has(projId) }),
     'projectiles');
 }
 

@@ -7,6 +7,7 @@ import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
+import { tileAnim } from './TileAnim';
 
 type Frame = [number, number];
 
@@ -411,35 +412,74 @@ export function cactusTextureFor(atlas: SpriteAtlas, st: TileStore, x: number, y
   return img ?? null;
 }
 
-/** 仙人掌实际渲染帧（列角色判定，与 drawCactusCell 共用）——供渲染与纠错面板定位 */
+/** 仙人掌实际渲染帧——原版 WorldGen.CactusFrame(1456 :56354-56560)1:1。
+ *  基列搜索:自 (x,y) 下行,列尽时向更长的邻臂列平移;num3 = x - 基列 ∈ {-1,0,1}。
+ *  返回帧列/行(帧坐标 = col*18 / row*18;与原版 frameX ∈ {0,18,36,54,72,90,108}、
+ *  frameY ∈ {0,18,36} 一致) */
 export function cactusFrameAt(st: TileStore, x: number, y: number, type: number): { col: number; row: number } {
-  const isC = (ax: number, ay: number) => st.inBounds(ax, ay) && st.type[st.idx(ax, ay)] === type;
-  // 本列顶部与各列下行高度（同一行起算，对齐 TEdit 的 length1/length2 比较）
-  let top = y;
-  while (isC(x, top - 1)) top--;
-  const colH = (ax: number) => { let n = 0; while (isC(ax, top + n)) n++; return n; };
-  const hSelf = colH(x), hR = colH(x + 1), hL = colH(x - 1);
-  const hasN = isC(x, y - 1), hasS = isC(x, y + 1);
-  let ux = 0, uy = 0;
-  if (hR > hSelf) {
-    // 左臂（西侧手臂，贴图靠右桥接主干）：顶格 (3,0) / 身格 (3,1) /
-    // 底格 (3,2) / 单格孤立手臂才是尖帽 (6,2)
-    if (!hasN && !hasS) { ux = 6; uy = 2; }
-    else { ux = 3; uy = !hasN ? 0 : hasS ? 1 : 2; }
-  } else if (hL > hSelf) {
-    // 右臂（东侧手臂，贴图靠左桥接主干）：(2,0)/(2,1)/(2,2)，单格尖帽 (6,1)
-    if (!hasN && !hasS) { ux = 6; uy = 1; }
-    else { ux = 2; uy = !hasN ? 0 : hasS ? 1 : 2; }
-  } else {
-    // 主干：顶格 Y=0 / 身格 Y=2，两者都做手臂连接位判定（w/e/sw/se）
-    uy = hasN ? 2 : 0;
-    const w = isC(x - 1, y), sw = isC(x - 1, y + 1), e = isC(x + 1, y), se = isC(x + 1, y + 1);
-    if (w && !sw && (!e || se)) ux = 4;
-    else if (e && !se && (!w || sw)) ux = 1;
-    else if (w && !sw && e && !se) ux = 5;
-    else ux = 0;
+  const isC = (ax: number, ay: number) =>
+    st.inBounds(ax, ay) && !!st.flags[st.idx(ax, ay)] && st.type[st.idx(ax, ay)] === type;
+  // 基列搜索(:56362-56389)
+  let num = y, num2 = x;
+  while (isC(num2, num)) {
+    num++;
+    if (!st.inBounds(num2, num)) return { col: 0, row: 0 };
+    if (!isC(num2, num)) {
+      // 列尽:邻臂列在同深且其上一格也是仙人掌 → 基列平移到臂列
+      if (isC(num2 - 1, num) && isC(num2 - 1, num - 1) && num2 >= x) num2--;
+      if (isC(num2 + 1, num) && isC(num2 + 1, num - 1) && num2 <= x) num2++;
+    }
   }
-  return { col: ux, row: uy };
+  num--;
+  const num3 = x - num2;
+  // 八邻类型(:56391-56427;inactive → -1;上方 227 视同仙人掌——原版原文如此)
+  const tAt = (ax: number, ay: number): number => {
+    if (!st.inBounds(ax, ay) || !st.flags[st.idx(ax, ay)]) return -1;
+    return st.type[st.idx(ax, ay)];
+  };
+  const CACT = type;
+  let num4 = tAt(x - 2, y), num5 = tAt(x - 1, y), num6 = tAt(x + 1, y);
+  let num7 = tAt(x, y - 1), num8 = tAt(x, y + 1);
+  const num9 = tAt(x - 1, y + 1), num10 = tAt(x + 1, y + 1);
+  if (num7 !== -1 && TILE_DEFS[num7]?.vanilla?.sheet === 227) num7 = CACT;
+  const solidT = (t: number) => t >= 0 && !!TILE_DEFS[t]?.solid;
+  let fx = 0, fy = 0;
+  switch (num3) {
+    case 0:  // 主干列
+      if (num7 !== CACT) {
+        if (num5 === CACT && num6 === CACT && num9 !== CACT && num10 !== CACT && num4 !== CACT) { fx = 90; fy = 0; }
+        else if (num5 === CACT && num9 !== CACT && num4 !== CACT) { fx = 72; fy = 0; }
+        else if (num6 === CACT && num10 !== CACT) { fx = 18; fy = 0; }
+        else { fx = 0; fy = 0; }
+      } else {
+        if (num5 === CACT && num6 === CACT && num9 !== CACT && num10 !== CACT && num4 !== CACT) { fx = 90; fy = 36; }
+        else if (num5 === CACT && num9 !== CACT && num4 !== CACT) { fx = 72; fy = 36; }
+        else if (num6 === CACT && num10 !== CACT) { fx = 18; fy = 36; }
+        else if (num8 >= 0 && solidT(num8)) { fx = 0; fy = 36; }
+        else { fx = 0; fy = 18; }
+      }
+      break;
+    case -1:  // 西臂(基列在东侧)
+      if (num6 === CACT) {
+        if (num7 !== CACT && num8 !== CACT) { fx = 108; fy = 36; }
+        else if (num8 !== CACT) { fx = 54; fy = 36; }
+        else if (num7 !== CACT) { fx = 54; fy = 0; }
+        else { fx = 54; fy = 18; }
+      } else if (num7 !== CACT) { fx = 54; fy = 0; }
+      else { fx = 54; fy = 18; }
+      break;
+    case 1:   // 东臂(基列在西侧)
+      if (num5 === CACT) {
+        if (num7 !== CACT && num8 !== CACT) { fx = 108; fy = 18; }
+        else if (num8 !== CACT) { fx = 36; fy = 36; }
+        else if (num7 !== CACT) { fx = 36; fy = 0; }
+        else { fx = 36; fy = 18; }
+      } else if (num7 !== CACT) { fx = 36; fy = 0; }
+      else { fx = 36; fy = 18; }
+      break;
+  }
+  void num4;
+  return { col: fx / 18, row: fy / 18 };
 }
 
 export function drawCactusCell(
@@ -447,11 +487,12 @@ export function drawCactusCell(
   st: TileStore, x: number, y: number, type: number, px: number, py: number,
 ): void {
   const { col: ux, row: uy } = cactusFrameAt(st, x, y, type);
-  // 生物群系变体：向下扫沙类（腐化/猩红/神圣）
+  // 生物群系变体:向下扫沙类(腐化/猩红/神圣)→ 拆行等价的独立贴图
   const img = cactusTextureFor(atlas, st, x, y);
   if (!img) return;
+  // 原版 GetTileDrawData case 80(:5083-5085):16×16、tileTop +2(插入沙面 2px)
   if (ux * 18 + 16 <= img.width && uy * 18 + 16 <= img.height) {
-    ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py, TILE, TILE);
+    ctx.drawImage(img, ux * 18, uy * 18, 16, 16, px, py + 2, TILE, TILE);
   }
 }
 
@@ -696,9 +737,25 @@ export function drawVanillaCell(
   }
   // D1:整砖实心且左右邻半砖 → 预制衔接帧替代整帧(TileDrawing.cs:1609-1652)
   if (drawHalfBrickSeam(ctx, r, st, x, y, sheet, dpx, dpy)) return;
+  // 帧源/尺寸调整(tileWidth/Height 覆写 + addFrX/Y 帧重排)
+  const adj = drawAdjust(sheet, fx, fy, x, y, r.img.width, r.img.height, st, st.w);
+  const asx = adj.sx ?? r.sx, asy = adj.sy ?? r.sy;
+  const asw = adj.sw ?? r.sw, ash = adj.sh ?? r.sh;
+  if (asx < 0 || asy < 0 || asx + asw > r.img.width || asy + ash > r.img.height) return;
+  // 尺寸覆写后重新居中(711 豁免)
+  const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
   const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
-  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx + vx, dpy + vy, r.sw, r.sh);
+  // X 镜像(植物/藤蔓变体:x%2==0 翻转)
+  if (FLIP_X_EVEN.has(sheet) && x % 2 === 0) {
+    ctx.save();
+    ctx.translate(fdx + vx + asw, dpy + vy);
+    ctx.scale(-1, 1);
+    ctx.drawImage(r.img, asx, asy, asw, ash, 0, 0, asw, ash);
+    ctx.restore();
+  } else {
+    ctx.drawImage(r.img, asx, asy, asw, ash, fdx + vx, dpy + vy, asw, ash);
+  }
   void fw; void fh;
 }
 
@@ -763,6 +820,7 @@ function tileTopCond(sheet: number, fx: number, fy: number): number | null {
     case 184: case 185: case 186: case 187: return fy <= 36 ? 2 : fy <= 108 ? -2 : 2; // :5282-5292
     case 442: { const c = Math.floor(fx / 22); return c === 1 ? -4 : (c === 2 || c === 3) ? -2 : 0; } // :5704-5720
     case 178: return fy <= 36 ? 2 : 0;
+    case 227: return fx === 238 ? -6 : -20;                                  // :5121-5131(染料植物/大仙人掌)
     default: return null;
   }
 }
@@ -796,6 +854,124 @@ const HAS_SLOPE_FRAMES = new Set([421, 422]);
 const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
 const NOT_REALLY_SOLID = new Set([387, 388, 10]);
 const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
+
+/** X 镜像翻转(GetTileDrawData:x % 2 == 0 → FlipHorizontally,植物/藤蔓变体的原版来源) */
+const FLIP_X_EVEN = new Set([3, 20, 24, 52, 61, 62, 71, 73, 74, 81, 82, 83, 84, 110, 113, 115, 201, 205, 227, 270, 271, 324, 382, 519, 528, 529, 571, 572, 581, 590, 595, 615, 624, 636, 638, 656, 660, 700, 701, 703]);
+
+/** tileHeight=18 组(:4933-4977 + 20/590/595/615/79/90 + 114 高度+2)——grid 仍是 16 的需覆写 */
+const HEIGHT_18 = new Set([16, 17, 20, 26, 32, 69, 72, 77, 79, 90, 114, 124, 137, 138, 352, 462, 487, 488, 574, 575, 576, 577, 578, 590, 595, 615, 664, 695, 704, 712, 713, 714, 715, 716]);
+
+/** 共用慢速旋转计数(Main.tileFrame[type] 的近似:原版各类型速率不同,装饰性轮换取统一慢速) */
+function animRot(): number {
+  return Math.floor(tileAnim.tick / 6);
+}
+
+/** 生物群系变体(529/530 的 GetBiomeInfluence 近似:看正下方格所属邪恶群系;海滩看 x) */
+function biomeVariant529(st: TileStore, x: number, y: number, w: number): number {
+  const CORRUPT = new Set(['v_25_ebonstone_block', 'v_23_corrupt_grass_block', 'v_112_ebonsand_block']);
+  const CRIMSON = new Set(['v_203_crimstone_block', 'v_199_crimson_grass_block', 'v_234_crimsand_block']);
+  const HALLOW = new Set(['v_117_pearlstone_block', 'v_109_hallowed_grass_block', 'v_116_pearlsand_block']);
+  if (st.inBounds(x, y + 1)) {
+    const k = TILE_DEFS[st.type[st.idx(x, y + 1)]]?.key ?? '';
+    if (HALLOW.has(k)) return 2;
+    if (CRIMSON.has(k)) return 3;
+    if (CORRUPT.has(k)) return 4;
+  }
+  const beach = 380; // WorldGen.beachDistance 近似
+  return x < beach || x > w - beach ? 1 : 0;
+}
+
+/** 帧源/尺寸调整(GetTileDrawData 的 tileWidth/Height 覆写 + addFrX/Y 帧重排)。
+ *  返回部分覆盖;null 项 = 用 r 原值 */
+function drawAdjust(
+  sheet: number, fx: number, fy: number, x: number, y: number,
+  imgW: number, imgH: number, st: TileStore, w: number,
+): { sx?: number; sy?: number; sw?: number; sh?: number } {
+  const a: { sx?: number; sy?: number; sw?: number; sh?: number } = {};
+  const fit = (sx: number, sy: number, sw: number, sh: number) => sx >= 0 && sy >= 0 && sx + sw <= imgW && sy + sh <= imgH;
+  switch (sheet) {
+    case 529: {   // :4895-4918:源行整替为 34*生物群系变体,高 32
+      const v = biomeVariant529(st, x, y, w);
+      if (fit(fx, 34 * v, 16, 32)) { a.sy = 34 * v; a.sh = 32; }
+      break;
+    }
+    case 698: {   // :4629-4636:36×44,fx 重排 (fx/18)*38
+      const sx = Math.floor(fx / 18) * 38;
+      if (fit(sx, fy, 36, 44)) { a.sx = sx; a.sw = 36; a.sh = 44; }
+      break;
+    }
+    case 751: if (fit(fx, fy, 56, 46)) { a.sw = 56; a.sh = 46; } break;  // :4582-4589
+    case 752: if (fit(fx, fy, 36, 38)) { a.sw = 36; a.sh = 38; } break;  // :4577-4581
+    case 185: case 186: case 187: if (fit(fx, fy, 20, 16)) a.sw = 20; break; // 落穿 184:宽 20(:5212-5292)
+    case 624: a.sh = 16; break;                                            // :5153-5162(20×16)
+    case 711: if (fx > 0 && fit(fx, fy, 18, 20)) { a.sw = 18; a.sh = 20; } break; // :5000-5008
+    case 561: a.sh = 20; break;                                            // 落穿 388 前预置高 20
+    case 270: case 271: case 581: {   // :5627-5648:旋转 6 帧
+      let n = animRot() + (x % 6);
+      if (x % 2 === 0) n += 3;
+      if (x % 3 === 0) n += 3;
+      if (x % 4 === 0) n += 3;
+      while (n > 5) n -= 6;
+      a.sx = fx + n * 18;
+      break;
+    }
+    case 660: {   // :5649-5671:旋转 5 帧
+      let n = animRot() + (x % 5);
+      if (x % 2 === 0) n += 3;
+      if (x % 3 === 0) n += 3;
+      if (x % 4 === 0) n += 3;
+      while (n > 4) n -= 5;
+      a.sx = fx + n * 18;
+      break;
+    }
+    case 572: {   // :5672-5690:旋转 4 帧
+      let n = animRot() + (x % 4);
+      while (n > 3) n -= 4;
+      a.sx = fx + n * 18;
+      break;
+    }
+    case 593:   // :5547-5579:fx>=18 → -18;fx<18 时帧行动画(临时帧未移植)
+      if (fx >= 18) a.sx = fx - 18;
+      else a.sy = fy + (animRot() % 8) * 18;
+      break;
+    case 594:
+      if (fx >= 36) a.sx = fx - 36;
+      else if (fx >= 18) a.sx = fx - 18;
+      else a.sy = fy + (animRot() % 8) * 18;
+      break;
+    case 507: case 508:   // :6101-6108:90*(counter+x*11+y*27)%160/20
+      a.sy = fy + 90 * Math.floor(((animRot() + x * 11 + y * 27) % 160) / 20);
+      break;
+    case 336: case 340: case 341: case 342: case 343: case 344:  // :6109-6117
+    case 739: case 748:                                          // :4590-4596
+      a.sy = fy + 90 * (animRot() % 4);
+      break;
+    case 405: a.sy = fy + 38 * (animRot() % 8); break;   // :5443-5462(高度按帧切换未移植)
+    case 406: a.sy = fy + 56 * (animRot() % 8); break;   // :5509-5523(同上)
+    case 617: a.sx = fx % 54; a.sy = fy % 144; break;    // :5351-5355
+    case 129:   // :4682-4690
+      if (fx >= 324) {
+        const n = Math.floor((fx - 324) / 18);
+        a.sx = fx + (((n + animRot()) % 6) - n) * 18;
+      }
+      break;
+    case 530:   // :4757-4776:addFrY += 36*biome(同 529 变体近似)
+      a.sy = fy + 36 * biomeVariant529(st, x, y, w);
+      break;
+    case 227:   // :5121-5152:fx==204 时按下方仙人掌群系加变体列(原版原文如此)
+      if (fx === 204) {
+        const v = biomeVariant529(st, x, y, w);
+        if (v === 2) a.sx = fx + 238;
+        else if (v === 4) a.sx = fx + 204;
+        else if (v === 3) a.sx = fx + 272;
+      }
+      break;
+    default:
+      if (HEIGHT_18.has(sheet)) a.sh = 18;
+      break;
+  }
+  return a;
+}
 
 /** D1 邻居半砖衔接(TileDrawing.cs:1609-1652):本格整砖实心、左右邻是半砖时,
  *  用素材表预制衔接帧(90/126/144/148/156 列)替代整帧,抹平 8px 高差。

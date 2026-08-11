@@ -168,7 +168,7 @@ function shootD(
 ): void {
   const rid = RENDER_PROXY[projId] ?? projId;
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav, life, pierce }),
+    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav, life, pierce, hostile: true }),
     'projectiles');
 }
 

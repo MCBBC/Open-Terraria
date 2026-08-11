@@ -331,10 +331,12 @@ export function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1
   }
   return true;
 }
-/** Boss 弹幕:直飞(grav 0)+ 原版 Projectile_N 贴图 */
+/** Boss 弹幕:直飞(grav 0)+ 原版 Projectile_N 贴图。
+ *  hostile=true(原版 Projectile.hostile):命中玩家结算——所有走本出口的弹都是
+ *  Boss/敌怪发射的敌弹(双子激光/死光/蜂后毒刺/哥布林弹等) */
 export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: number, dmg: number, projId: number, life = 300): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1 }), 'projectiles');
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1, hostile: true }), 'projectiles');
 }
 
 /** AI_030/031 双子(NPC.cs:26497-27735):雷神之眼 125 / 魔神之眼 126。

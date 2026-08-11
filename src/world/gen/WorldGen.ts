@@ -529,7 +529,11 @@ function pilesPass({ store, rng }: GenCtx) {
     // 落到第一个实心地面(与洞穴箱同式)
     let gy = y, guard = 0;
     while (guard++ < 400 && store.inBounds(x, gy) && !store.flags[store.idx(x, gy)]) gy++;
-    if (!store.inBounds(x, gy) || !TILE_DEFS[store.type[store.idx(x, gy)]]?.solid) { fail++; continue; }
+    // 原版地面门（PlaceTile case 186 → SolidTileAllowBottomSlope :49284/:70211）：
+    // 下方须实心且【非半砖非顶坡】（topSlope=slope 1/2）——斜坡沙上不生成装饰
+    const gi = store.idx(x, gy);
+    if (!store.inBounds(x, gy) || !TILE_DEFS[store.type[gi]]?.solid
+      || store.half[gi] === 1 || (store.slope[gi] >= 1 && store.slope[gi] <= 2)) { fail++; continue; }
     const i = store.idx(x, gy - 1);
     if (!store.inBounds(x, gy - 1) || store.flags[i]) { fail++; continue; }
     if (store.liquid[i] > 100) { fail++; continue; }

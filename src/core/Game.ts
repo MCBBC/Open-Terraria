@@ -115,7 +115,7 @@ import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { Bobber } from '../entities/Bobber';
 import { Minecart } from '../entities/Minecart';
@@ -1991,7 +1991,24 @@ export class Game implements GameHooks {
       19: [1.4, 0.7, 0.5], 20: [1.25, 0.6, 1.2], 21: [0.75, 1.45, 0.9], 22: [0.3, 0.78, 1.2],
     };
     let heldRGB: [number, number, number] | null = null;
-    if (heldDef && !player.inWater) {
+    // 荧光棒族手持光（EmitHeldItemLight 各 case，Player.cs:49288-49430）：仅 !pulley 门、
+    // **无湿门——水下也亮**（与火把的 (Torches&&!wet) 不同）：282=(0.7,1,0.8) /
+    // 286=(0.7,0.8,1) / 3112=(1,0.6,0.85) / 3002=(1.05,0.95,0.55) / 4776=(0.9,0.35,1)
+    // （附 4.5 格泛光近似省略）；5643 彩虹 = Disco 轮转
+    if (heldDef) {
+      const gvid = heldDef.key === 'torch' ? -1 : viIdFromKey(heldDef.key);
+      const GLOWSTICK_LIGHT: Record<number, [number, number, number]> = {
+        282: [0.7, 1, 0.8], 286: [0.7, 0.8, 1], 3112: [1, 0.6, 0.85],
+        3002: [1.05, 0.95, 0.55], 4776: [0.9, 0.35, 1],
+      };
+      if (gvid === 5643) {
+        const ph = Math.floor(this.tickCount / 10) % 6;
+        heldRGB = ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[ph];
+      } else if (gvid >= 0 && GLOWSTICK_LIGHT[gvid]) {
+        heldRGB = GLOWSTICK_LIGHT[gvid];
+      }
+    }
+    if (!heldRGB && heldDef && !player.inWater) {
       const vid = heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key);
       if (Number.isFinite(vid)) {
         // 蜡烛（ItemCheck 尾段 type 105/713）：同火把基色
@@ -2594,11 +2611,57 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
         this.cb.onToast(`${heldDef.name}：${p.duration} 秒`);
       }
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
+      // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
+      if (this.player.baseMaxHp >= 400) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
+      } else {
+        this.player.baseMaxHp += 20;
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
+        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#40E080');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_109_mana_crystal') {
+      // 魔力水晶(Player.cs:44655:statManaMax<200 → +20 上限并回复)
+      if (this.player.baseMaxMana >= 200) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ManaMaxReached'));
+      } else {
+        this.player.baseMaxMana += 20;
+        this.player.mana = Math.min(this.player.maxMana, this.player.mana + 20);
+        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#4080FF');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_1291_life_fruit') {
+      // 生命果(Player.cs:44665:statLifeMax≥400 且 <500 → +5)
+      if (this.player.baseMaxHp < 400) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedLifeCrystalFirst'));
+      } else if (this.player.baseMaxHp >= 500) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached500'));
+      } else {
+        this.player.baseMaxHp += 5;
+        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 5);
+        this.addDamageNumber(this.player.cx, this.player.y, 5, false, '#40E080');
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 30;
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
       // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
       // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
       const fm = /^vi_(\d+)_/.exec(heldDef.key);
       const ff = fm ? itemFuncOfVid(+fm[1]) : null;
+      // ★ 无消耗品语义（水晶/果/弓族等）不得空占本 else-if 槽位——否则链条后续
+      // 全部分支被饿死（else-if 匹配即终止）。命中才处理，否则落空交还链条
       if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
         && (ff.healLife || ff.healMana || (ff.buffType && ff.buffType > 0))) {
         if (ff.healLife && this.player.buffs.healBlocked) {
@@ -2626,50 +2689,6 @@ export class Game implements GameHooks {
           this.cb.onInventoryChanged();
         }
       }
-    } else if (heldDef && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
-      // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
-      if (this.player.baseMaxHp >= 400) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
-      } else {
-        this.player.baseMaxHp += 20;
-        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 20);
-        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#40E080');
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 30;
-        this.sfx.play('drink');
-        this.cb.onInventoryChanged();
-      }
-      this.player.useTime = Math.max(this.player.useTime, 30);
-    } else if (heldDef?.key === 'vi_109_mana_crystal') {
-      // 魔力水晶(Player.cs:44655:statManaMax<200 → +20 上限并回复)
-      if (this.player.baseMaxMana >= 200) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ManaMaxReached'));
-      } else {
-        this.player.baseMaxMana += 20;
-        this.player.mana = Math.min(this.player.maxMana, this.player.mana + 20);
-        this.addDamageNumber(this.player.cx, this.player.y, 20, false, '#4080FF');
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 30;
-        this.sfx.play('drink');
-        this.cb.onInventoryChanged();
-      }
-      this.player.useTime = Math.max(this.player.useTime, 30);
-    } else if (heldDef?.key === 'vi_1291_life_fruit') {
-      // 生命果(Player.cs:44665:statLifeMax≥400 且 <500 → +5)
-      if (this.player.baseMaxHp < 400) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedLifeCrystalFirst'));
-      } else if (this.player.baseMaxHp >= 500) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached500'));
-      } else {
-        this.player.baseMaxHp += 5;
-        this.player.hp = Math.min(this.player.maxHp, this.player.hp + 5);
-        this.addDamageNumber(this.player.cx, this.player.y, 5, false, '#40E080');
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 30;
-        this.sfx.play('drink');
-        this.cb.onInventoryChanged();
-      }
-      this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0
       && (heldDef.ranged || rangedAmmoWeapon(heldDef))) {
       // 远程武器（弓/枪/吹箭筒）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
@@ -2943,6 +2962,17 @@ export class Game implements GameHooks {
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0)), 'projectiles');
+        consume();
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        break;
+      }
+      case 'glowstick': {
+        // aiStyle 14（AI_014 弹跳物理/粘性粘墙/妖精排斥场）：消耗 1 支掷出；
+        // 光照走通用弹幕点光（projectileData.light=1）
+        this.entities.add(new GlowstickProj(px, py,
+          Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
+          cw.shoot), 'projectiles');
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
