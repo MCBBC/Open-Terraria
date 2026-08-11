@@ -30,6 +30,9 @@ import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
+import vanillaValueJson from '../data/vanilla-itemvalue.json';
+const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -64,7 +67,8 @@ const IMPORTED_TREE_TYPES = new Set<number>(
 import { LiquidSim } from '../world/liquid/LiquidSim';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
-import { ClientNet, RemotePlayerState } from '../net/ClientNet';
+import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
+import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
@@ -80,6 +84,7 @@ import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponP
 import { Minecart } from '../entities/Minecart';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
+import type { DropExtras } from '../drops/NpcDrops';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -149,8 +154,10 @@ export interface GameCallbacks {
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }>, portrait?: string | null) => void;
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'; label: string }>, portrait?: string | null) => void;
   onNpcDialogClose?: () => void;
+  /** 哥布林重铸界面（Main.InReforgeMenu） */
+  onReforgeOpen?: () => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币 */
   onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number) => void;
   onBuffsChanged?: () => void;
@@ -231,6 +238,280 @@ export class Game implements GameHooks {
       this.cb.onToast?.(msg);
     }
     this.input.rightDown = false;
+  }
+  // ---- 箱子同步（msg31/32，服务器权威） ----
+  /** 待开箱（msg31 已发、等回包后自动开面板） */
+  private netPendingChest: { x: number; y: number } | null = null;
+  /** 已登记箱子差分基准（postUpdate 轮询 → msg32 槽位编辑上报） */
+  private netChestWatch: Array<{ chest: ChestData; idx: number; last: Array<{ id: number; stack: number } | null> }> = [];
+
+  /** msg32 回包：登记/更新 world.chests（服务器权威），待开箱自动开面板 */
+  private netApplyChest(chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number } | null>) {
+    const w = this.world;
+    let chest = w.chests.find((ch) => ch.x === x && ch.y === y);
+    if (!chest) {
+      chest = { x, y, items: Array(10).fill(null) };
+      w.chests.push(chest);
+    }
+    for (let i = 0; i < items.length; i++) {
+      // 稀疏数组：单槽广播只带变更槽，undefined = 未涉及（全量帧才每槽都有值）
+      if (items[i] === undefined || i >= chest.items.length) continue;
+      chest.items[i] = items[i] ? { ...items[i]! } : null;
+    }
+    this.net?.chestIndexByPos.set(`${x},${y}`, chestIdx);
+    let watch = this.netChestWatch.find((wch) => wch.chest === chest);
+    if (!watch) {
+      watch = { chest, idx: chestIdx, last: chest.items.map((it) => it ? { ...it } : null) };
+      this.netChestWatch.push(watch);
+    } else {
+      watch.last = chest.items.map((it) => it ? { ...it } : null);
+    }
+    if (this.netPendingChest && this.netPendingChest.x === x && this.netPendingChest.y === y) {
+      this.netPendingChest = null;
+      this.tryOpenChest(chest); // 服务器已下发内容 = 通过了 protectItems 门
+    }
+    this.cb.onInventoryChanged?.(); // 面板打开中时刷新槽位显示
+  }
+
+  /** postUpdate 每 15 tick：箱子槽位差分上报（含他人广播回写后的再同步收敛） */
+  private netChestPoll() {
+    const net = this.net;
+    if (!net?.active) return;
+    for (const wch of this.netChestWatch) {
+      for (let i = 0; i < wch.chest.items.length; i++) {
+        const a = wch.chest.items[i], b = wch.last[i];
+        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)) {
+          net.sendChestSlot(wch.idx, wch.chest.x, wch.chest.y, i, a?.id ?? 0, a?.stack ?? 0);
+          wch.last[i] = a ? { ...a } : null;
+        }
+      }
+    }
+  }
+
+  // ================= v3 实体同步（房主权威 NPC + 双向掉落/弹幕；msg16/21/23/27/42） =================
+  // 模型：房主客户端跑完整模拟（刷怪/AI/掉落，与单人同码），快照经服务器中继；
+  // 访客渲染傀儡实体（无本地 AI），打击/拾取经上报由房主权威结算。
+  // netId = 拥有者 slot<<24 | 本地实体 id（entitySyncHooks.makeNetId，防跨端撞号）
+
+  private netNpcPuppets = new Map<number, { e: Enemy; seen: number }>();
+  private netDropPuppets = new Map<number, { d: ItemDrop; seen: number }>();
+  private netProjPuppets = new Map<number, { p: Entity; seen: number }>();
+  private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
+  private netProjLast = new Map<number, { x: number; y: number; t: number }>();
+  private netDropSeen = new Map<number, ItemDrop>();
+
+  /** 房主：NPC 快照广播（15Hz，变化驱动 + 2s 兜底；对齐原版 msg23 netUpdate 思想） */
+  private netNpcBroadcast() {
+    const net = this.net!;
+    const snaps: NpcSnap[] = [];
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (e.netPuppet) continue;
+      let last = this.netNpcLast.get(e.id);
+      if (!last) {
+        last = { x: e.x, y: e.y, hp: e.hp, t: this.tickCount };
+        this.netNpcLast.set(e.id, last);
+      }
+      const moved = Math.abs(e.x - last.x) > 0.5 || Math.abs(e.y - last.y) > 0.5 || e.hp !== last.hp;
+      if (!moved && this.tickCount - last.t < 120) continue; // 2s 全量兜底
+      last.x = e.x; last.y = e.y; last.hp = e.hp; last.t = this.tickCount;
+      snaps.push({
+        netId: makeNetId(net.mySlot, e.id), key: e.key,
+        x: e.x, y: e.y, vx: e.vx, vy: e.vy,
+        hp: e.hp, maxHp: e.maxHp, animT: e.animT,
+        flags: e.def.boss ? 1 : 0,
+      });
+      if (snaps.length >= 24) break; // 防超帧，余量下轮
+    }
+    // 清理已消亡敌人的差分基准
+    if (snaps.length < 24) {
+      const alive = new Set<number>();
+      for (const ent of this.entities.enemies) alive.add((ent as Enemy).id);
+      for (const id of this.netNpcLast.keys()) if (!alive.has(id)) this.netNpcLast.delete(id);
+    }
+    net.sendNpcSnapshot(snaps);
+  }
+
+  /** 双向：本地弹幕快照（15Hz 变化驱动；kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj） */
+  private netProjBroadcast() {
+    const net = this.net!;
+    const snaps: ProjSnap[] = [];
+    for (const ent of this.entities.projectiles) {
+      const p = ent as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
+      if (p.netPuppet || p.dead) continue;
+      let last = this.netProjLast.get(p.id);
+      if (!last) {
+        last = { x: p.x, y: p.y, t: this.tickCount };
+        this.netProjLast.set(p.id, last);
+      }
+      if (Math.abs(p.x - last.x) < 1 && Math.abs(p.y - last.y) < 1 && this.tickCount - last.t < 60) continue;
+      last.x = p.x; last.y = p.y; last.t = this.tickCount;
+      let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
+      if (p instanceof Arrow) { kind = 0; tag = String(p.projId ?? 1); }
+      else if (p.projId !== undefined) { kind = 1; tag = String(p.projId); }
+      else if (p instanceof TrapShot) { kind = 3; tag = p.kind ?? 'dart'; }
+      else if (p instanceof Dart) { kind = 2; }
+      else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
+      if (kind < 0) continue; // 未知弹幕类不同步（渲染缺类）
+      snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
+      if (snaps.length >= 24) break;
+    }
+    net.sendProjectileBatch(snaps);
+  }
+
+  /** 双向：本地真掉落诞生上报 + 消失（拾取/寿命）广播——扫描差分 */
+  private netDropSweep() {
+    const net = this.net!;
+    const cur = new Map<number, ItemDrop>();
+    for (const ent of this.entities.drops) {
+      const d = ent as ItemDrop;
+      if (d.netPuppet) continue;
+      if (!d.netId) {
+        d.netId = makeNetId(net.mySlot, d.id);
+        net.sendItemOp(0, d.netId, ITEM_DEFS[d.itemId]?.key ?? '', d.stack, d.x, d.y, d.vx, d.vy);
+      }
+      cur.set(d.netId, d);
+    }
+    for (const netId of this.netDropSeen.keys()) {
+      if (!cur.has(netId)) net.sendItemOp(1, netId); // 上轮在、本轮没 = 拾取/过期 → take
+    }
+    this.netDropSeen = cur;
+  }
+
+  /** msg23 回包：NPC 傀儡 upsert（首次创建入桶；boss 置 this.boss 供血条） */
+  private netApplyNpcSnaps(snaps: NpcSnap[]) {
+    for (const s of snaps) {
+      let pup = this.netNpcPuppets.get(s.netId);
+      if (!pup || pup.e.dead) {
+        const e = new Enemy(s.key, s.x, s.y);
+        e.x = s.x; e.y = s.y; // 快照坐标=左上（Enemy 构造按中心偏移，直接覆写）
+        e.netPuppet = true;
+        e.netId = s.netId;
+        e.hp = s.hp; e.maxHp = s.maxHp;
+        this.entities.add(e, 'enemies');
+        if (e.def.boss) this.boss = e;
+        pup = { e, seen: this.tickCount };
+        this.netNpcPuppets.set(s.netId, pup);
+      }
+      const e = pup.e;
+      e.x = s.x; e.y = s.y; e.vx = s.vx; e.vy = s.vy;
+      e.hp = s.hp; e.maxHp = s.maxHp;
+      e.animT = s.animT;
+      if (Math.abs(s.vx) > 0.1) e.facing = Math.sign(s.vx);
+      pup.seen = this.tickCount;
+    }
+  }
+
+  /** msg21 回包：掉落物傀儡 upsert / take 移除（含拥有者本地真掉落被他人拾取） */
+  private netApplyItemOp(op: ItemOpMsg) {
+    if (op.op === 0) {
+      const id = ITEM_BY_KEY[op.key];
+      if (id === undefined) return;
+      let pup = this.netDropPuppets.get(op.netId);
+      if (!pup) {
+        const d = new ItemDrop(op.x, op.y, id, Math.max(1, op.stack), op.vx, op.vy);
+        d.netPuppet = true;
+        d.netId = op.netId;
+        this.entities.add(d, 'drops');
+        pup = { d, seen: this.tickCount };
+        this.netDropPuppets.set(op.netId, pup);
+      }
+      pup.d.x = op.x; pup.d.y = op.y;
+      pup.d.vx = op.vx; pup.d.vy = op.vy;
+      pup.seen = this.tickCount;
+    } else {
+      const pup = this.netDropPuppets.get(op.netId);
+      if (pup) {
+        pup.d.dead = true;
+        this.netDropPuppets.delete(op.netId);
+        return;
+      }
+      // 拥有者的真掉落被他人拾取（访客 take 上报 → 房主在此移除真身）
+      for (const ent of this.entities.drops) {
+        const d = ent as ItemDrop;
+        if (!d.netPuppet && d.netId === op.netId) { d.dead = true; break; }
+      }
+    }
+  }
+
+  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类，纯视觉——不跑命中） */
+  private netApplyProjSnaps(snaps: ProjSnap[]) {
+    for (const s of snaps) {
+      let pup = this.netProjPuppets.get(s.netId);
+      if (!pup || pup.p.dead) {
+        const p = this.netMakeProj(s);
+        if (!p) continue;
+        p.netPuppet = true;
+        p.netId = s.netId;
+        this.entities.add(p, 'projectiles');
+        pup = { p, seen: this.tickCount };
+        this.netProjPuppets.set(s.netId, pup);
+      }
+      pup.p.x = s.x; pup.p.y = s.y;
+      pup.p.vx = s.vx; pup.p.vy = s.vy;
+      pup.seen = this.tickCount;
+    }
+  }
+
+  private netMakeProj(s: ProjSnap): Entity | null {
+    switch (s.kind) {
+      case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1);
+      case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
+      case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg);
+      case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as 'dart');
+      case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
+      default: return null;
+    }
+  }
+
+  /** msg42 回包（房主）：访客打击权威结算——按 netId 找真身应用 hurt（防御减算在此一次） */
+  private netApplyStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
+    const localId = netIdLocal(netId);
+    for (const ent of this.entities.enemies) {
+      const e = ent as Enemy;
+      if (e.netPuppet || e.id !== localId) continue;
+      e.hurt(rawDmg, kbx, kby, this);
+      const dealt = Math.max(1, Math.round(rawDmg - (e.def.defense ?? 0) * 0.5));
+      this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
+      return;
+    }
+  }
+
+  /** 傀儡清扫：死亡/超时无快照（掉线房主、宿主清场）→ 移除 */
+  private netSweepPuppets() {
+    for (const [id, pup] of this.netNpcPuppets) {
+      if (pup.e.dead || this.tickCount - pup.seen > 300) {
+        pup.e.dead = true;
+        if (this.boss === pup.e) this.boss = null;
+        this.netNpcPuppets.delete(id);
+      }
+    }
+    for (const [id, pup] of this.netDropPuppets) {
+      if (pup.d.dead || this.tickCount - pup.seen > 300) {
+        pup.d.dead = true;
+        this.netDropPuppets.delete(id);
+      }
+    }
+    for (const [id, pup] of this.netProjPuppets) {
+      if (pup.p.dead || this.tickCount - pup.seen > 180) {
+        pup.p.dead = true;
+        this.netProjPuppets.delete(id);
+      }
+    }
+  }
+
+  /** 访客：傀儡 NPC 接触伤害（房主 AI 只对房主结算；访客本地判 AABB，HP 客户端权威+msg16 中继） */
+  private netPuppetContact() {
+    const p = this.player;
+    if (p.dead) return;
+    for (const [, pup] of this.netNpcPuppets) {
+      const e = pup.e;
+      if (e.dead || e.iframes > 0) continue;
+      const dmg = e.def.damage ?? 0;
+      if (dmg <= 0 || !e.aabbOverlaps(p)) continue;
+      this.damagePlayer(dmg, e.cx, e.cy, e);
+      e.iframes = 8;
+    }
   }
   /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
   private remotePlayerProxies: import('../entities/Player').Player[] = [];
@@ -834,6 +1115,7 @@ export class Game implements GameHooks {
     this.net?.disconnect();
     this.net = null;
     this.remotePlayerProxies = [];
+    entityNet.reportStrike = null; // v3 实体钩子随生命周期摘除
     this.running = false;
     // 天气：雨声层静音 + 渲染器 detach（防下个世界复用旧状态）
     this.sfx.setRain(0);
@@ -1541,11 +1823,13 @@ export class Game implements GameHooks {
     const cw = heldDef ? combatWeapon(heldDef) : null;
     if (tool?.type === 'sword' || cw?.kind === 'melee') {
       const spd = Math.max(12, Math.round((tool?.speed ?? (cw?.kind === 'melee' ? cw.useTime : 42)) / this.player.attackSpeedMult));
+      // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
+      const ps = this.heldPrefixStat();
       if (!this.swing && this.player.useTime === 0) {
         this.swing = {
           t: spd, dur: spd, item: held!.id,
-          dmg: cw?.kind === 'melee' ? cw.damage : undefined,
-          kb: cw?.kind === 'melee' ? cw.knockback : undefined,
+          dmg: cw?.kind === 'melee' ? Math.max(1, Math.round(cw.damage * (ps?.dmg ?? 1))) : undefined,
+          kb: cw?.kind === 'melee' ? cw.knockback * (ps?.kb ?? 1) : undefined,
         };
         this.player.useTime = spd;
         this.swingHitSet.clear();
@@ -1702,8 +1986,10 @@ export class Game implements GameHooks {
       if (ammoSlot >= 0 && ammoDef) {
         const ammoC = ammoDef.vid != null ? itemCombat(ammoDef.vid) : null;
         const speed = (bowC?.shootSpeed ?? rg.projSpeed) + (ammoC?.shootSpeed ?? 0);
-        const damage = (bowC?.damage ?? rg.damage) + (ammoC?.damage ?? 0);
-        const knockback = (bowC?.knockBack ?? rg.knockback) + (ammoC?.knockBack ?? 0);
+        // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）
+        const ps = this.heldPrefixStat();
+        const damage = Math.round((bowC?.damage ?? rg.damage) * (ps?.dmg ?? 1)) + (ammoC?.damage ?? 0);
+        const knockback = (bowC?.knockBack ?? rg.knockback) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         const projId = ammoC?.shoot ?? 1; // PickAmmo：projToShoot = item.shoot（1 木箭 2 燃烧箭）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         const ax = this.player.cx + Math.cos(ang) * 14;
@@ -1808,7 +2094,13 @@ export class Game implements GameHooks {
   /** vi_* 数据驱动武器使用派发（combatWeapon 解析出的 aiStyle 家族）。
    *  数值全部取 vanilla-itemcombat.json（damage/knockBack/useTime/shootSpeed/mana），
    *  行为取 1456 aiStyle 语义（WeaponProj.ts 各实体） */
-  private useCombatWeapon(cw: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
+  /** 手持物词缀属性（Item.Prefix 持久在物品实例上；无词缀=全 1） */
+  private heldPrefixStat() {
+    const pfx = this.player.inv.heldItem()?.prefix;
+    return pfx ? prefixStat(pfx) : null;
+  }
+
+  private useCombatWeapon(cwIn: Exclude<CombatWeapon, { kind: 'melee' }>, def: (typeof ITEM_DEFS)[number]) {
     const inp = this.input;
     const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
     const px = this.player.cx + Math.cos(ang) * 14;
@@ -1817,6 +2109,10 @@ export class Game implements GameHooks {
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.cb.onInventoryChanged();
     };
+    // 词缀乘区（Item.Prefix :551-557）：damage=round(×dmg)、knockBack×kb——
+    // 手雷兜底下限在乘区后取 max，与原版（damage 先乘再判 0）一致
+    const ps = this.heldPrefixStat();
+    const cw = { ...cwIn, damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))), knockback: cwIn.knockback * (ps?.kb ?? 1) };
     switch (cw.kind) {
       case 'grenade': {
         // AI_016：引信（原版 timeLeft：手雷 180 / 炸弹 150 / 炸药 135）弹跳后爆炸；
@@ -2695,6 +2991,13 @@ export class Game implements GameHooks {
       // 打开宝箱：精确命中或 3×3 容差（点击宝箱边缘也算）
       const chest = this.findChest(tx, ty) ?? this.findChestNear(tx, ty);
       if (chest) this.tryOpenChest(chest);
+      else if (this.net) {
+        // 联机：本地无箱数据（msg7 不传 chests，权威在服务器）→ msg31 请求，
+        // onChestSync 回包后登记 world.chests 并自动开面板
+        this.netPendingChest = { x: tx, y: ty };
+        this.net.requestChestOpen(tx, ty);
+        this.input.rightDown = false;
+      }
     } else if (type === TILE_BY_KEY['tombstone_v']) {
       // 墓碑：读碑文（原版 Sign 阅读；碑文在 2×2 锚点登记，点任意一格都能读到）
       const sign = this.world.signs.find((s) =>
@@ -3517,7 +3820,8 @@ export class Game implements GameHooks {
   // ================= 生成 =================
 
   private trySpawnEnemy() {
-    if (this.net) return; // 联机模式：刷怪归服务器权威（v1 未接入 NPC 同步，客户端不本地刷怪）
+    // 联机模式：刷怪归房主权威（房主跑完整模拟，快照广播给访客；访客不本地刷怪）
+    if (this.net && !this.net.policy.isHost) return;
     const w = this.world;
     const p = this.player;
     if (p.dead) return;
@@ -3879,11 +4183,13 @@ export class Game implements GameHooks {
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
-    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }> = [];
+    const buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'; label: string }> = [];
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
     if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
+    // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
+    if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
     // 守卫老人:夜晚出现「诅咒」(白天只闲聊,原版 GetChat 语义)
     if (npc.npcKey === 'old_man' && !this.world.clock.isDay && !this.world.flags.hardMode) {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
@@ -4167,12 +4473,18 @@ export class Game implements GameHooks {
   }
 
   /** 对话框按钮(SetTalkNPC 后 UI 回调) */
-  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'): void {
+  npcDialogButton(id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'): void {
     const npc = this.dialogNpc;
     if (id === 'close' || !npc) { this.closeNpcDialog(); return; }
     if (id === 'shop') { this.openNpcShop(); return; }
     if (id === 'heal') { this.nurseHeal(); return; }
     if (id === 'collect' && npc.npcKey === 'tax_collector') { this.taxCollect(); return; }
+    if (id === 'reforge' && npc.npcKey === 'goblin_tinkerer') {
+      // 原版 NPCChatText_TinkererReforge（Main.cs:39431）：关对话进重铸界面
+      this.closeNpcDialog();
+      this.cb.onReforgeOpen?.();
+      return;
+    }
     if (id === 'curse' && npc.npcKey === 'old_man') {
       if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
       // 原版:释放诅咒时老人消失,击败骷髅王后转为裁缝
@@ -4461,14 +4773,19 @@ export class Game implements GameHooks {
     for (let i = 0; i < inv.slots.length; i++) {
       const sl = inv.slots[i];
       if (!sl) continue;
-      if (sl.id === ITEM_BY_KEY['coin_copper'] || sl.id === ITEM_BY_KEY['coin_silver'] || sl.id === ITEM_BY_KEY['coin_gold']) {
+      if (sl.id === ITEM_BY_KEY['coin_copper'] || sl.id === ITEM_BY_KEY['coin_silver']
+        || sl.id === ITEM_BY_KEY['coin_gold'] || sl.id === ITEM_BY_KEY['coin_platinum']
+        || sl.id === ITEM_BY_KEY['vi_71_CopperCoin'] || sl.id === ITEM_BY_KEY['vi_72_SilverCoin']
+        || sl.id === ITEM_BY_KEY['vi_73_GoldCoin'] || sl.id === ITEM_BY_KEY['vi_74_PlatinumCoin']) {
         inv.slots[i] = null;
       }
     }
-    // 按面额回流(金→银→铜,栈内合并)
-    const gold = Math.floor(change / 10000);
+    // 按面额回流(铂→金→银→铜,栈内合并)
+    const plat = Math.floor(change / 1000000);
+    const gold = Math.floor((change % 1000000) / 10000);
     const silver = Math.floor((change % 10000) / 100);
     const copper = change % 100;
+    if (plat) inv.add(ITEM_BY_KEY['coin_platinum'], plat);
     if (gold) inv.add(ITEM_BY_KEY['coin_gold'], gold);
     if (silver) inv.add(ITEM_BY_KEY['coin_silver'], silver);
     if (copper) inv.add(ITEM_BY_KEY['coin_copper'], copper);
@@ -4479,6 +4796,19 @@ export class Game implements GameHooks {
   //  泛洪填充 + 原版 wallHouse 墙表 + 桌椅灯需求，见 checkRoom/findFreeHouse）
 
   // ================= GameHooks 实现 =================
+
+  /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：玩家 zone + 季节 + 血月 + 风 */
+  dropContext(): DropExtras {
+    const s = this.scene;
+    const c = this.world.clock;
+    return {
+      zoneHallow: s.zoneHallow, zoneCorrupt: s.zoneCorrupt, zoneCrimson: s.zoneCrimson,
+      zoneJungle: s.zoneJungle, zoneSnow: s.zoneSnow, zoneDesert: s.zoneDesert,
+      zoneDungeon: s.zoneDungeon,
+      bloodMoon: !!c.bloodMoon, halloween: !!c.halloween, xmas: !!c.xMas,
+      windy: Math.abs(this.world.weather.windSpeedCurrent) > 0.5,
+    };
+  }
 
   enemies() {
     return this.entities.enemies;
@@ -5171,6 +5501,53 @@ export class Game implements GameHooks {
     this.cb.onInventoryChanged();
   }
 
+  /** 合成产出入包（vanillaCraft 的产出半段，供现代合成网格的格子合成复用） */
+  vanillaCraftOutput(r: VanillaRecipeLike): void {
+    const outKey = recipeItemKey(r.create);
+    if (!outKey) return;
+    const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack);
+    if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left);
+    this.sfx.play('tink');
+    this.cb.onInventoryChanged?.();
+  }
+
+  // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
+
+  /** 重铸费用 = value × stack ÷ 3（:41026-41032，discountAvailable 0.8 未实现折扣 NPC）。
+   *  vi_ 物品注册期 value=1 占位——权威值查 vanilla-itemvalue.json（extract-itemrare.mjs） */
+  reforgeCost(item: { id: number; stack: number }): number {
+    const def = ITEM_DEFS[item.id];
+    if (!def) return 0;
+    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
+    return Math.max(1, Math.floor((value * item.stack) / 3));
+  }
+
+  /** 该物品能否重铸（Item.CanHavePrefixes → GetRollablePrefixes != null） */
+  canReforge(item: { id: number }): boolean {
+    const def = ITEM_DEFS[item.id];
+    if (!def) return false;
+    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    if (vid < 0) return false;
+    return rollablePrefixes(vid, !!def.accessory) !== null;
+  }
+
+  /** 执行重铸（ReforgeItemInReforgeSlot :41346-41351：ResetPrefix + Prefix(-2)）。
+   *  成功：扣费、写回 item.prefix 并返回新词缀号；失败（钱不够/不可重铸）返回 -1 */
+  doReforge(item: { id: number; stack: number; prefix?: number }): number {
+    const def = ITEM_DEFS[item.id];
+    if (!def) return -1;
+    const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
+    const pool = vid >= 0 ? rollablePrefixes(vid, !!def.accessory) : null;
+    if (!pool || !pool.length) return -1;
+    const cost = this.reforgeCost(item);
+    if (this.coinsOwned() < cost || !this.spendCopper(cost)) return -1;
+    item.prefix = rollPrefix(pool, true);
+    this.sfx.play('tink'); // SoundID.Item37（非最优档）；最优档音效未接
+    this.cb.onInventoryChanged?.();
+    return item.prefix;
+  }
+
   // ================= 召唤 Boss =================
 
   /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
@@ -5308,57 +5685,62 @@ export class Game implements GameHooks {
   private teleportNear(tx: number, ty: number): boolean {
     const st = this.world.store;
     const p = this.player;
-    // 空中落点：2 格净空即可（无地面要求）
-    const fitsAir = (x: number, y: number) => {
-      for (let dy = 0; dy <= 1; dy++) {
-        if (!st.inBounds(x, y - dy) || st.isSolid(x, y - dy)) return false;
+    // 玩家盒 20×42（Player.cs:55083）——宽跨 2 列、高跨 3 行，落位必须按实际碰撞盒校验：
+    // 此前 y=(ty-1)*TILE 使脚底嵌入地面 10px（(ty-1)*16+42=ty*16+26 越入实心行），
+    // 且只查 1 列 2 行 → 头顶/侧向穿墙"卡半格"。现按"脚底贴地面顶"精确对齐。
+    const clearBox = (x0: number, yTop: number, yBot: number) => {
+      for (const cx of [x0, x0 + 1]) {
+        for (let y = yTop; y <= yBot; y++) {
+          if (!st.inBounds(cx, y) || st.isSolid(cx, y)) return false;
+          if (st.liquid[st.idx(cx, y)] > 100) return false;
+        }
       }
       return true;
     };
-    const fits = (x: number, y: number) => {
-      // (x, y-1..y) 两格净空（无实心/无液体），y+1 格实心站立
-      for (let dy = 0; dy <= 1; dy++) {
-        if (!st.inBounds(x, y - dy) || st.isSolid(x, y - dy)) return false;
-        if (st.liquid[st.idx(x, y - dy)] > 100) return false;
+    // (x, floorY)：floorY 行两列实心 + 其上 3 行两列净空（42px 身高）
+    const fitsFloor = (x: number, floorY: number) => {
+      for (const cx of [x, x + 1]) {
+        if (!st.inBounds(cx, floorY) || !st.isSolid(cx, floorY)) return false;
       }
-      return st.inBounds(x, y + 1) && st.isSolid(x, y + 1);
+      return clearBox(x, floorY - 3, floorY - 1);
     };
-    if (fits(tx, ty)) {
-      p.x = tx * TILE + 1; p.y = (ty - 1) * TILE;
-    } else {
-      // 螺旋外扩找最近可站位置
-      let found = false;
-      for (let r = 1; r <= 24 && !found; r++) {
-        for (let dx = -r; dx <= r && !found; dx++) {
-          for (let dy = -r; dy <= r && !found; dy++) {
-            if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
-            if (fits(tx + dx, ty + dy)) {
-              p.x = (tx + dx) * TILE + 1;
-              p.y = (ty + dy - 1) * TILE;
-              found = true;
-            }
+    // 落位：脚底 = 地面顶（floorY*TILE），盒顶在其上 42px
+    const placeOnFloor = (x: number, floorY: number) => {
+      p.x = x * TILE; p.y = floorY * TILE - p.h;
+      p.vx = 0; p.vy = 0;
+      this.camera.x = p.cx; this.camera.y = p.cy;
+    };
+    if (fitsFloor(tx, ty + 1)) {
+      placeOnFloor(tx, ty + 1);
+      return true;
+    }
+    // 螺旋外扩找最近可站位置（floorY 为地面行）
+    for (let r = 1; r <= 24; r++) {
+      let done = false;
+      for (let dx = -r; dx <= r && !done; dx++) {
+        for (let dy = -r; dy <= r && !done; dy++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== r) continue;
+          if (fitsFloor(tx + dx, ty + dy + 1)) {
+            placeOnFloor(tx + dx, ty + dy + 1);
+            done = true;
           }
         }
       }
-      if (!found) {
-        // 高空/无地面：允许落在空中（目标列上下找 2 格净空，重力会带下来）
-        for (let dy = 0; dy <= 6; dy++) {
-          for (const sy of [ty - dy, ty + dy]) {
-            if (fitsAir(tx, sy)) {
-              p.x = tx * TILE + 1; p.y = (sy - 1) * TILE;
-              p.vx = 0; p.vy = 0;
-              this.camera.x = p.cx; this.camera.y = p.cy;
-              return true;
-            }
-          }
+      if (done) return true;
+    }
+    // 高空/无地面：允许落在空中（两列 × 3 行净空，重力会带下来；脚底对齐格底）
+    for (let dy = 0; dy <= 6; dy++) {
+      for (const sy of [ty - dy, ty + dy]) {
+        if (clearBox(tx, sy - 2, sy)) {
+          p.x = tx * TILE; p.y = (sy + 1) * TILE - p.h;
+          p.vx = 0; p.vy = 0;
+          this.camera.x = p.cx; this.camera.y = p.cy;
+          return true;
         }
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.TeleportSolid'));
-        return false;
       }
     }
-    p.vx = 0; p.vy = 0;
-    this.camera.x = p.cx; this.camera.y = p.cy;
-    return true;
+    this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.TeleportSolid'));
+    return false;
   }
 
   /** Main.NewText(Main.cs:64095):左下角消息列。颜色 = ChatColors.cs 五色 */
@@ -5390,11 +5772,16 @@ export class Game implements GameHooks {
     this.entities.add(new Tombstone(p.cx, p.cy, this.coinsOwned(), deathText, p.facing), 'props');
   }
 
-  /** 身家（铜币计价）——DropTombstone 的金币门槛（>100000 → 金墓碑 527-531） */
-  private coinsOwned(): number {
+  /** 身家（铜币计价）——商店/重铸扣费与墓碑金币门槛（>100000 → 金墓碑 527-531）。
+   *  同时计 legacy coin_* 与原版 vi_71-74 两套钱币（wld 导入的钱币是后者） */
+  coinsOwned(): number {
     const p = this.player;
-    const n = (key: string, mult: number) => p.inv.countOf(ITEM_BY_KEY[key]) * mult;
-    return n('coin_copper', 1) + n('coin_silver', 100) + n('coin_gold', 10000);
+    const n = (key: string, mult: number) => {
+      const id = ITEM_BY_KEY[key];
+      return id !== undefined ? p.inv.countOf(id) * mult : 0;
+    };
+    return n('coin_copper', 1) + n('coin_silver', 100) + n('coin_gold', 10000) + n('coin_platinum', 1000000)
+      + n('vi_71_CopperCoin', 1) + n('vi_72_SilverCoin', 100) + n('vi_73_GoldCoin', 10000) + n('vi_74_PlatinumCoin', 1000000);
   }
 
   /** 角色名（死亡文本/墓碑碑文用；未命名回退） */
@@ -5481,6 +5868,8 @@ export class Game implements GameHooks {
           net.gameWorld = world;
           // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
           world.store.netReporter = (op) => net.reportTileOp(op);
+          // 实体同步钩子（Enemy.hurt 傀儡分支 → StrikeNPC 上报）
+          entityNet.reportStrike = (netId, rawDmg, kbx, kby) => net.sendStrike(netId, rawDmg, kbx, kby);
           this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
             if (settled) return;
             settled = true;
@@ -5510,6 +5899,15 @@ export class Game implements GameHooks {
             if (policy.protectItems) parts.push(Lang.text('Mods.SandboxWorld.Toast.RoomProtectItems'));
             this.cb.onToast?.(parts.join('；'));
           }
+        },
+        onChestSync: (chestIdx, x, y, items) => this.netApplyChest(chestIdx, x, y, items),
+        onNpcSnapshot: (snaps) => this.netApplyNpcSnaps(snaps),
+        onItemOp: (op) => this.netApplyItemOp(op),
+        onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
+        onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
+        onHp: (slot, hp, maxHp) => {
+          const rp = net.players.get(slot);
+          if (rp) { (rp as unknown as { hp?: number }).hp = hp; (rp as unknown as { maxHp?: number }).maxHp = maxHp; }
         },
       });
       net.connect(url, hostToken);
@@ -5542,6 +5940,18 @@ export class Game implements GameHooks {
     this.updateSwingHits();
     // 远端玩家模拟（每逻辑 tick：控制位驱动物理 + netOffset 平滑，对齐原版远端玩家）
     if (this.net?.active) this.simulateRemotePlayers();
+    // 箱子槽位差分上报（15 tick 轮询；UI/快捷堆叠等所有变更源统一捕获）
+    if (this.net?.active && this.tickCount % 15 === 0) this.netChestPoll();
+    // v3 实体同步：房主 NPC 快照 + 双向弹幕/掉落 + 傀儡清扫/接触伤害
+    if (this.net?.active) {
+      if (this.tickCount % 4 === 0) {
+        if (this.net.policy.isHost) this.netNpcBroadcast();
+        this.netProjBroadcast();
+        this.netDropSweep();
+      }
+      if (this.tickCount % 30 === 0) this.netSweepPuppets();
+      if (!this.net.policy.isHost) this.netPuppetContact();
+    }
   }
 
   /**

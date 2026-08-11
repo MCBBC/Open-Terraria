@@ -37,6 +37,8 @@ export class MagicProj extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
     if (--this.life <= 0) { this.dead = true; return; }
     this.x += this.vx;
     this.y += this.vy;

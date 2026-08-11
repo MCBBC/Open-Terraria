@@ -36,6 +36,28 @@ export interface RoomPolicyState {
   protectItems: boolean;
 }
 
+/** NPC 快照（msg23；房主权威） */
+export interface NpcSnap {
+  netId: number; key: string;
+  x: number; y: number; vx: number; vy: number;
+  hp: number; maxHp: number; animT: number;
+  flags: number; // bit0=boss
+}
+
+/** 弹幕快照（msg27；tag = projId(arrow/weapon) / dart kind / magic color） */
+export interface ProjSnap {
+  netId: number; kind: number; tag: string;
+  dmg: number; aux: number;
+  x: number; y: number; vx: number; vy: number;
+}
+
+/** 掉落物操作（msg21） */
+export interface ItemOpMsg {
+  op: 0 | 1 | 2; netId: number;
+  key: string; stack: number;
+  x: number; y: number; vx: number; vy: number;
+}
+
 export interface ClientNetHooks {
   /** 世界组装完成（全部初始 strip 到齐 + PlayerSpawn）——Game 进 loadWorld */
   onWorldReady: (world: World) => void;
@@ -47,6 +69,18 @@ export interface ClientNetHooks {
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** 被踢 */
   onKick?: (reason: string) => void;
+  /** 箱子内容到达/被纠正（服务器权威；Game 负责登记 world.chests 与开面板） */
+  onChestSync?: (chestIdx: number, x: number, y: number, items: Array<{ id: number; stack: number } | null>) => void;
+  /** NPC 快照到达（msg23；Game 维护傀儡池） */
+  onNpcSnapshot?: (snaps: NpcSnap[]) => void;
+  /** 掉落物操作到达（msg21；Game 维护傀儡/移除本地真掉落） */
+  onItemOp?: (op: ItemOpMsg) => void;
+  /** 弹幕快照到达（msg27；Game 维护傀儡池） */
+  onProjectileSync?: (snaps: ProjSnap[]) => void;
+  /** 打击到达（msg42；房主权威结算） */
+  onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number) => void;
+  /** 远端玩家 HP（msg16 中继） */
+  onHp?: (slot: number, hp: number, maxHp: number) => void;
   /** 房间策略到达（进场时；门禁/提示用） */
   onPolicy?: (policy: RoomPolicyState) => void;
 }
@@ -85,8 +119,14 @@ export class ClientNet {
   private pingTimer: ReturnType<typeof setInterval> | null = null;
 
   connect(url: string, hostToken = '') {
-    this.active = true;
+    this.url = url;
     this.hostToken = hostToken;
+    this.connect0(url);
+  }
+
+  /** 底层建连（首连/重连共用） */
+  private connect0(url: string) {
+    this.active = true;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
@@ -99,9 +139,11 @@ export class ClientNet {
     ws.binaryType = 'arraybuffer';
     this.ws = ws;
     // R9：独立 30s 心跳——暂停/后台（fixedUpdate 停跑）也不再被服务器 120s 看门狗踢
-    this.pingTimer = setInterval(() => {
-      this.send(new NetWriter(Msg.Ping).f64(performance.now()).finish());
-    }, 30000);
+    if (!this.pingTimer) {
+      this.pingTimer = setInterval(() => {
+        this.send(new NetWriter(Msg.Ping).f64(performance.now()).finish());
+      }, 30000);
+    }
     ws.onopen = () => {
       // Hello（对齐原版 msg1：版本校验）。连接时 Game.player 可能尚未创建（joinNetGame
       // 先连后 loadWorld）——外观名走可选链兜底
@@ -117,13 +159,29 @@ export class ClientNet {
       this.parser.drain((id, r) => this.handle(id, r));
     };
     ws.onclose = () => {
-      if (this.active) {
+      if (!this.active || this.userClosed) return;
+      // v3 断线重连（§8.8）：有 session 凭据 → 2s 间隔自动重试 3 次（同 slot 复位）；
+      // 耗尽或无凭据 → 按原语义 onKick
+      if (this.session && this.reconnects < 3) {
+        this.reconnects++;
         this.active = false;
-        this.hooks.onKick?.('与服务器断开连接');
+        setTimeout(() => {
+          if (this.userClosed) return;
+          const sep = this.url.includes('?') ? '&' : '?';
+          this.connect0(`${this.url}${sep}session=${encodeURIComponent(this.session)}`);
+        }, 2000);
+        return;
       }
+      this.active = false;
+      this.hooks.onKick?.('与服务器断开连接');
     };
     ws.onerror = () => { /* close 跟上 */ };
   }
+
+  private url = '';
+  private session = '';
+  private reconnects = 0;
+  private userClosed = false;
 
   private send(frame: Uint8Array) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(frame);
@@ -135,6 +193,7 @@ export class ClientNet {
   }
 
   disconnect() {
+    this.userClosed = true;
     this.active = false;
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
     this.ws?.close();
@@ -153,6 +212,18 @@ export class ClientNet {
       case Msg.PlayerSlot: {
         this.mySlot = r.u8();
         this.invDumpPending = true; // 物品全量 dump 时机：slot 分配后首 tick
+        // v3：session 凭据（重连用）；重连场景复位 join 状态以重走世界组装
+        const sess = (() => { try { return r.str(); } catch { return ''; } })();
+        if (sess) {
+          if (this.worldDelivered) {
+            // 断线重连：世界将重新组装下发（pendingWorld 复位）
+            this.worldDelivered = false;
+            this.pendingWorld = null;
+            this.pendingStrips = 0;
+          }
+          this.session = sess;
+          this.reconnects = 0;
+        }
         // 全量上传自身（对齐原版 msg3 后立刻 SyncPlayer + RequestWorldData）
         const p2 = this.game.player as { appearance?: unknown } | undefined | null;
         const app = JSON.stringify(p2?.appearance ?? {});
@@ -320,6 +391,61 @@ export class ClientNet {
         this.hooks.onPolicy?.(this.policy);
         return;
       }
+      case Msg.SyncChestItem: {
+        this.applyRemoteChest(r);
+        return;
+      }
+      case Msg.SyncNPC: {
+        const n = r.u16();
+        const snaps: NpcSnap[] = [];
+        for (let i = 0; i < n; i++) {
+          snaps.push({
+            netId: r.u32(), key: r.str(),
+            x: r.f32(), y: r.f32(), vx: r.f32(), vy: r.f32(),
+            hp: r.i16(), maxHp: r.i16(),
+            animT: r.u16(), flags: r.u8(),
+          });
+        }
+        this.hooks.onNpcSnapshot?.(snaps);
+        return;
+      }
+      case Msg.SyncItem: {
+        const netId = r.u32();
+        const op = r.u8() as 0 | 1 | 2;
+        let key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0;
+        if (op === 0) {
+          key = r.str(); stack = r.u16();
+          x = r.f32(); y = r.f32(); vx = r.f32(); vy = r.f32();
+        }
+        this.hooks.onItemOp?.({ op, netId, key, stack, x, y, vx, vy });
+        return;
+      }
+      case Msg.SyncProjectile: {
+        const n = r.u16();
+        const snaps: ProjSnap[] = [];
+        for (let i = 0; i < n; i++) {
+          snaps.push({
+            netId: r.u32(), kind: r.u8(), tag: r.str(),
+            dmg: r.i16(), aux: r.i16(),
+            x: r.f32(), y: r.f32(), vx: r.f32(), vy: r.f32(),
+          });
+        }
+        this.hooks.onProjectileSync?.(snaps);
+        return;
+      }
+      case Msg.StrikeNPC: {
+        const netId = r.u32();
+        const dmg = r.i16();
+        const kbx = r.f32(), kby = r.f32();
+        this.hooks.onStrike?.(netId, dmg, kbx, kby);
+        return;
+      }
+      case Msg.PlayerLifeMana: {
+        const slot = r.u8();
+        const hp = r.i16(), maxHp = r.i16();
+        if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
+        return;
+      }
       case Msg.Ping:
         return; // 忽略回显
       default:
@@ -377,6 +503,7 @@ export class ClientNet {
   tick() {
     if (!this.active) return;
     this.syncInventory(performance.now());
+    this.syncHp();
     if (this.tileQueue.length) {
       // 每包最多 64 op（防超帧）
       const batch = this.tileQueue.splice(0, 64);
@@ -440,6 +567,37 @@ export class ClientNet {
   private lastSentSel = -1;
   private lastSentDead = false;
 
+  // ================= 箱子同步（msg31/32，服务器权威） =================
+
+  /** 请求打开箱子（interactAt 未命中本地 chests 时——访客本地无箱数据） */
+  requestChestOpen(x: number, y: number) {
+    this.send(new NetWriter(Msg.RequestChestOpen).i32(x).i32(y).finish());
+  }
+
+  /** 槽位编辑上报（每槽一条消息；服务器权威+广播，编辑者本地已乐观生效） */
+  sendChestSlot(chestIdx: number, x: number, y: number, slot: number, itemId: number, stack: number) {
+    const w = new NetWriter(Msg.SyncChestItem);
+    w.u16(chestIdx); w.i32(x); w.i32(y);
+    w.u16(1);
+    w.u8(slot); w.u16(itemId); w.u16(stack);
+    this.send(w.finish());
+  }
+
+  /** 本地登记的箱子 → 同步槽位号（Game 注册；diff 轮询用） */
+  chestIndexByPos = new Map<string, number>();
+
+  private applyRemoteChest(r: NetReader) {
+    const chestIdx = r.u16();
+    const x = r.i32(), y = r.i32();
+    const n = r.u16();
+    const items: Array<{ id: number; stack: number } | null> = [];
+    for (let i = 0; i < n; i++) {
+      const slot = r.u8(), itemId = r.u16(), stack = r.u16();
+      items[slot] = itemId ? { id: itemId, stack } : null;
+    }
+    this.hooks.onChestSync?.(chestIdx, x, y, items);
+  }
+
   /** 外观变更后重发 SyncPlayer（进游戏后 applyCharacter 调用——初始两发都在外观应用前） */
   resendAppearance() {
     if (!this.active || this.mySlot < 0) return;
@@ -475,6 +633,67 @@ export class ClientNet {
   /** 聊天发送 */
   sendChat(text: string) {
     this.send(new NetWriter(Msg.NetModules).u16(NetModule.Text).str(text).finish());
+  }
+
+  // ================= v3 实体同步（msg16/21/23/27/42，房主权威+服务器中继） =================
+
+  /** NPC 快照（msg23） */
+  sendNpcSnapshot(snaps: NpcSnap[]) {
+    if (!snaps.length) return;
+    const w = new NetWriter(Msg.SyncNPC);
+    w.u16(snaps.length);
+    for (const s of snaps) {
+      w.u32(s.netId); w.str(s.key);
+      w.f32(s.x); w.f32(s.y); w.f32(s.vx); w.f32(s.vy);
+      w.i16(s.hp); w.i16(s.maxHp);
+      w.u16(s.animT & 0xffff);
+      w.u8(s.flags);
+    }
+    this.send(w.finish());
+  }
+
+  /** 掉落物操作（msg21）：op 0=spawn / 1=take / 2=despawn */
+  sendItemOp(op: 0 | 1 | 2, netId: number, key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0) {
+    const w = new NetWriter(Msg.SyncItem);
+    w.u32(netId); w.u8(op);
+    if (op === 0) {
+      w.str(key); w.u16(stack);
+      w.f32(x); w.f32(y); w.f32(vx); w.f32(vy);
+    }
+    this.send(w.finish());
+  }
+
+  /** 弹幕快照（msg27，双向：各自弹幕互播） */
+  sendProjectileBatch(snaps: ProjSnap[]) {
+    if (!snaps.length) return;
+    const w = new NetWriter(Msg.SyncProjectile);
+    w.u16(snaps.length);
+    for (const s of snaps) {
+      w.u32(s.netId); w.u8(s.kind); w.str(s.tag);
+      w.i16(s.dmg); w.i16(s.aux);
+      w.f32(s.x); w.f32(s.y); w.f32(s.vx); w.f32(s.vy);
+    }
+    this.send(w.finish());
+  }
+
+  /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */
+  sendStrike(netId: number, rawDmg: number, kbx: number, kby: number) {
+    this.send(new NetWriter(Msg.StrikeNPC).u32(netId).i16(rawDmg).f32(kbx).f32(kby).finish());
+  }
+
+  /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */
+  private lastHpSent = -1;
+  private lastHpAt = 0;
+  syncHp() {
+    if (this.mySlot < 0) return;
+    const p = this.game.player as unknown as { hp: number; maxHp: number };
+    const now = performance.now();
+    if (p.hp === this.lastHpSent) {
+      if (now - this.lastHpAt < 5000) return; // 满血心跳 5s
+    } else if (now - this.lastHpAt < 200) return;
+    this.lastHpSent = p.hp;
+    this.lastHpAt = now;
+    this.send(new NetWriter(Msg.PlayerLifeMana).u8(this.mySlot).i16(p.hp).i16(p.maxHp).finish());
   }
 
   // ================= 物品/装备同步（msg5，对齐原版 SyncPlayerItem 语义） =================

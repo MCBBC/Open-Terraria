@@ -1,11 +1,12 @@
 // 敌人实体：统一类 + 按 key 分支行为（史莱姆/僵尸/恶魔眼/蝙蝠/克苏鲁之眼及其仆从）
 // + 原版 NPC 数据驱动路径（vanillaId）：属性/AI/音效/贴图来自 vanilla-npcs.json（SetDefaults 提取）
 import { Entity } from './Entity';
+import { entityNet } from '../net/entitySyncHooks';
 import { TILE_BY_KEY } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
-import { vanillaNpc, vanillaSoundName, vanillaNpcDrops, type VanillaNpc } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaSoundName, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
@@ -17,6 +18,22 @@ import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTen
 import { dukeFishronAI, dukeBubbleAI, moonLordCoreAI, moonLordHandAI, moonLordHeadAI } from './bossAI_duke_moonlord';
 import { golemAI, golemHeadAI, golemFistAI } from './bossAI_golem';
 import { RNG } from '../core/rng';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import type { ItemDrop } from './ItemDrop';
+import {
+  resolveDrops, rollCoins, rollHeartsAndStars, rollBossPotionsAndHearts,
+  dropVelocity, npcValueOf, type NpcDropCtx,
+} from '../drops/NpcDrops';
+
+/** 无 key 映射的原版物品 id（一次性告警用） */
+const UNMAPPED_WARNED = new Set<number>();
+/** 有原生实现的原版物品 id → 原生 key（钱币=货币计数/凝胶火把晶状体=配方素材，
+ *  必须走原生 def 而非 vi_ 占位注册） */
+const NATIVE_DROP_KEY: Record<number, string> = {
+  71: 'coin_copper', 72: 'coin_silver', 73: 'coin_gold', 74: 'coin_platinum',
+  23: 'gel', 8: 'torch', 236: 'lens', 3: 'stone_block', 2: 'dirt_block', 9: 'wood',
+  28: 'lesser_healing_potion',
+};
 
 /** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
  *  EoC4/世吞13-15(头13 为 Boss,身14尾15 不标)/骷髅王35+手36/地牢守卫68/史莱姆王50/
@@ -127,7 +144,8 @@ export class Enemy extends Entity {
     const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14;
     e.def = {
       ...e.def,
-      name: v.name, hp: v.lifeMax, damage: v.damage, defense: v.defense,
+      // friendly（被缚 NPC 等城镇系）与 critter 一样零接触伤害——原版 friendly 旗
+      name: v.name, hp: v.lifeMax, damage: (v.critter || v.friendly) ? 0 : v.damage, defense: v.defense,
       // 原版 knockBackResist 是"承受击退的比例"（0.5=吃一半）；本仓库语义是
       // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
       knockbackResist: Math.max(0, Math.min(0.89, 1 - (v.knockBackResist ?? 0.5))),
@@ -135,7 +153,7 @@ export class Enemy extends Entity {
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
-      hitSound: [hit], killedSound: [kill], drops: v.critter ? [] : vanillaNpcDrops(id),
+      hitSound: [hit], killedSound: [kill], drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
       // 小动物：无接触伤害、不夜行
       ...(v.critter ? { damage: 0, nightOnly: false } : {}),
     };
@@ -182,6 +200,9 @@ export class Enemy extends Entity {
   spinPhase = 0;         // 自旋段:0 加速 / 1 减速
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
+  justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
+  /** 原版 justHit 语义（本 tick 内受过击） */
+  get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
   /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
@@ -233,8 +254,21 @@ export class Enemy extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.prevX = this.x; this.prevY = this.y;
+    // 联机傀儡（房主权威快照驱动）：无本地 AI——位置外推 + 动画计时，
+    // 打击/拾取等交互经 entityNet 上报房主结算
+    if (this.netPuppet) {
+      this.aiT++;
+      this.animT++;
+      this.x += this.vx;
+      this.y += this.vy;
+      this.onGround = Math.abs(this.vy) < 0.6;
+      if (Math.abs(this.vx) > 0.05) this.walkCycleT += Math.abs(this.vx);
+      if (this.iframes > 0) this.iframes--;
+      return;
+    }
     this.aiT++;
     if (this.iframes > 0) this.iframes--;
+    if (this.justHitT > 0) this.justHitT--;
     if (this.hpBarT > 0) this.hpBarT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
@@ -313,6 +347,15 @@ export class Enemy extends Entity {
         case 47: golemFistAI(this, game, p); break;                      // AI_047 石巨人拳 247/248(肩锚冲拳)
         case 40: this.wallCreeperAI(game, p); break;                      // AI_040 爬墙蜘蛛族（贴背景墙爬行+形态互转）
         case 42: this.lostGirlAI(game, p); break;                         // AI_042 失落女孩（伪装静止→Nymph 变身 cs:30281-30310）
+        case 0: this.boundNPCAI(game, p); break;                          // AI_000 被缚NPC（cs:19774 站立/水上漂流；Enemy 侧防御，常规走 TownNPC.bound）
+        case 17: this.vultureAI(game, p); break;                          // AI_017 秃鹫（cs:24079 栖息→200px盒/受击起飞，单向不回落）
+        case 19: this.antlionAI(game, p); break;                          // AI_019 蚁狮（cs:24465 扎沙不动+沙球；传送带特例略）
+        case 23: this.flyingWeaponAI(game, p); break;                     // AI_023 飞行武器（cs:25316 冲/漂100/转120 循环，受击回蓄转）
+        case 25: this.mimicAI(game, p); break;                            // AI_025 宝箱怪（cs:25621 伪装200px盒→小小大跳循环）
+        case 39: this.tortoiseAI(game, p); break;                         // AI_039 陆龟族（cs:29257 待机蓄力→蓄势→旋冲→恢复）
+        case 41: this.herplingAI(game, p); break;                         // AI_041 赫柏林/德普林（cs:30017 低跳连扑；378 炸弹自爆略）
+        case 44: this.flyingSwarmerAI(game, p); break;                    // AI_044 飞鱼/蚁狮蜂（cs:30999 分轴限速追+失视逃逸）
+        case 56: this.dungeonSpiritAI(game, p); break;                    // AI_056 地牢之魂（cs:32915 穿墙0.99惯性追踪）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -374,6 +417,13 @@ export class Enemy extends Entity {
   encourageDespawn(despawnTime: number): void {
     if (this.despawnTimer > despawnTime) this.despawnTimer = despawnTime;
     this.despawnEncouraged = true;
+  }
+
+  /** 敌怪弹幕发射辅助：从 (ox,oy) 朝 (tx,ty) 偏移方向以 speed 定速发射敌对 Dart */
+  private shootDart(game: GameHooks, ox: number, oy: number, tx: number, ty: number, speed: number, dmg: number): void {
+    const d = Math.hypot(tx, ty) || 1;
+    (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
+      .add(new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg), 'projectiles');
   }
 
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {
@@ -457,6 +507,23 @@ export class Enemy extends Entity {
           this.ai0 = stage === 1 ? -120 + num54 : -120 + num54 * 2;
         }
         this.jumpStartX = this.cx;  // ai[3] = position.X（L62059）
+      }
+    }
+    // ---- 尖刺史莱姆（cs:61555-61870：184 冰/535 尖刺/204 丛林）：落地 + 有视线 + 冷却尽
+    // → 单发抛物线尖刺（<200px，204 <400px；瞄准点上抬 rand(0,200) 补抛物线、速 4.5、
+    // 伤 9、冷却 50t=ai[3]）；专家模式五连扇形((k-2,-4) 归一 ×4、<120px/204<200px、冷却 30t)
+    // 未启用专家只做单发；射刺时 ai[0]=-40 压跳 + vx×0.9（cs:61573-61576）
+    const spiked = this.vanillaId === 184 || this.vanillaId === 535 || this.vanillaId === 204;
+    if (spiked && player && !player.dead && !inWater && this.onGround) {
+      if (this.ai3 > 0) this.ai3 -= 1;
+      const near = this.vanillaId === 204 ? 400 : 200;
+      const dp = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      if (dp < near && this.ai3 === 0 && this.canSeePlayer(st, player)) {
+        this.ai0 = -40; // 压制下一跳
+        this.vx *= 0.9;
+        const aimY = player.y - this.cy - Math.random() * 200;
+        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, aimY, 4.5, 9);
+        this.ai3 = 50;
       }
     }
     // 重力+碰撞（原版经由 NPC 碰撞；水中浮力为原版 wet 行为）
@@ -621,32 +688,34 @@ export class Enemy extends Entity {
     }
     // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
     if (this.onGround) this.vx *= 0.85;
-    // ---- 入侵远程攻击（NPC.cs:59464-60085 战士族射击段，入侵弓手/枪手专属）----
-    // ai[1]=瞄准冷却(ai0)、ai[2]=瞄准姿态(ai3)：地面站定 + 有视线 + 距离 < 射程时举枪，
-    // 半程处朝预判点发射（重力下坠补偿 |dx|×0.1，Deadeye 214 为 0 直射）
+    // ---- 战士族远程攻击（NPC.cs:59464-60085：落地 + 视线 + 距离<射程 → 举枪蓄力，
+    // 半程发射；justHit 打断蓄力 cs:59489。覆盖入侵弓手 + 地牢/沙漠常驻射击怪）----
+    // ai[1]=蓄力倒数(ai0)、ai[2]=瞄准姿态(ai3)
     if (player && this.vanillaId != null && Enemy.RANGED_FIGHTERS.has(this.vanillaId)) {
       const R = Enemy.RANGED_TABLE[this.vanillaId];
+      const fireAt = R.burst ? R.cooldown - 1 : R.cooldown >> 1; // 292 在 num163-1 连发（cs:59967）
+      const spread = R.spread ?? 40;
       if (this.ai3 > 0) {           // 瞄准中：减速 + 半程发射
         if (this.ai0 > 0) this.ai0--;
         this.vx *= 0.9;
         this.facing = player.cx > this.cx ? 1 : -1;
-        if (this.ai0 === R.cooldown >> 1 && this.ai0 > 0) {
-          const ox = this.cx, oy = this.cy;
-          // 预判点（cs:59700-59790）：目标中心 + 重力下坠补偿（|dx|×0.1；Deadeye 214 直射）
-          // + 散布 ±40px（原版 rand.Next(-40,41)）——弹体直飞（Dart 敌我对全敌对）
-          let tx = player.cx - ox;
-          let ty = player.cy - oy - (R.drop ? Math.abs(tx) * 0.1 : 0);
-          tx += Math.random() * 80 - 40;
-          ty += Math.random() * 80 - 40;
-          const d = Math.hypot(tx, ty) || 1;
-          const spd = R.speed / d;
-          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
-            .add(new Dart(ox, oy, tx * spd, ty * spd, R.dmg), 'projectiles');
+        if (this.ai0 === fireAt && this.ai0 > 0) {
+          const ox = this.cx, oy = this.cy + (R.oy ?? 0);
+          const shots = R.burst ?? 1;
+          for (let b = 0; b < shots; b++) {
+            // 预判点（cs:59700-59790）：目标中心 + 下坠补偿（默认 |dx|×0.1，各 type 修正）
+            // + 散布（默认 ±40，291 狙击 ±8）——弹体直飞（Dart 敌我对全敌对）
+            let tx = player.cx - ox;
+            let ty = player.cy - oy - Math.abs(tx) * (R.drop ?? 0.1);
+            tx += Math.random() * spread * 2 - spread;
+            ty += Math.random() * spread * 2 - spread;
+            this.shootDart(game, ox, oy, tx, ty, R.speed, R.dmg);
+          }
         }
         // 移动/冷却尽 → 解除瞄准（cs:60005-60009）
-        if ((this.vy !== 0 && R.drop) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
+        if ((this.vy !== 0 && (R.drop ?? 0.1) > 0) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
       } else if (this.vy === 0 && this.ai0 <= 0 && !player.dead && this.onGround) {
-        // 开瞄（cs:60013-60095）：视线 + 距离 < 射程（Collision.CanHit 简化为同高程无实心格）
+        // 开瞄（cs:60013-60095）：视线 + 距离 < 射程
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
         let los = true;
         const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 2));
@@ -662,17 +731,74 @@ export class Enemy extends Entity {
         }
       }
     }
+    // ---- 冰雪巨人 243 霜冻光束（cs:59331-59360）：ai[2] 计时 ≥ rand(30..900)×(HP 比)+30
+    // 且落地 + 朝向玩家 + 视线 → 光束（速 15、伤 32、散布 ±40）；阈值随机数缓存 ai[3]，
+    // 发射后双双清零（受击 ai[2]-=rand(30) 略）
+    if (this.vanillaId === 243 && player && !player.dead) {
+      this.ai2 += 1;
+      if (this.ai3 === 0) this.ai3 = 30 + Math.floor(Math.random() * 870);
+      if (this.vy === 0 && this.facing === (player.cx > this.cx ? 1 : -1)
+        && this.ai2 >= this.ai3 * (this.hp / this.maxHp) + 30 && this.canSeePlayer(st, player)) {
+        this.shootDart(game, this.cx, this.cy,
+          player.cx - this.cx + (Math.random() * 80 - 40),
+          player.cy - this.cy + (Math.random() * 80 - 40), 15, 32);
+        this.ai2 = 0; this.ai3 = 0;
+      }
+    }
+    // ---- 岩石巨人 631 投石（cs:56733-56760）：320px 内 + 视线 → 100 帧前摇，
+    // 第 68 帧发射岩石（速 8±0.8、伤 20）；脱距重置前摇
+    if (this.vanillaId === 631 && player && !player.dead) {
+      const dg = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      if (dg < 320 && this.canSeePlayer(st, player)) {
+        this.ai2 += 1;
+        if (this.ai2 === 68) {
+          const jit = 8 + (Math.random() * 1.6 - 0.8); // ±0.8
+          this.shootDart(game, this.cx, this.cy - 8, player.cx - this.cx, player.cy - this.cy, jit, 20);
+        }
+        if (this.ai2 >= 100) this.ai2 = 0;
+      } else this.ai2 = 0;
+    }
   }
 
-  /** 入侵远程战士参数（NPC.cs:59524-59930 各 type 修正汇总）：
-   *  cooldown=开瞄时长（半程发射，cs:59524 num163）/ speed=弹速（num166）/
-   *  dmg=弹伤（num171）/ range=开瞄距离（num181）/ drop=重力下坠补偿（num168 开关） */
-  private static readonly RANGED_FIGHTERS = new Set([111, 214, 215, 216]);
-  private static readonly RANGED_TABLE: Record<number, { cooldown: number; speed: number; dmg: number; range: number; drop: boolean }> = {
-    111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: true },
-    214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: false },
-    215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: true },
-    216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: true },
+  /** AI_003 远程战士参数（NPC.cs:59464-60095 各 type 修正汇总）：
+   *  cooldown=蓄力时长（num163，半程发射 num165）/ speed=弹速（num166）/
+   *  dmg=弹伤（num171）/ range=开瞄距离（num181 默认 700）/
+   *  drop=下坠补偿系数（num168，默认 0.1；0=直射）/ spread=散布 ±px（num167 后修正）/
+   *  oy=枪口 Y 偏移 / burst=连发数（292 战术骷髅 ×4 各自重新瞄准，cs:59967） */
+  private static readonly RANGED_FIGHTERS = new Set([
+    111, 214, 215, 216,                       // 入侵：哥布林弓手/海盗三件
+    110, 206, 290, 291, 292, 293,             // 骷髅弓手/冰鱼人/圣骑士/神射/战术/爆破
+    449, 450, 451, 452, 481,                  // 投骨骷髅×4/希腊骷髅
+    498, 499, 500, 501, 502, 503, 504, 505, 506, // 蝾螈族
+  ]);
+  private static readonly RANGED_TABLE: Record<number, {
+    cooldown: number; speed: number; dmg: number; range: number;
+    drop?: number; spread?: number; oy?: number; burst?: number;
+  }> = {
+    111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: 0.1 },
+    214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: 0, spread: 45 },
+    215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: 0.08 },
+    216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: 0.1 },
+    110: { cooldown: 70, speed: 11, dmg: 35, range: 700, drop: 0.1 },          // 骷髅弓手 火焰箭
+    206: { cooldown: 50, speed: 7, dmg: 37, range: 700, drop: 0.1, oy: -10 },  // 冰鱼人 冰水吐息
+    290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0, oy: -10 },    // 圣骑士 圣锤
+    291: { cooldown: 200, speed: 4, dmg: 100, range: 700, drop: 0, spread: 8 },// 骷髅神射 狙击弹
+    292: { cooldown: 120, speed: 12, dmg: 50, range: 700, drop: 0, burst: 4 }, // 战术骷髅 4 连弹
+    293: { cooldown: 90, speed: 4, dmg: 60, range: 700, drop: 0.1 },           // 骷髅爆破 火箭
+    449: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 }, // 投骨骷髅（drop 原版 rand 0.10-0.49）
+    450: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
+    451: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
+    452: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
+    481: { cooldown: 100, speed: 8, dmg: 18, range: 400, drop: 0, spread: 16, oy: -14 }, // 希腊骷髅 标枪（drop 原版 ±0.035 随机）
+    498: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 }, // 蝾螈吐息
+    499: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    500: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    501: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    502: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    503: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
   };
 
   /** 蜘蛛家族地面↔爬墙形态对照（NPC.cs:59276-59289 地→墙 / :29994-30008 墙→地）：
@@ -728,7 +854,7 @@ export class Enemy extends Entity {
       boss: VANILLA_BOSS_IDS.has(id),
       hitSound: [vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1'],
       killedSound: [vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1'],
-      drops: v.critter ? [] : vanillaNpcDrops(id),
+      drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
     return true;
@@ -858,6 +984,439 @@ export class Enemy extends Entity {
     moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
+  /** AI_000 被缚 NPC（NPC.cs:19774-19893）：105/106/123/354 静态站立（面朝玩家+摩擦，
+   *  无任何移动）；376 睡渔夫/579 醉酒酒保水上漂流（wet → vy=-0.4 上浮 + 缓漂）。
+   *  解救（对话 Transform 成对应城镇 NPC）在 TownNPC 侧；Enemy 侧仅防御性兜底 */
+  private boundNPCAI(game: GameHooks, player: Player | null) {
+    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    this.vx *= 0.93;
+    if (Math.abs(this.vx) < 0.1) this.vx = 0;
+    const st = game.world.store;
+    const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 0;
+    if ((this.vanillaId === 376 || this.vanillaId === 579) && inW) {
+      this.vy = -0.4;                       // 水面漂流（cs:19818-19883）
+      this.vx *= 0.99;
+      this.x += this.vx; this.y += this.vy;
+      return;
+    }
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** AI_017 秃鹫 61（Raven 301 同块，NPC.cs:24079-24209）：ai[0]=0 栖息（重力站立），
+   *  200px 盒与玩家相交 / life<max / 有速度 → 起飞（vy-=6）单向 0→1 不回落；
+   *  飞行态无重力：X accel 0.1 clamp±3，Y 目标=玩家上方（|dx|>50 再抬高 100）accel 0.05 clamp±3；
+   *  碰撞反弹旧速×-0.5（X 朝 direction 保底 2 / Y 保底 1） */
+  private vultureAI(game: GameHooks, player: Player | null) {
+    if (this.ai0 < 0) this.ai0 = 0;
+    if (this.ai0 === 0) {
+      // 唤醒判定用重力前的速度（原版 AI 先读 velocity、重力在其后施放——
+      // 落地碰撞清零后站立态 vy==0，不会被本 tick 重力误判成"有速度"）
+      const preVy = this.vy;
+      const near = player && !player.dead
+        && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
+        && Math.abs(player.cy - this.cy) < 100 + (this.h + player.h) / 2;
+      if (this.vx !== 0 || preVy < 0 || preVy > 0.3 || near || this.hp < this.maxHp) {
+        this.ai0 = 1;
+        this.vy = -6;
+        return;
+      }
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
+    }
+    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    const dir = this.facing;
+    if (dir === -1 && this.vx > -3) {
+      this.vx -= 0.1;
+      if (this.vx > 0) this.vx -= 0.1;
+      if (this.vx < -3) this.vx = -3;
+    } else if (dir === 1 && this.vx < 3) {
+      this.vx += 0.1;
+      if (this.vx < 0) this.vx += 0.1;
+      if (this.vx > 3) this.vx = 3;
+    }
+    let ty = player && !player.dead ? player.y - this.h / 2 : this.cy - 100;
+    if (player && Math.abs(player.cx - this.cx) > 50) ty -= 100;
+    if (this.vy > ty - 4) {
+      this.vy -= 0.05;
+      if (this.vy < 0 && ty > this.cy) this.vy -= 0.01;
+    } else if (this.vy < ty + 4) {
+      this.vy += 0.05;
+      if (this.vy > 0 && ty < this.cy) this.vy += 0.01;
+    }
+    this.vy = Math.max(-3, Math.min(3, this.vy));
+    const oldVx = this.vx, oldVy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) {
+      this.vx = -oldVx * 0.5;
+      if (this.facing === -1 && this.vx > 0 && this.vx < 2) this.vx = 2;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -2) this.vx = -2;
+    }
+    if (this.hitHead || this.onGround) {
+      this.vy = -oldVy * 0.5;
+      if (Math.abs(this.vy) < 1) this.vy = this.vy >= 0 ? 1 : -1;
+    }
+  }
+
+  /** AI_019 蚁狮 69（NPC.cs:24465-24595）：完全不动（knockBackResist=0）；底部 3 列任一
+   *  实心 → 无重力上浮 0.2 出沙面（cs:24543 动态 noTileCollide），否则正常落地；
+   *  沙球（cs:24499）：ai[0] 冷却 200、玩家在上方+视线 → 速 12 直射（伤害 10）；
+   *  传送带 ConveyorBelt 特例（cs:24526）未引入不移植 */
+  private antlionAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0;
+    this.vx *= 0.9;
+    if (Math.abs(this.vx) < 0.1) this.vx = 0;
+    // 脚下行（取盒内最底行；站地时该行为空气 → 正常落地，半埋沙中才触发浮出）
+    const bx = Math.floor(this.cx / TILE), by = Math.floor((this.y + this.h - 1) / TILE);
+    let rooted = false;
+    for (let i = -1; i <= 1; i++) if (st.isSolid(bx + i, by)) { rooted = true; break; }
+    if (rooted) {
+      this.vy = -0.2;
+      this.x += this.vx;
+      this.y += this.vy;
+      return;
+    }
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (player && !player.dead) {
+      this.ai0 += 1;
+      if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
+        this.ai0 = 0;
+        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10);
+      }
+    }
+  }
+
+  /** AI_023 飞行武器 83/84/179（NPC.cs:25316-25395）：块内强制 noGravity+noTileCollide 穿墙。
+   *  三态循环：0 冲刺（朝玩家单位向量×9、rotation=atan2+0.785）→ 1 漂移（×0.99/帧，
+   *  justHit 直接进 2；100 帧 → 清速进 2）→ 2 蓄转（×0.96/帧，转速 0.1+ai/120*0.4 递增，
+   *  justHit 重转；120 帧 → 回 0）。受击永远回蓄转态 */
+  private flyingWeaponAI(_game: GameHooks, player: Player | null) {
+    if (this.ai0 < 0) this.ai0 = 0;
+    if (this.ai0 === 0) {
+      if (player && !player.dead) {
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        this.vx = (dx / d) * 9;
+        this.vy = (dy / d) * 9;
+        this.visAngle = Math.atan2(this.vy, this.vx) + 0.785;
+      } else {
+        this.vx = this.facing * 3;
+        this.vy = -3;
+      }
+      this.ai0 = 1;
+      this.ai1 = 0;
+    } else if (this.ai0 === 1) {
+      this.vx *= 0.99;
+      this.vy *= 0.99;
+      this.ai1 += 1;
+      if (this.justHit) { this.ai0 = 2; this.ai1 = 0; }
+      else if (this.ai1 >= 100) { this.ai0 = 2; this.ai1 = 0; this.vx = 0; this.vy = 0; }
+    } else {
+      this.vx *= 0.96;
+      this.vy *= 0.96;
+      this.ai1 += 1;
+      this.visAngle += (0.1 + (this.ai1 / 120) * 0.4) * this.facing; // 越转越快
+      if (this.justHit) this.ai1 = 0;
+      else if (this.ai1 >= 120) this.ai0 = 0;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** AI_025 宝箱怪 85/341/629（NPC.cs:25621-25713）：ai[0]=0 伪装（重力站立），玩家进
+   *  200px 盒 / life<max / 有速度 → 显形；ai[0]=1 跳跃循环——落地 ai[2] 计数，
+   *  不足 12（首跳）/20 帧 vx×0.9 蓄力，然后小跳（vx=dir*3.5, vy=-4）×2 →
+   *  第三跳大跳（vx=dir*2.5, vy=-8）清零循环；空中朝 dir 补 |vx|≥1（±0.1/帧）。
+   *  341 礼物宝箱怪仅雪月索敌（flag36）——雪月未引入，保持伪装不索敌近似 */
+  private mimicAI(game: GameHooks, player: Player | null) {
+    if (this.ai0 < 0) this.ai0 = 0;
+    const flag36 = this.vanillaId === 341;
+    if (this.ai0 === 0) {
+      // 同 AI_017：唤醒判定用重力前速度（站立态 vy==0 不误触发）
+      const preVy = this.vy;
+      const near = !flag36 && player && !player.dead
+        && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
+        && Math.abs(player.cy - this.cy) < 100 + (this.h + player.h) / 2;
+      if (near || this.hp < this.maxHp || this.vx !== 0 || preVy < 0 || preVy > 0.3) {
+        this.ai0 = 1;
+        return;
+      }
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
+    }
+    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.onGround && this.vy === 0) {
+      this.ai2 += 1;
+      const wait = this.ai1 === 0 ? 12 : 20;
+      if (this.ai2 < wait) { this.vx *= 0.9; return; }
+      this.ai2 = 0;
+      if (this.ai1 === 2) {           // 第三跳：大跳清零
+        this.vx = this.facing * 2.5;
+        this.vy = -8;
+        this.ai1 = 0;
+      } else {
+        this.vx = this.facing * 3.5;
+        this.vy = -4;
+        this.ai1 += 1;
+      }
+    } else if (this.vy !== 0) {
+      if (this.facing === -1 && this.vx > -1) this.vx -= 0.1;
+      else if (this.facing === 1 && this.vx < 1) this.vx += 0.1;
+    }
+  }
+
+  /** AI_039 陆龟族 153/154/417/496/497（NPC.cs:29257-29783）：
+   *  justHit → 回待机（417 除外，knockBackResist=0）；
+   *  0 待机：远距(>200)+视线蓄力+4/t（496/497 +2），>600 再+10/t，wet 直跳 1000，≥400 → 1；
+   *    行走 accel 0.07，近(<400) clamp±1 远 ±1.5（496/497 ±0.5），前方 3×4 无地转身；
+   *  1 蓄势：vx×0.5、ai[1]+1(496/497 ×0.5) ≥30 → 3（417 → 6 态滚动）；
+   *  3 旋冲：首帧定速 有视线10/无视线6（496/497 ×0.75；瞄准 Y 加 |dx|*0.2、无视线强制
+   *    vy=-10），飞行中与玩家 X 重叠 → vx×0.8 停升，否则 vy-=0.22 持续上旋，≥90t → 4；
+   *  4 下落：vx×0.96，落地 → 5；
+   *  5 复位：vx=0，+1/t(×0.5) ≥30 → 回 0；wet 直接回 3；
+   *  6 Sroller 日耀滚动（16/10 定速、≥1200t 或 ai[2]==0 → 5）星柱未引入仅骨架 */
+  private tortoiseAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0;
+    const t496 = this.vanillaId === 496 || this.vanillaId === 497;
+    const sroller = this.vanillaId === 417;
+    if (this.justHit && !sroller && this.ai0 !== 3) { this.ai0 = 0; this.ai1 = 0; }
+    const dx = player ? player.cx - this.cx : 0;
+    const dy = player ? player.cy - this.cy : 0;
+    const dist = player ? Math.hypot(dx, dy) : Infinity;
+    const los = !!player && !player.dead && this.canSeePlayer(st, player);
+    const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    const gravityStep = () => {
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+    };
+    if (this.ai0 === 0 || this.ai0 > 5) {
+      // ---- 待机/接近 ----
+      if (this.ai0 === 0) {
+        if (los && dist > 200) this.ai1 += t496 ? 2 : 4;
+        if (dist > 600 && (los || dy > 200)) this.ai1 += t496 ? 4 : 10;
+        if (inW) this.ai1 = 1000;
+        if (this.ai1 >= 400) { this.ai0 = 1; this.ai1 = 0; return; }
+        if (player && !player.dead) this.facing = dx > 0 ? 1 : -1;
+        const max = t496 ? 0.5 : dist < 400 ? 1 : 1.5;
+        this.vx += this.facing * 0.07;
+        this.vx = Math.max(-max, Math.min(max, this.vx));
+        // 前方 3 格 × 下 4 格无地面 → 转身（cs:29395-29427）
+        const fx = Math.floor((this.cx + this.facing * 24) / TILE);
+        const fy = Math.floor((this.y + this.h - 1) / TILE);
+        let ground = false;
+        for (let k = 1; k <= 4 && !ground; k++) if (st.isSolid(fx, fy + k)) ground = true;
+        if (!ground) this.facing *= -1;
+        gravityStep();
+        return;
+      }
+      // ---- Sroller 6 态骨架 ----
+      if (this.ai1 === 0) {
+        const spd = los ? 16 : 10;
+        if (player && los) {
+          const d = Math.hypot(dx, dy) || 1;
+          this.vx = (dx / d) * spd; this.vy = (dy / d) * spd;
+        } else { this.vy = -12; this.vx = this.facing * spd * 0.5; }
+        this.ai2 = 2 + Math.floor(Math.random() * 3);
+      }
+      this.ai1 += 1;
+      gravityStep();
+      if (this.ai2 === 0 || this.ai1 >= 1200) { this.ai0 = 5; this.ai1 = 0; }
+      return;
+    }
+    if (this.ai0 === 1) {
+      // ---- 蓄势 ----
+      this.vx *= 0.5;
+      this.ai1 += t496 ? 0.5 : 1;
+      gravityStep();
+      if (this.ai1 >= 30) {
+        this.ai0 = sroller ? 6 : 3;
+        this.ai1 = 0;
+        this.ai2 = 0;
+      }
+      return;
+    }
+    if (this.ai0 === 3) {
+      // ---- 旋转弹射 ----
+      if (this.ai1 === 0) {
+        const spd = (los ? 10 : 6) * (t496 ? 0.75 : 1);
+        if (los && player) {
+          const aimY = dy + (dy > 0 ? 0 : Math.abs(dx) * 0.2); // directionY>0 时偏置为 0
+          const d = Math.hypot(dx, aimY) || 1;
+          this.vx = (dx / d) * spd;
+          this.vy = (aimY / d) * spd;
+        } else {
+          this.vy = -10;
+          this.vx = this.facing * spd;
+        }
+        this.ai3 = this.vx; // 存 vx
+      } else {
+        if (player && Math.abs(dx) < (this.w + player.w) / 2 + 8) {
+          this.vx *= 0.8;
+          this.ai3 = 0;
+        } else {
+          this.vx = this.ai3;
+          this.vy -= 0.22;
+        }
+      }
+      this.ai1 += 1;
+      gravityStep();
+      if (this.ai1 >= 90) { this.ai0 = 4; }
+      return;
+    }
+    if (this.ai0 === 4) {
+      // ---- 下落恢复 ----
+      this.vx *= 0.96;
+      this.ai2 -= 0.01;
+      gravityStep();
+      if (this.ai2 <= 0 && (this.onGround || inW)) { this.ai0 = 5; this.ai1 = 0; }
+      return;
+    }
+    // ---- 5 复位 ----
+    this.vx = 0;
+    this.ai1 += t496 ? 0.5 : 1;
+    gravityStep();
+    if (inW) { this.ai0 = 3; this.ai1 = 0; return; }
+    if (this.ai1 >= 30) { this.ai0 = 0; this.ai1 = 0; }
+  }
+
+  /** AI_041 赫柏林 174/德普林 177（NPC.cs:30017-30280）：ai[0] 负数倒计时（ai[2]==0 时
+   *  置 -100），落地 +5/t（177 +2）+ 距离加速 400/dist×10(177 ×5)（(int) 截断）、cap 30；
+   *  ≥0 触发跳：小跳 vy=-5/vx+5dir（177 -7.5/+4dir），第 3/2 跳大跳 vy=-9/vx+3dir
+   *  （177 -11.5/+2dir）清零并记 ai[3]=X；原地卡墙（ai[3]==X）→ 转向+ai[2]=300 惩罚；
+   *  空中朝 dir 补 |vx| 到 3（177 4）（±0.2/帧）；wet 浮力段略；
+   *  378 格格牙炸弹自爆序列（cs:30044）DD2 未引入不移植 */
+  private herplingAI(game: GameHooks, player: Player | null) {
+    if (this.ai2 === 0) { this.ai0 = -100; this.ai2 = 1; }
+    else if (this.ai2 > 1) this.ai2 -= 1;
+    const derpling = this.vanillaId === 177;
+    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.onGround && this.vy === 0) {
+      this.vx *= 0.8;
+      if (Math.abs(this.vx) < 0.1) this.vx = 0;
+      if (this.ai3 === this.x && this.ai3 !== 0) { // 原地白跳：转向 + 冷却惩罚
+        this.facing *= -1;
+        this.ai2 = 300;
+      }
+      this.ai0 += derpling ? 2 : 5;
+      if (player && Number.isFinite(dist) && dist > 0) {
+        this.ai0 += Math.trunc((400 / dist) * (derpling ? 5 : 10));
+      }
+      if (this.ai0 > 30) this.ai0 = 30;
+      if (this.ai0 >= 0) {
+        if (player && dist > 200 && dist < 350) this.vx += this.facing;
+        const bigAt = derpling ? 2 : 3;
+        if (this.ai1 === bigAt) {
+          this.vy = derpling ? -11.5 : -9;
+          this.vx += (derpling ? 2 : 3) * this.facing;
+          this.ai0 = -200;
+          this.ai1 = 0;
+          this.ai3 = this.x;
+        } else {
+          this.vy = derpling ? -7.5 : -5;
+          this.vx += (derpling ? 4 : 5) * this.facing;
+          this.ai0 = -120;
+          this.ai1 += 1;
+        }
+      }
+    } else {
+      const cap = derpling ? 4 : 3;
+      if (this.facing === -1 && this.vx > -cap) {
+        this.vx -= 0.2;
+        if (this.vx > 0) this.vx -= 0.2;
+      } else if (this.facing === 1 && this.vx < cap) {
+        this.vx += 0.2;
+        if (this.vx < 0) this.vx += 0.2;
+      }
+    }
+  }
+
+  /** AI_044 飞鱼 224/巨蚁狮蜂 509/蚁狮蜂 581（NPC.cs:30999-31268）：无重力分轴限速追击。
+   *  LOS 计时 ai[0]：有视线=90，无视线每帧 -1，≤0 垂直逃逸（maxX×0.8/accel×0.7，
+   *  目标 Y 偏 ±1000）；|dx|>yGate 时目标 Y 再抬高 yGate/2；撞墙 direction 翻转 vx=±1。
+   *  参数表（xAccel/yAccel/maxX/maxY/xGate/yGate）：224 0.05/0.01/3/1/30/100、
+   *  509 0.08/0.03/4.5/2/40/150、581 0.06/0.02/4/2/40/150。
+   *  同型个体分离（cs:31108）与穿平台（cs:94137）未移植（注释备案） */
+  private flyingSwarmerAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const T = this.vanillaId === 509
+      ? { ax: 0.08, ay: 0.03, mx: 4.5, my: 2, gx: 40, gy: 150 }
+      : this.vanillaId === 581
+        ? { ax: 0.06, ay: 0.02, mx: 4, my: 2, gx: 40, gy: 150 }
+        : { ax: 0.05, ay: 0.01, mx: 3, my: 1, gx: 30, gy: 100 };
+    const los = !!player && !player.dead && this.canSeePlayer(st, player);
+    if (los) this.ai0 = 90;
+    else if (this.ai0 > -1000) this.ai0 -= 1;
+    let mx = T.mx, ax = T.ax;
+    let ty: number;
+    if (this.ai0 <= 0) {
+      // 失视逃逸：垂直爬升/俯冲远离
+      mx *= 0.8; ax *= 0.7;
+      ty = this.cy + Math.sign(this.vx || 1) * 1000;
+    } else {
+      ty = player ? player.y - this.h / 2 : this.cy - 200;
+      if (player && Math.abs(player.cx - this.cx) > T.gy) ty -= T.gy / 2;
+    }
+    const dx = player ? player.cx - this.cx : this.facing * 200;
+    if (Math.abs(dx) > T.gx) {
+      if (dx < 0 && this.vx > -mx) {
+        this.vx -= ax;
+        if (this.vx > 0) this.vx -= ax;
+        if (this.vx < -mx) this.vx = -mx;
+      } else if (dx > 0 && this.vx < mx) {
+        this.vx += ax;
+        if (this.vx < 0) this.vx += ax;
+        if (this.vx > mx) this.vx = mx;
+      }
+    }
+    if (this.vy > ty - 4) {
+      this.vy -= T.ay;
+      if (this.vy < 0 && ty > this.cy) this.vy -= T.ay;
+    } else if (this.vy < ty + 4) {
+      this.vy += T.ay;
+      if (this.vy > 0 && ty < this.cy) this.vy += T.ay;
+    }
+    this.vy = Math.max(-T.my, Math.min(T.my, this.vy));
+    if (this.vx > 0.1) this.facing = 1; else if (this.vx < -0.1) this.facing = -1;
+    const oldVy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) {
+      this.facing *= -1;
+      this.vx = this.facing; // cs:31002 反弹后单位速
+    }
+    if (this.hitHead || this.onGround) this.vy = oldVy < 0 ? 1 : -1;
+  }
+
+  /** AI_056 地牢之魂 288（NPC.cs:32915-32936）：穿墙（SetDefaults noTileCollide+noGravity）
+   *  惯性追踪——期望速度=朝玩家单位向量×12，velocity=(v*100+期望)/101（0.99 平滑、
+   *  巨大惯性转向极慢）；rotation=atan2(dy,dx)-π/2 */
+  private dungeonSpiritAI(_game: GameHooks, player: Player | null) {
+    let ex: number, ey: number;
+    if (player && !player.dead) {
+      this.facing = player.cx > this.cx ? 1 : -1;
+      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
+      ex = ((player.cx - this.cx) / d) * 12;
+      ey = ((player.cy - this.cy) / d) * 12;
+    } else {
+      ex = this.facing * 6;
+      ey = -6;
+    }
+    this.vx = (this.vx * 100 + ex) / 101;
+    this.vy = (this.vy * 100 + ey) / 101;
+    this.visAngle = Math.atan2(this.vy, this.vx) - Math.PI / 2;
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
   /** AI_008 法师族（Fire Imp 24 / Goblin Sorcerer 29 / Dark Caster 32）：
    *  悬浮 + 周期传送（原版 ai[0] 计时到阈值或目标不可见时 TeleportSearch）+ 三连弹幕（原版 ai[1] volley）。
    *  弹幕复用 Dart（命中玩家）；传送条件：4-16 格内有地面 + 上下净空（原版 100 次随机试探） */
@@ -978,6 +1537,25 @@ export class Enemy extends Entity {
       if (this.vy > 0 && oy < 0) this.vy -= accel * 1.5;
     }
     this.facing = this.vx > 0 ? 1 : -1;
+    // ---- 爬行者 101 诅咒焰（cs:22823-22856）：ai[3] 每 tick +1，≥120 且自身未嵌实心
+    // 且有视线 → 喷诅咒焰（速 10、伤 22、散布 ±10）；条件不满足回退 ai[3]=100（20t 重试）
+    if (this.vanillaId === 101 && player && !player.dead) {
+      this.ai3 += 1;
+      if (this.ai3 >= 120) {
+        let embedded = false;
+        for (let tx = Math.floor(this.x / TILE); tx <= Math.floor((this.x + this.w - 0.01) / TILE) && !embedded; tx++) {
+          for (let ty = Math.floor(this.y / TILE); ty <= Math.floor((this.y + this.h - 0.01) / TILE); ty++) {
+            if (st.isSolid(tx, ty)) { embedded = true; break; }
+          }
+        }
+        if (!embedded && this.canSeePlayer(st, player)) {
+          this.shootDart(game, this.cx, this.cy,
+            player.cx - this.cx + (Math.random() * 20 - 10),
+            player.cy - this.cy + (Math.random() * 20 - 10), 10, 22);
+          this.ai3 = 0;
+        } else this.ai3 = 100;
+      }
+    }
     // noTileCollide:幽灵位移(原版 plants 不做 tile 碰撞)
     this.x += this.vx;
     this.y += this.vy;
@@ -1053,6 +1631,38 @@ export class Enemy extends Entity {
     // canvas 相反)→ canvas 等价 +π/2。★该族贴图正面朝上(实测 NPC_6 亮齿在上),
     // 与 EoC(正面朝下,−π/2)相反——符号按贴图实测确定
     this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
+    // ---- 黄蜂毒刺（cs:51125-51213：42/176/231-235）：ai[1] 每 tick +rand(5,20)×0.1
+    // （苔藓黄蜂 176 ×2）；玩家待机未挥动（原版 itemAnimation==0 && stealth==0 门）清零；
+    // ≥130 且有视线且朝向与移动方向一致 → 毒刺（速 8、伤 10×scale/176 30×scale、
+    // 散布 ±20），ai[1]=101 次帧清零（原版此处播音效 Item17）
+    // ---- 腐化者 94 唾液（cs:51257-51276）：ai[2] 每 tick +1，==180 且有视线 → VileSpit
+    // （原版 NewNPC 112 aiStyle 9 追踪球速 7，此处 Dart 直飞近似、伤害取 NPC 112 数据）
+    const st = game.world.store;
+    const isHornet = vid === 42 || vid === 176 || (vid >= 231 && vid <= 235);
+    if (player && !player.dead && (isHornet || vid === 94)) {
+      if (this.ai1 === 101) this.ai1 = 0; // 上一发余音帧
+      if (isHornet) {
+        this.ai1 += (Math.random() * 15 + 5) * 0.1;
+        if (vid === 176) this.ai1 += (Math.random() * 15 + 5) * 0.1;
+        if (player.useTime === 0) this.ai1 = 0; // 待机清零（原版潜行/挥动门）
+        if (this.ai1 >= 130 && this.canSeePlayer(st, player)) {
+          const sxp = player.cx - this.cx + (Math.random() * 40 - 20);
+          const syp = player.cy - this.cy + (Math.random() * 40 - 20);
+          if ((sxp < 0 && this.vx < 0) || (sxp > 0 && this.vx > 0)) {
+            const vScale = this.vanilla?.scale ?? 1;
+            this.shootDart(game, this.cx, this.cy, sxp, syp, 8, Math.round((vid === 176 ? 30 : 10) * vScale));
+            this.ai1 = 101;
+          } else this.ai1 = 0;
+        }
+      } else {
+        this.ai2 += 1;
+        if (this.ai2 === 180 && this.canSeePlayer(st, player)) {
+          this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy,
+            7, vanillaNpc(112)?.damage ?? 30);
+          this.ai2 = 0;
+        }
+      }
+    }
     // noTileCollide 成员(仆从 type 5 等)原版幽灵位移:直积分、无碰撞无反弹——
     // 曾对所有成员 moveAndCollide+反弹,仆从撞墙弹跳完全不像原版(穿墙追击)
     if (this.vanilla?.noTileCollide) {
@@ -1102,6 +1712,20 @@ export class Enemy extends Entity {
     if (this.vy < sy) this.vy += accel;
     else if (this.vy > sy) this.vy -= accel;
     if (player) this.facing = dx > 0 ? 1 : -1;
+    // ---- 巨型诅咒颅 289 暗影焰（cs:21762-21790）：≤500px 时 ai[3] 状态机
+    // （0 累计 120t → 1 冲刺段 40t），冲刺段 ai[2]==20 发射暗影焰（速 6、伤 25，
+    // 无视线门——冲刺贴脸语义）；脱距双清
+    if (this.vanillaId === 289) {
+      if (player && dist <= 500) {
+        this.ai2 += 1;
+        if (this.ai3 === 0) {
+          if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }
+        } else {
+          if (this.ai2 === 20) this.shootDart(game, this.cx, this.cy, dx, dy, 6, 25);
+          if (this.ai2 > 40) { this.ai3 = 0; this.ai2 = 0; }
+        }
+      } else { this.ai2 = 0; this.ai3 = 0; }
+    }
     this.x += this.vx;
     this.y += this.vy;
   }
@@ -1309,6 +1933,32 @@ export class Enemy extends Entity {
         this.tryTransformTo(159, game.world.store);
       }
     }
+    // ---- 飞行射击族（cs:23463-23543，逐发要求视线；轮空后 ai[0] 达随机阈值归零——
+    // 阈值缓存 ai[2]）：哈比 48 羽毛（30/60/90 连三、速 6、伤 15、±100、归零 400+rand400）/
+    // 恶魔 62/66 飞镰（20/40/60/80 连四、伤 21、±100、300+rand300；原版弹 0.2 起步自加速，
+    // Dart 无加速取直飞 6 近似）/ 红恶魔 156 三叉戟（20/40/60/80/100 连五、伤 80、±50、
+    // 250+rand250；出生点沿弹向前移 100px）
+    const shooter = this.vanillaId === 48
+      ? { ticks: [30, 60, 90], spd: 6, dmg: 15, spread: 100, reset: 400 }
+      : this.vanillaId === 62 || this.vanillaId === 66
+        ? { ticks: [20, 40, 60, 80], spd: 6, dmg: 21, spread: 100, reset: 300 }
+        : this.vanillaId === 156
+          ? { ticks: [20, 40, 60, 80, 100], spd: 7, dmg: 80, spread: 50, reset: 250 }
+          : null;
+    if (shooter && player && !player.dead) {
+      if (this.ai0 < 0) this.ai0 = 0; // 类字段默认 -1120 是史莱姆初值；原版 ai[0] 从 0 起步
+      this.ai0 += 1;
+      if (shooter.ticks.includes(this.ai0)) {
+        if (this.canSeePlayer(game.world.store, player)) {
+          const ox = player.cx - this.cx + (Math.random() * 2 - 1) * shooter.spread;
+          const oy = player.cy - this.cy + (Math.random() * 2 - 1) * shooter.spread;
+          this.shootDart(game, this.cx, this.cy, ox, oy, shooter.spd, shooter.dmg);
+        }
+      } else if (this.ai0 > shooter.ticks[shooter.ticks.length - 1]) {
+        if (this.ai2 === 0) this.ai2 = shooter.reset + Math.floor(Math.random() * shooter.reset);
+        if (this.ai0 >= this.ai2) { this.ai0 = 0; this.ai2 = 0; }
+      }
+    }
   }
 
   /** AI_016 游泳族（1.4.5.6 NPC.145.cs:23549+）：鲨鱼/食人鱼/琵琶鱼等
@@ -1376,6 +2026,45 @@ export class Enemy extends Entity {
     this.vx += ((dx / d) * 7 - this.vx) * 0.0125;
     this.vy += ((dy / d) * 7 - this.vy) * 0.0125;
     this.facing = this.vx > 0 ? 1 : -1;
+    // ---- 漂浮射击三族（cs:24854-25048）----
+    // 蜗牛怪 122 粉激光 / 冰雪元素 169 霜爆：同一充能机——待机计数(localAI[1]→ai[2])
+    // >120 且有视线 → 充能(ai[3]=1)；充能中出射程即取消、满 64 归零；受击清空；
+    // 122 在 ai[3]==32 发射（速 7、伤 25、射程 700、RotatedByRandom(0.0785) 微散布），
+    // 169 在 ai[3]==16 发射（速 5、伤 45）
+    // 脓水粘怪 268 金雨：ai[3] 每 tick +1（受击置 -45），≥60+rand(60) 且有视线 →
+    // 喷（速 10、伤 40、|dx|×0.1 下坠补偿、枪口 (cx-4, y+h×0.7)、散布 x±10/y-30..20）
+    const st = game.world.store;
+    if (this.vanillaId === 122 || this.vanillaId === 169) {
+      const fireAt = this.vanillaId === 122 ? 32 : 16;
+      if (this.iframes > 0 && this.iframes % 4 === 0) { this.ai3 = 0; this.ai2 = 0; } // justHit 清充能
+      if (this.ai3 === fireAt && d < 700) {
+        const spd = this.vanillaId === 122 ? 7 : 5;
+        const dmg = this.vanillaId === 122 ? 25 : 45;
+        const ang = Math.atan2(dy, dx) + (this.vanillaId === 122 ? (Math.random() - 0.5) * 0.157 : 0);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
+          .add(new Dart(this.cx, this.cy, Math.cos(ang) * spd, Math.sin(ang) * spd, dmg), 'projectiles');
+      }
+      if (this.ai3 > 0) {
+        this.ai3++;
+        if (d >= 700) this.ai3 = 0; // 出射程取消充能
+        if (this.ai3 >= 64) this.ai3 = 0;
+      }
+      if (this.ai3 === 0) {
+        this.ai2++;
+        if (this.ai2 > 120 && this.canSeePlayer(st, player)) { this.ai2 = 0; this.ai3 = 1; }
+      }
+    } else if (this.vanillaId === 268) {
+      this.ai3++;
+      if (this.iframes > 0 && this.iframes % 4 === 0) this.ai3 = -45; // 受击冷却
+      if (this.ai2 === 0) this.ai2 = 60 + Math.floor(Math.random() * 60);
+      if (this.ai3 >= this.ai2 && this.canSeePlayer(st, player)) {
+        const ox = this.cx - 4, oy = this.y + this.h * 0.7;
+        const tx = player.cx - ox + (Math.random() * 20 - 10);
+        const ty = player.cy - oy - Math.abs(player.cx - ox) * 0.1 + (Math.random() * 50 - 30);
+        this.shootDart(game, ox, oy, tx, ty, 10, 40);
+        this.ai3 = 0; this.ai2 = 0;
+      }
+    }
     // 幽灵族 noTileCollide：直接位移
     this.x += this.vx;
     this.y += this.vy;
@@ -1781,7 +2470,9 @@ export class Enemy extends Entity {
       game = dmg as unknown as GameHooks;
       dmg = 5; kbx = 0; kby = 0;
     }
+    const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
     if (this.iframes > 0) return false;
+    this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
     // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，
     // 受击只记摇晃强度+方向（渲染帧端消费），掉血由 dummyAI 回满
     if (this.vanillaId === 488) {
@@ -1801,6 +2492,8 @@ export class Enemy extends Entity {
       this.vx += kbx * (1 - resist);
       this.vy += kby * (1 - resist);
     }
+    // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
+    if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);
     if (this.hp <= 0) {
       // 月总族(396/397/398)血尽不直死:原版 checkDead(:78841-78867)转为闭眼残肢/死亡演出,
       // 转换逻辑在各自 AI 首行(hp<=0 → ai0 置态+满血续命),此处放行让 AI 下一 tick 接管
@@ -1834,20 +2527,71 @@ export class Enemy extends Entity {
         while (head.wormFollow) head = head.wormFollow;
         for (let s: Enemy | null = head; s; s = s.wormNext) s.dead = true;
       }
-      // 掉落
+      // 掉落：1.4.5.6 ItemDropDatabase 规则树 + 钱币/心星管线（src/drops/NpcDrops.ts）
+      // 求值序对照 NPCLoot(:79628)：规则 → 钱币 → 心星（Boss 另有药水+心）
       const rng = new RNG(Math.floor(Math.random() * 1e9));
-      for (const d of this.def.drops) {
-        if (rng.next() < d.chance) {
-          const n = rng.int(d.min, d.max);
-          if (n > 0) {
-            const drop = game.spawnDrop(this.cx, this.cy, d.item, n, rng.range(-1.5, 1.5), -2);
-            // 凝胶染色（CommonCode.ModifyItemDropFromNPC）：gel(item 23) 由 type 1 掉落且
-            // netID∉{-1,-2,-5,-6} → item.color = npc.color（当前渐变色）
-            if (drop && d.item === 'gel' && this.vanillaId === 1
-              && this.vanillaNetId !== -1 && this.vanillaNetId !== -2
-              && this.vanillaNetId !== -5 && this.vanillaNetId !== -6 && this.colorRGBA) {
-              drop.color = [...this.colorRGBA];
-            }
+      if (this.vanillaId) {
+        const w = game.world;
+        const p = game.player;
+        const diff = p.appearance?.difficulty ?? 0;
+        // vanillaNetId 默认 0=无变体：netId/value 查表都要把 0 归一到 type
+        const netId = this.vanillaNetId !== 0 ? this.vanillaNetId : this.vanillaId;
+        const ctx: NpcDropCtx = {
+          rng,
+          netId,
+          type: this.vanillaId,
+          isExpert: diff >= 2, isMaster: diff >= 3,
+          hardMode: !!w.flags.hardMode, crimson: !!w.crimson,
+          flags: w.flags,
+          x: this.cx, y: this.cy,
+          worldSurfaceTile: w.groundLevel, rockLayerTile: w.rockLevel,
+          underworldTileY: w.lavaLine || w.h - 200,
+          maxTilesX: w.w, maxTilesY: w.h,
+          lifeMax: this.maxHp, friendly: false, boss: !!this.def.boss,
+          damage: this.def.damage ?? 0, value: npcValueOf(netId),
+          hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
+          extras: game.dropContext?.(),
+        };
+        const unmapped = (id: number) => {
+          if (!UNMAPPED_WARNED.has(id)) { UNMAPPED_WARNED.add(id); console.warn(`[NpcDrops] 物品 ${id} 无 key 映射，跳过`); }
+        };
+        const spawn = (id: number, n: number): ItemDrop | null => {
+          const key = NATIVE_DROP_KEY[id] ?? VANILLA_ITEM_KEY_BY_ID[id];
+          if (!key) { unmapped(id); return null; }
+          const v = dropVelocity(rng);
+          return game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);
+        };
+        const res = resolveDrops(ctx);
+        for (const d of res.drops) {
+          const drop = spawn(d.id, d.n);
+          // 凝胶染色（CommonCode.ModifyItemDropFromNPC）：gel(item 23) 由 type 1 掉落且
+          // netID∉{-1,-2,-5,-6} → item.color = npc.color（当前渐变色）
+          if (drop && d.id === 23 && this.vanillaId === 1
+            && this.vanillaNetId !== -1 && this.vanillaNetId !== -2
+            && this.vanillaNetId !== -5 && this.vanillaNetId !== -6 && this.colorRGBA) {
+            drop.color = [...this.colorRGBA];
+          }
+        }
+        // 双子 BeforeLoot（NPC.cs DoDeathEvents_BeforeLoot :79761）：另一只眼还活着时
+        // value=0 + boss=false——钱与 Boss 药水/心只给后死的那只（先死的只出规则掉落）
+        const twinSuppressed = (this.vanillaId === 125 || this.vanillaId === 126)
+          && game.enemies().some((o) => {
+            const e = o as Enemy;
+            return e !== this && !e.dead
+              && e.vanillaId === (this.vanillaId === 125 ? 126 : 125);
+          });
+        // 钱币（规则未清零 value 时走 NPCLoot_DropMoney 管线）
+        const value = res.zeroValue || twinSuppressed ? 0 : ctx.value;
+        if (value > 0) for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon)) spawn(c.id, c.n);
+        // 心/星（NPCLoot_DropCommonLifeAndMana）
+        for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
+        // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts，boss 门 :80307）
+        if (this.def.boss && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
+      } else {
+        for (const d of this.def.drops) {
+          if (rng.next() < d.chance) {
+            const n = rng.int(d.min, d.max);
+            if (n > 0) game.spawnDrop(this.cx, this.cy, d.item, n, rng.range(-1.5, 1.5), -2);
           }
         }
       }

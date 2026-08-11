@@ -92,6 +92,8 @@ export class TrapShot extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const st = TRAP_SHOT_STYLE[this.kind];
     if (st.spin) this.rot += this.vx * 0.03;
@@ -180,6 +182,8 @@ export class Dart extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const world = game.world;
     this.x += this.vx;

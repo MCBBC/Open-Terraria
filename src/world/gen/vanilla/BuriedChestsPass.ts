@@ -2,10 +2,11 @@
 // 样式语义(AddBuriedChest L21335+ / PlaceChestDirect L34112:frameX=36*style 横排):
 //   -1 默认:y≥ws+25 → 金(1);冰系 tile(147/161/162)→ 冰箱(11)+冰系战利品;
 //   地下沙漠 → tile467 style10+沙漠战利品;y>h-205 → 地狱箱(4)+地狱武器序;
-//   Water Chests pass 固定 style17(水箱)+水中战利品;地表箱 style0 木箱。
+//   Water Chests pass 固定 style17(水箱)+水中战利品;地表箱 style0 木箱(墙 244 → 12 天空箱)。
 // 宝箱数量(Configuration.json):CaveChestCount 35-40 ScaleWith:WorldArea(÷5040000)、
-//   UnderworldChestCount 10-15 ScaleWith:WorldWidth(÷4200)。金/木箱主件战利品池
-//   = cs:21500+ 大 switch 的常用主件子集(id 经 id-maps 核对)。
+//   UnderworldChestCount 10-15 ScaleWith:WorldWidth(÷4200)。
+// 战利品 = AddBuriedChest(cs:35920-37560)1:1:按深度四分支(地表/金/洞穴/地狱),
+//   主件 + 概率杂物表 + 主题旗标池(ice/desert/ivy/water/hell/sky 附加物)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -23,43 +24,251 @@ const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 
 export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 
-const iceLoot = [
-  'vi_670_ice_boomerang', 'vi_724_ice_blade', 'vi_950_ice_skates',
-  'vi_1319_snowball_cannon', 'vi_987_blizzard_in_a_bottle', 'vi_1579_flurry_boots',
-];
-const desertShallowLoot = ['vi_4056_ancient_chisel', 'vi_4055_dunerider_boots', 'vi_4262_snake_charmer_s_flute', 'vi_4263_magic_conch'];
-const desertDeepLoot = ['vi_4061_storm_spear', 'vi_4062_thunder_zapper', 'vi_4276_bast_statue'];
-const hellLoot = ['vi_274_dark_lance', 'vi_112_flower_of_fire', 'vi_218_flamelash', 'vi_3019_hellwing_bow', 'vi_5010_treasure_magnet'];
-const waterLoot = ['vi_186_breathing_reed', 'vi_4404_inner_tube', 'vi_277_trident', 'vi_187_flipper'];
+/** 宝箱主题旗标(AddBuriedChest flag2/3/4/5/6/8) */
+export interface ChestFlags {
+  ice?: boolean;    // flag2 冰箱(style 11)
+  desert?: boolean; // flag3 沙漠箱(tile467 style10)
+  ivy?: boolean;    // flag4 常春藤箱(style 10)
+  water?: boolean;  // flag5 水箱(style 17)
+  sky?: boolean;    // flag6 天空箱(style 12)
+  hell?: boolean;   // flag8 地狱箱(style 4)
+  wooden?: boolean; // flag 木箱(style 0)——地表战利品分支门禁
+}
 
-/** 地牢墙集合(DungeonPass roomWall:L850 type 7/8/9 + 94-99 变体)。
- *  原版只排除 wallDungeon[](AddBuriedChest L17086)——曾用 wl∈[7,99] 一刀切,
- *  连带拒掉大量自然洞穴墙(泥墙/大理石墙),额外压低洞穴箱成功率 */
 const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 function isDungeonWall(wl: number): boolean {
   return DUNGEON_WALLS.has(wl);
 }
 
-/** 金箱主件池(cs:21500+ 常用主件子集,原版 id) */
-const goldMainIds = [285, 953, 53, 54, 158, 50, 5011, 42, 280, 279, 3069, 49];
-/** 木箱主件池(地表箱) */
-const woodMainIds = [281, 3069, 280, 953, 285, 946];
-
-/** 主件 + 概率杂物(火把/药水)。cs:21500+ 的 switch 只取主件语义子集 */
-function rollCommonLoot(rng: RNG, mainIds: number[]): Array<{ id: number; stack: number } | null> {
-  const key = vanillaItemKey(mainIds[rng.int(0, mainIds.length - 1)]);
-  const out: Array<{ id: number; stack: number } | null> = Array(10).fill(null);
-  if (key && ITEM_BY_KEY[key] !== undefined) out[0] = { id: ITEM_BY_KEY[key], stack: 1 };
-  const roll = rng.int(0, 2);
-  if (roll === 0) out[1] = { id: ITEM_BY_KEY['torch'] ?? out[0]?.id ?? -1, stack: rng.int(3, 9) };
-  else if (roll === 1) out[1] = { id: ITEM_BY_KEY['lesser_healing_potion'] ?? -1, stack: rng.int(1, 3) };
-  return out;
+// ---------- 战利品辅助 ----------
+/** 原版物品 id → 本仓库物品 id;未注册返回 -1 */
+function vid(id: number): number {
+  const k = vanillaItemKey(id);
+  return k ? (ITEM_BY_KEY[k] ?? -1) : -1;
 }
 
-/** AddBuriedChest 近似:从 (i,j) 向下落,按上下文解析样式与战利品,2×2 放置 */
+/** vi_N_… 键反解原版 id;legacy 键返回 null(主件直接用物品 id 入箱) */
+function vanillaIdOfKey(key: string): number | null {
+  const m = /^vi_(\d+)_/.exec(key);
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/** 锭 id(GenVars.copperBar 等语义:按本世界替代矿档位) */
+function barIds(gs: GenState): { copper: number; iron: number; silver: number; gold: number } {
+  const keyOf = (t: number) => TILE_DEFS[t]?.key ?? '';
+  return {
+    copper: keyOf(gs.oreTiers.copper).includes('tin') ? 703 : 20,
+    iron: keyOf(gs.oreTiers.iron).includes('lead') ? 704 : 22,
+    silver: keyOf(gs.oreTiers.silver).includes('tungsten') ? 705 : 21,
+    gold: keyOf(gs.oreTiers.gold).includes('platinum') ? 706 : 19,
+  };
+}
+
+/** 地狱箱主件序(cs:11262-11274:每世界乱序 [274,220,112,218,3019],顺序轮换) */
+function nextHellItem(gs: GenState, rng: RNG): number {
+  if (!gs.hellChestItems) {
+    const pool = [274, 220, 112, 218, 3019];
+    const out: number[] = [];
+    while (pool.length > 0) out.push(...pool.splice(rng.int(0, pool.length - 1), 1));
+    gs.hellChestItems = out;
+  }
+  const item = gs.hellChestItems[gs.hellChestIdx % gs.hellChestItems.length];
+  gs.hellChestIdx++;
+  return item;
+}
+
+/** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换) */
+export function nextJungleItem(gs: GenState, rng: RNG): number {
+  let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
+  if (rng.int(0, 49) === 0) result = 753;       // 1/50 海草
+  else if (rng.int(0, 14) === 0) result = 2292; // 1/15 玻璃钢鱼竿
+  else if (rng.int(0, 19) === 0) result = 3017; // 1/20 花之靴
+  gs.jungleItemIdx++;
+  return result;
+}
+
+interface LootCtx { rng: RNG; gs: GenState; gy: number; flags: ChestFlags; mainKey: string | null; worldH: number }
+
+/**
+ * AddBuriedChest 战利品主体(cs:36283-37360)1:1:按深度四分支。
+ * mainVanillaId>0 → 主题主件(冰箱/沙箱/常春藤/水箱/地狱/金字塔等),
+ * 否则按分支掷默认主件;各分支再按原版顺序逐项掷概率杂物表。
+ */
+export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: number; stack: number } | null> {
+  const { rng, gs, gy, flags } = ctx;
+  const bars = barIds(gs);
+  const out: Array<{ id: number; stack: number }> = [];
+  const push = (v: number, stack = 1) => {
+    const id = vid(v);
+    if (id >= 0 && out.length < 40) out.push({ id, stack });
+  };
+  const pick = (arr: number[]) => arr[rng.int(0, arr.length - 1)];
+
+  // ---- 分支判定(cs:36283 flag23 / 36563 / 36789 / 37163)----
+  // 地表分支仅木箱(style0 flag)/天空箱(style12 flag6)(cs:36283 `flag23 && (flag || flag6)`)
+  const isSurface = gy < gs.worldSurface + 25 && !!(flags.wooden || flags.sky);
+  const isGold = gy < gs.rockLevel;
+
+  if (isSurface) {
+    // ===== 地表木箱/天空箱(cs:36283-36468)=====
+    if (mainVanillaId > 0) {
+      push(mainVanillaId);
+      if (flags.sky) {
+        if (rng.int(0, 2) === 0) push(5629);
+        if (rng.int(0, 5) === 0) push(rng.int(0, 1) === 0 ? 4429 : 4427);
+        if (rng.int(0, 2) !== 0) push(5528);
+      }
+    } else {
+      push(pick([280, 281, 284, 285, 953, 946, 3068, 3069, 3084, 4341]));
+    }
+    if (rng.int(0, 5) === 0) push(282, rng.int(40, 75));   // 1/6 荧光棒
+    if (rng.int(0, 5) === 0) push(279, rng.int(150, 300)); // 1/6 飞刀
+    if (rng.int(0, 5) === 0) {                             // 1/6 草药袋(附赠叠层)
+      let n = 1;
+      if (rng.int(0, 4) === 0) n += rng.int(0, 1);
+      if (rng.int(0, 9) === 0) n += rng.int(0, 2);
+      push(3093, n);
+    }
+    if (rng.int(0, 5) === 0) {                             // 1/6 虫罐
+      let n = 1;
+      if (rng.int(0, 4) === 0) n += rng.int(0, 1);
+      if (rng.int(0, 9) === 0) n += rng.int(0, 2);
+      push(4345, n);
+    }
+    if (rng.int(0, 2) === 0) push(168, rng.int(3, 5));     // 1/3 手雷
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.copper : bars.iron, rng.int(3, 10));
+    if (rng.int(0, 1) === 0) push(965, rng.int(50, 100));  // 绳
+    if (rng.int(0, 2) !== 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.int(25, 50)); // 木箭/手里剑
+    if (rng.int(0, 1) === 0) push(28, rng.int(3, 5));      // 弱效治疗药水
+    if (rng.int(0, 2) !== 0) push(2350, rng.int(3, 5));    // 回城药水
+    if (rng.int(0, 2) > 0) push(pick([292, 298, 299, 290, 2322, 2325]), rng.int(1, 2));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 31, rng.int(10, 20));  // 火把/瓶子
+    if (rng.int(0, 1) === 0) push(72, rng.int(10, 29));    // 银币
+    if (rng.int(0, 1) === 0) push(9, rng.int(50, 99));     // 木材
+  } else if (isGold) {
+    // ===== 地下金箱(ws+25 ≤ gy < rockLevel,cs:36563-36789)=====
+    if (mainVanillaId > 0) {
+      push(mainVanillaId);
+      if (flags.water) {
+        if (rng.int(0, 1) === 0) push(4425);
+        if (rng.int(0, 1) === 0) push(4460);
+      }
+      if (flags.ivy) {
+        if (!gs.gennedMahoganyWands || rng.int(0, 4) === 0) {
+          gs.gennedMahoganyWands = true;
+          push(3360); push(3361); // 活桃花心木法杖/叶法杖
+        }
+        if (rng.int(0, 9) === 0) push(4426);
+        if (rng.int(0, 9) === 0) push(5525);
+      }
+    } else {
+      push(pick([49, 50, 53, 54, 5011, 975]));
+      if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
+      else if (rng.int(0, 19) === 0) { push(930); push(931, rng.int(25, 50)); } // 1/20 信号枪+闪光弹
+    }
+    if (flags.desert) { if (rng.int(0, 2) === 0) push(4423, rng.int(10, 19)); }
+    else if (rng.int(0, 2) === 0) push(166, rng.int(10, 19)); // 炸弹
+    if (rng.int(0, 4) === 0) push(52);                        // 1/5 天使雕像
+    if (rng.int(0, 2) === 0) push(965, rng.int(50, 100));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.iron : bars.silver, rng.int(5, 14));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 40 : 42, rng.int(25, 49));
+    if (rng.int(0, 1) === 0) push(28, rng.int(3, 5));
+    if (rng.int(0, 2) > 0) push(pick([289, 298, 299, 290, 303, 291, 304, 2322, 2329]), rng.int(1, 2));
+    if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
+    if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 19)); // 冰火把/火把
+    if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
+  } else if (gy < ctx.worldH - 250) {
+    // ===== 洞穴箱(rockLayer ≤ gy < h-250,cs:36789-37163)=====
+    if (mainVanillaId > 0) {
+      push(mainVanillaId);
+      if (flags.ice && rng.int(0, 4) === 0) push(3199);       // 1/5 冰镜
+      if (flags.desert) {
+        if (rng.int(0, 6) === 0) push(4346);                  // 1/7 沙漠矿车
+        if (rng.int(0, 14) === 0) push(4066);                 // 1/15 沙漠矿车(副)
+      }
+      if (flags.ivy) {
+        if (!gs.gennedMahoganyWands || rng.int(0, 4) === 0) {
+          gs.gennedMahoganyWands = true;
+          push(3360); push(3361);
+        }
+        if (rng.int(0, 9) === 0) push(4426);
+        if (rng.int(0, 9) === 0) push(5525);
+      }
+      if (flags.water) {
+        if (rng.int(0, 1) === 0) push(4425);
+        if (rng.int(0, 1) === 0) push(4460);
+      }
+    } else {
+      // 主件(cs:36913-36975):岩浆线以下 1/20 熔岩符 / 1/15 提炼机 / 默认池(含信号枪项)
+      if (rng.int(0, 19) === 0 && gy > gs.lavaLine) push(906);
+      else if (rng.int(0, 14) === 0) push(997);
+      else {
+        const m = rng.int(0, 6);
+        if (m === 6) { push(930); push(931, rng.int(25, 50)); }
+        else push([49, 50, 53, 54, 5011, 975][m]);
+      }
+    }
+    if (rng.int(0, 4) === 0) push(flags.ice ? 5120 : 43);     // 1/5(冰箱特殊项/可疑眼球)
+    if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
+    if (rng.int(0, 3) === 0) push(51, rng.int(25, 50));       // 1/4 小丑箭
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? bars.gold : bars.silver, rng.int(3, 10));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 41 : 279, rng.int(25, 50)); // 烈焰箭/飞刀
+    if (rng.int(0, 1) === 0) push(188, rng.int(3, 5));        // 治疗药水
+    if (rng.int(0, 2) > 0) push(pick([296, 295, 299, 302, 303, 305]), rng.int(1, 2));
+    if (rng.int(0, 2) > 1) push(pick([301, 297, 304, 2329, 2351, 2326]), rng.int(1, 2));
+    if (rng.int(0, 1) === 0) push(2350, rng.int(2, 4));
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? (flags.ice ? 974 : 8) : 282, rng.int(15, 30)); // 火把/荧光棒
+    if (rng.int(0, 1) === 0) push(73, rng.int(1, 2));         // 金币
+  } else {
+    // ===== 地狱箱(gy ≥ h-250,cs:37163-37360)=====
+    if (mainVanillaId > 0) {
+      push(mainVanillaId);
+      if (rng.int(0, 4) === 0) push(5010);                    // 1/5 宝藏磁铁
+      if (rng.int(0, 9) === 0) push(4443);
+      if (rng.int(0, 9) === 0) push(4737);
+      if (rng.int(0, 9) === 0) push(4551);
+    } else {
+      push([49, 50, 53, 54][rng.int(0, 3)]);
+    }
+    if (rng.int(0, 2) === 0) push(167);                       // 1/3 炸药
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 117 : bars.gold, rng.int(15, 29)); // 陨铁锭/金锭
+    if (rng.int(0, 1) === 0) {
+      // 地狱火箭矢 或 银弹(银矿为钨时换钨弹 4915,cs:37242)
+      const silverIsTungsten = (TILE_DEFS[gs.oreTiers.silver]?.key ?? '').includes('tungsten');
+      push(rng.int(0, 1) === 0 ? 265 : (silverIsTungsten ? 4915 : 278), rng.int(50, 74));
+    }
+    if (rng.int(0, 1) === 0) push(227, rng.int(15, 29));      // 再生药水
+    if (rng.int(0, 3) > 0) push(pick([296, 295, 293, 288, 294, 297, 304, 2323]), rng.int(1, 2));
+    if (rng.int(0, 2) > 1) push(pick([305, 301, 302, 288, 300, 2351, 2348, 2345]), rng.int(1, 2));
+    if (rng.int(0, 2) === 0) push(rng.int(0, 1) === 0 ? 2350 : 4870, rng.int(1, 2)); // 回城/回归药水
+    if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 282, rng.int(15, 29));    // 火把/荧光棒
+    if (rng.int(0, 1) === 0) push(73, rng.int(2, 4));         // 金币
+  }
+
+  // ---- 尾段(theme 附加,cs:37361-37560;tile 21 箱)----
+  const items: Array<{ id: number; stack: number } | null> = out.map((it) => ({ ...it }));
+  // 主题尾件
+  if (flags.ivy && rng.int(0, 3) === 0) {
+    const id = vid(2204);
+    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
+  }
+  if (flags.ice && rng.int(0, 6) === 0) {
+    const id = vid(2198);
+    if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
+  }
+  // legacy 键主件(如金字塔/蛛网的特殊掉落直接给 key)直接置首
+  if (ctx.mainKey && !items.some((it) => it && it.id === ITEM_BY_KEY[ctx.mainKey!])) {
+    const id = ITEM_BY_KEY[ctx.mainKey];
+    if (id !== undefined) items.unshift({ id, stack: 1 });
+  }
+  return items;
+}
+
+/** AddBuriedChest 近似:从 (i,j) 向下落,按上下文解析样式与战利品,2×2 放置。
+ *  opts.loot: 原版物品 id(number)或物品 key(string,vi_ 反解主件/legacy 直入) */
 export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
-  i: number, j: number, opts: { style?: number; tile?: number; loot?: string } = {},
+  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags } = {},
 ): boolean {
   // ±2 内不得有滚石/祭坛/其他宝箱(原版 num4=2 检查)
   for (let dx = -2; dx <= 2; dx++) {
@@ -79,28 +288,44 @@ export function placeBuriedChest(
 
   let tile = opts.tile ?? CHEST;
   let style = opts.style;
-  let lootKey = opts.loot;
+  const flags: ChestFlags = { ...(opts.flags ?? {}) };
+  let mainId = 0;
+  let mainKey: string | null = null;
+  if (typeof opts.loot === 'string') {
+    mainKey = opts.loot;
+    mainId = vanillaIdOfKey(opts.loot) ?? 0;
+    if (mainId === 0 && ITEM_BY_KEY[opts.loot] === undefined) mainKey = null; // 无效键丢弃
+  } else if (opts.loot !== undefined) {
+    mainId = opts.loot;
+  }
   if (style === undefined) {
     if (gy > st.h - 205) {
-      // 地狱箱:style 4 + 地狱武器序(每个世界乱序取用)
+      // 地狱箱:style 4 + 地狱武器序(cs:36158-36171)
       style = 4;
-      if (!lootKey) lootKey = hellLoot[rng.int(0, hellLoot.length - 1)];
+      flags.hell = true;
+      if (!mainId) mainId = nextHellItem(gs, rng);
     } else {
       style = gy >= gs.worldSurface + 25 ? 1 : 0;
+      if (style === 0) flags.wooden = true;
       const tBelow = st.type[st.idx(i, gy)];
-      if (!lootKey && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE)) {
+      // 冰箱门禁(cs:36126:num7 ≥ ws+25 且 ≤ h-205)
+      if (!mainId && gy >= gs.worldSurface + 25 && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE)) {
         style = 11;
-        lootKey = iceLoot[rng.int(0, iceLoot.length - 1)];
-        if (rng.int(0, 19) === 0) lootKey = 'vi_997_extractinator';
+        flags.ice = true;
+        mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
+        if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
+        if (rng.int(0, 49) === 0) mainId = 669; // 1/50 鱼
       }
       const ud = gs.undergroundDesert;
-      if (!lootKey && ud && i >= ud.x0 && i <= ud.x1 && gy >= ud.y0 && gy <= ud.y1
+      if (!mainId && ud && i >= ud.x0 && i <= ud.x1 && gy >= ud.y0 && gy <= ud.y1
         && gy >= gs.worldSurface + 25 && gy <= st.h - 205) {
         tile = CHEST2;
         style = 10;
+        flags.desert = true;
         const deep = gy > (ud.y0 * 3 + ud.y1 * 4) / 7;
-        const pool = deep ? desertDeepLoot : desertShallowLoot;
-        lootKey = pool[rng.int(0, pool.length - 1)];
+        mainId = deep
+          ? [4061, 4062, 4276][rng.int(0, 2)]
+          : [4056, 4055, 4262, 4263][rng.int(0, 3)];
       }
     }
   }
@@ -121,18 +346,8 @@ export function placeBuriedChest(
       st.setTileSilent(i + dx, topY + dy, tile, style * fw * 18 + dx * 18, dy * 18);
     }
   }
-  // 战利品:特殊池优先;金(1)/木(0)箱走主件+杂物池(此前是空箱,体感稀缺主因之一)
-  let items: Array<{ id: number; stack: number } | null>;
-  const lootId = lootKey ? ITEM_BY_KEY[lootKey] : undefined;
-  if (lootId !== undefined) {
-    items = [{ id: lootId, stack: 1 }, ...Array(9).fill(null)];
-  } else if (style === 1) {
-    items = rollCommonLoot(rng, goldMainIds);
-  } else if (style === 0) {
-    items = rollCommonLoot(rng, woodMainIds);
-  } else {
-    items = Array(10).fill(null);
-  }
+  // 战利品:四深度分支完整表(此前仅主件+火把/药水,体感稀缺主因之一)
+  const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h }, mainId);
   chests.push({ x: i, y: topY, items });
   return true;
 }
@@ -174,7 +389,7 @@ export function runUnderworldChestsPass(st: TileStore, rng: RNG, gs: GenState, c
   }
 }
 
-/** Surface Chests pass(L8019):w*0.005 个地表木箱(style 0) */
+/** Surface Chests pass(L8019):w*0.005 个地表木箱(style 0;墙 244 → 天空箱 style 12) */
 export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w } = st;
   const count = Math.floor(w * 0.005);
@@ -187,7 +402,8 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
       const i = st.idx(x, y);
       // 空格 + 泥土系自然墙(2/59/244)
       if (st.flags[i] || (st.wall[i] !== 2 && st.wall[i] !== 59 && st.wall[i] !== 244)) continue;
-      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: 0 })) ok = true;
+      const sky = st.wall[i] === 244;
+      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: sky ? 12 : 0, flags: sky ? { sky: true } : { wooden: true } })) ok = true;
     }
   }
 }
@@ -199,13 +415,10 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
   let waterIdx = 0;
   for (let n = 0; n < count; n++) {
     // 战利品序(cs L8087-8112):1/10 鲨鱼饵/水上漂靴,否则循环 芦笛/游泳圈/三叉戟/脚蹼
-    let loot: string;
-    if (rng.int(0, 9) === 0) loot = 'vi_4425_shark_bait';
-    else if (rng.int(0, 9) === 0) loot = 'vi_863_water_walking_boots';
-    else {
-      loot = waterLoot[waterIdx % waterLoot.length];
-      waterIdx++;
-    }
+    let main: number;
+    if (rng.int(0, 9) === 0) main = 4425;
+    else if (rng.int(0, 9) === 0) main = 863;
+    else main = [186, 4404, 277, 187][waterIdx++ % 4];
     let ok = false;
     for (let tries = 0; tries < 10000 && !ok; tries++) {
       const x = rng.int(50, w - 51);
@@ -213,7 +426,7 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
       if (st.liquid[i] < 250 || st.liquidType[i] === 2) continue;
-      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: 17, loot })) ok = true;
+      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: 17, loot: main, flags: { water: true } })) ok = true;
     }
   }
 }

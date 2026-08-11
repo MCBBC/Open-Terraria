@@ -5,16 +5,17 @@
 // 编码字段为本仓库 v1 简化集（protoVer 门禁，protoVer=1）。
 
 export const PROTO_MAGIC = 'SW1';
-/** v2：msg13 改对齐原版 PlayerControls 布局（控制位 BitsByte×2 + selectedItem +
- *  position(左上) + velocity），远端玩家本端跑物理（docs §4.4） */
-export const PROTO_VER = 2;
+/** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
+ *  v3：实体同步族（msg16/21/23/27/42）+ 箱子权威（msg31/32）+ sessionToken 重连 */
+export const PROTO_VER = 3;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
   Hello = 1,          // C→S {magic, protoVer, name, hostToken 兜底}
   Kick = 2,           // S→C {reason}（原版 Kick/Disconnect 同号）
-  PlayerSlot = 3,     // S→C {slot}（原版同号 PlayerInfo=3：名字/外观在原版走此包，
-                      //   我们拆到 Hello+msg4——字段分布简化，ID 保留）
+  PlayerSlot = 3,     // S→C {slot, sessionToken}（原版同号 PlayerInfo=3：名字/外观在原版
+                      //   走此包，我们拆到 Hello+msg4——字段分布简化，ID 保留；
+                      //   sessionToken 为重连凭据）
   SyncPlayer = 4,     // 双向 {slot, appearanceJson}
   SyncPlayerItem = 5, // C→S→广播（v2 对齐原版 msg5 SyncPlayerItem 语义，批量变体）：
                       //   {u8 count, entries[{u8 playerSlot(服务端覆写), u8 container,
@@ -33,6 +34,20 @@ export const enum Msg {
   PlayerActive = 14,  // S→C 广播 {slot, active, name}
   TileBatch = 17,     // C→S→广播 {count, ops[]}（tile 操作批量，对齐 msg17 语义）
   SetTime = 18,       // S→C {timeOfDay, dayCount}
+  // ---- v3 实体同步（房主权威 + 服务器中继；ID 对齐原版 MessageID.cs） ----
+  PlayerLifeMana = 16, // 双向 {u8 slot, i16 hp, i16 maxHp}（原版同号：客户端权威 HP，服务器中继）
+  SyncItem = 21,       // 房主→广播 {u32 netId, u8 op(0=spawn/1=take/2=despawn), str key,
+                       //   u16 stack, f32 x,y,vx,vy}（原版同号 SyncItem）
+  SyncNPC = 23,        // 房主→广播（批量快照，原版同号 SyncNPC）：
+                       //   {u16 count, [u32 netId, str key, f32 x,y,vx,vy, i16 hp, i16 maxHp,
+                       //    u16 animT, u8 flags(bit0=boss)]}
+  SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
+                       //   {u16 count, [u32 netId, str key, f32 x,y,vx,vy, f32 rot]}
+  RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
+  SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
+                       //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
+  StrikeNPC = 42,      // 访客→房主 {u32 netId, i16 dmg, u8 crit, u8 kbDir, f32 srcX, srcY}
+                       //   （原版 42=Unknown42：旧 StrikeNPC 槽位）
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----

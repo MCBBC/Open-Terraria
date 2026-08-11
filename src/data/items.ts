@@ -900,6 +900,7 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'grand_design': 10488,
   'goblin_battle_standard': 10489, 'snow_globe': 10490, 'pirate_map': 10491,
   'coin_platinum': 10492,
+  'place_v_119_iridescent_brick': 10493,
 };
 
 // ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取，124 项）：

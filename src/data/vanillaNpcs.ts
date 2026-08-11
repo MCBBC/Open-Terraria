@@ -2,7 +2,6 @@
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
-import vanillaLootJson from '../../public/sprites/vanilla-npcloot.json';
 import vanillaDataJson from '../../public/sprites/vanilla.json';
 import { ITEM_BY_KEY } from './items';
 import { TILE_DEFS } from './tiles';
@@ -10,8 +9,8 @@ import { TILE_DEFS } from './tiles';
 /** tile id → key 反查（biomeAt 群系判定用） */
 const TILE_KEY_NAME: string[] = TILE_DEFS.map((d) => d.key);
 
-/** 全怪掉落表（tools/extract-npcloot.mjs 提取：ItemDropDatabase + NPCLootOld 双源） */
-export const VANILLA_NPC_LOOT = vanillaLootJson as unknown as Record<string, Array<{ item: number; chance: number; min: number; max: number }>>;
+// （旧掉落表已退役：掉落走 src/drops/NpcDrops.ts 规则树——
+//  tools/extract-npcdrops.mjs 结构化提取 ItemDropDatabase.cs，含专家/大师/条件/链语义）
 
 /** 原版物品 id → 本仓库 item key（vanilla.json 的 key 是 PascalCase，ITEM_BY_KEY 多为 snake_case；
  *  未注册的返回 null 跳过） */
@@ -34,25 +33,6 @@ export const vanillaItemKey = (() => {
     return key;
   };
 })();
-
-/** npc id → 本仓库可用的掉落表（{item: key, chance, min, max}[]；未注册物品过滤）。
- *  按 id 缓存(2026-08 审计 #9):此前每只怪新建数组+对象——掉落表只读,
- *  共享实例即可(蠕虫 30 段 = 30 份克隆纯属浪费) */
-const _dropsCache = new Map<number, Array<{ item: string; min: number; max: number; chance: number }>>();
-export function vanillaNpcDrops(id: number): Array<{ item: string; min: number; max: number; chance: number }> {
-  const hit = _dropsCache.get(id);
-  if (hit) return hit;
-  const raw = VANILLA_NPC_LOOT[String(id)];
-  const out: Array<{ item: string; min: number; max: number; chance: number }> = [];
-  if (raw) {
-    for (const d of raw) {
-      const key = vanillaItemKey(d.item);
-      if (key) out.push({ item: key, min: d.min, max: d.max, chance: d.chance });
-    }
-  }
-  _dropsCache.set(id, out);
-  return out;
-}
 
 export interface VanillaNpc {
   id: number;

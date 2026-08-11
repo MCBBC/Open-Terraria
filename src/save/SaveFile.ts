@@ -58,6 +58,10 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     armor: player.inv.armor,
     dye: player.inv.dye,
     trash: player.inv.trash,
+    miscEquips: player.inv.miscEquips,
+    miscDyes: player.inv.miscDyes,
+    loadouts: player.inv.loadouts,
+    currentLoadout: player.inv.currentLoadout,
   };
   return serializeSave(view, meta, playerData, playTimeMs);
 }

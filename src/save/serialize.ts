@@ -71,21 +71,34 @@ export interface SaveData {
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
   player: {
     hp: number; x: number; y: number;
-    inventory: Array<{ id: number; stack: number } | null>;
+    inventory: Array<SavedItem | null>;
     selected: number;
     baseMaxHp?: number;   // 生命上限（水晶之心/生命果扩容；旧档缺省 100）
     baseMaxMana?: number; // 魔力上限（魔力水晶扩容；旧档缺省 20）
     mana?: number;        // 当前魔力
-    banks?: Array<Array<{ id: number; stack: number } | null>>; // 玩家储物×4（29/97/463/491；旧档缺省全空）
+    banks?: Array<Array<SavedItem | null>>; // 玩家储物×4（29/97/463/491；旧档缺省全空）
     /** armor[20]（0-2 盔甲/3-9 配饰/10-12 时装盔甲/13-19 时装配饰）——旧档缺省经 migrateLegacy 从旧 54 槽布局迁出 */
-    armor?: Array<{ id: number; stack: number } | null>;
-    dye?: Array<{ id: number; stack: number } | null>;
-    trash?: { id: number; stack: number } | null; // 垃圾桶持久槽（Player.trashItem；死亡清空）
+    armor?: Array<SavedItem | null>;
+    dye?: Array<SavedItem | null>;
+    trash?: SavedItem | null; // 垃圾桶持久槽（Player.trashItem；死亡清空）
+    /** miscEquips[5]（宠物/光源/矿车/坐骑/钩爪）与 miscDyes[5]（Player.cs:1376-1379） */
+    miscEquips?: Array<SavedItem | null>;
+    miscDyes?: Array<SavedItem | null>;
+    /** 三套 Loadout（EquipmentLoadout：armor[20]+dye[10]；当前套序号） */
+    loadouts?: Array<{ armor: Array<SavedItem | null>; dye: Array<SavedItem | null> }>;
+    currentLoadout?: number;
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
   flags: Record<string, boolean>;
   weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
+}
+
+/** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
+export interface SavedItem {
+  id: number; stack: number;
+  favorited?: boolean;
+  prefix?: number; // 重铸词缀（Item.prefix；0/缺省=无）
 }
 
 /** 序列化所需的 tilestore 视图(worker 路径=副本包装;主线程=活存储) */

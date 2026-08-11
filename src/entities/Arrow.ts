@@ -87,6 +87,8 @@ export class Arrow extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
+    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const world = game.world;
     // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）

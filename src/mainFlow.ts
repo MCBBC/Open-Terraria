@@ -123,6 +123,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // NPC 对话系统(SetTalkNPC + GetChat)
       onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),
+      onReforgeOpen: () => ui.showReforge(),
       onNpcShop: (title, items, copper) => ui.showNpcShop(title, items, copper),
       onReadSign: (text) => ui.showSign(text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
@@ -168,6 +169,20 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.armor) g.player.inv.armor = player.armor.map((it) => it ? { ...it } : null);
     if (player.dye) g.player.inv.dye = player.dye.map((it) => it ? { ...it } : null);
     if (player.trash) g.player.inv.trash = { ...player.trash };
+    // 杂项装备/染料 + 三套 Loadout 回填（旧档缺省全空）
+    if (player.miscEquips) g.player.inv.miscEquips = player.miscEquips.map((it) => it ? { ...it } : null);
+    if (player.miscDyes) g.player.inv.miscDyes = player.miscDyes.map((it) => it ? { ...it } : null);
+    if (player.loadouts) {
+      for (let k = 0; k < 3; k++) {
+        const src = player.loadouts[k];
+        if (!src) continue;
+        g.player.inv.loadouts[k] = {
+          armor: src.armor.map((it) => it ? { ...it } : null),
+          dye: src.dye.map((it) => it ? { ...it } : null),
+        };
+      }
+    }
+    if (player.currentLoadout !== undefined) g.player.inv.currentLoadout = player.currentLoadout;
     g.player.inv.selected = player.selected;
     // 玩家储物×4 回填（29/97/463/491；旧档缺省全空）
     if (player.banks) {

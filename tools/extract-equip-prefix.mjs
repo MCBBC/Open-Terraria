@@ -31,35 +31,48 @@ function methodBodyOf(src, name) {
   }
   return '';
 }
-/** 外层 case 段 → itemId: segmentSource 映射（嵌套 switch 深度过滤版）。
- *  SetDefaults1-5 每个方法体顶层只有一个 switch (type)：case 标签都在 switch 体
- *  内 depth==1 处；嵌套 switch(type) 的 case 标签 depth 更深，直接忽略。 */
+/** case 段 → itemId: segmentSource 映射。
+ *  关键：case 标签归属【最近一层 switch(type)】——SetDefaults1-5 内有嵌套
+ *  switch(type)（如矿车 2343 块），内层标签才是物品 id；switch(其他变量) 的
+ *  标签一律不归属（否则会冒充物品 id，见 extract-itemcombat 坑 2）。 */
 function outerCaseSegments(src) {
   const out = new Map();
+  const collect = (body) => {
+    const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
+    const stack = []; // { isType, opened, bodyDepth, cur, segStart }
+    let depth = 0;
+    let m;
+    while ((m = tokRe.exec(body))) {
+      const t = m[0];
+      if (t.startsWith('switch')) {
+        stack.push({ isType: /switch\s*\(\s*type\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
+      } else if (t === '{') {
+        depth++;
+        const top = stack[stack.length - 1];
+        if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
+      } else if (t === '}') {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && depth === top.bodyDepth) {
+          if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          stack.pop();
+        }
+        depth--;
+      } else {
+        // case / default
+        const top = stack[stack.length - 1];
+        if (top && top.opened && top.isType) {
+          if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          top.cur = t === 'default:' ? null : +m[2];
+          top.segStart = m.index + t.length;
+        }
+      }
+    }
+  };
   for (const n of [1, 2, 3, 4, 5]) {
     const body = methodBodyOf(src, `private void SetDefaults${n}(`)
       || methodBodyOf(src, `public void SetDefaults${n}(`)
       || methodBodyOf(src, `void SetDefaults${n}(`);
-    if (!body) continue;
-    const swIdx = body.indexOf('switch (type)');
-    if (swIdx < 0) continue;
-    const open = body.indexOf('{', swIdx);
-    // 扫描到匹配的闭括号，收集 depth==1 的 case 标签切分点（从 switch 体内部起步，depth=1）
-    const tokRe = /case (\d+):|default:|[{}]/g;
-    let depth = 1, cur = null, segStart = open + 1, m;
-    tokRe.lastIndex = open + 1;
-    while ((m = tokRe.exec(body))) {
-      const t = m[0];
-      if (t === '{') depth++;
-      else if (t === '}') {
-        depth--;
-        if (depth === 0) { if (cur !== null) out.set(cur, body.slice(segStart, m.index)); break; }
-      } else if (depth === 1) {
-        if (cur !== null) out.set(cur, body.slice(segStart, m.index));
-        cur = t === 'default:' ? null : +m[1];
-        segStart = m.index + t.length;
-      }
-    }
+    if (body) collect(body);
   }
   return out;
 }
@@ -92,9 +105,19 @@ for (const mm of initSeg.matchAll(/vanityPet\[(\d+)\] = true;/g)) vanityPet.add(
 for (const mm of initSeg.matchAll(/lightPet\[(\d+)\] = true;/g)) lightPet.add(+mm[1]);
 
 // ---- 染料：DyeInitializer BindShader(itemId, ...) 全表（多行调用） ----
+// 基础色染料经 LoadBasicColorDye(base) 辅助注册（每基色绑 4 件：base 黑=+12 亮=+31 银=+44，
+// DyeInitializer.cs:13-27）；4 参重载直接给 4 个 id（:29 如 2874-2877）。
 const dyeSrc = read('Terarria1456/Terraria.Initializers/DyeInitializer.cs');
 const dyeIds = new Set();
 for (const mm of dyeSrc.matchAll(/BindShader\(\s*(\d+)\s*,/g)) dyeIds.add(+mm[1]);
+for (const mm of dyeSrc.matchAll(/LoadBasicColorDye\((\d+),\s*([\d.]+)f/g)) {
+  // 单参重载（基色 id）：base / base+12 / base+31 / base+44
+  const base = +mm[1];
+  for (const id of [base, base + 12, base + 31, base + 44]) dyeIds.add(id);
+}
+for (const mm of dyeSrc.matchAll(/LoadBasicColorDye\((\d+),\s*(\d+),\s*(\d+),\s*(\d+),/g)) {
+  for (const id of [+mm[1], +mm[2], +mm[3], +mm[4]]) dyeIds.add(id);
+}
 
 // ---- 矿车 mount id（MountID.Sets.Cart :21） ----
 const MOUNT_CART = new Set([6, 13, 11, 15, 16, 18, 19, 20, 21, 22, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 38, 39, 51, 53]);

@@ -34,4 +34,6 @@ export interface GameHooks {
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
   /** 拾取物品时在主角旁飘出物品名 */
   showPickupLabel(itemKey: string): void;
+  /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */
+  dropContext?(): import('../drops/NpcDrops').DropExtras;
 }

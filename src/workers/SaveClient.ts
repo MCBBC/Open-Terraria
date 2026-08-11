@@ -59,6 +59,10 @@ export class SaveClient {
       armor: player.inv.armor,
       dye: player.inv.dye,
       trash: player.inv.trash,
+      miscEquips: player.inv.miscEquips,
+      miscDyes: player.inv.miscDyes,
+      loadouts: player.inv.loadouts,
+      currentLoadout: player.inv.currentLoadout,
     };
     // ★ 不 transfer:st.* 是活数组,transfer 会 detach 游戏状态;结构化克隆在发送线程
     // 完成(一次 memcpy),游戏内后续写入不影响已快照的副本

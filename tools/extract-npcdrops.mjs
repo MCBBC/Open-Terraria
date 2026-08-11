@@ -89,6 +89,12 @@ function parseAtom(src, pos) {
     const m = /^[A-Za-z_][A-Za-z0-9_.]*/.exec(src.slice(p));
     const cls = m[0]; p += cls.length;
     p = skipWs(src, p);
+    // 泛型参数 <T,…>（List<IItemDropRule>）：成对消耗到 '>'
+    if (src[p] === '<') {
+      let depth = 0;
+      while (p < src.length) { if (src[p] === '<') depth++; else if (src[p] === '>') { depth--; p++; if (!depth) break; } p++; }
+      p = skipWs(src, p);
+    }
     let args = [], init = null;
     if (src[p] === '(') { const r = parseArgs(src, p); args = r.args; p = r.end; p = skipWs(src, p); }
     // 数组尺寸 [N]（int[3] {…}）—先消耗再找 {
@@ -130,7 +136,7 @@ function parseAtom(src, pos) {
     }
     return { t: 'new', cls, args, end: p };
   }
-  const num = /^\d+(?:\.\d+)?f?/.exec(src.slice(p));
+  const num = /^-?\d+(?:\.\d+)?f?/.exec(src.slice(p));
   if (num) return { t: 'num', v: parseFloat(num[0]), end: p + num[0].length };
   const cast = /^\(int\)/.exec(src.slice(p));
   if (cast) { p += cast[0].length; p = skipWs(src, p); }
@@ -151,7 +157,12 @@ function condOf(n) {
     stats.conds[name] = (stats.conds[name] ?? 0) + 1;
     return { name, args: n.args.map(lit) };
   }
-  if (n.t === 'id') return { name: n.name, args: [] }; // 条件变量
+  if (n.t === 'id') {
+    // 条件变量（Conditions.NotExpert condition = new …）：查声明表
+    const v = rules.get(n.name);
+    if (v && v.k === '__cond') return v.cond;
+    return { name: n.name, args: [] };
+  }
   return null;
 }
 function lit(n) {
@@ -176,6 +187,7 @@ function toRule(n) {
     return base;
   }
   if (n.t === 'new') return newRule(n);
+  if (n.t === 'newarr') return { k: 'listRef', rules: n.items.map(toRule) };  // List<IItemDropRule>{…}
   if (n.t === 'id') return { k: 'varRef', name: n.name };
   if (n.t === 'paren') return toRule(n.inner);
   stats.unknown.push(render(n));
@@ -392,7 +404,7 @@ function handleRegistration(s, expr, rootCall, refVar) {
     const r = toRule(a[0]);
     if (chains.length) attachChains(r, chains);
     emit([], r, true);
-    if (refVar) emittedRefs.set(refVar, r);
+    if (refVar) { emittedRefs.set(refVar, { rule: r, entry: null }); rules.set(refVar, r); }
     return;
   }
   if (reg === 'RegisterToNPC') {
@@ -403,7 +415,7 @@ function handleRegistration(s, expr, rootCall, refVar) {
     const r = toRule(a[1]);
     if (chains.length) attachChains(r, chains);
     emit(id, r);
-    if (refVar) emittedRefs.set(refVar, r);
+    if (refVar) { emittedRefs.set(refVar, { rule: r, entry: entries[entries.length - 1] }); rules.set(refVar, r); }
     return;
   }
   // Multiple 系
@@ -415,7 +427,7 @@ function handleRegistration(s, expr, rootCall, refVar) {
     else if (arg.t === 'id' && arrays.has(arg.name)) ids.push(...arrays.get(arg.name));
     else if (arg.t === 'newarr') ids.push(...arg.items.map(x => lit(x)).filter(v => v !== undefined));
   }
-  if (ids.length) { emit(ids, rule); if (refVar) emittedRefs.set(refVar, rule); }
+  if (ids.length) { emit(ids, rule); if (refVar) { emittedRefs.set(refVar, { rule, entry: entries[entries.length - 1] }); rules.set(refVar, rule); } }
   else stats.unknown.push(`regids:${render(a[0])}`);
 }
 
@@ -452,7 +464,7 @@ const flushStmt = (stmt) => {
     m = /^(\w+)\.(ChanceNumerator|ChanceDenominator|MinimumItemDropsCount|MaximumItemDropsCount|MinimumStackPerChunkBase|MaximumStackPerChunkBase|BonusMinDropsPerChunkPerPlayer|BonusMaxDropsPerChunkPerPlayer)\s*=\s*(?:\(int\))?\s*([\d.]+)/.exec(s);
     if (m && paramss.has(m[1])) { const o = { ...paramss.get(m[1]) }; o[m[2]] = Math.round(parseFloat(m[3])); paramss.set(m[1], o); return; }
     // 规则/条件变量声明
-    m = /^(?:IItemDropRule|IItemDropRuleCondition|List<IItemDropRule>|Conditions\.[A-Za-z_][A-Za-z0-9_]*)\s+(\w+)\s*=/.exec(s);
+    m = /^(?:IItemDropRule|IItemDropRuleCondition|LeadingConditionRule|List<IItemDropRule>|Conditions\.[A-Za-z_][A-Za-z0-9_]*)\s+(\w+)\s*=/.exec(s);
     if (m) {
       const rhs = s.slice(s.indexOf('=') + 1).replace(/;$/, '');
       const isCond = s.startsWith('IItemDropRuleCondition') || s.startsWith('Conditions.');
@@ -476,10 +488,19 @@ const flushStmt = (stmt) => {
       const expr = parseExpr(s, s.indexOf(m[0]));
       // postfix 结构：call(fn=OnX, args=[varRef, rule])
       if (expr.t === 'call' && expr.base) {
-        const host = emittedRefs.get(m[1]) ?? rules.get(m[1]);
+        const ref = emittedRefs.get(m[1]);
+        const host = ref ? ref.rule : rules.get(m[1]);
         host.chain = host.chain ?? [];
         host.chain.push({ on: CHAIN_FN[m[2]], rule: toRule(expr.args[1]) });
       }
+      return;
+    }
+    // RemoveFromMultipleNPCs(entry, ids)：把 ids 从已 emit 条目的 npc 列表移除
+    m = /^RemoveFromMultipleNPCs\((\w+),\s*(\w+)\)/.exec(s);
+    if (m && emittedRefs.has(m[1])) {
+      const ids = arrays.get(m[2]) ?? [];
+      const entry = emittedRefs.get(m[1]).entry;
+      if (entry) entry.npcs = entry.npcs.filter((n) => !ids.includes(n));
       return;
     }
     // 注册调用（含链式 .OnSuccess(...) 尾巴）：剥链到最内层注册调用
@@ -502,7 +523,10 @@ const flushStmt = (stmt) => {
 for (const line of DB.split('\n')) {
   const t = line.trim();
   if (/^(private void|public void) /.test(t)) flushStmt(t);
-  if (t === '{' || t === '}') { flushStmt(buf); buf = ''; continue; }  // 类/方法体花括号行：语句边界
+  // 类/方法体花括号行：语句边界。但多行数组初始化器 `int[] x = new int[18]` 后跟 `{`
+  // 行不是边界——buf 尾是类型声明而非完整语句时继续累积
+  if (t === '{' && /[)}]\s*$|^\s*$/.test(buf)) { flushStmt(buf); buf = ''; continue; }
+  if (t === '}') { flushStmt(buf); buf = ''; continue; }
   buf += (buf ? '\n' : '') + line;
   // 对象初始化器语句未闭合时不 flush
   const opens = (buf.match(/{/g) ?? []).length, closes = (buf.match(/}/g) ?? []).length;
@@ -525,6 +549,18 @@ const values = {};
     const seg = body.slice(marks[i].at, end);
     const v = seg.match(/value = (\d+(?:\.\d+)?)f?;/);  // 25f / 5000f 浮点字面量
     if (v) values[marks[i].id] = Math.round(parseFloat(v[1]));
+  }
+  // SetDefaultsFromNetId 负 id 变体（case -N: 块内的 value = Xf;——史莱姆变体专属值，
+  // -1=100/-3=3/-4=10000/-5=10/-6=20…变体掉钱走这张表而非 type 表）。
+  // 该方法在文件里位于 SetDefaults(:8361) 之前 → 扫全文
+  const re2 = /case (-\d+):/g;
+  const marks2 = [];
+  while ((m = re2.exec(npcCs))) marks2.push({ id: Number(m[1]), at: m.index });
+  for (let i = 0; i < marks2.length; i++) {
+    const end = i + 1 < marks2.length ? marks2[i + 1].at : marks2[i].at + 800;
+    const seg = npcCs.slice(marks2[i].at, end);
+    const v = seg.match(/value = (\d+(?:\.\d+)?)f?;/);
+    if (v && values[marks2[i].id] === undefined) values[marks2[i].id] = Math.round(parseFloat(v[1]));
   }
 }
 

@@ -4,10 +4,12 @@ import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { RECIPES } from '../data/recipes';
-import { vanillaItemKey, ingredientKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
 import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
+import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ChatMonitor } from './ChatMonitor';
@@ -19,6 +21,23 @@ import type { ChestData } from '../world/World';
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
 
 const iconCache = new Map<number, string>();
+
+/** 组假 id → 组号 */
+function reqIdShift(reqId: number): number { return reqId - 1000000; }
+
+/** 词缀显示名（Lang.prefix → l10n "Prefix.{ConstName}"，缺失回落常量名） */
+function prefixDisplayName(prefix: number): string {
+  const key = PREFIX_NAMES[String(prefix)];
+  if (!key) return '';
+  const t = Lang.text(`Prefix.${key}`);
+  return t && t !== `Prefix.${key}` ? t : key;
+}
+
+/** 词缀后伤害值（Item.Prefix :551：damage = round(damage × dmg)） */
+function prefixedDamage(def: (typeof ITEM_DEFS)[number], prefix?: number): number {
+  if (!def.tool?.damage || !prefix) return def.tool?.damage ?? 0;
+  return Math.max(1, Math.round(def.tool.damage * prefixStat(prefix).dmg));
+}
 function iconUrl(game: Game, id: number): string {
   let url = iconCache.get(id);
   if (!url) {
@@ -563,36 +582,57 @@ export class UI {
     return s;
   }
 
-  /** 一键装备判定（ItemSlot.CanSwapEquip :3009-3020 近似） */
+  /** 一键装备判定（ItemSlot.CanSwapEquip :3009-3020 + RightClick :1541：
+   *  盔甲/配饰/染料/宠物/光源/矿车/坐骑/钩爪均可一键装备） */
   private canSwapEquip(id: number): boolean {
     const d = ITEM_DEFS[id];
-    return !!d && (!!d.armor || !!d.accessory);
+    if (!d) return false;
+    if (d.armor || d.accessory) return true;
+    const k = equipKindOfInternal(id);
+    return k === 'dye' || k === 'pet' || k === 'light' || k === 'cart' || k === 'mount' || k === 'hook';
   }
 
   /** 一键装备（ItemSlot.SwapEquip/ArmorSwap :3022-3346 近似）：部位→armor[0-2]（时装→[10-12]），
-   *  配饰→armor[3-9] 第一个空槽/原槽交换；成功后取消收藏（原版 :3341） */
+   *  配饰→armor[3-9] 第一个空槽/原槽交换；染料→dye 第一个空槽；杂项→对应 miscEquips 槽；
+   *  成功后取消收藏（原版 :3341） */
   private swapEquipItem(cur: { id: number; stack: number }, where: SlotWhere, i: number): void {
     const inv = this.game.player.inv;
     const d = ITEM_DEFS[cur.id];
+    const src = where === 'inv' ? inv.slots[i] : where === 'armor' ? inv.armor[i] : inv.dye[i];
+    if (!src) return;
     let target = -1;
+    let targetWhere: SlotWhere = 'armor';
     if (d.armor) {
-      const base = 0; // 时装装备区分暂未实现（Item.vanity），统一功能槽
-      target = base + d.armor.slot;
+      target = d.armor.slot;
     } else if (d.accessory) {
       for (let k = 3; k < 10; k++) {
         if (!inv.armor[k]) { target = k; break; }
       }
       if (target < 0) target = 3; // 全满→交换第 3 槽
+    } else {
+      const kind = equipKindOfInternal(cur.id);
+      if (kind === 'dye') {
+        // 染料→dye[0-9] 第一个空槽（SwapEquip :3030 dye 分支）
+        for (let k = 0; k < inv.dye.length; k++) {
+          if (!inv.dye[k]) { target = k; break; }
+        }
+        targetWhere = 'dye';
+        if (target < 0) return;
+      } else if (kind && MISC_KINDS.includes(kind)) {
+        target = MISC_KINDS.indexOf(kind);
+        targetWhere = 'misc';
+      } else return;
     }
-    if (target < 0 || !inv.armorAccepts(target, cur.id)) return;
-    const src = where === 'inv' ? inv.slots[i] : where === 'armor' ? inv.armor[i] : inv.dye[i];
-    if (!src) return;
+    if (targetWhere === 'armor' && !inv.armorAccepts(target, cur.id)) return;
     src.favorited = false; // 装上取消收藏（原版 ArmorSwap :3341）
-    const tmp = inv.armor[target];
-    inv.armor[target] = src;
+    const arr = targetWhere === 'armor' ? inv.armor : targetWhere === 'dye' ? inv.dye : inv.miscEquips;
+    const tmp = arr[target];
+    arr[target] = src;
     if (where === 'inv') inv.slots[i] = tmp ?? null;
     else if (where === 'armor') inv.armor[i] = tmp ?? null;
-    else inv.dye[i] = tmp ?? null;
+    else if (where === 'dye') inv.dye[i] = tmp ?? null;
+    else if (where === 'misc') inv.miscEquips[i] = tmp ?? null;
+    else inv.miscDyes[i] = tmp ?? null;
     this.game.sfx.play('menuTick', 0.6);
   }
 
@@ -894,7 +934,7 @@ export class UI {
   }
 
   private showTooltipFor(i: number, where: SlotWhere) {
-    const s = this.slotContent(where, i) as { id: number; stack: number; favorited?: boolean } | null;
+    const s = this.slotContent(where, i) as { id: number; stack: number; favorited?: boolean; prefix?: number } | null;
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
     // 名称按稀有度着色（原版 GetItemNameColor 15 档）：vi_ 物品查 vanilla-itemrare.json
@@ -908,10 +948,25 @@ export class UI {
         rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
       }
     }
+    // 词缀稀有度档位偏移（Item.Prefix :593-600：value≥1.05 档 +1、≥1.2 档 +2 等）
+    if (s.prefix) {
+      const pv = prefixValueMul(s.prefix);
+      if (pv >= 1.2) rare = Math.min(11, rare + 2);
+      else if (pv >= 1.05) rare = Math.min(11, rare + 1);
+      else if (pv <= 0.8) rare = Math.max(-1, rare - 2);
+      else if (pv <= 0.95) rare = Math.max(-1, rare - 1);
+    }
     const nameColor = this.rarityColor(rare);
-    let html = `<b style="color:${nameColor}">${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
+    // 词缀名前缀（Lang.GetPrefixedItemName：Prefix.{ConstName} + 物品名）
+    const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
+    let html = `<b style="color:${nameColor}">${prefixName}${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
     if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
-    if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', def.tool.damage)}`;
+    if (s.prefix) {
+      for (const ln of prefixLines(s.prefix)) {
+        html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
+      }
+    }
+    if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', prefixedDamage(def, s.prefix))}`;
     if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
@@ -942,12 +997,16 @@ export class UI {
   closeInventory() {
     this.invPanel.style.display = 'none';
     this.closeItemSearch();
+    this.closeGuideSearch();
     this.closeChest();
     // 放回手上物品
     if (this.heldStack) {
       this.game.player.inv.add(this.heldStack.id, this.heldStack.stack);
       this.heldStack = null;
     }
+    // 材料格内容归还背包（CraftingGrid 关闭语义）
+    this.returnCraftGrid();
+    this.craftGridRecipe = null;
     // 垃圾桶为持久槽（Player.trashItem 语义）：关闭背包保留，仅死亡时由 Game 清空
     this.moveGhost();
     this.game.input.uiBlocking = false;
@@ -1037,6 +1096,259 @@ export class UI {
     }
   }
 
+  // ============ 重铸（哥布林工匠，Main.InReforgeMenu + ReforgeItemInReforgeSlot） ============
+
+  /** 重铸槽物品（Main.reforgeItem；关闭时归还背包，Player.cs:4912） */
+  reforgeItem: { id: number; stack: number; prefix?: number } | null = null;
+  private reforgeEl: HTMLDivElement | null = null;
+  private reforgeCostEl: HTMLElement | null = null;
+  private reforgeSlotEl: HTMLElement | null = null;
+
+  /** 打开重铸面板：物品槽（放 1 件）+ 费用 + 重铸按钮 */
+  showReforge(): void {
+    this.closeReforge();
+    const overlay = el('div') as HTMLDivElement;
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.45); z-index:1150; display:flex; align-items:center; justify-content:center;';
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'width:360px;';
+    panel.appendChild(el('div', 'sw-title', '⚒ ' + Lang.inter(19)));
+    const hint = el('div', 'sw-lbl', Lang.inter(20)); // 将物品放到此处重铸
+    panel.appendChild(hint);
+    // 槽位行：物品槽 + 费用
+    const row = el('div');
+    row.style.cssText = 'display:flex; align-items:center; gap:12px; margin:8px 0;';
+    const slot = el('div', 'sw-slot');
+    slot.style.cssText += 'width:52px; height:52px;';
+    slot.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (this.heldStack) {
+        // 放入 1 件（ItemSlot :757-764：reforgeItem = item.Clone() stack=1）
+        if (this.reforgeItem) return;
+        if (!this.game.canReforge(this.heldStack)) { this.toast('该物品无法重铸'); return; }
+        this.reforgeItem = { id: this.heldStack.id, stack: 1 };
+        this.heldStack.stack -= 1;
+        if (this.heldStack.stack <= 0) this.heldStack = null;
+      } else if (this.reforgeItem) {
+        // 取回
+        this.heldStack = this.reforgeItem;
+        this.reforgeItem = null;
+      }
+      this.refreshReforge();
+    });
+    slot.addEventListener('mouseenter', () => {
+      if (this.reforgeItem) this.showReforgeTooltip();
+    });
+    slot.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
+    this.reforgeSlotEl = slot;
+    row.appendChild(slot);
+    const costWrap = el('div');
+    this.reforgeCostEl = el('div', '', '');
+    this.reforgeCostEl.style.cssText = 'font-size:13px; color:#ffe8a0;';
+    costWrap.appendChild(this.reforgeCostEl);
+    row.appendChild(costWrap);
+    panel.appendChild(row);
+    const doBtn = el('button', 'sw-btn', Lang.inter(19));
+    doBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      if (!this.reforgeItem) return;
+      const cost = this.game.reforgeCost(this.reforgeItem);
+      if (this.game.coinsOwned() < cost) {
+        this.toast(Lang.inter(46) + ' 不足');
+        return;
+      }
+      const np = this.game.doReforge(this.reforgeItem);
+      if (np < 0) { this.toast('重铸失败'); return; }
+      this.toast(`${Lang.inter(46)}: ${cost} · ${prefixDisplayName(np)}`);
+      this.refreshReforge();
+    });
+    panel.appendChild(doBtn);
+    const closeBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
+    closeBtn.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      this.closeReforge();
+    });
+    panel.appendChild(closeBtn);
+    overlay.appendChild(panel);
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) this.closeReforge();
+    });
+    document.body.appendChild(overlay);
+    this.reforgeEl = overlay;
+    this.refreshReforge();
+  }
+
+  private refreshReforge(): void {
+    if (!this.reforgeSlotEl) return;
+    // 画槽内容
+    const old = this.reforgeSlotEl.querySelector('img');
+    old?.remove();
+    this.reforgeSlotEl.querySelector('.cnt')?.remove();
+    if (this.reforgeItem) {
+      const img = el('img') as HTMLImageElement;
+      img.src = iconUrl(this.game, this.reforgeItem.id);
+      img.draggable = false;
+      this.reforgeSlotEl.appendChild(img);
+    }
+    // 费用行（Main.cs:41026：value×stack÷3）
+    if (this.reforgeCostEl) {
+      if (this.reforgeItem) {
+        const cost = this.game.reforgeCost(this.reforgeItem);
+        const owned = this.game.coinsOwned();
+        this.reforgeCostEl.textContent = `${Lang.inter(46)}: ${cost} 铜` + (owned < cost ? '（不足）' : '');
+        this.reforgeCostEl.style.color = owned < cost ? '#e08a8a' : '#ffe8a0';
+      } else {
+        this.reforgeCostEl.textContent = '';
+      }
+    }
+    this.refreshAll();
+  }
+
+  /** 重铸槽 tooltip（词缀前后对比行） */
+  private showReforgeTooltip(): void {
+    const s = this.reforgeItem;
+    if (!s) return;
+    const def = ITEM_DEFS[s.id];
+    let rare = 0;
+    if (def.key.startsWith('vi_')) rare = ITEM_RARE[String(parseInt(def.key.slice(3), 10))] ?? 0;
+    const prefixName = s.prefix ? prefixDisplayName(s.prefix) : '';
+    let html = `<b style="color:${this.rarityColor(rare)}">${prefixName}${Lang.itemNameByKey(def.key)}</b>`;
+    if (s.prefix) for (const ln of prefixLines(s.prefix)) {
+      html += `<br><span style="color:${ln.good ? 'rgb(120,190,120)' : 'rgb(190,120,120)'}">${ln.text}</span>`;
+    }
+    this.tooltip.innerHTML = html;
+    this.tooltip.style.display = 'block';
+    if (this.reforgeSlotEl) {
+      const r = this.reforgeSlotEl.getBoundingClientRect();
+      this.tooltip.style.left = `${r.right + 8}px`;
+      this.tooltip.style.top = `${r.top}px`;
+    }
+  }
+
+  closeReforge(): void {
+    // 归还重铸槽物品（Player.cs:4912：GetOrDropItem）
+    if (this.reforgeItem) {
+      this.game.player.inv.add(this.reforgeItem.id, this.reforgeItem.stack);
+      this.reforgeItem = null;
+    }
+    if (this.reforgeEl) {
+      this.reforgeEl.remove();
+      this.reforgeEl = null;
+    }
+    this.reforgeSlotEl = null;
+    this.refreshAll();
+  }
+
+  // ============ 向导配方反查（guideItem → CollectGuideRecipes，组匹配生效） ============
+
+  private guideEl: HTMLDivElement | null = null;
+
+  /** 反查面板：搜物品 → 列出以它为材料的全部配方（含 RecipeGroup 成员） */
+  openGuideSearch(): void {
+    this.closeGuideSearch();
+    const overlay = el('div') as HTMLDivElement;
+    overlay.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.55); z-index:1200; display:flex; align-items:center; justify-content:center;';
+    const panel = el('div');
+    panel.style.cssText = 'width:620px; max-height:76vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
+    const titleRow = el('div');
+    titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
+    titleRow.appendChild(el('div', 'sw-lbl', '📖 ' + Lang.inter(21)));
+    const closeBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
+    closeBtn.style.cssText = 'cursor:pointer; width:auto; margin:0;';
+    closeBtn.addEventListener('click', () => this.closeGuideSearch());
+    titleRow.appendChild(closeBtn);
+    panel.appendChild(titleRow);
+    const input = el('input') as HTMLInputElement;
+    input.placeholder = '材料名称 / key / 原版 id…';
+    input.style.cssText = 'width:100%; box-sizing:border-box; padding:6px 8px; background:#1a1a22; color:#eee; border:1px solid #555; border-radius:4px; font-size:14px;';
+    panel.appendChild(input);
+    const itemRow = el('div');
+    itemRow.style.cssText = 'display:flex; flex-wrap:wrap; gap:4px; overflow-y:auto; max-height:120px; align-content:flex-start;';
+    panel.appendChild(itemRow);
+    const recipeList = el('div');
+    recipeList.style.cssText = 'overflow-y:auto; flex:1;';
+    panel.appendChild(recipeList);
+    overlay.appendChild(panel);
+    overlay.addEventListener('mousedown', (e) => {
+      if (e.target === overlay) this.closeGuideSearch();
+    });
+    document.body.appendChild(overlay);
+    this.guideEl = overlay;
+
+    const entries = ITEM_DEFS.map((d, id) => {
+      const vid = d.key.startsWith('vi_') ? parseInt(d.key.slice(3, d.key.indexOf('_', 3)), 10) : -1;
+      const name = Lang.itemNameByKey(d.key) || d.key;
+      return { id, vid, name, lc: (name + ' ' + d.key + ' ' + vid).toLowerCase() };
+    }).filter((e) => e.vid >= 0);
+    const renderItems = () => {
+      const q = input.value.trim().toLowerCase();
+      itemRow.textContent = '';
+      let shown = 0;
+      for (const e of entries) {
+        if (q && !e.lc.includes(q)) continue;
+        if (++shown > 40) break;
+        const chip = el('div');
+        chip.title = e.name;
+        chip.style.cssText = 'display:flex; align-items:center; gap:3px; width:150px; padding:2px 4px; background:#1f1f28; border:1px solid #444; border-radius:3px; cursor:pointer; font-size:12px; color:#ddd;';
+        const img = el('img') as HTMLImageElement;
+        img.src = iconUrl(this.game!, e.id);
+        img.style.cssText = 'width:22px; height:22px; image-rendering:pixelated; flex:none;';
+        chip.appendChild(img);
+        const lbl = el('span');
+        lbl.textContent = e.name;
+        lbl.style.cssText = 'overflow:hidden; text-overflow:ellipsis; white-space:nowrap;';
+        chip.appendChild(lbl);
+        chip.addEventListener('click', () => this.renderGuideRecipes(recipeList, e.vid));
+        itemRow.appendChild(chip);
+      }
+      if (!shown) itemRow.appendChild(el('div', 'sw-lbl', '无匹配'));
+    };
+    input.addEventListener('input', renderItems);
+    renderItems();
+    input.focus();
+  }
+
+  /** 材料的配方列表（CollectGuideRecipes：items 直接命中或 RecipeGroup 成员命中） */
+  private renderGuideRecipes(listEl: HTMLElement, vid: number): void {
+    listEl.textContent = '';
+    const game = this.game;
+    const avail = new Map<unknown, number>();
+    for (const { r, count } of game.vanillaAvailableRecipes()) avail.set(r, count);
+    let hits = 0;
+    for (const r of VANILLA_RECIPES) {
+      const used = r.items.some((req) => req.id === vid
+        || (req.id >= 1000000 && (RECIPE_GROUP_ITEMS[String(req.id - 1000000)] ?? []).includes(vid)));
+      if (!used) continue;
+      if (++hits > 60) { listEl.appendChild(el('div', 'sw-lbl', '…更多结果请细化')); break; }
+      const outKey = vanillaItemKey(r.create);
+      if (!outKey) continue;
+      const row = el('div', 'sw-recipe' + (avail.has(r) ? '' : ' no'));
+      const img = el('img') as HTMLImageElement;
+      img.src = iconUrl(game, game.itemId(outKey));
+      row.appendChild(img);
+      const label = el('span', '', `${Lang.itemNameByKey(outKey)}${r.createStack > 1 ? ` ×${r.createStack}` : ''}`);
+      row.appendChild(label);
+      const info = el('span', '', `${r.tile >= 0 ? (Lang.tileName(r.tile) ?? `站点 ${r.tile}`) : Lang.text('Mods.SandboxWorld.UI.StationHand')} · ${
+        r.items.map((req) => `${req.id >= 1000000 ? '任何组物' : (Lang.itemNameByKey(ingredientKey(req.id) ?? '') ?? req.id)} ${req.stack}`).join(' +')}`);
+      info.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right; max-width:280px;';
+      row.appendChild(info);
+      if (avail.has(r)) {
+        row.onclick = () => {
+          game.vanillaCraft(r, 1);
+          this.refreshAll();
+        };
+      }
+      listEl.appendChild(row);
+    }
+    if (!hits) listEl.appendChild(el('div', 'sw-lbl', '该物品不用于任何配方'));
+  }
+
+  closeGuideSearch(): void {
+    if (this.guideEl) {
+      this.guideEl.remove();
+      this.guideEl = null;
+    }
+  }
+
   /** 垃圾桶暂存（关闭背包才删除；可取回） */
   /** @deprecated 改走 inv.trash 持久槽（Player.trashItem 语义）——保留字段仅作 UI 缓存兼容 */
 
@@ -1077,14 +1389,71 @@ export class UI {
   }
 
   trashEl: HTMLElement | null = null;
+  /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
+  private eqPageEl: HTMLElement | null = null;
+  private miscPageEl: HTMLElement | null = null;
+  private loadoutBtns: HTMLButtonElement[] = [];
+  private eqPageBtns: HTMLButtonElement[] = [];
+  private equipPage = 0;
+
+  /** 页签切换（原版 EquipPage 0=装备 2=杂项；DrawInventory :40614） */
+  setEquipPage(page: number): void {
+    this.equipPage = page;
+    if (this.eqPageEl) this.eqPageEl.style.display = page === 0 ? 'flex' : 'none';
+    if (this.miscPageEl) this.miscPageEl.style.display = page === 1 ? 'flex' : 'none';
+    this.eqPageBtns.forEach((b, k) => {
+      b.style.borderColor = k === page ? '#ffd75a' : '#6a5a8a';
+    });
+    this.refreshAll();
+  }
 
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
     this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
     this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Inventory')));
 
-    // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 时装 10-12 + 时装配饰 13-17）+
-    // 垃圾桶 + 钱币 + 弹药；右背包 10×4（10-49）。原版三列 sw-92/-139/-186（染料列 P5）
+    // ---- 顶部：三套 Loadout 切换（DrawLoadoutButtons Main.cs:41386+：当前套高亮） ----
+    {
+      const row = el('div');
+      row.style.cssText = 'display:flex; gap:4px; align-items:center; margin-bottom:6px;';
+      row.appendChild(el('div', 'sw-lbl', '预设'));
+      this.loadoutBtns = [];
+      for (let k = 0; k < 3; k++) {
+        const b = el('button', 'sw-btn');
+        b.textContent = `${k + 1}`;
+        b.style.cssText = 'margin:0; width:34px; padding:4px 0; font-size:13px;';
+        b.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          if (this.game.player.inv.currentLoadout === k) return;
+          this.game.player.inv.trySwitchingLoadout(k);
+          this.game.sfx.play('menuTick', 0.6); // SoundID 12（TrySwitchingLoadout）
+          this.refreshAll();
+        });
+        row.appendChild(b);
+        this.loadoutBtns.push(b);
+      }
+      // 页签：装备 / 杂项（原版 EquipPage 0/2——时装并入装备页主列）
+      const spacer = el('div');
+      spacer.style.flex = '1';
+      row.appendChild(spacer);
+      this.eqPageBtns = [];
+      for (const [label, page] of [['装备', 0], ['杂项', 1]] as const) {
+        const b = el('button', 'sw-btn');
+        b.textContent = label;
+        b.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+        b.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.setEquipPage(page);
+        });
+        row.appendChild(b);
+        this.eqPageBtns.push(b);
+      }
+      this.invPanel.appendChild(row);
+    }
+
+    // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 染料 0-2+3-7 | 时装 10-12 + 时装配饰 13-17）
+    // / 杂项页（miscEquips[5] + miscDyes[5]，Main.cs:40616-40672 EquipPage==2）+
+    // 垃圾桶 + 钱币 + 弹药；右背包 10×4（10-49）。原版三列 x=sw-92/-139/-186。
     const body = el('div');
     body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
     const left = el('div');
@@ -1097,10 +1466,32 @@ export class UI {
       col.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
       return col;
     };
-    left.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 'armor'));
-    left.appendChild(vcol(Lang.text('LegacyInterface.9'), 3, 5, 'armor')); // 配饰 armor[3-7]
-    left.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 'armor'));
-    left.appendChild(vcol('', 13, 5, 'armor')); // 时装配饰 armor[13-17]（8/9 需解锁暂隐）
+    // 装备页：四列装备 + 一列染料（染料[10] = 0-2 盔甲 + 3-9 配饰，ItemSlot context 12）
+    this.eqPageEl = el('div');
+    this.eqPageEl.style.cssText = 'display:flex; gap:6px;';
+    this.eqPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 'armor'));
+    this.eqPageEl.appendChild(vcol(Lang.text('LegacyInterface.9'), 3, 5, 'armor')); // 配饰 armor[3-7]
+    this.eqPageEl.appendChild(vcol(Lang.text('LegacyInterface.57'), 0, 3, 'dye'));  // 染料 dye[0-2]
+    this.eqPageEl.appendChild(vcol('', 3, 7, 'dye'));                                // 染料 dye[3-9]
+    this.eqPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 'armor'));
+    this.eqPageEl.appendChild(vcol('', 13, 5, 'armor')); // 时装配饰 armor[13-17]（8/9 需解锁暂隐）
+    left.appendChild(this.eqPageEl);
+    // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
+    this.miscPageEl = el('div');
+    this.miscPageEl.style.cssText = 'display:none; gap:10px;';
+    const MISC_LABELS = ['宠物', '光源', '矿车', '坐骑', '抓钩'];
+    const miscCol = el('div');
+    miscCol.style.cssText = 'display:flex; flex-direction:column;';
+    MISC_LABELS.forEach((lbl, k) => {
+      const pair = el('div');
+      pair.style.cssText = 'display:flex; flex-direction:column;';
+      pair.appendChild(el('div', 'sw-lbl', lbl));
+      pair.appendChild(this.makeSlotEl(k, 'misc'));
+      miscCol.appendChild(pair);
+    });
+    this.miscPageEl.appendChild(miscCol);
+    this.miscPageEl.appendChild(vcol('染料', 0, 5, 'miscDye'));
+    left.appendChild(this.miscPageEl);
     // 垃圾桶（持久槽；可交换取回）
     const trashWrap = el('div');
     trashWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
@@ -1152,6 +1543,12 @@ export class UI {
       searchBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
       searchBtn.addEventListener('click', () => this.openItemSearch());
       lblRow.appendChild(searchBtn);
+      // 向导配方反查（guideItem 槽 → CollectGuideRecipes；LegacyInterface.21 标题）
+      const guideBtn = el('button', 'sw-btn');
+      guideBtn.textContent = '📖 ' + Lang.text('LegacyInterface.21').replace('：', '');
+      guideBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
+      guideBtn.addEventListener('click', () => this.openGuideSearch());
+      lblRow.appendChild(guideBtn);
       right.appendChild(lblRow);
     }
     const grid = el('div');
@@ -1169,6 +1566,18 @@ export class UI {
     stations.style.cssText = 'font-size:12px; color:#8ad0a0; margin-bottom:6px;';
     stations.dataset.role = 'stations';
     this.invPanel.appendChild(stations);
+    // ---- Modern 合成网格控件（1.4.5 CraftingGrid：搜索栏 + 焦点配方材料格） ----
+    const modernRow = el('div');
+    modernRow.style.cssText = 'display:flex; gap:6px; align-items:center; margin-bottom:6px;';
+    this.craftSearchEl = el('input') as HTMLInputElement;
+    this.craftSearchEl.placeholder = '搜索配方成品…';
+    this.craftSearchEl.style.cssText = 'flex:1; padding:4px 8px; background:#241e38; color:#fff; border:1px solid #6a5a8a; border-radius:4px; font-size:12px;';
+    this.craftSearchEl.addEventListener('input', () => { this.craftFocus = 0; this.refreshVanillaCrafting(); });
+    modernRow.appendChild(this.craftSearchEl);
+    this.craftGridEl = el('div');
+    this.craftGridEl.style.cssText = 'display:flex; gap:4px; align-items:center; flex-wrap:wrap; max-width:520px;';
+    modernRow.appendChild(this.craftGridEl);
+    this.invPanel.appendChild(modernRow);
     this.craftListEl = el('div');
     this.craftListEl.style.cssText = 'max-height:240px; overflow-y:auto; width:520px;';
     this.invPanel.appendChild(this.craftListEl);
@@ -1400,6 +1809,18 @@ export class UI {
       const slotEl = this.slotEl(i, 'inv');
       if (slotEl) this.paintSlot(slotEl, inv.slots[i]);
     }
+    // 装备列全量重绘（armor[20] / dye[10] / miscEquips[5] / miscDyes[5]）
+    for (const where of ['armor', 'dye', 'misc', 'miscDye'] as const) {
+      const arr = this.equipArray(where);
+      for (let i = 0; i < arr.length; i++) {
+        const slotEl = this.slotEl(i, where);
+        if (slotEl) this.paintSlot(slotEl, arr[i]);
+      }
+    }
+    // Loadout 高亮（当前套金色描边）
+    this.loadoutBtns.forEach((b, k) => {
+      b.style.borderColor = k === inv.currentLoadout ? '#ffd75a' : '#6a5a8a';
+    });
     this.refreshBuffs();
     if (this.openChest) {
       const n = Math.min(40, this.openChest.items.length);
@@ -1451,12 +1872,28 @@ export class UI {
 
   /** 鱼眼合成列表焦点行（原版 focusRecipe；滚轮 ±1，CraftingUI 滚动 ±6.5/帧） */
   private craftFocus = 0;
+  /** Modern 合成网格：搜索栏 + 焦点配方材料格（1.4.5 CraftingGrid 语义） */
+  private craftSearchEl: HTMLInputElement | null = null;
+  private craftGridEl: HTMLElement | null = null;
+  /** 材料格已存（原版 vid → 数量；焦点配方切换/关面板时归还背包） */
+  private craftGrid = new Map<number, number>();
+  private craftGridRecipe: VanillaRecipeLike | null = null;
   /** 原版配方列表（数据驱动 1456 全量；鱼眼缩放 = 100/(|Δ|+100) 下限 0.75，CraftingUI.cs:184-192 DOM 近似） */
   private refreshVanillaCrafting(): void {
     const game = this.game;
     if (!game || !this.craftListEl) return;
-    const avail = game.vanillaAvailableRecipes();
+    let avail = game.vanillaAvailableRecipes();
     if (!avail.length) return;
+    // 搜索过滤（Modern 网格搜索栏：按成品名过滤）
+    const q = this.craftSearchEl?.value.trim().toLowerCase() ?? '';
+    if (q) {
+      const filtered = avail.filter(({ r }) => {
+        const k = vanillaItemKey(r.create);
+        const name = k ? Lang.itemNameByKey(k) : '';
+        return name.toLowerCase().includes(q);
+      });
+      if (filtered.length) avail = filtered;
+    }
     const head = el('div', 'sw-lbl', '── 原版配方 ──');
     this.craftListEl.appendChild(head);
     const MAX_ROWS = 60; // 焦点 ±30（超出原版 middleY 视口即 alpha→0 :177）
@@ -1501,8 +1938,121 @@ export class UI {
         this.refreshAll();
       }, { passive: false });
     }
+    // Modern 合成网格材料格（焦点配方）
+    this.refreshCraftGrid(avail);
   }
   private _craftWheelBound = false;
+
+  /** 材料格覆盖计数：req（含组假 id）当前格内存量 */
+  private gridCovered(reqId: number): number {
+    if (reqId < 1000000) return this.craftGrid.get(reqId) ?? 0;
+    const items = RECIPE_GROUP_ITEMS[String(reqId - 1000000)] ?? [];
+    let n = 0;
+    for (const m of items) n += this.craftGrid.get(m) ?? 0;
+    return n;
+  }
+
+  /** 现代合成网格材料行（1.4.5 CraftingGrid：左键=放入/右键=取回/合成=格子优先） */
+  private refreshCraftGrid(avail: Array<{ r: VanillaRecipeLike; count: number }>): void {
+    if (!this.craftGridEl) return;
+    const focusR = avail[Math.min(this.craftFocus, avail.length - 1)]?.r ?? null;
+    // 焦点配方变更：归还旧格内容
+    if (focusR !== this.craftGridRecipe) {
+      this.returnCraftGrid();
+      this.craftGridRecipe = focusR;
+    }
+    this.craftGridEl.textContent = '';
+    if (!focusR) return;
+    for (const req of focusR.items) {
+      const chip = el('div', 'sw-slot');
+      chip.style.cssText += 'width:38px; height:38px;';
+      const k = ingredientKey(req.id < 1000000 ? req.id : (RECIPE_GROUP_ITEMS[String(reqIdShift(req.id))]?.[0] ?? req.id));
+      if (k) {
+        const img = el('img') as HTMLImageElement;
+        img.src = iconUrl(this.game, this.game.itemId(k));
+        chip.appendChild(img);
+      }
+      const have = this.gridCovered(req.id);
+      const cnt = el('span', 'cnt', `${have}/${req.stack}`);
+      if (have >= req.stack) cnt.style.color = '#7de08a';
+      chip.appendChild(cnt);
+      chip.title = `${k ? Lang.itemNameByKey(k) : req.id}（左键放入 / 右键取回）`;
+      chip.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        if (e.button === 2) { this.craftGridReturnReq(focusR, req.id); this.refreshAll(); return; }
+        this.craftGridDeposit(focusR, req.id);
+        this.refreshAll();
+      });
+      chip.addEventListener('contextmenu', (e) => e.preventDefault());
+      this.craftGridEl.appendChild(chip);
+    }
+    // 合成按钮（格子优先：格内材料齐备才可点）
+    const ready = focusR.items.every((req) => this.gridCovered(req.id) >= req.stack);
+    const btn = el('button', 'sw-btn', '⚒ 合成');
+    btn.style.cssText = `margin:0; padding:4px 10px; font-size:12px; ${ready ? '' : 'opacity:0.4;'}`;
+    if (ready) {
+      btn.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        // 扣格子材料（组假 id 依序扣组内成员）
+        for (const req of focusR.items) {
+          let need = req.stack;
+          const members = req.id >= 1000000 ? RECIPE_GROUP_ITEMS[String(reqIdShift(req.id))] ?? [] : [req.id];
+          for (const m of members) {
+            if (need <= 0) break;
+            const have = this.craftGrid.get(m) ?? 0;
+            const take = Math.min(have, need);
+            if (take > 0) { this.craftGrid.set(m, have - take); need -= take; }
+          }
+        }
+        this.game.vanillaCraftOutput(focusR);
+        this.refreshAll();
+      });
+    }
+    this.craftGridEl.appendChild(btn);
+  }
+
+  /** 材料格放入：从背包按缺口拉取（组材料依序拉组内成员） */
+  private craftGridDeposit(r: VanillaRecipeLike, reqId: number): void {
+    void r;
+    const req = (r.items.find((x) => x.id === reqId));
+    if (!req) return;
+    const need = req.stack - this.gridCovered(reqId);
+    if (need <= 0) return;
+    const members = reqId >= 1000000 ? RECIPE_GROUP_ITEMS[String(reqIdShift(reqId))] ?? [] : [reqId];
+    let left = need;
+    for (const m of members) {
+      if (left <= 0) break;
+      const iid = invIndexOfVanilla(m);
+      if (iid < 0) continue;
+      const take = Math.min(this.game.player.inv.countOf(iid), left);
+      if (take > 0) {
+        this.game.player.inv.remove(iid, take);
+        this.craftGrid.set(m, (this.craftGrid.get(m) ?? 0) + take);
+        left -= take;
+      }
+    }
+  }
+
+  /** 材料格单材料取回（格内该 req 的全部存量回背包） */
+  private craftGridReturnReq(r: VanillaRecipeLike, reqId: number): void {
+    void r;
+    const members = reqId >= 1000000 ? RECIPE_GROUP_ITEMS[String(reqIdShift(reqId))] ?? [] : [reqId];
+    for (const m of members) {
+      const n = this.craftGrid.get(m) ?? 0;
+      if (n > 0) { this.game.player.inv.add(invIndexOfVanilla(m), n); this.craftGrid.delete(m); }
+    }
+  }
+
+  /** 材料格全部归还背包（关背包/换焦点时） */
+  returnCraftGrid(): void {
+    for (const [vid, n] of this.craftGrid) {
+      if (n > 0) {
+        const iid = invIndexOfVanilla(vid);
+        if (iid >= 0) this.game?.player.inv.add(iid, n);
+      }
+    }
+    this.craftGrid.clear();
+  }
 
   // ============ Toast ============
 
@@ -1543,6 +2093,13 @@ export class UI {
     this.root.innerHTML = '';
     this.heldStack = null;
     this.openChest = null;
+    this.reforgeItem = null;
+    this.reforgeEl?.remove();
+    this.reforgeEl = null;
+    this.guideEl?.remove();
+    this.guideEl = null;
+    this.itemSearchEl?.remove();
+    this.itemSearchEl = null;
   }
 
   /** 初始化 HUD 相关面板（进入游戏后调用一次） */

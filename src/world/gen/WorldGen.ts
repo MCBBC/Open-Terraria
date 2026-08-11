@@ -43,46 +43,48 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     cfg,
   };
 
-  // 原版管线:TerrainPass(五特征随机走) + TileRunner 泥石/洞穴;其余 pass 沿用
-  // (lgcTerrain=false 走旧 fbm 地形作为回退开关)
-  const useVanillaTerrain = (cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain !== false;
+  // 单一 vanilla 管线。原 lgcTerrain=false 的 fbm 回退（terrainPass/cavePass/
+  // floatCleanupPass 分支）是无 UI 入口的死代码且 hellPass 处会空指针崩溃，已删除。
+  // pass 顺序对齐原版 AddGenerationPass 注册序（WorldGen.cs:11525-22660，
+  // 权威对照表见 docs/worldgen/vanilla-pass-alignment.md）：
+  //   地形1 洞穴(3/7-14e) 海滩(33/34) 生物群系(15-64) 矿石(27) 液体(31)
+  //   清理(37) 生命水晶(55) 半砖平滑(57) 瀑布(58) 地狱(31) 地狱屋(76 前段)
+  //   地狱箱(63 地狱段) 小屋+散箱(63) 瓦罐(75) 矿骨堆(81) 表面(77/86/90)
+  //   地表装饰(76 traps/85) 海滩装饰(56) 结构
   const passes: Pass[] = [
-    ...(useVanillaTerrain ? [
-      { name: '原版地形', run: vanillaTerrain },
-      { name: '洞穴', run: vanillaCaves },
-      { name: '海滩', run: vanillaBeaches },
-      { name: '生物群系', run: vanillaBiomes },
-    ] as Pass[] : [
-      { name: '地形', run: terrainPass },
-      { name: '洞穴', run: cavePass },
-    ]),
+    { name: '原版地形', run: vanillaTerrain },
+    { name: '洞穴', run: vanillaCaves },
+    { name: '海滩', run: vanillaBeaches },
+    { name: '生物群系', run: vanillaBiomes },
     // 原版注册序:Shinies(27) → Lakes(31) → Clean Up Dirt(37) → LifeCrystals(55)。
     // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮;
     // 清理(Clean Up Dirt)也须在矿石之后(原版 37>27,清理散块才知道哪些是散块)
     { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
-    ...(useVanillaTerrain ? [
-      { name: '清理', run: vanillaCleanup },
-      { name: '生命水晶', run: vanillaLifeCrystals },
-    ] as Pass[] : []),
-    ...(useVanillaTerrain ? [
-      // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
-      // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
-      { name: '半砖平滑', run: halfBrickSmoothPass },
-      { name: '瀑布唇缘', run: waterfallLipPass },
-    ] as Pass[] : []),
+    { name: '清理', run: vanillaCleanup },
+    { name: '生命水晶', run: vanillaLifeCrystals },
+    // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
+    // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
+    { name: '半砖平滑', run: halfBrickSmoothPass },
+    { name: '瀑布唇缘', run: waterfallLipPass },
     { name: '地狱', run: hellPass },
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [{ name: '清浮空', run: floatCleanupPass }] : []),
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地狱屋', run: vanillaHellHouses }]),
+    { name: '地狱屋', run: vanillaHellHouses },
     // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
     // 曾在生物群系 pass 里随洞穴箱一起放 → 被后续 hellPass 重写 100% 抹除
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地狱箱', run: underworldChestsPass }]),
+    { name: '地狱箱', run: underworldChestsPass },
+    // 地狱熔炉(原版 Hellforges,cs:18298:w/200 个,墙 13/14 门禁)
+    { name: '地狱熔炉', run: hellforgesPass },
+    // （原版管线地下小屋/散箱已由生物群系 pass 内的 CaveHousePass/BuriedChestsPass/
+    // SurfaceChestsPass 完整覆盖,legacy structurePass 已删除——再跑会双倍密度+空箱）
+    // 瓦罐（原版 pass 75 PotsGraveyardsAndBoulderPiles 位置：Hellforges 76 之前）
     { name: '瓦罐', run: potPass },
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '矿骨堆', run: pilesPass }]),
+    // 矿骨堆（原版 pass 81 Piles 位置）
+    { name: '矿骨堆', run: pilesPass },
+    // 表面（legacy 外壳：铺草=原版 pass 77 SpreadingGrass；内嵌 vanilla TreePass
+    // =原版 pass 82 Trees；杂草/花=原版 pass 86-90）
     { name: '表面', run: surfacePass },
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地表装饰', run: vanillaSurfaceDecor }]),
-    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '海滩装饰', run: vanillaBeachDecor }]),
-    ...(cfg.structures === false ? [] : [{ name: '结构', run: structurePass }]),
+    { name: '地表装饰', run: vanillaSurfaceDecor },
+    { name: '海滩装饰', run: vanillaBeachDecor },
   ];
 
   for (let i = 0; i < passes.length; i++) {
@@ -127,8 +129,12 @@ import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runSwordShrinePass } from './vanilla/SwordShrinePass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
+import { runStatuesPass } from './vanilla/StatuesPass';
+import { runJungleShrinePass, runJungleChestsPass } from './vanilla/JungleShrinePass';
+import { runCaveHousesPass } from './vanilla/CaveHousePass';
+import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCavesPass';
+import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
-import { placeDoorClosed } from '../Door';
 
 function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   const gs = newGenState(store.w, store.h);
@@ -265,7 +271,17 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
+  // 原版注册序:OceanCaves(15228) < JungleShrines(16059) < Statues(16952) <
+  // UndergroundHouses(17066:洞穴箱→地狱箱→小屋) < SurfaceChests(17232) <
+  // ChestsInJungleShrines(17308) < UnderwaterChests(17345)
+  const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
+  const shrineSpots = runJungleShrinePass(store, rng, gs);  // 丛林神龛(壳+腔+火把+金字塔顶)
+  runStatuesPass(store, rng, gs);                           // 雕像 73 序+陷阱雕像接线
   runBuriedChestsPass(store, rng, gs, world.chests); // 59 Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
+  runCaveHousesPass(store, rng, gs, world.chests);   // 地下小屋七主题(木/冰/丛林/沙/花岗岩/大理石/蘑菇)
+  runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
+  runJungleChestsPass(store, rng, gs, world.chests, shrineSpots); // 常春藤箱(神龛中心)
+  runUnderwaterChestsPass(store, rng, gs, world.chests, oceanTreasures); // 海洋洞窟水箱
   runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
   runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
   runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
@@ -318,6 +334,11 @@ function underworldChestsPass({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runUnderworldChestsPass(store, rng, gs, world.chests);
+}
+
+// 地狱熔炉(原版 Hellforges,cs:18298)
+function hellforgesPass({ store, rng }: GenCtx) {
+  runHellforgesPass(store, rng);
 }
 
 // 矿/骨堆(原版 pass 77 Piles,cs:18928:w*0.06 次尝试,洞穴地面放小堆 185/骨堆 186)
@@ -385,158 +406,6 @@ function nextFrame(): Promise<void> {
   return new Promise((r) => setTimeout(r, 0));
 }
 
-// ---------- 地形 ----------
-function terrainPass({ store, surface, rng, cfg, noise2D }: GenCtx) {
-  const { w, h } = store;
-  const base = Math.floor(h * 0.28);
-  // 多 octave 地表高度。平坦为主、偶发高峰：
-  // 大势噪声幂次塑形（|v|^1.8）——噪声近 0 的大片区域被压平成平原，
-  // 只有噪声较强处才隆起成峰；小起伏幅度减半避免处处尖刺
-  const o1 = createNoise1Dish(rng, 0.012);
-  const o2 = createNoise1Dish(rng, 0.05);
-  const o3 = createNoise1Dish(rng, 0.11);
-  for (let x = 0; x < w; x++) {
-    const hill = (x > w * 0.18 && x < w * 0.82) ? 1 : 1.6; // 边缘更陡（近似海崖）
-    const shape = (v: number, amp: number) => Math.sign(v) * Math.pow(Math.abs(v), 1.8) * amp;
-    surface[x] = base + (shape(o1(x), 30) + o2(x) * 5 + o3(x) * 2) * hill;
-  }
-  // 左右海洋：最外侧 6% 下挖成海盆（岸边浅、世界缘深），后续灌水铺沙
-  const oceanW = Math.max(24, Math.floor(w * 0.06));
-  const seaLevel = base + 4; // 海平面（水表高度）
-  for (let x = 0; x < w; x++) {
-    const edge = Math.min(x, w - 1 - x);
-    if (edge >= oceanW) continue;
-    const t = 1 - edge / oceanW; // 0 岸边 → 1 世界缘
-    const floorY = base + 2 + t * 16 + Math.sin(x * 0.3) * 1.5;
-    surface[x] = Math.max(surface[x], Math.max(seaLevel + 2, floorY));
-  }
-  const rockLevel = Math.floor(h * 0.33);
-  const nBlend = createNoise1Dish(rng, 0.05);
-  for (let x = 0; x < w; x++) {
-    const sy = Math.floor(surface[x]);
-    // 每列岩石线带噪声起伏（±8 格），形成犬牙交错的土石过渡带
-    const rl = rockLevel + nBlend(x) * 8;
-    for (let y = 0; y < h; y++) {
-      if (y < sy) continue;
-      let type: number = T.DIRT;
-      if (y >= rl) type = T.STONE;
-      else if (y > rl - 14) {
-        // 过渡带：噪声混入石块夹层
-        if (fbm(noise2D, x * 0.09, y * 0.09, 2) > 0.12) type = T.STONE;
-      }
-      store.setTileSilent(x, y, type);
-      // 自然墙：地下土/石区背景
-      if (y > sy + 3) store.setWallSilent(x, y, type === T.STONE ? W.STONE : W.DIRT);
-    }
-  }
-  // 海洋灌水 + 沙滩铺沙：海盆内从海平面灌满水；盆底与近岸滩涂表层铺沙
-  for (let x = 0; x < w; x++) {
-    const edge = Math.min(x, w - 1 - x);
-    const sy = Math.floor(surface[x]);
-    if (edge < oceanW) {
-      for (let y = seaLevel; y < sy; y++) store.setLiquid(x, y, 255, 1);
-      for (let y = sy; y < sy + 5 && y < store.h; y++) {
-        const t = store.get(x, y);
-        if (t === T.DIRT || t === T.GRASS) store.setTileSilent(x, y, T.SAND);
-      }
-    } else if (edge < oceanW + 8 && surface[x] >= seaLevel - 1) {
-      // 近岸滩涂：海平面附近的陆地表面沙化过渡
-      for (let y = sy; y < sy + 4 && y < store.h; y++) {
-        const t = store.get(x, y);
-        if (t === T.DIRT || t === T.GRASS) store.setTileSilent(x, y, T.SAND);
-      }
-    }
-    // 沙漠地下层：海洋区沙层之下换沙岩/硬化沙（5-14 格深处随机夹层）
-    if (edge < oceanW) {
-      const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
-      for (let y = sy + 5; y < sy + 14 && y < store.h; y++) {
-        const t = store.get(x, y);
-        if ((t === T.DIRT || t === T.STONE) && rng.next() < 0.45) {
-          store.setTileSilent(x, y, y < sy + 9 ? SANDSTONE : HARDSAND);
-        }
-      }
-    }
-  }
-  // 雪原带：随机一侧的 10%-24% 区间 —— 地表雪化 + 浅层冰夹层（无树：surfacePass 只在草上种树）
-  {
-    const ICE = TILE_BY_KEY['ice']!;
-    const snowLeft = rng.next() < 0.5;
-    const xs0 = snowLeft ? Math.floor(w * 0.10) : Math.floor(w * 0.76);
-    const xs1 = snowLeft ? Math.floor(w * 0.24) : Math.floor(w * 0.90);
-    for (let x = xs0; x <= xs1; x++) {
-      const sy = Math.floor(surface[x]);
-      for (let y = sy; y < sy + 4 && y < store.h; y++) {
-        const t = store.get(x, y);
-        if (t === T.GRASS || t === T.DIRT) store.setTileSilent(x, y, T.SNOW);
-      }
-      for (let y = sy + 4; y < sy + 12 && y < store.h; y++) {
-        if (store.get(x, y) === T.DIRT && rng.next() < 0.45) store.setTileSilent(x, y, ICE);
-      }
-    }
-  }
-  // 世界最底部 3 行基岩（不可破坏 → 用 STONE 代替，破坏规则由硬度统一处理，简化）
-}
-
-// 伪 1D 噪声：借用 2D 噪声 y=0
-function createNoise1Dish(rng: RNG, freq: number) {
-  const n = createNoise2D(() => rng.next());
-  return (x: number) => n(x * freq, 0);
-}
-
-// ---------- 洞穴 ----------
-function cavePass({ store, surface, noise2D, rng, cfg }: GenCtx) {
-  const { w, h } = store;
-  // 1) 噪声挖空（海洋列跳过：保护海床，防止海水灌进洞穴系统）
-  const caveOceanW = Math.max(24, Math.floor(w * 0.06)) + 2;
-  for (let x = 0; x < w; x++) {
-    if (Math.min(x, w - 1 - x) < caveOceanW) continue;
-    const sy = surface[x];
-    for (let y = Math.floor(sy) + 6; y < h - 3; y++) {
-      const depth = (y - sy) / (h - sy);
-      const threshold = 0.30 - depth * 0.06; // 越深洞越多
-      const v = fbm(noise2D, x * 0.028, y * 0.028, 3);
-      if (v > threshold) store.setTileSilent(x, y, 0);
-    }
-  }
-  // 2) 蠕虫隧道（连通大洞穴）
-  const worms = 16 + Math.floor(rng.range(0, 8));
-  for (let i = 0; i < worms; i++) {
-    let wx = rng.range(w * 0.08, w * 0.92);
-    let wy = rng.range(h * 0.35, h * 0.92);
-    let angle = rng.range(0, Math.PI * 2);
-    const len = rng.int(60, 200);
-    for (let s = 0; s < len; s++) {
-      angle += (noise2D(s * 0.05, i * 10) * 0.6 + rng.range(-0.3, 0.3));
-      wx += Math.cos(angle) * 1.2;
-      wy += Math.sin(angle) * 0.8;
-      if (wx < 4 || wx > w - 5 || wy < h * 0.25 || wy > h - 6) break;
-      const r = 2.2 + noise2D(s * 0.03, i * 5) * 1.8;
-      carveCircle(store, wx, wy, Math.max(1.2, r));
-    }
-  }
-}
-
-function carveCircle(store: GenCtx['store'], cx: number, cy: number, r: number) {
-  const x0 = Math.floor(cx - r), x1 = Math.ceil(cx + r);
-  const y0 = Math.floor(cy - r), y1 = Math.ceil(cy + r);
-  for (let x = x0; x <= x1; x++) {
-    for (let y = y0; y <= y1; y++) {
-      if (!store.inBounds(x, y)) continue;
-      const dx = x - cx, dy = y - cy;
-      if (dx * dx + dy * dy <= r * r) store.setTileSilent(x, y, 0);
-    }
-  }
-}
-
-function fbm(n2: (x: number, y: number) => number, x: number, y: number, oct: number): number {
-  let v = 0, amp = 1, freq = 1, norm = 0;
-  for (let i = 0; i < oct; i++) {
-    v += n2(x * freq, y * freq) * amp;
-    norm += amp;
-    amp *= 0.5; freq *= 2;
-  }
-  return v / norm; // -1..1
-}
 
 // ---------- 地狱层(原版 Underworld pass,L5952,完整) ----------
 // 1) 边界随机走(h-190..h-160),界上~20格灰烬,界下清空;
@@ -635,29 +504,6 @@ function tileRunnerHell(st: World['store'], rng: RNG, gs: GenState, i: number, j
   });
 }
 
-// ---------- 浮空方块清理 ----------
-// 迭代剥离无支撑的孤立土/石块（下方三格全空且左右也空 → 移除），重复数次处理小簇
-function floatCleanupPass({ store, surface }: GenCtx) {
-  const st = store;
-  for (let iter = 0; iter < 4; iter++) {
-    let removed = 0;
-    for (let x = 2; x < st.w - 2; x++) {
-      const surfY = Math.floor(surface[x]);
-      for (let y = surfY + 2; y < st.h - 2; y++) {
-        const t = st.get(x, y);
-        if (t !== T.DIRT && t !== T.STONE && t !== T.GRASS) continue;
-        const below = st.isSolid(x, y + 1) || st.isSolid(x - 1, y + 1) || st.isSolid(x + 1, y + 1);
-        const beside = st.isSolid(x - 1, y) || st.isSolid(x + 1, y);
-        const above = st.isSolid(x, y - 1);
-        if (!below && !beside && !above) {
-          st.setTileSilent(x, y, 0);
-          removed++;
-        }
-      }
-    }
-    if (removed === 0) break;
-  }
-}
 
 // ---------- 瓦罐散布 ----------
 function potPass({ store, surface, rng }: GenCtx) {
@@ -826,71 +672,9 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
 }
 
 // ---------- 结构（地下小屋 + 宝箱） ----------
-function placeChest(store: GenCtx['store'], x: number, y: number) {
-  // 2×2 宝箱 object（锚点在左上）
-  store.setTileSilent(x, y, T.CHEST, 0, 0);
-  store.setTileSilent(x + 1, y, T.CHEST, 1, 0);
-  store.setTileSilent(x, y + 1, T.CHEST, 0, 1);
-  store.setTileSilent(x + 1, y + 1, T.CHEST, 1, 1);
-}
-
-function structurePass({ store, surface, rng, world }: GenCtx) {
-  const { w, h } = store;
-  // 地下小屋数量:对齐原版 CaveHouseCount 35-40 × WorldArea/5040000(Configuration.json
-  // ScaleWith:WorldArea)。旧值写死 4 → 小世界即差 10 倍(中/大差更多)
-  const hutCount = Math.max(4, Math.round(rng.int(35, 40) * (w * h) / 5040000));
-  for (let i = 0; i < hutCount; i++) {
-    const hx = rng.int(20, w - 30);
-    const hy = rng.int(Math.floor(h * 0.45), h - 40);
-    buildHut(store, hx, hy, rng);
-    // 小屋中心宝箱（坐在地板上：地板在 hy+6）
-    placeChest(store, hx + 4, hy + 4);
-    world.chests.push({ x: hx + 4, y: hy + 4, items: Array(10).fill(null) });
-  }
-  // 地表/浅层散落宝箱
-  for (let i = 0; i < 8; i++) {
-    const cx = rng.int(10, w - 12);
-    // 放在洞穴空地的地上（需要 2×2 空间）
-    for (let y = Math.floor(surface[cx]) + 8; y < h - 10; y++) {
-      const clear =
-        !store.isActive(cx, y) && !store.isActive(cx + 1, y) &&
-        !store.isActive(cx, y - 1) && !store.isActive(cx + 1, y - 1) &&
-        !store.isActive(cx, y + 1) && !store.isActive(cx + 1, y + 1);
-      if (clear && store.isSolid(cx, y + 2) && store.isSolid(cx + 1, y + 2)) {
-        placeChest(store, cx, y);
-        world.chests.push({ x: cx, y, items: Array(10).fill(null) });
-        break;
-      }
-    }
-  }
-}
-
-function buildHut(store: GenCtx['store'], hx: number, hy: number, rng: RNG) {
-  const rw = 9, rh = 6;
-  // 清空内部
-  for (let x = hx; x < hx + rw; x++) {
-    for (let y = hy; y < hy + rh; y++) {
-      store.setTileSilent(x, y, 0);
-      store.setWallSilent(x, y, W.WOOD);
-    }
-  }
-  // 地板与墙
-  for (let x = hx - 1; x <= hx + rw; x++) {
-    store.setTileSilent(x, hy + rh, T.WOOD);
-    store.setTileSilent(x, hy - 1, T.WOOD);
-  }
-  for (let y = hy; y <= hy + rh; y++) {
-    store.setTileSilent(hx - 1, y, T.WOOD);
-    store.setTileSilent(hx + rw, y, T.WOOD);
-  }
-  // 门洞（左侧地板上方 3 格）
-  for (let y = hy + rh - 3; y < hy + rh; y++) store.setTileSilent(hx - 1, y, 0);
-  placeDoorClosed(store, hx - 1, hy + rh - 3, 0);
-  // 内部陈设
-  store.setTileSilent(hx + 1, hy + rh - 1, T.WORKBENCH, 0, 0);
-  store.setTileSilent(hx + 3, hy + rh - 1, T.TORCH, 0, 0);
-  if (rng.chance(0.5)) store.setTileSilent(hx + 5, hy + rh - 1, T.FURNACE, 0, 0);
-}
+// 已删除:legacy structurePass/buildHut/placeChest。原版管线下 CaveHousePass(七主题
+// 地下小屋)/BuriedChestsPass/SurfaceChestsPass/UnderwaterChestsPass 在生物群系 pass 内
+// 完整覆盖(见 vanillaBiomes),legacy 版会造成双倍密度+索引帧宝箱(已修的 bug 源)。
 
 // ---------- 收尾：出生点（选最平坦区域并整平） ----------
 function finalize({ store, surface, world, cfg, rng }: GenCtx) {

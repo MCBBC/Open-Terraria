@@ -13,6 +13,10 @@ export abstract class Entity {
   hitWall = false;
   hitHead = false;
   dropThrough = false;
+  // ---- 联机傀儡标记（v3 实体同步）：快照驱动实体，本地不跑 AI/命中判定 ----
+  netPuppet = false;
+  /** 联机实体号（拥有者 slot 高 8 位 + 本地 id 低 24 位；见 net/entitySyncHooks） */
+  netId = 0;
 
   abstract fixedUpdate(dt: number, game: GameHooks): void;
   abstract draw(r: Renderer, cam: Camera): void;

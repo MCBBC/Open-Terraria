@@ -4,7 +4,7 @@
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close';
 
 export interface ShopEntry {
   /** 本仓库 item key(vi_ 系) */

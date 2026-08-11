@@ -87,6 +87,12 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
     const phase = (e.walkCycleT + Math.abs(e.vx) * 8) % 32; // 每 tick +|vx|，32 一循环
     return phase < 8 ? 0 : phase < 16 ? 1 : phase < 24 ? 2 : 1;
   }
+  // 栖息态 NPC（秃鹫 61 cs:24082 ai[0]=0 栖息 / 宝箱怪 85 族 cs:25645 ai[0]=0 伪装）：
+  // 静止帧 0；激活后从帧 1 起循环
+  if (ai === 17 || ai === 25) {
+    if ((e as Enemy & { ai0: number }).ai0 === 0) return 0;
+    return frames > 1 ? 1 + Math.floor(t / 8) % (frames - 1) : 0;
+  }
   // 爬墙蜘蛛族（FindFrame case 165/237/238/240/531, cs:73795-73817）：
   // frameCounter += (|vx|+|vy|)×0.5（531 ×0.4），24 一循环 4 帧
   if (ai === 40) {
@@ -867,6 +873,8 @@ export class Renderer {
         else if (e.vanilla?.aiStyle === 5) ctx.rotate(e.visAngle); // AI_005 蜂群族:cs:51022 朝速度方向转头
         else if (e.vanilla?.aiStyle === 6) ctx.rotate(e.visAngle); // AI_006 蠕虫族:cs:51500 段随链方向旋转(贴图正面朝上,+π/2)
         else if (e.vanilla?.aiStyle === 40) ctx.rotate(e.visAngle); // AI_040 爬墙蜘蛛:npc.rotation 随移动/期望速度角(cs:29865/29919),531 +π/2
+        else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)
+        else if (e.vanilla?.aiStyle === 56) ctx.rotate(e.visAngle); // AI_056 地牢之魂:rotation=atan2(v)-π/2(cs:32927)
         else if (rotId) ctx.rotate(e.spin);
         const worm = e.vanilla?.aiStyle === 6; // 旋转态不再叠加朝向镜像(垂直对称段贴图)
         ctx.scale(scale, scale);

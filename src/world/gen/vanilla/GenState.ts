@@ -49,6 +49,12 @@ export interface GenState {
   // 结构候选（由早期 pass 排队、后期 pass 消费）
   pyramidSpots: Array<{ x: number; y: number }>;
   floatingIslands: Array<{ x: number; y: number; style: number; isLake: boolean }>;
+
+  // 宝箱战利品序（AddBuriedChest 全局态,cs:11262/36165/10130）
+  hellChestItems: number[] | null; // 每世界乱序 [274,220,112,218,3019]（首只地狱箱时掷）
+  hellChestIdx: number;            // 地狱箱主件序游标（成功一只 +1,循环）
+  jungleItemIdx: number;           // 常春藤箱主件序游标（JungleItemCount）
+  gennedMahoganyWands: boolean;    // 活桃花心木法杖对已给过标记（GenVars.gennedLivingMahoganyWands）
 }
 
 export function newGenState(w: number, h: number): GenState {
@@ -70,5 +76,6 @@ export function newGenState(w: number, h: number): GenState {
     undergroundDesert: null,
     pyramidSpots: [],
     floatingIslands: [],
+    hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
   };
 }
