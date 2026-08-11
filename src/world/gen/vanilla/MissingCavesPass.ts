@@ -6,6 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { tileRunner } from './TileRunner';
+import { T } from '../../../data/tiles';
 
 /** SandPatches（cs:11712-11737）：地下沙团（tile 53）。中心避开出生点 ±4-6% 且
  *  y < worldSurface+150 的浅层（拒绝采样）——沙漠雏形之一。 */
@@ -21,7 +22,8 @@ export function runSandPatchesPass(st: TileStore, rng: RNG, gs: GenState): void 
     }
     const num4 = rng.nextIntRange(15, 70);
     const steps = rng.nextIntRange(20, 130);
-    tileRunner(st, rng, gs, num2, num3, { strength: num4, steps, type: 53 });
+    // ★type 是本仓库内部 id（原版 53 沙 = T.SAND；曾直传 53 = 内部表恰好沙漠化石!）
+    tileRunner(st, rng, gs, num2, num3, { strength: num4, steps, type: T.SAND });
   }
 }
 
@@ -54,12 +56,13 @@ export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
     gs.tunnelX[gs.numTunnels] = array[5];
     gs.numTunnels++;
     for (let l = 0; l < 10; l++) {
+      // 原版 type 0 = 泥土 = 本仓库 T.DIRT（内部 0 是空气!）
       tileRunner(st, rng, gs, array[l], array2[l], {
-        strength: rng.nextIntRange(5, 8), steps: rng.nextIntRange(6, 9), type: 0,
+        strength: rng.nextIntRange(5, 8), steps: rng.nextIntRange(6, 9), type: T.DIRT,
         addTile: true, speedX: -2, speedY: -0.3,
       });
       tileRunner(st, rng, gs, array[l], array2[l], {
-        strength: rng.nextIntRange(5, 8), steps: rng.nextIntRange(6, 9), type: 0,
+        strength: rng.nextIntRange(5, 8), steps: rng.nextIntRange(6, 9), type: T.DIRT,
         addTile: true, speedX: 2, speedY: -0.3,
       });
     }

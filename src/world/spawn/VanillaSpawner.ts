@@ -855,8 +855,17 @@ export class VanillaSpawner {
         if (N(7)) variant = rng.int(0, 3);
         // 未杀骷髅王（flag12）→ 地牢守卫 68（9999 伤，1:1 原版劝退机制）
         if (!this.downedBoss3) return D(68);
-        // L2559 机械师(124)：savedMech/AnyNPCs 未实现，暂缺
-        // hardDungeon(hardMode && downedPlantBoss) 分支省略（无此旗标系统）
+        // L2562 机械师(123)：1/5，未救出+场内唯一+深层门（(ws*4+rl)/5）
+        const hardDungeon = this.hardMode && !!this.world.flags['downed_262']; // downedPlantBoss（世花 262，Game 击杀通用置位链 downed_{id}）
+        if (this.downedBoss3 && N(5) && !this.waterTile && !any(123)
+          && this.spawnTileY > (this.world.groundLevel * 4 + this.world.rockLevel) / 5) {
+          return D(123);
+        }
+        // L2570-2585 hardDungeon（hardMode && downedPlantBoss）：1/30 技师 287 + 各墙变体 1/15
+        if (hardDungeon && N(30)) return D(287);
+        if (hardDungeon && variant === 0 && N(15)) return D(293);
+        if (hardDungeon && variant === 1 && N(15)) return D(291);
+        if (hardDungeon && variant === 2 && N(15)) return D(292);
         if (N(35)) return D(71);   // 地牢史莱姆
         if (variant === 1 && N(3)) return D(70);   // 火轮
         if (variant === 2 && N(5)) return D(72);   // 刺球
@@ -969,11 +978,11 @@ export class VanillaSpawner {
     const hallowFloor = t === T.PEARLSAND || t === T.PEARLSTONE_BLOCK
       || t === T.HALLOW_GRASS || t === T.HOLLOW_ICE;
     // L3946：hard && underGround && !waterTile && 神圣 tile →
-    //  雨天 Enchanted Nightcrawler 244（唯一）/ 夜 毒气鼻涕虫 122 / 1/10 妖精 86 / 兜底 75
-    //  （L3949 downedPlantBoss→661 Empress蝶：661 数据条已在 vanilla-npcs.json，
-    //   但 world.flags 尚无 downedPlantBoss 旗标，分支仍未接）
+    //  雨天 Enchanted Nightcrawler 244（唯一）/ 夜 毒气鼻涕虫 122 / 1/10 妖精 86 /
+    //  downedPlantBoss（=flags['downed_262']，Game 击杀通用置位链）→ 661 蝶 / 兜底 75
     if (hardMode && this.underGround && !this.waterTile && hallowFloor) {
       if (this.world.weather.raining && !any(244) && N(10)) return D(244);
+      if (this.world.flags['downed_262'] && N(10)) return D(661);
       if (!this.dayTime && N(2)) return D(122);
       if (N(10)) return D(86);
       return D(75);

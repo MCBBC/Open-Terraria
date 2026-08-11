@@ -18,6 +18,7 @@ const int BEACH_DISTANCE = 380; // WorldGen.beachDistance（cs:4102）
 var asm = Assembly.LoadFrom("/Users/vinlic/Library/Application Support/Steam/steamapps/common/Terraria/Terraria.app/Contents/Resources/Terraria.exe");
 dynamic r = Activator.CreateInstance(asm.GetType("Terraria.Utilities.UnifiedRandom")!, seed)!;
 
+
 // ---- 网格（vanilla tile id；行主序 y*W+x，同 JS TileStore）----
 var act = new byte[W * H];
 var typ = new ushort[W * H];
@@ -26,10 +27,17 @@ var liq = new byte[W * H];
 var liqT = new byte[W * H];
 var checkpoints = new List<string>();
 
-static uint Fnv16(ushort[] a) { uint h = 0x811c9dc5; foreach (var v in a) { h = (h ^ (uint)(v & 0xff)) * 16777619u; h = (h ^ (uint)((v >> 8) & 0xff)) * 16777619u; } return h; }
+static byte[] ToBytes(ushort[] a) { var b = new byte[a.Length * 2]; Buffer.BlockCopy(a, 0, b, 0, b.Length); return b; }
+uint Fnv16(ushort[] a) { uint h = 0x811c9dc5; foreach (var v in a) { h = (h ^ (uint)(v & 0xff)) * 16777619u; h = (h ^ (uint)((v >> 8) & 0xff)) * 16777619u; } return h; }
 static uint Fnv8(byte[] a) { uint h = 0x811c9dc5; foreach (var v in a) { h = (h ^ v) * 16777619u; h = h * 16777619u; } return h; }
-void Checkpoint(string name) =>
-    checkpoints.Add($"{name}|{Fnv16(typ):x8} {Fnv8(act):x8} {Fnv16(wal):x8} {Fnv8(liq):x8}");
+// 只比活性 type（非活性格的幽灵 type 归零——与 JS 侧 hashGrids 口径一致；
+// 幽灵 parity 是独立对账项：原版幽灵会存盘、我们 finalize 清除，玩法无差）
+var hashTyp = new ushort[W * H];
+void Checkpoint(string name)
+{
+    for (int i = 0; i < typ.Length; i++) hashTyp[i] = (ushort)(act[i] != 0 ? typ[i] : 0);
+    checkpoints.Add($"{name}|{Fnv16(hashTyp):x8} {Fnv8(act):x8} {Fnv16(wal):x8} {Fnv8(liq):x8}");
+}
 
 // CanBeClearedDuringGeneration = false 全集（TileID.cs:321）
 var NOT_CLEAR = new HashSet<ushort> { 396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237 };
@@ -374,6 +382,7 @@ void Caverer(int X, int Y)
     return (dx, dy);
 }
 
+int mountRolls = 0;
 void Mountinater(int i, int j)
 {
     double num = (int)r.Next(80, 120);
@@ -662,7 +671,9 @@ Checkpoint("tunnels");
         {
             done = true;
             while (num3 > W / 2 - 90 && num3 < W / 2 + 90)
+            {
                 num3 = (int)r.Next((int)(W * 0.25), (int)(W * 0.75));
+            }
             for (int j = 0; j < mCaveX.Count; j++)
             {
                 if (Math.Abs(num3 - mCaveX[j]) < 100) { tries++; done = false; break; }
@@ -713,12 +724,18 @@ Checkpoint("mountaincaves");
 Checkpoint("dirtwallbg");
 
 // ================= Pass 7-9：RocksInDirt / DirtInRocks / Clay（cs:11922-12033）=================
+int oreCalls = 0;
 void OreBand(double count, int yMin, int yMax, int type, int sMin, int sMax, int stMin, int stMax)
 {
     for (int n = 0; n < count; n++)
-        TileRunner((int)r.Next(0, W), (int)r.Next(Math.Max(0, yMin), Math.Min(H - 1, yMax) + 1), (int)r.Next(sMin, sMax + 1), (int)r.Next(stMin, stMax + 1), type);
+    {
+        int rx = (int)r.Next(0, W), ry = (int)r.Next(Math.Max(0, yMin), Math.Min(H - 1, yMax) + 1);
+        int rs = (int)r.Next(sMin, sMax + 1), rt = (int)r.Next(stMin, stMax + 1);
+        oreCalls++;
+        TileRunner(rx, ry, rs, rt, type);
+    }
 }
-OreBand(W * H * 0.00015, 0, (int)gvWorldSurfaceLow - 1, 1, 4, 14, 5, 39);
+OreBand(W * H * 0.00015, 0, (int)gvWorldSurfaceLow, 1, 4, 14, 5, 39); // Next(0,(int)WSL+1)
 {
     double num = W * H * 0.0002;
     for (int n = 0; n < num; n++)
@@ -746,6 +763,8 @@ for (int x = 5; x < W - 5; x++)
         break;
     }
 }
+File.WriteAllBytes("/tmp/cs-typ2.bin", ToBytes(typ));
+File.WriteAllBytes("/tmp/cs-act2.bin", act);
 Checkpoint("rocksclay");
 
 // ================= Pass 10：SmallHoles（cs:12034-12092）=================

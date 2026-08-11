@@ -825,6 +825,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
   const liquidArr = new Uint8Array(n);
   const liquidTypeArr = new Uint8Array(n);
   const wireArr = new Uint8Array(n);
+  const halfArr = new Uint8Array(n);
+  const slopeArr = new Uint8Array(n);
 
   const chestAt = new Map<string, { x: number; y: number }>();
   for (const c of wld.chests) chestAt.set(`${c.x},${c.y}`, c);
@@ -873,6 +875,8 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (lq > 0) liquidTypeArr[i] = wld.tiles.liquidType[i] || 1;
     // 电路位直拷（parser 已从 header2 提取 bit0-5）
     wireArr[i] = wld.tiles.wire[i];
+    if (wld.tiles.half) halfArr[i] = wld.tiles.half[i];
+    if (wld.tiles.slope) slopeArr[i] = wld.tiles.slope[i];
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 
@@ -948,6 +952,7 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     liquid: bytesToB64(rlePairs(liquidArr)),
     liquidType: bytesToB64(rlePairs(liquidTypeArr)),
     wire: bytesToB64(rlePairs(wireArr)),
+    blocks: bytesToB64(rlePairs(combineHalfSlope(halfArr, slopeArr))),
     chests,
     player: {
       hp: 100,
@@ -988,3 +993,12 @@ import vanillaJson from '../../public/sprites/vanilla.json';
 const vanillaData = vanillaJson as unknown as { tileNames?: Record<string, string>; itemNames?: Record<string, string> };
 const vanillaTileNames = vanillaData.tileNames ?? {};
 const vanillaItemNames = vanillaData.itemNames ?? {};
+
+/** half + slope → blockType 单字节(原版 Tile.blockType 编码) */
+function combineHalfSlope(half: Uint8Array, slope: Uint8Array): Uint8Array {
+  const out = new Uint8Array(half.length);
+  for (let i = 0; i < half.length; i++) {
+    out[i] = half[i] ? 1 : (slope[i] >= 1 && slope[i] <= 4 ? slope[i] + 1 : 0);
+  }
+  return out;
+}

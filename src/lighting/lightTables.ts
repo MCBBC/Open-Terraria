@@ -2,13 +2,45 @@
 // 行号注释指向原版源码;所有颜色为 0-1 浮点 RGB。
 
 // ---- 传播衰减(LightMap.cs:47-58 默认值 / LightingEngine.cs:137-202 每帧覆盖) ----
-export const DECAY_AIR = 0.91;
-export const DECAY_SOLID = 0.56;
+// let + setter:LightingEngine.UpdateLightDecay 每帧按 waterStyle/夜枭覆盖(ESM live binding,
+// LightMap 读到的即最新值)。基线:air 0.91 / solid 0.56 / honey (0.75,0.7,0.6)×0.91。
+const NIGHT_VISION_MUL = 1.03;   // 夜枭 buff(UpdateLightDecay :184-187)
+let nightVision = false;
+export let DECAY_AIR = 0.91;
+export let DECAY_SOLID = 0.56;
 export const DECAY_CRACKED = 0.80;
-/** 水衰减(waterStyle 0/1/7/8 基准;按通道分色——水下光偏蓝的来源) */
-export const DECAY_WATER: [number, number, number] = [0.88 * 0.91, 0.96 * 0.91, 1.015 * 0.91];
+/** 水衰减(按群系水色分 13 种,LightingEngine.cs:143-180;默认 0/1/7/8 基准) */
+export let DECAY_WATER: [number, number, number] = [0.88 * 0.91, 0.96 * 0.91, 1.015 * 0.91];
 /** 蜂蜜衰减 */
 export const DECAY_HONEY: [number, number, number] = [0.75 * 0.91, 0.70 * 0.91, 0.60 * 0.91];
+
+/** LightingEngine.UpdateLightDecay :143-180 全表(每 waterStyle 的 RGB 水下衰减) */
+const WATER_DECAY_BY_STYLE: Array<[number, number, number]> = [
+  [0.88, 0.96, 1.015],  // 0 纯净(1 岩浆/7 地下/8 洞穴同)
+  [0.88, 0.96, 1.015],  // 1 岩浆水域(原版同 case)
+  [0.94, 0.85, 1.01],   // 2 腐化
+  [0.84, 0.95, 1.015],  // 3 丛林
+  [0.9, 0.86, 1.01],    // 4 神圣
+  [0.84, 0.99, 1.01],   // 5 雪原
+  [0.83, 0.93, 0.98],   // 6 沙漠
+  [0.88, 0.96, 1.015],  // 7 地下
+  [0.88, 0.96, 1.015],  // 8 洞穴
+  [1.0, 0.88, 0.84],    // 9 血月
+  [0.83, 1.0, 1.0],     // 10 猩红
+  [0.88, 0.96, 1.015],  // 11 蜂蜜(原版 switch 无 11 → 保持基准)
+  [0.95, 0.98, 0.85],   // 12 地下沙漠
+  [0.9, 1.0, 1.02],     // 13 地狱
+];
+/** Game 每帧调用:按当前群系水色 + 夜枭更新衰减表(:137-187 主干) */
+export function updateLightDecay(waterStyle: number, nightVisionOn: boolean): void {
+  nightVision = nightVisionOn;
+  const base = WATER_DECAY_BY_STYLE[Math.max(0, Math.min(13, waterStyle))];
+  DECAY_WATER = [base[0] * 0.91, base[1] * 0.91, base[2] * 0.91];
+  DECAY_AIR = 0.91 * (nightVision ? NIGHT_VISION_MUL : 1);
+  DECAY_SOLID = 0.56 * (nightVision ? NIGHT_VISION_MUL : 1);
+  // 原版另有 blind ×0.95 / blackout ×0.85 / headcovered ×0.85 与
+  // SceneState.airLightDecay/solidLightDecay 调制——对应系统未实装,跳过
+}
 /** 通道熄灭阈值(LightMap.cs:132/148/164) */
 export const DEAD_THRESHOLD = 0.0185;
 /** 全局亮度(Lighting.cs:12-14) */

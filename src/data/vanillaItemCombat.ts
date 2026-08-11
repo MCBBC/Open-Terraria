@@ -40,7 +40,7 @@ export function viIdFromKey(key: string): number {
 }
 
 export type CombatWeapon =
-  | { kind: 'melee'; damage: number; knockback: number; useTime: number }
+  | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean }
   | {
       kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'magic' | 'shot';
       shoot: number;
@@ -91,8 +91,15 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base };
     return null;
   }
-  // 纯近战（剑等：melee 且非 noMelee；无 shootSpeed 语义）
-  if (c.melee && !c.noMelee) return { kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime };
+  // 纯近战（剑等：melee 且非 noMelee；无 shootSpeed 语义）。
+  // useAnimation=挥击动画时长 / useTime=复用冷却（Player.ItemCheck: itemAnimationMax 与 itemTime
+  // 分立，1790 件 vi 武器两者不同——只回传 useTime 会让挥速虚快）
+  if (c.melee && !c.noMelee) {
+    return {
+      kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime,
+      useAnimation: c.useAnimation ?? base.useTime, autoReuse: !!c.autoReuse,
+    };
+  }
   return null;
 }
 

@@ -71,6 +71,7 @@ export class SaveClient {
       frameX: st.frameX.buffer, frameY: st.frameY.buffer,
       wall: st.wall.buffer, liquid: st.liquid.buffer,
       liquidType: st.liquidType.buffer, wire: st.wire.buffer,
+      half: st.half.buffer, slope: st.slope.buffer,
     };
     const promise = new Promise<string>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

@@ -2,7 +2,7 @@
 export type ToolType = 'pick' | 'axe' | 'sword' | 'hammer';
 // Buff 类型（药水饮用后生效）
 export type PotionBuff = 'agility' | 'ironskin' | 'resistance' | 'thorns' | 'regen'
-  | 'obsidianSkin' | 'gills' | 'manaRegen' | 'magicPower' | 'featherfall' | 'waterWalking' | 'archery';
+  | 'obsidianSkin' | 'gills' | 'manaRegen' | 'magicPower' | 'featherfall' | 'waterWalking' | 'archery' | 'nightOwl';
 // 盔甲部位：0 头盔 1 胸甲 2 胫甲（与 Inventory.armorSlotReq 的格位对应）
 export type ArmorSlot = 0 | 1 | 2;
 
@@ -136,6 +136,8 @@ item({ key: 'water_walking_potion', name: '水上行走药水', maxStack: 30, de
   potion: { buff: 'waterWalking', duration: 600, isHealType: false } });   // 36000t
 item({ key: 'archery_potion', name: '射手药水', maxStack: 30, desc: '箭伤害 ×1.1，持续 8 分钟',
   potion: { buff: 'archery', duration: 480, isHealType: false } });        // 28800t
+item({ key: 'night_owl_potion', name: '夜枭药水', maxStack: 30, desc: '改善黑暗与水下视觉，持续 10 分钟',
+  potion: { buff: 'nightOwl', duration: 600, isHealType: false } });       // 36000t(Item 299→buff 12)
 
 // ---- 配饰（移植自 Maples Accessory）----
 item({ key: 'lucky_horseshoe', name: '幸运马掌', maxStack: 1, accessory: 'lucky_horseshoe',
@@ -922,6 +924,7 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'obsidian_skin_potion': 10494, 'gills_potion': 10495, 'mana_regen_potion': 10496,
   'magic_power_potion': 10497, 'featherfall_potion': 10498, 'water_walking_potion': 10499,
   'archery_potion': 10500,
+  'night_owl_potion': 10501,
 };
 
 // ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取，124 项）：

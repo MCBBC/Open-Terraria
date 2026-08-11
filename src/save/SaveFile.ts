@@ -37,6 +37,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
+    half: st.half, slope: st.slope,
   };
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
@@ -161,6 +162,20 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
       const run = readVarint(u8, pos) + 1;
       const v = readVarint(u8, pos);
       for (let k = 0; k < run && i < st.wire.length; k++, i++) st.wire[i] = v;
+    }
+  }
+  // half/slope(旧存档缺 → 全整砖;v3+ 语义)
+  {
+    const u8 = b64ToBytes(data.blocks ?? '');
+    const pos = { i: 0 };
+    let i = 0;
+    while (i < st.half.length && pos.i < u8.length) {
+      const run = readVarint(u8, pos) + 1;
+      const v = readVarint(u8, pos);
+      for (let k = 0; k < run && i < st.half.length; k++, i++) {
+        st.half[i] = v === 1 ? 1 : 0;
+        st.slope[i] = v >= 2 && v <= 5 ? v - 1 : 0;
+      }
     }
   }
   // liquid type（旧存档缺此字段 → 全 0，由液体模拟按 1=水 补全）

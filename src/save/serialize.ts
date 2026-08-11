@@ -66,8 +66,9 @@ export interface SaveData {
   tiles: string;   // base64 RLE
   walls: string;
   liquid: string;
-  liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜）
+  liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜 4微光）
   wire?: string;       // base64 RLE 电路位（bit0-3 四色线 bit4 致动器 bit5 已致动；旧档缺此字段=全 0）
+  blocks?: string;     // base64 RLE 半砖/坡面（0=整砖 1=半砖 2-5=slope1-4;旧档缺=全整砖）
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
   player: {
     hp: number; x: number; y: number;
@@ -106,6 +107,7 @@ export interface SaveStoreView {
   type: Uint16Array; flags: Uint8Array;
   frameX: Uint16Array; frameY: Uint16Array;
   wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; wire: Uint8Array;
+  half: Uint8Array; slope: Uint8Array;
 }
 /** 序列化所需的世界元数据(全部可结构化克隆) */
 export interface SaveMeta {
@@ -191,6 +193,7 @@ export function serializeSave(
     liquid: bytesToB64(rlePairs(st.liquid)),
     liquidType: bytesToB64(rlePairs(st.liquidType)),
     wire: bytesToB64(rlePairs(st.wire)),
+    blocks: bytesToB64(rlePairs(combineBlocks(st.half, st.slope))),
     chests: meta.chests.map((c) => ({ x: c.x, y: c.y, items: c.items.map(mapItem) })),
     player: { ...player, inventory: player.inventory.map(mapItem), banks: player.banks?.map((b) => b.map(mapItem)) },
     npcs: [],
@@ -200,4 +203,13 @@ export function serializeSave(
     idScheme: 'sheet',
   };
   return JSON.stringify(data);
+}
+
+/** half + slope → 单字节 blockType(原版 Tile.blockType: 0=整砖 1=半砖 2-5=slope1-4) */
+function combineBlocks(half: Uint8Array, slope: Uint8Array): Uint8Array {
+  const out = new Uint8Array(half.length);
+  for (let i = 0; i < half.length; i++) {
+    out[i] = half[i] ? 1 : (slope[i] >= 1 && slope[i] <= 4 ? slope[i] + 1 : 0);
+  }
+  return out;
 }

@@ -11,7 +11,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 
-const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜
+const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜（微光 vt=3 走 ?? 3 兜底——原版微光无瀑布拖尾分支，DrawShimmer 单独绘制）
 const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
                                           // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150);
                                           // 微光 = DrawShimmer val×0.75（LiquidRenderer.cs:700）
@@ -195,6 +195,14 @@ export function drawVanillaLiquids(
       hasBE[i] = (!hasVisA[di] && !isSolidA[di]) || nB !== 1 ? 1 : 0;
       hasLE[i] = (!hasVisA[li] && !isSolidA[li]) || nL !== 0 ? 1 : 0;
       hasRE[i] = (!hasVisA[ri] && !isSolidA[ri]) || nR !== 1 ? 1 : 0;
+      // 液面波动(原版 waveMask 语义):TopWall 逐格随时间微幅正弦扰动,
+      // 幅度参照 WAVE_MASK_STRENGTH(水≈0.078)×VISOCITY 反比(岩浆/蜂蜜更粘→波动更小)
+      if (hasTE[i]) {
+        const wx = px0 + lx, wy = py0 + ly; // 世界格坐标
+        const visc = typeA[i] === 1 ? 0.25 : typeA[i] === 2 ? 0.12 : 1; // 水1/岩浆0.25/蜂蜜0.12
+        const wave = (Math.sin(wx * 0.8 + nowMs * 0.004) * 0.04 + Math.sin(wy * 1.3 + nowMs * 0.003) * 0.03) * visc;
+        tW[i] = Math.max(0, Math.min(0.75, nT - Math.abs(wave)));
+      }
       let ox = 0, oy = 0;
       if (!hasLE[i]) { ox += hasRE[i] ? 32 : 16; }
       if (hasLE[i] && hasRE[i]) {

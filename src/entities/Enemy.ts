@@ -1639,6 +1639,15 @@ export class Enemy extends Entity {
       if (this.vy > 0 && oy < 0) this.vy -= accel * 1.5;
     }
     this.facing = this.vx > 0 ? 1 : -1;
+    // ---- 头部旋转（cs:22778-22794）：259/260 真菌球恒 +π/2；其余（43 食人怪/101 触手/175）
+    // 朝玩家伸展方向 atan2(num220,num219)，目标在左（num219<0）+π 且 spriteDirection=-1——
+    // 旋转+镜像组合保证头从不倒挂（此前只镜像不旋转 → 横向硬转）
+    if (this.vanillaId === 259 || this.vanillaId === 260) {
+      this.visAngle = Math.atan2(oy, ox) + Math.PI / 2;
+    } else {
+      if (ox > 0) { this.facing = 1; this.visAngle = Math.atan2(oy, ox); }
+      else if (ox < 0) { this.facing = -1; this.visAngle = Math.atan2(oy, ox) + Math.PI; }
+    }
     // ---- 爬行者 101 诅咒焰（cs:22823-22856）：ai[3] 每 tick +1，≥120 且自身未嵌实心
     // 且有视线 → 喷诅咒焰（速 10、伤 22、散布 ±10）；条件不满足回退 ai[3]=100（20t 重试）
     if (this.vanillaId === 101 && player && !player.dead) {

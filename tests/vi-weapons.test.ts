@@ -9,7 +9,8 @@ const def = (key: string) => ITEM_DEFS[ITEM_BY_KEY[key]];
 describe('vi_* 武器分类（combatWeapon）', () => {
   it('纯近战：铁剑走 melee 分支且数值来自 combat 表', () => {
     const w = combatWeapon({ key: 'vi_4_iron_shortsword' });
-    expect(w).toEqual({ kind: 'melee', damage: 12, knockback: 5.5, useTime: 20 });
+    // useAnimation=挥击动画时长 / autoReuse=持按连挥（Player.ItemCheck 分立计数）
+    expect(w).toEqual({ kind: 'melee', damage: 12, knockback: 5.5, useTime: 20, useAnimation: 20, autoReuse: false });
   });
 
   it('回旋镖：附魔回旋镖 → boomerang + 投射物 6（aiStyle 3）', () => {

@@ -103,6 +103,15 @@ export class UnifiedRandom {
   nextDouble(): number {
     return this.sample();
   }
+
+  /** C# Peek()（:88-99，非消耗）：下一 InternalSample 原始差值——对账/断点用 */
+  peek(): number {
+    let num = this.inext + 1;
+    if (num > 55) num = 1;
+    let num2 = num + 21;
+    if (num2 > 55) num2 -= 55;
+    return this.seedArray[num] - this.seedArray[num2];
+  }
 }
 
 // ── RNG：世界生成/运行时统一入口（API 不变，内核换 UnifiedRandom）──────────

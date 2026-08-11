@@ -12,6 +12,7 @@ interface SaveRequest {
     type: ArrayBuffer; flags: ArrayBuffer;
     frameX: ArrayBuffer; frameY: ArrayBuffer;
     wall: ArrayBuffer; liquid: ArrayBuffer; liquidType: ArrayBuffer; wire: ArrayBuffer;
+    half: ArrayBuffer; slope: ArrayBuffer;
   };
   meta: Omit<SaveMeta, 'w' | 'h'>;
   player: SaveData['player'];
@@ -32,6 +33,8 @@ self.onmessage = (e: MessageEvent<SaveRequest>) => {
       liquid: new Uint8Array(req.bufs.liquid),
       liquidType: new Uint8Array(req.bufs.liquidType),
       wire: new Uint8Array(req.bufs.wire),
+      half: new Uint8Array(req.bufs.half),
+      slope: new Uint8Array(req.bufs.slope),
     };
     const meta: SaveMeta = { ...req.meta, w: req.w, h: req.h };
     const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs);

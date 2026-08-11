@@ -3,7 +3,7 @@
 // 半砖是原版"水浸润到方块贴图透明区"与瀑布触发（WaterfallManager 靠 halfBrick 唇缘）
 // 的核心：Smooth World 把地表凸起砸成半砖/坡面，Waterfalls pass 专门在水边唇缘砸半砖。
 // 偏离原版处（坡面渲染未实现前）：
-//  - 原版随机二选一的 SlopeTile 分支统一改为 PoundTile（视觉安全，唇缘效果等价）
+//  - SlopeTile(1)/(2) 已还原(50% 随机与 PoundTile 二选一,与原版一致;坡面渲染见 VanillaTiler.drawSlopedFrame)
 //  - slope 3/4 的坡面分支暂不生成；Tile Cleanup 的 slope→halfBrick 转换随之无需
 //  - CanPoundTile 的原版类型黑名单（10/48/137/...）近似为"非 solid 的 framed/decor 不砸"
 import type { TileStore } from '../../TileStore';
@@ -36,6 +36,16 @@ function canPoundTile(st: TileStore, x: number, y: number): boolean {
   return !!d && d.solid && !d.platform && !d.framed;
 }
 
+/** 坡面(WorldGen.cs SlopeTile 的生成期路径):写 slope、清 half。
+ *  slope1=左高右低(右侧接低台阶)、slope2=右高左低(左侧接低台阶)。 */
+function slopeTile(st: TileStore, x: number, y: number, dir: 1 | 2): boolean {
+  if (!canPoundTile(st, x, y)) return false;
+  const i = st.idx(x, y);
+  st.slope[i] = dir;
+  st.half[i] = 0;
+  return true;
+}
+
 /** 砸半砖（WorldGen.cs:49198 PoundTile 的生成期路径）：切换 halfBrick 位 */
 function poundTile(st: TileStore, x: number, y: number): boolean {
   if (!canPoundTile(st, x, y)) return false;
@@ -66,11 +76,11 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
               if (!solidTile(st, i - 1, j) && !st.half[st.idx(i - 1, j + 1)]
                 && solidTile(st, i - 1, j + 1) && solidTile(st, i + 1, j)
                 && !st.flags[st.idx(i + 1, j - 1)]) {
-                poundTile(st, i, j); // 原版另一半走 SlopeTile(2)（坡面未实现，统一半砖）
+                if (rng.chance(0.5)) slopeTile(st, i, j, 2); else poundTile(st, i, j); // 原版二选一 SlopeTile(2)/PoundTile
               } else if (!solidTile(st, i + 1, j) && !st.half[st.idx(i + 1, j + 1)]
                 && solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
                 && !st.flags[st.idx(i - 1, j - 1)]) {
-                poundTile(st, i, j); // 原版另一半走 SlopeTile(1)
+                if (rng.chance(0.5)) slopeTile(st, i, j, 1); else poundTile(st, i, j); // 原版二选一 SlopeTile(1)/PoundTile
               } else if (solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j + 1)
                 && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i - 1, j)]) {
                 // 孤立凸起（L7629）：直接半砖
@@ -110,11 +120,11 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
             if (solidTile(st, i - 1, j + 1) && solidTile(st, i + 1, j)
               && !st.flags[st.idx(i - 1, j)] && !st.flags[st.idx(i + 1, j - 1)]) {
               st.setTileSilent(i, j, belowType);
-              poundTile(st, i, j);
+              if (rng.chance(0.5)) slopeTile(st, i, j, 2); else poundTile(st, i, j);
             } else if (solidTile(st, i + 1, j + 1) && solidTile(st, i - 1, j)
               && !st.flags[st.idx(i + 1, j)] && !st.flags[st.idx(i - 1, j - 1)]) {
               st.setTileSilent(i, j, belowType);
-              poundTile(st, i, j);
+              if (rng.chance(0.5)) slopeTile(st, i, j, 1); else poundTile(st, i, j);
             }
           }
         }
@@ -129,9 +139,9 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
       if (d && d.framed) continue;
       if (rng.chance(0.5) && !st.flags[st.idx(i, j - 1)] && solidTile(st, i, j)) {
         if (solidTile(st, i, j + 1) && solidTile(st, i + 1, j) && !st.flags[st.idx(i - 1, j)]) {
-          poundTile(st, i, j); // 原版 SlopeTile(2)
+          slopeTile(st, i, j, 2);
         } else if (solidTile(st, i, j + 1) && solidTile(st, i - 1, j) && !st.flags[st.idx(i + 1, j)]) {
-          poundTile(st, i, j); // 原版 SlopeTile(1)
+          slopeTile(st, i, j, 1);
         }
       }
     }

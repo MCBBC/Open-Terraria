@@ -36,6 +36,7 @@ export enum BuffType {
   Featherfall = 15,  // 羽落(8,600s)：slowFall 重力/3+fallStart 重置免摔（:9671/:21367）
   WaterWalking = 16, // 水上行走(15,600s)：waterWalk=true（:9706）
   Archery = 17,      // 射手(16,480s)：archery+arrowDamage×1.1（:9710）
+  NightOwl = 18,     // 夜枭(12,600s)：nightVision→光衰减 ×1.03（:9636/184）——水下/洞穴更亮
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -60,6 +61,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Featherfall]: { vanillaBuff: 8, descKey: 'Mods.SandboxWorld.Buff.Featherfall.Desc', fallbackName: '羽落' },
   [BuffType.WaterWalking]: { vanillaBuff: 15, descKey: 'Mods.SandboxWorld.Buff.WaterWalking.Desc', fallbackName: '水上行走' },
   [BuffType.Archery]: { vanillaBuff: 16, descKey: 'Mods.SandboxWorld.Buff.Archery.Desc', fallbackName: '射手' },
+  [BuffType.NightOwl]: { vanillaBuff: 12, descKey: 'Mods.SandboxWorld.Buff.NightOwl.Desc', fallbackName: '夜枭' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

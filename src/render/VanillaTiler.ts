@@ -104,7 +104,7 @@ export function frameFor(atlas: SpriteAtlas, sheet: number, st: TileStore, x: nu
  *  窄表）上是空像素，直画会整格空白 → 检出后回退默认帧 */
 const frameContentCache = new Map<string, boolean>();
 function frameHasContent(r: DrawRect): boolean {
-  const key = `${r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
+  const key = `${(r.img as HTMLImageElement).naturalWidth || r.img.width}x${r.img.height}:${r.sx},${r.sy}`;
   const hit = frameContentCache.get(key);
   if (hit !== undefined) return hit;
   let ok = false;
@@ -513,7 +513,16 @@ export function drawVanillaCell(
     const uv = getUVForMasks(same, mergeMask, strictness, ((x * 7) + (y * 11)) % 3);
     const r = atlas.vframe(sheet, uv.col, uv.row);
     if (r) {
-      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+      const si = st.idx(x, y);
+      const slope = st.slope[si];
+      const half = !!st.half[si];
+      if (half && slope === 0) {
+        ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, px, py + 8, r.sw, r.sh - 8);
+      } else if (slope > 0 && !half) {
+        drawSlopedFrame(ctx, r, slope, px, py);
+      } else {
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+      }
       return;
     }
     const fb = atlas.vframe(sheet, 1, 1);
@@ -584,8 +593,54 @@ export function drawVanillaCell(
   // (此前的 +4 引用了 :1084 的 case 4 —— 那是 tile 726 的半砖坡面分支,不是火把)
   const dxOff = sheet === 4 ? -2 : 0;
   if (sheet === 4 && st.inBounds(x, y - 1) && st.isSolid(x, y - 1)) dyOff += 4;
-  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px + dxOff, Math.max(py, dy) + dyOff, r.sw, r.sh);
+
+  // ---- 坡面/半砖分支(原版 TileDrawing.cs:1314-1361) ----
+  const si = st.idx(x, y);
+  const slope = st.slope[si];
+  const half = !!st.half[si];
+  const dpx = px + dxOff, dpy = Math.max(py, dy) + dyOff;
+  if (half && slope === 0) {
+    // 半砖:画下半 8px(源 y+8 高-8,目标 y+8;GetTileDrawData halfBrickHeight=8)
+    ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, dpx, dpy + 8, r.sw, r.sh - 8);
+    return;
+  }
+  if (slope > 0 && !half) {
+    drawSlopedFrame(ctx, r, slope, dpx, dpy);
+    return;
+  }
+
+  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
   void fw; void fh;
+}
+
+/**
+ * 坡面切条绘制(原版 TileDrawing.cs:1328-1360 1:1):非独立贴图帧,同帧错位采样。
+ * slope1(左高右低)/2(右高左低):8 条 2px 竖条,每条从帧顶部取高 14-2i,
+ * 目标 y 逐条下移 2i;补底部 16×2 整条。
+ * slope3(左低右高)/4(右低左高):8 条 2px 竖条,源行偏移 2i(取帧中段),
+ * 目标 y=0;补顶部 16×2 整条。
+ */
+function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number }, slope: number, px: number, py: number): void {
+  const fx = r.sx, fy = r.sy;
+  for (let i = 0; i < 8; i++) {
+    let num19: number; // 源X/目标X
+    let num17: number; // 条高
+    let num18: number; // 源行偏移
+    let num16: number; // 目标Y附加偏移
+    if (slope === 1) { num16 = 0; num19 = i * 2; num17 = 14 - i * 2; num18 = 0; }
+    else if (slope === 2) { num16 = 0; num19 = 16 - i * 2 - 2; num17 = 14 - i * 2; num18 = 0; }
+    else if (slope === 3) { num16 = i * -2; num19 = i * 2; num17 = 16 - i * 2; num18 = 16 - num17; }
+    else { num16 = i * -2; num19 = 16 - i * 2 - 2; num17 = 16 - i * 2; num18 = 16 - num17; }
+    const dstY = i * 2 + num16;
+    // 源矩形越界保护
+    if (fx + num19 + 2 > (r.img as HTMLImageElement).naturalWidth || r.img.width || fy + num18 + num17 > r.img.height) continue;
+    ctx.drawImage(r.img, fx + num19, fy + num18, 2, num17, px + num19, py + dstY, 2, num17);
+  }
+  // 补条:slope 1/2 在底部 y=14,slope 3/4 在顶部 y=0
+  const padY = slope <= 2 ? 14 : 0;
+  if (fy + padY + 2 <= r.img.height) {
+    ctx.drawImage(r.img, fx, fy + padY, 16, 2, px, py + padY, 16, 2);
+  }
 }
 
 /** 原版 TileObjectData.newTile.DrawYOffset 全量表（ObjectData/TileObjectData.cs 逐条提取；未列出 = 0） */

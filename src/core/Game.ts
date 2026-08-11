@@ -43,6 +43,8 @@ import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
+import { tileRunner } from '../world/gen/vanilla/TileRunner';
+import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
@@ -52,6 +54,7 @@ import { Camera } from '../render/Camera';
 import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
+import { updateLightDecay } from '../lighting/lightTables';
 import { Inventory } from '../items/Inventory';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
@@ -220,6 +223,8 @@ export class Game implements GameHooks {
   private hitTiles = new HitTile();
   private lastMineHitTick = -999;
   swing: { t: number; dur: number; item: number; dmg?: number; kb?: number } | null = null;
+  /** 上一帧鼠标左键状态（非 autoReuse 近战武器需点击沿触发新挥，原版 autoReuse 语义） */
+  prevSwingMouse = false;
   private swingHitSet = new Set<number>();
   /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
   private swingTileCutSet = new Set<number>();
@@ -1414,6 +1419,7 @@ export class Game implements GameHooks {
 
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
+    this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
 
     // ---- 实体 ----
     this.entities.update(dt, this);
@@ -1609,6 +1615,9 @@ export class Game implements GameHooks {
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
+    // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
+    // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
+    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl));
     // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
     // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
     // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：
@@ -1868,20 +1877,34 @@ export class Game implements GameHooks {
 
     // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速配饰：猛爪手套 ×2）
     const cw = heldDef ? combatWeapon(heldDef) : null;
-    if (tool?.type === 'sword' || cw?.kind === 'melee') {
-      const spd = Math.max(12, Math.round((tool?.speed ?? (cw?.kind === 'melee' ? cw.useTime : 42)) / this.player.attackSpeedMult));
+    const cwMelee = cw?.kind === 'melee' ? cw : null;
+    if (tool?.type === 'sword' || cwMelee) {
+      // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
+      // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）
+      // autoReuse 持按链式：useTime<useAnimation 时原版会在动画未走完时重置弧线（下挥被截）
+      const nativeSpd = tool?.speed;
+      const animSpd = nativeSpd != null
+        ? Math.max(12, Math.round(nativeSpd / this.player.attackSpeedMult))
+        : Math.max(4, Math.round((cwMelee!.useAnimation) / this.player.attackSpeedMult));
+      const reuseSpd = nativeSpd != null
+        ? animSpd
+        : Math.max(2, Math.round((cwMelee!.useTime) / this.player.attackSpeedMult));
+      const autoReuse = cwMelee ? cwMelee.autoReuse : true; // 原生 legacy sword 保持持按连挥
+      const clickEdge = inp.mouseDown && !this.prevSwingMouse;
+      const canChain = autoReuse || clickEdge; // 非 autoReuse 武器需重新点击（原版语义）
       // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
       const ps = this.heldPrefixStat();
       // ★ 重启门含 swing.t<=1（原版 itemAnimation 归零同帧即重启挥动,NPC AI 永远看不到 0 帧；
       //   此前 !this.swing 硬门让每挥击周期漏出 1 帧 useTime==0——黄蜂 ai[1] 每周期清零,
       //   永远攒不到 130 → 战斗中黄蜂从不射毒刺(NPC.cs:51165 的 itemAnimation 门因此误判"待机")）
-      if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
+      const swingOver = !this.swing || this.swing.t <= 1;
+      if (this.player.useTime === 0 && canChain && (swingOver || reuseSpd < animSpd)) {
         this.swing = {
-          t: spd, dur: spd, item: held!.id,
-          dmg: cw?.kind === 'melee' ? Math.max(1, Math.round(cw.damage * (ps?.dmg ?? 1))) : undefined,
-          kb: cw?.kind === 'melee' ? cw.knockback * (ps?.kb ?? 1) : undefined,
+          t: animSpd, dur: animSpd, item: held!.id,
+          dmg: cwMelee ? Math.max(1, Math.round(cwMelee.damage * (ps?.dmg ?? 1))) : undefined,
+          kb: cwMelee ? cwMelee.knockback * (ps?.kb ?? 1) : undefined,
         };
-        this.player.useTime = spd;
+        this.player.useTime = reuseSpd;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
       }
@@ -1959,7 +1982,7 @@ export class Game implements GameHooks {
         obsidianSkin: BuffType.ObsidianSkin, gills: BuffType.Gills,
         manaRegen: BuffType.ManaRegen, magicPower: BuffType.MagicPower,
         featherfall: BuffType.Featherfall, waterWalking: BuffType.WaterWalking,
-        archery: BuffType.Archery,
+        archery: BuffType.Archery, nightOwl: BuffType.NightOwl,
       };
       if (p.isHealType && this.player.buffs.healBlocked) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
@@ -2063,7 +2086,7 @@ export class Game implements GameHooks {
         this.sfx.play('bowShoot');
         this.cb.onInventoryChanged();
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee') {
       // vi_* 数据驱动武器（1456 aiStyle 家族）：回旋镖/长矛/悠悠球/连枷/手雷/魔法/直射兜底。
       // 必须排在 thrownCombat 之前——手雷(166 等)满足投掷判定但语义是 ai16 弹跳引信
       this.useCombatWeapon(cw, heldDef);
@@ -2291,12 +2314,72 @@ export class Game implements GameHooks {
     return tx >= LX && tx <= HX && ty >= LY && ty <= HY;
   }
 
+  /** 砸祭坛 = 原版 KillTile case 26 → SmashAltar（WorldGen.cs:48949）1:1：
+   *  altarCount%3 选矿档(0 钴/钯、1 秘银/山铜、2 精金/钛)，/3+1 为波次衰减；
+   *  矿脉数 num3 = w/4200×310 − 85×档 ×0.85 ÷ 波次；深度带随档位加深
+   *  （ws / rock / (rock×2+h)/3）；每脉 OreRunner 5..(9+w/4200)；最后生成
+   *  1-2 只幽灵(82)。祭坛 3×2 整体移除 */
+  private altarCount = 0;
+  private smashAltar(tx: number, ty: number): void {
+    const st = this.world.store;
+    const ALTAR = TILE_BY_KEY['v_26_altars'];
+    for (let dx = -3; dx <= 3; dx++) {
+      for (let dy = -3; dy <= 2; dy++) {
+        if (!st.inBounds(tx + dx, ty + dy)) continue;
+        if (st.type[st.idx(tx + dx, ty + dy)] === ALTAR) st.setTileSilent(tx + dx, ty + dy, 0);
+      }
+    }
+    this.spawnParticles(tx * TILE + 24, ty * TILE + 8, '#B080FF', 14, 2.5);
+    this.sfx.play('hit', 1);
+    const tier = this.altarCount % 3;
+    const wave = Math.floor(this.altarCount / 3) + 1;
+    let veins = (st.w / 4200) * 310 - 85 * tier;
+    veins *= 0.85;
+    veins /= wave;
+    const sheetKeys = tier === 0 ? ['ore_cobalt', 'ore_palladium'] : tier === 1 ? ['ore_mythril', 'ore_orichalcum'] : ['ore_adamantite', 'ore_titanium'];
+    const ore = TILE_BY_KEY[sheetKeys[Math.floor(Math.random() * 2)]] ?? TILE_BY_KEY['ore_cobalt'];
+    const band = tier === 0 ? this.world.groundLevel : tier === 1 ? this.world.rockLevel : (this.world.rockLevel * 2 + st.h) / 3;
+    const rng = new RNG((Math.random() * 1e9) | 0);
+    const cap = Math.floor(veins);
+    for (let k = 0; k < cap; k++) {
+      const x = 100 + Math.floor(Math.random() * (st.w - 200));
+      const y = Math.floor(band) + Math.floor(Math.random() * Math.max(1, st.h - 150 - Math.floor(band)));
+      const r = 5 + Math.floor(Math.random() * (4 + Math.floor(st.w / 4200)));
+      tileRunner(st, rng, lastGenState() ?? { worldSurface: this.world.groundLevel, lavaLine: st.h - 200, waterLine: this.world.groundLevel } as never, x, y, { strength: r, steps: r, type: ore, addTile: true });
+    }
+    const wraiths = 1 + Math.floor(Math.random() * 2);
+    for (let k = 0; k < wraiths; k++) {
+      const e = Enemy.fromVanilla(82, this.player.cx + (Math.random() - 0.5) * 64, this.player.y - 32);
+      if (e) {
+        e.id = this.entities.nextId++;
+        this.entities.enemies.push(e);
+      }
+    }
+    this.altarCount++;
+  }
+
   private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number) {
     // 联机破坏保护（v3 房间制）：非房主禁挖/禁锤墙
     if (!this.netCanEditTile()) { this.mining = null; this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // 范围检查
     if (!this.inTileRange(tx, ty)) { this.mining = null; return; }
     const type = this.world.store.get(tx, ty);
+    // 恶魔祭坛（tile 26，原版 Player.cs:45058）：镐不可破坏（def pick:-1 拦）；
+    // 锤 ≥80 锤力且困难模式 → SmashAltar（砸碎=困难矿三档轮换+幽灵）；
+    // 否则进度清零 + 玩家受 statLife/2 电击（ByOther(4)）
+    if (type === TILE_BY_KEY['v_26_altars']) {
+      this.mining = null;
+      if (toolType === 'hammer' && power >= 80 && this.world.flags.hardMode) {
+        this.smashAltar(tx, ty);
+      } else if (toolType === 'hammer') {
+        const p = this.player;
+        const dmg = Math.max(1, Math.floor(p.maxHp / 2));
+        p.damage(dmg, p.cx - p.facing * 8, p.cy, false);
+        this.addDamageNumber(p.cx, p.y, dmg, false, '#B080FF');
+        this.sfx.play('hit', 0.8);
+      }
+      return;
+    }
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
       // 原版语义:锤子优先循环实心块状态(整块→半砖→整块;坡面渲染未实现暂两态)
@@ -3891,9 +3974,12 @@ export class Game implements GameHooks {
     const tool = ITEM_DEFS[held.id].tool;
     void tool;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
-    // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）
-    // + 物品贴图帧宽高（vanilla heldItemFrame ≈ atlasIcon 尺寸）× scale；
-    // useStyle1 三段缩放：早段 宽×1.4 高×1.1 下移半高 / 中段原样 / 晚段 宽×2 高×1.4
+    // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
+    // （cs:44489 new Rectangle(itemLocation.X, itemLocation.Y, 32, 32) ×adjustedItemScale≈1，
+    // 与武器贴图尺寸无关——此前误用贴图帧宽高当基底，小武器欠打大武器超打）；
+    // 方向/重力翻转（cs:44506-44513）；useStyle1 三段扩展（cs:44516-44540）：
+    // **早段(anim≥0.666max) 宽×2 高×1.4 X 退 1.2宽 / 中段原样 / 晚段(anim<0.333max)
+    // 宽×1.4 高×1.1 Y 下移半高**——此前早/晚段扩展对调，注释也反
     const pAnim = Math.min(1, Math.max(0, this.swing.t / this.swing.dur));
     const ar = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, ITEM_DEFS[held.id].key) : null;
     const sprW = ar?.sw ?? 16, sprH = ar?.sh ?? 16;
@@ -3912,20 +3998,20 @@ export class Game implements GameHooks {
     const p = this.player;
     let bx = p.cx + p.facing * offX;
     let by = p.y + offY;
-    let bw = sprW, bh = sprH;
+    let bw = 32, bh = 32; // 恒定基底（cs:44489），与武器贴图无关
     if (p.facing === -1) bx -= bw;
     by -= bh;
-    // 三段缩放（:44516-44540）
+    // 三段扩展（cs:44516-44540）：早段大盒覆盖抡起区、晚段小盒收势
     if (phase === 0) {
-      if (p.facing === -1) bx -= bw * 1.4 - bw;
-      bw = Math.floor(bw * 1.4);
-      by += Math.floor(bh * 0.5);
-      bh = Math.floor(bh * 1.1);
-    } else if (phase === 2) {
       if (p.facing === 1) bx -= Math.floor(bw * 1.2);
       bw *= 2;
       by -= Math.floor(bh * 1.4 - bh);
       bh = Math.floor(bh * 1.4);
+    } else if (phase === 2) {
+      if (p.facing === -1) bx -= Math.floor(bw * 1.4 - bw);
+      bw = Math.floor(bw * 1.4);
+      by += Math.floor(bh * 0.5);
+      bh = Math.floor(bh * 1.1);
     }
     // 原版 ItemCheck_CutTiles（Player.cs:44002）：挥击矩形内所有 tileCut/KillTile
     for (let ty = Math.floor(by / TILE); ty <= Math.floor((by + bh - 1) / TILE); ty++) {

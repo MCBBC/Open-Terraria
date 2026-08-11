@@ -13,6 +13,8 @@ export interface WldTileData {
   liquid: Uint8Array;
   liquidType: Uint8Array; // 1水 2岩浆 3蜂蜜
   wire: Uint8Array;       // 电路位 bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动（header2 0x02-0x40）
+  half: Uint8Array;       // 半砖(WorldFile.cs:1519 header2>>4 & 0x7 == 1)
+  slope: Uint8Array;      // 坡面 1-4(== 2-5;Tile.cs sTileHeader bits 12-14 编码)
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
@@ -297,6 +299,9 @@ function decodeTiles(
   const liquid = new Uint8Array(n);
   const liquidType = new Uint8Array(n);
   const wire = new Uint8Array(n);
+  const half = new Uint8Array(n);
+  const slope = new Uint8Array(n);
+  const halfBits = half, slopeBits = slope; // 半砖/坡面解码目标
 
   let idx = 0; // y * w + x，列优先推进
   for (let x = 0; x < w; x++) {
@@ -334,6 +339,10 @@ function decodeTiles(
       }
       // 电路位（原版 Tile.cs flags2）：0x02红 0x04蓝 0x08绿 0x10黄 0x20致动器 0x40已致动
       const wireBits = (header2 & 0x3E) >> 1;
+      // half/slope(WorldFile.cs:1519):(header2 >> 4) & 7 → 1=半砖,2-5=slope1-4
+      const blockBits = (header2 >> 4) & 7;
+      const blockHalf = blockBits === 1 ? 1 : 0;
+      const blockSlope = blockBits >= 2 && blockBits <= 5 ? blockBits - 1 : 0;
       const lqType = (header1 & 0x18) >> 3;
       let lqAmount = 0, lqKind = 0;
       if (lqType !== 0) {
@@ -357,10 +366,12 @@ function decodeTiles(
         liquid[i] = lqAmount;
         liquidType[i] = lqKind;
         wire[i] = wireBits;
+        half[i] = blockHalf;
+        slope[i] = blockSlope;
       }
       y += rle;
     }
   }
   void idx;
-  return { active, type, frameX, frameY, wall, liquid, liquidType, wire };
+  return { active, type, frameX, frameY, wall, liquid, liquidType, wire, half, slope };
 }

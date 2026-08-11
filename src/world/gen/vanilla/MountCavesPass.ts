@@ -16,8 +16,8 @@ const SAND_AVOID = idsByVanillaSheet(53, 151, 274);
 
 /** Mountinater（L48367）：上漂泥土 blob = 山丘本体。只在空气格激活填土(type 0=Dirt) */
 function mountinater(st: TileStore, rng: RNG, i: number, j: number): void {
-  let num1 = rng.int(79, 119);            // Next(80,120)
-  let num2 = rng.int(39, 54);             // Next(40,55)
+  let num1 = rng.int(80, 119) + 0.0;      // Next(80,120)（double，cs:80122）
+  let num2 = rng.int(40, 54) + 0.0;       // Next(40,55)（double！）
   let px = i, py = j + num2 / 2;
   let vx = rng.int(-10, 10) * 0.1;        // Next(-10,11)
   let vy = rng.int(-20, -11) * 0.1;       // Next(-20,-10)
@@ -30,7 +30,7 @@ function mountinater(st: TileStore, rng: RNG, i: number, j: number): void {
     if (x1 > st.w) x1 = st.w;
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
-    const r = num1 * rng.int(79, 119) * 0.01; // Next(80,120)
+    const r = num1 * rng.int(80, 119) * 0.01; // Next(80,120)
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
@@ -93,7 +93,7 @@ export function runMountCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** CaveOpenater（L48789）：山侧横向开口，100 步或直到离开墙/碰不可清 tile */
 function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
-  let num1 = rng.int(6, 11);              // Next(7,12)
+  let num1 = rng.int(7, 11);              // Next(7,12)
   let dir = rng.int(0, 1) === 0 ? -1 : 1; // Next(2)
   if (rng.int(0, 9) !== 0) dir = i >= st.w / 2 ? -1 : 1; // 90% 朝世界外侧（Next(10)!=0）
   let px = i, py = j;
@@ -110,7 +110,7 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
     if (x1 > st.w) x1 = st.w;
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
-    const r = num1 * rng.int(79, 119) * 0.01;
+    const r = num1 * rng.int(80, 119) * 0.01;
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
@@ -136,10 +136,10 @@ const TILE_DUNGEON = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
 const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 
 function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, steps: number): void {
-  let num1 = rng.int(6, 14);              // Next(7,15)
+  let num1 = rng.int(7, 14);              // Next(7,15)
   const dir = rng.int(0, 1) === 0 ? -1 : 1;
   let px = i, py = j;
-  let num4 = rng.int(19, 39);            // Next(20,40)（num4：剩余步数，地牢命中清零）
+  let num4 = rng.int(20, 39);            // Next(20,40)（num4：剩余步数，地牢命中清零）
   let vx = dir, vy = rng.int(10, 19) * 0.01; // Next(10,20)
   const SAND = TILE_BY_KEY['sand']!;
   while (num4 > 0) {
@@ -150,7 +150,7 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     if (x1 > st.w) x1 = st.w;
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
-    const r = num1 * rng.int(79, 119) * 0.01;
+    const r = num1 * rng.int(80, 119) * 0.01;
     // ★地牢命中即整轮终止（cs:80753-80762）：tileDungeon/墙 dungeon → num4=0
     //  （此前缺失：跑满全程多耗每步 3 骰 → 条件性流漂移）
     outer:
@@ -190,6 +190,6 @@ export function runMountainCavesPass(st: TileStore, rng: RNG, gs: GenState): voi
   for (let n = 0; n < gs.numMCaves; n++) {
     const x = gs.mCaveX[n], y = gs.mCaveY[n];
     caveOpenater(st, rng, x, y);
-    cavinator(st, rng, gs, x, y, rng.int(39, 49)); // Next(40,50)
+    cavinator(st, rng, gs, x, y, rng.int(40, 49)); // Next(40,50)
   }
 }

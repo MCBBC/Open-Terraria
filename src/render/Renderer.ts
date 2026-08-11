@@ -728,25 +728,44 @@ export class Renderer {
   private _liquidNow = 0;
   /** 群系水色（CalculateWaterStyle，Main.cs:56845；每帧由场景标志+昼夜+深度算出） */
   waterStyle = 0;
+  /** 切换迟滞（DrawBG_HandleBackgroundTransition :63508-63533 的 bgDelay 语义：
+   *  原版水色本身硬切,但持续 30t(≈0.5s)偏好不变才提交切换,切后 60t 冷却不再响应——
+   *  群系边界来回抖动时不闪切;森林族 60t 差异省略,统一 30t 近似） */
+  private wsDelay = 0;
   /** 群系水色 1:1（Main.CalculateWaterStyle :56771-56824，fountain/天顶世界分支无对应系统跳过） */
   private updateWaterStyle(world: World, cam: { y: number }): void {
     const f = this.scene;
     if (!f) return;
     const bloodMoon = !!world.clock?.bloodMoon;
     const dayTime = world.clock ? world.clock.isDay : true;
-    if (bloodMoon && !dayTime) { this.waterStyle = 9; return; }
-    if (f.zoneCorrupt) { this.waterStyle = 2; return; }        // bgStyle 1/5
-    if (f.zoneJungle) { this.waterStyle = 3; return; }         // bgStyle 3
-    if (f.zoneCrimson) { this.waterStyle = 10; return; }       // bgStyle 8/14
-    if (f.zoneHallow) { this.waterStyle = 4; return; }         // bgStyle 6/13
-    if (f.zoneSnow) { this.waterStyle = 5; return; }           // bgStyle 7
-    if (f.zoneDesert) { this.waterStyle = f.belowSurface ? 12 : 6; return; } // bgStyle 2（地下→地下沙漠）
-    if (f.zoneUnderworldHeight) { this.waterStyle = 13; return; } // bgStyle 4（地狱）
-    // default:岩层+40 以下 → 发光蘑菇区 7 / 洞穴 8;地下 → 7;地表 → 0
-    // 深度取相机中心 tile Y（原版 SceneMetrics.TileCenter）
-    const ty = Math.floor(cam.y / TILE);
-    if (ty > world.rockLevel + 40) { this.waterStyle = f.zoneGlowshroom ? 7 : 8; return; }
-    this.waterStyle = f.belowSurface ? 7 : 0;
+    let target = 0;
+    if (bloodMoon && !dayTime) target = 9;
+    else if (f.zoneCorrupt) target = 2;            // bgStyle 1/5
+    else if (f.zoneJungle) target = 3;             // bgStyle 3
+    else if (f.zoneCrimson) target = 10;           // bgStyle 8/14
+    else if (f.zoneHallow) target = 4;             // bgStyle 6/13
+    else if (f.zoneSnow) target = 5;               // bgStyle 7
+    else if (f.zoneDesert) target = f.belowSurface ? 12 : 6;  // bgStyle 2（地下→地下沙漠）
+    else if (f.zoneUnderworldHeight) target = 13;  // bgStyle 4（地狱）
+    else {
+      // default:岩层+40 以下 → 发光蘑菇区 7 / 洞穴 8;地下 → 7;地表 → 0
+      // 深度取相机中心 tile Y（原版 SceneMetrics.TileCenter）
+      const ty = Math.floor(cam.y / TILE);
+      if (ty > world.rockLevel + 40) target = f.zoneGlowshroom ? 7 : 8;
+      else target = f.belowSurface ? 7 : 0;
+    }
+    // bgDelay 迟滞（:63440-63449 + :63508）：冷却期只倒数;偏好持续 30t 才提交
+    if (this.wsDelay < 0) {
+      this.wsDelay++;
+    } else if (target !== this.waterStyle) {
+      this.wsDelay++;
+      if (this.wsDelay > 30) {
+        this.wsDelay = -60;      // 提交切换,进入 60t 冷却
+        this.waterStyle = target;
+      }
+    } else {
+      this.wsDelay = 0;          // 偏好与当前一致,计数清零
+    }
   }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
@@ -938,6 +957,7 @@ export class Renderer {
         else if (e.vanilla?.aiStyle === 40) ctx.rotate(e.visAngle); // AI_040 爬墙蜘蛛:npc.rotation 随移动/期望速度角(cs:29865/29919),531 +π/2
         else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)
         else if (e.vanilla?.aiStyle === 56) ctx.rotate(e.visAngle); // AI_056 地牢之魂:rotation=atan2(v)-π/2(cs:32927)
+        else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
@@ -1740,10 +1760,13 @@ export class Renderer {
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
     ctx.rotate(rot);
     if (ar) {
-      // 原版 origin = (fw*0.5*-dir, fh)（DrawPlayer_HeldItem）→ 贴图左上 = 握点 - origin
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, fw / 2, -fh, ar.sw, ar.sh);
+      // 原版 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
+      // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
+      // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角。
+      // 此前误画在 (fw/2,−fh)：武器整把向外飘半个身位宽 = "离手很远"的根因
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
     } else if (icon) {
-      ctx.drawImage(icon, 7, -14, 14, 14);
+      ctx.drawImage(icon, 0, -14, 14, 14);
     }
     ctx.restore();
   }
