@@ -73,3 +73,97 @@ export function spreadGrassAll(st: TileStore, dirt: number, grass: number, cente
   }
   void T; void TILE_BY_KEY;
 }
+
+/**
+ * 原版 MudCavesToJungleGrass pass（cs:12499-12530）1:1——替代自创 spreadGrassAll 近似：
+ *  ① 全图逐 tile SpreadGrass(59, 60)（递归洪水，grassSpread 全局深度 ≤1000，
+ *     InWorld(i,j,10) 门禁，3×3 封闭/岩浆判定，CanBeCleared 门禁）；
+ *  ② ScanTileColumnAndRemoveClumps（cs:10164）：逐列竖向连续段 <20 且连通域 <20 → 清除。
+ * 原版泥→丛林草无中心限距（自创 centerX/maxDist 与 2 轮快照扩散均偏离原版）。
+ * 零 RNG——纯状态机，与掷骰流无关。
+ */
+export function runMudCavesPass(st: TileStore, dirt: number, grass: number): void {
+  const { w, h } = st;
+  let grassSpread = 0;
+
+  const spread = (x: number, y: number): void => {
+    // InWorld(i,j,10)（cs:75218）
+    if (x < 10 || x >= w - 10 || y < 10 || y >= h - 10) return;
+    const ci = st.idx(x, y);
+    if (!st.flags[ci] || st.type[ci] !== dirt) return;
+    // 生成期 dirt==0 的地表限高门禁：dirt=59 不触发；type==dirt && active → 不 return
+    // 3×3 窗口（clamp 到世界界，cs:75240-75251）
+    const x0 = Math.max(0, x - 1), x1 = Math.min(w, x + 2);
+    const y0 = Math.max(0, y - 1), y1 = Math.min(h, y + 2);
+    let enclosed = true;
+    for (let k = x0; k < x1; k++) {
+      for (let l = y0; l < y1; l++) {
+        const wi = st.idx(k, l);
+        if (!st.flags[wi] || !TILE_DEFS[st.type[wi]]?.solid) enclosed = false;
+        // ★岩浆只 break 内层循环（cs:75260-75264）——后续列可再把 enclosed 拉回 false；
+        // 曾实现为"遇岩浆直接 return"≠原版
+        if (st.liquidType[wi] === 2 && st.liquid[wi] > 0) { enclosed = true; break; }
+      }
+    }
+    if (enclosed) return;
+    if (NOT_CLEARABLE.has(st.type[ci])) return;
+    // flag2（Conversion.Grass[dirt]）的 Convert 分支仅 grass=23/199/109——本调用 grass=60 直写
+    st.type[ci] = grass;
+    for (let m = x0; m < x1; m++) {
+      for (let n = y0; n < y1; n++) {
+        const ni = st.idx(m, n);
+        if (st.flags[ni] && st.type[ni] === dirt && grassSpread < 1000) {
+          grassSpread++;
+          spread(m, n);
+          grassSpread--;
+        }
+      }
+    }
+  };
+
+  // ① 全图逐 tile 播种（cs:12510-12520）
+  for (let x = 0; x < w; x++) {
+    for (let y = 0; y < h; y++) {
+      if (st.flags[st.idx(x, y)]) {
+        grassSpread = 0;
+        spread(x, y);
+      }
+    }
+  }
+
+  // ② 散块清除（cs:12522-12529 + ScanTileColumnAndRemoveClumps cs:10164）
+  const MAX = 20; // tileCounterMax（cs:4307）
+  const solidClearable = (i: number): boolean => {
+    const t = st.type[i];
+    return st.flags[i] !== 0 && !!TILE_DEFS[t]?.solid && !NOT_CLEARABLE.has(t);
+  };
+  const counted = new Int32Array(MAX);
+  let countN = 0;
+  const flood = (x: number, y: number): void => {
+    if (countN >= MAX) return;
+    if (x < 5 || x >= w - 5 || y < 5 || y >= h - 5) return;
+    const i = st.idx(x, y);
+    if (!solidClearable(i)) return;
+    for (let n = 0; n < countN; n++) if (counted[n] === i) return;
+    counted[countN++] = i;
+    flood(x - 1, y); flood(x + 1, y); flood(x, y - 1); flood(x, y + 1);
+  };
+  for (let x = 10; x < w - 10; x++) {
+    let run = 0, runY = 0;
+    for (let y = 10; y < h - 10; y++) {
+      if (solidClearable(st.idx(x, y))) {
+        if (run === 0) runY = y;
+        run++;
+        continue;
+      }
+      if (run > 0 && run < MAX) {
+        countN = 0;
+        flood(x, runY);
+        if (countN < MAX) {
+          for (let n = 0; n < countN; n++) st.flags[counted[n]] = 0;
+        }
+      }
+      run = 0;
+    }
+  }
+}

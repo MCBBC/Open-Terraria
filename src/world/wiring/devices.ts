@@ -27,7 +27,7 @@ export interface DeviceCtx {
   /** 城镇 NPC 搬迁雕像(style 40/41):group 0/1 白名单,搬到 (px,py) */
   relocateTownNpc(group: 0 | 1, px: number, py: number): boolean;
   /** 爆炸(炸药/地雷/炮弹):范围伤害+清格+粒子 */
-  explode(tx: number, ty: number, damage: number): void;
+  explode(tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean): void;
   toast(msg: string): void;
   sfx(name: string, x?: number, y?: number): void; // 带坐标时按距离衰减/超距静音
   /** worldSurface(部分器件判定) */

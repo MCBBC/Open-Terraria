@@ -3402,6 +3402,7 @@ export class Enemy extends Entity {
           value: this.spawnedFromStatue ? 0 : npcValueOf(netId), // 雕像产怪 value=0（Wiring.cs:2479）
           statueSpawned: this.spawnedFromStatue,
           hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
+          moonEvent: game.moonEventCtx?.() ?? undefined,
           extras: game.dropContext?.(),
         };
         const unmapped = (id: number) => {

@@ -27,17 +27,21 @@ export function resolvePackKey(tree, path) {
   return cur;
 }
 
-/** 审计：src 全部 Lang.text/has('字面键') 是否都在 pack 中命中 */
+/** 审计：src 全部 Lang.text/has('字面键') + 所有 Mods.SandboxWorld.* 字面串
+ *  （含经 labelKey/descKey 等间接传递后仍走 Lang.text 的自定义键）是否都在 pack 命中 */
 export function auditL10n(srcDir, packPath) {
   const pack = JSON.parse(readFileSync(packPath, 'utf8'));
   const used = new Map(); // key → [file:line]
   const KEY_RE = /Lang\.(?:text|has)\(\s*['"]([A-Za-z0-9_.\-]+)['"]/g;
+  const CUSTOM_RE = /['"](Mods\.SandboxWorld\.[A-Za-z0-9_.\-]+)['"]/g;
   for (const f of collectTs(srcDir)) {
     const lines = readFileSync(f, 'utf8').split('\n');
     lines.forEach((line, i) => {
-      for (const m of line.matchAll(KEY_RE)) {
-        if (!used.has(m[1])) used.set(m[1], []);
-        used.get(m[1]).push(`${f}:${i + 1}`);
+      for (const re of [KEY_RE, CUSTOM_RE]) {
+        for (const m of line.matchAll(re)) {
+          if (!used.has(m[1])) used.set(m[1], []);
+          used.get(m[1]).push(`${f}:${i + 1}`);
+        }
       }
     });
   }

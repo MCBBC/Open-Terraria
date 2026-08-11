@@ -8,7 +8,7 @@
 // - Boss 药水+心：DoDeathEvents_DropBossPotionsAndHearts(:79790)
 // - 初速度：Item.cs:49325-49337 vx∈[-3,3] vy∈[-4,-1.5]
 // 偏差（记录）：luck 恒 0（RollLuck ≡ rng.Next(denom)）；NotFromStatue 恒 true；
-// 月事件/天空盒/DST 联动条件恒 false；多人为单人化（local/perPlayer ≈ common+清 value）。
+// 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
 import dropData from '../data/vanilla-npcdrops.json';
 import npcValueJson from '../data/vanilla-npcvalue.json';
 import type { RNG } from '../core/rng';
@@ -66,6 +66,9 @@ export interface NpcDropCtx {
   statueSpawned?: boolean;
   /** 玩家血蓝（心/星条件 statLife<statLifeMax2 等） */
   hp: number; hpMax: number; mana: number; manaMax: number;
+  /** 月事件（南瓜月/霜月）上下文：kind 1=霜月 2=南瓜月；wave=当前波（无事件缺省 0）。
+   *  四个 wave-gate 掉落条件的数据源（Conditions.cs:55-229），Game 击杀掉落处注入 */
+  moonEvent?: { kind: 1 | 2; wave: number };
   extras?: DropExtras;
 }
 
@@ -120,10 +123,35 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'DownedAllMechBosses': return downed(ctx, 134, 125, 127);
     case 'BeatAnyMechBoss': return downed(ctx, 134) || downed(ctx, 125) || downed(ctx, 127);
     case 'MechdusaKill': return false;
-    case 'FromCertainWaveAndAbove': return false; // 月事件未实现
-    case 'PumpkinMoonDropGatingChance': case 'PumpkinMoonDropGateForTrophies':
-    case 'FrostMoonDropGatingChance': case 'FrostMoonDropGateForTrophies':
-      return false;
+    case 'FromCertainWaveAndAbove': {
+      // Conditions.cs:249-261：NPC.waveNumber >= neededWave（不查事件——无事件时
+      // waveNumber=0 恒不满足；注册仅在冰女王专属掉落 1914 上，neededWave=15）
+      return (ctx.moonEvent?.wave ?? 0) >= Number(args[0] ?? 0);
+    }
+    case 'PumpkinMoonDropGatingChance': case 'FrostMoonDropGatingChance': {
+      // 稀有掉落总门（Conditions.cs:55-121）：霜月基数 28 / 南瓜月 24；
+      // 专家 wave+5；denom = ⌊(base-wave)/2.5⌋，专家再 -2(霜)/-1(南瓜)；下限 1；
+      // RollLuck(denom)==0 才放行（luck=0 ≡ rng.Next(denom)==0）
+      const me = ctx.moonEvent;
+      const frost = name === 'FrostMoonDropGatingChance';
+      if (!me || me.kind !== (frost ? 1 : 2)) return false;
+      let wave = me.wave;
+      if (ctx.isExpert) wave += 5;
+      let denom = Math.trunc(((frost ? 28 : 24) - wave) / 2.5);
+      if (ctx.isExpert) denom -= frost ? 2 : 1;
+      if (denom < 1) denom = 1;
+      return rollLuck(ctx, denom, 1);
+    }
+    case 'PumpkinMoonDropGateForTrophies': case 'FrostMoonDropGateForTrophies': {
+      // 纪念碑门（Conditions.cs:123-229）：wave≥15；denom = 4(15/16)/3(17/18)/2(19/20+)，
+      // 专家 1/3 概率再 -1；info.rng.Next(denom)==0
+      const me = ctx.moonEvent;
+      const frost = name === 'FrostMoonDropGateForTrophies';
+      if (!me || me.kind !== (frost ? 1 : 2) || me.wave < 15) return false;
+      let denom = me.wave >= 19 ? 2 : me.wave >= 17 ? 3 : 4;
+      if (ctx.isExpert && ctx.rng.int(0, 2) === 0) denom--;
+      return ctx.rng.int(0, Math.max(1, denom) - 1) === 0;
+    }
     case 'EmpressOfLightIsGenuinelyEnraged': return false;
     case 'MissingTwin': return false;
     case 'RedHatSkeletron': return false;

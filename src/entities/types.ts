@@ -36,4 +36,6 @@ export interface GameHooks {
   showPickupLabel(itemKey: string): void;
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */
   dropContext?(): import('../drops/NpcDrops').DropExtras;
+  /** 月事件上下文（南瓜月/霜月 wave-gate 掉落条件）：Game 实现，缺省按无事件（恒 false） */
+  moonEventCtx?(): { kind: 1 | 2; wave: number } | null;
 }

@@ -39,8 +39,30 @@ void Checkpoint(string name)
     checkpoints.Add($"{name}|{Fnv16(hashTyp):x8} {Fnv8(act):x8} {Fnv16(wal):x8} {Fnv8(liq):x8}");
 }
 
-// CanBeClearedDuringGeneration = false 全集（TileID.cs:321）
+// solid 表：源自仓库 TILE_DEFS（已对原版全表审计，见 vanilla-solid-audit 记忆）。
+// 反射 Main.tileSolid 会触发 FNA 静态构造，不可行。
+// 兼容旧引用（NOT_CLEAR 仍用于 TileRunner flag4/Cavinator）
+var SOLID = new HashSet<ushort> { 0,1,2,7,6,9,8,30,10,53,147,57,166,167,168,169,22,37,58,204,
+   107,108,111,221,222,223,211,63,64,65,66,67,68,161,162,206,148,396,397,404,
+   40,54,56,38,39,59,123,368,226,367,633,181,189,183,536,225,483,224,383,179,
+   384,273,381,48,192,191,196,118,321,152,158,357,272,229,311,130,193,190,350,369,
+   137,117,112,232,274,322,109,312,422,495,479,477,380,230,562,371,668,398,379,618,
+   484,138,388,387,235,625,151,234,182,45,399,248,175,539,481,119,120,714,664,711,
+   715,716,713,23,41,75,199,60,70,25,202,43,44,203,255,256,257,258,259,260,
+   261,262,263,264,265,266,267,268,421,476,546,557,482,163,200,116,76,46,47,115,
+   121,122,127,140,145,146,150,153,154,155,156,157,159,160,164,170,176,177,180,188,
+   194,195,197,198,208,239,249,250,251,252,253,284,313,315,325,326,327,328,329,336,
+   341,342,343,344,345,346,347,348,351,365,366,370,385,400,401,402,403,407,408,409,
+   415,416,417,418,426,427,430,431,432,433,434,435,436,437,438,439,446,447,448,449,
+   450,451,458,459,460,472,473,474,478,492,496,498,500,501,502,503,507,508,512,513,
+   514,515,516,517,534,535,537,540,541,563,566,626,627,628,635,641,659,661,662,666,
+   667,669,670,671,672,673,674,675,676,677,678,679,680,681,682,683,684,685,686,687,
+   688,689,690,691,692,708,712,717,718,719,722,726,727,728,729,730,731,732,734,735,
+   736,737,738,739,740,741,742,743,744,745,746,747,748,749,750, };
+
 var NOT_CLEAR = new HashSet<ushort> { 396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237 };
+bool CanBeCleared(ushort t) => !NOT_CLEAR.Contains(t);
+bool IsSolidT(ushort t) => SOLID.Contains(t);
 var TILE_DUNGEON = new HashSet<ushort> { 41, 43, 44, 677, 678, 679 };
 var WALL_DUNGEON = new HashSet<ushort> { 7, 8, 9, 94, 95, 96, 97, 98, 99 };
 var FLAG3_ALWAYS = new HashSet<ushort> { 45, 147, 189, 190, 196, 460, 717, 718, 719 };
@@ -1270,6 +1292,80 @@ Checkpoint("grass");
     }
 }
 Checkpoint("jungle");
+
+// ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================
+{
+    int grassSpread = 0;
+    void SpreadGrass(int i, int j)
+    {
+        if (i < 10 || i >= W - 10 || j < 10 || j >= H - 10) return; // InWorld(i,j,10)
+        int ci = j * W + i;
+        if (act[ci] == 0 || typ[ci] != 59) return;
+        int x0 = Math.Max(0, i - 1), x1 = Math.Min(W, i + 2);
+        int y0 = Math.Max(0, j - 1), y1 = Math.Min(H, j + 2);
+        bool enclosed = true;
+        for (int k = x0; k < x1; k++)
+        {
+            for (int l = y0; l < y1; l++)
+            {
+                int wi = l * W + k;
+                if (act[wi] == 0 || !IsSolidT(typ[wi])) enclosed = false;
+                if (liqT[wi] == 1 && liq[wi] > 0) { enclosed = true; break; } // lava 只 break 内层
+            }
+        }
+        if (enclosed || !CanBeCleared(typ[ci])) return;
+        typ[ci] = 60;
+        for (int m = x0; m < x1; m++)
+            for (int n = y0; n < y1; n++)
+            {
+                int ni = n * W + m;
+                if (act[ni] == 1 && typ[ni] == 59 && grassSpread < 1000)
+                {
+                    grassSpread++;
+                    SpreadGrass(m, n);
+                    grassSpread--;
+                }
+            }
+    }
+    for (int i = 0; i < W; i++)
+        for (int j = 0; j < H; j++)
+            if (act[j * W + i] == 1) { grassSpread = 0; SpreadGrass(i, j); }
+    // ScanTileColumnAndRemoveClumps（cs:10164-10192 + tileCounter cs:10029-10070）
+    const int CMAX = 20;
+    int[] cx = new int[CMAX], cy = new int[CMAX];
+    int cn = 0;
+    void Flood(int x, int y)
+    {
+        if (cn >= CMAX || x < 5 || x >= W - 5 || y < 5 || y >= H - 5) return;
+        int i = y * W + x;
+        if (act[i] == 0 || !IsSolidT(typ[i]) || !CanBeCleared(typ[i])) return;
+        for (int n = 0; n < cn; n++) if (cx[n] == x && cy[n] == y) return;
+        cx[cn] = x; cy[cn] = cn >= 0 ? y : y; cn++;
+        Flood(x - 1, y); Flood(x + 1, y); Flood(x, y - 1); Flood(x, y + 1);
+    }
+    for (int x = 10; x < W - 10; x++)
+    {
+        int run = 0, runY = 0;
+        for (int y = 10; y < H - 10; y++)
+        {
+            int i = y * W + x;
+            if (act[i] == 1 && IsSolidT(typ[i]) && CanBeCleared(typ[i]))
+            {
+                if (run == 0) runY = y;
+                run++;
+                continue;
+            }
+            if (run > 0 && run < CMAX)
+            {
+                cn = 0;
+                Flood(x, runY);
+                if (cn < CMAX) for (int n = 0; n < cn; n++) act[cy[n] * W + cx[n]] = 0;
+            }
+            run = 0;
+        }
+    }
+}
+Checkpoint("mudcaves");
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {

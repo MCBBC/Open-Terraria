@@ -12,6 +12,25 @@ import type { World } from '../World';
 import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
+import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
+
+/** 月事件刷怪上下文（Game 每帧随 setPlayerFlags 传入） */
+export interface MoonEventSpawnCtx {
+  /** 1=霜月 2=南瓜月（MoonEventState.kind） */
+  kind: number;
+  /** 当前波（MoonEventState.waveNumber） */
+  wave: number;
+  /** 场上存活 NPC 计数（id → 数量；选表 CountNPCS 用） */
+  counts: ReadonlyMap<number, number>;
+  /** Boss 族 npcSlots 总和（reachedInvasionBossCap 判定用，NPC.cs:159-183） */
+  bossSlotSum: number;
+}
+
+/** Boss 族（npcSlots 计入 reachedInvasionBossCap 的集合，NPC.cs:166-180） */
+const MOON_BOSS_IDS = new Set([315, 325, 327, 328, 344, 345, 346]);
+export { MOON_BOSS_IDS };
+/** 单人 maxSpawns 上限 = ⌊5×(2+0.3×1)⌋ = 11（NPC.cs:174 num2） */
+const MOON_BOSS_CAP_SLOTS = Math.floor(5 * (2 + 0.3 * 1));
 
 // ---- 原版 tile type 常量（TileID），我们通过 TILE_BY_KEY 反查内部 id ----
 const T = (() => {
@@ -218,15 +237,24 @@ export class VanillaSpawner {
   /** 玩家级 Zone 旗标（原版 Spawner.SetSpawnFlags L300：ZoneDungeon = player.ZoneDungeon——
    *  SceneMetrics 按玩家中心窗口判定，与落脚点无关）。Game 每帧刷怪前调用。
    *  invaders = ShouldSpawnInvasionEnemies(NPC.cs:352，入侵前线 3000px 内的地表玩家)；
-   *  activeIds = 场上存活 NPC 的 vanillaId 集（选表 AnyNPCs 去重用） */
+   *  activeIds = 场上存活 NPC 的 vanillaId 集（选表 AnyNPCs 去重用）；
+   *  moonEvent = 月事件上下文（事件开启时 Game 传入；null=无事件） */
   invaders = false;
   activeIds: Set<number> = new Set();
+  /** 月事件上下文（null=无事件）+ 当帧 Boss 上限旗标（Spawner.ctor NPC.cs:159-183） */
+  moonEvent: MoonEventSpawnCtx | null = null;
+  moonBossCap = false;
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
-    invaders = false, activeIds: Set<number> = new Set()): void {
+    invaders = false, activeIds: Set<number> = new Set(),
+    moonEvent: MoonEventSpawnCtx | null = null): void {
     this.ZoneDungeon = zoneDungeon;
     this.downedBoss3 = downedSkeletron;
     this.invaders = invaders;
     this.activeIds = activeIds;
+    this.moonEvent = moonEvent;
+    // reachedInvasionBossCap（Spawner 构造器 NPC.cs:159-183）：Boss 族 npcSlots 总和
+    // ≥ 玩家数 × maxSpawns 上限（单人 ⌊5×2.3⌋=11）时当帧不刷 Boss
+    this.moonBossCap = moonEvent != null && moonEvent.bossSlotSum >= 1 * MOON_BOSS_CAP_SLOTS;
   }
 
   /** 天气注入（Game 每 15 tick 下发）：cloudAlpha（雨强度，雪原刷怪修正）与沙尘暴态（怪池） */
@@ -460,10 +488,15 @@ export class VanillaSpawner {
   /** GetSpawnRate（L383-668，单机非 remix 分支）：
    *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
-   *  血月/日食/南瓜月/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
+   *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE): { spawnRate: number; maxSpawns: number } {
+    // 月事件覆盖（L681-685）：南瓜月/霜月且玩家在地表（remix 省略）→
+    // rate=20、max=⌊5×(2+0.3n)⌋（单人 11）；先于 invaders 覆盖（原版即此顺序）
+    if (this.moonEvent && playerYpx < this.world.groundLevel * 16) {
+      return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
+    }
     // 入侵覆盖（L691-695）：rate=20（每帧 1/20 尝试），上限 5*(2+0.3n)（单人 11）
     if (this.invaders) {
       return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
@@ -658,6 +691,247 @@ export class VanillaSpawner {
     if (rng.next() < 0.25) return this.spawnNPC(x, y, row[0], rng);
     if (rng.next() < 0.25) return this.spawnNPC(x, y, row[1], rng);
     return this.spawnNPC(x, y, row[2], rng);
+  }
+
+  // ---- 月事件选怪（霜月 NPC.cs:2714-3132 / 南瓜月 :3134-3455，1:1） ----
+  /** CountNPCS（场内存活数）：activeIds 只去重，计数走 Game 传入的 counts 表 */
+  private moonCount(id: number): number {
+    return this.moonEvent?.counts.get(id) ?? 0;
+  }
+
+  /** 霜月选怪：返回 netId；0 = 本帧不刷（原版空过，勿加兜底——14 波三 Boss 唯一门
+   *  全被占时不刷是原版行为）。任意波先掷 1/30 && CountNPCS(341)<4 → 礼物窃贼 341。 */
+  private pickFrostMoonSpawn(wave: number, rng: RNG): number {
+    const N = (n: number) => rng.next() < 1 / n;
+    const C = (id: number) => this.moonCount(id);
+    if (N(30) && C(341) < 4) return 341;
+    if (wave >= 20) {
+      const num45 = rng.int(0, 2);   // 原版在 bossCap 检查前先掷（RNG 流对齐）
+      if (!this.moonBossCap) {
+        if (num45 === 0) return 345;   // 冰雪女王
+        if (num45 === 1) return 346;   // 圣诞坦克
+        return 344;                    // 常世吼
+      }
+      return 0;
+    }
+    if (wave >= 19) {
+      if (N(10) && C(345) < 4) return 345;
+      if (N(10) && C(346) < 5) return 346;
+      if (N(10) && C(344) < 7) return 344;
+      return 343;                      // 雪怪兜底
+    }
+    if (wave >= 18) {
+      if (N(10) && C(345) < 3) return 345;
+      if (N(10) && C(346) < 4) return 346;
+      if (N(10) && C(344) < 6) return 344;
+      if (N(3)) return 348;            // 胡桃夹子
+      if (N(3)) return 351;            // 坎卜斯
+      return 343;
+    }
+    if (wave >= 17) {
+      if (N(10) && C(345) < 2) return 345;
+      if (N(10) && C(346) < 3) return 346;
+      if (N(10) && C(344) < 5) return 344;
+      if (N(4)) return 347;            // 玩具直升机
+      if (N(2)) return 351;
+      return 343;
+    }
+    if (wave >= 16) {
+      if (N(10) && C(345) < 2) return 345;
+      if (N(10) && C(346) < 2) return 346;
+      if (N(10) && C(344) < 4) return 344;
+      if (N(2)) return 352;            // 弗洛科
+      return 343;
+    }
+    if (wave >= 15) {
+      if (N(10) && C(345) < 1) return 345;
+      if (N(10) && C(346) < 2) return 346;
+      if (N(10) && C(344) < 3) return 344;
+      if (N(3)) return 347;
+      return 343;
+    }
+    switch (wave) {
+      case 14:
+        if (N(10) && C(345) < 1) return 345;
+        if (N(10) && C(346) < 1) return 346;
+        if (N(10) && C(344) < 1) return 344;
+        if (N(3)) return 343;
+        return 0;   // 原版 case 14 无 else 兜底：全落空即空刷（勿修）
+      case 13:
+        if (N(10) && C(345) < 1) return 345;
+        if (N(10) && C(346) < 1) return 346;
+        if (N(3)) return 352;
+        if (N(6)) return 343;
+        if (N(3)) return 342;
+        return 347;
+      case 12:
+        if (N(10) && C(345) < 1) return 345;
+        if (N(10) && C(344) < 1) return 344;
+        if (N(8)) return 343;
+        if (N(3)) return 342;
+        return rng.int(338, 340);       // Main.rand.Next(338,341)
+      case 11:
+        if (N(10) && C(345) < 1) return 345;
+        if (N(6)) return 352;
+        if (N(2)) return 342;
+        return rng.int(338, 340);
+      case 10:
+        if (N(10) && C(346) < 1) return 346;
+        if (N(10) && C(344) < 2) return 344;
+        if (N(6)) return 351;
+        if (N(3)) return 348;
+        if (N(3)) return 347;
+        return rng.int(338, 340);
+      case 9:
+        if (N(10) && C(346) < 1) return 346;
+        if (N(10) && C(344) < 1) return 344;
+        if (N(2)) return 348;
+        if (N(3)) return 347;
+        return 342;
+      case 8:
+        if (N(10) && C(346) < 1) return 346;
+        if (N(8)) return 351;
+        if (N(3)) return 348;
+        if (N(3)) return 347;
+        return 350;                     // 精灵弓手
+      case 7:
+        if (N(10) && C(346) < 1) return 346;
+        if (N(3)) return 342;
+        if (N(4)) return 350;
+        return rng.int(338, 340);
+      case 6:
+        if (N(10) && C(344) < 2) return 344;
+        if (N(4)) return 347;
+        if (N(2)) return 348;
+        return 350;
+      case 5:
+        if (N(10) && C(344) < 1) return 344;
+        if (N(4)) return 350;
+        if (N(8)) return 348;
+        return rng.int(338, 340);
+      case 4:
+        if (N(10) && C(344) < 1) return 344;
+        if (N(4)) return 350;
+        if (N(3)) return 342;
+        return rng.int(338, 340);
+      case 3:
+        if (N(8)) return 348;
+        if (N(4)) return 350;
+        if (N(3)) return 342;
+        return rng.int(338, 340);
+      case 2:
+        if (N(3)) return 350;
+        return rng.int(338, 340);
+      default:                           // wave 1
+        if (N(3)) return 342;            // 姜饼人
+        return rng.int(338, 340);        // 精灵僵尸
+    }
+  }
+
+  /** 南瓜月选怪：返回 netId；0 = 本帧不刷（19 波 bossCap 占满后可能空刷，原版行为勿修）。
+   *  注意 wave 15-18 首支是独立 if（原版命中后仍会落入后续 else-if 链再判一次；
+   *  单返回值实现取首个命中即返回，语义等价） */
+  private pickPumpkinMoonSpawn(wave: number, rng: RNG): number {
+    const N = (n: number) => rng.next() < 1 / n;
+    const C = (id: number) => this.moonCount(id);
+    if (wave >= 20) {
+      if (!this.moonBossCap) {
+        if (N(2) && C(327) < 2) return 327;                 // 南瓜王
+        if (rng.next() >= 1 / 3 && C(325) < 2) return 325;  // Next(3)!=0 → 悲木
+        if (C(315) < 3) return 315;                          // 无头骑士
+      }
+      return 0;
+    }
+    switch (wave) {
+      case 19:
+        if (N(5) && C(327) < 2) return 327;
+        if (N(5) && C(325) < 2) return 325;
+        if (!this.moonBossCap && C(315) < 5) return 315;
+        return 0;   // 原版 case 19 无 else：三支全落空即空刷（勿修）
+      case 18:
+        if (N(7) && C(327) < 2) return 327;
+        if (N(7) && C(325) < 2) return 325;
+        if (N(7) && C(315) < 3) return 315;
+        return 330;                      // 胡闹鬼
+      case 17:
+        if (N(7) && C(327) < 2) return 327;
+        if (N(7) && C(325) < 2) return 325;
+        if (N(7) && C(315) < 2) return 315;
+        if (N(3)) return 330;
+        return 329;                      // 地狱犬
+      case 16:
+        if (N(10) && C(327) < 2) return 327;
+        if (N(10) && C(315) < 2) return 315;
+        if (N(6)) return 330;
+        if (N(3)) return 329;
+        return 326;                      // 树怪
+      case 15:
+        if (N(10) && C(327) < 1) return 327;
+        if (N(7) && C(325) < 2) return 325;
+        if (N(5)) return 330;
+        if (N(3)) return 326;
+        return rng.int(305, 314);        // 稻草人 Next(305,315)
+      case 14:
+        if (N(10) && C(327) < 1) return 327;
+        if (N(7) && C(325) < 2) return 325;
+        if (N(10) && C(315) < 1) return 315;
+        if (N(10)) return 330;
+        if (N(7)) return 329;
+        if (N(3)) return 326;
+        return rng.int(305, 314);
+      case 13:
+        if (N(7) && C(325) < 2) return 325;
+        if (N(10) && C(315) < 2) return 315;
+        if (N(6)) return 330;
+        if (N(3)) return 329;
+        return 326;
+      case 12:
+        if (N(5) && C(327) < 1) return 327;
+        return 330;
+      case 11:
+        if (N(7) && C(325) < 2) return 325;
+        if (N(3)) return 330;
+        return 326;
+      case 10:
+        if (N(10) && C(327) < 1) return 327;
+        if (N(3)) return 329;
+        return rng.int(305, 314);
+      case 9:
+        if (N(10) && C(325) < 2) return 325;
+        if (N(8)) return 330;
+        if (N(5)) return 329;
+        if (N(2)) return 326;
+        return rng.int(305, 314);
+      case 8:
+        if (N(8) && C(315) < 2) return 315;
+        if (N(4)) return 330;
+        return 329;
+      case 7:
+        if (N(7) && C(325) < 2) return 325;
+        if (N(4)) return 330;
+        return 329;
+      case 6:
+        if (N(7) && C(325) < 2) return 325;
+        if (N(2)) return 326;
+        return rng.int(305, 314);
+      case 5:
+        if (N(10) && C(315) < 1) return 315;
+        return 329;
+      case 4:
+        // 原版怪癖（NPC.cs:3421）：判定是 !AnyNPCs(325)（悲木唯一）却刷 330（胡闹鬼）
+        // ——疑似复制粘贴笔误，照抄源码不"修"
+        if (N(8) && C(325) < 1) return 330;
+        if (N(2)) return 326;
+        return rng.int(305, 314);
+      case 3:
+        if (N(3)) return 329;
+        return 326;
+      case 2:
+        if (N(3)) return 326;
+        return rng.int(305, 314);
+      default:                           // wave 1
+        return rng.int(305, 314);        // 稻草人
+    }
   }
 
   // ---- SpawnAnNPC（L1186-5144）——肉前分支 1:1，hardMode 分支保留 ----
@@ -919,6 +1193,15 @@ export class VanillaSpawner {
     // ---- 陨石带（L2704：else if (ZoneMeteor)）----
     //  ZoneMeteor = 玩家窗口内陨石 tile ≥75（SceneMetrics.cs:56 MeteorTileThreshold）→ 陨石头 23
     if (this.ZoneMeteor) return D(23);
+    // ---- 月事件（NPC.cs:2714-3455：霜月在先、南瓜月在后，均位于陨石段之后、日食段之前）----
+    //  门 = (spawnTileY <= worldSurface || remix) && !dayTime && 事件开启（remixWorld 省略）
+    if (this.moonEvent && this.spawnTileY <= this.world.groundLevel && !this.dayTime) {
+      const pick = this.moonEvent.kind === MOON_KIND_FROST
+        ? this.pickFrostMoonSpawn(this.moonEvent.wave, rng)
+        : this.pickPumpkinMoonSpawn(this.moonEvent.wave, rng);
+      if (pick !== 0) return D(pick);
+      return null;   // 波内全部分支落空（霜月 14 波 / 南瓜 19 波 bossCap 后）= 原版空过
+    }
     // ---- 日食（NPC.cs:3459-3525：地表 && dayTime && eclipse——1.4.5.6 重做后的全表）----
     //  门 = spawnTileY <= worldSurface（remix 深层支省略）&& 白天 && eclipse；
     //  flag14 = 三机械全杀（downedMechBoss1/2/3 = 134 / 125|126 / 127）

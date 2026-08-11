@@ -15,6 +15,11 @@ import {
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
   tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
 } from '../world/Invasion';
+import {
+  MOON_KIND_FROST, MOON_KIND_PUMPKIN, MOON_EVENT_GROUP, REQUIRED_POINTS,
+  moonEventActive, startMoonEvent, stopMoonEvent, addMoonEventKill,
+  invasionWaveText,
+} from '../world/MoonEvent';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
@@ -26,7 +31,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
 import { projectileData } from '../data/vanillaProjectiles';
-import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
+import { VanillaSpawner, MOON_BOSS_IDS } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
@@ -213,6 +218,10 @@ export class Game implements GameHooks {
   private _lastClockT = 0.3;
   /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
   private invasionWarn = 0;
+  /** 月事件 wave≥15 胜利后的当日强制季节（原版 Main.forceHalloweenForToday /
+   *  forceXMasForToday，运行时不存档；每黎明先清再按事件重设，Main.cs:10833-10846） */
+  private forceHalloweenForToday = false;
+  private forceXMasForToday = false;
   private tickCount = 0;
 
   // 挖掘状态
@@ -1214,11 +1223,11 @@ export class Game implements GameHooks {
     w.clock.tick(dt * 1000);
     // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
     this.updateWeather();
-    // 昼夜切换：提示 + BGM 变奏
+    // 昼夜切换：公告走原版消息列（Main.NewText→LegacyChatMonitor；ChatColors.World 50,255,130）
     const isDay = w.clock.isDay;
     if (isDay !== this.lastWasDay) {
       if (this.lastWasDay !== null) {
-        this.cb.onToast(isDay ? Lang.text('Mods.SandboxWorld.Toast.DayStart') : Lang.text('Mods.SandboxWorld.Toast.NightFall'));
+        this.newText(isDay ? Lang.text('Mods.SandboxWorld.Toast.DayStart') : Lang.text('Mods.SandboxWorld.Toast.NightFall'), 50, 255, 130);
         this.cb.onDayNight?.(isDay);
         // 昼/夜逻辑感应器(423)触发
         this.triggerDayNightSensors();
@@ -1284,8 +1293,13 @@ export class Game implements GameHooks {
           break;
         }
       }
+      // 月事件 BGM（Main.cs:12914-12921，链尾最高优先级）：相机在地表
+      // worldSurface+10 格带内时覆盖一切（含 Boss 曲）；南瓜月 30 / 霜月 32
+      const moonMusic = w.moonEvent.kind === MOON_KIND_PUMPKIN ? 30
+        : w.moonEvent.kind === MOON_KIND_FROST ? 32 : 0;
+      const moonMusicGated = moonMusic && this.player.cy / TILE < w.groundLevel + 10 ? moonMusic : 0;
       const music = pickMusic({
-        scene: this.scene, isDay, bossMusic, invasionMusic,
+        scene: this.scene, isDay, bossMusic, invasionMusic, moonMusic: moonMusicGated,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
@@ -1551,6 +1565,37 @@ export class Game implements GameHooks {
         // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
+        // ---- 月事件黎明结算（UpdateTime_StartDay :64867-64871，顺序固定：
+        //      总分广播 → 强制季节 → stop；须在下方日食 roll 之前）----
+        // 每黎明先重置强制季节位（Main.cs:10833-10835 CheckForMoonEvents… 首两行）
+        this.forceHalloweenForToday = false;
+        this.forceXMasForToday = false;
+        if (moonEventActive(w)) {
+          // CheckForMoonEventsScoreDisplay（Main.cs:10865-10877）：Misc.*MoonScore
+          this.newText(
+            Lang.text(w.moonEvent.kind === MOON_KIND_PUMPKIN
+              ? 'Misc.PumpkinMoonScore' : 'Misc.FrostMoonScore',
+            Math.floor(w.moonEvent.totalInvasionPoints)), 175, 75, 255);
+          // CheckForMoonEventsStartingTemporarySeasons（Main.cs:10837-10862）：
+          // wave≥15 → 当日强制季节 + 变更公告（forceHalloween/XMasForever 未实现）
+          if (w.moonEvent.waveNumber >= 15) {
+            const forceHalloween = w.moonEvent.kind === MOON_KIND_PUMPKIN;
+            if (forceHalloween) this.forceHalloweenForToday = true;
+            else this.forceXMasForToday = true;
+            this.newText(Lang.text(forceHalloween
+              ? 'Misc.StartedVictoryHalloween' : 'Misc.StartedVictoryXmas'), 50, 255, 130);
+          }
+          // stopMoonEvent（Main.cs:10879-10901）：三字段清零（不进存档）
+          stopMoonEvent(w);
+          // 场上事件怪离场（NPC.cs:63029：事件结束后 Charger 族 EncourageDespawn；
+          // 此处对全组号 -1/-2 近似，交由各自 despawn 倒数收尾）
+          for (const e of this.entities.enemies) {
+            const en = e as Enemy;
+            if (!en.dead && en.vanillaId != null && MOON_EVENT_GROUP[en.vanillaId] !== undefined) {
+              en.encourageDespawn(10);
+            }
+          }
+        }
         this.checkSeasonal();
         // 入侵冷却递减（Main.cs:64846-64849；1.4.5.6 无置位点，仅保留语义）
         if (w.invasionDelay > 0) w.invasionDelay--;
@@ -1587,6 +1632,7 @@ export class Game implements GameHooks {
       }
       if (crossed(0.75)
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
+        && w.moonEvent.kind === 0      // 月事件进行中不 roll 血月（Main.cs:64300-64306 压制）
         && player.maxHp > 120 && Math.random() < 1 / 9) {
         // 黄昏血月 roll（Main.cs:64813-64831：1/9，新月不行，需生命上限>120）
         w.clock.bloodMoon = true;
@@ -2189,6 +2235,24 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
+    } else if (heldDef && (heldDef.key === 'vi_1844_pumpkin_moon_medallion' || heldDef.key === 'vi_1958_naughty_present')
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 南瓜月/霜月召唤物（1844 PumpkinMoonMedallion / 1958 NaughtyPresent，
+      //  Player.cs:43294/43361 ItemCheck + Main.startPumpkinMoon/startSnowMoon :10903-10940）：
+      //  门 = !dayTime && !pumpkinMoon && !snowMoon；成功 → 置位 + 清血月 + 广播 wave 1 文案。
+      //  useTime 45（Item.cs:20377-20385 / 21121-21128）。军队入侵进行中不开
+      //  （invaders 与月事件刷怪段互斥，避免两事件打架——原版 DD2 同门）
+      const kind = heldDef.key === 'vi_1844_pumpkin_moon_medallion' ? MOON_KIND_PUMPKIN : MOON_KIND_FROST;
+      if (this.world.clock.isDay) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
+      } else if (this.world.moonEvent.kind === 0 && this.world.invasionType === 0) {
+        const ann = startMoonEvent(this.world, kind);
+        if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 45;
+        this.cb.onInventoryChanged();
+      }
+      this.input.mouseDown = false;
     } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
@@ -2252,8 +2316,7 @@ export class Game implements GameHooks {
         const dmg = cw.shoot === 28 ? 100 : cw.shoot === 29 ? 250 : Math.max(cw.damage, 60);
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
-        const er = cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 4
-          : cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 7 : 0;
+        const er = Game.EXPLODE_RADIUS[cw.shoot] ?? 0;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0)), 'projectiles');
@@ -2606,6 +2669,14 @@ export class Game implements GameHooks {
       this.breakHive(x, y);
       return;
     }
+    // 附魔剑圣地之剑（原版 KillTile case 187/706, WorldGen.cs:49676/49838-49848）：
+    // 真 187 style17（锚点帧 918-970）→ 1/30 泰拉魔刃(4144) 否则附魔剑(989)；
+    // 706 回声恒掉 4144。假剑 186 style15 无掉落走 def.drop:null 兜底，不在此拦。
+    // 须在 object 锚点分支前拦（否则锚点路径掉落被 drop:null 吞掉）
+    if (type === TILE_BY_KEY['v_187_decos_3x2_group_2'] || type === TILE_BY_KEY['v_706_terragrim_shrine_echo']) {
+      this.breakShrineSword(x, y, type);
+      return;
+    }
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
     const doorAnchor = clearDoorAt(st, x, y);
     if (doorAnchor) {
@@ -2716,6 +2787,48 @@ export class Game implements GameHooks {
   }
 
   /** 幼虫破坏（KillTile case 231）：3×3 整件清除 + 300 格内召蜂后（无掉落） */
+  /** 圣地之剑破坏（KillTile case 187 style17 / 706，WorldGen.cs:49676/49838-49848 1:1）：
+   *  187 真 187 style17（锚点帧 918-970）→ Main.rand.Next(30)==0 泰拉魔刃(4144)，
+   *  否则附魔剑(989)；706 回声恒掉 4144。其他 style（蜘蛛巢覆饰等）不掉落。
+   *  锚点帧必须在清格前捕获 */
+  private breakShrineSword(x: number, y: number, type: number) {
+    const st = this.world.store;
+    const def = TILE_DEFS[type];
+    const ow = def?.w ?? 1, oh = def?.h ?? 1;
+    // 锚点（同 breakTile 通用算法）：相位 (0,0) 且框包含命中格，取帧最小
+    let ax = x, ay = y, best = Infinity;
+    for (let dx = -(ow - 1); dx <= ow - 1; dx++) {
+      for (let dy = -(oh - 1); dy <= oh - 1; dy++) {
+        const nx = x + dx, ny = y + dy;
+        if (!st.inBounds(nx, ny) || st.type[st.idx(nx, ny)] !== type) continue;
+        const ni = st.idx(nx, ny);
+        const phaseAnchor = st.frameX[ni] % (ow * 18) === 0 && st.frameY[ni] % (oh * 18) === 0;
+        const boxContains = nx <= x && nx + ow > x && ny <= y && ny + oh > y;
+        if (phaseAnchor && boxContains) {
+          const key = st.frameY[ni] * 4096 + st.frameX[ni];
+          if (key < best) { best = key; ax = nx; ay = ny; }
+        }
+      }
+    }
+    const fx = st.frameX[st.idx(ax, ay)];
+    for (let dx = 0; dx < ow; dx++) {
+      for (let dy = 0; dy < oh; dy++) {
+        if (st.inBounds(ax + dx, ay + dy)) st.setTile(ax + dx, ay + dy, 0);
+      }
+    }
+    // 掉落判定（帧区间取锚点帧：187 style17 = 918..970，case 用 Main.rand）
+    let dropKey: string | null = null;
+    if (type === TILE_BY_KEY['v_706_terragrim_shrine_echo']) {
+      dropKey = VANILLA_ITEM_KEY_BY_ID[4144] ?? null;
+    } else if (fx >= 918 && fx <= 970) {
+      dropKey = VANILLA_ITEM_KEY_BY_ID[Math.random() < 1 / 30 ? 4144 : 989] ?? null;
+    }
+    if (dropKey && ITEM_BY_KEY[dropKey] !== undefined) {
+      this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
+    }
+    this.spawnParticles(x * TILE + 8, y * TILE + 8, def?.mapColor ?? '#C8C8C8', 8, 1.8);
+  }
+
   private breakLarva(x: number, y: number) {
     const st = this.world.store;
     const larva = TILE_BY_KEY['v_231_larva']!;
@@ -3448,6 +3561,8 @@ export class Game implements GameHooks {
 
   /** 天气 hooks（afterWorldLoad 构造；字段每帧在 updateWeather 刷新） */
   private weatherHooks: import('../render/WeatherRenderer').WeatherFxHooks | null = null;
+  /** 史莱姆雨延迟公告倒计时（Main.slimeWarningTime/Delay=420，UpdateSlimeRainWarning :64984） */
+  private slimeWarningTime = 0;
 
   /** 天气推进（原版 Main.UpdateWeather + updateCloudLayer + 雨调度/沙尘暴，60Hz）：
    *  atmo = 玩家深度线性近似（worldSurface 以上 1 / rockLevel 以下 0）；雷声按距离衰减；
@@ -3460,48 +3575,50 @@ export class Game implements GameHooks {
    *  storm=0.85+大风 / sandstorm=立即沙尘暴 / slimerain=立即史莱姆雨 / random=重掷 */
   applyWeatherPreset(name: string): void {
     const wd = this.world.weather;
+    // 反馈走原版消息列（ChatColors.World）；全字面键——vite l10n-audit 插件静态覆盖
+    const announce = (key: string) => this.newText(Lang.text(key), 50, 255, 130);
     switch (name) {
       case 'clear':
         wd.stopRain(true);
         wd.sandstorm.happening = false; wd.sandstorm.timeLeft = 0;
         wd.sandstorm.severity = 0; wd.sandstorm.intendedSeverity = 0;
         if (wd.slimeRain) wd.stopSlimeRain();
-        this.cb.onToast('天气：晴朗');
+        announce('Mods.SandboxWorld.Weather.PresetClear');
         break;
       case 'cloudy':
         wd.stopRain(true);
         wd.numClouds = 120; wd.numCloudsTemp = 120;
-        this.cb.onToast('天气：多云');
+        announce('Mods.SandboxWorld.Weather.PresetCloudy');
         break;
       case 'lightrain':
         wd.startRain(true, 0.15);
-        this.cb.onToast('天气：小雨');
+        announce('Mods.SandboxWorld.Weather.PresetLightRain');
         break;
       case 'heavyrain':
         wd.startRain(true, 0.65);
-        this.cb.onToast('天气：大雨');
+        announce('Mods.SandboxWorld.Weather.PresetHeavyRain');
         break;
       case 'storm':
         wd.startRain(true, 0.85);
         wd.windSpeedTarget = 0.6;
-        this.cb.onToast('天气：风暴');
+        announce('Mods.SandboxWorld.Weather.PresetStorm');
         break;
       case 'sandstorm':
         wd.sandstorm.happening = true;
         wd.sandstorm.timeLeft = 86400;
         wd.sandstorm.intendedSeverity = 0.8;
         wd.sandstorm.severity = Math.max(wd.sandstorm.severity, 0.5);
-        this.cb.onToast('天气：沙尘暴');
+        announce('Mods.SandboxWorld.Weather.PresetSandstorm');
         break;
       case 'slimerain':
         wd.startSlimeRain();
-        this.cb.onToast('天气：史莱姆雨');
+        announce('Mods.SandboxWorld.Weather.PresetSlimeRain');
         break;
       case 'random':
         wd.weatherCounter = 1; // 云量周期立即落盘重掷
         if (wd.raining || Math.random() < 0.5) wd.stopRain();
         else wd.startRain();
-        this.cb.onToast('天气：随机重掷');
+        announce('Mods.SandboxWorld.Weather.PresetReroll');
         break;
     }
   }
@@ -3559,16 +3676,23 @@ export class Game implements GameHooks {
         this.sfx.play('thunder', vol);
       },
       onSandstormToggle: (happening) => {
-        this.cb.onToast(happening ? '🏜 沙尘暴来了！' : '沙尘暴平息了');
+        // 原版沙尘暴无公告——保留提示但走原版消息列（ChatColors.World）
+        this.newText(Lang.text(happening ? 'Mods.SandboxWorld.Weather.SandstormOn' : 'Mods.SandboxWorld.Weather.SandstormOff'), 50, 255, 130);
       },
-      onSlimeRainToggle: (happening) => {
-        this.cb.onToast(happening ? '🟢 史莱姆从天而降！' : '史莱姆雨停了');
+      onSlimeRainToggle: () => {
+        // 原版 UpdateSlimeRainWarning（Main.cs:64984）：切换后 420t 延迟公告
+        // Lang.gen[74]（开始）/gen[75]（停止），色 ChatColors.World
+        this.slimeWarningTime = 420;
       },
     });
-    // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]）
+    // 史莱姆雨延迟公告倒计时（UpdateSlimeRainWarning :64988-64996 1:1）
+    if (this.slimeWarningTime > 0 && --this.slimeWarningTime === 0) {
+      this.newText(Lang.gen(weather.slimeRainTime > 0 ? 74 : 75), 50, 255, 130);
+    }
+    // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]→消息列）
     if (weather.coinRainPending) {
       weather.coinRainPending = false;
-      this.cb.onToast('💰 天上掉金币了！');
+      this.newText(Lang.gen(93), 50, 255, 130);
     }
     // 雨声层（程序化棕噪近似 XACT 循环层）
     this.sfx.setRain(weather.cloudAlpha * atmo);
@@ -3744,7 +3868,30 @@ export class Game implements GameHooks {
   private static readonly EXPLODE_NEVER = new Set([41, 43, 44, 677, 678, 679, 21, 467,
     26, 88, 121, 122, 150, 211, 226, 237, 248, 249, 250, 346, 470, 475, 504, 685, 686]);
   /** 困难模式矿石（仅 scarab 弹 1086/1087 可炸——未引入恒 false） */
-  private static readonly EXPLODE_HM_ORE = new Set([107, 108, 111, 221, 222, 223]);
+  private static readonly EXPLODE_HM_ORE = new Set([107, 108, 111, 221, 223]);
+  /** 爆炸半径表（Projectile.cs:75262）：炸弹族=4、炸药棍族=7、放置炸药 108=10；
+   *  表外（手雷 30 等）= 不破坏地形（Kill 判定表 :75260 之外） */
+  static readonly EXPLODE_RADIUS: Record<number, number> = {
+    28: 4, 37: 4, 516: 4, 519: 4, 29: 7, 470: 7, 637: 7, 108: 10,
+  };
+  /** CanExploteTile 纯函数版（测试用）：规则见 explodeAt 注释 */
+  static canExplodeTile(
+    st: World['store'], x: number, y: number, hardMode: boolean, golemDown: boolean, lavaLine: number,
+  ): boolean {
+    const t = st.get(x, y);
+    const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+    if (Game.EXPLODE_NEVER.has(sheet)) return false;
+    const ii = st.idx(x, y);
+    if (st.wall[ii] === 350) return false;
+    if (Game.EXPLODE_HM_ORE.has(sheet)) return false;
+    if ((sheet === 37 || sheet === 58) && !hardMode) return false;
+    if (sheet === 77 && !hardMode && y >= lavaLine) return false;
+    if (sheet === 137 && !golemDown) {
+      const row = Math.floor(st.frameY[ii] / 18);
+      if (row >= 1 && row <= 4) return false; // 神庙门行（:75805 (uint)(num-1)<=3）
+    }
+    return true;
+  }
 
   /** 爆炸 1:1（Projectile.ExplodeTiles cs:75835 + CanExploteTile cs:75764）：
    *  radius=Projectile.cs:75262 半径表（炸弹族28/37/516/519=4、炸药棍族29/470/637=7、
@@ -3758,21 +3905,8 @@ export class Game implements GameHooks {
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
     const golemDown = !!this.world.flags['downed_245'];
-    const canExplode = (x: number, y: number): boolean => {
-      const t = st.get(x, y);
-      const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
-      if (Game.EXPLODE_NEVER.has(sheet)) return false;
-      const ii = st.idx(x, y);
-      if (st.wall[ii] === 350) return false;
-      if (Game.EXPLODE_HM_ORE.has(sheet)) return false;
-      if ((sheet === 37 || sheet === 58) && !hardMode) return false;
-      if (sheet === 77 && !hardMode && y >= this.world.lavaLine) return false;
-      if (sheet === 137 && !golemDown) {
-        const row = Math.floor(st.frameY[ii] / 18);
-        if (row >= 1 && row <= 4) return false; // 神庙门行（:75805 (uint)(num-1)<=3）
-      }
-      return true;
-    };
+    const canExplode = (x: number, y: number): boolean =>
+      Game.canExplodeTile(st, x, y, hardMode, golemDown, this.world.lavaLine);
     // 半径内被炸的格：多格 framed 物体按整件清除（锚点邻域扫描，同 breakTile 语义），
     // 防半件残留可重复破坏；炸药(141/142)收集后链式引爆（原版连爆语义，上限 32 防递归）
     const chain: Array<[number, number]> = [];
@@ -4179,11 +4313,21 @@ export class Game implements GameHooks {
     const invaders = shouldSpawnInvasionEnemies(w, p.cx, p.cy, this.camera.viewH / (this.camera.zoom || 1),
       this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).map((n) => (n as TownNPC).cx));
     const activeIds = new Set<number>();
+    // 月事件选怪需要 CountNPCS（场上同 id 数量）与 Boss 族 npcSlots 总和
+    // （reachedInvasionBossCap，NPC.cs:159-183）——activeIds 只去重不够，同轮统计
+    const moonCounts = new Map<number, number>();
+    let moonBossSlotSum = 0;
     for (const e of this.entities.enemies) {
       const en = e as Enemy;
-      if (!en.dead && en.vanillaId != null) activeIds.add(en.vanillaId);
+      if (en.dead || en.vanillaId == null) continue;
+      activeIds.add(en.vanillaId);
+      moonCounts.set(en.vanillaId, (moonCounts.get(en.vanillaId) ?? 0) + 1);
+      if (MOON_BOSS_IDS.has(en.vanillaId)) moonBossSlotSum += en.vanilla?.npcSlots ?? 1;
     }
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds);
+    const moonCtx = w.moonEvent.kind !== 0
+      ? { kind: w.moonEvent.kind, wave: w.moonEvent.waveNumber, counts: moonCounts, bossSlotSum: moonBossSlotSum }
+      : null;
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx);
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -5070,9 +5214,10 @@ export class Game implements GameHooks {
   /** 季节旗标（checkXMas Main.cs:13054 / checkHalloween :13093：按现实日期） */
   private checkSeasonal() {
     const now = new Date();
-    this.world.clock.xMas = now.getMonth() === 11 && now.getDate() >= 15;
+    // 现实日期（checkXMas Main.cs:13054 / checkHalloween :13093）∪ 月事件胜利强制位
+    this.world.clock.xMas = (now.getMonth() === 11 && now.getDate() >= 15) || this.forceXMasForToday;
     this.world.clock.halloween = (now.getMonth() === 9 && now.getDate() >= 10)
-      || (now.getMonth() === 10 && now.getDate() <= 1);
+      || (now.getMonth() === 10 && now.getDate() <= 1) || this.forceHalloweenForToday;
   }
 
   /** 税务员收税领取（NPCInteractions TaxCollectorCollectTaxes + Player.CollectTaxes :23854）：
@@ -5156,6 +5301,12 @@ export class Game implements GameHooks {
       bloodMoon: !!c.bloodMoon, halloween: !!c.halloween, xmas: !!c.xMas,
       windy: Math.abs(this.world.weather.windSpeedCurrent) > 0.5,
     };
+  }
+
+  /** 月事件掉落上下文（NpcDrops 四个 wave-gate 条件数据源）；无事件返回 null */
+  moonEventCtx(): { kind: 1 | 2; wave: number } | null {
+    const me = this.world.moonEvent;
+    return me.kind === 0 ? null : { kind: me.kind, wave: me.waveNumber };
   }
 
   enemies() {
@@ -5256,6 +5407,15 @@ export class Game implements GameHooks {
       if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId) && !this.boss) {
         this.summonBoss('king_slime');
       }
+    }
+    // 月事件计分（NPC.cs CheckProgressFrostMoon/PumpkinMoon :79245/:79487）：
+    // 必须在掉落结算之后同帧调用（Enemy.hurt 尾部 onEnemyKilled 即 NPCLoot 之后，
+    // 对齐原版 checkDead NPCLoot → CheckProgress 顺序 NPC.cs:79020-79021），
+    // 保证本波掉落 gate 用的是进波前的 wave。进波公告由此处广播
+    if (enemy && enemy.vanillaId != null && moonEventActive(this.world)) {
+      const diff = this.player.appearance?.difficulty ?? 0;
+      const ann = addMoonEventKill(this.world, enemy.vanillaId, diff >= 2, diff >= 3);
+      if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
     }
     // 入侵击杀扣分（NPC.cs:79021-79054：组号匹配当前入侵类型才计分，加权扣减）
     if (!enemy || this.world.invasionType <= 0 || enemy.vanillaId == null) return;
@@ -6268,6 +6428,24 @@ export class Game implements GameHooks {
       // 入侵进度条（DrawInvasionProgress :47071；nearInvasion 显示门=屏内 ±5000px 有本组 NPC）
       (() => {
         const w = this.world;
+        // 月事件分支（CheckInvasionProgressDisplay :47006-47016：snowMoon/pumpkinMoon
+        // 先于常规入侵；name=LegacyInterface.83 霜月 / 84 南瓜月，pct=waveKills/lookup[wave]；
+        // 显示门 = 夜晚 + 玩家在地表 + 屏内 ±5000px 有本组 NPC，组号 -kind）
+        if (w.moonEvent.kind !== 0) {
+          const group = -w.moonEvent.kind;
+          const need = REQUIRED_POINTS[w.moonEvent.waveNumber] ?? 0;
+          if (need > 0 && !w.clock.isDay && this.player.cy <= w.groundLevel * 16) {
+            for (const e of this.entities.enemies) {
+              const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
+              if (en.vanillaId != null && MOON_EVENT_GROUP[en.vanillaId] === group
+                && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
+                return { name: Lang.inter(w.moonEvent.kind === MOON_KIND_PUMPKIN ? 84 : 83),
+                  pct: Math.min(1, w.moonEvent.waveKills / need) };
+              }
+            }
+          }
+          return null;
+        }
         if (w.invasionType <= 0 || w.invasionSizeStart <= 0) return null;
         const nameKey = w.invasionType === INVASION_PIRATE ? 86 : w.invasionType === INVASION_SNOW_LEGION ? 87 : 88;
         for (const e of this.entities.enemies) {

@@ -57,6 +57,10 @@ export interface MusicInput {
   /** 日食（Main.cs:12578-12585：非 remix 且相机在地表半屏带内 → Eclipse 27，
    *  优先级在 Boss/入侵曲之后、城镇/群系曲之前） */
   eclipse?: boolean;
+  /** 月事件 BGM（MusicID 30=南瓜月 / 32=霜月；0=无）。原版位于 DecideOnNewMusic
+   *  链尾（Main.cs:12914-12921）——覆盖一切（含 Boss 曲）；门=相机在地表
+   *  worldSurface+10 格带内。Game 侧算好传入 */
+  moonMusic?: number;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -105,7 +109,8 @@ export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: nu
   return (centerY / 16 - (65 + 10 * (maxTilesX / 4200) ** 2)) / (worldSurface / 5);
 }
 
-/** 按环境选曲（优先级链 1:1 对照 Main.cs:12155-12913；remixWorld/沙尘暴/微光/月事件分支省略）。
+/** 按环境选曲（优先级链 1:1 对照 Main.cs:12155-12913；remixWorld/沙尘暴/微光分支省略，
+ *  月事件（链尾最高优先级）见函数首 moonMusic 分支）。
  *  天气曲嵌在原版槽位内：44 风日只覆盖森林白天曲（L12886）与神圣地表（L12811），
  *  19 雨只在森林白天/夜晚/神圣地表，52 风暴只在丛林/神圣地表与非特殊地表尾槽 */
 export function pickMusic(inp: MusicInput): number {
@@ -121,6 +126,9 @@ export function pickMusic(inp: MusicInput): number {
   // 我们白天 timeOfDay∈[0.25,0.75] ↔ 原版 time∈[0,54000]（晨雨 59 判定 time<10800 用）
   const vanillaTime = ((inp.weather?.timeOfDay01 ?? 0.5) - 0.25) / 0.5 * 54000;
 
+  // 月事件（原版 L12914-12921 位于 DecideOnNewMusic 链尾=最高优先级，覆盖 Boss 曲；
+  // 门「相机在地表 worldSurface+10 带内」由 Game 侧判定后传入）
+  if (inp.moonMusic && inp.moonMusic > 0) return inp.moonMusic;
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
   if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;

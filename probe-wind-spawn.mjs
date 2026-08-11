@@ -20,7 +20,7 @@ const run = async () => {
     w.weather.shouldUseWindyDayMusic = true;
     const res = {};
     const tally = {};
-    for (let i = 0; i < 3000; i++) {
+    for (let i = 0; i < 6000; i++) {
       g.trySpawnEnemy();
       for (const e of g.entities.enemies) {
         if (e.vanillaId != null && ![1, 2, 3].includes(e.vanillaId)) tally[e.vanillaId] = (tally[e.vanillaId] ?? 0) + 1;

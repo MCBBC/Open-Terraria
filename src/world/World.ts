@@ -2,6 +2,7 @@
 import { TileStore } from './TileStore';
 import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
+import { newMoonEventState } from './MoonEvent';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
@@ -75,6 +76,10 @@ export class World {
    *  缺省 0=未知，使用处以 groundLevel 回退 */
   dungeonY = 0;
   jungleX = 0;             // 丛林位置
+  // ---- 南瓜月/霜月事件（原版 Main.pumpkinMoon/snowMoon + NPC.waveNumber 三字段）----
+  // 运行时状态，**不进存档**：原版这些字段均不写 WorldFile（主菜单即重置 Main.cs:48332），
+  // serialize/fromPacket 不碰本字段；读档后 kind=0 即无事件（对齐原版）
+  moonEvent = newMoonEventState();
   // ---- 入侵系统持久化状态（原版 WorldFile.cs:1306-1339 存档五元组）----
   /** 当前入侵类型（InvasionID：0=无 1=哥布林 2=雪人军团 3=海盗；4=火星后续） */
   invasionType = 0;
