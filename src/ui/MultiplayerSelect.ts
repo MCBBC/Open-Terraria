@@ -16,6 +16,10 @@ export interface MultiplayerSelectCallbacks {
   onJoinRoom: (url: string, hostToken: string) => void;
   /** 列出可开房的存档槽位（name + 存档 JSON 字符串） */
   listSaves: () => Promise<SaveEntry[]>;
+  /** 角色列表（加入房间使用的角色） */
+  listCharacters: () => Promise<Array<{ id: number; name: string }>>;
+  /** 选中角色（进游戏后应用外观并补发 SyncPlayer） */
+  onPickCharacter: (id: number) => void | Promise<void>;
   onBack: () => void;
 }
 
@@ -60,6 +64,30 @@ export class MultiplayerSelect {
     this.root.style.cssText =
       'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); max-width:520px; width:min(520px,96vw); z-index:20; cursor:auto; max-height:92vh; overflow-y:auto;';
     this.root.appendChild(el('h2', undefined, '多人联机'));
+
+    // ---- 角色选择（进房使用的角色；外观随 SyncPlayer 同步给其他玩家） ----
+    const charSel = el('select') as HTMLSelectElement;
+    charSel.style.cssText = 'width:100%; padding:6px; margin-bottom:10px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    charSel.appendChild(el('option', undefined, '默认角色（不使用捏人外观）'));
+    this.root.appendChild(charSel);
+    charSel.addEventListener('change', () => {
+      const id = parseInt(charSel.value, 10);
+      if (!Number.isNaN(id)) void cb.onPickCharacter(id);
+    });
+    void cb.listCharacters().then((chars) => {
+      let first = -1;
+      for (const c of chars) {
+        const opt = el('option', undefined, c.name) as HTMLOptionElement;
+        opt.value = String(c.id);
+        charSel.appendChild(opt);
+        if (first < 0) first = c.id;
+      }
+      // 有角色则默认选中第一个（进房即带外观）
+      if (first >= 0) {
+        charSel.value = String(first);
+        void cb.onPickCharacter(first);
+      }
+    });
 
     // ---- 服务器地址 ----
     const srvRow = el('div');

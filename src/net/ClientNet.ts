@@ -4,19 +4,26 @@
 import {
   PROTO_MAGIC, PROTO_VER, Msg, NetModule,
   NetWriter, NetReader, FrameParser, TileOp, TileOpAction, readTileBatch, decodeStrip,
+  ItemContainer, ItemSyncEntry, INV_SYNC_SIZES, writePlayerItems, readPlayerItems,
 } from './protocol';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { Lang } from '../i18n/Lang';
 
-/** 远端玩家状态（渲染用；Player 实例由 Game 持有池，这里只存同步数据） */
+/** 远端玩家状态（对齐原版 msg13 同步集：控制位+位置+速度；Player 实例由 Game 持有池） */
 export interface RemotePlayerState {
   slot: number;
   name: string;
   appearance: string;
+  /** 权威位置（碰撞盒左上，原版 player.position 语义）与速度 */
   x: number; y: number; vx: number; vy: number;
+  /** 控制位（原版 msg13 ctrlBits：Game 侧据此跑本地物理模拟） */
+  up: boolean; down: boolean; left: boolean; right: boolean; jump: boolean; useItem: boolean;
   facing: number; selectedItem: number; dead: boolean;
+  /** 新权威包到达标记（Game 消费注入 netOffset 后清零） */
+  fresh: boolean;
   active: boolean;
 }
 
@@ -145,6 +152,7 @@ export class ClientNet {
       }
       case Msg.PlayerSlot: {
         this.mySlot = r.u8();
+        this.invDumpPending = true; // 物品全量 dump 时机：slot 分配后首 tick
         // 全量上传自身（对齐原版 msg3 后立刻 SyncPlayer + RequestWorldData）
         const p2 = this.game.player as { appearance?: unknown } | undefined | null;
         const app = JSON.stringify(p2?.appearance ?? {});
@@ -159,7 +167,9 @@ export class ClientNet {
       case Msg.StatusText: {
         this.pendingStrips = r.u16();
         this.pendingStripsTotal = Math.max(1, this.pendingStrips);
-        this.hooks.onProgress?.('接收世界数据', 0);
+        // 仅初始组装期上报进度：进世界后 R3 移动续传也会触发 StatusText（fresh=0），
+        // 无条件回调会把已关闭的全屏进度遮罩重新拉起 → "永久卡在接收世界数据"
+        if (!this.worldDelivered) this.hooks.onProgress?.('接收世界数据', 0);
         return;
       }
       case Msg.TileSection: {
@@ -204,7 +214,11 @@ export class ClientNet {
         let p = this.players.get(slot);
         if (active) {
           if (!p) {
-            p = { slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0, facing: 1, selectedItem: 0, dead: false, active: true };
+            p = {
+              slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
+              up: false, down: false, left: false, right: false, jump: false, useItem: false,
+              facing: 1, selectedItem: 0, dead: false, fresh: false, active: true,
+            };
             this.players.set(slot, p);
           }
           p.active = true;
@@ -221,18 +235,40 @@ export class ClientNet {
         if (p) p.appearance = appearance;
         return;
       }
+      case Msg.SyncPlayerItem: {
+        // 远端物品/装备（msg5）：Game 侧拷入 proxy.inv 驱动手持/盔甲/挥舞渲染
+        const entries = readPlayerItems(r);
+        this.applyRemoteItems(entries.filter((e) => e.playerSlot !== this.mySlot));
+        return;
+      }
       case Msg.PlayerState: {
+        // v2 布局（对齐原版 msg13）：slot + ctrlBits + flagBits + selectedItem + pos [+vel]
         const slot = r.u8();
+        const ctrl = r.u8();
+        const flag = r.u8();
+        const sel = r.u8();
+        const x = r.f32(), y = r.f32();
+        let vx = 0, vy = 0;
+        if (flag & 4) { vx = r.f32(); vy = r.f32(); } // flagBits[2] = hasVelocity
         let p = this.players.get(slot);
         if (!p) {
-          p = { slot, name: `玩家${slot}`, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0, facing: 1, selectedItem: 0, dead: false, active: true };
+          p = {
+            slot, name: `玩家${slot}`, appearance: '{}',
+            x, y, vx: 0, vy: 0,
+            up: false, down: false, left: false, right: false, jump: false, useItem: false,
+            facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
+            fresh: true, active: true,
+          };
           this.players.set(slot, p);
         }
-        p.x = r.f32(); p.y = r.f32();
-        p.vx = r.f32(); p.vy = r.f32();
-        p.facing = r.i8();
-        p.selectedItem = r.u8();
-        p.dead = r.bool();
+        p.x = x; p.y = y; p.vx = vx; p.vy = vy;
+        p.up = !!(ctrl & 1); p.down = !!(ctrl & 2);
+        p.left = !!(ctrl & 4); p.right = !!(ctrl & 8);
+        p.jump = !!(ctrl & 16); p.useItem = !!(ctrl & 32);
+        p.facing = ctrl & 64 ? 1 : -1;   // ctrlBits[6] = direction（原版）
+        p.selectedItem = sel;
+        p.dead = !!(flag & 64);           // flagBits[6] = ghost
+        p.fresh = true;                   // Game 侧注入 netOffset 后清零
         return;
       }
       case Msg.TileBatch: {
@@ -261,6 +297,15 @@ export class ClientNet {
           const cr = r.u8(), cg = r.u8(), cb = r.u8();
           const name = this.players.get(slot)?.name ?? `玩家${slot}`;
           this.hooks.onChat?.(`<${name}> ${text}`, cr, cg, cb);
+        } else if (moduleId === NetModule.JoinLeave) {
+          // 加入/离开公告（原版服务器 Lang.mp[19]/[20] 广播，色 (255,240,20)）
+          const slot = r.u8();
+          const joined = r.bool();
+          const name = this.players.get(slot)?.name ?? `玩家${slot}`;
+          this.hooks.onChat?.(
+            Lang.text(joined ? 'LegacyMultiplayer.19' : 'LegacyMultiplayer.20', name),
+            255, 240, 20,
+          );
         }
         return;
       }
@@ -331,6 +376,7 @@ export class ClientNet {
   /** Game 每 fixedUpdate 调用：冲洗 tile 队列 + 玩家状态上报（变化驱动 + 66ms 节流） */
   tick() {
     if (!this.active) return;
+    this.syncInventory(performance.now());
     if (this.tileQueue.length) {
       // 每包最多 64 op（防超帧）
       const batch = this.tileQueue.splice(0, 64);
@@ -348,20 +394,59 @@ export class ClientNet {
   }
 
   private sendPlayerState() {
-    const p = this.game.player as unknown as { cx: number; cy: number; vx: number; vy: number; facing: number; inv: { heldItem(): { id: number } | null }; dead: boolean };
+    // v2 布局（对齐原版 msg13）：控制位 + position(碰撞盒左上) + velocity。
+    // 远端据此跑本地物理 → 有移动过程；位置差由接收端 netOffset 平滑（瞬移消失）
+    const p = this.game.player as unknown as {
+      x: number; y: number; vx: number; vy: number; facing: number; dead: boolean;
+      inputX: number; inputJump: boolean; inputDown: boolean; inputUp: boolean;
+      inv: { heldItem(): { id: number } | null };
+    };
+    const inp = (this.game as { input?: { mouseDown: boolean; rightDown: boolean } }).input;
+    // ctrlBits: [0]up [1]down [2]left [3]right [4]jump [5]useItem [6]direction（原版 case 13）
+    // useItem = 左键按住（原版 controlUseItem；放置/右键交互不计）
+    const ctrl = (p.inputUp ? 1 : 0) | (p.inputDown ? 2 : 0)
+      | (p.inputX < 0 ? 4 : 0) | (p.inputX > 0 ? 8 : 0)
+      | (p.inputJump ? 16 : 0)
+      | (inp?.mouseDown && !inp.rightDown ? 32 : 0)
+      | (p.facing > 0 ? 64 : 0);
+    // selectedItem = 快捷栏槽位索引 0-9（原版 NetMessage.cs:471 语义；v1 误发物品 id）
+    const sel = (p.inv as unknown as { selected: number }).selected & 0xff;
+    // 控制位变化即时发（原版 TrySyncingInput Player.cs:6484：任一 control/selectedItem
+    // 变化立刻 SendData(13)）——原地起跳这类"位置未动"的操作不再等静止心跳
+    const ctrlChanged = ctrl !== this.lastSentCtrl || sel !== this.lastSentSel || p.dead !== this.lastSentDead;
     const now = performance.now();
-    const moved = Math.abs(p.cx - this.lastSentPos.x) > 1 || Math.abs(p.cy - this.lastSentPos.y) > 1;
-    if (!moved && now - this.lastStateSent < 1000) return; // 静止 1s 心跳
-    if (now - this.lastStateSent < 66) return;             // 节流 ≥66ms（≈15Hz）
+    const moved = Math.abs(p.x - this.lastSentPos.x) > 1 || Math.abs(p.y - this.lastSentPos.y) > 1;
+    if (!ctrlChanged) {
+      if (!moved && now - this.lastStateSent < 1000) return; // 静止 1s 心跳（原版 %420 全量兜底的加密版）
+      if (now - this.lastStateSent < 66) return;             // 位置驱动节流 ≥66ms（≈15Hz）
+    }
     this.lastStateSent = now;
-    this.lastSentPos = { x: p.cx, y: p.cy };
-    const held = p.inv.heldItem();
+    this.lastSentPos = { x: p.x, y: p.y };
+    this.lastSentCtrl = ctrl;
+    this.lastSentSel = sel;
+    this.lastSentDead = p.dead;
+    // flagBits: [2]hasVelocity [6]ghost
+    const flag = 4 | (p.dead ? 64 : 0);
     this.send(new NetWriter(Msg.PlayerState)
-      .f32(p.cx).f32(p.cy)
+      .u8(this.mySlot)
+      .u8(ctrl).u8(flag)
+      .u8(sel)
+      .f32(p.x).f32(p.y)
       .f32(p.vx).f32(p.vy)
-      .i8(p.facing)
-      .u8(held ? held.id : 0)
-      .bool(p.dead).finish());
+      .finish());
+  }
+
+  private lastSentCtrl = -1;
+  private lastSentSel = -1;
+  private lastSentDead = false;
+
+  /** 外观变更后重发 SyncPlayer（进游戏后 applyCharacter 调用——初始两发都在外观应用前） */
+  resendAppearance() {
+    if (!this.active || this.mySlot < 0) return;
+    const p = this.game.player as { appearance?: unknown } | undefined;
+    if (p?.appearance) {
+      this.send(new NetWriter(Msg.SyncPlayer).u8(this.mySlot).str(JSON.stringify(p.appearance)).finish());
+    }
   }
 
   // ================= 远端 tile 应用（回环抑制 + 事件链触发） =================
@@ -390,5 +475,68 @@ export class ClientNet {
   /** 聊天发送 */
   sendChat(text: string) {
     this.send(new NetWriter(Msg.NetModules).u16(NetModule.Text).str(text).finish());
+  }
+
+  // ================= 物品/装备同步（msg5，对齐原版 SyncPlayerItem 语义） =================
+
+  /** 远端玩家物品快照（Game 侧拷入 proxy.inv——手持/盔甲纸娃娃/挥舞动画渲染用） */
+  remoteItems = new Map<number, { inv: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> }>();
+
+  /** 本地已同步快照（差分基准；null = 尚未全量 dump） */
+  private sentInv: Array<Array<{ id: number; stack: number } | null>> | null = null;
+  private invDumpPending = true; // 进房首包全量
+  private lastInvSync = 0;
+
+  /** 全量 dump（进房后立即 + 外部可请求） */
+  private sendFullInventory() {
+    const p = this.game.player as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
+    for (let c = 0; c < 3; c++) {
+      const arr = c === 0 ? p.inv.slots : c === 1 ? p.inv.armor : p.inv.dye;
+      for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
+        entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: arr[i]?.id ?? 0, stack: arr[i]?.stack ?? 0 });
+      }
+    }
+    this.send(writePlayerItems(entries));
+    this.sentInv = [p.inv.slots.map(s => s ? { ...s } : null), p.inv.armor.map(s => s ? { ...s } : null), p.inv.dye.map(s => s ? { ...s } : null)];
+    this.invDumpPending = false;
+  }
+
+  /** 差分上报（tick 内每 250ms 调一次；原版 msg5 变化驱动逐槽发送的批量等价） */
+  private syncInventory(now: number) {
+    if (this.mySlot < 0) return;
+    if (this.invDumpPending || !this.sentInv) { this.sendFullInventory(); return; }
+    if (now - this.lastInvSync < 250) return;
+    this.lastInvSync = now;
+    const p = this.game.player as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const cur = [p.inv.slots, p.inv.armor, p.inv.dye];
+    const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
+    for (let c = 0; c < 3; c++) {
+      const arr = cur[c];
+      const sent = this.sentInv[c];
+      for (let i = 0; i < arr.length && i < INV_SYNC_SIZES[c]; i++) {
+        const a = arr[i], b = sent[i];
+        if ((a?.id ?? 0) !== (b?.id ?? 0) || (a?.stack ?? 0) !== (b?.stack ?? 0)) {
+          entries.push({ playerSlot: this.mySlot, container: c as ItemContainer, itemSlot: i, itemId: a?.id ?? 0, stack: a?.stack ?? 0 });
+          sent[i] = a ? { ...a } : null;
+        }
+      }
+    }
+    if (entries.length) this.send(writePlayerItems(entries));
+  }
+
+  private applyRemoteItems(entries: Array<ItemSyncEntry & { playerSlot: number }>) {
+    for (const e of entries) {
+      if (e.container > 2 || e.itemSlot >= INV_SYNC_SIZES[e.container]) continue;
+      let bag = this.remoteItems.get(e.playerSlot);
+      if (!bag) {
+        bag = {
+          inv: Array(58).fill(null), armor: Array(20).fill(null), dye: Array(10).fill(null),
+        };
+        this.remoteItems.set(e.playerSlot, bag);
+      }
+      const arr = e.container === 0 ? bag.inv : e.container === 1 ? bag.armor : bag.dye;
+      arr[e.itemSlot] = e.itemId ? { id: e.itemId, stack: e.stack } : null;
+    }
   }
 }

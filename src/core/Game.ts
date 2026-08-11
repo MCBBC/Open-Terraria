@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
-import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST } from './constants';
+import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
+import { moveAndCollide } from '../physics/TileCollision';
 import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
@@ -39,6 +40,7 @@ import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
+import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
@@ -626,6 +628,12 @@ export class Game implements GameHooks {
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;
+    // ---- 历史存档索引帧修复 ----
+    // 旧版生成代码曾把多格家具的格内偏移写成【格索引】(0/1)而非【像素】(0/18)，
+    // 渲染端 ofx=1 只偏 1px → 2×2 宝箱四格显示同一贴图。特征：多格 vanilla framed
+    // 物体的全部格帧 <18 且非全 0（合法块必有一格 ≥18；全 0 由渲染端锚点扫描重建）
+    this.repairIndexFrames();
+
     // ---- 城镇 NPC 恢复（原版 WorldFile 加载：存档里的 town NPC 原位生成）----
     const savedNpcs = this.world.pendingTownNpcs ?? [];
     this.world.pendingTownNpcs = [];
@@ -1279,6 +1287,8 @@ export class Game implements GameHooks {
     this.camera.clamp();
     this.chunks.flushDirty();
     this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
+    tickEmotes();
+    this.tickNpcEmotes();
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
@@ -4173,6 +4183,36 @@ export class Game implements GameHooks {
     }
   }
 
+  /** 城镇 NPC 社交表情（原版 ai[0]=7/19 相邻互发 EmoteBubble 的简化切片，NPC.cs:69936）：
+   *  白天、空闲、地面上的 NPC 与 6 格内另一 NPC 配对，低频随机互发表情 */
+  private emoteCooldown = 0;
+  private tickNpcEmotes(): void {
+    if (this.world.clock.isDay && --this.emoteCooldown <= 0) {
+      this.emoteCooldown = 600; // 每 10s 窗口一次
+      const npcs = this.entities.npcs.filter(
+        (n) => n instanceof TownNPC && !n.dead && !n.bound && !n.talking) as TownNPC[];
+      if (npcs.length >= 2) {
+        for (let i = 0; i < npcs.length - 1; i++) {
+          const a = npcs[i];
+          for (let j = i + 1; j < npcs.length; j++) {
+            const b = npcs[j];
+            if (Math.hypot(a.cx - b.cx, a.cy - b.cy) > 6 * TILE) continue;
+            // 表情池（EmoteID 实号：25 群系/90 道具/100 火/87 疑惑/89 睡意——原版社交段同源）
+            const pool = [25, 90, 100, 87, 89];
+            spawnEmote(a, pool[Math.floor(Math.random() * pool.length)], 180);
+            spawnEmote(b, pool[Math.floor(Math.random() * pool.length)], 180);
+            a.facing = b.cx < a.cx ? -1 : 1;  // 面向对方（原版社交状态朝向）
+            b.facing = a.cx < b.cx ? -1 : 1;
+            // 原版进入 ai[0]=7 社交态即停走；近似：重置游走计时让双方站定片刻
+            a.wanderT = Math.max(a.wanderT, 220); b.wanderT = Math.max(b.wanderT, 220);
+            a.vx *= 0.3; b.vx *= 0.3;
+            return;
+          }
+        }
+      }
+    }
+  }
+
   closeNpcDialog(): void {
     if (this.dialogNpc) this.dialogNpc.talking = false;
     this.dialogNpc = null;
@@ -4676,6 +4716,61 @@ export class Game implements GameHooks {
       }
       this.world.registerTree(x, groundY - th, th);
       this.chunks.markDirtyArea(x - 4, groundY - th - 4, x + 4, groundY);
+    }
+  }
+
+  /** 索引帧修复（见 afterWorldLoad 注释）：扫一遍全图多格 vanilla framed 物体 */
+  private repairIndexFrames(): void {
+    const st = this.world.store;
+    let fixed = 0;
+    for (let y = 0; y < st.h; y++) {
+      for (let x = 0; x < st.w; x++) {
+        const i = st.idx(x, y);
+        const type = st.type[i];
+        if (type === 0 || !st.flags[i]) continue;
+        const def = TILE_DEFS[type];
+        const fw = def?.vanilla?.fw ?? 0, fh = def?.vanilla?.fh ?? 0;
+        if (!def?.vanilla || def.vanilla.frame !== 'style' || fw < 2) continue;
+        // 物体块帧汇总（fw×fh 邻域内同型格）
+        let maxFx = 0, maxFy = 0, cells = 0, anyNonZero = false;
+        for (let dy = 0; dy < fh; dy++) {
+          for (let dx = 0; dx < fw; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (!st.inBounds(xx, yy)) continue;
+            const ii = st.idx(xx, yy);
+            if (st.type[ii] !== type) continue;
+            cells++;
+            const fx = st.frameX[ii], fy = st.frameY[ii];
+            if (fx > maxFx) maxFx = fx;
+            if (fy > maxFy) maxFy = fy;
+            if (fx !== 0 || fy !== 0) anyNonZero = true;
+          }
+        }
+        // 索引帧特征：≥2 格且全 <18 且非全 0（全 0 是 wld 残缺帧，渲染端另有重建）
+        if (cells < 2 || maxFx >= 18 || maxFy >= 18 || !anyNonZero) continue;
+        // 只在左上角格修一次（dx=dy=0 的格），避免重复 ×18
+        const li = st.idx(x - 1, y);
+        const above = st.idx(x, y - 1);
+        if (st.inBounds(x - 1, y) && st.type[li] === type) continue;
+        if (st.inBounds(x, y - 1) && st.type[above] === type) continue;
+        for (let dy = 0; dy < fh; dy++) {
+          for (let dx = 0; dx < fw; dx++) {
+            const xx = x + dx, yy = y + dy;
+            if (!st.inBounds(xx, yy)) continue;
+            const ii = st.idx(xx, yy);
+            if (st.type[ii] !== type) continue;
+            st.frameX[ii] = st.frameX[ii] * 18;
+            st.frameY[ii] = st.frameY[ii] * 18;
+            fixed++;
+          }
+        }
+      }
+    }
+    if (fixed) {
+      for (let cy = 0; cy < Math.ceil(st.h / 16); cy++) {
+        for (let cx = 0; cx < Math.ceil(st.w / 16); cx++) this.chunks.markDirty(cx, cy);
+      }
+      console.log(`[repairIndexFrames] 修复 ${fixed} 格历史索引帧（索引→像素 ×18）`);
     }
   }
 
@@ -5445,34 +5540,121 @@ export class Game implements GameHooks {
       }
     }
     this.updateSwingHits();
-    // 远端玩家代理同步（渲染前；每 15 帧重建以接纳新进/离场玩家）
-    if (this.net && this.tickCount % 15 === 0) this.syncRemotePlayerProxies();
+    // 远端玩家模拟（每逻辑 tick：控制位驱动物理 + netOffset 平滑，对齐原版远端玩家）
+    if (this.net?.active) this.simulateRemotePlayers();
   }
 
-  /** net.players → Player 渲染代理（外观/位置/朝向；动画帧由 vx 派生——与本地一致） */
-  private syncRemotePlayerProxies() {
+  /**
+   * 联机远端玩家模拟（对齐原版 MessageBuffer.cs case 13 + Player.UpdateNetOffset）：
+   * 远端玩家在本端用同步的控制位+速度跑移动物理（有移动过程、动画帧由速度派生）；
+   * 每个权威包的位置差注入 netOffset，渲染时叠加并逐 tick 收敛（<2px 归零，
+   * 每步 max(2, len×0.1)；超 300px=Main.multiplayerNPCSmoothingRange 直接归零）。
+   * 物理只取移动子集——环境伤害/液体细判等权威在各自客户端，避免双端分叉。
+   */
+  private simulateRemotePlayers() {
     const net = this.net!;
     const list: Player[] = [];
     for (const [slot, rp] of net.players) {
       if (!rp.active || slot === net.mySlot) continue;
       let proxy = this.remotePlayerProxies.find((p) => (p as unknown as { __netSlot?: number }).__netSlot === slot);
       if (!proxy) {
-        proxy = new Player(rp.x, rp.y, new Inventory()); // R11：独立空背包——不共享本地 inv（否则全员画着本地手持/盔甲）
+        proxy = new Player(rp.x, rp.y, new Inventory()); // R11：独立空背包——不共享本地 inv
         (proxy as unknown as { __netSlot?: number }).__netSlot = slot;
       }
-      proxy.x = rp.x; proxy.y = rp.y;
-      proxy.vx = rp.vx; proxy.vy = rp.vy;
+      // 新权威包（原版 case 13：netOffset += 模拟位置 - 权威位置；超限归零；硬设权威 pos/vel）
+      if (rp.fresh) {
+        rp.fresh = false;
+        proxy.netOffX += proxy.x - rp.x;
+        proxy.netOffY += proxy.y - rp.y;
+        if (Math.hypot(proxy.netOffX, proxy.netOffY) > 300) { proxy.netOffX = 0; proxy.netOffY = 0; }
+        proxy.x = rp.x; proxy.y = rp.y;
+        proxy.vx = rp.vx; proxy.vy = rp.vy;
+      }
+      // 控制位 → 输入（原版：远端玩家以同步的 control* 跑 Player.Update）
+      proxy.inputX = (rp.left ? -1 : 0) + (rp.right ? 1 : 0);
+      proxy.inputJump = rp.jump;
+      proxy.inputDown = rp.down;
+      proxy.inputUp = rp.up;
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
-      proxy.animTime = (proxy.animTime + 1) % 1e9;
-      // R11'.外观合并：网络侧可能为 {} 或缺字段——仅接受含 hair 的完整对象，
-      // 否则保留 Player 构造的默认外观（空对象会令纸娃娃读 X.r 崩溃）
+      // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）
       try {
         const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
         if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
       } catch { /* 保持默认外观 */ }
+      // 物品/装备（msg5）：拷入代理背包——手持物 holdStyle/挥舞动画/盔甲纸娃娃渲染依赖。
+      // 数组直接共享（代理只读不写，远端真权威在各自客户端）
+      const bag = net.remoteItems.get(slot);
+      if (bag) {
+        proxy.inv.slots = bag.inv;
+        proxy.inv.armor = bag.armor;
+        proxy.inv.dye = bag.dye;
+        proxy.inv.selected = Math.min(rp.selectedItem, 9); // 快捷栏 0-9（heldItem 依赖）
+      }
+      // useItem 位 → 远端挥舞动画（原版：远端客户端以 controlUseItem 跑 ItemCheck 设置
+      // itemAnimation；此处派生等价 swing——时长按本地同公式，攻速配饰差异忽略）
+      if (rp.useItem) {
+        const heldId = proxy.inv.heldItem()?.id ?? -1;
+        if (!proxy.swingNet || proxy.swingNet.item !== heldId || proxy.swingNet.t <= 0) {
+          proxy.swingNet = { t: this.remoteSwingDur(heldId), dur: this.remoteSwingDur(heldId), item: heldId };
+        } else proxy.swingNet.t--;
+      } else if (proxy.swingNet) {
+        proxy.swingNet.t--;
+        if (proxy.swingNet.t <= 0) proxy.swingNet = null;
+      }
+      this.stepRemoteProxy(proxy);
+      // netOffset 衰减（UpdateNetOffset :28240-28270 1:1，碰撞安全项略）
+      const len = Math.hypot(proxy.netOffX, proxy.netOffY);
+      if (len < 2) { proxy.netOffX = 0; proxy.netOffY = 0; }
+      else {
+        const k = Math.max(0, len - Math.max(2, len * 0.1)) / len;
+        proxy.netOffX *= k; proxy.netOffY *= k;
+      }
       list.push(proxy);
     }
     this.remotePlayerProxies = list;
+  }
+
+  /** 远端挥舞时长（对齐本地各分支公式，Game.useItem 派生处：剑/近战 max(12,useTime)、
+   *  镐斧锤 max(14,speed)、其它 30；攻速配饰倍率远端不可见，取基础值） */
+  private remoteSwingDur(itemId: number): number {
+    if (itemId < 0) return 30;
+    const def = ITEM_DEFS[itemId];
+    if (!def) return 30;
+    const cw = combatWeapon(def);
+    if (def.tool?.type === 'sword' || cw?.kind === 'melee') return Math.max(12, cw?.useTime ?? def.tool?.speed ?? 42);
+    if (def.tool && (def.tool.type === 'pick' || def.tool.type === 'axe' || def.tool.type === 'hammer')) return Math.max(14, def.tool.speed ?? 46);
+    return 30;
+  }
+
+  /** 远端代理移动子集物理（与 Player.fixedUpdate 同参数：加速/摩擦/跳跃/重力/碰撞/动画） */
+  private stepRemoteProxy(p: Player) {
+    const st = this.world.store;
+    // 液体粗判（游泳减速/上浮需要；同 Player 采样：脚底上方 4px）
+    p.inWater = st.liquid[st.idx(Math.floor(p.cx / TILE), Math.floor((p.y + p.h - 4) / TILE))] > 100;
+    const ix = p.inputX;
+    if (ix !== 0) {
+      p.vx += ix * PLAYER_WALK_ACCEL * (p.inWater ? 0.6 : 1);
+      p.facing = ix;
+    } else {
+      p.vx *= p.onGround ? PLAYER_FRICTION : PLAYER_AIR_FRICTION;
+      if (Math.abs(p.vx) < 0.05) p.vx = 0;
+    }
+    const maxSpd = PLAYER_WALK_MAX * (p.inWater ? 0.55 : 1);
+    p.vx = Math.max(-maxSpd, Math.min(maxSpd, p.vx));
+    if (p.inWater) {
+      if (p.inputJump) p.vy = Math.max(p.vy - 0.62, -4.4);
+      p.vy += GRAVITY * 0.3;
+      p.vy = Math.max(-4.6, Math.min(3.0, p.vy));
+    } else {
+      if (p.inputJump && p.onGround) { p.vy = -PLAYER_JUMP_SPEED; p.jumpHold = PLAYER_JUMP_TICKS; }
+      if (p.inputJump && p.jumpHold > 0) { p.vy -= 0.22; p.jumpHold--; } else p.jumpHold = 0;
+      p.vy = Math.min(p.vy + GRAVITY, MAX_FALL_SPEED);
+    }
+    if (!p.inputJump && p.vy < -2) p.vy = -2;
+    p.dropThrough = !!p.inputDown;
+    moveAndCollide(p, this.world, p.vx, p.vy);
+    if (Math.abs(p.vx) > 0.3 && p.onGround) p.animTime += Math.abs(p.vx);
+    else p.animTime = 0;
   }
 }

@@ -6,6 +6,7 @@ import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData } from './save/SaveFile';
 import { saveClient } from './workers/SaveClient';
+import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { parseWldToSave } from './wld/WldImport';
@@ -83,6 +84,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function enterGame(g: Game) {
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
+    // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
+    (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
+      liquidLab(g);
+    };
+    if (new URLSearchParams(location.search).has('liquidlab')) {
+      setTimeout(() => (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab?.(), 1500);
+    }
     playStart = Date.now();
     // 物品图标后台预取(主菜单不载图标=省 6059 请求;进世界补齐,游戏内显示不变)
     atlas?.prefetchIcons();
@@ -131,9 +139,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(label, p));
   }
 
-  /** 把选中角色的外观应用到玩家（进游戏后调用） */
+  /** 把选中角色的外观应用到玩家（进游戏后调用）。联机时补发 SyncPlayer——
+   *  初始两发（PlayerSlot/PlayerSpawn 时刻）都在外观应用前，远端只见默认皮肤 */
   function applyAppearance(g: Game) {
-    if (selectedAppearance) g.player.appearance = selectedAppearance;
+    if (selectedAppearance) {
+      g.player.appearance = selectedAppearance;
+      g.net?.resendAppearance();
+    }
   }
 
   async function quickLoad() {
@@ -344,7 +356,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onJoinRoom: (url, hostToken) => {
         closePanel();
         ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
-        makeGame().joinNetGame(url, (label, p) => {
+        const g = makeGame();
+        // 连接前应用选中角色：Hello 的玩家名（加入公告"X已加入。"）与首包
+        // SyncPlayer 外观都取自 player.appearance——等 applyAppearance 就太晚了
+        if (selectedAppearance) g.player.appearance = selectedAppearance;
+        g.joinNetGame(url, (label, p) => {
           ui.showProgress(label, 0.1 + p * 0.8);
         }, hostToken).then(() => {
           // loadWorld 内部已 onWorldReady（enterGame 由 makeGame 回调完成）
@@ -363,6 +379,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           name: m.name,
           json: await worldStore.load(m),
         })));
+      },
+      // 角色选择（需求："可以选择一个角色加入房间"）——选中后 applyAppearance 补发外观
+      listCharacters: async () => {
+        await charStore.ensureLoaded();
+        return charStore.list().map((c) => ({ id: c.id, name: c.name }));
+      },
+      onPickCharacter: async (id: number) => {
+        selectedAppearance = await charStore.get(id);
       },
     });
     panelRoot = panel.root;

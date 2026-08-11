@@ -16,7 +16,7 @@ import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 
-type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye';
+type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
 
 const iconCache = new Map<number, string>();
 function iconUrl(game: Game, id: number): string {
@@ -141,6 +141,8 @@ export class UI {
     if (where === 'inv') return this.game.player.inv.slots[i];
     if (where === 'armor') return this.game.player.inv.armor[i];
     if (where === 'dye') return this.game.player.inv.dye[i];
+    if (where === 'misc') return this.game.player.inv.miscEquips[i];
+    if (where === 'miscDye') return this.game.player.inv.miscDyes[i];
     return this.openChest?.items[i] ?? null;
   }
 
@@ -595,9 +597,19 @@ export class UI {
   }
 
   /** Shift+左键快速转移（GetAlternateClickAction :563-662 主干）：
-   *  开箱→入箱（仅堆已有或空格）；装备/配饰→卸回背包；箱内→背包；背包内→垃圾桶 */
+   *  开箱→入箱（仅堆已有或空格）；装备/配饰/染料/杂项→卸回背包；箱内→背包；背包内→垃圾桶 */
   private shiftClick(i: number, where: SlotWhere): void {
     const inv = this.game.player.inv;
+    if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+      // Unequip（:634-649）：卸回背包
+      const arr = this.equipArray(where);
+      const cur = arr[i];
+      if (!cur || cur.favorited) return;
+      const left = inv.add(cur.id, cur.stack);
+      if (left === 0) arr[i] = null;
+      this.refreshAll();
+      return;
+    }
     if (where === 'inv') {
       const cur = inv.slots[i];
       if (!cur || cur.favorited) return; // 收藏禁转移（:566）
@@ -624,16 +636,6 @@ export class UI {
       inv.trash = cur;
       inv.slots[i] = null;
       this.game.sfx.play('menuTick', 0.5);
-      this.refreshAll();
-      return;
-    }
-    if (where === 'armor' || where === 'dye') {
-      // Unequip（:634-649）：卸回背包
-      const arr = where === 'armor' ? inv.armor : inv.dye;
-      const cur = arr[i];
-      if (!cur || cur.favorited) return;
-      const left = inv.add(cur.id, cur.stack);
-      if (left === 0) arr[i] = null;
       this.refreshAll();
       return;
     }
@@ -702,6 +704,8 @@ export class UI {
     if (where === 'inv') this.game.player.inv.slots[i] = null;
     else if (where === 'armor') this.game.player.inv.armor[i] = null;
     else if (where === 'dye') this.game.player.inv.dye[i] = null;
+    else if (where === 'misc') this.game.player.inv.miscEquips[i] = null;
+    else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
     else this.heldStack = { id: cur.id, stack: cur.stack };
@@ -715,8 +719,8 @@ export class UI {
     if (!cur) return;
     const half = Math.ceil(cur.stack / 2);
     if (where === 'inv') this.game.player.inv.removeAt(i, half);
-    else if (where === 'armor' || where === 'dye') {
-      const arr = where === 'armor' ? this.game.player.inv.armor : this.game.player.inv.dye;
+    else if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
+      const arr = this.equipArray(where);
       cur.stack -= half;
       if (cur.stack <= 0) arr[i] = null;
     }
@@ -728,15 +732,26 @@ export class UI {
     this.refreshAll();
   }
 
+  /** 装备类数组快捷取用（armor/dye/misc/miscDye 四类） */
+  private equipArray(where: SlotWhere): Array<{ id: number; stack: number; favorited?: boolean; prefix?: number } | null> {
+    const inv = this.game.player.inv;
+    if (where === 'armor') return inv.armor;
+    if (where === 'dye') return inv.dye;
+    if (where === 'misc') return inv.miscEquips;
+    return inv.miscDyes;
+  }
+
   /** 放下到背包/宝箱格（合并→交换，装备位校验） */
   private placeHeld(i: number, where: SlotWhere): void {
     if (!this.heldStack) return;
-    if (where === 'armor' || where === 'dye') {
+    if (where === 'armor' || where === 'dye' || where === 'misc' || where === 'miscDye') {
       const inv = this.game.player.inv;
-      const arr = where === 'armor' ? inv.armor : inv.dye;
-      // 部位/配饰校验（Inventory.armorAccepts；dye 槽暂同 armor 校验宽松处理）
+      const arr = this.equipArray(where);
+      // 部位/配饰/染料/杂项分类校验（ItemSlot.PickItemMovementAction 同源判定）
       if (where === 'armor' && !inv.armorAccepts(i, this.heldStack.id)) return;
-      if (where === 'dye' && !ITEM_DEFS[this.heldStack.id]?.armor && !ITEM_DEFS[this.heldStack.id]?.accessory) return;
+      if (where === 'dye' && !inv.dyeAccepts(this.heldStack.id)) return;
+      if (where === 'misc' && !inv.miscAccepts(i, this.heldStack.id)) return;
+      if (where === 'miscDye' && !inv.dyeAccepts(this.heldStack.id)) return;
       const cur = arr[i];
       if (!cur) {
         arr[i] = this.heldStack;
@@ -748,7 +763,7 @@ export class UI {
         this.heldStack.stack -= put;
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else {
-        // 交换前反向校验
+        // 交换前反向校验（取出的物品总是合法的，防御性保留）
         if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
         arr[i] = this.heldStack;
         this.heldStack = cur;
@@ -801,7 +816,7 @@ export class UI {
     const slotEl = target?.closest?.('.sw-slot') as HTMLElement | null;
     if (slotEl?.dataset.idx !== undefined && slotEl?.dataset.where) {
       const ti = Number(slotEl.dataset.idx);
-      const tw = slotEl.dataset.where as 'inv' | 'chest';
+      const tw = slotEl.dataset.where as SlotWhere;
       if (tw === 'chest' && !this.openChest) return;
       this.placeHeld(ti, tw);
       return;

@@ -52,14 +52,19 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
       { name: '洞穴', run: vanillaCaves },
       { name: '海滩', run: vanillaBeaches },
       { name: '生物群系', run: vanillaBiomes },
-      { name: '清理', run: vanillaCleanup },
-      { name: '生命水晶', run: vanillaLifeCrystals },
     ] as Pass[] : [
       { name: '地形', run: terrainPass },
       { name: '洞穴', run: cavePass },
     ]),
+    // 原版注册序:Shinies(27) → Lakes(31) → Clean Up Dirt(37) → LifeCrystals(55)。
+    // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮;
+    // 清理(Clean Up Dirt)也须在矿石之后(原版 37>27,清理散块才知道哪些是散块)
     { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
+    ...(useVanillaTerrain ? [
+      { name: '清理', run: vanillaCleanup },
+      { name: '生命水晶', run: vanillaLifeCrystals },
+    ] as Pass[] : []),
     ...(useVanillaTerrain ? [
       // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
       // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
@@ -69,7 +74,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '地狱', run: hellPass },
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [{ name: '清浮空', run: floatCleanupPass }] : []),
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地狱屋', run: vanillaHellHouses }]),
+    // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
+    // 曾在生物群系 pass 里随洞穴箱一起放 → 被后续 hellPass 重写 100% 抹除
+    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地狱箱', run: underworldChestsPass }]),
     { name: '瓦罐', run: potPass },
+    ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '矿骨堆', run: pilesPass }]),
     { name: '表面', run: surfacePass },
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '地表装饰', run: vanillaSurfaceDecor }]),
     ...((cfg as GenConfig & { lgcTerrain?: boolean }).lgcTerrain === false ? [] : [{ name: '海滩装饰', run: vanillaBeachDecor }]),
@@ -117,7 +126,7 @@ import { runTemplePass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runSwordShrinePass } from './vanilla/SwordShrinePass';
-import { runBuriedChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
+import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
 import { placeDoorClosed } from '../Door';
 
@@ -256,7 +265,7 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
-  runBuriedChestsPass(store, rng, gs, world.chests); // 35 Buried Chests(洞穴金/冰箱/沙箱+地狱箱)
+  runBuriedChestsPass(store, rng, gs, world.chests); // 59 Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
   runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
   runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
   runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
@@ -302,6 +311,54 @@ function vanillaHellHouses({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runHellFortPass(store, rng, gs);
+}
+
+// 地狱箱(独立 pass,顺序见 passes 数组注释)
+function underworldChestsPass({ store, rng, world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runUnderworldChestsPass(store, rng, gs, world.chests);
+}
+
+// 矿/骨堆(原版 pass 77 Piles,cs:18928:w*0.06 次尝试,洞穴地面放小堆 185/骨堆 186)
+function pilesPass({ store, rng }: GenCtx) {
+  const { w, h } = store;
+  const SMALL = TILE_BY_KEY['v_185_small_decos']!;
+  const BONE = TILE_BY_KEY['v_186_decos_3x2']!;
+  const tries = Math.floor(w * 0.06);
+  let fail = 0;
+  for (let n = 0; n < tries && fail < 10000; ) {
+    const x = rng.int(20, w - 21);
+    const y = rng.int(20, h - 20);
+    // 落到第一个实心地面(与洞穴箱同式)
+    let gy = y, guard = 0;
+    while (guard++ < 400 && store.inBounds(x, gy) && !store.flags[store.idx(x, gy)]) gy++;
+    if (!store.inBounds(x, gy) || !TILE_DEFS[store.type[store.idx(x, gy)]]?.solid) { fail++; continue; }
+    const i = store.idx(x, gy - 1);
+    if (!store.inBounds(x, gy - 1) || store.flags[i]) { fail++; continue; }
+    if (store.liquid[i] > 100) { fail++; continue; }
+    if (rng.next() < 0.7) {
+      // 小堆 185:1×1,风格 ×18(fx 带 +18 偏移的下半帧;placeSmallPile size-0 语义)
+      const style = rng.int(0, 9);
+      store.setTileSilent(x, gy - 1, SMALL, style * 18, 0);
+    } else {
+      // 骨堆 186:3×2,风格 ×54(3 列 stride)
+      let ok = true;
+      for (let dx = 0; dx < 3 && ok; dx++) {
+        for (let dy = 1; dy <= 2 && ok; dy++) {
+          if (!store.inBounds(x + dx, gy - dy) || store.flags[store.idx(x + dx, gy - dy)]) ok = false;
+        }
+      }
+      if (!ok) { fail++; continue; }
+      const style = rng.int(0, 1);
+      for (let dx = 0; dx < 3; dx++) {
+        for (let dy = 0; dy < 2; dy++) {
+          store.setTileSilent(x + dx, gy - 2 + dy, BONE, style * 54 + dx * 18, dy * 18);
+        }
+      }
+    }
+    n++;
+  }
 }
 
 // 生物群系感知地表装饰(替代旧 surfacePass 的种树部分)
@@ -604,46 +661,90 @@ function floatCleanupPass({ store, surface }: GenCtx) {
 
 // ---------- 瓦罐散布 ----------
 function potPass({ store, surface, rng }: GenCtx) {
+  // 原版 Pots pass(1.4.5.6 WorldGen.cs:18186-18286)1:1:
+  // count = 面积×0.0008(小 4200×1200 = 4032 个),每个成功点放 1 罐;
+  // 进度 >75% 强制从地表浅层起扫、>93% 强制地狱行;2 宽×2 高 PlacePot
+  // (cs:54082:frameX = k*18 + 变体*36、frameY = (l+1)*18 + style*36);
+  // 样式按地面 tile/墙(冰雪 4-6/丛林草 7-9/地牢 10-12/腐化 16-18/猩红 22-24/
+  // 花岗岩 31-33/蜥蜴砖 28-30/大理石墙 34-36/地狱 13-15/默认 0-3)。
+  // 旧实现 w/6 次尝试+12 格排斥 → 只有原版 ~5%
+  const gs = ctxGs[0];
+  if (!gs) return;
   const { w, h } = store;
   const POT = TILE_BY_KEY['pot']!;
-  // 尝试次数随世界宽度；洞穴/浅层洞的地面（下方实心、上方 2x2 净空）放 1-3 个一组
-  const tries = Math.floor(w / 6);
-  for (let i = 0; i < tries; i++) {
-    const x = rng.int(4, w - 5);
-    const yMin = Math.floor(surface[x]) + 8;
-    const yMax = Math.min(h - 6, Math.floor(surface[x]) + Math.floor(h * 0.45));
-    if (yMax <= yMin) continue;
-    const y = rng.int(yMin, yMax);
-    // 2x2 净空 + 底部实心 = 洞内地面
-    let ok = true;
-    for (let dx = 0; dx < 2 && ok; dx++) {
-      for (let dy = 1; dy <= 2; dy++) {
-        if (store.isActive(x + dx, y - dy)) { ok = false; break; }
+  const count = Math.floor(w * h * 0.0008);
+  const surfHigh = Math.max(1, Math.floor(gs.worldSurfaceHigh));
+  const surfLow = Math.floor(gs.worldSurfaceLow);
+
+  const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
+  const JUNGLE = TILE_BY_KEY['v_60_jungle_grass_block']!;
+  const CORRUPT = new Set<number>([
+    TILE_BY_KEY['v_23_corrupt_grass_block']!, TILE_BY_KEY['v_112_ebonsand_block']!,
+    TILE_BY_KEY['v_116_pearlsand_block']!, TILE_BY_KEY['v_163_corrupt_ice_block']!,
+  ].filter((v) => v !== undefined));
+  const CRIMSON = new Set<number>([
+    TILE_BY_KEY['v_199_crimson_grass_block']!, TILE_BY_KEY['v_203_crimstone_block']!,
+    TILE_BY_KEY['v_204_crimsand_block']!, TILE_BY_KEY['v_200_crimson_ice_block']!,
+  ].filter((v) => v !== undefined));
+  const GRANITE = TILE_BY_KEY['v_368_granite_block'] ?? -1; // 368 = 花岗岩块
+  const MARBLE = TILE_BY_KEY['v_367_marble_block'] ?? -1;    // 367 = 大理石块(样式由墙 187/216/223 判定,MARBLE 仅保留)
+  const LIHZARD = TILE_BY_KEY['v_226_lihzahrd_brick'] ?? -1;
+  const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+  const MARBLE_WALLS = new Set([187, 216, 223]);
+
+  /** cs:18220-18272 样式选择(按地面 tile / 墙 / 深度) */
+  const potStyle = (x: number, y: number, ground: number, wall: number): number => {
+    if (ground === SNOW || ground === ICE || ground === THIN_ICE) return rng.int(4, 6);
+    if (ground === JUNGLE) return rng.int(7, 9);
+    if (DUNGEON_WALLS.has(wall)) return rng.int(10, 12);
+    if (CORRUPT.has(ground)) return rng.int(16, 18);
+    if (CRIMSON.has(ground)) return rng.int(22, 24);
+    if (ground === GRANITE) return rng.int(31, 33);
+    if (ground === LIHZARD) return rng.int(28, 30);
+    if (MARBLE_WALLS.has(wall)) return rng.int(34, 36);
+    if (y > gs.rockLevel && y > h - 260) return rng.int(13, 15); // 地狱(cs: UnderworldLayer)
+    return rng.int(0, 3);
+  };
+
+  for (let n = 0; n < count; ) {
+    const progress = n / count;
+    let y0 = rng.int(surfHigh, Math.max(surfHigh + 1, h - 10));
+    if (progress > 0.93) y0 = h - 150;          // 尾段强制地狱行(cs:18194)
+    else if (progress > 0.75) y0 = surfLow;     // 后 1/4 起地表浅层(cs:18196)
+    const x = rng.int(20, w - 20);
+    // 向下扫描(cs:18210-18286):遇首个实心后进入候选模式,
+    // 在满足"地表以下或背面有墙"的空腔地面放(2×2 净空+双列实心,PlacePot cs:54082)
+    let foundSolid = false;
+    let fail = true;
+    for (let y = y0; y < h - 20 && fail; y++) {
+      const t = store.get(x, y);
+      if (!foundSolid) {
+        if (t !== 0 && TILE_DEFS[t]?.solid && !store.liquid[store.idx(x, y - 1)]) foundSolid = true;
+        continue;
       }
-    }
-    if (!ok || !store.isSolid(x, y) || !store.isSolid(x + 1, y)) continue;
-    // 该点 12 格内有其他瓦罐则跳过（避免扎堆）
-    let nearby = false;
-    for (let dx = -6; dx <= 6 && !nearby; dx++) {
-      for (let dy = -4; dy <= 2; dy++) {
-        if (store.get(x + dx, y + dy) === POT) { nearby = true; break; }
+      if (y < surfLow && store.wall[store.idx(x, y)] === 0) continue; // cs:18216 地表上方需有墙
+      const ground = store.get(x, y + 1);
+      if (ground === 0 || !TILE_DEFS[ground]?.solid) continue;
+      if (store.liquid[store.idx(x, y)] > 0) continue;
+      // PlacePot 2×2 净空 + (x,y+1)(x+1,y+1) 实心 + 半砖/坡面检查(本仓库半砖简化跳过)
+      let ok = true;
+      for (let dx = 0; dx < 2 && ok; dx++) {
+        for (let dy = -1; dy <= 0; dy++) {
+          if (store.isActive(x + dx, y + dy)) ok = false;
+        }
+        if (!store.isSolid(x + dx, y + 1)) ok = false;
       }
-    }
-    if (nearby) continue;
-    // 放 1-3 个（间距 2-3 格，各自需独立净空）
-    const n = rng.int(1, 3);
-    let px = x;
-    for (let k = 0; k < n; k++) {
-      if (store.get(px, y - 1) === 0 && store.get(px + 1, y - 1) === 0 &&
-          store.get(px, y - 2) === 0 && store.get(px + 1, y - 2) === 0 && store.isSolid(px, y)) {
-        store.setTileSilent(px, y - 1, POT, 0, 0);
-        store.setTileSilent(px + 1, y - 1, POT, 18, 0);
-        store.setTileSilent(px, y - 2, POT, 0, 18);
-        store.setTileSilent(px + 1, y - 2, POT, 18, 18);
+      if (!ok) continue;
+      const style = potStyle(x, y, ground, store.wall[store.idx(x, y)]);
+      const variant = rng.int(0, 2) * 36;
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = -1; dy <= 0; dy++) {
+          store.setTileSilent(x + dx, y + dy, POT, dx * 18 + variant, (dy + 1) * 18 + style * 36);
+        }
       }
-      px += rng.int(2, 4);
-      if (px > w - 4) break;
+      fail = false;
     }
+    n++; // 原版每轮无论成败都推进 num8(10000 次失败预算内重试,这里简化为固定轮数)
   }
 }
 
@@ -735,7 +836,9 @@ function placeChest(store: GenCtx['store'], x: number, y: number) {
 
 function structurePass({ store, surface, rng, world }: GenCtx) {
   const { w, h } = store;
-  const hutCount = 4;
+  // 地下小屋数量:对齐原版 CaveHouseCount 35-40 × WorldArea/5040000(Configuration.json
+  // ScaleWith:WorldArea)。旧值写死 4 → 小世界即差 10 倍(中/大差更多)
+  const hutCount = Math.max(4, Math.round(rng.int(35, 40) * (w * h) / 5040000));
   for (let i = 0; i < hutCount; i++) {
     const hx = rng.int(20, w - 30);
     const hy = rng.int(Math.floor(h * 0.45), h - 40);

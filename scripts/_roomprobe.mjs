@@ -116,6 +116,14 @@ try {
   check('B 码加入成功', !!joinB.ok, joinB.err ?? `slot=${joinB.slot}`);
   check('B policy 非房主 + 门禁拦截（protectTiles/Items）', joinB.isHost === false && joinB.canEdit === false && joinB.canChest === false);
 
+  // A 记录聊天（加入/离开公告断言用；B 尚未触发任何公告）
+  await pageA.evaluate(() => {
+    window.__chatLog = [];
+    const g = window.__swGame;
+    const orig = g.cb.onChat;
+    g.cb.onChat = (t, r, gg, b) => { window.__chatLog.push([t, r, gg, b]); orig?.(t, r, gg, b); };
+  });
+
   if (joinA.ok && joinB.ok) {
     // ---- 双端互见 ----
     await pageA.evaluate(() => {
@@ -166,6 +174,101 @@ try {
       g.world.store.setTile(t.x, t.y, t.before);
       g.net.tick();
     }, t1);
+
+    // ---- v2 msg13 远端模拟回归：netOffset 注入+衰减、坐标零错位 ----
+    // A 持续位移 180px（墙钟节拍驱动——同步循环会被 66ms 发送节流压成单包）
+    const finalA = await pageA.evaluate(async () => {
+      const g = window.__swGame;
+      const before = { x: g.player.x, y: g.player.y };
+      for (let i = 0; i < 30; i++) {
+        g.player.x += 6;
+        g.fixedUpdate(1 / 60);
+        await new Promise((r) => setTimeout(r, 70)); // 让 sendPlayerState 节流放行（≈15Hz）
+      }
+      return { before, after: { x: g.player.x, y: g.player.y } };
+    });
+    await sleep(700); // netOffset 衰减窗口（10%/tick，30+ tick）
+    const align = await pageB.evaluate((a) => {
+      const g = window.__swGame;
+      const px = g.remotePlayerProxies[0];
+      if (!px) return { err: 'no proxy' };
+      return {
+        proxyX: px.x, proxyY: px.y, ay: a.after.y,
+        offX: px.netOffX, offY: px.netOffY,
+        onGround: px.onGround, inWater: px.inWater,
+        dx: Math.abs(px.x + px.netOffX - a.after.x),
+        dy: Math.abs(px.y + px.netOffY - a.after.y),
+      };
+    }, finalA);
+    console.log('对齐:', JSON.stringify(align));
+    check('远端代理存在（控制位驱动物理）', !align.err);
+    check('netOffset 已收敛（移动过程平滑，非瞬移残留）', !align.err && Math.abs(align.offX) + Math.abs(align.offY) < 30,
+      `off=(${align.offX?.toFixed(1)},${align.offY?.toFixed(1)})`);
+    check('坐标零错位（左上角语义对齐，渲染位≈权威位 ±2px）', !align.err && align.dx < 2 && align.dy < 4,
+      `dx=${align.dx?.toFixed(2)}px dy=${align.dy?.toFixed(2)}px onGround=${align.onGround}`);
+
+    // ---- msg5 物品/装备同步：手持物 + useItem 远端挥舞 ----
+    const itemSync = await pageA.evaluate(async () => {
+      const { ITEM_BY_KEY } = await import('/src/data/items.ts');
+      const g = window.__swGame;
+      const torch = ITEM_BY_KEY['torch'];
+      g.player.inv.slots[2] = { id: torch, stack: 5 };
+      g.player.inv.selected = 2;
+      g.net.tick(); g.net.tick(); // 差分上报冲洗
+      return { torch };
+    });
+    await sleep(600); // 服务器中继 + B 应用
+    const bItems = await pageB.evaluate((t) => {
+      const g = window.__swGame;
+      const bag = g.net.remoteItems.get(0);
+      const px = g.remotePlayerProxies[0];
+      return {
+        hasBag: !!bag,
+        torch: bag?.inv?.[2]?.id ?? -1,
+        held: px?.inv?.heldItem()?.id ?? -1,
+        selected: px?.inv?.selected ?? -1,
+      };
+    }, itemSync.torch);
+    check('物品同步（msg5 差分 → B 侧手持一致）', bItems.hasBag && bItems.torch === itemSync.torch
+      && bItems.held === itemSync.torch && bItems.selected === 2,
+      JSON.stringify({ ...bItems, expect: itemSync.torch }));
+
+    // useItem 位 → B 侧挥舞动画（按住期断言非空，松开后断言清除——分两段防节流竞态）
+    await pageA.evaluate(async () => {
+      const g = window.__swGame;
+      g.input.mouseDown = true;
+      for (let i = 0; i < 6; i++) {
+        g.fixedUpdate(1 / 60);
+        g.net.tick();
+        await new Promise((r) => setTimeout(r, 70));
+      }
+    });
+    await sleep(400); // 给 B 的 rAF 处理窗口（B 页面可能被后台节流）
+    const bSwing = await pageB.evaluate(() => window.__swGame.remotePlayerProxies[0]?.swingNet ?? null);
+    check('远端挥舞动画（useItem 位 → swingNet）', !!bSwing, JSON.stringify(bSwing));
+    await pageA.evaluate(async () => {
+      const g = window.__swGame;
+      g.input.mouseDown = false;
+      // 显式 flush 释放包（页面 rAF 可能被后台节流，不补这步 useItem=1 残留）
+      for (let i = 0; i < 3; i++) {
+        g.net.tick();
+        await new Promise((r) => setTimeout(r, 70));
+      }
+    });
+    await sleep(1500); // 松开后动画走完清除
+    const bSwing2 = await pageB.evaluate(() => window.__swGame.remotePlayerProxies[0]?.swingNet ?? null);
+    check('松开后挥舞结束清除', bSwing2 === null, JSON.stringify(bSwing2));
+
+    // ---- 加入/离开公告（原版 Lang.mp[19]/[20]，色 255,240,20）----
+    // 尽早断言（vite 偶发全量 reload 会清 window 状态——缩短暴露窗口）
+    await pageB.evaluate(() => window.__swGame.net.disconnect());
+    await sleep(1000);
+    const chatA = await pageA.evaluate(() => window.__chatLog ?? []);
+    const joinMsg = chatA.find((c) => String(c[0]).includes('已加入'));
+    const leaveMsg = chatA.find((c) => String(c[0]).includes('已离开'));
+    check('加入公告（"X已加入。"）', !!joinMsg, JSON.stringify(joinMsg ?? null));
+    check('离开公告（"X已离开。"，强制断线触发）', !!leaveMsg, JSON.stringify(leaveMsg ?? null));
+    check('公告颜色 (255,240,20)', !!joinMsg && joinMsg[1] === 255 && joinMsg[2] === 240 && joinMsg[3] === 20);
   }
 
   // ---- 公开性过滤：非公开房不在列表、码可查 ----
@@ -180,6 +283,45 @@ try {
     const direct = await fetch(`http://127.0.0.1:${LOBBY}/rooms/${created2.code}`).then((r) => r.json());
     check('非公开房码可查（码加入可行）', direct.ok === true);
   }
+
+  // ---- UI 面板回归：真实点击流程进房 + 断言进度遮罩消失（StatusText 误报修复） ----
+  // 背景：R3 移动续传的 StatusText(0) 曾无条件回调 onProgress → 进世界后全屏
+  // "接收世界数据"遮罩被重新拉起 → 视觉上永久卡死。桥路径（noop onProgress）测不出。
+  const pageC = await mkPage();
+  await pageC.waitForFunction(() => !!window.__swFlow, { timeout: 30000 });
+  await pageC.click('[data-act="mp"]');
+  await sleep(800);
+  // 服务器地址默认 127.0.0.1:7778 → 改成探针 lobby 端口
+  await pageC.evaluate((lobby) => {
+    const panel = document.querySelector('.sw-panel');
+    const input = panel?.querySelector('input');
+    if (input) input.value = `127.0.0.1:${lobby}`;
+  }, LOBBY);
+  // 刷新房间列表 → 等列表出现公开房 → 点击第一条
+  await pageC.evaluate(() => {
+    const btns = [...document.querySelectorAll('.sw-panel button')];
+    btns.find((b) => b.textContent.includes('刷新房间'))?.click();
+  });
+  await sleep(1500);
+  const clicked = await pageC.evaluate((code) => {
+    const list = document.querySelector('.sw-panel div');
+    // 房间列表是面板里第一个可滚动 div（含 [code] 文本的条目）
+    for (const item of [...document.querySelectorAll('.sw-panel div')]) {
+      if (item.textContent.includes(`[${code}]`) && item.onclick) { item.click(); return true; }
+    }
+    return false;
+  }, created.code);
+  check('UI 房间列表点击加入', clicked === true);
+  // 等 C 进世界
+  await pageC.waitForFunction(() => !!window.__swGame?.net?.active && !!window.__swGame?.world, { timeout: 60000 });
+  await sleep(4000); // 放过 R3 续传首个 30-tick 窗口
+  const overlay = await pageC.evaluate(() => {
+    const p = document.querySelector('.sw-progress');
+    return { visible: !!p, text: p?.textContent ?? '' };
+  });
+  check('进世界后进度遮罩已消失（不再卡"接收世界数据"）', overlay.visible === false, JSON.stringify(overlay));
+  const cOk = await pageC.evaluate(() => ({ active: window.__swGame.net.active, isHost: window.__swGame.net.policy.isHost }));
+  check('UI 进房 policy 正确（访客）', cOk.active === true && cOk.isHost === false, JSON.stringify(cOk));
 } finally {
   server.kill();
   await browser.close();

@@ -9,6 +9,7 @@
 // 旧版（2026-08-11 前）自创布局 0-39 背包/40-44 配饰/45-47 盔甲/48-50 时装/51-53 钱币
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
 import { ITEM_DEFS, ITEM_BY_KEY, type ArmorSlot } from '../data/items';
+import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 
 export const INV_COLS = 10;
 /** 背包主体行数（不含快捷栏行） */
@@ -24,6 +25,10 @@ export const AMMO_SLOTS = 4;
 export const ARMOR_SLOTS = 10;        // armor[20] 前半（功能），后半 10 为时装镜像
 export const ARMOR_TOTAL = 20;
 export const DYE_SLOTS = 10;
+/** 杂项装备[5]：0 宠物 / 1 光源 / 2 矿车 / 3 坐骑 / 4 钩爪（Player.cs:1376-1379） */
+export const MISC_SLOTS = 5;
+/** 三套 Loadout（Player.Loadouts :5421；EquipmentLoadout = armor[20]+dye[10]+hide[10]） */
+export const LOADOUT_COUNT = 3;
 /** armor[3] 起 = 配饰槽（原版 InitialAccSlotCount=5，index 3-7；8/9 需解锁） */
 export const ACC_ARMOR_START = 3;
 /** armor[10] 起 = 时装（镜像 index 差 10） */
@@ -39,7 +44,7 @@ export const LEGACY_VANITY_START = 48;
 export const LEGACY_COIN_START = 51;
 export const LEGACY_INV_SIZE = 54;
 
-export interface InvItem { id: number; stack: number; favorited?: boolean }
+export interface InvItem { id: number; stack: number; favorited?: boolean; /** 重铸词缀（Item.prefix，0/缺省=无） */ prefix?: number }
 
 export function isCoinSlot(i: number): boolean {
   return i >= COIN_START && i < COIN_START + COIN_SLOTS;
@@ -88,6 +93,14 @@ export class Inventory {
   armor: Array<InvItem | null>;
   /** dye[10]：0-2 盔甲染料 / 3-9 配饰染料（Player.cs:1374） */
   dye: Array<InvItem | null>;
+  /** miscEquips[5]：宠物/光源/矿车/坐骑/钩爪（Player.cs:1376） */
+  miscEquips: Array<InvItem | null>;
+  /** miscDyes[5]：杂项装备染料（Player.cs:1378） */
+  miscDyes: Array<InvItem | null>;
+  /** 三套 Loadout（EquipmentLoadout = armor[20]+dye[10]，Swap :65-82 元素级互换） */
+  loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null> }>;
+  /** 当前 Loadout 序号（0-2） */
+  currentLoadout = 0;
   /** 垃圾桶持久槽（Player.trashItem :1380——关背包保留、死亡清空 :53394） */
   trash: InvItem | null = null;
   selected = 0; // 快捷栏选中格
@@ -96,6 +109,28 @@ export class Inventory {
     this.slots = Array(INV_SIZE).fill(null);
     this.armor = Array(ARMOR_TOTAL).fill(null);
     this.dye = Array(DYE_SLOTS).fill(null);
+    this.miscEquips = Array(MISC_SLOTS).fill(null);
+    this.miscDyes = Array(MISC_SLOTS).fill(null);
+    this.loadouts = Array.from({ length: LOADOUT_COUNT }, () => ({
+      armor: Array(ARMOR_TOTAL).fill(null),
+      dye: Array(DYE_SLOTS).fill(null),
+    }));
+  }
+
+  /** 切换 Loadout（Player.TrySwitchingLoadout :5430-5434：先 Swap 当前套装备份仓、
+   *  再 Swap 目标仓——玩家身上即换上目标套装，原套装入当前备份仓） */
+  trySwitchingLoadout(idx: number): void {
+    if (idx === this.currentLoadout || idx < 0 || idx >= LOADOUT_COUNT) return;
+    const swap = (a: Array<InvItem | null>, b: Array<InvItem | null>, n: number) => {
+      for (let i = 0; i < n; i++) { const t = a[i]; a[i] = b[i]; b[i] = t; }
+    };
+    const cur = this.loadouts[this.currentLoadout];
+    const next = this.loadouts[idx];
+    swap(this.armor, cur.armor, ARMOR_TOTAL);
+    swap(this.dye, cur.dye, DYE_SLOTS);
+    swap(this.armor, next.armor, ARMOR_TOTAL);
+    swap(this.dye, next.dye, DYE_SLOTS);
+    this.currentLoadout = idx;
   }
 
   heldItem(): InvItem | null {
@@ -136,6 +171,16 @@ export class Inventory {
     const part = i % VANITY_ARMOR_START; // 0-2=部位 3-9=配饰（与 10-19 镜像同判）
     if (part <= 2) return d.armor?.slot === (part as ArmorSlot);
     return !!d.accessory;
+  }
+
+  /** dye 槽能否接收（ItemSlot context 12/25/27/33：checkItem.dye > 0——染料物品白名单） */
+  dyeAccepts(id: number): boolean {
+    return isDyeItem(id);
+  }
+
+  /** miscEquips 槽能否接收（ItemSlot context 16-20：宠物/光源/矿车/坐骑/钩爪分类门） */
+  miscAccepts(slot: number, id: number): boolean {
+    return miscSlotAccepts(slot, id);
   }
 
   /** slots 下标能否接收物品（钱币/弹药专格校验；0-49 通用） */

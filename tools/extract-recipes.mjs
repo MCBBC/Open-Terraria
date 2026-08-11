@@ -113,20 +113,15 @@ function parseLinear(body) {
       if (!recipe) recipe = { items: [], groups: [], create: 0, createStack: 1, tile: undefined };
       buf.push(l);
     } else if (/^Add\w+\(/.test(l)) {
+      const name = l.match(/^(Add\w+)\(/)[1];
+      // 参数化模板：调用语句字面量直接展开（优先于块体解析——块体内参数是变量名 foldBlock 必丢）
+      if (name === 'AddCritterStatueRecipe') { expandCritterStatue(l); continue; }
+      if (name === 'AddStandardFurnitureSetRecipes') { expandFromCall(l); continue; }
       // 生成器调用：块体递归解析（生成器内也是 currentRecipe 序列，末尾自带 AddRecipe）；
       // 表达体转发（=> AddStandardFurnitureSetRecipes）在 gen 为空时按调用语句级联展开
-      const name = l.match(/^(Add\w+)\(/)[1];
       const gen = methodBody(`void ${name}(`) || methodBody(`private void ${name}(`)
         || methodBody(`public void ${name}(`) || methodBody(`private static void ${name}(`);
-      if (gen) {
-        parseLinear(gen);
-        // 转发块体：体内是 AddStandardFurnitureSetRecipes(...) 调用（参数多为字面量或生成器入参变量——
-        // 变量形无法求值则跳过，字面量形直接展开）
-        for (const graw of gen.split('\n')) {
-          const gl = graw.trim();
-          if (/^AddStandardFurnitureSetRecipes\(/.test(gl)) expandFromCall(gl);
-        }
-      }
+      if (gen) parseLinear(gen);
       else if (/^AddStandardFurnitureSetRecipes\(/.test(l)) expandFromCall(l);
     }
   }
@@ -216,6 +211,30 @@ function foldBlockTemplate(lines, recipe, map) {
   }
 }
 
+// ---- AddCritterStatueRecipe（:16571-16587：50 石头+5 小动物(或组) @重型工作台283+墓地）----
+// 调用形 AddCritterStatueRecipe(statueItem, critterItem=0[, RecipeGroups.X])——
+// 组形第三个参取组占位物（GetPlaceholderItemType = 组内首个 id）并 RequireGroup
+function expandCritterStatue(line) {
+  const m = line.match(/AddCritterStatueRecipe\((\d+),\s*(\d+)(?:,\s*RecipeGroups\.(\w+))?\)/);
+  if (!m) return;
+  const statue = +m[1];
+  let critter = +m[2];
+  const groups = [];
+  if (m[3]) {
+    const gname = m[3];
+    const gid2 = GROUP_ID[gname];
+    if (gid2 === undefined) return;
+    critter = (GROUP_ITEMS[gid2] ?? [0])[0]; // GetPlaceholderItemType = 组内首个
+    groups.push(gid2);
+  }
+  if (critter <= 0 && !groups.length) return;
+  out.push({
+    create: statue, createStack: 1, tile: 283,
+    items: [{ id: 3, stack: 50 }, { id: critter || 1000000 + (groups[0] ?? 0), stack: 5 }],
+    groups, graveyard: true,
+  });
+}
+
 const main = methodBody('public static void SetupRecipes()');
 parseLinear(main);
 // main 里的直调 AddStandardFurnitureSetRecipes(...) 展开（缺省参补 -1）
@@ -282,6 +301,21 @@ for (let i = 0; i < baseCount; i++) {
   });
 }
 out.push(...reverseOut);
+
+// ---- 输出端去重（同 create+tile+材料序列 视为同一条——原版源码本身有重复注册，如
+//      4022 Seafood Dinner@烹饪锅 重复 14 次；运行时 list 重复渲染无意义）----
+{
+  const seen = new Set();
+  const unique = [];
+  for (const r of out) {
+    const key = `${r.create}|${r.tile}|${r.items.map((i) => `${i.id}x${i.stack}`).sort().join(',')}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(r);
+  }
+  out.length = 0;
+  out.push(...unique);
+}
 
 const doc = {
   count: out.length,

@@ -312,6 +312,7 @@ export class Enemy extends Entity {
         case 46: golemHeadAI(this, game, p); break;                      // AI_046 挂载头 246(锚本体/火焰弹眼激光;249 自由态)
         case 47: golemFistAI(this, game, p); break;                      // AI_047 石巨人拳 247/248(肩锚冲拳)
         case 40: this.wallCreeperAI(game, p); break;                      // AI_040 爬墙蜘蛛族（贴背景墙爬行+形态互转）
+        case 42: this.lostGirlAI(game, p); break;                         // AI_042 失落女孩（伪装静止→Nymph 变身 cs:30281-30310）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -608,6 +609,16 @@ export class Enemy extends Entity {
         this.tryTransformTo(wallForm, st);
       }
     }
+    // ---- 吸血鬼离远 → 化回蝙蝠（cs:59236-59244：type 159 距玩家 >300 → Transform(158)）
+    if (this.vanillaId === 159 && player
+      && Math.hypot(player.cx - this.cx, player.cy - this.cy) > 300) {
+      this.tryTransformTo(158, st);
+    }
+    // ---- 蜥蜴人激怒（cs:57422-57425：type 198 HP≤55% → Transform(199 LihzahrdCrawler)，
+    //  爬行姿态更快更狠；同段的 Nutcracker 348→349 霜月未引入不移植）
+    if (this.vanillaId === 198 && this.hp <= this.maxHp * 0.55) {
+      this.tryTransformTo(199, st);
+    }
     // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
     if (this.onGround) this.vx *= 0.85;
     // ---- 入侵远程攻击（NPC.cs:59464-60085 战士族射击段，入侵弓手/枪手专属）----
@@ -820,6 +831,31 @@ export class Enemy extends Entity {
       if (st.isSolid(lx, ly)) return false;
     }
     return true;
+  }
+
+  /** AI_042 失落女孩 1:1（NPC.cs:30281-30310）：伪装成无害 NPC 静止站立（无移动逻辑，
+   *  仅重力）；玩家靠到 200px 内有视线、或自身被推动/下落/受伤（ai[0] 0→1 的三重触发，
+   *  cs:30292-30300）→ 21 tick 后 Transform(196 Nymph) 显形追杀 */
+  private lostGirlAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0; // 类字段默认 -1120 是史莱姆专用初值；原版 ai[0] 从 0 起步
+    if (this.ai0 === 0) {
+      if (player && !player.dead) {
+        const dx = player.cx - this.cx, dy = player.y - this.cy;
+        if (Math.hypot(dx, dy) < 200 && this.canSeePlayer(st, player)) this.ai0 = 1;
+      }
+      if (this.vx !== 0 || this.vy < 0 || this.vy > 2 || this.hp !== this.maxHp) this.ai0 = 1;
+    } else {
+      this.ai0 += 1;
+      if (this.ai0 >= 21) {
+        this.ai0 = 21;
+        if (this.tryTransformTo(196, st)) return;
+      }
+    }
+    // 静止站立 + 重力（原版 AI_042 无任何速度代码）
+    this.vx = 0;
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
   }
 
   /** AI_008 法师族（Fire Imp 24 / Goblin Sorcerer 29 / Dark Caster 32）：
@@ -1228,6 +1264,7 @@ export class Enemy extends Entity {
     let ax = 0.1, ay = 0.04, cx = 4, cy = 1.5;
     if (this.vanillaId === 158) { ax = 0.2; ay = 0.2; cx = 7; cy = 7; }
     else if (this.vanillaId === 660) { ax = 0.35; ay = 0.3; cx = 6; cy = 5; }
+    const vampireBat = this.vanillaId === 158;
     let dirX: number, dirY: number;
     if (player) { dirX = player.cx > this.cx ? 1 : -1; dirY = player.cy > this.cy ? 1 : -1; }
     else { dirX = this.facing; dirY = -1; }
@@ -1263,6 +1300,14 @@ export class Enemy extends Entity {
       this.vy = -oldVy * 0.5;
       if (this.vy > 0 && this.vy < 1) this.vy = 1;
       if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    }
+    // ---- 吸血蝙蝠俯袭击变形（cs:23393-23402）：玩家在下方 200px 内且有视线 →
+    // 落地化作人形吸血鬼（159，AI_003 战士 + 离远化回）
+    if (vampireBat && player && !player.dead) {
+      const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      if (d < 200 && this.y + this.h < player.y + player.h && this.canSeePlayer(game.world.store, player)) {
+        this.tryTransformTo(159, game.world.store);
+      }
     }
   }
 

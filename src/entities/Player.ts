@@ -70,6 +70,14 @@ export class Player extends Entity {
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
+  /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
+   *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
+   *  本地玩家恒 0 */
+  netOffX = 0;
+  netOffY = 0;
+  /** 联机远端挥舞动画（msg13 useItem 位驱动；Game 派生，Renderer 以 swing 参数消费）。
+   *  本地玩家不用（本地走 Game.swing） */
+  swingNet: { t: number; dur: number; item: number } | null = null;
 
   constructor(x: number, y: number, inv: Inventory) {
     super();

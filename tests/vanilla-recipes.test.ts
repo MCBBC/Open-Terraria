@@ -14,8 +14,8 @@ const ctx = (over: Partial<VanillaCraftCtx> = {}): VanillaCraftCtx => ({
 });
 
 describe('原版配方提取', () => {
-  it('2786 条（含反向）、组 31、站点继承 9', () => {
-    expect(VANILLA_RECIPES.length).toBe(2786); // 2688 线性+生成器 + 98 反向平台/墙
+  it('3173 条（去重终态：模板+雕像+反向全含）+组 31+继承 9', () => {
+    expect(VANILLA_RECIPES.length).toBe(3173); // 线性+生成器+模板22件套+小动物雕像+反向平台/墙，源码重复注册已去重
     expect(Object.keys(RECIPE_GROUPS).length).toBe(31);
     expect(Object.keys(RECIPE_GROUP_ITEMS).length).toBe(31);
   });

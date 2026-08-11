@@ -3,13 +3,15 @@
 //   -1 默认:y≥ws+25 → 金(1);冰系 tile(147/161/162)→ 冰箱(11)+冰系战利品;
 //   地下沙漠 → tile467 style10+沙漠战利品;y>h-205 → 地狱箱(4)+地狱武器序;
 //   Water Chests pass 固定 style17(水箱)+水中战利品;地表箱 style0 木箱。
-// 宝箱数量配置(Configuration.json):CaveChestCount 35-40(世界面积)、UnderworldChestCount 7-10(宽度)。
-// 注:普通金箱/木箱的杂项战利品表(L21500+ 的大 switch)未移植,特殊箱战利品齐全。
+// 宝箱数量(Configuration.json):CaveChestCount 35-40 ScaleWith:WorldArea(÷5040000)、
+//   UnderworldChestCount 10-15 ScaleWith:WorldWidth(÷4200)。金/木箱主件战利品池
+//   = cs:21500+ 大 switch 的常用主件子集(id 经 id-maps 核对)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
+import { vanillaItemKey } from '../../../data/vanillaNpcs';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -29,6 +31,30 @@ const desertShallowLoot = ['vi_4056_ancient_chisel', 'vi_4055_dunerider_boots', 
 const desertDeepLoot = ['vi_4061_storm_spear', 'vi_4062_thunder_zapper', 'vi_4276_bast_statue'];
 const hellLoot = ['vi_274_dark_lance', 'vi_112_flower_of_fire', 'vi_218_flamelash', 'vi_3019_hellwing_bow', 'vi_5010_treasure_magnet'];
 const waterLoot = ['vi_186_breathing_reed', 'vi_4404_inner_tube', 'vi_277_trident', 'vi_187_flipper'];
+
+/** 地牢墙集合(DungeonPass roomWall:L850 type 7/8/9 + 94-99 变体)。
+ *  原版只排除 wallDungeon[](AddBuriedChest L17086)——曾用 wl∈[7,99] 一刀切,
+ *  连带拒掉大量自然洞穴墙(泥墙/大理石墙),额外压低洞穴箱成功率 */
+const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+function isDungeonWall(wl: number): boolean {
+  return DUNGEON_WALLS.has(wl);
+}
+
+/** 金箱主件池(cs:21500+ 常用主件子集,原版 id) */
+const goldMainIds = [285, 953, 53, 54, 158, 50, 5011, 42, 280, 279, 3069, 49];
+/** 木箱主件池(地表箱) */
+const woodMainIds = [281, 3069, 280, 953, 285, 946];
+
+/** 主件 + 概率杂物(火把/药水)。cs:21500+ 的 switch 只取主件语义子集 */
+function rollCommonLoot(rng: RNG, mainIds: number[]): Array<{ id: number; stack: number } | null> {
+  const key = vanillaItemKey(mainIds[rng.int(0, mainIds.length - 1)]);
+  const out: Array<{ id: number; stack: number } | null> = Array(10).fill(null);
+  if (key && ITEM_BY_KEY[key] !== undefined) out[0] = { id: ITEM_BY_KEY[key], stack: 1 };
+  const roll = rng.int(0, 2);
+  if (roll === 0) out[1] = { id: ITEM_BY_KEY['torch'] ?? out[0]?.id ?? -1, stack: rng.int(3, 9) };
+  else if (roll === 1) out[1] = { id: ITEM_BY_KEY['lesser_healing_potion'] ?? -1, stack: rng.int(1, 3) };
+  return out;
+}
 
 /** AddBuriedChest 近似:从 (i,j) 向下落,按上下文解析样式与战利品,2×2 放置 */
 export function placeBuriedChest(
@@ -95,37 +121,53 @@ export function placeBuriedChest(
       st.setTileSilent(i + dx, topY + dy, tile, style * fw * 18 + dx * 18, dy * 18);
     }
   }
+  // 战利品:特殊池优先;金(1)/木(0)箱走主件+杂物池(此前是空箱,体感稀缺主因之一)
+  let items: Array<{ id: number; stack: number } | null>;
   const lootId = lootKey ? ITEM_BY_KEY[lootKey] : undefined;
-  chests.push({
-    x: i, y: topY,
-    items: lootId !== undefined ? [{ id: lootId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null),
-  });
+  if (lootId !== undefined) {
+    items = [{ id: lootId, stack: 1 }, ...Array(9).fill(null)];
+  } else if (style === 1) {
+    items = rollCommonLoot(rng, goldMainIds);
+  } else if (style === 0) {
+    items = rollCommonLoot(rng, woodMainIds);
+  } else {
+    items = Array(10).fill(null);
+  }
+  chests.push({ x: i, y: topY, items });
   return true;
 }
 
-/** Buried Chests pass:L7907(洞穴 35-40 + 地狱 7-10,10000 失败预算) */
+/** Buried Chests pass:L7907 洞穴段(CaveChestCount 35-40 × WorldArea/5040000)。
+ *  ★地狱段拆出 runUnderworldChestsPass:本函数曾在 hellPass 之前执行,
+ *  地狱箱被后续地狱地形重写 100% 抹除(实际 0 个) */
 export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurfaceHigh + 20 + gs.rockLevel) / 2);
-  // 洞穴箱(CaveChestCount 35-40,面积缩放,4200 宽 = 1)
+  // 洞穴箱:35-40 × 面积缩放(Configuration.json CaveChestCount ScaleWith:WorldArea;
+  // 小世界(4200×1200=5040000)= 1.0 → 35-40;中 ×2.29;大 ×4.0)
+  const target = Math.round(rng.int(35, 40) * (w * h) / 5040000);
   let fail = 10000;
-  for (let n = 0; n < 40 && fail > 0; ) {
+  for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
     const y = rng.int(yMin, h - 231);
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
-    const badWall = (wl >= 7 && wl <= 99) || wl === 87;
-    if (badWall || !placeBuriedChest(st, rng, gs, chests, x, y)) {
+    if (isDungeonWall(wl) || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;
   }
-  // 地狱箱(UnderworldChestCount 7-10)
-  fail = 10000;
-  for (let n = 0; n < 10 && fail > 0; ) {
+}
+
+/** 地狱箱(UnderworldChestCount 10-15 × WorldWidth/4200)。
+ *  必须在 hellPass + 地狱屋之后调用(原版 Underworld(cs:13697) < Buried Chests(cs:17066)) */
+export function runUnderworldChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  const { w, h } = st;
+  const target = Math.round(rng.int(10, 15) * (w / 4200));
+  let fail = 10000;
+  for (let n = 0; n < target && fail > 0; ) {
     const x = rng.int(20, w - 21);
     const y = rng.int(h - 200, h - 51);
-    const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
-    if ((wl >= 7 && wl <= 99) || !placeBuriedChest(st, rng, gs, chests, x, y)) {
+    if (!placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;

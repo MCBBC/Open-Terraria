@@ -5,21 +5,31 @@
 // 编码字段为本仓库 v1 简化集（protoVer 门禁，protoVer=1）。
 
 export const PROTO_MAGIC = 'SW1';
-export const PROTO_VER = 1;
+/** v2：msg13 改对齐原版 PlayerControls 布局（控制位 BitsByte×2 + selectedItem +
+ *  position(左上) + velocity），远端玩家本端跑物理（docs §4.4） */
+export const PROTO_VER = 2;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
-  Hello = 1,          // C→S {magic, protoVer, name}
-  Kick = 2,           // S→C {reason}
-  PlayerSlot = 3,     // S→C {slot, seed 随机}
+  Hello = 1,          // C→S {magic, protoVer, name, hostToken 兜底}
+  Kick = 2,           // S→C {reason}（原版 Kick/Disconnect 同号）
+  PlayerSlot = 3,     // S→C {slot}（原版同号 PlayerInfo=3：名字/外观在原版走此包，
+                      //   我们拆到 Hello+msg4——字段分布简化，ID 保留）
   SyncPlayer = 4,     // 双向 {slot, appearanceJson}
+  SyncPlayerItem = 5, // C→S→广播（v2 对齐原版 msg5 SyncPlayerItem 语义，批量变体）：
+                      //   {u8 count, entries[{u8 playerSlot(服务端覆写), u8 container,
+                      //    u8 itemSlot, u16 itemId(0=空), u16 stack}]}
+                      //   container: 0=slots[0..57] 1=armor[0..19] 2=dye[0..9]
   RequestWorldData = 6, // C→S {}
   WorldData = 7,      // S→C {时间/尺寸/出生点/层线/flags/seed/name}
   SpawnTileData = 8,  // C→S {x, y}（客户端请求出生点周围 section）
   StatusText = 9,     // S→C {count}（将发的 strip 数，进度条）
   TileSection = 10,   // S→C {x0,y0,w,h, rleBytes}（200×20 条带）
   PlayerSpawn = 12,   // S→C {slot, x, y}（进房落点确认）
-  PlayerState = 13,   // C→S→广播 {slot,x,y,vx,vy,facing,sel,dead}
+  PlayerState = 13,   // C→S→广播（v2 对齐原版 msg13）：{u8 slot, u8 ctrlBits, u8 flagBits,
+                      //   u8 selectedItem, f32 x, f32 y, [f32 vx, f32 vy 若 flagBits[2]]}
+                      //   ctrlBits: [0]up [1]down [2]left [3]right [4]jump [5]useItem [6]direction
+                      //   flagBits: [2]hasVelocity [6]ghost(死亡)。position=碰撞盒左上（原版语义）
   PlayerActive = 14,  // S→C 广播 {slot, active, name}
   TileBatch = 17,     // C→S→广播 {count, ops[]}（tile 操作批量，对齐 msg17 语义）
   SetTime = 18,       // S→C {timeOfDay, dayCount}
@@ -29,11 +39,13 @@ export const enum Msg {
   RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems}
 }
 
-/** NetModule 表（对齐原版注册顺序，显式建表防错位） */
+/** NetModule 表（0-2 对齐原版 NetworkInitializer.cs 注册序：Liquid/Text/Ping；
+ *  JoinLeave=3 与原版 NetAmbienceModule 撞号——本协议双端自洽，无互操作需求） */
 export const enum NetModule {
   Liquid = 0,   // 预留（v1 液体客户端本地）
-  Text = 1,     // 聊天 {authorSlot, text, r, g, b}
+  Text = 1,     // 聊天 {authorSlot, text, r, g, b}（author=255 无前缀，对齐原版 255=服务器）
   PingModule = 2, // 预留
+  JoinLeave = 3,  // S→C 系统 {slot, joined}——加入/离开公告（原版 Lang.mp[19]/[20]，服务器广播）
 }
 
 // ================= Writer（小端，定宽；字符串 = u16 长度 + UTF-8） =================
@@ -151,6 +163,50 @@ export class FrameParser {
     if (p < buf.length) { this.chunks.push(buf.subarray(p)); this.total = buf.length - p; }
     return any || this.total > 0;
   }
+}
+
+// ================= 玩家物品同步（msg5 SyncPlayerItem 批量变体） =================
+
+export const enum ItemContainer {
+  Slots = 0,  // inv.slots[0..57]
+  Armor = 1,  // inv.armor[0..19]（0-2 盔甲/3-9 配饰/10-12 时装/13-19 时装配饰）
+  Dye = 2,    // inv.dye[0..9]
+}
+
+export interface ItemSyncEntry {
+  container: ItemContainer;
+  itemSlot: number;
+  itemId: number;   // 0 = 空
+  stack: number;
+}
+
+export const INV_SYNC_SIZES = [58, 20, 10];
+
+export function writePlayerItems(entries: Array<ItemSyncEntry & { playerSlot: number }>): Uint8Array {
+  const w = new NetWriter(Msg.SyncPlayerItem);
+  w.u16(entries.length);
+  for (const e of entries) {
+    w.u8(e.playerSlot);
+    w.u8(e.container);
+    w.u8(e.itemSlot);
+    w.u16(e.itemId & 0xffff);
+    w.u16(e.stack & 0xffff);
+  }
+  return w.finish();
+}
+
+export function readPlayerItems(r: NetReader): Array<ItemSyncEntry & { playerSlot: number }> {
+  const n = r.u16();
+  const out: Array<ItemSyncEntry & { playerSlot: number }> = [];
+  for (let i = 0; i < n; i++) {
+    const playerSlot = r.u8();
+    const container = r.u8() as ItemContainer;
+    const itemSlot = r.u8();
+    const itemId = r.u16();
+    const stack = r.u16();
+    out.push({ playerSlot, container, itemSlot, itemId, stack });
+  }
+  return out;
 }
 
 // ================= tile 操作批量（msg17，对齐原版单点操作语义的批量变体） =================

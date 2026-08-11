@@ -38,6 +38,7 @@ import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { drawEmotes } from './EmoteBubble';
 
 /** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
  *  火把族（8/彩色 427-433/群系 523..5353）+ 荧光棒族 ItemID.Sets.Glowsticks(282,286,3112,3002,4776,5643)。
@@ -496,9 +497,16 @@ export class Renderer {
         (e as unknown as { draw(r: Renderer, cam: Camera): void }).draw(this, cam);
       }
     }
+    // 表情气泡（原版 EmoteBubble：实体层之上；本段在世界变换内，世界坐标绘制）
+    {
+      const eb = this.emoteSheet();
+      if (eb) drawEmotes(this.ctx, eb);
+    }
     this.drawPlayer(player, world, swing);
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
-    for (const rp of this.remotePlayers) this.drawPlayer(rp, world, null);
+    // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
+    // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
+    for (const rp of this.remotePlayers) this.drawPlayer(rp, world, rp.swingNet);
 
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720）：
     //     水 0.6 半透明盖在实体上——水中角色带水色
@@ -1264,8 +1272,9 @@ export class Renderer {
     // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
-    // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感
-    ctx.translate(p.cx - p.facing * 2.5, p.y + p.h + p.stepRenderY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
+    // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感；
+    // 联机远端叠加 netOffset（原版 Player.netOffset 平滑收敛，本地玩家恒 0）
+    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + p.netOffY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
@@ -1443,6 +1452,18 @@ export class Renderer {
 
   private runFramesCache: ReturnType<SpriteAtlas['animFrames']> | null = null;
   private actionFramesCache: Record<string, ReturnType<SpriteAtlas['rect']>> | null = null;
+
+  /** Extra_48 表情总表（272×1092）懒加载——原版 TextureAssets.Extra[48] */
+  private emoteSheetImg: HTMLImageElement | null = null;
+  private emoteSheet(): HTMLImageElement | null {
+    if (!this.emoteSheetImg) {
+      const im = new Image();
+      im.onload = () => { /* 就绪 */ };
+      im.src = 'sprites/vanilla/Extra_48.png';
+      this.emoteSheetImg = im;
+    }
+    return this.emoteSheetImg;
+  }
 
   /** 精灵底部透明留白行数（缓存）：用于脚底对齐 */
   private bottomPadCache = new Map<string, number>();
