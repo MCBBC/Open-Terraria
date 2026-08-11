@@ -1017,6 +1017,7 @@ var beachDbg = new List<string>();
                 else depth += 1.0;
                 int pad = (int)r.Next(15, 20);
                 int yEnd = (int)((double)j + depth + pad);
+                if (x >= 134 && x <= 156) beachDbg.Add($"{x}:w{j}:y{yEnd}:d{depth:0.0}");
                 for (int y = 0; y < yEnd && y < H; y++)
                 {
                     int ti = y * W + x;
@@ -1065,6 +1066,7 @@ var beachDbg = new List<string>();
 }
 File.WriteAllBytes("/tmp/cs-act4.bin", act);
 File.WriteAllBytes("/tmp/cs-act5.bin", act);
+File.WriteAllText("/tmp/cs-beach2.txt", string.Join(" ", beachDbg));
 Checkpoint("beaches");
 
 // ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================

@@ -158,8 +158,18 @@ if (!up) {
     frozen = Math.abs(traj[k].x - traj[k - 1].x) < 1 ? frozen + 1 : 0;
     maxFrozen = Math.max(maxFrozen, frozen);
   }
+  const dbg = await page.evaluate(() => {
+    const g = window.__swGame; const p = g.player; const st = g.world.store;
+    const fx = Math.floor((p.x + p.w / 2) / 16), fy = Math.floor((p.y + p.h + 2) / 16);
+    const dump = [];
+    for (let dx = -3; dx <= 2; dx++) for (let dy = -3; dy <= 2; dy++) {
+      const j = st.idx(fx + dx, fy + dy);
+      dump.push(`${fx + dx},${fy + dy}:t${st.type[j]}${st.half[j] ? 'H' : ''}s${st.slope[j]}${st.flags[j] ? '' : '·'}${st.isSolid(fx + dx, fy + dy) ? '' : '!'}`);
+    }
+    return { px: p.x, py: p.y, feet: p.y + p.h, vx: p.vx, vy: p.vy, onGround: p.onGround, dump: dump.join(' ') };
+  });
   check('上坡行走:爬升且前进(不卡死)', climbed >= 10 && progressed >= 40,
-    `maxClimb ${climbed}px, 前进 ${Math.round(progressed)}px, 最长冻结 ${maxFrozen} 采样`);
+    `maxClimb ${climbed}px, 前进 ${Math.round(progressed)}px | dbg x ${Math.round(dbg.px)} feet ${Math.round(dbg.feet)} vx ${dbg.vx.toFixed(1)} vy ${dbg.vy.toFixed(1)} g ${dbg.onGround} | ${dbg.dump}`);
 }
 
 // ===== 用户标注复现(违法的要塞 (2236,276)):坡顶过渡沉入 =====

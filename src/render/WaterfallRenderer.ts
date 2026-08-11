@@ -84,10 +84,10 @@ export class WaterfallRenderer {
     for (const wf of this.falls) {
       const texImg = tex[wf.type] ?? tex[0];
       if (!texImg) continue;
-      // 帧槽布局实证（Waterfall_0.png 逐像素转储）：每 32px 槽的主水流在【右半 16px】
-      // （[16,32) 全宽柱），左半只有 2px 细边；原版主体路径采样 16+num21（L888/922/930）。
-      // 此前取左半 (num21,0,16) 只画出透明残边——瀑布几乎不可见
-      const frameX = 32 * (wf.type === 0 ? regular : slow) + 16;
+      // 帧槽 32px×40px 胶片条:【主水流带在 y=24 行、32px 整槽宽】(WaterfallManager :740/:744/
+      //  :754-758 全部 Rectangle(num21, 24, 32, 16-…));y=0 行 16px 是浅流细带(:767-776,
+      //  液量小的辅助层)。曾错取 (帧+16, 0, 16) —— 一直画浅流带,瀑布呈细白线"贴图不对"
+      const slot = 32 * (wf.type === 0 ? regular : slow);
       let cx = wf.x, cy = wf.y; // 原版从唇缘格本体开始画（半砖 blockType=1 不断流，L427）
       let dx = 0, dy = 0;       // num26/num27：本步位移
       let lastH = 0;            // num14：上一次水平方向
@@ -130,11 +130,13 @@ export class WaterfallRenderer {
         let alpha = wf.type === 1 ? 1.0 : wf.type === 2 ? 0.8
           : (st.wall[ci] !== 0 || cy >= groundLevel ? 0.6 : 1.0);
         if (step > WATERFALL_DIST - 10) alpha *= (WATERFALL_DIST - step) / 10;
-        const sh = 16 - Math.floor(liq / 16);       // num21：按格内液量裁掉底部
+        const depth = 16 - Math.floor(liq / 16);     // num43:按格内液量裁掉底部
         const yOff = solidT(cx, cy + 1) && !st.half[ci] ? 8 : 0; // 撞地格上移 8px（L531-534）
-        if (sh > 0) {
+        if (depth > 0) {
           ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-          ctx.drawImage(texImg, frameX, 0, 16, sh, cx * 16, cy * 16 + yOff, 16, sh);
+          // 主带 32px 整槽(:740/:744):以瀑布格为中心向左右各伸半格
+          // (原版 FlipHorizontally 分支为水平流段纹理方向,canvas 不镜像近似)
+          ctx.drawImage(texImg, slot, 24, 32, depth, cx * 16 - 16, cy * 16 + yOff, 32, depth);
         }
         if (liq > 0 && !st.half[ci]) break;         // 溶入液池（L777-778）
         cx += dx; cy += dy;

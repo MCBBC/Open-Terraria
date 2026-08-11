@@ -442,9 +442,10 @@ export function resolveDrops(ctx: NpcDropCtx): NpcDropOutcome {
 }
 
 // ============ 钱币管线（NPCLoot_DropMoney :80412 1:1，luck=0 → 单掷） ============
-export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean): ResolvedDrop[] {
+export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
   const rng = ctx.rng;
   let num = value * (1 + rng.int(-20, 75) * 0.01); // Next(-20,76) → [-20,75]
+  if (midas) num *= 1 + rng.int(10, 51) * 0.01;   // 金药剂 midas（:80424 ×1.10-1.51）
   if (rng.int(0, 1) === 0) num *= 1 + rng.int(5, 10) * 0.01;    // 1/2 ×(1.05-1.10)
   if (rng.int(0, 3) === 0) num *= 1 + rng.int(10, 20) * 0.01;   // 1/4 ×(1.10-1.20)
   if (rng.int(0, 7) === 0) num *= 1 + rng.int(15, 30) * 0.01;   // 1/8 ×(1.15-1.30)

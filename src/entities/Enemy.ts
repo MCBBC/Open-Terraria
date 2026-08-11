@@ -234,6 +234,21 @@ export class Enemy extends Entity {
   lavaWet = false;
   onFireT = 0;
   onFireDoT = 0;
+  /** 武器浸剂 debuff（R2，近战命中施加；单位=秒）
+   *  DoT 对应 NPC.cs UpdateNPC_BuffApplyDOTs（lifeRegen/2 = HP/s）：
+   *  poison 20→6HP/s、venom 70→30HP/s、cursed(39)→24HP/s */
+  poisonT = 0;
+  venomT = 0;
+  cursedT = 0;
+  poisonDoT = 0;
+  venomDoT = 0;
+  cursedDoT = 0;
+  /** ichor(69)：受击时防御 -15（ArmorPenetration += 15 :92096） */
+  ichorT = 0;
+  /** midas(72)：掉钱 ×1.1-1.5（NPC.cs:80424） */
+  midasT = 0;
+  /** confused(31)：纳米药剂——AI 反向（近似：每秒翻转水平速度） */
+  confusedT = 0;
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
@@ -472,6 +487,29 @@ export class Enemy extends Entity {
           Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.8,
           { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
       }
+    }
+
+    // ---- 武器浸剂 debuff 滴血（R2，NPC.cs:92585/92697/92708 DoT 同 onFire 模式） ----
+    if (this.poisonT > 0) { this.poisonT -= dt; this.poisonDoT += 6 * dt; }
+    if (this.venomT > 0) { this.venomT -= dt; this.venomDoT += 30 * dt; }
+    if (this.cursedT > 0) { this.cursedT -= dt; this.cursedDoT += 24 * dt; }
+    for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT']] as const) {
+      const acc = this[dKey];
+      if (acc >= 1) {
+        const n = Math.floor(acc);
+        this[dKey] -= n;
+        this.hp -= n;
+        this.hpBarT = 240;
+        if (this.hp <= 0) this.hurt(9999, 0, 0, game);
+      }
+    }
+    if (this.ichorT > 0) this.ichorT -= dt;
+    if (this.midasT > 0) this.midasT -= dt;
+    if (this.confusedT > 0) {
+      this.confusedT -= dt;
+      // 纳米（confused 近似）：每 60t 翻转水平速度方向（原版 AI 反向 :29811）
+      this.confuseFlip = (this.confuseFlip ?? 0) + dt;
+      if (this.confuseFlip >= 1) { this.confuseFlip = 0; this.vx *= -1; }
     }
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
@@ -3556,7 +3594,9 @@ export class Enemy extends Entity {
     }
     // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
     const def = this.def.defense ?? 0;
-    dmg = Math.max(1, Math.round(dmg - def * 0.5));
+    // ichor（灵液药剂，:92096）：armorPenetration += 15 → 防御 -15（下限 0）
+    const effDef = this.ichorT > 0 ? Math.max(0, def - 15) : def;
+    dmg = Math.max(1, Math.round(dmg - effDef * 0.5));
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
@@ -3691,7 +3731,7 @@ export class Enemy extends Entity {
           });
         // 钱币（规则未清零 value 时走 NPCLoot_DropMoney 管线）
         const value = res.zeroValue || twinSuppressed ? 0 : ctx.value;
-        if (value > 0) for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon)) spawn(c.id, c.n);
+        if (value > 0) for (const c of rollCoins(value, ctx, !!ctx.extras?.bloodMoon, this.midasT > 0)) spawn(c.id, c.n);
         // 心/星（NPCLoot_DropCommonLifeAndMana）
         for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
         // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts，boss 门 :80307）

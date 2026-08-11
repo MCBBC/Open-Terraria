@@ -29,8 +29,24 @@ async function attempt() {
     g.renderer.fullbright = true;
     // 复现瀑布:x=1222 顶部注满一列水(地表 337 → 从 310 起注到 332),任其下流
     const st = g.world.store;
-    for (let y = 310; y <= 332; y++) st.setLiquid(1222, y, 255, 1);
+    const STONE = g.tileByKey['stone'];
+    // 平台:309 行整行石面;310 行 x1222 半砖(唇缘),右邻 1223 露空
+    for (let x = 1215; x <= 1230; x++) {
+      st.setTile(x, 309, STONE, 0, 0);
+      st.half[st.idx(x, 310)] = 0;
+      st.setTile(x, 310, 0);
+    }
+    st.setTile(1222, 310, STONE, 0, 0);
+    st.half[st.idx(1222, 310)] = 1;
+    // 上方大水池(300-308 × 1218-1226)持续供水
+    for (let x = 1218; x <= 1226; x++) {
+      for (let y = 300; y <= 308; y++) {
+        st.setTile(x, y, 0);
+        st.setLiquid(x, y, 255, 1);
+      }
+    }
     g.lighting.liquidDirty = true;
+    g.camera.x = 1223 * 16; g.camera.y = 316 * 16;
     return 'ok';
   }, save);
   return r;
@@ -49,9 +65,10 @@ console.log('load:', ok);
 if (ok !== 'ok') { console.log('GAVE UP'); await browser.close(); process.exit(1); }
 
 // 等液流跑一会(湖面溢流形成下落柱),期间采两帧对比动画
-await new Promise((r2) => setTimeout(r2, 2500));
+await new Promise((r2) => setTimeout(r2, 3500));
 await page.screenshot({ path: '/tmp/wf-1.png' });
 const diag = await page.evaluate(() => {
+    const wf = window.__swGame.renderer.waterfalls; if (wf) console.log('falls=' + wf.count);
   const g = window.__swGame;
   const st = g.world.store;
   const cells = [];

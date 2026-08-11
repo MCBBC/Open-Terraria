@@ -204,7 +204,9 @@ export class SpriteAtlas {
   vframeAt(sheetId: number, fx: number, fy: number): DrawRect | null {
     const m = this.vmeta(sheetId);
     if (!m) return null;
-    const img = this.vimages.get(m.sheet);
+    // 与 vframe/vrect 同语义懒加载（ensureVImage）：place_v_* 物品图标走本方法,
+    // 此前直接 vimages.get——表未载时不发加载请求,宝箱内家具类物品图标永久回退
+    const img = this.ensureVImage(m.sheet);
     if (!img) return null;
     if (fx < 0 || fy < 0 || fx + m.grid[0] > img.width || fy + m.grid[1] > img.height) return null;
     return { img, sx: fx, sy: fy, sw: m.grid[0], sh: m.grid[1] };

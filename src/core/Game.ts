@@ -985,10 +985,12 @@ export class Game implements GameHooks {
         if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')) {
           this.chunks.invalidateAll();
         }
-        // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 30t 节流后刷背包/快捷栏，
+        // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 节流后刷背包/快捷栏/宝箱，
         // 把空图标升格为原版图标——否则图标未就绪时 paintSlot 写空 src，直到下次
-        // 用户点击才自愈）
-        if (file.includes('Item_Atlas')) this.iconUiDirty = true;
+        // 用户点击才自愈）。Tiles_ 表同样要刷：place_v_* 家具类物品的图标取自
+        // 图块表首帧（atlasIconForKey → vframeAt），此前只认 Item_Atlas → 开宝箱
+        // 时这类物品永久回退
+        if (file.includes('Item_Atlas') || file.startsWith('vanilla/Tiles_')) this.iconUiDirty = true;
       };
     }
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
@@ -3919,6 +3921,8 @@ export class Game implements GameHooks {
   private weatherHooks: import('../render/WeatherRenderer').WeatherFxHooks | null = null;
   /** 史莱姆雨延迟公告倒计时（Main.slimeWarningTime/Delay=420，UpdateSlimeRainWarning :64984） */
   private slimeWarningTime = 0;
+  /** 狱火光环 tick 计数（buff 116，:9896 infernoCounter） */
+  private infernoCounter = 0;
 
   /** 天气推进（原版 Main.UpdateWeather + updateCloudLayer + 雨调度/沙尘暴，60Hz）：
    *  atmo = 玩家深度线性近似（worldSurface 以上 1 / rockLevel 以下 0）；雷声按距离衰减；
@@ -4044,6 +4048,20 @@ export class Game implements GameHooks {
     // 史莱姆雨延迟公告倒计时（UpdateSlimeRainWarning :64988-64996 1:1）
     if (this.slimeWarningTime > 0 && --this.slimeWarningTime === 0) {
       this.newText(Lang.gen(weather.slimeRainTime > 0 ? 74 : 75), 50, 255, 130);
+    }
+    // 狱火药水（buff 116，Player.cs:9896-9938）：200px 光环烧敌——每 60t 对范围内敌
+    // 直伤 20（不绕 iframes）；视觉光效由粒子近似
+    if (this.player.buffs.has(BuffType.Inferno)) {
+      this.infernoCounter++;
+      const hitTick = this.infernoCounter % 60 === 0;
+      if (hitTick) this.spawnParticles(this.player.cx, this.player.cy, '#FF8C2A', 4, 1.8, { life: 24, grav: -0.08 });
+      for (const eent of this.entities.enemies) {
+        const en = eent as Enemy;
+        if (en.dead) continue;
+        if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 200) continue;
+        en.cursedT = Math.max(en.cursedT, 2); // AddBuff(323,120) 灼烧 2s
+        if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this);
+      }
     }
     // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]→消息列）
     if (weather.coinRainPending) {
@@ -4642,6 +4660,17 @@ export class Game implements GameHooks {
       const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
       const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
+      // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
+      if (this.player.buffs.has(BuffType.ImbueVenom)) e.venomT = Math.max(e.venomT, 5 + Math.random() * 5);
+      if (this.player.buffs.has(BuffType.ImbueCursed)) e.cursedT = Math.max(e.cursedT, 3 + Math.random() * 4);
+      if (this.player.buffs.has(BuffType.ImbueFire)) e.onFireT = Math.max(e.onFireT, 3 + Math.random() * 4);
+      if (this.player.buffs.has(BuffType.ImbueGold)) e.midasT = 2;
+      if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
+      if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
+      if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+      if (this.player.buffs.has(BuffType.ImbueParty)) {
+        this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
+      }
       // 幸运币（hasLuckyCoin：近战命中 20% 掉 1-5 铜币，Player.SpawnCoins 近似）
       if (this.player.equipStats.luckyCoin && Math.random() < 0.2) {
         this.spawnDrop(e.cx, e.y, 'coin_copper', 1 + Math.floor(Math.random() * 5), 0, -2);
@@ -6235,6 +6264,8 @@ export class Game implements GameHooks {
   private invNotifyPending = false;
   /** 图标图集晚到标记（onVImageLoaded 置位，flushInvNotify 节流刷 UI） */
   private iconUiDirty = false;
+  /** iconUiDirty 上次刷 UI 的 tick（冷却节流用） */
+  private iconUiAt = -100;
   /** 新物品入手飘名（主角旁浅白文本） */
 
   notifyInventoryChanged() {
@@ -6283,8 +6314,10 @@ export class Game implements GameHooks {
       this.invNotifyPending = false;
       this.cb.onInventoryChanged();
     }
-    // 图标图集晚到的 UI 补刷（30t 节流；与 invNotify 合并同点刷新）
-    if (this.iconUiDirty && this.tickCount % 30 === 0) {
+    // 图标图集晚到的 UI 补刷（冷却 30t 合并突发；此前 %30 对齐 tick 网格,
+    // 晚到后最长还要等 0.5s 才自愈——宝箱面板的回退图标可感知地停留）
+    if (this.iconUiDirty && this.tickCount - this.iconUiAt >= 30) {
+      this.iconUiAt = this.tickCount;
       this.iconUiDirty = false;
       this.cb.onInventoryChanged();
     }

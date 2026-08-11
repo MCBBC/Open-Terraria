@@ -131,7 +131,7 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (x > edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaL); }
         else depth += 1;
         const pad = rng.int(15, 19);
-        const yEnd = waterY + depth + pad;
+        const yEnd = Math.trunc(waterY + depth + pad); // C# (int) 截断——浮点直比会多挖一行
         for (let y = 0; y < yEnd && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {
@@ -158,7 +158,7 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (x < w - edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaR); }
         else depth += 1;
         const pad = rng.int(15, 19);
-        const yEnd = waterY + depth + pad;
+        const yEnd = Math.trunc(waterY + depth + pad); // C# (int) 截断——浮点直比会多挖一行
         for (let y = 0; y < yEnd && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {

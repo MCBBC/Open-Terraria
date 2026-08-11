@@ -62,6 +62,16 @@ export enum BuffType {
   Wrath = 39,         // 暴怒(115,240s)：全系暴击+10（:9890）
   Rage = 40,          // 怒气(117,240s)：全系伤害+10%（:9947）
   Tipsy = 41,         // 醉酒(25,清酒)：def-4/近战暴击+2/近战伤+10%/近战速+10%（:11513）
+  // ---- R2 武器浸剂（meleeEnchant 表 Player.cs:11604-11636 → 敌 debuff :6141-6171）----
+  ImbueVenom = 42,    // 毒液药剂(71)→敌 Venom(70) 5-10s（30HP/s）
+  ImbueCursed = 43,   // 诅咒焰药剂(73)→敌 Cursed Inferno(39) 3-7s（24HP/s）
+  ImbueFire = 44,     // 烈火药剂(74)→敌 OnFire(24) 3-7s（4HP/s）
+  ImbueGold = 45,     // 金药剂(75)→敌 Midas(72) 2s（掉钱 ×1.10-1.51）
+  ImbueIchor = 46,    // 灵液药剂(76)→敌 Ichor(69) 10-20s（防御 -15）
+  ImbueNano = 47,     // 纳米药剂(77)→敌 Confused(31) 1-4s（AI 反向近似）
+  ImbueParty = 48,    // 派对药剂(78)→命中爆彩带（视觉）
+  ImbuePoison = 49,   // 毒药剂(79)→敌 Poison(20) 5-10s（6HP/s）
+  Inferno = 50,       // 狱火药水(116)：200px 光环烧敌 2s+20 伤/60t（:9896）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -110,6 +120,15 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Wrath]: { vanillaBuff: 115, descKey: 'Mods.SandboxWorld.Buff.Wrath.Desc', fallbackName: '暴怒' },
   [BuffType.Rage]: { vanillaBuff: 117, descKey: 'Mods.SandboxWorld.Buff.Rage.Desc', fallbackName: '怒气' },
   [BuffType.Tipsy]: { vanillaBuff: 25, descKey: 'Mods.SandboxWorld.Buff.Tipsy.Desc', fallbackName: '醉酒' },
+  [BuffType.ImbueVenom]: { vanillaBuff: 71, descKey: 'Mods.SandboxWorld.Buff.ImbueVenom.Desc', fallbackName: '武器浸剂：毒液' },
+  [BuffType.ImbueCursed]: { vanillaBuff: 73, descKey: 'Mods.SandboxWorld.Buff.ImbueCursed.Desc', fallbackName: '武器浸剂：诅咒焰' },
+  [BuffType.ImbueFire]: { vanillaBuff: 74, descKey: 'Mods.SandboxWorld.Buff.ImbueFire.Desc', fallbackName: '武器浸剂：烈火' },
+  [BuffType.ImbueGold]: { vanillaBuff: 75, descKey: 'Mods.SandboxWorld.Buff.ImbueGold.Desc', fallbackName: '武器浸剂：黄金' },
+  [BuffType.ImbueIchor]: { vanillaBuff: 76, descKey: 'Mods.SandboxWorld.Buff.ImbueIchor.Desc', fallbackName: '武器浸剂：灵液' },
+  [BuffType.ImbueNano]: { vanillaBuff: 77, descKey: 'Mods.SandboxWorld.Buff.ImbueNano.Desc', fallbackName: '武器浸剂：纳米' },
+  [BuffType.ImbueParty]: { vanillaBuff: 78, descKey: 'Mods.SandboxWorld.Buff.ImbueParty.Desc', fallbackName: '武器浸剂：派对' },
+  [BuffType.ImbuePoison]: { vanillaBuff: 79, descKey: 'Mods.SandboxWorld.Buff.ImbuePoison.Desc', fallbackName: '武器浸剂：剧毒' },
+  [BuffType.Inferno]: { vanillaBuff: 116, descKey: 'Mods.SandboxWorld.Buff.Inferno.Desc', fallbackName: '狱火' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
