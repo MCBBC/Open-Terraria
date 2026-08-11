@@ -468,6 +468,8 @@ export class Enemy extends Entity {
   private slimeAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     const underground = this.cy / TILE > game.world.groundLevel;
+    const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     // flag3 激愤判定（L61446-61448）
     const hurt = this.hp < this.maxHp;
     let flag3 = !game.world.clock.isDay || hurt || underground;
@@ -476,7 +478,6 @@ export class Enemy extends Entity {
       flag3 = !!player && !player.dead && !inWater
         && Math.hypot(player.cx - this.cx, player.cy - this.cy) <= 200;
     }
-    const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
     // ai[2] 卡墙冷却期间不索敌（L61938）
     if (this.ai2 > 0) this.ai2--;
     // 激愤时索敌：direction 朝玩家；被动时保持现方向
@@ -484,7 +485,6 @@ export class Enemy extends Entity {
       this.facing = player.cx > this.cx ? 1 : -1;
     }
     const dir = this.facing;
-    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     const grounded = this.onGround || (inWater && Math.abs(this.vy) < 0.8);
     if (grounded) {
       // 落地卡墙检测（L61937-61939）：起跳位置没变 = 白跳 → 反转

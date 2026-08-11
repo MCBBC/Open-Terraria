@@ -115,6 +115,71 @@ for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
 console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size}）`);
 
+// ---- 配饰数值效果子集（Player.ApplyEquipFunctional :13952 switch(type)）→ vanilla-accfx.json ----
+// 只提取纯数值赋值模式（可数据驱动生效）；行为型效果（火箭靴飞行/熔岩护身/星星斗篷等）
+// 依赖未移植的 Player 子系统，不在本表——后续按系统移植进度扩白名单。
+const ACC_PATTERNS = [
+  ['life', /lifeRegen \+= (\d+);/],
+  ['mana', /statManaMax2 \+= (\d+);/],
+  ['def', /statDefense \+= (\d+);/],
+  ['move', /moveSpeed \+= ([\d.]+)f;/],
+  ['meleeSpd', /meleeSpeed \+= ([\d.]+)f;/],
+  ['runSpeed', /accRunSpeed = ([\d.]+)f;/],
+  ['dmgMelee', /meleeDamage \+= ([\d.]+)f;/],
+  ['dmgRanged', /rangedDamage \+= ([\d.]+)f;/],
+  ['dmgMagic', /magicDamage \+= ([\d.]+)f;/],
+  ['dmgAll', /allDamage \+= ([\d.]+)f;/],
+  ['critMelee', /meleeCrit \+= (\d+);/],
+  ['critRanged', /rangedCrit \+= (\d+);/],
+  ['critMagic', /magicCrit \+= (\d+);/],
+];
+{
+  const playerSrc = read('Terarria1456/Terraria/Player.cs');
+  const body = methodBodyOf(playerSrc, 'private void ApplyEquipFunctional(');
+  const segs = (() => {
+    // 复用 outerCaseSegments 的最近 switch(type) 归属（其采集 switch(type) 段）
+    const out = new Map();
+    const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
+    const stack = [];
+    let depth = 0, m;
+    while ((m = tokRe.exec(body))) {
+      const t = m[0];
+      if (t.startsWith('switch')) stack.push({ isType: /switch\s*\(\s*(?:currentItem\.)?type\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
+      else if (t === '{') {
+        depth++;
+        const top = stack[stack.length - 1];
+        if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
+      } else if (t === '}') {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && depth === top.bodyDepth) {
+          if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          stack.pop();
+        }
+        depth--;
+      } else {
+        const top = stack[stack.length - 1];
+        if (top && top.opened && top.isType) {
+          if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+          top.cur = t === 'default:' ? null : +m[2];
+          top.segStart = m.index + t.length;
+        }
+      }
+    }
+    return out;
+  })();
+  const ACCFX = {};
+  for (const [vid, seg] of segs) {
+    const fx = {};
+    for (const [field, re] of ACC_PATTERNS) {
+      const mm = seg.match(re);
+      if (mm) fx[field] = parseFloat(mm[1]);
+    }
+    if (Object.keys(fx).length) ACCFX[vid] = fx;
+  }
+  writeFileSync(`${ROOT}/game/src/data/vanilla-accfx.json`, JSON.stringify(ACCFX));
+  console.error(`accfx: ${Object.keys(ACCFX).length} 件配饰数值效果`);
+}
+
 // ---- vanityPet / lightPet 初始化表（Main.cs 9100-9290 静态初始化段） ----
 const mainSrc = read('Terarria1456/Terraria/Main.cs');
 const mainLines = mainSrc.split('\n');
