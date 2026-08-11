@@ -84,6 +84,30 @@ const MISC = [
   // 世界背景图全量（地表视差层/地下层/地狱层；仅落盘，运行时由 BiomeBackground 懒加载——
   // 不进 SpriteAtlas VANILLA_MISC 常驻表，避免 344 张整图常驻内存）
   ...Array.from({ length: 344 }, (_, i) => `Background_${i}.png`),
+  // ---- NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光叠画，GlowMaskID 逐处引用）----
+  // 火星飞碟族 392/395/394（Main.cs:24218-24226 Color(200,200,200,0) 叠画）
+  'Glow_48.png', 'Glow_49.png', 'Glow_50.png',
+  // 四天界塔（Main.cs:23746-23776：493→132 星璇? 见表内注释 / 507→143 / 422→149 / 517→162，
+  // 各以速度向量四向偏移画 4 份灰 A=64 拷贝）
+  'Glow_132.png', 'Glow_143.png', 'Glow_149.png', 'Glow_162.png',
+  // 银河织带 402-404（Main.cs:23878-23886 拖尾白 Glow 133/134 + 本体 135）
+  'Glow_133.png', 'Glow_134.png', 'Glow_135.png',
+  // 暗黑魔法师 564/565（Main.cs:23480-23492 white×Opacity + 4 环绕残影）/ Betsy 551（:23099）
+  'Glow_225.png', 'Glow_226.png',
+  // 永恒水晶 548（Main.cs:23594 彩虹脉冲底层）
+  'Glow_239.png',
+  // ---- 月总手-躯干连接（Main.cs:24325-24540 case 396/397/398 独占分支）----
+  // 398:Extra_13 躯干双半(镜像)+Extra_14 上臂+Extra_16 胸甲;397:Extra_15 前臂+Extra_17/19 眼
+  // 396:Extra_18/19 双眼+Extra_25/29 破体阶段;Extra_26 眼窝闲置帧(397 ai[0]==-2)
+  'Extra_13.png', 'Extra_14.png', 'Extra_15.png', 'Extra_16.png', 'Extra_17.png',
+  'Extra_18.png', 'Extra_19.png', 'Extra_25.png', 'Extra_26.png', 'Extra_29.png',
+  // ---- 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）----
+  // 157 着色器层(此处直画近似)/158 左臂/159 翅膀(1×11 帧 scale×2)/160 右臂
+  // 187 二阶段翅膀(1×8 帧)/188 二阶段头冠
+  'Extra_157.png', 'Extra_158.png', 'Extra_159.png', 'Extra_160.png',
+  'Extra_187.png', 'Extra_188.png',
+  // 塔护盾 ForceField 着色器载体（Main.cs:23806 DrawData 600×600 原图 Misc/Perlin）
+  'Misc/Perlin.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

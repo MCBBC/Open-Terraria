@@ -166,6 +166,21 @@ export class SettingsPanel {
     return row;
   }
 
+  /** 双态枚举行（点击在两态间切换；智能光标 Toggle/Hold 模式用） */
+  private modeRow(label: string, _get: () => string, value: () => string, cycle: () => void) {
+    const row = document.createElement('div');
+    row.className = 'sw-set-row';
+    const span = document.createElement('span');
+    span.textContent = label;
+    const btn = document.createElement('button');
+    btn.className = 'sw-set-back';
+    btn.style.padding = '4px 14px';
+    btn.textContent = value();
+    btn.addEventListener('click', () => { cycle(); btn.textContent = value(); });
+    row.append(span, btn);
+    return row;
+  }
+
   /** 语言选择网格:显示名取各语言包自带的 Language.* 键(原版语义) */
   private langGrid() {
     const wrap = document.createElement('div');
@@ -230,11 +245,27 @@ export class SettingsPanel {
     } else if (this.cat === 'game') {
       this.content.append(
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.DevMode'), () => d.devMode, (v) => void options.set('devMode', v)),
+        // 智能光标（原版 IngameOptions :1418 Smart Cursor 段）：模式 Toggle/Hold + 三开关
+        this.modeRow(
+          Lang.text('Mods.SandboxWorld.Settings.SmartCursorMode'),
+          () => d.smartCursorMode,
+          () => Lang.text(d.smartCursorMode === 'toggle'
+            ? 'Mods.SandboxWorld.Settings.SmartCursorToggle'
+            : 'Mods.SandboxWorld.Settings.SmartCursorHold'),
+          () => void options.set('smartCursorMode', d.smartCursorMode === 'toggle' ? 'hold' : 'toggle'),
+        ),
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartAxeAfterPickaxe'), () => d.smartAxeAfterPickaxe, (v) => void options.set('smartAxeAfterPickaxe', v)),
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartBlocks'), () => d.smartBlocksEnabled, (v) => void options.set('smartBlocksEnabled', v)),
+        this.toggle(Lang.text('Mods.SandboxWorld.Settings.SmartHoldRelease'), () => d.smartHoldCanReleaseMidUse, (v) => void options.set('smartHoldCanReleaseMidUse', v)),
       );
       const hint = document.createElement('div');
       hint.className = 'sw-set-hint';
       hint.textContent = Lang.text('Mods.SandboxWorld.Settings.DevModeHint');
       this.content.append(hint);
+      const scHint = document.createElement('div');
+      scHint.className = 'sw-set-hint';
+      scHint.textContent = Lang.text('Mods.SandboxWorld.Settings.SmartCursorHint');
+      this.content.append(scHint);
     } else if (this.cat === 'data' && this.flow.onQuickLoad) {
       const btns = document.createElement('div');
       btns.className = 'sw-set-btns';

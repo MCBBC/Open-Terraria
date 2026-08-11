@@ -77,23 +77,63 @@ const HERB_RULES: Record<number, { color: string; prob: number; rise?: number; s
   // 2 Blinkroot：原版无粒子
 };
 
-/** 矿物闪光精简表（通用 tileShine 分支 L7529-7646 的近似）：sheet → shine 值+色 */
+/** 矿物闪光表（tileShine 全量，Main.cs:7083-7498/9562-10200 赋值 1:1；
+ *  触发分支 TileDrawing.cs:7529-7646：光照>20 且 rand.Next(shine) < maxLight/30）。
+ *  sheet（=tile id，矿石族表号同 id）→ shine 值 + 闪光色（:7568-7646 的 newColor 表）。
+ *  概率折算：原版每帧 p = (maxLight/30)/shine（满光 8/shine）；本发射器每 3 tick 扫一次
+ *  → prob = 24/shine。光照比例项（maxLight/30）需发射器传光照值，本批发射器在
+ *  src/core（禁区），暂以 lightGate=20 二值门近似——登记。 */
 const SHINE_TABLE: Array<{ sheet: number; shine: number; color?: string }> = [
+  // 基础矿（Main.cs:7455-7463）
+  { sheet: 22, shine: 1150 },  // 黑檀石
   { sheet: 6, shine: 1150 },   // 铜矿
-  { sheet: 7, shine: 1100 },   // 金矿
-  { sheet: 8, shine: 1000 },   // 银矿
+  { sheet: 7, shine: 1100 },   // 银矿
+  { sheet: 8, shine: 1000 },   // 金矿
   { sheet: 9, shine: 1050 },   // 铁矿
-  { sheet: 12, shine: 300, color: '#FF6A6A' },    // 生命水晶红
-  { sheet: 63, shine: 900, color: '#6A8AFF' },    // 蓝宝石
-  { sheet: 64, shine: 900, color: '#FF5A5A' },    // 红宝石
-  { sheet: 65, shine: 900, color: '#5AFF7A' },    // 绿宝石
-  { sheet: 66, shine: 900, color: '#FFE85A' },    // 黄玉
-  { sheet: 67, shine: 900, color: '#C85AFF' },    // 紫晶
-  { sheet: 68, shine: 900 },                      // 钻石白
+  { sheet: 166, shine: 1125 }, // 锡
+  { sheet: 167, shine: 1075 }, // 钨
+  { sheet: 168, shine: 1025 }, // 铂
+  { sheet: 169, shine: 975 },  // 铅
+  // 宝石族（:7472-7477 + 色 :7634-7640）
+  { sheet: 63, shine: 900, color: '#0000FF' },    // 蓝宝石
+  { sheet: 64, shine: 900, color: '#FF0000' },    // 红宝石
+  { sheet: 65, shine: 900, color: '#00FF00' },    // 绿宝石
+  { sheet: 66, shine: 900, color: '#FFFF00' },    // 黄玉
+  { sheet: 67, shine: 900, color: '#FF00FF' },    // 紫晶
+  { sheet: 68, shine: 900, color: '#FFFFFF' },    // 钻石
+  // 特殊色族（:7571-7643）
+  { sheet: 12, shine: 300, color: '#FF0000' },    // 生命水晶红（:7467/:7641 同 665）
+  // 178 宝石锁不在此列——色随 fx/18 列交替，下方按列拆七条规则
+  { sheet: 211, shine: 500, color: '#32FF64' },   // 丛林蜥蜴祭坛绿（:7498/:7643 (50,255,100)）
+  { sheet: 204, shine: 1150, color: '#FF0000' },  // 猩红石红（:10200/:7642）
+  { sheet: 639, shine: 300, color: '#0000FF' },   // 蓝冰（:9562/:7641）
+  { sheet: 239, shine: 1100 },                    // 珍珠石
+  { sheet: 566, shine: 900, color: '#FFFF00' },   // 琥珀宝石果（:7478/:7640）
+  // 金属砖/板（:7468-7471/:7479-7489）——低频微光
+  { sheet: 21, shine: 1200 }, { sheet: 467, shine: 1200 },
+  { sheet: 441, shine: 1200 }, { sheet: 468, shine: 1200 },
+  { sheet: 45, shine: 1900 }, { sheet: 680, shine: 1900 },   // 金砖/皇冠家具
+  { sheet: 46, shine: 2000 }, { sheet: 681, shine: 2000 },   // 银砖
+  { sheet: 47, shine: 2100 }, { sheet: 682, shine: 2100 },   // 铜砖
+  { sheet: 122, shine: 1800 }, { sheet: 686, shine: 1800 },  // 皇家具
+  { sheet: 121, shine: 1850 }, { sheet: 685, shine: 1850 },
+  { sheet: 125, shine: 600 },                      // 魔法水晶灯
+  // 陨石/狱岩（:7490-7494 超低频 8000-9000）
+  { sheet: 109, shine: 9000 }, { sheet: 110, shine: 9000 },
+  { sheet: 116, shine: 9000 }, { sheet: 117, shine: 9000 },
+  { sheet: 118, shine: 8000 },
+  // 硬模式矿（:7495-7497）
   { sheet: 107, shine: 950 },  // 钴
   { sheet: 108, shine: 900 },  // 秘银
   { sheet: 111, shine: 850 },  // 精金
-  { sheet: 45, shine: 1900 },  // 金砖
+  // 其余（:7083-7085/:7137/:9567/:9910-9924/:9981/:10086）
+  { sheet: 221, shine: 925 }, { sheet: 222, shine: 875 }, { sheet: 223, shine: 825 },
+  { sheet: 129, shine: 300 },
+  { sheet: 346, shine: 2000 }, { sheet: 347, shine: 1900 }, { sheet: 348, shine: 1800 },
+  { sheet: 370, shine: 1900 },
+  { sheet: 407, shine: 1000 },
+  // 617（蜥蜴电池座）走独占分支（:7571-7586 子格判定）——以整格近似
+  { sheet: 617, shine: 400 },
 ];
 
 function buildRules(): TileParticleRule[] {
@@ -194,13 +234,33 @@ function buildRules(): TileParticleRule[] {
     });
   }
 
-  // ---- 矿物闪光（光照门；shine→tick 概率：1/shine*3；life 短促闪一下）----
+  // ---- 矿物闪光（TileDrawing.cs:7529-7646：rand.Next(shine) < maxLight/30）----
   for (const s of SHINE_TABLE) {
     add({
       sheet: s.sheet, color: s.color ?? dust(43),
-      prob: 1 / s.shine * 3 * 4, // ×4 补偿低频视觉缺失（近似值，见 plan）
-      lightGate: 20, dx: 8, dy: 8, rise: -0.1, life: 22, size: [1, 2],
+      prob: 24 / s.shine,  // 原版 8/shine/帧（满光）×3 tick 扫描节流
+      lightGate: 20, dx: 8, dy: 8, rise: 0, life: 22, size: [1, 2],
+      // 帧门（:7546）：21/441 仅亮格段；467/468 仅 144-180 段
+      pred: s.sheet === 21 || s.sheet === 441
+        ? (fx) => !((fx < 36 || fx >= 180) && (fx < 396 || fx > 409))
+        : s.sheet === 467 || s.sheet === 468
+          ? (fx) => fx >= 144 && fx < 180
+          : undefined,
     });
+  }
+  // 宝石锁 178：色随 fx/18 列（:7573-7591 [品红,黄,蓝,绿,红,白,黄]）
+  {
+    const COL: Array<[number, string]> = [
+      [0, '#FF00FF'], [1, '#FFFF00'], [2, '#0000FF'], [3, '#00FF00'],
+      [4, '#FF0000'], [5, '#FFFFFF'], [6, '#FFFF00'],
+    ];
+    for (const [col, color] of COL) {
+      add({
+        sheet: 178, color,
+        pred: (fx) => Math.floor(fx / 18) === col,
+        prob: 24 / 500, lightGate: 20, dx: 8, dy: 8, rise: 0, life: 22, size: [1, 2],
+      });
+    }
   }
 
   // ---- Tier 2 机器族 ----

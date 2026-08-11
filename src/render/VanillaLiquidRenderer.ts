@@ -28,6 +28,45 @@ function waterSheet(vt: number, waterStyle = 0): string {
   return `vanilla/Misc_water_${Math.max(0, Math.min(13, waterStyle))}.png`;
 }
 
+// ---- 微光 sparkle 数学（LiquidRenderer.cs:761-807 1:1） ----
+/** GetShimmerWave :761-763：sin(((x+y/6)/10 - tVis/360) × 2π) */
+function shimmerWave(x: number, y: number, tVis: number): number {
+  return Math.sin(((x + y / 6) / 10 - tVis / 360) * Math.PI * 2);
+}
+/** GetShimmerBaseColor :803-807：Lerp((0.647,0.510,0.933),(0.804,0.804,1), 0.1+wave×0.4) → 0-255 */
+function shimmerBaseColor(x: number, y: number, tVis: number): [number, number, number] {
+  const w = shimmerWave(x, y, tVis);
+  const k = 0.1 + w * 0.4;
+  const lerp = (a: number, b: number) => Math.round(255 * (a + (b - a) * k));
+  return [lerp(0.64705884, 41 / 51), lerp(26 / 51, 41 / 51), lerp(14 / 15, 1)];
+}
+/** SimpleWhiteNoise :793-797（uint 乘加混淆） */
+function shimmerWhiteNoise(x: number, y: number): number {
+  let ux = Math.abs(Math.floor(x)) >>> 0, uy = Math.abs(Math.floor(y)) >>> 0;
+  ux = (36469 * (ux & 0xffff) + (ux >>> 16)) >>> 0;
+  uy = (18012 * (uy & 0xffff) + (uy >>> 16)) >>> 0;
+  return (((ux << 16) >>> 0) + uy) >>> 0;
+}
+/** Utils.Remap（单调区间重映射） */
+function remap(v: number, a: number, b: number, c: number, d: number): number {
+  if (b === a) return c;
+  const t = Math.max(0, Math.min(1, (v - a) / (b - a)));
+  return c + (d - c) * t;
+}
+/** GetShimmerGlitterOpacity :773-790：top（液面格）恒 0.5；体部 = Remap(wave项×噪声项, 0, 0.5, 0, 1) */
+function shimmerGlitterOpacity(top: boolean, x: number, y: number, tVis: number): number {
+  if (top) return 0.5;
+  const num = remap(shimmerWave(x, y, tVis), -0.5, 1, 0, 0.35);
+  const num2 = Math.sin(shimmerWhiteNoise(x, y) / 10 + tVis / 180);
+  return remap(num * num2, 0, 0.5, 0, 1);
+}
+/** GetShimmerFrame :791-801：((int)num % 16 + 16) % 16；非 top 帧加 (x+y) 相位 */
+function shimmerFrame(top: boolean, x: number, y: number, tVis: number): number {
+  let num = ((x + 0.5 + (y + 0.5) / 6) / 10) - tVis / 360;
+  if (!top) num += (x + 0.5) + (y + 0.5);
+  return ((Math.floor(num) % 16) + 16) % 16;
+}
+
 // ---- 类型数组池(2026-08 审计 G1):此前每 pass 分配 24 个数组 ×2 pass/帧
 // ≈ 744KB/帧 ≈ 45MB/s 的 GC 压力。容量只增不减;每调用前 fill(0) 保持与
 // "新分配数组"完全相同的语义(未写格一律 0) ----
@@ -311,6 +350,45 @@ export function drawVanillaLiquids(
       // 帧选择 1:1（DrawNormalLiquids :636-644）：中列（sx==16,下落柱/池体）走慢速瀑布帧
       const srcY = isSurface ? 1280 : sy + (sx === 16 ? waterfallFrame : animFrame) * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
+      // ---- 微光（shimmer, vt=3）：DrawShimmer（LiquidRenderer.cs:682-730）----
+      // 原版三步：①基底层 water_14 直画 + 逐顶点 GetShimmerBaseColor 波动蓝移（:745-759）
+      // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
+      // 16 帧动画，仅 flag（非内部/瀑布帧）或 (x+y)%2==0 的格子画（:720-729）
+      // ③sparkle 顶点色 = GetShimmerGlitterColor 漂移彩虹 + 呼吸 alpha（:766-790）
+      // Canvas 无逐顶点色：基底层用整格 multiply 叠波色近似（薄边缘条 sw<8 跳过防
+      // 透明像素被压暗）；sparkle 彩虹用 hue-rotate 近似、alpha 1:1
+      if (vt === 3) {
+        const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
+        const px0 = x * 16 + Math.floor(n2 * 16), py0 = y * 16 + Math.floor(n4 * 16);
+        ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
+        ctx.drawImage(tex, sx, srcY, sw, sh, px0, py0, sw, sh);
+        if (sw >= 8) {
+          const bc = shimmerBaseColor(x + 0.5, y + 0.5, tVis);
+          ctx.save();
+          ctx.globalCompositeOperation = 'multiply';
+          ctx.fillStyle = `rgb(${bc[0]},${bc[1]},${bc[2]})`;
+          ctx.fillRect(px0, py0, sw, sh);
+          ctx.restore();
+        }
+        const flag = !(sx === 16 || sy % 80 === 48);           // :719
+        if (flag || (x + y) % 2 === 0) {
+          const ga = shimmerGlitterOpacity(flag, x, y, tVis);  // :773-790
+          if (ga > 0.02) {
+            const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
+            const sSrcX = sx + 48, sSrcY = srcY + 80 * fr;
+            if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
+              const hue = (((x + y / 6) + tVis / 30) / 6) % 1; // :767 彩虹相位
+              ctx.save();
+              ctx.globalCompositeOperation = 'lighter';
+              ctx.globalAlpha = Math.min(1, opacity[i] * ga);
+              ctx.filter = `hue-rotate(${Math.floor(hue * 360)}deg)`;
+              ctx.drawImage(tex, sSrcX, sSrcY, sw, sh, px0, py0, sw, sh);
+              ctx.restore();
+            }
+          }
+        }
+        continue;
+      }
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感
       ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : (DEFAULT_OPACITY[vt] ?? 0.6)));
@@ -440,6 +518,16 @@ function drawLiquidBehindTiles(
       }
       ctx.globalAlpha = alpha;
       ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
+      // 微光彩色叠加（TileDrawing.cs:4189-4191：num2==14 → SetShimmerVertexColors，
+      // solidLayer(背景 pass) opacity 0.75 / 前景 1）——逐顶点波色以整格 multiply 近似
+      if (lt === 3 && srcW >= 8) {
+        const bc = shimmerBaseColor(x + 0.5, y + 0.5, (performance.now() / 1000) * 60);
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.fillStyle = `rgb(${bc[0]},${bc[1]},${bc[2]})`;
+        ctx.fillRect(px, py, dstW, dstH);
+        ctx.restore();
+      }
     }
   }
   ctx.globalAlpha = 1;

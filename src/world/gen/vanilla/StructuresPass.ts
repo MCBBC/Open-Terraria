@@ -11,6 +11,10 @@ import { ITEM_BY_KEY } from '../../../data/items';
 import { digTunnel } from './TileRunner';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
+/** 雨云 196（IslandGen :23062 num9=196——islandStyle 0/1/13 默认雨云主体；
+ *  style2 雪云 460 / style3 普通云 189。我们 style 恒 0 → 主体取 196，
+ *  云下由 WaterfallRenderer 画雨幕（WaterfallManager :204 type 11） */
+const RAIN_CLOUD = TILE_BY_KEY['v_196_rain_cloud_block']!;
 const EBONSAND = TILE_BY_KEY['v_112_ebonsand_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
@@ -150,7 +154,7 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
         if (y <= top || !st.inBounds(x, y)) continue;
         if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
           const ti = st.idx(x, y);
-          st.type[ti] = CLOUD;
+          st.type[ti] = RAIN_CLOUD;
           st.flags[ti] = 1;
           bboxX0 = Math.min(bboxX0, x); bboxX1 = Math.max(bboxX1, x);
           bboxY0 = Math.min(bboxY0, y); bboxY1 = Math.max(bboxY1, y);

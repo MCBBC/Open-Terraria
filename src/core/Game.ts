@@ -92,6 +92,9 @@ import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS } from '../stats/Buffs';
+import { options } from './Options';
+import { SmartCursor, type SmartCursorSettings } from '../player/SmartCursor';
+import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
@@ -671,6 +674,8 @@ export class Game implements GameHooks {
   private _entityPlatePressed = new Set<string>();
   /** 电路系统(Wiring.cs 移植) */
   wiring: Wiring | null = null;
+  /** 智能光标（SmartCursorHelper.cs 全量移植；状态机 + 39 策略链） */
+  smartCursor = new SmartCursor();
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
   wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
   /** 宏伟蓝图拖拽锚点(tile 坐标) */
@@ -999,6 +1004,7 @@ export class Game implements GameHooks {
     attachDevices(this.wiring, this.makeDeviceCtx());
     this.scanTriggerTiles();
     this.lighting = new LightingEngine(w);
+    this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
     this.liquid = new LiquidSim(w);
     // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
     this.liquid.killTile = (x, y) => this.breakTile(x, y);
@@ -1252,6 +1258,10 @@ export class Game implements GameHooks {
     // 纸娃娃合成缓存:contextlost 后缓存内容归零且不重画——不清则
     // "角色/装备/时装全部隐形"(选人界面与游戏内 alike)
     clearPaperDollCache();
+    // 智能光标状态复位（防指针帧/黄框残留到主菜单）
+    this.smartCursor.wanted = false;
+    this.smartCursor.showing = false;
+    VUI.smartCursorOn = false;
   }
 
   start() {
@@ -1534,6 +1544,8 @@ export class Game implements GameHooks {
       this._deathHandled = false;
     }
 
+    // ---- 智能光标（每帧 lookup；结果供 updateUse 覆盖目标格 + 渲染黄框） ----
+    this.updateSmartCursor();
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
     this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
@@ -1858,6 +1870,10 @@ export class Game implements GameHooks {
         }
       }
     }
+    // 光芒药水（buff 11 shine，Player.cs:9872 Light.AddLight 玩家格 1.3/1.3/1.3）与
+    // 狱火药水（:9899 0.65/0.4/0.1）——无条件常亮，与手持火把同通道
+    if (!heldRGB && player.buffs.has(BuffType.Shine)) heldRGB = [1.3, 1.3, 1.3];
+    if (!heldRGB && player.buffs.has(BuffType.Inferno)) heldRGB = [0.65, 0.4, 0.1];
     const torchOn = !!heldRGB;
     const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
     const prevLight = this.lighting.heldLight;
@@ -2014,6 +2030,64 @@ export class Game implements GameHooks {
     } as NonNullable<(typeof ITEM_DEFS)[number]['tool']>;
   }
 
+  /** 智能光标设置（对齐原版 Player.SmartCursorSettings + Main.cs:49705 设置结构） */
+  private smartSettings(): SmartCursorSettings {
+    const d = options.data;
+    return {
+      toggleMode: d.smartCursorMode === 'toggle',
+      smartAxeAfterPickaxe: !!d.smartAxeAfterPickaxe,
+      smartBlocksEnabled: !!d.smartBlocksEnabled,
+      holdCanReleaseMidUse: !!d.smartHoldCanReleaseMidUse,
+    };
+  }
+
+  /**
+   * 智能光标每帧驱动（Player.cs:25159-25163 每帧 SmartCursorLookup + :28344-28374 Toggle/Hold 状态机）。
+   * Ctrl 按下沿翻转（Toggle）/跟随（Hold）；切换播音效 12（menuTick）。
+   * 必须在 updateUse 之前跑——同帧 lookup 结果即被挖掘/放置路径覆盖 tx/ty。
+   */
+  private updateSmartCursor() {
+    const inp = this.input;
+    const sc = this.smartCursor;
+    const s = this.smartSettings();
+    const controlSmart = inp.down('ControlLeft') || inp.down('ControlRight');
+    if (sc.updateWanted(controlSmart, !!inp.mouseDown, s)) this.sfx.play('menuTick');
+    const blocked = inp.uiBlocking || this.player.dead || !!this.minecart
+      || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover
+      || this.annotateMode;
+    if (blocked || !sc.wanted) { sc.showing = false; VUI.smartCursorOn = false; return; }
+    const held = this.player.inv.heldItem();
+    const heldDef = held ? ITEM_DEFS[held.id] : null;
+    const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
+    const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    const p = this.player;
+    // 放置物才有 blockRange（原版 SmartCursorLookup :95-98 createWall/createTile 才加）；
+    // 工具 tileBoost=0
+    const placing = heldDef?.tile != null || heldDef?.wallId != null;
+    const tb = placing
+      ? (p.equipStats.tileRange ? 3 : 0) + (p.buffs.has(BuffType.Builder) ? 1 : 0)
+      : 0;
+    // EmptyTile 的占位实体（玩家 + 敌怪 + 城镇 NPC）
+    const occupants: Array<{ x: number; y: number; w: number; h: number }> = [
+      { x: p.x, y: p.y, w: p.w, h: p.h },
+    ];
+    for (const e of this.entities.enemies) occupants.push({ x: e.x, y: e.y, w: e.w, h: e.h });
+    for (const e of this.entities.npcs) occupants.push({ x: e.x, y: e.y, w: e.w, h: e.h });
+    sc.lookup({
+      st: this.world.store,
+      mouse: { x: mx, y: my },
+      actor: { x: p.x, y: p.y, w: p.w, h: p.h, cx: p.cx, cy: p.cy, facing: p.facing },
+      held: { def: heldDef, tool: tool ? { type: tool.type, power: tool.power ?? 0 } : null },
+      settings: s,
+      tileBoost: tb,
+      wireToolMode: this.wireToolMode,
+      occupants,
+      controlUseItem: !!inp.mouseDown,
+    });
+    // 指针切到 Cursors[12] 智能光标帧（Main.cs:47442-47513 num=11+smart.ToInt()）
+    VUI.smartCursorOn = sc.showing;
+  }
+
   private updateUse(dt: number) {
     const inp = this.input;
     // 矿车骑乘驱动:左右加速,跳车
@@ -2046,7 +2120,8 @@ export class Game implements GameHooks {
     }
     const held = this.player.inv.heldItem();
     const heldDef = held ? ITEM_DEFS[held.id] : null;
-    const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
+    const [rawTx, rawTy] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
+    let tx = rawTx, ty = rawTy;
     // 工具判定：legacy def.tool 优先；vi_ 镐/斧/锤经 vanilla-itemfunc 桥接（数值取 combat 表）
     const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
     const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
@@ -2086,6 +2161,13 @@ export class Game implements GameHooks {
       } else {
         this.interactAt(tx, ty);
       }
+    }
+
+    // 智能光标覆盖（SmartCursorHelper.cs:157-162）：只影响左键使用路径（挖掘/放置/电路工具），
+    // 右键交互（宝箱/门/NPC 交谈）上面已用原始鼠标格 rawTx/rawTy 处理完毕
+    if (this.smartCursor.showing) {
+      tx = this.smartCursor.x;
+      ty = this.smartCursor.y;
     }
 
     if (!inp.mouseDown || this.annotateMode) {
@@ -6963,6 +7045,11 @@ export class Game implements GameHooks {
     const held = this.player.inv.heldItem();
     this.renderer.showWires = this.forceShowWires || !!held && !!ITEM_DEFS[held.id]?.wireTool;
     const hover = (this.input.uiBlocking || this.renderer.timeUiHover) ? null : (() => {
+      // 智能光标激活：hover 指向策略选出的目标格（渲染层据此画原版黄框 + 方向箭头）
+      const sc = this.smartCursor;
+      if (sc.showing && this.world.store.inBounds(sc.x, sc.y)) {
+        return { x: sc.x, y: sc.y, smart: true as const, arrow: sc.lockedDirection };
+      }
       const [tx, ty] = cam.tileUnder(this.input.mouseX, this.input.mouseY);
       return this.world.store.inBounds(tx, ty) ? { x: tx, y: ty } : null;
     })();

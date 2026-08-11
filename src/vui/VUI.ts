@@ -173,10 +173,13 @@ export class VUI {
     VUI.drawCursor();
   }
 
+  /** 智能光标激活中（Game 每帧写入）：指针切换到 Cursors[12] 帧（Main.cs:47442-47513 num=11+smart） */
+  static smartCursorOn = false;
+
   /** Canvas 原版光标：菜单与游戏内统一绘制（系统光标已被 #sw-cursor-style 全树隐藏） */
   private static drawCursor() {
     if (!VUI.batch || !VUI.enabled) return;
-    const tex = UITextures.get('UI_Cursor_0');
+    const tex = UITextures.get(VUI.smartCursorOn ? 'UI_Cursor_1' : 'UI_Cursor_0');
     if (!tex) return;
     const x = Math.round(UIScale.mouseX);
     const y = Math.round(UIScale.mouseY);

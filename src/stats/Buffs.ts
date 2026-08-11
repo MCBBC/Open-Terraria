@@ -72,6 +72,12 @@ export enum BuffType {
   ImbueParty = 48,    // 派对药剂(78)→命中爆彩带（视觉）
   ImbuePoison = 49,   // 毒药剂(79)→敌 Poison(20) 5-10s（6HP/s）
   Inferno = 50,       // 狱火药水(116)：200px 光环烧敌 2s+20 伤/60t（:9896）
+  // ---- R3 视觉批 ----
+  Shine = 51,         // 光芒(11,1800s)：玩家格常亮 1.3/1.3/1.3（:9872）
+  Spelunker = 52,     // 洞穴探险(9)：矿物高亮（Renderer 叠层）
+  Dangersense = 53,   // 危险感(111)：陷阱高亮
+  Hunter = 54,        // 狩猎(17)：小动物高亮（detectCreature :9719）
+  BiomeSight = 55,    // 群系视觉(343)：邪恶/神圣方块高亮
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -129,6 +135,11 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.ImbueParty]: { vanillaBuff: 78, descKey: 'Mods.SandboxWorld.Buff.ImbueParty.Desc', fallbackName: '武器浸剂：派对' },
   [BuffType.ImbuePoison]: { vanillaBuff: 79, descKey: 'Mods.SandboxWorld.Buff.ImbuePoison.Desc', fallbackName: '武器浸剂：剧毒' },
   [BuffType.Inferno]: { vanillaBuff: 116, descKey: 'Mods.SandboxWorld.Buff.Inferno.Desc', fallbackName: '狱火' },
+  [BuffType.Shine]: { vanillaBuff: 11, descKey: 'Mods.SandboxWorld.Buff.Shine.Desc', fallbackName: '光芒' },
+  [BuffType.Spelunker]: { vanillaBuff: 9, descKey: 'Mods.SandboxWorld.Buff.Spelunker.Desc', fallbackName: '洞穴探险' },
+  [BuffType.Dangersense]: { vanillaBuff: 111, descKey: 'Mods.SandboxWorld.Buff.Dangersense.Desc', fallbackName: '危险感' },
+  [BuffType.Hunter]: { vanillaBuff: 17, descKey: 'Mods.SandboxWorld.Buff.Hunter.Desc', fallbackName: '狩猎' },
+  [BuffType.BiomeSight]: { vanillaBuff: 343, descKey: 'Mods.SandboxWorld.Buff.BiomeSight.Desc', fallbackName: '生物群系视觉' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

@@ -8,6 +8,11 @@ export interface OptionsData {
   uiScale: number;    // 0.75..1.5（作用于 UIScale.userScale）
   devMode: boolean;
   lang: string;       // culture 名(如 zh-Hans);兼容旧数字 legacyId(对齐原版 config.json)
+  // 智能光标（对齐原版 Player.SmartCursorSettings + IngameOptions/Main.cs:49705 设置结构）
+  smartCursorMode: 'toggle' | 'hold';  // Main.cSmartCursorModeIsToggleAndNotHold（默认 Toggle）
+  smartAxeAfterPickaxe: boolean;       // UseSmartAxeAfterSmartPickaxe（默认 false）
+  smartBlocksEnabled: boolean;         // SmartBlocksEnabled（默认 true）
+  smartHoldCanReleaseMidUse: boolean;  // SmartCursorHoldCanReleaseMidUse（默认 true）
 }
 
 const KEY = 'sandboxworld.options';
@@ -19,6 +24,10 @@ export class OptionsStore {
     uiScale: 1,
     devMode: false,
     lang: DEFAULT_LANG,
+    smartCursorMode: 'toggle',
+    smartAxeAfterPickaxe: false,
+    smartBlocksEnabled: true,
+    smartHoldCanReleaseMidUse: true,
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];

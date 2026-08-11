@@ -5,6 +5,7 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import type { GenState } from '../src/world/gen/vanilla/GenState';
 import { TileStore } from '../src/world/TileStore';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from '../src/world/gen/vanilla/GemPasses';
+import { WaterfallRenderer } from '../src/render/WaterfallRenderer';
 
 function makeWorld(w = 800, h = 300): { st: TileStore; gs: GenState } {
   const st = new TileStore(w, h);
@@ -103,5 +104,27 @@ describe('宝石系统世界生成', () => {
     let trees = 0;
     for (let i = 0; i < st.type.length; i++) if (TREE.has(st.type[i])) trees++;
     expect(trees).toBeGreaterThan(0);
+  });
+});
+
+describe('浮空岛雨云 + 雨幕（WaterfallManager :204）', () => {
+  it('雨云 196 下方无阻挡格 → 登记雨幕 fall（type 3）', () => {
+    const st = new TileStore(200, 200);
+    const RAIN = TILE_BY_KEY['v_196_rain_cloud_block']!;
+    const SNOW = TILE_BY_KEY['v_460_snow_cloud_block']!;
+    // 云块 + 下方空气
+    for (let dx = 0; dx < 3; dx++) st.setTileSilent(50 + dx, 60, RAIN);
+    // 雪云 + 下方被实心挡住（不应登记）
+    st.setTileSilent(80, 60, SNOW);
+    st.setTileSilent(80, 61, TILE_BY_KEY['stone']!);
+    const wr = new WaterfallRenderer();
+    wr.findWaterfalls(st, 40, 50, 60, 70, 1);
+    const rainFalls = (wr as unknown as { falls: Array<{ x: number; y: number; type: number }> }).falls
+      .filter((f) => f.type === 3);
+    expect(rainFalls.length).toBe(3);
+    expect(rainFalls[0]).toEqual({ x: 50, y: 61, type: 3 });
+    const snowFalls = (wr as unknown as { falls: Array<{ x: number; y: number; type: number }> }).falls
+      .filter((f) => f.type === 4);
+    expect(snowFalls.length).toBe(0);
   });
 });

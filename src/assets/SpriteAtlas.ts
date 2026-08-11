@@ -86,6 +86,22 @@ export const VANILLA_MISC = [
   'vanilla/Projectile_162.png',
   'vanilla/Projectile_166.png',
   'vanilla/Projectile_281.png',
+  // ---- NPC GlowMask（Main.cs DrawNPC 硬编码发光叠画；Render 侧 drawNpcGlow 消费）----
+  'vanilla/Glow_48.png', 'vanilla/Glow_49.png', 'vanilla/Glow_50.png',     // 火星飞碟族 392/395/394（:24218-24226）
+  'vanilla/Glow_132.png', 'vanilla/Glow_143.png', 'vanilla/Glow_149.png', 'vanilla/Glow_162.png',  // 四塔（:23746-23776）
+  'vanilla/Glow_133.png', 'vanilla/Glow_134.png', 'vanilla/Glow_135.png',  // 银河织带 402-404（:23878-23886）
+  'vanilla/Glow_225.png', 'vanilla/Glow_226.png',                          // 暗黑魔法师 564/565（:23480）+ Betsy 551（:23099）
+  'vanilla/Glow_239.png',                                                  // 永恒水晶 548（:23594）
+  // ---- 月总手-躯干连接（Main.cs:24325-24540 case 396/397/398）----
+  'vanilla/Extra_13.png', 'vanilla/Extra_14.png', 'vanilla/Extra_15.png',
+  'vanilla/Extra_16.png', 'vanilla/Extra_17.png', 'vanilla/Extra_18.png',
+  'vanilla/Extra_19.png', 'vanilla/Extra_25.png', 'vanilla/Extra_26.png',
+  'vanilla/Extra_29.png',
+  // ---- 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）----
+  'vanilla/Extra_157.png', 'vanilla/Extra_158.png', 'vanilla/Extra_159.png',
+  'vanilla/Extra_160.png', 'vanilla/Extra_187.png', 'vanilla/Extra_188.png',
+  // 塔护盾 ForceField 着色器载体（Main.cs:23806 Misc/Perlin 600×600 采样源）
+  'vanilla/Misc_Perlin.png',
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;

@@ -1,0 +1,1790 @@
+// 智能光标（Smart Cursor）——原版 1.4.5.6 Terraria.GameContent/SmartCursorHelper.cs 全量移植。
+//
+// 权威源码对照（行号 = Terarria1456 反编译）：
+//   - 策略链总调度 SmartCursorLookup            SmartCursorHelper.cs:61-165
+//   - 让位集判定 IsHoveringOverAnInteractableTileThatBlocksSmartCursor :183-199
+//   - 镐射线  Step_Pickaxe_MineSolids            :2350-2580（Collision.HitLine Collision.cs:782）
+//   - 锤      Step_Hammers                       :1536-1723
+//   - 斧      Step_Axe                           :2582-2690
+//   - 方向锁  GetDesiredDirectionFrom/AllowedForContinuity :1403-1443
+//   - 状态机  Main.cs:2074-2084 + Player.cs:28344-28374（TryToToggleSmartCursor）
+//   - 渲染    Main.cs:46016-46066（DrawSmartCursor）
+//
+// 我们的 tile id 与原版 tile id 通过 TILE_DEFS[t].vanilla.sheet 桥接（sheet = 原版 Tiles_N 表 id）；
+// 物品原版 id 通过 ITEM_DEFS[i].vid 或 key 前缀 vi_(\d+)_ 反解。
+import type { ItemDef } from '../data/items';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import type { TileStore } from '../world/TileStore';
+import { TileStore as TS } from '../world/TileStore';
+
+// ===================== 原版 TileID.Sets / ItemID.Sets 集合（TileID.cs / ItemID.cs 行号注释） =====================
+
+/** TileID.cs:205 DisableSmartCursor（57 项）——鼠标悬停即让位，交给直接交互 */
+const VANILLA_DISABLE_SMART_CURSOR_IDS = [4, 104, 79, 209, 511, 510, 216, 335, 338, 219, 212, 21, 467, 13, 29, 463,
+  491, 97, 33, 49, 174, 50, 707, 139, 207, 55, 85, 237, 88, 10, 11, 125, 621, 354, 699, 287, 132, 136, 144, 334,
+  386, 387, 411, 389, 388, 425, 441, 468, 494, 573, 464, 642];
+
+/** TileID.cs:201 SmartCursorPickaxePriorityOverride（int 表：12/639/665 → 优先级 1） */
+const PICKAXE_PRIORITY_OVERRIDE: Record<number, number> = { 12: 1, 639: 1, 665: 1 };
+
+/** TileID.cs:203 IgnoreSmartCursorPriorityAxe */
+const IGNORE_SMART_AXE = new Set([488]);
+
+/** TileID.cs:161 IsATreeTrunk（多格树干族：橡树 5 / 棕榈 72 / 各宝石树 583-589 / 樱花 596 / 柳树 616 / 灰烬树 634） */
+const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+
+/** TileID.cs:173 CommonSapling（树苗族：普通 20 / 宝石 590 / 樱花 595 / 柳树 615） */
+const COMMON_SAPLING = new Set([20, 590, 595, 615]);
+
+/** TileID.cs:195 Boulders（巨石族） */
+const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+
+/** TileID.cs:239 IsBeam（梁族：火把侧锚允许） */
+const IS_BEAM = new Set([124, 561, 574, 575, 576, 577, 578]);
+
+/** TileID.cs:243 Platforms（平台族 = tileSolidTop） */
+const PLATFORMS = new Set([19, 427, 435, 436, 437, 438, 439]);
+
+/** TileID.cs:401 Torches（tile 级：只有 4） */
+const TORCH_TILES = new Set([4]);
+
+/** TileID.cs:355 NotReallySolid（高门 387/388 与开着的门 10——"看着实心其实能穿"） */
+const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+
+/** ItemID.cs:80 GrassSeeds（草地种子：草 2/丛林 59/猩红 194? 详见策略内 switch） */
+const GRASS_SEED_ITEMS = new Set([62, 59, 2171, 369, 195, 194, 5214]);
+
+/** ItemID.cs:82 Moss（苔藓物品族） */
+const MOSS_ITEMS = new Set([4349, 4350, 4351, 4352, 4353, 4354, 4377, 4378, 4389, 5127, 5128]);
+
+/** ItemID.cs:1192 Torches / :1194 WaterTorches（物品级火把族） */
+const TORCH_ITEMS = new Set([8, 427, 3004, 523, 433, 429, 974, 1333, 1245, 3114, 430, 3045, 428, 2274, 431, 432,
+  4383, 4384, 4385, 4386, 4387, 4388, 5293, 5353]);
+const WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
+
+/** ItemID.cs:254 IsPaintScraper（油漆刮刀）——油漆系统未建，策略 no-op 但集合保留 */
+const PAINT_SCRAPER_ITEMS = new Set([1100, 1545]);
+const PAINT_BRUSH_ITEMS = new Set([1071, 1543]);
+const PAINT_ROLLER_ITEMS = new Set([1072, 1544]);
+
+/** WorldGen.cs:3789 GrowTreeSettings.Profiles（GemCorns 策略档案：全部 TreeHeightMax=12 / SaplingTileType=590） */
+const GEM_TREE_PROFILES: Record<number, { treeHeightMax: number; saplingTile: number }> = {
+  4851: { treeHeightMax: 12, saplingTile: 590 },
+  4852: { treeHeightMax: 12, saplingTile: 590 },
+  4853: { treeHeightMax: 12, saplingTile: 590 },
+  4854: { treeHeightMax: 12, saplingTile: 590 },
+  4855: { treeHeightMax: 12, saplingTile: 590 },
+  4856: { treeHeightMax: 12, saplingTile: 590 },
+  4857: { treeHeightMax: 12, saplingTile: 590 },
+};
+/** WorldGen.cs:30461 GemTreeGroundTest = Conversion.Stone(TileID.cs:26) || Conversion.Moss(TileID.cs:38) */
+const GEM_TREE_GROUND = new Set([1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
+
+/** 让位集（导出供测试）：原版 57 项 ∩ 我方已注册 sheet——未注册的 tile 不可能出现在世界里，
+ *  即等价于"按我方已实现的交互裁剪"（门 10/11、宝箱 21/467、床 79、拉杆/开关/计时器、
+ *  起爆器 411、生命水晶 29、药草 82/83、训练假人、火把 4 等都在原版集内）。 */
+export const DISABLE_SMART_CURSOR_SHEETS: ReadonlySet<number> = (() => {
+  const registered = new Set<number>();
+  for (const d of TILE_DEFS) if (d?.vanilla?.sheet != null) registered.add(d.vanilla.sheet);
+  return new Set(VANILLA_DISABLE_SMART_CURSOR_IDS.filter((s) => registered.has(s)));
+})();
+
+/** Main.cs:66188 SmartCursorDirectionLocks（上起顺时针 8 方向；箭头帧索引 = 下标） */
+export const SMART_CURSOR_DIRECTION_LOCKS: ReadonlyArray<readonly [number, number]> = [
+  [0, -1], [1, -1], [1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1],
+];
+
+// ===================== tile sheet 桥 =====================
+
+const SHEET_OF: number[] = new Array(TILE_DEFS.length).fill(-1);
+for (let i = 0; i < TILE_DEFS.length; i++) SHEET_OF[i] = TILE_DEFS[i]?.vanilla?.sheet ?? -1;
+
+/** 我方 tile id → 原版 sheet（无映射 -1） */
+export function sheetOf(t: number): number {
+  return t >= 0 && t < SHEET_OF.length ? SHEET_OF[t] : -1;
+}
+
+// ===================== 设置（对齐原版 Player.SmartCursorSettings :320-329 + Main.cs:49705） =====================
+
+export interface SmartCursorSettings {
+  /** 模式：true=Toggle（默认，Main.cs:66090 cSmartCursorModeIsToggleAndNotHold 默认 true） */
+  toggleMode: boolean;
+  /** 斧优先级排后（默认 false：斧在镐之前） */
+  smartAxeAfterPickaxe: boolean;
+  /** 方块智能填充/铺线（默认 true） */
+  smartBlocksEnabled: boolean;
+  /** Hold 模式下使用中松开即关（默认 true） */
+  holdCanReleaseMidUse: boolean;
+}
+
+export const DEFAULT_SMART_CURSOR_SETTINGS: SmartCursorSettings = {
+  toggleMode: true,
+  smartAxeAfterPickaxe: false,
+  smartBlocksEnabled: true,
+  holdCanReleaseMidUse: true,
+};
+
+// ===================== 输入上下文 =====================
+
+export interface SmartCursorHeld {
+  def: ItemDef | null;
+  /** Game 侧工具判定结果（镐/斧/锤，含 vi_ 桥接） */
+  tool: { type: 'pick' | 'axe' | 'hammer' | 'sword'; power: number } | null;
+}
+
+export interface SmartCursorActor {
+  x: number; y: number; w: number; h: number;   // position / width / height（px）
+  cx: number; cy: number;                        // Center
+  facing: number;                                // direction
+}
+
+export interface SmartCursorEnv {
+  st: TileStore;
+  /** MouseWorld（世界 px） */
+  mouse: { x: number; y: number };
+  actor: SmartCursorActor;
+  held: SmartCursorHeld;
+  settings: SmartCursorSettings;
+  /** tileBoost（放置物加 blockRange；Game 侧与 inTileRange 同公式） */
+  tileBoost: number;
+  /** 多彩扳手/宏伟蓝图当前模式位（TOOL_*；仅 MulticolorWrench 策略用） */
+  wireToolMode: number;
+  /** EmptyTile 判定的占位实体（玩家 + NPC，px 盒） */
+  occupants: Array<{ x: number; y: number; w: number; h: number }>;
+  /** 是否正在按住使用键（controlUseItem）——锁清理与 Hold 模式语义用 */
+  controlUseItem: boolean;
+}
+
+interface Pt { x: number; y: number }
+
+// ===================== 格级谓词（Tile.cs / Main.tile* 语义） =====================
+
+const tileSolidType = (t: number): boolean => !!TILE_DEFS[t]?.solid;            // Main.tileSolid
+const tileSolidTopType = (t: number): boolean => !!TILE_DEFS[t]?.platform;      // Main.tileSolidTop
+const tileAxeType = (t: number): boolean => (TILE_DEFS[t]?.axe ?? -1) >= 0;     // Main.tileAxe
+/** WorldGen.CanKillTile 子集（SmartCursorHelper 用法：不查镐力，只看"不可破坏"） */
+const canKillTile = (t: number): boolean => (TILE_DEFS[t]?.pick ?? -1) >= 0;
+const tileFrameImportantType = (t: number): boolean => !!TILE_DEFS[t]?.framed;  // Main.tileFrameImportant
+const tileCutType = (t: number): boolean => !!TILE_DEFS[t]?.decor;              // Main.tileCut（可割植物）
+
+const activeAt = (st: TileStore, x: number, y: number): boolean => st.isActive(x, y);
+const inActiveAt = (st: TileStore, x: number, y: number): boolean => st.isActuated(x, y);
+/** Main.tileNoAttach 无独立数据源：实心即认为可附着（近似，原版仅少数方块 noAttach） */
+const tileNoAttachType = (_t: number): boolean => false;
+
+/** WorldGen.SolidTile（WorldGen.cs SolidTile(Tile)）:nactive && tileSolid && !tileSolidTop && !half && slope==0 */
+function solidTile(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!activeAt(st, x, y) || tileSolidTopType(st.type[i])) return false;
+  return tileSolidType(st.type[i]) && st.half[i] === 0 && st.slope[i] === 0;
+}
+
+/** WorldGen.SolidTile2（Acorns/GemCorns 用）:active && tileSolid && slope==0 && !half && !inActive */
+function solidTile2(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!activeAt(st, x, y)) return false;
+  return tileSolidType(st.type[i]) && st.slope[i] === 0 && st.half[i] === 0;
+}
+
+/** Collision.EmptyTile(ignoreTiles:true)（Collision.cs:1361）:无玩家/NPC 与该格相交 */
+function emptyTile(env: SmartCursorEnv, x: number, y: number): boolean {
+  const rx = x * 16, ry = y * 16;
+  for (const o of env.occupants) {
+    if (o.x < rx + 16 && o.x + o.w > rx && o.y < ry + 16 && o.y + o.h > ry) return false;
+  }
+  return true;
+}
+
+/** WorldGen.EmptyTileCheck：矩形内全部为空，或恰为 ignoreType 的树苗 */
+function emptyTileCheck(st: TileStore, x1: number, x2: number, y1: number, y2: number, ignoreType: number): boolean {
+  for (let x = x1; x <= x2; x++) {
+    for (let y = y1; y <= y2; y++) {
+      if (!st.inBounds(x, y)) return false;
+      const i = st.idx(x, y);
+      if (st.type[i] !== 0 && sheetOf(st.type[i]) !== ignoreType) return false;
+    }
+  }
+  return true;
+}
+
+/** Collision.InTileBounds */
+function inTileBounds(x: number, y: number, x0: number, y0: number, x1: number, y1: number): boolean {
+  return x >= x0 && x <= x1 && y >= y0 && y <= y1;
+}
+
+const toWorld = (p: Pt): { x: number; y: number } => ({ x: p.x * 16 + 8, y: p.y * 16 + 8 });
+const dist = (ax: number, ay: number, bx: number, by: number): number => Math.hypot(ax - bx, ay - by);
+
+/** 扫描型策略公共收尾：取离鼠标最近的候选（SmartCursorHelper 各策略统一模式） */
+function nearestOf(targets: Pt[], mouse: { x: number; y: number }): Pt | null {
+  if (targets.length === 0) return null;
+  let best = -1;
+  let point = targets[0];
+  for (const t of targets) {
+    const w = toWorld(t);
+    const d = dist(w.x, w.y, mouse.x, mouse.y);
+    if (best === -1 || d < best) { best = d; point = t; }
+  }
+  return point;
+}
+
+// ===================== Collision.HitLine 1:1（Collision.cs:782-979） =====================
+
+export interface HitLineResult { hit: boolean; col: Pt }
+
+/**
+ * 镐射线：DDA 从 (x1,y1) 走到 (x2,y2)，返回首个 `tileSolid && !tileSolidTop && !inActive` 的格。
+ * ignoreX/ignoreY 是 MineSolids 传入的 `signX*gravDir / -signY*gravDir`（起点一侧的邻居不判）。
+ * 返回 hit=false 表示线路上出现越界格；hit=true 且 col==终点表示一路畅通。
+ */
+export function hitLine(
+  st: TileStore, x1: number, y1: number, x2: number, y2: number,
+  ignoreX: number, ignoreY: number, ignoreTargets: ReadonlyArray<Pt>,
+): HitLineResult {
+  let value = Math.max(1, Math.min(x1, st.w - 1));
+  let value2 = Math.max(1, Math.min(y1, Math.max(2, st.h - 40)));
+  let value3 = Math.max(1, Math.min(x2, st.w - 1));
+  let value4 = Math.max(1, Math.min(y2, Math.max(2, st.h - 40)));
+  const blocked = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    return !inActiveAt(st, x, y) && activeAt(st, x, y)
+      && tileSolidType(st.type[i]) && !tileSolidTopType(st.type[i]);
+  };
+  const ignored = (x: number, y: number): boolean =>
+    ignoreTargets.some((t) => t.x === x && t.y === y);
+  const num = Math.abs(value - value3);
+  const num2 = Math.abs(value2 - value4);
+  if (num === 0 && num2 === 0) return { hit: true, col: { x: value, y: value2 } };
+  let num3 = 1, num4 = 1;
+  if (num === 0 || num2 === 0) {
+    if (num === 0) num3 = 0;
+    if (num2 === 0) num4 = 0;
+  } else if (num > num2) num3 = num / num2;
+  else num4 = num2 / num;
+  let num5 = 0, num6 = 0;
+  let num7 = value2 < value4 ? 2 : 1;
+  let num8 = Math.floor(num), num9 = Math.floor(num2);
+  const num10 = Math.sign(value3 - value);
+  const num11 = Math.sign(value4 - value2);
+  let flag = false, flag2 = false;
+  do {
+    if (num7 === 2) {
+      // 纵向步进（先走 Y）
+      num5 += num3;
+      let num13 = Math.floor(num5);
+      num5 -= num13;
+      for (let j = 0; j < num13; j++) {
+        if (!ignored(value, value2) && !ignored(value, value2 - 1) && !ignored(value, value2 + 1)) {
+          if (ignoreY !== -1 && num11 < 0 && blocked(value, value2 - 1)) return { hit: true, col: { x: value, y: value2 - 1 } };
+          if (ignoreY !== 1 && num11 > 0 && blocked(value, value2 + 1)) return { hit: true, col: { x: value, y: value2 + 1 } };
+          if (blocked(value, value2)) return { hit: true, col: { x: value, y: value2 } };
+        }
+        if (num8 === 0 && num9 === 0) { flag = true; break; }
+        value += num10; num8--;
+        if (num8 === 0 && num9 === 0 && num13 === 1) flag2 = true;
+      }
+      if (num9 !== 0) num7 = 1;
+    } else {
+      // 横向步进（先走 X）
+      num6 += num4;
+      let num12 = Math.floor(num6);
+      num6 -= num12;
+      for (let i = 0; i < num12; i++) {
+        if (!ignored(value, value2) && !ignored(value - 1, value2) && !ignored(value + 1, value2)) {
+          if (ignoreX !== -1 && num10 < 0 && blocked(value - 1, value2)) return { hit: true, col: { x: value - 1, y: value2 } };
+          if (ignoreX !== 1 && num10 > 0 && blocked(value + 1, value2)) return { hit: true, col: { x: value + 1, y: value2 } };
+          if (blocked(value, value2)) return { hit: true, col: { x: value, y: value2 } };
+        }
+        if (num8 === 0 && num9 === 0) { flag = true; break; }
+        value2 += num11; num9--;
+        if (num8 === 0 && num9 === 0 && num12 === 1) flag2 = true;
+      }
+      if (num8 !== 0) num7 = 2;
+    }
+    if (blocked(value, value2) && !ignored(value, value2)) return { hit: true, col: { x: value, y: value2 } };
+  } while (!(flag || flag2));
+  return { hit: true, col: { x: value, y: value2 } };
+}
+
+// ===================== 手持物语义解析 =====================
+
+/** 物品原版 id（def.vid 优先，vi_NNNN_ key 前缀兜底） */
+export function vanillaItemIdOf(def: ItemDef | null | undefined): number | null {
+  if (!def) return null;
+  if (def.vid != null) return def.vid;
+  const m = /^vi_(\d+)_/.exec(def.key);
+  return m ? Number(m[1]) : null;
+}
+
+interface HeldSemantics {
+  vid: number | null;
+  pick: number; axe: number; hammer: number;
+  createTileSheet: number | null;
+  createWall: number | null;
+  placeStyle: number;
+}
+
+function heldSemantics(held: SmartCursorHeld): HeldSemantics {
+  const def = held.def;
+  const tool = held.tool;
+  return {
+    vid: vanillaItemIdOf(def),
+    pick: tool?.type === 'pick' ? tool.power : 0,
+    axe: tool?.type === 'axe' ? tool.power : (tool?.type === 'hammer' ? (def?.axePower ?? 0) : 0),
+    hammer: tool?.type === 'hammer' ? tool.power : 0,
+    createTileSheet: def?.tile != null ? sheetOf(TILE_BY_KEY[def.tile] ?? -1) : null,
+    createWall: def?.wallId != null ? def.wallId : null,
+    placeStyle: def?.placeStyle ?? 0,
+  };
+}
+
+// ===================== SmartCursor 状态机 + 策略链 =====================
+
+export class SmartCursor {
+  // Main.cs:2074-2084
+  wanted = false;        // SmartCursorWanted_Mouse
+  showing = false;       // SmartCursorShowing
+  x = -1; y = -1;        // SmartCursorX/Y
+  /** SmartCursorHelper.cs:55-57 方向锁/连通锁（仅 Platforms 写入 :1382-1383） */
+  lockedDirection: Pt | null = null;
+  lockedContinuity: Pt | null = null;
+  private prevSmart = false;
+
+  /** Player.cs:28344-28374 TryToToggleSmartCursor 1:1。
+   *  返回 true = 发生按下沿（调用方播音效 12 / menuTick）。 */
+  updateWanted(controlSmart: boolean, controlUseItem: boolean, s: SmartCursorSettings): boolean {
+    const edge = controlSmart && !this.prevSmart;
+    this.prevSmart = controlSmart;
+    if (s.toggleMode) {
+      if (edge) this.wanted = !this.wanted;
+      return edge;
+    }
+    if (s.holdCanReleaseMidUse) {
+      this.wanted = controlSmart;
+    } else if (this.wanted) {
+      if (!controlSmart && !controlUseItem) this.wanted = false;
+    } else {
+      this.wanted = controlSmart;
+    }
+    return edge;
+  }
+
+  /** SmartCursorLookup（SmartCursorHelper.cs:61-165）1:1。 */
+  lookup(env: SmartCursorEnv): void {
+    this.showing = false; // :63
+    const used = this.wanted; // Main.SmartCursorIsUsed = SmartCursorWanted（Main.cs:2962）
+    if (!env.controlUseItem || !used) { // :64-68
+      this.lockedDirection = null;
+      this.lockedContinuity = null;
+    }
+    if (!used) return; // :69-72
+
+    const st = env.st;
+    const sem = heldSemantics(env.held);
+    const s = env.settings;
+    // :82-87 tileTarget 钳到世界 [10, max-10]
+    const raw = { x: Math.floor(env.mouse.x / 16), y: Math.floor(env.mouse.y / 16) };
+    const screenX = Math.max(10, Math.min(raw.x, st.w - 10));
+    const screenY = Math.max(10, Math.min(raw.y, st.h - 10));
+    if (!st.inBounds(screenX, screenY)) return; // :88-91
+    // :92 让位集
+    const blocks = isHoveringOverAnInteractableTile(st, screenX, screenY);
+    // :94-103 可达区 = GetTileRegion(tileBoost)（TileReachCheckSettings.cs:53）。
+    // blockRange（放置物额外射程）已由 Game 侧并入 env.tileBoost（Builder 药水/配饰同公式）
+    const reach = tileRegion(env.actor, env.tileBoost, st);
+    // :104 让位集命中且鼠标格在可达区内 → 本次不查找
+    if (blocks
+      && inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      return;
+    }
+    let fX = -1, fY = -1;
+    // :118-128 斧的插入位置由 SmartAxeAfterPickaxe 决定（默认 false = 斧最优先）
+    const steps: Array<() => void> = [];
+    if (!s.smartAxeAfterPickaxe) steps.push(() => this.stepAxe(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1));
+    steps.push(
+      () => this.stepForceCursor(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepMineShinies(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepMineSolids(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+    );
+    if (s.smartAxeAfterPickaxe) steps.push(() => this.stepAxe(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1));
+    steps.push(
+      () => this.stepColoredWrenches(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepMulticolorWrench(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepHammers(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepActuationRod(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepWireCutter(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPlatforms(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepMinecartTracks(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepWalls(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPumpkinSeeds(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepGrassSeeds(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepMoss(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPigronata(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepBoulders(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepTorch(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepLawnMower(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepBlocksFilling(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepBlocksLines(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPaintRoller(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPaintBrush(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPaintScrapper(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepAcorns(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepGemCorns(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepEmptyBuckets(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepActuators(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepAlchemySeeds(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepPlanterBox(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepClayPots(env, sem, reach, screenX, screenY, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+      () => this.stepStaffOfRegrowth(env, sem, reach, (x, y) => { fX = x; fY = y; }, () => fX !== -1),
+    );
+    for (const step of steps) {
+      if (fX !== -1 && fY !== -1) break; // 首个命中独占（:118-156 顺序执行）
+      step();
+    }
+    if (fX !== -1 && fY !== -1) { // :157-162
+      this.x = fX;
+      this.y = fY;
+      this.showing = true;
+    }
+  }
+
+  // ===================== 各策略 =====================
+
+  /** :2582-2690 斧：扫 tileAxe → 树干帧校正 → 沿 Y 走到根 → 离鼠标最近 */
+  private stepAxe(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.axe <= 0 || taken()) return; // :2590
+    const st = env.st;
+    let best = -1;
+    let bx = -1, by = -1;
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!activeAt(st, i, j)) continue;
+        const type = st.get(i, j);
+        const sheet = sheetOf(type);
+        if (!tileAxeType(type) || IGNORE_SMART_AXE.has(sheet)) continue; // :2604
+        let num2 = i, k = j;
+        if (IS_A_TREE_TRUNK.has(sheet)) {
+          // :2611-2646 多格树干帧校正（左右子块归位到主干列）+ 沿 Y 下到底（树根）
+          if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+            const i2 = st.idx(num2, k);
+            if (st.frameY[i2] >= 198 && st.frameX[i2] === 44) num2++;
+            if (st.frameX[i2] === 66 && st.frameY[i2] <= 44) num2++;
+            if (st.frameX[i2] === 44 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2++;
+          }
+          if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+            const i2 = st.idx(num2, k);
+            if (st.frameY[i2] >= 198 && st.frameX[i2] === 66) num2--;
+            if (st.frameX[i2] === 88 && st.frameY[i2] >= 66 && st.frameY[i2] <= 110) num2--;
+            if (st.frameX[i2] === 22 && st.frameY[i2] >= 132 && st.frameY[i2] <= 176) num2--;
+          }
+          for (; activeAt(st, num2, k) && sheetOf(st.get(num2, k)) === sheet
+            && sheetOf(st.get(num2, k + 1)) === sheet
+            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+        }
+        if (sheet === 80) {
+          // :2647-2674 仙人掌帧校正 + 下到底
+          if (inTileBounds(num2 + 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+            const i2 = st.idx(num2, k);
+            if (st.frameX[i2] === 54) num2++;
+            if (st.frameX[i2] === 108 && st.frameY[i2] === 36) num2++;
+          }
+          if (inTileBounds(num2 - 1, k, reach.x0, reach.y0, reach.x1, reach.y1)) {
+            const i2 = st.idx(num2, k);
+            if (st.frameX[i2] === 36) num2--;
+            if (st.frameX[i2] === 108 && st.frameY[i2] === 18) num2--;
+          }
+          for (; activeAt(st, num2, k) && sheetOf(st.get(num2, k)) === 80
+            && sheetOf(st.get(num2, k + 1)) === 80
+            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+        }
+        if (sheet === 323 || sheet === 72) {
+          // :2675-2680 竹 / 棕榈干下到底
+          for (; activeAt(st, num2, k)
+            && ((sheetOf(st.get(num2, k)) === 323 && sheetOf(st.get(num2, k + 1)) === 323)
+              || (sheetOf(st.get(num2, k)) === 72 && sheetOf(st.get(num2, k + 1)) === 72))
+            && inTileBounds(num2, k + 1, reach.x0, reach.y0, reach.x1, reach.y1); k++) { /* 下到底 */ }
+        }
+        const w = toWorld({ x: num2, y: k });
+        const d = dist(w.x, w.y, env.mouse.x, env.mouse.y);
+        if (best === -1 || d < best) { best = d; bx = num2; by = k; } // :2681-2687
+      }
+    }
+    if (bx !== -1) set(bx, by);
+  }
+
+  /** :2229-2268 ForceCursor：鼠标格自身可挖（非实心/平台）且工具门通过 → 钉鼠标格 */
+  private stepForceCursor(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (taken()) return;
+    const st = env.st;
+    const x = Math.floor(env.mouse.x / 16), y = Math.floor(env.mouse.y / 16);
+    if (!inTileBounds(x, y, reach.x0, reach.y0, reach.x1, reach.y1)) return;
+    const t = st.get(x, y);
+    const sheet = sheetOf(t);
+    let flag = activeAt(st, x, y) && canKillTile(t) && (!tileSolidType(t) || tileSolidTopType(t)); // :2249
+    if (flag && tileAxeType(t) && sem.axe < 1) flag = false;      // :2250-2253
+    if (flag && isHammerTile(sheet) && sem.hammer < 1) flag = false; // :2254-2257
+    if (flag && !isHammerTile(sheet) && !tileAxeType(t) && sem.pick < 1) flag = false; // :2258-2261
+    if (flag) set(x, y);
+  }
+
+  /** :2270-2348 MineShinies：优先级表（12 火把 / 639 / 665）全扫取离鼠标最近 */
+  private stepMineShinies(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.pick <= 0 || taken()) return; // :2280
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!activeAt(st, i, j)) continue;
+        const sheet = sheetOf(st.get(i, j));
+        if ((PICKAXE_PRIORITY_OVERRIDE[sheet] ?? 0) > 0) targets.push({ x: i, y: j }); // :2304-2312
+      }
+    }
+    // :2315-2327（反编译此处 _targets2 为空集——保留最高优先级过滤语义：本表全为 1，无过滤）
+    let maxPri = 0;
+    for (const t of targets) maxPri = Math.max(maxPri, PICKAXE_PRIORITY_OVERRIDE[sheetOf(st.get(t.x, t.y))] ?? 0);
+    const filtered = targets.filter((t) => (PICKAXE_PRIORITY_OVERRIDE[sheetOf(st.get(t.x, t.y))] ?? 0) >= maxPri);
+    const point = nearestOf(filtered, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y); // :2341-2345
+    }
+  }
+
+  /** :2350-2580 MineSolids：3:1 方向归约 → 玩家前缘列 ↔ 鼠标端点逐对射线 → 择近 */
+  private stepMineSolids(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.pick <= 0 || taken()) return; // :2355
+    const st = env.st;
+    const p = env.actor;
+    const gravDir = 1;
+    let mouse = { ...env.mouse };
+    // :2369-2381 3:1 方向归约（|vx|>3|vy| 纯水平等）
+    let vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
+    let signX = Math.sign(vector.x);
+    let signY = Math.sign(vector.y);
+    if (Math.abs(vector.x) > Math.abs(vector.y) * 3) { signY = 0; mouse.y = p.cy; }
+    if (Math.abs(vector.y) > Math.abs(vector.x) * 3) { signX = 0; mouse.x = p.cx; }
+    void vector;
+    const points: Pt[] = [];
+    const endpoints: Pt[] = [];
+    const num3 = (signY === -1 && signX !== 0) ? -1 : 1; // :2386-2390
+    // :2391-2396 玩家前缘列 / 起始行
+    const num4 = Math.floor((p.x + (p.w / 2) + ((p.w / 2 - 1) * signX)) / 16);
+    let num5 = Math.floor((p.y + 0.1) / 16);
+    if (num3 === -1) num5 = Math.floor((p.y + p.h - 1) / 16);
+    const num6 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+    const num7 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+    // :2399-2418 起点集（前缘列 + 必要时底/顶行展开）
+    if (signX !== 0) {
+      for (let i = 0; i < num7; i++) {
+        if (st.inBounds(num4, num5 + i * num3)) points.push({ x: num4, y: num5 + i * num3 });
+      }
+    }
+    if (signY !== 0) {
+      for (let j = 0; j < num6; j++) {
+        const x = Math.floor(p.x / 16) + j;
+        if (st.inBounds(x, num5)) points.push({ x, y: num5 });
+      }
+    }
+    // :2419-2432 鼠标端点（假想玩家前缘/边缘展开）
+    const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
+    let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
+    if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
+    if (gravDir === 1 && signX === 0) num9++;
+    if (num9 < 10) num9 = 10;
+    if (num9 > st.h - 10) num9 = st.h - 10;
+    const num10 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+    const num11 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+    if (num8 >= 40 && num9 >= 40 && num8 < st.w - 40 && num9 < st.h - 40) { // WorldGen.InWorld(,40)
+      if (signX !== 0) {
+        for (let k = 0; k < num11; k++) {
+          if (st.inBounds(num8, num9 + k * num3)) endpoints.push({ x: num8, y: num9 + k * num3 });
+        }
+      }
+      if (signY !== 0) {
+        for (let l = 0; l < num10; l++) {
+          const x = Math.floor((mouse.x - p.w / 2) / 16) + l;
+          if (st.inBounds(x, num9)) endpoints.push({ x, y: num9 });
+        }
+      }
+    }
+    // :2466-2488 逐对射线（钩爪锚点集合为空——我方钩爪未实装）
+    const grappleTargets: Pt[] = [];
+    const targets: Pt[] = [];
+    let pi = 0;
+    while (pi < points.length && endpoints.length > 0) {
+      const item = points[pi];
+      const item2 = endpoints[0];
+      const r = hitLine(st, item.x, item.y, item2.x, item2.y, signX * gravDir, -signY * gravDir, grappleTargets);
+      if (!r.hit) { pi++; endpoints.shift(); continue; }
+      if (r.col.x !== item2.x || r.col.y !== item2.y) targets.push(r.col);
+      const t = st.get(r.col.x, r.col.y);
+      if (!inActiveAt(st, r.col.x, r.col.y) && activeAt(st, r.col.x, r.col.y)
+        && tileSolidType(t) && !tileSolidTopType(t)) {
+        targets.push(r.col); // :2482-2485
+      }
+      pi++;
+      endpoints.shift();
+    }
+    // :2489-2501 CanKillTile 过滤（不查镐力）
+    const killable = targets.filter((t) => canKillTile(st.get(t.x, t.y)));
+    if (killable.length > 0) {
+      // :2502-2576 择近 = 格中心+8px 到玩家 Center（单人无联机偏移）
+      let best = -1;
+      let point = killable[0];
+      for (const t of killable) {
+        const w = toWorld(t);
+        const d = dist(w.x, w.y, p.cx, p.cy);
+        if (best === -1 || d < best) { best = d; point = t; }
+      }
+      if (inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+        set(point.x, point.y);
+      }
+    }
+  }
+
+  /** :1879-2030 彩色扳手（红 509/蓝 850/绿 851/黄 3612）：延伸已有同色导线断点一格 */
+  private stepColoredWrenches(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid;
+    if (vid == null || ![509, 850, 851, 3612].includes(vid) || taken()) return; // :1881
+    const st = env.st;
+    // :1886-1902 颜色档：509红(1)/850蓝(2)/851绿(3)/3612黄(4)
+    const num = vid === 509 ? 1 : vid === 850 ? 2 : vid === 851 ? 3 : 4;
+    const wireBit = num === 1 ? TS.WIRE_RED : num === 2 ? TS.WIRE_BLUE : num === 3 ? TS.WIRE_GREEN : TS.WIRE_YELLOW;
+    // :1903-1919 鼠标格已有同色线 → 让位（原版 flag=true 时不产生目标）
+    const hoverWire = st.inBounds(screenX, screenY) ? st.wire[st.idx(screenX, screenY)] : 0;
+    if ((hoverWire & wireBit) !== 0) return;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        if ((st.wire[st.idx(i, j)] & wireBit) === 0) continue;
+        // :1931-2006 四向断点延伸
+        for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+          const nx = i + ox, ny = j + oy;
+          if (!st.inBounds(nx, ny)) continue;
+          if ((st.wire[st.idx(nx, ny)] & wireBit) === 0) targets.push({ x: nx, y: ny });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);
+    }
+  }
+
+  /** :1724-1877 多彩扳手（3625）：按当前工具模式延伸/剪除 */
+  private stepMulticolorWrench(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 3625 || taken()) return; // :1726
+    const st = env.st;
+    const toolMode = env.wireToolMode; // WiresUI.Settings.ToolMode（Game.wireToolMode）
+    const bits: Array<[boolean, number]> = [
+      [(toolMode & 1) !== 0, TS.WIRE_RED],
+      [(toolMode & 2) !== 0, TS.WIRE_BLUE],
+      [(toolMode & 4) !== 0, TS.WIRE_GREEN],
+      [(toolMode & 8) !== 0, TS.WIRE_YELLOW],
+    ];
+    const cutter = (toolMode & 32) !== 0;
+    // :1733-1750 鼠标格已有线组合 == 工具模式（去 Cutter 位）→ 让位
+    const hoverWire = st.inBounds(screenX, screenY) ? st.wire[st.idx(screenX, screenY)] : 0;
+    let mouseMode = 0;
+    if (hoverWire & TS.WIRE_RED) mouseMode |= 1;
+    if (hoverWire & TS.WIRE_BLUE) mouseMode |= 2;
+    if (hoverWire & TS.WIRE_GREEN) mouseMode |= 4;
+    if (hoverWire & TS.WIRE_YELLOW) mouseMode |= 8;
+    if ((toolMode & ~32) === mouseMode) return;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const w = st.wire[st.idx(i, j)];
+        if (cutter) {
+          // :1764-1770 剪线模式：已选色有线的格都是目标
+          for (const [on, bit] of bits) if (on && (w & bit) !== 0) { targets.push({ x: i, y: j }); break; }
+        } else {
+          // :1772-1853 铺线模式：延伸每色断点一格
+          let any = false;
+          for (const [on, bit] of bits) if (on && (w & bit) !== 0) { any = true; break; }
+          if (!any) continue;
+          for (const [on, bit] of bits) {
+            if (!on) continue;
+            for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+              const nx = i + ox, ny = j + oy;
+              if (!st.inBounds(nx, ny)) continue;
+              if ((st.wire[st.idx(nx, ny)] & bit) === 0) targets.push({ x: nx, y: ny });
+            }
+          }
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);
+    }
+  }
+
+  /** :1536-1723 锤：射线（墙/可锤块）→ 失败退化为全扫可锤墙，取离鼠标最近 */
+  private stepHammers(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.hammer <= 0 || taken()) return; // :1540/:1683
+    const st = env.st;
+    const p = env.actor;
+    let mouse = { ...env.mouse };
+    // :1542-1554 3:1 方向归约（同 MineSolids）
+    const vector = { x: mouse.x - p.cx, y: mouse.y - p.cy };
+    let signX = Math.sign(vector.x);
+    let signY = Math.sign(vector.y);
+    if (Math.abs(vector.x) > Math.abs(vector.y) * 3) { signY = 0; mouse.y = p.cy; }
+    if (Math.abs(vector.y) > Math.abs(vector.x) * 3) { signX = 0; mouse.x = p.cx; }
+    const num3 = (signY === -1 && signX !== 0) ? -1 : 1;
+    const points: Pt[] = [], endpoints: Pt[] = [];
+    const num4 = Math.floor((p.x + (p.w / 2) + ((p.w / 2 - 1) * signX)) / 16);
+    let num5 = Math.floor((p.y + 0.1) / 16);
+    if (num3 === -1) num5 = Math.floor((p.y + p.h - 1) / 16);
+    const num6 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+    const num7 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+    if (signX !== 0) for (let i = 0; i < num7; i++) if (st.inBounds(num4, num5 + i * num3)) points.push({ x: num4, y: num5 + i * num3 });
+    if (signY !== 0) for (let j = 0; j < num6; j++) { const x = Math.floor(p.x / 16) + j; if (st.inBounds(x, num5)) points.push({ x, y: num5 }); }
+    const num8 = Math.floor((mouse.x + ((p.w / 2 - 1) * signX)) / 16);
+    let num9 = Math.floor((mouse.y + 0.1 - (p.h / 2 + 1)) / 16);
+    if (num3 === -1) num9 = Math.floor((mouse.y + (p.h / 2) - 1) / 16);
+    num9 = Math.max(10, Math.min(num9, st.h - 10));
+    const num10 = Math.floor(p.w / 16) + (p.w % 16 !== 0 ? 1 : 0);
+    const num11 = Math.floor(p.h / 16) + (p.h % 16 !== 0 ? 1 : 0);
+    if (signX !== 0) for (let k = 0; k < num11; k++) if (st.inBounds(num8, num9 + k * num3)) endpoints.push({ x: num8, y: num9 + k * num3 });
+    if (signY !== 0) for (let l = 0; l < num10; l++) { const x = Math.floor((mouse.x - p.w / 2) / 16) + l; if (st.inBounds(x, num9)) endpoints.push({ x, y: num9 }); }
+    // :1632-1655 逐对 HitLineWall：命中墙的格（非祭坛 26）入 targets
+    const targets: Pt[] = [];
+    let pi = 0;
+    while (pi < points.length && endpoints.length > 0) {
+      const a = points[pi], b = endpoints[0];
+      const col = hitLineWall(st, a.x, a.y, b.x, b.y);
+      if (col.x !== -1) {
+        if (col.x !== b.x || col.y !== b.y) targets.push(col);
+        if (hitWallSubstep(st, col.x, col.y)) targets.push(col); // :1649-1652
+      }
+      pi++;
+      endpoints.shift();
+    }
+    const pick = pickNonAltar(st, targets, (t) => toWorld(t), { x: p.cx, y: p.cy });
+    if (pick && inTileBounds(pick.x, pick.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(pick.x, pick.y);
+      return;
+    }
+    // :1683-1721 退化：全扫可锤墙，取离鼠标最近（非祭坛 26）
+    const targets2: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        if (st.wall[st.idx(i, j)] > 0 && hitWallSubstep(st, i, j)) targets2.push({ x: i, y: j });
+      }
+    }
+    const pick2 = pickNonAltar(st, targets2, (t) => toWorld(t), env.mouse);
+    if (pick2 && inTileBounds(pick2.x, pick2.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(pick2.x, pick2.y);
+    }
+  }
+
+  /** :1494-1534 致动魔杖（3620）：已装致动器的实心格取最近 */
+  private stepActuationRod(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 3620 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const w = st.wire[st.idx(i, j)];
+        if (activeAt(st, i, j) && (w & TS.WIRE_ACTUATOR) !== 0) targets.push({ x: i, y: j }); // :1508
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :1454-1492 剪线钳（510）：任何导线/致动器格取最近 */
+  private stepWireCutter(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 510 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        if (st.wire[st.idx(i, j)] & 31) targets.push({ x: i, y: j }); // :1466 四色线或致动器
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :1323-1388 平台：已有平台边缘沿八方向续一格；写方向锁/连通锁 */
+  private stepPlatforms(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const createSheet = sem.createTileSheet;
+    if (createSheet == null || !PLATFORMS.has(createSheet) || taken()) return; // :1325
+    const st = env.st;
+    if (isPlatformSheet(st, screenX, screenY)) return; // 鼠标已在平台上不动
+    const targets: Pt[] = [];
+    const points: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        // :1335 鼠标指向该格的八方向量化
+        const dir = this.getDesiredDirectionFrom({ x: env.mouse.x - (i * 16 + 8), y: env.mouse.y - (j * 16 + 8) });
+        let flag = !isPlatformSheet(st, i, j); // :1336
+        // :1337-1340 该格非实心且左右已有平台 → 不作为续铺源
+        if (!flag && dir.y === 0 && activeAt(st, i, j) && !solidTile(st, i, j)
+          && (isPlatformSheet(st, i - 1, j) || isPlatformSheet(st, i + 1, j))) {
+          flag = false;
+        }
+        if (flag) continue;
+        // :1345 对角规则映射 slope（1=右上 2=右下 等：dx==dy→2、dx==-dy→1）
+        const slopeKind = dir.x === dir.y ? 2 : dir.x === -dir.y ? 1 : 0;
+        if ((slopeKind === 0 || st.slope[st.idx(i, j)] !== slopeKind)
+          && (dir.x !== 0 || (!isPlatformSheet(st, i - 1, j + dir.y) && !isPlatformSheet(st, i + 1, j + dir.y)))) {
+          const nx = i + dir.x, ny = j + dir.y;
+          if (!st.inBounds(nx, ny)) continue;
+          const nt = st.get(nx, ny);
+          if ((!activeAt(st, nx, ny) || tileCutType(nt)) && this.allowedForContinuity(nx, ny, 2)) { // :1349
+            targets.push({ x: nx, y: ny });
+            points.push({ x: dir.x, y: dir.y });
+          }
+        }
+      }
+    }
+    if (targets.length === 0) return;
+    // :1359-1377 离鼠标最近，并列时取"沿锁定方向投影更大"
+    let num2 = -1, num3 = -1;
+    let point = targets[0], point2 = points[0];
+    for (let k = 0; k < targets.length; k++) {
+      const t = targets[k], d = points[k];
+      const vx = env.mouse.x - (t.x * 16 + 8), vy = env.mouse.y - (t.y * 16 + 8);
+      const len = Math.hypot(vx, vy);
+      const dot = vx * d.x + vy * d.y;
+      if (num2 === -1 || len < num2 || (len === num2 && dot > num3)) {
+        num2 = len; num3 = dot; point = t; point2 = d;
+      }
+    }
+    if (inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y);
+      this.lockedDirection = { x: point2.x, y: point2.y };   // :1382
+      this.lockedContinuity = { x: point.x, y: point.y };    // :1383
+    }
+  }
+
+  /** :1403-1428 AllowedForContinuity：目标须与连通锁重合或在锁方向步进可达 */
+  private allowedForContinuity(x: number, y: number, skipsAllowed: number): boolean {
+    const lock = this.lockedContinuity;
+    if (!lock) return true;
+    let cx = lock.x, cy = lock.y;
+    if (x === cx && y === cy) return true;
+    const dir = this.lockedDirection;
+    if (!dir) return false;
+    for (let i = 0; i < skipsAllowed; i++) {
+      cx += dir.x; cy += dir.y;
+      if (x === cx && y === cy) return true;
+    }
+    return false;
+  }
+
+  /** :1430-1443 八方向量化（锁定方向优先） */
+  getDesiredDirectionFrom(offset: { x: number; y: number }): Pt {
+    if (this.lockedDirection) return this.lockedDirection;
+    let num = Math.atan2(offset.y, offset.x);
+    if (num < 0) num += Math.PI * 2;
+    const step = Math.PI / 4;
+    const ang = Math.floor(((num + step / 2) % (Math.PI * 2)) / step) * step;
+    return { x: Math.trunc(Math.cos(ang) * 1.5), y: Math.trunc(Math.sin(ang) * 1.5) };
+  }
+
+  /** :1165-1321 矿车轨道（2340/2739 主 + 2492 压力轨道段） */
+  private stepMinecartTracks(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const st = env.st;
+    const p = env.actor;
+    // 原版按物品 id 2340/2739 门；我方轨道放置物（place_v_314_*）无 vid → 以 createTile sheet==314 认定
+    const isTrackItem = sem.createTileSheet === 314 || sem.vid === 2340 || sem.vid === 2739 || sem.vid === 2492;
+    if (isTrackItem && !taken()) {
+      // :1170-1196 主方向判定（±0.5 阈值；斜向组合时水平让位）
+      const dx = env.mouse.x - p.cx, dy = env.mouse.y - p.cy;
+      const len = Math.hypot(dx, dy) || 1;
+      const upDot = -dy / len;
+      const up = upDot >= 0.5, down = upDot <= -0.5;
+      const rightDot = dx / len;
+      let right = rightDot >= 0.5, left = rightDot <= -0.5;
+      const upLeft = up && left, upRight = up && right, downLeft = down && left, downRight = down && right;
+      if (upLeft || downLeft) left = false;
+      if (upRight || downRight) right = false;
+      // :1197-1201 鼠标格已在轨道上 → 不动
+      const hoverSheet = sheetOf(st.get(screenX, screenY));
+      if (hoverSheet !== 314) {
+        const targets: Pt[] = [];
+        for (let i = reach.x0; i <= reach.x1; i++) {
+          for (let j = reach.y0; j <= reach.y1; j++) {
+            if (!st.inBounds(i, j) || sheetOf(st.get(i, j)) !== 314) continue;
+            const diag = (ox: number, oy: number): boolean => st.inBounds(i + ox, j + oy) && sheetOf(st.get(i + ox, j + oy)) === 314;
+            const open = (x: number, y: number): boolean => {
+              if (!st.inBounds(x, y)) return false;
+              const t = st.get(x, y);
+              return !activeAt(st, x, y) || tileCutType(t);
+            };
+            // :1215-1238 六方向延伸（斜向带让位规则）
+            if (upLeft && open(i - 1, j - 1) && !(!diag(1, 1) && diag(1, -1)) && !diag(-1, 1)) targets.push({ x: i - 1, y: j - 1 });
+            if (left && open(i - 1, j)) targets.push({ x: i - 1, y: j });
+            if (downLeft && open(i - 1, j + 1) && !(!diag(1, -1) && diag(1, 1)) && !diag(-1, -1)) targets.push({ x: i - 1, y: j + 1 });
+            if (upRight && open(i + 1, j - 1) && !(!diag(-1, 1) && diag(-1, -1)) && !diag(1, 1)) targets.push({ x: i + 1, y: j - 1 });
+            if (right && open(i + 1, j)) targets.push({ x: i + 1, y: j });
+            if (downRight && open(i + 1, j + 1) && !(!diag(-1, -1) && diag(-1, 1)) && !diag(1, -1)) targets.push({ x: i + 1, y: j + 1 });
+          }
+        }
+        // :1243-1258 目标上下不可再连轨道（端点）才入选，取离鼠标最近
+        const ends = targets.filter((t) => {
+          const above = st.inBounds(t.x, t.y - 1) && sheetOf(st.get(t.x, t.y - 1)) === 314;
+          const below = st.inBounds(t.x, t.y + 1) && sheetOf(st.get(t.x, t.y + 1)) === 314;
+          return !above && !below;
+        });
+        const point = nearestOf(ends, env.mouse);
+        if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+          set(point.x, point.y);
+          return;
+        }
+      }
+    }
+    // :1267-1321 压力轨道（2492）：左右各续一格——我方无该物品的独立数据段，
+    // 已并入上面 sheet==314 的通用延伸（2492 命中 isTrackItem 同走主段）
+  }
+
+  /** :1099-1163 铺墙：可铺墙格四向有依附，取最近 */
+  private stepWalls(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if ((sem.createWall ?? 0) <= 0 || taken()) return; // :1103
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const ii = st.idx(i, j);
+        const t = st.type[ii];
+        // :1113 本格无墙且（空 / 非实心 / 平台）且与玩家视线可通（CanHitWithCheck 退化为无门阻挡判定）
+        if (st.wall[ii] === 0 && (!activeAt(st, i, j) || !tileSolidType(t) || tileSolidTopType(t))
+          && canSeeTile(st, env.actor, i, j)) {
+          let flag = false;
+          // :1115-1131 四向有 active tile 或已有墙 → 可依附
+          for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+            const nx = i + ox, ny = j + oy;
+            if (!st.inBounds(nx, ny)) continue;
+            const ni = st.idx(nx, ny);
+            if (activeAt(st, nx, ny) || st.wall[ni] > 0) { flag = true; break; }
+          }
+          if (flag) targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :1026-1097 南瓜种子（createTile 254） */
+  private stepPumpkinSeeds(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.createTileSheet !== 254 || taken()) return;
+    pumpkinOrBoulderScan(env, reach, set, (st, i, j) => {
+      // :1043-1070 草面 2 格宽、无坡无半砖、上方 2×2 无阻挡
+      const a = st.inBounds(i, j + 1) ? st.get(i, j + 1) : 0;
+      const b = st.inBounds(i + 1, j + 1) ? st.get(i + 1, j + 1) : 0;
+      if (!activeAt(st, i, j + 1) || !activeAt(st, i + 1, j + 1)) return false;
+      const grassOk = (t: number): boolean => [2, 477, 109, 492].includes(sheetOf(t));
+      if (!grassOk(a) || !grassOk(b)) return false;
+      for (let k = i; k <= i + 1; k++) {
+        for (let l = j - 1; l <= j; l++) {
+          if (!st.inBounds(k, l)) return false;
+          const t = st.get(k, l);
+          if (activeAt(st, k, l) && (tileSolidType(t) || !tileCutType(t))) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  /** :256-322 草地种子（ItemID.Sets.GrassSeeds） */
+  private stepGrassSeeds(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid;
+    if (vid == null || !GRASS_SEED_ITEMS.has(vid) || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        // :273-274 八向至少一格暴露
+        if (!exposed8(st, i, j)) continue;
+        const sheet = sheetOf(st.get(i, j));
+        // :278-294 各种子适配的基底
+        let ok = false;
+        switch (vid) {
+          default: ok = sheet === 0; break;                      // 普通草种：泥土
+          case 59: case 2171: ok = sheet === 0 || sheet === 59; break; // 丛林草种
+          case 194: case 195: ok = sheet === 59; break;
+          case 5214: ok = sheet === 57; break;
+        }
+        if (ok) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :324-369 苔藓（ItemID.Sets.Moss）：暴露的石/泥灰岩面 */
+  private stepMoss(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid;
+    if (vid == null || !MOSS_ITEMS.has(vid) || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const sheet = sheetOf(st.get(i, j));
+        if (!activeAt(st, i, j) || inActiveAt(st, i, j)) continue;
+        if (!exposed8(st, i, j)) continue; // :341-342
+        if (sheet === 1 || sheet === 38) targets.push({ x: i, y: j }); // :343 石/灰岩?（原版 38=???）保守照搬
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :968-1024 皮纳塔（createTile 454） */
+  private stepPigronata(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.createTileSheet !== 454 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        // :979-1002 顶部一行实心 + 下方 4×3 空
+        let flag = true;
+        for (let k = i - 2; k <= i + 1; k++) {
+          for (let l = j - 1; l <= j + 2; l++) {
+            if (!st.inBounds(k, l)) { flag = false; continue; }
+            const t = st.get(k, l);
+            if (l === j - 1) {
+              if (!solidTile(st, k, l)) flag = false;
+            } else if (activeAt(st, k, l) && (!tileCutType(t) || sheetOf(t) === 454)) {
+              flag = false;
+            }
+          }
+        }
+        if (flag) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :885-966 巨石（TileID.Sets.Boulders） */
+  private stepBoulders(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const cs = sem.createTileSheet;
+    if (cs == null || !BOULDERS.has(cs) || taken()) return;
+    pumpkinOrBoulderScan(env, reach, set, (st, i, j) => {
+      // :898-925 下方两格 nactive 无坡无半砖、可承重、上方 2×2 无阻挡
+      for (const ox of [0, 1]) {
+        const bx = i + ox, by = j + 1;
+        if (!st.inBounds(bx, by) || !activeAt(st, bx, by)) return false;
+        const t = st.get(bx, by);
+        if (st.slope[st.idx(bx, by)] > 0 || st.half[st.idx(bx, by)] > 0) return false;
+        if (!tileSolidType(t) && !TILE_DEFS[t]) return false;
+      }
+      for (let k = i; k <= i + 1; k++) {
+        for (let l = j - 1; l <= j; l++) {
+          if (!st.inBounds(k, l)) return false;
+          const t = st.get(k, l);
+          if (activeAt(st, k, l) && !tileCutType(t)) return false;
+        }
+      }
+      return true;
+    });
+  }
+
+  /** :2795-2865 火把：合法锚位 + 17×17 去重 + 非水火把避液体，取离鼠标最近 */
+  private stepTorch(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid;
+    const isTorch = (vid != null && TORCH_ITEMS.has(vid)) || sem.createTileSheet === 4 || env.held.def?.key === 'torch';
+    if (!isTorch || taken()) return; // :2804
+    const st = env.st;
+    const notWaterTorch = vid == null || !WATER_TORCH_ITEMS.has(vid); // :2809
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const ii = st.idx(i, j);
+        const t = st.type[ii];
+        // :2815 非水火把避液体；占位格须可替换（非 active 或可割植物/可破坏放置，82/83 药草除外）
+        if (notWaterTorch && st.liquid[ii] > 0) continue;
+        if (activeAt(st, i, j) && !tileCutType(t) && sheetOf(t) !== 82 && sheetOf(t) !== 83) continue;
+        // :2819-2838 17×17 内已有火把 → 排除
+        let near = false;
+        outer: for (let k = i - 8; k <= i + 8; k++) {
+          for (let l = j - 8; l <= j + 8; l++) {
+            if (st.inBounds(k, l) && TORCH_TILES.has(sheetOf(st.get(k, l)))) { near = true; break outer; }
+          }
+        }
+        if (!near && isValidSpotForTorch(st, i, j)) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :2895-2938 割草机（4049）：草/神圣草格取最近 */
+  private stepLawnMower(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 4049 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const sheet = sheetOf(st.get(i, j));
+        if (activeAt(st, i, j) && (sheet === 2 || sheet === 109)) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :2692-2793 方块填充（补洞）：四邻实心 ≥2；先 |dx| 最小再距离（水平优先） */
+  private stepBlocksFilling(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (!env.settings.smartBlocksEnabled) return; // :2694-2697
+    if (taken()) return;
+    const cs = sem.createTileSheet;
+    if (cs == null || !allowNormalBlockPlacement(sem) || !isSolidBlockSheet(cs)) return; // :2709
+    const st = env.st;
+    // :2714-2722 鼠标格已占用/不可达 → 停用
+    if (activeAt(st, screenX, screenY)) return;
+    if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const t = st.get(i, j);
+        if (!activeAt(st, i, j) || tileCutType(t)) {
+          // :2732-2749 四邻实心（非平台）计数 ≥2
+          let n = 0;
+          for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+            const nx = i + ox, ny = j + oy;
+            if (!st.inBounds(nx, ny)) continue;
+            const nt = st.get(nx, ny);
+            if (activeAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) n++;
+          }
+          if (n >= 2) targets.push({ x: i, y: j });
+        }
+      }
+    }
+    if (targets.length === 0) return;
+    // :2759-2784 排序：先 |dx| 最小，并列取距离小（Collision.EmptyTile(ignoreTiles) 门）
+    let num2 = -1;
+    let num3 = Infinity;
+    let point = targets[0];
+    for (const t of targets) {
+      if (!emptyTile(env, t.x, t.y)) continue;
+      const vx = (t.x * 16 + 8) - env.mouse.x;
+      const vy = (t.y * 16 + 8) - env.mouse.y;
+      const adx = Math.abs(vx);
+      const len = Math.hypot(vx, vy);
+      let better = false;
+      if (adx < num3) better = true;
+      if (adx === num3 && (num2 === -1 || len < num2)) better = true;
+      if (better) { num2 = len; num3 = adx; point = t; }
+    }
+    if (num2 !== -1 && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+      set(point.x, point.y); // :2786-2790
+    }
+  }
+
+  /** :809-883 方块铺线：四邻实心 ≥1，纯取最近 */
+  private stepBlocksLines(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (!env.settings.smartBlocksEnabled) return; // :812
+    if (taken()) return;
+    const cs = sem.createTileSheet;
+    if (cs == null || !allowNormalBlockPlacement(sem) || !isSolidBlockSheet(cs)) return;
+    const st = env.st;
+    // :817-825 鼠标格已占用/不可达 → 停用
+    if (activeAt(st, screenX, screenY)) return;
+    if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const t = st.get(i, j);
+        if (!activeAt(st, i, j) || tileCutType(t)) {
+          // :835-851 四邻任一实心（非平台）
+          let ok = false;
+          for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+            const nx = i + ox, ny = j + oy;
+            if (!st.inBounds(nx, ny)) continue;
+            const nt = st.get(nx, ny);
+            if (activeAt(st, nx, ny) && tileSolidType(nt) && !tileSolidTopType(nt)) { ok = true; break; }
+          }
+          if (ok) targets.push({ x: i, y: j });
+        }
+      }
+    }
+    // :860-876 EmptyTile 过滤后取最近
+    const open = targets.filter((t) => emptyTile(env, t.x, t.y));
+    const point = nearestOf(open, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  // ---- 油漆三策略：油漆系统（tile.color/paintCoating）未建 → no-op，门恒假 ----
+
+  /** :767-807 PaintRoller（1072/1544）——no-op：油漆数据缺失 */
+  private stepPaintRoller(
+    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
+    _set: (x: number, y: number) => void, _taken: () => boolean,
+  ): void {
+    void sem; void PAINT_ROLLER_ITEMS;
+  }
+
+  /** :722-765 PaintBrush（1071/1543）——no-op：油漆数据缺失 */
+  private stepPaintBrush(
+    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
+    _set: (x: number, y: number) => void, _taken: () => boolean,
+  ): void {
+    void sem; void PAINT_BRUSH_ITEMS;
+  }
+
+  /** :668-720 PaintScrapper（1100/1545）——no-op：油漆数据缺失 */
+  private stepPaintScrapper(
+    _env: SmartCursorEnv, sem: HeldSemantics, _reach: Region,
+    _set: (x: number, y: number) => void, _taken: () => boolean,
+  ): void {
+    void sem; void PAINT_SCRAPER_ITEMS;
+  }
+
+  /** :2032-2157 橡实（item 27）：草面 + 上方净空 + 相邻同类地面 */
+  private stepAcorns(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 27 || taken()) return; // :2037（reachableStartY<=20 的地表门由 reach 决定）
+    const st = env.st;
+    if (reach.y0 <= 20) return;
+    const NUM1 = 9, NUM2 = 14, NUM3 = 20; // :2034-2036
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j) || !st.inBounds(i, j - 1) || !st.inBounds(i, j + 1)) continue;
+        const t = st.get(i, j);
+        const below = st.get(i, j + 1);
+        // :2055 自身/上方须空（可割植物放行），下方须实心
+        if ((activeAt(st, i, j) && !tileCutType(t))
+          || (activeAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1)))
+          || !activeAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
+        // :2059-2060 ±1/±3 内已有树苗 → 间距门
+        const saplingAt = (x: number, y: number): boolean =>
+          st.inBounds(x, y) && activeAt(st, x, y) && COMMON_SAPLING.has(sheetOf(st.get(x, y)));
+        const flag = saplingAt(i - 1, j) || saplingAt(i + 1, j);
+        const flag2 = flag || saplingAt(i - 2, j) || saplingAt(i + 2, j) || saplingAt(i - 3, j) || saplingAt(i + 3, j);
+        const groundSheet = sheetOf(below);
+        let ok = false;
+        switch (groundSheet) {
+          case 60: // 丛林草：5×14 净空
+            if (!flag2 && emptyTileCheck(st, i - 2, i + 2, j - NUM2 + 1, j, 20)) ok = true;
+            break;
+          case 2: case 23: case 109: case 147: case 199: case 477: case 492: case 633: case 661: case 662:
+            if (!flag2 && st.liquid[st.idx(i - 1, j)] === 0 && st.liquid[st.idx(i, j)] === 0
+              && st.liquid[st.idx(i + 1, j)] === 0 && emptyTileCheck(st, i - 2, i + 2, j - NUM1 + 1, j, 20)) ok = true;
+            break;
+          case 53: case 112: case 116: case 234: // 沙族：棕榈
+            if (!flag && st.liquid[st.idx(i, j)] === 0 && emptyTileCheck(st, i, i, j - NUM3, j, 20)) ok = true;
+            break;
+        }
+        if (ok) targets.push({ x: i, y: j });
+      }
+    }
+    // :2096-2136 目标下方相邻列必须有同类地面（防孤点）
+    const kept = targets.filter((p) => {
+      let ok = false;
+      for (const l of [-1, 1]) {
+        const x = p.x + l, y = p.y + 1;
+        if (!st.inBounds(x, y) || !activeAt(st, x, y)) continue;
+        if ([2, 23, 53, 60, 109, 112, 116, 147, 199, 234, 477, 492, 633, 661, 662].includes(sheetOf(st.get(x, y)))) ok = true;
+      }
+      return ok;
+    });
+    const point = nearestOf(kept, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :2159-2226 宝石橡实（GrowTreeSettings 档案）：石/苔面 + 5×12 净空 */
+  private stepGemCorns(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const profile = sem.vid != null ? GEM_TREE_PROFILES[sem.vid] : undefined;
+    if (!profile || taken()) return; // :2161
+    const st = env.st;
+    if (reach.y0 <= 20) return;
+    const targets: Pt[] = [];
+    const groundOk = (t: number): boolean => GEM_TREE_GROUND.has(sheetOf(t));
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const t = st.get(i, j);
+        const below = st.get(i, j + 1);
+        if (!groundOk(below) || !activeAt(st, i, j + 1) || !solidTile2(st, i, j + 1)) continue;
+        if (activeAt(st, i, j) && !tileCutType(t)) continue;
+        if (activeAt(st, i, j - 1) && !tileCutType(st.get(i, j - 1))) continue;
+        // :2179 ±3 内无树苗、无液体、5×TreeHeightMax 净空
+        let sapling = false;
+        for (const dx of [-3, -2, -1, 1, 2, 3]) {
+          const x = i + dx;
+          if (st.inBounds(x, j) && activeAt(st, x, j) && COMMON_SAPLING.has(sheetOf(st.get(x, j)))) sapling = true;
+        }
+        if (sapling) continue;
+        if (st.liquid[st.idx(i - 1, j)] !== 0 || st.liquid[st.idx(i, j)] !== 0 || st.liquid[st.idx(i + 1, j)] !== 0) continue;
+        if (!emptyTileCheck(st, i - 2, i + 2, j - profile.treeHeightMax, j, profile.saplingTile)) continue;
+        targets.push({ x: i, y: j });
+      }
+    }
+    // :2185-2205 相邻列须有同类地面
+    const kept = targets.filter((p) => {
+      for (const l of [-1, 1]) {
+        const x = p.x + l, y = p.y + 1;
+        if (st.inBounds(x, y) && activeAt(st, x, y) && groundOk(st.get(x, y))) return true;
+      }
+      return false;
+    });
+    const point = nearestOf(kept, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :612-666 空桶（205）：液体连通量 >100 的格（我方键 empty_bucket，vid 缺 → 键名兜底） */
+  private stepEmptyBuckets(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const vid = sem.vid;
+    const isBucket = vid === 205 || env.held.def?.key === 'empty_bucket';
+    if (!isBucket || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const ii = st.idx(i, j);
+        if (st.liquid[ii] <= 0) continue;
+        // :628-640 3×3 同类液体总量 >100
+        let sum = 0;
+        for (let k = i - 1; k <= i + 1; k++) {
+          for (let l = j - 1; l <= j + 1; l++) {
+            if (!st.inBounds(k, l)) continue;
+            const ni = st.idx(k, l);
+            if (st.liquidType[ni] === st.liquidType[ii]) sum += st.liquid[ni];
+          }
+        }
+        if (sum > 100) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :572-610 致动器（849）：有导线未装致动器的格取最近 */
+  private stepActuators(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    const isActuatorItem = sem.vid === 849 || env.held.def?.key === 'actuator_item';
+    if (!isActuatorItem || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const w = st.wire[st.idx(i, j)];
+        // :584 四色任一导线 + 未装致动器 + active
+        if ((w & TS.WIRE_COLORS) !== 0 && (w & TS.WIRE_ACTUATOR) === 0 && activeAt(st, i, j)) {
+          targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :482-570 炼金种子（createTile 82）：各药草适配的盆/土/沙面。
+   *  我方药草种子物品放置 sheet 83（v_83_herbs_mature）——82/83 均为我方注册的药草格，
+   *  门取两档并集以兼容数据现状（原版仅 82）。 */
+  private stepAlchemySeeds(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.createTileSheet !== 82 && sem.createTileSheet !== 83 || taken()) return;
+    const st = env.st;
+    const style = sem.placeStyle;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const t = st.get(i, j);
+        const below = st.get(i, j + 1);
+        // :496-497 自身可替换（可破坏放置/可割非药草/已成熟可收）+ 下方 nactive 平顶
+        const replaceable = !activeAt(st, i, j)
+          || tileCutType(t) && sheetOf(t) !== 82 && sheetOf(t) !== 83;
+        if (!replaceable) continue;
+        if (!activeAt(st, i, j + 1) || st.half[st.idx(i, j + 1)] !== 0 || st.slope[st.idx(i, j + 1)] !== 0) continue;
+        const belowSheet = sheetOf(below);
+        const liq = st.liquid[st.idx(i, j)];
+        // :502-546 各样式（草药）适配基质
+        const ok = (() => {
+          switch (style) {
+            case 0: return [78, 380, 2, 477, 109, 492].includes(belowSheet) && liq === 0;
+            case 1: return [78, 380, 60].includes(belowSheet) && liq === 0;
+            case 2: return [78, 380, 0, 59].includes(belowSheet) && liq === 0;
+            case 3: return [78, 380, 203, 199, 23, 25].includes(belowSheet) && liq === 0;
+            case 4: return [78, 380, 53, 116].includes(belowSheet) && (liq === 0 || liq > 0);
+            case 5: return [78, 380, 57, 633].includes(belowSheet);
+            case 6: return [78, 380, 147, 161, 163, 164, 200].includes(belowSheet);
+            default: return false;
+          }
+        })();
+        if (ok) targets.push({ x: i, y: j });
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :427-480 种植盆（createTile 380）：已有盆的左右空位 */
+  private stepPlanterBox(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.createTileSheet !== 380 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j) || sheetOf(st.get(i, j)) !== 380) continue;
+        // :448-455 盆左右为空/可替换 → 续放
+        for (const ox of [-1, 1]) {
+          const nx = i + ox;
+          if (!st.inBounds(nx, j)) continue;
+          const nt = st.get(nx, j);
+          if (!activeAt(st, nx, j) || tileCutType(nt)) targets.push({ x: nx, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :371-425 陶盆（createTile 78）：空位 + 下方平实心顶 */
+  private stepClayPots(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region, screenX: number, screenY: number,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.createTileSheet !== 78 || taken()) return;
+    const st = env.st;
+    // :378-386 鼠标格占用/不可达 → 停用
+    if (activeAt(st, screenX, screenY)) return;
+    if (!inTileBounds(screenX, screenY, reach.x0, reach.y0, reach.x1, reach.y1)) return;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const t = st.get(i, j);
+        const below = st.get(i, j + 1);
+        // :395 自身空/可割，下方 nactive 无坡无半砖且实心
+        if ((!activeAt(st, i, j) || tileCutType(t))
+          && activeAt(st, i, j + 1) && st.half[st.idx(i, j + 1)] === 0 && st.slope[st.idx(i, j + 1)] === 0
+          && tileSolidType(below)) {
+          targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const open = targets.filter((p) => emptyTile(env, p.x, p.y));
+    const point = nearestOf(open, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+
+  /** :214-254 再生法杖（213/5295）：暴露泥土格取最近 */
+  private stepStaffOfRegrowth(
+    env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
+    set: (x: number, y: number) => void, taken: () => boolean,
+  ): void {
+    if (sem.vid !== 213 && sem.vid !== 5295 || taken()) return;
+    const st = env.st;
+    const targets: Pt[] = [];
+    for (let i = reach.x0; i <= reach.x1; i++) {
+      for (let j = reach.y0; j <= reach.y1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        // :228 泥土(0) 且暴露（四邻或四角有空）
+        if (activeAt(st, i, j) && !inActiveAt(st, i, j) && sheetOf(st.get(i, j)) === 0 && exposed8(st, i, j)) {
+          targets.push({ x: i, y: j });
+        }
+      }
+    }
+    const point = nearestOf(targets, env.mouse);
+    if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) set(point.x, point.y);
+  }
+}
+
+// ===================== 模块级工具 =====================
+
+interface Region { x0: number; y0: number; x1: number; y1: number }
+
+/** TileReachCheckSettings.GetTileRegion（TileReachCheckSettings.cs:53）+ clamp 世界 [10,max-10]（:100-103） */
+function tileRegion(p: SmartCursorActor, tb: number, st: TileStore): Region {
+  const x = Math.min(20, 5) + tb;
+  const y = Math.min(20, 3) + tb;
+  const LX = Math.floor(p.x / 16) - x;
+  const HX = Math.ceil((p.x + p.w) / 16) - 1 + x;
+  const LY = Math.floor(p.y / 16) - y;
+  const HY = Math.ceil((p.y + p.h) / 16) - 1 + y;
+  return {
+    x0: Math.max(10, Math.min(LX, st.w - 10)),
+    x1: Math.max(10, Math.min(HX, st.w - 10)),
+    y0: Math.max(10, Math.min(LY, st.h - 10)),
+    y1: Math.max(10, Math.min(HY, st.h - 10)),
+  };
+}
+
+/** :183-199 让位集（DisableSmartCursor / 轨道 314 且 gravDir=1） */
+function isHoveringOverAnInteractableTile(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  const sheet = sheetOf(st.get(x, y));
+  if (DISABLE_SMART_CURSOR_SHEETS.has(sheet)) return true;
+  if (sheet === 314) return true; // gravDir 恒 1（反重力未实装）
+  return false;
+}
+
+/** Main.tileHammer（Main.cs:7153-7156 全部赋值）：祭坛 26 / 31 / 695 / 696 */
+const HAMMER_TILES = new Set([26, 31, 695, 696]);
+function isHammerTile(sheet: number): boolean {
+  return HAMMER_TILES.has(sheet);
+}
+
+/** Step_Platforms 辅助：格上是平台族 sheet（:1445-1452） */
+function isPlatformSheet(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !activeAt(st, x, y)) return false;
+  return PLATFORMS.has(sheetOf(st.get(x, y)));
+}
+
+/** :201-212 AllowNormalBlockPlacementBehaviourForItemType（草种/苔藓物品不参与方块策略） */
+function allowNormalBlockPlacement(sem: HeldSemantics): boolean {
+  const vid = sem.vid;
+  if (vid == null) return true;
+  return !(vid === 213 || vid === 5295 || GRASS_SEED_ITEMS.has(vid) || MOSS_ITEMS.has(vid));
+}
+
+/** 放置物为实心非平台非框架方块（BlocksFilling/Lines 门 :812/:2709） */
+function isSolidBlockSheet(sheet: number): boolean {
+  const tileId = sheetToTileId(sheet);
+  if (tileId == null) return false;
+  const d = TILE_DEFS[tileId];
+  return !!d && d.solid && !d.platform && !d.framed;
+}
+
+function sheetToTileId(sheet: number): number | null {
+  if (sheet < 0) return null;
+  const hit = TILE_DEFS.findIndex((d) => d?.vanilla?.sheet === sheet);
+  return hit >= 0 ? hit : null;
+}
+
+/** 八向至少一格暴露（GrassSeeds/Moss/StaffOfRegrowth 共用 :273-274） */
+function exposed8(st: TileStore, x: number, y: number): boolean {
+  for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]]) {
+    const nx = x + ox, ny = y + oy;
+    if (st.inBounds(nx, ny) && !activeAt(st, nx, ny)) return true;
+  }
+  for (const [ox, oy] of [[-1, -1], [-1, 1], [1, 1], [1, -1]]) {
+    const nx = x + ox, ny = y + oy;
+    if (st.inBounds(nx, ny) && !activeAt(st, nx, ny)) return true;
+  }
+  return false;
+}
+
+/** :2867-2893 IsValidSpotForTorch（墙 → 左 → 右 → 下） */
+function isValidSpotForTorch(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const ii = st.idx(x, y);
+  if (st.wall[ii] > 0) return true; // :2869 有墙即放
+  if (TORCH_TILES.has(sheetOf(st.type[ii]))) return false; // :2873 自身是火把
+  const isTreeType = (tx: number, ty: number): boolean => {
+    if (!st.inBounds(tx, ty) || !activeAt(st, tx, ty)) return false;
+    return IS_A_TREE_TRUNK.has(sheetOf(st.get(tx, ty)));
+  };
+  // :2877-2881 左：slope 允许（0 或奇数坡）且 实心/梁/连续三格树干
+  if (st.inBounds(x - 1, y) && activeAt(st, x - 1, y)) {
+    const li = st.idx(x - 1, y);
+    const lt = st.get(x - 1, y);
+    const ls = sheetOf(lt);
+    if ((st.slope[li] === 0 || st.slope[li] % 2 !== 1)
+      && ((tileSolidType(lt) && !tileNoAttachType(ls) && !tileSolidTopType(lt) && !NOT_REALLY_SOLID.has(ls))
+        || IS_BEAM.has(ls)
+        || (isTreeType(x - 1, y) && isTreeType(x - 1, y - 1) && isTreeType(x - 1, y + 1)))) {
+      return true;
+    }
+  }
+  // :2882-2886 右：slope 允许（0 或偶数坡）
+  if (st.inBounds(x + 1, y) && activeAt(st, x + 1, y)) {
+    const ri = st.idx(x + 1, y);
+    const rt = st.get(x + 1, y);
+    const rs = sheetOf(rt);
+    if ((st.slope[ri] === 0 || st.slope[ri] % 2 !== 0)
+      && ((tileSolidType(rt) && !tileNoAttachType(rs) && !tileSolidTopType(rt) && !NOT_REALLY_SOLID.has(rs))
+        || IS_BEAM.has(rs)
+        || (isTreeType(x + 1, y) && isTreeType(x + 1, y - 1) && isTreeType(x + 1, y + 1)))) {
+      return true;
+    }
+  }
+  // :2887-2891 下：slope 0 且非半砖，实心（非平台）或平台
+  if (st.inBounds(x, y + 1) && activeAt(st, x + 0, y + 1)) {
+    const bi = st.idx(x, y + 1);
+    const bt = st.get(x, y + 1);
+    const bs = sheetOf(bt);
+    if (st.slope[bi] === 0 && st.half[bi] === 0
+      && ((tileSolidType(bt) && !tileSolidTopType(bt)) || PLATFORMS.has(bs))
+      && !NOT_REALLY_SOLID.has(bs)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Collision.HitLineWall 退化：沿线找首个"有墙或实心"格（锤射线用） */
+function hitLineWall(st: TileStore, x1: number, y1: number, x2: number, y2: number): Pt {
+  const steps = Math.max(Math.abs(x2 - x1), Math.abs(y2 - y1));
+  for (let s = 0; s <= steps; s++) {
+    const x = Math.round(x1 + ((x2 - x1) * s) / Math.max(1, steps));
+    const y = Math.round(y1 + ((y2 - y1) * s) / Math.max(1, steps));
+    if (!st.inBounds(x, y)) break;
+    const i = st.idx(x, y);
+    if (st.wall[i] > 0 || (activeAt(st, x, y) && tileSolidType(st.type[i]))) return { x, y };
+  }
+  return { x: -1, y: -1 };
+}
+
+/** Collision.HitWallSubstep：该格的墙"还有得锤"（至少一邻无墙/无实心） */
+function hitWallSubstep(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const w = st.wall[st.idx(x, y)];
+  if (w === 0) return false;
+  for (const [ox, oy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
+    const nx = x + ox, ny = y + oy;
+    if (!st.inBounds(nx, ny)) return true;
+    const ni = st.idx(nx, ny);
+    if (st.wall[ni] === 0 && !activeAt(st, nx, ny)) return true;
+  }
+  return false;
+}
+
+/** 锤目标剔除祭坛（26）：SmartCursorHelper.cs:1662/:1704 */
+function pickNonAltar(st: TileStore, targets: Pt[], world: (p: Pt) => { x: number; y: number }, ref: { x: number; y: number }): Pt | null {
+  let best = -1;
+  let point: Pt | null = null;
+  for (const t of targets) {
+    if (!st.inBounds(t.x, t.y) || sheetOf(st.get(t.x, t.y)) === 26) continue;
+    const w = world(t);
+    const d = dist(w.x, w.y, ref.x, ref.y);
+    if (best === -1 || d < best) { best = d; point = t; }
+  }
+  return point;
+}
+
+/** CanHitWithCheck 退化（铺墙视线判定）：近似为"玩家与目标格之间无整实心行/列阻挡" */
+function canSeeTile(st: TileStore, p: SmartCursorActor, tx: number, ty: number): boolean {
+  const x0 = Math.floor(p.x / 16), x1 = Math.floor((p.x + p.w) / 16);
+  const y0 = Math.floor(p.y / 16), y1 = Math.floor((p.y + p.h) / 16);
+  for (let x = Math.min(x0, tx); x <= Math.max(x1, tx); x++) {
+    for (let y = Math.min(y0, ty); y <= Math.max(y1, ty); y++) {
+      if (x >= Math.min(x0, tx) && x <= Math.max(x1, tx) && y >= Math.min(y0, ty) && y <= Math.max(y1, ty)) {
+        // 跳过玩家自身占据区与目标格
+        if (x >= x0 && x <= x1 && y >= y0 && y <= y1) continue;
+        if (x === tx && y === ty) continue;
+      }
+      if (!st.inBounds(x, y)) continue;
+      const t = st.get(x, y);
+      if (activeAt(st, x, y) && tileSolidType(t) && !tileSolidTopType(t)) return false;
+    }
+  }
+  return true;
+}
+
+/** PumpkinSeeds/Boulders 共用收尾（:1077-1096 / :946-965） */
+function pumpkinOrBoulderScan(
+  env: SmartCursorEnv, reach: Region,
+  set: (x: number, y: number) => void,
+  pred: (st: TileStore, i: number, j: number) => boolean,
+): void {
+  const st = env.st;
+  const targets: Pt[] = [];
+  for (let i = reach.x0; i <= reach.x1; i++) {
+    for (let j = reach.y0; j <= reach.y1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      if (pred(st, i, j)) targets.push({ x: i, y: j });
+    }
+  }
+  const point = nearestOf(targets, env.mouse);
+  if (point && inTileBounds(point.x, point.y, reach.x0, reach.y0, reach.x1, reach.y1)) {
+    set(point.x, point.y);
+  }
+}

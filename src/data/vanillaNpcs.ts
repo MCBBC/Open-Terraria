@@ -1,6 +1,9 @@
 // 原版 1.4.0.5 全量 NPC 数据（tools/extract-npcs.mjs 从 Terarria1405/NPC.cs SetDefaults 提取）。
 // 增量补齐（2026-08-11）：473-476/590/591/594/628/629/631/634/635/692 十三条取自
 // Terarria1456/NPC.cs SetDefaults + Main.cs npcFrameCount（数值一律取 1456 最终态）。
+// 弹跳球族增量（2026-08-11）：665 ChaosBallTim / 666 VileSpitEaterOfWorlds 两条取自
+// Terarria1456/NPC.cs SetDefaults :17338-17367（aiStyle 9，字段对齐 30/112 同族；贴图
+// NPC_665/666.png 已在 sprites，此前纯数据缺口）。
 // 星璇塔增量（2026-08-11）：403/404（星尘蠕虫身/尾，字段复制 402 改宽高——1456 无独立
 // SetDefaults，原版由 DrawNPC case 402 自绘 trail；本仓蠕虫链 spawnWormChain 需要
 // 头+1/头+2 条目）、408（小水流入侵者，复制 407 缩小——1456 无独立 SetDefaults）。

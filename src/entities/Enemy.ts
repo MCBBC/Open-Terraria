@@ -19,6 +19,10 @@ import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancie
 import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from './bossAI_queenbee_plantera';
 import { dukeFishronAI, dukeBubbleAI, sharkronAI, moonLordCoreAI, moonLordHandAI, moonLordHeadAI } from './bossAI_duke_moonlord';
 import { golemAI, golemHeadAI, golemFistAI } from './bossAI_golem';
+import {
+  mourningWoodAI, pumpkingAI, pumpkingBladeAI, iceQueenAI,
+  santaNK1AI, elfCopterAI, flockoAI, snowmanAI, bouncingBallAI,
+} from './bossAI_moon_events';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -423,9 +427,16 @@ export class Enemy extends Entity {
         case 75: this.fighterAI(game, p); break;
         case 85: case 95: case 96: case 99: this.swarmerAI(game, p); break;
         case 97: this.casterAI(game, p); break;
-        // 月事件 Boss 一期近似：悲木/常世吼 57、南瓜王 58、冰女王 60、圣诞坦克 61、
-        // 玩具直升机 62、弗洛科 63 均落此 default 战士核——能战斗即可；二期按 NPC.cs
-        // 对应 AI_0XX 1:1 补齐（docs/event-pumpkin-frost-moon.md 步骤 11）
+        // ---- 月事件（南瓜月/霜月）Boss 族 1:1（bossAI_moon_events.ts）----
+        case 57: mourningWoodAI(this, game, p); break;                  // AI_057 悲木 325/常世吼 344（cs:32937 悬浮树怪+分阶段弹幕）
+        case 58: pumpkingAI(this, game, p); break;                       // AI_058 南瓜王 327（cs:33246 悬浮/俯冲+生双刃）
+        case 59: pumpkingBladeAI(this, game, p); break;                   // AI_059 南瓜王之刃 328（cs:33405 锚主环绕/俯冲/横扫）
+        case 60: iceQueenAI(this, game, p); break;                        // AI_060 冰雪女王 345（cs:33588 滑翔/落冰/旋射三态）
+        case 61: santaNK1AI(this, game, p); break;                        // AI_061 圣诞坦克 346（cs:33902 悬浮+链炮/火箭/礼盒）
+        case 62: elfCopterAI(this, game, p); break;                       // AI_062 玩具直升机 347（cs:34155 近距悬停点射）
+        case 63: flockoAI(this, game, p); break;                          // AI_063 弗洛科 352（cs:34208 追踪+旋冲）
+        case 38: snowmanAI(this, game, p); break;                         // AI_038 雪人三兄弟 143/144/145（cs:29115 跳扑/停顿/雪球）
+        case 9: bouncingBallAI(this, game, p); break;                     // AI_009 弹跳球族 25/30/33/112/516/665/666（cs:21349 直飞球）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {

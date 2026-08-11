@@ -17,6 +17,7 @@
   "Inventory_Back13.png", "Inventory_Back14.png", "Inventory_Back15.png",
   "Inventory_Tick_On.png", "Inventory_Tick_Off.png",
   "Heart.png", "Heart2.png", "Mana.png",
+  "UI/UI_BossBar.png",
   "UI/Minimap/Default/MinimapFrame.png", "UI/Minimap/Default/MinimapButton_Reset.png",
   "UI/Minimap/Default/MinimapButton_ZoomIn.png", "UI/Minimap/Default/MinimapButton_ZoomOut.png",
   "UI/PlayerBackground.png",

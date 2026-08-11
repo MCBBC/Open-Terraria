@@ -29,13 +29,22 @@ async function attempt() {
     g.renderer.fullbright = true;
     // 复现瀑布:x=1222 顶部注满一列水(地表 337 → 从 310 起注到 332),任其下流
     const st = g.world.store;
-    // 现场复现:983-984 上方注一柱水,任其流过标注带
-    for (let x = 983; x <= 984; x++) {
-      for (let y = 315; y <= 328; y++) {
+    const STONE = g.tileByKey['stone'];
+    // 供水池 300-308×980-988;唇缘半砖 984@310;地面 322(瀑布撞地)
+    for (let x = 978; x <= 992; x++) {
+      st.setTile(x, 322, STONE, 0, 0);
+      for (let y = 309; y <= 321; y++) st.setTile(x, y, 0);
+    }
+    st.setTile(984, 310, STONE, 0, 0);
+    st.half[st.idx(984, 310)] = 1;
+    for (let x = 980; x <= 988; x++) {
+      for (let y = 300; y <= 308; y++) {
         st.setTile(x, y, 0);
         st.setLiquid(x, y, 255, 1);
       }
     }
+    g.lighting.liquidDirty = true;
+    g.camera.x = 984 * 16; g.camera.y = 316 * 16;
     g.lighting.liquidDirty = true;
     g.camera.x = 984 * 16; g.camera.y = 329 * 16;
     return 'ok';
@@ -64,7 +73,9 @@ const diag = await page.evaluate(() => {
   const st = g.world.store;
   const cells = [];
   for (let y = 325; y <= 340; y++) {
-    cells.push(y + ': ' + st.liquid[st.idx(984, y)]);
+    const t1 = st.type[st.idx(983, y)], t2 = st.type[st.idx(984, y)];
+        const half = st.half[st.idx(984, y)];
+        cells.push(y + ': liq' + st.liquid[st.idx(984, y)] + ' t983=' + t1 + ' t984=' + t2 + ' half=' + half);
   }
   return { liq: cells, hasWaterNear: cells.some((c) => parseInt(c.split(': ')[1]) > 0) };
 });

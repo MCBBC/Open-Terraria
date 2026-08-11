@@ -12,6 +12,14 @@ import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
 import { VanillaResourceBars } from './ResourceBars';
 import type { FlickerClock } from '../lighting/SkyColor';
+import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
+
+/** 鼠标目标格（智能光标激活时 smart=true 并附方向锁 arrow） */
+export interface HoverTarget {
+  x: number; y: number;
+  smart?: boolean;
+  arrow?: { x: number; y: number } | null;
+}
 
 /** 装备 → 纸娃娃渲染参数。贴图索引 = item.head/body/legs 槽位序号（原版语义，
  *  非物品 id——铁甲三件的槽位序号都是 2）；原版物品 id 经 vanilla.json armorIndex 查表 */
@@ -52,6 +60,7 @@ import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
+import { BuffType } from '../stats/Buffs';
 import { Enemy } from '../entities/Enemy';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -395,7 +404,7 @@ export class Renderer {
     player: Player, entities: Entity[],
     particles: Particle[], dmgNumbers: DamageNumber[],
     swing: { t: number; dur: number; item: number } | null,
-    hover: { x: number; y: number } | null,
+    hover: HoverTarget | null,
     boss: { name: string; hp: number; maxHp: number; cx: number; cy: number } | null,
     mouseX = 0, mouseY = 0, mouseDown = false,
     mineProgress = 0,
@@ -547,10 +556,21 @@ export class Renderer {
       }
     }
 
+    // 6b. 洞穴探险/危险感/狩猎/群系视觉高亮（Main.cs:49500 段 Spelunker/Dangersense 溢色近似：
+    //     全屏 tile 扫描 + 呼吸 alpha；狩猎对小动物画框）
+    this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts);
+
     ctx.restore();
 
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+
+    // 7b. 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor）：光照合成之后画，
+    //     颜色手动乘该格光照（Lighting.GetColor 语义）
+    if (hover?.smart) {
+      this.drawSmartCursor(ctx, cam, hover, viewW, z,
+        lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
+    }
 
     // 8. 飘字（受光照影响后画）
     ctx.save();
@@ -611,7 +631,7 @@ export class Renderer {
     // 10. Boss 血条（BigProgressBarSystem.TryFindingNPCToTrack：屏幕矩形外扩 5000px
     // 与 boss 命中盒相交才跟踪显示——远离重生点时不应残留血条）
     if (boss && Math.abs(boss.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(boss.cy - cam.y) < viewH / 2 / z + 5000) {
-      this.drawBossBar(ctx, viewW, boss);
+      this.drawBossBar(ctx, viewW, viewH, boss, entities);
     }
     // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
     // 原版右下角黄条——偏差记录）
@@ -724,11 +744,22 @@ export class Renderer {
     const now = this._liquidNow; // 与液体双 pass 同帧同时刻
     this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
     this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now, this.waterStyle);
+    // 岩浆瀑布发光(AddLight :1075-1080:r≈0.55×0.4 脉动,g=r×0.3,b=r×0.1 橙光;
+    // mouseTextColor 闪烁项取定值近似)——非岩浆瀑布 litCells 为空,零开销
+    const lit = this.waterfalls.litCells;
+    if (lit.length) {
+      const r = 0.22;
+      for (let k = 0; k < lit.length; k += 2) {
+        this.lighting?.addLight(lit[k], lit[k + 1], r, r * 0.3, r * 0.1);
+      }
+    }
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;
   /** 群系水色（CalculateWaterStyle，Main.cs:56845；每帧由场景标志+昼夜+深度算出） */
   waterStyle = 0;
+  /** 光照引擎引用(Game 创建后回填;岩浆瀑布 AddLight 消费) */
+  lighting: import('../lighting/LightingEngine').LightingEngine | null = null;
   /** 切换迟滞（DrawBG_HandleBackgroundTransition :63508-63533 的 bgDelay 语义：
    *  原版水色本身硬切,但持续 30t(≈0.5s)偏好不变才提交切换,切后 60t 冷却不再响应——
    *  群系边界来回抖动时不闪切;森林族 60t 差异省略,统一 30t 近似） */
@@ -915,6 +946,14 @@ export class Renderer {
     if (e.vanillaId === 125) this.drawTwinsChain(e, entities);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
+      // 月总族独占分支（Main.cs:24325-24504 case 396/397/398）：头/手/核心各自
+      // 带独立锚点与叠层（上臂/前臂/躯干/胸甲/眼/破体帧），通用路径锚点不对
+      if (e.vanillaId === 398) { this.drawMoonLordCore(e, entities); return; }
+      if (e.vanillaId === 397) { this.drawMoonLordHand(e, entities); return; }
+      if (e.vanillaId === 396) { this.drawMoonLordHead(e); return; }
+      // 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）：翅膀/双臂/
+      // 二阶段覆层独占——通用路径只画本体，缺背后大翼与攻击态手臂帧
+      if (e.vanillaId === 636) { this.drawEmpress(e); return; }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
@@ -1018,6 +1057,9 @@ export class Renderer {
             ctx.drawImage(crown.img, -crown.sw / 2, -e.h / 2 - (70 - num223) * scale - crown.sh / 2, crown.sw, crown.sh);
           }
         }
+        // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
+        // ——与基础精灵同变换叠加（原版同一 position/origin 二次 Draw）
+        this.drawNpcGlow(e, r);
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
@@ -1157,33 +1199,487 @@ export class Renderer {
 
   /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
   private armBoneImg: HTMLImageElement | null | undefined;
-  /** 星璇塔护盾半球（Main.cs:23797-23830 近似）：原版 = 600×600 Perlin 噪声 +
-   *  ForceField 着色器（分塔 Solar/Vortex/Nebula/Stardust 预设）；此处用径向渐变
-   *  圆顶替代（半径 300px = 原图半宽）。强度 = 盾/ShieldMax（alpha = 0.2+0.8×比），
-   *  塔 ai3∈(0,30] 时闪光脉冲（强度 ×(1+flash*0.5)、半径 ×(1+flash*0.05)）。
-   *  盾空（含死亡演出态）不画；盾破时的碎裂环（:23831+ num267 段）二期补 */
+
+  // ===================== NPC GlowMask 体系（Main.cs DrawNPC 硬编码发光层） =====================
+  // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
+  // 逐类型硬编码的 TextureAssets.GlowMask[N] 二次 Draw。下表为全量对照（1.4.5.6
+  // Main.cs:23099/23480/23594/23746-23776/23878-23886/24218-24226/24531-24535）：
+  //   mode 'frame'   同帧整图叠加（火星飞碟族/Betsy/暗黑魔法师/永恒水晶/银河织带）
+  //   mode 'vel4'    以速度向量四向旋转偏移画 4 份灰 A=64 拷贝（四塔 + 火星飞骑 416）
+  // 未接（登记）：Glow_100/101（case 94 前）、Glow_154（case 384 拖尾）、Glow_146
+  // （case 662 族）——这三处依赖 oldPos 拖尾链，本渲染层无逐 NPC 历史缓冲；
+  // Projectile glowMask（:34327-34378）与 Item glowMask（:38072-38213）不在本批。
+  private static readonly NPC_GLOW: Record<number, { tex: string; mode: 'frame' | 'vel4' }> = {
+    392: { tex: 'vanilla/Glow_48.png', mode: 'frame' },   // 火星飞碟主体（:24218 Color(200,200,200,0)）
+    395: { tex: 'vanilla/Glow_49.png', mode: 'frame' },   // 飞碟核心（:24222）
+    394: { tex: 'vanilla/Glow_50.png', mode: 'frame' },   // 飞碟炮塔（:24226）
+    551: { tex: 'vanilla/Glow_226.png', mode: 'frame' },  // Betsy（:23099 Lerp(color,White,0.6) A=66）
+    564: { tex: 'vanilla/Glow_225.png', mode: 'frame' },  // 暗黑魔法师 T1（:23480 white×Opacity A/2）
+    565: { tex: 'vanilla/Glow_225.png', mode: 'frame' },  // 暗黑魔法师 T2
+    548: { tex: 'vanilla/Glow_239.png', mode: 'frame' },  // 永恒水晶（:23594 呼吸脉冲底层）
+    402: { tex: 'vanilla/Glow_135.png', mode: 'frame' },  // 银河织带头（:23886 白 A=255-num291）
+    422: { tex: 'vanilla/Glow_149.png', mode: 'vel4' },   // 太阳塔（:23766）
+    493: { tex: 'vanilla/Glow_132.png', mode: 'vel4' },   // 星尘塔（:23746）
+    507: { tex: 'vanilla/Glow_143.png', mode: 'vel4' },   // 星云塔（:23756）
+    517: { tex: 'vanilla/Glow_162.png', mode: 'vel4' },   // 星璇塔（:23776，+UnitX*2 偏移）
+  };
+
+  /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内，
+   *  原点=精灵锚点），按表内 mode 分流。additive（XNA 默认 AlphaBlend + 贴图
+   *  自带发光色的语义，用 lighter 还原"叠加提亮"观感） */
+  private drawNpcGlow(e: Enemy, r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }) {
+    if (!this.atlas) return;
+    const g = Renderer.NPC_GLOW[e.vanillaId ?? -1];
+    if (!g) return;
+    const gr = this.atlas.vmisc(g.tex);
+    if (!gr) return;
+    const ctx = this.ctx;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    if (g.mode === 'frame') {
+      // 同帧整图叠加：源矩形取 Glow_N 的对应帧带（Glow 表与 NPC 表同帧高对齐）
+      const gh = Math.floor(gr.sh / Math.max(1, e.vanilla?.frames ?? 1));
+      const idx = Math.min((e.vanilla?.frames ?? 1) - 1, Math.floor(r.sy / Math.max(1, r.sh)));
+      let alpha = 0.8;
+      let flashPulse = 1;
+      if (e.vanillaId === 551) { alpha = (66 / 255) * 1.3; }              // :23099 A=66 ×(0.7+0.3*lerp)
+      else if (e.vanillaId === 564 || e.vanillaId === 565) { alpha = 0.5 * opacity; } // :23484 white.A/2×Opacity
+      else if (e.vanillaId === 548) {
+        // :23590-23596 num63/65 三秒呼吸三角波 ×0.6 紫底（(140,50,255)）
+        const t3 = (performance.now() / 1000) % 3 / 3;
+        flashPulse = t3 > 0.5 ? 1 - t3 : t3;
+        alpha = 0.6 * Math.max(0, flashPulse);
+      } else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.drawImage(gr.img, gr.sx, Math.min(gr.sh - gh, idx * gh), gr.sw, gh,
+        -r.sw / 2, -r.sh / 2, r.sw, r.sh);
+    } else {
+      // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份（:23750/:23850 Color(64,64,64,0)）
+      // ——原版在世界坐标偏移，此处转回本变换局部坐标（当前原点=精灵锚点，需平移 (cx,cy)-锚）
+      const num = 4 + 0 * 4; // (GetAlpha-0.5).Length()*4 光照项恒 0（我们无逐 NPC 光照）
+      ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
+      for (let k = 0; k < 4; k++) {
+        const a = k * Math.PI / 2;
+        // 世界坐标偏移 → 本变换局部（当前原点=精灵锚点，除 scale 还原）
+        const dx = ((e.vx * Math.cos(a) - e.vy * Math.sin(a)) * num) / scale;
+        const dy = ((e.vx * Math.sin(a) + e.vy * Math.cos(a)) * num) / scale
+          + (e.vanillaId === 517 ? 2 : 0);
+        ctx.drawImage(gr.img, gr.sx, gr.sy, gr.sw, gr.sh, -r.sw / 2 + dx, -r.sh / 2 + dy, r.sw, r.sh);
+      }
+    }
+    ctx.restore();
+  }
+
+  // ===================== 月总手-躯干连接（Main.cs:24325-24504） =====================
+  /** 核心额外偏移：肩锚 (220,-60)×sign、手锚 +（0,76）、臂长 340、IK 折角 acos */
+  private moonLordArmAngle(len: number, signX: number): number {
+    return Math.acos(Math.max(-1, Math.min(1, len / 340))) * -signX;   // :24362/:24413
+  }
+  private moonLordSideSign(side: number): [number, number] {
+    return side === 0 ? [-1, 1] : [1, 1];                              // vector25/vector41（:24352/:24403）
+  }
+
+  /** 月总核心 398（case 398 :24325-24388）：两侧上臂 Extra_14（肩=核心中心+(220,-60)×sign、
+   *  肘向量=(手中心+(0,76)-肩)×0.5、折角 acos(|v|/340)×-signX）→ 躯干 Extra_13 左右半
+   *  （镜像）→ 胸甲 Extra_16 → 核心 NPC_398 帧。手实体由实体表反查（原版按
+   *  npc[whoAmI] 全表扫 ai[2]/ai[3]——我们用 master 链等价解析） */
+  private drawMoonLordCore(e: Enemy, entities: unknown[]) {
+    if (!this.atlas) return;
+    const ex13 = this.atlas.vmisc('vanilla/Extra_13.png');
+    const ex14 = this.atlas.vmisc('vanilla/Extra_14.png');
+    const ex16 = this.atlas.vmisc('vanilla/Extra_16.png');
+    const ctx = this.ctx;
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 两侧上臂（:24346-24375）
+    if (ex14) {
+      for (let side = 0; side < 2; side++) {
+        const hand = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead
+          && n.vanillaId === 397 && n.ai2 === side && (!n.master || n.master === e));
+        if (!hand) continue;
+        const [sx] = this.moonLordSideSign(side);
+        const shx = e.cx + 220 * sx, shy = e.cy - 60;            // vector26（vector25.Y 恒 1）
+        const vx = (hand.cx + 0 - shx) * 0.5;
+        const vy = (hand.cy + 76 - shy) * 0.5;                   // vector27
+        const ang = this.moonLordArmAngle(Math.hypot(vx, vy), sx);
+        let ox = 76; if (side !== 0) ox = ex14.sw - 76;           // origin14（:24360）
+        const rot = Math.atan2(vy, vx) - ang - Math.PI / 2;
+        ctx.save();
+        ctx.translate(shx, shy);
+        ctx.rotate(rot);
+        if (side !== 0) ctx.scale(-1, 1);                        // FlipHorizontally
+        ctx.drawImage(ex14.img, ex14.sx, ex14.sy, ex14.sw, ex14.sh, -ox, -66, ex14.sw, ex14.sh);
+        ctx.restore();
+      }
+    }
+    // 躯干左右半（:24378-24379：origin (W,278)/(0,278)，右侧 FlipHorizontally）
+    if (ex13) {
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      ctx.drawImage(ex13.img, ex13.sx, ex13.sy, ex13.sw, ex13.sh, -ex13.sw, -278, ex13.sw, ex13.sh);
+      ctx.scale(-1, 1);
+      ctx.drawImage(ex13.img, ex13.sx, ex13.sy, ex13.sw, ex13.sh, -ex13.sw, -278, ex13.sw, ex13.sh);
+      ctx.restore();
+    }
+    // 胸甲（:24380 origin (112,101)）
+    if (ex16) {
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      ctx.drawImage(ex16.img, ex16.sx, ex16.sy, ex16.sw, ex16.sh, -112, -101, ex16.sw, ex16.sh);
+      ctx.restore();
+    }
+    // 核心心脏帧（:24381 origin=帧中心）
+    const frames = Math.max(1, e.vanilla?.frames ?? 1);
+    const r = this.atlas.vnpc(398, vanillaFrameIdx(e, frames));
+    if (r) {
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** 月总手 397（case 397 :24391-24447）：前臂 Extra_15（锚=手中心+(0,76)、折角同上臂）
+   *  → 眼窝（ai0==-2 闲置帧 Extra_26 行 / 否则 Extra_17 + 椭圆轨道瞳孔 Extra_19）
+   *  → 手本体帧（origin (120,180)）。瞳孔轨道用 lai0/lai1（原版 localAI[0]/[1]） */
+  private drawMoonLordHand(e: Enemy, entities: unknown[]) {
+    if (!this.atlas) return;
+    const core = (e.master && e.master.vanillaId === 398 ? e.master
+      : (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 398)) ?? null;
+    const ex15 = this.atlas.vmisc('vanilla/Extra_15.png');
+    const ex17 = this.atlas.vmisc('vanilla/Extra_17.png');
+    const ex19 = this.atlas.vmisc('vanilla/Extra_19.png');
+    const ex26 = this.atlas.vmisc('vanilla/Extra_26.png');
+    const ctx = this.ctx;
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    const side = e.ai2 === 0 ? 0 : 1;
+    const [sx] = this.moonLordSideSign(side);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    // 前臂（:24418-24431）
+    if (ex15 && core) {
+      const shx = core.cx + 220 * sx, shy = core.cy - 60;        // vector45
+      const ax = e.cx, ay = e.cy + 76;                           // vector46（+(0,76)）
+      let vx = shx - ax, vy = shy - ay;
+      vx *= 0.5; vy *= 0.5;                                      // v *= 1-num118
+      const ang = this.moonLordArmAngle(Math.hypot(vx, vy), sx);
+      let ox = 60; if (side !== 0) ox = ex15.sw - 60;            // origin19
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(Math.atan2(vy, vx) + ang - Math.PI / 2);
+      if (side !== 0) ctx.scale(-1, 1);
+      ctx.drawImage(ex15.img, ex15.sx, ex15.sy, ex15.sw, ex15.sh, -ox, -30, ex15.sw, ex15.sh);
+      ctx.restore();
+    }
+    // 眼窝/瞳孔（:24432-24441）
+    if (e.ai0 === -2 && ex26) {
+      const fh = Math.floor(ex26.sh / 4);
+      const row = Math.min(3, Math.floor(Math.max(0, e.ai1) / 8));
+      let ox = 26; if (side !== 0) ox = ex26.sw - 26;
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      if (side !== 0) ctx.scale(-1, 1);
+      ctx.drawImage(ex26.img, ex26.sx, row * fh, ex26.sw, fh, -ox + 4, -42 + 4, ex26.sw, fh);
+      ctx.restore();
+    } else {
+      if (ex17) {
+        let ox = 26; if (side !== 0) ox = ex17.sw - 26;          // vector42
+        ctx.save();
+        ctx.translate(e.cx, e.cy);
+        if (side !== 0) ctx.scale(-1, 1);
+        ctx.drawImage(ex17.img, ex17.sx, ex17.sy, ex17.sw, ex17.sh, -ox, -42, ex17.sw, ex17.sh);
+        ctx.restore();
+      }
+      if (ex19) {
+        // 椭圆轨道瞳孔：Vector2FromElipse(rot(lai0), (30,66)×lai1) + (−signX,3)
+        const th = e.lai0, k = e.lai1;
+        const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 66 * k;
+        ctx.save();
+        ctx.translate(e.cx - sx + ex, e.cy + 3 + ey);
+        ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh, -ex19.sw / 2, -ex19.sh / 2, ex19.sw, ex19.sh);
+        ctx.restore();
+      }
+    }
+    // 手本体帧（:24442-24443 origin (120,180)）
+    const r = this.atlas.vnpc(397, vanillaFrameIdx(e, Math.max(1, e.vanilla?.frames ?? 1)));
+    if (r) {
+      let ox = 120; if (side !== 0) ox = r.sw - 120;             // origin18
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      if (side !== 0) ctx.scale(-1, 1);
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -ox, -180, r.sw, r.sh);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  /** 月总头 396（case 396 :24449-24503）：眼窝（ai0<0 闲置 Extra_26 行 / 否则 Extra_18
+   *  + 椭圆瞳孔 Extra_19）→ 头帧（NPC_396 为 3×3 网格、scale 2）→ 破体阶段覆层
+   *  Extra_29（+(0,4)）/Extra_25（+(0,214) 旋转）。帧索引以 animT 循环近似（AI 侧
+   *  未映射 frameCounter）；破体帧行缺 localAI[2]/[3]，取行 0（登记） */
+  private drawMoonLordHead(e: Enemy) {
+    if (!this.atlas) return;
+    const ex18 = this.atlas.vmisc('vanilla/Extra_18.png');
+    const ex19 = this.atlas.vmisc('vanilla/Extra_19.png');
+    const ex25 = this.atlas.vmisc('vanilla/Extra_25.png');
+    const ex26 = this.atlas.vmisc('vanilla/Extra_26.png');
+    const ex29 = this.atlas.vmisc('vanilla/Extra_29.png');
+    const ctx = this.ctx;
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    const flip = e.facing > 0;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    if (e.ai0 < 0 && ex26) {
+      const fh = Math.floor(ex26.sh / 4);
+      const row = Math.min(3, Math.floor(Math.max(0, e.ai1) / 8));
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(ex26.img, ex26.sx, row * fh, ex26.sw, fh, -(19 + 4), -(34 + 4), ex26.sw, fh);
+      ctx.restore();
+    } else {
+      if (ex18) {
+        ctx.save();
+        ctx.translate(e.cx, e.cy);
+        if (flip) ctx.scale(-1, 1);
+        ctx.drawImage(ex18.img, ex18.sx, ex18.sy, ex18.sw, ex18.sh, -19, -34, ex18.sw, ex18.sh);
+        ctx.restore();
+      }
+      if (ex19) {
+        const th = e.lai0, k = e.lai1;
+        ctx.save();
+        ctx.translate(e.cx + Math.cos(th) * 27 * k, e.cy + Math.sin(th) * 59 * k);
+        ctx.drawImage(ex19.img, ex19.sx, ex19.sy, ex19.sw, ex19.sh, -ex19.sw / 2, -ex19.sh / 2, ex19.sw, ex19.sh);
+        ctx.restore();
+      }
+    }
+    // 头帧：NPC_396.png 573×804 = 3 列 × 3 行（Frame(3,3)），origin (95.5,65)、scale 2
+    const head = this.atlas.ensureVImage('vanilla/NPC_396.png');
+    if (head) {
+      const fw = Math.floor(head.width / 3), fh2 = Math.floor(head.height / 3);
+      const idx = Math.floor(e.animT / 6) % 9;
+      const col = idx % 3, row = Math.floor(idx / 3);
+      ctx.save();
+      ctx.translate(e.cx, e.cy);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(head, col * fw, row * fh2, fw, fh2, -95.5, -65, fw * 2, fh2 * 2);
+      ctx.restore();
+    }
+    // 破体覆层（:24499-24501；帧行 0 近似）
+    if (ex29) {
+      const fh = Math.floor(ex29.sh / 4);
+      ctx.save();
+      ctx.translate(e.cx, e.cy + 4);
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(ex29.img, ex29.sx, ex29.sy, ex29.sw, fh, -ex29.sw / 2, -fh / 2, ex29.sw, fh);
+      ctx.restore();
+    }
+    if (ex25) {
+      const fh = Math.floor(ex25.sh / 3);
+      const off = { x: 0, y: 214 };
+      const c = Math.cos(e.spin), s = Math.sin(e.spin);
+      ctx.save();
+      ctx.translate(e.cx + (off.x * c - off.y * s), e.cy + (off.x * s + off.y * c));
+      if (flip) ctx.scale(-1, 1);
+      ctx.drawImage(ex25.img, ex25.sx, ex25.sy, ex25.sw, fh, -ex25.sw / 2, -fh / 2, ex25.sw, fh);
+      ctx.restore();
+    }
+    ctx.restore();
+  }
+
+  // ===================== 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554） =====================
+  /** 女皇手臂帧（GetHallowBossArmFrame :26554-26640）：攻击态 ai0 × 计时 ai1 → 帧 0..6
+   *  （0 垂放/1 抬/2 举/3 蓄/4 施法/5 后摆/6 前刺） */
+  private empressArmFrames(e: Enemy): [number, number] {
+    const t = e.ai1;
+    let left = 0, right = 0;
+    switch (e.ai0) {
+      case 6: left = right = t < 6 ? 3 : t < 174 ? 4 : t < 180 ? 0 : 3; break;
+      case 0: left = right = t < 106 ? 1 : t < 110 ? 0 : 3; break;
+      case 2: case 11: left = t < 5 ? 3 : t < 65 ? 4 : 3; break;
+      case 5: right = t < 6 ? 3 : t < 54 ? 4 : 3; break;
+      case 4: case 10: left = right = t < 6 ? 3 : t < 54 ? 4 : 3; break;
+      case 8: case 9: {
+        const base = t < 10 ? 3 : t < 20 ? 4 : t < 30 ? 6 : 3;
+        left = right = base;
+        break;
+      }
+      case 7: {
+        const num10 = 60; const num11 = 0; const num12 = 5;
+        if (t < num11 + num12) left = 3;
+        else if (t < num11 + num10) left = 4;
+        else if (t < num11 + num10 + num12) { left = 4; right = 3; }
+        else if (t < num11 + 2 * num10) { left = 4; right = 4; }
+        else if (t < num11 + 3 * num10) { left = 5; right = 4; }
+        else if (t < num11 + 4 * num10) { left = 5; right = 5; }
+        else left = 5;
+        break;
+      }
+      default: break;
+    }
+    return [left, right];
+  }
+
+  /** 女皇绘制：背后大翼 Extra_159（1×11 帧按 localAI[0]/4 推进、scale×2）→ 着色器层
+   *  Extra_157（原版 HallowBoss 像素着色器；此处直画贴图近似，登记）→ 本体 NPC_636
+   *  帧（二阶段 ai3∈{1,3} → 帧 1，FindFrame cs:67678）→ 二阶段翅膀覆层 Extra_187
+   *  （1×8 帧 + 4 向相位轨道残影）+ 头冠 Extra_188（4 向残影）→ 双臂 Extra_158/160。
+   *  攻击态 8/9/10 的彩虹残影环（:26401-26478）依赖逐 NPC hsl 轨道，登记未接。
+   *  原版 AI_120 不写 npc.rotation（grep 实证）——旋转项以 facing 镜像为准 */
+  private drawEmpress(e: Enemy) {
+    if (!this.atlas) return;
+    const ctx = this.ctx;
+    const phase2 = e.ai3 === 1 || e.ai3 === 3;                    // AI_120_HallowBoss_IsInPhase2 (NPC.cs:46160)
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    const flip = e.facing > 0;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const wing = this.atlas.vmisc('vanilla/Extra_159.png');
+    const shader = this.atlas.vmisc('vanilla/Extra_157.png');
+    const armL = this.atlas.vmisc('vanilla/Extra_158.png');
+    const armR = this.atlas.vmisc('vanilla/Extra_160.png');
+    const wing2 = this.atlas.vmisc('vanilla/Extra_187.png');
+    const crown = this.atlas.vmisc('vanilla/Extra_188.png');
+    const body = this.atlas.vnpc(636, phase2 ? 1 : 0);
+    const frameAt = (r: NonNullable<ReturnType<SpriteAtlas['vmisc']>>, rows: number, idx: number) => {
+      const fh = Math.floor(r.sh / rows);
+      return { r, fh, idx: Math.min(rows - 1, Math.max(0, idx)) };
+    };
+    // num14：正弦脉动 0..1（:26500），二阶段轨道半径 Lerp(2,8)
+    const pulse = Math.sin((performance.now() / 1000) * Math.PI * 2 * 0.5) * 0.5 + 0.5;
+    ctx.save();
+    ctx.translate(e.cx, e.cy);
+    if (flip) ctx.scale(-1, 1);
+    ctx.scale(scale, scale);
+    ctx.globalAlpha = alpha;
+    // 背后大翼（:26481 scale×2）
+    if (wing) {
+      const f = frameAt(wing, 11, Math.floor(e.animT / 4) % 11);
+      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
+        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2);
+    }
+    if (shader) {
+      const f = frameAt(shader, 11, Math.floor(e.animT / 4) % 11);
+      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
+        -f.r.sw, -f.fh, f.r.sw * 2, f.fh * 2);
+    }
+    // 本体（FindFrame：二阶段帧 1）
+    if (body) ctx.drawImage(body.img, body.sx, body.sy, body.sw, body.sh, -body.sw / 2, -body.sh / 2, body.sw, body.sh);
+    // 二阶段：翅膀覆层 + 4 向轨道残影（:26509-26524）
+    if (phase2 && wing2) {
+      const f = frameAt(wing2, 8, Math.floor(e.animT / 4) % 8);
+      const drawW2 = (dx: number, dy: number, a: number) => {
+        ctx.save();
+        ctx.globalAlpha = alpha * a;
+        ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh,
+          -f.r.sw / 2 + dx, -f.fh / 2 + dy, f.r.sw, f.fh);
+        ctx.restore();
+      };
+      drawW2(0, 0, 1);
+      const rad = 2 + 6 * pulse;
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+        drawW2(Math.cos(a) * rad, Math.sin(a) * rad, 0.6 * (0.4 + 0.6 * pulse));
+      }
+      if (crown) {
+        const drawCr = (dx: number, dy: number, a: number) => {
+          ctx.save();
+          ctx.globalAlpha = alpha * a;
+          ctx.drawImage(crown.img, crown.sx, crown.sy, crown.sw, crown.sh,
+            -crown.sw / 2 + dx, -crown.sh / 2 + dy, crown.sw, crown.sh);
+          ctx.restore();
+        };
+        for (let k = 0; k < 4; k++) {
+          const a = (k / 4) * Math.PI * 2 + Math.PI / 4;
+          drawCr(Math.cos(a) * rad, Math.sin(a) * rad, 0.6 * (0.4 + 0.6 * pulse));
+        }
+      }
+    }
+    // 双臂（帧表按攻击态）
+    const [lf, rf] = this.empressArmFrames(e);
+    if (armL) {
+      const f = frameAt(armL, 7, lf);
+      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh);
+    }
+    if (armR) {
+      const f = frameAt(armR, 7, rf);
+      ctx.drawImage(f.r.img, f.r.sx, f.idx * f.fh, f.r.sw, f.fh, -f.r.sw / 2, -f.fh / 2, f.r.sw, f.fh);
+    }
+    ctx.restore();
+  }
+
+  // ===================== 塔护盾 ForceField（Main.cs:23797-23846） =====================
+  /** 分塔 Perlin 纹理缓存：原版 = Misc/Perlin（512×512）以 600×600 PointWrap 采样进
+   *  ForceField 像素着色器（Filters.Scene[塔名] 分塔预设色 + UseColor(1+flash*0.5)）。
+   *  Canvas 无着色器——预生成分塔着色 Perlin 纹理作近似载体（噪声本身 1:1 原版贴图，
+   *  分塔色预设对齐 TOWER_SHIELD_COLOR；着色器的流动/边缘扫描线未还原，登记） */
+  private towerShieldTexCache = new Map<string, HTMLCanvasElement>();
+  private towerShieldTex(key: string, col: string, bright = 1): HTMLCanvasElement | null {
+    if (!this.atlas) return null;
+    const ck = `${key}|${bright.toFixed(2)}`;
+    const hit = this.towerShieldTexCache.get(ck);
+    if (hit) return hit;
+    const perlin = this.atlas.ensureVImage('vanilla/Misc_Perlin.png');
+    if (!perlin) return null;
+    const c = document.createElement('canvas');
+    c.width = 600; c.height = 600;
+    const cx = c.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    // PointWrap 采样语义：源 512×512 → 目标 600×600 单次放大（右/下 88px 由 wrap 补，
+    // 此处以源左上 88px 接续，观感与噪声连续性无差）
+    cx.drawImage(perlin, 0, 0, 512, 512, 0, 0, 600, 600);
+    const [r, g, b] = col.split(',').map((n) => Math.min(255, Math.round(Number(n) * bright)));
+    cx.globalCompositeOperation = 'multiply';
+    cx.fillStyle = `rgb(${r},${g},${b})`;
+    cx.fillRect(0, 0, 600, 600);
+    cx.globalCompositeOperation = 'destination-in';
+    cx.drawImage(c, 0, 0);
+    this.towerShieldTexCache.set(ck, c);
+    if (this.towerShieldTexCache.size > 16) {
+      const first = this.towerShieldTexCache.keys().next().value;
+      if (first !== undefined) this.towerShieldTexCache.delete(first);
+    }
+    return c;
+  }
+
+  /** 塔护盾（Main.cs:23802-23831 盾存分支 + :23832-23846 盾破碎裂分支）：
+   *  alpha = ratio*0.8+0.2、scale×(1+flash*0.05)、着色 UseColor(1+flash*0.5)；
+   *  盾破（shield==0 且 ai3>0）：progress=ai3/120、color alpha=1-√(min(ai3/30,1))、
+   *  scale×(1+num268)——膨胀渐隐的碎裂残罩 */
   private drawTowerShield(e: Enemy, world: World) {
     const key = TOWER_KEY[e.vanillaId ?? -1];
     if (!key) return;
-    const shield = world.lunarEvent.shield[key];
-    if (shield <= 0) return;
-    const ratio = shield / shieldMax(world);
-    let flash = 0;
-    if (e.ai3 > 0 && e.ai3 <= 30) flash = 1 - e.ai3 / 30;   // :23803-23806
-    const alpha = Math.min(1, ratio * 0.8 + 0.2) * (1 + flash * 0.5);
-    const R = 300 * (1 + flash * 0.05);
-    const col = TOWER_SHIELD_COLOR[e.vanillaId!];
     const ctx = this.ctx;
-    const g = ctx.createRadialGradient(e.cx, e.cy, R * 0.2, e.cx, e.cy, R);
-    g.addColorStop(0, `rgba(${col},0)`);
-    g.addColorStop(0.75, `rgba(${col},${(alpha * 0.35).toFixed(3)})`);
-    g.addColorStop(1, `rgba(${col},${Math.min(1, alpha * 0.85).toFixed(3)})`);
+    const col = TOWER_SHIELD_COLOR[e.vanillaId!];
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const shield = world.lunarEvent.shield[key];
+    let alpha: number, size: number, bright: number;
+    if (shield > 0) {
+      const ratio = shield / shieldMax(world);
+      let flash = 0;
+      if (e.ai3 > 0 && e.ai3 <= 30) flash = 1 - e.ai3 / 30;   // :23803-23806
+      alpha = Math.min(1, ratio * 0.8 + 0.2);
+      size = 600 * scale * (1 + flash * 0.05);
+      bright = 1 + flash * 0.5;
+    } else if (e.ai3 > 0) {
+      // 盾破碎裂环（:23832-23845）
+      const num267 = e.ai3 / 120;
+      const num268 = Math.min(e.ai3 / 30, 1);
+      alpha = 1 - Math.sqrt(num268);
+      size = 600 * scale * (1 + num268);
+      bright = 2;                                               // UseColor(new Vector3(2f))
+      void num267;                                              // 着色器 progress（未还原，登记）
+    } else return;
+    if (alpha <= 0.01) return;
+    const tex = this.towerShieldTex(key, col, bright);
+    if (!tex) return;
     ctx.save();
+    ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
     ctx.globalCompositeOperation = 'lighter';
-    ctx.fillStyle = g;
-    ctx.beginPath();
-    ctx.arc(e.cx, e.cy, R, 0, Math.PI * 2);
-    ctx.fill();
+    ctx.drawImage(tex, e.cx - size / 2, e.cy - size / 2 + 10 * scale, size, size);
     ctx.restore();
   }
 
@@ -1877,6 +2373,67 @@ export class Renderer {
   /** 全亮模式（F9）：跳过光照合成，画面无暗影 */
   fullbright = false;
 
+  /**
+   * 智能光标黄框（Main.cs:46016-46066 DrawSmartCursor 1:1）：
+   * 目标格四象限各 8×8 块色 (1,0.9,0.1)×0.6 + 2px 外框十字 (1,0.95,0.3)，
+   * 颜色乘该格光照（Lighting.GetColor）；有方向锁且下一格空 → 方向箭头
+   * （SmartCursorArrow 贴图 8 帧；此处先用 canvas 三角形，沿方向 16/20px + 0.9s 正弦浮动）。
+   */
+  private drawSmartCursor(
+    ctx: CanvasRenderingContext2D, cam: Camera, hover: HoverTarget, viewH: number, z: number,
+    lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
+    rx: number, ry: number, rw: number, rh: number,
+  ) {
+    void viewH;
+    const ts = TILE * z;                       // 屏幕空间下的格尺寸
+    const [sx, sy] = cam.worldToScreen(hover.x * TILE, hover.y * TILE);
+    // 光照采样（越界/区域外按全亮，防洞穴边缘框消失）
+    let lr = 255, lg = 255, lb = 255;
+    if (hover.x >= rx && hover.y >= ry && hover.x < rx + rw && hover.y < ry + rh) {
+      const li = (hover.y - ry) * rw + (hover.x - rx);
+      lr = lightR[li]; lg = lightG[li]; lb = lightB[li];
+    }
+    const mul = (c: number, l: number): number => Math.round((c * l) / 255);
+    // 四象限 8×8 块 (1,0.9,0.1) × 0.6
+    ctx.fillStyle = `rgba(${mul(255, lr)},${mul(229, lg)},${mul(26, lb)},0.6)`;
+    const q = ts / 2;
+    ctx.fillRect(sx, sy, q, q);
+    ctx.fillRect(sx + q, sy, q, q);
+    ctx.fillRect(sx, sy + q, q, q);
+    ctx.fillRect(sx + q, sy + q, q, q);
+    // 2px 外框十字 (1,0.95,0.3)
+    ctx.fillStyle = `rgb(${mul(255, lr)},${mul(242, lg)},${mul(77, lb)})`;
+    const bw = 2 * z;
+    ctx.fillRect(sx - bw, sy, bw, ts);
+    ctx.fillRect(sx + ts, sy, bw, ts);
+    ctx.fillRect(sx, sy - bw, ts, bw);
+    ctx.fillRect(sx, sy + ts, ts, bw);
+    // 方向锁箭头（Main.cs:46055-46065）
+    const arrow = hover.arrow;
+    if (arrow) {
+      const idx = SMART_CURSOR_DIRECTION_LOCKS.findIndex(([ax, ay]) => ax === arrow.x && ay === arrow.y);
+      if (idx >= 0) {
+        const diagonal = idx % 2 === 1;
+        const phase = (performance.now() / 1000 / 0.9) % 1;
+        const bob = 2 - 2 * Math.sin(phase * Math.PI); // 0→2→0
+        const cxp = sx + ts / 2 + arrow.x * (diagonal ? 16 : 20) * z + arrow.x * bob * z;
+        const cyp = sy + ts / 2 + arrow.y * (diagonal ? 16 : 20) * z + arrow.y * bob * z;
+        ctx.save();
+        ctx.translate(cxp, cyp);
+        ctx.rotate((idx * Math.PI) / 4); // SmartCursorDirectionLocks 上起顺时针（Main.cs:66188）
+        ctx.fillStyle = `rgb(${mul(255, lr)},${mul(242, lg)},${mul(77, lb)})`;
+        const r = 5 * z;
+        ctx.beginPath();
+        ctx.moveTo(0, -r);
+        ctx.lineTo(r * 0.7, r);
+        ctx.lineTo(-r * 0.7, r);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+  }
+
   private compositeLight(
     cam: Camera, viewW: number, viewH: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,
@@ -1983,6 +2540,55 @@ export class Renderer {
   private static readonly MINIMAP_BTN_POS = {
     reset: [150, 240], zoomIn: [202, 240], zoomOut: [176, 240],
   } as const;
+
+  /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（TILE_DEFS key 启发式，模块级缓存） */
+  private static HIGHLIGHT_SETS = (() => {
+    const spelunker = new Set<number>(), danger = new Set<number>(), biome = new Set<number>();
+    for (let i = 0; i < TILE_DEFS.length; i++) {
+      const k = TILE_DEFS[i]?.key ?? '';
+      if (/ore_|gem|fossil|v_\d+_.*gem|crystal/i.test(k)) spelunker.add(i);
+      if (/spike|dart_trap|boulder|landmine|geyser|flame_trap|v_21[3-9]|v_137|v_138|v_139|v_140/i.test(k)) danger.add(i);
+      if (/corrupt|crimson|ebon|crims|hallow|pearl/i.test(k)) biome.add(i);
+    }
+    return { spelunker, danger, biome };
+  })();
+
+  /** R3 视觉 Buff 高亮叠层：Spelunker(9)/Dangersense(111)/Hunter(17)/BiomeSight(343) */
+  private drawBuffHighlights(
+    ctx: CanvasRenderingContext2D, world: World, player: Player,
+    cam: Camera, viewW: number, viewH: number, z: number, ts: number,
+  ) {
+    const buffs = player.buffs;
+    const spel = buffs.has(BuffType.Spelunker);
+    const dang = buffs.has(BuffType.Dangersense);
+    const biomeS = buffs.has(BuffType.BiomeSight);
+    if (!spel && !dang && !biomeS) return;
+    const st = world.store;
+    const pulse = 0.22 + 0.14 * Math.sin(performance.now() / 180);
+    const tx0 = Math.max(0, Math.floor((cam.x - viewW / 2 / z) / ts) - 1);
+    const tx1 = Math.min(st.w - 1, Math.ceil((cam.x + viewW / 2 / z) / ts) + 1);
+    const ty0 = Math.max(0, Math.floor((cam.y - viewH / 2 / z) / ts) - 1);
+    const ty1 = Math.min(st.h - 1, Math.ceil((cam.y + viewH / 2 / z) / ts) + 1);
+    ctx.globalAlpha = pulse;
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = st.idx(x, y);
+        if (!st.flags[i]) continue;
+        const t = st.type[i];
+        if (spel && Renderer.HIGHLIGHT_SETS.spelunker.has(t)) {
+          ctx.fillStyle = '#FFC419';
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (dang && Renderer.HIGHLIGHT_SETS.danger.has(t)) {
+          ctx.fillStyle = '#FF4040';
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        } else if (biomeS && Renderer.HIGHLIGHT_SETS.biome.has(t)) {
+          ctx.fillStyle = '#C060FF';
+          ctx.fillRect(x * ts + 2, y * ts + 2, ts - 4, ts - 4);
+        }
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
 
   private drawMinimap(ctx: CanvasRenderingContext2D, cam: Camera, world: World, player: Player, clock: Clock) {
     if (!this.minimap) return;
@@ -2411,7 +3017,7 @@ export class Renderer {
   private drawDebugOverlay(
     ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number,
     player: Player, entities: Entity[], mouseX: number, mouseY: number,
-    hover: { x: number; y: number } | null,
+    hover: HoverTarget | null,
   ) {
     const z = cam.zoom;
     const [mx, my] = cam.worldToScreen(mouseX, mouseY);
@@ -2517,19 +3123,87 @@ export class Renderer {
     ctx.fillText(`${invasion.name}  ${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`, viewW / 2, y + 15);
   }
 
-  private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number; cx: number; cy: number }) {
-    const w = Math.min(560, viewW - 200);
-    const x = (viewW - w) / 2, y = 28;
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(x - 3, y - 3, w + 6, 26);
-    ctx.fillStyle = '#5A1010';
-    ctx.fillRect(x, y, w, 20);
-    ctx.fillStyle = '#D02020';
-    ctx.fillRect(x, y, w * Math.max(0, boss.hp / boss.maxHp), 20);
+  /** Boss 头像贴图索引（NPCID.Sets.BossHeadTextures，NPCID.cs:4861 全量对照）：
+   *  npc type → NPC_Head_Boss_N。未列出的 boss（-1）原版不显示头像 */
+  private static readonly BOSS_HEAD_INDEX: Record<number, number> = {
+    4: 0, 13: 2, 344: 3, 370: 4, 246: 5, 249: 5, 345: 6, 50: 7, 396: 8, 395: 9,
+    325: 10, 262: 11, 327: 13, 222: 14, 125: 15, 126: 20, 346: 17, 127: 18,
+    35: 19, 68: 19, 113: 22, 266: 23, 439: 24, 440: 24, 134: 25, 491: 26, 517: 27,
+    422: 28, 507: 29, 493: 30, 549: 35, 564: 32, 565: 32, 576: 33, 577: 33,
+    551: 34, 548: 36, 636: 37, 657: 38, 668: 39,
+  };
+
+  /** Boss 血条 1:1（BigProgressBarHelper.DrawFancyBar，BigProgressBarHelper.cs:18-57）：
+   *  UI_BossBar.png（516×348 = 1 列 × 6 行 58px 帧）——行3 背景（×0.2）→ 行2 填充
+   *  2px 段横向拉伸（宽=456×ratio 取偶）→ 行1 填充端盖（x+num2-2）→ 行0 整框 →
+   *  头像（NPC_Head_Boss_N，锚=框左上+(4,20)+图标半宽）→ 血量文本。
+   *  布局：456×22 居中于 (W/2, H-50)——底部中央（原版语义；旧实现顶部自绘红条）。
+   *  多 Boss 面板：原版 BigProgressBarSystem 同时只跟踪一个 NPC（TryFindingNPCToTrack
+   *  单目标），我们也只收到单个 boss——单 Boss 路径即完整语义。盾量重载（行4/5，
+   *  LunarPillar 等）按塔盾条另走，未在本条复用（登记） */
+  private drawBossBar(
+    ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    boss: { name: string; hp: number; maxHp: number; cx: number; cy: number },
+    entities: Entity[] = [],
+  ) {
+    if (!this.atlas) return;
+    const bar = this.atlas.vui('UI_UI_BossBar.png');
+    const FH = 58, BW = 456, BH = 22, IX = 32, IY = 24;
+    const rect = { x: Math.round(viewW / 2 - BW / 2), y: Math.round(viewH - 50 - BH / 2), w: BW, h: BH };
+    const vec = { x: rect.x - IX, y: rect.y - IY };
+    let fill = Math.floor(BW * Math.max(0, Math.min(1, boss.hp / boss.maxHp)));
+    fill -= fill % 2;                                            // num2 -= num2 % 2
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    if (bar) {
+      // 行3 背景 ×0.2
+      ctx.globalAlpha = 0.2;
+      ctx.drawImage(bar.img, bar.sx, bar.sy + 3 * FH, bar.sw, FH, vec.x, vec.y, bar.sw, FH);
+      ctx.globalAlpha = 1;
+      // 行2 填充段（2px 源横向拉伸到 num2 宽）
+      ctx.drawImage(bar.img, bar.sx + IX, bar.sy + 2 * FH + IY, 2, BH, rect.x, rect.y, Math.max(2, fill), BH);
+      // 行1 端盖
+      ctx.drawImage(bar.img, bar.sx + IX, bar.sy + 1 * FH + IY, 2, BH, rect.x + Math.max(0, fill - 2), rect.y, 2, BH);
+      // 行0 整框（含头像背景槽）
+      ctx.drawImage(bar.img, bar.sx, bar.sy, bar.sw, FH, vec.x, vec.y, bar.sw, FH);
+    } else {
+      // 贴图未就绪兜底：几何暗条（不闪断）
+      ctx.fillStyle = 'rgba(0,0,0,0.55)';
+      ctx.fillRect(rect.x, rect.y, BW, BH);
+      ctx.fillStyle = '#C03030';
+      ctx.fillRect(rect.x, rect.y, Math.max(2, fill), BH);
+    }
+    // 头像：boss 参数无类型信息——从实体表反查同 hp/位置的 Enemy 取 vanillaId
+    const src = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead
+      && Math.abs(n.hp - boss.hp) < 1 && Math.abs(n.maxHp - boss.maxHp) < 1
+      && Math.abs(n.cx - boss.cx) < 64 && Math.abs(n.cy - boss.cy) < 64);
+    const headIdx = src?.vanillaId != null ? Renderer.BOSS_HEAD_INDEX[src.vanillaId] : undefined;
+    if (headIdx !== undefined) {
+      const head = this.atlas.vmisc(`vanilla/NPC_Head_Boss_${headIdx}.png`);
+      if (head) {
+        // vector2 = (4,20) + 图标半宽，origin = 图标半宽 → 净左上 = vec + (4,20)
+        ctx.drawImage(head.img, head.sx, head.sy, head.sw, head.sh,
+          vec.x + 4, vec.y + 20, head.sw, head.sh);
+      }
+    }
+    // 血量文本（DrawHealthText :59-68：中缝 "/"、左当前右上限）
     ctx.font = 'bold 13px sans-serif';
-    ctx.fillStyle = '#FFF';
     ctx.textAlign = 'center';
-    ctx.fillText(`${boss.name}  ${Math.ceil(boss.hp)} / ${boss.maxHp}`, viewW / 2, y + 15);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+    const cy2 = rect.y + rect.h / 2 + 5;
+    ctx.strokeText('/', rect.x + rect.w / 2, cy2);
+    ctx.fillStyle = '#FFF';
+    ctx.fillText('/', rect.x + rect.w / 2, cy2);
+    ctx.textAlign = 'right';
+    ctx.strokeText(`${Math.ceil(boss.hp)}`, rect.x + rect.w / 2 - 5, cy2);
+    ctx.fillText(`${Math.ceil(boss.hp)}`, rect.x + rect.w / 2 - 5, cy2);
+    ctx.textAlign = 'left';
+    ctx.strokeText(`${boss.maxHp}`, rect.x + rect.w / 2 + 5, cy2);
+    ctx.fillText(`${boss.maxHp}`, rect.x + rect.w / 2 + 5, cy2);
+    ctx.textAlign = 'start';
+    ctx.restore();
+    void boss.name;
   }
 
 }
