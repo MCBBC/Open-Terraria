@@ -9,6 +9,7 @@ import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
 import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 import { weatherToSave } from '../world/weather/Weather';
+import { applyLunarSave } from '../world/LunarEvent';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -116,6 +117,9 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   world.chests = data.chests;
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;
+  // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp
+  // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
+  applyLunarSave(world);
   if (data.signs) world.signs = data.signs;
 
   const st = world.store;

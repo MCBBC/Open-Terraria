@@ -332,6 +332,34 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       state = 'failedCond';
       break;
     }
+    case 'dropOneByOne': {
+      // DropOneByOne（DropOneByOne.cs TryDroppingItem 1:1）。注册仅四塔碎片
+      // （ItemDropDatabase.cs RegisterBoss_LunarTowers :610-629），参数 json 未数值化、
+      // 按 :611-627 硬编码：普通 12-20 块 × 每块 1-3；专家块数同、每块基数 ×1.5
+      // （min=(int)1.5=1 / max=(int)4.5=4）+ 每活跃玩家 +1/块。
+      // ChanceNumerator/Denominator=1 → RollLuck(1) 恒过
+      {
+        const expert = ctx.isExpert;
+        const chunks = ctx.rng.int(12, 20);                    // Next(12, 21)
+        const players = 1;                                     // Main.CurrentFrameFlags.ActivePlayersCount（单人）
+        const minStack = (expert ? 1 : 1) + players * (expert ? 1 : 0);
+        const maxStack = (expert ? 4 : 3) + players * (expert ? 1 : 0);
+        for (let i = 0; i < chunks; i++) {
+          pushDrop(out, rule.item, ctx.rng.int(minStack, maxStack));
+        }
+        state = 'success';
+      }
+      break;
+    }
+    case 'oneOfRules': { // OneFromRulesRule：rng.Next(denom) 过后等权取一，
+      // 被选中的 option 走完整子求值（含其自身链）；规则状态恒以掷骰为准
+      // （OneFromRulesRule.cs TryDroppingItem(info, resolveAction)）
+      if (rollLuck(ctx, rule.denom ?? 1, 1)) {
+        evalRule(rule.rules[ctx.rng.int(0, rule.rules.length - 1)], ctx, out);
+        state = 'success';
+      } else state = 'failedRoll';
+      break;
+    }
     case 'listRef': { // List<IItemDropRule>{…}（OneFromRulesRule 参数）
       state = 'success';
       break;

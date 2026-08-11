@@ -259,7 +259,7 @@ export class Player extends Entity {
     return this.baseMaxHp + this.buffs.healthBonus;
   }
   get maxMana(): number {
-    return this.baseMaxMana + this.equipStats.mana; // 星力手环族/魔法手铐等（statManaMax2 += N）
+    return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481）
   }
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
@@ -336,7 +336,9 @@ export class Player extends Entity {
       if (this.manaRegenAccum >= 1) {
         this.manaRegenAccum -= 1;
         const base = Math.ceil(this.maxMana * 0.08) + 1;
-        this.mana = Math.min(this.maxMana, this.mana + Math.round(base * (this.buffs.manaRegenBuff ? 2.3 : 1)));
+        // 瓶中星(158)：manaRegenDelay×0.5（:9629）——简化回蓝模型下等价 ×2 速率
+        const starMult = this.buffs.has(BuffType.StarInBottle) ? 2 : 1;
+        this.mana = Math.min(this.maxMana, this.mana + Math.round(base * (this.buffs.manaRegenBuff ? 2.3 : 1) * starMult));
       }
     }
 

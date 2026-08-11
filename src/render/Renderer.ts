@@ -53,6 +53,7 @@ import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
+import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
@@ -1020,6 +1021,8 @@ export class Renderer {
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
+        // 星璇塔护盾半球（在精灵之后叠画，对齐原版 DrawNPC 尾段顺序）
+        if (isTowerId(e.vanillaId)) this.drawTowerShield(e, world);
         return;
       }
       return; // 表未加载完成：本帧不画（下帧懒加载完成）
@@ -1154,6 +1157,36 @@ export class Renderer {
 
   /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
   private armBoneImg: HTMLImageElement | null | undefined;
+  /** 星璇塔护盾半球（Main.cs:23797-23830 近似）：原版 = 600×600 Perlin 噪声 +
+   *  ForceField 着色器（分塔 Solar/Vortex/Nebula/Stardust 预设）；此处用径向渐变
+   *  圆顶替代（半径 300px = 原图半宽）。强度 = 盾/ShieldMax（alpha = 0.2+0.8×比），
+   *  塔 ai3∈(0,30] 时闪光脉冲（强度 ×(1+flash*0.5)、半径 ×(1+flash*0.05)）。
+   *  盾空（含死亡演出态）不画；盾破时的碎裂环（:23831+ num267 段）二期补 */
+  private drawTowerShield(e: Enemy, world: World) {
+    const key = TOWER_KEY[e.vanillaId ?? -1];
+    if (!key) return;
+    const shield = world.lunarEvent.shield[key];
+    if (shield <= 0) return;
+    const ratio = shield / shieldMax(world);
+    let flash = 0;
+    if (e.ai3 > 0 && e.ai3 <= 30) flash = 1 - e.ai3 / 30;   // :23803-23806
+    const alpha = Math.min(1, ratio * 0.8 + 0.2) * (1 + flash * 0.5);
+    const R = 300 * (1 + flash * 0.05);
+    const col = TOWER_SHIELD_COLOR[e.vanillaId!];
+    const ctx = this.ctx;
+    const g = ctx.createRadialGradient(e.cx, e.cy, R * 0.2, e.cx, e.cy, R);
+    g.addColorStop(0, `rgba(${col},0)`);
+    g.addColorStop(0.75, `rgba(${col},${(alpha * 0.35).toFixed(3)})`);
+    g.addColorStop(1, `rgba(${col},${Math.min(1, alpha * 0.85).toFixed(3)})`);
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(e.cx, e.cy, R, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
   /** AI_013 植物/攀爬者族茎蔓（Main.cs:22433-22514 1:1）：从 NPC 中心向锚点格
    *  中心（ai0/ai1 各 ×16+8）逐段画 Chain 贴图——步长 28px、距锚 <40px 时尾段
    *  缩短对齐（259/260 真菌球为 12/20）；整链 rotation=atan2(dy,dx)-π/2（贴图

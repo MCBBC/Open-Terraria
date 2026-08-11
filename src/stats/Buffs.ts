@@ -37,6 +37,17 @@ export enum BuffType {
   WaterWalking = 16, // 水上行走(15,600s)：waterWalk=true（:9706）
   Archery = 17,      // 射手(16,480s)：archery+arrowDamage×1.1（:9710）
   NightOwl = 18,     // 夜枭(12,600s)：nightVision→光衰减 ×1.03（:9636/184）——水下/洞穴更亮
+  // ---- 环境光环 + 工作站 buff（SceneMetrics 扫描 / Player.cs:25235-25266 授予链）----
+  Sunflower = 19,    // 向日葵(146,光环)：moveSpeed +0.1 再 ×1.1（两步复合 ≈×1.21,Player.cs:10598）
+  CatBast = 20,      // 猫堡垒(215,光环)：statDefense +5（:9778）
+  StarInBottle = 21, // 瓶中星(158,光环)：manaRegenDelay×0.5+manaRegenBonus+10（:9629）→本作回蓝×2
+  PeaceCandle = 22,  // 和平蜡烛(157,光环)：刷怪 spawnRate×1.3/max×0.7（NPC.cs:645）
+  Clairvoyance = 23, // 预见(29,水晶球右键,1800s)：manaMax+20/magicDmg+5%/crit+2/manaCost-2%（:11481）
+  Sharpened = 24,    // 磨刀石(159,右键)：近战穿甲 +12（:9625，穿甲系统未接先登记）
+  AmmoBox = 25,      // 弹药箱(93,右键)：20% 不耗弹（PickAmmo :52746）
+  Bewitched = 26,    // 附魔台(150,右键)：maxMinions+1（:9857，召唤位未接先登记）
+  WarTable = 27,     // 战争桌(348,右键)：maxTurrets+1（:9863，哨兵位未接先登记）
+  SugarRush = 28,    // 糖分冲刺(192,蛋糕右键,120s)：moveSpeed+0.2+镐速（:9634）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -62,6 +73,16 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.WaterWalking]: { vanillaBuff: 15, descKey: 'Mods.SandboxWorld.Buff.WaterWalking.Desc', fallbackName: '水上行走' },
   [BuffType.Archery]: { vanillaBuff: 16, descKey: 'Mods.SandboxWorld.Buff.Archery.Desc', fallbackName: '射手' },
   [BuffType.NightOwl]: { vanillaBuff: 12, descKey: 'Mods.SandboxWorld.Buff.NightOwl.Desc', fallbackName: '夜枭' },
+  [BuffType.Sunflower]: { vanillaBuff: 146, descKey: 'Mods.SandboxWorld.Buff.Sunflower.Desc', fallbackName: '向日葵' },
+  [BuffType.CatBast]: { vanillaBuff: 215, descKey: 'Mods.SandboxWorld.Buff.CatBast.Desc', fallbackName: '猫堡垒' },
+  [BuffType.StarInBottle]: { vanillaBuff: 158, descKey: 'Mods.SandboxWorld.Buff.StarInBottle.Desc', fallbackName: '瓶中星' },
+  [BuffType.PeaceCandle]: { vanillaBuff: 157, descKey: 'Mods.SandboxWorld.Buff.PeaceCandle.Desc', fallbackName: '和平蜡烛' },
+  [BuffType.Clairvoyance]: { vanillaBuff: 29, descKey: 'Mods.SandboxWorld.Buff.Clairvoyance.Desc', fallbackName: '预见' },
+  [BuffType.Sharpened]: { vanillaBuff: 159, descKey: 'Mods.SandboxWorld.Buff.Sharpened.Desc', fallbackName: '磨刀石' },
+  [BuffType.AmmoBox]: { vanillaBuff: 93, descKey: 'Mods.SandboxWorld.Buff.AmmoBox.Desc', fallbackName: '弹药箱' },
+  [BuffType.Bewitched]: { vanillaBuff: 150, descKey: 'Mods.SandboxWorld.Buff.Bewitched.Desc', fallbackName: '魅惑' },
+  [BuffType.WarTable]: { vanillaBuff: 348, descKey: 'Mods.SandboxWorld.Buff.WarTable.Desc', fallbackName: '战争桌' },
+  [BuffType.SugarRush]: { vanillaBuff: 192, descKey: 'Mods.SandboxWorld.Buff.SugarRush.Desc', fallbackName: '糖分冲刺' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -157,10 +178,22 @@ export class BuffState {
   get moveSpeedMult(): number {
     let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
     if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
+    if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
+    if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     return m;
   }
   get defenseBonus(): number {
-    return this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
+    let d = this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
+    if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
+    return d;
+  }
+  /** 魔力上限加成：水晶球预见 statManaMax2 += 20（:11481） */
+  get manaMaxBonus(): number {
+    return this.active.has(BuffType.Clairvoyance) ? 20 : 0;
+  }
+  /** 弹药箱 20% 不耗弹（PickAmmo :52746 rand.Next(5)==0） */
+  get hasAmmoBox(): boolean {
+    return this.active.has(BuffType.AmmoBox);
   }
   get healthBonus(): number {
     return this.active.has(BuffType.Resistance) ? 80 : 0;

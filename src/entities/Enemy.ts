@@ -13,13 +13,14 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from './bossAI_queenbee_plantera';
 import { dukeFishronAI, dukeBubbleAI, moonLordCoreAI, moonLordHandAI, moonLordHeadAI } from './bossAI_duke_moonlord';
 import { golemAI, golemHeadAI, golemFistAI } from './bossAI_golem';
 import { RNG } from '../core/rng';
+import { TOWER_KEY } from '../world/LunarEvent';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
@@ -396,6 +397,18 @@ export class Enemy extends Entity {
         case 56: this.dungeonSpiritAI(game, p); break;                    // AI_056 地牢之魂（cs:32915 穿墙0.99惯性追踪）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
+        case 94: this.towerAI(game, p); break;                          // AI_094 星璇四塔（NPC.cs:41029-41443，核心 1:1）
+        // ---- 星璇塔四组专属怪 AI 一期近似（docs/event-lunar-pillars.md §4）----
+        // 74 穿心者（悬浮俯冲）→ AI_002 飘浮眼核；75 日耀骑手 → AI_003 战士核；
+        // 85 星细胞/星云头蟹、95 小星细胞、96 水流入侵者、99 日耀耀斑（漂浮追击族）→ AI_005 蜂群核；
+        // 97 星云悬浮脑（瞬移+弹幕）→ AI_008 法师核。二期按各自 AI_0XX 1:1 补齐
+        case 74: this.floatEyeAI(game, p); break;
+        case 75: this.fighterAI(game, p); break;
+        case 85: case 95: case 96: case 99: this.swarmerAI(game, p); break;
+        case 97: this.casterAI(game, p); break;
+        // 月事件 Boss 一期近似：悲木/常世吼 57、南瓜王 58、冰女王 60、圣诞坦克 61、
+        // 玩具直升机 62、弗洛科 63 均落此 default 战士核——能战斗即可；二期按 NPC.cs
+        // 对应 AI_0XX 1:1 补齐（docs/event-pumpkin-frost-moon.md 步骤 11）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -472,8 +485,10 @@ export class Enemy extends Entity {
     // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
     // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
     // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
-    if (this.vanillaId === 488) {
-      // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）
+    if (this.vanillaId === 488 || (this.vanillaId != null && this.vanillaId in TOWER_KEY)) {
+      // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）；
+      // 四塔同样豁免（DoesntDespawnToInactivity 名单 NPC.cs:78634-78635 含 422/493/507/517
+      // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
     } else if (!this.def.boss || this.despawnEncouraged) {
       // 屏内判定跳过死亡玩家（原版 CheckActive 只用 active 玩家重置 timeLeft：
       // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）
@@ -3296,6 +3311,229 @@ export class Enemy extends Entity {
     this.y = Math.max(0, Math.min(maxY, this.y));
   }
 
+  /** AI_094 星璇四塔（NPC.cs:41029-41443，1:1）。塔 = NPC（非 tile entity）。
+   *  原版 dontTakeDamage（盾>0 完全免伤，:41162-41176 每 tick 重算）用 iframes=2 每 tick
+   *  刷新近似（同 bossAI 克脑一阶段先例）。血尽先由 hurt() 转 ai2=1 死亡演出（checkDead
+   *  :78867-78875），180t 渐隐后走标准死亡管线（碎片掉落/塔灭公告）。
+   *  分塔支线（493 星尘标记/422 星旋传送门/517 日耀耀斑）按文档简化许可折叠为
+   *  "直接在标记点 spawnNPC"（540/578/579 传送门演出二期补） */
+  private towerAI(game: GameHooks, player: Player | null) {
+    const w = game.world;
+    const key = TOWER_KEY[this.vanillaId ?? -1];
+    if (!key) return;
+    const le = w.lunarEvent;
+    const st = w.store;
+    const count = (id: number): number => {
+      let n = 0;
+      for (const o of game.enemies() as Enemy[]) {
+        if (!o.dead && o.vanillaId === id) n++;
+      }
+      return n;
+    };
+    const distTo = (px: number, py: number) => Math.hypot(px - this.cx, py - this.cy);
+
+    // ---- 1. 死亡演出（ai2==1，:41031-41128）----
+    if (this.ai2 === 1) {
+      // velocity = UnitY * velocity.Length()（:41033）：保留速率只留 +Y 分量，±0.25 钳（步进 0.02）
+      const spd = Math.hypot(this.vx, this.vy);
+      this.vx = 0;
+      this.vy = spd;
+      if (this.vy < 0.25) this.vy += 0.02;
+      if (this.vy > 0.25) this.vy -= 0.02;
+      this.iframes = 2;                                  // dontTakeDamage = true（:41042）
+      this.ai1++;
+      if (this.ai1 > 120) {
+        // Opacity = 1-(ai1-120)/60（:41046）→ 本仓 spawnAlpha（0..255，越大越透明）
+        const opacity = Math.max(0, 1 - (this.ai1 - 120) / 60);
+        this.spawnAlpha = Math.round((1 - opacity) * 255);
+      }
+      // 分塔爆散尘（:41048-41117：三组粒子 + 241 白尘；此处按塔色近似两组）
+      const dustCol = this.vanillaId === 517 ? '#FFB060' : this.vanillaId === 422 ? '#8CE8C8'
+        : this.vanillaId === 507 ? '#E070E0' : '#7CB8FF';
+      if (Math.random() < 0.2 && this.ai1 < 120) {
+        game.spawnParticles(this.cx + (Math.random() - 0.5) * this.w, this.cy, dustCol, 3, 1.2,
+          { life: 40, grav: -0.02 });
+      }
+      if (Math.random() < 0.2 && this.ai1 < 150) {
+        game.spawnParticles(this.cx, this.y - 20, dustCol, 6, 2.4, { life: 40, grav: -0.05 });
+        game.spawnParticles(this.cx, this.cy, '#F0F0F0', 1, 0.8, { life: 30, grav: 0.02 });
+      }
+      // 每 60t 音效（:41118-41121 SoundID 4/22 碎裂；音效未接 → 低响咆哮近似）
+      if (this.ai1 % 60 === 1) game.playSfx('roar', 0.3, this.cx, this.cy);
+      this.x += this.vx;
+      this.y += this.vy;
+      if (this.ai1 >= 180) {
+        // life=0 + HitEffect + checkDead（:41122-41127）→ 真死（碎片 3456-3459 + 塔灭公告）
+        this.iframes = 0;
+        this.hurt(1e9, 0, 0, game);
+      }
+      return;
+    }
+
+    // ---- 2. 受击闪光 ai3>0（:41130-41161；ai3 由扣盾置 1，>120 归零）----
+    if (this.ai3 > 0) {
+      if (this.ai3 === 1) game.playSfxFiles(['NPC_Killed_3'], 1, this.cx, this.cy); // :41152-41155
+      this.ai3++;
+      if (this.ai3 > 120) this.ai3 = 0;
+    }
+    // ---- 3. 盾判定（:41162-41176）：dontTakeDamage = 本塔 ShieldStrength>0（每帧重算）----
+    // （盾破瞬间的 NPCDeath58 音效由 Game.onEnemyKilled 扣盾归零处播放——等价 :41148-41151）
+    if (le.shield[key] > 0) this.iframes = 2;
+
+    // ---- 4. 远离自愈（:41177-41191）----
+    if (player && distTo(player.cx, player.cy) > 2000) this.lai0++;
+    if (this.lai0 >= 60) {
+      this.lai0 = 0;
+      this.hp = Math.max(0, Math.min(this.maxHp, this.hp + 200));
+    } else {
+      this.lai0 = 0;   // 原版 else 每 tick 清零（:41188-41191）——自愈实际不可达，照抄不"修"
+    }
+
+    // ---- 5. 悬停（:41192）+ 贴地（:41193-41214）----
+    this.vx = 0;
+    this.vy = Math.sin(Math.PI * 2 * (this.ai0 / 300)) * 0.5;
+    const ox = Math.floor(this.cx / TILE);
+    const oy = Math.floor((this.y + this.h) / TILE);
+    const solidDown = (maxDist: number): number => {
+      for (let d = 0; d <= maxDist; d++) {
+        const yy = oy + d;
+        if (!st.inBounds(ox, yy)) return -1;
+        if (st.isSolid(ox, yy)) return yy;
+      }
+      return -1;
+    };
+    const near = solidDown(10);
+    if (near >= 0) {
+      // 近（≤10 格）：按距离比下沉 1.5×（:41200-41204，塔底压向地面）
+      this.y -= 1.5 * (1 - Math.abs(oy - near) / 10);
+    } else if (solidDown(20) < 0) {
+      // 远（>20 格）：上浮 1.5×，20-30 格间线性插值（:41205-41213）
+      let f = 1;
+      const far = solidDown(30);
+      if (far >= 0) f = Math.max(0, Math.min(1, (Math.abs(oy - far) - 20) / 10));
+      this.y += 1.5 * f;
+    }
+
+    // ---- 6. 世界边界钳制（:41215-41238；60 格边距 + 80px 内推）----
+    // 原版 Y 上限也取 maxTilesX*16（:41215-41216 的 num1489 怪癖）——照抄
+    const limX = w.w * TILE;
+    const limY = w.w * TILE;
+    const m = 60 * TILE;
+    if (this.cx < m) this.x = m + 80 - this.w / 2;
+    if (this.cx > limX - m) this.x = limX - m - 80 - this.w / 2;
+    if (this.cy < m) this.y = m + 80 - this.h / 2;
+    if (this.cy > limY - m) this.y = limY - m - 80 - this.h / 2;
+    // 普通世界塔底 ≤ worldSurface*16-100（:41247-41250）
+    if (this.y + this.h > w.groundLevel * TILE - 100) {
+      this.y = w.groundLevel * TILE - this.h - 100;
+    }
+
+    this.ai0++;
+    if (this.ai0 >= 300) this.ai0 = 0;   // :41251-41256
+
+    // ---- 7. 分塔支线 ----
+    if (this.vanillaId === 493) {
+      // 星尘（:41257-41286）：环境尘略；SpawnStardustMark_StardustTower（:44142-44228）
+      if (this.ai1 > 0) this.ai1--;
+      if (this.ai1 <= 0 && player && !player.dead
+        && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400) {
+        const pool: number[] = [];
+        if (count(405) + count(406) < 2) pool.push(405);
+        if (count(402) < 2) pool.push(402);
+        if (count(407) < 1) pool.push(407);
+        if (pool.length > 0) {
+          const pick = pool[(Math.random() * pool.length) | 0];
+          this.ai1 = 30 * (5 + ((Math.random() * 11) | 0));   // 30*Next(5,16)
+          // 投射物 540 星尘标记 → 末端生成该 NPC：折叠为塔顶随机点直接 spawn（无飞行演出）
+          const mark = spawnPart(game, this, pick);
+          if (mark) {
+            mark.x = this.cx + (Math.random() - 0.5) * 160 - mark.w / 2;
+            mark.y = this.y - 120 - mark.h / 2;
+          }
+        } else {
+          this.ai1 = 30;   // :44225-44227
+        }
+      }
+    } else if (this.vanillaId === 422) {
+      // 星旋（:41310-41407）：玩家头顶传送门 + 空中随机点传送门
+      if (this.ai1 > 0) this.ai1--;
+      // 支线 a（:41336-41361）：3240px 内（原版还要求 !CanHitLine 视线阻隔——未接，省略）→
+      // 玩家头顶门；n428+n427+n426<14 → 579 门（90t 后生 2× Alien Hornet 427）否则 578 门（只放电）
+      if (this.ai1 <= 0 && player && !player.dead && distTo(player.cx, player.cy) < 3240) {
+        this.ai1 = 60 + ((Math.random() * 120) | 0);
+        if (count(428) + count(427) + count(426) < 14) {
+          const ptx = Math.floor(player.cx / TILE);
+          let py = Math.floor(player.y / TILE);
+          for (let i = 0; i < 10; i++) {
+            if (!st.inBounds(ptx, py) || st.isSolid(ptx, py) || py <= 10) break;
+            py--;
+          }
+          for (let i = 0; i < 2; i++) {
+            const hornet = spawnPart(game, this, 427);
+            if (!hornet) continue;
+            hornet.x = ptx * TILE + 8 - hornet.w / 2;
+            hornet.y = py * TILE + 24 - hornet.h;
+            const a = Math.random() * Math.PI * 2;
+            const sp = 4 + Math.random() * 5;               // Next(4,9)
+            hornet.vx = Math.cos(a) * sp;
+            hornet.vy = Math.sin(a) * sp - 2;               // - Vector2.UnitY*2
+          }
+        }
+      }
+      // 支线 b（:41362-41406）：1080px 内且低于塔顶 400px、n427+n426*3+n428<20 →
+      // 玩家 ±20 格随机空中点 579 门（2× 427）
+      if (this.ai1 <= 0 && player && !player.dead
+        && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 400
+        && count(427) + count(426) * 3 + count(428) < 20) {
+        this.ai1 = 420 + ((Math.random() * 360) | 0);
+        const ptx = Math.floor(player.cx / TILE);
+        const pty = Math.floor(player.cy / TILE);
+        const ttx = Math.floor(this.cx / TILE);
+        const tty = Math.floor(this.cy / TILE);
+        for (let attempt = 0; attempt < 100; attempt++) {
+          const mx = ptx - 20 + ((Math.random() * 41) | 0);
+          const my = pty - 20 + ((Math.random() * 41) | 0);
+          if (Math.abs(my - pty) <= 8 && Math.abs(mx - ptx) <= 8) continue;   // :41383 玩家 8 格禁圈
+          if (Math.abs(my - tty) <= 3 && Math.abs(mx - ttx) <= 3) continue;   // :41383 塔 3 格禁圈
+          if (!st.inBounds(mx, my) || st.isSolid(mx, my)) continue;
+          for (let i = 0; i < 2; i++) {
+            const hornet = spawnPart(game, this, 427);
+            if (!hornet) continue;
+            hornet.x = mx * TILE + 8 - hornet.w / 2;
+            hornet.y = my * TILE + 8 - hornet.h / 2;
+            const a = Math.random() * Math.PI * 2;
+            const sp = 4 + Math.random() * 5;
+            hornet.vx = Math.cos(a) * sp;
+            hornet.vy = Math.sin(a) * sp - 2;
+          }
+          break;
+        }
+      }
+    } else if (this.vanillaId === 517) {
+      // 日耀（:41431-41443）：1080px 内且低于塔顶 700px → 塔顶直投 519（斜抛 7-12px/t）
+      if (this.ai1 > 0) this.ai1--;
+      if (this.ai1 <= 0 && player && !player.dead
+        && distTo(player.cx, player.cy) < 1080 && player.y - this.y < 700) {
+        const flare = spawnPart(game, this, 519);
+        if (flare) {
+          flare.x = this.x - this.w * 0.33 + Math.random() * this.w * 0.66 - flare.w / 2;
+          flare.y = this.y - 20;
+          const theta = (Math.random() * 2 - 1) * 0.7853981852531433;   // RotatedByRandom(0.785)
+          const sp = 7 + Math.random() * 5;
+          flare.vx = Math.sin(theta) * sp;      // -UnitY 旋转 θ：(sinθ, -cosθ)
+          flare.vy = -Math.cos(theta) * sp;
+        }
+        this.ai1 = 60;
+      }
+    }
+    // 507 星云仅环境粒子（:41287-41309），怪全靠 Zone 刷怪表——略
+
+    // noTileCollide + noGravity：直接位移（原版速度由引擎积分）
+    this.x += this.vx;
+    this.y += this.vy;
+    this.onGround = false;
+  }
+
   /** 受击。返回是否死亡 */
   hurt(dmg: number, kbx: number, kby: number, game: GameHooks): boolean {
     // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
@@ -3334,6 +3572,12 @@ export class Enemy extends Entity {
       if (this.vanillaId === 396 || this.vanillaId === 397 || this.vanillaId === 398) return false;
       // 石巨人族(245/246/247/248):血尽转换在各 AI 首行(本体死亡演出/头转自由态),同样放行
       if (this.vanillaId === 245 || this.vanillaId === 246 || this.vanillaId === 247 || this.vanillaId === 248) return false;
+      // 星璇四塔(517/422/507/493)：checkDead（NPC.cs:78867-78875）血尽转 ai2=1 死亡演出
+      // （ai1=0、满血续命 + dontTakeDamage），180t 上升渐隐后由 towerAI 走标准死亡管线（掉碎片）
+      if (this.vanillaId != null && this.vanillaId in TOWER_KEY && this.ai2 !== 1) {
+        this.ai2 = 1; this.ai1 = 0; this.hp = this.maxHp; this.iframes = 2;
+        return false;
+      }
       this.dead = true;
       // 风气球 594 爆裂：解冻挂载史莱姆（原版 HitEffect :82586-82594 slave ai[0]=0 + 上移 10）
       if (this.vanillaId === 594) {

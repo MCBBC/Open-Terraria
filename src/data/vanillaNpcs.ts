@@ -1,6 +1,9 @@
 // 原版 1.4.0.5 全量 NPC 数据（tools/extract-npcs.mjs 从 Terarria1405/NPC.cs SetDefaults 提取）。
 // 增量补齐（2026-08-11）：473-476/590/591/594/628/629/631/634/635/692 十三条取自
 // Terarria1456/NPC.cs SetDefaults + Main.cs npcFrameCount（数值一律取 1456 最终态）。
+// 星璇塔增量（2026-08-11）：403/404（星尘蠕虫身/尾，字段复制 402 改宽高——1456 无独立
+// SetDefaults，原版由 DrawNPC case 402 自绘 trail；本仓蠕虫链 spawnWormChain 需要
+// 头+1/头+2 条目）、408（小水流入侵者，复制 407 缩小——1456 无独立 SetDefaults）。
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
@@ -63,6 +66,30 @@ export interface VanillaNpc {
 }
 
 export const VANILLA_NPCS = vanillaNpcsJson as unknown as Record<string, VanillaNpc>;
+
+/** GetGemSquirrelToSpawn（NPC.cs:5611-5623）/ GetGemBunnyToSpawn（:5591-5603）：
+ *  纯加权随机表（Diamond 5%/Amber 8%/Ruby 10%/Emerald 12%/Sapphire 16%/Topaz 21%/Amethyst 28%）
+ *  ——与就近宝石 tile、世界档位完全无关 */
+export function getGemSquirrelToSpawn(rand: () => number): number {
+  const num = Math.floor(rand() * 100);
+  if (num < 5) return 644;
+  if (num < 13) return 645;
+  if (num < 23) return 643;
+  if (num < 35) return 642;
+  if (num < 51) return 641;
+  if (num < 72) return 640;
+  return 639;
+}
+export function getGemBunnyToSpawn(rand: () => number): number {
+  const num = Math.floor(rand() * 100);
+  if (num < 5) return 651;
+  if (num < 13) return 652;
+  if (num < 23) return 650;
+  if (num < 35) return 649;
+  if (num < 51) return 648;
+  if (num < 72) return 647;
+  return 646;
+}
 
 export function vanillaNpc(id: number): VanillaNpc | null {
   return VANILLA_NPCS[String(id)] ?? null;

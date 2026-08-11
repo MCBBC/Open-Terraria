@@ -79,6 +79,53 @@ const probe = async (cell) => page.evaluate((cx, cy) => {
   };
 }, cell.x, cell.y);
 
+// slope3/4(顶部锚定:顶补条全实,底部随列变浅):solidEnd = 列内最后不透明行
+const probeEnd = async (cell) => page.evaluate((cx, cy) => {
+  const g = window.__swGame;
+  const cc = g.chunks;
+  const key = (Math.floor(cx / 16) & 0xffff) | ((Math.floor(cy / 16) & 0xffff) << 16);
+  const pair = cc.chunks.get(key);
+  if (!pair) return { err: 'no chunk' };
+  const ctx = pair.tile.getContext('2d');
+  const lx = (cx % 16) * 16, ly = (cy % 16) * 16;
+  const d = ctx.getImageData(lx, ly, 16, 16).data;
+  const solidEnd = (x) => {
+    for (let y = 15; y >= 0; y--) if (d[(y * 16 + x) * 4 + 3] > 40) return y;
+    return -1;
+  };
+  return { e: [1, 4, 7, 10, 13].map(solidEnd), topPad: d[8 * 4 + 3] > 40 ? 1 : 0 };
+}, cell.x, cell.y);
+const s34 = await page.evaluate(() => {
+  const g = window.__swGame;
+  const st = g.world.store;
+  const gl = Math.floor(g.world.groundLevel);
+  const out = { s3: [], s4: [] };
+  for (let x = 200; x < st.w - 200; x++) {
+    for (let y = Math.max(10, gl - 10); y < Math.min(st.h, gl + 60); y++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      if (st.slope[i] === 3 && out.s3.length < 4) out.s3.push({ x, y });
+      if (st.slope[i] === 4 && out.s4.length < 4) out.s4.push({ x, y });
+    }
+  }
+  return out;
+});
+const okTop = (r, dir) => dir === 3
+  ? r.topPad === 1 && r.e[0] >= 10 && r.e[4] <= 5 && r.e[0] > r.e[2] && r.e[2] > r.e[4]
+  : r.topPad === 1 && r.e[4] >= 10 && r.e[0] <= 5 && r.e[4] > r.e[2] && r.e[2] > r.e[0];
+const tryTop = async (list, dir, label) => {
+  const tried = [];
+  for (const c of list.slice(0, 4)) {
+    const r = await probeEnd(c);
+    if (r.err) continue;
+    tried.push(`${c.x},${c.y}:${JSON.stringify(r.e)}`);
+    if (okTop(r, dir)) { check(label, true, tried.join(' | ')); return; }
+  }
+  check(label, false, tried.join(' | ') || 'no samples');
+};
+await tryTop(s34.s3, 3, 'slope3 左深右浅(顶部锚定)');
+await tryTop(s34.s4, 4, 'slope4 右深左浅(顶部锚定)');
+
 // 断言:至少一个样本呈对角线(草丛/植物/树冠重叠的单格会有噪声,逐格全过太苛)
 const okDiag = (r, dir) => dir === 1
   ? r.s[0] <= 5 && r.s[4] >= 8 && r.s[0] < r.s[2] && r.s[2] < r.s[4] && r.bottomPad >= 1

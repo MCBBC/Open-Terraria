@@ -58,10 +58,10 @@ describe('爆炸规则（CanExploteTile + 半径表）', () => {
     const st = world.store;
     const t137 = TILE_DEFS.find((d) => d.vanilla?.sheet === 137);
     expect(t137).toBeDefined();
-    st.setTileSilent(22, 20, t137!.id, 0, 36); // 行 2（门）
+    st.setTileSilent(22, 20, TILE_DEFS.indexOf(t137!), 0, 36); // 行 2（门）
     expect(Game.canExplodeTile(st, 22, 20, true, false, 30)).toBe(false); // 石巨人前
     expect(Game.canExplodeTile(st, 22, 20, true, true, 30)).toBe(true);  // 石巨人后
-    st.setTileSilent(22, 20, t137!.id, 0, 0);  // 行 0（普通蜥蜴砖）
+    st.setTileSilent(22, 20, TILE_DEFS.indexOf(t137!), 0, 0);  // 行 0（普通蜥蜴砖）
     expect(Game.canExplodeTile(st, 22, 20, true, false, 30)).toBe(true); // 普通行肉前也可炸
   });
 

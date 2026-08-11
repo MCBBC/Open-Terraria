@@ -11,8 +11,15 @@ import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
 import { runOceanSandPass } from '../src/world/gen/vanilla/BeachPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from '../src/world/gen/vanilla/MissingCavesPass';
-import { runMountCavesPass } from '../src/world/gen/vanilla/MountCavesPass';
+import { runMountCavesPass, runMountainCavesPass } from '../src/world/gen/vanilla/MountCavesPass';
 import { runRocksAndClayPass, runCavesPass } from '../src/world/gen/vanilla/CavesPass';
+import { runBeachesPass } from '../src/world/gen/vanilla/BeachPass';
+import { runIceBiomePass } from '../src/world/gen/vanilla/IceBiomePass';
+import { runGrassPass } from '../src/world/gen/vanilla/GrassPass';
+import { runJunglePass } from '../src/world/gen/vanilla/JunglePass';
+import { runMudCavesPass } from '../src/world/gen/vanilla/Spread';
+import { runDesertMoundOnly } from '../src/world/gen/vanilla/DesertPass';
+import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
 
@@ -46,6 +53,14 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runRocksAndClayPass(st, rng, gs); out.set('rocksclay', hashGrids(st));
   runSmallHolesPass(st, rng, gs); out.set('smallholes', hashGrids(st));
   runCavesPass(st, rng, gs); out.set('surfacecaves', hashGrids(st));
+  runMountainCavesPass(st, rng, gs); out.set('mcopenings', hashGrids(st));
+  runBeachesPass(st, rng, gs); out.set('beaches', hashGrids(st));
+  runIceBiomePass(st, rng, gs); out.set('icebiome', hashGrids(st));
+  runGrassPass(st, rng, gs); out.set('grass', hashGrids(st));
+  runJunglePass(st, rng, gs); out.set('jungle', hashGrids(st));
+  runMudCavesPass(st, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
+  out.set('mudcaves', hashGrids(st));
+  runDesertMoundOnly(st, rng, gs); out.set('desertmound', hashGrids(st));
   return out;
 }
 
@@ -66,7 +81,8 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
       }
       const ours = chainCheckpoints(c.seedText, c.evil);
       const names = ['terrain', 'dunes', 'oceansand', 'sandpatches', 'tunnels',
-        'mountaincaves', 'dirtwallbg', 'rocksclay', 'smallholes', 'surfacecaves'];
+        'mountaincaves', 'dirtwallbg', 'rocksclay', 'smallholes', 'surfacecaves',
+        'mcopenings', 'beaches', 'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

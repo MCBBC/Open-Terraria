@@ -61,6 +61,11 @@ export interface MusicInput {
    *  链尾（Main.cs:12914-12921）——覆盖一切（含 Boss 曲）；门=相机在地表
    *  worldSurface+10 格带内。Game 侧算好传入 */
   moonMusic?: number;
+  /** 星璇塔 BGM（MusicID 34=LunarPillars；0=无）。原版 Main.cs:12243-12247（塔入屏
+   *  ±5000px → num3=10）→ :12479-12493 flag11 → 34。优先级在 398 月总曲（flag8→38）
+   *  之后——与月总同屏时月总曲胜出，故本字段在 pickMusic 内排在 bossMusic 之后判定
+   *  （文档 §5 写"与 moonMusic 同层其后"，与源码冲突处以源码为准） */
+  lunarMusic?: number;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -131,6 +136,9 @@ export function pickMusic(inp: MusicInput): number {
   if (inp.moonMusic && inp.moonMusic > 0) return inp.moonMusic;
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
+  // 星璇塔曲（Main.cs:12479-12493：flag8 月总 38 → flag17 25 → flag10 37 → flag11 塔曲 34，
+  // 排在 Boss 曲之后＝398 月总优先；其余 Boss 曲与塔曲同屏时取 Boss——单值 bossMusic 近似）
+  if (inp.lunarMusic && inp.lunarMusic > 0) return inp.lunarMusic;
   if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;
   // 日食（L12578-12585：eclipse 且相机在地表半屏带内 → 27；remix 分支省略）
   if (inp.eclipse && !belowHalf) return MUSIC.Eclipse;

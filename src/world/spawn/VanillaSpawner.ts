@@ -14,6 +14,15 @@ import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 
+/** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
+export interface LunarSpawnCtx {
+  /** 玩家 4000px 内各塔是否在场（SceneMetrics.CloseEnoughTo*Tower = WithinRangeOfNPC(塔id, 4000)，
+   *  SceneMetrics.cs:276-282 / NPCEventZoneRadius=4000） */
+  zone: { solar: boolean; vortex: boolean; nebula: boolean; stardust: boolean };
+  /** 场上存活 NPC 计数（选表 CountNPCS 用；与月事件共用 Game 统计的 counts 表） */
+  counts: ReadonlyMap<number, number>;
+}
+
 /** 月事件刷怪上下文（Game 每帧随 setPlayerFlags 传入） */
 export interface MoonEventSpawnCtx {
   /** 1=霜月 2=南瓜月（MoonEventState.kind） */
@@ -244,14 +253,18 @@ export class VanillaSpawner {
   /** 月事件上下文（null=无事件）+ 当帧 Boss 上限旗标（Spawner.ctor NPC.cs:159-183） */
   moonEvent: MoonEventSpawnCtx | null = null;
   moonBossCap = false;
+  /** 星璇塔 Zone 上下文（null=不在塔区）；invaders 语义（SetSpawnFlags :315-318）由此驱动 */
+  lunar: LunarSpawnCtx | null = null;
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
     invaders = false, activeIds: Set<number> = new Set(),
-    moonEvent: MoonEventSpawnCtx | null = null): void {
+    moonEvent: MoonEventSpawnCtx | null = null,
+    lunar: LunarSpawnCtx | null = null): void {
     this.ZoneDungeon = zoneDungeon;
     this.downedBoss3 = downedSkeletron;
     this.invaders = invaders;
     this.activeIds = activeIds;
     this.moonEvent = moonEvent;
+    this.lunar = lunar;
     // reachedInvasionBossCap（Spawner 构造器 NPC.cs:159-183）：Boss 族 npcSlots 总和
     // ≥ 玩家数 × maxSpawns 上限（单人 ⌊5×2.3⌋=11）时当帧不刷 Boss
     this.moonBossCap = moonEvent != null && moonEvent.bossSlotSum >= 1 * MOON_BOSS_CAP_SLOTS;
@@ -491,14 +504,15 @@ export class VanillaSpawner {
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
-    playerXpx = this.pX * TILE): { spawnRate: number; maxSpawns: number } {
+    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false): { spawnRate: number; maxSpawns: number } {
     // 月事件覆盖（L681-685）：南瓜月/霜月且玩家在地表（remix 省略）→
     // rate=20、max=⌊5×(2+0.3n)⌋（单人 11）；先于 invaders 覆盖（原版即此顺序）
     if (this.moonEvent && playerYpx < this.world.groundLevel * 16) {
       return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
     }
-    // 入侵覆盖（L691-695）：rate=20（每帧 1/20 尝试），上限 5*(2+0.3n)（单人 11）
-    if (this.invaders) {
+    // 入侵覆盖（L691-695）：rate=20（每帧 1/20 尝试），上限 5*(2+0.3n)（单人 11）。
+    // 星璇塔 Zone 同走 invaders 语义（SetSpawnFlags :315-318 任一塔 Zone → invaders=true）
+    if (this.invaders || this.lunar) {
       return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
     }
     let spawnRate = 600;
@@ -569,6 +583,15 @@ export class VanillaSpawner {
       spawnRate = Math.floor(spawnRate * 0.75);
       maxSpawns = Math.floor(maxSpawns * 1.5);
       if (playerYpx / TILE < w.groundLevel * 0.35) spawnRate = Math.floor(spawnRate * 0.5);
+    } else if (peaceCandle) {
+      // L645-648：和平蜡烛 ×1.3 / ×0.7（与水蜡烛互斥——原版 else if）
+      spawnRate = Math.floor(spawnRate * 1.3);
+      maxSpawns = Math.floor(maxSpawns * 0.7);
+    }
+    // L624-628：向日葵（buff 146 标志）×1.2 / ×0.8
+    if (sunflower) {
+      spawnRate = Math.floor(spawnRate * 1.2);
+      maxSpawns = Math.floor(maxSpawns * 0.8);
     }
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
     if (spawnRate < 60) spawnRate = 60;
@@ -950,6 +973,52 @@ export class VanillaSpawner {
     // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
     // 原版在函数入口 roll（此处同位置，保持后续 RNG 流顺序一致）
     this.zombieStyle = rng.int(0, 6);
+
+    // ---- 星璇塔 Zone（NPC.cs:1204-1289：SpawnAnNPC 链**第一**分支——原版先于
+    //  天空怪/入侵/月事件段；逐塔 SelectRandom 权重表 + CountNPCS 上限重掷，1:1）----
+    if (this.lunar) {
+      const z = this.lunar.zone;
+      const C = (id: number) => this.lunar!.counts.get(id) ?? 0;
+      const pick = (arr: number[]) => arr[rng.int(0, arr.length - 1)];   // Utils.SelectRandom
+      if (z.nebula) {
+        // 星云（L1204-1229）：424×3/423×3/421×3/420×2；上限 424<3、423<3、420<3（421 无上限）
+        let id = 0;
+        for (;;) {
+          id = pick([424, 424, 424, 423, 423, 423, 421, 421, 421, 420, 420]);
+          if (id === 424 && C(424) >= 3) continue;
+          if (id === 423 && C(423) >= 3) continue;
+          if (id === 420 && C(420) >= 3) continue;
+          break;
+        }
+        if (id !== 0) return D(id);
+      } else if (z.vortex) {
+        // 星旋（L1230-1255）：429×4/427×2/425×2/426×1；上限 425<3、426<3、429<4
+        let id = 0;
+        for (;;) {
+          id = pick([429, 429, 429, 429, 427, 427, 425, 425, 426]);
+          if (id === 425 && C(425) >= 3) continue;
+          if (id === 426 && C(426) >= 3) continue;
+          if (id === 429 && C(429) >= 4) continue;
+          break;
+        }
+        if (id !== 0) return D(id);
+      } else if (z.stardust) {
+        // 星尘（L1256-1263）：411×3/409×2/407/402/405 各 1，无上限
+        return D(pick([411, 411, 411, 409, 409, 407, 402, 405]));
+      } else if (z.solar) {
+        // 日耀（L1264-1289）：518/419/418/412/417/416/415 各 1；掷中 418 再 1/2 重选
+        //  {415,416,419,417}；上限 518<2、412<1（千足蜈蚣场内唯一）
+        let id = 0;
+        for (;;) {
+          id = pick([518, 419, 418, 412, 417, 416, 415]);
+          if (id === 418 && rng.int(0, 1) === 0) id = pick([415, 416, 419, 417]);
+          if (id === 518 && C(518) >= 2) continue;
+          if (id === 412 && C(412) >= 1) continue;
+          break;
+        }
+        if (id !== 0) return D(id);
+      }
+    }
 
     // ---- 天空怪（原版 NPC.cs:1290-1331：else-if 链最前、invaders 之前——
     //  skyMob 优先于入侵分支；肉前 = 兜底鸟妖 48，困难 = 1/10 飞龙 87（场内唯一））----

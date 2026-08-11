@@ -63,19 +63,53 @@ const LOOKUP: Record<number, Frame[]> = {
 
 const DEFAULT_FRAME: Frame = [1, 1];
 
-/** 8 向邻居掩码（vanilla 位序：U=1 L=2 R=4 D=8 UL=16 UR=32 DL=64 DR=128） */
+/** 8 向邻居掩码（vanilla 位序：U=1 L=2 R=4 D=8 UL=16 UR=32 DL=64 DR=128）。
+ *  含 BlockStyle 双向门控（与 blend 路径同款,Framing.cs:92-98/199-316）:
+ *  half 断上;slope1 断上/右;2 断上/左;3 断下/右;4 断下/左;角落需对角反向两向放行 */
 export function mask8(st: TileStore, x: number, y: number, type: number, same: (t: number) => boolean): number {
+  const BS = [0b1111, 0b1110, 0b0110, 0b1010, 0b0101, 0b1001]; // bit0=up 1=down 2=left 3=right
+  const edges = (ii: number) => {
+    const b = st.half[ii] ? 1 : (st.slope[ii] >= 1 && st.slope[ii] <= 4 ? st.slope[ii] + 1 : 0);
+    return BS[b];
+  };
+  const cE = edges(st.idx(x, y));
+  // 各方向所需(中心 edge, 对面格 edge);角方向额外查对角格反向两向
+  const NEED: Array<[number, number]> = [
+    [0b0001, 0b0010], // U: 中心 up / 上邻 down
+    [0b0100, 0b1000], // L: 中心 left / 左邻 right
+    [0b1000, 0b0100], // R: 中心 right / 右邻 left
+    [0b0010, 0b0001], // D: 中心 down / 下邻 up
+  ];
+  const diagNeed = (dx: number, dy: number): number => {
+    // 对角格需放行朝向中心的两个反向边
+    let need = 0;
+    if (dy < 0) need |= 0b0010; else if (dy > 0) need |= 0b0001; // 对角在下→up / 在上→down
+    if (dx < 0) need |= 0b1000; else if (dx > 0) need |= 0b0100; // 对角在右→left / 在左→right
+    return need;
+  };
   const at = (ax: number, ay: number) => st.inBounds(ax, ay) && same(st.type[st.idx(ax, ay)]);
   let m = 0;
-  if (at(x, y - 1)) m |= 1;    // U
-  if (at(x - 1, y)) m |= 2;    // L
-  if (at(x + 1, y)) m |= 4;    // R
-  if (at(x, y + 1)) m |= 8;    // D
-  // 角：两相邻正交邻也在时角才计入（vanilla BlockStyle 语义的简化）
-  if ((m & 3) === 3 && at(x - 1, y - 1)) m |= 16;    // UL
-  if ((m & 5) === 5 && at(x + 1, y - 1)) m |= 32;    // UR
-  if ((m & 10) === 10 && at(x - 1, y + 1)) m |= 64;  // DL
-  if ((m & 12) === 12 && at(x + 1, y + 1)) m |= 128; // DR
+  // 四正交（:70-73）：类型同 + BlockStyle 双向放行
+  const sides: Array<[number, number, number]> = [[0, -1, 0], [-1, 0, 1], [1, 0, 2], [0, 1, 3]];
+  for (const [dx, dy, di] of sides) {
+    const [cNeed, nNeed] = NEED[di];
+    if ((cE & cNeed) !== cNeed) continue;
+    const oi = st.idx(x + dx, y + dy);
+    if ((edges(oi) & nNeed) !== nNeed) continue;
+    if (!at(x + dx, y + dy)) continue;
+    m |= 1 << di;
+  }
+  // 角（:75-78）：两正交均在 + 对角格反向两向放行 + 类型同
+  const corners: Array<[number, number, number, number]> = [
+    [-1, -1, 3, 16], [1, -1, 5, 32], [-1, 1, 10, 64], [1, 1, 12, 128], // dx,dy,正交位组合(U|L 等),角位
+  ];
+  for (const [dx, dy, combo, bit] of corners) {
+    if ((m & combo) !== combo) continue;
+    if (!at(x + dx, y + dy)) continue;
+    const oi = st.idx(x + dx, y + dy);
+    if ((edges(oi) & diagNeed(dx, dy)) !== diagNeed(dx, dy)) continue;
+    m |= bit;
+  }
   return m;
 }
 
@@ -507,17 +541,30 @@ export function drawVanillaCell(
       return BLOCK_STYLE[b];
     };
     const cE = edgesOf(st.idx(x, y));
-    // 方向 (dx,dy) 连通 = 中心各分量 edge && 邻居各反向 edge
+    // 方向 (dx,dy) 连通 = 中心各分量 edge && 邻居各反向 edge。
+    // 角方向额外要求两个正交邻居的交叉边（SelfFrame8Way:269-316 Clear() 语义：
+    // 正交方向未连通时其 BlockStyle 被 Clear → 角检查随之失败）
     const DIR_EDGE: Array<[number, number]> = [
       [0b1000, 0b0100], // E: 中心 right / 邻居 left
       [0b0001, 0b0010], // N: 中心 up / 邻居 down
       [0b0100, 0b1000], // W: 中心 left / 邻居 right
       [0b0010, 0b0001], // S: 中心 down / 邻居 up
-      [0b1001, 0b0110], // NE
-      [0b0101, 0b1010], // NW
-      [0b0110, 0b1001], // SW
-      [0b1010, 0b0101], // SE
+      [0b1001, 0b0110], // NE: 中心 up|right / 对角 left|down
+      [0b0101, 0b1010], // NW: 中心 up|left / 对角 right|down
+      [0b0110, 0b1001], // SW: 中心 down|left / 对角 up|right
+      [0b1010, 0b0101], // SE: 中心 down|right / 对角 up|left
     ];
+    // 角方向的正交邻居交叉边：[旁格坐标, 所需 edge]
+    const CORNER_CROSS: Array<Array<[number, number, number]>> = [
+      [], [],
+      [], [],
+      [[1, 0, 0b0101], [0, -1, 0b1010]],  // NE: E 邻 left|top, N 邻 down|right
+      [[-1, 0, 0b1001], [0, -1, 0b0110]], // NW: W 邻 right|top, N 邻 down|left
+      [[-1, 0, 0b1010], [0, 1, 0b0101]],  // SW: W 邻 right|down, S 邻 up|left
+      [[1, 0, 0b0110], [0, 1, 0b1001]],   // SE: E 邻 left|down, S 邻 up|right
+    ];
+    const edgeOK = (ax: number, ay: number, need: number): boolean =>
+      st.inBounds(ax, ay) && (edgesOf(st.idx(ax, ay)) & need) === need;
     let same = 0, mergeMask = 0;
     for (let di = 0; di < dirs.length; di++) {
       const [dx, dy, bit] = dirs[di];
@@ -529,6 +576,14 @@ export function drawVanillaCell(
       if (ot === 0) continue;
       // 中心或邻居任一侧 BlockStyle 断边 → 该方向不连通（不算 same/merge）
       if ((cE & cNeed) !== cNeed || (edgesOf(oi) & nNeed) !== nNeed) continue;
+      // 角方向:两个正交邻居的交叉边也要放行
+      if (di >= 4) {
+        let ok = true;
+        for (const [cdx, cdy, need] of CORNER_CROSS[di]) {
+          if (!edgeOK(x + cdx, y + cdy, need)) { ok = false; break; }
+        }
+        if (!ok) continue;
+      }
       const om = nMeta(ot);
       // 同型：石族按 isStone 互认，其余走 Merges 链
       if (myStone ? !!om?.isStone : merges(ot)) same |= bit;

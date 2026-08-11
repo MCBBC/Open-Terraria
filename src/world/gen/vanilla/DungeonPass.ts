@@ -996,7 +996,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
               if (!withBooks && rng.int(0, 1) === 0) {
                 // 蜡烛/水蜡烛放在靠墙的开格上方(cs L18735-18754)
                 if (rng.int(0, 3) !== 0) {
-                  st.setTileSilent(openX, y - 1, CANDLE, rng.int(0, 1) !== 0 ? 36 : 18, 0);
+                  st.setTileSilent(openX, y - 1, CANDLE, rng.int(0, 1) !== 0 ? 0 : 18, rng.int(0, 3) * 22); // 蜡烛:亮灭 X 0/18,样式 Y 步22(Tiles_33 实测)
                 } else {
                   st.setTileSilent(openX, y - 1, WATER_CANDLE, 0, 0);
                 }
@@ -1074,7 +1074,9 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
               // 吊灯:下方 15 格内无实心才放(cs L18927-18936)
               let blocked = false;
               for (let k = 0; k < 15; k++) if (solidAt(x, y + k)) { blocked = true; break; }
-              if (!blocked && placeFurn(st, x, y, CHANDELIER, roomWall[0] === 7 ? 27 : roomWall[0] === 8 ? 28 : 29, 'top')) {
+              // 吊灯样式 Y 行54(wrap37 换列) 
+              if (!blocked && placeFurn(st, x, y, CHANDELIER, roomWall[0] === 7 ? 27 : roomWall[0] === 8 ? 28 : 29, 'top', 1, true, 54))
+              {
                 placedLight = true;
                 fail = 0; added++;
                 wireToSwitch(st, rng, dc, x, y, ex0, ex1, ey0, ey1, isDWall, isBrick, true);
@@ -1263,7 +1265,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
           for (let i = cx0 - 1; i <= cx0 + 1; i++) {
             if (rng.int(0, 1) === 0 && !st.flags[st.idx(i, floorY - 2)]) {
               const pick = rng.int(0, 4);
-              if (pick <= 1) st.setTileSilent(i, floorY - 2, CANDLE, sCandle * 18, 0);
+              if (pick <= 1) st.setTileSilent(i, floorY - 2, CANDLE, 0, sCandle * 22); // 样式竖排 Y 步22,亮态 X=0
               else if (pick === 2) st.setTileSilent(i, floorY - 2, WATER_CANDLE, 0, 0);
               else if (pick === 3) st.setTileSilent(i, floorY - 2, BOOKS, 0, 0);
               else st.setTileSilent(i, floorY - 2, BOWLS, 0, 0);
@@ -1281,7 +1283,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
           for (let i = cx0; i <= cx0 + 1; i++) {
             if (rng.int(0, 1) === 0 && !st.flags[st.idx(i, floorY - 1)]) {
               const pick = rng.int(0, 4);
-              if (pick <= 1) st.setTileSilent(i, floorY - 1, CANDLE, sCandle * 18, 0);
+              if (pick <= 1) st.setTileSilent(i, floorY - 1, CANDLE, 0, sCandle * 22);
               else if (pick === 2) st.setTileSilent(i, floorY - 1, WATER_CANDLE, 0, 0);
               else if (pick === 3) st.setTileSilent(i, floorY - 1, BOOKS, 0, 0);
               else st.setTileSilent(i, floorY - 1, BOWLS, 0, 0);
@@ -1290,7 +1292,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
           break;
         }
         case 2: placeFurn(st, cx0, floorY, STATUE, sStatue); break;
-        case 3: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra); break;
+        case 3: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra, 'bottom', 1, true, 72); break; // 烛台样式 Y 步72(skip2)
         case 4: {
           if (placeFurn(st, cx0, floorY, CHAIR, sChair) && rng.int(0, 1) === 0) flipFurn(st, cx0, floorY, CHAIR);
           break;
@@ -1300,8 +1302,8 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
         case 7: placeFurn(st, cx0, floorY, DRESSER, sDresser2); break;
         case 8: placeFurn(st, cx0, floorY, BENCH, sBench); break;
         case 9: placeFurn(st, cx0, floorY, BATHTUB, sTub, 'bottom', rng.int(0, 1) === 0 ? 1 : -1); break;
-        case 10: placeFurn(st, cx0, floorY, LAMP, sLamp); break;
-        case 11: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra2); break;
+        case 10: placeFurn(st, cx0, floorY, LAMP, sLamp, 'bottom', 1, true, 110); break; // 路灯样式竖排步110(93 表行带实测)
+        case 11: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra2, 'bottom', 1, true, 72); break;
         case 12: placeFurn(st, cx0, floorY, CLOCK, sClock); break;
       }
     }
@@ -1431,9 +1433,9 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
       const base = st.wall[st.idx(x, j2)] === roomWall[1] ? 12 : st.wall[st.idx(x, j2)] === roomWall[2] ? 14 : 10;
       // 整条旗帜同一 style(原版 PlaceTile 一次抽取,此前每格独立重摇会混样式)
       const bannerStyle = base + rng.int(0, 1);
-      st.setTileSilent(x, j2, BANNER, bannerStyle * 18, 0);
-      st.setTileSilent(x, j2 + 1, BANNER, bannerStyle * 18, 18);
-      st.setTileSilent(x, j2 + 2, BANNER, bannerStyle * 18, 36);
+      st.setTileSilent(x, j2, BANNER, bannerStyle * 54, 0); // 旗帜样式横排步54(91 表 1998=37×54)
+      st.setTileSilent(x, j2 + 1, BANNER, bannerStyle * 54, 18);
+      st.setTileSilent(x, j2 + 2, BANNER, bannerStyle * 54, 36);
     }
   }
 }
@@ -1464,7 +1466,7 @@ function wallDungeonSpread(st: TileStore, sx: number, sy: number, wallType: numb
  * 成功条件:fw×fh 全净空 + 底行下方全实心(bottom 时)。帧 = style*fw*18 + dx*18 / dy*18。
  * flip=-1 时水平镜像帧。返回是否放置成功。
  */
-export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number): boolean {
+export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number, styleColW?: number): boolean {
   const def = TILE_DEFS[tile];
   if (!def) return false;
   const fw = def.vanilla?.fw ?? def.w ?? 1;
@@ -1482,7 +1484,7 @@ export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: numb
         || !TILE_DEFS[st.type[st.idx(x0 + dx, yTop + fh)]]?.solid) return false;
     }
   }
-  const stride = fw * 18;
+  const stride = styleColW ?? fw * 18; // styleColW:横排列步(旗帜 91=54 等非整格宽样式族)
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
       const fx = flip < 0 ? fw - 1 - dx : dx;
@@ -1521,16 +1523,25 @@ function placeWallArt(st: TileStore, x: number, y: number, tile: number, style: 
   if (!def) return;
   const fw = def.vanilla?.fw ?? def.w ?? 1;
   const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const sheet = def.vanilla?.sheet ?? -1;
   const x0 = x - Math.floor(fw / 2);
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
       if (!st.inBounds(x0 + dx, y + dy) || st.flags[st.idx(x0 + dx, y + dy)]) return;
     }
   }
-  const stride = fw * 18;
+  // 样式基偏移(TileObjectData + Tiles_N.png 尺寸实测):
+  //  240(1944×162):横排 36 列×54,wrap36 → 超 36 换下行 54
+  //  241(4×3):竖排行 54(wrap0 单列)
+  //  242(324×1944):竖排 27 行×72,wrap27 → 超 27 换右列 108
+  let bx: number, by: number;
+  if (sheet === 240) { bx = (style % 36) * 54; by = Math.floor(style / 36) * 54; }
+  else if (sheet === 241) { bx = 0; by = style * 54; }
+  else if (sheet === 242) { bx = Math.floor(style / 27) * 108; by = (style % 27) * 72; }
+  else { bx = style * fw * 18; by = 0; }
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
-      st.setTileSilent(x0 + dx, y + dy, tile, style * stride + dx * 18, dy * 18);
+      st.setTileSilent(x0 + dx, y + dy, tile, bx + dx * 18, by + dy * 18);
     }
   }
 }

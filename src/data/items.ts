@@ -742,6 +742,12 @@ item({ key: 'vi_3517_gold_hammer', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_3525_stardust_hamaxe', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_4317_haemorrhaxe', name: '', maxStack: 999, value: 1 });
 
+// 月事件触发物品（Player.cs:43294/43361：夜晚 && 无进行中月事件；Main.startPumpkinMoon/
+// startSnowMoon :10903-10940）。键用 vanilla.json 权威驼峰键（下方自动注册循环按此键
+// 跳过，避免同 vid 双注册）；原版 maxStack 20 / useTime 45（Item.cs:20377-21128）
+item({ key: 'vi_1844_PumpkinMoonMedallion', name: '', vid: 1844, maxStack: 20, value: 1, desc: '夜晚使用:召唤南瓜月' });
+item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, maxStack: 20, value: 1, desc: '夜晚使用:召唤霜月' });
+
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
 for (const [idStr, m] of Object.entries(_vim)) {
@@ -752,6 +758,16 @@ for (const [idStr, m] of Object.entries(_vim)) {
   item({ key: ik, name: '', maxStack: 999, value: 1 });
 }
 void 0;
+
+// ---- 宝石系统：gemcorn 4851-4857（Item.cs createTile=590 宝石树苗，style=宝石序号；
+// 种在石/苔上必须地下长成宝石树，见 growSaplings）----
+item({ key: 'vi_4851_GemTreeTopazSeed', name: '黄玉宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 0 });
+item({ key: 'vi_4852_GemTreeAmethystSeed', name: '紫水晶宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 1 });
+item({ key: 'vi_4853_GemTreeSapphireSeed', name: '蓝宝石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 2 });
+item({ key: 'vi_4854_GemTreeEmeraldSeed', name: '翡翠宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 3 });
+item({ key: 'vi_4855_GemTreeRubySeed', name: '红宝石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 4 });
+item({ key: 'vi_4856_GemTreeDiamondSeed', name: '钻石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 5 });
+item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 6 });
 
 // ---- 阶段 6:功能道具(桶三态/绳圈) ----
 item({ key: 'empty_bucket', name: '空桶', maxStack: 99, value: 1, desc: '右键舀取液体' });

@@ -115,10 +115,10 @@ function islandHouse(
   }
   // 横幅(cs L48334-48348):1×3 顶锚,style 7-9(步长 18)
   for (const bx2 of [i - halfW + 1, i + halfW - 1]) {
-    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top');
+    placeFurn(st, bx2, j1, BANNER, rng.int(7, 9), 'top', 1, false, undefined, 54); // 旗帜列步54
   }
   const bannerX = dir > 0 ? i - halfW : i + halfW;
-  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top');
+  placeFurn(st, bannerX, j1 + 1, BANNER, rng.int(7, 9), 'top', 1, false, undefined, 54);
 }
 
 void T;

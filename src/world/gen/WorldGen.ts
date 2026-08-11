@@ -99,6 +99,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // =原版 pass 82 Trees；杂草/花=原版 pass 86-90）
     { name: '表面', run: surfacePass },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 宝石系统（原版 GemCaves(17528) < ExposedGems(20842/20874) <
+    // SpeleothemsAndGemTrees(22196)：装饰之后、海滩装饰之前）
+    { name: '宝石系统', run: vanillaGems },
     // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
@@ -126,7 +129,7 @@ import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/B
 import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
-import { spreadGrassAll } from './vanilla/Spread';
+import { runMudCavesPass } from './vanilla/Spread';
 import { runDesertPass } from './vanilla/DesertPass';
 import { runMushroomPass } from './vanilla/MushroomPass';
 import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
@@ -137,6 +140,7 @@ import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
+import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
@@ -413,7 +417,9 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
       }
     }
   }
-  spreadGrassAll(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!, world.jungleX, Math.floor(store.w * 0.21)); // 17 Mud Caves To Grass(丛林核心区)
+  // 17 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
+  // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
+  runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
   runDesertPass(store, rng, gs);         // 18 Full Desert
   runFloatingIslandsPass(store, rng, gs); // 19 Floating Islands
   runMushroomPass(store, rng, gs);       // 20 Mushroom Patches
@@ -550,6 +556,15 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   if (!gs) return;
   runSurfaceDecorPass(store, rng, gs);
   runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
+}
+
+// 宝石系统（原版序 GemCaves → ExposedGems → SpeleothemsAndGemTrees）
+function vanillaGems({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runGemCavesPass(store, rng, gs);
+  runExposedGemsPass(store, rng, gs);
+  runGemTreesPass(store, rng, gs);
 }
 
 // 海滩装饰：贝壳堆 + 海藻（原版 ShellPiles pass + GrowCheckSeaweed）

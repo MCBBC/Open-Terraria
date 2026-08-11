@@ -20,6 +20,11 @@ import {
   moonEventActive, startMoonEvent, stopMoonEvent, addMoonEventKill,
   invasionWaveText,
 } from '../world/MoonEvent';
+import {
+  TOWER_KEY, TOWER_ZONE_RADIUS, isTowerId, isTowerMinion,
+  triggerLunarApocalypse, onTowerKilled,
+  onMinionKilled, tickMoonLordCountdown, type LunarHost,
+} from '../world/LunarEvent';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
@@ -28,10 +33,10 @@ import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { vanillaNpc, TOWN_NPC_IDS } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
 import { projectileData } from '../data/vanillaProjectiles';
-import { VanillaSpawner, MOON_BOSS_IDS } from '../world/spawn/VanillaSpawner';
+import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
@@ -49,6 +54,7 @@ import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
 import { portraitUrl } from '../data/npcPortraits';
 import { tileRunner } from '../world/gen/vanilla/TileRunner';
+import { growGemTree } from '../world/gen/vanilla/TreePass';
 import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
@@ -643,6 +649,8 @@ export class Game implements GameHooks {
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
   waterCandleNear = false;
+  /** 和平蜡烛光环在場（光环扫描写入；getSpawnRate ×1.3/×0.7，NPC.cs:645） */
+  peaceCandleNear = false;
   heldWaterCandle = false;
   trackTile = TILE_BY_KEY['v_314_minecart_track'] ?? 0;
   minecart: import('../entities/Minecart').Minecart | null = null;
@@ -1298,8 +1306,22 @@ export class Game implements GameHooks {
       const moonMusic = w.moonEvent.kind === MOON_KIND_PUMPKIN ? 30
         : w.moonEvent.kind === MOON_KIND_FROST ? 32 : 0;
       const moonMusicGated = moonMusic && this.player.cy / TILE < w.groundLevel + 10 ? moonMusic : 0;
+      // 星璇塔 BGM（Main.cs:12243-12247 num3=10 → :12479-12493 flag11 → 34 LunarPillars）：
+      // 屏内 ±5000px 有塔即切曲。优先级：398 月总（flag8→38）在源码链里先于塔曲，
+      // 故 pickMusic 内 lunarMusic 排在 bossMusic 之后（文档 §5"与 moonMusic 同层"以源码为准）
+      let lunarMusic = 0;
+      if (w.lunarEvent.active) {
+        for (const e of this.entities.enemies) {
+          const en = e as Enemy;
+          if (en.dead || !isTowerId(en.vanillaId)) continue;
+          if (Math.abs(en.cx - this.player.cx) >= 5000 || Math.abs(en.cy - this.player.cy) >= 5000) continue;
+          lunarMusic = 34;
+          break;
+        }
+      }
       const music = pickMusic({
         scene: this.scene, isDay, bossMusic, invasionMusic, moonMusic: moonMusicGated,
+        lunarMusic,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
@@ -1495,6 +1517,32 @@ export class Game implements GameHooks {
       if (fire) this.player.buffs.apply(BuffType.Campfire, 0.5);
       this.player.buffs.lanternHeal = heart ? 1 : 0;
     }
+    // ---- 环境光环四族（SceneMetrics.cs:385-411 + Player.cs:25235-25266 授予链）：
+    // 瓶中星(42 frameY 252-286→158)、向日葵(27→146，墓园覆盖略)、猫堡垒(506 frameX<72→215)、
+    // 和平蜡烛(372 frameX<18→157)——AddBuff 2t 自动续
+    if (this.tickCount % 20 === 0) {
+      const ptx3 = Math.floor(this.player.cx / TILE), pty3 = Math.floor(this.player.cy / TILE);
+      let star = false, sun = false, bast = false, peace = false;
+      const st4 = this.world.store;
+      for (let dx = -48; dx <= 48 && !(star && sun && bast && peace); dx += 3) {
+        for (let dy = -36; dy <= 36; dy += 3) {
+          const sx = ptx3 + dx, sy = pty3 + dy;
+          if (!st4.inBounds(sx, sy)) continue;
+          const si = st4.idx(sx, sy);
+          const sheet = TILE_DEFS[st4.type[si]]?.vanilla?.sheet ?? -1;
+          if (sheet === 42 && st4.frameY[si] >= 252 && st4.frameY[si] <= 286) star = true;
+          else if (sheet === 27) sun = true;
+          else if (sheet === 506 && st4.frameX[si] < 72) bast = true;
+          else if (sheet === 372 && st4.frameX[si] < 18) peace = true;
+        }
+      }
+      const b = this.player.buffs;
+      if (star) b.apply(BuffType.StarInBottle, 0.5);
+      if (sun) b.apply(BuffType.Sunflower, 0.5);
+      if (bast) b.apply(BuffType.CatBast, 0.5);
+      if (peace) b.apply(BuffType.PeaceCandle, 0.5);
+      this.peaceCandleNear = peace;
+    }
     // 原版 Main.SpawnNPC 每帧调用（Main.cs:17724），概率门在 TrySpawnAnNPC L30
     // （Next(spawnRate)==0；spawnRate 修正表见 VanillaSpawner.getSpawnRate）。
     // 水蜡烛（heldWaterCandle/waterCandleNear）在 getSpawnRate 内修正，不再改节流
@@ -1523,6 +1571,10 @@ export class Game implements GameHooks {
     this.updateTriggerTiles();
     this.updateEntityPlates();
 
+    // ---- 月总倒计时（Main.cs:64437-64459：四塔全灭 → StartImpendingDoom(3600)，
+    //      每 tick -1，归零 SpawnOnPlayer(最近玩家, 398)；期间 MoonLordShake 震屏滤镜未接）----
+    if (tickMoonLordCountdown(w)) this.spawnMoonLordOnPlayer();
+
     // ---- Boss 逻辑 ----
     if (this.boss) {
       // 原版无通用"日出剔除 Boss"机制：EoC 白天走 AI_004 自漂离、骷髅王族白天狂暴、
@@ -1541,6 +1593,9 @@ export class Game implements GameHooks {
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
+          // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
+          // downed_439 通用置位处直接追加，四塔就位 + 满盾 + misc[43] 公告）
+          if (this.boss.vanillaId === 439) this.triggerLunarApocalypse();
         }
         // 骷髅王战斗结束（无论胜负）且未击败 → 守卫老人次日重新出现在地牢门口
         // （原版：老人在诅咒时消失，骷髅王离场/未被击败后重新生成；击败后转为裁缝）
@@ -2235,14 +2290,14 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
-    } else if (heldDef && (heldDef.key === 'vi_1844_pumpkin_moon_medallion' || heldDef.key === 'vi_1958_naughty_present')
+    } else if (heldDef && (heldDef.key === 'vi_1844_PumpkinMoonMedallion' || heldDef.key === 'vi_1958_NaughtyPresent')
       && inp.mouseDown && this.player.useTime === 0) {
       // 南瓜月/霜月召唤物（1844 PumpkinMoonMedallion / 1958 NaughtyPresent，
       //  Player.cs:43294/43361 ItemCheck + Main.startPumpkinMoon/startSnowMoon :10903-10940）：
       //  门 = !dayTime && !pumpkinMoon && !snowMoon；成功 → 置位 + 清血月 + 广播 wave 1 文案。
       //  useTime 45（Item.cs:20377-20385 / 21121-21128）。军队入侵进行中不开
       //  （invaders 与月事件刷怪段互斥，避免两事件打架——原版 DD2 同门）
-      const kind = heldDef.key === 'vi_1844_pumpkin_moon_medallion' ? MOON_KIND_PUMPKIN : MOON_KIND_FROST;
+      const kind = heldDef.key === 'vi_1844_PumpkinMoonMedallion' ? MOON_KIND_PUMPKIN : MOON_KIND_FROST;
       if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else if (this.world.moonEvent.kind === 0 && this.world.invasionType === 0) {
@@ -2491,12 +2546,35 @@ export class Game implements GameHooks {
     }
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
-      // 原版语义:锤子优先循环实心块状态(整块→半砖→整块;坡面渲染未实现暂两态)
-      if (type !== 0 && this.world.store.isSolid(tx, ty) && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
+      // 原版锤循环（Player.cs:45625-45695）：整砖→半砖→slope1→2→3→4→整砖。
+      // 方向感知：右实左空 → 先 slope2；上实下空（天花板模式）→ 先 slope3/4。
+      // 平台族的锤循环（:45394-45440 平台坡面/楼梯）依赖楼梯绘制未移植,暂不接入
+      const hd = TILE_DEFS[type];
+      const poundable = type !== 0 && !!hd && hd.solid && !hd.platform && !hd.framed;
+      if (poundable && this.world.store.isSolid(tx, ty) && this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
         this.lastMineHitTick = this.tickCount;
-        const i = this.world.store.idx(tx, ty);
-        const cur = this.world.store.half[i];
-        this.world.store.setHalfBrick(tx, ty, !cur);
+        const st = this.world.store;
+        const i = st.idx(tx, ty);
+        // WorldGen.SolidTile：active && tileSolid && !solidTop && !half && slope==0
+        const solidFull = (x: number, y: number) => {
+          if (!st.inBounds(x, y)) return false;
+          const j = st.idx(x, y);
+          const dj = TILE_DEFS[st.type[j]];
+          return !!st.flags[j] && !!dj && dj.solid && !dj.platform && !st.half[j] && st.slope[j] === 0;
+        };
+        if (st.half[i] || st.slope[i] !== 0) {
+          let num11 = 1, num12 = 1, num13 = 2;
+          if ((solidFull(tx + 1, ty) || st.slope[st.idx(tx + 1, ty)] === 1 || st.slope[st.idx(tx + 1, ty)] === 3)
+            && !solidFull(tx - 1, ty)) { num12 = 2; num13 = 1; }
+          if (solidFull(tx, ty - 1) && !solidFull(tx, ty + 1)) num11 = -1;
+          const s = st.slope[i];
+          const next = num11 === 1
+            ? (s === 0 ? num12 : s === num12 ? num13 : s === num13 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : 0)
+            : (s === 0 ? num12 + 2 : s === num12 + 2 ? num13 + 2 : s === num13 + 2 ? num12 : s === num12 ? num13 : 0);
+          st.setSlope(tx, ty, next); // setSlope 无条件清 half——与原版 SlopeTile 一致
+        } else {
+          st.setHalfBrick(tx, ty, true); // PoundTile：整砖→半砖
+        }
         this.sfx.play('tink');
         this.mining = null;
         return;
@@ -2756,8 +2834,20 @@ export class Game implements GameHooks {
       st.setTile(x, y, 0);
       return;
     }
-    // 普通
+    // 普通（★ 帧必须在清格前捕获——setTile(0) 清零 frameX）
+    const fxHere = st.frameX[st.idx(x, y)];
     st.setTile(x, y, 0);
+    // 宝石暴露晶簇（KillTile_GetItemDrops case 178，:65545-65569）：
+    // style=frameX/18 → 0紫181/1黄180/2蓝177/3翠179/4红178/5钻182/6琥珀999
+    if (def.vanilla?.sheet === 178) {
+      const gemId = [181, 180, 177, 179, 178, 182, 999][Math.floor(fxHere / 18)] ?? 181;
+      const gemKey = VANILLA_ITEM_KEY_BY_ID[gemId];
+      if (gemKey && ITEM_BY_KEY[gemKey] !== undefined) {
+        this.spawnDrop(x * TILE + 8, y * TILE + 8, gemKey, 1);
+      }
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
+      return;
+    }
     // 破坏树木正下方的支撑方块 → 整棵树倒下（掉木材）
     const treeOnTop = this.world.trees.find((t) => t.x === x && t.y + t.h === y);
     if (treeOnTop) this.fellTree(x, y - 1);
@@ -2959,6 +3049,39 @@ export class Game implements GameHooks {
         }
       }
       this.spawnParticles(x * TILE + 8, top * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
+      return;
+    }
+    // 宝石树（sheet 583-589；KillTile_GetItemDrops :65754-65802 + SetGemTreeDrops :66149-66163）：
+    // 每格 1/10 对应宝石×1 / 否则石块×1-2；干基格（frameX≥22 && frameY≥198）50% gemcorn
+    const gemSheet = TILE_DEFS[type]?.vanilla?.sheet ?? 0;
+    if (gemSheet >= 583 && gemSheet <= 589) {
+      // 干基帧在清格前捕获（setTile(0) 清零 frame）
+      const baseFi = st.idx(x, bottom);
+      const isBase = st.frameX[baseFi] >= 22 && st.frameY[baseFi] >= 198;
+      const gemOf: Record<number, [number, number]> = {
+        583: [180, 4851], 584: [181, 4852], 585: [177, 4853],
+        586: [179, 4854], 587: [178, 4855], 588: [182, 4856], 589: [999, 4857],
+      };
+      const [gemId, seedId] = gemOf[gemSheet];
+      const height2 = bottom - top + 1;
+      for (let yy = top; yy <= bottom; yy++) {
+        const dropId = Math.random() < 0.1 ? gemId : 3;   // 1/10 宝石 / 9/10 石块
+        const stack = dropId === 3 ? 1 + Math.floor(Math.random() * 2) : 1;
+        const key = dropId === 3 ? 'stone_block' : VANILLA_ITEM_KEY_BY_ID[dropId];
+        if (key && ITEM_BY_KEY[key] !== undefined) {
+          this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
+            key, stack, (Math.random() - 0.5) * 2, -2 - Math.random());
+        }
+      }
+      // 干基格 50% gemcorn（树苗种子；frameX≥22 即主干底格）
+      if (isBase && Math.random() < 0.5) {
+        const seedKey = VANILLA_ITEM_KEY_BY_ID[seedId];
+        if (seedKey && ITEM_BY_KEY[seedKey] !== undefined) {
+          this.spawnDrop(x * TILE + 8, bottom * TILE, seedKey, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+        }
+      }
+      void height2;
+      this.spawnParticles(x * TILE + 8, top * TILE + 8, '#B46BD8', 14, 2.2);
       return;
     }
     // 掉木材（与自有树同比例）+ 树顶枝条额外几份
@@ -3318,6 +3441,87 @@ export class Game implements GameHooks {
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
     );
     if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
+    // ---- 提炼机（tile 219；Player.cs:41038 → ExtractinatorHelper.RollExtractinatorDrop）：
+    //  右键消耗背包 1 份沙泥 424/淤泥 1103（mode0）或沙漠化石 3347（mode1）出产物。
+    //  mode0/1 链（:65-374）：1/10 坚固化石(mode1) → 1/2 钱币（白 1/12000/金 1/800/
+    //  银 1/60/铜 10-100）→ 蚊 1242（mode0 1/5000 / mode1 1/1667）→ 宝石 1/25（mode1
+    //  1/50）→ 琥珀 1/50（mode1 1/20）→ 再 1/2 钱币小表 → 兜底 8 选 1 矿石 ----
+    if (type === (TILE_BY_KEY['v_219_extractinator'] ?? -1)) {
+      const inv = this.player.inv;
+      const findMat = (id: number) => inv.slots.findIndex((s) => s && s.id === id);
+      const siltId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[424] ?? ''];
+      const slushId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[1103] ?? ''];
+      const fossilId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3347] ?? ''];
+      let mode = -1, slot = -1;
+      const tryMat = (ids: number[], m: number) => {
+        for (const iid of ids) {
+          const sid = findMat(iid);
+          if (sid >= 0) { mode = m; slot = sid; return; }
+        }
+      };
+      if (siltId !== undefined || slushId !== undefined) {
+        tryMat([siltId, slushId].filter((v) => v !== undefined), 0);
+      }
+      if (mode < 0 && fossilId !== undefined) tryMat([fossilId], 1);
+      if (mode < 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedExtractMaterial')); return; }
+      inv.removeAt(slot, 1);
+      this.cb.onInventoryChanged();
+      const r = Math.random;
+      const N = (n: number) => Math.floor(r() * n) === 0;
+      let out = -1, stack = 1;
+      if (mode === 1 && N(10)) {
+        out = 3380; // Sturdy Fossil
+        if (N(5)) stack += Math.floor(r() * 2);
+        if (N(10)) stack += Math.floor(r() * 3);
+        if (N(15)) stack += Math.floor(r() * 4);
+      } else if (N(2)) {
+        // 钱币大表
+        if (N(12000)) { out = 74; for (let k = 0; k < 4; k++) if (N(14)) stack += Math.floor(r() * 2); }
+        else if (N(800)) { out = 73; for (let k = 0; k < 5; k++) if (N(6)) stack += 1 + Math.floor(r() * 20); }
+        else if (N(60)) { out = 72; for (let k = 0; k < 4; k++) if (N(4)) stack += 5 + Math.floor(r() * 21); }
+        else { out = 71; for (let k = 0; k < 4; k++) if (N(3)) stack += 10 + Math.floor(r() * 16); }
+      } else if (N(mode === 0 ? 5000 : 1667)) {
+        out = 1242; // Amber Mosquito
+      } else if (N(mode === 0 ? 25 : 50)) {
+        out = [181, 180, 177, 179, 178, 182][Math.floor(r() * 6)]; // 六宝石均匀
+        if (N(20)) stack += Math.floor(r() * 2);
+        if (N(30)) stack += Math.floor(r() * 3);
+        if (N(40)) stack += Math.floor(r() * 4);
+        if (N(50)) stack += Math.floor(r() * 5);
+        if (N(60)) stack += Math.floor(r() * 6);
+      } else if (N(mode === 0 ? 50 : 20)) {
+        out = 999; // Amber
+        if (N(20)) stack += Math.floor(r() * 2);
+        if (N(30)) stack += Math.floor(r() * 3);
+        if (N(40)) stack += Math.floor(r() * 4);
+        if (N(50)) stack += Math.floor(r() * 5);
+        if (N(60)) stack += Math.floor(r() * 6);
+      } else if (N(3)) {
+        // 钱币小表
+        if (N(5000)) { out = 74; for (let k = 0; k < 5; k++) if (N(10)) stack += Math.floor(r() * 3); }
+        else if (N(400)) { out = 73; for (let k = 0; k < 5; k++) if (N(5)) stack += 1 + Math.floor(r() * 20); }
+        else if (N(30)) { out = 72; for (let k = 0; k < 4; k++) if (N(3)) stack += 5 + Math.floor(r() * 21); }
+        else { out = 71; for (let k = 0; k < 4; k++) if (N(2)) stack += 10 + Math.floor(r() * 16); }
+      } else {
+        // 兜底矿石（RollOreEarlymode :511-522：铜12/铁11/银14/金13/锡699/铅700/钨701/铂702）
+        out = [12, 11, 14, 13, 699, 700, 701, 702][Math.floor(r() * 8)];
+        if (N(20)) stack += Math.floor(r() * 2);
+        if (N(30)) stack += Math.floor(r() * 3);
+        if (N(40)) stack += Math.floor(r() * 4);
+        if (N(50)) stack += Math.floor(r() * 5);
+        if (N(60)) stack += Math.floor(r() * 6);
+      }
+      if (out > 0) {
+        const key = out === 71 ? 'coin_copper' : out === 72 ? 'coin_silver'
+          : out === 73 ? 'coin_gold' : out === 74 ? 'coin_platinum'
+            : VANILLA_ITEM_KEY_BY_ID[out];
+        if (key && ITEM_BY_KEY[key] !== undefined) {
+          this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, stack, 0, -2);
+        }
+      }
+      this.sfx.play('chop', 0.8, tx * TILE + 24, ty * TILE + 24);
+      return;
+    }
     // ---- 玩家储物族（原版 Player.cs:32598+）：29→bank / 97→bank2 / 463→bank3 / 491→bank4。
     //  内容随玩家存档（banks[0..3]），不随方块；复用宝箱面板（x 用 -2..-5 标识容器来源，
     //  与原版 player.chest = -2..-5 同约定）----
@@ -3360,6 +3564,21 @@ export class Game implements GameHooks {
       this.world.spawnX = tx + 1;
       this.world.spawnY = ty - 1;
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
+      this.input.rightDown = false;
+    } else if (type === TILE_BY_KEY['v_125_crystal_ball'] || type === TILE_BY_KEY['v_354_bewitching_table']
+      || type === TILE_BY_KEY['v_377_sharpening_station'] || type === TILE_BY_KEY['v_287_ammo_box']
+      || type === TILE_BY_KEY['v_464_war_table'] || type === TILE_BY_KEY['v_621_slice_of_cake']) {
+      // 工位 buff（Player.cs:32126-32162 右键授予）：水晶球 29(1800s)/附魔台 150/磨刀石 159/
+      // 弹药箱 93/战争桌 348 均 108000t=1800s；蛋糕 192=7200t=120s
+      const dur = type === TILE_BY_KEY['v_621_slice_of_cake'] ? 120 : 1800;
+      const bt = type === TILE_BY_KEY['v_125_crystal_ball'] ? BuffType.Clairvoyance
+        : type === TILE_BY_KEY['v_354_bewitching_table'] ? BuffType.Bewitched
+          : type === TILE_BY_KEY['v_377_sharpening_station'] ? BuffType.Sharpened
+            : type === TILE_BY_KEY['v_287_ammo_box'] ? BuffType.AmmoBox
+              : type === TILE_BY_KEY['v_464_war_table'] ? BuffType.WarTable : BuffType.SugarRush;
+      this.player.buffs.apply(bt, dur);
+      this.sfx.play('drink'); // 原版 SoundID.Item4（药水/授予类 UseSound 占位）
+      this.cb.onInventoryChanged();
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
       || type === TILE_BY_KEY['v_411_detonator']) {
@@ -4327,7 +4546,24 @@ export class Game implements GameHooks {
     const moonCtx = w.moonEvent.kind !== 0
       ? { kind: w.moonEvent.kind, wave: w.moonEvent.waveNumber, counts: moonCounts, bossSlotSum: moonBossSlotSum }
       : null;
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx);
+    // 星璇塔 Zone（SceneMetrics.cs:276-282：玩家与场上塔 NPC 距离 <4000px）+
+    // 选表 CountNPCS 复用上面统计的 counts 表。任一塔 Zone → spawner 走 invaders 语义
+    // （SetSpawnFlags :315-318）+ SpawnAnNPC 链头四塔选怪段
+    let lunar: LunarSpawnCtx | null = null;
+    if (w.lunarEvent.active) {
+      const zone = { solar: false, vortex: false, nebula: false, stardust: false };
+      for (const e of this.entities.enemies) {
+        const en = e as Enemy;
+        if (en.dead || en.vanillaId == null) continue;
+        const k = TOWER_KEY[en.vanillaId];
+        if (!k) continue;
+        if (Math.hypot(en.cx - p.cx, en.cy - p.cy) < TOWER_ZONE_RADIUS) zone[k] = true;
+      }
+      if (zone.solar || zone.vortex || zone.nebula || zone.stardust) {
+        lunar = { zone, counts: moonCounts };
+      }
+    }
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar);
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -4348,7 +4584,8 @@ export class Game implements GameHooks {
       ? [...this.net.players.values()].filter((q) => q.active).map((q) => ({ x: q.x + 10, y: q.y + 21 }))
       : [];
     const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
-      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx);
+      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx,
+      this.peaceCandleNear, p.buffs.has(BuffType.Sunflower));
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -4544,8 +4781,9 @@ export class Game implements GameHooks {
   /** 入驻轮（每 7200 tick）：①无家 NPC 见空房入住（QuickFindHome）
    *  ②按优先级链选一名待入驻者 ③有房则入住房内、无房但有入住者则流浪生成 */
   private updateTownNpcArrival() {
-    // 入侵进行中暂停城镇 NPC 入驻（SpawnHomelessNPC :4987 门）
-    if (invasionActive(this.world)) return;
+    // 入侵/月事件进行中暂停城镇 NPC 入驻（SpawnHomelessNPC :4987 门；月事件原版经
+    // !dayTime 间接压制——本入驻轮无昼夜门，显式补 moonEventActive）
+    if (invasionActive(this.world) || moonEventActive(this.world)) return;
     const npcs = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead) as TownNPC[];
     const has = (key: string) => npcs.some((n) => n.npcKey === key);
     const homes = npcs.filter((n) => n.home).map((n) => n.home!);
@@ -5111,8 +5349,9 @@ export class Game implements GameHooks {
         if (++this.skeletonMerchantDespawnT >= 750) { sm.dead = true; this.skeletonMerchantDespawnT = 0; }
       } else this.skeletonMerchantDespawnT = 0;
     }
-    // 入侵进行中旅行商不到访（SpawnTravelNPC :5189 门）
-    if (invasionActive(w)) return;
+    // 入侵/月事件进行中旅行商不到访（SpawnTravelNPC :5189 门；月事件原版经 !dayTime
+    // 间接压制——此处同入驻轮显式补）
+    if (invasionActive(w) || moonEventActive(w)) return;
     const tm = this.entities.npcs.find(
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'travelling_merchant') as TownNPC | undefined;
     if (tm) {
@@ -5417,11 +5656,107 @@ export class Game implements GameHooks {
       const ann = addMoonEventKill(this.world, enemy.vanillaId, diff >= 2, diff >= 3);
       if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
     }
+    // 星璇塔事件（NPC.cs:80080-80146）：
+    //  本组专属怪死亡 → 发射 629 TowerDamageBolt → 命中塔盾 -1（归属表 LunarEvent.MINION_TOWER）；
+    //  塔真死（180t 死亡演出后）→ downedTower_* + UpdateLunarApocalypse + MessageLunarApocalypse。
+    //  与月事件计分同位（掉落结算之后同帧，对齐原版 checkDead 尾段顺序）
+    if (enemy && enemy.vanillaId != null) {
+      if (isTowerId(enemy.vanillaId)) {
+        this.onLunarTowerKilled(enemy.vanillaId);
+      } else if (this.world.lunarEvent.active && isTowerMinion(enemy.vanillaId)) {
+        this.onLunarMinionKilled(enemy);
+      }
+    }
     // 入侵击杀扣分（NPC.cs:79021-79054：组号匹配当前入侵类型才计分，加权扣减）
     if (!enemy || this.world.invasionType <= 0 || enemy.vanillaId == null) return;
     const group = INVASION_GROUP[enemy.vanillaId];
     if (!group || group !== this.world.invasionType) return;
     this.world.invasionSize = Math.max(0, this.world.invasionSize - (KILL_WEIGHT[enemy.vanillaId] ?? 1));
+  }
+
+  // ================= 星璇塔 / 天界入侵（LunarEvent.ts 宿主回调侧） =================
+
+  /** LunarHost：造塔/广播/清教徒（LunarEvent 保持纯逻辑，不反向依赖 Game） */
+  private lunarHost(): LunarHost {
+    return {
+      spawnTowerNpc: (id, tx, ty) => this.spawnLunarTower(id, tx, ty),
+      broadcast: (text, r, g, b) => this.newText(text, r, g, b),
+      clearCultists: () => {
+        // GetRidOfCultists（WorldGen.cs:87508-87521：移除 437/438/379）
+        for (const e of this.entities.enemies) {
+          const en = e as Enemy;
+          if (!en.dead && (en.vanillaId === 437 || en.vanillaId === 438 || en.vanillaId === 379)) {
+            en.dead = true;
+          }
+        }
+      },
+    };
+  }
+
+  /** 塔就位（WorldGen.TriggerLunarApocalypse 内 NewNPC 语义：锚点 = 列中心 + 底部贴格顶） */
+  private spawnLunarTower(id: number, tx: number, ty: number): void {
+    const e = Enemy.fromVanilla(id, tx * TILE + 8, ty * TILE);
+    if (!e) return;
+    e.x = tx * TILE + 8 - e.w / 2;
+    e.y = ty * TILE - e.h;
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'enemies');
+  }
+
+  /** TriggerLunarApocalypse（WorldGen.cs:87371-87436：教徒死调用，见 Boss 逻辑块） */
+  triggerLunarApocalypse(): void {
+    triggerLunarApocalypse(this.world, new RNG((Math.random() * 1e9) | 0), this.lunarHost());
+  }
+
+  /** 场上是否存在存活 NPC id（UpdateLunarApocalypse 的塔/月总在场探测用） */
+  private hasNpcId(id: number): boolean {
+    return this.entities.enemies.some((e) => {
+      const en = e as Enemy;
+      return !en.dead && en.vanillaId === id;
+    });
+  }
+
+  /** 塔真死（NPC.cs:80122-80146：downedTower_* + Update/MessageLunarApocalypse） */
+  private onLunarTowerKilled(towerId: number): void {
+    onTowerKilled(this.world, towerId, (id) => this.hasNpcId(id), this.lunarHost());
+  }
+
+  /** 本组怪死亡 → 扣对应塔盾 1（LunarEvent.onMinionKilled = Projectile.cs:69784-69819 命中段）
+   *  + 视觉：塔 ai3=1 闪光、629 红色追踪弹（此处粒子尾迹近似，二期接真弹体） */
+  private onLunarMinionKilled(enemy: Enemy): void {
+    const hit = onMinionKilled(this.world, enemy.vanillaId!);
+    if (!hit) return;
+    const tower = (this.entities.enemies as Enemy[]).find(
+      (e) => !e.dead && e.vanillaId === hit.tower);
+    if (!tower) return;
+    tower.ai3 = 1;   // Projectile.cs:69791 等：命中且盾非 0 → 塔 ai[3]=1（闪光 120t）
+    // 629 TowerDamageBolt（5px/t 追塔 + 红尘尾，Projectile.cs:69784 起）：沿路径铺红粒近似
+    const steps = Math.max(4, Math.min(24, Math.floor(Math.hypot(tower.cx - enemy.cx, tower.cy - enemy.cy) / 24)));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      this.spawnParticles(
+        enemy.cx + (tower.cx - enemy.cx) * t + (Math.random() - 0.5) * 6,
+        enemy.cy + (tower.cy - enemy.cy) * t + (Math.random() - 0.5) * 6,
+        Math.random() < 0.7 ? '#FF4040' : '#FF9060', 1, 0.6, { life: 18 + ((Math.random() * 10) | 0) });
+    }
+    // 盾破瞬间 NPCDeath58（NPC.cs:41148-41151 的 flag99 翻转支）
+    if (this.world.lunarEvent.shield[TOWER_KEY[hit.tower]] === 0) {
+      this.sfx.play('roar', 0.8, tower.cx, tower.cy);
+    }
+  }
+
+  /** 倒计时归零召月总（Main.cs:64457：SpawnOnPlayer(FindClosest, 398)——单人即主角头顶）。
+   *  入 Boss 槽（专属 BGM 38 / 血条 / 击败记账 downed_398 → shieldMax 减半为 50） */
+  private spawnMoonLordOnPlayer(): void {
+    if (this.boss) return;   // 已有 Boss 在场（原版 SpawnOnPlayer 同样照召；此处避免双 Boss 槽冲突）
+    const p = this.player;
+    const e = Enemy.fromVanilla(398, p.cx, p.cy - 160);
+    if (!e) return;
+    e.x = p.cx - e.w / 2;
+    e.y = p.cy - 160 - e.h / 2;
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'enemies');
+    this.boss = e;
   }
 
   /** 小动物生成：视野外地表，按昼夜 + 栖息生态筛选，权重抽取。
@@ -5514,10 +5849,35 @@ export class Game implements GameHooks {
         return;
       }
       // 上岸金鱼块：1/400 金蚯蚓 448 → 2/3 蚯蚓 357 → 1/400 金金鱼 593 → 兜底 230
+      // 洞穴层（deeperThanRockLayer）先走 gem 分支：1/5 松鼠、再 1/5 兔子（:2289-2298）
+      const lavaLineT = this.world.lavaLine || st.h - 200;
+      if (groundY >= this.world.rockLevel && groundY <= lavaLineT) {
+        const gr = Math.random();
+        if (gr < 0.2) { spawnVanilla(getGemSquirrelToSpawn(Math.random), tx * TILE + 8, groundY * TILE); return; }
+        if (gr < 0.4) { spawnVanilla(getGemBunnyToSpawn(Math.random), tx * TILE + 8, groundY * TILE); return; }
+      }
       const rr = Math.random();
       const id = rr < 1 / 400 ? 448 : rr < 2 / 3 ? 357 : Math.random() < 1 / 400 ? 593 : 230;
       spawnVanilla(id, tx * TILE + 8, groundY * TILE);
       return;
+    }
+    // 宝石小动物·洞穴层主路径（NPC.cs:2466-2531 尾段）：rockLevel≤y≤UnderworldLayer 的
+    // 草/土格、昼夜均可：1/3×1/5 gem 松鼠 + 2/3×1/5 gem 兔子（合计 1/5）。
+    // 选色纯加权表（:5587-5645，与就近宝石无关）
+    if (!surfaceWater && (gTile === T.GRASS || gTile === T.DIRT)
+      && groundY >= this.world.rockLevel && groundY <= (this.world.lavaLine || st.h - 200)) {
+      const roll = Math.random();
+      if (roll < 1 / 3) {
+        if (Math.random() < 0.2) {
+          const e = Enemy.fromVanilla(getGemSquirrelToSpawn(Math.random), tx * TILE + 8, groundY * TILE);
+          if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'critters'); }
+          return;
+        }
+      } else if (Math.random() < 0.2) {
+        const e = Enemy.fromVanilla(getGemBunnyToSpawn(Math.random), tx * TILE + 8, groundY * TILE);
+        if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'critters'); }
+        return;
+      }
     }
     // 按昼夜 + 栖息生态过滤（水面列只出 water 生态或飞行种）
     const pool = CRITTER_DEFS.filter((c) => {
@@ -5581,6 +5941,31 @@ export class Game implements GameHooks {
     const grown: Array<[number, number]> = [];
     // 只扫玩家附近 60×40 区域
     const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
+    // 宝石树苗 590（AttemptToGrowTreeFromSapling case 590，:72924-72960）：必须地下
+    // （y>worldSurface）；frameX/54 = 宝石序号 → 对应树 583-589；growGemTree 自带
+    // 石/苔基座 + 洞穴墙 + 净空全套判定
+    const GEM_SAP = TILE_BY_KEY['v_590_gem_saplings'];
+    if (GEM_SAP) {
+      for (let dy = -20; dy <= 20; dy++) {
+        for (let dx = -30; dx <= 30; dx++) {
+          const x = ptx + dx, y = pty + dy;
+          if (!st.inBounds(x, y) || st.get(x, y) !== GEM_SAP) continue;
+          if (y <= this.world.groundLevel) continue; // 必须 underground（原版硬门）
+          if (Math.random() < 0.7) continue;         // 成长节奏近似（原版每晚 roll）
+          const ii = st.idx(x, y);
+          const kind = Math.floor(st.frameX[ii] / 54); // frame 带宽 54（placeStyle×18×fw?）
+          const treeSheet = 583 + Math.min(6, Math.max(0, kind));
+          // 树干内部帧带宽查 TREE_DEFS（growGemTree 用的带宽与放置一致）
+          const treeType = TILE_DEFS.find((d) => d.vanilla?.sheet === treeSheet)?.key;
+          const tid = treeType ? TILE_BY_KEY[treeType] : 0;
+          if (!tid) continue;
+          if (growGemTree(st, new RNG((Math.random() * 1e9) | 0), x, y, tid)) {
+            st.setTile(x, y, 0);
+            this.chunks.markDirtyArea(x - 6, y - 14, x + 6, y + 2);
+          }
+        }
+      }
+    }
     for (let dy = -20; dy <= 20; dy++) {
       for (let dx = -30; dx <= 30; dx++) {
         const x = ptx + dx, y = pty + dy;

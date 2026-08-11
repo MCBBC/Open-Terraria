@@ -12,8 +12,18 @@ const VINE = TILE_BY_KEY['v_52_vines']!;
 
 export function runSwordShrinePass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
-  const count = 2; // 每世界约 1-2 处
-  for (let n = 0; n < count * 80; n++) {
+  // 原版 pass 101（cs:21858-21905）：attempts = SwordShrineAttempts(Min1 Max2,
+  // ScaleWith WorldWidth)，每次 50% 放置概率(SwordShrinePlacementChance) → 世界 0-2 座
+  const attempts = rng.int(1, 2);
+  for (let a = 0; a < attempts; a++) {
+    if (rng.next() >= 0.5) continue;
+    placeOneShrine(st, rng, gs);
+  }
+}
+
+function placeOneShrine(st: TileStore, rng: RNG, gs: GenState): void {
+  const { w } = st;
+  for (let n = 0; n < 80; n++) {
     // 位置:左/右 30%
     const left = rng.next() < 0.5;
     const x = left ? rng.int(50, Math.floor(w * 0.3)) : rng.int(Math.floor(w * 0.7), w - 50);
@@ -75,12 +85,24 @@ export function runSwordShrinePass(st: TileStore, rng: RNG, gs: GenState): void 
         st.liquid[i] = 0;
       }
     }
-    // ---- 1 格宽竖井通地表(切割一切,原版 SkipTiles 仅生命木)----
-    for (let y = sy + 5; y >= Math.max(2, Math.floor(gs.worldSurface) - 2); y--) {
-      if (!st.inBounds(x, y)) continue;
-      const i = st.idx(x, y);
-      st.type[i] = 0; st.flags[i] = 0;
-      st.liquid[i] = 0;
+    // ---- 1 格宽竖井通地表(ChanceOfEntrance=1/3;原版 SkipTiles 仅生命木)----
+    // 通道壁沙化处理(Modifiers.Expand(1)+OnlyTiles(53)+SetTile(397)):竖井 ±1 的沙转硬化沙
+    if (rng.next() < 1 / 3) {
+      const topY = Math.max(2, Math.floor(gs.worldSurface) - 2);
+      for (let y = sy + 5; y >= topY; y--) {
+        if (!st.inBounds(x, y)) continue;
+        const i = st.idx(x, y);
+        st.type[i] = 0; st.flags[i] = 0;
+        st.liquid[i] = 0;
+      }
+      const HARDENED = TILE_BY_KEY['hardened_sand']!;
+      for (let y = sy + 5; y >= topY; y--) {
+        for (let dx = -1; dx <= 1; dx += 2) {
+          if (!st.inBounds(x + dx, y)) continue;
+          const j = st.idx(x + dx, y);
+          if (st.type[j] === T.SAND) st.type[j] = HARDENED;
+        }
+      }
     }
     // 剑插土丘上方(cs L76-78):真 1/3 → tile187 style17,假 → tile186 style15。
     // 原版 PlaceTile force=true 强制覆盖;3×2 完整放置(底行锚点,居中),
@@ -95,6 +117,6 @@ export function runSwordShrinePass(st: TileStore, rng: RNG, gs: GenState): void 
         }
       }
     }
-    return; // 每世界一处足矣
+    return; // 放置成功
   }
 }

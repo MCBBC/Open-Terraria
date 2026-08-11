@@ -195,14 +195,10 @@ export function drawVanillaLiquids(
       hasBE[i] = (!hasVisA[di] && !isSolidA[di]) || nB !== 1 ? 1 : 0;
       hasLE[i] = (!hasVisA[li] && !isSolidA[li]) || nL !== 0 ? 1 : 0;
       hasRE[i] = (!hasVisA[ri] && !isSolidA[ri]) || nR !== 1 ? 1 : 0;
-      // 液面波动(原版 waveMask 语义):TopWall 逐格随时间微幅正弦扰动,
-      // 幅度参照 WAVE_MASK_STRENGTH(水≈0.078)×VISOCITY 反比(岩浆/蜂蜜更粘→波动更小)
-      if (hasTE[i]) {
-        const wx = px0 + lx, wy = py0 + ly; // 世界格坐标
-        const visc = typeA[i] === 1 ? 0.25 : typeA[i] === 2 ? 0.12 : 1; // 水1/岩浆0.25/蜂蜜0.12
-        const wave = (Math.sin(wx * 0.8 + nowMs * 0.004) * 0.04 + Math.sin(wy * 1.3 + nowMs * 0.003) * 0.03) * visc;
-        tW[i] = Math.max(0, Math.min(0.75, nT - Math.abs(wave)));
-      }
+      // 注:原版 1.4.5.6 的 _waveMask 几何波动是【死代码】——WAVE_MASK_STRENGTH 是
+      // new byte[5] 全零从不赋值、WaveFilters 事件全工程无订阅者(LiquidRenderer.cs:110/616)。
+      // 用户感知的"水面波动"全部来自 16 帧纹理动画(下方 :289-291 已 1:1)+ 表面静态带 1280,
+      // 此处曾加过的正弦 TopWall 扰动是多余的非原版效果,已按源码标杆移除。
       let ox = 0, oy = 0;
       if (!hasLE[i]) { ox += hasRE[i] ? 32 : 16; }
       if (hasLE[i] && hasRE[i]) {

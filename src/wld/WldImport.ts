@@ -409,6 +409,12 @@ const TILE_MAP: Record<number, MapEntry> = {
 
 // 墙 id 直用原版 wld 墙 id（WALL_DEFS 已按 TEdit walls.json 全量注册 367 种）
 
+/** TileID.Sets.SaveSlopes 门禁的非 solid 例外（TileID.cs:179/425-428：
+ *  SaveSlopes = tileSolid ∪ {131,351,336,340,342,341,343,344}）。
+ *  WorldFile.cs:2623 加载端只对 SaveSlopes 内的类型应用 half/slope——
+ *  其余类型的 bits 4-6 直接丢弃（防止家具/装饰类杂波帧被切条/裁剪） */
+const NON_SOLID_SAVE_SLOPES = new Set([131, 351, 336, 340, 342, 341, 343, 344]);
+
 // wld item id → 内部 item key（宝箱战利品用）
 export const ITEM_MAP: Record<number, string> = {
   2: 'dirt_block', 8: 'torch', 9: 'wood', 175: 'stone_block',
@@ -875,8 +881,14 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (lq > 0) liquidTypeArr[i] = wld.tiles.liquidType[i] || 1;
     // 电路位直拷（parser 已从 header2 提取 bit0-5）
     wireArr[i] = wld.tiles.wire[i];
-    if (wld.tiles.half) halfArr[i] = wld.tiles.half[i];
-    if (wld.tiles.slope) slopeArr[i] = wld.tiles.slope[i];
+    // half/slope 只对 SaveSlopes 类型应用（WorldFile.cs:2623：tileSolid ∪ 非固体例外表；
+    // 其余类型——家具/装饰/植物——bits 4-6 是杂波,不落地,防切条裁剪）
+    if (wld.tiles.half[i] || wld.tiles.slope[i]) {
+      if (TILE_DEFS[type[i]]?.solid || NON_SOLID_SAVE_SLOPES.has(wt)) {
+        halfArr[i] = wld.tiles.half[i];
+        slopeArr[i] = wld.tiles.slope[i];
+      }
+    }
   }
   if (unmapped > 0) warnings.push(`${unmapped} 个未知 tile 已降级为石块`);
 

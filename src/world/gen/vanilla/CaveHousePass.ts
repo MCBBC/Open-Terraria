@@ -164,9 +164,21 @@ function placeFurniture(st: TileStore, key: string, x: number, y: number, style 
       if (!st.inBounds(x + dx, topY + dy) || st.flags[st.idx(x + dx, topY + dy)]) return false;
     }
   }
+  // 样式基偏移(Tiles_N.png 尺寸实测,非全横排!旧通用公式 style*fw*18 对竖排/换行画全错):
+  //  240 墙饰 3×3(1944×162):横排 36 列×54,wrap36 → 超样式换下行 54
+  //  242 画 6×4(324×1944):竖排 27 行×72,wrap27 → 超样式换右列 108
+  //  246 画 3×2(54×1332):竖排 37 行×36
+  //  245 画 2×3(1152×54):横排 36 步(2 格宽)——旧公式恰好正确
+  const sheet = d.vanilla?.sheet ?? -1;
+  let bx: number, by: number;
+  if (sheet === 240) { bx = (style % 36) * 54; by = Math.floor(style / 36) * 54; }
+  else if (sheet === 242) { bx = Math.floor(style / 27) * 108; by = (style % 27) * 72; }
+  else if (sheet === 246) { bx = 0; by = style * 36; }
+  else if (sheet === 100) { bx = 0; by = style * 72; }  // 烛台:竖排步72(skip2,100 表 142×2016)
+  else { bx = style * fw * 18; by = 0; }
   for (let dx = 0; dx < w; dx++) {
     for (let dy = 0; dy < h; dy++) {
-      st.setTileSilent(x + dx, topY + dy, t, style * fw * 18 + dx * 18, dy * 18);
+      st.setTileSilent(x + dx, topY + dy, t, bx + dx * 18, by + dy * 18);
     }
   }
   return true;

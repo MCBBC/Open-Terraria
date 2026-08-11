@@ -83,6 +83,13 @@ function parseAtom(src, pos) {
       const r = parseArgs(src, after);
       return { t: 'call', fn: name, args: r.args, end: r.end };
     }
+    // 链式调用语句头（rule.OnSuccess(...)）：idm 贪婪吃掉了 '.OnSuccess' 段，
+    // 截断到点号前只返回主体名，让 parsePostfix 的 '.' 循环建出 call(base) 结构
+    // ——否则返回 {t:'id', name:'rule.OnSuccess'}，外层 expr.t!=='call' 链体整体丢失
+    if (src[after] === '(' && CHAIN_FN[lastSeg] && name.includes('.')) {
+      const cut = name.lastIndexOf('.');
+      return { t: 'id', name: name.slice(0, cut), end: p + cut };
+    }
   }
   if (src[p] === 'n' && src.startsWith('new ', p)) {
     p = skipWs(src, p + 4);
@@ -178,12 +185,9 @@ function toRule(n) {
   if (!n) return { k: 'unknown', raw: String(n).slice(0, 80) };
   if (n.t === 'call' && !n.base) return callRule(n);
   if (n.t === 'call' && n.base) {
-    // 链式：主体规则 + .OnXxx(...)
+    // 链式：主体规则 + .OnXxx(...)（多级链宿主逐级传递，见 applyChainLinks）
     const base = toRule(n.args[0]);
-    const chains = [];
-    // args[0] 是链主体（本身可能再是链）；fn 是当前链方法
-    collectChain(n, chains);
-    if (chains.length) base.chain = chains;
+    applyChainLinks(base, n, false);
     return base;
   }
   if (n.t === 'new') return newRule(n);
@@ -194,11 +198,21 @@ function toRule(n) {
   return { k: 'unknown', raw: render(n) };
 }
 // 链式调用是嵌套的：postfix 把 a.OnX(b) 解析成 call(fn='OnX', args=[postfix(a), b])
-function collectChain(n, out) {
-  if (n.t === 'call' && n.base) {
-    collectChain(n.args[0], out);
-    if (CHAIN_FN[n.fn]) out.push({ on: CHAIN_FN[n.fn], rule: toRule(n.args[1]) });
+// 宿主语义（Chains.cs:93-110）：host.OnX(A) 把链挂到 host 并【返回 A】——
+// host.OnSuccess(A).OnFailedRoll(B) = host.chain[success A] + A.chain[failedRoll B]，
+// 不是平铺挂 host（平铺会让 B 错误地以 host 的状态门控）
+function applyChainLinks(host, n, resolve = false) {
+  if (n.t !== 'call' || !n.base) return host;
+  const inner = applyChainLinks(host, n.args[0], resolve);   // 更内层（更早）的链先挂
+  let linked = n.args[1] ? toRule(n.args[1]) : null;
+  if (resolve && linked) linked = linked.k === 'varRef'
+    ? (rules.get(linked.name) ?? { k: 'unknown', raw: `var:${linked.name}` })  // 原实例直挂（语句级，emit 已过）
+    : resolveRule(linked);
+  if (linked) {
+    inner.chain = inner.chain ?? [];
+    inner.chain.push({ on: CHAIN_FN[n.fn] ?? 'success', rule: linked });
   }
+  return linked;   // 下一层链宿主 = 本层 rule
 }
 function render(n) {
   if (!n) return '?';
@@ -354,19 +368,17 @@ function emit(npcs, ruleNode, global = false) {
   const rule = resolveRule(ruleNode);
   if (rule?.k) stats.kinds[rule.k] = (stats.kinds[rule.k] ?? 0) + 1;
   entries.push(global ? { global: true, rule } : { npcs, rule });
+  return rule;  // 返回 resolve 后的实例：语句级挂链（emit 之后的 var.OnXxx）必须改这份
 }
-/** 注册语句尾部的 .OnXxx(...) 链挂到规则上（gate.OnSuccess(r) → gate.chain） */
-function attachChains(rule, chains) {
-  for (const c of chains) {
-    if (!rule || rule.k === 'unknown') return;
-    if (rule.k === 'gate' && c.fn === 'OnSuccess') {
-      // gate 的链语义：OnSuccess 挂 chain（LeadingConditionRule 门卫放行链）
-      rule.chain = rule.chain ?? [];
-      rule.chain.push({ on: 'success', rule: c.rule });
-    } else {
-      rule.chain = rule.chain ?? [];
-      rule.chain.push({ on: CHAIN_FN[c.fn] ?? 'success', rule: c.rule });
-    }
+/** 注册语句尾部的 .OnXxx(...) 链挂到规则上——宿主逐级传递（同 applyChainLinks 语义） */
+function attachChains(rule, layers) {
+  let host = rule;
+  for (const layer of layers) {
+    if (!host || host.k === 'unknown') return;
+    const linked = toRule(layer.args[1]);
+    host.chain = host.chain ?? [];
+    host.chain.push({ on: CHAIN_FN[layer.fn] ?? 'success', rule: linked });
+    host = linked;
   }
 }
 /** 剥掉 .OnXxx 链得到最内层调用（不转译） */
@@ -391,20 +403,17 @@ const emittedRefs = new Map();
 function handleRegistration(s, expr, rootCall, refVar) {
   const reg = rootCall.fn;
   const a = rootCall.args;
-  // 链（expr 与 rootCall 之间的层）
-  const chains = [];
+  // 链（expr 与 rootCall 之间的层，AST 节点按出现顺序）
+  const layers = [];
   if (expr !== rootCall) {
     let n = expr;
-    while (n !== rootCall) {
-      chains.unshift({ fn: n.fn, rule: toRule(n.args[1]) });
-      n = n.args[0];
-    }
+    while (n !== rootCall) { layers.unshift(n); n = n.args[0]; }
   }
   if (reg === 'RegisterToGlobal') {
     const r = toRule(a[0]);
-    if (chains.length) attachChains(r, chains);
-    emit([], r, true);
-    if (refVar) { emittedRefs.set(refVar, { rule: r, entry: null }); rules.set(refVar, r); }
+    if (layers.length) attachChains(r, layers);
+    const resolved = emit([], r, true);
+    if (refVar) { emittedRefs.set(refVar, { rule: resolved, entry: null }); rules.set(refVar, resolved); }
     return;
   }
   if (reg === 'RegisterToNPC') {
@@ -413,21 +422,24 @@ function handleRegistration(s, expr, rootCall, refVar) {
     else if (a[0].t === 'id' && ints.has(a[0].name)) id = [ints.get(a[0].name)];
     if (id == null) return;  // npcNetIds[i] 变体拷贝辅助
     const r = toRule(a[1]);
-    if (chains.length) attachChains(r, chains);
-    emit(id, r);
-    if (refVar) { emittedRefs.set(refVar, { rule: r, entry: entries[entries.length - 1] }); rules.set(refVar, r); }
+    if (layers.length) attachChains(r, layers);
+    const resolved = emit(id, r);
+    if (refVar) { emittedRefs.set(refVar, { rule: resolved, entry: entries[entries.length - 1] }); rules.set(refVar, resolved); }
     return;
   }
   // Multiple 系
   const rule = toRule(a[0]);
-  if (chains.length) attachChains(rule, chains);
+  if (layers.length) attachChains(rule, layers);
   const ids = [];
   for (const arg of a.slice(1)) {
     if (arg.t === 'num') ids.push(arg.v);
     else if (arg.t === 'id' && arrays.has(arg.name)) ids.push(...arrays.get(arg.name));
     else if (arg.t === 'newarr') ids.push(...arg.items.map(x => lit(x)).filter(v => v !== undefined));
   }
-  if (ids.length) { emit(ids, rule); if (refVar) { emittedRefs.set(refVar, { rule, entry: entries[entries.length - 1] }); rules.set(refVar, rule); } }
+  if (ids.length) {
+    const resolved = emit(ids, rule);
+    if (refVar) { emittedRefs.set(refVar, { rule: resolved, entry: entries[entries.length - 1] }); rules.set(refVar, resolved); }
+  }
   else stats.unknown.push(`regids:${render(a[0])}`);
 }
 
@@ -486,12 +498,13 @@ const flushStmt = (stmt) => {
     m = /^(\w+)\.(OnSuccess|OnFailedRoll|OnFailedConditions)\(/.exec(s);
     if (m && (rules.has(m[1]) || emittedRefs.has(m[1]))) {
       const expr = parseExpr(s, s.indexOf(m[0]));
-      // postfix 结构：call(fn=OnX, args=[varRef, rule])
+      // postfix 结构：call(fn=OnX, args=[varRef, rule])，可再套 .OnY(...)（如
+      // .OnSuccess(Common(1871,15)).OnFailedRoll(OneFromOptions(...))）→ collectChain 收全部层
       if (expr.t === 'call' && expr.base) {
         const ref = emittedRefs.get(m[1]);
         const host = ref ? ref.rule : rules.get(m[1]);
-        host.chain = host.chain ?? [];
-        host.chain.push({ on: CHAIN_FN[m[2]], rule: toRule(expr.args[1]) });
+        // 语句级挂链发生在 emit 之后（resolveRule 已跑过）→ resolve=true 补 varRef 解引用
+        applyChainLinks(host, expr, true);
       }
       return;
     }

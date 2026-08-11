@@ -1367,6 +1367,113 @@ Checkpoint("jungle");
 }
 Checkpoint("mudcaves");
 
+// ================= Desert Sub-A（DesertBiome pass cs:12532 + DesertDescription + SandMound）=================
+// 注意：入口(33%+Next4)与 Hive 未含——本检查点只到 mound 完成后
+int[] SurfFromArea(int startX, int width)
+{
+    int half = H / 2;
+    var arr = new int[width];
+    for (int i = 0; i < width; i++)
+    {
+        int x = startX + i;
+        bool flag = false; int y = half + 50;
+        if (x >= 0 && x < W)
+        {
+            for (int j = 50; j < 50 + half; j++)
+            {
+                int ti = j * W + x;
+                if (act[ti] == 1)
+                {
+                    if (typ[ti] == 189 || typ[ti] == 196 || typ[ti] == 460 || typ[ti] == 717 || typ[ti] == 718 || typ[ti] == 719) flag = false;
+                    else if (!flag) { y = j; flag = true; }
+                }
+                if (!flag) y = half + 50;
+            }
+        }
+        arr[i] = y;
+    }
+    return arr;
+}
+(int[], double, int) SurfStats(int[] hs)
+{
+    long sum = 0; int mn = int.MaxValue, mx = 0;
+    foreach (var v in hs) { sum += v; mn = Math.Min(mn, v); mx = Math.Max(mx, v); }
+    int cap = worldSurface - 10;
+    if (mx > cap) mx = cap;
+    return (hs, (double)sum / hs.Length, mx);
+}
+bool DesertPlaceMound(int x)
+{
+    double factor = W / 4200.0;
+    int blockCols = (int)(80.0 * factor);
+    int blockRows = (int)(((double)r.NextDouble() * 0.5 + 1.5) * 170.0 * factor);
+    int dw = (int)(4.0 * blockCols), dh = (int)(2.0 * blockRows);
+    int ox = x - dw / 2;
+    var pre = SurfFromArea(ox - 5, dw + 10);
+    var (_, avg, bottom) = SurfStats(pre);
+    for (int i = ox; i < ox + dw; i++)
+    {
+        if (i < 0 || i >= W) continue;
+        ushort t = typ[bottom * W + i];
+        if (t == 59 || t == 60 || t == 161 || t == 147) return false;
+    }
+    int topY = (int)(avg + (double)bottom) / 2;
+    int hiveTop = topY + (int)r.Next(40, 60);
+    int desertH = hiveTop + dh / 2 - topY;
+    int moundH = Math.Min(desertH, dh / 2);
+    int moundBottom = topY + moundH;
+    int sandBottom = topY + desertH;
+    int coarse = 0, fine = 0;
+    for (int i = -5; i < dw + 5; i++)
+    {
+        int cx = ox + i;
+        double tv = Math.Abs((i + 5) / (double)(dw + 10)) * 2.0 - 1.0;
+        tv = Math.Clamp(tv, -1.0, 1.0);
+        if (i % 3 == 0) { coarse += (int)r.Next(-1, 2); coarse = Math.Clamp(coarse, -10, 10); }
+        fine += (int)r.Next(-1, 2); fine = Math.Clamp(fine, -10, 10);
+        double prof = Math.Sqrt(1.0 - tv * tv * tv * tv);
+        int surfY = moundBottom - (int)(prof * moundH) + coarse;
+        if (Math.Abs(tv) < 1.0 && cx >= 0 && cx < W)
+        {
+            double ramp = (Math.Abs(tv) - 0.5) / 0.3;
+            int val = Math.Min(10 + (int)((double)topY - ramp * ramp * ramp * 20.0) + fine, surfY);
+            int si = Math.Clamp(i + 5, 0, pre.Length - 1);
+            for (int j = pre[si] - 1; j < val; j++)
+            {
+                if (j < 0 || j >= H) continue;
+                act[j * W + cx] = 0;
+                wal[j * W + cx] = 0;
+            }
+        }
+        for (int y = surfY + (sandBottom - surfY) - 1; y >= surfY; y--)
+        {
+            if (y < 0 || y >= H) continue;
+            typ[y * W + cx] = 53; act[y * W + cx] = 1; liq[y * W + cx] = 0;
+        }
+    }
+    return true;
+}
+{
+    int halfW = W / 2;
+    int side = dungeonRight ? 1 : -1;
+    int tries = 0, flips = 0; bool skipCheck = false;
+    int num4 = (int)r.Next(0, halfW) / 8 + halfW / 8;
+    int dx0 = halfW + num4 * -side;
+    while (!DesertPlaceMound(dx0))
+    {
+        num4 = (int)r.Next(0, halfW) / 2 + halfW / 8 + (int)r.Next(0, tries / 12);
+        dx0 = halfW + num4 * -side;
+        if (++tries > W / 4)
+        {
+            side = -side;
+            tries = 0;
+            if (++flips >= 2) skipCheck = true;
+        }
+        if (skipCheck) { DesertPlaceMound(dx0); break; }
+    }
+}
+Checkpoint("desertmound");
+
 double TuneOceanDepth(int count, double depth, bool florida)
 {
     double Inc(double f) => depth + (int)r.Next(10, 20) * f;

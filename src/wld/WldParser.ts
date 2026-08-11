@@ -12,7 +12,7 @@ export interface WldTileData {
   wall: Uint16Array;
   liquid: Uint8Array;
   liquidType: Uint8Array; // 1水 2岩浆 3蜂蜜
-  wire: Uint8Array;       // 电路位 bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动（header2 0x02-0x40）
+  wire: Uint8Array;       // 电路位 bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动（红蓝绿=header2 0x02-0x08,其余=header3）
   half: Uint8Array;       // 半砖(WorldFile.cs:1519 header2>>4 & 0x7 == 1)
   slope: Uint8Array;      // 坡面 1-4(== 2-5;Tile.cs sTileHeader bits 12-14 编码)
 }
@@ -337,8 +337,13 @@ function decodeTiles(
           wl |= r.u8() << 8;
         }
       }
-      // 电路位（原版 Tile.cs flags2）：0x02红 0x04蓝 0x08绿 0x10黄 0x20致动器 0x40已致动
-      const wireBits = (header2 & 0x3E) >> 1;
+      // 电路位（1456/1405 同布局,WorldFile.cs:2610-2656）：header2 0x02红/0x04蓝/0x08绿,
+      // header3 0x02致动器/0x04已致动/0x20黄线（1.4 起致动器与黄线在 header3;
+      // 旧写法 0x3E>>1 是 1.3 布局——0x10/0x20 已是 half/slope 位,会漏进黄线/致动器）
+      let wireBits = (header2 & 0x0E) >> 1;
+      if (header3 & 0x02) wireBits |= 0x10; // 致动器
+      if (header3 & 0x04) wireBits |= 0x20; // 已致动(inActive)
+      if (header3 & 0x20) wireBits |= 0x08; // 黄线
       // half/slope(WorldFile.cs:1519):(header2 >> 4) & 7 → 1=半砖,2-5=slope1-4
       const blockBits = (header2 >> 4) & 7;
       const blockHalf = blockBits === 1 ? 1 : 0;

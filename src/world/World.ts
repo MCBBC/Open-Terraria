@@ -3,6 +3,7 @@ import { TileStore } from './TileStore';
 import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
 import { newMoonEventState } from './MoonEvent';
+import { newLunarEventState } from './LunarEvent';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
@@ -80,6 +81,11 @@ export class World {
   // 运行时状态，**不进存档**：原版这些字段均不写 WorldFile（主菜单即重置 Main.cs:48332），
   // serialize/fromPacket 不碰本字段；读档后 kind=0 即无事件（对齐原版）
   moonEvent = newMoonEventState();
+  // ---- 星璇塔 / 天界入侵（原版 NPC.LunarApocalypseIsUp + TowerActive/Shield 六字段）----
+  // 运行时状态：downedTower*/towerActive*/lunarApocalypseUp 三类 bool 走 flags 进存档
+  // （WorldFile.cs:1352-1360）；盾值与月总倒计时**不存档**（读档 TowerActive=true 重置满盾，
+  // WorldFile.cs:2240-2255），读档回填见 LunarEvent.applyLunarSave
+  lunarEvent = newLunarEventState();
   // ---- 入侵系统持久化状态（原版 WorldFile.cs:1306-1339 存档五元组）----
   /** 当前入侵类型（InvasionID：0=无 1=哥布林 2=雪人军团 3=海盗；4=火星后续） */
   invasionType = 0;

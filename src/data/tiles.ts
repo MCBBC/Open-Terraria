@@ -255,7 +255,7 @@ def({ key: 'v_135_pressure_plates', name: '', solid: false, framed: true, opacit
 def({ key: 'v_91_banners', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#0D5882', drop: null, vanilla: { sheet: 91, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_242_paintings_6x4', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 4, mapColor: '#63321E', drop: null, vanilla: { sheet: 242, frame: 'style', fw: 6, fh: 4 } });
 def({ key: 'v_50_books', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#AA3072', drop: null, vanilla: { sheet: 50, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#FDDD03', drop: null, light: [255, 185, 110], vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } });
+def({ key: 'v_93_lamps', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 6, mapColor: '#FDDD03', drop: null, light: [255, 185, 110], vanilla: { sheet: 93, frame: 'style', fw: 1, fh: 3 } });
 def({ key: 'v_549_seaweed', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#385806', drop: null, vanilla: { sheet: 549, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_254_pumpkin_plant', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#F89E5C', drop: null, vanilla: { sheet: 254, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_571_bamboo', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#638017', drop: null, vanilla: { sheet: 571, frame: 'style', fw: 1, fh: 1 } });
@@ -732,7 +732,7 @@ def({ key: 'v_579_rock_golem_head', name: '', solid: false, framed: true, opacit
 def({ key: 'v_580_hell_butterfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#6E5D5D', drop: null, vanilla: { sheet: 580, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_581_lavafly_in_a_bottle', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#747179', drop: null, vanilla: { sheet: 581, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_582_magma_snail_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#6A6769', drop: null, vanilla: { sheet: 582, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'v_590_gem_saplings', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#8E714F', drop: null, vanilla: { sheet: 590, frame: 'style', fw: 1, fh: 2 } });
+def({ key: 'v_590_gem_saplings', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#8E714F', drop: null, vanilla: { sheet: 590, frame: 'style', fw: 3, fh: 2 } }); // fw3 = 带宽 54px（原版 frameX/54 宝石序号，:72924 树苗成长判定）
 def({ key: 'v_591_hanging_pots', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#915438', drop: null, vanilla: { sheet: 591, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_595_sakura_sapling', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#935E68', drop: null, vanilla: { sheet: 595, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_599_amethyst_bunny_cage', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 6, h: 3, mapColor: '#7886A1', drop: null, vanilla: { sheet: 599, frame: 'style', fw: 6, fh: 3 } });

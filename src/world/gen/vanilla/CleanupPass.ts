@@ -48,8 +48,8 @@ export function runCleanupPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
-  // 2) 连通小块清除(< 20):扫描列范围 [10, w-10)(cs L5519-5521)
-  for (let x = 10; x < w - 10; x++) scanTileColumnAndRemoveClumps(st, x);
+  // 2) 散块清除已移至 MudCaves pass（1456 调用点 cs:12526—— DirtWallCleanup 只清墙；
+  //    此前重复跑=双倍清除偏离原版，已删）
 }
 
 function clearWallSet(st: TileStore, x: number, y: number, set: number[]): boolean {
@@ -57,62 +57,4 @@ function clearWallSet(st: TileStore, x: number, y: number, set: number[]): boole
   const wl = st.wall[st.idx(x, y)];
   if (set.includes(wl)) { st.wall[st.idx(x, y)] = 0; return true; }
   return false;
-}
-
-/** 可被生成期清除的实心块(关键物块 fw/fh 不算) */
-function clearable(st: TileStore, i: number): boolean {
-  const d = TILE_DEFS[st.type[i]];
-  if (!d) return false;
-  if (d.vanilla?.fw || d.vanilla?.fh) return false;
-  return !!d.solid;
-}
-
-function scanTileColumnAndRemoveClumps(st: TileStore, x: number): void {
-  const { h } = st;
-  let run = 0, runY = 0;
-  for (let y = 10; y < h - 10; y++) {
-    const i = st.idx(x, y);
-    if (st.flags[i] && TILE_DEFS[st.type[i]]?.solid && clearable(st, i)) {
-      if (run === 0) runY = y;
-      run++;
-    } else {
-      if (run > 0 && run < TILE_COUNTER_MAX) {
-        // 连通块计数(BFS,cap 20)
-        if (tileCounter(st, x, runY) < TILE_COUNTER_MAX) tileCounterKill(st);
-      }
-      run = 0;
-    }
-  }
-}
-
-const _cx = new Int32Array(TILE_COUNTER_MAX);
-const _cy = new Int32Array(TILE_COUNTER_MAX);
-let _cn = 0;
-
-function tileCounter(st: TileStore, x: number, y: number): number {
-  _cn = 0;
-  tileCounterNext(st, x, y);
-  return _cn;
-}
-
-function tileCounterNext(st: TileStore, x: number, y: number): void {
-  if (_cn >= TILE_COUNTER_MAX || x < 5 || x > st.w - 5 || y < 5 || y > st.h - 5) return;
-  const i = st.idx(x, y);
-  if (!st.flags[i] || !TILE_DEFS[st.type[i]]?.solid || !clearable(st, i)) return;
-  for (let k = 0; k < _cn; k++) {
-    if (_cx[k] === x && _cy[k] === y) return;
-  }
-  _cx[_cn] = x; _cy[_cn] = y; _cn++;
-  tileCounterNext(st, x - 1, y);
-  tileCounterNext(st, x + 1, y);
-  tileCounterNext(st, x, y - 1);
-  tileCounterNext(st, x, y + 1);
-}
-
-function tileCounterKill(st: TileStore): void {
-  for (let k = 0; k < _cn; k++) {
-    const i = st.idx(_cx[k], _cy[k]);
-    st.flags[i] = 0;
-    st.type[i] = 0;
-  }
 }

@@ -7,6 +7,121 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { idsByVanillaSheet } from './TileRunner';
+
+const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
+
+/** SurfaceMap.FromArea（Desert/SurfaceMap.cs 1:1）：全列首实心扫描（云族重置），
+ *  Bottom 统计钳到 (int)worldSurface-10，Average=原始均值 */
+function surfaceMapFromArea(st: TileStore, startX: number, width: number) {
+  const half = Math.floor(st.h / 2);
+  const hs = new Int16Array(width);
+  let sum = 0, mn = 0x7fffffff, mx = 0;
+  for (let i = 0; i < width; i++) {
+    const x = startX + i;
+    let flag = false, y = half + 50;
+    if (x >= 0 && x < st.w) {
+      for (let j = 50; j < 50 + half; j++) {
+        const ti = st.idx(x, j);
+        if (st.flags[ti]) {
+          if (CLOUDS.has(st.type[ti])) flag = false;
+          else if (!flag) { y = j; flag = true; }
+        }
+        if (!flag) y = half + 50;
+      }
+    }
+    hs[i] = y; sum += y;
+    if (y < mn) mn = y;
+    if (y > mx) mx = y;
+  }
+  const cap = Math.floor(stWorldSurface(st)) - 10;
+  if (mx > cap) mx = cap;
+  return { heights: hs, average: sum / width, bottom: mx };
+}
+// GenState 没存 Main.worldSurface 引用——由调用方传 gs；为省参数用模块级钩子
+let _wsRef: () => number = () => 300;
+function stWorldSurface(_st: TileStore): number { return _wsRef(); }
+
+export interface DesertDesc {
+  combX: number; combY: number; combW: number; combH: number;
+  hiveTop: number; hiveH: number;
+  desertH: number;
+  blockCols: number; blockRows: number;
+  surface: Int16Array; surfaceX: number;
+  surface2: Int16Array; surface2X: number;
+}
+
+/** RowHasInvalidTiles（DesertDescription.cs:96-110）：Bottom 行整列查 59/60/161/147 */
+function rowHasInvalidTiles(st: TileStore, startX: number, bottomY: number, width: number): boolean {
+  for (let i = startX; i < startX + width; i++) {
+    if (i < 0 || i >= st.w) continue;
+    const t = st.type[st.idx(i, bottomY)];
+    if (t === MUD || t === JUNGLE_GRASS || t === ICE || t === SNOW) return true;
+  }
+  return false;
+}
+
+/** DesertDescription.CreateFromPlacement + SandMound.Place（1:1，Sub-A）。
+ *  返回 null = 无效（RowHasInvalidTiles 命中）——blockRows 掷骰已消耗（原版语义） */
+export function desertPlaceMound(st: TileStore, rng: RNG, x: number, worldSurface: number, skipCheck = false): DesertDesc | null {
+  _wsRef = () => worldSurface;
+  const { w, h } = st;
+  const factor = w / 4200;
+  const blockCols = Math.trunc(80 * factor);
+  const blockRows = Math.trunc((rng.next() * 0.5 + 1.5) * 170 * factor);
+  const width = Math.trunc(4 * blockCols);   // BlockScale.X=4
+  const height = Math.trunc(2 * blockRows);  // BlockScale.Y=2
+  const ox = x - Math.trunc(width / 2);      // origin.X -= num4/2（int 除）
+  const sm = surfaceMapFromArea(st, ox - 5, width + 10);
+  if (!skipCheck && rowHasInvalidTiles(st, ox, sm.bottom, width)) return null;
+  // num6 = (int)(Average + Bottom) / 2 —— 先截断再 int 除（DesertDescription.cs:81）
+  const topY = Math.trunc(sm.average + sm.bottom) / 2 | 0;
+  const hiveTop = topY + rng.int(40, 59);    // Next(40,60)
+  const desertH = hiveTop + Math.trunc(height / 2) - topY; // Desert.Height（未封顶）
+  // ---- SandMound.Place（SandMound.cs 1:1）----
+  let moundH = Math.min(desertH, Math.trunc(height / 2));  // min(Desert.Height, Hive.Height/2)
+  const moundBottom = topY + moundH;                        // capped desert.Bottom
+  const sandBottom = topY + desertH;                        // Desert.Bottom（沙柱底）
+  let coarse = 0, fine = 0;
+  for (let i = -5; i < width + 5; i++) {
+    const cx = ox + i;
+    let t = Math.abs((i + 5) / (width + 10)) * 2 - 1;
+    t = Math.max(-1, Math.min(1, t));
+    if (i % 3 === 0) coarse = Math.max(-10, Math.min(10, coarse + rng.int(-1, 1)));
+    fine = Math.max(-10, Math.min(10, fine + rng.int(-1, 1)));
+    const profile = Math.sqrt(1 - t * t * t * t);
+    const surfY = moundBottom - Math.trunc(profile * moundH) + coarse;
+    if (Math.abs(t) < 1 && cx >= 0 && cx < w) {
+      // UnclampedSmoothStep=纯线性斜坡（Utils.cs:141-144），再立方——非平滑曲线
+      const ramp = (Math.abs(t) - 0.5) / 0.3;
+      const val = Math.min(10 + Math.trunc(topY - ramp * ramp * ramp * 20) + fine, surfY);
+      const si = Math.max(0, Math.min(sm.heights.length - 1, i + 5)); // Surface[cx]=heights[cx-(ox-5)]
+      const jStart = sm.heights[si] - 1;
+      for (let j = jStart; j < val; j++) {
+        if (j < 0 || j >= h) continue;
+        const ti = st.idx(cx, j);
+        st.flags[ti] = 0;          // active(false)（type 保留=幽灵，原版语义）
+        st.wall[ti] = 0;
+      }
+    }
+    // PlaceSandColumn：从 surfY 填到 sandBottom（沙/清液体/激活；height 可为负→零次）
+    for (let y = surfY + (sandBottom - surfY) - 1; y >= surfY; y--) {
+      if (y < 0 || y >= h) continue;
+      const ti = st.idx(cx, y);
+      st.type[ti] = SAND; st.flags[ti] = 1;
+      st.liquid[ti] = 0; st.liquidType[ti] = 0;
+    }
+  }
+  // UpdateSurfaceMap（mound 后重扫，入口/Hive 消费）
+  const sm2 = surfaceMapFromArea(st, ox - 5, width + 10);
+  return {
+    combX: ox, combY: topY, combW: width, combH: hiveTop + height - topY,
+    hiveTop, hiveH: height, desertH,
+    blockCols, blockRows,
+    surface: sm.heights, surfaceX: ox - 5,
+    surface2: sm2.heights, surface2X: ox - 5,
+  };
+}
 
 const MUD = TILE_BY_KEY['mud']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
@@ -17,79 +132,43 @@ const SANDSTONE = TILE_BY_KEY['sandstone']!;
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const FOSSIL = TILE_BY_KEY['desert_fossil']!;
 
+/** 放置循环 + Description + SandMound（Sub-A；Hive/入口在 runDesertPass 续） */
+export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): DesertDesc {
+  const { w } = st;
+  const half = Math.floor(w / 2);
+  // DesertBiome pass 放置循环（cs:12538-12562 1:1）：失败重掷**永不早退**，
+  // 2 次换向后 skipDesertTileCheck 恒过（此前 tries>w/2 早退=可能整图无沙漠）
+  let side = gs.dungeonSide, tries = 0, flips = 0, skipCheck = false;
+  let num4 = Math.trunc(rng.nextIntRange(0, half) / 8) + Math.trunc(half / 8);
+  let x = half + num4 * -side;
+  let desc: DesertDesc | null = null;
+  for (;;) {
+    desc = desertPlaceMound(st, rng, x, gs.worldSurface);
+    if (desc) break;
+    num4 = Math.trunc(rng.nextIntRange(0, half) / 2) + Math.trunc(half / 8)
+      + rng.nextIntRange(0, Math.trunc(tries / 12));
+    x = half + num4 * -side;
+    if (++tries > Math.floor(w / 4)) {
+      side = (-side) as 1 | -1;
+      tries = 0;
+      if (++flips >= 2) skipCheck = true;
+    }
+    if (skipCheck) {
+      // 恒过：RowHasInvalidTiles 直接 false（GenVars.skipDesertTileCheck 语义）
+      desc = desertPlaceMound(st, rng, x, gs.worldSurface, true);
+      break;
+    }
+  }
+  return desc!; // skipCheck 后 RowHasInvalidTiles 恒 false → 必非 null
+}
+
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
-  const factor = w / 4200;
-  // 沙漠 X(地牢异侧):x = w/2 + (rand(w/2)/8 + w/16) * -dungeonSide
-  const half = Math.floor(w / 2);
-  let num2 = 0, side = gs.dungeonSide, tries = 0;
-  let x = 0;
-  for (;;) {
-    const off = Math.floor(rng.next() * half / 8) + Math.floor(half / 8);
-    x = half + off * -side;
-    if (++tries > Math.floor(w / 4)) { side = -side as 1 | -1; tries = 0; if (++num2 >= 2) break; }
-    if (rowIsValid(st, x, factor)) break;
-    if (tries > Math.floor(w / 2)) break;
-  }
-
-  // DesertDescription.CreateFromPlacement
-  const blockCols = Math.max(16, Math.floor(80 * factor));
-  // DesertDescription.cs:53：(NextDouble()*0.5+1.5)*170*factor → 深度范围 255-340·factor。
-  // 曾误写 (next+1)*170 → 范围 170-340，最浅时蜂巢只有原版 2/3 深
-  const blockRows = Math.max(40, Math.floor((rng.next() * 0.5 + 1.5) * 170 * factor));
-  const width = Math.min(w - 20, Math.floor(4 * blockCols));
-  const ox = Math.max(10, Math.min(w - 10 - width, x - Math.floor(width / 2)));
-  // SurfaceMap:平均/最底(钳到 worldSurface-10)
-  let surfSum = 0, surfMax = 0, count = 0;
-  for (let i = ox; i < ox + width; i += 4) {
-    let y = 0;
-    while (y < h - 2 && !st.flags[st.idx(i, y)]) y++;
-    surfSum += y; surfMax = Math.max(surfMax, y); count++;
-  }
-  const avg = surfSum / Math.max(1, count);
-  const topY = Math.floor((avg + surfMax) / 2);
-  const hiveTop = topY + rng.int(40, 59);
-  const hiveHeight = Math.floor(2 * blockRows);
-  const hiveBottom = Math.min(h - 2, hiveTop + hiveHeight);
-  const desertBottom = hiveTop + Math.floor((hiveBottom - hiveTop) / 2);
-
-  // ---- SandMound.Place 1:1 ----
-  const moundH = Math.floor((hiveBottom - hiveTop) / 2);
-  let coarse = 0, fine = 0; // ±10 双随机游走
-  for (let dx = -5; dx < width + 5; dx++) {
-    const cx = ox + dx;
-    if (cx < 0 || cx >= w) continue;
-    const t = Math.max(-1, Math.min(1, Math.abs((dx + 5) / (width + 10)) * 2 - 1));
-    if (dx % 3 === 0) coarse = Math.max(-10, Math.min(10, coarse + rng.int(-1, 1)));
-    fine = Math.max(-10, Math.min(10, fine + rng.int(-1, 1)));
-    const profile = Math.sqrt(1 - Math.pow(t, 4));
-    const moundSurfY = (topY + moundH) - Math.floor(profile * moundH) + coarse;
-    // 中心削平/边缘抬升(SmoothStep(0.5,0.8,|t|)³)
-    if (Math.abs(t) < 1) {
-      const s = Math.max(0, Math.min(1, (Math.abs(t) - 0.5) / 0.3));
-      const ss = s * s * (3 - 2 * s);
-      const flatten = Math.min(10 + Math.floor((topY - Math.pow(ss, 3) * 20)) + fine, moundSurfY);
-      // 从地表上一格清到 flatten(削掉沙丘上方突出物)
-      let sy = 0;
-      while (sy < h - 2 && !st.flags[st.idx(cx, sy)]) sy++;
-      for (let y = sy - 1; y < flatten && y >= 0; y++) {
-        const i = st.idx(cx, y);
-        st.type[i] = 0; st.flags[i] = 0; st.wall[i] = 0;
-      }
-    }
-    // 纯沙柱:从 moundSurfY 填到 hiveBottom(整柱)
-    for (let y = moundSurfY; y < hiveBottom; y++) {
-      if (y < 0 || y >= h) continue;
-      const i = st.idx(cx, y);
-      st.type[i] = SAND; st.flags[i] = 1;
-      st.liquid[i] = 0; st.liquidType[i] = 0;
-    }
-  }
-
+  const desc = runDesertMoundOnly(st, rng, gs);
   // ---- DesertHive(DesertHive.cs 1:1):椭圆散点 → 深度2 DFS 簇 → AttemptClaim 合并
   // 场强 = 各簇内全部块的 Σ1/d²,取前二大簇求和;阈值 3.5/1.8/0.7/0.25 ----
   const cellW = 4, cellH = 2;
-  const gw = blockCols, gh = blockRows;
+  const gw = desc.blockCols, gh = desc.blockRows;
   // 1) 椭圆掩码 50% 散点(ClusterGroup.Generate)
   const blockMap: boolean[][] = [];
   for (let c = 0; c < gw; c++) blockMap.push(new Array(gh).fill(false));
@@ -160,11 +239,11 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
       bx + (rng.next() - 0.5) * 0.5, by + (rng.next() - 0.5) * 0.5,
     ] as [number, number]));
   }
-  const hiveW = width, hiveH = hiveBottom - hiveTop;
+  const hiveW = desc.combW, hiveH = desc.hiveH;
   // ---- 场强分层(PlaceClustersArea):±10 窗口判簇(簇首块),簇内求和取前二大 ----
   for (let dx = -20; dx < hiveW + 20; dx++) {
     for (let dy = -20; dy < hiveH + 20; dy++) {
-      const px = ox + dx, py = hiveTop + dy;
+      const px = desc.combX + dx, py = desc.hiveTop + dy;
       if (!st.inBounds(px, py)) continue;
       let shellType: number = SAND;
       if (rng.int(0, 2) === 0) shellType = HARDSAND;
@@ -211,9 +290,9 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
   // ---- AddTileVariance:沙 53 下方 2 格非实心 → 酥化为 397(装饰 485/484/165/187 略)----
-  for (let dx = -20; dx < width + 20; dx++) {
+  for (let dx = -20; dx < desc.combW + 20; dx++) {
     for (let dy = -20; dy < hiveH + 20; dy++) {
-      const px = ox + dx, py = hiveTop + dy;
+      const px = desc.combX + dx, py = desc.hiveTop + dy;
       if (!st.inBounds(px, py) || !st.inBounds(px, py + 2)) continue;
       const i = st.idx(px, py);
       if (st.type[i] === SAND && st.flags[i]
@@ -223,13 +302,16 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 
-  // ---- 入口(33%):竖井通到蜂巢顶(原版四种入口的简化)----
+  // ---- 入口（33%，DesertBiome.cs:24-45）：★四种入口待移植（Sub-C），暂用简化竖井
+  // 但掷骰结构对齐：NextDouble<=ChanceOfEntrance 后必掷 Next(4) 类型骰（Sub-C 前提）
   if (rng.next() <= 0.3333) {
-    const ex = ox + rng.int(Math.floor(width * 0.2), Math.floor(width * 0.8));
+    const kind = rng.nextIntRange(0, 4); // Chambers/Anthill/LarvaHole/Pit（暂不分支）
+    void kind;
+    const ex = desc.combX + rng.int(Math.floor(desc.combW * 0.2), Math.floor(desc.combW * 0.8));
     let ey = 0;
     while (ey < h - 2 && !st.flags[st.idx(ex, ey)]) ey++;
     const shaftW = rng.int(0, 3) === 0 ? 8 : 4;
-    for (let y = ey - 2; y <= hiveTop + 8; y++) {
+    for (let y = ey - 2; y <= desc.hiveTop + 8; y++) {
       for (let dx = 0; dx < shaftW; dx++) {
         if (!st.inBounds(ex + dx, y)) continue;
         const i = st.idx(ex + dx, y);
@@ -239,21 +321,11 @@ export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 
+  // ExportDescriptionToEngine（DesertBiome.cs:54-58）：CombinedArea.Inflate(10,10)
   gs.undergroundDesert = {
-    x0: Math.max(0, ox - 10), y0: Math.max(0, topY - 10),
-    x1: Math.min(w, ox + width + 10), y1: Math.min(h, hiveBottom + 10),
+    x0: Math.max(0, desc.combX - 10), y0: Math.max(0, desc.combY - 10),
+    x1: Math.min(w, desc.combX + desc.combW + 10),
+    y1: Math.min(h, desc.combY + desc.combH + 10),
   };
 }
 
-function rowIsValid(st: TileStore, x: number, factor: number): boolean {
-  const width = Math.floor(320 * factor);
-  const x0 = Math.max(1, x - Math.floor(width / 2));
-  let y = 0;
-  while (y < st.h - 2 && !st.flags[st.idx(x, y)]) y++;
-  y = Math.min(st.h - 2, y + 2);
-  for (let i = x0; i < Math.min(st.w - 1, x0 + width); i++) {
-    const t = st.type[st.idx(i, y)];
-    if (t === MUD || t === JUNGLE_GRASS || t === SNOW || t === ICE) return false;
-  }
-  return true;
-}
