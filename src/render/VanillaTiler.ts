@@ -725,6 +725,32 @@ export function drawVanillaCell(
     return;
   }
   if (slope > 0 && !half) {
+    // 平台坡面(:1540-1567):整帧 + 下侧对角实心时背面填充(楼梯视觉);
+    // 平台不走切条(原版平台分支在切条之前 return)
+    if (TILE_DEFS[st.type[si]]?.platform) {
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
+      const diagOK = (dx2: number) => {
+        if (!st.inBounds(x + dx2, y + 1)) return false;
+        const j = st.idx(x + dx2, y + 1);
+        return !!st.flags[j] && !!TILE_DEFS[st.type[j]]?.solid && st.slope[j] !== (dx2 > 0 ? 2 : 1) && !st.half[j];
+      };
+      if (slope === 1 && diagOK(1)) {
+        const j = st.idx(x + 1, y + 1);
+        const flat = TILE_DEFS[st.type[j]]?.platform && st.slope[j] === 0;
+        const fx2 = flat ? 324 : 198;
+        if (fx2 + 16 <= r.img.width && r.sy + 16 <= r.img.height) {
+          ctx.drawImage(r.img, fx2, r.sy, 16, 16, dpx, dpy + 16, 16, 16);
+        }
+      } else if (slope === 2 && diagOK(-1)) {
+        const j = st.idx(x - 1, y + 1);
+        const flat = TILE_DEFS[st.type[j]]?.platform && st.slope[j] === 0;
+        const fx2 = flat ? 306 : 162;
+        if (fx2 + 16 <= r.img.width && r.sy + 16 <= r.img.height) {
+          ctx.drawImage(r.img, fx2, r.sy, 16, 16, dpx, dpy + 16, 16, 16);
+        }
+      }
+      return;
+    }
     // 坡面门控:421/422 专属坡帧整帧画;DontDrawTileSlopes 跳过切条走整帧
     if (HAS_SLOPE_FRAMES.has(sheet)) {
       ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);

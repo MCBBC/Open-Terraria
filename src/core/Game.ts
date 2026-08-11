@@ -1633,6 +1633,8 @@ export class Game implements GameHooks {
         this._deathHandled = true;
         this.handlePlayerDeath();
       }
+      // 死亡画面淡入 ramp（Player.cs:16873 immuneAlpha += 2 钳 255）
+      if (player.immuneAlpha < 255) player.immuneAlpha = Math.min(255, player.immuneAlpha + 2);
       // 重生计时
       player.respawnTimer++;
       if (player.respawnTimer > 180) this.respawnPlayer();
@@ -2048,17 +2050,27 @@ export class Game implements GameHooks {
         || prevLight.r !== heldRGB![0] || prevLight.g !== heldRGB![1] || prevLight.b !== heldRGB![2]))) {
       this.lighting.dirty = true;
     }
-    // 弹幕动态点光(原版 Lighting.AddLight + Projectile.light 数据):
-    // 荧光棒/燃烧箭/火花/火焰镖等飞行中发光——Arrow/WeaponProj 系均暴露 projId
+    // 弹幕动态点光(原版 Projectile.ProjLight() cs:14809：light 标量 × 逐类型
+    // RGB 乘区表；荧光棒/燃烧箭/火花/火焰镖等飞行中发光——均暴露 projId)。
+    // 荧光棒族颜色表（cs:15060-15091，与手持光同色）：
+    //   50=(0.7,1,0.8) 53=(0.7,0.8,1) 473=(1.05,0.95,0.55) 515=(1,0.6,0.85)
+    //   870=(0.9,0.35,1) 1089=Disco 轮转
+    const PROJ_LIGHT_RGB: Record<number, [number, number, number]> = {
+      50: [0.7, 1, 0.8], 53: [0.7, 0.8, 1], 473: [1.05, 0.95, 0.55],
+      515: [1, 0.6, 0.85], 870: [0.9, 0.35, 1],
+    };
     for (const p of this.entities.projectiles) {
       const pid = (p as { projId?: number }).projId;
       if (pid == null) continue;
       const l = projectileData(pid)?.light;
       if (!l || l <= 0) continue;
       const pe = p as unknown as { x: number; y: number; w: number; h: number };
+      const rgb = pid === 1089
+        ? ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[Math.floor(this.tickCount / 10) % 6]
+        : PROJ_LIGHT_RGB[pid] ?? [1, 1, 1];
       this.lighting.addLight(
         Math.floor((pe.x + pe.w / 2) / TILE), Math.floor((pe.y + pe.h / 2) / TILE),
-        l, l, l,
+        l * rgb[0], l * rgb[1], l * rgb[2],
       );
     }
     // 掉落物点光（WorldItem.UpdateItem_VisualEffects :1467-1471 + :1455-1461 + :1684-1703）：
@@ -4511,6 +4523,8 @@ export class Game implements GameHooks {
   private weatherHooks: import('../render/WeatherRenderer').WeatherFxHooks | null = null;
   /** 史莱姆雨延迟公告倒计时（Main.slimeWarningTime/Delay=420，UpdateSlimeRainWarning :64984） */
   private slimeWarningTime = 0;
+  /** 本次死亡掉落钱数（LocalPlayer.lostCoins；死亡 UI"掉了{0}"用） */
+  lostCoins = 0;
   /** 重力切换边沿锁（buff 18：Up 按住只切一次） */
   private gravLatch = false;
   /** 狱火光环 tick 计数（buff 116，:9896 infernoCounter） */
@@ -6544,10 +6558,16 @@ export class Game implements GameHooks {
         // 0=经典 1=专家 2=大师 3=旅程按经典）。垃圾桶死亡清空（Player.cs:53394）
         const diff = p.appearance?.difficulty ?? 0;
         const keep = diff === 2 ? 1 : diff === 1 ? 0.75 : 0.5;
-        for (const ck of ['coin_copper', 'coin_silver', 'coin_gold', 'coin_platinum']) {
+        let lost = 0;
+        const face = [1, 100, 10000, 1000000];
+        ['coin_copper', 'coin_silver', 'coin_gold', 'coin_platinum'].forEach((ck, ci) => {
           const n = p.inv.countOf(ITEM_BY_KEY[ck]);
-          if (n > 0) p.inv.remove(ITEM_BY_KEY[ck], n - Math.floor(n * keep));
-        }
+          if (n > 0) {
+            lost += (n - Math.floor(n * keep)) * face[ci];
+            p.inv.remove(ITEM_BY_KEY[ck], n - Math.floor(n * keep));
+          }
+        });
+        this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
         p.inv.trash = null;
       }
     }
@@ -7711,6 +7731,8 @@ export class Game implements GameHooks {
     p.dead = false;
     p.iframes = 90;
     p.respawnTimer = 0;
+    p.immuneAlpha = 0;
+    this.lostCoins = 0;
     p.x = this.world.spawnX * TILE + 8;
     p.y = (this.world.spawnY - 3) * TILE;
     p.vx = 0; p.vy = 0;
@@ -7722,6 +7744,7 @@ export class Game implements GameHooks {
     const cam = this.camera;
     const L = this.lighting;
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
+    this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
     this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
     // 导线可见性:手持电路工具(mech)或 F7 强制(Main.cs:43548 DrawWires 开关语义)
     const held = this.player.inv.heldItem();

@@ -11,6 +11,7 @@ import type { ChestSink } from '../src/world/gen/vanilla/BuriedChestsPass';
 import {
   runLivingTreesPass, runLivingTreeWallsPass, growLivingTree,
 } from '../src/world/gen/vanilla/LivingTreePass';
+import { rollChestLoot } from '../src/world/gen/vanilla/BuriedChestsPass';
 
 const DIRT = TILE_BY_KEY['dirt']!;
 const BRICK41 = TILE_BY_KEY['v_41_blue_brick']!;
@@ -208,8 +209,17 @@ describe('Living Trees 世界生成', () => {
     // 主件 = 832 生命木魔棒 或 4281 雀杖（cs:29418-29421）
     const wand = ITEM_BY_KEY['vi_832_living_wood_wand']!;
     const finch = ITEM_BY_KEY['vi_4281_finch_staff']!;
+    // 同原版 id 的规范驼峰键（items.ts 自动注册循环）——曾与显式键双份入箱
+    const wandCamel = ITEM_BY_KEY['vi_832_LivingWoodWand']!;
+    const finchCamel = ITEM_BY_KEY['vi_4281_BabyBirdStaff']!;
     const hasMain = chests.some((c) => c.items.some((it) => it && (it.id === wand || it.id === finch)));
     expect(hasMain).toBe(true);
+    // 主件恰一份：显式键与驼峰键不得同时出现（rollChestLoot 尾段主件去重）
+    for (const c of chests) {
+      const mains = c.items.filter((it) => it
+        && (it.id === wand || it.id === finch || it.id === wandCamel || it.id === finchCamel));
+      expect(mains.length).toBeLessThanOrEqual(1);
+    }
     // 房间本体：活木墙腔（wall 244 的空格）在竖井深处存在
     let deepHollow = 0;
     for (let y = SURFACE + 40; y < SURFACE + 200; y++) {
@@ -220,6 +230,34 @@ describe('Living Trees 世界生成', () => {
     }
     expect(deepHollow).toBeGreaterThan(0);
   }, 60000);
+
+  it('主件 id 解析：832/4281 裸 id 与 vi_ key 均可入箱且不双份（vid() 查 vanilla.json 全量表）', () => {
+    // vid() 的查表源是 VANILLA_ITEM_KEY_BY_ID（public/sprites/vanilla.json 全量 6059 条）,
+    // 与 vanilla-itemstats.json（盔甲/配饰属性表）无关——裸 id 路径不会被"无 itemstats 条目"丢弃
+    const wandCamel = ITEM_BY_KEY['vi_832_LivingWoodWand']!;
+    const finchCamel = ITEM_BY_KEY['vi_4281_BabyBirdStaff']!;
+    expect(wandCamel).toBeGreaterThan(0);
+    expect(finchCamel).toBeGreaterThan(0);
+    const ctx = (mainKey: string | null) => ({
+      rng: new RNG(7), gs: gsFor(800, 600), gy: SURFACE + 60, flags: {}, mainKey, worldH: 600,
+    });
+    // ① 裸 id 路径：主件以规范驼峰键注册条目入箱
+    for (const vid of [832, 4281]) {
+      const loot = rollChestLoot(ctx(null), vid).filter((it): it is { id: number; stack: number } => !!it);
+      const camel = vid === 832 ? wandCamel : finchCamel;
+      expect(loot.some((it) => it.id === camel)).toBe(true);
+    }
+    // ② key 路径：按调用方显式键入箱,且剔除驼峰键那份——同物恰一份
+    const keyCases = [
+      { key: 'vi_832_living_wood_wand', vid: 832, camel: wandCamel },
+      { key: 'vi_4281_finch_staff', vid: 4281, camel: finchCamel },
+    ];
+    for (const { key, vid, camel } of keyCases) {
+      const loot = rollChestLoot(ctx(key), vid).filter((it): it is { id: number; stack: number } => !!it);
+      expect(loot.some((it) => it.id === ITEM_BY_KEY[key])).toBe(true);   // 显式键入箱
+      expect(loot.some((it) => it.id === camel)).toBe(false);             // 驼峰键那份已剔除
+    }
+  });
 
   it('破坏掉落：活木/树叶均为魔棒放置块,挖除无掉落（drop:null；vanilla tileWand 832/933）', () => {
     const world = new World(64, 64, 1, 't');

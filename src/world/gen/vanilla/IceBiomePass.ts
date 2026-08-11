@@ -40,8 +40,9 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
     for (let x = x0; x < x1; x++) {
       if (y < num2) {
         const i = st.idx(x, y);
-        // 原版只写 type 不激活——未激活格保持空气,跳过
-        if (!st.flags[i]) continue;
+        // 原版 cs:12394-12413 直接 switch(tile.type) 写 147/161 + 墙 2→40，
+        // **不判 active()**——幽灵格(挖空残留)同样被转化，跳过会让幽灵
+        // 泥/石保持原类型 → 后续 pass 读到错类型（幽灵一致性分叉）
         if (st.wall[i] === 2) st.wall[i] = 40;
         const t = st.type[i];
         if (t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;
@@ -56,7 +57,7 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
         else if (thickness > 50) thickness = 50 - rng.int(0, 2);
         for (let y2 = y; y2 < y + thickness && y2 < h; y2++) {
           const i = st.idx(x, y2);
-          if (!st.flags[i]) continue;
+          // 同上：不判 active（幽灵格一并转化）
           if (st.wall[i] === 2) st.wall[i] = 40;
           const t = st.type[i];
           if (t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;

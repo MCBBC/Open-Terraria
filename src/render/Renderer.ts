@@ -710,7 +710,54 @@ export class Renderer {
 
     // 11. 生命/魔力资源条（原版 ClassicPlayerResourcesDisplaySet：右上红心排 + 右缘魔力星）
     this.resourceBars.draw(ctx, player, viewW, flicker);
+
+    // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 灰化遮罩）
+    if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
   }
+
+  /** 死亡 UI（原版 DrawInterface_35_YouDied :44765-44801 1:1 + 灰化遮罩）：
+   *  - 中央文字「你被杀死了……」（Lang.inter[38]，DeathText 大字号）@ 屏中 -60
+   *  - 掉钱行「掉了{0}」（Game.DroppedCoins，仅 lostCoins>0）@ 下一行
+   *  - 重生倒计时（Game.RespawnInSuffix {0}=秒数，scale 0.7）@ 屏中 +10
+   *  - 文字色 = GetDeathAlpha（Player.cs:53284：r=0.9α g=0.5α b=0.5α a=0.4α——
+   *    immuneAlpha +2/tick 缓升，红黑渐显）
+   *  - 灰化遮罩（原版无全局去饱和——视觉近似：随 immuneAlpha 渐深的中性灰罩） */
+  private drawDeathScreen(ctx: CanvasRenderingContext2D, player: Player, viewW: number, viewH: number) {
+    const a = player.immuneAlpha / 255; // 0→1 缓升（约 2.1s 走满）
+    // 灰化遮罩
+    ctx.fillStyle = `rgba(46, 40, 46, ${(a * 0.55).toFixed(3)})`;
+    ctx.fillRect(0, 0, viewW, viewH);
+    // 文字色（GetDeathAlpha 公式）
+    const col = `rgba(${Math.round(230 * 0.9 * a)},${Math.round(230 * 0.5 * a)},${Math.round(230 * 0.5 * a)},${(a * 0.4 + a * 0.6).toFixed(3)})`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    const cx = viewW / 2;
+    // 「你被杀死了……」@ 屏中 -60（原版 num=-60）
+    ctx.font = 'bold 34px "Fusion Pixel 12px zh_hans", monospace';
+    ctx.strokeStyle = `rgba(0,0,0,${(a * 0.85).toFixed(3)})`;
+    ctx.lineWidth = 5;
+    const died = Lang.text('LegacyInterface.38');
+    ctx.strokeText(died, cx, viewH / 2 - 60);
+    ctx.fillStyle = col;
+    ctx.fillText(died, cx, viewH / 2 - 60);
+    // 掉钱行（原版 num += 50 后写、再 -=26；效果即 Died 下方一行；lostCoins 由 Game 注入）
+    const lost = this.deathLostCoins;
+    if (lost > 0) {
+      ctx.font = '16px "Fusion Pixel 12px zh_hans", monospace';
+      const coins = Lang.text('Game.DroppedCoins', String(lost));
+      ctx.strokeText(coins, cx, viewH / 2 - 10);
+      ctx.fillText(coins, cx, viewH / 2 - 10);
+    }
+    // 重生倒计时（原版 num=-60+70=+10，scale 0.7）
+    const secs = 1 + Math.floor(player.respawnTimer / 60);
+    ctx.font = 'bold 24px "Fusion Pixel 12px zh_hans", monospace';
+    const cd = Lang.text('Game.RespawnInSuffix', String(secs));
+    ctx.strokeText(cd, cx, viewH / 2 + 36);
+    ctx.fillText(cd, cx, viewH / 2 + 36);
+    ctx.textBaseline = 'alphabetic';
+  }
+  /** Game 每帧注入：本次死亡掉落钱数（LocalPlayer.lostCoins） */
+  deathLostCoins = 0;
 
   private drawLiquids(world: World, cam: Camera, viewW: number, viewH: number, z: number, isBackground: boolean) {
     // 原版 1.4.0.5 LiquidRenderer 移植（多 pass 网格算法，见 VanillaLiquidRenderer）。
@@ -2311,6 +2358,14 @@ export class Renderer {
       if (doll) {
         let row = 0; // 0 站立
         if (useRow >= 0) row = useRow;
+        else if (Math.abs(p.vx) > 0.3 && p.onGround) {
+          // ★行走循环优先于静持行——原版 PlayerFrame（cs:36012 静持 vs :36178
+          // velocity.X!=0 走路）静持行确实在前，但原版身体/腿是【分图层】：静持只钉
+          // 身体行（手臂持物）、腿照常走 legFrame 循环；本项目纸娃娃是单层合成帧，
+          // 钉行会把腿一起冻结=走路无动画。单层近似：走路时静持行让位（手持物
+          // 仍按上方 holdStyle 持位渲染）
+          row = 6 + Math.floor(p.animTime / 6) % 14;
+        }
         else if (staticHoldStyle) {
           // 静持 bodyFrame 行（Player.cs:36007-36040）：1/3/5→行3、2→行2、
           // 4→站定行 0；6/8 无行分支（7 已在上方置 0 不画）
@@ -2319,7 +2374,6 @@ export class Renderer {
           else row = 3;
         }
         else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
-        else if (Math.abs(p.vx) > 0.3) row = 6 + Math.floor(p.animTime / 6) % 14; // 行走循环 6-19
         const f = dollFrame(doll, row);
         // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
         // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿

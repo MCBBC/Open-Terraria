@@ -234,13 +234,17 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     }
   }
   // 泥内石囊 + 宝石
+  const L3: string[] = [];
   for (let n = 0; n <= 300 * scale; n++) {
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
+    let tries = 1;
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
       i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
       j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
+      tries++;
     }
+    if (n < 40) L3.push(`n${n}@${i2},${j2}t${tries}`);
     tileRunner(st, rng, gs, i2, j2, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
     if (rng.next() * 4 < 1) {
       // ★原版掷序（cs:269-271）：type2(Next 63,69) 在实参求值**之前**求值 →
@@ -251,4 +255,5 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
         { strength: rng.int(3, 6), steps: rng.int(4, 7), type: gtype });
     }
   }
+  console.log('L3LOG ' + L3.join(' '));
 }

@@ -29,11 +29,18 @@ it('jungle active-type diff v2', () => {
   runIceBiomePass(st, rng, gs); runGrassPass(st, rng, gs);
   runJunglePass(st, rng, gs);
   let n = 0;
-  const samples: string[] = [];
-  for (let i = 0; i < cs.length && n < 300; i++) {
-    if (!st.flags[i]) continue;
+  const hist = new Map<string, number>();
+  const cl = new Map<string, [number, number, number, number]>();
+  for (let i = 0; i < cs.length; i++) {
     const jv = V_ID[st.type[i]] < 0 ? 0x7fff : V_ID[st.type[i]];
-    if (cs[i] !== jv) { n++; if (samples.length < 5) samples.push(`(${i % 4200},${(i / 4200) | 0}) cs=${cs[i]} js=${jv}`); }
+    if (cs[i] === jv) continue;
+    n++;
+    const k = `a${st.flags[i]}:${cs[i]}>${jv}`;
+    hist.set(k, (hist.get(k) ?? 0) + 1);
+    const x = i % 4200, y = (i / 4200) | 0;
+    const b = cl.get(k) ?? [x, y, x, y];
+    b[0] = Math.min(b[0], x); b[1] = Math.min(b[1], y); b[2] = Math.max(b[2], x); b[3] = Math.max(b[3], y);
+    cl.set(k, b);
   }
-  console.log('DIFF2:', n, samples.join(' '));
+  console.log('DIFF3:', n, [...hist.entries()].sort((a, b) => b[1] - a[1]).slice(0, 12).map(([k, v]) => `${k}x${v}@[${cl.get(k)!.join(',')}]`).join(' '));
 });

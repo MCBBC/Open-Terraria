@@ -391,8 +391,29 @@ export class GlowstickProj extends Entity {
     this.timeLeft = projId === 473 ? 3600 : 9000;
   }
 
-  draw(r: Renderer, cam: Camera): void {
-    drawProj(r, cam, this, this.projId, this.rot, '#7FE8A8');
+  draw(r: Renderer, _cam: Camera): void {
+    // 原版投射物绘制尺寸 = 贴图原生尺寸 × scale（碰撞盒 6×6 与绘制解耦）——
+    // 50/53/515/1089 贴图是 22×6 横条（此前按碰撞盒 6px 画成 1.6px 细丝）；
+    // 870 妖精 = 18×96 纵条 6 帧（帧进 5t）；473 = 18×18 单帧
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = projSprite(this.projId);
+    ctx.save();
+    ctx.translate(this.x + this.w / 2, this.y + this.h / 2);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    if (img && img.complete && img.naturalWidth > 0) {
+      if (this.projId === 870) {
+        const fr = Math.floor(this.fairyT / 5) % 6;
+        ctx.drawImage(img, 0, fr * 16, 18, 16, -9, -8, 18, 16);
+      } else {
+        ctx.drawImage(img, -img.naturalWidth / 2, -img.naturalHeight / 2);
+      }
+    } else {
+      ctx.fillStyle = '#7FE8A8';
+      ctx.fillRect(-3, -3, 6, 6);
+    }
+    ctx.restore();
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
@@ -457,6 +478,7 @@ export class GlowstickProj extends Entity {
         this.vx = -lastVx; this.vy = -lastVy;
         this.fairy = true;
         this.fairyT = 0;
+        this.rot = 0;
         return;
       }
       if (this.projId === 50) {

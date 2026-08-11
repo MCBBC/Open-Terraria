@@ -67,6 +67,8 @@ export class Player extends Entity {
   useTime = 0;           // 通用动作冷却
   dead = false;
   respawnTimer = 0;
+  /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费） */
+  immuneAlpha = 0;
   // 摔伤追踪
   private fallStartY: number | null = null;
   /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */

@@ -56,17 +56,18 @@ export function hitPlayer(
   if (dmg <= 0) return false;
   const p = game.player;
   if (p.dead) return false;
+  if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
   const ifr = p.iframes;
   game.damagePlayer(dmg, self.x + self.w / 2, self.y + self.h / 2);
-  return p.iframes > ifr; // damage 落地才置无敌帧(闪避/无敌内不置)
+  return p.iframes > ifr; // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）
 }
 
 /** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450+,仅在
  *  hitPlayer 返回 true 即 Hurt>0 后调用)。本仓库已实装弹型登记:
  *   348 FrostWave —— Chilled(46) 300/600t(:11554-11557) + Frozen(47)
  *                    概率 20/40/60t 三级(:11558-11567)
- *   349 FrostShard —— Chilled(46) 1/3→600t、否则 1/2→300t(:11569-11576)
+ *   349 FrostShard —— Chilled(46) 1/3→600t、否则 1/2→300t(:11580-11588)
  *  其余弹型的 debuff 链(毒/诅咒/灵液/暗影焰等)随对应批次逐条接入。 */
 export function statusPlayer(game: GameHooks, projId: number): void {
   const p = game.player;

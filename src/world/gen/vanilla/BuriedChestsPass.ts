@@ -253,10 +253,21 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     const id = vid(2198);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
   }
-  // legacy 键主件(如金字塔/蛛网的特殊掉落直接给 key)直接置首
-  if (ctx.mainKey && !items.some((it) => it && it.id === ITEM_BY_KEY[ctx.mainKey!])) {
-    const id = ITEM_BY_KEY[ctx.mainKey];
-    if (id !== undefined) items.unshift({ id, stack: 1 });
+  // 键主件(如金字塔/蛛网/世界树的特殊掉落直接给 key)置首。
+  // 同一原版物品可能有两个注册键:调用方显式键(如 vi_832_living_wood_wand)与
+  // vid() 的规范驼峰键(items.ts 自动注册循环 vi_832_LivingWoodWand)。mainKey 与
+  // mainVanillaId 同源(placeBuriedChest 由键反解)时,先剔除 push(mainVanillaId)
+  // 经 vid() 入箱的那份,再按调用方指定键入箱——否则世界树宝箱会出现两根活木魔棒。
+  if (ctx.mainKey) {
+    const keyId = ITEM_BY_KEY[ctx.mainKey];
+    if (keyId !== undefined) {
+      if (vanillaIdOfKey(ctx.mainKey) !== null && vanillaIdOfKey(ctx.mainKey) === mainVanillaId) {
+        const viaVid = vid(mainVanillaId);
+        const idx = items.findIndex((it) => it && it.id === viaVid);
+        if (idx >= 0) items.splice(idx, 1);
+      }
+      if (!items.some((it) => it && it.id === keyId)) items.unshift({ id: keyId, stack: 1 });
+    }
   }
   return items;
 }

@@ -305,7 +305,14 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                     ushort cur = typ[ti];
                     if (overRide && act[ti] == 1)
                     {
-                        // Main.tileStone[type]：宝石族——本链放置类型不含，恒 false
+                        // Main.tileStone[type]（Main.cs tileStone[63-68,130,131,566]=true）：
+                        // 宝石/活失活石/琥珀石铺设时仅替换石头，其余活性块保护。
+                        // 丛林链 r1/r2/r3 与收尾 loop 都铺宝石——缺失会让宝石覆盖活性泥，
+                        // 污染后续 type==59 拒绝采样 → 石囊位置整体错位
+                        if ((type >= 63 && type <= 68) || type == 130 || type == 131 || type == 566)
+                        {
+                            if (cur != 1) flag4 = true;
+                        }
                         if (NOT_CLEAR.Contains(cur)) flag4 = true;
                         if (cur == 1 && type == 59)
                         {
@@ -1327,18 +1334,22 @@ Checkpoint("grass");
     }
     CPT.Add($"holes_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     ghAt("big");
+    var L3C = new List<string>();
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
         int c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws));
+        int tries = 1;
         while (c3x < 1 || c3x >= W - 1 || c3y < 1 || c3y >= H - 1 || typ[c3y * W + c3x] != 59)
-        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); }
+        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); tries++; }
+        if (l < 40) L3C.Add($"n{l}@{c3x},{c3y}t{tries}");
         TileRunner(c3x, c3y, (int)r.Next(4, 10), (int)r.Next(5, 30), 1);
         if ((int)r.Next(4) == 0)
             TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
     }
     File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
     File.WriteAllBytes("/tmp/cs-act6.bin", act);
+    File.WriteAllText("/tmp/cs-l3.txt", string.Join(" ", L3C));
     File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
 }
 Checkpoint("jungle");

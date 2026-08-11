@@ -8,7 +8,7 @@
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
-import { Inventory } from '../src/stats/Inventory';
+import { Inventory } from '../src/items/Inventory';
 import { Arrow } from '../src/entities/Arrow';
 import { BuffType } from '../src/stats/Buffs';
 import type { GameHooks } from '../src/entities/types';
@@ -21,7 +21,10 @@ function makeGame(p: Player, log: { dmg: number[] }): GameHooks {
     enemies: () => [],
     critters: () => [],
     spawnDrop: () => null,
-    damagePlayer: (dmg: number) => { log.dmg.push(dmg); },
+    damagePlayer: (dmg: number, sx: number, sy: number) => {
+      log.dmg.push(dmg);
+      p.damage(dmg, sx, sy); // 真 Game.damagePlayer 同链:Player.damage 落地即置 iframes
+    },
     addDamageNumber: () => {},
     cutTile: () => {},
     spawnParticles: () => {},
@@ -87,5 +90,26 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
     expect(p.buffs.has(BuffType.Chilled)).toBe(true);
     // Chilled 移速 ×0.75（Player.cs:25659-25661）
     expect(p.buffs.moveSpeedMult).toBeCloseTo(0.75, 5);
+  });
+
+  it('aiStyle 14 弹跳弹（希腊火 326）:落地反弹不消亡', () => {
+    const p = new Player(30 * 16, 10 * 16, new Inventory());
+    const game = makeGame(p, { dmg: [] });
+    // 世界 FLOOR=20 行无地面,这里落到世界底边（store 底行实心边界外用 isSolid 判定,
+    // 直接把弹体射向 y=20*16 以下的实心底——World 边界外 isSolid=false,故自建地面:
+    // 使用 makeGame 的 world 在底部两行放实心块）
+    const w = game.world.store;
+    for (let x = 0; x < w.w; x++) { w.setTile(x, 20, 1); w.setTile(x, 21, 1); }
+    const arrow = new Arrow(30 * 16, 14 * 16, 2, 3, 30, 0, 326, null,
+      { grav: 0.2, life: 300, pierce: 1, hostile: true, bounce: true });
+    let bounces = 0;
+    let prevVy = arrow.vy;
+    for (let i = 0; i < 200 && !arrow.dead; i++) {
+      arrow.fixedUpdate(1 / 60, game);
+      if (arrow.vy < 0 && prevVy > 0) bounces++; // 触地反弹（vy 翻负）
+      prevVy = arrow.vy;
+    }
+    expect(bounces).toBeGreaterThan(0); // 弹跳发生
+    expect(arrow.dead).toBe(false);      // 反弹不消耗弹体（寿命未尽不消亡）
   });
 });

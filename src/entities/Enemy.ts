@@ -2523,12 +2523,20 @@ export class Enemy extends Entity {
     }
     // 垂直避障
     const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
-    let belowSolid = false;
-    for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
-    if (belowSolid && this.ai1 > 0) this.ai1 = -Math.abs(this.ai1);
-    let aboveClear = true;
-    for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
-    if (aboveClear && this.ai1 < 0) this.ai1 = Math.abs(this.ai1);
+    // (:34427-34448) vy>0 查下方 4 格(实心/液体 → 翻转目标+vy×0.9);
+    // (:34450-34464) vy<0 查下方 30 格(**下方**非上方——曾写反成 cy-k,
+    // 空旷世界恒"上方空" → 向上目标被每帧强制翻正 → 萤火虫确定性下沉)
+    if (this.vy > 0) {
+      let belowHit = false;
+      for (let k = 0; k <= 4 && !belowHit; k++) {
+        if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) belowHit = true;
+      }
+      if (belowHit) { this.ai1 = -this.ai1; this.vy *= 0.9; }
+    } else if (this.vy < 0) {
+      let belowClear = true;
+      for (let k = 0; k <= 30 && belowClear; k++) if (st.isSolid(cx, cy + k)) belowClear = false;
+      if (belowClear) { this.ai1 = -this.ai1; this.vy *= 0.9; }
+    }
     // 平滑逼近
     this.vx = (this.vx * 59 + this.ai0) / 60;
     this.vy = (this.vy * 59 + this.ai1) / 60;
@@ -2686,7 +2694,11 @@ export class Enemy extends Entity {
       const spd = far ? 0.5 + Math.random() : 0.05 + Math.random() * 1.45;
       const ang = Math.random() * Math.PI * 2;
       this.ai0 = Math.cos(ang) * spd;
-      this.ai1 = Math.sin(ang) * spd - 0.35 + Math.random() * 1.2; // Y 偏向上（-100..+250 量化）
+      // Y 偏置(:34296-34300)仅"有玩家且自身在玩家下方"时施加(寻的上抬);
+      // ★曾无条件加 -0.35+rand*1.2(均值 +0.25 向下) → 无玩家场景(测试/荒野)
+      // 萤火虫缓慢下沉,200tick 漂移超容差
+      const yBias = (player && this.y > player.y - 100) ? -0.35 + Math.random() * 1.2 : 0;
+      this.ai1 = Math.sin(ang) * spd + yBias;
       this.ai2 = 60 + Math.floor(Math.random() * 120);
     }
     this.ai2 -= 1;
