@@ -70,7 +70,7 @@ import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType } from '../stats/Buffs';
-import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
+import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
@@ -1872,7 +1872,10 @@ export class Game implements GameHooks {
       const spd = Math.max(12, Math.round((tool?.speed ?? (cw?.kind === 'melee' ? cw.useTime : 42)) / this.player.attackSpeedMult));
       // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
       const ps = this.heldPrefixStat();
-      if (!this.swing && this.player.useTime === 0) {
+      // ★ 重启门含 swing.t<=1（原版 itemAnimation 归零同帧即重启挥动,NPC AI 永远看不到 0 帧；
+      //   此前 !this.swing 硬门让每挥击周期漏出 1 帧 useTime==0——黄蜂 ai[1] 每周期清零,
+      //   永远攒不到 130 → 战斗中黄蜂从不射毒刺(NPC.cs:51165 的 itemAnimation 门因此误判"待机")）
+      if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
         this.swing = {
           t: spd, dur: spd, item: held!.id,
           dmg: cw?.kind === 'melee' ? Math.max(1, Math.round(cw.damage * (ps?.dmg ?? 1))) : undefined,
@@ -1889,7 +1892,8 @@ export class Game implements GameHooks {
     // 镐/斧/锤：挖掘（按住累计）+ 同时作为武器挥击（伤害低于剑）
     if (tool && (tool.type === 'pick' || tool.type === 'axe' || tool.type === 'hammer')) {
       const spd = Math.max(14, Math.round((tool.speed ?? 46) / this.player.attackSpeedMult));
-      if (!this.swing && this.player.useTime === 0) {
+      // 同剑系：swing.t<=1 放行同帧重启（防黄蜂 ai[1] 每周期清零,见上）
+      if (this.player.useTime === 0 && (!this.swing || this.swing.t <= 1)) {
         this.swing = { t: spd, dur: spd, item: held!.id };
         this.player.useTime = spd;
         this.swingHitSet.clear();
@@ -2274,13 +2278,24 @@ export class Game implements GameHooks {
     return false;
   }
 
+  /** 原版 IsInTileInteractionRange（Player.cs:31548）+ GetTileRegion
+   * （TileReachCheckSettings.cs:53）1:1：玩家盒外扩 tileRangeX=5 / tileRangeY=3
+   * （+tileBoost）的【矩形】判定（Simple 档 multiplier=1/上限 20）。非圆形距离 */
+  private inTileRange(tx: number, ty: number, tb = 0): boolean {
+    const p = this.player;
+    const x = Math.min(20, 5) + tb, y = Math.min(20, 3) + tb;
+    const LX = Math.floor(p.x / TILE) - x;
+    const HX = Math.ceil((p.x + p.w) / TILE) - 1 + x;
+    const LY = Math.floor(p.y / TILE) - y;
+    const HY = Math.ceil((p.y + p.h) / TILE) - 1 + y;
+    return tx >= LX && tx <= HX && ty >= LY && ty <= HY;
+  }
+
   private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number) {
     // 联机破坏保护（v3 房间制）：非房主禁挖/禁锤墙
     if (!this.netCanEditTile()) { this.mining = null; this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // 范围检查
-    const dx = tx - Math.floor(this.player.cx / TILE);
-    const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 4.5) { this.mining = null; return; }
+    if (!this.inTileRange(tx, ty)) { this.mining = null; return; }
     const type = this.world.store.get(tx, ty);
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
@@ -2730,7 +2745,7 @@ export class Game implements GameHooks {
     const st = this.world.store;
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 8.5) return; // 原版 tileBoost 20,放宽到 8.5 格
+    if (!this.inTileRange(tx, ty, 20)) return; // 原版多彩扳手/蓝图 tileBoost=20
     if (this.player.useTime > 0) return;
     const wt = itemDef.wireTool!;
     const inv = this.player.inv;
@@ -2827,7 +2842,7 @@ export class Game implements GameHooks {
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) return;
+    if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) return;
     if (this.player.useTime > 0) return;
     const wallId = itemDef.wallId!;
     const i0 = st.idx(tx, ty);
@@ -2869,7 +2884,7 @@ export class Game implements GameHooks {
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) return;
+    if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
     // 橡实: 只能种在草块正上方
@@ -3050,7 +3065,7 @@ export class Game implements GameHooks {
     {
       const dx = tx - Math.floor(this.player.cx / TILE);
       const dy = ty - Math.floor(this.player.cy / TILE);
-      if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) { this.input.rightDown = false; return; }
+      if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
     // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
@@ -3874,41 +3889,71 @@ export class Game implements GameHooks {
     const held = this.player.inv.heldItem();
     if (!held) return;
     const tool = ITEM_DEFS[held.id].tool;
-    // 近战判定范围因武器而异：剑用完整 reach；镐/斧/锤当武器不顺手（×0.8）；
-    // 空手默认 3 格
-    const reach = (tool?.reach ?? TILE * 3) * (tool?.type === 'sword' ? 1 : tool ? 0.8 : 1);
-    // 原版 Player.ItemCheck_CutTiles（Player.cs:44002）：挥击覆盖矩形内所有 Main.tileCut
-    // tile → KillTile（杂草/藤蔓/药草直接碎；瓦罐整罐碎裂掉 loot；同一挥击每格只处理一次）
-    const arcX = this.player.cx + this.player.facing * reach * 0.35;
-    {
-      const half = Math.ceil(reach / TILE);
-      const acx = Math.floor(arcX / TILE), acy = Math.floor(this.player.cy / TILE);
-      for (let ty = acy - half; ty <= acy + half; ty++) {
-        for (let tx = acx - half; tx <= acx + half; tx++) {
-          const tk = tx * 100000 + ty;
-          if (this.swingTileCutSet.has(tk)) continue;
-          const t = this.world.store.get(tx, ty);
-          if (t === POT_TILE) {
-            this.swingTileCutSet.add(tk);
-            this.smashPot(tx, ty);
-          } else if (TILE_CUT.has(t)) {
-            this.swingTileCutSet.add(tk);
-            this.breakTile(tx, ty);
-          }
+    void tool;
+    // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
+    // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）
+    // + 物品贴图帧宽高（vanilla heldItemFrame ≈ atlasIcon 尺寸）× scale；
+    // useStyle1 三段缩放：早段 宽×1.4 高×1.1 下移半高 / 中段原样 / 晚段 宽×2 高×1.4
+    const pAnim = Math.min(1, Math.max(0, this.swing.t / this.swing.dur));
+    const ar = this.renderer?.atlas ? atlasIconForKey(this.renderer.atlas, ITEM_DEFS[held.id].key) : null;
+    const sprW = ar?.sw ?? 16, sprH = ar?.sh ?? 16;
+    const xTier = (w: number, phase: 0 | 1 | 2) => phase === 0
+      ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
+      : phase === 1
+        ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
+        : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
+    const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
+      : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
+    let offX: number, offY: number;
+    const phase: 0 | 1 | 2 = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
+    if (phase === 0) { offX = sprW * 0.5 - xTier(sprW, 0); offY = yTier(sprH, 0); }
+    else if (phase === 1) { offX = sprW * 0.5 - xTier(sprW, 1); offY = yTier(sprH, 1); }
+    else { offX = -(sprW * 0.5 - xTier(sprW, 2)); offY = yTier(sprH, 2); }
+    const p = this.player;
+    let bx = p.cx + p.facing * offX;
+    let by = p.y + offY;
+    let bw = sprW, bh = sprH;
+    if (p.facing === -1) bx -= bw;
+    by -= bh;
+    // 三段缩放（:44516-44540）
+    if (phase === 0) {
+      if (p.facing === -1) bx -= bw * 1.4 - bw;
+      bw = Math.floor(bw * 1.4);
+      by += Math.floor(bh * 0.5);
+      bh = Math.floor(bh * 1.1);
+    } else if (phase === 2) {
+      if (p.facing === 1) bx -= Math.floor(bw * 1.2);
+      bw *= 2;
+      by -= Math.floor(bh * 1.4 - bh);
+      bh = Math.floor(bh * 1.4);
+    }
+    // 原版 ItemCheck_CutTiles（Player.cs:44002）：挥击矩形内所有 tileCut/KillTile
+    for (let ty = Math.floor(by / TILE); ty <= Math.floor((by + bh - 1) / TILE); ty++) {
+      for (let tx = Math.floor(bx / TILE); tx <= Math.floor((bx + bw - 1) / TILE); tx++) {
+        const tk = tx * 100000 + ty;
+        if (this.swingTileCutSet.has(tk)) continue;
+        const t = this.world.store.get(tx, ty);
+        if (t === POT_TILE) {
+          this.swingTileCutSet.add(tk);
+          this.smashPot(tx, ty);
+        } else if (TILE_CUT.has(t)) {
+          this.swingTileCutSet.add(tk);
+          this.breakTile(tx, ty);
         }
       }
     }
-    // 弧线判定：圆心向朝向方向平移（身后不再被波及；小动物/怪物共用同一判定圆）
-    const prog = 1 - this.swing.t / this.swing.dur;
+    // 矩形-AABB 相交判定（原版 ItemCheck_MeleeHitNPCs 的 npc.getRect().Intersects(itemRectangle)）
+    const prog = 1 - pAnim;
     // 法杖系 noMelee = true（原版 Item.cs case 739/3069 等共 449 处 noMelee）：
     // 突刺动画不造成任何近战伤害——实体判定整体跳过（tileCut 砍草保留，原版 CutTiles 仍生效）
     if (ITEM_DEFS[held.id].magic) { void prog; return; }
+    const hitRect = (ex: number, ey: number, ew: number, eh: number) =>
+      ex < bx + bw && ex + ew > bx && ey < by + bh && ey + eh > by;
     // 小动物：任何挥击一击致死
     for (const cent of this.entities.critters) {
       const c = cent as Critter;
       if (this.swingHitSet.has(c.id)) continue;
-      const cdx = c.cx - arcX, cdy = c.cy - this.player.cy;
-      if (Math.hypot(cdx, cdy) <= reach + c.w / 2) {
+      if (hitRect(c.x, c.y, c.w, c.h)) {
         this.swingHitSet.add(c.id);
         c.hurt(this);
       }
@@ -3916,12 +3961,7 @@ export class Game implements GameHooks {
     for (const ent of this.entities.enemies) {
       const e = ent as Enemy;
       if (this.swingHitSet.has(e.id)) continue;
-      const dx = e.cx - arcX;
-      const dy = e.cy - this.player.cy;
-      const dist = Math.hypot(dx, dy);
-      if (dist > reach + e.w / 2) continue;
-      // 朝向检查（挥舞半程后命中判定放宽）
-      if (Math.sign(dx) !== this.player.facing && Math.abs(dx) > e.w / 2) continue;
+      if (!hitRect(e.x, e.y, e.w, e.h)) continue;
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
       if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
@@ -3933,7 +3973,7 @@ export class Game implements GameHooks {
         * this.player.damageMult('melee')) + this.player.equipStats.armorPen;
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
-      const kdir = Math.sign(dx) || this.player.facing;
+      const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
       const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1);

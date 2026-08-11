@@ -1,4 +1,6 @@
 // 原版 1.4.0.5 全量 NPC 数据（tools/extract-npcs.mjs 从 Terarria1405/NPC.cs SetDefaults 提取）。
+// 增量补齐（2026-08-11）：473-476/590/591/594/628/629/631/634/635/692 十三条取自
+// Terarria1456/NPC.cs SetDefaults + Main.cs npcFrameCount（数值一律取 1456 最终态）。
 // aiStyle 与 AI_XXX 方法的对应见 NPC.cs AI() 分发；此处先覆盖高频家族，
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';

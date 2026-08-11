@@ -167,7 +167,7 @@ async function liquidSettlePass({ world }: GenCtx) {
 /** 种子等价对账钩子（terrain oracle）：只跑 Reset 掷骰 + Terrain pass，
  *  返回 GenState 与逐列地表（trunc(num3)），供与 C# 参考实现逐列比对 */
 export function runResetAndTerrain(cfg: { width: number; height: number; seedText: string; evil?: -1 | 0 | 1 }): {
-  gs: GenState; surface: Int32Array; seed: number;
+  gs: GenState; surface: Int32Array; seed: number; world: World; rng: RNG; ctx: GenCtx;
 } {
   const seed = translateSeed(cfg.seedText);
   const world = new World(cfg.width, cfg.height, seed);
@@ -180,7 +180,7 @@ export function runResetAndTerrain(cfg: { width: number; height: number; seedTex
   vanillaTerrain(ctx);
   const out = new Int32Array(cfg.width);
   for (let x = 0; x < cfg.width; x++) out[x] = ctx.surface[x];
-  return { gs: ctxGs[0]!, surface: out, seed };
+  return { gs: ctxGs[0]!, surface: out, seed, world, rng, ctx };
 }
 
 function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
@@ -589,7 +589,9 @@ function hellPass({ store, rng }: GenCtx) {
         st.liquid[i] = 0; st.liquidType[i] = 0;
       } else {
         st.type[i] = ASH; st.flags[i] = 1;
-        st.wall[i] = 1;
+        // 原版地狱本体无自然墙（空腔无墙，NPC 可刷）——此前涂 wall 1（可放置墙，
+        // 在 spawner WALL_HOUSE 表内）→ 地狱刷怪点被"房屋墙门"(NPC.cs L886)全拒，
+        // 地狱恒不刷怪
       }
     }
   }

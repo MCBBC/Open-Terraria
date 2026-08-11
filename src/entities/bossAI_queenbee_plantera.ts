@@ -475,6 +475,7 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
     if (e.hp <= 0) e.dead = true;
     return;
   }
+  e.master = boss; // 钩蔓链渲染用（Renderer.drawPlanteraVine，Main.cs:22225-22261）
   const target: { cx: number; cy: number; x: number; y: number; dead: boolean } = player ?? boss;
   const flag54 = !player || player.dead;    // 玩家死(:32248-32250)
   // 暴怒 flag53(玩家离丛林/地表/地狱层,localAI[0]-4/换锚-6/速度 ×2)省略(见汇报简化项)
@@ -572,6 +573,7 @@ export function planteraTentacle2AI(e: Enemy, game: GameHooks, player: Player | 
   const anchor = e.ai3 > 0
     ? (game.enemies() as Enemy[]).find((n) => !n.dead && n.id === e.ai3 - 1) ?? boss
     : boss;
+  e.master = anchor; // 触须链渲染用（Renderer.drawPlanteraVine，Main.cs:22262-22285）
   // 偏移重掷(:32432-32439)
   l[0] -= 1;
   if (l[0] <= 0) {

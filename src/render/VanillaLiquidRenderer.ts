@@ -19,8 +19,11 @@ const DEFAULT_OPACITY = [0.5, 0.9, 0.8];  // 水 / 岩浆 / 蜂蜜——原版 o
 function toVanillaType(t: number): number {
   return t === 2 ? 1 : t === 3 ? 2 : 0;
 }
-function waterSheet(vt: number): string {
-  return vt === 1 ? 'vanilla/Misc_water_1.png' : vt === 2 ? 'vanilla/Misc_water_11.png' : 'vanilla/Misc_water_0.png';
+function waterSheet(vt: number, waterStyle = 0): string {
+  if (vt === 1) return 'vanilla/Misc_water_1.png';   // 岩浆
+  if (vt === 2) return 'vanilla/Misc_water_11.png';  // 蜂蜜
+  // 水:群系水色（CalculateWaterStyle,Main.cs:56845）——0-10/12/13 十三种
+  return `vanilla/Misc_water_${Math.max(0, Math.min(13, waterStyle))}.png`;
 }
 
 // ---- 类型数组池(2026-08 审计 G1):此前每 pass 分配 24 个数组 ×2 pass/帧
@@ -40,7 +43,7 @@ export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number,
-  nowMs: number, isBackground = false,
+  nowMs: number, isBackground = false, windSpeed = 0, waterStyle = 0,
 ): void {
   if (!atlas) return;
   const PAD = 2;
@@ -264,12 +267,18 @@ export function drawVanillaLiquids(
   const texFor = (vt: number) => {
     let t = texCache.get(vt);
     if (t === undefined) {
-      t = atlas.ensureVImage(waterSheet(vt)) ?? null;
+      t = atlas.ensureVImage(waterSheet(vt, waterStyle)) ?? null;
       if (t) texCache.set(vt, t);  // 只缓存命中(缓存 null 会把未就绪永久化)
     }
     return t;
   };
-  const animFrame = Math.floor((nowMs / 1000) * 6) % 16; // 原版 _frameState（风+6 基速）
+  // 双动画帧（1456 LiquidRenderer.Update :844-856）：
+  //  _animationFrame = windSpeed*25 ± 6 每 秒（边缘格波浪,负风倒放,模 16）
+  //  _waterfallAnimationFrame = 0.5 每 秒（X==16 中列 = 下落水柱/池体,慢速流纹——
+  //  1.4.4 新增;1405 无此项,旧移植全部格共用快帧导致下落水柱 6fps 快闪"贴图不对"）
+  const rate = windSpeed >= 0 ? windSpeed * 25 + 6 : windSpeed * 25 - 6;
+  const animFrame = ((Math.floor((nowMs / 1000) * rate) % 16) + 16) % 16;
+  const waterfallFrame = Math.floor((nowMs / 1000) * 0.5) % 16;
   ctx.imageSmoothingEnabled = false;
 
   // 主循环（双 pass 共用：背景 pass 画在方块层前、透明度 1.0；前景 pass 画在方块后、乘 DEFAULT_OPACITY）
@@ -293,7 +302,8 @@ export function drawVanillaLiquids(
       const sy = Math.floor(16 - n5 * 16) + fy[i];
       const sw = Math.ceil((n3 - n2) * 16), sh = Math.ceil((n5 - n4) * 16);
       const isSurface = fx[i] === 16 && fy[i] === 0 && y > groundLevel - 40;
-      const srcY = isSurface ? 1280 : sy + animFrame * 80;
+      // 帧选择 1:1（DrawNormalLiquids :636-644）：中列（sx==16,下落柱/池体）走慢速瀑布帧
+      const srcY = isSurface ? 1280 : sy + (sx === 16 ? waterfallFrame : animFrame) * 80;
       if (sw <= 0 || sh <= 0 || sx + sw > tex.width || srcY + sh > tex.height) continue;
       // 双 pass（Main.cs DrawWaters(true/false) + LiquidRenderer.InternalDraw）：
       // 背景 pass 不透明（露出方块透明像素 = 浸润）；前景 pass 水 0.6 半透明质感

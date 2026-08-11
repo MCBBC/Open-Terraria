@@ -59,12 +59,18 @@ export const VANILLA_MISC = [
   'vanilla/Tiles_323.png', 'vanilla/Tiles_72.png',  // 棕榈/发光蘑菇树干(群系专属但极小,常驻防传送闪失)
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
   'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
-  'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png',
+  ...Array.from({ length: 11 }, (_, i) => `vanilla/Misc_water_${i}.png`),
+  'vanilla/Misc_water_12.png', 'vanilla/Misc_water_13.png', 'vanilla/Misc_water_14.png',
   'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
   'vanilla/Shroom_Tops.png',
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
   'vanilla/Chain4.png', 'vanilla/Chain5.png', 'vanilla/Chain14.png',
   'vanilla/Chain24.png', 'vanilla/Chain25.png',  // AI_013 藤蔓段（Main.cs:22433-22514 食人怪族茎蔓叠画）
+  'vanilla/Chain10.png', 'vanilla/Chain11.png',  // 邪恶触手 101 茎蔓（Main.cs:22391-22432 交替段）
+  'vanilla/Chain12.png',                         // 双子互连链（Main.cs:22177-22224）
+  'vanilla/Chain21.png',                         // 石巨人拳链（Main.cs:22593-22632）
+  'vanilla/Chain26.png', 'vanilla/Chain27.png',  // 世花钩蔓/触须（Main.cs:22225-22285）
+  'vanilla/Arm_Bone_2.png',                      // Prime 部件臂骨（Main.cs:22633-22675）
   'vanilla/WiresNew.png', 'vanilla/Actuator.png',
   // 电路陷阱弹幕贴图(Wiring.cs:1495-1743 的 projectile id;帧尺寸取 Projectile.cs SetDefaults)
   'vanilla/Projectile_98.png',   // 毒镖 10×10

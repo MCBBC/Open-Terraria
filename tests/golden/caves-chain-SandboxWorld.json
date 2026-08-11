@@ -1,0 +1,18 @@
+{
+  "seed": 1511931452, "evil": 1,
+  "worldSurface": 337, "rockLayer": 487, "waterLine": 809, "lavaLine": 885,
+  "checkpoints": [
+    "terrain|7fc39ae4 93b70d3c 0bb5a9c5 0bb5a9c5",
+    "dunes|6784f1e9 7cb3fb5d 0bb5a9c5 0bb5a9c5",
+    "oceansand|8f0d8fdc 7cb3fb5d 0bb5a9c5 0bb5a9c5",
+    "sandpatches|855da129 7cb3fb5d 0bb5a9c5 0bb5a9c5",
+    "tunnels|855da129 d612d3cd 0bb5a9c5 0bb5a9c5",
+    "mountaincaves|855da129 61b3d20d 0bb5a9c5 0bb5a9c5",
+    "dirtwallbg|855da129 61b3d20d 758d1847 0bb5a9c5",
+    "rocksclay|7c6f83b8 61b3d20d 758d1847 0bb5a9c5",
+    "smallholes|7c6f83b8 5f9285c4 758d1847 87b8329d",
+    "dirtlayer|7c6f83b8 fe032ded 758d1847 e215953d",
+    "rocklayer|7c6f83b8 675ae12d 758d1847 1e7b6a62",
+    "surfacecaves|7c6f83b8 dede6b7c 758d1847 6abfd595"
+  ]
+}

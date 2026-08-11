@@ -1727,10 +1727,14 @@ export class Enemy extends Entity {
       if (flag4 && this.vy > 0 && sy < 0) this.vy -= accel;
     }
     this.facing = this.vx > 0 ? 1 : -1;
-    // 旋转(cs:51022):原版全族 rotation = atan2(vy,vx) − π/2(XNA 旋转方向与
-    // canvas 相反)→ canvas 等价 +π/2。★该族贴图正面朝上(实测 NPC_6 亮齿在上),
-    // 与 EoC(正面朝下,−π/2)相反——符号按贴图实测确定
-    this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
+    // 旋转角来源分族（cs:51022/51045-51052）：6/94/173/619 用**指向目标的期望速度**
+    // (sx,sy)——噬魂怪永远盯着目标转头，惯性环绕/漂移时头不乱摆（此前误用当前速度，
+    // 观感"AI 不对"的最大来源）；其余全转头成员（仆从 5 等）原版用当前速度角。
+    // +π/2 为该族贴图正面朝上的实测符号（原版 −π/2 叠默认镜像等价）
+    const faceTarget = vid === 6 || vid === 94 || vid === 173 || vid === 619;
+    const fax = faceTarget ? sx : this.vx;
+    const fay = faceTarget ? sy : this.vy;
+    this.visAngle = Math.atan2(fay, fax) + Math.PI * 0.5;
     // ---- 黄蜂毒刺（cs:51125-51213：42/176/231-235）：ai[1] 每 tick +rand(5,20)×0.1
     // （苔藓黄蜂 176 ×2）；玩家待机未挥动（原版 itemAnimation==0 && stealth==0 门）清零；
     // ≥130 且有视线且朝向与移动方向一致 → 毒刺（速 8、伤 10×scale/176 30×scale、
@@ -1771,12 +1775,37 @@ export class Enemy extends Entity {
       return;
     }
     moveAndCollide(this, game.world, this.vx, this.vy);
-    // 撞墙/撞地反弹（L51047-51066）：6/173 ×0.4，其余（含蜂）×0.7；
-    // X 最小弹速 ±2 / Y 下方 +2 上方 -2（眼睛同款近似，最小值暂略）
+    // 撞墙/撞地反弹 1:1（cs:51041-51066）：6/173 ×0.4、其余 ×0.7；
+    // collideX 朝 direction 保底 ±2、collideY |vy|<1.5 保底 ±2（此前最小弹速略）
     const bounce = isEater ? 0.4 : 0.7;
-    if (this.hitWall) this.vx = -this.vx * bounce;
-    if (this.onGround) this.vy = -Math.abs(this.vy) * bounce - 0.5;
-    if (this.hitHead) this.vy = Math.abs(this.vy) * bounce + 0.5;
+    if (this.hitWall) {
+      this.vx = -this.vx * bounce;
+      if (this.facing === -1 && this.vx > 0 && this.vx < 2) this.vx = 2;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -2) this.vx = -2;
+    }
+    if (this.onGround || this.hitHead) {
+      this.vy = -this.vy * bounce;
+      if (this.vy > 0 && this.vy < 1.5) this.vy = 2;
+      if (this.vy < 0 && this.vy > -1.5) this.vy = -2;
+    }
+    // ---- wet 浮力（cs:51106-51136）：噬魂怪族(6/94/173/619) vy>0 ×0.95、-0.3、钳 -2
+    // （入水即上浮不沉底）；黄蜂族(42/176/231-235) -0.5 钳 -4
+    const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 0;
+    if (inW && (vid === 6 || vid === 94 || vid === 173)) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.3;
+      if (this.vy < -2) this.vy = -2;
+    } else if (inW && (vid === 42 || vid === 176 || (vid >= 231 && vid <= 235))) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
+    }
+    // ---- 环境拖尾尘（cs:51083-51091）：非蜂族 1/20 出下半身尘（dust 18 紫；
+    // 173 Crimera dust 5 红），vel.X×0.5/Y×0.1 近似
+    if (!isHornet && vid !== 205 && Math.random() < 1 / 20) {
+      game.spawnParticles(this.cx, this.y + this.h * 0.5,
+        vid === 173 ? '#8A3030' : '#7A4FA8', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
+    }
   }
 
   /** AI_010 诅咒头骨（NPC.145.cs:21553+；type 34 路径，书怪 694/魔法骷髅 289 分支未达）：

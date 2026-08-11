@@ -6,6 +6,7 @@ const browser = await puppeteer.launch({ executablePath: '/Applications/Google C
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+page.on('console', (m) => { const t = m.type(); if (t === 'error' || t === 'warning') errs.push(`console.${t}: ` + m.text().slice(0, 200)); });
 await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await new Promise(r => setTimeout(r, 400));
@@ -33,7 +34,13 @@ await new Promise(r => setTimeout(r, 500));
 await page.click('[data-g=size] .sw-wc-opt');
 await new Promise(r => setTimeout(r, 200));
 await page.click('[data-act=create]');
-await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 180000 });
+try {
+  await page.waitForFunction(() => { const g = window.__swGame; return g && g.player; }, { timeout: 420000 });
+} catch (e) {
+  console.log('等待进世界超时,已捕获诊断:', JSON.stringify(errs.slice(-10), null, 2));
+  await page.screenshot({ path: '/tmp/glowshroom-stuck.png' });
+  throw e;
+}
 await new Promise(r => setTimeout(r, 1500));
 
 const res = await page.evaluate(() => {

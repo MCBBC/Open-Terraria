@@ -45,7 +45,7 @@ function surfaceMap(st: TileStore, startX: number, width: number): Int16Array {
   return out;
 }
 
-export function runDunesPass(st: TileStore, rng: RNG, gs: GenState): void {
+export function runDunesPass(st: TileStore, rng: RNG, gs: GenState, onIter?: (i: number) => void): void {
   const { w, h } = st;
   // pass 头：DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）
   // ——地牢主题 Next(3) 在**这里**消耗（曾错放到 DungeonPass=流错位 1 颗）
@@ -92,8 +92,13 @@ function placeDunes(st: TileStore, rng: RNG, ox: number, oy: number): void {
   const h2 = Math.trunc(rng.int(60, 99) * HEIGHT_SCALE);
   const w1 = rng.int(150, 250); // SingleDunesWidth.GetRandom(含两端)
   const w2 = rng.int(150, 250);
-  placeSingle(st, rng, makeDesc(st, rng, ox - Math.trunc(w1 / 2) + 30, oy, w1, h1));
-  placeSingle(st, rng, makeDesc(st, rng, ox + Math.trunc(w2 / 2) - 30, oy, w2, h2));
+  // ★求值顺序（DunesBiome.cs:62-65）：两张 description（含 SurfaceMap 采样+风向掷）
+  // 都在 PlaceSingle **之前**创建——dune2 的地表图取的是 dune1 放置前的地形。
+  // 此前 makeDesc 内联在 placeSingle 实参里 → dune2 的图被 dune1 污染（+/- 若干行）
+  const d1 = makeDesc(st, rng, ox - Math.trunc(w1 / 2) + 30, oy, w1, h1);
+  const d2 = makeDesc(st, rng, ox + Math.trunc(w2 / 2) - 30, oy, w2, h2);
+  placeSingle(st, rng, d1);
+  placeSingle(st, rng, d2);
 }
 
 function makeDesc(st: TileStore, rng: RNG, x: number, y: number, width: number, height: number): DunesDesc {
@@ -171,7 +176,10 @@ function placeCurvedLine(
     const centerX = d.area.left + Math.trunc(d.area.width / 2);
     const n3 = Math.trunc(d.area.width / 2) - Math.abs(px - centerX);
     const surf = d.surface[Math.max(0, Math.min(d.surface.length - 1, px - d.surfaceX))];
-    const n4 = surf + Math.trunc(Math.sqrt(Math.max(0, n3)) * 3);
+    // 原版 Math.Sqrt(负)=NaN → (int)NaN=int.MinValue → 填充循环不执行。
+    // JS 的 Math.sqrt(负)=NaN、trunc(NaN)=NaN、j<NaN=false——天然同语义，
+    // 不可钳 0（曾钳 0 → 沙丘外缘多铺一列沙）
+    const n4 = surf + Math.trunc(Math.sqrt(n3) * 3);
     if (!st.inBounds(px, py)) continue;
     for (let i = py - 10; i < py; i++) {
       if (!st.inBounds(px, i)) continue;

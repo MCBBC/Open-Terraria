@@ -528,6 +528,7 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   const head = findHead(game);
   const anchor = body && !body.dead ? body : head;
   if (!anchor) { e.dead = true; return; }
+  e.master = anchor; // 拳链渲染用（Renderer.drawGolemFistChain，Main.cs:22593-22632）
 
   const num = balanceNum(game, player);
   // 渐显(:19187-19194):期间 ai[1]=0

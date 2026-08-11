@@ -43,8 +43,9 @@ const MISC = [
   'Evil_Cactus.png', 'Good_Cactus.png', 'Crimson_Cactus.png',
   // 液体贴图（TEdit GetLiquid：0 水 / 1 岩浆 / 11 蜂蜜 / 14 微光）
   'Liquid_0.png', 'Liquid_1.png', 'Liquid_11.png', 'Liquid_14.png',
-  // 1.4 原版液体主表（LiquidRenderer：0 水 / 1 岩浆 / 11 蜂蜜，48×1360）
-  'Misc/water_0.png', 'Misc/water_1.png', 'Misc/water_11.png',
+  // 1.4 原版液体主表（LiquidRenderer：0-10/12/13 群系水色 CalculateWaterStyle + 1 岩浆 11 蜂蜜 14 微光，48×1360）
+  ...Array.from({ length: 11 }, (_, i) => `Misc/water_${i}.png`),
+  'Misc/water_12.png', 'Misc/water_13.png', 'Misc/water_14.png',
   // 蘑菇树树冠（tile 72 专用 ShroomTop）
   'Shroom_Tops.png',
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖

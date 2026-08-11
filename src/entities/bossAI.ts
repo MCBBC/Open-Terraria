@@ -615,6 +615,7 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
   const head = (game.enemies() as Enemy[]).find((n) => n.id === headId && n.vanilla?.aiStyle === 32);
   // 头死亡/失效 → 自毁(原版 ai2+=10 到 50 清除;简化即时)
   if (!head || head.dead) { e.dead = true; return; }
+  e.master = head; // 臂骨 IK 渲染用（Renderer.drawPrimeArm，Main.cs:22633-22675）
   const side = e.ai0 || 1;
   e.facing = -side;
   const ax = head.cx - 200 * side, ay = head.y + 230; // 部件锚点(vanilla num528 系)

@@ -970,7 +970,8 @@ export class VanillaSpawner {
       || t === T.HALLOW_GRASS || t === T.HOLLOW_ICE;
     // L3946：hard && underGround && !waterTile && 神圣 tile →
     //  雨天 Enchanted Nightcrawler 244（唯一）/ 夜 毒气鼻涕虫 122 / 1/10 妖精 86 / 兜底 75
-    //  （L3949 downedPlantBoss→661 Empress蝶 未接旗标，略）
+    //  （L3949 downedPlantBoss→661 Empress蝶：661 数据条已在 vanilla-npcs.json，
+    //   但 world.flags 尚无 downedPlantBoss 旗标，分支仍未接）
     if (hardMode && this.underGround && !this.waterTile && hallowFloor) {
       if (this.world.weather.raining && !any(244) && N(10)) return D(244);
       if (!this.dayTime && N(2)) return D(122);

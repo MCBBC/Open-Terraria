@@ -407,6 +407,7 @@ export class Renderer {
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
+    this.updateWaterStyle(world, cam);
     this.easeFullMap();
     const ctx = this.ctx;
     const viewW = this.canvas.width, viewH = this.canvas.height;
@@ -498,7 +499,7 @@ export class Renderer {
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
     for (const e of sorted) {
-      if (e instanceof Enemy) this.drawEnemy(e, world);
+      if (e instanceof Enemy) this.drawEnemy(e, world, entities);
       else if (e instanceof ItemDrop) this.drawDrop(e);
       else if (e instanceof TownNPC) this.drawTownNPC(e);
       else if (e instanceof Tombstone) this.drawTombstone(e);
@@ -630,7 +631,8 @@ export class Renderer {
     // 外扩后未构建带落在屏幕外，防止视口底缘液体类型错画
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts) + 5);
     // 双 pass 共用同一时刻，避免动画帧错位（原版 PrepareDraw 每帧一次、两 pass 共享缓存）
-    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground);
+    drawVanillaLiquids(this.ctx, this.atlas, world.store, world.groundLevel, tx0, ty0, tx1, ty1, this._liquidNow, isBackground,
+      world.weather?.windSpeedCurrent ?? 0, this.waterStyle);
   }
 
   /** 导线覆盖层(Main.cs:43543-43954 DrawWires 移植:四色行/连接掩码/多色淡化/致动器覆盖) */
@@ -724,6 +726,28 @@ export class Renderer {
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;
+  /** 群系水色（CalculateWaterStyle，Main.cs:56845；每帧由场景标志+昼夜+深度算出） */
+  waterStyle = 0;
+  /** 群系水色 1:1（Main.CalculateWaterStyle :56771-56824，fountain/天顶世界分支无对应系统跳过） */
+  private updateWaterStyle(world: World, cam: { y: number }): void {
+    const f = this.scene;
+    if (!f) return;
+    const bloodMoon = !!world.clock?.bloodMoon;
+    const dayTime = world.clock ? world.clock.isDay : true;
+    if (bloodMoon && !dayTime) { this.waterStyle = 9; return; }
+    if (f.zoneCorrupt) { this.waterStyle = 2; return; }        // bgStyle 1/5
+    if (f.zoneJungle) { this.waterStyle = 3; return; }         // bgStyle 3
+    if (f.zoneCrimson) { this.waterStyle = 10; return; }       // bgStyle 8/14
+    if (f.zoneHallow) { this.waterStyle = 4; return; }         // bgStyle 6/13
+    if (f.zoneSnow) { this.waterStyle = 5; return; }           // bgStyle 7
+    if (f.zoneDesert) { this.waterStyle = f.belowSurface ? 12 : 6; return; } // bgStyle 2（地下→地下沙漠）
+    if (f.zoneUnderworldHeight) { this.waterStyle = 13; return; } // bgStyle 4（地狱）
+    // default:岩层+40 以下 → 发光蘑菇区 7 / 洞穴 8;地下 → 7;地表 → 0
+    // 深度取相机中心 tile Y（原版 SceneMetrics.TileCenter）
+    const ty = Math.floor(cam.y / TILE);
+    if (ty > world.rockLevel + 40) { this.waterStyle = f.zoneGlowshroom ? 7 : 8; return; }
+    this.waterStyle = f.belowSurface ? 7 : 0;
+  }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
@@ -847,7 +871,7 @@ export class Renderer {
     return f;
   }
 
-  private drawEnemy(e: Enemy, world: World) {
+  private drawEnemy(e: Enemy, world: World, entities: unknown[] = []) {
     const ctx = this.ctx;
     const spr = this.assets.enemySprites.get(e.key);
     // 受击闪白
@@ -861,6 +885,14 @@ export class Renderer {
     // AI_013 食人怪族茎蔓（Main.cs:22433-22514 1:1）：头中心 → 锚点格(ai0/ai1)
     // 每 28px 一段 Chain 贴图步进，剩余 <40px 画一段收缩尾段对齐锚点
     if (e.vanilla?.aiStyle === 13) this.drawPlantVine(e);
+    // 石巨人拳链（Main.cs:22593-22632）：拳 → 本体（AI 侧 master；本体死透锚自由头）
+    if (e.vanilla?.aiStyle === 47 && e.master) this.drawGolemFistChain(e);
+    // Prime 部件臂骨（Main.cs:22633-22675）：锯/激光/钳/炮 → 头 两段 IK
+    if ((e.vanilla?.aiStyle ?? 0) >= 33 && (e.vanilla?.aiStyle ?? 0) <= 36 && e.master) this.drawPrimeArm(e);
+    // 世纪之花钩蔓/触须链（Main.cs:22225-22285）：263/264 → 本体
+    if ((e.vanillaId === 263 || e.vanillaId === 264) && e.master) this.drawPlanteraVine(e);
+    // 双子互连链（Main.cs:22177-22224，1.4.5）：125 激活时单侧向 126 画一次
+    if (e.vanillaId === 125) this.drawTwinsChain(e, entities);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
@@ -1106,10 +1138,48 @@ export class Renderer {
    *  中心（ai0/ai1 各 ×16+8）逐段画 Chain 贴图——步长 28px、距锚 <40px 时尾段
    *  缩短对齐（259/260 真菌球为 12/20）；整链 rotation=atan2(dy,dx)-π/2（贴图
    *  正面向上）。贴图分流（:22480-22510）：56→Chain5、175→Chain14、259/260→
-   *  Chain24/25，默认（43 食人怪/101 邪恶触手）→Chain4。光照由 compositeLight
-   *  全屏合成，此处不逐段取光 */
+   *  Chain24/25，默认（43 食人怪）→Chain4。光照由 compositeLight 全屏合成，
+   *  此处不逐段取光。
+   *  邪恶触手 101 是独占分支（:22391-22432，先于 aiStyle 13 判定）：Chain10/
+   *  Chain11 交替段、scale 0.75、步进 15px（20×0.75）、终止 21px（28×0.75）、
+   *  尾段高 = dist-40+28（与终止阈值解耦，绘制高 28 恒定——段间有意重叠） */
   private drawPlantVine(e: Enemy) {
     if (!this.atlas || e.ai0 < 0 || e.ai1 < 0) return;
+    const ctx = this.ctx;
+    const ax = e.ai0 * 16 + 8, ay = e.ai1 * 16 + 8;
+    let px = e.cx, py = e.cy;
+    let dx = ax - px, dy = ay - py;
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;
+    // Clinger 101 独占分支（:22391-22432）
+    if (e.vanillaId === 101) {
+      const c10 = this.atlas.vmisc('vanilla/Chain10.png');
+      const c11 = this.atlas.vmisc('vanilla/Chain11.png');
+      if (!c10 || !c11) return;
+      const s = 0.75;                                // num3
+      let alt = true;                                // flag3：首段走 else → Chain11
+      let running = true;
+      let guard = 0;
+      while (running && guard++ < 200) {
+        let h = 28;                                  // 绘制高（恒 28，尾段除外）
+        const dist = Math.hypot(dx, dy);
+        if (dist < 28 * s) { h = dist - 40 + 28; running = false; }
+        if (dist > 0 && h > 0) {
+          const k = 20 * s / dist;                   // 步进 15px
+          px += dx * k; py += dy * k;
+          dx = ax - px; dy = ay - py;
+          const c = alt ? c11 : c10; alt = !alt;
+          const sh = Math.min(h, c.sh);              // 源矩形越界钳（XNA 同）
+          ctx.save();
+          ctx.translate(px, py);
+          ctx.rotate(rot);
+          ctx.drawImage(c.img, c.sx, c.sy, c.sw, sh, -c.sw * s / 2, -c.sh * s / 2, c.sw * s, sh * s);
+          ctx.restore();
+        } else {
+          running = false;
+        }
+      }
+      return;
+    }
     const id = e.vanillaId;
     // num7/num8：段长/终止距离（Main.cs:22442-22447）
     let step = 28, stop = 40;
@@ -1121,13 +1191,9 @@ export class Renderer {
             : id === 260 ? 'vanilla/Chain25.png'
               : 'vanilla/Chain4.png');
     if (!chain) return;
-    const ctx = this.ctx;
-    const ax = e.ai0 * 16 + 8, ay = e.ai1 * 16 + 8;
-    let px = e.cx, py = e.cy;
-    let dx = ax - px, dy = ay - py;
-    const rot = Math.atan2(dy, dx) - Math.PI / 2;   // :22438
     let running = true;
-    while (running) {                               // :22441-22512
+    let guard = 0;
+    while (running && guard++ < 200) {               // :22441-22512
       const dist = Math.hypot(dx, dy);
       let seg = step;
       if (dist < stop) { seg = dist - stop + step; running = false; }
@@ -1139,12 +1205,143 @@ export class Renderer {
         ctx.translate(px, py);
         ctx.rotate(rot);
         // 源矩形取贴图顶部 seg 行，origin=贴图中心（:22504-22505 scale 1）
-        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, seg,
-          -chain.sw / 2, -chain.sh / 2, chain.sw, seg);
+        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, Math.min(seg, chain.sh),
+          -chain.sw / 2, -chain.sh / 2, chain.sw, Math.min(seg, chain.sh));
         ctx.restore();
       } else {
         running = false;                            // 头贴锚点（dist≈0）不画段
       }
+    }
+  }
+
+  /** 石巨人拳链（Main.cs:22593-22632 1:1）：拳 → golemBoss 本体中心（AI 侧
+   *  master=本体，本体死透时锚自由头——与原版 golemBoss=-1 回退自身中心的
+   *  差异已注释）；目标带肩偏移（247 左 -70×scale / 248 右 +66×scale，Y -7×scale），
+   *  Chain21 全段 16×16、步长 16×scale、距锚 <16 无尾段直接停 */
+  private drawGolemFistChain(e: Enemy) {
+    if (!this.atlas) return;
+    const chain = this.atlas.vmisc('vanilla/Chain21.png');
+    if (!chain || !e.master) return;
+    const ctx = this.ctx;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const offX = e.vanillaId !== 247 ? 66 : -70;    // :22605（type!=247 → +66）
+    const ax = e.master.cx, ay = e.master.cy;
+    let px = e.cx, py = e.cy;
+    let dx = ax - px + offX * scale;
+    let dy = ay - py - 7 * scale;
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;   // :22607
+    let guard = 0;
+    while (guard++ < 200) {
+      const dist = Math.hypot(dx, dy);
+      if (dist < 16) break;                         // :22609-22612 无尾段
+      const k = 16 * scale / dist;
+      px += dx * k; py += dy * k;
+      dx = ax - px + offX * scale;
+      dy = ay - py - 7 * scale;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
+        -chain.sw / 2, -chain.sh / 2, chain.sw, chain.sh);
+      ctx.restore();
+    }
+  }
+
+  /** Prime 部件臂骨（Main.cs:22633-22675 1:1，与骷髅王手 36 同构的两段收缩
+   *  IK）：锚点 = 部件 pos + w/2 - 5×ai[0], +20；朝头中心两段 92/60 归一化，
+   *  段偏移（-200×ai[0], +130）/（-50×ai[0], +80），旋转 atan2-π/2，
+   *  贴图 Arm_Bone_2（26×98，rect/origin 与 Arm_Bone 同尺寸） */
+  private drawPrimeArm(e: Enemy) {
+    if (!this.atlas) return;
+    const arm = this.atlas.vmisc('vanilla/Arm_Bone_2.png');
+    if (!arm || !e.master) return;
+    const ctx = this.ctx;
+    const head = e.master;
+    const side = e.ai0 || 1;                        // ai[0] 侧别 ±1
+    let vx = e.x + e.w * 0.5 - 5 * side;            // :22635
+    let vy = e.y + 20;
+    for (let k = 0; k < 2; k++) {
+      let dx = head.cx - vx, dy = head.cy - vy;
+      let n: number;
+      if (k === 0) { dx -= 200 * side; dy += 130; const len = Math.hypot(dx, dy) || 1; n = 92 / len; }
+      else { dx -= 50 * side; dy += 80; const len = Math.hypot(dx, dy) || 1; n = 60 / len; }
+      vx += dx * n; vy += dy * n;
+      const rot = Math.atan2(dy, dx) - Math.PI / 2; // :22662
+      ctx.save();
+      ctx.translate(vx, vy);
+      ctx.rotate(rot);
+      ctx.drawImage(arm.img, arm.sx, arm.sy, arm.sw, arm.sh, -arm.sw / 2, -arm.sh / 2, arm.sw, arm.sh);
+      ctx.restore();
+      if (k === 0) { vx += dx * n / 2; vy += dy * n / 2; }  // :22666 段间推进
+    }
+  }
+
+  /** 世纪之花钩蔓/触须链（Main.cs:22225-22285 1:1）：263 钩蔓→Chain26、
+   *  264 触须→Chain27，目标 = 本体中心（触须 ai[3]>0 时锚另一触须——AI 侧
+   *  master 已按同语义解析）；步长 16、距锚 <32 尾段缩短（dist-32+16），
+   *  origin=贴图全高中心、scale 1 */
+  private drawPlanteraVine(e: Enemy) {
+    if (!this.atlas) return;
+    const chain = this.atlas.vmisc(e.vanillaId === 263 ? 'vanilla/Chain26.png' : 'vanilla/Chain27.png');
+    if (!chain || !e.master) return;
+    const ctx = this.ctx;
+    const ax = e.master.cx, ay = e.master.cy;
+    let px = e.cx, py = e.cy;
+    let dx = ax - px, dy = ay - py;
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;
+    let running = true;
+    let guard = 0;
+    while (running && guard++ < 200) {
+      let seg = 16;                                 // num9/num15
+      const dist = Math.hypot(dx, dy);
+      if (dist < 32) { seg = dist - 32 + 16; running = false; }
+      if (dist > 0 && seg > 0) {
+        const k = seg / dist;
+        px += dx * k; py += dy * k;
+        dx = ax - px; dy = ay - py;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot);
+        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, Math.min(seg, chain.sh),
+          -chain.sw / 2, -chain.sh / 2, chain.sw, Math.min(seg, chain.sh));
+        ctx.restore();
+      } else {
+        running = false;
+      }
+    }
+  }
+
+  /** 双子互连链（Main.cs:22177-22224，1.4.5 新增）：Retinazer 125 激活时向
+   *  场上的 Spazmatism 126 画 Chain12（原版双方各画一遍，几何相同——单侧画
+   *  一次等价）。两端锚 = Bottom - h×0.5×scale，步长 28×scale、距锚
+   *  <40×scale 无尾段停、相距 >2000px 不画 */
+  private drawTwinsChain(e: Enemy, entities: unknown[]) {
+    if (!this.atlas) return;
+    const chain = this.atlas.vmisc('vanilla/Chain12.png');
+    if (!chain) return;
+    const other = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 126);
+    if (!other) return;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const ax = other.cx, ay = other.y + other.h - other.h * 0.5 * scale;
+    let px = e.cx, py = e.y + e.h - e.h * 0.5 * scale;
+    let dx = ax - px, dy = ay - py;
+    if (Math.hypot(dx, dy) > 2000) return;          // :22196-22199
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;
+    const step = 28 * scale, stop = 40 * scale;     // num6
+    let guard = 0;
+    while (guard++ < 200) {
+      const dist = Math.hypot(dx, dy);
+      if (dist < stop) break;                       // :22204-22208 无尾段
+      const k = step / dist;
+      px += dx * k; py += dy * k;
+      dx = ax - px; dy = ay - py;
+      const ctx = this.ctx;
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, chain.sh,
+        -chain.sw / 2, -chain.sh / 2, chain.sw * scale, chain.sh * scale);
+      ctx.restore();
     }
   }
 
