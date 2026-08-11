@@ -118,6 +118,9 @@ for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
 // 翅膀槽（Item.wingSlot——翅膀是配饰，wingSlot>0 即翅膀；飞行时长/速度查 vanilla-wingstats.json）
 const WING_SLOT = scanCaseFields(itemSrc, ['\\bwingSlot\\s*=\\s*(\\d+);']);
 for (const [vid, wing] of WING_SLOT) setStat(vid, { wing });
+// 悠悠球线（Item.stringColor>0 → yoyoString=true，Player.cs:14170）
+const STRING_COLOR = scanCaseFields(itemSrc, ['\\bstringColor\\s*=\\s*(\\d+);']);
+for (const [vid, sc] of STRING_COLOR) setStat(vid, { str: sc });
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
 console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size} wing ${WING_SLOT.size}）`);
 
@@ -175,6 +178,27 @@ const ACC_PATTERNS = [
   ['blackBelt', /blackBelt = true;/],             // 10% 闪避（Black Belt :9772）
   ['bees', /honeyCombItem = (?:currentItem|armorPiece);/], // 蜂蜜斗篷/蜂巢背带：受击放蜂
   ['spikedBoots', /spikedBoots \+= (\d);/],       // 冰刀（攀冰，暂存）
+  // ---- 五轮（残余全量）----
+  ['flipper', /accFlipper = true;/],              // 脚蹼：游泳提速
+  ['jumpSpd', /jumpSpeedBoost \+= ([\d.]+)f;/],   // 跳跃速度提升（蛙腿族）
+  ['longInvince', /longInvince = true;/],         // 项链族：无敌帧翻倍
+  ['treasureMagnet', /treasureMagnet = true;/],   // 吸附范围
+  ['goldRing', /goldRing = true;/],               // 金币吸附
+  ['luckyCoin', /hasLuckyCoin = true;/],          // 幸运币：命中掉钱（暂存）
+  ['discount', /discountEquipped = true;/],       // 折扣卡：商店 8 折
+  ['quiver', /magicQuiver = true;/],              // 魔法箭袋：箭伤 +10%
+  ['arrowDmg', /arrowDamageAdditiveStack \+= ([\d.]+)f;/],
+  ['ammoSave', /ammoCost80 = true;/],             // 20% 概率不耗弹
+  ['huntressSave', /huntressAmmoCost90 = true;/], // 10% 概率不耗弹
+  ['kbGlove', /kbGlove = true;/],                 // 力量手套：近战击退翻倍
+  ['yoyoString', /yoyoString = true;/],            // 悠悠球线：射程 +
+  ['tileSpeed', /equippedAnyTileSpeedAcc = true;/],  // 采矿加速
+  ['wallSpeed', /equippedAnyWallSpeedAcc = true;/],  // 铺墙加速
+  ['tileRange', /equippedAnyTileRangeAcc = true;/],  // 工具射程 +
+  ['skyStone', /skyStoneEffects = true;/],        // 天界石族：全属性复合（:12558）
+  ['counterWeight', /counterWeight = \d+;/],      // 配重球（悠悠球命中触发，暂存）
+  ['manaMagnet', /manaMagnet = true;/],           // 魔力磁石（暂存）
+  ['pStone', /pStone = true;/],                   // 贤者之石（药水 CD -25%，暂存）
 ];
 // 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）
 const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;

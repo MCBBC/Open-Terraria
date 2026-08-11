@@ -128,6 +128,10 @@ export class Player extends Entity {
     jumpOpts: string[];
     wing: { time: number; speed: number } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
+    jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
+    treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
+    arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
+    tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
   } {
     let def = 0, mana = 0, life = 0;
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
@@ -139,6 +143,11 @@ export class Player extends Entity {
     const jumpSet = new Set<string>();
     let wing: { time: number; speed: number } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
+    let jumpSpd = 0, arrowDmg = 0;
+    let flipper = false, longInvince = false, spikedBoots = false;
+    let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
+    let ammoSave = false, kbGlove = false, yoyoString = false;
+    let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -146,6 +155,8 @@ export class Player extends Entity {
       // 翅膀（Item.wingSlot>0 → WingStatsInitializer 飞行属性；多翅膀取首个）
       const wingSlot = statOfInternal(s.id)?.wing;
       if (wingSlot && wingSlot > 0 && !wing) wing = wingStatOf(wingSlot);
+      // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
+      if (statOfInternal(s.id)?.str) yoyoString = true;
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
@@ -182,6 +193,23 @@ export class Player extends Entity {
         if (fx.blackBelt) blackBelt = true;
         if (fx.bees) bees = true;
         if (fx.carpet) carpet = true;
+        if (fx.jumpSpd) jumpSpd = Math.max(jumpSpd, fx.jumpSpd);
+        if (fx.arrowDmg) arrowDmg += fx.arrowDmg;
+        if (fx.flipper) flipper = true;
+        if (fx.longInvince) longInvince = true;
+        if (fx.spikedBoots) spikedBoots = true;
+        if (fx.treasureMagnet) treasureMagnet = true;
+        if (fx.goldRing) goldRing = true;
+        if (fx.luckyCoin) luckyCoin = true;
+        if (fx.discount) discount = true;
+        if (fx.ammoSave || fx.huntressSave) ammoSave = true;
+        if (fx.kbGlove) kbGlove = true;
+        if (fx.yoyoString) yoyoString = true;
+        if (fx.tileSpeed) tileSpeed = true;
+        if (fx.wallSpeed) wallSpeed = true;
+        if (fx.tileRange) tileRange = true;
+        if (fx.skyStone) skyStone = true;
+        if (fx.pStone) pStone = true;
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
       // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
@@ -203,9 +231,15 @@ export class Player extends Entity {
     // 多段跳按原版优先序排列（JumpMovement 消费序）
     const JUMP_ORDER = ['Cloud', 'Sail', 'Sandstorm', 'Blizzard', 'Fart', 'Tsunami', 'Unicorn', 'Basilisk', 'WallOfFleshGoat', 'Santank'];
     const jumpOpts = JUMP_ORDER.filter((j) => jumpSet.has(j));
+    // 天界石族复合（Player.cs:12558-12570：life+2/def+4/近战速+10%/全系伤+10%/全系暴+2%）
+    if (skyStone) {
+      life += 2; def += 4; meleeSpeed += 0.1;
+      dmgMelee += 0.1; dmgRanged += 0.1; dmgMagic += 0.1;
+      critMelee += 2; critRanged += 2; critMagic += 2;
+    }
     return {
       def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
-      dmgMelee, dmgRanged, dmgMagic,
+      dmgMelee, dmgRanged: dmgRanged + arrowDmg, dmgMagic,
       critMelee, critRanged, critMagic,
       moveMult, meleeSpeed,
       extraFall, lavaMax, armorPen, rocketBoots,
@@ -213,6 +247,10 @@ export class Player extends Entity {
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
+      jumpSpd, flipper, longInvince, spikedBoots,
+      treasureMagnet, goldRing, luckyCoin, discount,
+      arrowDmg, ammoSave, kbGlove, yoyoString,
+      tileSpeed, wallSpeed, tileRange, pStone,
     };
   }
   get maxHp(): number {
@@ -235,7 +273,10 @@ export class Player extends Entity {
   /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；melee/ranged/magic 分道） */
   damageMult(kind: 'melee' | 'ranged' | 'magic'): number {
     const st = this.equipStats;
-    return 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
+    let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
+    if (kind === 'magic') m += this.buffs.magicDmgBonus;   // MagicPower +20%（:9669）
+    if (kind === 'ranged') m *= this.buffs.arrowDmgMult;   // Archery ×1.1（:9712,ranged 近义）
+    return m;
   }
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
@@ -286,12 +327,14 @@ export class Player extends Entity {
     }
     // 上限收缩时钳制
     if (this.hp > this.maxHp) this.hp = this.maxHp;
-    // 魔力自然回复(原版 Player.manaRegen:越满越快,简化为每秒 maxMana*0.08+0.5)
+    // 魔力自然回复(原版 Player.manaRegen:越满越快,简化为每秒 maxMana*0.08+1;
+    // 魔力再生药水 manaRegenBuff:静止加成常开+满额倍率+×1.15 ≈ 2.3 倍,:19238-19270)
     if (this.mana < this.maxMana) {
       this.manaRegenAccum += dt;
       if (this.manaRegenAccum >= 1) {
         this.manaRegenAccum -= 1;
-        this.mana = Math.min(this.maxMana, this.mana + Math.ceil(this.maxMana * 0.08) + 1);
+        const base = Math.ceil(this.maxMana * 0.08) + 1;
+        this.mana = Math.min(this.maxMana, this.mana + Math.round(base * (this.buffs.manaRegenBuff ? 2.3 : 1)));
       }
     }
 
@@ -304,7 +347,11 @@ export class Player extends Entity {
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
-    this.inLava = liquidCollision(world.store, this.x, this.y, this.w, this.h, 2); // LavaCollision 盒判定
+    // waterWalk 时缩高 6px 判定(原版 num80,Player.cs:27349/27352:水面行走不因脚尖触浆受伤)
+    // 水上行走（装备 waterWalk 族 ∪ 水上行走药水 buff 15,:9706）
+    const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
+    const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
+    this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
     // 蜂蜜浸入（Player.cs:27436）：湿判定命中蜂蜜 → AddBuff(48, 1800t=30s) + honeyWet。
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
     this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
@@ -318,7 +365,8 @@ export class Player extends Entity {
     // 岩浆伤害 1:1（Player.cs:27350-27440）：盒判定接触 → lavaTime 宽限（护身符族）耗尽后
     // 单发 80（Hurt 全结算：防御+无敌帧）+ 着火 OnFire 7s（AddBuff(24,420)）；
     // 无敌帧承担原版 hurtCooldowns[Lava] 冷却
-    if (this.inLava) {
+    if (this.inLava && !this.buffs.obsidianSkin) {
+      // 黑曜石皮 buff:lavaImmune 完全豁免（Player.cs:9573）,不伤不火
       const lavaMax = this.equipStats.lavaMax;
       if (lavaMax > 0 && this.lavaImmuneTicks > 0) {
         this.lavaImmuneTicks--;
@@ -331,9 +379,12 @@ export class Player extends Entity {
           game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
       }
-    } else {
+    } else if (!this.inLava) {
       this.lavaAccum = 0;
-      if (this.equipStats.lavaMax > 0) this.lavaImmuneTicks = this.equipStats.lavaMax;
+      // 离浆宽限逐步恢复(Player.cs:27405:lavaTime < lavaMax 时每 tick +1,
+      // 非立即回满——护身符 7s 宽限需要等价时间回充)
+      const lavaMax = this.equipStats.lavaMax;
+      if (lavaMax > 0 && this.lavaImmuneTicks < lavaMax) this.lavaImmuneTicks++;
     }
     // 入水熄灭着火（Player.cs:27426：wet 且非岩浆 → DelBuff 24）
     if (this.inWater && !this.inLava) this.buffs.remove(BuffType.OnFire);
@@ -348,12 +399,14 @@ export class Player extends Entity {
     }
     // HurtTiles 接触伤害（Collision.cs:3128 + Player.cs:27296/28507）:
     // 尖刺/木尖刺/荆棘族直接伤害 + 流血,陨石/狱石族 Burning,沙族窒息,荆棘族触碰毁块
-    const ht = hurtTiles(world.store, this.x, this.y, this.w, this.h, this.equipStats.fireWalk);
+    const ht = hurtTiles(world.store, this.x, this.y, this.w, this.h,
+      this.equipStats.fireWalk || this.buffs.obsidianSkin); // 黑曜石皮含 fireWalk（:9576）
     if (ht) this.applyTouchDamage(game, ht);
 
-    // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复
+    // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复；
+    // 鱼鳃 buff（gills,:9656）水下呼吸不耗
     const wasHead = prevHeadUnderwater;
-    if (this.headUnderwater) {
+    if (this.headUnderwater && !this.buffs.gills) {
       this.breathAccum += dt;
       const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
       while (this.breathAccum >= per && this.breath > 0) {
@@ -439,7 +492,7 @@ export class Player extends Entity {
       // ---- 水面行走（WaterWalkingBoots/LavaWaders 族，Player.WaterWalk 语义近似）----
       // 装备后落向液面时站在液面（vy 清零、可正常行走/起跳/重置空中能力）；
       // 按 ↓ 下潜。waterWalk2（水上漂靴）同效。
-      if (this.equipStats.waterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
+      if (canWaterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
         this.onWaterSurface = true;
         this.vy = 0;
         this.fallStartY = null;
@@ -464,8 +517,9 @@ export class Player extends Entity {
             this.surfaceJumpCd = 24;
           }
       } else if (this.inputJump) {
-        // 全浸没：游泳上浮
-        this.vy = Math.max(this.vy - 0.62, -4.4);
+        // 全浸没：游泳上浮（脚蹼族 accFlipper：提速 1.5×）
+        const swimMult = this.equipStats.flipper ? 1.5 : 1;
+        this.vy = Math.max(this.vy - 0.62 * swimMult, -4.4 * swimMult);
       }
       if (this.surfaceJumpCd > 0) this.surfaceJumpCd--;
       this.vy += GRAVITY * 0.3;
@@ -474,7 +528,8 @@ export class Player extends Entity {
       }
     } else {
       if (this.inputJump && this.onGround) {
-        this.vy = -PLAYER_JUMP_SPEED * (this.equipStats.jumpBoost ? 1.25 : 1);
+        // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）
+        this.vy = -(PLAYER_JUMP_SPEED + this.equipStats.jumpSpd);
         this.jumpHold = PLAYER_JUMP_TICKS;
       }
       if (this.inputJump && this.jumpHold > 0) {
@@ -497,8 +552,10 @@ export class Player extends Entity {
       if (this.extraJumpCd > 0) this.extraJumpCd--;
       // ---- 翅膀/火箭靴飞行（WingMovement+RocketBootsMovement :26530 近似）----
       // 共用控制语义：松跳键（release）后再次按住起飞；落地回满。翅膀优先于火箭靴。
+      // 同穿翅膀+火箭靴：飞行时长合并（:26511 rocketTime×6 并入 wingTime）
+      const wingTimeMax = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
       if (this.onGround) {
-        if (eq.wing) this.wingTime = eq.wing.time;
+        if (eq.wing) this.wingTime = wingTimeMax;
         this.rocketUnits = 7;
         this.rocketRelease = true;
         this.rocketUnitTicks = 0;
@@ -550,6 +607,18 @@ export class Player extends Entity {
       if (this.dashT > 0) this.dashT--;
       else if (this.dashT < 0) this.dashT++;
       if (this.dashCd > 0) this.dashCd--;
+      // ---- 攀壁钉鞋（spikedBoots：攀爬爪/鞋钉/忍者大师装备——贴墙缓降+蹬墙跳）----
+      this.wallCling = false;
+      if (!this.onGround && eq.spikedBoots && this.hitWall && this.inputX !== 0 && this.vy > 0) {
+        this.vy = Math.min(this.vy, 1.5); // 贴墙缓降
+        this.fallStartY = null;
+        this.wallCling = true;
+        if (this.inputJump) { // 蹬墙跳
+          this.vy = -PLAYER_JUMP_SPEED;
+          this.jumpHold = PLAYER_JUMP_TICKS;
+          this.vx = -Math.sign(this.vx || this.facing) * 3;
+        }
+      }
       if (this.dashTicks > 0) {
         this.dashTicks--;
         this.vx = this.dashDir * 12.5; // 冲刺速度（原版 16.9 → 本作物理尺度近似）
@@ -575,7 +644,10 @@ export class Player extends Entity {
           }
         }
       }
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      // 羽落 buff（slowFall,:21369）：重力 /3,fallStart 每帧重置 → 免坠伤
+      const grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+      this.vy = Math.min(this.vy + grav, MAX_FALL_SPEED);
+      if (this.buffs.slowFall) this.fallStartY = null;
     }
     // 松键截断上升（手感）
     if (!this.inputJump && this.vy < -2) this.vy = -2;
@@ -590,8 +662,11 @@ export class Player extends Entity {
       const ty0 = Math.floor(this.y / TILE) - 1, ty1 = Math.floor((this.y + this.h) / TILE) + 1;
       let inWeb = false, inHoney = false;
       let webTx = 0, webTy = 0;
-      for (let ty = ty0; ty <= ty1 && !(inWeb || inHoney); ty++) {
-        for (let tx = tx0; tx <= tx1; tx++) {
+      // 扫描顺序 1:1（Collision.StickyTiles cs:3399-3402）：外层 X 自左向右、
+      // 内层 Y 自顶向下——撕网目标=最左重叠列的顶端那张（垂直蛛网串即从身体最上方
+      // 开始撕，原版语义；此前行优先会错撕横向蛛网层的最上行）
+      for (let tx = tx0; tx <= tx1 && !(inWeb || inHoney); tx++) {
+        for (let ty = ty0; ty <= ty1; ty++) {
           if (!st.inBounds(tx, ty)) continue;
           const t = st.type[st.idx(tx, ty)];
           if (t === 0) continue;
@@ -626,22 +701,16 @@ export class Player extends Entity {
         }
         if (inWeb) {
           this.jumpHold = 0; // L22676：type != 229 → jump 清零（蛛网内禁跳）
-          // 挣扎撕网（L22653-22670）：移动中 stickyBreak++，超 rand(20,100) 破坏
+          // 挣扎撕网（L22653-22670）：移动中 stickyBreak++，超 rand(20,100) →
+          // WorldGen.KillTile(检测格)——原版直接破坏 StickyTiles 返回的那一格
           if (this.vx !== 0 || this.vy !== 0) {
             this.stickyBreak++;
             if (this.stickyBreak > 20 + Math.floor(Math.random() * 80)) {
               this.stickyBreak = 0;
-              // 破坏脚边第一张重叠网（原版破坏的是检测返回的那格）
-              outer: for (let ty = ty0; ty <= ty1; ty++) {
-                for (let tx = tx0; tx <= tx1; tx++) {
-                  if (!st.inBounds(tx, ty) || st.type[st.idx(tx, ty)] !== stickId) continue;
-                  st.setTile(tx, ty, 0);
-                  // 破坏爆散（KillTile HitEffect 网屑四溅近似）
-                  game.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#C8C8CC', 8, 1.4, { life: 30, grav: 0.05 });
-                  game.spawnDrop(tx * TILE + 8, ty * TILE, VANILLA_ITEM_KEY_BY_ID[150] ?? 'vi_150_cobweb', 1);
-                  break outer;
-                }
-              }
+              st.setTile(webTx, webTy, 0);
+              // 破坏爆散（KillTile HitEffect 网屑四溅近似）
+              game.spawnParticles(webTx * TILE + 8, webTy * TILE + 8, '#C8C8CC', 8, 1.4, { life: 30, grav: 0.05 });
+              game.spawnDrop(webTx * TILE + 8, webTy * TILE, VANILLA_ITEM_KEY_BY_ID[150] ?? 'vi_150_cobweb', 1);
             }
           }
         }
@@ -794,6 +863,12 @@ export class Player extends Entity {
   prevInputX = 0;
   /** 水面行走状态（水上漂靴族：站在液面，按 ↓ 下潜） */
   onWaterSurface = false;
+  /** 贴墙缓降中（spikedBoots 攀壁） */
+  wallCling = false;
+  /** 拾取范围扩展（宝藏磁石/金戒指族，px；defaultItemGrabRange=42） */
+  get grabRangeBonus(): number {
+    return this.equipStats.treasureMagnet ? 94 : this.equipStats.goldRing ? 12 : 0;
+  }
   inputDown = false;
   inputUp = false;
   onRope = false;
@@ -807,7 +882,8 @@ export class Player extends Entity {
     if (eq.blackBelt && Math.random() < 0.1) return false;
     const reduction = Math.max(1, dmg - this.defense * 0.5);
     this.hp -= reduction;
-    this.iframes = PLAYER_IFRAME_TICKS;
+    // 十字项链/星星面纱：无敌帧翻倍（longInvince）
+    this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
     this.sinceHurt = 0; // 受击打断自然回血
     // 恐慌项链：受击触发 5 秒移速爆发（panicTime=300，PanicSpeedBoost :25034）
     if (eq.panic) this.panicTime = 300;

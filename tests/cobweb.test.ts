@@ -49,4 +49,33 @@ describe('蛛网/蜂蜜块黏滞（StickyTiles 1:1）', () => {
     expect(p.vy).toBeLessThanOrEqual(1 * 0.3 + 0.36);
     expect(p.jumpHold).toBe(9); // 自然衰减 1，未被黏滞清零（type != 229 才清）
   });
+
+  it('撕网目标 1:1（Collision.StickyTiles 列优先 cs:3399）：最左重叠列优先于更上行的网', () => {
+    const w = new World(40, 40, 42, 'open');
+    const st = w.store;
+    const WEB = TILE_BY_KEY['v_51_cobweb']!;
+    for (let x = 18; x <= 26; x++) st.setTileSilent(x, 30, 2); // 宽地板
+    // 两张网：左列低位 (20,29) 与右列高位 (21,27)——行优先会先撕 (21,27)，
+    // 列优先（原版）先撕最左重叠列的 (20,29)
+    st.setTileSilent(20, 29, WEB);
+    st.setTileSilent(21, 27, WEB);
+    for (let y = 26; y <= 29; y++) st.setTileSilent(22, y, 2); // 右墙钉住玩家不漂出左列重叠区
+    const drops: Array<{ x: number; y: number }> = [];
+    const hooks = {
+      ...fakeHooks(w),
+      spawnDrop: (_x: number, _y: number) => { drops.push({ x: _x, y: _y }); return null; },
+    } as never;
+    const p = new Player(20 * 16 - 4, 30 * 16 - 42, new Inventory());
+    p.inputX = 1;
+    let ticks = 0;
+    for (let t = 0; t < 600 && drops.length === 0; t++) {
+      p.fixedUpdate(1 / 60, hooks);
+      ticks++;
+    }
+    expect(drops.length).toBeGreaterThan(0);           // 挣扎撕破
+    expect(Math.floor(drops[0].x / 16)).toBe(20);      // 最左重叠列
+    expect(Math.floor(drops[0].y / 16)).toBe(29);      // 该列的网（非更上行的 27）
+    expect(st.type[st.idx(20, 29)]).not.toBe(WEB);     // 检测格被破坏（KillTile 语义）
+    expect(st.type[st.idx(21, 27)]).toBe(WEB);         // 上行那张未动
+  });
 });

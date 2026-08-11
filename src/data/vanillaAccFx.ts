@@ -39,7 +39,28 @@ export interface AccFx {
   dashType?: number;     // 1=忍者足具/水晶刺客 2=克苏鲁护盾（冲撞带伤害）
   blackBelt?: number;    // 10% 闪避（Player.Hurt :9772）
   bees?: number;         // 蜂窝/蜂巢背带：受击放蜂
-  spikedBoots?: number;  // 冰刀（攀冰，暂存）
+  spikedBoots?: number;  // 攀壁钉鞋（贴墙滑降）
+  // ---- 五轮（残余全量）----
+  flipper?: number;      // 脚蹼：游泳提速
+  jumpSpd?: number;      // jumpSpeedBoost（蛙腿族 +1.6）
+  longInvince?: number;  // 无敌帧翻倍（十字项链/星星面纱）
+  treasureMagnet?: number; // 宝藏磁石：拾取范围 +
+  goldRing?: number;     // 金戒指族：钱币拾取范围
+  luckyCoin?: number;    // 幸运币：近战命中掉钱
+  discount?: number;     // 折扣卡：商店/重铸 8 折
+  quiver?: number;       // 魔法箭袋族
+  arrowDmg?: number;     // 箭伤加成（+0.1/件）
+  ammoSave?: number;     // 20% 概率不耗弹
+  huntressSave?: number; // 10% 概率不耗弹
+  kbGlove?: number;      // 力量手套族：近战击退翻倍
+  yoyoString?: number;   // 悠悠球线：射程 +
+  tileSpeed?: number;    // 采矿/放置加速
+  wallSpeed?: number;    // 铺墙加速
+  tileRange?: number;    // 工具/放置射程 +
+  skyStone?: number;     // 天界石族：全属性复合（:12558）
+  counterWeight?: number; // 配重球（悠悠球命中触发）
+  manaMagnet?: number;   // 魔力磁石（魔力星拾取，暂存）
+  pStone?: number;       // 贤者之石（药水 CD -25%）
 }
 
 const FX = fxJson as Record<string, AccFx>;

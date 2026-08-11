@@ -394,12 +394,14 @@ export function runWebsInSpiderCavesPass(st: TileStore, rng: RNG, gs: GenState):
       if (st.wall[idx] === 86) {
         if (st.liquid[idx] > 0) st.liquidType[idx] = 3; // honey
         if (rng.int(0, 2) === 0) {
-          // PlaceTight(spiders:false)：普通钟乳石，样式 0-2（近似）
+          // PlaceTight(spiders:false) → PlaceUncheckedStalactite（cs:38373-38402）：
+          // 帧按上方实心块类型分派——蜂巢腔内上方必是蜂巢块 225 → 蜂蜜滴单格
+          // fx=162+变体×18（162/180/198）、fy=72。此前错用雪地冰锥帧(0..36, 双格 fy 0/18)
+          // ——蜂巢里挂出一串冰锥的根因
           if (solidTile(st, i, j - 1) && st.inBounds(i, j) && !st.flags[st.idx(i, j)]
             && st.inBounds(i, j + 1) && !st.flags[st.idx(i, j + 1)]) {
-            const fx = rng.int(0, 2) * 18;
-            st.setTileSilent(i, j, DECO165, fx, 0);
-            st.setTileSilent(i, j + 1, DECO165, fx, 18);
+            const fx = 162 + rng.int(0, 2) * 18;
+            st.setTileSilent(i, j, DECO165, fx, 72);
           }
         }
       }

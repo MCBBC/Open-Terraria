@@ -139,7 +139,15 @@ export class RNG {
     return arr[this.ur.nextInt(arr.length)];
   }
 
-  /** 原版裸方法直通（pass 级对账/探针用） */
+  /** 原版裸方法直通（Reset 序列/pass 级对账用，语义与 C# 完全一致） */
+  nextInt(maxValue: number): number {
+    return this.ur.nextInt(maxValue);
+  }
+
+  nextIntRange(minValue: number, maxValue: number): number {
+    return this.ur.nextIntRange(minValue, maxValue);
+  }
+
   get vanilla(): UnifiedRandom {
     return this.ur;
   }

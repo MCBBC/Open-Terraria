@@ -9,7 +9,7 @@ import { World } from '../src/world/World';
 import { LiquidSim } from '../src/world/liquid/LiquidSim';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { generateWorld } from '../src/world/gen/WorldGen';
-import type { RNG } from '../src/core/rng';
+import { RNG } from '../src/core/rng';
 
 /** 脚本化 rng：按序吐出预设值 */
 function scriptedRng(values: number[]): RNG {
@@ -172,4 +172,47 @@ describe('生成期幼虫（BeeLarvaInBeehives）', () => {
     }
     expect(found).toBeGreaterThanOrEqual(2);
   }, 120000);
+});
+
+
+// 5) 蜂巢钟乳石帧分派（PlaceUncheckedStalactite cs:38373-38402：上方蜂巢块 225 →
+//    蜂蜜滴单格 fx=162/180/198、fy=72——此前错用雪地冰锥帧 0..36/fy 0/18，
+//    蜂巢里挂出一串冰锥的根因）
+import { runWebsInSpiderCavesPass } from '../src/world/gen/vanilla/HiveSpiderPass';
+import type { GenState } from '../src/world/gen/vanilla/GenState';
+
+describe('蜂巢钟乳石帧（WebsInSpiderCaves pass）', () => {
+  it('墙86 腔内钟乳石一律蜂蜜滴帧（fx∈{162,180,198}、fy=72、单格）', () => {
+    const w = new World(220, 200, 42, 'open');
+    const st = w.store;
+    const HIVE = TILE_BY_KEY['v_225_hive_block']!;
+    const DECO = TILE_BY_KEY['v_165_cave_decos']!;
+    // 蜂巢腔：10 列 × 2 行墙 86，天花板为蜂巢块（j=99）
+    for (let x = 110; x < 120; x++) {
+      for (let y = 70; y <= 71; y++) st.setWallSilent(x, y, 86);
+      st.setTileSilent(x, 69, HIVE);
+    }
+    const gs = { worldSurface: 50 } as GenState;
+    // 1/3 概率/格 × 10 格：多 seed 跑，保证覆盖放置路径
+    let placed = 0;
+    for (let seed = 1; seed <= 6 && placed === 0; seed++) {
+      runWebsInSpiderCavesPass(st, new RNG(seed), gs);
+    }
+    for (let x = 110; x < 120; x++) {
+      for (let y = 70; y <= 71; y++) {
+        if (st.type[st.idx(x, y)] !== DECO) continue;
+        placed++;
+        const i = st.idx(x, y);
+        expect([162, 180, 198]).toContain(st.frameX[i]); // 蜂蜜滴帧（非冰锥 0..36）
+        expect(st.frameY[i]).toBe(72);                    // 独立小格行
+      }
+    }
+    expect(placed).toBeGreaterThan(0); // 至少放置了一个钟乳石
+    // 单格语义：钟乳石下方一格不再有第二段（原版 225 分支只放 1 格）
+    for (let x = 110; x < 120; x++) {
+      if (st.type[st.idx(x, 70)] === DECO) {
+        expect(st.type[st.idx(x, 71)]).not.toBe(DECO);
+      }
+    }
+  });
 });

@@ -27,15 +27,36 @@ const T = (() => {
     MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
     CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'),
     CORRUPT_ICE: get('v_163_purple_ice_block'), CRIMSON_ICE: get('v_200_red_ice_block'),
-    // 164 粉冰(神圣冰)引擎未注册 → 0(ZoneHallow 冰分支暂不触发,与已知缺口一致)
-    HOLLOW_ICE: get('v_164_hallowed_ice'), DUNGEON_BLUE: get('v_41_blue_brick'),
+    // 164 粉冰(=神圣冰)：key 实为 v_164_pink_ice_block（旧注"未注册→0"有误，已注册）
+    HOLLOW_ICE: get('v_164_pink_ice_block'), DUNGEON_BLUE: get('v_41_blue_brick'),
     DUNGEON_GREEN: get('v_43_green_brick'), DUNGEON_PINK: get('v_44_pink_brick'),
-    // 恶土系计数(SceneMetrics.cs:613-615 的 _tileCounts 公式)
+    // 恶土系计数(SceneMetrics.cs:614-615 非 remix 的 _tileCounts 公式)
     EBONSTONE: get('v_25_ebonstone_block'), CORRUPT_PLANT: get('v_24_corruption_short_plants'),
     CORRUPT_THORN: get('v_32_corruption_thorns'), CORRUPT_HARDSAND: get('v_398_corrupt_hardened_sand_block'),
     CRIMSTONE: get('v_203_crimstone_block'), CRIMSON_PLANT: get('v_201_crimson_short_plants'),
     CRIMSAND_THORN: get('v_352_crimtane_thorns'), CRIMSON_HARDSAND: get('v_399_crimson_hardened_sand_block'),
     SUNFLOWER: get('v_27_sunflower'),
+    // 神圣族计数(SceneMetrics.cs:603)：109 神圣草/492 神圣修剪草/110 神圣矮草/
+    // 113 神圣高草/117 珍珠岩/402 神圣硬化沙/403 神圣沙岩（116 珍珠沙/164 粉冰见上）
+    HALLOW_GRASS: get('v_109_hallowed_grass_block'), HALLOW_MOWED_GRASS: get('v_492_hallowed_mowed_grass_block'),
+    HALLOW_PLANT: get('v_110_hallow_short_plants'), HALLOW_TALL_PLANT: get('v_113_hallow_tall_plants'),
+    PEARLSTONE_BLOCK: get('v_117_pearlstone_block'), HALLOW_HARDSAND: get('v_402_hallow_hardened_sand_block'),
+    HALLOW_SANDSTONE: get('v_403_hallow_sandstone_block'),
+    // 雪族计数(SceneMetrics.cs:604)：162 薄冰（147/148/161/163/200/164 见上/常量区）
+    THIN_ICE: get('thin_ice'),
+    // 丛林族计数(SceneMetrics.cs:613)：61 矮草/62 藤/74 高草/225 蜂巢块/226 神庙砖
+    JUNGLE_PLANT: get('v_61_jungle_short_plants'), JUNGLE_VINE: get('v_62_jungle_vines'),
+    JUNGLE_TALL_PLANT: get('v_74_jungle_tall_plants'), HIVE: get('v_225_hive_block'),
+    LIHZAHRD_BRICK: get('v_226_lihzahrd_brick'),
+    // 蘑菇族计数(SceneMetrics.cs:617)：71 植株/72 蘑菇树/528 藤（70 蘑菇草见上）
+    MUSHROOM_PLANT: get('v_71_mushroom_plant'), MUSHROOM_TREE: get('v_72_mushroom_tree'),
+    MUSHROOM_VINE: get('v_528_mushroom_vines'),
+    // 恶地族补齐（SceneMetrics.cs:614-615）：661 腐化丛林草/400 腐化沙岩/662/401 猩红对位
+    // （旧注释称引擎无 def——实际均已注册，按 0 计是漏）
+    CORRUPT_JUNGLE_GRASS: get('v_661_corrupt_jungle_grass_block'),
+    CORRUPT_SANDSTONE: get('v_400_corrupt_sandstone_block'),
+    CRIMSON_JUNGLE_GRASS: get('v_662_crimson_jungle_grass_block'),
+    CRIMSON_SANDSTONE: get('v_401_crimson_sandstone_block'),
   };
 })();
 /** 房屋墙表（Main.cs wallHouse[N]=true 全提取，265 项）：可由玩家放置的墙。
@@ -43,21 +64,51 @@ const T = (() => {
  *  SetSpawnFlags L321：玩家所站格带房屋墙 → noWorms（房屋内不出蠕虫） */
 const WALL_HOUSE = new Set([1, 4, 5, 6, 10, 11, 12, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 41, 42, 43, 44, 45, 46, 47, 60, 66, 67, 68, 72, 73, 74, 75, 76, 77, 78, 82, 84, 85, 88, 89, 90, 91, 92, 93, 100, 101, 102, 103, 104, 105, 106, 107, 108, 109, 110, 111, 112, 113, 114, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 125, 126, 127, 128, 129, 130, 131, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 149, 150, 151, 152, 167, 168, 169, 172, 173, 174, 175, 176, 177, 179, 181, 182, 183, 184, 186, 224, 225, 226, 227, 228, 229, 230, 231, 232, 233, 234, 235, 236, 237, 238, 239, 240, 241, 242, 243, 245, 246, 247, 248, 249, 250, 251, 252, 253, 254, 255, 256, 257, 258, 259, 260, 261, 262, 263, 264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280, 281, 282, 283, 284, 285, 286, 287, 288, 289, 290, 291, 292, 293, 294, 295, 296, 297, 298, 299, 300, 301, 302, 303, 304, 305, 306, 307, 308, 309, 310, 311, 312, 313, 314, 315, 316, 317, 318, 319, 320, 321, 322, 323, 324, 325, 326, 327, 328, 329, 330, 331, 332, 333, 334, 335, 336, 337, 338, 339, 340, 341, 342, 343, 344, 345, 346, 347, 348, 351, 352, 353, 354, 355, 356, 357, 358, 359, 360, 361, 362, 363, 364, 365, 366]);
 
-/** EvilTileCount 计数表(SceneMetrics.cs:613):23/661/24/25/32/112/163/400/398 计 1,27 向日葵 −10。
- *  661/400 等引擎无 def 的按 0 计 */
+/** EvilTileCount 计数表(SceneMetrics.cs:614):23/661/24/25/32/112/163/400/398 计 1,27 向日葵 −10 */
 const EVIL_LOOKUP = (() => {
   const t = new Uint8Array(TILE_DEFS.length);
-  for (const id of [T.CORRUPT_GRASS, T.EBONSTONE, T.CORRUPT_PLANT, T.CORRUPT_THORN,
-    T.EBONSAND, T.CORRUPT_ICE, T.CORRUPT_HARDSAND]) if (id) t[id] = 1;
+  for (const id of [T.CORRUPT_GRASS, T.CORRUPT_JUNGLE_GRASS, T.EBONSTONE, T.CORRUPT_PLANT,
+    T.CORRUPT_THORN, T.EBONSAND, T.CORRUPT_ICE, T.CORRUPT_SANDSTONE, T.CORRUPT_HARDSAND]) if (id) t[id] = 1;
   return t;
 })();
 /** BloodTileCount 计数表(SceneMetrics.cs:615):199/662/201/203/200/401/399/234/352 计 1 */
 const BLOOD_LOOKUP = (() => {
   const t = new Uint8Array(TILE_DEFS.length);
-  for (const id of [T.CRIMSON_GRASS, T.CRIMSTONE, T.CRIMSON_PLANT, T.CRIMSON_ICE,
-    T.CRIMSAND, T.CRIMSAND_THORN, T.CRIMSON_HARDSAND]) if (id) t[id] = 1;
+  for (const id of [T.CRIMSON_GRASS, T.CRIMSON_JUNGLE_GRASS, T.CRIMSTONE, T.CRIMSON_PLANT,
+    T.CRIMSON_ICE, T.CRIMSON_SANDSTONE, T.CRIMSON_HARDSAND, T.CRIMSAND, T.CRIMSAND_THORN]) if (id) t[id] = 1;
   return t;
 })();
+/** HolyTileCount 计数表(SceneMetrics.cs:603):109/492/110/113/117/116/164/403/402 计 1 */
+const HOLY_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.HALLOW_GRASS, T.HALLOW_MOWED_GRASS, T.HALLOW_PLANT, T.HALLOW_TALL_PLANT,
+    T.PEARLSTONE_BLOCK, T.PEARLSAND, T.HOLLOW_ICE, T.HALLOW_SANDSTONE, T.HALLOW_HARDSAND]) if (id) t[id] = 1;
+  return t;
+})();
+/** SnowTileCount 计数表(SceneMetrics.cs:604):147/148/161/162/164/163/200 计 1
+ *  （注意 164 粉冰/163 紫冰/200 红冰同时计入雪族——转化冰都算雪原） */
+const SNOW_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.SNOW, T.SNOW_BRICK, T.ICE, T.THIN_ICE, T.HOLLOW_ICE,
+    T.CORRUPT_ICE, T.CRIMSON_ICE]) if (id) t[id] = 1;
+  return t;
+})();
+/** JungleTileCount 计数表(SceneMetrics.cs:613 非 remix):60/61/62/74/226/225 计 1 */
+const JUNGLE_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.JUNGLE_GRASS, T.JUNGLE_PLANT, T.JUNGLE_VINE, T.JUNGLE_TALL_PLANT,
+    T.LIHZAHRD_BRICK, T.HIVE]) if (id) t[id] = 1;
+  return t;
+})();
+/** MushroomTileCount 计数表(SceneMetrics.cs:617):70/71/72/528 计 1 */
+const MUSHROOM_LOOKUP = (() => {
+  const t = new Uint8Array(TILE_DEFS.length);
+  for (const id of [T.MUSHROOM_GRASS, T.MUSHROOM_PLANT, T.MUSHROOM_TREE, T.MUSHROOM_VINE]) if (id) t[id] = 1;
+  return t;
+})();
+/** Main.tileSand 全表（Main.cs:7177-7180，1.4.5.6 仅 4 项）：
+ *  isOcean 判定（NPC.cs L1104）用沙族集合而非只认 53 黄沙 */
+const TILE_SAND = new Set([T.SAND, T.EBONSAND, T.PEARLSAND, T.CRIMSAND]);
 
 // ---- 洞穴主池 cavernMonsterType 表（NPC.cs:6498 + 世界生成时 18058-18064 填充） ----
 export let cavernMonsterType: number[][] = [[49, 49, 49], [49, 49, 49]];
@@ -288,23 +339,31 @@ export class VanillaSpawner {
     this.surfaceSpawn = spawnTileY <= this.world.groundLevel;
     this.deeperThanRockLayer = spawnTileY >= this.world.rockLevel;
     this.underGround = spawnTileY > this.world.groundLevel && spawnTileY < this.world.rockLevel;
-    // isOcean（L1104）：边缘 + 沙 tile + 岩石层上
+    // isOcean（L1104 1:1）：(边缘 && Main.tileSand[spawnTileType] && 岩石层上)
+    //  || (spawnTileType==53 && oceanDepths)。沙族 = Main.cs:7177-7180 全表（53/112/116/234），
+    //  只认 53 会漏黑檀沙/珍珠沙/猩红沙海床；oceanDepths 用 BeachPass 同源的 beachX/中层+40 近似
     // 海洋/海滩 x 阈值与 BeachPass 同源缩放（van = w/4200：oceanWater 220~260、
     // beachSandRandomCenter+20=340）——此前硬编码 250/340，非 4200 宽世界会错位：
     // 大世界海洋 250~sc(260) 段漏判 isOcean → 海滩水走水池段刷出水母
     const van = st.w / 4200;
     const oceanX = Math.max(1, Math.floor(260 * van));
     const beachX = Math.floor(340 * van);
-    this.isOcean = (spawnTileX < oceanX || spawnTileX > st.w - oceanX) && spawnTileType === T.SAND && spawnTileY < this.world.rockLevel;
+    this.isOcean = ((spawnTileX < oceanX || spawnTileX > st.w - oceanX)
+      && TILE_SAND.has(spawnTileType) && spawnTileY < this.world.rockLevel)
+      || (spawnTileType === T.SAND
+        && spawnTileY <= (this.world.groundLevel + this.world.rockLevel) / 2 + 40
+        && (spawnTileX < beachX || spawnTileX > st.w - beachX));
     this.isBeach = spawnTileY <= this.world.groundLevel && (spawnTileX < beachX || spawnTileX > st.w - beachX);
-    // Zone 判定（SceneMetrics.cs:16/613-615/678）：以玩家为中心 169×123 窗口计数 ≥300。
-    // 旧实现只看落脚格类型且漏黑檀石 25——腐化地表大量铺黑檀石导致噬魂怪永不触发
-    this.ZoneSnow = spawnTileType === T.SNOW || spawnTileType === T.ICE || spawnTileType === T.SNOW_BRICK;
-    this.ZoneCorrupt = this.countTiles(EVIL_LOOKUP, this.pX, this.pY) >= 300;
-    this.ZoneCrimson = this.countTiles(BLOOD_LOOKUP, this.pX, this.pY) >= 300;
-    this.ZoneHallow = spawnTileType === T.PEARLSAND || spawnTileType === T.HOLLOW_ICE;
-    this.ZoneJungle = spawnTileType === T.MUD || spawnTileType === T.JUNGLE_GRASS;
-    this.ZoneGlowshroom = spawnTileType === T.MUSHROOM_GRASS;
+    // Zone 判定（SceneMetrics.cs:24-64/648-697）：全部六族走玩家中心 169×123 窗口计数，
+    // 阈值 Snow 1500 / Corrupt·Crimson 300 / Hallow 125 / Jungle 140 / Mushroom 100。
+    // 旧实现只有恶地走窗口计数，其余只看落脚单格 → 雪原/神圣/丛林/蘑菇地常漏判
+    this.refreshZoneCounts(this.pX, this.pY);
+    this.ZoneSnow = this.zoneCounts.snow >= 1500;
+    this.ZoneCorrupt = this.zoneCounts.evil >= 300;
+    this.ZoneCrimson = this.zoneCounts.blood >= 300;
+    this.ZoneHallow = this.zoneCounts.holy >= 125;
+    this.ZoneJungle = this.zoneCounts.jungle >= 140;
+    this.ZoneGlowshroom = this.zoneCounts.mushroom >= 100;
     // ZoneDungeon 不在此设置：原版取玩家 SceneMetrics（SetSpawnFlags L300），见 setPlayerFlags
     // ---- 蜘蛛巢旗标（L1045-1079）:岩石层~地狱层 && 非地牢时 ----
     // 1/3 概率扫落点 ±Next(5,15) 立方盒内任意墙 62;否则查玩家所站格墙 62。
@@ -326,26 +385,54 @@ export class VanillaSpawner {
   }
 
   /** tileDungeon 集（Main.cs:7941-7946）：41/43/44 主砖（677-679 安全变体未注册缺席=0）。
-   *  PostCheckChosenSpawnTile L924：ZoneDungeon 时落脚点必须踩地牢砖且头顶有墙 */
+   *  PostCheckChosenSpawnTile L922-927：ZoneDungeon 时落脚点必须踩地牢砖且
+   *  spawnWallType（=落脚格上方一格的墙，GetProperGroundSpawnTileTypeAndWallType L5792）非 0。
+   *  查落脚格自身的墙会因地板砖 wall=0 恒拒 → 地牢几乎不刷怪 */
   private isDungeonTile(t: number): boolean {
     return t === T.DUNGEON_BLUE || t === T.DUNGEON_GREEN || t === T.DUNGEON_PINK;
   }
 
-  /** SceneMetrics.ScanTiles 近似:中心 169×123 窗口(zoneScanSize=120×75+padding 25×2−1)计数 */
-  private countTiles(lookup: Uint8Array, cx: number, cy: number): number {
+  /** SceneMetrics.ScanTiles 近似：玩家中心 169×123 窗口(zoneScanSize=1920/16+49 × 1200/16+49)
+   *  一次扫描同时产出全部六族计数，setFlagsForChosenTile 与 getSpawnRate 共用。
+   *  原版 SceneMetrics 每帧增量维护；本类无帧钩子 → 0.5s 或玩家移动 ≥32 格才重算（近似） */
+  private zoneStamp = -1;
+  private zoneCX = -99999; private zoneCY = -99999;
+  private zoneCounts = { evil: 0, blood: 0, holy: 0, snow: 0, jungle: 0, mushroom: 0 };
+
+  private refreshZoneCounts(cx: number, cy: number): void {
+    const now = performance.now();
+    if (this.zoneStamp >= 0 && now - this.zoneStamp < 500
+      && Math.abs(cx - this.zoneCX) < 32 && Math.abs(cy - this.zoneCY) < 32) return;
+    this.zoneStamp = now; this.zoneCX = cx; this.zoneCY = cy;
     const st = this.world.store;
     const x0 = Math.max(2, cx - 84), x1 = Math.min(st.w - 3, cx + 84);
     const y0 = Math.max(2, cy - 61), y1 = Math.min(st.h - 3, cy + 61);
-    let n = 0;
+    let evil = 0, blood = 0, holy = 0, snow = 0, jungle = 0, mushroom = 0, sunflower = 0;
     for (let y = y0; y <= y1; y++) {
       const row = y * st.w;
       for (let x = x0; x <= x1; x++) {
-        const t = st.type[row + x];
-        if (lookup[t]) n++;
-        else if (t === T.SUNFLOWER) n -= 10; // 向日葵每株 −10(SceneMetrics.cs:588 num=-10)
+        const i = row + x;
+        if (!st.flags[i]) continue;   // 仅活跃格（SceneMetrics.ScanTiles 同语义）
+        const t = st.type[i];
+        if (EVIL_LOOKUP[t]) evil++;
+        else if (BLOOD_LOOKUP[t]) blood++;
+        else if (HOLY_LOOKUP[t]) holy++;
+        else if (SNOW_LOOKUP[t]) snow++;
+        else if (JUNGLE_LOOKUP[t]) jungle++;
+        else if (MUSHROOM_LOOKUP[t]) mushroom++;
+        else if (t === T.SUNFLOWER) sunflower++;
       }
     }
-    return n;
+    // SceneMetrics.cs:608-615：向日葵每株 −10（infectedSeed ×3 未实现）
+    evil += sunflower * -10; blood += sunflower * -10;
+    // SceneMetrics.cs:648-662：神圣/邪恶/猩红两两互减后钳 ≥0
+    const holyRaw = holy;
+    holy -= evil; holy -= blood;
+    evil -= holyRaw; blood -= holyRaw;
+    this.zoneCounts = {
+      evil: Math.max(0, evil), blood: Math.max(0, blood), holy: Math.max(0, holy),
+      snow, jungle, mushroom,
+    };
   }
 
   // ---- FindSpawnTile（L879-920）----
@@ -354,7 +441,8 @@ export class VanillaSpawner {
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
    *  血月/日食/南瓜月/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
-  getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number): { spawnRate: number; maxSpawns: number } {
+  getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
+    playerXpx = this.pX * TILE): { spawnRate: number; maxSpawns: number } {
     // 入侵覆盖（L691-695）：rate=20（每帧 1/20 尝试），上限 5*(2+0.3n)（单人 11）
     if (this.invaders) {
       return { spawnRate: 20, maxSpawns: Math.floor(5 * (2 + 0.3 * 1)) };
@@ -362,9 +450,15 @@ export class VanillaSpawner {
     let spawnRate = 600;
     let maxSpawns = 5;
     const w = this.world;
+    // L389-392：困难模式 spawnRate×0.9 / maxSpawns+1——最先施加，后续修正全部叠在其上。
+    // 直接读 world.flags（this.hardMode 要等 spawn() 才刷新，首帧会漏乘）
+    if (w.flags.hardMode) {
+      spawnRate = Math.floor(spawnRate * 0.9);
+      maxSpawns += 1;
+    }
     const underworldY = (w.store.h - 200) * 16;
     if (playerYpx > underworldY) {
-      // L389-392：地狱 maxSpawns×2
+      // L393-396：地狱 maxSpawns×2
       maxSpawns = Math.floor(maxSpawns * 2);
     } else if (playerYpx > w.rockLevel * 16 + sHeightPx) {
       // L402-407：洞穴层 spawnRate×0.4 / max×1.9
@@ -374,8 +468,9 @@ export class VanillaSpawner {
       // L418-422：地下层 spawnRate×0.5 / max×1.7
       spawnRate = Math.floor(spawnRate * 0.5);
       maxSpawns = Math.floor(maxSpawns * 1.7);
-    } else if (!this.dayTime) {
+    } else if (!w.clock.isDay) {
       // L455-459：夜晚 spawnRate×0.6 / max×1.3；血月再 ×0.3/×1.8（L447-450）
+      // （昼/夜直接读 clock，同 hardMode——this.dayTime 要等 spawn() 才刷新，首帧会漏判）
       spawnRate = Math.floor(spawnRate * 0.6);
       maxSpawns = Math.floor(maxSpawns * 1.3);
       if (w.clock.bloodMoon) {
@@ -383,13 +478,31 @@ export class VanillaSpawner {
         maxSpawns = Math.floor(maxSpawns * 1.8);
       }
     }
+    // Zone 判定现取（原版每次从玩家 SceneMetrics 取，非上次生成残留 flag）：
+    // 玩家中心窗口计数（0.5s 缓存近似，见 refreshZoneCounts），本函数每帧被调
+    this.refreshZoneCounts(Math.floor(playerXpx / TILE), Math.floor(playerYpx / TILE));
+    const zoneCorrupt = this.zoneCounts.evil >= 300;
+    const zoneCrimson = this.zoneCounts.blood >= 300;
+    const zoneSnow = this.zoneCounts.snow >= 1500;
+    // 雨天雪原（L493-496，深度修正之后、地牢倍率之前）：ZoneSnow 且玩家在地表 →
+    // max×(1+cloudAlpha) / rate×(1-cloudAlpha+1)/2（cloudAlpha=0 时为恒等变换）
+    if (zoneSnow && playerYpx / TILE < w.groundLevel) {
+      maxSpawns = Math.floor(maxSpawns * (1 + this.rainCloudAlpha));
+      spawnRate = Math.floor(spawnRate * (1 - this.rainCloudAlpha + 1) / 2);
+    }
+    // 地牢（L504-505）：spawnRate×0.3 / max×1.8——必须发生在 clamp（L661-664）之前，
+    // 否则可产出 max>15（旧实现放 clamp 后漏判）
+    if (this.ZoneDungeon) {
+      spawnRate = Math.floor(spawnRate * 0.3);
+      maxSpawns = Math.floor(maxSpawns * 1.8);
+    }
     // L583-591（无条件）：附近怪 <20%/40%/60%/80% 上限时 ×0.6/×0.7/×0.8/×0.9
     if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.6);
     else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.7);
     else if (nearbySlots < maxSpawns * 0.6) spawnRate = Math.floor(spawnRate * 0.8);
     else if (nearbySlots < maxSpawns * 0.8) spawnRate = Math.floor(spawnRate * 0.9);
-    // L592-604：地下中点以下/腐化/猩红再叠加（Zone flags 为上次生成残留，同原版）
-    if (playerYpx / TILE > (w.groundLevel + w.rockLevel) / 2 || this.ZoneCorrupt || this.ZoneCrimson) {
+    // L592-604：地下中点以下/腐化/猩红再叠加（Zone 用上面现取值）
+    if (playerYpx / TILE > (w.groundLevel + w.rockLevel) / 2 || zoneCorrupt || zoneCrimson) {
       if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
       else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
     }
@@ -402,18 +515,8 @@ export class VanillaSpawner {
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
     if (spawnRate < 60) spawnRate = 60;
     if (maxSpawns > 15) maxSpawns = 15;
-    // 地牢（L502-506）：spawnRate×0.3 / max×1.8；未杀骷髅王再压到 10（L696，
-    // 在 clamp 之后赋值故不受 ≥60 下限影响——守卫快速轮换）
-    if (this.ZoneDungeon) {
-      spawnRate = Math.floor(spawnRate * 0.3);
-      maxSpawns = Math.floor(maxSpawns * 1.8);
-      if (!this.downedBoss3) spawnRate = 10;
-    }
-    // 雨天雪原（NPC.cs:494-496）：ZoneSnow 且玩家在地表 → max×(1+cloudAlpha) / rate×(1-cloudAlpha+1)/2
-    if (this.ZoneSnow && this.rainCloudAlpha > 0 && playerYpx / 16 < w.groundLevel) {
-      maxSpawns = Math.floor(maxSpawns * (1 + this.rainCloudAlpha));
-      spawnRate = Math.floor(spawnRate * (1 - this.rainCloudAlpha + 1) / 2);
-    }
+    // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）
+    if (this.ZoneDungeon && !this.downedBoss3) spawnRate = 10;
     return { spawnRate, maxSpawns };
   }
 
@@ -457,12 +560,6 @@ export class VanillaSpawner {
       // L911：xRange = 落脚点在 safeArea 横向范围内（原版传给 SpawnAnNPC 的水生成判定）
       this.xRange = tx >= px - safeX && tx < px + safeX;
       this.spawnTileX = tx; this.spawnTileY = ty;
-      // 落脚处 tile type（原版 GetProperGroundSpawnTileTypeAndWallType）
-      const groundType = this.skyMob ? 0 : st.type[st.idx(tx, ty)];
-      // PostCheckChosenSpawnTile L924：地牢内刷怪点必须踩地牢砖且上方格有墙，否则换点重试
-      if (this.ZoneDungeon &&
-        (!this.isDungeonTile(groundType) || st.wall[st.idx(tx, ty)] === 0)) continue;
-      this.setFlagsForChosenTile(tx, ty, groundType, rng);
       return true;
     }
     return false;
@@ -484,16 +581,28 @@ export class VanillaSpawner {
     return true;
   }
 
+  /** 联机远端玩家位置注入（px，玩家碰撞盒中心）：Game.trySpawnEnemy 每帧赋值一行。
+   *  原版 CheckNotSpawningOnScreen（L5344-5366）遍历全部 255 名玩家——与任一活跃玩家
+   *  的扩展屏相交即拒，不是只查本地玩家；否则分屏/异地队友眼前会凭空刷怪 */
+  static remotePlayers: Array<{ x: number; y: number }> = [];
+
   /** CheckNotSpawningOnScreen（L5344-5366）像素级双保险：
    *  落脚格 16×16 与"玩家屏幕 ±safeRange"矩形相交 → 拒绝。
    *  注意原版单位混用（L5354）：safeRangeX/Y 是格数但直接当像素偏移加——实际外扩仅 ~2 格 */
   private checkNotSpawningOnScreen(px: number, py: number, viewHalfW: number, viewHalfH: number): boolean {
     const sW = viewHalfW * 2 * TILE, sH = viewHalfH * 2 * TILE;
     const safePxX = viewHalfW * 1.04, safePxY = viewHalfH * 1.04; // 格数直接当像素（原版 L5354 原样）
-    const rectX = px - sW / 2 - safePxX, rectY = py - sH / 2 - safePxY;
-    const rectW = sW + safePxX * 2, rectH = sH + safePxY * 2;
     const tX = this.spawnTileX * TILE, tY = this.spawnTileY * TILE;
-    return !(tX < rectX + rectW && tX + TILE > rectX && tY < rectY + rectH && tY + TILE > rectY);
+    const clear = (cx: number, cy: number): boolean => {
+      const rectX = cx - sW / 2 - safePxX, rectY = cy - sH / 2 - safePxY;
+      const rectW = sW + safePxX * 2, rectH = sH + safePxY * 2;
+      return !(tX < rectX + rectW && tX + TILE > rectX && tY < rectY + rectH && tY + TILE > rectY);
+    };
+    if (!clear(px, py)) return false;
+    for (const rp of VanillaSpawner.remotePlayers) {
+      if (!clear(rp.x, rp.y)) return false;
+    }
+    return true;
   }
 
   /** 向上 50 格找“干格 + 下两格非实心”的洞隙线（海洋段 L1711-1718 / L1737-1752、
@@ -963,6 +1072,16 @@ export class VanillaSpawner {
     if (!this.findSpawnTile(rng, viewHalfW, viewHalfH)) return null;
     // TrySpawnAnNPC L220：CheckNotSpawningOnScreen 像素级二次校验（画面内/贴屏拒绝）
     if (!this.checkNotSpawningOnScreen(playerX, playerY, viewHalfW, viewHalfH)) return null;
+    // GetProperGroundSpawnTileTypeAndWallType（L5789-5792）：tile = 落脚格自身 type，
+    // wall = 落脚格【上方一格】的墙（skyMob 天空怪落点无实心面 → tile=0）
+    const st = this.world.store;
+    const groundType = this.skyMob ? 0 : st.type[st.idx(this.spawnTileX, this.spawnTileY)];
+    const spawnWallType = this.spawnTileY > 0
+      ? st.wall[st.idx(this.spawnTileX, this.spawnTileY - 1)] : 0;
+    // PostCheckChosenSpawnTile（L922-927）：地牢内刷怪点必须踩地牢砖且上方格有墙。
+    // 原版失败 = TrySpawnAnNPC return false（L227-230）——整帧放弃，不回选点循环换点重试
+    if (this.ZoneDungeon && (!this.isDungeonTile(groundType) || spawnWallType === 0)) return null;
+    this.setFlagsForChosenTile(this.spawnTileX, this.spawnTileY, groundType, rng);
     this.currentSpawnX = this.spawnTileX;
     this.currentSpawnY = this.spawnTileY;
     // 探针调试覆盖：debugPoolOverride 非空时绕过原版链直接从池选（确定性验证）

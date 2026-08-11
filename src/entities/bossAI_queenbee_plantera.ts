@@ -66,7 +66,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (e.vx < 0) e.vx *= 0.98; else la(e)[0] = 1;
       e.vx += 0.08;
     }
-    // EncourageDespawn(10):共享 Despawn 系统兜底
+    e.encourageDespawn(10); // :30390 离场态每 tick EncourageDespawn(10)——离屏 ~10t 消散
   } else if (e.ai0 === -1) {
     // 选下一招(:30384-30408):{0,2,3} 随机,避开 ai1 暂存的上一状态
     let pick: number;

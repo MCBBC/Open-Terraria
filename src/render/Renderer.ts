@@ -390,7 +390,7 @@ export class Renderer {
     particles: Particle[], dmgNumbers: DamageNumber[],
     swing: { t: number; dur: number; item: number } | null,
     hover: { x: number; y: number } | null,
-    boss: { name: string; hp: number; maxHp: number } | null,
+    boss: { name: string; hp: number; maxHp: number; cx: number; cy: number } | null,
     mouseX = 0, mouseY = 0, mouseDown = false,
     mineProgress = 0,
     flicker: FlickerClock | null = null,
@@ -601,8 +601,11 @@ export class Renderer {
     }
     if (this.debugMode) this.drawDebugOverlay(ctx, cam, viewW, viewH, player, entities, mouseX, mouseY, hover);
 
-    // 10. Boss 血条
-    if (boss) this.drawBossBar(ctx, viewW, boss);
+    // 10. Boss 血条（BigProgressBarSystem.TryFindingNPCToTrack：屏幕矩形外扩 5000px
+    // 与 boss 命中盒相交才跟踪显示——远离重生点时不应残留血条）
+    if (boss && Math.abs(boss.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(boss.cy - cam.y) < viewH / 2 / z + 5000) {
+      this.drawBossBar(ctx, viewW, boss);
+    }
     // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
     // 原版右下角黄条——偏差记录）
     if (invasion) this.drawInvasionBar(ctx, viewW, invasion);
@@ -2188,7 +2191,7 @@ export class Renderer {
     ctx.fillText(`${invasion.name}  ${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`, viewW / 2, y + 15);
   }
 
-  private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number }) {
+  private drawBossBar(ctx: CanvasRenderingContext2D, viewW: number, boss: { name: string; hp: number; maxHp: number; cx: number; cy: number }) {
     const w = Math.min(560, viewW - 200);
     const x = (viewW - w) / 2, y = 28;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';

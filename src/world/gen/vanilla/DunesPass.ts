@@ -123,7 +123,11 @@ function placeSingle(st: TileStore, rng: RNG, d: DunesDesc): void {
 
 /** DunesBiome.PlaceHill(DunesBiome.cs:89-108) */
 function placeHill(st: TileStore, rng: RNG, d: DunesDesc, startX: number, endX: number, scale: number): void {
-  const surfAt = (x: number) => d.surface[x - d.surfaceX] ?? 0;
+  // SurfaceMap 越界钳到边缘列(原版越界会 IndexOutOfRange,此处防御)
+  const surfAt = (x: number) => {
+    const i = Math.max(0, Math.min(d.surface.length - 1, x - d.surfaceX));
+    return d.surface[i];
+  };
   const startPoint = { x: startX, y: surfAt(startX) };
   const endPoint = { x: endX, y: surfAt(endX) };
   const center = { x: Math.trunc((startPoint.x + endPoint.x) / 2), y: Math.trunc((startPoint.y + endPoint.y) / 2) - Math.trunc(35 * scale) };
@@ -163,7 +167,8 @@ function placeCurvedLine(
     prevX = px; prevY = py;
     const centerX = d.area.left + Math.trunc(d.area.width / 2);
     const n3 = Math.trunc(d.area.width / 2) - Math.abs(px - centerX);
-    const n4 = (d.surface[px - d.surfaceX] ?? 0) + Math.trunc(Math.sqrt(Math.max(0, n3)) * 3);
+    const surf = d.surface[Math.max(0, Math.min(d.surface.length - 1, px - d.surfaceX))];
+    const n4 = surf + Math.trunc(Math.sqrt(Math.max(0, n3)) * 3);
     if (!st.inBounds(px, py)) continue;
     for (let i = py - 10; i < py; i++) {
       if (!st.inBounds(px, i)) continue;

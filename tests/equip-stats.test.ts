@@ -170,4 +170,32 @@ describe('Player 装备属性聚合', () => {
     expect(dodged).toBeGreaterThan(10);
     expect(dodged).toBeLessThan(80);
   });
+
+  it('五轮字段：天界石复合/蛙腿跳速/十字项链无敌帧/宝藏磁石范围/悠悠球线', () => {
+    const p = mkPlayer();
+    // 天界石（skyStone 复合 :12558：life+2/def+4/全系伤+10%/全系暴+2%/近战速+10%）
+    p.inv.armor[3] = { id: _iid(1865), stack: 1 }; // Celestial Stone 1865
+    const st = p.equipStats;
+    expect(st.hpPerSec).toBe(1);        // (2)/2
+    expect(st.def).toBe(4);
+    expect(st.dmgMelee).toBeCloseTo(0.1, 5);
+    expect(st.critRanged).toBe(2);
+    expect(st.meleeSpeed).toBeCloseTo(0.1, 5);
+    p.inv.armor[3] = null;
+    // 蛙腿 2423：jumpSpd 1.6
+    p.inv.armor[3] = { id: _iid(2423), stack: 1 };
+    expect(p.equipStats.jumpSpd).toBe(1.6);
+    // 十字项链 554：longInvince → iframes 翻倍
+    p.inv.armor[4] = { id: _iid(554), stack: 1 };
+    p.hp = 100; p.iframes = 0;
+    p.damage(5, 0, 0, false);
+    expect(p.iframes).toBe(80); // 40×2
+    // 宝藏磁石 5010：grabRangeBonus +94
+    p.inv.armor[5] = { id: _iid(5010), stack: 1 };
+    expect(p.grabRangeBonus).toBe(94);
+    p.inv.armor[5] = null;
+    // 白绳 3306：yoyoString（Item.stringColor>0 通道，Player.cs:14170）
+    p.inv.armor[6] = { id: _iid(3306), stack: 1 };
+    expect(p.equipStats.yoyoString).toBe(true);
+  });
 });

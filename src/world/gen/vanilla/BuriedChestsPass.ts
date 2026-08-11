@@ -65,15 +65,11 @@ function barIds(gs: GenState): { copper: number; iron: number; silver: number; g
   };
 }
 
-/** 地狱箱主件序(cs:11262-11274:每世界乱序 [274,220,112,218,3019],顺序轮换) */
-function nextHellItem(gs: GenState, rng: RNG): number {
-  if (!gs.hellChestItems) {
-    const pool = [274, 220, 112, 218, 3019];
-    const out: number[] = [];
-    while (pool.length > 0) out.push(...pool.splice(rng.int(0, pool.length - 1), 1));
-    gs.hellChestItems = out;
-  }
-  const item = gs.hellChestItems[gs.hellChestIdx % gs.hellChestItems.length];
+/** 地狱箱主件序：Reset 已按原版位置洗牌（WorldGen.ts vanillaTerrain ④，
+ *  cs:11262-11274——种子等价要求该洗牌发生在 pass 循环前，此处只轮换取用） */
+function nextHellItem(gs: GenState): number {
+  const items = gs.hellChestItems ?? [274, 220, 112, 218, 3019]; // 兜底（探针直调）
+  const item = items[gs.hellChestIdx % items.length];
   gs.hellChestIdx++;
   return item;
 }
@@ -304,7 +300,7 @@ export function placeBuriedChest(
       // 地狱箱:style 4 + 地狱武器序(cs:36158-36171)
       style = 4;
       flags.hell = true;
-      if (!mainId) mainId = nextHellItem(gs, rng);
+      if (!mainId) mainId = nextHellItem(gs);
     } else {
       style = gy >= gs.worldSurface + 25 ? 1 : 0;
       if (style === 0) flags.wooden = true;

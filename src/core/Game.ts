@@ -1952,13 +1952,18 @@ export class Game implements GameHooks {
       const buffTypeMap: Record<string, BuffType> = {
         agility: BuffType.Agility, ironskin: BuffType.Ironskin,
         resistance: BuffType.Resistance, thorns: BuffType.Thorns, regen: BuffType.Regen,
+        obsidianSkin: BuffType.ObsidianSkin, gills: BuffType.Gills,
+        manaRegen: BuffType.ManaRegen, magicPower: BuffType.MagicPower,
+        featherfall: BuffType.Featherfall, waterWalking: BuffType.WaterWalking,
+        archery: BuffType.Archery,
       };
       if (p.isHealType && this.player.buffs.healBlocked) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
         this.player.useTime = 30;
       } else {
         const bt = buffTypeMap[p.buff];
-        this.player.buffs.apply(bt, p.duration);
+        // 贤者之石（pStone：药水 CD -25%，Player.pStone → PotionSickness 2850→2140）
+        this.player.buffs.apply(bt, Math.round(p.duration * (this.player.equipStats.pStone ? 0.75 : 1)));
         if (heldDef.heal) {
           this.player.hp = Math.min(this.player.maxHp, this.player.hp + heldDef.heal);
           this.addDamageNumber(this.player.cx, this.player.y, heldDef.heal, false, '#40E080');
@@ -2046,7 +2051,10 @@ export class Game implements GameHooks {
         const dropKey = projId === 1 ? ammoDef.key : null;
         this.entities.add(new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
           damage, knockback, projId, dropKey), 'projectiles');
-        this.player.inv.removeAt(ammoSlot, 1);
+        // 弹药节约（ammoCost80：20% 概率不耗弹——蘑菇矿胸甲族，Player.PickAmmo 语义）
+        if (!(this.player.equipStats.ammoSave && Math.random() < 0.2)) {
+          this.player.inv.removeAt(ammoSlot, 1);
+        }
         this.player.useTime = bowC?.useTime ?? rg.speed;
         this.sfx.play('bowShoot');
         this.cb.onInventoryChanged();
@@ -2208,7 +2216,9 @@ export class Game implements GameHooks {
           const y = e as YoyoProj;
           if (y instanceof YoyoProj && y.projId === cw.shoot) return;
         }
-        const stringLen = flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10;
+        // 悠悠球线（yoyoString：射程 +60%，YoyoBag 语义）
+        const stringLen = (flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10)
+          * (this.player.equipStats.yoyoString ? 1.6 : 1);
         this.entities.add(new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
           () => this.input.mouseDown && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
@@ -2327,8 +2337,10 @@ export class Game implements GameHooks {
     }
     // ---- 原版 HitTile 制 1:1（Player.cs:45032-45120 ItemCheck_UseMiningTools_ActuallyUseMiningTool
     //      + :52981 GetPickaxeDamage）：每击积累、阈值 100 破坏；冷却 = useTime
-    //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）----
-    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult));
+    //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
+    //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
+    const tileSpeedMult = this.player.equipStats.tileSpeed ? 0.75 : 1;
+    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
@@ -2792,7 +2804,7 @@ export class Game implements GameHooks {
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 5.5) return;
+    if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) return;
     if (this.player.useTime > 0) return;
     const wallId = itemDef.wallId!;
     const i0 = st.idx(tx, ty);
@@ -2806,7 +2818,8 @@ export class Game implements GameHooks {
     st.setWall(tx, ty, wallId);
     this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     this.player.inv.removeAt(this.player.inv.selected, 1);
-    this.player.useTime = 15;           // wallSpeed=1（Player.cs:2336），铺墙节奏 ≈ 常规放置
+    // wallSpeed=1（Player.cs:2336），铺墙节奏 ≈ 常规放置；便携水泥机族 WallSpeedAcc 冷却 -25%
+    this.player.useTime = Math.max(4, Math.round(15 * (this.player.equipStats.wallSpeed ? 0.75 : 1)));
     this.cb.onInventoryChanged();
     // FillEmptySpace（cs:38973-39025）：stack>1 时补铺被本墙四面包围的空洞
     if (this.player.inv.heldItem()?.stack ?? 0 > 1) {
@@ -2833,7 +2846,7 @@ export class Game implements GameHooks {
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (Math.hypot(dx, dy) > 5.5) return;
+    if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
     // 橡实: 只能种在草块正上方
@@ -3014,7 +3027,7 @@ export class Game implements GameHooks {
     {
       const dx = tx - Math.floor(this.player.cx / TILE);
       const dy = ty - Math.floor(this.player.cy / TILE);
-      if (Math.hypot(dx, dy) > 5.5) { this.input.rightDown = false; return; }
+      if (Math.hypot(dx, dy) > 5.5 + (this.player.equipStats.tileRange ? 3 : 0)) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
     // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
@@ -3898,10 +3911,15 @@ export class Game implements GameHooks {
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(dx) || this.player.facing;
-      // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）
-      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65;
+      // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
+      // 力量手套族 kbGlove 近战击退翻倍
+      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1);
       const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
+      // 幸运币（hasLuckyCoin：近战命中 20% 掉 1-5 铜币，Player.SpawnCoins 近似）
+      if (this.player.equipStats.luckyCoin && Math.random() < 0.2) {
+        this.spawnDrop(e.cx, e.y, 'coin_copper', 1 + Math.floor(Math.random() * 5), 0, -2);
+      }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
     void prog;
@@ -3946,8 +3964,12 @@ export class Game implements GameHooks {
       return s + (en.vanilla?.npcSlots ?? 1);
     }, 0);
     const sHeightPx = this.camera.viewH / (this.camera.zoom || 1);
+    // 联机远端玩家注入（原版 CheckNotSpawningOnScreen L5344-5366 遍历全部玩家扩展屏）
+    VanillaSpawner.remotePlayers = this.net?.active
+      ? [...this.net.players.values()].filter((q) => q.active).map((q) => ({ x: q.x + 10, y: q.y + 21 }))
+      : [];
     const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
-      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx);
+      p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx);
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -4680,7 +4702,8 @@ export class Game implements GameHooks {
     const list = this.dialogNpc ? this.shopStockFor(this.dialogNpc) : [];
     const entry = list.find(([id]) => id === vanillaId);
     if (!entry) return;
-    const price = entry[1];
+    // 折扣卡（discountAvailable：PriceAdjustment 0.8，Main.cs:41028 同源）
+    const price = Math.max(1, Math.round(entry[1] * (this.player.equipStats.discount ? 0.8 : 1)));
     if (this.coinsOwned() < price || !this.spendCopper(price)) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       this.openNpcShop();
@@ -5645,14 +5668,15 @@ export class Game implements GameHooks {
 
   // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
 
-  /** 重铸费用 = value × stack ÷ 3（:41026-41032，discountAvailable 0.8 未实现折扣 NPC）。
+  /** 重铸费用 = value × stack ÷ 3 × 折扣（:41026-41032 discountAvailable 0.8）。
    *  vi_ 物品注册期 value=1 占位——权威值查 vanilla-itemvalue.json（extract-itemrare.mjs） */
   reforgeCost(item: { id: number; stack: number }): number {
     const def = ITEM_DEFS[item.id];
     if (!def) return 0;
     const vid = def.vid ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : -1);
     const value = (vid >= 0 ? ITEM_VALUE[String(vid)] : undefined) ?? def.value ?? 0;
-    return Math.max(1, Math.floor((value * item.stack) / 3));
+    const cost = Math.max(1, Math.floor((value * item.stack) / 3));
+    return this.player.equipStats.discount ? Math.max(1, Math.floor(cost * 0.8)) : cost;
   }
 
   /** 该物品能否重铸（Item.CanHavePrefixes → GetRollablePrefixes != null） */
@@ -5963,7 +5987,7 @@ export class Game implements GameHooks {
       this.entities.all(),
       this.particles, this.dmgNumbers,
       this.swing, hover,
-      this.boss ? { name: this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) ?? this.boss.def.name : this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp } : null,
+      this.boss ? { name: this.boss.vanillaId != null ? Lang.npcName(this.boss.vanillaId) ?? this.boss.def.name : this.boss.def.name, hp: this.boss.hp, maxHp: this.boss.maxHp, cx: this.boss.cx, cy: this.boss.cy } : null,
       this.input.mouseX, this.input.mouseY, this.input.mouseDown,
       this.mining ? Math.min(1, this.mining.progress / this.hardnessCache) : 0,
       this.lighting.clock, // FlickerClock：资源条亮度/呼吸（mouseTextColor/cursorScale）

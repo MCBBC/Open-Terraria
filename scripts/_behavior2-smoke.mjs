@@ -78,16 +78,18 @@ const res = await page.evaluate(() => {
   p.inv.armor[4] = null;
   p.inv.armor[5] = { id: g.itemId('vi_863_WaterWalkingBoots'), stack: 1 };
   out.waterWalk = p.equipStats.waterWalk;
-  // 找真实地表（该列首个实心格），向下挖 3 深水池
+  // 找真实地表（该列首个实心格），向下挖 3 深水池（两列防跨列 ledge）
   const wx = px + 5;
   let surf = 10;
   for (let y = 10; y < st.h - 10; y++) {
     if (st.flags[st.idx(wx, y)]) { surf = y; break; }
   }
-  for (let dy = 0; dy < 3; dy++) {
-    const i = st.idx(wx, surf + dy);
-    st.type[i] = 0; st.flags[i] = 0;
-    st.liquid[i] = 255; st.liquidType[i] = 1;
+  for (const col of [wx, wx + 1]) {
+    for (let dy = 0; dy < 3; dy++) {
+      const i = st.idx(col, surf + dy);
+      st.type[i] = 0; st.flags[i] = 0;
+      st.liquid[i] = 255; st.liquidType[i] = 1;
+    }
   }
   p.x = wx * 16 + 4; p.y = (surf - 5) * 16; p.vx = 0; p.vy = 0;
   p.inputX = 0; p.inputJump = false;

@@ -1,7 +1,8 @@
 // 物品注册表
 export type ToolType = 'pick' | 'axe' | 'sword' | 'hammer';
 // Buff 类型（药水饮用后生效）
-export type PotionBuff = 'agility' | 'ironskin' | 'resistance' | 'thorns' | 'regen';
+export type PotionBuff = 'agility' | 'ironskin' | 'resistance' | 'thorns' | 'regen'
+  | 'obsidianSkin' | 'gills' | 'manaRegen' | 'magicPower' | 'featherfall' | 'waterWalking' | 'archery';
 // 盔甲部位：0 头盔 1 胸甲 2 胫甲（与 Inventory.armorSlotReq 的格位对应）
 export type ArmorSlot = 0 | 1 | 2;
 
@@ -107,17 +108,34 @@ item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
 item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });
 item({ key: 'coin_platinum', name: '铂金币', maxStack: 999, value: 1000000, vid: 73 }); // 金币雨（WorldGen.cs:71848）
 
-// ---- 药水（Buff 来源，数值移植自 Maples Potions/*.asset）----
+// ---- 药水（Buff 来源;buffType/buffTime 对齐 1456 Item.cs case 288-305）----
+// 时长换算:buffTime/60 = 秒(Regeneration/Swiftness/Ironskin/Thorns 均 28800t=480s=8min)
 item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 100, desc: '回复 100 生命',
   potion: { buff: 'resistance', duration: 60, isHealType: true } });
-item({ key: 'agility_potion', name: '敏捷药水', maxStack: 30, desc: '移速 +25%，持续 4 分钟',
-  potion: { buff: 'agility', duration: 240, isHealType: false } });
-item({ key: 'ironskin_potion', name: '铁皮药水', maxStack: 30, desc: '防御 +6，持续 5 分钟',
-  potion: { buff: 'ironskin', duration: 300, isHealType: false } });
-item({ key: 'thorns_potion', name: '荆棘药水', maxStack: 30, desc: '受击反弹 2 伤害，持续 2 分钟',
-  potion: { buff: 'thorns', duration: 120, isHealType: false } });
-item({ key: 'regen_potion', name: '恢复药水', maxStack: 30, desc: '每 5 秒回复 10 生命，持续 2 分钟',
-  potion: { buff: 'regen', duration: 120, isHealType: true } });
+item({ key: 'agility_potion', name: '敏捷药水', maxStack: 30, desc: '移速 +25%，持续 8 分钟',
+  potion: { buff: 'agility', duration: 480, isHealType: false } });
+item({ key: 'ironskin_potion', name: '铁皮药水', maxStack: 30, desc: '防御 +8，持续 8 分钟',
+  potion: { buff: 'ironskin', duration: 480, isHealType: false } });
+item({ key: 'thorns_potion', name: '荆棘药水', maxStack: 30, desc: '受击反弹全额接触伤害，持续 8 分钟',
+  potion: { buff: 'thorns', duration: 480, isHealType: false } });
+item({ key: 'regen_potion', name: '恢复药水', maxStack: 30, desc: '每秒回复 2 生命，持续 8 分钟',
+  // 原版 Regeneration Potion 是 buff 药水(heal=0),不触发 PotionSickness → isHealType:false
+  potion: { buff: 'regen', duration: 480, isHealType: false } });
+// ---- 药水 buff 族第二批（Item.cs case 288/291/293/294/295/302/303 buffTime/60 = 秒）----
+item({ key: 'obsidian_skin_potion', name: '黑曜石皮药水', maxStack: 30, desc: '免疫岩浆与灼烧，持续 6 分钟',
+  potion: { buff: 'obsidianSkin', duration: 360, isHealType: false } });   // 21600t
+item({ key: 'gills_potion', name: '鱼鳃药水', maxStack: 30, desc: '可在水下呼吸，持续 4 分钟',
+  potion: { buff: 'gills', duration: 240, isHealType: false } });          // 14400t
+item({ key: 'mana_regen_potion', name: '魔力再生药水', maxStack: 30, desc: '大幅提升魔力恢复，持续 8 分钟',
+  potion: { buff: 'manaRegen', duration: 480, isHealType: false } });      // 28800t
+item({ key: 'magic_power_potion', name: '魔法力量药水', maxStack: 30, desc: '魔法伤害 +20%，持续 4 分钟',
+  potion: { buff: 'magicPower', duration: 240, isHealType: false } });     // 14400t
+item({ key: 'featherfall_potion', name: '羽落药水', maxStack: 30, desc: '减缓下落速度，持续 10 分钟',
+  potion: { buff: 'featherfall', duration: 600, isHealType: false } });    // 36000t
+item({ key: 'water_walking_potion', name: '水上行走药水', maxStack: 30, desc: '可在水面行走，持续 10 分钟',
+  potion: { buff: 'waterWalking', duration: 600, isHealType: false } });   // 36000t
+item({ key: 'archery_potion', name: '射手药水', maxStack: 30, desc: '箭伤害 ×1.1，持续 8 分钟',
+  potion: { buff: 'archery', duration: 480, isHealType: false } });        // 28800t
 
 // ---- 配饰（移植自 Maples Accessory）----
 item({ key: 'lucky_horseshoe', name: '幸运马掌', maxStack: 1, accessory: 'lucky_horseshoe',
@@ -901,6 +919,9 @@ const PRIV_ITEM_STABLE: Record<string, number> = {
   'goblin_battle_standard': 10489, 'snow_globe': 10490, 'pirate_map': 10491,
   'coin_platinum': 10492,
   'place_v_119_iridescent_brick': 10493,
+  'obsidian_skin_potion': 10494, 'gills_potion': 10495, 'mana_regen_potion': 10496,
+  'magic_power_potion': 10497, 'featherfall_potion': 10498, 'water_walking_potion': 10499,
+  'archery_potion': 10500,
 };
 
 // ---- 墙面物品全量（vanilla-wallitems.json = Item.cs createWall 提取，124 项）：

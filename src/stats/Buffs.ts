@@ -28,6 +28,14 @@ export enum BuffType {
   Burning = 8,    // 燃烧(67)：30 HP/s（lifeRegen-60）+ 移速减半；站上陨石/狱石授予（ApplyTouchDamage）
   Bleeding = 9,   // 流血(30)：清自然恢复计时 lifeRegenTime=0（:18998,无直接 DoT）
   Suffocation = 10, // 窒息(68)：20 HP/s（lifeRegen-40）；埋入沙族持续 1 tick 授予
+  // ---- 药水 buff 族（Item.cs case 288-304 buffType/buffTime;效果取 Player.cs UpdateBuffs）----
+  ObsidianSkin = 11, // 黑曜石皮(1,360s)：lavaImmune+fireWalk+着火免疫（:9573）
+  Gills = 12,        // 鱼鳃(4,240s)：gills 水下呼吸不耗（:9656）
+  ManaRegen = 13,    // 魔力再生(6,480s)：manaRegenBuff 静止加成常开+满额倍率（:19238）
+  MagicPower = 14,   // 魔法力量(7,240s)：magicDamage+0.2（:9667）
+  Featherfall = 15,  // 羽落(8,600s)：slowFall 重力/3+fallStart 重置免摔（:9671/:21367）
+  WaterWalking = 16, // 水上行走(15,600s)：waterWalk=true（:9706）
+  Archery = 17,      // 射手(16,480s)：archery+arrowDamage×1.1（:9710）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -44,6 +52,14 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Burning]: { vanillaBuff: 67, descKey: 'Mods.SandboxWorld.Buff.Burning.Desc', fallbackName: '燃烧！' },
   [BuffType.Bleeding]: { vanillaBuff: 30, descKey: 'Mods.SandboxWorld.Buff.Bleeding.Desc', fallbackName: '流血' },
   [BuffType.Suffocation]: { vanillaBuff: 68, descKey: 'Mods.SandboxWorld.Buff.Suffocation.Desc', fallbackName: '窒息' },
+  // 药水族
+  [BuffType.ObsidianSkin]: { vanillaBuff: 1, descKey: 'Mods.SandboxWorld.Buff.ObsidianSkin.Desc', fallbackName: '黑曜石皮' },
+  [BuffType.Gills]: { vanillaBuff: 4, descKey: 'Mods.SandboxWorld.Buff.Gills.Desc', fallbackName: '鱼鳃' },
+  [BuffType.ManaRegen]: { vanillaBuff: 6, descKey: 'Mods.SandboxWorld.Buff.ManaRegen.Desc', fallbackName: '魔力再生' },
+  [BuffType.MagicPower]: { vanillaBuff: 7, descKey: 'Mods.SandboxWorld.Buff.MagicPower.Desc', fallbackName: '魔法力量' },
+  [BuffType.Featherfall]: { vanillaBuff: 8, descKey: 'Mods.SandboxWorld.Buff.Featherfall.Desc', fallbackName: '羽落' },
+  [BuffType.WaterWalking]: { vanillaBuff: 15, descKey: 'Mods.SandboxWorld.Buff.WaterWalking.Desc', fallbackName: '水上行走' },
+  [BuffType.Archery]: { vanillaBuff: 16, descKey: 'Mods.SandboxWorld.Buff.Archery.Desc', fallbackName: '射手' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -96,6 +112,12 @@ export class BuffState {
     heal += this.rateAccum(BuffType.OnFire, -4, dt);        // lifeRegen-8
     heal += this.rateAccum(BuffType.Burning, -30, dt);      // lifeRegen-60
     heal += this.rateAccum(BuffType.Suffocation, -20, dt);  // lifeRegen-40
+    // 蜂蜜对冲（Player.cs:18934-18940:lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s）——
+    // DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
+    const dotActive = heal < 0;
+    if (dotActive && this.active.has(BuffType.Honey)) {
+      heal += this.rateAccum(BuffType.Honey, 2, dt, true);
+    }
     if (this.active.has(BuffType.Campfire)) {
       // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:18990/12244-12245)→ 每 2 秒 1 HP
       this.campfireAccum += dt;
@@ -113,18 +135,20 @@ export class BuffState {
     }
     return heal;
   }
-  /** 定额回复/伤害 buff 的独立累加器（Map 存每 buff 的秒余数;负速率=DoT） */
-  private rateLeft = new Map<BuffType, number>();
-  private rateAccum(t: BuffType, hpPerSec: number, dt: number): number {
-    if (!this.active.has(t)) { this.rateLeft.delete(t); return 0; }
-    let left = (this.rateLeft.get(t) ?? 0) + hpPerSec * dt;
+  /** 定额回复/伤害 buff 的独立累加器（Map 存每 buff 的秒余数;负速率=DoT）。
+   *  separate=true 用独立累加器键(蜂蜜对冲与常规蜂蜜回复分账,避免共用余数) */
+  private rateLeft = new Map<string, number>();
+  private rateAccum(t: BuffType, hpPerSec: number, dt: number, separate = false): number {
+    if (!this.active.has(t)) { this.rateLeft.delete(`${t}:${separate}`); return 0; }
+    const key = `${t}:${separate}`;
+    let left = (this.rateLeft.get(key) ?? 0) + hpPerSec * dt;
     let heal = 0;
     if (hpPerSec >= 0) {
       while (left >= 1) { left -= 1; heal += 1; }
     } else {
       while (left <= -1) { left += 1; heal -= 1; }
     }
-    this.rateLeft.set(t, left);
+    this.rateLeft.set(key, left);
     return heal;
   }
   // ---- 属性聚合（幂等读取，不做副作用写入）----
@@ -144,5 +168,30 @@ export class BuffState {
   }
   get healBlocked(): boolean {
     return this.active.has(BuffType.Resistance);
+  }
+  // ---- 药水族效果聚合（Player.cs UpdateBuffs 各 case 1:1）----
+  /** 黑曜石皮:lavaImmune + fireWalk + 着火免疫（:9573-9577） */
+  get obsidianSkin(): boolean {
+    return this.active.has(BuffType.ObsidianSkin);
+  }
+  get gills(): boolean {
+    return this.active.has(BuffType.Gills);
+  }
+  get slowFall(): boolean {
+    return this.active.has(BuffType.Featherfall);
+  }
+  get canWaterWalk(): boolean {
+    return this.active.has(BuffType.WaterWalking);
+  }
+  get manaRegenBuff(): boolean {
+    return this.active.has(BuffType.ManaRegen);
+  }
+  /** 魔法伤害 +20%（:9669） */
+  get magicDmgBonus(): number {
+    return this.active.has(BuffType.MagicPower) ? 0.2 : 0;
+  }
+  /** 箭伤 ×1.1（:9712;本仓库 ranged 管道统一消费,乘 ranged 全系——近义注明） */
+  get arrowDmgMult(): number {
+    return this.active.has(BuffType.Archery) ? 1.1 : 1;
   }
 }

@@ -411,14 +411,14 @@ export class Enemy extends Entity {
       game.playSfx('splash', vol);
     }
 
-    // 岩浆接触（NPC.cs:94520-94545）：30t 冷却,onFire 7s + 50 直伤;
-    // lavaImmune 族（NPC_LAVA_IMMUNE,SetDefaults 提取）完全豁免
+    // 岩浆接触（NPC.cs:94520-94545）：30t 独立冷却（immune[255],不受普通受击 iframes 影响）,
+    // onFire 7s + 50 直伤;lavaImmune 族（NPC_LAVA_IMMUNE,SetDefaults 提取）完全豁免
     if (this.vanillaId === null || !NPC_LAVA_IMMUNE.has(this.vanillaId)) {
       if (this.lavaCd > 0) this.lavaCd--;
       const inLava = liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2);
       if (inLava) {
         this.lavaWet = true;
-        if (this.lavaCd <= 0 && this.iframes <= 0) {
+        if (this.lavaCd <= 0) {
           this.lavaCd = 30;
           this.onFireT = Math.max(this.onFireT, 7); // AddBuff(24,420)
           this.hurt(50, 0, 0, game);                // StrikeNPCNoInteraction(50)
@@ -427,7 +427,11 @@ export class Enemy extends Entity {
       } else {
         this.lavaWet = false;
       }
+    } else {
+      this.lavaWet = false;
     }
+    // 入水熄灭 onFire（NPC.cs:94284 TryRemovingWaterPerishableEffects:水湿(非岩浆)→DelBuff 24）
+    if (this.inWater && !this.lavaWet) this.onFireT = 0;
     // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
     if (this.onFireT > 0) {
       this.onFireT -= dt;

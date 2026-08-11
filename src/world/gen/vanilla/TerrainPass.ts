@@ -1,16 +1,19 @@
-// 原版 TerrainPass 移植(Terrarria1405/GameContent/Biomes/TerrainPass.cs,1:1)。
+// 原版 TerrainPass 移植（1456 Terraria.GameContent.Biomes/TerrainPass.cs 1:1，
+// 2026-08-11 种子等价对账修正：num3/num4 是 double 非 float——此前误加 fround
+// float32 每步舍入，整条随机游走被腐蚀；小世界 clamp 缺 +0.02（GetWorldSize()==0）；
+// 填柱空气边界是 trunc(num3) 非 ceil（原版 dirt 循环从 (int)num3 起覆盖小数格））。
 // 逐列随机走 5 种地形特征(Plateau/Hill/Dale/Mountain/Valley)驱动 worldSurface/rockLayer;
 // 输出 worldSurfaceHigh/Low、rockLevelHigh/Low、waterLine、lavaLine 到 GenState;
 // 海滩区按 Reset 掷的 beachLeftEnd/beachRightStart 平坦化,右海滩入口 Retarget 收平。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { fround } from '../../../core/csCompat';
 import { T, W } from '../../../data/tiles';
 
 const enum Feature { Plateau, Hill, Dale, Mountain, Valley }
 
-// GenerateWorldSurfaceOffset(TerrainPass.cs:222-251,普通模式分支)
+// GenerateWorldSurfaceOffset（1456 cs:293-401，普通模式 else 分支：
+// 条件 drunk/getGood/remix 为 false 时不掷判定骰）
 function genSurfaceOffset(rng: RNG, f: Feature): number {
   let n = 0;
   switch (f) {
@@ -40,9 +43,12 @@ function genSurfaceOffset(rng: RNG, f: Feature): number {
 export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachPadding = 5): void {
   const { w, h } = st;
   const leftBeach = gs.beachLeftEnd, rightBeach = w - gs.beachRightStart;
+  // num10（cs:117-131）：0.17 基线，小世界（GetWorldSize()==0，maxTilesX==4200）+0.02
+  const surfLo = h * (0.17 + (w === 4200 ? 0.02 : 0));
+  const surfHi = h * 0.26;
   let feature: Feature = Feature.Plateau;
-  let num2 = h * 0.3 * (rng.int(90, 109) * 0.005);            // worldSurface(逐列游走)
-  let num3 = (num2 + h * 0.2) * (rng.int(90, 109) * 0.01);      // rockLayer(逐列游走)
+  let num2 = h * 0.3 * (rng.int(90, 109) * 0.005);            // num3 worldSurface(逐列游走,double)
+  let num3 = (num2 + h * 0.2) * (rng.int(90, 109) * 0.01);      // num4 rockLayer(逐列游走,double)
   let loSurf = num2, hiSurf = num2, loRock = num3, hiRock = num3;
   const maxSurf = h * 0.23;
   const history: number[] = []; // 近 500 列地表(右海滩 Retarget 用)
@@ -64,22 +70,24 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
       feature = rng.int(0, 2);
     }
     if (x > w * 0.48 && x < w * 0.52) feature = Feature.Plateau;
-    num2 = fround(num2 + genSurfaceOffset(rng, feature)); // C# float：每步舍 float32
+    // 原版：double 累加（整数偏移），无任何 float 舍入——IEEE754 double 与 C# 位级一致
+    num2 += genSurfaceOffset(rng, feature);
     if (x < leftBeach + flatBeachPadding || x > w - rightBeach - flatBeachPadding) {
-      num2 = Math.max(h * 0.17, Math.min(num2, maxSurf)); // 海滩 clamp
-    } else if (num2 < h * 0.17) { num2 = h * 0.17; runLen = 0; }
-    else if (num2 > h * 0.26) { num2 = h * 0.26; runLen = 0; }
-    num2 = fround(num2);
+      num2 = Math.max(surfLo, Math.min(num2, maxSurf)); // Utils.Clamp(海滩区)
+    } else if (num2 < surfLo) { num2 = surfLo; runLen = 0; }
+    else if (num2 > surfHi) { num2 = surfHi; runLen = 0; }
     while (rng.int(0, 2) === 0) num3 += rng.int(-2, 2);
     if (num3 < num2 + h * 0.06) num3++;
     if (num3 > num2 + h * 0.35) num3--;
-    num3 = fround(num3);
     history.push(num2);
     if (history.length > 500) history.shift();
-    // 填列:地表以上空气,到 rockLayer 为泥土,以下石头 + 自然墙
+    // 填列（FillColumn cs:246-271）：air 循环 i<num3，dirt 循环从 (int)num3 起覆盖
+    // → 最终态 y < trunc(num3) 空气、[trunc(num3), num4) 泥土、≥num4 石头。
+    // （此前按 y<num3 空气 = ceil 边界，小数列整体低一格）
+    const surfTrunc = Math.trunc(num2);
     for (let y = 0; y < h; y++) {
       const i = st.idx(x, y);
-      if (y < num2) {
+      if (y < surfTrunc) {
         st.type[i] = 0; st.flags[i] = 0;
       } else if (y < num3) {
         st.type[i] = T.DIRT; st.flags[i] = 1;
@@ -89,7 +97,7 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
         st.wall[i] = W.STONE;
       }
     }
-    // 右海滩入口:若地表高于 maxSurf,回溯改写近 500 列向下收平(TerrainPass.cs:101-107)
+    // 右海滩入口:若地表高于 maxSurf,回溯改写近 500 列向下收平(cs:196-204)
     if (x === w - rightBeach - flatBeachPadding) {
       if (num2 > maxSurf) retargetSurfaceHistory(st, history, x, maxSurf);
       feature = Feature.Plateau;
@@ -136,9 +144,10 @@ function retargetSurfaceHistory(st: TileStore, history: number[], targetX: numbe
 
 function retargetColumn(st: TileStore, x: number, worldSurface: number): void {
   if (x < 0 || x >= st.w) return;
+  const surfTrunc = Math.trunc(worldSurface); // 同 FillColumn：dirt 循环 (int) 起覆盖小数格
   for (let y = 0; y < st.h; y++) {
     const i = st.idx(x, y);
-    if (y < worldSurface) {
+    if (y < surfTrunc) {
       st.type[i] = 0; st.flags[i] = 0;
     } else if (!(st.type[i] === T.STONE && st.flags[i])) {
       st.type[i] = T.DIRT; st.flags[i] = 1;

@@ -1603,7 +1603,9 @@ export class UI {
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
     for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey,
-      BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation]) {
+      BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
+      BuffType.ObsidianSkin, BuffType.Gills, BuffType.ManaRegen, BuffType.MagicPower,
+      BuffType.Featherfall, BuffType.WaterWalking, BuffType.Archery]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
       block.style.cssText += 'width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer;';
@@ -2132,6 +2134,10 @@ export class UI {
       // 环境 debuff(原版用专属 buff 贴图,此处以近义物品图标近似)
       [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
       [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
+      [BuffType.ObsidianSkin, 'obsidian_skin_potion'], [BuffType.Gills, 'gills_potion'],
+      [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
+      [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
+      [BuffType.Archery, 'archery_potion'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);  }
 
@@ -2189,6 +2195,10 @@ export class UI {
       [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
       [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
       [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
+      [BuffType.ObsidianSkin, 'obsidian_skin_potion'], [BuffType.Gills, 'gills_potion'],
+      [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
+      [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
+      [BuffType.Archery, 'archery_potion'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

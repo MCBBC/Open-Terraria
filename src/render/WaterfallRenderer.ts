@@ -81,7 +81,10 @@ export class WaterfallRenderer {
     for (const wf of this.falls) {
       const texImg = tex[wf.type] ?? tex[0];
       if (!texImg) continue;
-      const frameX = 32 * (wf.type === 0 ? regular : slow);
+      // 帧槽布局实证（Waterfall_0.png 逐像素转储）：每 32px 槽的主水流在【右半 16px】
+      // （[16,32) 全宽柱），左半只有 2px 细边；原版主体路径采样 16+num21（L888/922/930）。
+      // 此前取左半 (num21,0,16) 只画出透明残边——瀑布几乎不可见
+      const frameX = 32 * (wf.type === 0 ? regular : slow) + 16;
       let cx = wf.x, cy = wf.y; // 原版从唇缘格本体开始画（半砖 blockType=1 不断流，L427）
       let dx = 0, dy = 0;       // num26/num27：本步位移
       let lastH = 0;            // num14：上一次水平方向

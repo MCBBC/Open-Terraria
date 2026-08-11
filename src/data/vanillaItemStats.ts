@@ -12,6 +12,7 @@ export interface VanillaItemStat {
   acc?: 0 | 1;
   life?: number;   // 生命回复（Item.lifeRegen，再生手环族）
   wing?: number;   // 翅膀槽（Item.wingSlot>0 即翅膀；飞行属性查 vanilla-wingstats）
+  str?: number;    // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
 }
 
 const STATS = statsJson as Record<string, VanillaItemStat>;

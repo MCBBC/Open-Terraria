@@ -163,53 +163,151 @@ async function liquidSettlePass({ world }: GenCtx) {
   await settleWorldLiquids(world, 'gen');
 }
 
+/** 种子等价对账钩子（terrain oracle）：只跑 Reset 掷骰 + Terrain pass，
+ *  返回 GenState 与逐列地表（trunc(num3)），供与 C# 参考实现逐列比对 */
+export function runResetAndTerrain(cfg: { width: number; height: number; seedText: string; evil?: -1 | 0 | 1 }): {
+  gs: GenState; surface: Int32Array; seed: number;
+} {
+  const seed = translateSeed(cfg.seedText);
+  const world = new World(cfg.width, cfg.height, seed);
+  const rng = new RNG(seed);
+  const ctx: GenCtx = {
+    world, store: world.store, rng,
+    surface: new Float32Array(cfg.width),
+    cfg: { ...cfg, evil: cfg.evil ?? -1 },
+  };
+  vanillaTerrain(ctx);
+  const out = new Int32Array(cfg.width);
+  for (let x = 0; x < cfg.width; x++) out[x] = ctx.surface[x];
+  return { gs: ctxGs[0]!, surface: out, seed };
+}
+
 function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   const gs = newGenState(store.w, store.h);
-  // Reset pass 掷骰(WorldGen.cs L4780-4880,掷骰顺序 = RNG 契约不可调换)
-  // 矿石替代对:Next(2)==0 → 替代矿(内部 id)
+  // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
+  // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
+  // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
+  const W = store.w;
+  // ① jungleHut（cs:11179）——丛林小屋样式映射，未消费
+  rng.nextInt(5);
+  // ② crimsonLeft（cs:11235）——邪恶群系左右分布，未消费
+  rng.nextInt(2);
+  // ③ RandomizeWeather（cs:7736-7746）：numClouds + 风速 do-while
+  rng.nextIntRange(10, 200);
+  for (;;) {
+    const wf = rng.next();              // NextFloat = (float)NextDouble（1 次采样）
+    rng.nextIntRange(0, 2);             // Next(2)（符号）
+    if (wf !== 0) break;                // ×0.35×(±1) 非零 ⇔ wf≠0
+  }
+  // ④ 地狱箱主件洗牌（cs:11262-11274）：Next(5..1) 逐个抽出 → gs.hellChestItems
+  {
+    const pool = [274, 220, 112, 218, 3019];
+    const out: number[] = [];
+    while (pool.length > 0) out.push(...pool.splice(rng.nextInt(pool.length), 1));
+    gs.hellChestItems = out;
+  }
+  // ⑤⑥ slimeRainTime / cloudBGActive（cs:11277-11283，天气初值，未消费）
+  rng.nextIntRange(86400 * 2, 86400 * 3);
+  rng.nextIntRange(8640, 86400);
+  // ⑦-⑩ 矿石替代对（cs:11286-11298）——Next(2)==0 用替代矿
   gs.oreTiers = {
-    copper: rng.next() < 0.5 ? TILE_BY_KEY['ore_tin']! : TILE_BY_KEY['ore_copper']!,
-    iron: rng.next() < 0.5 ? TILE_BY_KEY['ore_lead']! : TILE_BY_KEY['ore_iron']!,
-    silver: rng.next() < 0.5 ? TILE_BY_KEY['ore_tungsten']! : TILE_BY_KEY['ore_silver']!,
-    gold: rng.next() < 0.5 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
+    copper: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_tin']! : TILE_BY_KEY['ore_copper']!,
+    iron: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_lead']! : TILE_BY_KEY['ore_iron']!,
+    silver: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_tungsten']! : TILE_BY_KEY['ore_silver']!,
+    gold: rng.nextIntRange(0, 2) === 0 ? TILE_BY_KEY['ore_platinum']! : TILE_BY_KEY['ore_gold']!,
   };
-  gs.crimson = rng.next() < 0.5;
-  // RandomizeTreeStyle（原版 Reset L4837：worldID 之后）——树冠样式与边界
-  const ts = randomizeTreeStyle(rng, store.w);
-  gs.treeX = ts.treeX;
-  gs.treeStyle = ts.treeStyle;
-  // 邪恶群系覆盖（RNG 契约：骰照掷，仅覆盖结果）
+  // ⑪ crimson（cs:11321）+ UI 覆盖（骰照掷仅覆盖结果，cs:11326-11332）
+  gs.crimson = rng.nextIntRange(0, 2) === 0;
   if (cfg.evil === 0) gs.crimson = false;
   else if (cfg.evil === 1) gs.crimson = true;
   world.crimson = gs.crimson;
-  gs.dungeonSide = rng.next() < 0.5 ? -1 : 1;
-  // 丛林:与地牢异侧(Next(15,30) 即 15-29)
-  const jf = rng.int(15, 29) * 0.01;
-  gs.jungleX = Math.floor(store.w * (gs.dungeonSide === -1 ? 1 - jf : jf));
-  world.jungleX = gs.jungleX;
-  // 地牢 X:拒绝采样直到落在地牢侧 15% 区间
-  let dX = rng.int(0, store.w - 1);
-  const dLo = store.w * (gs.dungeonSide === 1 ? 0.60 : 0.25);
-  const dHi = store.w * (gs.dungeonSide === 1 ? 0.75 : 0.40);
-  while (dX < dLo || dX > dHi) dX = rng.int(0, store.w - 1);
-  gs.dungeonX = dX;
-  // 雪原:以地牢 X 为中心向两侧扩展(L4863-4879)——原版雪原与地牢同侧
-  const snowScale = store.w / 4200;
-  const snowExtend = () => rng.int(50, 89) + Math.floor(rng.int(20, 39) * snowScale) + Math.floor(rng.int(20, 39) * snowScale);
-  gs.snowOriginLeft = Math.max(0, dX - snowExtend());
-  gs.snowOriginRight = Math.min(store.w, dX + snowExtend());
-  // 海滩宽度(原版固定 300-340+档位加成,按 4200 宽设计;小世界线性缩放保持比例)
-  const beachRoll = () => Math.max(20, Math.floor(rng.int(300, 339) * snowScale));
-  gs.beachLeftEnd = beachRoll() + (gs.dungeonSide === 1 ? 40 : 20) * (snowScale >= 1 ? 1 : Math.max(0.3, snowScale));
-  gs.beachRightStart = store.w - beachRoll() - (gs.dungeonSide === -1 ? 40 : 20) * (snowScale >= 1 ? 1 : Math.max(0.3, snowScale));
-  // 地牢入口(L4891-4894):地牢侧海滩内 15% 区间随机
+  // ⑫ WorldId（cs:11354）——Next(int.MaxValue) 单次采样，未消费
+  rng.nextIntRange(0, 2147483647);
+  // ⑬ RandomizeTreeStyle（cs:8082）——树冠样式与边界
+  const ts = randomizeTreeStyle(rng, W);
+  gs.treeX = ts.treeX;
+  gs.treeStyle = ts.treeStyle;
+  // ⑭ RandomizeCaveBackgrounds（cs:8157，4200 分支；值未消费照掷）
+  rng.nextIntRange(1050, 3150);                            // caveBackX[0]
+  {
+    const a = rng.nextInt(8);
+    let b = rng.nextInt(8);
+    while (b === a) b = rng.nextInt(8);
+  }
+  // ⑮ RandomizeBackgrounds（cs:7913-7960，全部未消费照掷）
+  {
+    const rollForest = () => {
+      let n = rng.nextInt(14);
+      if ((n === 1 || n === 2) && rng.nextIntRange(0, 2) === 0) n = rng.nextInt(14);
+      if (n === 0) n = rng.nextInt(14);
+      if (n === 3 && rng.nextIntRange(0, 3) === 0) n = 31;
+      if (n === 5 && rng.nextIntRange(0, 2) === 0) n = 51;
+      if (n === 7 && rng.nextIntRange(0, 4) === 0) n = rng.nextIntRange(71, 74);
+      return n;
+    };
+    const bg1 = rollForest();
+    let bg2 = rollForest();
+    while (bg2 === bg1) bg2 = rollForest();
+    let bg3 = rollForest();
+    while (bg3 === bg1 || bg3 === bg2) bg3 = rollForest();
+    let bg4 = rollForest();
+    while (bg4 === bg1 || bg4 === bg2 || bg4 === bg3) bg4 = rollForest();
+    { // Corruption 背景：Next(6)；==5 时 Next(2) 定 51/52
+      const n = rng.nextInt(6);
+      if (n === 5) rng.nextIntRange(0, 2);
+    }
+    rng.nextInt(7);                                        // setBG(2, jungle)
+    const snowBG = rng.nextInt(9);
+    if (snowBG === 2 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
+    if (snowBG === 3 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
+    if (snowBG === 4 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
+    rng.nextInt(6);                                        // setBG(4, hallow)
+    rng.nextInt(7);                                        // setBG(5, crimson)
+    { // Desert 背景：Next(6)；==5 时 Next(5)
+      const n = rng.nextInt(6);
+      if (n === 5) rng.nextInt(5);
+    }
+    rng.nextInt(8);                                        // setBG(7, ice)
+    rng.nextInt(5);                                        // setBG(8, mushroom)
+    rng.nextInt(3);                                        // setBG(9, underworld)
+  }
+  // ⑯ RandomizeMoonState（cs:7748）——Next(9)，未消费
+  rng.nextInt(9);
+  // （TreeTops.CopyExistingWorldInfoForWorldGeneration / SetupDungeonGenVars：零掷骰）
+  // ⑰ dungeonSide（cs:11360）：Next(2)==0 → Left(我们 -1)
+  gs.dungeonSide = rng.nextIntRange(0, 2) === 0 ? -1 : 1;
+  // ⑱ 丛林（cs:11377-11392）：与地牢异侧，Next(15,30)
   if (gs.dungeonSide === -1) {
-    gs.dungeonLocation = rng.int(gs.beachLeftEnd + 50, Math.floor(store.w * 0.2));
+    gs.jungleX = Math.trunc(W * (1 - rng.nextIntRange(15, 30) * 0.01));
   } else {
-    gs.dungeonLocation = rng.int(Math.floor(store.w * 0.8), gs.beachRightStart - 50);
+    gs.jungleX = Math.trunc(W * (rng.nextIntRange(15, 30) * 0.01));
+  }
+  world.jungleX = gs.jungleX;
+  // ⑲ 地牢侧锚点 num7（cs:11394-11416）：Next(w) 拒绝采样到地牢侧 15% 区间
+  let dX = rng.nextInt(W);
+  const dLo = W * (gs.dungeonSide === 1 ? 0.60 : 0.25);
+  const dHi = W * (gs.dungeonSide === 1 ? 0.75 : 0.40);
+  while (dX < dLo || dX > dHi) dX = rng.nextInt(W);
+  gs.dungeonX = dX;
+  // ⑳ 雪原（cs:11425-11440）：锚点两侧独立扩展（num9 = w/4200，小世界恰 1.0）
+  const num9 = W / 4200;
+  const snowHalf = () => rng.nextIntRange(50, 90)
+    + Math.trunc(rng.nextIntRange(20, 40) * num9)
+    + Math.trunc(rng.nextIntRange(20, 40) * num9);
+  const snowL = snowHalf(), snowR = snowHalf();
+  gs.snowOriginLeft = Math.max(0, dX - snowL);
+  gs.snowOriginRight = Math.min(W, dX + snowR);
+  // ㉑㉒ 海滩（cs:11445-11459）：Next(300,340)（center 320±range 20）+ 侧别加宽
+  gs.beachLeftEnd = rng.nextIntRange(300, 340) + (gs.dungeonSide === 1 ? 40 : 20);
+  gs.beachRightStart = W - rng.nextIntRange(300, 340) - (gs.dungeonSide === -1 ? 40 : 20);
+  // ㉓ 地牢入口（cs:11461-11470）：地牢侧海滩内 15% 区间（dungeonBeachPadding=50）
+  if (gs.dungeonSide === -1) {
+    gs.dungeonLocation = rng.nextIntRange(gs.beachLeftEnd + 50, Math.trunc(W * 0.2));
+  } else {
+    gs.dungeonLocation = rng.nextIntRange(Math.trunc(W * 0.8), gs.beachRightStart - 50);
   }
   world.dungeonX = gs.dungeonLocation;
-  // Terrain pass
+  // ===== Terrain pass（原版第一个注册 pass，cs:11526）=====
   runTerrainPass(store, rng, gs);
   // surface 数组给后续旧 pass(surfacePass 树木等)用:每列首个实心行
   for (let x = 0; x < store.w; x++) {
