@@ -2676,8 +2676,9 @@ export class Game implements GameHooks {
       //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
       //   击退 = 弓 kb + 弹药 kb；投射物类型 = 弹药 shoot；音效 = 弓 UseSound(Item5)
       //   弹药查找：原版先扫 54-57 弹药栏（Inventory.add 已把弹药归入 54-57），再扫背包 0-53 第一组
-      //   ★ vi_ 枪族（164 手枪/930/1313 雪球炮等 useAmmo 武器）此前 combatWeapon 按
-      //   useAmmo 排除后无人接管 = 静默失效；此处经 vanilla-itemcombat.useAmmo 数据驱动接入
+      //   ★ vi_ 枪族（164 手枪/964 火铳/1319 雪球炮/281 吹箭筒等 useAmmo 武器）此前
+      //   combatWeapon 按 useAmmo 排除后无人接管 = 静默失效；此处经
+      //   vanilla-itemcombat.useAmmo 数据驱动接入（930 信号枪 useAmmo=-1 原版语义不接）
       const rg = heldDef.ranged ?? null;
       const bowVid = rg?.vid ?? viIdFromKey(heldDef.key);
       const bowC = bowVid >= 0 ? itemCombat(bowVid) : null;
@@ -3360,6 +3361,27 @@ export class Game implements GameHooks {
     // 须在 object 锚点分支前拦（否则锚点路径掉落被 drop:null 吞掉）
     if (type === TILE_BY_KEY['v_187_decos_3x2_group_2'] || type === TILE_BY_KEY['v_706_terragrim_shrine_echo']) {
       this.breakShrineSword(x, y, type);
+      return;
+    }
+    // 世花球茎/生命果植物（KillTile 尾段，WorldGen.cs:48013-48036）：
+    // 238 破坏 = 2×2 整件清除 + 50 格内有玩家 → SpawnOnPlayer(262) 召唤世花；
+    // 236 破坏 = 掉生命果(1291)。须在 object 锚点分支前拦（drop:null 会吞掉掉落）
+    if (type === TILE_BY_KEY['v_238_plantera_s_bulb'] || type === TILE_BY_KEY['v_236_life_fruit_plant']) {
+      const i0 = st.idx(x, y);
+      const ax = x - Math.floor(st.frameX[i0] / 18), ay = y - Math.floor(st.frameY[i0] / 18);
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 2; dy++) {
+          if (st.inBounds(ax + dx, ay + dy) && st.get(ax + dx, ay + dy) === type) st.setTile(ax + dx, ay + dy, 0);
+        }
+      }
+      if (type === TILE_BY_KEY['v_238_plantera_s_bulb']) {
+        if (Math.abs(this.player.cx - (ax * 16 + 16)) + Math.abs(this.player.cy - (ay * 16 + 16)) < 50 * 16) {
+          this.summonBoss('plantera');
+        }
+      } else {
+        this.spawnDrop(ax * TILE + 8, ay * TILE, 'vi_1291_life_fruit', 1);
+      }
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E180CE', 8, 1.8);
       return;
     }
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除

@@ -613,14 +613,14 @@ export class WorldEvolution {
             for (let x = i - 150; x < i + 150 && !has; x += 2) for (let y = j - 150; y < j + 150; y += 2) {
               if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 238) { has = true; break; }
             }
-            if (!has) this.placeBlock(i, minJ, 238, 2, 2);
+            if (!has) this.placeBlock(i, minJ - 1, 238, 2, 2); // 2×2 向上悬（底行贴草顶）
           } else if (this.hardMode && this.mechAny() && Math.random() < 1 / (30)) {
             // 生命果植物 236（cs:74514-74538；专家 1/30 大师 1/40——本仓库无难度档取 1/30）
             let has = false;
             for (let x = i - 60; x < i + 60 && !has; x += 2) for (let y = j - 60; y < j + 60; y += 2) {
               if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 236) { has = true; break; }
             }
-            if (!has) this.placeBlock(i, minJ, 236, 2, 2);
+            if (!has) this.placeBlock(i, minJ - 1, 236, 2, 2);
           } else {
             // 丛林植物 233（cs:74540-74558）
             this.place1(i, minJ, 233, Math.floor(Math.random() * 8), 1);

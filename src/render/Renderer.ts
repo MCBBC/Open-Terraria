@@ -252,7 +252,7 @@ export class Minimap {
         const v = parseInt(hex.slice(1), 16);
         return 0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >> 16) & 255); // 小端 ABGR
       };
-      const rgb = (c: number[]): number => 0xff000000 | ((c[0] & 255) << 16) | ((c[1] & 255) << 8) | (c[2] & 255);
+      const rgb = (c: number[]): number => 0xff000000 | ((c[2] & 255) << 16) | ((c[1] & 255) << 8) | (c[0] & 255); // 小端：bits16=B（同 parse）
       // 原版地图色全表（MapHelper.cs Initialize → vanilla-mapcolors.json）：
       // tile 按 vanilla.sheet 查原版色；legacy def 回落 mapColor
       const tiles = new Uint32Array(Math.max(64, TILE_DEFS.length));
@@ -290,7 +290,7 @@ export class Minimap {
     for (let y = 0; y < world.h; y++) {
       // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
       const skyC = vanillaSkyColor(y, surf);
-      const bg = y < surf ? (0xff000000 | ((skyC[0] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[2] & 255))
+      const bg = y < surf ? (0xff000000 | ((skyC[2] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[0] & 255))
         : y < rock ? lut.dirtBg : lut.rockBg;
       for (let x = 0; x < world.w; x++) {
         const i = y * world.w + x;

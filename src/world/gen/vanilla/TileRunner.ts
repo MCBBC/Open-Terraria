@@ -105,13 +105,10 @@ export function tileRunner(
         // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
-        if (GP2_ON && steps === 10000) {
-          GP2_N++;
-          if ((GP2_N >= 1110000 && GP2_N <= 1121000 && GP2_N % 100 === 0) || GP2_N % 50000 === 0) {
-            GP2.push(`c${GP2_N}=${rng.vanilla.peek()}`);
-          }
-        }
         const ci0 = st.idx(x, y);
+        if (GP2_ON && (x === 3401 && y === 581)) {
+          GP2.push(`S@${px.toFixed(0)},${py.toFixed(0)} a${st.flags[ci0]}t${st.type[ci0]}=peek${rng.vanilla.peek()}`);
+        }
         const cdef = TILE_DEFS[st.type[ci0]];
         if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
         if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;

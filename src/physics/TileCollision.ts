@@ -35,7 +35,7 @@ function applyStepUp(b: Body, world: World): void {
   const solidAt = (x: number, y: number): boolean =>
     st.inBounds(x, y) && st.isSolid(x, y);       // 平台非 tileSolid → 不阻挡（vanilla 语义）
   const halfAt = (x: number, y: number): boolean =>
-    st.inBounds(x, y) && st.half[st.idx(x, y)];
+    st.inBounds(x, y) && !!st.half[st.idx(x, y)];
   const slopeAt = (x: number, y: number): number =>
     st.inBounds(x, y) ? st.slope[st.idx(x, y)] : 0;
   // flag（:3700-3708）：身体放入探柱（j=2..num4 上方行全净空）
@@ -80,6 +80,39 @@ function solidSpan(world: World, tx: number, ty: number): [number, number] | nul
   if (!st.isSolid(tx, ty)) return null;
   const top = ty * TILE + (st.half[st.idx(tx, ty)] ? 8 : 0);
   return [top, (ty + 1) * TILE];
+}
+
+/** Collision.StepDown（Collision.cs:3577-3638，gravDir=1、waterWalk=false）：
+ *  贴地行走时脚下 7~17px 内有落面（半砖顶/台阶/平台）→ 直接吸附下去，
+ *  消除下楼梯的腾空帧（onGround 连续，AI 跳跃/攻击门不抖动）。
+ *  玩家（Player.cs:23252，vy==gravity 时）与 NPC（NPC.cs:54377，vy==0 时）共用。 */
+function applyStepDown(b: Body, world: World): void {
+  const vx = b.vx;
+  if (vx === 0) return;
+  const st = world.store;
+  const probeX = b.x + vx;                          // vector.X = position.X + velocity.X
+  // vector.Y = ⌊(y+h)/16⌋×16 - h（:3581 先把脚底吸附到格线）
+  const snapY = Math.floor((b.y + b.h) / TILE) * TILE - b.h;
+  const rowA = Math.floor((snapY + b.h + 4) / TILE); // num3（:3585）
+  const col0 = Math.floor(probeX / TILE), col1 = Math.floor((probeX + b.w) / TILE);
+  const num4 = Math.floor(b.h / TILE) + (b.h % TILE !== 0 ? 1 : 0);
+  let best = (rowA + num4) * TILE;                  // num5 初始（远下方默认）
+  for (let i = col0; i <= col1; i++) {
+    for (let j = rowA; j <= rowA + 1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const ji = st.idx(i, j);
+      if (!(st.isSolid(i, j) || st.isPlatform(i, j))) continue; // tileSolid||tileSolidTop（:3614）
+      let top = j * TILE;
+      if (st.half[ji]) top += 8;                    // 半砖顶 +8（:3618-3621）
+      // FloatIntersect(tile 行, 以原 position 判定 :3623)
+      if (i * TILE < b.x + b.w && i * TILE + TILE > b.x
+        && j * TILE - 17 < b.y + b.h && j * TILE - 17 + TILE > b.y && top < best) {
+        best = top;
+      }
+    }
+  }
+  const gap = best - (b.y + b.h);                   // num10（:3630）
+  if (gap > 7 && gap < 17) b.y = best - b.h;        // :3632-3637
 }
 
 /** 单个轴的移动 + 碰撞解析。返回是否发生碰撞。 */
@@ -279,8 +312,12 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;
-  // 原版 StepUp 在 TileCollision 之前用未受阻的意图速度探测（Player.cs:23258/NPC.cs:54382）
-  if (b.stepUp) applyStepUp(b, world);
+  // 原版 StepUp/StepDown 在 TileCollision 之前用未受阻的意图速度探测
+  // （Player.cs:23252-23263 / NPC.cs:54377-54382）
+  if (b.stepUp) {
+    if (b.vy >= 0) applyStepDown(b, world);
+    applyStepUp(b, world);
+  }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
   // 是 slope1/2、水平速度朝低侧、脚已沉到对角线 → dy += |dx|
   // （等价 Velocity.Y += |Velocity.X|）把身体粘到斜面,消除坡顶角/高速下坡 1 帧的格顶滑行

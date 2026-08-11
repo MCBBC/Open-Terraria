@@ -16,6 +16,7 @@ export interface NpcHome { x: number; y: number; }
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
+  stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
   npcKey: string; // 'guide'
   /** 原版 NPCID（TOWN_NPC_IDS；Renderer 经 atlas.vnpc 取 NPC_{id}.png 贴图条） */
   vanillaId: number;

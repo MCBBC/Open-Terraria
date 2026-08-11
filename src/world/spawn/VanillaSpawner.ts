@@ -1349,6 +1349,9 @@ export class VanillaSpawner {
         return D(this.getGemBunnyToSpawn(rng));
       }
     }
+    // 友好轮守卫（SpawnAnNPC :2006 else-if 链语义）：friendly 轮只可能出小动物,
+    // 前面各友好分支未命中(落点 tile 不合) → 本轮空过,绝不落入后续敌怪链
+    if (this.spawnFriendlyCycle) return null;
     // ---- 地牢（L2536-2706：CheckToSpawnDungeonEnemies = ZoneDungeon 且玩家在 dungeonY+40 以下）----
     {
       const dungeonY = this.world.dungeonY || Math.floor(this.world.groundLevel);

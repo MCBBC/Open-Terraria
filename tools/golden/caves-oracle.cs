@@ -265,7 +265,12 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             for (int y = y0; y < y1; y++)
             {
                 int ti = y * W + x;
-                if (GP2C != null) { GP2C_N++; if (GP2C_N % 10000 == 0) GP2C.Add($"c{GP2C_N}={(int)r.Peek()}"); }
+                if (GP2C != null) {
+                    GP2C_N++;
+                    if ((GP2C_N >= 1114690 && GP2C_N <= 1114701) || GP2C_N % 50000 == 0) {
+                        GP2C.Add($"c{GP2C_N}@{x},{y}a{act[ti]}t{typ[ti]}w{wal[ti]}={(int)r.Peek()}");
+                    }
+                }
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2

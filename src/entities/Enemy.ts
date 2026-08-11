@@ -109,6 +109,8 @@ export class Enemy extends Entity {
   /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
    *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
   spawnedFromStatue = false;
+  /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
+  stepUp = true;
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
   /** 链上紧随本段的一段（头 → 身×n → 尾） */
   wormNext: Enemy | null = null;

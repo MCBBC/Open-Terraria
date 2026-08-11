@@ -37,9 +37,10 @@ const baseOf = (e: Enemy): { dmg: number; def: number } => {
   return b;
 };
 
-/** 原版 localAI[0..3] 的外部存储(Enemy 只有 ai0-ai3 四个槽) */
-const localAI = new WeakMap<Enemy, { la0: number; la1: number; la2: number; la3: number }>();
-const laOf = (e: Enemy): { la0: number; la1: number; la2: number; la3: number } => {
+/** 原版 localAI[0..3] 的外部存储(Enemy 只有 ai0-ai3 四个槽)。
+ *  la2/la3 放宽为 unknown:邪教徒用 la2 存仪式圈心坐标对象、la3 存克隆体的真身引用 */
+const localAI = new WeakMap<Enemy, { la0: number; la1: number; la2: unknown; la3: unknown }>();
+const laOf = (e: Enemy): { la0: number; la1: number; la2: unknown; la3: unknown } => {
   let l = localAI.get(e);
   if (!l) { l = { la0: 0, la1: 0, la2: 0, la3: 0 }; localAI.set(e, l); }
   return l;
@@ -96,30 +97,103 @@ function aimLead(e: Enemy, player: Player, fallbackX: number): { x: number; y: n
 const rot = (x: number, y: number, a: number): [number, number] =>
   [x * Math.cos(a) - y * Math.sin(a), x * Math.sin(a) + y * Math.cos(a)];
 
-// ===================== AI_084 拜月教邪教徒 439(NPC.cs:64921-65957) =====================
-// 状态机(ai0): -1 出生显形(420t) / 0 选招(40t) / 1 飞掠占位 / 2 冰雾 464 / 3 火球 467 /
-//   4 闪电 465 / 5 仪式瞬移(克隆体跳过) / 6 被打中真身后的硬直(克隆分支,跳过) /
-//   7 远古之光(原版 NPC522,收敛为 468 直飞弹)/ 8 远古末日 NPC523(经典不被选中,保留状态体)。
-// 经典数值: 冰 35 伤(:64930)/火 30 伤·18t×3(:64941-64946)/闪电 45 伤·20+80t(:64953-64958)/
-//   光 20t×2(:64963-64967)/末日 20t×3(:64970-64973);半血防御 ×0.65(:64982-64985)。
-// 选招表(:65160-65254 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环):
+// ===================== AI_084 拜月教邪教徒 439 + 克隆体 440(NPC.cs:64921-65957) =====================
+// 真身 439 与克隆体 440 共用本核(flag2 = type==439,:64971):克隆体由仪式态(ai0==5)生成,
+//   ai[0]/ai[1] 每 tick 从真身镜像(:65000-65001);仅在仪式窗口(120-420t)可被击中——
+//   打中克隆体 → 克隆体消散 + 真身进 6 态硬直 120t(:65003-65014);
+//   打中真身 → 推进选招拍号并清同代克隆体(:65016-65060)。
+//   仪式态外克隆体无敌且不可选(dontTakeDamage=flag3,:65953)。
+// 状态机(ai0): -1 出生显形(420t,真身专属) / 0 选招(40t) / 1 飞掠占位(含克隆体环位补位) /
+//   2 冰雾 464(:65362) / 3 火球 467(:65430,第三拍克隆体补射 468) / 4 闪电 465(:65531) /
+//   5 仪式瞬移(:65623,生成/补位克隆体) / 6 硬直(:65771) / 7 远古之光(:65796,真身召
+//   NPC522 轨道弹 + 第三拍克隆体补射 468×5) / 8 远古末日 NPC523(经典不可达,状态体保留)。
+// 经典数值: 冰 35 伤(:64930)/火 30 伤·18t×3(:64941-64946)/闪电 45 伤(:64953)/
+//   光 20t×2(:64963-64967)/末日 20t×3(:64970-64973);克隆体补射 468 恒 18 伤(:65491)。
+// 选招表(:65131-65254 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环):
 //   一阶段 12 拍 [冲,火,冲,冰,冲,雷,冲,火,冲,冰,冲,仪式] 循环;
-//   二阶段 12 拍 [冲,火,冲,光,冲,雷,冲,光,冲,冰,冲,雷] 循环(原版二阶段不再仪式召克隆)。
+//   二阶段 12 拍 [冲,火,冲,光,冲,雷,冲,光,冲,冰,冲,雷] 循环(二阶段不再仪式)。
 const CULTIST_CYCLE_P1 = [0, 1, 0, 2, 0, 3, 0, 1, 0, 2, 0, 4];
 const CULTIST_CYCLE_P2 = [0, 1, 0, 5, 0, 3, 0, 5, 0, 2, 0, 3];
 
-/** 选招(:65131-65226 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环) */
+/** 选招(:65131-65254 两张 switch 表合一;表尾拍把 ai3 复位 -1 → 下次完成攻击后回 0 重循环) */
 function cultistPick(e: Enemy, phase2: boolean): number {
   const table = phase2 ? CULTIST_CYCLE_P2 : CULTIST_CYCLE_P1;
   const i = Math.floor(e.ai3);
   if (i < 0 || i >= table.length) { e.ai3 = -1; return 0; }
-  if (i === table.length - 1) e.ai3 = -1; // :65175/:65225 表尾复位
+  if (i === table.length - 1) e.ai3 = -1; // :65199/:65253 表尾复位
   return table[i];
+}
+
+/** 真身的全部存活克隆体(:65449 系:type==440 && ai[3]==whoAmI;
+ *  本仓克隆体以 localAI 槽 la3 反存真身 Enemy 引用) */
+function cultistClones(game: GameHooks, parent: Enemy): Enemy[] {
+  return (game.enemies() as Enemy[]).filter(
+    (n) => !n.dead && n.vanillaId === 440 && laOf(n).la3 === parent);
+}
+
+/** 克隆体生成出口(:65646-65650 NewNPC 440:X,Y 是底部中心坐标且 Y 再 +真身 height/2;
+ *  ai[3]=真身 whoAmI / localAI[1]=仪式代数)。本仓:la3=真身引用、la1=代数、跳过出生显影 */
+function spawnCultistClone(game: GameHooks, parent: Enemy, x: number, y: number, gen: number): Enemy | null {
+  const c = spawnPart(game, parent, 440);
+  if (!c) return null;
+  const la = laOf(c);
+  la.la3 = parent;
+  la.la1 = gen;
+  c.x = x - c.w / 2;
+  c.y = y + parent.h / 2 - c.h;
+  c.bInit = true; // 原版克隆体会落入 1t 的 -1 显影态(:65047),无实际效果,直接跳过
+  return c;
+}
+
+/** 克隆体补射 468(:65375-65397 冰雾 / :65462-65499 火球第三拍 / :65531-65562 闪电 /
+ *  :65796-65822 光第三拍):每只克隆体朝玩家(预判 20t)发 count 发,18 伤,
+ *  (6+rand4) 速 ±spread 散布,出口 = 克隆体中心 + (facing*30, 12) */
+function cloneSupplement(game: GameHooks, clones: Enemy[], player: Player, count: number, spread: number): void {
+  for (const c of clones) {
+    const dir = Math.sign(player.cx - c.cx);
+    if (dir !== 0) c.facing = dir;
+    const aim = aimLead(c, player, c.facing);
+    for (let k = 0; k < count; k++) {
+      const spd = 6 + Math.random() * 4;
+      const [dvx, dvy] = rot(aim.x * spd, aim.y * spd, (Math.random() - 0.5) * 2 * spread);
+      shoot(game, c.cx + c.facing * 30, c.cy + 12, dvx, dvy, 18, 468);
+    }
+  }
+}
+
+/** 仪式圈心(原版 Projectile 490 的位置 = 仪式开始时真身中心,:65652)。
+ *  真身存 la2;克隆体读真身的 la2 */
+function ritualCenterOf(isReal: boolean, la: { la2: unknown }, parent: Enemy | null): { x: number; y: number } | null {
+  const raw = (isReal ? la.la2 : (parent ? laOf(parent).la2 : null)) as { x: number; y: number } | null;
+  return raw ?? null;
 }
 
 export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | null): void {
   const la = laOf(e);
-  if (!e.bInit) {
+  const isReal = e.vanillaId !== 440; // flag2 = type==439(:64971);440 = 克隆体
+  let parent: Enemy | null = null;
+  // ---- 克隆体镜像段(:64998-65015):真身失效 → 消散;ai0/ai1 逐 tick 镜像;
+  //      仪式态中被击中 → 自身消散 + 真身进 6 态硬直 ----
+  if (!isReal) {
+    parent = (la.la3 as unknown as Enemy) ?? null;
+    if (!parent || parent.dead || parent.vanillaId !== 439) { // :64975-64982
+      e.dead = true;
+      return;
+    }
+    e.ai0 = parent.ai0;
+    e.ai1 = parent.ai1;
+    if (e.ai0 === 5) {
+      if (e.justHit) { // :65003-65014
+        game.spawnParticles(e.cx, e.cy, '#8060D0', 14, 2.4);
+        e.dead = true;
+        parent.ai0 = 6;
+        parent.ai1 = 0;
+        return;
+      }
+    } else {
+      e.iframes = 2; // flag3/flag4 → dontTakeDamage(chaseable=false,:65015)
+    }
+  } else if (!e.bInit) {
     // :65047-65057 localAI[0]==0:音效 + alpha=255 + ai[0]=-1(出生显形)
     e.bInit = true;
     e.ai0 = -1; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0;
@@ -131,13 +205,33 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   const phase2 = e.hp <= e.maxHp / 2;                       // flag :64928
   e.def.defense = Math.floor(phase2 ? b.def * 0.65 : b.def); // :64982-64985 半血防御 ×0.65
 
-  // :65060-65088 玩家死/超 5600px → 消散退场
+  // :65060-65088 玩家死/超 5600px → 消散退场(连带清全部克隆体,:65078-65087)
   if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     game.spawnParticles(e.cx, e.cy, '#6040A0', 14, 2.4);
+    if (isReal) {
+      for (const c of cultistClones(game, e)) {
+        game.spawnParticles(c.cx, c.cy, '#6040A0', 10, 2);
+        c.dead = true;
+      }
+    }
     e.dead = true;
     return;
   }
-  // 朝向(:65117-65120 sign(player.X - center.X))
+
+  // ---- 仪式窗口(120-420t)真身被击中(:65016-65060):推进选招 + 清同代克隆体(≤10) ----
+  if (isReal && e.ai0 === 5 && e.ai1 >= 120 && e.ai1 < 420 && e.justHit) {
+    e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; // :65021-65025
+    e.vx = 0; e.vy = 0;
+    let budget = 10; // num9 经典 10(expert 3,:65041-65044);两分支同为清场,差异仅联网消息
+    for (const c of cultistClones(game, e)) {
+      if (budget <= 0) break;
+      budget--;
+      game.spawnParticles(c.cx, c.cy, '#8060D0', 12, 2.4);
+      c.dead = true;
+    }
+  }
+
+  // 朝向(:65117-65120 sign(player.X - center.X);仪式态内被 :65676 系圈心朝向覆盖)
   const face = Math.sign(player.cx - e.cx);
   if (face !== 0) e.facing = face;
 
@@ -146,31 +240,43 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     e.spawnAlpha = Math.max(0, 254 - e.ai1 * 5); // :65066 alpha -= 5/tick
     e.iframes = 2; // flag3/flag4 → dontTakeDamage
     e.ai1 += 1;
-    if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65117-65123 收势阻尼
-    else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65126-65130 velocity=-UnitY
+    if (e.ai1 > 360) { e.vx *= 0.95; e.vy *= 0.95; }      // :65109-65111 收势阻尼
+    else if (e.ai1 > 300) { e.vx = 0; e.vy = -1; }        // :65113-65115 velocity=-UnitY
     flyIntegrate(e);
     if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.spawnAlpha = 0; }
     return;
   }
 
-  // ---- ai0 == 0 选招(:65110-65336):40t 后按 ai3 拍号取招 ----
+  // ---- ai0 == 0 选招(:65110-65336):40t 后按 ai3 拍号取招(flag2 门控,克隆体不选) ----
   if (e.ai0 === 0) {
     e.ai1 += 1;
-    if (e.ai1 >= 40) {
+    if (isReal && e.ai1 >= 40) {
       e.ai1 = 0;
       const pick = cultistPick(e, phase2);
       if (pick === 0) {
-        // 飞掠占位(:65277-65336):无克隆体时环位恒为玩家正上 (0,-200)(num16=0),
-        // num14 = ceil(距离/50) 至少 1;velocity = 位移/num14,ai1 = num14*2(隔拍移动)
-        const destX = player.cx;
-        const destY = player.cy - 200;
-        const dist = Math.hypot(destX - e.cx, destY - e.cy);
-        const num14 = Math.max(1, Math.ceil(dist / 50));
-        e.vx = (destX - e.cx) / num14;
-        e.vy = (destY - e.cy) / num14;
-        e.x -= e.vx; e.y -= e.vy; // :65318-65321 whoAmI>=自身 → 选拍当帧回退(净位移 0)
-        e.ai0 = 1;
-        e.ai1 = num14 * 2;
+        // 飞掠占位(:65277-65336):真身 + 全部克隆体一起入环——环位角
+        // num16 = ((序号+flag5+1)/2)·2π·0.4/总数,奇数序取负(flag5=总数偶数),
+        // 半径椭圆 (300,200),自转轴 (0,-1);num14 = ceil(距离/50) 至少 1,
+        // velocity = 位移/num14,ai1 = num14*2(隔拍移动;克隆体 ai1 会被镜像覆写为真身值)
+        const group = [e, ...cultistClones(game, e)];
+        const flag5 = group.length % 2 === 0 ? 1 : 0; // :65287
+        let idx = 0;
+        for (const m of group) {
+          let num16 = Math.floor((idx + flag5 + 1) / 2) * Math.PI * 2 * 0.4 / group.length; // :65291-65296
+          if (idx % 2 === 1) num16 = -num16;
+          if (group.length === 1) num16 = 0;
+          const [ux, uy] = rot(0, -1, num16);
+          const destX = player.cx + ux * 300;
+          const destY = player.cy + uy * 200;
+          const num14 = Math.max(1, Math.ceil(Math.hypot(destX - m.cx, destY - m.cy) / 50)); // :65279-65283
+          m.vx = (destX - m.cx) / num14;
+          m.vy = (destY - m.cy) / num14;
+          m.ai0 = 1;
+          m.ai1 = num14 * 2;
+          // :65318-65321 whoAmI >= 自身 → 选招当帧回退(净位移 0);克隆体按 id 序决定
+          if (m === e || e.id >= m.id) { m.x -= m.vx; m.y -= m.vy; }
+          idx++;
+        }
       } else if (pick === 1) { e.ai0 = 3; } // 火球
       else if (pick === 2) { e.ai0 = 2; }   // 冰雾
       else if (pick === 3) { e.ai0 = 4; }   // 闪电
@@ -188,53 +294,61 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     const undo = Math.floor(e.ai1) % 2 !== 0 && e.ai1 !== 1; // :65341-65344
     if (!undo) flyIntegrate(e);
     e.ai1 -= 1;
-    if (e.ai1 <= 0) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 <= 0) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 2 冰雾 464(:65362-65429):4t 时一发,35 伤,4 速直飞;持续 4+120 ----
+  // ---- ai0 == 2 冰雾 464(:65362-65429):4t 时克隆体各补 1 发 468 + 真身 1 发 464(35 伤);
+  //      持续 4+120 ----
   if (e.ai0 === 2) {
-    if (e.ai1 >= 4 && (e.ai1 - 4) % 120 === 0) {
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 120 === 0) {
+      cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
       const aim = aimLead(e, player, e.facing);
-      const [ox, oy] = [e.cx + e.facing * 30, e.cy + 12];
-      shoot(game, ox, oy, aim.x * 4, aim.y * 4, 35, 464);
+      shoot(game, e.cx + e.facing * 30, e.cy + 12, aim.x * 4, aim.y * 4, 35, 464); // :65411-65421
       game.playSfx('roar', 0.35);
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 120) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + 120) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 3 火球 467(:65430-65530):每 18t 一发×3,30 伤,(6+rand4) 速 ±0.52rad 散布;持续 4+18*3 ----
+  // ---- ai0 == 3 火球 467(:65430-65530):每 18t 一发×3,30 伤,(6+rand4) 速 ±0.52rad 散布;
+  //      第三拍克隆体各补 1 发 468(:65462-65499);持续 4+18*3 ----
   if (e.ai0 === 3) {
-    if (e.ai1 >= 4 && (e.ai1 - 4) % 18 === 0) {
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 18 === 0) {
+      if ((e.ai1 - 4) / 18 === 2) {
+        cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65448-65462
+      }
       const aim = aimLead(e, player, e.facing);
       const spd = 6 + Math.random() * 4;
       const [dvx, dvy] = rot(aim.x * spd, aim.y * spd, (Math.random() - 0.5) * 2 * 0.5235987901687622);
-      shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, 30, 467);
+      shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, 30, 467); // :65505-65517
     }
-    // 第三拍(num13==2)克隆体补射 468(:65462-65499)——无克隆体,跳过
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 18 * 3) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + 18 * 3) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 4 闪电 465(:65531-65622):20t 时在头顶 100px 撒球,45 伤;持续 20+80 ----
+  // ---- ai0 == 4 闪电 465(:65531-65622):ai1==20 时克隆体各补 1 发 468(:65531-65562),
+  //      之后每逢 (ai1-20)%80==0 在头顶 100px 撒 465(45 伤);持续 20+80 ----
   if (e.ai0 === 4) {
-    if (e.ai1 === 20) {
+    if (isReal && e.ai1 >= 20 && (e.ai1 - 20) % 80 === 0) {
+      if (e.ai1 === 20) {
+        cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622);
+        game.playSfx('roar', 0.5);
+      }
       // 原版 465 零速悬停后从天引雷(Projectile.AI 收敛:直飞 6 速朝玩家)
       const dx = player.cx - e.cx, dy = player.cy - (e.cy - 100);
       const d = Math.hypot(dx, dy) || 1;
-      shoot(game, e.cx, e.cy - 100, dx / d * 6, dy / d * 6, 45, 465);
-      game.playSfx('roar', 0.5);
+      shoot(game, e.cx, e.cy - 100, dx / d * 6, dy / d * 6, 45, 465); // :65563-65566
     }
     e.ai1 += 1;
-    if (e.ai1 >= 20 + 80) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 20 + 80) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 5 仪式瞬移(:65623-65756):0-30 淡出,30 瞬移,30-90 隐形,90-120 淡入,
-  //      120-420 可被选中(打真身窗口);持续 420 ----
+  // ---- ai0 == 5 仪式瞬移(:65623-65770):0-30 淡出,30 环位重定位 + 生成/补位克隆体,
+  //      30-90 隐形,90-120 淡入,120-420 显形可受击(打真身/克隆体窗口);持续 420 ----
   if (e.ai0 === 5) {
     const t = e.ai1;
     if (t >= 0 && t < 30) {
@@ -243,78 +357,132 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
     } else if (t >= 30 && t < 90) {
       e.spawnAlpha = 254;
       e.iframes = 2;
-      if (t === 30) {
-        // :65636-65648 原版为绕自身半径 180 的环位重定位(≤180px);
-        // 收敛:直接瞬移到绕玩家椭圆 (300,200) 8 环位中最远一格——即下一拍飞掠的目的地,
-        // 保留「消失→别处再现」语义且产生 >300px 位置跳变。
-        let far = 0, farD = -1;
-        for (let k = 0; k < 8; k++) {
-          const a = (k / 8) * Math.PI * 2;
-          const px = player.cx + Math.cos(a) * 300;
-          const py = player.cy + Math.sin(a) * 200;
-          const d = Math.hypot(px - e.cx, py - e.cy);
-          if (d > farD) { farD = d; far = k; }
+      if (t === 30 && isReal) {
+        // :65636-65675:环绕自身半径 180 的 num29 环位重定位——
+        //   补位克隆体(总数目标 6,每轮至多新造 2),余下槽位重排既有克隆体;
+        //   真身取「距玩家最远」槽(num31 = 最近槽的对侧);490 仪式圈弹未实装,
+        //   圈心(=重定位前中心)存 la2 供本态朝向用
+        la.la1 += 1; // localAI[1] 仪式代数(:65637)
+        la.la2 = { x: e.cx, y: e.cy };
+        const clones = cultistClones(game, e);
+        let num28 = 6 - clones.length; // :65643-65647
+        if (num28 > 2) num28 = 2;
+        const num29 = clones.length + num28 + 1;
+        const dists: number[] = [];
+        for (let s = 0; s < num29; s++) { // :65650-65656 各槽到玩家距离
+          const [rx, ry] = rot(180, 0, (s * Math.PI * 2) / num29 - Math.PI / 2);
+          dists.push(Math.hypot(e.cx + rx - player.cx, e.cy + ry - player.cy));
         }
-        const a = (far / 8) * Math.PI * 2;
-        e.x = player.cx + Math.cos(a) * 300 - e.w / 2;
-        e.y = player.cy + Math.sin(a) * 200 - e.h / 2;
+        let num31 = 0; // :65658-65664 取最近槽 → 映射到对侧(最远)槽
+        for (let s = 1; s < num29; s++) if (dists[num31] > dists[s]) num31 = s;
+        num31 = num31 >= num29 / 2 ? num31 - Math.floor(num29 / 2) : num31 + Math.floor(num29 / 2);
+        let num33 = num28; // :65666 新造配额,耗尽后按序重排既有克隆体(list6[-num33-1])
+        let reused = 0;
+        for (let s = 0; s < num29; s++) {
+          if (num31 === s) continue;
+          const [rx, ry] = rot(180, 0, (s * Math.PI * 2) / num29 - Math.PI / 2);
+          const px = e.cx + rx, py = e.cy + ry;
+          if (num33-- > 0) spawnCultistClone(game, e, px, py, la.la1);
+          else if (reused < clones.length) {
+            const c = clones[reused++];
+            c.x = px - c.w / 2;
+            c.y = py - c.h / 2;
+          }
+        }
+        // 真身移到 num31 槽(:65652 Center += 偏移向量)
+        const [fx, fy] = rot(180, 0, (num31 * Math.PI * 2) / num29 - Math.PI / 2);
+        e.x += fx;
+        e.y += fy;
         e.vx = 0; e.vy = 0;
         game.spawnParticles(e.cx, e.cy, '#8060D0', 18, 2.6);
         game.playSfx('roar', 0.7);
-        // 克隆体(NPC 440,环位补位 + 490 仪式弹幕,:65636-65675)按任务要求跳过
       }
     } else if (t >= 90 && t < 120) {
       e.spawnAlpha = Math.floor(254 * (1 - (t - 90) / 30));
       e.iframes = 2;
     } else {
-      e.spawnAlpha = 0; // 120-420 可选中(chaseable)
+      // 120-420:显形且可受击(alpha=0,不置 iframes;chaseable 原版为 false,:65954)
+      e.spawnAlpha = 0;
+      // 朝向:以仪式圈心为基准(:65706-65719 / :65743-65756 sign(圈心-自身).X)
+      const cir = ritualCenterOf(isReal, la, parent);
+      if (cir) {
+        const dx = cir.x - e.cx;
+        if (dx !== 0) e.facing = Math.sign(dx);
+      }
     }
     e.ai1 += 1;
-    if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 420) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 6 打中真身硬直(:65757-65770,克隆分支专用)——跳过 ----
+  // ---- ai0 == 6 硬直(:65771-65784):打中克隆体后真身暴露(不置 iframes),120t 后回选招 ----
+  if (e.ai0 === 6) {
+    e.ai1 += 1;
+    if (e.ai1 >= 120) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    flyIntegrate(e);
+    return;
+  }
 
-  // ---- ai0 == 7 远古之光(:65796-65877):每 20t 一轮×2,每轮 5 发呈扇面(步进 2π/25);持续 4+20*2 ----
+  // ---- ai0 == 7 远古之光(:65796-65877):每 20t 一轮×2;第三拍克隆体各补 5 发 468
+  //      (±1.2566rad,:65796-65822),真身每轮以扇面(步进 2π/25,8 速)召 5 只 NPC522
+  //      (:65862-65865,ai1=逐 t 弯转角 → AI_100 轨道弹);持续 4+20*2 ----
   if (e.ai0 === 7) {
-    if (e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
-      e.facing = Math.sign(player.cx - e.cx) || e.facing; // :65842-65846
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
+      e.facing = Math.sign(player.cx - e.cx) || e.facing; // :65839-65843
       const aim = aimLead(e, player, e.facing);
       const num47 = (Math.PI * 2) / 25; // :65856
+      if ((e.ai1 - 4) / 20 === 2) {
+        cloneSupplement(game, cultistClones(game, e), player, 5, 1.2566370964050293);
+      }
       for (let i = 0; i < 5; i++) {
         const [dvx, dvy] = rot(aim.x * 8, aim.y * 8, num47 * i - (Math.PI * 2 / 5 - num47) / 2); // :65860
-        // 简化项:原版生成 5 只 NPC522 远古之光(:65862-65865,aiStyle 100 直飞核未移植,
-        // 现分发会落 zombieAI),按同弹道收敛为 468 直飞弹,伤取同段克隆火球 18(:65837)
-        shoot(game, e.cx + e.facing * 30, e.cy + 12 + 7, dvx, dvy, 18, 468);
+        const n = spawnPart(game, e, 522);
+        if (n) {
+          // NewNPC(..., vector15.X, vector15.Y + 7, 522, ...) → X=中心横坐标,Y=底部纵坐标
+          n.ai0 = 0;
+          n.ai1 = (Math.random() - 0.5) * 0.3 * (Math.PI * 2) / 60; // :65861 逐 t 弯转角
+          n.ai2 = dvx; n.ai3 = dvy;                                  // 初速(AI_100 首拍取用)
+          n.x = e.cx + e.facing * 30 - n.w / 2;
+          n.y = e.cy + 12 + 7 - n.h;
+          n.vx = dvx; n.vy = dvy;
+        }
       }
       game.playSfx('roar', 0.5);
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 20 * 2) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + 20 * 2) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 8 远古末日(:65873-65932):玩家附近随机空位撒 NPC523(最多 1 只);持续 4+20*3 ----
-  // 经典选招表不含 6(expert 随机替换专属,:65270-65275),此处仅保留状态体防外部置入。
+  // ---- ai0 == 8 远古末日(:65873-65932):玩家附近随机空位撒 NPC523,数量 = min(克隆体+1, 3)
+  //      (:65892-65897);经典选招表不含 6(expert 随机替换专属,:65270-65275),状态体保留 ----
   if (e.ai0 === 8) {
-    if (e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 20 === 0) {
       const st = game.world.store;
       const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
       const etx = Math.floor(e.cx / TILE), ety = Math.floor(e.cy / TILE);
-      for (let tries = 0; tries < 100; tries++) {
-        const tx = ptx + Math.floor(Math.random() * 41) - 20;
-        const ty = pty + Math.floor(Math.random() * 41) - 20;
-        const nearPlayer = Math.abs(ty - pty) <= 7 && Math.abs(tx - ptx) <= 7;
-        const nearSelf = Math.abs(ty - ety) <= 3 && Math.abs(tx - etx) <= 3;
-        if (nearPlayer || nearSelf || !st.inBounds(tx, ty) || st.isSolid(tx, ty)) continue;
-        const n = spawnPart(game, e, 523);
-        if (n) { n.x = tx * TILE + 8 - n.w / 2; n.y = ty * TILE + 8 - n.h / 2; n.vx = 0; n.vy = 0; n.bInit = true; }
-        break;
+      const want = Math.min(cultistClones(game, e).length + 1, 3);
+      for (let k = 0; k < want; k++) {
+        for (let tries = 0; tries < 100; tries++) { // :65904-65931 空位采样
+          const tx = ptx + Math.floor(Math.random() * 41) - 20;
+          const ty = pty + Math.floor(Math.random() * 41) - 20;
+          const nearPlayer = Math.abs(ty - pty) <= 7 && Math.abs(tx - ptx) <= 7;
+          const nearSelf = Math.abs(ty - ety) <= 3 && Math.abs(tx - etx) <= 3;
+          if (nearPlayer || nearSelf || !st.inBounds(tx, ty) || st.isSolid(tx, ty)) continue;
+          const n = spawnPart(game, e, 523);
+          if (n) {
+            n.x = tx * TILE + 8 - n.w / 2;
+            n.y = ty * TILE + 8 - n.h / 2;
+            n.vx = 0; n.vy = 0;
+            n.ai0 = e.id; // :65930 ai[0] = 真身 whoAmI(本仓以运行时 id 代)
+            n.bInit = true;
+          }
+          break;
+        }
       }
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 20 * 3) { e.ai0 = 0; e.ai1 = 0; e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + 20 * 3) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
@@ -584,10 +752,12 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
 // 半血(flag2)进二阶段:悬浮 FlyMovement + 攻速变化 + 暴怒(离开神圣之地)分支按任务跳过。
 // 经典数值(:45546-45552): 砸地 922 40 伤 / 凝胶环 926 30 伤;砸地蓄力 30t(二阶段 10t);
 //   凝胶环 6 发(二阶段 10 发);仆从按掉血 2%(二阶段 1.5%)撒 1-2 只 NPC 658/659/660。
-const QUEEN_MINION_VANILLA = [658, 659, 660]; // vanilla :46134-46146 蓝/粉/紫仆从(1.4.0.5 与 1.4.5.6 同 id)
-// 658-660 未入 vanilla-npcs.json(提取遗漏)时的兜底:全部取真实史莱姆族——
-// 任务清单的 535/536/537 实为 SlimeSpiked/TheBride(僵尸!)/SandSlime(NPCID.cs:12135-12139),
-// 536 不可用,故以 16 蓝史莱姆补位
+const QUEEN_MINION_VANILLA = [658, 659, 660]; // vanilla :46134-46146 蓝/粉/紫仆从
+// 数据核对(1.4.5.6):658/659/660 已在 public/sprites/vanilla-npcs.json,与 SetDefaults
+//   :17261-17284 逐字段一致(658/659 QueenSlimeMinion 24×18 aiStyle1 伤40 防35 血150;
+//   660 QueenSlimeMinionPurple 40×30 aiStyle14 伤50 防30 血120),贴图 NPC_658/659/660.png
+//   亦在 sprites/vanilla —— 真身直连,aiStyle 1/14 均已接线。
+// FALLBACK 仅作数据文件缺失时的防御(535 刺史莱姆/537 沙史莱姆/16 蓝史莱姆)。
 const QUEEN_MINION_FALLBACK = [535, 537, 16];
 
 /** AI_015_KingSlime_FindTeleportSpot(NPC.cs:43402-43434)收敛:anti → 玩家脚下;
@@ -757,7 +927,7 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
       if (e.ai1 >= 60 && la.la1 !== 0) {
         e.iframes = 2; // dontTakeDamage = hide(:46138)
         e.x = la.la1 - e.w / 2;
-        e.y = la.la2 - e.h;
+        e.y = (la.la2 as number) - e.h;
         e.vx = 0; e.vy = 0;
         e.ai0 = 1; e.ai1 = 0;
         game.spawnParticles(e.cx, e.cy, '#7040A0', 16, 2.4);
@@ -911,22 +1081,21 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
   }
 }
 
-// ===================== 接线清单(主会话统一接线,本文件不改动已有文件) =====================
-// Enemy.fixedUpdate aiStyle 分发(Enemy.ts case 表)追加:
-//   case 84:  lunaticCultistAI(this, game, p); break;   // 439 拜月教邪教徒(克隆体 440 未移植,任务简化)
-//   case 120: empressOfLightAI(this, game, p); break;   // 636 光之女皇(无 spin 渲染,仅 facing)
+// ===================== 接线清单(Enemy.ts aiStyle case 表已接线) =====================
+//   case 84:  lunaticCultistAI(this, game, p); break;   // 439 真身 + 440 克隆体共用(见文件头)
+//   case 120: empressOfLightAI(this, game, p); break;   // 636 光之女皇(原版 AI_120 无 rotation,仅 facing)
 //   case 121: queenSlimeAI(this, game, p); break;       // 657 史莱姆皇后(俯仰用 spin)
-// 召唤 key: spawnPart(game, src, id)——史后仆从 vanilla 658/659/660(数据缺→535/537/16 兜底);
-//   邪教徒 ai0=8 态撒 523(经典不可达)。弹幕 key: shoot(game, x, y, vx, vy, dmg, projId)——
-//   464 冰雾/465 闪电球/467 火球/468 光珠;872 永恒彩虹/873 虹迹/874 极光/919 光枪/923 日舞;
-//   922 砸地冲击/926 凝胶弹。
-// 注意:Projectile_464/465/467/468/872/873/874/919/922/923/926.png 尚未入 public/sprites/vanilla/,
-//   Arrow 会画兜底短线,素材补齐后自动生效。
+// 召唤 key: spawnPart(game, src, id)——史后仆从 658/659/660(数据/贴图齐,直连真身;
+//   FALLBACK 仅防御);邪教徒仪式态生成 440 克隆体、ai0=7 态召 522 远古之光、ai0=8 态撒 523。
+// 弹幕 key: shoot(game, x, y, vx, vy, dmg, projId)——464 冰雾/465 闪电球/467 火球/468 光珠;
+//   872 永恒彩虹/873 虹迹/874 极光/919 光枪/923 日舞/922 砸地冲击/926 凝胶弹。
+// 贴图:Projectile_464/465/467/468/872/873/874/919/922/923/926.png 均已在
+//   public/sprites/vanilla/(Arrow 按 projId 懒加载自动生效)。
 
 // ============================================================================
-// AI_100 远古之光 522(NPC.cs:42064-42142):直飞投射物型 NPC。
-// 初速 ai[2]/ai[3];ai[0]>60 后按 ai[1] 弯转、>120 阻尼;触地(ai0>=0 时)→ 停驻 5t 自灭。
-// (当前邪教徒远古之光已收敛为 468 直飞弹,本核供数据完整性/未来 1:1 替换)
+// AI_100 远古之光 522(NPC.cs:42064-42142):轨道投射物型 NPC(邪教徒 ai0=7 直召)。
+// 初速 ai[2]/ai[3];ai[0]>60 后按 ai[1] 逐 t 弯转(小随机角 → 环绕/收敛弧线)、
+// >120 阻尼 0.98;触地(ai0>=0 时)→ 停驻 5t 自灭。(尘 261 系为纯视觉,略)
 // ============================================================================
 export function ancientLightAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.vx = e.ai2; e.vy = e.ai3; }

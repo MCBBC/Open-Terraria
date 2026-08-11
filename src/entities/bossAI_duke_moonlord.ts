@@ -817,9 +817,9 @@ export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
 //   → 2 死亡演出(600t 后真死,全族消散)/ 3 玩家全灭离场(60t 后全族清除)。
 //   -2:远距(>2400px)传送归位后的短演出。
 
-/** 二阶段弹幕表 = MoonLordAttacksArray2(:6966-6985,10 槽循环)。
- *  原版该表驱动 NPC 400 真眼(aiStyle 81,:38243-38264);真眼不在本次范围,
- *  攻击主链折叠到核心上执行(投射物 id/伤害取自 78/79/81 的原版发射调用)。 */
+/** 二阶段弹幕表 = MoonLordAttacksArray2(:6966-6985,10 槽循环),驱动 NPC 400 真眼
+ *  (aiStyle 81,:38243-38264,由部件 checkDead 召出,见 spawnTrueEye)。
+ *  真眼数据/贴图缺失导致 spawn 失败时,攻击主链才折叠到核心上执行兜底。 */
 const ML_CORE_P2: ReadonlyArray<readonly [number, number]> = [
   [0, 90], [1, 90], [0, 90], [2, 135], [0, 90], [3, 200], [0, 90], [4, 375], [0, 90], [2, 135],
 ];
@@ -830,6 +830,32 @@ function mlShoot(e: Enemy, game: GameHooks, player: Player, ox: number, oy: numb
   const dx = player.cx - (e.cx + ox), dy = player.cy - (e.cy + oy);
   const d = Math.hypot(dx, dy) || 1;
   shoot(game, e.cx + ox, e.cy + oy, (dx / d) * spd, (dy / d) * spd, dmg, projId, 600);
+}
+
+/** checkDead(:78845-78857):手 397 / 头 396 血尽 → ai0=-2 闭眼残肢的同时,于部件中心
+ *  召 NPC 400 真眼,ai[3] = 部件的 ai[3](核心 id,游离眼 AI 据此锚定核心) */
+function spawnTrueEye(game: GameHooks, part: Enemy): void {
+  const eye = spawnPart(game, part, 400);
+  if (!eye) return;
+  eye.x = part.cx - eye.w / 2;
+  eye.y = part.cy - eye.h / 2;
+  eye.ai0 = 0; eye.ai1 = 0; eye.ai2 = 0; eye.ai3 = part.ai3;
+}
+
+/** 月噬怪召出(:37828-37842 残肢 / :37975-37989 月噬攻击):头在 lt/inSlot=120/180/240
+ *  于玩家处召 NPC 401,ai[0]=头 whoAmI+1 / ai[1]=源弹 456 索引。
+ *  原版门禁 = 玩家身中 MoonLeech debuff 145(由 456 月噬弹命中赋予);本仓 456 为
+ *  0 伤纯视觉弹且 debuff 145 未实装——按「月噬弹已射出即视为命中」无条件补召
+ *  (ai[1] 源弹索引以 -1 代,moonLeechAI 以出生点代弹着点,不受影响)。 */
+function spawnMoonLeech(game: GameHooks, head: Enemy, player: Player): void {
+  const leech = spawnPart(game, head, 401);
+  if (!leech) return;
+  leech.x = player.cx - leech.w / 2;
+  leech.y = player.cy - leech.h / 2;
+  leech.ai0 = head.id + 1;
+  leech.ai1 = -1;
+  leech.ai2 = 0;
+  leech.vx = 0; leech.vy = 0;
 }
 
 // ---------------------------------------------------------------------------
@@ -1026,9 +1052,15 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
     }
     if (player) mlCoreHover(e, player);
     if (e.ai0 === 1 && player) {
-      // aiStyle 81 真眼的攻击表计时(:38247 起 ai[1] 每 tick +1)——折叠到核心后由核心推进
-      e.ai1 += 1;
-      mlCoreBarrage(e, game, player); // 二阶段弹幕(真眼主链折叠)
+      // 原版二阶段核心只悬停(:36912-36923),攻击全部由真眼 400(aiStyle 81)执行;
+      // 真眼已由部件 checkDead 召出 → 不再走折叠弹幕(否则双倍)。真眼 spawn 失败
+      // (数据缺失)时保留折叠兜底
+      const eyes = (game.enemies() as Enemy[]).some(
+        (n) => !n.dead && n.vanillaId === 400 && n.ai3 === e.id);
+      if (!eyes) {
+        e.ai1 += 1;
+        mlCoreBarrage(e, game, player); // 二阶段弹幕(真眼主链折叠兜底)
+      }
     }
   } else if (e.ai0 === 2) { // 死亡演出(:36925-37064)
     e.iframes = 2;
@@ -1136,8 +1168,11 @@ export function moonLordHandAI(e: Enemy, game: GameHooks, player: Player | null)
   // 锚定核心;核心缺失/死亡 → 自毁(:37202-37207)
   const core = (game.enemies() as Enemy[]).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; }
-  // 原版 checkDead(:78845-78857):血尽 → ai0=-2 闭眼残肢(满血续命+无敌)+召真眼(此处折叠为核心弹幕)
-  if (e.hp <= 0 && e.ai0 !== -2) { e.ai0 = -2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2; }
+  // 原版 checkDead(:78845-78857):血尽 → ai0=-2 闭眼残肢(满血续命+无敌)+召真眼 400
+  if (e.hp <= 0 && e.ai0 !== -2) {
+    e.ai0 = -2; e.ai1 = 0; e.hp = e.maxHp; e.iframes = 2;
+    spawnTrueEye(game, e);
+  }
 
   const x = handOf(e);
   const side = e.ai2 === 0 ? -1 : 1;  // num1231 :37208-37210
@@ -1307,8 +1342,11 @@ const ML_HEAD_ATTACKS: ReadonlyArray<readonly [number, number]> = [
 export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   const core = (game.enemies() as Enemy[]).find((n) => n.id === e.ai3 && n.vanillaId === 398);
   if (!core || core.dead) { e.dead = true; return; } // :37714-37719
-  // checkDead(:78845-78857)同手:血尽 → ai0=-2 闭眼残肢
-  if (e.hp <= 0 && e.ai0 !== -2 && e.ai0 !== -3) { e.ai0 = -2; e.ai1 = 0; e.ai2 = 0; e.hp = e.maxHp; e.iframes = 2; }
+  // checkDead(:78845-78857)同手:血尽 → ai0=-2 闭眼残肢 + 召真眼 400
+  if (e.hp <= 0 && e.ai0 !== -2 && e.ai0 !== -3) {
+    e.ai0 = -2; e.ai1 = 0; e.ai2 = 0; e.hp = e.maxHp; e.iframes = 2;
+    spawnTrueEye(game, e);
+  }
 
   const x = headOf(e);
   e.vx = 0; e.vy = 0; // :37725
@@ -1347,7 +1385,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
         const d = Math.hypot(dx, dy) || 1;
         shoot(game, e.cx, e.cy + 216, (dx / d) * 6, (dy / d) * 6, 0, 456, 600);
       }
-      // :37828-37842 原版在 lt=120/180/240 于玩家处召 401 月噬怪;不在本次范围,略
+      // :37828-37842 lt=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
+      if ((lt === 120 || lt === 180 || lt === 240)) spawnMoonLeech(game, e, player);
     }
     return;
   }
@@ -1393,7 +1432,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
       const d = Math.hypot(dx, dy) || 1;
       shoot(game, e.cx, e.cy + 216, (dx / d) * 6, (dy / d) * 6, 0, 456, 600);
     }
-    // :37975-37989 原版在 inSlot=120/180/240 召 401;不在本次范围,略
+    // :37975-37989 inSlot=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
+    if (inSlot === 120 || inSlot === 180 || inSlot === 240) spawnMoonLeech(game, e, player);
   } else if (e.ai0 === 3 && player) { // 三连幻影矢(:37991-38015)
     const pvx = (player as unknown as { vx: number }).vx ?? 0;
     const pvy = (player as unknown as { vy: number }).vy ?? 0;

@@ -9,6 +9,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { avoidWater } from './waterAvoid';
 
 export class Critter extends Entity {
+  stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
   def: CritterDef;
   facing = 1;
   animT = 0;
