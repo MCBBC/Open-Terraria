@@ -18,7 +18,8 @@ export interface GenConfig {
 
 export interface Pass {
   name: string;
-  run: (ctx: GenCtx, report: (p: number) => void) => void;
+  /** 允许 async（如中途水体沉降带 yield），generateWorld 会 await */
+  run: (ctx: GenCtx, report: (p: number) => void) => void | Promise<void>;
 }
 
 export interface GenCtx {
@@ -61,6 +62,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
     { name: '清理', run: vanillaCleanup },
+    // 原版 pass 49 SettleLiquids（cs:16215）：Lakes 之后、Smooth World(53)/
+    // Waterfalls(54) 之前的中途沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，
+    // 必须在静止水面数据上跑（此前沉降只在管线末尾 → 唇缘基于未沉降水体漂移）。
+    // 原版 pass 97 SettleLiquidsPart2（管线尾二次沉降）由 generateWorld 之后
+    // worker/Game 的 settleWorldLiquids('gen') 承担。
+    { name: '水体沉降', run: liquidSettlePass },
     { name: '生命水晶', run: vanillaLifeCrystals },
     // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
     // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
@@ -89,7 +96,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   for (let i = 0; i < passes.length; i++) {
     onProgress?.(passes[i].name, i / passes.length);
     await nextFrame();
-    passes[i].run(ctx, () => {});
+    await passes[i].run(ctx, () => {});
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
   }
@@ -134,6 +141,12 @@ import { runCaveHousesPass } from './vanilla/CaveHousePass';
 import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCavesPass';
 import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
+import { settleWorldLiquids } from '../liquid/settle';
+
+// 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
+async function liquidSettlePass({ world }: GenCtx) {
+  await settleWorldLiquids(world, 'gen');
+}
 
 function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   const gs = newGenState(store.w, store.h);
