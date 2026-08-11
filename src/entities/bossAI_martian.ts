@@ -26,6 +26,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
 import { canStartInvasion, startInvasion, INVASION_MARTIAN } from '../world/Invasion';
+import { dutchmanCannonAI } from './bossAI_dd2';
 
 /** 原版 localAI[0..3]（Enemy 的 ai0-ai3 对应 ai[],localAI 独立 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
@@ -346,6 +347,9 @@ export function martianSaucerAI(e: Enemy, game: GameHooks, player: Player | null
 // ---------------------------------------------------------------------------
 export function martianSaucerPartAI(e: Enemy, game: GameHooks, player: Player | null) {
   const id = e.vanillaId ?? 0;
+  // ---- 荷兰大炮 492（DD2 批 bossAI_dd2.ts：锚船体偏移 cs:35889 + 240t 装填炮击
+  // cs:36008）——aiStyle 75 分发进本函数,转发后不走飞碟部件路径 ----
+  if (id === 492) { dutchmanCannonAI(e, game, player); return; }
   // ---- 骑手首帧生成坐骑（:35750-35762）----
   if ((id === 390 || id === 416) && !e.bInit) {
     e.bInit = true;

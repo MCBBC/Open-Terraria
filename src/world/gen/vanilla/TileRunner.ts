@@ -60,6 +60,12 @@ export interface TileRunnerOpts {
 }
 
 
+const GP2: string[] = [];
+let GP2_N = 0;
+let GP2_ON = false;
+export function gp2Begin() { GP2_ON = true; GP2.length = 0; GP2_N = 0; }
+export function gp2Dump() { return GP2.join(' '); }
+
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -99,6 +105,7 @@ export function tileRunner(
         // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
+        if (GP2_ON) { GP2_N++; if (GP2_N % 200000 === 0) GP2.push(`c${GP2_N}=${rng.vanilla.peek()}`); }
         const ci0 = st.idx(x, y);
         const cdef = TILE_DEFS[st.type[ci0]];
         if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
@@ -232,7 +239,7 @@ export function digTunnel(
         if (Math.abs(ix - x) + Math.abs(iy - y) < radius * (1 + rng.int(-10, 10) * 0.005)
           && st.inBounds(ix, iy)) {
           const i = st.idx(ix, iy);
-          st.type[i] = 0; st.flags[i] = 0;
+          st.flags[i] = 0; // 原版 active(false) 保留 type（幽灵）——清零分叉拒绝采样
           if (wet) { st.liquid[i] = 255; st.liquidType[i] = 1; }
         }
       }

@@ -46,6 +46,7 @@ import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
 
 /** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
@@ -56,11 +57,26 @@ const HOLD_STYLE_ITEMS = new Set([
   4383, 4384, 4385, 4386, 4387, 4388, 5293, 5353,
   282, 286, 3112, 3002, 4776, 5643,
 ]);
+
+/** useStyle 5 的"法杖持位"物品（Main.cs:6695-6740 Item.staff=true 全 34 件）：
+ *  ApplyUseStyle 5 的 staff 分支（Player.cs:50374）把 itemLocation 钉在
+ *  MountedCenter + 瞄准向量×6（贴图斜持指向鼠标），与默认持位不同 */
+const STAFF_ITEMS = new Set([
+  683, 723, 726, 739, 740, 741, 742, 743, 744, 788, 1296, 1308, 1326, 1444, 1445,
+  1446, 1801, 1930, 1931, 2188, 2750, 3006, 3051, 3209, 3210, 3377, 3476, 3569,
+  3571, 3787, 3852, 3870, 4062, 5065,
+]);
+
+/** OffsetsPlayerHeadgear（Main.cs:504-525，按 bodyFrame.Y/56 行索引）：
+ *  行 0-6→y2 / 7-9→y0 / 10-13→y2 / 14-16→y0 / 17-19→y2（X 恒 0）。
+ *  useStyle 14/15（头侧持）与 holdStyle 5/6/8 的 itemLocation 都要加此偏移 */
+const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2];
 import { Lang } from '../i18n/Lang';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { BuffType } from '../stats/Buffs';
+import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
 import { Enemy } from '../entities/Enemy';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -200,19 +216,29 @@ export class Minimap {
   colorFor(x: number, y: number): string | null {
     const st = this.world.store;
     const i = st.idx(x, y);
-    if (st.type[i] !== 0) {
+    const hex = (c: number[]): string => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
+    if (st.flags[i] && st.type[i] !== 0) {
       const d = TILE_DEFS[st.type[i]];
+      if (d?.vanilla?.sheet !== undefined) {
+        const vc = vanillaTileMapColor(d.vanilla.sheet);
+        if (vc) return hex(vc);
+      }
       return d ? d.mapColor : '#808080';
     }
-    // 液体：水蓝 / 岩浆橙
-    if (st.liquid[i] > 32) return st.liquidType[i] === 2 ? '#E8622C' : '#3D6FD1'; // 原版 Minimap 阈值 >32(MapHelper.cs:1983)
-    if (st.wall[i] !== 0) {
-      // 墙色 = 深化（地下洞穴空气）
-      const w = st.wall[i];
-      return WALL_DEFS[w]?.mapColor ?? '#2E2E2E'; // 全量权威墙色（TEdit walls.json）
+    // 液体四色（原版 array3：水9,61,191/岩浆253,32,3/蜂蜜254,194,20/微光161,127,255）
+    if (st.liquid[i] > 32) {
+      const lt = st.liquidType[i];
+      return hex(vanillaLiquidColor(lt >= 1 && lt <= 4 ? lt - 1 : 0));
     }
-    // 探索过的天空 = 亮蓝（未探索区域由迷雾层另盖黑）
-    return '#7EB6E8';
+    if (st.wall[i] !== 0) {
+      const vc = vanillaWallMapColor(st.wall[i]);
+      if (vc) return hex(vc);
+      return WALL_DEFS[st.wall[i]]?.mapColor ?? '#2E2E2E';
+    }
+    // 背景：天空渐变（y<世界面）/ 土层底 / 石层底（MapHelper GetBackgroundType）
+    if (y < Math.max(1, this.world.groundLevel)) return hex(vanillaSkyColor(y, Math.max(1, this.world.groundLevel)));
+    if (y < Math.max(1, this.world.rockLevel)) return hex(VANILLA_DIRT_BG);
+    return hex(VANILLA_ROCK_BG);
   }
 
   redrawAll() {
@@ -226,34 +252,64 @@ export class Minimap {
         const v = parseInt(hex.slice(1), 16);
         return 0xff000000 | ((v & 255) << 16) | (v & 0xff00) | ((v >> 16) & 255); // 小端 ABGR
       };
+      const rgb = (c: number[]): number => 0xff000000 | ((c[0] & 255) << 16) | ((c[1] & 255) << 8) | (c[2] & 255);
+      // 原版地图色全表（MapHelper.cs Initialize → vanilla-mapcolors.json）：
+      // tile 按 vanilla.sheet 查原版色；legacy def 回落 mapColor
       const tiles = new Uint32Array(Math.max(64, TILE_DEFS.length));
       tiles.fill(parse('#808080'));
       for (let id = 0; id < TILE_DEFS.length; id++) {
-        if (TILE_DEFS[id]?.mapColor) tiles[id] = parse(TILE_DEFS[id].mapColor);
+        const d = TILE_DEFS[id];
+        if (!d) continue;
+        const sheet = d.vanilla?.sheet;
+        if (sheet !== undefined) {
+          const vc = vanillaTileMapColor(sheet);
+          if (vc) { tiles[id] = rgb(vc); continue; }
+        }
+        if (d.mapColor) tiles[id] = parse(d.mapColor);
       }
+      // 墙：vanilla id 直查原版表（墙注册表即原版 id 序）；回落 def.mapColor
       const walls = new Uint32Array(Math.max(64, WALL_DEFS.length));
       walls.fill(parse('#2E2E2E'));
       for (let id = 0; id < WALL_DEFS.length; id++) {
+        const vc = vanillaWallMapColor(id);
+        if (vc) { walls[id] = rgb(vc); continue; }
         if (WALL_DEFS[id]?.mapColor) walls[id] = parse(WALL_DEFS[id].mapColor);
       }
-      this._mapLUT = { tiles, walls, sky: parse('#7EB6E8'), water: parse('#3D6FD1'), lava: parse('#E8622C') };
+      // 液体四色（我们编码 1水2岩浆3蜂蜜4微光 → 原版索引 0/1/2/3）
+      const liq = new Uint32Array(5);
+      liq[0] = parse('#000000');
+      liq[1] = rgb(vanillaLiquidColor(0)); liq[2] = rgb(vanillaLiquidColor(1));
+      liq[3] = rgb(vanillaLiquidColor(2)); liq[4] = rgb(vanillaLiquidColor(3));
+      this._mapLUT = { tiles, walls, liq, dirtBg: rgb(VANILLA_DIRT_BG), rockBg: rgb(VANILLA_ROCK_BG) };
     }
     const lut = this._mapLUT;
     const img = ctx.createImageData(world.w, world.h);
     const buf = new Uint32Array(img.data.buffer);
     const { type, wall, liquid, liquidType } = st;
-    for (let i = 0, n = world.w * world.h; i < n; i++) {
-      const t = type[i];
-      if (t !== 0) { buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue; }
-      if (liquid[i] > 32) { buf[i] = liquidType[i] === 2 ? lut.lava : lut.water; continue; }
-      const wl = wall[i];
-      buf[i] = wl !== 0 ? (lut.walls[wl] ?? lut.walls[0]) : lut.sky;
+    const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
+    for (let y = 0; y < world.h; y++) {
+      // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
+      const skyC = vanillaSkyColor(y, surf);
+      const bg = y < surf ? (0xff000000 | ((skyC[0] & 255) << 16) | ((skyC[1] & 255) << 8) | (skyC[2] & 255))
+        : y < rock ? lut.dirtBg : lut.rockBg;
+      for (let x = 0; x < world.w; x++) {
+        const i = y * world.w + x;
+        const t = type[i];
+        if (t !== 0) { buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue; }
+        if (liquid[i] > 32) {
+          const lt = liquidType[i];
+          buf[i] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
+          continue;
+        }
+        const wl = wall[i];
+        buf[i] = wl !== 0 ? (lut.walls[wl] ?? lut.walls[0]) : bg;
+      }
     }
     ctx.putImageData(img, 0, 0);
     this.dirtyChunks.clear();
   }
   /** redrawAll 用的颜色 LUT（tile/wall id → ABGR） */
-  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; sky: number; water: number; lava: number } | null = null;
+  private _mapLUT: { tiles: Uint32Array; walls: Uint32Array; liq: Uint32Array; dirtBg: number; rockBg: number } | null = null;
 
   flushDirty() {
     if (this.dirtyChunks.size === 0) return;
@@ -1023,6 +1079,10 @@ export class Renderer {
         else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)
         else if (e.vanilla?.aiStyle === 56) ctx.rotate(e.visAngle); // AI_056 地牢之魂:rotation=atan2(v)-π/2(cs:32927)
         else if (e.vanilla?.aiStyle === 13) ctx.rotate(e.visAngle); // AI_013 植物族:头随朝玩家伸展方向旋转(cs:22778-22794);spriteDirection 仍翻转→不进 rotationDriven
+        else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
+        else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
+        else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
+        else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (rotId) ctx.rotate(e.spin);
         ctx.scale(scale, scale);
         if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
@@ -2108,33 +2168,51 @@ export class Renderer {
     ctx.restore();
   }
 
-  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number } | null) {
+  /** swing 形状（Game.swing / 远端 swingNet 同构）。
+   *  useStyle 分族 + aim（useStyle 5/13 的瞄准角）由 Game.useSwing 写入 */
+  private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number } | null) {
     const ctx = this.ctx;
     if (p.dead) return;
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
-    // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1
-    // → 静持时也渲染、手臂抬起（ItemCheck_ApplyHoldStyle 近似：竖举在身前）；
+    // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1、
+    // 雨伞族 holdStyle=2 等静持时也渲染（ItemCheck_ApplyHoldStyle :49496 逐值持位）；
     // noWet（火把 noWet=true）→ 水下不显示（与手持光源熄灭同步）。
+    // holdStyle 数据源 = vanilla-itemfunc（40 件）∪ DefaultToTorch 批量族（提取漏，
+    // HOLD_STYLE_ITEMS 手工补）；7 无持位分支（仅 bodyFrame 行 11）不画
+    let staticHoldStyle = 0;
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
       if (held && def && !p.inWater) {
         const vid = def.key === 'torch' ? 8 : viIdFromKey(def.key);
-        const holdStyle = Number.isFinite(vid) && HOLD_STYLE_ITEMS.has(vid) ? 1 : 0;
-        if (holdStyle) {
+        const hs = vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
+        staticHoldStyle = hs === 7 ? 0 : hs;
+        if (staticHoldStyle) {
           const ar = this.atlasIcon(held.id);
           const icon = ar ? null : this.itemIcon(held.id);
           if (ar || icon) {
+            const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
+            // 持位（ApplyHoldStyle dir=1 空间；offX 正=身前，offY 从 p.y 起算）：
+            //  1 默认 = (fw/2+2, 24)（:49720）；2 雨伞 = (-16, 22)（:49764）、
+            //  其余 = (6, 16) 旋 -0.79（:49777）；3 = (-2, 中心-fh/2)（:49790）；
+            //  6 = (8, 38+头饰)（:49833）；8 = (6, 28+头饰)（:49851）。rot 恒 0（除 2 的 else）
+            let offX = fw * 0.5 + 2, offY = 24, rot = 0;
+            if (hs === 2) {
+              if (vid === 946 || vid === 4707) { offX = -16; offY = 22; }
+              else { offX = 6; offY = 16; rot = -0.79; }
+            } else if (hs === 3) {
+              offX = -2; offY = p.h * 0.5 - fh * 0.5;
+            } else if (hs === 6) {
+              offX = 8; offY = 38 + HEADGEAR_OFFSET_Y[2];
+            } else if (hs === 8) {
+              offX = 6; offY = 28 + HEADGEAR_OFFSET_Y[2];
+            }
             ctx.save();
-            // 原版 holdStyle=1（ItemCheck_ApplyHoldStyle :49671/:49720）：
-            // itemLocation = (中心 + (frameW*0.5+2)*dir, 顶 + 24)；**itemRotation = 0**——
-            // 贴图以原生 45° 倾角呈现（贴图本身斜指右上），握把=左下角锚在手部，
-            // 朝左时整图镜像。此前归竖(-0.8rad)是错的：原版就不转。
-            ctx.translate(p.cx + p.facing * 7, p.y + p.h * 0.57);
+            ctx.translate(p.cx + p.facing * offX, p.y + offY);
             ctx.scale(p.facing, 1);
+            ctx.rotate(rot);
             if (ar) {
-              const w = ar.sw, h = ar.sh;
-              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -h, w, h);
+              ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
             } else if (icon) {
               ctx.drawImage(icon, 0, -icon.height * 0.6, icon.width * 0.6, icon.height * 0.6);
             }
@@ -2159,16 +2237,21 @@ export class Renderer {
     ctx.scale(p.facing, 1);
 
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
+    // use 期间 bodyFrame 行（Player.cs:35874-35990 itemAnimation>0 分支逐 useStyle）：
+    // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行
+    const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
     if (p.appearance) {
       const doll = compositePaperDoll(p.appearance, dollEquipFromInv(p.inv, this.atlas));
       if (doll) {
         let row = 0; // 0 站立
-        if (swing) {
-          // 原版 useStyle=1 三段 use 姿势（Player.cs:35876-35890）：
-          // p>2/3 行1（举）/1/3-2/3 行2（挥）/p<1/3 行3（收）——手臂烘焙在帧内随行切换
-          const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
-          row = pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+        if (useRow >= 0) row = useRow;
+        else if (staticHoldStyle) {
+          // 静持 bodyFrame 行（Player.cs:36007-36040）：1/3/5→行3、2→行2、
+          // 4→站定行 0；6/8 无行分支（7 已在上方置 0 不画）
+          if (staticHoldStyle === 2) row = 2;
+          else if (staticHoldStyle === 4 && p.onGround) row = 0;
+          else row = 3;
         }
         else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
         else if (Math.abs(p.vx) > 0.3) row = 6 + Math.floor(p.animTime / 6) % 14; // 行走循环 6-19
@@ -2194,11 +2277,17 @@ export class Renderer {
       }
       const af = this.actionFramesCache;
       let frame: typeof idle = null;
-      // 挥砍/使用中：三段 use 姿势（原版 bodyFrame 行 1/2/3，Player.cs:35876）
-      if (swing) {
-        const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
-        const swingIdx = pAnim > 2 / 3 ? 19 : pAnim > 1 / 3 ? 20 : 21;
-        frame = af['Player_' + swingIdx] ?? idle;
+      // use 期间：bodyFrame 行映射到动作帧池（行1→19 举 / 行2→20 挥 / 行3→21 收，
+      // 行0→12 / 行4→14；Player.cs:35876-35990 逐 useStyle 行档）
+      if (useRow >= 0) {
+        const rowFrame = af['Player_' + (useRow === 0 ? 12 : useRow === 4 ? 14 : 19 + useRow)];
+        frame = rowFrame ?? idle;
+      } else if (staticHoldStyle === 2) {
+        frame = af['Player_20'] ?? idle; // holdStyle 2 → bodyFrame 行 2
+      } else if (staticHoldStyle === 4 && p.onGround) {
+        frame = idle;                    // holdStyle 4 → 站定行 0
+      } else if (staticHoldStyle) {
+        frame = af['Player_21'] ?? idle; // holdStyle 1/3/5 → bodyFrame 行 3
       } else if (!p.onGround) {
         // 空中：上升用 12（收腿）、下落用 14（张腿）
         frame = (p.vy < 0 ? af['Player_12'] : af['Player_14']) ?? runFrames[0] ?? idle;
@@ -2281,43 +2370,175 @@ export class Renderer {
     void world;
   }
 
-  /** 使用/挥舞动画（与静持同尺寸：原始像素比例 ×0.9，不放大）。
-   *  工具/武器：绕持握点旋转挥砍（-63° → +57° 完整弧，身后图层）。
-   *  使用类物品（托举）：前半程旋转举起（与已验证效果一致），
-   *  后半程沿同一路径转回（三角波往返），收尾回到起始位——
-   *  不会继续向前转导致"放下时飘到身前一格"。
+  /** use 期间 bodyFrame 行（Player.cs:35874-35990，itemAnimation>0 分支逐 useStyle）。
+   *  -1 = 不改 bodyFrame（useStyle 10/14/15 被 flag6 排除在 :35716、16 无匹配分支），
+   *  交给常规动画行（行走/跳跃）。aim 仅 useStyle 5 用（:35986 itemRotation*direction 档） */
+  private useStyleBodyRow(swing: { t: number; dur: number; useStyle?: number; aim?: number }, p: Player): number {
+    const us = swing.useStyle ?? 1;
+    const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
+    switch (us) {
+      case 1:
+      case 13:
+        // :35882-35890 / :35971-35985：三段 行1/2/3（13 与 1 同表）
+        return pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+      case 2:
+      case 3:
+        return 3; // :35908 / :35948（3 两段都是行3）
+      case 4:
+        return 2; // :35959 举过头
+      case 9:
+        return 0; // :35927 饮用
+      case 6: {
+        // :35931-35947：(1-pAnim)*6 截 1，≥0.5 → 行3 否则行2
+        const n = Math.min((1 - pAnim) * 6, 1);
+        return n >= 0.5 ? 3 : 2;
+      }
+      case 5: {
+        // :35986-36005：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4
+        const n21 = (swing.aim ?? 0) * p.facing;
+        if (n21 < -0.75) return 2;
+        if (n21 > 0.6) return 4;
+        return 3;
+      }
+      case 14:
+      case 15:
+      case 10:
+      case 16:
+        return -1;
+      default:
+        return pAnim > 2 / 3 ? 1 : pAnim > 1 / 3 ? 2 : 3;
+    }
+  }
+
+  /** 使用/挥舞动画（与静持同尺寸：原始像素比例，不放大）。
+   *  useStyle 1:1 分族（Player.cs:49916 ItemCheck_ApplyUseStyle switch）：
+   *   1 挥砍三段（已验证）/ 2 咀嚼 / 3 雨伞 / 4 举过头 / 5 朝鼠标静持（法杖钉中心）
+   *   6 饮用旋转 / 9 举杯（DefaultToHealingPotion）/ 13 短剑突刺（复合手臂）/
+   *   14-15 头侧持 / 16 委托静持（holdStyle）。
+   *  坐标约定：全部按 direction=+1 推导（offX 正=身前），朝左靠镜像空间翻转；
+   *  offY 从 p.y（碰撞盒顶）起算；旋转 origin = 底角（PlayerDrawLayers.cs:3260）。
    *  图层：工具/武器挥砍在身体之前调用（身后），使用类托举在身体之后调用（身前） */
-  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number }) {
+  private drawUseItem(ctx: CanvasRenderingContext2D, p: Player, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number }) {
     const ar = this.atlasIcon(swing.item);
     const icon = ar ? null : this.itemIcon(swing.item);
-    // 原版 useStyle=1（ItemCheck_ApplyUseStyle Player.cs:49939-50108）1:1：
-    // p = itemAnimation/itemAnimationMax（起 1 收 0）——swing.t 从 dur 递减到 0，同向
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
-    // itemRotation = (p-0.5)*(-dir)*3.5 - dir*0.3（:50105）——约 200° 线性挥砍弧
-    const rot = (pAnim - 0.5) * -3.5 - 0.3;
-    // itemLocation 三段（早 p>2/3 / 中 1/3-2/3 / 晚 <1/3），X 档位按帧宽、Y 按帧高
     const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
-    // X 档位（:49948 早 / :49990 中 / :50038 晚，各自独立阈值表）
-    const xTier = (w: number, phase: 0 | 1 | 2) => phase === 0
-      ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
-      : phase === 1
-        ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
-        : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
-    // Y 档位：早=顶+24（:49958）；中按帧高（:50000）；晚按帧高（:50078）
-    const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
-      : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
-    let offX: number, offY: number;
-    if (pAnim > 2 / 3) {
-      offX = fw * 0.5 - xTier(fw, 0);
-      offY = yTier(fh, 0);
-    } else if (pAnim > 1 / 3) {
-      offX = fw * 0.5 - xTier(fw, 1);
-      offY = yTier(fh, 1);
-    } else {
-      // 晚段：X 反向（:50071 -(...)*direction）——挥过身前收到另一侧
-      offX = -(fw * 0.5 - xTier(fw, 2));
-      offY = yTier(fh, 2);
+    const us = swing.useStyle ?? 1;
+    // → { rot, offX, offY }（dir=1 空间）；hide = 原版把 itemLocation 挪到 -1000（不画）
+    let rot = 0, offX = 0, offY = 0, hide = false;
+    switch (us) {
+      case 1: {
+        // useStyle=1（:49939-50108）1:1：约 200° 线性挥砍弧 + 三段持位
+        rot = (pAnim - 0.5) * -3.5 - 0.3;
+        const xTier = (w: number, phase: 0 | 1 | 2) => phase === 0
+          ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
+          : phase === 1
+            ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
+            : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
+        const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
+          : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
+        if (pAnim > 2 / 3) { offX = fw * 0.5 - xTier(fw, 0); offY = yTier(fh, 0); }
+        else if (pAnim > 1 / 3) { offX = fw * 0.5 - xTier(fw, 1); offY = yTier(fh, 1); }
+        else { offX = -(fw * 0.5 - xTier(fw, 2)); offY = yTier(fh, 2); }
+        break;
+      }
+      case 2: {
+        // 咀嚼（:50183-50224，DefaultToFood 非 gulp 族：蘑菇 5/蜂蜜鳍 2314）：
+        // 手臂伸缩档 num15=8/6/4/2 → offX = num15+10-fw/2，Y = 中心 + fh/2-4；rot 不变
+        const n14 = 1 - pAnim;
+        const n15 = n14 <= 0.25 ? 8 : n14 <= 0.5 ? 6 : n14 <= 0.75 ? 4 : 2;
+        offX = n15 + 10 - fw * 0.5;
+        offY = p.h * 0.5 + fh * 0.5 - 4;
+        break;
+      }
+      case 3: {
+        // 雨伞（:50279-50312）：收势段（pAnim>0.666）itemLocation=-1000 不画
+        if (pAnim > 0.666) { hide = true; break; }
+        rot = 0.8;
+        offX = fw * 0.5 - 4 - Math.max(pAnim * fw * 1.2 - 10, 8);
+        offY = 24;
+        break;
+      }
+      case 4: {
+        // 举过头（:50313-50338）：rot=0；offX = fw/2-13（3601/5114/5120 再 -10）
+        // offY = fh/2+4（5114 再 -2）——使用中身体行 2（双手举过头顶）
+        offX = fw * 0.5 - 13;
+        offY = fh * 0.5 + 4;
+        break;
+      }
+      case 5: {
+        // 朝鼠标静持（:50339-50422 + :46708 itemRotation=瞄准角）：
+        // 法杖族钉 MountedCenter+瞄准向量×6；默认 X=中心-2*dir、Y=中心-fh/2
+        rot = swing.aim ?? 0;
+        const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        if (vid >= 0 && STAFF_ITEMS.has(vid)) {
+          offX = Math.cos(rot) * 6;
+          offY = p.h * 0.5 + Math.sin(rot) * 6;
+        } else {
+          offX = -2;
+          offY = p.h * 0.5 - fh * 0.5;
+        }
+        break;
+      }
+      case 6: {
+        // 饮用旋转（:50158-50182，回归药水 2350/4870）：与 7 同构反向
+        const n13 = Math.min((1 - pAnim) * 6, 1);
+        rot = (1 - n13) * 2 - 1.4;
+        if (n13 >= 0.5) { offX = fw * 0.5 - 9 - rot * 12; offY = 38 + rot * 4; }
+        else { offX = fw * 0.5 - 9 - rot * 16; offY = 38 + rot; }
+        break;
+      }
+      case 9: {
+        // 举杯（:50127-50157，DefaultToHealingPotion/DefaultToFood gulp）：
+        // t=clamp((1-pAnim)/0.7)；rot = -2t+0.7；
+        // 持位 = GetFrontHandPosition(Full, num11-π/2) 再缩放 Lerp(1.5,1.2,t)+前移 Lerp(8,2,t)
+        const t = Math.min(Math.max((1 - pAnim) / 0.7, 0), 1);
+        rot = -2 * t + 0.7;
+        const num11 = -(Math.PI * 2) / 5 * 0.5 + (1 - t) * ((Math.PI * 2) / 5) + Math.PI / 10;
+        // GetFrontHandPosition(Full, num11-π/2)（:49887-49913，dir=1 展开）
+        const hx = 10 * Math.cos(num11) - 4 - 3 * Math.sin(num11);
+        const hy = 10 * Math.sin(num11) - 2 + 3 * Math.cos(num11);
+        offX = hx + (8 + (2 - 8) * t);
+        offY = p.h * 0.5 + hy;
+        break;
+      }
+      case 13: {
+        // 短剑突刺（:50423-50446）：复合手臂持位 GetFrontHandPosition(stretch, aim-π/2)，
+        // stretch 按 1-pAnim 档 Quarter(6)/ThreeQuarters(8)/Full(10)；绘制旋转 = aim
+        const n24 = 1 - pAnim;
+        const mult = n24 <= 0.33 ? 6 : n24 <= 0.66 ? 8 : 10;
+        rot = swing.aim ?? 0;
+        offX = mult * Math.cos(rot) - 4 - 3 * Math.sin(rot);
+        offY = p.h * 0.5 + mult * Math.sin(rot) - 2 + 3 * Math.cos(rot);
+        break;
+      }
+      case 14: {
+        // 头侧持（:50604-50617，夜光 4952）：X=中心+6、Y=顶+32+头饰偏移；身体行不改
+        offX = 6;
+        offY = 32 + HEADGEAR_OFFSET_Y[2];
+        break;
+      }
+      case 15: {
+        // 头侧持（:50618-50628，占卜球 5644）：Y=顶+28+头饰偏移
+        offX = 6;
+        offY = 28 + HEADGEAR_OFFSET_Y[2];
+        break;
+      }
+      case 16: {
+        // 委托静持（:50629-50633，独角兽棒 856 = holdStyle 1 特例：X=中心+4、Y=顶+34）
+        offX = 4;
+        offY = 34;
+        break;
+      }
+      default: {
+        // 7/8/10/11/12 等未入表族（本批物品无）回退 useStyle 1 挥砍
+        rot = (pAnim - 0.5) * -3.5 - 0.3;
+        offX = fw * 0.5 - 10;
+        offY = 24;
+        break;
+      }
     }
+    if (hide) return;
     ctx.save();
     ctx.translate(p.cx + p.facing * offX, p.y + offY);
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
@@ -2325,8 +2546,7 @@ export class Renderer {
     if (ar) {
       // 原版 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
-      // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角。
-      // 此前误画在 (fw/2,−fh)：武器整把向外飘半个身位宽 = "离手很远"的根因
+      // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角
       ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
     } else if (icon) {
       ctx.drawImage(icon, 0, -14, 14, 14);
@@ -2967,16 +3187,16 @@ export class Renderer {
     }
     const cx0 = viewW / 2 - mapW / 2 + fm.panX;
     const cy0 = viewH / 2 - mapH / 2 + fm.panY;
-    // 背景遮罩
-    ctx.fillStyle = 'rgba(8,6,16,0.88)';
-    ctx.fillRect(0, 0, viewW, viewH);
-    // 地图边框
-    ctx.strokeStyle = '#5A4A7A';
-    ctx.lineWidth = 4;
-    ctx.strokeRect(cx0 - 3, cy0 - 3, mapW + 6, mapH + 6);
-    // 地图本体
-    ctx.fillStyle = '#7EB6E8';
-    ctx.fillRect(cx0, cy0, mapW, mapH);
+    // 背景：原版 DrawMapFullscreenBackground（Main.cs:55804）——全屏群系 MapBG 贴图
+    // （TextureAssets.MapBGs[i] = MapBG{i+1}.png，AssetInitializer :641），按视区深度
+    // 与玩家 zone 选表；贴图 vui() 懒加载首帧 null → 次帧补上（兜底深色）
+    const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}`) : null;
+    if (bgTex) {
+      ctx.drawImage(bgTex.img, bgTex.sx, bgTex.sy, bgTex.sw, bgTex.sh, 0, 0, viewW, viewH);
+    } else {
+      ctx.fillStyle = 'rgba(8,6,16,0.92)';
+      ctx.fillRect(0, 0, viewW, viewH);
+    }
     ctx.imageSmoothingEnabled = fm.zoom >= 1;
     ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);
     ctx.imageSmoothingEnabled = false;
@@ -3011,6 +3231,57 @@ export class Renderer {
     ctx.fillText(Lang.text('Mods.SandboxWorld.Map.Hint'), viewW / 2, viewH - 16);
   }
   private _mapInit = false;
+
+  /** 全屏地图背景群系序号（DrawMapFullscreenBackground Main.cs:55804-55905 1:1）。
+   *  深度以地图视区竖直中心（tile）近似原版 screenPosition；群系/墙取玩家所在格。
+   *  返回值 = MapBGs 数组下标（贴图文件 MapBG{下标+1}.png）。 */
+  fullMapBgIndex(world: World): number {
+    const p = this._lastPlayer;
+    const sc = this.scene;
+    if (!p || !sc) return 0;
+    // 视区竖直中心（tile）——用 pan 后地图的屏幕中心近似（原版 screenPosition.Y）
+    const fm = this.fullMap;
+    const viewW = this.canvas.width, viewH = this.canvas.height;
+    const mapH = world.h * fm.zoom;
+    const cy0 = viewH / 2 - mapH / 2 + fm.panY;
+    const vy = Math.floor((cy0 + mapH / 2) / fm.zoom);
+    const px = Math.floor(p.cx / TILE), py = Math.floor(p.cy / TILE);
+    const st = world.store;
+    const inB = st.inBounds(px, py);
+    const wall = inB ? st.wall[st.idx(px, py)] : 0;
+    // 地狱（视区深度）
+    if (vy > world.store.h - 232) return 2;
+    if (sc.zoneDungeon) return 4;
+    if (wall === 87) return 13;
+    if (py > world.groundLevel) {
+      switch (wall) {
+        case 86: case 108: return 15;
+        case 180: case 184: return 16;
+        case 178: case 183: return 17;
+        case 62: case 263: return 18;
+      }
+      if (sc.zoneGlowshroom) return 20;
+      if (sc.zoneCorrupt) return sc.zoneDesert ? 41 : sc.zoneSnow ? 35 : 21;
+      if (sc.zoneCrimson) return sc.zoneDesert ? 40 : sc.zoneSnow ? 34 : 22;
+      if (sc.zoneHallow) return sc.zoneDesert ? 39 : sc.zoneSnow ? 33 : 23;
+      if (sc.zoneDesert) return 14;
+      if (sc.zoneSnow) return 3;
+      if (sc.zoneJungle) return 12;
+      return sc.zoneRockLayerHeight ? 31 : 1;
+    }
+    // 地表
+    if (sc.zoneSkyHeight) return 32;
+    if (sc.zoneCorrupt) return sc.zoneDesert ? 36 : 5;
+    if (sc.zoneCrimson) return sc.zoneDesert ? 37 : 6;
+    if (sc.zoneHallow) return sc.zoneDesert ? 38 : 7;
+    if (py <= world.groundLevel + 10 && (px < 380 || px > world.store.w - 380)) return 10;
+    if (sc.zoneSnow) return 11;
+    if (sc.zoneJungle) return 8;
+    if (sc.zoneDesert) return 9;
+    if (world.clock?.bloodMoon) return 25;
+    if (sc.zoneGraveyard) return 26;
+    return 0;
+  }
 
   /** 全屏地图主角标记：脉冲圆环 + 原版风格白箭头（黑描边）+ 坐标文字 */
   private drawFullMapPlayerMarker(ctx: CanvasRenderingContext2D, x: number, y: number) {

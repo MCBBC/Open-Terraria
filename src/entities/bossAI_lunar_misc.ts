@@ -405,8 +405,8 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
       child.ai3 = -(e.id + 1);                          // ai[3]=-(碑id+1) 待机锚
       child.bInit = true;
       if (isDevotee) x[1 + devN++] = child.id + 1;      // localAI[1..2]=信徒 id+1
-      else if (arcN === 0) e.ai0 = child.id + 1;        // ai[0]=弓手0 id+1
-      else e.ai1 = child.id + 1;                        // ai[1]=弓手1 id+1
+      else if (arcN === 0) { e.ai0 = child.id + 1; arcN = 1; }   // ai[0]=弓手0 id+1
+      else { e.ai1 = child.id + 1; arcN = 2; }                   // ai[1]=弓手1 id+1
     }
     if (arcN < 2 || devN < 2) { e.dead = true; return; }   // 生成不足 → 消散
     return;
@@ -487,6 +487,7 @@ export function lunaticDevoteeAI(e: Enemy, game: GameHooks, _player: Player | nu
     const ox = lunarLocalAI(owner);
     if (ox[0] === 0) ox[0] = 1;
   }
+  if (e.ai0 < 0 || e.ai0 >= 300) e.ai0 = 0;              // 原版 ai[0] 出生 0
   e.ai0 += 1;
   if (e.ai0 >= 300) e.ai0 = 0;                           // :38953-38956
   e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
@@ -554,7 +555,8 @@ export function phantomAI(e: Enemy, game: GameHooks, player: Player | null) {
     x[3] += 1;
     if (big) game.spawnParticles(e.cx, e.cy, '#5A2BA0', 2, 1.5, { life: 20 });
   }
-  // ---- 状态机(:39362-39509) ----
+  // ---- 状态机(:39362-39509);原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一 ----
+  if (e.ai0 < 0 || e.ai0 > 3) e.ai0 = 0;
   if (e.ai0 === 0) {
     if (player) e.facing = player.cx > e.cx ? 1 : -1;
     e.ai0 = 1; e.ai1 = e.facing;
@@ -765,8 +767,10 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   e.def.damage = baseDmg;                                 // :39881 damage=defDamage
   const eggCap = 7;                                       // num1412
 
+  // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
+  if (e.ai0 < -1 || e.ai0 > 4.2) e.ai0 = 0;
   // ---- 日食/目标门(:39882-39915) ----
-  if (!game.world.eclipse) {
+  if (!game.world.clock.eclipse) {
     if (e.ai0 !== -1) e.ai0 = -1;
   } else if (!p) {
     e.ai0 = -1;
@@ -961,6 +965,7 @@ export function mothronAI(e: Enemy, game: GameHooks, player: Player | null) {
 // ---------------------------------------------------------------------------
 export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const hatchT = EXPERT ? 600 : 900;                      // num1440
+  if (e.ai0 < 0) e.ai0 = 0;                              // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
   if (e.vy === 0) {
     e.vx *= 0.9;
     e.spin += e.vx * 0.02;
@@ -998,7 +1003,9 @@ export function mothronEggAI(e: Enemy, game: GameHooks, _player: Player | null) 
 export function babyMothronAI(e: Enemy, game: GameHooks, player: Player | null) {
   const p = player && !player.dead ? player : null;
   e.spin = (e.spin * 9 + e.vx * 0.1) / 10;                // :40456
-  if (!game.world.eclipse) {                              // :40458-40467
+  // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一
+  if (e.ai0 < -1 || e.ai0 > 2.1) e.ai0 = 0;
+  if (!game.world.clock.eclipse) {                              // :40458-40467
     e.encourageDespawn(5);
     e.vy = Math.max(e.vy - 0.2, -8);
     fly(e);
@@ -1105,6 +1112,8 @@ function bounceAxis(e: Enemy, preVx: number, preVy: number) {
 export function graniteElementalAI(e: Enemy, game: GameHooks, player: Player | null) {
   const p = player && !player.dead ? player : null;
   const x = lunarLocalAI(e);
+  // 原版 ai[0] 出生 0,Enemy 哨兵 -1120 归一(-1 石化态合法保留)
+  if (e.ai0 !== -1 && (e.ai0 < 0 || e.ai0 > 4)) e.ai0 = 0;
   // ---- 专家受击石化(:40692-40697,EXPERT 恒 false 不可达,代码保留) ----
   if (e.justHit && EXPERT && rnd(6) === 0) { e.ai0 = -1; e.ai1 = 0; }
 

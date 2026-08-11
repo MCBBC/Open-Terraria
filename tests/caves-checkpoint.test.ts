@@ -32,11 +32,24 @@ for (let i = 0; i < TILE_DEFS.length; i++) {
 function hashGrids(st: { type: Uint16Array; flags: Uint8Array; liquid: Uint8Array; w: number; h: number }) {
   const n = st.w * st.h;
   const mapped = new Uint16Array(n);
+  const ghost = new Uint16Array(n);
   for (let i = 0; i < n; i++) {
-    const v = st.flags[i] ? V_ID[st.type[i]] : 0;
-    mapped[i] = v < 0 ? 0x7fff : v;
+    const v = V_ID[st.type[i]];
+    if (st.flags[i]) mapped[i] = v < 0 ? 0x7fff : v;
+    else ghost[i] = v < 0 ? 0x7fff : v; // 幽灵 parity：inactive 格的残留 type
   }
   return `${fnv1a(mapped)} ${fnv1a(st.flags)} ${fnv1a(st.liquid)}`;
+}
+
+function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: number }): number {
+  const n = st.w * st.h;
+  const ghost = new Uint16Array(n);
+  for (let i = 0; i < n; i++) {
+    if (st.flags[i]) continue;
+    const v = V_ID[st.type[i]];
+    ghost[i] = v < 0 ? 0x7fff : v;
+  }
+  return fnv1a(ghost);
 }
 
 function chainCheckpoints(seedText: string, evil: 0 | 1) {

@@ -22,7 +22,34 @@ export interface ItemCombat {
   summon?: boolean;
 }
 
-const TABLE = combatJson as unknown as Record<string, ItemCombat>;
+const RAW = combatJson as unknown as Record<string, ItemCombat>;
+
+// ---- 提取缺口补丁（tools/extract-itemcombat.mjs 只解析 case 内字面赋值）----
+// DefaultToSpear/DefaultToStaff/DefaultToMagicWeapon/DefaultToRangedWeapon 的形参
+// 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/4703/5629 仅剩 damage/knockBack、
+// 4788-4790（剑矛三件 DefaultToSpear+SetWeaponValues）与 4060-4062 整条缺失。
+// 下表按源码 case 逐件 1:1（:35651/:35672/:37119/:38629/:39341-39353/:44212）：
+//   DefaultToSpear → useStyle5 / useTime=useAnimation=animationTime / shootSpeed=push / noMelee+melee
+//   DefaultToStaff → magic / autoReuse / mana=manaPerShot / UseSound43
+//   DefaultToMagicWeapon → magic / noMelee / useTime=useAnimation=singleShotTime
+//   DefaultToRangedWeapon → noMelee / ranged / useAmmo=ammoID（5629 随后 ranged=false 已在表内）
+const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
+  '4060': { shoot: 728, useAmmo: 75, useTime: 18, useAnimation: 18, shootSpeed: 20, damage: 60, knockBack: 5, noMelee: true, ranged: true, autoReuse: true },
+  '4061': { shoot: 730, useTime: 28, useAnimation: 28, shootSpeed: 3.5, damage: 14, knockBack: 6, noMelee: true, melee: true },
+  '4062': { shoot: 731, useTime: 17, useAnimation: 17, shootSpeed: 8, mana: 6, damage: 24, knockBack: 3, noMelee: true, magic: true, autoReuse: true },
+  '4347': { shoot: 876, useTime: 36, useAnimation: 36, shootSpeed: 15, noMelee: true, magic: true },
+  '4348': { shoot: 876, useTime: 36, useAnimation: 36, shootSpeed: 15, noMelee: true, magic: true },
+  '4703': { shoot: 14, useAmmo: 97, useTime: 55, useAnimation: 55, shootSpeed: 7, noMelee: true, ranged: true },
+  '4788': { shoot: 877, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 60, knockBack: 12, noMelee: true, melee: true },
+  '4789': { shoot: 878, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 130, knockBack: 14, noMelee: true, melee: true },
+  '4790': { shoot: 879, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 90, knockBack: 13, noMelee: true, melee: true },
+  '5629': { shoot: 1088, useAmmo: 27, useTime: 20, useAnimation: 20, shootSpeed: 10, noMelee: true, autoReuse: true },
+};
+
+const TABLE: Record<string, ItemCombat> = { ...RAW };
+for (const k of Object.keys(EXTRACT_PATCH)) {
+  TABLE[k] = { ...(RAW[k] ?? {}), ...EXTRACT_PATCH[k] } as ItemCombat;
+}
 
 /** 原版 item id → 战斗数据（无条目返回 null） */
 export function itemCombat(vanillaId: number): ItemCombat | null {
@@ -31,6 +58,16 @@ export function itemCombat(vanillaId: number): ItemCombat | null {
 
 /** 弓类 AmmoID.Arrow = 40（AmmoID.cs:116） */
 export const AMMO_ARROW = 40;
+/** AmmoID 常量（AmmoID.cs:114-146）：子弹/凝胶/钱币/坠落之星/沙/飞镖/火箭/溶液/信号弹 */
+export const AMMO_GEL = 23;
+export const AMMO_COIN = 71;
+export const AMMO_FALLEN_STAR = 75;
+export const AMMO_BULLET = 97;
+export const AMMO_SAND = 169;
+export const AMMO_DART = 283;
+export const AMMO_ROCKET = 771;
+export const AMMO_SOLUTION = 780;
+export const AMMO_FLARE = 931;
 
 // ================= vi_* 武器语义解析（1456 数据驱动） =================
 
@@ -134,4 +171,15 @@ export function thrownCombat(def: CombatWeaponItemLike): { shoot: number; damage
 export function projGravity(shoot: number): number {
   const ai = projectileData(shoot)?.aiStyle ?? -1;
   return ai === AI_THROWN || ai === AI_GRENADE ? 0.3 : 0;
+}
+
+/** vi_ useAmmo 远程武器（弓/枪/发射器，DefaultToRangedWeapon 族 useStyle=5）：
+ *  返回 useAmmo id（AmmoID.Arrow=40 / Bullet=97 …）；非 useAmmo 物品返回 0。
+ *  combatWeapon 对 useAmmo 物品返回 null（弓弩/弹药体系另走 PickAmmo），Game 远程
+ *  分支据此接管枪族——此前 vi_ 手枪/雪球炮等无 def.ranged 又被 combatWeapon 排除 = 静默失效 */
+export function rangedAmmoWeapon(def: CombatWeaponItemLike): number {
+  const vid = def.vid ?? viIdFromKey(def.key);
+  if (vid < 0) return 0;
+  const ua = itemCombat(vid)?.useAmmo ?? 0;
+  return ua > 0 ? ua : 0;
 }

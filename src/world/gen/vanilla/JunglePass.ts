@@ -6,12 +6,13 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
-import { tileRunner } from './TileRunner';
+import { tileRunner, gp2Begin, gp2Dump } from './TileRunner';
 
 const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
 
 export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
+  const PT: string[] = [];
   const { w, h } = st;
   const scale = (w / 4200) * 1.5;
   const van = w / 4200;
@@ -56,6 +57,7 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   placeFirstPassMud(-3);
   placeGemsAt(4, 2);
 
+  PT.push(`g3_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   // 巨型泥 runner:三次移动点的均值为中心
   const cx = Math.floor(zeroX / 3), cy = Math.floor(zeroY / 3);
   // 原版 Next((int)(400*ws), (int)(600*ws)) 上界开（曾闭区间多 1 档）
@@ -64,12 +66,17 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
+  gp2Begin();
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
+  console.log('GP2 ' + gp2Dump());
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);
+  PT.push(`big_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   generateHolesInMudWalls(st, rng, gs);
+  PT.push(`holes_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van);
+  console.log('PT ' + PT.join(' '));
   return jungleXOut;
 }
 
@@ -203,27 +210,19 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     // Next(-A, A) 上界开 → int(-A, A-1)；拒绝采样无界 while（原版，无 40 次上限）
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
-    let rejN = 0;
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
-      rejN++;
       i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
       j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     }
-    if (n === 13) FT.push(`rj=${rejPts.join('/')}`);
     for (let k = 0; k < 8 * scale; k++) {
       i2 += rng.int(-30, 30);
       j2 += rng.int(-30, 30);
-      if (n === 0 || n === 13) FT.push(`r${k}.pre=${rng.vanilla.peek()}`);
-      if (n === 0 && k === 0) drBegin();
       // ★原版掷序（cs:245-247）：type(Next 7) → strength(Next 10,20) → steps(Next 30,70)
       //（对象字面量曾按 strength/steps/type 求值 = 流错位）
       const cavType = rng.next() * 7 < 1 ? -2 : -1;
       const cavStr = rng.int(10, 19), cavStp = rng.int(30, 69);
       tileRunner(st, rng, gs, i2, j2, { strength: cavStr, steps: cavStp, type: cavType });
-      if (n === 0 && k === 0) { drEnd(); FT.push('DR[' + DR_LOG.join(' ') + ']'); }
-      if (n === 0 || n === 13) FT.push(`r${k}.post=${rng.vanilla.peek()}`);
     }
-    if (n >= 12) FT.push(`r3p.${n}=${rng.vanilla.peek()}`);
   }
   // 泥内石囊 + 宝石
   for (let n = 0; n <= 300 * scale; n++) {

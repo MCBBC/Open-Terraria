@@ -7,7 +7,8 @@ import { TileStore } from '../src/world/TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
 import {
-  SmartCursor, hitLine, sheetOf, smartCursorArrowAllowed,
+  SmartCursor, hitLine, hitLineWall, hitWallSubstep, canHitWithCheck, isOpenDoorAnchorFrame,
+  sheetOf, smartCursorArrowAllowed,
   DEFAULT_SMART_CURSOR_SETTINGS, DISABLE_SMART_CURSOR_SHEETS,
   type SmartCursorEnv, type SmartCursorSettings,
 } from '../src/player/SmartCursor';
@@ -45,6 +46,7 @@ const hammer = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['wood_hammer']], tool: { type
 const torchItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['torch']], tool: null });
 const dirtItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['dirt_block']], tool: null });
 const platformItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['platform']], tool: null });
+const wallItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['vi_93_wood_wall']], tool: null }); // wallId 4（房墙）
 
 /** 跑一次 lookup 并返回目标（无目标 null） */
 function run(env: SmartCursorEnv, sc = new SmartCursor()): { x: number; y: number } | null {
@@ -176,23 +178,23 @@ describe('方块填充/铺线（Step_BlocksFilling :2692 / Step_BlocksLines :809
     expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 104, y: 98 });
   });
 
-  it('Filling |dx| 优先：水平更近的洞胜过距离更近的洞', () => {
-    const st = new TileStore(W, H);
-    // 洞 A (104,98)：与鼠标同列（|dx|=0），距离 48px
-    st.setTile(104, 99, T.STONE);
-    st.setTile(103, 98, T.STONE);
-    // 洞 B (102,95)：距鼠标 32px 更近，但 |dx|=32
-    st.setTile(102, 96, T.STONE);
-    st.setTile(103, 95, T.STONE);
-    const target = run(mkEnv(st, mouseAt(104, 95), dirtItem()));
-    expect(target).toEqual({ x: 104, y: 98 }); // |dx| 最小者胜（:2766-2784）
-  });
-
-  it('≥2 邻居的洞：Filling 直接命中（先于 Lines）', () => {
+  it('原版死门：SmartBlocksEnabled 打开时 Filling 恒不产生目标（:2694-2697 + :2714）', () => {
+    // 原版 Step_BlocksFilling 第一道门 `if (!SmartBlocksEnabled) return;` 之后，
+    // 第二道门条件首项竟是 `SmartBlocksEnabled ||`（1.4.0.5 / 1.4.5.6 反编译一致）——
+    // 开关打开即整段返回。若 Filling 存活，(104,98)（2 邻居、|dx|=0）会以 |dx| 规则胜出；
+    // 实际由 Lines 以纯距离接手 → 选 16px 外的 (103,97)
     const st = new TileStore(W, H);
     st.setTile(104, 99, T.STONE);
     st.setTile(103, 98, T.STONE); // (104,98) 下方 + 左侧 = 2 个实心邻居
-    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 104, y: 98 });
+    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 103, y: 97 });
+  });
+
+  it('洞照补：Lines（≥1 邻居）在 Filling 死门后仍铺方块', () => {
+    const st = new TileStore(W, H);
+    st.setTile(103, 98, T.STONE);
+    st.setTile(104, 98, T.STONE);
+    st.setTile(104, 99, T.STONE); // (104,97) 下方实心 → Lines 候选且离鼠标最近
+    expect(run(mkEnv(st, mouseAt(104, 95), dirtItem()))).toEqual({ x: 104, y: 97 });
   });
 
   it('SmartBlocksEnabled 关闭 → 两策略都不生效', () => {
@@ -292,6 +294,108 @@ describe('其余策略抽样', () => {
       settings: { ...DEFAULT_SMART_CURSOR_SETTINGS, smartAxeAfterPickaxe: true },
     }));
     expect(t2!.x).toBe(103); // 镐优先：石墙
+  });
+});
+
+describe('锤射线（Step_Hammers :1536 + Collision.HitLineWall :1148 / HitWallSubstep :1312）', () => {
+  it('HitWallSubstep：无墙→false；八邻全有墙→false；房墙→true；被实心块包死→false', () => {
+    const st = new TileStore(W, H);
+    expect(hitWallSubstep(st, 100, 97)).toBe(false);          // wall==0（:1314-1317）
+    st.setWallSilent(100, 97, 7);                              // 自然墙（非 wallHouse）
+    expect(hitWallSubstep(st, 100, 97)).toBe(true);           // 八邻无墙 → flag（:1325-1334）
+    for (let x = 99; x <= 101; x++) {
+      for (let y = 96; y <= 98; y++) {
+        if (x !== 100 || y !== 97) st.setWallSilent(x, y, 7);
+      }
+    }
+    expect(hitWallSubstep(st, 100, 97)).toBe(false);          // 3×3 全有墙 → 无暴露（:1325-1334）
+    st.setWallSilent(100, 97, 4);                              // 木墙（wallHouse，Main.cs 全表）
+    expect(hitWallSubstep(st, 100, 97)).toBe(true);           // 房墙恒可锤（:1319-1322）
+  });
+
+  it('HitWallSubstep：本格 active 且八邻全实心 → 墙被包死不可锤（:1336-1357）', () => {
+    const st = new TileStore(W, H);
+    st.setWallSilent(100, 97, 7);
+    for (let x = 99; x <= 101; x++) {
+      for (let y = 96; y <= 98; y++) st.setTile(x, y, T.STONE); // 含本格：全实心包死
+    }
+    expect(hitWallSubstep(st, 100, 97)).toBe(false);
+  });
+
+  it('HitLineWall：沿线首个可锤墙格；墙被实心块包死则落到终点（DDA :1228-1304）', () => {
+    const st = new TileStore(W, H);
+    st.setWallSilent(103, 96, 7);                              // 孤立自然墙 → 可锤
+    expect(hitLineWall(st, 100, 96, 106, 96)).toEqual({ x: 103, y: 96 });
+    const st2 = new TileStore(W, H);
+    for (let x = 102; x <= 104; x++) {
+      for (let y = 95; y <= 97; y++) st2.setTile(x, y, T.STONE); // 3×3 实心块
+    }
+    st2.setWallSilent(103, 96, 7);                             // 墙被包死 → HitWallSubstep=false（:1336-1357）
+    expect(hitLineWall(st2, 100, 96, 106, 96)).toEqual({ x: 106, y: 96 }); // 回落终点（:1304）
+    const st3 = new TileStore(W, H);
+    st3.setWallSilent(101, 96, 4);                             // 房墙（wallHouse）恒可锤（:1319-1322）
+    expect(hitLineWall(st3, 100, 96, 106, 96)).toEqual({ x: 101, y: 96 });
+  });
+
+  it('HitLineWall：斜线 DDA 阶梯步进（先纵后横交替，:1216-1219/:1232-1291）', () => {
+    const st = new TileStore(W, H);
+    st.setWallSilent(102, 97, 7);
+    // (100,96)→(104,100) 的原版足迹是阶梯：(101,96)(101,97)(102,97)…
+    // （case2 步 X、case1 步 Y 交替）→ 首个足迹上的可锤墙 = (102,97)
+    expect(hitLineWall(st, 100, 96, 104, 100)).toEqual({ x: 102, y: 97 });
+  });
+});
+
+describe('铺墙视线（Step_Walls :1099 + Collision.CanHitWithCheck :492）', () => {
+  const visionOK = (st: TileStore, tx: number, ty: number) =>
+    canHitWithCheck(st, { x: px, y: py }, 20, 42, { x: tx * 16, y: ty * 16 }, 16, 16,
+      (x, y) => !(st.isActive(x, y) && sheetOf(st.get(x, y)) === 11
+        && (st.frameX[st.idx(x, y)] < 18 || st.frameX[st.idx(x, y)] >= 54)));
+
+  it('夹缝不可视：两侧同时完整实心（无坡无半砖）→ CanHit=false（:551-554）', () => {
+    const st = new TileStore(W, H);
+    expect(visionOK(st, 104, 96)).toBe(true);                 // 空旷直达（:536-539）
+    for (let y = 95; y <= 97; y++) {                          // (102,95..97) 实心柱
+      st.setTile(102, y, T.STONE);
+    }
+    expect(visionOK(st, 104, 96)).toBe(false);                // 途中实心 → false（:575-578）
+  });
+
+  it('坡面/半砖不构成完整阻挡：两侧夹缝放宽（blocksSightFully :551）', () => {
+    // 纵向走查（(100,96)→(100,99)）：两侧 (99,97)/(101,97) 同时完整实心才截断
+    const solid = new TileStore(W, H);
+    solid.setTile(99, 97, T.STONE);
+    solid.setTile(101, 97, T.STONE);
+    expect(visionOK(solid, 100, 99)).toBe(false);            // 两侧完整实心 → 夹缝截断
+    const sloped = new TileStore(W, H);
+    sloped.setTile(99, 97, T.STONE);
+    sloped.setTile(101, 97, T.STONE);
+    sloped.setSlope(99, 97, 1);                              // 坡面 → 非完整（slope!=0）
+    expect(visionOK(sloped, 100, 99)).toBe(true);            // 一侧带坡 → 不算夹死
+    const half = new TileStore(W, H);
+    half.setTile(99, 97, T.STONE);
+    half.setTile(101, 97, T.STONE);
+    half.setHalfBrick(99, 97, true);                         // 半砖 → 非完整（halfBrick）
+    expect(visionOK(half, 100, 99)).toBe(true);
+  });
+
+  it('门类阻挡：开门锚帧截断 CanHit（NotDoorStand :858-869 / IsOpenDoorAnchorFrame :69228）', () => {
+    const st = new TileStore(W, H);
+    st.setTile(102, 96, T.DOOR_OPEN, 0, 0);                   // 锚帧 frameX=0
+    expect(isOpenDoorAnchorFrame(st, 102, 96)).toBe(true);
+    expect(visionOK(st, 104, 96)).toBe(false);                // 锚帧 → 循环终止 → false
+    const st2 = new TileStore(W, H);
+    st2.setTile(102, 96, T.DOOR_OPEN, 36, 0);                 // 门体帧 frameX=36
+    expect(isOpenDoorAnchorFrame(st2, 102, 96)).toBe(false);
+    expect(visionOK(st2, 104, 96)).toBe(true);                // 门体帧放行
+  });
+
+  it('Step_Walls 端到端：实心柱截断视线 → 铺墙目标退到柱前（:1113）', () => {
+    const st = new TileStore(W, H);
+    for (let x = 100; x <= 105; x++) st.setTile(x, 98, T.STONE); // 地板 → (x,97) 均可依附
+    expect(run(mkEnv(st, mouseAt(105, 97), wallItem()))).toEqual({ x: 105, y: 97 });
+    for (let y = 95; y <= 97; y++) st.setTile(103, y, T.STONE);  // 视线内立实心柱
+    expect(run(mkEnv(st, mouseAt(105, 97), wallItem()))).toEqual({ x: 102, y: 97 });
   });
 });
 

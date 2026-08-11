@@ -33,10 +33,16 @@ static uint Fnv8(byte[] a) { uint h = 0x811c9dc5; foreach (var v in a) { h = (h 
 // 只比活性 type（非活性格的幽灵 type 归零——与 JS 侧 hashGrids 口径一致；
 // 幽灵 parity 是独立对账项：原版幽灵会存盘、我们 finalize 清除，玩法无差）
 var hashTyp = new ushort[W * H];
+var hashGho = new ushort[W * H];
+var ghostPts = new List<string>();
 void Checkpoint(string name)
 {
-    for (int i = 0; i < typ.Length; i++) hashTyp[i] = (ushort)(act[i] != 0 ? typ[i] : 0);
+    for (int i = 0; i < typ.Length; i++) {
+        hashTyp[i] = (ushort)(act[i] != 0 ? typ[i] : 0);
+        hashGho[i] = (ushort)(act[i] == 0 ? typ[i] : 0); // inactive 格残留 type（幽灵 parity）
+    }
     checkpoints.Add($"{name}|{Fnv16(hashTyp):x8} {Fnv8(act):x8} {Fnv16(wal):x8} {Fnv8(liq):x8}");
+    ghostPts.Add($"{name}|{Fnv16(hashGho):x8}");
 }
 
 // solid 表：源自仓库 TILE_DEFS（已对原版全表审计，见 vanilla-solid-audit 记忆）。
@@ -238,6 +244,8 @@ void TileRunner(double i, double j, double strength, int steps, int type,
 {
     double num1 = strength, num2 = steps;
     double px = i, py = j;
+    var GP2C = steps == 10000 ? new List<string>() : null;
+    long GP2C_N = 0;
     double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(-10, 11) * 0.1;
     if (speedX != 0.0 || speedY != 0.0) { vx = speedX; vy = speedY; }
     int num3l = 0;
@@ -246,8 +254,7 @@ void TileRunner(double i, double j, double strength, int steps, int type,
     {
         if (py < 0.0 && num2 > 0.0 && type == 59) num2 = 0.0;
         num1 = strength * (num2 / steps);
-        num2 -= 1.0;,py={py:0.0} n1={num1:0.0} before_t{typ[315 * W + 3407]}a{act[315 * W + 3407]}");
-        }
+        num2 -= 1.0;
         int x0 = (int)(px - num1 * 0.5), x1 = (int)(px + num1 * 0.5);
         int y0 = (int)(py - num1 * 0.5), y1 = (int)(py + num1 * 0.5);
         if (x0 < 1) x0 = 1; if (x1 > W - 1) x1 = W - 1;
@@ -257,7 +264,8 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             if (x < BEACH_DISTANCE + 50 || x >= W - BEACH_DISTANCE - 50) num3l = 0;
             for (int y = y0; y < y1; y++)
             {
-                int ti = y * W + x;@{x},{y}a{act[ti]}t{typ[ti]}w{wal[ti]}={(int)r.Peek()}"); }
+                int ti = y * W + x;
+                if (GP2C != null) { GP2C_N++; if (GP2C_N % 200000 == 0) GP2C.Add($"c{GP2C_N}={(int)r.Peek()}"); }
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -332,6 +340,7 @@ void TileRunner(double i, double j, double strength, int steps, int type,
         {
             if (vy > 1.0) vy = 1.0; if (vy < -1.0) vy = -1.0;
         }
+        if (GP2C != null) File.WriteAllText("/tmp/cs-gp2.txt", string.Join(" ", GP2C));
         if (type == 59 && !noYChange)
         {
             if (vy > 0.5) vy = 0.5; if (vy < -0.5) vy = -0.5;
@@ -1274,7 +1283,9 @@ Checkpoint("grass");
         { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
         MudWallRunner(hx, hy);
     }
-        // GenerateFinishingTouches（cs:219-280）
+    var CPT = new List<string>();
+    // GenerateFinishingTouches（cs:219-280）
+    CPT.Add($"g3_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     int fx = oldX, fy = oldY;
     for (int i = 0; (double)i <= 20.0 * ws; i++)
     {
@@ -1282,6 +1293,7 @@ Checkpoint("grass");
         fy += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
         TileRunner(fx, fy, (int)r.Next(40, 100), (int)r.Next(300, 500), 59);
     }
+    CPT.Add($"big_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     for (int j = 0; (double)j <= 10.0 * ws; j++)
     {
         int c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1295,6 +1307,10 @@ Checkpoint("grass");
             TileRunner(c2x, c2y, (int)r.Next(10, 20), (int)r.Next(30, 70), type);
         }
     }
+    CPT.Add($"holes_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
+    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT));
+    File.WriteAllBytes("/tmp/cs-act6.bin", act);
+    File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1306,8 +1322,6 @@ Checkpoint("grass");
             TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
     }
 }
-File.WriteAllBytes("/tmp/cs-act6.bin", act);
-File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
 Checkpoint("jungle");
 
 // ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================
@@ -1544,4 +1558,5 @@ for (int i = 0; i < checkpoints.Count; i++)
 sb.AppendLine("  ]");
 sb.AppendLine("}");
 File.WriteAllText(outPath, sb.ToString());
+File.WriteAllText(outPath + ".ghost", string.Join("\n", ghostPts));
 Console.WriteLine($"written {outPath} ({checkpoints.Count} checkpoints)");

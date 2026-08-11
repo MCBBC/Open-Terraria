@@ -90,13 +90,25 @@ const CSS = `
   border-radius:6px; cursor:pointer; font-size:15px; text-align:center; }
 .sw-btn:hover { background:linear-gradient(#5a4a7e,#4a3a6e); }
 .sw-btn:disabled { opacity:0.45; cursor:default; }
-.sw-slot { pointer-events:auto; width:44px; height:44px; background:rgba(24,34,70,0.9);
-  border:2px solid #4d5f9e; border-radius:4px; position:relative; cursor:pointer; }
-.sw-slot:hover { border-color:#aebfe8; background:rgba(40,56,110,0.95); }
-.sw-slot.sel { border-color:#ffd75a; box-shadow:0 0 8px rgba(255,215,90,0.5); }
-.sw-slot img { position:absolute; inset:4px; width:36px; height:36px; image-rendering:pixelated; }
-.sw-slot .cnt { position:absolute; right:3px; bottom:1px; font-size:12px; font-weight:bold; color:#fff;
+.sw-slot { pointer-events:auto; width:52px; height:52px; background:url(sprites/vanilla/Inventory_Back.png) 0 0 / 100% 100%;
+  position:relative; cursor:pointer; image-rendering:pixelated; }
+.sw-slot:hover { filter:brightness(1.15); }
+.sw-slot img { position:absolute; inset:8px; width:36px; height:36px; image-rendering:pixelated; }
+.sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:12px; font-weight:bold; color:#fff;
   text-shadow:1px 1px 0 #000; }
+/* ---- 快捷栏（原版 GUIHotbarDrawInner Main.cs:42996-43060 1:1）----
+ * 贴图 52px：未选中 scale0.75（视觉 39px、y+6、alpha 147/255≈0.575）+ Back20；
+ * 选中 scale1.0（52px、y=20、alpha1）+ Back14；x 步进 ⌊52×scale⌋+4（43/56）；
+ * 格号 1-9,0（ItemSlot :2487 顶左 (8,4)×scale）；选中名居中 x=236 脉动 */
+.sw-hotbar { position:fixed; top:0; left:0; pointer-events:auto; }
+.sw-hotbar .sw-slot { position:absolute; transition:transform 80ms linear, opacity 80ms linear, left 80ms linear, top 80ms linear; }
+.sw-hotbar .sw-slot:hover { filter:none; }
+.sw-hotbar .sw-slot .sw-slot-num { position:absolute; left:5px; top:2px; font-size:11px; font-weight:bold;
+  color:#fff; text-shadow:1px 1px 0 #000; pointer-events:none; }
+.sw-hotbar-name { position:fixed; left:236px; top:0; transform:translateX(-50%); white-space:nowrap;
+  font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
+  animation:sw-name-pulse 2s ease-in-out infinite alternate; }
+@keyframes sw-name-pulse { from { opacity:0.35; } to { opacity:1; } }
 .sw-slot.trash::after { content:'🗑'; position:absolute; left:50%; top:50%;
   transform:translate(-50%,-52%); font-size:18px; opacity:0.55; pointer-events:none; }
 .sw-slot.trash:hover { border-color:#e08a8a; }
@@ -137,6 +149,7 @@ export class UI {
   root: HTMLElement;
   game!: Game;
   hotbarEl!: HTMLElement;
+  hotbarNameEl!: HTMLElement;
   invPanel!: HTMLElement;
   chestPanel!: HTMLElement;
   craftListEl!: HTMLElement;
@@ -519,13 +532,16 @@ export class UI {
 
   buildHud(game: Game) {
     this.game = game;
-    // 快捷栏（原版位置：左上角，首行与背包对齐）
-    this.hotbarEl = el('div');
-    this.hotbarEl.style.cssText = 'pointer-events:auto; position:fixed; top:14px; left:14px; display:flex; gap:2px;';
+    // 快捷栏（原版 GUIHotbarDrawInner Main.cs:42996-43060：左上角锚点 (20,20)；
+    // 选中格 scale 1/其余 0.75、y=20+22(1-scale)、x 步进 ⌊52×scale⌋+4；
+    // 选中物品名居中 x=236 脉动显示）
+    this.hotbarEl = el('div', 'sw-hotbar');
     for (let i = 0; i < 10; i++) {
       this.hotbarEl.appendChild(this.makeSlotEl(i, 'inv'));
     }
     this.root.appendChild(this.hotbarEl);
+    this.hotbarNameEl = el('div', 'sw-hotbar-name');
+    this.root.appendChild(this.hotbarNameEl);
     this.refreshHotbar();
 
     // Tooltip
@@ -1524,12 +1540,12 @@ export class UI {
     const coinWrap = el('div');
     coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.26')));
     const coinRow = el('div');
-    coinRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,44px); gap:4px;';
+    coinRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,52px); gap:4px;';
     for (let k = 0; k < 4; k++) coinRow.appendChild(this.makeSlotEl(COIN_START + k, 'inv'));
     coinWrap.appendChild(coinRow);
     coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.27')));
     const ammoRow = el('div');
-    ammoRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,44px); gap:4px;';
+    ammoRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,52px); gap:4px;';
     for (let k = 0; k < 4; k++) ammoRow.appendChild(this.makeSlotEl(AMMO_START + k, 'inv'));
     coinWrap.appendChild(ammoRow);
     coinWrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
@@ -1562,7 +1578,7 @@ export class UI {
       right.appendChild(lblRow);
     }
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:4px;';
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,52px); gap:4px;';
     for (let i = 10; i < INV_SIZE; i++) {
       grid.appendChild(this.makeSlotEl(i, 'inv'));
     }
@@ -1673,7 +1689,7 @@ export class UI {
     this.chestTitle = el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Chest'));
     this.chestPanel.appendChild(this.chestTitle);
     const grid = el('div');
-    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:5px;';
+    grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,52px); gap:5px;';
     // 按 40 槽上限构建（玩家储物 bank×4）；打开时按容器实际长度显隐（宝箱 10 / 储物 40）
     for (let i = 0; i < 40; i++) {
       grid.appendChild(this.makeSlotEl(i, 'chest'));
@@ -1785,12 +1801,34 @@ export class UI {
   refreshHotbar() {
     if (!this.game) return;
     const inv = this.game.player.inv;
+    // 原版布局（Main.cs:43017-43060）：x 从 20 起步进 ⌊52×scale⌋+4；
+    // y = 20 + 22×(1-scale)（选中 20，未选中 25→CSS 视觉再随 scale 收缩）；
+    // 未选中 alpha = 200×187/255 ≈ 147（Back20 半透明），选中 255（Back14）
+    let x = 20;
     for (let i = 0; i < 10; i++) {
       const slotEl = this.slotEl(i, 'inv');
       if (!slotEl) continue;
+      const sel = i === inv.selected;
+      const scale = sel ? 1 : 0.75;
       this.paintSlot(slotEl, inv.slots[i]);
-      slotEl.classList.toggle('sel', i === inv.selected);
+      slotEl.style.left = `${x}px`;
+      slotEl.style.top = `${Math.trunc(20 + 22 * (1 - scale))}px`;
+      slotEl.style.width = slotEl.style.height = '52px';
+      slotEl.style.transform = `scale(${scale})`;
+      slotEl.style.transformOrigin = 'top left';
+      slotEl.style.opacity = sel ? '1' : '0.575';
+      slotEl.style.backgroundImage = `url(sprites/vanilla/Inventory_Back${sel ? 14 : 20}.png)`;
+      slotEl.style.boxShadow = ''; // 原版快捷栏不画收藏高亮（ItemSlot :1987 context!=13）
+      if (!slotEl.querySelector('.sw-slot-num')) {
+        const num = el('span', 'sw-slot-num', i === 9 ? '0' : String(i + 1));
+        slotEl.appendChild(num);
+      }
+      x += Math.floor(52 * scale) + 4;
     }
+    // 选中物品名（:43003-43009：居中 x=236、mouseTextColor 脉动；空手回退 inter[37]）
+    const held = inv.slots[inv.selected];
+    const name = held ? (Lang.itemName(ITEM_DEFS[held.id]?.vid ?? -1) ?? ITEM_DEFS[held.id]?.name) : null;
+    this.hotbarNameEl.textContent = name || Lang.inter(37);
   }
 
   private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean } | null) {
@@ -1807,8 +1845,11 @@ export class UI {
         slotEl.appendChild(el('span', 'cnt', String(content.stack)));
       }
     }
-    // 收藏星标边框（原版 InventoryBack10 金边——CSS 近似）
-    slotEl.style.boxShadow = content?.favorited ? '0 0 0 2px #ffb347, 0 0 6px rgba(255,179,71,0.55)' : '';
+    // 收藏星标（原版 Inventory_Back10 金边贴图——ItemSlot :1966-1985 favorited 分支）
+    const inHotbar = !!slotEl.closest('.sw-hotbar');
+    if (!inHotbar) {
+      slotEl.style.backgroundImage = content?.favorited ? 'url(sprites/vanilla/Inventory_Back10.png)' : '';
+    }
     slotEl.title = content?.favorited ? '已收藏（Alt+左键取消；禁止快速转移）' : '';
   }
 

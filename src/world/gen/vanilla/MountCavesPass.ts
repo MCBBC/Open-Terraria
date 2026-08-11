@@ -116,7 +116,7 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
         if (Math.sqrt(dx * dx + dy * dy) < r * 0.4) {
           const kk = st.idx(x, y);
-          if (st.flags[kk] && !NOT_CLEARABLE.has(st.type[kk])) st.setTileSilent(x, y, 0);
+          if (st.flags[kk] && !NOT_CLEARABLE.has(st.type[kk])) st.flags[kk] = 0; // 原版 active(false) 保留幽灵 type
         }
       }
     }
@@ -166,7 +166,7 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
           }
           // 不可清块/沙：跳过该格（原版 continue，不终止）
           if (active && (NOT_CLEARABLE.has(st.type[kk]) || st.type[kk] === SAND)) continue;
-          if (active) st.setTileSilent(x, y, 0);
+          if (active) st.flags[kk] = 0; // 原版 active(false) 保留幽灵 type（cavinator）
         }
         if (num4 <= 0) break;
       }

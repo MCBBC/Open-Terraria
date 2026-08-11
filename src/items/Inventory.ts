@@ -11,6 +11,8 @@
 import { ITEM_DEFS, ITEM_BY_KEY, type ArmorSlot } from '../data/items';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
+import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';
 
 export const INV_COLS = 10;
 /** 背包主体行数（不含快捷栏行） */
@@ -61,17 +63,33 @@ export function coinSlotAccepts(i: number, id: number): boolean {
   return id === ITEM_BY_KEY[COIN_KEYS[i - COIN_START]];
 }
 
-/** 弹药格校验（Item.FitsAmmoSlot：ammo>0 且非 notAmmo，Item.cs:1351-1367 近似） */
+/** 弹药格校验（Item.FitsAmmoSlot 1:1，Item.cs:1351-1367）：
+ *  ```csharp
+ *  if ((type != 0 && ammo <= 0 && bait <= 0 && type != 530 && type != 849 && !PaintOrCoating) || notAmmo)
+ *      return type == 353;
+ *  return true;
+ *  ```
+ *  即：vid==353（信号枪本体，ammo=353+notAmmo 双设但豁免）恒收；
+ *  其余 = (ammo>0 || bait>0 || vid∈{530,849} || 涂料) 且非 notAmmo。
+ *  530=导线、849=油漆喷枪用填充物的原版硬编码豁免。
+ *  PaintOrCoating（Item.cs:334：paint/paintCoating>0）提取表无 paint 字段，
+ *  集合取 Item.cs paint=1..30 的 case 段（1073-1099 涂料 + 1966-1968/4668/5344 涂层） */
+const PAINT_OR_COATING = new Set([
+  ...Array.from({ length: 1099 - 1073 + 1 }, (_, i) => 1073 + i),
+  1966, 1967, 1968, 4668, 5344,
+]);
+
 export function ammoSlotAccepts(id: number): boolean {
   const d = ITEM_DEFS[id];
   if (!d) return false;
-  // vi_ 全量物品经 combat 表判定；legacy 注册表带 ammoId（40=箭）
-  if (d.ammoId !== undefined && d.ammoId > 0) return true;
-  const c = id >= 0 ? itemCombatAmmo(d) : 0;
-  return c > 0;
-}
-function itemCombatAmmo(_d: (typeof ITEM_DEFS)[number]): number {
-  return 0; // vi_ 批次的 ammo 判定在 Game/调用侧经 vanillaItemCombat 查询（避免本文件依赖循环）
+  const vid = d.vid ?? viIdFromKey(d.key);
+  if (vid < 0) return d.ammoId !== undefined && d.ammoId > 0; // legacy 注册表自带 ammoId
+  if (vid === 353) return true;
+  const f = itemFuncOfVid(vid);
+  if (f?.notAmmo) return false;
+  if (vid === 530 || vid === 849 || PAINT_OR_COATING.has(vid)) return true;
+  if ((f?.bait ?? 0) > 0) return true;
+  return (itemCombat(vid)?.ammo ?? 0) > 0;
 }
 
 /** 是否任一币种 */

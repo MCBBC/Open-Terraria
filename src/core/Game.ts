@@ -43,7 +43,7 @@ import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { furnitureStyleBase } from '../world/FurnitureStyle';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
-import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
@@ -95,6 +95,7 @@ const IMPORTED_TREE_TYPES = new Set<number>(
     .filter((v): v is number => v !== undefined),
 );
 import { LiquidSim } from '../world/liquid/LiquidSim';
+import { WorldEvolution } from '../world/evolution/WorldEvolution';
 import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
@@ -125,6 +126,14 @@ import type { DropExtras } from '../drops/NpcDrops';
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
 const AMMO_BULLET = 14;
+
+/** legacy（无 vid）物品的原版 useStyle 补表——Boss 召唤物与生命水晶在
+ *  Item.cs SetDefaults 均为 4（举过头）：544/556/557 机械三王、560 史莱姆王冠、
+ *  70 蠕虫食物、1331 血腥脊椎、29 生命水晶、88 可疑眼球 */
+const LEGACY_USE_STYLE: Record<string, number> = {
+  suspicious_eye: 4, worm_food: 4, bloody_spine: 4, slime_crown: 4,
+  mechanical_worm: 4, mechanical_eye: 4, mechanical_skull: 4, life_crystal: 4,
+};
 
 /** 旅行商人动态商店池（Chest.SetupTravelShop_GetItem/GetPainting 提取，tools/extract-travelshop.mjs） */
 const TRAVEL_POOL = travelshopJson as {
@@ -231,6 +240,13 @@ export interface GameCallbacks {
   onMusic?: (musicId: number) => void;
 }
 
+/** Main.time 口径（Main.cs 昼夜计时）：黎明 4:30（timeOfDay 0.25）归零，
+ *  白天 54000 ticks、夜晚 32400 ticks。WorldGen.IsAlchemyPlantHarvestable（:66214）用。 */
+function vanillaMainTime(timeOfDay: number): number {
+  if (timeOfDay >= 0.25 && timeOfDay < 0.75) return (timeOfDay - 0.25) * 54000;
+  return timeOfDay >= 0.75 ? (timeOfDay - 0.75) * 32400 : (timeOfDay + 0.25) * 32400;
+}
+
 export class Game implements GameHooks {
   assets: AssetBundle;
   atlas: SpriteAtlas | null = null;
@@ -242,6 +258,8 @@ export class Game implements GameHooks {
   chunks!: ChunkCache;
   lighting!: LightingEngine;
   liquid!: LiquidSim;
+  /** 世界运行时演化（WorldGen.UpdateWorld 移植）：草蔓延/藤蔓/药草/邪恶扩散 */
+  evolution!: WorldEvolution;
   entities = new EntityManager();
   input: Input;
   cb: GameCallbacks;
@@ -268,7 +286,15 @@ export class Game implements GameHooks {
   /** 原版 HitTile 伤害积累（劈砍/挖掘通用，阈值 100） */
   private hitTiles = new HitTile();
   private lastMineHitTick = -999;
-  swing: { t: number; dur: number; item: number; dmg?: number; kb?: number } | null = null;
+  swing: {
+    t: number; dur: number; item: number; dmg?: number; kb?: number;
+    /** useStyle 分族（Player.cs:49939 ApplyUseStyle switch）：1 挥砍 / 2 咀嚼 /
+     *  3 雨伞 / 4 举过头 / 5 朝鼠标静持 / 6 饮用旋转 / 9 举杯 / 13 短剑突刺 /
+     *  14-15 头侧持（不改 bodyFrame）/ 16 静持。缺省 1（Renderer drawUseStyle 路由） */
+    useStyle?: number;
+    /** useStyle 5/13 的瞄准角（世界系 atan2；Renderer 姿势与 bodyFrame 行档用它） */
+    aim?: number;
+  } | null = null;
   /** 上一帧鼠标左键状态（非 autoReuse 近战武器需点击沿触发新挥，原版 autoReuse 语义） */
   prevSwingMouse = false;
   private swingHitSet = new Set<number>();
@@ -1027,6 +1053,19 @@ export class Game implements GameHooks {
     this.lighting = new LightingEngine(w);
     this.renderer.lighting = this.lighting; // 岩浆瀑布 AddLight 等渲染端光源注入
     this.liquid = new LiquidSim(w);
+    // 世界运行时演化（WorldGen.UpdateWorld 1:1）：草蔓延/藤蔓/药草/邪恶神圣扩散等
+    this.evolution = new WorldEvolution({
+      store: w.store,
+      worldSurface: w.groundLevel,
+      rockLevel: w.rockLevel,
+      flags: w.flags,
+      crimson: w.crimson,
+      get isDay() { return w.clock.isDay; },
+      get raining() { return !!w.weather?.raining; },
+      get maxRaining() { return w.weather?.maxRaining ?? 0; },
+      get windSpeedCurrent() { return w.weather?.windSpeedCurrent ?? 0; },
+      playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
+    });
     // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
     this.liquid.killTile = (x, y) => this.breakTile(x, y);
     // 液体交互音（WorldGen.PlayLiquidChangeSound :4577-4599，六种配对）：
@@ -2046,6 +2085,9 @@ export class Game implements GameHooks {
 
     // ---- 粒子与飘字 ----
     this.flushInvNotify();
+    // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
+    // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
+    this.evolution.update();
     // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
     if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
       this.spawnCritter();
@@ -2169,6 +2211,49 @@ export class Game implements GameHooks {
     } as NonNullable<(typeof ITEM_DEFS)[number]['tool']>;
   }
 
+  /** 手持物 useStyle 分族（Player.cs:49939 ItemCheck_ApplyUseStyle switch）：
+   *  vi_ → vanilla-itemfunc.useStyle（2141 件分布 1:1504 / 4:74 / 5:243 / 9:70 …）；
+   *  legacy 药水无 vid → 9（Item.DefaultToHealingPotion：useStyle=9 举杯）；
+   *  其余 legacy 缺数据 → 1（挥砍）。返回值供 Renderer 姿势/身体行路由 */
+  private heldUseStyle(def: (typeof ITEM_DEFS)[number] | null): number {
+    if (!def) return 1;
+    const vid = def.vid ?? viIdFromKey(def.key);
+    if (vid >= 0) return itemFuncOfVid(vid)?.useStyle ?? 1;
+    if (def.potion) return 9;
+    // legacy 无 vid 的原版 4 族（Boss 召唤物/生命水晶，Item.cs SetDefaults useStyle=4）
+    return LEGACY_USE_STYLE[def.key] ?? 1;
+  }
+
+  /** 使用动画时长（Player.itemAnimationMax = item.useAnimation）：
+   *  vi_ 取 vanilla-itemcombat.useAnimation；legacy 工具 def.tool.speed；
+   *  无数据 → 30（原版绝大多数消耗品 useAnimation 15-45 的中位近似） */
+  private heldUseAnimation(def: (typeof ITEM_DEFS)[number] | null): number {
+    if (!def) return 30;
+    if (def.tool?.speed) return Math.max(10, def.tool.speed);
+    const vid = def.vid ?? viIdFromKey(def.key);
+    if (vid >= 0) {
+      const ua = itemCombat(vid)?.useAnimation;
+      if (ua && ua > 0) return Math.max(4, ua);
+    }
+    return 30;
+  }
+
+  /** 启动一次使用动画（itemAnimation>0 的本项目等价）。
+   *  useStyle 5/13（弓/枪/法杖/短剑）附 aim 瞄准角——Renderer 持物姿势与
+   *  bodyFrame 行档（Player.cs:35986 useStyle==5 的 itemRotation*direction 档）依赖 */
+  private useSwing(def: (typeof ITEM_DEFS)[number] | null, aim?: number): void {
+    if (!def) return;
+    const us = this.heldUseStyle(def);
+    const dur = this.heldUseAnimation(def);
+    this.swing = {
+      t: dur, dur, item: ITEM_BY_KEY[def.key] ?? 0,
+      useStyle: us,
+      aim: us === 5 || us === 13 ? aim : undefined,
+    };
+    this.swingHitSet.clear();
+    this.swingTileCutSet.clear();
+  }
+
   /** 双工具分流（Player.cs:45040-45045：tileHammer→锤力 / tileAxe→斧力 / 其余→镐力）。
    *  Hamaxe 族（pick+axe）对树族用斧力、对矿石用镐力；The Axe 族（axe+hammer）
    *  对树族用斧力、其余（锤墙/坡面）走锤。单工具原样返回 */
@@ -2240,6 +2325,19 @@ export class Game implements GameHooks {
       wireToolMode: this.wireToolMode,
       occupants,
       controlUseItem: !!inp.mouseDown,
+      // Step_AlchemySeeds 成熟药草判定（WorldGen.cs:66198-66225 IsAlchemyPlantHarvestable）
+      // 所需世界态；Main.time 口径 = 白天 (t-0.25)*54000 / 夜晚 (t-0.75 / t+0.25)*32400
+      alchemy: {
+        dayTime: this.world.clock.isDay,
+        bloodMoon: this.world.clock.bloodMoon,
+        moonPhase: this.world.clock.moonPhase,
+        raining: this.world.weather.raining,
+        cloudAlpha: this.world.weather.cloudAlpha,
+        time: vanillaMainTime(this.world.clock.timeOfDay),
+        worldSurface: this.world.groundLevel,
+        remixWorld: false,
+        maxTilesY: this.world.store.h,
+      },
     });
     // 指针切到 Cursors[12] 智能光标帧（Main.cs:47442-47513 num=11+smart.ToInt()）
     VUI.smartCursorOn = sc.showing;
@@ -2447,14 +2545,15 @@ export class Game implements GameHooks {
       return;
     }
 
-    // 其它物品（方块/药水等）：左键使用并带挥砍动画
+    // 其它物品（药水/食物/镜子/召唤物等）：左键使用，useStyle 分族姿势
+    // （Player.ItemCheck：itemAnimationMax = useAnimation，ApplyUseStyle 按 useStyle
+    //  路由——4 举过头（镜子/机械三王召唤）/5 朝鼠标静持（火把族非放置路径）/
+    //  9 举杯（增益药水 DefaultToHealingPotion）/2 咀嚼（食物 DefaultToFood）/
+    //  6 饮用旋转（回归药水）；此前的统一 30t 挥砍对 395 件 4/5/9 族全错族）
     // （召唤武器例外——交给下方 cw 分发 kind='summon'）
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
       && cw?.kind !== 'summon') {
-      const spd = 30;
-      this.swing = { t: spd, dur: spd, item: held!.id };
-      this.swingHitSet.clear();
-        this.swingTileCutSet.clear();
+      this.useSwing(heldDef);
       // 召唤道具（原版左键使用）
       if (heldDef.key === 'suspicious_eye') {
         if (!this.world.clock.isDay) {
@@ -2571,36 +2670,47 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
-    } else if (heldDef?.ranged && inp.mouseDown && this.player.useTime === 0) {
-      // 远程武器（弓）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0
+      && (heldDef.ranged || rangedAmmoWeapon(heldDef))) {
+      // 远程武器（弓/枪/吹箭筒）：PickAmmo + ItemCheck_Shoot 1:1（Player.cs:52590+/46426）
       //   速度 = 弓 shootSpeed + 弹药 shootSpeed；伤害 = 弓 damage + 弹药 damage；
       //   击退 = 弓 kb + 弹药 kb；投射物类型 = 弹药 shoot；音效 = 弓 UseSound(Item5)
-      //   弹药查找：原版先扫 54-57 弹药栏（我们无弹药栏），再扫背包 0-53 第一组
-      const rg = heldDef.ranged;
-      const bowC = rg.vid != null ? itemCombat(rg.vid) : null;
+      //   弹药查找：原版先扫 54-57 弹药栏（Inventory.add 已把弹药归入 54-57），再扫背包 0-53 第一组
+      //   ★ vi_ 枪族（164 手枪/930/1313 雪球炮等 useAmmo 武器）此前 combatWeapon 按
+      //   useAmmo 排除后无人接管 = 静默失效；此处经 vanilla-itemcombat.useAmmo 数据驱动接入
+      const rg = heldDef.ranged ?? null;
+      const bowVid = rg?.vid ?? viIdFromKey(heldDef.key);
+      const bowC = bowVid >= 0 ? itemCombat(bowVid) : null;
       const useAmmo = bowC?.useAmmo ?? AMMO_ARROW;
-      // PickAmmo：背包顺序第一组 useAmmo 匹配的弹药物品
+      // PickAmmo：弹药栏 54-57 优先，再背包 0-53 第一组 useAmmo 匹配
+      // （def.ammoId = legacy 注册；vi_ 弹药经 combat.ammo 反查）
+      const ammoOf = (d: (typeof ITEM_DEFS)[number]): number =>
+        d.ammoId ?? (d.vid != null || viIdFromKey(d.key) >= 0 ? itemCombat(d.vid ?? viIdFromKey(d.key))?.ammo ?? 0 : 0);
       let ammoSlot = -1;
       let ammoDef: (typeof ITEM_DEFS)[number] | null = null;
-      for (let i = 0; i < this.player.inv.slots.length; i++) {
-        const sl = this.player.inv.slots[i];
-        if (!sl || sl.stack <= 0) continue;
-        const d = ITEM_DEFS[sl.id];
-        if (d?.ammoId === useAmmo) { ammoSlot = i; ammoDef = d; break; }
+      for (const [from, to] of [[54, 58], [0, 54]] as const) {
+        for (let i = from; i < to; i++) {
+          const sl = this.player.inv.slots[i];
+          if (!sl || sl.stack <= 0) continue;
+          const d = ITEM_DEFS[sl.id];
+          if (d && ammoOf(d) === useAmmo) { ammoSlot = i; ammoDef = d; break; }
+        }
+        if (ammoSlot >= 0) break;
       }
       if (ammoSlot >= 0 && ammoDef) {
-        const ammoC = ammoDef.vid != null ? itemCombat(ammoDef.vid) : null;
-        const speed = (bowC?.shootSpeed ?? rg.projSpeed) + (ammoC?.shootSpeed ?? 0);
+        const ammoC = ammoDef.vid != null || viIdFromKey(ammoDef.key) >= 0
+          ? itemCombat(ammoDef.vid ?? viIdFromKey(ammoDef.key)) : null;
+        const speed = (bowC?.shootSpeed ?? rg?.projSpeed ?? 7) + (ammoC?.shootSpeed ?? 0);
         // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
         // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
-        const damage = Math.round((bowC?.damage ?? rg.damage) * (ps?.dmg ?? 1) * this.player.damageMult('ranged')) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
-        const knockback = (bowC?.knockBack ?? rg.knockback) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
-        const projId = ammoC?.shoot ?? 1; // PickAmmo：projToShoot = item.shoot（1 木箭 2 燃烧箭）
+        const damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.damageMult('ranged')) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
+        const knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
+        const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         const ax = this.player.cx + Math.cos(ang) * 14;
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
-        // 回收掉落：仅非点燃弹（原版燃烧箭 Kill 不掉）
+        // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
         const dropKey = projId === 1 ? ammoDef.key : null;
         this.entities.add(new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
           damage, knockback, projId, dropKey), 'projectiles');
@@ -2608,8 +2718,10 @@ export class Game implements GameHooks {
         if (!(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
           this.player.inv.removeAt(ammoSlot, 1);
         }
-        this.player.useTime = bowC?.useTime ?? rg.speed;
-        this.sfx.play('bowShoot');
+        this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
+        // useStyle 5（弓枪族恒 5）：朝鼠标静持姿势 + 身体行档（Player.cs:46708 itemRotation=瞄准角）
+        this.useSwing(heldDef, ang);
+        this.sfx.play('bowShoot'); // 枪族原版 Item11/36/41 素材未提取，暂与弓共用（登记依赖）
         this.cb.onInventoryChanged();
       }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee') {
@@ -2728,6 +2840,8 @@ export class Game implements GameHooks {
         const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color);
         this.entities.add(proj, 'projectiles');
         this.player.useTime = mg.speed;
+        // 法杖 useStyle 5：朝鼠标静持姿势（Player.cs:46708 itemRotation=瞄准角）
+        this.useSwing(heldDef, ang);
         this.sfx.play('tink');
         this.input.mouseDown = false;
       }
@@ -2808,6 +2922,12 @@ export class Game implements GameHooks {
       damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind)) + this.player.equipStats.armorPen),
       knockback: cwIn.knockback * (ps?.kb ?? 1),
     };
+    // 使用姿势（Player.ItemCheck：itemAnimation>0 期间持物可见）。
+    // ★ spear/yoyo/flail/boomerang 族源码 noUseGraphic=true（DefaultToSpear :47637 等
+    //   202 处）——投射物即本体，挥动再画持物会重影，这四族不加 swing
+    if (cw.kind === 'grenade' || cw.kind === 'magic' || cw.kind === 'shot' || cw.kind === 'summon') {
+      this.useSwing(def, ang);
+    }
     switch (cw.kind) {
       case 'grenade': {
         // AI_016：引信 timeLeft（Projectile.SetDefaults：炸弹28=150/炸药棍29=135/手雷30=180）
@@ -5037,8 +5157,17 @@ export class Game implements GameHooks {
     if (this.swing.t <= 0) { this.swing = null; return; }
     const held = this.player.inv.heldItem();
     if (!held) return;
-    const tool = ITEM_DEFS[held.id].tool ?? this.itemFuncTool(held.id);
-    void tool;
+    const heldDef = ITEM_DEFS[held.id];
+    const tool = heldDef.tool ?? this.itemFuncTool(held.id);
+    // ---- 近战整体门（Player.cs:42964）：(damage>=0 && !noMelee) 才进 GetMeleeHitbox，
+    // 且 CutTiles/MeleeHitNPCs 都在 damage>0 内（cs:42991-43006）——
+    // 此前挥动药水/镜子（damage=0）也带 32×32 近战盒：砍草 + 对敌 1 点伤害 + 对小动物
+    // 一击致死，均为原版没有的行为（vi_ 数值取 combat 表，legacy 工具取 def.tool）
+    const swingVid = heldDef.vid ?? viIdFromKey(heldDef.key);
+    const swingCombat = swingVid >= 0 ? itemCombat(swingVid) : null;
+    const meleeDmg = this.swing.dmg ?? tool?.damage ?? swingCombat?.damage ?? 0;
+    const noMelee = heldDef.magic || swingCombat?.noMelee;
+    if (noMelee || meleeDmg <= 0) return;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
     // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
     // （cs:44489 new Rectangle(itemLocation.X, itemLocation.Y, 32, 32) ×adjustedItemScale≈1，
@@ -5058,7 +5187,13 @@ export class Game implements GameHooks {
       : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
     let offX: number, offY: number;
     const phase: 0 | 1 | 2 = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
-    if (phase === 0) { offX = sprW * 0.5 - xTier(sprW, 0); offY = yTier(sprH, 0); }
+    const hitUs = this.swing.useStyle ?? 1;
+    if (hitUs === 3) {
+      // useStyle 3（雨伞 946/4707）单一持位（cs:50279-50294）：
+      // offX = fw/2-4-max(pAnim*fw*1.2-10, 8)、offY = 顶+24
+      offX = sprW * 0.5 - 4 - Math.max(pAnim * sprW * 1.2 - 10, 8);
+      offY = 24;
+    } else if (phase === 0) { offX = sprW * 0.5 - xTier(sprW, 0); offY = yTier(sprH, 0); }
     else if (phase === 1) { offX = sprW * 0.5 - xTier(sprW, 1); offY = yTier(sprH, 1); }
     else { offX = -(sprW * 0.5 - xTier(sprW, 2)); offY = yTier(sprH, 2); }
     const p = this.player;
@@ -5067,8 +5202,21 @@ export class Game implements GameHooks {
     let bw = 32, bh = 32; // 恒定基底（cs:44489），与武器贴图无关
     if (p.facing === -1) bx -= bw;
     by -= bh;
-    // 三段扩展（cs:44516-44540）：早段大盒覆盖抡起区、晚段小盒收势
-    if (phase === 0) {
+    if (hitUs === 3) {
+      // useStyle 3（cs:44545-44560 + :50279-50312）：anim>0.666 收势段 dontAttack；
+      // 判定段宽×1.4 / 高×0.6（Y 下移 0.6 高）；雨伞本体再 高+14 宽-10（朝左 X+10）
+      if (pAnim > 0.666) return;
+      if (p.facing === -1) bx -= Math.floor(bw * 1.4 - bw);
+      bw = Math.floor(bw * 1.4);
+      by += Math.floor(bh * 0.6);
+      bh = Math.floor(bh * 0.6);
+      if (swingVid === 946 || swingVid === 4707) {
+        bh += 14;
+        bw -= 10;
+        if (p.facing === -1) bx += 10;
+      }
+    } else if (phase === 0) {
+      // 三段扩展（cs:44516-44540）：早段大盒覆盖抡起区、晚段小盒收势
       if (p.facing === 1) bx -= Math.floor(bw * 1.2);
       bw *= 2;
       by -= Math.floor(bh * 1.4 - bh);
@@ -5096,9 +5244,8 @@ export class Game implements GameHooks {
     }
     // 矩形-AABB 相交判定（原版 ItemCheck_MeleeHitNPCs 的 npc.getRect().Intersects(itemRectangle)）
     const prog = 1 - pAnim;
-    // 法杖系 noMelee = true（原版 Item.cs case 739/3069 等共 449 处 noMelee）：
-    // 突刺动画不造成任何近战伤害——实体判定整体跳过（tileCut 砍草保留，原版 CutTiles 仍生效）
-    if (ITEM_DEFS[held.id].magic) { void prog; return; }
+    // 法杖系 noMelee=true 已在入口门整体跳过（含 CutTiles——原版 noMelee 连
+    // GetMeleeHitbox 都不进，cs:42964；此前的 magic 后置 return 只挡实体不挡砍草）
     const hitRect = (ex: number, ey: number, ew: number, eh: number) =>
       ex < bx + bw && ex + ew > bx && ey < by + bh && ey + eh > by;
     // 小动物：任何挥击一击致死
@@ -5121,14 +5268,14 @@ export class Game implements GameHooks {
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
       // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）
-      const baseDmg = ((this.swing.dmg ?? tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
+      const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
         * this.player.damageMult('melee')) + this.player.equipStats.armorPen;
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
-      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
+      const kb = ((this.swing.kb ?? tool?.knockback ?? swingCombat?.knockBack ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
       const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 武器浸剂（meleeEnchant 表 Player.cs:11604 → 敌 debuff :6141-6171 时长 Next(a,b) 秒）
