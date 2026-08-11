@@ -12,6 +12,10 @@ export class Clock {
   moonPhase: number = 0;
   /** 血月旗标（dusk roll / dawn 清除，Main.cs:64817-64831） */
   bloodMoon: boolean = false;
+  /** 日食旗标（Main.eclipse，运行时态不进存档）：黎明 roll（Main.cs:64898，
+   *  hardMode && downedMechBossAny && 1/20）/ 日耀碑牌召唤（Player.cs:43308，白天），
+   *  夜幕清除（Main.cs:64721）——全天持续，只影响白天刷怪段 */
+  eclipse: boolean = false;
   /** 圣诞季（现实日期 12/15-31，checkXMas Main.cs:13054） */
   xMas: boolean = false;
   /** 万圣季（现实日期 10/20-11/10，checkHalloween Main.cs:13093） */

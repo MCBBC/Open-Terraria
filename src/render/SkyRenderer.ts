@@ -288,6 +288,19 @@ export class SkyRenderer {
     grad.addColorStop(1, bottom);
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, viewW, viewH);
+    // 日食压暗（Main.cs:63282-63305）：eclipseLight = min(1, 白天 time/1242)，
+    // bgColor 三通道 ×(1-0.925L)/(1-0.96L)/(1-1.0L)——血红暮色，蓝通道清零
+    if (clock.eclipse && t > 0.25 && t < 0.75) {
+      const dayTime = ((t - 0.25) / 0.5) * 54000;
+      const L = Math.min(1, dayTime / 1242);
+      if (L > 0) {
+        ctx.save();
+        ctx.globalCompositeOperation = 'multiply';
+        ctx.fillStyle = `rgb(${Math.round(255 * (1 - 0.925 * L))},${Math.round(255 * (1 - 0.96 * L))},${Math.round(255 * (1 - L))})`;
+        ctx.fillRect(0, 0, viewW, viewH);
+        ctx.restore();
+      }
+    }
     // 闪电白（原版 Main.cs:63346：bgColor 向白 lerp lightning——纯闪白不画贴图）
     if (this.weatherRef && this.weatherRef.lightning > 0) {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(1, this.weatherRef.lightning * 0.85)})`;

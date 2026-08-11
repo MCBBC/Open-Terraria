@@ -68,11 +68,22 @@ export function tileColor(bg: readonly [number, number, number]): [number, numbe
   ];
 }
 
-/** 一次调用得到天空光种子(0-1 RGB) */
-export function skySeed(timeOfDay: number, dayCount: number): [number, number, number] {
+/** 一次调用得到天空光种子(0-1 RGB)。eclipse=true 时按 Main.cs:63282-63305 压暗：
+ *  eclipseLight = min(1, 白天 Main.time/1242)（约 25 游戏秒到满暗）；R×(1-0.925L)
+ *  G×(1-0.96L) B×(1-1.0L)——蓝色通道清零、红色保留 7.5% 的血红暮色 */
+export function skySeed(timeOfDay: number, dayCount: number, eclipse = false): [number, number, number] {
   const isDay = timeOfDay > 0.25 && timeOfDay < 0.75;
   const t = toVanillaTime(timeOfDay, isDay);
-  return tileColor(setBackColor(t, isDay, moonPhase(dayCount)));
+  let bg = setBackColor(t, isDay, moonPhase(dayCount));
+  if (eclipse && isDay) {
+    const L = Math.min(1, t / 1242);
+    bg = [
+      bg[0] * (1 - 0.925 * L),
+      bg[1] * (1 - 0.96 * L),
+      bg[2] * (1 - 1 * L),
+    ];
+  }
+  return tileColor(bg);
 }
 
 // ---- 全局闪烁驱动(火把动态时钟源,由引擎每 tick 推进) ----

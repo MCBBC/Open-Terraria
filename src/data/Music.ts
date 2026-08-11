@@ -54,6 +54,9 @@ export interface MusicInput {
   };
   /** 血月（夜晚森林/海洋/风暴分支 2 号曲） */
   bloodMoon?: boolean;
+  /** 日食（Main.cs:12578-12585：非 remix 且相机在地表半屏带内 → Eclipse 27，
+   *  优先级在 Boss/入侵曲之后、城镇/群系曲之前） */
+  eclipse?: boolean;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -121,6 +124,8 @@ export function pickMusic(inp: MusicInput): number {
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
   if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;
+  // 日食（L12578-12585：eclipse 且相机在地表半屏带内 → 27；remix 分支省略）
+  if (inp.eclipse && !belowHalf) return MUSIC.Eclipse;
 
   // 城镇曲（L12602-12609：≥3 城镇 NPC；白天需无云无风，夜晚需非血月无云）
   const town = s.townNPCCount >= 3 && !s.zoneGraveyard;

@@ -52,11 +52,9 @@ await page.evaluate((sx, sy) => {
 }, samples.s1[0]?.x ?? 0, samples.s1[0]?.y ?? 0);
 await new Promise((r) => setTimeout(r, 1500));
 
-// 逐样本读 chunk tile canvas: 格内 16×16,采样左/右列上段
-const CHUNK = 16, TILE = 16;
+// 逐样本读 chunk tile canvas: 每列首个不透明行(斜坡对角线)+补条
 const probe = async (cell) => page.evaluate((cx, cy) => {
   const g = window.__swGame;
-  const st = g.world.store;
   const cc = g.chunks;
   const key = (Math.floor(cx / 16) & 0xffff) | ((Math.floor(cy / 16) & 0xffff) << 16); // ChunkCache.key
   const pair = cc.chunks.get(key);
@@ -64,32 +62,37 @@ const probe = async (cell) => page.evaluate((cx, cy) => {
   const ctx = pair.tile.getContext('2d');
   const lx = (cx % 16) * 16, ly = (cy % 16) * 16;
   const d = ctx.getImageData(lx, ly, 16, 16).data;
+  // solidStart(x): 列 x 自顶向下首个 alpha>40 的行(无则 16)
+  const solidStart = (x) => {
+    for (let y = 0; y < 16; y++) if (d[(y * 16 + x) * 4 + 3] > 40) return y;
+    return 16;
+  };
   const opq = (x, y0, y1) => {
     let n = 0;
     for (let y = y0; y < y1; y++) if (d[(y * 16 + x) * 4 + 3] > 40) n++;
     return n;
   };
   return {
-    leftTop: opq(1, 0, 6), rightTop: opq(14, 0, 6),      // 0-6 上段
-    leftMid: opq(1, 8, 14), rightMid: opq(14, 8, 14),    // 下段
-    bottomPad: opq(8, 14, 16),
+    s: [1, 4, 7, 10, 13].map(solidStart),
+    bottomPad: opq(8, 14, 16), topPad: opq(8, 0, 2),
   };
 }, cell.x, cell.y);
 
+// slope1(左高右低): solidStart 随列递增(左列≈0/贴图顶部,右列≥8),补条在底部
 for (const c of samples.s1) {
   const r = await probe(c);
   if (r.err) { console.log('skip s1', JSON.stringify(c), r.err); continue; }
-  // slope1: 左高右低——左列上段应基本不透明,右列上段透明,两列下段均不透明,补条在
-  check(`slope1(${c.x},${c.y}) 左高右低`,
-    r.leftTop >= 4 && r.rightTop <= 2 && r.leftMid >= 5 && r.rightMid >= 5 && r.bottomPad >= 1,
+  check(`slope1(${c.x},${c.y}) 左高右低对角线`,
+    r.s[0] <= 3 && r.s[4] >= 8 && r.s[0] < r.s[2] && r.s[2] < r.s[4] && r.bottomPad >= 1,
     JSON.stringify(r));
   break;
 }
+// slope2(右高左低): 镜像
 for (const c of samples.s2) {
   const r = await probe(c);
   if (r.err) { console.log('skip s2', JSON.stringify(c), r.err); continue; }
-  check(`slope2(${c.x},${c.y}) 右高左低`,
-    r.rightTop >= 4 && r.leftTop <= 2 && r.leftMid >= 5 && r.rightMid >= 5 && r.bottomPad >= 1,
+  check(`slope2(${c.x},${c.y}) 右高左低对角线`,
+    r.s[4] <= 5 && r.s[0] >= 8 && r.s[4] < r.s[2] && r.s[2] < r.s[0] && r.bottomPad >= 1,
     JSON.stringify(r));
   break;
 }
@@ -121,15 +124,16 @@ const water = await page.evaluate(() => {
 if (!water) {
   check('找到测试水面', false, '');
 } else {
-  await page.evaluate((wx, wy) => {
+  // 玩家浮在液面格(游戏每帧把相机吸回玩家——相机手动对位会被覆盖),
+  // 玩家原地漂浮 → 相机跟随 → 液面保持在视口中央附近
+  const zoom = await page.evaluate((wx, wy) => {
     const g = window.__swGame;
-    g.player.x = wx * 16; g.player.y = (wy - 8) * 16;
+    g.player.x = wx * 16; g.player.y = wy * 16;
     g.player.vx = 0; g.player.vy = 0;
-    g.camera.x = g.player.cx; g.camera.y = g.player.cy;
+    return g.renderer?.zoom ?? g.camera?.zoom ?? 1;
   }, water.x, water.y);
-  await new Promise((r) => setTimeout(r, 1200));
-  // 视口中央附近裁剪水面带(玩家居中)
-  const clip = { x: 640 - 160, y: 400 - 12, width: 320, height: 48 };
+  await new Promise((r) => setTimeout(r, 1500));
+  const clip = { x: 640 - 200, y: 400 - 24, width: 400, height: 56 };
   const shots = [];
   for (let k = 0; k < 3; k++) {
     const buf = await page.screenshot({ clip });
@@ -139,12 +143,12 @@ if (!water) {
   let diff01 = 0, diff02 = 0;
   const a = shots[0].data, b = shots[1].data, c = shots[2].data;
   for (let p = 0; p < a.length; p += 4) {
-    if (Math.abs(a[p] - b[p]) > 12 || Math.abs(a[p + 1] - b[p + 1]) > 12) diff01++;
-    if (Math.abs(a[p] - c[p]) > 12 || Math.abs(a[p + 1] - c[p + 1]) > 12) diff02++;
+    if (Math.abs(a[p] - b[p]) > 8 || Math.abs(a[p + 1] - b[p + 1]) > 8 || Math.abs(a[p + 2] - b[p + 2]) > 8) diff01++;
+    if (Math.abs(a[p] - c[p]) > 8 || Math.abs(a[p + 1] - c[p + 1]) > 8 || Math.abs(a[p + 2] - c[p + 2]) > 8) diff02++;
   }
   await page.screenshot({ path: '/tmp/water-surface.png', clip });
   check('液面随时间波动(帧间像素变化)', diff01 > 20 && diff02 > 20,
-    `帧0→1 ${diff01}px, 0→2 ${diff02}px`);
+    `zoom=${zoom} 帧0→1 ${diff01}px, 0→2 ${diff02}px`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

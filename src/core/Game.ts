@@ -1288,7 +1288,7 @@ export class Game implements GameHooks {
         scene: this.scene, isDay, bossMusic, invasionMusic,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
-        state: this.musicState, bloodMoon: !!w.clock.bloodMoon,
+        state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
         weather: {
           storm: w.weather.shouldUseStormMusic,
           rain: w.weather.cloudAlpha > 0,
@@ -1554,21 +1554,36 @@ export class Game implements GameHooks {
         this.checkSeasonal();
         // 入侵冷却递减（Main.cs:64846-64849；1.4.5.6 无置位点，仅保留语义）
         if (w.invasionDelay > 0) w.invasionDelay--;
-        // 哥布林军队自然 roll（Main.cs:64927-64936）：需砸过暗影珠/猩红之心；
-        // 未击败过 1/3，已击败 hardMode 1/60 否则 1/30
-        if (w.flags.shadowOrbSmashed && w.invasionType === INVASION_NONE
-          && canStartInvasion(w, player.maxHp)) {
-          const p = w.flags['downedGoblins']
-            ? (w.flags.hardMode ? 1 / 60 : 1 / 30) : 1 / 3;
-          if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_GOBLIN);
+        // 日食自然 roll（Main.cs:64898-64920）：hardMode && downedMechBossAny &&
+        // 1/20 → eclipse=true + 公告 LegacyMisc.20（remix 的 misc.106 无对应世界）。
+        // 原版与当日哥布林/海盗 roll 互斥（同一段 if/else）——命中日食则跳过入侵 roll
+        const mechAny = !!(w.flags['downed_125'] || w.flags['downed_126']
+          || w.flags['downed_127'] || w.flags['downed_134']);
+        if (w.flags.hardMode && mechAny && Math.random() < 1 / 20) {
+          w.clock.eclipse = true;
+          this.newText(Lang.misc(20), 50, 255, 130);   // ChatColors.World
+        } else {
+          // 哥布林军队自然 roll（Main.cs:64927-64936）：需砸过暗影珠/猩红之心；
+          // 未击败过 1/3，已击败 hardMode 1/60 否则 1/30
+          if (w.flags.shadowOrbSmashed && w.invasionType === INVASION_NONE
+            && canStartInvasion(w, player.maxHp)) {
+            const p = w.flags['downedGoblins']
+              ? (w.flags.hardMode ? 1 / 60 : 1 / 30) : 1 / 3;
+            if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_GOBLIN);
+          }
+          // 海盗自然 roll（Main.cs:64938-64944）：hardMode（原版还要求砸过祭坛
+          // altarCount>0——祭坛计数未移植，暂以 hardMode 替代）；已击败 1/60 否则 1/30
+          if (w.flags.hardMode && w.invasionType === INVASION_NONE
+            && canStartInvasion(w, player.maxHp)) {
+            const p = w.flags['downedPirates'] ? 1 / 60 : 1 / 30;
+            if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_PIRATE);
+          }
         }
-        // 海盗自然 roll（Main.cs:64938-64944）：hardMode（原版还要求砸过祭坛
-        // altarCount>0——祭坛计数未移植，暂以 hardMode 替代）；已击败 1/60 否则 1/30
-        if (w.flags.hardMode && w.invasionType === INVASION_NONE
-          && canStartInvasion(w, player.maxHp)) {
-          const p = w.flags['downedPirates'] ? 1 / 60 : 1 / 30;
-          if (Math.random() < p) this.startInvasionAndAnnounce(INVASION_PIRATE);
-        }
+      }
+      if (crossed(0.75)) {
+        // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
+        // UpdateTime_StartNight 内位于血月 roll 之前）
+        w.clock.eclipse = false;
       }
       if (crossed(0.75)
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
@@ -2146,6 +2161,20 @@ export class Game implements GameHooks {
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
         this.cb.onInventoryChanged();
+      }
+      this.input.mouseDown = false;
+    } else if (heldDef && heldDef.key === 'vi_2767_solar_tablet'
+      && inp.mouseDown && this.player.useTime === 0) {
+      // 日耀碑牌（Player.cs:43308/51431：dayTime && !eclipse && hardMode 才可用，
+      // 成功 → Main.eclipse=true + Lang.misc[20] 公告；非白天/已日食/肉前静默不可用）
+      if (this.world.flags.hardMode && this.world.clock.isDay && !this.world.clock.eclipse) {
+        this.world.clock.eclipse = true;
+        this.newText(Lang.misc(20), 50, 255, 130);   // ChatColors.World
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.player.useTime = 60;
+        this.cb.onInventoryChanged();
+      } else if (!this.world.clock.isDay) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       }
       this.input.mouseDown = false;
     } else if (heldDef && (heldDef.key === 'goblin_battle_standard' || heldDef.key === 'snow_globe' || heldDef.key === 'pirate_map')

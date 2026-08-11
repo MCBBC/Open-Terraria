@@ -15,7 +15,7 @@ export interface ScannerWorld {
   store: TileStore;
   groundLevel: number;  // 原版 worldSurface
   lavaLine: number;     // 原版 UnderworldLayer
-  clock: { timeOfDay: number; dayCount: number };
+  clock: { timeOfDay: number; dayCount: number; eclipse?: boolean };
 }
 
 /** 动态点光(原版 Lighting.AddLight;0-1 RGB) */
@@ -116,7 +116,7 @@ export class TileLightScanner {
   exportTo(w: ScannerWorld, map: LightMap, rx: number, ry: number, perFrame: PerFrameLight[]): void {
     const st = w.store;
     map.clear();
-    const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount);
+    const [skyR, skyG, skyB] = skySeed(w.clock.timeOfDay, w.clock.dayCount, !!w.clock.eclipse);
     // 地狱脉动(ApplyHellLight:3266-3271)
     const hellV = 0.55 + Math.sin(performance.now() * 0.002) * 0.08; // GlobalTimeWrappedHourly 近似
     const hellR = hellV, hellG = hellV * 0.6, hellB = hellV * 0.2;

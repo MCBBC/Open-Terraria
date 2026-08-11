@@ -498,6 +498,10 @@ export class VanillaSpawner {
         spawnRate = Math.floor(spawnRate * 0.3);
         maxSpawns = Math.floor(maxSpawns * 1.8);
       }
+    } else if (w.clock.isDay && w.clock.eclipse) {
+      // L458-461：日食白天 spawnRate×0.2 / max×1.9（血月同层级的 else-if 支）
+      spawnRate = Math.floor(spawnRate * 0.2);
+      maxSpawns = Math.floor(maxSpawns * 1.9);
     }
     // Zone 判定现取（原版每次从玩家 SceneMetrics 取，非上次生成残留 flag）：
     // 玩家中心窗口计数（0.5s 缓存近似，见 refreshZoneCounts），本函数每帧被调
@@ -823,6 +827,19 @@ export class VanillaSpawner {
       }
       // A/B 均未命中 → 原版落入 L1906+ 腐化/猩红水段（非本段范围），交回主链
     }
+    // ---- 雨天深层宝石松鼠/兔（NPC.cs:2289-2296，case 2/109/477/492 雨分支首两支）----
+    //  门：raining && spawnTileY <= UnderworldLayer && deeperThanRockLayer，各 1/5；
+    //  未命中则原版继续雨块尾段（金蚯蚓/蚯蚓/上岸金鱼——本仓雨块仅地表简化版，深处放行
+    //  落后续洞穴段）。宝石档位按 GetGemSquirrel/BunnyToSpawn 权重表 roll，
+    //  与落点附近是否有宝石 tile 无关（原版即如此）。
+    //  tile 门 = case 2/109/477/492 或地下任意（default: y>worldSurface → goto case 2）；
+    //  147/161/60/53 走各自 switch case（雪原/丛林蛙/沙地小动物），须排除
+    const gemTileOK = !(t === T.JUNGLE_GRASS || t === T.SNOW || t === T.ICE || t === T.SAND);
+    if (this.dayTime && !this.waterTile && this.world.weather.raining && gemTileOK
+      && this.deeperThanRockLayer && this.spawnTileY <= st.h - 200) {
+      if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
+      if (N(5)) return D(this.getGemBunnyToSpawn(rng));
+    }
     // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
     if (this.dayTime && !this.waterTile && this.surfaceSpawn &&
       (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === 477)) {
@@ -840,6 +857,19 @@ export class VanillaSpawner {
         if (r < 0.8) return D(299);       // 松鼠
         if (r < 0.9) return D(300);       // 老鼠
         return D(74);                     // 鸟
+      }
+    }
+    // ---- 洞穴层宝石松鼠/兔（NPC.cs:2456-2531 case 2 尾段：flag11 = rockLayer ≤ y ≤ UnderworldLayer）----
+    //  Next(3)==0 → 1/5 宝石松鼠；否则 1/5 宝石兔（合计 1/15 + 2/15 ≈ 1/5）；
+    //  未命中则原版 switch 空过、落后续 else-if 链（地牢/陨石…），此处同序放行。
+    //  tile 门同雨天支（case 2/default-underground；147/161/60/53 各有独立 case 须排除）。
+    //  （原版该块外层为 spawnFriendly 小动物段；本仓小动物沿用 dayTime 简化门）
+    if (this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK
+      && this.spawnTileY >= this.world.rockLevel && this.spawnTileY <= st.h - 200) {
+      if (N(3)) {
+        if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
+      } else if (N(5)) {
+        return D(this.getGemBunnyToSpawn(rng));
       }
     }
     // ---- 地牢（L2536-2706：CheckToSpawnDungeonEnemies = ZoneDungeon 且玩家在 dungeonY+40 以下）----
@@ -884,6 +914,29 @@ export class VanillaSpawner {
     // ---- 陨石带（L2704：else if (ZoneMeteor)）----
     //  ZoneMeteor = 玩家窗口内陨石 tile ≥75（SceneMetrics.cs:56 MeteorTileThreshold）→ 陨石头 23
     if (this.ZoneMeteor) return D(23);
+    // ---- 日食（NPC.cs:3459-3525：地表 && dayTime && eclipse——1.4.5.6 重做后的全表）----
+    //  门 = spawnTileY <= worldSurface（remix 深层支省略）&& 白天 && eclipse；
+    //  flag14 = 三机械全杀（downedMechBoss1/2/3 = 134 / 125|126 / 127）
+    if (this.surfaceSpawn && this.dayTime && this.world.clock.eclipse) {
+      const f = this.world.flags;
+      const downedPlant = !!f['downed_262'];   // downedPlantBoss（世花 262）
+      const flag14 = !!(f['downed_134'] && (f['downed_125'] || f['downed_126']) && f['downed_127']);
+      let cnt467 = 0; for (const id of this.activeIds) if (id === 467) cnt467++;
+      if (downedPlant && N(80) && !any(477)) return D(477);    // 飞蛾魔 Mothron（唯一）
+      if (N(50) && !any(251)) return D(251);                   // 独眼怪 Eyezor（唯一）
+      if (downedPlant && N(5) && !any(466)) return D(466);     // 精神病人 Psycho（唯一）
+      if (downedPlant && N(20) && !any(463)) return D(463);    // 钉头 Nailhead（唯一）
+      if (downedPlant && N(20) && cnt467 < 2) return D(467);   // 致命球 Deadly Sphere（≤2）
+      if (N(15)) return D(159);                                // 吸血鬼 Vampire
+      if (flag14 && N(13)) return D(253);                      // 死神 Reaper（需三机械全杀）
+      if (N(8)) return D(469);                                 // 被附身者 The Possessed
+      if (downedPlant && N(7)) return D(468);                  // 蝇博士 Dr. Man Fly
+      if (downedPlant && N(5)) return D(460);                  // 屠夫 Butcher
+      if (N(4)) return D(162);                                 // 科学怪人 Frankenstein
+      if (N(3)) return D(461);                                 // 深海怪形 Creature from the Deep
+      if (N(2)) return D(462);                                 // 弗里茨 Fritz
+      return D(166);                                           // 沼泽怪 Swamp Thing（兜底）
+    }
     // ---- 蘑菇地（L3540-3610，tile 70）----
     if (t === T.MUSHROOM_GRASS) {
       if (this.surfaceSpawn) {
@@ -1258,6 +1311,31 @@ export class VanillaSpawner {
     // L5128：冰落脚 tile（147/161/162，非 ZoneSnow 旗标）→ hard?169 Ice Elemental : 150
     if (iceCave) return D(hardMode ? 169 : 150);
     return D(49);  // Cave Bat
+  }
+
+  /** GetGemBunnyToSpawn（NPC.cs:5587-5615 1:1）：Next(100) 分档——琥珀 5%/钻石 8%/
+   *  红玉 10%/翠玉 12%/蓝玉 16%/黄玉 21%/紫晶 28%（越稀有权重越低） */
+  private getGemBunnyToSpawn(rng: RNG): number {
+    const n = Math.floor(rng.next() * 100);
+    if (n < 5) return 651;      // Amber Bunny
+    if (n < 13) return 652;     // Diamond Bunny
+    if (n < 23) return 650;     // Ruby Bunny
+    if (n < 35) return 649;     // Emerald Bunny
+    if (n < 51) return 648;     // Sapphire Bunny
+    if (n < 72) return 647;     // Topaz Bunny
+    return 646;                 // Amethyst Bunny
+  }
+
+  /** GetGemSquirrelToSpawn（NPC.cs:5617-5645 1:1）：权重表同上（639-645 松鼠族） */
+  private getGemSquirrelToSpawn(rng: RNG): number {
+    const n = Math.floor(rng.next() * 100);
+    if (n < 5) return 644;      // Amber Squirrel
+    if (n < 13) return 645;     // Diamond Squirrel
+    if (n < 23) return 643;     // Ruby Squirrel
+    if (n < 35) return 642;     // Emerald Squirrel
+    if (n < 51) return 641;     // Sapphire Squirrel
+    if (n < 72) return 640;     // Topaz Squirrel
+    return 639;                 // Amethyst Squirrel
   }
 
   /** GetBasicSlimeToSpawn（L5537-5580） */

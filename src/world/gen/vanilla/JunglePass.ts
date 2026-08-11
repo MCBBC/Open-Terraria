@@ -22,7 +22,7 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const applyRandomMovement = (xRange: number, yRange: number) => {
     x += rng.int(Math.floor(-xRange * scale), Math.floor(xRange * scale));
     y += rng.int(Math.floor(-yRange * scale), Math.floor(yRange * scale));
-    y = Math.max(gs.rockLevel, Math.min(h - 1, y));
+    y = Math.max(gs.rockLevel, Math.min(h, y)); // 原版 clamp 上界 = maxTilesY（H 非 H-1）
   };
   const placeFirstPassMud = (xSpeedScale: number) => {
     const str = rng.int(Math.floor(250 * scale), Math.floor(500 * scale));
@@ -129,29 +129,56 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
   return jungleX;
 }
 
-/** 泥墙挖洞(原版 MudWallRunner 的简化:在丛林墙上随机游走清出通道) */
+/** 泥墙挖洞（cs:12503-12520 + MudWallRunner cs:77584-77663 1:1）：
+ *  w/4 次：拒绝采样到墙 64/15 格后跑 MudWallRunner（TileRunner 形状的清墙游走）。
+ *  曾是"简化随机走"自创实现——掷骰序列完全不同 */
 function generateHolesInMudWalls(st: TileStore, rng: RNG, gs: GenState): void {
-  const tries = Math.floor(st.w / 4);
+  const { w, h } = st;
+  const underworld = h - 200; // Main.UnderworldLayer（Main.cs:2863）
+  const tries = Math.floor(w / 4);
   for (let n = 0; n < tries; n++) {
-    let x = rng.int(20, st.w - 21);
-    let y = rng.int(gs.worldSurface + 10, st.h - 150);
-    let found = false;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      const i = st.idx(x, y);
-      if (st.wall[i] === 64 || st.wall[i] === 15) { found = true; break; }
-      x = rng.int(20, st.w - 21);
-      y = rng.int(gs.worldSurface + 10, st.h - 150);
+    let x = rng.int(20, w - 21);
+    let y = rng.int(gs.worldSurface + 10, underworld - 1); // Next(wS+10, UnderworldLayer)
+    while (!(st.wall[st.idx(x, y)] === 64 || st.wall[st.idx(x, y)] === 15)) {
+      x = rng.int(20, w - 21);
+      y = rng.int(gs.worldSurface + 10, underworld - 1);
     }
-    if (!found) continue;
-    // 简化随机走:清墙 30-80 步
-    let steps = rng.int(30, 80);
-    while (steps-- > 0) {
-      if (!st.inBounds(x, y)) break;
-      const i = st.idx(x, y);
-      if (st.wall[i] === 64 || st.wall[i] === 15) st.wall[i] = 0;
-      x += rng.int(-1, 1);
-      y += rng.int(-1, 1);
+    mudWallRunner(st, rng, gs, x, y);
+  }
+}
+
+/** MudWallRunner（cs:77584）：衰减半径游走，菱形域内（y>worldSurface）清墙 */
+function mudWallRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
+  const { w, h } = st;
+  const num = rng.int(8, 20) + 0.0;          // Next(8,21)（double）
+  const num2 = rng.int(8, 32) + 0.0;         // Next(8,33)（double）
+  let num3 = num2;
+  let px = i + 0.0, py = j + 0.0;
+  let vx = rng.int(-10, 10) * 0.1, vy = rng.int(-10, 10) * 0.1;
+  while (num > 0 && num3 > 0) {
+    const num4 = num * (num3 / num2);
+    num3 -= 1;
+    let x0 = Math.trunc(px - num4 * 0.5), x1 = Math.trunc(px + num4 * 0.5);
+    let y0 = Math.trunc(py - num4 * 0.5), y1 = Math.trunc(py + num4 * 0.5);
+    if (x0 < 0) x0 = 0;
+    if (x1 > w) x1 = w;
+    if (y0 < 0) y0 = 0;
+    if (y1 > h) y1 = h;
+    for (let x = x0; x < x1; x++) {
+      for (let y = y0; y < y1; y++) {
+        if (Math.abs(x - px) + Math.abs(y - py) < num * 0.5 * (1 + rng.int(-10, 10) * 0.015)
+          && y > gs.worldSurface) {
+          st.wall[st.idx(x, y)] = 0;
+        }
+      }
     }
+    px += vx; py += vy;
+    vx += rng.int(-10, 10) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    vy += rng.int(-10, 10) * 0.05;
+    if (vy > 1) vy = 1;
+    if (vy < -1) vy = -1;
   }
 }
 
@@ -159,23 +186,22 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
   let x = oldX, y = oldY;
   // 大泥簇
   for (let n = 0; n <= 20 * scale; n++) {
-    x += rng.int(Math.floor(-5 * scale), Math.floor(5 * scale));
-    y += rng.int(Math.floor(-5 * scale), Math.floor(5 * scale));
+    // 原版 Next((int)(-5*ws), (int)(6*ws))：上界 6 非 5（曾写对称 ±5）
+    x += rng.int(-Math.floor(5 * scale), Math.floor(6 * scale) - 1);
+    y += rng.int(-Math.floor(5 * scale), Math.floor(6 * scale) - 1);
     // 原版 300-500 步固定不缩放
     const str = rng.int(40, 99), stp = rng.int(300, 499);
     tileRunner(st, rng, gs, x, y, { strength: str, steps: stp, type: MUD });
   }
   // 洞穴(1/7 填液体)
   for (let n = 0; n <= 10 * scale; n++) {
-    let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale));
-    let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale));
-    let found = false;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      if (i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD) { found = true; break; }
-      i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale));
-      j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale));
+    // Next(-A, A) 上界开 → int(-A, A-1)；拒绝采样无界 while（原版，无 40 次上限）
+    let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
+    let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
+    while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
+      i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
+      j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     }
-    if (!found) continue;
     for (let k = 0; k < 8 * scale; k++) {
       i2 += rng.int(-30, 30);
       j2 += rng.int(-30, 30);
@@ -187,15 +213,12 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
   }
   // 泥内石囊 + 宝石
   for (let n = 0; n <= 300 * scale; n++) {
-    let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale));
-    let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale));
-    let found = false;
-    for (let attempt = 0; attempt < 40; attempt++) {
-      if (i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD) { found = true; break; }
-      i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale));
-      j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale));
+    let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
+    let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
+    while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
+      i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
+      j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     }
-    if (!found) continue;
     tileRunner(st, rng, gs, i2, j2, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
     if (rng.next() * 4 < 1) {
       tileRunner(st, rng, gs,

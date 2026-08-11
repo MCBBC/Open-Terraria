@@ -209,6 +209,7 @@ Checkpoint("terrain");
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
 
 // ================= 原语 =================
+bool mudWallFlag = false;
 void TileRunner(double i, double j, double strength, int steps, int type,
     bool addTile = false, double speedX = 0.0, double speedY = 0.0, bool noYChange = false,
     bool overRide = true, int ignoreTileType = -1)
@@ -236,6 +237,19 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 int ti = y * W + x;
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
+                if (mudWallFlag && y > worldSurface && wal[y * W + x - 1] != 2
+                    && y < H - 210 - (int)r.Next(3)
+                    && dist < strength * 0.45 * (1.0 + (int)r.Next(-10, 11) * 0.01))
+                {
+                    if (y > lavaLine - (int)r.Next(0, 4) - 50)
+                    {
+                        if (wal[y * W + x - 1] != 64 && wal[y * W + x + 1] != 64 && wal[y * W + x - W] != 64 && wal[y * W + x + W] != 64) wal[ti] = 15;
+                    }
+                    else if (wal[y * W + x - 1] != 15 && wal[y * W + x + 1] != 15 && wal[y * W + x - W] != 15 && wal[y * W + x + W] != 15)
+                    {
+                        wal[ti] = 64;
+                    }
+                }
                 if (type < 0)
                 {
                     if (act[ti] == 1 && typ[ti] == 53) continue;
@@ -1107,6 +1121,155 @@ Checkpoint("icebiome");
     }
 }
 Checkpoint("grass");
+
+// ================= Jungle（JunglePass.cs 全文 1:1）=================
+{
+    double ws = W / 4200.0 * 1.5;
+    int jx = jungleX, jy = (H + rockLayer) / 2;
+    int zeroX = 0, zeroY = 0;
+    void Move(ref int x, ref int y, int xr, int yr)
+    {
+        x += (int)r.Next((int)(-xr * ws), 1 + (int)(xr * ws));
+        y += (int)r.Next((int)(-yr * ws), 1 + (int)(yr * ws));
+        y = Math.Clamp(y, rockLayer, H);
+    }
+    void PlaceFirstPassMud(int x, int y, int xSpeedScale)
+    {
+        mudWallFlag = true;
+        TileRunner(x, y, (int)r.Next((int)(250 * ws), (int)(500 * ws)), (int)r.Next(50, 150), 59, false, (dungeonRight ? 1 : -1) * xSpeedScale, 0.0);
+        mudWallFlag = false;
+    }
+    void PlaceGemsAt(int x, int y, int baseGem, int variants)
+    {
+        for (int i = 0; (double)i < 6.0 * ws; i++)
+            TileRunner(x + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), y + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), (int)r.Next(3, 7), (int)r.Next(3, 8), (int)r.Next(baseGem, baseGem + variants));
+    }
+    Move(ref jx, ref jy, 100, 100); zeroX += jx; zeroY += jy;
+    PlaceFirstPassMud(jx, jy, 3); PlaceGemsAt(jx, jy, 63, 2);
+    Move(ref jx, ref jy, 250, 150); zeroX += jx; zeroY += jy;
+    PlaceFirstPassMud(jx, jy, 0); PlaceGemsAt(jx, jy, 65, 2);
+    int oldX = jx, oldY = jy;
+    Move(ref jx, ref jy, 400, 150); zeroX += jx; zeroY += jy;
+    PlaceFirstPassMud(jx, jy, -3); PlaceGemsAt(jx, jy, 67, 2);
+    jx = zeroX / 3; jy = zeroY / 3;
+    int bigNum = (int)r.Next((int)(400 * ws), (int)(600 * ws));
+    int pad = (int)(25 * ws);
+    jx = Math.Clamp(jx, leftBeachEnd + bigNum / 2 + pad, rightBeachStart - bigNum / 2 - pad);
+    mudWallFlag = true;
+    TileRunner(jx, jy, bigNum, 10000, 59, false, 0.0, -20.0, true);
+    mudWallFlag = false;
+    // GenerateTunnelToSurface（cs:131-200）
+    double num = (int)r.Next(5, 11);
+    double px = jx, py = jy;
+    double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(10, 20) * 0.1;
+    int num2 = 0; bool flag = true;
+    while (flag)
+    {
+        if (py < worldSurface)
+        {
+            int vv = (int)py; vv = Math.Clamp(vv, 10, W - 10);
+            int vvy = (int)px; vvy = Math.Clamp(vvy, 10, H - 10);
+            if (vvy < 5) vvy = 5;
+            bool openAll = true;
+            for (int d = 0; d <= 5; d++)
+            {
+                int ii = (vvy - d) * W + vv;
+                if (vvy - d < 0 || vvy - d >= H) { openAll = false; break; }
+                if (wal[ii] != 0 || act[ii] == 1) { openAll = false; break; }
+            }
+            if (openAll) flag = false;
+        }
+        num += (int)r.Next(-20, 21) * 0.1;
+        if (num < 5) num = 5; if (num > 10) num = 10;
+        int x0 = Math.Clamp((int)(px - num * 0.5), 10, W - 10);
+        int x1 = Math.Clamp((int)(px + num * 0.5), 10, W - 10);
+        int y0 = Math.Clamp((int)(py - num * 0.5), 10, H - 10);
+        int y1 = Math.Clamp((int)(py + num * 0.5), 10, H - 10);
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+                if (Math.Abs(x - px) + Math.Abs(y - py) < num * 0.5 * (1 + (int)r.Next(-10, 11) * 0.015))
+                    act[y * W + x] = 0;
+        num2++;
+        if (num2 > 10 && (int)r.Next(50) < num2)
+        {
+            num2 = 0;
+            int side = (int)r.Next(2) == 0 ? -2 : 2;
+            TileRunner((int)px, (int)py, (int)r.Next(3, 20), (int)r.Next(10, 100), -1, false, side);
+        }
+        px += vx; py += vy;
+        vy += (int)r.Next(-10, 11) * 0.01;
+        if (vy > 0) vy = 0; if (vy < -2) vy = -2;
+        vx += (int)r.Next(-10, 11) * 0.1;
+        if (px < jx - 200) vx += (int)r.Next(5, 21) * 0.1;
+        if (px > jx + 200) vx -= (int)r.Next(5, 21) * 0.1;
+        if (vx > 1.5) vx = 1.5; if (vx < -1.5) vx = -1.5;
+    }
+    // GenerateHolesInMudWalls + MudWallRunner（cs:203-217 + 77584）
+    void MudWallRunner(int i, int j)
+    {
+        double m1 = (int)r.Next(8, 21), m2 = (int)r.Next(8, 33);
+        double m3 = m2;
+        double mx = i, my = j;
+        double mvx = (int)r.Next(-10, 11) * 0.1, mvy = (int)r.Next(-10, 11) * 0.1;
+        while (m1 > 0 && m3 > 0)
+        {
+            double m4 = m1 * (m3 / m2);
+            m3 -= 1;
+            int x0 = (int)(mx - m4 * 0.5), x1 = (int)(mx + m4 * 0.5);
+            int y0 = (int)(my - m4 * 0.5), y1 = (int)(my + m4 * 0.5);
+            if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
+            if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
+            for (int x = x0; x < x1; x++)
+                for (int y = y0; y < y1; y++)
+                    if (Math.Abs(x - mx) + Math.Abs(y - my) < m1 * 0.5 * (1 + (int)r.Next(-10, 11) * 0.015) && y > worldSurface)
+                        wal[y * W + x] = 0;
+            mx += mvx; my += mvy;
+            mvx += (int)r.Next(-10, 11) * 0.05;
+            if (mvx > 1) mvx = 1; if (mvx < -1) mvx = -1;
+            mvy += (int)r.Next(-10, 11) * 0.05;
+            if (mvy > 1) mvy = 1; if (mvy < -1) mvy = -1;
+        }
+    }
+    for (int i = 0; i < W / 4; i++)
+    {
+        int hx = (int)r.Next(20, W - 20), hy = (int)r.Next(worldSurface + 10, H - 200);
+        while (!(wal[hy * W + hx] == 64 || wal[hy * W + hx] == 15))
+        { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
+        MudWallRunner(hx, hy);
+    }
+    // GenerateFinishingTouches（cs:219-280）
+    int fx = oldX, fy = oldY;
+    for (int i = 0; (double)i <= 20.0 * ws; i++)
+    {
+        fx += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
+        fy += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
+        TileRunner(fx, fy, (int)r.Next(40, 100), (int)r.Next(300, 500), 59);
+    }
+    for (int j = 0; (double)j <= 10.0 * ws; j++)
+    {
+        int c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
+        int c2y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws));
+        while (c2x < 1 || c2x >= W - 1 || c2y < 1 || c2y >= H - 1 || typ[c2y * W + c2x] != 59)
+        { c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c2y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); }
+        for (int k = 0; (double)k < 8.0 * ws; k++)
+        {
+            c2x += (int)r.Next(-30, 31); c2y += (int)r.Next(-30, 31);
+            int type = (int)r.Next(7) == 0 ? -2 : -1;
+            TileRunner(c2x, c2y, (int)r.Next(10, 20), (int)r.Next(30, 70), type);
+        }
+    }
+    for (int l = 0; (double)l <= 300.0 * ws; l++)
+    {
+        int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
+        int c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws));
+        while (c3x < 1 || c3x >= W - 1 || c3y < 1 || c3y >= H - 1 || typ[c3y * W + c3x] != 59)
+        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); }
+        TileRunner(c3x, c3y, (int)r.Next(4, 10), (int)r.Next(5, 30), 1);
+        if ((int)r.Next(4) == 0)
+            TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
+    }
+}
+Checkpoint("jungle");
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {

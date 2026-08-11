@@ -20,6 +20,7 @@ const run = async () => {
     const bump = (id) => { tally[id] = (tally[id] ?? 0) + 1; };
     for (let i = 0; i < 4000; i++) {
       g.trySpawnEnemy();
+      g['spawnCritter']();
       for (const e of g.entities.enemies) if (e.vanillaId != null && ![1, 2, 3].includes(e.vanillaId)) bump(e.vanillaId);
       for (const c of g.entities.critters) bump((c.vanillaId ?? 0));
       g.entities.enemies.length = 0;  // 清场防占额（普通地表怪保留判定已过）

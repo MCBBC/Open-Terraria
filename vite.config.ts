@@ -8,6 +8,52 @@ import { existsSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+/** l10n 键完整性自动检查 + 语言包过期自动重建。
+ *  ① 自有文案源(tools/l10n-custom)或构建脚本比 public/l10n 产物新 → 先重跑 build-l10n.mjs
+ *    （防"补了键没重建包"的静默裸键）。
+ *  ② src 全部 Lang.text/has 字面键对 zh-Hans 合并包解析（tools/l10n-audit.mjs）：
+ *    vite build 缺键即 fail（构建中断，列出键名与使用位置）；dev 启动仅 console 警告
+ *    （不阻塞热更新）。vitest 不走这些钩子，回归由 tests/l10n-audit.test.ts 锁定。 */
+function l10nAuditAuto(): Plugin {
+  const ROOT = join(dirname(fileURLToPath(import.meta.url)));
+  const sources = [
+    join(ROOT, '..', 'tools', 'l10n-custom'),
+    join(ROOT, 'scripts', 'build-l10n.mjs'),
+    join(ROOT, 'scripts', 'l10n-merge.mjs'),
+  ];
+  const stale = () => {
+    if (!existsSync(join(ROOT, 'public', 'l10n', 'zh-Hans.json'))) return true;
+    const srcNew = Math.max(...sources.map((f) => statSync(f).mtimeMs));
+    return statSync(join(ROOT, 'public', 'l10n', 'zh-Hans.json')).mtimeMs < srcNew;
+  };
+  const audit = async () => {
+    if (stale()) {
+      console.log('[l10n-audit] 语言包源有更新,自动重建…');
+      execFileSync('node', [join(ROOT, 'scripts', 'build-l10n.mjs')], { stdio: 'inherit' });
+    }
+    const { auditL10n } = await import('./tools/l10n-audit.mjs');
+    return auditL10n(join(ROOT, 'src'), join(ROOT, 'public', 'l10n', 'zh-Hans.json'));
+  };
+  return {
+    name: 'l10n-audit-auto',
+    async configureServer() {
+      const { used, missing } = await audit();
+      if (missing.length) {
+        console.warn(`[l10n-audit] 警告: ${missing.length}/${used} 键缺失（dev 不阻塞，build 会失败）:`);
+        for (const m of missing) console.warn(`  MISSING ${m.key} ← ${m.locs.join(', ')}`);
+      }
+    },
+    async buildStart() {
+      const { used, missing } = await audit();
+      if (missing.length) {
+        const lines = missing.map((m) => `  MISSING ${m.key}  ←  ${m.locs.join(', ')}`).join('\n');
+        throw new Error(`[l10n-audit] Lang 键缺失 ${missing.length}/${used} 条——请在 tools/l10n-custom/{en-US,zh-Hans}.json 补键后重试:\n${lines}`);
+      }
+      console.log(`[l10n-audit] ${used} 键全部命中 ✓`);
+    },
+  };
+}
+
 /** 素材过期自动重打包(物品图集/贴图表管线)。
  *  判定 = 源目录(terraria-assets/Images)·白名单·TEdit 数据·脚本本体的最新 mtime
  *  晚于产物(vanilla.json / Item_Atlas_0.png)的最旧 mtime → 同步重跑 vanilla-atlas.mjs。
@@ -51,5 +97,5 @@ export default defineConfig({
   // worker 打包格式：默认 'iife' 遇到 worker 图内代码分割/动态 import 会构建报错；
   // 'es' 与 dev 态 module worker 一致（worldGen.worker 及其依赖全为静态 import）
   worker: { format: 'es' },
-  plugins: [vanillaAtlasAuto()],
+  plugins: [vanillaAtlasAuto(), l10nAuditAuto()],
 });
