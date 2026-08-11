@@ -25,6 +25,8 @@ const T = (() => {
     PEARLSAND: get('v_116_pearlsand_block'), HARDENED_SAND: get('hardened_sand'),
     SANDSTONE: get('sandstone'), FOSSIL: get('desert_fossil'),
     MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
+    // 23 陨石（tiles.ts key 为 ore_meteorite，非 v_23_*）
+    METEORITE: get('ore_meteorite'),
     CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'),
     CORRUPT_ICE: get('v_163_purple_ice_block'), CRIMSON_ICE: get('v_200_red_ice_block'),
     // 164 粉冰(=神圣冰)：key 实为 v_164_pink_ice_block（旧注"未注册→0"有误，已注册）
@@ -151,15 +153,26 @@ const NET_ID_MAP: Record<number, { base: number; scale: number; hp?: number; dmg
   '-15': { base: 1, scale: 1.15 },   // 史莱姆王子
   '-22': { base: 223, scale: 1.0 }, '-23': { base: 223, scale: 1.0 },
   '-24': { base: 223, scale: 1.0 }, '-25': { base: 223, scale: 1.0 },
-  // 僵尸/骷髅/眼变种 = 基底 + scale（贴图同基底，属性缩放）
-  '-38': { base: 3, scale: 0.85 }, '-39': { base: 3, scale: 0.85 }, '-40': { base: 3, scale: 0.85 },
-  '-41': { base: 3, scale: 0.85 }, '-42': { base: 3, scale: 0.85 },
+  // 僵尸/骷髅/眼变种 = 基底 + scale（贴图同基底，属性缩放）。
+  // 基底一律以 NPCID.NetIdMap（NPCID.cs:12457-12465，index = -id-1）为准：
+  // -26..-37 僵尸族基底 3/132/186/187/188/189；-38..-42 恶魔眼族基底 190-194
+  // （旧表误写 base:3——贴图/属性全错）；-43 基底 2；-44/-45 基底 200
+  '-26': { base: 3, scale: 0.9 }, '-27': { base: 3, scale: 1.1 },
+  '-28': { base: 132, scale: 0.85 }, '-29': { base: 132, scale: 1.15 },
+  '-30': { base: 186, scale: 0.93 }, '-31': { base: 186, scale: 1.13 },
+  '-32': { base: 187, scale: 0.89 }, '-33': { base: 187, scale: 1.11 },
+  '-34': { base: 188, scale: 0.87 }, '-35': { base: 188, scale: 1.13 },
+  '-36': { base: 189, scale: 0.92 }, '-37': { base: 189, scale: 1.08 },
+  '-38': { base: 190, scale: 1.15 }, '-39': { base: 191, scale: 1.1 },
+  '-40': { base: 192, scale: 0.9 }, '-41': { base: 193, scale: 0.85 },
+  '-42': { base: 194, scale: 1.1 },
   '-43': { base: 2, scale: 0.85 },  // 小恶魔眼
+  '-44': { base: 200, scale: 0.87 }, '-45': { base: 200, scale: 1.05 },
   '-46': { base: 21, scale: 0.9 }, '-47': { base: 21, scale: 0.9 },
   '-48': { base: 201, scale: 0.9 }, '-49': { base: 201, scale: 0.9 },
   '-50': { base: 202, scale: 0.9 }, '-51': { base: 202, scale: 0.9 },
   '-52': { base: 203, scale: 0.9 }, '-53': { base: 203, scale: 0.9 },
-  '-54': { base: 223, scale: 0.9 }, '-55': { base: 223, scale: 0.9 },
+  '-54': { base: 223, scale: 0.9 }, '-55': { base: 223, scale: 1.1 },
 };
 
 export class VanillaSpawner {
@@ -183,6 +196,8 @@ export class VanillaSpawner {
   private spawnSpider = false;
   private ZoneSnow = false; private ZoneCorrupt = false; private ZoneCrimson = false;
   private ZoneHallow = false; private ZoneJungle = false; private ZoneGlowshroom = false;
+  /** 陨石带（SceneMetrics.cs:56/685：窗口内陨石 tile ≥ MeteorTileThreshold=75） */
+  private ZoneMeteor = false;
   private ZoneDungeon = false; private ZoneGraveyard = false; private ZoneBeach = false;
   /** 原版 downedBoss3（杀过骷髅王）：地牢分支切换 守卫→常规怪池 */
   private downedBoss3 = false;
@@ -193,6 +208,8 @@ export class VanillaSpawner {
   /** 落脚点（Game 放置用） */
   currentSpawnX = 0;
   currentSpawnY = 0;
+  /** GetZombieSettings（L5495）的地表夜僵尸 style（SpawnAnNPC 入口 Next(7) roll，L1193） */
+  private zombieStyle = 0;
 
   constructor(private world: World) {}
 
@@ -364,6 +381,7 @@ export class VanillaSpawner {
     this.ZoneHallow = this.zoneCounts.holy >= 125;
     this.ZoneJungle = this.zoneCounts.jungle >= 140;
     this.ZoneGlowshroom = this.zoneCounts.mushroom >= 100;
+    this.ZoneMeteor = this.zoneCounts.meteor >= 75;
     // ZoneDungeon 不在此设置：原版取玩家 SceneMetrics（SetSpawnFlags L300），见 setPlayerFlags
     // ---- 蜘蛛巢旗标（L1045-1079）:岩石层~地狱层 && 非地牢时 ----
     // 1/3 概率扫落点 ±Next(5,15) 立方盒内任意墙 62;否则查玩家所站格墙 62。
@@ -397,7 +415,7 @@ export class VanillaSpawner {
    *  原版 SceneMetrics 每帧增量维护；本类无帧钩子 → 0.5s 或玩家移动 ≥32 格才重算（近似） */
   private zoneStamp = -1;
   private zoneCX = -99999; private zoneCY = -99999;
-  private zoneCounts = { evil: 0, blood: 0, holy: 0, snow: 0, jungle: 0, mushroom: 0 };
+  private zoneCounts = { evil: 0, blood: 0, holy: 0, snow: 0, jungle: 0, mushroom: 0, meteor: 0 };
 
   private refreshZoneCounts(cx: number, cy: number): void {
     const now = performance.now();
@@ -407,7 +425,7 @@ export class VanillaSpawner {
     const st = this.world.store;
     const x0 = Math.max(2, cx - 84), x1 = Math.min(st.w - 3, cx + 84);
     const y0 = Math.max(2, cy - 61), y1 = Math.min(st.h - 3, cy + 61);
-    let evil = 0, blood = 0, holy = 0, snow = 0, jungle = 0, mushroom = 0, sunflower = 0;
+    let evil = 0, blood = 0, holy = 0, snow = 0, jungle = 0, mushroom = 0, sunflower = 0, meteor = 0;
     for (let y = y0; y <= y1; y++) {
       const row = y * st.w;
       for (let x = x0; x <= x1; x++) {
@@ -420,6 +438,7 @@ export class VanillaSpawner {
         else if (SNOW_LOOKUP[t]) snow++;
         else if (JUNGLE_LOOKUP[t]) jungle++;
         else if (MUSHROOM_LOOKUP[t]) mushroom++;
+        else if (t === T.METEORITE) meteor++;
         else if (t === T.SUNFLOWER) sunflower++;
       }
     }
@@ -431,7 +450,7 @@ export class VanillaSpawner {
     evil -= holyRaw; blood -= holyRaw;
     this.zoneCounts = {
       evil: Math.max(0, evil), blood: Math.max(0, blood), holy: Math.max(0, holy),
-      snow, jungle, mushroom,
+      snow, jungle, mushroom, meteor,
     };
   }
 
@@ -645,6 +664,9 @@ export class VanillaSpawner {
     const t = this.spawnTileType;
     const D = (id: number) => this.spawnNPC(x, y, id, rng);
     const any = (id: number) => this.activeIds.has(id);
+    // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
+    // 原版在函数入口 roll（此处同位置，保持后续 RNG 流顺序一致）
+    this.zombieStyle = rng.int(0, 7);
 
     // ---- 天空怪（原版 NPC.cs:1290-1331：else-if 链最前、invaders 之前——
     //  skyMob 优先于入侵分支；肉前 = 兜底鸟妖 48，困难 = 1/10 飞龙 87（场内唯一））----
@@ -848,6 +870,9 @@ export class VanillaSpawner {
         return D(31);              // 愤怒骨怪
       }
     }
+    // ---- 陨石带（L2704：else if (ZoneMeteor)）----
+    //  ZoneMeteor = 玩家窗口内陨石 tile ≥75（SceneMetrics.cs:56 MeteorTileThreshold）→ 陨石头 23
+    if (this.ZoneMeteor) return D(23);
     // ---- 蘑菇地（L3540-3610，tile 70）----
     if (t === T.MUSHROOM_GRASS) {
       if (this.surfaceSpawn) {
@@ -861,6 +886,36 @@ export class VanillaSpawner {
       if (N(4)) return D(259);
       return D(257);
     }
+    // ---- 洞穴稀有怪/小动物（L3644-3719；原版位于蘑菇地之后、丛林草之前）----
+    //  RollLuck(n)≈Next(n)（玩家幸运度未接入）；goldCritterChance=400
+    // L3644：hard && y>worldSurface && RollLuck(75) → 群系稀有元素怪。
+    //  473/474/475/476 与 629 在 vanilla-npcs.json 无条目（fromVanilla→null 静默丢弃），
+    //  实际可达的只有兜底 85（hellstone turtle）；分支按原版顺序保留
+    if (hardMode && this.spawnTileY > this.world.groundLevel && N(75)) {
+      if (N(2) && this.ZoneCorrupt && !any(473)) return D(473);
+      if (N(2) && this.ZoneCrimson && !any(474)) return D(474);
+      if (N(2) && this.ZoneHallow && !any(475)) return D(475);
+      if (N(2) && this.ZoneJungle && !any(476)) return D(476);   // 原版还要求 tenthAnniversaryWorld
+      if (this.ZoneSnow) return D(629);
+      return D(85);
+    }
+    // L3671：hard && 落脚墙 2（天然泥土墙）&& 1/20 → 85
+    if (hardMode && wall === 2 && N(20)) return D(85);
+    // L3676：hard && 地表 && 夜 && (1/20 或 满月 1/5) → 狼人 82
+    if (hardMode && this.surfaceSpawn && !this.dayTime
+      && (N(20) || (N(5) && this.world.clock.moonPhase === 4))) return D(82);
+    // L3681：丛林草 && RollLuck(500) && 夜 → 丛林尖刺球史莱姆 52（先于 L3839 丛林草主段）
+    if (t === T.JUNGLE_GRASS && N(500) && !this.dayTime) return D(52);
+    // L3688：丛林草 && y>worldSurface && 1/60 → 丛林蜷怪 219
+    if (t === T.JUNGLE_GRASS && this.spawnTileY > this.world.groundLevel && N(60)) return D(219);
+    // L3690-3719：洞穴白天小动物（earthworm/mouse/grasshopper 族），条件均排除五群系
+    const critGates = this.spawnTileY > this.world.groundLevel
+      && !this.ZoneSnow && !this.ZoneCrimson && !this.ZoneCorrupt && !this.ZoneJungle && !this.ZoneHallow;
+    if (critGates && this.spawnTileY < st.h - 210 && N(8)) return D(N(400) ? 448 : 357);
+    if (critGates && this.spawnTileY < st.h - 210 && N(13)) return D(N(400) ? 447 : 300);
+    if (this.spawnTileY > this.world.groundLevel
+      && this.spawnTileY < (this.world.rockLevel + st.h) / 2
+      && !this.ZoneSnow && !this.ZoneCrimson && !this.ZoneCorrupt && !this.ZoneHallow && N(13)) return D(359);
     // ---- 蜂巢墙 86（NPC.cs:3833-3835）：7/8 SpawnHornet ----
     if (wall === 86 && !N(8)) return this.spawnHornet(x, y, rng);
     // ---- 丛林草 tile 60（NPC.cs:3839-3856；旧实现误在肉前出 158 巨型蝙蝠，原版无此分支）----
@@ -894,12 +949,32 @@ export class VanillaSpawner {
       }
     }
     // ---- 沙漠地表（L3859-3928，沙尘暴外简化为沙漠 tile 段）----
-    // 原版 L3859 沙地族 = 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/397 硬化沙/396 沙岩/404 化石
+    // 原版 L3859 沙地族 = 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/397 硬化沙/396 沙岩/404 化石；
+    // L4397：黄沙 && 1/5 && Spawning_SandstoneCheck（沙岩邻接未接 → 近似恒真）→ 蚁狮 69，
+    // 否则秃鹫 61
     if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE || t === T.FOSSIL) {
       if (!hardMode) {
-        if (N(6)) return D(69);   // 蚁狮
+        if (N(5)) return D(69);   // 蚁狮
         return D(61);             // 秃鹫（地表沙）
       }
+    }
+    // ---- 神圣 tiles（L3940-3967，tile 116 珍珠沙/117 珍珠石/109 神圣草/164 粉冰）----
+    //  L3940：hard && 珍珠沙 && 1/2 → Light Mummy 80
+    if (hardMode && t === T.PEARLSAND && N(2)) return D(80);
+    const hallowFloor = t === T.PEARLSAND || t === T.PEARLSTONE_BLOCK
+      || t === T.HALLOW_GRASS || t === T.HOLLOW_ICE;
+    // L3946：hard && underGround && !waterTile && 神圣 tile →
+    //  雨天 Enchanted Nightcrawler 244（唯一）/ 夜 毒气鼻涕虫 122 / 1/10 妖精 86 / 兜底 75
+    //  （L3949 downedPlantBoss→661 Empress蝶 未接旗标，略）
+    if (hardMode && this.underGround && !this.waterTile && hallowFloor) {
+      if (this.world.weather.raining && !any(244) && N(10)) return D(244);
+      if (!this.dayTime && N(2)) return D(122);
+      if (N(10)) return D(86);
+      return D(75);
+    }
+    // L3962：hard && 1/50 && !waterTile && 岩石层下 && 神圣 tile → 神圣噬魂怪 84
+    if (!this.noWorms && hardMode && N(50) && !this.waterTile && this.deeperThanRockLayer && hallowFloor) {
+      return D(84);
     }
     // ---- 猩红（L3973-4031）----
     if (this.ZoneCrimson) {
@@ -926,114 +1001,248 @@ export class VanillaSpawner {
       return D(6);               // 默认 Eater of Souls
     }
     // ---- 地表（L4075-4717）----
+    //  群系判定：雪原不走 ZoneSnow 旗标兜底段——原版白昼走小动物/基础史莱姆，
+    //  夜晚走 IcesSnow 落脚 tile 段（L4555），此前的 ZoneSnow 拦截段为误植已移除
     if (this.surfaceSpawn) {
-      if (this.ZoneSnow) {
-        // 雪原地表（L4560+）
-        if (hardMode && N(3)) return D(155);
-        if (N(6)) return D(147);   // 冰史莱姆
-        return D(161);             // 雪原狼
-      }
+      const clock = this.world.clock;
+      const raining = this.world.weather.raining;
+      const moonPhase = clock.moonPhase;
+      // TileID.Sets.IcesSnow（TileID.cs:297：161/200/163/164/147）+ 162
+      const iceTile = t === T.ICE || t === T.CRIMSON_ICE || t === T.CORRUPT_ICE
+        || t === T.HOLLOW_ICE || t === T.SNOW || t === T.THIN_ICE;
+      // ---- 白昼（L4112-4415 链尾）----
       if (this.dayTime) {
-        // 白天地表小动物门已过 → 池底
-        if (!this.waterTile) {
-          return D(this.getBasicSlimeToSpawn(true, t, rng));  // L4402
+        // num46 = |落脚 x - 世界出生点 x|（L4108）
+        const num46 = Math.abs(this.spawnTileX - this.world.spawnX);
+        // L4412：哥布林侦察兵 73——距出生点 >1/3 图宽，1/15
+        //  （或未破哥布林入侵 && 砸过暗影珠 → 1/7）
+        if (!this.waterTile && num46 > st.w / 3
+          && (N(15) || (!this.world.flags['downedGoblins'] && this.world.flags['shadowOrbSmashed'] && N(7)))) {
+          return D(73);
         }
+        // L4417：雨天飞行怪 224（1/4，无 waterTile 门）
+        if (raining && N(4)) return D(224);
+        // L4421：雨伞史莱姆 225（!waterTile 1/2）
+        if (!this.waterTile && raining && N(2)) return D(225);
+        // L4426/4431：大风天 594/628——vanilla-npcs.json 无条目，跳过（缺 594/628）
+        // L4435：池底基础史莱姆
+        if (!this.waterTile) return D(this.getBasicSlimeToSpawn(true, t, rng));
         return null;
       }
-      // 夜晚（L4454-4716）：Next(6) 门
-      if (N(6) || (this.world.clock.dayCount >= 0 && N(2) && false)) {  // moonPhase 暂无
-        if (N(2)) {
-          if (N(4)) return D(-43);  // 小恶魔眼
-          return D(2);              // 恶魔眼
-        }
-        // switch(Next(5)) 僵尸系
+      // ---- 夜晚（L4437-4716）----
+      // L4437：萤火虫——草族 tile + 无风 + 无雨 + 1/fireFlyChance（原版为每世界 roll
+      //  的随机值 setFireFlyChance L94555，此处取代表值 30）；成群附加只略
+      const tooWindy = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
+      if (!tooWindy && !raining
+        && (t === T.GRASS || t === 477 || t === T.HALLOW_GRASS)
+        && N(30) && this.spawnTileY <= this.world.groundLevel) {
+        return D(t === T.HALLOW_GRASS ? 358 : 355);
+      }
+      // L4454：Next(6) 或 满月（moonPhase==4）1/2 门
+      if (N(6) || (moonPhase === 4 && N(2))) {
+        // L4456：hard 1/3 → Wandering Eye 133
+        if (hardMode && N(3)) return D(133);
+        // L4464：1/2 → 恶魔眼族（1/4 小眼 -43）
+        if (N(2)) return D(N(4) ? -43 : 2);
+        // L4471-4516：switch(Next(5)) 僵尸族 190-194；各 1/3 小变体与本体【同帧同出】
+        //  （原版先 SpawnNPC 小变体再 SpawnNPC 本体；单返回值 API 只能交付本体，
+        //   小变体另调一次 spawnNPC 后丢弃）
         const zv = rng.int(0, 5);
-        const zm = [190, 191, 192, 193, 194][zv] ?? 3;
-        if (N(3)) {
-          // 各配 1/3 概率小变种
-          const small = [-38, -39, -40, -41, -42][zv] ?? -38;
-          return D(small);
-        }
-        return D(zm);
+        if (N(3)) this.spawnNPC(x, y, [-38, -39, -40, -41, -42][zv], rng);
+        return D([190, 191, 192, 193, 194][zv]);
       }
-      // 夜间池底（L4561+ torch zombie 等）
-      if (!this.ZoneSnow && !this.ZoneJungle && !this.waterTile) {
-        return D(3);  // 普通僵尸兜底
+      // L4518：hard 1/50 血月 && 场上无小丑 109 → Clown
+      if (hardMode && N(50) && clock.bloodMoon && !any(109)) return D(109);
+      // L4523/4529：血月/墓园 RollOnlyBadLuck(300)（幸运度未接 → 按 1/300 近似）
+      //  → The Groom 53 / The Bride 536
+      if (clock.bloodMoon && N(300)) return D(53);
+      if (clock.bloodMoon && N(300)) return D(536);
+      // L4533：新月（moonPhase==0）hard 2/3 → Werewolf 104
+      if (!this.dayTime && moonPhase === 0 && hardMode && !N(3)) return D(104);
+      // L4538：hard 1/3 → Werewolf 140
+      if (!this.dayTime && hardMode && N(3)) return D(140);
+      // L4543：血月 2/5 → Blood Zombie 489 / Drippler 490
+      if (clock.bloodMoon && rng.int(0, 5) < 2) return D(N(2) ? 490 : 489);
+      // L4555：冰系落脚 tile → hard 1/4 Ice Elemental 169 / hard 1/3 Wolf 155 / else Frozen Zombie 161
+      //  （spawnArmedZombies && expertMode → 431 未接专家模式，略）
+      if (iceTile) {
+        if (hardMode && N(4)) return D(169);
+        if (hardMode && N(3)) return D(155);
+        return D(161);
       }
-      return null;
+      // L4577：雨夜 1/2 → Raincoat Zombie 223（1/3 小变体 -54/-55）
+      if (raining && N(2)) {
+        if (!N(3)) return D(223);
+        return D(N(2) ? -55 : -54);
+      }
+      // L4585：skyblock 火把僵尸段省略（skyblock 语义未接）
+      // L4622：火把僵尸 590/591（Next(torchZombieChance=12)）——json 缺 590/591，跳过
+      // L4634：halloween/xMas/墓园/专家持械僵尸 430-436 略（节日/专家模式未接）
+      // ---- 最终僵尸 style 表（L4671-4716 + GetZombieSettings L5495）----
+      //  zombieStyle = Next(7)（在 SpawnAnNPC 入口即 roll，L1193）；各 style 配大小变体
+      const zrow = [
+        [3, -26, -27], [132, -28, -29], [186, -30, -31], [187, -32, -33],
+        [188, -34, -35], [189, -36, -37], [200, -44, -45],
+      ][this.zombieStyle] ?? [3, -26, -27];
+      let zid = zrow[0];
+      if (N(3)) zid = rng.next() < 0.5 ? zrow[1] : zrow[2];
+      return D(zid);
     }
     // ---- 地下层（L4718-4770，worldSurface < y < rockLayer）----
     if (this.underGround) {
       if (!this.noWorms && N(50) && !this.ZoneSnow) {
-        return D(10);   // Giant Worm
+        // L4722：hard → 2/3 Digger 95 / 1/3 Giant Worm 10；肉前恒 10
+        if (hardMode) return D(N(3) ? 10 : 95);
+        return D(10);
       }
-      if (this.ZoneSnow) return D(147);
+      // L4734/4738：hard 1/3→140（Possessed Armor）/ 1/2→141（Toxic Sludge）
+      if (hardMode && N(3)) return D(140);
+      if (hardMode && N(2)) return D(141);
+      // L4748：落脚 147/161 或 ZoneSnow → 冰史莱姆 147
+      if (t === T.SNOW || t === T.ICE || this.ZoneSnow) return D(147);
       return D(this.getBasicSlimeToSpawn(false, t, rng));
     }
     // ---- 地狱（L4771-4820，y > maxTilesY-190）----
+    //  mechAny = downedMechBossAny（Main 旗标；我们取 flags.downed_125/126/127/134 任一，
+    //  与 Game.ts flag 求值同源）
     if (this.spawnTileY > st.h - 190) {
-      if (N(40)) return D(39);   // Bone Serpent
-      if (N(14)) return D(24);   // Fire Imp
-      if (N(7)) {
-        if (N(10)) return D(66);  // Voodoo Demon
-        return D(62);             // Demon
+      const mechAny = !!(this.world.flags['downed_125'] || this.world.flags['downed_126']
+        || this.world.flags['downed_127'] || this.world.flags['downed_134']);
+      // L4777：hard && 未救出税务官 && 1/20 && 场上无 534 → Tortured Soul 534
+      if (hardMode && !this.world.flags['savedTaxCollector'] && N(20) && !any(534)) return D(534);
+      // L4781：熔岩小动物 1/8（先于骨蛇——原版段序）。
+      //  SpawnLavaBaitCritters（L5760）：2/3 → 白天 Hell Butterfly 653 / 夜 Lavafly 654
+      //  （原版夜间成群 1-5 只，单返回值只交付 1 只）；else Magma Snail 655
+      if (N(8)) {
+        if (!N(3)) return D(this.dayTime ? 653 : 654);
+        return D(655);
       }
-      if (N(3)) return D(59);    // Lava Slime
-      return D(60);              // Hellbat
+      // L4787：Bone Serpent 1/40（场上唯一）
+      if (N(40) && !any(39)) return D(39);
+      // L4794：Fire Imp 1/14
+      if (N(14)) return D(24);
+      if (N(7)) {
+        // L4799：Voodoo Demon 1/10；hard+mechAny 4/5 → Red Devil 156；else Demon
+        if (N(10)) return D(66);
+        if (hardMode && mechAny && !N(5)) return D(156);
+        return D(62);
+      }
+      // L4810：Lava Slime 1/3
+      if (N(3)) return D(59);
+      // L4812：hard+mechAny 4/5 → Lava Bat 151；else Hellbat
+      if (hardMode && mechAny && !N(5)) return D(151);
+      return D(60);
     }
+    // CheckToSpawnRockGolem（L4822）→ 631：岩石柱邻接判定未移植且 json 缺 631 条目，跳过
     // ---- 洞穴通用池（L4825-5142）----
+    // 冰系 tile 分档（原版各段用不同子集）：
+    //  iceAll=147/161/162/163/164/200（蠕虫段 L4842）、iceCave=147/161/162（L4981/5117/5128）
+    const iceAll = t === T.SNOW || t === T.ICE || t === T.THIN_ICE
+      || t === T.CORRUPT_ICE || t === T.HOLLOW_ICE || t === T.CRIMSON_ICE;
+    const iceCave = t === T.SNOW || t === T.ICE || t === T.THIN_ICE;
     if (N(60)) {
       if (this.ZoneSnow) return D(218);
       return D(217);
     }
+    // L4836：hard && 珍珠沙/珍珠石/粉冰 && 1/8 → Chaos Elemental 120
+    if ((t === T.PEARLSAND || t === T.PEARLSTONE_BLOCK || t === T.HOLLOW_ICE)
+      && hardMode && !this.noWorms && N(8)) return D(120);
+    // L4842-4850：hard && 冰系 tile && 群系旗标 → Pigron 变体 170(腐化)/171(神圣)/180(猩红)
+    if (iceAll && !this.noWorms && hardMode) {
+      if (this.ZoneCorrupt && N(30)) return D(170);
+      if (this.ZoneHallow && N(30)) return D(171);
+      if (this.ZoneCrimson && N(30)) return D(180);
+    }
+    // L4852：hard && ZoneSnow && 1/10 → Ice Tortoise 154
+    if (hardMode && this.ZoneSnow && N(10)) return D(154);
+    // L4855：1/100 蠕虫——hard→Digger 95；肉前 ZoneSnow→Snow Flinx 185 / else Giant Worm 10
     if (!this.noWorms && N(100) && !this.ZoneHallow) {
-      if (!hardMode) {
-        if (this.ZoneSnow) return D(185);
-        return D(10);
-      }
+      if (hardMode) return D(95);
+      if (this.ZoneSnow) return D(185);
+      return D(10);
     }
+    // L4867：ZoneSnow && 1/20 → Snow Flinx 185
     if (this.ZoneSnow && N(20)) return D(185);
+    // L4871：1/10(肉前)/1/20(hard) 母史莱姆族——雪/冰落脚 184，否则 1/3 黑 -6 / 母 16
     if ((!hardMode && N(10)) || (hardMode && N(20))) {
-      if (this.ZoneSnow) return D(184);
-      if (N(3)) return D(-6);  // 黑史莱姆
-      return D(16);            // 母史莱姆
-    }
-    if ((!hardMode) && N(4)) {
-      if (this.ZoneSnow) return D(184);
+      if (this.ZoneSnow || t === T.ICE || t === T.SNOW) return D(184);
       if (N(3)) return D(-6);
-      return D(184);
+      return D(16);
+    }
+    // L4890：(!hard || skyblock) && 1/4 史莱姆段——丛林→-10；雪/冰落脚→184；else -6
+    if (!hardMode && N(4)) {
+      if (this.ZoneJungle) return D(-10);
+      if (this.ZoneSnow || t === T.ICE || t === T.SNOW) return D(184);
+      return D(-6);
     }
     if (N(2)) {
-      // 洞穴主池（L4896+）
-      // 骷髅商 453（L4906-4910）：1/35，非水域（影烛未实现），场上无 453
+      // 洞穴主池（L4896-5099）
+      // 骷髅商 453（L4905-4910）：1/35，非水域（影烛未实现），场内唯一（CountNPCS==0）
       // —— Game.trySpawnEnemy 把 453 转成 TownNPC 放 npcs 桶
-      if (N(35) && !this.waterTile) return D(453);
-      if (N(80)) return D(195);                     // Tim（罕）
-      if (N(200)) return D(45);                     // Bound Goblin
+      if (N(35) && !this.waterTile && !any(453)) return D(453);
+      // L4911：Lost Girl 195（Nymph）1/80
+      if (N(80)) return D(195);
+      // 深层半段 = y > (rockLayer + maxTilesY)/2（L4913/4917 共用门）
+      const deepCave = this.spawnTileY > (this.world.rockLevel + st.h) / 2;
+      // L4913：hard && 深层半段 && 1/200 → Rune Wizard 172
+      if (hardMode && deepCave && N(200)) return D(172);
+      // L4917：深层半段 && 1/200（offensiveToTim 1/50 buff 未接）→ Bound Goblin 45
+      if (deepCave && N(200)) return D(45);
+      // L4929/4941：Next(4)!=0（3/4）→ 大理石房：Next(6)!=0（5/6）且场内无 480
+      //  且 hard → Medusa 480，else Hoplite 481（花岗岩同构 483/482）
       if (this.nearMarble && !N(4)) {
-        if (hardMode && N(6)) return D(480);
+        if (!N(6) && !any(480) && hardMode) return D(480);
         return D(481);
       }
       if (this.nearGranite && !N(5)) {
-        if (N(6)) return D(483);
+        if (!N(6) && !any(483)) return D(483);
         return D(482);
       }
-      if (N(20)) return D(44);   // 附魔剑
-      // switch(Next(4)) 骷髅系
+      // L4951：hard && Next(10)!=0（9/10）→ 洞穴主池：
+      //  1/2 → ZoneSnow?197 : (深层半段 1/5→-15 Heavy Skeleton / else 77 Armored Skeleton)
+      //  else → ZoneSnow?206 : 110 Skeleton Archer
+      if (hardMode && !N(10)) {
+        if (N(2)) {
+          if (this.ZoneSnow) return D(197);
+          if (deepCave && N(5)) return D(-15);
+          return D(77);
+        }
+        return D(this.ZoneSnow ? 206 : 110);
+      }
+      // L4961：halloween/墓园 蠕虫 316 略（节日/墓园系统未接）
+      // L4969：Undead Miner 44（1/20）
+      if (N(20)) return D(44);
+      // L4979：冰洞池——落脚 147/161/162：1/15 Snow Flinx 185 / else Undead Viking 167
+      if (iceCave) return D(N(15) ? 185 : 167);
+      // L4993：ZoneSnow → Snow Flinx 185
+      if (this.ZoneSnow) return D(185);
+      // L5000：1/3 → cavernMonsterType[Next(2)][Next(3)]（洞穴蝾螈族，世界生成时 roll）
+      if (N(3)) return D(cavernMonsterType[rng.int(0, 2)][rng.int(0, 3)]);
+      // L5010：ZoneGlowshroom && tile 70/190 → Fungi Spore 635——json 缺 635，跳过
+      // L5018：halloween 南瓜精略；L5029：专家模式骨堆小动物 449-452 略（无专家模式）
+      // switch(Next(4)) 骷髅系（L5050-5099）：2/3 本体，1/3 大小变体二选一
       const sv = rng.int(0, 4);
       const sm = [21, 201, 202, 203][sv] ?? 21;
-      if (N(3)) {
-        const small = [[-46, -47], [-48, -49], [-50, -51], [-52, -53]][sv] ?? [-46, -47];
-        return D(rng.next() < 0.5 ? small[0] : small[1]);
-      }
-      return D(sm);
+      if (!N(3)) return D(sm);
+      const small = [[-46, -47], [-48, -49], [-50, -51], [-52, -53]][sv] ?? [-46, -47];
+      return D(rng.next() < 0.5 ? small[0] : small[1]);
     }
-    // 洞穴兜底（L5101-5142）
+    // 洞穴兜底（L5101-5142，按原版段序）
+    // L5101：hard && ZoneHallow && 1/2 → Illuminant Slime 138
+    if (hardMode && this.ZoneHallow && N(2)) return D(138);
+    // L5105：ZoneJungle → Jungle Bat 51
     if (this.ZoneJungle) return D(51);
-    if (this.ZoneSnow) return D(150);
+    // L5109：ZoneGlowshroom && tile 70/190 → 634——json 缺 634，跳过
+    // L5113：hard && ZoneHallow → Illuminant Bat 137
+    if (hardMode && this.ZoneHallow) return D(137);
+    // L5117：hard && Next(6)>0（5/6）→ 冰落脚 1/3 Ice Bat 150 / else Giant Bat 93
+    if (hardMode && !N(6)) {
+      if (N(3) && iceCave) return D(150);
+      return D(93);
+    }
+    // L5128：冰落脚 tile（147/161/162，非 ZoneSnow 旗标）→ hard?169 Ice Elemental : 150
+    if (iceCave) return D(hardMode ? 169 : 150);
     return D(49);  // Cave Bat
-
-    return null;
   }
 
   /** GetBasicSlimeToSpawn（L5537-5580） */

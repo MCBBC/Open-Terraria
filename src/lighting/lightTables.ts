@@ -52,6 +52,9 @@ export const TORCH_COLORS: ReadonlyArray<readonly [number, number, number]> = [
 ];
 /** 蜡烛/吊灯/篝火等闪烁幅度来源的 sheet 集(燃烧类光源) */
 export const FLICKER_SHEETS = new Set([33, 49, 92, 93, 174, 34, 149, 95, 100, 126, 173, 564, 215, 405, 4]);
+/** 蘑菇组发光 sheet(TileLightScanner.cs:2938 case 70/71/72/190/348/349/528/578；
+ *  R=0 B=1 G=0.2+num11/2 的呼吸蓝光,与 FLICKER_SHEETS 三通道叠加不同) */
+export const MUSHROOM_GLOW_SHEETS = new Set([70, 71, 72, 190, 348, 349, 528, 578]);
 
 // ---- 发光墙(ApplyWallLight:167-342 精选;[wallId] → RGB) ----
 export const WALL_EMISSIVE: Record<number, readonly [number, number, number]> = {

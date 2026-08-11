@@ -11,6 +11,13 @@ export interface GenState {
   waterLine: number;      // 雪原上方（原版 waterLine ≈ 0.35×h）
   lavaLine: number;       // 地狱顶（原版 ≈ h-200）
   beachDistance: number;
+  /** GenVars.worldSurface/rockLayer：Terrain 游走**终值**（double，≠ Main.worldSurface
+   *  的 worldSurfaceHigh+25；SandPatches/SmallHoles/Tunnels 等按 GenVars 值掷骰） */
+  genWorldSurface: number;
+  genRockLayer: number;
+  /** Tunnels pass 记录（cs:11743：numTunnels ≤ maxTunnels-1；tunnelX[5] 存档用） */
+  tunnelX: number[];
+  numTunnels: number;
 
   // Reset pass 掷的世界级选择
   crimson: boolean;           // 50% 猩红 / 50% 腐化
@@ -66,6 +73,8 @@ export function newGenState(w: number, h: number): GenState {
     rockLevel: Math.floor(h * 0.42), rockLevelLow: 0, rockLevelHigh: 0,
     waterLine: Math.floor(h * 0.35), lavaLine: h - 200,
     beachDistance: Math.max(24, Math.floor(w * 0.06)),
+    genWorldSurface: 0, genRockLayer: 0,
+    tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, jungleX: 0,

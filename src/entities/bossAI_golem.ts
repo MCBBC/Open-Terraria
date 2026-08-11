@@ -348,8 +348,15 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   }
 
-  // ---- 离场(NPC.cs:19709-19721):无目标或曼哈顿距离 > 3000 → 清除 ----
-  if (!player || Math.abs(e.cx - player.cx) + Math.abs(e.cy - player.cy) > 3000) { e.dead = true; return; }
+  // ---- 玩家死亡 vs 远离（NPC.cs:19469-19475 / 19709-19721）----
+  // 玩家死：仅 noTileCollide=true（无 despawn 无状态切换，AI 继续跑）；
+  // 活人曼哈顿 >3000：瞬消（二次判定 TargetClosest 后）
+  if (!player) {
+    x.noTC = true;
+  } else if (Math.abs(e.cx - player.cx) + Math.abs(e.cy - player.cy) > 3000) {
+    e.dead = true; e.bossFled = true;
+    return;
+  }
 
   // ---- 重力+位移+落地(原版共享物理:noGravity=false → 0.3/2t、maxFall 10) ----
   e.vy = Math.min(e.vy + GRAV, MAX_FALL);

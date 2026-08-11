@@ -7,6 +7,7 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { VanillaSpawner } from '../src/world/spawn/VanillaSpawner';
 import { RNG } from '../src/core/rng';
 import { World } from '../src/world/World';
+import { TILE_BY_KEY } from '../src/data/tiles';
 
 async function makeWorld(): Promise<World> {
   return generateWorld({ width: 4200, height: 1200, seedText: 'dungeon-spawn-chain' });
@@ -18,42 +19,58 @@ async function makeWorld(): Promise<World> {
  *  水点会出水母 63 而非守卫（原版顺序如此）；生成流任何变动都会平移世界形态，
  *  选点直接要求地牢砖地面（PostCheck L922-927 的落点硬条件），保证稳定命中地牢分支 */
 function findDungeonSpot(world: World): { x: number; y: number } | null {
+  return findDungeonSpots(world, 1)[0] ?? null;
+}
+
+/** 收集最多 max 个候选落脚点（生成流变动会平移地牢形态——单点可能落在
+ *  spawner 采样环恒不命中的位置，多候选兜底） */
+// 地牢砖 tile(原版 41 蓝/43 绿/44 粉)
+const DBLUE = TILE_BY_KEY['v_41_blue_brick'] ?? -1;
+const DGREEN = TILE_BY_KEY['v_43_green_brick'] ?? -1;
+const DPINK = TILE_BY_KEY['v_44_pink_brick'] ?? -1;
+
+function findDungeonSpots(world: World, max: number): Array<{ x: number; y: number }> {
+  const out: Array<{ x: number; y: number }> = [];
   const st = world.store;
-  const dY = world.dungeonY || Math.floor(world.groundLevel);
   const isDW = (w: number) => w === 7 || w === 8 || w === 9 || (w >= 94 && w <= 99);
   const y1 = Math.min(st.h - 10, Math.floor(world.rockLevel) + 100);
-  for (let y = Math.max(10, Math.floor(world.groundLevel) + 1); y < y1; y++) {
-    for (let x = 100; x < st.w - 100; x++) {
+  for (let y = Math.max(10, Math.floor(world.groundLevel) + 1); y < y1 && out.length < max; y++) {
+    for (let x = 100; x < st.w - 100 && out.length < max; x++) {
       const i = st.idx(x, y);
       if (!isDW(st.wall[i])) continue;
       const t = st.type[i];
-      if (t !== T.DUNGEON_BLUE && t !== T.DUNGEON_GREEN && t !== T.DUNGEON_PINK) continue; // 地牢砖地面
+      if (t !== DBLUE && t !== DGREEN && t !== DPINK) continue; // 地牢砖地面
       if (!st.isSolid(x, y)) continue;
       if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2) || st.isSolid(x, y - 3)) continue;
       if (st.liquid[st.idx(x, y - 1)] > 40 || st.liquid[st.idx(x, y - 2)] > 40) continue; // 干燥点
-      return { x, y };
+      out.push({ x, y });
     }
   }
-  return null;
+  return out;
 }
 
 describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
   it('未杀骷髅王 → 地牢守卫；杀过 → 常规怪池', async () => {
     const world = await makeWorld();
-    const spot = findDungeonSpot(world);
-    expect(spot).not.toBeNull();
-    const playerX = (spot!.x + 0.5) * 16;
-    const playerY = (spot!.y - 3) * 16;
+    const spots = findDungeonSpots(world, 12);
+    expect(spots.length).toBeGreaterThan(0);
     const spawner = new VanillaSpawner(world);
 
-    // 未杀骷髅王：期望全部为守卫 68（flag12 分支）
+    // 未杀骷髅王：期望全部为守卫 68（flag12 分支）——多点采样直到出怪
     spawner.setPlayerFlags(true, false);
     const guardianIds = new Set<number>();
-    for (let k = 0; k < 4000; k++) {
-      const e = spawner.spawn(playerX, playerY, new RNG(k * 7919 + 13), 60, 35);
-      if (e) guardianIds.add(e.vanillaId ?? -1);
+    let activeSpot = spots[0];
+    for (const spot of spots) {
+      guardianIds.clear();
+      const playerX = (spot.x + 0.5) * 16;
+      const playerY = (spot.y - 3) * 16;
+      for (let k = 0; k < 800; k++) {
+        const e = spawner.spawn(playerX, playerY, new RNG(k * 7919 + 13), 30, 18);
+        if (e) guardianIds.add(e.vanillaId ?? -1);
+      }
+      if (guardianIds.size > 0) { activeSpot = spot; break; }
     }
-    console.log('未杀骷髅王出怪:', [...guardianIds]);
+    console.log('未杀骷髅王出怪:', [...guardianIds], 'at', activeSpot);
     expect(guardianIds.size).toBeGreaterThan(0);
     // 63=蓝水母：SpawnAnNPC 水域分支(L1839)在地牢分支(L2536)之前——生成点采样环
     // 内有水格时出水母是原版顺序的正确行为（地牢连水洞属正常世界形态）；
@@ -65,8 +82,10 @@ describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
     spawner.setPlayerFlags(true, true);
     const pool = new Set<number>();
     let spawned = 0;
+    const playerX = (activeSpot.x + 0.5) * 16;
+    const playerY = (activeSpot.y - 3) * 16;
     for (let k = 0; k < 1500; k++) {
-      const e = spawner.spawn(playerX, playerY, new RNG(k * 104729 + 7), 60, 35);
+      const e = spawner.spawn(playerX, playerY, new RNG(k * 104729 + 7), 30, 18);
       if (e) { spawned++; pool.add(e.vanillaId ?? -1); }
     }
     console.log('杀过骷髅王出怪:', [...pool], '共', spawned);

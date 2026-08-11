@@ -105,6 +105,11 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
     if (!walking) return 0;
     return Math.floor((e.walkCycleT * 1.1) / 6) % 4;
   }
+  // 黄蜂族（FindFrame case 42，cs:75607-75633）：counter 每 tick+1，2 tick 一换，
+  // 序列 0→1→2→1→回卷（8 tick 一循环）——翅膀对称拍动
+  if (id === 42 || (id >= 231 && id <= 235)) {
+    return [0, 1, 2, 1][Math.floor(t / 2) % 4];
+  }
   // 蝙蝠族（L75585）：每 6 tick 推进，全循环（部分类型不含末帧）
   if (ai === 14) {
     const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
@@ -873,7 +878,16 @@ export class Renderer {
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
-        else if (e.vanilla?.aiStyle === 5) ctx.rotate(e.visAngle); // AI_005 蜂群族:cs:51022 朝速度方向转头
+        else if (e.vanilla?.aiStyle === 5) {
+          // AI_005 旋转按族分流（cs:51045-51054 + FindFrame 蜜蜂覆盖 L75553）：
+          // 黄蜂 42/231-235、孢子蝠 176、205 仅倾斜 vx*0.1（不随飞行方向转头）；
+          // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
+          // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
+          const id5 = e.vanillaId;
+          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235)) ctx.rotate(e.vx * 0.1);
+          else if (id5 === 210 || id5 === 211) ctx.rotate(e.vx * 0.2);
+          else ctx.rotate(e.visAngle);
+        }
         else if (e.vanilla?.aiStyle === 6) ctx.rotate(e.visAngle); // AI_006 蠕虫族:cs:51500 段随链方向旋转(贴图正面朝上,+π/2)
         else if (e.vanilla?.aiStyle === 40) ctx.rotate(e.visAngle); // AI_040 爬墙蜘蛛:npc.rotation 随移动/期望速度角(cs:29865/29919),531 +π/2
         else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)

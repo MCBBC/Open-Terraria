@@ -170,9 +170,39 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
 /** AI_015 史莱姆王(NPC.cs SetDefaults case 50 / AI_015):大跳朝玩家 + 受击攒怒 +
  *  落地砸出小史莱姆(30% 概率)。经典模式无传送(专家专属),暂不移植传送。 */
 export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!player) return;
   // Enemy.ai0 默认 -1120(史莱姆族约定);原版 AI_015 的 ai[0] 从 0 起步 → 首帧复位
-  if (!e.bInit) { e.bInit = true; e.ai0 = 0; }
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
+  // 玩家死/远距 3000px(:43466-43485)：TargetClosest 二次判定后仍失败 →
+  // EncourageDespawn(10) + 背对 + ai[1]=5 缩身离场（anti-cheese 传送回归）
+  const ksd = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : Infinity;
+  if (!player || ksd > 3000) {
+    e.encourageDespawn(10);
+    if (player) e.facing = player.cx < e.cx ? 1 : -1; // 转身背对(:43479-43485)
+    if (e.ai1 !== 5 && e.ai1 !== 6) { e.ai1 = 5; e.ai3 = 0; }
+  }
+  if (e.ai1 === 5) {
+    // 离场态(:43537-43575)：缩身 60 tick 后传送到世界右下角，转 6 号淡入
+    e.ai3++;
+    e.squash = Math.max(0, 1 - e.ai3 / 60) * 0.6; // 缩身近似（scale 收缩）
+    e.vy += 0.3;
+    e.x += e.vx; e.y += e.vy;
+    if (e.ai3 >= 60) {
+      e.x = (game.world.w - 3) * 16;
+      e.y = (game.world.h - 3) * 16;
+      e.ai1 = 6; e.ai3 = 0;
+      e.squash = 0;
+      e.spawnAlpha = 255; e.alphaFade = true; // 淡入（6 号态）
+    }
+    return;
+  }
+  if (e.ai1 === 6) {
+    // 淡入回归（约 30 tick spawnAlpha 归零后回战斗）
+    e.ai3++;
+    e.ai0 = 0;
+    if (e.ai3 >= 30) { e.ai1 = 0; e.ai3 = 0; }
+    return;
+  }
+  if (!player) return;
   e.ai0 += 1;
   if (!e.onGround) {
     e.vy += 0.35; // 重力(原版大跳重力)
@@ -203,7 +233,24 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
  *  一阶段(爬行者存活时无敌:dontTakeDamage)脑体悬空不动,爬行者环绕玩家;
  *  爬行者全灭 → 二阶段:瞬移冲刺(3 点环绕) + 幻影(简化:冲刺时半透明)。 */
 export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!player) return;
+  // 玩家死/远离（:32557-32566/:32810-32822）：曼哈顿 >6000px 瞬消；
+  // 玩家死 → localAI[3] 计数 120，>60 后 vy+=(n-60)*0.25 越坠越快钻地逃离、ai[0]=2、alpha=10
+  // （原版还含 !ZoneCrimson 触发——跨群系判定未实现，仅 dead）
+  if (player && Math.abs(player.cx - e.cx) + Math.abs(player.cy - e.cy) > 6000) {
+    e.dead = true; e.bossFled = true;
+    return;
+  }
+  if (!player) {
+    e.encourageDespawn(750); // 原版无显式 EncourageDespawn，靠 CheckActive timeLeft(750) 收尾
+    e.ai3++;
+    if (e.ai3 > 60) {
+      e.vy += (e.ai3 - 60) * 0.25;
+      e.ai0 = 2;
+      e.spawnAlpha = Math.max(e.spawnAlpha, 245);
+    }
+    e.x += e.vx; e.y += e.vy;
+    return;
+  }
   const enemies = game.enemies() as unknown[];
   // 初次:补生成爬行者(原版 371-393 只)——必须先于爬行者计数,
   // 否则首 tick 爬行者为 0 直接落二阶段,永远不生成
@@ -296,7 +343,14 @@ export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: num
  *  三阶段:雷眼 激光 83→100(伤害×1.5 防+10),魔眼 火焰喷射 101(伤害×1.5 防+18)。 */
 export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: boolean) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
-  if (!player) { e.x += e.vx; e.y += e.vy; return; }
+  // 白天/玩家死:上飞离场(原版 :26585/:27208 vy-=0.04 + EncourageDespawn(10))——
+  // 玩家死亡派发为 null,一并进离场（此前 null 仅漂移不消散）
+  if (game.world.clock.isDay || !player || player.dead) {
+    e.vy -= 0.04;
+    e.encourageDespawn(10); // 离屏即消(Enemy 打 bossFled,Game 不播击败/不记账)
+    e.x += e.vx; e.y += e.vy;
+    return;
+  }
   // ---- 旋转瞄准(num427/num471:atan2(dy-59, 自-玩)+π/2,步进 0.1/0.15) ----
   let target = Math.atan2(e.y + e.h - 59 - (player.y + player.h / 2), e.cx - player.cx) + Math.PI / 2;
   if (target < 0) target += 6.283; else if (target > 6.283) target -= 6.283;
@@ -307,14 +361,6 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   if (Math.abs(rot - target) < step) rot = target;
   if (rot < 0) rot += 6.283; else if (rot > 6.283) rot -= 6.283;
   e.spin = rot;
-
-  // 白天/玩家死:上飞离场(原版 :26585/:27208 vy-=0.04 + EncourageDespawn(10))
-  if (game.world.clock.isDay || player.dead) {
-    e.vy -= 0.04;
-    e.encourageDespawn(10); // 离屏即消(Enemy 打 bossFled,Game 不播击败/不记账)
-    e.x += e.vx; e.y += e.vy;
-    return;
-  }
 
   // ---- 一阶段(ai0=0) ----
   if (e.ai0 === 0) {
@@ -576,7 +622,15 @@ export function primePartAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai2 !== 99) { if (distA > 800) e.ai2 = 99; }
   else if (distA < 400) e.ai2 = 0;
   if (head.ai1 === 3) { e.dead = true; return; } // 头离场:部件跟随消散
-  if (!player) { e.x += e.vx; e.y += e.vy; return; } // 玩家死亡:悬停不动(原版坠落的简化)
+  if (!player) {
+    // 玩家死亡且头非战斗态（ai[1]!=0）：下坠不再攻击（:28067-28074 vy+=0.1 上限 16）
+    if (head.ai1 !== 0) {
+      e.vy = Math.min(e.vy + 0.1, 16);
+      e.vx *= 0.95;
+    }
+    e.x += e.vx; e.y += e.vy;
+    return;
+  }
 
   const style = e.vanilla?.aiStyle ?? 33;
   const hoverBand = (yLow: number, yHigh: number, acc: number, max: number) => {

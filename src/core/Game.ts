@@ -2509,7 +2509,10 @@ export class Game implements GameHooks {
     // 可砍植物（Main.tileCut）：清格 + 拂草声（SoundID 6 = Grass.wav）。
     // 蘑菇类例外可采集（KillTile_GetItemDrops，WorldGen.cs:65041-65076）：
     //   tile 3 帧 144（蘑菇）→ item 5 / tile 24 帧 144（邪恶蘑菇）→ item 60
-    //   tile 201 帧 270（血腥蘑菇）→ item 2887——其余 plant 类无掉落
+    //   tile 201 帧 270（血腥蘑菇）→ item 2887
+    //   tile 71 发光蘑菇株 → case 71/72（WorldGen.cs:65697-65707）：
+    //     1/40 蘑菇草种子(194) / 否则 1/2 发光蘑菇(183) / 否则无掉落
+    //   ——其余 plant 类无掉落
     if (type !== POT_TILE && TILE_CUT.has(type)) {
       // ★ 帧必须在清格前捕获：setTile(0) 会把 frameX/frameY 归零，
       //   曾在清格后读帧 → fx 恒 0，蘑菇（帧 144）永远判不中 → 不掉落
@@ -2518,11 +2521,16 @@ export class Game implements GameHooks {
       st.setTile(x, y, 0);
       this.sfx.play('chop', 1, x * TILE + 8, y * TILE + 8);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 5, 1.4);
+      // 原版 Main.rand：Next(40)==0 → 种子；否则 Next(2)==0 → 发光蘑菇
+      const roll = sheet === 71 ? new RNG((Math.random() * 1e9) | 0) : null;
       const mushroomDrop =
         sheet === 3 && fx === 144 ? 'mushroom_item'
           : sheet === 24 && fx === 144 ? VANILLA_ITEM_KEY_BY_ID[60]
             : sheet === 201 && fx === 270 ? VANILLA_ITEM_KEY_BY_ID[2887]
-              : null;
+              : sheet === 71 && roll
+                ? (roll.nextInt(40) === 0 ? 'mushroom_grass_seeds'
+                  : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null)
+                : null;
       if (mushroomDrop && ITEM_BY_KEY[mushroomDrop] !== undefined) {
         this.spawnDrop(x * TILE + 8, y * TILE + 8, mushroomDrop, 1);
       }

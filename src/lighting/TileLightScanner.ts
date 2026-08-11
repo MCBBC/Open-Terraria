@@ -6,7 +6,7 @@ import { TILE_DEFS } from '../data/tiles';
 import { lightIsOn } from '../world/wiring/devices';
 import { TileStore } from '../world/TileStore';
 import { FastRandom } from './FastRandom';
-import { CRACKED_SHEETS, FLICKER_SHEETS, TORCH_COLORS, WALL_EMISSIVE, WALL_LIGHT } from './lightTables';
+import { CRACKED_SHEETS, FLICKER_SHEETS, MUSHROOM_GLOW_SHEETS, TORCH_COLORS, WALL_EMISSIVE, WALL_LIGHT } from './lightTables';
 import { FlickerClock, skySeed } from './SkyColor';
 import { LightMap, Mask } from './LightMap';
 
@@ -169,6 +169,12 @@ export class TileLightScanner {
                 // 蜡烛/篝火族闪烁(:1034-1036:localRand.Next(28,42)*0.005+(270-mouseTextColor)/700)
                 const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
                 er += f; eg += f; eb += f;
+              } else if (MUSHROOM_GLOW_SHEETS.has(sheet) && !(sheet === 349 && st.frameX[i] < 36)) {
+                // 蘑菇组发光（TileLightScanner.cs:2938-2960 case 70/71/72/190/348/349/528/578）：
+                //   R=0、B=1，G=0.2+num11/2；num11=Next(28,42)*0.005+(270-mouseTextColor)/1000
+                //   ——只抬 G（与 FLICKER_SHEETS 的三通道叠加不同），349 蘑菇雕像 frameX<36 不发光
+                const num11 = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 1000;
+                er = 0; eg = 0.2 + num11 / 2; eb = 1;
               } else {
                 er = d.light[0] / 255; eg = d.light[1] / 255; eb = d.light[2] / 255;
                 if (FLICKER_SHEETS.has(sheet)) {

@@ -939,7 +939,10 @@ export const ITEM_INTERNAL_OF_STABLE = new Map<number, number>();
 for (let i = 0; i < ITEM_DEFS.length; i++) {
   const k = ITEM_DEFS[i].key;
   const vm = /^vi_(\d+)_/.exec(k);
-  const s = vm ? Number(vm[1]) : PRIV_ITEM_STABLE[k];
+  // place_v_N_* 未在 PRIV 表登记时按 sheet 派生 20000+N(确定性,与表内显式号不冲突:
+  // 表尾已到 10500,20000+ 区段独占)——新注册 tile 的放置物不再逐个补表
+  const pm = !vm ? /^place_v_(\d+)_/.exec(k) : null;
+  const s = vm ? Number(vm[1]) : PRIV_ITEM_STABLE[k] ?? (pm ? 20000 + Number(pm[1]) : undefined);
   if (s === undefined) { console.error(`[stable-id] item 缺稳定 id: ${k}`); continue; }
   ITEM_STABLE_OF_INTERNAL[i] = s;
   if (!ITEM_INTERNAL_OF_STABLE.has(s)) ITEM_INTERNAL_OF_STABLE.set(s, i);

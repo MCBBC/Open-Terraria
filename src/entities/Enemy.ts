@@ -92,6 +92,15 @@ export class Enemy extends Entity {
 
   /** AI_006 头部（L18645 通用常数 maxSpd=8 accel=0.07；穿墙直行；段链跟随） */
   private wormAI(game: GameHooks, player: Player | null) {
+    // 玩家死亡（:51532-51539）：TargetClosest 落空 → EncourageDespawn(300) 缓慢消散
+    // （EoW flag=false 不加速下钻——靠 despawn 系统离屏倒数收尾）
+    if (!player) {
+      this.encourageDespawn(300);
+      this.vx *= 0.97; this.vy *= 0.97;
+      this.x += this.vx; this.y += this.vy;
+      this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI * 0.5;
+      return;
+    }
     const maxSpd = 8, accel = 0.07;
     // 朝向：有玩家朝玩家，无玩家缓慢巡游
     let dx: number, dy: number;
@@ -466,8 +475,11 @@ export class Enemy extends Entity {
     if (this.vanillaId === 488) {
       // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）
     } else if (!this.def.boss || this.despawnEncouraged) {
-      const dxp = player ? Math.abs(player.cx - this.cx) : Infinity;
-      const dyp = player ? Math.abs(player.cy - this.cy) : Infinity;
+      // 屏内判定跳过死亡玩家（原版 CheckActive 只用 active 玩家重置 timeLeft：
+      // 尸体位置不算"屏内"——此前死亡玩家照常重置，Boss 鼓励消散全部失效）
+      const pp = player && !player.dead ? player : null;
+      const dxp = pp ? Math.abs(pp.cx - this.cx) : Infinity;
+      const dyp = pp ? Math.abs(pp.cy - this.cy) : Infinity;
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
       if (dxp < TILE * 62 && dyp < TILE * 35) {
         this.despawnTimer = 750;
@@ -2972,15 +2984,16 @@ export class Enemy extends Entity {
     const dx = player.cx - this.cx, dy = player.cy - this.cy;
     const dist = Math.hypot(dx, dy) || 1;
 
-    // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(cs:20020-20025) ----
+    // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（cs:20020-20025） ----
     if (game.world.clock.isDay || player.dead) {
       this.vy -= 0.04;
+      this.encourageDespawn(10);
       this.applyEocRotation(Math.atan2(dy, dx) - Math.PI * 0.5, 0.02);
       this.x += this.vx; this.y += this.vy;
       // 原版此处 return 在状态机之前:ai[2](本作 aiT)不推进 = 冲刺/悬浮计时冻结,
       // 复活后从冻结处继续(fixedUpdate 头部的 aiT++ 在此抵消)
       this.aiT--;
-      if (dist > T * 120) this.dead = true;   // 漂远后消失(原版按距玩家 40~80 格剔除)
+      if (dist > T * 120) this.dead = true;   // 漂远后兜底消失
       return;
     }
 

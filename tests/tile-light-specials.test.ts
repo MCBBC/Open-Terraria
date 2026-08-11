@@ -1,6 +1,9 @@
 import { describe, it, expect } from 'vitest';
-import { specialTileLight } from '../src/lighting/TileLightScanner';
+import { specialTileLight, TileLightScanner, type ScannerWorld } from '../src/lighting/TileLightScanner';
 import { FlickerClock } from '../src/lighting/SkyColor';
+import { LightMap } from '../src/lighting/LightMap';
+import { TileStore } from '../src/world/TileStore';
+import { TILE_BY_KEY } from '../src/data/tiles';
 
 // 动态发光特例（原版 ApplyTileLight 帧条件/动态色 case 1:1）
 describe('tile 动态发光特例（specialTileLight）', () => {
@@ -36,5 +39,52 @@ describe('tile 动态发光特例（specialTileLight）', () => {
     expect(s6[2]).toBeCloseTo(0.08, 5);                          // style6 颤骨草淡蓝
     const s2 = specialTileLight(84, 18 * 2, 0, f)!;              // style2 死亡草随闪烁
     expect(s2[0]).toBeGreaterThan(0);
+  });
+});
+
+// 蘑菇组发光（TileLightScanner.cs:2938-2960 case 70/71/72/190/348/349/528/578）：
+// R=0、B=1、G=0.2+num11/2（只抬 G，num11∈[0.14,0.21]+(270-mouseTextColor)/1000）
+describe('蘑菇组发光（exportTo 种子光）', () => {
+  const flicker = new FlickerClock();
+
+  /** 在 (x,y) 放一个 sheet 的 tile，扫描后取该格种子色（不经 Blur） */
+  const glowAt = (key: string, frameX = 0): [number, number, number] => {
+    const st = new TileStore(3, 3);
+    const id = TILE_BY_KEY[key]!;
+    st.setTile(1, 1, id);
+    st.frameX[st.idx(1, 1)] = frameX;
+    const world: ScannerWorld = {
+      store: st,
+      groundLevel: -1, lavaLine: st.h + 1,   // 不触发天空/地狱光
+      get clock() { return { timeOfDay: 0.5, dayCount: 1 } as never; },
+    };
+    const map = new LightMap();
+    map.setSize(3, 3);
+    new TileLightScanner(flicker).exportTo(world, map, 0, 0, []);
+    const i = 1 * 3 + 1;
+    return [map.r[i], map.g[i], map.b[i]];
+  };
+
+  for (const key of [
+    'v_70_mushroom_grass_block', 'v_71_mushroom_plant', 'v_72_mushroom_tree',
+    'v_190_glowing_mushroom_block', 'v_348_shroomite_plating',
+    'v_528_mushroom_vines', 'v_578_mushroom_beam',
+  ]) {
+    it(`${key}：R=0、B=1、G∈[0.2,0.45] 呼吸蓝光`, () => {
+      const [r, g, b] = glowAt(key);
+      expect(r).toBe(0);
+      expect(b).toBe(1);
+      // G = 0.2 + num11/2，num11 ≥ 0.14 → G ≥ 0.27；上界留余量（mouseTextColor 项）
+      expect(g).toBeGreaterThanOrEqual(0.27);
+      expect(g).toBeLessThanOrEqual(0.45);
+    });
+  }
+
+  it('蘑菇雕像 349：frameX<36（style 0）不发光，≥36 发光', () => {
+    const off = glowAt('v_349_mushroom_statue', 0);
+    expect(off).toEqual([0, 0, 0]);
+    const on = glowAt('v_349_mushroom_statue', 36);
+    expect(on[2]).toBe(1);
+    expect(on[1]).toBeGreaterThanOrEqual(0.27);
   });
 });

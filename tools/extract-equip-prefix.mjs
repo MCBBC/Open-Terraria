@@ -177,7 +177,7 @@ const ACC_PATTERNS = [
   ['dashType', /dashType = (\d);/],               // 1=忍者足具/水晶刺客 2=忍者大师装备
   ['blackBelt', /blackBelt = true;/],             // 10% 闪避（Black Belt :9772）
   ['bees', /honeyCombItem = (?:currentItem|armorPiece);/], // 蜂蜜斗篷/蜂巢背带：受击放蜂
-  ['spikedBoots', /spikedBoots \+= (\d);/],       // 冰刀（攀冰，暂存）
+  ['spikedBoots', /spikedBoots (?:\+=|=) (\d);/], // 攀壁钉鞋（忍者大师装备 = 2 / 冰刀族 += 2）
   // ---- 五轮（残余全量）----
   ['flipper', /accFlipper = true;/],              // 脚蹼：游泳提速
   ['jumpSpd', /jumpSpeedBoost \+= ([\d.]+)f;/],   // 跳跃速度提升（蛙腿族）

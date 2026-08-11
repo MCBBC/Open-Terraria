@@ -31,8 +31,8 @@ const STONE_PLACED = idsByVanillaSheet(63, 64, 65, 66, 67, 68, 130, 131, 566);
 export const NOT_CLEARABLE = idsByVanillaSheet(396, 400, 401, 397, 398, 399, 404, 368, 367, 226, 237,
   135, 136, 137, 141, 443,   // 电路器件（压板/开关/陷阱/炸药/喷泉）：矿石 runner 不可覆盖
   41, 43, 44);              // 地牢砖（原版顺序中矿石先于地牢，此处防反向覆盖）
-// 原版 switch case 45/147/189/190/196/460:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云)
-const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460);
+// 原版 switch case 45/147/189/190/196/460/717/718/719:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云+1.4.5新增)
+const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460, 717, 718, 719);
 // TileID.Sets.Ore:铺设 396/397 时矿石可覆盖
 const ORE_SET = new Set<number>();
 {
@@ -73,6 +73,10 @@ export function tileRunner(
   if ((o.speedX ?? 0) !== 0 || (o.speedY ?? 0) !== 0) {
     vx = o.speedX ?? 0; vy = o.speedY ?? 0;
   }
+  // 原版 num3 液体类型掷骰（1456 cs:77163-77176）：notTheBees&&dontStarve 分支
+  // 普通世界短路不掷；else if (Next(4)==0) 的 Next(4) **每次调用必掷**（普通世界
+  // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
+  rng.nextIntRange(0, 4);
 
   while (num1 > 0 && num2 > 0) {
     // 泥向上钻出世界顶即停(原版)
@@ -85,19 +89,26 @@ export function tileRunner(
     const y1 = Math.min(st.h - 1, Math.floor(py + num1 * 0.5));
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
-        if (ignoreTileType >= 0 && st.type[st.idx(x, y)] === ignoreTileType && st.flags[st.idx(x, y)]) continue;
+        // 原版活性 framed 物件跳过（cs:77217-77220，在 dist 掷骰**之前**短路——
+        // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
+        // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
+        // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
+        const ci0 = st.idx(x, y);
+        const cdef = TILE_DEFS[st.type[ci0]];
+        if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
+        if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
         const ti = st.idx(x, y);
-        // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让邻墙)
+        // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻)
         if (o.mudWall && y > gs.worldSurface && st.wall[st.idx(x, y - 1)] !== 2
           && y < st.h - 210 - rng.int(0, 2)
           && dist < strength * 0.45 * (1 + rng.int(-10, 10) * 0.01)) {
           if (y > gs.lavaLine - rng.int(0, 3) - 50) {
             if (st.wall[st.idx(x, y - 1)] !== 64 && st.wall[st.idx(x, y + 1)] !== 64
-              && st.wall[st.idx(x - 1, y)] !== 64) st.wall[ti] = 15;
+              && st.wall[st.idx(x - 1, y)] !== 64 && st.wall[st.idx(x + 1, y)] !== 64) st.wall[ti] = 15;
           } else if (st.wall[st.idx(x, y - 1)] !== 15 && st.wall[st.idx(x, y + 1)] !== 15
-            && st.wall[st.idx(x - 1, y)] !== 15) {
+            && st.wall[st.idx(x - 1, y)] !== 15 && st.wall[st.idx(x + 1, y)] !== 15) {
             st.wall[ti] = 64;
           }
         }
@@ -108,8 +119,8 @@ export function tileRunner(
           }
         }
         if (type < 0) {
-          // 挖空:沙不挖(原版 53 保护);-2 在活性块上填液体
-          if (st.type[ti] === T.SAND) continue;
+          // 挖空:仅活性沙不挖(原版 active&&type==53 保护);-2 在活性块上填液体
+          if (st.flags[ti] && st.type[ti] === T.SAND) continue;
           if (type === -2 && st.flags[ti] && (y < gs.waterLine || y > gs.lavaLine)) {
             st.liquid[ti] = 255;
             st.liquidType[ti] = y > gs.lavaLine ? 2 : 1;
@@ -117,30 +128,33 @@ export function tileRunner(
           st.type[ti] = 0;
           st.flags[ti] = 0;
         } else {
-          // 铺设:原版 flag3 规则(WorldGen.cs:46509-46555)
-          if (overRide || !st.flags[ti]) {
-            const cur = st.type[ti];
-            // Main.tileStone[type](放置类型是宝石族)且目标非石头 → flag3
-            let flag3 = STONE_PLACED.has(type) && cur !== T.STONE;
-            // CanBeClearedDuringGeneration:11 种不可清 tile 被覆盖时恒 flag3
-            if (NOT_CLEARABLE.has(cur)) flag3 = true;
+          // 铺设:原版 flag4 规则（1456 cs:77277-77330）。结构语义：
+          // overRide 仅门禁"保护计算"，**不门禁写入**——!flag4 一律写 type
+          //（overRide=false 时 flag4 恒 false，活性块照写）
+          let flag4 = false;
+          const cur = st.type[ti];
+          if (overRide && st.flags[ti]) {
+            // Main.tileStone[type](放置类型是宝石族)且目标非石头 → flag4
+            flag4 = STONE_PLACED.has(type) && cur !== T.STONE;
+            // CanBeClearedDuringGeneration:false 的 tile 被覆盖时恒 flag4
+            if (NOT_CLEARABLE.has(cur)) flag4 = true;
             if (cur === T.STONE) {
               // 泥不替换近地表的石头(±50 抖动)
-              if (type === MUD && y < gs.worldSurface + rng.int(-50, 49)) flag3 = true;
+              if (type === MUD && y < gs.worldSurface + rng.int(-50, 49)) flag4 = true;
             } else if (FLAG3_ALWAYS.has(cur)) {
-              // 金砖/雪/云/荧光菇/雨云/雪云:无条件保护
-              flag3 = true;
+              // 金砖/雪/云/荧光菇/雨云/雪云/717-719:无条件保护
+              flag4 = true;
             } else if (cur === T.SAND) {
-              if (type === MUD && inUndergroundDesert(gs, x, y)) flag3 = true;
-              if (type === CLAY) flag3 = true;  // 原版:沙上不可铺粘土
-              if (y < gs.worldSurface && type !== MUD) flag3 = true;
+              if (type === MUD && inUndergroundDesert(gs, x, y)) flag4 = true;
+              if (type === CLAY) flag4 = true;  // 原版 case 53: type==40(ClayBlock)
+              if (y < gs.worldSurface && type !== MUD) flag4 = true;
             } else if (cur === MARBLE || cur === GRANITE) {
-              if (type === MUD) flag3 = true;
+              if (type === MUD) flag4 = true;
             } else if (cur === SANDSTONE || cur === HARDSAND) {
-              if (!ORE_SET.has(type)) flag3 = true;
+              if (!ORE_SET.has(type)) flag4 = true;
             }
-            if (!flag3) st.type[ti] = type;
           }
+          if (!flag4) st.type[ti] = type;
           if (addTile) {
             st.flags[ti] = 1;
             st.liquid[ti] = 0;

@@ -156,6 +156,7 @@ import { runCaveHousesPass } from './vanilla/CaveHousePass';
 import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCavesPass';
 import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
+import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from './vanilla/MissingCavesPass';
 import { settleWorldLiquids } from '../liquid/settle';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
@@ -361,9 +362,17 @@ function vanillaShinies({ store, rng }: GenCtx) {
 function vanillaCaves({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runOceanSandPass(store, rng, gs); // 原版 pass 3(顺序上先于泥石/洞穴)
-  if (gs) runMountCavesPass(store, rng, gs); // 原版 pass 7 Mount Caves(山丘本体)
+  // 原版注册序（1456）：OceanSand(11603) → SandPatches(11712) → Tunnels(11743) →
+  // MountainCaves(11809) → DirtWallBackgrounds(11883) → RocksInDirt/DirtInRocks/Clay
+  // → SmallHoles(12034) → DirtLayer/RockLayer/Surface Caves（WavyCaves 12301 仅
+  // 饥荒世界，普通世界零掷骰跳过）
+  runOceanSandPass(store, rng, gs);
+  runSandPatchesPass(store, rng, gs);   // 地下沙团（沙漠雏形）
+  runTunnelsPass(store, rng, gs);       // 地表隧道（dirt runner 双向填充）
+  runMountCavesPass(store, rng, gs);    // 山丘本体
+  runDirtWallBgPass(store, rng, gs);    // 地表自然墙（wall 2/40）
   runRocksAndClayPass(store, rng, gs);
+  runSmallHolesPass(store, rng, gs);    // 小空洞（每轮 2 发挖除 runner）
   runCavesPass(store, rng, gs);
 }
 
