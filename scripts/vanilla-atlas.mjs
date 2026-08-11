@@ -41,8 +41,9 @@ const MISC = [
   ...Array.from({ length: 7 }, (_, i) => `Tiles_5_${i}.png`),
   // 仙人掌生物群系变体（腐化/神圣/猩红，与 Tiles_80 同 18px 网格）
   'Evil_Cactus.png', 'Good_Cactus.png', 'Crimson_Cactus.png',
-  // 液体贴图（TEdit GetLiquid：0 水 / 1 岩浆 / 11 蜂蜜 / 14 微光）
-  'Liquid_0.png', 'Liquid_1.png', 'Liquid_11.png', 'Liquid_14.png',
+  // 液体贴图（TEdit GetLiquid：0-13 群系水色 + 1 岩浆 11 蜂蜜 14 微光）
+  ...Array.from({ length: 14 }, (_, i) => `Liquid_${i}.png`),
+  'Liquid_14.png',
   // 1.4 原版液体主表（LiquidRenderer：0-10/12/13 群系水色 CalculateWaterStyle + 1 岩浆 11 蜂蜜 14 微光，48×1360）
   ...Array.from({ length: 11 }, (_, i) => `Misc/water_${i}.png`),
   'Misc/water_12.png', 'Misc/water_13.png', 'Misc/water_14.png',

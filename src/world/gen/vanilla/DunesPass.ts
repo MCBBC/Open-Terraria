@@ -176,10 +176,12 @@ function placeCurvedLine(
     const centerX = d.area.left + Math.trunc(d.area.width / 2);
     const n3 = Math.trunc(d.area.width / 2) - Math.abs(px - centerX);
     const surf = d.surface[Math.max(0, Math.min(d.surface.length - 1, px - d.surfaceX))];
-    // 原版 Math.Sqrt(负)=NaN → (int)NaN=int.MinValue → 填充循环不执行。
-    // JS 的 Math.sqrt(负)=NaN、trunc(NaN)=NaN、j<NaN=false——天然同语义，
-    // 不可钳 0（曾钳 0 → 沙丘外缘多铺一列沙）
-    const n4 = surf + Math.trunc(Math.sqrt(n3) * 3);
+    // 原版 Math.Sqrt(负)=NaN → (int)NaN。★平台语义：x86 cvttsd2si=0x80000000
+    //（int.MinValue→填充循环不执行）；ARM64 fcvtzs=0（会填一格）。金标 .wld 在本机
+    // 生成但游戏经 Rosetta x86 运行——实证 (2315,310) 无沙 = x86 语义。按 x86 复刻：
+    const castSq = n3 < 0 ? -2147483648 : Math.trunc(Math.sqrt(n3) * 3);
+    const n4 = surf + castSq;
+    if (px >= 2349 && px <= 2351) console.log(`JSW3 t=${t} rawY=${ay + (by - ay) * (t - step)} px=${px} py=${py}`);
     if (!st.inBounds(px, py)) continue;
     for (let i = py - 10; i < py; i++) {
       if (!st.inBounds(px, i)) continue;

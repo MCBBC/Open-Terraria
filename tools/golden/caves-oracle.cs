@@ -523,8 +523,11 @@ void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] su
         prevX = cx; prevY = cy;
         if (cx < 0 || cx >= W) continue;
         int num3 = width / 2 - Math.Abs(cx - centerX);
-        int num4 = surface[cx - (left - 20)] + (int)(Math.Sqrt(num3) * 3.0);
-        if (cx >= 2310 && cx <= 2325) Console.WriteLine($"CSW cx={cx} cy={cy} n3={num3} n4={num4} surf={surface[cx - (left - 20)]}");
+        // (int)NaN x86 语义（int.MinValue）——dotnet ARM64 原生给 0，须显式模拟（金标实证）
+        double sq = Math.Sqrt(num3) * 3.0;
+        int sqi = double.IsNaN(sq) ? int.MinValue : (int)sq;
+        int num4 = surface[cx - (left - 20)] + sqi;
+        if (cx >= 2349 && cx <= 2351) Console.WriteLine($"CSW3 t={t:R} rawY={ly + (ry - ly) * t:R} cx={cx} cy={cy}");
         for (int i2 = cy - 10; i2 < cy; i2++)
         {
             if (i2 < 0 || i2 >= H) continue;

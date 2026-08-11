@@ -19,9 +19,9 @@ it('sand profile', () => {
   }
   writeFileSync('/tmp/js-sand.txt', prof.join(','));
   const cs = readFileSync('/tmp/cs-sand.txt', 'utf8').split(',').map(Number);
-  let first = -1;
+  const bad: string[] = [];
   for (let i = 0; i < prof.length; i++) {
-    if (prof[i] !== cs[i]) { first = i; break; }
+    if (prof[i] !== cs[i] && bad.length < 10) bad.push(`x=${2300 + i}: js=${prof[i]} cs=${cs[i]}`);
   }
-  console.log('first diff col:', first >= 0 ? 2300 + first : 'NONE', first >= 0 ? `js=${prof[first]} cs=${cs[first]}` : '');
+  console.log(bad.length ? bad.join('  ') : 'ALL MATCH');
 });

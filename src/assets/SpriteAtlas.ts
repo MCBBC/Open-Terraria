@@ -58,7 +58,8 @@ export const VANILLA_MISC = [
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),
   'vanilla/Tiles_323.png', 'vanilla/Tiles_72.png',  // 棕榈/发光蘑菇树干(群系专属但极小,常驻防传送闪失)
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
-  'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
+  ...Array.from({ length: 14 }, (_, i) => `vanilla/Liquid_${i}.png`),
+  'vanilla/Liquid_14.png',
   ...Array.from({ length: 11 }, (_, i) => `vanilla/Misc_water_${i}.png`),
   'vanilla/Misc_water_12.png', 'vanilla/Misc_water_13.png', 'vanilla/Misc_water_14.png',
   'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',

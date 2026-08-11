@@ -321,7 +321,7 @@ export function drawVanillaLiquids(
   //   仅下方有水 → 格底 16×4 横条(:4089-4093)
   //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
-  if (isBackground) drawLiquidBehindTiles(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1);
+  if (isBackground) drawLiquidBehindTiles(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle);
 
   ctx.globalAlpha = 1;
 }
@@ -334,14 +334,15 @@ export function drawVanillaLiquids(
 function drawLiquidBehindTiles(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, groundLevel: number,
-  tx0: number, ty0: number, tx1: number, ty1: number,
+  tx0: number, ty0: number, tx1: number, ty1: number, waterStyle = 0,
 ): void {
   // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
   const texCache = new Map<number, HTMLImageElement | null>();
   const texFor = (vt: number) => {
     let t = texCache.get(vt);
     if (t === undefined) {
-      const file = vt === 1 ? 'vanilla/Liquid_1.png' : vt === 2 ? 'vanilla/Liquid_11.png' : 'vanilla/Liquid_0.png';
+      const file = vt === 1 ? 'vanilla/Liquid_1.png' : vt === 2 ? 'vanilla/Liquid_11.png'
+      : `vanilla/Liquid_${Math.max(0, Math.min(13, waterStyle))}.png`; // 群系水色(原版 DrawTile_LiquidBehindTile 同走 waterStyle)
       t = atlas.ensureVImage(file) ?? null;
       if (t) texCache.set(vt, t); // 只缓存命中(缓存 null 会把未就绪永久化——首帧丢条带)
     }

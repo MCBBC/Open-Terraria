@@ -5,9 +5,16 @@
 //  - Update() 单格流程：实心格/地狱蒸发/岩浆蜂蜜降速与交互/下灌/侧向均流/kill 维护（Liquid.cs:298-674）
 //  - LavaCheck/HoneyCheck：水+岩浆→黑曜石(56)、岩浆+蜂蜜→脆蜂蜜块(230)、水+蜂蜜→蜂蜜块(229)（Liquid.cs:888-1115）
 //  - QuickWater/SettleWaterAt 读档沉降搬运（Liquid.cs:85-212）+ WaterCheck 重建列表（WorldGen.cs:48955）
-// liquidType 编码沿用本仓库 store 约定：1=水 2=岩浆 3=蜂蜜（原版 0/1/2）。
+// liquidType 编码沿用本仓库 store 约定：1=水 2=岩浆 3=蜂蜜 4=微光（原版 0/1/2/3）。
+//  微光语义（1456 Liquid.cs，liquidType 4）：
+//  - 流动性与水完全一致（无岩浆/蜂蜜的 delay 降速），Update 分支 Liquid.cs:543-565
+//  - 交互表（GetLiquidMergeTypes Liquid.cs:1385-1453）：微光 + 水/岩浆/蜂蜜 任一 →
+//    Aetherium 块 659；岩浆/蜂蜜遇微光同样 → 659（shimmer 优先级最高，后写覆盖）
+//  - DelWater 尾部 shimmerCheck（Liquid.cs:1576-1579）、SettleWaterAt 落地
+//    AttemptToMoveShimmer（Liquid.cs:285/386-432）
+//  - 生成期 QuickWater 首尾 ShimmerRemoveWater（Liquid.cs:107/137 + WorldGen.cs:34859）：
+//    以太腔 150 半径内清除非微光液体，防沉降期水/岩浆灌入把微光转化成 Aetherium
 // 偏离原版处（无法直译的周边系统，均有注释标注）：
-//  - shimmer 微光液（liquidType 4/块 659）：世界未生成 Aether 液体，ShimmerCheck 空实现
 //  - tilesIgnoreWater 的 boulder/树 tile 动态固态（379/546/10 等）：无对应系统
 //  - PlaceTile 的音效/网络广播省略；tileObsidianKill 近似为 decor 清除
 //  - DelWater 尾部 CheckAlch/睡莲(518) 帧检查省略
@@ -22,6 +29,8 @@ interface LiquidEntry { x: number; y: number; kill: number; delay: number; }
 const OBSIDIAN = TILE_BY_KEY['obsidian'];
 const HONEY_BLOCK = TILE_BY_KEY['v_229_honey_block'];
 const CRISPY_HONEY = TILE_BY_KEY['v_230_crispy_honey_block'];
+const AETHERIUM = TILE_BY_KEY['v_659_aetherium_block'];
+const THIN_ICE = TILE_BY_KEY['thin_ice'];
 
 /** C# Math.Round = banker's rounding（.5 取偶；JS Math.round 是四舍五入）——1456 均
  *  分全程使用，直接换 Math.round 会在 x.5 时偏离 1 */
@@ -84,6 +93,12 @@ export class LiquidSim {
   private panicMode = false;
   private panicCounter = 0;
   private panicY = 0;
+  // ---- 微光（生成期 QuickWater 首尾 ShimmerRemoveWater 用，WorldGen.cs:34859）----
+  /** 原版 WorldGen.generatingWorld：仅世界生成期为 true（读档 isGeneratingOrLoading
+   *  但 generatingWorld=false，ShimmerRemoveWater 自身早退） */
+  generatingWorld = false;
+  /** 原版 GenVars.shimmerPosition：以太生物群系中心（无微光世界为 null） */
+  shimmerCenter: { x: number; y: number } | null = null;
 
   constructor(world: World) {
     this.world = world;
@@ -128,25 +143,26 @@ export class LiquidSim {
 
   private idx(x: number, y: number): number { return y * this.world.store.w + x; }
 
-  /** 格子是否阻挡液体（原版 nactive() && tileSolid && !tileSolidTop） */
+  /** 格子是否阻挡液体（原版 nactive() && tileSolid && !tileSolidTop）。
+   *  nactive() 要求 active 位——生成期 TileRunner 会在空气格写幽灵 type（flags=0），
+   *  无 active 的一律视为空气（否则微光池会被 waterCheck 当实心格清零泄流） */
   private blocksLiquid(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
-    const t = st.type[this.idx(x, y)];
-    if (t === 0) return false;
-    const d = TILE_DEFS[t];
+    const i = this.idx(x, y);
+    if (!st.flags[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
     return !!d && d.solid && !d.platform;
   }
 
   /** WorldGen.SolidTile 语义（WorldGen.cs:42370）：实心 && !平台 && !半砖 && !坡面。
-   *  仅 LavaCheck/HoneyCheck 入口使用——半砖格允许发生交互（Liquid.cs:898/1020） */
+   *  仅 LavaCheck/HoneyCheck/ShimmerCheck 入口使用——半砖格允许发生交互（Liquid.cs:898/1020） */
   private solidTileFull(x: number, y: number): boolean {
     const st = this.world.store;
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
-    const t = st.type[i];
-    if (t === 0) return false;
-    const d = TILE_DEFS[t];
+    if (!st.flags[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
     return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
   }
 
@@ -158,7 +174,7 @@ export class LiquidSim {
     const i = this.idx(x, y);
     if (this.checking[i] || st.liquid[i] === 0) return;
     const t = st.type[i];
-    if (t !== 0) {
+    if (t !== 0 && st.flags[i]) {
       const d = TILE_DEFS[t];
       if (d && d.solid && !d.platform) return;
     }
@@ -171,8 +187,9 @@ export class LiquidSim {
     this.skip[i] = 0;
     this.liquids[this.numLiquid] = { x, y, kill: 0, delay: 0 };
     this.numLiquid++;
-    // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）
-    if (t !== 0) {
+    // 1456 AddWater 尾部（L1196-1211）：岩浆/水冲毁可死亡方块（火把/植物等 KillTile）。
+    //  与 blocksLiquid 同理走 nactive（幽灵 type 不算实心）
+    if (t !== 0 && st.flags[i]) {
       const isLava = st.liquidType[i] === 2;
       const dies = isLava ? this.lavaDeathIds.has(t) : this.waterDeathIds.has(t);
       if (dies) this.killTile?.(x, y);
@@ -329,6 +346,20 @@ export class LiquidSim {
           if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
           const ni = this.idx(nx, ny);
           if (st.liquid[ni] > 0 && st.liquidType[ni] === 3) this.addWater(nx, ny);
+        }
+        if (myType === 4) {
+          // 微光格：自检交互（Liquid.cs:543-546 tile5.shimmer() → ShimmerCheck），
+          // 无降速 delay——流动性与水一致
+          this.shimmerCheck(x, y);
+        } else {
+          // 水格：唤醒微光邻居，让对方自己的 Update 处理交互（Liquid.cs:549-564）
+          for (let t = 0; t < 4; t++) {
+            const nx = x + (t === 0 ? -1 : t === 1 ? 1 : 0);
+            const ny = y + (t === 2 ? -1 : t === 3 ? 1 : 0);
+            if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+            const ni = this.idx(nx, ny);
+            if (st.liquid[ni] > 0 && st.liquidType[ni] === 4) this.addWater(nx, ny);
+          }
         }
       }
     }
