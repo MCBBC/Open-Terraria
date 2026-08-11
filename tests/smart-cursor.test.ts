@@ -7,7 +7,7 @@ import { TileStore } from '../src/world/TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
 import {
-  SmartCursor, hitLine, sheetOf,
+  SmartCursor, hitLine, sheetOf, smartCursorArrowAllowed,
   DEFAULT_SMART_CURSOR_SETTINGS, DISABLE_SMART_CURSOR_SHEETS,
   type SmartCursorEnv, type SmartCursorSettings,
 } from '../src/player/SmartCursor';
@@ -301,5 +301,21 @@ describe('sheet 桥', () => {
     expect(sheetOf(T.TREE)).toBe(5);
     expect(sheetOf(T.TORCH)).toBe(4);
     expect(sheetOf(T.PLATFORM)).toBe(19);
+  });
+});
+
+describe('方向箭头显示门（Main.cs:46058-46065）', () => {
+  it('锁向下一格：空格/可割植物 → 画箭头；实心块/家具 → 不画', () => {
+    const st = new TileStore(W, H);
+    st.setTile(110, 97, T.STONE);            // 锁向下一格是实心块
+    st.setTile(110, 100, TILE_BY_KEY['tallgrass']!); // 草丛：Main.tileCut 可割植物（decor）
+    // 空格 → true（!active()）
+    expect(smartCursorArrowAllowed(st, 105, 97, { x: 1, y: 0 })).toBe(true);
+    // 实心块 → false（PlaceThing_IsReplaceableBlock 不认）
+    expect(smartCursorArrowAllowed(st, 109, 97, { x: 1, y: 0 })).toBe(false);
+    // 可割植物 → true（tileCut 可替换口径）
+    expect(smartCursorArrowAllowed(st, 109, 100, { x: 1, y: 0 })).toBe(true);
+    // 越界锁向 → 按未激活处理 → true
+    expect(smartCursorArrowAllowed(st, 0, 80, { x: -1, y: 0 })).toBe(true);
   });
 });

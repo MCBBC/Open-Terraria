@@ -46,16 +46,16 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '7|7|7': { critRanged: 10, name: 'Bone' },
   // 巫师帽 14 + 长袍：魔法暴 +10
   '14|58|*': { critMagic: 10, name: 'Wizard' },
-  // 暗影 (5|74)（身体 5|48 腿 5|44）：shadowArmor（移速+近战速 engine 部分）——登记 dmg 近似
-  '5|5|5': { dmgMelee: 0.05, meleeSpd: 0.1, name: 'ShadowScale' },
-  '74|5|5': { dmgMelee: 0.05, meleeSpd: 0.1, name: 'ShadowScale' },
-  '5|48|44': { dmgMelee: 0.05, meleeSpd: 0.1, name: 'ShadowScale' },
-  '74|48|44': { dmgMelee: 0.05, meleeSpd: 0.1, name: 'ShadowScale' },
-  // 丛林 (76|8)：耗魔 -16%
+  // 暗影 (5|74)：C# 仅置 shadowArmor 旗标（:15842，行为型 engine）——数值不加虚构
+  // 丛林 (76|8)(49|45) 2×2×2=8 种组合全配（:15873-15877 manaCost-=0.16f）
   '8|8|8': { manaCostMul: 0.84, name: 'Jungle' },
   '76|8|8': { manaCostMul: 0.84, name: 'Jungle' },
   '76|49|45': { manaCostMul: 0.84, name: 'Jungle' },
   '8|49|45': { manaCostMul: 0.84, name: 'Jungle' },
+  '76|49|8': { manaCostMul: 0.84, name: 'Jungle' },
+  '76|8|45': { manaCostMul: 0.84, name: 'Jungle' },
+  '8|49|8': { manaCostMul: 0.84, name: 'Jungle' },
+  '8|8|45': { manaCostMul: 0.84, name: 'Jungle' },
   // 熔岩 9：近战伤 +10% + fireWalk
   '9|9|9': { dmgMelee: 0.1, fireWalk: true, name: 'Molten' },
   // 霜寒 46：近远程伤 +10%（frostBurn engine）

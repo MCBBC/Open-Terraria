@@ -23,6 +23,10 @@ import {
   mourningWoodAI, pumpkingAI, pumpkingBladeAI, iceQueenAI,
   santaNK1AI, elfCopterAI, flockoAI, snowmanAI, bouncingBallAI,
 } from './bossAI_moon_events';
+import {
+  martianProbeAI, martianSaucerAI, martianSaucerPartAI, martianDroneAI,
+  teslaTurretAI, bubbleShieldAI, angryNimbusAI, martianFighterExtras,
+} from './bossAI_martian';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -54,8 +58,9 @@ const STATUE_DROP_RARITY: Record<number, number> = {
 /** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
  *  EoC4/世吞13-15(头13 为 Boss,身14尾15 不标)/骷髅王35+手36/地牢守卫68/史莱姆王50/
  *  血肉墙113/双子125,126/骷髅Prime127/毁灭者134/蜂后222/石巨人245/世纪之花262/克脑266/
- *  猪鲨370/月总核心398/异教徒439/光皇636/史莱姆皇后657 */
-const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 398, 439, 636, 657]);
+ *  猪鲨370/火星飞碟395(SetDefaults boss=true,:13993)/月总核心398/异教徒439/光皇636/
+ *  史莱姆皇后657 */
+const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657]);
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -69,6 +74,9 @@ const FIGHTER_DAY_ACTIVE = new Set([
   // 入侵怪（原版昼行：入侵期间不被驱散——哥布林 26-29/111/471、海盗 212-216、雪人 143-145）
   26, 27, 28, 29, 111, 471, 212, 213, 214, 215, 216, 143, 144, 145,
 ]);
+// 火星入侵昼行豁免（cs:60705 第四组 invasionType!=4 门）：入侵进行中这些战士族
+// 不被白天驱散（387 特斯拉炮塔是 aiStyle 73 无此逻辑,不列）
+const MARTIAN_DAY_ACTIVE = new Set([381, 382, 383, 385, 386, 389, 391, 520]);
 // AI_002 飘浮眼昼散表（DespawnEncouragement_AIStyle2_FloatingEye_IsDiscouraged, cs:53152-53165）：
 // 白天 && y≤worldSurface → EncourageDespawn(10) + 保持水平方向向上飞离
 const EYE_DAY_DESPAWN = new Set([2, 133, 190, 191, 192, 193, 194, 317, 318]);
@@ -240,7 +248,7 @@ export class Enemy extends Entity {
   onFireDoT = 0;
   /** 武器浸剂 debuff（R2，近战命中施加；单位=秒）
    *  DoT 对应 NPC.cs UpdateNPC_BuffApplyDOTs（lifeRegen/2 = HP/s）：
-   *  poison 20→6HP/s、venom 70→30HP/s、cursed(39)→24HP/s */
+   *  poison lifeRegen-12→6HP/s(:92590)、venom -60→30(:92706)、cursed(onFire2) -48→24(:92690) */
   poisonT = 0;
   venomT = 0;
   cursedT = 0;
@@ -353,7 +361,11 @@ export class Enemy extends Entity {
         case 92: this.dummyAI(game); break;                            // AI_092 训练假人（NPC 488）
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
-        case 3: this.fighterAI(game, p); break;                        // AI_003 战士族（原版通用核）
+        case 3:
+          this.fighterAI(game, p);
+          // AI_003 火星尾段（bossAI_martian.ts）：军官 383 带盾无敌/补盾、工程师 386 放炮塔
+          if (this.vanillaId === 383 || this.vanillaId === 386) martianFighterExtras(this, game, p);
+          break;                                                        // AI_003 战士族（原版通用核）
         // EoC 传参例外:玩家死亡也要传原对象(cs:19931 dead 判定走逃离分支,
         // 冲刺计时合法冻结;传 null 会让 aiT 照走、状态机停摆 → 首冲时长翻倍)
         case 4: this.eocAI(game, (game as unknown as { player: Player }).player ?? null); break; // AI_004 克苏鲁之眼（NPC.cs:19909）
@@ -423,8 +435,8 @@ export class Enemy extends Entity {
         // 74 穿心者（悬浮俯冲）→ AI_002 飘浮眼核；75 日耀骑手 → AI_003 战士核；
         // 85 星细胞/星云头蟹、95 小星细胞、96 水流入侵者、99 日耀耀斑（漂浮追击族）→ AI_005 蜂群核；
         // 97 星云悬浮脑（瞬移+弹幕）→ AI_008 法师核。二期按各自 AI_0XX 1:1 补齐
-        case 74: this.floatEyeAI(game, p); break;
-        case 75: this.fighterAI(game, p); break;
+        // （74/75 已由火星批 bossAI_martian.ts 1:1 落位：388 无人机/418 Corite、
+        //   390 骑手/392-394 飞碟部件/416 日耀骑手——见下方火星族分发）
         case 85: case 95: case 96: case 99: this.swarmerAI(game, p); break;
         case 97: this.casterAI(game, p); break;
         // ---- 月事件（南瓜月/霜月）Boss 族 1:1（bossAI_moon_events.ts）----
@@ -437,6 +449,23 @@ export class Enemy extends Entity {
         case 63: flockoAI(this, game, p); break;                          // AI_063 弗洛科 352（cs:34208 追踪+旋冲）
         case 38: snowmanAI(this, game, p); break;                         // AI_038 雪人三兄弟 143/144/145（cs:29115 跳扑/停顿/雪球）
         case 9: bouncingBallAI(this, game, p); break;                     // AI_009 弹跳球族 25/30/33/112/516/665/666（cs:21349 直飞球）
+        // ---- 火星疯狂族 1:1（bossAI_martian.ts）----
+        case 80: martianProbeAI(this, game, p); break;                    // AI_080 火星探测器 399（cs:38129 逃逸→StartInvasion(4)）
+        case 76: martianSaucerAI(this, game, p); break;                   // AI_076 火星飞碟核心 395（cs:36322 600t 六窗口+部件生成）
+        case 72: bubbleShieldAI(this, game, p); break;                    // AI_072 泡泡盾 384（cs:35318 锚军官 383）
+        case 73: teslaTurretAI(this, game, p); break;                     // AI_073 特斯拉炮塔 387（cs:35340 部署渐显+180t 电击）
+        case 74:                                                          // AI_074 火星无人机 388/日耀 Corite 418（cs:35452 悬浮→扑咬→自爆）
+          if (this.vanillaId === 388 || this.vanillaId === 418) martianDroneAI(this, game, p);
+          else this.floatEyeAI(game, p);                                  // 其余（一期近似档保留）
+          break;
+        case 75:                                                          // AI_075 飞碟部件 392/393/394 + 骑手 390（cs:35745 锚主体+攻击窗）
+          if (this.vanillaId === 390 || this.vanillaId === 392
+            || this.vanillaId === 393 || this.vanillaId === 394
+            || this.vanillaId === 416 || this.vanillaId === 492) martianSaucerPartAI(this, game, p);
+          else this.fighterAI(game, p);                                   // 其余（一期近似档保留）
+          break;
+        case 48: golemHeadAI(this, game, p); break;                       // AI_048 自由石巨人头 249（cs:31500,golemHeadAI 已含自由态分支）
+        case 49: angryNimbusAI(this, game, p); break;                     // AI_049 愤怒云 250（cs:31742 悬顶淋雨 264）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -774,7 +803,10 @@ export class Enemy extends Entity {
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
     // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除
     const daySurface = game.world.clock.isDay && this.cy < game.world.groundLevel * TILE;
-    const discouraged = daySurface && this.vanillaId != null && !FIGHTER_DAY_ACTIVE.has(this.vanillaId);
+    const dayActive = this.vanillaId != null
+      && (FIGHTER_DAY_ACTIVE.has(this.vanillaId)
+        || (game.world.invasionType === 4 && MARTIAN_DAY_ACTIVE.has(this.vanillaId)));
+    const discouraged = daySurface && !dayActive;
     if (discouraged) {
       this.encourageDespawn(10);
       // 游荡转向（原版 else 分支 ：57783-57797：站定累计 2t 反转 direction）
@@ -1029,6 +1061,11 @@ export class Enemy extends Entity {
     };
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
     return true;
+  }
+
+  /** 外部 AI 文件的 Transform 入口（骑手 390 失坐骑 → 382,cs:36291） */
+  transformTo(id: number, st: GameHooks['world']['store']): boolean {
+    return this.tryTransformTo(id, st);
   }
 
   /** AI_040 爬墙蜘蛛族 1:1（NPC.cs:29784-30022）：无重力、贴背景墙表面爬行。
@@ -3622,9 +3659,12 @@ export class Enemy extends Entity {
     }
     // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1
     const def = this.def.defense ?? 0;
-    // ichor（灵液药剂，:92096）：armorPenetration += 15 → 防御 -15（下限 0）
-    const effDef = this.ichorT > 0 ? Math.max(0, def - 15) : def;
-    dmg = Math.max(1, Math.round(dmg - effDef * 0.5));
+    // ichor（灵液药剂）：NPC.checkArmorPenetration（NPC.cs:81913-81938）——
+    // armorPenetration += 15，结算 (armorPenetration/2) 整除 = +7 直伤；
+    // 超防钳制（def>2×dmg 时按 dmg 上限，防穿透把伤害推到全额以上）
+    const pen = this.ichorT > 0 ? 7 : 0;
+    const effDef = def > dmg * 2 ? dmg * 2 : def;
+    dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒

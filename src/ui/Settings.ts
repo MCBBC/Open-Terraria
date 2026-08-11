@@ -245,6 +245,9 @@ export class SettingsPanel {
     } else if (this.cat === 'game') {
       this.content.append(
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.DevMode'), () => d.devMode, (v) => void options.set('devMode', v)),
+        // 背景 开/关（Main.BackgroundEnabled Main.cs:790，原版视频设置项 Lang.menu[100/101]；
+        // 天气阴天渐变 cloudBGAlpha 的门，Game.updateWeather 注入 WeatherCtx.backgroundEnabled）
+        this.toggle(Lang.menu(100).replace(/[:：].*$/, ''), () => d.backgrounds, (v) => void options.set('backgrounds', v)),
         // 智能光标（原版 IngameOptions :1418 Smart Cursor 段）：模式 Toggle/Hold + 三开关
         this.modeRow(
           Lang.text('Mods.SandboxWorld.Settings.SmartCursorMode'),

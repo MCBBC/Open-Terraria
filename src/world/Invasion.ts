@@ -8,20 +8,25 @@ export const INVASION_NONE = 0;
 export const INVASION_GOBLIN = 1;
 export const INVASION_SNOW_LEGION = 2;
 export const INVASION_PIRATE = 3;
-// INVASION_MARTIAN = 4 —— 火星疯狂后续单独一期（探测器 399 + 飞碟 395）
+export const INVASION_MARTIAN = 4;
 
 /** NPC → 入侵组号表（NPC.GetNPCInvasionGroup, NPC.cs:79095-79180）。
- *  组 1=哥布林 2=雪人 3=海盗（含召唤物/部件：472 幻影/492 飞船炮/662 海盗幽灵） */
+ *  组 1=哥布林 2=雪人 3=海盗（含召唤物/部件：472 幻影/492 飞船炮/662 海盗幽灵）
+ *  组 4=火星（NPC.cs:79123-79136；384 盾/392-394 飞碟部件不在组内,不扣分） */
 export const INVASION_GROUP: Record<number, number> = (() => {
   const g: Record<number, number> = {};
   for (const id of [26, 27, 28, 29, 111, 471, 472]) g[id] = 1;
   for (const id of [143, 144, 145]) g[id] = 2;
   for (const id of [212, 213, 214, 215, 216, 252, 491, 492, 662]) g[id] = 3;
+  for (const id of [381, 382, 383, 385, 386, 387, 388, 389, 390, 391, 394, 395, 520]) g[id] = 4;
   return g;
 })();
 
-/** 击杀扣分权重（NPC.cs:79026-79050；默认 1，船长 216=5，召唤师 471=10） */
-export const KILL_WEIGHT: Record<number, number> = { 216: 5, 471: 10, 491: 10 };
+/** 击杀扣分权重（NPC.cs:79026-79050；默认 1，船长 216=5；飞碟 395=10，
+ *  召唤师 471=10、飞船 491=10、幻影 472=0、特斯拉炮塔 387=0） */
+export const KILL_WEIGHT: Record<number, number> = {
+  216: 5, 471: 10, 491: 10, 472: 0, 395: 10, 387: 0,
+};
 
 /** 入侵进行中（SpawnHomelessNPC/SpawnTravelNPC 压制门，WorldGen.cs:4987） */
 export function invasionActive(w: World): boolean {
@@ -44,16 +49,23 @@ export function startInvasion(w: World, type: number): number | null {
   const n = 1; // 单人
   w.invasionSize = 80 + 40 * n;
   if (type === INVASION_PIRATE) w.invasionSize += 40 + 20 * n;   // 海盗 120+60n
+  if (type === INVASION_MARTIAN) w.invasionSize = 160 + 40 * n;  // 火星 160+40n（:63898-63900）
   w.invasionSizeStart = w.invasionSize;
   // invasionX（:63920-63932）：非火星 50/50 世界左右边缘；与 spawnX 的相对方向决定公告文案
   w.invasionX = Math.random() < 0.5 ? 0 : w.store.w;
+  // 火星前线直接压在出生点旁一格（:63922-63925 invasionX=spawnTileX-1）——下一帧
+  // tickInvasion 推进即"抵达"并广播 misc 41;原版同时置 invasionWarn=2（Game 侧私有
+  // 计数,首帧 warn=0 时 arrived 公告同帧生效,语义等价）
+  if (type === INVASION_MARTIAN) w.invasionX = w.spawnX - 1;
   w.invasionType = type;
   return invasionWarningMisc(w);
 }
 
 /**
  * InvasionWarning 文案选择（Main.cs:63853-63862）：按剩余量与前线方向返回 LegacyMisc 编号。
- *  misc 0/1/2/3 = 哥布林 defeated/西来/东来/抵达；4-7 雪人；24-27 海盗
+ *  misc 0/1/2/3 = 哥布林 defeated/西来/东来/抵达；4-7 雪人；24-27 海盗；
+ *  41/42 = 火星 抵达/defeated——原版火星"西来/东来"取 LocalizedText.Empty
+ *  （前线自 spawn-1 启动,恒当帧抵达,接近文案无意义）→ -1（调用方静默）
  */
 export function invasionWarningMisc(w: World): number {
   const fromWest = w.invasionX < w.spawnX;
@@ -66,6 +78,8 @@ export function invasionWarningMisc(w: World): number {
       return defeated ? 4 : arrived ? 7 : fromWest ? 5 : 6;
     case INVASION_PIRATE:
       return defeated ? 24 : arrived ? 27 : fromWest ? 25 : 26;
+    case INVASION_MARTIAN:
+      return defeated ? 42 : arrived ? 41 : -1;
     default:
       return -1;
   }

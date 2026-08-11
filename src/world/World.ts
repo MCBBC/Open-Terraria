@@ -59,6 +59,10 @@ export class World {
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   // Boss 进度旗标
   flags: Record<string, boolean> = { downedEyeOfCthulhu: false, downedSkeletron: false, shadowOrbSmashed: false, hardMode: false };
+  /** 已砸碎恶魔祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100 随存档持久化）：
+   *  SmashAltar 矿物三档轮换的波次源（%3 选档 /3+1 衰减），海盗入侵自然 roll 的
+   *  altarCount>0 门（Main.cs:64938） */
+  altarCount = 0;
   // 树登记：砍树干时找到整棵树（roots → 范围）
   trees: Array<{ x: number; y: number; h: number }> = [];
   /** 战争迷雾：1 = 已探索。按 tile 粒度。 */

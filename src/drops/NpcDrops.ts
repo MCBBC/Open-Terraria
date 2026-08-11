@@ -463,7 +463,7 @@ export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, mi
 function rollCoinsOnce(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
   const rng = ctx.rng;
   let num = value * (1 + rng.int(-20, 75) * 0.01); // Next(-20,76) → [-20,75]
-  if (midas) num *= 1 + rng.int(10, 51) * 0.01;   // 金药剂 midas（:80424 ×1.10-1.51）
+  if (midas) num *= 1 + rng.int(10, 50) * 0.01;   // 金药剂 midas（:80426 Next(10,51) 左闭右开 → int(10,50)；rng.int(a,b)=Next(a,b+1) 约定）
   if (rng.int(0, 1) === 0) num *= 1 + rng.int(5, 10) * 0.01;    // 1/2 ×(1.05-1.10)
   if (rng.int(0, 3) === 0) num *= 1 + rng.int(10, 20) * 0.01;   // 1/4 ×(1.10-1.20)
   if (rng.int(0, 7) === 0) num *= 1 + rng.int(15, 30) * 0.01;   // 1/8 ×(1.15-1.30)

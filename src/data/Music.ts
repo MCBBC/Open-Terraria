@@ -104,6 +104,10 @@ export const BOSS_MUSIC: Record<number, number> = {
   370: 58,
   398: 38,
   439: 94,
+  // 异教徒仪式态两族（Main.cs:12212-12225：CultistDevote 438 ai[1]==1 与
+  // CultistArcher 379 ai[3]>=0 → num3=20 → flag20 → 音乐 94，与 439 本体同曲）。
+  // 仪式态外不触发 Boss 曲（Game 选曲循环的 ceremony 门保证）
+  438: 94, 379: 94,
   636: 57,
   657: 56,
   668: 90,

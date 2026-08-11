@@ -604,6 +604,21 @@ export class VanillaSpawner {
       if (nearbySlots < maxSpawns * 0.2) spawnRate = Math.floor(spawnRate * 0.7);
       else if (nearbySlots < maxSpawns * 0.4) spawnRate = Math.floor(spawnRate * 0.9);
     }
+    // L617-620：镇静药水（calmed）×1.65 / ×0.6
+    if (calmed) {
+      spawnRate = Math.floor(spawnRate * 1.65);
+      maxSpawns = Math.floor(maxSpawns * 0.6);
+    }
+    // L624-628：向日葵（buff 146 标志）×1.2 / ×0.8
+    if (sunflower) {
+      spawnRate = Math.floor(spawnRate * 1.2);
+      maxSpawns = Math.floor(maxSpawns * 0.8);
+    }
+    // L632-635：战斗药水（enemySpawns）×0.5 / ×2
+    if (battle) {
+      spawnRate = Math.floor(spawnRate * 0.5);
+      maxSpawns = Math.floor(maxSpawns * 2);
+    }
     // L640-646：水蜡烛 spawnRate×0.75 / max×1.5；天空层再 ×0.5
     if (waterCandle) {
       spawnRate = Math.floor(spawnRate * 0.75);
@@ -613,21 +628,6 @@ export class VanillaSpawner {
       // L645-648：和平蜡烛 ×1.3 / ×0.7（与水蜡烛互斥——原版 else if）
       spawnRate = Math.floor(spawnRate * 1.3);
       maxSpawns = Math.floor(maxSpawns * 0.7);
-    }
-    // L624-628：向日葵（buff 146 标志）×1.2 / ×0.8
-    if (sunflower) {
-      spawnRate = Math.floor(spawnRate * 1.2);
-      maxSpawns = Math.floor(maxSpawns * 0.8);
-    }
-    // L617-620：镇静药水（calmed）×1.65 / ×0.6
-    if (calmed) {
-      spawnRate = Math.floor(spawnRate * 1.65);
-      maxSpawns = Math.floor(maxSpawns * 0.6);
-    }
-    // L632-635：战斗药水（enemySpawns）×0.5 / ×2
-    if (battle) {
-      spawnRate = Math.floor(spawnRate * 0.5);
-      maxSpawns = Math.floor(maxSpawns * 2);
     }
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
     if (spawnRate < 60) spawnRate = 60;
@@ -1065,6 +1065,16 @@ export class VanillaSpawner {
     // ---- 天空怪（原版 NPC.cs:1290-1331：else-if 链最前、invaders 之前——
     //  skyMob 优先于入侵分支；肉前 = 兜底鸟妖 48，困难 = 1/10 飞龙 87（场内唯一））----
     if (this.skyMob) {
+      // 火星入侵期间天空怪位出无人机（L1295-1297：invaders && invasionType==4 → 388）
+      if (this.invaders && this.world.invasionType === 4) return D(388);
+      // 火星探测器 399（L1302-1305）：困难+已败石巨人,首次未败火星 1/8 否则 1/30,
+      // 场上无 399;flag5 的 skyBehindPlayer/AnyDanger 上下文本仓未跟踪,以 skyMob+带外
+      // 距中央 >1/3 近似（探测器本就只在高空两侧刷出）
+      if (hardMode && this.world.flags['downed_245'] && !any(399)
+        && Math.abs(this.spawnTileX - this.world.store.w / 2) / (this.world.store.w / 2) > 0.33
+        && (N(this.world.flags['downedMartians'] ? 30 : 8) || N(30))) {
+        return D(399);
+      }
       if (hardMode && !any(87) && N(10)) return D(87);
       return D(48);
     }
@@ -1095,6 +1105,30 @@ export class VanillaSpawner {
         if (N(7)) return D(214);
         if (N(3)) return D(213);
         return D(212);
+      }
+      if (it === 4) {
+        // 火星疯狂（L1408-1463）。flag6 = 进度≥30% 且场上无飞碟（1/45 或高档位 1/20 出 395）;
+        // num7=Next(7): ≥6 → 骑手 390/工程师 386 二选;≥4 → 炮手 382×2/无人机 388/扰脑者 381;
+        // <4 → 灰兵 385/电侠 389/军官 383,3/4 概率出火星行者 520（场上唯一,否则重掷）
+        const prog = (this.world.invasionSizeStart - this.world.invasionSize)
+          / (this.world.invasionSizeStart || 1);
+        const saucerOk = prog >= 0.3 && !any(395);
+        const num7 = rng.int(0, 6);
+        if (N(45) && saucerOk) return D(395);
+        if (num7 >= 6) {
+          if (N(20) && saucerOk) return D(395);
+          return D(rng.int(0, 1) === 0 ? 390 : 386);
+        }
+        if (num7 >= 4) {
+          const r9 = rng.int(0, 4);
+          return D(r9 < 2 ? 382 : r9 >= 4 ? 388 : 381);
+        }
+        let r10 = rng.int(0, 3);
+        if (r10 === 3) {
+          if (!any(520)) return D(520);
+          r10 = rng.int(0, 2);
+        }
+        return D(r10 === 0 ? 385 : r10 === 1 ? 389 : 383);
       }
     }
 

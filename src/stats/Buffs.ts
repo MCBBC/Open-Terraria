@@ -80,6 +80,11 @@ export enum BuffType {
   BiomeSight = 55,    // 群系视觉(343)：邪恶/神圣方块高亮
   Luck = 56,           // 幸运(257)：luckPotion 三档（buffTime>600s=3/>300s=2）×0.1（:9971/:28674）
   Summoning = 57,      // 召唤(110,480s)：maxMinions+1（:9855）
+  // ---- R7 钓鱼三药水 ----
+  Fishing = 58,        // 钓鱼(121,480s)：fishingSkill+15（:9831）
+  Sonar = 59,          // 声呐(122,480s)：显示渔获名（sonar :9835）
+  Crate = 60,          // 宝匣(123,300s)：渔获箱率 +10%（cratePotion :9839）
+  Gravitation = 61,    // 重力(18,180s)：Up 键切换 gravDir（:9720）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -144,6 +149,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.BiomeSight]: { vanillaBuff: 343, descKey: 'Mods.SandboxWorld.Buff.BiomeSight.Desc', fallbackName: '生物群系视觉' },
   [BuffType.Luck]: { vanillaBuff: 257, descKey: 'Mods.SandboxWorld.Buff.Luck.Desc', fallbackName: '幸运' },
   [BuffType.Summoning]: { vanillaBuff: 110, descKey: 'Mods.SandboxWorld.Buff.Summoning.Desc', fallbackName: '召唤' },
+  [BuffType.Fishing]: { vanillaBuff: 121, descKey: 'Mods.SandboxWorld.Buff.Fishing.Desc', fallbackName: '钓鱼' },
+  [BuffType.Sonar]: { vanillaBuff: 122, descKey: 'Mods.SandboxWorld.Buff.Sonar.Desc', fallbackName: '声呐' },
+  [BuffType.Crate]: { vanillaBuff: 123, descKey: 'Mods.SandboxWorld.Buff.Crate.Desc', fallbackName: '宝匣' },
+  [BuffType.Gravitation]: { vanillaBuff: 18, descKey: 'Mods.SandboxWorld.Buff.Gravitation.Desc', fallbackName: '重力' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

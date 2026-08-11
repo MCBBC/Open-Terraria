@@ -231,6 +231,8 @@ Checkpoint("terrain");
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
 
 // ================= 原语 =================
+var GPKC = new List<string>();
+var TRC7 = new List<string>();
 bool mudWallFlag = false;
 void TileRunner(double i, double j, double strength, int steps, int type,
     bool addTile = false, double speedX = 0.0, double speedY = 0.0, bool noYChange = false,
@@ -242,11 +244,16 @@ void TileRunner(double i, double j, double strength, int steps, int type,
     if (speedX != 0.0 || speedY != 0.0) { vx = speedX; vy = speedY; }
     int num3l = 0;
     r.Next(4); // num3 液体类型（普通世界结果弃用）
+    long GPKC_N = 0;
     while (num1 > 0.0 && num2 > 0.0)
     {
         if (py < 0.0 && num2 > 0.0 && type == 59) num2 = 0.0;
         num1 = strength * (num2 / steps);
         num2 -= 1.0;
+        if (steps == 10000 && px - num1 * 0.5 <= 3407 && px + num1 * 0.5 >= 3407 && py - num1 * 0.5 <= 315 && py + num1 * 0.5 >= 315)
+        {
+            TRC7.Add($"px={px:0.0},py={py:0.0} n1={num1:0.0} before_t{typ[315 * W + 3407]}a{act[315 * W + 3407]}");
+        }
         int x0 = (int)(px - num1 * 0.5), x1 = (int)(px + num1 * 0.5);
         int y0 = (int)(py - num1 * 0.5), y1 = (int)(py + num1 * 0.5);
         if (x0 < 1) x0 = 1; if (x1 > W - 1) x1 = W - 1;
@@ -257,6 +264,7 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             for (int y = y0; y < y1; y++)
             {
                 int ti = y * W + x;
+                if (steps == 10000) { GPKC_N++; if (GPKC_N % 50000 == 0) GPKC.Add($"c{GPKC_N}={(int)r.Peek()}"); }
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -1200,8 +1208,10 @@ Checkpoint("grass");
     {
         if (py < worldSurface)
         {
-            int vv = (int)py; vv = Math.Clamp(vv, 10, W - 10);
-            int vvy = (int)px; vvy = Math.Clamp(vvy, 10, H - 10);
+            // ★原版：value=(int)val.X 钳 [10, W-10]；value2=(int)val.Y 钳 [10, H-10]，
+            // value2<5 → 5；检查 (value, value2-{0..5})——曾 x/y 互换
+            int vv = (int)px; vv = Math.Clamp(vv, 10, W - 10);
+            int vvy = (int)py; vvy = Math.Clamp(vvy, 10, H - 10);
             if (vvy < 5) vvy = 5;
             bool openAll = true;
             for (int d = 0; d <= 5; d++)
@@ -1237,6 +1247,7 @@ Checkpoint("grass");
         if (px > jx + 200) vx -= (int)r.Next(5, 21) * 0.1;
         if (vx > 1.5) vx = 1.5; if (vx < -1.5) vx = -1.5;
     }
+        var CPH = new List<string> { $"tun={(int)r.Peek()}" };
     // GenerateHolesInMudWalls + MudWallRunner（cs:203-217 + 77584）
     void MudWallRunner(int i, int j)
     {
@@ -1270,7 +1281,10 @@ Checkpoint("grass");
         { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
         MudWallRunner(hx, hy);
     }
-        // GenerateFinishingTouches（cs:219-280）
+        CPH.Add($"holes={(int)r.Peek()}");
+    var CFT = new List<string>();
+    File.WriteAllText("/tmp/cs-ft-dummy.txt", "");
+    // GenerateFinishingTouches（cs:219-280）
     int fx = oldX, fy = oldY;
     for (int i = 0; (double)i <= 20.0 * ws; i++)
     {
@@ -1278,6 +1292,7 @@ Checkpoint("grass");
         fy += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
         TileRunner(fx, fy, (int)r.Next(40, 100), (int)r.Next(300, 500), 59);
     }
+    CFT.Add($"clumps={(int)r.Peek()}");
     for (int j = 0; (double)j <= 10.0 * ws; j++)
     {
         int c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1290,7 +1305,10 @@ Checkpoint("grass");
             int type = (int)r.Next(7) == 0 ? -2 : -1;
             TileRunner(c2x, c2y, (int)r.Next(10, 20), (int)r.Next(30, 70), type);
         }
+        CFT.Add($"c2.{j}={(int)r.Peek()}");
     }
+    CFT.Add($"caves={(int)r.Peek()}");
+    File.WriteAllText("/tmp/cs-ph.txt", string.Join(" ", CPH) + " CFT " + string.Join(" ", CFT));
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1303,6 +1321,8 @@ Checkpoint("grass");
     }
 }
 File.WriteAllBytes("/tmp/cs-act6.bin", act);
+File.WriteAllText("/tmp/cs-gpk.txt", string.Join(" ", GPKC));
+File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
 Checkpoint("jungle");
 
 // ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================

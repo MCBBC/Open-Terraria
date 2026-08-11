@@ -50,6 +50,7 @@ export class SaveClient {
       weather: weatherToSave(world.weather),
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
         x: world.invasionX, delay: world.invasionDelay },
+      altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
     };
     const playerData: SaveData['player'] = {
       hp: player.hp, x: player.x, y: player.y,

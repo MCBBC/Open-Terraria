@@ -167,6 +167,19 @@ const canKillTile = (t: number): boolean => (TILE_DEFS[t]?.pick ?? -1) >= 0;
 const tileFrameImportantType = (t: number): boolean => !!TILE_DEFS[t]?.framed;  // Main.tileFrameImportant
 const tileCutType = (t: number): boolean => !!TILE_DEFS[t]?.decor;              // Main.tileCut（可割植物）
 
+/** Main.cs:46058-46065 方向箭头显示门：锁向下一格须 !active 或可替换块才画
+ *  SmartCursorArrow。"可替换" = PlaceThing_IsReplaceableBlock（Player.cs:39094-
+ *  39103），本作沿用 tileCutType（Main.tileCut 可割植物）口径；锁向格为实心/家具
+ *  等不可覆盖块时返回 false → 调用方传 null，渲染层不画箭头。
+ *  越界按"未激活"处理（原版越界 Tile 为空 → !active() → 画；SmartCursor 已钳到
+ *  [10, w-10]，锁向 ±1 实际不会越界）。 */
+export function smartCursorArrowAllowed(st: TileStore, x: number, y: number, dir: Pt): boolean {
+  const nx = x + dir.x, ny = y + dir.y;
+  if (!st.inBounds(nx, ny)) return true;
+  if (!activeAt(st, nx, ny)) return true;
+  return tileCutType(st.type[st.idx(nx, ny)]);
+}
+
 const activeAt = (st: TileStore, x: number, y: number): boolean => st.isActive(x, y);
 const inActiveAt = (st: TileStore, x: number, y: number): boolean => st.isActuated(x, y);
 /** Main.tileNoAttach 无独立数据源：实心即认为可附着（近似，原版仅少数方块 noAttach） */

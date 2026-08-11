@@ -582,9 +582,11 @@ export class Player extends Entity {
       this.fallStartY = null;
       }
     } else {
+      const gd = this.gravDir;
       if (this.inputJump && this.onGround) {
-        // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）
-        this.vy = -(PLAYER_JUMP_SPEED + this.equipStats.jumpSpd);
+        // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
+        // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
+        this.vy = -(PLAYER_JUMP_SPEED + this.equipStats.jumpSpd) * gd;
         this.jumpHold = PLAYER_JUMP_TICKS;
       }
       if (this.inputJump && this.jumpHold > 0) {
@@ -701,11 +703,16 @@ export class Player extends Entity {
       }
       // 羽落 buff（slowFall,:21369）：重力 /3,fallStart 每帧重置 → 免坠伤
       const grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
-      this.vy = Math.min(this.vy + grav, MAX_FALL_SPEED);
+      // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
+      this.vy = gd === 1
+        ? Math.min(this.vy + grav, MAX_FALL_SPEED)
+        : Math.max(this.vy - grav, -MAX_FALL_SPEED);
       if (this.buffs.slowFall) this.fallStartY = null;
+      // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
+      if (gd === -1) this.onGround = this.hitHead;
     }
-    // 松键截断上升（手感）
-    if (!this.inputJump && this.vy < -2) this.vy = -2;
+    // 松键截断上升（手感；倒置时镜像）
+    if (!this.inputJump && (this.gravDir === 1 ? this.vy < -2 : this.vy > 2)) this.vy = 2 * this.gravDir;
 
     // ---- 黏滞 tile（Collision.StickyTiles + Player.cs:22650-22740 1:1）----
     // 蛛网(51)：泡在网里 X/Y 双重阻尼、禁跳、不计摔伤、挣扎随机会撕破网（掉蛛丝）；
@@ -773,10 +780,11 @@ export class Player extends Entity {
     }
 
     // 摔伤追踪：开始下落记录高度，落地结算
-    if (!this.onGround && this.vy > 0 && this.fallStartY === null) {
+    const fallVy = this.vy * this.gravDir;
+    if (!this.onGround && fallVy > 0 && this.fallStartY === null) {
       this.fallStartY = this.y;
     }
-    if (this.vy < -0.1) this.fallStartY = null; // 重新上升则重置
+    if (fallVy < -0.1) this.fallStartY = null; // 重新上升则重置
 
     this.dropThrough = !!this.inputDown;
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
@@ -924,6 +932,9 @@ export class Player extends Entity {
   onWaterSurface = false;
   /** 所在沙漠区（Game 每帧同步 scene.zoneDesert；沙丘行者靴消费） */
   zoneDesert = false;
+  /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
+   *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
+  gravDir: 1 | -1 = 1;
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
   /** 拾取范围扩展（宝藏磁石/金戒指族，px；defaultItemGrabRange=42） */

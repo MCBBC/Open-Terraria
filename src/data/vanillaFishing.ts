@@ -1,0 +1,54 @@
+// 钓鱼渔获表（R7）。原版 FishingRules 条目 400+（深度/群系/月相/任务鱼），此处按
+// 分层×液体×群系精简为常见池（id 均经 l10n 实名核对）；权威后续可全量提取扩表。
+export interface FishPool { fish: number[]; crates?: number[]; junk?: number[] }
+
+export const FISH_POOLS: Record<string, FishPool> = {
+  // 地表（海洋区由 Game 侧判定换 ocean 池）
+  surface: {
+    fish: [2290, 2297, 2298, 2299, 2301, 2308], // 鲈鱼/鳟鱼/三文鱼/大西洋鳕/红鲷/金鲤鱼
+    crates: [2334, 2335, 2336],                   // 木匣/铁匣/金匣
+    junk: [2339, 2337, 753],                      // 锡罐/旧鞋/海草
+  },
+  ocean: {
+    fish: [2299, 2301, 2302, 2308, 2488],         // 鳕鱼/红鲷/霓虹脂鲤/金鲤/热带梭鱼
+    crates: [2334, 2335, 2336],
+    junk: [2339, 2337],
+  },
+  cavern: {
+    fish: [2303, 2309, 2310, 2311, 2330],         // 装甲洞穴鱼/镜面鱼/七彩矿鱼/斑驳油鱼/紫挥棒鱼
+    crates: [2334, 2335],
+    junk: [2339, 2337],
+  },
+  // 腐化/猩红/神圣/丛林/雪原（cavern/surface 深度均可，Game 按 scene 选池）
+  corrupt: { fish: [2318, 2319] },                // 黑檀锦鲤/血腥食人鱼(腐化共用 ebonkoi)
+  crimson: { fish: [2305, 2319] },                // 猩红虎鱼/血腥食人鱼
+  hallow: { fish: [2310, 2420] },                 // 七彩矿鱼/和风鱼
+  jungle: { fish: [2486, 2330] },                 // 泥鱼/紫挥棒鱼
+  snow: { fish: [2298, 2330] },
+  honey: { fish: [2314] },                        // 蜂蜜鱼
+  lava: { fish: [2312, 2315] },                   // 闪鳍锦鲤/黑曜石鱼（需熔线钓钩）
+};
+
+/** 按渔获场景选池（Game 调用：液体优先，再群系，再深度） */
+export function pickPool(opts: {
+  liquid: 'water' | 'lava' | 'honey'; zone: string; depth: 'sky' | 'surface' | 'cavern' | 'underworld';
+  zoneOcean: boolean;
+}): FishPool {
+  if (opts.liquid === 'lava') return FISH_POOLS.lava;
+  if (opts.liquid === 'honey') return FISH_POOLS.honey;
+  if (opts.zoneOcean && opts.depth === 'surface') return FISH_POOLS.ocean;
+  const biomePool = FISH_POOLS[opts.zone];
+  if (biomePool && opts.zone !== 'forest') return biomePool;
+  return opts.depth === 'cavern' || opts.depth === 'underworld' ? FISH_POOLS.cavern : FISH_POOLS.surface;
+}
+
+/** 掷一次渔获（FishingCheck 精简主干）：返回原版物品 id。
+ *  power = 竿力+饵力+药水；cratePotion 提升箱率；低 power 提高 junk */
+export function rollCatch(power: number, pool: FishPool, cratePotion: boolean): number {
+  const crateChance = 0.1 + (cratePotion ? 0.1 : 0);
+  const junkChance = Math.max(0.05, 0.35 - power * 0.004);
+  const r = Math.random();
+  if (pool.crates?.length && r < crateChance) return pool.crates[Math.floor(Math.random() * pool.crates.length)];
+  if (pool.junk?.length && r < crateChance + junkChance) return pool.junk[Math.floor(Math.random() * pool.junk.length)];
+  return pool.fish[Math.floor(Math.random() * pool.fish.length)];
+}

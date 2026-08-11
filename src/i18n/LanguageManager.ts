@@ -191,6 +191,19 @@ class LanguageManager {
     return this.pack.texts.get(list[Math.floor(rng() * list.length)]) ?? null;
   }
 
+  /** Lang.CreateDialogFilter(startsWith)（Lang.cs:425-428）+ Language.SelectRandom：
+   *  类目内全键前缀匹配后随机一条（NPC.HasSpecialEventText 的
+   *  "XxxSpecialText.Yyy" 族——键形如 MerchantSpecialText.Rain1/Rain2） */
+  randomFromPrefix(prefix: string, rng: () => number = Math.random): string | null {
+    const dot = prefix.indexOf('.');
+    if (dot <= 0) return null;
+    const list = this.pack.groupedKeys.get(prefix.slice(0, dot));
+    if (!list || !list.length) return null;
+    const hits = list.filter((k) => k.startsWith(prefix));
+    if (!hits.length) return null;
+    return this.pack.texts.get(hits[Math.floor(rng() * hits.length)]) ?? null;
+  }
+
   categorySize(category: string): number {
     return this.pack.groupedKeys.get(category)?.length ?? 0;
   }

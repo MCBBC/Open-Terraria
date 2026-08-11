@@ -34,6 +34,10 @@ export const Lang = {
   /** 聊天池随机一条（XxxChatter 类目；原版 Language.SelectRandom(Lang.CreateDialogFilter)） */
   chatter(category: string): string | null { return languageManager.randomFromCategory(category); },
 
+  /** CreateDialogFilter 前缀随机（NPC.HasSpecialEventText 的 "XxxSpecialText.Yyy" 族；
+   *  原版 Language.SelectRandom(Lang.CreateDialogFilter(prefix))，Lang.cs:425-428） */
+  specialText(prefix: string): string | null { return languageManager.randomFromPrefix(prefix); },
+
   // ---- Legacy 数组等价物(Lang.cs:475-551 InitializeLegacyLocalization)----
   /** gen[i] → LegacyWorldGen.i */
   gen(i: number): string { return languageManager.getTextValue(`LegacyWorldGen.${i}`); },

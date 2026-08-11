@@ -66,7 +66,9 @@ for (const idStr of Object.keys(vmeta)) {
     const bridged = legacy || !!(f.healLife || f.healMana);
     push('治疗/魔力药', bridged ? '✅' : '❌', legacy ? '' : `heal${f.healLife ?? 0}/mana${f.healMana ?? 0}（itemfunc 桥接）`);
   }
-  if (f.buffType && f.buffType > 0) {
+  // ---- Buff 药水：仅 consumable 非召唤物品（宠物/随从/星云焰的 buffType 是随从 buff
+  //      非饮用效果——已计入杂项装备/召唤武器类，此处排除防重复计数）----
+  if (f.buffType && f.buffType > 0 && f.consumable && !f.summon) {
     const known = BUFF_VANILLA_IDS.has(f.buffType);
     push('Buff 药水', known ? '✅' : '⚠️', `buff ${f.buffType}${known ? '' : ' 无对应 BuffType（引擎缺）'}`);
   }

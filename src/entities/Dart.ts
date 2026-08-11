@@ -6,6 +6,7 @@ import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
+import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -343,6 +344,64 @@ export class Dart extends Entity {
       p.damage(this.damage, this.x, this.y);
       game.addDamageNumber(p.cx, p.y, this.damage, false, '#FF8060');
       this.dead = true;
+    }
+  }
+}
+
+/**
+ * 629 TowerDamageBolt（Projectile.cs AI_122 :33747-33778 + Kill 段 :69784-69819）：
+ * 本组教徒怪死亡时朝对应塔发射的红色追踪弹——ai[0]=目标塔 NPC，
+ * 每 tick velocity = normalize(塔心-弹心)×5（:33775-33777）+ Dust.QuickDust 红尘尾，
+ * 命中塔 Hitbox → Kill：盾 -1（Game 侧 onTowerBoltHit）且盾非 0 时塔 ai[3]=1（闪光 120t）。
+ * 目标失联（塔死亡/消失）立即消亡（:33753-33761）。
+ * 纯事件弹：无伤害（damage=0）、无碰撞、不参与联机弹幕同步（视觉弹） */
+export class TowerBolt extends Entity {
+  w = 10; h = 10;
+  /** 目标塔解析（每 tick 重查——塔可能在本弹飞行中死亡） */
+  private target: () => Enemy | null;
+  /** 命中回调（盾结算/闪光/盾破音，Game 注入） */
+  private onHit: (tower: Enemy) => void;
+  private life = 3600;
+
+  constructor(x: number, y: number, target: () => Enemy | null, onHit: (tower: Enemy) => void) {
+    super();
+    this.x = x; this.y = y;
+    this.target = target;
+    this.onHit = onHit;
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    // 世界坐标绘制：红色发光点（原版贴图 Projectile_629 未解包时以粒子红点代）
+    const img = r.atlas ? r.atlas.vimages.get('vanilla/Projectile_629.png') : null;
+    if (img) {
+      ctx.drawImage(img, this.x + this.w / 2 - img.width / 2, this.y + this.h / 2 - img.height / 2);
+      return;
+    }
+    ctx.fillStyle = '#FF4040';
+    ctx.fillRect(this.x, this.y, this.w, this.h);
+    ctx.fillStyle = '#FFB0A0';
+    ctx.fillRect(this.x + 3, this.y + 3, this.w - 6, this.h - 6);
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const t = this.target();
+    if (!t || t.dead) { this.dead = true; return; }   // AI_122 目标失联即 Kill（:33753-33761）
+    if (--this.life <= 0) { this.dead = true; return; }
+    const dx = t.cx - this.cx, dy = t.cy - this.cy;
+    const len = Math.hypot(dx, dy) || 1;
+    this.vx = (dx / len) * 5;                          // :33775 normalize(塔心-弹心)×5
+    this.vy = (dy / len) * 5;
+    this.x += this.vx;
+    this.y += this.vy;
+    // 红尘尾（:33778 Dust.QuickDust(Center, Red)——无重力短命尘）
+    game.spawnParticles(this.cx, this.cy, Math.random() < 0.5 ? '#FF4040' : '#FF9060',
+      1, 0.5, { life: 12, damp: 0.95, grav: 0 });
+    // 命中塔 Hitbox（:33765-33770）→ Kill → 盾结算回调
+    if (this.aabbOverlaps(t)) {
+      this.dead = true;
+      this.onHit(t);
     }
   }
 }

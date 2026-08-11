@@ -237,18 +237,25 @@ export function isTowerMinion(vanillaId: number | null | undefined): boolean {
   return vanillaId != null && vanillaId in MINION_TOWER;
 }
 
-/** 本组怪死亡 → 扣盾 1（Projectile.cs:69784-69819 命中段 1:1）。
- *  返回被扣盾的塔 id（调用方负责视觉：塔 ai3=1 闪光 + 红色追踪弹尾迹）；
- *  flash = 扣盾前盾值非 0（原版命中时 shield!=0 才置塔 ai[3]=1）；null = 不扣（盾已空/非本组怪） */
-export function onMinionKilled(w: World, vanillaId: number): { tower: number; flash: boolean } | null {
+/** 本组怪死亡 → 629 TowerDamageBolt 的目标塔（NPC.cs:80089-80121 发弹门：
+ *  对应塔盾 >0 才发弹；FindFirstNPC(517/422/507/493) = 场上对应塔）。
+ *  不在此扣盾——原版扣盾在弹体命中塔时（Projectile.cs:69784-69819 Kill 段） */
+export function towerBoltTarget(w: World, vanillaId: number): number | null {
   const key = MINION_TOWER[vanillaId];
   if (!key) return null;
+  if (w.lunarEvent.shield[key] <= 0) return null;
+  return TOWER_IDS.find((t) => TOWER_KEY[t] === key) ?? null;
+}
+
+/** 629 命中塔结算（Projectile.cs:69784-69819 1:1）：盾 -1（clamp 0..ShieldMax）；
+ *  flash = 扣盾前盾值非 0（原版命中时 shield!=0 才置塔 ai[3]=1 闪光 120t，
+ *  塔实例位由调用方写 ai3）；shieldZero = 盾破（NPC.cs:41148-41151 NPCDeath58 门） */
+export function onTowerBoltHit(w: World, towerId: number): { flash: boolean; shieldZero: boolean } {
+  const key = TOWER_KEY[towerId];
   const s = w.lunarEvent;
   const before = s.shield[key];
-  if (before <= 0) return null;   // 原版发弹门：ShieldStrengthTower* > 0 才发 629
   s.shield[key] = Math.max(0, Math.min(shieldMax(w), before - 1));
-  const towerId = TOWER_IDS.find((t) => TOWER_KEY[t] === key)!;
-  return { tower: towerId, flash: true };
+  return { flash: before !== 0, shieldZero: s.shield[key] === 0 };
 }
 
 /** SceneMetrics.NPCEventZoneRadius（SceneMetrics.cs:31）= 250 格 */

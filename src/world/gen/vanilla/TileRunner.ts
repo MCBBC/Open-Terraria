@@ -59,6 +59,25 @@ export interface TileRunnerOpts {
   mudWall?: boolean;     // 丛林泥墙模式(墙 15/64 按深度)
 }
 
+export const DR_LOG: string[] = [];
+let DR_ON = false;
+export function drBegin() { DR_ON = true; DR_LOG.length = 0; }
+export function drEnd() { DR_ON = false; }
+export const GPK: string[] = [];
+let GPK_N = 0;
+let GPK_ON = false;
+export function gpkBegin() { GPK_ON = true; GPK.length = 0; GPK_N = 0; }
+export function gpkEnd() { GPK_ON = false; }
+
+export let DR_ON = false;
+export function drBegin() { DR_ON = true; DR_LOG.length = 0; }
+export function drEnd() { DR_ON = false; }
+
+const CELL_TR: string[] = [];
+export function cellTraceBegin() { CELL_TR.length = 0; }
+export function cellTraceDump() { return CELL_TR.join(' | '); }
+const TR_TX = 3407, TR_TY = 315;
+
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -83,11 +102,17 @@ export function tileRunner(
   rng.nextIntRange(0, 4);
 
 
+  let DR_N = 0;
   while (num1 > 0 && num2 > 0) {
+    if (DR_ON && DR_N < 30) DR_LOG.push(`d${DR_N}:${px.toFixed(2)},${py.toFixed(2)} n1=${num1.toFixed(1)} n2=${num2}=${rng.vanilla.peek()}`);
+    DR_N++;
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;
     num1 = strength * (num2 / steps);
     num2--;
+    if (px - num1 * 0.5 <= TR_TX && px + num1 * 0.5 >= TR_TX && py - num1 * 0.5 <= TR_TY && py + num1 * 0.5 >= TR_TY) {
+      CELL_TR.push(`px=${px.toFixed(1)},py=${py.toFixed(1)} n1=${num1.toFixed(1)} ty=${type} before_t${st.type[st.idx(TR_TX, TR_TY)]}a${st.flags[st.idx(TR_TX, TR_TY)]}`);
+    }
     const x0 = Math.max(1, Math.floor(px - num1 * 0.5));
     const x1 = Math.min(st.w - 1, Math.floor(px + num1 * 0.5));
     const y0 = Math.max(1, Math.floor(py - num1 * 0.5));
@@ -100,7 +125,8 @@ export function tileRunner(
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
         const ci0 = st.idx(x, y);
         const cdef = TILE_DEFS[st.type[ci0]];
-        if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
+        if (GPK_ON) { GPK_N++; if (GPK_N % 50000 === 0) GPK.push(`c${GPK_N}=${rng.vanilla.peek()}`); }
+        if (st.flags[ci0] && cdef?.framed && !cdef.decor) { if (DR_ON) { DR_LOG.push(`FSKIP@${x},${y}t${st.type[ci0]}`); } continue; }
         if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
@@ -130,7 +156,8 @@ export function tileRunner(
             st.liquid[ti] = 255;
             st.liquidType[ti] = y > gs.lavaLine ? 2 : 1;
           }
-          st.type[ti] = 0;
+          // 原版 active(false) **保留 type**（幽灵语义）——挖除清零会让后续
+          // 拒绝采样/flag4 判定读错（收尾洞穴循环实测分叉点）
           st.flags[ti] = 0;
         } else {
           // 铺设:原版 flag4 规则（1456 cs:77277-77330）。结构语义：

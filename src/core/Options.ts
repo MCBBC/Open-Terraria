@@ -13,6 +13,7 @@ export interface OptionsData {
   smartAxeAfterPickaxe: boolean;       // UseSmartAxeAfterSmartPickaxe（默认 false）
   smartBlocksEnabled: boolean;         // SmartBlocksEnabled（默认 true）
   smartHoldCanReleaseMidUse: boolean;  // SmartCursorHoldCanReleaseMidUse（默认 true）
+  backgrounds: boolean;                // Main.BackgroundEnabled（Main.cs:790，config.json 持久化；默认 true）
 }
 
 const KEY = 'sandboxworld.options';
@@ -28,6 +29,7 @@ export class OptionsStore {
     smartAxeAfterPickaxe: false,
     smartBlocksEnabled: true,
     smartHoldCanReleaseMidUse: true,
+    backgrounds: true,
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];

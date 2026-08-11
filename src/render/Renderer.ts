@@ -288,6 +288,11 @@ export class Renderer {
   weatherFx = new WeatherRenderer();
   /** weatherFx 已 attach（避免每帧空调用开销） */
   weatherFxActive = false;
+  /** MoonLordShake 滤镜态（Main.cs:64437-64447：月总倒计时>0 时激活，
+   *  强度 num5 = clamp(sin(cd/60×0.5)×2,0,1) × (0.75−0.5×cd/Max)；Game 每帧注入，null=未激活）。
+   *  原版为 FilterMoonLordShake 屏幕后处理（以激活点=玩家为靶心的红色扰动）；
+   *  canvas 2D 以「靶心径向红晕 + 呼吸脉冲」近似（drawMoonLordShake） */
+  moonLordShake: { t: number; x: number; y: number } | null = null;
   lightCanvas: HTMLCanvasElement;
   lightCtx: CanvasRenderingContext2D;
   minimap: Minimap | null = null;
@@ -578,6 +583,9 @@ export class Renderer {
       this.drawSmartCursor(ctx, cam, hover, viewW, z,
         lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);
     }
+
+    // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
+    this.drawMoonLordShake(ctx, cam, viewW, viewH);
 
     // 8. 飘字（受光照影响后画）
     ctx.save();
@@ -2405,6 +2413,22 @@ export class Renderer {
    * 颜色乘该格光照（Lighting.GetColor）；有方向锁且下一格空 → 方向箭头
    * （SmartCursorArrow 贴图 8 帧；此处先用 canvas 三角形，沿方向 16/20px + 0.9s 正弦浮动）。
    */
+  /** MoonLordShake 屏幕滤镜（Main.cs:64437-64447 + FilterMoonLordShake）：
+   *  月总倒计时期间的红色震屏后处理。原版 shader 以激活点为靶心做径向扰动 + 红移，
+   *  此处以靶心径向红晕近似；脉冲相位沿强度公式里的 sin(cd/60×0.5) 呼吸 */
+  private drawMoonLordShake(ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number) {
+    const m = this.moonLordShake;
+    if (!m || m.t <= 0) return;
+    const [sx, sy] = cam.worldToScreen(m.x, m.y);
+    const pulse = 0.75 + 0.25 * Math.sin(performance.now() / 90);
+    const r = Math.max(viewW, viewH) * 0.75;
+    const g = ctx.createRadialGradient(sx, sy, r * 0.12, sx, sy, r);
+    g.addColorStop(0, 'rgba(255,32,32,0)');
+    g.addColorStop(1, `rgba(190,10,10,${Math.min(0.7, 0.55 * m.t * pulse).toFixed(3)})`);
+    ctx.fillStyle = g;
+    ctx.fillRect(0, 0, viewW, viewH);
+  }
+
   private drawSmartCursor(
     ctx: CanvasRenderingContext2D, cam: Camera, hover: HoverTarget, viewH: number, z: number,
     lightR: Uint8Array, lightG: Uint8Array, lightB: Uint8Array,

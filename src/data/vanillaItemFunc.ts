@@ -11,6 +11,8 @@ export interface ItemFunc {
   ammo?: number; useAmmo?: number; notAmmo?: number;
   shoot?: number; channel?: number; holdStyle?: number; torch?: number;
   useStyle?: number; knockBack?: number; autoReuse?: number;
+  fishingPole?: number;  // 钓竿力度（9 支；抛竿入口判定）
+  bait?: number;        // 鱼饵力度（29 种；消耗率 1/(1+bait/6)）
 }
 
 import funcJson from './vanilla-itemfunc.json';

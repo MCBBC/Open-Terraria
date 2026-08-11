@@ -51,6 +51,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
+    altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
   };
   const playerData: SaveData['player'] = {
     hp: player.hp, x: player.x, y: player.y,
@@ -114,6 +115,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     world.invasionX = data.invasion.x;
     world.invasionDelay = data.invasion.delay;
   }
+  if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
   world.chests = data.chests;
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;

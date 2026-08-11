@@ -52,23 +52,20 @@ describe('R2 敌 debuff DoT（NPC.cs:92585/92697/92708，lifeRegen/2=HP/s）', (
     expect(e.hp).toBe(1000 - 24);
   });
 
-  it('ichor：受击防御 -15（:92096 armorPenetration += 15）', () => {
+  it('ichor：armorPenetration +15 折半 = +7 直伤（NPC.cs:81913-81938）', () => {
     const { hooks } = makeHooks();
     const e = new Enemy('zombie', 10 * 16, 10 * 16);
     e.hp = 1000; e.iframes = 0;
-    e.ichorT = 5;
-    // zombie def 取 ENEMY_DEFS——以 def 实值验证差值一致
     const def = e.def.defense ?? 0;
     const noIchor = Math.max(1, Math.round(100 - def * 0.5));
-    e.ichorT = 0;
     e.hurt(100, 0, 0, hooks as never);
     expect(1000 - e.hp).toBe(noIchor);
-    // 有 ichor：有效防御 = max(0, def-15)
+    // 有 ichor：dmg - def*0.5 + floor(15/2)=7（超防钳制 def>2×dmg 时按 dmg）
     e.hp = 1000; e.iframes = 0;
     e.ichorT = 5;
     e.hurt(100, 0, 0, hooks as never);
-    const effDef = Math.max(0, def - 15);
-    expect(1000 - e.hp).toBe(Math.max(1, Math.round(100 - effDef * 0.5)));
+    const effDef = Math.min(def, 200); // 2×100
+    expect(1000 - e.hp).toBe(Math.max(1, Math.round(100 - effDef * 0.5 + 7)));
   });
 });
 

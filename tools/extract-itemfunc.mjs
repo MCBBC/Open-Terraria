@@ -100,6 +100,8 @@ const FIELDS = [
   ['holdStyle', /\bholdStyle = (\d+);/, 'n'],
   ['useStyle', /\buseStyle = (\d+);/, 'n'],
   ['knockBack', /\bknockBack = ([\d.]+)f;/, 'f'],
+  ['fishingPole', /\bfishingPole = (\d+);/, 'n'],
+  ['bait', /\bbait = (\d+);/, 'n'],
 ];
 
 const FUNC = {};
@@ -111,6 +113,11 @@ for (const [id, seg] of SEGS) {
     f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
   }
   if (Object.keys(f).length) FUNC[id] = f;
+}
+// 钓竿区段补丁：2290-2296 族在 case 段外的 type 区间块赋值（最近 switch 归属扫不到），
+// 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。
+for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35, 2296: 40, 2294: 50 })) {
+  FUNC[id] = { ...(FUNC[id] ?? {}), fishingPole: pow };
 }
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemfunc.json`, JSON.stringify(FUNC));
 console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);
