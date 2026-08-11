@@ -3,6 +3,7 @@
 // Boss 判定用 VANILLA_BOSS_IDS 近似原版 5000px 判定盒（L12149-12378 boss flag → 兜底 5 Boss1，
 // EoC 原版即 Boss1）。
 import type { SceneFlags } from '../world/SceneMetrics';
+import { MB_STYLE_TO_MUSIC } from '../world/wiring/devices';
 
 /** MusicID（Terraria.ID/MusicID.cs；音频文件 audios/music/Music_<id>.ogg） */
 export const MUSIC = {
@@ -66,6 +67,10 @@ export interface MusicInput {
    *  之后——与月总同屏时月总曲胜出，故本字段在 pickMusic 内排在 bossMusic 之后判定
    *  （文档 §5 写"与 moonMusic 同层其后"，与源码冲突处以源码为准） */
   lunarMusic?: number;
+  /** 八音盒曲目 style（SceneMetrics.musicBoxStyle；-1/缺省 = 无）。
+   *  原版 Main.cs:11002-11405：ActiveMusicBox ≥ 0 时在 DecideOnNewMusic 之后覆盖 newMusic
+   *  ——优先级高于一切（含月事件/Boss 曲）；style 100 = 静音（MusicBoxSilence → newMusic=0） */
+  musicBox?: number;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -120,6 +125,12 @@ export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: nu
  *  19 雨只在森林白天/夜晚/神圣地表，52 风暴只在丛林/神圣地表与非特殊地表尾槽 */
 export function pickMusic(inp: MusicInput): number {
   const s = inp.scene;
+  // 八音盒（Main.cs:11002-11405）：DecideOnNewMusic 之后覆盖 newMusic = 全链最高优先级。
+  // style 100 = 静音（MusicBoxSilence → flag2 → newMusic=0）；表外 style 缺映射 → 不覆盖
+  // （原版 if-chain 无匹配分支时保留 DecideOnNewMusic 结果）
+  const mb = inp.musicBox ?? -1;
+  if (mb >= 0 && mb <= 99 && MB_STYLE_TO_MUSIC[mb] !== undefined) return MB_STYLE_TO_MUSIC[mb]!;
+  if (mb === 100) return MUSIC.None;
   const lavaLine = inp.lavaLine;
   const halfScreen = 400; // 原版 screenHeight/2（AssumedConstantScreenSize 1200/2≈600，本仓库视口 800/2）
   const belowHalf = inp.centerY > inp.worldSurface * 16 + halfScreen; // 原版 Center.Y > worldSurface*16 + screenHeight/2

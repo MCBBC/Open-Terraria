@@ -73,7 +73,12 @@ for (const idStr of Object.keys(vmeta)) {
   // ---- 武器 ----
   if ((f.damage ?? 0) > 0 && !toolPow && !f.createTile) {
     const c = COMBAT[idStr];
-    if (f.summon) push('召唤武器', '❌', '召唤物系统未移植');
+    if (f.summon) {
+      // R6：combatWeapon 解析 kind='summon'（哨兵分流 ai53/54/123）→ MinionProj
+      const cw = (globalThis as unknown as { __cw?: unknown }).__cw;
+      void cw;
+      push('召唤武器', c?.shoot ? '✅' : '❌', c?.shoot ? 'kind=summon（随从/哨兵 AI 近似）' : 'combat 表缺 shoot');
+    }
     else if (!c) push('武器', '❌', 'combat 表缺');
     else push('武器', '✅', `${f.melee ? '近战' : f.ranged ? '远程' : f.magic ? '魔法' : '通用'} dmg${f.damage}`);
   }

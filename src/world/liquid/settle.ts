@@ -1,6 +1,10 @@
 // 全图液体沉降（从 Game.settleLiquids 平移的纯函数，主线程 fallback 与 worker 共用）。
 // mode='gen'（新建世界）：原版 WorldGen pass 49/97 Settle Liquids（WorldGen.cs:16215+）——
 //   外层 10 轮跑到收敛，每轮上限 活量×5，清除生成期晚到的回流（漏斗入口等）。
+//   尾部 finalGenMergeCheck = 原版最终 pass 的全图 LiquidCheck(createMergeTilesDuringGen:
+//   true)（WorldGen.cs:22639-22650）：生成期常规交互只做类型 strip 不落块，唯独这一步
+//   允许残余静态接触结块。原版挂在终 pass；本仓库 gen 管线无对应终 pass，挂在 gen 模式
+//   尾部——pass 49 中途沉降也会各跑一次（时点略早于原版；金标 9293480 两侧均 0 块一致）。
 // mode='load'（读档）：原版 WorldFile.cs:738-770 时序 1:1——单轮上限 100000，
 //   不收敛的少量残留活水交给运行时（尾部 WaterCheck），与原版一致（无外层循环）。
 // yield 按真实耗时让出（≥32ms 一次）——worker 内也保留，让 progress postMessage 流出。
@@ -13,6 +17,10 @@ export async function settleWorldLiquids(
   onProgress?: (p: number) => void,
 ): Promise<void> {
   const sim = new LiquidSim(world);
+  // isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：生成与读档
+  // 两态都置位——CreateLiquidMergeTile 走 LiquidOverwriteStrip 分支不落块（防沉降期
+  // 全图结黑曜石），运行期由 Game.liquid 保持 false 走落块路径
+  sim.isGeneratingOrLoadingWorld = true;
   // 生成期标记：QuickWater 首尾跑 ShimmerRemoveWater（Liquid.cs:105-141 的
   // isGeneratingOrLoadingWorld 分支；读档 generatingWorld=false 该步骤早退）
   if (mode === 'gen') {
@@ -48,6 +56,9 @@ export async function settleWorldLiquids(
   }
   sim.quickSettle = false;
   sim.waterCheck(); // 残留活水交给运行时收敛（原版 WorldFile.cs:769 同款）
+  // 生成收尾：全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）
+  // ——生成/读档期常规交互只做类型 strip 不落块，唯独这一次允许残余接触结块
+  if (mode === 'gen') sim.finalGenMergeCheck();
   sim.dispose();
   onProgress?.(1);
 }

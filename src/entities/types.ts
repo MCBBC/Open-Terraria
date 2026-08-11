@@ -17,6 +17,8 @@ export interface GameHooks {
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string): void;
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
+  /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
+  placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 出生敌人 */

@@ -534,6 +534,8 @@ export class UI {
     this.root.appendChild(this.tooltip);
 
     game.openChest = (c) => this.openChestPanel(c);
+    // 当前打开箱子引用（Game 提取机通电 Wiring.cs:2571 Chest.UsingChest 判定用）
+    game.openChestRef = () => this.openChest;
   }
 
   slotEl(i: number, where: SlotWhere): HTMLElement {

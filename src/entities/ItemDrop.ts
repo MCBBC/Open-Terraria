@@ -41,7 +41,9 @@ export class ItemDrop extends Entity {
       // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
       const GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0)
         // 拾心药水（lifeMagnet）：红心单独扩大拾取范围
-        + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0);
+        + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0)
+        // 魔力磁石（manaMagnet：星 184/1735/1868 专用吸附，Player.cs:34495 专属拉取通道）
+        + (this.pickup === 'star' ? ((player as { manaMagnetBonus?: number }).manaMagnetBonus ?? 0) : 0);
       const touching =
         this.x < player.x + player.w && this.x + this.w > player.x &&
         this.y < player.y + player.h && this.y + this.h > player.y;

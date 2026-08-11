@@ -78,6 +78,8 @@ export enum BuffType {
   Dangersense = 53,   // 危险感(111)：陷阱高亮
   Hunter = 54,        // 狩猎(17)：小动物高亮（detectCreature :9719）
   BiomeSight = 55,    // 群系视觉(343)：邪恶/神圣方块高亮
+  Luck = 56,           // 幸运(257)：luckPotion 三档（buffTime>600s=3/>300s=2）×0.1（:9971/:28674）
+  Summoning = 57,      // 召唤(110,480s)：maxMinions+1（:9855）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -140,6 +142,8 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Dangersense]: { vanillaBuff: 111, descKey: 'Mods.SandboxWorld.Buff.Dangersense.Desc', fallbackName: '危险感' },
   [BuffType.Hunter]: { vanillaBuff: 17, descKey: 'Mods.SandboxWorld.Buff.Hunter.Desc', fallbackName: '狩猎' },
   [BuffType.BiomeSight]: { vanillaBuff: 343, descKey: 'Mods.SandboxWorld.Buff.BiomeSight.Desc', fallbackName: '生物群系视觉' },
+  [BuffType.Luck]: { vanillaBuff: 257, descKey: 'Mods.SandboxWorld.Buff.Luck.Desc', fallbackName: '幸运' },
+  [BuffType.Summoning]: { vanillaBuff: 110, descKey: 'Mods.SandboxWorld.Buff.Summoning.Desc', fallbackName: '召唤' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

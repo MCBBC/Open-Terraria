@@ -36,6 +36,9 @@ export interface WeatherCtx {
   worldSurface: number;
   /** 视口中心 Y px（atmo 公式的 y） */
   viewCenterY: number;
+  /** Main.BackgroundEnabled（Main.cs:790，设置项"背景: 开/关"，默认 true）。
+   *  cloudBGAlpha 渐变门（Main.cs:58783）；缺省 true 与原版默认一致 */
+  backgroundEnabled?: boolean;
   /** 金币雨掉落回调（WorldGen.cs:71817-71858：type 71 银/72 金/73 铂金） */
   onCoinRain?: (x: number, y: number, type: 71 | 72 | 73, stack: number) => void;
   /** 雷声落点回调（thunderDelay 归零时；参数 = 与玩家的距离 px，已含方向由 Game 决定播放） */
@@ -434,8 +437,12 @@ export class WeatherState {
       this.cloudAlpha -= step;
       if (this.cloudAlpha < 0) this.cloudAlpha = 0;
     }
-    // cloudBGAlpha（阴天渐变）：地表才有（我们按 atmo>0.5 近似 BackgroundEnabled 门）
-    if (ctx.atmo > 0.5) {
+    // cloudBGAlpha（阴天渐变）门（Main.cs:58776-58791）：
+    //   !drunkWorldGen && ShouldDrawSurfaceBackground() && BackgroundEnabled
+    //   && screenPosition.Y/16 <= worldSurface + 10
+    // drunkWorldGen/ShouldDrawSurfaceBackground 的 remix·drunk·全屏地图分支本仓库
+    // 无对应体系（恒真），保留 BackgroundEnabled 设置项与深度门
+    if ((ctx.backgroundEnabled ?? true) && ctx.viewCenterY / 16 <= ctx.worldSurface + 10) {
       if (this.cloudBGActive > 0) {
         this.cloudBGAlpha += step;
         if (this.cloudBGAlpha > 1) this.cloudBGAlpha = 1;

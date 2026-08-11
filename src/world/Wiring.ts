@@ -30,6 +30,13 @@ export const TOOL_CUTTER = 32;
 const MAX_PUMP = 20;   // Wiring.cs:34(MaxPump=20,填充上限 19)
 const MAX_MECH = 1000; // Wiring.cs:41(MaxMech=1000,注册上限 999)
 
+/** TileID.Sets.PreventsActuationUnder（TileID.cs:313）：下方不可被致动器缩入的承载物。
+ *  旧表只列宝箱族/祭坛（21/88/467/237），漏音乐盒 26/花盆 77/垃圾桶 470/475/
+ *  茶壶 597/饼干 441/望远镜 468 */
+const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 597, 441, 468]);
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 树干承载检查用 */
+const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
+
 export class Wiring {
   readonly st: TileStore;
   /** 器件表(P3 注入) */
@@ -580,24 +587,63 @@ export class Wiring {
     else this.deActive(i, j);
   }
 
-  /** 缩入(:2373-2396):蜥蜴砖(地表下未杀花)/宝箱顶限制 */
+  /** 缩入（Wiring.cs:3222-3251 DeActive 1:1）：蜥蜴砖地表限制 + 不可缩 tile 表 +
+   *  上方 PreventsActuationUnder / CanKillTile 结构检查 */
   private deActive(i: number, j: number): void {
     const st = this.st;
     if (!st.inBounds(i, j)) return;
     const t = this.p2i(i, j);
-    if (st.type[t] === 0) return;
-    if (this.sheetAt(i, j) === 226 && j > this.worldSurface && !this.planteraDowned) return;
+    if (!st.flags[t]) return;
+    const sh = this.sheetAt(i, j);
+    if (sh === 226 && j > this.worldSurface && !this.planteraDowned) return;
+    // flag = tileSolid && !NotReallySolid{387,388,10}；314/379/386-389/476 显式置 false
+    // （Wiring.cs:3227-3239；379 boulder 此前漏列）
     const def = TILE_DEFS[st.type[t]];
     let solid = !!def?.solid;
-    const sh = this.sheetAt(i, j);
-    if (sh === 314 || sh === 386 || sh === 387 || sh === 388 || sh === 389 || sh === 476) solid = false;
-    // 上方是宝箱/祭坛则拒绝(:2389,CanKillTile 近似:实心即可杀)
+    if (sh === 314 || sh === 379 || sh === 386 || sh === 387 || sh === 388 || sh === 389 || sh === 476) solid = false;
+    if (sh === 387 || sh === 388 || sh === 10) solid = false; // TileID.Sets.NotReallySolid（TileID.cs:355）
     if (!solid) return;
-    if (st.inBounds(i, j - 1) && st.type[this.p2i(i, j - 1)] !== 0) {
+    // 门（Wiring.cs:3241）：上方未激活，或（上方非 PreventsActuationUnder 且 CanKillTile）
+    if (st.inBounds(i, j - 1) && st.flags[this.p2i(i, j - 1)]) {
       const above = this.sheetAt(i, j - 1);
-      if (above === 21 || above === 88 || above === 467 || above === 237) return; // 宝箱族/祭坛
+      if (PREVENTS_ACTUATION_UNDER.has(above)) return;
+      if (!this.canKillTile(i, j)) return;
     }
     st.setActuated(i, j, true);
+  }
+
+  /** WorldGen.CanKillTile 结构子集（WorldGen.cs:62249-62358，致动缩入门用）：
+   *  未激活/魔法冰墙 350 → false；上方是异种树干/宝箱族/棕榈/雕像承载位 → false。
+   *  Boulders+CheckBoulderChest/IsLockedDoor/Chest.CanDestroyChest（容器战利品）
+   *  依赖容器内容与门锁系统，未接入——恒按"可杀"处理（注释登记） */
+  private canKillTile(i: number, j: number): boolean {
+    const st = this.st;
+    if (!st.inBounds(i, j)) return false;
+    const t = this.p2i(i, j);
+    if (!st.flags[t]) return false;
+    if (st.wall[t] === 350) return false;
+    const mySheet = this.sheetAt(i, j);
+    if (j >= 1) {
+      const a = this.p2i(i, j - 1);
+      if (st.flags[a]) {
+        const above = this.sheetAt(i, j - 1);
+        if (above !== mySheet) {
+          // IsATreeTrunk{5,72,583-589,596,616,634}：上方异种树干段不可缩（分支/树顶帧豁免）
+          if (IS_A_TREE_TRUNK.has(above)) {
+            const fx = st.frameX[a], fy = st.frameY[a];
+            const branchExempt = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110);
+            if (!branchExempt && fy < 198) return false;
+          }
+          // 棕榈 323：左右枝帧不可缩
+          if (above === 323 && (st.frameX[a] === 66 || st.frameX[a] === 220)) return false;
+          // 宝箱/梳妆台/雕像承载位（62290-62305）
+          if (above === 21 || above === 26 || above === 72 || above === 77 || above === 88 || above === 467 || above === 488) return false;
+          if (above === 80 && st.frameX[a] / 18 <= 1) return false;
+          if (above === 80 && st.frameX[a] / 18 >= 4 && st.frameX[a] / 18 <= 5) return false;
+        }
+      }
+    }
+    return true;
   }
 
   private reActive(i: number, j: number): void {

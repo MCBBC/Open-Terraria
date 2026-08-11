@@ -608,7 +608,8 @@ export function iceQueenAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (e.ai1 > 600) e.ai0 = -1;
   } else if (e.ai0 === 2) {
     // 自旋环射(:33777-33834)：原速 0.95 衰减 + rotation+=0.2；随机方向 15 速，
-    // 出膛点 (cx,cy-20)+方向*4；节拍 7-6-2-3(负!) <10% 血时每 tick 一发 349（伤 35）
+    // 出膛点 (cx,cy-20)+方向*4；节拍 7/6/4/1/-3（<10% 血时 ai[3]>负数恒真 → 每 tick 一发）
+    // 349（伤 35）
     let dx = rndRange(-1000, 1001), dy = rndRange(-1000, 1001);
     const d = Math.hypot(dx, dy) || 1;
     const k = 15 / d;

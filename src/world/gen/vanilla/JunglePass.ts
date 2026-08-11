@@ -25,7 +25,8 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
     y = Math.max(gs.rockLevel, Math.min(h, y)); // 原版 clamp 上界 = maxTilesY（H 非 H-1）
   };
   const placeFirstPassMud = (xSpeedScale: number) => {
-    const str = rng.int(Math.floor(250 * scale), Math.floor(500 * scale));
+    // 原版 Next((int)(250*ws), (int)(500*ws)) 上界开 → int(a, b-1)（曾多 1 档值）
+    const str = rng.int(Math.floor(250 * scale), Math.floor(500 * scale) - 1);
     // 原版步数固定 50-150 不缩放(speedX=±3 → 漂移 ≤450;4200 宽的 10.7%)
     const stp = rng.int(50, 149);
     tileRunner(st, rng, gs, x, y, { strength: str, steps: stp, type: MUD, speedX: gs.dungeonSide * xSpeedScale, speedY: 0, mudWall: true });
@@ -44,20 +45,21 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   applyRandomMovement(100, 100);
   zeroX += x; zeroY += y;
   placeFirstPassMud(3);
-  placeGemsAt(0, 2); // 蓝宝石 63
+  placeGemsAt(0, 2);
   applyRandomMovement(250, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(0);
-  placeGemsAt(2, 2); // 祖母绿 65
+  placeGemsAt(2, 2);
   const oldX = x, oldY = y;
   applyRandomMovement(400, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(-3);
-  placeGemsAt(4, 2); // 黄玉 67
+  placeGemsAt(4, 2);
 
   // 巨型泥 runner:三次移动点的均值为中心
   const cx = Math.floor(zeroX / 3), cy = Math.floor(zeroY / 3);
-  const num2 = rng.int(Math.floor(400 * scale), Math.floor(600 * scale));
+  // 原版 Next((int)(400*ws), (int)(600*ws)) 上界开（曾闭区间多 1 档）
+  const num2 = rng.int(Math.floor(400 * scale), Math.floor(600 * scale) - 1);
   const num3 = Math.floor(25 * scale);
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1

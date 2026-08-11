@@ -12,7 +12,9 @@ export type SfxName =
   | 'throw'      // 原版 SoundID.Item1（手里剑/投掷刀 UseSound）
   | 'explosion'  // 原版 SoundID.Item14（爆炸通用：手雷/炸弹/炸药/巨石,Projectile.cs 20+ 处）
   | 'beeSummon'  // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
-  | 'thunder';   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
+  | 'thunder'   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
+  | 'mech'       // 原版 SoundID 28（Mech_0：器件右键切换音，Player.cs:31762/31799/31803）
+  | 'portalOrange' | 'portalBlue'; // 原版 Item_115 / Item_114（传送门弹撞块落门音，Projectile.cs:16675-16683）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -42,6 +44,9 @@ const WAV_MAP: Record<SfxName, string[]> = {
   explosion: ['Item_14'],
   beeSummon: ['Item_173'],
   thunder: ['Thunder_0', 'Thunder_1', 'Thunder_2', 'Thunder_3', 'Thunder_4', 'Thunder_5'],
+  mech: ['Mech_0'],
+  portalOrange: ['Item_115'],   // form 0（ai[1]==0 → Item115，Projectile.cs:16675-16683）
+  portalBlue: ['Item_114'],     // form 1
   // 以下无原版素材，走合成
   drink: [],
 };

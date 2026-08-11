@@ -16,8 +16,9 @@ export interface DeviceCtx {
   mechSpawnOk(px: number, py: number, type: number): boolean;
   /** Item.MechSpawn（Item.cs:48982-49013）：同 item 300px≥3 / 800px≥6 / 全图≥10 拒绝 */
   itemSpawnOk(px: number, py: number, type: number): boolean;
-  /** 投射物(飞镖/火焰/尖刺球/炮弹/雪球):vx/vy px/tick */
-  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind): void;
+  /** 投射物(飞镖/火焰/尖刺球/炮弹/雪球):vx/vy px/tick。
+   *  form = 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：ammo4→0 橙 / ammo5→1 蓝） */
+  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form?: number): void;
   /** 统计附近某类投射物数量(尖刺球惩罚表/兔兔炮场内上限用) */
   countProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
@@ -31,6 +32,15 @@ export interface DeviceCtx {
   explode(tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean): void;
   toast(msg: string): void;
   sfx(name: string, x?: number, y?: number): void; // 带坐标时按距离衰减/超距静音
+  /** 广播盒（425）：锚点 (x,y) 起的 2×2 内告示牌文本广播；无牌由引擎侧静默 */
+  announce?(x: number, y: number): void;
+  /** 派对纪念碑（455）：BirthdayParty.ToggleManualParty */
+  toggleParty?(): void;
+  /** 提取机通电转化（Wiring.cs:2572-2592 Extractinator）：锚点邻域箱子里自后向前找
+   *  首个可提取物，消耗 1 并返回产物 {itemType, stack}；无箱/箱内无可转化返回 null */
+  extractinatorPull(ax: number, ay: number, blockType: number): { itemType: number; stack: number } | null;
+  /** 按原版 item id 掉落指定数量（提取机产物带 stack，钱币走 coin 体系） */
+  dropItemStack(vanillaItemId: number, stack: number, px: number, py: number): void;
   /** worldSurface(部分器件判定) */
   worldSurface: number;
 }
@@ -85,6 +95,139 @@ function flipCell(w: Wiring, x: number, y: number, delta: number): void {
   let d = delta;
   if (st.frameX[i] >= delta) d = -delta;
   st.setTile(x, y, st.type[i], st.frameX[i] + d, st.frameY[i]);
+}
+
+// ============ 器件态机族：八音盒 / 喷泉 / 天塔柱（原版"帧带 = 开关态"系统） ============
+// 原版语义：Switch* 只翻帧（WorldGen.cs:50977-51209），激活态由 SceneMetrics 每帧扫描
+// 视区 tile 帧读出（SceneMetrics.cs:471-585）→ BGM 覆盖（Main.cs:11002）/ 水色
+// （Main.cs:56766-56770）/ 天空滤镜（SceneState.cs:111-115）。下方 *Of 为扫描侧共用读取器。
+
+/** 音乐盒 style → MusicID 全表（Main.cs:11002-11403 ActiveMusicBox if-chain，100 条；
+ *  style = tile 139 frameY/36，即放置物品 placeStyle = 曲目号）。
+ *  style 100 = 静音（SceneMetrics.cs:474-480 frameY/36==100 → MusicBoxSilence）。
+ *  【依赖登记】录制机制（空盒放置后 5 分钟内录当前曲，Player/Item 侧改 frameY）未移植；
+ *  唱片物品的 placeStyle→曲目链在本表，放置物品接入后即全量生效 */
+export const MB_STYLE_TO_MUSIC: readonly number[] = [
+  1, 2, 3, 6, 4, 5, 7, 8, 10, 9,
+  12, 11, 13, 14, 15, 16, 17, 18, 19, 20,
+  21, 22, 23, 24, 25, 26, 27, 29, 30, 31,
+  32, 33, 38, 37, 35, 36, 34, 39, 40, 41,
+  44, 48, 42, 43, 46, 47, 49, 51, 52, 53,
+  54, 55, 56, 57, 58, 59, 60, 61, 62, 63,
+  64, 65, 66, 67, 68, 69, 70, 71, 72, 73,
+  74, 75, 76, 77, 78, 79, 80, 81, 82, 83,
+  84, 85, 86, 87, 88, 89, 90, 91, 93, 96,
+  95, 94, 97, 98, 92, 99, 101, 100, 104, 103,
+];
+
+/** 喷泉 style → 水色 id（SceneMetrics.cs:488-523 frameX/36 → ActiveFountainColor） */
+const FOUNTAIN_COLOR = [0, 12, 3, 5, 2, 10, 4, 9, 8, 6];
+
+/** 八音盒态（SceneMetrics.cs:471-486）：frameX≥36 = 开；曲目 = frameY/36；-1 = 关 */
+export function musicBoxStyleOf(frameX: number, frameY: number): number {
+  if (frameX < 36) return -1;
+  return Math.floor(frameY / 36);
+}
+
+/** 喷泉态（SceneMetrics.cs:487-523）：frameY≥72 = 开；-1 = 关 */
+export function fountainColorOf(frameX: number, frameY: number): number {
+  if (frameY < 72) return -1;
+  return FOUNTAIN_COLOR[Math.floor(frameX / 36)] ?? -1;
+}
+
+/** 天塔柱类型（SceneMetrics.cs:524-541）：410=style(frameX/36, 0星璇/1星云/2星尘/3耀斑)、
+ *  509=4 月总；-1 = 关。480 血月柱走 bloodMoonMonolithOf。
+ *  【依赖登记】657 回声/658 微光/720 CRT/721 复古/725 黑白/733 收音机柱的屏幕滤镜未接入 */
+export function monolithTypeOf(sheet: number, frameX: number, frameY: number): number {
+  if (sheet === 410) return frameY >= 56 ? Math.floor(frameX / 36) : -1;
+  if (sheet === 509) return frameY >= 56 ? 4 : -1;
+  return -1;
+}
+
+/** 血月柱（SceneMetrics.cs:542-546：480 frameY≥54 → BloodMoonMonolith →
+ *  Main.cs:61417 并入 BloodMoonActive） */
+export function bloodMoonMonolithOf(sheet: number, frameY: number): boolean {
+  return sheet === 480 && frameY >= 54;
+}
+
+/** SwitchMB（WorldGen.cs:50977-51021 1:1）：八音盒 139 / 南瓜灯 35 共用。
+ *  锚点：num3 = frameY/18 对 2 取余（行内偏移）、num4 = frameX/18 ≥2 再减 2（列内偏移）；
+ *  2×2 区内 139/35 格 frameX ±36（<36 → +36，否则 -36），整体 SkipWire。
+ *  电路触发（Wiring.cs:2019-2022）与右键（Player.cs:31759-31764，多播 SoundID 28）共用 */
+export function switchMB(w: Wiring, x: number, y: number): void {
+  const st = w.st;
+  const i = st.idx(x, y);
+  let num3 = Math.floor(st.frameY[i] / 18);
+  while (num3 >= 2) num3 -= 2;
+  let num4 = Math.floor(st.frameX[i] / 18);
+  if (num4 >= 2) num4 -= 2;
+  const ox = x - num4, oy = y - num3;
+  for (let k = ox; k < ox + 2; k++) {
+    for (let l = oy; l < oy + 2; l++) {
+      if (!st.inBounds(k, l)) continue;
+      const sh = w.sheetOf(k, l);
+      if (sh !== 139 && sh !== 35) continue;
+      const ii = st.idx(k, l);
+      const fx = st.frameX[ii] < 36 ? st.frameX[ii] + 36 : st.frameX[ii] - 36;
+      st.setTile(k, l, st.type[ii], fx, st.frameY[ii]);
+    }
+  }
+  w.skipCell(ox, oy); w.skipCell(ox + 1, oy);
+  w.skipCell(ox, oy + 1); w.skipCell(ox + 1, oy + 1);
+}
+
+/** SwitchFountain（WorldGen.cs:51171-51209 1:1）：喷泉 207，2×4 区 frameY ±72。
+ *  锚点：num3 = frameX/18 对 2 取余、num4 = frameY/18 ≥4 再减 4 */
+export function switchFountain(w: Wiring, x: number, y: number): void {
+  const st = w.st;
+  const i = st.idx(x, y);
+  let num3 = Math.floor(st.frameX[i] / 18);
+  while (num3 >= 2) num3 -= 2;
+  let num4 = Math.floor(st.frameY[i] / 18);
+  if (num4 >= 4) num4 -= 4;
+  const ox = x - num3, oy = y - num4;
+  for (let k = ox; k < ox + 2; k++) {
+    for (let l = oy; l < oy + 4; l++) {
+      if (!st.inBounds(k, l)) continue;
+      w.skipCell(k, l);   // 原版 2×4 全区 SkipWire（:51200-51207，先于类型判定）
+      if (w.sheetOf(k, l) !== 207) continue;
+      const ii = st.idx(k, l);
+      const fy = st.frameY[ii] < 72 ? st.frameY[ii] + 72 : st.frameY[ii] - 72;
+      st.setTile(k, l, st.type[ii], st.frameX[ii], fy);
+    }
+  }
+}
+
+/** SwitchMonolith（WorldGen.cs:51023-51169 1:1）：天塔柱族 frameY 翻转。
+ *  区块 2×3（733 为 3×3）；410 阈值 56，其余 54；658 为 +54 对 162 取模循环（三态）。
+ *  电路触发（Wiring.cs:2032-2036）与右键（Player.cs:31801-31808）共用 */
+export function switchMonolith(w: Wiring, x: number, y: number): void {
+  const st = w.st;
+  const i = st.idx(x, y);
+  const sheet = w.sheetOf(x, y);
+  const bw = sheet === 733 ? 3 : 2;   // :51026-51028
+  const bh = 3;
+  let num3 = Math.floor(st.frameX[i] / 18);
+  while (num3 >= bw) num3 -= bw;
+  let num4 = Math.floor(st.frameY[i] / 18);
+  while (num4 >= bh) num4 -= bh;
+  const ox = x - num3, oy = y - num4;
+  for (let k = ox; k < ox + bw; k++) {
+    for (let l = oy; l < oy + bh; l++) {
+      if (!st.inBounds(k, l)) continue;
+      w.skipCell(k, l);   // 原版全区 SkipWire（:51156-51166，先于类型判定）
+      const sh = w.sheetOf(k, l);
+      if (sh < 0) continue;
+      const ii = st.idx(k, l);
+      let fy = st.frameY[ii];
+      if (sh === 410) fy = fy < 56 ? fy + 56 : fy - 56;
+      else if (sh === 658) fy = (fy + 54) % 162;   // :51131-51140
+      else if (sh === 480 || sh === 509 || sh === 657 || sh === 720 || sh === 721 || sh === 725 || sh === 733) {
+        fy = fy < 54 ? fy + 54 : fy - 54;
+      } else continue;
+      st.setTile(k, l, st.type[ii], st.frameX[ii], fy);
+    }
+  }
 }
 
 /** 陷阱(137)发射(Wiring.cs:1495-1743 + Item.cs placeStyle)。frameY/18=种类:
@@ -324,10 +467,15 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 34: // 吊灯 3×3 frameX ±54(:1405-1428)
       flipBlock(w, x, y, 108, 54, 3, 3, 'x', 54, 54);
       return true;
-    case 35: case 139: case 207: case 410: case 480: case 509:
-      // 南瓜灯/八音盒/喷泉/三色天塔柱:原版 SwitchMB/SwitchFountain/SwitchMonolith。
-      // 引擎暂无对应状态系统 → toast 占位
-      ctx.toast('装置切换(音乐/喷泉/天塔柱系统未接入)');
+    case 35: case 139: // 南瓜灯/八音盒：SwitchMB（WorldGen.cs:50977-51021；Wiring.cs:2019-2022）
+      switchMB(w, x, y);
+      return true;
+    case 207: // 喷泉：SwitchFountain（WorldGen.cs:51171-51209；Wiring.cs:2023）
+      switchFountain(w, x, y);
+      return true;
+    case 410: case 480: case 509: case 657: case 658: case 720: case 721: case 725: case 733:
+      // 天塔柱族：SwitchMonolith（WorldGen.cs:51023-51169；Wiring.cs:2032-2036）
+      switchMonolith(w, x, y);
       return true;
     case 42: // 挂链灯笼 1×2 frameX ±18(:1214-1227)
       flipBlock(w, x, y, 36, 36, 1, 2, 'x', 18, 18);
@@ -364,6 +512,20 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 149: // 节日彩灯 frameX ±54(:1244-1250)
       flipCell(w, x, y, 54);
       return true;
+    case 219:
+    case 642: { // 提取机（Wiring.cs:1993-1995 → Extractinator :2563-2593）：
+      // 通电自动消耗邻域箱子里的可提取物。锚点按 3×3(54px) 帧内偏移回算（:2567-2568），
+      // 冷却 checkMech 60t（:2569/:2571）；箱子查找/消耗/掉落在 ctx（Game 侧拥有箱子与物品栏）。
+      const ax = x - Math.floor(st.frameX[i] % 54 / 18);
+      const ay = y - Math.floor(st.frameY[i] % 54 / 18);
+      if (!w.checkMech(ax, ay, 60)) return true;
+      const out = ctx.extractinatorPull(ax, ay, sheet);
+      if (out && out.itemType > 0) {
+        // :2588 Item.NewItem(num*16, num2*16, 32, 32) → 锚点 2×2 判定框中心
+        ctx.dropItemStack(out.itemType, out.stack, ax * 16 + 16, ay * 16 + 16);
+      }
+      return true;
+    }
     case 209: { // 大炮（Wiring.cs:1237-1346 1:1）：旋转+开火复合状态机。
       // num31=块内列(0/3=旋转态,1/2=待发) num32=行内偏移 num35=仰角带(frameY/54,0-8)
       // num36=水平带(frameX/72: 0/1=右向 大炮/兔兔炮, 3/4=左向)
@@ -431,9 +593,11 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         if (num35 === 4) px += 5;
         py += 5;
       }
-      // num36 3/4 原版发 PortalGunBolt 601（WorldGen.cs:50622-50631）——传送门弹未实现，
-      // 沿用巨石弹体近似（速度/伤害/位置已按原版）
-      const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny' : 'boulder';
+      // num36 3/4 原版发 PortalGunBolt 601（WorldGen.cs:50622-50631）：速度 3、damage 0、
+      // ai[0] = ammo5 ? 1 : 0（传送门 form，橙 0/蓝 1）。撞块 → PortalHelper.TryPlacingPortal
+      // 落门（entities/Portal.ts），不再沿用巨石弹体
+      const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny' : 'portalbolt';
+      const form = num36 === 4 ? 1 : 0; // :50622-50631（ammo4 → ai0=0 / ammo5 → ai0=1）
       // 全局冷却置位（Wiring.cs:1334-1339：大炮 120 / 兔兔炮 480）——先于弹内判定，
       // 与原版一致（冷却在 HitWireSingle 置位，BunnyCannonCanFire 在 ShootFromCannon 内）
       if (num36 === 0) w.cannonCoolDown = 120;
@@ -441,7 +605,7 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :50722-50760：
       //   NPC614+弹281 计数 ≥4 拒绝；NPC614 无对应实体，此处只数 281 弹）
       if (kind === 'bunny' && ctx.countProjectiles('bunny', px, py, Infinity) >= 4) return true;
-      ctx.shootProjectile(px, py, vx, vy, damage, kind);
+      ctx.shootProjectile(px, py, vx, vy, damage, kind, form);
       return true;
     }
     case 210: // 地雷 ExplodeMine(:3093)：清格 + Projectile 164(250伤)——
@@ -512,7 +676,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       if (to) st.setTile(x, y, to, st.frameX[i], st.frameY[i]);
       return true;
     }
-    case 314: // 压板轨道:CheckMech 5 + FlipSwitchTrack(:1429-1433;矿车系统占位)
+    case 314: // 压板轨道（Wiring.cs:1429-1433）：CheckMech 5 + FlipSwitchTrack 翻转轨道指向。
+      // 【依赖登记】FlipSwitchTrack 依赖矿车轨道系统（轨道帧族 314 的箭头帧语义），
+      // 矿车系统接入前只走冷却注册，不翻帧
       w.checkMech(x, y, 5);
       return true;
     case 335: // 烟花盒 2×2(:1294-1304)
@@ -569,10 +735,21 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       if (other) st.setTile(x, y, other, st.frameX[i], st.frameY[i]);
       return true;
     }
-    case 425: // 广播盒:读木牌文本聊天近似(:1087-1131;引擎无木牌系统)
-      w.skipCell(x, y); w.skipCell(x + 1, y);
-      ctx.toast('📢 广播盒触发');
+    case 425: { // 广播盒（Wiring.cs:1177-1230 1:1）：锚点 2×2 内登记的告示牌文本 →
+      // 粉色聊天广播（NewTextMultiline）；无牌/空文本静默返回。
+      // AnnouncementBoxRange 默认 -1 = 全图（设置项，引擎暂未接设置门，恒全图）。
+      // 【依赖登记】牌面文字编辑 UI 未接入（现存 signs 只读：墓碑/导入存档）
+      const num5 = Math.floor(st.frameX[i] % 36 / 18);
+      const num6 = Math.floor(st.frameY[i] % 36 / 18);
+      const ox = x - num5, oy = y - num6;
+      for (let m = ox; m < ox + 2; m++) {
+        for (let n = oy; n < oy + 2; n++) {
+          if (st.inBounds(m, n)) w.skipCell(m, n);
+        }
+      }
+      ctx.announce?.(ox, oy);
       return true;
+    }
     case 442: return true; // 投射物垫板(触发源侧处理)
     case 443:
       geyserTrap(w, ctx, x, y);
@@ -580,8 +757,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 452: // 呆萌气球机 3×3 frameX ±54(:1132-1149)
       flipBlock(w, x, y, 54, 54, 3, 3, 'x', 54, 54);
       return true;
-    case 455: // 派对中心(:1789-1791;派对系统占位)
-      ctx.toast('🎉 派对开始!');
+    case 455: // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty，
+      // BirthdayParty.cs:145-163）：切换 ManualParty（开→升气球天/彩带，入夜 CheckNight 结束）
+      ctx.toggleParty?.();
       return true;
     case 476: return true; // 高尔夫球洞(无高尔夫系统)
     case 497: // 马桶(frameY/40,同 case 15 分支)

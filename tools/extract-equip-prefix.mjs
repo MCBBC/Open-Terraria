@@ -99,9 +99,12 @@ const MOUNT_TYPE = scanCaseFields(itemSrc, ['\\bmountType\\s*=\\s*(-?\\d+);', 'D
 // 槽位归属：headSlot/bodySlot/legSlot 赋值即对应部位（值是绘制槽序号非部位，仅判有无）。
 // 防御值：`defense = N;` 字面量（269 处全字面量，无表达式/辅助方法）。
 // 配饰：`accessory = true;`；vanity=true 的社交配饰 acc:0（可入时装配饰槽、无功能效果）。
-const HEAD = new Set(scanCaseFields(itemSrc, ['\\bheadSlot\\s*=\\s*(\\d+);']).keys());
-const BODY = new Set(scanCaseFields(itemSrc, ['\\bbodySlot\\s*=\\s*(\\d+);']).keys());
-const LEGS = new Set(scanCaseFields(itemSrc, ['\\blegSlot\\s*=\\s*(\\d+);']).keys());
+const HEAD_SLOT = scanCaseFields(itemSrc, ['\\bheadSlot\\s*=\\s*(\\d+);']);
+const BODY_SLOT = scanCaseFields(itemSrc, ['\\bbodySlot\\s*=\\s*(\\d+);']);
+const LEGS_SLOT = scanCaseFields(itemSrc, ['\\blegSlot\\s*=\\s*(\\d+);']);
+const HEAD = new Set(HEAD_SLOT.keys());
+const BODY = new Set(BODY_SLOT.keys());
+const LEGS = new Set(LEGS_SLOT.keys());
 const DEFENSE = scanCaseFields(itemSrc, ['\\bdefense\\s*=\\s*(\\d+);']);
 // 生命回复（Item.lifeRegen 字段——再生手环族；GrantArmorBenefits :12700 lifeRegen += armorPiece.lifeRegen）
 const LIFEREGEN = scanCaseFields(itemSrc, ['\\blifeRegen\\s*=\\s*(\\d+);']);
@@ -109,9 +112,9 @@ const ACCESSORY = new Set(scanCaseFields(itemSrc, ['\\baccessory\\s*=\\s*true;']
 const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
 const STATS = {};
 const setStat = (vid, patch) => { STATS[vid] = { ...(STATS[vid] ?? {}), ...patch }; };
-for (const vid of HEAD) setStat(vid, { s: 'h' });
-for (const vid of BODY) setStat(vid, { s: 'b' });
-for (const vid of LEGS) setStat(vid, { s: 'l' });
+for (const [vid, slot] of HEAD_SLOT) setStat(vid, { s: 'h', hs: slot });
+for (const [vid, slot] of BODY_SLOT) setStat(vid, { s: 'b', bs: slot });
+for (const [vid, slot] of LEGS_SLOT) setStat(vid, { s: 'l', ls: slot });
 for (const [vid, def] of DEFENSE) setStat(vid, { def });
 for (const [vid, reg] of LIFEREGEN) setStat(vid, { life: reg });
 for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
@@ -197,7 +200,9 @@ const ACC_PATTERNS = [
   ['tileRange', /equippedAnyTileRangeAcc = true;/],  // 工具射程 +
   ['skyStone', /skyStoneEffects = true;/],        // 天界石族：全属性复合（:12558）
   ['counterWeight', /counterWeight = \d+;/],      // 配重球（悠悠球命中触发，暂存）
-  ['manaMagnet', /manaMagnet = true;/],           // 魔力磁石（暂存）
+  ['manaMagnet', /manaMagnet = true;/],           // 魔力磁石：魔力星吸附
+  ['magicCuffs', /magicCuffs = true;/],           // 魔力手铐：受伤回蓝
+  ['manaFlower', /manaFlower = true;/],           // 磁花：耗魔 -8%+魔力不足自动喝蓝
   ['pStone', /pStone = true;/],                   // 贤者之石（药水 CD -25%，暂存）
 ];
 // 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）

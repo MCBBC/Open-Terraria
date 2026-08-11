@@ -424,7 +424,12 @@ export class Renderer {
     cam.viewW = viewW; cam.viewH = viewH;
     const z = cam.zoom;
 
-    // 1. 天空
+    // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线）
+    this.sky.fx = {
+      monolith: this.scene?.monolithType ?? -1,
+      party: !!this.scene?.partyUp,
+      surfaceY: world.groundLevel * TILE,
+    };
     this.sky.draw(ctx, clock, viewW, viewH, cam.x);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
@@ -442,6 +447,8 @@ export class Renderer {
       }
       this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
     }
+    // 1.6 天塔柱滤镜（SceneState → Filters.Scene["Monolith*"]；后处理层的背景子集近似）
+    this.sky.drawMonolithFilter(ctx, viewW, viewH);
 
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
@@ -764,11 +771,21 @@ export class Renderer {
    *  原版水色本身硬切,但持续 30t(≈0.5s)偏好不变才提交切换,切后 60t 冷却不再响应——
    *  群系边界来回抖动时不闪切;森林族 60t 差异省略,统一 30t 近似） */
   private wsDelay = 0;
-  /** 群系水色 1:1（Main.CalculateWaterStyle :56771-56824，fountain/天顶世界分支无对应系统跳过） */
+  /** 群系水色 1:1（Main.CalculateWaterStyle :56766-56824；喷泉/血月柱并入） */
   private updateWaterStyle(world: World, cam: { y: number }): void {
     const f = this.scene;
     if (!f) return;
-    const bloodMoon = !!world.clock?.bloodMoon;
+    // 喷泉（:56766-56770）：ActiveFountainColor ≥ 0 直接短路返回——无 bgDelay 迟滞，
+    // 立即生效立即失效；水色 id 与群系水色同一空间（0 普通 … 13 地狱）
+    const fountain = f.fountainColor ?? -1;
+    if (fountain >= 0) {
+      this.waterStyle = fountain;
+      this.wsDelay = 0;
+      return;
+    }
+    // 血月柱（SceneMetrics.BloodMoonMonolith → Main.cs:61417 并入 BloodMoonActive；
+    // CalculateWaterStyle 的血月分支读 Main.bloodMoon——柱激活时同色 9，白夜也生效）
+    const bloodMoon = (!!world.clock?.bloodMoon || !!f.bloodMoonMonolith);
     const dayTime = world.clock ? world.clock.isDay : true;
     let target = 0;
     if (bloodMoon && !dayTime) target = 9;
@@ -1207,7 +1224,8 @@ export class Renderer {
   //   mode 'frame'   同帧整图叠加（火星飞碟族/Betsy/暗黑魔法师/永恒水晶/银河织带）
   //   mode 'vel4'    以速度向量四向旋转偏移画 4 份灰 A=64 拷贝（四塔 + 火星飞骑 416）
   // 未接（登记）：Glow_100/101（case 94 前）、Glow_154（case 384 拖尾）、Glow_146
-  // （case 662 族）——这三处依赖 oldPos 拖尾链，本渲染层无逐 NPC 历史缓冲；
+  // （case 662 族）、Glow_156（火星飞骑 416 :24531-24535，同 vel4 模式但锚点是
+  // 底心 +4px 特例）——前三处依赖 oldPos 拖尾链，本渲染层无逐 NPC 历史缓冲；
   // Projectile glowMask（:34327-34378）与 Item glowMask（:38072-38213）不在本批。
   private static readonly NPC_GLOW: Record<number, { tex: string; mode: 'frame' | 'vel4' }> = {
     392: { tex: 'vanilla/Glow_48.png', mode: 'frame' },   // 火星飞碟主体（:24218 Color(200,200,200,0)）
@@ -1298,8 +1316,12 @@ export class Renderer {
     // 两侧上臂（:24346-24375）
     if (ex14) {
       for (let side = 0; side < 2; side++) {
+        // 原版按 npc[whoAmI] 全表扫 ai[2]==side && ai[3]==core.whoAmI（:24346-24353）——
+        // 我们的 AI 侧 ai3 = 核心实体 id（bossAI_duke_moonlord.ts moonLordHandAI 同语义）
         const hand = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead
-          && n.vanillaId === 397 && n.ai2 === side && (!n.master || n.master === e));
+          && n.vanillaId === 397 && n.ai2 === side && n.ai3 === e.id)
+          ?? (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead
+            && n.vanillaId === 397 && n.ai2 === side && (!n.master || n.master === e));
         if (!hand) continue;
         const [sx] = this.moonLordSideSign(side);
         const shx = e.cx + 220 * sx, shy = e.cy - 60;            // vector26（vector25.Y 恒 1）
@@ -1349,8 +1371,9 @@ export class Renderer {
    *  → 手本体帧（origin (120,180)）。瞳孔轨道用 lai0/lai1（原版 localAI[0]/[1]） */
   private drawMoonLordHand(e: Enemy, entities: unknown[]) {
     if (!this.atlas) return;
-    const core = (e.master && e.master.vanillaId === 398 ? e.master
-      : (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 398)) ?? null;
+    const core = ((entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.id === e.ai3 && n.vanillaId === 398)
+      ?? (e.master && e.master.vanillaId === 398 ? e.master
+        : (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 398))) ?? null;
     const ex15 = this.atlas.vmisc('vanilla/Extra_15.png');
     const ex17 = this.atlas.vmisc('vanilla/Extra_17.png');
     const ex19 = this.atlas.vmisc('vanilla/Extra_19.png');
@@ -1396,7 +1419,9 @@ export class Renderer {
         ctx.restore();
       }
       if (ex19) {
-        // 椭圆轨道瞳孔：Vector2FromElipse(rot(lai0), (30,66)×lai1) + (−signX,3)
+        // 椭圆轨道瞳孔：Vector2FromElipse(rot(localAI[0]), (30,66)×localAI[1]) + (−signX,3)。
+        // AI 侧轨道角/开度存于 handOf 内部态（渲染层不可达）——lai0/lai1 为 0 时
+        // 瞳孔静态居中（登记），容器 Extra_17/19 位置与镜像仍 1:1
         const th = e.lai0, k = e.lai1;
         const ex = Math.cos(th) * 30 * k, ey = Math.sin(th) * 66 * k;
         ctx.save();

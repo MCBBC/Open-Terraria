@@ -8,7 +8,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, W } from '../../../data/tiles';
+import { T } from '../../../data/tiles';
 
 const enum Feature { Plateau, Hill, Dale, Mountain, Valley }
 
@@ -90,11 +90,12 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
       if (y < surfTrunc) {
         st.type[i] = 0; st.flags[i] = 0;
       } else if (y < num3) {
+        // ★原版 FillColumn 只写 active+type 不刷墙（地下自然墙全部来自后置 pass：
+        // DirtWallBackgrounds 近地表 + CaveWallsInEnclosedSpaces(17819) 封闭腔 +
+        // digTunnel 无墙 + mudWall 丛林）。自刷渲染墙曾致 mudWall 分支短路分叉
         st.type[i] = T.DIRT; st.flags[i] = 1;
-        if (y > num2 + 3) st.wall[i] = W.DIRT;
       } else {
         st.type[i] = T.STONE; st.flags[i] = 1;
-        st.wall[i] = W.STONE;
       }
     }
     // 右海滩入口:若地表高于 maxSurf,回溯改写近 500 列向下收平(cs:196-204)

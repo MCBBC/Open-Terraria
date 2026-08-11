@@ -259,15 +259,15 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 int ti = y * W + x;
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
-                if (mudWallFlag && y > worldSurface && wal[y * W + x - 1] != 2
+                if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
                     && y < H - 210 - (int)r.Next(3)
                     && dist < strength * 0.45 * (1.0 + (int)r.Next(-10, 11) * 0.01))
                 {
                     if (y > lavaLine - (int)r.Next(0, 4) - 50)
                     {
-                        if (wal[y * W + x - 1] != 64 && wal[y * W + x + 1] != 64 && wal[y * W + x - W] != 64 && wal[y * W + x + W] != 64) wal[ti] = 15;
+                        if (wal[(y-1) * W + x] != 64 && wal[(y+1) * W + x] != 64 && wal[y * W + x - 1] != 64 && wal[y * W + x + 1] != 64) wal[ti] = 15;
                     }
-                    else if (wal[y * W + x - 1] != 15 && wal[y * W + x + 1] != 15 && wal[y * W + x - W] != 15 && wal[y * W + x + W] != 15)
+                    else if (wal[(y-1) * W + x] != 15 && wal[(y+1) * W + x] != 15 && wal[y * W + x - 1] != 15 && wal[y * W + x + 1] != 15)
                     {
                         wal[ti] = 64;
                     }
@@ -1174,20 +1174,24 @@ Checkpoint("grass");
             TileRunner(x + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), y + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), (int)r.Next(3, 7), (int)r.Next(3, 8), (int)r.Next(baseGem, baseGem + variants));
     }
     Move(ref jx, ref jy, 100, 100); zeroX += jx; zeroY += jy;
-    PlaceFirstPassMud(jx, jy, 3); PlaceGemsAt(jx, jy, 63, 2);
+    var CJP3 = new List<string>();
+    PlaceFirstPassMud(jx, jy, 3);
+    PlaceGemsAt(jx, jy, 63, 2);
     Move(ref jx, ref jy, 250, 150); zeroX += jx; zeroY += jy;
-    PlaceFirstPassMud(jx, jy, 0); PlaceGemsAt(jx, jy, 65, 2);
+    PlaceFirstPassMud(jx, jy, 0);
+    PlaceGemsAt(jx, jy, 65, 2);
     int oldX = jx, oldY = jy;
     Move(ref jx, ref jy, 400, 150); zeroX += jx; zeroY += jy;
-    PlaceFirstPassMud(jx, jy, -3); PlaceGemsAt(jx, jy, 67, 2);
-    jx = zeroX / 3; jy = zeroY / 3;
+    PlaceFirstPassMud(jx, jy, -3);
+    PlaceGemsAt(jx, jy, 67, 2);
+        jx = zeroX / 3; jy = zeroY / 3;
     int bigNum = (int)r.Next((int)(400 * ws), (int)(600 * ws));
     int pad = (int)(25 * ws);
     jx = Math.Clamp(jx, leftBeachEnd + bigNum / 2 + pad, rightBeachStart - bigNum / 2 - pad);
     mudWallFlag = true;
     TileRunner(jx, jy, bigNum, 10000, 59, false, 0.0, -20.0, true);
     mudWallFlag = false;
-    // GenerateTunnelToSurface（cs:131-200）
+        // GenerateTunnelToSurface（cs:131-200）
     double num = (int)r.Next(5, 11);
     double px = jx, py = jy;
     double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(10, 20) * 0.1;
@@ -1266,7 +1270,7 @@ Checkpoint("grass");
         { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
         MudWallRunner(hx, hy);
     }
-    // GenerateFinishingTouches（cs:219-280）
+        // GenerateFinishingTouches（cs:219-280）
     int fx = oldX, fy = oldY;
     for (int i = 0; (double)i <= 20.0 * ws; i++)
     {
@@ -1298,6 +1302,7 @@ Checkpoint("grass");
             TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
     }
 }
+File.WriteAllBytes("/tmp/cs-act6.bin", act);
 Checkpoint("jungle");
 
 // ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================

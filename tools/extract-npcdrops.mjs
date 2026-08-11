@@ -73,6 +73,12 @@ function parseAtom(src, pos) {
     const r = parseArgs(src, p);
     return { t: 'paren', inner: r.args[0], end: r.end };
   }
+  // 字符串字面量（NamedNPC("GuideNames.Andrew") 的具名键）
+  if (src[p] === '"') {
+    let q = p + 1, out = '';
+    while (q < src.length && src[q] !== '"') { if (src[q] === '\\') { out += src[q]; q++; } out += src[q]; q++; }
+    return { t: 'str', v: out, end: q + 1 };
+  }
   // 直接函数调用（含限定名 A.B.C(args)）：点号段并入名字，'(' 跟随 → call
   const idm = /^[A-Za-z_][A-Za-z0-9_]*(?:\.[A-Za-z_][A-Za-z0-9_]*)*/.exec(src.slice(p));
   if (idm) {
@@ -156,13 +162,20 @@ function parseAtom(src, pos) {
 const CHAIN_FN = { OnFailedRoll: 'failedRoll', OnSuccess: 'success', OnFailedConditions: 'failedConditions' };
 const stats = { unknown: [], kinds: {}, conds: {} };
 
+// 条件实参：数字取值；字符串去 "GuideNames." 式语言键前缀取本地化值本身
+// （NamedNPC 的 neededName 与 npc.GivenName 比对，lang 值即 Andrew/Whitney/Jim）
+function condArg(n) {
+  if (n?.t === 'num') return n.v;
+  if (n?.t === 'str') return n.v.replace(/^[A-Za-z]+Names\./, '');
+  return undefined;
+}
 function condOf(n) {
   // 条件节点 → {name, args}
   if (!n) return null;
   if (n.t === 'new') {
     const name = n.cls.replace('Conditions.', '');
     stats.conds[name] = (stats.conds[name] ?? 0) + 1;
-    return { name, args: n.args.map(lit) };
+    return { name, args: n.args.map(condArg) };
   }
   if (n.t === 'id') {
     // 条件变量（Conditions.NotExpert condition = new …）：查声明表
@@ -174,10 +187,13 @@ function condOf(n) {
 }
 function lit(n) {
   if (n?.t === 'num') return n.v;
+  // 局部 int 变量（chanceDenominator = 9 之类作规则参数）：查声明表
+  if (n?.t === 'id' && ints.has(n.name)) return ints.get(n.name);
   return undefined;
 }
 function commonArgs(a, defaults = [1, 1, 1]) {
-  const v = (i, d) => { const x = a[i]; return x && x.t === 'num' ? x.v : d; };
+  // lit 兼顾数字字面量与局部 int 变量（chanceDenominator = 9）
+  const v = (i, d) => { const x = a[i]; const l = x ? lit(x) : undefined; return l !== undefined ? l : d; };
   return [v(0, defaults[0]), v(1, defaults[1]), v(2, defaults[2])];
 }
 
@@ -400,6 +416,14 @@ const emittedRefs = new Map();
  * refVar = 可选的变量名（IItemDropRule rule = RegisterTo...(…) 时记录活动引用，
  * 之后的 rule.OnSuccess(...) 语句直接挂到已 emit 的规则上）
  */
+/**
+ * 注册 arg 是规则变量（RegisterToNPC(type, leadingConditionRule).OnSuccess(...)）时，
+ * attachChains 必须挂到变量背后的真实规则对象——resolveRule 对 varRef 返回 rules 里
+ * 的【同一实例】，故挂它即可见；挂 varRef 包装器会被 resolve 丢弃（女皇 636 两链全丢的根因）
+ */
+function chainHost(r) {
+  return r && r.k === 'varRef' && rules.has(r.name) ? rules.get(r.name) : r;
+}
 function handleRegistration(s, expr, rootCall, refVar) {
   const reg = rootCall.fn;
   const a = rootCall.args;
@@ -411,7 +435,7 @@ function handleRegistration(s, expr, rootCall, refVar) {
   }
   if (reg === 'RegisterToGlobal') {
     const r = toRule(a[0]);
-    if (layers.length) attachChains(r, layers);
+    if (layers.length) attachChains(chainHost(r), layers);
     const resolved = emit([], r, true);
     if (refVar) { emittedRefs.set(refVar, { rule: resolved, entry: null }); rules.set(refVar, resolved); }
     return;
@@ -422,14 +446,14 @@ function handleRegistration(s, expr, rootCall, refVar) {
     else if (a[0].t === 'id' && ints.has(a[0].name)) id = [ints.get(a[0].name)];
     if (id == null) return;  // npcNetIds[i] 变体拷贝辅助
     const r = toRule(a[1]);
-    if (layers.length) attachChains(r, layers);
+    if (layers.length) attachChains(chainHost(r), layers);
     const resolved = emit(id, r);
     if (refVar) { emittedRefs.set(refVar, { rule: resolved, entry: entries[entries.length - 1] }); rules.set(refVar, resolved); }
     return;
   }
   // Multiple 系
   const rule = toRule(a[0]);
-  if (layers.length) attachChains(rule, layers);
+  if (layers.length) attachChains(chainHost(rule), layers);
   const ids = [];
   for (const arg of a.slice(1)) {
     if (arg.t === 'num') ids.push(arg.v);
@@ -483,6 +507,18 @@ const flushStmt = (stmt) => {
       const expr = parseExpr(rhs, 0);
       if (isCond) rules.set(m[1], { k: '__cond', cond: condOf(expr) ?? condOfVar(expr) });
       else {
+        // RHS 是变量挂链（:202 rule2 = rule.OnSuccess(gate2)；:1192 rule = gate.OnSuccess(oneOf)）：
+        // Chains 语义——host.chain 挂入被挂规则并【返回被挂规则】，故变量值 = 最后一层链的规则，
+        // 后续 var.OnXxx(...) 挂到它身上（同一实例，宿主链数组内可见）。走通用 toRule 只会
+        // 把链挂到 varRef 包装器上，从未 emit → 整条丢失
+        if (expr.t === 'call' && expr.base && expr.args[0].t === 'id'
+          && (rules.has(expr.args[0].name) || emittedRefs.has(expr.args[0].name))) {
+          const ref0 = emittedRefs.get(expr.args[0].name);
+          const host0 = ref0 ? ref0.rule : rules.get(expr.args[0].name);
+          const last = applyChainLinks(host0, expr, true);
+          if (last && last.k) rules.set(m[1], last);
+          return;
+        }
         // RHS 是注册调用（EoW 模式：rule = RegisterToMultipleNPCs(gate, ids)）：emit + 记活动引用
         const rootCall = stripChains(expr);
         if (rootCall.t === 'call' && rootCall.fn.startsWith('RegisterTo')) {

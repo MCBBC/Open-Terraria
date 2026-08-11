@@ -16,8 +16,12 @@
 //    以太腔 150 半径内清除非微光液体，防沉降期水/岩浆灌入把微光转化成 Aetherium
 // 偏离原版处（无法直译的周边系统，均有注释标注）：
 //  - tilesIgnoreWater 的 boulder/树 tile 动态固态（379/546/10 等）：无对应系统
-//  - PlaceTile 的音效/网络广播省略；tileObsidianKill 近似为 decor 清除
-//  - DelWater 尾部 CheckAlch/睡莲(518) 帧检查省略
+//  - 交互落块的 ReplaceTile 掉落/PlayLiquidChangeSound 走 Game 注入钩子
+//    （killTile=掉落+帧刷新；liquidChangeSound=音效；NetMessage 广播=多人层未接）
+//  - 生成/读档期（isGeneratingOrLoadingWorld）不落块：CreateLiquidMergeTile 走
+//    LiquidOverwriteStrip 分支（Liquid.cs:1359-1377），运行期才 ReplaceTile+PlaceTile
+//  - DelWater 尾 CheckAlch/睡莲(518)：已 1:1（WorldGen.CheckAlch/CheckLilyPad）；
+//    SquareTileFrame 帧刷新分支为无操作（本仓库帧由渲染期派生）
 // 1456 对齐修正（相对旧 1.4.0.5 移植）：banker's rounding（C# Math.Round），
 // 蜂蜜交互阈值 32→24（LiquidCheck 统一），AddWater/WaterCheck 的水死/岩浆死表
 // （Main.cs:7182+ 提取），panic 模式（Liquid.cs:1040-1070），岩浆 3×3 烧草精确 type 映射
@@ -49,6 +53,34 @@ const LAVA_DEATH_SHEETS = new Set([630, 631, 571, 579, 591, 538, 544, 629, 550, 
 /** 岩浆 3×3 烧除（1456 DelWater L1557+）：草族 tile → 空气；蘑菇草族 → 泥土 */
 const LAVA_BURN_TO_AIR = new Set([2, 23, 109, 199, 477, 492]);
 const LAVA_BURN_TO_DIRT = new Set([60, 70, 661, 662]);
+/** Main.tileObsidianKill（Main.cs:8214-8259）= tileLavaDeath 全表 ∪ 附加表 − {88}：
+ *  交互落块时"可被黑曜石顶掉"的 tile（火把/植物/草药/幼虫/丛林蜥蜴祭坛石等）。
+ *  旧实现按 decor 近似——decor 不含 lavaDeath 全表（门/宝箱顶的实心格反而该拒绝） */
+const OBSIDIAN_KILL_EXTRA_SHEETS = new Set([546, 77, 78, 82, 83, 84, 85, 105, 129, 132, 133, 134, 135, 136, 139, 165, 178, 185, 186, 187, 231, 337, 349, 506, 314]);
+/** Main.tileCut 全表（Main.cs 逐条提取）：情形 B"下方裁切植物"在合并门之前先 KillTile 掉落
+ *  （Liquid.cs:1289-1295）——掉落语义，不是单纯清格 */
+const CUT_SHEETS = new Set([654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655, 71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485, 454, 254, 236]);
+/** TileID.Sets.IsAContainer（TileID.cs:405）：情形 B 的"上方是容器而下方不是"放行标志 */
+const CONTAINER_SHEETS = new Set([21, 467, 88]);
+/** Main.tileAlch（Main.cs:7755-7757）：DelWater 尾 CheckAlch 的草药族 */
+const ALCH_SHEETS = new Set([82, 83, 84]);
+/** CheckAlch 各生长阶段（frameX/18）可依附的下方泥土 sheet（WorldGen.cs:45994-46102 switch 表） */
+const ALCH_SOIL_SHEETS: Array<Set<number>> = [
+  new Set([109, 2, 477, 492, 78, 380]),            // case 0：草族/泥土 + 花盆/Planter
+  new Set([60, 78, 380]),                          // case 1：蘑菇草
+  new Set([0, 59, 78, 380]),                       // case 2：空气/泥 + 花盆
+  new Set([661, 662, 199, 203, 23, 25, 78, 380]),  // case 3：猩红/腐化草
+  new Set([53, 78, 380, 116]),                     // case 4：沙族
+  new Set([57, 633, 78, 380]),                     // case 5：雪族
+  new Set([78, 380, 147, 161, 163, 164, 200]),     // case 6：冰族
+];
+/** CheckLilyPad 水底泥土 sheet → 睡莲 frameY 行（WorldGen.cs:59251-59259；
+ *  原版 109 写两次属上游笔误，此处补 116 保持集合语义） */
+const LILY_FLOOR_ROWS: Array<[Set<number>, number]> = [
+  [new Set([2, 477]), 0],
+  [new Set([109, 116]), 18],
+  [new Set([60]), 36],
+];
 
 export class LiquidSim {
   world: World;
@@ -77,8 +109,31 @@ export class LiquidSim {
   private readonly lavaBurnAirIds: Set<number>;
   private readonly lavaBurnDirtIds: Set<number>;
   private readonly dirtId: number;
+  /** Main.tileObsidianKill（sheet 反查；lavaDeath ∪ 附加 − 88） */
+  private readonly obsidianKillIds: Set<number>;
+  /** Main.tileCut / IsAContainer / tileAlch（sheet 反查） */
+  private readonly cutIds: Set<number>;
+  private readonly containerIds: Set<number>;
+  private readonly alchIds: Set<number>;
+  private readonly alchSoilIds: Array<Set<number>>;
+  /** 草药三态（sheet 82/83/84）与睡莲（518）内部 id——DelWater 尾复查用 */
+  private readonly herbSproutId: number;
+  private readonly herbMatureId: number;
+  private readonly herbBloomId: number;
+  private readonly lilyPadId: number;
   /** 液体冲毁方块（原版 AddWater 尾 KillTile）：Game 注入 breakTile（掉落+帧刷新） */
   killTile: ((x: number, y: number) => void) | null = null;
+  /** 交互落块音效（WorldGen.PlayLiquidChangeSound Liquid.cs:1379）：Game 注入；
+   *  参数 = (x, y, thisLiquidType, mergeType)（本仓库液体编码 1水/2岩浆/3蜂蜜/4微光） */
+  liquidChangeSound: ((x: number, y: number, thisType: number, mergeType: number) => void) | null = null;
+  /** WorldGen.isGeneratingOrLoadingWorld（WorldGen.cs:11089 / WorldFile.cs:738）：
+   *  世界生成期与读档沉降期为 true——CreateLiquidMergeTile 走 LiquidOverwriteStrip
+   *  分支不落块；运行期（Game.liquid）保持 false 走 ReplaceTile+PlaceTile。
+   *  由 settle.ts 按模式置位 */
+  isGeneratingOrLoadingWorld = false;
+  /** LiquidCheck 的 createMergeTilesDuringGen（WorldGen.cs:22647 生成收尾全图检查用）：
+   *  生成期常规交互不落块，唯独收尾那次允许落块 */
+  private createMergeTilesDuringGen = false;
   /** 确定性随机（原版 3 格分支用 WorldGen.genRand 而非 Main.rand——Liquid.cs:639。
    *  mulberry32 与 world.seed 派生：同 seed 世界双路径沉降结果逐格一致） */
   private genState: number;
@@ -114,6 +169,19 @@ export class LiquidSim {
     this.lavaBurnAirIds = bySheet(LAVA_BURN_TO_AIR);
     this.lavaBurnDirtIds = bySheet(LAVA_BURN_TO_DIRT);
     this.dirtId = TILE_BY_KEY['dirt'];
+    // tileObsidianKill = lavaDeath ∪ 附加 − {88}（Main.cs:8214-8220，88=梳妆台显式豁免）
+    const okKill = bySheet(OBSIDIAN_KILL_EXTRA_SHEETS);
+    for (const id of this.lavaDeathIds) okKill.add(id);
+    for (const id of bySheet(new Set([88]))) okKill.delete(id);
+    this.obsidianKillIds = okKill;
+    this.cutIds = bySheet(CUT_SHEETS);
+    this.containerIds = bySheet(CONTAINER_SHEETS);
+    this.alchIds = bySheet(ALCH_SHEETS);
+    this.alchSoilIds = ALCH_SOIL_SHEETS.map((s) => bySheet(s));
+    this.herbSproutId = bySheet(new Set([82])).values().next().value ?? 0;
+    this.herbMatureId = bySheet(new Set([83])).values().next().value ?? 0;
+    this.herbBloomId = bySheet(new Set([84])).values().next().value ?? 0;
+    this.lilyPadId = bySheet(new Set([518])).values().next().value ?? 0;
     // genRand 初态：world.seed 派生（避免与生成管线的 genRand 状态纠缠，仅求双路径一致）
     this.genState = (world.seed ^ 0x9e3779b9) | 0;
     // 挖掘/放置唤醒：原版 SquareTileFrame 会对 3×3 内每格 TileFrame→AddWater（WorldGen.cs:49664）
@@ -515,6 +583,58 @@ export class LiquidSim {
   //   水 > 岩浆 > 蜂蜜 > 微光——任一方是微光 → Aetherium 块 659；
   //   否则 蜂蜜在场 → 229/230，只剩水岩组合 → 黑曜石 56
 
+  /** CreateLiquidMergeTile（Liquid.cs:1355-1384）：
+   *  生成/读档期 → LiquidOverwriteStrip（整行液体类型统一，不落块）；
+   *  运行期 → PlayLiquidChangeSound + ReplaceTile/KillTile+PlaceTile（掉落走 killTile 钩子） */
+  private createMergeTile(x: number, y: number, tileType: number, thisType: number, mergeType: number) {
+    const st = this.world.store;
+    if (this.isGeneratingOrLoadingWorld && !this.createMergeTilesDuringGen) {
+      // Liquid.cs:1360-1377：产物 → 源类型（229→水 230/56→岩浆 659→微光），
+      // 地狱层强制岩浆；两处调用点目标格已预先清零 → strip 实为空操作，仅保留原版结构
+      let stripType = -1;
+      if (tileType === HONEY_BLOCK) stripType = 1;
+      else if (tileType === CRISPY_HONEY || tileType === OBSIDIAN) stripType = 2;
+      else if (tileType === AETHERIUM) stripType = 4;
+      if (y >= st.h - 200) stripType = 2; // y >= UnderworldLayer
+      if (stripType >= 0) this.liquidOverwriteStrip(x, y, stripType);
+      return;
+    }
+    this.liquidChangeSound?.(x, y, thisType, mergeType); // WorldGen.PlayLiquidChangeSound
+    const i = this.idx(x, y);
+    if (st.flags[i]) this.killTile?.(x, y); // ReplaceTile：KillTile_DropItems（火把/植物掉落）
+    st.setTile(x, y, tileType);
+  }
+
+  /** LiquidOverwriteStrip（Liquid.cs:1338-1352）：从 (x,y) 起向两侧延伸，
+   *  把同行连续液体段的类型统一为 stripType */
+  private liquidOverwriteStrip(x: number, y: number, stripType: number) {
+    const st = this.world.store;
+    for (let nx = x; nx >= 0 && st.liquid[this.idx(nx, y)] > 0; nx--) st.liquidType[this.idx(nx, y)] = stripType;
+    for (let nx = x; nx < st.w && st.liquid[this.idx(nx, y)] > 0; nx++) st.liquidType[this.idx(nx, y)] = stripType;
+  }
+
+  /** 生成收尾全图 LiquidCheck(createMergeTilesDuringGen:true)（WorldGen.cs:22639-22650）：
+   *  常规生成期交互不落块（strip 分支），唯独收尾这一次允许把残余接触转成块 */
+  finalGenMergeCheck() {
+    const st = this.world.store;
+    this.createMergeTilesDuringGen = true;
+    try {
+      for (let y = 1; y < st.h - 1; y++) {
+        const row = y * st.w;
+        for (let x = 1; x < st.w - 1; x++) {
+          const i = row + x;
+          if (st.liquid[i] === 0) continue;
+          const t = st.liquidType[i];
+          if (t === 2) this.lavaCheck(x, y);
+          else if (t === 3) this.honeyCheck(x, y);
+          else if (t === 4) this.shimmerCheck(x, y);
+        }
+      }
+    } finally {
+      this.createMergeTilesDuringGen = false;
+    }
+  }
+
   /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24） */
   private lavaCheck(x: number, y: number) {
     const st = this.world.store;
@@ -527,35 +647,37 @@ export class LiquidSim {
       // 情形 A：左右/上方有非岩浆液体 → 生成在岩浆格（Liquid.cs:905-959）
       let sum = 0;
       let type = OBSIDIAN;
+      let mergeType = 1;
       if (lt !== 2) { sum += lq; st.liquid[il] = 0; }
       if (rt !== 2) { sum += rq; st.liquid[ir] = 0; }
       if (ut !== 2) { sum += uq; st.liquid[iu] = 0; }
-      if (lt === 3 || rt === 3 || ut === 3) type = CRISPY_HONEY;
-      if (lt === 4 || rt === 4 || ut === 4) type = AETHERIUM; // 微光优先级最高（L1443-1451）
+      if (lt === 3 || rt === 3 || ut === 3) { type = CRISPY_HONEY; mergeType = 3; }
+      if (lt === 4 || rt === 4 || ut === 4) { type = AETHERIUM; mergeType = 4; } // 微光优先级最高（L1443-1451）
       if (sum < 24) return;
-      const t = st.type[i5];
-      if (t !== 0) {
-        const d = TILE_DEFS[t];
-        if (d && d.decor) st.setTile(x, y, 0);  // 近似 tileObsidianKill
-        else return;                             // 平台等保留方块 → 不生成
-      }
+      // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill（火把/植物被顶掉，非 decor 近似）
+      const act = st.flags[i5] !== 0;
+      if (act && !this.obsidianKillIds.has(st.type[i5])) return;
       st.liquid[i5] = 0;
       st.liquidType[i5] = 0;
-      st.setTile(x, y, type);
+      this.createMergeTile(x, y, type, 2, mergeType);
     } else {
       if (dq <= 0 || dt === 2) return;
       // 情形 B：仅下方有水/蜂蜜/微光 → 生成在下方格（Liquid.cs:961-1014）
+      const selfAct = st.flags[i5] !== 0;
+      const selfT = st.type[i5];
+      const belowAct = st.flags[id] !== 0;
       const belowT = st.type[id];
-      if (belowT !== 0) {
-        const d = TILE_DEFS[belowT];
-        if (d && d.decor) st.setTile(x, y + 1, 0); // tileCut / obsidianKill 近似
-        else return;
-      }
+      // flag：本格容器而下方不是（Liquid.cs:1285-1288）——容器内液体允许向下合并
+      const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
+      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      // 落块门（Liquid.cs:1294）：下方空 / tileObsidianKill / 容器位 三者其一
+      if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       const type = dt === 4 ? AETHERIUM : dt === 3 ? CRISPY_HONEY : OBSIDIAN;
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
-      st.setTile(x, y + 1, type);
+      this.createMergeTile(x, y + 1, type, 2, dt);
     }
   }
 
@@ -577,28 +699,28 @@ export class LiquidSim {
       if (sum < 24) return; // 1456 LiquidCheck 统一阈值 24
       const type = (lt === 4 || rt === 4 || ut === 4) ? AETHERIUM
         : (lt === 2 || rt === 2 || ut === 2) ? CRISPY_HONEY : HONEY_BLOCK;
-      const t = st.type[i5];
-      if (t !== 0) {
-        const d = TILE_DEFS[t];
-        if (d && d.decor) st.setTile(x, y, 0);
-        else return;
-      }
+      const mergeType = (lt === 4 || rt === 4 || ut === 4) ? 4 : (lt === 2 || rt === 2 || ut === 2) ? 2 : 1;
+      // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
+      const act = st.flags[i5] !== 0;
+      if (act && !this.obsidianKillIds.has(st.type[i5])) return;
       st.liquid[i5] = 0;
       st.liquidType[i5] = 0;
-      st.setTile(x, y, type);
+      this.createMergeTile(x, y, type, 3, mergeType);
     } else {
       if (dq <= 0 || dt === 3) return;
+      const selfAct = st.flags[i5] !== 0;
+      const selfT = st.type[i5];
+      const belowAct = st.flags[id] !== 0;
       const belowT = st.type[id];
-      if (belowT !== 0) {
-        const d = TILE_DEFS[belowT];
-        if (d && d.decor) st.setTile(x, y + 1, 0);
-        else return;
-      }
+      const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
+      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
       const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
-      st.setTile(x, y + 1, type);
+      this.createMergeTile(x, y + 1, type, 3, dt);
     }
   }
 
@@ -619,28 +741,27 @@ export class LiquidSim {
       if (ut !== 4) { sum += uq; st.liquid[iu] = 0; }
       // mergeType == thisType 门（L1269）：三邻中仍有微光 → 不产块（liquidMergeType 被拉回 3）
       if (sum < 24 || lt === 4 || rt === 4 || ut === 4) return;
-      const t = st.type[i5];
-      if (t !== 0) {
-        const d = TILE_DEFS[t];
-        if (d && d.decor) st.setTile(x, y, 0);  // 近似 tileObsidianKill
-        else return;
-      }
+      // 落块门（Liquid.cs:1269）：空格 或 tileObsidianKill
+      const act = st.flags[i5] !== 0;
+      if (act && !this.obsidianKillIds.has(st.type[i5])) return;
       st.liquid[i5] = 0;
       st.liquidType[i5] = 0;
-      st.setTile(x, y, AETHERIUM);
+      this.createMergeTile(x, y, AETHERIUM, 4, (lt !== 4 ? lt : rt !== 4 ? rt : ut) || 1);
     } else {
       if (dq <= 0 || dt === 4) return;
       // 情形 B：仅下方有异种液体 → 产物生成在下方格（Liquid.cs:1275-1317）
+      const selfAct = st.flags[i5] !== 0;
+      const selfT = st.type[i5];
+      const belowAct = st.flags[id] !== 0;
       const belowT = st.type[id];
-      if (belowT !== 0) {
-        const d = TILE_DEFS[belowT];
-        if (d && d.decor) st.setTile(x, y + 1, 0); // tileCut / obsidianKill 近似
-        else return;
-      }
+      const containerOk = selfAct && this.containerIds.has(selfT) && !(belowAct && this.containerIds.has(belowT));
+      // 非水本格 + 下方裁切植物 → 先 KillTile 掉落（Liquid.cs:1289-1295）
+      if (selfT !== 1 && belowAct && this.cutIds.has(belowT)) this.killTile?.(x, y + 1);
+      if (st.flags[id] !== 0 && !this.obsidianKillIds.has(st.type[id]) && !containerOk) return;
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
-      st.setTile(x, y + 1, AETHERIUM);
+      this.createMergeTile(x, y + 1, AETHERIUM, 4, dt);
     }
   }
 
@@ -704,6 +825,88 @@ export class LiquidSim {
     const tail = this.liquids[this.numLiquid];
     e.x = tail.x; e.y = tail.y; e.kill = tail.kill;
     this.liquids.length = this.numLiquid;
+    // DelWater 尾部（Liquid.cs:1607-1624）：出列格是草药 → CheckAlch 依附复查；
+    // 是睡莲(518) → 快沉降/静水时 CheckLilyPad，否则仅 SquareTileFrame（本仓库帧为
+    // 渲染期派生，该分支无操作）
+    if (st.flags[i5]) {
+      if (this.alchIds.has(st.type[i5])) this.checkAlch(x, y);
+      else if (st.type[i5] === this.lilyPadId) {
+        const iu = i5 - st.w;
+        if (this.quickFall) this.checkLilyPad(x, y);
+        else if (st.liquid[id] < 255 || st.liquid[iu] > 0) { /* SquareTileFrame：帧由渲染派生 */ }
+        else this.checkLilyPad(x, y);
+      }
+    }
+  }
+
+  /** WorldGen.CheckAlch（WorldGen.cs:45981-46109）：液体退去后复查草药依附。
+   *  frameX/18 = 生长阶段 0-6，各阶段允许的下方泥土不同；frameY 强制归 0；
+   *  阶段 5 附带岩浆 bloom 切换（液体>16 → 83 成熟→84 绽放，反之退回） */
+  private checkAlch(x: number, y: number) {
+    const st = this.world.store;
+    const i5 = this.idx(x, y);
+    const id = this.idx(x, y + 1);
+    let bad = false;
+    if (!st.flags[id]) bad = true;      // 下方无 active tile
+    if (st.half[id]) bad = true;        // halfBrick 不算依附面
+    const stage = (st.frameX[i5] / 18) | 0;
+    st.frameY[i5] = 0;
+    if (!bad && stage >= 0 && stage < this.alchSoilIds.length) {
+      if (!this.alchSoilIds[stage].has(st.type[id])) bad = true;
+      if (st.liquid[i5] > 0 && st.liquidType[i5] === 2) bad = true; // 草药泡岩浆必枯
+    }
+    if (bad) { this.killTile?.(x, y); return; }
+    // 阶段 5 bloom 切换（45981+ case 5 尾段）：Daybloom(82) 豁免，仅岩浆格生效
+    if (stage !== 5) return;
+    const t = st.type[i5];
+    if (t === this.herbSproutId || st.liquidType[i5] !== 2) return;
+    if (st.liquid[i5] > 16) {
+      if (t === this.herbMatureId) st.setTile(x, y, this.herbBloomId, st.frameX[i5], st.frameY[i5]);
+    } else if (t === this.herbBloomId) {
+      st.setTile(x, y, this.herbMatureId, st.frameX[i5], st.frameY[i5]);
+    }
+  }
+
+  /** WorldGen.CheckLilyPad（WorldGen.cs:59227-59324）：睡莲只能浮在水面——
+   *  非水即 KillTile；frameY 按水底泥土族选行（0/18/36）；水位涨落整体上下移一格 */
+  private checkLilyPad(x: number, y: number) {
+    const st = this.world.store;
+    const i5 = this.idx(x, y);
+    if (st.liquidType[i5] !== 1) { this.killTile?.(x, y); return; } // 非水 → 掉落清除
+    // 向下找第一个实心格（原版 tileSolid && !tileSolidTop；tileSolidTop 的家具族
+    // 本仓库 defs 均 non-solid，platform 标志位近似）
+    let fy = y;
+    for (;;) {
+      const fi = this.idx(x, fy);
+      const d = TILE_DEFS[st.type[fi]];
+      if (st.flags[fi] && d?.solid && !d.platform) break;
+      if (fy >= st.h - 50) { this.killTile?.(x, y); return; } // 落不到底 → 清除
+      fy++;
+    }
+    const floorSheet = TILE_DEFS[st.type[this.idx(x, fy)]]?.vanilla?.sheet ?? -1;
+    let row = -1;
+    for (const [sheets, r] of LILY_FLOOR_ROWS) {
+      if (sheets.has(floorSheet)) { row = r; break; }
+    }
+    if (row < 0) { this.killTile?.(x, y); return; } // 水底不是泥土族 → 清除
+    if (row !== st.frameY[i5]) st.frameY[i5] = row;
+    const iu = i5 - st.w, ib = i5 + st.w;
+    if (st.liquid[iu] > 0 && !st.flags[iu]) {
+      // 上方涨水且为空 → 整个垫上移一格（59266-59281）
+      st.setTile(x, y - 1, this.lilyPadId, st.frameX[i5], st.frameY[i5]);
+      st.setTile(x, y, 0);
+    } else {
+      if (st.liquid[i5] !== 0) return; // 本格仍有液体 → 保持
+      const belowDef = TILE_DEFS[st.type[ib]];
+      if (!st.flags[ib]) {
+        // 下方退水成空 → 下移一格（59289-59304）
+        st.setTile(x, y + 1, this.lilyPadId, st.frameX[i5], st.frameY[i5]);
+        st.setTile(x, y, 0);
+      } else if (!belowDef?.platform && (!belowDef?.solid)) {
+        // 下方被非平台实心家具占据 → 掉落清除（59305-59312）
+        this.killTile?.(x, y);
+      }
+    }
   }
 
   // ================= 读档沉降：QuickWater（Liquid.cs:85-103 / 105-212） =================

@@ -71,6 +71,8 @@ export interface NpcDropCtx {
   statueSpawned?: boolean;
   /** 玩家血蓝（心/星条件 statLife<statLifeMax2 等） */
   hp: number; hpMax: number; mana: number; manaMax: number;
+  /** 玩家幸运（Player.luck，RecalculateLuck :28671；luck=0 时全链退化为 rand.Next 语义） */
+  luck?: number;
   /** 月事件（南瓜月/霜月）上下文：kind 1=霜月 2=南瓜月；wave=当前波（无事件缺省 0）。
    *  四个 wave-gate 掉落条件的数据源（Conditions.cs:55-229），Game 击杀掉落处注入 */
   moonEvent?: { kind: 1 | 2; wave: number };
@@ -247,6 +249,15 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
 /** Player.RollLuck(denom, luck=0) ≡ rng.Next(denom) */
 function rollLuck(ctx: NpcDropCtx, denom: number, num: number): boolean {
   if (denom <= 1) return true;
+  const luck = ctx.luck ?? 0;
+  if (luck !== 0 && ctx.rng.next() < Math.abs(luck)) {
+    // Luck.RollLuck（Luck.cs:6）：幸运 → 先掷 [denom/2, denom) 再掷（<num 更易命中）；
+    // 负幸运反向 → [denom, denom*2) 更难命中
+    const inner = luck > 0
+      ? ctx.rng.int(Math.floor(denom / 2), denom - 1)
+      : ctx.rng.int(denom, denom * 2 - 1);
+    return ctx.rng.int(0, Math.max(1, inner) - 1) < num;
+  }
   return ctx.rng.int(0, denom - 1) < num;
 }
 
@@ -443,6 +454,13 @@ export function resolveDrops(ctx: NpcDropCtx): NpcDropOutcome {
 
 // ============ 钱币管线（NPCLoot_DropMoney :80412 1:1，luck=0 → 单掷） ============
 export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
+  // NPCLoot_DropMoney :80414：|luck| 概率 → 掷两次取后者（幸运重掷）
+  if ((ctx.luck ?? 0) !== 0 && ctx.rng.next() < Math.abs(ctx.luck!)) {
+    return rollCoinsOnce(value, ctx, bloodMoon, midas);
+  }
+  return rollCoinsOnce(value, ctx, bloodMoon, midas);
+}
+function rollCoinsOnce(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
   const rng = ctx.rng;
   let num = value * (1 + rng.int(-20, 75) * 0.01); // Next(-20,76) → [-20,75]
   if (midas) num *= 1 + rng.int(10, 51) * 0.01;   // 金药剂 midas（:80424 ×1.10-1.51）

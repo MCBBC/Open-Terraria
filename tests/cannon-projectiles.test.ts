@@ -8,17 +8,18 @@ import type { GameHooks } from '../src/entities/types';
 
 // 炮弹投射物 1:1 回归（Wiring.cs case 209/1301-1341 + case 212/1345-1418 →
 // WorldGen.ShootFromCannon WorldGen.cs:50606-50718；Projectile 162/281/166 AI 与 Kill）
-type Shot = { px: number; py: number; vx: number; vy: number; damage: number; kind: string };
+type Shot = { px: number; py: number; vx: number; vy: number; damage: number; kind: string; form: number };
 
 function makeCtx() {
   const shots: Shot[] = [];
   let bunnyCount = 0;
   const ctx: DeviceCtx = {
     dropItem: () => {}, spawnNpc: () => true, mechSpawnOk: () => true, itemSpawnOk: () => true,
-    shootProjectile: (px, py, vx, vy, damage, kind) => shots.push({ px, py, vx, vy, damage, kind }),
+    shootProjectile: (px, py, vx, vy, damage, kind, form = 0) => shots.push({ px, py, vx, vy, damage, kind, form }),
     countProjectiles: (kind) => (kind === 'bunny' ? bunnyCount : 0),
     doorOpen: () => true, doorClose: () => true, teleportPair: () => {},
     relocateTownNpc: () => true, explode: () => {}, toast: () => {}, sfx: () => {},
+    extractinatorPull: () => null, dropItemStack: () => {},
     worldSurface: 100,
   };
   return { ctx, shots, setBunnyCount: (n: number) => { bunnyCount = n; } };
@@ -287,5 +288,26 @@ describe('TrapShot 炮弹族弹体', () => {
     expect(p.vy).toBe(15.9);
     expect(p.dead).toBe(false); // timeLeft 600
     expect(hits).toHaveLength(0); // 未命中
+  });
+
+  it('传送门炮（num36 3/4）：弹种 portalbolt / 速度 3 / damage 0（WorldGen.cs:50622-50631）', () => {
+    const w = freshWiring();
+    const ctxA = makeCtx();
+    placeCannon(w, 10, 20, 3, 4); // 右向传送门炮，仰角带 4 = 正上
+    expect(deviceTable(w, ctxA.ctx, 209, 11, 22)).toBe(true); // 待发行 2（左向半仰角不发射门 flag2，Wiring.cs:1301-1304）
+    const a = ctxA.shots[0]!;
+    expect(a.kind).toBe('portalbolt');
+    expect(a.damage).toBe(0);
+    expect(a.vx).toBeCloseTo(0, 6);
+    expect(a.vy).toBeCloseTo(-3, 6); // 速度 3（:50623 num=3f）
+    expect(a.py).toBe((20 + 2) * 16 + 5); // :50689-50696 (y+2)*16+5
+    expect(a.form).toBe(0); // ammo 4 → form 0 橙门
+
+    const w2 = freshWiring();
+    const ctxB = makeCtx();
+    placeCannon(w2, 10, 20, 4, 4); // 左向传送门炮（ammo 5 → form 1 蓝门）
+    deviceTable(w2, ctxB.ctx, 209, 11, 22);
+    expect(ctxB.shots[0]!.kind).toBe('portalbolt');
+    expect(ctxB.shots[0]!.form).toBe(1);
   });
 });

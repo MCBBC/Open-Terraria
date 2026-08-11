@@ -12,6 +12,8 @@ export interface VanillaItemStat {
   acc?: 0 | 1;
   life?: number;   // 生命回复（Item.lifeRegen，再生手环族）
   wing?: number;   // 翅膀槽（Item.wingSlot>0 即翅膀；飞行属性查 vanilla-wingstats）
+  hs?: number; bs?: number; ls?: number; // 盔甲绘制槽序号（套装匹配键，Player.cs UpdateArmorSets）
+
   str?: number;    // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
 }
 

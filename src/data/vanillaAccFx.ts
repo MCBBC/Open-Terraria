@@ -59,8 +59,10 @@ export interface AccFx {
   tileRange?: number;    // 工具/放置射程 +
   skyStone?: number;     // 天界石族：全属性复合（:12558）
   counterWeight?: number; // 配重球（悠悠球命中触发）
-  manaMagnet?: number;   // 魔力磁石（魔力星拾取，暂存）
+  manaMagnet?: number;   // 魔力磁石：魔力星吸附范围 +
   pStone?: number;       // 贤者之石（药水 CD -25%）
+  magicCuffs?: number;   // 魔力手铐：受伤回蓝（raw damage 1:1）
+  manaFlower?: number;   // 魔力花族：耗魔 -8% + 魔力不足自动喝蓝
 }
 
 const FX = fxJson as Record<string, AccFx>;

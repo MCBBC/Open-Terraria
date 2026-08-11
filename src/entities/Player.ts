@@ -13,6 +13,7 @@ import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { accFxOfInternal } from '../data/vanillaAccFx';
+import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 
@@ -134,8 +135,19 @@ export class Player extends Entity {
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
-    counterWeight: boolean;
+    counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
+    setBonus: ReturnType<typeof activeArmorSetBonus> | null;
+    manaCostMul: number;
   } {
+    /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
+    function activeArmorSetBonus(self: Player) {
+      const st0 = statOfInternal(self.inv.armor[0]?.id ?? -1);
+      const st1 = statOfInternal(self.inv.armor[1]?.id ?? -1);
+      const st2 = statOfInternal(self.inv.armor[2]?.id ?? -1);
+      if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
+      return ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|${st2.ls}`]
+        ?? ARMOR_SET_BONUSES[`${st0.hs}|${st1.bs}|*`] ?? null;
+    }
     let def = 0, mana = 0, life = 0;
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
@@ -151,6 +163,8 @@ export class Player extends Entity {
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false;
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
+    let manaMagnet = false, magicCuffs = false, manaFlower = false;
+    let manaCostMul = 1;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -213,6 +227,9 @@ export class Player extends Entity {
         if (fx.tileRange) tileRange = true;
         if (fx.skyStone) skyStone = true;
         if (fx.pStone) pStone = true;
+        if (fx.manaMagnet) manaMagnet = true;
+        if (fx.magicCuffs) magicCuffs = true;
+        if (fx.manaFlower) manaFlower = true;
         if (fx.counterWeight) counterWeight = true;
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
@@ -237,6 +254,24 @@ export class Player extends Entity {
     // 多段跳按原版优先序排列（JumpMovement 消费序）
     const JUMP_ORDER = ['Cloud', 'Sail', 'Sandstorm', 'Blizzard', 'Fart', 'Tsunami', 'Unicorn', 'Basilisk', 'WallOfFleshGoat', 'Santank'];
     const jumpOpts = JUMP_ORDER.filter((j) => jumpSet.has(j));
+    // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
+    const sb = activeArmorSetBonus(this);
+    if (sb) {
+      if (sb.def) def += sb.def;
+      if (sb.mana) mana += sb.mana;
+      if (sb.move) move += sb.move;
+      if (sb.meleeSpd) meleeSpeed += sb.meleeSpd;
+      if (sb.dmgMelee) dmgMelee += sb.dmgMelee;
+      if (sb.dmgRanged) dmgRanged += sb.dmgRanged;
+      if (sb.dmgMagic) dmgMagic += sb.dmgMagic;
+      if (sb.critMelee) critMelee += sb.critMelee;
+      if (sb.critRanged) critRanged += sb.critRanged;
+      if (sb.critMagic) critMagic += sb.critMagic;
+      if (sb.noKnockback) noKnockback = true;
+      if (sb.fireWalk) fireWalk = true;
+      if (sb.ammoCost80) ammoSave = true;
+      if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
+    }
     // 天界石族复合（Player.cs:12558-12570：life+2/def+4/近战速+10%/全系伤+10%/全系暴+2%）
     if (skyStone) {
       life += 2; def += 4; meleeSpeed += 0.1;
@@ -257,6 +292,8 @@ export class Player extends Entity {
       treasureMagnet, goldRing, luckyCoin, discount,
       arrowDmg, ammoSave, kbGlove, yoyoString,
       tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
+      manaMagnet, magicCuffs, manaFlower,
+      setBonus: sb, manaCostMul,
     };
   }
   get maxHp(): number {
@@ -897,6 +934,23 @@ export class Player extends Entity {
   get heartGrabBonus(): number {
     return this.buffs.has(BuffType.Heartreach) ? 60 : 0;
   }
+  /** 魔力星拾取范围扩展（魔力磁石族 manaMagnet，ItemDrop 星分支消费） */
+  get manaMagnetBonus(): number {
+    return this.equipStats.manaMagnet ? 80 : 0;
+  }
+  /** 幸运值（RecalculateLuck :28671 主干，clamp [-0.7,1]）：
+   *  幸运药水（buff 257 三档 ×0.1）+ 灯笼夜 +0.3（事件未移植暂 0）+ 装备/火炬
+   *  幸运暂 0——后续系统落地时在此扩 */
+  get luck(): number {
+    let l = 0;
+    const left = this.buffs.active.get(BuffType.Luck);
+    if (left !== undefined) {
+      // 档位按 buffTime（:9971-9982）：>600s=3 / >300s=2 / 否则 1 → ×0.1
+      const tier = left > 600 ? 3 : left > 300 ? 2 : 1;
+      l += tier * 0.1;
+    }
+    return Math.max(-0.7, Math.min(1, l));
+  }
   inputDown = false;
   inputUp = false;
   onRope = false;
@@ -917,6 +971,8 @@ export class Player extends Entity {
     this.sinceHurt = 0; // 受击打断自然回血
     // 恐慌项链：受击触发 5 秒移速爆发（panicTime=300，PanicSpeedBoost :25034）
     if (eq.panic) this.panicTime = 300;
+    // 魔力手铐（magicCuffs :37678）：受伤回蓝 = 原始伤害 1:1（防前数值）
+    if (eq.magicCuffs) this.mana = Math.min(this.maxMana, this.mana + dmg);
     // 击退（钴护盾族 noKnockback 免疫）
     if (knockback && !eq.noKnockback) {
       const dir = this.cx < srcX ? -1 : 1;

@@ -19,6 +19,7 @@ export interface ItemCombat {
   melee?: boolean;
   ranged?: boolean;
   magic?: boolean;
+  summon?: boolean;
 }
 
 const TABLE = combatJson as unknown as Record<string, ItemCombat>;
@@ -41,14 +42,16 @@ export function viIdFromKey(key: string): number {
 
 export type CombatWeapon =
   | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean; shoot?: number; shootSpeed?: number }
+  | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
   | {
-      kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'magic' | 'shot';
+      kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'magic' | 'shot' | 'summon';
       shoot: number;
       damage: number;
       knockback: number;
       useTime: number;
       shootSpeed: number;
       mana?: number;
+      sentry?: boolean;
     };
 
 /** 物品定义的最小形状（items.ts 的 ItemDef 满足之） */
@@ -85,6 +88,10 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (ai === AI_BOOMERANG) return { kind: 'boomerang', shoot, ...base };
     if (ai === AI_SPEAR || ai === AI_SHORTSWORD) return { kind: 'spear', shoot, ...base };
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
+    if (c.summon) {
+      // 召唤武器（31 件）：按投射物 AI 分流哨兵（53/54/123 定点炮台）与随从（其余飞行/地面）
+      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 54 || ai === 123, ...base };
+    }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
     // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +
     // 挥击中射弹（Player.cs:42880：flag4 = itemAnimation>0 && ItemTimeIsZero →

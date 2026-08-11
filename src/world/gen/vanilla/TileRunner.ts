@@ -82,6 +82,7 @@ export function tileRunner(
   // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
   rng.nextIntRange(0, 4);
 
+
   while (num1 > 0 && num2 > 0) {
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;

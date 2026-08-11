@@ -201,6 +201,99 @@ export class SkyRenderer {
     this.weatherRef = w;
   }
 
+  // ---- 器件驱动的天空效果（SceneMetrics 器件态；Renderer 每帧写入）----
+  fx: { monolith: number; party: boolean; surfaceY: number } = { monolith: -1, party: false, surfaceY: 0 };
+
+  /** 天塔柱全屏滤镜颜色/不透明度（ScreenEffectInitializer.cs:18-21 FilterMiniTower 1:1；
+   *  类型映射 SceneState.cs:111-115：0 星璇/1 星云/2 星尘/3 耀斑/4 月总）。
+   *  【依赖登记】柱背景天空贴图（VortexSky/NebulaSky/StardustSky/SolarSky/MoonLordSky）
+   *  与 FilterMoonLord 专用 shader 未接入——此处只有滤镜层 */
+  private static readonly MONOLITH_FILTER: Record<number, readonly [number, number, number, number]> = {
+    0: [0, 0.7, 0.7, 0.5],        // MonolithVortex（ScreenEffectInitializer.cs:21）
+    1: [1, 0, 0.9, 0.35],         // MonolithNebula（:18）
+    2: [0, 0.5, 1, 0.5],          // MonolithStardust（:20）
+    3: [1, 0.7, 0, 0.3],          // MonolithSolar（:19）
+    4: [0.35, 0.3, 0.42, 0.35],   // MonolithMoonLord（:24 FilterMoonLord——深紫压暗近似）
+  };
+
+  /** 天塔柱滤镜：multiply 混合近似 shader 染色（result = screen × mix(白, 柱色, opacity)）。
+   *  原版为全屏后处理（Filters.Scene）；此处只染天空+群系背景层，tile 前景不染——
+   *  视觉近似点登记 */
+  drawMonolithFilter(ctx: CanvasRenderingContext2D, viewW: number, viewH: number): void {
+    const f = SkyRenderer.MONOLITH_FILTER[this.fx.monolith];
+    if (!f) return;
+    const [r, g, b, a] = f;
+    const mixv = (c: number) => Math.round(255 * (1 - a + c * a));
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = `rgb(${mixv(r)},${mixv(g)},${mixv(b)})`;
+    ctx.fillRect(0, 0, viewW, viewH);
+    ctx.restore();
+  }
+
+  // ---- 派对气球天空（PartySky.cs 精简核：BirthdayParty.PartyIsUp 时激活）----
+  private partyBalloons: Array<{ tex: number; variant: number; x: number; y: number; depth: number; speed: number }> = [];
+  private partyTexs: Array<HTMLImageElement | null> = [null, null, null];
+
+  /** 生成气球（PartySky.ResetBalloon :109-122 + GenerateBalloons :88-107：
+   *  贴图 Extra_69/70 二选一（1/30 换 Extra_71）、variant 0-2、speed -1.5..-4、
+   *  depth 1.6..3.35；X 绘制时模 4000 包裹 :325-330） */
+  private spawnBalloon(viewH: number, respawn = false): void {
+    this.partyBalloons.push({
+      tex: Math.random() < 1 / 30 ? 2 : Math.floor(Math.random() * 2),
+      variant: Math.floor(Math.random() * 3),
+      x: Math.random() * 4000 - 500,
+      y: respawn ? this.fx.surfaceY + 1600 : -viewH + Math.random() * (viewH + 1600),
+      depth: 1.6 + Math.random() * 1.75,
+      speed: -1.5 - 2.5 * Math.random(),
+    });
+  }
+
+  /** 派对气球绘制（PartySky.Update/Draw :130-198 精简核：上升 + 风漂移 + 视差 1/depth） */
+  private drawPartyBalloons(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, dtMs: number): void {
+    if (!this.fx.party || this.fx.surfaceY <= 0) {
+      this.partyBalloons.length = 0;
+      return;
+    }
+    // 相机在地表以下不画（PartySky.Draw :172：screenPosition.Y > worldSurface*16 直接返回）
+    if (this.partyTexs[0] === null) {
+      for (let i = 0; i < 3; i++) {
+        const im = new Image();
+        im.src = `sprites/vanilla/Extra_${69 + i}.png`;
+        this.partyTexs[i] = im;
+      }
+    }
+    while (this.partyBalloons.length < 48) this.spawnBalloon(viewH);
+    const frames = dtMs / (1000 / 60);
+    const wind = this.wind;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const b of this.partyBalloons) {
+      b.y += b.speed * frames;
+      b.x += wind * (3 - b.speed) * frames;
+      if (b.y < -viewH) {  // 升出屏顶：重掷（PartySky.Update :151-158）
+        b.y = this.fx.surfaceY + 1600;
+        b.x = Math.random() * 4000 - 500;
+        b.tex = Math.random() < 1 / 30 ? 2 : Math.floor(Math.random() * 2);
+        b.variant = Math.floor(Math.random() * 3);
+        b.speed = -1.5 - 2.5 * Math.random();
+        b.depth = 1.6 + Math.random() * 1.75;
+      }
+      const tex = this.partyTexs[b.tex];
+      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
+      // 视差（:320-322：(pos - 屏中心) × (1/depth, 0.9/depth) + 屏中心）+ X 4000 包裹（:325-330）
+      const par = 1 / b.depth;
+      const sx = (((b.x - camX) * par + camX + 500) % 4000 + 4000) % 4000 - 500;
+      const sy = (b.y - viewH / 2) * (0.9 * par) + viewH / 2;
+      const fw = tex.naturalWidth / 3, fh = tex.naturalHeight / 3;
+      const scale = par * 2 * 0.9;  // :337 vector2.X * 2 × 天色亮度 0.9 近似
+      ctx.globalAlpha = 0.8;
+      ctx.drawImage(tex, fw * b.variant, 0, fw, fh, sx, sy, fw * scale, fh * scale);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   /** 原版三层绘制（DrawClouds_Distant/Closer/Closest + NextHorizonRenderer.DrawCloud）：
    *  按视口宽缩放（cloud.position.Y*(H/600) 语义近似为 y 带），远景(scale<1)压暗 R/G 通道。 */
   private drawVanillaClouds(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, isNight: boolean, dtMs: number) {
@@ -367,6 +460,9 @@ export class SkyRenderer {
 
     // 云：原版素材与规则（Cloud.cs / NextHorizonRenderer.DrawCloud）
     this.drawVanillaClouds(ctx, viewW, viewH, isNight, dtMs);
+
+    // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
+    this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
 
     // 远山最后绘制（最前层）：太阳和云在山后，不会出现在山前
     this.drawMountains(ctx, viewW, viewH, camX);

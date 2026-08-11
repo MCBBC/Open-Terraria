@@ -64,10 +64,15 @@ const TRAP_SHOT_STYLE: Record<string, {
   snowball: { w: 14, h: 14, color: '#F2F8FF', grav: 0.3, gravDelay: 20, xDamp: 0.98,
     proj: 'vanilla/Projectile_166.png', fw: 14, fh: 14, spin: 'roll', friendly: true,
     shatterDust: true, life: 3600 },
+  // 601 传送门弹（SetDefaults Projectile.cs:3408 族：10×10 friendly，无重力直线；
+  // AI :51174-51242：门色拖尾尘 + alpha 递减；撞块 :16672-16686 → PortalHelper.TryPlacingPortal
+  // + Kill）。贴图 20×38 竖条 = 2 帧 20×19（frameCounter 4tick 步进）
+  portalbolt: { w: 10, h: 10, color: '#B069FF', grav: 0,
+    proj: 'vanilla/Projectile_601.png', fw: 20, fh: 19, friendly: true, life: 3600 },
 };
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
-export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball';
+export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt';
 
 export class TrapShot extends Entity {
   w = 8; h = 8;
@@ -75,6 +80,8 @@ export class TrapShot extends Entity {
   vy: number;
   damage: number;
   kind: TrapShotKind;
+  /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门） */
+  form = 0;
   /** 滚转角(尖刺球/巨石/炮弹族) */
   private rot = 0;
   /** 已飞行 tick（炮弹族重力延迟用，对应原版 ai[0]） */
@@ -102,13 +109,14 @@ export class TrapShot extends Entity {
     return blank;
   }
 
-  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: TrapShotKind) {
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0) {
     super();
     const s = TRAP_SHOT_STYLE[kind];
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
     this.kind = kind;
+    this.form = form;
     this.w = s.w; this.h = s.h;
     if (kind === 'spiky') this.life = 1800; // 原版尖刺球 timeLeft 1800
     if (s.life !== undefined) this.life = s.life; // 炮弹族 timeLeft（SetDefaults 默认 3600 / 281=600）
@@ -178,9 +186,23 @@ export class TrapShot extends Entity {
         st.trail.count, 0.4, { life: st.trail.life, damp: 0.96, grav: st.trail.grav },
       );
     }
+    // 传送门弹拖尾（Projectile.cs:51180-51192：尘 264 = 门色，无重力）
+    if (this.kind === 'portalbolt' && (this.life & 1) === 0) {
+      game.spawnParticles(
+        this.x + this.w / 2, this.y + this.h / 2,
+        this.form === 0 ? '#FFAA28' : '#3CE0FF', 1, 0.6, { life: 14, damp: 0.94, grav: 0 },
+      );
+    }
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) {
+      // 传送门弹撞块（Projectile.cs:16672-16686）：落门后消亡（音效 Item115/114 按 form）
+      if (this.kind === 'portalbolt') {
+        game.placePortal?.(this.x, this.y, this.vx, this.vy, this.form);
+        game.playSfx(this.form === 0 ? 'portalOrange' : 'portalBlue', 1, this.x, this.y);
+        this.dead = true;
+        return;
+      }
       // 尖刺球/巨石:撞块反弹衰减
       if (this.kind === 'spiky' || this.kind === 'boulder') {
         if (Math.abs(this.vy) > 1) { this.vy *= -0.4; this.vx *= 0.7; this.y -= this.vy; }

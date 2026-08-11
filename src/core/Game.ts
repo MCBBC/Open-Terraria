@@ -29,7 +29,14 @@ import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
-import { attachDevices, geyserTrap } from '../world/wiring/devices';
+import { attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith } from '../world/wiring/devices';
+import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, type PartyState } from '../world/wiring/party';
+import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
+import {
+  rollExtractinatorDrop, extractinatorMode, extractinatorUseTime, mathRand,
+  CHLOROPHYTE_TRADES, COIN_KEY_BY_VID, findExtractinatorChest,
+  extractinatorConsumeFromChest, type ExtractDrop,
+} from '../world/Extractinator';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { furnitureStyleBase } from '../world/FurnitureStyle';
@@ -107,6 +114,7 @@ import { TrapShot } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponProj';
+import { MinionProj } from '../entities/MinionProj';
 import { Minecart } from '../entities/Minecart';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
@@ -171,9 +179,15 @@ const NATIVE_ITEM_VID: Record<string, number> = {
   lesser_healing_potion: 28,
 };
 function dropVanillaId(d: ItemDrop): number {
-  const m = /^vi_(\d+)_/.exec(ITEM_DEFS[d.itemId]?.key ?? '');
-  if (m) return Number(m[1]);
-  return NATIVE_ITEM_VID[ITEM_DEFS[d.itemId]?.key ?? ''] ?? -1;
+  return slotVanillaId(d.itemId);
+}
+
+/** 内部 item id → 原版 item id（vi_<id>_ 键解析；原生 key 走 NATIVE_ITEM_VID） */
+function slotVanillaId(itemId: number): number {
+  const key = ITEM_DEFS[itemId]?.key ?? '';
+  const vid = viIdFromKey(key);
+  if (vid >= 0) return vid;
+  return NATIVE_ITEM_VID[key] ?? -1;
 }
 
 /** 玩家储物族 tile key → bank 索引（原版 Player.cs:32598+：29→bank / 97→bank2 /
@@ -651,6 +665,8 @@ export class Game implements GameHooks {
   /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
   scene: SceneFlags = { ...EMPTY_SCENE };
   private musicState: MusicState = newMusicState();
+  /** 派对态（BirthdayParty 精简核：ManualParty；派对纪念碑 455 驱动） */
+  private partyState: PartyState = newPartyState();
   private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
@@ -1027,6 +1043,8 @@ export class Game implements GameHooks {
       }
     });
     this.entities.clear();
+    clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
+    partyWorldClear(this.partyState);
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备 = 原版经典开局三件套（铜镐/铜斧/铜剑），其余一概不给——
     // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
@@ -1353,7 +1371,7 @@ export class Game implements GameHooks {
         const tn = n as TownNPC;
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1080;
       }).length;
-      this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount);
+      this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
       this.player.zoneDesert = this.scene.zoneDesert; // 沙丘行者靴消费
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
@@ -1402,7 +1420,7 @@ export class Game implements GameHooks {
       }
       const music = pickMusic({
         scene: this.scene, isDay, bossMusic, invasionMusic, moonMusic: moonMusicGated,
-        lunarMusic,
+        lunarMusic, musicBox: this.scene.musicBoxStyle,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
         state: this.musicState, bloodMoon: !!w.clock.bloodMoon, eclipse: !!w.clock.eclipse,
@@ -1767,6 +1785,10 @@ export class Game implements GameHooks {
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
         // UpdateTime_StartNight 内位于血月 roll 之前）
         w.clock.eclipse = false;
+        // 派对入夜结算（BirthdayParty.CheckNight :40-53）：进行中则结束 + 粉字广播 misc[99]
+        if (partyCheckNight(this.partyState)) {
+          this.newText(Lang.misc(99), 255, 0, 160);
+        }
       }
       if (crossed(0.75)
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
@@ -2013,6 +2035,29 @@ export class Game implements GameHooks {
 
   /** vi_ 工具桥接（vanilla-itemfunc.json pick/axe/hammer → tool def；
    *  双工具 Hamaxe 族取主类型，副力暂缺——挖掘入口按主类型判定） */
+  /** 魔力花族自动喝蓝（manaFlower：施法魔力不足时自动消耗背包魔力药水，
+   *  Player.cs QuickMana 原理同 QuickHeal；返回 true=已补蓝可重试施法） */
+  private tryAutoManaPotion(): boolean {
+    const inv = this.player.inv;
+    for (let i = 0; i < inv.slots.length; i++) {
+      const s = inv.slots[i];
+      if (!s) continue;
+      const def = ITEM_DEFS[s.id];
+      if (!def) continue;
+      const m = /^vi_(\d+)_/.exec(def.key);
+      if (!m) continue;
+      const f = itemFuncOfVid(+m[1]);
+      if (f?.healMana && f.consumable && !f.createTile) {
+        this.player.mana = Math.min(this.player.maxMana, this.player.mana + f.healMana);
+        inv.removeAt(i, 1);
+        this.sfx.play('drink');
+        this.cb.onInventoryChanged();
+        return true;
+      }
+    }
+    return false;
+  }
+
   private itemFuncTool(id: number): (typeof ITEM_DEFS)[number]['tool'] {
     const def = ITEM_DEFS[id];
     if (!def) return undefined;
@@ -2254,6 +2299,23 @@ export class Game implements GameHooks {
       return;
     }
 
+    // 提取机（Player.cs:41008 PlaceThing_ItemInExtractinator——先于 PlaceThing_Tiles）：
+    // 手持可提取物（泥沙/雪泥/沙漠化石/垃圾/苔藓/粪块/蜂巢/贝壳堆/黑曜石，ItemID.cs:1104）
+    // 对准 219/642 左键使用 → 转化；642 先查矿物兑换表。useTime 冷却 = 10×(642?0.33:1)
+    if (inp.mouseDown && !inp.rightDown && this.player.useTime === 0
+      && this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) {
+      const esh = this.wiring?.sheetOf(tx, ty) ?? -1;
+      if (esh === 219 || esh === 642) {
+        if (this.useExtractinator(tx, ty, true)) {
+          // useAnimation 15（Item.cs:6301 泥沙/MakeUsableWithChlorophyteExtractinator:48120）
+          this.swing = { t: 15, dur: 15, item: held!.id };
+          this.swingHitSet.clear();
+          this.swingTileCutSet.clear();
+          return;
+        }
+      }
+    }
+
     // 电路工具(扳手/剪线钳/致动器/致动魔杖/五彩扳手/宏伟蓝图):左键,目标格可被占用
     if (heldDef?.wireTool && inp.mouseDown && !inp.rightDown) {
       this.useWireTool(tx, ty, heldDef);
@@ -2272,7 +2334,9 @@ export class Game implements GameHooks {
     }
 
     // 其它物品（方块/药水等）：左键使用并带挥砍动画
-    if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool) {
+    // （召唤武器例外——交给下方 cw 分发 kind='summon'）
+    if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
+      && cw?.kind !== 'summon') {
       const spd = 30;
       this.swing = { t: spd, dur: spd, item: held!.id };
       this.swingHitSet.clear();
@@ -2532,11 +2596,17 @@ export class Game implements GameHooks {
     } else if (heldDef?.magic && inp.mouseDown && this.player.useTime === 0) {
       // 魔法武器:消耗 mana → 发射魔法弹(Player.ItemCheck_Shoot 语义)
       const mg = heldDef.magic;
-      if (this.player.mana < mg.manaCost) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
-        this.input.mouseDown = false;
-      } else {
-        this.player.mana -= mg.manaCost;
+      // 魔力花族：耗魔 -8%（manaCost -= 0.08，Player.cs:14040）；不足时自动喝蓝
+      // 魔力花族 -8% + 丛林套 manaCostMul（:14040 / :15878）
+      const mgCost = Math.max(1, Math.round(mg.manaCost * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul));
+      if (this.player.mana < mgCost) {
+        if (!(this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= mgCost)) {
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
+          this.input.mouseDown = false;
+        }
+      }
+      if (this.player.mana >= mgCost) {
+        this.player.mana -= mgCost;
         const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
         const mx = this.player.cx + Math.cos(ang) * 14;
         const my = this.player.cy - 4 + Math.sin(ang) * 14;
@@ -2619,6 +2689,31 @@ export class Game implements GameHooks {
         this.sfx.play('throw');
         break;
       }
+      case 'summon': {
+        // 召唤（R6）：随从上限 = 1+附魔台+召唤药水（Player.maxMinions 链 :9855），
+        // 超限驱逐最旧；哨兵独立（WarTable maxTurrets 未接=1）
+        const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry) as MinionProj[];
+        if (!cw.sentry) {
+          const maxMinions = 1 + (this.player.buffs.has(BuffType.Bewitched) ? 1 : 0)
+            + (this.player.buffs.has(BuffType.Summoning) ? 1 : 0);
+          if (minions.length >= maxMinions) minions[0].dead = true; // 驱逐最旧
+        } else {
+          const sentries = this.entities.projectiles.filter((e) => e instanceof MinionProj && e.sentry) as MinionProj[];
+          if (sentries.length >= 1) sentries[0].dead = true;
+        }
+        const owner = this.player;
+        this.entities.add(new MinionProj(
+          px, py, cw.shoot, Math.max(1, Math.round(cw.damage * owner.damageMult('magic'))),
+          cw.knockback, !!cw.sentry,
+          this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length,
+          false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
+          () => (owner.dead ? null : owner),
+        ), 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw');
+        this.input.mouseDown = false;
+        break;
+      }
       case 'yoyo':
       case 'flail': {
         // AI_099 channel：同物品已有悠悠球在场则不重复掷出（原版每把悠悠球仅一个）
@@ -2651,12 +2746,16 @@ export class Game implements GameHooks {
       }
       case 'magic': {
         // 魔法：消耗 mana（原版 mana 字段）→ 发射 item.shoot（贴图/穿透/寿命取投射物表）
-        if (this.player.mana < (cw.mana ?? 0)) {
-          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
-          this.input.mouseDown = false;
-          return;
+        // 魔力花族：耗魔 -8%；不足时自动喝蓝重试
+        const cwCost = Math.max(1, Math.round((cw.mana ?? 0) * (this.player.equipStats.manaFlower ? 0.92 : 1) * this.player.equipStats.manaCostMul));
+        if (this.player.mana < cwCost) {
+          if (!(this.player.equipStats.manaFlower && this.tryAutoManaPotion() && this.player.mana >= cwCost)) {
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NoMana'));
+            this.input.mouseDown = false;
+            return;
+          }
         }
-        this.player.mana -= cw.mana ?? 0;
+        this.player.mana -= cwCost;
         const pd = projectileData(cw.shoot);
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
@@ -3664,93 +3763,23 @@ export class Game implements GameHooks {
       if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
+    // 原版 tile sheet（八音盒/喷泉/天塔柱/派对柱右键分支用）
+    const sh = this.wiring?.sheetOf(tx, ty) ?? -1;
     // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
     // 玩家储物族/读碑文/设床不受限（前者是玩家自有物品，后两者不改方块）。
     const editDenied = !this.netCanEditTile() && (
       type === T.DOOR_CLOSED || type === T.DOOR_OPEN || type === TILE_BY_KEY['v_83_herbs_mature']
       || type === TILE_BY_KEY['v_84_herbs_bloom'] || type === TILE_BY_KEY['crystal_heart']
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
+      || sh === 35 || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
     );
     if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
-    // ---- 提炼机（tile 219；Player.cs:41038 → ExtractinatorHelper.RollExtractinatorDrop）：
-    //  右键消耗背包 1 份沙泥 424/淤泥 1103（mode0）或沙漠化石 3347（mode1）出产物。
-    //  mode0/1 链（:65-374）：1/10 坚固化石(mode1) → 1/2 钱币（白 1/12000/金 1/800/
-    //  银 1/60/铜 10-100）→ 蚊 1242（mode0 1/5000 / mode1 1/1667）→ 宝石 1/25（mode1
-    //  1/50）→ 琥珀 1/50（mode1 1/20）→ 再 1/2 钱币小表 → 兜底 8 选 1 矿石 ----
-    if (type === (TILE_BY_KEY['v_219_extractinator'] ?? -1)) {
-      const inv = this.player.inv;
-      const findMat = (id: number) => inv.slots.findIndex((s) => s && s.id === id);
-      const siltId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[424] ?? ''];
-      const slushId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[1103] ?? ''];
-      const fossilId = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3347] ?? ''];
-      let mode = -1, slot = -1;
-      const tryMat = (ids: number[], m: number) => {
-        for (const iid of ids) {
-          const sid = findMat(iid);
-          if (sid >= 0) { mode = m; slot = sid; return; }
-        }
-      };
-      if (siltId !== undefined || slushId !== undefined) {
-        tryMat([siltId, slushId].filter((v) => v !== undefined), 0);
-      }
-      if (mode < 0 && fossilId !== undefined) tryMat([fossilId], 1);
-      if (mode < 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedExtractMaterial')); return; }
-      inv.removeAt(slot, 1);
-      this.cb.onInventoryChanged();
-      const r = Math.random;
-      const N = (n: number) => Math.floor(r() * n) === 0;
-      let out = -1, stack = 1;
-      if (mode === 1 && N(10)) {
-        out = 3380; // Sturdy Fossil
-        if (N(5)) stack += Math.floor(r() * 2);
-        if (N(10)) stack += Math.floor(r() * 3);
-        if (N(15)) stack += Math.floor(r() * 4);
-      } else if (N(2)) {
-        // 钱币大表
-        if (N(12000)) { out = 74; for (let k = 0; k < 4; k++) if (N(14)) stack += Math.floor(r() * 2); }
-        else if (N(800)) { out = 73; for (let k = 0; k < 5; k++) if (N(6)) stack += 1 + Math.floor(r() * 20); }
-        else if (N(60)) { out = 72; for (let k = 0; k < 4; k++) if (N(4)) stack += 5 + Math.floor(r() * 21); }
-        else { out = 71; for (let k = 0; k < 4; k++) if (N(3)) stack += 10 + Math.floor(r() * 16); }
-      } else if (N(mode === 0 ? 5000 : 1667)) {
-        out = 1242; // Amber Mosquito
-      } else if (N(mode === 0 ? 25 : 50)) {
-        out = [181, 180, 177, 179, 178, 182][Math.floor(r() * 6)]; // 六宝石均匀
-        if (N(20)) stack += Math.floor(r() * 2);
-        if (N(30)) stack += Math.floor(r() * 3);
-        if (N(40)) stack += Math.floor(r() * 4);
-        if (N(50)) stack += Math.floor(r() * 5);
-        if (N(60)) stack += Math.floor(r() * 6);
-      } else if (N(mode === 0 ? 50 : 20)) {
-        out = 999; // Amber
-        if (N(20)) stack += Math.floor(r() * 2);
-        if (N(30)) stack += Math.floor(r() * 3);
-        if (N(40)) stack += Math.floor(r() * 4);
-        if (N(50)) stack += Math.floor(r() * 5);
-        if (N(60)) stack += Math.floor(r() * 6);
-      } else if (N(3)) {
-        // 钱币小表
-        if (N(5000)) { out = 74; for (let k = 0; k < 5; k++) if (N(10)) stack += Math.floor(r() * 3); }
-        else if (N(400)) { out = 73; for (let k = 0; k < 5; k++) if (N(5)) stack += 1 + Math.floor(r() * 20); }
-        else if (N(30)) { out = 72; for (let k = 0; k < 4; k++) if (N(3)) stack += 5 + Math.floor(r() * 21); }
-        else { out = 71; for (let k = 0; k < 4; k++) if (N(2)) stack += 10 + Math.floor(r() * 16); }
-      } else {
-        // 兜底矿石（RollOreEarlymode :511-522：铜12/铁11/银14/金13/锡699/铅700/钨701/铂702）
-        out = [12, 11, 14, 13, 699, 700, 701, 702][Math.floor(r() * 8)];
-        if (N(20)) stack += Math.floor(r() * 2);
-        if (N(30)) stack += Math.floor(r() * 3);
-        if (N(40)) stack += Math.floor(r() * 4);
-        if (N(50)) stack += Math.floor(r() * 5);
-        if (N(60)) stack += Math.floor(r() * 6);
-      }
-      if (out > 0) {
-        const key = out === 71 ? 'coin_copper' : out === 72 ? 'coin_silver'
-          : out === 73 ? 'coin_gold' : out === 74 ? 'coin_platinum'
-            : VANILLA_ITEM_KEY_BY_ID[out];
-        if (key && ITEM_BY_KEY[key] !== undefined) {
-          this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, stack, 0, -2);
-        }
-      }
-      this.sfx.play('chop', 0.8, tx * TILE + 24, ty * TILE + 24);
+    // ---- 提取机（tile 219 普通版 / 642 叶绿版；Player.cs:41008-41049
+    //  PlaceThing_ItemInExtractinator 1:1，全量转化表见 world/Extractinator.ts）----
+    if (type === (TILE_BY_KEY['v_219_extractinator'] ?? -1)
+      || type === (TILE_BY_KEY['v_642_chlorophyte_extractinator'] ?? -1)) {
+      this.useExtractinator(tx, ty, false);
+      this.input.rightDown = false;
       return;
     }
     // ---- 玩家储物族（原版 Player.cs:32598+）：29→bank / 97→bank2 / 463→bank3 / 491→bank4。
@@ -3827,7 +3856,104 @@ export class Game implements GameHooks {
       const sk = seedKeys[style] ?? seedKeys[0];
       this.spawnDrop(tx * 16 + 8, ty * 16, sk, 1);
       this.input.rightDown = false;
+    } else if (sh === 35 || sh === 139) {
+      // 八音盒/南瓜灯右键（Player.cs:31759-31764）：SoundID 28 + SwitchMB（与电路共用）
+      this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
+      this.wiring && switchMB(this.wiring, tx, ty);
+      this.input.rightDown = false;
+    } else if (sh === 207) {
+      // 喷泉右键（Player.cs:31796-31800）
+      this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
+      this.wiring && switchFountain(this.wiring, tx, ty);
+      this.input.rightDown = false;
+    } else if (sh === 410 || sh === 480 || sh === 509 || sh === 657 || sh === 658 || sh === 720 || sh === 721 || sh === 725 || sh === 733) {
+      // 天塔柱族右键（Player.cs:31801-31808）
+      this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
+      this.wiring && switchMonolith(this.wiring, tx, ty);
+      this.input.rightDown = false;
+    } else if (sh === 455) {
+      // 派对纪念碑右键（Player.cs:31809-31814 → ToggleManualParty）
+      this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
+      toggleManualParty(this.partyState);
+      this.input.rightDown = false;
     }
+  }
+
+  /**
+   * 提取机对准使用（Player.cs:41008-41049 PlaceThing_ItemInExtractinator 1:1）。
+   * 优先级：642 叶绿版先查矿物兑换表（ItemTrader.ChlorophyteExtractinator，
+   * Player.cs:41024-41033 / ItemTrader.cs:82-108），命中则 1:1 兑换（SkipItemConsumption
+   * 语义——本方法自扣 stack）；否则按 ExtractinatorMode（ItemID.cs:1104）走转化表
+   * （:41034-41044 → ExtractinatorHelper.RollExtractinatorDrop，全表在
+   * world/Extractinator.ts）。原版消耗走通用 consumable 扣减（Player.cs:42602），此处等价
+   * 为手持格扣 1。642 使用间隔 ×0.33（:41018-41020）。
+   * @param viaUse true = 左键使用链（updateUse，受 useTime 冷却）；false = 右键交互
+   * @returns 是否成功转化/兑换（false 时调用方应回落到普通放置/使用）
+   */
+  private useExtractinator(tx: number, ty: number, viaUse: boolean): boolean {
+    const sheet = this.wiring?.sheetOf(tx, ty) ?? -1;
+    if (sheet !== 219 && sheet !== 642) return false;
+    const held = this.player.inv.heldItem();
+    if (!held) {
+      if (!viaUse) this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedExtractMaterial'));
+      return false;
+    }
+    const vid = slotVanillaId(held.id);
+    // 642 矿物兑换表优先（Player.cs:41024-41033：itemTrader.TryGetTradeOption）
+    if (sheet === 642) {
+      const give = CHLOROPHYTE_TRADES[vid];
+      if (give !== undefined) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onInventoryChanged();
+        this.dropFromExtractinator({ itemType: give, stack: 1 }, tx, ty);
+        this.sfx.play('pickup'); // SoundID 7（:41025 Grab）
+        if (viaUse) this.player.useTime = extractinatorUseTime(10, sheet);
+        return true;
+      }
+    }
+    const mode = extractinatorMode(vid);
+    if (mode < 0) {
+      // 手持不可提取物：use 链回落到放置/挥砍；interact 提示
+      if (!viaUse) this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedExtractMaterial'));
+      return false;
+    }
+    const drop = rollExtractinatorDrop(mode, sheet, mathRand(), this.world.flags.hardMode);
+    this.player.inv.removeAt(this.player.inv.selected, 1);
+    this.cb.onInventoryChanged();
+    this.dropFromExtractinator(drop, tx, ty);
+    this.sfx.play('pickup'); // SoundID 7（Player.cs:41040）
+    if (viaUse) this.player.useTime = extractinatorUseTime(10, sheet);
+    return true;
+  }
+
+  /** 转化产物掉落（Player.cs:41426-41436 DropItemFromExtractinator：鼠标世界坐标生成；
+   *  此处落在提取机顶格上方，带向上初速便于拾取） */
+  private dropFromExtractinator(drop: ExtractDrop, tx: number, ty: number): void {
+    if (drop.itemType <= 0) return;
+    const key = COIN_KEY_BY_VID[drop.itemType] ?? VANILLA_ITEM_KEY_BY_ID[drop.itemType];
+    if (key && ITEM_BY_KEY[key] !== undefined) {
+      this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, drop.stack, 0, -2);
+    }
+  }
+
+  /**
+   * 提取机通电消耗源（Wiring.cs:2572-2592）。箱子查找/箱内消耗为纯函数
+   * （world/Extractinator.ts，对应 TryFindChestForExtractinator :2596-2622 与
+   * :2575-2592）；此处补两条引擎侧门禁——箱子正被玩家打开（Chest.UsingChest，:2571）
+   * 不转化，箱子格存的内部 id 经 slotVanillaId 转回原版 id。
+   */
+  private extractinatorPullImpl(ax: number, ay: number, blockType: number): ExtractDrop | null {
+    const chest = findExtractinatorChest(this.world.chests, ax, ay);
+    if (!chest) return null;
+    if (this.openChestRef?.() === chest) return null;
+    return extractinatorConsumeFromChest(
+      chest, blockType, mathRand(), this.world.flags.hardMode, slotVanillaId);
+  }
+
+  /** 提取机通电产物掉落（Wiring.cs:2588 Item.NewItem 32×32 判定框中心） */
+  private dropItemStackImpl(vanillaItemId: number, stack: number, px: number, py: number): void {
+    const key = COIN_KEY_BY_VID[vanillaItemId] ?? VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
+    if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(px, py, key, stack, 0, -2);
   }
 
   /** 放置态生命水晶使用(Player.cs:29358:statLifeMax≥400 拒绝,+20 上限+回复,消耗) */
@@ -4259,10 +4385,11 @@ export class Game implements GameHooks {
         }
         return true;
       },
-      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind) => {
-        this.entities.add(new TrapShot(px, py, vx, vy, damage, kind), 'projectiles');
-        // 发射音：陷阱族=敲石近似；炮弹族由 TrapShot 首帧按原版播 Item14（Projectile.cs:21542/26830）
-        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball') this.sfxAt('tink', px, py);
+      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0) => {
+        this.entities.add(new TrapShot(px, py, vx, vy, damage, kind, form), 'projectiles');
+        // 发射音：陷阱族=敲石近似；炮弹族由 TrapShot 首帧按原版播 Item14（Projectile.cs:21542/26830）；
+        // 传送门弹 601 首帧无发射音（原版 AI 只有 alpha 段的门色拖尾尘）
+        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball' && kind !== 'portalbolt') this.sfxAt('tink', px, py);
       },
       countProjectiles: (kind: 'spiky' | 'bunny', px: number, py: number, radius: number) => {
         let n = 0;
@@ -4297,10 +4424,24 @@ export class Game implements GameHooks {
       },
       explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean) =>
         this.explodeAt(tx, ty, damage, radius, destroyTiles),
+      extractinatorPull: (ax: number, ay: number, blockType: number) =>
+        this.extractinatorPullImpl(ax, ay, blockType),
+      dropItemStack: (vid: number, stack: number, px: number, py: number) =>
+        this.dropItemStackImpl(vid, stack, px, py),
       toast: (m: string) => this.cb.onToast(m),
       sfx: (n: string, x?: number, y?: number) => {
         if (x !== undefined && y !== undefined) this.sfxAt(n as SfxName, x, y);
         else this.sfx.play(n as SfxName);
+      },
+      // 广播盒（Wiring.cs:1177-1230）：锚点 2×2 内的告示牌文本 → 聊天广播。
+      // 原版 NewTextMultiline 粉色多行——toast 单行近似（聊天多行渲染未接入）
+      announce: (x: number, y: number) => {
+        const sign = this.world.signs.find((s) => x >= s.x && x <= s.x + 1 && y >= s.y && y <= s.y + 1);
+        if (sign && sign.text.trim()) this.cb.onToast(sign.text);
+      },
+      // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty）
+      toggleParty: () => {
+        toggleManualParty(this.partyState);
       },
     };
   }
@@ -4367,6 +4508,14 @@ export class Game implements GameHooks {
    *  地狱免疫 + 蜥蜴砖(137)石巨人前神庙门行(frameY/18∈1-4)免疫 + 墙350；
    *  破坏走 breakTile（=WorldGen.KillTile 全语义，**含掉落**——曾误注释"不掉物品"）；
    *  墙破坏 ShouldWallExplode(:75739)：盘内任一格无墙 → 每 destroyed 格 3×3 清墙(≠350) */
+  /** 传送门弹 601 落门（GameHooks.placePortal；TrapShot 撞块时调用）。
+   *  PortalHelper.TryPlacingPortal+AddPortal（entities/Portal.ts）：同 form 旧门与
+   *  门线相交门被移除；落点不成（门线无有效支承）静默 */
+  placePortal(x: number, y: number, vx: number, vy: number, form: number): void {
+    const p: Portal | null = placePortalAt(this.world.store, x, y, vx, vy, form);
+    if (p) this.entities.add(p, 'props');
+  }
+
   private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true) {
     const st = this.world.store;
     const R = radius;
@@ -4478,6 +4627,8 @@ export class Game implements GameHooks {
   }
 
   openChest: ((c: ChestData) => void) | null = null;
+  /** UI 侧当前打开的箱子（Wiring.cs:2571 Chest.UsingChest 判定用；UI.ts 赋值） */
+  openChestRef: (() => ChestData | null) | null = null;
 
   private findChest(tx: number, ty: number): ChestData | null {
     for (const c of this.world.chests) {

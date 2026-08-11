@@ -218,6 +218,94 @@ if (!up) {
   }
 }
 
+// ===== 墙角坡:天花板压住坡顶 → 抬升受阻应回退挡停(不楔进角落) =====
+{
+  const corner = await page.evaluate(() => {
+    const g = window.__swGame; const st = g.world.store;
+    const cx = Math.floor(g.player.cx / 16), G = Math.floor(g.player.cy / 16) + 16;
+    const sx = cx + 4;
+    // 雕刻 3 高走廊:x-2..x+8 × G-1..G+3(G-1 留作天花板上方,走廊 = 行 G..G+2)
+    for (let dx = -2; dx <= 8; dx++) for (let dy = -1; dy <= 3; dy++) st.setTile(sx + dx, G + dy, 0);
+    const dirt = st.type[st.idx(cx, G + 20)] || 1;
+    for (let dx = -2; dx <= 8; dx++) st.setTile(sx + dx, G + 3, dirt);   // 地板
+    for (let dx = -2; dx <= 1; dx++) st.setTile(sx + dx, G + 2, dirt);   // 高侧顶面(行G+2)
+    // 悬垂块压住高侧上方(行G+1)——爬到坡顶必被挡
+    for (let dx = -2; dx <= 0; dx++) st.setTile(sx + dx, G + 1, dirt);
+    st.setTile(sx, G + 2, dirt); st.setSlope(sx, G + 2, 1);              // slope1 在走廊地面
+    return { sx, G };
+  });
+  const cstart = await page.evaluate((C) => {
+    const g = window.__swGame; const p = g.player;
+    p.x = (C.sx + 6) * 16 + 8 - p.w / 2; p.y = (C.G + 3) * 16 - p.h; p.vx = 0; p.vy = 0;
+    return { x: p.x, feet: p.y + p.h };
+  }, corner);
+  await new Promise((r) => setTimeout(r, 400));
+  await page.keyboard.down('KeyA');
+  await new Promise((r) => setTimeout(r, 1800));
+  await page.keyboard.up('KeyA');
+  const cend = await page.evaluate((C) => {
+    const g = window.__swGame; const p = g.player; const st = g.world.store;
+    // 嵌入检测:身体盒覆盖的整砖格(排除坡/半砖)
+    let embed = 0;
+    const bx0 = Math.floor(p.x / 16), bx1 = Math.floor((p.x + p.w - 0.01) / 16);
+    const by0 = Math.floor(p.y / 16), by1 = Math.floor((p.y + p.h - 0.01) / 16);
+    for (let x = bx0; x <= bx1; x++) for (let y = by0; y <= by1; y++) {
+      const j = st.idx(x, y);
+      if (st.flags[j] && !st.half[j] && st.slope[j] === 0 && st.isSolid(x, y)) embed++;
+    }
+    return { x: p.x, feet: p.y + p.h, embed, wallX: (C.sx - 2) * 16, floorY: (C.G + 3) * 16 };
+  }, corner);
+  const stopped = cend.x >= cend.wallX;                 // 没穿进墙
+  const notEmbedded = cend.embed === 0;                 // 不楔进任何整砖
+  const onSurface = cend.feet >= cend.floorY - 24 && cend.feet <= cend.floorY + 4; // 停在坡面/地板
+  check('墙角坡受阻回退(挡停不楔入)', stopped && notEmbedded && onSurface,
+    `start x ${Math.round(cstart.x)} → end x ${Math.round(cend.x)} (墙线 ${cend.wallX}), feet ${Math.round(cend.feet)} / 地板 ${cend.floorY}, 嵌入格 ${cend.embed}`);
+}
+
+// ===== 下坡粘性:速度辅助消除格顶滑行 =====
+{
+  const dh = await page.evaluate(() => {
+    const g = window.__swGame; const st = g.world.store;
+    const cx = Math.floor(g.player.cx / 16), G = Math.floor(g.player.cy / 16) + 20;
+    const sx = cx + 3;
+    for (let dx = -3; dx <= 9; dx++) for (let dy = -3; dy <= 3; dy++) st.setTile(sx + dx, G + dy, 0);
+    const dirt = st.type[st.idx(cx, G + 20)] || 1;
+    for (let dx = -3; dx <= 9; dx++) st.setTile(sx + dx, G + 2, dirt);   // 安全地板
+    for (let dx = -3; dx <= 0; dx++) st.setTile(sx + dx, G, dirt);       // 高台(行G)
+    for (let dx = 1; dx <= 14; dx++) st.setTile(sx + dx, G + 1, dirt);   // 低处地面(行G+1,加宽防走出条外)
+    st.setTile(sx, G, dirt); st.setSlope(sx, G, 1);                      // slope1 高台右缘下行
+    return { sx, G };
+  });
+  const ds = await page.evaluate((D) => {
+    const g = window.__swGame; const p = g.player;
+    p.x = (D.sx - 1) * 16 + 8 - p.w / 2; p.y = D.G * 16 - p.h; p.vx = 0; p.vy = 0;
+    return { x: p.x, feet: p.y + p.h };
+  }, dh);
+  await new Promise((r) => setTimeout(r, 400));
+  await page.keyboard.down('KeyD');
+  const dtraj = [];
+  for (let k = 0; k < 6; k++) {
+    await new Promise((r) => setTimeout(r, 200));
+    dtraj.push(await page.evaluate(() => {
+      const p = window.__swGame.player;
+      return { x: Math.round(p.x), feet: p.y + p.h };
+    }));
+  }
+  await page.keyboard.up('KeyD');
+  // 断言:走过坡区、无下沉(<=低地面+4)、无中途回弹(下坡后 feet 再升高>2px)
+  const slopeX0 = dh.sx * 16, slopeX1 = slopeX0 + 16;
+  const crossed = dtraj.some((t) => t.x > slopeX1);
+  const floorY = (dh.G + 1) * 16;
+  const last = dtraj[dtraj.length - 1];
+  const sunk = last.feet > floorY + 4;
+  let bounce = 0;
+  for (let k = 1; k < dtraj.length; k++) {
+    if (dtraj[k].feet < dtraj[k - 1].feet - 2) bounce++; // feet 升高 = 回弹到格顶
+  }
+  check('下坡粘性(走过坡区不滑行回弹)', crossed && !sunk && bounce <= 1,
+    `start ${Math.round(ds.x)} → last x ${last.x} feet ${Math.round(last.feet)} (坡区 ${slopeX0}-${slopeX1}, 地面 ${floorY}, 回弹 ${bounce} 次), traj ${JSON.stringify(dtraj.map(t => [t.x, Math.round(t.feet)]))}`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();
 process.exit(fail ? 1 : 0);
