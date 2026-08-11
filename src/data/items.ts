@@ -47,6 +47,8 @@ export interface ItemDef {
     knockback?: number;
     reach?: number;       // 攻击/作用半径（px）
   };
+  /** 副工具力（Hamaxe 系双工具：主 tool.type 外的另一力，挖掘入口按主类型判定） */
+  axePower?: number;
   heal?: number;          // 食用/饮用回复
   potion?: {
     buff: PotionBuff;
@@ -703,6 +705,43 @@ item({ key: 'mushroom_grass_seeds', name: '蘑菇草地种子', maxStack: 999, v
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
 import vanillaItemMeta from '../../public/sprites/vanilla.json';
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
+// ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
+item({ key: 'vi_103_nightmare_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_104_the_breaker', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_122_molten_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_204_meteor_hamaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_217_molten_hamaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_367_pwnhammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_579_drax', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_654_ebonwood_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_657_rich_mahogany_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_660_pearlwood_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_776_cobalt_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_777_mythril_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_778_adamantite_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_787_hammush', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_797_flesh_grinder', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_798_deathbringer_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_922_shadewood_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_990_pickaxe_axe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1188_palladium_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1195_orichalcum_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1202_titanium_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1234_chlorophyte_warhammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1305_the_axe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1506_spectre_pickaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_1507_spectre_hamaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3481_platinum_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3487_tungsten_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3493_lead_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3499_tin_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3505_copper_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3511_silver_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3517_gold_hammer', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3525_stardust_hamaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_4317_haemorrhaxe', name: '', maxStack: 999, value: 1 });
+
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
 for (const [idStr, m] of Object.entries(_vim)) {
@@ -949,4 +988,16 @@ for (let i = 0; i < ITEM_DEFS.length; i++) {
   if (s === undefined) { console.error(`[stable-id] item 缺稳定 id: ${k}`); continue; }
   ITEM_STABLE_OF_INTERNAL[i] = s;
   if (!ITEM_INTERNAL_OF_STABLE.has(s)) ITEM_INTERNAL_OF_STABLE.set(s, i);
+}
+// ---- 原版工具力表补齐(Item.cs SetDefaults 提取)→ vi_ 道具 tool 元数据 ----
+// 条件破坏链的道具入口:圣锤 80 砸祭坛/邪恶石 65 需梦魇镐/神庙砖 210 需 Picksaw 级等
+const VANILLA_TOOL_POWERS: Record<number, { pick?: number; hammer?: number; axe?: number }> = JSON.parse("{\"103\":{\"pick\":65},\"104\":{\"hammer\":55},\"122\":{\"pick\":100},\"204\":{\"hammer\":60,\"axe\":60},\"217\":{\"hammer\":70,\"axe\":70},\"367\":{\"hammer\":80},\"579\":{\"pick\":200,\"axe\":70},\"654\":{\"hammer\":40},\"657\":{\"hammer\":35},\"660\":{\"hammer\":55},\"776\":{\"pick\":110},\"777\":{\"pick\":150},\"778\":{\"pick\":180},\"787\":{\"hammer\":85},\"797\":{\"hammer\":55},\"798\":{\"pick\":70},\"922\":{\"hammer\":40},\"990\":{\"pick\":200,\"axe\":70},\"1188\":{\"pick\":130},\"1195\":{\"pick\":165},\"1202\":{\"pick\":190},\"1234\":{\"hammer\":90},\"1262\":{\"hammer\":90},\"1305\":{\"hammer\":100,\"axe\":70},\"1506\":{\"pick\":200},\"1507\":{\"hammer\":90,\"axe\":70},\"3481\":{\"hammer\":59},\"3487\":{\"hammer\":50},\"3493\":{\"hammer\":43},\"3499\":{\"hammer\":38},\"3505\":{\"hammer\":35},\"3511\":{\"hammer\":45},\"3517\":{\"hammer\":55},\"3525\":{\"hammer\":100,\"axe\":70},\"4317\":{\"hammer\":80}}");
+for (const [idS, tp] of Object.entries(VANILLA_TOOL_POWERS)) {
+  const key = VANILLA_ITEM_KEY_BY_ID[Number(idS)];
+  if (!key) continue;
+  const def = ITEM_DEFS[ITEM_BY_KEY[key]];
+  if (!def) continue;
+  const type = tp.pick !== undefined ? 'pick' : 'hammer';
+  def.tool = { type: type as ToolType, power: tp.pick ?? tp.hammer ?? 0 };
+  if (tp.axe !== undefined) def.axePower = tp.axe;
 }

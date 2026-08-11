@@ -27,7 +27,7 @@ const T = (() => {
     MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
     // 23 陨石（tiles.ts key 为 ore_meteorite，非 v_23_*）
     METEORITE: get('ore_meteorite'),
-    CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'),
+    CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'), CATTAIL: get('v_519_cattails'),
     CORRUPT_ICE: get('v_163_purple_ice_block'), CRIMSON_ICE: get('v_200_red_ice_block'),
     // 164 粉冰(=神圣冰)：key 实为 v_164_pink_ice_block（旧注"未注册→0"有误，已注册）
     HOLLOW_ICE: get('v_164_pink_ice_block'), DUNGEON_BLUE: get('v_41_blue_brick'),

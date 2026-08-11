@@ -72,6 +72,8 @@ export class Player extends Entity {
   private stickyBreak = 0;
   private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
+  /** 本 tick 落地冲击速度（碰撞前 vy≥3 落地才非 0；Game 消费：起爆器 411 坠落触发） */
+  landImpactVy = 0;
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
@@ -724,7 +726,11 @@ export class Player extends Entity {
     if (this.vy < -0.1) this.fallStartY = null; // 重新上升则重置
 
     this.dropThrough = !!this.inputDown;
+    // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
+    // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
+    const impactVy = this.vy;
     moveAndCollide(this, world, this.vx, this.vy);
+    this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
 
     // 边缘滑落：已移除（改为收窄支撑判定宽度——本质相同但无侧推力）
     if (false) {

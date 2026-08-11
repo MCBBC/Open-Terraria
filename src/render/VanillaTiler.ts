@@ -496,13 +496,39 @@ export function drawVanillaCell(
       [1, 0, 0x1], [0, -1, 0x10], [-1, 0, 0x100], [0, 1, 0x1000],          // E N W S
       [1, -1, 0x10000], [-1, -1, 0x100000], [-1, 1, 0x1000000], [1, 1, 0x10000000], // NE NW SW SE
     ];
+    // 原版 BlockStyle 双向连通门控（Framing.cs:92-98 + SelfFrame8Way:199-316）：
+    // 半砖/坡面按 blockStyleLookup 断开对应方向——half 断上；slope1 断上/右；
+    // slope2 断上/左；slope3 断下/右；slope4 断下/左。中心与邻居两侧都要放行
+    //（中心 own edge && 邻居 opposite edge；角落需相邻两条边同时放行）。
+    // edge mask: bit0=up bit1=down bit2=left bit3=right（blockType 0-5，half=1 slope1-4=2-5）
+    const BLOCK_STYLE = [0b1111, 0b1110, 0b0110, 0b1010, 0b0101, 0b1001];
+    const edgesOf = (ii: number): number => {
+      const b = st.half[ii] ? 1 : (st.slope[ii] >= 1 && st.slope[ii] <= 4 ? st.slope[ii] + 1 : 0);
+      return BLOCK_STYLE[b];
+    };
+    const cE = edgesOf(st.idx(x, y));
+    // 方向 (dx,dy) 连通 = 中心各分量 edge && 邻居各反向 edge
+    const DIR_EDGE: Array<[number, number]> = [
+      [0b1000, 0b0100], // E: 中心 right / 邻居 left
+      [0b0001, 0b0010], // N: 中心 up / 邻居 down
+      [0b0100, 0b1000], // W: 中心 left / 邻居 right
+      [0b0010, 0b0001], // S: 中心 down / 邻居 up
+      [0b1001, 0b0110], // NE
+      [0b0101, 0b1010], // NW
+      [0b0110, 0b1001], // SW
+      [0b1010, 0b0101], // SE
+    ];
     let same = 0, mergeMask = 0;
-    for (const [dx, dy, bit] of dirs) {
+    for (let di = 0; di < dirs.length; di++) {
+      const [dx, dy, bit] = dirs[di];
+      const [cNeed, nNeed] = DIR_EDGE[di];
       const ax = x + dx, ay = y + dy;
       if (!st.inBounds(ax, ay)) continue;
       const oi = st.idx(ax, ay);
       const ot = st.type[oi];
       if (ot === 0) continue;
+      // 中心或邻居任一侧 BlockStyle 断边 → 该方向不连通（不算 same/merge）
+      if ((cE & cNeed) !== cNeed || (edgesOf(oi) & nNeed) !== nNeed) continue;
       const om = nMeta(ot);
       // 同型：石族按 isStone 互认，其余走 Merges 链
       if (myStone ? !!om?.isStone : merges(ot)) same |= bit;
@@ -632,8 +658,8 @@ function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageEleme
     else if (slope === 3) { num16 = i * -2; num19 = i * 2; num17 = 16 - i * 2; num18 = 16 - num17; }
     else { num16 = i * -2; num19 = 16 - i * 2 - 2; num17 = 16 - i * 2; num18 = 16 - num17; }
     const dstY = i * 2 + num16;
-    // 源矩形越界保护
-    if (fx + num19 + 2 > (r.img as HTMLImageElement).naturalWidth || r.img.width || fy + num18 + num17 > r.img.height) continue;
+    // 源矩形越界保护（HTMLImageElement/HTMLCanvasElement 均有 .width/.height）
+    if (fx + num19 + 2 > r.img.width || fy + num18 + num17 > r.img.height) continue;
     ctx.drawImage(r.img, fx + num19, fy + num18, 2, num17, px + num19, py + dstY, 2, num17);
   }
   // 补条:slope 1/2 在底部 y=14,slope 3/4 在顶部 y=0

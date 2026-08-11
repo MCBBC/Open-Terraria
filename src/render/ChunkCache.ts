@@ -318,9 +318,8 @@ export class ChunkCache {
     ctx.globalAlpha = 1; // 致动幽灵 alpha 复位(防影响后续 pass)
 
     // ---- 第三遍：半砖（halfBrick）——主绘制后清掉上半 8px ----
-    // 原版 TileDrawing.cs:689-690：源矩形高度 -8、目标下移 8（贴图上半画进格下半）。
-    // 此处统一后处理 clearRect 上半（对 blend/auto/rule 全部绘制路径生效；
-    // 与原版的差异是保留贴图下半而非上半，纹理内容差异可忽略）
+    // VanillaTiler blend/auto/style 三路径已按原版源矩形裁剪（源 y+8 高-8）；
+    // 此处 clearRect 仅作兜底（uv 查找失败走 vframe(1,1) 全帧回退等路径仍画满 16×16）
     for (let ly = 0; ly < CHUNK; ly++) {
       for (let lx = 0; lx < CHUNK; lx++) {
         const i = st.idx(x0 + lx, y0 + ly);

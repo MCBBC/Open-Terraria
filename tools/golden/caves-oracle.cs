@@ -659,10 +659,12 @@ Checkpoint("sandpatches");
 }
 Checkpoint("tunnels");
 
+var mCaveX = new List<int>();
+var mCaveY = new List<int>();
+
 // ================= Pass 5：MountainCaves（cs:11809-11882，山丘本体；pass 34 开口在 Beaches 后）=================
 {
     int num = (int)((double)W * 0.001);
-    var mCaveX = new List<int>();
     for (int i = 0; i < num; i++)
     {
         int tries = 0; bool giveUp = false, done = false;
@@ -692,7 +694,7 @@ Checkpoint("tunnels");
                         if (l < 0 || l >= W || m < 0 || m >= H) continue;
                         if (act[m * W + l] == 1 && (typ[m * W + l] == 53 || typ[m * W + l] == 151 || typ[m * W + l] == 274)) sand = true;
                     }
-                if (!sand) { Mountinater(num3, k); mCaveX.Add(num3); }
+                if (!sand) { Mountinater(num3, k); mCaveX.Add(num3); mCaveY.Add(k); }
                 break;
             }
         }
@@ -857,6 +859,296 @@ Checkpoint("rocklayer");
         Caverer((int)r.Next(340, W - 340), (int)r.Next(yLo, yHi));
 }
 Checkpoint("surfacecaves");
+
+// ================= Pass 34：MountainCaveOpenings（cs:14932-14947，按我们的执行序紧跟洞穴链）=================
+void CaveOpenater(int i, int j)
+{
+    double num = (int)r.Next(7, 12);
+    double num2 = num;
+    int dir = 1;
+    if ((int)r.Next(2) == 0) dir = -1;
+    if ((int)r.Next(10) != 0) dir = (i < W / 2) ? 1 : -1;
+    double px = i, py = j;
+    int steps = 100;
+    double vx = dir, vy = 0.0;
+    while (steps > 0)
+    {
+        int hx = (int)px, hy = (int)py;
+        if (hx < 0) hx = 0; if (hx > W - 1) hx = W - 1;
+        if (hy < 0) hy = 0; if (hy > H - 1) hy = H - 1;
+        int hi = hy * W + hx;
+        if (wal[hi] == 0 || (act[hi] == 1 && NOT_CLEAR.Contains(typ[hi]))) steps = 0;
+        steps--;
+        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
+        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
+        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
+        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
+        num2 = num * (int)r.Next(80, 120) * 0.01;
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && !NOT_CLEAR.Contains(typ[y * W + x]))
+                    act[y * W + x] = 0;
+            }
+        px += vx; py += vy;
+        vx += (int)r.Next(-10, 11) * 0.05;
+        vy += (int)r.Next(-10, 11) * 0.05;
+        if (vx > dir + 0.5) vx = dir + 0.5;
+        if (vx < dir - 0.5) vx = dir - 0.5;
+        if (vy > 0.0) vy = 0.0;
+        if (vy < -0.5) vy = -0.5;
+    }
+}
+void Cavinator2(int i, int j, int steps)
+{
+    double num = (int)r.Next(7, 15);
+    double num2 = num;
+    int dir = 1;
+    if ((int)r.Next(2) == 0) dir = -1;
+    double px = i, py = j;
+    int num4 = (int)r.Next(20, 40);
+    double vx = dir, vy = (int)r.Next(10, 20) * 0.01;
+    while (num4 > 0)
+    {
+        num4--;
+        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
+        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
+        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
+        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
+        num2 = num * (int)r.Next(80, 120) * 0.01;
+        bool stop = false;
+        for (int x = x0; x < x1 && !stop; x++)
+        {
+            for (int y = y0; y < y1; y++)
+            {
+                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4)
+                {
+                    int ti = y * W + x;
+                    if ((act[ti] == 1 && TILE_DUNGEON.Contains(typ[ti])) || WALL_DUNGEON.Contains(wal[ti]))
+                    { num4 = 0; stop = true; break; }
+                    if (act[ti] == 1 && (!NOT_CLEAR.Contains(typ[ti]) || typ[ti] == 53)) { /* skip */ }
+                    else if (act[ti] == 1) act[ti] = 0;
+                }
+                if (num4 <= 0) break;
+            }
+            if (num4 <= 0) break;
+        }
+        if (num4 <= 0) break;
+        px += vx; py += vy;
+        vx += (int)r.Next(-10, 11) * 0.05;
+        vy += (int)r.Next(-10, 11) * 0.05;
+        if (vx > dir + 0.5) vx = dir + 0.5;
+        if (vx < dir - 0.5) vx = dir - 0.5;
+        if (vy > 2.0) vy = 2.0;
+        if (vy < 0.0) vy = 0.0;
+    }
+    if (steps > 0 && (int)py < rockLayer + 50) Cavinator2((int)px, (int)py, steps - 1);
+}
+for (int i = 0; i < mCaveX.Count; i++)
+{
+    CaveOpenater(mCaveX[i], mCaveY[i]);
+    Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
+}
+Checkpoint("mcopenings");
+
+// ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
+{
+    bool floridaL = false, floridaR = false;
+    if ((int)r.Next(4) == 0)
+    {
+        if ((int)r.Next(2) == 0) floridaL = true; else floridaR = true;
+    }
+    for (int side = 0; side < 2; side++)
+    {
+        if (side == 0)
+        {
+            int waterX = (int)r.Next(220, 260);
+            if (dungeonRight) waterX = 275;
+            int cap = leftBeachEnd - 50;
+            if (waterX > cap) waterX = cap;
+            int j = 0;
+            while (j < H && act[j * W + (waterX - 1)] == 0) j++;
+            j += (int)r.Next(1, 5);
+            int count = 0; double depth = 1.0;
+            for (int x = waterX - 1; x >= 0; x--)
+            {
+                if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
+                else depth += 1.0;
+                int pad = (int)r.Next(15, 20);
+                int yEnd = (int)((double)j + depth + pad);
+                for (int y = 0; y < yEnd && y < H; y++)
+                {
+                    int ti = y * W + x;
+                    if ((double)y < (double)j + depth * 0.75 - 3.0)
+                    {
+                        act[ti] = 0;
+                        if (y > j) liq[ti] = 255;
+                        else if (y == j) liq[ti] = 127;
+                    }
+                    else if (y > j) { typ[ti] = 53; act[ti] = 1; }
+                    wal[ti] = 0;
+                }
+            }
+        }
+        else
+        {
+            int waterX = W - (int)r.Next(220, 260);
+            if (!dungeonRight) waterX = W - 275;
+            int cap = rightBeachStart + 50;
+            if (waterX < cap) waterX = cap;
+            int l = 0;
+            while (l < H && act[l * W + waterX] == 0) l++;
+            l += (int)r.Next(1, 5);
+            int count = 0; double depth = 1.0;
+            for (int x = waterX; x < W; x++)
+            {
+                if (x < W - 30) { count++; depth = TuneOceanDepth(count, depth, floridaR); }
+                else depth += 1.0;
+                int pad = (int)r.Next(15, 20);
+                int yEnd = (int)((double)l + depth + pad);
+                for (int y = 0; y < yEnd && y < H; y++)
+                {
+                    int ti = y * W + x;
+                    if ((double)y < (double)l + depth * 0.75 - 3.0)
+                    {
+                        act[ti] = 0;
+                        if (y > l) liq[ti] = 255;
+                        else if (y == l) liq[ti] = 127;
+                    }
+                    else if (y > l) { typ[ti] = 53; act[ti] = 1; }
+                    wal[ti] = 0;
+                }
+            }
+        }
+    }
+}
+Checkpoint("beaches");
+
+// ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================
+var snowMinXArr = new int[H];
+var snowMaxXArr = new int[H];
+{
+    int snowTop = worldSurface;
+    int convLine = lavaLine - (int)r.Next(160, 200);
+    int left = snowL, right = snowR;
+    int num5 = 10;
+    for (int i = 0; i <= lavaLine - 140; i++)
+    {
+        left += (int)r.Next(-4, 4);
+        right += (int)r.Next(-3, 5);
+        if (i > 0)
+        {
+            left = (left + snowMinXArr[i - 1]) / 2;
+            right = (right + snowMaxXArr[i - 1]) / 2;
+        }
+        if (dungeonRight) { if ((int)r.Next(4) == 0) { left++; right++; } }
+        else if ((int)r.Next(4) == 0) { left--; right--; }
+        snowMinXArr[i] = left;
+        snowMaxXArr[i] = right;
+        for (int j = left; j < right; j++)
+        {
+            if (j < 0 || j >= W) continue; // vanilla 落 padding（丢弃）
+            if (i < convLine)
+            {
+                int ti = i * W + j;
+                if (wal[ti] == 2) wal[ti] = 40;
+                if (typ[ti] is 0 or 2 or 23 or 40 or 53) typ[ti] = 147;
+                else if (typ[ti] == 1) typ[ti] = 161;
+            }
+            else
+            {
+                num5 += (int)r.Next(-3, 4);
+                if ((int)r.Next(3) == 0)
+                {
+                    num5 += (int)r.Next(-4, 5);
+                    if ((int)r.Next(3) == 0) num5 += (int)r.Next(-6, 7);
+                }
+                if (num5 < 0) num5 = (int)r.Next(3);
+                else if (num5 > 50) num5 = 50 - (int)r.Next(3);
+                for (int k = i; k < i + num5; k++)
+                {
+                    if (k >= H) break;
+                    int ti = k * W + j;
+                    if (wal[ti] == 2) wal[ti] = 40;
+                    if (typ[ti] is 0 or 2 or 23 or 40 or 53) typ[ti] = 147;
+                    else if (typ[ti] == 1) typ[ti] = 161;
+                }
+            }
+        }
+    }
+}
+Checkpoint("icebiome");
+
+// ================= Grass（cs:12454-12507）=================
+{
+    double count = (double)(W * H) * 0.002;
+    for (int i = 0; (double)i < count; i++)
+    {
+        int x1 = (int)r.Next(1, W - 1);
+        int y1 = (int)r.Next((int)gvWorldSurfaceLow, (int)gvWorldSurfaceHigh);
+        if (y1 >= H) y1 = H - 2;
+        if (x1 >= 1 && x1 < W - 1 && y1 >= 1 && y1 < H - 1
+            && act[y1 * W + x1 - 1] == 1 && typ[y1 * W + x1 - 1] == 0
+            && act[y1 * W + x1 + 1] == 1 && typ[y1 * W + x1 + 1] == 0
+            && act[(y1 - 1) * W + x1] == 1 && typ[(y1 - 1) * W + x1] == 0
+            && act[(y1 + 1) * W + x1] == 1 && typ[(y1 + 1) * W + x1] == 0)
+        { act[y1 * W + x1] = 1; typ[y1 * W + x1] = 2; }
+        int x2 = (int)r.Next(1, W - 1);
+        int y2 = (int)r.Next(5, (int)gvWorldSurfaceLow);
+        if (y2 >= H) y2 = H - 2;
+        if (x2 >= 1 && x2 < W - 1 && y2 >= 1 && y2 < H - 1
+            && act[y2 * W + x2 - 1] == 1 && typ[y2 * W + x2 - 1] == 0
+            && act[y2 * W + x2 + 1] == 1 && typ[y2 * W + x2 + 1] == 0
+            && act[(y2 - 1) * W + x2] == 1 && typ[(y2 - 1) * W + x2] == 0
+            && act[(y2 + 1) * W + x2] == 1 && typ[(y2 + 1) * W + x2] == 0)
+        { act[y2 * W + x2] = 1; typ[y2 * W + x2] = 2; }
+    }
+}
+Checkpoint("grass");
+
+double TuneOceanDepth(int count, double depth, bool florida)
+{
+    double Inc(double f) => depth + (int)r.Next(10, 20) * f;
+    if (!florida)
+    {
+        if (count < 3) return Inc(0.2);
+        if (count < 6) return Inc(0.15);
+        if (count < 9) return Inc(0.1);
+        if (count < 15) return Inc(0.07);
+        if (count < 50) return Inc(0.05);
+        if (count < 75) return Inc(0.04);
+        if (count < 100) return Inc(0.03);
+        if (count < 125) return Inc(0.02);
+        if (count < 150) return Inc(0.01);
+        if (count < 175) return Inc(0.005);
+        if (count < 200) return Inc(0.001);
+        if (count < 230) return Inc(0.01);
+        if (count < 235) return Inc(0.05);
+        if (count < 240) return Inc(0.1);
+        if (count < 245) return Inc(0.05);
+        if (count < 255) return Inc(0.01);
+        return depth;
+    }
+    if (count < 3) return Inc(0.001);
+    if (count < 6) return Inc(0.002);
+    if (count < 9) return Inc(0.004);
+    if (count < 15) return Inc(0.007);
+    if (count < 50) return Inc(0.01);
+    if (count < 75) return Inc(0.014);
+    if (count < 100) return Inc(0.019);
+    if (count < 125) return Inc(0.027);
+    if (count < 150) return Inc(0.038);
+    if (count < 175) return Inc(0.052);
+    if (count < 200) return Inc(0.08);
+    if (count < 230) return Inc(0.12);
+    if (count < 235) return Inc(0.16);
+    if (count < 240) return Inc(0.27);
+    if (count < 245) return Inc(0.43);
+    if (count < 255) return Inc(0.6);
+    return depth;
+}
 
 // ================= 输出 =================
 var sb = new StringBuilder();

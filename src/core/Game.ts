@@ -1403,6 +1403,17 @@ export class Game implements GameHooks {
     }
 
     player.fixedUpdate(dt, this);
+    // ---- 起爆器 411 坠落触发（Player.cs:34368 TryLandingOnDetonator）：落地冲击 vy≥3 且
+    // 脚下格（Bottom 左下角 +0.01）是 411 未触发态（frameY==0 && frameX<36）→ Wiring.HitSwitch
+    if (player.landImpactVy >= 3 && this.wiring) {
+      const dx = Math.floor(player.x / TILE), dy = Math.floor((player.y + player.h + 0.01) / TILE);
+      const di = this.world.store.idx(dx, dy);
+      if (this.wiring.sheetOf(dx, dy) === 411
+        && this.world.store.frameY[di] === 0 && this.world.store.frameX[di] < 36) {
+        this.wiring.hitSwitch(dx, dy);
+      }
+      player.landImpactVy = 0; // 消费（防多帧重复）
+    }
     this.updateTallGateAuto();
     if (player.dead) {
       // 死亡瞬间：红色粉碎粒子 + 原地留墓碑（只处理一次）
@@ -3202,8 +3213,11 @@ export class Game implements GameHooks {
       this.world.spawnY = ty - 1;
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
       this.input.rightDown = false;
-    } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']) {
-      // 拉杆/开关:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
+    } else if (type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
+      || type === TILE_BY_KEY['v_411_detonator']) {
+      // 拉杆/开关/计时器:切换通断(帧 +18 翻转),触发直线可见的陷阱(WorldGen Wiring 简化)
+      // 起爆器 411：原版为"对准使用任意物品"触发（Player.cs:31865）+ 坠落触发（:34368，
+      // 已接 Game.fixedUpdate landImpactVy）——本作并入右键交互
       this.toggleSwitch(tx, ty, type);
     } else if (type === TILE_BY_KEY['v_83_herbs_mature'] || type === TILE_BY_KEY['v_84_herbs_bloom']) {
       // 药草收获:成熟/开花态右键 → 掉种子(style = frameX/18,WorldGen.cs:38731)
@@ -5235,6 +5249,44 @@ export class Game implements GameHooks {
     })();
     // 海洋带判定（地图外沿 8%——螃蟹/海鸥 oceanOnly 门，防止进沙漠）
     const inOceanBand = tx < st.w * 0.08 || tx > st.w * 0.92;
+    // ---- 雨天小动物（原版 SpawnAnNPC L2288-2311 friendly 段：草族 critter 块雨天
+    //  整段替换——金鱼上岸散步 230 主导；L2107-2126 香蒲蜻蜓）。
+    //  走本 friendly 通道（原版 FindSpawnTile 独立友好点位，不占敌怪配额）----
+    const hallowGrassT = TILE_BY_KEY['v_109_hallowed_grass_block'];
+    if (isDay && this.world.weather.raining && Math.abs(this.world.weather.windSpeedTarget) < 0.4
+      && !surfaceWater && (gTile === T.GRASS || gTile === T.DIRT || gTile === hallowGrassT)) {
+      // 香蒲蜻蜓（FindCattailTop :80977：±30×±20 窗口 reservoir 采样 tile519 顶段 frameX≥180）
+      const cattailT = TILE_BY_KEY['v_519_cattails'];
+      let cx = tx, cy = groundY, nCattail = 1;
+      for (let ix = Math.max(4, tx - 30); ix <= Math.min(st.w - 4, tx + 30); ix++) {
+        for (let iy = Math.max(4, groundY - 20); iy <= Math.min(st.h - 4, groundY + 20); iy++) {
+          const ii = st.idx(ix, iy);
+          if (st.type[ii] === cattailT && st.frameX[ii] >= 180 && Math.random() < 1 / nCattail) {
+            cx = ix; cy = iy; nCattail++;
+          }
+        }
+      }
+      const spawnVanilla = (id: number, px: number, py: number) => {
+        const e = Enemy.fromVanilla(id, px, py);
+        if (e) { e.id = this.entities.nextId++; this.entities.add(e, 'critters'); }
+      };
+      if (nCattail > 1) {
+        // 金蜻蜓 601（1/goldCritterChance=400）；池按 tile（RollDragonflyType L5426）；
+        // 1/3 附加只 ×2（±16px）——原版 SpawnNPC 多只
+        const dfly = () => Math.random() < 1 / 400 ? 601
+          : (gTile === T.SAND ? [595, 598, 600][Math.floor(Math.random() * 3)]
+            : [596, 597, 599][Math.floor(Math.random() * 3)]);
+        spawnVanilla(dfly(), cx * TILE + 8, cy * TILE);
+        if (Math.random() < 1 / 3) spawnVanilla(dfly(), cx * TILE - 8, cy * TILE);
+        if (Math.random() < 1 / 3) spawnVanilla(dfly(), cx * TILE + 24, cy * TILE);
+        return;
+      }
+      // 上岸金鱼块：1/400 金蚯蚓 448 → 2/3 蚯蚓 357 → 1/400 金金鱼 593 → 兜底 230
+      const rr = Math.random();
+      const id = rr < 1 / 400 ? 448 : rr < 2 / 3 ? 357 : Math.random() < 1 / 400 ? 593 : 230;
+      spawnVanilla(id, tx * TILE + 8, groundY * TILE);
+      return;
+    }
     // 按昼夜 + 栖息生态过滤（水面列只出 water 生态或飞行种）
     const pool = CRITTER_DEFS.filter((c) => {
       if (c.dayOnly && !isDay) return false;

@@ -23,7 +23,8 @@ export function runGrassPass(st: TileStore, rng: RNG, gs: GenState): void {
     if (y1 >= h) y1 = h - 2;
     seed(x1, y1);
     const x2 = rng.int(1, w - 2);
-    let y2 = rng.int(0, Math.max(1, gs.worldSurfaceLow - 1));
+    // 原版下界是 **5**（Next(5, (int)WSL)——曾误写 0）
+    let y2 = rng.int(5, gs.worldSurfaceLow - 1);
     if (y2 >= h) y2 = h - 2;
     seed(x2, y2);
   }

@@ -13,6 +13,10 @@
     "smallholes|a1b1c465 9ec53eb5 43e0eeb7 c72cf112",
     "dirtlayer|501ff8ad f6578ccd 43e0eeb7 bc707f32",
     "rocklayer|0d3c77fd 44a16d1c 43e0eeb7 19ceaead",
-    "surfacecaves|ec7b37cd 5011521d 43e0eeb7 1361af1d"
+    "surfacecaves|ec7b37cd 5011521d 43e0eeb7 1361af1d",
+    "mcopenings|c004531c 95c97ed4 43e0eeb7 1361af1d",
+    "beaches|aec263a5 ce38eca4 e093b057 d7385cfd",
+    "icebiome|35319c4b ce38eca4 54459dfd d7385cfd",
+    "grass|9480fe68 ce38eca4 54459dfd d7385cfd"
   ]
 }
