@@ -11,10 +11,10 @@
 // 方向语义（易错点，素材命名有误导）：
 //  站上带后的水平推运方向 = +ConveyorDirection——421 向 +X（右）、422 向 -X（左）。
 //  两条独立链路互相印证：
-//   ① StepConveyorBelt：num = Σ dir×num5×gravDir（:4304），num5 站立=+1（上沿线命中
-//     ：4299-4301），位移 velocity.X = num×gravDir（:4333）→ 421 取 +2.5；
+//   ① StepConveyorBelt：num = Σ dir×num5×gravDir（:4306），num5 站立=+1（上沿线命中
+//     ：4299-4302），位移 velocity.X = num×gravDir（:4333）→ 421 取 +2.5；
 //   ② ApplyConveyorBeltMovementToVelocity：Side=Bottom（物品底==格顶，BuildTileContacts
-//     :2212-2216）→ zero.X += +num3×overlap（:4001-4002）→ 421 同样取正。
+//     :2212-2216）→ zero.X += +num3×overlap（:3966-3968）→ 421 同样取正。
 //  素材键 v_421_conveyorbeltleft / v_422_conveyor_belt_ccw 的 left/right 与推运方向
 //  无关——物品名是 "Conveyor Belt (Clockwise / Counter Clockwise)"
 //  （idNames.generated.ts:11361-11362）：顺时针带环顶面向右走。
@@ -23,7 +23,7 @@
 //  - Player/NPC：固定步进 2.5px/tick（:4333-4334，方向经 Math.Sign 归一 :4328-4329），
 //    直接改 position 不改 velocity；先按 TileCollision 钳制平移（:4335-4336），
 //    再向下压 2.5×gravDir 贴合带面（:4337-4341，下坡/跨带不断联）。
-//  - 掉落物：速度驱动。按脚下接触的带向×重叠量分档（:4052-4077）
+//  - 掉落物：速度驱动。按脚下接触的带向×重叠量分档（:4028-4051）
 //    |Σ|≤4→0.75、≤8→1.25、>8→2.5，每 tick vx += 目标×6/60（=0.1）且钳到目标
 //    （:4130-4140）——即加速逼近、上限 2.5。
 //
@@ -101,7 +101,7 @@ function beltLineY(kind: 1 | 2, slope: number, half: boolean, ty: number, t: num
     case 2: return kind === 2 ? bot - t : bot;              // :4284-4288
     case 3: return kind === 2 ? top : bot - t;              // :4289-4293
     case 4: return kind === 2 ? top : top + t;              // :4284-4293 的 4 分支
-    default: return kind === 2 ? top + (half ? 8 : 0) : bot; // :4295-4301 半砖顶 +8
+    default: return kind === 2 ? top + (half ? 8 : 0) : bot; // :4299-4301 半砖顶 +8
   }
 }
 
@@ -120,34 +120,34 @@ function beltLineSpan(
 }
 
 interface BeltContact {
-  /** Σ dir×num5×gravDir（:4304），Math.Sign 前的原值 */
+  /** Σ dir×num5×gravDir（:4306），Math.Sign 前的原值 */
   num: number;
-  /** 坡面垂直分量 Σ（:4306-4310） */
+  /** 坡面垂直分量 Σ（:4307-4314） */
   num2: number;
   /** 物品分档用的带向×重叠量 Σ（:3988-4002 的 Bottom/Top 接触） */
   overlapX: number;
 }
 
-/** 边缘行扫描（原版 GetEntityEdgeTiles :3882-3935 的 up+down 双边 + :4253 调用参数
+/** 边缘行扫描（原版 GetEntityEdgeTiles :3882-3932 的 up+down 双边 + :4239 调用参数
  *  left:false right:false）：
- *  - down 行 = 脚下带（底边恰在格顶时取带所在行 :3900-3902），num5=+1 正向推运；
- *  - up 行   = 头顶带（顶边恰在格底时取带所在行 :3897-3899），带的下沿线命中走
- *    num5=-1（:4295-4298），num += num4×num5×gravDir（:4304）→ 反向水平推动——
+ *  - down 行 = 脚下带（底边恰在格顶时取带所在行 :3902-3905），num5=+1 正向推运；
+ *  - up 行   = 头顶带（顶边恰在格底时取带所在行 :3894-3897），带的下沿线命中走
+ *    num5=-1（:4295-4298），num += num4×num5×gravDir（:4306）→ 反向水平推动——
  *    服务"带悬于实体头顶"场景；按压方向不变（:4337-4341 恒向下 2.5×gravDir）。
- *  两行可能同格（身高 <16 且顶边不入下一行）：原版把该格入列两次（:3923-3928 各
+ *  两行可能同格（身高 <16 且顶边不入下一行）：原版把该格入列两次（:3912-3919 各
  *  Add 一次）→ 双倍计入，此处保持 1:1 不去重。
  *  O(2×实体宽/16) 单点查表，不做全图扫描。 */
 function scanBeltContact(ent: ConveyorBody, st: TileStore, gravDir: number): BeltContact | null {
-  // 列范围：边界贴合时原版向两侧各扩一列（:3893-3899）
+  // 列范围：边界贴合时原版向两侧各扩一列（:3890-3901）
   let l = Math.floor(ent.x), r = Math.floor(ent.x + ent.w);
   if (l % TILE === 0) l--;
   if (r % TILE === 0) r++;
   const c0 = Math.floor(l / TILE), c1 = Math.floor(r / TILE);
-  // up 行：顶边恰在格底（头顶正下方悬带）→ 取带所在行（:3897-3899 的 num2--）
+  // up 行：顶边恰在格底（头顶正下方悬带）→ 取带所在行（:3894-3897 的 num2--）
   let t = Math.floor(ent.y);
   if (t % TILE === 0) t--;
   const rowUp = Math.floor(t / TILE);
-  // down 行：底边恰在格顶（正常落脚）→ 取带所在行（:3900-3902 的 num4++）
+  // down 行：底边恰在格顶（正常落脚）→ 取带所在行（:3902-3905 的 num4++）
   let b = Math.floor(ent.y + ent.h);
   if (b % TILE === 0) b++;
   const rowDn = Math.floor(b / TILE);
@@ -164,7 +164,7 @@ function scanBeltContact(ent: ConveyorBody, st: TileStore, gravDir: number): Bel
       // 原版要求 active() && nactive()（:4249-4252）：已致动（缩地）的带不搬运
       if (!st.isActive(c, row)) continue;
       const slope = st.slope[j], half = st.half[j] !== 0;
-      // num5：上沿线命中 +1、下沿线命中 -1（:4295-4301；带非 platform，恒减）
+      // num5：上沿线命中 +1（:4299-4302）、下沿线命中 -1（:4295-4298；带非 platform）
       let num5 = 0;
       const top2 = beltLineSpan(ax0, ax1, c, 2, slope, half, row);
       if (top2 && top2[0] <= ay1 + EPS && top2[1] >= ay0 - EPS) num5++;
@@ -173,12 +173,14 @@ function scanBeltContact(ent: ConveyorBody, st: TileStore, gravDir: number): Bel
       if (num5 === 0) continue;
       found = true;
       contact.num += dir * num5 * gravDir;
-      // 坡面垂直分量（:4306-4310；leftSlope={2,4}/rightSlope={1,3}，Tile.cs:340-358）
+      // 坡面垂直分量（:4307-4314；leftSlope={2,4}/rightSlope={1,3}，Tile.cs:340-358）
       if (slope === 2 || slope === 4) contact.num2 += gravDir * -dir;
       if (slope === 1 || slope === 3) contact.num2 -= gravDir * -dir;
-      // 物品分档重叠量（BuildTileContacts :2225-2230：X 需严格相交 +0.5、下限 1、
-      //  TileContact 构造 (int) 截断；num5>0=站立其上取 +dir、num5<0=带悬于其下取
-      //  -dir，对齐 ApplyConveyorBeltMovementToVelocity :3988-4002 的 Bottom/Top）
+      // 物品分档重叠量（BuildTileContacts 权重公式 :2196-2198：X 需严格相交
+      //  （ax1>格左 && ax0<格右）、overlap+0.5、下限 1，TileContact 构造再 (int) 截断
+      //  （:2204/:2208）；num5>0=站立其上取 +dir、num5<0=带悬于其下取 -dir，对齐
+      //  ApplyConveyorBeltMovementToVelocity Top/Bottom 累加（:3962-3968，逐格累入
+      //  zero.X 后 :4028-4051 统一分档））
       const raw = Math.min(ax1, c * TILE + TILE) - Math.max(ax0, c * TILE);
       if (raw > 0) contact.overlapX += dir * num5 * Math.trunc(Math.max(raw + 0.5, 1));
     }
@@ -238,7 +240,7 @@ function clampMove(ent: ConveyorBody, st: TileStore, dx: number, dy: number): vo
   }
 }
 
-/** 掉落物档位（Collision.cs:4052-4077 1:1）：|Σ带向×重叠| ≤4→0.75、≤8→1.25、>8→2.5 */
+/** 掉落物档位（Collision.cs:4028-4051 1:1）：|Σ带向×重叠| ≤4→0.75、≤8→1.25、>8→2.5 */
 function itemTier(v: number): number {
   if (v < 0) return v < -8 ? -CONVEYOR_ITEM_MAX : v < -4 ? -1.25 : -0.75;
   if (v > 0) return v > 8 ? CONVEYOR_ITEM_MAX : v > 4 ? 1.25 : 0.75;

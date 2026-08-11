@@ -138,7 +138,7 @@ describe('传送带实体输送（StepConveyorBelt 1:1）', () => {
     expect(b.x + b.w).toBe(15 * 16);
   });
 
-  it('掉落物档位：带缘小重叠走 0.75 低档（:4052-4077）', () => {
+  it('掉落物档位：带缘小重叠走 0.75 低档（:4028-4051）', () => {
     const w = new World(60, 40, 42);
     w.store.setTileSilent(10, ROW, BELT_421); // 单格带
     const item = body(10 * 16 + 13, SURFACE - 12, 12, 12); // 只压带 3px
@@ -146,8 +146,8 @@ describe('传送带实体输送（StepConveyorBelt 1:1）', () => {
     expect(item.vx).toBeCloseTo(0.75 * 0.1); // 档位 0.75 → 首 tick +0.075
   });
 
-  it('头顶带（up 边扫描 :3923-3928 + num5-- :4295-4298）：带悬于头顶 1 格 → 反向推动', () => {
-    // 48px 身高（3 整格）站在石面上：头顶恰在格底 → GetEntityEdgeTiles 的 num2--（:3897-3899）
+  it('头顶带（up 边扫描 :3912-3919 + num5-- :4295-4298）：带悬于头顶 1 格 → 反向推动', () => {
+    // 48px 身高（3 整格）站在石面上：头顶恰在格底 → GetEntityEdgeTiles 的 num2--（:3894-3897）
     // 把 up 行取到头顶带的所在行（18）；带的下沿线（y=304）命中实体盒顶 → num5=-1 → 反向
     const FLOOR = 22, HEAD = 18;             // 石面行顶 y=352；头顶带行 18（底 y=304=盒顶）
     const FLOOR_Y = FLOOR * 16;
@@ -157,7 +157,7 @@ describe('传送带实体输送（StepConveyorBelt 1:1）', () => {
       for (let c = 10; c <= 19; c++) w.store.setTileSilent(c, HEAD, type);
       return w;
     };
-    // 421（dir=+1）→ num5=-1 取 -dir → 向 -X（:4304）
+    // 421（dir=+1）→ num5=-1 取 -dir → 向 -X（:4306）
     const b = body(12 * 16, FLOOR_Y - 48, 20, 48);
     expect(stepConveyor(b, overHead(BELT_421).store)).toBe(true);
     expect(b.x).toBeCloseTo(12 * 16 - CONVEYOR_SPEED);

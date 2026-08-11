@@ -6,7 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
-import { tileRunner, drBegin, drEnd, DR_LOG, cellTraceBegin, cellTraceDump, gpkBegin, gpkEnd, GPK } from './TileRunner';
+import { tileRunner } from './TileRunner';
 
 const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
@@ -64,21 +64,12 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
-  cellTraceBegin();
-  gpkBegin();
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
-  gpkEnd();
-  console.log('GPK ' + GPK.join(' '));
-  console.log('CT ' + cellTraceDump());
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);
-  const PH: string[] = [`tun=${rng.vanilla.peek()}`];
   generateHolesInMudWalls(st, rng, gs);
-  PH.push(`holes=${rng.vanilla.peek()}`);
   generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van);
-  console.log('CT ' + cellTraceDump());
-  console.log('PH ' + PH.join(' ') + ' FT ' + FT.join(' '));
   return jungleXOut;
 }
 
@@ -195,9 +186,7 @@ function mudWallRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: numb
   }
 }
 
-let FT: string[] = [];
 function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: number, oldY: number, scale: number, van: number): void {
-  FT.length = 0;
   void van;
   let x = oldX, y = oldY;
   // 大泥簇
@@ -209,17 +198,14 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     const str = rng.int(40, 99), stp = rng.int(300, 499);
     tileRunner(st, rng, gs, x, y, { strength: str, steps: stp, type: MUD });
   }
-  FT.push(`clumps=${rng.vanilla.peek()}`);
   // 洞穴(1/7 填液体)
   for (let n = 0; n <= 10 * scale; n++) {
     // Next(-A, A) 上界开 → int(-A, A-1)；拒绝采样无界 while（原版，无 40 次上限）
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     let rejN = 0;
-    const rejPts: string[] = [];
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
       rejN++;
-      rejPts.push(`${i2},${j2}:t${st.type[st.idx(i2, j2)]}`);
       i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
       j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     }
@@ -238,9 +224,7 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
       if (n === 0 || n === 13) FT.push(`r${k}.post=${rng.vanilla.peek()}`);
     }
     if (n >= 12) FT.push(`r3p.${n}=${rng.vanilla.peek()}`);
-    FT.push(`c2.${n}=${rng.vanilla.peek()}`);
   }
-  FT.push(`caves=${rng.vanilla.peek()}`);
   // 泥内石囊 + 宝石
   for (let n = 0; n <= 300 * scale; n++) {
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);

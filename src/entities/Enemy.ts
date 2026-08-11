@@ -27,6 +27,11 @@ import {
   martianProbeAI, martianSaucerAI, martianSaucerPartAI, martianDroneAI,
   teslaTurretAI, bubbleShieldAI, angryNimbusAI, martianFighterExtras,
 } from './bossAI_martian';
+import {
+  moonLordFreeEyeAI, moonLeechAI, cultistTabletAI, lunaticDevoteeAI,
+  cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
+  mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
+} from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
@@ -47,6 +52,10 @@ const NATIVE_DROP_KEY: Record<number, string> = {
 };
 /** 雕像产怪战利品门（NPCID.Sets，NPC.cs :79648-79654 NPCLoot 早退用） */
 const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
+/** DoesntDespawnToInactivity 名单（NPC.cs:78584-78641）中本批涉及的仪式/月总链类型——
+ *  神秘石碑 437/忠实信徒 438/弓手 379,380（拜月仪式链条，离屏消失会断 439 召唤链）与
+ *  月总游离眼 400（锚核心 398 生命周期，自身不参与离屏消散） */
+const NO_DESPAWN_IDS = new Set([379, 380, 400, 437, 438]);
 /** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
 const STATUE_DROP_RARITY: Record<number, number> = {
   480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
@@ -362,6 +371,13 @@ export class Enemy extends Entity {
         case 1: this.slimeAI(game, p); break;                          // AI_001 史莱姆
         case 2: this.floatEyeAI(game, p); break;                        // AI_002 飘浮眼（原版核）
         case 3:
+          // AI_003 拜月教弓手 379/380 仪式待机（NPC.cs:56575-56601,ai[3]<0 静立面碑零伤；
+          // 碑置 ai[3]=0 后激活复位 :56602-56609,回战士核）——bossAI_lunar_misc
+          if ((this.vanillaId === 379 || this.vanillaId === 380) && this.ai3 < 0) {
+            cultistArcherStandbyAI(this, game);
+            break;
+          }
+          if (this.vanillaId === 379 || this.vanillaId === 380) cultistArcherWake(this);
           this.fighterAI(game, p);
           // AI_003 火星尾段（bossAI_martian.ts）：军官 383 带盾无敌/补盾、工程师 386 放炮塔
           if (this.vanillaId === 383 || this.vanillaId === 386) martianFighterExtras(this, game, p);
@@ -399,6 +415,19 @@ export class Enemy extends Entity {
         case 28: wofEyeAI(this, game, p); break;                          // AI_028 血肉墙之眼(钉墙吸附/激光连射 83)
         case 29: hungryAI(this, game, p); break;                          // AI_029 饥饿者(挂墙环绕→受击脱落扑咬)
         case 84: lunaticCultistAI(this, game, p); break;                  // AI_084 拜月教邪教徒(瞬移+四系弹幕轮换)
+        // ---- 月系批（bossAI_lunar_misc.ts）----
+        case 81: moonLordFreeEyeAI(this, game, p); break;                // AI_081 月总游离眼 400（cs:38224 十槽攻击表+死光）
+        case 82: moonLeechAI(this, game, p); break;                       // AI_082 月总水蛭块 401（cs:38668 90t 插值吸血回灌）
+        case 83:                                                            // AI_083 神秘石碑 437/忠实信徒 438（cs:38793）
+          if (this.vanillaId === 437) cultistTabletAI(this, game, p);
+          else lunaticDevoteeAI(this, game, p);
+          break;
+        case 86: phantomAI(this, game, p); break;                          // AI_086 暗焰幻影 472/远古幻影 521（cs:39261 穿墙横掠循环）
+        case 87: bigMimicAI(this, game, p); break;                         // AI_087 珍稀四宝箱怪 473-476（cs:39520 跳扑+蓄能/俯冲/三连扑）
+        case 88: mothronAI(this, game, p); break;                          // AI_088 飞蛾魔 477（cs:39876 日食限定轮换+产卵）
+        case 89: mothronEggAI(this, game, p); break;                       // AI_089 蛾卵 478（cs:40407 900t→Transform 479）
+        case 90: babyMothronAI(this, game, p); break;                      // AI_090 幼蛾 479（cs:40450 日食贴脸冲撞）
+        case 91: graniteElementalAI(this, game, p); break;                 // AI_091 花岗岩元素 483（cs:40686 五态寻路）
         case 120: empressOfLightAI(this, game, p); break;                 // AI_120 光之女皇(连段选招/半血变身)
         case 121: queenSlimeAI(this, game, p); break;                     // AI_121 史莱姆皇后(走路四连跳→飞行二阶段)
         case 100: ancientLightAI(this, game, p); break;                  // AI_100 远古之光 522(直飞投射物型)
@@ -565,7 +594,8 @@ export class Enemy extends Entity {
     // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
     // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
     // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
-    if (this.vanillaId === 488 || (this.vanillaId != null && this.vanillaId in TOWER_KEY)) {
+    if (this.vanillaId === 488 || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
+      || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))) {
       // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）；
       // 四塔同样豁免（DoesntDespawnToInactivity 名单 NPC.cs:78634-78635 含 422/493/507/517
       // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
@@ -971,12 +1001,15 @@ export class Enemy extends Entity {
     110, 206, 290, 291, 292, 293,             // 骷髅弓手/冰鱼人/圣骑士/神射/战术/爆破
     449, 450, 451, 452, 481,                  // 投骨骷髅×4/希腊骷髅
     498, 499, 500, 501, 502, 503, 504, 505, 506, // 蝾螈族
+    379, 380,                                 // 拜月教弓手（cs:56575 仪式待机解除后射击，num163=80）
   ]);
   private static readonly RANGED_TABLE: Record<number, {
     cooldown: number; speed: number; dmg: number; range: number;
     drop?: number; spread?: number; oy?: number; burst?: number;
   }> = {
     111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: 0.1 },
+    379: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1 },  // 拜月教弓手（cs:59494/59609/59797/59823 修正后值,弹 WoodenArrowHostile 81）
+    380: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1 },
     214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: 0, spread: 45 },
     215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: 0.08 },
     216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: 0.1 },
