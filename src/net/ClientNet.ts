@@ -20,6 +20,15 @@ export interface RemotePlayerState {
   active: boolean;
 }
 
+/** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制） */
+export interface RoomPolicyState {
+  roomCode: string;
+  roomName: string;
+  isHost: boolean;
+  protectTiles: boolean;
+  protectItems: boolean;
+}
+
 export interface ClientNetHooks {
   /** 世界组装完成（全部初始 strip 到齐 + PlayerSpawn）——Game 进 loadWorld */
   onWorldReady: (world: World) => void;
@@ -31,17 +40,22 @@ export interface ClientNetHooks {
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** 被踢 */
   onKick?: (reason: string) => void;
+  /** 房间策略到达（进场时；门禁/提示用） */
+  onPolicy?: (policy: RoomPolicyState) => void;
 }
 
 export class ClientNet {
   active = false;
   mySlot = -1;
   players = new Map<number, RemotePlayerState>();
+  /** 房间策略（RoomPolicy 到达前 = 自由房默认） */
+  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false };
 
   private ws: WebSocket | null = null;
   private parser = new FrameParser();
   private hooks: ClientNetHooks;
   private game: { player: { appearance?: unknown; inv: { slots: Array<{ id: number; stack: number } | null> } } };
+  private hostToken = '';
 
   /** 组装中的世界（收到 msg7 建骨架，strip 到齐后交给 onWorldReady） */
   private pendingWorld: World | null = null;
@@ -63,8 +77,9 @@ export class ClientNet {
 
   private pingTimer: ReturnType<typeof setInterval> | null = null;
 
-  connect(url: string) {
+  connect(url: string, hostToken = '') {
     this.active = true;
+    this.hostToken = hostToken;
     let ws: WebSocket;
     try {
       ws = new WebSocket(url);
@@ -85,7 +100,10 @@ export class ClientNet {
       // 先连后 loadWorld）——外观名走可选链兜底
       const p = this.game.player as { appearance?: { name?: string } } | undefined | null;
       const name = p?.appearance?.name ?? '玩家';
-      this.send(new NetWriter(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(name).finish());
+      // 房主令牌：URL 已带 ?token=（路由层 newClient 注入）——消息内再传一份兜底
+      // （非房主/旧路径传空串，服务器 try/catch 读不到即跳过）
+      const hello = new NetWriter(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(name).str(this.hostToken);
+      this.send(hello.finish());
     };
     ws.onmessage = (e) => {
       this.parser.append(new Uint8Array(e.data as ArrayBuffer));
@@ -244,6 +262,17 @@ export class ClientNet {
           const name = this.players.get(slot)?.name ?? `玩家${slot}`;
           this.hooks.onChat?.(`<${name}> ${text}`, cr, cg, cb);
         }
+        return;
+      }
+      case Msg.RoomPolicy: {
+        this.policy = {
+          roomCode: r.str(),
+          roomName: r.str(),
+          isHost: r.bool(),
+          protectTiles: r.bool(),
+          protectItems: r.bool(),
+        };
+        this.hooks.onPolicy?.(this.policy);
         return;
       }
       case Msg.Ping:

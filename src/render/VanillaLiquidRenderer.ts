@@ -302,5 +302,131 @@ export function drawVanillaLiquids(
         x * 16 + Math.floor(n2 * 16), y * 16 + Math.floor(n4 * 16), sw, sh);
     }
   }
+
+  // ---- 浸润 pass：DrawTile_LiquidBehindTile(TileDrawing.cs:3859-4193) ----
+  // 对每个【实心方块格】，检查四邻是否有液体 → 在方块格内画一条液体带
+  // （背景 pass，不透明）。方块贴图画在其上——透明圆角像素透出液体色而不是墙色/背景色。
+  // 这是原版"水体包裹方块"的全部秘密；条带宽度由邻接方向决定：
+  //   仅上方有水 → 格顶 16×4 横条(:4081-4087)
+  //   仅下方有水 → 格底 16×4 横条(:4089-4093)
+  //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
+  //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
+  if (isBackground) drawLiquidBehindTiles(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1);
+
+  ctx.globalAlpha = 1;
+}
+
+/**
+ * 浸润 pass:原版 TilesRenderer.DrawLiquidBehindTiles → DrawTile_LiquidBehindTile
+ * (TileDrawing.cs:3859-4193)。对视区内每个实心方块格检查四邻液体,在方块格内画液体带。
+ * 背景 pass 调用(画在方块贴图之下)——透明圆角像素透出液体色。
+ */
+function drawLiquidBehindTiles(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  st: TileStore, groundLevel: number,
+  tx0: number, ty0: number, tx1: number, ty1: number,
+): void {
+  // Liquid_N 贴图(16×16 纯液体块;水 Liquid_0 多 style 但取首 16px)
+  const texCache = new Map<number, HTMLImageElement | null>();
+  const texFor = (vt: number) => {
+    let t = texCache.get(vt);
+    if (t === undefined) {
+      const file = vt === 1 ? 'vanilla/Liquid_1.png' : vt === 2 ? 'vanilla/Liquid_11.png' : 'vanilla/Liquid_0.png';
+      t = atlas.ensureVImage(file) ?? null;
+      if (t) texCache.set(vt, t); // 只缓存命中(缓存 null 会把未就绪永久化——首帧丢条带)
+    }
+    return t;
+  };
+
+  let _dbgCount = 0;
+  for (let x = Math.max(1, tx0); x <= Math.min(st.w - 2, tx1); x++) {
+    for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue; // 空格没有"方块后面"
+      const def = TILE_DEFS[st.type[i]];
+      if (!def || !def.solid || def.platform) continue; // 仅实心方块(:4075 tileSolid 排除)
+
+      // 四邻液体(TileDrawing.cs:3861-3900;379=conveyor 按 vanilla 视为无液体)
+      const lq = (dx: number, dy: number) => {
+        const nx = x + dx, ny = y + dy;
+        if (!st.inBounds(nx, ny)) return { lq: 0, lt: 0 };
+        const ni = st.idx(nx, ny);
+        return { lq: st.liquid[ni], lt: st.liquidType[ni] || 1 };
+      };
+      const L = lq(-1, 0), R = lq(1, 0), U = lq(0, -1), D = lq(0, 1);
+      // flag 语义(:3967-4053):flag=左 / flag2=右 / flag3=上 / flag4=下(>240)
+      let fL = L.lq > 0; const fR = R.lq > 0, fU = U.lq > 0, fD = D.lq > 240;
+      if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
+      _dbgCount++;
+      (typeof window !== 'undefined' ? window : {}).__infilCount = _dbgCount;
+
+      // 液体类型与最大液位(:3940-3965 取最高液位邻居)
+      let maxLq = 0, lt = 0;
+      const consider = (n: { lq: number; lt: number }) => {
+        if (n.lq > maxLq) { maxLq = n.lq; lt = toVanillaType(n.lt); }
+      };
+      if (fL) consider(L); if (fR) consider(R); if (fU) consider(U); if (fD) consider(D);
+      if (lt === 3) continue; // 微光暂不支持
+      const tex = texFor(lt);
+      if (!tex) continue;
+
+      // ---- 液体矩形计算(:4069-4123) ----
+      // 原版默认 rect = (0, 4, 16, 16);pos = (tileX*16, tileY*16)
+      let rx = 0, ry = 4, rw = 16, rh = 16;   // liquidSize(源矩形)
+      let px = x * 16, py = y * 16;            // 目标位置
+
+      if (fD && (fL || fR)) { fL = true; /* :4070-4074 下+任一侧 → 视为双侧 */ }
+      if (!(fU && (fL || fR)) && !(fD && fU)) {
+        if (fU) {
+          // 仅上方有水:格顶 16×4 条(:4081-4087;坡面/半砖加深到 12)
+          rh = 4;
+          const isHalf = st.half[i];
+          if (isHalf) rh = 12;
+        } else if (fD && !fL && !fR) {
+          // 仅下方:格底 16×4(:4089-4093)
+          py = y * 16 + 12; rh = 4;
+        } else {
+          // 侧向有水(:4095-4123)
+          let y0 = 4;
+          const upNi = st.idx(x, y - 1);
+          if (st.liquid[upNi] === 0 && !st.isSolid(x, y - 1)) y0 = 0; // 上方无液无实心→从格顶画(:4098-4101)
+          const num6 = Math.floor((256 - maxLq) / 32) * 2; // 深度=液位不足时从底收(:4096,4102)
+          const isHalf = st.half[i];
+          if (fL && fR || isHalf) {
+            // 左右都有 或 半砖:整格宽(:4108-4111)
+            py = y * 16 + num6; ry = y0; rh = 16 - num6;
+          } else if (fL) {
+            // 仅左:格左 4px 竖条(:4113-4116)
+            py = y * 16 + num6; ry = y0; rw = 4; rh = 16 - num6;
+          } else {
+            // 仅右:格右 4px 竖条(:4118-4121)
+            px = x * 16 + 12; py = y * 16 + num6; ry = y0; rw = 4; rh = 16 - num6;
+          }
+        }
+      }
+      if (rw <= 0 || rh <= 0) continue;
+
+      // ---- 源矩形钳制到贴图边界(原版 XNA PointClamp 自动钳;Canvas 2D 需显式) ----
+      // Liquid_N 是 16×16 纯块;ry=4 起 + rh=16 会到 y=20 越界——XNA 读边缘像素,
+      // 我们钳 rh = tex.height - ry 保持等比(不画满时目标也同步缩)
+      const srcH = Math.min(rh, tex.height - ry);
+      const srcW = Math.min(rw, tex.width - rx);
+      if (srcW <= 0 || srcH <= 0) continue;
+      const dstH = srcH; // 源=目标尺寸(原版 DrawPartialLiquid 同源同目标)
+      const dstW = srcW;
+
+      // ---- 不透明度(:4126-4146) ----
+      // 地上=1.0(有墙压 0.6,墙 21→0.9);地下=0.5 基线
+      let alpha = 0.5;
+      if (y <= Math.floor(groundLevel)) {
+        alpha = 1.0;
+        const wi = st.wall[i];
+        if (wi === 21) alpha = 0.9;
+        else if (wi > 0) alpha = 0.6;
+      }
+      ctx.globalAlpha = alpha;
+      ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
+    }
+  }
   ctx.globalAlpha = 1;
 }

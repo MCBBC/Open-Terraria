@@ -7,10 +7,10 @@ import {
   PLAYER_IFRAME_TICKS, TILE,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { Inventory, ACCESSORY_START } from '../items/Inventory';
+import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
-import { ITEM_DEFS } from '../data/items';
-import { TILE_DEFS } from '../data/tiles';
+import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
 // 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
@@ -64,6 +64,8 @@ export class Player extends Entity {
   respawnTimer = 0;
   // 摔伤追踪
   private fallStartY: number | null = null;
+  /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */
+  private stickyBreak = 0;
   private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
   private regenAccum = 0;
@@ -77,15 +79,15 @@ export class Player extends Entity {
 
   // ---- 配饰效果（重算式聚合，幂等）----
   get hasHorseshoe(): boolean {
-    for (let i = ACCESSORY_START; i < this.inv.slots.length; i++) {
-      const s = this.inv.slots[i];
+    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) { // armor[3-9] 配饰槽（原版 Player.cs:36326）
+      const s = this.inv.armor[i];
       if (s && ITEM_DEFS[s.id]?.accessory === 'lucky_horseshoe') return true;
     }
     return false;
   }
   get hasFeralClaws(): boolean {
-    for (let i = ACCESSORY_START; i < this.inv.slots.length; i++) {
-      const s = this.inv.slots[i];
+    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
+      const s = this.inv.armor[i];
       if (s && ITEM_DEFS[s.id]?.accessory === 'feral_claws') return true;
     }
     return false;
@@ -298,6 +300,74 @@ export class Player extends Entity {
     }
     // 松键截断上升（手感）
     if (!this.inputJump && this.vy < -2) this.vy = -2;
+
+    // ---- 黏滞 tile（Collision.StickyTiles + Player.cs:22650-22740 1:1）----
+    // 蛛网(51)：泡在网里 X/Y 双重阻尼、禁跳、不计摔伤、挣扎随机会撕破网（掉蛛丝）；
+    // 蜂蜜块(229)：只阻尼、不破坏、不禁跳（原版 type!=229 才清 jump）
+    {
+      const stickId = TILE_BY_KEY['v_51_cobweb'] ?? 0;
+      const honeyId = TILE_BY_KEY['v_229_honey_block'] ?? 0;
+      const tx0 = Math.floor(this.x / TILE) - 1, tx1 = Math.floor((this.x + this.w) / TILE) + 1;
+      const ty0 = Math.floor(this.y / TILE) - 1, ty1 = Math.floor((this.y + this.h) / TILE) + 1;
+      let inWeb = false, inHoney = false;
+      let webTx = 0, webTy = 0;
+      for (let ty = ty0; ty <= ty1 && !(inWeb || inHoney); ty++) {
+        for (let tx = tx0; tx <= tx1; tx++) {
+          if (!st.inBounds(tx, ty)) continue;
+          const t = st.type[st.idx(tx, ty)];
+          if (t === 0) continue;
+          const cell = { x: tx * TILE, y: ty * TILE };
+          const pad = t === honeyId ? 1 : 0;
+          if (this.x + this.w > cell.x - pad && this.x < cell.x + TILE + pad
+            && this.y + this.h > cell.y && this.y < cell.y + TILE + 0.01) {
+            if (t === stickId) { inWeb = true; webTx = tx; webTy = ty; break; }
+            if (t === honeyId) { inHoney = true; break; }
+          }
+        }
+      }
+      if (inWeb || inHoney) {
+        this.fallStartY = null; // fallStart 重置（黏滞中不积累摔伤）
+        // X 阻尼（L22688-22699）：钳 ±1；|vx|>0.75 → ×0.85，否则 ×0.6
+        this.vx = Math.max(-1, Math.min(1, this.vx));
+        this.vx *= Math.abs(this.vx) > 0.75 ? 0.85 : 0.6;
+        // Y 阻尼（gravDir=1，L22715-22726）：下落钳 1（缓沉）、上升钳 -5；
+        // 上升 ×0.96，下落 ×0.3
+        if (this.vy > 1) this.vy = 1;
+        if (this.vy < -5) this.vy = -5;
+        this.vy *= this.vy < 0 ? 0.96 : 0.3;
+        // 丝尘（Collision.cs:3416）：纠缠中速度>0.7 时每 tick 1/30 出白色网屑
+        if (inWeb && Math.abs(this.vx) + Math.abs(this.vy) > 0.7 && Math.random() < 1 / 30) {
+          game.spawnParticles(webTx * TILE + 8, webTy * TILE + 8, '#C8C8CC', 1, 0.4, { life: 26, damp: 0.96, grav: 0 });
+        }
+        // 蜂蜜滴落尘（Player.cs:22747-22760，dust 153）：1/5 且垂直有速
+        if (inHoney && (this.vy > 0.15 || this.vy < 0) && Math.random() < 1 / 5) {
+          const side = this.cx > webTx * TILE + TILE / 2 ? -1 : 1;
+          game.spawnParticles(this.cx + side * (this.w / 2 + 2), this.y + this.h * 0.6,
+            '#E8A020', 1, 0.3, { life: 22, damp: 0.97, grav: 0.02 });
+        }
+        if (inWeb) {
+          this.jumpHold = 0; // L22676：type != 229 → jump 清零（蛛网内禁跳）
+          // 挣扎撕网（L22653-22670）：移动中 stickyBreak++，超 rand(20,100) 破坏
+          if (this.vx !== 0 || this.vy !== 0) {
+            this.stickyBreak++;
+            if (this.stickyBreak > 20 + Math.floor(Math.random() * 80)) {
+              this.stickyBreak = 0;
+              // 破坏脚边第一张重叠网（原版破坏的是检测返回的那格）
+              outer: for (let ty = ty0; ty <= ty1; ty++) {
+                for (let tx = tx0; tx <= tx1; tx++) {
+                  if (!st.inBounds(tx, ty) || st.type[st.idx(tx, ty)] !== stickId) continue;
+                  st.setTile(tx, ty, 0);
+                  // 破坏爆散（KillTile HitEffect 网屑四溅近似）
+                  game.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#C8C8CC', 8, 1.4, { life: 30, grav: 0.05 });
+                  game.spawnDrop(tx * TILE + 8, ty * TILE, VANILLA_ITEM_KEY_BY_ID[150] ?? 'vi_150_cobweb', 1);
+                  break outer;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
 
     // 摔伤追踪：开始下落记录高度，落地结算
     if (!this.onGround && this.vy > 0 && this.fallStartY === null) {

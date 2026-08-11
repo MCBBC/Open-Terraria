@@ -4,14 +4,17 @@ import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { RECIPES } from '../data/recipes';
+import { vanillaItemKey, ingredientKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
-import { ACCESSORY_START, ARMOR_START, COIN_START, INV_SIZE, VANITY_START } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE } from '../items/Inventory';
 import type { ChestData } from '../world/World';
+
+type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye';
 
 const iconCache = new Map<number, string>();
 function iconUrl(game: Game, id: number): string {
@@ -118,7 +121,7 @@ export class UI {
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
   heldStack: { id: number; stack: number } | null = null;
-  heldFrom: 'inv' | 'chest' = 'inv';
+  heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
 
@@ -132,8 +135,10 @@ export class UI {
     (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
   }
 
-  private slotContent(where: 'inv' | 'chest', i: number): { id: number; stack: number } | null {
+  private slotContent(where: SlotWhere, i: number): { id: number; stack: number } | null {
     if (where === 'inv') return this.game.player.inv.slots[i];
+    if (where === 'armor') return this.game.player.inv.armor[i];
+    if (where === 'dye') return this.game.player.inv.dye[i];
     return this.openChest?.items[i] ?? null;
   }
 
@@ -507,13 +512,13 @@ export class UI {
     game.openChest = (c) => this.openChestPanel(c);
   }
 
-  slotEl(i: number, where: 'inv' | 'chest'): HTMLElement {
+  slotEl(i: number, where: SlotWhere): HTMLElement {
     // 背包格（idx>=10）在背包面板里，快捷栏格在 HUD 上——全文档查
     const found = document.querySelector(`[data-idx="${i}"][data-where="${where}"]`);
     return found as HTMLElement;
   }
 
-  private makeSlotEl(i: number, where: 'inv' | 'chest'): HTMLElement {
+  private makeSlotEl(i: number, where: SlotWhere): HTMLElement {
     const s = el('div', 'sw-slot');
     s.dataset.idx = String(i);
     s.dataset.where = where;
@@ -521,10 +526,32 @@ export class UI {
       e.stopPropagation();
       e.preventDefault();
       if (e.button === 2) {
+        // 右键（ItemSlot.RightClick :1496-1571）：装备物一键装备，否则拆 1 个到光标
+        const cur = this.slotContent(where, i);
+        if (!this.heldStack && cur && cur.stack === 1 && this.canSwapEquip(cur.id)) {
+          this.swapEquipItem(cur, where, i);
+          this.refreshAll();
+          return;
+        }
         this.splitHalf(i, where);
-      } else {
-        this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
+        return;
       }
+      // Shift+左键（GetAlternateClickAction :563-662）：背包→箱子/装备→卸下/箱内→背包
+      if (e.shiftKey && !e.altKey) {
+        this.shiftClick(i, where);
+        return;
+      }
+      // Alt+左键（OverrideHover :533-561）：收藏/取消（仅背包/钱币/弹药格，favorited 禁 Shift 转移）
+      if (e.altKey && !e.shiftKey && (where === 'inv') && i < 58) {
+        const cur = this.game.player.inv.slots[i];
+        if (cur) {
+          cur.favorited = !cur.favorited;
+          this.game.sfx.play('menuTick', 0.5);
+          this.refreshAll();
+          return;
+        }
+      }
+      this.dragFrom = { i, where, sx: e.clientX, sy: e.clientY };
     });
     s.addEventListener('mouseenter', () => this.showTooltipFor(i, where));
     s.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
@@ -532,8 +559,97 @@ export class UI {
     return s;
   }
 
+  /** 一键装备判定（ItemSlot.CanSwapEquip :3009-3020 近似） */
+  private canSwapEquip(id: number): boolean {
+    const d = ITEM_DEFS[id];
+    return !!d && (!!d.armor || !!d.accessory);
+  }
+
+  /** 一键装备（ItemSlot.SwapEquip/ArmorSwap :3022-3346 近似）：部位→armor[0-2]（时装→[10-12]），
+   *  配饰→armor[3-9] 第一个空槽/原槽交换；成功后取消收藏（原版 :3341） */
+  private swapEquipItem(cur: { id: number; stack: number }, where: SlotWhere, i: number): void {
+    const inv = this.game.player.inv;
+    const d = ITEM_DEFS[cur.id];
+    let target = -1;
+    if (d.armor) {
+      const base = 0; // 时装装备区分暂未实现（Item.vanity），统一功能槽
+      target = base + d.armor.slot;
+    } else if (d.accessory) {
+      for (let k = 3; k < 10; k++) {
+        if (!inv.armor[k]) { target = k; break; }
+      }
+      if (target < 0) target = 3; // 全满→交换第 3 槽
+    }
+    if (target < 0 || !inv.armorAccepts(target, cur.id)) return;
+    const src = where === 'inv' ? inv.slots[i] : where === 'armor' ? inv.armor[i] : inv.dye[i];
+    if (!src) return;
+    src.favorited = false; // 装上取消收藏（原版 ArmorSwap :3341）
+    const tmp = inv.armor[target];
+    inv.armor[target] = src;
+    if (where === 'inv') inv.slots[i] = tmp ?? null;
+    else if (where === 'armor') inv.armor[i] = tmp ?? null;
+    else inv.dye[i] = tmp ?? null;
+    this.game.sfx.play('menuTick', 0.6);
+  }
+
+  /** Shift+左键快速转移（GetAlternateClickAction :563-662 主干）：
+   *  开箱→入箱（仅堆已有或空格）；装备/配饰→卸回背包；箱内→背包；背包内→垃圾桶 */
+  private shiftClick(i: number, where: SlotWhere): void {
+    const inv = this.game.player.inv;
+    if (where === 'inv') {
+      const cur = inv.slots[i];
+      if (!cur || cur.favorited) return; // 收藏禁转移（:566）
+      if (this.openChest) {
+        // TryPlacingInChest（QuickStack 语义：先合并箱内已有类型再空格）
+        const chest = this.openChest;
+        let moved = 0;
+        for (let k = 0; k < chest.items.length; k++) {
+          const cs = chest.items[k];
+          if (cs && cs.id === cur.id && cs.stack < ITEM_DEFS[cur.id].maxStack) {
+            const put = Math.min(ITEM_DEFS[cur.id].maxStack - cs.stack, cur.stack);
+            cs.stack += put; cur.stack -= put; moved += put;
+            if (cur.stack <= 0) break;
+          }
+        }
+        for (let k = 0; k < chest.items.length && cur.stack > 0; k++) {
+          if (!chest.items[k]) { chest.items[k] = cur; inv.slots[i] = null; return; }
+        }
+        if (cur.stack <= 0) inv.slots[i] = null;
+        if (moved > 0 || !inv.slots[i]) this.refreshAll();
+        return;
+      }
+      // 无箱→垃圾桶（覆盖旧内容，OverrideLeftClick cursorOverride 6 :689-706）
+      inv.trash = cur;
+      inv.slots[i] = null;
+      this.game.sfx.play('menuTick', 0.5);
+      this.refreshAll();
+      return;
+    }
+    if (where === 'armor' || where === 'dye') {
+      // Unequip（:634-649）：卸回背包
+      const arr = where === 'armor' ? inv.armor : inv.dye;
+      const cur = arr[i];
+      if (!cur || cur.favorited) return;
+      const left = inv.add(cur.id, cur.stack);
+      if (left === 0) arr[i] = null;
+      this.refreshAll();
+      return;
+    }
+    if (where === 'chest') {
+      // TransferFromChest（:626-633）：箱→背包
+      const chest = this.openChest;
+      if (!chest) return;
+      const cur = chest.items[i];
+      if (!cur) return;
+      const left = inv.add(cur.id, cur.stack);
+      if (left === 0) chest.items[i] = null;
+      else cur.stack = left;
+      this.refreshAll();
+    }
+  }
+
   // ---- 拖拽系统：按下起点 + 光标持有物（ghost 跟随） ----
-  private dragFrom: { i: number; where: 'inv' | 'chest'; sx: number; sy: number } | null = null;
+  private dragFrom: { i: number; where: SlotWhere; sx: number; sy: number } | null = null;
   private ghostEl: HTMLElement | null = null;
   private mouseX = 0; private mouseY = 0;
 
@@ -577,11 +693,13 @@ export class UI {
   }
 
   /** 整叠拾取到光标 */
-  private pickUp(i: number, where: 'inv' | 'chest') {
+  private pickUp(i: number, where: SlotWhere) {
     const cur = this.slotContent(where, i);
     if (!cur) return;
     if (this.heldStack && this.heldStack.id !== cur.id) return;
     if (where === 'inv') this.game.player.inv.slots[i] = null;
+    else if (where === 'armor') this.game.player.inv.armor[i] = null;
+    else if (where === 'dye') this.game.player.inv.dye[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
     else this.heldStack = { id: cur.id, stack: cur.stack };
@@ -589,12 +707,17 @@ export class UI {
   }
 
   /** 右键：拆半到光标 */
-  private splitHalf(i: number, where: 'inv' | 'chest') {
+  private splitHalf(i: number, where: SlotWhere) {
     if (this.heldStack) return;
     const cur = this.slotContent(where, i);
     if (!cur) return;
     const half = Math.ceil(cur.stack / 2);
     if (where === 'inv') this.game.player.inv.removeAt(i, half);
+    else if (where === 'armor' || where === 'dye') {
+      const arr = where === 'armor' ? this.game.player.inv.armor : this.game.player.inv.dye;
+      cur.stack -= half;
+      if (cur.stack <= 0) arr[i] = null;
+    }
     else if (this.openChest) {
       cur.stack -= half;
       if (cur.stack <= 0) this.openChest.items[i] = null;
@@ -604,8 +727,33 @@ export class UI {
   }
 
   /** 放下到背包/宝箱格（合并→交换，装备位校验） */
-  private placeHeld(i: number, where: 'inv' | 'chest'): void {
+  private placeHeld(i: number, where: SlotWhere): void {
     if (!this.heldStack) return;
+    if (where === 'armor' || where === 'dye') {
+      const inv = this.game.player.inv;
+      const arr = where === 'armor' ? inv.armor : inv.dye;
+      // 部位/配饰校验（Inventory.armorAccepts；dye 槽暂同 armor 校验宽松处理）
+      if (where === 'armor' && !inv.armorAccepts(i, this.heldStack.id)) return;
+      if (where === 'dye' && !ITEM_DEFS[this.heldStack.id]?.armor && !ITEM_DEFS[this.heldStack.id]?.accessory) return;
+      const cur = arr[i];
+      if (!cur) {
+        arr[i] = this.heldStack;
+        this.heldStack = null;
+      } else if (cur.id === this.heldStack.id) {
+        const max = ITEM_DEFS[cur.id].maxStack;
+        const put = Math.min(max - cur.stack, this.heldStack.stack);
+        cur.stack += put;
+        this.heldStack.stack -= put;
+        if (this.heldStack.stack <= 0) this.heldStack = null;
+      } else {
+        // 交换前反向校验
+        if (where === 'armor' && !inv.armorAccepts(i, cur.id)) return;
+        arr[i] = this.heldStack;
+        this.heldStack = cur;
+      }
+      this.refreshAll();
+      return;
+    }
     if (where === 'inv') {
       const inv = this.game.player.inv;
       if (!inv.canAccept(i, this.heldStack.id)) return; // 装备位校验失败：弹回原处
@@ -646,7 +794,7 @@ export class UI {
   }
 
   /** 拖拽松手：判定落点（格子/垃圾桶/面板外丢弃/面板空白放回） */
-  private resolveDrop(from: { i: number; where: 'inv' | 'chest' }) {
+  private resolveDrop(from: { i: number; where: SlotWhere }) {
     const target = document.elementFromPoint(this.mouseX, this.mouseY) as HTMLElement | null;
     const slotEl = target?.closest?.('.sw-slot') as HTMLElement | null;
     if (slotEl?.dataset.idx !== undefined && slotEl?.dataset.where) {
@@ -709,17 +857,47 @@ export class UI {
     this.ghostEl.style.top = `${this.mouseY - 20}px`;
   }
 
-  private showTooltipFor(i: number, where: 'inv' | 'chest') {
-    const s = this.slotContent(where, i);
+  /** 稀有度着色（Main.cs GetItemNameColor :20415-20473 主干） */
+  private rarityColor(rare: number): string {
+    if (rare <= -13) return '#FF6400';
+    if (rare === -12) return `rgb(255,${Math.floor((Math.sin(performance.now() / 60) + 1) * 127)},0)`; // expert Disco
+    if (rare === -11 || rare === -1) return '#828282';
+    if (rare === 0) return '#ffffff';
+    if (rare === 1) return '#9696ff';
+    if (rare === 2) return '#96ff96';
+    if (rare === 3) return '#ffc896';
+    if (rare === 4) return '#ff9696';
+    if (rare === 5) return '#ff96ff';
+    if (rare === 6) return '#d2a0ff';
+    if (rare === 7) return '#96ff0a';
+    if (rare === 8) return '#ffff0a';
+    if (rare === 9) return '#0affff';
+    if (rare === 10) return '#ffaa66';
+    return '#b42cff';
+  }
+
+  private showTooltipFor(i: number, where: SlotWhere) {
+    const s = this.slotContent(where, i) as { id: number; stack: number; favorited?: boolean } | null;
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
-    let html = `<b style="color:#ffe8a0">${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
+    // 名称按稀有度着色（原版 GetItemNameColor 15 档；vi_ 物品经 combat 表无 rare 字段——
+    // 用 value 近似：>10000=蓝/绿/橙三档，其余白。原版精确 rare 需 Item.cs SetDefaults 提取，P4 后补）
+    let rare = 0;
+    if (def.key.startsWith('vi_')) {
+      const v = def.value ?? 0;
+      rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
+    }
+    const nameColor = this.rarityColor(rare);
+    let html = `<b style="color:${nameColor}">${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
+    if (s.favorited) html += ` <span style="color:#ffb347">★</span>`;
     if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', def.tool.damage)}`;
     if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
     this.tooltip.innerHTML = html;
     this.tooltip.style.display = 'block';
+    // 背景：原版不透明面板色 (23,25,81)×0.925（:20242-20245）
+    this.tooltip.style.background = 'rgba(21,23,75,0.95)';
     const slotEl = this.slotEl(i, where);
     if (slotEl) {
       const r = slotEl.getBoundingClientRect();
@@ -749,13 +927,7 @@ export class UI {
       this.game.player.inv.add(this.heldStack.id, this.heldStack.stack);
       this.heldStack = null;
     }
-    // 垃圾桶结算：关闭背包才真正删除
-    if (this.trashStack) {
-      const def = ITEM_DEFS[this.trashStack.id];
-      this.toast(Lang.text('Mods.SandboxWorld.UI.Dropped', Lang.itemNameByKey(def.key), this.trashStack.stack));
-      this.trashStack = null;
-      this.paintTrash();
-    }
+    // 垃圾桶为持久槽（Player.trashItem 语义）：关闭背包保留，仅死亡时由 Game 清空
     this.moveGhost();
     this.game.input.uiBlocking = false;
   }
@@ -845,13 +1017,13 @@ export class UI {
   }
 
   /** 垃圾桶暂存（关闭背包才删除；可取回） */
-  trashStack: { id: number; stack: number } | null = null;
+  /** @deprecated 改走 inv.trash 持久槽（Player.trashItem 语义）——保留字段仅作 UI 缓存兼容 */
 
   private placeTrash(): void {
     if (!this.heldStack) return;
-    const t = this.trashStack;
+    const t = this.game.player.inv.trash;
     if (!t) {
-      this.trashStack = this.heldStack;
+      this.game.player.inv.trash = this.heldStack;
       this.heldStack = null;
     } else if (t.id === this.heldStack.id) {
       const max = ITEM_DEFS[t.id].maxStack;
@@ -860,7 +1032,7 @@ export class UI {
       this.heldStack.stack -= put;
       if (this.heldStack.stack <= 0) this.heldStack = null;
     } else {
-      this.trashStack = this.heldStack; // 交换：可把误放的东西取回
+      this.game.player.inv.trash = this.heldStack; // 交换：可把误放的东西取回
       this.heldStack = t;
     }
     this.paintTrash();
@@ -872,13 +1044,13 @@ export class UI {
     const cnt = this.trashEl.querySelector('.cnt');
     img?.remove();
     cnt?.remove();
-    if (this.trashStack) {
+    if (this.game.player.inv.trash) {
       const im = el('img') as HTMLImageElement;
-      im.src = iconUrl(this.game, this.trashStack.id);
+      im.src = iconUrl(this.game, this.game.player.inv.trash!.id);
       im.draggable = false;
       this.trashEl.appendChild(im);
-      if (this.trashStack.stack > 1) {
-        this.trashEl.appendChild(el('span', 'cnt', String(this.trashStack.stack)));
+      if (this.game.player.inv.trash!.stack > 1) {
+        this.trashEl.appendChild(el('span', 'cnt', String(this.game.player.inv.trash!.stack)));
       }
     }
   }
@@ -890,41 +1062,60 @@ export class UI {
     this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
     this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Inventory')));
 
-    // 主体：左纸娃娃列（装备/时装/垃圾桶/配饰/金钱） + 右背包 10×4
+    // 主体：原版布局——左装备竖列（盔甲 0-2 + 配饰 3-7 | 时装 10-12 + 时装配饰 13-17）+
+    // 垃圾桶 + 钱币 + 弹药；右背包 10×4（10-49）。原版三列 sw-92/-139/-186（染料列 P5）
     const body = el('div');
     body.style.cssText = 'display:flex; gap:14px; margin-bottom:8px;';
     const left = el('div');
-    left.style.cssText = 'width:152px; flex:none;';
-    const equipRow = (label: string, from: number, n: number, cols = 3) => {
-      const wrap = el('div');
-      wrap.appendChild(el('div', 'sw-lbl', label));
-      const row = el('div');
-      row.style.cssText = `display:grid; grid-template-columns:repeat(${cols},44px); gap:4px; margin-bottom:6px;`;
-      for (let k = 0; k < n; k++) row.appendChild(this.makeSlotEl(from + k, 'inv'));
-      wrap.appendChild(row);
-      return wrap;
+    left.style.cssText = 'display:flex; gap:6px; flex:none;';
+    // 竖排列构建器（原版 DrawInventory :40844-40968 语义：同 x 纵向排，label 顶部）
+    const vcol = (label: string, from: number, n: number, where: SlotWhere) => {
+      const col = el('div');
+      col.appendChild(el('div', 'sw-lbl', label));
+      for (let k = 0; k < n; k++) col.appendChild(this.makeSlotEl(from + k, where));
+      col.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+      return col;
     };
-    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Equipment'), ARMOR_START, 3));
-    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Vanity'), VANITY_START, 3));
-    // 垃圾桶（暂存，关闭背包时才真正删除；可交换取回）
-    left.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
+    left.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 'armor'));
+    left.appendChild(vcol(Lang.text('LegacyInterface.9'), 3, 5, 'armor')); // 配饰 armor[3-7]
+    left.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 'armor'));
+    left.appendChild(vcol('', 13, 5, 'armor')); // 时装配饰 armor[13-17]（8/9 需解锁暂隐）
+    // 垃圾桶（持久槽；可交换取回）
+    const trashWrap = el('div');
+    trashWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
     const trash = el('div', 'sw-slot trash sw-trash');
     trash.style.cssText = 'width:44px; height:44px; flex:none;';
     trash.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (this.heldStack) {
         this.placeTrash();
-      } else if (this.trashStack) {
-        this.heldStack = this.trashStack; // 取回
-        this.trashStack = null;
+      } else if (this.game.player.inv.trash) {
+        this.heldStack = this.game.player.inv.trash; // 取回
+        this.game.player.inv.trash = null;
         this.paintTrash();
       }
       this.refreshAll();
     });
     this.trashEl = trash;
-    left.appendChild(trash);
-    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Accessories'), ACCESSORY_START, 5)); // 3 列自动换行
-    left.appendChild(equipRow(Lang.text('Mods.SandboxWorld.UI.Coins'), COIN_START, 3));
+    trashWrap.appendChild(trash);
+    // 钱币 4 格（50-53）+ 弹药 4 格（54-57）
+    const coinWrap = el('div');
+    coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.26')));
+    const coinRow = el('div');
+    coinRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,44px); gap:4px;';
+    for (let k = 0; k < 4; k++) coinRow.appendChild(this.makeSlotEl(COIN_START + k, 'inv'));
+    coinWrap.appendChild(coinRow);
+    coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.27')));
+    const ammoRow = el('div');
+    ammoRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,44px); gap:4px;';
+    for (let k = 0; k < 4; k++) ammoRow.appendChild(this.makeSlotEl(AMMO_START + k, 'inv'));
+    coinWrap.appendChild(ammoRow);
+    coinWrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+    const rightRail = el('div');
+    rightRail.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+    rightRail.appendChild(trashWrap);
+    rightRail.appendChild(coinWrap);
+    left.appendChild(rightRail);
     body.appendChild(left);
 
     // 背包 10×4（10-39）
@@ -944,7 +1135,7 @@ export class UI {
     }
     const grid = el('div');
     grid.style.cssText = 'display:grid; grid-template-columns:repeat(10,48px); gap:4px;';
-    for (let i = 10; i < ACCESSORY_START; i++) {
+    for (let i = 10; i < INV_SIZE; i++) {
       grid.appendChild(this.makeSlotEl(i, 'inv'));
     }
     right.appendChild(grid);
@@ -1046,7 +1237,81 @@ export class UI {
     }
     this.chestGrid = grid;
     this.chestPanel.appendChild(grid);
+    // ---- 箱子三按钮（ChestUI.DrawButtons :182-260：LootAll/DepositAll/QuickStack） ----
+    const btns = el('div');
+    btns.style.cssText = 'display:flex; gap:6px; margin-top:8px;';
+    const mkBtn = (label: string, act: () => void) => {
+      const b = el('button', 'sw-btn', label);
+      b.style.cssText = 'margin:0; padding:6px 10px; font-size:12px; flex:1;';
+      b.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        act();
+      });
+      btns.appendChild(b);
+    };
+    mkBtn(Lang.text('LegacyInterface.29'), () => this.chestLootAll());       // 全部取出
+    mkBtn(Lang.text('LegacyInterface.30'), () => this.chestDepositAll());    // 存入全部（仅箱内尚无的类型，跳钱币）
+    mkBtn(Lang.text('LegacyInterface.31'), () => this.chestQuickStack());    // 快速堆叠（只堆箱内已有类型）
+    this.chestPanel.appendChild(btns);
     this.root.appendChild(this.chestPanel);
+  }
+
+  /** Loot All（ChestUI.LootAll :282/389）：箱内全部入包，装不下的留在箱里 */
+  private chestLootAll(): void {
+    const chest = this.openChest;
+    if (!chest) return;
+    const inv = this.game.player.inv;
+    for (let i = 0; i < chest.items.length; i++) {
+      const cur = chest.items[i];
+      if (!cur) continue;
+      const left = inv.add(cur.id, cur.stack);
+      if (left === 0) chest.items[i] = null;
+      else cur.stack = left;
+    }
+    this.game.sfx.play('pickup');
+    this.refreshAll();
+  }
+
+  /** Deposit All（ChestUI.DepositAll :531：背包→箱，仅放箱内尚不存在的类型；跳过钱币 71-74） */
+  private chestDepositAll(): void {
+    const chest = this.openChest;
+    if (!chest) return;
+    const inv = this.game.player.inv;
+    for (let i = 0; i < 50; i++) { // 0-49 背包（钱币 50-53 不动）
+      const cur = inv.slots[i];
+      if (!cur || cur.favorited) continue;
+      if (cur.id === ITEM_BY_KEY['coin_copper'] || cur.id === ITEM_BY_KEY['coin_silver']
+        || cur.id === ITEM_BY_KEY['coin_gold'] || cur.id === ITEM_BY_KEY['coin_platinum']) continue;
+      if (chest.items.some((cs) => cs && cs.id === cur.id)) continue; // 箱内已有类型 → 跳过（走 QuickStack）
+      const empty = chest.items.findIndex((cs) => !cs);
+      if (empty < 0) break; // 箱满
+      chest.items[empty] = cur;
+      inv.slots[i] = null;
+    }
+    this.game.sfx.play('pickup');
+    this.refreshAll();
+  }
+
+  /** Quick Stack（ChestUI.QuickStack :651：只堆箱内已存在类型；收藏禁转移） */
+  private chestQuickStack(): void {
+    const chest = this.openChest;
+    if (!chest) return;
+    const inv = this.game.player.inv;
+    for (let i = 0; i < 54; i++) { // 0-53（含钱币栏堆叠）
+      const cur = inv.slots[i];
+      if (!cur || cur.favorited) continue;
+      for (let k = 0; k < chest.items.length; k++) {
+        const cs = chest.items[k];
+        if (!cs || cs.id !== cur.id) continue;
+        const max = ITEM_DEFS[cur.id].maxStack;
+        const put = Math.min(max - cs.stack, cur.stack);
+        cs.stack += put;
+        cur.stack -= put;
+        if (cur.stack <= 0) { inv.slots[i] = null; break; }
+      }
+    }
+    this.game.sfx.play('pickup');
+    this.refreshAll();
   }
   private chestTitle!: HTMLElement;
   private chestGrid!: HTMLElement;
@@ -1085,7 +1350,7 @@ export class UI {
     }
   }
 
-  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number } | null) {
+  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean } | null) {
     const oldImg = slotEl.querySelector('img');
     const oldCnt = slotEl.querySelector('.cnt');
     if (oldImg) oldImg.remove();
@@ -1099,6 +1364,9 @@ export class UI {
         slotEl.appendChild(el('span', 'cnt', String(content.stack)));
       }
     }
+    // 收藏星标边框（原版 InventoryBack10 金边——CSS 近似）
+    slotEl.style.boxShadow = content?.favorited ? '0 0 0 2px #ffb347, 0 0 6px rgba(255,179,71,0.55)' : '';
+    slotEl.title = content?.favorited ? '已收藏（Alt+左键取消；禁止快速转移）' : '';
   }
 
   refreshAll() {
@@ -1154,6 +1422,42 @@ export class UI {
           this.refreshAll();
         };
       }
+      this.craftListEl.appendChild(row);
+    }
+    // ---- 原版配方（2688 条，Recipe.UpdateRecipeList 主干：环境+材料双门） ----
+    this.refreshVanillaCrafting();
+  }
+
+  /** 原版配方列表（数据驱动 1456 全量；站点扫描走 Game.vanillaNearbyStations） */
+  private refreshVanillaCrafting(): void {
+    const game = this.game;
+    if (!game || !this.craftListEl) return;
+    const avail = game.vanillaAvailableRecipes();
+    if (!avail.length) return;
+    const head = el('div', 'sw-lbl', '── 原版配方 ──');
+    this.craftListEl.appendChild(head);
+    for (const { r, count } of avail.slice(0, 120)) { // 上限防 DOM 爆炸（鱼眼列表 P4 换 Canvas）
+      const outKey = vanillaItemKey(r.create);
+      if (!outKey) continue;
+      const row = el('div', 'sw-recipe');
+      const img = el('img') as HTMLImageElement;
+      img.src = iconUrl(game, game.itemId(outKey));
+      row.appendChild(img);
+      const label = el('span', '', `${Lang.itemNameByKey(outKey)}${r.createStack > 1 ? ` ×${r.createStack}` : ''} ×${count}`);
+      row.appendChild(label);
+      const mats = el('span', '', r.items.map((req) => {
+        const k = ingredientKey(req.id);
+        if (!k) return ` ? ${req.stack}`;
+        const have = game.player.inv.countOf(game.itemId(k));
+        return ` ${Lang.itemNameByKey(k)} ${Math.min(have, req.stack)}/${req.stack}`;
+      }).join(' ·'));
+      mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
+      row.appendChild(mats);
+      row.addEventListener('mousedown', (ev) => {
+        ev.stopPropagation();
+        game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1);
+        this.refreshAll();
+      });
       this.craftListEl.appendChild(row);
     }
   }

@@ -55,6 +55,9 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     inventory: player.inv.slots, selected: player.inv.selected,
     baseMaxHp: player.baseMaxHp, baseMaxMana: player.baseMaxMana, mana: player.mana,
     banks: player.banks,
+    armor: player.inv.armor,
+    dye: player.inv.dye,
+    trash: player.inv.trash,
   };
   return serializeSave(view, meta, playerData, playTimeMs);
 }

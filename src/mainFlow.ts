@@ -9,7 +9,7 @@ import { saveClient } from './workers/SaveClient';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
 import { parseWldToSave } from './wld/WldImport';
-import { INV_SIZE } from './items/Inventory';
+import { Inventory } from './items/Inventory';
 import { VUI } from './vui/VUI';
 import { TitleMenu } from './ui/TitleMenu';
 import { MultiplayerSelect } from './ui/MultiplayerSelect';
@@ -150,7 +150,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     if (player.baseMaxHp !== undefined) g.player.baseMaxHp = player.baseMaxHp;
     if (player.baseMaxMana !== undefined) g.player.baseMaxMana = player.baseMaxMana;
     if (player.mana !== undefined) g.player.mana = player.mana;
-    g.player.inv.slots = player.inventory.concat(Array(Math.max(0, INV_SIZE - player.inventory.length)).fill(null));
+    // 背包布局迁移（旧 54 槽自创布局 → 原版 58 槽+armor[20]；Inventory.migrateLegacy 判别）
+    const mig = Inventory.migrateLegacy(player.inventory);
+    g.player.inv.slots = mig.slots;
+    if (player.armor) g.player.inv.armor = player.armor.map((it) => it ? { ...it } : null);
+    if (player.dye) g.player.inv.dye = player.dye.map((it) => it ? { ...it } : null);
+    if (player.trash) g.player.inv.trash = { ...player.trash };
     g.player.inv.selected = player.selected;
     // 玩家储物×4 回填（29/97/463/491；旧档缺省全空）
     if (player.banks) {
@@ -159,6 +164,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         g.player.banks[b] = src.concat(Array(Math.max(0, 40 - src.length)).fill(null)).slice(0, 40);
       }
     }
+    // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
+    //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
+    g.cb.onInventoryChanged();
   }
 
   /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到
@@ -285,10 +293,44 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     VUI.clear();
   }
 
-  /** 角色列表（DOM）。切页前清 VUI 防穿透 */
-  async function joinGame(ip: string): Promise<void> {
-    const g = makeGame();
-    await g.joinNetGame(ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`, () => {});
+  /** 加入房间（探针桥 + UI 共用语义）：url = ws://host:port/<房间码>[?token=] */
+  async function joinRoom(url: string, hostToken = ''): Promise<void> {
+    await makeGame().joinNetGame(url, () => {}, hostToken);
+  }
+
+  /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}） */
+  async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean } = {}): Promise<{ code: string; hostToken: string; error?: string }> {
+    try {
+      if (!game) return { error: 'no game', code: '', hostToken: '' };
+      const { saveGame } = await import('./save/SaveFile');
+      await worldStore.ensureLoaded();
+      if (!currentWorld) {
+        currentWorld = await worldStore.register({
+          name: game.world.name, seed: String(game.world.seed), w: game.world.w, h: game.world.h,
+          difficulty: 0, evil: game.world.crimson ? 1 : 0,
+        });
+      }
+      const json = saveGame(game.world, game.player, Date.now() - playStart, game.townNpcsForSave());
+      await worldStore.save(currentWorld, json, Date.now() - playStart);
+      const lobbyPort = addr.includes(':') ? parseInt(addr.split(':')[1], 10) : 7778;
+      const host = addr.includes(':') ? addr.split(':')[0] : addr;
+      const r = await fetch(`http://${host}:${lobbyPort}/rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: opts.name ?? game.world.name,
+          public: opts.public ?? true,
+          protectTiles: !!opts.protectTiles,
+          protectItems: !!opts.protectItems,
+          save: json,
+        }),
+      });
+      const data = await r.json() as { ok: boolean; code?: string; hostToken?: string; error?: string };
+      if (!data.ok || !data.code || !data.hostToken) return { error: data.error ?? 'bad response', code: '', hostToken: '' };
+      return { code: data.code, hostToken: data.hostToken };
+    } catch (e) {
+      return { error: String((e as Error).message ?? e), code: '', hostToken: '' };
+    }
   }
 
   function showMultiplayerSelect() {
@@ -298,15 +340,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     let panelRoot: HTMLElement | null = null;
     const closePanel = () => { panelRoot?.remove(); panelRoot = null; };
     const panel = new MultiplayerSelect({
-      onJoin: (ipRaw) => {
-        // R12：允许 host / host:port 两种输入；面板先移除（R13：防堆叠 + 进游戏挡输入）
-        const ip = ipRaw.trim();
-        const url = ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`;
+      // v3 房间制：onJoinRoom(url, hostToken)——url 含 /<房间码>[?token=]
+      onJoinRoom: (url, hostToken) => {
         closePanel();
         ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.Connecting'), 0.1);
         makeGame().joinNetGame(url, (label, p) => {
           ui.showProgress(label, 0.1 + p * 0.8);
-        }).then(() => {
+        }, hostToken).then(() => {
           // loadWorld 内部已 onWorldReady（enterGame 由 makeGame 回调完成）
         }, (e) => {
           ui.hideProgress();
@@ -316,7 +356,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
       onBack: () => { closePanel(); showTitle(); },
       listSaves: async () => {
-        // 列出世界槽位并读出存档 JSON（浏览器 IndexedDB → 下载给开服脚本用）
+        // 列出世界槽位并读出存档 JSON（IndexedDB → 上传给中央服务器建房）
         await worldStore.ensureLoaded();
         return Promise.all(worldStore.list().map(async (m) => ({
           id: m.id,
@@ -518,7 +558,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     doSave,
     backToTitle: showTitle,
     devMode: () => devMode,
-    joinGame: (ip: string) => joinGame(ip), // 探针/联机调试桥
+    joinGame: (ip: string) => joinRoom(ip.includes(':') ? `ws://${ip}` : `ws://${ip}:7777`), // 旧桥（直连 URL）
+    joinRoom: (url: string, token: string) => joinRoom(url, token), // 探针桥：房间制加入
+    createRoom: (addr: string, opts: Record<string, unknown>) => createRoom(addr, opts as never), // 探针桥：建房
     loadJson: (text: string) => loadFromJson(text), // 读自有 json 存档（探针）
   };
 

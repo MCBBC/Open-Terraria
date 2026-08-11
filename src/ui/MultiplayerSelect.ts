@@ -1,5 +1,7 @@
-// 联机面板 v2：一键三步——下载开服脚本 → 选择存档下载 → 运行后显示本机 IP 分享。
-// docs/multiplayer-design.md §7 简化流程：脚本自动找 server/worlds/ 最新存档（无则按种子生成）。
+// 联机面板 v3：中央服务器房间制（docs/multiplayer-design.md §房间）。
+// lobby HTTP（:lobbyPort）= 房间列表/建房/码校验；WS（lobbyPort-1）/<房间码>?token=。
+// 房主：选存档建房（勾选公开性 + 破坏保护 + 物品保护）→ 得 6 位房间码 → 进房。
+// 其他玩家：房间列表点击加入，或输房间码进非公开房。
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -7,147 +9,253 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+export interface SaveEntry { id: number; name: string; json: string | null }
+
 export interface MultiplayerSelectCallbacks {
-  /** 加入游戏（ip 或 ip:port） */
-  onJoin: (ip: string) => void;
-  /** 列出可开房的存档槽位（name + 导出 JSON 字符串） */
-  listSaves: () => Promise<Array<{ id: number; name: string; json: string | null }>>;
+  /** 加入房间（完整 ws URL：ws://host:wsPort/<房间码>[?token=...]） */
+  onJoinRoom: (url: string, hostToken: string) => void;
+  /** 列出可开房的存档槽位（name + 存档 JSON 字符串） */
+  listSaves: () => Promise<SaveEntry[]>;
   onBack: () => void;
 }
 
-/** 开服脚本（bash，放项目根目录运行 `bash 开服.sh`） */
-function hostScript(): string {
-  return `#!/bin/bash
-# SandboxWorld 一键开服：把本文件放到项目根目录（SandboxWorld/）下，运行: bash 开服.sh
-cd "$(dirname "$0")/server" 2>/dev/null || { echo "✗ 请把此脚本放到项目根目录(SandboxWorld/) 再运行"; exit 1; }
-[ -d node_modules ] || { echo "安装依赖…"; npm install || exit 1; }
-# 优先用 worlds/ 里最新的存档；没有则按种子生成新世界
-W=$(ls -t worlds/*.json 2>/dev/null | head -1)
-if [ -n "$W" ]; then
-  echo "▶ 使用存档: $W"
-  exec npx tsx src/index.ts --world "$W" "$@"
-else
-  echo "▶ worlds/ 无存档，按种子生成新世界（可用: bash 开服.sh --seed 名字）"
-  exec npx tsx src/index.ts "$@"
-fi
-`;
+export interface RoomListItem {
+  code: string; name: string; online: number; w: number; h: number;
+  protectTiles: boolean; protectItems: boolean;
 }
 
-function download(filename: string, content: string, mime = 'text/plain') {
-  const blob = new Blob([content], { type: mime });
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = filename;
-  a.click();
-  URL.revokeObjectURL(a.href);
+const DEFAULT_SERVER = '127.0.0.1:7778'; // lobby 端口（WS = lobby-1）
+
+/** 地址 → { httpBase, wsBase }（lobby 端口约定：WS 在 lobby-1） */
+function serverBase(addr: string): { httpBase: string; wsBase: string } | null {
+  const a = addr.trim();
+  if (!a) return null;
+  const m = a.match(/^(\d{1,3}(?:\.\d{1,3}){3}|\[[0-9a-f:]+\]|[a-z0-9.-]+)(?::(\d+))?$/i);
+  if (!m) return null;
+  const lobbyPort = m[2] ? parseInt(m[2], 10) : 7778;
+  return { httpBase: `http://${m[1]}:${lobbyPort}`, wsBase: `ws://${m[1]}:${lobbyPort - 1}` };
 }
 
 export class MultiplayerSelect {
   root: HTMLElement;
+  private serverInput: HTMLInputElement;
+  private roomList = el('div');
+  private codeInput: HTMLInputElement;
+  private createName: HTMLInputElement;
+  private createPublic: HTMLInputElement;
+  private createTiles: HTMLInputElement;
+  private createItems: HTMLInputElement;
+  private saveSel: HTMLSelectElement;
+  private createdInfo = el('div');
+  private hostCode = '';
+  private hostToken = '';
+  private saves: SaveEntry[] = [];
+  private status = (elm: HTMLElement, text: string, color = '#8b98bd') => {
+    elm.textContent = text;
+    elm.style.color = color;
+  };
 
-  constructor(cb: MultiplayerSelectCallbacks) {
+  constructor(private cb: MultiplayerSelectCallbacks) {
     this.root = el('div', 'sw-panel');
     this.root.style.cssText =
-      'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); max-width:480px; width:min(480px,96vw); z-index:20; cursor:auto; max-height:92vh; overflow-y:auto;';
+      'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); max-width:520px; width:min(520px,96vw); z-index:20; cursor:auto; max-height:92vh; overflow-y:auto;';
     this.root.appendChild(el('h2', undefined, '多人联机'));
 
-    // ---- ① 下载开服脚本 ----
-    const s1 = el('div', undefined, '① 房主：下载并运行开服脚本');
-    s1.style.cssText = 'margin:12px 0 6px; color:#c9d4ff;';
-    this.root.appendChild(s1);
-    const scriptBtn = el('button', 'sw-btn', '下载 开服.sh');
-    scriptBtn.style.margin = '0 0 6px';
-    scriptBtn.onclick = () => download('开服.sh', hostScript());
-    this.root.appendChild(scriptBtn);
-    const s1tip = el('div', undefined, '把文件放到项目根目录（SandboxWorld/），终端执行 bash 开服.sh');
-    s1tip.style.cssText = 'font-size:11px; color:#8b98bd;';
-    this.root.appendChild(s1tip);
+    // ---- 服务器地址 ----
+    const srvRow = el('div');
+    srvRow.style.cssText = 'display:flex; gap:8px; align-items:center; margin-bottom:10px;';
+    this.serverInput = el('input') as HTMLInputElement;
+    this.serverInput.value = DEFAULT_SERVER;
+    this.serverInput.placeholder = '服务器地址（如 192.168.1.100:7778）';
+    this.serverInput.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    const srvBtn = el('button', 'sw-btn', '刷新房间') as HTMLButtonElement;
+    srvBtn.style.cssText = 'width:auto; margin:0; padding:8px 12px; flex:none;';
+    srvBtn.onclick = () => void this.refreshRooms();
+    srvRow.appendChild(this.serverInput);
+    srvRow.appendChild(srvBtn);
+    this.root.appendChild(srvRow);
 
-    // ---- ② 选择存档下载（脚本会自动读取） ----
-    const s2 = el('div', undefined, '② 用自己的存档开房（可选）');
-    s2.style.cssText = 'margin:14px 0 6px; color:#c9d4ff;';
-    this.root.appendChild(s2);
-    const saveSel = el('select') as HTMLSelectElement;
-    saveSel.style.cssText = 'width:100%; padding:6px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
-    saveSel.appendChild(el('option', undefined, '不用存档（新世界）'));
-    this.root.appendChild(saveSel);
-    const saveBtn = el('button', 'sw-btn', '下载选中存档 → 放入 server/worlds/');
-    saveBtn.style.margin = '6px 0 0';
-    let saves: Array<{ id: number; name: string; json: string | null }> = [];
-    saveBtn.onclick = () => {
-      const id = parseInt(saveSel.value, 10);
-      const sv = saves.find((x) => x.id === id);
-      if (!sv?.json) return;
-      download(`${sv.name}.json`, sv.json, 'application/json');
-    };
-    this.root.appendChild(saveBtn);
+    // ---- 加入：房间列表 ----
+    const sJoin = el('div', undefined, '加入房间');
+    sJoin.style.cssText = 'margin:10px 0 6px; color:#c9d4ff;';
+    this.root.appendChild(sJoin);
+    this.roomList.style.cssText = 'min-height:60px; max-height:220px; overflow-y:auto; background:rgba(10,16,40,0.5); border-radius:4px; padding:4px; margin-bottom:8px;';
+    this.root.appendChild(this.roomList);
+
+    // 码加入（非公开房）
+    const codeRow = el('div');
+    codeRow.style.cssText = 'display:flex; gap:8px;';
+    this.codeInput = el('input') as HTMLInputElement;
+    this.codeInput.placeholder = '房间码（6 位数字，非公开房用）';
+    this.codeInput.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    const codeBtn = el('button', 'sw-btn', '码加入') as HTMLButtonElement;
+    codeBtn.style.cssText = 'width:auto; margin:0; padding:8px 14px; flex:none;';
+    codeBtn.onclick = () => void this.joinByCode();
+    this.codeInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') codeBtn.click(); });
+    codeRow.appendChild(this.codeInput);
+    codeRow.appendChild(codeBtn);
+    this.root.appendChild(codeRow);
+
+    // ---- 分隔 ----
+    const hr = el('hr');
+    hr.style.cssText = 'border:none; border-top:1px solid rgba(90,120,220,0.3); margin:14px 0;';
+    this.root.appendChild(hr);
+
+    // ---- 建房（房主） ----
+    const sHost = el('div', undefined, '创建房间（房主）');
+    sHost.style.cssText = 'margin:0 0 6px; color:#c9d4ff;';
+    this.root.appendChild(sHost);
+
+    this.saveSel = el('select') as HTMLSelectElement;
+    this.saveSel.style.cssText = 'width:100%; padding:6px; margin-bottom:6px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    this.saveSel.appendChild(el('option', undefined, '选择要开房的存档…'));
+    this.root.appendChild(this.saveSel);
     void cb.listSaves().then((list) => {
-      saves = list.filter((x) => x.json);
-      for (const sv of saves) {
+      this.saves = list.filter((x) => x.json);
+      for (const sv of this.saves) {
         const opt = el('option', undefined, sv.name) as HTMLOptionElement;
         opt.value = String(sv.id);
-        saveSel.appendChild(opt);
+        this.saveSel.appendChild(opt);
       }
-      if (!saves.length) {
-        saveSel.disabled = true;
-        saveBtn.disabled = true;
-      }
+      if (!this.saves.length) this.saveSel.appendChild(el('option', undefined, '（无存档——先单人模式创建一个世界）'));
     });
 
-    // ---- ③ 本机 IP（运行脚本后点查询，分享给朋友） ----
-    const s3 = el('div', undefined, '③ 本机 IP（运行脚本后点查询，发给其他玩家）');
-    s3.style.cssText = 'margin:14px 0 6px; color:#c9d4ff;';
-    this.root.appendChild(s3);
-    const ipRow = el('div');
-    ipRow.style.cssText = 'display:flex; gap:8px; align-items:center;';
-    const ipOut = el('code', undefined, '未查询');
-    ipOut.style.cssText = 'flex:1; color:#ffd75a; font-size:15px; word-break:break-all;';
-    const ipBtn = el('button', 'sw-btn', '查询');
-    ipBtn.style.cssText = 'width:auto; margin:0; padding:8px 14px; flex:none;';
-    ipBtn.onclick = async () => {
-      ipOut.textContent = '查询中…';
-      try {
-        // 服务器 LAN 发现端点（仅本机脚本启动后可用；:7778/lan 返回 lanIps 列表）
-        const r = await fetch('http://127.0.0.1:7778/lan');
-        const info = await r.json() as { lanIps?: string[]; port?: number; online?: number };
-        const ips = info.lanIps ?? [];
-        ipOut.textContent = ips.length
-          ? ips.map((ip) => `${ip}:${info.port ?? 7777}`).join('  或  ')
-          : `未取到 IP（在线 ${info.online ?? 0} 人）`;
-      } catch {
-        ipOut.textContent = '未连接到本机服务器（先运行脚本）';
-      }
-    };
-    ipRow.appendChild(ipOut);
-    ipRow.appendChild(ipBtn);
-    this.root.appendChild(ipRow);
+    this.createName = el('input') as HTMLInputElement;
+    this.createName.placeholder = '房间名（默认 = 存档名）';
+    this.createName.style.cssText = 'width:100%; box-sizing:border-box; padding:6px; margin-bottom:6px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
+    this.root.appendChild(this.createName);
 
-    // ---- 加入游戏 ----
-    const s4 = el('div', undefined, '④ 加入游戏（所有玩家，包括房主）');
-    s4.style.cssText = 'margin:14px 0 6px; color:#c9d4ff;';
-    this.root.appendChild(s4);
-    const row = el('div');
-    row.style.cssText = 'display:flex; gap:8px;';
-    const input = el('input') as HTMLInputElement;
-    input.placeholder = '192.168.1.100（房主用 127.0.0.1）';
-    input.style.cssText = 'flex:1; padding:8px; background:rgba(10,16,40,0.8); color:#fff; border:1px solid #4a5a9a; border-radius:4px;';
-    row.appendChild(input);
-    const joinBtn = el('button', 'sw-btn', '加入');
-    joinBtn.style.cssText = 'width:auto; margin:0; padding:8px 14px; flex:none;';
-    joinBtn.onclick = () => {
-      const ip = input.value.trim();
-      if (!ip) return;
-      cb.onJoin(ip);
+    const mkCheck = (label: string, checked: boolean): HTMLInputElement => {
+      const wrap = el('label');
+      wrap.style.cssText = 'display:flex; align-items:center; gap:6px; color:#c9d4ff; font-size:13px; margin:2px 0;';
+      const box = el('input') as HTMLInputElement;
+      box.type = 'checkbox';
+      box.checked = checked;
+      wrap.appendChild(box);
+      wrap.appendChild(el('span', undefined, label));
+      this.root.appendChild(wrap);
+      return box;
     };
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') joinBtn.click();
-    });
-    row.appendChild(joinBtn);
-    this.root.appendChild(row);
+    this.createPublic = mkCheck('公开房间（出现在房间列表；不勾则只能凭房间码进入）', true);
+    this.createTiles = mkCheck('破坏保护（其他玩家不能挖掘/建造，仅房主可以）', false);
+    this.createItems = mkCheck('物品保护（其他玩家不能取放宝箱物品）', false);
 
-    const back = el('button', 'sw-btn', '返回');
-    back.style.marginTop = '16px';
+    const createBtn = el('button', 'sw-btn', '创建房间') as HTMLButtonElement;
+    createBtn.style.margin = '8px 0 4px';
+    createBtn.onclick = () => void this.createRoom(createBtn);
+    this.root.appendChild(createBtn);
+
+    this.createdInfo.style.cssText = 'min-height:18px; font-size:13px; color:#8b98bd; word-break:break-all;';
+    this.root.appendChild(this.createdInfo);
+
+    const back = el('button', 'sw-btn', '返回') as HTMLButtonElement;
+    back.style.marginTop = '14px';
     back.onclick = cb.onBack;
     this.root.appendChild(back);
+
+    void this.refreshRooms();
+  }
+
+  // ================= 加入 =================
+
+  private joinUrl(code: string, token = ''): string | null {
+    const base = serverBase(this.serverInput.value);
+    if (!base) { this.status(this.roomList, '服务器地址格式不对', '#ff6b6b'); return null; }
+    return token ? `${base.wsBase}/${code}?token=${encodeURIComponent(token)}` : `${base.wsBase}/${code}`;
+  }
+
+  private async refreshRooms() {
+    const base = serverBase(this.serverInput.value);
+    if (!base) { this.status(this.roomList, '服务器地址格式不对', '#ff6b6b'); return; }
+    this.status(this.roomList, '获取房间列表…');
+    try {
+      const r = await fetch(`${base.httpBase}/rooms`);
+      const data = await r.json() as { ok: boolean; rooms: RoomListItem[] };
+      if (!data.ok) throw new Error('bad response');
+      this.roomList.textContent = '';
+      if (!data.rooms.length) {
+        this.status(this.roomList, '（暂无公开房间——创建一个，或用房间码加入）');
+        return;
+      }
+      for (const rm of data.rooms) {
+        const item = el('div');
+        item.style.cssText = 'display:flex; justify-content:space-between; align-items:center; padding:6px; border-bottom:1px solid rgba(90,120,220,0.2); cursor:pointer;';
+        item.onmouseenter = () => { item.style.background = 'rgba(60,80,160,0.3)'; };
+        item.onmouseleave = () => { item.style.background = ''; };
+        const prot = [rm.protectTiles ? '🛡破坏' : '', rm.protectItems ? '📦物品' : ''].filter(Boolean).join(' ');
+        const left = el('div', undefined, `${rm.name}  ${rm.w}×${rm.h}${prot ? '  ' + prot : ''}`);
+        left.style.cssText = 'color:#e8ecf8; font-size:13px;';
+        const right = el('div', undefined, `👤${rm.online}  [${rm.code}]`);
+        right.style.cssText = 'color:#8b98bd; font-size:12px;';
+        item.appendChild(left);
+        item.appendChild(right);
+        item.onclick = () => {
+          const url = this.joinUrl(rm.code);
+          if (url) this.cb.onJoinRoom(url, '');
+        };
+        this.roomList.appendChild(item);
+      }
+    } catch {
+      this.status(this.roomList, '连不上服务器（先启动中央服务器：server/ 下 npm start）', '#ff6b6b');
+    }
+  }
+
+  private async joinByCode() {
+    const code = this.codeInput.value.trim();
+    if (!/^\d{6}$/.test(code)) { this.status(this.roomList, '房间码是 6 位数字', '#ff6b6b'); return; }
+    const base = serverBase(this.serverInput.value);
+    if (!base) { this.status(this.roomList, '服务器地址格式不对', '#ff6b6b'); return; }
+    this.status(this.roomList, `校验房间 ${code}…`);
+    try {
+      const r = await fetch(`${base.httpBase}/rooms/${code}`);
+      if (!r.ok) throw new Error(await r.json().then((d: { error?: string }) => d.error ?? '房间不存在').catch(() => '房间不存在'));
+      const url = this.joinUrl(code);
+      if (url) this.cb.onJoinRoom(url, '');
+    } catch (e) {
+      this.status(this.roomList, (e as Error).message, '#ff6b6b');
+    }
+  }
+
+  // ================= 建房 =================
+
+  private async createRoom(btn: HTMLButtonElement) {
+    const base = serverBase(this.serverInput.value);
+    if (!base) { this.status(this.createdInfo, '服务器地址格式不对', '#ff6b6b'); return; }
+    const id = parseInt(this.saveSel.value, 10);
+    const sv = this.saves.find((x) => x.id === id);
+    if (!sv?.json) { this.status(this.createdInfo, '请先选择一个存档', '#ff6b6b'); return; }
+    btn.disabled = true;
+    this.status(this.createdInfo, '上传存档并创建房间…');
+    try {
+      const r = await fetch(`${base.httpBase}/rooms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: this.createName.value.trim() || sv.name,
+          public: this.createPublic.checked,
+          protectTiles: this.createTiles.checked,
+          protectItems: this.createItems.checked,
+          save: sv.json,
+        }),
+      });
+      const data = await r.json() as { ok: boolean; code?: string; hostToken?: string; error?: string };
+      if (!data.ok || !data.code || !data.hostToken) throw new Error(data.error ?? '建房失败');
+      this.hostCode = data.code;
+      this.hostToken = data.hostToken;
+      this.status(this.createdInfo, `✅ 房间已创建！房间码 ${data.code}${this.createPublic.checked ? '' : '（非公开）'}`, '#7dff8a');
+      const enter = el('button', 'sw-btn', `进入房间 ${data.code}`) as HTMLButtonElement;
+      enter.style.cssText = 'width:auto; margin:6px 0 0; display:block;';
+      enter.onclick = () => {
+        const url = this.joinUrl(this.hostCode, this.hostToken);
+        if (url) this.cb.onJoinRoom(url, this.hostToken);
+      };
+      this.createdInfo.appendChild(enter);
+      // 建房成功后房间码所在房可能进列表（公开时）——轻刷一次
+      void this.refreshRooms();
+    } catch (e) {
+      this.status(this.createdInfo, `建房失败：${(e as Error).message}`, '#ff6b6b');
+    } finally {
+      btn.disabled = false;
+    }
   }
 }

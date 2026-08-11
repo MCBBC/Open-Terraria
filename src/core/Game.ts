@@ -28,6 +28,7 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { RECIPES } from '../data/recipes';
+import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { Player } from '../entities/Player';
 import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
@@ -45,7 +46,7 @@ import { Camera } from '../render/Camera';
 import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
-import { Inventory, ACCESSORY_START, ARMOR_START } from '../items/Inventory';
+import { Inventory } from '../items/Inventory';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
 const IMPORTED_TREE_TYPES = new Set<number>(
@@ -65,6 +66,7 @@ import { BuffType } from '../stats/Buffs';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
+import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
@@ -188,6 +190,25 @@ export class Game implements GameHooks {
   private genClient: WorldGenClient | null = null;
   /** 多人联机客户端（netMode==1；单机 null）。docs/multiplayer-design.md §4 */
   net: ClientNet | null = null;
+  // ---- v3 房间制保护门禁（集中点，低耦合）：策略存于 net.policy，门禁只在操作入口查询 ----
+  /** 破坏保护：单人/房主/未开启保护时放行 */
+  netCanEditTile(): boolean {
+    return !this.net || this.net.policy.isHost || !this.net.policy.protectTiles;
+  }
+  /** 物品保护：宝箱取放等受控（自动拾取不门禁——需求明确豁免） */
+  netCanChestInteract(): boolean {
+    return !this.net || this.net.policy.isHost || !this.net.policy.protectItems;
+  }
+  /** 门禁拒绝提示（2s 节流防刷屏） */
+  private netDenyAt = 0;
+  netDeny(msg: string) {
+    const now = Date.now();
+    if (now - this.netDenyAt > 2000) {
+      this.netDenyAt = now;
+      this.cb.onToast?.(msg);
+    }
+    this.input.rightDown = false;
+  }
   /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
   private remotePlayerProxies: import('../entities/Player').Player[] = [];
   /** tile key → id 反查表（调试句柄/wld 导入映射用） */
@@ -541,6 +562,10 @@ export class Game implements GameHooks {
         if (file.startsWith('vanilla/Tiles_') || file.startsWith('vanilla/Wall_')) {
           this.chunks.invalidateAll();
         }
+        // 物品图标图集晚到 → 标记 UI 待刷（fixedUpdate 30t 节流后刷背包/快捷栏，
+        // 把空图标升格为原版图标——否则图标未就绪时 paintSlot 写空 src，直到下次
+        // 用户点击才自愈）
+        if (file.includes('Item_Atlas')) this.iconUiDirty = true;
       };
     }
     // 电路系统(Wiring.cs 移植):器件表 + 触发源登记(测重板 428/感应器 423)
@@ -1361,6 +1386,7 @@ export class Game implements GameHooks {
     }
     // 火把火苗：视内点燃火把随机飘出火星（火点在格顶上方 20px 精灵的火焰处）
     this.emitTorchSparks();
+    this.emitTileParticles();
     for (const p of this.particles) {
       p.life--;
       p.vy += p.grav ?? 0.12;
@@ -1858,6 +1884,8 @@ export class Game implements GameHooks {
   }
 
   private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number) {
+    // 联机破坏保护（v3 房间制）：非房主禁挖/禁锤墙
+    if (!this.netCanEditTile()) { this.mining = null; this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // 范围检查
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
@@ -1875,7 +1903,9 @@ export class Game implements GameHooks {
         this.mining = null;
         return;
       }
-      const wall = this.world.store.get(tx, ty) === 0 ? this.world.store.wall[this.world.store.idx(tx, ty)] : 0;
+      // 墙读取不受前景 tile 影响（原版：火把/平台/门后的墙可锤；实心块已被上方
+      // 半砖分支拦截——实心块后的墙原版同样不可直接锤，语义一致）
+      const wall = this.world.store.wall[this.world.store.idx(tx, ty)];
       if (type !== 0 && TILE_DEFS[type]?.decor) {
         this.breakTile(tx, ty);
         this.sfx.play('chop');
@@ -2255,6 +2285,7 @@ export class Game implements GameHooks {
 
   /** 电路工具使用(原版 Player.cs:30289-30444 ItemCheck_UseWiringTools) */
   private useWireTool(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const w = this.wiring;
     if (!w) return;
     const st = this.world.store;
@@ -2351,6 +2382,7 @@ export class Game implements GameHooks {
    *  （消耗逐格扣）——原版铺墙手感"一笔涂一片"的核心
    */
   private tryPlaceWall(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
@@ -2391,6 +2423,7 @@ export class Game implements GameHooks {
   }
 
   private tryPlace(tx: number, ty: number, itemDef: (typeof ITEM_DEFS)[number]) {
+    if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
     // 距离
@@ -2509,6 +2542,33 @@ export class Game implements GameHooks {
         st.setTile(tx, py, tileId, st.frameX[ti] + 18, st.frameY[ti]);
       }
     }
+    // 浴缸(90)朝向（TileObjectData Direction=PlaceLeft/Right 备选锚点 + 素材双方向带实证：
+    // Tiles_90 每样式带 144px 宽 = 方向1 0-71 / 方向2 72-143，GetTileDrawData addFrX+=144*band；
+    // 原版 wld frameX 同时存在 0-54 与 72-126 两组）：direction==1 → 全部格子 frameX += 72
+    if (def.vanilla?.sheet === 90 && this.player.facing === 1) {
+      for (let dy2 = 0; dy2 < oh; dy2++) {
+        for (let dx3 = 0; dx3 < ow; dx3++) {
+          const px2 = tx + dx3, py2 = ty + dy2;
+          if (!st.inBounds(px2, py2)) continue;
+          const ti = st.idx(px2, py2);
+          st.setTile(px2, py2, tileId, st.frameX[ti] + 72, st.frameY[ti]);
+        }
+      }
+    }
+    // 马桶(497)朝向（TileObjectData :4189 StyleHorizontal+WrapLimit2+Direction=PlaceLeft：
+    // 方向占一个样式列——变体步长 36、方向 +18；素材 72px=2变体×2方向 吻合）：
+    // 重写帧 = placeStyle*36(变体带) + (facing==1?18:0) + 列内偏移
+    if (def.vanilla?.sheet === 497) {
+      for (let dy2 = 0; dy2 < oh; dy2++) {
+        for (let dx3 = 0; dx3 < ow; dx3++) {
+          const px2 = tx + dx3, py2 = ty + dy2;
+          if (!st.inBounds(px2, py2)) continue;
+          st.setTile(px2, py2, tileId,
+            (itemDef.placeStyle ?? 0) * 36 + (this.player.facing === 1 ? 18 : 0) + dx3 * 18,
+            dy2 * 18);
+        }
+      }
+    }
     // 训练假人放置：锚点生成假人 NPC（TETrainingDummy.Activate）
     if (tileId === TILE_BY_KEY['v_378_target_dummy']) this.spawnDummyAt(tx, ty);
     this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -2553,6 +2613,14 @@ export class Game implements GameHooks {
       if (Math.hypot(dx, dy) > 5.5) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
+    // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
+    // 玩家储物族/读碑文/设床不受限（前者是玩家自有物品，后两者不改方块）。
+    const editDenied = !this.netCanEditTile() && (
+      type === T.DOOR_CLOSED || type === T.DOOR_OPEN || type === TILE_BY_KEY['v_83_herbs_mature']
+      || type === TILE_BY_KEY['v_84_herbs_bloom'] || type === TILE_BY_KEY['crystal_heart']
+      || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
+    );
+    if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // ---- 玩家储物族（原版 Player.cs:32598+）：29→bank / 97→bank2 / 463→bank3 / 491→bank4。
     //  内容随玩家存档（banks[0..3]），不随方块；复用宝箱面板（x 用 -2..-5 标识容器来源，
     //  与原版 player.chest = -2..-5 同约定）----
@@ -2630,6 +2698,8 @@ export class Game implements GameHooks {
 
   /** 开宝箱统一入口:锁定箱(原版 Chest.locked)需金钥匙,首次开启消耗 */
   private tryOpenChest(chest: { locked?: boolean }): void {
+    // 物品保护（v3 房间制）：非房主禁开宝箱（v1 无箱子内容同步，取放全在本地——门禁开箱即拦截）
+    if (!this.netCanChestInteract()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectItems')); return; }
     if (chest.locked) {
       const keyId = ITEM_BY_KEY['vi_327_golden_key'];
       let keySlot = -1;
@@ -4375,11 +4445,15 @@ export class Game implements GameHooks {
         p.dead = true;
         p.respawnTimer = 0;
         // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
-        // 掉一半铜币
-        const coins = p.inv.countOf(ITEM_BY_KEY['coin_copper']);
-        if (coins > 0) {
-          p.inv.remove(ITEM_BY_KEY['coin_copper'], Math.floor(coins / 2));
+        // 掉钱按难度（Player.DropCoins :53351-53390：普通掉一半/专家 1/4/大师不掉；
+        // 0=经典 1=专家 2=大师 3=旅程按经典）。垃圾桶死亡清空（Player.cs:53394）
+        const diff = p.appearance?.difficulty ?? 0;
+        const keep = diff === 2 ? 1 : diff === 1 ? 0.75 : 0.5;
+        for (const ck of ['coin_copper', 'coin_silver', 'coin_gold', 'coin_platinum']) {
+          const n = p.inv.countOf(ITEM_BY_KEY[ck]);
+          if (n > 0) p.inv.remove(ITEM_BY_KEY[ck], n - Math.floor(n * keep));
         }
+        p.inv.trash = null;
       }
     }
   }
@@ -4593,6 +4667,8 @@ export class Game implements GameHooks {
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */
   private invNotifyAt = -100;
   private invNotifyPending = false;
+  /** 图标图集晚到标记（onVImageLoaded 置位，flushInvNotify 节流刷 UI） */
+  private iconUiDirty = false;
   /** 新物品入手飘名（主角旁浅白文本） */
 
   notifyInventoryChanged() {
@@ -4641,6 +4717,11 @@ export class Game implements GameHooks {
       this.invNotifyPending = false;
       this.cb.onInventoryChanged();
     }
+    // 图标图集晚到的 UI 补刷（30t 节流；与 invNotify 合并同点刷新）
+    if (this.iconUiDirty && this.tickCount % 30 === 0) {
+      this.iconUiDirty = false;
+      this.cb.onInventoryChanged();
+    }
   }
 
   /** 火把火星：视区内点燃的火把按概率在火点处飘出上浮火粒 */
@@ -4674,6 +4755,58 @@ export class Game implements GameHooks {
         });
       }
     }
+  }
+
+  /** 方块环境粒子（原版 TileDrawing.DrawTiles_EmitParticles Tier 1/2 移植）：
+   *  每 3 tick 扫视口，按 sheet 查规则表发射。与 emitTorchSparks 共用节流（火把独立保留 1:1 实现）。 */
+  private emitTileParticles() {
+    if (this.tickCount % 3 !== 0) return;
+    const st = this.world.store;
+    const cam = this.camera;
+    const z = cam.zoom || 1;
+    const tx0 = Math.max(0, Math.floor((cam.x - cam.viewW / 2 / z) / TILE));
+    const tx1 = Math.min(this.world.w - 1, Math.ceil((cam.x + cam.viewW / 2 / z) / TILE));
+    const ty0 = Math.max(0, Math.floor((cam.y - cam.viewH / 2 / z) / TILE));
+    const ty1 = Math.min(this.world.h - 1, Math.ceil((cam.y + cam.viewH / 2 / z) / TILE));
+    const sheetCache = new Int16Array(TILE_DEFS.length).fill(-2); // -2 未算 / -1 无 sheet
+    const sheetOf = (t: number): number => {
+      const c = sheetCache[t];
+      if (c !== -2) return c;
+      const s = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+      sheetCache[t] = s;
+      return s;
+    };
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = st.idx(x, y);
+        if (st.type[i] === 0) continue;
+        const rules = TILE_PARTICLE_RULES.get(sheetOf(st.type[i]));
+        if (!rules) continue;
+        const fx = st.frameX[i], fy = st.frameY[i];
+        for (const rule of rules) {
+          if (Math.random() >= rule.prob) continue;
+          if (rule.fx0 !== undefined && fx !== rule.fx0) continue;
+          if (rule.fy0 !== undefined && fy !== rule.fy0) continue;
+          if (rule.pred && !rule.pred(fx, fy)) continue;
+          if (rule.lightGate !== undefined && this.lighting.lightAt(x, y)[0] <= rule.lightGate) continue;
+          const [smin, smax] = rule.size ?? [1.5, 3];
+          const life = Math.round((rule.life ?? 40) * (0.7 + Math.random() * 0.6));
+          const rise = rule.rise ?? 0.4;
+          this.particles.push({
+            x: x * TILE + (rule.dx ?? 8) + (Math.random() - 0.5) * 4,
+            y: y * TILE + (rule.dy ?? 0) + (Math.random() - 0.5) * 4,
+            vx: (rule.sideways ?? 0) * (Math.random() < 0.5 ? 1 : -1) + (Math.random() - 0.5) * 0.2,
+            vy: -rise * (0.7 + Math.random() * 0.6),
+            life, maxLife: life,
+            color: rule.color,
+            size: smin + Math.random() * (smax - smin),
+            grav: rule.grav ?? (rise < 0 ? 0.1 : -0.005),
+            damp: rule.damp ?? 0.985,
+          });
+        }
+      }
+    }
+    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
   }
 
   // ================= 高门自动通行（DoorOpeningHelper.cs 1:1 简化） =================
@@ -4830,6 +4963,52 @@ export class Game implements GameHooks {
     if (!this.canCraft(r)) return;
     for (const [key, n] of r.inputs) this.player.inv.remove(ITEM_BY_KEY[key], n);
     this.player.inv.add(ITEM_BY_KEY[r.out], r.count);
+    this.cb.onInventoryChanged();
+  }
+
+  // ================= 原版配方（1456 全量 2688 条） =================
+
+  /** 附近站点集合（内部 tile id）+ 液体/群系 → VanillaCraftCtx（每帧缓存由 UI 调用侧刷新） */
+  vanillaNearbyStations(): Set<number> {
+    const st = this.world.store;
+    const out = new Set<number>();
+    const px = Math.floor(this.player.cx / TILE), py = Math.floor(this.player.cy / TILE);
+    const ALCHEMY = new Set<number>(); // 炼金台 sheet 355/699
+    for (const k of ['v_355_alchemy_table', 'v_699_deadcellspotionstation']) {
+      const t = TILE_BY_KEY[k];
+      if (t !== undefined) ALCHEMY.add(t);
+    }
+    for (let dx = -20; dx <= 20; dx++) {
+      for (let dy = -15; dy <= 15; dy++) {
+        const x = px + dx, y = py + dy;
+        if (!st.inBounds(x, y) || !st.isActive(x, y)) continue;
+        const t = st.type[st.idx(x, y)];
+        out.add(t);
+        if (ALCHEMY.has(t)) this._alchemyTable = true;
+      }
+    }
+    return out;
+  }
+
+  /** 可用原版配方列表（Recipe.UpdateRecipeList 主干；供 UI 列表渲染） */
+  private _alchemyTable = false;
+  vanillaAvailableRecipes() {
+    return availableRecipes(this.player.inv, {
+      nearbyInternal: this.vanillaNearbyStations(),
+      nearWater: true, nearHoney: true, nearLava: true, // 液体源扫描 P4 精确化（先宽松）
+      zoneSnow: this.scene.zoneSnow,
+      zoneGraveyard: this.scene.zoneGraveyard,
+    });
+  }
+
+  /** 执行原版配方合成（CraftingRequests.CraftLocally 主干）：扣材料→成品入背包 */
+  vanillaCraft(r: VanillaRecipeLike, times = 1) {
+    if (!consumeMaterials(this.player.inv, r, times, this._alchemyTable)) return;
+    const outKey = recipeItemKey(r.create);
+    if (!outKey) return;
+    const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack * times);
+    if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
+    this.sfx.play('tink');
     this.cb.onInventoryChanged();
   }
 
@@ -5123,8 +5302,10 @@ export class Game implements GameHooks {
     );
   }
 
-  /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld） */
-  joinNetGame(url: string, onProgress?: (label: string, p: number) => void): Promise<void> {
+  /** 加入联机服务器（mainFlow 的加入流程调用；world 就绪回调内进 loadWorld）。
+   *  v3 房间制：url = ws://host:port/<房间码>[?token=<房主令牌>]，hostToken 传入时
+   *  Hello 内兜底再传一份（路由层已从 URL 注入） */
+  joinNetGame(url: string, onProgress?: (label: string, p: number) => void, hostToken = ''): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
       const fail = (reason: string) => {
@@ -5162,8 +5343,17 @@ export class Game implements GameHooks {
           this.cb.onToast?.(reason);
           fail(reason);
         },
+        onPolicy: (policy) => {
+          // 保护房提示：非房主告知受控范围（房主静默）
+          if (!policy.isHost && (policy.protectTiles || policy.protectItems)) {
+            const parts: string[] = [];
+            if (policy.protectTiles) parts.push(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles'));
+            if (policy.protectItems) parts.push(Lang.text('Mods.SandboxWorld.Toast.RoomProtectItems'));
+            this.cb.onToast?.(parts.join('；'));
+          }
+        },
       });
-      net.connect(url);
+      net.connect(url, hostToken);
       // R10：30s 握手超时（计时器在 settle 后清除，不再空跑）
       const timer = setTimeout(() => {
         if (!settled && !net.gameWorld) fail('连接超时');

@@ -25,6 +25,8 @@ export const enum Msg {
   SetTime = 18,       // S→C {timeOfDay, dayCount}
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
+  // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----
+  RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems}
 }
 
 /** NetModule 表（对齐原版注册顺序，显式建表防错位） */

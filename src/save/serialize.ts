@@ -77,6 +77,10 @@ export interface SaveData {
     baseMaxMana?: number; // 魔力上限（魔力水晶扩容；旧档缺省 20）
     mana?: number;        // 当前魔力
     banks?: Array<Array<{ id: number; stack: number } | null>>; // 玩家储物×4（29/97/463/491；旧档缺省全空）
+    /** armor[20]（0-2 盔甲/3-9 配饰/10-12 时装盔甲/13-19 时装配饰）——旧档缺省经 migrateLegacy 从旧 54 槽布局迁出 */
+    armor?: Array<{ id: number; stack: number } | null>;
+    dye?: Array<{ id: number; stack: number } | null>;
+    trash?: { id: number; stack: number } | null; // 垃圾桶持久槽（Player.trashItem；死亡清空）
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）

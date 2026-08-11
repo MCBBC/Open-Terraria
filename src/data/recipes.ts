@@ -18,6 +18,10 @@ export const RECIPES: Recipe[] = [
   { out: 'wood_pickaxe', count: 1, station: 'workbench', inputs: [['wood', 12]] },
   { out: 'wood_axe', count: 1, station: 'workbench', inputs: [['wood', 9]] },
   { out: 'wood_sword', count: 1, station: 'workbench', inputs: [['wood', 7]] },
+  { out: 'wood_hammer', count: 1, station: 'workbench', inputs: [['wood', 8]] },
+  // 背景墙（原版 Recipe：工作台，1 材 → 4 墙）
+  { out: 'vi_93_wood_wall', count: 4, station: 'workbench', inputs: [['wood', 1]] },
+  { out: 'vi_26_stone_wall', count: 4, station: 'workbench', inputs: [['stone_block', 1]] },
   // 熔炼
   { out: 'copper_bar', count: 1, station: 'furnace', inputs: [['copper_ore', 3]] },
   { out: 'iron_bar', count: 1, station: 'furnace', inputs: [['iron_ore', 3]] },

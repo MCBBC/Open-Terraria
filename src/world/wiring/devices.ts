@@ -325,15 +325,54 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 149: // 节日彩灯 frameX ±54(:1244-1250)
       flipCell(w, x, y, 54);
       return true;
-    case 209: { // 大炮:CheckMech 30 发射炮弹(:890-945;弹药系统未接入,固定炮弹)
-      const ox = x - Math.floor(st.frameX[i] % 72 / 18);
-      const oy = y - Math.floor(st.frameY[i] % 54 / 18);
-      if (!w.checkMech(ox, oy, 30)) return true;
-      // 角度:frameX 块内列(0-3)= 抬角 0-45°;朝向 frameY
-      const col = Math.floor((st.frameX[i] % 72) / 18) % 4;
-      const dir = st.frameY[i] >= 54 ? -1 : 1;
-      const ang = (col * Math.PI) / 12;
-      ctx.shootProjectile(ox * 16 + 24, oy * 16, dir * 6 * Math.cos(ang), -6 * Math.sin(ang) - 2, 40, 'boulder');
+    case 209: { // 大炮（Wiring.cs:1237-1346 1:1）：旋转+开火复合状态机。
+      // num31=块内列(0/3=旋转态,1/2=待发) num32=行内偏移 num35=仰角带(frameY/54,0-8)
+      // num36=水平带(frameX/72: 0/1=右向 大炮/兔兔炮, 3/4=左向)
+      const num31 = Math.floor(st.frameX[i] % 72 / 18);
+      const num32 = Math.floor(st.frameY[i] % 54 / 18);
+      const ox = x - num31, oy = y - num32;
+      const num35 = Math.floor(st.frameY[i] / 54);
+      const num36 = Math.floor(st.frameX[i] / 72);
+      let num37 = -1;
+      if (num31 === 1 || num31 === 2) num37 = num32;
+      // 旋转半边：列3 → 仰角 -54（带0停）；列0 → +54（带8停）
+      let num38 = 0;
+      if (num31 === 3) num38 = -54;
+      if (num31 === 0) num38 = 54;
+      if (num35 >= 8 && num38 > 0) num38 = 0;
+      if (num35 === 0 && num38 < 0) num38 = 0;
+      if (num38 !== 0) {
+        for (let cx = ox; cx < ox + 4; cx++) {
+          for (let cy = oy; cy < oy + 3; cy++) {
+            if (!st.inBounds(cx, cy)) continue;
+            w.skipCell(cx, cy);
+            const ci = st.idx(cx, cy);
+            st.setTile(cx, cy, st.type[ci], st.frameX[ci], st.frameY[ci] + num38);
+          }
+        }
+      }
+      // 水平朝向带翻转：3/4 带 + 行0/1 → frameX ±72（下一次触发反向）
+      if ((num36 === 3 || num36 === 4) && (num37 === 0 || num37 === 1)) {
+        const fx = num36 === 3 ? 72 : -72;
+        for (let cx = ox; cx < ox + 4; cx++) {
+          for (let cy = oy; cy < oy + 3; cy++) {
+            if (!st.inBounds(cx, cy)) continue;
+            w.skipCell(cx, cy);
+            const ci = st.idx(cx, cy);
+            st.setTile(cx, cy, st.type[ci], st.frameX[ci] + fx, st.frameY[ci]);
+          }
+        }
+      }
+      if (num37 === -1) return true; // 只旋转未开火
+      // 开火半边：半仰角(<2)时左向(带3/4)不发射（flag2）
+      const flag2 = !((num36 === 3 || num36 === 4) && num37 < 2);
+      const damage = num36 === 0 ? 300 : num36 === 1 ? 350 : 40; // 兔兔炮350/普通300
+      const time = num36 === 0 ? 480 : num36 === 1 ? 3600 : 30;
+      if (!w.checkMech(ox, oy, time) || !flag2) return true;
+      // ShootFromCannon(x, y, 仰角带, direction=num36+1)：方向1/2右 3/4左；弹药未接入以巨石近似
+      const dirR = num36 <= 1 ? 1 : -1;
+      const ang = (num35 * Math.PI) / 16; // 仰角带 0-8 ≈ 0-90°
+      ctx.shootProjectile(ox * 16 + 24, oy * 16, dirR * 7 * Math.cos(ang), -7 * Math.sin(ang) - 2, damage, 'boulder');
       return true;
     }
     case 210: // 地雷:原版 ExplodeMine(:1786-1788)清格+爆炸

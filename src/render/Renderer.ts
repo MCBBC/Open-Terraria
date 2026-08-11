@@ -1114,12 +1114,15 @@ export class Renderer {
         cy--;
       }
       if (!found) continue;
-      const fx = (n.home!.x % 2) * 16;                 // 帧 X：单/双（双人=同房含自己类型，暂单）
-      const fy = 0;                                     // housingCategory 城镇 NPC 全 0
+      // 整面旗帜绘制（House_Banner_1 = 吊杆+垂布的完整旗，32×40 ≈ 2×2.5 格；
+      // 用户对照官方原版实测旗帜约 4 格方形——此前按 Frame(2,2) 切 16×20 画小了）
       const bx = n.home!.x * 16 + 8;                    // 原版 num8=8 偏移
-      const by = (cy + 1) * 16 + 18 + dup * 26;         // num9=18（平台 -8 略）+ 重复偏移
-      ctx.drawImage(cloth.img, cloth.sx + fx, cloth.sy + fy, 16, 20,
-        bx - 8, by - 10, 16, 20);
+      // num9=18；实心格是平台（tile 19）时 -8（Main.cs:40212-40214）——
+      // 平台只有半格厚，旗帜上移贴平台上表面
+      const onPlatform = TILE_DEFS[st.type[st.idx(n.home!.x, cy)]]?.vanilla?.sheet === 19;
+      const by = (cy + 1) * 16 + (onPlatform ? 10 : 18) + dup * 26;
+      ctx.drawImage(cloth.img, cloth.sx, cloth.sy, cloth.sw, cloth.sh,
+        bx - cloth.sw / 2, by - cloth.sh / 2, cloth.sw, cloth.sh);
       // 头像叠画（原版 TownNPCProfiles/TypeToDefaultHeadIndex NPC.cs:7489——head 索引≠NPC id）
       const headIdx = TOWN_NPC_HEAD_INDEX[n.vanillaId];
       const head = headIdx != null ? this.atlas.vmisc(`vanilla/NPC_Head_${headIdx}.png`) : null;
@@ -1132,7 +1135,7 @@ export class Renderer {
       // 光照色调（原版 Lighting.GetColor(homeTileX, num3)：旗布头像受所在格光照染色。
       //  lightCanvas 为屏幕空间 2× 超采样光照图（合成在本层之后，此处取上一帧数据——
       //  光照变化平缓一帧滞后无感；首帧全黑跳过）
-      const rectW = 16, rectH = 24;
+      const rectW = cloth.sw, rectH = cloth.sh + 4;
       const [lsx, lsy] = cam.worldToScreen(bx, by - 12);
       const lx = Math.round(lsx * 2), ly = Math.round(lsy * 2);
       if (lx >= 0 && ly >= 0 && lx < this.lightCanvas.width && ly < this.lightCanvas.height) {
@@ -1260,7 +1263,10 @@ export class Renderer {
         else if (!p.onGround) row = p.vy < 0 ? 1 : 4;
         else if (Math.abs(p.vx) > 0.3) row = 6 + Math.floor(p.animTime / 6) % 14; // 行走循环 6-19
         const f = dollFrame(doll, row);
-        ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh, f.sw, f.sh);
+        // 贴底:纸娃娃帧底有 ~2px 透明边距(Player_0_10 全帧实测),底锚会悬空——
+        // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿
+        const pad = this.spriteBottomPad(f, `doll:${row}`);
+        ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
         drawn = true;
       }
     }
