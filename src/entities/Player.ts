@@ -256,7 +256,9 @@ export class Player extends Entity {
     };
   }
   get maxHp(): number {
-    return this.baseMaxHp + this.buffs.healthBonus;
+    // 生命力药水（Lifeforce :9883）：statLifeMax2 += statLifeMax/5/20*20 → +20%（按 20 取整）
+    const lf = this.buffs.has(BuffType.Lifeforce) ? Math.floor(this.baseMaxHp / 5 / 20) * 20 : 0;
+    return this.baseMaxHp + this.buffs.healthBonus + lf;
   }
   get maxMana(): number {
     return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481）
@@ -264,9 +266,10 @@ export class Player extends Entity {
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
   }
-  /** 近战攻速倍率（猛爪手套 ×2 + 装备 meleeSpeed 67-80 词缀/狂战士手套累加） */
+  /** 近战攻速倍率（猛爪手套 ×2 + 装备 meleeSpeed 67-80 词缀/狂战士手套累加 + 醉酒近战速 ×1.1） */
   get attackSpeedMult(): number {
-    return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1);
+    return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
+      * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1);
   }
   /** 近战伤害加成（猛爪手套 +5） */
   get meleeDamageBonus(): number {
@@ -278,12 +281,19 @@ export class Player extends Entity {
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
     if (kind === 'magic') m += this.buffs.magicDmgBonus;   // MagicPower +20%（:9669）
     if (kind === 'ranged') m *= this.buffs.arrowDmgMult;   // Archery ×1.1（:9712,ranged 近义）
+    // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
+    if (this.buffs.has(BuffType.Rage)) m += 0.1;
+    if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) m += 0.1;
     return m;
   }
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
     const st = this.equipStats;
-    return kind === 'melee' ? st.critMelee : kind === 'ranged' ? st.critRanged : st.critMagic;
+    let c = kind === 'melee' ? st.critMelee : kind === 'ranged' ? st.critRanged : st.critMagic;
+    // R1 药水：暴怒(115)全系暴击 +10（:9890）；醉酒(25)近战暴击 +2（:11515）
+    if (this.buffs.has(BuffType.Wrath)) c += 10;
+    if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) c += 2;
+    return c;
   }
 
   get frame(): number {
@@ -522,7 +532,7 @@ export class Player extends Entity {
           }
       } else if (this.inputJump) {
         // 全浸没：游泳上浮（脚蹼族 accFlipper：提速 1.5×）
-        const swimMult = this.equipStats.flipper ? 1.5 : 1;
+        const swimMult = (this.equipStats.flipper || this.buffs.has(BuffType.FlipperPotion)) ? 1.5 : 1;
         this.vy = Math.max(this.vy - 0.62 * swimMult, -4.4 * swimMult);
       }
       if (this.surfaceJumpCd > 0) this.surfaceJumpCd--;
@@ -877,6 +887,10 @@ export class Player extends Entity {
   get grabRangeBonus(): number {
     return this.equipStats.treasureMagnet ? 94 : this.equipStats.goldRing ? 12 : 0;
   }
+  /** 红心拾取范围扩展（拾心药水 lifeMagnet，ItemDrop 心分支消费） */
+  get heartGrabBonus(): number {
+    return this.buffs.has(BuffType.Heartreach) ? 60 : 0;
+  }
   inputDown = false;
   inputUp = false;
   onRope = false;
@@ -888,7 +902,9 @@ export class Player extends Entity {
     const eq = this.equipStats;
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
     if (eq.blackBelt && Math.random() < 0.1) return false;
-    const reduction = Math.max(1, dmg - this.defense * 0.5);
+    // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
+    const endurance = this.buffs.has(BuffType.Endurance) ? 0.1 : 0;
+    const reduction = Math.max(1, Math.round((dmg - this.defense * 0.5) * (1 - endurance)));
     this.hp -= reduction;
     // 十字项链/星星面纱：无敌帧翻倍（longInvince）
     this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);

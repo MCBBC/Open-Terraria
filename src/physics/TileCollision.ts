@@ -114,8 +114,11 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
 /** 原版 Collision.SlopeCollision（1456 Collision.cs:1796-2036）适配：
  *  常规碰撞后对重叠坡面格做对角线贴合——身体沉到斜面下时抬回斜面上
  *  （走路沿坡爬升;多格取最高贴合位,与原版 y 最小值机制一致）。
- *  slope1/2 地面坡:slope1 左高右低(右移爬升)、slope2 右高左低;
- *  slope3/4 天花板坡:对称向下推离。 */
+ *  slope1/2 地面坡:slope1 左高右低(左行爬升)、slope2 右高左低;
+ *  slope3/4 天花板坡:对称向下推离。
+ *  与原版的偏差（稳定性取舍,均在行内注释标记）：
+ *  - num4 钳 ≥0（原版 num4<0 跳过）：坡顶过渡瞬间防脱钩下沉
+ *  - 抬升受阻守卫为近似（原版 :2003 抬升受阻回退 X） */
 function slopeCollide(b: Body, world: World): void {
   const st = world.store;
   const x0 = Math.floor(b.x / TILE), x1 = Math.floor((b.x + b.w - 0.01) / TILE);
@@ -131,11 +134,13 @@ function slopeCollide(b: Body, world: World): void {
       const vx0 = tx * TILE, vy0 = ty * TILE;
       if (b.x + b.w <= vx0 || b.x >= vx0 + TILE || b.y + b.h <= vy0 || b.y >= vy0 + TILE) continue;
       // 对角线水平偏移（:1882-1893/1927-1934）：slope1/3 取身体左缘进格深度,
-      // slope2/4 取右缘
+      // slope2/4 取右缘。钳到 ≥0（与原版 num4<0 即跳过的差异,见函数头注释）：
+      // 坡顶过渡瞬间(高侧缘越过坡面)原版会脱钩,脚底残留在对角线端点下方数像素,
+      // 落地门槛不补救 → 角色沉进坡格;钳位后贴合保持到水平重叠结束,送脚到
+      // 对角线高端点(=相邻整砖顶),由常规落地无缝接管
       let num4: number;
-      if (slope === 1 || slope === 3) num4 = b.x - vx0;
-      else num4 = vx0 + TILE - (b.x + b.w);
-      if (num4 < 0) continue;
+      if (slope === 1 || slope === 3) num4 = Math.max(0, b.x - vx0);
+      else num4 = Math.max(0, vx0 + TILE - (b.x + b.w));
       if (slope === 3 || slope === 4) {
         // 天花板坡（:1883-1921）：头在斜面上方才贴合下推
         if (b.y <= vy0 + TILE - num4) {

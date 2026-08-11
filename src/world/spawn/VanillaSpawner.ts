@@ -530,7 +530,7 @@ export class VanillaSpawner {
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
-    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false): { spawnRate: number; maxSpawns: number } {
+    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false): { spawnRate: number; maxSpawns: number } {
     // 月事件覆盖（L681-685）：南瓜月/霜月且玩家在地表（remix 省略）→
     // rate=20、max=⌊5×(2+0.3n)⌋（单人 11）；先于 invaders 覆盖（原版即此顺序）
     if (this.moonEvent && playerYpx < this.world.groundLevel * 16) {
@@ -618,6 +618,16 @@ export class VanillaSpawner {
     if (sunflower) {
       spawnRate = Math.floor(spawnRate * 1.2);
       maxSpawns = Math.floor(maxSpawns * 0.8);
+    }
+    // L617-620：镇静药水（calmed）×1.65 / ×0.6
+    if (calmed) {
+      spawnRate = Math.floor(spawnRate * 1.65);
+      maxSpawns = Math.floor(maxSpawns * 0.6);
+    }
+    // L632-635：战斗药水（enemySpawns）×0.5 / ×2
+    if (battle) {
+      spawnRate = Math.floor(spawnRate * 0.5);
+      maxSpawns = Math.floor(maxSpawns * 2);
     }
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
     if (spawnRate < 60) spawnRate = 60;

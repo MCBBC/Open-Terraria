@@ -2138,6 +2138,14 @@ export class UI {
       [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
       [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
       [BuffType.Archery, 'archery_potion'], [BuffType.NightOwl, 'night_owl_potion'],
+      // R1 数值批（vi_ 药水物品图标）
+      [BuffType.Battle, 'vi_300_BattlePotion'], [BuffType.Calming, 'vi_2324_CalmingPotion'],
+      [BuffType.Mining, 'vi_2322_MiningPotion'], [BuffType.Builder, 'vi_2325_BuilderPotion'],
+      [BuffType.Heartreach, 'vi_2323_HeartreachPotion'], [BuffType.FlipperPotion, 'vi_2327_FlipperPotion'],
+      [BuffType.Titan, 'vi_2326_TitanPotion'], [BuffType.AmmoReservation, 'vi_2344_AmmoReservationPotion'],
+      [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
+      [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
+      [BuffType.Tipsy, 'vi_2266_Sake'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);  }
 
@@ -2199,6 +2207,14 @@ export class UI {
       [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
       [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
       [BuffType.Archery, 'archery_potion'], [BuffType.NightOwl, 'night_owl_potion'],
+      // R1 数值批（vi_ 药水物品图标）
+      [BuffType.Battle, 'vi_300_BattlePotion'], [BuffType.Calming, 'vi_2324_CalmingPotion'],
+      [BuffType.Mining, 'vi_2322_MiningPotion'], [BuffType.Builder, 'vi_2325_BuilderPotion'],
+      [BuffType.Heartreach, 'vi_2323_HeartreachPotion'], [BuffType.FlipperPotion, 'vi_2327_FlipperPotion'],
+      [BuffType.Titan, 'vi_2326_TitanPotion'], [BuffType.AmmoReservation, 'vi_2344_AmmoReservationPotion'],
+      [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
+      [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
+      [BuffType.Tipsy, 'vi_2266_Sake'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

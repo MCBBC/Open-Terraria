@@ -25,7 +25,9 @@ const cell = await page.evaluate(() => {
     for (let y = gl; y < gl + 40; y++) {
       const i = st.idx(x, y);
       if (st.slope[i] !== 1 || !st.flags[i]) continue;
-      const ok = !st.flags[st.idx(x, y - 1)] && !st.flags[st.idx(x, y - 2)] && !st.flags[st.idx(x - 1, y - 1)];
+      // 落点净空:坡格及左邻上方 2 行(正上方有块会接住下落玩家干扰断言)
+      let ok = !st.flags[st.idx(x, y - 1)] && !st.flags[st.idx(x, y - 2)] && !st.flags[st.idx(x - 1, y - 1)];
+      if (st.flags[st.idx(x, y - 3)] && st.isSolid(x, y - 3)) ok = false;
       if (ok) return { x, y };
     }
   }
@@ -113,6 +115,13 @@ const up = await page.evaluate(() => {
       const solidFull = (j) => st.flags[j] && !st.half[j] && st.slope[j] === 0;
       if (!solidFull(L) || !solidFull(B)) continue;
       if (st.flags[st.idx(x - 1, y - 1)] || st.flags[st.idx(x - 1, y - 2)]) continue; // 高处上方净空
+      // 出生区净空:坡列/右侧列上方(树干等实心会让玩家卡死)
+      let clear = true;
+      for (let dx = 0; dx <= 2 && clear; dx++) for (let dy = 1; dy <= 3; dy++) {
+        const j = st.idx(x + dx, y - dy);
+        if (st.flags[j] && st.isSolid(x + dx, y - dy)) clear = false;
+      }
+      if (!clear) continue;
       return { x, y };
     }
   }
@@ -139,10 +148,64 @@ if (!up) {
   await page.keyboard.up('KeyA');
   const end = traj[traj.length - 1];
   console.log('  轨迹:', JSON.stringify(traj));
-  const climbed = start.feet - end.feet; // >0 为爬升
-  const progressed = start.x - end.x;    // >0 为前进
-  check('上坡行走:爬升且前进(不卡死)', climbed >= 10 && progressed >= 8,
-    `start feet ${start.feet} x ${Math.round(start.x)} → end feet ${end.feet} x ${Math.round(end.x)} (爬升 ${climbed}px, 前进 ${Math.round(progressed)}px, onGround ${end.onGround})`);
+  // 轨迹式断言:出现过显著爬升 + 持续前进 + 无长时间冻结(玩家会继续走过地形,
+  // 终点高度不能作断言)
+  const minFeet = Math.min(...traj.map((t) => t.feet));
+  const climbed = start.feet - minFeet;
+  const progressed = start.x - end.x;
+  let frozen = 0, maxFrozen = 0;
+  for (let k = 1; k < traj.length; k++) {
+    frozen = Math.abs(traj[k].x - traj[k - 1].x) < 1 ? frozen + 1 : 0;
+    maxFrozen = Math.max(maxFrozen, frozen);
+  }
+  check('上坡行走:爬升且前进(不卡死)', climbed >= 10 && progressed >= 40,
+    `maxClimb ${climbed}px, 前进 ${Math.round(progressed)}px, 最长冻结 ${maxFrozen} 采样`);
+}
+
+// ===== 用户标注复现(违法的要塞 (2236,276)):坡顶过渡沉入 =====
+// 构造同款布局:[X..X-3 整砖顶面(行G)] [X+1 = slope1] [X+1..X+4 行G+1 整砖(低处地面)]
+// 玩家从低处向左爬坡 → 过顶瞬间不得下沉(脚底应保持在 G*16 一线)
+{
+  const layout = await page.evaluate(() => {
+    const g = window.__swGame; const st = g.world.store;
+    // 直接雕刻(不依赖自然地形):玩家附近地下 12 行处开一个测试腔
+    const cx = Math.floor(g.player.cx / 16), G = Math.floor(g.player.cy / 16) + 14;
+    const x = cx + 4;
+    // 清空 x-9..x+6 × G-4..G+2
+    for (let dx = -9; dx <= 6; dx++) for (let dy = -4; dy <= 2; dy++) st.setTile(x + dx, G + dy, 0);
+    const dirt = st.type[st.idx(cx, G + 20)] || 1;
+    // 安全地板:G+2 整行(防掉落摔死重生干扰断言)
+    for (let dx = -9; dx <= 6; dx++) st.setTile(x + dx, G + 2, dirt);
+    // 高处顶面:x-8..x 行G 整砖;低处地面:x-1..x+4 行G+1 整砖
+    for (let dx = -8; dx <= 0; dx++) st.setTile(x + dx, G, dirt);
+    for (let dx = -1; dx <= 4; dx++) st.setTile(x + dx, G + 1, dirt);
+    // slope1 在 (x+1, G) —— 与用户标注(2236,276)同款:整砖(左) + slope1 + 下方整砖地面(右)
+    st.setTile(x + 1, G, dirt);
+    st.setSlope(x + 1, G, 1);
+    return { x, G };
+  });
+  if (!layout) {
+    check('构造坡顶过渡布局', false, '');
+  } else {
+    const start = await page.evaluate((L) => {
+      const g = window.__swGame; const p = g.player;
+      p.x = (L.x + 3) * 16 + 8 - p.w / 2; p.y = (L.G + 1) * 16 - p.h; p.vx = 0; p.vy = 0;
+      return { x: p.x, feet: p.y + p.h };
+    }, layout);
+    await new Promise((r) => setTimeout(r, 400));
+    await page.keyboard.down('KeyA');
+    await new Promise((r) => setTimeout(r, 1400));
+    await page.keyboard.up('KeyA');
+    const end = await page.evaluate(() => {
+      const p = window.__swGame.player;
+      return { x: p.x, feet: p.y + p.h, onGround: p.onGround };
+    });
+    const topY = layout.G * 16;
+    const sink = end.feet - topY;               // >4 = 沉入坡顶行(用户报告症状)
+    const passedSlope = end.x < layout.x * 16 + 4; // 已走过坡顶进入整砖区
+    check('坡顶过渡不沉入(用户标注复现)', passedSlope && sink <= 4 && sink >= -4,
+      `布局@(${layout.x},${layout.G}) start feet ${start.feet} → end feet ${end.feet} (坡顶线 ${topY}, 沉入 ${sink}px, x ${Math.round(start.x)}→${Math.round(end.x)}, onGround ${end.onGround})`);
+  }
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

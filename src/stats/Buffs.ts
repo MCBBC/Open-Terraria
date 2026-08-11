@@ -212,6 +212,7 @@ export class BuffState {
   get defenseBonus(): number {
     let d = this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
     if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
+    if (this.active.has(BuffType.Tipsy)) d -= 4;            // 醉酒 statDefense -= 4（:11514）
     return d;
   }
   /** 魔力上限加成：水晶球预见 statManaMax2 += 20（:11481） */

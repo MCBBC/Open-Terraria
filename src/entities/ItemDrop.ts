@@ -39,7 +39,9 @@ export class ItemDrop extends Entity {
       // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
       // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取；
       // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
-      const GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0);
+      const GRAB_RANGE = 42 + ((player as { grabRangeBonus?: number }).grabRangeBonus ?? 0)
+        // 拾心药水（lifeMagnet）：红心单独扩大拾取范围
+        + (this.pickup === 'heart' ? ((player as { heartGrabBonus?: number }).heartGrabBonus ?? 0) : 0);
       const touching =
         this.x < player.x + player.w && this.x + this.w > player.x &&
         this.y < player.y + player.h && this.y + this.h > player.y;

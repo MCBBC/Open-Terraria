@@ -6,13 +6,22 @@
 //   月总头   aiStyle 79(396)      :37712-38128
 //   攻击时间表 MoonLordAttacksArray :6830-6946 / MoonLordAttacksArray2 :6948-6987
 //   死亡转换 checkDead             :78841-78867(396/397 血尽→ai0=-2 闭眼残肢+召真眼;398 血尽→ai0=2 死亡演出)
+//   鲨鱼 NPC aiStyle 71(372/373)  :35196-35328(升空蓄力 90t→16 速扑咬,撞墙即死)
+// 弹体(原版 Projectile.cs 1:1,本文件内实现为投射桶实体):
+//   龙卷水弹 385 aiStyle 65        :28402-28482(小:斜落/大:追踪玩家 50px 引爆)+ Kill 落龙卷 :70714-70778
+//   鲨鱼龙卷 384/386 aiStyle 64    :28287-28398(逐段向上生长,周期 NewNPC 372/373 出鲨)
+//   死亡之光 455 aiStyle 84        :30291-30549(锚源 NPC 眼部,±2π/540 每 t 扫射,180t 寿命,
+//                                  Colliding 线段判定 :14673-14682,命中伤害 = NewProjectile 伤 ×2 :13781)
 // 经典模式主链 1:1;expert/getGoodWorld 分支保留注释;netcode 跳过。
 // 无敌语义:dontTakeDamage 用 e.iframes=2 每 tick 刷新近似(同 bossAI.ts 克脑一阶段)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
+import type { Camera } from '../render/Camera';
+import type { Renderer } from '../render/Renderer';
+import { Entity } from './Entity';
 import { TILE } from '../core/constants';
-import { spawnPart, shoot, accelTo } from './bossAI';
+import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 
 // ---------------------------------------------------------------------------
 // 通用工具
@@ -452,31 +461,297 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
 }
 
 /** 鲨鱼龙卷(状态 3 :49638-49660 / 状态 8 :49865-49885 共用):
- *  减速悬停,ai2==60 时发射龙卷水弹 proj 385(SharknadoBolt,原版伤害 0 的落地生成器)。
- *  简化:本工程无 385 落地生成龙卷+鲨鱼龙 372 寻的链,补一发 proj 407 直飞"鲨鱼"弹幕
- *  (伤害取 NPC 372 Sharkron 经典接触伤 100)近似龙卷出鲨。 */
+ *  减速悬停,ai2==60(nadoT-30)时发射龙卷水弹 proj 385(伤害 0 的落地生成器)——
+ *  小龙卷两发斜落(±dir*2, 8)、克苏龙卷一发原地(0,0,ai0=1=追踪型,ai2=狂暴旗)。
+ *  落地/近身 50px 后由弹体自身 Kill 生成 384/386 龙卷,龙卷逐段向上生长并周期
+ *  NewNPC 372/373 鲨鱼(见 DukeSharknadoBolt / DukeSharknadoTornado)。 */
 function dukeSharknado(e: Enemy, game: GameHooks, player: Player, st: DukeX, big: boolean) {
   e.vx *= 0.98;
   e.vy = lerp(e.vy, 0, 0.02);
   if (e.ai2 === DUKE.nadoT - 30) {
     game.playSfx('roar', 0.7);
     if (big) {
-      // 状态 8:原地一发(原版 ai0=1 即在自身处展开大龙卷,:49873-49876)
-      shoot(game, e.cx, e.cy, 0, 2, 0, 385, 300);
+      // 状态 8:克苏龙卷弹(:49873-49876;ai2=flag6 狂暴→追踪速度 +12)
+      addProj(game, new DukeSharknadoBolt(e.cx, e.cy, 0, 0, true, dukeEnraged(game, player), e));
     } else {
-      // 状态 3:左右两发斜落(:49646-49651)
-      shoot(game, e.cx, e.cy, st.dir * 2, 8, 0, 385, 300);
-      shoot(game, e.cx, e.cy, -st.dir * 2, 8, 0, 385, 300);
-    }
-    // 鲨鱼弹幕(原版由龙卷持续生成 372;此为直飞近似)
-    const dx = player.cx - e.cx, dy = player.cy - e.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    for (let k = -1; k <= 1; k++) {
-      shoot(game, e.cx, e.cy, (dx / d) * 9 + k * 2.5, (dy / d) * 9 + k * 1.2, 100, 407, 300);
+      // 状态 3:左右两发斜落(:49646-49651;vector8 = rotation·(dir,0)·(w+20)/2 偏移)
+      const ox = Math.cos(e.spin) * st.dir * (e.w + 20) / 2;
+      addProj(game, new DukeSharknadoBolt(e.cx + ox, e.cy, st.dir * 2, 8, false, false, e));
+      addProj(game, new DukeSharknadoBolt(e.cx + ox, e.cy, -st.dir * 2, 8, false, false, e));
     }
   }
   e.ai2 += 1;
   if (e.ai2 >= DUKE.nadoT) { e.ai0 = big ? 5 : 0; e.ai1 = 0; e.ai2 = 0; }
+}
+
+/** 投射桶入桶辅助(同 bossAI.addProj;类在本文件内,避免跨模块构造注入) */
+function addProj(game: GameHooks, p: Entity): void {
+  (game as unknown as { entities: { add: (e: Entity, b: string) => void } }).entities.add(p, 'projectiles');
+}
+
+// ---------------------------------------------------------------------------
+// 龙卷水弹 385(Projectile.cs:28402-28482 AI / :70714-70778 Kill 落龙卷)
+// ---------------------------------------------------------------------------
+// aiStyle 65:ai1==0(状态 3 小弹)→ vy 余弦摆动斜落,撞块/入水/超时 Kill;
+//  ai1>0(状态 8 克苏弹)→ 追踪玩家,速 4(+12 狂暴)+age/20,贴身 50px Kill。
+//  Kill:小弹原地落 384 鲨鱼龙卷(伤 40);大弹自弹体 tile 向下扫描 100 格落 386
+//  克苏龙卷(伤 80)——龙卷接触伤另按原版 hostile ×2 规则结算(Projectile.cs:13781)。
+export class DukeSharknadoBolt extends Entity {
+  w = 30; h = 30; // SetDefaults 385
+  private vx0: number;
+  private vy0: number;
+  private big: boolean;
+  private enraged: boolean;
+  /** 小弹 vy 摆动相位(原版 ai[0]) */
+  private phase = 0;
+  private age = 0;
+  life = 300; // SetDefaults timeLeft
+  /** 鲨鱼生成所需的 Duke 引用(spawnPart 位置供体,实际落点由龙卷覆写) */
+  private src: Enemy;
+  dead = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, big: boolean, enraged: boolean, src: Enemy) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.vx0 = vx; this.vy0 = vy;
+    this.big = big; this.enraged = enraged;
+    this.src = src;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.kill(game); return; }
+    this.age++;
+    const p = game.player;
+    if (this.big) {
+      // :28405-28447 追踪:速 4(+12 狂暴)+localAI[0]/20,距玩家 <50px 即 Kill
+      if (p && !p.dead) {
+        const dx = p.cx - this.cx, dy = p.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const spd = 4 + (this.enraged ? 12 : 0) + this.age / 20;
+        this.vx0 = (dx / d) * spd;
+        this.vy0 = (dy / d) * spd;
+        if (d < 50) { this.kill(game); return; }
+      }
+    } else {
+      // :28448-28475 vy 余弦摆动:vy += (cos(π/15·θₙ₊₁) − cos(π/15·θₙ))·4
+      const f = (t: number) => (Math.cos((Math.PI / 15) * t) - 0.5) * 4;
+      const d0 = f(this.phase);
+      this.phase += 1;
+      this.vy0 += f(this.phase) - d0;
+    }
+    this.x += this.vx0;
+    this.y += this.vy0;
+    // :28477-28481 入水上浮 16px 后 Kill
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    if (st.inBounds(tx, ty) && st.liquid[st.idx(tx, ty)] > 0) { this.y -= 16; this.kill(game); return; }
+    if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.kill(game); return; }
+  }
+
+  /** Kill(:70714-70778):尘环 + 落龙卷(小 384 / 大 386 向下扫描地面) */
+  private kill(game: GameHooks): void {
+    this.dead = true;
+    game.spawnParticles(this.cx, this.cy, '#7FB8E8', 10, 2.4, { life: 24, damp: 0.94 });
+    if (this.big) {
+      // :70752-70770 自弹体 tile 向下扫 100 格,落点 = 首个实心/液体格上沿 -24px
+      const st = game.world.store;
+      let tx = clamp(Math.floor(this.cx / TILE), 10, st.w - 10);
+      let ty = clamp(Math.floor(this.cy / TILE), 10, st.h - 110);
+      let ground = ty + 15;
+      for (let y = ty; y < ty + 100; y++) {
+        if (st.inBounds(tx, y) && (st.isSolid(tx, y) || st.liquid[st.idx(tx, y)] !== 0)) { ground = y; break; }
+      }
+      addProj(game, new DukeSharknadoTornado(tx * TILE + 8, ground * TILE - 24, true, this.src));
+    } else {
+      // :70733-70737 原地落 384(中心反向偏移 direction*30, y-4)
+      const dir = Math.sign(this.vx0) || 1;
+      addProj(game, new DukeSharknadoTornado(this.cx - dir * 30, this.cy - 4, false, this.src));
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.fillStyle = '#8FD8FF';
+    ctx.beginPath();
+    ctx.arc(this.cx, this.cy, 6, 0, TAU);
+    ctx.fill();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 鲨鱼龙卷 384 / 克苏龙卷 386(Projectile.cs:28287-28398,aiStyle 64)
+// ---------------------------------------------------------------------------
+// 原版是"父段 ai0 倒计时到 1 → 在正上方生成子段(ai0=10, ai1-1)直至 ai1=0"的投射物塔;
+// 本实现以单实体模拟该塔:列顶随段生长上移,鲨鱼在"新段出现且 ai1 % 出鲨模 == 0"时
+// 于列顶 NewNPC(小 384:模 4 → 3 只/塔;大 386:模 2 → 12 只/塔,ai2=幅宽 ai3=-1.5)。
+// 接触伤害:小 40 / 大 80(经典 NewProjectile 值),命中按原版 hostile 弹 ×2 规则(:13781)。
+export class DukeSharknadoTornado extends Entity {
+  private big: boolean;
+  private ai0: number;   // 段生长倒计时(父段 16,子段 10)
+  private ai1: number;   // 剩余段数(小 15 / 大 24)
+  private ai1Start: number;
+  /** 列顶中心 y(鲨鱼生成点/绘制塔顶) */
+  private topY: number;
+  private segs = 0;      // 已生长段数
+  private age = 0;
+  private alpha = 255;   // 原版 alpha(实体内嵌 SolidCollision 逐渐显形)
+  life: number;          // timeLeft 小 540 / 大 840
+  private src: Enemy;
+  dead = false;
+
+  constructor(x: number, y: number, big: boolean, src: Enemy) {
+    super();
+    this.big = big;
+    this.ai0 = 16;                       // NewProjectile ai0
+    this.ai1 = big ? 24 : 15;            // NewProjectile ai1
+    this.ai1Start = this.ai1;
+    this.topY = y;
+    this.life = big ? 840 : 540;         // SetDefaults timeLeft
+    this.src = src;
+    this.x = x; this.y = y;
+    this.resize();
+  }
+
+  /** 段缩放(aiStyle 64 :28297-28316):小 (25-ai1)/25;大 (32-ai1)*1.5/32 */
+  private scaleOf(ai1: number): number {
+    return this.big ? (32 - ai1) * 1.5 / 32 : (25 - ai1) / 25;
+  }
+  private resize(): void {
+    const s = this.scaleOf(this.ai1);
+    this.w = Math.round(150 * s);        // SetDefaults 150×42 × scale
+    this.h = Math.round(42 * s);
+    this.x = this.cx - this.w / 2;
+    this.y = this.topY - this.h / 2;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }
+    this.age++;
+    // alpha(:28336-28360):嵌实体块渐隐,否则向 60(大 100)显形
+    const st = game.world.store;
+    const inSolidTile = st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE)) && st.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+    if (inSolidTile) this.alpha = Math.min(150, this.alpha + 30);
+    else this.alpha = Math.max(this.big ? 100 : 60, this.alpha - 30);
+
+    if (this.ai0 > 0) this.ai0--;
+    if (this.ai0 === 1 && this.ai1 > 0) {
+      // :28363-28390 子段落点:列顶再上移 (42·sP + 42·sC)/2 − 2
+      const sP = this.scaleOf(this.ai1), sC = this.scaleOf(this.ai1 - 1);
+      this.topY -= (42 * sP) / 2 + (42 * sC) / 2 - 2;
+      // 出鲨(:28372-28385):ai1 % 模 == 0 且 ai1≠0 → NewNPC 372/373 于列顶
+      const mod = this.big ? 2 : 4;
+      if (this.ai1 % mod === 0 && this.ai1 !== 0) {
+        const shark = spawnPart(game, this.src, this.big ? 373 : 372);
+        if (shark) {
+          shark.x = this.cx - shark.w / 2;
+          shark.y = this.topY - shark.h / 2;
+          shark.vx = this.vx; shark.vy = this.vy; // Main.npc.velocity = 弹体速度
+          shark.bInit = false;                    // 由 sharkronAI 按 ai2/ai3 初始化
+          shark.ai2 = this.big ? this.w : 0;      // 373 横游幅宽(:28382)
+          shark.ai3 = this.big ? -1.5 : 0;        // 373 升速(:28383)
+        }
+      }
+      this.ai1 -= 1;
+      this.ai0 = 10;
+      this.segs += 1;
+      this.resize();
+    }
+    if (this.ai0 <= 0 && this.ai1 <= 0) {
+      // :28392-28398 停止生长后横向摇摆(cos(π/30·−ai0) − 0.5)·幅宽
+      const amp = (this.w / 5) * (this.big ? 2 : 1);
+      const f = (t: number) => (Math.cos((Math.PI / 30) * t) - 0.5) * amp;
+      this.x -= f(-this.ai0) * -1;
+      this.ai0 -= 1;
+      this.x += f(-this.ai0) * -1;
+    }
+
+    // 接触伤害(hostile 弹 ×2 规则,Projectile.cs:13781:小 40→80 / 大 80→160)
+    // 判定盒 = 整列(基座→列顶),宽取当前最宽段(= this.w,列顶段)
+    const p = game.player;
+    if (p && !p.dead) {
+      const halfW = this.w / 2;
+      const colTop = Math.min(this.topY, this.cy);
+      const colH = Math.abs(this.cy - this.topY) + this.h;
+      if (Math.abs(p.cx - this.cx) < halfW + p.w / 2 && Math.abs(p.cy - (colTop + colH / 2)) < colH / 2 + p.h / 2) {
+        game.damagePlayer(this.big ? 160 : 80, this.cx, this.cy, this.src);
+      }
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.save();
+    ctx.globalAlpha = 1 - this.alpha / 255;
+    // 塔形:自基座向列顶逐段变宽(384 族贴图未解包,按段缩放画半透明白蓝柱)
+    let segY = this.cy + this.h / 2;
+    for (let i = this.segs; i >= 0; i--) {
+      const s = this.scaleOf(Math.max(0, this.ai1Start - i));
+      const sw = 150 * s, sh = 42 * s;
+      segY -= sh;
+      ctx.fillStyle = i % 2 ? '#9FD4F0' : '#7FB8E8';
+      ctx.fillRect(this.cx - sw / 2, segY, sw, sh);
+    }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 鲨鱼 NPC aiStyle 71(NPC 372 Sharkron / 373,NPC.cs:35196-35328)
+// ---------------------------------------------------------------------------
+// ai0=0:ai3 升速垂直蓄力 90t(dontTakeDamage;373 另带 ai2 幅宽余弦横游+渐显);
+// 期满 ai0=1 → 16 速直扑玩家;ai0=1:渐显(−60/t)、撞实心块即死、60t 后恢复重力。
+export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): void {
+  if (!e.bInit) {
+    e.bInit = true;
+    e.ai0 = 0; e.ai1 = 0;
+    e.spawnAlpha = 255; e.alphaFade = false; // 渐显由本 AI 按 :35228/:35267 驱动
+  }
+  if (!player || player.dead) { e.dead = true; return; } // TargetClosest 落空即消散
+  const RISE_T = 90; // num1077
+  if (e.ai0 === 0) {
+    e.iframes = 2;              // dontTakeDamage(:35211)
+    e.vx = 0;
+    e.vy = e.ai3;               // velocity.Y = ai[3](:35212)
+    if (e.vanillaId === 373) {
+      e.spawnAlpha = Math.max(0, e.spawnAlpha - 6); // :35228 渐显
+      // :35222-35227 贴图倾斜 rotation = vy·spriteDirection·0.1(钳 ±0.2)
+      e.spin = clamp(e.vy * -e.facing * 0.1, -0.2, 0.2);
+    }
+    e.ai1 += 1;
+    if (e.ai1 >= RISE_T) {
+      // :35232-35252 蓄力期满:16 速扑咬(撞块内则 ai1=0 延后起扑)
+      e.ai0 = 1;
+      e.ai1 = inSolid(game, e) ? 0 : 1;
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      e.vx = (dx / d) * 16;
+      e.vy = (dy / d) * 16;
+      e.facing = dx < 0 ? -1 : 1;
+      e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0);
+    }
+  } else {
+    // ai0 === 1(:35254-35310)
+    if (e.ai1 < 1 && !inSolid(game, e)) e.ai1 = 1;
+    if (inSolid(game, e)) e.spawnAlpha = Math.min(150, e.spawnAlpha + 15); // :35260
+    if (e.ai1 >= 1) {
+      e.spawnAlpha = Math.max(0, e.spawnAlpha - 60); // :35267 渐显
+      e.ai1 += 1;
+      if (inSolid(game, e)) { e.dead = true; return; } // :35282-35297 撞墙即死
+    }
+    if (e.ai1 >= 60) e.vy = Math.min(e.vy + 0.3, 16); // :35305-35309 恢复重力
+    e.spin = Math.atan2(e.vy, e.vx) + (e.facing < 0 ? Math.PI : 0); // :35311-35315
+  }
+  // 373 蓄力段横游(:35213-35221):x += (cos(π/30·l1) − 0.5)·ai2·(−direction) 位移差
+  if (e.ai0 === 0 && e.vanillaId === 373 && e.ai2 > 0) {
+    const f = (t: number) => (Math.cos((Math.PI / 30) * t) - 0.5) * e.ai2;
+    const prev = f(e.ai1 - 1), cur = f(e.ai1);
+    e.x += (cur - prev) * -e.facing;
+  }
+  e.x += e.vx;
+  e.y += e.vy;
 }
 
 /** AI_070 爆裂泡泡(NPC 371,NPC.cs:35122-35195):
@@ -557,6 +832,146 @@ function mlShoot(e: Enemy, game: GameHooks, player: Player, ox: number, oy: numb
   shoot(game, e.cx + ox, e.cy + oy, (dx / d) * spd, (dy / d) * spd, dmg, projId, 600);
 }
 
+// ---------------------------------------------------------------------------
+// 死亡之光 455 PhantasmalDeathray(Projectile.cs:30291-30549,aiStyle 84)
+// ---------------------------------------------------------------------------
+// 定轴扫射激光:锚定源 NPC 眼部(头 396 椭圆 (27,59)·睁眼度 / 真眼 400 椭圆 (30,30)),
+// 每 tick 转 ai0(=±2π/540),寿命 180t,scale = sin(age·π/180)·10·maxScale 脉冲张合;
+// 束长 LaserScan(3 采样,最大 2400)以 0.5/t Lerp 逼近;命中判定 = 玩家矩形 vs
+// 「源心 → 源心+dir·束长」线段,线宽 36·scale(Colliding :14673-14682);
+// 伤害 = NewProjectile 值 ×2(hostile 弹规则 :13781:头 75→150 / 真眼 50→100)。
+export class MLDeathray extends Entity {
+  w = 36; h = 36; // SetDefaults 455
+  private srcId: number;
+  /** 'head' = 396 头眼 / 'core' = 400 真眼(本仓折叠到核心 398) */
+  private kind: 'head' | 'core';
+  /** 扫射角速度(原版 ai[0] = ±2π/540) */
+  private sweep: number;
+  /** 当前束角(原版 velocity.ToRotation,每 tick +sweep) */
+  private angle: number;
+  private age = 0;
+  /** 束长 Lerp 值(原版 localAI[1]) */
+  private len = 0;
+  private dmg: number;
+  dead = false;
+
+  constructor(src: Enemy, kind: 'head' | 'core', angle: number, sweep: number, dmg: number) {
+    super();
+    this.srcId = src.id;
+    this.kind = kind;
+    this.angle = angle;
+    this.sweep = sweep;
+    this.dmg = dmg;
+    this.x = src.cx - this.w / 2;
+    this.y = src.cy - this.h / 2;
+  }
+
+  /** scale 上限:头 1.0 / 真眼 0.4(:30468-30478 num728) */
+  private get maxScale(): number { return this.kind === 'head' ? 1 : 0.4; }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    if (!src || src.dead) { this.dead = true; return; }        // 源消亡即 Kill(:30297)
+    if (this.kind === 'head' && src.ai0 === -2) { this.dead = true; return; } // :30296 头闭眼残肢
+    this.age++;
+    if (this.age >= 180) { this.dead = true; return; }         // :30472 寿命 180t
+    this.angle += this.sweep;                                  // :30521 rotation += ai[0]
+
+    // 锚点:束原点 = 源心 + 眼球椭圆偏移(:30293-30308)
+    const hx = headOf(src);
+    const open = this.kind === 'head' ? hx.l1 : 1;
+    const eyeA = this.kind === 'head' ? hx.l0 : this.angle;    // 真眼无独立瞳角,随束角
+    const ex = this.kind === 'head' ? Math.cos(eyeA) * 27 * open : Math.cos(eyeA) * 30;
+    const ey = this.kind === 'head' ? Math.sin(eyeA) * 59 * open : Math.sin(eyeA) * 30;
+    this.x = src.cx + ex - this.w / 2;
+    this.y = src.cy + ey - this.h / 2;
+
+    // 束长:LaserScan 3 采样(线宽 36·scale,最大 2400)均值,:30483-30509
+    const scale = Math.min(this.maxScale, Math.sin((this.age * Math.PI) / 180) * 10 * this.maxScale);
+    const wSq = 36 * scale;
+    const dirX = Math.cos(this.angle), dirY = Math.sin(this.angle);
+    let amt = 0.5;
+    let dist = this.laserScan(game, dirX, dirY, wSq);
+    const p = game.player;
+    if (this.kind === 'head' && p && !p.dead && !losClear(game, this.cx, this.cy, p.cx, p.cy)) {
+      // :30511-30519 头与玩家无视线 → 束长取 距玩家+150(防隔墙盲射)
+      dist = Math.min(2400, Math.hypot(p.cx - src.cx, p.cy - src.cy) + 150);
+      amt = 0.75;
+    }
+    this.len = lerp(this.len, dist, amt);
+
+    // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)
+    if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
+      game.damagePlayer(this.dmg, this.cx, this.cy, src);
+    }
+  }
+
+  /** Collision.LaserScan 近似:垂直束向 ±半宽 3 条采样线,8px 步进至首实心块 */
+  private laserScan(game: GameHooks, dirX: number, dirY: number, width: number): number {
+    const px = -dirY, py = dirX; // 垂直束向
+    let sum = 0;
+    for (let k = -1; k <= 1; k++) {
+      const off = (k * width) / 2;
+      const ox = this.cx + px * off, oy = this.cy + py * off;
+      const steps = Math.ceil(2400 / 8);
+      let d = 2400;
+      for (let i = 1; i <= steps; i++) {
+        const t = i * 8;
+        const tx = Math.floor((ox + dirX * t) / TILE), ty = Math.floor((oy + dirY * t) / TILE);
+        const st = game.world.store;
+        if (!st.inBounds(tx, ty)) { d = t - 8; break; }
+        if (st.isSolid(tx, ty)) { d = t - 8; break; }
+      }
+      sum += d;
+    }
+    return sum / 3;
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const scale = Math.min(this.maxScale, Math.sin((this.age * Math.PI) / 180) * 10 * this.maxScale);
+    if (scale <= 0.01 || this.len <= 1) return;
+    const thick = Math.max(2, 36 * scale);
+    ctx.save();
+    ctx.globalAlpha = clamp(scale * 1.6, 0.25, 1);
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.angle);
+    ctx.fillStyle = '#B040D0';
+    ctx.fillRect(0, -thick / 2, this.len, thick);
+    ctx.globalAlpha = clamp(scale * 0.9, 0.15, 0.6);
+    ctx.fillStyle = '#F0C8FF';
+    ctx.fillRect(0, -thick / 4, this.len, thick / 2);
+    ctx.restore();
+  }
+}
+
+/** 线段 vs AABB(原版 Collision.CheckAABBvLineCollision 语义:线宽胶囊与矩形相交) */
+function segHitsRect(x0: number, y0: number, dx: number, dy: number, width: number,
+  t: { x: number; y: number; w: number; h: number }): boolean {
+  // 最近点参数 t∈[0,1](钳到段内)
+  const cx = t.x + t.w / 2, cy = t.y + t.h / 2;
+  const len2 = dx * dx + dy * dy || 1;
+  let k = ((cx - x0) * dx + (cy - y0) * dy) / len2;
+  k = clamp(k, 0, 1);
+  const px = x0 + dx * k, py = y0 + dy * k;
+  // 最近点到矩形距离(逐轴钳位)
+  const nx = clamp(px, t.x, t.x + t.w), ny = clamp(py, t.y, t.y + t.h);
+  return Math.hypot(px - nx, py - ny) < width / 2;
+}
+
+/** 死亡之光发射出口(原版 :37902-37916 头 / :38625-38637 真眼):
+ *  起角 = 朝玩家角 ∓ 60°(num1278 = 玩家在左 +1),角速度 = num1278·2π/540。
+ *  返回源 NPC 的扫射编码角初值((起角+3π)·num1278,头部 ai2 逐 t 解码步进用)。 */
+function mlDeathray(game: GameHooks, src: Enemy, kind: 'head' | 'core', player: Player, dmg: number): number {
+  const dx = player.cx - src.cx, dy = player.cy - src.cy;
+  const d = Math.hypot(dx, dy) || 1;
+  const n = dx / d < 0 ? 1 : -1;                       // num1278
+  const ang = Math.atan2(dy, dx) - n * (TAU / 6);
+  addProj(game, new MLDeathray(src, kind, ang, n * (TAU / 540), dmg));
+  return (ang + Math.PI * 3) * n;
+}
+
 /** 核心悬停移动(:36854-36865 / :36912-36923 同构):目标 = 玩家 + (0,130),8 速/0.5 步进+半程混合 */
 function mlCoreHover(e: Enemy, player: Player) {
   const dx = player.cx - e.cx;
@@ -610,7 +1025,11 @@ export function moonLordCoreAI(e: Enemy, game: GameHooks, player: Player | null)
       if (parts.every((p) => p.ai0 === -2)) { e.ai0 = 1; e.ai1 = 0; }
     }
     if (player) mlCoreHover(e, player);
-    if (e.ai0 === 1 && player) mlCoreBarrage(e, game, player); // 二阶段弹幕(真眼主链折叠)
+    if (e.ai0 === 1 && player) {
+      // aiStyle 81 真眼的攻击表计时(:38247 起 ai[1] 每 tick +1)——折叠到核心后由核心推进
+      e.ai1 += 1;
+      mlCoreBarrage(e, game, player); // 二阶段弹幕(真眼主链折叠)
+    }
   } else if (e.ai0 === 2) { // 死亡演出(:36925-37064)
     e.iframes = 2;
     e.vx = lerp(e.vx, 0, 0.02);
@@ -689,10 +1108,10 @@ function mlCoreBarrage(e: Enemy, game: GameHooks, player: Player) {
         mlShoot(e, game, player, 0, 0, 8, 35, 462);
       }
       break;
-    case 4: // 死亡之光 455(原版为持续扫射激光;直飞弹近似)
-      if (inSlot === 0 || inSlot === 120 || inSlot === 240) {
-        mlShoot(e, game, player, 0, 0, 7, 75, 455);
-      }
+    case 4: // 死亡之光 455(:38625-38647):inSlot==180 一发定轴扫射激光(50 伤→命中×2=100)
+      // 原版此槽 375t:0-179 蓄能尘,180 发束,束体自转 180t 至槽末;真眼瞳角动画随束同步
+      // (localAI[0],:38642-38652)——真眼不在本仓范围,锚点用核心中心 (30,30) 椭圆近似
+      if (inSlot === 180) { e.ai2 = mlDeathray(game, e, 'core', player, 50 * 2); }
       break;
     default: break; // 0 = 闭眼冷却 90t
   }
@@ -948,15 +1367,18 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
           e.cx + (Math.random() - 0.5) * 27, e.cy + (Math.random() - 0.5) * 59, '#B040C0', 2, 1.2, { life: 24 });
       }
     } else if (inSlot < dur - 15) {
-      // :37902-37916 原版发射 455 死亡之光(75 伤)并以 2π/540 每t 扫射;
-      // 本工程投射物无持续扫射,按发射方向(∓60° 预偏)直飞近似,逐t 扫射略
+      // :37902-37916 发射 455 死亡之光(75 伤→命中×2=150):起角 ∓60° 预偏,
+      // 束体以 ±2π/540 每 t 扫射 180t(束体自转见 MLDeathray)
       if (inSlot === 180) {
-        const dx = player.cx - e.cx, dy = player.cy - e.cy;
-        const d = Math.hypot(dx, dy) || 1;
-        const n = dx / d < 0 ? 1 : -1; // num1278
-        const ang = Math.atan2(dy, dx) - n * (TAU / 6);
-        shoot(game, e.cx, e.cy, Math.cos(ang) * 9, Math.sin(ang) * 9, 75, 455, 600);
+        e.ai2 = mlDeathray(game, e, 'head', player, 75 * 2); // :37913 扫射编码角初值
         game.playSfx('roar', 0.8);
+      }
+      // :37917-37947 头部瞳角与束体同角速度扫射(ai2 存编码角,逐 t 解码步进)
+      if (inSlot >= 180) {
+        const n = e.ai2 >= 0 ? 1 : -1; // num1279
+        const a = Math.abs(e.ai2) - Math.PI * 3 + n * (TAU / 540);
+        x.l0 = a;
+        e.ai2 = (a + Math.PI * 3) * n;
       }
       x.l1 = Math.min(1, x.l1 + 0.05);
     } else {

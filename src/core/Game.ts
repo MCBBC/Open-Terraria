@@ -2342,7 +2342,7 @@ export class Game implements GameHooks {
         this.entities.add(new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
           damage, knockback, projId, dropKey), 'projectiles');
         // 弹药节约（ammoCost80：20% 概率不耗弹——蘑菇矿胸甲族，Player.PickAmmo 语义）
-        if (!(this.player.equipStats.ammoSave && Math.random() < 0.2)) {
+        if (!(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
           this.player.inv.removeAt(ammoSlot, 1);
         }
         this.player.useTime = bowC?.useTime ?? rg.speed;
@@ -2760,7 +2760,7 @@ export class Game implements GameHooks {
     //      + :52981 GetPickaxeDamage）：每击积累、阈值 100 破坏；冷却 = useTime
     //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
     //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
-    const tileSpeedMult = this.player.equipStats.tileSpeed ? 0.75 : 1;
+    const tileSpeedMult = (this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1;
     const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
@@ -3343,7 +3343,7 @@ export class Game implements GameHooks {
     // 射程（ItemReach，与 tryPlace 一致 5.5 格）
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) return;
+    if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
     if (this.player.useTime > 0) return;
     const wallId = itemDef.wallId!;
     const i0 = st.idx(tx, ty);
@@ -3358,7 +3358,7 @@ export class Game implements GameHooks {
     this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     this.player.inv.removeAt(this.player.inv.selected, 1);
     // wallSpeed=1（Player.cs:2336），铺墙节奏 ≈ 常规放置；便携水泥机族 WallSpeedAcc 冷却 -25%
-    this.player.useTime = Math.max(4, Math.round(15 * (this.player.equipStats.wallSpeed ? 0.75 : 1)));
+    this.player.useTime = Math.max(4, Math.round(15 * ((this.player.equipStats.wallSpeed || this.player.buffs.has(BuffType.Builder)) ? 0.75 : 1)));
     this.cb.onInventoryChanged();
     // FillEmptySpace（cs:38973-39025）：stack>1 时补铺被本墙四面包围的空洞
     if (this.player.inv.heldItem()?.stack ?? 0 > 1) {
@@ -3385,7 +3385,7 @@ export class Game implements GameHooks {
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
-    if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) return;
+    if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
     // 橡实: 只能种在草块正上方
@@ -3567,7 +3567,7 @@ export class Game implements GameHooks {
     {
       const dx = tx - Math.floor(this.player.cx / TILE);
       const dy = ty - Math.floor(this.player.cy / TILE);
-      if (!this.inTileRange(tx, ty, this.player.equipStats.tileRange ? 3 : 0)) { this.input.rightDown = false; return; }
+      if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) { this.input.rightDown = false; return; }
     }
     const type = st.get(tx, ty);
     // 联机保护门禁（v3 房间制）：以下右键操作会改方块/世界状态——非房主在保护房拒绝。
@@ -4639,7 +4639,7 @@ export class Game implements GameHooks {
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
-      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1);
+      const kb = ((this.swing.kb ?? tool?.knockback ?? 3)) * 0.65 * (this.player.equipStats.kbGlove ? 2 : 1) * (this.player.buffs.has(BuffType.Titan) ? 1.5 : 1);
       const killed = e.hurt(dmg, kdir * kb, -2.5, this);
       this.addDamageNumber(e.cx, e.y, dmg, crit, crit ? '#FFD040' : '#FF7060');
       // 幸运币（hasLuckyCoin：近战命中 20% 掉 1-5 铜币，Player.SpawnCoins 近似）
@@ -4723,7 +4723,8 @@ export class Game implements GameHooks {
       : [];
     const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
       p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx,
-      this.peaceCandleNear, p.buffs.has(BuffType.Sunflower));
+      this.peaceCandleNear, p.buffs.has(BuffType.Sunflower),
+      p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle));
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
