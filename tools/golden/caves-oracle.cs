@@ -1327,9 +1327,6 @@ Checkpoint("grass");
     }
     CPT.Add($"holes_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     ghAt("big");
-    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
-    File.WriteAllBytes("/tmp/cs-act6.bin", act);
-    File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1340,6 +1337,9 @@ Checkpoint("grass");
         if ((int)r.Next(4) == 0)
             TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
     }
+    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
+    File.WriteAllBytes("/tmp/cs-act6.bin", act);
+    File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
 }
 Checkpoint("jungle");
 

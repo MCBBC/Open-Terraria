@@ -2,6 +2,7 @@
 // 原版小动物是 NPC(NPCID.Squirrel 等),任何伤害即死——近战挥砍已覆盖
 // (Game 挥砍段"小动物:任何挥击一击致死"),弹幕此前漏判,箭射松鼠无效果。
 import type { GameHooks } from './types';
+import { BuffType } from '../stats/Buffs';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -45,7 +46,8 @@ export function playEnemyHitSound(game: GameHooks, e: { def?: { hitSound?: strin
  *    受击音/伤害数字/饰品触发)。
  *  原版敌弹命中【不消耗穿透】(:13811-13829 仅 435/436/437/681/682 特判递减),
  *  弹体照常飞行——调用方不得据此销毁弹体。
- *  返回是否相交并结算(伤害可能被 iframes/闪避吞掉,语义同原版 Hurt 返回 0)。 */
+ *  返回是否【实际造成伤害】(iframes/闪避吞掉时 false,对应原版 Hurt 返回 0;
+ *  StatusPlayer 的 debuff 授予以此为准,:13798-13800)。 */
 export function hitPlayer(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
@@ -55,6 +57,35 @@ export function hitPlayer(
   const p = game.player;
   if (p.dead) return false;
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
+  const ifr = p.iframes;
   game.damagePlayer(dmg, self.x + self.w / 2, self.y + self.h / 2);
-  return true;
+  return p.iframes > ifr; // damage 落地才置无敌帧(闪避/无敌内不置)
+}
+
+/** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450+,仅在
+ *  hitPlayer 返回 true 即 Hurt>0 后调用)。本仓库已实装弹型登记:
+ *   348 FrostWave —— Chilled(46) 300/600t(:11554-11557) + Frozen(47)
+ *                    概率 20/40/60t 三级(:11558-11567)
+ *   349 FrostShard —— Chilled(46) 1/3→600t、否则 1/2→300t(:11569-11576)
+ *  其余弹型的 debuff 链(毒/诅咒/灵液/暗影焰等)随对应批次逐条接入。 */
+export function statusPlayer(game: GameHooks, projId: number): void {
+  const p = game.player;
+  switch (projId) {
+    case 348:
+      p.buffs.apply(BuffType.Chilled, (Math.random() < 0.5 ? 300 : 600) / 60);
+      if (Math.random() < 2 / 3) {
+        const r = Math.random();
+        const t = r < 1 / 16 ? 60 : r < 1 / 12 ? 40 : r < 1 / 8 ? 20 : 0;
+        if (t > 0) p.buffs.apply(BuffType.Frozen, t / 60);
+      }
+      break;
+    case 349: {
+      const r = Math.random();
+      if (r < 1 / 3) p.buffs.apply(BuffType.Chilled, 600 / 60);
+      else if (r < 0.5) p.buffs.apply(BuffType.Chilled, 300 / 60);
+      break;
+    }
+    default:
+      break;
+  }
 }

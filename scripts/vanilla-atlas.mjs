@@ -78,6 +78,10 @@ const MISC = [
   'Projectile_922.png', 'Projectile_923.png', 'Projectile_926.png',
   // 蜂后毒刺 719 + 世花种子 275/276/277
   'Projectile_719.png', 'Projectile_275.png', 'Projectile_276.png', 'Projectile_277.png',
+  // DD2 军队弹幕（ProjectileID.cs:840/:1676-1734）：240 荷兰飞船炮弹 / 675 暗影矢 /
+  // 682 电弧 / 686 Betsy 火球 / 687 Betsy 喷焰——此前以 21/173/15 代渲(RENDER_PROXY 已退役)
+  'Projectile_240.png', 'Projectile_675.png', 'Projectile_682.png',
+  'Projectile_686.png', 'Projectile_687.png',
   // 日月(Main.cs:62279 DrawSunAndMoon):太阳整图 + 月亮 8 相位竖条(Moon_N 50×400)
   'Sun.png',
   ...Array.from({ length: 9 }, (_, i) => `Moon_${i}.png`),

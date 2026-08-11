@@ -1304,14 +1304,17 @@ export class Enemy extends Entity {
       if (this.vx < 0) this.vx += 0.1;
       if (this.vx > 3) this.vx = 3;
     }
+    // 悬停目标(:24172-24174):player.Y - h/2;水平距离>50 → 再抬 100px。
+    // ★曾写成【vy】与【世界坐标 ty】比较(单位错位恒 false → 永远 vy+=0.05 向下
+    // 加速):秃鹫唤醒后不悬停,贴地乱撞冲向玩家。原版比较的是 position.Y 与 ty
     let ty = player && !player.dead ? player.y - this.h / 2 : this.cy - 100;
     if (player && Math.abs(player.cx - this.cx) > 50) ty -= 100;
-    if (this.vy > ty - 4) {
-      this.vy -= 0.05;
-      if (this.vy < 0 && ty > this.cy) this.vy -= 0.01;
-    } else if (this.vy < ty + 4) {
+    if (this.y < ty) {
       this.vy += 0.05;
-      if (this.vy > 0 && ty < this.cy) this.vy += 0.01;
+      if (this.vy < 0) this.vy -= 0.01;
+    } else {
+      this.vy -= 0.05;
+      if (this.vy > 0) this.vy -= 0.01;
     }
     this.vy = Math.max(-3, Math.min(3, this.vy));
     const oldVx = this.vx, oldVy = this.vy;

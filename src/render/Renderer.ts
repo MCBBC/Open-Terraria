@@ -577,9 +577,9 @@ export class Renderer {
     // 4. 实体（按 y 排序）
     const sorted = [...entities].sort((a, b) => a.y - b.y);
     for (const e of sorted) {
-      if (e instanceof Enemy) this.drawEnemy(e, world, entities);
+      if (e instanceof Enemy) { this.drawEnemy(e, world, entities); this.drawHealthBar(e); }
       else if (e instanceof ItemDrop) this.drawDrop(e);
-      else if (e instanceof TownNPC) this.drawTownNPC(e);
+      else if (e instanceof TownNPC) { this.drawTownNPC(e); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (e instanceof Critter) this.drawCritter(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
@@ -922,6 +922,71 @@ export class Renderer {
   }
 
   /** 小动物：原版 NPC 纵向帧条动画（移动时循环全帧，静止首帧；贴图默认朝左镜像） */
+  /** 大血条比例 1.5 的类型（Main.cs:45228-45298：Boss 与大型怪） */
+  private static readonly HB_BIG_SCALE = new Set([
+    4, 35, 36, 50, 113, 114, 125, 126, 127, 128, 129, 130, 131, 222, 262, 266,
+    245, 246, 247, 248, 249, 564, 565, 551, 576, 577, 87, 510, 454, 621, 439, 370,
+  ]);
+  /** NPCAddHeight（Main.cs:21852-21977）：血条在脚底 +10 之上的额外下沉（视觉修正） */
+  private static readonly HB_ADD_H: Record<number, number> = {
+    125: 30, 126: 30, 54: 2, 205: 8, 182: 24, 178: 2, 6: 26, 173: 26, 94: 14,
+    7: 13, 8: 13, 9: 13, 98: 13, 99: 13, 100: 13, 95: 13, 96: 13, 97: 13,
+    10: 8, 11: 8, 12: 8, 13: 26, 14: 26, 15: 26, 175: 4, 520: 2,
+    412: 18, 413: 18, 414: 18, 48: 32, 49: 4, 51: 4, 60: 10,
+    62: 14, 66: 14, 156: 14, 63: 4, 64: 4, 103: 4, 65: 5, 69: 4, 70: -4, 72: -2,
+    83: 20, 84: 20, 150: 10, 151: 10, 158: 10, 152: 6, 153: 2, 154: 2,
+    165: 10, 237: 10, 238: 10, 240: 10, 531: 10, 39: 26, 40: 26, 41: 26,
+    87: 56, 88: 56, 89: 56, 90: 56, 91: 56, 92: 56, 134: 30, 135: 30, 136: 30, 169: 8,
+  };
+
+  /** 受伤实体血条（DrawInterface_14_EntityHealthBars Main.cs:45203 + DrawHealthBar :21748）：
+   *  life != lifeMax 即显示（无时间衰减——原版打到没满血就一直显示）；画在脚底
+   *  +10+NPCAddHeight；填充 36px×比例；绿→黄→红渐变（:21766-21778）；光照亮度调
+   *  alpha（:45417 Brightness）。蠕虫段不画（头部血条代表全链）；毁灭者原版为
+   *  全链共享一条（destroyerHB 平滑），此处近似画在头下。 */
+  private drawHealthBar(e: { cx: number; cy: number; y: number; h: number; hp: number; maxHp: number; vanillaId: number | null; wormFollow?: Enemy['wormFollow'] }) {
+    const hp = e.hp, maxHp = e.maxHp;
+    if (hp <= 0 || hp >= maxHp) return;
+    if (e.wormFollow) return;
+    if (!this.atlas) return;
+    const hb1 = this.atlas.ensureVImage('vanilla/HealthBar1.png');
+    const hb2 = this.atlas.ensureVImage('vanilla/HealthBar2.png');
+    if (!hb1 || !hb2) return;
+    const vid = e.vanillaId ?? 0;
+    const scale = Renderer.HB_BIG_SCALE.has(vid) ? 1.5 : 1;
+    const x = e.cx - 18 * scale;
+    const y = e.y + e.h + 10 + (Renderer.HB_ADD_H[vid] ?? 0);
+    const fill = Math.max(0, Math.min(36, Math.floor((36 * hp) / maxHp)));  // num2
+    // 光照 alpha（Brightness = 中心格最大通道/255；8 档量化控 tint 缓存规模）
+    let aQ = 1;
+    if (this.lighting) {
+      const [lr, lg, lb] = this.lighting.lightAt(Math.floor(e.cx / TILE), Math.floor(e.cy / TILE));
+      aQ = Math.round((Math.max(lr, lg, lb) / 255) * 7) / 7;
+    }
+    if (aQ <= 0) aQ = 0.15; // 全黑也留一点可见度（光照区外 lightAt=0 的兜底）
+    // 颜色（:21766-21778）：n=hp%-0.1；>0.5 绿满红减，否则红满绿增
+    let n = hp / maxHp - 0.1;
+    n = Math.max(0, Math.min(1, n));
+    const r = Math.round(n > 0.5 ? 255 * (1 - n) * 2 : 255);
+    const g = Math.round(n > 0.5 ? 255 : 255 * n * 2);
+    const tint = (img: CanvasImageSource, tex: string, sx: number, sw: number) =>
+      this.tintedSprite(`hb${tex}|f${fill}|a${aQ}`, { img, sx, sy: 0, sw, sh: 12 }, [r, g, 0]);
+    const ctx = this.ctx;
+    ctx.globalAlpha = 0.95 * aQ;
+    if (fill < 34) {
+      // :21814-21828：背景两段（fill 处 2px 帽 + 余量）+ 填充两段（主体 + 末端 2px）
+      ctx.drawImage(tint(hb2, '2', 2, 2), x + fill * scale, y, 2 * scale, 12 * scale);
+      ctx.drawImage(tint(hb2, '2', fill + 2, 36 - fill - 2), x + (fill + 2) * scale, y, (36 - fill - 2) * scale, 12 * scale);
+      if (fill > 2) ctx.drawImage(tint(hb1, '1', 0, fill - 2), x, y, (fill - 2) * scale, 12 * scale);
+      ctx.drawImage(tint(hb1, '1', 32, 2), x + (fill - 2) * scale, y, 2 * scale, 12 * scale);
+    } else {
+      // :21830-21836：fill≥34 全长填充 + 尾部背景
+      if (fill < 36) ctx.drawImage(tint(hb2, '2', fill, 36 - fill), x + fill * scale, y, (36 - fill) * scale, 12 * scale);
+      ctx.drawImage(tint(hb1, '1', 0, fill), x, y, fill * scale, 12 * scale);
+    }
+    ctx.globalAlpha = 1;
+  }
+
   private drawCritter(c: Critter) {
     if (!this.atlas) return;
     const meta = this.atlas.vnpcMeta(c.def.npc);

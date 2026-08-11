@@ -35,10 +35,13 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
     tileRunner(st, rng, gs, x, y, { strength: str, steps: stp, type: MUD, speedX: gs.dungeonSide * xSpeedScale, speedY: 0, mudWall: true });
   };
   const placeGemsAt = (baseGem: number, variants: number) => {
+    // 原版 Next(-(int)(125*ws), (int)(125*ws)) 上界开 → int(a, b-1)。
+    // 曾写成闭区间多 1 档：偏移 187 时 gem runner 落点差 1 → 巨型泥 runner
+    // 扫描内出现 1 格骰偏移（值不同但总数自愈）→ 丛林 ~292 格写出差异。
     for (let n = 0; n < 6 * scale; n++) {
       tileRunner(st, rng, gs,
-        x + rng.int(-Math.floor(125 * scale), Math.floor(125 * scale)),
-        y + rng.int(-Math.floor(125 * scale), Math.floor(125 * scale)), {
+        x + rng.int(-Math.floor(125 * scale), Math.floor(125 * scale) - 1),
+        y + rng.int(-Math.floor(125 * scale), Math.floor(125 * scale) - 1), {
           strength: rng.int(3, 6), steps: rng.int(3, 7),
           type: GEMS[baseGem + rng.int(0, variants - 1)],
         });
@@ -240,9 +243,12 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     }
     tileRunner(st, rng, gs, i2, j2, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
     if (rng.next() * 4 < 1) {
+      // ★原版掷序（cs:269-271）：type2(Next 63,69) 在实参求值**之前**求值 →
+      // type → x偏移 → y偏移 → strength → steps（对象字面量会把 type 排到最后=流错位）
+      const gtype = GEMS[rng.int(0, 5)];
       tileRunner(st, rng, gs,
         i2 + rng.int(-1, 1), j2 + rng.int(-1, 1),
-        { strength: rng.int(3, 6), steps: rng.int(4, 7), type: GEMS[rng.int(0, 5)] });
+        { strength: rng.int(3, 6), steps: rng.int(4, 7), type: gtype });
     }
   }
 }

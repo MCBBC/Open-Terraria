@@ -224,9 +224,12 @@ function placeCampsite(st: TileStore, rng: RNG, protectedRects: Rect[], ox: numb
  *  原版经 PlaceTile → case 186 的 SolidTileAllowBottomSlope 门（WorldGen.cs:49284）：
  *  地面须实心且非半砖非顶坡——斜坡格上不生成（与 pilesPass 同门） */
 function placeLargePile(st: TileStore, x: number, y: number): void {
-  const gi = st.idx(x, y);
-  if (!st.inBounds(x, y) || !solidAt(st, x, y)
-    || st.half[gi] === 1 || (st.slope[gi] >= 1 && st.slope[gi] <= 2)) return;
+  for (let dx = 0; dx < 3; dx++) {
+    if (!st.inBounds(x + dx, y)) return;
+    const gi = st.idx(x + dx, y);
+    if (!solidAt(st, x + dx, y)
+      || st.half[gi] === 1 || (st.slope[gi] >= 1 && st.slope[gi] <= 2)) return;
+  }
   for (let dx = 0; dx < 3; dx++) {
     for (let dy = 0; dy < 2; dy++) {
       if (!st.inBounds(x + dx, y - 1 + dy)) continue;

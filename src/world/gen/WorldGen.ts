@@ -530,10 +530,16 @@ function pilesPass({ store, rng }: GenCtx) {
     let gy = y, guard = 0;
     while (guard++ < 400 && store.inBounds(x, gy) && !store.flags[store.idx(x, gy)]) gy++;
     // 原版地面门（PlaceTile case 186 → SolidTileAllowBottomSlope :49284/:70211）：
-    // 下方须实心且【非半砖非顶坡】（topSlope=slope 1/2）——斜坡沙上不生成装饰
-    const gi = store.idx(x, gy);
-    if (!store.inBounds(x, gy) || !TILE_DEFS[store.type[gi]]?.solid
-      || store.half[gi] === 1 || (store.slope[gi] >= 1 && store.slope[gi] <= 2)) { fail++; continue; }
+    // 下方须实心且【非半砖非顶坡】（topSlope=slope 1/2）——斜坡沙上不生成装饰；
+    // 骨堆跨 3 列（185 单列），整片地面都要平
+    let groundOk = true;
+    for (let dx = 0; dx < 3 && groundOk; dx++) {
+      if (!store.inBounds(x + dx, gy)) { groundOk = false; break; }
+      const gi = store.idx(x + dx, gy);
+      if (!TILE_DEFS[store.type[gi]]?.solid
+        || store.half[gi] === 1 || (store.slope[gi] >= 1 && store.slope[gi] <= 2)) groundOk = false;
+    }
+    if (!groundOk) { fail++; continue; }
     const i = store.idx(x, gy - 1);
     if (!store.inBounds(x, gy - 1) || store.flags[i]) { fail++; continue; }
     if (store.liquid[i] > 100) { fail++; continue; }

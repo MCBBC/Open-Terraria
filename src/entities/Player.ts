@@ -509,6 +509,9 @@ export class Player extends Entity {
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
     const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1);
+    // 冰冻 Frozen(47,Player.cs:9749 frozen=true)：整帧封移动输入——跳跃/攀绳/矿车
+    // 同读这些标志,一并归零(原版 Update 段 control* 清零语义)。帧末由 Game 重灌输入
+    if (this.buffs.has(BuffType.Frozen)) { this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false; }
     const ix = this.inputX;
     if (ix !== 0) {
       this.vx += ix * PLAYER_WALK_ACCEL * (this.inWater ? 0.6 : 1) * speedMult;

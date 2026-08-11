@@ -85,6 +85,11 @@ export enum BuffType {
   Sonar = 59,          // 声呐(122,480s)：显示渔获名（sonar :9835）
   Crate = 60,          // 宝匣(123,300s)：渔获箱率 +10%（cratePotion :9839）
   Gravitation = 61,    // 重力(18,180s)：Up 键切换 gravDir（:9720）
+  // ---- R8 敌弹状态批（Projectile.StatusPlayer :11450+ 授予链）----
+  Chilled = 62,        // 冰寒(46)：移速 ×0.75（Player.cs:25659-25661）——霜月冰弹
+                       //   348 FrostWave / 349 FrostShard 命中授予（:11554-11576）
+  Frozen = 63,         // 冰冻(47)：整帧封移动输入（player.frozen :9749，input 清零
+                       //   同 :18474 重置段）——冰女王霜弹 348 概率授予
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -153,6 +158,9 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Sonar]: { vanillaBuff: 122, descKey: 'Mods.SandboxWorld.Buff.Sonar.Desc', fallbackName: '声呐' },
   [BuffType.Crate]: { vanillaBuff: 123, descKey: 'Mods.SandboxWorld.Buff.Crate.Desc', fallbackName: '宝匣' },
   [BuffType.Gravitation]: { vanillaBuff: 18, descKey: 'Mods.SandboxWorld.Buff.Gravitation.Desc', fallbackName: '重力' },
+  // 描述直接用原版 BuffDescription（12 语言现成，语义一致，同 Honey 先例）
+  [BuffType.Chilled]: { vanillaBuff: 46, descKey: 'BuffDescription.Chilled', fallbackName: '冰寒' },
+  [BuffType.Frozen]: { vanillaBuff: 47, descKey: 'BuffDescription.Frozen', fallbackName: '冰冻' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -248,6 +256,7 @@ export class BuffState {
   get moveSpeedMult(): number {
     let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
     if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
+    if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     return m;

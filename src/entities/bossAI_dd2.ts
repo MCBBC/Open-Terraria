@@ -75,9 +75,8 @@
 //   raiseGoblins()/canRaiseGoblinsHere()（109 召骷髅）、stopInvasion()（105 胜负收场）、
 //   reportLoss()（105 败北）、findArenaHitbox()（105）、difficulty()（DD2 难度档,默认 1）。
 //   DD2 敌怪索敌语义（NPCUtils.cs:261/:308）：场上有水晶 548 → 咬水晶;否则咬玩家。
-// 弹幕贴图缺口登记 RENDER_PROXY（sprites/vanilla 无 Projectile_{240,658,673,674,675,
-//   682,686,687}.png,ProjectileID.cs:840/:1676-1734）——按最接近的既有弹体代渲,
-//   速度/伤害/节拍 1:1。
+// 弹幕贴图：Projectile_{240,675,682,686,687}.png 已入 sprites/vanilla 管线（见
+//   shootD 上方注记）；658/673/674 三枚 0 伤效果弹无弹体（粒子降级）,速度/伤害/节拍 1:1。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -87,6 +86,11 @@ import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
 import { TILE_DEFS } from '../data/tiles';
 
+// 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
+// sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
+// RENDER_PROXY 代渲登记退役。687 喷焰原版为 Main.cs:31282 自定义 15 层火舌程序化
+// 绘制,此处按整条贴图(98×686 单帧)近似;682 电弧 4 帧竖条(projFrames=4,Main.cs:8482)
+// 同按整条绘制。
 /** 原版 localAI[0..3]（Enemy 只有 ai0-ai3 对应 ai[],localAI 独立 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
 export const dd2LocalAI = (e: Enemy): number[] => {
@@ -142,33 +146,23 @@ export const DD2_EVENT_HOOKS = {
 };
 
 // ---------------------------------------------------------------------------
-// 弹幕：DD2/沙漠族弹体贴图全部缺失（public/sprites/vanilla 无 Projectile_{240,658,
-// 673,674,675,682,686,687}.png）。ProjectileID.cs：240 CannonballHostile（荷兰大炮
-// 炮弹,14 速-5 上抛）/ 658 SandnadoHostileMark（沙暴标记,damage 0 纯视觉尘柱）/
-// 673 DD2DarkMageRaise（召骷髅阵眼,0 伤）/ 674 DD2DarkMageHeal（治疗脉动,落地 40t
-// 后 1000px 内友军 +500,0 伤）/ 675 DD2DarkMageBolt（暗影矢 14 速 40 伤）/ 682
-// DD2LightningBugZap（电弧 10 速 50 伤）/ 686 DD2BetsyFireball（空袭火球,继承机速）/
-// 687 DD2BetsyFlameBreath（喷焰,10 速横冲）。
-// 伤害弹（240/675/682/686/687）走 Arrow + RENDER_PROXY 代渲;三枚 0 伤效果弹
-//（658/673/674）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）且
-// 瞬间耗尽 pierce,与原版"纯视觉/纯疗效"语义相反 → 降级为粒子（674 疗效已由
+// 弹幕：ProjectileID.cs：240 CannonballHostile（荷兰大炮炮弹,14 速-5 上抛）/
+// 658 SandnadoHostileMark（沙暴标记,damage 0 纯视觉尘柱）/ 673 DD2DarkMageRaise
+//（召骷髅阵眼,0 伤）/ 674 DD2DarkMageHeal（治疗脉动,落地 40t 后 1000px 内友军
+// +500,0 伤）/ 675 DD2DarkMageBolt（暗影矢 14 速 40 伤）/ 682 DD2LightningBugZap
+//（电弧 10 速 50 伤）/ 686 DD2BetsyFireball（空袭火球,继承机速）/ 687
+// DD2BetsyFlameBreath（喷焰,10 速横冲）。
+// 伤害弹（240/675/682/686/687）走 Arrow 真图（RENDER_PROXY 已退役）;三枚 0 伤
+// 效果弹（658/673/674）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）
+// 且瞬间耗尽 pierce,与原版"纯视觉/纯疗效"语义相反 → 降级为粒子（674 疗效已由
 // darkMageAI 在节拍帧直接结算）。
 // ---------------------------------------------------------------------------
-const RENDER_PROXY: Record<number, number> = {
-  240: 21,    // 炮弹 → Bone(圆弹体)
-  675: 173,   // 暗影矢 → EnchantedBeam
-  682: 173,   // 电弧 → EnchantedBeam
-  686: 15,    // 火球 → BallofFire
-  687: 15,    // 喷焰 → BallofFire
-};
-
 function shootD(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300, grav = 0, pierce = 1,
 ): void {
-  const rid = RENDER_PROXY[projId] ?? projId;
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav, life, pierce, hostile: true }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav, life, pierce, hostile: true }),
     'projectiles');
 }
 

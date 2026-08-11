@@ -2228,6 +2228,16 @@ export class Game implements GameHooks {
     } as NonNullable<(typeof ITEM_DEFS)[number]['tool']>;
   }
 
+  /** 通用消耗品语义门（vanilla-itemfunc）：必须确有 heal/buff 语义才允许占用
+   *  else-if 槽位——生命水晶(29)/魔力水晶(109)/生命果(1291)/弓枪族等无此语义，
+   *  若被本分支空认领会把链条后续分支全部饿死（else-if 匹配即终止） */
+  private consumableFuncGate(def: (typeof ITEM_DEFS)[number]): boolean {
+    const fm = /^vi_(\d+)_/.exec(def.key);
+    const ff = fm ? itemFuncOfVid(+fm[1]) : null;
+    return !!ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
+      && (!!ff.healLife || !!ff.healMana || !!(ff.buffType && ff.buffType > 0));
+  }
+
   /** 手持物 useStyle 分族（Player.cs:49939 ItemCheck_ApplyUseStyle switch）：
    *  vi_ → vanilla-itemfunc.useStyle（2141 件分布 1:1504 / 4:74 / 5:243 / 9:70 …）；
    *  legacy 药水无 vid → 9（Item.DefaultToHealingPotion：useStyle=9 举杯）；
@@ -2655,7 +2665,7 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && this.consumableFuncGate(heldDef)) {
       // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
       // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
       const fm = /^vi_(\d+)_/.exec(heldDef.key);
