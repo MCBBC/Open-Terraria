@@ -190,7 +190,7 @@ export class Minimap {
       return d ? d.mapColor : '#808080';
     }
     // 液体：水蓝 / 岩浆橙
-    if (st.liquid[i] > 40) return st.liquidType[i] === 2 ? '#E8622C' : '#3D6FD1';
+    if (st.liquid[i] > 32) return st.liquidType[i] === 2 ? '#E8622C' : '#3D6FD1'; // 原版 Minimap 阈值 >32(MapHelper.cs:1983)
     if (st.wall[i] !== 0) {
       // 墙色 = 深化（地下洞穴空气）
       const w = st.wall[i];
@@ -230,7 +230,7 @@ export class Minimap {
     for (let i = 0, n = world.w * world.h; i < n; i++) {
       const t = type[i];
       if (t !== 0) { buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue; }
-      if (liquid[i] > 40) { buf[i] = liquidType[i] === 2 ? lut.lava : lut.water; continue; }
+      if (liquid[i] > 32) { buf[i] = liquidType[i] === 2 ? lut.lava : lut.water; continue; }
       const wl = wall[i];
       buf[i] = wl !== 0 ? (lut.walls[wl] ?? lut.walls[0]) : lut.sky;
     }
@@ -1102,23 +1102,37 @@ export class Renderer {
     }
   }
 
-  private drawEnemyHpBar(e: Enemy) {
-    // 受击后 4 秒内显示（hpBarT），临近消失淡出；满血不显示
-    if (e.hpBarT > 0 && e.hp < e.maxHp) {
-      const ctx = this.ctx;
-      const wBar = Math.max(18, e.w);
-      const fade = e.hpBarT < 40 ? e.hpBarT / 40 : 1;
-      ctx.globalAlpha = fade;
-      ctx.fillStyle = '#400';
-      ctx.fillRect(e.cx - wBar / 2, e.y - 8, wBar, 4);
-      ctx.fillStyle = '#E33';
-      ctx.fillRect(e.cx - wBar / 2, e.y - 8, wBar * (e.hp / e.maxHp), 4);
-      // 剩余血量的亮色前缘
-      ctx.fillStyle = '#FF7A7A';
-      const fw = wBar * (e.hp / e.maxHp);
-      if (fw > 1) ctx.fillRect(e.cx - wBar / 2, e.y - 8, Math.min(2, fw), 4);
-      ctx.globalAlpha = 1;
-    }
+  /**
+   * NPC 血条 1:1（Main.DrawHealthBar Main.cs:21748-21839 + 显示门
+   * DrawInterface_14_EntityHealthBars :45223：life != lifeMax && !dontTakeDamage——
+   * 掉血即常驻显示、满血隐藏；immortal 实体血量恒满自动排除）。
+   * Hb1/Hb2 贴图未入素材管线——几何绘制同布局：总宽 36px（scale=1）、填充 min 3px、
+   * Y=实体脚下（settings=1 经典锚点 position.Y+height+NPCAddHeight）、
+   * 颜色公式 :21771-21810（ratio-0.1 → >0.5 绿 r=255*(1-n)*2 / 否则红 g=255*n*2，b=0，
+   * ×0.95 alpha；前景/背景同色 tint 靠明度区分）
+   */
+  private drawEnemyHpBar(e: { hp: number; maxHp: number; cx: number; y: number; h: number }) {
+    if (e.hp <= 0 || e.hp >= e.maxHp) return;
+    const ctx = this.ctx;
+    let r = e.hp / e.maxHp;
+    if (r > 1) r = 1;
+    const fill = Math.min(36, Math.max(3, Math.floor(36 * r)));  // num2：填充宽（min 3）
+    const x = Math.round(e.cx - 18);                             // num3 = X - 18*scale
+    const y = Math.round(e.y + e.h);                             // 实体脚下（经典锚点）
+    const n = r - 0.1;                                           // ratio 偏移（:21771）
+    const cr = n > 0.5 ? Math.round(255 * (1 - n) * 2) : 255;
+    const cg = n > 0.5 ? 255 : Math.round(255 * n * 2);
+    const rgb = (mul: number) => `rgb(${Math.min(255, Math.round(cr * mul))},${Math.min(255, Math.round(cg * mul))},0)`;
+    ctx.globalAlpha = 0.95;                                      // alpha×0.95（光照亮度并入常量）
+    // 背景空槽（Hb2 等价：暗框+同色调暗填充）
+    ctx.fillStyle = 'rgba(0,0,0,0.55)';
+    ctx.fillRect(x - 1, y - 1, 38, 5);
+    ctx.fillStyle = rgb(0.45);
+    ctx.fillRect(x, y, 36, 3);
+    // 前景填充（Hb1 等价：全亮同色 tint）
+    ctx.fillStyle = rgb(1);
+    ctx.fillRect(x, y, fill, 3);
+    ctx.globalAlpha = 1;
   }
 
   /** 入驻旗帜（Main.cs:40152-40236 DrawNPCHousesInWorld 1:1）：
@@ -1205,6 +1219,9 @@ export class Renderer {
 
   private drawTownNPC(n: TownNPC) {
     const ctx = this.ctx;
+    // 血条与怪物同规（原版 DrawInterface_14 对 friendly NPC 同函数绘制：
+    // life != lifeMax 即常驻显示——城镇 NPC 受伤掉血后可见；贴图条加载未就绪也照画）
+    this.drawEnemyHpBar(n);
     // ---- 原版贴图条（Images/NPC_{id}，40×56 帧、默认朝左）：帧语义见 TownNPC.fixedUpdate ----
     // 注意：不再回退 Maples 角色/NPC_1.png——那是原版绿史莱姆贴图（Maples 沿用原版命名），
     // 曾导致全部城镇 NPC 显示为史莱姆

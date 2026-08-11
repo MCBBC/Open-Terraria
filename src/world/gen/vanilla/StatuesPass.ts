@@ -8,8 +8,8 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 
-const STATUE = (() => {
-  // (tile, style) 对,cs:4395-4433 原序
+/** statueList(cs:4395-4433):73 项 (tile, style) 对,原序 */
+export const STATUE_LIST: Array<[number, number]> = (() => {
   const list: Array<[number, number]> = [];
   for (let i = 0; i < 44; i++) list.push([105, i]);
   list[34] = [349, 0];
@@ -20,7 +20,10 @@ const STATUE = (() => {
   return list;
 })();
 
-const STATUES_WITH_TRAPS = new Set([4, 7, 10, 18]);
+const STATUE = STATUE_LIST;
+
+/** 陷阱雕像 = 列表索引 {4,7,10,18}(GenVars.StatuesWithTraps;索引<34 时与样式同值) */
+export const STATUES_WITH_TRAPS = new Set([4, 7, 10, 18]);
 
 function statueTileKey(sheet: number): number | null {
   for (let id = 0; id < TILE_DEFS.length; id++) {
@@ -36,7 +39,7 @@ const TRAP = statueTileKey(137);
 const WIRE_RED = TileStore.WIRE_RED;
 
 /** PlaceStatueTrap(cs:4436):±10 盒内找"空格+下方实心"位放飞镖陷阱并向雕像拉红石线 */
-function placeStatueTrap(st: TileStore, x: number, y: number): void {
+export function placeStatueTrap(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y) || x < 20 || x > st.w - 21 || y < 20 || y > st.h - 21 || !TRAP) return;
   for (let i = -10; i <= 10; i++) {
     for (let j = -10; j <= 10; j++) {

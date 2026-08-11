@@ -10,6 +10,7 @@ export interface VanillaItemStat {
   s?: 'h' | 'b' | 'l';
   def?: number;
   acc?: 0 | 1;
+  life?: number;   // 生命回复（Item.lifeRegen，再生手环族）
 }
 
 const STATS = statsJson as Record<string, VanillaItemStat>;

@@ -14,6 +14,9 @@ export class ItemDrop extends Entity {
   bobPhase: number;
   /** 原版 Item.color（凝胶等掉落继承怪物色，逐像素乘法贴轮廓渲染） */
   color?: number[]; // [r, g, b, a]
+  /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
+   *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
+  pickup?: 'heart' | 'star';
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();
@@ -43,6 +46,19 @@ export class ItemDrop extends Entity {
         this.x < player.x + player.w + GRAB_RANGE && this.x + this.w > player.x - GRAB_RANGE &&
         this.y < player.y + player.h + GRAB_RANGE && this.y + this.h > player.y - GRAB_RANGE;
       if (touching) {
+        // 心/星 pickup：直接回复并消失，不进背包（原版拾取即 Heal(20)/mana+100+ClearOut）
+        if (this.pickup) {
+          if (this.pickup === 'heart') {
+            player.hp = Math.min(player.maxHp, player.hp + 20);
+            game.addDamageNumber(player.cx, player.y, 20, false, '#40E080');
+          } else {
+            player.mana = Math.min(player.maxMana, player.mana + 100);
+            game.addDamageNumber(player.cx, player.y, 100, false, '#4080FF');
+          }
+          this.dead = true;
+          game.playSfx('pickup', 0.75); // 原版 SoundID 7 Grab
+          return;
+        }
         const before = this.stack;
         const left = player.inv.add(this.itemId, this.stack);
         if (left === 0) {

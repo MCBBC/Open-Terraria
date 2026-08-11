@@ -56,23 +56,24 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '洞穴', run: vanillaCaves },
     { name: '海滩', run: vanillaBeaches },
     { name: '生物群系', run: vanillaBiomes },
-    // 原版注册序:Shinies(27) → Lakes(31) → Clean Up Dirt(37) → LifeCrystals(55)。
-    // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮;
-    // 清理(Clean Up Dirt)也须在矿石之后(原版 37>27,清理散块才知道哪些是散块)
+    // 原版 1456 注册序:OresAndShinies(13233) → Lakes(14613) → DirtWallCleanup(15310)
+    // → SettleLiquids(16215) → SmoothWorld(16507) → Waterfalls(16697) → LifeCrystals(16847)。
+    // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮
+    // （唯一硬约束:水晶在 Lakes 之后;平滑/瀑布在其前的原版序可完整对齐）
     { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
     { name: '清理', run: vanillaCleanup },
-    // 原版 pass 49 SettleLiquids（cs:16215）：Lakes 之后、Smooth World(53)/
-    // Waterfalls(54) 之前的中途沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，
-    // 必须在静止水面数据上跑（此前沉降只在管线末尾 → 唇缘基于未沉降水体漂移）。
-    // 原版 pass 97 SettleLiquidsPart2（管线尾二次沉降）由 generateWorld 之后
+    // 原版 SettleLiquids（cs:16215）：Lakes 之后、SmoothWorld/Waterfalls 之前的中途
+    // 沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，必须在静止水面数据上跑
+    // （此前沉降只在管线末尾 → 唇缘基于未沉降水体漂移）。
+    // 原版 SettleLiquidsPart2（cs:21051，管线尾二次沉降）由 generateWorld 之后
     // worker/Game 的 settleWorldLiquids('gen') 承担。
     { name: '水体沉降', run: liquidSettlePass },
-    { name: '生命水晶', run: vanillaLifeCrystals },
-    // 原版 "Smooth World"(L7568)+"Waterfalls"(L7697)：地表凸起与水边唇缘砸半砖
+    // 原版 "Smooth World"(cs:16507)+"Waterfalls"(cs:16697)：地表凸起与水边唇缘砸半砖
     // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
     { name: '半砖平滑', run: halfBrickSmoothPass },
     { name: '瀑布唇缘', run: waterfallLipPass },
+    { name: '生命水晶', run: vanillaLifeCrystals },
     { name: '地狱', run: hellPass },
     { name: '地狱屋', run: vanillaHellHouses },
     // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
@@ -282,26 +283,30 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   // 守卫老人出生/游走锚)——塔心锚点会把老人漏进塔内
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
-  runPyramidPass(store, rng, gs, world.chests); // 38 Pyramids(沙岩砖金字塔+宝箱)
-  // 原版注册序:OceanCaves(15228) < JungleShrines(16059) < Statues(16952) <
-  // UndergroundHouses(17066:洞穴箱→地狱箱→小屋) < SurfaceChests(17232) <
-  // ChestsInJungleShrines(17308) < UnderwaterChests(17345)
+  // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
+  //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
+  //   Temple(15911) < Beehives(16005) < JungleShrines(16059) < Statues(16947) <
+  //   UndergroundHouses+BuriedChests(17066) < SurfaceChests(17226) <
+  //   ChestsInJungleShrines(17308) < UnderwaterChests(17343) < SpiderCaves(17455) <
+  //   FloatingIslandHouses(17971) < MicroBiomes(21785)
+  // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
+  // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
   const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
+  runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
+  runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(丛林湿隧道灌水)
+  runTemplePass(store, rng, gs, world.chests);  // Jungle Temple(之字形房间链+走廊+门+宝箱)
+  runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
   const shrineSpots = runJungleShrinePass(store, rng, gs);  // 丛林神龛(壳+腔+火把+金字塔顶)
   runStatuesPass(store, rng, gs);                           // 雕像 73 序+陷阱雕像接线
-  runBuriedChestsPass(store, rng, gs, world.chests); // 59 Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
+  runBuriedChestsPass(store, rng, gs, world.chests); // Buried Chests(洞穴金/冰箱/沙箱;地狱箱已拆到地狱箱 pass)
   runCaveHousesPass(store, rng, gs, world.chests);   // 地下小屋七主题(木/冰/丛林/沙/花岗岩/大理石/蘑菇)
-  runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
+  runSurfaceChestsPass(store, rng, gs, world.chests); // Surface Chests(地表木箱;只放一次——曾双调致密度翻倍)
   runJungleChestsPass(store, rng, gs, world.chests, shrineSpots); // 常春藤箱(神龛中心)
   runUnderwaterChestsPass(store, rng, gs, world.chests, oceanTreasures); // 海洋洞窟水箱
-  runSurfaceChestsPass(store, rng, gs, world.chests); // 36 Surface Chests(地表木箱)
-  runWaterChestsPass(store, rng, gs, world.chests); // 39 Water Chests(水中 style17)
-  runWetJunglePass(store, rng, gs);             // 43 Wet Jungle(丛林湿隧道灌水)
-  runBeehivePass(store, rng, gs);               // 45 Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
-  runWebsPass(store, rng, gs);                  // 58 Webs(全局天花板蛛网 runner 51;原版序:Hives后/SpiderCaves前)
-  runSpiderNestPass(store, rng, gs, world.chests); // 63 Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
-  runWebsInSpiderCavesPass(store, rng, gs);     // 64 Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
-  runTemplePass(store, rng, gs, world.chests);  // 44 Jungle Temple(之字形房间链+走廊+门+宝箱)
+  runWaterChestsPass(store, rng, gs, world.chests); // Water Chests(水中 style17;1.4.4 概念保留)
+  runWebsPass(store, rng, gs);                  // Webs(全局天花板蛛网 runner 51;1456 注册 13659 早段,后放防被清,语义近 WebsInSpiderCaves)
+  runSpiderNestPass(store, rng, gs, world.chests); // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
+  runWebsInSpiderCavesPass(store, rng, gs);     // Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
   runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
   runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)
 }
@@ -518,7 +523,7 @@ function tileRunnerHell(st: World['store'], rng: RNG, gs: GenState, i: number, j
 
 
 // ---------- 瓦罐散布 ----------
-function potPass({ store, surface, rng }: GenCtx) {
+function potPass({ store, rng }: GenCtx) {
   // 原版 Pots pass(1.4.5.6 WorldGen.cs:18186-18286)1:1:
   // count = 面积×0.0008(小 4200×1200 = 4032 个),每个成功点放 1 罐;
   // 进度 >75% 强制从地表浅层起扫、>93% 强制地狱行;2 宽×2 高 PlacePot
@@ -544,8 +549,7 @@ function potPass({ store, surface, rng }: GenCtx) {
     TILE_BY_KEY['v_199_crimson_grass_block']!, TILE_BY_KEY['v_203_crimstone_block']!,
     TILE_BY_KEY['v_204_crimsand_block']!, TILE_BY_KEY['v_200_crimson_ice_block']!,
   ].filter((v) => v !== undefined));
-  const GRANITE = TILE_BY_KEY['v_368_granite_block'] ?? -1; // 368 = 花岗岩块
-  const MARBLE = TILE_BY_KEY['v_367_marble_block'] ?? -1;    // 367 = 大理石块(样式由墙 187/216/223 判定,MARBLE 仅保留)
+  const GRANITE = TILE_BY_KEY['v_368_granite_block'] ?? -1; // 368 = 花岗岩块(样式由墙 187/216/223 判定)
   const LIHZARD = TILE_BY_KEY['v_226_lihzahrd_brick'] ?? -1;
   const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
   const MARBLE_WALLS = new Set([187, 216, 223]);
@@ -701,7 +705,7 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     if (!store.flags[i] && store.type[i] !== 0) store.type[i] = 0; // 幽灵 type
     if (store.type[i] === 0) store.flags[i] = 0; // 幻影活性(type 0 不可有 flags)
   }
-  // ---- 原版 pass 78 Spawn Point（cs:9471-9508）：中心随机扩张采样，自然地表，不改地形 ----
+  // ---- 原版 Spawn Point（1456 注册 cs:19605，实现 19605-19724）：中心随机扩张采样，自然地表，不改地形 ----
   // 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符
   let range = 5;
   let sx = Math.floor(store.w / 2), sy = 0;
@@ -716,7 +720,11 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     range++;
     const gs2 = ctxGs[0];
     if (gs2 && sy > gs2.worldSurface) bad = true;
-    if (store.liquid[store.idx(sx, Math.max(0, sy - 1))] > 0) bad = true;
+    // 出生点上方 3 格任一有水即弃（原版 cs:19700-19703 查 sy-1/-2/-3 三格——
+    // 只查 sy-1 会漏检水面下 1-2 格,出生进浅水）
+    for (const dy of [1, 2, 3]) {
+      if (store.liquid[store.idx(sx, Math.max(0, sy - dy))] > 0) { bad = true; break; }
+    }
     if (!bad) break;
   }
   let widen = 10;
@@ -730,7 +738,10 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     widen++;
   }
   world.spawnX = sx;
-  world.spawnY = Math.max(4, sy - 3);
+  // spawnY = 地面行本身（原版 spawnTileY = j 直存,cs:19724）。消费端自行抬高：
+  // Game.ts Player 用 (spawnY-3)*TILE（玩家 3 格高）。此前这里也 -3 → 双重偏移,
+  // 玩家浮空 6 格后坠落
+  world.spawnY = Math.max(4, sy);
   // 出生点上空净空保留（防卡块；不整平地形）。
   // ★必须豁免树干:树干非实心不会卡人,整格清空会把清理盒内的树干中段删掉
   // (基座行 dy=0 与上部 dy>5 保留)→ 浮空断干"贴图透明"。

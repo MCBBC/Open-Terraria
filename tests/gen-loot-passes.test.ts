@@ -59,16 +59,17 @@ describe('物资对齐:战利品与新增 pass', () => {
     for (const wl of [27, 149, 42, 187, 181, 179, 74]) houseWalls += countWall(world, wl);
     expect(houseWalls).toBeGreaterThan(500);
 
-    // ⑦ 陶罐地表泛滥回归(cs:18216 门禁,逐格等价):罐底行(锚点)在平均地表线
-    //    以上且锚点无墙 → 违规。上半格露头的"墙龛罐"是原版同款合法形态
+    // ⑦ 陶罐地表泛滥回归(cs:18216 门禁,逐格等价):锚点(罐底行左列)在平均地表线
+    //    以上且锚点无墙 → 违规。右半罐/上半格露头的"墙龛罐"是原版同款合法形态
+    //   (原版门禁只查 (num12,num13) 单格)
     const st = world.store;
     const POT = TILE_BY_KEY['pot']!;
     const isPot = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] && st.type[st.idx(x, y)] === POT;
     let surfacePots = 0;
     for (let y = 0; y < Math.floor(world.groundLevel); y++) {
       for (let x = 0; x < st.w; x++) {
-        // 只看罐底行(下方不再是罐)
-        if (!isPot(x, y) || isPot(x, y + 1)) continue;
+        // 锚点 = 罐底行左列:左侧与下方都不是罐
+        if (!isPot(x, y) || isPot(x - 1, y) || isPot(x, y + 1)) continue;
         if (st.wall[st.idx(x, y)] === 0) surfacePots++;
       }
     }

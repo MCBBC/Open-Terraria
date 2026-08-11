@@ -33,10 +33,12 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
   for (let n = 0; n < total; n++) {
     let x = 0, ok = false;
     for (let attempt = 0; attempt < 200 && !ok; attempt++) {
-      x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
-      while (x > w / 2 - 150 && x < w / 2 + 150) {
-        x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
-      }
+      // 原版岛只在两侧带生成（约 8%~42% / 58%~92%），与刷怪器 skyMob 门
+      // （NPC.cs L890-897：x<0.45w || x>0.55w 才判天空怪）严格自洽——
+      // 此前全域随机（仅避中央 ±150），落进 45%~55% 带的岛会当地表刷僵尸/水母
+      const side = rng.next() < 0.5;
+      x = side ? rng.int(Math.floor(w * 0.08), Math.floor(w * 0.42))
+        : rng.int(Math.floor(w * 0.58), Math.floor(w * 0.92));
       ok = placed.every((px) => Math.abs(px - x) >= 180);
     }
     // 该列地表（原版从 y=200 起扫）
@@ -46,7 +48,10 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       if (st.flags[st.idx(x, y)]) { surf = y; found = true; break; }
     }
     if (!found) continue;
-    const y = Math.min(rng.int(90, Math.max(91, surf - 100)), gs.worldSurfaceLow - 50);
+    // 高度钳进 skyMob 阈值带（NPC.cs：ty < worldSurface×0.35 才判天空怪）——
+    // 此前 rng(90, surf-100) 可低至地表附近，低于阈值的岛会当地表刷僵尸
+    const skyTop = Math.floor(gs.worldSurface * 0.35) - 30;
+    const y = Math.min(rng.int(90, Math.max(91, Math.min(surf - 100, skyTop))), gs.worldSurfaceLow - 50);
     const isLake = lakeIdx >= islands;
     if (isLake) cloudLake(st, rng, x, y);
     else cloudIsland(st, rng, x, y);

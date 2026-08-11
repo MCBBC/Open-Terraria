@@ -29,11 +29,11 @@ describe('mapColor24', () => {
     expect(hex(mapColor24(st, x, y))).toBe(TILE_DEFS[T.STONE].mapColor.toUpperCase());
   });
 
-  it('液体需 >40 才显示（原版 Minimap 同阈值）', () => {
+  it('液体需 >32 才显示（原版 Minimap 阈值,MapHelper.cs:1983）', () => {
     const w = new World(2, 2, 1, 't');
     w.store.setLiquid(0, 0, 20, 1);
     expect(hex(mapColor24(w.store, 0, 0))).toBe('#7EB6E8');
-    w.store.setLiquid(0, 0, 41, 1);
+    w.store.setLiquid(0, 0, 33, 1);
     expect(hex(mapColor24(w.store, 0, 0))).toBe('#3D6FD1');
   });
 });

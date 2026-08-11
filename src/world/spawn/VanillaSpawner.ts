@@ -23,7 +23,8 @@ const T = (() => {
     CRIMSON_GRASS: get('v_199_crimson_grass_block'), MUSHROOM_GRASS: get('v_70_mushroom_grass_block'),
     EBONSAND: get('v_112_ebonsand_block'), CRIMSAND: get('v_234_crimsand_block'),
     PEARLSAND: get('v_116_pearlsand_block'), HARDENED_SAND: get('hardened_sand'),
-    SANDSTONE: get('sandstone'), MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
+    SANDSTONE: get('sandstone'), FOSSIL: get('desert_fossil'),
+    MARBLE: get('v_367_marble_block'), GRANITE: get('v_368_granite_block'),
     CACTUS: get('v_80_cactus'), SNOW_BRICK: get('snow_brick'),
     CORRUPT_ICE: get('v_163_purple_ice_block'), CRIMSON_ICE: get('v_200_red_ice_block'),
     // 164 粉冰(神圣冰)引擎未注册 → 0(ZoneHallow 冰分支暂不触发,与已知缺口一致)
@@ -288,8 +289,14 @@ export class VanillaSpawner {
     this.deeperThanRockLayer = spawnTileY >= this.world.rockLevel;
     this.underGround = spawnTileY > this.world.groundLevel && spawnTileY < this.world.rockLevel;
     // isOcean（L1104）：边缘 + 沙 tile + 岩石层上
-    this.isOcean = (spawnTileX < 250 || spawnTileX > st.w - 250) && spawnTileType === T.SAND && spawnTileY < this.world.rockLevel;
-    this.isBeach = spawnTileY <= this.world.groundLevel && (spawnTileX < 340 || spawnTileX > st.w - 340);
+    // 海洋/海滩 x 阈值与 BeachPass 同源缩放（van = w/4200：oceanWater 220~260、
+    // beachSandRandomCenter+20=340）——此前硬编码 250/340，非 4200 宽世界会错位：
+    // 大世界海洋 250~sc(260) 段漏判 isOcean → 海滩水走水池段刷出水母
+    const van = st.w / 4200;
+    const oceanX = Math.max(1, Math.floor(260 * van));
+    const beachX = Math.floor(340 * van);
+    this.isOcean = (spawnTileX < oceanX || spawnTileX > st.w - oceanX) && spawnTileType === T.SAND && spawnTileY < this.world.rockLevel;
+    this.isBeach = spawnTileY <= this.world.groundLevel && (spawnTileX < beachX || spawnTileX > st.w - beachX);
     // Zone 判定（SceneMetrics.cs:16/613-615/678）：以玩家为中心 169×123 窗口计数 ≥300。
     // 旧实现只看落脚格类型且漏黑檀石 25——腐化地表大量铺黑檀石导致噬魂怪永不触发
     this.ZoneSnow = spawnTileType === T.SNOW || spawnTileType === T.ICE || spawnTileType === T.SNOW_BRICK;
@@ -431,8 +438,11 @@ export class VanillaSpawner {
       if (st.isSolid(tx, ty)) continue;
       if (WALL_HOUSE.has(st.wall[st.idx(tx, ty)])) continue;
       this.skyMob = false;
-      // L890-897：天空怪——高于 worldSurface×0.35 且在世界两侧 45% 之外（肉前非 hardMode 分支）
-      if (ty < this.world.groundLevel * 0.35 && (tx < st.w * 0.45 || tx > st.w * 0.55)) {
+      // L890-897：天空怪——高于 worldSurface×0.35 且露天（原版以"两侧 45% 带外"为条件，
+      // 隐含不变量 = 浮空岛只在两侧、中央带无高空地面。此处改判"落脚面上方两格无墙"，
+      // 在合法原版世界上与原版等价（岛皆露天），且兼容含中央浮空岛的存量世界——
+      // 否则中央岛会被当地表刷僵尸/水母）
+      if (ty < this.world.groundLevel * 0.35 && st.wall[st.idx(tx, ty - 1)] === 0 && st.wall[st.idx(tx, ty - 2)] === 0) {
         this.skyMob = true;
       } else {
         // L900-906：向下找第一个实心格 = 落脚面（扫描上限 = spawnArea.Bottom，非世界底）
@@ -512,6 +522,12 @@ export class VanillaSpawner {
     const D = (id: number) => this.spawnNPC(x, y, id, rng);
     const any = (id: number) => this.activeIds.has(id);
 
+    // ---- 天空怪（原版 NPC.cs:1290-1331：else-if 链最前、invaders 之前——
+    //  skyMob 优先于入侵分支；肉前 = 兜底鸟妖 48，困难 = 1/10 飞龙 87（场内唯一））----
+    if (this.skyMob) {
+      if (hardMode && !any(87) && N(10)) return D(87);
+      return D(48);
+    }
     // ---- 入侵分支（L1333-1401：else if (invaders)，与普通链互斥）----
     if (this.invaders) {
       const it = this.world.invasionType;
@@ -667,7 +683,8 @@ export class VanillaSpawner {
       }
     }
     // ---- 沙漠地表（L3859-3928，沙尘暴外简化为沙漠 tile 段）----
-    if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE) {
+    // 原版 L3859 沙地族 = 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/397 硬化沙/396 沙岩/404 化石
+    if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE || t === T.FOSSIL) {
       if (!hardMode) {
         if (N(6)) return D(69);   // 蚁狮
         return D(61);             // 秃鹫（地表沙）

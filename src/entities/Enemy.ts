@@ -205,6 +205,11 @@ export class Enemy extends Entity {
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
   justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
+  /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
+   *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
+  lightRGB: [number, number, number] | null = null;
+  lai0 = 0;              // localAI 语义位（萤火虫：闪烁间隔计时）
+  lai1 = 0;              // localAI 语义位（萤火虫：发光剩余帧）
   /** 原版 justHit 语义（本 tick 内受过击） */
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
@@ -273,6 +278,7 @@ export class Enemy extends Entity {
     this.aiT++;
     if (this.iframes > 0) this.iframes--;
     if (this.justHitT > 0) this.justHitT--;
+    this.lightRGB = null; // 点光由 AI 每帧重写（不残留上一帧状态）
     if (this.hpBarT > 0) this.hpBarT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
@@ -483,6 +489,13 @@ export class Enemy extends Entity {
     // 激愤时索敌：direction 朝玩家；被动时保持现方向
     if (flag3 && this.ai2 === 0 && player) {
       this.facing = player.cx > this.cx ? 1 : -1;
+    }
+    // 蚱蜢被动档（cs:61479）：无激愤时走"走路档"——0.2 慢爬不进跳循环
+    if (grasshopper && !flag3) {
+      this.vx += this.facing * 0.02;
+      this.vx = Math.max(-0.2, Math.min(0.2, this.vx));
+      this.groundPhysics(game, 0, 0.12, 1, true);
+      return;
     }
     const dir = this.facing;
     const grounded = this.onGround || (inWater && Math.abs(this.vy) < 0.8);
@@ -838,15 +851,17 @@ export class Enemy extends Entity {
   /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
    *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
    *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义） */
-  private tryTransformTo(id: number, st: GameHooks['world']['store']): boolean {
+  private tryTransformTo(id: number, st: GameHooks['world']['store'], allowEmbedded = false): boolean {
     const v = vanillaNpc(id);
     if (!v) return false;
     const s = v.scale ?? 1;
     const nw = Math.round(v.width * s), nh = Math.round(v.height * s);
     const nx = this.cx - nw / 2, ny = this.y + this.h - nh; // 底边中心锚定
-    for (let tx = Math.floor(nx / TILE); tx <= Math.floor((nx + nw - 0.01) / TILE); tx++) {
-      for (let ty = Math.floor(ny / TILE); ty <= Math.floor((ny + nh - 0.01) / TILE); ty++) {
-        if (st.isSolid(tx, ty)) return false;
+    if (!allowEmbedded) {
+      for (let tx = Math.floor(nx / TILE); tx <= Math.floor((nx + nw - 0.01) / TILE); tx++) {
+        for (let ty = Math.floor(ny / TILE); ty <= Math.floor((ny + nh - 0.01) / TILE); ty++) {
+          if (st.isSolid(tx, ty)) return false;
+        }
       }
     }
     const oldMax = this.maxHp;
@@ -2349,7 +2364,31 @@ export class Enemy extends Entity {
    *  白天不消失只不发光（发光在 cs:34416 由 !dayTime 门——光照层未接入小动物，备案） */
   private fireflyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
-    if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 60 + Math.floor(Math.random() * 120); }
+    if (!this.aiInit) {
+      this.aiInit = true;
+      this.ai0 = 0; this.ai1 = 0; this.ai2 = 60 + Math.floor(Math.random() * 120);
+      // 随机 scale 0.75-1.11（cs 内 ai[3]，影响光照强度与渲染尺寸）
+      this.ai3 = 0.75 + Math.random() * 0.36;
+      this.vanillaScale = this.ai3;
+    }
+    // ---- 闪烁发光（cs:34412-34423）：间隔 30-180 帧；!白天 或 地下(y>worldSurface+10)
+    // 时进入 10-30 帧发光段；lightRGB 仅在发光剩余 >3 帧时非空（色表 cs:34395-34407）
+    if (this.lai1 > 0) {
+      if (this.lai1 > 3) {
+        const s = this.ai3;
+        this.lightRGB = this.vanillaId === 358 ? [0.10125 * s, 0.21375 * s, 0.225 * s]
+          : this.vanillaId === 654 ? [0.225 * s, 0.105 * s, 0.06 * s]
+            : [0.1095 * s, 0.15 * s, 0.0615 * s];
+      }
+      this.lai1 -= 1;
+    } else if (this.lai0 > 0) {
+      this.lai0 -= 1;
+    } else {
+      this.lai0 = 30 + Math.floor(Math.random() * 150);
+      if (!game.world.clock.isDay || this.cy / TILE > game.world.groundLevel + 10) {
+        this.lai1 = 10 + Math.floor(Math.random() * 20);
+      }
+    }
     if (this.ai2 <= 0) {
       const far = player ? Math.abs(player.cx - this.cx) > 700 : true;
       const spd = far ? 0.5 + Math.random() : 0.05 + Math.random() * 1.45;
@@ -2395,6 +2434,12 @@ export class Enemy extends Entity {
    *  钻地逃走（cs:34560-34584），静止期不被随机蠕动惊扰 */
   private wormCritterAI(game: GameHooks) {
     const st = game.world.store;
+    // 484 魔化夜爬虫点光（cs:34492-34497）：每帧 90-111% 抖动 ×(essScale+0.5)/2
+    // （essScale 赋能默认 0.5 → 系数 0.5），紫光
+    if (this.vanillaId === 484) {
+      const f = (0.9 + Math.random() * 0.2) * 0.5;
+      this.lightRGB = [0.3 * f, 0.1 * f, 0.25 * f];
+    }
     if (this.ai0 < 0) this.ai0 = 0;
     if (this.ai1 < 0) this.ai1 = 300 + Math.random() * 600;
     const player = (game as unknown as { player: Player }).player;
@@ -2405,7 +2450,8 @@ export class Enemy extends Entity {
         if (this.ai2 >= 90) {
           this.ai2 = 0;
           this.y += TILE;
-          this.tryTransformTo(375, st);
+          // 375 钻地形态本就要嵌进地里（穿墙蠕虫），跳过实心适配检查
+          this.tryTransformTo(375, st, true);
           return;
         }
       } else this.ai2 = 0;
@@ -2432,6 +2478,9 @@ export class Enemy extends Entity {
   private snailAI(game: GameHooks) {
     const st = game.world.store;
     const spd = this.vanillaId === 360 || this.vanillaId === 655 ? 0.6 : 0.3;
+    // 点光（cs:34623-34630）：360 发光蜗牛 (0.1,0.2,0.7)、655 熔岩蜗牛 (0.6,0.3,0.1)，恒定
+    if (this.vanillaId === 360) this.lightRGB = [0.1, 0.2, 0.7];
+    else if (this.vanillaId === 655) this.lightRGB = [0.6, 0.3, 0.1];
     if (this.ai2 <= 0) {
       // 贴墙爬
       if (Math.random() < 1 / 7200) this.ai2 = 1; // 随机受惊
@@ -2500,8 +2549,8 @@ export class Enemy extends Entity {
     if ((this.hitHead || this.onGround || inWater) && this.ai1 >= 300) {
       this.ai0 = 0;
       this.ai1 = 200 + Math.random() * 200;
-      const ground = this.vanillaId ?? 363;
-      if (ground > 363) this.tryTransformTo(ground - 1, st); // 回行走形（363→362 等）
+      // 回行走形（cs:35000 Transform(type-1)，363→362/365→364/603→602/609→608）
+      this.tryTransformTo((this.vanillaId ?? 363) - 1, st);
     }
   }
 
@@ -3099,7 +3148,13 @@ export class Enemy extends Entity {
           const key = NATIVE_DROP_KEY[id] ?? VANILLA_ITEM_KEY_BY_ID[id];
           if (!key) { unmapped(id); return null; }
           const v = dropVelocity(rng);
-          return game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);
+          const drop = game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);
+          // 心(58)/星(184) 标记为 pickup：触碰回血/回蓝，不进背包
+          if (drop) {
+            if (id === 58) drop.pickup = 'heart';
+            else if (id === 184) drop.pickup = 'star';
+          }
+          return drop;
         };
         const res = resolveDrops(ctx);
         for (const d of res.drops) {

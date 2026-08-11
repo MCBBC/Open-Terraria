@@ -11,6 +11,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { accFxOfInternal } from '../data/vanillaAccFx';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
@@ -101,31 +102,131 @@ export class Player extends Entity {
     }
     return false;
   }
-  /** 防御 = 基础(0) + 盔甲 + 铁皮 Buff(+6)（时装不计）。
-   *  vi_ 盔甲防御值查 vanilla-itemstats.json（extract-equip-prefix.mjs 从 Item.cs 提取） */
+  /** 防御 = 基础(0) + 盔甲/配饰（含 vi_ 表防御+accfx def+词缀 62-65）+ 铁皮 Buff(+6)（时装不计） */
   get defense(): number {
-    let d = this.buffs.defenseBonus;
+    let d = this.buffs.defenseBonus + this.equipStats.def;
     for (const id of this.inv.equippedArmor()) {
       if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
     }
     return d;
   }
+
+  /** 装备数值聚合（GrantArmorBenefits/ApplyEquipFunctional/GrantPrefixBenefits 可移植切片）。
+   *  覆盖：配饰防御/魔力/回复/移速/近战速度/全系伤害/暴击 + 词缀 62-80 效益；
+   *  行为型效果（火箭靴飞行/熔岩护身等）不在内。每帧重算式聚合，幂等 */
+  get equipStats(): {
+    def: number; mana: number; hpPerSec: number;
+    dmgMelee: number; dmgRanged: number; dmgMagic: number;
+    critMelee: number; critRanged: number; critMagic: number;
+    moveMult: number; meleeSpeed: number;
+    extraFall: number; lavaMax: number; armorPen: number;
+    rocketBoots: number; autoJump: boolean; fireWalk: boolean;
+    noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
+    waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
+    jumpOpts: string[];
+  } {
+    let def = 0, mana = 0, life = 0;
+    let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
+    let critMelee = 0, critRanged = 0, critMagic = 0;
+    let move = 0, meleeSpeed = 0, runSpeed = 0;
+    let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
+    let autoJump = false, fireWalk = false, noKnockback = false, noFallDmg = false;
+    let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
+    const jumpSet = new Set<string>();
+    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
+      const s = this.inv.armor[i];
+      if (!s) continue;
+      const fx = accFxOfInternal(s.id);
+      // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
+      // accfx.life 为 if-chain 段的 lifeRegen += N
+      const itemLife = statOfInternal(s.id)?.life ?? 0;
+      if (itemLife) life += itemLife;
+      if (fx) {
+        if (fx.def) def += fx.def;
+        if (fx.mana) mana += fx.mana;
+        if (fx.life) life += fx.life;
+        if (fx.move) move += fx.move;
+        if (fx.meleeSpd) meleeSpeed += fx.meleeSpd;
+        if (fx.runSpeed) runSpeed = Math.max(runSpeed, fx.runSpeed);
+        if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
+        if (fx.dmgRanged) dmgRanged += fx.dmgRanged;
+        if (fx.dmgMagic) dmgMagic += fx.dmgMagic;
+        if (fx.dmgAll) { dmgMelee += fx.dmgAll; dmgRanged += fx.dmgAll; dmgMagic += fx.dmgAll; }
+        if (fx.critMelee) critMelee += fx.critMelee;
+        if (fx.critRanged) critRanged += fx.critRanged;
+        if (fx.critMagic) critMagic += fx.critMagic;
+        // ---- 行为型（ApplyEquipFunctional 布尔/数值字段）----
+        if (fx.extraFall) extraFall += fx.extraFall;
+        if (fx.lavaMax) lavaMax += fx.lavaMax;       // 熔岩护身符族：叠加（lavaMax += 420）
+        if (fx.armorPen) armorPen += fx.armorPen;
+        if (fx.rocketBoots) rocketBoots = Math.max(rocketBoots, fx.rocketBoots);
+        if (fx.autoJump) autoJump = true;
+        if (fx.fireWalk) fireWalk = true;
+        if (fx.noKnockback) noKnockback = true;
+        if (fx.noFallDmg) noFallDmg = true;
+        if (fx.desertBoots) desertBoots = true;
+        if (fx.waterWalk || fx.waterWalk2) waterWalk = true;
+        if (fx.jumpBoost) jumpBoost = true;
+        if (fx.panic) panic = true;
+        if (fx.starCloak) starCloak = true;
+        for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
+      }
+      // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
+      const p = s.prefix;
+      if (p && p >= 62 && p <= 80) {
+        if (p <= 65) def += p - 61;              // 62-65：+1..4 防御
+        else if (p === 66) mana += 20;           // Arcane：魔力 +20
+        else if (p === 67) { critMelee += 2; critRanged += 2; critMagic += 2; }
+        else if (p === 68) { critMelee += 4; critRanged += 4; critMagic += 4; }
+        else if (p >= 69 && p <= 72) dmgMelee += dmgRanged += dmgMagic += (p - 68) / 100; // 69-72：+1..4% 全伤
+        else if (p <= 76) move += (p - 72) / 100; // 73-76：+1..4% 移速
+        else meleeSpeed += (p - 76) / 100;        // 77-80：+1..4% 近战速度
+      }
+    }
+    // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
+    if (this.panicTime > 0) move += 0.5;
+    // runSpeed：accRunSpeed=6 vs 基础 maxRunSpeed=3 → 移速倍率贡献（取最高不叠）
+    const moveMult = 1 + move + (runSpeed > 0 ? runSpeed / 3 - 1 : 0);
+    // 多段跳按原版优先序排列（JumpMovement 消费序）
+    const JUMP_ORDER = ['Cloud', 'Sail', 'Sandstorm', 'Blizzard', 'Fart', 'Tsunami', 'Unicorn', 'Basilisk', 'WallOfFleshGoat', 'Santank'];
+    const jumpOpts = JUMP_ORDER.filter((j) => jumpSet.has(j));
+    return {
+      def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
+      dmgMelee, dmgRanged, dmgMagic,
+      critMelee, critRanged, critMagic,
+      moveMult, meleeSpeed,
+      extraFall, lavaMax, armorPen, rocketBoots,
+      autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
+      waterWalk, jumpBoost, panic, starCloak,
+      jumpOpts,
+    };
+  }
   get maxHp(): number {
     return this.baseMaxHp + this.buffs.healthBonus;
   }
   get maxMana(): number {
-    return this.baseMaxMana;
+    return this.baseMaxMana + this.equipStats.mana; // 星力手环族/魔法手铐等（statManaMax2 += N）
   }
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
   }
-  /** 近战攻速倍率（猛爪手套 ×2） */
+  /** 近战攻速倍率（猛爪手套 ×2 + 装备 meleeSpeed 67-80 词缀/狂战士手套累加） */
   get attackSpeedMult(): number {
-    return this.hasFeralClaws ? 2 : 1;
+    return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1);
   }
   /** 近战伤害加成（猛爪手套 +5） */
   get meleeDamageBonus(): number {
     return this.hasFeralClaws ? 5 : 0;
+  }
+  /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；melee/ranged/magic 分道） */
+  damageMult(kind: 'melee' | 'ranged' | 'magic'): number {
+    const st = this.equipStats;
+    return 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
+  }
+  /** 装备暴击率（critX 段 + 词缀 67/68） */
+  critChance(kind: 'melee' | 'ranged' | 'magic'): number {
+    const st = this.equipStats;
+    return kind === 'melee' ? st.critMelee : kind === 'ranged' ? st.critRanged : st.critMagic;
   }
 
   get frame(): number {
@@ -144,6 +245,18 @@ export class Player extends Entity {
     // Buff tick：自然回复（恢复 Buff）
     const buffHeal = this.buffs.tick(dt);
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
+    // 恐慌项链加速窗口倒计时
+    if (this.panicTime > 0) this.panicTime -= dt;
+    // 装备生命回复（再生手环族 lifeRegen：每半秒 N/2 HP → 每秒 N/2；战斗中也生效）
+    const equipRegen = this.equipStats.hpPerSec;
+    if (equipRegen > 0 && this.hp > 0) {
+      this.regenAccum += equipRegen * dt;
+      if (this.regenAccum >= 1) {
+        const n = Math.floor(this.regenAccum);
+        this.regenAccum -= n;
+        this.hp = Math.min(this.maxHp, this.hp + n);
+      }
+    }
     // 自然回血：脱离战斗 5 秒后每秒缓回 1 点
     this.sinceHurt++;
     if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp) {
@@ -184,16 +297,25 @@ export class Player extends Entity {
     const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
     // 气口消耗只对水（原版 DrownCollision 不含水蜜/岩浆——蜂蜜和岩浆不会淹死）
     this.headUnderwater = headLiq > 40 && world.store.liquidType[headIdx] === 1;
-    // 岩浆伤害：每半秒 15
+    // 岩浆伤害：每半秒 15（熔岩护身符族 lavaMax 免疫：入浆先耗免疫 tick，耗尽才受伤，
+    // 离浆立即回满——原版 lavaTime 语义 Player.cs:27363/27405）
     if (this.inLava) {
-      this.lavaAccum += dt;
-      if (this.lavaAccum >= 0.5) {
-        this.lavaAccum = 0;
-        this.lastDamageCause = { kind: 'lava' };
-        this.damage(15, this.cx, this.y - 10);
-        game.addDamageNumber(this.cx, this.y, 15, false, '#FF6020');
+      const lavaMax = this.equipStats.lavaMax;
+      if (lavaMax > 0 && this.lavaImmuneTicks > 0) {
+        this.lavaImmuneTicks--;
+      } else {
+        this.lavaAccum += dt;
+        if (this.lavaAccum >= 0.5) {
+          this.lavaAccum = 0;
+          this.lastDamageCause = { kind: 'lava' };
+          this.damage(15, this.cx, this.y - 10);
+          game.addDamageNumber(this.cx, this.y, 15, false, '#FF6020');
+        }
       }
-    } else this.lavaAccum = 0;
+    } else {
+      this.lavaAccum = 0;
+      if (this.equipStats.lavaMax > 0) this.lavaImmuneTicks = this.equipStats.lavaMax;
+    }
 
     // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复
     const wasHead = prevHeadUnderwater;
@@ -242,8 +364,8 @@ export class Player extends Entity {
       return;
     }
 
-    // 水平（敏捷 Buff 提速；蜂蜜比水更黏滞——原版蜂蜜重力 0.1/落速 3，Player.cs:24131-24135）
-    const speedMult = this.buffs.moveSpeedMult * (this.inHoney ? 0.5 : 1);
+    // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
+    const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1);
     const ix = this.inputX;
     if (ix !== 0) {
       this.vx += ix * PLAYER_WALK_ACCEL * (this.inWater ? 0.6 : 1) * speedMult;
@@ -297,7 +419,7 @@ export class Player extends Entity {
       this.fallStartY = null;
     } else {
       if (this.inputJump && this.onGround) {
-        this.vy = -PLAYER_JUMP_SPEED;
+        this.vy = -PLAYER_JUMP_SPEED * (this.equipStats.jumpBoost ? 1.25 : 1);
         this.jumpHold = PLAYER_JUMP_TICKS;
       }
       if (this.inputJump && this.jumpHold > 0) {
@@ -305,6 +427,40 @@ export class Player extends Entity {
         this.jumpHold--;
       } else {
         this.jumpHold = 0;
+      }
+      // ---- 多段跳（RefreshDoubleJumps + JumpMovement 近似）：云朵/沙暴/暴雪/屁瓶族 ----
+      // 空中再按跳（持续按住 + 段数剩余 + 未在急升中）→ 消费一段；各段速度原版梯度近似
+      const eq = this.equipStats;
+      if (this.onGround) this.extraJumps = [...eq.jumpOpts]; // 落地重置段数
+      if (!this.onGround && this.inputJump && this.extraJumps.length > 0 && this.vy > -2 && this.extraJumpCd <= 0) {
+        const opt = this.extraJumps.shift()!;
+        const mult = opt === 'Fart' ? 1.28 : (opt === 'Sandstorm' || opt === 'Blizzard') ? 1.18 : 1.0;
+        this.vy = -PLAYER_JUMP_SPEED * mult * (eq.jumpBoost ? 1.25 : 1);
+        this.jumpHold = PLAYER_JUMP_TICKS;
+        this.extraJumpCd = 8; // 防同帧连段
+      }
+      if (this.extraJumpCd > 0) this.extraJumpCd--;
+      // ---- 火箭靴族（RocketBootsMovement :26530 近似）：松跳键后再次按住起飞 ----
+      // 7 格飞行（rocketTimeMax=7）；1 档每格 30t、2+ 档 15t（:26537）；上升 -7；落地回满
+      if (eq.rocketBoots > 0) {
+        if (this.onGround) {
+          this.rocketUnits = 7;
+          this.rocketRelease = true;
+          this.rocketUnitTicks = 0;
+        } else {
+          if (!this.inputJump) this.rocketRelease = true;
+          if (this.inputJump && this.rocketRelease && this.rocketUnits > 0) {
+            this.rocketUnitTicks++;
+            const perUnit = eq.rocketBoots === 1 ? 30 : 15;
+            if (this.rocketUnitTicks >= perUnit) {
+              this.rocketUnitTicks = 0;
+              this.rocketUnits--;
+              if (this.rocketUnits <= 0) this.rocketRelease = false;
+            }
+            this.vy = Math.min(this.vy, -7); // 飞行上升速度（近似 rocketSpeed）
+            this.fallStartY = null;          // 飞行不积累摔伤（原版 fallStart 重置）
+          }
+        }
       }
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     }
@@ -458,8 +614,10 @@ export class Player extends Entity {
       const feetLiq = world.store.liquid[world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 1) / TILE))];
       const landedInWater = feetLiq > 60 || this.inWater;
       if (landedInWater) { /* 落水缓冲：不计摔伤 */ }
-      else if (fallTiles > FALL_SAFE_TILES && !this.hasHorseshoe) {
-        const t = Math.min(1, (fallTiles - FALL_SAFE_TILES) / (FALL_FATAL_TILES - FALL_SAFE_TILES));
+      else if (fallTiles > FALL_SAFE_TILES + this.equipStats.extraFall
+        && !(this.hasHorseshoe || this.equipStats.noFallDmg)) {
+        const safeT = FALL_SAFE_TILES + this.equipStats.extraFall;
+        const t = Math.min(1, (fallTiles - safeT) / (FALL_FATAL_TILES - FALL_SAFE_TILES));
         const dmgPercent = 10 + 90 * t * t * t; // 10%~100% 三次方曲线（Maples 公式）
         const dmg = Math.max(1, Math.round((dmgPercent / 100) * this.hp));
         this.lastDamageCause = { kind: 'fell' };
@@ -497,6 +655,17 @@ export class Player extends Entity {
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
+  /** 多段跳剩余段（原版 RefreshDoubleJumps：落地时重置为 equipStats.jumpOpts 拷贝） */
+  extraJumps: string[] = [];
+  extraJumpCd = 0;
+  /** 火箭靴飞行：剩余格（7 满）/ 当前格消耗 tick / 需松跳键重触发（:26530 rocketRelease） */
+  rocketUnits = 0;
+  rocketUnitTicks = 0;
+  rocketRelease = true;
+  /** 恐慌项链受击加速计时（tick，原版 panicTime=300） */
+  panicTime = 0;
+  /** 岩浆免疫剩余 tick（熔岩护身符族 lavaMax；离开岩浆回满） */
+  lavaImmuneTicks = 0;
   inputDown = false;
   inputUp = false;
   onRope = false;
@@ -505,12 +674,15 @@ export class Player extends Entity {
    *  knockback=false 用于窒息等环境伤害（只掉血不击退） */
   damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
     if (this.iframes > 0 || this.dead) return false;
+    const eq = this.equipStats;
     const reduction = Math.max(1, dmg - this.defense * 0.5);
     this.hp -= reduction;
     this.iframes = PLAYER_IFRAME_TICKS;
     this.sinceHurt = 0; // 受击打断自然回血
-    // 击退
-    if (knockback) {
+    // 恐慌项链：受击触发 5 秒移速爆发（panicTime=300，PanicSpeedBoost :25034）
+    if (eq.panic) this.panicTime = 300;
+    // 击退（钴护盾族 noKnockback 免疫）
+    if (knockback && !eq.noKnockback) {
       const dir = this.cx < srcX ? -1 : 1;
       this.vx = dir * 3.4;
       this.vy = -3;

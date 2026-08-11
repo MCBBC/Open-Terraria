@@ -103,6 +103,8 @@ const HEAD = new Set(scanCaseFields(itemSrc, ['\\bheadSlot\\s*=\\s*(\\d+);']).ke
 const BODY = new Set(scanCaseFields(itemSrc, ['\\bbodySlot\\s*=\\s*(\\d+);']).keys());
 const LEGS = new Set(scanCaseFields(itemSrc, ['\\blegSlot\\s*=\\s*(\\d+);']).keys());
 const DEFENSE = scanCaseFields(itemSrc, ['\\bdefense\\s*=\\s*(\\d+);']);
+// 生命回复（Item.lifeRegen 字段——再生手环族；GrantArmorBenefits :12700 lifeRegen += armorPiece.lifeRegen）
+const LIFEREGEN = scanCaseFields(itemSrc, ['\\blifeRegen\\s*=\\s*(\\d+);']);
 const ACCESSORY = new Set(scanCaseFields(itemSrc, ['\\baccessory\\s*=\\s*true;']).keys());
 const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
 const STATS = {};
@@ -111,6 +113,7 @@ for (const vid of HEAD) setStat(vid, { s: 'h' });
 for (const vid of BODY) setStat(vid, { s: 'b' });
 for (const vid of LEGS) setStat(vid, { s: 'l' });
 for (const [vid, def] of DEFENSE) setStat(vid, { def });
+for (const [vid, reg] of LIFEREGEN) setStat(vid, { life: reg });
 for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
 console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size}）`);
@@ -132,7 +135,25 @@ const ACC_PATTERNS = [
   ['critMelee', /meleeCrit \+= (\d+);/],
   ['critRanged', /rangedCrit \+= (\d+);/],
   ['critMagic', /magicCrit \+= (\d+);/],
+  // ---- 行为型字段（二轮：跳跃/飞行/免疫/受击触发）----
+  ['extraFall', /extraFall \+= (\d+);/],          // 摔伤豁免高度
+  ['lavaMax', /lavaMax \+= (\d+);/],              // 岩浆免疫时长（420=7s）
+  ['armorPen', /armorPenetration \+= (\d+);/],    // 护甲穿透（鲨鱼牙项链）
+  ['rocketBoots', /rocketBoots = \(vanityRocketBoots = (\d)\);/], // 1-5 档飞行
+  ['autoJump', /autoJump = true;/],
+  ['fireWalk', /fireWalk = true;/],               // 陨石/狱岩灼伤免疫
+  ['noKnockback', /noKnockback = true;/],         // 钴蓝盾族
+  ['noFallDmg', /noFallDmg = true;/],             // 幸运马掌/气球族
+  ['desertBoots', /desertBoots = true;/],
+  ['waterWalk', /waterWalk = true;/],
+  ['waterWalk2', /waterWalk2 = true;/],
+  ['jumpBoost', /jumpBoost = true;/],             // 气球+跳跃组合件
+  ['panic', /panic = true;/],                     // 恐慌项链：受击加速
+  ['starCloak', /starCloakItem = (?:currentItem|armorPiece);/], // 星星斗篷：受击落星
+  ['carpet', /carpet = true;/],                   // 飞毯（水平滑翔，暂存字段）
 ];
+// 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）
+const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;
 {
   const playerSrc = read('Terarria1456/Terraria/Player.cs');
   const body = methodBodyOf(playerSrc, 'private void ApplyEquipFunctional(');
@@ -168,13 +189,45 @@ const ACC_PATTERNS = [
     return out;
   })();
   const ACCFX = {};
-  for (const [vid, seg] of segs) {
+  // 段 → 效果对象（白名单单值 + jumpOpts 多值）
+  const extractFx = (seg) => {
     const fx = {};
     for (const [field, re] of ACC_PATTERNS) {
       const mm = seg.match(re);
-      if (mm) fx[field] = parseFloat(mm[1]);
+      // 布尔型模式（无捕获组）→ 1；数值型 → parseFloat
+      if (mm) fx[field] = mm[1] === undefined ? 1 : parseFloat(mm[1]);
     }
+    for (const jm of seg.matchAll(JUMP_OPTS_RE)) {
+      fx.jumpOpts = fx.jumpOpts ?? [];
+      if (!fx.jumpOpts.includes(jm[1])) fx.jumpOpts.push(jm[1]);
+    }
+    return fx;
+  };
+  for (const [vid, seg] of segs) {
+    const fx = extractFx(seg);
     if (Object.keys(fx).length) ACCFX[vid] = fx;
+  }
+  // ---- 旧配饰/盔甲 if-chain（GrantArmorBenefits 的 armorPiece.type == X 数值段 +
+  //      ApplyEquipFunctional 内的 currentItem.type == X 数值段——赫麦靴族等老物品在此）----
+  {
+    const ifRe = (varName) => new RegExp(
+      `if \\(${varName}\\.type == (\\d+)([^)]*)\\)\\s*\\{([^{}]*(?:\\{[^{}]*\\}[^{}]*)*)\\}`, 'g');
+    for (const [method, varName] of [
+      ['private void GrantArmorBenefits(', 'armorPiece'],
+      ['private void ApplyEquipFunctional(', 'currentItem'],
+    ]) {
+      const body = methodBodyOf(playerSrc, method);
+      const re = ifRe(varName);
+      let m2;
+      while ((m2 = re.exec(body))) {
+        const cond = `== ${m2[1]}${m2[2]}`;
+        const ids = [...cond.matchAll(/== (\d+)/g)].map((x) => +x[1]);
+        const seg = m2[3];
+        const fx = extractFx(seg);
+        if (!Object.keys(fx).length) continue;
+        for (const vid of ids) ACCFX[vid] = { ...(ACCFX[vid] ?? {}), ...fx };
+      }
+    }
   }
   writeFileSync(`${ROOT}/game/src/data/vanilla-accfx.json`, JSON.stringify(ACCFX));
   console.error(`accfx: ${Object.keys(ACCFX).length} 件配饰数值效果`);

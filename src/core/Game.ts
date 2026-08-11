@@ -1681,6 +1681,18 @@ export class Game implements GameHooks {
       else if (vid === 75) this.lighting.addLight(tx, ty, 0.8, 0.7, 0.1);      // 坠落之星 :1719
       else if (vid === 183) this.lighting.addLight(tx, ty, 0.15, 0.45, 0.9);   // 陨石锭 :1715
     }
+    // 实体点光（原版 Lighting.AddLight 的 NPC 侧调用）：AI 每 tick 写 lightRGB——
+    // 萤火虫族闪烁（NPC.cs:34395-34407，昼地表不亮）、发光蜗牛/熔岩蜗牛恒定（:34623-34630）、
+    // 魔化夜 crawler 抖动（:34492）；敌怪与小动物两桶同扫
+    for (const bucket of [this.entities.enemies, this.entities.critters]) {
+      for (const ent of bucket) {
+        const l = (ent as Enemy).lightRGB;
+        if (!l) continue;
+        const e2 = ent as Enemy;
+        const tx2 = Math.floor(e2.cx / TILE), ty2 = Math.floor(e2.cy / TILE);
+        if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
+      }
+    }
     this.lighting.compute(w.clock.dayFactor);
 
     // ---- 粒子与飘字 ----
@@ -2003,9 +2015,10 @@ export class Game implements GameHooks {
       if (ammoSlot >= 0 && ammoDef) {
         const ammoC = ammoDef.vid != null ? itemCombat(ammoDef.vid) : null;
         const speed = (bowC?.shootSpeed ?? rg.projSpeed) + (ammoC?.shootSpeed ?? 0);
-        // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）
+        // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
+        // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
-        const damage = Math.round((bowC?.damage ?? rg.damage) * (ps?.dmg ?? 1)) + (ammoC?.damage ?? 0);
+        const damage = Math.round((bowC?.damage ?? rg.damage) * (ps?.dmg ?? 1) * this.player.damageMult('ranged')) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
         const knockback = (bowC?.knockBack ?? rg.knockback) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         const projId = ammoC?.shoot ?? 1; // PickAmmo：projToShoot = item.shoot（1 木箭 2 燃烧箭）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
@@ -2127,9 +2140,15 @@ export class Game implements GameHooks {
       this.cb.onInventoryChanged();
     };
     // 词缀乘区（Item.Prefix :551-557）：damage=round(×dmg)、knockBack×kb——
-    // 手雷兜底下限在乘区后取 max，与原版（damage 先乘再判 0）一致
+    // 手雷兜底下限在乘区后取 max，与原版（damage 先乘再判 0）一致；
+    // 装备全系伤害乘区（徽章/险恶词缀等）：近战族=melee、魔法=magic、其余=ranged
     const ps = this.heldPrefixStat();
-    const cw = { ...cwIn, damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))), knockback: cwIn.knockback * (ps?.kb ?? 1) };
+    const dmgKind = cwIn.kind === 'magic' ? 'magic' : (cwIn.kind === 'boomerang' || cwIn.kind === 'spear' || cwIn.kind === 'yoyo' || cwIn.kind === 'flail') ? 'melee' as const : 'ranged' as const;
+    const cw = {
+      ...cwIn,
+      damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind)) + this.player.equipStats.armorPen),
+      knockback: cwIn.knockback * (ps?.kb ?? 1),
+    };
     switch (cw.kind) {
       case 'grenade': {
         // AI_016：引信（原版 timeLeft：手雷 180 / 炸弹 150 / 炸药 135）弹跳后爆炸；
@@ -3818,10 +3837,12 @@ export class Game implements GameHooks {
       this.swingHitSet.add(e.id);
       // 怪物专属受击声（各家族不同）；播放失败回退通用 hit
       if (!this.sfx.playFiles(e.def.hitSound, 1, e.cx, e.cy)) this.sfx.play('hit', 1, e.cx, e.cy);
-      const crit = Math.random() < 0.04; // 原版近战基础暴击 4%（Player.meleeCrit）
+      const crit = Math.random() < 0.04 + this.player.critChance('melee') / 100; // 基础 4% + 装备/词缀暴击
       // 工具（镐/斧）也有攻击力但远弱于剑：功率/16（铁镐 3 / 铁斧 4，铁剑 16）—— 仅应急；
-      // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）
-      const baseDmg = this.swing.dmg ?? tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16));
+      // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
+      // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）
+      const baseDmg = ((this.swing.dmg ?? tool?.damage ?? Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
+        * this.player.damageMult('melee')) + this.player.equipStats.armorPen;
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(dx) || this.player.facing;
@@ -4863,6 +4884,8 @@ export class Game implements GameHooks {
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
+      // 星星斗篷/蜜蜂斗篷（Player.SpawnStar/SpawnBee 近似）：受击召 3 颗落星砸附近敌人
+      if (p.equipStats.starCloak) this.spawnStarCloakStars();
       // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
       if (p.hp <= 0) this.sfx.play('pkilled');
       else this.sfx.play('hurt');
@@ -5529,6 +5552,25 @@ export class Game implements GameHooks {
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left);
     this.sfx.play('tink');
     this.cb.onInventoryChanged?.();
+  }
+
+  /** 星星斗篷落星（Player.SpawnStar 近似）：附近敌人上空召 3 颗星（投射物 92，伤 30） */
+  private spawnStarCloakStars(): void {
+    const p = this.player;
+    const targets = this.entities.enemies
+      .filter((e) => {
+        const en = e as Enemy;
+        return !en.dead && Math.abs(en.cx - p.cx) < 420 && Math.abs(en.cy - p.cy) < 300;
+      })
+      .slice(0, 3) as Enemy[];
+    if (!targets.length) return;
+    for (const t of targets) {
+      this.entities.add(new Arrow(
+        t.cx + (Math.random() - 0.5) * 120, t.cy - 320, 0, 0,
+        Math.round(30 * p.damageMult('magic')), 3, 92, null,
+      ), 'projectiles');
+    }
+    this.sfx.play('bowShoot');
   }
 
   // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----

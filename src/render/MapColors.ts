@@ -1,5 +1,7 @@
-// 地图 tile→RGB 公共逻辑（Minimap 与生成期世界预览 GenWorldPreview 共用）。
-// 提取自 Renderer.Minimap.colorFor；返回 0xRRGGBB（字符串 hex 在热循环里太慢）。
+// 生成期世界预览（GenWorldPreview / worker previewBitmap 共用）的 tile→RGB 逻辑。
+// 返回 0xRRGGBB（字符串 hex 在热循环里太慢）。
+// 注意：游戏内小地图（Renderer.colorFor/redrawAll LUT）是独立实现，未走本函数——
+// 两份语义需保持一致（活性 tile > 液体 >32 > 墙 > 天空, MapHelper.cs GetWallType）。
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 
@@ -36,7 +38,7 @@ export function mapColor24(st: TileStore, x: number, y: number): number {
     const c = TILE_COLORS.get(t);
     return c !== undefined ? c : UNKNOWN;
   }
-  if (st.liquid[i] > 40) return st.liquidType[i] === 2 ? LAVA : WATER;
+  if (st.liquid[i] > 32) return st.liquidType[i] === 2 ? LAVA : WATER;
   const w = st.wall[i];
   if (w !== 0) {
     const c = WALL_COLORS.get(w);
