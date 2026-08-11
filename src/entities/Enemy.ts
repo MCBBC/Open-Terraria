@@ -181,6 +181,7 @@ export class Enemy extends Entity {
   spinSpeed = 0;         // 自旋角速度(cs ai[2]:0.005 步进钳 0.5)
   spinPhase = 0;         // 自旋段:0 加速 / 1 减速
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
+  crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
   vanillaScale = 1;
   /** 实际生效的负 netID（SetDefaultsFromNetId；凝胶染色过滤用） */
@@ -310,6 +311,7 @@ export class Enemy extends Entity {
         case 45: golemAI(this, game, p); break;                        // AI_045 石巨人本体 245(蓄力跳/挂头无敌)
         case 46: golemHeadAI(this, game, p); break;                      // AI_046 挂载头 246(锚本体/火焰弹眼激光;249 自由态)
         case 47: golemFistAI(this, game, p); break;                      // AI_047 石巨人拳 247/248(肩锚冲拳)
+        case 40: this.wallCreeperAI(game, p); break;                      // AI_040 爬墙蜘蛛族（贴背景墙爬行+形态互转）
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -597,6 +599,15 @@ export class Enemy extends Entity {
         this.vx *= 1.5;
       }
     }
+    // ---- 蜘蛛上墙形态切换（NPC.cs:59273-59293）：站定（velocity.Y==0）且身边有
+    // 背景墙（NPCCanStickToWalls）→ Transform 成爬墙形态（164→165 等）——
+    // 蜘蛛洞里贴墙爬的就是这一步，地表无背景墙自然不触发
+    if (this.vy === 0 && this.vanillaId != null) {
+      const wallForm = Enemy.SPIDER_WALL_FORM[this.vanillaId];
+      if (wallForm !== undefined && this.npcCanStickToWalls(st)) {
+        this.tryTransformTo(wallForm, st);
+      }
+    }
     // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
     if (this.onGround) this.vx *= 0.85;
     // ---- 入侵远程攻击（NPC.cs:59464-60085 战士族射击段，入侵弓手/枪手专属）----
@@ -652,6 +663,164 @@ export class Enemy extends Entity {
     215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: true },
     216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: true },
   };
+
+  /** 蜘蛛家族地面↔爬墙形态对照（NPC.cs:59276-59289 地→墙 / :29994-30008 墙→地）：
+   *  164 Wall Creeper→165 Wall Creeper Wall、236→237 Black Recluse、163→238、239→240、530→531 */
+  private static readonly SPIDER_WALL_FORM: Record<number, number> = { 164: 165, 236: 237, 163: 238, 239: 240, 530: 531 };
+  private static readonly SPIDER_GROUND_FORM: Record<number, number> = { 165: 164, 237: 236, 238: 163, 240: 239, 531: 530 };
+
+  /** NPCCanStickToWalls 1:1（NPC.cs:56209-56229）：身体中心 3×3 内"非实心 tile 且有背景墙"
+   *  的格数 >4 → 可贴墙（蜘蛛洞/洞穴天然满足，地表不满足 → 落回地面形态） */
+  private npcCanStickToWalls(st: GameHooks['world']['store']): boolean {
+    const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+    let n = 0;
+    for (let i = cx - 1; i <= cx + 1; i++) {
+      for (let j = cy - 1; j <= cy + 1; j++) {
+        if (!st.inBounds(i, j)) continue;
+        const ii = st.idx(i, j);
+        const passable = st.type[ii] === 0 || !st.isSolid(i, j) || st.isPlatform(i, j);
+        if (passable && st.wall[ii] > 0) {
+          n++;
+          if (n > 4) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Transform 1:1（NPC.cs:81861-81919）：换类型 + 按比例结转 HP + ai[0..3] 清零；
+   *  位置按 TryChangingSizeFromBottomCenter（:81836）底边中心锚定改尺寸，
+   *  新碰撞盒与实心块重叠则放弃（原版换尺寸失败语义） */
+  private tryTransformTo(id: number, st: GameHooks['world']['store']): boolean {
+    const v = vanillaNpc(id);
+    if (!v) return false;
+    const s = v.scale ?? 1;
+    const nw = Math.round(v.width * s), nh = Math.round(v.height * s);
+    const nx = this.cx - nw / 2, ny = this.y + this.h - nh; // 底边中心锚定
+    for (let tx = Math.floor(nx / TILE); tx <= Math.floor((nx + nw - 0.01) / TILE); tx++) {
+      for (let ty = Math.floor(ny / TILE); ty <= Math.floor((ny + nh - 0.01) / TILE); ty++) {
+        if (st.isSolid(tx, ty)) return false;
+      }
+    }
+    const oldMax = this.maxHp;
+    this.vanillaId = id;
+    this.vanilla = v;
+    this.w = nw; this.h = nh;
+    this.x = nx; this.y = ny;
+    this.maxHp = v.lifeMax;
+    this.hp = Math.max(1, Math.round((this.hp * v.lifeMax) / oldMax)); // life = life*lifeMax/old
+    this.def = {
+      ...this.def,
+      name: v.name, hp: v.lifeMax, damage: v.damage, defense: v.defense,
+      width: nw, height: nh,
+      flying: v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14,
+      boss: VANILLA_BOSS_IDS.has(id),
+      hitSound: [vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1'],
+      killedSound: [vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1'],
+      drops: v.critter ? [] : vanillaNpcDrops(id),
+    };
+    this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
+    return true;
+  }
+
+  /** AI_040 爬墙蜘蛛族 1:1（NPC.cs:29784-30022）：无重力、贴背景墙表面爬行。
+   *  速度表：165 默认 2/0.08、237 3/0.12、531 4/0.16（:29789-29798）；
+   *  有视线 → 分轴伺服追玩家（:29880-29920，朝向角 atan2(期望速度)）；
+   *  无视线 → ai[0] ±200 振荡漂移（:29833-29878，角 atan2(当前速度)）；
+   *  531 朝向角额外 +π/2（:29922）；spriteDirection 恒 -1（:29829，渲染层处理）；
+   *  碰撞反弹（:29924-29950）：旧速 ×-0.5，X 朝移动方向保底 ±2、Y 保底 ±2；
+   *  专家模式毒液弹（:29960-29989，type 472）未启用专家模式，不移植；
+   *  脱墙（NPCCanStickToWalls 假）→ Transform 回地面形态（:29991-30010） */
+  private wallCreeperAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    let maxSpd = 2, accel = 0.08;
+    if (this.vanillaId === 237) { maxSpd = 3; accel = 0.12; }
+    else if (this.vanillaId === 531) { maxSpd = 4; accel = 0.16; }
+    // 目标向量（8px 量化，:29799-29819）；无目标/目标死亡 → 沿方向漂离上浮（:29824-29827）
+    let tx: number, ty: number;
+    const alive = !!player && !player.dead;
+    if (alive) {
+      tx = Math.floor(player!.cx / 8) * 8 - Math.floor(this.cx / 8) * 8;
+      ty = Math.floor(player!.cy / 8) * 8 - Math.floor(this.cy / 8) * 8;
+    } else {
+      tx = this.facing * maxSpd / 2;
+      ty = -maxSpd / 2;
+    }
+    const dist = Math.hypot(tx, ty);
+    let sx: number, sy: number; // 期望速度向量（num636/637）
+    if (dist === 0) { sx = this.vx; sy = this.vy; }
+    else { sx = (tx / dist) * maxSpd; sy = (ty / dist) * maxSpd; }
+    // direction（TargetClosest 语义：朝目标水平方向；死亡保持）
+    if (alive) this.facing = player!.cx > this.cx ? 1 : -1;
+    const los = alive ? this.canSeePlayer(st, player!) : false;
+    if (!los) {
+      // 无视线：振荡漂移（:29833-29878）——ai[0] 驱动的 X/Y 交替扰动 + 微弱趋目标分量
+      this.ai0 += 1;
+      this.vy += this.ai0 > 0 ? 0.023 : -0.023;
+      this.vx += (this.ai0 < -100 || this.ai0 > 100) ? 0.023 : -0.023;
+      if (this.ai0 > 200) this.ai0 = -200;
+      this.vx += sx * 0.007;
+      this.vy += sy * 0.007;
+      this.visAngle = Math.atan2(this.vy, this.vx);
+      if (this.vx > 1.5 || this.vx < -1.5) this.vx *= 0.9;
+      if (this.vy > 1.5 || this.vy < -1.5) this.vy *= 0.9;
+      this.vx = Math.max(-3, Math.min(3, this.vx));
+      this.vy = Math.max(-3, Math.min(3, this.vy));
+    } else {
+      // 有视线：分轴非对称伺服（:29880-29920，与 servoTo 同构、目标为期望速度）
+      if (this.vx < sx) {
+        this.vx += accel;
+        if (this.vx < 0 && sx > 0) this.vx += accel;
+      } else if (this.vx > sx) {
+        this.vx -= accel;
+        if (this.vx > 0 && sx < 0) this.vx -= accel;
+      }
+      if (this.vy < sy) {
+        this.vy += accel;
+        if (this.vy < 0 && sy > 0) this.vy += accel;
+      } else if (this.vy > sy) {
+        this.vy -= accel;
+        if (this.vy > 0 && sy < 0) this.vy -= accel;
+      }
+      this.visAngle = Math.atan2(sy, sx);
+    }
+    if (this.vanillaId === 531) this.visAngle += Math.PI / 2; // :29922
+    // 移动 + 碰撞反弹（:29924-29950；旧速 = 碰撞前速度）
+    const oldVx = this.vx, oldVy = this.vy;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) {
+      this.vx = oldVx * -0.5;
+      if (this.facing === -1 && this.vx > 0 && this.vx < 2) this.vx = 2;
+      if (this.facing === 1 && this.vx < 0 && this.vx > -2) this.vx = -2;
+    }
+    if (this.hitHead || this.onGround) {
+      this.vy = oldVy * -0.5;
+      if (this.vy > 0 && this.vy < 1.5) this.vy = 2;
+      if (this.vy < 0 && this.vy > -1.5) this.vy = -2;
+    }
+    // 行走帧累加（FindFrame case 165/237/238/240/531，cs:73795-73817：
+    // frameCounter += (|vx|+|vy|)×0.5（531 ×0.4），24 一循环）
+    this.crawlT = (this.crawlT + (Math.abs(this.vx) + Math.abs(this.vy))
+      * (this.vanillaId === 531 ? 0.4 : 0.5)) % 24;
+    // 脱墙 → Transform 回地面形态（:29991-30010）
+    const groundForm = Enemy.SPIDER_GROUND_FORM[this.vanillaId ?? -1];
+    if (groundForm !== undefined && !this.npcCanStickToWalls(st)) {
+      this.tryTransformTo(groundForm, st);
+    }
+  }
+
+  /** Collision.CanHit 近似：路径上被任一实心块阻挡即无视线（背景墙不阻挡） */
+  private canSeePlayer(st: GameHooks['world']['store'], p: Player): boolean {
+    const dx = p.cx - this.cx, dy = p.cy - this.cy;
+    const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 2));
+    for (let s = 1; s < steps; s++) {
+      const lx = Math.floor((this.cx + (dx * s) / steps) / TILE);
+      const ly = Math.floor((this.cy + (dy * s) / steps) / TILE);
+      if (!st.inBounds(lx, ly)) return false;
+      if (st.isSolid(lx, ly)) return false;
+    }
+    return true;
+  }
 
   /** AI_008 法师族（Fire Imp 24 / Goblin Sorcerer 29 / Dark Caster 32）：
    *  悬浮 + 周期传送（原版 ai[0] 计时到阈值或目标不可见时 TeleportSearch）+ 三连弹幕（原版 ai[1] volley）。

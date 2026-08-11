@@ -86,6 +86,18 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
     const phase = (e.walkCycleT + Math.abs(e.vx) * 8) % 32; // 每 tick +|vx|，32 一循环
     return phase < 8 ? 0 : phase < 16 ? 1 : phase < 24 ? 2 : 1;
   }
+  // 爬墙蜘蛛族（FindFrame case 165/237/238/240/531, cs:73795-73817）：
+  // frameCounter += (|vx|+|vy|)×0.5（531 ×0.4），24 一循环 4 帧
+  if (ai === 40) {
+    return Math.floor(((e.crawlT ?? 0) / 6)) % frames;
+  }
+  // 蜘蛛地面形态（FindFrame case 164/236/239/530, cs:73766-73783）：
+  // 腾空 vy<0=帧4 / vy>0=帧0；行走 |vx|×1.1 累加 6 步进 0..3 循环
+  if (id === 164 || id === 236 || id === 239 || id === 530) {
+    if (!e.onGround) return e.vy < 0 ? Math.min(4, frames - 1) : 0;
+    if (!walking) return 0;
+    return Math.floor((e.walkCycleT * 1.1) / 6) % 4;
+  }
   // 蝙蝠族（L75585）：每 6 tick 推进，全循环（部分类型不含末帧）
   if (ai === 14) {
     const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
@@ -834,20 +846,23 @@ export class Renderer {
         // 原版 NPC.scale（SetDefaults base × netID scale）——作用于碰撞盒与渲染
         const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
         ctx.save();
-        // 锚点:原版 DrawNPC 默认分支(Main.cs:23635-23638)帧中心==碰撞盒中心——
-        // 地面型曾用底锚(精灵底=盒底),NPC 帧底部普遍有 ~2px 透明边距,
-        // 视觉脚悬空 2px("浮空"感);中心锚由美术边距自然补偿,与原版一致
-        ctx.translate(e.cx, e.cy);
+        // 锚点:飞行型=帧中心(原版默认分支 Main.cs:23635 语义);地面型=底锚+逐帧
+        // 实测底部透明行数补偿(spriteBottomPad)——NPC 帧底普遍 ~2px 透明边距,
+        // 裸底锚会悬空 2px、中心锚会入地 2px(实测反馈),pad 补偿数学上保证贴地。
+        // 与纸娃娃(:1266)/legacy(:1301)/小动物(:763)四路统一
+        const grounded = !flying;
+        ctx.translate(e.cx, grounded ? e.y + e.h : e.cy);
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
         else if (e.vanilla?.aiStyle === 5) ctx.rotate(e.visAngle); // AI_005 蜂群族:cs:51022 朝速度方向转头
         else if (e.vanilla?.aiStyle === 6) ctx.rotate(e.visAngle); // AI_006 蠕虫族:cs:51500 段随链方向旋转(贴图正面朝上,+π/2)
+        else if (e.vanilla?.aiStyle === 40) ctx.rotate(e.visAngle); // AI_040 爬墙蜘蛛:npc.rotation 随移动/期望速度角(cs:29865/29919),531 +π/2
         else if (rotId) ctx.rotate(e.spin);
         const worm = e.vanilla?.aiStyle === 6; // 旋转态不再叠加朝向镜像(垂直对称段贴图)
         ctx.scale(scale, scale);
-        if (!rotId && !worm && e.vanillaId !== 4 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左
+        if (!rotId && !worm && e.vanillaId !== 4 && e.vanilla?.aiStyle !== 40 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左（AI_040 spriteDirection 恒 -1,cs:29829,不镜像）
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -855,7 +870,9 @@ export class Renderer {
         // 帧中心 83——原版通用锚点(帧中心==碰撞盒中心)会让 100×110 的盒偏在
         // 血管尾/眼球上方。碰撞盒尺寸保持原版,绘制整体下移 (质心−帧中心)
         // 让眼球主体居中于盒(用户 2026-08-11 拍板;张嘴帧偏移略大)
-        const anchorY = -r.sh / 2; // 中心锚(地面/飞行统一,原版默认分支语义)
+        // 地面型:底锚 + pad(帧底透明行)贴地;飞行型:中心锚。EoC 额外 +23/+30 眼球修正
+        const pad = grounded ? this.spriteBottomPad(r, `npc${e.vanillaId}:f${frameIdx}`) : 0;
+        const anchorY = grounded ? -r.sh + pad : -r.sh / 2;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
@@ -866,8 +883,9 @@ export class Renderer {
           // 普通 drawImage 会把染色 RGB 再乘 alpha（蓝色糊成灰绿）——改为两步：
           // ① 原始精灵 destination-out 按 colorA 削弱底下内容 ② lighter 全量加染色精灵
           const tinted = this.tintedSprite(`npc${e.vanillaId}`, r, e.colorRGBA);
-          const anchorY = -r.sh / 2 + eocOff; // 与基础层同锚(中心锚+EoC 修正)——
-          // 曾残留旧底锚条件,基础/染色两层错位 → 史莱姆"彩色+灰影"双画
+          const anchorY2 = grounded ? -r.sh + pad : -r.sh / 2;
+          const anchorY = anchorY2 + eocOff; // 与基础层同锚——曾残留旧底锚条件,
+          // 基础/染色两层错位 → 史莱姆"彩色+灰影"双画
           ctx.globalCompositeOperation = 'destination-out';
           ctx.globalAlpha = e.colorRGBA[3] / 255;
           ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY, r.sw, r.sh);
@@ -1178,12 +1196,14 @@ export class Renderer {
       const r = this.atlas.vnpc(n.vanillaId, n.frame);
       if (r) {
         ctx.save();
-        // 中心锚(原版 DrawNPC 默认分支):帧底 ~2px 透明边距由中心锚自然补偿,
-        // 底锚会让 NPC 视觉悬空 2px
-        ctx.translate(n.cx, n.cy);
+        // 底锚 + 逐帧实测底部透明行数补偿(spriteBottomPad):帧底 ~2px 透明边距
+        // 裸底锚悬空 2px、中心锚入地 2px(实测反馈)——pad 补偿保证贴地,
+        // 与怪物(:854)/纸娃娃(:1266)/legacy(:1301)统一
+        const pad = this.spriteBottomPad(r, `npc${n.vanillaId}:f${n.frame}`);
+        ctx.translate(n.cx, n.y + n.h); // 脚底中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
-        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2, r.sw, r.sh);
+        ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
         ctx.filter = 'none';
         ctx.restore();
         return;

@@ -112,18 +112,122 @@ function parseLinear(body) {
     if (l.startsWith('currentRecipe.')) {
       if (!recipe) recipe = { items: [], groups: [], create: 0, createStack: 1, tile: undefined };
       buf.push(l);
-    } else if (/^Add\w+Furniture|^AddCritterStatueRecipe|^AddAetheriumFurniture|^AddFallenStarFurniture|^AddFeywoodFurniture/.test(l)) {
-      // 生成器调用：逐个解析（生成器内也是 currentRecipe 序列，末尾自带 AddRecipe）
+    } else if (/^Add\w+\(/.test(l)) {
+      // 生成器调用：块体递归解析（生成器内也是 currentRecipe 序列，末尾自带 AddRecipe）；
+      // 表达体转发（=> AddStandardFurnitureSetRecipes）在 gen 为空时按调用语句级联展开
       const name = l.match(/^(Add\w+)\(/)[1];
-      const gen = methodBody(`void ${name}(`) || methodBody(`private void ${name}(`) || methodBody(`public void ${name}(`);
-      if (gen) parseLinear(gen);
+      const gen = methodBody(`void ${name}(`) || methodBody(`private void ${name}(`)
+        || methodBody(`public void ${name}(`) || methodBody(`private static void ${name}(`);
+      if (gen) {
+        parseLinear(gen);
+        // 转发块体：体内是 AddStandardFurnitureSetRecipes(...) 调用（参数多为字面量或生成器入参变量——
+        // 变量形无法求值则跳过，字面量形直接展开）
+        for (const graw of gen.split('\n')) {
+          const gl = graw.trim();
+          if (/^AddStandardFurnitureSetRecipes\(/.test(gl)) expandFromCall(gl);
+        }
+      }
+      else if (/^AddStandardFurnitureSetRecipes\(/.test(l)) expandFromCall(l);
     }
   }
   flush();
 }
 
+// ---- 22 件套模板展开（AddStandardFurnitureSetRecipes :16452-16569）----
+// 模板体含两类材料形态：SetIngredients(primaryMaterial, N) 直排 与
+// `int[] obj = {a,b,c,d}; obj[K] = primaryMaterial; SetIngredients(obj)`（K 号位替换主材）
+const STD_PARAMS = ['primaryMaterial', 'bathtub', 'bed', 'bookcase', 'candelabra', 'candle',
+  'chair', 'chandelier', 'chest', 'clock', 'door', 'dresser', 'lamp', 'lantern', 'piano',
+  'sink', 'sofa', 'table', 'toilet', 'workbench', 'fake_chest', 'overrideStation'];
+/** 从一条调用语句展开模板：AddStandardFurnitureSetRecipes(a, b, ...) 或带 gen 参数前缀 */
+function expandFromCall(line) {
+  const m = line.match(/AddStandardFurnitureSetRecipes\(([^)]*)\)/);
+  if (!m) return;
+  const args = m[1].split(',').map((x) => x.trim());
+  while (args.length < 22) args.push('-1');
+  expandStandardSet(args);
+}
+function expandStandardSet(args) {
+  const map = {};
+  STD_PARAMS.forEach((name, k) => { map[name] = args[k] !== undefined ? +args[k] : (name === 'overrideStation' ? -1 : 0); });
+  const body = methodBody('void AddStandardFurnitureSetRecipes(');
+  if (!body) return;
+  parseLinearTemplate(body, map);
+}
+function parseLinearTemplate(body, map) {
+  const lines = body.split('\n');
+  let recipe = null, buf = [];
+  const flush = () => {
+    if (!recipe) return;
+    foldBlockTemplate(buf, recipe, map);
+    if (recipe.create > 0) out.push({
+      create: recipe.create, createStack: recipe.createStack ?? 1,
+      tile: recipe.tile ?? -1,
+      items: recipe.items.filter((x) => x && x.id > 0),
+      groups: recipe.groups,
+      ...((recipe.tile ?? -1) === 13 ? { alchemy: true } : {}),
+    });
+    recipe = null; buf = [];
+  };
+  for (const raw of lines) {
+    const l = raw.trim();
+    if (l === 'AddRecipe();') { flush(); continue; }
+    // 模板体要完整收集：currentRecipe 语句 + obj 数组声明/赋值行都进 buf
+    if (l.startsWith('currentRecipe.') || /^int\[\] obj/.test(l) || /^obj\d*\[/.test(l)) {
+      if (!recipe) recipe = { items: [], groups: [], create: 0, createStack: 1, tile: undefined };
+      buf.push(l);
+    }
+  }
+  flush();
+}
+function foldBlockTemplate(lines, recipe, map) {
+  // obj 数组：`int[] obj = {a,b,c,d}; obj[K] = primaryMaterial; SetIngredients(obj)`
+  const arrVals = {};
+  for (const raw of lines) {
+    const l = raw.trim();
+    let m;
+    if ((m = l.match(/^int\[\] (obj\d*) = new int\[\d+\] \{([\d,\s]+)\};$/))
+      || (m = l.match(/^int\[\] (obj\d*) = \{([\d,\s]+)\};$/))) {
+      arrVals[m[1]] = m[2].split(',').map((x) => parseInt(x.trim(), 10));
+    } else if ((m = l.match(/^(obj\d*)\[(\d+)\] = (primaryMaterial|overrideStation);$/))) {
+      const arr = arrVals[m[1]];
+      if (arr) arr[+m[2]] = map[m[3]] ?? -1;
+    }
+  }
+  for (const raw of lines) {
+    const l = raw.trim();
+    let m;
+    if ((m = l.match(/^currentRecipe\.createItem\.SetDefaults\((\w+)\);$/))) {
+      recipe.create = map[m[1]] ?? +m[1];
+    } else if ((m = l.match(/^currentRecipe\.SetIngredients\((primaryMaterial|\w+), (\d+)\);$/))) {
+      recipe.items.push({ id: map[m[1]] ?? +m[1], stack: +m[2] });
+    } else if ((m = l.match(/^currentRecipe\.SetIngredients\((obj\d*)\);$/))) {
+      const arr = arrVals[m[1]] ?? [];
+      for (let k = 0; k + 1 < arr.length; k += 2) recipe.items.push({ id: arr[k], stack: arr[k + 1] });
+    } else if ((m = l.match(/^currentRecipe\.SetCraftingStation\(\(overrideStation >= 0\) \? overrideStation : (\d+)\);$/))) {
+      recipe.tile = map.overrideStation >= 0 ? map.overrideStation : +m[1];
+    } else if ((m = l.match(/^currentRecipe\.SetCraftingStation\((\d+)\);$/))) {
+      recipe.tile = +m[1];
+    } else if ((m = l.match(/^currentRecipe\.RequireGroup\(RecipeGroups\.(\w+)\);$/))) {
+      recipe.groups.push(GROUP_ID[m[1]]);
+    } else if ((m = l.match(/^currentRecipe\.createItem\.stack\s*=\s*(\d+);$/))) {
+      recipe.createStack = +m[1];
+    }
+  }
+}
+
 const main = methodBody('public static void SetupRecipes()');
 parseLinear(main);
+// main 里的直调 AddStandardFurnitureSetRecipes(...) 展开（缺省参补 -1）
+{
+  const re = /AddStandardFurnitureSetRecipes\(([^)]*)\);/g;
+  let m;
+  while ((m = re.exec(main))) {
+    const args = m[1].split(',').map((x) => x.trim());
+    while (args.length < 22) args.push('-1');
+    expandStandardSet(args);
+  }
+}
 
 // ---- 反向配方（CreateReversePlatformRecipes :16589 / CreateReverseWallRecipes :16613）----
 // 条件：单材料配方（items[1] 不存在）且 成品是平台（createTile∈Platforms）或墙（createWall>0）

@@ -3,6 +3,7 @@
 // 按钮标签 = Lang.inter[](LegacyInterface):28 商店 / 52 关闭 / 54 治疗 / 50 诅咒。
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
+import { UISfx } from '../vui/UISfx';
 export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'close';
 
 export interface ShopEntry {
@@ -27,6 +28,13 @@ const CSS = `
   font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
   box-shadow: 0 8px 40px rgba(0,0,0,.6);
 }
+.sw-npc-body { display: flex; gap: 10px; align-items: flex-start; }
+.sw-npc-portrait { width: 76px; height: 92px; flex: none; image-rendering: pixelated;
+  border: 2px solid #7d92d6; border-radius: 4px; background: #10142a;
+  animation: sw-portrait-hop 0.35s cubic-bezier(.2,1.6,.4,1); }
+@keyframes sw-portrait-hop { 0% { transform: translateY(14px) scale(0.9); opacity: 0.2; }
+  100% { transform: translateY(0) scale(1); opacity: 1; } }
+.sw-npc-main { flex: 1; min-width: 0; }
 .sw-npc-name { color: #ffe8a0; font-size: 15px; margin-bottom: 6px;
   text-shadow: 1px 1px 0 #000, -1px -1px 0 #000; }
 .sw-npc-chat { font-size: 14px; line-height: 1.6; color: #e8e8f4; min-height: 44px; }
@@ -87,14 +95,24 @@ export class NpcDialog {
   }
 
   /** 打开对话框:name=NPC 名,chat=台词,buttons=选项(原版 Lang.inter 标签) */
-  open(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>) {
+  open(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-dialog';
     const btns = buttons.map((b) => `<button data-b="${b.id}">${b.label}</button>`).join('');
-    panel.innerHTML = `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}</div><div class="sw-npc-btns">${btns}</div>`;
+    // 头像(原版 Main.npcChatPortrait = Images/TownNPCs/Portraits/Portrait_<Name>，SetTalkNPC :4196;
+    // 打开时 DoNPCPortraitHop 弹跳)——无头像类型(如骷髅商人外的野兽)原版也不显示
+    const portraitHtml = portrait
+      ? `<img class="sw-npc-portrait" src="${portrait}">`
+      : '';
+    panel.innerHTML = `<div class="sw-npc-body">${portraitHtml}<div class="sw-npc-main">`
+      + `<div class="sw-npc-name">${name}</div><div class="sw-npc-chat">${chat}</div>`
+      + `<div class="sw-npc-btns">${btns}</div></div></div>`;
     panel.querySelectorAll('button').forEach((el) => {
-      el.addEventListener('click', () => this.onButton((el as HTMLElement).dataset.b as NpcButtonId));
+      el.addEventListener('click', () => {
+        UISfx.click(); // 原版对话按钮 MenuTick(id 12)
+        this.onButton((el as HTMLElement).dataset.b as NpcButtonId);
+      });
     });
     this.parent.appendChild(panel);
     this.panel = panel;

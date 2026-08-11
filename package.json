@@ -9,7 +9,8 @@
     "build": "node scripts/build-l10n.mjs && tsc && vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "start": "vite build && vite preview"
+    "start": "vite build && vite preview",
+    "e2e": "node scripts/run-e2e.mjs"
   },
   "dependencies": {
     "simplex-noise": "^4.0.3"

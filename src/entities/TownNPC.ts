@@ -4,6 +4,7 @@
 // （frameCounter += |vx|*2+1 每 tick，>6 推进一帧，越界回卷帧2）
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
@@ -37,6 +38,8 @@ export class TownNPC extends Entity {
   private doorX = 0; private doorY = 0;
   /** 白天游走但不远离 home(守卫老人:锚地牢门口走廊,防走失) */
   leashHome = false;
+  /** 正在与玩家对话（原版 AI_007 :53721：talkNPC==本体 → ai[0]=0 站定、面向玩家） */
+  talking = false;
   talkCooldown = 0;
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
@@ -92,7 +95,14 @@ export class TownNPC extends Entity {
     }
 
     let wantDir = 0;
-    if (!this.stationary && world.clock.isDay) {
+    // 对话中站定并面向玩家（原版 AI_007 NPC.cs:53721-53742：talkNPC==本体 →
+    // ai[0]=0 停走、ai[1]=300、direction 指向玩家——杜绝"聊着聊着走开丢对话"）
+    if (this.talking) {
+      const p = (game as unknown as { player: Player }).player;
+      if (p) this.facing = p.cx < this.cx ? -1 : 1;
+      this.vx *= 0.6;
+      this.wanderT = 0;
+    } else if (!this.stationary && world.clock.isDay) {
       // 白天家门口附近游走;leashHome 者离 home 超过 ~10 格时折返(守卫老人不离地牢)
       if (this.leashHome && this.home
         && Math.abs(this.cx - (this.home.x * TILE + 8)) > 10 * TILE) {

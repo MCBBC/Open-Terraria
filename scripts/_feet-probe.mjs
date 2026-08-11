@@ -66,12 +66,14 @@ const run = () => page.evaluate(() => new Promise((res) => {
     } else if (Date.now() - t0 > 180000) { clearInterval(iv); res('timeout'); }
   }, 250);
 }));
-for (let a = 0; a < 5; a++) {
+for (let a = 0; a < 12; a++) {
   try { const r = await run(); console.log(JSON.stringify(r, null, 1)); break; }
   catch (e) {
     if (!/navigation|detached/i.test(e.message)) throw e;
-    await new Promise((r2) => setTimeout(r2, 2000));
+    console.log('retry', a + 1, e.message.slice(0, 60));
+    await new Promise((r2) => setTimeout(r2, 2500));
     await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
   }
 }
+console.log('PROBE GAVE UP');
 await browser.close();

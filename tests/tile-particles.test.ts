@@ -27,11 +27,11 @@ describe('方块环境粒子规则表（TileParticles）', () => {
     expect(bad).toEqual([]);
   });
 
-  it('高频项对齐原版概率量级：水蜡烛/和平蜡烛 ~1.5/tick（1/2×3）、熔炉点燃帧 ~0.075（1/40×3）', () => {
+  it('高频项对齐原版概率量级：水蜡烛/和平蜡烛 高发射率（1/2 钳 0.95）、熔炉点燃帧 ~0.075（1/40×3）', () => {
     const candle = TILE_PARTICLE_RULES.get(49)?.[0];
-    expect(candle?.prob).toBeCloseTo(1.5, 5);
+    expect(candle?.prob).toBe(0.95);
     const peace = TILE_PARTICLE_RULES.get(372)?.[0];
-    expect(peace?.prob).toBeCloseTo(1.5, 5);
+    expect(peace?.prob).toBe(0.95);
     const furnace = TILE_PARTICLE_RULES.get(17)?.[0];
     expect(furnace?.prob).toBeCloseTo(0.075, 5);
     expect(furnace?.fx0).toBe(18);

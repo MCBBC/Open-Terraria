@@ -5,6 +5,8 @@ import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
 import { RECIPES } from '../data/recipes';
 import { vanillaItemKey, ingredientKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import vanillaRareJson from '../data/vanilla-itemrare.json';
+const ITEM_RARE = vanillaRareJson as Record<string, number>;
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
@@ -880,12 +882,16 @@ export class UI {
     const s = this.slotContent(where, i) as { id: number; stack: number; favorited?: boolean } | null;
     if (!s) { this.tooltip.style.display = 'none'; return; }
     const def = ITEM_DEFS[s.id];
-    // 名称按稀有度着色（原版 GetItemNameColor 15 档；vi_ 物品经 combat 表无 rare 字段——
-    // 用 value 近似：>10000=蓝/绿/橙三档，其余白。原版精确 rare 需 Item.cs SetDefaults 提取，P4 后补）
+    // 名称按稀有度着色（原版 GetItemNameColor 15 档）：vi_ 物品查 vanilla-itemrare.json
+    //（tools/extract-itemrare.mjs 从 Item.cs case 块提取 1643 条）；缺条目 fallback value 近似
     let rare = 0;
     if (def.key.startsWith('vi_')) {
-      const v = def.value ?? 0;
-      rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
+      const vid = parseInt(def.key.slice(3), 10);
+      rare = ITEM_RARE[String(vid)] ?? 0;
+      if (rare === 0) {
+        const v = def.value ?? 0;
+        rare = v >= 100000 ? 4 : v >= 10000 ? 3 : v >= 1000 ? 2 : v >= 100 ? 1 : 0;
+      }
     }
     const nameColor = this.rarityColor(rare);
     let html = `<b style="color:${nameColor}">${Lang.itemNameByKey(def.key)}</b> ×${s.stack}`;
@@ -1428,7 +1434,9 @@ export class UI {
     this.refreshVanillaCrafting();
   }
 
-  /** 原版配方列表（数据驱动 1456 全量；站点扫描走 Game.vanillaNearbyStations） */
+  /** 鱼眼合成列表焦点行（原版 focusRecipe；滚轮 ±1，CraftingUI 滚动 ±6.5/帧） */
+  private craftFocus = 0;
+  /** 原版配方列表（数据驱动 1456 全量；鱼眼缩放 = 100/(|Δ|+100) 下限 0.75，CraftingUI.cs:184-192 DOM 近似） */
   private refreshVanillaCrafting(): void {
     const game = this.game;
     if (!game || !this.craftListEl) return;
@@ -1436,10 +1444,17 @@ export class UI {
     if (!avail.length) return;
     const head = el('div', 'sw-lbl', '── 原版配方 ──');
     this.craftListEl.appendChild(head);
-    for (const { r, count } of avail.slice(0, 120)) { // 上限防 DOM 爆炸（鱼眼列表 P4 换 Canvas）
+    const MAX_ROWS = 60; // 焦点 ±30（超出原版 middleY 视口即 alpha→0 :177）
+    const start = Math.max(0, Math.min(this.craftFocus - 30, avail.length - MAX_ROWS));
+    if (this.craftFocus >= avail.length) this.craftFocus = 0;
+    for (let idx = start; idx < Math.min(avail.length, start + MAX_ROWS); idx++) {
+      const { r, count } = avail[idx];
+      const dy = idx - this.craftFocus; // 相对焦点的连续偏移（原版 availableRecipeY）
+      const scale = Math.max(0.75, 100 / (Math.abs(dy) + 100));
       const outKey = vanillaItemKey(r.create);
       if (!outKey) continue;
       const row = el('div', 'sw-recipe');
+      row.style.cssText += ` transform:scale(${scale.toFixed(3)}); transform-origin:left center; opacity:${(1 - Math.min(0.75, Math.abs(dy) / 30)).toFixed(2)}; transition:transform 0.08s;`;
       const img = el('img') as HTMLImageElement;
       img.src = iconUrl(game, game.itemId(outKey));
       row.appendChild(img);
@@ -1455,12 +1470,24 @@ export class UI {
       row.appendChild(mats);
       row.addEventListener('mousedown', (ev) => {
         ev.stopPropagation();
+        this.craftFocus = idx; // 选中置焦（原版 focusRecipe=i）
         game.vanillaCraft(r, (ev as MouseEvent).shiftKey ? 10 : 1);
         this.refreshAll();
       });
       this.craftListEl.appendChild(row);
     }
+    // 滚轮：焦点 ±1（原版 ScrollCraftingList；±6.5/帧的平滑由 transition 兜）
+    if (!this._craftWheelBound) {
+      this._craftWheelBound = true;
+      this.craftListEl.addEventListener('wheel', (ev) => {
+        ev.preventDefault();
+        ev.stopPropagation();
+        this.craftFocus = Math.max(0, this.craftFocus + (ev.deltaY > 0 ? 1 : -1));
+        this.refreshAll();
+      }, { passive: false });
+    }
   }
+  private _craftWheelBound = false;
 
   // ============ Toast ============
 
@@ -1508,6 +1535,9 @@ export class UI {
     // 原版左下角消息列(Main.NewText → LegacyChatMonitor;NewText 播 SoundID 12)
     this.chatMonitor?.clear();
     this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
+    // 回放进世界前缓冲的消息(如新世界出生时的 NPC 入驻公告)
+    for (const [t, r, g, b] of this.chatPending) this.chatMonitor.message(t, r, g, b);
+    this.chatPending = [];
 
     this.buildInventoryPanel();
     this.buildChestPanel();
@@ -1524,15 +1554,19 @@ export class UI {
 
   /** 原版消息列(Main.NewText 入口) */
   private chatMonitor: ChatMonitor | null = null;
+  /** 消息缓冲:ChatMonitor 未建(initInGame 之前,如新世界 afterWorldLoad
+   *  发出的 NPC 入驻公告)时暂存,initInGame 创建后回放——曾直接丢弃 */
+  private chatPending: Array<[string, number, number, number]> = [];
   chatMessage(text: string, r = 255, g = 255, b = 255): void {
-    this.chatMonitor?.message(text, r, g, b);
+    if (this.chatMonitor) this.chatMonitor.message(text, r, g, b);
+    else this.chatPending.push([text, r, g, b]);
   }
 
   // ---- NPC 对话系统(SetTalkNPC + GetChat;内容在 Game 生成,此处纯渲染) ----
   private npcDialog: NpcDialog | null = null;
   private npcShop: NpcShop | null = null;
 
-  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>): void {
+  showNpcDialog(name: string, chat: string, buttons: Array<{ id: NpcButtonId; label: string }>, portrait?: string | null): void {
     if (!this.npcDialog) {
       this.npcDialog = new NpcDialog(this.root, (id) => {
         this.npcShop?.close();
@@ -1540,7 +1574,7 @@ export class UI {
         this.game?.npcDialogButton(id);
       });
     }
-    this.npcDialog.open(name, chat, buttons);
+    this.npcDialog.open(name, chat, buttons, portrait);
   }
 
   closeNpcDialog(): void {

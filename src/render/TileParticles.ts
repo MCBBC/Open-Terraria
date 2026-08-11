@@ -94,8 +94,6 @@ const SHINE_TABLE: Array<{ sheet: number; shine: number; color?: string }> = [
   { sheet: 108, shine: 900 },  // 秘银
   { sheet: 111, shine: 850 },  // 精金
   { sheet: 45, shine: 1900 },  // 金砖
-  { sheet: 46, shine: 2000 },  // 银砖
-  { sheet: 47, shine: 2100 },  // 铜砖
 ];
 
 function buildRules(): TileParticleRule[] {
@@ -104,7 +102,7 @@ function buildRules(): TileParticleRule[] {
 
   // ---- 火焰/光源族 ----
   // 熔炉族 L7482-7492：点燃帧 fx==18&&fy==18，dust 6，1/40
-  for (const sheet of [17, 77, 133]) {
+  for (const sheet of [17, 77]) {
     add({ sheet, color: dust(6), prob: 1 / 40 * 3, fx0: 18, fy0: 18, dx: 8, dy: -6, rise: 1.2, life: 34 });
   }
   // 吊灯 34 L7376-7426：fx%108<54 且非中列（fx%108 在 18..35 段为中间亮片）；
@@ -212,8 +210,6 @@ function buildRules(): TileParticleRule[] {
   add({ sheet: 139, color: '#C8A8E8', prob: 1 / 3 * 3, fx0: 36, pred: (_fx, fy) => fy % 36 === 0, dx: 16, dy: 4, rise: 0.5, sideways: 0.3, life: 70, size: [1.5, 2.5] });
   // 钟乳石滴水 165 L7150-7160（fx 162-214 && fy==72）
   add({ sheet: 165, color: dust(153), prob: 1 / 60 * 3, pred: (fx, fy) => fx >= 162 && fx <= 214 && fy === 72, dx: 8, dy: 16, rise: 0, life: 50, size: [1.5, 2.5] });
-  // 世纪之花球茎 238 L7071-7076（1/10）
-  add({ sheet: 238, color: dust(168), prob: 1 / 10 * 3, dx: 8, dy: 4, rise: 0.3, life: 50, size: [1.5, 2.5] });
 
   return r;
 }

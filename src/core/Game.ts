@@ -38,6 +38,7 @@ import { pickMusic, newMusicState, bossMusicFor, type MusicState } from '../data
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
+import { portraitUrl } from '../data/npcPortraits';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
@@ -96,6 +97,26 @@ const TILE_CUT_VANILLA = new Set([
   654, 518, 519, 549, 529, 637, 231, 484, 711, 201, 3, 24, 28, 32, 51, 52, 61, 62, 69, 655,
   71, 73, 74, 82, 83, 84, 110, 113, 115, 184, 205, 352, 382, 528, 636, 638, 444, 485,
 ]);
+// ---- 原版挖掘表（vanilla sheet id）----
+// tileNoFail（Main.cs:7138/7142-7152/7313-7338/7392/7772-8318/9407-9411/9498/10197-10198）：
+// 花草/藤蔓/苔藓/蘑菇/雪泥/宝石树芽/回声家具等——原版每击 100 直接破坏
+const TILE_NO_FAIL_SHEETS = new Set([
+  3, 4, 24, 32, 35, 50, 51, 52, 61, 62, 69, 73, 74, 81, 82, 83, 84, 110, 113, 115, 129,
+  162, 165, 184, 185, 186, 187, 192, 201, 205, 227, 233, 254, 324, 330, 331, 332, 333,
+  373, 374, 375, 382, 384, 461, 481, 482, 483, 484, 485, 518, 519, 528, 529, 530, 549,
+  624, 636, 637, 638, 654, 655, 656, 666, 697, 700, 701, 705, 709,
+]);
+// tileAxe（Main.cs:7157-7172）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
+const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 589, 596, 616, 634, 704]);
+// 地牢砖族（Main.tileDungeon + 41/43/44 裂纹变体）：除数 /2 + 门槛 100
+const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
+// 上表 → 内部 tile id（vanilla.sheet 反查）
+const sheetToInternal = (sheet: number): number => {
+  const d = TILE_DEFS.find((t) => t?.vanilla?.sheet === sheet);
+  return d ? TILE_DEFS.indexOf(d) : -1;
+};
+const TILE_NO_FAIL = new Set<number>([...TILE_NO_FAIL_SHEETS].map(sheetToInternal).filter((v) => v >= 0));
+
 const TILE_CUT = new Set<number>(
   TILE_DEFS.reduce<number[]>((acc, d, id) => {
     if (d.vanilla && TILE_CUT_VANILLA.has(d.vanilla.sheet)) acc.push(id);
@@ -126,7 +147,7 @@ export interface GameCallbacks {
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   onChat?: (text: string, r: number, g: number, b: number) => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
-  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }>) => void;
+  onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'close'; label: string }>, portrait?: string | null) => void;
   onNpcDialogClose?: () => void;
   /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币 */
   onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number) => void;
@@ -1545,7 +1566,7 @@ export class Game implements GameHooks {
         }
       }
       // HitTile 节流窗 = 实际挥击间隔（含攻速配饰加成），保证一挥一击
-      this.tryMine(tx, ty, tool.power ?? 10, tool.type, spd);
+      this.tryMine(tx, ty, tool.power ?? 10, tool.type, spd, tool.useTime ?? spd);
       return;
     }
 
@@ -1883,7 +1904,7 @@ export class Game implements GameHooks {
     return false;
   }
 
-  private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number) {
+  private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number) {
     // 联机破坏保护（v3 房间制）：非房主禁挖/禁锤墙
     if (!this.netCanEditTile()) { this.mining = null; this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // 范围检查
@@ -1944,9 +1965,11 @@ export class Game implements GameHooks {
       this.mining = null;
       return;
     }
-    // ---- 原版 HitTile 制（Player.PickTile 移植）：每挥一击积累伤害，阈值 100 破坏 ----
-    // 每挥一击（按工具速度节流），伤害 = 工具力 × 材质系数（GetPickaxeDamage 简化）
-    if (this.tickCount - this.lastMineHitTick < Math.max(8, speed)) {
+    // ---- 原版 HitTile 制 1:1（Player.cs:45032-45120 ItemCheck_UseMiningTools_ActuallyUseMiningTool
+    //      + :52981 GetPickaxeDamage）：每击积累、阈值 100 破坏；冷却 = useTime
+    //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）----
+    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult));
+    if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
       this.mining = { x: tx, y: ty, progress: this.hitTiles.getDamage(tx, ty) };
@@ -1954,21 +1977,42 @@ export class Game implements GameHooks {
     }
     this.lastMineHitTick = this.tickCount;
     const d = TILE_DEFS[type];
-    // 原版 GetPickaxeDamage：普通块 = 镐力；泥土族（0/40/53/57/59/123/147/224/397）= 镐力×2。
-    // 矿石无系数（只靠镐力门槛 gate）；家具软质 ×2 保持原版 tileNoFail 方向。
-    // 斧 = 斧力×1.2（原版 Player.cs:29576）——绝对值配原版节奏需十击太多，
-    // 按同比例放大（≈斧力×5.5）适配我们的挥击间隔+衰减：铜斧 7→39（3 击）/ 金斧 11→61（2 击）
+    const sheet = d?.vanilla?.sheet ?? -1;
     let dmg: number;
-    if (type === T.TREE || IMPORTED_TREE_TYPES.has(type)) {
-      dmg = toolType === 'axe' ? Math.round(power * 5.5) : power;
-    } else if (toolType === 'axe') {
-      dmg = Math.round(power * 5.5);
-    } else if (d.decor || (d.framed && !d.solid)) {
-      dmg = power * 2;
+    if (TILE_NO_FAIL.has(sheet)) {
+      // tileNoFail（Main.cs:7138-10198 表）：一次挥击直接破坏（原版 num2=100）
+      dmg = 100;
+    } else if (TILE_AXE_SHEETS.has(sheet)) {
+      // 斧族 tile（树/仙人掌/棕榈/宝石树等，Main.cs:7157-7172 tileAxe 表）：
+      // 仅斧有效（原版 pick 分支被 tileAxe 排除——镐不能砍树）；
+      // 伤害 = int(斧力×1.2)（仙人掌 80 ×3 再 ×1.2，Player.cs:45098-45100）
+      dmg = toolType === 'axe' ? Math.floor((sheet === 80 ? power * 3 : power) * 1.2) : 0;
+    } else if (toolType === 'pick') {
+      // 镐族：伤害 = 镐力，分档除数（GetPickaxeDamage:52981-53015）
+      dmg = power;
+      if (sheet === 107 || sheet === 221) dmg = Math.floor(power / 2);        // 钴/钯金矿
+      else if (sheet === 108 || sheet === 222) dmg = Math.floor(power / 3);    // 秘银/山铜矿
+      else if (sheet === 111 || sheet === 223) dmg = Math.floor(power / 4);    // 精金/钛金矿
+      else if (sheet === 211) dmg = Math.floor(power / 5);                     // 绿藻矿
+      else if (sheet === 226 || sheet === 237) dmg = Math.floor(power / 4);    // 蜥蜴砖
+      else if (sheet === 25 || sheet === 203 || sheet === 117 || sheet === 58
+        || TILE_DUNGEON_SHEETS.has(sheet)) dmg = Math.floor(power / 2);        // 黑檀/猩红/狱岩/地狱石砖/地牢砖
+      else if (sheet === 48 || sheet === 232) dmg = power * 2;                 // 云块
+      // 门槛归零（GetPickaxeDamage:53017-53075 gate 段——镐力不足=无伤害）
+      const underSurf = ty > this.world.groundLevel;
+      if (sheet === 211 && power < 200) dmg = 0;                              // 绿藻 200
+      else if ((sheet === 25 || sheet === 203) && power < (underSurf ? 55 : 65)) dmg = 0;
+      else if (sheet === 117 && power < 65) dmg = 0;
+      else if (sheet === 37 && power < 50) dmg = 0;                            // 陨石 50
+      else if ((sheet === 22 || sheet === 204) && underSurf && power < 55) dmg = 0; // 地下魔金/猩红矿
+      else if (sheet === 56 && power < 55) dmg = 0;                            // 黑曜石 55
+      else if (sheet === 77 && power < 65 && ty >= (this.world.lavaLine || this.world.h - 200)) dmg = 0;
+      else if (sheet === 58 && power < 65) dmg = 0;                            // 狱岩 65
+      else if ((sheet === 226 || sheet === 237) && power < 210) dmg = 0;       // 蜥蜴砖 210
+      else if (TILE_DUNGEON_SHEETS.has(sheet) && power < 100 && underSurf) dmg = 0; // 地牢砖 100
     } else {
-      const dirtFamily = /^(dirt|grass|sand|snow|mud|silt|clay|ash|slush|ebonsand|crimsand|pearlsand|hardened_sand)/i.test(d.key)
-        || d.key === 'v_123_silt' || d.key === 'v_224_slush_block' || d.key === 'v_397_hardened_sand' || d.key === 'v_112_ebonsand_block';
-      dmg = power * (dirtFamily ? 2 : 1);
+      // 斧/锤点在非斧族 tile：原版该分支无伤害（hammer 墙路径在上方已分流）
+      dmg = 0;
     }
     const total = this.hitTiles.addDamage(tx, ty, dmg);
     this.hardnessCache = 100;
@@ -3819,7 +3863,9 @@ export class Game implements GameHooks {
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
   private openNpcDialog(npc: TownNPC) {
     this.dialogNpc = npc;
+    npc.talking = true;  // 原版 AI_007:53721 对话中站定面向玩家
     npc.talkCooldown = 30;
+    this.sfx.play('menuOpen'); // 对话面板打开音（原版 UI 面板开合语义 id 10/11）
     const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
     // FullName 语义（NPC.FullName:6657 + Game.NPCTitle，zh "{1}{0}"=类型名+个人名）
     const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
@@ -3833,7 +3879,7 @@ export class Game implements GameHooks {
       buttons.push({ id: 'curse', label: Lang.inter(50) });                                 // 诅咒
     }
     buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
-    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)), buttons);
+    this.cb.onNpcDialog?.(name, this.formatDialogTags(this.townNpcChat(npc)), buttons, portraitUrl(npc.vanillaId));
   }
 
   /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
@@ -4128,7 +4174,9 @@ export class Game implements GameHooks {
   }
 
   closeNpcDialog(): void {
+    if (this.dialogNpc) this.dialogNpc.talking = false;
     this.dialogNpc = null;
+    this.sfx.play('menuClose');
     this.cb.onNpcDialogClose?.();
   }
 
@@ -4978,24 +5026,40 @@ export class Game implements GameHooks {
       const t = TILE_BY_KEY[k];
       if (t !== undefined) ALCHEMY.add(t);
     }
+    // 液体源（Player.cs:35235-35243：liquid>200 且 liquidType 0水/2蜜/1岩浆；
+    // CountsAsWaterForCrafting tile 172 水槽/207 也算水）
+    this._nearLiquid = { water: false, honey: false, lava: false };
     for (let dx = -20; dx <= 20; dx++) {
       for (let dy = -15; dy <= 15; dy++) {
         const x = px + dx, y = py + dy;
-        if (!st.inBounds(x, y) || !st.isActive(x, y)) continue;
-        const t = st.type[st.idx(x, y)];
-        out.add(t);
-        if (ALCHEMY.has(t)) this._alchemyTable = true;
+        if (!st.inBounds(x, y)) continue;
+        const ii = st.idx(x, y);
+        if (st.isActive(x, y)) {
+          const t = st.type[ii];
+          out.add(t);
+          if (ALCHEMY.has(t)) this._alchemyTable = true;
+          // CountsAsWaterForCrafting（水槽 172/207 近似：本仓库按 sheet 判）
+          const sheet = TILE_DEFS[t]?.vanilla?.sheet;
+          if (sheet === 172 || sheet === 207) this._nearLiquid.water = true;
+        }
+        if (st.liquid[ii] > 200) {
+          const lt = st.liquidType[ii];
+          if (lt === 0 || lt === undefined) this._nearLiquid.water = true;
+          else if (lt === 2) this._nearLiquid.honey = true;
+          else if (lt === 1) this._nearLiquid.lava = true;
+        }
       }
     }
     return out;
   }
+  private _nearLiquid = { water: false, honey: false, lava: false };
 
   /** 可用原版配方列表（Recipe.UpdateRecipeList 主干；供 UI 列表渲染） */
   private _alchemyTable = false;
   vanillaAvailableRecipes() {
     return availableRecipes(this.player.inv, {
       nearbyInternal: this.vanillaNearbyStations(),
-      nearWater: true, nearHoney: true, nearLava: true, // 液体源扫描 P4 精确化（先宽松）
+      nearWater: this._nearLiquid.water, nearHoney: this._nearLiquid.honey, nearLava: this._nearLiquid.lava,
       zoneSnow: this.scene.zoneSnow,
       zoneGraveyard: this.scene.zoneGraveyard,
     });

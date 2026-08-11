@@ -39,7 +39,10 @@ export interface ItemDef {
     type: ToolType;
     power?: number;       // 工具力（镐/斧/锤）
     damage?: number;      // 武器伤害
-    speed?: number;       // 使用间隔 tick
+    speed?: number;       // 挥砍动画 tick（≈原版 useAnimation）
+    /** 原版 useTime（Item.cs SetDefaults）：挖掘每击冷却——原版挖掘节奏的真基准，
+     *  铜 15-23 / 铁 13-20 / 银 11-19 / 金 17-23（applyItemTime 冷却=useTime） */
+    useTime?: number;
     knockback?: number;
     reach?: number;       // 攻击/作用半径（px）
   };
@@ -146,53 +149,53 @@ for (const [prefix, cn, defs] of armorTiers) {
 // ---- 工具/武器（数值 = 官方原版 1.4.0.5 Item.cs SetDefaults，铜币价值）----
 // 木镐/木斧为自定义低档（原版无对应）；木剑(24)=官方 7 伤、木锤(196)=官方 25 锤力
 item({ key: 'wood_pickaxe', name: '木镐', maxStack: 1, value: 50,
-  tool: { type: 'pick', power: 12, damage: 2, speed: 23, knockback: 2, reach: 2.6 * 16 } });
+  tool: { type: 'pick', power: 12, damage: 2, speed: 23, useTime: 17, knockback: 2, reach: 2.6 * 16 } });
 item({ key: 'wood_axe', name: '木斧', maxStack: 1, value: 50,
-  tool: { type: 'axe', power: 4, damage: 2, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
+  tool: { type: 'axe', power: 4, damage: 2, speed: 30, useTime: 22, knockback: 4.5, reach: 2.4 * 16 } });
 item({ key: 'wood_sword', name: '木剑', maxStack: 1, value: 100,
-  tool: { type: 'sword', damage: 7, speed: 25, knockback: 4, reach: 2.2 * 16 } });
+  tool: { type: 'sword', damage: 7, speed: 25, useTime: 25, knockback: 4, reach: 2.2 * 16 } });
 item({ key: 'wood_hammer', name: '木锤', maxStack: 1, value: 50,
-  tool: { type: 'hammer', power: 25, damage: 2, speed: 37, knockback: 5.5, reach: 2.4 * 16 },
+  tool: { type: 'hammer', power: 25, damage: 2, speed: 37, useTime: 25, knockback: 5.5, reach: 2.4 * 16 },
   desc: '敲除背景墙' });
 // 铜（3509/3506/3508/3505）
 item({ key: 'copper_pickaxe', name: '铜镐', maxStack: 1, value: 500,
-  tool: { type: 'pick', power: 35, damage: 4, speed: 23, knockback: 2, reach: 2.6 * 16 } });
+  tool: { type: 'pick', power: 35, damage: 4, speed: 23, useTime: 15, knockback: 2, reach: 2.6 * 16 } });
 item({ key: 'copper_axe', name: '铜斧', maxStack: 1, value: 400,
-  tool: { type: 'axe', power: 7, damage: 3, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
+  tool: { type: 'axe', power: 7, damage: 3, speed: 30, useTime: 21, knockback: 4.5, reach: 2.4 * 16 } });
 item({ key: 'copper_sword', name: '铜剑', maxStack: 1, value: 450,
-  tool: { type: 'sword', damage: 8, speed: 23, knockback: 5, reach: 2.2 * 16 } });
+  tool: { type: 'sword', damage: 8, speed: 23, useTime: 23, knockback: 5, reach: 2.2 * 16 } });
 item({ key: 'copper_hammer', name: '铜锤', maxStack: 1, value: 400,
-  tool: { type: 'hammer', power: 35, damage: 4, speed: 33, knockback: 5.5, reach: 2.4 * 16 },
+  tool: { type: 'hammer', power: 35, damage: 4, speed: 33, useTime: 23, knockback: 5.5, reach: 2.4 * 16 },
   desc: '敲除背景墙' });
 // 铁（1/10/4/7）
 item({ key: 'iron_pickaxe', name: '铁镐', maxStack: 1, value: 2000,
-  tool: { type: 'pick', power: 40, damage: 5, speed: 20, knockback: 2, reach: 2.6 * 16 } });
+  tool: { type: 'pick', power: 40, damage: 5, speed: 20, useTime: 13, knockback: 2, reach: 2.6 * 16 } });
 item({ key: 'iron_axe', name: '铁斧', maxStack: 1, value: 1600,
-  tool: { type: 'axe', power: 9, damage: 5, speed: 27, knockback: 4.5, reach: 2.4 * 16 } });
+  tool: { type: 'axe', power: 9, damage: 5, speed: 27, useTime: 19, knockback: 4.5, reach: 2.4 * 16 } });
 item({ key: 'iron_sword', name: '铁剑', maxStack: 1, value: 1800,
-  tool: { type: 'sword', damage: 10, speed: 21, knockback: 5, reach: 2.2 * 16 } });
+  tool: { type: 'sword', damage: 10, speed: 21, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
 item({ key: 'iron_hammer', name: '铁锤', maxStack: 1, value: 1600,
-  tool: { type: 'hammer', power: 40, damage: 7, speed: 30, knockback: 5.5, reach: 2.4 * 16 },
+  tool: { type: 'hammer', power: 40, damage: 7, speed: 30, useTime: 20, knockback: 5.5, reach: 2.4 * 16 },
   desc: '敲除背景墙' });
 // 银（3515/3512/3514/3511）
 item({ key: 'silver_pickaxe', name: '银镐', maxStack: 1, value: 5000,
-  tool: { type: 'pick', power: 45, damage: 6, speed: 19, knockback: 2, reach: 2.6 * 16 } });
+  tool: { type: 'pick', power: 45, damage: 6, speed: 19, useTime: 11, knockback: 2, reach: 2.6 * 16 } });
 item({ key: 'silver_axe', name: '银斧', maxStack: 1, value: 4000,
-  tool: { type: 'axe', power: 10, damage: 6, speed: 26, knockback: 4.5, reach: 2.4 * 16 } });
+  tool: { type: 'axe', power: 10, damage: 6, speed: 26, useTime: 18, knockback: 4.5, reach: 2.4 * 16 } });
 item({ key: 'silver_sword', name: '银剑', maxStack: 1, value: 4500,
-  tool: { type: 'sword', damage: 11, speed: 21, knockback: 5, reach: 2.2 * 16 } });
+  tool: { type: 'sword', damage: 11, speed: 21, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
 item({ key: 'silver_hammer', name: '银锤', maxStack: 1, value: 4000,
-  tool: { type: 'hammer', power: 45, damage: 9, speed: 29, knockback: 5.5, reach: 2.4 * 16 },
+  tool: { type: 'hammer', power: 45, damage: 9, speed: 29, useTime: 19, knockback: 5.5, reach: 2.4 * 16 },
   desc: '敲除背景墙' });
 // 金（3521/3518/3520/3517）
 item({ key: 'gold_pickaxe', name: '金镐', maxStack: 1, value: 10000,
-  tool: { type: 'pick', power: 55, damage: 6, speed: 20, knockback: 2, reach: 2.6 * 16 } });
+  tool: { type: 'pick', power: 55, damage: 6, speed: 20, useTime: 17, knockback: 2, reach: 2.6 * 16 } });
 item({ key: 'gold_axe', name: '金斧', maxStack: 1, value: 8000,
-  tool: { type: 'axe', power: 11, damage: 7, speed: 26, knockback: 4.5, reach: 2.4 * 16 } });
+  tool: { type: 'axe', power: 11, damage: 7, speed: 26, useTime: 18, knockback: 4.5, reach: 2.4 * 16 } });
 item({ key: 'gold_sword', name: '金剑', maxStack: 1, value: 9000,
-  tool: { type: 'sword', damage: 13, speed: 20, knockback: 5, reach: 2.2 * 16 } });
+  tool: { type: 'sword', damage: 13, speed: 20, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
 item({ key: 'gold_hammer', name: '金锤', maxStack: 1, value: 8000,
-  tool: { type: 'hammer', power: 55, damage: 9, speed: 28, knockback: 5.5, reach: 2.4 * 16 },
+  tool: { type: 'hammer', power: 55, damage: 9, speed: 28, useTime: 23, knockback: 5.5, reach: 2.4 * 16 },
   desc: '敲除背景墙' });
 
 // ===================== 原版素材批次：新材料 / 方块 / 家具 =====================

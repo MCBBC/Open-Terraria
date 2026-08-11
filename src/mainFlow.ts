@@ -113,7 +113,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)
       onChat: (t, r, g, b) => ui.chatMessage(t, r, g, b),
       // NPC 对话系统(SetTalkNPC + GetChat)
-      onNpcDialog: (name, chat, buttons) => ui.showNpcDialog(name, chat, buttons),
+      onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onNpcShop: (title, items, copper) => ui.showNpcShop(title, items, copper),
       onReadSign: (text) => ui.showSign(text),

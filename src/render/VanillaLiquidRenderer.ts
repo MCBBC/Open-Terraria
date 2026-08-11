@@ -338,7 +338,6 @@ function drawLiquidBehindTiles(
     return t;
   };
 
-  let _dbgCount = 0;
   for (let x = Math.max(1, tx0); x <= Math.min(st.w - 2, tx1); x++) {
     for (let y = Math.max(1, ty0); y <= Math.min(st.h - 2, ty1); y++) {
       const i = st.idx(x, y);
@@ -355,10 +354,8 @@ function drawLiquidBehindTiles(
       };
       const L = lq(-1, 0), R = lq(1, 0), U = lq(0, -1), D = lq(0, 1);
       // flag 语义(:3967-4053):flag=左 / flag2=右 / flag3=上 / flag4=下(>240)
-      let fL = L.lq > 0; const fR = R.lq > 0, fU = U.lq > 0, fD = D.lq > 240;
+      let fL = L.lq > 0; let fR = R.lq > 0; const fU = U.lq > 0, fD = D.lq > 240;
       if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
-      _dbgCount++;
-      (typeof window !== 'undefined' ? window as unknown as Record<string, number> : {} as Record<string, number>).__infilCount = _dbgCount;
 
       // 液体类型与最大液位(:3940-3965 取最高液位邻居)
       let maxLq = 0, lt = 0;
@@ -375,7 +372,7 @@ function drawLiquidBehindTiles(
       let rx = 0, ry = 4, rw = 16, rh = 16;   // liquidSize(源矩形)
       let px = x * 16, py = y * 16;            // 目标位置
 
-      if (fD && (fL || fR)) { fL = true; /* :4070-4074 下+任一侧 → 视为双侧 */ }
+      if (fD && (fL || fR)) { fL = true; fR = true; /* :4070-4074 下+任一侧 → 双侧全宽 */ }
       if (!(fU && (fL || fR)) && !(fD && fU)) {
         if (fU) {
           // 仅上方有水:格顶 16×4 条(:4081-4087;坡面/半砖加深到 12)
