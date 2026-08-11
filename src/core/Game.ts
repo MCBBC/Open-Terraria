@@ -2244,13 +2244,19 @@ export class Game implements GameHooks {
     };
     switch (cw.kind) {
       case 'grenade': {
-        // AI_016：引信（原版 timeLeft：手雷 180 / 炸弹 150 / 炸药 135）弹跳后爆炸；
-        // 伤害下限 60（手雷 item damage=0，威力在爆炸不在直击）
-        const fuse = cw.shoot === 29 ? 150 : cw.shoot === 30 ? 135 : 180;
-        const dmg = cw.shoot === 30 ? 250 : Math.max(cw.damage, 60);
+        // AI_016：引信 timeLeft（Projectile.SetDefaults：炸弹28=150/炸药棍29=135/手雷30=180）
+        // ——此前 29/30 映射对调（炸药棍拿了炸弹的 150、手雷拿了炸药棍的 135）
+        const fuse = cw.shoot === 28 ? 150 : cw.shoot === 29 ? 135 : 180;
+        // 爆炸伤害（Projectile.SetDefaults）：炸弹28=100/炸药棍29=250/手雷30=60；
+        // 此前手雷误取 250
+        const dmg = cw.shoot === 28 ? 100 : cw.shoot === 29 ? 250 : Math.max(cw.damage, 60);
+        // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
+        // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
+        const er = cw.shoot === 28 || cw.shoot === 37 || cw.shoot === 516 || cw.shoot === 519 ? 4
+          : cw.shoot === 29 || cw.shoot === 470 || cw.shoot === 637 ? 7 : 0;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg)), 'projectiles');
+          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0)), 'projectiles');
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -3698,7 +3704,8 @@ export class Game implements GameHooks {
         }
         return false;
       },
-      explode: (tx: number, ty: number, damage: number) => this.explodeAt(tx, ty, damage),
+      explode: (tx: number, ty: number, damage: number, radius?: number, destroyTiles?: boolean) =>
+        this.explodeAt(tx, ty, damage, radius, destroyTiles),
       toast: (m: string) => this.cb.onToast(m),
       sfx: (n: string, x?: number, y?: number) => {
         if (x !== undefined && y !== undefined) this.sfxAt(n as SfxName, x, y);
@@ -3730,40 +3737,76 @@ export class Game implements GameHooks {
   }
 
   /** 爆炸(炸药/地雷/巨石近似):半径 3 清软块 + 范围伤害 + 粒子 */
-  private explodeAt(tx: number, ty: number, damage: number) {
+  /** 爆炸不可炸 tile 表（Projectile.CanExploteTile cs:75764 1:1）：
+   *  地牢砖族 tileDungeon{41,43,44,677-679}(Main.cs:7941) + 基础宝箱 BasicChest{21,467}
+   *  (TileID.cs:315) + switch 黑名单{26 祭坛,88 柜子,121/122 史莱姆块?,150 蛛网? ,
+   *  211 血月砖?,226 蜥蜴砖,237 蜥蜴祭坛,248-250 尖刺?,346/470/475/504 陷阱族,685/686} */
+  private static readonly EXPLODE_NEVER = new Set([41, 43, 44, 677, 678, 679, 21, 467,
+    26, 88, 121, 122, 150, 211, 226, 237, 248, 249, 250, 346, 470, 475, 504, 685, 686]);
+  /** 困难模式矿石（仅 scarab 弹 1086/1087 可炸——未引入恒 false） */
+  private static readonly EXPLODE_HM_ORE = new Set([107, 108, 111, 221, 222, 223]);
+
+  /** 爆炸 1:1（Projectile.ExplodeTiles cs:75835 + CanExploteTile cs:75764）：
+   *  radius=Projectile.cs:75262 半径表（炸弹族28/37/516/519=4、炸药棍族29/470/637=7、
+   *  放置炸药108=10、手雷族不破坏地形→destroyTiles=false）；
+   *  免疫表 EXPLODE_NEVER + 困难模式矿石 + 陨石/狱石(37/58)肉前免疫 + 黑檀石(77)肉前
+   *  地狱免疫 + 蜥蜴砖(137)石巨人前神庙门行(frameY/18∈1-4)免疫 + 墙350；
+   *  破坏走 breakTile（=WorldGen.KillTile 全语义，**含掉落**——曾误注释"不掉物品"）；
+   *  墙破坏 ShouldWallExplode(:75739)：盘内任一格无墙 → 每 destroyed 格 3×3 清墙(≠350) */
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true) {
     const st = this.world.store;
-    const R = 3;
+    const R = radius;
+    const hardMode = !!this.world.flags.hardMode;
+    const golemDown = !!this.world.flags['downed_245'];
+    const canExplode = (x: number, y: number): boolean => {
+      const t = st.get(x, y);
+      const sheet = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+      if (Game.EXPLODE_NEVER.has(sheet)) return false;
+      const ii = st.idx(x, y);
+      if (st.wall[ii] === 350) return false;
+      if (Game.EXPLODE_HM_ORE.has(sheet)) return false;
+      if ((sheet === 37 || sheet === 58) && !hardMode) return false;
+      if (sheet === 77 && !hardMode && y >= this.world.lavaLine) return false;
+      if (sheet === 137 && !golemDown) {
+        const row = Math.floor(st.frameY[ii] / 18);
+        if (row >= 1 && row <= 4) return false; // 神庙门行（:75805 (uint)(num-1)<=3）
+      }
+      return true;
+    };
     // 半径内被炸的格：多格 framed 物体按整件清除（锚点邻域扫描，同 breakTile 语义），
     // 防半件残留可重复破坏；炸药(141/142)收集后链式引爆（原版连爆语义，上限 32 防递归）
     const chain: Array<[number, number]> = [];
-    for (let dx = -R; dx <= R; dx++) {
-      for (let dy = -R; dy <= R; dy++) {
-        if (dx * dx + dy * dy > R * R) continue;
-        const x = tx + dx, y = ty + dy;
-        if (!st.inBounds(x, y)) continue;
-        const t = st.get(x, y);
-        const d = TILE_DEFS[t];
-        if (!d || d.pick < 0 || d.pick >= 200 || d.key.startsWith('v_75') || d.key.startsWith('v_76')) continue;
-        if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
-        if ((d.w ?? 1) > 1 || (d.h ?? 1) > 1) {
-          // 多格物体：找锚点整件清（无掉落——原版爆炸摧毁不掉物品）
-          const ow = d.w ?? 1, oh = d.h ?? 1;
-          let ax = x, ay = y;
-          for (let sx = -(ow - 1); sx <= ow - 1 && st.inBounds(x, y); sx++) {
-            for (let sy = -(oh - 1); sy <= oh - 1; sy++) {
-              const nx = x + sx, ny = y + sy;
-              if (!st.inBounds(nx, ny) || st.type[st.idx(nx, ny)] !== t) continue;
-              const ni = st.idx(nx, ny);
-              const phaseAnchor = st.frameX[ni] % (ow * 18) === 0 && st.frameY[ni] % (oh * 18) === 0;
-              const boxContains = nx <= x && nx + ow > x && ny <= y && ny + oh > y;
-              if (phaseAnchor && boxContains) { ax = nx; ay = ny; sx = ow; break; }
+    if (destroyTiles && R > 0) {
+      // ShouldWallExplode(:75739)：盘内任一格无墙 → 墙也可炸
+      let wallSplode = false;
+      for (let dx = -R; dx <= R && !wallSplode; dx++) {
+        for (let dy = -R; dy <= R; dy++) {
+          if (dx * dx + dy * dy > R * R) continue;
+          const x = tx + dx, y = ty + dy;
+          if (st.inBounds(x, y) && st.wall[st.idx(x, y)] === 0) { wallSplode = true; break; }
+        }
+      }
+      for (let dx = -R; dx <= R; dx++) {
+        for (let dy = -R; dy <= R; dy++) {
+          if (dx * dx + dy * dy > R * R) continue;
+          const x = tx + dx, y = ty + dy;
+          if (!st.inBounds(x, y)) continue;
+          const t = st.get(x, y);
+          if (t !== 0) {
+            if (!canExplode(x, y)) continue;
+            if (t === TILE_BY_KEY['v_141_explosives']) { chain.push([x, y]); continue; }
+            this.breakTile(x, y); // KillTile 全语义（掉落/树/罐/幼虫/蜂巢…）
+          }
+          if (wallSplode) {
+            // 每 destroyed 格 3×3 清墙（:75852-75867，墙≠350）
+            for (let wx = x - 1; wx <= x + 1; wx++) {
+              for (let wy = y - 1; wy <= y + 1; wy++) {
+                if (!st.inBounds(wx, wy)) continue;
+                const wi = st.idx(wx, wy);
+                if (st.wall[wi] > 0 && st.wall[wi] !== 350) st.setWallSilent(wx, wy, 0);
+              }
             }
           }
-          for (let cdx = 0; cdx < ow; cdx++) {
-            for (let cdy = 0; cdy < oh; cdy++) st.setTile(ax + cdx, ay + cdy, 0);
-          }
-        } else {
-          st.setTile(x, y, 0);
         }
       }
     }
@@ -3784,7 +3827,7 @@ export class Game implements GameHooks {
       if (st.get(ex, ey) !== TILE_BY_KEY['v_141_explosives']) continue;
       st.setTile(ex, ey, 0);
       chained++;
-      this.explodeAt(ex, ey, 500);
+      this.explodeAt(ex, ey, 500, 10);
     }
   }
 

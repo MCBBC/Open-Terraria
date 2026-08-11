@@ -6,6 +6,7 @@
 //  3) 水面波动: 同一液面截图 3 帧 150ms 间隔 → 表面带像素差异 > 0
 import puppeteer from 'puppeteer-core';
 import { PNG } from 'pngjs';
+import { writeFileSync } from 'fs';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = process.env.URL || 'http://localhost:5199';
@@ -132,23 +133,24 @@ if (!water) {
     g.player.vx = 0; g.player.vy = 0;
     return g.renderer?.zoom ?? g.camera?.zoom ?? 1;
   }, water.x, water.y);
-  await new Promise((r) => setTimeout(r, 1500));
-  const clip = { x: 640 - 200, y: 400 - 24, width: 400, height: 56 };
+  await new Promise((r) => setTimeout(r, 2000));
+  // 玩家浮在水面 → 视口内必含大片液面;全视口截图直接做帧间 diff(不猜液面屏幕位置)
   const shots = [];
   for (let k = 0; k < 3; k++) {
-    const buf = await page.screenshot({ clip });
+    const buf = await page.screenshot({});
     shots.push(PNG.sync.read(buf));
-    await new Promise((r) => setTimeout(r, 160));
+    await new Promise((r) => setTimeout(r, 200));
   }
-  let diff01 = 0, diff02 = 0;
+  let diff01 = 0, diff02 = 0, blueA = 0;
   const a = shots[0].data, b = shots[1].data, c = shots[2].data;
   for (let p = 0; p < a.length; p += 4) {
     if (Math.abs(a[p] - b[p]) > 8 || Math.abs(a[p + 1] - b[p + 1]) > 8 || Math.abs(a[p + 2] - b[p + 2]) > 8) diff01++;
     if (Math.abs(a[p] - c[p]) > 8 || Math.abs(a[p + 1] - c[p + 1]) > 8 || Math.abs(a[p + 2] - c[p + 2]) > 8) diff02++;
+    if (a[p + 3] > 60 && a[p + 2] > a[p] + 20) blueA++;
   }
-  await page.screenshot({ path: '/tmp/water-surface.png', clip });
-  check('液面随时间波动(帧间像素变化)', diff01 > 20 && diff02 > 20,
-    `zoom=${zoom} 帧0→1 ${diff01}px, 0→2 ${diff02}px`);
+  writeFileSync('/tmp/water-surface.png', PNG.sync.write(shots[0]));
+  check('液面随时间波动(帧间像素变化)', diff01 > 100 && diff02 > 100,
+    `zoom=${zoom} 帧0→1 ${diff01}px, 0→2 ${diff02}px, 视口内水色px ${blueA}`);
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

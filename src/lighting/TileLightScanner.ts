@@ -29,9 +29,23 @@ export interface PerFrameLight { x: number; y: number; r: number; g: number; b: 
  * - 84 开花药草：style2 死亡草随闪烁暗红 / style5 火焰草橙 / style6 颤骨草淡蓝（cs:3009）
  */
 export function specialTileLight(
-  sheet: number, frameX: number, _frameY: number, flicker: FlickerClock,
+  sheet: number, frameX: number, frameY: number, flicker: FlickerClock,
 ): [number, number, number] | null {
   switch (sheet) {
+    case 42: {
+      // 灯笼(TileLightScanner 主 switch case 42):frameX!=0(灭档 18)不发光;
+      // 光色按样式行 frameY/36 —— def.light 静态单色由 lantern def 移除,全走此表
+      if (frameX !== 0) return null;
+      const LANTERN_LIGHT: Record<number, [number, number, number]> = {
+        0: [0.7, 0.65, 0.55], 1: [0.9, 0.75, 0.6], 2: [0.8, 0.6, 0.6],
+        3: [0.65, 0.5, 0.2], 4: [0.5, 0.7, 0.4], 5: [0.9, 0.4, 0.2],
+        6: [0.7, 0.75, 0.3], 7: [0.8, 0.8, 0.8], 8: [0.75, 0.6, 0.3],
+        9: [0.9, 0.2, 0.4], 11: [0.85, 0.6, 1], 14: [1, 0.95, 0.65],
+      };
+      // 样式 7/9 原版叠加 demonTorch 调制(Main.demonTorch 全局比值)——
+      // 恶魔火把计数系统未实装,取中值 0.5 近似
+      return LANTERN_LIGHT[Math.floor(frameY / 36)] ?? [0.7, 0.65, 0.55];
+    }
     case 126:
       if (frameX < 36) {
         const [r, g, b] = flicker.discoColor();

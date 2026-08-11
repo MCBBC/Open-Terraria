@@ -488,6 +488,11 @@ export class Enemy extends Entity {
         this.despawnTimer--;
         if (this.despawnTimer <= 0) {
           if (this.def.boss) this.bossFled = true; // 非击杀消亡:天亮离场/玩家死后撤离
+          // 风气球 594 自然消散：挂载史莱姆一并消失（防 -999 冻结悬空）
+          if (this.vanillaId === 594) {
+            const sl = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
+            if (sl) sl.dead = true;
+          }
           this.dead = true;
         }
       }
@@ -543,6 +548,8 @@ export class Enemy extends Entity {
    *  卡墙（L61937）：落地 X == 起跳 X → direction 反转 + ai[2]=200 冷却（期间不索敌）。
    *  蚱蜢(377/446) 复用本 AI（ai0 额外 +3，跳得更频繁） */
   private slimeAI(game: GameHooks, player: Player | null) {
+    // ai[0]==-999：风气球挂载冻结（NPC.cs:61441 帧0不行动，位置由气球驱动）
+    if (this.ai0 === -999) return;
     const st = game.world.store;
     const underground = this.cy / TILE > game.world.groundLevel;
     const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
@@ -2379,7 +2386,9 @@ export class Enemy extends Entity {
       case 67: this.snailAI(game); return;                                // AI_067 蜗牛
       case 68: this.duckFlyAI(game, player); return;                      // AI_068 鸭飞形
       case 112: this.fairyAI(game, player); return;                       // AI_112 仙灵
+      case 113: this.windyBalloonAI(game, player); return;                // AI_113 风气球（cs:43036 挂史莱姆）
       case 114: this.dragonflyAI(game, player); return;                   // AI_114 蜻蜓
+      case 119: this.dandelionAI(game, player); return;                   // AI_119 蒲公英（cs:43254 喷籽）
       case 115: this.ladybugAI(game, player); return;                     // AI_115 瓢虫/椿象
       case 116: this.waterStriderAI(game); return;                        // AI_116 水黾
       case 118: this.seahorseAI(game); return;                            // AI_118 海马
@@ -2710,6 +2719,129 @@ export class Enemy extends Entity {
    *  朝锚突进×3、16-96px → ×1+抖动；突进 4 帧（离锚 >112px 延长 200 帧）；
    *  向下 3 格实心/液体 → vy-=0.2 且 v×0.9、向上 30 格无实心 → v×0.9；wet → vy=-3 弹出；
    *  避敌（每 15 帧）：100px 敌/150px 玩家叠加逃逸（上限 16）并把锚点挪向逃逸方向 */
+  /** AI_113 风气球 594（NPC.cs:43036-43175）：首帧挂载史莱姆（1/180 金 -4 / 1/10 母 -7 /
+   *  1/3 绿 -3，ai[0]=-999 冻结 :61441）；横速朝向加速至 2+|wind|×2；前方 8 格探测升降；
+   *  玩家 400px 内跟随 Y；湿/撞 → 爆（HitEffect :82590 解冻 slave ai[0]=0 落地开打）；
+   *  slave 亡 → 自由上飘随风漂移 */
+  private windyBalloonAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const wind = game.world.weather.windSpeedTarget;
+    if (!this.aiInit) {
+      this.aiInit = true;
+      this.ai2 = 1 + Math.floor(Math.random() * 7); // ai[2] 装饰随机
+      const slave = Enemy.fromVanilla(1, this.cx, this.cy);
+      if (slave) {
+        // 变体近似（SetDefaultsFromNetId -4/-7/-3：scale + 属性/颜色覆盖）
+        const r = Math.random();
+        if (r < 1 / 180) { // 金史莱姆 -4
+          slave.vanillaScale = 0.6; slave.w = Math.round(slave.w * 0.6 / (slave.vanillaScale || 1));
+          slave.hp = slave.maxHp = 150; slave.def.damage = 5; slave.def.defense = 5;
+          slave.colorRGBA = [250, 30, 90, 90];
+        } else if (r < 1 / 10) { // 母史莱姆 -7（纯 scale 1.05）
+          slave.vanillaScale = 1.05; slave.w = Math.round(slave.w * 1.05); slave.h = Math.round(slave.h * 1.05);
+        } else if (r < 1 / 3) { // 绿史莱姆 -3
+          slave.vanillaScale = 0.9; slave.w = Math.round(slave.w * 0.9); slave.h = Math.round(slave.h * 0.9);
+          slave.hp = slave.maxHp = 14; slave.def.damage = 6; slave.def.defense = 0;
+          slave.colorRGBA = [0, 220, 40, 100];
+        }
+        slave.ai0 = -999; // 挂载冻结标记（slimeAI 首行放行）
+        slave.id = (game as unknown as { entities: { nextId: number; add(e: unknown, b: string): void } }).entities.nextId++;
+        (game as unknown as { entities: { add(e: unknown, b: string): void } }).entities.add(slave, 'enemies');
+        this.ai3 = slave.id;
+        this.vanillaScale = slave.vanillaScale ?? 1; // ai[1] = slave.scale（气球随之缩放）
+      }
+    }
+    const scale = this.vanillaScale ?? 1;
+    const enemies = game.enemies() as Enemy[];
+    const slave = enemies.find((n) => n.id === this.ai3 && !n.dead && n.vanillaId === 1 && n.ai0 === -999) ?? null;
+    this.visAngle = this.vx * 0.05; // rotation（cs:43076）
+    const pop = () => {
+      if (slave) { slave.ai0 = 0; slave.y -= 10; } // HitEffect :82590 解冻落地
+      this.dead = true;
+      game.playSfxFiles(this.def.killedSound, 1, this.cx, this.cy);
+    };
+    if (slave) {
+      // 湿/入墙 → 爆（cs:43089-43102）
+      const selfSolid = st.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+      if (this.inWater || slave.inWater || selfSolid) { pop(); return; }
+      // X 朝向（TargetClosest 近似：有玩家朝玩家，否则顺风）加速至 num5（cs:43114-43128）
+      const dir = player && !player.dead ? (player.cx > this.cx ? 1 : -1) : (wind > 0 ? 1 : -1);
+      this.facing = dir;
+      const num5 = 2 + Math.abs(wind) * 2;
+      if (Math.sign(this.vx) !== dir || Math.abs(this.vx) < num5) {
+        this.vx += dir * 0.01;
+        if (this.vx * dir < 0) this.vx += Math.abs(this.vx) > num5 ? dir * 0.1 : dir * 0.05;
+        else if (Math.abs(this.vx) > num5) this.vx = dir * num5;
+      }
+      // 前方探测（num6/num7，8+num3 格 → num3 简化 0，cs:43130-43153）
+      const num6 = Math.floor((this.x + this.w / 2) / TILE) + dir;
+      const num7 = Math.floor((this.y + this.h) / TILE);
+      let open = true, near = false;
+      for (let i = num7; i < num7 + 8; i++) {
+        if (!st.inBounds(num6, i)) break;
+        const ii = st.idx(num6, i);
+        if (st.isSolid(num6, i) || st.liquid[ii] > 0) {
+          if (i < num7 + 5) near = true;
+          open = false;
+          break;
+        }
+      }
+      // 玩家 400px 内 → 跟随 Y（±0.035，cs:43155-43175）；否则探测升降（+0.05/-0.1/-0.2 钳 [-4,2]）
+      const pD = player && !player.dead ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
+      if (pD < 400) {
+        if (this.cy + this.h / 4 > player!.cy && this.vy > -2) this.vy -= this.vy > 0 ? 0.07 : 0.035;
+        else if (this.cy + this.h / 4 < player!.cy && this.vy < 2) this.vy += this.vy < 0 ? 0.07 : 0.035;
+      } else {
+        if (open) this.vy += 0.05; else this.vy -= 0.1;
+        if (near) this.vy -= 0.2;
+        this.vy = Math.max(-4, Math.min(2, this.vy));
+      }
+      this.x += this.vx; this.y += this.vy;
+      // slave 挂气球下（cs:43177 nPC.Center = Bottom + (0,-8+56*scale)）
+      slave.x = this.cx - slave.w / 2;
+      slave.y = this.y + this.h - 8 + 56 * scale - slave.h / 2;
+      slave.vx = this.vx; slave.vy = this.vy;
+    } else {
+      // 无 slave：自由上飘随风（cs:43179-43193）；撞墙爆
+      this.vy = Math.max(-8, Math.min(8, this.vy - 0.2));
+      this.vx = Math.max(-4, Math.min(4, this.vx + wind * 0.3));
+      this.x += this.vx; this.y += this.vy;
+      if (st.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { pop(); return; }
+    }
+  }
+
+  /** AI_119 蒲公英 628（NPC.cs:43254-43318）：非风日快速消散（timeLeft=10）；
+   *  玩家在下风 600px 内且 |dy|<100 → 喷籽态 ai[0]=1：计数 40 发 1-3 枚种子
+   *  （proj 836 伤 7——Dart 近似），>80 回待机。本体无位移（原版仅状态机+弹幕） */
+  private dandelionAI(game: GameHooks, player: Player | null) {
+    const wt = game.world.weather;
+    if (!wt.shouldUseWindyDayMusic) this.encourageDespawn(10); // :43257
+    if (!player || player.dead) return;
+    const dx = player.cx - this.cx;
+    const flag = Math.abs(player.cy - this.cy) < 100 && Math.abs(dx) < 600
+      && ((dx > 0 && wt.windSpeedCurrent > 0) || (dx < 0 && wt.windSpeedCurrent < 0));
+    if (this.ai0 === 0) {
+      if (flag) this.ai0 = 1;
+      this.ai1 = 0;
+    } else if (this.ai0 === 1) {
+      if (!flag) { this.ai0 = 0; return; }
+      this.ai1++;
+      if (this.ai1 > 80) { this.ai0 = 0; return; }
+      if (this.ai1 === 40) {
+        // :43291-43308 种子：vector=(dir*Next(-2,10), 10+Next(-6,6))×0.25 + (dir*2,-2)，vy 保底 -3
+        const dir = dx > 0 ? 1 : -1;
+        const n = 1 + Math.floor(Math.random() * 3);
+        const ents = (game as unknown as { entities: { add(e: unknown, b: string): void } }).entities;
+        for (let i = 0; i < n; i++) {
+          const vx = dir * 2 + dir * (Math.floor(Math.random() * 12) - 2) * 0.25;
+          let vy = -2 + (10 + Math.floor(Math.random() * 12) - 6) * 0.25;
+          if (vy > -3) vy = -3;
+          ents.add(new Dart(this.cx + dir * 6, this.cy, vx, vy, 7), 'projectiles');
+        }
+      }
+    }
+  }
+
   private dragonflyAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     if (!this.aiInit) { this.aiInit = true; this.ai0 = 1; this.ai1 = 0; this.ai2 = this.cx; this.ai3 = this.cy; }
@@ -3203,6 +3335,11 @@ export class Enemy extends Entity {
       // 石巨人族(245/246/247/248):血尽转换在各 AI 首行(本体死亡演出/头转自由态),同样放行
       if (this.vanillaId === 245 || this.vanillaId === 246 || this.vanillaId === 247 || this.vanillaId === 248) return false;
       this.dead = true;
+      // 风气球 594 爆裂：解冻挂载史莱姆（原版 HitEffect :82586-82594 slave ai[0]=0 + 上移 10）
+      if (this.vanillaId === 594) {
+        const slave = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);
+        if (slave) { slave.ai0 = 0; slave.y -= 10; }
+      }
       // 母史莱姆死亡分裂（Wiki 权威：1-3 只 Baby Slime，netID -5 = 半透明灰黑小史莱姆；
       // SetDefaultsFromNetId -5：base 1 × scale 0.9 + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）。
       // 联机傀儡跳过：分裂权威在房主（其真身分裂后经 msg23 快照下发，本地生成会留幽灵实体）

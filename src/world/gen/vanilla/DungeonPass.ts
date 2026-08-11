@@ -1082,7 +1082,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
             }
             if (!placedLight) {
               const styleIdx = st.wall[st.idx(x, y)] === roomWall[1] ? 1 : st.wall[st.idx(x, y)] === roomWall[2] ? 2 : 0;
-              if (placeFurn(st, x, y, LANTERN, lampStyles[styleIdx], 'top')) {
+              if (placeFurn(st, x, y, LANTERN, lampStyles[styleIdx], 'top', 1, true, 36)) { // 竖排样式行高36(TileLightScanner frameY/36 实证)
                 fail = 0; added++;
                 wireToSwitch(st, rng, dc, x, y, ex0, ex1, ey0, ey1, isDWall, isBrick, false);
               }
@@ -1464,7 +1464,7 @@ function wallDungeonSpread(st: TileStore, sx: number, sy: number, wallType: numb
  * 成功条件:fw×fh 全净空 + 底行下方全实心(bottom 时)。帧 = style*fw*18 + dx*18 / dy*18。
  * flip=-1 时水平镜像帧。返回是否放置成功。
  */
-export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true): boolean {
+export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number): boolean {
   const def = TILE_DEFS[tile];
   if (!def) return false;
   const fw = def.vanilla?.fw ?? def.w ?? 1;
@@ -1486,7 +1486,13 @@ export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: numb
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
       const fx = flip < 0 ? fw - 1 - dx : dx;
-      st.setTileSilent(x0 + dx, yTop + dy, tile, style * stride + fx * 18, dy * 18);
+      if (styleRowH !== undefined) {
+        // 竖排样式(TileObjectData StyleHorizontal=false 默认族:灯笼42/工作台18/钢琴87 等):
+        // 样式写 frameY(styleRowH 实证,灯笼 36),frameX=0(灯具亮态;灭态=18 由接线翻转)
+        st.setTileSilent(x0 + dx, yTop + dy, tile, fx * 18, style * styleRowH + dy * 18);
+      } else {
+        st.setTileSilent(x0 + dx, yTop + dy, tile, style * stride + fx * 18, dy * 18);
+      }
     }
   }
   return true;

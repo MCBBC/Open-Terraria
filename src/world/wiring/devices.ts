@@ -355,10 +355,10 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 137:
       fireTrap(w, ctx, x, y);
       return true;
-    case 141: // 炸药:清格+爆炸(:1781-1785)
+    case 141: // 炸药(:1781-1785)：清格 + Projectile 108(500伤/半径10)
       w.skipCell(x, y);
       st.setTile(x, y, 0);
-      ctx.explode(x, y, 500);
+      ctx.explode(x, y, 500, 10);
       return true;
     case 149: // 节日彩灯 frameX ±54(:1244-1250)
       flipCell(w, x, y, 54);
@@ -413,9 +413,10 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       ctx.shootProjectile(ox * 16 + 24, oy * 16, dirR * 7 * Math.cos(ang), -7 * Math.sin(ang) - 2, damage, 'boulder');
       return true;
     }
-    case 210: // 地雷:原版 ExplodeMine(:1786-1788)清格+爆炸
+    case 210: // 地雷 ExplodeMine(:3093)：清格 + Projectile 164(250伤)——
+      // 164 不在 ExplodeTiles 判定表内 = **不破坏地形**（纯伤害爆炸）
       st.setTile(x, y, 0);
-      ctx.explode(x, y, 100);
+      ctx.explode(x, y, 250, 0, false);
       return true;
     case 212: { // 雪球发射器:CheckMech 10 发射(:946-1002)
       const ox = x - Math.floor(st.frameX[i] % 54 / 18);

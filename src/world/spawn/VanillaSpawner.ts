@@ -668,6 +668,9 @@ export class VanillaSpawner {
     const N = (n: number) => rng.next() < 1 / n;  // Main.rand.Next(n)==0
     const hardMode = this.hardMode;
     const t = this.spawnTileType;
+    // SetSpawnFlags L709：日食白天关闭小动物段（(!eclipse || !dayTime) 门）——
+    // 小动物块（下方 gem 支 + 地表森林块）须跳过
+    const friendlyBlocked = this.world.clock.eclipse && this.dayTime;
     const D = (id: number) => this.spawnNPC(x, y, id, rng);
     const any = (id: number) => this.activeIds.has(id);
     // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
@@ -836,12 +839,14 @@ export class VanillaSpawner {
     //  147/161/60/53 走各自 switch case（雪原/丛林蛙/沙地小动物），须排除
     const gemTileOK = !(t === T.JUNGLE_GRASS || t === T.SNOW || t === T.ICE || t === T.SAND);
     if (this.dayTime && !this.waterTile && this.world.weather.raining && gemTileOK
+      && !friendlyBlocked
       && this.deeperThanRockLayer && this.spawnTileY <= st.h - 200) {
       if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
       if (N(5)) return D(this.getGemBunnyToSpawn(rng));
     }
     // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
-    if (this.dayTime && !this.waterTile && this.surfaceSpawn &&
+    //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）
+    if (this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
       (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === 477)) {
       if (N(15)) {
         if (t === T.SNOW || t === T.SNOW_BRICK) {
@@ -864,7 +869,7 @@ export class VanillaSpawner {
     //  未命中则原版 switch 空过、落后续 else-if 链（地牢/陨石…），此处同序放行。
     //  tile 门同雨天支（case 2/default-underground；147/161/60/53 各有独立 case 须排除）。
     //  （原版该块外层为 spawnFriendly 小动物段；本仓小动物沿用 dayTime 简化门）
-    if (this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK
+    if (this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK && !friendlyBlocked
       && this.spawnTileY >= this.world.rockLevel && this.spawnTileY <= st.h - 200) {
       if (N(3)) {
         if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
@@ -1092,7 +1097,17 @@ export class VanillaSpawner {
         if (raining && N(4)) return D(224);
         // L4421：雨伞史莱姆 225（!waterTile 1/2）
         if (!this.waterTile && raining && N(2)) return D(225);
-        // L4426/4431：大风天 594/628——vanilla-npcs.json 无条目，跳过（缺 594/628）
+        // L4426/4431：大风天 594 风气球（2/3）→ 628 蒲公英（草地 9/10）。
+        //  门：!waterTile && num==0（落点上格无墙，L1188 num=wall）&& IsItAHappyWindyDay
+        //  （=_shouldUseWindyDayMusic）&& isSpawningInWindDirection（L1101
+        //  (pX-spawnTileX)*windSpeedTarget>0，生成点在玩家下风侧）
+        const windyDay = this.world.weather.shouldUseWindyDayMusic;
+        const spawnWallEmpty = st.wall[st.idx(this.spawnTileX, this.spawnTileY - 1)] === 0;
+        const downwind = (this.pX - this.spawnTileX) * this.world.weather.windSpeedTarget > 0;
+        if (!this.waterTile && spawnWallEmpty && windyDay && downwind) {
+          if (!N(3)) return D(594);
+          if ((t === T.GRASS || t === 477) && !N(10)) return D(628);
+        }
         // L4435：池底基础史莱姆
         if (!this.waterTile) return D(this.getBasicSlimeToSpawn(true, t, rng));
         return null;
