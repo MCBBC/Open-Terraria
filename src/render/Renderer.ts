@@ -1239,8 +1239,9 @@ export class Renderer {
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     if (g.mode === 'frame') {
-      // 同帧整图叠加：源矩形取 Glow_N 的对应帧带（Glow 表与 NPC 表同帧高对齐）
-      const gh = Math.floor(gr.sh / Math.max(1, e.vanilla?.frames ?? 1));
+      // 同帧整图叠加：源矩形取 Glow_N 的对应帧带（Glow 表帧高 = 表高/帧数；
+      // 与 NPC 表帧高的逐像素对齐未逐一校验——登记，观感为发光罩层）
+      const gh = Math.max(1, Math.floor(gr.sh / Math.max(1, e.vanilla?.frames ?? 1)));
       const idx = Math.min((e.vanilla?.frames ?? 1) - 1, Math.floor(r.sy / Math.max(1, r.sh)));
       let alpha = 0.8;
       let flashPulse = 1;

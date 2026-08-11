@@ -333,7 +333,8 @@ function heldSemantics(held: SmartCursorHeld): HeldSemantics {
   return {
     vid: vanillaItemIdOf(def),
     pick: tool?.type === 'pick' ? tool.power : 0,
-    axe: tool?.type === 'axe' ? tool.power : (tool?.type === 'hammer' ? (def?.axePower ?? 0) : 0),
+    // 副斧力（Drax 579 等镐+斧双工具 / Hamaxe 锤+斧）：主工具之外再取 def.axePower
+    axe: tool?.type === 'axe' ? tool.power : (def?.axePower ?? 0),
     hammer: tool?.type === 'hammer' ? tool.power : 0,
     createTileSheet: def?.tile != null ? sheetOf(TILE_BY_KEY[def.tile] ?? -1) : null,
     createWall: def?.wallId != null ? def.wallId : null,
@@ -922,7 +923,8 @@ export class SmartCursor {
     if (num < 0) num += Math.PI * 2;
     const step = Math.PI / 4;
     const ang = Math.floor(((num + step / 2) % (Math.PI * 2)) / step) * step;
-    return { x: Math.trunc(Math.cos(ang) * 1.5), y: Math.trunc(Math.sin(ang) * 1.5) };
+    // || 0 归一化 -0（cos(π/2) 浮点残尾 trunc 后会是 -0）
+    return { x: Math.trunc(Math.cos(ang) * 1.5) || 0, y: Math.trunc(Math.sin(ang) * 1.5) || 0 };
   }
 
   /** :1165-1321 矿车轨道（2340/2739 主 + 2492 压力轨道段） */

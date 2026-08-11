@@ -359,15 +359,15 @@ export function drawVanillaLiquids(
       // 透明像素被压暗）；sparkle 彩虹用 hue-rotate 近似、alpha 1:1
       if (vt === 3) {
         const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
-        const px0 = x * 16 + Math.floor(n2 * 16), py0 = y * 16 + Math.floor(n4 * 16);
+        const dstX = x * 16 + Math.floor(n2 * 16), dstY = y * 16 + Math.floor(n4 * 16);
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
-        ctx.drawImage(tex, sx, srcY, sw, sh, px0, py0, sw, sh);
+        ctx.drawImage(tex, sx, srcY, sw, sh, dstX, dstY, sw, sh);
         if (sw >= 8) {
           const bc = shimmerBaseColor(x + 0.5, y + 0.5, tVis);
           ctx.save();
           ctx.globalCompositeOperation = 'multiply';
           ctx.fillStyle = `rgb(${bc[0]},${bc[1]},${bc[2]})`;
-          ctx.fillRect(px0, py0, sw, sh);
+          ctx.fillRect(dstX, dstY, sw, sh);
           ctx.restore();
         }
         const flag = !(sx === 16 || sy % 80 === 48);           // :719
@@ -382,7 +382,7 @@ export function drawVanillaLiquids(
               ctx.globalCompositeOperation = 'lighter';
               ctx.globalAlpha = Math.min(1, opacity[i] * ga);
               ctx.filter = `hue-rotate(${Math.floor(hue * 360)}deg)`;
-              ctx.drawImage(tex, sSrcX, sSrcY, sw, sh, px0, py0, sw, sh);
+              ctx.drawImage(tex, sSrcX, sSrcY, sw, sh, dstX, dstY, sw, sh);
               ctx.restore();
             }
           }

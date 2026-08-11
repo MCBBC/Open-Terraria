@@ -13,7 +13,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from './bossAI_queenbee_plantera';
@@ -1845,8 +1845,10 @@ export class Enemy extends Entity {
       } else {
         this.ai2 += 1;
         if (this.ai2 === 180 && this.canSeePlayer(st, player)) {
-          this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy,
-            7, vanillaNpc(112)?.damage ?? 30);
+          // VileSpit（原版 NewNPC 112，cs:51257-51276——aiStyle 9 直飞球速 7）：
+          // AI_009 已 1:1，改出真 NPC 112（此前 Dart 直飞近似、伤害取 NPC 112 数据）
+          const spit = Enemy.fromVanilla(112, this.cx, this.cy);
+          if (spit) addEnemy(game, spit);
           this.ai2 = 0;
         }
       }
@@ -3105,11 +3107,25 @@ export class Enemy extends Entity {
     }
     // 三连弹幕：传送后第 15/40/65 tick 各一发（原版 volley 间隔）
     if (this.chargesLeft > 0 && (this.aiT === 15 || this.aiT === 40 || this.aiT === 65)) {
-      const dx = player.cx - this.cx, dy = player.cy - this.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      const spd = 3.4;
-      const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.def.damage);
-      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
+      // 弹跳球系法师（NPC.cs:21136/:21199-21206）：火妖 24→25 焰球 / 哥布林术士
+      // 29→30 混沌球 / 水球术士 32→33 水球 / 黑暗法师 45→665 混沌球(Tim 变体)——
+      // 原版每轮 volley 只 NewNPC 一球（AI_009 自带出膛定速），其余法师走 Dart 三连
+      const ballByCaster: Record<number, number> = { 24: 25, 29: 30, 32: 33, 45: 665 };
+      const ballId = ballByCaster[this.vanillaId ?? -1];
+      if (ballId) {
+        if (this.aiT === 15) {
+          const ball = Enemy.fromVanilla(ballId,
+            this.cx + (ballId === 25 ? this.facing * 8 : 0),
+            this.cy + (ballId === 25 ? 20 : -8));
+          if (ball) addEnemy(game, ball);
+        }
+      } else {
+        const dx = player.cx - this.cx, dy = player.cy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const spd = 3.4;
+        const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.def.damage);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
+      }
       this.chargesLeft--;
     }
   }

@@ -934,6 +934,7 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
 
 export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null) {
   const L = la(e);
+  if (!e.bInit) { e.bInit = true; e.ai0 = 0; }   // 原版 ai[0] 从 0 起步（Enemy 默认 -1120 是史莱姆族约定）
   const vid = e.vanillaId ?? 25;
   // 日耀耀斑(:21354-21378)：alpha 0→220 渐隐成光团；出膛方向 = 朝玩家 ±90° 随机
   // （再固定回转 -45°），Y 分量钳 0.2，速 6+rand*4
@@ -1012,6 +1013,9 @@ export function bouncingBallAI(e: Enemy, game: GameHooks, player: Player | null)
     e.y += e.vy;
   } else {
     moveAndCollide(e, game.world, e.vx, e.vy);
-    // 516 的 collideX/collideY 自爆已在上方 solidRect 判定覆盖
+    // 516 的 collideX/collideY（:21370 上一帧碰撞旗标）→ 撞墙/落地即自爆
+    if (vid === 516 && (e.hitWall || e.hitHead || e.onGround)) {
+      e.hurt(9999, 0, 0, game);
+    }
   }
 }

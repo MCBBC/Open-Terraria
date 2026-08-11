@@ -134,6 +134,7 @@ export class Player extends Entity {
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
+    counterWeight: boolean;
   } {
     let def = 0, mana = 0, life = 0;
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
@@ -149,7 +150,7 @@ export class Player extends Entity {
     let flipper = false, longInvince = false, spikedBoots = false;
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false;
-    let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false;
+    let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -212,6 +213,7 @@ export class Player extends Entity {
         if (fx.tileRange) tileRange = true;
         if (fx.skyStone) skyStone = true;
         if (fx.pStone) pStone = true;
+        if (fx.counterWeight) counterWeight = true;
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
       // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
@@ -228,6 +230,8 @@ export class Player extends Entity {
     }
     // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
     if (this.panicTime > 0) move += 0.5;
+    // 沙丘行者靴（desertBoots：沙漠区提速近似——原版 ZoneDesert 时 maxRunSpeed+3/段）
+    if (desertBoots && this.zoneDesert) move += 0.25;
     // runSpeed：accRunSpeed=6 vs 基础 maxRunSpeed=3 → 移速倍率贡献（取最高不叠）
     const moveMult = 1 + move + (runSpeed > 0 ? runSpeed / 3 - 1 : 0);
     // 多段跳按原版优先序排列（JumpMovement 消费序）
@@ -252,7 +256,7 @@ export class Player extends Entity {
       jumpSpd, flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
       arrowDmg, ammoSave, kbGlove, yoyoString,
-      tileSpeed, wallSpeed, tileRange, pStone,
+      tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
     };
   }
   get maxHp(): number {
@@ -881,6 +885,8 @@ export class Player extends Entity {
   prevInputX = 0;
   /** 水面行走状态（水上漂靴族：站在液面，按 ↓ 下潜） */
   onWaterSurface = false;
+  /** 所在沙漠区（Game 每帧同步 scene.zoneDesert；沙丘行者靴消费） */
+  zoneDesert = false;
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
   /** 拾取范围扩展（宝藏磁石/金戒指族，px；defaultItemGrabRange=42） */

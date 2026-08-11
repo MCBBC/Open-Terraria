@@ -1354,6 +1354,7 @@ export class Game implements GameHooks {
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1080;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount);
+      this.player.zoneDesert = this.scene.zoneDesert; // 沙丘行者靴消费
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
@@ -2630,10 +2631,19 @@ export class Game implements GameHooks {
         // 悠悠球线（yoyoString：射程 +60%，YoyoBag 语义）
         const stringLen = (flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10)
           * (this.player.equipStats.yoyoString ? 1.6 : 1);
-        this.entities.add(new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
+        const yoyo = new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
           () => this.input.mouseDown && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
-          flail), 'projectiles');
+          flail);
+        // 配重球（counterWeight：悠悠球命中时落配重投射物，原版环绕弹的直线坠落近似）
+        if (this.player.equipStats.counterWeight) {
+          (yoyo as unknown as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight =
+            (wx, wy, wdmg) => {
+              this.entities.add(new Arrow(wx, wy, (Math.random() - 0.5) * 2, -1.5,
+                wdmg, 2, 556 + Math.floor(Math.random() * 6), null), 'projectiles');
+            };
+        }
+        this.entities.add(yoyo, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
         this.input.mouseDown = false; // 本击只负责掷出，滞留由 channel 回调判定

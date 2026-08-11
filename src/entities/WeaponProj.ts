@@ -73,6 +73,10 @@ function hitEnemies(
     playEnemyHitSound(game, e);
     e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game);
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+    // 配重球（counterWeight 装备时悠悠球命中落配重：YoyoBag 语义近似——
+    // spawnWeight 回调由 Game 注入（无实体循环依赖）；伤害 = 武器 100%（原版））
+    const wSpawn = (self as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight;
+    if (wSpawn) wSpawn(e.x + e.w / 2, e.y, Math.round(self.damage));
   }
 }
 
