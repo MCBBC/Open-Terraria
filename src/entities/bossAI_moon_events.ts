@@ -11,7 +11,8 @@
 //                                             NPC.cs:21349-21548（直飞球/毒唾/日耀耀斑）
 // 经典模式主链 1:1；expert/getGoodWorld 分支（33 骷髅王在场无敌 / 25 血肉墙在场无敌 /
 // 666 地表无敌 / RedHatSkeletronAdjustments 速度档）仅注释保留；netcode 跳过。
-// 弹幕贴图缺口登记见 RENDER_PROXY（sprites 缺 Projectile_{109,110,180,325..352}.png）。
+// 弹幕贴图 Projectile_{109,110,180,325..329,345..352}.png 已入 sprites/vanilla(原 RENDER_PROXY
+// 代渲退役,Arrow 按 projId 懒加载真图)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -54,28 +55,13 @@ function solidTileAt(game: GameHooks, x: number, y: number): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// 弹幕：月事件族弹体贴图全部缺失（public/sprites/vanilla 无 Projectile_{109,110,
-// 180,325..352}.png）——按最接近的既有弹体代渲（渲染缺口登记，AI/伤害/速度仍 1:1）。
-// ProjectileID.cs 对照：325 FlamingWood / 326-328 GreekFire1-3 / 329 FlamingScythe /
-// 345 PineNeedleHostile / 346 OrnamentHostile / 348 FrostWave / 349 FrostShard /
-// 350 Missile / 351 Present / 352 Spike / 180 BulletDeadeye / 109 SnowBallHostile /
-// 110 BulletSnowman。
+// 弹幕：月事件族弹体贴图 Projectile_{109,110,180,325..329,345..352}.png 已按 601/602
+// 先例自 terraria-assets/Images 补入 public/sprites/vanilla/（Arrow 按 projId 懒加载
+// 真图），此前的 RENDER_PROXY 代渲登记退役。ProjectileID.cs 对照：325 FlamingWood /
+// 326-328 GreekFire1-3 / 329 FlamingScythe / 345 PineNeedleHostile / 346 OrnamentHostile /
+// 348 FrostWave / 349 FrostShard / 350 Missile / 351 Present / 352 Spike /
+// 180 BulletDeadeye / 109 SnowBallHostile / 110 BulletSnowman。
 // ---------------------------------------------------------------------------
-const RENDER_PROXY: Record<number, number> = {
-  325: 15,   // FlamingWood → BallofFire(火球)
-  326: 15, 327: 15, 328: 15,  // GreekFire1/2/3 → BallofFire
-  329: 45,   // FlamingScythe → DemonScythe
-  345: 94,   // PineNeedleHostile → CrystalStorm(晶簇)
-  346: 21,   // OrnamentHostile → Bone(尖刺球)
-  348: 118,  // FrostWave → IceBolt
-  349: 118,  // FrostShard → IceBolt
-  350: 102,  // Missile → BombSkeletronPrime(火箭)
-  351: 99,   // Present → Boulder(礼盒)
-  352: 21,   // Spike → Bone(尖刺)
-  180: 173,  // BulletDeadeye → EnchantedBeam(子弹)
-  109: 118,  // SnowBallHostile → IceBolt
-  110: 173,  // BulletSnowman → EnchantedBeam(子弹)
-};
 /** 弹体行为近似登记：349 FrostShard 原版 vy+=0.2/t 下坠（Projectile.cs:53360），
  *  其余月事件弹幕原版自带 aiStyle 14（希腊火/装饰球弹跳）等次级运动——Arrow 直飞近似 */
 const PROJ_GRAV: Record<number, number> = { 349: 0.2 };
@@ -84,7 +70,6 @@ function shootE(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300,
 ): void {
-  const rid = RENDER_PROXY[projId] ?? projId;
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
     new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1 }),
     'projectiles');

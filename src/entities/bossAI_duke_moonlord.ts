@@ -1433,7 +1433,7 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
       shoot(game, e.cx, e.cy + 216, (dx / d) * 6, (dy / d) * 6, 0, 456, 600);
     }
     // :37975-37989 inSlot=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
-    if (inSlot === 120 || inSlot === 180 || inSlot === 240) spawnMoonLeech(game, e, player);
+    if (player && (inSlot === 120 || inSlot === 180 || inSlot === 240)) spawnMoonLeech(game, e, player);
   } else if (e.ai0 === 3 && player) { // 三连幻影矢(:37991-38015)
     const pvx = (player as unknown as { vx: number }).vx ?? 0;
     const pvy = (player as unknown as { vy: number }).vy ?? 0;

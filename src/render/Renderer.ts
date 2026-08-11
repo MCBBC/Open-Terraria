@@ -3200,6 +3200,14 @@ export class Renderer {
       ctx.fillStyle = 'rgba(8,6,16,0.92)';
       ctx.fillRect(0, 0, viewW, viewH);
     }
+    // 卷轴底图（原版 Images/Map.png 928×248 羊皮纸，Main.cs:54923：地图内容【之下】
+    // 整幅绘制——destRect 与地图区同位同缩放，羊皮纸边缘饰纹在地图缩放留边处露出；
+    // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
+    const scroll = this.atlas ? this.atlas.vui('Map') : null;
+    if (scroll && scroll.img instanceof HTMLImageElement && scroll.img.complete && scroll.img.naturalWidth > 0) {
+      ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
+      ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, cx0, cy0, mapW, mapH);
+    }
     ctx.imageSmoothingEnabled = fm.zoom >= 1;
     ctx.drawImage(this.minimap!.canvas, cx0, cy0, mapW, mapH);
     ctx.imageSmoothingEnabled = false;

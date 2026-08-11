@@ -573,10 +573,27 @@ export function drawVanillaCell(
       const slope = st.slope[si];
       const half = !!st.half[si];
       if (half && slope === 0) {
-        ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, px, py + 8, r.sw, r.sh - 8);
+        // D2:下方无支撑 → 半砖底 4px 换暗条(TileDrawing.cs:1657-1667)
+        const bi = st.idx(x, y + 1);
+        const noSupport = y + 1 >= st.h || !st.flags[bi] || !TILE_DEFS[st.type[bi]]?.solid || !!st.half[bi];
+        if (noSupport && r.sy + 12 <= r.img.height && 144 + r.sw <= r.img.width && 70 <= r.img.height) {
+          ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, 4, px, py + 8, r.sw, 4);
+          ctx.drawImage(r.img, 144, 66, r.sw, 4, px, py + 12, r.sw, 4);
+        } else {
+          ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, px, py + 8, r.sw, r.sh - 8);
+        }
       } else if (slope > 0 && !half) {
-        drawSlopedFrame(ctx, r, slope, px, py);
+        // 坡面门控:421/422 专属坡帧整帧画;DontDrawTileSlopes 跳过切条走整帧
+        if (HAS_SLOPE_FRAMES.has(sheet)) {
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, r.sw, r.sh);
+        } else if (!DONT_DRAW_SLOPES.has(sheet)) {
+          drawSlopedFrame(ctx, r, slope, px, py);
+        } else {
+          ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
+        }
       } else {
+        // D1:左右邻半砖 → 预制衔接帧替代整帧(:1609-1652)
+        if (drawHalfBrickSeam(ctx, r, st, x, y, sheet, px, py)) return;
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, px, py, TILE, TILE);
       }
       return;
@@ -638,34 +655,50 @@ export function drawVanillaCell(
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
   }
   if (!r) return;
-  // 蜡烛类高格（grid 16×20）：底部对齐本格
-  const dy = py + TILE - r.sh;
-  // 原版 TileObjectData DrawYOffset：落地家具普遍 +2（腿部插入地面 2px）、
-  // 挂墙/特殊件为负。从反编译 ObjectData/TileObjectData.cs 全量提取。
-  let dyOff = DRAW_Y_OFFSET[sheet] ?? 0;
-  // 火把（tile 4）：原版 GetTileDrawData case 4(:4724-4731) tileWidth=20 → 主绘制
-  // X = tileX*16 - (20-16)/2(:1020-1025 num5) = 格内居中 -2(左右各溢 2px);
-  // Y:上方实心 = 天花板火把 tileTop=4 下移(:4727-4730),地面/墙面为 0。
-  // (此前的 +4 引用了 :1084 的 case 4 —— 那是 tile 726 的半砖坡面分支,不是火把)
-  const dxOff = sheet === 4 ? -2 : 0;
+  // tileTop(GetTileDrawData 权威,静态表 + 条件项)与 C 类手动偏移
+  const cond = tileTopCond(sheet, fx, fy);
+  let dyOff = cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+  // 火把（tile 4）：上方实心 = 天花板火把 tileTop=4 下移(:4727-4730)
   if (sheet === 4 && st.inBounds(x, y - 1) && st.isSolid(x, y - 1)) dyOff += 4;
 
   // ---- 坡面/半砖分支(原版 TileDrawing.cs:1314-1361) ----
   const si = st.idx(x, y);
   const slope = st.slope[si];
   const half = !!st.half[si];
-  const dpx = px + dxOff, dpy = Math.max(py, dy) + dyOff;
+  // 原版锚定公式(:1019-1025):X = x*16-(tileWidth-16)/2(711 豁免)、Y = y*16+tileTop
+  // ——顶锚定,高>16 的精灵向下溢出盖住下格顶(接缝合拢)。此前的底锚定
+  // (py+16-sh)整体上移 sh-16,是家具/植物悬浮与树干接缝的共同根因
+  const dpx = px - (sheet === 711 ? 0 : (r.sw - TILE) / 2);
+  const dpy = py + dyOff;
   if (half && slope === 0) {
-    // 半砖:画下半 8px(源 y+8 高-8,目标 y+8;GetTileDrawData halfBrickHeight=8)
-    ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, dpx, dpy + 8, r.sw, r.sh - 8);
+    // 半砖:画下半 8px(源 y+8 高-8,目标 y+8;halfBrickHeight=8);
+    // D2:下方无支撑 → 底 4px 换暗条(TileDrawing.cs:1657-1667)
+    const bi = st.idx(x, y + 1);
+    const noSupport = y + 1 >= st.h || !st.flags[bi] || !TILE_DEFS[st.type[bi]]?.solid || !!st.half[bi];
+    if (noSupport && r.sy + 12 <= r.img.height && 144 + r.sw <= r.img.width && 70 <= r.img.height) {
+      ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, 4, dpx, dpy + 8, r.sw, 4);
+      ctx.drawImage(r.img, 144, 66, r.sw, 4, dpx, dpy + 12, r.sw, 4);
+    } else {
+      ctx.drawImage(r.img, r.sx, r.sy + 8, r.sw, r.sh - 8, dpx, dpy + 8, r.sw, r.sh - 8);
+    }
     return;
   }
   if (slope > 0 && !half) {
-    drawSlopedFrame(ctx, r, slope, dpx, dpy);
+    // 坡面门控:421/422 专属坡帧整帧画;DontDrawTileSlopes 跳过切条走整帧
+    if (HAS_SLOPE_FRAMES.has(sheet)) {
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
+    } else if (!DONT_DRAW_SLOPES.has(sheet)) {
+      drawSlopedFrame(ctx, r, slope, dpx, dpy);
+    } else {
+      ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
+    }
     return;
   }
-
-  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx, dpy, r.sw, r.sh);
+  // D1:整砖实心且左右邻半砖 → 预制衔接帧替代整帧(TileDrawing.cs:1609-1652)
+  if (drawHalfBrickSeam(ctx, r, st, x, y, sheet, dpx, dpy)) return;
+  // C 类手动偏移(DrawSingleTile :1032-1186)
+  const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
+  ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, dpx + vx, dpy + vy, r.sw, r.sh);
   void fw; void fh;
 }
 
@@ -699,17 +732,113 @@ function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageEleme
   }
 }
 
-/** 原版 TileObjectData.newTile.DrawYOffset 全量表（ObjectData/TileObjectData.cs 逐条提取；未列出 = 0） */
+/** 原版 GetTileDrawData tileTop 权威表（TileDrawing.cs 巨型 switch 逐条提取；未列出 = 0）。
+ *  2026-08-12 接缝审计换源:旧表取自 TileObjectData.DrawYOffset——该字段原版只用于
+ *  放置预览虚影(TileObject.cs:911),世界渲染唯一权威是 GetTileDrawData 的 tileTop;
+ *  两表大量重合但不等同(旧表 16 项多余、3 项值错、条件项全部缺失),已全量换血。
+ *  227 仙人掌走 drawCactusCell 专属路径不在此表;518 按水位动态偏移未移植(备案)。 */
 const DRAW_Y_OFFSET: Record<number, number> = {
-  33: -4, 34: -2, 42: -2, 49: -4, 78: 2, 81: -8, 82: -1, 85: 2, 89: 2, 91: -2, 93: 2, 95: -2,
-  100: 2, 102: 2, 104: 2, 105: 2, 126: -2, 132: 2, 133: 2, 134: 2, 135: 2, 136: 2, 139: 2,
-  142: 2, 143: 2, 174: -4, 186: 2, 187: 2, 207: 2, 210: 2, 215: 2, 217: 2, 218: 2, 219: 2,
-  220: 2, 227: -6, 228: 2, 231: 2, 243: 2, 244: 2, 247: 2, 254: 2, 270: -2, 271: -2, 275: 2,
-  282: 2, 283: 2, 285: 2, 300: 2, 301: 2, 302: 2, 303: 2, 304: 2, 305: 2, 306: 2, 307: 2,
-  308: 2, 324: -2, 349: 2, 354: 2, 355: 2, 372: -4, 377: 2, 378: 2, 388: -2, 389: -2, 412: 2, 428: 2,
-  444: -2, 454: -2, 455: 2, 457: 2, 463: 2, 464: 2, 465: -2, 470: 2, 475: 2, 485: 2, 490: 2,
-  491: 2, 494: 2, 499: 2, 505: 2, 506: 2, 520: 2, 521: 2, 522: 2, 523: 2, 524: 2, 525: 2,
-  526: 2, 527: 2, 543: 2, 547: 2, 548: 2, 552: 2, 560: 2, 564: 2, 565: 2, 567: 2, 568: 2,
-  569: 2, 570: 2, 572: -2, 579: -2, 581: -2, 591: -2, 592: -2, 593: 2, 594: 2, 597: 2, 598: 2,
-  613: 2, 614: 2, 617: 2, 621: 2, 622: 2,
+  33: -4, 49: -4, 52: -2, 62: -2, 73: -12, 74: -12, 78: 2, 81: -8, 82: -2, 83: -2, 84: -2,
+  85: 2, 89: 2, 100: 2, 102: 2, 105: 2, 113: -12, 115: -2, 132: 2, 133: 2, 134: 2, 135: 2,
+  139: 2, 142: 2, 143: 2, 174: -4, 186: 2, 187: 2, 205: -2, 207: 2, 210: 2, 215: 2, 217: 2,
+  218: 2, 219: 2, 220: 2, 228: 2, 231: 2, 243: 2, 244: 2, 247: 2, 254: 2, 275: 2, 282: 2,
+  283: 2, 285: 2, 300: 2, 301: 2, 302: 2, 303: 2, 304: 2, 305: 2, 306: 2, 307: 2, 308: 2,
+  330: 2, 331: 2, 332: 2, 333: 2, 336: 2, 340: 2, 341: 2, 342: 2, 343: 2, 344: 2, 349: 2,
+  354: 2, 355: 2, 372: -4, 377: 2, 378: 2, 382: -2, 412: 2, 428: 4, 455: 2, 457: 2, 463: 2,
+  464: 2, 466: 2, 470: 2, 475: 2, 485: 2, 489: 2, 490: 2, 491: 2, 493: 2, 494: 2, 499: 2,
+  505: 2, 506: 2, 519: 2, 520: 2, 521: 2, 522: 2, 523: 2, 524: 2, 525: 2, 526: 2, 527: 2,
+  528: -2, 529: -14, 530: 2, 543: 2, 547: 2, 548: 2, 552: 2, 560: 2, 564: 2, 565: 2, 568: 2,
+  569: 2, 570: 2, 571: 2, 579: -2, 593: 2, 594: 2, 597: 2, 598: 2, 613: 2, 614: 2, 617: 2,
+  621: 2, 622: 2, 624: 2, 636: -2, 638: -2, 646: -4, 654: 2, 656: -16, 700: 2, 701: -16, 705: 2,
 };
+
+/** 条件型 tileTop（按帧变化,GetTileDrawData 原文条件;返回 null = 走静态表） */
+function tileTopCond(sheet: number, fx: number, fy: number): number | null {
+  switch (sheet) {
+    case 136: return fx === 0 ? 2 : 0;                                       // :4637-4642
+    case 443: return fx / 36 >= 2 ? -2 : 2;                                  // :4612-4621
+    case 567: return fy === 0 ? -2 : 0;                                      // :5203-5206
+    case 388: case 389: return (fy === 0 || fy === 94) ? -2 : 0;             // :5106-5119
+    // 185/186/187 落穿进 184 分支(:5212-5221 C# fallthrough):预置 2 再被帧段覆盖
+    case 184: case 185: case 186: case 187: return fy <= 36 ? 2 : fy <= 108 ? -2 : 2; // :5282-5292
+    case 442: { const c = Math.floor(fx / 22); return c === 1 ? -4 : (c === 2 || c === 3) ? -2 : 0; } // :5704-5720
+    case 178: return fy <= 36 ? 2 : 0;
+    default: return null;
+  }
+}
+
+/** C 类手动偏移(DrawSingleTile 第二段 switch,:1032-1186;blockType→slope 映射:bt2=slope1/bt3=slope2/bt4=slope3/bt5=slope4) */
+function vectorOffset(sheet: number, fx: number, fy: number, slope: number): [number, number] {
+  switch (sheet) {
+    case 726: {   // :1069-1088:X 基础 -2;按 blockType 再 ±6/±2
+      if (slope === 1) return [4, 2];   // bt2: -2+6, +2
+      if (slope === 2) return [-8, 2];  // bt3: -2-6, +2
+      if (slope === 3) return [4, 0];   // bt4: -2+6, 0
+      if (slope === 4) return [-8, 0];  // bt5: -2-6, 0
+      return [-2, 0];
+    }
+    case 129: return fy === 0 ? [0, 2] : fy < 36 ? [0, -2] : fy === 36 ? [2, 0] : [-2, 0]; // :1104-1121
+    case 723: case 724: {  // :1122-1139
+      const c = Math.floor(fx / 18);
+      return c === 0 ? [0, 2] : c === 1 ? [0, -2] : c === 2 ? [-2, 0] : [2, 0];
+    }
+    case 751: return [11, -8];           // :1034-1041(锚点帧;非锚点帧原版跳过绘制,未移植)
+    case 752: return [8, 0];             // :1042-1048(同上)
+    case 136: { const c = Math.floor(fx / 18); return c === 1 ? [-2, 0] : c === 2 ? [2, 0] : [0, 0]; } // :1049-1059
+    case 442: return Math.floor(fx / 22) === 3 ? [2, 0] : [0, 0];       // :1060-1068
+    default: return [0, 0];
+  }
+}
+
+/** 坡面/邻接特判 Set(TileID.cs 原文) */
+const DONT_DRAW_SLOPES = new Set([137, 235, 388, 476, 138, 664, 665, 630, 631, 711, 712, 713, 714, 715, 716, 723, 726]);
+const HAS_SLOPE_FRAMES = new Set([421, 422]);
+const IGNORES_NEARBY_HALFBRICK = new Set([380, 476, 235, 138, 664, 137, 484, 421, 422, 711, 712, 713, 714, 715, 716]);
+const NOT_REALLY_SOLID = new Set([387, 388, 10]);
+const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 38, 39, 152, 118, 151, 148, 206, 119, 175, 46, 176, 45, 140, 347, 370, 121, 122, 680, 681, 682, 685, 686, 346, 687, 688, 689, 690, 691, 692, 160, 226, 54, 156, 155, 153, 154, 150, 250, 198, 273, 274, 325, 284, 348, 385, 327, 326, 345, 328, 329, 357, 369, 268, 261, 262, 255, 267, 260, 265, 258, 266, 259, 264, 257, 263, 256, 311, 426, 430, 431, 432, 433, 434, 727, 728, 729, 730, 731, 732, 272, 145, 146, 350, 127, 472, 473, 477, 478, 479, 492, 496, 507, 508, 563, 618, 708, 722, 735, 748]);
+
+/** D1 邻居半砖衔接(TileDrawing.cs:1609-1652):本格整砖实心、左右邻是半砖时,
+ *  用素材表预制衔接帧(90/126/144/148/156 列)替代整帧,抹平 8px 高差。
+ *  返回 true = 已绘制(调用方 return) */
+function drawHalfBrickSeam(
+  ctx: CanvasRenderingContext2D,
+  r: { img: HTMLImageElement | HTMLCanvasElement; sx: number; sy: number; sw: number; sh: number },
+  st: TileStore, x: number, y: number, sheet: number, px: number, py: number,
+): boolean {
+  if (DONT_DRAW_SLOPES.has(sheet) || IGNORES_NEARBY_HALFBRICK.has(sheet) || NOT_REALLY_SOLID.has(sheet)) return false;
+  const ti = st.idx(x, y);
+  const td = TILE_DEFS[st.type[ti]];
+  if (!td || !td.solid || td.platform || st.half[ti] || st.slope[ti] !== 0) return false;
+  if (!st.inBounds(x - 1, y) || !st.inBounds(x + 1, y)) return false;
+  const li = st.idx(x - 1, y), ri = st.idx(x + 1, y);
+  const lh = !!st.flags[li] && !!st.half[li], rh = !!st.flags[ri] && !!st.half[ri];
+  if (!lh && !rh) return false;
+  const img = r.img, fx = r.sx, fy = r.sy, tw = r.sw, th = r.sh;
+  const ok = (sx: number, sy: number, sw: number, sh: number) => sx >= 0 && sy >= 0 && sx + sw <= img.width && sy + sh <= img.height;
+  if (!ok(fx, fy + 8, tw, 8)) return false;
+  ctx.drawImage(img, fx, fy + 8, tw, 8, px, py + 8, tw, 8);  // 下半 8px 条(三分支共用)
+  if (lh && rh) {
+    // 上半通用衔接帧;上邻同型且非底坡 → (90,0),否则 (126,0)
+    let ux = 126;
+    if (y >= 1) {
+      const ui = st.idx(x, y - 1);
+      const sl = st.slope[ui];
+      if (st.flags[ui] && sl !== 3 && sl !== 4 && TILE_DEFS[st.type[ui]]?.vanilla?.sheet === sheet) ux = 90;
+    }
+    if (ok(ux, 0, 16, 8)) ctx.drawImage(img, ux, 0, 16, 8, px, py, 16, 8);
+    return true;
+  }
+  const num = SMOOTH_BORDER.has(sheet) ? 2 : 4;
+  if (lh) {
+    if (!ok(fx + num, fy, tw - num, th)) return true;
+    ctx.drawImage(img, fx + num, fy, tw - num, th, px + num, py, tw - num, th);
+    if (ok(144, 0, num, 8)) ctx.drawImage(img, 144, 0, num, 8, px, py, num, 8);
+    if (num === 2 && ok(148, 0, 2, 2)) ctx.drawImage(img, 148, 0, 2, 2, px, py, 2, 2);
+  } else {
+    if (!ok(fx, fy, tw - num, th)) return true;
+    ctx.drawImage(img, fx, fy, tw - num, th, px, py, tw - num, th);
+    if (ok(144 + (16 - num), 0, num, 8)) ctx.drawImage(img, 144 + (16 - num), 0, num, 8, px + 16 - num, py, num, 8);
+    if (num === 2 && ok(156, 0, 2, 2)) ctx.drawImage(img, 156, 0, 2, 2, px + 14, py, 2, 2);
+  }
+  return true;
+}

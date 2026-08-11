@@ -64,6 +64,7 @@ const GP2: string[] = [];
 let GP2_N = 0;
 let GP2_ON = false;
 export function gp2Begin() { GP2_ON = true; GP2.length = 0; GP2_N = 0; }
+export function gp2End() { GP2_ON = false; }
 export function gp2Dump() { return GP2.join(' '); }
 
 export function tileRunner(
@@ -106,11 +107,12 @@ export function tileRunner(
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
         const ci0 = st.idx(x, y);
+        if (GP2_ON && steps === 10000 && GP2_N % 10000 === 0) GP2.push(`c${GP2_N}=pk${rng.vanilla.peek()}`);
         if (GP2_ON && (x === 3401 && y === 581)) {
-          GP2.push(`S@${px.toFixed(0)},${py.toFixed(0)} a${st.flags[ci0]}t${st.type[ci0]}=peek${rng.vanilla.peek()}`);
+          GP2.push(`S@${px.toFixed(1)},${py.toFixed(1)} a${st.flags[ci0]}t${st.type[ci0]}=pk${rng.vanilla.peek()}`);
         }
         const cdef = TILE_DEFS[st.type[ci0]];
-        if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
+                if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
         if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;

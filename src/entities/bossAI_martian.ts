@@ -17,7 +17,7 @@
 //   aiStyle 49  愤怒云 250(同批普查顺带)        NPC.cs:31742-31810（悬顶 200px,正下方淋雨 264）
 // expert 分支(飞碟 ai0=1 旋转过渡/ai0=2 死光弹幕 3600t)本工程 expertMode 恒 false(Main.ts
 // 4272),按原版结构保留代码、入口 EXPERT 门关闭;netcode 跳过。
-// 弹幕贴图缺口登记见 RENDER_PROXY(sprites/vanilla 无 Projectile_{264,435,438,447-450}.png)。
+// 弹幕贴图 Projectile_{264,435,438,447-450}.png 已入 sprites/vanilla(见 shootM 注释)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -49,29 +49,19 @@ const sign = (v: number): number => (v > 0 ? 1 : v < 0 ? -1 : 0);
 const EXPERT = false;
 
 // ---------------------------------------------------------------------------
-// 弹幕：火星族弹体贴图全部缺失（public/sprites/vanilla 无 Projectile_{264,435,
-// 438,447,448,449,450}.png）——按最接近的既有弹体代渲（渲染缺口登记,伤害/速度 1:1）。
-// ProjectileID.cs 对照：264 RainCloud 雨滴 / 435 MartianTurretBlast(特斯拉电球) /
-// 438 MuonBlast(骑手弹) / 447 MartianDeathray(死光电报,自带 proj AI 未实装→直落代) /
+// 弹幕:火星族弹体贴图 Projectile_{264,435,438,447,448,449,450}.png 已按 601/602
+// 先例自 terraria-assets/Images 补入 public/sprites/vanilla/(Arrow 按 projId 懒加载),
+// 此前的 RENDER_PROXY 代渲登记已退役。
+// ProjectileID.cs 对照:264 RainCloud 雨滴 / 435 MartianTurretBlast(特斯拉电球) /
+// 438 MuonBlast(骑手弹) / 447 MartianDeathray(死光电报,自带 proj AI 未实装→直飞代) /
 // 448 MartianSaucerCannon(火炮弹) / 449 MartianSaucerLaser(激光) / 450 MartianMissile。
 // ---------------------------------------------------------------------------
-const RENDER_PROXY: Record<number, number> = {
-  264: 118,   // 雨 → IceBolt
-  435: 173,   // 特斯拉电球 → EnchantedBeam
-  438: 173,   // 骑手弹 → EnchantedBeam
-  447: 173,   // 死光电报 → EnchantedBeam
-  448: 21,    // 火炮弹 → Bone(尖刺球)
-  449: 173,   // 激光 → EnchantedBeam
-  450: 102,   // 发射器导弹 → BombSkeletronPrime(火箭)
-};
-
 function shootM(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300, pierce = 1,
 ): void {
-  const rid = RENDER_PROXY[projId] ?? projId;
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav: 0, life, pierce }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce }),
     'projectiles');
 }
 

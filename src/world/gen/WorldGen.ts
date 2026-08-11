@@ -146,6 +146,7 @@ import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
+import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runWebsPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
@@ -444,6 +445,12 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
   const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
+  // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
+  // SurfaceWaterInJungle(15887)——世界树插在金字塔后、丛林灌水前（方案 A 原版位置）。
+  // LivingTrees：GrowLivingTree 树干壳+枝叶+根系+贯通竖井+密室宝箱；LivingTreeWalls：
+  // 全图 type==191 连通核补墙 244（零掷骰）。
+  runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)
+  runLivingTreeWallsPass(store, gs);                 // Living Tree Walls(活木墙)
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(丛林湿隧道灌水)
   runTemplePass(store, rng, gs, world.chests);  // Jungle Temple(之字形房间链+走廊+门+宝箱)
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)

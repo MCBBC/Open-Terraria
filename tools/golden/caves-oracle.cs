@@ -267,8 +267,8 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 int ti = y * W + x;
                 if (GP2C != null) {
                     GP2C_N++;
-                    if ((GP2C_N >= 1114690 && GP2C_N <= 1114701) || GP2C_N % 50000 == 0) {
-                        GP2C.Add($"c{GP2C_N}@{x},{y}a{act[ti]}t{typ[ti]}w{wal[ti]}={(int)r.Peek()}");
+                    if (GP2C_N % 10000 == 0) {
+                        GP2C.Add($"c{GP2C_N}=pk{(int)r.Peek()}");
                     }
                 }
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);

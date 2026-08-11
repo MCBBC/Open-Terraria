@@ -6,7 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
-import { tileRunner, gp2Begin, gp2Dump } from './TileRunner';
+import { tileRunner, gp2Begin, gp2End, gp2Dump } from './TileRunner';
 
 const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
@@ -68,7 +68,8 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
   gp2Begin();
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
-  console.log('GP2 ' + gp2Dump());
+  gp2End();
+  console.log('GP2DUMP ' + gp2Dump());
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);

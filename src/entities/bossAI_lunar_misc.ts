@@ -33,8 +33,8 @@
 //   bossAI_duke_moonlord 导出的 MLDeathray 类 'core' 档)。aiStyle 85(405 星细胞/
 //   421 脑蛭/467 致命球体)四塔批已以 swarmerAI 近似落位(Enemy.ts case 85)——421 的
 //   头顶吸附 Obstructed(buff 163)未实现,遗留。
-// 弹幕贴图缺口登记 RENDER_PROXY(sprites/vanilla 无 Projectile_{452,454,462}.png);
-//   455 走 MLDeathray 类自绘;526 仪式粒子有贴图但带 ai[0..1] 归巢弹道,降级为粒子。
+// 弹幕贴图 Projectile_{452,454,462}.png 已入 sprites/vanilla(原 RENDER_PROXY 代渲退役,
+//   见 shootL 注释);455 走 MLDeathray 类自绘;526 仪式粒子有贴图但带 ai[0..1] 归巢弹道,降级为粒子。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -108,22 +108,16 @@ function solidTileAt(game: GameHooks, x: number, y: number): boolean {
 
 // ---------------------------------------------------------------------------
 // 弹幕出口:452 PhantasmalEye / 454 PhantasmalSphere / 462 PhantasmalBolt 贴图
-// 缺失(sprites/vanilla 无 Projectile_{452,454,462}.png)→ EnchantedBeam 173 代渲,
-// 伤害/初速 1:1。454/452 的原版归巢弹道(弹 ai[0] 标记 + ai[1]=源 NPC)Arrow 无 ai 槽,
-// 不实装(按发射初速直飞)。
+// Projectile_{452,454,462}.png 已按 601/602 先例补入 sprites/vanilla(Arrow 按 projId
+// 懒加载真图),原 EnchantedBeam 173 代渲登记退役。454/452 的原版归巢弹道
+// (弹 ai[0] 标记 + ai[1]=源 NPC)Arrow 无 ai 槽,不实装(按发射初速直飞)。
 // ---------------------------------------------------------------------------
-const RENDER_PROXY: Record<number, number> = {
-  452: 173,   // 幻影眼 → EnchantedBeam
-  454: 173,   // 幻影球 → EnchantedBeam
-  462: 173,   // 幻影矢 → EnchantedBeam
-};
 function shootL(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300,
 ): void {
-  const rid = RENDER_PROXY[projId] ?? projId;
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav: 0, life, pierce: 1 }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: 0, life, pierce: 1 }),
     'projectiles');
 }
 

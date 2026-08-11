@@ -188,7 +188,9 @@ def({ key: 'v_384_living_mahogany_leaves_block', name: '', solid: true, opacity:
 def({ key: 'v_273_stone_slab', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 273, frame: 'auto' } });
 def({ key: 'v_381_lava_moss', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: null, light: [255, 120, 30], vanilla: { sheet: 381, frame: 'auto' } });
 def({ key: 'v_48_spike', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: null, vanilla: { sheet: 48, frame: 'auto' } });
-def({ key: 'v_192_living_leaf_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#1AC454', blend: true, drop: null, vanilla: { sheet: 192, frame: 'auto' } });
+def({ key: 'v_192_living_leaf_block', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#1AC454', blend: true, drop: null, vanilla: { sheet: 192, frame: 'auto' } });
+// ↑ solid:Main.cs:10167 初值 true,但 LivingTrees pass 收尾 `Main.tileSolid[192] = false`
+//   （WorldGen.cs:15789）——树叶块全程可穿行。生成+碰撞均按 false。
 def({ key: 'v_191_living_wood_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: null, vanilla: { sheet: 191, frame: 'auto' } });
 def({ key: 'v_196_rain_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#9390B2', blend: true, drop: null, vanilla: { sheet: 196, frame: 'auto' } });
 def({ key: 'v_118_pearlstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: null, vanilla: { sheet: 118, frame: 'auto' } });
