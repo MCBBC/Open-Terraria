@@ -44,9 +44,10 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 玩家失效 = 原版 TargetClosest 落空后的 dead4(:30316-30319)
   const dead4 = !player || player.dead;
   // 暴怒度 num658(:30321-30327):地表 +1 / 非丛林 +1(getGoodWorld +0.5 省略)。
-  // ZoneJungle 群系判定暂缺 → 只保留 worldSurface 一档(见汇报简化项)
+  // ZoneJungle = Game.scene 窗口计数(丛林砖 60/61/62/74/226/225 ≥140 且非地狱层)
   let num658 = 0;
   if (e.y / TILE < game.world.groundLevel) num658 += 1;
+  if (!game.scene?.zoneJungle) num658 += 1;
   const num659 = player ? Math.hypot(player.cx - e.cx, player.cy - e.cy) : 1e9;
   // timeLeft 维持 ≥60(:30330-30334)由共享 Despawn 系统承担,不在此重复
   if (e.ai0 !== 5 && num659 > 3000) e.ai0 = 4;   // :30336-30341 远距追赶
@@ -324,8 +325,13 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.y += e.vy;
     return;
   }
-  // 暴怒 flag50(:31923-31928):玩家非丛林/高于地表/低于地狱层 → 省略(见汇报简化项)
-  const flag50 = false;
+  // 暴怒 flag50(:31923-31928):!ZoneJungle || 玩家顶边 Y < worldSurface*16
+  // || > UnderworldLayer*16 → num793+8 / num794=0.15(ZoneJungle = Game.scene 窗口计数;
+  // UnderworldLayer 同 SceneMetrics 取法:lavaLine || maxTilesY-200)
+  const underLayer = (game.world.lavaLine || game.world.store.h - 200) * TILE;
+  const flag50 = !game.scene?.zoneJungle
+    || p.y < game.world.groundLevel * TILE
+    || p.y > underLayer;
   // 初始化(:31886-31892):localAI[0]=1 + 钩蔓 263×3
   if (!e.bInit) {
     e.bInit = true;
@@ -350,7 +356,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
   let num794 = 0.025;
   if (e.hp < e.maxHp / 2) { num793 = 5; num794 = 0.05; }
   if (e.hp < e.maxHp / 4) num793 = 7;
-  // flag50:num793 += 8 / num794 = 0.15;expert:+1 ×1.1 / +0.01 ×1.1 省略(:31930-31941)
+  if (flag50) { num793 += 8; num794 = 0.15; }   // :31923-31941 暴怒档(expert ×1.1 档省略)
   // 目标点 = 钩蔓中心 + 朝玩家偏移,钳 500px(:31942-31968)
   let num795 = p.cx - num789;
   let num796 = p.cy - num790;
@@ -390,11 +396,13 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
 
   if (e.hp > e.maxHp / 2) {
     // ---- 一阶段(:32020-32133) ----
-    e.def.defense = 36;                       // :32021
+    e.def.defense = 36;                       // :32028
     e.def.damage = 50;                        // GetAttackDamage_ScaledByDifficulty(50) 经典 = 50
+    if (flag50) { e.def.defense *= 2; e.def.damage *= 2; }   // :32030-32034 暴怒防/接触伤 ×2
     l[1] += 1;                                // :32034
     for (const th of [0.9, 0.8, 0.7, 0.6]) if (e.hp < e.maxHp * th) l[1] += 1;
-    // flag50:+3 / expert:+1 / expert justHit 概率蓄力 / getGoodWorld:+1 均省略(:32051-32066)
+    if (flag50) l[1] += 3;                     // :32059-32062 暴怒蓄力 +3
+    // expert:+1 / expert justHit 概率蓄力 / getGoodWorld:+1 省略(:32051-32066)
     if (l[1] > 80) {
       l[1] = 0;
       // 视线检查(:32069-32078):Collision.CanHit(position,w,h,player,...) 近似
@@ -420,6 +428,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
           l[1] = -120;                        // 下发弹延迟 120t
           life = 1200;                        // 原版不设 timeLeft(保持默认),此处取本框架默认
         }
+        if (flag50) num806 *= 2;              // :32120-32122 暴怒弹伤 ×2
         shoot(game, e.cx + num803 * 3, e.cy + num804 * 3, num803, num804, num806, num807, life);
       }
     }
@@ -427,6 +436,7 @@ export function planteraAI(e: Enemy, game: GameHooks, player: Player | null) {
     // ---- 二阶段(血≤50%,:32134-32237) ----
     e.def.defense = 10;                       // :32134
     e.def.damage = 70;                        // GetAttackDamage_ScaledByDifficulty(70) 经典 = 70
+    if (flag50) { e.def.defense *= 4; e.def.damage *= 2; }   // :32136-32140 暴怒防 ×4/接触伤 ×2
     // 首次进二阶段:触须 264×8(:32144-32170;expert 追加分配/getGoodWorld +6 省略)
     if (l[0] === 1) {
       l[0] = 2;
@@ -478,14 +488,20 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
   e.master = boss; // 钩蔓链渲染用（Renderer.drawPlanteraVine，Main.cs:22225-22261）
   const target: { cx: number; cy: number; x: number; y: number; dead: boolean } = player ?? boss;
   const flag54 = !player || player.dead;    // 玩家死(:32248-32250)
-  // 暴怒 flag53(玩家离丛林/地表/地狱层,localAI[0]-4/换锚-6/速度 ×2)省略(见汇报简化项)
-  const flag53 = false;
+  // 暴怒 flag53(:32252-32257):目标玩家非丛林 / 顶边 Y < worldSurface*16 /
+  // > UnderworldLayer*16 / 玩家死(flag54)→ 入口 localAI[0] -4
+  const underLayerT = (game.world.lavaLine || game.world.store.h - 200) * TILE;
+  const flag53 = !game.scene?.zoneJungle
+    || (!!player && player.y < game.world.groundLevel * TILE)
+    || (!!player && player.y > underLayerT)
+    || flag54;
   // 换锚倒计时(:32268-32291)
   if (e.ai0 === 0 || e.ai1 === 0) l[0] = 0;
   l[0] -= 1;
   if (boss.hp < boss.maxHp / 2) l[0] -= 2;   // :32275-32277
   if (boss.hp < boss.maxHp / 4) l[0] -= 2;
-  if (flag53) l[0] -= 4;                     // 原版入口 -4(:32252-32256)+ 换锚前 -6(:32283-32285)合并近似
+  if (flag53) { l[0] -= 4; }                 // :32252-32256 入口 -4
+  if (flag53) l[0] -= 6;                     // :32283-32285 换锚前 -6
   // 错峰:其他同类钩蔓仍在飞行 → 随机 60-300t 后再换(:32286-32298)
   if (!flag54 && l[0] <= 0 && e.ai0 !== 0) {
     for (const n of game.enemies() as Enemy[]) {
@@ -539,6 +555,7 @@ export function planteraTentacleAI(e: Enemy, game: GameHooks, player: Player | n
   let num834 = 6;
   if (boss.hp < boss.maxHp / 2) num834 = 8;
   if (boss.hp < boss.maxHp / 4) num834 = 10;
+  if (flag53) num834 *= 2;                   // :32368-32371 暴怒收线 ×2
   if (flag54) num834 *= 2;
   // 朝锚点(锚点 tile 中心 - 8px)收线(:32383-32395):近于 12+速 → 速度=残差(钉住)
   const num835 = e.ai0 * TILE - 8 - e.cx;

@@ -9,6 +9,9 @@
 // - 初速度：Item.cs:49325-49337 vx∈[-3,3] vy∈[-4,-1.5]
 // 偏差（记录）：luck 恒 0（RollLuck ≡ rng.Next(denom)）；NotFromStatue 恒 true；
 // 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
+// RedHatSkeletron/MissingTwin/EmpressOfLightIsGenuinelyEnraged 经 ctx.ai3/
+// anyNpcOfType 接通（Enemy 注入）；MechdusaKill/NamedNPC/
+// EyeOfCthulhuDefeatedAndNoAltarsInWorld 缺子系统恒 false（注释见 evalCond）。
 import dropData from '../data/vanilla-npcdrops.json';
 import npcValueJson from '../data/vanilla-npcvalue.json';
 import type { RNG } from '../core/rng';
@@ -41,6 +44,8 @@ export function npcValueOf(netIdOrType: number): number {
 export interface DropExtras {
   zoneHallow: boolean; zoneCorrupt: boolean; zoneCrimson: boolean;
   zoneJungle: boolean; zoneSnow: boolean; zoneDesert: boolean; zoneDungeon: boolean;
+  /** 玩家 zoneBeach（SceneMetrics.zoneBeach：DesertKeyCondition 需 !zoneBeach，Conditions.cs:1096） */
+  zoneBeach: boolean;
   bloodMoon: boolean; halloween: boolean; xmas: boolean; windy: boolean;
 }
 
@@ -69,6 +74,12 @@ export interface NpcDropCtx {
   /** 月事件（南瓜月/霜月）上下文：kind 1=霜月 2=南瓜月；wave=当前波（无事件缺省 0）。
    *  四个 wave-gate 掉落条件的数据源（Conditions.cs:55-229），Game 击杀掉落处注入 */
   moonEvent?: { kind: 1 | 2; wave: number };
+  /** NPC ai[3]（Enemy 注入；RedHatSkeletron / 光之女皇暴怒条件数据源） */
+  ai3?: number;
+  /** NPC localAI[3]（引擎未承载，恒 undefined → 依赖它的分支恒 false） */
+  localAi3?: number;
+  /** NPC.AnyNPCs(type)（Enemy 注入存活同型扫描；MissingTwin 条件数据源） */
+  anyNpcOfType?: (type: number) => boolean;
   extras?: DropExtras;
 }
 
@@ -122,7 +133,10 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'FirstTimeKillingPlantera': return !downed(ctx, 262); // 掉落先于 downed 写入 → 首杀语义
     case 'DownedAllMechBosses': return downed(ctx, 134, 125, 127);
     case 'BeatAnyMechBoss': return downed(ctx, 134) || downed(ctx, 125) || downed(ctx, 127);
-    case 'MechdusaKill': return false;
+    case 'MechdusaKill':
+      // Conditions.cs:579：首需 SpecialSeedFeatures.Mechdusa（Mekdusa 秘密种子），
+      // 再需三王一眼 AnyNPCs 扫描。秘密种子系统未实装 → 恒 false
+      return false;
     case 'FromCertainWaveAndAbove': {
       // Conditions.cs:249-261：NPC.waveNumber >= neededWave（不查事件——无事件时
       // waveNumber=0 恒不满足；注册仅在冰女王专属掉落 1914 上，neededWave=15）
@@ -152,15 +166,33 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       if (ctx.isExpert && ctx.rng.int(0, 2) === 0) denom--;
       return ctx.rng.int(0, Math.max(1, denom) - 1) === 0;
     }
-    case 'EmpressOfLightIsGenuinelyEnraged': return false;
-    case 'MissingTwin': return false;
-    case 'RedHatSkeletron': return false;
+    case 'EmpressOfLightIsGenuinelyEnraged':
+      // Conditions.cs:525 → NPC.cs AI_120_HallowBoss_IsGenuinelyEnraged(:46169)：
+      // ai[3]∈{2,3}（白天暴怒/二阶段白天）。本作 ai3 与原版 ai[3] 同义
+      // （bossAI_lategame.ts:370 IsInPhase2=ai3∈{1,3}），但白天暴怒分支未实现
+      // （:554 仅置 1）→ 运行时恒 false，语义已 1:1 接通
+      return ctx.type === 636 && (ctx.ai3 === 2 || ctx.ai3 === 3);
+    case 'MissingTwin':
+      // Conditions.cs:502：另一只眼（125↔126）不在场才放行——先死者不掉（NPC.AnyNPCs）
+      return !!ctx.anyNpcOfType && !ctx.anyNpcOfType(ctx.type === 125 ? 126 : 125);
+    case 'RedHatSkeletron':
+      // Conditions.cs:543 → NPC.cs RedHatSkeletronAdjustmentsEnabled(:67282)：
+      // 35/33 看 ai[3]==1（持有裁缝巫毒娃娃击杀裁缝召出的红帽骷髅王，NPC.cs:81203-81264），
+      // 36/32 看 localAI[3]==1（引擎未承载 localAI[3] → 恒 false，均为不可达内容）
+      return (ctx.type === 35 || ctx.type === 33) ? ctx.ai3 === 1
+        : (ctx.type === 36 || ctx.type === 32) ? ctx.localAi3 === 1 : false;
     case 'SkyblockIsUp': case 'SkyblockIsUpNoSickle': return false;
     case 'WindyEnoughForKiteDrops': return !!ex?.windy;
-    case 'EyeOfCthulhuDefeatedAndNoAltarsInWorld': return false; // 天空盒世界专用
-    case 'NamedNPC': return false; // 具名 NPC 未实现
+    case 'EyeOfCthulhuDefeatedAndNoAltarsInWorld':
+      // Conditions.cs:1422：NPC.downedBoss1 && WorldGen.Skyblock.noAltars。
+      // flags.downedBoss1（downed_4? 否——Boss1=克眼）已有，但 noAltars 是天空盒世界
+      // 专属字段、本作无天空盒世界 → 恒 false
+      return false;
+    case 'NamedNPC': return false; // 需 NPC.HasGivenName/GivenName 具名城镇 NPC
+      // （Andrew/Whitney/Jim，ItemDropDatabase.cs:732-734）——具名系统未实装 → 恒 false
     case 'LivingFlames':
       // Conditions.cs:939 lifeMax>5 && value>0 && !friendly && hardMode && y>UnderworldLayer
+      // && !IsInSimulation（后者仅图鉴模拟，运行时恒 false）——语义已 1:1
       return ctx.lifeMax > 5 && ctx.value > 0 && !ctx.friendly && ctx.hardMode
         && ctx.y / 16 > ctx.underworldTileY;
     case 'SoulOfLight': case 'SoulOfNight': {
@@ -186,7 +218,7 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
         case 'CorruptKeyCondition': return !!ex?.zoneCorrupt;
         case 'CrimsonKeyCondition': return !!ex?.zoneCrimson;
         case 'FrozenKeyCondition': return !!ex?.zoneSnow;
-        case 'DesertKeyCondition': return !!ex?.zoneDesert; // zoneBeach 未入 ctx（近似）
+        case 'DesertKeyCondition': return !!ex?.zoneDesert && !ex?.zoneBeach;
       }
       return false;
     }
@@ -362,6 +394,21 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
     }
     case 'listRef': { // List<IItemDropRule>{…}（OneFromRulesRule 参数）
       state = 'success';
+      break;
+    }
+    case 'noRepeat': { // FromOptionsWithoutRepeatsDropRule.cs:27-45：
+      // CanDrop 恒 true；dropCount 次不放回抽样（每件 rng.Next(len) 取一后移除），
+      // 每件数量恒 1；规则状态恒 Success（无掷骰）
+      {
+        const pool = [...(rule.ids as number[])];
+        for (let i = 0; i < (rule.count ?? 0); i++) {
+          if (pool.length <= 0) break;
+          const idx = ctx.rng.int(0, pool.length - 1);
+          pushDrop(out, pool[idx], 1);
+          pool.splice(idx, 1);
+        }
+        state = 'success';
+      }
       break;
     }
     default:

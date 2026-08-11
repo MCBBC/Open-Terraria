@@ -48,6 +48,20 @@ export enum BuffType {
   Bewitched = 26,    // 附魔台(150,右键)：maxMinions+1（:9857，召唤位未接先登记）
   WarTable = 27,     // 战争桌(348,右键)：maxTurrets+1（:9863，哨兵位未接先登记）
   SugarRush = 28,    // 糖分冲刺(192,蛋糕右键,120s)：moveSpeed+0.2+镐速（:9634）
+  // ---- R1 数值批（Player.cs UpdateBuffs 逐条对 1456）----
+  Battle = 29,        // 战斗(13,420s)：spawnRate×0.5/max×2（NPC.cs:632）
+  Calming = 30,       // 镇静(106,240s)：spawnRate×1.65/max×0.6（NPC.cs:617）
+  Mining = 31,        // 挖矿(104,600s)：pickSpeed-0.25 → 挖掘冷却×0.75（:9818）
+  Builder = 32,       // 建筑工(107,900s)：tileSpeed+0.25/wallSpeed+0.25/blockRange+1（:9841）
+  Heartreach = 33,    // 拾心(105,180s)：lifeMagnet 心拾取范围扩大（:9822）
+  FlipperPotion = 34, // 脚蹼药(109,180s)：ignoreWater 游泳自由（:9851）
+  Titan = 35,         // 泰坦(108,180s)：kbBuff → 近战击退×1.5（:20812）
+  AmmoReservation = 36, // 弹药储备(112,480s)：20% 不耗弹（PickAmmo :52751）
+  Lifeforce = 37,     // 生命力(113,300s)：maxHp +20%（statLifeMax2 += max/5/20*20,:9883）
+  Endurance = 38,     // 耐久(114,300s)：endurance+0.1 → 受伤×0.9（:9886）
+  Wrath = 39,         // 暴怒(115,240s)：全系暴击+10（:9890）
+  Rage = 40,          // 怒气(117,240s)：全系伤害+10%（:9947）
+  Tipsy = 41,         // 醉酒(25,清酒)：def-4/近战暴击+2/近战伤+10%/近战速+10%（:11513）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -83,6 +97,19 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Bewitched]: { vanillaBuff: 150, descKey: 'Mods.SandboxWorld.Buff.Bewitched.Desc', fallbackName: '魅惑' },
   [BuffType.WarTable]: { vanillaBuff: 348, descKey: 'Mods.SandboxWorld.Buff.WarTable.Desc', fallbackName: '战争桌' },
   [BuffType.SugarRush]: { vanillaBuff: 192, descKey: 'Mods.SandboxWorld.Buff.SugarRush.Desc', fallbackName: '糖分冲刺' },
+  [BuffType.Battle]: { vanillaBuff: 13, descKey: 'Mods.SandboxWorld.Buff.Battle.Desc', fallbackName: '战斗' },
+  [BuffType.Calming]: { vanillaBuff: 106, descKey: 'Mods.SandboxWorld.Buff.Calming.Desc', fallbackName: '镇静' },
+  [BuffType.Mining]: { vanillaBuff: 104, descKey: 'Mods.SandboxWorld.Buff.Mining.Desc', fallbackName: '挖矿' },
+  [BuffType.Builder]: { vanillaBuff: 107, descKey: 'Mods.SandboxWorld.Buff.Builder.Desc', fallbackName: '建筑工' },
+  [BuffType.Heartreach]: { vanillaBuff: 105, descKey: 'Mods.SandboxWorld.Buff.Heartreach.Desc', fallbackName: '拾心' },
+  [BuffType.FlipperPotion]: { vanillaBuff: 109, descKey: 'Mods.SandboxWorld.Buff.FlipperPotion.Desc', fallbackName: '脚蹼' },
+  [BuffType.Titan]: { vanillaBuff: 108, descKey: 'Mods.SandboxWorld.Buff.Titan.Desc', fallbackName: '泰坦' },
+  [BuffType.AmmoReservation]: { vanillaBuff: 112, descKey: 'Mods.SandboxWorld.Buff.AmmoReservation.Desc', fallbackName: '弹药储备' },
+  [BuffType.Lifeforce]: { vanillaBuff: 113, descKey: 'Mods.SandboxWorld.Buff.Lifeforce.Desc', fallbackName: '生命力' },
+  [BuffType.Endurance]: { vanillaBuff: 114, descKey: 'Mods.SandboxWorld.Buff.Endurance.Desc', fallbackName: '耐久' },
+  [BuffType.Wrath]: { vanillaBuff: 115, descKey: 'Mods.SandboxWorld.Buff.Wrath.Desc', fallbackName: '暴怒' },
+  [BuffType.Rage]: { vanillaBuff: 117, descKey: 'Mods.SandboxWorld.Buff.Rage.Desc', fallbackName: '怒气' },
+  [BuffType.Tipsy]: { vanillaBuff: 25, descKey: 'Mods.SandboxWorld.Buff.Tipsy.Desc', fallbackName: '醉酒' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */

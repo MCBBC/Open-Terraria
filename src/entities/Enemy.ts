@@ -3647,6 +3647,11 @@ export class Enemy extends Entity {
           statueSpawned: this.spawnedFromStatue,
           hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
           moonEvent: game.moonEventCtx?.() ?? undefined,
+          ai3: this.ai3, // NPC ai[3]：RedHatSkeletron / 光之女皇暴怒掉落条件
+          anyNpcOfType: (t) => game.enemies().some((o) => {
+            const e2 = o as Enemy;
+            return e2 !== this && !e2.dead && e2.vanillaId === t;
+          }), // NPC.AnyNPCs：MissingTwin（先死的那只眼不掉）
           extras: game.dropContext?.(),
         };
         const unmapped = (id: number) => {

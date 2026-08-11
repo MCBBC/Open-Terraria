@@ -697,7 +697,14 @@ export class Game implements GameHooks {
    *  (悬空落在正下方地面、点进实体送到旁边的地表/洞穴地面——统一按距离最近算)。
    *  相机不硬切:由每帧 camera.follow(0.15 指数缓动)平滑飞过去。 */
   teleportToMouse(): void {
-    const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+    // 参考坐标 = 鼠标指针落点(不依赖 Input 缓存/相机 viewW 单位语义):
+    // 直接用 canvas 的 CSS 矩形 + 相机中心/缩放换算,保证以指针为起点
+    const rect = this.renderer.canvas.getBoundingClientRect();
+    const sx = (this.input.mouseX || rect.width / 2) - rect.width / 2;
+    const sy = (this.input.mouseY || rect.height / 2) - rect.height / 2;
+    const z = this.camera.zoom;
+    const wx = sx / z + this.camera.x;
+    const wy = sy / z + this.camera.y;
     const st = this.world.store;
     // fits(tx, ty):ty = 脚下实心行,其上 3 行 2 列净空(树干等非实心不挡)
     const fits = (tx: number, ty: number): boolean => {
@@ -732,7 +739,8 @@ export class Game implements GameHooks {
     }
     const p = this.player;
     p.x = land[0] * TILE;                    // 盒左对齐脚下格
-    p.y = (land[1] + 1) * TILE - p.h;        // 盒底贴地面顶
+    p.y = land[1] * TILE - p.h;              // 盒底贴【脚下格顶面】(land 行是实心地面,
+                                              // 其顶 = land*TILE;曾多减一格 → 卡半身)
     p.vx = 0; p.vy = 0;
     p.netOffX = 0; p.netOffY = 0;            // 清联机平滑偏移(本地瞬移不插值)
     p.clearFall?.();                         // 清坠落起点:瞬移不结算摔伤
@@ -4693,7 +4701,7 @@ export class Game implements GameHooks {
         lunar = { zone, counts: moonCounts };
       }
     }
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar);
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar, this.player.maxHp);
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -5666,7 +5674,7 @@ export class Game implements GameHooks {
     return {
       zoneHallow: s.zoneHallow, zoneCorrupt: s.zoneCorrupt, zoneCrimson: s.zoneCrimson,
       zoneJungle: s.zoneJungle, zoneSnow: s.zoneSnow, zoneDesert: s.zoneDesert,
-      zoneDungeon: s.zoneDungeon,
+      zoneDungeon: s.zoneDungeon, zoneBeach: s.zoneBeach,
       bloodMoon: !!c.bloodMoon, halloween: !!c.halloween, xmas: !!c.xMas,
       windy: Math.abs(this.world.weather.windSpeedCurrent) > 0.5,
     };

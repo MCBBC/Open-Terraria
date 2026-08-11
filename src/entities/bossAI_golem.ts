@@ -463,9 +463,14 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else {
     // ================= 自由态 aiStyle 48 GolemHeadFree(NPC.cs:31500-31741) =================
-    // flag48(:31503-31519):看不到玩家 → 穿墙(flag49 联动弹幕预判;原版判定本体↔玩家视线,
-    // 二阶段本体已亡 → 用头↔玩家视线,简化项)
+    // flag48(:31503-31515):头自身看不到玩家 → 穿墙 + 火焰弹不蓄满(头↔玩家视线)
+    const rBody = findBody(game);
     const noLos = !player || !losClear(game, e.cx, e.cy, player.cx, player.cy);
+    // flag49(:31646-31651):本体↔玩家无视线 → 激光催速 + 弹道预判;
+    // 本体已亡(本移植死亡链)→ 退化为头↔玩家视线
+    const noLosBody = rBody
+      ? !player || !losClear(game, rBody.cx, rBody.cy, player.cx, player.cy)
+      : noLos;
     if (player) {
       // 悬浮(:31521-31564):目标 = 玩家 + (0,-300),7 速/0.05 步进(符号翻转双步进)
       const dx = player.cx - e.cx, dy = player.cy - 300 - e.cy;
@@ -476,7 +481,6 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       // 本体已亡(本移植死亡链,原版无此态)→ 比值 0 = 全档,等价原版读尸体槽 life<=0 恒真
       const num761 = (num + 4) / 5;
       e.ai1 += num761;
-      const rBody = findBody(game);
       const r = rBody ? rBody.hp / rBody.maxHp : 0;
       if (r < 0.8) e.ai1 += num761;
       if (r < 0.6) e.ai1 += num761;
@@ -498,10 +502,10 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (r < 1 / 4) e.ai2 += num;
       if (r < 1 / 5) e.ai2 += num;
       if (r < 1 / 6) e.ai2 += num;
-      if (noLos) e.ai2 += num * 10;                // :31646-31651
+      if (noLosBody) e.ai2 += num * 10;            // :31646-31651 flag49 催速
       if (e.ai2 > 100 + Math.random() * 4800) {
         e.ai2 = 0;
-        golemEyeLasersFree(game, e, player, noLos, r);
+        golemEyeLasersFree(game, e, player, noLosBody, r);
       }
     }
     // :31721-31740 排焰尘(纯视觉,略)

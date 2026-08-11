@@ -123,6 +123,8 @@ export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
   stylist: { id: 353, extra: 9 },
   tax_collector: { id: 441, extra: 9 },
   golfer: { id: 588, extra: 9 },
+  angler: { id: 369, extra: 9 },      // 渔夫（海滩 376 睡渔夫解救后城镇化；ExtraFramesCount 9）
+  tavernkeep: { id: 550, extra: 9 },  // 酒保（击败一次旧日军团后入驻；ExtraFramesCount 9）
   zoologist: { id: 633, extra: 9 },   // BestiaryGirl
   princess: { id: 663, extra: 7 },
   travelling_merchant: { id: 368, extra: 10 },  // 旅行商人（上午随机到访，黄昏离场）

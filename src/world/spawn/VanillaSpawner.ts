@@ -81,6 +81,16 @@ const T = (() => {
     // 蘑菇族计数(SceneMetrics.cs:617)：71 植株/72 蘑菇树/528 藤（70 蘑菇草见上）
     MUSHROOM_PLANT: get('v_71_mushroom_plant'), MUSHROOM_TREE: get('v_72_mushroom_tree'),
     MUSHROOM_VINE: get('v_528_mushroom_vines'),
+    // 190 发光蘑菇块（NPC.cs:5010/5109 glowshroom 出怪门 tile 70||190 之一）
+    MUSHROOM_BLOCK: get('v_190_glowing_mushroom_block'),
+    // Moss 族（TileID.Sets.Conversion.Moss，TileID.cs:38）：CheckToSpawnRockGolem 落脚门
+    // 179 绿/180 黄/181 红/182 蓝/183 紫/381 熔岩/534 氪/536 氙/539 氩/625 氖/627 氦
+    MOSS_GREEN: get('v_179_green_moss_block'), MOSS_YELLOW: get('v_180_yellow_moss_block'),
+    MOSS_RED: get('v_181_red_moss_block'), MOSS_BLUE: get('v_182_blue_moss_block'),
+    MOSS_PURPLE: get('v_183_purple_moss_block'), MOSS_LAVA: get('v_381_lava_moss'),
+    MOSS_KRYPTON: get('v_534_krypton_moss_block'), MOSS_XENON: get('v_536_xenon_moss_block'),
+    MOSS_ARGON: get('v_539_argon_moss_block'), MOSS_NEON: get('v_625_neon_moss_block'),
+    MOSS_HELIUM: get('v_627_helium_moss_block'),
     // 恶地族补齐（SceneMetrics.cs:614-615）：661 腐化丛林草/400 腐化沙岩/662/401 猩红对位
     // （旧注释称引擎无 def——实际均已注册，按 0 计是漏）
     CORRUPT_JUNGLE_GRASS: get('v_661_corrupt_jungle_grass_block'),
@@ -139,6 +149,10 @@ const MUSHROOM_LOOKUP = (() => {
 /** Main.tileSand 全表（Main.cs:7177-7180，1.4.5.6 仅 4 项）：
  *  isOcean 判定（NPC.cs L1104）用沙族集合而非只认 53 黄沙 */
 const TILE_SAND = new Set([T.SAND, T.EBONSAND, T.PEARLSAND, T.CRIMSAND]);
+/** TileID.Sets.Conversion.Moss（TileID.cs:38）全表：CheckToSpawnRockGolem 落脚 tile 门
+ *  （NPC.cs:5715：spawnTileType==1 石 或 Moss 族） */
+const TILE_MOSS = new Set([T.MOSS_GREEN, T.MOSS_YELLOW, T.MOSS_RED, T.MOSS_BLUE, T.MOSS_PURPLE,
+  T.MOSS_LAVA, T.MOSS_KRYPTON, T.MOSS_XENON, T.MOSS_ARGON, T.MOSS_NEON, T.MOSS_HELIUM]);
 
 // ---- 洞穴主池 cavernMonsterType 表（NPC.cs:6498 + 世界生成时 18058-18064 填充） ----
 export let cavernMonsterType: number[][] = [[49, 49, 49], [49, 49, 49]];
@@ -240,6 +254,11 @@ export class VanillaSpawner {
   currentSpawnY = 0;
   /** GetZombieSettings（L5495）的地表夜僵尸 style（SpawnAnNPC 入口 Next(7) roll，L1193） */
   private zombieStyle = 0;
+  /** GetZombieSettings（L5499-5514）：火把僵尸 590/591 的概率门分母。
+   *  基础 12；playerHasStartingHealth（statLifeMax≤100，L327）→ 5 − 活跃玩家数/2（下限 2） */
+  private torchZombieChance = 12;
+  /** 玩家 statLifeMax（playerHasStartingHealth 判定用；未传入视为非初始血量 → 概率门 12） */
+  private playerLifeMax = 0;
 
   constructor(private world: World) {}
 
@@ -258,13 +277,15 @@ export class VanillaSpawner {
   setPlayerFlags(zoneDungeon: boolean, downedSkeletron: boolean,
     invaders = false, activeIds: Set<number> = new Set(),
     moonEvent: MoonEventSpawnCtx | null = null,
-    lunar: LunarSpawnCtx | null = null): void {
+    lunar: LunarSpawnCtx | null = null,
+    playerLifeMax = 0): void {
     this.ZoneDungeon = zoneDungeon;
     this.downedBoss3 = downedSkeletron;
     this.invaders = invaders;
     this.activeIds = activeIds;
     this.moonEvent = moonEvent;
     this.lunar = lunar;
+    this.playerLifeMax = playerLifeMax;
     // reachedInvasionBossCap（Spawner 构造器 NPC.cs:159-183）：Boss 族 npcSlots 总和
     // ≥ 玩家数 × maxSpawns 上限（单人 ⌊5×2.3⌋=11）时当帧不刷 Boss
     this.moonBossCap = moonEvent != null && moonEvent.bossSlotSum >= 1 * MOON_BOSS_CAP_SLOTS;
@@ -401,13 +422,16 @@ export class VanillaSpawner {
     this.underGround = spawnTileY > this.world.groundLevel && spawnTileY < this.world.rockLevel;
     // isOcean（L1104 1:1）：(边缘 && Main.tileSand[spawnTileType] && 岩石层上)
     //  || (spawnTileType==53 && oceanDepths)。沙族 = Main.cs:7177-7180 全表（53/112/116/234），
-    //  只认 53 会漏黑檀沙/珍珠沙/猩红沙海床；oceanDepths 用 BeachPass 同源的 beachX/中层+40 近似
-    // 海洋/海滩 x 阈值与 BeachPass 同源缩放（van = w/4200：oceanWater 220~260、
-    // beachSandRandomCenter+20=340）——此前硬编码 250/340，非 4200 宽世界会错位：
-    // 大世界海洋 250~sc(260) 段漏判 isOcean → 海滩水走水池段刷出水母
-    const van = st.w / 4200;
-    const oceanX = Math.max(1, Math.floor(260 * van));
-    const beachX = Math.floor(340 * van);
+    //  只认 53 会漏黑檀沙/珍珠沙/猩红沙海床。
+    // oceanDepths（WorldGen.cs:10978-10988 1:1）：y ≤ oceanLevel（=（worldSurface+rockLayer)/2+40，
+    //  WorldGen.cs:4393）&& x < beachDistance。oceanDistance/beachDistance 是
+    //  **不随图宽缩放**的常量（WorldGen.cs:4100/4102 = 250/380）——BeachPass 的
+    //  oceanWater 220~260 / beachSandRandomCenter+20=340 是另一套生成期随机值，
+    //  与本判定的 250/380 无对应关系，此前借它近似（260/340）属错位：
+    //  第二项 beachX 340→380 会漏判 40 格沙滩海床。本仓世界恒 4200 宽（van=1），
+    //  直接取原版常量。
+    const oceanX = 250;    // WorldGen.oceanDistance
+    const beachX = 380;    // WorldGen.beachDistance
     this.isOcean = ((spawnTileX < oceanX || spawnTileX > st.w - oceanX)
       && TILE_SAND.has(spawnTileType) && spawnTileY < this.world.rockLevel)
       || (spawnTileType === T.SAND
@@ -485,7 +509,9 @@ export class VanillaSpawner {
         else if (t === T.SUNFLOWER) sunflower++;
       }
     }
-    // SceneMetrics.cs:608-615：向日葵每株 −10（infectedSeed ×3 未实现）
+    // SceneMetrics.cs:588-592/608-615：向日葵每株 −10 计入恶/血两族。
+    //  num = −10，infectedSeed 种子（10xx 醉酒世界）时 num ×3 → 每株 −30——
+    //  本仓无种子系统（恒非 infectedSeed）→ 恒 ×1
     evil += sunflower * -10; blood += sunflower * -10;
     // SceneMetrics.cs:648-662：神圣/邪恶/猩红两两互减后钳 ≥0
     const holyRaw = holy;
@@ -973,6 +999,12 @@ export class VanillaSpawner {
     // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
     // 原版在函数入口 roll（此处同位置，保持后续 RNG 流顺序一致）
     this.zombieStyle = rng.int(0, 6);
+    // GetZombieSettings L5499-5514：torchZombieChance 基础 12；
+    //  playerHasStartingHealth（L327：statLifeMax ≤ 100）→ 5 − numberOfActivePlayers/2
+    //  （下限 2；活跃玩家数未跟踪 → 单人取 1）。skyblock 的 spawnArmedZombies=false
+    //  只影响 591 持械变体，不影响本概率门
+    this.torchZombieChance = this.playerLifeMax > 0 && this.playerLifeMax <= 100
+      ? Math.max(2, 5 - Math.floor(1 / 2)) : 12;
 
     // ---- 星璇塔 Zone（NPC.cs:1204-1289：SpawnAnNPC 链**第一**分支——原版先于
     //  天空怪/入侵/月事件段；逐塔 SelectRandom 权重表 + CountNPCS 上限重掷，1:1）----
@@ -1073,8 +1105,13 @@ export class VanillaSpawner {
     }
     // ---- 海洋（L1705-1834）----
     // 门（L1705）：(!spawnFriendly || (!savedAngler && !AnyNPCs(376))) && waterTile && isOcean。
-    //  spawnFriendly（Spawner 字段 L71，FindSpawnTile 内对小动物友好点置 true）与
-    //  savedAngler 均未跟踪 → 按 false 近似；AnyNPCs(376) 用 activeIds 现查
+    //  spawnFriendly（Spawner 字段 L71）：SetSpawnFlags L714-828 内**概率 roll** 的
+    //  "友好刷怪位"——玩家近旁有 ≥1 名城镇 NPC 时按 1/10~1/3 概率置 true 并减
+    //  maxSpawns（该帧只刷小动物）。本仓该 roll 未实装 → 恒 false（门恒放行）。
+    //  savedAngler（NPC.savedAngler 静态）：由 AI_007_TownEntities_UpdateSavedStates
+    //  （NPC.cs:53337-53361 case 369）在渔夫 369 城镇化运行 AI 时置位；本仓渔夫
+    //  救援链未实装（376 睡渔夫可由本段刷出，但无 376→369 转换、flags 亦无
+    //  savedAngler 位）→ 恒 false。AnyNPCs(376) 用 activeIds 现查
     if (this.waterTile && this.isOcean && !any(376)) {
       // 渔夫 376（L1708-1728）：表层水（spawnTileY < worldSurface-10）→ 向上 50 格
       //  找干隙线 num15 → 抬到该线落点；!xRange 才出（L1723）
@@ -1107,10 +1144,12 @@ export class VanillaSpawner {
       // 海鸥 602（L1762-1765）：干隙线存在 + !xRange + 1/10 → 落在水面线 num17
       if (num17 > 0 && !this.xRange && N(10)) return this.spawnNPC(x, num17 * TILE, 602, rng);
       // 鲨鱼 65（L1766-1769）：1/SharkSpawnChance。原版 SharkSpawnChance（L5458-5475）
-      //  基础 10，落点水面上方有弹体 820（血腥诱饵）可命中时降为 2——弹体未接入 → 恒 10 近似
+      //  基础 10，落点水面上方可命中弹体 820（血腥诱饵 Chum，Chum Caster 鱼竿施放）时降为 2。
+      //  依赖链未实装：items.ts 无 Chum 物品注册、无弹体 820 → 恒 10（依赖：
+      //  Chum Bucket/Chum Caster 物品 + 鱼竿弹体系统）
       const sharkChance = 10;
       if (N(sharkChance)) return D(65);
-      // 鲨鱼龙 692（L1770-1773，困难）：npc json 缺 692 条目 → spawnNPC 可能返回 null
+      // 鲨鱼龙 692（L1770-1773，困难）：json 已有条目（1:1 虎鲸属性，aiStyle 16 游泳族）
       if (hardMode && N(sharkChance)) return D(692);
       // 海洋小动物（L1774-1817）：1/10 门 → Next(4) 四选
       if (N(10)) {
@@ -1303,9 +1342,15 @@ export class VanillaSpawner {
         }
         return D(254);
       }
-      if (N(8)) return D(360);
-      if (N(4)) return D(259);
-      return D(257);
+      // L3581：洞穴级蘑菇草是**困难模式专属段**（70 && hard && y≥worldSurface &&
+      //  Next(3)!=0 → 真菌族 374/360/259/260/257/258）。肉前须穿透本段落入洞穴
+      //  主池/兜底段，由 L5010/5109 的 ZoneGlowshroom 门出 635/634——此前缺
+      //  hardMode 门，肉前也被截断（635/634 因此永不可达）
+      if (hardMode && N(3)) {
+        if (N(8)) return D(360);
+        if (N(4)) return D(259);
+        return D(257);
+      }
     }
     // ---- 洞穴稀有怪/小动物（L3644-3719；原版位于蘑菇地之后、丛林草之前）----
     //  RollLuck(n)≈Next(n)（玩家幸运度未接入）；goldCritterChance=400
@@ -1378,7 +1423,10 @@ export class VanillaSpawner {
     // 否则秃鹫 61
     if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE || t === T.FOSSIL) {
       if (!hardMode) {
-        if (N(5)) return D(69);   // 蚁狮
+        // L4374：!waterTile && 黄沙 53 && 1/5 && Spawning_SandstoneCheck（落脚向下 8 行、
+        //  每行 ±4 格沙族邻接计数 ≥40——蚁狮只出成片沙地；孤沙/硬化沙面计数不足 → 秃鹫）
+        if (!this.waterTile && t === T.SAND && N(5)
+          && this.spawningSandstoneCheck(this.spawnTileX, this.spawnTileY)) return D(69);   // 蚁狮
         return D(61);             // 秃鹫（地表沙）
       }
     }
@@ -1511,7 +1559,11 @@ export class VanillaSpawner {
         return D(N(2) ? -55 : -54);
       }
       // L4585：skyblock 火把僵尸段省略（skyblock 语义未接）
-      // L4622：火把僵尸 590/591（Next(torchZombieChance=12)）——json 缺 590/591，跳过
+      // L4622：火把僵尸 590/591——Next(torchZombieChance)。原版条件**仅此一个概率门**，
+      //  与"点燃的火把/营火邻近"无关（590 贴图手持火把故俗名火把僵尸；
+      //  GetZombieSettings L5495-5523 全文无火把/营火邻接扫描）。持械变体 591 需
+      //  spawnArmedZombies && expertMode（专家模式未接 → 恒 false）→ 恒刷 590
+      if (N(this.torchZombieChance)) return D(590);
       // L4634：halloween/xMas/墓园/专家持械僵尸 430-436 略（节日/专家模式未接）
       // ---- 最终僵尸 style 表（L4671-4716 + GetZombieSettings L5495）----
       //  zombieStyle = Next(7)（在 SpawnAnNPC 入口即 roll，L1193）；各 style 配大小变体
@@ -1568,7 +1620,10 @@ export class VanillaSpawner {
       if (hardMode && mechAny && !N(5)) return D(151);
       return D(60);
     }
-    // CheckToSpawnRockGolem（L4822）→ 631：岩石柱邻接判定未移植且 json 缺 631 条目，跳过
+    // CheckToSpawnRockGolem（L4821/L5713 1:1）→ 岩石高仑 631：
+    //  hard && (落脚=石 或 Moss 族) && !ZoneSnow && 1/50
+    //  && 落点上方 4 格三连（x−1/x/x+1）净空（体型 36×48 的头部空间预检）
+    if (this.checkToSpawnRockGolem(rng)) return D(631);
     // ---- 洞穴通用池（L4825-5142）----
     // 冰系 tile 分档（原版各段用不同子集）：
     //  iceAll=147/161/162/163/164/200（蠕虫段 L4842）、iceCave=147/161/162（L4981/5117/5128）
@@ -1653,7 +1708,8 @@ export class VanillaSpawner {
       if (this.ZoneSnow) return D(185);
       // L5000：1/3 → cavernMonsterType[Next(2)][Next(3)]（洞穴蝾螈族，世界生成时 roll）
       if (N(3)) return D(cavernMonsterType[rng.int(0, 1)][rng.int(0, 2)]);
-      // L5010：ZoneGlowshroom && tile 70/190 → Fungi Spore 635——json 缺 635，跳过
+      // L5010：ZoneGlowshroom && tile 70/190 → 孢子骷髅 635（蘑菇草/发光蘑菇块落脚）
+      if (this.ZoneGlowshroom && (t === T.MUSHROOM_GRASS || t === T.MUSHROOM_BLOCK)) return D(635);
       // L5018：halloween 南瓜精略；L5029：专家模式骨堆小动物 449-452 略（无专家模式）
       // switch(Next(4)) 骷髅系（L5050-5099）：2/3 本体，1/3 大小变体二选一
       const sv = rng.int(0, 3);
@@ -1667,7 +1723,9 @@ export class VanillaSpawner {
     if (hardMode && this.ZoneHallow && N(2)) return D(138);
     // L5105：ZoneJungle → Jungle Bat 51
     if (this.ZoneJungle) return D(51);
-    // L5109：ZoneGlowshroom && tile 70/190 → 634——json 缺 634，跳过
+    // L5109：ZoneGlowshroom && tile 70/190 → 孢子蝙蝠 634（洞穴兜底段的蘑菇地支，
+    //  与 L5010 的 635 分居两支——命中本支说明洞穴主池 Next(2) 已先行掷空）
+    if (this.ZoneGlowshroom && (t === T.MUSHROOM_GRASS || t === T.MUSHROOM_BLOCK)) return D(634);
     // L5113：hard && ZoneHallow → Illuminant Bat 137
     if (hardMode && this.ZoneHallow) return D(137);
     // L5117：hard && Next(6)>0（5/6）→ 冰落脚 1/3 Ice Bat 150 / else Giant Bat 93
@@ -1703,6 +1761,48 @@ export class VanillaSpawner {
     if (n < 51) return 641;     // Sapphire Squirrel
     if (n < 72) return 640;     // Topaz Squirrel
     return 639;                 // Amethyst Squirrel
+  }
+
+  /** CheckToSpawnRockGolem（NPC.cs:5713-5728 1:1）：
+   *  !hardMode / (落脚≠石 且 非 Moss 族) / ZoneSnow 任一 → false；
+   *  Next(50)≠0 → false；落点上方 4 格三连任一实心（WorldGen.SolidTile）→ false */
+  private checkToSpawnRockGolem(rng: RNG): boolean {
+    if (!this.hardMode) return false;
+    if (this.spawnTileType !== T.STONE && !TILE_MOSS.has(this.spawnTileType)) return false;
+    if (this.ZoneSnow) return false;
+    if (rng.next() >= 1 / 50) return false;   // Main.rand.Next(50)==0
+    const st = this.world.store;
+    const y4 = this.spawnTileY - 4;
+    if (st.isSolid(this.spawnTileX - 1, y4) || st.isSolid(this.spawnTileX, y4)
+      || st.isSolid(this.spawnTileX + 1, y4)) return false;
+    return true;
+  }
+
+  /** Spawning_SandstoneCheck（NPC.cs:5364-5403 1:1）：沙漠地表蚁狮门。
+   *  WorldGen.InWorld(x,y,10) 外 → false；自落脚格向下 ≤8 行逐行计数——本行须为
+   *  沙族 tile（中断止），并向两侧各延伸 ≤4 格（遇非沙族中断）；
+   *  计数 ≥40 通过（remixWorld 阈值 10 未接——本仓无 remix 世界恒 40） */
+  private spawningSandstoneCheck(x: number, y: number): boolean {
+    const st = this.world.store;
+    if (x < 10 || y < 10 || x > st.w - 10 || y > st.h - 10) return false;
+    let num = 0;
+    outer: for (let i = 0; i < 8; i++) {
+      let t = st.type[st.idx(x, y + i)];
+      if (!st.flags[st.idx(x, y + i)] || !TILE_SAND.has(t)) break;
+      num++;
+      for (let j = 1; j <= 4; j++) {
+        t = st.type[st.idx(x + j, y + i)];
+        if (!st.flags[st.idx(x + j, y + i)] || !TILE_SAND.has(t)) break;
+        num++;
+      }
+      for (let k = 1; k <= 4; k++) {
+        t = st.type[st.idx(x - k, y + i)];
+        if (!st.flags[st.idx(x - k, y + i)] || !TILE_SAND.has(t)) break;
+        num++;
+      }
+      if (num >= 40) break outer;
+    }
+    return num >= 40;
   }
 
   /** GetBasicSlimeToSpawn（L5537-5580） */

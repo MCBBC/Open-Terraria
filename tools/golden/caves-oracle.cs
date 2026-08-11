@@ -993,15 +993,19 @@ Checkpoint("mcopenings");
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
 {
     bool floridaL = false, floridaR = false;
+    double f1 = (double)r.NextDouble();
     if ((int)r.Next(4) == 0)
     {
         if ((int)r.Next(2) == 0) floridaL = true; else floridaR = true;
     }
+    Console.WriteLine($"CSBH f1={f1} fl={floridaL} fr={floridaR} peek={(int)r.Peek()}");
+    void Noop() { }
     for (int side = 0; side < 2; side++)
     {
         if (side == 0)
         {
             int waterX = (int)r.Next(220, 260);
+            Console.WriteLine($"CSBW waterX={waterX} dSide={dungeonRight} cap={leftBeachEnd - 50}");
             if (dungeonRight) waterX = 275;
             int cap = leftBeachEnd - 50;
             if (waterX > cap) waterX = cap;
@@ -1011,8 +1015,12 @@ Checkpoint("mcopenings");
             int count = 0; double depth = 1.0;
             for (int x = waterX - 1; x >= 0; x--)
             {
-                if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
-                else depth += 1.0;
+                if (x > 30)
+            {
+                count++; depth = TuneOceanDepth(count, depth, floridaL);
+                if (x >= 140 && x <= 240) Console.WriteLine($"CSB3 x={x} c={count} d={depth}");
+            }
+            else depth += 1.0;
                 int pad = (int)r.Next(15, 20);
                 int yEnd = (int)((double)j + depth + pad);
                 for (int y = 0; y < yEnd && y < H; y++)

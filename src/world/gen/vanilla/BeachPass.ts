@@ -111,14 +111,17 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const edgeWall = Math.max(4, Math.floor(30 * van));
 
   let floridaL = false, floridaR = false;
-  if (rng.next() < 0.25) {
+  const f1 = rng.next();
+  if (f1 < 0.25) {
     if (rng.next() < 0.5) floridaL = true; else floridaR = true;
   }
+  console.log(`JSBH f1=${f1} fl=${floridaL} fr=${floridaR} peek=${rng.vanilla.peek()}`);
 
   for (let side = 0; side < 2; side++) {
     if (side === 0) {
       // 左海盆:从 beachLeftEnd-50 之左往世界缘挖
       let waterX = rng.int(oceanWaterMin, oceanWaterMax - 1);  // 原版 Next(220,260) 上界开
+      console.log(`JSBW waterX=${waterX} dSide=${gs.dungeonSide} cap=${gs.beachLeftEnd - minSand}`);
       if (gs.dungeonSide === 1) waterX = forcedJungleLen; // 丛林侧强制 275(缩放)
       const cap = gs.beachLeftEnd - minSand;
       if (waterX > cap) waterX = Math.max(2, cap);
@@ -128,8 +131,10 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
       const waterY = surfY + rng.int(1, 4);
       let count = 0, depth = 1;
       for (let x = waterX - 1; x >= 0; x--) {
-        if (x > edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaL); }
-        else depth += 1;
+        if (x > edgeWall) {
+          count++; depth = tuneOceanDepth(rng, count, depth, van, floridaL);
+          if (side === 0 && x >= 140 && x <= 240) console.log(`JSB3 x=${x} c=${count} d=${depth}`);
+        } else depth += 1;
         const pad = rng.int(15, 19);
         const yEnd = waterY + depth + pad;
         for (let y = 0; y < yEnd && y < st.h; y++) {
