@@ -2689,6 +2689,21 @@ export class Game implements GameHooks {
         if (st.get(x + s, yy) === type) st.setTile(x + s, yy, 0);
       }
     }
+    // 蘑菇树（sheet 72）：不走树干木材/橡实——原版 KillTile_GetTreeDrops 仅覆盖
+    // tile 5/596/616/634（WorldGen.cs:65267），72 走 case 71/72 掷骰（:65697-65707）：
+    //   每格 1/40 蘑菇草种子(194) / 否则 1/2 发光蘑菇(183) / 否则无掉落
+    if (TILE_DEFS[type]?.vanilla?.sheet === 72) {
+      const roll = new RNG((Math.random() * 1e9) | 0);
+      for (let yy = top; yy <= bottom; yy++) {
+        const key = roll.nextInt(40) === 0 ? 'mushroom_grass_seeds'
+          : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null;
+        if (key && ITEM_BY_KEY[key] !== undefined) {
+          this.spawnDrop(x * TILE + 8, yy * TILE + 8, key, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+        }
+      }
+      this.spawnParticles(x * TILE + 8, top * TILE + 8, TILE_DEFS[type]?.mapColor ?? '#2E8B3D', 14, 2.2);
+      return;
+    }
     // 掉木材（与自有树同比例）+ 树顶枝条额外几份
     const wood = Math.max(1, Math.floor(height * 0.8));
     for (let p = 0; p < wood; p++) {

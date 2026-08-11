@@ -13,7 +13,13 @@ import { placeDoorClosed } from '../../Door';
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
 const PINK = TILE_BY_KEY['v_44_pink_brick']!;
-const CRACKED = [TILE_BY_KEY['v_481_cracked_blue_brick'] ?? BLUE];
+// 原版 DungeonCrawler.SetupDungeonGenVarVariables(cs L54-90)：裂砖随主题——
+// 蓝41/墙7→481、绿43/墙8→482、粉44/墙9→483（此前恒 481，粉/绿地牢混蓝裂砖）
+const CRACKED_FOR_BRICK: Record<number, number> = {
+  [BLUE]: TILE_BY_KEY['v_481_cracked_blue_brick'] ?? BLUE,
+  [GREEN]: TILE_BY_KEY['v_482_cracked_green_brick'] ?? GREEN,
+  [PINK]: TILE_BY_KEY['v_483_cracked_pink_brick'] ?? PINK,
+};
 const DOOR = TILE_BY_KEY['door_closed']!;
 const CHEST = TILE_BY_KEY['chest']!;
 const SPIKE = TILE_BY_KEY['v_48_spike']!;
@@ -49,7 +55,7 @@ const BANNER = TILE_BY_KEY['v_91_banners']!;
 interface DRoom { cx: number; cy: number; l: number; r: number; t: number; b: number }
 
 class DungeonCtx {
-  brick: number; wall: number;
+  brick: number; wall: number; cracked: number;
   minX = 0; maxX = 0; minYY = 0; maxY = 0;
   rooms: DRoom[] = [];
   entranceX = 0;
@@ -63,6 +69,7 @@ class DungeonCtx {
   dPlatforms: Array<[number, number]> = [];
   constructor(brick: number, wall: number, x: number, y: number) {
     this.brick = brick; this.wall = wall;
+    this.cracked = CRACKED_FOR_BRICK[brick] ?? brick;
     this.minX = this.maxX = x; this.minYY = this.maxY = y;
   }
   isDungeonWall(st: TileStore, x: number, y: number): boolean {
@@ -121,8 +128,9 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   }
   const x0 = gs.dungeonLocation;
   if (x0 < 30 || x0 > w - 30) return;
-  // 原版主题:Next(3) → 蓝41/墙7、绿43/墙8、粉44/墙9
-  const theme = rng.int(0, 2);
+  // 原版主题在 **Dunes pass 头**已掷（SetupDungeonGenVarVariables，cs:11542）；
+  // 此处只消费 gs.dungeonTheme（-1=非原版管线直调时回退自掷）
+  const theme = gs.dungeonTheme >= 0 ? gs.dungeonTheme : rng.int(0, 2);
   const brick = theme === 0 ? BLUE : theme === 1 ? GREEN : PINK;
   const wallId = brick === BLUE ? 7 : brick === GREEN ? 8 : 9;
   // 深度:找实心(L6565)
@@ -339,7 +347,7 @@ function dungeonHalls(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix:
         const i = st.idx(x, y);
         if (dangerous) {
           // 危险走廊:填裂砖(不可挖穿的陷阱段)
-          if (st.flags[i] || !dc.isDungeonWall(st, x, y)) { st.type[i] = CRACKED[0]; st.flags[i] = 1; }
+          if (st.flags[i] || !dc.isDungeonWall(st, x, y)) { st.type[i] = dc.cracked; st.flags[i] = 1; }
         } else {
           st.flags[i] = 0;
         }
@@ -852,7 +860,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
   const isBrick = (x: number, y: number): boolean => {
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
-    return !!(st.flags[i] && (st.type[i] === dc.brick || st.type[i] === CRACKED[0]));
+    return !!(st.flags[i] && (st.type[i] === dc.brick || st.type[i] === dc.cracked));
   };
   const isDWall = (x: number, y: number): boolean => st.inBounds(x, y) && dc.isDungeonWall(st, x, y);
   const airDW = (x: number, y: number) => st.inBounds(x, y) && !st.flags[st.idx(x, y)] && dc.isDungeonWall(st, x, y);

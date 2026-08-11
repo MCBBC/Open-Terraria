@@ -15,6 +15,9 @@ export interface GenState {
    *  的 worldSurfaceHigh+25；SandPatches/SmallHoles/Tunnels 等按 GenVars 值掷骰） */
   genWorldSurface: number;
   genRockLayer: number;
+  /** GenVars.worldSurfaceHigh 原始 double（≠ floor 版 worldSurfaceHigh；
+   *  SmallHoles/DirtLayerCaves/SurfaceCaves 的拒绝判定与首实心行上界用它比较） */
+  genWorldSurfaceHigh: number;
   /** Tunnels pass 记录（cs:11743：numTunnels ≤ maxTunnels-1；tunnelX[5] 存档用） */
   tunnelX: number[];
   numTunnels: number;
@@ -25,6 +28,9 @@ export interface GenState {
   dungeonSide: 1 | -1;        // 地牢在地图哪侧
   dungeonX: number;           // 地牢位置（Reset num4：仅作雪原中心）
   dungeonLocation: number;    // 地牢入口实际位置（Reset 末掷）
+  /** 地牢主题（Dunes pass 头 DungeonCrawler.SetupDungeonGenVarVariables 掷 Next(3)，
+   *  cs:11542+DungeonCrawler.cs:56——掷骰时点在 Dunes，不在 Dungeon pass；-1=未掷） */
+  dungeonTheme: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
   dungeonEntY: number;        // 入口门厅可站立点 Y
@@ -73,11 +79,11 @@ export function newGenState(w: number, h: number): GenState {
     rockLevel: Math.floor(h * 0.42), rockLevelLow: 0, rockLevelHigh: 0,
     waterLine: Math.floor(h * 0.35), lavaLine: h - 200,
     beachDistance: Math.max(24, Math.floor(w * 0.06)),
-    genWorldSurface: 0, genRockLayer: 0,
+    genWorldSurface: 0, genRockLayer: 0, genWorldSurfaceHigh: 0,
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
-    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, jungleX: 0,
+    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
     treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [], lakeX: [],

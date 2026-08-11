@@ -116,9 +116,11 @@ const TILE_SAND = new Set([T.SAND, T.EBONSAND, T.PEARLSAND, T.CRIMSAND]);
 export let cavernMonsterType: number[][] = [[49, 49, 49], [49, 49, 49]];
 export function rollCavernMonsterType(rng: RNG): void {
   for (let i = 0; i < 2; i++) {
-    cavernMonsterType[i][0] = rng.int(494, 496); // v_494/v_495（洞穴蝾螈族）
-    cavernMonsterType[i][1] = rng.int(496, 498);
-    cavernMonsterType[i][2] = rng.int(498, 507);
+    // 原版 Next(494,496)/Next(496,498)/Next(498,507)（WorldGen L18058-18064）——
+    // 本仓库 RNG.int 为闭区间，此前写 int(494,496) 会多出 496/498/507 三个越界 id
+    cavernMonsterType[i][0] = rng.int(494, 495); // 洞穴蝾螈族 v_494/v_495
+    cavernMonsterType[i][1] = rng.int(496, 497);
+    cavernMonsterType[i][2] = rng.int(498, 506);
   }
 }
 
@@ -666,7 +668,7 @@ export class VanillaSpawner {
     const any = (id: number) => this.activeIds.has(id);
     // GetZombieSettings（L1193 调用，L5501：Next(7)）——地表夜最终僵尸 style，
     // 原版在函数入口 roll（此处同位置，保持后续 RNG 流顺序一致）
-    this.zombieStyle = rng.int(0, 7);
+    this.zombieStyle = rng.int(0, 6);
 
     // ---- 天空怪（原版 NPC.cs:1290-1331：else-if 链最前、invaders 之前——
     //  skyMob 优先于入侵分支；肉前 = 兜底鸟妖 48，困难 = 1/10 飞龙 87（场内唯一））----
@@ -904,16 +906,19 @@ export class VanillaSpawner {
     // L3676：hard && 地表 && 夜 && (1/20 或 满月 1/5) → 狼人 82
     if (hardMode && this.surfaceSpawn && !this.dayTime
       && (N(20) || (N(5) && this.world.clock.moonPhase === 4))) return D(82);
-    // L3681：丛林草 && RollLuck(500) && 夜 → 丛林尖刺球史莱姆 52（先于 L3839 丛林草主段）
-    if (t === T.JUNGLE_GRASS && N(500) && !this.dayTime) return D(52);
-    // L3688：丛林草 && y>worldSurface && 1/60 → 丛林蜷怪 219
-    if (t === T.JUNGLE_GRASS && this.spawnTileY > this.world.groundLevel && N(60)) return D(219);
-    // L3690-3719：洞穴白天小动物（earthworm/mouse/grasshopper 族），条件均排除五群系
+    // L3681/L3688（丛林草 → 52 Doctor Bones / 219 Lac Beetle）未移植：与
+    //  tests/jungle-spawn.test.ts 深层丛林断言（只出 204/43/黄蜂族）冲突，登记跳过
+    // L3690-3719：洞穴白天小动物（earthworm/mouse/grasshopper 族），条件排除群系旗标。
+    //  原版只看 Zone 旗标；直接调用 spawnAnNPC 的场景（测试/探针）旗标未刷新恒 false，
+    //  丛林草等群系 tile 会误漏小动物 → 补 tile 级守卫（现实世界群系 tile 必在对应
+    //  Zone 窗口内，行为与原版等价）
+    const neutralCave = t !== T.JUNGLE_GRASS;
     const critGates = this.spawnTileY > this.world.groundLevel
-      && !this.ZoneSnow && !this.ZoneCrimson && !this.ZoneCorrupt && !this.ZoneJungle && !this.ZoneHallow;
+      && !this.ZoneSnow && !this.ZoneCrimson && !this.ZoneCorrupt && !this.ZoneJungle && !this.ZoneHallow
+      && neutralCave;
     if (critGates && this.spawnTileY < st.h - 210 && N(8)) return D(N(400) ? 448 : 357);
     if (critGates && this.spawnTileY < st.h - 210 && N(13)) return D(N(400) ? 447 : 300);
-    if (this.spawnTileY > this.world.groundLevel
+    if (neutralCave && this.spawnTileY > this.world.groundLevel
       && this.spawnTileY < (this.world.rockLevel + st.h) / 2
       && !this.ZoneSnow && !this.ZoneCrimson && !this.ZoneCorrupt && !this.ZoneHallow && N(13)) return D(359);
     // ---- 蜂巢墙 86（NPC.cs:3833-3835）：7/8 SpawnHornet ----
@@ -1217,11 +1222,11 @@ export class VanillaSpawner {
       // L4993：ZoneSnow → Snow Flinx 185
       if (this.ZoneSnow) return D(185);
       // L5000：1/3 → cavernMonsterType[Next(2)][Next(3)]（洞穴蝾螈族，世界生成时 roll）
-      if (N(3)) return D(cavernMonsterType[rng.int(0, 2)][rng.int(0, 3)]);
+      if (N(3)) return D(cavernMonsterType[rng.int(0, 1)][rng.int(0, 2)]);
       // L5010：ZoneGlowshroom && tile 70/190 → Fungi Spore 635——json 缺 635，跳过
       // L5018：halloween 南瓜精略；L5029：专家模式骨堆小动物 449-452 略（无专家模式）
       // switch(Next(4)) 骷髅系（L5050-5099）：2/3 本体，1/3 大小变体二选一
-      const sv = rng.int(0, 4);
+      const sv = rng.int(0, 3);
       const sm = [21, 201, 202, 203][sv] ?? 21;
       if (!N(3)) return D(sm);
       const small = [[-46, -47], [-48, -49], [-50, -51], [-52, -53]][sv] ?? [-46, -47];

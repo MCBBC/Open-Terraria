@@ -1598,9 +1598,13 @@ export class Enemy extends Entity {
       this.dead = true;
       return;
     }
-    let range = 175;  // Clinger num218(:22631);食人花 43 为 250
-    let accel = 0.035;
-    if (this.vanillaId === 43) range = 250;
+    let range = 150;  // 默认 num218(:22632)；族内覆盖(:22636-22658)
+    let accel = 0.035; // num217(:22630)
+    if (this.vanillaId === 43) range = 250;          // 食人怪（getGoodWorld 350 未接入）
+    else if (this.vanillaId === 101) range = 175;    // 邪恶触手
+    else if (this.vanillaId === 259) range = 100;    // 真菌球
+    else if (this.vanillaId === 175) { range = 500; accel = 0.05; }   // 怒牙捕兽草
+    else if (this.vanillaId === 260) { range = 350; accel = 0.15; }   // 巨型真菌球
     // ai2:300-450 tick 周期 → range ×1.3(:22644-22653)
     this.ai2 += 1;
     if (this.ai2 > 300) {

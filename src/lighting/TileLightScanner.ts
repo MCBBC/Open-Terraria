@@ -179,7 +179,7 @@ export class TileLightScanner {
                 const num11 = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 1000;
                 er = 0; eg = 0.2 + num11 / 2; eb = 1;
               } else {
-                er = d.light[0] / 255; eg = d.light[1] / 255; eb = d.light[2] / 255;
+                er = d.light![0] / 255; eg = d.light![1] / 255; eb = d.light![2] / 255;
                 if (FLICKER_SHEETS.has(sheet)) {
                   const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
                   er += f; eg += f; eb += f;

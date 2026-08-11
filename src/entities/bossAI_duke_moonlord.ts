@@ -221,6 +221,7 @@ export function dukeFishronAI(e: Enemy, game: GameHooks, player: Player | null) 
   // 本工程 Boss 不参与 despawn 块,故仅保留升空)。原版此处无回血逻辑。
   if (!player || player.dead || Math.hypot(player.cx - e.cx, player.cy - e.cy) > 5600) {
     e.vy -= 0.4;
+    e.encourageDespawn(10); // :49234 急升逃离 + EncourageDespawn(10)
     e.ai0 = e.ai0 > 4 ? 5 : 0;
     e.ai2 = 0;
     e.x += e.vx; e.y += e.vy;

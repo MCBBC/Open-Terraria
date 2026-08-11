@@ -128,6 +128,7 @@ export function runTerrainPass(st: TileStore, rng: RNG, gs: GenState, flatBeachP
   // GenVars 终值（cs:232-237：游走最后一列的 num3/num4 double——注意 ≠ Main.worldSurface）
   gs.genWorldSurface = num2;
   gs.genRockLayer = num3;
+  gs.genWorldSurfaceHigh = hiSurf; // num6 校正后 raw double（cs:236）
 }
 
 // RetargetSurfaceHistory(TerrainPass.cs:256-276):将历史地表逐列下压到目标高度后重写地形

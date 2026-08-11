@@ -47,6 +47,9 @@ function surfaceMap(st: TileStore, startX: number, width: number): Int16Array {
 
 export function runDunesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
+  // pass 头：DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）
+  // ——地牢主题 Next(3) 在**这里**消耗（曾错放到 DungeonPass=流错位 1 颗）
+  gs.dungeonTheme = rng.nextIntRange(0, 3);
   // WorldGenRange(1,2,ScaleWith:WorldWidth).GetRandom:ScaleValue=(int)(w/4200×v)
   const ws = w / 4200;
   const lo = Math.max(1, Math.trunc(ws * 1));

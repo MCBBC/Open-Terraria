@@ -1,6 +1,9 @@
-// 原版 pass 8-14 移植(参数 1:1 对齐 WorldGen.cs L5174-5372):
-// Rocks In Dirt / Dirt In Rocks / Clay / Small Holes / Dirt Layer Caves /
-// Rock Layer Caves / Surface Caves(5 组,含大竖井)。
+// 原版 pass 8-14 移植（1456 注册序对齐：RocksInDirt 11922 / DirtInRocks 11952 /
+// Clay 11985 / DirtLayerCaves 12094 / RockLayerCaves 12135 / SurfaceCaves 12191；
+// SmallHoles 12034 已拆到 MissingCavesPass——本文件不再重复执行）。
+// 2026-08-11 种子等价重写：DirtLayer/RockLayer 恢复 TileRunner 直呼（原版就是直线
+// runner，曾自创 digTunnel 蜿蜒改型=掷骰序列分叉）；Caverer 首掷顺序改回
+// 「段数→方向」；首实心行上界用 GenVars raw double；计数一律 (int) 截断。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -10,7 +13,7 @@ import { tileRunner, digTunnel } from './TileRunner';
 const DIRT = T.DIRT;
 const CLAY = TILE_BY_KEY['clay']!;
 
-/** pass 8-10:泥石混合 + 粘土 */
+/** pass 8-10:泥石混合 + 粘土（cs:11922-12033） */
 export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const area = w * h;
@@ -21,7 +24,7 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
       });
     }
   };
-  // 8 Rocks In Dirt(L5178):三档密度带,石嵌泥
+  // Rocks In Dirt（cs:11922）：三档密度带，石嵌泥
   run(area * 0.00015, 0, gs.worldSurfaceLow, T.STONE, 4, 14, 5, 39);
   for (let n = 0; n < area * 0.0002; n++) { // 中带:起点上方 10 格须为实心否则重掷一次
     const i = rng.int(0, w - 1);
@@ -30,157 +33,142 @@ export function runRocksAndClayPass(st: TileStore, rng: RNG, gs: GenState): void
     tileRunner(st, rng, gs, i, j, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
   }
   run(area * 0.0045, gs.worldSurfaceHigh, gs.rockLevelHigh, T.STONE, 2, 6, 2, 22);
-  // 9 Dirt In Rocks(L5203):泥嵌石
+  // Dirt In Rocks（cs:11952）：泥嵌石
   run(area * 0.005, gs.rockLevelLow, h, DIRT, 2, 5, 2, 39);
-  // 10 Clay(L5212):三带 + 表层粘土清除
-  run(area * 0.00002, 0, gs.worldSurfaceLow - 1, CLAY, 4, 13, 10, 49);
-  run(area * 0.00005, gs.worldSurfaceLow, gs.worldSurfaceHigh, CLAY, 8, 13, 15, 44);
-  run(area * 0.00002, gs.worldSurfaceHigh, gs.rockLevelHigh, CLAY, 8, 14, 5, 49);
+  // Clay（cs:11985）：三带 + 表层粘土清除。
+  // ★计数 (int) 截断（cs:11990/11997/12009）：area*2e-5=100.8 → 100 次，
+  //  此前浮点上界多跑 1 发 runner → 其后 RNG 流永久漂移
+  run(Math.trunc(area * 0.00002), 0, gs.worldSurfaceLow - 1, CLAY, 4, 13, 10, 49);
+  run(Math.trunc(area * 0.00005), gs.worldSurfaceLow, gs.worldSurfaceHigh, CLAY, 8, 13, 15, 44);
+  run(Math.trunc(area * 0.00002), gs.worldSurfaceHigh, gs.rockLevelHigh, CLAY, 8, 14, 5, 49);
+  // 表层粘土清除（cs:12023-12025）：type=0（原版 0=泥土）保持 active——转泥而非挖空
   for (let x = 5; x < w - 5; x++) {
     for (let y = 1; y < gs.worldSurface - 1; y++) {
       if (!st.flags[st.idx(x, y)]) continue;
       for (let y2 = y; y2 < y + 5; y2++) {
-        if (st.get(x, y2) === CLAY) st.setTileSilent(x, y2, 0);
+        if (y2 < h && st.get(x, y2) === CLAY) st.type[st.idx(x, y2)] = DIRT;
       }
       break;
     }
   }
 }
 
-/** pass 11-14:洞穴(小孔/泥土层/岩石层/地表入口) */
+/** pass 12-14:洞穴（DirtLayer/RockLayer/Surface；SmallHoles 已在 MissingCavesPass） */
 export function runCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const area = w * h;
-  // 位置避让(cs:4733):beachSandRandomCenter(320)+20 = 340
-  const avoidBeach = 340;
-  // 11 Small Holes(L5238):每轮两个 runner,1/5 液体;
-  // 避让:海滩 340 内且浅于 worldSurfaceHigh、或中部 45-55% 且浅于 worldSurface → 重掷
-  for (let n = 0; n < area * 0.0015; n++) {
-    const type = rng.next() * 5 < 1 ? -2 : -1;
-    let x1 = rng.int(0, w - 1), y1 = rng.int(gs.worldSurfaceHigh, h - 1);
-    for (let a = 0; a < 40 && (((x1 < avoidBeach || x1 > w - avoidBeach) && y1 < gs.worldSurfaceHigh)
-      || (x1 > w * 0.45 && x1 < w * 0.55 && y1 < gs.worldSurface)); a++) {
-      x1 = rng.int(0, w - 1);
-      y1 = rng.int(gs.worldSurfaceHigh, h - 1);
-    }
-    tileRunner(st, rng, gs, x1, y1, { strength: rng.int(2, 4), steps: rng.int(2, 19), type });
-    let x2 = rng.int(0, w - 1), y2 = rng.int(gs.worldSurfaceHigh, h - 1);
-    for (let a = 0; a < 40 && (((x2 < avoidBeach || x2 > w - avoidBeach) && y2 < gs.worldSurfaceHigh)
-      || (x2 > w * 0.45 && x2 < w * 0.55 && y2 < gs.worldSurface)); a++) {
-      x2 = rng.int(0, w - 1);
-      y2 = rng.int(gs.worldSurfaceHigh, h - 1);
-    }
-    tileRunner(st, rng, gs, x2, y2, { strength: rng.int(8, 14), steps: rng.int(7, 29), type });
-  }
-  // 12 Dirt Layer Caves(L5262):1/6 液体;中部条件为闭区间 >=45% <=55%
-  for (let n = 0; n < area * 0.00003; n++) {
-    const type = rng.next() * 6 < 1 ? -2 : -1;
-    let i = rng.int(0, w - 1);
-    let j = rng.int(gs.worldSurfaceLow, gs.rockLevelHigh);
-    for (let a = 0; a < 40 && ((i < avoidBeach || i > w - avoidBeach) && j < gs.worldSurfaceHigh
-      || (i >= w * 0.45 && i <= w * 0.55 && j < gs.worldSurface)); a++) {
-      i = rng.int(0, w - 1);
-      j = rng.int(gs.worldSurfaceLow, gs.rockLevelHigh);
-    }
-    // digTunnel 蜿蜒版(原版 1.4.0.5 为直线 TileRunner;参考 1.4.4 洞型走 digTunnel,
-    // 数量/尺寸/位置与原版一致,仅形状改为有机蜿蜒)
-    const dx = rng.int(-100, 100) * 0.01, dy = rng.int(-100, 100) * 0.01;
-    digTunnel(st, rng, i, j, dx, dy, rng.int(30, 199), rng.int(3, 7), type === -2);
-  }
-  // 13 Rock Layer Caves(L5280):1/10 液体(digTunnel 蜿蜒版,尺寸对齐原版 strength×0.5)
-  for (let n = 0; n < area * 0.00013; n++) {
-    const wet = rng.next() * 10 < 1;
-    const dx = rng.int(-100, 100) * 0.01, dy = rng.int(-100, 100) * 0.01;
-    digTunnel(st, rng, rng.int(0, w - 1), rng.int(gs.rockLevelHigh, h - 1), dx, dy,
-      rng.int(50, 299), rng.int(3, 9), wet);
-  }
-  // 14 Surface Caves(L5296):五组地表入口
-  const beachL = gs.beachLeftEnd + 20, beachR = gs.beachRightStart - 20;
-  const surfaceCave = (count: number, lo: number, hi: number, runners: Array<[(i2: number) => void]>) => {
-    for (let n = 0; n < count; n++) {
-      let x = rng.int(0, w - 1);
-      for (let a = 0; a < 40 && (x > w * lo && x < w * hi || x < beachL || x > beachR); a++) {
-        x = rng.int(0, w - 1);
+  const avoidBeach = 340; // smallHolesBeachAvoidance = beachSandRandomCenter(320)+20
+  // Dirt Layer Caves（cs:12094-12134）：(int)(area*3e-5) 次；拒绝判定第一子句用
+  // GenVars.worldSurfaceHigh raw double；中部 45-55% 为闭区间 >= <=
+  {
+    const num = Math.trunc(area * 0.00003);
+    for (let i = 0; i < num; i++) {
+      const type = rng.nextInt(6) === 0 ? -2 : -1;
+      let num2 = rng.nextIntRange(0, w);
+      let num3 = rng.nextIntRange(gs.worldSurfaceLow, gs.rockLevelHigh + 1);
+      while (((num2 < avoidBeach || num2 > w - avoidBeach) && num3 < gs.genWorldSurfaceHigh)
+        || (num2 >= w * 0.45 && num2 <= w * 0.55 && num3 < gs.worldSurface)) {
+        num2 = rng.nextIntRange(0, w);
+        num3 = rng.nextIntRange(gs.worldSurfaceLow, gs.rockLevelHigh + 1);
       }
-      // 找该列首个实心行
+      const num4 = rng.nextIntRange(5, 15);
+      const num5 = rng.nextIntRange(30, 200);
+      tileRunner(st, rng, gs, num2, num3, { strength: num4, steps: num5, type });
+    }
+  }
+  // Rock Layer Caves（cs:12135-12165）：掷序 type→strength→steps→x→y（曾错位+改 digTunnel）
+  {
+    const num = Math.trunc(area * 0.00013);
+    for (let i = 0; i < num; i++) {
+      const type = rng.nextInt(10) === 0 ? -2 : -1;
+      const num2 = rng.nextIntRange(6, 20);
+      const num3 = rng.nextIntRange(50, 300);
+      tileRunner(st, rng, gs, rng.nextIntRange(0, w), rng.nextIntRange(gs.rockLevelHigh, h), {
+        strength: num2, steps: num3, type,
+      });
+    }
+  }
+  // Surface Caves（cs:12191-12300）：五组地表入口
+  const beachL = gs.beachLeftEnd + 20, beachR = gs.beachRightStart - 20;
+  /** 14a-14d 骨架：拒绝采样（无界 while）+ 首实心行（上界 GenVars.worldSurfaceHigh
+   *  raw double；找不到则整轮跳过不掷 runner 骰——原版 for-break 语义） */
+  const surfaceCave = (count: number, lo: number, hi: number, runners: Array<(x: number, y: number) => void>) => {
+    for (let n = 0; n < count; n++) {
+      let x = rng.nextIntRange(0, w);
+      while ((x > w * lo && x < w * hi) || x < beachL || x > beachR) x = rng.nextIntRange(0, w);
       let sy = -1;
-      for (let y = 0; y < gs.worldSurfaceHigh; y++) {
+      for (let y = 0; y < gs.genWorldSurfaceHigh && y < h; y++) {
         if (st.flags[st.idx(x, y)]) { sy = y; break; }
       }
       if (sy < 0) continue;
-      for (const r of runners) r[0](x);
+      for (const r of runners) r(x, sy);
     }
   };
-  // 14a:细入口
-  surfaceCave(Math.floor(w * 0.002), 0.45, 0.55, [[(x) => {
-    tileRunner(st, rng, gs, x, firstSolid(st, gs, x), { strength: rng.int(3, 5), steps: rng.int(5, 49), type: -1, speedX: rng.int(-10, 10) * 0.1, speedY: 1 });
-  }]]);
-  // 14b:中入口
-  surfaceCave(Math.floor(w * 0.0007), 0.43, 0.57, [[(x) => {
-    tileRunner(st, rng, gs, x, firstSolid(st, gs, x), { strength: rng.int(10, 14), steps: rng.int(50, 129), type: -1, speedX: rng.int(-10, 10) * 0.1, speedY: 2 });
-  }]]);
-  // 14c:大竖井(三连 runner)
-  surfaceCave(Math.floor(w * 0.0003), 0.40, 0.60, [[(x) => {
-    const y = firstSolid(st, gs, x);
-    tileRunner(st, rng, gs, x, y, { strength: rng.int(12, 24), steps: rng.int(150, 499), type: -1, speedX: rng.int(-10, 10) * 0.1, speedY: 4 });
-    tileRunner(st, rng, gs, x, y, { strength: rng.int(8, 16), steps: rng.int(60, 199), type: -1, speedX: rng.int(-10, 10) * 0.1, speedY: 2 });
-    tileRunner(st, rng, gs, x, y, { strength: rng.int(5, 12), steps: rng.int(40, 169), type: -1, speedX: rng.int(-10, 10) * 0.1, speedY: 2 });
-  }]]);
-  // 14d:noYChange 入口
-  surfaceCave(Math.floor(w * 0.0004), 0.40, 0.60, [[(x) => {
-    tileRunner(st, rng, gs, x, firstSolid(st, gs, x), { strength: rng.int(7, 11), steps: rng.int(150, 249), type: -1, speedY: 1, noYChange: true });
-  }]]);
-  // 14e Caverer(L5360):5×(w/4200 整除截断) 个大洞穴系统;起点边距 340、y 上界 h-400 开
-  const cavCount = 5 * Math.floor(w / 4200);
+  // 14a 细入口（cs:12205-12218）
+  surfaceCave(Math.trunc(w * 0.002), 0.45, 0.55, [(x, y) => {
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(3, 6), steps: rng.nextIntRange(5, 50), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 1 });
+  }]);
+  // 14b 中入口（cs:12227-12238）
+  surfaceCave(Math.trunc(w * 0.0007), 0.43, 0.57, [(x, y) => {
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(10, 15), steps: rng.nextIntRange(50, 130), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });
+  }]);
+  // 14c 大竖井三连（cs:12241-12261）
+  surfaceCave(Math.trunc(w * 0.0003), 0.40, 0.60, [(x, y) => {
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(12, 25), steps: rng.nextIntRange(150, 500), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 4 });
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(8, 17), steps: rng.nextIntRange(60, 200), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(5, 13), steps: rng.nextIntRange(40, 170), type: -1, speedX: rng.nextIntRange(-10, 11) * 0.1, speedY: 2 });
+  }]);
+  // 14d noYChange 入口（cs:12266-12280）：speedX=0 不掷覆写判定外的额外骰
+  surfaceCave(Math.trunc(w * 0.0004), 0.40, 0.60, [(x, y) => {
+    tileRunner(st, rng, gs, x, y, { strength: rng.nextIntRange(7, 12), steps: rng.nextIntRange(150, 250), type: -1, speedY: 1, noYChange: true });
+  }]);
+  // 14e Caverer 大洞穴系统（cs:12284-12299）：(int)(5*(w/4200)) 个；
+  // y 上界 h-400，退化时 rockLayer 取 h-401（cs:12287-12292）
+  const cavCount = Math.trunc(5 * (w / 4200));
+  let yLo = gs.rockLevel;
+  const yHi = h - 400;
+  if (yLo >= yHi) yLo = yHi - 1;
   for (let n = 0; n < cavCount; n++) {
-    const cx = rng.int(340, w - 341);
-    const cy = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, h - 401));
-    caverer(st, rng, gs, cx, cy);
+    caverer(st, rng, gs, rng.nextIntRange(340, w - 340), rng.nextIntRange(yLo, yHi));
   }
 }
 
-/** Caverer(L48064)1:1:模式 0 = 主隧道+粗支洞,模式 1 = 长细链 */
+/** Caverer（cs:79642-79751）1:1：模式 0 = 主隧道+粗支洞，模式 1 = 长细链。
+ *  ★首掷顺序：mode(Next 2) → 段数 → 方向（曾方向先于段数=第 2 个样本起流错位） */
 function caverer(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): void {
   const randDir = () => {
-    let dx = rng.int(0, 99) * 0.01;
+    let dx = rng.nextIntRange(0, 100) * 0.01;
     let dy = 1 - dx;
-    if (rng.next() < 0.5) dx = -dx;
-    if (rng.next() < 0.5) dy = -dy;
+    if (rng.nextIntRange(0, 2) === 0) dx = -dx;
+    if (rng.nextIntRange(0, 2) === 0) dy = -dy;
     return [dx, dy] as [number, number];
   };
-  if (rng.next() < 0.5) {
-    // 模式 0:7-8 段,每段主挖(6-19 步,粗 4-8)+ 支挖(30-49 步,细 2-5)+ 小 runner
+  if (rng.nextIntRange(0, 2) === 0) {
+    // 模式 0:先段数 Next(7,9)，再方向 3 掷
     let px = X + 0.0, py = Y + 0.0;
+    const segs = rng.nextIntRange(7, 9);
     let [dx, dy] = randDir();
-    const segs = rng.int(7, 8);
     for (let k = 0; k < segs; k++) {
-      [px, py] = digTunnel(st, rng, px, py, dx, dy, rng.int(6, 19), rng.int(4, 8));
-      dx += rng.int(-20, 20) * 0.1; dy += rng.int(-20, 20) * 0.1;
+      [px, py] = digTunnel(st, rng, px, py, dx, dy, rng.nextIntRange(6, 20), rng.nextIntRange(4, 9));
+      dx += rng.nextIntRange(-20, 21) * 0.1; dy += rng.nextIntRange(-20, 21) * 0.1;
       dx = Math.max(-1.5, Math.min(1.5, dx));
       dy = Math.max(-1.5, Math.min(1.5, dy));
       const [bx, by] = randDir();
-      const [ex, ey] = digTunnel(st, rng, px, py, bx, by, rng.int(30, 49), rng.int(3, 5));
-      tileRunner(st, rng, gs, Math.floor(ex), Math.floor(ey), {
-        strength: rng.int(10, 19), steps: rng.int(5, 9), type: -1,
+      const [ex, ey] = digTunnel(st, rng, px, py, bx, by, rng.nextIntRange(30, 50), rng.nextIntRange(3, 6));
+      tileRunner(st, rng, gs, Math.trunc(ex), Math.trunc(ey), {
+        strength: rng.nextIntRange(10, 20), steps: rng.nextIntRange(5, 10), type: -1,
       });
     }
   } else {
-    // 模式 1:15-29 段长细链(湿)
+    // 模式 1:先段数 Next(15,30)，再方向 3 掷
     let px = X + 0.0, py = Y + 0.0;
+    const segs = rng.nextIntRange(15, 30);
     let [dx, dy] = randDir();
-    const segs = rng.int(15, 29);
     for (let k = 0; k < segs; k++) {
-      [px, py] = digTunnel(st, rng, px, py, dx, dy, rng.int(5, 14), rng.int(2, 5), true);
-      dx += rng.int(-20, 20) * 0.1; dy += rng.int(-20, 20) * 0.1;
+      [px, py] = digTunnel(st, rng, px, py, dx, dy, rng.nextIntRange(5, 15), rng.nextIntRange(2, 6), true);
+      dx += rng.nextIntRange(-20, 21) * 0.1; dy += rng.nextIntRange(-20, 21) * 0.1;
       dx = Math.max(-1.5, Math.min(1.5, dx));
       dy = Math.max(-1.5, Math.min(1.5, dy));
     }
   }
-}
-
-function firstSolid(st: TileStore, gs: GenState, x: number): number {
-  for (let y = 0; y < gs.worldSurfaceHigh && y < st.h; y++) {
-    if (st.flags[st.idx(x, y)]) return y;
-  }
-  return Math.floor(gs.worldSurfaceHigh);
 }

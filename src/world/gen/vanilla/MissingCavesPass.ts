@@ -96,7 +96,9 @@ export function runDirtWallBgPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  type -1 普通 / 1/5 挖穿地表 -2）。锚点避海滩浅层与出生点浅层（拒绝采样）。 */
 export function runSmallHolesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
-  const worldSurfaceHigh = gs.worldSurfaceHigh;
+  // 拒绝判定第一子句用 GenVars.worldSurfaceHigh **raw double**（cs:12062）——
+  // floored int 会在 num3==floor(raw) 时判定翻转（每图约十数次）→ 流分叉
+  const worldSurfaceHigh = gs.genWorldSurfaceHigh;
   const avoidance = 340; // GenVars.smallHolesBeachAvoidance = beachSandRandomCenter(320)+20
   const total = w * h;
   const num = Math.trunc(total * 0.0015); // 4200×1200 → 7560

@@ -63,6 +63,8 @@ export const VANILLA_MISC = [
   'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
   'vanilla/Shroom_Tops.png',
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
+  'vanilla/Chain4.png', 'vanilla/Chain5.png', 'vanilla/Chain14.png',
+  'vanilla/Chain24.png', 'vanilla/Chain25.png',  // AI_013 藤蔓段（Main.cs:22433-22514 食人怪族茎蔓叠画）
   'vanilla/WiresNew.png', 'vanilla/Actuator.png',
   // 电路陷阱弹幕贴图(Wiring.cs:1495-1743 的 projectile id;帧尺寸取 Projectile.cs SetDefaults)
   'vanilla/Projectile_98.png',   // 毒镖 10×10

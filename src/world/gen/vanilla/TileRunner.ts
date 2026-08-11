@@ -27,10 +27,14 @@ export function idsByVanillaSheet(...sheets: number[]): Set<number> {
 // 原版 Main.tileStone(Main.cs:6120-6139):宝石 63-68 + 活/失活石 130/131 + 琥珀石 566。
 // 只有这些"放置类型"触发 flag3(仅替换石头)
 const STONE_PLACED = idsByVanillaSheet(63, 64, 65, 66, 67, 68, 130, 131, 566);
-// TileID.Sets.CanBeClearedDuringGeneration 默认 true,仅这 11 种不可被生成期覆盖(TileID.cs:702)
-export const NOT_CLEARABLE = idsByVanillaSheet(396, 400, 401, 397, 398, 399, 404, 368, 367, 226, 237,
-  135, 136, 137, 141, 443,   // 电路器件（压板/开关/陷阱/炸药/喷泉）：矿石 runner 不可覆盖
-  41, 43, 44);              // 地牢砖（原版顺序中矿石先于地牢，此处防反向覆盖）
+// TileID.Sets.CanBeClearedDuringGeneration = false 全集（1456 TileID.cs:321，
+// 2026-08-11 种子等价对齐——曾自加电路器件 135-137/141/443 保护，原版生成期可覆盖）
+export const NOT_CLEARABLE = idsByVanillaSheet(
+  396, 400, 401, 397, 398, 399, 404,   // 沙岩家族
+  368, 367,                            // 花岗岩/大理石
+  41, 43, 44,                          // 地牢砖
+  481, 482, 483,                       // 1.4.5 新增不可清块
+  226, 237);                           // 蜥蜴砖/陨石
 // 原版 switch case 45/147/189/190/196/460/717/718/719:无条件 flag3(金砖/雪/云/荧光菇/雨云/雪云+1.4.5新增)
 const FLAG3_ALWAYS = idsByVanillaSheet(45, 147, 189, 190, 196, 460, 717, 718, 719);
 // TileID.Sets.Ore:铺设 396/397 时矿石可覆盖
@@ -217,8 +221,9 @@ export function digTunnel(
   let noiseX = 0, noiseY = 0;
   let radius = size;
   for (let step = 0; step < steps; step++) {
-    const x0 = Math.floor(x - radius), x1 = Math.floor(x + radius);
-    const y0 = Math.floor(y - radius), y1 = Math.floor(y + radius);
+    // (int) 向零截断（cs:79766-79767）：floor 在负小数时多扫一列 → 多耗 dist 骰
+    const x0 = Math.trunc(x - radius), x1 = Math.floor(x + radius);
+    const y0 = Math.trunc(y - radius), y1 = Math.floor(y + radius);
     for (let ix = x0; ix <= x1; ix++) {
       for (let iy = y0; iy <= y1; iy++) {
         if (Math.abs(ix - x) + Math.abs(iy - y) < radius * (1 + rng.int(-10, 10) * 0.005)

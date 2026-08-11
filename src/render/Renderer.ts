@@ -858,6 +858,9 @@ export class Renderer {
     // 骷髅王手（36）的两节臂骨 IK（Main.cs:22543-22596 1:1）：从手部锚点向头
     // 中心做两段收缩（92/60 缩比），段间旋转 atan2-π/2——贴图 Arm_Bone.png
     if (e.vanillaId === 36 && e.master) this.drawSkeletronArm(e, e.master);
+    // AI_013 食人怪族茎蔓（Main.cs:22433-22514 1:1）：头中心 → 锚点格(ai0/ai1)
+    // 每 28px 一段 Chain 贴图步进，剩余 <40px 画一段收缩尾段对齐锚点
+    if (e.vanilla?.aiStyle === 13) this.drawPlantVine(e);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
@@ -877,6 +880,17 @@ export class Renderer {
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
+        // ★旋转驱动族总判定：朝向完全由 rotation 决定，原版这些家族不动 spriteDirection
+        // （默认 -1 从不镜像）——渲染层禁止对其叠加 facing 镜像，否则"屁股朝前"
+        // （噬魂怪 aiStyle5 实踩）。新增旋转族 AI 时必须登记在此，旋转与镜像共用本判定。
+        // 例外：AI_005 内的"仅倾斜"成员（黄蜂 42/231-235、孢子蝠 176/205、蜜蜂 210/211）
+        // 贴图横画、只 tilt 不转头——它们仍需镜像翻转朝向（原版同款 spriteDirection 翻转）。
+        const idR = e.vanillaId ?? -1;
+        const stR = e.vanilla?.aiStyle ?? 0;
+        const tiltOnly5 = stR === 5 && (idR === 42 || idR === 176 || idR === 205 || idR === 210
+          || idR === 211 || (idR >= 231 && idR <= 235));
+        const rotationDriven = !tiltOnly5
+          && (idR === 4 || rotId || stR === 5 || stR === 6 || stR === 23 || stR === 40 || stR === 56);
         if (e.vanillaId === 4) ctx.rotate(e.visAngle);
         else if (e.vanilla?.aiStyle === 5) {
           // AI_005 旋转按族分流（cs:51045-51054 + FindFrame 蜜蜂覆盖 L75553）：
@@ -893,9 +907,8 @@ export class Renderer {
         else if (e.vanilla?.aiStyle === 23) ctx.rotate(e.visAngle); // AI_023 飞行武器:冲刺角 atan2+0.785 / 蓄转递增(cs:25336-25390)
         else if (e.vanilla?.aiStyle === 56) ctx.rotate(e.visAngle); // AI_056 地牢之魂:rotation=atan2(v)-π/2(cs:32927)
         else if (rotId) ctx.rotate(e.spin);
-        const worm = e.vanilla?.aiStyle === 6; // 旋转态不再叠加朝向镜像(垂直对称段贴图)
         ctx.scale(scale, scale);
-        if (!rotId && !worm && e.vanillaId !== 4 && e.vanilla?.aiStyle !== 40 && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左（AI_040 spriteDirection 恒 -1,cs:29829,不镜像）
+        if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1); // 原版默认朝左；旋转族（rotationDriven）禁镜像
         // 原版 alpha 语义（NPC.Opacity/GetAlpha）：不透明度 = 1 - alpha/255。
         // alpha 是 SetDefaults 每类型静态值（0=实体；史莱姆 175=半透明凝胶），无通用渐隐
         ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
@@ -1089,6 +1102,52 @@ export class Renderer {
 
   /** Arm_Bone.png 懒加载（骷髅王臂骨；vanilla 独立贴图，非 NPC 表） */
   private armBoneImg: HTMLImageElement | null | undefined;
+  /** AI_013 植物/攀爬者族茎蔓（Main.cs:22433-22514 1:1）：从 NPC 中心向锚点格
+   *  中心（ai0/ai1 各 ×16+8）逐段画 Chain 贴图——步长 28px、距锚 <40px 时尾段
+   *  缩短对齐（259/260 真菌球为 12/20）；整链 rotation=atan2(dy,dx)-π/2（贴图
+   *  正面向上）。贴图分流（:22480-22510）：56→Chain5、175→Chain14、259/260→
+   *  Chain24/25，默认（43 食人怪/101 邪恶触手）→Chain4。光照由 compositeLight
+   *  全屏合成，此处不逐段取光 */
+  private drawPlantVine(e: Enemy) {
+    if (!this.atlas || e.ai0 < 0 || e.ai1 < 0) return;
+    const id = e.vanillaId;
+    // num7/num8：段长/终止距离（Main.cs:22442-22447）
+    let step = 28, stop = 40;
+    if (id === 259 || id === 260) { step = 12; stop = 20; }
+    const chain = this.atlas.vmisc(
+      id === 56 ? 'vanilla/Chain5.png'
+        : id === 175 ? 'vanilla/Chain14.png'
+          : id === 259 ? 'vanilla/Chain24.png'
+            : id === 260 ? 'vanilla/Chain25.png'
+              : 'vanilla/Chain4.png');
+    if (!chain) return;
+    const ctx = this.ctx;
+    const ax = e.ai0 * 16 + 8, ay = e.ai1 * 16 + 8;
+    let px = e.cx, py = e.cy;
+    let dx = ax - px, dy = ay - py;
+    const rot = Math.atan2(dy, dx) - Math.PI / 2;   // :22438
+    let running = true;
+    while (running) {                               // :22441-22512
+      const dist = Math.hypot(dx, dy);
+      let seg = step;
+      if (dist < stop) { seg = dist - stop + step; running = false; }
+      if (dist > 0 && seg > 0) {
+        const k = seg / dist;
+        px += dx * k; py += dy * k;                 // 段心向锚点步进（:22454-22455）
+        dx = ax - px; dy = ay - py;
+        ctx.save();
+        ctx.translate(px, py);
+        ctx.rotate(rot);
+        // 源矩形取贴图顶部 seg 行，origin=贴图中心（:22504-22505 scale 1）
+        ctx.drawImage(chain.img, chain.sx, chain.sy, chain.sw, seg,
+          -chain.sw / 2, -chain.sh / 2, chain.sw, seg);
+        ctx.restore();
+      } else {
+        running = false;                            // 头贴锚点（dist≈0）不画段
+      }
+    }
+  }
+
   private drawSkeletronArm(hand: Enemy, head: Enemy) {
     if (this.armBoneImg === undefined) {
       this.armBoneImg = new Image();

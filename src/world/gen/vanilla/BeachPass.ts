@@ -10,7 +10,6 @@ import { T } from '../../../data/tiles';
 /** Ocean Sand:海滩铺沙 + 金字塔候选(L4962-5042) */
 export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w;
-  const sandDepthLimit = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
   for (let i = 0; i < 3; i++) {
     // 拒绝采样:中部 40%-60% 区间的起点重掷(原版 while 循环)
     let x0 = rng.int(0, w - 1);
@@ -36,9 +35,16 @@ export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
         if (depth < 50) depth = 50;
         if (depth > 200) depth = 200;
       }
-      for (let y = 0; y < sandDepthLimit; y++) {
+      // 列深度上界（cs:11682）：double 比较 (wS+rockLayer)/2.0，奇和时多扫一行
+      const depthScan = (gs.worldSurface + gs.rockLevel) / 2;
+      for (let y = 0; y < depthScan; y++) {
         const ii = st.idx(x, y);
         if (!st.flags[ii]) continue;
+        // 中点列金字塔候选（cs:11685-11691）：Next(6)==0 时登记 PyrX/PyrY
+        //（此前缺失→每侧少 1 颗骰 + 海洋金字塔候选丢失=流错位+内容缺）
+        if (x === Math.trunc((x1 + x2) / 2) && rng.nextIntRange(0, 6) === 0) {
+          gs.pyramidSpots.push({ x, y });
+        }
         const edge = Math.min(depth, x - x1, x2 - x);
         const thick = edge + rng.int(0, 4);
         for (let y2 = y; y2 < y + thick && y2 < st.h; y2++) {

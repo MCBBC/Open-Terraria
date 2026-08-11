@@ -131,15 +131,19 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
 }
 
 /** Cavinator（L48733）：向下蜿蜒洞穴，递归 steps 次直至岩层（不挖沙 53） */
+/** 原版 tileDungeon（Main.cs:7941-7946）与 wallDungeon（Main.cs:10507-10515） */
+const TILE_DUNGEON = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+
 function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, steps: number): void {
   let num1 = rng.int(6, 14);              // Next(7,15)
   const dir = rng.int(0, 1) === 0 ? -1 : 1;
   let px = i, py = j;
-  let count = rng.int(19, 39);            // Next(20,40)
+  let num4 = rng.int(19, 39);            // Next(20,40)（num4：剩余步数，地牢命中清零）
   let vx = dir, vy = rng.int(10, 19) * 0.01; // Next(10,20)
   const SAND = TILE_BY_KEY['sand']!;
-  while (count > 0) {
-    count--;
+  while (num4 > 0) {
+    num4--;
     let x0 = ctrunc(px - num1 * 0.5), x1 = ctrunc(px + num1 * 0.5);
     let y0 = ctrunc(py - num1 * 0.5), y1 = ctrunc(py + num1 * 0.5);
     if (x0 < 0) x0 = 0;
@@ -147,17 +151,28 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
     const r = num1 * rng.int(79, 119) * 0.01;
+    // ★地牢命中即整轮终止（cs:80753-80762）：tileDungeon/墙 dungeon → num4=0
+    //  （此前缺失：跑满全程多耗每步 3 骰 → 条件性流漂移）
+    outer:
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
         if (Math.sqrt(dx * dx + dy * dy) < r * 0.4) {
           const kk = st.idx(x, y);
-          if (st.flags[kk] && !NOT_CLEARABLE.has(st.type[kk]) && st.type[kk] !== SAND) {
-            st.setTileSilent(x, y, 0);
+          const active = st.flags[kk] !== 0;
+          if ((active && TILE_DUNGEON.has(st.type[kk])) || WALL_DUNGEON.has(st.wall[kk])) {
+            num4 = 0;
+            break outer;
           }
+          // 不可清块/沙：跳过该格（原版 continue，不终止）
+          if (active && (NOT_CLEARABLE.has(st.type[kk]) || st.type[kk] === SAND)) continue;
+          if (active) st.setTileSilent(x, y, 0);
         }
+        if (num4 <= 0) break;
       }
+      if (num4 <= 0) break;
     }
+    if (num4 <= 0) break; // 终止后不再消耗速度/半径骰（原版 while 条件）
     px += vx; py += vy;
     vx += rng.int(-10, 10) * 0.05;
     vy += rng.int(-10, 10) * 0.05;

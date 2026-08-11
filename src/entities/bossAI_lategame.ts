@@ -669,6 +669,8 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
   e.def.defense = b.def;
   // 玩家死/超 500 格 → 鼓励离场(EncourageDespawn:45576;简化为远距上浮,不清除)
   if (!player || player.dead || Math.abs(e.cx - player.cx) / 16 > 500) {
+    e.encourageDespawn(10); // :45574 二次判定后仍失败 → EncourageDespawn(10)
+    if (player) e.facing = player.cx < e.cx ? 1 : -1; // 背对玩家（:45576-45582）
     e.vy -= 0.06;
     e.y += e.vy; e.x += e.vx;
     e.spin = clamp(e.vx * 0.1, -0.5, 0.5);
