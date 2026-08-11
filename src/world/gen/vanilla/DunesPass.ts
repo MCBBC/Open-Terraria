@@ -181,7 +181,6 @@ function placeCurvedLine(
     // 生成但游戏经 Rosetta x86 运行——实证 (2315,310) 无沙 = x86 语义。按 x86 复刻：
     const castSq = n3 < 0 ? -2147483648 : Math.trunc(Math.sqrt(n3) * 3);
     const n4 = surf + castSq;
-    if (px >= 2349 && px <= 2351) console.log(`JSW3 t=${t} rawY=${ay + (by - ay) * (t - step)} px=${px} py=${py}`);
     if (!st.inBounds(px, py)) continue;
     for (let i = py - 10; i < py; i++) {
       if (!st.inBounds(px, i)) continue;
