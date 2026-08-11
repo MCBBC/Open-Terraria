@@ -10,10 +10,7 @@ export interface GenConfigDTO {
   height: number;
   seedText: string;
   name?: string;
-  structures?: boolean;
   evil?: -1 | 0 | 1;
-  /** 经典地形回退开关（探针用） */
-  lgcTerrain?: boolean;
   /** 是否需要降采样预览消息 */
   preview?: boolean;
 }

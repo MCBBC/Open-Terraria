@@ -81,7 +81,11 @@ export class Enemy extends Entity {
     const maxSpd = 8, accel = 0.07;
     // 朝向：有玩家朝玩家，无玩家缓慢巡游
     let dx: number, dy: number;
-    if (player) { dx = player.cx - this.cx; dy = player.cy - this.cy; }
+    if (player) {
+      // 375 TruffleWormDigger（松露虫钻地逃走形）：AI_006 反向——逃离玩家而非追击
+      const s = this.vanillaId === 375 ? -1 : 1;
+      dx = s * (player.cx - this.cx); dy = s * (player.cy - this.cy);
+    }
     else { dx = Math.cos(this.aiT * 0.02) * 10; dy = Math.sin(this.aiT * 0.013) * 10; }
     const d = Math.hypot(dx, dy) || 1;
     this.vx += (dx / d) * accel;
@@ -466,7 +470,12 @@ export class Enemy extends Entity {
     const underground = this.cy / TILE > game.world.groundLevel;
     // flag3 激愤判定（L61446-61448）
     const hurt = this.hp < this.maxHp;
-    const flag3 = !game.world.clock.isDay || hurt || underground;
+    let flag3 = !game.world.clock.isDay || hurt || underground;
+    if (grasshopper) {
+      // 蚱蜢（cs:61479-61483）：只有玩家 200px 内且非 wet 才激愤蹦跳，平时走路档
+      flag3 = !!player && !player.dead && !inWater
+        && Math.hypot(player.cx - this.cx, player.cy - this.cy) <= 200;
+    }
     const grasshopper = this.vanillaId === 377 || this.vanillaId === 446;
     // ai[2] 卡墙冷却期间不索敌（L61938）
     if (this.ai2 > 0) this.ai2--;
@@ -486,8 +495,8 @@ export class Enemy extends Entity {
       this.jumpStartX = 0;
       this.vx *= 0.8;
       if (Math.abs(this.vx) < 0.1) this.vx = 0;
-      // ai[0] 递增（L61954-61956：基础+1；激愤额外+1；蚱蜢+3）
-      this.ai0 += 1 + (flag3 ? 1 : 0) + (grasshopper ? 3 : 0);
+      // ai[0] 递增（L61954-61956：基础+1 激愤+1；蚱蜢固定 +3 整体更慢，cs:61994）
+      this.ai0 += grasshopper ? 3 : 1 + (flag3 ? 1 : 0);
       // 阶段判定（L62029-62040）
       const num54 = -1000;
       let stage = 0;
@@ -506,6 +515,7 @@ export class Enemy extends Entity {
           this.vx += 2 * dir;
           this.ai0 = stage === 1 ? -120 + num54 : -120 + num54 * 2;
         }
+        if (grasshopper) { this.vy *= 0.9; this.vx *= 0.6; } // cs:62088-62102 蚱蜢跳力衰减
         this.jumpStartX = this.cx;  // ai[3] = position.X（L62059）
       }
     }
@@ -1973,6 +1983,38 @@ export class Enemy extends Entity {
     const ara = this.vanillaId === 157;
     const ax = ara ? 0.25 : 0.1, ay = ara ? 0.2 : 0.1;
     const cx = ara ? 7 : 3, cy = ara ? 4 : 2;
+    // ---- 河鲀 688 膨胀（cs:23555-23620）：受击进入膨胀 180t——缓速悬浮贴水面，
+    // 期间不吃通用鱼逻辑（简化为阻尼漂浮，贴水线钉法省略）
+    if (this.vanillaId === 688) {
+      if (this.justHit && this.ai2 === 0) { this.ai2 = 1; this.ai3 = 180; }
+      if (this.ai2 === 1) {
+        this.vx *= 0.98;
+        this.vy = inWater ? Math.max(this.vy - 0.3, -10) : Math.min(this.vy + 0.3, 10);
+        this.vy *= 0.98;
+        this.ai3 -= 1;
+        if (this.ai3 <= 0) this.ai2 = 0;
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        return;
+      }
+    }
+    // ---- 海豚 615 周期跃出（cs:23629-23747）：每 300-1199t 触发，水中持续上冲
+    //  （vy-=0.4 限 -6）出水后抛物线落回
+    if (this.vanillaId === 615) {
+      if (this.ai2 !== 1) {
+        this.ai1 += 1;
+        if (this.ai1 >= 300 + Math.random() * 900 && inWater) { this.ai2 = 1; this.ai1 = 0; }
+      } else {
+        if (inWater) {
+          this.vy -= 0.4;
+          if (this.vy < -6) this.vy = -6;
+        } else {
+          this.vy = Math.min(this.vy + 0.3, 10); // 出水抛物线
+        }
+        if (this.onGround || this.hitWall) this.ai2 = 0;
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        return;
+      }
+    }
     if (inWater) {
       this.vx += dirX * ax;
       this.vy += dirY * ay;
@@ -2145,40 +2187,535 @@ export class Enemy extends Entity {
   }
 
   /** AI_065 蝶/萤（NPC.cs:34488 AI_065_Butterflies）：正弦游荡漂移 */
+  /** AI_065 蝴蝶族（AI_065_Butterflies cs:45231）：ai[0]/ai[1]=目标速度分量，漂移速度
+   *  0.26-3.0 每 60-179 帧重选（近距 90-239 帧）；平滑 v=(v*59+目标)/60（cs:45231 系数 60）；
+   *  垂直避障：向下 4 格实心/液体 → 反向，向上 30 格无实心 → 反向；collideX → vx×-0.2 翻 ai0；
+   *  主动避敌（每 15 帧 cs:45395-45427）：100px 内敌怪叠加反向速度（上限 16）。
+   *  （661 帝皇蝶离神圣渐隐、356 花色变体/catchItem 在掉落与虫网侧，不在 AI 内） */
   private butterflyAI(game: GameHooks, _player: Player | null) {
-    const t = this.aiT;
-    this.vx = Math.sin(t * 0.03) * 1.5;
-    this.vy = Math.cos(t * 0.05) * 0.8;
+    const st = game.world.store;
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; }
+    // 漂移目标重选
+    if (this.ai2 <= 0) {
+      this.ai0 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
+      this.ai1 = (Math.random() * 2 - 1) * (0.26 + Math.random() * 2.74);
+      this.ai2 = 60 + Math.floor(Math.random() * 120);
+    }
+    this.ai2 -= 1;
+    // 避敌（每 15 帧）
+    if (this.aiT % 15 === 0) {
+      for (const o of game.enemies()) {
+        const e = o as Enemy;
+        if (e === this || e.dead || e.def.damage <= 0) continue;
+        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
+        if (d < 100 && d > 0.01) {
+          this.ai0 += ((this.cx - e.cx) / d) * 2;
+          this.ai1 += ((this.cy - e.cy) / d) * 2;
+        }
+      }
+      const spd = Math.hypot(this.ai0, this.ai1);
+      if (spd > 16) { this.ai0 = (this.ai0 / spd) * 16; this.ai1 = (this.ai1 / spd) * 16; }
+    }
+    // 垂直避障
+    const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+    let belowSolid = false;
+    for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
+    if (belowSolid && this.ai1 > 0) this.ai1 = -Math.abs(this.ai1);
+    let aboveClear = true;
+    for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
+    if (aboveClear && this.ai1 < 0) this.ai1 = Math.abs(this.ai1);
+    // 平滑逼近
+    this.vx = (this.vx * 59 + this.ai0) / 60;
+    this.vy = (this.vy * 59 + this.ai1) / 60;
     this.facing = this.vx > 0 ? 1 : -1;
-    this.x += this.vx;
-    this.y += this.vy;
-    if (game.world.store.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) {
-      this.vx *= -1; this.vy *= -1;
-      this.x += this.vx * 4; this.y += this.vy * 4;
+    const oldVx = this.vx;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) {
+      this.vx = oldVx * -0.2;
+      this.ai0 = -this.ai0;
+      this.ai2 = 0;
     }
   }
 
+  /** 小动物路由：按 aiStyle 精确分流到各家族 1:1 实现（AI_001/016 复用既有精确 AI） */
   private critterWanderAI(game: GameHooks, player: Player | null) {
-    // 飞行/漂浮家族走专属 AI（鸟 24 / 蝶萤 64/65）；蚱蜢 1 复用 slimeAI（ai0 额外+3）
-    const ai = this.vanilla?.aiStyle ?? 0;
-    if (ai === 24) { this.birdAI(game, player); return; }
-    if (ai === 64 || ai === 65) { this.butterflyAI(game, player); return; }
-    // 受击逃离（iframes 刚触发时朝远离玩家方向窜）
-    if (this.iframes > 6 && player) {
-      const flee = player.cx > this.cx ? -1 : 1;
-      this.facing = flee;
-      this.vx = flee * 2.2;
-      if (this.onGround) this.vy = -3;
-    } else if (this.onGround && this.aiT % 90 === 0) {
-      // 随机踱步/停驻
-      const r = Math.random();
-      if (r < 0.4) { this.facing = Math.random() < 0.5 ? -1 : 1; this.vx = this.facing * 0.7; }
-      else this.vx = 0;
+    switch (this.vanilla?.aiStyle ?? 0) {
+      case 24: this.birdAI(game, player); return;                        // AI_024 鸟
+      case 1: this.slimeAI(game, player); return;                         // AI_001 蚱蜢（含专属差异项）
+      case 16: this.swimAI(game, player); return;                         // AI_016 鱼类小动物（含河鲀/海豚特化）
+      case 64: this.fireflyAI(game, player); return;                      // AI_064 萤火虫
+      case 65: this.butterflyAI(game, player); return;                    // AI_065 蝴蝶
+      case 66: this.wormCritterAI(game); return;                          // AI_066 蠕虫
+      case 67: this.snailAI(game); return;                                // AI_067 蜗牛
+      case 68: this.duckFlyAI(game, player); return;                      // AI_068 鸭飞形
+      case 112: this.fairyAI(game, player); return;                       // AI_112 仙灵
+      case 114: this.dragonflyAI(game, player); return;                   // AI_114 蜻蜓
+      case 115: this.ladybugAI(game, player); return;                     // AI_115 瓢虫/椿象
+      case 116: this.waterStriderAI(game); return;                        // AI_116 水黾
+      case 118: this.seahorseAI(game); return;                            // AI_118 海马
+      default: this.townCritterWalkAI(game, player); return;              // AI_007 小动物行走
+    }
+  }
+
+  /** AI_007 小动物行走（NPC.cs:53366+ 的 TownCritter 分支）：站/走循环 + 台阶跳 + 危险逃离。
+   *  速度表（cs:54280-54326）：默认 1/0.07；松鼠族(299/538/539/639-645) 1.5；
+   *  龟(616/617/625) 陆 0.5、水中 2（625 2.5）；鼠类(300/447/610) 2/1 不跳改转身；
+   *  青蛙(361/445/687) 水中低速 vx += maxX*10*dir（cs:54333-54342）。
+   *  节奏（cs:54030）：站→走 200+rand300+rand(200,400)、走→站 300+rand300-rand100。
+   *  跳跃（cs:54315-54417）：前方 1 格实心+净空 → vy=-5、2 格 → -6、半砖 → -4.4，
+   *  否则危险中 ai0=8 僵立 240t / 平时掉头；上升 ×1.2（非鼠类）。
+   *  危险扫描（cs:53884-54028，每 15t）：200px 内敌怪+视线 → 逃离 120+rand120。
+   *  鸭/海鸥/鷿鷈行走形(362/364/602/608)：wet 或 |vy|>4 → Transform(+1) 飞形（cs:53585） */
+  private townCritterWalkAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const vid = this.vanillaId ?? 0;
+    if (this.ai0 < 0 || this.ai0 > 8) this.ai0 = 0;
+    if (this.ai1 < 0) this.ai1 = 100; // 初值：站立约 100t 后开始游走
+    // 危险扫描（每 15t）
+    if (this.aiT % 15 === 0) {
+      for (const o of game.enemies()) {
+        const e = o as Enemy;
+        if (e === this || e.dead || e.def.damage <= 0) continue;
+        if (Math.hypot(e.cx - this.cx, e.cy - this.cy) < 200) {
+          this.ai0 = 1;
+          this.ai1 = 120 + Math.random() * 120;
+          this.facing = e.cx > this.cx ? -1 : 1;
+          break;
+        }
+      }
+    }
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    // 形态链：行走鸭族遇水/坠落 → 飞形（cs:53585-53589）
+    if ((vid === 362 || vid === 364 || vid === 602 || vid === 608) && (inWater || Math.abs(this.vy) > 4)) {
+      this.tryTransformTo(vid + 1, st);
+      return;
+    }
+    // 速度表
+    const squirrel = vid === 299 || vid === 538 || vid === 539 || (vid >= 639 && vid <= 645);
+    const turtle = vid === 616 || vid === 617 || vid === 625;
+    const rat = vid === 300 || vid === 447 || vid === 610;
+    const frog = vid === 361 || vid === 445 || vid === 687;
+    let maxX = 1, acc = 0.07;
+    if (squirrel) maxX = 1.5;
+    else if (turtle) { maxX = inWater ? (vid === 625 ? 2.5 : 2) : 0.5; if (inWater) acc = 1; }
+    else if (rat) { maxX = 2; acc = 1; }
+    // 状态流转
+    this.ai1 -= 1;
+    if (this.ai0 === 0) {
+      this.vx *= 0.8;
+      if (this.ai1 <= 0) { // 站→走
+        this.ai0 = 1;
+        this.ai1 = 300 + Math.random() * 300 - Math.random() * 100;
+        if (Math.random() < 0.5) this.facing *= -1;
+      }
+    } else {
+      this.vx += this.facing * acc;
+      this.vx = Math.max(-maxX, Math.min(maxX, this.vx));
+      // 青蛙水中窜游
+      if (frog && inWater && Math.abs(this.vx) < maxX * 0.5) this.vx += maxX * 10 * this.facing;
+      if (this.ai1 <= 0) { // 走→站
+        this.ai0 = 0;
+        this.ai1 = 200 + Math.random() * 300 + 200 + Math.random() * 200;
+        this.vx = 0;
+      }
+    }
+    // 台阶跳跃判定（碰撞前速度符号门略——小动物无冲撞语义）
+    const frontX = Math.floor((this.cx + this.facing * (this.w / 2 + 8)) / TILE);
+    const footY = Math.floor((this.y + this.h - 1) / TILE);
+    if (this.onGround && this.vx !== 0 && st.isSolid(frontX, footY)) {
+      if (rat) { // 鼠类不跳，转身
+        this.facing *= -1;
+        this.vx = 0;
+      } else if (!st.isSolid(frontX, footY - 1) && !st.isSolid(frontX, footY - 2)) {
+        this.vy = -5;
+        this.vy *= 1.2; // TownCritter 上升补偿（cs:54398-54405）
+      } else if (st.isSolid(frontX, footY - 1) && !st.isSolid(frontX, footY - 3)) {
+        this.vy = -6;
+        this.vy *= 1.2;
+      } else {
+        this.facing *= -1; // 跳不过去：掉头
+      }
     }
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround) this.vx *= 0.85;
+    if (this.hitWall && !rat) this.facing *= -1;
+  }
+
+  /** AI_064 萤火虫族（cs:34256-34486）：ai[0]/ai[1]=目标速度、ai[2]=漂移重选计时；
+   *  远距（>700px）漂移 0.5-1.5、近距 0.05-1.5，Y 偏向上（-100..+250）；
+   *  平滑 v=(v*79+目标)/80；垂直避障（下 4 格实心/液体、上 30 格全空 → 反向）；
+   *  collideX → vx×-0.2 翻 ai0。677 仙尘：敌怪 100px/玩家 150px 内逃逸叠加（上限 8）。
+   *  白天不消失只不发光（发光在 cs:34416 由 !dayTime 门——光照层未接入小动物，备案） */
+  private fireflyAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = 0; this.ai1 = 0; this.ai2 = 60 + Math.floor(Math.random() * 120); }
+    if (this.ai2 <= 0) {
+      const far = player ? Math.abs(player.cx - this.cx) > 700 : true;
+      const spd = far ? 0.5 + Math.random() : 0.05 + Math.random() * 1.45;
+      const ang = Math.random() * Math.PI * 2;
+      this.ai0 = Math.cos(ang) * spd;
+      this.ai1 = Math.sin(ang) * spd - 0.35 + Math.random() * 1.2; // Y 偏向上（-100..+250 量化）
+      this.ai2 = 60 + Math.floor(Math.random() * 120);
+    }
+    this.ai2 -= 1;
+    if (this.vanillaId === 677 && this.aiT % 15 === 0) { // Faeling 逃逸
+      let fx = 0, fy = 0;
+      for (const o of game.enemies()) {
+        const e = o as Enemy;
+        if (e === this || e.dead || e.def.damage <= 0) continue;
+        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
+        if (d < 100 && d > 0.01) { fx += (this.cx - e.cx) / d; fy += (this.cy - e.cy) / d; }
+      }
+      if (player && !player.dead) {
+        const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+        if (d < 150 && d > 0.01) { fx += (this.cx - player.cx) / d; fy += (this.cy - player.cy) / d; }
+      }
+      const m = Math.hypot(fx, fy);
+      if (m > 0.01) { this.ai0 += (fx / m) * Math.min(8, m); this.ai1 += (fy / m) * Math.min(8, m); }
+    }
+    const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+    let belowSolid = false;
+    for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
+    if (belowSolid && this.ai1 > 0) this.ai1 = -Math.abs(this.ai1);
+    let aboveClear = true;
+    for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
+    if (aboveClear && this.ai1 < 0) this.ai1 = Math.abs(this.ai1);
+    this.vx = (this.vx * 79 + this.ai0) / 80;
+    this.vy = (this.vy * 79 + this.ai1) / 80;
+    this.facing = this.vx > 0 ? 1 : -1;
+    const oldVx = this.vx;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) { this.vx = oldVx * -0.2; this.ai0 = -this.ai0; this.ai2 = 0; }
+  }
+
+  /** AI_066 蠕虫族（cs:34490-34586）：ai[0]=0 静止/1 蠕动、ai[1]=切换计时；
+   *  静止 300-899 帧 → 蠕动 600-1799 帧；蠕动速度 方向×0.2（485=0.25/486=0.325/487=0.4，
+   *  374 ×3）；collideX 翻向。374 松露虫：玩家 160px 内 ai[1] 累计到 90 → Transform(375)
+   *  钻地逃走（cs:34560-34584），静止期不被随机蠕动惊扰 */
+  private wormCritterAI(game: GameHooks) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0;
+    if (this.ai1 < 0) this.ai1 = 300 + Math.random() * 600;
+    const player = (game as unknown as { player: Player }).player;
+    // 松露虫受惊钻地
+    if (this.vanillaId === 374) {
+      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 160) {
+        this.ai2 += 1;
+        if (this.ai2 >= 90) {
+          this.ai2 = 0;
+          this.y += TILE;
+          this.tryTransformTo(375, st);
+          return;
+        }
+      } else this.ai2 = 0;
+    }
+    this.ai1 -= 1;
+    if (this.ai1 <= 0) {
+      this.ai0 = this.ai0 === 0 ? 1 : 0;
+      this.ai1 = this.ai0 === 1 ? 600 + Math.random() * 1200 : 300 + Math.random() * 600;
+      if (this.ai0 === 1 && Math.random() < 0.5) this.facing *= -1;
+    }
+    if (this.ai0 === 1) {
+      const mult = this.vanillaId === 485 ? 0.25 : this.vanillaId === 486 ? 0.325
+        : this.vanillaId === 487 ? 0.4 : this.vanillaId === 374 ? 0.6 : 0.2;
+      this.vx = this.facing * mult;
+    } else this.vx = 0;
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) this.facing *= -1;
+  }
+
+  /** AI_067 蜗牛族（cs:34586-34861）：ai[2]=0 贴墙爬（noGravity、速度=(spd*dir, spd*dirY)，
+   *  撞墙/撞地翻 direction/directionY）；ai[2]>0 惊扰逃跑（重力、1/7200 随机或腾空 5t 触发，
+   *  cs:34646-34666）。速度：普通 0.3、发光/岩浆 0.6。（四象限 rotation 视觉未接，备案） */
+  private snailAI(game: GameHooks) {
+    const st = game.world.store;
+    const spd = this.vanillaId === 360 || this.vanillaId === 655 ? 0.6 : 0.3;
+    if (this.ai2 <= 0) {
+      // 贴墙爬
+      if (Math.random() < 1 / 7200) this.ai2 = 1; // 随机受惊
+      this.vx = spd * this.facing;
+      this.vy = spd * this.dirY;
+      this.x += this.vx;
+      this.y += this.vy;
+      if (this.hitWall) this.facing *= -1;
+      // 前方无支撑（墙面尽头）→ 翻爬行方向
+      const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 2)) / TILE);
+      const fy = Math.floor((this.cy + this.dirY * (this.h / 2 + 2)) / TILE);
+      if (!st.isSolid(fx, fy)) this.dirY = this.dirY === 0 ? 1 : -this.dirY;
+      this.dirY = Math.max(-1, Math.min(1, this.dirY));
+    } else {
+      // 惊扰逃跑：正常重力爬地
+      if (this.onGround) this.ai2 = 0;
+      this.vx = this.facing * spd;
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.hitWall) this.facing *= -1;
+    }
+  }
+
+  /** AI_068 鸭飞形 363/365/603/609（cs:34861-35117）：整族 noGravity，仅 ai[0]=0 且非 wet
+   *  时有重力。水中：X 平滑到 dir×2、前方无水/实心翻向、钉水面；脱离水 → 起飞翻向；
+   *  玩家 200px 盒或受伤 → 起飞（vy-=6 翻向）。飞行：X 渐近 ±3、前方 15 格下探避障
+   *  （5 格内障碍 -0.2/有障碍 -0.1/无 +0.1，Y 限 [-4,3]）；ai[1]>=300 且落地/落水 →
+   *  Transform(type-1) 回行走形（cs:35000） */
+  private duckFlyAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0;
+    if (this.ai1 < 0) this.ai1 = 0;
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    if (this.ai0 === 0) {
+      // 游泳/陆行
+      if (!inWater) this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      if (Math.abs(this.vx) < 2) this.vx += this.facing * 0.1;
+      if (player && !player.dead
+        && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
+        && Math.abs(player.cy - this.cy) < 100 + (this.h + player.h) / 2) {
+        this.ai0 = 1; this.vy -= 6; this.facing *= -1;
+      }
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.onGround && !inWater) { // 陆上：起飞回飞形
+        this.ai0 = 1; this.vy -= 6;
+      }
+      return;
+    }
+    // 飞行
+    this.ai1 += 1;
+    if (player && !player.dead) this.facing = player.cx > this.cx ? -1 : 1; // 远离玩家
+    if (this.facing === -1 && this.vx > -3) this.vx -= 0.1;
+    else if (this.facing === 1 && this.vx < 3) this.vx += 0.1;
+    const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
+    const footY = Math.floor(this.cy / TILE);
+    let obstruction = 0;
+    for (let k = 0; k < 15; k++) {
+      if (st.isSolid(aheadX, footY + k) || st.liquid[st.idx(aheadX, footY + k)] > 0) { obstruction = k + 1; break; }
+    }
+    if (obstruction > 0 && obstruction <= 5) this.vy -= 0.2;
+    else if (obstruction > 0) this.vy -= 0.1;
+    else this.vy += 0.1;
+    this.vy = Math.max(-4, Math.min(3, this.vy));
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) { this.vx *= -0.5; this.facing *= -1; }
+    if ((this.hitHead || this.onGround || inWater) && this.ai1 >= 300) {
+      this.ai0 = 0;
+      this.ai1 = 200 + Math.random() * 200;
+      const ground = this.vanillaId ?? 363;
+      if (ground > 363) this.tryTransformTo(ground - 1, st); // 回行走形（363→362 等）
+    }
+  }
+
+  /** AI_112 仙灵 583-585（AI_112_FairyCritter cs:48453）：状态 0 绕出生点 20px 微漂、
+   *  玩家 250px 内 → 状态 1 追随飞（X 渐近 dir×4.5、前方 20×8 扫描定 Y、限 [-5,3]）；
+   *  存在 18000 帧（5 分钟）强制离场消失（cs:48457-48473）。
+   *  （状态 2-7 宝箱引导链需要宝箱搜索基建，未移植备案） */
+  private fairyAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = this.cx; this.ai1 = this.cy; this.ai2 = 0; this.ai3 = 0; }
+    this.ai3 += 1;
+    if (this.ai3 >= 18000) { this.dead = true; return; } // 存在期满离场
+    if (this.ai2 === 0) {
+      // 绕锚点微漂
+      const dx = this.ai0 - this.cx, dy = this.ai1 - this.cy;
+      if (Math.hypot(dx, dy) > 20) { this.vx += Math.sign(dx) * 0.04; this.vy += Math.sign(dy) * 0.04; }
+      else { this.vx += (Math.random() - 0.5) * 0.04; this.vy += (Math.random() - 0.5) * 0.04; }
+      this.vy = Math.max(-2, Math.min(2, this.vy));
+      if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) this.ai2 = 1;
+    } else {
+      // 追随飞（cs:48453 状态 1）
+      if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+      const target = this.facing * 4.5;
+      this.vx += Math.sign(target - this.vx) * 0.1;
+      const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
+      const cy = Math.floor(this.cy / TILE);
+      let obstruction = 0;
+      for (let k = 0; k < 8; k++) {
+        if (st.isSolid(aheadX, cy + k) || st.liquid[st.idx(aheadX, cy + k)] > 0) { obstruction = k + 1; break; }
+      }
+      if (obstruction > 0 && obstruction <= 5) this.vy -= 0.3;
+      else if (obstruction > 0) this.vy -= 0.2;
+      else this.vy += 0.05;
+      this.vy = Math.max(-5, Math.min(3, this.vy));
+    }
+    this.facing = this.vx > 0 ? 1 : -1;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** AI_114 蜻蜓族 595-601（AI_114_Dragonflies cs:48080）：ai[0]=0 悬停/1 突进，
+   *  ai[1]=计时、ai[2]/ai[3]=锚点。悬停：v×0.94，每 60-119 帧结束；离锚 >96px →
+   *  朝锚突进×3、16-96px → ×1+抖动；突进 4 帧（离锚 >112px 延长 200 帧）；
+   *  向下 3 格实心/液体 → vy-=0.2 且 v×0.9、向上 30 格无实心 → v×0.9；wet → vy=-3 弹出；
+   *  避敌（每 15 帧）：100px 敌/150px 玩家叠加逃逸（上限 16）并把锚点挪向逃逸方向 */
+  private dragonflyAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = 1; this.ai1 = 0; this.ai2 = this.cx; this.ai3 = this.cy; }
+    if (this.aiT % 15 === 0) { // 避敌
+      let fx = 0, fy = 0;
+      for (const o of game.enemies()) {
+        const e = o as Enemy;
+        if (e === this || e.dead || e.def.damage <= 0) continue;
+        const d = Math.hypot(e.cx - this.cx, e.cy - this.cy);
+        if (d < 100 && d > 0.01) { fx += (this.cx - e.cx) / d * 2; fy += (this.cy - e.cy) / d * 2; }
+      }
+      if (player && !player.dead) {
+        const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+        if (d < 150 && d > 0.01) { fx += (this.cx - player.cx) / d * 2; fy += (this.cy - player.cy) / d * 2; }
+      }
+      const m = Math.hypot(fx, fy);
+      if (m > 0.01) {
+        this.vx = Math.max(-16, Math.min(16, this.vx + fx));
+        this.vy = Math.max(-16, Math.min(16, this.vy + fy));
+        this.ai2 = this.cx + fx * 10; // 锚点迁移
+        this.ai3 = this.cy + fy * 10;
+      }
+    }
+    const anchD = Math.hypot(this.ai2 - this.cx, this.ai3 - this.cy);
+    if (this.ai0 === 0) {
+      this.vx *= 0.94; this.vy *= 0.94;
+      this.ai1 -= 1;
+      if (this.ai1 <= 0) {
+        if (anchD > 96) {
+          this.vx = ((this.ai2 - this.cx) / (anchD || 1)) * 3;
+          this.vy = ((this.ai3 - this.cy) / (anchD || 1)) * 3;
+          this.ai0 = 1;
+          this.ai1 = anchD > 112 ? 200 : 4;
+        } else {
+          this.vx += (Math.random() - 0.5) * 1;
+          this.vy += (Math.random() - 0.5) * 1;
+          this.ai1 = 60 + Math.floor(Math.random() * 60);
+        }
+      }
+    } else {
+      this.ai1 -= 1;
+      const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+      let below = false;
+      for (let k = 1; k <= 3; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { below = true; break; }
+      if (below) { this.vy -= 0.2; this.vx *= 0.9; this.vy *= 0.9; }
+      let aboveClear = true;
+      for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
+      if (aboveClear) { this.vx *= 0.9; this.vy *= 0.9; }
+      if (this.inWater) this.vy = -3;
+      if (this.ai1 <= 0) { this.ai0 = 0; this.ai1 = 60 + Math.floor(Math.random() * 60); }
+    }
+    this.facing = this.vx > 0 ? 1 : -1;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** AI_115 瓢虫/椿象 604/605/669（AI_115_LadyBugs cs:47944）：ai[0]=飞行方向角、
+   *  ai[2]=0 飞/1 陆行、localAI 重选 60-180 帧 1/5 概率切换。飞行：v → Lerp(角向×1, v, 0.0125)
+   *  慢飞、垂直避障同蝶族、collideX → 角反射+vx×-0.2；陆行：一跳一跳 Lerp(UnitX*dir, 0.05)
+   *  +vy+=0.2、前方 1 格下 4 格有水 → 起飞（cs:48036-48075） */
+  private ladybugAI(game: GameHooks, _player: Player | null) {
+    const st = game.world.store;
+    if (!this.aiInit) { this.aiInit = true; this.ai0 = Math.random() * Math.PI * 2; this.ai1 = 60 + Math.floor(Math.random() * 120); this.ai2 = 0; }
+    this.ai1 -= 1;
+    if (this.ai1 <= 0) {
+      this.ai1 = 60 + Math.floor(Math.random() * 120);
+      if (Math.random() < 0.2) this.ai2 = this.ai2 === 0 ? 1 : 0;
+      if (this.ai2 === 0) this.ai0 = Math.random() * Math.PI * 2;
+    }
+    if (this.ai2 === 0) {
+      // 飞行
+      const tx = Math.cos(this.ai0), ty = Math.sin(this.ai0);
+      this.vx += (tx - this.vx) * 0.0125;
+      this.vy += (ty - this.vy) * 0.0125;
+      const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+      let belowSolid = false;
+      for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
+      if (belowSolid) this.ai0 = -this.ai0;
+      let aboveClear = true;
+      for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
+      if (aboveClear) this.ai0 = Math.PI - this.ai0;
+      this.facing = this.vx > 0 ? 1 : -1;
+      const oldVx = this.vx;
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      if (this.hitWall) { this.vx = oldVx * -0.2; this.ai0 = Math.PI - this.ai0; }
+      return;
+    }
+    // 陆行
+    const fx = Math.floor((this.cx + this.facing * (this.w / 2 + 8)) / TILE);
+    const fy = Math.floor(this.cy / TILE);
+    let waterAhead = false;
+    for (let k = 1; k <= 4; k++) if (st.liquid[st.idx(fx, fy + k)] > 80) { waterAhead = true; break; }
+    if (waterAhead) { this.ai2 = 0; this.ai0 = Math.random() * Math.PI * 2; return; }
+    if (this.vy !== 0) {
+      this.vx *= 0.98;
+      this.vy += (2 - this.vy) * 0.05;
+    } else {
+      this.vx += (this.facing * 0.05 - this.vx) * 0.1;
+      this.vy += 0.2; // 一跳一跳
+    }
+    this.vy = Math.min(this.vy, 10);
+    const oldVx = this.vx;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) { this.facing *= -1; this.vx = oldVx * -0.2; }
+  }
+
+  /** AI_116 水黾 612/613（AI_116_WaterStriders cs:47882）：钉水面（Center.Y > 水面 →
+   *  vy-=0.8 限 -4；反之钳到水面）+ 每 120-240 帧随机方向 ×5 冲刺（不在水面/未 wet 时
+   *  60-240，着地顺带 vy=-2 起跳，cs:47910-47941） */
+  private waterStriderAI(game: GameHooks) {
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+    const liq = st.liquid[st.idx(tx, ty)];
+    let onSurface = false;
+    if (liq > 80) {
+      // 本格液面高度 → 水面 Y 近似（液量比例）
+      const waterY = ty * TILE + (TILE - (liq / 255) * TILE);
+      if (this.cy > waterY) { this.vy -= 0.8; if (this.vy < -4) this.vy = -4; }
+      else { this.vy = Math.min(this.vy, waterY - (this.y + this.h - 1)); onSurface = true; }
+    } else if (this.inWater) {
+      this.vy -= 0.2;
+    }
+    this.ai1 += 1;
+    this.vx *= 0.9;
+    if (this.onGround) this.vx *= 0.6;
+    const interval = onSurface ? 120 + Math.floor(Math.random() * 120) : 60 + Math.floor(Math.random() * 180);
+    if (this.ai1 >= interval) {
+      this.ai1 = 0;
+      this.vx = (Math.random() < 0.5 ? -1 : 1) * 5;
+      this.facing = this.vx > 0 ? 1 : -1;
+      if (!onSurface && this.onGround) { this.vy = -2; this.ai1 = 60; }
+    }
+    this.vy = this.inWater || liq > 80 ? this.vy : Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** AI_118 海马 626/627（AI_118_Seahorses cs:47432）：noGravity=wet；水中 ai[1] 冷却
+   *  归零时沿 ai[0] 角 +0.06 加速、合速超 ±3 → 重随机角（450-600 帧）；非冲刺帧 v×0.95；
+   *  接近水面时新角朝下则折回；离水 vy==0 时 vx×0.95 瘫软；碰撞反射对应轴（cs:47470） */
+  private seahorseAI(game: GameHooks) {
+    const st = game.world.store;
+    if (this.ai0 === 0 || Math.abs(this.ai0) < 0.01) this.ai0 = Math.random() * Math.PI * 2;
+    if (this.ai1 <= 0) this.ai1 = 450 + Math.floor(Math.random() * 150);
+    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    if (inWater) {
+      this.ai1 -= 1;
+      if (this.ai1 <= 0) {
+        this.vx += Math.cos(this.ai0) * 0.06;
+        this.vy += Math.sin(this.ai0) * 0.06;
+        const spd = Math.hypot(this.vx, this.vy);
+        if (spd > 3) {
+          this.ai0 = Math.random() * Math.PI * 2;
+          this.ai1 = 450 + Math.floor(Math.random() * 150);
+        }
+        // 接近水面且新角朝下 → 折回
+        const ty = Math.floor(this.cy / TILE);
+        const liq = st.liquid[st.idx(Math.floor(this.cx / TILE), ty)];
+        const waterY = ty * TILE + (TILE - (liq / 255) * TILE);
+        if (this.y - waterY < 20 && Math.sin(this.ai0) > 0) this.ai0 -= Math.PI;
+      } else {
+        this.vx *= 0.95;
+        this.vy *= 0.95;
+      }
+    } else {
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      if (this.vy === 0) this.vx *= 0.95;
+    }
+    this.facing = this.vx > 0 ? 1 : -1;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    if (this.hitWall) { this.vx *= -1; this.ai0 = Math.PI - this.ai0; }
+    if (this.onGround || this.hitHead) { this.vy *= -1; this.ai0 = -this.ai0; }
   }
 
   private casterAI(game: GameHooks, player: Player | null) {
@@ -2502,8 +3039,9 @@ export class Enemy extends Entity {
       if (this.vanillaId === 245 || this.vanillaId === 246 || this.vanillaId === 247 || this.vanillaId === 248) return false;
       this.dead = true;
       // 母史莱姆死亡分裂（Wiki 权威：1-3 只 Baby Slime，netID -5 = 半透明灰黑小史莱姆；
-      // SetDefaultsFromNetId -5：base 1 × scale 0.9 + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）
-      if (this.vanillaId === 16) {
+      // SetDefaultsFromNetId -5：base 1 × scale 0.9 + color(0,0,0,50) + alpha 120，hp30/dmg13/def4）。
+      // 联机傀儡跳过：分裂权威在房主（其真身分裂后经 msg23 快照下发，本地生成会留幽灵实体）
+      if (this.vanillaId === 16 && !this.netPuppet) {
         const n = 1 + Math.floor(Math.random() * 3);
         const add = (game as unknown as { entities?: { add: (en: unknown, bucket: string) => void; nextId?: number } }).entities;
         for (let k = 0; k < n; k++) {
@@ -2528,9 +3066,11 @@ export class Enemy extends Entity {
         for (let s: Enemy | null = head; s; s = s.wormNext) s.dead = true;
       }
       // 掉落：1.4.5.6 ItemDropDatabase 规则树 + 钱币/心星管线（src/drops/NpcDrops.ts）
-      // 求值序对照 NPCLoot(:79628)：规则 → 钱币 → 心星（Boss 另有药水+心）
+      // 求值序对照 NPCLoot(:79628)：规则 → 钱币 → 心星（Boss 另有药水+心）。
+      // 联机傀儡跳过：掉落权威在房主（真身死亡掉落经 msg21 广播，本地生成会被
+      // 自己的 netDropSweep 当作本端掉落二次广播 → 幽灵物品+重复掉落）
       const rng = new RNG(Math.floor(Math.random() * 1e9));
-      if (this.vanillaId) {
+      if (this.vanillaId && !this.netPuppet) {
         const w = game.world;
         const p = game.player;
         const diff = p.appearance?.difficulty ?? 0;

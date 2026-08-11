@@ -383,7 +383,11 @@ export class Game implements GameHooks {
     for (const s of snaps) {
       let pup = this.netNpcPuppets.get(s.netId);
       if (!pup || pup.e.dead) {
-        const e = new Enemy(s.key, s.x, s.y);
+        // v_* 键走 fromVanilla（防御/伤害等权威属性——占位 def 会让 hurt 双端分叉）；
+        // 原生键退普通构造
+        const vm = s.key.match(/^v_(\d+)$/);
+        const e = vm ? Enemy.fromVanilla(parseInt(vm[1], 10), s.x, s.y) : new Enemy(s.key, s.x, s.y);
+        if (!e) return;
         e.x = s.x; e.y = s.y; // 快照坐标=左上（Enemy 构造按中心偏移，直接覆写）
         e.netPuppet = true;
         e.netId = s.netId;
@@ -487,7 +491,14 @@ export class Game implements GameHooks {
       }
     }
     for (const [id, pup] of this.netDropPuppets) {
-      if (pup.d.dead || this.tickCount - pup.seen > 300) {
+      if (pup.d.dead) {
+        // 傀儡消失两源：本地拾取（dead 由 ItemDrop 置位）→ 上报 take 让房主移除真身；
+        // 寿命/远端 take → netApplyItemOp 已删映射，不会走到这
+        this.net?.sendItemOp(1, id);
+        this.netDropPuppets.delete(id);
+        continue;
+      }
+      if (this.tickCount - pup.seen > 300) {
         pup.d.dead = true;
         this.netDropPuppets.delete(id);
       }
@@ -1215,7 +1226,13 @@ export class Game implements GameHooks {
     this.sfx.setListener(this.camera.x, this.camera.y);
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
-      const townNPCCount = this.entities.npcs.filter((n) => !(n as TownNPC).dead).length;
+      // 城镇 NPC 计数为"距离盒"语义（SceneMetrics.cs:755-757/:18：CenteredRectangle(Center,
+      // AssumedConstantScreenSize×2)=±1920×±1080px 内的 townNPC）——全图存活数会让
+      // 46/47 城镇曲盖住一切群系 BGM
+      const townNPCCount = this.entities.npcs.filter((n) => {
+        const tn = n as TownNPC;
+        return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1080;
+      }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount);
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
@@ -1248,7 +1265,7 @@ export class Game implements GameHooks {
         scene: this.scene, isDay, bossMusic, invasionMusic,
         worldSurface: w.groundLevel, rockLevel: w.rockLevel, lavaLine: w.lavaLine || w.store.h - 200,
         maxTilesX: w.store.w, centerX: this.player.cx, centerY: this.player.cy, ocean: this.scene.zoneBeach,
-        state: this.musicState,
+        state: this.musicState, bloodMoon: !!w.clock.bloodMoon,
         weather: {
           storm: w.weather.shouldUseStormMusic,
           rain: w.weather.cloudAlpha > 0,
@@ -5000,6 +5017,9 @@ export class Game implements GameHooks {
   }
 
   spawnEnemy(key: string, x: number, y: number) {
+    // 联机访客不生成真敌（刷怪/召唤权威在房主；本地生成=幽灵实体永不同步）。
+    // 傀儡不在此列（netApplyNpcSnaps 直接入桶）
+    if (this.net && !this.net.policy.isHost) return null;
     const e = new Enemy(key, x, y);
     this.entities.add(e, 'enemies');
     if (e.def.boss) this.boss = e;
@@ -5561,6 +5581,11 @@ export class Game implements GameHooks {
   /** 指定落点列召唤(summonBoss 的位置化变体;守卫老人诅咒在地牢上空召唤骷髅王) */
   private summonBossAtTx(key: string, tx: number): void {
     if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
+    // 联机访客不召唤（Boss 权威在房主——本地召唤=幽灵 Boss 不同步；召唤物也不消耗）
+    if (this.net && !this.net.policy.isHost) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossHostOnly'));
+      return;
+    }
     const st = this.world.store;
     tx = Math.max(2, Math.min(st.w - 3, tx));
     let ty = 10;

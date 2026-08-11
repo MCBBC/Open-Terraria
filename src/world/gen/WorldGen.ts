@@ -2,7 +2,7 @@
 // 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
 import { createNoise2D } from 'simplex-noise';
 import { RNG, hashString } from '../../core/rng';
-import { T, W, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
+import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World } from '../World';
 
 export interface GenConfig {
@@ -10,7 +10,6 @@ export interface GenConfig {
   height: number;
   seedText: string;
   name?: string;
-  structures?: boolean;
   /** 邪恶群系：-1 随机（默认） 0 腐化 1 猩红（UIWorldCreation 对应原版 WorldGenParam_Evil） */
   evil?: -1 | 0 | 1;
   /** 每 pass 完成后回调部分世界（生成期实时地图预览用；无需等 finalize） */
@@ -568,7 +567,12 @@ function potPass({ store, surface, rng }: GenCtx) {
         if (t !== 0 && TILE_DEFS[t]?.solid && !store.liquid[store.idx(x, y - 1)]) foundSolid = true;
         continue;
       }
-      if (y < surfLow && store.wall[store.idx(x, y)] === 0) continue; // cs:18216 地表上方需有墙
+      // cs:18216 门禁:y < Main.worldSurface(平均地表线)时必须有墙——
+      // 曾误用 worldSurfaceLow(谷底线,几乎恒小于 y)→ 地表露天处全放,陶罐泛滥
+      if (y < gs.worldSurface && store.wall[store.idx(x, y)] === 0) continue;
+      // cs:18244 oceanDepths 排除:浅于 oceanLevel=(ws+rockLevel)/2+40 且在海滩列 → 拒绝
+      if (y <= (gs.worldSurface + gs.rockLevel) / 2 + 40
+        && (x < gs.beachDistance || x > w - gs.beachDistance)) continue;
       const ground = store.get(x, y + 1);
       if (ground === 0 || !TILE_DEFS[ground]?.solid) continue;
       if (store.liquid[store.idx(x, y)] > 0) continue;

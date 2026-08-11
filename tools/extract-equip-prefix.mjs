@@ -95,6 +95,26 @@ const BUFF_TYPE = scanCaseFields(itemSrc, [
 ]);
 const MOUNT_TYPE = scanCaseFields(itemSrc, ['\\bmountType\\s*=\\s*(-?\\d+);', 'DefaultToMinecart\\((\\d+)\\);']);
 
+// ---- 盔甲/配饰基础数据（装备槽归属 + 防御值）→ vanilla-itemstats.json ----
+// 槽位归属：headSlot/bodySlot/legSlot 赋值即对应部位（值是绘制槽序号非部位，仅判有无）。
+// 防御值：`defense = N;` 字面量（269 处全字面量，无表达式/辅助方法）。
+// 配饰：`accessory = true;`；vanity=true 的社交配饰 acc:0（可入时装配饰槽、无功能效果）。
+const HEAD = new Set(scanCaseFields(itemSrc, ['\\bheadSlot\\s*=\\s*(\\d+);']).keys());
+const BODY = new Set(scanCaseFields(itemSrc, ['\\bbodySlot\\s*=\\s*(\\d+);']).keys());
+const LEGS = new Set(scanCaseFields(itemSrc, ['\\blegSlot\\s*=\\s*(\\d+);']).keys());
+const DEFENSE = scanCaseFields(itemSrc, ['\\bdefense\\s*=\\s*(\\d+);']);
+const ACCESSORY = new Set(scanCaseFields(itemSrc, ['\\baccessory\\s*=\\s*true;']).keys());
+const VANITY = new Set(scanCaseFields(itemSrc, ['\\bvanity\\s*=\\s*true;']).keys());
+const STATS = {};
+const setStat = (vid, patch) => { STATS[vid] = { ...(STATS[vid] ?? {}), ...patch }; };
+for (const vid of HEAD) setStat(vid, { s: 'h' });
+for (const vid of BODY) setStat(vid, { s: 'b' });
+for (const vid of LEGS) setStat(vid, { s: 'l' });
+for (const [vid, def] of DEFENSE) setStat(vid, { def });
+for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
+writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
+console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size}）`);
+
 // ---- vanityPet / lightPet 初始化表（Main.cs 9100-9290 静态初始化段） ----
 const mainSrc = read('Terarria1456/Terraria/Main.cs');
 const mainLines = mainSrc.split('\n');

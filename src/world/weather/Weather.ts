@@ -530,10 +530,10 @@ export class WeatherState {
     ctx.onRainStart?.();
   }
 
-  /** UpdateWindyDayState（Main.cs:12924-12961）：BGM 门。time = 原版白天 tick 窗口 10800-43200 */
+  /** UpdateWindyDayState（Main.cs:12924-12961）：BGM 门。
+   *  原版 time∈(10800,43200)（白天 tick/54000）= 我们 timeOfDay∈(0.35,0.65) */
   updateMusicGates(timeOfDay01 = 0.5) {
-    // 原版 time∈(10800,43200) = 我们 timeOfDay∈(0.2,0.8) 白天中段
-    const midDay = timeOfDay01 > 0.2 && timeOfDay01 < 0.8;
+    const midDay = timeOfDay01 > 0.35 && timeOfDay01 < 0.65;
     if (this.cloudAlpha === 0) {
       this.shouldUseStormMusic = false;
       const w = Math.abs(this.windSpeedTarget);

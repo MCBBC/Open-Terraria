@@ -10,6 +10,7 @@ const ITEM_RARE = vanillaRareJson as Record<string, number>;
 import { atlasIconForKey } from '../assets/SpriteAtlas';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
+import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ChatMonitor } from './ChatMonitor';
@@ -583,11 +584,13 @@ export class UI {
   }
 
   /** 一键装备判定（ItemSlot.CanSwapEquip :3009-3020 + RightClick :1541：
-   *  盔甲/配饰/染料/宠物/光源/矿车/坐骑/钩爪均可一键装备） */
+   *  盔甲/配饰/染料/宠物/光源/矿车/坐骑/钩爪均可一键装备；
+   *  vi_ 物品的盔甲/配饰归属查 vanilla-itemstats.json） */
   private canSwapEquip(id: number): boolean {
     const d = ITEM_DEFS[id];
     if (!d) return false;
     if (d.armor || d.accessory) return true;
+    if (armorSlotIndexOfInternal(id) >= 0 || statOfInternal(id)?.acc !== undefined) return true;
     const k = equipKindOfInternal(id);
     return k === 'dye' || k === 'pet' || k === 'light' || k === 'cart' || k === 'mount' || k === 'hook';
   }
@@ -604,6 +607,8 @@ export class UI {
     let targetWhere: SlotWhere = 'armor';
     if (d.armor) {
       target = d.armor.slot;
+    } else if (armorSlotIndexOfInternal(cur.id) >= 0) {
+      target = armorSlotIndexOfInternal(cur.id); // vi_ 盔甲（vanilla-itemstats 部位）
     } else if (d.accessory) {
       for (let k = 3; k < 10; k++) {
         if (!inv.armor[k]) { target = k; break; }
@@ -968,6 +973,9 @@ export class UI {
     }
     if (def.tool?.damage) html += `<br>${Lang.text('Mods.SandboxWorld.Item.Damage', prefixedDamage(def, s.prefix))}`;
     if (def.tool?.power && def.tool.type !== 'sword') html += `<br>${Lang.text(def.tool.type === 'pick' ? 'Mods.SandboxWorld.Item.PickPower' : 'Mods.SandboxWorld.Item.AxePower', def.tool.power)}`;
+    // 盔甲防御行（vi_ 物品查 vanilla-itemstats.json；原版经 item.defense 的 tooltip 行）
+    const vsDef = def.armor?.defense ?? statOfInternal(s.id)?.def;
+    if (vsDef) html += `<br>防御 +${vsDef}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;
     this.tooltip.innerHTML = html;

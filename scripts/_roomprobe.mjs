@@ -19,7 +19,7 @@ const server = spawn('npx', ['tsx', 'src/index.ts', '--port', String(PORT)], {
   cwd: SERVER_DIR, stdio: ['ignore', 'pipe', 'pipe'],
 });
 const serverLog = [];
-server.stdout.on('data', (d) => serverLog.push(d.toString()));
+server.stdout.on('data', (d) => { const s = d.toString(); serverLog.push(s); if (s.includes('[dbg]')) process.stdout.write(s); });
 server.stderr.on('data', (d) => serverLog.push(d.toString()));
 const waitServer = async () => {
   const t0 = Date.now();

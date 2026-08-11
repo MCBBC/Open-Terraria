@@ -10,6 +10,7 @@
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
 import { ITEM_DEFS, ITEM_BY_KEY, type ArmorSlot } from '../data/items';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
+import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 
 export const INV_COLS = 10;
 /** 背包主体行数（不含快捷栏行） */
@@ -79,11 +80,11 @@ export function coinIndexOf(id: number): number {
 }
 
 export function isAccessoryItem(id: number): boolean {
-  return !!ITEM_DEFS[id]?.accessory;
+  return !!ITEM_DEFS[id]?.accessory || statOfInternal(id)?.acc !== undefined;
 }
 
 export function isArmorItem(id: number): boolean {
-  return !!ITEM_DEFS[id]?.armor;
+  return !!ITEM_DEFS[id]?.armor || armorSlotIndexOfInternal(id) >= 0;
 }
 
 export class Inventory {
@@ -163,14 +164,20 @@ export class Inventory {
   }
 
   /** armor[20] 下标能否接收物品（ItemSlot.PickItemMovementAction :1363-1494）：
-   *  0-2/10-12 部位校验（head/body/leg slot）；3-9/13-19 配饰；染料走 dye 数组 */
+   *  0-2/10-12 部位校验（head/body/leg slot）；3-9 功能配饰（vanity 排除）/13-19 配饰（含社交）；
+   *  染料走 dye 数组。vi_ 批次物品的部位/配饰归属查 vanilla-itemstats.json（注册期无字段） */
   armorAccepts(i: number, id: number): boolean {
     if (i < 0 || i >= ARMOR_TOTAL) return false;
     const d = ITEM_DEFS[id];
     if (!d) return false;
     const part = i % VANITY_ARMOR_START; // 0-2=部位 3-9=配饰（与 10-19 镜像同判）
-    if (part <= 2) return d.armor?.slot === (part as ArmorSlot);
-    return !!d.accessory;
+    if (part <= 2) {
+      if (d.armor) return d.armor.slot === (part as ArmorSlot);
+      return armorSlotIndexOfInternal(id) === part;
+    }
+    if (d.accessory) return i < VANITY_ARMOR_START; // legacy 配饰（社交槽放宽）
+    if (i < VANITY_ARMOR_START) return statOfInternal(id)?.acc === 1; // 功能配饰槽：vanity 排除
+    return statOfInternal(id)?.acc !== undefined; // 社交配饰槽：功能/社交都收
   }
 
   /** dye 槽能否接收（ItemSlot context 12/25/27/33：checkItem.dye > 0——染料物品白名单） */

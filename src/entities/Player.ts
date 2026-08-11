@@ -10,6 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { statOfInternal } from '../data/vanillaItemStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
@@ -100,11 +101,12 @@ export class Player extends Entity {
     }
     return false;
   }
-  /** 防御 = 基础(0) + 盔甲 + 铁皮 Buff(+6)（时装不计） */
+  /** 防御 = 基础(0) + 盔甲 + 铁皮 Buff(+6)（时装不计）。
+   *  vi_ 盔甲防御值查 vanilla-itemstats.json（extract-equip-prefix.mjs 从 Item.cs 提取） */
   get defense(): number {
     let d = this.buffs.defenseBonus;
     for (const id of this.inv.equippedArmor()) {
-      if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? 0;
+      if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
     }
     return d;
   }

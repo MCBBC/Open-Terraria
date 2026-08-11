@@ -43,15 +43,17 @@ export interface MusicInput {
   /** 入侵 BGM（MusicID；0=无）。原版屏内 ±5000px 入侵 NPC 驱动（Main.cs:12186-12192,
    *  12478-12566 链：海盗 35 > 哥布林 39 > 日食），优先级仅次于 Boss 曲 */
   invasionMusic?: number;
-  /** 天气（原版 UpdateAudio 天气链 Main.cs:12708/12799）：storm(52) > rain(19) > windy(44)。
-   *  storm=_shouldUseStormMusic（cloudAlpha≥0.5 && |wind|≥0.4 且地表）；rain=cloudAlpha>0；
-   *  windy=cloudAlpha==0 且白天中段 && |windTarget|≥0.4（updateMusicGates 维护） */
+  /** 天气。注意原版天气曲不是全局优先——只嵌在特定槽位（见 pickMusic）：
+   *  storm52/rain19/windy44 各自在森林白天、神圣地表、丛林表层等分支内；
+   *  wind=cloudAlpha==0 且白天中段 && |windTarget|≥0.4（updateMusicGates 维护） */
   weather?: {
     storm: boolean;
     rain: boolean;
     windy: boolean;
     timeOfDay01: number;
   };
+  /** 血月（夜晚森林/海洋/风暴分支 2 号曲） */
+  bloodMoon?: boolean;
   /** 世界数据 */
   worldSurface: number;   // tile
   rockLevel: number;      // tile
@@ -100,32 +102,30 @@ export function spaceFactor(centerY: number, maxTilesX: number, worldSurface: nu
   return (centerY / 16 - (65 + 10 * (maxTilesX / 4200) ** 2)) / (worldSurface / 5);
 }
 
-/** 按环境选曲（优先级链同 Main.cs:12470-12913；remixWorld/天气/事件分支省略） */
+/** 按环境选曲（优先级链 1:1 对照 Main.cs:12155-12913；remixWorld/沙尘暴/微光/月事件分支省略）。
+ *  天气曲嵌在原版槽位内：44 风日只覆盖森林白天曲（L12886）与神圣地表（L12811），
+ *  19 雨只在森林白天/夜晚/神圣地表，52 风暴只在丛林/神圣地表与非特殊地表尾槽 */
 export function pickMusic(inp: MusicInput): number {
   const s = inp.scene;
   const lavaLine = inp.lavaLine;
   const halfScreen = 400; // 原版 screenHeight/2（AssumedConstantScreenSize 1200/2≈600，本仓库视口 800/2）
   const belowHalf = inp.centerY > inp.worldSurface * 16 + halfScreen; // 原版 Center.Y > worldSurface*16 + screenHeight/2
+  const atSurface = !belowHalf;
+  const storm = !!inp.weather?.storm;
+  const rain = !!inp.weather?.rain;
+  const windy = !!inp.weather?.windy;
+  const bloodMoon = !!inp.bloodMoon;
+  // 我们白天 timeOfDay∈[0.25,0.75] ↔ 原版 time∈[0,54000]（晨雨 59 判定 time<10800 用）
+  const vanillaTime = ((inp.weather?.timeOfDay01 ?? 0.5) - 0.25) / 0.5 * 54000;
 
   // Boss（原版 L12155-12312 屏幕附近 Boss 链：每 Boss 专属曲，先于全部群系分支）
   if (inp.bossMusic > 0) return inp.bossMusic;
   if (inp.invasionMusic && inp.invasionMusic > 0) return inp.invasionMusic;
 
-  // ---- 天气链（原版 UpdateAudio Main.cs:12708-12712/12799-12803：先于群系、后于 Boss） ----
-  //  暴雨曲 52：_shouldUseStormMusic 且玩家在地表（Center.Y < worldSurface×16 + halfScreen）
-  //  雨曲 19：下雨（cloudAlpha>0）且地表——原版 12035 段
-  //  风日曲 44：_shouldUseWindyDayMusic（白天中段 && |windTarget|≥0.4）
-  if (inp.weather) {
-    const atSurface = inp.centerY < inp.worldSurface * 16 + halfScreen;
-    if (inp.weather.storm && atSurface) return MUSIC.Storm;
-    if (inp.weather.rain && atSurface) return MUSIC.Rain;
-    if (inp.weather.windy) return MUSIC.WindyDay;
-  }
-
-  // 城镇曲（L12602-12609：≥3 城镇 NPC 且非墓地；无雨风判定省略）
-  if (s.townNPCCount >= 3 && !s.zoneGraveyard) {
-    return inp.isDay ? MUSIC.TownDay : MUSIC.TownNight;
-  }
+  // 城镇曲（L12602-12609：≥3 城镇 NPC；白天需无云无风，夜晚需非血月无云）
+  const town = s.townNPCCount >= 3 && !s.zoneGraveyard;
+  if (town && inp.isDay && !rain && !windy) return MUSIC.TownDay;
+  if (town && !inp.isDay && !bloodMoon && !rain) return MUSIC.TownNight;
   // 地狱（L12614）
   if (inp.centerY > lavaLine * 16) return MUSIC.Underworld;
   // 太空（L12618）
@@ -151,14 +151,15 @@ export function pickMusic(inp: MusicInput): number {
   // 地下沙漠（L12675）/ 沙漠（L12679）
   if (s.zoneUndergroundDesert) return MUSIC.UndergroundDesert;
   if (s.zoneDesert) return MUSIC.Desert;
-  // 丛林（L12683-12724：岩石层下 54 深地丛林；否则昼 7 夜 55）
+  // 丛林（L12683-12730：岩石层下 54 深地丛林；表层风暴 52 在昼夜曲前；昼 7 夜 55）
   if (s.zoneJungle) {
     if (inp.centerY > inp.rockLevel * 16 + halfScreen) return MUSIC.UndergroundJungle;
+    if (storm && atSurface) return MUSIC.Storm;
     return inp.isDay ? MUSIC.JungleDay : MUSIC.JungleNight;
   }
-  // 雪原（L12725-12746：地下 20 冰雪，地表 14）
+  // 雪原（L12731-12754：地下 20 冰雪，地表 14）
   if (s.zoneSnow) return belowHalf ? MUSIC.Ice : MUSIC.Snow;
-  // 地下分支（L12747：y ≥ surface+half 且非海洋）
+  // 地下分支（L12755：y ≥ surface+half 且非海洋）
   const ocean = inp.ocean ?? s.zoneBeach;
   if (belowHalf && !ocean) {
     if (s.zoneHallow) return MUSIC.UndergroundHallow;
@@ -166,14 +167,31 @@ export function pickMusic(inp: MusicInput): number {
     if (inp.state.ugMusic === 0) inp.state.ugMusic = Math.random() < 0.5 ? MUSIC.Underground : MUSIC.UndergroundAlt;
     return inp.state.ugMusic;
   }
-  // 神圣地表（L12806-12816 白天分支）
-  if (inp.isDay && s.zoneHallow) return MUSIC.Hallow;
-  // 海洋（L12836-12857）
-  if (ocean) return inp.isDay ? MUSIC.OceanDay : MUSIC.OceanNight;
-  // 森林昼夜（L12862-12910：白天 1/18 随机粘性；夜晚 3）
-  if (inp.isDay) {
-    if (inp.state.dayMusic === 0) inp.state.dayMusic = Math.random() < 0.5 ? MUSIC.OverworldDay : MUSIC.OverworldDayAlt;
-    return inp.state.dayMusic;
+  // 神圣地表（L12799-12815：仅白天分支；风暴 52 > 雨 19 > 风日 44 > 神圣 9）
+  if (inp.isDay && s.zoneHallow) {
+    if (storm) return MUSIC.Storm;
+    if (rain) return MUSIC.Rain;
+    if (windy) return MUSIC.WindyDay;
+    return MUSIC.Hallow;
   }
+  // 风暴尾槽（L12816-12829：非神圣地表；血月优先 2）
+  if (storm) return bloodMoon ? MUSIC.Eerie : MUSIC.Storm;
+  // 海洋（L12831-12855：血月 2 > 城镇 46/47 > 昼 22 夜 43）
+  if (ocean) {
+    if (bloodMoon) return MUSIC.Eerie;
+    if (town) return inp.isDay ? MUSIC.TownDay : MUSIC.TownNight;
+    return inp.isDay ? MUSIC.OceanDay : MUSIC.OceanNight;
+  }
+  // 森林昼夜（L12861-12910）
+  if (inp.isDay) {
+    // 雨天：晨雨 59（time<10800）否则 19（L12865-12873）
+    if (rain) return vanillaTime < 10800 ? MUSIC.MorningRain : MUSIC.Rain;
+    // 白天 1/18 随机粘性；风日覆盖为 44（L12874-12888）
+    if (inp.state.dayMusic === 0) inp.state.dayMusic = Math.random() < 0.5 ? MUSIC.OverworldDay : MUSIC.OverworldDayAlt;
+    return windy ? MUSIC.WindyDay : inp.state.dayMusic;
+  }
+  // 夜晚（L12897-12910：血月 2 > 雨 19 > 夜曲 3）
+  if (bloodMoon) return MUSIC.Eerie;
+  if (rain) return MUSIC.Rain;
   return MUSIC.OverworldNight;
 }
