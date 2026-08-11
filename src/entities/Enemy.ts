@@ -249,6 +249,7 @@ export class Enemy extends Entity {
   midasT = 0;
   /** confused(31)：纳米药剂——AI 反向（近似：每秒翻转水平速度） */
   confusedT = 0;
+  private confuseFlip = 0;
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
@@ -508,7 +509,7 @@ export class Enemy extends Entity {
     if (this.confusedT > 0) {
       this.confusedT -= dt;
       // 纳米（confused 近似）：每 60t 翻转水平速度方向（原版 AI 反向 :29811）
-      this.confuseFlip = (this.confuseFlip ?? 0) + dt;
+      this.confuseFlip += dt;
       if (this.confuseFlip >= 1) { this.confuseFlip = 0; this.vx *= -1; }
     }
 
