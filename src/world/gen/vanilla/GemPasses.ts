@@ -41,25 +41,38 @@ function placeExposed(st: TileStore, x: number, y: number, style: number): void 
 // ============ GemCaves 宝石洞（:17528-17572 + Spread.Gem） ============
 export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const num = Math.floor(st.w * 0.003);
+  // countTiles（WorldGen.cs:9493）：洪泛连通空气计数（maxTileCount 上限停），
+  // 实心格不扩散——岩浆/冰/岩石只计数（lavaCount/iceCount/rockCount）
+  const countTiles = (sx: number, sy: number) => {
+    let air = 0, lava = 0, ice = 0, rock = 0;
+    const seen = new Set<number>();
+    const stack: Array<[number, number]> = [[sx, sy]];
+    while (stack.length && air <= 301) {
+      const [x, y] = stack.pop()!;
+      if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) return { air: 9999, lava, ice, rock };
+      const ii = st.idx(x, y);
+      if (seen.has(ii)) continue;
+      seen.add(ii);
+      if (st.flags[ii]) { // 实心：只计数不扩散
+        if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) lava++;
+        else if (ICE_FLOOR.has(st.type[ii])) ice++;
+        else if (st.type[ii] === STONE) rock++;
+        continue;
+      }
+      air++;
+      stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+    }
+    return { air, lava, ice, rock };
+  };
   for (let i = 0; i < num; i++) {
     // 选点（:17547-17565）：x∈[200,w-200]、y∈[rockLevel+30, h-230]、
-    // countTiles∈[50,300) 且无岩浆/冰/有岩石（1000 次上限）
+    // countTiles∈[50,300) 且 lavaCount==0 && iceCount==0 && rockCount>0（1000 次上限）
     let sx = -1, sy = -1;
     for (let tries = 0; tries < 1000; tries++) {
       const x = rng.nextIntRange(200, st.w - 201);
       const y = rng.nextIntRange(gs.rockLevel + 30, st.h - 231);
-      let count = 0, hasRock = false, bad = false;
-      for (let dy = -4; dy <= 4 && !bad; dy++) {
-        for (let dx = -4; dx <= 4; dx++) {
-          const ii = st.idx(x + dx, y + dy);
-          if (!st.flags[ii]) { count++; continue; }           // 空气
-          if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) { bad = true; break; } // 岩浆
-          const t = st.type[ii];
-          if (ICE_FLOOR.has(t)) { bad = true; break; }
-          if (t === STONE) hasRock = true;
-        }
-      }
-      if (!bad && count >= 50 && count < 300 && hasRock) { sx = x; sy = y; break; }
+      const c = countTiles(x, y);
+      if (c.air >= 50 && c.air < 300 && c.lava === 0 && c.ice === 0 && c.rock > 0) { sx = x; sy = y; break; }
     }
     if (sx < 0) continue;
     // 选池（gemCave :9657-9673）：强制 1 种 + 各 1/6 追加（1~7 种）
@@ -134,6 +147,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
     placeExposed(st, x, y, randGemStyle(rng));
   }
   // 琥珀（:20891-20913）：w 次，y∈[ws, h-300]，墙 187(沙岩)/216(硬化沙) → 3×3 style=6 晶簇
+  // （原版 PlaceTile 直接覆盖，不查实心）
   for (let i = 0; i < st.w; i++) {
     const x = rng.nextIntRange(4, st.w - 5);
     const y = rng.nextIntRange(gs.worldSurface, st.h - 301);
@@ -141,8 +155,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (wl !== 187 && wl !== 216) continue;
     for (let dx = -1; dx <= 1; dx++) {
       for (let dy = -1; dy <= 1; dy++) {
-        const ii = st.idx(x + dx, y + dy);
-        if (!st.flags[ii]) placeExposed(st, x + dx, y + dy, 6);
+        placeExposed(st, x + dx, y + dy, 6);
       }
     }
   }

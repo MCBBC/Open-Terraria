@@ -64,6 +64,12 @@ export class Wiring {
   private outPumpX = new Int16Array(MAX_PUMP); private outPumpY = new Int16Array(MAX_PUMP);
   private numInPump = 0; private numOutPump = 0;
 
+  // 炮族全局冷却（Wiring.cs:69-73 静态字段；:147-158 UpdateMech 每 tick 递减）。
+  // devices.ts case 209/212 开火时置位（Wiring.cs:1335/1338/1393）
+  cannonCoolDown = 0;          // :69 大炮 120
+  bunnyCannonCoolDown = 0;     // :71 兔兔炮 480
+  snowballCannonCoolDown = 0;  // :73 雪球发射器 15
+
   // 冷却注册(:41-45)
   private mechX = new Int32Array(MAX_MECH + 1);
   private mechY = new Int32Array(MAX_MECH + 1);
@@ -90,6 +96,10 @@ export class Wiring {
   // ============ UpdateMech(Wiring.cs:88-161)每 tick 调 ============
 
   updateMech(): void {
+    // 炮族全局冷却每 tick 递减（Wiring.cs:147-158）
+    if (this.cannonCoolDown > 0) this.cannonCoolDown--;
+    if (this.bunnyCannonCoolDown > 0) this.bunnyCannonCoolDown--;
+    if (this.snowballCannonCoolDown > 0) this.snowballCannonCoolDown--;
     for (let i = this.numMechs - 1; i >= 0; i--) {
       this.mechTime[i]--;
       const mx = this.mechX[i], my = this.mechY[i];

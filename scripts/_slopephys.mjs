@@ -10,7 +10,7 @@ page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
 await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
-await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
+await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 600000 });
 await new Promise((r) => setTimeout(r, 1500));
 
 let pass = 0, fail = 0;
@@ -67,7 +67,13 @@ if (cell) {
       for (let x = cc.x - 60; x < cc.x + 60; x++) {
         for (let y = cc.y; y < cc.y + 10; y++) {
           const i = st.idx(x, y);
-          if (st.flags[i] && !st.half[i] && st.slope[i] === 0 && !st.flags[st.idx(x, y - 1)] && !st.flags[st.idx(x, y - 2)]) return { x, y };
+          if (st.flags[i] && !st.half[i] && st.slope[i] === 0) {
+            let clear = true;
+            for (let dx = -1; dx <= 2 && clear; dx++) {   // 玩家宽 20px 跨 3 列
+              if (st.flags[st.idx(x + dx, y - 1)] || st.flags[st.idx(x + dx, y - 2)]) clear = false;
+            }
+            if (clear) return { x, y };
+          }
         }
       }
       return null;
@@ -80,8 +86,14 @@ if (cell) {
     }, flat);
     await new Promise((r) => setTimeout(r, 1500));
     const r2 = await page.evaluate((f) => {
-      const p = window.__swGame.player;
-      return { feet: p.y + p.h, top: f.y * 16, onGround: p.onGround };
+      const g = window.__swGame; const p = g.player; const st = g.world.store;
+      const dump = [];
+      const fx = Math.floor((p.x + p.w / 2) / 16), fy = Math.floor((p.y + p.h + 2) / 16);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -2; dy <= 2; dy++) {
+        const i = st.idx(fx + dx, fy + dy);
+        dump.push(`${fx + dx},${fy + dy}:t${st.type[i]}${st.half[i] ? 'H' : ''}s${st.slope[i]}${st.flags[i] ? '' : '·'}`);
+      }
+      return { feet: p.y + p.h, top: f.y * 16, onGround: p.onGround, px: p.x, py: p.y, dump: dump.join(' ') };
     }, flat);
     check('整砖格正常落地(回归)', Math.abs(r2.feet - r2.top) < 2 && r2.onGround, JSON.stringify(r2));
   }

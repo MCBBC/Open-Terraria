@@ -40,7 +40,7 @@ export function viIdFromKey(key: string): number {
 }
 
 export type CombatWeapon =
-  | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean }
+  | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean; shoot?: number; shootSpeed?: number }
   | {
       kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'magic' | 'shot';
       shoot: number;
@@ -86,6 +86,17 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (ai === AI_SPEAR || ai === AI_SHORTSWORD) return { kind: 'spear', shoot, ...base };
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
+    // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +
+    // 挥击中射弹（Player.cs:42880：flag4 = itemAnimation>0 && ItemTimeIsZero →
+    // ItemCheck_Shoot，useTime 节奏发弹）。此前落入 shot 兜底 = 变成"光束枪"
+    // 完全不挥砍——语义错误。数值取 melee 分支，附带 shoot/shootSpeed 给挥击侧发射
+    if (c.melee && !c.noMelee) {
+      return {
+        kind: 'melee', damage: base.damage, knockback: base.knockback, useTime: base.useTime,
+        useAnimation: c.useAnimation ?? base.useTime, autoReuse: !!c.autoReuse,
+        shoot, shootSpeed: base.shootSpeed,
+      };
+    }
     if (c.magic || c.mana) return { kind: 'magic', shoot, mana: c.mana ?? 0, ...base };
     // 其余 melee/ranged+shoot（附魔剑光束等）：直射弹兜底
     if (c.melee || c.ranged || c.noMelee) return { kind: 'shot', shoot, ...base };

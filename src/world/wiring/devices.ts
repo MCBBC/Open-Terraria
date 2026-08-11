@@ -3,6 +3,7 @@
 // 其余 case 在此按原版逐条移植;NetMessage 跳过(单机)。
 // 行为无对应引擎系统的器件(音乐盒/派对/天塔柱等)按"帧翻转 + toast 占位"处理,注释标明。
 import type { Wiring } from '../Wiring';
+import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
 
 /** 器件运行环境(Game 实现;保持窄接口以便单测注入) */
@@ -15,10 +16,10 @@ export interface DeviceCtx {
   mechSpawnOk(px: number, py: number, type: number): boolean;
   /** Item.MechSpawn（Item.cs:48982-49013）：同 item 300px≥3 / 800px≥6 / 全图≥10 拒绝 */
   itemSpawnOk(px: number, py: number, type: number): boolean;
-  /** 投射物(飞镖/火焰/尖刺球/炮弹近似):vx/vy px/tick */
-  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser'): void;
-  /** 统计附近某类投射物数量(尖刺球惩罚表用) */
-  countProjectiles(kind: 'spiky', px: number, py: number, radius: number): number;
+  /** 投射物(飞镖/火焰/尖刺球/炮弹/雪球):vx/vy px/tick */
+  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind): void;
+  /** 统计附近某类投射物数量(尖刺球惩罚表/兔兔炮场内上限用) */
+  countProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
   doorOpen(x: number, y: number): boolean;
   doorClose(x: number, y: number): boolean;
@@ -402,15 +403,44 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         }
       }
       if (num37 === -1) return true; // 只旋转未开火
-      // 开火半边：半仰角(<2)时左向(带3/4)不发射（flag2）
+      // 开火半边：半仰角(<2)时左向(带3/4)不发射（flag2，Wiring.cs:1301-1304）
       const flag2 = !((num36 === 3 || num36 === 4) && num37 < 2);
-      const damage = num36 === 0 ? 300 : num36 === 1 ? 350 : 40; // 兔兔炮350/普通300
+      // 伤害/CheckMech 时长（Wiring.cs:1306-1330）：0=大炮 300/480，1=兔兔炮 350/3600，
+      // 其余（3/4 传送门炮）damage 0 / time 30——原版 switch 只设这两档
+      const damage = num36 === 0 ? 300 : num36 === 1 ? 350 : 0;
       const time = num36 === 0 ? 480 : num36 === 1 ? 3600 : 30;
-      if (!w.checkMech(ox, oy, time) || !flag2) return true;
-      // ShootFromCannon(x, y, 仰角带, direction=num36+1)：方向1/2右 3/4左；弹药未接入以巨石近似
-      const dirR = num36 <= 1 ? 1 : -1;
-      const ang = (num35 * Math.PI) / 16; // 仰角带 0-8 ≈ 0-90°
-      ctx.shootProjectile(ox * 16 + 24, oy * 16, dirR * 7 * Math.cos(ang), -7 * Math.sin(ang) - 2, damage, 'boulder');
+      // 全局冷却门（Wiring.cs:1312-1314/1321-1323：冷却中直接返回）
+      if (num36 === 0 && w.cannonCoolDown > 0) return true;
+      if (num36 === 1 && w.bunnyCannonCoolDown > 0) return true;
+      if (!flag2 || !w.checkMech(ox, oy, time)) return true;
+      // WorldGen.ShootFromCannon（WorldGen.cs:50606-50718 1:1）
+      // 弹种（:50611-50631）：ammo=num36+1 → 0→162 炮弹 / 1→281 爆炸兔兔 / 3·4→601（速度 3）
+      const speed = num36 === 3 || num36 === 4 ? 3 : 14; // :50608 num=14f；601 时 num=3f(:50623/50628)
+      // 初速方向表（:50640-50683）：仰角带 0-8 → (10,0)…(0,-10)…(-10,0)
+      const ANGLE_V: Array<readonly [number, number]> = [
+        [10, 0], [7.5, -2.5], [5, -5], [2.75, -6], [0, -10],
+        [-2.75, -6], [-5, -5], [-7.5, -2.5], [-10, 0],
+      ];
+      const [bx, by] = ANGLE_V[num35] ?? [0, -10];
+      // 归一化到 speed（:50706-50708 num8 = num/|v|）
+      const len = Math.hypot(bx, by);
+      const vx = (bx * speed) / len, vy = (by * speed) / len;
+      // 出膛位置（:50685 (x+2)*16,(y+2)*16；601 仅加 (0/5,5) 偏移 :50689-50696）
+      let px = (ox + 2) * 16, py = (oy + 2) * 16;
+      if (num36 === 3 || num36 === 4) {
+        if (num35 === 4) px += 5;
+        py += 5;
+      }
+      // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :50722-50760：
+      //   NPC614+弹281 计数 ≥4 拒绝；NPC614 无对应实体，此处只数 281 弹）
+      // num36 3/4 原版发 PortalGunBolt 601（WorldGen.cs:50622-50631）——传送门弹未实现，
+      // 沿用巨石弹体近似（速度/伤害/位置已按原版）
+      const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny' : 'boulder';
+      if (kind === 'bunny' && ctx.countProjectiles('bunny', px, py, Infinity) >= 4) return true;
+      // 全局冷却置位（Wiring.cs:1334-1339：大炮 120 / 兔兔炮 480）
+      if (num36 === 0) w.cannonCoolDown = 120;
+      if (num36 === 1) w.bunnyCannonCoolDown = 480;
+      ctx.shootProjectile(px, py, vx, vy, damage, kind);
       return true;
     }
     case 210: // 地雷 ExplodeMine(:3093)：清格 + Projectile 164(250伤)——
@@ -418,11 +448,45 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       st.setTile(x, y, 0);
       ctx.explode(x, y, 250, 0, false);
       return true;
-    case 212: { // 雪球发射器:CheckMech 10 发射(:946-1002)
-      const ox = x - Math.floor(st.frameX[i] % 54 / 18);
-      const oy = y - Math.floor(st.frameY[i] % 54 / 18);
-      if (!w.checkMech(x, y, 10)) return true;
-      ctx.shootProjectile(ox * 16 + 16, oy * 16, 8, -8, 20, 'boulder');
+    case 212: { // 雪球发射器（Wiring.cs:1345-1418 1:1）：旋转+开火复合状态机。
+      // num51=块内列(0/2=旋转态,1=待发) num52=行内偏移 num55=朝向带(frameX/54,0左 1右)
+      const num51 = Math.floor(st.frameX[i] % 54 / 18);
+      const num52 = Math.floor(st.frameY[i] % 54 / 18);
+      const ox = x - num51, oy = y - num52;
+      const num55 = Math.floor(st.frameX[i] / 54);
+      let num56 = -1;
+      if (num51 === 1) num56 = num52;
+      // 瞄准旋转：列0→frameX -54（带0停）、列2→+54（带1停）（:1359-1365）
+      let num57 = 0;
+      if (num51 === 0) num57 = -54;
+      if (num51 === 2) num57 = 54;
+      if (num55 >= 1 && num57 > 0) num57 = 0;
+      if (num55 === 0 && num57 < 0) num57 = 0;
+      if (num57 !== 0) {
+        for (let cx = ox; cx < ox + 3; cx++) {
+          for (let cy = oy; cy < oy + 3; cy++) {
+            if (!st.inBounds(cx, cy)) continue;
+            w.skipCell(cx, cy);
+            const ci = st.idx(cx, cy);
+            st.setTile(cx, cy, st.type[ci], st.frameX[ci] + num57, st.frameY[ci]);
+          }
+        }
+      }
+      if (num56 === -1) return true; // 只旋转未开火
+      // 开火门（:1391）：全局冷却 0 + CheckMech(锚点,60)
+      if (w.snowballCannonCoolDown > 0 || !w.checkMech(ox, oy, 60)) return true;
+      w.snowballCannonCoolDown = 15; // :1393
+      // 弹速（:1394）：12 + rand(0..449)*0.01 = 12.00..16.49
+      const speed = 12 + Math.floor(Math.random() * 450) * 0.01;
+      // 方向（:1395-1396）：X=rand(85..104) / Y=rand(-35..10)（Main.rand.Next 上界开区间）
+      let dx = 85 + Math.floor(Math.random() * 20);
+      const dy = -35 + Math.floor(Math.random() * 46);
+      // 出膛位置（:1400 (x+2)*16-8,(y+2)*16-8）+ 朝向偏移（:1401-1405：左带 X-12 / 右带 X+12）
+      let px = (ox + 2) * 16 - 8, py = (oy + 2) * 16 - 8;
+      if (num55 === 0) { dx *= -1; px -= 12; } else { px += 12; }
+      // 归一化到 speed（:1410-1415）后发射 166 雪球：35 伤 / 3.5 击退（:1397-1399）
+      const len = Math.hypot(dx, dy);
+      ctx.shootProjectile(px, py, (dx * speed) / len, (dy * speed) / len, 35, 'snowball');
       return true;
     }
     case 215: // 篝火 3×2 frameY ±36(:1003-1020)

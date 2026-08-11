@@ -3320,7 +3320,7 @@ export class Enemy extends Entity {
   private towerAI(game: GameHooks, player: Player | null) {
     const w = game.world;
     const key = TOWER_KEY[this.vanillaId ?? -1];
-    if (!key) return;
+    if (!key || this.dead) return;   // 真死后不再跑（防死亡管线重复触发）
     const le = w.lunarEvent;
     const st = w.store;
     const count = (id: number): number => {

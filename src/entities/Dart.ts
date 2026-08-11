@@ -16,7 +16,27 @@ import type { Camera } from '../render/Camera';
 //   3 尖球机关(1148)→185 | 4 长矛机关(1149)→186(有图)
 // 187/654 的 PNG 是官方占位空桩(xnb 像素全零,经字节级同 stub 证实),isBlankTex 检出后
 // 走色块回退 + 粒子拖尾——与原版"隐形弹体+尘埃视觉"一致(Projectile.cs:24222 188 同族 dust 驱动)
-const TRAP_SHOT_STYLE: Record<string, { w: number; h: number; color: string; grav: number; proj?: string; fw?: number; fh?: number; spin?: boolean; rotOff?: number; trail?: { colors: string[]; count: number; life: number; grav: number } }> = {
+const TRAP_SHOT_STYLE: Record<string, {
+  w: number; h: number; color: string; grav: number;
+  proj?: string; fw?: number; fh?: number;
+  spin?: boolean | 'roll' | 'bunny'; rotOff?: number;
+  trail?: { colors: string[]; count: number; life: number; grav: number };
+  /** 炮弹族：前 N tick 直线无重力（Projectile.cs:21546/26844 ai[0]>=18 才加重力） */
+  gravDelay?: number;
+  /** 水平阻尼（Projectile.cs:21549 velocity.X *= 0.99） */
+  xDamp?: number;
+  /** 垂直速度上限（Projectile.cs:26850-26853 兔兔炮 15.9） */
+  vCap?: number;
+  /** 友方弹幕（friendly=true，SetDefaults）：只伤敌怪，不伤玩家/城镇 NPC */
+  friendly?: boolean;
+  /** 落点爆炸半宽 px（Projectile.Kill 伤害盒：162=144×144→72 / 281=128×128→64） */
+  blast?: number;
+  /** 撞块破碎尘（Projectile.Kill 166：尘 76 十粒 + Item51） */
+  shatterDust?: boolean;
+  /** 发射音（Projectile.AI 首帧 SoundID.Item14：162=Projectile.cs:21542 / 281=26830） */
+  launchSfx?: string;
+  life?: number;
+}> = {
   dart: { w: 8, h: 4, color: '#C8B89A', grav: 0, proj: 'vanilla/Projectile_98.png', fw: 10, fh: 28, rotOff: Math.PI / 2 },
   superdart: { w: 6, h: 6, color: '#8FBF6A', grav: 0, proj: 'vanilla/Projectile_184.png', fw: 10, fh: 18, rotOff: Math.PI / 2 },
   flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16,
@@ -26,16 +46,39 @@ const TRAP_SHOT_STYLE: Record<string, { w: number; h: number; color: string; gra
   boulder: { w: 14, h: 14, color: '#9A8C72', grav: 0.22, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true },
   geyser: { w: 10, h: 14, color: '#B8E8F0', grav: 0.02, proj: 'vanilla/Projectile_654.png', fw: 16, fh: 16,
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
+  // ---- 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon / 直接 NewProjectile）----
+  // 162 炮弹（SetDefaults Projectile.cs:2239-2246）：16×16 aiStyle2 friendly penetrate4；
+  // AI（:21540-21592）：18 tick 直线后 vy+=0.28/vx*=0.99；Kill（:72768-72831）：64×64→144×144
+  // 两段 Damage() 纯伤害（不在 ExplodeTiles 表 = 不破坏地形）
+  cannonball: { w: 16, h: 16, color: '#33333C', grav: 0.28, gravDelay: 18, xDamp: 0.99,
+    proj: 'vanilla/Projectile_162.png', fw: 18, fh: 18, spin: 'roll', friendly: true, blast: 72,
+    launchSfx: 'explosion', life: 3600 },
+  // 281 爆炸兔兔（SetDefaults Projectile.cs:3408-3418）：28×28 aiStyle49 friendly timeLeft600；
+  // AI（:26822-26913）同炮弹弧线（18 tick 后 vy+=0.28/vx*=0.99，vy 上限 15.9）；
+  // Kill（:72704-72758）：128×128 Damage() 纯伤害
+  bunny: { w: 28, h: 28, color: '#E8E2D8', grav: 0.28, gravDelay: 18, xDamp: 0.99, vCap: 15.9,
+    proj: 'vanilla/Projectile_281.png', fw: 28, fh: 28, spin: 'bunny', friendly: true, blast: 64,
+    launchSfx: 'explosion', life: 600 },
+  // 166 雪球（SetDefaults Projectile.cs:2282-2289）：14×14 aiStyle2 friendly ranged coldDamage；
+  // AI（:21862-21897）：20 tick 直线后 vy+=0.3/vx*=0.98；Kill（:71758-71767）：碎裂尘无 AoE
+  snowball: { w: 14, h: 14, color: '#F2F8FF', grav: 0.3, gravDelay: 20, xDamp: 0.98,
+    proj: 'vanilla/Projectile_166.png', fw: 14, fh: 14, spin: 'roll', friendly: true,
+    shatterDust: true, life: 3600 },
 };
+
+/** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
+export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball';
 
 export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;
   vy: number;
   damage: number;
-  kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser';
-  /** 滚转角(尖刺球/巨石) */
+  kind: TrapShotKind;
+  /** 滚转角(尖刺球/巨石/炮弹族) */
   private rot = 0;
+  /** 已飞行 tick（炮弹族重力延迟用，对应原版 ai[0]） */
+  private age = 0;
   life = 600;
   dead = false;
 
@@ -59,7 +102,7 @@ export class TrapShot extends Entity {
     return blank;
   }
 
-  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser') {
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: TrapShotKind) {
     super();
     const s = TRAP_SHOT_STYLE[kind];
     this.x = x; this.y = y;
@@ -68,6 +111,7 @@ export class TrapShot extends Entity {
     this.kind = kind;
     this.w = s.w; this.h = s.h;
     if (kind === 'spiky') this.life = 1800; // 原版尖刺球 timeLeft 1800
+    if (s.life !== undefined) this.life = s.life; // 炮弹族 timeLeft（SetDefaults 默认 3600 / 281=600）
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -94,10 +138,36 @@ export class TrapShot extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) {
+      // 炮弹族 timeLeft 耗尽同样走 Kill 爆炸（Projectile.Kill 由 timeLeft 归零触发）
+      if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
+      else this.dead = true;
+      return;
+    }
     const st = TRAP_SHOT_STYLE[this.kind];
-    if (st.spin) this.rot += this.vx * 0.03;
-    this.vy += st.grav;
+    this.age++;
+    // 首帧发射音（Projectile.AI：162=Projectile.cs:21542-21546 / 281=26830-26833 SoundID.Item14）
+    if (this.age === 1 && st.launchSfx) game.playSfx(st.launchSfx, 1, this.x + this.w / 2, this.y + this.h / 2);
+    // 滚转：尖刺球/巨石近似 | 炮弹族按原版
+    if (st.spin === true) this.rot += this.vx * 0.03;
+    else if (st.spin === 'roll') {
+      // aiStyle2（Projectile.cs:21528）：rotation += (|vx|+|vy|)*0.03*direction
+      this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx < 0 ? -1 : 1);
+    } else if (st.spin === 'bunny') {
+      // aiStyle49（Projectile.cs:26841）：rotation += vx*0.05 + direction*0.05
+      this.rot += this.vx * 0.05 + (this.vx < 0 ? -1 : 1) * 0.05;
+    }
+    if (st.gravDelay !== undefined) {
+      // 炮弹族弧线：前 gravDelay tick 直线，之后 vy+=grav / vx*=xDamp
+      // （162/281=Projectile.cs:21546-21550/26844-26849 的 ai[0]>=18；166=:21879-21884 的 >=20）
+      if (this.age >= st.gravDelay) {
+        this.vy += st.grav;
+        this.vx *= st.xDamp ?? 1;
+        if (st.vCap !== undefined && this.vy > st.vCap) this.vy = st.vCap; // 281 :26850-26853
+      }
+    } else {
+      this.vy += st.grav;
+    }
     this.x += this.vx;
     this.y += this.vy;
     // 粒子拖尾(原版火焰陷阱/热喷泉的视觉主体是沿途粒子;每 2 tick 一次防刷屏)
@@ -111,23 +181,39 @@ export class TrapShot extends Entity {
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (game.world.store.isSolid(tx, ty)) {
-      // 尖刺球/巨石:撞块反弹衰减,其余消失
+      // 尖刺球/巨石:撞块反弹衰减
       if (this.kind === 'spiky' || this.kind === 'boulder') {
         if (Math.abs(this.vy) > 1) { this.vy *= -0.4; this.vx *= 0.7; this.y -= this.vy; }
         else { this.vy = 0; this.vx *= 0.94; }
-      } else { this.dead = true; return; }
+      } else if (st.blast) {
+        // 炮弹/兔兔炮撞块 → Kill 落点爆炸（Projectile.cs:72768-72831 / 72704-72758）
+        this.blastKill(game);
+        return;
+      } else {
+        // 雪球撞块碎裂（Projectile.cs:71758-71767）
+        if (st.shatterDust) this.shatter(game);
+        this.dead = true;
+        return;
+      }
     }
-    const p = game.player;
-    if (!p.dead && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-      p.damage(this.damage, this.x, this.y);
-      game.addDamageNumber(p.cx, p.y, this.damage, false, '#FF8060');
-      if (this.kind !== 'boulder') this.dead = true;
+    // 友方弹幕（炮弹族 friendly=true）：不伤玩家，直接进敌怪判定
+    if (!st.friendly) {
+      const p = game.player;
+      if (!p.dead && this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+        p.damage(this.damage, this.x, this.y);
+        game.addDamageNumber(p.cx, p.y, this.damage, false, '#FF8060');
+        if (this.kind !== 'boulder') this.dead = true;
+        if (this.dead) return;
+      }
     }
 
     // ---- 命中怪物/小动物/城镇 NPC（原版陷阱弹幕对全实体敌对，Projectile.DamageNPC 语义） ----
     // 穿透规则（近似原版）：巨石碾压穿透；尖刺球/火焰穿透（靠受击者无敌帧节流连击）；
-    // 镖/超级飞镖/热喷泉一碰即碎（与对玩家一致）
-    const pierce = this.kind === 'boulder' || this.kind === 'spiky' || this.kind === 'flame';
+    // 镖/超级飞镖/热喷泉一碰即碎（与对玩家一致）；
+    // 炮弹族：162 penetrate4 / 281 penetrate-1（SetDefaults）→ 穿透，撞块/超时才 Kill 爆炸；
+    // 166 雪球 penetrate1 → 一碰即碎
+    const pierce = this.kind === 'boulder' || this.kind === 'spiky' || this.kind === 'flame'
+      || this.kind === 'cannonball' || this.kind === 'bunny';
     const overlaps = (e: { x: number; y: number; w: number; h: number }) =>
       this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y;
     // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）
@@ -138,8 +224,15 @@ export class TrapShot extends Entity {
         playEnemyHitSound(game, e);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
       }
-      if (!pierce) { this.dead = true; return; }
+      if (!pierce) {
+        if (st.shatterDust) this.shatter(game);
+        this.dead = true;
+        return;
+      }
     }
+    // 友方弹幕（炮弹族 friendly=true）到此为止：不误伤小动物/城镇 NPC
+    // （原版 friendly 弹对城镇 NPC 免疫；小动物不在敌怪判定内）
+    if (st.friendly) return;
     // 小动物桶（Enemy 单参 shim / Critter.hurt(game) 皆可，被击即死）
     const buckets = (game as unknown as { entities?: { critters: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (g: GameHooks) => boolean }>; npcs: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean }> } }).entities;
     if (buckets) {
@@ -153,6 +246,36 @@ export class TrapShot extends Entity {
         if (n.dead || !overlaps(n)) continue;
         n.hurt(this.damage, Math.sign(this.vx) * 2, 0, game);
         if (!pierce) { this.dead = true; return; }
+      }
+    }
+  }
+
+  /** 雪球碎裂（Projectile.Kill type166，Projectile.cs:71758-71767：尘 76 十粒 + Item51） */
+  private shatter(game: GameHooks): void {
+    game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#F2F8FF', 10, 1, { life: 20, damp: 0.94, grav: -0.01 });
+    game.playSfx('shatter', 1, this.x, this.y);
+  }
+
+  /** 落点爆炸（Projectile.Kill：type162=Projectile.cs:72768-72831 / type281=72704-72758）：
+   *  纯范围伤害（162/281 均不在 ExplodeTiles 判定表 Projectile.cs:75260 → 不破坏地形）；
+   *  原版两段伤害盒 162 为 64×64→144×144、281 为 128×128，此处按 blast 半宽合并一段；
+   *  friendly 弹不伤玩家（hostile 伤害仅在 getGoodWorld 下对玩家生效，Main.getGoodWorld） */
+  private blastKill(game: GameHooks): void {
+    this.dead = true;
+    const st = TRAP_SHOT_STYLE[this.kind];
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（Projectile.cs:72769/72706）
+    game.spawnParticles(cx, cy, '#FFA050', 14, 3.5, { life: 18, damp: 0.93, grav: -0.02 });
+    game.spawnParticles(cx, cy, '#FFF0C0', 8, 4.5, { life: 10, damp: 0.9, grav: -0.05 });
+    const r = st.blast!;
+    const box = { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r };
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead) continue;
+      if (!(box.x < e.x + e.w && box.x + box.w > e.x && box.y < e.y + e.h && box.y + box.h > e.y)) continue;
+      if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
+        playEnemyHitSound(game, e);
+        game.addDamageNumber(cx, cy, this.damage, false, '#FFD060');
       }
     }
   }

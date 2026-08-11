@@ -32,9 +32,14 @@ import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TO
 import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
+import { furnitureStyleBase } from '../world/FurnitureStyle';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemFuncOfVid } from '../data/vanillaItemFunc';
+/** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
+const BUFF_BY_VANILLA = new Map<number, BuffType>();
+for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
@@ -83,7 +88,7 @@ import { settleWorldLiquids } from '../world/liquid/settle';
 import { WorldGenClient, WorldGenUnavailable } from '../workers/WorldGenClient';
 import { ClientNet, RemotePlayerState, type NpcSnap, type ProjSnap, type ItemOpMsg } from '../net/ClientNet';
 import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
-import { BuffType } from '../stats/Buffs';
+import { BuffType, BUFF_DEFS } from '../stats/Buffs';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
@@ -93,6 +98,7 @@ import { HitTile } from './HitTile';
 import type { GameHooks } from '../entities/types';
 import { Dart } from '../entities/Dart';
 import { TrapShot } from '../entities/Dart';
+import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../entities/WeaponProj';
 import { Minecart } from '../entities/Minecart';
@@ -500,7 +506,7 @@ export class Game implements GameHooks {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1);
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
       case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg);
-      case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as 'dart');
+      case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind);
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
       default: return null;
     }
@@ -1924,6 +1930,26 @@ export class Game implements GameHooks {
 
   // ================= 物品使用：挖掘 / 放置 / 攻击 / 使用 =================
 
+  /** vi_ 工具桥接（vanilla-itemfunc.json pick/axe/hammer → tool def；
+   *  双工具 Hamaxe 族取主类型，副力暂缺——挖掘入口按主类型判定） */
+  private itemFuncTool(id: number): (typeof ITEM_DEFS)[number]['tool'] {
+    const def = ITEM_DEFS[id];
+    if (!def) return undefined;
+    const m = /^vi_(\d+)_/.exec(def.key);
+    if (!m) return undefined;
+    const f = itemFuncOfVid(+m[1]);
+    if (!f || !(f.pick || f.axe || f.hammer)) return undefined;
+    const c = itemCombat(+m[1]);
+    return {
+      type: f.pick ? 'pick' : f.axe ? 'axe' : 'hammer',
+      power: f.pick ?? f.axe ?? f.hammer,
+      damage: c?.damage ?? 5,
+      speed: c?.useAnimation ?? 25,
+      useTime: c?.useTime ?? 20,
+      knockback: c?.knockBack ?? 3,
+    } as NonNullable<(typeof ITEM_DEFS)[number]['tool']>;
+  }
+
   private updateUse(dt: number) {
     const inp = this.input;
     // 矿车骑乘驱动:左右加速,跳车
@@ -1957,7 +1983,8 @@ export class Game implements GameHooks {
     const held = this.player.inv.heldItem();
     const heldDef = held ? ITEM_DEFS[held.id] : null;
     const [tx, ty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
-    const tool = heldDef?.tool;
+    // 工具判定：legacy def.tool 优先；vi_ 镐/斧/锤经 vanilla-itemfunc 桥接（数值取 combat 表）
+    const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
     const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
 
     // 右键：手持矿车点轨道(最优先,防 NPC 交谈拦截)→ 附近宝箱 → NPC 交谈 → 交互
@@ -2034,6 +2061,21 @@ export class Game implements GameHooks {
         this.player.useTime = reuseSpd;
         this.swingHitSet.clear();
         this.swingTileCutSet.clear();
+        // ★ melee+shoot 剑族（附魔剑 989/波刃 190 等，Player.cs:42880 flag4 语义）：
+        // 挥砍为主 + 挥击启动帧朝鼠标射出 item.shoot（useTime 节奏=每次挥击一弹）；
+        // 弹体走通用 Arrow（贴图/穿透/寿命取投射物表），伤害与本体挥击同源
+        if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
+          const ang2 = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+          const pd = projectileData(cwMelee.shoot);
+          let pen = pd?.penetrate ?? 1;
+          if (pen < 0) pen = 3;
+          pen = Math.max(1, Math.min(pen, 3));
+          this.entities.add(new Arrow(
+            this.player.cx + Math.cos(ang2) * 14, this.player.cy - 4 + Math.sin(ang2) * 14,
+            Math.cos(ang2) * cwMelee.shootSpeed, Math.sin(ang2) * cwMelee.shootSpeed,
+            this.swing.dmg ?? 1, this.swing.kb ?? 3, cwMelee.shoot, null,
+            { grav: projGravity(cwMelee.shoot), life: pd?.timeLeft ?? 600, pierce: pen }), 'projectiles');
+        }
       }
       this.mining = null;
       return;
@@ -2127,6 +2169,38 @@ export class Game implements GameHooks {
         this.sfx.play('drink');
         this.cb.onInventoryChanged();
         this.cb.onToast(`${heldDef.name}：${p.duration} 秒`);
+      }
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
+      // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
+      // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
+      const fm = /^vi_(\d+)_/.exec(heldDef.key);
+      const ff = fm ? itemFuncOfVid(+fm[1]) : null;
+      if (ff?.consumable && !ff.createTile && !ff.shoot && !ff.pick && !ff.axe && !ff.hammer
+        && (ff.healLife || ff.healMana || (ff.buffType && ff.buffType > 0))) {
+        if (ff.healLife && this.player.buffs.healBlocked) {
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
+          this.player.useTime = 30;
+        } else {
+          // 原版 buff id → BuffType（BUFF_DEFS 反查；耐药性 21 是治疗副作用不主动施加）
+          if (ff.buffType && ff.buffType > 0) {
+            const bt = BUFF_BY_VANILLA.get(ff.buffType);
+            if (bt !== undefined && bt !== BuffType.Resistance) {
+              this.player.buffs.apply(bt, Math.round((ff.buffTime ?? 7200) / 60)); // tick→秒
+            }
+          }
+          if (ff.healLife) {
+            this.player.hp = Math.min(this.player.maxHp, this.player.hp + ff.healLife);
+            this.addDamageNumber(this.player.cx, this.player.y, ff.healLife, false, '#40E080');
+            this.player.buffs.apply(BuffType.Resistance, 60); // 药水病（PotionSickness 近似）
+          }
+          if (ff.healMana) {
+            this.player.mana = Math.min(this.player.maxMana, this.player.mana + ff.healMana);
+          }
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.player.useTime = 60;
+          this.sfx.play('drink');
+          this.cb.onInventoryChanged();
+        }
       }
     } else if (heldDef && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
       // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
@@ -3313,9 +3387,10 @@ export class Game implements GameHooks {
         // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
         // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确
         if (isVanillaStyle) {
-          // placeStyle:样式索引 → X 偏移 style*fw*18(2 宽物件步长 36,3 宽 54)
-          const strideX = (def.vanilla?.fw ?? 1) * 18;
-          st.setTile(px, py, tileId, (itemDef.placeStyle ?? 0) * strideX + dx2 * 18, dy2 * 18);
+          // placeStyle → 样式基偏移:权威布局表(FurnitureStyle.ts;竖排族写 Y,
+          // 旧公式 style*fw*18 一刀切会把灯笼/蜡烛/吊灯等写成非法帧)
+          const [bx2, by2] = furnitureStyleBase(def.vanilla?.sheet ?? -1, itemDef.placeStyle ?? 0, def.vanilla?.fw ?? 1);
+          st.setTile(px, py, tileId, bx2 + dx2 * 18, by2 + dy2 * 18);
         } else {
           st.setTile(px, py, tileId, dx2, dy2);
         }
@@ -4012,11 +4087,12 @@ export class Game implements GameHooks {
         }
         return true;
       },
-      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser') => {
+      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind) => {
         this.entities.add(new TrapShot(px, py, vx, vy, damage, kind), 'projectiles');
-        this.sfxAt('tink', px, py); // 陷阱发射:按距离衰减
+        // 发射音：陷阱族=敲石近似；炮弹族由 TrapShot 首帧按原版播 Item14（Projectile.cs:21542/26830）
+        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball') this.sfxAt('tink', px, py);
       },
-      countProjectiles: (kind: 'spiky', px: number, py: number, radius: number) => {
+      countProjectiles: (kind: 'spiky' | 'bunny', px: number, py: number, radius: number) => {
         let n = 0;
         for (const e of this.entities.projectiles) {
           if (e instanceof TrapShot && e.kind === kind && Math.hypot(e.x - px, e.y - py) < radius) n++;
@@ -4410,7 +4486,7 @@ export class Game implements GameHooks {
     if (this.swing.t <= 0) { this.swing = null; return; }
     const held = this.player.inv.heldItem();
     if (!held) return;
-    const tool = ITEM_DEFS[held.id].tool;
+    const tool = ITEM_DEFS[held.id].tool ?? this.itemFuncTool(held.id);
     void tool;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
     // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**

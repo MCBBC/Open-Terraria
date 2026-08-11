@@ -81,6 +81,11 @@ export const VANILLA_MISC = [
   'vanilla/Projectile_186.png',  // 长矛机关 10×16
   'vanilla/Projectile_187.png',  // 超级飞镖 6×6
   'vanilla/Projectile_654.png',  // 热喷泉 16×16
+  // 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon）：
+  // 162 炮弹 18×18 / 166 雪球 14×14 / 281 爆炸兔兔 28×28（整图单帧）
+  'vanilla/Projectile_162.png',
+  'vanilla/Projectile_166.png',
+  'vanilla/Projectile_281.png',
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;

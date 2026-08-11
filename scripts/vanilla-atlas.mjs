@@ -58,6 +58,9 @@ const MISC = [
   // 电路陷阱弹幕(Wiring.cs:1495-1743)
   'Projectile_98.png', 'Projectile_99.png', 'Projectile_184.png',
   'Projectile_185.png', 'Projectile_186.png', 'Projectile_187.png', 'Projectile_654.png',
+  // 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon）：
+  // 162 炮弹 18×18 / 166 雪球 14×14 / 281 爆炸兔兔 28×28（整图单帧）
+  'Projectile_162.png', 'Projectile_166.png', 'Projectile_281.png',
   // Boss 弹幕(机械三王/血肉墙/蜂后/世花/石巨人/猪鲨/月总/邪教徒/光女/史后)
   // 83 雷眼绿激光 / 96 诅咒焰 / 100,101,102 激光系 / 183 毒刺 / 407-410 猪鲨泡泡+鲨鱼
   // 522,526,527 蜂后机关枪弹 / 441,442 光女飞刀 / 545 世花种子 / 612 石巨人火球

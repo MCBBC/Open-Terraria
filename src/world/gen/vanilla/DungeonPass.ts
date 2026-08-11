@@ -9,6 +9,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { tileRunner } from './TileRunner';
 import { placeDoorClosed } from '../../Door';
+import { furnitureStyleBase } from '../../FurnitureStyle';
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
 const GREEN = TILE_BY_KEY['v_43_green_brick']!;
@@ -1484,17 +1485,18 @@ export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: numb
         || !TILE_DEFS[st.type[st.idx(x0 + dx, yTop + fh)]]?.solid) return false;
     }
   }
-  const stride = styleColW ?? fw * 18; // styleColW:横排列步(旗帜 91=54 等非整格宽样式族)
+  const sheet = TILE_DEFS[tile]?.vanilla?.sheet ?? -1;
+  // 权威布局表(FurnitureStyle.ts,TileObjectData+贴图实测):表内 sheet 直接用,
+  // 表外尊重调用参数(竖排 styleRowH / 横排列步 styleColW),最终回退通用横排
+  const inTable = [42, 33, 49, 34, 100, 93, 91, 240, 241, 242, 245, 246].includes(sheet);
+  let bx: number, by: number;
+  if (inTable) [bx, by] = furnitureStyleBase(sheet, style, fw);
+  else if (styleRowH !== undefined) { bx = 0; by = style * styleRowH; }
+  else { bx = style * (styleColW ?? fw * 18); by = 0; }
   for (let dx = 0; dx < fw; dx++) {
     for (let dy = 0; dy < fh; dy++) {
       const fx = flip < 0 ? fw - 1 - dx : dx;
-      if (styleRowH !== undefined) {
-        // 竖排样式(TileObjectData StyleHorizontal=false 默认族:灯笼42/工作台18/钢琴87 等):
-        // 样式写 frameY(styleRowH 实证,灯笼 36),frameX=0(灯具亮态;灭态=18 由接线翻转)
-        st.setTileSilent(x0 + dx, yTop + dy, tile, fx * 18, style * styleRowH + dy * 18);
-      } else {
-        st.setTileSilent(x0 + dx, yTop + dy, tile, style * stride + fx * 18, dy * 18);
-      }
+      st.setTileSilent(x0 + dx, yTop + dy, tile, bx + fx * 18, by + dy * 18);
     }
   }
   return true;

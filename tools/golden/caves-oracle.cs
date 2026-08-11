@@ -920,6 +920,7 @@ void CaveOpenater(int i, int j)
         if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
         if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
         num2 = num * (int)r.Next(80, 120) * 0.01;
+        if (i == 2998) Console.WriteLine($"CSCO px={px} py={py} r={num2} n={num}");
         for (int x = x0; x < x1; x++)
             for (int y = y0; y < y1; y++)
             {
@@ -953,6 +954,7 @@ void Cavinator2(int i, int j, int steps)
         if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
         if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
         num2 = num * (int)r.Next(80, 120) * 0.01;
+        if (i == 2998 && num4 > 30) Console.WriteLine($"CSCV px={px} py={py} r={num2} n={num} left={num4}");
         bool stop = false;
         for (int x = x0; x < x1 && !stop; x++)
         {
@@ -987,6 +989,7 @@ for (int i = 0; i < mCaveX.Count; i++)
     CaveOpenater(mCaveX[i], mCaveY[i]);
     Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
 }
+File.WriteAllBytes("/tmp/cs-act3.bin", act);
 Checkpoint("mcopenings");
 
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
