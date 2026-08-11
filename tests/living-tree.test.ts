@@ -161,18 +161,25 @@ describe('Living Trees 世界生成', () => {
     const anchorX = 400;
     const ok = growLivingTree(st, new RNG(555), gs, chests, anchorX, SURFACE - 1);
     expect(ok).toBe(true);
-    // 井筒核心列 num10-1..num10+1（cs:29088 i > num10-2 && i <= num10+1）
-    let run = 0;
-    for (let y = SURFACE; y < SURFACE + 120; y++) {
-      const i = st.idx(anchorX, y);
-      if (st.flags[i] === 0 && st.wall[i] === 244) run++;
-      else break;
+    // 井筒核心列 num10-1..num10+1（cs:29088 i > num10-2 && i <= num10+1）。
+    // 注：井口 j+1 行是生命木平台活板门（cs:29109-29112）,且井筒每 6 行 ±1 蛇行
+    //（cs:29177）→ 逐行断言 ±4 窗口内存在墙 244 空腔
+    let hollowRows = 0, hollowCells = 0;
+    for (let y = SURFACE + 1; y < SURFACE + 41; y++) {
+      let rowHollow = 0;
+      for (let dx = -4; dx <= 4; dx++) {
+        const i = st.idx(anchorX + dx, y);
+        if (st.flags[i] === 0 && st.wall[i] === 244) rowHollow++;
+      }
+      if (rowHollow > 0) hollowRows++;
+      hollowCells += rowHollow;
     }
-    expect(run).toBeGreaterThanOrEqual(30);
-    // 树冠与根系存在
+    expect(hollowRows).toBeGreaterThanOrEqual(35);
+    expect(hollowCells).toBeGreaterThanOrEqual(70);
+    // 树冠（锚点上方空气）与根系（地表以下）存在
     let leaves = 0, roots = 0;
-    for (let y = SURFACE + 5; y < SURFACE + 80; y++) {
-      for (let dx = -60; dx <= 60; dx++) {
+    for (let y = 60; y < SURFACE; y++) {
+      for (let dx = -80; dx <= 80; dx++) {
         if (st.type[st.idx(anchorX + dx, y)] === LEAF) leaves++;
       }
     }

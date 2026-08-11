@@ -267,10 +267,11 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                 int ti = y * W + x;
                 if (GP2C != null) {
                     GP2C_N++;
-                    if (GP2C_N % 10000 == 0) {
-                        GP2C.Add($"c{GP2C_N}=pk{(int)r.Peek()}");
+                    if ((GP2C_N >= 1114600 && GP2C_N <= 1114700) || GP2C_N % 50000 == 0) {
+                        GP2C.Add($"c{GP2C_N}@{x},{y}a{act[ti]}t{typ[ti]}=pk{(int)r.Peek()}");
                     }
                 }
+                if (GP2C != null && x == 3401 && y == 581) GP2C.Add($"S@{px:0.0},{py:0.0} a{act[ti]}t{typ[ti]}=pk{(int)r.Peek()}");
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -1193,17 +1194,20 @@ Checkpoint("grass");
         for (int i = 0; (double)i < 6.0 * ws; i++)
             TileRunner(x + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), y + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), (int)r.Next(3, 7), (int)r.Next(3, 8), (int)r.Next(baseGem, baseGem + variants));
     }
+    var CGH = new List<string>();
+    Action<string> ghAt = (tag) => { int ii = 315 * W + 3395; CGH.Add($"{tag}:t{typ[ii]}a{act[ii]}"); };
+    ghAt("entry");
     Move(ref jx, ref jy, 100, 100); zeroX += jx; zeroY += jy;
     var CJP3 = new List<string>();
     PlaceFirstPassMud(jx, jy, 3);
-    PlaceGemsAt(jx, jy, 63, 2);
+    PlaceGemsAt(jx, jy, 63, 2); ghAt("r1");
     Move(ref jx, ref jy, 250, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, 0);
-    PlaceGemsAt(jx, jy, 65, 2);
+    PlaceGemsAt(jx, jy, 65, 2); ghAt("r2");
     int oldX = jx, oldY = jy;
     Move(ref jx, ref jy, 400, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, -3);
-    PlaceGemsAt(jx, jy, 67, 2);
+    PlaceGemsAt(jx, jy, 67, 2); ghAt("r3");
         jx = zeroX / 3; jy = zeroY / 3;
     int bigNum = (int)r.Next((int)(400 * ws), (int)(600 * ws));
     int pad = (int)(25 * ws);
@@ -1318,7 +1322,8 @@ Checkpoint("grass");
         }
     }
     CPT.Add($"holes_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
-    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT));
+    ghAt("big");
+    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
     File.WriteAllBytes("/tmp/cs-act6.bin", act);
     File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
     for (int l = 0; (double)l <= 300.0 * ws; l++)

@@ -12,6 +12,8 @@ const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
 
 export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
+  const GH1: string[] = [];
+  const ghAt = (tag: string) => { const i = st.idx(3395, 315); GH1.push(`${tag}:t${st.type[i]}a${st.flags[i]}`); };
   const PT: string[] = [];
   const { w, h } = st;
   const scale = (w / 4200) * 1.5;
@@ -43,19 +45,20 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
     }
   };
 
+  ghAt('entry');
   applyRandomMovement(100, 100);
   zeroX += x; zeroY += y;
   placeFirstPassMud(3);
-  placeGemsAt(0, 2);
+  placeGemsAt(0, 2); ghAt('r1');
   applyRandomMovement(250, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(0);
-  placeGemsAt(2, 2);
+  placeGemsAt(2, 2); ghAt('r2');
   const oldX = x, oldY = y;
   applyRandomMovement(400, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(-3);
-  placeGemsAt(4, 2);
+  placeGemsAt(4, 2); ghAt('r3');
 
   PT.push(`g3_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   // 巨型泥 runner:三次移动点的均值为中心
@@ -68,8 +71,10 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
   gp2Begin();
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
+  ghAt('big');
   gp2End();
   console.log('GP2DUMP ' + gp2Dump());
+  console.log('GH1 ' + GH1.join(' '));
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);

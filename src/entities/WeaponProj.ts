@@ -352,3 +352,126 @@ export class GrenadeProj extends Entity {
     if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;
   }
 }
+
+// ================= 荧光棒族（aiStyle 14，AI_014 + 碰撞反弹表 Projectile.cs:23482-23500/18261-18333） =================
+
+/** 荧光棒物理 1:1：
+ *  AI_014 主体（cs:23482-23500）：ai0++ >5 钳位；着地（本帧 vy 未变且 vx≠0）滚动摩擦
+ *  vx×0.97（<0.01 归零）；重力 vy+=0.2；rotation += vx×0.1
+ *  粘性（proj 53，tileCollide=false，cs:23245-23296）：与实心块重叠 → velocity=(0,-0.2)
+ *  抵消重力 → 停在原位粘住
+ *  妖精（proj 870）：首次碰墙全反射 → aiStyle 170（cs:42997-43053）：半径 10 实心排斥
+ *  场（速度>1 时每 10 tick 重算）+ 速度 ×0.95 衰减、<1 归零
+ *  碰撞反弹表（cs:18261-18333，碰墙后）：
+ *    50      X→-0.2×；Y（lastV>1.5）→-0.2×
+ *    ≥1089   彩虹：X→-0.99×（|Δ|<1 → ±1）；Y→-0.99×（0<lastV<1 → -1）——近似永动
+ *    其余    473/515：X→-0.5×；Y（lastV>1）→-0.5×
+ *  寿命：timeLeft×5（=9000，cs:1075）；矿工 473 ×2（=3600）。到期消失无掉落 */
+export class GlowstickProj extends Entity {
+  w: number; h: number;
+  vx: number;
+  vy: number;
+  projId: number;
+  dead = false;
+  /** 原版 timeLeft（proj 50/53/515/870/1089 = 9000；473 = 3600） */
+  timeLeft: number;
+  private ai0 = 0;
+  private rot = 0;
+  /** 妖精阶段（870 反弹后） */
+  private fairy = false;
+  private fairyT = 0;
+
+  constructor(x: number, y: number, vx: number, vy: number, projId: number) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.projId = projId;
+    this.w = projId === 473 ? 8 : 6;
+    this.h = this.w;
+    this.timeLeft = projId === 473 ? 3600 : 9000;
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, this.projId, this.rot, '#7FE8A8');
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.timeLeft <= 0) { this.dead = true; return; }
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    };
+    if (this.fairy) {
+      // AI_170_FairyGlowstick（cs:42997-43053）：排斥场 + 衰减
+      this.fairyT++;
+      if (this.fairyT % 10 === 0 && Math.hypot(this.vx, this.vy) > 1) {
+        const ptx = Math.floor((this.x + this.w / 2) / TILE), pty = Math.floor((this.y + this.h / 2) / TILE);
+        let zx = 0, zy = 0, n = 0;
+        for (let i = ptx - 10; i <= ptx + 10; i++) {
+          for (let j = pty - 10; j <= pty + 10; j++) {
+            if (!st.inBounds(i, j) || !st.isSolid(i, j)) continue;
+            const dx = ptx - i, dy = pty - j;
+            const len = Math.hypot(dx, dy) || 1;
+            const f = Math.max(10 - len, 0) / len * 3;
+            zx += dx * f; zy += dy * f; n++;
+          }
+        }
+        if (n > 0) { zx /= n; zy /= n; }
+        if (Math.hypot(zx, zy) > 1) { this.vx = zx; this.vy = zy; }
+      }
+      this.vx *= 0.95; this.vy *= 0.95;
+      if (Math.hypot(this.vx, this.vy) < 1) { this.vx = 0; this.vy = 0; }
+      this.x += this.vx; this.y += this.vy;
+      return;
+    }
+    // AI_014 主体
+    this.ai0++;
+    if (this.ai0 > 5) {
+      this.ai0 = 5;
+      // 着地判定用上一帧 vy 是否未变（原版 velocity.Y == 0 即已落地）——落地格 vy 被置 0
+      if (this.vy === 0 && this.vx !== 0) {
+        this.vx *= 0.97;
+        if (Math.abs(this.vx) < 0.01) this.vx = 0;
+      }
+      this.vy += 0.2;
+    }
+    this.rot += this.vx * 0.1;
+    // 粘性（53）：tileCollide=false，与实心重叠 → 粘住
+    if (this.projId === 53) {
+      const overlap = solidAt(this.x + this.w / 2, this.y + this.h / 2)
+        || solidAt(this.x + 1, this.y + 1) || solidAt(this.x + this.w - 2, this.y + this.h - 2);
+      if (overlap) { this.vx = 0; this.vy = -0.2; return; }
+      this.x += this.vx; this.y += this.vy;
+      return;
+    }
+    // 移动 + 碰撞反弹（反弹表 cs:18261-18333）
+    const lastVx = this.vx, lastVy = this.vy;
+    let nx = this.x + this.vx, ny = this.y + this.vy;
+    let hitX = false, hitY = false;
+    if (solidAt(nx + this.w / 2, this.y + this.h / 2) || solidAt(nx + this.w / 2, this.y + 1)) { hitX = true; nx = this.x; }
+    if (solidAt(nx + this.w / 2, ny + this.h) || solidAt(nx + 1, ny + this.h) || solidAt(nx + this.w - 1, ny + this.h)) { hitY = true; ny = this.y; }
+    if (hitX || hitY) {
+      if (this.projId === 870) {
+        // 妖精首次反弹：全反射进入 170 阶段（cs:18270-18276）
+        this.vx = -lastVx; this.vy = -lastVy;
+        this.fairy = true;
+        this.fairyT = 0;
+        return;
+      }
+      if (this.projId === 50) {
+        if (hitX) this.vx = lastVx * -0.2;
+        if (hitY) this.vy = lastVy > 1.5 ? lastVy * -0.2 : 0;
+      } else if (this.projId >= 1089) {
+        // 彩虹：近全反射、最低 ±1 保底（cs:18279-18299）
+        if (hitX) this.vx = Math.abs(this.vx - lastVx) < 1 ? (lastVx < 0 ? -1 : 1) : -lastVx * 0.99;
+        if (hitY) this.vy = -lastVy * 0.99;
+      } else {
+        // 473 矿工 / 515 弹力（默认档，cs:18314-18327）
+        if (hitX) this.vx = lastVx * -0.5;
+        if (hitY) this.vy = lastVy > 1 ? lastVy * -0.5 : 0;
+      }
+    }
+    this.x = nx; this.y = ny;
+  }
+}

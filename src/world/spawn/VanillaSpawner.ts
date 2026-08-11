@@ -1,4 +1,6 @@
 // 原版 1.4.5.6 NPC.Spawner 内嵌类 1:1 移植（Terarria1456/Terraria/NPC.cs:39-5952）。
+// ★简化纪律:任何"未移植/近似/恒X"必须在 docs/spawn-parity-gaps.md 登记(含原版行号+
+// 可见影响+依赖),否则视为未完成。先例:spawnFriendly 曾标"恒放行"导致兔鼠刷浮空岛。
 // 结构：SetSpawnFlags(L276) → GetSpawnRate(L383-640) → FindSpawnTile(L879) →
 //       SetSpawnFlagsForChosenTile(L950) → SpawnAnNPC(L1186-5144 巨型 if-else 链)。
 // 权重语义：Main.rand.Next(N)==0（1/N 命中）；越靠前优先级越高。
@@ -536,7 +538,7 @@ export class VanillaSpawner {
    *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
-   *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
+   *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
     townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false): { spawnRate: number; maxSpawns: number } {
@@ -1192,6 +1194,14 @@ export class VanillaSpawner {
       if (r < 0.9) return D(581);
       return D(69);
     }
+    // ---- 硬模式群系水面（:1673-1683,地下沙漠块尾 else-if 链;pre-hardmode 恒跳过）----
+    //  丛林水 2/3 → 巨骨舌鱼 157(Arapaima);猩红水 2/3 → 242/241(毒骨鱼/血浆渗透者)
+    //  ★此前未移植:困难模式丛林湖泊只有食人鱼/垂钓者兜底,原版主体是巨骨舌鱼
+    if (hardMode && this.waterTile && this.ZoneJungle && !N(3)) return D(157);
+    if (hardMode && this.waterTile && this.ZoneCrimson) {
+      if (!N(3)) return D(242);
+      if (!N(3)) return D(241);
+    }
     // ---- 海洋（L1705-1834）----
     // 门（L1705）：(!spawnFriendly || (!savedAngler && !AnyNPCs(376))) && waterTile && isOcean。
     //  spawnFriendly（Spawner 字段 L71）：SetSpawnFlags L714-828 内**概率 roll** 的
@@ -1463,8 +1473,10 @@ export class VanillaSpawner {
     // L3676：hard && 地表 && 夜 && (1/20 或 满月 1/5) → 狼人 82
     if (hardMode && this.surfaceSpawn && !this.dayTime
       && (N(20) || (N(5) && this.world.clock.moonPhase === 4))) return D(82);
-    // L3681/L3688（丛林草 → 52 Doctor Bones / 219 Lac Beetle）未移植：与
-    //  tests/jungle-spawn.test.ts 深层丛林断言（只出 204/43/黄蜂族）冲突，登记跳过
+    // L3681：丛林草 && RollLuck(500) && 夜 → 骨头博士 52(稀有,jungle 金表前置)
+    if (t === T.JUNGLE_GRASS && N(500) && !this.dayTime) return D(52);
+    // L3688：丛林草 && y>worldSurface && 1/60 → 龟甲虫 219
+    if (t === T.JUNGLE_GRASS && this.spawnTileY > this.world.groundLevel && N(60)) return D(219);
     // L3690-3719：洞穴白天小动物（earthworm/mouse/grasshopper 族），条件排除群系旗标。
     //  原版只看 Zone 旗标；直接调用 spawnAnNPC 的场景（测试/探针）旗标未刷新恒 false，
     //  丛林草等群系 tile 会误漏小动物 → 补 tile 级守卫（现实世界群系 tile 必在对应

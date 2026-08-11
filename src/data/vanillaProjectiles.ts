@@ -38,3 +38,4 @@ export const AI_SPEAR = 19;       // 长矛（随角色前刺）
 export const AI_YOYO = 99;        // 悠悠球（按住持续滞留）
 export const AI_SHORTSWORD = 161; // 短剑直刺
 export const AI_WHIP = 165;       // 鞭
+export const AI_GLOWSTICK = 14;   // 荧光棒族（弹跳物理/粘性/妖精）

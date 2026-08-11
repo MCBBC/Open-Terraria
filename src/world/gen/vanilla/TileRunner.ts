@@ -107,7 +107,12 @@ export function tileRunner(
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
         const ci0 = st.idx(x, y);
-        if (GP2_ON && steps === 10000 && GP2_N % 10000 === 0) GP2.push(`c${GP2_N}=pk${rng.vanilla.peek()}`);
+        if (GP2_ON && steps === 10000) {
+          GP2_N++;
+          if ((GP2_N >= 1114600 && GP2_N <= 1114700) || GP2_N % 50000 === 0) {
+            GP2.push(`c${GP2_N}@${x},${y}a${st.flags[ci0]}t${st.type[ci0]}=pk${rng.vanilla.peek()}`);
+          }
+        }
         if (GP2_ON && (x === 3401 && y === 581)) {
           GP2.push(`S@${px.toFixed(1)},${py.toFixed(1)} a${st.flags[ci0]}t${st.type[ci0]}=pk${rng.vanilla.peek()}`);
         }

@@ -1,7 +1,7 @@
 // 原版物品战斗数据（tools/extract-itemcombat.mjs 从 Terarria1456 Item.cs SetDefaults 提取）：
 // damage/knockBack/useTime/useAnimation/shoot/useAmmo/shootSpeed/ammo/consumable/noMelee/autoReuse/mana
 import combatJson from './vanilla-itemcombat.json';
-import { projectileData, AI_BOOMERANG, AI_FLAIL, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
+import { projectileData, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
 
 export interface ItemCombat {
   damage?: number;
@@ -81,7 +81,7 @@ export type CombatWeapon =
   | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean; shoot?: number; shootSpeed?: number }
   | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
   | {
-      kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'magic' | 'shot' | 'summon';
+      kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
       shoot: number;
       damage: number;
       knockback: number;
@@ -117,8 +117,10 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   };
   if (shoot) {
     if (c.consumable && c.noMelee) {
-      // 消耗型：爆炸物族（手雷 28/炸弹 29/炸药 30 等 ai16）弹跳+引信；
+      // 消耗型：荧光棒族（282 普通/286 粘性/3112 弹力/3002 矿工/4776 妖精/5643 彩虹
+      // → proj 50/53/515/473/870/1089，ai14 弹跳物理）；爆炸物族（ai16）弹跳+引信；
       // ai2 抛物线投掷武器（手里剑）交回 thrownCombat
+      if (ai === AI_GLOWSTICK) return { kind: 'glowstick', shoot, ...base };
       if (ai === AI_GRENADE) return { kind: 'grenade', shoot, ...base };
       return null;
     }

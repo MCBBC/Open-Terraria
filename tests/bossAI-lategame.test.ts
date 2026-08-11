@@ -169,8 +169,8 @@ describe('AI_084 邪教徒克隆体 440', () => {
     tick(h, 1);                                // 克隆体镜像 ai0=3
     const clone = h.enemies.find((n) => n.vanillaId === 440 && !n.dead)!;
     expect(clone.ai0).toBe(3);
-    // 前两拍:ai1=4 / 22 各一发 467(首 tick 后 ai1=1,需再走 21t 到 22)
-    tick(h, 21, [cult]);
+    // 前两拍:ai1=4 / 22 各一发 467(镜像 tick 后 ai1=1,第 k 拍看到 ai1=k → 走 22t)
+    tick(h, 22, [cult]);
     const p = h.projectiles as Array<{ projId: number; damage: number }>;
     expect(p.filter((x) => x.projId === 467).length).toBe(2);
     expect(p.filter((x) => x.projId === 468).length).toBe(0);

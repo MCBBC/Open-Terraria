@@ -35,7 +35,8 @@ describe('丛林草出怪池（SpawnAnNPC L3839-3856）', () => {
     const keys = [...ids.keys()];
     expect(keys).toEqual(expect.arrayContaining([204, 43]));       // 两扇门都命中
     for (const id of keys) {
-      expect(id === 204 || id === 43 || HORNETS.has(id)).toBe(true);
+      // 219 龟甲虫 = L3688 丛林草 1/60(与 HORNETS 同层的合法稀有怪)
+      expect(id === 204 || id === 43 || id === 219 || HORNETS.has(id)).toBe(true);
     }
     expect(ids.has(158)).toBe(false);                               // 巨型蝙蝠绝不在肉前丛林
     expect(ids.has(51)).toBe(false);                                // 深层无丛林蝙蝠

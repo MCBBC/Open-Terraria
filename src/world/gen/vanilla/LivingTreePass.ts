@@ -236,16 +236,17 @@ function growLivingTreePassageRoom(
     }
   }
   // 宝箱（cs:29418-29507）：主件 832 生命木魔棒 / 1:3 4281 雀杖；
-  // AddBuriedChest(..., style 12) 在墙非 244 处降级木箱无主件（cs:36171-36186）
+  // AddBuriedChest(..., style 12) 在墙非 244 处降级木箱无主件（cs:36171-36186）。
+  // loot 走 vi_ key：vanilla-itemstats.json 缺 832/4281 两条,传裸 id 会被
+  // rollChestLoot 的 vid() 静默丢弃——key 路径走 mainKey 兜底直入（BuriedChestsPass:255）
   num8 = num < 0 ? num3 + 8 : num5 - 7;
-  let mainItem = 832;
-  if (rng.int(0, 2) === 0) mainItem = 4281;
+  const mainItemKey = rng.int(0, 2) === 0 ? 'vi_4281_finch_staff' : 'vi_832_living_wood_wand';
   // 落地行：房内 Y 行空心、Y+1 是活木地板（同 AddBuriedChest 的 i-1/num7-1 墙判定取同排）
   let gy = Y;
   while (gy < st.h - 1 && !activeAt(st, num8, gy)) gy++;
   const wallOk = wallAt(st, num8, gy - 1) === WALL_LIVING_WOOD;
   if (wallOk) {
-    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItem });
+    placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 12, loot: mainItemKey });
   } else {
     placeBuriedChest(st, rng, gs, chests, num8, Y, { style: 0 });
   }

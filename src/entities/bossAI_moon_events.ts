@@ -71,7 +71,7 @@ function shootE(
   dmg: number, projId: number, life = 300,
 ): void {
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-    new Arrow(x, y, vx, vy, dmg, 0, rid, null, { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1 }),
+    new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav: PROJ_GRAV[projId] ?? 0, life, pierce: 1 }),
     'projectiles');
 }
 
