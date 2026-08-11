@@ -13,6 +13,12 @@ export async function settleWorldLiquids(
   onProgress?: (p: number) => void,
 ): Promise<void> {
   const sim = new LiquidSim(world);
+  // 生成期标记：QuickWater 首尾跑 ShimmerRemoveWater（Liquid.cs:105-141 的
+  // isGeneratingOrLoadingWorld 分支；读档 generatingWorld=false 该步骤早退）
+  if (mode === 'gen') {
+    sim.generatingWorld = true;
+    sim.shimmerCenter = world.shimmerX > 0 ? { x: world.shimmerX, y: world.shimmerY } : null;
+  }
   onProgress?.(0.05);
   sim.quickWater();
   onProgress?.(0.35);

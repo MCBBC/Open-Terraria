@@ -47,6 +47,9 @@ const MISC = [
   // 1.4 原版液体主表（LiquidRenderer：0-10/12/13 群系水色 CalculateWaterStyle + 1 岩浆 11 蜂蜜 14 微光，48×1360）
   ...Array.from({ length: 11 }, (_, i) => `Misc/water_${i}.png`),
   'Misc/water_12.png', 'Misc/water_13.png', 'Misc/water_14.png',
+  // 长柱瀑布胶片条（WaterfallManager:水类型绘制走 num12=Style=waterStyle,:528）
+  ...Array.from({ length: 14 }, (_, i) => `Waterfall_${i}.png`),
+  'Waterfall_25.png', 'Waterfall_26.png', 'Waterfall_27.png',
   // 蘑菇树树冠（tile 72 专用 ShroomTop）
   'Shroom_Tops.png',
   // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖

@@ -31,6 +31,7 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     trees: world.trees,
     flags: world.flags,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+    shimmerX: world.shimmerX, shimmerY: world.shimmerY,
     buf,
   };
   return { packet, transfer: Object.values(buf) as ArrayBuffer[] };

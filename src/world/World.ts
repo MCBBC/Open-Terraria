@@ -60,6 +60,10 @@ export class World {
   /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
   treeX: number[] = [];
   treeStyle: number[] = [0, 0, 0, 0];
+  /** 以太生物群系中心（GenVars.shimmerPosition；无微光世界为 0）。ShimmerPass 写入，
+   *  生成期沉降 ShimmerRemoveWater（WorldGen.cs:34859）按此清腔内非微光液体 */
+  shimmerX = 0;
+  shimmerY = 0;
   /** 世界级生物群系常量(原版 header,生成期 Reset pass 掷出) */
   crimson = false;          // true=猩红 false=腐化
   dungeonX = 0;            // 地牢位置
@@ -134,6 +138,7 @@ export class World {
     w.trees = p.trees;
     w.flags = p.flags;
     w.treeX = p.treeX; w.treeStyle = p.treeStyle; w.treeTops = p.treeTops;
+    w.shimmerX = p.shimmerX ?? 0; w.shimmerY = p.shimmerY ?? 0;
     return w;
   }
 

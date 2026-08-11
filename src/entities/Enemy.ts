@@ -809,11 +809,13 @@ export class Enemy extends Entity {
         // 移动/冷却尽 → 解除瞄准（cs:60005-60009）
         if ((this.vy !== 0 && (R.drop ?? 0.1) > 0) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
       } else if (this.vy === 0 && this.ai0 <= 0 && !player.dead && this.onGround) {
-        // 开瞄（cs:60013-60095）：视线 + 距离 < 射程
+        // 开瞄（cs:60013-60095）：视线 + 距离 < 射程。
+        // ★ cs:60036-60039 idle 门：目标玩家待机（原版 stealth==0 && itemAnimation==0，
+        //   此处 useTime>0 近似——挥击重启已对齐原版时序，战斗中恒 >0）→ 视线判 false，不开瞄
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
-        let los = true;
+        let los = player.useTime > 0;
         const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 2));
-        for (let s = 1; s < steps; s++) {
+        for (let s = 1; s < steps && los; s++) {
           const lx = Math.floor((this.cx + (dx * s) / steps) / TILE);
           const ly = Math.floor((this.cy + (dy * s) / steps) / TILE);
           if (lx >= 0 && ly >= 0 && lx < st.w && ly < st.h && solidAt(lx, ly)) { los = false; break; }

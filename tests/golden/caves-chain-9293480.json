@@ -3,16 +3,16 @@
   "worldSurface": 337, "rockLayer": 661, "waterLine": 852, "lavaLine": 921,
   "checkpoints": [
     "terrain|3a99b51d 13a826e5 0bb5a9c5 0bb5a9c5",
-    "dunes|4662f635 17cb5935 0bb5a9c5 0bb5a9c5",
-    "oceansand|211ef660 17cb5935 0bb5a9c5 0bb5a9c5",
-    "sandpatches|3edac599 17cb5935 0bb5a9c5 0bb5a9c5",
-    "tunnels|3edac599 573abb9d 0bb5a9c5 0bb5a9c5",
-    "mountaincaves|3edac599 cfc56cec 0bb5a9c5 0bb5a9c5",
-    "dirtwallbg|3edac599 cfc56cec ee8d71b7 0bb5a9c5",
-    "rocksclay|c3cce59c cfc56cec ee8d71b7 0bb5a9c5",
-    "smallholes|c3cce59c abee8995 ee8d71b7 55b85275",
-    "dirtlayer|c3cce59c 53081765 ee8d71b7 7ee0b4d5",
-    "rocklayer|c3cce59c 8ee56c35 ee8d71b7 693c26cd",
-    "surfacecaves|c3cce59c 0f9721dc ee8d71b7 c175cf52"
+    "dunes|29f3f095 7802af6c 0bb5a9c5 0bb5a9c5",
+    "oceansand|c90f09e0 7802af6c 0bb5a9c5 0bb5a9c5",
+    "sandpatches|e6cad919 7802af6c 0bb5a9c5 0bb5a9c5",
+    "tunnels|e6cad919 bd99bd84 0bb5a9c5 0bb5a9c5",
+    "mountaincaves|e6cad919 32318455 0bb5a9c5 0bb5a9c5",
+    "dirtwallbg|e6cad919 32318455 7dad2e85 0bb5a9c5",
+    "rocksclay|b2fd936c 32318455 7dad2e85 0bb5a9c5",
+    "smallholes|b2fd936c 560867ac 7dad2e85 55b85275",
+    "dirtlayer|b2fd936c bb8c61fc 7dad2e85 7ee0b4d5",
+    "rocklayer|b2fd936c 7faf0d2c 7dad2e85 693c26cd",
+    "surfacecaves|b2fd936c 294a2ca5 7dad2e85 c175cf52"
   ]
 }

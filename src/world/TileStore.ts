@@ -11,7 +11,7 @@ export class TileStore {
   readonly frameY: Uint16Array;
   readonly wall: Uint16Array; // 原版 wld 墙 id（0-366）
   readonly liquid: Uint8Array;   // 0-255 液量
-  readonly liquidType: Uint8Array; // 0无 1水 2岩浆 3蜂蜜
+  readonly liquidType: Uint8Array; // 0无 1水 2岩浆 3蜂蜜 4微光(原版 liquidType 3,本仓库 +1 编码;任意液体遇微光 → Aetherium 块 659)
   readonly half: Uint8Array;      // halfBrick 位（原版 Tile.cs bTileHeader bit1）：下半 8px 实心
   readonly slope: Uint8Array;     // 坡面 0-4（原版编码；渲染暂未支持，生成期少用）
   readonly wire: Uint8Array;      // 电路位（原版 Tile.cs sTileHeader）：bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动(inActive)

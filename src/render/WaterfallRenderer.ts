@@ -70,9 +70,12 @@ export class WaterfallRenderer {
   }
 
   /** 绘制（DrawWaterfall 行 211-803 的主体路径；style 固定 0=水） */
-  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number) {
+  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number, waterStyle = 0) {
     if (!atlas || this.falls.length === 0) return;
     const tex = SHEET.map((s) => atlas.ensureVImage(s) ?? null);
+    // 水类型走群系贴图（WaterfallManager :528 case 0 → num12 = Style = waterStyle）
+    const waterTex = atlas.ensureVImage(`vanilla/Waterfall_${Math.max(0, Math.min(13, waterStyle))}.png`);
+    if (waterTex) tex[0] = waterTex;
     if (!tex[0] && !tex[1] && !tex[2]) return;
     // 帧动画：水 3 tick/帧、岩浆蜂蜜 7 tick/帧（1 tick ≈ 16.67ms）
     const regular = Math.floor(nowMs / 50) % 16;

@@ -722,7 +722,7 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
     const now = this._liquidNow; // 与液体双 pass 同帧同时刻
     this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
-    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);
+    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now, this.waterStyle);
   }
   /** 本帧液体动画时刻（双 pass 共享） */
   private _liquidNow = 0;

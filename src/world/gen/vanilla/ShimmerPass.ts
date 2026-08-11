@@ -1,25 +1,34 @@
 // 原版 pass "Shimmer"(WorldGen.cs:15256-15308)+ ShimmerMakeBiome(cs:34889-35083)
 // 1:1 移植:以太生物群系——圆形石壳(型 1)+ 腔体挖空 + 底部微光液 +
-// 两侧隧道开口 + (num==0 时)地表石笋柱。
+// 两侧隧道开口 + (num==0 时)地表石笋柱 + aether 宝石树。
 // 位置(cs:15274-15275):地牢异侧 dungeonSide<Right → Next(0.89w, w-200),
 // 否则 Next(200, 0.11w);y∈[(ws+rl)/2+50, ((h-250)*2+rl)/3](失败重掷见下)。
 // 失败重试(cs:15283-15300):前 1e4 次不变 x 带;>20000 次放宽到 0.8/0.2 带,
 // y 下限改为 ws+120;成功后 GenVars.shimmerPosition → gs.shimmerX/Y。
-// 已知缺口(注明):
-//  - 微光液体本仓库 liquidType=4(TileStore 注释只列 1-3;渲染端 VanillaLiquidRenderer
-//    toVanillaType 未映射 4 → 暂按水渲染,渲染侧待接 Misc_water_11 以外素材)
-//  - aether 树(cs:35057-35079,TryGrowingTreeByType 583-589)依赖未移植的宝石树
-//    生长逻辑,未实现(仅地形+液体 1:1)
+// aether 树(cs:35057-35083):500 次 X±70 / Y±2 采样,两侧整砖即种
+// TryGrowingTreeByType(583-589 宝石树)——实现见 TreePass.growGemTree
+// (GrowTreeWithSettings 1:1;宝石树砍伐掉落/树苗生长未接,静态种植)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { growGemTree } from './TreePass';
 
 const STONE = TILE_BY_KEY['stone']!;         // 原版 type 1
 const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 原版 type 165(PlaceTight)
 const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block']!;
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const LIQ_SHIMMER = 4; // 原版 liquidType 3(shimmer)→ 本仓库 +1 编码
+/** aether 宝石树 tile 表（cs:35063-35079 num24=0..6 → treeTileType） */
+const GEM_TREES = [
+  TILE_BY_KEY['v_583_topaz_tree']!,
+  TILE_BY_KEY['v_584_amethyst_tree']!,
+  TILE_BY_KEY['v_585_sapphire_tree']!,
+  TILE_BY_KEY['v_586_emerald_tree']!,
+  TILE_BY_KEY['v_587_ruby_tree']!,
+  TILE_BY_KEY['v_588_diamond_tree']!,
+  TILE_BY_KEY['v_589_amber_tree']!,
+];
 
 export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w, h = st.h;
@@ -150,6 +159,21 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
   // cs:35054-35055:两侧隧道开口
   shimmerOpening(st, rng, -1, X - n5, Y, n8);
   shimmerOpening(st, rng, 1, X + n5, Y, n8);
+  // cs:35057-35083:aether 宝石树——500 次 X±70/Y±2 采样,两侧 SolidTile 才种
+  const solidTile = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const i = st.idx(x, y);
+    if (!st.flags[i]) return false;
+    const d = TILE_DEFS[st.type[i]];
+    return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+  };
+  for (let n = 0; n < 500; n++) {
+    const tx = rng.int(X - 70, X + 69);              // Next(X-70, X+70)
+    const ty = rng.int(Y - 2, Y + 2);                // Next(Y-2, Y+3)
+    const treeType = GEM_TREES[rng.int(0, 6)];       // num24=Next(7)（SolidTile 判定前消耗，保持流位）
+    if (!solidTile(tx - 1, ty) || !solidTile(tx + 1, ty)) continue;
+    growGemTree(st, rng, tx, ty, treeType);
+  }
   return true;
 }
 

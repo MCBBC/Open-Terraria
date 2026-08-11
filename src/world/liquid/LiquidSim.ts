@@ -510,9 +510,12 @@ export class LiquidSim {
     }
   }
 
-  // ================= 液体交互（Liquid.cs:888-1115） =================
+  // ================= 液体交互（Liquid.cs:888-1115 + GetLiquidMergeTypes 1385-1453） =================
+  // 合并产物优先级（GetLiquidMergeTypes 逐段覆盖，后写胜出）：
+  //   水 > 岩浆 > 蜂蜜 > 微光——任一方是微光 → Aetherium 块 659；
+  //   否则 蜂蜜在场 → 229/230，只剩水岩组合 → 黑曜石 56
 
-  /** 岩浆格与水/蜂蜜接触 → 黑曜石 56 / 脆蜂蜜块 230（阈值 24） */
+  /** 岩浆格与水/蜂蜜/微光接触 → 黑曜石 56 / 脆蜂蜜块 230 / Aetherium 659（阈值 24） */
   private lavaCheck(x: number, y: number) {
     const st = this.world.store;
     if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:898）
@@ -528,6 +531,7 @@ export class LiquidSim {
       if (rt !== 2) { sum += rq; st.liquid[ir] = 0; }
       if (ut !== 2) { sum += uq; st.liquid[iu] = 0; }
       if (lt === 3 || rt === 3 || ut === 3) type = CRISPY_HONEY;
+      if (lt === 4 || rt === 4 || ut === 4) type = AETHERIUM; // 微光优先级最高（L1443-1451）
       if (sum < 24) return;
       const t = st.type[i5];
       if (t !== 0) {
@@ -540,7 +544,7 @@ export class LiquidSim {
       st.setTile(x, y, type);
     } else {
       if (dq <= 0 || dt === 2) return;
-      // 情形 B：仅下方有水/蜂蜜 → 生成在下方格（Liquid.cs:961-1014）
+      // 情形 B：仅下方有水/蜂蜜/微光 → 生成在下方格（Liquid.cs:961-1014）
       const belowT = st.type[id];
       if (belowT !== 0) {
         const d = TILE_DEFS[belowT];
@@ -548,14 +552,16 @@ export class LiquidSim {
         else return;
       }
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
-      const type = dt === 3 ? CRISPY_HONEY : OBSIDIAN;
+      const type = dt === 4 ? AETHERIUM : dt === 3 ? CRISPY_HONEY : OBSIDIAN;
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
       st.setTile(x, y + 1, type);
     }
   }
 
-  /** 蜂蜜格与水接触 → 蜂蜜块 229（阈值 32） */
+  /** 蜂蜜格与水/岩浆/微光接触 → 蜂蜜块 229 / 脆蜂蜜块 230 / Aetherium 659（阈值 24）。
+   *  触发门 = 任一邻格液体类型非蜂蜜（LiquidCheck L1244 `liquidType() != thisLiquidType`），
+   *  此前只识别水邻——岩浆/微光邻漏触发，1456 对齐补齐 */
   private honeyCheck(x: number, y: number) {
     const st = this.world.store;
     if (this.solidTileFull(x, y)) return; // WorldGen.SolidTile：半砖/坡面放行（Liquid.cs:1020）
@@ -563,12 +569,14 @@ export class LiquidSim {
     const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
     const lq = st.liquid[il], rq = st.liquid[ir], uq = st.liquid[iu], dq = st.liquid[id];
     const lt = st.liquidType[il], rt = st.liquidType[ir], ut = st.liquidType[iu], dt = st.liquidType[id];
-    if ((lq > 0 && lt === 1) || (rq > 0 && rt === 1) || (uq > 0 && ut === 1)) {
+    if ((lq > 0 && lt !== 3) || (rq > 0 && rt !== 3) || (uq > 0 && ut !== 3)) {
       let sum = 0;
-      if (lt === 1) { sum += lq; st.liquid[il] = 0; }
-      if (rt === 1) { sum += rq; st.liquid[ir] = 0; }
-      if (ut === 1) { sum += uq; st.liquid[iu] = 0; }
+      if (lt !== 3) { sum += lq; st.liquid[il] = 0; }
+      if (rt !== 3) { sum += rq; st.liquid[ir] = 0; }
+      if (ut !== 3) { sum += uq; st.liquid[iu] = 0; }
       if (sum < 24) return; // 1456 LiquidCheck 统一阈值 24
+      const type = (lt === 4 || rt === 4 || ut === 4) ? AETHERIUM
+        : (lt === 2 || rt === 2 || ut === 2) ? CRISPY_HONEY : HONEY_BLOCK;
       const t = st.type[i5];
       if (t !== 0) {
         const d = TILE_DEFS[t];
@@ -577,9 +585,9 @@ export class LiquidSim {
       }
       st.liquid[i5] = 0;
       st.liquidType[i5] = 0;
-      st.setTile(x, y, HONEY_BLOCK);
+      st.setTile(x, y, type);
     } else {
-      if (dq <= 0 || dt !== 1) return;
+      if (dq <= 0 || dt === 3) return;
       const belowT = st.type[id];
       if (belowT !== 0) {
         const d = TILE_DEFS[belowT];
@@ -587,9 +595,52 @@ export class LiquidSim {
         else return;
       }
       if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; } // 1456 统一 24
+      const type = dt === 4 ? AETHERIUM : dt === 2 ? CRISPY_HONEY : HONEY_BLOCK;
       st.liquid[i5] = 0; st.liquidType[i5] = 0;
       st.liquid[id] = 0; st.liquidType[id] = 0;
-      st.setTile(x, y + 1, HONEY_BLOCK);
+      st.setTile(x, y + 1, type);
+    }
+  }
+
+  /** 微光格与水/岩浆/蜂蜜任一接触 → Aetherium 块 659（Liquid.cs:1475-1478 →
+   *  LiquidCheck(thisLiquidType=3)；GetLiquidMergeTypes L1437-1452 微光行恒为 659） */
+  private shimmerCheck(x: number, y: number) {
+    const st = this.world.store;
+    if (this.solidTileFull(x, y)) return;
+    const i5 = this.idx(x, y);
+    const il = i5 - 1, ir = i5 + 1, iu = i5 - st.w, id = i5 + st.w;
+    const lq = st.liquid[il], rq = st.liquid[ir], uq = st.liquid[iu], dq = st.liquid[id];
+    const lt = st.liquidType[il], rt = st.liquidType[ir], ut = st.liquidType[iu], dt = st.liquidType[id];
+    if ((lq > 0 && lt !== 4) || (rq > 0 && rt !== 4) || (uq > 0 && ut !== 4)) {
+      // 情形 A：左右/上方有非微光液体 → 汇总清零，产物生成在微光格（Liquid.cs:1250-1273）
+      let sum = 0;
+      if (lt !== 4) { sum += lq; st.liquid[il] = 0; }
+      if (rt !== 4) { sum += rq; st.liquid[ir] = 0; }
+      if (ut !== 4) { sum += uq; st.liquid[iu] = 0; }
+      // mergeType == thisType 门（L1269）：三邻中仍有微光 → 不产块（liquidMergeType 被拉回 3）
+      if (sum < 24 || lt === 4 || rt === 4 || ut === 4) return;
+      const t = st.type[i5];
+      if (t !== 0) {
+        const d = TILE_DEFS[t];
+        if (d && d.decor) st.setTile(x, y, 0);  // 近似 tileObsidianKill
+        else return;
+      }
+      st.liquid[i5] = 0;
+      st.liquidType[i5] = 0;
+      st.setTile(x, y, AETHERIUM);
+    } else {
+      if (dq <= 0 || dt === 4) return;
+      // 情形 B：仅下方有异种液体 → 产物生成在下方格（Liquid.cs:1275-1317）
+      const belowT = st.type[id];
+      if (belowT !== 0) {
+        const d = TILE_DEFS[belowT];
+        if (d && d.decor) st.setTile(x, y + 1, 0); // tileCut / obsidianKill 近似
+        else return;
+      }
+      if (st.liquid[i5] < 24) { st.liquid[i5] = 0; st.liquidType[i5] = 0; return; }
+      st.liquid[i5] = 0; st.liquidType[i5] = 0;
+      st.liquid[id] = 0; st.liquidType[id] = 0;
+      st.setTile(x, y + 1, AETHERIUM);
     }
   }
 
@@ -643,6 +694,8 @@ export class LiquidSim {
         }
       } else if (st.liquidType[i5] === 3) {
         this.honeyCheck(x, y);
+      } else if (st.liquidType[i5] === 4) {
+        this.shimmerCheck(x, y); // Liquid.cs:1576-1579 tile4.shimmer() → ShimmerCheck
       }
     }
     // swap-remove（Liquid.cs:1193-1197）：只搬 x/y/kill，delay 保留本槽旧值（原版语义）
@@ -655,13 +708,37 @@ export class LiquidSim {
 
   // ================= 读档沉降：QuickWater（Liquid.cs:85-103 / 105-212） =================
 
-  /** 自底向上逐湿格直接搬运沉降（原版 QuickWater(verbose, -1, -1)：y 从 h-3 到 3） */
+  /** 自底向上逐湿格直接搬运沉降（原版 QuickWater(verbose, -1, -1)：y 从 h-3 到 3）。
+   *  生成期首尾各调一次 ShimmerRemoveWater（Liquid.cs:107/137 + WorldGen.cs:34859） */
   quickWater(minY = 3, maxY = -1) {
     const st = this.world.store;
+    if (this.generatingWorld) this.shimmerRemoveWater();
     const yMax = maxY < 0 ? st.h - 3 : maxY;
     for (let y = yMax; y >= minY; y--) {
       for (let x = 4; x < st.w - 4; x++) {
         if (st.liquid[this.idx(x, y)] !== 0) this.settleWaterAt(x, y);
+      }
+    }
+    if (this.generatingWorld) this.shimmerRemoveWater();
+  }
+
+  /** WorldGen.ShimmerRemoveWater（cs:34859-34886）：以太腔 150 半径球内清除
+   *  非微光液体 + 去活薄冰 162——防沉降期周边湖/洞穴水灌入腔体与微光互转 Aetherium */
+  private shimmerRemoveWater() {
+    const c = this.shimmerCenter;
+    if (!c) return;
+    const st = this.world.store;
+    const R = 150;
+    const x0 = c.x - R, x1 = c.x + R, y0 = c.y - R, y1 = c.y + R / 2;
+    for (let y = y0; y <= y1; y++) {
+      for (let x = x0; x <= x1; x++) {
+        if (!st.inBounds(x, y)) continue;
+        // 原版 (int)Math.Sqrt(dx²+dy²) < 150（整数平方根比较）
+        const dx = Math.abs(x - c.x), dy = Math.abs(y - c.y);
+        if (Math.trunc(Math.sqrt(dx * dx + dy * dy)) >= R) continue;
+        const i = st.idx(x, y);
+        if (st.liquidType[i] !== 4) st.liquid[i] = 0;
+        if (st.type[i] === THIN_ICE) st.flags[i] = 0; // active(false)——幽灵 type 由 finalize 归零
       }
     }
   }
@@ -747,20 +824,22 @@ export class LiquidSim {
     st.liquid[fi] = liquid;
     st.liquidType[fi] = srcType;
     if (st.liquid[fi] > 0) {
-      // 落地即交互（Liquid.cs:206-210 / AttemptToMoveLava/Honey 248-280）
+      // 落地即交互（Liquid.cs:206-210 / AttemptToMoveLava/Honey/Shimmer 248-432）
       this.attemptToMoveLiquid(X, Y, srcType, 2);
       this.attemptToMoveLiquid(X, Y, srcType, 3);
+      this.attemptToMoveLiquid(X, Y, srcType, 4);
     }
   }
 
-  /** 落点与异种液体相邻时触发交互检查（Liquid.cs:248-280 AttemptToMoveLava 同构）。
+  /** 落点与异种液体相邻时触发交互检查（Liquid.cs:248-432 AttemptToMoveLava/Honey/Shimmer 同构）。
    *  原版语义：邻居的 target 性 != 落点格的 target 性 才算"异种相遇"——
    *  水落水旁不算，水落岩浆旁才算（否则整片海洋互相当岩浆转黑曜石） */
   private attemptToMoveLiquid(X: number, Y: number, srcType: number, targetType: number) {
     const st = this.world.store;
     const srcIs = srcType === targetType;
     const check = targetType === 2 ? (x: number, y: number) => this.lavaCheck(x, y)
-      : (x: number, y: number) => this.honeyCheck(x, y);
+      : targetType === 3 ? (x: number, y: number) => this.honeyCheck(x, y)
+      : (x: number, y: number) => this.shimmerCheck(x, y);
     const diff = (x: number, y: number) => {
       const i = this.idx(x, y);
       return st.liquid[i] > 0 && (st.liquidType[i] === targetType) !== srcIs;
@@ -785,9 +864,9 @@ export class LiquidSim {
         const i = this.idx(x, y);
         if (st.liquid[i] === 0) continue;
         const t = st.type[i];
-        if (t !== 0) {
+        if (t !== 0 && st.flags[i]) {
           const d = TILE_DEFS[t];
-          if (d && d.solid && !d.platform) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例）
+          if (d && d.solid && !d.platform) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例；nactive 门）
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
           if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTile?.(x, y); }
           else if (this.waterDeathIds.has(t)) this.killTile?.(x, y);

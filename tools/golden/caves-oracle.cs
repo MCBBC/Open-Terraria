@@ -507,7 +507,8 @@ void PlaceHill(int startX, int endX, double scale, int[] surface, int left, int 
     else midX += (int)r.Next(minV, num + 1);
     int aX = 0, aY = (int)(scale * 12.0);
     PlaceCurvedLine(startX, sy0, midX, midY, windRight ? (-aX / 2, -aY / 2) : (aX, aY), surface, left, width, centerX);
-    PlaceCurvedLine(midX, midY, endX, sy1, windRight ? (-aX / 2, -aY / 2) : (aX, aY), surface, left, width, centerX);
+    // line2 锚（cs 源码：WindDirection == Left ? point3 : point2 —— Right 风用 p2，与 line1 相反）
+    PlaceCurvedLine(midX, midY, endX, sy1, windRight ? (aX, aY) : (-aX / 2, -aY / 2), surface, left, width, centerX);
 }
 void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] surface, int left, int width, int centerX)
 {
@@ -527,7 +528,6 @@ void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] su
         double sq = Math.Sqrt(num3) * 3.0;
         int sqi = double.IsNaN(sq) ? int.MinValue : (int)sq;
         int num4 = surface[cx - (left - 20)] + sqi;
-        if (cx >= 2349 && cx <= 2351) Console.WriteLine($"CSW3 t={t:R} rawY={ly + (ry - ly) * t:R} cx={cx} cy={cy}");
         for (int i2 = cy - 10; i2 < cy; i2++)
         {
             if (i2 < 0 || i2 >= H) continue;

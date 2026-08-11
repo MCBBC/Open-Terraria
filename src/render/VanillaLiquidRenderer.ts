@@ -12,16 +12,18 @@ import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS } from '../data/tiles';
 
 const WATERFALL_LENGTH = [10, 3, 2];        // 水岩蜜
-const DEFAULT_OPACITY = [0.5, 0.9, 0.8];  // 水 / 岩浆 / 蜂蜜——原版 oldDrawWater num17:
-                                          // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150)
+const DEFAULT_OPACITY = [0.5, 0.9, 0.8, 0.75];  // 水 / 岩浆 / 蜂蜜 / 微光——原版 oldDrawWater num17:
+                                          // 前景水基 0.5(cs:57029),岩浆 ×1.8、蜂蜜 ×1.6 钳 1(cs:57138-57150);
+                                          // 微光 = DrawShimmer val×0.75（LiquidRenderer.cs:700）
 
-// 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜）→ 原版 LiquidType（0/1/2）
+// 我们的 liquidType（1 水 / 2 岩浆 / 3 蜂蜜 / 4 微光）→ 原版 LiquidType（0/1/2/3）
 function toVanillaType(t: number): number {
-  return t === 2 ? 1 : t === 3 ? 2 : 0;
+  return t === 2 ? 1 : t === 3 ? 2 : t === 4 ? 3 : 0;
 }
 function waterSheet(vt: number, waterStyle = 0): string {
   if (vt === 1) return 'vanilla/Misc_water_1.png';   // 岩浆
   if (vt === 2) return 'vanilla/Misc_water_11.png';  // 蜂蜜
+  if (vt === 3) return 'vanilla/Misc_water_14.png';  // 微光（Images/Misc/water_14，LiquidRenderer._liquidTextures[14]）
   // 水:群系水色（CalculateWaterStyle,Main.cs:56845）——0-10/12/13 十三种
   return `vanilla/Misc_water_${Math.max(0, Math.min(13, waterStyle))}.png`;
 }
@@ -342,6 +344,7 @@ function drawLiquidBehindTiles(
     let t = texCache.get(vt);
     if (t === undefined) {
       const file = vt === 1 ? 'vanilla/Liquid_1.png' : vt === 2 ? 'vanilla/Liquid_11.png'
+      : vt === 3 ? 'vanilla/Liquid_14.png' // 微光
       : `vanilla/Liquid_${Math.max(0, Math.min(13, waterStyle))}.png`; // 群系水色(原版 DrawTile_LiquidBehindTile 同走 waterStyle)
       t = atlas.ensureVImage(file) ?? null;
       if (t) texCache.set(vt, t); // 只缓存命中(缓存 null 会把未就绪永久化——首帧丢条带)
@@ -374,8 +377,7 @@ function drawLiquidBehindTiles(
         if (n.lq > maxLq) { maxLq = n.lq; lt = toVanillaType(n.lt); }
       };
       if (fL) consider(L); if (fR) consider(R); if (fU) consider(U); if (fD) consider(D);
-      if (lt === 3) continue; // 微光暂不支持
-      const tex = texFor(lt);
+      const tex = texFor(lt); // lt=3 微光走 Liquid_14（原版 DrawTile_LiquidBehindTile 微光分支省略彩色叠加）
       if (!tex) continue;
 
       // ---- 液体矩形计算(:4069-4123) ----

@@ -331,10 +331,13 @@ function vanillaDunes({ store, rng }: GenCtx) {
 }
 
 // 原版 pass "Shimmer"(cs:15256):以太微光生物群系
-function vanillaShimmer({ store, rng }: GenCtx) {
+function vanillaShimmer({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runShimmerPass(store, rng, gs);
+  // GenVars.shimmerPosition 落到 World（中途沉降 pass 在 finalize 之前就需要它）
+  world.shimmerX = gs.shimmerX;
+  world.shimmerY = gs.shimmerY;
 }
 
 // 原版 pass "Micro Biomes"(cs:21785):露营地标 + 炸药陷阱屋

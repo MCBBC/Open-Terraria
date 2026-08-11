@@ -45,6 +45,8 @@ export interface WorldPacket {
   trees: Array<{ x: number; y: number; h: number }>;
   flags: Record<string, boolean>;
   treeX: number[]; treeStyle: number[]; treeTops: number[];
+  /** 以太生物群系中心（无微光世界为 0；旧包可缺省） */
+  shimmerX?: number; shimmerY?: number;
   buf: TileBuffers;
 }
 
