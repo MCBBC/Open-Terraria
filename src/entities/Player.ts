@@ -313,7 +313,8 @@ export class Player extends Entity {
   /** 近战攻速倍率（猛爪手套 ×2 + 装备 meleeSpeed 67-80 词缀/狂战士手套累加 + 醉酒近战速 ×1.1） */
   get attackSpeedMult(): number {
     return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
-      * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1);
+      * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
+      * (1 + this.buffs.wellFedMeleeSpeed);   // 食物近战速 +5/7.5/10%（:11528+）
   }
   /** 近战伤害加成（猛爪手套 +5） */
   get meleeDamageBonus(): number {
@@ -328,6 +329,7 @@ export class Player extends Entity {
     // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
     if (this.buffs.has(BuffType.Rage)) m += 0.1;
     if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) m += 0.1;
+    m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
     return m;
   }
   /** 装备暴击率（critX 段 + 词缀 67/68） */
@@ -337,6 +339,7 @@ export class Player extends Entity {
     // R1 药水：暴怒(115)全系暴击 +10（:9890）；醉酒(25)近战暴击 +2（:11515）
     if (this.buffs.has(BuffType.Wrath)) c += 10;
     if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) c += 2;
+    c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     return c;
   }
 

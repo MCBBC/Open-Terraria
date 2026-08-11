@@ -2,13 +2,15 @@
 // 与 LiquidRenderer 的 P3 瀑布拖尾（10 格内液体本体渐隐）互补——这里画的是
 // 独立的 Waterfall_N 贴图柱（最长 100 格），触发条件 = 原版 halfBrick 唇缘（L100-130）。
 // 照抄原版：
-//  - 贴图 Waterfall_N.png：512×40 胶片条，帧宽 32、16 帧；流柱格取 (frameX,0,16,16-liquid/16)
+//  - 贴图 Waterfall_N.png：512×40 胶片条，帧宽 32、16 帧。每帧左右半幅分工：
+//    左半 (fx,0,16,*) = 竖直下落条；右半 (16+fx,0,16,*) = 水平横流条；
+//    y=24 行 32px = 坡面/持续竖直柱的宽带（见 draw 内滞后状态机注释）
 //  - 帧速：水 regularFrame 每 3 tick、岩浆/蜂蜜 slowFrame 每 7 tick（L171-209）
 //  - 透明度：岩浆 1.0 / 蜂蜜 0.8 / 水地表 1.0、地下或有墙 0.6；末 10 格线性衰减（L538-551）
 //  - 走向决策（L421-507）：唇缘半砖格不满足直落门（!halfBrick）→ 先向空侧平移 1 格再落；
-//    偏折计数 num23 仅方向反转时累加、直落清零、≥2 翻转方向而非停止
+//    偏折计数 num23 仅方向反转时累加、直落清零、≥2 翻转方向（次格循环头即断）
 //  - 断流：完整实心块（blockType==0）停（L427）；溶入液池 liquid>0 && !halfBrick 停（L777）
-//  - 撞地格绘制上移 8px：SolidTile(下) && !halfBrick（L531-534）
+//  - 撞地（num11=8）：y=0 行竖条/横流条下沉 8px 入地；另补 8px 溅片于本格顶部（:779-798）
 //  - 雨幕（WaterfallManager :204-260 触发 + :360-517 绘制）：雨云 196/雪云 460/灰烬云 717
 //    下方格 !Solid && liquid==0 && slope==0 → 雨丝柱：雨 25 格/雪 50 格，双层贴图
 //    （前景 Waterfall_11 alpha 0.6 + 背景 12 alpha 0.3；雪 22 单层；灰烬雨 26+27），
@@ -16,7 +18,8 @@
 //    每格 x ±1 交错、末 8 格线性衰减、撞实心停、液面裁剪
 //  - 坡面分支（1456 WaterfallManager.cs:576-587 flag2）：下方顶坡（slope 1/2）格 →
 //    贴坡斜向下行 + 溅落 2px 斜切片（:739-748，翻转侧 FlipHorizontally 以镜像实现）
-// 省略（周边系统缺失）：彩虹/荧光砖改写、浅流细带分层（y=0 行 16px）、环境音、Grate 穿透。
+// 省略（周边系统缺失）：彩虹/荧光砖改写（num34 switch :657-672）、BlocksWaterDrawingBehindSelf
+//   横流条半高、雨云邻接缩短 num22（:947-950）、环境音、Grate 穿透。
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
@@ -168,14 +171,29 @@ export class WaterfallRenderer {
       if (!texImg) continue;
       // 岩浆瀑布收集光照格(AddLight :1075-1080:整条橙光,夜晚可见)——
       // 由 Renderer 消费注入 LightingEngine(canvas 无 StylizeColor 通道调制,略)
-      // 帧槽 32px×40px 胶片条:【主水流带在 y=24 行、32px 整槽宽】(WaterfallManager :740/:744/
-      //  :754-758 全部 Rectangle(num21, 24, 32, 16-…));y=0 行 16px 是浅流细带(:767-776,
-      //  液量小的辅助层)。曾错取 (帧+16, 0, 16) —— 一直画浅流带,瀑布呈细白线"贴图不对"
+      // 【2026-08-12 五返重对齐】1456 DrawWaterfall(:314-960)逐格绘制是"滞后状态机":
+      // 循环尾 :940-945 回填 num15=上格水平步 / num16=上格竖直步 / num18=上格水平向 /
+      // num19=上格坡向,各绘制分支按这些滞后量分派(此前误读为死变量):
+      //  · 竖直格(:823):上格也竖直(num16≠0) → y=24 行 32px 宽带(:831-840,x-1 起 Flip);
+      //    上格非竖直(水平/坡后首格) → y=0 行左半幅 16px 竖条(:827/:843,带 num11 下沉)
+      //  · 水平格(:852 switch num32):非坡 → (16+slot,0,16,16) 右半幅横流条,向右 Flip/
+      //    向左 None(:885/:908);坡上横移(num30=±1) → 8×2px 扇形切片(:858-901)
+      //  · 坡面格 32px 主带(:801)仅当上格非水平(num15==0);flag2 溅落切片(:739)门 =
+      //    坡向≠上格水平向(num17!=num31);坡转竖浅流(:761) / 撞地 8px 溅片(:779) /
+      //    竖转坡白带(:747) 同为滞后门
+      // 旧实现所有格子一律画 32px y=24 宽带且左移半格:唇缘格宽带压到西邻池面格
+      //  (用户标注 1484,587),坡面切片条件也错(lastH===-dir 应为 num17!=num31)。
       const slot = 32 * (wf.type === 0 ? regular : slow);
       let cx = wf.x, cy = wf.y; // 原版从唇缘格本体开始画（半砖 blockType=1 不断流，L427）
-      let dx = 0, dy = 0;       // num26/num27：本步位移
-      let lastH = 0;            // num14：上一次水平方向
-      let turns = 0;            // num23：方向反转计数
+      let dx = 0, dy = 0;       // num32/num33：本步位移
+      let slopeDir = 0;         // num30：本步坡向（flag2 分支）
+      let hDir = 0;             // num17：水平向记忆
+      let n18 = 0;              // num18：水平向滞后（坡面分支即时同步，尾部 = num17）
+      let pHoriz = 0;           // num15：上格水平步
+      let pVert = false;        // num16：上格竖直步
+      let pSlope = 0;           // num19：上格坡向
+      let yOff = 0;             // num11：撞地下沉（:536 下方实心且非半砖 → 8）
+      let turns = 0;            // num29：滞留/反转计数
       // SolidTile 语义（WorldGen.SolidTile：实心 && !platform && !half && !slope）
       const solidT = (x: number, y: number) => {
         if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
@@ -185,85 +203,128 @@ export class WaterfallRenderer {
         const d = TILE_DEFS[t];
         return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
       };
+      const topSlopeAt = (x: number, y: number) => {
+        if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+        const s = st.slope[st.idx(x, y)];
+        return s === 1 || s === 2;
+      };
+      const botSlopeAt = (x: number, y: number) => {
+        if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+        const s = st.slope[st.idx(x, y)];
+        return s === 3 || s === 4;
+      };
+      // 水平镜像绘制（SpriteEffects.FlipHorizontally 的 canvas 等价）
+      const drawFlipped = (
+        flip: boolean, sx: number, sy: number, sw: number, sh: number,
+        px: number, py: number, dw: number, dh: number,
+      ) => {
+        if (sh <= 0 || dh <= 0) return;
+        if (!flip) { ctx.drawImage(texImg, sx, sy, sw, sh, px, py, dw, dh); return; }
+        ctx.save();
+        ctx.translate(px + dw, py);
+        ctx.scale(-1, 1);
+        ctx.drawImage(texImg, sx, sy, sw, sh, 0, 0, dw, dh);
+        ctx.restore();
+      };
       for (let step = 0; step < WATERFALL_DIST; step++) {
+        if (turns >= 2) break;                          // 循环头 :533-536
         if (cx < 1 || cy < 1 || cx >= st.w - 1 || cy >= st.h - 1) break;
         const ci = st.idx(cx, cy);
         // 完整实心块（blockType==0）断流；半砖/坡面豁免（L427）
         if (solidT(cx, cy) && !st.half[ci] && st.slope[ci] === 0) break;
         const li = ci - 1, ri = ci + 1, bi = ci + st.w;
-        // ---- 坡面分支（WaterfallManager.cs:576-587 flag2）----
-        // 下方格是顶坡（slope 1/2）且本格非半砖且非雪（type!=19）：水流贴坡斜向
-        // 下行——方向 = 坡朝向（slope 1 → 右 / 2 → 左），垂直步进照常
-        const belowSlope = st.slope[bi] === 1 || st.slope[bi] === 2;
-        let slopeSlant = 0;
-        if (belowSlope && !st.half[ci] && st.type[bi] !== 19) {
-          const dir = st.slope[bi] === 1 ? 1 : -1;
-          slopeSlant = dir;
-          if (lastH === -dir) {
-            // 溅落 2px 斜切片（:739-748 flag2 && num17!=num31）：格底上移 2px、
-            // 高度收 2px 的斜切带，方向翻转侧用 FlipHorizontally（canvas 镜像实现）
-            const depthS = 16 - Math.floor(st.liquid[ci] / 16) - 2;
-            if (depthS > 0) {
-              ctx.save();
-              if (dir === 1) {
-                ctx.translate(cx * 16 + 16, cy * 16 + 16 - 2);
-                ctx.scale(-1, 1);
-                ctx.drawImage(texImg, slot, 24, 32, depthS, -32, -depthS, 32, depthS);
-              } else {
-                ctx.drawImage(texImg, slot, 24, 32, depthS, cx * 16, cy * 16 + 14, 32, depthS);
-              }
-              ctx.restore();
-            }
-          }
-          dx = dir; dy = 1; lastH = dir;
-        }
-        // ---- 走向决策（L452-507）----
-        if (slopeSlant === 0 && (!solidT(cx, cy + 1) || st.type[bi] === 0) && !st.half[ci]) {
-          // 直落门（L470）：下方非实心 且 本格非半砖——唇缘半砖格不直落
-          turns = 0; dy = 1; dx = 0;
-        } else if (slopeSlant === 0 && (solidT(cx - 1, cy) || st.liquid[li] > 0) && (!solidT(cx + 1, cy) && st.liquid[ri] === 0)) {
-          // 左堵/左液 → 向右平移（L476-483）
-          if (lastH === -1) turns++;
-          dx = 1; dy = 0; lastH = 1;
-        } else if ((solidT(cx + 1, cy) || st.liquid[ri] > 0) && (!solidT(cx - 1, cy) && st.liquid[li] === 0)) {
-          // 右堵/右液 → 向左平移（L484-491）
-          if (lastH === 1) turns++;
-          dx = -1; dy = 0; lastH = -1;
-        } else if (!solidT(cx + 1, cy) && st.liquid[ri] === 0 && !solidT(cx - 1, cy) && st.liquid[li] === 0) {
-          dy = 0; dx = lastH;   // 两侧皆空：保持上次水平方向（L492-496）
+        // num11（:536）：下方实心且本格非半砖 → 8（撞地下沉）；否则上格竖直时归零
+        if (solidT(cx, cy + 1) && !st.half[ci]) yOff = 8;
+        else if (pVert) yOff = 0;
+        const lag31 = n18;                              // num31 = 本格决策前的 num18
+        // ---- 走向决策（:579-647）----
+        slopeDir = 0;
+        if (topSlopeAt(cx, cy + 1) && !st.half[ci] && st.type[bi] !== 19) {
+          // flag2 坡面分支：下方顶坡 → 贴坡斜行（num30=num32=±1, num33=1）
+          slopeDir = st.slope[bi] === 1 ? 1 : -1;
+          dx = slopeDir; dy = 1; hDir = slopeDir; n18 = slopeDir;
+        } else if ((!solidT(cx, cy + 1) && !botSlopeAt(cx, cy + 1) && !st.half[ci]) || (st.type[bi] === 0 && !st.half[ci])) {
+          turns = 0; dy = 1; dx = 0;                    // 直落（:610-613）
+        } else if ((solidT(cx - 1, cy) || topSlopeAt(cx - 1, cy) || st.liquid[li] > 0) && !solidT(cx + 1, cy) && st.liquid[ri] === 0) {
+          if (hDir === -1) turns++;
+          dx = 1; dy = 0; hDir = 1;                     // 左堵/左液 → 右移（:615-623）
+        } else if ((solidT(cx + 1, cy) || topSlopeAt(cx + 1, cy) || st.liquid[ri] > 0) && !solidT(cx - 1, cy) && st.liquid[li] === 0) {
+          if (hDir === 1) turns++;
+          dx = -1; dy = 0; hDir = -1;                   // 右堵/右液 → 左移（:625-633）
+        } else if (((!solidT(cx + 1, cy) && !topSlopeAt(cx, cy)) || st.liquid[ri] === 0) && !solidT(cx - 1, cy) && !topSlopeAt(cx, cy) && st.liquid[li] === 0) {
+          dy = 0; dx = hDir;                            // 两侧皆空：保持水平向（:635-639）
         } else {
-          turns++; dy = 0; dx = 0; // 四面皆堵：滞留计数（L497-501）
+          turns++; dy = 0; dx = 0;                      // 四面皆堵：滞留（:641-644）
         }
-        if (turns >= 2) { lastH *= -1; dx *= -1; } // 翻转方向而非停止（L503-507）
-        // ---- 绘制本格 ----
+        if (turns >= 2) { hDir *= -1; dx *= -1; }       // 翻转而非停止（:649-652）
+        // ---- 绘制本格（按原版分支顺序）----
         const liq = st.liquid[ci];
         if (wf.type === 1) this.litCells.push(cx, cy);
         let alpha = wf.type === 1 ? 1.0 : wf.type === 2 ? 0.8
           : (st.wall[ci] !== 0 || cy >= groundLevel ? 0.6 : 1.0);
         if (step > WATERFALL_DIST - 10) alpha *= (WATERFALL_DIST - step) / 10;
-        const depth = 16 - Math.floor(liq / 16);     // num43:按格内液量裁掉底部
-        const hitGround = solidT(cx, cy + 1) && !st.half[ci];
-        const yOff = hitGround ? 8 : 0;              // 撞地格上移 8px（L531-534）
         ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-        if (depth > 0) {
-          // 主带 32px 整槽(:740/:744):以瀑布格为中心向左右各伸半格
-          // (原版 FlipHorizontally 分支为水平流段纹理方向,canvas 不镜像近似)
-          ctx.drawImage(texImg, slot, 24, 32, depth, cx * 16 - 16, cy * 16 + yOff, 32, depth);
+        const num43 = Math.floor(liq / 16);             // 格内液量裁剪（:709）
+        const x0 = cx * 16, y0 = cy * 16;
+        if (slopeDir !== 0 && hDir !== lag31) {
+          // flag2 溅落切片（:739-748）：格底上移 2px 的 32px 斜切带
+          drawFlipped(lag31 === 1, slot, 24, 32, 16 - num43 - 2,
+            lag31 === 1 ? x0 - 16 : x0, y0 + 14, 32, 16 - num43 - 2);
         }
-        // 转向浅流过渡带(:762-776):上一格水平流、本格转直落 → 在本格补 y=0 行的
-        // 16px 浅流片(顶部细流衔接,画于格内偏下 8px 区)
-        if (dx === 0 && dy === 1 && lastH !== 0 && depth > 8) {
-          const shSh = depth - 8;
-          if (shSh > 0) {
-            ctx.drawImage(texImg, slot, 0, 16, shSh, cx * 16, cy * 16 + 8, 16, shSh);
+        // （:747-758 竖转坡白过渡带：条件 num17!=num18 在坡面分支同步两者后恒假，
+        //  原版死代码——不移植）
+        if (pSlope !== 0 && dx === 0 && dy === 1) {
+          // 坡转竖浅流片（:761-776）：y=0 行 16px，格内偏下 8px 区
+          drawFlipped(hDir === 1, slot, 0, 16, 16 - num43 - 8, x0, y0 + yOff + 8, 16, 16 - num43 - 8);
+        }
+        if (yOff === 8 && pVert && pSlope === 0) {
+          // 撞地 8px 溅片（:779-798）：画在本格顶部（非下一格行）
+          drawFlipped(n18 !== -1, slot, 24, 32, 8, n18 === -1 ? x0 : x0 - 16, y0, 32, 8);
+        }
+        if (slopeDir !== 0 && pHoriz === 0) {
+          // 坡面格主带（:801-821）：仅上格非水平时
+          drawFlipped(lag31 === 1, slot, 24, 32, 16 - num43,
+            lag31 === 1 ? x0 - 16 : x0, y0, 32, 16 - num43);
+        } else if (dy === 1 && slopeDir === 0 && pSlope === 0) {
+          // 竖直格主绘（:823-853）
+          if (hDir === -1) {
+            if (pVert) drawFlipped(false, slot, 24, 32, 16 - num43, x0, y0, 32, 16 - num43);
+            else drawFlipped(false, slot, 0, 16, 16 - num43, x0, y0 + yOff, 16, 16 - num43);
+          } else {
+            if (pVert) drawFlipped(true, slot, 24, 32, 16 - num43, x0 - 16, y0, 32, 16 - num43);
+            else drawFlipped(true, slot, 0, 16, 16 - num43, x0, y0 + yOff, 16, 16 - num43);
           }
+        } else if (dx !== 0) {
+          // 水平格（:852 switch num32）：格内有液且非半砖 → 不画（仅溶入）
+          if (!(liq > 0 && !st.half[ci])) {
+            if (slopeDir === dx) {
+              // 坡上横移扇形切片（:858-869 向右 / :889-901 向左）：8×2px 交错下探
+              for (let m = 0; m < 8; m++) {
+                const xo = m * 2;
+                const yo = dx === 1 ? xo : 14 - m * 2;
+                const sxo = dx === 1 ? 14 - m * 2 : xo;
+                const yTop = dx === 1 ? (pHoriz === 0 && m < 2 ? 4 : yo) : (pHoriz === 0 && m > 5 ? 4 : yo);
+                drawFlipped(true, 16 + slot + sxo, 0, 2, 8, x0 + xo, y0 + 8 + yTop, 2, 8);
+              }
+            } else {
+              // 普通横流条：右半幅 16px（:885 向右 Flip / :908 向左 None）
+              drawFlipped(dx === 1, 16 + slot, 0, 16, 16, x0, y0 + yOff, 16, 16);
+            }
+          }
+        } else if (dy === 0) {
+          // 滞留格（:921-928 case 0）：画右半幅整条后终止
+          if (liq <= 0 || st.half[ci]) {
+            drawFlipped(false, 16 + slot, 0, 16, 16, x0, y0 + yOff, 16, 16);
+          }
+          break;                                        // k = 1000（:926）
         }
-        // 撞地溅落片(:785-798):下方实心 → 地面行顶画 8px 外溢水花(32px 宽向两侧铺开)
-        if (hitGround) {
-          ctx.drawImage(texImg, slot, 24, 32, 8, cx * 16 - 16, (cy + 1) * 16, 32, 8);
-        }
-        if (liq > 0 && !st.half[ci]) break;         // 溶入液池（L777-778）
+        if (liq > 0 && !st.half[ci]) break;             // 溶入液池（:931-934）
+        // 尾部滞后回填（:940-945）+ 步进
+        pVert = dy === 1;
+        n18 = hDir;
+        pHoriz = dx;
         cx += dx; cy += dy;
+        pSlope = slopeDir;
       }
     }
     ctx.globalAlpha = 1;

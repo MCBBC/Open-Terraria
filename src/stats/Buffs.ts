@@ -90,6 +90,11 @@ export enum BuffType {
                        //   348 FrostWave / 349 FrostShard 命中授予（:11554-11576）
   Frozen = 63,         // 冰冻(47)：整帧封移动输入（player.frozen :9749，input 清零
                        //   同 :18474 重置段）——冰女王霜弹 348 概率授予
+  // ---- 食物链（Item.cs:47653 SetFoodDefaults → DefaultToFood useStyle 2 咀嚼/9 仰饮；
+  // ---- 三档数值 Player.cs:11523-11570 逐档）----
+  WellFed = 64,   // 饱腹(26)：def+2/全系暴击+2/全系伤+5%/近战速+5%/移速+20%/镐速-5%（:11523）
+  WellFed2 = 65,  // 很饱(206)：def+3/暴击+3/伤+7.5%/近战速+7.5%/移速+30%/镐速-10%（:11539）
+  WellFed3 = 66,  // 饕餮(207)：def+4/暴击+4/伤+10%/近战速+10%/移速+40%/镐速-15%（:11555）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -161,6 +166,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // 描述直接用原版 BuffDescription（12 语言现成，语义一致，同 Honey 先例）
   [BuffType.Chilled]: { vanillaBuff: 46, descKey: 'BuffDescription.Chilled', fallbackName: '冰寒' },
   [BuffType.Frozen]: { vanillaBuff: 47, descKey: 'BuffDescription.Frozen', fallbackName: '冰冻' },
+  // 食物三档：描述用原版 BuffDescription.WellFed*（"全面提升属性"语义一致，12 语言现成）
+  [BuffType.WellFed]: { vanillaBuff: 26, descKey: 'BuffDescription.WellFed', fallbackName: '饱腹' },
+  [BuffType.WellFed2]: { vanillaBuff: 206, descKey: 'BuffDescription.WellFed2', fallbackName: '很饱' },
+  [BuffType.WellFed3]: { vanillaBuff: 207, descKey: 'BuffDescription.WellFed3', fallbackName: '饕餮' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -259,12 +268,14 @@ export class BuffState {
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
+    m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
   }
   get defenseBonus(): number {
     let d = this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
     if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
     if (this.active.has(BuffType.Tipsy)) d -= 4;            // 醉酒 statDefense -= 4（:11514）
+    d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
     return d;
   }
   /** 魔力上限加成：水晶球预见 statManaMax2 += 20（:11481） */
@@ -274,6 +285,31 @@ export class BuffState {
   /** 弹药箱 20% 不耗弹（PickAmmo :52746 rand.Next(5)==0） */
   get hasAmmoBox(): boolean {
     return this.active.has(BuffType.AmmoBox);
+  }
+  // ---- 食物三档属性（Player.cs:11523-11570；同时多档激活时取最高档，与原版逐条累加
+  // 等价——原版吃高档后低档不可能并存低于高档单独存在的情况）----
+  /** 当前生效的食物档位：0 无 / 1 WellFed(26) / 2 WellFed2(206) / 3 WellFed3(207) */
+  get wellFedTier(): 0 | 1 | 2 | 3 {
+    if (this.active.has(BuffType.WellFed3)) return 3;
+    if (this.active.has(BuffType.WellFed2)) return 2;
+    if (this.active.has(BuffType.WellFed)) return 1;
+    return 0;
+  }
+  /** 全系伤害 +5/7.5/10%（meleeDamage/magicDamage/rangedDamage/minionDamage 同值,:11527+） */
+  get wellFedDamage(): number {
+    return [0, 0.05, 0.075, 0.1][this.wellFedTier];
+  }
+  /** 全系暴击 +2/3/4（melee/magic/rangedCrit 同值,:11525+） */
+  get wellFedCrit(): number {
+    return [0, 2, 3, 4][this.wellFedTier];
+  }
+  /** 近战速度 +5/7.5/10%（meleeSpeed += ,:11528+） */
+  get wellFedMeleeSpeed(): number {
+    return [0, 0.05, 0.075, 0.1][this.wellFedTier];
+  }
+  /** 镐速 +5/10/15%（pickSpeed -= ,:11534+）→ 挖掘倍率 */
+  get wellFedPickMult(): number {
+    return [1, 0.95, 0.9, 0.85][this.wellFedTier];
   }
   get healthBonus(): number {
     return this.active.has(BuffType.Resistance) ? 80 : 0;

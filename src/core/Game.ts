@@ -3285,7 +3285,9 @@ export class Game implements GameHooks {
     //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
     //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
     const tileSpeedMult = (this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1;
-    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult);
+    // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）→ 冷却按原版 useTime/pickSpeed 缩短
+    const pickMult = this.player.buffs.wellFedPickMult;
+    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult / pickMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
@@ -6560,11 +6562,19 @@ export class Game implements GameHooks {
         const keep = diff === 2 ? 1 : diff === 1 ? 0.75 : 0.5;
         let lost = 0;
         const face = [1, 100, 10000, 1000000];
-        ['coin_copper', 'coin_silver', 'coin_gold', 'coin_platinum'].forEach((ck, ci) => {
-          const n = p.inv.countOf(ITEM_BY_KEY[ck]);
-          if (n > 0) {
-            lost += (n - Math.floor(n * keep)) * face[ci];
-            p.inv.remove(ITEM_BY_KEY[ck], n - Math.floor(n * keep));
+        const coinKeys = [
+          ['coin_copper', 'vi_71_CopperCoin'], ['coin_silver', 'vi_72_SilverCoin'],
+          ['coin_gold', 'vi_73_GoldCoin'], ['coin_platinum', 'vi_74_PlatinumCoin'],
+        ];
+        coinKeys.forEach(([ck, vk], ci) => {
+          for (const k of [ck, vk]) {
+            const id = ITEM_BY_KEY[k];
+            if (id === undefined) continue;
+            const n = p.inv.countOf(id);
+            if (n > 0) {
+              lost += (n - Math.floor(n * keep)) * face[ci];
+              p.inv.remove(id, n - Math.floor(n * keep));
+            }
           }
         });
         this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）

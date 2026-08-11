@@ -26,13 +26,26 @@ it('jungle active-type diff v2', () => {
   runMountCavesPass(st, rng, gs); runDirtWallBgPass(st, rng, gs);
   runRocksAndClayPass(st, rng, gs); runSmallHolesPass(st, rng, gs); runCavesPass(st, rng, gs);
   runMountainCavesPass(st, rng, gs); runBeachesPass(st, rng, gs);
-  runIceBiomePass(st, rng, gs); runGrassPass(st, rng, gs);
-  runJunglePass(st, rng, gs);
+  const bandHash = (tag: string) => {
+    let h = 2166136261;
+    for (let y = 150; y <= 400; y++) for (let x = 0; x < 4200; x++) {
+      const i = y * 4200 + x;
+      if (st.flags[i]) continue;
+      h = (h ^ (st.type[i] + 1)) * 16777619 | 0;
+    }
+    console.log(`BAND ${tag} ${h >>> 0}`);
+  };
+  bandHash('mcopen');
+  runBeachesPass(st, rng, gs); bandHash('beaches');
+  runIceBiomePass(st, rng, gs); bandHash('ice');
+  runGrassPass(st, rng, gs); bandHash('grass');
+  runJunglePass(st, rng, gs); bandHash('jungle');
   let n = 0;
   const hist = new Map<string, number>();
   const cl = new Map<string, [number, number, number, number]>();
   for (let i = 0; i < cs.length; i++) {
-    const jv = V_ID[st.type[i]] < 0 ? 0x7fff : V_ID[st.type[i]];
+    // internal 0=EMPTY ≡ vanilla 0（幽灵泥土）——无 sheet 的其他 id 才是真缺口
+    const jv = V_ID[st.type[i]] < 0 ? (st.type[i] === 0 ? 0 : 0x7fff) : V_ID[st.type[i]];
     if (cs[i] === jv) continue;
     n++;
     const k = `a${st.flags[i]}:${cs[i]}>${jv}`;

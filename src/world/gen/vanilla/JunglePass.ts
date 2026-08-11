@@ -239,13 +239,19 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
     let tries = 1;
+    if (n < 3) L3.push(`s${tries}@${i2},${j2}=${st.type[st.idx(i2, j2)]}`);
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
       i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
       j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
       tries++;
+      if (n < 3) L3.push(`s${tries}@${i2},${j2}=${st.type[st.idx(i2, j2)]}`);
     }
     if (n < 40) L3.push(`n${n}@${i2},${j2}t${tries}`);
-    tileRunner(st, rng, gs, i2, j2, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
+    if (n < 3) L3.push(`E${n}pk${rng.vanilla.peek()}`);
+    const sStr = rng.int(4, 9), sStp = rng.int(5, 29);
+    if (n < 3) L3.push(`P${n}s${sStr}k${sStp}pk${rng.vanilla.peek()}`);
+    tileRunner(st, rng, gs, i2, j2, { strength: sStr, steps: sStp, type: T.STONE });
+    if (n < 3) L3.push(`X${n}pk${rng.vanilla.peek()}`);
     if (rng.next() * 4 < 1) {
       // ★原版掷序（cs:269-271）：type2(Next 63,69) 在实参求值**之前**求值 →
       // type → x偏移 → y偏移 → strength → steps（对象字面量会把 type 排到最后=流错位）

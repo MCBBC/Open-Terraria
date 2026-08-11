@@ -6,8 +6,10 @@
 
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
- *  v3：实体同步族（msg16/21/23/27/42）+ 箱子权威（msg31/32）+ sessionToken 重连 */
-export const PROTO_VER = 3;
+ *  v3：实体同步族（msg16/21/23/27/42）+ 箱子权威（msg31/32）+ sessionToken 重连
+ *  v4：msg23 S→C 短码格式（key 每次全量→codeId 短码+按需全量）+ RoomPolicy 尾部 u16 maxPlayers。
+ *      server 与 game 同仓库同时发布，不做 v3 向后兼容 */
+export const PROTO_VER = 4;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
@@ -38,20 +40,23 @@ export const enum Msg {
   PlayerLifeMana = 16, // 双向 {u8 slot, i16 hp, i16 maxHp}（原版同号：客户端权威 HP，服务器中继）
   SyncItem = 21,       // 房主→广播 {u32 netId, u8 op(0=spawn/1=take/2=despawn), str key,
                        //   u16 stack, f32 x,y,vx,vy}（原版同号 SyncItem）
-  SyncNPC = 23,        // 房主→广播（批量快照，原版同号 SyncNPC）：
-                       //   {u16 count, [u32 netId, str key, f32 x,y,vx,vy, i16 hp, i16 maxHp,
-                       //    u16 animT, u8 flags(bit0=boss)]}
+  SyncNPC = 23,        // C→S（房主上行）：{u16 count, [u32 netId, str key, f32 x,y,vx,vy,
+                       //    i16 hp, i16 maxHp, u16 animT, u8 flags(bit0=boss)]}
+                       // S→C（v4 短码+AOI 逐端过滤）：{u16 count, [u8 eflags, ...,
+                       //    eflags.bit0=含 key 全量(u32 netId + u16 codeId + str key)
+                       //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, str key, f32 x,y,vx,vy, f32 rot]}
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
-  StrikeNPC = 42,      // 访客→房主 {u32 netId, i16 dmg, u8 crit, u8 kbDir, f32 srcX, srcY}
-                       //   （原版 42=Unknown42：旧 StrikeNPC 槽位）
+  StrikeNPC = 42,      // 访客→房主（服务器定向转发）{u32 netId, i16 dmg, f32 kbx, f32 kby}
+                       //   （原版 42=Unknown42：旧 StrikeNPC 槽位；注释曾误写 crit/kbDir/srcX/srcY——
+                       //    实际线格式自 v3 起即为 dmg+击退两分量，2026-08 校正）
   NetModules = 82,    // 双向 {moduleId, ...}（module1=聊天 module2=ping）
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----
-  RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems}
+  RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems, u16 maxPlayers(v4)}
 }
 
 /** NetModule 表（0-2 对齐原版 NetworkInitializer.cs 注册序：Liquid/Text/Ping；
@@ -139,15 +144,26 @@ export class NetReader {
 
 // ================= 帧流解析（粘包；对齐原版 CheckBytes 语义） =================
 
-/** 字节流帧解析器：append 后逐帧回调 {msgId, payloadReader}，自动处理半包 */
+/** 字节流帧解析器：append 后逐帧回调 {msgId, payloadReader}，自动处理半包。
+ *  P0.4 增量化：单一缓冲 + 读写偏移（旧版每 drain 把全部 chunk 合并成新数组——
+ *  4 人房每秒数百次全量拷贝，纯 GC 压力）。残余半包 copyWithin 归位。 */
 export class FrameParser {
-  private chunks: Uint8Array[] = [];
-  private total = 0;
+  private buf = new Uint8Array(4096);
+  private len = 0;
+  private _draining = false;
 
   append(data: Uint8Array) {
-    // 拷贝（ws 回调数据可能被复用）
-    this.chunks.push(new Uint8Array(data));
-    this.total += data.length;
+    if (this._draining) throw new Error('FrameParser: drain 回调内禁止 append（会破坏解析缓冲）');
+    if (this.len + data.length > this.buf.length) {
+      let cap = this.buf.length;
+      while (cap < this.len + data.length) cap *= 2;
+      const nb = new Uint8Array(cap);
+      nb.set(this.buf.subarray(0, this.len));
+      this.buf = nb;
+    }
+    // 拷贝入缓冲（ws 回调数据可能被复用）
+    this.buf.set(data, this.len);
+    this.len += data.length;
   }
 
   /** 解析所有完整帧；返回 false 表示缓冲为空。
@@ -155,28 +171,32 @@ export class FrameParser {
    *  缓冲上限 256KB：超限重置（半包攻击防御） */
   private static readonly MAX_BUFFER = 256 * 1024;
   drain(cb: (msgId: number, r: NetReader) => void): boolean {
-    if (this.total < 3) return this.total > 0;
-    if (this.total > FrameParser.MAX_BUFFER) { this.chunks = []; this.total = 0; return false; }
-    // 合并缓冲
-    let buf = new Uint8Array(this.total);
-    let off = 0;
-    for (const c of this.chunks) { buf.set(c, off); off += c.length; }
-    this.chunks = [];
-    this.total = 0;
+    if (this._draining) throw new Error('FrameParser: drain 重入');
+    if (this.len < 3) return this.len > 0;
+    if (this.len > FrameParser.MAX_BUFFER) { this.len = 0; return false; }
+    this._draining = true;
     let p = 0;
     let any = false;
-    const dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
-    while (p + 3 <= buf.length) {
-      const len = dv.getUint16(p, true);
-      if (len < 3 || len > 65535) { p += 1; continue; } // 脏字节：跳过重同步
-      if (p + len > buf.length) break; // 半包
-      const msgId = buf[p + 2];
-      cb(msgId, new NetReader(buf.subarray(p + 3, p + len)));
-      p += len;
-      any = true;
+    const dv = new DataView(this.buf.buffer, this.buf.byteOffset, this.buf.byteLength);
+    try {
+      while (p + 3 <= this.len) {
+        const len = dv.getUint16(p, true);
+        if (len < 3 || len > 65535) { p += 1; continue; } // 脏字节：跳过重同步
+        if (p + len > this.len) break; // 半包
+        const msgId = this.buf[p + 2];
+        cb(msgId, new NetReader(this.buf.subarray(p + 3, p + len)));
+        p += len;
+        any = true;
+      }
+    } finally {
+      this._draining = false;
     }
-    if (p < buf.length) { this.chunks.push(buf.subarray(p)); this.total = buf.length - p; }
-    return any || this.total > 0;
+    // 回调同步消费完 subarray 视图后才压缩缓冲（期间禁止 append，见上）
+    if (p > 0) {
+      if (p < this.len) this.buf.copyWithin(0, p, this.len);
+      this.len -= p;
+    }
+    return any || this.len > 0;
   }
 }
 

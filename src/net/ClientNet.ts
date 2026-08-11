@@ -25,15 +25,19 @@ export interface RemotePlayerState {
   /** 新权威包到达标记（Game 消费注入 netOffset 后清零） */
   fresh: boolean;
   active: boolean;
+  /** 最近一次 msg13 到达时刻（P1.1 AOI 配套：超时未达 → Game 冻结代理输入防幽灵行走） */
+  lastFresh: number;
 }
 
-/** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制） */
+/** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers） */
 export interface RoomPolicyState {
   roomCode: string;
   roomName: string;
   isHost: boolean;
   protectTiles: boolean;
   protectItems: boolean;
+  /** 单房人数上限（v4；UI 显示 online/max） */
+  maxPlayers: number;
 }
 
 /** NPC 快照（msg23；房主权威） */
@@ -90,7 +94,7 @@ export class ClientNet {
   mySlot = -1;
   players = new Map<number, RemotePlayerState>();
   /** 房间策略（RoomPolicy 到达前 = 自由房默认） */
-  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false };
+  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255 };
 
   private ws: WebSocket | null = null;
   private parser = new FrameParser();

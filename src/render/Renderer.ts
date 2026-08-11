@@ -2401,6 +2401,11 @@ export class Renderer {
       if (useRow >= 0) {
         const rowFrame = af['Player_' + (useRow === 0 ? 12 : useRow === 4 ? 14 : 19 + useRow)];
         frame = rowFrame ?? idle;
+      } else if (Math.abs(p.vx) > 0.3 && p.onGround) {
+        // ★行走循环优先于静持行（与纸娃娃路径同因：原版身体/腿分图层，静持只钉
+        // 身体行、腿照常走 legFrame 循环（cs:36178）；单层帧近似下静持行让位）
+        const idx = Math.floor(p.animTime / 6) % runFrames.length;
+        frame = runFrames[idx] ?? idle;
       } else if (staticHoldStyle === 2) {
         frame = af['Player_20'] ?? idle; // holdStyle 2 → bodyFrame 行 2
       } else if (staticHoldStyle === 4 && p.onGround) {
@@ -2410,9 +2415,6 @@ export class Renderer {
       } else if (!p.onGround) {
         // 空中：上升用 12（收腿）、下落用 14（张腿）
         frame = (p.vy < 0 ? af['Player_12'] : af['Player_14']) ?? runFrames[0] ?? idle;
-      } else if (Math.abs(p.vx) > 0.3) {
-        const idx = Math.floor(p.animTime / 6) % runFrames.length;
-        frame = runFrames[idx] ?? idle;
       } else {
         frame = idle;
       }

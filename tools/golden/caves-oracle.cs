@@ -1020,6 +1020,11 @@ for (int i = 0; i < mCaveX.Count; i++)
     CaveOpenater(mCaveX[i], mCaveY[i]);
     Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
 }
+{
+    uint h = 2166136261;
+    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+    Console.WriteLine($"BAND mcopen {h}");
+}
 Checkpoint("mcopenings");
 
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
@@ -1099,6 +1104,11 @@ var beachDbg = new List<string>();
 File.WriteAllBytes("/tmp/cs-act4.bin", act);
 File.WriteAllBytes("/tmp/cs-act5.bin", act);
 File.WriteAllText("/tmp/cs-beach2.txt", string.Join(" ", beachDbg));
+{
+    uint h = 2166136261;
+    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+    Console.WriteLine($"BAND beaches {h}");
+}
 Checkpoint("beaches");
 
 // ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================
@@ -1154,6 +1164,11 @@ var snowMaxXArr = new int[H];
         }
     }
 }
+{
+    uint h = 2166136261;
+    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+    Console.WriteLine($"BAND ice {h}");
+}
 Checkpoint("icebiome");
 
 // ================= Grass（cs:12454-12507）=================
@@ -1180,6 +1195,11 @@ Checkpoint("icebiome");
             && act[(y2 + 1) * W + x2] == 1 && typ[(y2 + 1) * W + x2] == 0)
         { act[y2 * W + x2] = 1; typ[y2 * W + x2] = 2; }
     }
+}
+{
+    uint h = 2166136261;
+    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+    Console.WriteLine($"BAND grass {h}");
 }
 Checkpoint("grass");
 
@@ -1340,17 +1360,31 @@ Checkpoint("grass");
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
         int c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws));
         int tries = 1;
+        if (l < 3) L3C.Add($"s{tries}@{c3x},{c3y}=" + (c3x >= 0 && c3x < W && c3y >= 0 && c3y < H ? typ[c3y * W + c3x].ToString() : "oob"));
         while (c3x < 1 || c3x >= W - 1 || c3y < 1 || c3y >= H - 1 || typ[c3y * W + c3x] != 59)
-        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); tries++; }
+        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); tries++; if (l < 3) L3C.Add($"s{tries}@{c3x},{c3y}=" + (c3x >= 0 && c3x < W && c3y >= 0 && c3y < H ? typ[c3y * W + c3x].ToString() : "oob")); }
         if (l < 40) L3C.Add($"n{l}@{c3x},{c3y}t{tries}");
-        TileRunner(c3x, c3y, (int)r.Next(4, 10), (int)r.Next(5, 30), 1);
-        if ((int)r.Next(4) == 0)
-            TileRunner(c3x + (int)r.Next(-1, 2), c3y + (int)r.Next(-1, 2), (int)r.Next(3, 7), (int)r.Next(4, 8), (int)r.Next(63, 69));
+        if (l < 3) L3C.Add($"E{l}pk{(int)r.Peek()}");
+        int sStr = (int)r.Next(4, 10), sStp = (int)r.Next(5, 30);
+        if (l < 3) L3C.Add($"P{l}s{sStr}k{sStp}pk{(int)r.Peek()}");
+        TileRunner(c3x, c3y, sStr, sStp, 1);
+        if (l < 3) L3C.Add($"X{l}pk{(int)r.Peek()}");
+        int gate = (int)r.Next(4);
+        if (l < 3) L3C.Add($"G{l}={gate}pk{(int)r.Peek()}");
+        if (gate == 0)
+        { int gt = (int)r.Next(63, 69); int gx = c3x + (int)r.Next(-1, 2); int gy = c3y + (int)r.Next(-1, 2); int gstr = (int)r.Next(3, 7); int gstp = (int)r.Next(4, 8);
+          if (l < 3) L3C.Add($"GEM{l}t{gt}@{gx},{gy}s{gstr}k{gstp}pk{(int)r.Peek()}");
+          TileRunner(gx, gy, gstr, gstp, gt); }
     }
     File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
     File.WriteAllBytes("/tmp/cs-act6.bin", act);
     File.WriteAllText("/tmp/cs-l3.txt", string.Join(" ", L3C));
     File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
+}
+{
+    uint h = 2166136261;
+    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+    Console.WriteLine($"BAND jungle {h}");
 }
 Checkpoint("jungle");
 

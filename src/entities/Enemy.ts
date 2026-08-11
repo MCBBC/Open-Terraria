@@ -2717,13 +2717,8 @@ export class Enemy extends Entity {
       const m = Math.hypot(fx, fy);
       if (m > 0.01) { this.ai0 += (fx / m) * Math.min(8, m); this.ai1 += (fy / m) * Math.min(8, m); }
     }
-    const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
-    let belowSolid = false;
-    for (let k = 1; k <= 4; k++) if (st.isSolid(cx, cy + k) || st.liquid[st.idx(cx, cy + k)] > 0) { belowSolid = true; break; }
-    if (belowSolid && this.ai1 > 0) this.ai1 = -Math.abs(this.ai1);
-    let aboveClear = true;
-    for (let k = 1; k <= 30 && aboveClear; k++) if (st.isSolid(cx, cy - k)) aboveClear = false;
-    if (aboveClear && this.ai1 < 0) this.ai1 = Math.abs(this.ai1);
+    // (垂直避障已在上方 :34427-34464 修正块统一处理;本旧块扫描方向写反
+    //  (cy-k 查"上方")且无条件强制 ai1>0,是萤火虫确定性下沉的残根——删除)
     this.vx = (this.vx * 79 + this.ai0) / 80;
     this.vy = (this.vy * 79 + this.ai1) / 80;
     this.facing = this.vx > 0 ? 1 : -1;

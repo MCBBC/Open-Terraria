@@ -25,42 +25,43 @@ function methodBodyOf(src, name) {
 }
 
 /** case 段 → itemId: segment（最近一层 switch(type) 归属，嵌套 switch(type) 的内层标签才是物品 id） */
-function outerCaseSegments(src) {
-  const out = new Map();
-  const collect = (body) => {
-    const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
-    const stack = [];
-    let depth = 0, m;
-    while ((m = tokRe.exec(body))) {
-      const t = m[0];
-      if (t.startsWith('switch')) {
-        stack.push({ isType: /switch\s*\(\s*(?:type|currentItem\.type)\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
-      } else if (t === '{') {
-        depth++;
-        const top = stack[stack.length - 1];
-        if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
-      } else if (t === '}') {
-        const top = stack[stack.length - 1];
-        if (top && top.opened && depth === top.bodyDepth) {
-          if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
-          stack.pop();
-        }
-        depth--;
-      } else {
-        const top = stack[stack.length - 1];
-        if (top && top.opened && top.isType) {
-          if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
-          top.cur = t === 'default:' ? null : +m[2];
-          top.segStart = m.index + t.length;
-        }
+function collectCaseSegments(body, out) {
+  const tokRe = /switch\s*\(([^)]*)\)|case (\d+):|default:|[{}]/g;
+  const stack = [];
+  let depth = 0, m;
+  while ((m = tokRe.exec(body))) {
+    const t = m[0];
+    if (t.startsWith('switch')) {
+      stack.push({ isType: /switch\s*\(\s*(?:type|currentItem\.type)\b/.test(t), opened: false, bodyDepth: -1, cur: null, segStart: 0 });
+    } else if (t === '{') {
+      depth++;
+      const top = stack[stack.length - 1];
+      if (top && !top.opened) { top.opened = true; top.bodyDepth = depth; top.segStart = m.index + 1; }
+    } else if (t === '}') {
+      const top = stack[stack.length - 1];
+      if (top && top.opened && depth === top.bodyDepth) {
+        if (top.isType && top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+        stack.pop();
+      }
+      depth--;
+    } else {
+      const top = stack[stack.length - 1];
+      if (top && top.opened && top.isType) {
+        if (top.cur !== null) out.set(top.cur, body.slice(top.segStart, m.index));
+        top.cur = t === 'default:' ? null : +m[2];
+        top.segStart = m.index + t.length;
       }
     }
-  };
+  }
+}
+
+function outerCaseSegments(src) {
+  const out = new Map();
   for (const n of [1, 2, 3, 4, 5]) {
     const body = methodBodyOf(src, `public void SetDefaults${n}(`)
       || methodBodyOf(src, `private void SetDefaults${n}(`)
       || methodBodyOf(src, `void SetDefaults${n}(`);
-    if (body) collect(body);
+    if (body) collectCaseSegments(body, out);
   }
   return out;
 }
@@ -118,6 +119,49 @@ for (const [id, seg] of SEGS) {
 // 按源码实表补齐（Item.cs:23005-23040 前向扫描实证）。
 for (const [id, pow] of Object.entries({ 2291: 15, 2293: 20, 2292: 30, 2295: 35, 2296: 40, 2294: 50 })) {
   FUNC[id] = { ...(FUNC[id] ?? {}), fishingPole: pow };
+}
+
+// ---- SetFoodDefaults（Item.cs:47653）：食物族走 SetDefaults 的 IsFood 分支直转此方法，
+// SetDefaults1-5 扫不到——85 个 case 全靠此 switch 补。逐 case 解析
+// DefaultToFood(w,h,buff,dur[,useGulpSound]) → buffType/buffTime/useStyle(2 咀嚼 | 9 仰饮)
+// /consumable（DefaultToFood :48155 实体）；DefaultToHealingPotion（case 1912）→ 治疗。
+// case 内显式赋值可覆盖（967/969 强制 useStyle=9；353 清酒 Ale holdStyle/ammo/notAmmo）。
+{
+  const foodSegs = new Map();
+  const foodBody = methodBodyOf(itemSrc, 'private void SetFoodDefaults(');
+  if (foodBody) collectCaseSegments(foodBody, foodSegs);
+  const foodFunc = {};
+  for (const [id, seg] of foodSegs) {
+    const f = {};
+    const dm = seg.match(/DefaultToFood\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)([^)]*)\)/);
+    if (dm) {
+      f.buffType = +dm[3];
+      f.buffTime = +dm[4];
+      // DefaultToFood：useGulpSound=true → useStyle 9（Item2/Item3 音效差异不在此表）
+      f.useStyle = /useGulpSound\s*:\s*true/.test(dm[5]) ? 9 : 2;
+      f.consumable = 1;
+    }
+    const dh = seg.match(/DefaultToHealingPotion\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/);
+    if (dh) {
+      f.healLife = +dh[3];
+      f.useStyle = 9;
+      f.consumable = 1;
+      f.potion = 1;
+    }
+    if (!Object.keys(f).length) continue;
+    // case 段内显式赋值（仅 useStyle 允许覆盖解析值；其余字段并集）
+    for (const [name, re, type] of FIELDS) {
+      if (f[name] !== undefined && name !== 'useStyle') continue;
+      const m = seg.match(re);
+      if (!m) continue;
+      f[name] = type === 'b' ? 1 : type === 'f' ? parseFloat(m[1]) : parseInt(m[1], 10);
+    }
+    foodFunc[id] = f;
+  }
+  for (const [id, f] of Object.entries(foodFunc)) {
+    FUNC[id] = { ...(FUNC[id] ?? {}), ...f };
+  }
+  console.error(`foodfunc: ${Object.keys(foodFunc).length} 件（SetFoodDefaults）`);
 }
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemfunc.json`, JSON.stringify(FUNC));
 console.error(`itemfunc: ${Object.keys(FUNC).length} 件`);

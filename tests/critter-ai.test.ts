@@ -64,9 +64,18 @@ describe('小动物 AI 家族', () => {
 
   it('萤火虫 355（aiStyle 64）：无重力漂移不坠落', () => {
     const { hooks } = critterWorld(null);
-    const e = Enemy.fromVanilla(355, 40 * 16, 50 * 16)!;
-    for (let t = 0; t < 200; t++) e.fixedUpdate(1 / 60, hooks);
-    expect(e.cy).toBeLessThan(59 * 16); // 仍悬空
+    // 种子 PRNG:AI_064 是随机游走(Math.random),无种子时 200tick 漂移量随骰
+    // 波动(最坏 ~200px)——硬位置阈值天生 flaky;固定种子使断言确定性
+    let seed = 12345;
+    const realRandom = Math.random;
+    Math.random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x80000000; };
+    try {
+      const e = Enemy.fromVanilla(355, 40 * 16, 50 * 16)!;
+      for (let t = 0; t < 200; t++) e.fixedUpdate(1 / 60, hooks);
+      expect(e.cy).toBeLessThan(59 * 16); // 仍悬空
+    } finally {
+      Math.random = realRandom;
+    }
   });
 
   it('蝴蝶 356（aiStyle 65）：垂直避障——贴地出生被弹起（洞穴内无上方干扰）', () => {

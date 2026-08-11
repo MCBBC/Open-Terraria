@@ -73,6 +73,37 @@ export function loadSave(json: string): ReturnType<typeof loadSaveData> {
   return loadSaveData(JSON.parse(json) as SaveData);
 }
 
+/** 服务器侧世界-only 存档（P3.1 持久化）：tile/箱子/clock/flags/天气，不含玩家/城镇NPC。
+ *  player 字段以空壳占位（格式必填；语义上服务器档无玩家，加载方忽略）。
+ *  注意：serializeSave 的幽灵净化会就地写 store——服务器存储由 setTileSilent/
+ *  loadSaveData 保持 type/flags 一致，该循环为 no-op，活存储不受影响。 */
+export function saveWorldOnly(world: World): string {
+  const st = world.store;
+  const view: SaveStoreView = {
+    type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
+    wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
+    half: st.half, slope: st.slope,
+  };
+  const meta: SaveMeta = {
+    name: world.name, seed: world.seed, w: st.w, h: st.h,
+    spawnX: world.spawnX, spawnY: world.spawnY,
+    groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
+    treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
+    crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
+    timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
+    chests: world.chests, signs: world.signs, flags: world.flags,
+    weather: weatherToSave(world.weather),
+    invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
+      x: world.invasionX, delay: world.invasionDelay },
+    altarCount: world.altarCount,
+  };
+  const placeholderPlayer: SaveData['player'] = {
+    hp: 0, x: world.spawnX * 16, y: world.spawnY * 16,
+    inventory: [], selected: 0,
+  };
+  return serializeSave(view, meta, placeholderPlayer, 0);
+}
+
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
 export function loadSaveData(data: SaveData): { world: World; player: SaveData['player'] } {
