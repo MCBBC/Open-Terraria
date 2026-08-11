@@ -934,5 +934,10 @@ export class Player extends Entity {
     }
   }
 
+  /** 清坠落起点(F10 调试瞬移用):瞬移不结算高空摔伤 */
+  clearFall(): void {
+    this.fallStartY = null;
+  }
+
   draw() { /* 由 Renderer 统一绘制 */ }
 }

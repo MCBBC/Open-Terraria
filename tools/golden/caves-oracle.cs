@@ -988,7 +988,6 @@ for (int i = 0; i < mCaveX.Count; i++)
     CaveOpenater(mCaveX[i], mCaveY[i]);
     Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
 }
-File.WriteAllBytes("/tmp/cs-act3.bin", act);
 Checkpoint("mcopenings");
 
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
@@ -1014,6 +1013,7 @@ Checkpoint("mcopenings");
             {
                 if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
                 else depth += 1.0;
+                if (count <= 6 && side == 0) Console.WriteLine($"CSB x=${x} depth=${depth} count=${count}");
                 int pad = (int)r.Next(15, 20);
                 int yEnd = (int)((double)j + depth + pad);
                 for (int y = 0; y < yEnd && y < H; y++)
@@ -1062,6 +1062,7 @@ Checkpoint("mcopenings");
         }
     }
 }
+File.WriteAllBytes("/tmp/cs-act4.bin", act);
 Checkpoint("beaches");
 
 // ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================

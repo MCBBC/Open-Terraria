@@ -127,6 +127,10 @@ window.addEventListener('keydown', (e) => {
       game.renderer.fullbright = !game.renderer.fullbright;
       ui.toast(game.renderer.fullbright ? '已开灯：全画面无暗影' : '已关灯：恢复正常光照');
       break;
+    case 'F10':
+      e.preventDefault();
+      game.teleportToMouse();
+      break;
     case 'KeyM':
       if (game.renderer.fullMap.open) {
         game.renderer.fullMap.open = false;

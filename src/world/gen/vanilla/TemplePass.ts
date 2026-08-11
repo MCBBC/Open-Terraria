@@ -327,8 +327,11 @@ export function runTemplePass(
       }
     }
   }
-  // 原版 L17578 PlaceTile(i1, j1) → 门顶在 jy-2
-  placeDoorClosed(st, i1, jy - 2, 11);
+  // 原版 makeTemple 尾部（1456 WorldGen.cs:34176）：PlaceTile(i1, num81=jy, 10, style 11)。
+  // PlaceTile case 10（:59867）条件 B：j+1/j+2 空 + j+3 实心 → PlaceDoor(i, j+1)（:31938，
+  // 门占 j..j+2）。此处 jy=地板-4：门顶=jy、门底=jy+2，站地板 jy+3。
+  // 此前放 jy-2 = 整门悬空 2 格（标注实测）
+  placeDoorClosed(st, i1, jy, 11);
   // ---- templeCleaner 两遍(L17579-17588)----
   const cleaner = (x: number, y: number) => {
     if (!st.inBounds(x, y)) return;

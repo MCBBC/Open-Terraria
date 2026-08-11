@@ -98,6 +98,48 @@ if (cell) {
     check('整砖格正常落地(回归)', Math.abs(r2.feet - r2.top) < 2 && r2.onGround, JSON.stringify(r2));
   }
 }
+// ===== 上坡行走(用户报告:卡住+往后退) =====
+// 模式:slope1 在 (sx,sy);左邻 (sx-1,sy) 整砖(高处);下方 (sx,sy+1) 整砖(低处落脚)
+// 玩家站低处块顶,按住 A 向左走上坡 → 应爬到高处块顶(y 下降 16px,x 前进),不卡死
+const up = await page.evaluate(() => {
+  const g = window.__swGame;
+  const st = g.world.store;
+  const gl = Math.floor(g.world.groundLevel);
+  for (let x = 300; x < st.w - 300; x++) {
+    for (let y = gl; y < gl + 40; y++) {
+      const i = st.idx(x, y);
+      if (st.slope[i] !== 1 || !st.flags[i]) continue;
+      const L = st.idx(x - 1, y), B = st.idx(x, y + 1);
+      const solidFull = (j) => st.flags[j] && !st.half[j] && st.slope[j] === 0;
+      if (!solidFull(L) || !solidFull(B)) continue;
+      if (st.flags[st.idx(x - 1, y - 1)] || st.flags[st.idx(x - 1, y - 2)]) continue; // 高处上方净空
+      return { x, y };
+    }
+  }
+  return null;
+});
+if (!up) {
+  check('找到上坡测试点(slope1 台阶)', false, '');
+} else {
+  const start = await page.evaluate((u) => {
+    const g = window.__swGame; const p = g.player;
+    p.x = u.x * 16 + 8 - p.w / 2; p.y = (u.y + 1) * 16 - p.h; p.vx = 0; p.vy = 0;
+    return { x: p.x, feet: p.y + p.h };
+  }, up);
+  await new Promise((r) => setTimeout(r, 400));
+  await page.keyboard.down('KeyA');
+  await new Promise((r) => setTimeout(r, 1600));
+  await page.keyboard.up('KeyA');
+  const end = await page.evaluate(() => {
+    const p = window.__swGame.player;
+    return { x: p.x, feet: p.y + p.h, onGround: p.onGround };
+  });
+  const climbed = start.feet - end.feet; // >0 为爬升
+  const progressed = start.x - end.x;    // >0 为前进
+  check('上坡行走:爬升且前进(不卡死)', climbed >= 10 && progressed >= 8,
+    `start feet ${start.feet} x ${Math.round(start.x)} → end feet ${end.feet} x ${Math.round(end.x)} (爬升 ${climbed}px, 前进 ${Math.round(progressed)}px, onGround ${end.onGround})`);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 await browser.close();
 process.exit(fail ? 1 : 0);

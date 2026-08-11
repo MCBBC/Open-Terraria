@@ -44,6 +44,7 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
   if (dx !== 0) {
     b.x += dx;
     const dir = Math.sign(dx);
+    const oldX = b.x - dx; // 本步移动前位置（原版 vector3）
     const edgeX = dir > 0 ? b.x + b.w : b.x;
     const tx = Math.floor(edgeX / TILE);
     const y0 = Math.floor(b.y / TILE), y1 = Math.floor((b.y + b.h - 0.01) / TILE);
@@ -52,6 +53,10 @@ function moveAxis(b: Body, world: World, dx: number, dy: number): { hitX: boolea
       const span = solidSpan(world, tx, ty);
       // 半砖只占下半：身体底部没超过半砖顶面（ty*16+8）则不拦
       if (span && b.y + b.h > span[0]) {
+        // 原版拦截前提（:2406/:2426）：上一位置【完全】在该格一侧（贴面接近）才拦；
+        // 身体已横向跨在格上（上坡爬升中段,脚沉在斜面下）不拦——交给 slopeCollide
+        // 抬升,否则上坡会被每帧推回卡死
+        if (dir > 0 ? oldX + b.w > tx * TILE + 0.01 : oldX < (tx + 1) * TILE - 0.01) continue;
         // hoik 坡链放行（:2412/:2432）：身后格是配套坡面（同向坡链中段）→ 不拦
         const bj = st.idx(tx - Math.sign(dir), ty);
         if (dir > 0 && (st.slope[bj] === 2 || st.slope[bj] === 4)) continue;

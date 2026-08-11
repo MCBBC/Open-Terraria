@@ -67,6 +67,9 @@ import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
+
+// F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
+const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_DOWN_SCAN = 40, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
@@ -688,6 +691,63 @@ export class Game implements GameHooks {
   fixTexMode = false;
   // 敌人生成开关（F8）：关闭后不再生成新怪物（已有的不受影响）
   enemySpawnEnabled = true;
+
+  /** F10 调试瞬移:鼠标世界位置落脚(须容纳角色:2 宽×3 高净空 + 脚下实心)。
+   *  鼠标点本身不可落脚(实体方块内/悬空)时:先向下扫 40 行(落向鼠标下方的地面),
+   *  再环形 BFS 找最近可落脚点(钻进实体时送到最近地表/洞穴地面)。 */
+  teleportToMouse(): void {
+    const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
+    const st = this.world.store;
+    // fits(tx, ty):ty = 脚下实心行,其上 3 行 2 列净空(树干等非实心不挡)
+    const fits = (tx: number, ty: number): boolean => {
+      if (!st.inBounds(tx, ty) || !st.inBounds(tx + TELEPORT_FIT_W - 1, ty - TELEPORT_FIT_H)) return false;
+      for (let dx = 0; dx < TELEPORT_FIT_W; dx++) {
+        if (!st.isSolid(tx + dx, ty)) return false;
+        for (let dy = 1; dy <= TELEPORT_FIT_H; dy++) {
+          if (st.isActive(tx + dx, ty - dy)) return false;
+        }
+      }
+      return true;
+    };
+    const tx = Math.floor(wx / TILE), ty = Math.floor(wy / TILE);
+    let land: [number, number] | null = fits(tx, ty) ? [tx, ty] : null;
+    if (!land) {
+      // 悬空(洞穴上空/天空):沿鼠标列向下扫,落到下方首个地面
+      for (let d = 1; d <= TELEPORT_DOWN_SCAN && !land; d++) {
+        if (fits(tx, ty + d)) land = [tx, ty + d];
+      }
+    }
+    if (!land) {
+      // 实体内/无地面:环形 BFS 扩散找最近可落脚点
+      outer: for (let r = 1; r <= TELEPORT_RING_MAX; r++) {
+        for (let dx = -r; dx <= r && !land; dx++) {
+          for (const dy of [-r, r]) {
+            if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
+          }
+        }
+        for (let dy = -r + 1; dy <= r - 1 && !land; dy++) {
+          for (const dx of [-r, r]) {
+            if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
+          }
+        }
+      }
+    }
+    if (!land) {
+      this.cb.onToast?.('瞬移失败:附近没有可落脚点');
+      return;
+    }
+    const p = this.player;
+    p.x = land[0] * TILE;                    // 盒左对齐脚下格
+    p.y = (land[1] + 1) * TILE - p.h;        // 盒底贴地面顶
+    p.vx = 0; p.vy = 0;
+    p.netOffX = 0; p.netOffY = 0;            // 清联机平滑偏移(本地瞬移不插值)
+    p.clearFall?.();                         // 清坠落起点:瞬移不结算摔伤
+    this.camera.x = p.cx; this.camera.y = p.cy;  // 相机跟过去,防一帧黑视
+    this.lighting.liquidDirty = true;
+    const liq = st.liquid[st.idx(land[0], land[1] - 1)];
+    this.cb.onToast?.(liq > 0 && st.liquidType[st.idx(land[0], land[1] - 1)] === 2
+      ? `已瞬移至 (${land[0]}, ${land[1]})——脚下是岩浆!` : `已瞬移至 (${land[0]}, ${land[1]})`);
+  }
   marks: Array<{ x: number; y: number }> = [];
   private _annoLatch = false;
 
