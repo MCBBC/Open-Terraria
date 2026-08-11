@@ -358,7 +358,7 @@ function drawLiquidBehindTiles(
       let fL = L.lq > 0; const fR = R.lq > 0, fU = U.lq > 0, fD = D.lq > 240;
       if (!fL && !fR && !fU && !fD) continue; // :4055-4057 四邻无液体跳过
       _dbgCount++;
-      (typeof window !== 'undefined' ? window : {}).__infilCount = _dbgCount;
+      (typeof window !== 'undefined' ? window as unknown as Record<string, number> : {} as Record<string, number>).__infilCount = _dbgCount;
 
       // 液体类型与最大液位(:3940-3965 取最高液位邻居)
       let maxLq = 0, lt = 0;

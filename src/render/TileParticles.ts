@@ -148,9 +148,9 @@ function buildRules(): TileParticleRule[] {
   // 骷髅灯笼 98 L7332-7341
   add({ sheet: 98, color: dust(6), prob: 1 / 40 * 3, fx0: 0, fy0: 0, dx: 8, dy: 4, rise: 1.4, life: 32 });
   // 水蜡烛 49 L7342-7356（1/2！）
-  add({ sheet: 49, color: dust(172), prob: 1 / 2 * 3, fx0: 0, dx: 8, dy: 4, rise: 1.6, life: 30, size: [1, 2] });
+  add({ sheet: 49, color: dust(172), prob: 0.95, fx0: 0, dx: 8, dy: 4, rise: 1.6, life: 30, size: [1, 2] });
   // 和平蜡烛 372 L7357-7371（1/2）
-  add({ sheet: 372, color: dust(242), prob: 1 / 2 * 3, fx0: 0, dx: 8, dy: 4, rise: 1.6, life: 30, size: [1, 2] });
+  add({ sheet: 372, color: dust(242), prob: 0.95, fx0: 0, dx: 8, dy: 4, rise: 1.6, life: 30, size: [1, 2] });
 
   // ---- 腐化族 ----
   for (const [sheet, prob] of [[22, 400], [23, 500], [24, 500], [32, 500], [25, 700], [112, 700]] as const) {
@@ -172,16 +172,16 @@ function buildRules(): TileParticleRule[] {
   // 丛林植物成熟 61 L7521-7528：fx==144
   add({ sheet: 61, color: dust(44), prob: 1 / 60 * 3, fx0: 144, rise: 0.3, life: 50, size: [1.5, 3] });
   // 篝火 215 L6893-6908（fy==0 时 1/3 smoke；fy<36 都算点燃侧）+ 悬挂火盆 592 L6909-6924
-  add({ sheet: 215, color: dust(31), prob: 1 / 3 * 3, fy0: 0, dx: 16, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
-  add({ sheet: 592, color: dust(31), prob: 1 / 3 * 3, fy0: 18, dx: 8, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+  add({ sheet: 215, color: dust(31), prob: 0.9, fy0: 0, dx: 16, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
+  add({ sheet: 592, color: dust(31), prob: 0.9, fy0: 18, dx: 8, dy: -2, rise: 0.9, life: 60, size: [1.5, 3], damp: 0.985 });
   // 壁炉 405 L7493-7503（点燃帧 1/20）
   add({ sheet: 405, color: dust(6), prob: 1 / 20 * 3, fx0: 18, fy0: 18, dx: 16, dy: -4, rise: 1.0, life: 40, size: [1.5, 2.5] });
   // 烟囱 406 L6925-6946（fy==54&&fx==0 时 1/3 蒸汽）
-  add({ sheet: 406, color: dust(825), prob: 1 / 3 * 3, fx0: 0, fy0: 54, dx: 16, dy: -2, rise: 0.7, life: 80, size: [2, 3.5], damp: 0.99 });
+  add({ sheet: 406, color: dust(825), prob: 0.9, fx0: 0, fy0: 54, dx: 16, dy: -2, rise: 0.7, life: 80, size: [2, 3.5], damp: 0.99 });
   // 造雾机 565 L6883-6892（fx==0&&fy==18 时 1/3 雾团）
-  add({ sheet: 565, color: dust(1202), prob: 1 / 3 * 3, fx0: 0, fy0: 18, dx: 16, dy: 8, rise: 0.25, life: 110, size: [3, 5], damp: 0.995 });
+  add({ sheet: 565, color: dust(1202), prob: 0.9, fx0: 0, fy0: 18, dx: 16, dy: 8, rise: 0.25, life: 110, size: [3, 5], damp: 0.995 });
   // 守护者熔炉 463 L7097-7130（蒸汽近似）
-  add({ sheet: 463, color: dust(825), prob: 1 / 3 * 3, fy0: 54, fx0: 0, dx: 16, dy: -2, rise: 0.6, life: 70, size: [2, 3.5], damp: 0.99 });
+  add({ sheet: 463, color: dust(825), prob: 0.9, fy0: 54, fx0: 0, dx: 16, dy: -2, rise: 0.6, life: 70, size: [2, 3.5], damp: 0.99 });
   add({ sheet: 463, color: dust(274), prob: 1 / 13 * 3, fy0: 18, pred: (fx) => fx === 0 || fx === 36, rise: 0.3, life: 60, size: [1, 2] });
   // 水滴/岩浆滴石 373/374 L693-699+7714（落滴；prob 由 num*2=120/240）
   add({ sheet: 373, color: dust(153), prob: 1 / 60 * 3, rise: -1.0, life: 50, grav: 0.12, size: [1.5, 2.5] });
@@ -207,7 +207,7 @@ function buildRules(): TileParticleRule[] {
 
   // ---- Tier 2 机器族 ----
   // 泡泡机 244 L6860-6882（fx==18&&fy==18 时 1/2，五档大小近似两档）
-  add({ sheet: 244, color: '#DCE8FF', prob: 1 / 2 * 3, fx0: 18, fy0: 18, dx: 16, dy: 8, rise: 0.6, life: 90, size: [1.5, 3.5], damp: 0.99 });
+  add({ sheet: 244, color: '#DCE8FF', prob: 0.95, fx0: 18, fy0: 18, dx: 16, dy: 8, rise: 0.6, life: 90, size: [1.5, 3.5], damp: 0.99 });
   // 音乐盒 139 L7077-7096（fx==36 && fy%36==0；timeForVisualEffects%7 由 tickCount%21 近似——由发射器传 tick）
   add({ sheet: 139, color: '#C8A8E8', prob: 1 / 3 * 3, fx0: 36, pred: (_fx, fy) => fy % 36 === 0, dx: 16, dy: 4, rise: 0.5, sideways: 0.3, life: 70, size: [1.5, 2.5] });
   // 钟乳石滴水 165 L7150-7160（fx 162-214 && fy==72）
