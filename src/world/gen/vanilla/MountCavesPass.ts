@@ -111,7 +111,6 @@ function caveOpenater(st: TileStore, rng: RNG, i: number, j: number): void {
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
     const r = num1 * rng.int(80, 119) * 0.01;
-    if (i === 2998) console.log(`JSCO px=${px} py=${py} r=${r} n=${num1}`);
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
         const dx = Math.abs(x - px), dy = Math.abs(y - py);
@@ -152,7 +151,6 @@ function cavinator(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     if (y0 < 0) y0 = 0;
     if (y1 > st.h) y1 = st.h;
     const r = num1 * rng.int(80, 119) * 0.01;
-    if (i === 2998 && num4 > 30) console.log(`JSCV px=${px} py=${py} r=${r} n=${num1} left=${num4}`);
     // ★地牢命中即整轮终止（cs:80753-80762）：tileDungeon/墙 dungeon → num4=0
     //  （此前缺失：跑满全程多耗每步 3 骰 → 条件性流漂移）
     outer:

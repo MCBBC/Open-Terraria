@@ -431,15 +431,16 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
         if (num35 === 4) px += 5;
         py += 5;
       }
-      // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :50722-50760：
-      //   NPC614+弹281 计数 ≥4 拒绝；NPC614 无对应实体，此处只数 281 弹）
       // num36 3/4 原版发 PortalGunBolt 601（WorldGen.cs:50622-50631）——传送门弹未实现，
       // 沿用巨石弹体近似（速度/伤害/位置已按原版）
       const kind: TrapShotKind = num36 === 0 ? 'cannonball' : num36 === 1 ? 'bunny' : 'boulder';
-      if (kind === 'bunny' && ctx.countProjectiles('bunny', px, py, Infinity) >= 4) return true;
-      // 全局冷却置位（Wiring.cs:1334-1339：大炮 120 / 兔兔炮 480）
+      // 全局冷却置位（Wiring.cs:1334-1339：大炮 120 / 兔兔炮 480）——先于弹内判定，
+      // 与原版一致（冷却在 HitWireSingle 置位，BunnyCannonCanFire 在 ShootFromCannon 内）
       if (num36 === 0) w.cannonCoolDown = 120;
       if (num36 === 1) w.bunnyCannonCoolDown = 480;
+      // 兔兔炮场内上限（WorldGen.cs:50697-50701 → BunnyCannonCanFire :50722-50760：
+      //   NPC614+弹281 计数 ≥4 拒绝；NPC614 无对应实体，此处只数 281 弹）
+      if (kind === 'bunny' && ctx.countProjectiles('bunny', px, py, Infinity) >= 4) return true;
       ctx.shootProjectile(px, py, vx, vy, damage, kind);
       return true;
     }

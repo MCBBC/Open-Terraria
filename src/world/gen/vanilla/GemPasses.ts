@@ -19,8 +19,12 @@ const STONE = TILE_BY_KEY['stone']!;
 const GEMMABLE = idsByVanillaSheet(1, 40, 59, 60, 70, 147, 161);
 /** 冰系落脚（:20846）：雪/冰/薄冰/雪砖 */
 const ICE_FLOOR = idsByVanillaSheet(147, 161, 162, 224);
-/** 宝石墙（WallID.cs:165-175）：AmethystUnsafe=48 … DiamondUnsafe=53（=48+序号） */
+/** 宝石墙（WallID.cs:165-175）：AmethystUnsafe=48 … DiamondUnsafe=53（=48+序号）。
+ *  序号 0-5 = 紫/黄/蓝/翠/红/钻（与 randGem/暴露晶簇 style 同序） */
 const GEM_WALL_BASE = 48;
+/** 宝石矿 tile 内部 id（序号同上） */
+const GEM_TILES = ['gem_amethyst', 'gem_topaz', 'gem_sapphire', 'gem_emerald', 'gem_ruby', 'gem_diamond']
+  .map((k) => TILE_BY_KEY[k]!);
 
 /** 暴露晶簇 style 权重（:20857-20859 / PlaceTile randGem 序）：紫 3/黄 3/蓝 2/翠 2/红 1/钻 1（共 12） */
 function randGemStyle(rng: RNG): number {
@@ -87,7 +91,7 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
     let cx = sx, cy = sy;
     for (let step = 0; step < 200; step++) {
       const gem = pool[rng.nextInt(pool.length)];
-      const gemTileId = [67, 66, 63, 65, 64, 68][gem];
+      const gemTileId = GEM_TILES[gem];
       const conv = (x: number, y: number) => {
         if (!st.inBounds(x, y)) return;
         const ii = st.idx(x, y);

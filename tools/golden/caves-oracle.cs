@@ -920,7 +920,6 @@ void CaveOpenater(int i, int j)
         if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
         if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
         num2 = num * (int)r.Next(80, 120) * 0.01;
-        if (i == 2998) Console.WriteLine($"CSCO px={px} py={py} r={num2} n={num}");
         for (int x = x0; x < x1; x++)
             for (int y = y0; y < y1; y++)
             {
@@ -954,7 +953,6 @@ void Cavinator2(int i, int j, int steps)
         if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
         if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
         num2 = num * (int)r.Next(80, 120) * 0.01;
-        if (i == 2998 && num4 > 30) Console.WriteLine($"CSCV px={px} py={py} r={num2} n={num} left={num4}");
         bool stop = false;
         for (int x = x0; x < x1 && !stop; x++)
         {
@@ -966,7 +964,8 @@ void Cavinator2(int i, int j, int steps)
                     int ti = y * W + x;
                     if ((act[ti] == 1 && TILE_DUNGEON.Contains(typ[ti])) || WALL_DUNGEON.Contains(wal[ti]))
                     { num4 = 0; stop = true; break; }
-                    if (act[ti] == 1 && (!NOT_CLEAR.Contains(typ[ti]) || typ[ti] == 53)) { /* skip */ }
+                    // 原版 cs:80763：active && (!CanBeCleared || type==53) → continue（跳过不可清/沙）
+                    if (act[ti] == 1 && (NOT_CLEAR.Contains(typ[ti]) || typ[ti] == 53)) { /* skip */ }
                     else if (act[ti] == 1) act[ti] = 0;
                 }
                 if (num4 <= 0) break;

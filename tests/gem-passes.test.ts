@@ -49,7 +49,7 @@ describe('宝石系统世界生成', () => {
   });
 
   it('ExposedGems：地下段产出单格晶簇；琥珀段在沙岩墙处 3×3', () => {
-    const { st, gs } = makeWorld(400, 300);
+    const { st, gs } = makeWorld(400, 500);
     // 铺一块沙岩墙区（187；空气格供琥珀晶簇放置）
     for (let x = 100; x < 120; x++) for (let y = 100; y < 110; y++) {
       st.setTileSilent(x, y, 0);
