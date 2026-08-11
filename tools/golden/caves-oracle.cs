@@ -265,7 +265,7 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             for (int y = y0; y < y1; y++)
             {
                 int ti = y * W + x;
-                if (GP2C != null) { GP2C_N++; if (GP2C_N % 200000 == 0) GP2C.Add($"c{GP2C_N}={(int)r.Peek()}"); }
+                if (GP2C != null) { GP2C_N++; if (GP2C_N % 10000 == 0) GP2C.Add($"c{GP2C_N}={(int)r.Peek()}"); }
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -299,7 +299,12 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                     {
                         // Main.tileStone[type]：宝石族——本链放置类型不含，恒 false
                         if (NOT_CLEAR.Contains(cur)) flag4 = true;
-                        if (cur == 1) { if (type == 59 && y < worldSurface + (int)r.Next(-50, 50)) flag4 = true; }
+                        if (cur == 1 && type == 59)
+                        {
+                            int f4r = (int)r.Next(-50, 50);
+                            if (x == 3405 && y == 308) Console.WriteLine($"CF4 roll={f4r} y={y} wS={worldSurface} pass={y < worldSurface + f4r} py={py:0.0}");
+                            if (y < worldSurface + f4r) flag4 = true;
+                        }
                         else if (FLAG3_ALWAYS.Contains(cur)) flag4 = true;
                         else if (cur == 53)
                         {

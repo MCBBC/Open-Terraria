@@ -284,14 +284,13 @@ export function drawTreeCell(
         px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
       return;
     }
-    // 干身（原版 TileDrawing case 323：20×20 帧 22px 步长，底部对齐；
-    // frameY 是**有符号像素偏移**——棕榈树干随高度倾斜，65534 = -2 的 u16 回绕）
+    // 干身（原版 GetTileDrawData case 323：20×20 顶锚定、X 居中 -2——向下溢出
+    // 4px 盖住下方格顶,干底接缝由下溢覆盖;frameY 是**有符号像素偏移**——
+    // 棕榈树干随高度倾斜，65534 = -2 的 u16 回绕）
     const img323 = atlas.ensureVImage('vanilla/Tiles_323.png');
     if (!img323 || fx + 20 > img323.width) return;
     const lean = fy >= 32768 ? fy - 65536 : fy; // 原版 vector2.X += frameY
-    const pad323 = treeFrameBottomPad(img323, fx, 0);
-    const artH323 = 20 - pad323;
-    ctx.drawImage(img323, fx, 0, 20, 20, px - 2 + lean, py + TILE - artH323, 20, 20);
+    ctx.drawImage(img323, fx, 0, 20, 20, px - 2 + lean, py, 20, 20);
     return;
   }
   // 蘑菇树（tile 72）：独立渲染路径——U≥36 标记帧 = 巨蘑菇顶（Shroom_Tops，60×42、62px 步长、底部锚定）
@@ -374,36 +373,12 @@ export function drawTreeCell(
     : atlas.ensureVImage(`vanilla/Tiles_${sheet}.png`);
   if (!img) return;
   if (fx + 20 <= img.width && fy + 20 <= img.height) {
-    // 水平：帧内美术像素占中间 16px（两侧 2px 透明边距），整体 -2 后精确落满本格
-    // 垂直：各帧美术高度不一（满高 20 行 / 短帧仅顶部 16 行）——按实际美术高度
-    // 底部对齐：满高帧向上溢出 4px 与上格交叠，短帧贴齐格底，任何上下组合都无缝
-    const pad = treeFrameBottomPad(img, fx, fy);
-    const artH = 20 - pad;
-    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py + TILE - artH, 20, 20);
+    // 原版 GetTileDrawData case 5(:4688-4694)+ DrawBasicTile(:1019-1025):
+    // 20×20 精灵**顶锚定**、X 居中 -2((20-16)/2)——向下溢出 4px 压住下方格顶,
+    // 干底与草块的接缝由下溢覆盖。此前按测量美术高度底锚定,整体上移 4px,
+    // 干底停在格边界 → wld 导入出现透明接缝(用户标注)
+    ctx.drawImage(img, fx, fy, 20, 20, px - 2, py, 20, 20);
   }
-}
-
-/** 树干帧底部透明行数（缓存）：扫描 20×20 区域最下方不透明行 */
-const treePadCache = new Map<string, number>();
-function treeFrameBottomPad(img: HTMLImageElement, fx: number, fy: number): number {
-  const key = `${img.width}:${fx},${fy}`;
-  const hit = treePadCache.get(key);
-  if (hit !== undefined) return hit;
-  let pad = 20;
-  try {
-    const c = document.createElement('canvas');
-    c.width = 20; c.height = 20;
-    const cx = c.getContext('2d', { willReadFrequently: true })!;
-    cx.drawImage(img, fx, fy, 20, 20, 0, 0, 20, 20);
-    const d = cx.getImageData(0, 0, 20, 20).data;
-    outer: for (let y = 19; y >= 0; y--) {
-      for (let x = 0; x < 20; x++) {
-        if (d[(y * 20 + x) * 4 + 3] > 40) { pad = 19 - y; break outer; }
-      }
-    }
-  } catch { /* 跨域等异常时按满高处理 */ }
-  treePadCache.set(key, pad);
-  return pad;
 }
 
 /** 仙人掌渲染（tile 80，移植 TEdit WorldRenderXna 5467-5706）：

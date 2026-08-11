@@ -114,15 +114,16 @@ describe('AI_093 荷兰飞盗船 491', () => {
 });
 
 describe('AI_102 沙尘精 541', () => {
-  it('walker 核贴地逼近玩家;ai[0] 攻击循环推进并在 54t 放沙暴标记', () => {
+  it('walker 核贴地逼近玩家;ai[0] 攻击循环推进并在 54t 放沙暴标记（粒子代）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 130, y: 105 });
     const e = spawn(h, 541, 100, 108);
     tick(h, 60, [e]);
     expect(e.ai0).toBeGreaterThan(0);                                // 起手 1 → 递增
     expect(Math.abs(e.cx - 130 * TILE)).toBeLessThan(46 * TILE);     // 向玩家侧移动
-    const marks = h.projectiles.filter((p) => p.projId === 15 && p.damage === 0);
-    expect(marks.length).toBeGreaterThan(0);                         // 658 标记（代渲 15,0 伤）
+    // 658 沙暴标记原版 damage 0 纯视觉 → 粒子代,不生成弹体（见 RENDER_PROXY 注）
+    expect(h.projectiles.length).toBe(0);
+    expect(e.ai0).toBeGreaterThanOrEqual(54);                        // 已过 54t 标记帧
   });
 
   it('135t 攻击收尾 → 负值冷却（半血免击退）', () => {

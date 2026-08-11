@@ -2462,8 +2462,9 @@ export class Renderer {
       case 4: {
         // 举过头（:50313-50338）：rot=0；offX = fw/2-13（3601/5114/5120 再 -10）
         // offY = fh/2+4（5114 再 -2）——使用中身体行 2（双手举过头顶）
-        offX = fw * 0.5 - 13;
-        offY = fh * 0.5 + 4;
+        const vid4 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        offX = fw * 0.5 - 13 - (vid4 === 3601 || vid4 === 5114 || vid4 === 5120 ? 10 : 0);
+        offY = fh * 0.5 + 4 + (vid4 === 5114 ? -2 : 0);
         break;
       }
       case 5: {
@@ -2471,7 +2472,9 @@ export class Renderer {
         // 法杖族钉 MountedCenter+瞄准向量×6；默认 X=中心-2*dir、Y=中心-fh/2
         rot = swing.aim ?? 0;
         const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
-        if (vid >= 0 && STAFF_ITEMS.has(vid)) {
+        if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; }          // :50343
+        else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; }    // :50349
+        else if (vid >= 0 && STAFF_ITEMS.has(vid)) {
           offX = Math.cos(rot) * 6;
           offY = p.h * 0.5 + Math.sin(rot) * 6;
         } else {

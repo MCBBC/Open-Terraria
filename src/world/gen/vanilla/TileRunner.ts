@@ -105,7 +105,12 @@ export function tileRunner(
         // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
-        if (GP2_ON) { GP2_N++; if (GP2_N % 200000 === 0) GP2.push(`c${GP2_N}=${rng.vanilla.peek()}`); }
+        if (GP2_ON && steps === 10000) {
+          GP2_N++;
+          if ((GP2_N >= 1110000 && GP2_N <= 1121000 && GP2_N % 100 === 0) || GP2_N % 50000 === 0) {
+            GP2.push(`c${GP2_N}=${rng.vanilla.peek()}`);
+          }
+        }
         const ci0 = st.idx(x, y);
         const cdef = TILE_DEFS[st.type[ci0]];
         if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
@@ -154,7 +159,11 @@ export function tileRunner(
             if (NOT_CLEARABLE.has(cur)) flag4 = true;
             if (cur === T.STONE) {
               // 泥不替换近地表的石头(±50 抖动)
-              if (type === MUD && y < gs.worldSurface + rng.int(-50, 49)) flag4 = true;
+              if (type === MUD) {
+                const f4r = rng.int(-50, 49);
+                if (x === 3405 && y === 308 && Math.abs(y - py) < 700) console.log(`F4@${x},${y} roll=${f4r} y=${y} wS=${gs.worldSurface} thr=${gs.worldSurface + f4r} pass=${y < gs.worldSurface + f4r} py=${py.toFixed(1)}`);
+                if (y < gs.worldSurface + f4r) flag4 = true;
+              }
             } else if (FLAG3_ALWAYS.has(cur)) {
               // 金砖/雪/云/荧光菇/雨云/雪云/717-719:无条件保护
               flag4 = true;

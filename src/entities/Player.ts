@@ -77,6 +77,7 @@ export class Player extends Entity {
   landImpactVy = 0;
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
+  stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
    *  本地玩家恒 0 */
@@ -787,11 +788,16 @@ export class Player extends Entity {
     if (fallVy < -0.1) this.fallStartY = null; // 重新上升则重置
 
     this.dropThrough = !!this.inputDown;
+    this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
+    const preY = this.y;
     moveAndCollide(this, world, this.vx, this.vy);
     this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
+    // StepUp 抬升检测（原版 gfxOffY）：水平移动中被抬升 ≤16px → 渲染缓动补偿
+    const lifted = preY - this.y;
+    if (this.inputX !== 0 && lifted > 0.5 && lifted <= 16.1) this.stepRenderY = lifted;
 
     // 边缘滑落：已移除（改为收窄支撑判定宽度——本质相同但无侧推力）
     if (false) {
@@ -824,33 +830,13 @@ export class Player extends Entity {
       }
     }
 
-    // 自动上台阶：贴地行走撞 1 格高台阶且上方净空 → 直接踏上去（无需跳跃）
-    // 注意碰撞后 vx 已清零，用输入方向判断
+    // 自动上台阶：统一走原版 Collision.StepUp（moveAndCollide 内 stepUp 门，
+    // Physics/TileCollision.ts applyStepUp 1:1）——此前自研版只处理玩家，
+    // 敌人/小动物卡死半砖；原版玩家与 NPC 共用同一 StepUp。视觉缓动保留：
+    // 每帧检测被抬升时记录补偿高度
     if (this.onGround && this.hitWall && this.inputX !== 0) {
-      const dir = this.inputX;
-      const frontX = dir > 0 ? this.x + this.w + 1 : this.x - 1;
-      const fx = Math.floor(frontX / TILE);
-      const fy = Math.floor((this.y + this.h - 1) / TILE);
-      const stepSolid = world.store.isSolid(fx, fy);
-      const headroom = !world.store.isSolid(fx, fy - 1) && !world.store.isSolid(fx, fy - 2);
-      if (stepSolid && headroom) {
-        const ny = this.y - TILE;
-        // 抬升后自身所占空间必须无实心
-        let clear = true;
-        const tx0 = Math.floor(this.x / TILE), tx1 = Math.floor((this.x + this.w - 1) / TILE);
-        const ty0 = Math.floor(ny / TILE), ty1 = Math.floor((ny + this.h - 1) / TILE);
-        for (let tx = tx0; tx <= tx1 && clear; tx++) {
-          for (let ty = ty0; ty <= ty1; ty++) {
-            if (world.store.isSolid(tx, ty)) { clear = false; break; }
-          }
-        }
-        if (clear) {
-          this.y = ny;
-          this.x += dir * 2.5;
-          this.onGround = true;
-          this.stepRenderY = TILE; // 渲染补偿：从旧高度缓升，消除瞬移顿挫
-        }
-      }
+      // 碰撞被拦但 StepUp 已抬升过（y 比上一帧高出一格内）→ 渲染缓动
+      void 0;
     }
     // 台阶视觉缓动：每帧向 0 收敛
     if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;

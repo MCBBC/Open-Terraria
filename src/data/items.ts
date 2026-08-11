@@ -93,7 +93,9 @@ item({ key: 'chest', name: '宝箱', tile: 'chest', maxStack: 99 });
 // ---- 材料 ----
 item({ key: 'gel', name: '凝胶', desc: '史莱姆的残留物' });
 item({ key: 'acorn', name: '橡实', desc: '种在草块上会长成树', maxStack: 99, tile: 'acorn_sapling' });
-item({ key: 'mushroom_item', name: '蘑菇', heal: 15, value: 1 });
+item({ key: 'mushroom_item', name: '蘑菇', heal: 15, value: 1,
+  // 原版 item 5（Item.cs:1424）：useStyle 2 咀嚼、healLife 15、potion=true（触发药水病）
+  potion: { buff: 'resistance', duration: 60, isHealType: true } });
 item({ key: 'copper_ore', name: '铜矿', desc: '可在熔炉炼成铜锭' });
 item({ key: 'iron_ore', name: '铁矿' });
 item({ key: 'silver_ore', name: '银矿' });
@@ -104,7 +106,9 @@ item({ key: 'silver_bar', name: '银锭' });
 item({ key: 'gold_bar', name: '金锭' });
 item({ key: 'lens', name: '晶状体', desc: '恶魔眼的眼睛' });
 item({ key: 'suspicious_eye', name: '可疑的眼球', desc: '夜间使用会召唤不祥之物…', maxStack: 20 });
-item({ key: 'lesser_healing_potion', name: '弱效治疗药水', heal: 50, maxStack: 30 });
+item({ key: 'lesser_healing_potion', name: '弱效治疗药水', heal: 50, maxStack: 30,
+  // 原版 188 治疗药水族（DefaultToHealingPotion）：useStyle 9 举杯、potion=true
+  potion: { buff: 'resistance', duration: 60, isHealType: true } });
 item({ key: 'coin_copper', name: '铜币', maxStack: 999, value: 1 });
 item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
 item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });

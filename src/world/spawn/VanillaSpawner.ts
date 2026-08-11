@@ -228,6 +228,14 @@ export class VanillaSpawner {
   private noWorms = false;         // 原版 wallHouse（房屋内不出蠕虫）
   private skyMob = false;
   private surfaceSpawn = false;
+  /** 本轮 spawnFriendly（NPC.cs:711-832 掷骰）：true = 本轮只走友好小动物链
+   *  （SpawnAnNPC `else if (spawnFriendly)` :2006 段）;false = 小动物/宝石鼠兔/水黾段全跳过 */
+  private spawnFriendlyCycle = false;
+  /** Game 每轮尝试前置入(原版在 GetSpawnRate 同一例程内掷,本仓拆到 Game 侧以便
+   *  同步 spawnRate/maxSpawns 修正;语义同序:掷骰失败时的 spawnRate 罚倍由 Game 应用) */
+  setFriendlyCycle(v: boolean): void {
+    this.spawnFriendlyCycle = v;
+  }
   private underGround = false;      // 原 underGround = worldSurface < y < rockLayer
   private deeperThanRockLayer = false;
   private isOcean = false;
@@ -530,7 +538,8 @@ export class VanillaSpawner {
    *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
    *  UnderworldLayer 暂用 h-200 近似（待接世界生成精确值） */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
-    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false): { spawnRate: number; maxSpawns: number } {
+    playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
+    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false): { spawnRate: number; maxSpawns: number } {
     // 月事件覆盖（L681-685）：南瓜月/霜月且玩家在地表（remix 省略）→
     // rate=20、max=⌊5×(2+0.3n)⌋（单人 11）；先于 invaders 覆盖（原版即此顺序）
     if (this.moonEvent && playerYpx < this.world.groundLevel * 16) {
@@ -634,7 +643,43 @@ export class VanillaSpawner {
     if (maxSpawns > 15) maxSpawns = 15;
     // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）
     if (this.ZoneDungeon && !this.downedBoss3) spawnRate = 10;
+    // ---- spawnFriendly 掷骰（NPC.cs:711-832;原版在 SetSpawnFlags 与 rate 同例程内）----
+    // 外层门 :710：!invaders && 非血/南瓜/霜月(或白天) && 非日食白天 && !腐化/猩红/陨石/旧军
+    // （墓地/Skyblock/infectedSeed 变体未实装;eclipse/陨石/旧军系统缺席恒 false）
+    // ★此前未移植:小动物链（SpawnAnNPC :2006 `else if (spawnFriendly)`）恒放行 →
+    //  无城镇 NPC 也会满地兔鼠(甚至刷到浮空岛——原版岛边 townNPCs=0 永不出小动物)
+    this.spawnFriendlyCycle = false;
+    if (!this.invaders && ((!bloodMoon) || dayTime) && !zoneEvil) {
+      const deep = playerYpx / TILE > w.h - 200;   // :711 player.Center.Y/16 > UnderworldLayer
+      if (deep) {
+        // 地狱侧(:713-759):友好概率低
+        if (townNPCs === 1) {
+          if (this.rateRng() < 1 / 10) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 1.25);
+        } else if (townNPCs === 2) {
+          if (this.rateRng() < 1 / 5) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 1.5);
+        } else if (townNPCs >= 3) {
+          if (this.rateRng() < 1 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 2);
+        }
+      } else {
+        // 地表/洞穴侧(:760-831):高友好率;townNPCs==0 → 永不友好(不出小动物)
+        if (townNPCs === 1) {
+          if (this.rateRng() < 1 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 2);
+        } else if (townNPCs === 2) {
+          if (this.rateRng() < 2 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 3);
+        } else if (townNPCs >= 3) {
+          this.friendlyHit();   // :824 非 ftw 恒友好(专家 1/30 例外未实装)
+        }
+      }
+    }
     return { spawnRate, maxSpawns };
+  }
+  /** friendly 命中(:723/:740/:756/:804/:828):本仓签名限制,乘数由调用侧返回值体现——
+   *  这里直接改 spawnFriendlyCycle;maxSpawns×0.5(地狱)/×0.6(地表) 简化统一按 0.6 */
+  private friendlyHit(): void {
+    this.spawnFriendlyCycle = true;
+  }
+  private rateRng(): number {
+    return Math.random();
   }
 
   /** FindSpawnTile（L879-927）+ GetSpawnArea（L841-877）1:1：
@@ -1216,8 +1261,9 @@ export class VanillaSpawner {
       return D(64);               // 粉水母兜底（L1830-1833）
     }
     // ---- 水池段（L1839-1905）----
-    //  两支 else-if（原版 L1839 / L1895）：A 命中（含 flag9 已置）则不再走 B
-    if (this.waterTile && !this.isOcean) {
+    //  两支 else-if（原版 L1839 / L1895,均带 !spawnFriendly 门）;友好轮落 SpawnAnNPC
+    //  :2006 的 spawnFriendly 段(水中小动物 :2136+),本仓该段走水中小动物近似于 A 段内
+    if (this.waterTile && !this.isOcean && !this.spawnFriendlyCycle) {
       // 门 A（L1839）：!spawnFriendly && waterTile && ((deeperThanRockLayer && 1/2) || 丛林草 60)
       if ((this.deeperThanRockLayer && N(2)) || t === T.JUNGLE_GRASS) {
         let flag9 = false;
@@ -1264,7 +1310,7 @@ export class VanillaSpawner {
     //  tile 门 = case 2/109/477/492 或地下任意（default: y>worldSurface → goto case 2）；
     //  147/161/60/53 走各自 switch case（雪原/丛林蛙/沙地小动物），须排除
     const gemTileOK = !(t === T.JUNGLE_GRASS || t === T.SNOW || t === T.ICE || t === T.SAND);
-    if (this.dayTime && !this.waterTile && this.world.weather.raining && gemTileOK
+    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.world.weather.raining && gemTileOK
       && !friendlyBlocked
       && this.deeperThanRockLayer && this.spawnTileY <= st.h - 200) {
       if (N(5)) return D(this.getGemSquirrelToSpawn(rng));
@@ -1272,7 +1318,7 @@ export class VanillaSpawner {
     }
     // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
     //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）
-    if (this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
+    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
       (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === 477)) {
       if (N(15)) {
         if (t === T.SNOW || t === T.SNOW_BRICK) {
@@ -1295,7 +1341,7 @@ export class VanillaSpawner {
     //  未命中则原版 switch 空过、落后续 else-if 链（地牢/陨石…），此处同序放行。
     //  tile 门同雨天支（case 2/default-underground；147/161/60/53 各有独立 case 须排除）。
     //  （原版该块外层为 spawnFriendly 小动物段；本仓小动物沿用 dayTime 简化门）
-    if (this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK && !friendlyBlocked
+    if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && !this.surfaceSpawn && gemTileOK && !friendlyBlocked
       && this.spawnTileY >= this.world.rockLevel && this.spawnTileY <= st.h - 200) {
       if (N(3)) {
         if (N(5)) return D(this.getGemSquirrelToSpawn(rng));

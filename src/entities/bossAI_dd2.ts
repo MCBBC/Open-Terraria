@@ -145,16 +145,17 @@ export const DD2_EVENT_HOOKS = {
 // 弹幕：DD2/沙漠族弹体贴图全部缺失（public/sprites/vanilla 无 Projectile_{240,658,
 // 673,674,675,682,686,687}.png）。ProjectileID.cs：240 CannonballHostile（荷兰大炮
 // 炮弹,14 速-5 上抛）/ 658 SandnadoHostileMark（沙暴标记,damage 0 纯视觉尘柱）/
-// 673 DD2DarkMageRaise（召骷髅阵眼）/ 674 DD2DarkMageHeal（治疗脉动,落地 40t 后
-// 1000px 内友军 +500）/ 675 DD2DarkMageBolt（暗影矢 14 速 40 伤）/ 682
+// 673 DD2DarkMageRaise（召骷髅阵眼,0 伤）/ 674 DD2DarkMageHeal（治疗脉动,落地 40t
+// 后 1000px 内友军 +500,0 伤）/ 675 DD2DarkMageBolt（暗影矢 14 速 40 伤）/ 682
 // DD2LightningBugZap（电弧 10 速 50 伤）/ 686 DD2BetsyFireball（空袭火球,继承机速）/
 // 687 DD2BetsyFlameBreath（喷焰,10 速横冲）。
+// 伤害弹（240/675/682/686/687）走 Arrow + RENDER_PROXY 代渲;三枚 0 伤效果弹
+//（658/673/674）不生成弹体——Arrow 命中敌怪会 hurt(0)（假命中音+0 伤害数字）且
+// 瞬间耗尽 pierce,与原版"纯视觉/纯疗效"语义相反 → 降级为粒子（674 疗效已由
+// darkMageAI 在节拍帧直接结算）。
 // ---------------------------------------------------------------------------
 const RENDER_PROXY: Record<number, number> = {
   240: 21,    // 炮弹 → Bone(圆弹体)
-  658: 15,    // 沙暴标记 → BallofFire(尘柱代)
-  673: 173,   // 召骷髅阵眼 → EnchantedBeam
-  674: 173,   // 治疗脉动 → EnchantedBeam
   675: 173,   // 暗影矢 → EnchantedBeam
   682: 173,   // 电弧 → EnchantedBeam
   686: 15,    // 火球 → BallofFire
@@ -514,10 +515,14 @@ function walkerKernel(
     x[2] += 1;
     if (player && !player.dead) e.facing = player.cx > e.cx ? 1 : -1;
   }
-  // ---- 施法僵直（cs:42387-42389 / :66554-66555） ----
+  // ---- 施法僵直（cs:42387-42389 / :66554-66555）：AI 早退但碰撞步照跑 ----
   if (castDamp > 0) {
     e.vx *= castDamp;
     e.vy *= castDamp;
+    oldVel.set(e, { x: e.vx, y: e.vy });
+    moveAndCollide(e, game.world, e.vx, e.vy);
+    if (e.hitWall) e.vx = 0;
+    if (e.onGround || e.hitHead) e.vy = 0;
     return;
   }
   // ---- 前方/底部/头顶探测（cs:42428-42475 / :66594-66651） ----
@@ -642,7 +647,10 @@ export function sandElementalAI(e: Enemy, game: GameHooks, player: Player | null
           const my = bottomY - 15;
           if (canSpawnSandstormHostile(game, col, my)) picks.push({ x: col, y: my });
         }
-        for (const q of picks) shootD(game, q.x * TILE, q.y * TILE, 0, 0, 0, 658, 900);
+        for (const q of picks) {
+          // 658 沙暴标记：原版 damage 0 纯视觉（尘柱 900t）——粒子代,不生成弹体
+          game.spawnParticles(q.x * TILE + 8, q.y * TILE + 8, '#E0A050', 8, 1.4, { life: 60, grav: -0.06 });
+        }
       } else {
         e.ai0 = -200;                               // 太远 → 缩短冷却（:42344-42347）
       }
@@ -1146,9 +1154,8 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.ai0 -= 1;                                     // 注：109 是递减（102 递增）
     // 召骷髅（:66431-66435）：ai[1]==2 且 ai[0]==64 → 673 阵眼 + RaiseGoblins
     if (e.ai1 === 2 && e.ai0 === 64) {
-      shootD(game, e.cx + e.facing * 24, e.cy - 40, 0, 0, 0, 673, 900);
       DD2_EVENT_HOOKS.raiseGoblins?.(game, e.cx, e.cy);
-      game.spawnParticles(e.cx, e.cy - 40, '#C060FF', 10, 2, { life: 40 });
+      game.spawnParticles(e.cx + e.facing * 24, e.cy - 40, '#C060FF', 10, 2, { life: 40 });
     }
     // 暗影矢（:66437-66446）：ai[1]==0 且 ai[0]==32 → 675（14 速 40 伤）
     if (e.ai1 === 0 && e.ai0 === 32) {
@@ -1162,7 +1169,6 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
       const gx = Math.floor((e.cx + e.facing * 240) / TILE);
       const gy = Math.floor(e.cy / TILE);
       const [, bottom] = expandVertically(game, gx, gy, 0, 50);
-      shootD(game, gx * TILE + 8, bottom * TILE, 0, 0, 0, 674, 900);
       game.spawnParticles(gx * TILE + 8, bottom * TILE, '#FF7AE0', 8, 1.6, { life: 50 });
       // Projectile 674 落地 40t 后的疗效（Projectile.cs:35544-35570）：1000px 内友军
       // （伤 ≥1、lifeMax ≥30、非 564/565）各 +500（封顶补满）——事件投射物系统未实装,

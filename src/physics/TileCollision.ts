@@ -11,6 +11,66 @@ export interface Body {
   hitHead: boolean;
   /** 平台单向碰撞：仅当开启且下落时与平台碰撞 */
   dropThrough?: boolean;
+  /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
+   *  掉落物/弹幕/墓碑等不参与（原版它们不调 StepUp） */
+  stepUp?: boolean;
+}
+
+/** Collision.StepUp（Collision.cs:3641-3770，gravDir=1、holdsMatching=false）：
+ *  水平行走【意图速度】先探前方一列 → 满足净空门即抬升最多 16.1px
+ *  （半砖 8px / 整砖台阶 16px）。玩家（Player.cs:23258/:27753）与全部 NPC
+ *  （NPC.cs:54382，先于 TileCollision 用未受阻的速度调用）共用——
+ *  此前只有玩家有自研版上台阶，敌人/小动物/城镇 NPC 全部卡死在半砖/台阶。
+ *  gfxOffY 视觉缓动无对应渲染通道，位置直接抬升（原版 NPC 同样瞬间抬）。 */
+function applyStepUp(b: Body, world: World): void {
+  const vx = b.vx;
+  if (vx === 0) return;
+  const dir = Math.sign(vx);
+  const st = world.store;
+  const probeX = b.x + vx;                       // vector.X = position.X + velocity.X
+  const num2 = Math.floor((probeX + b.w / 2 + (b.w / 2 + 1) * dir) / TILE);
+  const num3 = Math.floor((b.y + b.h - 1) / TILE); // 脚底行（gravDir=1）
+  const num4 = Math.floor(b.h / TILE) + (b.h % TILE !== 0 ? 1 : 0);
+  if (!st.inBounds(num2, num3) || num3 >= st.h - 40) return;
+  const solidAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.isSolid(x, y);       // 平台非 tileSolid → 不阻挡（vanilla 语义）
+  const halfAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.half[st.idx(x, y)];
+  const slopeAt = (x: number, y: number): number =>
+    st.inBounds(x, y) ? st.slope[st.idx(x, y)] : 0;
+  // flag（:3700-3708）：身体放入探柱（j=2..num4 上方行全净空）
+  for (let j = 2; j <= num4; j++) if (solidAt(num2, num3 - j)) return;
+  // flag2（:3710-3714）：后上方对角净空
+  if (solidAt(num2 - dir, num3 - num4)) return;
+  const centerX = b.x + b.w / 2;
+  // flag3（:3725-3728）：脚上一格净空 / 面朝坡 / 半砖且其上净空
+  {
+    const s = slopeAt(num2, num3 - 1);
+    const ok = !solidAt(num2, num3 - 1)
+      || (s === 1 && centerX > num2 * TILE)
+      || (s === 2 && centerX < num2 * TILE + TILE)
+      || (halfAt(num2, num3 - 1) && !solidAt(num2, num3 - num4 - 1));
+    if (!ok) return;
+  }
+  // flag4（:3730-3737）：落脚格实心（面朝坡且身体沉入）/ 或脚上一格是半砖
+  {
+    const fs = slopeAt(num2, num3);
+    const topSlope = fs === 1 || fs === 2;
+    const a = solidAt(num2, num3)
+      && (!topSlope || (fs === 1 && centerX < num2 * TILE) || (fs === 2 && centerX > num2 * TILE + TILE))
+      && (!topSlope || b.y + b.h > num3 * TILE);
+    const bb = halfAt(num2, num3 - 1) && solidAt(num2, num3 - 1);
+    if (!(a || bb)) return;
+  }
+  // X 重叠门（:3745-3748）：探柱与移动后身体横向相交
+  if (!(num2 * TILE < probeX + b.w && num2 * TILE + TILE > probeX)) return;
+  // 抬升（:3750-3770）：半砖上一格 → rowTop-8；本格半砖 → rowTop+8；上限 16.1px
+  let target = num3 * TILE;
+  if (halfAt(num2, num3 - 1)) target -= 8;
+  else if (halfAt(num2, num3)) target += 8;
+  if (target >= b.y + b.h) return;
+  if (b.y + b.h - target > 16.1) return;
+  b.y = target - b.h;
 }
 
 /** 格子的半砖碰撞盒（原版 Collision.cs:1320-1324 三处一致）：下半 8px。
@@ -219,6 +279,8 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   b.onGround = false;
   b.hitWall = false;
   b.hitHead = false;
+  // 原版 StepUp 在 TileCollision 之前用未受阻的意图速度探测（Player.cs:23258/NPC.cs:54382）
+  if (b.stepUp) applyStepUp(b, world);
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
   // 是 slope1/2、水平速度朝低侧、脚已沉到对角线 → dy += |dx|
   // （等价 Velocity.Y += |Velocity.X|）把身体粘到斜面,消除坡顶角/高速下坡 1 帧的格顶滑行

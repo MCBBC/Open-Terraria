@@ -2219,7 +2219,7 @@ export class Game implements GameHooks {
     if (!def) return 1;
     const vid = def.vid ?? viIdFromKey(def.key);
     if (vid >= 0) return itemFuncOfVid(vid)?.useStyle ?? 1;
-    if (def.potion) return 9;
+    if (def.potion || def.heal) return 9; // 治疗类（含仅标 heal 的 legacy）
     // legacy 无 vid 的原版 4 族（Boss 召唤物/生命水晶，Item.cs SetDefaults useStyle=4）
     return LEGACY_USE_STYLE[def.key] ?? 1;
   }
@@ -5368,10 +5368,20 @@ export class Game implements GameHooks {
     VanillaSpawner.remotePlayers = this.net?.active
       ? [...this.net.players.values()].filter((q) => q.active).map((q) => ({ x: q.x + 10, y: q.y + 21 }))
       : [];
+    // townNPCs（Player.townNPCs = SceneMetrics.TownNPCCount）：玩家 ±(85×60) 格内存活
+    // 城镇 NPC 数——spawnFriendly 掷骰的门(NPC.cs:711-832)。岛/荒野无 NPC → 0 → 永不出小动物
+    const townNPCs = this.entities.npcs.reduce((s, n) => {
+      const tn = n as TownNPC;
+      return s + (tn instanceof TownNPC && !tn.dead
+        && Math.abs(tn.cx - p.cx) < 85 * TILE && Math.abs(tn.cy - p.cy) < 60 * TILE ? 1 : 0);
+    }, 0);
     const { spawnRate, maxSpawns } = this.vanillaSpawner.getSpawnRate(
       p.cy, nearby, this.heldWaterCandle || this.waterCandleNear, sHeightPx, p.cx,
       this.peaceCandleNear, p.buffs.has(BuffType.Sunflower),
-      p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle));
+      p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle),
+      townNPCs, w.clock.isDay,
+      !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
+      !!w.clock.bloodMoon);
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;

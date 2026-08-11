@@ -417,8 +417,9 @@ export class WorldEvolution {
       if (Math.random() < 1 / maxV && !this.active(i, j + 1) && !this.isLava(i, j + 1)
         && this.hasSupportMulti(i, j, [633])) this.setType(i, j + 1, S(638));
     } else if ((sheet === 60 || sheet === 62) && Math.random() < 1 / 80 && !this.playerLOS(i, j)) {
-      // 蜂巢再生（444 2×2，cs:73541-73605）：由 62 藤位锚定、锚 2 宽实心、20 格密度门
-      this.placeJungleBlock2x2(i, j, 444, j + 1);
+      // 蜂巢再生（444 2×2，cs:73541-73605）：62 藤位锚定，主体行 = j（替换藤位，
+      // 原版 num15 = j for 62）；60 驱动则为 j+1
+      this.placeJungleBlock2x2(i, j, 444, sheet === 62 ? j : j + 1);
     } else if (sheet === 396 && Math.random() < 1 / 80 && !this.playerLOS(i, j)) {
       // 蚁狮幼虫（485/稀有 751，cs:73608-73693）：上方 3 格净空
       if (Math.random() < 1 / 100) { this.place1(i, j - 1, 751, 0); }
@@ -467,19 +468,29 @@ export class WorldEvolution {
     return false;
   }
 
-  /** 蜂巢/球茎 2×2 放置（cs:73550-73605 简化：锚 2 宽实心+净空+密度门） */
+  /** 蜂巢 2×2 放置（cs:73550-73605）：锚 2 宽实心+无液，主体区仅 tileCut
+   *  藤草类可被覆写（原版 KillTile），实心块/岩浆阻断；20 格密度门 */
   private placeJungleBlock2x2(i: number, j: number, sheet: number, floorY: number): boolean {
-    // floorY: 主体底行（60 草上再下一格）
+    void j;
     for (let k = i; k < i + 2; k++) {
       if (!this.solidTile(k, floorY - 1)) return false;
       if (this.liquidAt(k, floorY - 1) > 0) return false;
       for (let l = floorY; l < floorY + 2; l++) {
-        if (this.active(k, l) || this.isLava(k, l)) return false;
+        if (this.isLava(k, l)) return false;
+        if (this.active(k, l)) {
+          const s = sheetOf(this.typeAt(k, l));
+          // tileCut 藤草族可覆写（原版 !tileCut || type==444 阻断条件）
+          const cuttable = [52, 61, 62, 69, 71, 73, 74, 110, 113, 115, 184, 201, 205, 233, 352, 382, 528, 636, 637, 638].includes(s);
+          if (!cuttable) return false;
+        }
       }
     }
     // 20 格内既有 >0 → 不放（CountNearBlocksTypes cap 1）
     for (let x = i - 20; x <= i + 20; x += 2) for (let y = floorY - 20; y <= floorY + 20; y += 2) {
       if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === sheet) return false;
+    }
+    for (let dx = 0; dx < 2; dx++) for (let dy = 0; dy < 2; dy++) {
+      if (this.active(i + dx, floorY + dy)) this.kill(i + dx, floorY + dy);
     }
     return this.placeBlock(i, floorY, sheet, 2, 2);
   }
