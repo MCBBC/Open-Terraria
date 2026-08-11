@@ -16,9 +16,13 @@ export interface DeviceCtx {
   mechSpawnOk(px: number, py: number, type: number): boolean;
   /** Item.MechSpawn（Item.cs:48982-49013）：同 item 300px≥3 / 800px≥6 / 全图≥10 拒绝 */
   itemSpawnOk(px: number, py: number, type: number): boolean;
-  /** 投射物(飞镖/火焰/尖刺球/炮弹/雪球):vx/vy px/tick。
-   *  form = 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：ammo4→0 橙 / ammo5→1 蓝） */
-  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form?: number): void;
+  /** 投射物(飞镖/火焰/尖刺球/炮弹/雪球/烟花族):vx/vy px/tick。
+   *  form = 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：ammo4→0 橙 / ammo5→1 蓝）；
+   *  烟花族 = 色变体（167-170 / 415-418 / 419-422 减基址）。
+   *  anchor = 喷泉弹锚点 tile（Projectile.ai[0]/ai[1]，Wiring.cs:1548） */
+  shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form?: number, anchor?: [number, number]): void;
+  /** 喷泉去重（Wiring.cs:1529-1545）：同锚点是否已有 aiStyle73 弹在喷 */
+  hasFountainAt?(tx: number, ty: number): boolean;
   /** 统计附近某类投射物数量(尖刺球惩罚表/兔兔炮场内上限用) */
   countProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
@@ -412,6 +416,18 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   }
 }
 
+/** 马桶烟花（Wiring.cs:1498-1509）：tile 497 与 tile 15 马桶样式（frameY/40==1 或 20）共用。
+ *  num68 = j - frameY%40/18（锚点上格）；SkipWire 两格；CheckMech(锚点, 60) → 弹 733
+ *  ToiletEffect：静态水花发射器（速度 0 / damage 0），位于 (i*16+8, num68*16+12) */
+function fireworkToilet(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
+  const st = w.st;
+  const i = st.idx(x, y);
+  const num68 = y - Math.floor(st.frameY[i] % 40 / 18);
+  w.skipCell(x, num68); w.skipCell(x, num68 + 1); // :1501-1502
+  if (!w.checkMech(x, num68, 60)) return;          // :1503（60t 冷却）
+  ctx.shootProjectile(x * 16 + 8, num68 * 16 + 12, 0, 0, 0, 'toiletPop'); // :1505
+}
+
 /** 巨石雕像 531(Wiring.cs:1747-1762) */
 function fireBoulderStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   const st = w.st;
@@ -456,9 +472,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 11:
       ctx.doorClose(x, y);
       return true;
-    case 15: { // 马桶(frameY/40 判定,:1194-1204;喷水近似粒子)
+    case 15: { // 马桶椅样式（Wiring.cs:1498-1509 与 tile 497 共用分支；frameY/40==1 或 20）
       if (Math.floor(st.frameY[i] / 40) !== 1 && Math.floor(st.frameY[i] / 40) !== 20) return true;
-      if (w.checkMech(x, y, 60)) ctx.sfx('splash', x * 16 + 8, y * 16 + 8);
+      fireworkToilet(w, ctx, x, y);
       return true;
     }
     case 33: case 174: case 49: case 372: // 蜡烛族 frameX ±18(:1472-1480)
@@ -657,10 +673,19 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
     case 215: // 篝火 3×2 frameY ±36(:1003-1020)
       flipBlock(w, x, y, 54, 36, 3, 2, 'y', 36, 36);
       return true;
-    case 216: // 烟花火箭(:1189-1192;近似粒子升空)
-      w.skipCell(x, y);
-      ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
+    case 216: { // 烟花火箭（Wiring.cs:1492-1495 → WorldGen.LaunchRocket WorldGen.cs:62184-62206）
+      // LaunchRocket：行 = frameY/40（0-3 → 弹 167-170 红/绿/蓝/黄）；frameY%40==18 说明
+      // 点的是下半格，锚点 y 上移（:62188-62194）
+      let ly = y;
+      if (st.frameY[i] % 40 === 18) ly--;
+      // 发射位 (x*16+8, y*16+4+2)、速度 (0,-8)、damage 150 / kb 7（:62196-62199）
+      ctx.shootProjectile(x * 16 + 8, ly * 16 + 6, 0, -8, 150, 'fireworkRocket', Math.floor(st.frameY[i] / 40));
+      // 烟花方块是消耗品：发射即移除 1×2 两格（:62203-62204 active(false)）
+      st.setTile(x, ly, 0);
+      st.setTile(x, ly + 1, 0);
+      w.skipCell(x, y); // SkipWire（Wiring.cs:1494）
       return true;
+    }
     case 244: // 泡泡机 3×2 frameX ±54(:1272-1293)
       flipBlock(w, x, y, 54, 36, 3, 2, 'x', 54, 54);
       return true;
@@ -681,14 +706,28 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       // 矿车系统接入前只走冷却注册，不翻帧
       w.checkMech(x, y, 5);
       return true;
-    case 335: // 烟花盒 2×2(:1294-1304)
-      w.skipCell(x, y); w.skipCell(x + 1, y);
-      if (w.checkMech(x, y, 30)) ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
+    case 335: { // 烟花盒 2×2（Wiring.cs:1511-1523 → WorldGen.LaunchRocketSmall WorldGen.cs:62208-62222）
+      const num72 = y - Math.floor(st.frameY[i] / 18);
+      const num73 = x - Math.floor(st.frameX[i] / 18);
+      w.skipCell(num73, num72); w.skipCell(num73 + 1, num72);
+      w.skipCell(num73, num72 + 1); w.skipCell(num73 + 1, num72 + 1);
+      if (!w.checkMech(num73, num72, 30)) return true; // CheckMech 30（:1518-1520）
+      // LaunchRocketSmall：弹 415+rand(4)（红/绿/蓝/黄）、速度 (0,-8)、damage 0（:62213-62215）
+      ctx.shootProjectile(num73 * 16 + 16, num72 * 16 + 2, 0, -8, 0, 'fireworksBoxRocket', Math.floor(Math.random() * 4));
       return true;
-    case 338: // 烟花喷泉 1×2(:1305-1324)
-      w.skipCell(x, y);
-      if (w.checkMech(x, y, 30)) ctx.sfx('roar', x * 16 + 8, y * 16 + 8);
+    }
+    case 338: { // 烟花喷泉 1×2（Wiring.cs:1525-1553）
+      const num69 = y - Math.floor(st.frameY[i] / 18);
+      const num70 = x - Math.floor(st.frameX[i] / 18);
+      w.skipCell(num70, num69); w.skipCell(num70, num69 + 1);
+      if (!w.checkMech(num70, num69, 30)) return true; // CheckMech 30（:1538-1540）
+      // 去重（:1542-1547）：同锚点已有 aiStyle73 弹在喷则不再生成
+      if (ctx.hasFountainAt?.(num70, num69)) return true;
+      // 弹 419+rand(4)（黄/红/蓝/彩虹），静态发射器（速度 0），ai[0]/ai[1] = 锚点（:1548-1550）
+      ctx.shootProjectile(num70 * 16 + 8, num69 * 16 + 2, 0, 0, 0, 'fireworkFountain',
+        Math.floor(Math.random() * 4), [num70, num69]);
       return true;
+    }
     case 386: case 387: { // 活板门开/关互换(ShiftTrapdoor;帧近似)
       const openK = 'v_386_trapdooropen', closedK = 'v_387_trap_door_closed';
       const toOpen = sheet === 387;
@@ -762,8 +801,8 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       ctx.toggleParty?.();
       return true;
     case 476: return true; // 高尔夫球洞(无高尔夫系统)
-    case 497: // 马桶(frameY/40,同 case 15 分支)
-      if (w.checkMech(x, y, 60)) ctx.sfx('splash', x * 16 + 8, y * 16 + 8);
+    case 497: // 马桶（Wiring.cs:1498-1509，与 tile 15 马桶样式共用分支）
+      fireworkToilet(w, ctx, x, y);
       return true;
     case 506: // 巴斯特雕像 2×3 frameX ±72(:2239-2261)
       flipBlock(w, x, y, 72, 54, 2, 3, 'x', 72, 72);

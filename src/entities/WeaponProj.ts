@@ -110,7 +110,7 @@ export class Boomerang extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
     this.rot += 0.35;
@@ -181,7 +181,7 @@ export class SpearProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
     if (this.t >= this.dur) { this.dead = true; return; }
     // 原版 AI_019：矛锚定在角色中心，沿出手方向伸缩（sin 曲线 0→reach→0）
@@ -248,7 +248,7 @@ export class YoyoProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
     this.handX = p.cx;

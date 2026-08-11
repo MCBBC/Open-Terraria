@@ -2189,6 +2189,9 @@ export class UI {
       [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
       [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
       [BuffType.Tipsy, 'vi_2266_Sake'],
+      // 食物三档（以已注册食物贴图为图标近似）
+      [BuffType.WellFed, 'vi_5275_joja_cola'], [BuffType.WellFed2, 'vi_4023_grapes'],
+      [BuffType.WellFed3, 'vi_1919_sugar_cookie'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);  }
 
@@ -2258,6 +2261,9 @@ export class UI {
       [BuffType.Lifeforce, 'vi_2345_LifeforcePotion'], [BuffType.Endurance, 'vi_2346_EndurancePotion'],
       [BuffType.Wrath, 'vi_2349_WrathPotion'], [BuffType.Rage, 'vi_2347_RagePotion'],
       [BuffType.Tipsy, 'vi_2266_Sake'],
+      // 食物三档（以已注册食物贴图为图标近似）
+      [BuffType.WellFed, 'vi_5275_joja_cola'], [BuffType.WellFed2, 'vi_4023_grapes'],
+      [BuffType.WellFed3, 'vi_1919_sugar_cookie'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

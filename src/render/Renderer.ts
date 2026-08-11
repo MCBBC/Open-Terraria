@@ -41,6 +41,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 }
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
+import { renderEnv } from './VanillaTiler';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
@@ -478,6 +479,9 @@ export class Renderer {
     this._mouseY = mouseY;
     this._mouseDown = mouseDown;
     this._liquidNow = performance.now(); // 帧 first thing 采样：背景水/瀑布/前景水共用同一时刻
+    // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface
+    renderEnv.wind = world.weather?.windSpeedCurrent ?? 0;
+    renderEnv.worldSurface = world.groundLevel;
     this.updateWaterStyle(world, cam);
     this.easeFullMap();
     const ctx = this.ctx;

@@ -17,9 +17,37 @@ export abstract class Entity {
   netPuppet = false;
   /** 联机实体号（拥有者 slot 高 8 位 + 本地 id 低 24 位；见 net/entitySyncHooks） */
   netId = 0;
+  // ---- P3.2 傀儡插值缓冲（15Hz 快照 × 60TPS 渲染的平滑桥）----
+  /** 最新权威快照位（逻辑位：接触判定用；= 房主认为的"现在"） */
+  netAx = 0; netAy = 0;
+  /** 插值起点（快照到达时的渲染位）与进度（1=已到目标，纯外推） */
+  netIx = 0; netIy = 0; netIt = 1;
+  private netSnapIvt = 4;
 
   abstract fixedUpdate(dt: number, game: GameHooks): void;
   abstract draw(r: Renderer, cam: Camera): void;
+
+  /** 快照到达（Game.netApplyNpcSnaps / netApplyProjSnaps 调用）：设插值目标。
+   *  从当前渲染位连续出发（中途到包不跳变）；intervalTicks = 快照周期（15Hz=4 tick） */
+  netSnapTo(x: number, y: number, intervalTicks = 4) {
+    this.netIx = this.x; this.netIy = this.y;
+    this.netAx = x; this.netAy = y;
+    this.netIt = 0;
+    this.netSnapIvt = Math.max(1, intervalTicks);
+  }
+
+  /** 傀儡每 tick 推进：未到目标走 smoothstep 插值（一个快照周期到达），到后纯速度外推 */
+  netPuppetStep() {
+    if (this.netIt < 1) {
+      this.netIt = Math.min(1, this.netIt + 1 / this.netSnapIvt);
+      const t = this.netIt * this.netIt * (3 - 2 * this.netIt); // smoothstep
+      this.x = this.netIx + (this.netAx - this.netIx) * t;
+      this.y = this.netIy + (this.netAy - this.netIy) * t;
+      return;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+  }
 
   get cx() { return this.x + this.w / 2; }
   get cy() { return this.y + this.h / 2; }

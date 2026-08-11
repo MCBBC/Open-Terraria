@@ -10,7 +10,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { Arrow, projSprite } from './Arrow';
+import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
 interface EnemyLike {
@@ -47,6 +47,8 @@ export class MinionProj extends Entity {
   /** 地面型重力 */
   private ground: boolean;
   onGround = false;
+  /** 存活 tick（多帧贴图动画驱动） */
+  age = 0;
 
   constructor(
     x: number, y: number, projId: number, damage: number, knockback: number,
@@ -82,6 +84,7 @@ export class MinionProj extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     void dt;
+    this.age++;
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
       // 哨兵：定点炮台，60t 一发
@@ -157,19 +160,21 @@ export class MinionProj extends Entity {
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
-    // 世界坐标绘制（Renderer 实体循环在世界变换内）——投射物贴图懒加载通道同 Arrow
+    // 世界坐标绘制（Renderer 实体循环在世界变换内）——投射物贴图懒加载通道同 Arrow。
+    // 原版投射物贴图是竖向多帧行（projFrames 表）：按帧高切片 + age 驱动动画，
+    // 1:1 像素尺寸（整图压 32px 会把 12 帧行压成胶片条）
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const img = projSprite(this.projId);
+    const frames = projFrameCount(this.projId);
+    const frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
+    const img = projFrameImg(this.projId, frame);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
-    if (img && img.complete && img.naturalWidth > 0) {
-      const s = Math.max(1, 32 / img.naturalWidth); // 贴图按宽归一到 32px（随从尺寸家族近似）
-      const w = img.naturalWidth * s, h = img.naturalHeight * s;
-      ctx.drawImage(img, -w / 2, -h / 2, w, h);
+    if (img) {
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {
-      // 兜底：召唤符记色块（哨兵紫 / 随从金）
+      // 兜底：召唤符记色块（哨兵紫 / 随从金）——贴图缺失或懒加载未就绪
       ctx.fillStyle = this.sentry ? '#B080FF' : '#FFD060';
       ctx.fillRect(-8, -8, 16, 16);
       ctx.strokeStyle = '#000';

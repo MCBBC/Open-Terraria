@@ -339,13 +339,12 @@ export class Enemy extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.prevX = this.x; this.prevY = this.y;
-    // 联机傀儡（房主权威快照驱动）：无本地 AI——位置外推 + 动画计时，
+    // 联机傀儡（房主权威快照驱动）：无本地 AI——P3.2 插值/外推推进 + 动画计时，
     // 打击/拾取等交互经 entityNet 上报房主结算
     if (this.netPuppet) {
       this.aiT++;
       this.animT++;
-      this.x += this.vx;
-      this.y += this.vy;
+      this.netPuppetStep();
       this.onGround = Math.abs(this.vy) < 0.6;
       if (Math.abs(this.vx) > 0.05) this.walkCycleT += Math.abs(this.vx);
       if (this.iframes > 0) this.iframes--;

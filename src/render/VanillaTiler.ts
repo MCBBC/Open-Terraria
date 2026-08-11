@@ -509,6 +509,8 @@ export function drawVanillaCell(
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
   trees?: TreeStyleData,
 ): void {
+  // 751/752(睡着的掘地龟/啮龙蛋):仅锚点帧 (0,0) 绘制,非锚点格整格跳过(:1034-1048)
+  if ((sheet === 751 || sheet === 752) && (fx !== 0 || fy !== 0)) return;
   // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634 + 棕榈 323 + 蘑菇树 72）：
   // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）。
   // 棕榈干身 frameY 是倾斜偏移（跨列）——主遍跳过，整棵由树族外扩遍绘制防裁剪
@@ -701,6 +703,24 @@ export function drawVanillaCell(
   let dyOff = cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
   // 火把（tile 4）：上方实心 = 天花板火把 tileTop=4 下移(:4727-4730)
   if (sheet === 4 && st.inBounds(x, y - 1) && st.isSolid(x, y - 1)) dyOff += 4;
+  // 518 悬挂火盆:tileTop 按本格水位动态上移(:4648-4675;无水时看下方格半砖/坡再补)
+  if (sheet === 518) {
+    const si518 = st.idx(x, y);
+    let num28 = Math.floor(st.liquid[si518] / 16) - 3;
+    const aboveFull = st.inBounds(x, y - 1) && (() => {
+      const j = st.idx(x, y - 1);
+      return !!st.flags[j] && !!TILE_DEFS[st.type[j]]?.solid && !st.half[j] && st.slope[j] === 0;
+    })();
+    if (aboveFull && num28 > 8) num28 = 8;
+    if (st.liquid[si518] === 0 && st.inBounds(x, y + 1)) {
+      const bj = st.idx(x, y + 1);
+      if (st.flags[bj]) {
+        if (st.half[bj]) num28 = -16 + Math.max(8, Math.floor(st.liquid[bj] / 16));
+        else if (st.slope[bj] === 1 || st.slope[bj] === 2) num28 -= 4;
+      }
+    }
+    dyOff -= num28;
+  }
 
   // ---- 坡面/半砖分支(原版 TileDrawing.cs:1314-1361) ----
   const si = st.idx(x, y);
@@ -821,7 +841,7 @@ function drawSlopedFrame(ctx: CanvasRenderingContext2D, r: { img: HTMLImageEleme
  *  两表大量重合但不等同(旧表 16 项多余、3 项值错、条件项全部缺失),已全量换血。
  *  227 仙人掌走 drawCactusCell 专属路径不在此表;518 按水位动态偏移未移植(备案)。 */
 const DRAW_Y_OFFSET: Record<number, number> = {
-  33: -4, 49: -4, 52: -2, 62: -2, 73: -12, 74: -12, 78: 2, 81: -8, 82: -2, 83: -2, 84: -2,
+  12: 4, 31: 4, 33: -4, 49: -4, 52: -2, 62: -2, 73: -12, 74: -12, 78: 2, 81: -8, 82: -2, 83: -2, 84: -2,
   85: 2, 89: 2, 100: 2, 102: 2, 105: 2, 113: -12, 115: -2, 132: 2, 133: 2, 134: 2, 135: 2,
   139: 2, 142: 2, 143: 2, 174: -4, 186: 2, 187: 2, 205: -2, 207: 2, 210: 2, 215: 2, 217: 2,
   218: 2, 219: 2, 220: 2, 228: 2, 231: 2, 243: 2, 244: 2, 247: 2, 254: 2, 275: 2, 282: 2,
@@ -890,6 +910,30 @@ const HEIGHT_18 = new Set([16, 17, 20, 26, 32, 69, 72, 77, 79, 90, 114, 124, 137
 /** 共用慢速旋转计数(Main.tileFrame[type] 的近似:原版各类型速率不同,装饰性轮换取统一慢速) */
 function animRot(): number {
   return Math.floor(tileAnim.tick / 6);
+}
+
+/** 渲染帧共享态:由 Renderer 每帧刷新(chunk 烘焙期读取) */
+export const renderEnv = {
+  /** Main.WindForVisuals 近似 = 天气当前风速 */
+  wind: 0,
+  /** Main.worldSurface(DoesWindBlowAtThisHeight 用) */
+  worldSurface: 0,
+};
+/** 428 测重板被踩状态(Game.triggerTiles428 镜像;原版 PressurePlateHelper.PressurePlatesPressed) */
+export const plates428Pressed = new Set<number>();
+
+/** WorldGen.InAPlaceWithWind(:87603):高度在 worldSurface 之上且区域内无液体无墙
+ *  (AllowsWind 墙集合未提取,任何墙挡风为保守近似) */
+function inAPlaceWithWind(st: TileStore, x: number, y: number, w2: number, h2: number): boolean {
+  if (y >= renderEnv.worldSurface) return false;
+  for (let i = 0; i < w2; i++) {
+    for (let j = 0; j < h2; j++) {
+      if (!st.inBounds(x + i, y + j)) continue;
+      const ti = st.idx(x + i, y + j);
+      if (st.liquid[ti] > 0 || st.wall[ti] > 0) return false;
+    }
+  }
+  return true;
 }
 
 /** 生物群系变体(529/530 的 GetBiomeInfluence 近似:看正下方格所属邪恶群系;海滩看 x) */
@@ -972,8 +1016,6 @@ function drawAdjust(
     case 739: case 748:                                          // :4590-4596
       a.sy = fy + 90 * (animRot() % 4);
       break;
-    case 405: a.sy = fy + 38 * (animRot() % 8); break;   // :5443-5462(高度按帧切换未移植)
-    case 406: a.sy = fy + 56 * (animRot() % 8); break;   // :5509-5523(同上)
     case 617: a.sx = fx % 54; a.sy = fy % 144; break;    // :5351-5355
     case 129:   // :4682-4690
       if (fx >= 324) {
@@ -991,6 +1033,73 @@ function drawAdjust(
         else if (v === 4) a.sx = fx + 204;
         else if (v === 3) a.sx = fx + 272;
       }
+      break;
+    case 485:   // :4780-4790:恒摆(无风门)
+      a.sy = fy + 36 * (((Math.floor(tileAnim.tick / 5) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4);
+      break;
+    case 489:   // :4791-4804:风门 2×3 → 16 帧快摆
+      if (inAPlaceWithWind(st, x - Math.floor(fx / 18), y - Math.floor(fy / 18), 2, 3)) {
+        a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 5) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 16 + 16) % 16);
+      }
+      break;
+    case 490: {  // :4805-4880:风门 2×2 → 帧率帧 + 强风摇晃偏移(weatherVaneBobframe 用 tick 采样近似)
+      const ax = x - Math.floor(fx / 18), ay = y - Math.floor(fy / 18);
+      const windy = inAPlaceWithWind(st, ax, ay, 2, 2);
+      let n = windy ? animRot() % 8 : 0;
+      let bob = 0;
+      if (windy && Math.abs(renderEnv.wind) > 0.5) {
+        bob = [0, 1, 2, 1, 0, -1, -2, -1][Math.floor(tileAnim.tick / 5) % 8];
+      }
+      n += bob;
+      if (n < 0) n += 12;
+      a.sy = fy + 36 * (n % 12);
+      break;
+    }
+    case 493: {  // :5300-5332:风门 1×1,按风速分档 6/12 帧带
+      if (fy === 0) {
+        const ax = x - Math.floor(fx / 18), ay = y - Math.floor(fy / 18);
+        let windAbs = inAPlaceWithWind(st, x, ay, 1, 1) ? Math.abs(renderEnv.wind) : 0;
+        if (windAbs >= 0.1) {
+          let n: number;
+          if (windAbs < 0.5) {
+            n = Math.floor(tileAnim.tick / 20) + ay + ax;
+            n = ((n % 6) + 6) % 6;
+            n = renderEnv.wind >= 0 ? n + 1 : 6 - n;
+          } else {
+            n = Math.floor(tileAnim.tick / 10) + ay + ax;
+            n = ((n % 6) + 6) % 6;
+            n = renderEnv.wind >= 0 ? n + 7 : 12 - n;
+          }
+          a.sy = fy + 36 * n;
+        }
+      }
+      break;
+    }
+    case 28: case 105: case 470: case 719: {  // :4603-4611:14 相位时间动画(288×270 网格)
+      const t = (x + y + Math.floor(tileAnim.tick / 4)) % 14;
+      a.sx = fx + 288 * Math.floor(t / 4);
+      a.sy = fy + 270 * (t % 4);
+      break;
+    }
+    case 405:   // :5443-5462
+      if (fy > 0) a.sh = 18;
+      a.sy = fy + 38 * (fx >= 54 ? 0 : animRot() % 8);
+      break;
+    case 406: {  // :5509-5523
+      if (fy % 54 >= 36) a.sh = 18;
+      let n = animRot() % 8;
+      if (fy >= 108) n = 6 - Math.floor(fy / 54);
+      else if (fy >= 54) n = (animRot() - 1) % 8;
+      a.sy = fy + n * 56 + Math.floor(fy / 54) * 2;
+      break;
+    }
+    case 452: a.sy = fy + (fx >= 54 ? 0 : animRot() % 8) * 54; break;  // :5463-5470
+    case 454: a.sy = fy + (animRot() % 8) * 54; break;                 // :5494-5496
+    case 453: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + x) % 3 + 3) % 3); break; // :5485-5493
+    case 456: a.sy = fy + 54 * (((Math.floor(tileAnim.tick / 20) + (y - Math.floor(fy / 18)) + (x - Math.floor(fx / 18))) % 4 + 4) % 4); break; // :5497-5508
+    // 455(:5471-5484):派对挂件——无派对系统,原版非派对时 addFrY=0,tileTop 2 已在表内
+    case 428:   // :5697-5703:被踩 → addFrX += 18
+      if (plates428Pressed.has(st.idx(x, y))) a.sx = fx + 18;
       break;
     default:
       if (HEIGHT_18.has(sheet)) a.sh = 18;

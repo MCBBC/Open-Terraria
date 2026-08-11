@@ -109,6 +109,10 @@ export class ClientNet {
   private worldDelivered = false;
   /** 本地 tile 变更上报队列（TileStore.netReporter 收集） */
   private tileQueue: TileOp[] = [];
+  /** msg23 短码表（v4：codeId → {netId, key}；服务器端分配，全量条目重建） */
+  private npcCodes = new Map<number, { netId: number; key: string }>();
+  /** msg21 上行合帧暂存（P1.3：netDropSweep 每 4 tick 逐条发 → 攒到 tick 冲洗拼一条 WS 消息） */
+  private pendingFrames: Uint8Array[] = [];
   private lastStateSent = 0;
   private lastSentPos = { x: 0, y: 0 };
 
@@ -292,7 +296,7 @@ export class ClientNet {
             p = {
               slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
-              facing: 1, selectedItem: 0, dead: false, fresh: false, active: true,
+              facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
             };
             this.players.set(slot, p);
           }
@@ -332,10 +336,11 @@ export class ClientNet {
             x, y, vx: 0, vy: 0,
             up: false, down: false, left: false, right: false, jump: false, useItem: false,
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
-            fresh: true, active: true,
+            fresh: true, active: true, lastFresh: performance.now(),
           };
           this.players.set(slot, p);
         }
+        p.lastFresh = performance.now();
         p.x = x; p.y = y; p.vx = vx; p.vy = vy;
         p.up = !!(ctrl & 1); p.down = !!(ctrl & 2);
         p.left = !!(ctrl & 4); p.right = !!(ctrl & 8);
@@ -391,6 +396,7 @@ export class ClientNet {
           isHost: r.bool(),
           protectTiles: r.bool(),
           protectItems: r.bool(),
+          maxPlayers: (() => { try { return r.u16(); } catch { return 255; } })(),
         };
         this.hooks.onPolicy?.(this.policy);
         return;
@@ -400,14 +406,31 @@ export class ClientNet {
         return;
       }
       case Msg.SyncNPC: {
+        // v4 短码格式：每条 1B eflags——bit0=含 key 全量(u32 netId+u16 codeId+str key)，
+        // bit1=boss；否则仅 u16 codeId（查本端 codeId→netId/key 表）。未知短码静默丢弃
+        // （≤2s 全量兜底自动补；AOI 重入视野/短码表清空后的自愈路径）
         const n = r.u16();
         const snaps: NpcSnap[] = [];
         for (let i = 0; i < n; i++) {
+          const eflags = r.u8();
+          let netId = 0, key = '';
+          if (eflags & 1) {
+            netId = r.u32();
+            const code = r.u16();
+            key = r.str();
+            this.npcCodes.set(code, { netId, key });
+          } else {
+            const code = r.u16();
+            const e = this.npcCodes.get(code);
+            if (!e) continue; // 未知短码：跳过本条
+            netId = e.netId;
+            key = e.key;
+          }
           snaps.push({
-            netId: r.u32(), key: r.str(),
+            netId, key,
             x: r.f32(), y: r.f32(), vx: r.f32(), vy: r.f32(),
             hp: r.i16(), maxHp: r.i16(),
-            animT: r.u16(), flags: r.u8(),
+            animT: r.u16(), flags: eflags & 2 ? 1 : 0,
           });
         }
         this.hooks.onNpcSnapshot?.(snaps);
@@ -508,6 +531,7 @@ export class ClientNet {
     if (!this.active) return;
     this.syncInventory(performance.now());
     this.syncHp();
+    this.flushPending(); // P1.3 msg21 合帧冲洗
     if (this.tileQueue.length) {
       // 每包最多 64 op（防超帧）
       const batch = this.tileQueue.splice(0, 64);
@@ -656,7 +680,9 @@ export class ClientNet {
     this.send(w.finish());
   }
 
-  /** 掉落物操作（msg21）：op 0=spawn / 1=take / 2=despawn */
+  /** 掉落物操作（msg21）：op 0=spawn / 1=take / 2=despawn。
+   *  P1.3 上行合帧：入 pending 攒批（netDropSweep 每 4 tick 可能逐条几十发），
+   *  tick() 冲洗时拼为单条 WS 消息；满 64 帧立即冲防延迟 */
   sendItemOp(op: 0 | 1 | 2, netId: number, key = '', stack = 0, x = 0, y = 0, vx = 0, vy = 0) {
     const w = new NetWriter(Msg.SyncItem);
     w.u32(netId); w.u8(op);
@@ -664,7 +690,23 @@ export class ClientNet {
       w.str(key); w.u16(stack);
       w.f32(x); w.f32(y); w.f32(vx); w.f32(vy);
     }
-    this.send(w.finish());
+    this.pendingFrames.push(w.finish());
+    if (this.pendingFrames.length >= 64) this.flushPending();
+  }
+
+  /** 冲洗 pending 合帧：多帧拼接为一条 WS 消息（§1.1 允许一 WS 消息串联多帧） */
+  private flushPending() {
+    if (!this.pendingFrames.length || !this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      this.pendingFrames.length = 0;
+      return;
+    }
+    let total = 0;
+    for (const f of this.pendingFrames) total += f.length;
+    const joined = new Uint8Array(total);
+    let off = 0;
+    for (const f of this.pendingFrames) { joined.set(f, off); off += f.length; }
+    this.pendingFrames.length = 0;
+    this.ws.send(joined);
   }
 
   /** 弹幕快照（msg27，双向：各自弹幕互播） */

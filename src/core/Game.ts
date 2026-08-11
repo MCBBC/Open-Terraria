@@ -1,6 +1,7 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { plates428Pressed } from '../render/VanillaTiler';
 import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input } from './Input';
@@ -487,13 +488,15 @@ export class Game implements GameHooks {
         e.netPuppet = true;
         e.netId = s.netId;
         e.hp = s.hp; e.maxHp = s.maxHp;
+        e.netAx = s.x; e.netAy = s.y; e.netIt = 1; // P3.2：新建傀儡直接落位（无插值起点）
         this.entities.add(e, 'enemies');
         if (e.def.boss) this.boss = e;
         pup = { e, seen: this.tickCount };
         this.netNpcPuppets.set(s.netId, pup);
       }
       const e = pup.e;
-      e.x = s.x; e.y = s.y; e.vx = s.vx; e.vy = s.vy;
+      e.netSnapTo(s.x, s.y); // P3.2：渲染位平滑追踪快照；逻辑位（netAx/netAy）= 最新快照
+      e.vx = s.vx; e.vy = s.vy;
       e.hp = s.hp; e.maxHp = s.maxHp;
       e.animT = s.animT;
       if (Math.abs(s.vx) > 0.1) e.facing = Math.sign(s.vx);
@@ -542,11 +545,12 @@ export class Game implements GameHooks {
         if (!p) continue;
         p.netPuppet = true;
         p.netId = s.netId;
+        p.netAx = s.x; p.netAy = s.y; p.netIt = 1; // P3.2：新建直接落位
         this.entities.add(p, 'projectiles');
         pup = { p, seen: this.tickCount };
         this.netProjPuppets.set(s.netId, pup);
       }
-      pup.p.x = s.x; pup.p.y = s.y;
+      pup.p.netSnapTo(s.x, s.y); // P3.2：插值追踪（弹幕周期短，intervalTicks 默认 4）
       pup.p.vx = s.vx; pup.p.vy = s.vy;
       pup.seen = this.tickCount;
     }
@@ -606,7 +610,8 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 访客：傀儡 NPC 接触伤害（房主 AI 只对房主结算；访客本地判 AABB，HP 客户端权威+msg16 中继） */
+  /** 访客：傀儡 NPC 接触伤害（房主 AI 只对房主结算；访客本地判 AABB，HP 客户端权威+msg16 中继）。
+   *  P3.2：判定用权威位 netAx/netAy（渲染位在插值途中，最多滞后一个快照周期 66ms） */
   private netPuppetContact() {
     const p = this.player;
     if (p.dead) return;
@@ -614,7 +619,9 @@ export class Game implements GameHooks {
       const e = pup.e;
       if (e.dead || e.iframes > 0) continue;
       const dmg = e.def.damage ?? 0;
-      if (dmg <= 0 || !e.aabbOverlaps(p)) continue;
+      if (dmg <= 0) continue;
+      // 手工 AABB（权威位 vs 本地玩家），不经插值渲染位
+      if (!(e.netAx < p.x + p.w && e.netAx + e.w > p.x && e.netAy < p.y + p.h && e.netAy + e.h > p.y)) continue;
       this.damagePlayer(dmg, e.cx, e.cy, e);
       e.iframes = 8;
     }
@@ -4455,6 +4462,9 @@ export class Game implements GameHooks {
         w.hitSwitch(idx % st.w, (idx / st.w) | 0);
       }
     }
+    // 镜像踩踏态到渲染模块(428 被踩帧偏移,VanillaTiler.plates428Pressed)
+    plates428Pressed.clear();
+    for (const idx of this.weightedLatch) plates428Pressed.add(idx);
     for (const idx of this.weightedLatch) {
       if (!standing.has(idx)) {
         this.weightedLatch.delete(idx);
@@ -4781,11 +4791,22 @@ export class Game implements GameHooks {
         }
         return true;
       },
-      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0) => {
-        this.entities.add(new TrapShot(px, py, vx, vy, damage, kind, form), 'projectiles');
+      shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0, anchor?: [number, number]) => {
+        this.entities.add(new TrapShot(px, py, vx, vy, damage, kind, form, anchor), 'projectiles');
         // 发射音：陷阱族=敲石近似；炮弹族由 TrapShot 首帧按原版播 Item14（Projectile.cs:21542/26830）；
-        // 传送门弹 601 首帧无发射音（原版 AI 只有 alpha 段的门色拖尾尘）
-        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball' && kind !== 'portalbolt') this.sfxAt('tink', px, py);
+        // 传送门弹 601 首帧无发射音（原版 AI 只有 alpha 段的门色拖尾尘）；
+        // 烟花族发射静音——爆花 Item14 在 Kill（Projectile.cs:73437），喷泉/马桶全程无声
+        if (kind !== 'cannonball' && kind !== 'bunny' && kind !== 'snowball' && kind !== 'portalbolt'
+          && kind !== 'fireworkRocket' && kind !== 'fireworksBoxRocket'
+          && kind !== 'fireworkFountain' && kind !== 'toiletPop') this.sfxAt('tink', px, py);
+      },
+      hasFountainAt: (tx: number, ty: number) => {
+        // 喷泉去重（Wiring.cs:1529-1545：场上已存在 aiStyle73 且 ai[0]/ai[1] 同锚点的弹）
+        for (const e of this.entities.projectiles) {
+          if (e instanceof TrapShot && e.kind === 'fireworkFountain' && !e.dead
+            && e.ax === tx && e.ay === ty) return true;
+        }
+        return false;
       },
       countProjectiles: (kind: 'spiky' | 'bunny', px: number, py: number, radius: number) => {
         let n = 0;
@@ -7318,6 +7339,31 @@ export class Game implements GameHooks {
     if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
   }
 
+  /** 定向粒子爆发（GameHooks.spawnBurst）：烟花爆花/喷泉/马桶水花的原版 dust
+   *  带初速方向与轴向压缩（Projectile.cs Kill/AI 各循环的速度档与 x/y 乘数）。
+   *  角度 = dir ± spread；速度系数 0.85+rand*0.2 对齐原版喷泉的
+   *  `spinningpoint *= 0.85 + NextDouble()*0.2`（Projectile.cs:29388-29390 等） */
+  spawnBurst(
+    x: number, y: number, color: string, count: number, speed: number,
+    dir: number, spread: number,
+    opts: { life?: number; damp?: number; grav?: number; xMul?: number; yMul?: number } = {},
+  ) {
+    const base = opts.life ?? 40;
+    for (let i = 0; i < count; i++) {
+      const a = dir + (Math.random() - 0.5) * 2 * spread;
+      const sp = speed * (0.85 + Math.random() * 0.2);
+      const life = Math.round(base * (0.6 + Math.random() * 0.4));
+      this.particles.push({
+        x, y,
+        vx: Math.cos(a) * sp * (opts.xMul ?? 1),
+        vy: Math.sin(a) * sp * (opts.yMul ?? 1),
+        life, maxLife: life, color, size: 2 + Math.random() * 2,
+        damp: opts.damp, grav: opts.grav,
+      });
+    }
+    if (this.particles.length > 600) this.particles.splice(0, this.particles.length - 600);
+  }
+
   setZoom(z: number) {
     if (!this.camera) return;
     this.camera.setZoomTarget(z);
@@ -7956,11 +8002,14 @@ export class Game implements GameHooks {
         proxy.x = rp.x; proxy.y = rp.y;
         proxy.vx = rp.vx; proxy.vy = rp.vy;
       }
-      // 控制位 → 输入（原版：远端玩家以同步的 control* 跑 Player.Update）
-      proxy.inputX = (rp.left ? -1 : 0) + (rp.right ? 1 : 0);
-      proxy.inputJump = rp.jump;
-      proxy.inputDown = rp.down;
-      proxy.inputUp = rp.up;
+      // 控制位 → 输入（原版：远端玩家以同步的 control* 跑 Player.Update）。
+      // P1.1 AOI 配套：>1.5s 无 msg13（超出对端视野被过滤/断流）→ 冻结输入，
+      // 防陈旧控制位驱动的"幽灵行走"（静止心跳 1s，正常通路不会触发）
+      const stale = performance.now() - rp.lastFresh > 1500;
+      proxy.inputX = stale ? 0 : (rp.left ? -1 : 0) + (rp.right ? 1 : 0);
+      proxy.inputJump = !stale && rp.jump;
+      proxy.inputDown = !stale && rp.down;
+      proxy.inputUp = !stale && rp.up;
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
       // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）

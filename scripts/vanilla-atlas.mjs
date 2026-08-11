@@ -61,6 +61,11 @@ const MISC = [
   // 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon）：
   // 162 炮弹 18×18 / 166 雪球 14×14 / 281 爆炸兔兔 28×28（整图单帧）
   'Projectile_162.png', 'Projectile_166.png', 'Projectile_281.png',
+  // 烟花三件套（Wiring.cs:1492-1553）：167-170 烟花火箭 / 415-418 烟花盒火箭 /
+  // 419-422 喷泉火花；733 马桶水花 alpha=255 隐形纯发射器，不入表
+  'Projectile_167.png', 'Projectile_168.png', 'Projectile_169.png', 'Projectile_170.png',
+  'Projectile_415.png', 'Projectile_416.png', 'Projectile_417.png', 'Projectile_418.png',
+  'Projectile_419.png', 'Projectile_420.png', 'Projectile_421.png', 'Projectile_422.png',
   // Boss 弹幕(机械三王/血肉墙/蜂后/世花/石巨人/猪鲨/月总/邪教徒/光女/史后)
   // 83 雷眼绿激光 / 96 诅咒焰 / 100,101,102 激光系 / 183 毒刺 / 407-410 猪鲨泡泡+鲨鱼
   // 522,526,527 蜂后机关枪弹 / 441,442 光女飞刀 / 545 世花种子 / 612 石巨人火球

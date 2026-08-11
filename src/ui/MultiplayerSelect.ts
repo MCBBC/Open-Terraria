@@ -24,7 +24,7 @@ export interface MultiplayerSelectCallbacks {
 }
 
 export interface RoomListItem {
-  code: string; name: string; online: number; w: number; h: number;
+  code: string; name: string; online: number; maxPlayers: number; w: number; h: number;
   protectTiles: boolean; protectItems: boolean;
 }
 
@@ -213,7 +213,7 @@ export class MultiplayerSelect {
         const prot = [rm.protectTiles ? '🛡破坏' : '', rm.protectItems ? '📦物品' : ''].filter(Boolean).join(' ');
         const left = el('div', undefined, `${rm.name}  ${rm.w}×${rm.h}${prot ? '  ' + prot : ''}`);
         left.style.cssText = 'color:#e8ecf8; font-size:13px;';
-        const right = el('div', undefined, `👤${rm.online}  [${rm.code}]`);
+        const right = el('div', undefined, `👤${rm.online}/${rm.maxPlayers ?? 255}  [${rm.code}]`);
         right.style.cssText = 'color:#8b98bd; font-size:12px;';
         item.appendChild(left);
         item.appendChild(right);

@@ -3,6 +3,7 @@
 import { Entity } from './Entity';
 import { hitPlayer, playEnemyHitSound, projOverlap } from './projTargets';
 import { TILE } from '../core/constants';
+import { TILE_BY_KEY } from '../data/tiles';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
@@ -20,6 +21,10 @@ import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖
 const TRAP_SHOT_STYLE: Record<string, {
   w: number; h: number; color: string; grav: number;
   proj?: string; fw?: number; fh?: number;
+  /** 烟花族：同 kind 多色变体贴图（form 0-3 → 167-170 / 415-418 / 419-422） */
+  projs?: string[];
+  /** 隐形弹（733 alpha=255 SetDefaults）：纯尘/gore 发射器，不画本体 */
+  invisible?: boolean;
   spin?: boolean | 'roll' | 'bunny'; rotOff?: number;
   trail?: { colors: string[]; count: number; life: number; grav: number };
   /** 炮弹族：前 N tick 直线无重力（Projectile.cs:21546/26844 ai[0]>=18 才加重力） */
@@ -70,10 +75,51 @@ const TRAP_SHOT_STYLE: Record<string, {
   // + Kill）。贴图 20×38 竖条 = 2 帧 20×19（frameCounter 4tick 步进）
   portalbolt: { w: 10, h: 10, color: '#B069FF', grav: 0,
     proj: 'vanilla/Projectile_601.png', fw: 20, fh: 19, friendly: true, life: 3600 },
+  // ---- 烟花三件套 + 马桶水花（Wiring.cs:1492-1553；WorldGen.LaunchRocket/LaunchRocketSmall）----
+  // 167-170 烟花火箭（SetDefaults Projectile.cs:2291-2300）：14×14 aiStyle34 friendly ranged
+  // timeLeft45，damage 150 / kb 7（WorldGen.cs:62197-62199）；AI（:25677-25739）无重力直线 + 尾烟；
+  // Kill（:73435-73921）：Item14 + 按色爆尘 + 192×192 Damage()。贴图 14×28 = 2 帧 14×14（取帧 0）
+  fireworkRocket: { w: 14, h: 14, color: '#FF8066', grav: 0, friendly: true, blast: 96, life: 45,
+    projs: ['vanilla/Projectile_167.png', 'vanilla/Projectile_168.png',
+      'vanilla/Projectile_169.png', 'vanilla/Projectile_170.png'],
+    fw: 14, fh: 14, rotOff: Math.PI / 2 },
+  // 415-418 烟花盒火箭（SetDefaults Projectile.cs:4669-4676）：14×14 aiStyle34 friendly timeLeft45
+  // damage 0（WorldGen.cs:62213-62215）——纯视觉弹，Kill 同样 192×192 Damage() 但伤害为 0
+  fireworksBoxRocket: { w: 14, h: 14, color: '#66FF99', grav: 0, friendly: true, blast: 96, life: 45,
+    projs: ['vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
+      'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png'],
+    fw: 14, fh: 14, rotOff: Math.PI / 2 },
+  // 419-422 烟花喷泉（SetDefaults Projectile.cs:4679-4686）：4×4 aiStyle73 friendly timeLeft3600（默认值），
+  // 锚点 tile 338 消失即 Kill（AI :29369-29377）；每 tick 2 粒火花 × 60 秒
+  fireworkFountain: { w: 4, h: 4, color: '#FFE85A', grav: 0, friendly: true, life: 3600,
+    projs: ['vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
+      'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png'],
+    fw: 8, fh: 8 },
+  // 733 马桶水花（SetDefaults Projectile.cs:7434-7441）：2×2 aiStyle153 tileCollide=false alpha=255
+  // ——全隐形纯发射器；AI_153_ToiletPop（:49278-49314）ai[0]==0 → 6 尘 + 1 gore，
+  // ai[0] 1..10 → 2 尘 + 1/5 gore，ai[0]>10 → Kill
+  toiletPop: { w: 2, h: 2, color: '#8AC7F0', grav: 0, life: 3600, invisible: true },
 };
 
 /** TrapShot 弹种（DeviceCtx.shootProjectile kind 共用） */
-export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt';
+export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'
+  | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop';
+
+/** ---- 烟花尘色表（Projectile.cs Kill/AI 引用的 Dust id → 近似色）----
+ *  130-134 爆花尘：发光色照抄 Dust.cs:2204-2226 Lighting.AddLight 的 RGB（134 未入光照表，
+ *  金色弹 170 与 133 交替使用，取亮金近似）；219-223 喷泉火花条（DustID.cs:167 仅 219 命名
+ *  Fireworks；419 用 222 黄 / 420 用 219 红 / 421 用 221 蓝 / 422 用 219+rand(5)，据此定色）；
+ *  216 马桶水花（AI_153 :49299）取浅水蓝 */
+export const FW_DUST: Record<string, string> = {
+  d130_red: '#FF8066', d131_green: '#66FF99', d132_blue: '#4D80FF',
+  d133_yellow: '#E6E64D', d134_gold: '#FFF2A8',
+  d219_red: '#FF5A4A', d220_green: '#5AFF8A', d221_blue: '#5A8AFF',
+  d222_yellow: '#FFE85A', d223_pink: '#FF66C8',
+  d216_water: '#8AC7F0',
+};
+/** 喷泉彩虹弹 422 的尘池（Projectile.cs:29499：219 + rand(5)） */
+export const FW_RAINBOW = [FW_DUST.d219_red, FW_DUST.d220_green, FW_DUST.d221_blue,
+  FW_DUST.d222_yellow, FW_DUST.d223_pink];
 
 export class TrapShot extends Entity {
   w = 8; h = 8;
@@ -81,8 +127,12 @@ export class TrapShot extends Entity {
   vy: number;
   damage: number;
   kind: TrapShotKind;
-  /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门） */
+  /** 传送门弹 601 的 ai[0]（WorldGen.cs:50622-50631：0 橙门 / 1 蓝门）；
+   *  烟花族 = 色变体（167-170 / 415-418 / 419-422 减基址） */
   form = 0;
+  /** 喷泉弹锚点 tile（Projectile.ai[0]/ai[1]，Wiring.cs:1548；锚点 338 消失即 Kill） */
+  ax = -1;
+  ay = -1;
   /** 滚转角(尖刺球/巨石/炮弹族) */
   private rot = 0;
   /** 已飞行 tick（炮弹族重力延迟用，对应原版 ai[0]） */
@@ -110,7 +160,8 @@ export class TrapShot extends Entity {
     return blank;
   }
 
-  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: TrapShotKind, form = 0) {
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, kind: TrapShotKind,
+    form = 0, anchor?: [number, number]) {
     super();
     const s = TRAP_SHOT_STYLE[kind];
     this.x = x; this.y = y;
@@ -118,6 +169,7 @@ export class TrapShot extends Entity {
     this.damage = damage;
     this.kind = kind;
     this.form = form;
+    if (anchor) { this.ax = anchor[0]; this.ay = anchor[1]; }
     this.w = s.w; this.h = s.h;
     if (kind === 'spiky') this.life = 1800; // 原版尖刺球 timeLeft 1800
     if (s.life !== undefined) this.life = s.life; // 炮弹族 timeLeft（SetDefaults 默认 3600 / 281=600）
@@ -128,8 +180,11 @@ export class TrapShot extends Entity {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const st = TRAP_SHOT_STYLE[this.kind];
-    const img = st.proj && r.atlas ? r.atlas.vimages.get(st.proj) : null;
-    if (img && st.fw && st.fh && !TrapShot.isBlank(r, st.proj!)) {
+    if (st.invisible) return; // 733 alpha=255：隐形纯发射器（SetDefaults :7440）
+    // 烟花族按 form 选色变体贴图；单贴图 kind 走 proj
+    const tex = st.projs?.[this.form] ?? st.proj;
+    const img = tex && r.atlas ? r.atlas.vimages.get(tex) : null;
+    if (img && st.fw && st.fh && !TrapShot.isBlank(r, tex!)) {
       // 原版弹幕贴图(整帧):飞行类贴图默认朝上(镖尖/火苗向上),对齐速度方向需 +90°;
       // 尖刺球/巨石不随速度旋转,按位移滚转
       ctx.save();
@@ -146,7 +201,13 @@ export class TrapShot extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    // 烟花三件套 + 马桶水花：独立 AI 族（aiStyle 34/73/153），不走陷阱弹通用位移/命中链
+    if (this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket'
+      || this.kind === 'fireworkFountain' || this.kind === 'toiletPop') {
+      this.fireworkUpdate(game);
+      return;
+    }
     if (--this.life <= 0) {
       // 炮弹族 timeLeft 耗尽同样走 Kill 爆炸（Projectile.Kill 由 timeLeft 归零触发）
       if (TRAP_SHOT_STYLE[this.kind].blast) this.blastKill(game);
@@ -289,7 +350,11 @@ export class TrapShot extends Entity {
     game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（Projectile.cs:72769/72706）
     game.spawnParticles(cx, cy, '#FFA050', 14, 3.5, { life: 18, damp: 0.93, grav: -0.02 });
     game.spawnParticles(cx, cy, '#FFF0C0', 8, 4.5, { life: 10, damp: 0.9, grav: -0.05 });
-    const r = st.blast!;
+    this.blastDamage(game, cx, cy, st.blast!);
+  }
+
+  /** 伤害盒结算（炮弹族与烟花火箭共用的 Damage() 语义：friendly 只伤敌怪） */
+  private blastDamage(game: GameHooks, cx: number, cy: number, r: number): void {
     const box = { x: cx - r, y: cy - r, w: 2 * r, h: 2 * r };
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
@@ -300,6 +365,161 @@ export class TrapShot extends Entity {
         game.addDamageNumber(cx, cy, this.damage, false, '#FFD060');
       }
     }
+  }
+
+  // ============ 烟花三件套 + 马桶水花（Projectile 167-170 / 415-422 / 733）============
+
+  /** 烟花族 AI 主循环。
+   *  火箭（aiStyle34，Projectile.cs:25677-25739）：无重力直线上升 + 尾烟尘 6，
+   *  timeLeft 45 到点或撞块 → Kill 爆花；
+   *  喷泉（aiStyle73，:29369-29510）：静态发射器，锚点 338 消失即 Kill，每 tick 2 粒火花；
+   *  马桶（aiStyle153，:49278-49314）：11 帧水花后自杀 */
+  private fireworkUpdate(game: GameHooks): void {
+    const isRocket = this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket';
+    if (--this.life <= 0) {
+      if (isRocket) this.explodeFirework(game); // timeLeft 45 到点 → Projectile.Kill（:73435）
+      else this.dead = true;                    // 喷泉 3600 自然耗尽（马桶由下方 age 分支自杀）
+      return;
+    }
+    this.age++;
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    if (isRocket) {
+      this.x += this.vx;
+      this.y += this.vy;
+      // 尾烟（AI_034 :25724-25739）：167-170 每帧 1 粒尘 6；415-418 自 ai[0]>4 起（:25722-25733）
+      //（引擎粒子 2 tick 一发节流，视觉近似）
+      const trailOk = this.kind === 'fireworkRocket' || this.age > 4;
+      if (trailOk && (this.life & 1) === 0) {
+        game.spawnParticles(this.x + this.w / 2, this.y + this.h, '#A8A8A0', 1, 0.6,
+          { life: 18, damp: 0.95, grav: -0.02 });
+      }
+      // tileCollide=true → 撞实心块同样 Kill 爆花
+      const tx = Math.floor(cx / TILE), ty = Math.floor(cy / TILE);
+      if (game.world.store.isSolid(tx, ty)) this.explodeFirework(game);
+      return;
+    }
+    if (this.kind === 'fireworkFountain') {
+      // 锚点 tile 必须仍是 338（AI_073 :29371-29377，否则 Kill）
+      const T338 = TILE_BY_KEY['v_338_fireworkfountain'] ?? -1;
+      const st = game.world.store;
+      if (!st.inBounds(this.ax, this.ay) || st.type[st.idx(this.ax, this.ay)] !== T338) {
+        this.dead = true;
+        return;
+      }
+      // num625 = 2 * min(1, timeLeft/60)（:29378-29383）——最后 60t 出速衰减
+      const sp = 2 * Math.min(1, this.life / 60);
+      const burst = game.spawnBurst;
+      if (!burst) return;
+      if (this.form === 0) {
+        // 419 黄（:29385-29406）：尘 222，±PI/4 散布，vy×2
+        burst(cx, cy, FW_DUST.d222_yellow, 2, sp, -Math.PI / 2, Math.PI / 4, { yMul: 2, life: 30, damp: 0.96 });
+      } else if (this.form === 1) {
+        // 420 红（:29408-29431）：尘 219（每粒 1/5 → 222，此处逐帧取色近似），vx×0.5 vy×2
+        burst(cx, cy, Math.random() < 0.2 ? FW_DUST.d222_yellow : FW_DUST.d219_red, 2, sp,
+          -Math.PI / 2, Math.PI / 4, { xMul: 0.5, yMul: 2, life: 30, damp: 0.96 });
+      } else if (this.form === 2) {
+        // 421 蓝（:29433-29452）：尘 221，±PI/8 窄散布，vy×2.5
+        burst(cx, cy, FW_DUST.d221_blue, 2, sp, -Math.PI / 2, Math.PI / 8, { yMul: 2.5, life: 30, damp: 0.96 });
+        // timeLeft%10==0 再补 9 粒尘 222 扇面（:29455-29475：x=(i-4)/5 均布）
+        if (this.life % 10 === 0) {
+          burst(cx, cy, FW_DUST.d222_yellow, 9, sp * (0.85 + Math.random() * 0.2),
+            -Math.PI / 2, Math.PI / 5, { yMul: 2, life: 30, damp: 0.96 });
+        }
+      } else {
+        // 422 彩虹（:29494-29510）：尘 219 + rand(5)，±PI/4，vy×2
+        burst(cx, cy, FW_RAINBOW[Math.floor(Math.random() * FW_RAINBOW.length)]!, 2, sp,
+          -Math.PI / 2, Math.PI / 4, { yMul: 2, life: 30, damp: 0.96 });
+      }
+      return;
+    }
+    // ---- 马桶水花 733（AI_153_ToiletPop :49278-29314）----
+    // age 1 ↔ 原版 ai[0]==0（首帧 6 尘 216 + 1 gore）；age 2..11 ↔ ai[0] 1..10（2 尘 + 1/5 gore）；
+    // age 12 ↔ ai[0]=11 > 10 → Kill。尘向上（speedY -2，velX×0.5，:49299-49305）；
+    // gore 580-582（:49308-49312）以 2 粒亮水珠近似
+    const burst = game.spawnBurst;
+    if (!burst) return;
+    if (this.age === 1) {
+      burst(cx, cy, FW_DUST.d216_water, 6, 2, -Math.PI / 2, 0.9, { xMul: 0.5, life: 26, damp: 0.96 });
+      burst(cx, cy, '#D8ECFA', 2, 2.5, -Math.PI / 2, 0.7, { life: 32, damp: 0.97 });
+    } else if (this.age <= 11) {
+      burst(cx, cy, FW_DUST.d216_water, 2, 2, -Math.PI / 2, 0.9, { xMul: 0.5, life: 26, damp: 0.96 });
+      if (Math.random() < 0.2) {
+        burst(cx, cy, '#D8ECFA', 2, 2.5, -Math.PI / 2, 0.7, { life: 32, damp: 0.97 });
+      }
+    } else {
+      this.dead = true;
+    }
+  }
+
+  /** 烟花爆花（Projectile.Kill aiStyle==34，Projectile.cs:73435-73921）：
+   *  SoundID.Item14 + 按弹种彩色尘（数量/速度档 1:1）+ 192×192 伤害盒 Damage()（:73912-73920）。
+   *  尘速档 = 原版各循环的径向速度（尘自带 0.5 系数初速并入档位）；noGravity 尘按
+   *  Dust.cs:2227-2230 velocity*=0.93 / fadeIn 缓胀 → damp 0.93 + 45t 存活近似 */
+  private explodeFirework(game: GameHooks): void {
+    this.dead = true;
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    game.playSfx('explosion', 1, cx, cy); // SoundID.Item14（:73437）
+    const burst = game.spawnBurst
+      ?? ((x: number, y: number, c: string, n: number, s: number) => game.spawnParticles(x, y, c, n, s));
+    /** 全向径向爆花（dir=0/spread=PI 覆盖全圆；原版尘方向为随机角，整体旋转不变） */
+    const radial = (color: string, count: number, speed: number,
+      opts?: { xMul?: number; yMul?: number }) =>
+      burst(cx, cy, color, count, speed, 0, Math.PI, { life: 45, damp: 0.93, ...opts });
+    const rand = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo));
+    if (this.kind === 'fireworkRocket') {
+      // 167-170（:73439-73661）
+      if (this.form === 0) {
+        // 红 167（:73439-73473）：400 尘 130，四档速度 4/8/12/16 各 100
+        radial(FW_DUST.d130_red, 100, 4); radial(FW_DUST.d130_red, 100, 8);
+        radial(FW_DUST.d130_red, 100, 12); radial(FW_DUST.d130_red, 100, 16);
+      } else if (this.form === 1) {
+        // 绿 168（:73475-73518）：400 尘 131；0-100 档 0→2 渐增（取均值 1）、
+        // 101-250 档 10（150 粒）、251-399 档 13 且 x×1.25/y×0.75（149 粒）
+        radial(FW_DUST.d131_green, 101, 1); radial(FW_DUST.d131_green, 150, 10);
+        radial(FW_DUST.d131_green, 149, 13, { xMul: 1.25, yMul: 0.75 });
+      } else if (this.form === 2) {
+        // 蓝 169（:73520-73612）：双圈 Lerp 曲线（各 2×num843×20 尘 133）+ 中心 100 尘 132；
+        // num843 = rand(5,9) 臂、num844 = rand(12,17) 外速、value10 = rand(3,7) 内速
+        const arms = rand(5, 9), outer = rand(12, 17), inner = rand(3, 7);
+        radial(FW_DUST.d133_yellow, 80 * arms, outer);
+        radial(FW_DUST.d133_yellow, 80 * arms, outer / 2);
+        radial(FW_DUST.d132_blue, 100, outer);
+      } else {
+        // 黄 170（:73614-73661）：400 尘 133/134 交替，四档 16/11/8/5 各 100，轴压 0.7 交替
+        radial(FW_DUST.d133_yellow, 100, 16, { yMul: 0.7 }); radial(FW_DUST.d134_gold, 100, 11, { xMul: 0.7 });
+        radial(FW_DUST.d133_yellow, 100, 8, { yMul: 0.7 }); radial(FW_DUST.d134_gold, 100, 5, { xMul: 0.7 });
+      }
+    } else {
+      // 415-418 烟花盒（:73663-73898）
+      if (this.form === 0) {
+        // 红 415（:73663-73710）：30×num868 臂尘 130（速度 num870→num869 渐增，取均值）+
+        // 100 尘 130 补充；num868 = rand(5,9)、num869 = rand(10,15)×0.66、num870 = rand(4,7)/2
+        const arms = rand(5, 9), sp = rand(10, 15) * 0.66, sp0 = rand(4, 7) / 2;
+        radial(FW_DUST.d130_red, 30 * arms, (sp0 + sp) / 2);
+        radial(FW_DUST.d130_red, 100, sp);
+      } else if (this.form === 1) {
+        // 绿 416（:73712-73760）：num883=20 步 × num882 = rand(3,6)×2 臂螺旋尘 131，
+        // 速度 1→8 渐增（取均值 4.5），奇偶臂 scale 0.9
+        radial(FW_DUST.d131_green, 20 * rand(3, 6) * 2, 4.5);
+      } else if (this.form === 2) {
+        // 蓝 417（:73762-73801）：150 尘三段（各 50）132/133/132，
+        // 外圈 num894 = max(rand(4,7),rand(4,7))（x×0.5 旋转）、中段 num893（y×0.5 旋转）、内圈 num892
+        const sp2 = 4 + Math.random() * 3, sp1 = 4 + Math.random() * 3;
+        radial(FW_DUST.d132_blue, 50, Math.max(sp1, sp2), { xMul: 0.5 });
+        radial(FW_DUST.d133_yellow, 50, Math.min(sp1, sp2), { yMul: 0.5 });
+        radial(FW_DUST.d132_blue, 50, Math.min(sp1, sp2));
+      } else {
+        // 黄 418（:73803-73898）：2×num899×15 臂尘 134（SmoothStep num900→num901）+
+        // 120 补充尘（前 80 尘 133 慢速、后 40 尘 131 外速）
+        const arms = rand(5, 12), sp = rand(9, 14) * 0.66, sp0 = rand(2, 4) * 0.66;
+        radial(FW_DUST.d134_gold, 2 * arms * 15, (sp + sp0) / 2);
+        radial(FW_DUST.d133_yellow, 80, sp0);
+        radial(FW_DUST.d131_green, 40, sp);
+      }
+    }
+    // 192×192 伤害盒 Damage()（:73912-73920）：烟花火箭 damage 150 结算，
+    // 烟花盒 damage 0 = 纯视觉（hurt(0) 无意义，直接跳过）
+    if (this.damage > 0) this.blastDamage(game, cx, cy, 96);
   }
 }
 
@@ -328,7 +548,7 @@ export class Dart extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const world = game.world;
     this.x += this.vx;

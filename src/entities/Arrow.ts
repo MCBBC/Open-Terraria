@@ -21,6 +21,38 @@ export function projSprite(projId: number): HTMLImageElement | null {
   return img;
 }
 
+/** Main.projFrames（Main.cs:8392 起全 275 条非 1 帧赋值，tools 内联提取）：
+ *  未列入的恒 1 帧。投射物贴图是【竖向多帧行】——帧高 = 图高/帧数，
+ *  整图绘制会把多帧压成胶片条（史莱姆随从 266 曾 12 帧压成一坨） */
+import projFramesJson from '../data/vanilla-projframes.json';
+const PROJ_FRAMES = projFramesJson as Record<string, number>;
+export function projFrameCount(projId: number): number {
+  return PROJ_FRAMES[String(projId)] ?? 1;
+}
+
+/** 单帧裁切缓存（id+帧号 → canvas），多帧行按帧高切片 */
+const frameCache = new Map<string, HTMLCanvasElement>();
+export function projFrameImg(projId: number, frameIdx: number): HTMLCanvasElement | null {
+  const img = projSprite(projId);
+  if (!img || !img.complete || img.naturalWidth === 0) return null;
+  const frames = projFrameCount(projId);
+  const idx = Math.max(0, Math.min(frames - 1, frameIdx));
+  const fh = img.naturalHeight / frames;
+  if (!Number.isFinite(fh) || fh < 1) return null;
+  const key = `${projId}|${idx}`;
+  let c = frameCache.get(key);
+  if (c) return c;
+  c = document.createElement('canvas');
+  c.width = img.naturalWidth;
+  c.height = Math.round(fh);
+  const cx = c.getContext('2d')!;
+  cx.imageSmoothingEnabled = false;
+  cx.drawImage(img, 0, Math.round(idx * fh), img.naturalWidth, Math.round(fh), 0, 0, c.width, c.height);
+  if (frameCache.size > 2048) frameCache.clear();
+  frameCache.set(key, c);
+  return c;
+}
+
 export interface ArrowOpts {
   /** 重力/tick（aiStyle1/2 = 0.3；直飞魔法弹传 0）。默认 0.3 */
   grav?: number;
@@ -100,7 +132,7 @@ export class Arrow extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
-    if (this.netPuppet) { this.x += this.vx; this.y += this.vy; return; }
+    if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const world = game.world;
     // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）

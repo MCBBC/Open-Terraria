@@ -232,6 +232,13 @@ if (num7w < num6w + num14)
 double gvWorldSurfaceLow = num5w, gvWorldSurfaceHigh = num6w;
 double gvRockLayerLow = num7w, gvRockLayerHigh = num8w;
 double gvWorldSurface = num3w, gvRockLayer = num4w;
+Action<string> SkyGh = (tag) =>
+    {
+        uint h = 2166136261;
+        for (int yy = 0; yy <= 120; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
+        Console.WriteLine($"SKYGH {tag} {h}");
+    };
+    SkyGh("terrain");
 Checkpoint("terrain");
 
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
@@ -619,6 +626,7 @@ void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] su
         }
     }
 }
+SkyGh("dunes");
 Checkpoint("dunes");
 
 // ================= Pass 2：OceanSand（cs:11603-11711）=================
@@ -677,6 +685,7 @@ for (int i = 0; i < 3; i++)
     }
     File.WriteAllText("/tmp/cs-sand.txt", string.Join(",", prof));
 }
+SkyGh("oceansand");
 Checkpoint("oceansand");
 
 // ================= Pass 3：SandPatches（cs:11712-11737）=================
@@ -691,6 +700,7 @@ Checkpoint("oceansand");
         TileRunner(num2, num3, (int)r.Next(15, 70), (int)r.Next(20, 130), 53);
     }
 }
+SkyGh("sandpatches");
 Checkpoint("sandpatches");
 
 // ================= Pass 4：Tunnels（cs:11745-11808）=================
@@ -725,6 +735,7 @@ Checkpoint("sandpatches");
         }
     }
 }
+SkyGh("tunnels");
 Checkpoint("tunnels");
 
 var mCaveX = new List<int>();
@@ -768,6 +779,7 @@ var mCaveY = new List<int>();
         }
     }
 }
+SkyGh("mountaincaves");
 Checkpoint("mountaincaves");
 
 // ================= Pass 6：DirtWallBackgrounds（cs:11883-11921）=================
@@ -791,6 +803,7 @@ Checkpoint("mountaincaves");
         }
     }
 }
+SkyGh("dirtwallbg");
 Checkpoint("dirtwallbg");
 
 // ================= Pass 7-9：RocksInDirt / DirtInRocks / Clay（cs:11922-12033）=================
@@ -835,6 +848,8 @@ for (int x = 5; x < W - 5; x++)
 }
 File.WriteAllBytes("/tmp/cs-typ2.bin", ToBytes(typ));
 File.WriteAllBytes("/tmp/cs-act2.bin", act);
+SkyGh("rocksclay");
+File.WriteAllBytes("/tmp/cs-rc.bin", ToBytes(typ));
 Checkpoint("rocksclay");
 
 // ================= Pass 10：SmallHoles（cs:12034-12092）=================
@@ -861,6 +876,7 @@ Checkpoint("rocksclay");
         TileRunner(num2, num3, num4, num5, type);
     }
 }
+SkyGh("smallholes");
 Checkpoint("smallholes");
 
 // ================= Pass 11：DirtLayerCaves（cs:12094-12134）=================
@@ -926,6 +942,7 @@ Checkpoint("rocklayer");
     for (int n = 0; n < cavCount; n++)
         Caverer((int)r.Next(340, W - 340), (int)r.Next(yLo, yHi));
 }
+SkyGh("surfacecaves");
 Checkpoint("surfacecaves");
 
 // ================= Pass 34：MountainCaveOpenings（cs:14932-14947，按我们的执行序紧跟洞穴链）=================
@@ -1025,6 +1042,7 @@ for (int i = 0; i < mCaveX.Count; i++)
     for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
     Console.WriteLine($"BAND mcopen {h}");
 }
+SkyGh("mcopenings");
 Checkpoint("mcopenings");
 
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
@@ -1109,6 +1127,7 @@ File.WriteAllText("/tmp/cs-beach2.txt", string.Join(" ", beachDbg));
     for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
     Console.WriteLine($"BAND beaches {h}");
 }
+SkyGh("beaches");
 Checkpoint("beaches");
 
 // ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================
@@ -1169,6 +1188,7 @@ var snowMaxXArr = new int[H];
     for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
     Console.WriteLine($"BAND ice {h}");
 }
+SkyGh("icebiome");
 Checkpoint("icebiome");
 
 // ================= Grass（cs:12454-12507）=================
@@ -1201,6 +1221,7 @@ Checkpoint("icebiome");
     for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
     Console.WriteLine($"BAND grass {h}");
 }
+SkyGh("grass");
 Checkpoint("grass");
 
 // ================= Jungle（JunglePass.cs 全文 1:1）=================

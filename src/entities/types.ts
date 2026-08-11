@@ -28,6 +28,14 @@ export interface GameHooks {
     x: number, y: number, color: string, count: number, speed?: number,
     opts?: { life?: number; damp?: number; grav?: number },
   ): void;
+  /** 定向粒子爆发（烟花爆花/喷泉/马桶水花等原版 dust 带初速方向的场景；
+   *  spawnParticles 为全向均匀发射，无法表达定向）。dir 为中心角、spread 为半散布，
+   *  xMul/yMul 为原版轴向压缩（如 168 尘 y×0.75、马桶尘 x×0.5） */
+  spawnBurst?(
+    x: number, y: number, color: string, count: number, speed: number,
+    dir: number, spread: number,
+    opts?: { life?: number; damp?: number; grav?: number; xMul?: number; yMul?: number },
+  ): void;
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
   /** 播放音效 */

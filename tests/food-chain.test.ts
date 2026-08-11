@@ -43,11 +43,11 @@ describe('食物提取（SetFoodDefaults → vanilla-itemfunc）', () => {
       expect(ff.useStyle).toBe(t.useStyle);
     }
   });
-  it('三档分布：26×42 / 206×25 / 207×14 / 25×2（2266+353 醉酒）', () => {
+  it('三档分布：26×42 / 206×26 / 207×14 / 25×2（2266+353 醉酒）', () => {
     const foods = Object.values(FUNC).filter((v) => v.buffType && [25, 26, 206, 207].includes(v.buffType));
     const cnt = (b: number) => foods.filter((v) => v.buffType === b).length;
     expect(cnt(26)).toBe(42);
-    expect(cnt(206)).toBe(25);
+    expect(cnt(206)).toBe(26);
     expect(cnt(207)).toBe(14);
     expect(cnt(25)).toBe(2);
   });

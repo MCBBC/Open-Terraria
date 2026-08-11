@@ -86,6 +86,15 @@ export const VANILLA_MISC = [
   'vanilla/Projectile_162.png',
   'vanilla/Projectile_166.png',
   'vanilla/Projectile_281.png',
+  // 烟花三件套（Wiring.cs:1492-1553 → WorldGen.LaunchRocket/LaunchRocketSmall/NewProjectile）：
+  // 167-170 烟花火箭 14×28（2 帧 14×14）/ 415-418 烟花盒火箭 / 419-422 喷泉火花 8×8；
+  // 733 马桶水花为 alpha=255 隐形纯发射器（SetDefaults Projectile.cs:7440），无需贴图
+  'vanilla/Projectile_167.png', 'vanilla/Projectile_168.png',
+  'vanilla/Projectile_169.png', 'vanilla/Projectile_170.png',
+  'vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
+  'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png',
+  'vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
+  'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png',
   // ---- NPC GlowMask（Main.cs DrawNPC 硬编码发光叠画；Render 侧 drawNpcGlow 消费）----
   'vanilla/Glow_48.png', 'vanilla/Glow_49.png', 'vanilla/Glow_50.png',     // 火星飞碟族 392/395/394（:24218-24226）
   'vanilla/Glow_132.png', 'vanilla/Glow_143.png', 'vanilla/Glow_149.png', 'vanilla/Glow_162.png',  // 四塔（:23746-23776）
