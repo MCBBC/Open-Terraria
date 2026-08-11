@@ -1,7 +1,6 @@
 // 程序化世界生成管线：地形 → 洞穴 → 矿石 → 液体 → 表面 → 结构
 // 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
-import { createNoise2D } from 'simplex-noise';
-import { RNG, hashString } from '../../core/rng';
+import { RNG, translateSeed } from '../../core/rng';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World } from '../World';
 
@@ -26,19 +25,22 @@ export interface GenCtx {
   world: World;
   store: World['store'];
   rng: RNG;
-  noise2D: (x: number, y: number) => number;
   surface: Float32Array;   // 每列地表高度（tile y）
   cfg: GenConfig;
 }
 
 /** 生成一个世界。passes 按序执行，每帧尽量做完一个 pass 后让出主线程。 */
 export async function generateWorld(cfg: GenConfig, onProgress?: (label: string, p: number) => void): Promise<World> {
-  const seed = hashString(cfg.seedText || String(Date.now()));
+  // 种子解析 1:1 原版 WorldFileData.TranslateSeed（数字→Abs；非数字→Crc32），
+  // 生成入口构造 Main.rand = new UnifiedRandom(seed)（WorldGen.cs:11159）。
+  // 位级金标见 tests/unified-random.test.ts。
+  const seed = translateSeed(cfg.seedText || String(Date.now()));
   const world = new World(cfg.width, cfg.height, seed, cfg.name ?? '新世界');
   const rng = new RNG(seed);
-  const noise2D = createNoise2D(() => rng.next());
+  // 注：曾在此 createNoise2D(() => rng.next())——simplex 构造即消耗 RNG 流
+  //（建置换表 256+ 次），而全管线无消费者。种子等价必须零预耗，已删除。
   const ctx: GenCtx = {
-    world, store: world.store, rng, noise2D,
+    world, store: world.store, rng,
     surface: new Float32Array(cfg.width),
     cfg,
   };
@@ -53,6 +55,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   //   地表装饰(76 traps/85) 海滩装饰(56) 结构
   const passes: Pass[] = [
     { name: '原版地形', run: vanillaTerrain },
+    // 原版注册序 Dunes(cs:11540) < Ocean Sand(cs:11603):沙丘先于海洋沙/海滩塑造,
+    // 并同时掷金字塔候选(cs:11591-11599 → gs.pyramidSpots)
+    { name: '沙丘', run: vanillaDunes },
     { name: '洞穴', run: vanillaCaves },
     { name: '海滩', run: vanillaBeaches },
     { name: '生物群系', run: vanillaBiomes },
@@ -62,6 +67,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // （唯一硬约束:水晶在 Lakes 之后;平滑/瀑布在其前的原版序可完整对齐）
     { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
+    // 原版注册序 Lakes(14613) < Shimmer(15256) < DirtWallCleanup(15310)：
+    // 微光以太在此挖洞灌液，清理/沉降在其后
+    { name: '微光', run: vanillaShimmer },
     { name: '清理', run: vanillaCleanup },
     // 原版 SettleLiquids（cs:16215）：Lakes 之后、SmoothWorld/Waterfalls 之前的中途
     // 沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，必须在静止水面数据上跑
@@ -91,6 +99,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // =原版 pass 82 Trees；杂草/花=原版 pass 86-90）
     { name: '表面', run: surfacePass },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
+    // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
+    { name: '微群系', run: vanillaMicroBiomes },
     { name: '海滩装饰', run: vanillaBeachDecor },
   ];
 
@@ -119,6 +130,9 @@ import { spreadGrassAll } from './vanilla/Spread';
 import { runDesertPass } from './vanilla/DesertPass';
 import { runMushroomPass } from './vanilla/MushroomPass';
 import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
+import { runDunesPass } from './vanilla/DunesPass';
+import { runShimmerPass } from './vanilla/ShimmerPass';
+import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
@@ -208,6 +222,27 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   world.groundLevel = gs.worldSurface;
   world.rockLevel = gs.rockLevel;
   world.lavaLine = gs.lavaLine;
+}
+
+// 原版 pass "Dunes"(cs:11540):沙丘塑造 + 金字塔候选(gs.pyramidSpots)
+function vanillaDunes({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runDunesPass(store, rng, gs);
+}
+
+// 原版 pass "Shimmer"(cs:15256):以太微光生物群系
+function vanillaShimmer({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runShimmerPass(store, rng, gs);
+}
+
+// 原版 pass "Micro Biomes"(cs:21785):露营地标 + 炸药陷阱屋
+function vanillaMicroBiomes({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runMicroBiomesPass(store, rng, gs);
 }
 
 function vanillaLakes({ store, rng }: GenCtx) {

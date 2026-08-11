@@ -39,10 +39,6 @@ export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
       for (let y = 0; y < sandDepthLimit; y++) {
         const ii = st.idx(x, y);
         if (!st.flags[ii]) continue;
-        // 金字塔候选:区域中心 1/6 概率
-        if (x === ((x1 + x2) >> 1) && rng.next() < 1 / 6) {
-          gs.pyramidSpots.push({ x, y });
-        }
         const edge = Math.min(depth, x - x1, x2 - x);
         const thick = edge + rng.int(0, 4);
         for (let y2 = y; y2 < y + thick && y2 < st.h; y2++) {

@@ -23,7 +23,7 @@ import { attachDevices, geyserTrap } from '../world/wiring/devices';
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { vanillaNpc, vanillaItemKey, TOWN_NPC_IDS } from '../data/vanillaNpcs';
+import { vanillaNpc, TOWN_NPC_IDS } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, type CombatWeapon } from '../data/vanillaItemCombat';
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner } from '../world/spawn/VanillaSpawner';
@@ -131,6 +131,24 @@ const TILE_CUT = new Set<number>(
   }, []),
 );
 const POT_TILE = TILE_BY_KEY['pot'] ?? -1;
+/** NPC.MechSpawn 等价组（NPC.cs:7415-7453）：组内任一 type 互计配额 */
+const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
+  [74, 297, 298],      // 蛇
+  [46, 540, 303, 337], // 骷髅
+  [362, 363, 364, 365],// 鸟
+  [602, 603], [608, 609], [616, 617],
+];
+/** 掉落物 → 原版物品 id（vi_NNN 前缀解析；原生 key 走稳定表反查） */
+const NATIVE_ITEM_VID: Record<string, number> = {
+  coin_copper: 71, coin_silver: 72, coin_gold: 73, coin_platinum: 74,
+  gel: 23, torch: 8, lens: 236, stone_block: 3, dirt_block: 2, wood: 9,
+  lesser_healing_potion: 28,
+};
+function dropVanillaId(d: ItemDrop): number {
+  const m = /^vi_(\d+)_/.exec(ITEM_DEFS[d.itemId]?.key ?? '');
+  if (m) return Number(m[1]);
+  return NATIVE_ITEM_VID[ITEM_DEFS[d.itemId]?.key ?? ''] ?? -1;
+}
 
 /** 玩家储物族 tile key → bank 索引（原版 Player.cs:32598+：29→bank / 97→bank2 /
  *  463→bank3 / 491→bank4，chest 槽位约定 -2..-5） */
@@ -3420,29 +3438,53 @@ export class Game implements GameHooks {
     return {
       worldSurface: this.world.groundLevel,
       dropItem: (vanillaItemId: number, px: number, py: number) => {
-        const key = ITEM_MAP[vanillaItemId];
-        if (key) this.spawnDrop(px, py, key, 1);
+        const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
+        if (!key) return;
+        const d = this.spawnDrop(px, py, key, 1);
+        // 心/星雕像是 pickup 类物品（ItemID.Sets.IsAPickup）
+        if (d && vanillaItemId === 58) d.pickup = 'heart';
+        else if (d && vanillaItemId === 184) d.pickup = 'star';
       },
       spawnNpc: (vanillaNpcId: number, px: number, py: number) => {
         const e = Enemy.fromVanilla(vanillaNpcId, px, py);
-        if (e) { this.entities.add(e, 'enemies'); return true; }
+        if (e) {
+          // Wiring.cs:2479-2483：雕像产怪 value=0（不掉钱）+ SpawnedFromStatue
+          e.spawnedFromStatue = true;
+          this.entities.add(e, 'enemies');
+          return true;
+        }
         return false;
       },
-      mechSpawnOk: (px: number, py: number) => {
-        // NPC.MechSpawn 近似:25 格半径内敌人 < 6
-        let n = 0;
-        for (const e of this.entities.enemies) {
-          if (Math.abs(e.x - px) < 400 && Math.abs(e.y - py) < 400) n++;
+      mechSpawnOk: (px: number, py: number, type: number) => {
+        // NPC.MechSpawn（NPC.cs:7399-7483）：同 type（等价组互计）三阈值拒绝
+        const grp = NPC_MECH_GROUPS.find((g) => g.includes(type));
+        let total = 0, near = 0, mid = 0;
+        for (const o of this.entities.enemies) {
+          const en = o as Enemy;
+          const t = en.vanillaId;
+          if (t == null) continue;
+          if (t !== type && !(grp && grp.includes(t)) && !(type === 55 && t === 230)) continue;
+          total++;
+          const d = Math.hypot(en.x - px, en.y - py);
+          if (d < 200) near++;
+          if (d < 600) mid++;
+          if (near >= 3 || mid >= 6 || total >= 10) return false;
         }
-        return n < 6;
+        return true;
       },
-      itemSpawnOk: (px: number, py: number) => {
-        // Item.MechSpawn 近似:20 格半径内掉落物 < 20
-        let n = 0;
-        for (const d of this.entities.drops) {
-          if (Math.abs(d.x - px) < 320 && Math.abs(d.y - py) < 320) n++;
+      itemSpawnOk: (px: number, py: number, type: number) => {
+        // Item.MechSpawn（Item.cs:48982-49013）：同 item 三阈值拒绝
+        let total = 0, near = 0, mid = 0;
+        for (const o of this.entities.drops) {
+          const d = o as ItemDrop;
+          if (dropVanillaId(d) !== type) continue;
+          total++;
+          const dist = Math.hypot(d.x - px, d.y - py);
+          if (dist < 300) near++;
+          if (dist < 800) mid++;
+          if (near >= 3 || mid >= 6 || total >= 10) return false;
         }
-        return n < 20;
+        return true;
       },
       shootProjectile: (px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser') => {
         this.entities.add(new TrapShot(px, py, vx, vy, damage, kind), 'projectiles');
@@ -3686,12 +3728,16 @@ export class Game implements GameHooks {
     const w = this.world;
     const underworldY = w.store.h - 200; // UnderworldLayer ≈ maxTilesY-200
     const flag = y < w.rockLevel;         // 原版 flag：j < rockLayer（地表+泥土层）
-    // item id → 我们 key：vanillaItemKey 解析 + 自研 key 覆盖（vi 表缺的 5 项）
-    const drop = (itemId: number, n = 1) => {
-      const override: Record<number, string> = { 58: 'mushroom_item', 8: 'torch', 73: 'coin_copper' };
-      const key = override[itemId] ?? vanillaItemKey(itemId);
-      if (key) this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n, (Math.random() - 0.5) * 2.4, -2 - Math.random());
+    // item id → 我们 key：VANILLA_ITEM_KEY_BY_ID 全量映射（vi_ 表覆盖 6146 件）+
+    // 原生 def 覆盖（火把/铜币有原生实现）
+    const drop = (itemId: number, n = 1): ItemDrop | null => {
+      const override: Record<number, string> = { 8: 'torch', 73: 'coin_copper' };
+      const key = override[itemId] ?? VANILLA_ITEM_KEY_BY_ID[itemId];
+      if (!key) return null;
+      return this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n, (Math.random() - 0.5) * 2.4, -2 - Math.random());
     };
+    /** 心 pickup（item 58 是 IsAPickup：触碰回血不进包——此处曾误当蘑菇收集物） */
+    const dropHeart = () => { const h = drop(58); if (h) h.pickup = 'heart'; };
     const R = (n: number) => (Math.random() * n) | 0;
     // L57213：1/45 稀有 → 按深度三张药水表
     if (R(45) === 0) {
@@ -3727,8 +3773,14 @@ export class Game implements GameHooks {
     // 掉落物随后被 entities.clear() 清掉,无泄漏
     const pl = this.player;
     if (num10 === 0 && (!pl || pl.hp < pl.maxHp)) {
-      drop(58); // 蘑菇
-      if (R(2) === 0) drop(58);
+      // 心 pickup（WorldGen.cs:57511-57531）：1 颗 + 1/2 第二颗；
+      // 专家模式（大师也算）再 1/2、1/2 两颗
+      dropHeart();
+      if (R(2) === 0) dropHeart();
+      if ((pl?.appearance?.difficulty ?? 0) >= 2) {
+        if (R(2) === 0) dropHeart();
+        if (R(2) === 0) dropHeart();
+      }
       return;
     }
     if (num10 === 1 || num10 === 0) {
@@ -3745,7 +3797,7 @@ export class Game implements GameHooks {
         drop(t, 10 + R(11));
         return;
       }
-      case 3: // 凝胶 28（地狱→治疗药水 188）（L57653）
+      case 3: // 弱效治疗药水 28（地狱/困难→治疗药水 188）（L57625-57638）
         drop(y > underworldY ? 188 : 28, 1);
         return;
       case 4:
@@ -4615,9 +4667,9 @@ export class Game implements GameHooks {
     const npc = this.dialogNpc;
     if (!npc) return;
     const entries = this.shopStockFor(npc).map(([vid, price]) => ({
-      key: vanillaItemKey(vid) ?? '',
+      key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
       vanillaId: vid,
-      name: Lang.itemName(vid) ?? vanillaItemKey(vid) ?? String(vid),
+      name: Lang.itemName(vid) ?? VANILLA_ITEM_KEY_BY_ID[vid] ?? String(vid),
       price,
     }));
     this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned());
@@ -4634,7 +4686,7 @@ export class Game implements GameHooks {
       this.openNpcShop();
       return;
     }
-    const key = vanillaItemKey(vanillaId);
+    const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
     if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 1);
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
@@ -4884,8 +4936,26 @@ export class Game implements GameHooks {
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
-      // 星星斗篷/蜜蜂斗篷（Player.SpawnStar/SpawnBee 近似）：受击召 3 颗落星砸附近敌人
+      // 星星斗篷（Player.SpawnStar 近似）：受击召 3 颗落星砸附近敌人
       if (p.equipStats.starCloak) this.spawnStarCloakStars();
+      // 蜂蜜斗篷/蜂巢背带（Player.SpawnBees :2147 近似）：受击放 1-3 只蜂（proj 181/183/189）
+      if (p.equipStats.bees) {
+        const n = 1 + Math.floor(Math.random() * 3);
+        for (let k = 0; k < n; k++) {
+          const tx = p.cx + (Math.random() - 0.5) * 48;
+          const ty = p.cy - 20 + (Math.random() - 0.5) * 24;
+          const tgt = this.entities.enemies.find((e) => {
+            const en = e as Enemy;
+            return !en.dead && Math.abs(en.cx - p.cx) < 500;
+          }) as Enemy | undefined;
+          const ang = tgt
+            ? Math.atan2(tgt.cy - ty, tgt.cx - tx)
+            : -Math.PI / 2 + (Math.random() - 0.5);
+          this.entities.add(new Arrow(tx, ty, Math.cos(ang) * 3.4, Math.sin(ang) * 3.4,
+            Math.round(9 * p.damageMult('melee')), 0.5, 181, null), 'projectiles');
+        }
+        this.sfx.play('beeSummon');
+      }
       // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
       if (p.hp <= 0) this.sfx.play('pkilled');
       else this.sfx.play('hurt');

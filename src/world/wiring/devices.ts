@@ -11,10 +11,10 @@ export interface DeviceCtx {
   dropItem(vanillaItemId: number, px: number, py: number): void;
   /** 按原版 npc id 生成敌人(雕像刷怪;返回是否成功) */
   spawnNpc(vanillaNpcId: number, px: number, py: number): boolean;
-  /** NPC.MechSpawn 近似:该点区域雕像刷怪是否超限 */
-  mechSpawnOk(px: number, py: number): boolean;
-  /** Item.MechSpawn 近似 */
-  itemSpawnOk(px: number, py: number): boolean;
+  /** NPC.MechSpawn（NPC.cs:7399-7483）：同 type（含等价组）200px≥3 / 600px≥6 / 全图≥10 拒绝 */
+  mechSpawnOk(px: number, py: number, type: number): boolean;
+  /** Item.MechSpawn（Item.cs:48982-49013）：同 item 300px≥3 / 800px≥6 / 全图≥10 拒绝 */
+  itemSpawnOk(px: number, py: number, type: number): boolean;
   /** 投射物(飞镖/火焰/尖刺球/炮弹近似):vx/vy px/tick */
   shootProjectile(px: number, py: number, vx: number, vy: number, damage: number, kind: 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser'): void;
   /** 统计附近某类投射物数量(尖刺球惩罚表用) */
@@ -158,13 +158,33 @@ const STATUE_NPC: Record<number, number | number[]> = {
   62: [487, 486, 485], 64: 86, 65: 490, 66: 82, 67: 449, 68: 167, 69: 480, 70: 48,
   71: [170, 180, 171], 72: 481, 73: 482, 74: 430, 75: 489, 76: 611, 77: 602,
   78: [595, 596, 599, 597, 600, 598], 79: [616, 617],
+  80: [671, 672], 81: 673, 82: [674, 675], // 1.4.4+ 新雕像（:2260-2267）
 };
-/** 单独分支的雕像 style(NPC 直刷,Wiring.cs:2010-2208) */
-const STATUE_NPC_DIRECT: Record<number, number> = {
-  4: 1, 7: 49, 8: 55, 9: 46, 10: 21, 16: 42, 18: 67, 23: 63, 27: 85, 28: 74, 42: 58, 50: 65,
+/** flag7（生成区实心 → poof 不生成）的 style（:2270-2282；64=小丑? 71=史莱姆王组） */
+const STATUE_SOLID_CHECK = new Set([64, 71]);
+/** 单独分支的雕像 style（Wiring.cs :2290-2440）。dx/dy 为生成点偏移、
+ *  solid=生成区实心时 poof、pool=随机池（28 蛇三色等） */
+const STATUE_NPC_DIRECT: Record<number, { npc: number | number[]; dx?: number; dy?: number; solid?: boolean }> = {
+  4: { npc: 1, dy: -12 },
+  7: { npc: 49, dx: -4, dy: -6 },
+  8: { npc: 55, dy: -12 },
+  9: { npc: 46, dy: -12 },
+  10: { npc: 21 },
+  16: { npc: 42, dy: -12, solid: true },
+  18: { npc: 67, dy: -12 },
+  23: { npc: 63, dy: -12 },
+  27: { npc: 85, dx: -9 },
+  28: { npc: [74, 297, 298], dy: -12 },
+  42: { npc: 58, dy: -12 },
+  50: { npc: 65, solid: true }, // 史莱姆王雕像（:2385-2399）
 };
-/** 物品雕像 style → 原版 item id(2王冠 17心 37星;Wiring.cs:2014-2131) */
-const STATUE_ITEM: Record<number, number> = { 2: 184, 17: 166, 37: 58 };
+/** 物品雕像 style → [原版 item id, ...MechSpawn 配额同查的等价 id]
+ *  （2 星 184/1735/1868、17 炸弹 166、37 心 58/1734/1867；:2408-2420） */
+const STATUE_ITEM: Record<number, { item: number; mechIds: number[] }> = {
+  2: { item: 184, mechIds: [184, 1735, 1868] },
+  17: { item: 166, mechIds: [166] },
+  37: { item: 58, mechIds: [58, 1734, 1867] },
+};
 
 function pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -184,29 +204,47 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
   w.skipCell(ax, ay); w.skipCell(ax, ay + 1); w.skipCell(ax, ay + 2);
   w.skipCell(ax + 1, ay); w.skipCell(ax + 1, ay + 1); w.skipCell(ax + 1, ay + 2);
   const px = ax * 16 + 16, py = (ay + 3) * 16;
-  // NPC 雕像主表
+  // 生成区实心判定（:2274 SolidTiles(num139-2..num139+3, num138..num138+2)；flag7/部分直刷用）
+  const spawnAreaSolid = () => {
+    for (let sx = ax - 2; sx <= ax + 3; sx++) {
+      for (let sy = ay; sy <= ay + 2; sy++) {
+        if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) return true;
+      }
+    }
+    return false;
+  };
+  // NPC 雕像主表（spawn 于雕像底中心 (px,py)；:2268-2282）
   const entry = STATUE_NPC[num79];
   if (entry !== undefined) {
     const npcId = Array.isArray(entry) ? pick(entry) : entry;
-    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py)) {
-      ctx.spawnNpc(npcId, px, py);
+    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py, npcId)) {
+      if (!STATUE_SOLID_CHECK.has(num79) || !spawnAreaSolid()) {
+        ctx.spawnNpc(npcId, px, py);
+      } else {
+        ctx.sfx('tink', px, py);
+      }
     }
     return;
   }
-  // 单独分支 NPC 雕像
+  // 单独分支 NPC 雕像（各自偏移/实心判定；:2290-2440）
   const direct = STATUE_NPC_DIRECT[num79];
   if (direct !== undefined) {
-    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py)) {
-      ctx.spawnNpc(direct, px, py - 12);
+    const npcId = Array.isArray(direct.npc) ? pick(direct.npc) : direct.npc;
+    if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py, npcId)) {
+      if (!direct.solid || !spawnAreaSolid()) {
+        ctx.spawnNpc(npcId, px + (direct.dx ?? 0), py + (direct.dy ?? 0));
+      } else {
+        ctx.sfx('tink', px, py);
+      }
     }
     return;
   }
-  // 物品雕像(CheckMech 600)
-  const itemId = STATUE_ITEM[num79];
-  if (itemId !== undefined) {
-    if (w.checkMech(ax, ay, 600) && ctx.itemSpawnOk(px, py)) {
-      ctx.dropItem(itemId, px, py - 16);
-    }
+  // 物品雕像（CheckMech 600；心/星要过全部等价 id 的 MechSpawn 配额；:2408-2420）
+  const itemEntry = STATUE_ITEM[num79];
+  if (itemEntry !== undefined) {
+    const ok = w.checkMech(ax, ay, 600)
+      && itemEntry.mechIds.every((mid) => ctx.itemSpawnOk(px, py, mid));
+    if (ok) ctx.dropItem(itemEntry.item, px, py - 16);
     return;
   }
   switch (num79) {
@@ -222,8 +260,8 @@ function fireStatue(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     case 40: case 41: // 城镇 NPC 搬迁(CheckMech 300,:2133-2186)
       if (w.checkMech(ax, ay, 300)) ctx.relocateTownNpc(num79 === 40 ? 0 : 1, px, py);
       return;
-    case 63: // 随机传送雕像(:1942-1945,额外 MechSpawn(165))
-      if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py)) {
+    case 63: // 随机传送雕像：164 + 额外 MechSpawn(165)（:2226-2229）
+      if (w.checkMech(ax, ay, 30) && ctx.mechSpawnOk(px, py, 164) && ctx.mechSpawnOk(px, py, 165)) {
         ctx.spawnNpc(164, px, py);
       }
       return;

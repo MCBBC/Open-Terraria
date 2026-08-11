@@ -24,6 +24,10 @@ export enum BuffType {
   Regen = 4,      // 恢复：2 HP/s → Regeneration(2)
   Campfire = 5,   // 篝火：范围光环(由附近篝火/心灯实体驱动,Game 每帧续期) → Campfire(87)
   Honey = 6,      // 蜂蜜：1 HP/s（浸蜜授予，30s）→ Honey(48)
+  OnFire = 7,     // 着火(24)：4 HP/s（lifeRegen-8,Player.cs:18793）；入水熄灭（:27426）
+  Burning = 8,    // 燃烧(67)：30 HP/s（lifeRegen-60）+ 移速减半；站上陨石/狱石授予（ApplyTouchDamage）
+  Bleeding = 9,   // 流血(30)：清自然恢复计时 lifeRegenTime=0（:18998,无直接 DoT）
+  Suffocation = 10, // 窒息(68)：20 HP/s（lifeRegen-40）；埋入沙族持续 1 tick 授予
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -35,6 +39,11 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Regen]: { vanillaBuff: 2, descKey: 'Mods.SandboxWorld.Buff.Regen.Desc', fallbackName: '恢复' },
   // 蜂蜜描述直接用原版 BuffDescription.Honey（12 语言现成，语义一致）
   [BuffType.Honey]: { vanillaBuff: 48, descKey: 'BuffDescription.Honey', fallbackName: '蜂蜜' },
+  // 环境伤害 debuff:名称走原版 BuffName,描述用自有键
+  [BuffType.OnFire]: { vanillaBuff: 24, descKey: 'Mods.SandboxWorld.Buff.OnFire.Desc', fallbackName: '着火！' },
+  [BuffType.Burning]: { vanillaBuff: 67, descKey: 'Mods.SandboxWorld.Buff.Burning.Desc', fallbackName: '燃烧！' },
+  [BuffType.Bleeding]: { vanillaBuff: 30, descKey: 'Mods.SandboxWorld.Buff.Bleeding.Desc', fallbackName: '流血' },
+  [BuffType.Suffocation]: { vanillaBuff: 68, descKey: 'Mods.SandboxWorld.Buff.Suffocation.Desc', fallbackName: '窒息' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -72,7 +81,7 @@ export class BuffState {
   remove(type: BuffType) {
     this.active.delete(type);
   }
-  /** 每逻辑帧（dt 秒）。返回本帧需要回复的生命值 */
+  /** 每逻辑帧（dt 秒）。返回本帧生命净变化（正=回复,负=持续伤害/DoT,无视无敌帧与防御） */
   tick(dt: number): number {
     let heal = 0;
     for (const [t, time] of [...this.active]) {
@@ -83,6 +92,10 @@ export class BuffState {
     // 定额 HP/s buff（Regeneration 2 HP/s / Honey 1 HP/s）
     heal += this.rateAccum(BuffType.Regen, 2, dt);
     heal += this.rateAccum(BuffType.Honey, 1, dt);
+    // 环境 DoT debuff（Player.cs:18793-18934 lifeRegen 负项 / 2 = HP/s）
+    heal += this.rateAccum(BuffType.OnFire, -4, dt);        // lifeRegen-8
+    heal += this.rateAccum(BuffType.Burning, -30, dt);      // lifeRegen-60
+    heal += this.rateAccum(BuffType.Suffocation, -20, dt);  // lifeRegen-40
     if (this.active.has(BuffType.Campfire)) {
       // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:18990/12244-12245)→ 每 2 秒 1 HP
       this.campfireAccum += dt;
@@ -100,19 +113,25 @@ export class BuffState {
     }
     return heal;
   }
-  /** 定额回复 buff 的独立累加器（Map 存每 buff 的秒余数） */
+  /** 定额回复/伤害 buff 的独立累加器（Map 存每 buff 的秒余数;负速率=DoT） */
   private rateLeft = new Map<BuffType, number>();
   private rateAccum(t: BuffType, hpPerSec: number, dt: number): number {
     if (!this.active.has(t)) { this.rateLeft.delete(t); return 0; }
     let left = (this.rateLeft.get(t) ?? 0) + hpPerSec * dt;
     let heal = 0;
-    while (left >= 1) { left -= 1; heal += 1; }
+    if (hpPerSec >= 0) {
+      while (left >= 1) { left -= 1; heal += 1; }
+    } else {
+      while (left <= -1) { left += 1; heal -= 1; }
+    }
     this.rateLeft.set(t, left);
     return heal;
   }
   // ---- 属性聚合（幂等读取，不做副作用写入）----
   get moveSpeedMult(): number {
-    return this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
+    let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
+    if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
+    return m;
   }
   get defenseBonus(): number {
     return this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）

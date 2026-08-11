@@ -115,8 +115,27 @@ for (const vid of LEGS) setStat(vid, { s: 'l' });
 for (const [vid, def] of DEFENSE) setStat(vid, { def });
 for (const [vid, reg] of LIFEREGEN) setStat(vid, { life: reg });
 for (const vid of ACCESSORY) setStat(vid, { acc: VANITY.has(vid) ? 0 : 1 });
+// 翅膀槽（Item.wingSlot——翅膀是配饰，wingSlot>0 即翅膀；飞行时长/速度查 vanilla-wingstats.json）
+const WING_SLOT = scanCaseFields(itemSrc, ['\\bwingSlot\\s*=\\s*(\\d+);']);
+for (const [vid, wing] of WING_SLOT) setStat(vid, { wing });
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemstats.json`, JSON.stringify(STATS));
-console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size}）`);
+console.error(`itemstats: ${Object.keys(STATS).length} 件（head ${HEAD.size} body ${BODY.size} legs ${LEGS.size} def ${DEFENSE.size} acc ${ACCESSORY.size} wing ${WING_SLOT.size}）`);
+
+// ---- 翅膀飞行属性（WingStatsInitializer.cs：array[N] = new WingStats(flyTimeVar, flySpeedVar)）----
+// 本地变量别名（flyTime*=int 时长 tick、flySpeedOverride*=float 速度）先求值再代入。
+{
+  const wsSrc = read('Terarria1456/Terraria.Initializers/WingStatsInitializer.cs');
+  const locals = {};
+  for (const mm of wsSrc.matchAll(/int (flyTime\d*) = (\d+);/g)) locals[mm[1]] = +mm[2];
+  for (const mm of wsSrc.matchAll(/float (flySpeedOverride\d*) = ([\d.]+)f;/g)) locals[mm[1]] = parseFloat(mm[2]);
+  const WING_STATS = {};
+  for (const mm of wsSrc.matchAll(/array\[(\d+)\] = new WingStats\((\w+),\s*(\w+)\);/g)) {
+    const t = locals[mm[2]], s = locals[mm[3]];
+    if (t !== undefined && s !== undefined) WING_STATS[mm[1]] = { time: t, speed: s };
+  }
+  writeFileSync(`${ROOT}/game/src/data/vanilla-wingstats.json`, JSON.stringify(WING_STATS));
+  console.error(`wingstats: ${Object.keys(WING_STATS).length} 组（angel=1: ${JSON.stringify(WING_STATS['1'])}）`);
+}
 
 // ---- 配饰数值效果子集（Player.ApplyEquipFunctional :13952 switch(type)）→ vanilla-accfx.json ----
 // 只提取纯数值赋值模式（可数据驱动生效）；行为型效果（火箭靴飞行/熔岩护身/星星斗篷等）
@@ -151,6 +170,11 @@ const ACC_PATTERNS = [
   ['panic', /panic = true;/],                     // 恐慌项链：受击加速
   ['starCloak', /starCloakItem = (?:currentItem|armorPiece);/], // 星星斗篷：受击落星
   ['carpet', /carpet = true;/],                   // 飞毯（水平滑翔，暂存字段）
+  // ---- 三轮（冲刺/闪避/蜜蜂）----
+  ['dashType', /dashType = (\d);/],               // 1=忍者足具/水晶刺客 2=忍者大师装备
+  ['blackBelt', /blackBelt = true;/],             // 10% 闪避（Black Belt :9772）
+  ['bees', /honeyCombItem = (?:currentItem|armorPiece);/], // 蜂蜜斗篷/蜂巢背带：受击放蜂
+  ['spikedBoots', /spikedBoots \+= (\d);/],       // 冰刀（攀冰，暂存）
 ];
 // 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）
 const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;

@@ -11,8 +11,10 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { wingStatOf } from '../data/vanillaWingStats';
 import { accFxOfInternal } from '../data/vanillaAccFx';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
+import { hurtTiles, liquidCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
 // 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
@@ -124,6 +126,8 @@ export class Player extends Entity {
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
+    wing: { time: number; speed: number } | null;
+    dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
   } {
     let def = 0, mana = 0, life = 0;
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
@@ -133,10 +137,15 @@ export class Player extends Entity {
     let autoJump = false, fireWalk = false, noKnockback = false, noFallDmg = false;
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
+    let wing: { time: number; speed: number } | null = null;
+    let dash = 0, blackBelt = false, bees = false, carpet = false;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
+      // 翅膀（Item.wingSlot>0 → WingStatsInitializer 飞行属性；多翅膀取首个）
+      const wingSlot = statOfInternal(s.id)?.wing;
+      if (wingSlot && wingSlot > 0 && !wing) wing = wingStatOf(wingSlot);
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
       // accfx.life 为 if-chain 段的 lifeRegen += N
       const itemLife = statOfInternal(s.id)?.life ?? 0;
@@ -169,6 +178,10 @@ export class Player extends Entity {
         if (fx.jumpBoost) jumpBoost = true;
         if (fx.panic) panic = true;
         if (fx.starCloak) starCloak = true;
+        if (fx.dashType) dash = Math.max(dash, fx.dashType);
+        if (fx.blackBelt) blackBelt = true;
+        if (fx.bees) bees = true;
+        if (fx.carpet) carpet = true;
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
       // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
@@ -199,6 +212,7 @@ export class Player extends Entity {
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
+      wing, dash, blackBelt, bees, carpet,
     };
   }
   get maxHp(): number {
@@ -242,9 +256,13 @@ export class Player extends Entity {
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
 
-    // Buff tick：自然回复（恢复 Buff）
+    // Buff tick：自然回复 / 环境 DoT（负值=持续伤害,原版 lifeRegen 路径:无视防御与无敌帧）
     const buffHeal = this.buffs.tick(dt);
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
+    else if (buffHeal < 0 && this.hp > 0) {
+      this.hp = Math.max(0, this.hp + buffHeal);
+      if (this.hp <= 0) this.lastDamageCause = { kind: 'default' }; // DoT 致死=默认死亡包
+    }
     // 恐慌项链加速窗口倒计时
     if (this.panicTime > 0) this.panicTime -= dt;
     // 装备生命回复（再生手环族 lifeRegen：每半秒 N/2 HP → 每秒 N/2；战斗中也生效）
@@ -257,9 +275,9 @@ export class Player extends Entity {
         this.hp = Math.min(this.maxHp, this.hp + n);
       }
     }
-    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点
+    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点（流血 Bleeding 清 lifeRegenTime → 阻断,:18998）
     this.sinceHurt++;
-    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp) {
+    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp && !this.buffs.has(BuffType.Bleeding)) {
       this.regenAccum += dt;
       if (this.regenAccum >= 1) {
         this.regenAccum -= 1;
@@ -286,7 +304,7 @@ export class Player extends Entity {
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
-    this.inLava = world.store.liquidType[centerIdx] === 2 && world.store.liquid[centerIdx] > 60;
+    this.inLava = liquidCollision(world.store, this.x, this.y, this.w, this.h, 2); // LavaCollision 盒判定
     // 蜂蜜浸入（Player.cs:27436）：湿判定命中蜂蜜 → AddBuff(48, 1800t=30s) + honeyWet。
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
     this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
@@ -297,25 +315,41 @@ export class Player extends Entity {
     const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
     // 气口消耗只对水（原版 DrownCollision 不含水蜜/岩浆——蜂蜜和岩浆不会淹死）
     this.headUnderwater = headLiq > 40 && world.store.liquidType[headIdx] === 1;
-    // 岩浆伤害：每半秒 15（熔岩护身符族 lavaMax 免疫：入浆先耗免疫 tick，耗尽才受伤，
-    // 离浆立即回满——原版 lavaTime 语义 Player.cs:27363/27405）
+    // 岩浆伤害 1:1（Player.cs:27350-27440）：盒判定接触 → lavaTime 宽限（护身符族）耗尽后
+    // 单发 80（Hurt 全结算：防御+无敌帧）+ 着火 OnFire 7s（AddBuff(24,420)）；
+    // 无敌帧承担原版 hurtCooldowns[Lava] 冷却
     if (this.inLava) {
       const lavaMax = this.equipStats.lavaMax;
       if (lavaMax > 0 && this.lavaImmuneTicks > 0) {
         this.lavaImmuneTicks--;
-      } else {
-        this.lavaAccum += dt;
-        if (this.lavaAccum >= 0.5) {
-          this.lavaAccum = 0;
-          this.lastDamageCause = { kind: 'lava' };
-          this.damage(15, this.cx, this.y - 10);
-          game.addDamageNumber(this.cx, this.y, 15, false, '#FF6020');
+      } else if (this.iframes <= 0) {
+        this.lastDamageCause = { kind: 'lava' };
+        if (this.damage(80, this.cx, this.y - 10, false)) {
+          this.buffs.apply(BuffType.OnFire, 7);
+          game.playSfx('hurt');
+          game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(80 - this.defense * 0.5)), false, '#FF6020');
+          game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
       }
     } else {
       this.lavaAccum = 0;
       if (this.equipStats.lavaMax > 0) this.lavaImmuneTicks = this.equipStats.lavaMax;
     }
+    // 入水熄灭着火（Player.cs:27426：wet 且非岩浆 → DelBuff 24）
+    if (this.inWater && !this.inLava) this.buffs.remove(BuffType.OnFire);
+    // 着火/燃烧粒子（dust6 火尘族,每 tick 0.8 概率一枚上浮）
+    if (this.buffs.has(BuffType.OnFire) || this.buffs.has(BuffType.Burning)) {
+      if (Math.random() < 0.8) {
+        game.spawnParticles(
+          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+          Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.7,
+          { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
+      }
+    }
+    // HurtTiles 接触伤害（Collision.cs:3128 + Player.cs:27296/28507）:
+    // 尖刺/木尖刺/荆棘族直接伤害 + 流血,陨石/狱石族 Burning,沙族窒息,荆棘族触碰毁块
+    const ht = hurtTiles(world.store, this.x, this.y, this.w, this.h, this.equipStats.fireWalk);
+    if (ht) this.applyTouchDamage(game, ht);
 
     // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复
     const wasHead = prevHeadUnderwater;
@@ -402,13 +436,33 @@ export class Player extends Entity {
     } else
     // 跳跃 / 游泳
     if (this.inWater) {
-      // 头部露出水面（踩水状态）→ 允许正常力度起跳跃上岸块（带冷却防连跳）
-      if (this.inputJump && !this.headUnderwater) {
-        if (this.surfaceJumpCd <= 0) {
+      // ---- 水面行走（WaterWalkingBoots/LavaWaders 族，Player.WaterWalk 语义近似）----
+      // 装备后落向液面时站在液面（vy 清零、可正常行走/起跳/重置空中能力）；
+      // 按 ↓ 下潜。waterWalk2（水上漂靴）同效。
+      if (this.equipStats.waterWalk && !this.headUnderwater && this.vy >= 0 && !this.inputDown) {
+        this.onWaterSurface = true;
+        this.vy = 0;
+        this.fallStartY = null;
+        // 站在液面等价落地：重置多段跳/飞行/飞毯，允许起跳离水面
+        this.extraJumps = [...this.equipStats.jumpOpts];
+        if (this.equipStats.wing) this.wingTime = this.equipStats.wing.time;
+        this.rocketUnits = 7; this.rocketRelease = true; this.rocketUnitTicks = 0;
+        this.carpetTime = 300;
+        if (this.inputJump && this.surfaceJumpCd <= 0) {
           this.vy = -PLAYER_JUMP_SPEED;
           this.jumpHold = PLAYER_JUMP_TICKS;
           this.surfaceJumpCd = 24;
         }
+        if (this.surfaceJumpCd > 0) this.surfaceJumpCd--;
+      } else {
+        this.onWaterSurface = false;
+        // 头部露出水面（踩水状态）→ 允许正常力度起跳跃上岸块（带冷却防连跳）
+        if (this.inputJump && !this.headUnderwater) {
+          if (this.surfaceJumpCd <= 0) {
+            this.vy = -PLAYER_JUMP_SPEED;
+            this.jumpHold = PLAYER_JUMP_TICKS;
+            this.surfaceJumpCd = 24;
+          }
       } else if (this.inputJump) {
         // 全浸没：游泳上浮
         this.vy = Math.max(this.vy - 0.62, -4.4);
@@ -417,6 +471,7 @@ export class Player extends Entity {
       this.vy += GRAVITY * 0.3;
       this.vy = Math.max(-4.6, Math.min(3.0, this.vy));
       this.fallStartY = null;
+      }
     } else {
       if (this.inputJump && this.onGround) {
         this.vy = -PLAYER_JUMP_SPEED * (this.equipStats.jumpBoost ? 1.25 : 1);
@@ -440,25 +495,83 @@ export class Player extends Entity {
         this.extraJumpCd = 8; // 防同帧连段
       }
       if (this.extraJumpCd > 0) this.extraJumpCd--;
-      // ---- 火箭靴族（RocketBootsMovement :26530 近似）：松跳键后再次按住起飞 ----
-      // 7 格飞行（rocketTimeMax=7）；1 档每格 30t、2+ 档 15t（:26537）；上升 -7；落地回满
-      if (eq.rocketBoots > 0) {
-        if (this.onGround) {
-          this.rocketUnits = 7;
-          this.rocketRelease = true;
-          this.rocketUnitTicks = 0;
-        } else {
-          if (!this.inputJump) this.rocketRelease = true;
-          if (this.inputJump && this.rocketRelease && this.rocketUnits > 0) {
-            this.rocketUnitTicks++;
-            const perUnit = eq.rocketBoots === 1 ? 30 : 15;
-            if (this.rocketUnitTicks >= perUnit) {
-              this.rocketUnitTicks = 0;
-              this.rocketUnits--;
-              if (this.rocketUnits <= 0) this.rocketRelease = false;
+      // ---- 翅膀/火箭靴飞行（WingMovement+RocketBootsMovement :26530 近似）----
+      // 共用控制语义：松跳键（release）后再次按住起飞；落地回满。翅膀优先于火箭靴。
+      if (this.onGround) {
+        if (eq.wing) this.wingTime = eq.wing.time;
+        this.rocketUnits = 7;
+        this.rocketRelease = true;
+        this.rocketUnitTicks = 0;
+        this.carpetTime = 300;
+      } else {
+        if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
+        let flying = false;
+        if (this.inputJump && this.wingRelease && eq.wing && this.wingTime > 0) {
+          this.wingTime--;
+          flying = true;
+          this.vy = Math.min(this.vy, -eq.wing.speed * 0.85); // 上升（flySpeed 近似）
+          this.fallStartY = null;
+        } else if (this.inputJump && this.rocketRelease && eq.rocketBoots > 0 && this.rocketUnits > 0) {
+          // 火箭靴：7 格（rocketTimeMax=7）；1 档每格 30t、2+ 档 15t（:26537）
+          this.rocketUnitTicks++;
+          const perUnit = eq.rocketBoots === 1 ? 30 : 15;
+          if (this.rocketUnitTicks >= perUnit) {
+            this.rocketUnitTicks = 0;
+            this.rocketUnits--;
+            if (this.rocketUnits <= 0) this.rocketRelease = false;
+          }
+          flying = true;
+          this.vy = Math.min(this.vy, -7); // 飞行上升速度（近似 rocketSpeed）
+          this.fallStartY = null;
+        }
+        // 翅膀滑翔（时间耗尽后按住跳缓降）+ 飞毯水平滑翔（CarpetMovement 近似：
+        // 按住跳+有横移 → 缓降+横向加速，300t 用尽落地回满）
+        if (!flying && this.inputJump) {
+          if (eq.wing && this.vy > 2.5) this.vy = 2.5;
+          if (eq.carpet && this.carpetTime > 0 && this.inputX !== 0) {
+            this.carpetTime--;
+            if (this.vy > 2) this.vy = 2;
+            this.vx += this.inputX * 0.35;
+            this.fallStartY = null;
+          }
+        }
+      }
+      // ---- 冲刺（DashMovement + DoCommonDashHandle 近似）：同向双击触发 ----
+      // 1=忍者足具/水晶刺客（纯位移）2=克苏鲁护盾（冲撞伤害 30+反弹）
+      if (this.inputX !== 0 && this.prevInputX === 0) {
+        if (eq.dash > 0 && this.dashCd <= 0 && this.dashT !== 0 && Math.sign(this.dashT) === this.inputX) {
+          this.dashDir = this.inputX;
+          this.dashTicks = 15;
+          this.dashCd = 30;
+          this.dashHitDone = false;
+        }
+        this.dashT = this.inputX * 15; // 双击窗口（dashTime ±15）
+      }
+      if (this.dashT > 0) this.dashT--;
+      else if (this.dashT < 0) this.dashT++;
+      if (this.dashCd > 0) this.dashCd--;
+      if (this.dashTicks > 0) {
+        this.dashTicks--;
+        this.vx = this.dashDir * 12.5; // 冲刺速度（原版 16.9 → 本作物理尺度近似）
+        this.vy = 0;                    // 冲刺中锁定垂直速度（原版 dashing 分支）
+        this.fallStartY = null;
+        // 克苏鲁护盾冲撞（dashType 2，DashMovement :20791：接触 30×meleeDamage 击退 9，
+        // 命中后反弹 vx=-dir*9 vy=-4 + 30t 冷却）
+        if (eq.dash === 2 && !this.dashHitDone) {
+          for (const e of game.enemies()) {
+            const en = e as { cx?: number; cy?: number; w?: number; dead?: boolean;
+              hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean };
+            if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
+            if (Math.abs(en.cx - this.cx) < 26 && Math.abs(en.cy - this.cy) < 30) {
+              const dmg = Math.max(1, Math.round(30 * this.damageMult('melee')));
+              en.hurt(dmg, this.dashDir * 9, -4, game);
+              game.addDamageNumber(en.cx, en.cy, dmg, false, '#FFD080');
+              this.dashHitDone = true;
+              this.vx = -this.dashDir * 9;
+              this.vy = -4;
+              this.dashTicks = 0;
+              break;
             }
-            this.vy = Math.min(this.vy, -7); // 飞行上升速度（近似 rocketSpeed）
-            this.fallStartY = null;          // 飞行不积累摔伤（原版 fallStart 重置）
           }
         }
       }
@@ -634,6 +747,7 @@ export class Player extends Entity {
     // 越界保护
     const maxY = world.h * TILE;
     if (this.y > maxY + 100) this.damage(9999, this.cx, this.y);
+    this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
   }
 
   /** 出水补气动画进度 0..1（-1 = 未在补气） */
@@ -666,6 +780,20 @@ export class Player extends Entity {
   panicTime = 0;
   /** 岩浆免疫剩余 tick（熔岩护身符族 lavaMax；离开岩浆回满） */
   lavaImmuneTicks = 0;
+  /** 翅膀：剩余飞行 tick（WingStats.FlyTime）+ 需松跳键重触发 */
+  wingTime = 0;
+  wingRelease = true;
+  /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
+  carpetTime = 0;
+  /** 冲刺：双击窗口（±15）/ 方向 / 持续 tick / 冷却（dashTime/dashDelay） */
+  dashT = 0;
+  dashDir = 1;
+  dashTicks = 0;
+  dashCd = 0;
+  dashHitDone = false;
+  prevInputX = 0;
+  /** 水面行走状态（水上漂靴族：站在液面，按 ↓ 下潜） */
+  onWaterSurface = false;
   inputDown = false;
   inputUp = false;
   onRope = false;
@@ -675,6 +803,8 @@ export class Player extends Entity {
   damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
     if (this.iframes > 0 || this.dead) return false;
     const eq = this.equipStats;
+    // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
+    if (eq.blackBelt && Math.random() < 0.1) return false;
     const reduction = Math.max(1, dmg - this.defense * 0.5);
     this.hp -= reduction;
     this.iframes = PLAYER_IFRAME_TICKS;
@@ -688,6 +818,36 @@ export class Player extends Entity {
       this.vy = -3;
     }
     return true;
+  }
+
+  /** ApplyTouchDamage（Player.cs:28507）1:1:直接伤害(护甲结算)→灼烧/流血 buff→
+   *  窒息延迟→荆棘族触碰毁块。伤害被完全抵消(含无敌帧)时跳过 buff 授予(原版 num83==0 分支) */
+  private suffocateDelay = 0;
+  private applyTouchDamage(game: GameHooks, ht: HurtTile): void {
+    let blocked = false;
+    const dmg = TOUCH_IMMEDIATE.get(ht.type);
+    if (dmg !== undefined) {
+      this.lastDamageCause = { kind: 'default' }; // PlayerDeathReason.ByOther(3) → 默认包
+      if (!this.damage(dmg, this.cx, this.y - 10, false)) {
+        blocked = true;
+      } else {
+        game.playSfx('hurt');
+        game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(dmg - this.defense * 0.5)), false, '#FF5050');
+      }
+    }
+    if (!blocked) {
+      if (TOUCH_HOT.has(ht.type)) this.buffs.apply(BuffType.Burning, 20 / 60);   // AddBuff(67,20)
+      if (TOUCH_BLEEDING.has(ht.type)) this.buffs.apply(BuffType.Bleeding, (600 + Math.random() * 600) / 60); // AddBuff(30,600-1200)
+    }
+    if (SUFFOCATE.has(ht.type)) {
+      if (this.suffocateDelay < 5) this.suffocateDelay++;       // suffocateDelay<5 递增
+      else this.buffs.apply(BuffType.Suffocation, 1 / 60);      // 满后每 tick AddBuff(68,1)
+    } else {
+      this.suffocateDelay = 0;
+    }
+    if (TOUCH_DESTROY.has(ht.type)) {
+      game.world.breakTileAt(ht.x, ht.y); // TouchDamageDestroyTile → KillTile
+    }
   }
 
   draw() { /* 由 Renderer 统一绘制 */ }

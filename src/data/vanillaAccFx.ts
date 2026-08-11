@@ -35,6 +35,11 @@ export interface AccFx {
   starCloak?: number;    // 受击落星（星星斗篷）
   carpet?: number;       // 飞毯（水平滑翔，待滑翔系统）
   jumpOpts?: string[];   // 多段跳选项（Cloud/Blizzard/Sandstorm/Fart/Tsunami/…）
+  // ---- 三轮（冲刺/闪避/蜜蜂）----
+  dashType?: number;     // 1=忍者足具/水晶刺客 2=克苏鲁护盾（冲撞带伤害）
+  blackBelt?: number;    // 10% 闪避（Player.Hurt :9772）
+  bees?: number;         // 蜂窝/蜂巢背带：受击放蜂
+  spikedBoots?: number;  // 冰刀（攀冰，暂存）
 }
 
 const FX = fxJson as Record<string, AccFx>;

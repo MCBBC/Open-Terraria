@@ -1602,7 +1602,8 @@ export class UI {
     this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-wrap:wrap; width:412px; column-gap:6px; row-gap:18px;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
-    for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey]) {
+    for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey,
+      BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
       block.style.cssText += 'width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer;';
@@ -2128,9 +2129,11 @@ export class UI {
       [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
       [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
       [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
+      // 环境 debuff(原版用专属 buff 贴图,此处以近义物品图标近似)
+      [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
+      [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
     ];
-    for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
-  }
+    for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);  }
 
   /** 原版消息列(Main.NewText 入口) */
   private chatMonitor: ChatMonitor | null = null;
@@ -2184,6 +2187,8 @@ export class UI {
       [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
       [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
       [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
+      [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
+      [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

@@ -3,6 +3,8 @@
 import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
 import { TILE_BY_KEY } from '../data/tiles';
+import { liquidCollision } from '../stats/TouchDamage';
+import { NPC_LAVA_IMMUNE } from '../data/npcLavaImmune';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
@@ -33,6 +35,15 @@ const NATIVE_DROP_KEY: Record<number, string> = {
   71: 'coin_copper', 72: 'coin_silver', 73: 'coin_gold', 74: 'coin_platinum',
   23: 'gel', 8: 'torch', 236: 'lens', 3: 'stone_block', 2: 'dirt_block', 9: 'wood',
   28: 'lesser_healing_potion',
+};
+/** 雕像产怪战利品门（NPCID.Sets，NPC.cs :79648-79654 NPCLoot 早退用） */
+const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
+/** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
+const STATUE_DROP_RARITY: Record<number, number> = {
+  480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
+  170: 0.05, 180: 0.05, 171: 0.05, 167: 0.25, 73: 0.01, 24: 0.05,
+  481: 0.05, 42: 0.05, 6: 0.05, 2: 0.05, 49: 0.2, 3: 0.2, 58: 0.2,
+  21: 0.2, 65: 0.2, 449: 0.2, 482: 0.2, 103: 0.2, 64: 0.2, 63: 0.2, 85: 0,
 };
 
 /** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
@@ -68,6 +79,9 @@ export class Enemy extends Entity {
   /** 原版 NPC id（数据驱动路径启用时非空） */
   vanillaId: number | null = null;
   vanilla: VanillaNpc | null = null;
+  /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
+   *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
+  spawnedFromStatue = false;
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
   /** 链上紧随本段的一段（头 → 身×n → 尾） */
   wormNext: Enemy | null = null;
@@ -205,6 +219,11 @@ export class Enemy extends Entity {
   walkCycleT = 0;        // 行走帧累加器（≈原版 frameCounter，按 |vx| 推进）
   crawlT = 0;            // AI_040 爬墙帧累加器（FindFrame case 165 族：(|vx|+|vy|)×0.5，24 循环）
   justHitT = 0;          // 受击单帧旗标计数（hurt() 置 2，AI 消费原版 justHit 语义）
+  /** 岩浆接触冷却（原版 immune[255]=30,NPC.cs:94528）与 onFire 状态（buff 24,秒） */
+  lavaCd = 0;
+  lavaWet = false;
+  onFireT = 0;
+  onFireDoT = 0;
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
@@ -390,6 +409,42 @@ export class Enemy extends Entity {
       const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
       const vol = Math.max(0.12, Math.min(1, 1 - d / (TILE * 45))) * (this.def.boss ? 1.2 : 0.9);
       game.playSfx('splash', vol);
+    }
+
+    // 岩浆接触（NPC.cs:94520-94545）：30t 冷却,onFire 7s + 50 直伤;
+    // lavaImmune 族（NPC_LAVA_IMMUNE,SetDefaults 提取）完全豁免
+    if (this.vanillaId === null || !NPC_LAVA_IMMUNE.has(this.vanillaId)) {
+      if (this.lavaCd > 0) this.lavaCd--;
+      const inLava = liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 2);
+      if (inLava) {
+        this.lavaWet = true;
+        if (this.lavaCd <= 0 && this.iframes <= 0) {
+          this.lavaCd = 30;
+          this.onFireT = Math.max(this.onFireT, 7); // AddBuff(24,420)
+          this.hurt(50, 0, 0, game);                // StrikeNPCNoInteraction(50)
+          game.spawnParticles(this.cx, this.cy, '#FF9A3C', 10, 1.6, { life: 30, grav: -0.05 });
+        }
+      } else {
+        this.lavaWet = false;
+      }
+    }
+    // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
+    if (this.onFireT > 0) {
+      this.onFireT -= dt;
+      this.onFireDoT += 4 * dt;
+      if (this.onFireDoT >= 1) {
+        const n = Math.floor(this.onFireDoT);
+        this.onFireDoT -= n;
+        this.hp -= n;
+        this.hpBarT = 240;
+        if (this.hp <= 0) this.hurt(9999, 0, 0, game); // 走标准死亡管线(掉落/分裂/联机)
+      }
+      if (Math.random() < 0.75) {
+        game.spawnParticles(
+          this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+          Math.random() < 0.7 ? '#FF9A3C' : '#FFD24A', 1, 0.8,
+          { life: 26 + Math.random() * 14, grav: -0.06, damp: 0.96 });
+      }
     }
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
@@ -3120,6 +3175,14 @@ export class Enemy extends Entity {
       // 自己的 netDropSweep 当作本端掉落二次广播 → 幽灵物品+重复掉落）
       const rng = new RNG(Math.floor(Math.random() * 1e9));
       if (this.vanillaId && !this.netPuppet) {
+        // 雕像产怪战利品门（NPCLoot :79648-79654）：肉前集合 / StatueSpawnedDropRarity
+        // 概率门外 → 整单不出（连钱带心星一起跳过，原版直接 return）
+        const statueSkip = this.spawnedFromStatue && (() => {
+          if (STATUE_NO_EARLYMODE_LOOT.has(this.vanillaId!) && !game.world.flags.hardMode) return true;
+          const rarity = STATUE_DROP_RARITY[this.vanillaId!] ?? -1;
+          return rarity >= 0 && rng.next() >= rarity;
+        })();
+        if (!statueSkip) {
         const w = game.world;
         const p = game.player;
         const diff = p.appearance?.difficulty ?? 0;
@@ -3137,7 +3200,9 @@ export class Enemy extends Entity {
           underworldTileY: w.lavaLine || w.h - 200,
           maxTilesX: w.w, maxTilesY: w.h,
           lifeMax: this.maxHp, friendly: false, boss: !!this.def.boss,
-          damage: this.def.damage ?? 0, value: npcValueOf(netId),
+          damage: this.def.damage ?? 0,
+          value: this.spawnedFromStatue ? 0 : npcValueOf(netId), // 雕像产怪 value=0（Wiring.cs:2479）
+          statueSpawned: this.spawnedFromStatue,
           hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
           extras: game.dropContext?.(),
         };
@@ -3182,6 +3247,7 @@ export class Enemy extends Entity {
         for (const h of rollHeartsAndStars(ctx)) spawn(h.id, h.n);
         // Boss 药水+心（DoDeathEvents_DropBossPotionsAndHearts，boss 门 :80307）
         if (this.def.boss && !twinSuppressed) for (const b of rollBossPotionsAndHearts(ctx)) spawn(b.id, b.n);
+        }
       } else {
         for (const d of this.def.drops) {
           if (rng.next() < d.chance) {

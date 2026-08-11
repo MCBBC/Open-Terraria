@@ -496,6 +496,21 @@ export class VanillaSpawner {
     return !(tX < rectX + rectW && tX + TILE > rectX && tY < rectY + rectH && tY + TILE > rectY);
   }
 
+  /** 向上 50 格找“干格 + 下两格非实心”的洞隙线（海洋段 L1711-1718 / L1737-1752、
+   *  水池段 L1844-1852 四处共用的扫描体）：命中返回干格 y+2 并按 L1719-1722 /
+   *  L1853-1856 钳到 spawnTileY，找不到返回 -1 */
+  private findDryGapY(spawnTileY: number): number {
+    const st = this.world.store;
+    for (let y = spawnTileY - 1; y > spawnTileY - 50 && y >= 0; y--) {
+      if (st.liquid[st.idx(this.spawnTileX, y)] === 0
+        && !st.isSolid(this.spawnTileX, y) && !st.isSolid(this.spawnTileX, y + 1)
+        && !st.isSolid(this.spawnTileX, y + 2)) {
+        return Math.min(y + 2, spawnTileY);
+      }
+    }
+    return -1;
+  }
+
   /** SpawnHornet（NPC.cs:5189-5255 1:1）：Next(8) 选族——
    *  case0-4 黄蜂族 231-235（各 1/4 小 -2k/大 -2k+1 变体）；default(case5-7) 蜂刺族 42 */
   private spawnHornet(x: number, y: number, rng: RNG): Enemy | null {
@@ -574,19 +589,106 @@ export class VanillaSpawner {
       return D(69);
     }
     // ---- 海洋（L1705-1834）----
-    if (this.waterTile && this.isOcean) {
-      // 海鸥 602（L1767：水面上方有干格时 1/10；落点由 Game 的 critter 放置抬到水面线）
-      if (N(10)) return D(602);
-      if (N(10)) return D(220);
-      if (N(18)) return D(221);
-      if (N(3)) return D(67);   // 螃蟹
-      return D(64);             // 默认粉水母
+    // 门（L1705）：(!spawnFriendly || (!savedAngler && !AnyNPCs(376))) && waterTile && isOcean。
+    //  spawnFriendly（Spawner 字段 L71，FindSpawnTile 内对小动物友好点置 true）与
+    //  savedAngler 均未跟踪 → 按 false 近似；AnyNPCs(376) 用 activeIds 现查
+    if (this.waterTile && this.isOcean && !any(376)) {
+      // 渔夫 376（L1708-1728）：表层水（spawnTileY < worldSurface-10）→ 向上 50 格
+      //  找干隙线 num15 → 抬到该线落点；!xRange 才出（L1723）
+      let angler: Enemy | null = null;
+      if (!any(376) && this.spawnTileY < this.world.groundLevel - 10) {
+        const num15 = this.findDryGapY(this.spawnTileY);
+        if (num15 > 0 && !this.xRange) angler = this.spawnNPC(x, num15 * TILE, 376, rng);
+      }
+      // L1729-1732：出了渔夫或落点在玩家横向 safe 范围内 → 直接返回
+      if (angler || this.xRange) return angler;
+      // 水面线 num17 / 岸上净空位 num18（L1733-1761，仅 spawnTileY<worldSurface 且 >50）
+      let num17 = -1, num18 = -1;
+      if (this.spawnTileY < this.world.groundLevel && this.spawnTileY > 50) {
+        for (let y2 = this.spawnTileY - 1; y2 > this.spawnTileY - 50; y2--) {
+          if (st.liquid[st.idx(this.spawnTileX, y2)] === 0
+            && !st.isSolid(this.spawnTileX, y2) && !st.isSolid(this.spawnTileX, y2 + 1)
+            && !st.isSolid(this.spawnTileX, y2 + 2)) {
+            num17 = y2 + 2;
+            // L1742-1745：num17 下两格净空且 num17+2 墙非房屋墙 → 岸上落点 num18
+            if (!st.isSolid(this.spawnTileX, num17 + 1) && !st.isSolid(this.spawnTileX, num17 + 2)
+              && !WALL_HOUSE.has(st.wall[st.idx(this.spawnTileX, num17 + 2)])) num18 = num17 + 2;
+            // L1746-1749：num17 自身在房屋墙内 → 作废水面线
+            if (WALL_HOUSE.has(st.wall[st.idx(this.spawnTileX, num17)])) num17 = -1;
+            break;
+          }
+        }
+        if (num17 > this.spawnTileY) num17 = this.spawnTileY;   // L1753-1756
+        if (num18 > this.spawnTileY) num18 = this.spawnTileY;   // L1757-1760
+      }
+      // 海鸥 602（L1762-1765）：干隙线存在 + !xRange + 1/10 → 落在水面线 num17
+      if (num17 > 0 && !this.xRange && N(10)) return this.spawnNPC(x, num17 * TILE, 602, rng);
+      // 鲨鱼 65（L1766-1769）：1/SharkSpawnChance。原版 SharkSpawnChance（L5458-5475）
+      //  基础 10，落点水面上方有弹体 820（血腥诱饵）可命中时降为 2——弹体未接入 → 恒 10 近似
+      const sharkChance = 10;
+      if (N(sharkChance)) return D(65);
+      // 鲨鱼龙 692（L1770-1773，困难）：npc json 缺 692 条目 → spawnNPC 可能返回 null
+      if (hardMode && N(sharkChance)) return D(692);
+      // 海洋小动物（L1774-1817）：1/10 门 → Next(4) 四选
+      if (N(10)) {
+        const num20 = rng.int(0, 3);   // Main.rand.Next(4)
+        if (num20 === 0 && num17 > 0) return this.spawnNPC(x, num17 * TILE, 625, rng);  // 海龟
+        if (num20 === 1 && num18 > 0) return this.spawnNPC(x, num18 * TILE, 615, rng);  // 海豚
+        if (num20 === 2) {   // 海马（L1789-1805）：金 1/goldCritterChance(400, NPC.cs:5976)
+          const num22 = num18 > 0 ? num18 : this.spawnTileY;
+          return this.spawnNPC(x, num22 * TILE, N(400) ? 627 : 626, rng);
+        }
+        if (num20 === 3) {   // 河豚（L1806-1815）
+          const num21 = num18 > 0 ? num18 : this.spawnTileY;
+          return this.spawnNPC(x, num21 * TILE, 688, rng);
+        }
+        return null;   // case0/1 落点条件不满足 → 原版 switch 空过不生成
+      }
+      if (N(40)) return D(220);   // 海蜗牛（L1818-1821）
+      if (N(18)) return D(221);   // 鱿鱼（L1822-1825）
+      if (N(3)) return D(67);     // 螃蟹（L1826-1829）
+      return D(64);               // 粉水母兜底（L1830-1833）
     }
     // ---- 水池段（L1839-1905）----
+    //  两支 else-if（原版 L1839 / L1895）：A 命中（含 flag9 已置）则不再走 B
     if (this.waterTile && !this.isOcean) {
-      // 原版水池在地下也是这些
-      if (N(6)) return D(63);   // 蓝水母
-      return D(63);
+      // 门 A（L1839）：!spawnFriendly && waterTile && ((deeperThanRockLayer && 1/2) || 丛林草 60)
+      if ((this.deeperThanRockLayer && N(2)) || t === T.JUNGLE_GRASS) {
+        let flag9 = false;
+        // L1842：丛林草 + 表层 + y>50 + 1/3 + 白天 → 水面线小动物
+        if (t === T.JUNGLE_GRASS && this.surfaceSpawn && this.spawnTileY > 50 && N(3) && this.dayTime) {
+          const num23 = this.findDryGapY(this.spawnTileY);
+          if (num23 > 0 && !this.xRange) {   // L1857
+            flag9 = true;
+            // 丛林龟 617（L1860-1864）：1/4
+            if (N(4)) return this.spawnNPC(x, num23 * TILE, 617, rng);
+            // 水黾群（L1865-1880）：无风（flag = |windSpeedTarget|>0.45, L1201）且非雨天
+            //  → Next(1,4) 只、x 抖 ±16px、落 num23 上一格；金水黾 1/400
+            //  spawner 单返回值 API 只能交付 1 只，其余丢弃（原版成群 1-3 只）
+            const windy = Math.abs(this.world.weather.windSpeedTarget) > 0.45;
+            const raining = this.world.weather.raining;
+            if (!windy && !raining) {
+              flag9 = true;
+              const num25 = rng.int(1, 3);   // Main.rand.Next(1,4)
+              const jx = x + rng.int(-16, 16);
+              return this.spawnNPC(jx, num23 * TILE - TILE, N(400) ? 613 : 612, rng);
+            }
+          }
+        }
+        if (!flag9) {
+          // L1883-1893：琵琶鱼（困难 Next(3)>0 = 2/3）/ 食人鱼兜底
+          if (hardMode && rng.next() < 2 / 3) return D(102);
+          return D(58);
+        }
+        return null;   // flag9 已置但雨天/有风未生成（L1883 守卫）→ 原版本帧不出怪
+      }
+      // 门 B（L1895）：!spawnFriendly && waterTile && spawnTileY>worldSurface && 1/3
+      //  → 绿水母（困难 2/3）/ 蓝水母 63
+      if (this.spawnTileY > this.world.groundLevel && N(3)) {
+        if (hardMode && rng.next() < 2 / 3) return D(103);
+        return D(63);
+      }
+      // A/B 均未命中 → 原版落入 L1906+ 腐化/猩红水段（非本段范围），交回主链
     }
     // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
     if (this.dayTime && !this.waterTile && this.surfaceSpawn &&

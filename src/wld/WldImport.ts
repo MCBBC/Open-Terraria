@@ -24,6 +24,29 @@ const TOWN_NPC_KEY_BY_ID: Record<number, { key: string; bound: boolean }> = {
 
 // wld tile id → 内部 tile key（null = 清空丢弃；copyFrame = 原版 framed 家具，18px 帧直拷）
 type MapEntry = string | { key: string; copyFrame?: boolean } | null;
+
+/** sheet 兜底索引：TILE_MAP 未显式登记的 wld tile id → 注册表中首个同 sheet 的 def。
+ *  2026-08-12 tile 全量补齐后 753 个 sheet 全部有注册——任意原版存档不再降级石块。
+ *  显式 TILE_MAP 优先（null 清空/特判语义不被兜底覆盖） */
+const SHEET_FALLBACK: Array<{ sheet: number; id: number; framed: boolean }> = [];
+{
+  const seen = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const sh = TILE_DEFS[i].vanilla?.sheet;
+    if (sh === undefined || seen.has(sh)) continue;
+    seen.add(sh);
+    SHEET_FALLBACK.push({ sheet: sh, id: i, framed: !!TILE_DEFS[i].framed });
+  }
+}
+const SHEET_SLOT = new Map<number, number>();
+SHEET_FALLBACK.forEach((f, slot) => SHEET_SLOT.set(f.sheet, slot));
+function sheetFallback(wt: number): { id: number; copyFrame: boolean } | null {
+  const slot = SHEET_SLOT.get(wt);
+  if (slot === undefined) return null;
+  const f = SHEET_FALLBACK[slot];
+  return { id: f.id, copyFrame: f.framed };
+}
+
 const TILE_MAP: Record<number, MapEntry> = {
   594: { key: 'v_594_volcanolarge', copyFrame: true },
   593: { key: 'v_593_volcanosmall', copyFrame: true },
@@ -812,10 +835,16 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     if (wld.tiles.active[i]) {
       const mapped = TILE_MAP[wt];
       if (mapped === undefined) {
-        // 未映射：framed 物体丢弃，方块降级为 stone（保持地形完整可玩）
-        unmapped++;
-        bump(deg, wt);
-        type[i] = T.STONE;
+        // 未显式登记 → sheet 兜底（全量补齐后 753 sheet 全覆盖，正常不再走到降级）
+        const fb = sheetFallback(wt);
+        if (fb) {
+          type[i] = fb.id;
+          if (fb.copyFrame) { frameX[i] = wld.tiles.frameX[i]; frameY[i] = wld.tiles.frameY[i]; }
+        } else {
+          unmapped++;
+          bump(deg, wt);
+          type[i] = T.STONE;
+        }
       } else if (mapped === null) {
         bump(clr, wt);
         type[i] = 0;

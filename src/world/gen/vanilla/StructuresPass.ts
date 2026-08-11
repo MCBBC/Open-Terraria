@@ -33,12 +33,13 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
   for (let n = 0; n < total; n++) {
     let x = 0, ok = false;
     for (let attempt = 0; attempt < 200 && !ok; attempt++) {
-      // 原版岛只在两侧带生成（约 8%~42% / 58%~92%），与刷怪器 skyMob 门
-      // （NPC.cs L890-897：x<0.45w || x>0.55w 才判天空怪）严格自洽——
-      // 此前全域随机（仅避中央 ±150），落进 45%~55% 带的岛会当地表刷僵尸/水母
-      const side = rng.next() < 0.5;
-      x = side ? rng.int(Math.floor(w * 0.08), Math.floor(w * 0.42))
-        : rng.int(Math.floor(w * 0.58), Math.floor(w * 0.92));
+      // 原版（WorldGen.cs:13017-13028）：x = Next(0.1w, 0.9w)，仅 |x-w/2|<150 重掷。
+      // 重掷带宽扩为 ±max(150, 0.05w)：与刷怪器 skyMob 中央带（NPC.cs:1290 段：
+      // x<0.45w||x>0.55w 之外不判天空怪）完全重合——既 1:1 保留原版全域分布，
+      // 又保证岛不落进"当地表刷僵尸/水母"的窄缝（曾误修成两侧 8%~42% 带，过度收窄）
+      const band = Math.max(150, Math.floor(w * 0.05));
+      x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
+      if (Math.abs(x - w / 2) < band) continue;
       ok = placed.every((px) => Math.abs(px - x) >= 180);
     }
     // 该列地表（原版从 y=200 起扫）
@@ -48,10 +49,12 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       if (st.flags[st.idx(x, y)]) { surf = y; found = true; break; }
     }
     if (!found) continue;
-    // 高度钳进 skyMob 阈值带（NPC.cs：ty < worldSurface×0.35 才判天空怪）——
-    // 此前 rng(90, surf-100) 可低至地表附近，低于阈值的岛会当地表刷僵尸
-    const skyTop = Math.floor(gs.worldSurface * 0.35) - 30;
-    const y = Math.min(rng.int(90, Math.max(91, Math.min(surf - 100, skyTop))), gs.worldSurfaceLow - 50);
+    // 原版（cs:13072/13093）：y = Next(90, surf-100) 后 min(y, worldSurfaceLow-50)，无
+    // 0.35 钳（曾有 y 钳把岛整体抬高，已删）——skyMob 由刷怪侧"露天高空"判定兜底。
+    // 下限取 102 而非原版字面 90：岛的列顶游走最多再上漂 13 格（vy -0.44×29 步），
+    // 岛树最高 29 格——90 下限时树冠可探进 y<60 深空（违反 sky-invariant 不变量；
+    // 原版岛树是从岛体随机游走找点种植、不贴最高凸起，故 90 即可，此处按实测补偿）
+    const y = Math.min(rng.int(102, Math.max(103, surf - 100)), gs.worldSurfaceLow - 50);
     const isLake = lakeIdx >= islands;
     if (isLake) cloudLake(st, rng, x, y);
     else cloudIsland(st, rng, x, y);
@@ -308,12 +311,46 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
 const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
 const CHEST = TILE_BY_KEY['chest']!;
 
-/** 金字塔(pass 38 Pyramids 简化):gs.pyramidSpots 候选 → 地下沙岩砖金字塔 + 宝箱 */
+/** 金字塔(pass 38 Pyramids 简化)：候选来自 DunesPass.runDunesPass（原版 DunesAndPyramidLocations
+ *  WorldGen.cs:11570-11599 → GenVars.PyrX/PyrY，此处 = gs.pyramidSpots）；
+ *  Pyramids pass(cs:15426-15489)再校验：x∈(300,w-300)、自 PyrY 下扫首个实心格 < worldSurface
+ *  且为沙(cs:15455)、与既有金字塔距 ≥220(cs:15466)。gs.pyramidSpots 为空时回退旧自掷候选。 */
 export function runPyramidPass(
   st: TileStore, rng: RNG, gs: GenState,
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
 ): void {
-  for (const spot of gs.pyramidSpots.slice(0, 2)) {
+  const SAND = TILE_BY_KEY['sand'] ?? 0;
+  let spots: Array<{ x: number; y: number }> = [];
+  if (gs.pyramidSpots.length > 0) {
+    // cs:15446-15489 消费 PyrX/PyrY：自候选 y 下扫到首个实心格，须在 worldSurface 上且为沙
+    for (const cand of gs.pyramidSpots) {
+      if (cand.x <= 300 || cand.x >= st.w - 300) continue;
+      if (spots.some((s) => Math.abs(s.x - cand.x) < 220)) continue; // cs:15466 间距 ≥220
+      let y = cand.y;
+      while (y < gs.worldSurface && !(st.inBounds(cand.x, y) && st.flags[st.idx(cand.x, y)])) y++;
+      if (y >= gs.worldSurface) continue;
+      if (st.type[st.idx(cand.x, y)] !== SAND) continue; // cs:15455 沙列门禁
+      spots.push({ x: cand.x, y: y - 1 }); // cs:15470 k--
+    }
+  } else {
+    // 回退：旧自掷候选（沙丘 pass 未产出时的兜底，非原版路径）
+    const van = st.w / 4200;
+    for (let tries = 0; tries < 200 && spots.length < 2; tries++) {
+      const ox = rng.int(500, st.w - 501);
+      if (Math.abs(ox - gs.jungleX) < Math.floor(600 * van)) continue;
+      if (Math.abs(ox - st.w / 2) < 300) continue;
+      if (ox > gs.snowOriginLeft - 300 && ox < gs.snowOriginRight + 300) continue;
+      const px = ox + (rng.next() < 0.5 ? -1 : 1) * rng.int(0, 200);
+      let surf = -1;
+      for (let y = 0; y < gs.worldSurface; y++) {
+        if (st.flags[st.idx(px, y)]) { surf = y; break; }
+      }
+      if (surf < 0 || st.type[st.idx(px, surf)] !== SAND) continue;
+      if (spots.some((s) => Math.abs(s.x - px) < 220)) continue;
+      spots.push({ x: px, y: surf + 20 });
+    }
+  }
+  for (const spot of spots) {
     const size = rng.int(14, 20); // 半宽
     const baseY = Math.min(st.h - 260, spot.y + rng.int(60, 90));
     if (spot.x < size + 5 || spot.x > st.w - size - 5) continue;

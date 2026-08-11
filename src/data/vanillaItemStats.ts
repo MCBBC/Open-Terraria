@@ -11,6 +11,7 @@ export interface VanillaItemStat {
   def?: number;
   acc?: 0 | 1;
   life?: number;   // 生命回复（Item.lifeRegen，再生手环族）
+  wing?: number;   // 翅膀槽（Item.wingSlot>0 即翅膀；飞行属性查 vanilla-wingstats）
 }
 
 const STATS = statsJson as Record<string, VanillaItemStat>;

@@ -26,12 +26,15 @@ const ctx = (over: Partial<WeatherCtx> = {}): WeatherCtx => ({
 });
 
 describe('WeatherState 状态机', () => {
-  it('startRain 时长分布：86400/24×8 ≤ rainTime ≤ 86400×1.5', () => {
+  it('startRain 时长分布（原版语义边界）', () => {
+    // 原版 Main.cs StartRain：num4 = Next(28800, 86400) + 各档 bonus（cap 61194），
+    // num5 ∈ [1, 1.5] → rainTime = round(num4×num5) ∈ [28800, 221390]。
+    // （旧上界 86400×1.5=129600 是按 mulberry32 流标定的，非原版推导值）
     for (let s = 0; s < 200; s++) {
       const w = new WeatherState(s);
       w.startRain();
       expect(w.rainTime).toBeGreaterThanOrEqual((86400 / 24) * 8);
-      expect(w.rainTime).toBeLessThanOrEqual(86400 * 1.5);
+      expect(w.rainTime).toBeLessThanOrEqual(221390);
       expect(w.raining).toBe(true);
     }
   });
@@ -54,8 +57,11 @@ describe('WeatherState 状态机', () => {
     w.windSpeedTarget = 2; // 超界
     w.update(ctx());
     expect(w.windSpeedTarget).toBe(0.8);
+    // 弱玩家钳位只在 windCounter 到期重掷时生效（原版 Main.cs:58252-58340 同构，
+    // 构造器初掷不钳——10801）。强制到期至少一次再断言。
     const weak = new WeatherState(43);
-    for (let i = 0; i < 2000; i++) weak.update(ctx({ playerStrongEnough: false, aboveRockLayer: false }));
+    weak.windCounter = 1;
+    for (let i = 0; i < 3000; i++) weak.update(ctx({ playerStrongEnough: false, aboveRockLayer: false }));
     expect(Math.abs(weak.windSpeedTarget)).toBeLessThanOrEqual(0.35);
   });
 

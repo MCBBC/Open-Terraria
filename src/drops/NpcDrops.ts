@@ -62,6 +62,8 @@ export interface NpcDropCtx {
   worldSurfaceTile: number; rockLayerTile: number; underworldTileY: number;
   maxTilesX: number; maxTilesY: number;
   lifeMax: number; friendly: boolean; boss: boolean; damage: number; value: number;
+  /** 雕像产怪（SpawnedFromStatue）：NotFromStatue 类条件为 false */
+  statueSpawned?: boolean;
   /** 玩家血蓝（心/星条件 statLife<statLifeMax2 等） */
   hp: number; hpMax: number; mana: number; manaMax: number;
   extras?: DropExtras;
@@ -102,8 +104,8 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'RemixSeed': return false;
     case 'NotRemixSeed': return true;
     case 'NeverTrue': return false;
-    case 'NotFromStatue': return true; // 雕像刷怪未实现
-    case 'IsBloodMoonAndNotFromStatue': return !!ex?.bloodMoon;
+    case 'NotFromStatue': return !ctx.statueSpawned; // Conditions.NotFromStatue
+    case 'IsBloodMoonAndNotFromStatue': return !!ex?.bloodMoon && !ctx.statueSpawned;
     case 'IsCrimsonAndNotExpert': return ctx.crimson && !ctx.isExpert;
     case 'IsCorruptionAndNotExpert': return !ctx.crimson && !ctx.isExpert;
     case 'IsChristmas': return !!ex?.xmas;

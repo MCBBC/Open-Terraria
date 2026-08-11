@@ -105,8 +105,12 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
   let placed = 0;
   for (let n = 0; n < count * 100 && placed < count; n++) {
-    const x = rng.int(20, st.w - 301);
-    const y = rng.int(yMin, st.h - 21);
+    // 原版 RandomWorldPoint((ws+rl)>>1, 20, 300, 20)（WorldGen.cs:16028，cs:27255
+    // 参数序 top,right,bottom,left）：X∈[20,w-21]，Y∈[(ws+rl)/2, h-300]。
+    // 此前 right=20/bottom=300 安反轴——横向两侧各砍 300 格（丛林边缘蜂巢绝迹）、
+    // 纵向放到 h-21 贴地狱
+    const x = rng.int(20, st.w - 21);
+    const y = rng.int(yMin, st.h - 301);
     if (!st.inBounds(x, y) || !st.flags[st.idx(x, y)]) continue;
     // 原版验证:半径 15 圆内实心中 60/59 占比 ≥75% 且 60 ≥2
     let solid = 0, mudOrGrass = 0, grass = 0;

@@ -12,6 +12,7 @@ import { placeDoorClosed } from '../../Door';
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 const CHEST = TILE_BY_KEY['chest']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
+const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 
 interface Room { x: number; y: number; w: number; h: number }
 
@@ -32,14 +33,28 @@ export function runTemplePass(
 ): void {
   const { w, h } = st;
   const s = w / 4200;
-  // 种子点:丛林侧(地牢异侧)深层
+  // 种子点(cs:15917-15992):y = Next(rockLayer, maxTilesY-600)(rockLayer 先钳 ≤ h-601);
+  // x = ((NextDouble()*num3+0.1)*-dungeonSide+0.5)*w,num3 起 0.25,每 1e6 次失败
+  // num3 = min(0.35, num3+0.05) 递增(cs:15978-15989);落点须为丛林草 60(cs:15972)。
+  // num3==0.35 后再失败 10 轮放弃(不作原版地表补救 cs:15995+,直接返回)。
   let sx = -1, sy = -1;
-  for (let attempt = 0; attempt < 4000 && sx < 0; attempt++) {
-    const y = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, h - 800));
-    const xf = (rng.next() * 0.25 + 0.1) * -gs.dungeonSide + 0.5;
-    const x = Math.floor(xf * w);
-    if (st.inBounds(x, y) && st.flags[st.idx(x, y)]) {
-      sx = x; sy = y;
+  {
+    let band = 0.25, fails = 0, giveups = 0;
+    for (;;) {
+      let yTop = Math.floor(gs.rockLevel);
+      const yBot = h - 600;
+      if (yTop > yBot - 1) yTop = yBot - 1;
+      const y = rng.int(yTop, yBot - 1);
+      const x = Math.floor(((rng.next() * band + 0.1) * -gs.dungeonSide + 0.5) * w);
+      if (st.inBounds(x, y)) {
+        const i = st.idx(x, y);
+        if (st.flags[i] && st.type[i] === JUNGLE_GRASS) { sx = x; sy = y; break; }
+      }
+      if (fails++ > 1000000) {
+        if (band === 0.35 && ++giveups > 10) break;
+        band = Math.min(0.35, band + 0.05);
+        fails = 0;
+      }
     }
   }
   if (sx < 0) return;

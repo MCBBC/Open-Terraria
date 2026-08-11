@@ -49,6 +49,9 @@ export interface GenState {
   // 结构候选（由早期 pass 排队、后期 pass 消费）
   pyramidSpots: Array<{ x: number; y: number }>;
   floatingIslands: Array<{ x: number; y: number; style: number; isLake: boolean }>;
+  /** 微光以太中心（Shimmer pass cs:15301 GenVars.shimmerPosition；-1 = 未生成） */
+  shimmerX: number;
+  shimmerY: number;
 
   // 宝箱战利品序（AddBuriedChest 全局态,cs:11262/36165/10130）
   hellChestItems: number[] | null; // 每世界乱序 [274,220,112,218,3019]（首只地狱箱时掷）
@@ -76,6 +79,7 @@ export function newGenState(w: number, h: number): GenState {
     undergroundDesert: null,
     pyramidSpots: [],
     floatingIslands: [],
+    shimmerX: -1, shimmerY: -1,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
   };
 }

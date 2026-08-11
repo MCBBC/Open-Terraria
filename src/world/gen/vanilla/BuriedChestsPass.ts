@@ -11,8 +11,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { ITEM_BY_KEY } from '../../../data/items';
-import { vanillaItemKey } from '../../../data/vanillaNpcs';
+import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -41,9 +40,11 @@ function isDungeonWall(wl: number): boolean {
 }
 
 // ---------- 战利品辅助 ----------
-/** 原版物品 id → 本仓库物品 id;未注册返回 -1 */
+/** 原版物品 id → 本仓库物品 id;未注册返回 -1。
+ *  VANILLA_ITEM_KEY_BY_ID 全量映射（vi_ 表覆盖 6146 件）——旧 vanillaItemKey
+ *  只认 snake_case 显式注册（少数），宝箱战利品曾整条静默丢失 */
 function vid(id: number): number {
-  const k = vanillaItemKey(id);
+  const k = VANILLA_ITEM_KEY_BY_ID[id];
   return k ? (ITEM_BY_KEY[k] ?? -1) : -1;
 }
 
@@ -396,8 +397,16 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
   for (let n = 0; n < count; n++) {
     let ok = false;
     for (let tries = 0; tries < 2000 && !ok; tries++) {
-      const x = rng.int(300, w - 301);
-      const y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface));
+      // cs:17244 首掷 Next(200, w-200);仅落点命中 oceanDepths(cs:17246-17254:
+      // y ≤ oceanLevel=(ws+rl)/2+40 且 x 在海滩带内)才改掷 Next(300, w-300)——
+      // 原版 WorldGen.beachDistance 是常量 380(cs:4102),此处沿用 gs.beachDistance 比例值
+      let x = rng.int(200, w - 201);
+      let y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface));
+      const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+      while (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance)) {
+        x = rng.int(300, w - 301);
+        y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface));
+      }
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
       // 空格 + 泥土系自然墙(2/59/244)

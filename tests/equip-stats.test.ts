@@ -136,4 +136,38 @@ describe('Player 装备属性聚合', () => {
     expect(p.equipStats.jumpOpts).toHaveLength(3);
     // extraJumps 由 fixedUpdate 落地时重置（此处仅验证聚合层；飞行行为在冒烟覆盖）
   });
+
+  it('三轮行为：翅膀属性/冲刺档/黑带/蜜蜂/飞毯', () => {
+    const p = mkPlayer();
+    // 恶魔之翼 492：wingSlot 1 → 100t / 6.25 速度（WingStatsInitializer）
+    p.inv.armor[3] = { id: _iid(492), stack: 1 };
+    expect(p.equipStats.wing).toEqual({ time: 100, speed: 6.25 });
+    // 忍者大师装备 984：dash 1 + blackBelt
+    p.inv.armor[4] = { id: _iid(984), stack: 1 };
+    expect(p.equipStats.dash).toBe(1);
+    expect(p.equipStats.blackBelt).toBe(true);
+    // 克苏鲁护盾 3097：dash 2（冲撞伤害型，取最高档）
+    p.inv.armor[5] = { id: _iid(3097), stack: 1 };
+    expect(p.equipStats.dash).toBe(2);
+    // 蜂窝 1132：bees
+    p.inv.armor[6] = { id: _iid(1132), stack: 1 };
+    expect(p.equipStats.bees).toBe(true);
+    // 飞毯 934：carpet
+    p.inv.armor[7] = { id: _iid(934), stack: 1 };
+    expect(p.equipStats.carpet).toBe(true);
+  });
+
+  it('黑带闪避：damage 有 10% 概率完全闪避（返回 false 且不掉血）', () => {
+    const p = mkPlayer();
+    p.hp = 100;
+    p.inv.armor[3] = { id: _iid(963), stack: 1 }; // Black Belt（963）
+    let dodged = 0;
+    for (let k = 0; k < 300; k++) {
+      p.iframes = 0; p.hp = 100;
+      if (!p.damage(10, 0, 0, false)) dodged++;
+    }
+    // 300 次样本：10% 闪避，容差带宽松防抖动
+    expect(dodged).toBeGreaterThan(10);
+    expect(dodged).toBeLessThan(80);
+  });
 });

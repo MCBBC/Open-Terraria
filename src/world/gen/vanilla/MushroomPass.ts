@@ -29,7 +29,8 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
     while (attempts <= Math.floor(w / 2)) {
       let i = rng.int(Math.floor(w * 0.2), Math.floor(w * 0.8) - 1);
       if (attempts > Math.floor(w / 4)) {
-        i = rng.int(Math.floor(w * 0.25), Math.floor(w * 0.975) - 1);
+        // 原版（WorldGen.cs:12620）兜底带 = Next(0.025w, 0.975w)——0.25 是 10 倍笔误
+        i = rng.int(Math.floor(w * 0.025), Math.floor(w * 0.975) - 1);
       }
       const j = rng.int(gs.rockLevel + 50, h - 301);
       // 区域检查:避开雪/冰/丛林/花岗岩/大理石与已放蘑菇(原版 100/500 距离)
