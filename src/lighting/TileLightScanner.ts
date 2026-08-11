@@ -150,8 +150,11 @@ export class TileLightScanner {
         const type = st.type[i];
         if (type !== 0 && (st.wire[i] & TileStore.WIRE_ACTUATED) === 0) {
           const d = TILE_DEFS[type];
-          if (d && d.light) {
-            const sheet = d.vanilla?.sheet ?? -1;
+          const sheet = d?.vanilla?.sheet ?? -1;
+          // 蘑菇雕像 349 门控(:2940):frameX<36 的 style 完全不发光——
+          // 同时压制组公式与 def.light 静态兜底,故提到入口处判
+          const shroomGateOk = !(sheet === 349 && st.frameX[i] < 36);
+          if (d && (d.light || MUSHROOM_GLOW_SHEETS.has(sheet)) && shroomGateOk) {
             // 接线灯门控:关帧不发光(LIGHT_TOGGLE)
             const on = sheet < 0 || lightIsOn(sheet, st.frameX[i], st.frameY[i]);
             if (on) {
@@ -169,10 +172,10 @@ export class TileLightScanner {
                 // 蜡烛/篝火族闪烁(:1034-1036:localRand.Next(28,42)*0.005+(270-mouseTextColor)/700)
                 const f = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 700;
                 er += f; eg += f; eb += f;
-              } else if (MUSHROOM_GLOW_SHEETS.has(sheet) && !(sheet === 349 && st.frameX[i] < 36)) {
+              } else if (MUSHROOM_GLOW_SHEETS.has(sheet)) {
                 // 蘑菇组发光（TileLightScanner.cs:2938-2960 case 70/71/72/190/348/349/528/578）：
                 //   R=0、B=1，G=0.2+num11/2；num11=Next(28,42)*0.005+(270-mouseTextColor)/1000
-                //   ——只抬 G（与 FLICKER_SHEETS 的三通道叠加不同），349 蘑菇雕像 frameX<36 不发光
+                //   ——只抬 G（与 FLICKER_SHEETS 的三通道叠加不同）
                 const num11 = this.localRandom(tx, ty).next(28, 42) * 0.005 + (270 - osc) / 1000;
                 er = 0; eg = 0.2 + num11 / 2; eb = 1;
               } else {
