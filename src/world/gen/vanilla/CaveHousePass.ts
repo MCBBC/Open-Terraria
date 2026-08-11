@@ -508,16 +508,19 @@ function findSideExit(st: TileStore, wallX: number, wallY: number, wallH: number
 function placeDoors(st: TileStore, rooms: Rect[], def: ThemeDef): void {
   for (const r of rooms) {
     // 墙列矩形 (X, Y+1, 1, H-2)
+    // 门禁（原版 PlaceTile(x, exitY)→PlaceDoor(j+1)，WorldGen.cs:31946）：mount
+    // （exitY-1 实心）+ 地板（exitY+3 实心）缺一即不放门只留门洞——HouseBuilder
+    // 的 forced=true 仅绕过首道空格门，门分支的锚点条件仍生效
+    const tryDoor = (x: number, exitY: number) => {
+      for (let dy = 0; dy < 3; dy++) st.setTileSilent(x, exitY + dy, 0);
+      if (solidAt(st, x, exitY - 1) && solidAt(st, x, exitY + 3)) {
+        placeDoorClosed(st, x, exitY, def.door);
+      }
+    };
     const exitR = findSideExit(st, r.x + r.w - 1, r.y + 1, r.h - 2, false);
-    if (exitR !== null) {
-      for (let dy = 0; dy < 3; dy++) st.setTileSilent(r.x + r.w - 1, exitR + dy, 0);
-      placeDoorClosed(st, r.x + r.w - 1, exitR, def.door);
-    }
+    if (exitR !== null) tryDoor(r.x + r.w - 1, exitR);
     const exitL = findSideExit(st, r.x, r.y + 1, r.h - 2, true);
-    if (exitL !== null) {
-      for (let dy = 0; dy < 3; dy++) st.setTileSilent(r.x, exitL + dy, 0);
-      placeDoorClosed(st, r.x, exitL, def.door);
-    }
+    if (exitL !== null) tryDoor(r.x, exitL);
   }
 }
 

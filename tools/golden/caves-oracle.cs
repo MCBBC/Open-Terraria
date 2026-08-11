@@ -1013,7 +1013,6 @@ Checkpoint("mcopenings");
             {
                 if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
                 else depth += 1.0;
-                if (count <= 6 && side == 0) Console.WriteLine($"CSB x=${x} depth=${depth} count=${count}");
                 int pad = (int)r.Next(15, 20);
                 int yEnd = (int)((double)j + depth + pad);
                 for (int y = 0; y < yEnd && y < H; y++)

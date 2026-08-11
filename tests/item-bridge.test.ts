@@ -23,9 +23,10 @@ describe('vanilla-itemfunc 数据（1456 Item.cs 提取）', () => {
     expect(itemFuncOfVid(188)!.potion).toBe(1);
     expect(itemFuncOfVid(110)!.healMana).toBe(50);
   });
-  it('Buff 药水：铁皮 1161 buffType 5 / 挖矿 2322 buffType 104+buffTime', () => {
-    const iron = itemFuncOfVid(1161)!;
+  it('Buff 药水：铁皮 292 buffType 5+28800t（8 分钟）/ 挖矿 2322 buffType 104+36000t', () => {
+    const iron = itemFuncOfVid(292)!;
     expect(iron.buffType).toBe(5);
+    expect(iron.buffTime).toBe(28800);
     expect(iron.consumable).toBe(1);
     const mine = itemFuncOfVid(2322)!;
     expect(mine.buffType).toBe(104);

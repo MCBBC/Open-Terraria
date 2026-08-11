@@ -19,11 +19,12 @@ function makeWorld(w = 800, h = 300): { st: TileStore; gs: GenState } {
     for (let dx = -r; dx <= r; dx++) for (let dy = -r; dy <= r; dy++) {
       if (dx * dx + dy * dy <= r * r) {
         st.setTileSilent(cx + dx, cy + dy, 0);
-        st.setWallSilent(cx + dx, cy + dy, 2);
       }
     }
   };
-  cave(300, 150, 7); cave(150, 180, 6); cave(450, 200, 8);
+  // 洞腔放选点带内：rockLevel+30=150 ≤ y < h-231（h=500 → 269）
+  cave(300, 200, 7); cave(150, 230, 6); cave(450, 180, 8);
+
   const gs = {
     worldSurface: 60, rockLevel: 120, lavaLine: h - 200,
     snowOriginLeft: 10, snowOriginRight: 100,
@@ -33,7 +34,7 @@ function makeWorld(w = 800, h = 300): { st: TileStore; gs: GenState } {
 
 describe('宝石系统世界生成', () => {
   it('GemCaves：产出宝石矿 + 宝石墙 + 暴露晶簇（19:1/1:2 语义）', () => {
-    const { st, gs } = makeWorld(600, 300);
+    const { st, gs } = makeWorld(600, 500);
     runGemCavesPass(st, new RNG(42), gs);
     const GEMS = new Set(['gem_sapphire','gem_ruby','gem_emerald','gem_topaz','gem_amethyst','gem_diamond'].map(k => TILE_BY_KEY[k]!));
     const EXPOSED = TILE_BY_KEY['v_178_gems']!;
@@ -63,6 +64,30 @@ describe('宝石系统世界生成', () => {
       if (st.type[i] === EXPOSED && Math.floor(st.frameX[i] / 18) === 6) amber++;
     }
     expect(amber).toBeGreaterThan(0);
+  });
+
+  it('GemCaves：BFS 不侵入有墙结构（神庙/房屋免疫——Spread.Gem :3583 wall≠0 不扩散）', () => {
+    const { st, gs } = makeWorld(600, 500);
+    // 洞穴（无墙空气）+ 相邻的神庙（砖 226 实心 + 墙 87 内部空气腔）
+    const TEMPLE = TILE_BY_KEY['v_226_lihzahrd_brick']!;
+    // 洞腔（选点带内）
+    for (let dx = -7; dx <= 7; dx++) for (let dy = -7; dy <= 7; dy++) {
+      if (dx * dx + dy * dy <= 49) st.setTileSilent(300 + dx, 200 + dy, 0);
+    }
+    // 神庙：320-340 × 190-210，砖壳 + 墙 87，内部空气
+    for (let x = 320; x <= 340; x++) for (let y = 190; y <= 210; y++) {
+      st.setTileSilent(x, y, TEMPLE);
+      st.setWallSilent(x, y, 87);
+    }
+    for (let x = 322; x <= 338; x++) for (let y = 192; y <= 208; y++) st.setTileSilent(x, y, 0);
+    runGemCavesPass(st, new RNG(42), gs);
+    const EXPOSED = TILE_BY_KEY['v_178_gems']!;
+    let leak = 0;
+    for (let x = 320; x <= 340; x++) for (let y = 190; y <= 210; y++) {
+      const i = st.idx(x, y);
+      if ((st.wall[i] >= 48 && st.wall[i] <= 53) || st.type[i] === EXPOSED) leak++;
+    }
+    expect(leak).toBe(0);
   });
 
   it('GemTrees：洞穴墙+石基座处长出宝石树', () => {

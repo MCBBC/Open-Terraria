@@ -129,7 +129,6 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
       let count = 0, depth = 1;
       for (let x = waterX - 1; x >= 0; x--) {
         if (x > edgeWall) { count++; depth = tuneOceanDepth(rng, count, depth, van, floridaL); }
-        if (count <= 6 && side === 0) console.log(`JSB x=${x} depth=${depth} count=${count}`);
         else depth += 1;
         const pad = rng.int(15, 19);
         const yEnd = waterY + depth + pad;

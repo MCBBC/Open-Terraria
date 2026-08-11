@@ -67,13 +67,16 @@ const findBody = (game: GameHooks): Enemy | null =>
 const findHead = (game: GameHooks): Enemy | null =>
   (game.enemies() as Enemy[]).find((n) => !n.dead && (n.vanillaId === 246 || n.vanillaId === 249)) ?? null;
 
-/** GetMyBalance + 脱离神庙/丛林加成(NPC.cs:19450-19457 / :19173-19180 / :31274-31282):
- *  经典单人 = 1;getGoodWorld +2/+3(expert,略);玩家不在神庙/丛林带 或 在地表以上 → ×2。
- *  简化项:本工程无 ZoneLihzhardTemple/ZoneJungle 判定,仅保留"玩家在地表以上"一支
- *  (地下神庙内 = 1,与原版常态一致)。 */
+/** GetMyBalance + 脱离神庙/丛林加成(NPC.cs:19450-19457 / :19173-19180 / :31274-31282 / :31506-31512):
+ *  经典单人 = 1;getGoodWorld +2/+3(expert,略);
+ *  (!ZoneLihzhardTemple && !ZoneJungle) || 玩家 Center.Y < worldSurface*16 → ×2。
+ *  Zone 判定接 Game.scene(SceneMetrics):zoneTemple = 中心格墙 87(SceneMetrics.cs:688,
+ *  神庙砖 226 不构成独立 Zone,只计入 JungleTileCount——SceneMetrics.cs:613,阈值 140)。 */
 const balanceNum = (game: GameHooks, player: Player | null): number => {
   let num = 1;
-  if (player && player.cy < game.world.groundLevel * TILE) num *= 2;
+  const s = game.scene;
+  const inTempleOrJungle = !!s?.zoneTemple || !!s?.zoneJungle;
+  if (!inTempleOrJungle || (player != null && player.cy < game.world.groundLevel * TILE)) num *= 2;
   return num;
 };
 
@@ -173,7 +176,7 @@ function golemEyeLasers(game: GameHooks, e: Enemy, player: Player, side: number)
 }
 
 /** 自由头眼激光(:31659-31717):双眼(±14*scale,-50*scale)各一发 proj 259;
- *  伤 24/速 11,本体(此处用头自身血量 r)每降一档 +1 伤/+0.25 速;
+ *  伤 24/速 11,本体(245)残血每降一档 +1 伤/+0.25 速(调用方传本体血量比值 r);
  *  无视线(flag49)→ 伤 ×1.5、速 ×2.5、按玩家速度随机提前量瞄准 */
 function golemEyeLasersFree(
   game: GameHooks, e: Enemy, player: Player, noLos: boolean, r: number,
@@ -469,10 +472,12 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
       const d = Math.hypot(dx, dy) || 1;
       e.vx = accelTo(e.vx, (dx / d) * 7, 0.05);
       e.vy = accelTo(e.vy, (dy / d) * 7, 0.05);
-      // 火焰弹节奏(:31566-31595):num761=(num+4)/5;原版按本体残血分档 → 改按头自身血量(简化项)
+      // 火焰弹节奏(:31566-31595):num761=(num+4)/5,分档读本体(golemBoss=245)残血(:31574-31594)。
+      // 本体已亡(本移植死亡链,原版无此态)→ 比值 0 = 全档,等价原版读尸体槽 life<=0 恒真
       const num761 = (num + 4) / 5;
       e.ai1 += num761;
-      const r = e.hp / e.maxHp;
+      const rBody = findBody(game);
+      const r = rBody ? rBody.hp / rBody.maxHp : 0;
       if (r < 0.8) e.ai1 += num761;
       if (r < 0.6) e.ai1 += num761;
       if (r < 0.2) e.ai1 += num761;
@@ -483,7 +488,8 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.ai1 = 0;
         golemSpit(game, e, player, 0, -10 * SCALE, 8, 20, 258);
       }
-      // 眼激光节奏(:31618-31658):基数 num,本体残血分档 → 头自身血量(简化项)
+      // 眼激光节奏(:31618-31658):基数 num,分档读本体残血(:31626-31645;r 与上方火焰弹
+      // 同源);激光伤/速分档(:31683-31705,阈值 0.5/0.4/0.3/0.2/0.1)经 golemEyeLasersFree 传 r
       e.ai2 += num;
       if (r < 1 / 1.25) e.ai2 += num;
       if (r < 1 / 1.5) e.ai2 += num;

@@ -67,7 +67,7 @@ if (cell) {
       for (let x = cc.x - 60; x < cc.x + 60; x++) {
         for (let y = cc.y; y < cc.y + 10; y++) {
           const i = st.idx(x, y);
-          if (st.flags[i] && !st.half[i] && st.slope[i] === 0) {
+          if (st.isSolid(x, y) && !st.half[i] && st.slope[i] === 0) {
             let clear = true;
             for (let dx = -1; dx <= 2 && clear; dx++) {   // 玩家宽 20px 跨 3 列
               if (st.flags[st.idx(x + dx, y - 1)] || st.flags[st.idx(x + dx, y - 2)]) clear = false;
@@ -123,17 +123,22 @@ if (!up) {
 } else {
   const start = await page.evaluate((u) => {
     const g = window.__swGame; const p = g.player;
-    p.x = u.x * 16 + 8 - p.w / 2; p.y = (u.y + 1) * 16 - p.h; p.vx = 0; p.vy = 0;
+    p.x = u.x * 16 + 2; p.y = (u.y + 1) * 16 - p.h; p.vx = 0; p.vy = 0;
     return { x: p.x, feet: p.y + p.h };
   }, up);
   await new Promise((r) => setTimeout(r, 400));
   await page.keyboard.down('KeyA');
-  await new Promise((r) => setTimeout(r, 1600));
+  const traj = [];
+  for (let k = 0; k < 8; k++) {
+    await new Promise((r) => setTimeout(r, 200));
+    traj.push(await page.evaluate(() => {
+      const p = window.__swGame.player;
+      return { x: Math.round(p.x), feet: p.y + p.h };
+    }));
+  }
   await page.keyboard.up('KeyA');
-  const end = await page.evaluate(() => {
-    const p = window.__swGame.player;
-    return { x: p.x, feet: p.y + p.h, onGround: p.onGround };
-  });
+  const end = traj[traj.length - 1];
+  console.log('  轨迹:', JSON.stringify(traj));
   const climbed = start.feet - end.feet; // >0 为爬升
   const progressed = start.x - end.x;    // >0 为前进
   check('上坡行走:爬升且前进(不卡死)', climbed >= 10 && progressed >= 8,

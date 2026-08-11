@@ -69,7 +69,7 @@ import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
-const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_DOWN_SCAN = 40, TELEPORT_RING_MAX = 60;
+const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
 import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
@@ -693,8 +693,9 @@ export class Game implements GameHooks {
   enemySpawnEnabled = true;
 
   /** F10 调试瞬移:鼠标世界位置落脚(须容纳角色:2 宽×3 高净空 + 脚下实心)。
-   *  鼠标点本身不可落脚(实体方块内/悬空)时:先向下扫 40 行(落向鼠标下方的地面),
-   *  再环形 BFS 找最近可落脚点(钻进实体时送到最近地表/洞穴地面)。 */
+   *  鼠标点本身不可落脚时,以鼠标点为中心【就近优先】环形 BFS 找最近可落脚点
+   *  (悬空落在正下方地面、点进实体送到旁边的地表/洞穴地面——统一按距离最近算)。
+   *  相机不硬切:由每帧 camera.follow(0.15 指数缓动)平滑飞过去。 */
   teleportToMouse(): void {
     const [wx, wy] = this.camera.screenToWorld(this.input.mouseX, this.input.mouseY);
     const st = this.world.store;
@@ -711,24 +712,17 @@ export class Game implements GameHooks {
     };
     const tx = Math.floor(wx / TILE), ty = Math.floor(wy / TILE);
     let land: [number, number] | null = fits(tx, ty) ? [tx, ty] : null;
-    if (!land) {
-      // 悬空(洞穴上空/天空):沿鼠标列向下扫,落到下方首个地面
-      for (let d = 1; d <= TELEPORT_DOWN_SCAN && !land; d++) {
-        if (fits(tx, ty + d)) land = [tx, ty + d];
-      }
-    }
-    if (!land) {
-      // 实体内/无地面:环形 BFS 扩散找最近可落脚点
-      outer: for (let r = 1; r <= TELEPORT_RING_MAX; r++) {
-        for (let dx = -r; dx <= r && !land; dx++) {
-          for (const dy of [-r, r]) {
-            if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
-          }
+    // 环形 BFS(Chebyshev 距离逐环外扩):第 r 环上的全部格按"上边→下边→左边→右边"
+    // 顺序找,保证命中的是距鼠标最近的落脚点(同环内顺序只影响并列情形)
+    outer: for (let r = 1; r <= TELEPORT_RING_MAX && !land; r++) {
+      for (let dx = -r; dx <= r; dx++) {
+        for (const dy of [-r, r]) {
+          if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
         }
-        for (let dy = -r + 1; dy <= r - 1 && !land; dy++) {
-          for (const dx of [-r, r]) {
-            if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
-          }
+      }
+      for (let dy = -r + 1; dy <= r - 1; dy++) {
+        for (const dx of [-r, r]) {
+          if (fits(tx + dx, ty + dy)) { land = [tx + dx, ty + dy]; break outer; }
         }
       }
     }
@@ -742,7 +736,7 @@ export class Game implements GameHooks {
     p.vx = 0; p.vy = 0;
     p.netOffX = 0; p.netOffY = 0;            // 清联机平滑偏移(本地瞬移不插值)
     p.clearFall?.();                         // 清坠落起点:瞬移不结算摔伤
-    this.camera.x = p.cx; this.camera.y = p.cy;  // 相机跟过去,防一帧黑视
+    // 相机交给每帧 camera.follow 缓动飞过去(不硬切)
     this.lighting.liquidDirty = true;
     const liq = st.liquid[st.idx(land[0], land[1] - 1)];
     this.cb.onToast?.(liq > 0 && st.liquidType[st.idx(land[0], land[1] - 1)] === 2
