@@ -51,16 +51,19 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;   // 无过渡,单份
     const { ctx, calls } = recorder();
     const world = hellWorld();
-    const camY = (600 - 345) * 16;            // 玩家在 h-345(岩浆带内)
-    bg.draw(ctx, world, {} as never, { x: 3200, y: camY }, 1280, 800, [1, 1, 1], 100);
+    const camY = (600 - 300) * 16;            // 玩家在 h-300(岩浆带 263..400 格内)
+    // 直调 drawUnderground(draw 内 update 会把 ugAlpha 从 0 渐变,单帧早退)
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 100);
     const rectIdx = calls.findIndex(c => c.op === 'rect');
     const firstImg = calls.findIndex(c => c.op === 'img');
     expect(rectIdx).toBeGreaterThanOrEqual(0);
     expect(firstImg).toBeGreaterThan(rectIdx);       // 黑盒先于一切贴图
-    // 下界 = (h-200)*16 - camTopY(h-200 格,UnderworldLayer)
+    // 高度 = min(viewH+200, UnderworldLayer 屏 y)——原版 num=screenHeight+200 上限
+    // (hellBlackBoxBottom 仅在更小时收窄,:52810-52817)
     const hRect = calls[rectIdx].args as number[];
     const camTopY = camY - 800 / 2;
-    expect(hRect[3]).toBeCloseTo((600 - 200) * 16 - camTopY, 0);
+    expect(hRect[3]).toBeCloseTo(Math.min(800 + 200, (600 - 200) * 16 - camTopY), 0);
   });
 
   it('岩浆带顶 = magmaLayer 公式(h-335 带,非 lavaLine h-200——曾低 ~135 格 :52237)', () => {
@@ -69,13 +72,14 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;
     const { ctx, calls } = recorder();
     const world = hellWorld();
-    const camY = (600 - 345) * 16;
-    bg.draw(ctx, world, {} as never, { x: 3200, y: camY }, 1280, 800, [1, 1, 1], 100);
+    const camY = (600 - 300) * 16;
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 100);
     const magma = calls.find(c => c.op === 'img' && (c.tex === 125 || c.tex === 126 || c.tex === 127));
     expect(magma).toBeTruthy();
     const camTopY = camY - 400;
     const expectedTop = (100 + Math.floor((600 - 330 - 100) / 6) * 6 - 5) * 16 - camTopY + 16 + 600 - 8;
-    expect((magma!.args as number[])[1]).toBeCloseTo(expectedTop, 0);
+    expect((magma!.args as number[])[5]).toBeCloseTo(expectedTop, 0);   // 9 参 drawImage 的 dy=args[5]
   });
 
   it('岩浆体按 magmaFrame 行取帧(3 帧×96px;surface 条 185+hell 取 frame*16 行 :52488-97)', () => {
@@ -84,19 +88,27 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;
     const { ctx, calls } = recorder();
     const world = hellWorld();
-    const camY = (600 - 345) * 16;
-    // 推到第 2 帧:8 tick/帧 × 2 = 16 tick = 2133ms
-    bg.draw(ctx, world, {} as never, { x: 3200, y: camY }, 1280, 800, [1, 1, 1], 2133);
+    // 相机移到 UnderworldLayer(h-200)附近:岩浆带底+表面波纹条同屏(:52488 条在带底)
+    const camY = (600 - 215) * 16;
+    // 推到第 2 帧:magmaBGFrame 每 8 tick(133.33ms)推一次 → 16 tick = 266.7ms
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 266.7);
     const magma = calls.find(c => c.op === 'img' && (c.tex === 125 || c.tex === 126));
     expect(magma).toBeTruthy();
     expect((magma!.args as number[])[1]).toBe(96 * 2);          // sourceY = frame*96
     const strip = calls.find(c => c.op === 'img' && (c.tex === 185 || c.tex === 186));
     expect(strip).toBeTruthy();                                  // 表面条存在(曾缺失)
     expect((strip!.args as number[])[1]).toBe(16 * 2);           // sourceY = frame*16
-    // 帧循环:3 帧后回 0(40 tick=5333ms)
+    // 帧循环:3 帧一循环回 0(24 tick = 400ms → frame=3%3=0;新建实例清零累计,
+    // 因 magmaFrameT 跨帧调用累计——原版 magmaBGFrame 同为全局持久计数)
+    const bg2 = new BiomeBackground();
+    stubImgs(bg2);
+    bg2.ugAlpha = 1; bg2.ugOld = bg2.ugStyle;
     const { ctx: ctx2, calls: calls2 } = recorder();
-    bg.draw(ctx2, world, {} as never, { x: 3200, y: camY }, 1280, 800, [1, 1, 1], 5333);
+    (bg2 as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx2, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 400);
     const magma2 = calls2.find(c => c.op === 'img' && (c.tex === 125 || c.tex === 126));
     expect((magma2!.args as number[])[1]).toBe(0);               // mod 3 回 0
+    void bg2;
   });
 });

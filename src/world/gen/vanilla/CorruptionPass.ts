@@ -53,6 +53,9 @@ const HARDSAND = TILE_BY_KEY['hardened_sand']!;
 const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉 + 挖空保护 :76191）
 const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）
 
+const COLBUF: string[] = [];
+export function __crDump(): string { return COLBUF.join('\n'); }
+
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁
@@ -98,6 +101,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
       if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
     }
+    COLBUF.push(`g=${g} cx=${cx} zLo=${zLo} zHi=${zHi} p=${rng.vanilla.peek()}`);
     gs.evilZones.push({ x0: zLo, x1: zHi });
 
     if (gs.crimson) {
@@ -128,18 +132,24 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
           for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
             if (st.flags[st.idx(x, y)] || st.wall[st.idx(x, y)] > 0) {
               sy = y;
+              if (x >= 410 && x <= 416) COLBUF.push(`scanJS x=${x} y=${y} wall=${st.wall[st.idx(x, y)]} act=${st.flags[st.idx(x, y)]} pre=${rng.vanilla.peek()}`);
               if (x === cx) {
                 cooldown = 20;
+                if (x === 414) COLBUF.push(`trig414JS main y=${y} p=${rng.vanilla.peek()}`);
                 chasmRunner(st, rng, gs, x, y, rng.int(0, 149) + 150, true);
+                if (x === 414) COLBUF.push(`trig414JS mainDone p=${rng.vanilla.peek()}`);
               } else if (rng.int(0, 34) === 0) {
                 cooldown = 30;
+                if (x === 414) COLBUF.push(`trig414JS side roll p=${rng.vanilla.peek()}`);
                 chasmRunner(st, rng, gs, x, y, rng.int(0, 49) + 50, true);
+                if (x === 414) COLBUF.push(`trig414JS sideDone p=${rng.vanilla.peek()}`);
               }
               break;
             }
           }
           void sy;
         }
+        COLBUF.push(`x=${x} p=${rng.vanilla.peek()}`);
         for (let y = gs.worldSurfaceLow; y < gs.worldSurface - 1; y++) {
           if (!st.flags[st.idx(x, y)]) continue;
           const depth = y + rng.int(10, 13);
@@ -152,7 +162,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
           break;
         }
       }
+      COLBUF.push(`chasmDone p=${rng.vanilla.peek()}`);
       convertSurface(st, rng, gs, zLo, zHi, false);
+      COLBUF.push(`bandDone p=${rng.vanilla.peek()}`);
       // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
       cleanOrbPockets(st, rng, zLo, zHi);
     }

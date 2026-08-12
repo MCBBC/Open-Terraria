@@ -1700,7 +1700,6 @@ export class LunarOrb extends Entity {
   /** 539 亡时 80×80 范围伤害 + 尘爆(:69366-69405) */
   private explode(game: GameHooks): void {
     this.dead = true;
-    const st = game.world.store;
     game.spawnParticles(this.cx, this.cy, '#8FE8FF', 20, 3.4, { life: 40, damp: 0.94 });
     game.spawnParticles(this.cx, this.cy, '#4FB8E8', 10, 2.2, { life: 36, damp: 0.94 });
     const p = game.player;
@@ -1711,7 +1710,6 @@ export class LunarOrb extends Entity {
         game.damagePlayer(this.dmg, this.cx, this.cy, null);
       }
     }
-    void st;
   }
 
   draw(r: Renderer, _cam: Camera): void {

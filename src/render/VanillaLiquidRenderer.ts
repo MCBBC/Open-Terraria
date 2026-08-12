@@ -69,6 +69,14 @@ function shimmerFrame(top: boolean, x: number, y: number, tVis: number): number 
   return ((Math.floor(num) % 16) + 16) % 16;
 }
 
+/** sparkle 源矩形（DrawShimmer :716-721）：先把 sourceRectangle 重置回【原始
+ *  SourceRectangle】再加 X+48 / Y+80×fr。注意第二参数是原始 sy——表面格基底层
+ * 虽强制切 Y=1280（:700），sparkle 仍按原始 Y 取带（表层漂移彩虹条的来源）。
+ *  旧实现误传 1280：fr≥1 全部越界被跳过（彩虹条消失），fr=0 命中 Y=1280 黑底块画出黑斑。 */
+export function shimmerSparkleSource(sx: number, sy: number, fr: number): [number, number] {
+  return [sx + 48, sy + 80 * fr];
+}
+
 /**
  * 基底层波色叠加（SetShimmerVertexColors :745-759 的 Canvas2D 最优可达）。
  * 原版四角顶点色 = white × opacity × GetShimmerBaseColor(角)，顶点间插值；
@@ -82,6 +90,10 @@ function applyShimmerBaseTint(
   const c00 = shimmerBaseColorF(x, y, tVis), c10 = shimmerBaseColorF(x + 1, y, tVis);
   const c01 = shimmerBaseColorF(x, y + 1, tVis), c11 = shimmerBaseColorF(x + 1, y + 1, tVis);
   ctx.save();
+  // 原版 SetShimmerVertexColors 的乘法是【无条件 modulate】（纹理×顶点色），不带
+  // 透明 pass 的 0.75 衰减——若沿用调用方残留的 globalAlpha，白色基底（表面格
+  // Y=1280 整块纯白）只会被"部分染色"，表层色带被冲淡成灰白。故强制 1.0 全乘。
+  ctx.globalAlpha = 1;
   ctx.globalCompositeOperation = 'multiply';
   const subW = Math.ceil(w / 2), subH = Math.ceil(h / 2);
   for (let by = 0; by < 2; by++) {
@@ -118,17 +130,32 @@ function hslToRgb(hue: number, sat: number, lum: number): [number, number, numbe
 }
 
 // ---- sparkle 染色变体缓存（离线预渲染）----
-// 关键：sparkle 闪纹是近纯白像素（饱和度 0），CSS hue-rotate 对纯白是 no-op——
+// 关键①：sparkle 闪纹是灰度像素（饱和度 0），CSS hue-rotate 对纯白/纯灰是 no-op——
 // 旧实现 ctx.filter=hue-rotate 等于没上色，闪纹显示为白色而非原版彩虹。
 // 故离线预渲染染色副本：hue 量化 16 档（((px+py/6)+t/30)/6 % 1），每档一条
 // water_14 的 sparkle 带（X∈[48,宽)，:721 sourceRectangle.X += 48）整条染色，惰性构建。
-// 染色 = 纹理×HSL 色（modulate，同原版顶点色乘法）：画 sprite → multiply 填色 →
-// destination-in 复贴恢复 alpha 掩码（单用 source-atop 会把 RGB 替换成平色、
-// 丢掉闪纹的明暗纹理细节；multiply 单用会给透明区上色）。
-// 绘制沿用原版源矩形 (sx+48, srcY+80*fr)（在副本内即 −48），一条带覆盖全部
+// 关键②（黑底根因，2026-08-12 像素审计）：原版 water_14 的 sparkle 带是
+// 【黑底不透明】的灰度加色闪纹——整带 X∈[48,96)/Y∈[0,1280) 三通道差恒 0（纯灰度），
+// 约 2/3 像素是 alpha=255 的纯黑。原版 XNA 侧该带由 SetShimmerVertexColors_Sparkle
+// 的顶点色（RGB=彩虹、A=glitter 强度）整体门控呈现；Canvas2D 的 multiply/直画
+// 序列没有这个门控，黑底被当成实心像素 → 用户所见的"黑色背景"。
+// 修法 = 加色闪纹语义还原：灰度亮度即强度 → 以亮度重造 alpha（黑 → 透明），
+// RGB 写成 HSL 彩虹色（tintSparkleBand，纯函数供测试探针）。
+// 绘制沿用原版源矩形 (sx+48, sy+80*fr)（在副本内即 −48），一条带覆盖全部
 // 帧行/变体子矩形——避免逐帧×hue 的 16×16 变体随 sx/sy 爆炸，单 hue 一份即可。
 const SPARKLE_HUE_STEPS = 16;
 const _sparkleTintCache = new Map<number, HTMLCanvasElement>();
+
+/** sparkle 变体逐像素重造：灰度亮度 → alpha（黑底归零），RGB → HSL 彩虹色。 */
+export function tintSparkleBand(data: Uint8ClampedArray, r: number, g: number, b: number): void {
+  for (let i = 0; i < data.length; i += 4) {
+    // 灰度带（三通道相等）→ 亮度即灰度值；保留亚像素抗锯齿渐变（闪纹边缘软过渡）
+    const lum = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    data[i] = r; data[i + 1] = g; data[i + 2] = b;
+    data[i + 3] = lum;
+  }
+}
+
 function shimmerSparkleTint(tex: HTMLImageElement, hueIdx: number): HTMLCanvasElement | null {
   let c = _sparkleTintCache.get(hueIdx);
   if (c) return c;
@@ -142,12 +169,9 @@ function shimmerSparkleTint(tex: HTMLImageElement, hueIdx: number): HTMLCanvasEl
   cc.imageSmoothingEnabled = false;
   cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);
   const [r, g, b] = hslToRgb(hueIdx / SPARKLE_HUE_STEPS, 1, 0.5);
-  cc.globalCompositeOperation = 'multiply';
-  cc.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
-  cc.fillRect(0, 0, bandW, tex.height);
-  cc.globalCompositeOperation = 'destination-in';
-  cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);
-  cc.globalCompositeOperation = 'source-over';
+  const img = cc.getImageData(0, 0, bandW, tex.height);
+  tintSparkleBand(img.data, Math.round(r * 255), Math.round(g * 255), Math.round(b * 255));
+  cc.putImageData(img, 0, 0);
   _sparkleTintCache.set(hueIdx, c);
   return c;
 }
@@ -493,7 +517,11 @@ export function drawVanillaLiquids(
             + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25;  // :773-790
           if (ga > 0.02) {
             const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
-            const sSrcX = sx + 48, sSrcY = srcY + 80 * fr;
+            // :716 sparkle 前把 sourceRectangle 重置回原始 SourceRectangle 再加偏移——
+            // 表面格的基底层虽强制切 Y=1280（:700），但 sparkle 的 Y 用的是原始 sy+80*fr
+            // （shimmerSparkleSource）。旧实现误用 1280+80*fr：表面格 sparkle 几乎全部
+            // 越界被跳过（=表层"彩虹条"消失），仅 fr=0 时命中 Y=1280 的黑底块反而画出黑斑。
+            const [sSrcX, sSrcY] = shimmerSparkleSource(sx, sy, fr);
             if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
               const hue = (((x + y / 6) + tVis / 30) / 6) % 1; // :767 彩虹相位
               const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)

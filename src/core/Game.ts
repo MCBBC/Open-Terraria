@@ -104,6 +104,7 @@ import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
+import { HealProj } from '../entities/HealProj';
 /** 血月腐化变换表（AttemptToConvertNPCToEvil :93122-93149：[腐化, 猩红]）——
  *  兔 46/企鹅 303/海鸥 337/蚱蜢? 443/鼠 540 → 47/464；金鱼族 55/230/592/593 → 57/465；
  *  松鼠 148/149 → 168/470 */
@@ -204,6 +205,54 @@ const TRAVEL_POOL = travelshopJson as {
 };
 /** 物品 value 表（vanilla-shopstock.json 附带；旅行商定价用） */
 const ITEM_VALUES = (shopstockJson as { values: Record<string, number> }).values;
+
+/** 旅行商人稀有度降档（Chest.SetupTravelShop_AdjustSlotRarities :919-947 1:1）：
+ *  逐槽阈值递减（高槽先降），当次尝试数超阈值且槽位 >1 才降 1。原版首件环与
+ *  末件画环共用同一 rarity 数组（同引用）→ 降档跨环持久 */
+export function travelAdjustSlotRarities(rarity: number[], slotItemAttempts: number): void {
+  if (rarity[5] > 1 && slotItemAttempts > 4700) rarity[5] = 1;
+  if (rarity[4] > 1 && slotItemAttempts > 4600) rarity[4] = 1;
+  if (rarity[3] > 1 && slotItemAttempts > 4500) rarity[3] = 1;
+  if (rarity[2] > 1 && slotItemAttempts > 4400) rarity[2] = 1;
+  if (rarity[1] > 1 && slotItemAttempts > 4300) rarity[1] = 1;
+  if (rarity[0] > 1 && slotItemAttempts > 4200) rarity[0] = 1;
+}
+
+/** 树苗扫描切片计划（growSaplings 消费）。原版 WorldGen.UpdateWorld 每 tick 在全图
+ *  均匀采样（地下 (w×h)×1.5e-05 格 :71622-71631；地表 (w×h)×3e-05 格 :71549-71555，
+ *  worldUpdateRate=1）——单苗每 tick 被采中概率 = rate×(w×h)/区格数。本仓 300 tick
+ *  一轮、按列切片轮转（每轮预算 cellsPerRound 格，K 轮覆盖全图），每苗每轮命中概率
+ *  gemP/sapP = K×300×rate×(w×h)/区格数（×590 命中再掷 1/5、20 苗命中掷 1/20），
+ *  单 tick 期望 = gemP/(K×300) 与原版逐点相等——数值等价实现（等价推导登记于
+ *  growSaplings 函数头），空间上不再限域玩家附近 */
+export function saplingScanPlan(wTiles: number, hTiles: number, groundLevel: number,
+  round: number, cellsPerRound = 120000, raining = false): {
+  K: number; sliceW: number; x0: number; x1: number;
+  underY0: number; underY1: number; overY0: number; overY1: number;
+  gemP: number; sapP: number;
+} {
+  // 采样区格数（原版 y 取值域宽度 × w）：地下 j∈[worldSurface-1, h-20)，
+  // 地表 j∈[10, worldSurface-1)（WorldGen.cs:71553-71555/:71627-71629）
+  const underTiles = Math.max(1, (hTiles - Math.floor(groundLevel) - 19) * wTiles);
+  const overTiles = Math.max(1, (Math.floor(groundLevel) - 11) * wTiles);
+  // 每列需扫行数（地表带+地下带）→ 每轮列数预算 → K 轮覆盖全图
+  const rows = Math.max(1, Math.max(0, Math.floor(groundLevel) - 11)
+    + Math.max(0, hTiles - Math.floor(groundLevel) - 19));
+  const sliceW = Math.max(1, Math.floor(cellsPerRound / rows));
+  const K = Math.max(1, Math.ceil(wTiles / sliceW));
+  const slice = round % K;
+  const x0 = Math.max(0, slice * sliceW);
+  const x1 = Math.min(wTiles, x0 + sliceW);
+  return {
+    K, sliceW, x0, x1,
+    underY0: Math.floor(groundLevel) - 1, underY1: hTiles - 20,   // [gl-1, h-21]
+    overY0: 10, overY1: Math.floor(groundLevel) - 1,              // [10, gl-2]
+    // 每苗每轮命中概率（K 轮一访 × 300 tick/轮 × 原版单 tick 采样率 × 命中掷骰）
+    gemP: Math.min(1, K * 300 * 1.5e-05 * (wTiles * hTiles) / underTiles * 0.2),
+    sapP: Math.min(1, K * 300 * 3e-05 * (wTiles * hTiles) / overTiles * (1 / 20)
+      * (raining ? 1.5 : 1)),
+  };
+}
 
 /** Boss netID → 首胜事件 id（NPC.cs:80014-80291 SetEventFlagCleared 实参）：
  *  击败 Boss 除记账外还触发 OnGameEventClearedForTheFirstTime → 次夜灯笼夜预约
@@ -774,8 +823,8 @@ export class Game implements GameHooks {
   }
 
   private netMakeProj(s: ProjSnap): Entity | null {
-    // v5：bit7 = hostile（原版 Projectile.hostile，仅 kind0/Arrow 语义有效）——
-    // 访客端据此对敌对弹幕傀儡本地结算 Damage_EVP（见 netPuppetProjContact）
+    // v5：bit7 = hostile（原版 Projectile.hostile，kind0/2/3 携带——Arrow 敌弹/Dart 射击怪/
+    // TrapShot 机关；服务器剥除非房主置位）——访客端据此本地结算 Damage_EVP（见 netPuppetProjContact）
     const hostile = (s.kind & 0x80) !== 0;
     switch (s.kind & 0x7f) {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1, null, { hostile });
@@ -2253,6 +2302,7 @@ export class Game implements GameHooks {
       }
     }
     this._prevRightDown = inp.rightDown;
+    this.updateNebulaBoosters();
     // ⑤ Foxparks 5664 手持喷火通道（PC:42669-42690 TryUsingFoxsparksAbility：
     // 按住期间已有 1094 进 ai[0]=1000 喷火态 + SetDummyItemTime(2) 锁 useTime）
     {
@@ -3865,7 +3915,7 @@ export class Game implements GameHooks {
       }
       if (this.player.mana >= mgCost) {
         this.player.mana -= mgCost;
-        this.player.onManaSpent(); // 星云套叠层
+        // （星云叠层已改为 booster 掉落拾取链 nebulaCb/nebulaLevelup——耗魔直叠旧路径移除）
         const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
         const mx = this.player.cx + Math.cos(ang) * 14;
         const my = this.player.cy - 4 + Math.sin(ang) * 14;
@@ -4130,10 +4180,17 @@ export class Game implements GameHooks {
         let pen = pd?.penetrate ?? 1;
         if (pen < 0) pen = 3;
         pen = Math.max(1, Math.min(pen, 3));
-        this.entities.add(new Arrow(px, py,
+        const mArrow = new Arrow(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
-          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen }), 'projectiles');
+          { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen });
+        // 星云 booster（StrikeNPC :12892-12905：魔法弹命中、套装在身、CD=0、1/3 → 掉 booster）
+        mArrow.nebulaCb = () => {
+          if (!this.player.equipStats.nebulaSet || this.player.nebulaCD > 0 || Math.random() >= 1 / 3) return;
+          this.player.nebulaCD = 30; // :12895
+          this.spawnNebulaBooster(mArrow.cx, mArrow.cy);
+        };
+        this.entities.add(mArrow, 'projectiles');
         this.player.useTime = cw.useTime;
         this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
         this.sfx.play('tink');
@@ -5682,7 +5739,7 @@ export class Game implements GameHooks {
     const w = this.world;
     // 条件门（:32307；原版静默——本作按惯例给反馈，偏差已记录）
     if (this.hasNpcId(245)) {
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossAlreadyHere'));
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive'));
       this.input.rightDown = false;
       return;
     }
@@ -8040,17 +8097,22 @@ export class Game implements GameHooks {
     this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);
   }
 
-  /** 旅行商人当期股票（Chest.SetupTravelShop :1237 结构 1:1）：
-   *  4-6 件商品（首件高稀有起步）+ 1 幅画；池内按原版 if 链顺序、后命中覆盖。
+  /** 旅行商人当期股票（Chest.SetupTravelShop :1241-1321 结构 1:1）：
+   *  件数 4-6 + 运气/专家加件；首件（仅困难模式）minimumRarity=2 有上限循环；
+   *  主件环无尝试上限；末尾 1 幅画另有上限循环。池内按原版 if 链顺序、后命中覆盖。
    *  幸运度已接（Player.luck → Luck.RollLuck 三态，Luck.cs:5-16）：luck>0 时
    *  RollLuck(N) 改掷 [N/2, N)（命中 0 的概率升 ~2 倍期望）、luck<0 改掷 [N, 2N)
    *  （恒不中 0）；件数 num 的 RollLuck(4/8/16/32)==0 加件掷同链（SetupTravelShop :1251-1267）。
-   *  偏差（登记）：AdjustSlotRarities（Chest.cs:921-947，第 4200-4700 次尝试把 rarity
-   *  各档降 1）以"失败渐放宽"近似——原版 while 上限 5000 次与本仓 60 次上限不同尺度；
-   *  首件 minimumRarity=2 只在困难模式生效（:1277 hardMode 门）未区分 */
+   *  AdjustSlotRarities（Chest.cs:919-947）逐槽阈值降档：第 4201-4701 次尝试起各槽
+   *  rarity 降 1——原版 rarity 与 array 同引用（:1283-1285/:1310），降档全店持久。
+   *  peddlersSatchelWasUsed（:1271 货郎背包 +1）/十周年世界（:1274-1280）未实装 */
   private travelStock: Array<[number, number]> = [];
   private buildTravelStock(): Array<[number, number]> {
-    const rarity = [100, 200, 300, 400, 500, 600];
+    const array = [100, 200, 300, 400, 500, 600];
+    const rarity = array;   // 与 array 同引用：AdjustSlotRarities 降档持久到后续环（原版同构）
+    const adjustSlotRarities = (slotItemAttempts: number): void => {
+      travelAdjustSlotRarities(rarity, slotItemAttempts);
+    };
     const luck = this.player.luck;   // Player.GetPlayerWithHighestLuck → 本地玩家（单人）
     const rollZero = (n: number): boolean => rollLuck(luck, n) === 0;
     const condOk = (c: string | null): boolean => {
@@ -8073,10 +8135,16 @@ export class Game implements GameHooks {
     };
     const stock: number[] = [];
     const canAdd = (id: number) => id > 0 && !stock.includes(id);
-    // 首件：minRarity=2 起步，失败渐放宽（AdjustSlotRarities 近似）
-    for (let tries = 0; stock.length < 1 && tries < 60; tries++) {
-      const it = pick(TRAVEL_POOL.items, tries > 40 ? 0 : tries > 20 ? 1 : 2);
-      if (canAdd(it)) stock.push(it);
+    // 首件（:1276-1299）：仅 hardMode 才有此环；while num2<5000 + 每轮先降档 +
+    // minimumRarity=2；成功入店即 break
+    if (this.world.flags.hardMode) {
+      let num2 = 0;
+      while (num2 < 5000) {
+        num2++;
+        adjustSlotRarities(num2);
+        const it = pick(TRAVEL_POOL.items, 2);
+        if (canAdd(it)) { stock.push(it); break; }
+      }
     }
     // 件数：4-6 基础 + 运气加件（SetupTravelShop :1251-1262 RollLuck(4/8/16/32)==0 → num++）
     let num = 4 + Math.floor(Math.random() * 3);
@@ -8085,13 +8153,19 @@ export class Game implements GameHooks {
     if (rollZero(16)) num++;
     if (rollZero(32)) num++;
     if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
+    // 主件环（:1300-1308）：added<num 且无尝试上限——原版同（概率上必然终止，
+    // 此处仅挂防死循环护栏，正常永不可达）
     let guard = 0;
-    while (stock.length < num && guard++ < 500) {
+    while (stock.length < num) {
       const it = pick(TRAVEL_POOL.items, 0);
       if (canAdd(it)) stock.push(it);
+      if (++guard > 100000) break;
     }
-    // 一幅画
-    for (let tries = 0; tries < 60; tries++) {
+    // 末件画（:1309-1321）：num2 重置、每轮先降档、while num2<5000
+    let num3 = 0;
+    while (num3 < 5000) {
+      num3++;
+      adjustSlotRarities(num3);
       const it = pick(TRAVEL_POOL.paintings, 0);
       if (canAdd(it)) { stock.push(it); break; }
     }
@@ -8246,6 +8320,46 @@ export class Game implements GameHooks {
     return drop;
   }
 
+  /** 星云 booster 实体（原版是 Item 3453-55：WI:418 重力 0.1；PC:34497 抓取 42px 内
+   *  PullItem 速度 12/acc 5；拾取 → NebulaLevelup（3453 伤/3454 命/3455 魔）+ 音效 7） */
+  private nebulaBoosters: Array<{ x: number; y: number; vx: number; vy: number; fam: 0 | 1 | 2 }> = [];
+  private spawnNebulaBooster(x: number, y: number): void {
+    const fam = (Math.floor(Math.random() * 3) as 0 | 1 | 2); // SelectRandom(3453,3454,3455)
+    const side = Math.random() < 0.5 ? -1 : 1;
+    this.nebulaBoosters.push({
+      x, y,
+      vx: (10 + Math.floor(Math.random() * 21)) * 0.2 * side, // :12898
+      vy: (-20 + Math.floor(Math.random() * 21)) * 0.2,       // :12897
+      fam,
+    });
+  }
+  private updateNebulaBoosters(): void {
+    const p = this.player;
+    if (p.nebulaCD > 0) p.nebulaCD--;
+    for (const b of this.nebulaBoosters) {
+      const d = Math.hypot(p.cx - b.x, p.cy - b.y);
+      if (d < 42 + 10) { // grabRange 42（PC:2406）→ PullItem 速 12/acc 5（PC:34581-34596）
+        b.vx += ((p.cx - b.x) / (d || 1)) * 5;
+        b.vy += ((p.cy - b.y) / (d || 1)) * 5;
+        const sp = Math.hypot(b.vx, b.vy);
+        if (sp > 12) { b.vx *= 12 / sp; b.vy *= 12 / sp; }
+      } else {
+        b.vy = Math.min(b.vy + 0.1, 10); // 物品重力（WI:418）
+      }
+      b.x += b.vx; b.y += b.vy;
+      const tb = this.world.store;
+      const tx = Math.floor(b.x / TILE), ty = Math.floor(b.y / TILE);
+      if (tb.inBounds(tx, ty) && tb.isSolid(tx, ty)) { b.y -= b.vy; b.vy = 0; b.vx *= 0.9; }
+      if (d < 20) { // 碰体拾取（PC:34476-34480）
+        p.nebulaLevelup(b.fam);
+        this.sfx.play('pickup', 1, -1); // SoundID 7（PC:34601）
+        b.fam = -1 as unknown as 0 | 1 | 2; // 标记回收
+        this.spawnParticles(b.x, b.y, ['#FF6AD5', '#FF3C3C', '#3CB8FF'][b.fam === -1 ? 0 : b.fam], 6, 2, { life: 24 });
+      }
+    }
+    this.nebulaBoosters = this.nebulaBoosters.filter((b) => (b.fam as number) !== -1);
+  }
+
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy) {
     const p = this.player;
     if (p.dead) return;
@@ -8359,16 +8473,19 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 吸血链（Projectile.vampireHeal :11439-11448 / ghostHeal :11404-11437 语义）：
+  /** 吸血链（Projectile.vampireHeal :11439-11448 / ghostHeal :11404-11437 1:1）：
    *  回复系数 = 吸血鬼飞刀 0.075 / 幽灵治疗 0.2−numHits×0.05（钳 >0，:11407-11411）；
    *  floor ≥1 且预算 >0 才生效（:11413/:11442），预算扣全额浮点（:11417/:11444）。
    *  ghost 侧旗标门在调用点（:12885 ghostHeal && !moonLeech）——此处双保险；
    *  非魔法弹预算照扣不回复（:11418-11421 原文顺序）。
-   *  【近似登记】原版经治疗弹 305/298 飞达玩家后结算（含鬼疗跨队友选最缺血者
-   *  :11424-11434）——本仓直回当前玩家；canGhostHeal 按恒 true；ghostHurt 未接 */
+   *  生效 = 自命中点发射治疗弹（305 吸血 :11447 / 298 鬼疗 :11436），初速 (0,0)、
+   *  ai[1]=回复量，飞达目标后结算（aiStyle 52 :27114-27165，见 HealProj）——不再
+   *  直回当前玩家。原版鬼疗跨队友选最缺血者（:11424-11434），本仓无队友体系，
+   *  目标恒本地玩家（vampireHeal :11447 同为 owner 自己）。canGhostHeal 按恒 true；
+   *  ghostHurt 未接 */
   applyLifeSteal(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic = false): number {
     const p = this.player;
-    if (p.buffs.moonLeech) return 0;                       // 月噬 145 全禁（:12879/:12885）
+    if (p.buffs.moonLeech) return 0;                       // 月噬 145 全禁（:12879/:12885/:27124）
     if (kind === 'ghost' && !p.equipStats.setBonus?.ghostHeal) return 0;
     const rate = kind === 'vampire' ? 0.075 : 0.2 - numHits * 0.05;
     if (rate <= 0) return 0;
@@ -8377,8 +8494,8 @@ export class Game implements GameHooks {
     if (n <= 0 || p.lifeSteal <= 0) return 0;
     p.lifeSteal -= heal;
     if (kind === 'ghost' && !isMagic) return 0;            // 预算已扣，非魔法不回复
-    p.hp = Math.min(p.maxHp, p.hp + n);
-    this.addDamageNumber(x, y - 10, n, false, '#40E080');
+    // NewProjectile(298/305, x, y, 0, 0, ..., ai0=owner, ai1=heal)（:11436/:11447）
+    this.entities.add(new HealProj(kind === 'vampire' ? 305 : 298, x, y, heal, p), 'projectiles');
     return n;
   }
 
@@ -8793,35 +8910,29 @@ export class Game implements GameHooks {
     return e;
   }
 
-  /** 树苗生长成树。成长节奏 1:1 源自 WorldGen.UpdateWorld（:71507-71632）：
-   *  每帧在地下区均匀采 (w×h)×1.5e-05 个随机格跑 UpdateWorld_UndergroundTile，
-   *  590 宝石树苗命中再掷 1/5（:73808-73812）→ 单苗每 tick 成长概率
-   *  1.5e-05×(w×h)/((h−groundLevel−19)×w)×1/5；本扫描 300 tick 一轮，
-   *  把该概率折算成本轮命中概率（期望时长与世界尺寸/地表线无关地 ≈ 原版 60-90 分钟） */
+  /** 树苗生长成树。成长节奏数值等价源自 WorldGen.UpdateWorld 全图均匀采样
+   *  （:71507-71632）：每 tick 地下区采 (w×h)×1.5e-05 格（:71622-71631，j∈
+   *  [worldSurface-1, h-20)）、地表区采 (w×h)×3e-05 格（:71549-71555，j∈[10,
+   *  worldSurface-1)，雨天 ×1.5 :71557-71559，worldUpdateRate=1 Main.cs:734）。
+   *  本仓 300 tick 一轮 + 按列切片轮转（saplingScanPlan）：K 轮覆盖全图，
+   *  每苗每轮命中概率 = K×300×rate×(w×h)/区格数 → 单 tick 期望与原版逐点等价
+   *  （p_tick = rate×(w×h)/区格数，见 plan 函数头推导），且玩家视野外的苗同样生长
+   *  （旧实现只扫玩家附近 60×40，视野外永不生长——限域近似已废） */
   private growSaplings() {
     const st = this.world.store;
     const grown: Array<[number, number]> = [];
-    // 只扫玩家附近 60×40 区域（原版全图均匀采样——玩家视野外同样生长，此处限域近似）
-    const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor(this.player.cy / TILE);
-    // 地下采样区格数（j∈[worldSurface-1, maxTilesY-20)，WorldGen.cs:71626-71630）
-    const underTiles = Math.max(1, (st.h - Math.floor(this.world.groundLevel) - 19) * st.w);
-    // 单次扫描（300 tick）的宝石苗成长概率：300 × 1.5e-05×(w×h)/underTiles × 1/5
-    const gemP = Math.min(1, 300 * 1.5e-05 * (st.w * st.h) / underTiles * 0.2);
-    // 地表橡实苗（tile 20）：地表区采样率 3e-05（:71550 num=3E-05×rate；雨天 ×1.5，
-    // :71557-71559 num5 *= 1.5），采样区 j∈[10, worldSurface-1) → 格数 ≈ (gl-11)×w；
-    // 命中掷 1/20（:72471-72475）
-    const overTiles = Math.max(1, (Math.floor(this.world.groundLevel) - 11) * st.w);
-    const sapP = Math.min(1, 300 * 3e-05 * (st.w * st.h) / overTiles * (1 / 20)
-      * (this.world.weather.raining ? 1.5 : 1));
+    const plan = saplingScanPlan(st.w, st.h, this.world.groundLevel,
+      Math.floor(this.tickCount / 300));
+    const gemP = plan.gemP;
+    const sapP = Math.min(1, plan.sapP * (this.world.weather.raining ? 1.5 : 1)); // :71557-71559
     // 宝石树苗 590（AttemptToGrowTreeFromSapling case 590，:72924-72960）：必须地下
     // （y>worldSurface）；frameX/54 = 宝石序号 → 对应树 583-589；growGemTree 自带
     // 石/苔基座 + 洞穴墙 + 净空全套判定
     const GEM_SAP = TILE_BY_KEY['v_590_gem_saplings'];
     if (GEM_SAP) {
-      for (let dy = -20; dy <= 20; dy++) {
-        for (let dx = -30; dx <= 30; dx++) {
-          const x = ptx + dx, y = pty + dy;
-          if (!st.inBounds(x, y) || st.get(x, y) !== GEM_SAP) continue;
+      for (let x = plan.x0; x < plan.x1; x++) {
+        for (let y = plan.underY0; y < plan.underY1; y++) {
+          if (st.get(x, y) !== GEM_SAP) continue;
           if (y <= this.world.groundLevel) continue; // 必须 underground（原版硬门）
           if (Math.random() >= gemP) continue;       // 原版每帧采样概率折算（见函数头）
           const ii = st.idx(x, y);
@@ -8838,10 +8949,9 @@ export class Game implements GameHooks {
         }
       }
     }
-    for (let dy = -20; dy <= 20; dy++) {
-      for (let dx = -30; dx <= 30; dx++) {
-        const x = ptx + dx, y = pty + dy;
-        if (!st.inBounds(x, y) || st.get(x, y) !== T.SAPLING) continue;
+    for (let x = plan.x0; x < plan.x1; x++) {
+      for (let y = plan.overY0; y < plan.overY1; y++) {
+        if (st.get(x, y) !== T.SAPLING) continue;
         // 上方 2-3 格净空才长
         if (st.isActive(x, y - 1) || st.isActive(x, y - 2) || st.isActive(x, y - 3)) continue;
         if (Math.random() < sapP) { // 地表采样率折算（见函数头，原版 :71550/72471）
@@ -9835,9 +9945,11 @@ export class Game implements GameHooks {
   joinNetGame(url: string, onProgress?: (label: string, p: number) => void, hostToken = ''): Promise<void> {
     return new Promise((resolve, reject) => {
       let settled = false;
+      let timer: ReturnType<typeof setTimeout> | null = null; // R10 握手超时句柄（fail 时清除）
       const fail = (reason: string) => {
         if (settled) return;
         settled = true;
+        if (timer) clearTimeout(timer);
         net.disconnect();
         if (this.net === net) this.net = null;
         reject(new Error(reason));
@@ -9917,11 +10029,10 @@ export class Game implements GameHooks {
         },
       });
       net.connect(url, hostToken);
-      // R10：30s 握手超时（计时器在 settle 后清除，不再空跑）
-      const timer = setTimeout(() => {
+      // R10：30s 握手超时（fail 内统一 clearTimeout,终审 B4 修正：原 void timer 空转）
+      timer = setTimeout(() => {
         if (!settled && !net.gameWorld) fail('连接超时');
       }, 30000);
-      void timer;
     });
   }
 

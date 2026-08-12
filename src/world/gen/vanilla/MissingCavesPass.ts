@@ -47,7 +47,7 @@ export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
       for (let k = 0; k < 10; k++) {
         num2 %= w;
         while (!st.flags[st.idx(num2, j)]) j++; // 列扫描到首个实心格
-        if (st.type[st.idx(num2, j)] === 53) flag = true; // 锚在沙上 → 整组重掷
+        if (st.type[st.idx(num2, j)] === T.SAND) flag = true; // 锚在沙上 → 整组重掷（原版 id 53=沙;内部 53 恰是沙漠化石,曾直传 53 致重掷永假）
         array[k] = num2;
         array2[k] = j - rng.nextIntRange(11, 16);
         num2 += rng.nextIntRange(5, 11);
@@ -73,7 +73,7 @@ export function runTunnelsPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  每列一个 Next(-1,2) 随机游走定墙深（worldSurface+0..10）；从"六邻实心"首格向下刷墙。 */
 export function runDirtWallBgPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
-  const wallTarget = (t: number) => (t !== 147 ? 2 : 40);
+  const wallTarget = (t: number) => (t !== T.SNOW ? 2 : 40); // 原版 147=雪→冰墙 40;内部 147 是熔岩滴,曾直传原版 id
   let num = 0;
   for (let i = 1; i < w - 1; i++) {
     let wall = 2;

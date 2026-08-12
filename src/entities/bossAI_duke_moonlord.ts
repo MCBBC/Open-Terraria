@@ -1008,7 +1008,7 @@ export class MLDeathray extends Entity {
     this.y = (y ?? src!.cy) - this.h / 2;
   }
 
-  /** v6 联机打包：kind=7，tag=`${srcId},${head|core}`，aux=扫速×10000，
+  /** v6 联机打包：kind=7，tag=`${srcId},${0|1 数值位（0=head 1=core）}`，aux=扫速×10000，
    *  束角经 vx/vy 通道携带（重建端 atan2 还原后本地扫射——确定性自包含） */
   netProjMeta(): NetProjMeta {
     return {

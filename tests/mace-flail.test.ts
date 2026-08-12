@@ -26,3 +26,12 @@ it('其余 shoot 指向新解析投射物的物品不落入异常族', () => {
     expect(cw?.kind, `item ${v}`).not.toBe('glowstick');
   }
 });
+
+it('aiStyle 13 锚定链族(鱼叉/Golem拳/KO加农/链刀/链斩)归 spear,不再子弹射飞', () => {
+  for (const [vid, proj] of [[160, 23], [1297, 262], [1314, 271], [1325, 273], [3012, 481]] as const) {
+    expect(projectileData(proj)?.aiStyle, `proj ${proj}`).toBe(13);
+    const cw = combatWeapon({ key: `vi_${vid}_x`, vid });
+    expect(cw?.kind, `item ${vid}`).toBe('spear');
+    expect((cw as { shoot: number }).shoot).toBe(proj);
+  }
+});

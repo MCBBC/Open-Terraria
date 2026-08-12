@@ -88,6 +88,8 @@ export class Arrow extends Entity {
   whipTagShot = false;
   /** 命中施加 OnFire 300t（1106 火舌 :11002-11004） */
   ignite = false;
+  /** 星云套 booster 回调（StrikeNPC :12892-12905：魔法弹命中 → Game 判定掉落） */
+  nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
@@ -146,7 +148,7 @@ export class Arrow extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.killNow(game); return; }
     const world = game.world;
@@ -210,6 +212,7 @@ export class Arrow extends Entity {
           const en3 = e as unknown as { onFireT?: number };
           en3.onFireT = Math.max(en3.onFireT ?? 0, 5); // AddBuff(24,300)=5s
         }
+        if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');

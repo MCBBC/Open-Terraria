@@ -108,7 +108,6 @@ export class NetWriter {
   }
 
   u8(v: number): this { this.grow(1); this.buf[this.len++] = v & 255; return this; }
-  i8(v: number): this { return this.u8(v < 0 ? v + 256 : v); }
   u16(v: number): this { this.grow(2); this.dv.setUint16(this.len, v, true); this.len += 2; return this; }
   i16(v: number): this { this.grow(2); this.dv.setInt16(this.len, v, true); this.len += 2; return this; }
   u32(v: number): this { this.grow(4); this.dv.setUint32(this.len, v >>> 0, true); this.len += 4; return this; }
@@ -141,9 +140,7 @@ export class NetReader {
   constructor(private readonly buf: Uint8Array) {
     this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   }
-  get pos() { return this.p; }
   u8(): number { return this.buf[this.p++]; }
-  i8(): number { const v = this.buf[this.p++]; return v >= 128 ? v - 256 : v; }
   u16(): number { const v = this.dv.getUint16(this.p, true); this.p += 2; return v; }
   i16(): number { const v = this.dv.getInt16(this.p, true); this.p += 2; return v; }
   u32(): number { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }
@@ -307,9 +304,11 @@ export function readTileBatch(r: NetReader): TileOp[] {
 }
 
 // ================= tile strip RLE 编解码（msg10，codecVer=0 裸 RLE） =================
-// 每 tile 完整状态 = type/flags/frameX/frameY/wall/liquid/liquidType/half/slope/wire
-// 11B 裸；RLE 按"全状态相同"连续段编码 [u16 count][11B 状态]，地下均质区压缩比极高。
-// 条带默认 200×20（4400 格，最坏 57KB < 64KB 包上限）。
+// 每 tile 完整状态 11B 裸（type u16/flags u8/frameX u16/frameY u16/wall u16/
+// liquid u8/liquidType u8/half u8/slope u8/wire u8）；RLE 按"全状态相同"连续段编码
+// [u16 count][14B 状态] = 16B/run，地下均质区压缩比极高。
+// 条带默认 200×20（4000 格，全异态最坏 4000×16+15 ≈ 64015B < 65535 包上限——
+// 余量仅 ~1.5KB！扩 strip 尺寸或加状态通道前必核此账，超限会触发 finish() 抛错）。
 
 export interface StripRect { x0: number; y0: number; w: number; h: number; }
 

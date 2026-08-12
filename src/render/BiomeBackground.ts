@@ -64,7 +64,8 @@ const FAR_TEX: Record<number, number> = {
 function ugSlots(style: number, iceBack: number, jungleBack: number, hellBack: number, worldID: number): number[] {
   const t = [0, 0, 0, 0, 0, 125 + hellBack, 185 + hellBack];
   switch (style) {
-    case 0: return [1, 2, 4, 3, 6, 5, t[5]];
+    case 0: return [1, 2, 4, 3, 6, t[5], t[6]];   // ★原版 switch 后统一覆写 [5]=125+hell/[6]=185+hell(:53418-26),
+                                                  //   曾漏覆写(style0 槽位错位→magma/strip 取错贴图)
     case 1: {
       const v = iceBack === 0 ? [40, 33, 34, 32] : iceBack === 1 ? [160, 118, 161, 117]
         : iceBack === 2 ? [164, 165, 166, 167] : [162, 120, 163, 119];
@@ -92,7 +93,7 @@ function ugSlots(style: number, iceBack: number, jungleBack: number, hellBack: n
     case 19: return [292, 293, 0, 0, 0, t[5], t[6]];
     case 20: return [294, 295, 0, 0, 0, t[5], t[6]];
     case 21: return [296, 297, 0, 0, 0, t[5], t[6]];
-    default: return [1, 2, 4, 3, 6, 5, t[6]];
+    default: return [1, 2, 4, 3, 6, t[5], t[6]];  // 同上统一覆写
   }
 }
 
@@ -543,9 +544,10 @@ export class BiomeBackground {
           }
         }
       }
-      // 岩浆带（slot6=125+hell 岩浆体,3 帧动画行 sourceY=frame*96;带区 magmaTop→UnderworldLayer）
+      // 岩浆带（slot5=125+hell 岩浆体 = 原版 backTexture[5](:52423),3 帧动画行
+      // sourceY=frame*96;带区 magmaTop→UnderworldLayer）
       {
-        const im6 = slots[6] ? this.img(slots[6]) : null;
+        const im6 = slots[5] ? this.img(slots[5]) : null;
         if (im6 && im6.complete && im6.naturalWidth) {
           const frameH = im6.naturalHeight / 3;   // 160×288 = 3 帧 × 96px
           const sy = Math.min(2, magmaFrame) * frameH;
@@ -561,9 +563,9 @@ export class BiomeBackground {
         }
         // slot4 岩浆过渡条（DrawMagmaTransition :52765）
         tile(slots[4], magmaTop - 200, 200);
-        // 岩浆海表面波纹条（slot5=185+hell,160×48 取 16px 行 sourceY=frame*16,
-        // 画在 UnderworldLayer 高度 :52488-52497——★曾从未绘制="地狱背景缺失"组成项）
-        const im5 = slots[5] ? this.img(slots[5]) : null;
+        // 岩浆海表面波纹条（slot6=185+hell = 原版 backTexture[6](:52495),160×48 取
+        // 16px 行 sourceY=frame*16,画在 UnderworldLayer 高度——★曾从未绘制)
+        const im5 = slots[6] ? this.img(slots[6]) : null;
         if (im5 && im5.complete && im5.naturalWidth) {
           const sy = Math.min(2, magmaFrame) * 16;
           const wS = im5.naturalWidth;

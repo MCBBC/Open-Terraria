@@ -16,7 +16,9 @@ import {
 import { LuckState } from '../src/stats/Luck';
 import { ItemDrop } from '../src/entities/ItemDrop';
 import { Player } from '../src/entities/Player';
+import { Enemy } from '../src/entities/Enemy';
 import { Inventory } from '../src/items/Inventory';
+import { BuffType } from '../src/stats/Buffs';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
@@ -230,5 +232,42 @@ describe('玩家浸微光（buff 353 + 脱困传送，Player.cs:27420/11381/2837
     p.fixedUpdate(1 / 60, hooks(w, p));
     expect(p.inShimmer).toBe(true);
     expect(p.shimmering).toBe(false);
+  });
+});
+
+// ============ 回归探针（2026-08：矿车/装备聚合重写把微光封输入挪到移动积分之后） ============
+describe('微光封输入回归探针（buff 353 frozen 语义 + 图标来源 + NPC 转化链）', () => {
+  it('浸微光：inputX 清零先于移动积分 → 不可行走 + Shimmered buff 每帧刷新（图标来源）', () => {
+    const w = shimmerWorld();
+    const p = new Player(20 * TILE, 36 * TILE, new Inventory());
+    const h = hooks(w, p);
+    const x0 = p.x;
+    for (let i = 0; i < 10; i++) {
+      // 模拟 Game.ts:2234 每帧重灌输入：灌入后 fixedUpdate 必须先清零再积分。
+      // 回归形态 = 清零在 else-if 链的 shimmering 物理分支（积分之后）→ 微光里自由行走
+      p.inputX = 1; p.inputJump = true; p.inputDown = true;
+      p.fixedUpdate(1 / 60, h);
+    }
+    expect(p.inShimmer).toBe(true);
+    expect(p.shimmering).toBe(true);
+    expect(p.buffs.has(BuffType.Shimmered)).toBe(true);  // 左上角 debuff 图标显示前提
+    expect(p.inputX).toBe(0);                            // 清零生效（先于 const ix 消费点）
+    expect(Math.abs(p.vx)).toBeLessThan(0.05);           // 无水平加速 → 摩擦钳零
+    expect(p.x).toBe(x0);                                // 微光中不可位移
+  });
+
+  it('敌怪浸微光 90t → NPC.GetShimmered 转化/消散链路活性（物理可入湖，入后必转化）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const h = hooks(w, p);
+    // 走原版数据工厂（fromVanilla 才置 vanillaId；直接 new Enemy('zombie') 是旧本地
+    // 数据路径，vanillaId=null → 微光转化门直接跳过——生产刷怪全部走 fromVanilla）
+    const e = Enemy.fromVanilla(3, 20 * TILE, 34 * TILE);   // 僵尸（NPCID 3）
+    expect(e).not.toBeNull();
+    expect(e!.vanillaId).toBe(3);
+    const orig = e!.vanillaId;
+    for (let i = 0; i < 200 && !e!.dead; i++) e!.fixedUpdate(1 / 60, h as never);
+    // ShimmerTransformToNPC 换型（vanillaId 变）或 TransformToItem 掉物后消散（dead）
+    expect(e!.dead || e!.vanillaId !== orig).toBe(true);
   });
 });

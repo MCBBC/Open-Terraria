@@ -64,6 +64,9 @@ class DungeonCtx {
   entranceX = 0;
   entStand: [number, number] | null = null; // 开放门厅可站立点（原版 dungeonX/Y 语义）
   lastHall: [number, number] = [0, 0];
+  // SetupDungeonDataVariables 掷出的书架/灯笼样式（pass 头照原版序消费，陈设期取用）
+  shelfStyles: number[] = [0, 0, 0];
+  lanternStyles: number[] = [0, 0, 0];
   // 原版 L18045-18048:入口塔尺寸强度(竖井出口探测偏移用)
   dxS1 = 0; dyS1 = 0; dxS2 = 0; dyS2 = 0;
   // 门候选(cs L18158-18179 房左右墙 + L20500 水平走廊端点):pos 0=取最窄,-1=取最右,+1=取最左
@@ -88,6 +91,20 @@ class DungeonCtx {
 
 export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>): void {
   const { w, h } = st;
+  // ---- SetupDungeonData/SetupDungeonDataVariables 头部掷骰（cs:14821-14825 +
+  // DungeonCrawler.cs:167-192/:243-274，须在入口预计算之前）----
+  // 入口类型 2 掷（普通世界 flag 即真、循环只跑一轮；Dome/Tower 结果我方 legacy
+  // 入口不消费，照掷）+ 书架/灯具样式三选不重复（陈设期取用）+
+  // useSkewedDungeonEntranceHalls（值未消费照掷）。此前整组缺失且书架/灯样式骰
+  // 挪到陈设期 → 共享单流自本 pass 起整体错位（2026-08-12 审计修正）
+  rng.nextInt(3); rng.nextInt(3);
+  const shelfStyles = [rng.int(9, 12), 0, 0];
+  do { shelfStyles[1] = rng.int(9, 12); } while (shelfStyles[1] === shelfStyles[0]);
+  do { shelfStyles[2] = rng.int(9, 12); } while (shelfStyles[2] === shelfStyles[0] || shelfStyles[2] === shelfStyles[1]);
+  const lanternStyles = [rng.int(0, 6), 0, 0];
+  do { lanternStyles[1] = rng.int(0, 6); } while (lanternStyles[1] === lanternStyles[0]);
+  do { lanternStyles[2] = rng.int(0, 6); } while (lanternStyles[2] === lanternStyles[0] || lanternStyles[2] === lanternStyles[1]);
+  rng.nextInt(4);
   // ---- 1456 入口位置预计算(DungeonCrawler.cs L280-326):锚点 ±300 内拒绝采样地表点
   // (从 y=10 下扫到首个"有内容"格:实心/液体/墙),校验无云块(±15 方框 + 上方 50 带)
   // 与头顶余量(ny-40-RoughHeight40>0);成功则锚点迁移到入口旁(±25),爬升改为
@@ -146,6 +163,8 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   }
   y0 = Math.max(gs.worldSurface + 10, Math.min(h - 220, y0));
   const dc = new DungeonCtx(brick, wallId, x0, y0);
+  dc.shelfStyles = shelfStyles;
+  dc.lanternStyles = lanternStyles;
   // 原版 L18045-18048:入口塔尺寸强度(DungeonEnt 与竖井出口探测共用)
   dc.dxS1 = rng.int(25, 29); dc.dyS1 = rng.int(20, 24);
   dc.dxS2 = rng.int(35, 49); dc.dyS2 = rng.int(10, 14);
@@ -952,10 +971,8 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
     }
   }
 
-  // ---- 4. 书架平台 + 蜡烛/书(cs L18658-18764):平台样式 9-12 三选不重复 ----
-  const bookStyles = [rng.int(9, 12), 0, 0];
-  do { bookStyles[1] = rng.int(9, 12); } while (bookStyles[1] === bookStyles[0]);
-  do { bookStyles[2] = rng.int(9, 12); } while (bookStyles[2] === bookStyles[0] || bookStyles[2] === bookStyles[1]);
+  // ---- 4. 书架平台 + 蜡烛/书(cs L18658-18764):平台样式取 pass 头 SetupDungeonDataVariables 掷 ----
+  const bookStyles = dc.shelfStyles;
   {
     let added = 0, fail = 0;
     while (added < Math.floor(w / 20)) {
@@ -1053,9 +1070,8 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
 
   // ---- 6. 灯具(cs L18865-19040):吊灯/灯笼 + 墙上开关 + 红线布线 ----
   {
-    const lampStyles = [rng.int(0, 6), 0, 0];
-    do { lampStyles[1] = rng.int(0, 6); } while (lampStyles[1] === lampStyles[0]);
-    do { lampStyles[2] = rng.int(0, 6); } while (lampStyles[2] === lampStyles[0] || lampStyles[2] === lampStyles[1]);
+    // 灯具样式取 pass 头 SetupDungeonDataVariables 掷（cs:256-266）
+    const lampStyles = dc.lanternStyles;
     let added = 0, fail = 0;
     while (added < Math.floor(w / 150)) {
       fail++;

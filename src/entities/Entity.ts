@@ -18,7 +18,7 @@ export abstract class Entity {
   /** 联机实体号（拥有者 slot 高 8 位 + 本地 id 低 24 位；见 net/entitySyncHooks） */
   netId = 0;
   // ---- P3.2 傀儡插值缓冲（15Hz 快照 × 60TPS 渲染的平滑桥）----
-  /** 最新权威快照位（逻辑位：接触判定用；= 房主认为的"现在"） */
+  /** 最新权威快照位（NPC 接触判定用；弹幕侧判定用渲染位——见 Game 两处接触注释） */
   netAx = 0; netAy = 0;
   /** 插值起点（快照到达时的渲染位）与进度（1=已到目标，纯外推） */
   netIx = 0; netIy = 0; netIt = 1;

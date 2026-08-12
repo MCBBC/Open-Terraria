@@ -69,6 +69,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮
     // （唯一硬约束:水晶在 Lakes 之后;平滑/瀑布在其前的原版序可完整对齐）
     { name: '液体', run: vanillaLakes },
+    // 引力沙（原版 GravitatingSandCleanup cs:15198，注册位 Lakes(14613) < 本 pass <
+    // Shimmer(15256)）：地表内悬空 Falling 系方块空腔落定。纯扫描零掷骰。
+    // 2026-08-12 前整 pass 缺失——海岸/沙滩带生成残留的浮空沙无人回收。
+    { name: '引力沙', run: gravitatingSandPass },
     // 原版注册序 Lakes(14613) < Shimmer(15256) < DirtWallCleanup(15310)：
     // 微光以太在此挖洞灌液，清理/沉降在其后（Slush 31 已随 Lakes 入"液体"槽）
     { name: '微光', run: vanillaShimmer },
@@ -79,6 +83,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 原版 SettleLiquidsPart2（cs:21051，管线尾二次沉降）由 generateWorld 之后
     // worker/Game 的 settleWorldLiquids('gen') 承担。
     { name: '水体沉降', run: liquidSettlePass },
+    // 海滩装饰（原版 ShellPiles cs:16393-16501）：贝壳堆。原版注册序
+    // SettleLiquids(16215) < ShellPiles(16385) < SmoothWorld(16507)——必须在半砖平滑
+    // 之前，否则堆出的散沙/孤立单格无人回收（2026-08-12 前排管线末尾=海里单体沙来源之一）
+    { name: '海滩装饰', run: vanillaBeachDecor },
     // 原版 "Smooth World"(cs:16507)+"Waterfalls"(cs:16697)：地表凸起与水边唇缘砸半砖
     // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
     { name: '半砖平滑', run: halfBrickSmoothPass },
@@ -146,8 +154,8 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
     // 水生植物（原版 LilypadsCattailsBambooAndSeaweed cs:22131）：睡莲/香蒲/竹/海藻
+    // （注册序 Lilypads(22131) 在 ShellPiles(16385) 之后——贝壳堆已前移"水体沉降"后）
     { name: '水生植物', run: vanillaLilypads },
-    { name: '海滩装饰', run: vanillaBeachDecor },
   ];
 
   for (let i = 0; i < passes.length; i++) {
@@ -192,6 +200,7 @@ import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
 import { runTreePass, randomizeTreeStyle, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
+import { runGravitatingSandPass } from './vanilla/GravitatingSandPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
 import {
@@ -300,6 +309,11 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
     let b = rng.nextInt(8);
     while (b === a) b = rng.nextInt(8);
   }
+  // 尾部无条件 3 掷（cs:8211-8213：iceBackStyle/hellBackStyle/jungleBackStyle）——
+  // 2026-08-12 审计发现整条 RNG 流自 Reset 起少 3 样本,后续世界形态整体平移
+  rng.nextInt(4);
+  rng.nextInt(3);
+  rng.nextInt(2);
   // ⑮ RandomizeBackgrounds（cs:7913-7960，全部未消费照掷）
   {
     const rollForest = () => {
@@ -727,6 +741,13 @@ function vanillaBeachDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runBeachDecorPass(store, rng, gs);
+}
+
+// 引力沙（原版 GravitatingSandCleanup cs:15198-15226）：地表内悬空 Falling 系落定
+function gravitatingSandPass({ store }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runGravitatingSandPass(store, gs);
 }
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)

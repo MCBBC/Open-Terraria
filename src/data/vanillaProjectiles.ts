@@ -35,6 +35,7 @@ export const AI_BOOMERANG = 3;    // 回旋镖（飞出后返回）
 export const AI_FLAIL = 15;       // 连枷（抛掷甩链）
 export const AI_GRENADE = 16;     // 弹跳爆炸物（手雷/炸弹/炸药，引信爆炸）
 export const AI_SPEAR = 19;       // 长矛（随角色前刺）
+export const AI_ANCHORED = 13;    // 锚定链族（AI_013:鱼叉/Golem拳/KO加农/链刀——锚在角色上伸缩,归长矛近似）
 export const AI_YOYO = 99;        // 悠悠球（按住持续滞留）
 export const AI_SHORTSWORD = 161; // 短剑直刺
 export const AI_WHIP = 165;       // 鞭

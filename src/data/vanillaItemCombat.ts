@@ -1,7 +1,7 @@
 // 原版物品战斗数据（tools/extract-itemcombat.mjs 从 Terarria1456 Item.cs SetDefaults 提取）：
 // damage/knockBack/useTime/useAnimation/shoot/useAmmo/shootSpeed/ammo/consumable/noMelee/autoReuse/mana
 import combatJson from './vanilla-itemcombat.json';
-import { projectileData, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
+import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_GRENADE, AI_SPEAR, AI_SHORTSWORD, AI_THROWN, AI_YOYO } from './vanillaProjectiles';
 
 export interface ItemCombat {
   damage?: number;
@@ -143,7 +143,9 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
       return null;
     }
     if (ai === AI_BOOMERANG) return { kind: 'boomerang', shoot, ...base };
-    if (ai === AI_SPEAR || ai === AI_SHORTSWORD) return { kind: 'spear', shoot, ...base };
+    if (ai === AI_SPEAR || ai === AI_SHORTSWORD || ai === AI_ANCHORED) return { kind: 'spear', shoot, ...base };
+    // AI_ANCHORED(13):鱼叉 160/Golem拳 1297/KO加农 1314/链刀 1325/链斩 3012——
+    // 原版锚在角色上伸缩(AI_013),归长矛前刺族近似;此前落入 shot 兜底=子弹射飞
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
     if (c.summon) {
       // 召唤武器（31 件）：按投射物 AI 分流哨兵（53/54/123 定点炮台）与随从（其余飞行/地面）

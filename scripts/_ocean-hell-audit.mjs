@@ -23,7 +23,7 @@ const report = await page.evaluate(async () => {
     forge: BK['v_17_furnace'],
   };
   const lavaLine = world.lavaLine;
-  const idx = st.idx;
+  const idx = st.idx.bind(st);
 
   // ---- 1. 海洋单体沙：海盆范围内，四周(4邻)无沙且带水的沙格 = 孤立沙粒 ----
   const oceanW = 400;
@@ -66,10 +66,35 @@ const report = await page.evaluate(async () => {
     if (st.type[idx(x, y)] === ids.forge) { forgeBins[Math.floor(x / bin)]++; }
   }
 
+  // ---- 4. 贝壳堆落点分布（验证锚点回到水线浅滩）----
+  const shell = BK['v_495_shell_pile_block'];
+  const shellPts = [];
+  for (let x = 0; x < w; x++) {
+    for (let y = Math.max(0, Math.floor(world.worldSurface) - 80); y < Math.min(h, Math.floor(world.worldSurface) + 160); y++) {
+      if (st.type[idx(x, y)] === shell) { shellPts.push([x, y]); break; }
+    }
+  }
+  // ---- 5. 孤立沙 5x5 邻域快照 ----
+  const nb = (px, py) => {
+    const out = [];
+    for (let dy = -2; dy <= 2; dy++) {
+      const row = [];
+      for (let dx = -2; dx <= 2; dx++) {
+        const j = idx(px + dx, py + dy);
+        row.push([st.type[j], st.flags[j], st.liquid[j]]);
+      }
+      out.push(row);
+    }
+    return out;
+  };
+  const isoNb = [...isolated.left, ...isolated.right].slice(0, 5).map(([x, y]) => ({ x, y, nb: nb(x, y) }));
+
   return {
     w, h, lavaLine, ids,
     sandInOcean,
     isolatedLeft: isolated.left, isolatedRight: isolated.right,
+    isoNb,
+    shellPts: { left: shellPts.filter(([x]) => x < w / 2), right: shellPts.filter(([x]) => x >= w / 2), total: shellPts.length },
     hellBrickTotal, third,
     binsPer100: bins,
     forgeBinsPer100: forgeBins,

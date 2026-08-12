@@ -92,21 +92,42 @@ function parseSwitch(body) {
   return out;
 }
 
-/** 块内嵌套 `if (type == N) {…}` 单守卫覆盖条目（id → 块）。
- *  1456 惯用法:case 贯穿组共享体 + `if (type == K) { 个别字段覆盖 }`
- *  （链锤 5011/5012 组共享 shoot=947,5012 嵌套 if 里 shoot=948——
- *  曾漏提致烈焰链锤发射未点燃的 947）*/
+/** 块内嵌套纯 type 条件 if 的覆盖条目（id → 块）。
+ *  1456 惯用法:case 贯穿组共享体 + 嵌套条件二次覆盖——
+ *  `if (type == K) {…}`（链锤 5012 组共享 shoot=947、内层覆盖 948,曾漏提）
+ *  及区间/复合 OR 形态（通配:平衡括号取条件,纯 type 布尔式逐 id 求值）。*/
 function nestedTypeIfCases(block) {
   const out = [];
-  const re = /(?:else\s+)?if\s*\(\s*type\s*==\s*(\d+)\s*\)\s*\{/g;
+  const re = /(?:else\s+)?if\s*\(/g;
   let m;
   while ((m = re.exec(block))) {
-    let depth = 0, close = m.index + m[0].length - 1;
-    for (let i = close; i < block.length; i++) {
+    // 平衡括号取条件
+    let d = 0, condEnd = -1;
+    for (let i = m.index + m[0].length - 1; i < block.length; i++) {
+      if (block[i] === '(') d++;
+      else if (block[i] === ')') { d--; if (d === 0) { condEnd = i + 1; break; } }
+    }
+    if (condEnd < 0) break;
+    const cond = block.slice(m.index + m[0].length - 1, condEnd);
+    if (/\bType\b/.test(cond)) { re.lastIndex = condEnd; continue; }
+    const stripped = cond.replace(/\btype\b/g, '');
+    if (!/^[\s\d()&|=<>!*]+$/.test(stripped)) { re.lastIndex = condEnd; continue; }
+    let fn;
+    try { fn = new Function('type', `return (${cond});`); } catch { re.lastIndex = condEnd; continue; }
+    const braceAt = block.indexOf('{', condEnd);
+    if (braceAt < 0 || block.slice(condEnd, braceAt).trim() !== '') { re.lastIndex = condEnd; continue; }
+    let depth = 0, close = braceAt;
+    for (let i = braceAt; i < block.length; i++) {
       if (block[i] === '{') depth++;
       else if (block[i] === '}') { depth--; if (depth === 0) { close = i; break; } }
     }
-    out.push({ id: +m[1], block: block.slice(m.index + m[0].length, close) });
+    const inner = block.slice(braceAt + 1, close);
+    for (let id = 0; id <= 5500; id++) {
+      let hit = false;
+      try { hit = !!fn(id); } catch { hit = false; }
+      if (hit) out.push({ id, block: inner });
+    }
+    re.lastIndex = close + 1;
   }
   return out;
 }

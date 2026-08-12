@@ -101,7 +101,7 @@ function tileEmpty(st: TileStore, x: number, y: number): boolean {
 }
 
 /** WorldGen.SolidOrSlopedTile（70046）：active && tileSolid && !tileSolidTop（坡面算实心） */
-function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean {
+export function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;

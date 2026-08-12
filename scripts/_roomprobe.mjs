@@ -1,12 +1,9 @@
-// 中央服务器房间制端到端验证（v3）：
-// 1) 起 server（:7901 ws / :7902 lobby）
-// 2) 页面 A 建小世界 → createRoom（公开 + 破坏保护 + 物品保护）→ 房间码
-// 3) HTTP：公开列表含该房 / 码校验可达
-// 4) A 以 hostToken 进房（policy.isHost=true）→ B 码加入（policy.isHost=false）
-// 5) 双端互见
-// 6) 破坏保护：B（非房主）tile op 被服务端拒绝 + correction 回滚；A（房主）op 中继到 B
-// 7) 公开性过滤：非公开房不在列表、但码可查
-// 用法：node scripts/_roomprobe.mjs
+// 中央服务器房间制端到端验证（v6，54 断言）：
+// 基础链（v3）：建房/互见/双保护/公开性过滤
+// + P0：/stats、maxPlayers 满员踢；P1：AOI 三态、msg23 短码、敌弹 bit7+本地伤害+msg16
+// + v6：msg28 消亡即时移除；箱子/重连/session 复位/公告；P2.1 strip 缓存；
+// + P3.1：SIGTERM 落盘 + --world 常驻房重启；UI 真实点击进房回归
+// 用法：node scripts/_roomprobe.mjs  （PROBE_GAME_URL 指向目标源,默认 dev 5199）
 import puppeteer from 'puppeteer-core';
 import { WebSocket, Writer, PROTO_MAGIC, PROTO_VER, Msg, makeTinySave, spawnServer } from './_netfake.mjs';
 
@@ -44,7 +41,7 @@ const mkPage = async () => {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', String(e.message).slice(0, 300)));
   page.setDefaultTimeout(300000); // 世界生成 evaluate 可能分钟级
-  await page.goto(process.env.PROBE_GAME_URL ?? '' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(process.env.PROBE_GAME_URL || process.env.SW_ORIGIN || 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(1500);
   // 预热动态导入（data/items.ts 等）：触发可能的 vite 依赖再优化+全页 reload，
   // 必须发生在游戏状态建立之前——中后期 reload 会杀掉进行中的 evaluate（context destroyed）

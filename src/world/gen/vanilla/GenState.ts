@@ -49,6 +49,12 @@ export interface GenState {
   snowOriginRight: number;
   beachLeftEnd: number;       // 左海滩右界（Reset L4880 掷，Ocean Sand/Beaches 消费）
   beachRightStart: number;    // 右海滩左界
+  // ShellPiles 锚点（GenVars.shellStart{X,Y}{Left,Right}，cs:11183-11186 清零）：
+  // Beaches pass 记录（cs:14996/15025/15060/15090），海滩装饰 pass 消费（cs:16402）
+  shellStartXLeft: number;
+  shellStartYLeft: number;
+  shellStartXRight: number;
+  shellStartYRight: number;
 
   // 各 pass 记录给后续 pass 用的区域
   // RandomizeTreeStyle（Reset 掷）：树冠样式边界与样式（finalize 写回 world）
@@ -108,6 +114,7 @@ export function newGenState(w: number, h: number): GenState {
     dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
+    shellStartXLeft: 0, shellStartYLeft: 0, shellStartXRight: 0, shellStartYRight: 0,
     treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [], lakeX: [],
     mCaveX: new Int32Array(1024), mCaveY: new Int32Array(1024), numMCaves: 0,
     snowMinX: null, snowMaxX: null, snowTop: 0, snowBottom: 0,

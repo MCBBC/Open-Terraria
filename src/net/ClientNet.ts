@@ -9,8 +9,6 @@ import {
 } from './protocol';
 import type { World } from '../world/World';
 import { World as WorldCtor } from '../world/World';
-import type { TileStore } from '../world/TileStore';
-import { TILE } from '../core/constants';
 import { Lang } from '../i18n/Lang';
 
 /** 远端玩家状态（对齐原版 msg13 同步集：控制位+位置+速度；Player 实例由 Game 持有池） */
@@ -596,7 +594,7 @@ export class ClientNet {
     const now = performance.now();
     const moved = Math.abs(p.x - this.lastSentPos.x) > 1 || Math.abs(p.y - this.lastSentPos.y) > 1;
     if (!ctrlChanged) {
-      if (!moved && now - this.lastStateSent < 1000) return; // 静止 1s 心跳（原版 %420 全量兜底的加密版）
+      if (!moved && now - this.lastStateSent < 1000) return; // 静止 1s 心跳（原版 %420 全量兜底的简化版）
       if (now - this.lastStateSent < 66) return;             // 位置驱动节流 ≥66ms（≈15Hz）
     }
     this.lastStateSent = now;
@@ -680,11 +678,6 @@ export class ClientNet {
     } finally {
       st.netSuppress = false; // R5：异常安全复位（否则 suppress 永久卡死上报）
     }
-  }
-
-  /** 聊天发送 */
-  sendChat(text: string) {
-    this.send(new NetWriter(Msg.NetModules).u16(NetModule.Text).str(text).finish());
   }
 
   // ================= v3 实体同步（msg16/21/23/27/42，房主权威+服务器中继） =================

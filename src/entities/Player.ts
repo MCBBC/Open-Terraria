@@ -117,9 +117,17 @@ export class Player extends Entity {
   /** 右键集火目标（MinionAttackTargetNPC，Player.cs:48952：召唤杖右键指定，
    *  随从索敌优先；-1=无。失效：死亡或离玩家 >3000px——随从侧判定） */
   minionTargetId = -1;
-  /** 星云层数（0-3，8s 刷新；套装 on-mana-spent 触发近似原版击杀掉 booster） */
-  nebulaStacks = 0;
-  private nebulaT = 0;
+  /** 星云三族等级（0-3，各自独立 480t；NebulaLevelup :56091-56121 逐级升/降）：
+   *  0=伤害 179-181（四系 +15%/级）1=生命 173-175（lifeRegen +6/级）2=魔力 176-178 */
+  nebula = [0, 0, 0];
+  private nebulaT = [0, 0, 0];
+  private nebulaManaAccum = 0;
+  private nebulaLifeAccum = 0;
+  /** NebulaLevelup（:56091-56121）：本族 +1 级 cap3，满 480t 重置（拾取驱动） */
+  nebulaLevelup(family: 0 | 1 | 2): void {
+    this.nebula[family] = Math.min(3, this.nebula[family] + 1);
+    this.nebulaT[family] = 480;
+  }
   /** 甲虫攻击球（0-3）：近战命中蓄能，受击掉一颗 */
   beetleOrbs = 0;
   private beetleCharge = 0;
@@ -187,6 +195,7 @@ export class Player extends Entity {
     dmgMelee: number; dmgRanged: number; dmgMagic: number;
     critMelee: number; critRanged: number; critMagic: number;
     moveMult: number; meleeSpeed: number;
+    accRunSpeed: number;   // 靴族 accRunSpeed 原值（0=未装备）
     extraFall: number; lavaMax: number; armorPen: number;
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
@@ -423,6 +432,7 @@ export class Player extends Entity {
       dmgMelee, dmgRanged, dmgMagic,   // 箭袋 arrowDmg 移入 arrowStack（仅箭吃，:3820）
       critMelee, critRanged, critMagic,
       moveMult, meleeSpeed,
+      accRunSpeed: runSpeed,   // 靴族 accRunSpeed（裸 0=未装备 → 消费侧取基准 3）
       extraFall, lavaMax, armorPen, rocketBoots,
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
       waterWalk, jumpBoost, panic, starCloak,
@@ -497,7 +507,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Rage)) m += 0.1;
       if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
-      m += 0.15 * this.nebulaStacks;   // 星云 179-181 每级四系 +15%（:10116）
+      m += 0.15 * this.nebula[0];        // 星云伤害 179-181 每级四系 +15%（:10118-10124）
       return m;
     }
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
@@ -516,7 +526,7 @@ export class Player extends Entity {
       if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
-    m += 0.15 * this.nebulaStacks;   // 星云四系 +15%/层
+    m += 0.15 * this.nebula[0];      // 星云四系 +15%/层
     return m;
   }
   /** 远程分道乘区（Player.cs:3820-3824 bowEffectiveDamage 拆分）：
@@ -555,12 +565,8 @@ export class Player extends Entity {
   get meleeArmorPen(): number {
     return this.buffs.has(BuffType.Sharpened) ? 12 : 0;
   }
-  /** 星云套：耗魔 15% 概率叠层（近似原版击杀掉 booster 拾取；8s 全层刷新） */
-  onManaSpent(): void {
-    if (!this.equipStats.nebulaSet || Math.random() >= 0.15) return;
-    this.nebulaStacks = Math.min(3, this.nebulaStacks + 1);
-    this.nebulaT = 480;
-  }
+  /** 星云 booster CD（命中驱动，Game 侧判定；:12895 nebulaCD=30） */
+  nebulaCD = 0;
   /** 用魔物品起手（Game 在设定 useTime 后调用）：登记动画窗，窗内每帧重置
    *  manaRegenDelay（Player.cs:42131-42137 itemAnimation>0 && item.mana>0 →
    *  ItemCheck_ApplyManaRegenDelay :49851；本仓单计时器模型以 useTime 代 useAnimation） */
@@ -600,6 +606,7 @@ export class Player extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     const world = game.world;
+    this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
 
@@ -841,9 +848,15 @@ export class Player extends Entity {
     const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1)
       * (this.vortexStealthActive && this.stealth > 0 ? 0.3 : 1)   // 星璇潜行移速（:25563）
       * (duneBoost ? 1.75 : 1);
-    // 冰冻 Frozen(47,Player.cs:9749 frozen=true)：整帧封移动输入——跳跃/攀绳/矿车
-    // 同读这些标志,一并归零(原版 Update 段 control* 清零语义)。帧末由 Game 重灌输入
-    if (this.buffs.has(BuffType.Frozen)) { this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false; }
+    // 冰冻 Frozen(47,Player.cs:9749 frozen=true) ∪ 微光化 buff 353（:11381-11388
+    // frozen=true 同语义）：整帧封移动输入——跳跃/攀绳/矿车同读这些标志,一并归零
+    // （原版 Update 段 control* 清零语义,发生在移动积分之前）。帧末由 Game 重灌输入。
+    // ★必须在水平积分（下方 const ix = this.inputX 消费点）之前执行：矿车/装备聚合
+    // 重写曾把清零挪进 else-if 链的 shimmering 物理分支（位于积分之后）——清零形同
+    // 虚设,微光中仍可自由行走（2026-08 回归）
+    if (this.buffs.has(BuffType.Frozen) || this.shimmering) {
+      this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
+    }
     // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
     //（原版 Player.Update :27783-27850 的 TrackCollision 段替代常规移动链）。
     // 上面的 buff/液体/受伤逻辑照常 tick；位置每 tick 由矿车回写。
@@ -916,9 +929,9 @@ export class Player extends Entity {
       this.vy = Math.max(-5.5, Math.min(3.0, this.vy));
       this.fallStartY = null;
     } else if (this.shimmering) {
-      // buff 353（:11381-11388）：frozen 封输入 + fallStart 重置（免摔伤）；
+      // buff 353（:11381-11388）：frozen 封输入（输入清零在上方移动积分前的
+      // Frozen∪Shimmering 段执行——此处只做物理）+ fallStart 重置（免摔伤）；
       // 物理 :24117-24119 gravity/maxFall ×0.9（近似正常慢沉，原地等脱困传送）
-      this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
       this.vy = Math.min(this.vy + GRAVITY * 0.7 * 0.9, MAX_FALL_SPEED * 0.9);
       this.fallStartY = null;
     } else
@@ -1081,15 +1094,11 @@ export class Player extends Entity {
       }
       // ---- 冲刺 1:1（DashMovement :20769-21265 + DoCommonDashHandle :21267-21323）----
       // 1=忍者足具/水晶刺客（纯位移） 2=克苏鲁护盾（冲撞 30+反弹）。
-      // dashDelay 三态（:20775-20782）：0=就绪 / -1=滑行中（阻尼衰减） / >0=冷却倒计时；
-      // 触发帧单次置速（:21131 dash1=16.9 / :21162 dash2=14.5，原版 px 值），此后靠
-      // 滑行阻尼自然衰减——无恒速段（旧 dashTicks=15×12.5 近似已废）；重力照常作用
-      if (this.dashDelay > 0) {
-        // 冷却段（:20958-20968）：eocDash 同步倒数，归零清冲撞命中标记
-        if (this.eocDash > 0) this.eocDash--;
-        if (this.eocDash === 0) this.eocHitId = -1;
-        this.dashDelay--;
-      }
+      // dashDelay 三态（:20775-20782）：0=就绪 / -1=滑行中（阻尼衰减） / >0=冷却倒计时。
+      // 三态互斥（原版 if/else-if/else 同 tick 只走一支：:20958/:20970/:21128）——
+      // 触发帧不再叠跑阻尼。触发帧单次置速（:21131 dash1=16.9 / :21162 dash2=14.5，
+      // 原版 px 值），此后靠滑行阻尼自然衰减——无恒速段（旧 dashTicks=15×12.5 近似
+      // 已废）；重力照常作用（原版 JumpMovement 不因 dashing 豁免）
       // 克苏鲁护盾冲撞（:20784-20846）：eocDash>0 且未命中时逐帧扫敌。命中判定盒 =
       // 位置 + 速度×0.5 外扩 4px（:20786）；伤害 30×meleeDamage 可暴击、击退 9
       // （kbGlove ×2 / 泰坦 kbBuff ×1.5，:20800-20808）；命中 → eocDash=10、30t 冷却、
@@ -1117,28 +1126,47 @@ export class Player extends Entity {
           break;
         }
       }
-      if (this.inputX !== 0 && this.prevInputX === 0) {
-        // 双击触发（DoCommonDashHandle :21296-21320 release 语义）：就绪 + 同向二连击
-        const dir = this.inputX;
-        if (eq.dash > 0 && this.dashDelay === 0 && (dir > 0 ? this.dashT > 0 : this.dashT < 0)) {
-          this.dashT = 0;               // :21305 触发即清双击窗
-          this.dashDir = dir;
-          this.dashDelay = -1;          // :21138 进入滑行态
-          this.vx = (eq.dash === 2 ? 14.5 : 16.9) * dir;   // :21162 / :21131 单帧置速
-          // 头部将撞墙减半（:21132-21137）：身前半宽+2px 的头部点/身体中点格
-          // SolidOrSlopedTile → velocity.X /= 2
-          const wtx = Math.floor((this.cx + dir * (this.w / 2) + 2 * dir) / TILE);
-          const hty = Math.floor((this.cy + this.gravDir * (-this.h / 2) + 2 * this.gravDir) / TILE);
-          const solidOrSloped = (tx: number, ty: number): boolean =>
-            st.inBounds(tx, ty) && !!st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty);
-          if (solidOrSloped(wtx, hty) || solidOrSloped(wtx, Math.floor(this.cy / TILE))) this.vx /= 2;
-          if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
+      if (this.dashDelay > 0) {
+        // 冷却段（:20958-20968）：eocDash 同步倒数，归零清冲撞命中标记
+        if (this.eocDash > 0) this.eocDash--;
+        if (this.eocDash === 0) this.eocHitId = -1;
+        this.dashDelay--;
+      } else if (this.dashDelay < 0) {
+        // 滑行阻尼（:20970-21113）：|vx|>12 → ×0.985；否则 |vx|>max(accRunSpeed,
+        // maxRunSpeed) → ×0.94；跌破档位即结束滑行（dashDelay=20）并把 vx 钳回
+        // ±maxRunSpeed（:21108-21113）。num13 = max(accRunSpeed,maxRunSpeed)
+        // （accRunSpeed=靴 6/裸 3，maxRunSpeed=3×moveSpeed）
+        const num13 = Math.max(eq.accRunSpeed > 0 ? eq.accRunSpeed : 3, 3 * eq.moveMult);
+        this.vortexStealthActive = false;  // :21106 滑行中强制显形
+        if (Math.abs(this.vx) > 12) {
+          this.vx *= 0.985;
+        } else if (Math.abs(this.vx) > num13) {
+          this.vx *= 0.94;
         } else {
-          this.dashT = dir * 15;        // :21316-21321 首击登记双击窗（dashTime ±15）
+          this.dashDelay = 20;             // :21110（dash1/2 档 num15=20）
+          this.vx = this.vx < 0 ? -num13 : num13;
+        }
+      } else if (eq.dash > 0) {
+        // 就绪段（:21128 else）：DoCommonDashHandle（:21267-21323）——双击窗收敛 +
+        // 同向二连击触发（原版此段只在 dashDelay==0 时运行：冷却/滑行期点击不登记窗）
+        if (this.dashT > 0) this.dashT--;   // :21268-21271 每帧向 0 收敛
+        else if (this.dashT < 0) this.dashT++;
+        if (this.inputX !== 0 && this.prevInputX === 0) {
+          const dir = this.inputX;
+          if (dir > 0 ? this.dashT > 0 : this.dashT < 0) {
+            this.dashT = 0;               // :21305 触发即清双击窗
+            this.dashDir = dir;
+            this.dashDelay = -1;          // :21138 进入滑行态
+            this.vx = (eq.dash === 2 ? 14.5 : 16.9) * dir;   // :21162 / :21131 单帧置速
+            // 头部将撞墙减半（:21132-21137）：身前半宽+2px 的头部点/身体中点格
+            // SolidOrSlopedTile → velocity.X /= 2
+            if (this.dashWallAhead(dir)) this.vx /= 2;
+            if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
+          } else {
+            this.dashT = dir * 15;        // :21316-21321 首击登记双击窗（dashTime ±15）
+          }
         }
       }
-      if (this.dashT > 0) this.dashT--; // :21268-21271 每帧向 0 收敛
-      else if (this.dashT < 0) this.dashT++;
       // ---- 攀壁钉鞋（spikedBoots：攀爬爪/鞋钉/忍者大师装备——贴墙缓降+蹬墙跳）----
       this.wallCling = false;
       if (!this.onGround && eq.spikedBoots && this.hitWall && this.inputX !== 0 && this.vy > 0) {
@@ -1149,22 +1177,6 @@ export class Player extends Entity {
           this.vy = -PLAYER_JUMP_SPEED;
           this.jumpHold = PLAYER_JUMP_TICKS;
           this.vx = -Math.sign(this.vx || this.facing) * 3;
-        }
-      }
-      if (this.dashDelay < 0) {
-        // 滑行阻尼（:20970-21113）：|vx|>12 → ×0.985；否则 |vx|>max(accRunSpeed,
-        // maxRunSpeed) → ×0.94；跌破档位即结束滑行（dashDelay=20）并把 vx 钳回
-        // ±maxRunSpeed（:21108-21113）。num13 = max(accRunSpeed,maxRunSpeed)
-        // （accRunSpeed=靴 6/裸 3，maxRunSpeed=3×moveSpeed）
-        const num13 = Math.max(eq.runSpeed > 0 ? eq.runSpeed : 3, 3 * eq.moveMult);
-        this.vortexStealthActive = false;  // :21106 滑行中强制显形
-        if (Math.abs(this.vx) > 12) {
-          this.vx *= 0.985;
-        } else if (Math.abs(this.vx) > num13) {
-          this.vx *= 0.94;
-        } else {
-          this.dashDelay = 20;             // :21110（dash1/2 档 num15=20）
-          this.vx = this.vx < 0 ? -num13 : num13;
         }
       }
       // 翅膀滑翔（:27015-27027）：wingTime 尽后按住跳 = 重力/3 + 终端 maxFallSpeed/3
@@ -1378,8 +1390,23 @@ export class Player extends Entity {
       this.stealth = 0;
       this.vortexStealthActive = false;
     }
-    // 星云层数衰减（8s 全层刷新）
-    if (this.nebulaStacks > 0 && --this.nebulaT <= 0) { this.nebulaStacks = 0; }
+    // 星云三族逐级衰减（:11660-11670：到时降 1 级并重挂 480t，非直接清零）
+    for (let f = 0; f < 3; f++) {
+      if (this.nebula[f] > 0 && --this.nebulaT[f] <= 0) {
+        this.nebula[f]--;
+        if (this.nebula[f] > 0) this.nebulaT[f] = 480;
+      }
+    }
+    // 星云生命 173-175（:10111-10115 lifeRegen+6/级 = 3HP/s/级）
+    if (this.nebula[1] > 0 && this.hp > 0) {
+      this.nebulaLifeAccum += 3 * this.nebula[1] * dt;
+      if (this.nebulaLifeAccum >= 1) { const n = Math.floor(this.nebulaLifeAccum); this.nebulaLifeAccum -= n; this.hp = Math.min(this.maxHp, this.hp + n); }
+    }
+    // 星云魔力 176-178（:19214-19226 counter+level/t，>=6 → mana++）
+    if (this.nebula[2] > 0) {
+      this.nebulaManaAccum += this.nebula[2] * dt;
+      if (this.nebulaManaAccum >= 6) { this.nebulaManaAccum -= 6; this.mana = Math.min(this.maxMana, this.mana + 1); }
+    }
     // 甲虫球时间蓄能（进攻+防御共用；窗口内每 tick +1，90t/球；受击掉球见 damage()）
     if (this.lastMeleeTick > 0) {
       this.lastMeleeTick--;
@@ -1519,6 +1546,19 @@ export class Player extends Entity {
 
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;
+  /** 冲刺头部将撞墙探测（DashMovement :21132-21137）：身前 dir×半宽+2px 的
+   *  头部点（gravDir 对应侧 h/2−2）与身体中点格任一 SolidOrSlopedTile → true
+   *  （触发帧 velocity.X /= 2）。探测点恒在身体行内——对整砖随后必撞停（原版同），
+   *  实际差异面 = 半砖/坡面（SolidOrSloped 含之） */
+  dashWallAhead(dir: number): boolean {
+    const st = this.lastStore;
+    if (!st) return false;   // fixedUpdate 之前调用：无缓存世界视为不撞
+    const wtx = Math.floor((this.cx + dir * (this.w / 2) + 2 * dir) / TILE);
+    const hty = Math.floor((this.cy + this.gravDir * (-this.h / 2) + 2 * this.gravDir) / TILE);
+    const solidOrSloped = (tx: number, ty: number): boolean =>
+      st.inBounds(tx, ty) && !!st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty);
+    return solidOrSloped(wtx, hty) || solidOrSloped(wtx, Math.floor(this.cy / TILE));
+  }
   /** 冲刺：双击窗口（dashTime ±15）/ 方向 / dashDelay 三态（0 就绪 / -1 滑行 / >0 冷却） */
   dashT = 0;
   dashDir = 1;
@@ -1534,6 +1574,8 @@ export class Player extends Entity {
   /** 脚下是沙族地格（runningOnSand，FloorVisuals :23457——沙丘行者靴消费）。
    *  原版只在 vy==0 时刷新、离地不清零（ResetFloorFlags 仅重生/传送） */
   runningOnSand = false;
+  /** 上一 tick 的世界 store 引用（fixedUpdate 缓存；dashWallAhead 探测用） */
+  private lastStore: import('../world/TileStore').TileStore | null = null;
   /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
    *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
   gravDir: 1 | -1 = 1;

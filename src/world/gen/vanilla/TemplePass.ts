@@ -503,7 +503,9 @@ function templePart2(
     while (budget > 0) {
       const x2 = rng.int(lx, rx);
       const y2 = rng.int(ty, by);
-      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+      // 祭坛 ±3 格回避（原版由保护结构承担；防宝箱贴祭坛抢右键交互）
+      const nearAltar = gs.lAltarX >= 0 && Math.abs(x2 - gs.lAltarX) <= 3 && Math.abs(y2 - gs.lAltarY) <= 3;
+      if (!nearAltar && st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
         if (placeBuriedChest(st, rng, gs, chests, x2, y2, { style: 16, loot: 'vi_1293_lihzahrd_power_cell' })) {
           budget -= 1;
           fails = 0;

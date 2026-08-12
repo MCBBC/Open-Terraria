@@ -226,7 +226,7 @@ export class TrapShot extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     // 烟花三件套 + 马桶水花：独立 AI 族（aiStyle 34/73/153），不走陷阱弹通用位移/命中链
     if (this.kind === 'fireworkRocket' || this.kind === 'fireworksBoxRocket'
@@ -660,7 +660,7 @@ export class Dart extends Entity {
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
+    // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     const st = this.projId ? DART_STYLE[this.projId] : undefined;
     if (--this.life <= 0) {

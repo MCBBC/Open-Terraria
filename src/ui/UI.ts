@@ -1718,7 +1718,8 @@ export class UI {
     for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey,
       BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
       BuffType.ObsidianSkin, BuffType.Gills, BuffType.ManaRegen, BuffType.MagicPower,
-      BuffType.Featherfall, BuffType.WaterWalking, BuffType.Archery, BuffType.NightOwl]) {
+      BuffType.Featherfall, BuffType.WaterWalking, BuffType.Archery, BuffType.NightOwl,
+      BuffType.Shimmered]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
       block.style.cssText += 'width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer;';
@@ -2425,6 +2426,9 @@ export class UI {
       // 食物三档（以已注册食物贴图为图标近似）
       [BuffType.WellFed, 'vi_5275_joja_cola'], [BuffType.WellFed2, 'vi_4023_grapes'],
       [BuffType.WellFed3, 'vi_1919_sugar_cookie'],
+      // 微光化 353：银河珍珠 5340 近似（原版 Buff 353 无独立物品图标，debuff 显示
+      // 微光池主素材；两处 init 路径的 map 必须同步——曾只加一处导致另一路径无图标）
+      [BuffType.Shimmered, 'vi_5340_galaxy_pearl'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);  }
 
@@ -2499,6 +2503,8 @@ export class UI {
       // 食物三档（以已注册食物贴图为图标近似）
       [BuffType.WellFed, 'vi_5275_joja_cola'], [BuffType.WellFed2, 'vi_4023_grapes'],
       [BuffType.WellFed3, 'vi_1919_sugar_cookie'],
+      // 微光化 353：银河珍珠 5340 近似（与上方 init 全量路径的 map 保持同步）
+      [BuffType.Shimmered, 'vi_5340_galaxy_pearl'],
     ];
     for (const [t, key] of map) this.buffIconItem.set(t, ITEM_BY_KEY[key]);
   }

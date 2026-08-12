@@ -1,5 +1,5 @@
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
 import { runOceanSandPass } from '../src/world/gen/vanilla/BeachPass';
@@ -18,7 +18,7 @@ import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMu
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
 import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
-import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
+import { runCorruptionPass, __crDump } from '../src/world/gen/vanilla/CorruptionPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 
@@ -35,7 +35,7 @@ it('diag lakes', () => {
   runMushroomPass(st, rng, gs); runMarblePass(st, rng, gs); runGranitePass(st, rng, gs);
   runFloatingIslandsPass(st, rng, gs); runDirtToMudPass(st, rng, gs); runSiltPass(st, rng, gs);
   runShiniesPass(st, rng, gs); runWebsPass(st, rng, gs); runUnderworldPass(st, rng, gs);
-  runCorruptionPass(st, rng, gs); runLakesPass(st, rng, gs);
+  runCorruptionPass(st, rng, gs); writeFileSync('/tmp/js-cc.txt', __crDump()); runLakesPass(st, rng, gs);
   const V = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
   const cs = readFileSync('/tmp/cs-lakes.txt', 'utf8').split(';');
   let n = 0; const pat = new Map<string, number>();

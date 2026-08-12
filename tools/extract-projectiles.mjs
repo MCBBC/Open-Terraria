@@ -157,7 +157,8 @@ for (const hm of src.matchAll(/public void (DefaultTo\w+)\(\)\s*\{/g)) {
 // 展开顺序内的行序列（DefaultTo* 调用与直写赋值按出现顺序合并，后设覆盖）
 const data = {};
 for (const { id, block } of blocks) {
-  const lines = depth1Lines(block);
+  // 语句层行 + 嵌套纯 type if 对本 id 的递归行(顶层链互斥已在此前择块)
+  const lines = collectLinesForId(block, id);
   const rec = {};
   const apply = (ls) => {
     for (const f of NUM_FIELDS) {
