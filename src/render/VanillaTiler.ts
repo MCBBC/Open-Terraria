@@ -247,6 +247,19 @@ export interface TreeStyleData {
   worldW?: number;
 }
 
+/** 634 灰烬树 glowmask 叠画（原版 DrawTrees :8291-8300/:8336-8345：顶 Glow_316 / 枝 Glow_317，
+ *  与主贴图同矩形同变换白色彩——须在调用方的 save/restore 内执行） */
+function drawTreeGlow(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  sheet: number, anchor: number, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number,
+): void {
+  if (sheet !== 634) return;
+  const glow = atlas.ensureVImage(anchor === 0 ? 'vanilla/Glow_316.png' : 'vanilla/Glow_317.png');
+  if (!glow || !glow.complete || glow.naturalWidth === 0) return;
+  if (sx + sw > glow.naturalWidth || sy + sh > glow.naturalHeight) return;
+  ctx.drawImage(glow, sx, sy, sw, sh, dx, dy, sw, sh);
+}
+
 export function drawTreeCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   st: TileStore, x: number, y: number, fx: number, fy: number, px: number, py: number,
@@ -379,9 +392,11 @@ export function drawTreeCell(
       ctx.rotate(rot);
       ctx.translate(-(dx + offX + pivOX), -(dy + offY + pivOY));
       ctx.drawImage(img, sx, sy, sw, sh, dx + offX, dy + offY, sw, sh);
+      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx + offX, dy + offY);
       ctx.restore();
     } else {
       ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+      drawTreeGlow(ctx, atlas, sheet, anchor, sx, sy, sw, sh, dx, dy);
     }
     return;
   }
