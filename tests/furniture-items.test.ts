@@ -205,6 +205,13 @@ describe('挂物族：放入 / 替换 / 取出', () => {
     const r3 = dollPlace(list, 0, 0, { id: iid(88), stack: 1 }, 88); // 88 另一顶头盔
     expect(r3!.swappedOut!.id).toBe(iid(VID.head));
     expect(list[0].slots[0]!.id).toBe(iid(88));
+    // 单叠放入空槽：手持整件交出（Utils.Swap 空槽 → 手持=空气，调用方清手持格）
+    const single = { id: iid(VID.body), stack: 1 };
+    const r4 = dollPlace(list, 0, 0, single, VID.body);
+    expect(r4!.target).toBe(1);
+    expect(r4!.swappedOut).toBeNull();
+    expect(single.stack).toBe(0);
+    expect(list[0].slots[1]!.id).toBe(iid(VID.body));
   });
 
   it('帽架 TryFitting：首空槽轮转（TEHatRack.cs:342-347）', () => {

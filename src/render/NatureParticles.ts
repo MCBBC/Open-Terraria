@@ -185,7 +185,7 @@ export class NatureParticles {
         if (st.inBounds(tx, ty) && !st.flags[st.idx(tx, ty)]) { d.dead = true; continue; }
         if (d.frame <= 2) wait = 24 + Math.floor(Math.random() * 256);
         else if (d.frame === 3) wait = 24 + Math.floor(Math.random() * 96);
-        else if (d.frame === 4) wait = 16 + Math.floor(Math.random() * 64);
+        // 原版另有 frame==5 特例(16+Next(64))——在 frame<=4 块内不可达=死代码，不移植
         if (d.type === 716) wait *= 2;
         if (d.type === 717) wait *= 4;
         if ((d.type === 943 || (d.type >= 1160 && d.type <= 1162)) && d.frame < 6) wait = 4;

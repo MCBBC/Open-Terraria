@@ -87,6 +87,7 @@ function setLeaf(st: TileStore, x: number, y: number): void {
   st.type[i] = LEAF;
   st.flags[i] = 1;
   st.half[i] = 0;
+  st.frameX[i] = 0; st.frameY[i] = 0; // 清帧：防旧 framed tile（187 地被等）帧残留
 }
 function deactivate(st: TileStore, x: number, y: number): void {
   if (!st.inBounds(x, y)) return;

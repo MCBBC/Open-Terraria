@@ -694,18 +694,21 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
   }
+
+  // ExportDescriptionToEngine（DesertBiome.cs:54-58）：CombinedArea.Inflate(10,10)。
+  // 原版在 Place 内、CleanupArea 之前落盘——Mushroom(#20) 等后续 pass 的
+  // UndergroundDesertLocation 避让依赖它（曾只在 runDesertPass 包装里设置，
+  // caves-checkpoint 拆分调用时恒 null → 蘑菇采样环与 oracle 分叉）
+  gs.undergroundDesert = {
+    x0: Math.max(0, desc.combX - 10), y0: Math.max(0, desc.combY - 10),
+    x1: Math.min(st.w, desc.combX + desc.combW + 10),
+    y1: Math.min(st.h, desc.combY + desc.combH + 10),
+  };
 }
 
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w, h } = st;
   const desc = runDesertMoundOnly(st, rng, gs);
   runDesertEntrancesAndHive(st, rng, gs, desc);
-
-  // ExportDescriptionToEngine（DesertBiome.cs:54-58）：CombinedArea.Inflate(10,10)
-  gs.undergroundDesert = {
-    x0: Math.max(0, desc.combX - 10), y0: Math.max(0, desc.combY - 10),
-    x1: Math.min(w, desc.combX + desc.combW + 10),
-    y1: Math.min(h, desc.combY + desc.combH + 10),
-  };
+  // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）
 }
 

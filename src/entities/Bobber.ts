@@ -53,7 +53,17 @@ export class Bobber extends Entity {
   /** 钓鱼力（竿+饵+药水 121 +15；声呐 122/宝匣 123 由收竿侧消费） */
   private fishingPower(p: Player): number {
     // buff 121 钓鱼药水 +15（Player.cs:9831 fishingSkill += 15）
-    return this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0);
+    let lvl = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0);
+    // 幸运度修正（Projectile.cs:19267-19276 FishingAttempt 主干，1:1）：
+    //   luck<0 且 rand<|luck| → ×(0.9 - rand*0.3)（0.6-0.9 倍）
+    //   luck>0 且 rand<luck  → ×(1.1 + rand*0.3)（1.1-1.4 倍）
+    const luck = p.luck;
+    if (luck < 0) {
+      if (Math.random() < -luck) lvl = Math.floor(lvl * (0.9 - Math.random() * 0.3));
+    } else if (Math.random() < luck) {
+      lvl = Math.floor(lvl * (1.1 + Math.random() * 0.3));
+    }
+    return lvl;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {

@@ -260,7 +260,7 @@ function sendWalker(
 }
 
 /** StrayMethods.CheckArenaScore（StrayMethods.cs:83）：水晶落点双向 walker 扫场端点 */
-function checkArenaScore(
+export function checkArenaScore(
   game: GameHooks, cx: number, cy: number,
 ): { left: { x: number; y: number }; right: { x: number; y: number } } {
   const maxDist = 100; // Main.MaxWorldViewSize.X/16 的常见档（SendWalker 默认 100）

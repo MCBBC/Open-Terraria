@@ -78,8 +78,15 @@ export function spawnServer(port, extraArgs = [], serverDir = null) {
   const server = spawn('npx', ['tsx', 'src/index.ts', '--port', String(port), ...extraArgs], {
     cwd, stdio: ['ignore', 'pipe', 'pipe'], detached: true,
   });
+  /** 优雅停机：SIGTERM 直杀直子（npx 级联到 tsx node 子进程；实测组播信号与落盘
+   *  并发会让服务器静默死亡——组内 esbuild/npx 转发升级疑似 SIGKILL,勿用组播发 TERM）。
+   *  5s 未退 → 整组 SIGKILL 兜底（防孤儿）。 */
   server.killGroup = () => {
-    try { process.kill(-server.pid, 'SIGTERM'); } catch { try { server.kill('SIGTERM'); } catch { /* 已退 */ } }
+    try { server.kill('SIGTERM'); } catch { /* 已退 */ }
+    setTimeout(() => {
+      if (server.exitCode !== null) return;
+      try { process.kill(-server.pid, 'SIGKILL'); } catch { try { server.kill('SIGKILL'); } catch { /* 已退 */ } }
+    }, 5000).unref?.();
   };
   return server;
 }

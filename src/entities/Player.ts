@@ -9,11 +9,13 @@ import {
 import { moveAndCollide } from '../physics/TileCollision';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
+import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { accFxOfInternal } from '../data/vanillaAccFx';
 import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
+import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 
@@ -81,7 +83,8 @@ export class Player extends Entity {
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
   /** 鞭命中授予的玩家 buff（WhipTagEffect.PlayerBuffId → 剩余 tick；
-   *  314 荆棘鞭=随从伤害+10%，随从 dmgOf 读取） */
+   *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
+   *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
   whipBuffs: Record<number, number> = {};
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
@@ -135,7 +138,7 @@ export class Player extends Entity {
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
-    wing: { time: number; speed: number } | null;
+    wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
@@ -144,6 +147,14 @@ export class Player extends Entity {
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     setBonus: ReturnType<typeof activeArmorSetBonus> | null;
     manaCostMul: number;
+    // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional type if-chain 1:1）----
+    minionSlots: number;   // maxMinions += N（散件+套装合计）
+    minionDmg: number;     // minionDamage += X（加算乘区，散件+套装合计）
+    minionKB: number;      // minionKB += N
+    sentrySlots: number;   // maxTurrets += N
+    whipRange: number;     // whipRangeMultiplier += X
+    whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
+    summonSet: SummonSetFx | null;
   } {
     /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
     function activeArmorSetBonus(self: Player) {
@@ -162,7 +173,7 @@ export class Player extends Entity {
     let autoJump = false, fireWalk = false, noKnockback = false, noFallDmg = false;
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
-    let wing: { time: number; speed: number } | null = null;
+    let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
     let jumpSpd = 0, arrowDmg = 0;
     let flipper = false, longInvince = false, spikedBoots = false;
@@ -175,9 +186,12 @@ export class Player extends Entity {
       const s = this.inv.armor[i];
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
-      // 翅膀（Item.wingSlot>0 → WingStatsInitializer 飞行属性；多翅膀取首个）
+      // 翅膀（Item.wingSlot>0 → WingStatsInitializer 全字段；多翅膀取首个）
       const wingSlot = statOfInternal(s.id)?.wing;
-      if (wingSlot && wingSlot > 0 && !wing) wing = wingStatOf(wingSlot);
+      if (wingSlot && wingSlot > 0 && !wing) {
+        const ws = wingStatOf(wingSlot);
+        wing = { logic: wingSlot, time: ws.time, accSpeed: ws.accSpeed, accelMult: ws.accelMult, hover: ws.hover };
+      }
       // 悠悠球线（Item.stringColor>0 → yoyoString，Player.cs:14170）
       if (statOfInternal(s.id)?.str) yoyoString = true;
       // 生命回复优先取 Item.lifeRegen 字段（再生手环族，GrantArmorBenefits :12700），
@@ -260,6 +274,24 @@ export class Player extends Entity {
     // 多段跳按原版优先序排列（JumpMovement 消费序）
     const JUMP_ORDER = ['Cloud', 'Sail', 'Sandstorm', 'Blizzard', 'Fart', 'Tsunami', 'Unicorn', 'Basilisk', 'WallOfFleshGoat', 'Santank'];
     const jumpOpts = JUMP_ORDER.filter((j) => jumpSet.has(j));
+    // ---- 召唤师链（vanillaSummonStats：ApplyEquipFunctional armor[0-9] 单遍语义 =
+    //      盔甲三件 + 配饰各扫一遍 SUMMON_GEAR；套装查 SUMMON_SET）----
+    let minionSlots = 0, minionDmg = 0, minionKB = 0, sentrySlots = 0, whipRange = 0;
+    // 原版 ApplyEquipFunctional armor[0-9] 单遍 = 盔甲三件 + 配饰各扫（SummonFx 同表直查）
+    const sumFx = (s: { id: number } | null): void => {
+      if (!s) return;
+      const d = ITEM_DEFS[s.id];
+      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      const fx = vid >= 0 ? SUMMON_GEAR[vid] : undefined;
+      if (!fx) return;
+      if (fx.slot) minionSlots += fx.slot;
+      if (fx.sentry) sentrySlots += fx.sentry;
+      if (fx.dmg) minionDmg += fx.dmg;
+      if (fx.kb) minionKB += fx.kb;
+      if (fx.whipRange) whipRange += fx.whipRange;
+    };
+    for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
+    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     const sb = activeArmorSetBonus(this);
     if (sb) {
@@ -278,6 +310,20 @@ export class Player extends Entity {
       if (sb.ammoCost80) ammoSave = true;
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     }
+    // 召唤系套装（SUMMON_SET 槽序键；散件效果已在上扫，此处只叠套装层）
+    const summonSet = (() => {
+      const st0 = statOfInternal(this.inv.armor[0]?.id ?? -1);
+      const st1 = statOfInternal(this.inv.armor[1]?.id ?? -1);
+      const st2 = statOfInternal(this.inv.armor[2]?.id ?? -1);
+      if (!st0?.hs || st1?.bs === undefined || st2?.ls === undefined) return null;
+      const s = SUMMON_SET[`${st0.hs}|${st1.bs}|${st2.ls}`] ?? SUMMON_SET[`${st0.hs}|${st1.bs}|*`];
+      if (!s) return null;
+      if (s.slot) minionSlots += s.slot;
+      if (s.sentry) sentrySlots += s.sentry;
+      if (s.dmg) minionDmg += s.dmg;
+      if (s.whipRange) whipRange += s.whipRange;
+      return s;
+    })();
     // 天界石族复合（Player.cs:12558-12570：life+2/def+4/近战速+10%/全系伤+10%/全系暴+2%）
     if (skyStone) {
       life += 2; def += 4; meleeSpeed += 0.1;
@@ -300,6 +346,9 @@ export class Player extends Entity {
       tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
       manaMagnet, magicCuffs, manaFlower,
       setBonus: sb, manaCostMul,
+      minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
+      whipSpd: summonSet?.whipSpd ?? 1,
+      summonSet,
     };
   }
   get maxHp(): number {
@@ -308,7 +357,22 @@ export class Player extends Entity {
     return this.baseMaxHp + this.buffs.healthBonus + lf;
   }
   get maxMana(): number {
-    return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481）
+    return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481)
+  }
+  /** 随从/鞭伤害乘区（GetWeaponDamageMultiplier summon → minionDamage 链：
+   *  装备 magic 系 + buff 通用（damageMult('magic') 已含）× SUMMON_GEAR/SET 加算乘区） */
+  get summonDamageMult(): number {
+    return this.damageMult('magic') * (1 + this.equipStats.minionDmg);
+  }
+  /** 随从上限（Player.cs:9855+ buff + ApplyEquipFunctional 散件/配饰 + 套装层） */
+  get maxMinions(): number {
+    return 1 + (this.buffs.has(BuffType.Bewitched) ? 1 : 0)
+      + (this.buffs.has(BuffType.Summoning) ? 1 : 0)
+      + this.equipStats.minionSlots;
+  }
+  /** 哨兵上限（maxTurrets 链 :9863 War Table buff 未实装暂缺 + 散件/套装） */
+  get maxSentries(): number {
+    return 1 + this.equipStats.sentrySlots;
   }
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
@@ -523,14 +587,28 @@ export class Player extends Entity {
     // 同读这些标志,一并归零(原版 Update 段 control* 清零语义)。帧末由 Game 重灌输入
     if (this.buffs.has(BuffType.Frozen)) { this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false; }
     const ix = this.inputX;
+    let accel = PLAYER_WALK_ACCEL;
+    if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
+      const ws = wingStatOf(this.equipStats.wing.logic);
+      const hoverDownMove = this.inputDown && this.inputJump && ws.hover;
+      accel *= hoverDownMove && ws.hover ? ws.hoverAccelMult : ws.accelMult;
+    }
     if (ix !== 0) {
-      this.vx += ix * PLAYER_WALK_ACCEL * (this.inWater ? 0.6 : 1) * speedMult;
+      this.vx += ix * accel * (this.inWater ? 0.6 : 1) * speedMult;
       this.facing = ix;
     } else {
       this.vx *= this.onGround ? PLAYER_FRICTION : PLAYER_AIR_FRICTION;
       if (Math.abs(this.vx) < 0.05) this.vx = 0;
     }
-    const maxSpd = PLAYER_WALK_MAX * (this.inWater ? 0.55 : 1) * speedMult;
+    let maxSpd = PLAYER_WALK_MAX * (this.inWater ? 0.55 : 1) * speedMult;
+    // 翅膀空中横移上限覆盖（WingAirLogicTweaks cs:28843-48：AccRunSpeedOverride；
+    // hover 下落态改用 DownHoverSpeedOverride 档）
+    if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
+      const ws = wingStatOf(this.equipStats.wing.logic);
+      const hoverDownMove = this.inputDown && this.inputJump && ws.hover;
+      const spd = hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed;
+      if (spd > maxSpd) maxSpd = spd;
+    }
     this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx));
 
     // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
@@ -567,8 +645,10 @@ export class Player extends Entity {
         this.fallStartY = null;
         // 站在液面等价落地：重置多段跳/飞行/飞毯，允许起跳离水面
         this.extraJumps = [...this.equipStats.jumpOpts];
-        if (this.equipStats.wing) this.wingTime = this.equipStats.wing.time;
-        this.rocketUnits = 7; this.rocketRelease = true; this.rocketUnitTicks = 0;
+        const eqW = this.equipStats;
+        this.wingTime = eqW.wing ? eqW.wing.time + (eqW.rocketBoots > 0 ? 42 : 0) : 0;
+        this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
+        this.canCarpet = true;
         this.carpetTime = 300;
         if (this.inputJump && this.surfaceJumpCd <= 0) {
           this.vy = -PLAYER_JUMP_SPEED;
@@ -621,47 +701,67 @@ export class Player extends Entity {
         this.extraJumpCd = 8; // 防同帧连段
       }
       if (this.extraJumpCd > 0) this.extraJumpCd--;
-      // ---- 翅膀/火箭靴飞行（WingMovement+RocketBootsMovement :26530 近似）----
-      // 共用控制语义：松跳键（release）后再次按住起飞；落地回满。翅膀优先于火箭靴。
-      // 同穿翅膀+火箭靴：飞行时长合并（:26511 rocketTime×6 并入 wingTime）
-      const wingTimeMax = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
+      // ---- 翅膀/火箭靴/飞毯 1:1（Player.Update :26388-27092 + WingMovement :21746 +
+      //      CarpetMovement :21568 + RocketBoots :26548-26628）----
+      const wings = eq.wing ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
+      const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
+      const JS = PLAYER_JUMP_SPEED;                // jumpSpeed 基准（原版 5.301 系按本地尺度）
+      // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
       if (this.onGround) {
-        if (eq.wing) this.wingTime = wingTimeMax;
-        this.rocketUnits = 7;
-        this.rocketRelease = true;
-        this.rocketUnitTicks = 0;
+        this.wingTime = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
+        this.rocketTime = 7;          // rocketTimeMax（:2612）
+        this.rocketDelay = 0;
+        this.canRocket = false;
+        this.rocketRelease = false;
+        this.canCarpet = true;        // :26173
         this.carpetTime = 300;
       } else {
         if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
-        let flying = false;
-        if (this.inputJump && this.wingRelease && eq.wing && this.wingTime > 0) {
-          this.wingTime--;
-          flying = true;
-          this.vy = Math.min(this.vy, -eq.wing.speed * 0.85); // 上升（flySpeed 近似）
-          this.fallStartY = null;
-        } else if (this.inputJump && this.rocketRelease && eq.rocketBoots > 0 && this.rocketUnits > 0) {
-          // 火箭靴：7 格（rocketTimeMax=7）；1 档每格 30t、2+ 档 15t（:26537）
-          this.rocketUnitTicks++;
-          const perUnit = eq.rocketBoots === 1 ? 30 : 15;
-          if (this.rocketUnitTicks >= perUnit) {
-            this.rocketUnitTicks = 0;
-            this.rocketUnits--;
-            if (this.rocketUnits <= 0) this.rocketRelease = false;
+        // canRocket 门（:26487）：vy > -jumpSpeed 且 vy≠0
+        if (this.vy > -JS && this.vy !== 0) this.canRocket = true;
+        // flag19 = 翅膀飞行中（:26500-26510：wings>0 && controlJump && wingTime>0 &&
+        //   jump==0 && vy≠0；hover 族 + ↓+跳 也算 :26505）
+        const flying =
+          (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
+          || (eq.wing?.hover && this.inputJump && hoverDown && this.wingTime > 0);
+        if (flying) this.wingMovement(wings, hoverDown, JS);
+        // ---- 火箭靴（:26548-26628）：翅膀不可用（无翅或时间尽）才接管 ----
+        if (!flying && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
+          && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
+          if (this.rocketTime > 0) {
+            this.rocketTime--;
+            this.rocketDelay = 10;    // 推力脉冲段（:26556）
+            if (this.rocketDelay2 <= 0) this.rocketDelay2 = eq.rocketBoots === 1 ? 30 : 15;
+          } else {
+            this.canRocket = false;
           }
-          flying = true;
-          this.vy = Math.min(this.vy, -7); // 飞行上升速度（近似 rocketSpeed）
-          this.fallStartY = null;
         }
-        // 翅膀滑翔（时间耗尽后按住跳缓降）+ 飞毯水平滑翔（CarpetMovement 近似：
-        // 按住跳+有横移 → 缓降+横向加速，300t 用尽落地回满）
-        if (!flying && this.inputJump) {
-          if (eq.wing && this.vy > 2.5) this.vy = 2.5;
-          if (eq.carpet && this.carpetTime > 0 && this.inputX !== 0) {
-            this.carpetTime--;
-            if (this.vy > 2) this.vy = 2;
-            this.vx += this.inputX * 0.35;
-            this.fallStartY = null;
+        if (this.rocketDelay2 > 0) this.rocketDelay2--;
+        if (this.rocketDelay > 0) {
+          // 推力脉冲速度模型（:26602-26626，与翅膀同构 0.1/0.5/1.5 档）：
+          this.rocketDelay--;
+          this.vy -= 0.1;
+          if (this.vy > 0) this.vy -= 0.5;
+          else if (this.vy > -JS * 0.5) this.vy -= 0.1;
+          if (this.vy < -JS * 1.5) this.vy = -JS * 1.5;
+          this.fallStartY = null;
+        } else if (!flying) {
+          // ---- 飞毯（CarpetMovement :21568-21602）：条件=无多段跳余量/jumpHold 空/
+          //      vy≠0/火箭靴未在用/翅膀时间尽；效果=vy 钳到 -(gravity+ε) 抵消重力 ----
+          if (eq.carpet && this.extraJumps.length === 0 && this.jumpHold === 0
+            && this.vy !== 0 && this.rocketTime === 0 && this.wingTime <= 0) {
+            if (this.inputJump && this.canCarpet) { this.canCarpet = false; this.carpetTime = 300; }
+            if (this.carpetTime > 0 && this.inputJump) {
+              this.carpetTime--;
+              this.fallStartY = null;
+              this.vy = -(GRAVITY + 1e-6);   // :21588 微升抵消随后重力 → 净缓降
+            }
           }
+        }
+        // 悬浮缓降（:27083-27102）：hover 族 + ↓+跳 + wingTime>0 → vy×0.9（45=0.8）
+        if (eq.wing?.hover && hoverDown && this.inputJump && this.wingTime > 0) {
+          this.vy *= wings === 45 ? 0.8 : 0.9;
+          if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
         }
       }
       // ---- 冲刺（DashMovement + DoCommonDashHandle 近似）：同向双击触发 ----
@@ -715,8 +815,15 @@ export class Player extends Entity {
           }
         }
       }
+      // 翅膀滑翔（:27015-27027）：wingTime 尽后按住跳 = 重力/3 + 终端 maxFallSpeed/3
+      // （!hoverDown）——原版此段在 else-if 链替换常规重力，此处以等价条件并入
+      const gliding = !!eq.wing && this.wingTime <= 0 && this.inputJump && this.vy > 0 && !hoverDown;
       // 羽落 buff（slowFall,:21369）：重力 /3,fallStart 每帧重置 → 免坠伤
-      const grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+      let grav = this.buffs.slowFall ? GRAVITY / 3 : GRAVITY;
+      if (gliding) {
+        grav = GRAVITY / 3;
+        if (this.vy > MAX_FALL_SPEED / 3) this.vy = MAX_FALL_SPEED / 3;
+      }
       // 重力倒置（gravDir，R7）：方向取反（Player.cs:3207 vy×gravDir 全局语义近似）
       this.vy = gd === 1
         ? Math.min(this.vy + grav, MAX_FALL_SPEED)
@@ -911,17 +1018,76 @@ export class Player extends Entity {
   /** 多段跳剩余段（原版 RefreshDoubleJumps：落地时重置为 equipStats.jumpOpts 拷贝） */
   extraJumps: string[] = [];
   extraJumpCd = 0;
-  /** 火箭靴飞行：剩余格（7 满）/ 当前格消耗 tick / 需松跳键重触发（:26530 rocketRelease） */
-  rocketUnits = 0;
-  rocketUnitTicks = 0;
-  rocketRelease = true;
+  /** 火箭靴 1:1（Player.cs:2612/26548-26628）：rocketTime 剩余脉冲次数（max=7）/
+   *  rocketDelay 推力脉冲倒计时（每次触发=10t 加速段）/ rocketDelay2 焰间隔
+   *  （1 档 30 / 2+ 档 15）/ canRocket 门（vy>-jumpSpeed 才可启动）/ rocketRelease
+   *  需松跳重触发 */
+  rocketTime = 0;
+  rocketDelay = 0;
+  rocketDelay2 = 0;
+  canRocket = false;
+  rocketRelease = false;
+  /** WingMovement（Player.cs:21746-21966）1:1：飞行中每 tick 垂直运动。
+   *  wings==4（UFO 之翼）+TryingToHoverUp 独占分支（消耗 ×2）；
+   *  其余按翼型参数表（num 恒减/num2 下落减速/num5 上升微推/num4 jumpSpeed 区间
+   *  系数/num3 上升帽系数），上升帽 = -jumpSpeed×num3（1.5~4.5 按翼型）；
+   *  hover 下落无左右移时 wingTime 消耗减半（×0.5） */
+  private wingMovement(wings: number, hoverDown: boolean, JS: number): void {
+    if (wings === 4 && this.inputUp) {
+      // wingsLogic 4 + TryingToHoverUp（:21748-21782）
+      this.vy -= 0.2;
+      if (this.vy > 0) this.vy -= 1;
+      else if (this.vy > -JS) this.vy -= 0.2;
+      if (this.vy < -JS * 3) this.vy = -JS * 3;
+      this.wingTime -= 2;
+    } else {
+      // 参数表（:21785-21789 基准 + 翼型覆盖 :21790-21921）
+      let num = 0.1, num2 = 0.5, num3 = 1.5, num4 = 0.5, num5 = 0.1;
+      if (wings === 26) { num2 = 0.75; num5 = 0.15; num4 = 1; num3 = 2.5; num = 0.125; }
+      if (wings === 8 || wings === 11 || wings === 24 || wings === 27 || wings === 22) num3 = 1.66;
+      if (wings === 21 || wings === 12 || wings === 20 || wings === 23) num3 = 1.805;
+      if (wings === 37) { num2 = 0.75; num5 = 0.15; num4 = 1; num3 = 2.5; num = 0.125; }
+      if (wings === 44 || wings === 45) {
+        // 星尘/星旋悬浮强化：±0.4 hover 推力（:21814-21904）
+        if (wings === 44) { num2 = 0.85; num3 = 2.75; }
+        else { num2 = 0.95; num3 = 4.5; }
+        num5 = 0.15; num4 = 1; num = 0.125;
+        if (this.inputUp) {
+          this.vy -= 0.4;
+          if (this.vy > 0) this.vy -= 1;
+          else if (this.vy > -JS) this.vy -= 0.2;
+          if (this.vy < -JS * 3) this.vy = -JS * 3;
+        }
+        if (hoverDown && !this.inputJump === false && this.vy !== 0) {
+          // TryingToHoverDown && !controlJump 分支仅 hover-up 族 44/45（:21855）：
+          // 本方法只在 inputJump 成立时调用 → 该分支永不触发，保留语义注释
+        }
+        void hoverDown;
+      }
+      if (wings === 29 || wings === 32) { num2 = 0.85; num5 = 0.15; num4 = 1; num3 = 3; num = 0.135; }
+      if (wings === 30 || wings === 31) { num4 = 1; num3 = 2.45; if (!hoverDown) num = 0.15; }
+      // 主体（:21922-21952，gravDir=1 半边）
+      this.vy -= num;
+      if (this.vy > 0) this.vy -= num2;
+      else if (this.vy > -JS * num4) this.vy -= num5;
+      if (this.vy < -JS * num3) this.vy = -JS * num3;
+      // wingTime 消耗（:21953-21960）：hover 下落且无左右移 ×0.5
+      const halfCost = (wings === 22 || wings === 28 || wings === 30 || wings === 31
+        || wings === 37 || wings === 45) && hoverDown && this.inputX === 0;
+      this.wingTime -= halfCost ? 0.5 : 1;
+    }
+    this.fallStartY = null;
+  }
+
   /** 恐慌项链受击加速计时（tick，原版 panicTime=300） */
   panicTime = 0;
   /** 岩浆免疫剩余 tick（熔岩护身符族 lavaMax；离开岩浆回满） */
   lavaImmuneTicks = 0;
-  /** 翅膀：剩余飞行 tick（WingStats.FlyTime）+ 需松跳键重触发 */
+  /** 翅膀：剩余飞行 tick（float，hover 下落档 0.5/tick）+ 需松跳键重触发 */
   wingTime = 0;
   wingRelease = true;
+  /** 飞毯触发门（CarpetMovement :21575：起跳后置 true，触发一次即 false） */
+  canCarpet = true;
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;
   /** 冲刺：双击窗口（±15）/ 方向 / 持续 tick / 冷却（dashTime/dashDelay） */
@@ -952,18 +1118,44 @@ export class Player extends Entity {
   get manaMagnetBonus(): number {
     return this.equipStats.manaMagnet ? 80 : 0;
   }
-  /** 幸运值（RecalculateLuck :28671 主干，clamp [-0.7,1]）：
-   *  幸运药水（buff 257 三档 ×0.1）+ 灯笼夜 +0.3（事件未移植暂 0）+ 装备/火炬
-   *  幸运暂 0——后续系统落地时在此扩 */
+  /** 幸运度聚合态（src/stats/Luck.ts LuckState；环境因子由 Game 扫描写入，
+   *  RecalculateLuck :28672-28697 各项见 LuckState 注释） */
+  readonly luckState = new LuckState();
+  /** 幸运值（RecalculateLuck :28672-28697 1:1）：
+   *  luck = 瓢虫×0.2 + 火炬×0.2 + 药水档×0.1 + 风筝档×0.1/3 + 银河珍珠 0.03
+   *        + 灯笼夜 0.3 + 地精 0.2 − 臭屁 0.25 + 装备 + 钱币 − 碎镜 0.25。
+   *  不 clamp——luckMinimumCap=-0.7/luckMaximumCap=1（Player.cs:2952/2954）只喂 UI 计量
+   *  （:3950-3957），聚合本体可超界（原版如此）。
+   *  来源接线：药水 buff 257 三档 / 灯笼夜 / 地精+火炬（Game 15t 扫描）/ 装备（幸运币 855
+   *  +0.05、马掌族 +0.05，Player.cs:12629-12647）已接；瓢虫 359/360、buff 383 风筝、
+   *  buff 120 臭屁、银河珍珠 5340、碎镜 810、微光化币——登记（物品/子系统未移植） */
   get luck(): number {
-    let l = 0;
+    const l = this.luckState;
+    let v = l.ladyBugLuck * 0.2 + l.torchLuck * 0.2;        // :28673
+    v += this.luckPotionTier * 0.1;                          // :28674（buff 257 三档）
+    if (l.usedGalaxyPearl) v += 0.03;                        // :28676-28678
+    if (l.lanternsUp) v += 0.3;                              // :28679-28682
+    if (l.hasGardenGnomeNearby) v += 0.2;                    // :28683-28686
+    if (l.stinky) v -= 0.25;                                 // :28687-28690
+    v += this.luckEquipmentBonus;                            // :28692
+    v += l.coinLuckValue;                                    // :28693
+    if (l.brokenMirrorBadLuck) v -= 0.25;                    // :28694-28696
+    return v;
+  }
+  /** luckPotion（Player.cs:9971-9982 buff 257 分档）：0 无 / >600s=3 / >300s=2 / 其余 1 */
+  get luckPotionTier(): number {
     const left = this.buffs.active.get(BuffType.Luck);
-    if (left !== undefined) {
-      // 档位按 buffTime（:9971-9982）：>600s=3 / >300s=2 / 否则 1 → ×0.1
-      const tier = left > 600 ? 3 : left > 300 ? 2 : 1;
-      l += tier * 0.1;
-    }
-    return Math.max(-0.7, Math.min(1, l));
+    if (left === undefined) return 0;
+    return left > 600 ? 3 : left > 300 ? 2 : 1;
+  }
+  /** equipmentBasedLuckBonus（Player.cs:12629-12647）：
+   *  幸运币 855 +0.05（hasLuck_LuckyCoin）/ 马掌族 +0.05（hasLuck_LuckyHorseshoe）。
+   *  四叶草 5574 +0.03 / 枯萎 5575 −0.1 / 乌鸦羽 5576 −0.1（RefreshInfoAccsFromItemType
+   *  :12321-12332）——三件物品未入物品表，登记 */
+  get luckEquipmentBonus(): number {
+    let b = this.equipStats.luckyCoin ? 0.05 : 0;
+    if (this.hasHorseshoe) b += 0.05;
+    return b;
   }
   inputDown = false;
   inputUp = false;

@@ -257,7 +257,8 @@ function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, 
   if (pileSize === 1) {
     const frameX = pileStyle * 36, frameY = 18;
     if (solidTile2(st, x, y + 1) && solidTile2(st, x + 1, y + 1)
-      && !activeAt(st, x, y) && !activeAt(st, x + 1, y)) {
+      && !activeAt(st, x, y) && !activeAt(st, x + 1, y)
+      && !invalidForPiles(st, x, y + 1) && !invalidForPiles(st, x + 1, y + 1)) { // cs:46863
       st.setTileSilent(x, y, PILE_SMALL, frameX, frameY);
       st.setTileSilent(x + 1, y, PILE_SMALL, frameX + 18, frameY);
       return true;

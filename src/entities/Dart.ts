@@ -680,6 +680,17 @@ export class Dart extends Entity {
       }
     }
     // ---- 位移 ----
+    // 293 追踪（AI_051 :AI_051 200px 曼哈顿内:target=norm(玩家-心)×3,vel=(vel*100+target)/101）
+    if (st.home && !game.player.dead) {
+      const p = game.player;
+      if (Math.abs(p.cx - this.cx) + Math.abs(p.cy - this.cy) < st.home.range) {
+        const ddx = p.cx - this.cx, ddy = p.cy - this.cy;
+        const dd = Math.hypot(ddx, ddy) || 1;
+        const tvx = (ddx / dd) * st.home.spd, tvy = (ddy / dd) * st.home.spd;
+        this.vx = (this.vx * st.home.lerp + tvx) / (st.home.lerp + 1);
+        this.vy = (this.vy * st.home.lerp + tvy) / (st.home.lerp + 1);
+      }
+    }
     this.x += this.vx;
     this.y += this.vy;
     // ---- 拖尾尘（原版每更新 NewDust;近似为低频 spawnParticles 防刷屏）----
@@ -781,6 +792,7 @@ interface DartStyle {
   frameRand?: number;                    // 出生随机帧(909)
   animEvery?: number;                    // 帧动画步进(836:6)
   windSeed?: boolean;                    // 836 风力转向 AI
+  home?: { spd: number; lerp: number; range: number };   // 293 追踪(AI_051)
   noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
   pulse?: boolean;                       // alpha/scale 呼吸(115)
   fallback?: string;                     // 贴图未就绪短线色
@@ -803,7 +815,7 @@ const DART_STYLE: Record<number, DartStyle> = {
     light: [0.64, 0.64, 0.64], trail: { color: '#9A6AFF', count: 1 }, sfx: ['Item_20'], fallback: '#8A5AE8' },
   // 115 邪恶三叉戟(红恶魔 156 :23533):16×16,a45,alpha255 呼吸脉冲,加速 ×1.125@ai0<30(:24753),
   //    light 0.5×(0.5,0.05,1)(:15205);Item8
-  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true,
+  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true, life: 300,
     accel: { from: 0, to: 30, mul: 1.125 }, light: [0.25, 0.025, 0.5], sfx: ['Item_8'], fallback: '#B060FF' },
   // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3;Item28
   128: { w: 14, h: 14, rot: 'none', alpha0: 255, fade: 50,
@@ -852,11 +864,23 @@ const DART_STYLE: Record<number, DartStyle> = {
     trail: { color: '#8AD8A0', count: 2 }, sfx: ['Item_17'], fallback: '#8AD8A0' },
   // 44 魔鬼飞镰(恶魔 62/66 :23504):48×48,scale0.9,alpha100,spin 0.8(:23814),
   //    加速 ×1.06@ai0[30,100)(:23816),light (0.3,0.25,0.1)(:23748);尘 27;Item8(:23723)
-  44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100,
+  44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100, life: 300,
     accel: { from: 30, to: 100, mul: 1.06 }, light: [0.3, 0.25, 0.1],
     trail: { color: '#B08050', count: 1 }, sfx: ['Item_8'], fallback: '#B08050' },
   // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
+  // ---- 史后三法师（NPC.cs:21146-21191,timeLeft 均覆写 300）----
+  // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 ~6×101≈606px/t
+  //    全屋瞬达),life 100(SetDefaults)
+  290: { w: 4, h: 4, rot: 'align90', life: 100, updates: 100, fallback: '#B090FF' },
+  // 291 地狱火弹(魔法师 285/286):12×12,alpha255 渐入,tileCollide=false,Kill→130×130 爆炸
+  //    (弹 292,半宽 65;原版 aiStyle50 到点即爆——此处撞人/到期爆,到点判据登记待补)
+  291: { w: 12, h: 12, rot: 'align90', alpha0: 255, fade: 50, life: 300, noTile: true, rocket: 65, fallback: '#FF9040' },
+  // 293 迷失之魂(布道者 281/282):12×12,旋转恒 0,alpha255,tileCollide=false,extraUpdates1,
+  //    200px 内追踪(:AI_051 target v=norm×3,vel=(vel*100+t)/101);尘 175 ×9/更新;Item8
+  293: { w: 12, h: 12, rot: 'none', alpha0: 255, fade: 50, life: 300, noTile: true, updates: 1,
+    home: { spd: 3, lerp: 101, range: 200 },
+    trail: { color: '#C8C0FF', count: 2 }, sfx: ['Item_8'], fallback: '#D8D0FF' },
   // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
   836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, windSeed: true, fallback: '#E8E8D0' },
 };

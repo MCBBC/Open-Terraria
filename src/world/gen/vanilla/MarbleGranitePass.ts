@@ -106,7 +106,7 @@ export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): voi
  *  y∈[GenVars.rockLayer+20, +(h-rockLayer-40-200))；中部 45-55% 重掷 beachDistance..w-；
  *  100 次预算；失败计数 > w*10 收缩 count。Place 内联在采样环（BiomeTileCheck 双查）。 */
 export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
-  let count = worldGenRangeCount(st, rng, 4, 8, 'area');
+  let count = worldGenRangeCount(st, rng, 4, 8, 'area'); console.log(`mbCountJS ${count}`);
   let placed = 0, fails = 0;
   while (placed < count) {
     const frac = placed / count;
@@ -123,7 +123,9 @@ export function runMarblePass(st: TileStore, rng: RNG, gs: GenState): void {
       ok = true;
     }
     fails++;
-    if (ok && marblePlace(st, rng, x, y)) { placed++; fails = 0; }
+    const ok2 = ok && marblePlace(st, rng, x, y);
+    console.log(`marbleTryJS ${x},${y} ok=${ok2} placed=${placed} fails=${fails} peek=${rng.vanilla.peek()}`);
+    if (ok2) { placed++; fails = 0; }
     else if (fails > st.w * 10) { count = placed; placed++; fails = 0; }
   }
 }
@@ -183,9 +185,11 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
       state[sx]![sy] = code === 10 ? 6 : code === 9 ? 5 : code === 6 ? 4 : code === 5 ? 3 : code === 4 ? 2 : 1;
     }
   }
+  if (ox0 === 1436) console.log(`mbPhaseJS smoothDone peek=${rng.vanilla.peek()}`);
   const bn7 = Math.trunc(bn / 2), bn8 = Math.trunc(bn2 / 2);
   const bn9 = (bn8 + 1) * (bn8 + 1);
   const vv = rng.next() * 2 - 1, vv2 = rng.next() * 2 - 1, vv3 = rng.next() * 2 - 1;
+  if (ox0 === 1436) console.log(`mbPhaseJS slabBuilt peek=${rng.vanilla.peek()}`);
   let n11 = 0;
   for (let m = 0; m <= bn; m++) {
     const n12 = bn8 / bn7 * (m - bn7);
@@ -194,6 +198,7 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
       ? n11 + (vv2 + (vv3 - vv2) * (m / Math.trunc(bn / 2) - 1))
       : n11 + (vv + (vv2 - vv) * (m / Math.trunc(bn / 2)));
     for (let n = bn8 - n13; n <= bn8 + n13; n++) {
+      if (ox0 === 1436) console.log(`mbColJS m=${m} n=${n} peek=${rng.vanilla.peek()}`);
       // PlaceSlab（scale=3）
       const pOX = m * 3 + ox, pOY = n * 3 + oy + Math.trunc(n11);
       const pst = state[m + 1]![n + 1]!, pWall = hasWall[m + 1]![n + 1]!;
@@ -216,6 +221,7 @@ function marblePlace(st: TileStore, rng: RNG, ox0: number, oy0: number): boolean
       }
     }
   }
+  if (ox0 === 1436) console.log(`mbPhaseJS ellipseDone peek=${rng.vanilla.peek()}`);
   return true;
 }
 

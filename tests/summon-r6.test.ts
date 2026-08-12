@@ -22,8 +22,6 @@ function makeHooks(enemies: Array<Record<string, unknown>> = []) {
     world: { store } as never,
     player: player as never,
     enemies: () => enemies,
-    // 随从射击出口（MinionProj.fixedUpdate 射弹经 entities.add 入 projectiles 桶）
-    entities: { add: (e: unknown) => { added.push(e); } } as never,
     critters: () => [],
     spawnDrop: () => null,
     damagePlayer: () => {},
@@ -37,6 +35,10 @@ function makeHooks(enemies: Array<Record<string, unknown>> = []) {
     playSfxFiles: () => {},
     showPickupLabel: () => {},
   };
+  // 随从射击出口（MinionProj.fixedUpdate 射弹经 entities.add 入 projectiles 桶）——
+  // GameHooks 未声明 entities（生产侧统一以 as unknown 收窄），测试同样旁挂
+  (hooks as unknown as { entities: { add: (e: unknown) => void } }).entities =
+    { add: (e: unknown) => { added.push(e); } };
   return { hooks, store, player, added };
 }
 

@@ -28,6 +28,20 @@ import {
   triggerLunarApocalypse, onTowerKilled,
   towerBoltTarget, onTowerBoltHit, tickMoonLordCountdown, type LunarHost,
 } from '../world/LunarEvent';
+import {
+  updateTime as dd2UpdateTime, checkProgress as dd2CheckProgress, reportLoss as dd2ReportLoss,
+  stopInvasion as dd2StopInvasion, summonCrystalDirect as dd2SummonCrystalDirect,
+  wouldFailSpawningHere as dd2WouldFailSpawningHere, requestToSkipWaitTime as dd2RequestToSkipWaitTime,
+  spawnMonsterFromGate as dd2SpawnMonsterFromGate, raiseGoblins as dd2RaiseGoblins,
+  canRaiseGoblinsHere as dd2CanRaiseGoblinsHere, findArenaHitbox as dd2FindArenaHitbox,
+  announceGoblinDeath as dd2AnnounceGoblinDeath, shouldDropCrystals as dd2ShouldDropCrystals,
+  summonBetsy as dd2SummonBetsy, type OldOnesArmyHost, type OldOnesArmyState,
+} from '../world/OldOnesArmy';
+import {
+  scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
+  pylonItemTypeFromStyle, type TeleportPylonInfo, type NpcHomeLike,
+} from '../world/TeleportPylons';
+import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
@@ -69,7 +83,8 @@ import { Enemy } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
-import { pickMusic, newMusicState, bossMusicFor, type MusicState } from '../data/Music';
+import { scanLuckScene, rollLuck } from '../stats/Luck';
+import { pickMusic, newMusicState, bossMusicFor, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
@@ -483,9 +498,9 @@ export class Game implements GameHooks {
       last.x = p.x; last.y = p.y; last.t = this.tickCount;
       let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
       if (p instanceof Arrow) { kind = 0; tag = String(p.projId ?? 1); }
+      else if (p instanceof Dart) { kind = 2; tag = String(p.projId ?? 0); }
       else if (p.projId !== undefined) { kind = 1; tag = String(p.projId); }
       else if (p instanceof TrapShot) { kind = 3; tag = p.kind ?? 'dart'; }
-      else if (p instanceof Dart) { kind = 2; }
       else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
       if (kind < 0) continue; // 未知弹幕类不同步（渲染缺类）
       snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
@@ -599,7 +614,7 @@ export class Game implements GameHooks {
     switch (s.kind) {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1);
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
-      case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg);
+      case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0);
       case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind);
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
       default: return null;
@@ -751,6 +766,13 @@ export class Game implements GameHooks {
   private _mapPressX = 0;
   private _mapPressY = 0;
   private _tpTarget: { x: number; y: number } | null = null;
+  // ---- 传送晶塔（Player.cs:31707-31747 / TeleportPylonsSystem.cs）----
+  /** 已放置晶塔缓存（scanPylons 整表扫——右键晶塔/放置/破坏时刷新；原版
+   *  UpdatePylonsListAndBroadcastChanges 每 10s 扫 TileEntity 表的等价） */
+  pylons: TeleportPylonInfo[] = [];
+  /** 右键晶塔时记下的"当前塔"锚点（原版 Main.MapPylonTile，地图连线起点） */
+  mapPylonTile: { x: number; y: number } | null = null;
+  private _dd2HooksWired = false;
   // 方块标注模式（F5）：点击标记问题方块，导出标注+地图给开发者定位
   annotateMode = false;
   waterCandleNear = false;
@@ -1043,6 +1065,10 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 旧日军团事件依赖接线（bossAI_dd2.ts DD2_EVENT_HOOKS 占位正式落地）
+    this.wireDD2Hooks();
+    // 晶塔表首扫（wld 导入的既有晶塔即刻可点；放置/破坏时 refreshPylons 增量刷）
+    this.refreshPylons();
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
@@ -1529,6 +1555,31 @@ export class Game implements GameHooks {
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
       this.player.zoneDesert = this.scene.zoneDesert; // 沙丘行者靴消费
+      // ---- 幸运度环境扫描（Player.TryRecalculatingTorchLuck :17580-17939 净效果版）----
+      // 火炬窗 81×81（原版每 tick 一行、81 tick 一轮——15t 整窗直扫节流等价）+
+      // 地精窗 169×124（SceneMetrics _tileCounts[567]）；群系判定复用 scene（Zone 标志），
+      // oceanDepths 以 zoneBeach 同式近似。手持火把 placeStyle 计入 nearbyTorch（:17775-17778）
+      {
+        const s = this.scene;
+        // 手持火把物品（inventory[selectedItem].createTile==4）才计 placeStyle（:17775-17778）
+        const held = this.player.inv.slots[this.player.inv.selected];
+        const heldDef = held ? ITEM_DEFS[held.id] : undefined;
+        const heldTorchStyle = heldDef?.tile != null && TILE_BY_KEY[heldDef.tile] === T.TORCH
+          ? torchStyleOfItemKey(heldDef.key) : null;
+        const luckScan = scanLuckScene({
+          store: w.store,
+          tx: Math.floor(this.player.cx / TILE), ty: Math.floor(this.player.cy / TILE),
+          belowSurface: this.player.cy / TILE > w.groundLevel,
+          zones: {
+            dungeon: s.zoneDungeon, temple: s.zoneTemple, snow: s.zoneSnow, desert: s.zoneDesert,
+            jungle: s.zoneJungle, glowshroom: s.zoneGlowshroom, corrupt: s.zoneCorrupt,
+            crimson: s.zoneCrimson, hallow: s.zoneHallow, ocean: s.zoneBeach,
+          },
+          heldTorchStyle,
+        });
+        this.player.luckState.torchLuck = luckScan.torchLuck;
+        this.player.luckState.hasGardenGnomeNearby = luckScan.hasGardenGnome;
+      }
       // 群系背景预测性预热:进入新群系前把该群系视差贴图后台取齐
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
@@ -1560,6 +1611,22 @@ export class Game implements GameHooks {
           if (g !== w.invasionType) continue;
           if (Math.abs(en.x - this.player.cx) >= 5000 || Math.abs(en.y - this.player.cy) >= 5000) continue;
           invasionMusic = g === INVASION_PIRATE ? 35 : g === INVASION_SNOW_LEGION ? 13 : 39;
+          break;
+        }
+      }
+      // 旧日军团 BGM（Main.cs 音乐链入侵组 -3 分支：GetNPCInvasionGroup -3 =
+      // BelongsToInvasionOldOnesArmy + DD2Event.Ongoing → MusicID.OldOnesArmy 41；
+      // 屏内 ±5000px 有军团 NPC 即切曲，与入侵 BGM同层）
+      if (w.oldOnesArmy.ongoing) {
+        for (const e of this.entities.enemies) {
+          const en = e as Enemy;
+          if (en.dead || en.vanillaId == null) continue;
+          const id = en.vanillaId;
+          // BelongsToInvasionOldOnesArmy：551-578（550 酒馆老板除外）+ 548 水晶/549 门
+          const isDD2 = (id >= 551 && id <= 578) || id === 548 || id === 549;
+          if (!isDD2) continue;
+          if (Math.abs(en.cx - this.player.cx) >= 5000 || Math.abs(en.cy - this.player.cy) >= 5000) continue;
+          invasionMusic = MUSIC.OldOnesArmy;
           break;
         }
       }
@@ -1649,7 +1716,12 @@ export class Game implements GameHooks {
           const tx = Math.floor((inp.mouseX - cx0) / fm.zoom);
           const ty = Math.floor((inp.mouseY - cy0) / fm.zoom);
           if (tx >= 0 && ty >= 0 && tx < this.world.w && ty < this.world.h) {
-            if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
+            // 晶塔图标优先（TeleportPylonsMapLayer.cs:77-127：点中图标 → 门禁 → 传送/
+            // 失败文案；图标悬停时原版取消普通选点 cancelWormHole :97）
+            if (this.tryPylonMapTeleport(tx, ty)) {
+              this._tpTarget = null;
+              this.renderer.tpMark = null;
+            } else if (this._tpTarget && this._tpTarget.x === tx && this._tpTarget.y === ty) {
               // 第二次点击同一点 → 先就位目标区域贴图再传送(落地即完美,
               // 不出现 fallback 色块闪烁);失败不关图、保留标记可重试
               void this.teleportWhenReady(tx, ty);
@@ -1707,6 +1779,36 @@ export class Game implements GameHooks {
     }
 
     player.fixedUpdate(dt, this);
+    // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
+    // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
+    // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。
+    {
+      let n = 0;
+      for (const e of this.entities.projectiles) {
+        const m = e as MinionProj;
+        if (!(m instanceof MinionProj) || m.dead || m.sentry || m.noSlot) continue;
+        if (++n > this.player.maxMinions) m.dead = true;
+      }
+      n = 0;
+      for (const e of this.entities.projectiles) {
+        const m = e as MinionProj;
+        if (!(m instanceof MinionProj) || m.dead || !m.sentry || m.noSlot) continue;
+        if (++n > this.player.maxSentries) m.dead = true;
+      }
+    }
+    // ---- 星尘套装守护者（Player.cs:16195-16212：套装在身 → 常驻 proj 623，base 30 伤；
+    //      伤害走 live 刷新吃 summonDamageMult）。buff 187 展示层从略。
+    if (this.player.equipStats.summonSet?.guardian && !this.player.dead
+      && !this.entities.projectiles.some((e) => {
+        const m = e as MinionProj;
+        return m instanceof MinionProj && !m.dead && m.projId === 623;
+      })) {
+      const owner = this.player;
+      const g = new MinionProj(owner.cx, owner.cy, 623, 30, 10, false, 0, false,
+        () => (owner.dead ? null : owner));
+      g.noSlot = true;
+      this.entities.add(g, 'projectiles');
+    }
     // ---- 起爆器 411 坠落触发（Player.cs:34368 TryLandingOnDetonator）：落地冲击 vy≥3 且
     // 脚下格（Bottom 左下角 +0.01）是 411 未触发态（frameY==0 && frameX<36）→ Wiring.HitSwitch
     if (player.landImpactVy >= 3 && this.wiring) {
@@ -2053,6 +2155,8 @@ export class Game implements GameHooks {
     }
     // ---- 入侵状态推进（Main.cs:63775 UpdateInvasion：前线推进+胜利判定+周期公告） ----
     {
+      // 旧日军团 UpdateTime（Main.cs:64431 DD2Event.UpdateTime：波间间歇/水晶在场判定）
+      this.tickOldOnesArmy();
       const inv = tickInvasion(w, this.invasionWarn);
       this.invasionWarn = inv.warn;
       if (inv.announce != null && inv.announce >= 0) {
@@ -2247,7 +2351,7 @@ export class Game implements GameHooks {
     // 实体点光（原版 Lighting.AddLight 的 NPC 侧调用）：AI 每 tick 写 lightRGB——
     // 萤火虫族闪烁（NPC.cs:34395-34407，昼地表不亮）、发光蜗牛/熔岩蜗牛恒定（:34623-34630）、
     // 魔化夜 crawler 抖动（:34492）；敌怪与小动物两桶同扫
-    for (const bucket of [this.entities.enemies, this.entities.critters]) {
+    for (const bucket of [this.entities.enemies, this.entities.critters, this.entities.projectiles]) {
       for (const ent of bucket) {
         const l = (ent as Enemy).lightRGB;
         if (!l) continue;
@@ -2264,6 +2368,10 @@ export class Game implements GameHooks {
     // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
     this.evolution.update();
     this.torchGod.update();
+    // ---- 幸运度时序（Player.UpdateLuckFactors :28656-28670：瓢虫/钱币/碎镜衰减）----
+    const pl = this.player.luckState;
+    pl.lanternsUp = LanternNight.lanternsUp;   // RecalculateLuck :28679（每帧读边）
+    pl.update();
     // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
     if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
       this.spawnCritter();
@@ -3256,30 +3364,45 @@ export class Game implements GameHooks {
         const owner = this.player;
         this.entities.add(new WhipProj(
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
-          Math.max(1, Math.round(whip.damage * owner.damageMult('magic'))),
+          Math.max(1, Math.round(whip.damage * owner.summonDamageMult)),
           whip.knockback, whip.useTime, whip.shootSpeed,
           () => (owner.dead ? null : owner),
         ), 'projectiles');
-        this.player.useTime = whip.useTime;
+        // 鞭攻速（SetItemAnimation :4266：summonerWeaponSpeedBonus × whipUseTimeMultiplier，
+        // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）
+        const swb = (owner.whipBuffs[311] ? 0.35 : 0) + (owner.whipBuffs[308] ? 0.25 : 0)
+          + (owner.whipBuffs[314] ? 0.12 : 0);
+        const whipAtk = Math.min(3, 1 + swb * owner.equipStats.whipSpd);
+        this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
         this.sfx.playWav('whipCrack', 0.9, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
       }
       case 'summon': {
-        // 召唤（R6）：随从上限 = 1+附魔台+召唤药水（Player.maxMinions 链 :9855），
-        // 超限驱逐最旧；哨兵独立（WarTable maxTurrets 未接=1）
-        const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry) as MinionProj[];
+        // 召唤：上限链 = Player.maxMinions（1+buff+散件+套装）/ maxSentries；
+        // 超限驱逐最旧（原版 FreeUpPetsAndMinions 最便宜优先——本作全 1 槽=最旧先死）；
+        // damage 传武器基伤——随从每 tick 按当时装备重算（Projectile.cs:15368 live 刷新）
+        const minions = this.entities.projectiles.filter((e) => e instanceof MinionProj && !e.sentry && !(e as MinionProj).noSlot) as MinionProj[];
+        // 星尘龙：已有龙头 → 不出新头，尾前插 2 段（SpawnMinionOnCursor :47906-47963）
+        if (cw.shoot === 625) {
+          const head = minions.find((m) => m.projId === 625);
+          if (head && !head.dead) {
+            head.extendDragon(this);
+            this.player.useTime = cw.useTime;
+            this.sfx.playWav('summon', 0.9, this.player.cx, this.player.cy);
+            this.input.mouseDown = false;
+            break;
+          }
+        }
         if (!cw.sentry) {
-          const maxMinions = 1 + (this.player.buffs.has(BuffType.Bewitched) ? 1 : 0)
-            + (this.player.buffs.has(BuffType.Summoning) ? 1 : 0);
-          if (minions.length >= maxMinions) minions[0].dead = true; // 驱逐最旧
+          if (minions.length >= this.player.maxMinions) minions[0].dead = true; // 驱逐最旧
         } else {
           const sentries = this.entities.projectiles.filter((e) => e instanceof MinionProj && e.sentry) as MinionProj[];
-          if (sentries.length >= 1) sentries[0].dead = true;
+          if (sentries.length >= this.player.maxSentries) sentries[0].dead = true;
         }
         const owner = this.player;
         this.entities.add(new MinionProj(
-          px, py, cw.shoot, Math.max(1, Math.round(cw.damage * owner.damageMult('magic'))),
+          px, py, cw.shoot, cw.damage,
           cw.knockback, !!cw.sentry,
           this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length,
           false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）
@@ -4629,6 +4752,15 @@ export class Game implements GameHooks {
       this.sfxAt('mech', tx * 16 + 8, ty * 16 + 8);
       toggleManualParty(this.partyState);
       this.input.rightDown = false;
+    } else if (type === TILE_BY_KEY['v_237_lihzahrd_altar']) {
+      // 蜥蜴祭坛 237（Player.cs:32303-32335）：消耗蜥蜴能量电池召石巨人
+      this.useLihzahrdAltar(tx, ty);
+    } else if (type === TILE_BY_KEY['v_466_elder_cystal_stand']) {
+      // 永恒水晶座 466（Player.cs:31930-31977）：永恒水晶 → 旧日军团
+      this.useEterniaStand(tx, ty);
+    } else if (type === TILE_BY_KEY['v_597_pylons']) {
+      // 传送晶塔 597（Player.cs:31707-31747）：开全屏地图选其它晶塔传送
+      this.usePylon(tx, ty);
     }
   }
 
@@ -4776,6 +4908,265 @@ export class Game implements GameHooks {
     this.wiring?.hitSwitch(x, y);
     this.sfx.play('tink');
     this.input.rightDown = false;
+  }
+
+  // ================= 蜥蜴祭坛 237 / 永恒水晶座 466 / 传送晶塔 597 =================
+
+  /** 蜥蜴祭坛右键（Player.cs:32303-32335 1:1）：条件门 !AnyNPCs(245) && hardMode
+   *  && downedPlantBoss → 顺序扫 58 格消耗蜥蜴能量电池 1293（:32309-32319）→
+   *  SoundID 15 Roar（:32328）→ NPC.SpawnOnPlayer(245)。
+   *  条件不满足时原版**静默**（无提示文本——flag8=false 直接无事发生）。 */
+  private useLihzahrdAltar(tx: number, ty: number): void {
+    void tx; void ty;
+    const w = this.world;
+    // 条件门（:32307）
+    if (this.hasNpcId(245) || !w.flags.hardMode || !w.flags['downed_262']) {
+      this.input.rightDown = false;
+      return;
+    }
+    // 电池消耗（:32309-32319：inventory 顺序首个 1293 → stack-1 → 空则整格清空）
+    const cellId = ITEM_BY_KEY['vi_1293_lihzahrd_power_cell'];
+    let consumed = false;
+    const slots = this.player.inv.slots;
+    for (let n = 0; n < slots.length; n++) {
+      const it = slots[n];
+      if (it && it.id === cellId) {
+        it.stack--;
+        if (it.stack <= 0) slots[n] = null;
+        consumed = true;
+        break;
+      }
+    }
+    if (!consumed) { this.input.rightDown = false; return; }
+    this.cb.onInventoryChanged?.();
+    this.sfx.playWav('roar');   // SoundID 15（:32328）
+    this.spawnGolemFromAltar();
+    this.input.rightDown = false;
+  }
+
+  /** SpawnOnPlayer case 245（NPC.cs:81284-81330 1:1）：玩家 ±20 格找祭坛顶中格
+   *  （frameX==18 && frameY==0）→ 向上/向下 50 格找实心 → 落位 y=(上+上+下)/3 →
+   *  NewNPC + 广播 Announcement.HasAwoken（:81325-81326；ChatColors.BossOrEvent）。 */
+  private spawnGolemFromAltar(): void {
+    const st = this.world.store;
+    const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar'];
+    if (!ALTAR) return;
+    const pcx = Math.floor(this.player.cx / TILE), pcy = Math.floor(this.player.cy / TILE);
+    let ax = 0, ay = 0;
+    for (let j = Math.max(0, pcx - 20); j < Math.min(st.w, pcx + 20); j++) {
+      for (let k = Math.max(0, pcy - 20); k < Math.min(st.h, pcy + 20); k++) {
+        const i = st.idx(j, k);
+        if (st.type[i] === ALTAR && st.frameX[i] === 18 && st.frameY[i] === 0) { ax = j; ay = k; }
+      }
+    }
+    if (ax <= 0 || ay <= 0) return;   // 找不到祭坛（:81308-81311）——已扣电池同原版不返还
+    let up = ay - 15, down = ay - 15; // num6/num7 初值（:81313-81314）
+    for (let y = ay; y > ay - 50; y--) {
+      if (st.inBounds(ax, y) && st.isSolid(ax, y)) { up = y; break; }
+    }
+    for (let y = ay; y < ay + 50; y++) {
+      if (st.inBounds(ax, y) && st.isSolid(ax, y)) { down = y; break; }
+    }
+    const gy = Math.floor((up + up + down) / 3);   // :81324
+    const head = Enemy.fromVanilla(245, ax * TILE + 8, gy * TILE);
+    if (!head) return;
+    head.id = this.entities.nextId++;
+    this.entities.add(head, 'enemies');
+    if (!this.boss) this.boss = head;   // 等价边界：单 Boss 槽（见报告）
+    this.newText(Lang.text('Announcement.HasAwoken', Lang.npcName(245) ?? 'Golem'), 175, 75, 255);
+  }
+
+  /** 永恒水晶座右键（Player.cs:31930-31977 1:1）：
+   *   num28 = 所点行 frameY 回推底行（0→+3 / 18→+2 / 36→+1 / 54→+0，:31938-31946）
+   *   进行中 → RequestToSkipWaitTime（DD2Event.cs:1794-1810）
+   *   否则门禁：!AnyNPCs(548) && 无南瓜/霜月 && 背包有 3828（HasItem）→
+   *   竞技场检查（WouldFailSpawningHere——失败播 BartenderWarning 黄字）→
+   *   ConsumeItem(3828) → SummonCrystal（StartInvasion + 水晶 548 + 起始魔力）。 */
+  private useEterniaStand(tx: number, ty: number): void {
+    const w = this.world;
+    const st = w.store;
+    const i = st.idx(tx, ty);
+    const fy = st.frameY[i];
+    // num28（:31938-31946）
+    const by = ty + (fy === 0 ? 3 : fy === 18 ? 2 : fy === 36 ? 1 : 0);
+    const oa = w.oldOnesArmy;
+    if (oa.ongoing) {
+      // RequestToSkipWaitTime（:31948-31950）：波间 >60t 且水晶在座 → 直接跳到 60t
+      if (dd2RequestToSkipWaitTime(oa, this.dd2Host(), tx, ty)) {
+        this.sfx.play('killed', 0.8, tx * TILE + 8, ty * TILE + 8);  // SoundID.NPCDeath7
+      }
+      this.input.rightDown = false;
+      return;
+    }
+    // flag6 门禁链（:31954-31961）
+    const crystalId = ITEM_BY_KEY['vi_3828_eternia_crystal'];
+    const gated = !this.hasNpcId(548) && w.moonEvent.kind === 0 && crystalId !== undefined
+      && this.player.inv.countOf(crystalId) > 0;
+    if (gated) {
+      if (dd2WouldFailSpawningHere(this.dd2Host(), tx, by)) {
+        // FailureMessage（DD2Event.cs:615-626，黄 255,255,0）
+        this.newText(Lang.text('DungeonDefenders2.BartenderWarning'), 255, 255, 0);
+        this.input.rightDown = false;
+        return;
+      }
+      // ConsumeItem(3828)（:31968-31970）
+      this.player.inv.remove(crystalId, 1);
+      this.cb.onInventoryChanged?.();
+      dd2SummonCrystalDirect(oa, w, this.dd2Host(), tx, by, st.frameX[i], fy);
+      // InvasionStart 广播（DD2Event.cs:285，ChatColors.World 50,255,130）
+      this.newText(Lang.text('DungeonDefenders2.InvasionStart'), 50, 255, 130);
+    }
+    this.input.rightDown = false;
+  }
+
+  /** 传送晶塔右键（Player.cs:31707-31747 1:1）：开全屏地图 + MapPylonTile =
+   *  点击格按帧回推的 3×4 锚点；视口对焦"本塔+全部晶塔"包围盒外扩 20 格
+   *  （:31717-31740：中心 = 盒心，缩放只下钳 (屏-40)/盒宽高） */
+  private usePylon(tx: number, ty: number): void {
+    const anchor = pylonAnchorAt(this.world, tx, ty);
+    if (!anchor) { this.input.rightDown = false; return; }
+    this.refreshPylons();
+    this.mapPylonTile = anchor;
+    const fm = this.renderer.fullMap;
+    const viewW = this.renderer.canvas.width, viewH = this.renderer.canvas.height;
+    fm.open = true;                       // TryOpeningFullscreenMap（:31710）
+    const focus = mapFocusRect(this.pylons, anchor, viewW, viewH);
+    // 只下钳（:31733-31742）：scale = min(当前目标缩放, (屏-40)/盒宽高)
+    const scale = Math.min(Math.max(fm.zoomTarget, 0.5), Math.max(focus.scale, 0.5));
+    fm.zoom = scale;
+    fm.zoomTarget = scale;
+    fm.anchorU = focus.cx;
+    fm.anchorV = focus.cy;
+    fm.anchorMX = viewW / 2;
+    fm.anchorMY = viewH / 2;
+    fm.panX = (this.world.w * scale) / 2 - focus.cx * scale;
+    fm.panY = (this.world.h * scale) / 2 - focus.cy * scale;
+    this.renderer['_mapInit'] = false;
+    this.renderer['_mapOpenClick'] = true;   // 打开地图的这次按压不算拖拽
+    // 渲染层图标/连线数据（TeleportPylonsMapLayer.cs:52-75）
+    this.renderer.pylons = this.pylons;
+    this.renderer.mapPylonTile = anchor;
+    this._mapClickLatch = true;
+    this.input.rightDown = false;
+  }
+
+  /** 晶塔表刷新（放置/破坏晶塔与右键时调用） */
+  refreshPylons(): void {
+    this.pylons = scanPylons(this.world);
+    this.renderer.pylons = this.pylons;
+  }
+
+  /** 全屏地图上点晶塔图标 → HandleTeleportRequest 门禁（TeleportPylonsSystem.cs:100-205）。
+   *  返回 true = 已消费本次点击（传送或失败文案），false = 未点中图标（回落普通选点） */
+  private tryPylonMapTeleport(tx: number, ty: number): boolean {
+    if (!this.mapPylonTile) return false;
+    // 图标中心 = 锚点 + (1.5, 2)（TeleportPylonsMapLayer.cs:56/63 PositionInTiles+(1.5,2)）
+    let hit: TeleportPylonInfo | null = null;
+    for (const p of this.pylons) {
+      if (Math.abs(tx - (p.x + 1.5)) <= 2 && Math.abs(ty - (p.y + 2)) <= 2) { hit = p; break; }
+    }
+    if (!hit) return false;
+    if (hit.x === this.mapPylonTile.x && hit.y === this.mapPylonTile.y) return false;  // 本塔不可选
+    // 当前塔：原版按"玩家可达范围内且过 NPC/群系门的塔"求（:155-192）——单人语义 =
+    // 玩家 ±60 格内的塔（IsPlayerNearAPylon）
+    const ptx = Math.floor(this.player.x / TILE), pty = Math.floor(this.player.y / TILE);
+    const current = this.pylons.find((p) => {
+      const LX = ptx - 60, HX = ptx + 1 + 60, LY = pty - 60, HY = pty + 2 + 60;
+      return p.x + 2 >= LX && p.x <= HX && p.y + 3 >= LY && p.y <= HY;
+    }) ?? null;
+    const npcs: NpcHomeLike[] = this.entities.npcs
+      .filter((n): n is TownNPC => n instanceof TownNPC)
+      .filter((n) => !n.dead && !n.bound && n.home)
+      .map((n) => ({
+        homeX: n.home!.x, homeY: n.home!.y,
+        x: Math.floor(n.cx / TILE), y: Math.floor(n.cy / TILE),
+      }));
+    const check = checkPylonTeleport(this.world, {
+      playerTileX: ptx, playerTileY: pty,
+      target: hit,
+      current,
+      npcs,
+      targetScene: scanScene(this.world, hit.x * TILE + 24, hit.y * TILE + 32, 0),
+      currentScene: current
+        ? scanScene(this.world, current.x * TILE + 24, current.y * TILE + 32, 0)
+        : { ...EMPTY_SCENE },
+      downedPlantBoss: !!this.world.flags['downed_262'],
+    });
+    if (!check.ok) {
+      // ChatHelper.SendChatMessageToClient → ChatColors.ServerMessage 255,240,20（:203-205）
+      this.newText(Lang.text(check.fail!), 255, 240, 20);
+      return true;
+    }
+    // 传送（:194-200：落位 = 塔锚 ToWorldCoordinates()）+ SoundID 11（地图关闭音，
+    // TeleportPylonsMapLayer.cs:119）——贴图预载+找位由 teleportWhenReady 统一处理
+    this.sfx.playWav('menuClose');
+    this.mapPylonTile = null;
+    this.renderer.mapPylonTile = null;
+    void this.teleportWhenReady(hit.x, hit.y);
+    return true;
+  }
+
+  /** DD2Event 宿主回调（OldOnesArmy.ts 纯逻辑 ↔ Game 副作用桥） */
+  private dd2Host(): OldOnesArmyHost {
+    return {
+      broadcast: (text, r, g, b) => this.newText(Lang.text(text), r, g, b),
+      spawnNpc: (id, x, y) => {
+        const e = Enemy.fromVanilla(id, x, y);
+        if (!e) return;
+        e.id = this.entities.nextId++;
+        this.entities.add(e, 'enemies');
+      },
+      countNpcs: (id) => (this.entities.enemies as Enemy[]).reduce(
+        (n, e) => n + (e.dead || e.vanillaId !== id ? 0 : 1), 0),
+      anyNpc: (id) => this.hasNpcId(id),
+      crystalPoints: () => (this.entities.enemies as Enemy[])
+        .filter((e) => !e.dead && e.vanillaId === 548)
+        .map((e) => ({ x: e.cx, y: e.y + e.h })),
+      dropAtCrystal: (vanillaItemId, count) => {
+        const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
+        const crystal = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 548);
+        if (!key || !crystal) return;
+        this.spawnDrop(crystal.cx, crystal.cy + 8, key, count, 0, -2);
+      },
+      arenaEnds: (x, y) => checkArenaScore(this, x * TILE + 8, y * TILE + 8),
+      findGroundY: (tileX, tileY) => {
+        const st = this.world.store;
+        for (let y = tileY; y < Math.min(st.h, tileY + 50); y++) {
+          if (st.inBounds(tileX, y) && st.isSolid(tileX, y)) return y;
+        }
+        return null;
+      },
+      rand: (n) => Math.floor(Math.random() * n),
+    };
+  }
+
+  /** DD2_EVENT_HOOKS 接线（bossAI_dd2.ts 的占位正式落地——AI 家族批次的既定依赖） */
+  private wireDD2Hooks(): void {
+    if (this._dd2HooksWired) return;
+    this._dd2HooksWired = true;
+    DD2_EVENT_HOOKS.laneSpawnRate = () => this.world.oldOnesArmy.laneSpawnRate;
+    DD2_EVENT_HOOKS.enemySpawningOnHold = () => this.world.oldOnesArmy.timeLeftUntilSpawningBegins !== 0;
+    DD2_EVENT_HOOKS.spawnMonsterFromGate = (g, x, y, left) => {
+      const st = this.world.oldOnesArmy;
+      if (!st.ongoing) return;
+      dd2SpawnMonsterFromGate(st, this.dd2Host(), x, y, left);
+      void g;
+    };
+    DD2_EVENT_HOOKS.raiseGoblins = (_g, x, y) => dd2RaiseGoblins(this.world.oldOnesArmy, this.dd2Host(), x, y);
+    DD2_EVENT_HOOKS.canRaiseGoblinsHere = (_g, x, y) => dd2CanRaiseGoblinsHere(this.world.oldOnesArmy, x, y);
+    DD2_EVENT_HOOKS.stopInvasion = (_g, win) => {
+      // StopInvasion（:294-320）+ WinInvasionInternal（:322-343；win 时 downed 旗标/
+      // 奖牌/InvasionWin 广播在模块内完成，host 落副作用）
+      dd2StopInvasion(this.world.oldOnesArmy, this.world, this.dd2Host(), win);
+    };
+    DD2_EVENT_HOOKS.reportLoss = () => dd2ReportLoss(this.world.oldOnesArmy);
+    DD2_EVENT_HOOKS.findArenaHitbox = () => {
+      const pts = (this.entities.enemies as Enemy[])
+        .filter((e) => !e.dead && (e.vanillaId === 548 || e.vanillaId === 549))
+        .map((e) => ({ x: e.x, y: e.y, w: e.w, h: e.h }));
+      dd2FindArenaHitbox(this.world.oldOnesArmy, pts);
+    };
+    DD2_EVENT_HOOKS.difficulty = () => this.world.oldOnesArmy.ongoingDifficulty;
   }
 
   /** 压力板 135:踩上瞬间 HitSwitch(Collision.SwitchTiles 玩家语义;敌人触发见 Enemy 侧) */
@@ -6762,15 +7153,19 @@ export class Game implements GameHooks {
     this.newText(Lang.text('Announcement.HasArrived', Lang.npcName(368) ?? ''), 50, 125, 255);
   }
 
-  /** 旅行商人当期股票（Chest.SetupTravelShop :1240 结构 1:1）：
+  /** 旅行商人当期股票（Chest.SetupTravelShop :1237 结构 1:1）：
    *  4-6 件商品（首件高稀有起步）+ 1 幅画；池内按原版 if 链顺序、后命中覆盖。
-   *  运气加成缺 luck 系统精确注释：原版 Player.RollLuck（Luck.cs:5-15）对
-   *  luck>0 以 |luck| 概率改掷 [0, N/2..N)（命中率升）、luck<0 改掷 [N, 2N)
-   *  （恒不中）；luck 由火把/花园地精/瓢虫等修正（Player.cs luck 链）——系统未移植，
-   *  此处等价 luck=0 的 Next(N)==0（依赖登记：luck 计算 + RollLuck 三态） */
+   *  幸运度已接（Player.luck → Luck.RollLuck 三态，Luck.cs:5-16）：luck>0 时
+   *  RollLuck(N) 改掷 [N/2, N)（命中 0 的概率升 ~2 倍期望）、luck<0 改掷 [N, 2N)
+   *  （恒不中 0）；件数 num 的 RollLuck(4/8/16/32)==0 加件掷同链（SetupTravelShop :1251-1267）。
+   *  偏差（登记）：AdjustSlotRarities（Chest.cs:921-947，第 4200-4700 次尝试把 rarity
+   *  各档降 1）以"失败渐放宽"近似——原版 while 上限 5000 次与本仓 60 次上限不同尺度；
+   *  首件 minimumRarity=2 只在困难模式生效（:1277 hardMode 门）未区分 */
   private travelStock: Array<[number, number]> = [];
   private buildTravelStock(): Array<[number, number]> {
     const rarity = [100, 200, 300, 400, 500, 600];
+    const luck = this.player.luck;   // Player.GetPlayerWithHighestLuck → 本地玩家（单人）
+    const rollZero = (n: number): boolean => rollLuck(luck, n) === 0;
     const condOk = (c: string | null): boolean => {
       const f = this.world.flags;
       switch (c) {
@@ -6785,7 +7180,7 @@ export class Game implements GameHooks {
       let it = 0;
       for (const e of pool) {
         if (e.tier < minimumRarity || e.cond === 'skip' || !condOk(e.cond)) continue;
-        if (Math.random() * rarity[e.tier] < 1) it = e.id;  // RollLuck(N)==0（luck=0 态，见上）
+        if (rollZero(rarity[e.tier])) it = e.id;  // SetupTravelShop_GetItem RollLuck(rarity[t])==0
       }
       return it;
     };
@@ -6796,8 +7191,13 @@ export class Game implements GameHooks {
       const it = pick(TRAVEL_POOL.items, tries > 40 ? 0 : tries > 20 ? 1 : 2);
       if (canAdd(it)) stock.push(it);
     }
-    // 其余件：全域稀有度（num 只掷一次，SetupTravelShop :1244）
-    const num = 4 + Math.floor(Math.random() * 3);
+    // 件数：4-6 基础 + 运气加件（SetupTravelShop :1251-1262 RollLuck(4/8/16/32)==0 → num++）
+    let num = 4 + Math.floor(Math.random() * 3);
+    if (rollZero(4)) num++;
+    if (rollZero(8)) num++;
+    if (rollZero(16)) num++;
+    if (rollZero(32)) num++;
+    if ((this.player.appearance?.difficulty ?? 0) >= 2 && rollZero(2)) num++; // :1263 expert
     let guard = 0;
     while (stock.length < num && guard++ < 500) {
       const it = pick(TRAVEL_POOL.items, 0);
@@ -7063,10 +7463,71 @@ export class Game implements GameHooks {
       }
     }
     // 入侵击杀扣分（NPC.cs:79021-79054：组号匹配当前入侵类型才计分，加权扣减）
-    if (!enemy || this.world.invasionType <= 0 || enemy.vanillaId == null) return;
-    const group = INVASION_GROUP[enemy.vanillaId];
-    if (!group || group !== this.world.invasionType) return;
-    this.world.invasionSize = Math.max(0, this.world.invasionSize - (KILL_WEIGHT[enemy.vanillaId] ?? 1));
+    if (enemy && this.world.invasionType > 0 && enemy.vanillaId != null) {
+      const group = INVASION_GROUP[enemy.vanillaId];
+      if (group && group === this.world.invasionType) {
+        this.world.invasionSize = Math.max(0, this.world.invasionSize - (KILL_WEIGHT[enemy.vanillaId] ?? 1));
+      }
+    }
+    // 旧日军团计分（DD2Event.CheckProgress :344-470 + AnnounceGoblinDeath :733-736）：
+    // 与月事件同位（掉落结算之后同帧，对齐原版 checkDead 尾段顺序）
+    if (enemy && enemy.vanillaId != null) {
+      const oa = this.world.oldOnesArmy;
+      if (oa.ongoing) {
+        // 小妖精类死亡登记尸点（黑暗魔法师 RaiseGoblins 的复活源，:733-736）
+        if (enemy.vanillaId >= 551 && enemy.vanillaId <= 565) {
+          dd2AnnounceGoblinDeath(oa, enemy.cx, enemy.y + enemy.h);
+        }
+        const diff = this.player.appearance?.difficulty ?? 0;
+        const prog = dd2CheckProgress(oa, enemy.vanillaId, diff >= 2, this.betsyLifeRatio());
+        if (prog.waveComplete) {
+          this.newText(Lang.text(prog.waveComplete), 175, 55, 255);   // INFO_NEW_WAVE_COLOR
+          if (prog.medals > 0) this.dd2Host().dropAtCrystal(3817, prog.medals);
+        }
+        if (prog.victoryScene) this.startDD2VictoryScene();
+        // 击杀推进中的魔力配额掉落（ShouldDropCrystals :799-927——波内按击杀进度放出）
+        if (dd2ShouldDropCrystals(oa, this.betsyLifeRatio())) {
+          this.dd2Host().dropAtCrystal(3822, 1);
+        }
+      }
+    }
+  }
+
+  /** Betsy 血量比（D3 第 7 波进度 = 100×已损血比，DD2Event.cs:1503-1513；无 Betsy → null） */
+  private betsyLifeRatio(): number | null {
+    const betsy = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 551);
+    return betsy ? betsy.hp / betsy.maxHp : null;
+  }
+
+  /** StartVictoryScene（DD2Event.cs:481-507）：水晶 548 ai[1]=2 / 门 549 撤收 */
+  private startDD2VictoryScene(): void {
+    for (const e of this.entities.enemies as Enemy[]) {
+      if (e.dead) continue;
+      if (e.vanillaId === 548) { e.ai1 = 2; e.ai0 = 2; }
+      else if (e.vanillaId === 549) { e.ai0 = 0; e.ai1 = 1; }
+    }
+  }
+
+  /** UpdateTime（DD2Event.cs:209-251）：每 tick 推进波间间歇/水晶在场判定 */
+  private tickOldOnesArmy(): void {
+    const oa = this.world.oldOnesArmy;
+    if (!oa.ongoing) return;
+    const res = dd2UpdateTime(oa, this.dd2Host(), this.betsyLifeRatio());
+    if (res.stopped) {
+      // 水晶亡 → StopInvasion（:218-220）——败北文案由水晶 AI 演出钩子播
+      return;
+    }
+    if (res.waveAnnounce) {
+      this.newText(invasionWaveText(res.waveAnnounce), 175, 55, 255);
+      if (res.summonBetsy) {
+        const crystal = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 548);
+        dd2SummonBetsy(oa, this.dd2Host(), crystal ? crystal.cx : this.player.cx,
+          crystal ? crystal.cy : this.player.cy);
+      }
+    }
+    if (res.lose) {
+      this.newText(Lang.text('DungeonDefenders2.InvasionLose'), 255, 0, 0);
+    }
   }
 
   // ================= 星璇塔 / 天界入侵（LunarEvent.ts 宿主回调侧） =================

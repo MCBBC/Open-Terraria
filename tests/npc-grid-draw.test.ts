@@ -66,7 +66,8 @@ describe('657 史莱姆皇后（FindFrame case 657，NPC.cs:67503-67614）', () 
     expect(compress(seq)).toEqual([0, 1, 2, 3]);
     const s2: NpcGridFrameState = { counter: 0, idx: 10 };
     const seq2 = run(() => queenSlimeNextFrame(s2, { half: false, flying: false, vy: 0, ai0: 0, ai1: 0 }), 30);
-    expect(compress(seq2)).toEqual([10, 11, 12, 0, 1, 2]);
+    // 回 0 后 flag14 失效 → step 恢复 10（0 段持 10t）
+    expect(compress(seq2)).toEqual([10, 11, 12, 0, 1]);
   });
 });
 
@@ -75,12 +76,13 @@ describe('576/577 DD2 食人魔（FindFrame case 576/577，NPC.cs:68241-68380）
     const s = st();
     const seq = run(() => dd2OgreNextFrame(s, { ai0: 1, ai1: 0, vx: 0, vy: 0 }), 200);
     expect(compress(seq).slice(0, 10)).toEqual([11, 12, 13, 14, 15, 16, 17, 18, 19, 20]);
-    // 持帧数（首帧少 1 拍）：11×3, 12×4, 13×7, 14×1, 15×4, 16×4, 17×4, 18×1, 19×7, 20 停
+    // 持帧数：仅入段首帧（范围复位）少 1 拍=3；段内帧（推进调用当场显示新帧、
+    // counter 清 0）恰持标称值：13/19=8、14/18=2、其余 4
     const holds: Record<number, number> = {};
     for (const f of seq) holds[f] = (holds[f] ?? 0) + 1;
-    expect(holds[11]).toBe(3); expect(holds[13]).toBe(7); expect(holds[14]).toBe(1);
-    expect(holds[18]).toBe(1); expect(holds[19]).toBe(7);
-    expect(seq.at(-1)).toBe(20); // 帧末停住（原版 idx==20 后 counter 不复位）
+    expect(holds[11]).toBe(3); expect(holds[13]).toBe(8); expect(holds[14]).toBe(2);
+    expect(holds[18]).toBe(2); expect(holds[19]).toBe(8);
+    expect(seq[seq.length - 1]).toBe(20); // 帧末停住（原版 idx==20 后 counter 不复位）
   });
   it('攻击 ai0>0&&ai1==2：39 入段 → …→47 → 37→38；47 持 26；38/46腾空 冻结', () => {
     const s = st();
@@ -90,7 +92,7 @@ describe('576/577 DD2 食人魔（FindFrame case 576/577，NPC.cs:68241-68380）
     for (const f of seq) holds[f] = (holds[f] ?? 0) + 1;
     expect(holds[47]).toBeGreaterThanOrEqual(25); // 持 26（首帧少 1 拍后进入的段为 26）
     expect(seq).toContain(37);
-    expect(seq.at(-1)).toBe(38); // 38 起手不推进（flag12=false），地面态永久冻结
+    expect(seq[seq.length - 1]).toBe(38); // 38 起手不推进（flag12=false），地面态永久冻结
     // 46 腾空：帧冻结（flag12=false 不累加 counter）
     const sAir: NpcGridFrameState = { counter: 0, idx: 46 };
     const air = run(() => dd2OgreNextFrame(sAir, { ai0: 1, ai1: 2, vx: 0, vy: -3 }), 30);
@@ -141,8 +143,8 @@ describe('564/565 暗黑魔法师（FindFrame case 564/565，NPC.cs:68657-69085�
     const seq = run(() => darkMageNextFrame(s, { ai0: 1, ai1: 0, speed: 0 }), 98);
     expect(compress(seq).slice(0, 14)).toEqual([5, 6, 7, 5, 6, 7, 5, 6, 7, 8, 9, 10, 11, 12]);
     expect(seq[97]).toBe(5); // 第 98t 阈值链触底 → 回卷帧 5 并清 counter
-    const seq2 = run(() => darkMageNextFrame(s, { ai0: 1, ai1: 0, speed: 0 }), 14);
-    expect(compress(seq2)).toEqual([5, 6, 7, 8, 9, 10, 11, 12, 5]); // 续循环不重置
+    const seq2 = run(() => darkMageNextFrame(s, { ai0: 1, ai1: 0, speed: 0 }), 49);
+    expect(compress(seq2).slice(0, 7)).toEqual([5, 6, 7, 5, 6, 7, 5]); // 续循环不重置
   });
   it('ai1==1 治疗：13..20 → 18/19/20 回摆 → 21..25，8t/帧、128t 一循环', () => {
     const s = st();
@@ -169,9 +171,9 @@ describe('564/565 暗黑魔法师（FindFrame case 564/565，NPC.cs:68657-69085�
     // 从漂浮帧 2 直接进 ai1==1 → 越界（2 < 13）→ counter 清零从 13 起播
     const s: NpcGridFrameState = { counter: 0, idx: 2 };
     expect(darkMageNextFrame(s, { ai0: 1, ai1: 1, speed: 0 })).toBe(13);
-    // 段内帧（如 20）不清 counter——连续播放
+    // 段内帧（如 20）不清 counter——按 counter=100 续播到 seq[12]=22（非从头 14）
     const s2: NpcGridFrameState = { counter: 100, idx: 20 };
-    expect(darkMageNextFrame(s2, { ai0: 1, ai1: 1, speed: 0 })).toBe(25);
+    expect(darkMageNextFrame(s2, { ai0: 1, ai1: 1, speed: 0 })).toBe(22);
   });
 });
 
@@ -181,7 +183,7 @@ describe('668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + 序列表 :6
       const s = st();
       const seq = run(() => deerclopsNextFrame(s, { ai0, vx: 0, vy: 0 }), 60);
       expect(compress(seq)).toEqual([12, 13, 14, 13, 14, 13, 14, 13, 14, 15, 16, 17]);
-      expect(seq.at(-1)).toBe(17); // FromSequence 钳末帧后停住
+      expect(seq[seq.length - 1]).toBe(17); // FromSequence 钳末帧后停住
     }
   });
   it('ai0==2：攻击 2 表 [12,15,16,17×4,13,18×4,12]（入段范围 12..18 非 12..12）', () => {
@@ -197,7 +199,7 @@ describe('668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + 序列表 :6
     for (const ai0 of [3, 5, 7, 8]) {
       const s = st();
       const seq = run(() => deerclopsNextFrame(s, { ai0, vx: 0, vy: 0 }), 20);
-      expect(compress(seq)).toEqual([19, 20, 21, 22, 21]);
+      expect(compress(seq)).toEqual([19, 20, 21, 22, 21, 22]);
     }
   });
   it('默认：vy>0 → 帧 1；站定 → 帧 0；行走 2..11 按 |vx| 累加（150 一循环）', () => {

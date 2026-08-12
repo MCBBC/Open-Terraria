@@ -112,7 +112,7 @@ export class MinionProj extends Entity {
   /** 同列槽位序（多随从环形悬停错位） */
   slot: number;
   private ownerRef: () => Player | null;
-  private hitCd = new MinionHitCd();
+  hitCd = new MinionHitCd(); // dragon 全链共用实例
   private shootCd = 0;
   /** 地面型重力 */
   private ground: boolean;
@@ -127,6 +127,291 @@ export class MinionProj extends Entity {
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
   attackFlash = 0;
+  /** 不占随从槽位（沙漠虎/阿比盖尔本体、龙身体段、星尘守护者——原版 minionSlots=0/不统计） */
+  noSlot = false;
+  /** 龙链父段引用（626/627/628 跟随前段） */
+  parentRef: (() => MinionProj | null) | null = null;
+  /** 虎/守护者冲刺状态 */
+  private dashT = 0;
+  /** 家族一次性初始化（龙链生成） */
+  private spawned = false;
+  private pounceCd = 0;
+
+  // ---- 旗舰家族分支（行号见各方法注释；均在通用运动前 return）----
+
+  /** 星尘龙头（aiStyle 121 :40138-40403）：加速追敌（acc 0.4/0.6/0.8 限速 30，穿墙穿敌）
+   *  / 跟随玩家（限速 15，>2000px 传送）；伤害 ×(1+0.23×段数)（:12097）；
+   *  首次生成 626→627→628 链（段距 16px），全链共用一张命中表（7t/敌） */
+  private dragonHead(game: GameHooks, p: Player, dmg0: number): void {
+    const ents = (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities;
+    if (!this.spawned) {
+      this.spawned = true;
+      let parent: MinionProj = this;
+      for (const seg of [626, 627, 628]) {
+        const m = new MinionProj(this.cx, this.cy, seg, this.damage, this.knockback,
+          false, 0, false, this.ownerRef);
+        m.noSlot = true;
+        const par = parent;
+        m.parentRef = () => (par.dead ? null : par);
+        m.hitCd = this.hitCd; // 全链共用命中表（localNPCHitCooldown=7 语义）
+        ents.add(m, 'projectiles');
+        parent = m;
+      }
+    }
+    const segN = this.peerCount(game, 626) + this.peerCount(game, 627);
+    const scale = 1 + 0.23 * Math.min(50, segN);
+    const tgt = this.nearestEnemy(game, 1000);
+    if (tgt) {
+      const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const acc = d < 300 ? 0.8 : d < 600 ? 0.6 : 0.4;
+      this.vx += (dx / d) * acc;
+      this.vy += (dy / d) * acc;
+      const sp = Math.hypot(this.vx, this.vy);
+      if (sp > 30) { this.vx *= 30 / sp; this.vy *= 30 / sp; }
+    } else {
+      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      if (d > 2000) { this.x = p.cx - 30; this.y = p.cy - 30; this.vx = this.vy = 0; }
+      else if (d > 100) {
+        const acc = d < 140 ? 0.06 : d < 200 ? 0.12 : 0.2;
+        this.vx += (dx / d) * acc;
+        this.vy += (dy / d) * acc;
+        const sp = Math.hypot(this.vx, this.vy);
+        if (sp > 15) { this.vx *= 15 / sp; this.vy *= 15 / sp; }
+      } else {
+        this.vx *= 0.96; this.vy *= 0.96; this.vy -= 0.1; // 近距缓刹 + 轻微上浮（:40168）
+      }
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    const fd = tgt ? Math.sign(tgt.cx - this.cx) : Math.sign(this.vx);
+    if (fd !== 0) this.facing = fd;
+    this.contact(game, dmg0 * scale, 7);
+  }
+
+  /** 再召唤延伸：尾(628)前插入 2 段（626+627）（Player.cs:47906-47963） */
+  extendDragon(game: GameHooks): boolean {
+    const projs = (game as unknown as { entities: { projectiles: unknown[]; add: (e: unknown, b: string) => void } }).entities;
+    const tail = projs.projectiles.find((m) =>
+      m instanceof MinionProj && !m.dead && m.projId === 628) as MinionProj | undefined;
+    if (!tail || !tail.parentRef) return false;
+    const oldParent = tail.parentRef;
+    const a = new MinionProj(tail.cx, tail.cy, 626, this.damage, this.knockback, false, 0, false, this.ownerRef);
+    const b = new MinionProj(tail.cx, tail.cy, 627, this.damage, this.knockback, false, 0, false, this.ownerRef);
+    a.noSlot = b.noSlot = true;
+    a.parentRef = oldParent;
+    b.parentRef = () => (a.dead ? null : a);
+    tail.parentRef = () => (b.dead ? null : b);
+    a.hitCd = b.hitCd = this.hitCd;
+    projs.add(a, 'projectiles');
+    projs.add(b, 'projectiles');
+    return true;
+  }
+
+  /** 龙身/尾（626/627/628）：无自主速度——纯链式跟随（:40384 pos=父段心-方向×16px） */
+  private dragonSegment(game: GameHooks, p: Player, dmg0: number): void {
+    void p;
+    const par = this.parentRef?.();
+    if (!par) { this.dead = true; return; } // 头亡链断
+    const dx = this.cx - par.cx, dy = this.cy - par.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    this.x = par.cx - (dx / d) * 16 - this.w / 2;
+    this.y = par.cy - (dy / d) * 16 - this.h / 2;
+    const segN = this.peerCount(game, 626) + this.peerCount(game, 627);
+    this.contact(game, dmg0 * (1 + 0.23 * Math.min(50, segN)), 7);
+  }
+
+  /** 计数器（831 虎宝石 / 970 阿比盖尔计数，AI_164 :43946）：头顶环绕吸附、不攻击；
+   *  派生唯一本体（档位随同类数），本体 noSlot 不占上限 */
+  private counterHover(game: GameHooks, p: Player, dmg0: number): void {
+    void dmg0;
+    const projs = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles;
+    if (this.projId === 831) {
+      const gems = this.peerCount(game, 831);
+      const want = gems <= 3 ? 833 : gems <= 6 ? 834 : 835; // GetDesiredStormTigerMinionRank
+      const tigers = projs.filter((m) => m instanceof MinionProj && !m.dead && m.projId >= 833 && m.projId <= 835);
+      if (!tigers.length) this.spawnBody(game, want, this.damage);
+      else if (tigers[0].projId !== want) { tigers[0].dead = true; this.spawnBody(game, want, this.damage); }
+    } else if (!projs.some((m) => m instanceof MinionProj && !m.dead && m.projId === 963)) {
+      this.spawnBody(game, 963, this.damage);
+    }
+    // AI_164 环绕：每层 4 个、层高 +12px、中心头顶 -61px（MountedCenter-21-40）
+    const peers = projs.filter((m) => m instanceof MinionProj && !m.dead && m.projId === this.projId);
+    const idx = peers.indexOf(this);
+    const layer = Math.floor(idx / 4), inLayer = idx % 4;
+    const layerCount = Math.max(1, Math.min(4, peers.length - layer * 4));
+    const ang = (this.age * 2 + layer / 8 + inLayer / layerCount) * Math.PI * 2;
+    const r = 8 + 12 * layer;
+    this.x = p.cx + Math.sin(ang) * r - this.w / 2;
+    this.y = p.cy - 61 - Math.cos(ang) * r - this.h / 2;
+    this.facing = p.facing;
+  }
+
+  /** 沙漠虎本体（833/834/835，minionSlots=0）：地面追击 + 周期冲刺（818 链近似为
+   *  直线穿墙冲刺，132 判定盒、冲刺伤 ×(1.5+0.4n)→取 1.5×缩放）；伤害 ×(1+0.4×(宝石数-1)) */
+  private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
+    const gems = Math.max(1, this.peerCount(game, 831));
+    const scale = 1 + 0.4 * (gems - 1);
+    const cd = this.projId === 833 ? 360 : this.projId === 834 ? 300 : 240;
+    const tgt = this.nearestEnemy(game, 800);
+    if (this.dashT > 0) {
+      this.dashT--;
+      if (tgt) {
+        const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+        this.x += ((tgt.cx - this.cx) / d) * 12;
+        this.y += ((tgt.cy - this.cy) / d) * 12;
+      }
+      this.contact(game, dmg0 * scale * 1.5, 10, 58);
+      return;
+    }
+    if (this.pounceCd > 0) this.pounceCd--;
+    if (tgt && this.pounceCd <= 0) { this.dashT = 30; this.pounceCd = cd; return; }
+    // 地面追击（AI_067 地面段近似）
+    if (tgt) {
+      this.vx += Math.sign(tgt.cx - this.cx) * 0.12;
+      this.vx = Math.max(-3.5, Math.min(3.5, this.vx));
+      if (this.onGround && tgt.cy < this.cy - 24 && Math.random() < 0.05) this.vy = -6;
+      this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+    } else {
+      this.vx *= 0.9;
+      const dx = p.cx - this.cx;
+      if (Math.abs(dx) > 60) this.vx = Math.max(-2.5, Math.min(2.5, dx * 0.02));
+      this.facing = Math.sign(dx) || p.facing;
+    }
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    this.contact(game, dmg0 * scale, 10);
+  }
+
+  /** 阿比盖尔本体 963（aiStyle 62 前段 :62109-63100）：飞行近战，<50px 挥击
+   *  （20t/敌）；伤害 ×(1+0.55×(n-1))（肉前档，1.4.5 困难模式 1.3） */
+  private abigailBody(game: GameHooks, p: Player, dmg0: number): void {
+    const n = Math.max(1, this.peerCount(game, 970));
+    const scale = 1 + 0.55 * (n - 1);
+    const tgt = this.nearestEnemy(game, 700);
+    if (tgt) {
+      const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+      const spd = d > 200 ? 7.4 : d > 50 ? 5.4 : 0; // 6+1.4n / 4+1.4n（n=1 档）
+      this.vx = (tgt.cx - this.cx) / d * spd;
+      this.vy = (tgt.cy - this.cy) / d * spd;
+      if (d < 50) this.attackFlash = 24;
+      this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+    } else {
+      const hx = p.cx - p.facing * 40, hy = p.cy + 40;
+      const dx = hx - this.cx, dy = hy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const spd = Math.min(4.8, d * 0.08);
+      this.vx = (dx / d) * spd;
+      this.vy = (dy / d) * spd;
+      this.facing = p.facing;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    this.contact(game, dmg0 * scale, 20);
+  }
+
+  /** 星尘守护者 623（套装奖励，Player.cs:16195）：站玩家侧后 -(5+w/2)×dir,-25；
+   *  500 内最近敌瞬移冲刺拳击（AI_120 近似） */
+  private guardianBody(game: GameHooks, p: Player, dmg0: number): void {
+    const tgt = this.nearestEnemy(game, 500);
+    if (tgt) {
+      const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+      this.vx = (tgt.cx - this.cx) / d * 10;
+      this.vy = (tgt.cy - this.cy) / d * 10;
+      this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+    } else {
+      const hx = p.cx - p.facing * (5 + this.w / 2), hy = p.cy - 25;
+      const dx = hx - this.cx, dy = hy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      const spd = Math.min(10, d * 0.1);
+      this.vx = (dx / d) * spd;
+      this.vy = (dy / d) * spd;
+      this.facing = p.facing;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    this.contact(game, dmg0, 10);
+  }
+
+  /** 接触伤害通用（pad=判定盒外扩，818 冲刺用）；鞭 tag + TagCrit 语义同主线 */
+  private contact(game: GameHooks, dmg: number, cd: number, pad = 0): void {
+    const add = (e: unknown, b: string) =>
+      (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
+    for (const e of game.enemies()) {
+      const en = e as never as EnemyLike & {
+        dead: boolean; whipTagT?: number; whipTagDmg?: number; whipTagCrit?: number;
+        whipTagItem?: number; whipProcT?: number; whipProcItem?: number;
+      };
+      if (en.dead) continue;
+      if (!(this.x - pad < en.x + en.w && this.x + this.w + pad > en.x
+        && this.y - pad < en.y + en.h && this.y + this.h + pad > en.y)) continue;
+      if (!this.hitCd.ready(en.id, cd)) continue;
+      const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
+      const crit = tag > 0 && Math.random() * 100 < (en.whipTagCrit ?? 0);
+      let dmg1 = (dmg + tag) * (crit ? 2 : 1);
+      // 黑收成 OnTaggedHit（WhipTagEffect_DarkHarvest :9-20：每次 tag 命中 → 916 黑闪电，
+      // 伤害 = TagDamage×乘率，armorPen 50）——视觉走 916 弹幕
+      if (tag > 0 && en.whipTagItem === 4680) {
+        en.hurt(Math.max(1, Math.round(tag)), Math.sign(en.cx - this.cx), -1, game);
+        add(new Arrow(en.cx, en.cy, 0, -1, 0, 0, 916, null, { grav: 0, life: 24, pierce: 99 }), 'projectiles');
+        game.spawnParticles(en.cx, en.cy, '#7A3AFF', 6, 2.2, { life: 20 });
+      }
+      // proc 型鞭首跳（TagEffectState：ModifyProcHit→OnProcHit 一次性）：
+      //  4912 火鞭 ×2.75 + 918 爆炸（伤×1.75,96 盒）；5476 星陨（×1.33 自上而下）；
+      //  5477 花瓣×3（各 40）；5479 星座星（×0.33 若干）；5480 月主弹（20，3 连近似 1 发）
+      if (en.whipProcT && en.whipProcT > 0 && en.whipProcItem) {
+        const pi = en.whipProcItem;
+        en.whipProcT = 0;
+        if (pi === 4912) {
+          dmg1 *= 2.75; // ProcDamageMultiplier 1.75 → ModifyProcHit 合计 ×2.75
+          const ex = Math.max(1, Math.round(dmg * 1.75));
+          for (const ent2 of game.enemies()) {
+            const en2 = ent2 as EnemyLike & { dead: boolean };
+            if (en2.dead || Math.abs(en2.cx - en.cx) > 48 + en2.w / 2 || Math.abs(en2.cy - en.cy) > 48 + en2.h / 2) continue;
+            en2.hurt(ex, Math.sign(en2.cx - en.cx) * 2, -2, game);
+          }
+          game.spawnParticles(en.cx, en.cy, '#FF7A28', 16, 4, { life: 26 });
+        } else if (pi === 5476) {
+          add(new Arrow(en.cx - 6, en.cy - 280, 0.4, 8, Math.max(1, Math.round(dmg * 1.33)), 2, 1037, null, { grav: 0 }), 'projectiles');
+        } else if (pi === 5477) {
+          for (let i = 0; i < 3; i++) {
+            const a = Math.random() * Math.PI * 2;
+            add(new Arrow(en.cx, en.cy, Math.cos(a) * 3.5, Math.sin(a) * 3.5, 40, 2, 1038, null, { grav: 0, life: 120 }), 'projectiles');
+          }
+        } else if (pi === 5479) {
+          for (let i = 0; i < 3; i++) {
+            add(new Arrow(en.cx, en.cy - 20 - i * 30, (Math.random() - 0.5) * 2, 3,
+              Math.max(1, Math.round(dmg * 0.33)), 1, 1039, null, { grav: 0, life: 240 }), 'projectiles');
+          }
+        } else if (pi === 5480) {
+          add(new Arrow(en.cx, en.cy - 30, (Math.random() - 0.5) * 4, 6, 20, 1, 1045, null, { grav: 0 }), 'projectiles');
+        }
+      }
+      en.hurt(Math.max(1, Math.round(dmg1)), Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
+      this.attackFlash = 24;
+    }
+  }
+
+  /** 同类计数（计数器/本体伤害档位用：831 宝石数 / 970 阿比盖尔数） */
+  private peerCount(game: GameHooks, id: number): number {
+    let n = 0;
+    for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+      const m = e as MinionProj;
+      if (m instanceof MinionProj && !m.dead && m.projId === id) n++;
+    }
+    return n;
+  }
+
+  /** 生成不占槽实体（计数器派生本体/守护者） */
+  private spawnBody(game: GameHooks, projId: number, damage: number): MinionProj {
+    const owner = this.ownerRef();
+    const m = new MinionProj(this.cx, this.cy, projId, damage, this.knockback,
+      false, 0, false, () => owner);
+    m.noSlot = true;
+    (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(m, 'projectiles');
+    return m;
+  }
 
   constructor(
     x: number, y: number, projId: number, damage: number, knockback: number,
@@ -174,9 +459,10 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
       moveAndCollide(this, game.world, 0, this.vy);
       const owner = this.ownerRef();
-      // 随从伤害 = 基础 × magic 乘区；荆棘鞭 buff(314) 命中 +10%（Player.minionDamage 系）
-      const thorn = (owner as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
-      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1) * thorn));
+      // 随从/哨兵伤害：武器基伤 × summonDamageMult（live 刷新，换装即时生效，
+      // Projectile.cs:15368 语义）+ 护甲穿透（对随从弹幕生效 :12068）
+      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))
+        + (owner ? owner.equipStats.armorPen : 0));
       // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
       // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
@@ -239,7 +525,9 @@ export class MinionProj extends Entity {
             if (en.dead) continue;
             if (Math.abs(en.cx - this.cx) > TILE * 4 || Math.abs(en.cy - this.cy) > TILE * 4) continue;
             if (!this.hitCd.ready(en.id, 3)) continue;
-            en.hurt(dmgOf(), 0, 0, game);
+            // SummonTagDamageMultiplier（ProjectileID.cs:31）：闪电 aura 族 tag 伤减半
+            const tagA = (en as { whipTagT?: number; whipTagDmg?: number }).whipTagT ? Math.round(((en as { whipTagDmg?: number }).whipTagDmg ?? 0) * 0.5) : 0;
+            en.hurt(dmgOf() + tagA, 0, 0, game);
           }
         }
         return;
@@ -327,9 +615,41 @@ export class MinionProj extends Entity {
     const p = this.ownerRef();
     if (!p) { this.dead = true; return; }
     const tgt = this.nearestEnemy(game, MINION_SHOOT[this.projId] ? 1000 : 700);
-    // 基础伤害（× summon≈magic 乘区 × 荆棘鞭 +10%）——射击/接触共用
-    const thornM0 = (p as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
-    const dmg0 = Math.max(1, Math.round(this.damage * p.damageMult('magic') * thornM0));
+    // 基础伤害（每 tick 按当前装备 live 重算 = Projectile.cs:15368；+armorPen）
+    const dmg0 = Math.max(1, Math.round(this.damage * p.summonDamageMult) + p.equipStats.armorPen);
+    // ---- 旗舰家族分发（源码行号见各方法注释；先于通用运动）----
+    if (this.projId >= 626 && this.projId <= 628) { this.dragonSegment(game, p, dmg0); return; }
+    if (this.projId === 625) { this.dragonHead(game, p, dmg0); return; }
+    if (this.projId === 831 || this.projId === 970) { this.counterHover(game, p, dmg0); return; }
+    if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
+    if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
+    if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
+    // Cool Whip 雪花哨兵 917（buff 312 维持）与 Cobwhip 蜘蛛 1036（buff 365 维持）：
+    // 独立索敌 400/环绕，伤害吃 summonDamageMult
+    if (this.projId === 917 || this.projId === 1036) {
+      // 生命与玩家 buff 绑定（AI_177 :42468：coolWhipBuff/cobWhipBuff → timeLeft=2 续命）
+      if (!p.whipBuffs[this.projId === 917 ? 312 : 365]) { this.dead = true; return; }
+      const tgt = this.nearestEnemy(game, 400);
+      if (tgt) {
+        const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+        this.vx = (tgt.cx - this.cx) / d * 5;
+        this.vy = (tgt.cy - this.cy) / d * 5;
+        this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+      } else {
+        const hx = p.cx - p.facing * 30 + Math.cos(this.age * 0.05 + this.slot) * 24;
+        const hy = p.cy - 40 + Math.sin(this.age * 0.05 + this.slot) * 16;
+        const dx = hx - this.cx, dy = hy - this.cy;
+        const d = Math.hypot(dx, dy) || 1;
+        const spd = Math.min(4, d * 0.08);
+        this.vx = (dx / d) * spd;
+        this.vy = (dy / d) * spd;
+        this.facing = p.facing;
+      }
+      this.x += this.vx;
+      this.y += this.vy;
+      this.contact(game, dmg0 + 30, 20); // armorPen 30（:8422/:9490）
+      return;
+    }
     // 朝向（AI_062 :62975：velocity.X>0 → spriteDirection=-1；近似取
     // 追敌方向/移动方向的水平符号）
     {
@@ -397,18 +717,8 @@ export class MinionProj extends Entity {
         }
       }
     }
-    // 接触伤害（同敌 20t 冷却；伤害吃玩家 summon≈magic 乘区；
-    // 敌方有鞭 tag → +whipTagDmg，Projectile.ApplyTag 系语义）
-    for (const e of game.enemies()) {
-      const en = e as never as EnemyLike & { dead: boolean; whipTagT?: number; whipTagDmg?: number };
-      if (en.dead) continue;
-      if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
-      if (!this.hitCd.ready(en.id, 20)) continue;
-      const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
-      const dmg = dmg0 + tag;
-      en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
-      this.attackFlash = 24; // AI_062 攻击帧门（小鬼 ai[1]<24 → frame+4）
-    }
+    // 接触伤害（同敌 20t 冷却；tag + TagCrit 语义见 contact()）
+    this.contact(game, dmg0, 20);
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
     void TILE;
   }

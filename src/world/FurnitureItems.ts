@@ -404,7 +404,8 @@ export function hatRackPlace(
 }
 
 /** TryFitting 共用主体（TEDisplayDoll.cs:693-718 / TEHatRack.cs:350-360）：
- *  占位+多叠 → null；多叠 → 克隆 1 并手持 -1；单叠 → 整体交换 */
+ *  占位+多叠 → null；多叠 → 克隆 1 并手持 -1；单叠 → 整体交换（Utils.Swap——
+ *  手持格收到原槽内容，空槽即空气，故置 item.stack=0 由调用方清手持格） */
 function tryFitting(
   rec: FurnitureItemRecord, target: number,
   item: { id: number; stack: number; prefix?: number },
@@ -417,6 +418,7 @@ function tryFitting(
     return { target, swappedOut: null };
   }
   rec.slots[target] = { id: item.id, stack: item.stack, prefix: item.prefix }; // Utils.Swap :705-709
+  item.stack = 0; // 手持格交出整件（原槽为空 → Swap 后手持=空气）
   return { target, swappedOut: cur };
 }
 

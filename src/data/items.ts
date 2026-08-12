@@ -369,6 +369,12 @@ item({ key: 'vi_285_aglet', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_213_staff_of_regrowth', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_964_boomstick', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_1293_lihzahrd_power_cell', name: '', maxStack: 999, value: 1 });
+// ---- 旧日军团三件（ItemID.cs：3817/3822/3828）——永恒水晶座右键消耗 3828
+// （Player.cs:31964 ConsumeItem），DropStarterCrystals 掉 3822（DD2Event.cs:944-957），
+// DropMedals 掉 3817（DD2Event.cs:819）。名字/图标走 vi_ 桥接（l10n ItemName + vicon）
+item({ key: 'vi_3828_eternia_crystal', name: '', maxStack: 99, value: 1 });
+item({ key: 'vi_3822_etherian_mana', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3817_defender_medal', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2195_lihzahrd_furnace', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2766_solar_tablet_fragment', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_300_battle_potion', name: '', maxStack: 999, value: 1 });

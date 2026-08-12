@@ -187,6 +187,7 @@ import { runHellforgesPass } from './vanilla/HellforgesPass';
 import { runCorruptionPass } from './vanilla/CorruptionPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from './vanilla/MissingCavesPass';
 import { settleWorldLiquids } from '../liquid/settle';
+import vanillaJson from '../../../public/sprites/vanilla.json';
 
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world }: GenCtx) {
@@ -972,12 +973,44 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
 // 完整覆盖(见 vanillaBiomes),legacy 版会造成双倍密度+索引帧宝箱(已修的 bug 源)。
 
 // ---------- 收尾：出生点（选最平坦区域并整平） ----------
+// sheet id → 贴图表 [宽,高]（帧越界净化用；数据源 public/sprites/vanilla.json）
+const V_SHEET_DIM: Record<number, [number, number]> = (() => {
+  const out: Record<number, [number, number]> = {};
+  const t = (vanillaJson as unknown as { tiles: Record<string, { grid: [number, number]; cols: number; rows: number }> }).tiles;
+  for (const [k, m] of Object.entries(t)) {
+    if (!m || !m.cols || !m.rows) continue;
+    out[Number(k)] = [m.cols * m.grid[0] + (m.cols - 1) * 2, m.rows * m.grid[1] + (m.rows - 1) * 2];
+  }
+  return out;
+})();
 function finalize({ store, surface, world, cfg, rng }: GenCtx) {
   // 幽灵净化:生成期 TileRunner 会在空气格写残留 type(原版语义,渲染不可见),
   // 但我们的存档格式无 active 位——进入存档前归零(防重读激活成浮空块)
   for (let i = 0; i < store.type.length; i++) {
     if (!store.flags[i] && store.type[i] !== 0) store.type[i] = 0; // 幽灵 type
     if (store.type[i] === 0) store.flags[i] = 0; // 幻影活性(type 0 不可有 flags)
+  }
+  // ---- 帧越界净化：生成期大量 type 直写/覆盖不清帧（LivingTree setLeaf、Terrain
+  //      type=1 等），旧 framed tile 帧残留进新类型 = 渲染越界/错位（实测 sheet1
+  //      fx=1080 / sheet4 fx=252 / sheet51 fy=216 等）。像素级粗判（超出表宽/高即清 0），
+  //      非均匀行高表（187 的 16/18 行）不受影响（越表判比步长判宽松）
+  {
+    const wmax = new Map<number, number>();
+    const hmax = new Map<number, number>();
+    for (let i = 0; i < store.type.length; i++) {
+      if (!store.flags[i]) continue;
+      const d = TILE_DEFS[store.type[i]];
+      const sh = d?.vanilla?.sheet;
+      if (sh == null) continue;
+      let w = wmax.get(sh), h2 = hmax.get(sh);
+      if (w === undefined || h2 === undefined) {
+        const m = V_SHEET_DIM[sh];
+        w = m ? m[0] : 0; h2 = m ? m[1] : 0;
+        wmax.set(sh, w); hmax.set(sh, h2);
+      }
+      if (w === 0) continue;
+      if (store.frameX[i] >= w || store.frameY[i] >= h2) { store.frameX[i] = 0; store.frameY[i] = 0; }
+    }
   }
   // ---- 原版 Spawn Point（1456 注册 cs:19605，实现 19605-19724）：中心随机扩张采样，自然地表，不改地形 ----
   // 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符

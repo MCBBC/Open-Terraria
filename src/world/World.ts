@@ -3,6 +3,7 @@ import { TileStore } from './TileStore';
 import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
 import { newMoonEventState } from './MoonEvent';
+import { newOldOnesArmyState } from './OldOnesArmy';
 import { newLunarEventState } from './LunarEvent';
 import type { FurnitureItemRecord } from './FurnitureItems';
 
@@ -89,6 +90,11 @@ export class World {
   // 运行时状态，**不进存档**：原版这些字段均不写 WorldFile（主菜单即重置 Main.cs:48332），
   // serialize/fromPacket 不碰本字段；读档后 kind=0 即无事件（对齐原版）
   moonEvent = newMoonEventState();
+  // ---- 旧日军团（原版 DD2Event 全静态位；召唤入口 = 永恒水晶座 466 右键）----
+  // 运行时状态不存档（对齐原版：仅 DownedInvasionT1-3 随 WorldFile 存 → flags）。
+  // 纯逻辑在 world/OldOnesArmy.ts（DD2Event.cs 1:1）；Game 接线 + AI 依赖注入
+  // DD2_EVENT_HOOKS（bossAI_dd2.ts 占位）
+  oldOnesArmy = newOldOnesArmyState();
   // ---- 星璇塔 / 天界入侵（原版 NPC.LunarApocalypseIsUp + TowerActive/Shield 六字段）----
   // 运行时状态：downedTower*/towerActive*/lunarApocalypseUp 三类 bool 走 flags 进存档
   // （WorldFile.cs:1352-1360）；盾值与月总倒计时**不存档**（读档 TowerActive=true 重置满盾，

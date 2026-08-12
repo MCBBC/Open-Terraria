@@ -522,6 +522,16 @@ function drawVineStrip(
 ): void {
   const amount = Math.max(0, Math.min(1, Math.abs(windSway.wind) / 1.2));
   const amt = 0.2 + (1 - 0.2) * amount; // Lerp(0.2,1,amount)
+  // 爬到藤真顶（CrawlToTopOfVineAndAddSpecialPoint :750——顶可能在视区扫描范围外；
+  // 从可视首格起链会丢上段相位，长藤在屏缘摆动错拍）
+  let topY = startY;
+  for (let k = 0; k < 80; k++) {
+    const ny = topY - 1;
+    if (ny < 0 || !st.flags[st.idx(x, ny)]) break;
+    if (!VINE_THREADS.has(TILE_DEFS[st.type[st.idx(x, ny)]]?.vanilla?.sheet ?? -1)) break;
+    topY = ny;
+  }
+  startY = topY;
   let segRot = -0.08 * amt;
   const wc = getWindCycle(x, startY, counters.vine, ENV.worldSurface, ENV.remix);
   let vx = x * TILE + 8, vy = startY * TILE - 2;
@@ -554,6 +564,15 @@ function drawRisingVineStrip(
 ): void {
   const amount = Math.max(0, Math.min(1, Math.abs(windSway.wind) / 1.2));
   const amt = 0.2 + 0.8 * amount;
+  // 爬到藤真底（CrawlToBottomOfReverseVine :770——向上生长链以底为锚）
+  let botY = startY;
+  for (let k = 0; k < 80; k++) {
+    const ny = botY + 1;
+    if (ny >= st.h || !st.flags[st.idx(x, ny)]) break;
+    if (!REVERSE_VINE.has(TILE_DEFS[st.type[st.idx(x, ny)]]?.vanilla?.sheet ?? -1)) break;
+    botY = ny;
+  }
+  startY = botY;
   let segRot = -0.08 * amt;
   const wc = getWindCycle(x, startY, counters.vine, ENV.worldSurface, ENV.remix);
   let vx = x * TILE + 8, vy = startY * TILE + TILE + 2;
@@ -864,13 +883,15 @@ export function drawWindSwayTiles(
               if (group === 2) drawDirectionalGrass(ctx, atlas, st, rec, x, y, type, trees);
               break;
             case SwayKind.VineThread:
-              // 锚点=藤顶（上方非藤才起链——CrawlToTopOfVineAndAddSpecialPoint）
-              if (group === 3 && isAnchorVine(VINE_THREADS, -1)) {
+              // 锚点=藤顶（CrawlToTopOfVineAndAddSpecialPoint——真顶可能在扫描范围外，
+              // 视区上缘格兜底起链，drawVineStrip 内部爬到真顶，仍整藤只画一次）
+              if (group === 3 && (isAnchorVine(VINE_THREADS, -1) || y === ty0)) {
                 drawVineStrip(ctx, atlas, st, rec, x, y, type, trees);
               }
               break;
             case SwayKind.ReverseVine:
-              if (group === 3 && isAnchorVine(REVERSE_VINE, +1)) {
+              // 同理：真底可能在扫描范围外，下缘格兜底（drawRisingVineStrip 内爬真底）
+              if (group === 3 && (isAnchorVine(REVERSE_VINE, +1) || y === ty1)) {
                 drawRisingVineStrip(ctx, atlas, st, rec, x, y, type, trees);
               }
               break;

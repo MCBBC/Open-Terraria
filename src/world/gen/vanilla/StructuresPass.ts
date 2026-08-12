@@ -730,7 +730,9 @@ function pyramid(
 /** PlaceTile(91, style)（火把）：frameX=22*style */
 function placeTorch(st: TileStore, x: number, y: number, style: number): void {
   if (!st.inBounds(x, y)) return;
-  st.setTileSilent(x, y, TORCH, style * 22, 0);
+  // 原版 PlaceTile case4（cs:59863）：frameY = 22*style（style 在 Y 轴！）；
+  // 此前 style*22 写 X = 轴向反了 → style≥6 全部越界（Tiles_4 宽仅 6 列）
+  st.setTileSilent(x, y, TORCH, 0, style * 22);
 }
 
 /** PlaceSmallPile（size1=2×1）：fx=pileStyle*36(+18)，fy=18；下方双列实心 + 双格净空 */

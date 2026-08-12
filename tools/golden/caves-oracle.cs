@@ -1635,6 +1635,7 @@ Checkpoint("desertentrance");
             {
                 wal[hti] = 187;
                 if ((double)hj < (double)worldSurface) liq[hti] = 0;     // else lava()：liq 量不变
+                else liqT[hti] = 1;                                      // ★lava 类型位（JS liquidType=2）
                 if (!hEdge || act[hti] != 0) { typ[hti] = 396; act[hti] = 1; liq[hti] = 0; }
             }
             else if (f7 > 0.7 || !hEdge)
@@ -1651,6 +1652,7 @@ Checkpoint("desertentrance");
                 {
                     wal[hti] = 187;
                     if ((double)hj < (double)worldSurface) liq[hti] = 0;
+                    else liqT[hti] = 1;                                  // ★lava 类型位
                     if (act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; }
                 }
             }

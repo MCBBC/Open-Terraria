@@ -118,6 +118,11 @@ export class Enemy extends Entity {
    *  （240t=4 秒；随从命中被 tag 敌伤害 +whipTagDmg） */
   whipTagT = 0;
   whipTagDmg = 0;
+  whipTagCrit = 0;
+  whipTagItem = 0;
+  /** 鞭 proc（proc 型鞭命中启用 240t，随从首跳触发后清零） */
+  whipProcT = 0;
+  whipProcItem = 0;
   /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
   stepUp = true;
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
@@ -375,6 +380,7 @@ export class Enemy extends Entity {
     this.lightRGB = null; // 点光由 AI 每帧重写（不残留上一帧状态）
     if (this.hpBarT > 0) this.hpBarT--;
     if (this.whipTagT > 0) this.whipTagT--;
+    if (this.whipProcT > 0) this.whipProcT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
@@ -787,7 +793,8 @@ export class Enemy extends Entity {
         this.ai0 = -40; // 压制下一跳
         this.vx *= 0.9;
         const aimY = player.y - this.cy - Math.random() * 200;
-        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, aimY, 4.5, 9);
+        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, aimY, 4.5, 9,
+          this.vanillaId === 184 ? 174 : this.vanillaId === 204 ? 176 : 605);
         this.ai3 = 50;
       }
     }
@@ -1005,7 +1012,7 @@ export class Enemy extends Entity {
             let ty = player.cy - oy - Math.abs(tx) * (R.drop ?? 0.1);
             tx += Math.random() * spread * 2 - spread;
             ty += Math.random() * spread * 2 - spread;
-            this.shootDart(game, ox, oy, tx, ty, R.speed, R.dmg);
+            this.shootDart(game, ox, oy, tx, ty, R.speed, R.dmg, R.proj);
           }
         }
         // 移动/冷却尽 → 解除瞄准（cs:60005-60009）
@@ -1039,7 +1046,7 @@ export class Enemy extends Entity {
         && this.ai2 >= this.ai3 * (this.hp / this.maxHp) + 30 && this.canSeePlayer(st, player)) {
         this.shootDart(game, this.cx, this.cy,
           player.cx - this.cx + (Math.random() * 80 - 40),
-          player.cy - this.cy + (Math.random() * 80 - 40), 15, 32);
+          player.cy - this.cy + (Math.random() * 80 - 40), 15, 32, 257);
         this.ai2 = 0; this.ai3 = 0;
       }
     }
@@ -1051,7 +1058,7 @@ export class Enemy extends Entity {
         this.ai2 += 1;
         if (this.ai2 === 68) {
           const jit = 8 + (Math.random() * 1.6 - 0.8); // ±0.8
-          this.shootDart(game, this.cx, this.cy - 8, player.cx - this.cx, player.cy - this.cy, jit, 20);
+          this.shootDart(game, this.cx, this.cy - 8, player.cx - this.cx, player.cy - this.cy, jit, 20, 909);
         }
         if (this.ai2 >= 100) this.ai2 = 0;
       } else this.ai2 = 0;
@@ -1073,33 +1080,35 @@ export class Enemy extends Entity {
   private static readonly RANGED_TABLE: Record<number, {
     cooldown: number; speed: number; dmg: number; range: number;
     drop?: number; spread?: number; oy?: number; burst?: number;
+    /** 原版弹型（NPC.cs:59797 起各 num172：贴图/旋转/重力见 Dart.ts DART_STYLE） */
+    proj: number;
   }> = {
-    111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: 0.1 },
-    379: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1 },  // 拜月教弓手（cs:59494/59609/59797/59823 修正后值,弹 WoodenArrowHostile 81）
-    380: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1 },
-    214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: 0, spread: 45 },
-    215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: 0.08 },
-    216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: 0.1 },
-    110: { cooldown: 70, speed: 11, dmg: 35, range: 700, drop: 0.1 },          // 骷髅弓手 火焰箭
-    206: { cooldown: 50, speed: 7, dmg: 37, range: 700, drop: 0.1, oy: -10 },  // 冰鱼人 冰水吐息
-    290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0, oy: -10 },    // 圣骑士 圣锤
-    291: { cooldown: 200, speed: 4, dmg: 100, range: 700, drop: 0, spread: 8 },// 骷髅神射 狙击弹
-    292: { cooldown: 120, speed: 12, dmg: 50, range: 700, drop: 0, burst: 4 }, // 战术骷髅 4 连弹
-    293: { cooldown: 90, speed: 4, dmg: 60, range: 700, drop: 0.1 },           // 骷髅爆破 火箭
-    449: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 }, // 投骨骷髅（drop 原版 rand 0.10-0.49）
-    450: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
-    451: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
-    452: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16 },
-    481: { cooldown: 100, speed: 8, dmg: 18, range: 400, drop: 0, spread: 16, oy: -14 }, // 希腊骷髅 标枪（drop 原版 ±0.035 随机）
-    498: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 }, // 蝾螈吐息
-    499: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    500: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    501: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    502: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    503: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
-    506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8 },
+    111: { cooldown: 180, speed: 9, dmg: 11, range: 700, drop: 0.1, proj: 81 },
+    379: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1, proj: 81 },  // 拜月教弓手（cs:59494/59609/59797/59823 修正后值,弹 WoodenArrowHostile 81）
+    380: { cooldown: 80, speed: 11, dmg: 35, range: 700, drop: 0.1, proj: 81 },
+    214: { cooldown: 50, speed: 10, dmg: 25, range: 500, drop: 0, spread: 45, proj: 180 },
+    215: { cooldown: 90, speed: 14, dmg: 35, range: 650, drop: 0.08, proj: 82 },
+    216: { cooldown: 180, speed: 9, dmg: 30, range: 700, drop: 0.1, proj: 180 },
+    110: { cooldown: 70, speed: 11, dmg: 35, range: 700, drop: 0.1, proj: 82 },          // 骷髅弓手 火焰箭
+    206: { cooldown: 50, speed: 7, dmg: 37, range: 700, drop: 0.1, oy: -10, proj: 177 },  // 冰鱼人 冰水吐息
+    290: { cooldown: 30, speed: 9, dmg: 60, range: 700, drop: 0, oy: -10, proj: 300 },    // 圣骑士 圣锤
+    291: { cooldown: 200, speed: 4, dmg: 100, range: 700, drop: 0, spread: 8, proj: 302 },// 骷髅神射 狙击弹
+    292: { cooldown: 120, speed: 12, dmg: 50, range: 700, drop: 0, burst: 4, proj: 180 }, // 战术骷髅 4 连弹
+    293: { cooldown: 90, speed: 4, dmg: 60, range: 700, drop: 0.1, proj: 303 },           // 骷髅爆破 火箭
+    449: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16, proj: 471 }, // 投骨骷髅（drop 原版 rand 0.10-0.49）
+    450: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16, proj: 471 },
+    451: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16, proj: 471 },
+    452: { cooldown: 70, speed: 7, dmg: 15, range: 200, drop: 0.25, spread: 16, proj: 471 },
+    481: { cooldown: 100, speed: 8, dmg: 18, range: 400, drop: 0, spread: 16, oy: -14, proj: 508 }, // 希腊骷髅 标枪（drop 原版 ±0.035 随机）
+    498: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 }, // 蝾螈吐息
+    499: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    500: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    501: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    502: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    503: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
   };
 
   /** 蜘蛛家族地面↔爬墙形态对照（NPC.cs:59276-59289 地→墙 / :29994-30008 墙→地）：
@@ -1404,7 +1413,7 @@ export class Enemy extends Entity {
       this.ai0 += 1;
       if (this.ai0 >= 200 && player.cy < this.cy && this.canSeePlayer(st, player)) {
         this.ai0 = 0;
-        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10);
+        this.shootDart(game, this.cx, this.cy, player.cx - this.cx, player.cy - this.cy, 12, 10, 31);
       }
     }
   }
@@ -1886,7 +1895,7 @@ export class Enemy extends Entity {
         if (!embedded && this.canSeePlayer(st, player)) {
           this.shootDart(game, this.cx, this.cy,
             player.cx - this.cx + (Math.random() * 20 - 10),
-            player.cy - this.cy + (Math.random() * 20 - 10), 10, 22);
+            player.cy - this.cy + (Math.random() * 20 - 10), 10, 22, 96);
           this.ai3 = 0;
         } else this.ai3 = 100;
       }
@@ -1989,7 +1998,7 @@ export class Enemy extends Entity {
           const syp = player.cy - this.cy + (Math.random() * 40 - 20);
           if ((sxp < 0 && this.vx < 0) || (sxp > 0 && this.vx > 0)) {
             const vScale = this.vanilla?.scale ?? 1;
-            this.shootDart(game, this.cx, this.cy, sxp, syp, 8, Math.round((vid === 176 ? 30 : 10) * vScale));
+            this.shootDart(game, this.cx, this.cy, sxp, syp, 8, Math.round((vid === 176 ? 30 : 10) * vScale), 55);
             this.ai1 = 101;
           } else this.ai1 = 0;
         }
@@ -2087,7 +2096,7 @@ export class Enemy extends Entity {
         if (this.ai3 === 0) {
           if (this.ai2 > 120) { this.ai2 = 0; this.ai3 = 1; }
         } else {
-          if (this.ai2 === 20) this.shootDart(game, this.cx, this.cy, dx, dy, 6, 25);
+          if (this.ai2 === 20) this.shootDart(game, this.cx, this.cy, dx, dy, 6, 25, 299);
           if (this.ai2 > 40) { this.ai3 = 0; this.ai2 = 0; }
         }
       } else { this.ai2 = 0; this.ai3 = 0; }
@@ -2300,16 +2309,17 @@ export class Enemy extends Entity {
       }
     }
     // ---- 飞行射击族（cs:23463-23543，逐发要求视线；轮空后 ai[0] 达随机阈值归零——
-    // 阈值缓存 ai[2]）：哈比 48 羽毛（30/60/90 连三、速 6、伤 15、±100、归零 400+rand400）/
-    // 恶魔 62/66 飞镰（20/40/60/80 连四、伤 21、±100、300+rand300；原版弹 0.2 起步自加速，
-    // Dart 无加速取直飞 6 近似）/ 红恶魔 156 三叉戟（20/40/60/80/100 连五、伤 80、±50、
-    // 250+rand250；出生点沿弹向前移 100px）
+    // 阈值缓存 ai[2]）：哈比 48 羽毛 38（30/60/90 连三、速 6、伤 15、±100、归零 400+rand400）/
+    // 恶魔 62/66 飞镰 44（20/40/60/80 连四、伤 21、±100、300+rand300；弹速 0.2 起步,
+    // AI_018 加速 ×1.06@ai0[30,100) 见 Dart.ts DART_STYLE[44]）/ 红恶魔 156 三叉戟 115
+    // （20/40/60/80/100 连五、伤 80、±50、250+rand250；弹速 0.2 起步 AI_027 ×1.125@ai0<30；
+    // 出生点沿弹向前移 100px cs:23538-23540）
     const shooter = this.vanillaId === 48
-      ? { ticks: [30, 60, 90], spd: 6, dmg: 15, spread: 100, reset: 400 }
+      ? { ticks: [30, 60, 90], spd: 6, dmg: 15, spread: 100, reset: 400, proj: 38, lead: 0 }
       : this.vanillaId === 62 || this.vanillaId === 66
-        ? { ticks: [20, 40, 60, 80], spd: 6, dmg: 21, spread: 100, reset: 300 }
+        ? { ticks: [20, 40, 60, 80], spd: 0.2, dmg: 21, spread: 100, reset: 300, proj: 44, lead: 0 }
         : this.vanillaId === 156
-          ? { ticks: [20, 40, 60, 80, 100], spd: 7, dmg: 80, spread: 50, reset: 250 }
+          ? { ticks: [20, 40, 60, 80, 100], spd: 0.2, dmg: 80, spread: 50, reset: 250, proj: 115, lead: 100 }
           : null;
     if (shooter && player && !player.dead) {
       if (this.ai0 < 0) this.ai0 = 0; // 类字段默认 -1120 是史莱姆初值；原版 ai[0] 从 0 起步
@@ -2318,7 +2328,10 @@ export class Enemy extends Entity {
         if (this.canSeePlayer(game.world.store, player)) {
           const ox = player.cx - this.cx + (Math.random() * 2 - 1) * shooter.spread;
           const oy = player.cy - this.cy + (Math.random() * 2 - 1) * shooter.spread;
-          this.shootDart(game, this.cx, this.cy, ox, oy, shooter.spd, shooter.dmg);
+          const d = Math.hypot(ox, oy) || 1;
+          // 出生点沿弹向偏移 lead px（原版 vector25 += dir*100,cs:23538）
+          this.shootDart(game, this.cx + (ox / d) * shooter.lead, this.cy + (oy / d) * shooter.lead,
+            ox, oy, shooter.spd, shooter.dmg, shooter.proj);
         }
       } else if (this.ai0 > shooter.ticks[shooter.ticks.length - 1]) {
         if (this.ai2 === 0) this.ai2 = shooter.reset + Math.floor(Math.random() * shooter.reset);
@@ -2440,7 +2453,8 @@ export class Enemy extends Entity {
         const dmg = this.vanillaId === 122 ? 25 : 45;
         const ang = Math.atan2(dy, dx) + (this.vanillaId === 122 ? (Math.random() - 0.5) * 0.157 : 0);
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
-          .add(new Dart(this.cx, this.cy, Math.cos(ang) * spd, Math.sin(ang) * spd, dmg), 'projectiles');
+          .add(new Dart(this.cx, this.cy, Math.cos(ang) * spd, Math.sin(ang) * spd, dmg,
+            this.vanillaId === 122 ? 84 : 128), 'projectiles');
       }
       if (this.ai3 > 0) {
         this.ai3++;
@@ -2459,7 +2473,7 @@ export class Enemy extends Entity {
         const ox = this.cx - 4, oy = this.y + this.h * 0.7;
         const tx = player.cx - ox + (Math.random() * 20 - 10);
         const ty = player.cy - oy - Math.abs(player.cx - ox) * 0.1 + (Math.random() * 50 - 30);
-        this.shootDart(game, ox, oy, tx, ty, 10, 40);
+        this.shootDart(game, ox, oy, tx, ty, 10, 40, 288);
         this.ai3 = 0; this.ai2 = 0;
       }
     }
@@ -3062,7 +3076,7 @@ export class Enemy extends Entity {
           const vx = dir * 2 + dir * (Math.floor(Math.random() * 12) - 2) * 0.25;
           let vy = -2 + (10 + Math.floor(Math.random() * 12) - 6) * 0.25;
           if (vy > -3) vy = -3;
-          ents.add(new Dart(this.cx + dir * 6, this.cy, vx, vy, 7), 'projectiles');
+          ents.add(new Dart(this.cx + dir * 6, this.cy, vx, vy, 7, 836), 'projectiles');
         }
       }
     }
@@ -3277,6 +3291,23 @@ export class Enemy extends Entity {
             this.cy + (ballId === 25 ? 20 : -8));
           if (ball) addEnemy(game, ball);
         }
+      } else if (this.vanillaId != null && this.vanillaId >= 281 && this.vanillaId <= 286) {
+        // 史后三法师（NPC.cs:21146-21191 num100/104/105）：布道者 281/282 迷失之魂 293
+        // （速 4、伤 40、timeLeft 300）;死灵法师 283/284 暗影束 290（速 6、伤 30,散布 ±30
+        // + 目标速度前置补偿 ×10）;魔法师 285/286 地狱火弹 291（速 8、伤 40）。
+        // 枪口 = (cx, y)（vector13 = 顶部中心）
+        const vid = this.vanillaId;
+        const proj = vid <= 282 ? 293 : vid <= 284 ? 290 : 291;
+        const spd = vid <= 282 ? 4 : vid <= 284 ? 6 : 8;
+        const dmg = vid <= 282 || vid >= 285 ? 40 : 30;
+        let dx = player.cx - this.cx, dy = player.cy - this.cy;
+        if (vid === 283 || vid === 284) {           // :21163-21166 散布 + 前置补偿
+          dx += (Math.random() * 60 - 30) - player.vx * 10;
+          dy += (Math.random() * 60 - 30) - player.vy * 10;
+        }
+        const d = Math.hypot(dx, dy) || 1;
+        const dart = new Dart(this.cx, this.y, (dx / d) * spd, (dy / d) * spd, dmg, proj);
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       } else {
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
         const d = Math.hypot(dx, dy) || 1;

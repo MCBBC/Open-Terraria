@@ -77,6 +77,7 @@ const STAFF_ITEMS = new Set([
  *  useStyle 14/15（头侧持）与 holdStyle 5/6/8 的 itemLocation 都要加此偏移 */
 const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2];
 import { Lang } from '../i18n/Lang';
+import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
@@ -565,6 +566,13 @@ export class Renderer {
     open: false, zoom: 0.5, zoomTarget: 0.5, panX: 0, panY: 0,
     anchorU: 0, anchorV: 0, anchorMX: 0, anchorMY: 0,
   };
+
+  /** 已放置传送晶塔（Game.refreshPylons 写入；地图图标层 TeleportPylonsMapLayer） */
+  pylons: Array<{ x: number; y: number; type: number }> = [];
+  /** 右键晶塔时的"当前塔"锚点（Main.MapPylonTile，连线起点；null=非晶塔会话） */
+  mapPylonTile: { x: number; y: number } | null = null;
+  /** 地图悬停晶塔的物品名（本帧；null=未悬停）——原版地图层 text 提示位 */
+  pylonHoverName: string | null = null;
 
   /** 全屏地图缩放：以鼠标位置为锚点（鼠标下的地图点不动，不乱飞） */
   zoomFullMapAt(newZoom: number, mouseX: number, mouseY: number) {
@@ -1889,13 +1897,15 @@ export class Renderer {
         ctx.drawImage(g.img, sx, sy, sw, sh, -originX, -originY, sw, sh);
       }
     }
-    // 投影层（696：同列 row+18，±1px 随机抖动，alpha 127×Opacity）
+    // 投影层（696 :23358-23367:同列 row+18 画【两遍】——第一遍精确、第二遍 ±1px 抖动,
+    //  alpha 127×Opacity）
     if (opts.echoRowShift) {
       const esy = Math.min(img.height - sh, (row + opts.echoRowShift) * cellH + padY);
-      const jx = (Math.floor(Math.random() * 3)) - 1;
-      const jy = (Math.floor(Math.random() * 3)) - 1;
       ctx.globalCompositeOperation = 'source-over';
       ctx.globalAlpha = Math.max(0, Math.min(1, (127 / 255) * opacity));
+      ctx.drawImage(img, sx, esy, sw, sh, -originX, -originY, sw, sh);
+      const jx = (Math.floor(Math.random() * 3)) - 1;
+      const jy = (Math.floor(Math.random() * 3)) - 1;
       ctx.drawImage(img, sx, esy, sw, sh, -originX + jx, -originY + jy, sw, sh);
     }
     ctx.restore();
@@ -1913,9 +1923,12 @@ export class Renderer {
   private drawQueenSlimeGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_657.png');
     if (!img) return;
+    const half = e.hp <= e.maxHp / 2;
     const idx = queenSlimeNextFrame(this.npcGridFrame(e), {
-      half: e.hp <= e.maxHp / 2,
-      flying: e.ai0 === 0,   // 二段待机即飞行（bossAI_lategame queenSlimeAI flying 同款）
+      half,
+      // 与 bossAI_lategame queenSlimeAI 的 noGravity 判定同式(:949)——
+      // 渲染/AI 两处 flying 语义必须一致,否则半血 ai0∈{4,5} 飞行帧段走错
+      flying: e.ai0 === 5 || (e.ai0 === 4 && e.ai2 === 0) || (half && e.ai0 === 0),
       vy: e.vy, ai0: e.ai0, ai1: e.ai1,
     });
     this.drawNpcGrid(e, img, 2, 16, idx, 180, 122, {
@@ -3970,12 +3983,77 @@ export class Renderer {
       ctx.globalAlpha = 1;
     }
     // 操作提示
+    this.drawPylonMapLayer(ctx, cx0, cy0, mouseX, mouseY);
     ctx.font = '13px sans-serif';
     ctx.fillStyle = '#C8C0D8';
     ctx.textAlign = 'center';
     ctx.fillText(Lang.text('Mods.SandboxWorld.Map.Hint'), viewW / 2, viewH - 16);
   }
   private _mapInit = false;
+
+  /** 全屏地图晶塔图标层（TeleportPylonsMapLayer.cs 1:1）：
+   *   - 连线（:52-75）：当前塔（MapPylonTile）→ 其余每座晶塔的黑 6px/白 2px 双线
+   *   - 图标（:77-104）：Extra_182.png 11 帧横排（330×38，帧 30×38），帧号 = 塔型；
+   *     玩家不在晶塔旁 → 半透明灰（color = Gray*0.5 :70-73）
+   *   - 悬停提示（:97-99）：晶塔物品名
+   *  击中判定（Game.tryPylonMapTeleport）：图标中心 = 锚点 + (1.5, 2) 格。 */
+  private drawPylonMapLayer(
+    ctx: CanvasRenderingContext2D, cx0: number, cy0: number,
+    mouseX: number, mouseY: number,
+  ) {
+    if (!this.pylons.length) { this.pylonHoverName = null; return; }
+    const fm = this.fullMap;
+    const icon = this.atlas ? this.atlas.vui('Images_Extra_182.png') : null;
+    // 玩家 ±60 格内无晶塔 → 半透明（IsPlayerNearAPylon :70-73；近似取相机中心玩家位）
+    const p = this._lastPlayer;
+    const dim = p ? !this.pylons.some((py) =>
+      Math.abs(py.x - p.cx / TILE) <= 62 && Math.abs(py.y - p.cy / TILE) <= 63) : true;
+    // 连线（:52-75）
+    if (this.mapPylonTile) {
+      const o = this.mapPylonTile;
+      const ox = cx0 + (o.x + 1.5) * fm.zoom, oy = cy0 + (o.y + 2) * fm.zoom;
+      for (const py of this.pylons) {
+        if (py.x === o.x && py.y === o.y) continue;
+        const tx = cx0 + (py.x + 1.5) * fm.zoom, ty = cy0 + (py.y + 2) * fm.zoom;
+        for (const [c, w] of [['#000000', 6], ['#FFFFFF', 2]] as const) {
+          ctx.strokeStyle = c;
+          ctx.lineWidth = w;
+          ctx.beginPath(); ctx.moveTo(ox, oy); ctx.lineTo(tx, ty); ctx.stroke();
+        }
+      }
+    }
+    // 图标 + 悬停
+    this.pylonHoverName = null;
+    const FW = 30, FH = 38;   // Extra_182：11 帧 × 30px（330×38）
+    const scale = Math.max(1, Math.min(2, fm.zoom));   // scaleIfSelected 2× / 基线 1×
+    for (const py of this.pylons) {
+      const mx = cx0 + (py.x + 1.5) * fm.zoom, my = cy0 + (py.y + 2) * fm.zoom;
+      const dw = FW * scale, dh = FH * scale;
+      if (mx < -dw || mx > ctx.canvas.width + dw || my < -dh || my > ctx.canvas.height + dh) continue;
+      ctx.globalAlpha = dim ? 0.35 : 1;
+      if (icon) {
+        ctx.drawImage(icon.img, icon.sx + py.type * FW, icon.sy, FW, FH,
+          mx - dw / 2, my - dh / 2, dw, dh);
+      } else {
+        // 贴图未就绪兜底：白描边菱形占位（懒加载次帧补上真图标）
+        ctx.strokeStyle = '#8CF5A9'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(mx, my - dh / 2); ctx.lineTo(mx + dw / 2, my);
+        ctx.lineTo(mx, my + dh / 2); ctx.lineTo(mx - dw / 2, my);
+        ctx.closePath(); ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+      if (Math.abs(mouseX - mx) <= dw / 2 && Math.abs(mouseY - my) <= dh / 2) {
+        this.pylonHoverName = Lang.itemName(pylonItemTypeFromStyle(py.type));
+      }
+    }
+    if (this.pylonHoverName) {
+      ctx.font = '13px sans-serif';
+      ctx.fillStyle = '#FFFFFF';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.pylonHoverName, mouseX, mouseY - 14);
+    }
+  }
 
   /** 全屏地图背景群系序号（DrawMapFullscreenBackground Main.cs:55804-55905 1:1）。
    *  深度以地图视区竖直中心（tile）近似原版 screenPosition；群系/墙取玩家所在格。

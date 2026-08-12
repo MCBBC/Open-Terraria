@@ -26,6 +26,12 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 242: return [Math.floor(style / 27) * 108, (style % 27) * 72];
     case 245: return [style * 36, 0];
     case 246: return [0, style * 36];
+    // 187 Decos3x2 Group2（TileObjectData :3303 StyleWrapLimit=35）：每行 35 组换行
+    // ——LivingTree 叶下地被 style 47-51（cs:28695）在第二行（Y=54）。此前 default
+    // 单轴 style*54 → style≥35 越界 1890 表宽
+    case 187: return [(style % 35) * 54, Math.floor(style / 35) * 36]; // Y 步=块高 36(16+2+18,非均匀行高)
+    // 15 椅子（TileObjectData :4164 StyleHorizontal=false）：style 竖排 Y 步 38
+    case 15: return [0, style * 38];
     default: return [style * fw * 18, 0];
   }
 }
