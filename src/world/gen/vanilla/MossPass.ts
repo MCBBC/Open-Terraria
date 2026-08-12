@@ -216,8 +216,10 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   }
 
   // ---- 暴露石头苔藓（cs:17725-17739）：0.05×w 个，四邻任一暴露的石头 ----
+  //  ★ 迭代上限（原版 while 无上限）：人工构造的"无洞穴"世界（单测/迷你图）会
+  //   永不命中暴露石头 → 死循环。真世界命中率 ≈1-5%，上限 500×budget 远超所需
   let budget = st.w * 0.05;
-  while (budget > 0) {
+  for (let iter = 0; budget > 0 && iter < budget * 500; iter++) {
     const x = rng.nextIntRange(50, st.w - 50);
     const y = rng.nextIntRange(Math.floor((gs.worldSurface + gs.rockLevel) / 2), gs.lavaLine);
     if (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY) continue;
@@ -232,8 +234,10 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
   }
 
   // ---- 地狱氦苔藓 381（cs:17741-17770）：0.065×w 个，25 半径框岩浆 >20 ----
+  //  ★ 同上迭代上限：选带无岩浆（选带 y<UnderworldLayer 且岩浆全在更深处）时
+  //   原版同款 while 会永不命中
   budget = st.w * 0.065;
-  while (budget > 0) {
+  for (let iter = 0; budget > 0 && iter < budget * 500; iter++) {
     const x = rng.nextIntRange(50, st.w - 50);
     const y = rng.nextIntRange(gs.waterLine, st.h - 200);
     const ii = st.idx(x, y);

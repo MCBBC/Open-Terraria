@@ -522,7 +522,13 @@ try {
       await sleep(600); // msg16 中继窗口
       const projDmg = await pageB.evaluate(() => window.__swGame.player.hp);
       const aHp2 = await pageA.evaluate(() => window.__swGame.net.players.get(1)?.hp ?? -1);
-      check('敌对弹幕对访客伤害（v5 bit7 + Damage_EVP 本地结算）', projDmg < 100, `B hp=${projDmg}/100`);
+      // 中间态诊断：房主真身弹体存活数 / B 端总傀儡数 / B iframes
+      const diag = {
+        aArrows: await pageA.evaluate(() => window.__swGame.entities.projectiles.filter((p) => !p.netPuppet && !p.dead).length),
+        bTotal: await pageB.evaluate(() => window.__swGame.netProjPuppets.size),
+        bIfr: await pageB.evaluate(() => window.__swGame.player.iframes),
+      };
+      check('敌对弹幕对访客伤害（v5 bit7 + Damage_EVP 本地结算）', projDmg < 100, `B hp=${projDmg}/100 ${JSON.stringify(diag)}`);
       check('弹幕伤害经 msg16 中继到房主', aHp2 === projDmg, `A侧=${aHp2} B侧=${projDmg}`);
       // 弹体命中不销毁（原版 :13811 穿透不消耗语义）——傀儡应仍存在或自然超时
       const pupHostile = await pageB.evaluate(() => {
@@ -530,7 +536,7 @@ try {
         for (const [, pup] of window.__swGame.netProjPuppets) if (pup.p.hostile) n++;
         return n;
       });
-      check('hostile 弹幕傀儡重建（bit7 解码）', pupHostile >= 1, `hostile傀儡=${pupHostile}`);
+      check('hostile 弹幕傀儡重建（bit7 解码）', pupHostile >= 1, `hostile傀儡=${pupHostile} 总傀儡=${diag.bTotal}`);
     }
 
     // 箱子同步：B 请求开箱（msg31）→ 服务器权威内容（msg32）→ protectItems 编辑被拒。

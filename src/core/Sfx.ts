@@ -25,7 +25,8 @@ export type SfxName =
   // ---- 枪族 UseSound（Item.cs：其余枪械通用 Item_11，此前已在库内）----
   | 'gunShot'      // SoundID.Item11 枪械通用
   | 'gunShotgun'   // SoundID.Item36 霰弹枪族 534/964/3788/4703
-  | 'gunHandgun';  // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
+  | 'gunHandgun'   // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
+  | 'record';      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -69,6 +70,7 @@ const WAV_MAP: Record<SfxName, string[]> = {
   gunShot: ['Item_11'],
   gunShotgun: ['Item_36'],
   gunHandgun: ['Item_41'],
+  record: ['Item_166'],
   // 以下无原版素材，走合成
   drink: [],
 };

@@ -9076,7 +9076,7 @@ export class Game implements GameHooks {
           }
           this.lighting.dirty = true;
         },
-        onChat: (text, r, g, b, width) => this.newText(text, r, g, b, width),
+        onChat: (text: string, r: number, g: number, b: number) => this.newText(text, r, g, b),
         onKick: (reason) => {
           this.cb.onToast?.(reason);
           fail(reason);
