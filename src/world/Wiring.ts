@@ -96,6 +96,23 @@ export class Wiring {
     this.st = st;
   }
 
+  /** 活跃器件冷却数（F5 调试报告只读 numMechs） */
+  activeMechCount(): number { return this.numMechs; }
+
+  /** 冷却注册表快照：{x, y, t} 剩余 tick（F5 调试报告 mechDump） */
+  mechDump(): Array<{ x: number; y: number; t: number }> {
+    const out: Array<{ x: number; y: number; t: number }> = [];
+    for (let i = 0; i < this.numMechs; i++) {
+      out.push({ x: this.mechX[i], y: this.mechY[i], t: this.mechTime[i] });
+    }
+    return out;
+  }
+
+  /** 传送器捕获对快照（-1 = 未捕获；F5 调试报告） */
+  teleportPairs(): Array<[number, number]> {
+    return [[...this.tp[0]], [...this.tp[1]]];
+  }
+
   private p2i(x: number, y: number): number { return y * this.st.w + x; }
   private i2x(i: number): number { return i % this.st.w; }
   private i2y(i: number): number { return (i / this.st.w) | 0; }

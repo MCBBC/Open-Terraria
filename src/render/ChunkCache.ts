@@ -37,6 +37,9 @@ export class ChunkCache {
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
   static readonly MAX_CHUNKS = 384;
+  /** 最近一次 flushDirty 实测耗时 ms（F5 调试报告：烘焙尖峰证据面） */
+  lastFlushMs = 0;
+  lastFlushCount = 0;
 
   /** 释放全部 chunk 画布 GPU 背板并清表(退出世界必须调用)。
    *  detached canvas 的回收依赖 GC 且明显滞后——连续多次读档累积数百 MB
@@ -117,6 +120,8 @@ export class ChunkCache {
       n++;
       if (performance.now() - t0 > budgetMs) break; // 单 chunk 烘焙超预算也至少完成 1 个
     }
+    this.lastFlushMs = performance.now() - t0;
+    this.lastFlushCount = n;
   }
 
   /** 动画时钟推进（Game 每帧调用）：sheet 到达换帧 tick → 只重建含该 sheet 的 chunk。
@@ -231,12 +236,6 @@ export class ChunkCache {
         // 风摆动图块（草/藤/吊挂植物/树冠标记帧）：摘出静态烘焙，
         // 由 Renderer 的 WindSway overlay 逐帧动态绘制（原版 AddSpecialPoint 特殊路径）
         if (def.vanilla && swayBakeSkip(type, st.frameX[i])) continue;
-        // ★TEMP 调试:陶罐(82)烘焙路径追踪(定位"贴图错位"bug,用后即删)
-        if (type === 82 && (window as unknown as { __potDbg?: boolean }).__potDbg) {
-          console.warn('[potDbg] cell', x, y, 'fx', st.frameX[i], 'fy', st.frameY[i],
-            'vanilla', JSON.stringify(def.vanilla), 'autotiler', !!this.autotiler,
-            'skip', swayBakeSkip(type, st.frameX[i]));
-        }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
           // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch

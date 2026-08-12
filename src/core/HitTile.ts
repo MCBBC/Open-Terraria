@@ -35,6 +35,21 @@ export class HitTile {
     return this.data.get(`${x},${y},${type}`)?.damage ?? 0;
   }
 
+  /** 条目数（F5 调试报告 / 泄漏排查） */
+  size(): number { return this.data.size; }
+
+  /** 按插入序取前 n 条（F5 调试报告 Top 条目转储） */
+  dumpTop(n: number): Array<{ x: number; y: number; type: number; damage: number; ttl: number }> {
+    const out: Array<{ x: number; y: number; type: number; damage: number; ttl: number }> = [];
+    let i = 0;
+    for (const [key, e] of this.data) {
+      if (i++ >= n) break;
+      const p = key.split(',');
+      out.push({ x: +p[0], y: +p[1], type: +p[2], damage: e.damage, ttl: e.ttl });
+    }
+    return out;
+  }
+
   /** 清除指定格（破坏完成/格已空时调用） */
   clear(x: number, y: number, type = 1) {
     this.data.delete(`${x},${y},${type}`);

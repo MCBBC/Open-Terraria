@@ -731,12 +731,6 @@ export function drawVanillaCell(
     const meta = atlas.vmeta(sheet);
     if (meta && fw > 0) {
       const imgW = atlas.ensureVImage(meta.sheet)?.width ?? 0;
-      // ★TEMP 调试:陶罐(28)重排判定输入(用后即删)
-      if (sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg
-        && (x === 3385 || x === 3386) && (y === 189 || y === 190)) {
-        console.warn('[potDbg4]', x, y, 'grid', JSON.stringify(meta.grid), 'stride', JSON.stringify(meta.stride),
-          'imgW', imgW, 'ofx', ofx, 'fw', fw, 'fh', fh, '触发重排', ofx + meta.grid[0] > imgW);
-      }
       if (imgW > 0 && ofx + meta.grid[0] > imgW) {
         const objW = fw * meta.stride[0];
         const bandH = (fh || 1) * meta.stride[1];
@@ -754,12 +748,6 @@ export function drawVanillaCell(
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
     r = atlas.vframeAt(sheet, ofx, ofy);
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
-    // ★TEMP 调试:陶罐(28)style 路径取帧结果(定位错位 bug,用后即删)
-    if (sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg) {
-      console.warn('[potDbg2] style', x, y, 'fx', fx, 'fy', fy, '→ ofx', ofx, 'ofy', ofy,
-        'r', r ? `${r.sx},${r.sy} ${r.sw}x${r.sh}` : 'NULL',
-        'imgSize', r ? `${r.img.width}x${r.img.height}` : '-');
-    }
   }
   if (!r) return;
   // tileTop(GetTileDrawData 权威,静态表 + 条件项)与 C 类手动偏移
@@ -856,13 +844,6 @@ export function drawVanillaCell(
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
   const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
-  // ★TEMP 调试:陶罐(28)最终绘制参数 + 画后回读(定位错位 bug,用后即删)
-  const dbgPot = sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg
-    && (x === 3385 || x === 3386) && (y === 189 || y === 190);
-  if (dbgPot) {
-    console.warn('[potDbg3]', x, y, 'src', asx, asy, asw, ash, 'dst', Math.round(fdx + vx), Math.round(dpy + vy),
-      'flip', FLIP_X_EVEN.has(sheet) && x % 2 === 0, 'alpha', ctx.globalAlpha, 'imgOk', r.img.width > 0);
-  }
   // X 镜像(植物/藤蔓变体:x%2==0 翻转)
   if (FLIP_X_EVEN.has(sheet) && x % 2 === 0) {
     ctx.save();
@@ -872,12 +853,6 @@ export function drawVanillaCell(
     ctx.restore();
   } else {
     ctx.drawImage(r.img, asx, asy, asw, ash, fdx + vx, dpy + vy, asw, ash);
-  }
-  if (dbgPot) {
-    const rd = ctx.getImageData(Math.round(fdx), Math.round(dpy), 16, 16).data;
-    let op = 0;
-    for (let k = 3; k < rd.length; k += 4) if (rd[k] > 40) op++;
-    console.warn('[potDbg3]', x, y, '画后回读 op =', op);
   }
   void fw; void fh;
 }
@@ -1127,6 +1102,10 @@ function drawAdjust(
     case 530:   // :4757-4776:addFrY += 36*biome(同 529 变体近似)
       a.sy = fy + 36 * biomeVariant529(st, x, y, w);
       break;
+    // ⚠已删除 case 28/105/470/719:那是 Player.cs 手持【物品】贴图的 14 相位
+    // 动画(物品 id 空间),不是 tile sheet!错抄于此致 sheet 28(陶罐)被劫持——
+    // sy+270×(t%4) 与 sx+288×(t/4) 随时间/位置变化 → 陶罐错位且开关门重建后
+    // 错位形态改变(用户标注)。物品手持动画归 PlayerDrawLayers 体系,不归此处。
     case 227:   // :5121-5152:fx==204 时按下方仙人掌群系加变体列(原版原文如此)
       if (fx === 204) {
         const v = biomeVariant529(st, x, y, w);
@@ -1174,12 +1153,6 @@ function drawAdjust(
           a.sy = fy + 36 * n;
         }
       }
-      break;
-    }
-    case 28: case 105: case 470: case 719: {  // :4603-4611:14 相位时间动画(288×270 网格)
-      const t = (x + y + Math.floor(tileAnim.tick / 4)) % 14;
-      a.sx = fx + 288 * Math.floor(t / 4);
-      a.sy = fy + 270 * (t % 4);
       break;
     }
     case 405:   // :5443-5462

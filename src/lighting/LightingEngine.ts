@@ -36,6 +36,9 @@ export class LightingEngine {
     this.dirty = true;
   }
 
+  /** 本帧已注册的动态点光数（F5 调试报告只读 perFrame 长度） */
+  get perFrameCount(): number { return this.perFrame.length; }
+
   // ---- 内部 ----
   private state: State = State.MinimapUpdate;
   private work = new LightMap();

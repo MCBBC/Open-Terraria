@@ -118,12 +118,22 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
         strength: rng.int(10, 29), steps: rng.int(10, 19), type: -2,
         speedX: rng.int(-1, 2), speedY: rng.int(-1, 2),
       });
+      if (pillarSeqJS === 27) {
+        let w6 = '';
+        for (let y6 = 1045; y6 <= 1060; y6++) for (let x6 = 400; x6 <= 420; x6++) { const k6 = st.idx(x6, y6); w6 += String(st.flags[k6] ? V(st.type[k6]) : 0).padStart(3, ' '); }
+        console.log('r27JS dig2Win ' + w6);
+      }
     }
     if (rng.next() * 5 < 1) {
       tileRunner(st, rng, gs, x + rng.int(-15, 14), y + rng.int(-15, 9), {
         strength: rng.int(15, 29), steps: rng.int(5, 19), type: -2,
         speedX: rng.int(-1, 2), speedY: rng.int(-1, 2),
       });
+      if (pillarSeqJS === 27) {
+        let w7 = '';
+        for (let y7 = 1045; y7 <= 1060; y7++) for (let x7 = 400; x7 <= 420; x7++) { const k7 = st.idx(x7, y7); w7 += String(st.flags[k7] ? V(st.type[k7]) : 0).padStart(3, ' '); }
+        console.log('r27JS dig3Win ' + w7);
+      }
     }
   }
   console.log(`uwPhaseJS uwS4 peek=${rng.vanilla.peek()}`);

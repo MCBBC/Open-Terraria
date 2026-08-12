@@ -355,6 +355,8 @@ export class Game implements GameHooks {
   paused = false;
   private acc = 0;
   private lastTime = 0;
+  /** 最近 60 个 rAF 帧间隔（ms）——F5 调试报告 fps 的唯一数据源 */
+  private frameDts: number[] = [];
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
   private _prevRightDown = false;
@@ -387,6 +389,31 @@ export class Game implements GameHooks {
   private swingHitSet = new Set<number>();
   /** 同一挥击内 tileCut 格只处理一次（与 swingHitSet 同生命周期） */
   private swingTileCutSet = new Set<number>();
+
+  /** 滚动 FPS（最近 60 帧均值；样本不足返回 null）——F5 调试报告 meta/perf 段 */
+  get fps(): number | null {
+    const n = this.frameDts.length;
+    if (n < 2) return null;
+    let sum = 0;
+    for (const d of this.frameDts) sum += d;
+    return sum / n > 0 ? 1000 / (sum / n) : null;
+  }
+
+  /** 私有运行时状态一次性打包（F5 调试报告 systems 段；私有字段只从这里出） */
+  debugSnapshot() {
+    return {
+      fps: this.fps,
+      frameDtMs: this.frameDts.slice(),
+      hitTilesSize: this.hitTiles.size(),
+      hitTilesTop: this.hitTiles.dumpTop(10),
+      mining: this.mining ? { x: this.mining.x, y: this.mining.y, progress: this.mining.progress } : null,
+      swing: this.swing
+        ? { t: this.swing.t, dur: this.swing.dur, item: this.swing.item, dmg: this.swing.dmg ?? null, kb: this.swing.kb ?? null, useStyle: this.swing.useStyle ?? null, aim: this.swing.aim ?? null }
+        : null,
+      invasionWarn: this.invasionWarn,
+      tickCount: this.tickCount,
+    };
+  }
 
   // 弹药
   particles: Particle[] = [];
@@ -1638,7 +1665,10 @@ export class Game implements GameHooks {
   }
 
   private frame(now: number) {
-    const elapsed = Math.min((now - this.lastTime) / 1000, 0.25);
+    const dtMs = now - this.lastTime;
+    this.frameDts.push(dtMs);
+    if (this.frameDts.length > 60) this.frameDts.shift();
+    const elapsed = Math.min(dtMs / 1000, 0.25);
     this.lastTime = now;
     windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
     // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
