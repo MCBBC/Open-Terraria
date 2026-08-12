@@ -1830,17 +1830,21 @@ export class Game implements GameHooks {
       }
     }
     // ---- 星尘套装守护者（Player.cs:16195-16212：套装在身 → 常驻 proj 623，base 30 伤；
-    //      伤害走 live 刷新吃 summonDamageMult）。buff 187 展示层从略。
-    if (this.player.equipStats.summonSet?.guardian && !this.player.dead
-      && !this.entities.projectiles.some((e) => {
+    //      伤害走 live 刷新吃 summonDamageMult；脱装 → buff 187 撤除守护者死亡）。
+    //      buff 187 展示层从略。
+    {
+      const guardianOn = !!this.player.equipStats.summonSet?.guardian && !this.player.dead;
+      const g623 = this.entities.projectiles.find((e) => {
         const m = e as MinionProj;
         return m instanceof MinionProj && !m.dead && m.projId === 623;
-      })) {
-      const owner = this.player;
-      const g = new MinionProj(owner.cx, owner.cy, 623, 30, 10, false, 0, false,
-        () => (owner.dead ? null : owner));
-      g.noSlot = true;
-      this.entities.add(g, 'projectiles');
+      }) as MinionProj | undefined;
+      if (guardianOn && !g623) {
+        const owner = this.player;
+        const g = new MinionProj(owner.cx, owner.cy, 623, 30, 10, false, 0, false,
+          () => (owner.dead ? null : owner));
+        g.noSlot = true;
+        this.entities.add(g, 'projectiles');
+      } else if (!guardianOn && g623) g623.dead = true;
     }
     // ---- 起爆器 411 坠落触发（Player.cs:34368 TryLandingOnDetonator）：落地冲击 vy≥3 且
     // 脚下格（Bottom 左下角 +0.01）是 411 未触发态（frameY==0 && frameX<36）→ Wiring.HitSwitch
@@ -3397,12 +3401,15 @@ export class Game implements GameHooks {
       }
       case 'whip': {
         // 鞭（ProjectileAI_Whip 主干简化）：从玩家朝鼠标甩出/收回（时长=useAnimation），
-        // 命中敌人伤害+tag（UniqueTagEffects TagDamage，240t 内随从对该敌 +N）
+        // 命中敌人伤害+tag（UniqueTagEffects TagDamage，240t 内随从对该敌 +N）。
+        // ★伤害取武器基伤×词缀（GetWeaponDamage summon → minionDamage 单次乘区）——
+        // 不能用 wrapper 预乘后的 cw.damage（那已含 ranged 乘区，WhipProj 再乘
+        // summonDamageMult 会双乘；armorPen 同理由命中侧加）
         const whip = cw as Extract<typeof cw, { kind: 'whip' }>;
         const owner = this.player;
         this.entities.add(new WhipProj(
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
-          Math.max(1, Math.round(whip.damage * owner.summonDamageMult)),
+          Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
           whip.knockback, whip.useTime, whip.shootSpeed,
           () => (owner.dead ? null : owner),
         ), 'projectiles');
@@ -3440,7 +3447,7 @@ export class Game implements GameHooks {
         }
         const owner = this.player;
         this.entities.add(new MinionProj(
-          px, py, cw.shoot, cw.damage,
+          px, py, cw.shoot, Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))), // 基伤×词缀（乘区由 MinionProj live 结算，勿用预乘的 cw.damage）
           cw.knockback, !!cw.sentry,
           this.entities.projectiles.filter((e) => e instanceof MinionProj && !(e as MinionProj).sentry).length,
           false, // 地面型判定省略：统一飞行（地面 3 件的 walk 近似后续按 aiStyle 细分）

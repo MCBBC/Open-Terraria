@@ -125,7 +125,8 @@ export class WhipProj extends Entity {
     // 命中：根部→鞭尖线段（分段采样，段半径 8px）与敌 AABB 相交。
     // 多目标衰减（:12626-12678）：本次挥动第 n 个命中敌 ×falloff^(n-1)（首敌全额）
     const falloff = WHIP_FALLOFF[this.projId] ?? 0.7;
-    const baseDmg = Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1)));
+    const baseDmg = Math.max(1, Math.round(this.damage * (owner ? owner.summonDamageMult : 1))
+      + (owner ? owner.equipStats.armorPen : 0)); // 护甲穿透（:12068 命中侧）
     const segs = 6;
     for (let s = 1; s <= segs; s++) {
       const k = s / segs;

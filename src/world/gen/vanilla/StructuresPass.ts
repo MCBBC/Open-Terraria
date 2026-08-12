@@ -126,7 +126,8 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
   console.log(`ciPhaseJS ciS1 peek=${rng.vanilla.peek()} bbox=${b4},${b5},${b6},${b7}`);
   let r17 = b4 + rng.int(0, 4);                      // ② 底缘雨云凸包：num4+Next(5)
   let r19 = 0;
-  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5))) {
+  // 步进 Next(r,(int)(r*1.5))——闭区间-1
+  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5) - 1)) {
     let r18 = b7;
     while (r17 >= 15 && r17 < st.w - 15 && r18 >= 15 && r18 < st.h - 15 && st.flags[st.idx(r17, r18)] === 0) r18--;
     r18 += rng.int(-3, 3);                           // Next(-3,4)
@@ -197,7 +198,7 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
           if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) st.type[st.idx(x, y)] = tile;   // 原版只写 type
         }
       }
-      cx += rng.int(cr, Math.floor(cr * 1.5));
+      cx += rng.int(cr, Math.floor(cr * 1.5) - 1);
     }
   }
   for (let x = b4 - 20; x <= b5 + 20; x++) {         // ⑤ 全实心区填墙 73
@@ -317,7 +318,8 @@ function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
   }
   let r17 = b4 + rng.int(0, 4);                      // ② 雨云凸包（CloudLake 无 InWorld 门）
   let r19 = 0;
-  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5))) {
+  // 步进 Next(r,(int)(r*1.5))——闭区间-1
+  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5) - 1)) {
     let r18 = b7;
     while (r18 >= 0 && st.flags[st.idx(r17, r18)] === 0) r18--;
     r18 += rng.int(-3, 3);
