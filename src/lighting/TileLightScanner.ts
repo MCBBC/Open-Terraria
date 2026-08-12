@@ -123,7 +123,12 @@ export class TileLightScanner {
     const type = st.type[i];
     if (type !== 0) {
       const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
-      if (!actuated && this.blocksLight[type]) {
+      // AllowLightInWater（TileID.cs:359：玻璃 54/回声 541/彩纸 328/降雪 459/
+      // 水族馆 748/尖刺 750）——水中也透天光（:3161 独立分支）
+      const sheet = TILE_DEFS[type]?.vanilla?.sheet ?? -1;
+      if (sheet === 54 || sheet === 541 || sheet === 328 || sheet === 459 || sheet === 748 || sheet === 750) {
+        // 落到墙透光判定（原版此分支同样要求 wallLight）
+      } else if (!actuated && this.blocksLight[type]) {
         if (st.slope[i] === 0 && st.half[i] === 0) return false;
         // 坡面/半砖例外：四邻必须全干（:3170 第三析取支的邻格 liquid==0）
         if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
@@ -172,6 +177,24 @@ export class TileLightScanner {
         if (wall !== 0 && st.type[i] === 0) {
           const we = WALL_EMISSIVE[wall];
           if (we) { lr = Math.max(lr, we[0]); lg = Math.max(lg, we[1]); lb = Math.max(lb, we[2]); }
+          // 彩色玻璃墙彩光（ApplySurfaceLight :3190-3242）：墙 88-93（紫/黄/蓝/绿/
+          // 红/彩虹玻璃）/241 橙——格式满光后按墙种 RGB 乘区染色（switch wall-88 档）
+          if ((wall >= 88 && wall <= 93) || wall === 241) {
+            const k = wall === 241 ? 6 : wall - 88;
+            const TINT: Array<[number, number, number]> = [
+              [0.9, 0.15, 0.9], [0.9, 0.9, 0.15], [0.15, 0.15, 0.9], [0.15, 0.9, 0.15],
+              [0.9, 0.15, 0.15], [0.7 + 0.2, 0.7, 0.7], [0.9, 0.5, 0],
+            ];
+            // 原版 switch：0 紫(0.9,0.15,0.9) 1 黄(0.9,0.9,0.15) 2 蓝(0.15,0.15,0.9)
+            // 3 绿(0.15,0.9,0.15) 4 红(0.9,0.15,0.15) 5 彩虹(0.7+Disco×0.2) 6 橙(0.9,0.5,0)
+            const dc = this.flicker.discoColor();  // Main.Disco 轮转（:3229-3233 彩虹档）
+            const t = k === 5
+              ? [0.7 + (dc[0] / 255) * 0.2, 0.7 + (dc[1] / 255) * 0.2, 0.7 + (dc[2] / 255) * 0.2]
+              : TINT[k];
+            // 此分支原版作用在天空光之上（num=num4 系）且要求 tile 不挡阳/液<255：
+            // 此处以 max 合成等效（墙格无挡阳块时天空已满 → 乘区改写）
+            lr = Math.max(lr, t[0]); lg = Math.max(lg, t[1]); lb = Math.max(lb, t[2]);
+          }
         }
         // ③ 发光 tile(:103-106)
         const type = st.type[i];

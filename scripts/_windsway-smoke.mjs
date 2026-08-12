@@ -95,13 +95,15 @@ const out = await page.evaluate(async () => {
   await new Promise(r => setTimeout(r, 400));
 
   const canvas = g.renderer.canvas;
+  const crownTarget = res.sampleTarget === 'treeCrown';
+  const SW = crownTarget ? 72 : 24; // 树冠代位时大窗（慢速摆动+天空背景）
   const sampleHash = () => {
     const ctx = canvas.getContext('2d');
-    // 草所在屏幕位置附近的 64×64 区域
+    // 草所在屏幕位置附近的 SW×SW 区域
     const sx = Math.round(canvas.width / 2 + (grassX * 16 + 8 - g.camera.x) * g.camera.zoom);
     const sy = Math.round(canvas.height / 2 + (grassY * 16 + 8 - g.camera.y) * g.camera.zoom);
-    if (sx < 14 || sy < 14 || sx + 24 > canvas.width || sy + 24 > canvas.height) return null;
-    const d = ctx.getImageData(sx - 12, sy - 12, 24, 24).data;
+    if (sx < SW / 2 + 2 || sy < SW / 2 + 2 || sx + SW / 2 > canvas.width || sy + SW / 2 > canvas.height) return null;
+    const d = ctx.getImageData(sx - SW / 2, sy - SW / 2, SW, SW).data;
     let h = 0;
     for (let k = 0; k < d.length; k += 16) h = (h * 31 + d[k]) | 0;
     return { h, sx, sy };
@@ -113,10 +115,10 @@ const out = await page.evaluate(async () => {
   // 取整个 64×64 的非透明/非黑像素数作为"有东西"证据
   const ctx = canvas.getContext('2d');
   if (s0) {
-    const d = ctx.getImageData(s0.sx - 12, s0.sy - 12, 24, 24).data;
+    const d = ctx.getImageData(s0.sx - SW / 2, s0.sy - SW / 2, SW, SW).data;
     let lit = 0;
     for (let k = 0; k < d.length; k += 4) if (d[k] + d[k + 1] + d[k + 2] > 60) lit++;
-    res.staticLitPxNarrow = lit; // 24×24=576px 满格参考
+    res.staticLitPxNarrow = lit;
     res.staticLitPx = lit;
   }
 
@@ -182,6 +184,22 @@ const out = await page.evaluate(async () => {
     res.gateOffWind = ws.windSway.wind;
     opts.data.swayInWind = true;
   } catch (e) { res.gateErr = String(e); }
+
+  // 6.5 落叶：高风下树冠区数秒内喷出落叶（EmitTreeLeaves 频率门 + 粒子上限）
+  const np = (await import('/src/render/NatureParticles.ts')).natureParticles;
+  g.world.weather.windSpeedCurrent = 0.8; g.world.weather.windSpeedTarget = 0.8;
+  p.x = (treeX - 6) * 16; p.y = (groundY - 2) * 16; p.vx = 0; p.vy = 0;
+  if (treeX >= 0) {
+    await new Promise(r => setTimeout(r, 400));
+    np.clear();
+    let peak = 0;
+    for (let i = 0; i < 30; i++) {
+      peak = Math.max(peak, np.leaves.length);
+      await new Promise(r => setTimeout(r, 100));
+    }
+    res.leafPeak = peak;
+    res.leavesOk = peak > 0;
+  }
 
   // 7. 性能：草密集区逐帧动态绘制的帧间隔（p95 应 < 20ms）
   park();

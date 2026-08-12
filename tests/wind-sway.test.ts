@@ -177,10 +177,45 @@ import { getTreeLeaf, dripGoreFor, leafEmits } from '../src/render/NatureParticl
 import { Clock } from '../src/world/World';
 
 describe('MultiTileVine 变体表（:9430-9532 全量）', () => {
-  it('34/126 的 key 变体：9 号 flag2+num5=-1+num2Mul=0.3；23 号 num3=0 静态', () => {
-    // 经由 _windSwayInternals 无法直查私有函数——用行为侧证：此处至少验证表驱动的
-    // 关键样本通过模块暴露面可回归（变体表为私有，由浏览器冒烟覆盖）
-    expect(true).toBe(true);
+  const mv = _windSwayInternals.multiVineVariant;
+  it('34/126 key 变体逐条（key = fy/54 + fx/108*37）', () => {
+    const at = (key: number) => mv(34, Math.floor(key / 37) * 108, (key % 37) * 54); // key = fy/54 + fx/108*37
+    expect(at(9)).toMatchObject({ num3: null, num5: -1, num2Mul: 0.3, flag2: true });
+    expect(at(11)).toMatchObject({ num2Mul: 0.5 });
+    expect(at(12)).toMatchObject({ num3: null, num5: -1 });
+    expect(at(18)).toMatchObject({ num3: null, num5: -1 });
+    expect(at(21)).toMatchObject({ num3: null, num5: -1 });
+    expect(at(23)).toMatchObject({ num3: 0 });
+    expect(at(25)).toMatchObject({ num3: null, num5: -1, flag2: true });
+    expect(at(32)).toMatchObject({ num2Mul: 0.5 });
+    expect(at(35)).toMatchObject({ num3: 0 });
+    expect(at(36)).toMatchObject({ num3: null, num5: -1, flag2: true });
+    expect(at(37)).toMatchObject({ num3: null, num5: -1, flag2: true, num2Mul: 0.5 });
+    expect(at(39)).toMatchObject({ num3: null, num5: -1, flag2: true });
+    expect(at(40)).toMatchObject({ num3: null, num5: -2, flag2: true, num2Mul: 0.5 });
+    expect(at(43)).toMatchObject({ num3: null, num5: -2, flag2: true, num2Mul: 0.5 });
+    expect(at(44)).toMatchObject({ num3: null, num5: -3 });
+    expect(at(54)).toMatchObject({ num3: 0 });
+    expect(at(70)).toMatchObject({ num3: 0 });
+    expect(at(0)).toMatchObject({ num3: 1, num5: 0, num2Mul: 1, flag2: false });
+  });
+  it('42 行变体（key = fy/36）', () => {
+    const at = (row: number) => mv(42, 0, row * 36);
+    expect(at(0)).toMatchObject({ num3: null, num5: -1 });
+    expect(at(9)).toMatchObject({ num3: 0 });
+    expect(at(30)).toMatchObject({ num3: 0 });
+    expect(at(39)).toMatchObject({ num3: null, num5: -1, flag2: true });
+    expect(at(43)).toMatchObject({ num3: null, num5: -1, flag2: true });
+    expect(at(70)).toMatchObject({ num3: 0 });
+    expect(at(5)).toMatchObject({ num3: 1, num5: 0 });
+  });
+  it('其余类型基础值：95 族 num5=0；591/592 nx=0.5,num5=-2；698 offX=-10；91/465 默认 -4', () => {
+    expect(mv(95, 0, 0)).toMatchObject({ num3: 1, num5: 0 });
+    expect(mv(591, 0, 0)).toMatchObject({ nx: 0.5, num5: -2 });
+    expect(mv(592, 0, 0)).toMatchObject({ nx: 0.5, num5: -2 });
+    expect(mv(698, 0, 0)).toMatchObject({ nx: 0.5, num5: -1, offX: -10 });
+    expect(mv(91, 0, 0)).toMatchObject({ num3: null, num5: -4 });
+    expect(mv(465, 0, 0)).toMatchObject({ num3: null, num5: -4 });
   });
 });
 

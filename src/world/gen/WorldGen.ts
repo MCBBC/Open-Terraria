@@ -146,7 +146,7 @@ import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPas
 import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
-import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass } from './vanilla/StructuresPass';
+import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass, matureHerbPlants } from './vanilla/StructuresPass';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runWebsPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -840,6 +840,15 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
   {
     const gs = ctxGs[0];
     if (gs) runTreePass(store, rng, gs);
+  }
+  // 原版 pass AlchemyHerbs(20109)+DyePlants 的熟成段(45757)：Trees 之后、
+  // GrassPlants(20209) 之前——w×1.7 次 PlantAlch + 岩层下泥面补种/熟成
+  {
+    const gs = ctxGs[0];
+    if (gs) {
+      runAlchemyHerbsPass(store, rng, gs);
+      matureHerbPlants(store, rng, gs);
+    }
   }
   // 地表植物装饰——原版 pass GrassPlantsEvilPlantsAndPumpkinsOnSurface（WorldGen.cs:20201-20266）+
   // PlaceTile 液体拒绝（WorldGen.cs:59477：tile 3/24/201/637 在液体中不放）。

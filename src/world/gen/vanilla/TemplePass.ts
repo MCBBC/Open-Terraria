@@ -1,16 +1,16 @@
 // 原版 "Jungle Temple"(WorldGen.cs:7190 + makeTemple L17158)1:1 移植。
 // 之字形下沉房间链(重投至与旧房不相交;锚点=中心;行程 1-2 递增)→ 全房对实心砖连线
 // → 房内双遍游走挖腔(墙 87)→ templePather 通道 → outerTempled 封壳 → 入口隧道+门框
-// → templeCleaner → 祭坛 237(末间中心 ±15)。宝箱为简化保留(原版在陷阱段之后放置)。
+// → templeCleaner → 祭坛 237(末间中心 ±15) → templePart2 五段(陷阱→箱→雕像→家具→挂饰)。
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { ITEM_BY_KEY } from '../../../data/items';
 import { placeDoorClosed } from '../../Door';
+import { placeBuriedChest } from './BuriedChestsPass';
+import { placeFurn } from './DungeonPass';
 
 const BRICK = TILE_BY_KEY['v_226_lihzahrd_brick']!;
-const CHEST = TILE_BY_KEY['chest']!;
 const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 
@@ -392,45 +392,181 @@ export function runTemplePass(
     }
     altarPlaced = true;
   }
-  // ---- 宝箱(简化保留:原版在尖刺陷阱段之后,数量 = 房数×1.1×(1±0.25))----
-  const chestCount = Math.max(1, Math.floor(rooms.length * 1.1 * (1 + rng.int(-25, 25) * 0.01))); // C# (int)
-  for (let n = 0; n < chestCount; n++) {
-    const r = rooms[rng.int(0, rooms.length - 1)];
-    const bx = rng.int(r.x, r.x + r.w - 2);
-    const by = rng.int(r.y, r.y + r.h - 2);
-    if (!st.inBounds(bx, by)) continue;
-    if (st.wall[st.idx(bx, by)] !== 87 || st.flags[st.idx(bx, by)]) continue;
-    if (!st.inBounds(bx + 1, by + 1)) continue;
-    if (st.flags[st.idx(bx + 1, by)] || st.flags[st.idx(bx, by + 1)] || st.flags[st.idx(bx + 1, by + 1)]) continue;
-    // cs L17876-17880:style16 Lihzahrd 箱,每箱含蜥蜴能量电池(1293)
-    st.setTileSilent(bx, by, CHEST, 16 * 36, 0);
-    st.setTileSilent(bx + 1, by, CHEST, 16 * 36 + 18, 0);
-    st.setTileSilent(bx, by + 1, CHEST, 16 * 36, 18);
-    st.setTileSilent(bx + 1, by + 1, CHEST, 16 * 36 + 18, 18);
-    const cellId = ITEM_BY_KEY['vi_1293_lihzahrd_power_cell'];
-    chests.push({ x: bx, y: by, items: cellId !== undefined ? [{ id: cellId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null) });
-  }
+  // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
+  // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
   void altarPlaced;
+  templePart2(st, rng, gs, chests, rooms);
+}
 
-  // ---- 陷阱电路(templePart2 L17837-17860 + mayanTrap L2945-3235):压板+陷阱+三色随机布线 ----
+/** templePart2（1456 cs:34497-34685）1:1。tRooms=房间数；各段预算公式与
+ *  失败推进语义逐掷对齐（陷阱段 fails>100 直接扣预算；其余段 fails>10000 break）。 */
+function templePart2(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+  rooms: Room[],
+): void {
+  let tLeft = Infinity, tRight = -Infinity, tTop = Infinity, tBottom = -Infinity;
+  for (const r of rooms) {
+    tLeft = Math.min(tLeft, r.x); tRight = Math.max(tRight, r.x + r.w);
+    tTop = Math.min(tTop, r.y); tBottom = Math.max(tBottom, r.y + r.h);
+  }
+  const tRooms = rooms.length;
+  const lx = Math.floor(tLeft), rx = Math.ceil(tRight) - 1;
+  const ty = Math.floor(tTop), by = Math.ceil(tBottom) - 1;
+
+  // ---- 1. 尖刺陷阱（cs:34497-34519）：预算 = 房数×1.9×(1±15%) ----
   {
-    let tLeft = Infinity, tRight = -Infinity, tTop = Infinity, tBottom = -Infinity;
-    for (const r of rooms) {
-      tLeft = Math.min(tLeft, r.x); tRight = Math.max(tRight, r.x + r.w);
-      tTop = Math.min(tTop, r.y); tBottom = Math.max(tBottom, r.y + r.h);
-    }
-    // 原版 num1 = 房数×1.9×(1±15%)
-    let budget = rooms.length * 1.9 * (1 + rng.int(-15, 15) * 0.01);
+    let budget = tRooms * 1.9 * (1 + rng.int(-15, 15) * 0.01);
     let fails = 0;
-    while (budget > 0 && fails < 100000) {
-      const x2 = rng.int(Math.floor(tLeft), Math.ceil(tRight) - 1);
-      const y2 = rng.int(Math.floor(tTop), Math.ceil(tBottom) - 1);
+    while (budget > 0) {
+      const x2 = rng.int(lx, rx);
+      const y2 = rng.int(ty, by);
       if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
-        if (mayanTrap(st, rng, gs, x2, y2)) budget -= 1;
+        if (mayanTrap(st, rng, gs, x2, y2)) { budget -= 1; fails = 0; }
         else fails++;
       } else fails++;
+      if (fails > 100) { fails = 0; budget -= 1; }   // cs:34517-34518
     }
   }
+
+  // ---- 2. 神庙宝箱（cs:34521-34545）：预算 = 房数×0.35×(1±15%) ----
+  //  AddBuriedChest(mainItem=1293 蜥蜴能量电池, notNearOtherChests:true, style 16)
+  {
+    let budget = tRooms * 0.35 * (1 + rng.int(-15, 15) * 0.01);
+    let fails = 0;
+    while (budget > 0) {
+      const x2 = rng.int(lx, rx);
+      const y2 = rng.int(ty, by);
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+        if (placeBuriedChest(st, rng, gs, chests, x2, y2, { style: 16, loot: 'vi_1293_lihzahrd_power_cell' })) {
+          budget -= 1;
+          fails = 0;
+        }
+      }
+      fails++;
+      if (fails > 10000) break;
+    }
+  }
+
+  // ---- 3. 雕像 105 style43-45（cs:34547-34583）：预算 = 房数×1.25×(1+Next(-25,36)%) ----
+  {
+    let budget = tRooms * 1.25 * (1 + rng.int(-25, 35) * 0.01);
+    let fails = 0;
+    while (budget > 0) {
+      fails++;
+      const x2 = rng.int(lx, rx);
+      const y2 = rng.int(ty, by);
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+        let fy = y2;
+        while (st.inBounds(x2, fy) && !st.flags[st.idx(x2, fy)]) {
+          fy++;
+          if (fy > by) break;
+        }
+        fy--;
+        if (fy <= by) {
+          const style = rng.int(43, 45);              // Next(43,46)
+          if (placeStatueTemple(st, x2, fy, style)) budget -= 1;
+        }
+      }
+      if (fails > 10000) break;
+    }
+  }
+
+  // ---- 4. 蜥蜴家具（cs:34585-34632）：预算 = 房数×1.35×(1+Next(-15,26)%) ----
+  //  Next(3)：0→桌 14 style10 / 1→椅 15 style9 / 2→工作台 18 style12
+  {
+    let budget = tRooms * 1.35 * (1 + rng.int(-15, 25) * 0.01);
+    let fails = 0;
+    while (budget > 0) {
+      fails++;
+      const x2 = rng.int(lx, rx);
+      const y2 = rng.int(ty, by);
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+        let fy = y2;
+        while (st.inBounds(x2, fy) && !st.flags[st.idx(x2, fy)]) {
+          fy++;
+          if (fy > by) break;
+        }
+        fy--;
+        if (fy <= by) {
+          const kind = rng.int(0, 2);                 // Next(3)
+          const spec = kind === 0
+            ? { tile: TILE_BY_KEY['table']!, style: 10 }
+            : kind === 1
+              ? { tile: TILE_BY_KEY['chair']!, style: 9 }
+              : { tile: TILE_BY_KEY['workbench']!, style: 12 };
+          if (placeFurn(st, x2, fy, spec.tile, spec.style)) budget -= 1;
+        }
+      }
+      if (fails > 10000) break;
+    }
+  }
+
+  // ---- 5. 墙挂饰 240 style88（cs:34634-34682）：数量 = 1 + (w>4200) + (w>6400?Next(2):0) ----
+  {
+    let count = 1;
+    if (st.w > 4200) count++;
+    if (st.w > 6400) count += rng.int(0, 1);
+    let fails = 0;
+    while (count > 0) {
+      fails++;
+      const x2 = rng.int(lx, rx);
+      const y2 = rng.int(ty, by);
+      if (st.inBounds(x2, y2) && st.wall[st.idx(x2, y2)] === 87 && !st.flags[st.idx(x2, y2)]) {
+        // ±70 内已有 240，或 ±4 内有蜥蜴砖 226 → 拒绝（cs:34654-34675）
+        let flag = false;
+        for (let dx = -70; dx <= 70 && !flag; dx++) {
+          for (let dy = -70; dy <= 70; dy++) {
+            const xx = x2 + dx, yy = y2 + dy;
+            if (!st.inBounds(xx, yy)) continue;
+            const k = st.idx(xx, yy);
+            if (!st.flags[k]) continue;
+            const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+            if (sh === 240) { flag = true; break; }
+            if (dx >= -4 && dx <= 4 && dy >= -4 && dy <= 4 && sh === 226) { flag = true; break; }
+          }
+        }
+        if (!flag && placeWallHangingTemple(st, x2, y2, 88)) count--;
+      }
+      if (fails > 10000) break;
+    }
+  }
+}
+
+/** PlaceTile(105, style)（神庙雕像）：2×3，锚点=底行左列的下一格语义（与 StatuesPass 一致） */
+function placeStatueTemple(st: TileStore, x: number, y: number, style: number): boolean {
+  const STATUE = TILE_BY_KEY['v_105_statue'];
+  if (STATUE === undefined) return false;
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -2; dy <= 0; dy++) {
+      if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)]) return false;
+    }
+  }
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = 0; dy < 3; dy++) {
+      st.setTileSilent(x + dx, y - 2 + dy, STATUE, style * 36 + dx * 18, dy * 18);
+    }
+  }
+  return true;
+}
+
+/** PlaceTile(240, style)（神庙墙挂饰）：3×3，帧基 = (style%36)*54 / floor(style/36)*54 */
+function placeWallHangingTemple(st: TileStore, x: number, y: number, style: number): boolean {
+  const HANGING = TILE_BY_KEY['v_240_wall_hangings_3x3'];
+  if (HANGING === undefined) return false;
+  for (let dx = 0; dx < 3; dx++) {
+    for (let dy = 0; dy < 3; dy++) {
+      if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)]) return false;
+    }
+  }
+  const bx = (style % 36) * 54;
+  const bys = Math.floor(style / 36) * 54;
+  for (let dx = 0; dx < 3; dx++) {
+    for (let dy = 0; dy < 3; dy++) {
+      st.setTileSilent(x + dx, y + dy, HANGING, bx + dx * 18, bys + dy * 18);
+    }
+  }
+  return true;
 }
 
 /** 玛雅陷阱(WorldGen.cs:2945-3235):压板 135(style6)→ 陷阱 137,路径铺三色随机导线 */

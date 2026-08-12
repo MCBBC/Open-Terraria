@@ -64,8 +64,8 @@ const FLARE_AMMO_ITEMS: ReadonlySet<number> = new Set([931, 1614]);
 /** Main.cs:7153-7156 tileHammer 全表（26 祭坛 / 695 / 31 音符块 / 696） */
 const TILE_HAMMER_SHEETS: ReadonlySet<number> = new Set([26, 31, 695, 696]);
 
-/** Main.cs:7157-7171 tileAxe 全表（树干族 5/72/各宝石树 583-589/樱花 596/柳树 616/灰烬树 634
- *  + 仙人掌 80 + 488 + 704 树苗? + 323 棕榈树苗族） */
+/** Main.cs:7157-7171 tileAxe 全表（树 5 / 蘑菇树 72 / 仙人掌 80 / 倒木 488 / 倒木回响 704 /
+ *  棕榈树 323 / 樱花树 596 / 黄柳树 616 / 灰烬树 634 / 宝石树 583-589） */
 const TILE_AXE_SHEETS: ReadonlySet<number> = new Set([
   5, 72, 80, 488, 704, 323, 596, 616, 634, 589, 584, 588, 586, 587, 585, 583,
 ]);

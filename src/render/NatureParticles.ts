@@ -66,6 +66,9 @@ export class NatureParticles {
   private st: TileStore | null = null;
   maxLeaves = 220;
   maxDrips = 90;
+  /** 滴水溅落音钩子（Game 注入 Sfx；Gore.cs :971-984：SoundID 39=Drip，
+   *  落地 variant rand(0,1) / 入水 variant 2，位置 +8,+8；flag4 水型本模块内静音） */
+  onDripSplash: ((x: number, y: number, wet: boolean) => void) | null = null;
 
   clear(): void { this.leaves.length = 0; this.drips.length = 0; }
   /** Game 每帧绑定当前世界 store */
@@ -211,9 +214,12 @@ export class NatureParticles {
         const preVy = d.vy;
         const r = boxCollide(st, d.x, d.y, 0, d.vy, 14); // TileCollision(position, velocity, 16, 14)
         d.x = r.nx; d.y = r.ny; d.vy = r.nvy;
-        if (r.nvy !== preVy) { if (d.frame < 10) { d.frame = 10; d.frameCounter = 0; } continue; } // :968
+        if (r.nvy !== preVy) {
+          if (d.frame < 10) { d.frame = 10; d.frameCounter = 0; this.dripSound(d, false); } // :968
+          continue;
+        }
         const liq = this.liquidAt(d.x + 8, d.y + 8);
-        if (liq > 0 && d.frame < 10) { d.frame = 10; d.frameCounter = 0; } // WetCollision :980
+        if (liq > 0 && d.frame < 10) { d.frame = 10; d.frameCounter = 0; this.dripSound(d, true); } // WetCollision :980
       } else {
         // 溅落 10-14（:510-529）：速度清零、逐帧消散
         wait = 4;
@@ -226,6 +232,12 @@ export class NatureParticles {
       }
     }
     this.drips = this.drips.filter((d) => !d.dead);
+  }
+
+  /** 溅落音（Gore.cs :967-984）：flag4 水型（716 蜂蜜/717/943/1160-62）不发声 */
+  private dripSound(d: Drip, wet: boolean): void {
+    if (d.type === 716 || d.type === 717 || d.type === 943 || (d.type >= 1160 && d.type <= 1162)) return;
+    this.onDripSplash?.(d.x + 8, d.y + 8, wet);
   }
 
   // ================= 绘制 =================

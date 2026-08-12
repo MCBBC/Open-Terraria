@@ -9,11 +9,13 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
+import { idsByVanillaSheet } from './TileRunner';
+import { solidTile as _solidTileHB } from './HalfBrickPass';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
-/** 雨云 196（IslandGen :23062 num9=196——islandStyle 0/1/13 默认雨云主体；
- *  style2 雪云 460 / style3 普通云 189。我们 style 恒 0 → 主体取 196，
- *  云下由 WaterfallRenderer 画雨幕（WaterfallManager :204 type 11） */
+/** 雨云 196：CloudIsland/CloudLake 的雨云凸包（1/4）与岛上方 puff（1/2）专用；
+ *  岛盘主体是云 189（cs:78724 num8）——196 误作主体会令土芯 type==189 判定恒假。
+ *  云下雨幕由 WaterfallRenderer 画（WaterfallManager :204 type 11） */
 const RAIN_CLOUD = TILE_BY_KEY['v_196_rain_cloud_block']!;
 const EBONSAND = TILE_BY_KEY['v_112_ebonsand_block']!;
 const CRIMSAND = TILE_BY_KEY['v_234_crimsand_block']!;
@@ -130,8 +132,11 @@ function cloudLake(st: TileStore, rng: RNG, i: number, j: number): void {
   if (bx1 > bx0) rainBumps(st, rng, bx0, bx1, by0, by1);
 }
 
-/** CloudIsland(L47397)核心移植:扁平云盘(纵压3+顶面游走)→雨云凸包→
- * 土芯只嵌云内 → 内部云墙 73 → 10% 水池。岛屋由独立 pass 处理。 */
+/** CloudIsland（1456 cs:78618）1:1：扁平云盘（材质 189 云，纵压 3 + 顶面游走）
+ *  → 雨云凸包 → 土芯（80-95，只把云 189 换土 0）→ 土芯云盖（小云团盖在土面上）
+ *  → 内部云墙 73 → 逐列水池（10% 凹坑 + 1/5 单格）→ 岛上方 0-3 团带水云 puff。
+ *  旧版盘体误用雨云 196（IslandHouse 的 num9）→ 土芯的 type==189 判定恒假、
+ *  整芯死代码；本版对齐 CloudIsland 本体的 num8=189。 */
 function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
   let num1 = rng.int(100, 149);
   let steps = rng.int(20, 29);
@@ -154,7 +159,7 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
         if (y <= top || !st.inBounds(x, y)) continue;
         if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
           const ti = st.idx(x, y);
-          st.type[ti] = RAIN_CLOUD;
+          st.type[ti] = CLOUD;   // cs:78754 num8=189（雨云只在凸包/上方 puff 1/4-1/2 概率出现）
           st.flags[ti] = 1;
           bboxX0 = Math.min(bboxX0, x); bboxX1 = Math.max(bboxX1, x);
           bboxY0 = Math.min(bboxY0, y); bboxY1 = Math.max(bboxY1, y);
@@ -168,9 +173,9 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
     vy = Math.max(-0.2, Math.min(0.2, vy));
   }
   if (bboxX1 <= bboxX0) return;
-  // ---- 阶段2:雨云凸包（L47484-47522） ----
+  // ---- 阶段2:雨云凸包（cs:78785-78828） ----
   rainBumps(st, rng, bboxX0, bboxX1, bboxY0, bboxY1);
-  // ---- 阶段3:土芯(80-95,只把云换土)----
+  // ---- 阶段3:土芯(80-95,只把云 189 换土 0；起点 y=bbox 顶)----
   let dR = rng.int(80, 94);
   let dSteps = rng.int(10, 14);
   let dx0 = i + 0.0, dy0 = bboxY0 + 0.0;
@@ -181,7 +186,7 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
     dR -= rng.int(0, 3);
     dSteps--;
     const x0 = Math.max(0, Math.floor(dx0 - dR * 0.5)), x1 = Math.min(st.w, Math.floor(dx0 + dR * 0.5));
-    const y0 = Math.max(0, Math.floor(dy0 - dR * 0.5)), y1 = Math.min(st.h, Math.floor(dy0 + dR * 0.5));
+    const y0 = Math.max(0, Math.floor(bboxY0 - 1)), y1 = Math.min(st.h, Math.floor(dy0 + dR * 0.5));
     const r = dR * rng.int(80, 119) * 0.01;
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
@@ -198,28 +203,112 @@ function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
     dvx = Math.max(-1, Math.min(1, dvx));
     dvy = Math.max(-0.2, Math.min(0.2, dvy));
   }
-  // ---- 阶段5:内部云墙(3×3 全包裹 → wall 73)----
-  for (let x = bboxX0; x <= bboxX1; x++) {
-    for (let y = bboxY0; y <= bboxY1; y++) {
+  // ---- 阶段4:土芯云盖（cs:78872-78914）：自岛底向上找首个活性土格，上方盖小云团 ----
+  {
+    let cx = bboxX0 + rng.int(0, 4);                 // num29 = num4 + Next(5)
+    while (cx < bboxX1) {
+      let cy = bboxY1;                                // 自岛底向上
+      let guard = 0;
+      while ((!st.inBounds(cx, cy) || !st.flags[st.idx(cx, cy)] || st.type[st.idx(cx, cy)] !== T.DIRT)
+        && cx < bboxX1 && guard++ < 4000) {
+        cy--;
+        if (cy < bboxY0) { cy = bboxY1; cx += rng.int(1, 3); }   // Next(1,4)
+      }
+      if (cx >= bboxX1) break;
+      cy += rng.int(0, 3);                            // Next(0,4)
+      const cr = rng.int(2, 4);                       // Next(2,5)
+      for (let x = cx - cr; x <= cx + cr; x++) {
+        for (let y = cy - cr; y <= cy + cr; y++) {
+          if (y <= bboxY0 || !st.inBounds(x, y)) continue;
+          if (Math.hypot(x - cx, (y - cy) * 2) < cr) {
+            // 原版只写 type 不激活（空气格成幽灵、活性云格换云）
+            if (st.flags[st.idx(x, y)]) st.type[st.idx(x, y)] = CLOUD;
+          }
+        }
+      }
+      cx += rng.int(cr, Math.floor(cr * 1.5));
+    }
+  }
+  // ---- 阶段5:内部云墙（cs:78915-78971：3×3 全活性 且 本格 wall∈{0,73} → wall 73）----
+  for (let x = bboxX0 - 20; x <= bboxX1 + 20; x++) {
+    for (let y = bboxY0 - 20; y <= bboxY1 + 20; y++) {
       let all = true;
       for (let ax = -1; ax <= 1 && all; ax++) {
         for (let ay = -1; ay <= 1; ay++) {
           if (!st.inBounds(x + ax, y + ay) || !st.flags[st.idx(x + ax, y + ay)]) { all = false; break; }
+          const wl = st.wall[st.idx(x + ax, y + ay)];
+          if (wl !== 0 && wl !== 73) { all = false; break; }
         }
       }
-      if (all) st.wall[st.idx(x, y)] = 73;
+      if (all && st.inBounds(x, y)) st.wall[st.idx(x, y)] = 73;
     }
   }
-  // ---- 阶段6:水池(每列 10% 在云顶凹处放水)----
-  for (let x = bboxX0 + 2; x < bboxX1 - 2; x++) {
-    if (rng.next() >= 0.1) continue;
-    let y = Math.max(1, bboxY0 - 10);
-    while (y < st.h - 1 && !st.flags[st.idx(x, y)]) y++;
-    const below = st.idx(x, y + 1);
-    if (y < bboxY1 && st.type[below] === CLOUD) {
-      const ti = st.idx(x, y);
-      st.type[ti] = 0; st.flags[ti] = 0;
-      st.liquid[ti] = 255; st.liquidType[ti] = 1;
+  // ---- 阶段6:水池（cs:78973-79021：逐列；10% 凹坑(宽 1-2 深 3) + 1/5 单格 + 恒 liquidType）----
+  const stayPut = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y + 1) || !st.inBounds(x - 1, y) || !st.inBounds(x + 1, y)) return false;
+    const hold = (xx: number, yy: number) => {
+      const k = st.idx(xx, yy);
+      return (st.flags[k] && !!TILE_DEFS[st.type[k]]?.solid && !TILE_DEFS[st.type[k]]?.platform)
+        || (st.liquid[k] === 255);
+    };
+    return hold(x, y + 1) && hold(x - 1, y) && hold(x + 1, y);
+  };
+  for (let x = bboxX0; x <= bboxX1; x++) {
+    let y = bboxY0 - 10;                              // num42 自 num6-10 向下找首个活性
+    let guard = 0;
+    while (st.inBounds(x, y) && !st.flags[st.idx(x, y + 1)] && guard++ < 4000) y++;
+    if (y >= bboxY1) continue;
+    if (!st.inBounds(x, y + 1) || st.type[st.idx(x, y + 1)] !== CLOUD) continue;
+    if (rng.int(0, 9) === 0) {                        // Next(10)==0 → 凹坑水池
+      const w2 = rng.int(1, 2);                       // Next(1,3)
+      for (let xx = x - w2; xx <= x + w2; xx++) {
+        for (const yy of [y, y + 1]) {
+          if (st.inBounds(xx, yy) && st.type[st.idx(xx, yy)] === CLOUD && stayPut(xx, yy)) {
+            const k = st.idx(xx, yy);
+            st.type[k] = 0; st.flags[k] = 0;
+            st.liquid[k] = 255; st.liquidType[k] = 1;
+          }
+        }
+        if (xx > x - w2 && xx < x + 2 && st.inBounds(xx, y + 2)
+          && st.type[st.idx(xx, y + 2)] === CLOUD && stayPut(xx, y + 2)) {
+          const k = st.idx(xx, y + 2);
+          st.type[k] = 0; st.flags[k] = 0;
+          st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+      }
+    }
+    if (rng.int(0, 4) === 0 && stayPut(x, y)) {       // Next(5)==0 → 单格满水
+      st.liquid[st.idx(x, y)] = 255;
+    }
+    if (st.inBounds(x, y)) st.liquidType[st.idx(x, y)] = 1;   // 恒置水型
+  }
+  // ---- 阶段7:岛上方带水云 puff（cs:79023-79066：Next(4) 团,1/2 雨云,中心注水）----
+  {
+    const puffs = rng.int(0, 3);                      // genRand.Next(4)
+    for (let n = 0; n <= puffs; n++) {
+      const cx = rng.int(bboxX0 - 5, bboxX1 + 4);     // Next(num4-5, num5+5)
+      const cy = bboxY0 - rng.int(20, 39);            // num6 - Next(20,40)
+      const cr = rng.int(4, 7);                       // Next(4,8)
+      const mat = rng.int(0, 1) === 0 ? RAIN_CLOUD : CLOUD;   // Next(2)==0 → 196
+      for (let x = cx - cr; x <= cx + cr; x++) {
+        for (let y = cy - cr; y <= cy + cr; y++) {
+          if (!st.inBounds(x, y)) continue;
+          if (Math.hypot(x - cx, (y - cy) * 2) < cr + rng.int(-1, 1)) {   // num49 + Next(-1,2)
+            const k = st.idx(x, y);
+            st.type[k] = mat; st.flags[k] = 1;
+          }
+        }
+      }
+      for (let x = cx - cr + 2; x <= cx + cr - 2; x++) {   // 中心注水
+        let y = cy - cr;
+        let guard = 0;
+        while (st.inBounds(x, y) && !st.flags[st.idx(x, y)] && guard++ < 200) y++;
+        if (st.inBounds(x, y) && stayPut(x, y)) {
+          const k = st.idx(x, y);
+          st.type[k] = 0; st.flags[k] = 0;
+          st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+      }
     }
   }
 }
@@ -601,3 +690,111 @@ export function runWetJunglePass(st: TileStore, _rng: RNG, gs: GenState): void {
 }
 
 
+
+// ===================== 炼金草药（pass AlchemyHerbs cs:20109 + MatureTheHerbPlants cs:45757） =====================
+
+const HERB_SPROUT = TILE_BY_KEY['v_82_herbs_sprout']!;
+const MUD_TILE = TILE_BY_KEY['mud']!;
+const HERB_MATURE = TILE_BY_KEY['v_83_herbs_mature']!;
+const HERB_BLOOM = TILE_BY_KEY['v_84_herbs_bloom']!;
+/** Main.tileAlch：82/83/84 三态草药（PlantAlch ±15 邻域密度门用） */
+const TILE_ALCH = new Set<number>([HERB_SPROUT, HERB_MATURE, HERB_BLOOM]);
+/** PlaceAlch 各 style 的基座白名单（cs:45395-45464；78 割草/380 花盆箱为通用补充） */
+const ALCH_GROUND: Array<Set<number>> = [
+  idsByVanillaSheet(2, 477, 492, 78, 380, 109),          // 0 草/神圣草
+  idsByVanillaSheet(60, 78, 380),                        // 1 丛林草
+  idsByVanillaSheet(0, 59, 78, 380),                     // 2 土/泥
+  idsByVanillaSheet(661, 662, 203, 199, 23, 25, 78, 380),// 3 邪恶
+  idsByVanillaSheet(53, 78, 380, 116),                   // 4 沙/珍珠沙
+  idsByVanillaSheet(57, 633, 78, 380),                   // 5 灰烬/灰烬草
+  idsByVanillaSheet(78, 380, 147, 161, 163, 164, 200),   // 6 冰雪族
+];
+/** PlaceSuitableHerbHere（cs:45948-45976）：基座类型 → style 分派（顺序覆盖式） */
+const HERB_STYLE_GROUND: Array<[Set<number>, number]> = [
+  [idsByVanillaSheet(2, 109), 0],
+  [idsByVanillaSheet(60), 1],
+  [idsByVanillaSheet(0, 59), 2],
+  [idsByVanillaSheet(23, 661, 25, 203, 199, 662), 3],
+  [idsByVanillaSheet(53, 116), 4],
+  [idsByVanillaSheet(57, 633), 5],
+  [idsByVanillaSheet(147, 163, 164, 161, 200), 6],
+];
+
+/** PlaceAlch（cs:45386）1:1：目标格净空 + 基座 nactive/整砖 + style 白名单/液体门。
+ *  style 4/6 只拒岩浆、style 5 只拒非岩浆（水中焰花/灰烬上） */
+function placeAlch(st: TileStore, x: number, y: number, style: number): boolean {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return false;
+  const k = st.idx(x, y);
+  const g = st.idx(x, y + 1);
+  if (st.flags[k]) return false;
+  if (!st.flags[g] || st.half[g] || st.slope[g] !== 0) return false;
+  if (!ALCH_GROUND[style].has(st.type[g])) return false;
+  const liq = st.liquid[k];
+  const lava = liq > 0 && st.liquidType[k] === 2;
+  if (style <= 3) { if (liq > 0) return false; }
+  else if (style === 4 || style === 6) { if (lava) return false; }
+  else if (style === 5) { if (liq > 0 && !lava) return false; }
+  st.setTileSilent(x, y, HERB_SPROUT, 18 * style, 0);
+  return true;
+}
+
+/** PlantAlch（cs:45910）1:1：y 带三段掷（1/40 深层带、9/10 地表带、其余全域），
+ *  下落至首个活性格；基座须 nactive 且上格净空无液；±15（×w/4200）内草药 <5 才种 */
+function plantAlch(st: TileStore, rng: RNG, gs: GenState): void {
+  const w = st.w, h = st.h;
+  const num = rng.int(20, w - 21);                        // Next(20, maxTilesX-20)
+  let y: number;
+  if (rng.int(0, 39) === 0) y = rng.int(Math.floor((gs.rockLevel + h) / 2), h - 21);
+  else if (rng.int(0, 9) !== 0) y = rng.int(Math.floor(gs.worldSurface), h - 21);
+  else y = rng.int(20, h - 21);
+  while (y < h - 20 && !(st.inBounds(num, y) && st.flags[st.idx(num, y)])) y++;
+  if (!st.inBounds(num, y)) return;
+  const k = st.idx(num, y);
+  if (!st.flags[k] || st.half[k] || st.slope[k] !== 0) return;   // nactive
+  if (!st.inBounds(num, y - 1)) return;
+  if (st.flags[st.idx(num, y - 1)] || st.liquid[st.idx(num, y - 1)] !== 0) return;
+  const rad = Math.floor(15 * (w / 4200));
+  const x0 = Math.max(4, Math.min(w - 4, num - rad));
+  const x1 = Math.max(4, Math.min(w - 4, num + rad));
+  const y0 = Math.max(4, Math.min(h - 4, y - rad));
+  const y1 = Math.max(4, Math.min(h - 4, y + rad));
+  let near = 0;
+  for (let i = x0; i <= x1; i++) {
+    for (let j = y0; j <= y1; j++) {
+      if (TILE_ALCH.has(st.type[st.idx(i, j)])) near++;
+    }
+  }
+  if (near < 5) {
+    for (const [set, style] of HERB_STYLE_GROUND) {
+      if (set.has(st.type[k])) placeAlch(st, num, y - 1, style);
+    }
+  }
+}
+
+/** AlchemyHerbs pass（cs:20109）：w×1.7 次 PlantAlch */
+export function runAlchemyHerbsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const count = Math.floor(st.w * 1.7);
+  for (let i = 0; i < count; i++) plantAlch(st, rng, gs);
+}
+
+/** MatureTheHerbPlants（cs:45757，DyePlants pass 内调用）1:1：
+ *  岩层以下泥土/泥面 1/25 补种 82(frameX=36)；既有 82 → 1/3 熟成 83，
+ *  frameX=36 再 1/2、frameX=108 再 1/3 进阶 84 */
+export function matureHerbPlants(st: TileStore, rng: RNG, gs: GenState): void {
+  for (let i = 10; i < st.w - 10; i++) {
+    for (let j = 10; j < st.h - 10; j++) {
+      const k = st.idx(i, j);
+      const below = st.idx(i, j + 1);
+      if (j > gs.rockLevel && (st.type[below] === MUD_TILE || st.type[below] === T.DIRT)
+        && _solidTileHB(st, i, j + 1) && !st.flags[k] && st.liquid[k] === 0
+        && rng.int(0, 24) === 0) {
+        st.setTileSilent(i, j, HERB_SPROUT, 36, 0);
+      }
+      if (st.type[k] === HERB_SPROUT && rng.int(0, 2) === 0) {
+        st.type[k] = HERB_MATURE;
+        if (st.frameX[k] === 36 && rng.int(0, 1) === 0) st.type[k] = HERB_BLOOM;
+        if (st.frameX[k] === 108 && rng.int(0, 2) === 0) st.type[k] = HERB_BLOOM;
+      }
+    }
+  }
+}

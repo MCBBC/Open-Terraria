@@ -216,6 +216,26 @@ export class Sfx {
       case 'place': osc('triangle', 260, 120, 0.08, 0.12); break;
       case 'drink': osc('sine', 300, 620, 0.06, 0.08); osc('sine', 420, 780, 0.06, 0.07, 0.07); osc('sine', 560, 940, 0.06, 0.06, 0.14); break;
       case 'splash': osc('sine', 700, 200, 0.18, 0.1); break;
+      case 'explosion': {
+        // 噪声爆发近似(原版 Item_14):一次性白噪 buffer + 低频 thump。
+        // ★曾无此分支:按需加载首播(wav 还在 fetch)完全静音 = "炸弹没有音效"主因
+        const dur = 0.5, n = Math.floor(ctx.sampleRate * dur);
+        const buf = ctx.createBuffer(1, n, ctx.sampleRate);
+        const d = buf.getChannelData(0);
+        for (let i = 0; i < n; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / n, 2.2);
+        const src = ctx.createBufferSource();
+        src.buffer = buf;
+        const lp = ctx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.frequency.setValueAtTime(900, t);
+        lp.frequency.exponentialRampToValueAtTime(120, t + dur);
+        const g = ctx.createGain();
+        g.gain.value = 0.5 * this.master;
+        src.connect(lp).connect(g).connect(ctx.destination);
+        src.start(t);
+        osc('sine', 90, 35, 0.35, 0.35); // 低频冲击
+        break;
+      }
       case 'coin': osc('sine', 990, 1400, 0.07, 0.08); osc('sine', 1320, 1760, 0.09, 0.06, 0.05); break;
       case 'door_open': osc('triangle', 180, 320, 0.12, 0.1); break;
       case 'door_close': osc('triangle', 320, 160, 0.1, 0.1); break;

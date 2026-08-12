@@ -80,6 +80,9 @@ export class Player extends Entity {
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
+  /** 鞭命中授予的玩家 buff（WhipTagEffect.PlayerBuffId → 剩余 tick；
+   *  314 荆棘鞭=随从伤害+10%，随从 dmgOf 读取） */
+  whipBuffs: Record<number, number> = {};
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
    *  本地玩家恒 0 */
@@ -849,6 +852,10 @@ export class Player extends Entity {
     // 台阶视觉缓动：每帧向 0 收敛
     if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;
     else this.stepRenderY = 0;
+    // 鞭 buff 倒计时（WhipTagEffect.PlayerBuffTime=180 系）
+    for (const k of Object.keys(this.whipBuffs)) {
+      if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
+    }
 
     // 落地摔伤结算（幸运马掌免疫；落在水里豁免——水有缓冲）
     if (this.onGround && this.fallStartY !== null) {

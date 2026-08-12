@@ -25,15 +25,25 @@ const AURA_TOWER = new Set([688, 689, 690]);
  *  中心上方 48px 处 144×144 盒内有敌 → 原地爆炸（proj 694/695/696 等价 AoE），
  *  冷却 GetExplosiveTrapCooldown=90 */
 const TRAP_TOWER = new Set([691, 692, 693]);
-/** AI_062 族随从帧语义（Projectile.cs:62868-62971）：[每帧 tick, 循环帧数, 攻击帧偏移]
- *  373 黄蜂 2t/帧 0-2；375 小鬼 5t/帧 0-3，攻击中(ai[1]<24)→+4（真攻击帧!）；
- *  407 蜘蛛 2t/帧 0-5；423/613 3t/帧 0-3 */
-const AI062_FRAMES: Record<number, [number, number, number]> = {
-  373: [2, 3, 0],
-  375: [5, 4, 4],
-  407: [2, 6, 0],
-  423: [3, 4, 0],
-  613: [3, 4, 0],
+/** 随从帧循环表（源码提取，Projectile.cs 各 AI 内 frameCounter 规则）：
+ *  [每帧 tick, 循环帧数, 攻击帧偏移]。375 小鬼攻击中 +4（ai[1]<24 → 真攻击帧）；
+ *  未列入的家族（758 吸血蛙 24 帧/951 雪怪 12 帧/1022 蘑菇 16 帧/1093 猫 28 帧/
+ *  191 矮人 18 帧/393 海盗 15 帧/864 刃 2 帧/946 棱镜 1 帧）帧语义复杂或单帧，
+ *  走 age/8 匀速循环兜底 */
+const MINION_FRAMES: Record<number, [number, number, number]> = {
+  373: [2, 3, 0],   // 黄蜂：fc>1 → frame++，cap 2
+  375: [5, 4, 4],   // 小鬼：fc/5 帧 0-3，攻击中 +4
+  407: [2, 6, 0],   // 蜘蛛：fc/2，6 帧循环
+  423: [3, 4, 0],  613: [3, 4, 0], // 暴风雨/星尘细胞
+  266: [5, 8, 0],   // 史莱姆：fc>4 → frame++，frame≥8 → 0
+  317: [5, 4, 0],   // 乌鸦：fc≥4 → frame++，frame>3 → 0
+  387: [4, 3, 0],   // 魔眼：fc>3 → frame++，cap 2
+  533: [2, 3, 0],   // 致命球：fc>1 → frame++，cap 2
+  755: [6, 5, 0],   // 血红杖：fc≥6 循环 5 帧
+  759: [6, 4, 0],   // 雀杖：fc≥6，cap projFrames-1=4
+  831: [4, 6, 0],   // 沙漠虎：fc≥4，frame≥6 → 0
+  970: [4, 6, 0],   // 阿比盖尔：fc≥4，frame≥6 → 0
+  1025: [8, 4, 0],  // 藤壶：慢循环
 };
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
@@ -129,7 +139,9 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
       moveAndCollide(this, game.world, 0, this.vy);
       const owner = this.ownerRef();
-      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1)));
+      // 随从伤害 = 基础 × magic 乘区；荆棘鞭 buff(314) 命中 +10%（Player.minionDamage 系）
+      const thorn = owner && (owner as unknown as { whipBuffs?: Record<number, number> }).whipBuffs?.[314] > 0 ? 1.1 : 1;
+      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1) * thorn));
       // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
       // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
       // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
@@ -288,7 +300,8 @@ export class MinionProj extends Entity {
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       if (!this.hitCd.ready(en.id, 20)) continue;
       const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
-      const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic')) + tag);
+      const thornM = (p as unknown as { whipBuffs?: Record<number, number> }).whipBuffs?.[314] > 0 ? 1.1 : 1;
+      const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic') * thornM) + tag);
       en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
       this.attackFlash = 24; // AI_062 攻击帧门（小鬼 ai[1]<24 → frame+4）
     }
@@ -311,10 +324,10 @@ export class MinionProj extends Entity {
       frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 5) : 0;
     } else if (this.sentry && TRAP_TOWER.has(this.projId)) {
       frame = Math.floor(this.age / 12) % frames; // AI_138 frameCounter 12t 连续循环
-    } else if (AI062_FRAMES[this.projId]) {
-      // AI_062 族（Projectile.cs:62868-62971）：每帧 tick 循环帧表；
+    } else if (MINION_FRAMES[this.projId]) {
+      // 帧表族（源码各 AI 提取）：每帧 tick 循环帧表；
       // 小鬼攻击中（attackFlash>0）frame += 4（ai[1]<24 → 帧偏移，真攻击帧）
-      const [tickPer, count, atkOff] = AI062_FRAMES[this.projId];
+      const [tickPer, count, atkOff] = MINION_FRAMES[this.projId];
       frame = Math.floor(this.age / tickPer) % count;
       if (atkOff && this.attackFlash > 0) frame += atkOff;
     } else {

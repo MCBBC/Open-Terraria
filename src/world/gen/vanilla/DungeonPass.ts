@@ -8,6 +8,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { tileRunner } from './TileRunner';
+import { solidTile as solidTileHB } from './HalfBrickPass';
 import { placeDoorClosed } from '../../Door';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 
@@ -844,12 +845,16 @@ function placeDoors(st: TileStore, rng: RNG, dc: DungeonCtx): void {
   }
 }
 
-/** 家具+金箱(L18792 简化保留:工作台/桌椅/蜡烛 + 每房金箱) */
+/** 家具+金箱（1405 L18792 段）：管线 1:1（见下）——房间金箱走 AddBuriedChest 下落语义，
+ *  战利品序 155/156/157/163/113/3317/327/164；工作台/桌椅/蜡烛由第 7 段地面家具覆盖 */
 // ============================================================================
 // 地牢陈设管线(WorldGen.cs L18441-19613 1:1)
 // 墙变体→房口平台→特殊宝箱(上锁)→书架平台+蜡烛/书→房间金箱→
 // 灯具(吊灯/灯笼+墙上开关+布线)→飞镖陷阱→地面家具 13 类→墙饰(画/骨)→旗帜
 // ============================================================================
+/** TileID.Sets.Boulders（1456 TileID.cs:195）——AddBuriedChest ±2 邻域排除 */
+const BOULDER_SHEETS_DP = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+
 type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 
 function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, chests: ChestSink): void {
@@ -1592,7 +1597,7 @@ function wireToSwitch(
     if (x < ex0 || x > ex1 || y < ey0 || y > ey1) continue;
     if (!st.inBounds(x, y) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y + 1)]) continue;
     if (!isBrick(x - 1, y) || !isBrick(x + 1, y)) continue;
-    if (!hasLineOfSight(st, x, y, lx, ly)) continue;
+    if (!canHit(st, x, y, lx, ly)) continue;
     const solidSide = (st.inBounds(x - 1, y) && st.flags[st.idx(x - 1, y)] && st.type[st.idx(x - 1, y)] !== DOOR && TILE_DEFS[st.type[st.idx(x - 1, y)]]?.solid)
       || (st.inBounds(x + 1, y) && st.flags[st.idx(x + 1, y)] && st.type[st.idx(x + 1, y)] !== DOOR && TILE_DEFS[st.type[st.idx(x + 1, y)]]?.solid)
       || (st.inBounds(x, y + 1) && st.flags[st.idx(x, y + 1)] && TILE_DEFS[st.type[st.idx(x, y + 1)]]?.solid);
@@ -1618,29 +1623,65 @@ function wireToSwitch(
   void dc;
 }
 
-/** 简易视线(Collision.CanHit 近似):两点连线采样无实心阻挡 */
-function hasLineOfSight(st: TileStore, x0: number, y0: number, x1: number, y1: number): boolean {
-  const dx = x1 - x0, dy = y1 - y0;
-  const steps = Math.max(Math.abs(dx), Math.abs(dy)) * 4;
-  for (let k = 1; k < steps; k++) {
-    const t = k / steps;
-    const x = Math.floor(x0 + dx * t);
-    const y = Math.floor(y0 + dy * t);
+/** Collision.CanHit（1456 Collision.cs:383）1:1：开关↔灯具视线判定。
+ *  16px 实体盒（16×16）中心取整即 tile 坐标；主轴步进（|dx|>|dy| 走 x 否则走 y），
+ *  每步检查步进方向两侧全整砖（active+tileSolid+!solidTop+slope0+!halfBrick）成对 → 阻挡；
+ *  步进后落点格为实心非平台 → 阻挡（穿墙）。y 钳 [1, h-40]、x 钳 [1, w-1]。 */
+function canHit(st: TileStore, x1: number, y1: number, x2: number, y2: number): boolean {
+  const w = st.w, h = st.h;
+  let num = x1, num2 = y1;
+  const num3 = Math.max(1, Math.min(w - 1, x2));
+  const num4 = Math.max(1, Math.min(h - 40, y2));
+  num = Math.max(1, Math.min(w - 1, num));
+  num2 = Math.max(1, Math.min(h - 40, num2));
+  const fullBrick = (x: number, y: number): boolean => {
     if (!st.inBounds(x, y)) return false;
-    const i = st.idx(x, y);
-    if (st.flags[i] && TILE_DEFS[st.type[i]]?.solid) return false;
+    const k = st.idx(x, y);
+    if (!st.flags[k]) return false;
+    const d = TILE_DEFS[st.type[k]];
+    return !!d?.solid && !d.platform && st.slope[k] === 0 && !st.half[k];
+  };
+  for (;;) {
+    if (num === num3 && num2 === num4) return true;
+    const dAbs = Math.abs(num - num3), dOrd = Math.abs(num2 - num4);
+    if (dAbs > dOrd) {
+      num += num >= num3 ? -1 : 1;
+      if (fullBrick(num, num2 - 1) && fullBrick(num, num2 + 1)) return false;
+    } else {
+      num2 += num2 >= num4 ? -1 : 1;
+      if (fullBrick(num - 1, num2) && fullBrick(num + 1, num2)) return false;
+    }
+    // do-while 条件：落点格"非活性 / 非实心 / 平台"才继续步进；实心非平台 → 穿墙阻挡
+    const k = st.idx(num, num2);
+    const d = TILE_DEFS[st.type[k]];
+    const passable = !st.flags[k] || !d?.solid || !!d.platform;
+    if (!passable) return false;
+    if (num < 1 || num >= w - 1 || num2 < 1 || num2 >= h - 40) return false;
   }
-  return true;
 }
 
-/** AddBuriedChest 近似:从 (x,y) 向下找地面,2×2 箱落其上;推入 chests */
+/** AddBuriedChest（1456 cs:35920）下落段 1:1：自 y 向下扫至 h-10，
+ *  首个 SolidTile（半砖/坡面不算）落定；±2 邻域有 Boulders/26/237 → 失败。
+ *  样式/主件由调用方显式给定（地牢战利品序），2×2 箱落其上后推入 chests */
 function addChest(st: TileStore, chests: ChestSink, x: number, y: number, tile: number, style: number, itemId: number | undefined, locked: boolean): boolean {
   const def = TILE_DEFS[tile];
   if (!def) return false;
+  for (let dx = -2; dx <= 2; dx++) {
+    for (let dy = -2; dy <= 2; dy++) {
+      const xx = x + dx, yy = y + dy;
+      if (xx < 1 || yy < 1 || xx >= st.w - 1 || yy >= st.h - 1) continue;
+      const k = st.idx(xx, yy);
+      if (!st.flags[k]) continue;
+      const sh = TILE_DEFS[st.type[k]]?.vanilla?.sheet ?? -1;
+      if (BOULDER_SHEETS_DP.has(sh) || st.type[k] === TILE_BY_KEY['v_26_altars'] || st.type[k] === TILE_BY_KEY['v_237_lihzahrd_altar']) return false;
+    }
+  }
   let gy = y;
-  let guard = 0;
-  while (guard++ < 60 && st.inBounds(x, gy) && !st.flags[st.idx(x, gy)]) gy++;
-  if (!st.inBounds(x, gy) || !st.flags[st.idx(x, gy)]) return false;
+  for (; gy < st.h - 10; gy++) {
+    if (solidTileHB(st, x, gy)) break;
+  }
+  if (gy >= st.h - 10) return false;
+  if (!solidTileHB(st, x, gy)) return false;
   const topY = gy - 2;
   if (topY < 1) return false;
   for (let dx = 0; dx < 2; dx++) {

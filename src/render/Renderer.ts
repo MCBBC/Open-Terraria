@@ -11,6 +11,7 @@ import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
 import { VanillaResourceBars } from './ResourceBars';
+import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
 
@@ -363,6 +364,12 @@ export class Renderer {
   biomeBg = new BiomeBackground();
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
   resourceBars = new VanillaResourceBars();
+  /** 天塔柱族全屏滤镜（SceneMetrics 视区扫描 + SceneState/FilterManager 状态机；
+   *  本帧器件态见 monoScan） */
+  readonly monoFilters = new MonolithFilters();
+  /** 本帧天塔柱扫描结果（SceneMetrics.ScanOnScreenTiles :524-583；render() 每帧刷新） */
+  monoScan: MonolithSceneState = emptyMonolithScene();
+  private _monoFrameMs = 0;
   scene: SceneFlags | null = null;
 
   // 全屏地图查看器状态（zoom 向 zoomTarget 缓动；缓动期间按锚点补偿 pan）
@@ -486,16 +493,37 @@ export class Renderer {
     // 渲染共享态(chunk 烘焙的风摆/风门读取):风速 + worldSurface
     renderEnv.wind = world.weather?.windSpeedCurrent ?? 0;
     renderEnv.worldSurface = world.groundLevel;
-    this.updateWaterStyle(world, cam);
-    this.easeFullMap();
     const ctx = this.ctx;
     const viewW = this.canvas.width, viewH = this.canvas.height;
     cam.viewW = viewW; cam.viewH = viewH;
     const z = cam.zoom;
 
+    // 0. 天塔柱族：视区扫描（Main.cs:61983-61990 GetAreaToLight+Inflate(28) →
+    //    SceneMetrics.ScanOnScreenTiles :524-583）+ 滤镜状态机（SceneState.cs:105-128）
+    const clock0 = world.clock;
+    this.monoScan = scanMonolithScene(world.store, visualScanRect(
+      cam.x, cam.y, viewW, viewH, z, world.store.w, world.store.h));
+    this.monoFilters.update(this._liquidNow - (this._monoFrameMs || this._liquidNow), this.monoScan, {
+      worldSurface: world.groundLevel,
+      rockLevel: world.rockLevel,
+      screenTileY: cam.y / TILE,
+      dayTime: clock0 ? clock0.isDay : true,
+      // 映射到原版 24h 表盘（Utils.GetDayTimeAs24FloatStartingFromMidnight :738-745）：
+      // 我方黎明 timeOfDay=0.25 ↔ 4.5h；取模防午夜负值
+      hour24: ((((clock0 ? clock0.timeOfDay : 0.5) - 0.25) % 1 + 1) % 1) * 24 + 4.5,
+      nightElapsed01: (((clock0 ? clock0.timeOfDay : 0) - 0.75) % 1 + 1) % 1,
+      fullMoon: clock0?.moonPhase === 0,
+      worldBloodMoon: !!clock0?.bloodMoon,
+      cloudAlpha: world.weather?.cloudAlpha ?? 0,
+    });
+    this._monoFrameMs = this._liquidNow;
+
+    this.updateWaterStyle(world, cam);
+    this.easeFullMap();
+
     // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线）
     this.sky.fx = {
-      monolith: this.scene?.monolithType ?? -1,
+      monolith: this.monoScan.activeMonolithType,
       party: !!this.scene?.partyUp,
       surfaceY: world.groundLevel * TILE,
     };
@@ -516,8 +544,8 @@ export class Renderer {
       }
       this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
     }
-    // 1.6 天塔柱滤镜（SceneState → Filters.Scene["Monolith*"]；后处理层的背景子集近似）
-    this.sky.drawMonolithFilter(ctx, viewW, viewH);
+    // 1.6 天塔柱滤镜：原"天空层子集近似"已上移为全屏后处理（步骤 7d，
+    //     SceneState → Filters.Scene["Monolith*"] 整屏合成语义 1:1）
 
     ctx.save();
     // 世界变换：平移 + 缩放（以屏幕中心为相机中心）
@@ -682,6 +710,17 @@ export class Renderer {
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
+
+    // 7d. 天塔柱族全屏滤镜（FilterManager.EndCapture :136-176：世界整屏合成、
+    //     HUD 之前；EffectPriority 升序 → Medium 先 VeryHigh 后）。开关链：
+    //     电路/右键 → SwitchMonolith 翻帧 → SceneMetrics 视区扫描（本帧 monoScan）
+    //     → SceneState.cs:105-128 激活 → Filter.Opacity 1/s 斜坡
+    if (this.monoFilters.anyInUse) {
+      this.monoFilters.draw(ctx, this.canvas, viewW, viewH, {
+        x: (player.cx - cam.x) * z + viewW / 2,
+        y: (player.cy - cam.y) * z + viewH / 2,
+      });
+    }
 
     // 8. 飘字（受光照影响后画）
     ctx.save();
@@ -935,8 +974,9 @@ export class Renderer {
       return;
     }
     // 血月柱（SceneMetrics.BloodMoonMonolith → Main.cs:61417 并入 BloodMoonActive；
-    // CalculateWaterStyle 的血月分支读 Main.bloodMoon——柱激活时同色 9，白夜也生效）
-    const bloodMoon = (!!world.clock?.bloodMoon || !!f.bloodMoonMonolith);
+    // CalculateWaterStyle 的血月分支读 Main.bloodMoon——柱激活时同色 9，白夜也生效。
+    // 来源用本帧视区扫描 monoScan（ScanOnScreenTiles 语义）而非 169×124 窗口的近似值）
+    const bloodMoon = (!!world.clock?.bloodMoon || !!f.bloodMoonMonolith || this.monoScan.bloodMoonMonolith);
     const dayTime = world.clock ? world.clock.isDay : true;
     let target = 0;
     if (bloodMoon && !dayTime) target = 9;
@@ -1179,6 +1219,11 @@ export class Renderer {
     if (e.vanillaId === 125) this.drawTwinsChain(e, entities);
     // ---- 原版 NPC 表精灵（数据驱动路径：纵向帧条 + 朝向翻转，原版贴图默认朝左） ----
     if (e.vanillaId != null && this.atlas) {
+      // 风气球 594（Main.cs:23380-23406 独占）：贴图是 8 列变体【横条】(256×76 =
+      // 32×76×8),变体索引 = ai[2]；携带史莱姆时先画帧 0 的 alpha+奴隶染色两遍
+      // （气球壳随史莱姆染色）。通用竖切路径(json frames=1)会把整条横排 8 个气球
+      // 全画出来——"完整逐帧贴图"(用户标注)
+      if (e.vanillaId === 594) { this.drawWindyBalloon(e, entities); return; }
       // 月总族独占分支（Main.cs:24325-24504 case 396/397/398）：头/手/核心各自
       // 带独立锚点与叠层（上臂/前臂/躯干/胸甲/眼/破体帧），通用路径锚点不对
       if (e.vanillaId === 398) { this.drawMoonLordCore(e, entities); return; }
@@ -1524,6 +1569,40 @@ export class Renderer {
    *  肘向量=(手中心+(0,76)-肩)×0.5、折角 acos(|v|/340)×-signX）→ 躯干 Extra_13 左右半
    *  （镜像）→ 胸甲 Extra_16 → 核心 NPC_398 帧。手实体由实体表反查（原版按
    *  npc[whoAmI] 全表扫 ai[2]/ai[3]——我们用 master 链等价解析） */
+  /** 风气球 594（Main.cs:23380-23406 + FindFrame case 594 :68652-68656 独占绘制）：
+   *  - 贴图 NPC_594.png 为 8 列变体横条 32×76/帧；变体 = ai[2]（1-7 装饰随机）
+   *  - 携带史莱姆（slave ai0=-999）时：帧 0 以 slave 的 alpha+color 两遍绘制
+   *    （气球壳染成史莱姆色），scale 取 slave.scale；之后叠 ai[2] 变体帧
+   *  - 锚点 = npc.Top + origin(0.5,0)（顶部居中）,随 rotation(visAngle) 倾斜 */
+  private drawWindyBalloon(e: Enemy, entities: unknown[]) {
+    const ctx = this.ctx;
+    const img = this.atlas!.ensureVImage('vanilla/NPC_594.png');
+    if (!img) return;
+    const fw = 32, fh = img.height;
+    const variant = Math.max(0, Math.min(7, Math.round(e.ai2)));
+    const slave = (entities as Enemy[]).find(
+      (n) => n.id === e.ai3 && !n.dead && n.vanillaId === 1 && n.ai0 === -999,
+    ) ?? null;
+    const scale = slave?.vanillaScale ?? e.vanillaScale ?? 1;
+    ctx.save();
+    ctx.translate(e.cx, e.y);
+    ctx.rotate(e.visAngle);
+    ctx.scale(scale, scale);
+    if (slave && slave.colorRGBA && slave.colorRGBA[3] > 0) {
+      // 气球壳染色（与史莱姆染色同款两步：destination-out 削弱 + lighter 加色）
+      const tinted = this.tintedSprite('npc594shell', { img, sx: 0, sy: 0, sw: fw, sh: fh }, slave.colorRGBA);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = slave.colorRGBA[3] / 255;
+      ctx.drawImage(img, 0, 0, fw, fh, -fw / 2, 0, fw, fh);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 1;
+      ctx.drawImage(tinted, -fw / 2, 0, fw, fh);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    ctx.drawImage(img, variant * fw, 0, fw, fh, -fw / 2, 0, fw, fh);
+    ctx.restore();
+  }
+
   private drawMoonLordCore(e: Enemy, entities: unknown[]) {
     if (!this.atlas) return;
     const ex13 = this.atlas.vmisc('vanilla/Extra_13.png');

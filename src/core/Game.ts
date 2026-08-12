@@ -1011,7 +1011,14 @@ export class Game implements GameHooks {
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
-      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar', 'thunder']);
+      'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar', 'thunder',
+      'explosion']); // Item_14 爆炸声(炸弹/手雷/炸药/巨石)——不预热则首爆静音
+    this.sfx.preloadFiles(['Drip_0', 'Drip_1', 'Drip_2']); // 滴水溅落（SoundID 39，Gore 碰撞/入水）
+    // 滴水溅落音钩子（Gore.cs :971-984：落地 Drip_0/1 随机、入水 Drip_2、位置 +8；
+    // 带坐标走 2500px 距离衰减，flag4 水型已在 NatureParticles 内静音）
+    natureParticles.onDripSplash = (x, y, wet) => {
+      this.sfx.playFiles(wet ? ['Drip_2'] : ['Drip_0', 'Drip_1'], 1, x, y);
+    };
     // ---- 天气系统接线：状态机已在 world.weather（存档/wld 导入回填）；
     //  天空云联动 + 雨滴/沙尘渲染器 attach；hooks 字段每帧由 fixedUpdate 刷新 ----
     this.renderer.sky.attachWeather(w.weather);
@@ -1346,6 +1353,8 @@ export class Game implements GameHooks {
     this.renderer.weatherFxActive = false;
     this.renderer.weatherFx.detach();
     this.renderer.sky.weatherRef = null;
+    natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
+    natureParticles.onDripSplash = null;
     // 月总震屏滤镜解除（倒计时中退世界 → 菜单不留红色脉冲）
     this.renderer.moonLordShake = null;
     // 资源释放链(缺一不可,见各 dispose 注释):连续多次读档曾因不释放
@@ -5051,7 +5060,10 @@ export class Game implements GameHooks {
     if (p) this.entities.add(p, 'props');
   }
 
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true) {
+  /** hurtBox:实体伤害盒半宽(Projectile.Kill 各族 Resize 盒的半边)。
+   *  原版与地形破坏半径【无关】:炸弹/手雷族(:74885)Resize(22,22)=11px;
+   *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆) */
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number) {
     const st = this.world.store;
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
@@ -5097,13 +5109,29 @@ export class Game implements GameHooks {
     }
     const cx = tx * TILE + 8, cy = ty * TILE + 8;
     for (const e of this.entities.enemies) {
-      if (Math.hypot(e.x - cx, e.y - cy) < R * TILE + 16) { const en = e as Enemy; if (en.hurt) en.hurt(damage, cx - (e.cx ?? cx), cy - (e.cy ?? cy), this); }
+      // 原版语义 = Resize(hurtBox×2) 盒与实体 Hitbox 相交(中心距 < hurtBox+半宽)。
+      // ★曾用 R*TILE+16 距离圆:炸弹 80px(原版 11px,近 4 格外的怪也被炸)——半径混用
+      const hb = hurtBox ?? R * TILE;
+      const en = e as Enemy;
+      if (en.hurt && Math.abs((en.cx ?? cx) - cx) < hb + (e.w >> 1)
+        && Math.abs((en.cy ?? cy) - cy) < hb + (e.h >> 1)) {
+        en.hurt(damage, cx - (en.cx ?? cx), cy - (en.cy ?? cy), this);
+      }
     }
     const p = this.player;
-    if (Math.hypot(p.cx - cx, p.cy - cy) < R * TILE + 16) p.damage(damage, cx, cy);
-    this.spawnParticles(cx, cy, '#FFA040', 26, 4);
+    const hb = hurtBox ?? R * TILE;
+    if (Math.abs(p.cx - cx) < hb + p.w / 2 && Math.abs(p.cy - cy) < hb + p.h / 2) p.damage(damage, cx, cy);
+    // 视觉 1:1(Projectile.Kill 炸弹族 :74886-74916):烟 31×20 慢散 +
+    // 火 6×10 对(noGravity 快速) + gore 61-63 四向 4 块(近似灰色块)
+    this.spawnParticles(cx, cy, '#9A9A9A', 20, 2, { life: 40, damp: 0.96 });       // 烟(×1.4 慢)
+    this.spawnParticles(cx, cy, '#FF9A3C', 20, 5, { life: 30, grav: -0.06, damp: 0.94 }); // 火对(×5/×3 无重力)
+    for (let gi = 0; gi < 4; gi++) {
+      const a = gi * Math.PI / 2 + Math.PI / 4;
+      this.spawnParticles(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, '#D8D8D0', 1, 3,
+        { life: 50, damp: 0.98, size: 3 });
+    }
     // 原版爆炸声 SoundID.Item14(Projectile.cs 手雷/炸弹/炸药等 20+ 处)——
-    // 曾误用 roar(Boss 咆哮)
+    // 曾误用 roar(Boss 咆哮);首播静音已由 Sfx 合成分支+预热兜底
     this.sfxAt('explosion', cx, cy);
     // 链式引爆（延后到本爆结算后，防爆心递归；上限防炸药墙死循环）
     let chained = 0;
@@ -7443,7 +7471,7 @@ export class Game implements GameHooks {
 
   spawnParticles(
     x: number, y: number, color: string, count: number, speed = 2,
-    opts: { life?: number; damp?: number; grav?: number } = {},
+    opts: { life?: number; damp?: number; grav?: number; size?: number } = {},
   ) {
     const base = opts.life ?? 40;
     for (let i = 0; i < count; i++) {
@@ -7451,7 +7479,7 @@ export class Game implements GameHooks {
       const life = Math.round(base * (0.6 + Math.random() * 0.4));
       this.particles.push({
         x, y, vx: Math.cos(a) * speed * Math.random(), vy: Math.sin(a) * speed * Math.random() - 1,
-        life, maxLife: life, color, size: 2 + Math.random() * 2,
+        life, maxLife: life, color, size: opts.size ?? 2 + Math.random() * 2,
         damp: opts.damp, grav: opts.grav,
       });
     }

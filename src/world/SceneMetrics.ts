@@ -158,13 +158,17 @@ export function scanScene(
       // isDesertBiomeSand && oceanDepths（SceneMetrics L376-380）：只有普通沙族在
       // 海洋深度带内才计海洋沙；邪恶/神圣沙与沙岩砖族不是 isDesertBiomeSand
       if (DESERT_BIOME_SAND.has(t) && y <= oceanTopY && (x < beachDist || x > w - beachDist)) oceanSand++;
-      // 器件帧态（八音盒/喷泉/天塔柱；读取器与电路开关同源 wiring/devices.ts）
+      // 器件帧态（八音盒/喷泉/天塔柱；读取器与电路开关同源 wiring/devices.ts）。
+      // 天塔柱只认激活帧（SceneMetrics.cs:524-536 是"激活才赋值"——关帧不回写 -1）：
+      // 同屏多柱时后扫到的激活柱生效；渲染侧权威扫描在 render/MonolithFilters.ts
       const fxSh = FX_SHEET_IDS.get(t);
       if (fxSh !== undefined) {
         if (fxSh === 139) mbStyle = musicBoxStyleOf(st.frameX[i], st.frameY[i]);
         else if (fxSh === 207) fountain = fountainColorOf(st.frameX[i], st.frameY[i]);
-        else if (fxSh === 410 || fxSh === 509) monolith = monolithTypeOf(fxSh, st.frameX[i], st.frameY[i]);
-        else if (fxSh === 480) bloodMoonMono = bloodMoonMonolithOf(fxSh, st.frameY[i]);
+        else if (fxSh === 410 || fxSh === 509) {
+          const mt = monolithTypeOf(fxSh, st.frameX[i], st.frameY[i]);
+          if (mt >= 0) monolith = mt;
+        } else if (fxSh === 480) bloodMoonMono = bloodMoonMonolithOf(fxSh, st.frameY[i]) || bloodMoonMono;
       }
     }
   }

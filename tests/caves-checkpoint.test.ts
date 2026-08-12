@@ -48,7 +48,7 @@ function hashWalls(st: { wall: Uint16Array }): string {
   return fnv1a(st.wall);
 }
 
-function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: number }): number {
+function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: number }): string {
   const n = st.w * st.h;
   const ghost = new Uint16Array(n);
   for (let i = 0; i < n; i++) {
@@ -56,7 +56,7 @@ function hashGhost(st: { type: Uint16Array; flags: Uint8Array; w: number; h: num
     const v = V_ID[st.type[i]];
     ghost[i] = v < 0 ? 0x7fff : v;
   }
-  return fnv1a(ghost);
+  return fnv1a(ghost);   // fnv1a 返回 hex string（注解曾是 number——陈旧签名残留）
 }
 
 function chainCheckpoints(seedText: string, evil: 0 | 1) {

@@ -10,12 +10,18 @@ import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { projFrameImg, projFrameCount } from './Arrow';
 
-/** ItemID.UniqueTagEffects（ItemID.cs:1303-1350）：鞭 → tag 附加伤害
- *  （未列入的鞭 TagDamage=0 或走默认表；星璇/万花筒特效简化为纯伤害） */
+/** ItemID.UniqueTagEffects（ItemID.cs:1303-1414 全表核对）：鞭 → tag 附加伤害。
+ *  4912 火鞭无 flat tag（专属爆炸 proc 未实装）；6143 妖精鞭 +4 */
 const WHIP_TAG: Record<number, number> = {
   5688: 3, 5473: 3, 4672: 4, 5474: 5, 5475: 5, 5476: 2,
-  4913: 6, 5074: 7, 4911: 8, 5477: 5, 4678: 9, 5478: 10, 5479: 10,
-  4679: 11, 4914: 13, 5480: 14, 4680: 14, 4912: 15,
+  4913: 6, 5074: 7, 4911: 6, 5477: 9, 4678: 9, 4680: 15,
+  4679: 8, 5478: 12, 5479: 15, 4914: 20, 5480: 25, 6143: 4,
+};
+/** 鞭命中授予的玩家 buff（WhipTagEffect.PlayerBuffId/Time=180）：
+ *  308 剑鞭/311 镰鞭/312 鞭杖(迅捷)/314 荆棘鞭(召唤伤害+10%)/365 麻线鞭。
+ *  效果实装：314 → 随从伤害 ×1.1；其余登记持续期（效果端暂不接） */
+const WHIP_PLAYER_BUFF: Record<number, number> = {
+  5473: 365, 4913: 314, 4911: 312, 4678: 308, 4680: 311,
 };
 
 export interface WhipTagged {
@@ -101,6 +107,12 @@ export class WhipProj extends Entity {
         if (tag > 0) {
           e.whipTagT = 240;
           e.whipTagDmg = tag;
+        }
+        // 玩家 buff（WhipTagEffect.PlayerBuffId：命中授予 180t；314=荆棘鞭召唤伤+10%）
+        const pb = WHIP_PLAYER_BUFF[this.itemId];
+        if (pb && owner) {
+          (owner as unknown as { whipBuffs?: Record<number, number> }).whipBuffs ??= {};
+          (owner as unknown as { whipBuffs: Record<number, number> }).whipBuffs[pb] = 180;
         }
         game.addDamageNumber(sx, sy, dmg, false, '#FFD060');
       }

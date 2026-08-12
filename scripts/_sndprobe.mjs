@@ -29,9 +29,9 @@ for (let att = 0; att < 12 && r === null; att++) {
       const calls = [];
       const origPlay = sfx0.play.bind(sfx0);
       sfx0.play = (n, v, x, y) => { calls.push([n, typeof x]); return origPlay(n, v, x, y); };
-      (g).explodeAt(100, 100, 100, 4, true);
+      (g).explodeAt(Math.floor(g.player.cx / 16), Math.floor(g.player.cy / 16) + 3, 100, 4, true);
       await new Promise((r2) => setTimeout(r2, 500));
-      (g).explodeAt(100, 100, 100, 4, true);
+      (g).explodeAt(Math.floor(g.player.cx / 16), Math.floor(g.player.cy / 16) + 3, 100, 4, true);
       out.explodeCalls = calls.filter((c) => c[0] === 'explosion').length;
       out.bufAfterTwoExplosions = sfx0.buffers.has('Item_14');
       sfx0.play = origPlay;
