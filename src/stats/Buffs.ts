@@ -353,8 +353,9 @@ export class BuffState {
   }
   /** 定额回复/伤害 buff 的独立累加器（Map 存每 buff 的秒余数;负速率=DoT）。
    *  separate=true 用独立累加器键(蜂蜜对冲与常规蜂蜜回复分账,避免共用余数)。
-   *  负速率按 DOT_CHUNK 整块弹出（≈原版 lifeRegenCount 阈值分块）;buff 到期时
-   *  不足一块的余数丢弃(原版同样只在整阈值结算) */
+   *  负速率按 DOT_CHUNK 整块弹出（≈原版 lifeRegenCount 阈值分块）。已知偏差:
+   *  原版 lifeRegenCount 是全局共享计数器,buff 到期后负余量仍残留(由后续
+   *  DoT/自然回复对冲);本实现 per-buff 累加器到期即弃余数(<1 块,≤4 HP,一次性) */
   private rateLeft = new Map<string, number>();
   private rateAccum(t: BuffType, hpPerSec: number, dt: number, separate = false): number {
     if (!this.active.has(t)) { this.rateLeft.delete(`${t}:${separate}`); return 0; }

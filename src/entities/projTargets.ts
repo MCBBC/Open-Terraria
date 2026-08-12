@@ -18,6 +18,32 @@ export function projOverlap(ax: number, ay: number, aw: number, ah: number, e: {
 }
 
 /** 命中小动物:一击致死。返回是否命中(调用方按各自语义消耗穿透/销毁弹体) */
+/** 城镇 NPC 受击判定(玩家武器/友方弹幕/敌怪接触/巨石共用)。
+ *  原版 Projectile.Damage 的 NPC 碰撞对 friendly 城镇 NPC 同样生效——
+ *  杀裁缝师召骷髅王即此链;本作曾仅陷阱弹(Dart)命中城镇 NPC。
+ *  TownNPC.hurt 自带 8t 无敌帧去重;返回是否实际造成伤害。 */
+export function hitTownNpcs(
+  self: { x: number; y: number; w: number; h: number },
+  game: GameHooks,
+  dmg: number,
+  kbx = 0,
+): boolean {
+  const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
+  let any = false;
+  for (const ent of list) {
+    const n = ent as {
+      x: number; y: number; w: number; h: number; dead: boolean;
+      hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
+      bound?: boolean; talking?: boolean;
+    };
+    if (n.dead || typeof n.hurt !== 'function') continue;
+    if (n.bound) continue; // 被缚待救不可打(近似;原版 bound 型有独立受击语义)
+    if (!projOverlap(self.x, self.y, self.w, self.h, n)) continue;
+    if (n.hurt(dmg, kbx, 0, game)) any = true;
+  }
+  return any;
+}
+
 export function hitCritters(self: { x: number; y: number; w: number; h: number }, game: GameHooks): boolean {
   const list = (game as unknown as { critters?: () => unknown[] }).critters?.() ?? [];
   for (const ent of list) {
