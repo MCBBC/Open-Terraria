@@ -6,7 +6,7 @@ import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData } from './save/SaveFile';
 import { saveClient } from './workers/SaveClient';
-import { TILE_BY_KEY } from './data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
@@ -16,6 +16,7 @@ import { VUI } from './vui/VUI';
 import { TitleMenu } from './ui/TitleMenu';
 import { MultiplayerSelect } from './ui/MultiplayerSelect';
 import { SettingsPanel } from './ui/Settings';
+import { BestiaryPanel } from './ui/BestiaryPanel';
 import { CharSelectPanel } from './ui/CharSelect';
 import { WorldSelectPanel } from './ui/WorldSelect';
 import { WorldCreationPanel } from './ui/WorldCreation';
@@ -42,6 +43,7 @@ export interface FlowHandle {
   quitToMenu(): void;
   doSave(): void;
   openSettings(inGame: boolean): void;
+  openBestiary(): void;
   game: Game | null;
   playStart: number;
 }
@@ -90,6 +92,11 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // E2E/控制台调试:tile key → 内部 id 反查(测试脚本放置图块用)
     (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
       (TILE_BY_KEY as Record<string, number>)[k] ?? -1;
+    // E2E 调试:内部 id → def 关键字段(注册表漂移排查)
+    (window as unknown as { __swTileDefById?: (id: number) => unknown }).__swTileDefById = (id: number) => {
+      const d = (TILE_DEFS as Array<{ key: string; vanilla?: { sheet: number; frame: string; fw?: number; fh?: number } }>)[id];
+      return d ? { key: d.key, sheet: d.vanilla?.sheet, frame: d.vanilla?.frame, fw: d.vanilla?.fw, fh: d.vanilla?.fh } : null;
+    };
     // E2E/控制台调试:直接加载存档 JSON 文本(绕过设置面板的 file input)
     // (挂模块级而非 enterGame:菜单阶段测试脚本就要用)
     // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
@@ -523,6 +530,26 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     });
   }
 
+  /** 图鉴面板（UIBestiaryTest 1:1 结构：网格分页/筛选排序/条目卡/完成度条）。
+   *  打开期间暂停世界并阻断输入；Esc/E 关闭后恢复先前的暂停/阻断态
+   *  （从暂停菜单进入时其面板仍叠在下层，关闭即回暂停菜单）。 */
+  function openBestiary() {
+    const g = game;
+    if (!g) return;
+    const wasPaused = g.paused;
+    const wasBlocking = g.input.uiBlocking;
+    g.paused = true;
+    g.input.uiBlocking = true;
+    new BestiaryPanel(root, {
+      getTracker: () => g.world.bestiary,
+      atlas,
+      onBack: () => {
+        if (!wasPaused) g.paused = false;
+        if (!wasBlocking) g.input.uiBlocking = false;
+      },
+    });
+  }
+
   function showTitle() {
     audio.play('title');
     ui.closeAll();
@@ -647,6 +674,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     quitToMenu,
     doSave,
     openSettings,
+    openBestiary,
     get game() { return game; },
     playStart: 0,
     get playStartNow() { return Date.now() - playStart; },

@@ -5,7 +5,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto('http://localhost:5199/?t=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?t=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 // 等背景图加载 + 变体就绪
 for (let i = 0; i < 20; i++) { await new Promise(r => setTimeout(r, 500)); }

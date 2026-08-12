@@ -11,7 +11,10 @@ import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
 export class Clock {
-  timeOfDay: number = 0.3;   // 0-1，0=午夜 0.5=正午（起始上午 7:12 ≈ 0.3）
+  /** 昼夜边界（1:1 Main.time：昼 4:30AM-7:30PM=54000t、夜 32400t；0=午夜线性 24h） */
+  static readonly DAWN = 4.5 / 24;   // 0.1875
+  static readonly DUSK = 19.5 / 24;  // 0.8125
+  timeOfDay: number = 8.25 / 24;   // 0-1，0=午夜 0.5=正午（起始 8:15AM = Main.time 13500）
   dayCount: number = 1;
   /** 月相 0-7（0=满月 4=新月；每黎明 +1 mod 8，Main.cs:64877）。对话月相池/血月门用 */
   moonPhase: number = 0;
@@ -28,17 +31,19 @@ export class Clock {
   readonly dayLengthMs: number;
   constructor(dayLengthMs: number) { this.dayLengthMs = dayLengthMs; }
   tick(dtMs: number) {
+    // 原版 Main.time 恒速 tick（1t/帧）：dayLengthMs=全周期 24min 时，0.625/0.375 的
+    // 昼夜窗口自然得出 15min/9min——★勿再按段调速（曾除反导致昼夜缩水，探针抓回）
     this.timeOfDay += dtMs / this.dayLengthMs;
     while (this.timeOfDay >= 1) { this.timeOfDay -= 1; this.dayCount++; }
   }
-  get isDay(): boolean { return this.timeOfDay > 0.25 && this.timeOfDay < 0.75; }
+  get isDay(): boolean { return this.timeOfDay > Clock.DAWN && this.timeOfDay < Clock.DUSK; }
   get dayFactor(): number {
     // 昼夜平滑系数：白天 1，夜晚 0.32（月光下地表仍可见，火把不再像贴在黑幕上），晨昏过渡
     const t = this.timeOfDay;
-    if (t > 0.28 && t < 0.72) return 1;
-    if (t >= 0.72 && t < 0.80) return 1 - (t - 0.72) / 0.08 * 0.68;
-    if (t >= 0.80 || t < 0.20) return 0.32;
-    return 0.32 + (t - 0.20) / 0.08 * 0.68;
+    if (t > Clock.DAWN + 0.04 && t < Clock.DUSK - 0.04) return 1;
+    if (t >= Clock.DUSK - 0.04 && t < Clock.DUSK + 0.04) return 1 - (t - (Clock.DUSK - 0.04)) / 0.08 * 0.68;
+    if (t >= Clock.DUSK + 0.04 || t < Clock.DAWN - 0.04) return 0.32;
+    return 0.32 + (t - (Clock.DAWN - 0.04)) / 0.08 * 0.68;
   }
   get hourFloat(): number { return this.timeOfDay * 24; }
 }
@@ -162,7 +167,7 @@ export class World {
     this.seed = seed;
     this.name = name;
     // 1 游戏日 = 30 现实分钟（24→40 后折中）
-    this.clock = new Clock(30 * 60 * 1000);
+    this.clock = new Clock(24 * 60 * 1000); // 1:1 全周期 24min（昼 15/夜 9）
   }
 
   /** 从 worker 数据包重建（buffer 已 transfer 移交，零拷贝包装）。

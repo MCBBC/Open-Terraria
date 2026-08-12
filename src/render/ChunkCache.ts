@@ -231,6 +231,12 @@ export class ChunkCache {
         // 风摆动图块（草/藤/吊挂植物/树冠标记帧）：摘出静态烘焙，
         // 由 Renderer 的 WindSway overlay 逐帧动态绘制（原版 AddSpecialPoint 特殊路径）
         if (def.vanilla && swayBakeSkip(type, st.frameX[i])) continue;
+        // ★TEMP 调试:陶罐(82)烘焙路径追踪(定位"贴图错位"bug,用后即删)
+        if (type === 82 && (window as unknown as { __potDbg?: boolean }).__potDbg) {
+          console.warn('[potDbg] cell', x, y, 'fx', st.frameX[i], 'fy', st.frameY[i],
+            'vanilla', JSON.stringify(def.vanilla), 'autotiler', !!this.autotiler,
+            'skip', swayBakeSkip(type, st.frameX[i]));
+        }
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
           // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch

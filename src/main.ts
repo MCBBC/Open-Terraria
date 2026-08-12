@@ -23,6 +23,7 @@ import type { FlowHandle } from './mainFlow';
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);
+ui.onBestiary = () => flow.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
 
@@ -81,6 +82,7 @@ window.addEventListener('keydown', (e) => {
           },
           onSave: () => flow.doSave(),
           onSettings: () => flow.openSettings(true),
+          onBestiary: () => flow.openBestiary(),
           onQuit: () => {
             pausePanel = null;
             game!.paused = false;

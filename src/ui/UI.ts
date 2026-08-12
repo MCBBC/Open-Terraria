@@ -178,6 +178,8 @@ export class UI {
   heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
+  /** 图鉴面板入口（背包按钮/暂停菜单注入；见 BestiaryPanel） */
+  onBestiary?: () => void;
 
   constructor(parent: HTMLElement) {
     const style = el('style');
@@ -1536,6 +1538,15 @@ export class UI {
         row.appendChild(b);
         this.eqPageBtns.push(b);
       }
+      // 图鉴入口（原版 BestiaryMenuButton Main.cs:41896-41910：背包侧按钮
+      // IngameFancyUI.OpenUIState(BestiaryUI)；打开逻辑由 main.ts 注入 onBestiary）
+      const bBst = el('button', 'sw-btn', '图鉴');
+      bBst.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+      bBst.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.onBestiary?.();
+      });
+      row.appendChild(bBst);
       this.invPanel.appendChild(row);
     }
 
@@ -2342,7 +2353,7 @@ export class UI {
 
   // ============ 暂停菜单 ============
 
-  showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void; onSettings?: () => void }) {
+  showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void }) {
     const panel = el('div', 'sw-panel');
     panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:280px;';
     panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Paused')));
@@ -2352,9 +2363,11 @@ export class UI {
     bSave.onclick = () => handlers.onSave();
     const bSet = el('button', 'sw-btn', Lang.text('LegacyMenu.14'));
     bSet.onclick = () => handlers.onSettings?.();
+    const bBst = el('button', 'sw-btn', '图鉴');
+    bBst.onclick = () => handlers.onBestiary?.();
     const bQuit = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.BackToMenu'));
     bQuit.onclick = () => { panel.remove(); handlers.onQuit(); };
-    panel.append(bRes, bSave, bSet, bQuit);
+    panel.append(bRes, bSave, bSet, bBst, bQuit);
     this.root.appendChild(panel);
     return panel;
   }

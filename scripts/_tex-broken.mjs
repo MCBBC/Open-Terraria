@@ -5,7 +5,7 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push('PAGEERR: ' + String(e).slice(0, 200)));
 page.on('console', m => { if (m.type() === 'error' || m.type() === 'warning') errs.push(m.type().toUpperCase() + ': ' + m.text().slice(0, 200)); });
-await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 try {
   await page.waitForFunction(() => window.__swGame && window.__swGame.liquid, { timeout: 600000 });
 } catch { console.log('世界未就绪'); }

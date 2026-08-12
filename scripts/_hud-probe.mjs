@@ -7,7 +7,7 @@ const errors = [];
 const navs = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('framenavigated', (f) => { if (f === page.mainFrame()) navs.push(f.url().slice(0, 80)); });
-await page.goto('http://localhost:5199/?play=small&hud=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small&hud=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
 const waitGame = () => page.evaluate(() => !!(window.__swGame && window.__swGame.player && window.__swGame.renderer)).catch(() => false);
 let inGame = false;
 for (let i = 0; i < 90 && !inGame; i++) {

@@ -21,7 +21,14 @@ function makeHooks(waterAt?: { x: number; y: number; w?: number }) {
   }
   const player = new Player(60 * 16, 90 * 16, new Inventory());
   const hooks: GameHooks = {
-    world: { store } as never,
+    world: {
+      store,
+      // 中性时段（乘区=1）：上午 10k tick ≈ timeOfDay 0.3426、无雨无云、月相 2 非血月
+      clock: { timeOfDay: 0.25 + 10000 / 54000 * 0.5, isDay: true, moonPhase: 2, bloodMoon: false, eclipse: false },
+      weather: { raining: false, cloudAlpha: 0 },
+      flags: {},
+      scene: null,
+    } as never,
     player: player as never,
     enemies: () => [],
     critters: () => [],

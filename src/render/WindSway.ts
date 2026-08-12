@@ -18,6 +18,7 @@ import { natureParticles, getTreeLeaf, leafEmits, dripGoreFor } from './NaturePa
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import type { World, Clock } from '../world/World';
+import { Clock as ClockVal } from '../world/World';
 import { options } from '../core/Options';
 
 /** 帧级环境（drawWindSwayTiles 每帧构建，贯穿全部绘制分支） */
@@ -826,7 +827,7 @@ export function drawWindSwayTiles(
   const st = world.store;
   ST = st;
   const t = clock?.timeOfDay ?? 0.5;
-  const isDay = t > 0.25 && t < 0.75;
+  const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
   ENV = {
     worldSurface: world.groundLevel,
     remix: !!(world as { remixWorld?: boolean }).remixWorld,

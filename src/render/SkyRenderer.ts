@@ -1,5 +1,8 @@
 // 天空渲染：昼夜渐变、太阳/月亮、星星、云
-import type { Clock } from '../world/World';
+// 注意:Clock 必须值导入——DAWN/DUSK 是运行时常量,import type 会被擦除
+// (:528/:561 运行时取值 → "Clock is not defined" 每帧崩渲染循环)
+import { Clock } from '../world/World';
+import { Clock as ClockVal } from '../world/World';
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 
@@ -525,7 +528,7 @@ export class SkyRenderer {
     ctx.fillRect(0, 0, viewW, viewH);
     // 日食压暗（Main.cs:63282-63305）：eclipseLight = min(1, 白天 time/1242)，
     // bgColor 三通道 ×(1-0.925L)/(1-0.96L)/(1-1.0L)——血红暮色，蓝通道清零
-    if (clock.eclipse && t > 0.25 && t < 0.75) {
+    if (clock.eclipse && t > ClockVal.DAWN && t < ClockVal.DUSK) {
       const dayTime = ((t - 0.25) / 0.5) * 54000;
       const L = Math.min(1, dayTime / 1242);
       if (L > 0) {
@@ -558,7 +561,7 @@ export class SkyRenderer {
 
     // ---- 原版太阳/月亮(Main.cs:62279 DrawSunAndMoon 一比一)----
     // 昼夜时间(我们 0.25/0.75 边界 → 原版 day 0-54000 / night 0-32400)
-    const isDay = t > 0.25 && t < 0.75;
+    const isDay = t > ClockVal.DAWN && t < ClockVal.DUSK;
     const dayTime = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
     const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
     ctx.save();

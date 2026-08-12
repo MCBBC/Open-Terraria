@@ -32,7 +32,7 @@ export class MenuBackground {
   private ctx: CanvasRenderingContext2D;
   private sky = new SkyRenderer();
   /** 菜单时钟：一圈 2.5 分钟（原版 30min 太慢，日月升降肉眼不可见） */
-  private clock = new Clock(150_000);
+  private clock = new Clock(24 * 60 * 1000); // 与世界同周期 24min（1:1）
   private camX = 0;
   private imgs = new Map<number, HTMLImageElement>();
   private variantIdx = Math.floor(Math.random() * FOREST_VARIANTS.length);

@@ -31,7 +31,7 @@ const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: 
 try {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', String(e.message).slice(0, 200)));
-  await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await new Promise((r) => setTimeout(r, 4000));
   await page.click('[data-act="mp"]');
   await new Promise((r) => setTimeout(r, 800));

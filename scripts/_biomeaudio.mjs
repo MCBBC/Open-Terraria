@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 180000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 180000 });
 // 垫片 select 出现需等主菜单挂载（HMR 重载会废掉 waitForSelector 的 context，手动轮询）
 for (let i = 0; i < 60; i++) {
   const has = await page.evaluate(() => !!document.querySelector('select')).catch(() => false);

@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message.slice(0, 250)));
 page.on('console', (m) => { if (m.type() === 'error') console.log('CERR:', m.text().slice(0, 250)); });
-await page.goto('http://localhost:5199/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.evaluate(() => { const s = document.querySelector('select'); if (s) s.selectedIndex = 0; });
 await page.evaluate(() => document.querySelector('button').click());

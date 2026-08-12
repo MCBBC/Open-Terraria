@@ -3,7 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
-import { hitCritters, hitPlayer, playEnemyHitSound, statusPlayer } from './projTargets';
+import { hitCritters, hitPlayer, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -84,8 +84,13 @@ export class Arrow extends Entity {
   pierce: number;
   /** 敌对弹（原版 Projectile.hostile）：命中玩家结算（Damage_EVP 语义） */
   hostile: boolean;
+  /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
+  whipTagShot = false;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
+  /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
+   *  反射后弹体转 hostile——不再入下方敌怪判定，改走 hitPlayer 伤玩家） */
+  reflected = false;
   /** 穿透投射物的同敌免疫表（敌人 id 集合） */
   private hitSet = new Set<number>();
   dead = false;
@@ -168,17 +173,37 @@ export class Arrow extends Entity {
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
     // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800）
     if (this.hostile && hitPlayer(this, game, this.damage)) statusPlayer(game, this.projId);
+    // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
+    // ——不再伤小动物/敌怪，只走上方 hitPlayer 回打发射者
+    if (this.reflected) return;
     // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        // 反射源（419 旋刃冲刺等 reflectsProjectiles 置标）：命中前先走反射
+        // （原版 Projectile.cs:12050-12060，反射即终止本帧命中迭代 keepIterating=false）
+        if (tryReflectProjectile(this, this.projId, e, game)) {
+          this.pierce = 1;            // 原版 penetrate=1（NPC.cs:67058）
+          this.hitSet.clear();        // 转敌对后命中表作废
+          return;
+        }
         if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
-        // 暴击：玩家远程基础 4%（原版 ranged 初始 4）
-        const crit = Math.random() < 0.04;
-        const dmg = crit ? this.damage * 2 : this.damage;
+        // 暴击：玩家远程基础 4%（原版 ranged 初始 4）。
+        // ★鞭 tag（WhipTagEffect.CanRunHitEffects :73-84：MinionShot/SentryShot 弹幕吃
+        //   tag——随从/哨兵射出的箭 whipTagShot 置标时 +tagDmg，TagCrit 可暴击）
+        let dmg = this.damage;
+        let crit = Math.random() < 0.04;
+        if (this.whipTagShot) {
+          const en2 = e as unknown as { whipTagT?: number; whipTagDmg?: number; whipTagCrit?: number };
+          if (en2.whipTagT && en2.whipTagT > 0) {
+            dmg += (en2.whipTagDmg ?? 0);
+            if (Math.random() * 100 < (en2.whipTagCrit ?? 0)) crit = true;
+          }
+        }
+        if (crit) dmg *= 2;
         playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');

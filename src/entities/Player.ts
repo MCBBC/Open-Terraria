@@ -96,12 +96,17 @@ export class Player extends Entity {
    *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
    *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
   whipBuffs: Record<number, number> = {};
+  /** 右键集火目标（MinionAttackTargetNPC，Player.cs:48952：召唤杖右键指定，
+   *  随从索敌优先；-1=无。失效：死亡或离玩家 >3000px——随从侧判定） */
+  minionTargetId = -1;
   /** 星云层数（0-3，8s 刷新；套装 on-mana-spent 触发近似原版击杀掉 booster） */
   nebulaStacks = 0;
   private nebulaT = 0;
   /** 甲虫攻击球（0-3）：近战命中蓄能，受击掉一颗 */
   beetleOrbs = 0;
   private beetleCharge = 0;
+  /** 近战续航窗口（onMeleeHit 刷新；fixedUpdate 内蓄能消费） */
+  private lastMeleeTick = 0;
   /** 潜行 0(可见)-1(满)：蘑菇矿=移动蓄/星璇=双击↓开关（:25500/:25542） */
   stealth = 0;
   private stealthTimer = 0;
@@ -168,9 +173,12 @@ export class Player extends Entity {
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
+    quiver: boolean;
+    moltenQuiver: boolean;
     arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
     shroomiteType: 'arrow' | 'bullet' | 'rocket' | null;
     shroomiteSet: boolean; vortexSet: boolean; nebulaSet: boolean; beetleOff: boolean;
+    beetleDef: boolean;
     wolfAcc: boolean; boc: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
@@ -205,9 +213,12 @@ export class Player extends Entity {
     let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
     let jumpSpd = 0, arrowDmg = 0;
+    let equipHasQuiver = false;
     let wolfAcc = false, boc = false;
+    let moltenQuiver = false;
     let shroomiteType: 'arrow' | 'bullet' | 'rocket' | null = null;
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
+    let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false;
@@ -265,6 +276,8 @@ export class Player extends Entity {
         if (fx.jumpSpd) jumpSpd = Math.max(jumpSpd, fx.jumpSpd);
         if (fx.arrowDmg) arrowDmg += fx.arrowDmg; // 箭袋 +0.1（仅箭吃，见 rangedDamageMult）
         if (fx.nightWolf) wolfAcc = true;
+        if (fx.quiver) equipHasQuiver = true;
+        if (fx.moltenQuiver) moltenQuiver = true;
         if (fx.brainOfConfusion) boc = true;
         if (fx.flipper) flipper = true;
         if (fx.longInvince) longInvince = true;
@@ -337,7 +350,8 @@ export class Player extends Entity {
     shroomiteSet = (hVid >= 1546 && hVid <= 1548) && bVid === 1549 && lVid === 1550;
     vortexSet = hVid === 2757 && bVid === 2758 && lVid === 2759;
     nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
-    beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲（壳 2201 是防御版）
+    beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
+    beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     const sb = activeArmorSetBonus(this);
@@ -390,7 +404,10 @@ export class Player extends Entity {
       jumpSpd, flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
       arrowDmg, ammoSave, kbGlove, yoyoString,
+    quiver: equipHasQuiver,
+    moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
+      beetleDef,
       wolfAcc, boc,
       tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
       manaMagnet, magicCuffs, manaFlower,
@@ -421,7 +438,8 @@ export class Player extends Entity {
   }
   /** 哨兵上限（maxTurrets 链 :9863 War Table buff 未实装暂缺 + 散件/套装） */
   get maxSentries(): number {
-    return 1 + this.equipStats.sentrySlots;
+    // War Table buff 348（:9863-9866 maxTurrets++，:2714 默认 1）
+    return 1 + this.equipStats.sentrySlots + (this.buffs.has(BuffType.WarTable) ? 1 : 0);
   }
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
@@ -467,6 +485,7 @@ export class Player extends Entity {
       if (this.buffs.has(BuffType.Werewolf)) m += 0.051;      // 狼人（:11488）
       if (this.buffs.has(BuffType.Weak)) m -= 0.051;         // 虚弱（:11506）
       m += 0.1 * this.beetleOrbs;                              // 甲虫攻击球每颗 +10%（:10071+）
+      if (this.heldPsychoKnife) m += (1 - this.stealth) * 3;   // 变态刀潜行（:25487）
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
     m += 0.15 * this.nebulaStacks;   // 星云四系 +15%/层
@@ -489,6 +508,21 @@ export class Player extends Entity {
     if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
     return base;
   }
+  /** 手持变态刀 3106（潜行判定用） */
+  get heldPsychoKnife(): boolean {
+    const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
+    const vid = d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    return vid === 3106;
+  }
+  /** 潜行 aggro（:25518/:25557/:25491：蘑菇矿 -750×(1-s) / 星璇 -1200 / 变态刀 -750）
+   *  ——敌人索敌距离缩短（NPC.cs:78375 dist -= aggro）；各 AI 家族索敌门消费见后续批 */
+  get aggro(): number {
+    const s1 = 1 - this.stealth;
+    if (this.equipStats.vortexSet) return -Math.round(1200 * s1);
+    if (this.equipStats.shroomiteSet) return -Math.round(750 * s1);
+    if (this.heldPsychoKnife) return -Math.round(750 * s1);
+    return 0;
+  }
   /** 近战护甲穿透（磨刀 159：meleeArmorPenetration += 12，仅近战/投掷） */
   get meleeArmorPen(): number {
     return this.buffs.has(BuffType.Sharpened) ? 12 : 0;
@@ -501,8 +535,8 @@ export class Player extends Entity {
   }
   /** 甲虫进攻套：近战命中蓄能（45 次/球，满 3 球；受击掉球见 damage()） */
   onMeleeHit(): void {
-    if (!this.equipStats.beetleOff) return;
-    if (++this.beetleCharge >= 45) { this.beetleCharge = 0; this.beetleOrbs = Math.min(3, this.beetleOrbs + 1); }
+    // ⑰ 时间蓄能（原版持续近战 ~90t/球）：命中只刷新续航窗口，蓄能走 fixedUpdate 每 tick
+    if (this.equipStats.beetleOff || this.equipStats.beetleDef) this.lastMeleeTick = 30;
   }
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
@@ -513,6 +547,7 @@ export class Player extends Entity {
     if (this.buffs.has(BuffType.BrainOfConfusionBuff)) c += 10; // BOC（:9639）
     if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) c += 2;
     if (kind === 'melee' && this.buffs.has(BuffType.Werewolf)) c += 2; // 狼人（:11493）
+    if (kind === 'melee' && this.heldPsychoKnife) c = Math.min(100, c + Math.round((1 - this.stealth) * 30)); // 变态刀（:25489）
     if (kind === 'ranged') {
       if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
       if (st.shroomiteSet || st.vortexSet) c += Math.round((1 - this.stealth) * (st.vortexSet ? 20 : 10)); // 潜行暴击
@@ -1162,7 +1197,19 @@ export class Player extends Entity {
     // 潜行（1:1 改写 :25500-25567）：蘑菇矿套=移动蓄(|vx|+|vy|)×0.0075/t、静止散 0.015/t
     // （攻击中 itemAnimation 门→近似 useTime>0 暂停 5t）；星璇套=双击↓开关 vortexStealthActive
     // （开时 stealth 从满每 t -0.04、移速 ×0.3；再双击关）——星璇的增伤/暴在乘区读同一 stealth
-    if (this.equipStats.shroomiteSet) {
+    // ⑭ 变态刀 3106 单件潜行（:25448-25493：挥击中 stealth +0.1/t 且 timer=15；
+    // 静止衰减同蘑菇矿；效果在 damageMult/critChance 消费）
+    const heldVid = (() => {
+      const d = ITEM_DEFS[this.inv.heldItem()?.id ?? -1];
+      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    })();
+    if (heldVid === 3106) {
+      if (this.useTime > 0) { this.stealthTimer = 15; if (this.stealth > 0) this.stealth = Math.min(1, this.stealth + 0.1); }
+      else if (Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1 && this.stealthTimer === 0 && this.stealth > 0) {
+        this.stealth = Math.max(0, this.stealth - 0.015);
+      }
+      if (this.stealthTimer > 0) this.stealthTimer--;
+    } else if (this.equipStats.shroomiteSet) {
       if (this.useTime > 0) this.stealthTimer = 5;
       const still = Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1;
       if (still) {
@@ -1188,6 +1235,14 @@ export class Player extends Entity {
     }
     // 星云层数衰减（8s 全层刷新）
     if (this.nebulaStacks > 0 && --this.nebulaT <= 0) { this.nebulaStacks = 0; }
+    // 甲虫球时间蓄能（进攻+防御共用；窗口内每 tick +1，90t/球；受击掉球见 damage()）
+    if (this.lastMeleeTick > 0) {
+      this.lastMeleeTick--;
+      if ((this.equipStats.beetleOff || this.equipStats.beetleDef) && ++this.beetleCharge >= 90) {
+        this.beetleCharge = 0;
+        this.beetleOrbs = Math.min(3, this.beetleOrbs + 1);
+      }
+    } else this.beetleCharge = Math.max(0, this.beetleCharge - 2); // 断战缓退
     // 鞭 buff 倒计时（WhipTagEffect.PlayerBuffTime=180 系）
     for (const k of Object.keys(this.whipBuffs)) {
       if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
@@ -1411,7 +1466,8 @@ export class Player extends Entity {
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
     if (eq.blackBelt && Math.random() < 0.1) return false;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
-    const endurance = this.buffs.has(BuffType.Endurance) ? 0.1 : 0;
+    const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
+      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0); // 甲虫壳每球 15%（buffs 95-97）
     const reduction = Math.max(1, Math.round((dmg - this.defense * 0.5) * (1 - endurance)));
     this.hp -= reduction;
     // 十字项链/星星面纱：无敌帧翻倍（longInvince）

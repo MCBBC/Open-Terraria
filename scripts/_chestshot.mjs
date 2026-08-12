@@ -6,7 +6,7 @@ const json = fs.readFileSync(MAP, 'utf8');
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0', timeout: 120000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0', timeout: 120000 });
 await page.waitForFunction(() => window.__swFlow, { timeout: 60000 });
 const out = await page.evaluate(async (text) => {
   await window.__swFlow.loadJson(text);

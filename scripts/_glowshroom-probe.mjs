@@ -7,7 +7,7 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
 page.on('console', (m) => { const t = m.type(); if (t === 'error' || t === 'warning') errs.push(`console.${t}: ` + m.text().slice(0, 200)); });
-await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await new Promise(r => setTimeout(r, 400));
 await page.click('[data-act=sp]');

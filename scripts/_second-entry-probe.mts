@@ -6,7 +6,7 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message));
 const log = (s: string) => console.log(`[probe] ${new Date().toISOString().slice(14, 23)} ${s}`);
 log('goto');
-await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 120000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 120000 });
 await new Promise((r) => setTimeout(r, 3000));
 
 // 阶段1：第一次进世界

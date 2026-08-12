@@ -1,7 +1,7 @@
 // 飞镖投射物(原版 Projectile 10 Dart 语义:直线飞行、撞块消失、命中伤害)。
 // 陷阱(137)发射;简化布线:同排/同列直线可见(≤60 格无实心阻挡)的拉杆/开关/压力板驱动。
 import { Entity } from './Entity';
-import { hitPlayer, playEnemyHitSound, projOverlap } from './projTargets';
+import { hitPlayer, playEnemyHitSound, projOverlap, tryReflectProjectile } from './projTargets';
 import { TILE } from '../core/constants';
 import { TILE_BY_KEY } from '../data/tiles';
 import type { GameHooks } from './types';
@@ -109,6 +109,14 @@ const TRAP_SHOT_STYLE: Record<string, {
 export type TrapShotKind = 'dart' | 'superdart' | 'flame' | 'spear' | 'spiky' | 'boulder' | 'geyser' | 'cannonball' | 'bunny' | 'snowball' | 'portalbolt'
   | 'fireworkRocket' | 'fireworksBoxRocket' | 'fireworkFountain' | 'toiletPop';
 
+/** TrapShot kind → 原版 projectile id（反射门禁用：Projectile.CanBeReflected 按
+ *  type/aiStyle 查表——162 炮弹 aiStyle2 / 166 雪球 aiStyle2 可反射，烟花族
+ *  aiStyle 34/73/153 与 281 aiStyle49 不在白名单故不列） */
+const TRAP_PROJ_ID: Partial<Record<TrapShotKind, number>> = {
+  dart: 98, superdart: 184, flame: 187, spear: 186, spiky: 185, boulder: 99,
+  geyser: 654, cannonball: 162, bunny: 281, snowball: 166, portalbolt: 601,
+};
+
 /** ---- 烟花尘色表（Projectile.cs Kill/AI 引用的 Dust id → 近似色）----
  *  130-134 爆花尘：发光色照抄 Dust.cs:2204-2226 Lighting.AddLight 的 RGB（134 未入光照表，
  *  金色弹 170 与 133 交替使用，取亮金近似）；219-223 喷泉火花条（DustID.cs:167 仅 219 命名
@@ -153,6 +161,9 @@ export class TrapShot extends Entity {
   /** 敌对弹（原版 Projectile.hostile，= !style.friendly：机关/陷阱类弹伤玩家，
    *  烟花等 friendly 类不伤）。联机 v5：随 msg27 bit7 下发，访客傀儡据此本地结算 */
   hostile: boolean;
+  /** 已反射（原版 Projectile.reflected）：被反射源（419 旋刃冲刺等）打回后置位，
+   *  弹体转 hostile 伤玩家、不再入敌怪判定（原版 Damage NPC 需 friendly 门禁） */
+  reflected = false;
 
   /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕 */
   private static blankTex = new Set<string>();
@@ -313,8 +324,9 @@ export class TrapShot extends Entity {
       }
     }
     // 友方弹幕（炮弹族 friendly=true）：不伤玩家，直接进敌怪判定。
-    // 敌对陷阱：伤害走 damagePlayer(防御减算/受击音/iframes 去重);除巨石外命中即碎
-    if (!st.friendly) {
+    // 敌对陷阱：伤害走 damagePlayer(防御减算/受击音/iframes 去重);除巨石外命中即碎。
+    // 读实例 hostile 而非 style.friendly——反射后弹体转 hostile 需改为伤玩家
+    if (this.hostile) {
       if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
         hitPlayer(this, game, this.damage);
         if (this.kind !== 'boulder') this.dead = true;
@@ -331,23 +343,30 @@ export class TrapShot extends Entity {
       || this.kind === 'cannonball' || this.kind === 'bunny';
     const overlaps = (e: { x: number; y: number; w: number; h: number }) =>
       this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y;
-    // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）
-    for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
-      if (e.dead || !overlaps(e)) continue;
-      if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
-        playEnemyHitSound(game, e);
-        game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
-      }
-      if (!pierce) {
-        if (st.shatterDust) this.shatter(game);
-        this.dead = true;
-        return;
+    // 怪物桶（Enemy.hurt 自带 8tick 无敌帧，穿透弹不会同帧连击）。
+    // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 门禁）
+    if (!this.reflected) {
+      const trapProjId = TRAP_PROJ_ID[this.kind];
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+        if (e.dead || !overlaps(e)) continue;
+        // 反射源命中（Projectile.cs:12050-12060）：友方炮弹/雪球可反射（aiStyle2）
+        if (trapProjId !== undefined && tryReflectProjectile(this, trapProjId, e, game)) return;
+        if (e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game)) {
+          playEnemyHitSound(game, e);
+          game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
+        }
+        if (!pierce) {
+          if (st.shatterDust) this.shatter(game);
+          this.dead = true;
+          return;
+        }
       }
     }
     // 友方弹幕（炮弹族 friendly=true）到此为止：不误伤小动物/城镇 NPC
-    // （原版 friendly 弹对城镇 NPC 免疫；小动物不在敌怪判定内）
-    if (st.friendly) return;
+    // （原版 friendly 弹对城镇 NPC 免疫；小动物不在敌怪判定内）。
+    // 反射后转 hostile 同样走此出口（原版敌弹对 NPC 无伤害）
+    if (!this.hostile || this.reflected) return;
     // 小动物桶（Enemy 单参 shim / Critter.hurt(game) 皆可，被击即死）
     const buckets = (game as unknown as { entities?: { critters: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (g: GameHooks) => boolean }>; npcs: Array<{ x: number; y: number; w: number; h: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean }> } }).entities;
     if (buckets) {

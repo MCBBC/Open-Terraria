@@ -84,6 +84,9 @@ export class WhipProj extends Entity {
   private hitSet = new Set<number>();
   private ownerRef: () => Player | null;
 
+  /** 月主鞭补鞭代数（ai[2]≥10 即补鞭，不递归再补） */
+  extraLash = 0;
+
   constructor(
     x: number, y: number, ang: number, projId: number, itemId: number,
     damage: number, knockback: number, anim: number, speed: number,
@@ -152,6 +155,13 @@ export class WhipProj extends Entity {
           e.whipProcT = 240;
           e.whipProcItem = this.itemId;
         }
+        // 鞭敌方直伤 debuff（ApplyWhipDebuffs :11067-11090）：
+        //  913 火鞭→地狱火 323/240t、912 酷鞭→霜燃 324/240t（两者均 DoT→复用 onFireT 4s）、
+        //  914 荆棘鞭→20% 中毒 180t；1033 电鳗 362 / 849 黑收成 310 为标记位
+        //  （无自带 DoT：黑收成伤害走 tag 链已实装，电鳗链电弧为独立系统）
+        const deb = e as unknown as { onFireT?: number; poisonT?: number };
+        if (this.projId === 913 || this.projId === 912) deb.onFireT = Math.max(deb.onFireT ?? 0, 4);
+        if (this.projId === 914 && Math.random() < 0.2) deb.poisonT = Math.max(deb.poisonT ?? 0, 3);
         // 玩家 buff（WhipTagEffect.PlayerBuffId：命中授予 180t）+ 附属召唤
         const pb = WHIP_PLAYER_BUFF[this.itemId];
         if (pb && owner) {
@@ -159,6 +169,21 @@ export class WhipProj extends Entity {
           this.spawnSidekick(game, owner, this.itemId);
         }
         game.addDamageNumber(sx, sy, dmg, false, '#FFD060');
+      }
+    }
+    // 月主鞭 1035 多重补鞭（AI_165 :45038-45048：进度每过 1/3 补一鞭，最多 2 次补鞭；
+    // 子鞭 extraLash≥1 不再补）
+    if (this.projId === 1035 && this.extraLash === 0 && owner) {
+      const third = this.anim / 3;
+      for (const k of [1, 2]) {
+        const at = third * k;
+        if (this.t >= at && this.t - 1 < at) {
+          const lash = new WhipProj(owner.cx, owner.cy, this.ang, this.projId, this.itemId,
+            this.damage, this.knockback, 30, this.maxLen / (this.anim * 2) * 30 * 2 > 0 ? this.maxLen / this.anim * 30 : this.maxLen,
+            () => owner);
+          lash.extraLash = k;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(lash, 'projectiles');
+        }
       }
     }
     // 生存期不位移（根部跟随玩家在 fixedUpdate 首段同步）

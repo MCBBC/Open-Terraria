@@ -448,6 +448,10 @@ export class BuffState {
     if (left === undefined) return 1;
     return 1 - Math.min(0.25, 0.25 * (left / 5));
   }
+  /** 射手 buff 箭速 ×1.2（Player.cs:52717-52722） */
+  get arrowSpeedMult(): number {
+    return this.active.has(BuffType.Archery) ? 1.2 : 1;
+  }
   get arrowDmgMult(): number {
     return this.active.has(BuffType.Archery) ? 1.1 : 1;
   }

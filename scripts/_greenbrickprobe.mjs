@@ -9,7 +9,7 @@ const browser = await puppeteer.launch({
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push(e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0' });
 
 // 选择存档"新世界"
 const picked = await page.evaluate(() => {

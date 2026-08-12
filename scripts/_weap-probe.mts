@@ -4,7 +4,7 @@ import puppeteer from 'puppeteer-core';
 const browser = await puppeteer.launch({ executablePath: '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless: 'new', defaultViewport: { width: 800, height: 600 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 120000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 120000 });
 // HMR 全页重载窗口（数据 JSON 变更会触发）：等稳定后再进页面
 await new Promise((r) => setTimeout(r, 3000));
 try { await page.evaluate(() => 1); } catch { await new Promise((r) => setTimeout(r, 5000)); }

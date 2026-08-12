@@ -914,7 +914,8 @@
   },
   "4002": {
     "quiver": 1,
-    "arrowDmg": 0.1
+    "arrowDmg": 0.1,
+    "moltenQuiver": 1
   },
   "4003": {
     "fireWalk": 1,

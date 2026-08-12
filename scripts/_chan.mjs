@@ -4,7 +4,7 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new' });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5199/?vuidemo=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?vuidemo=1', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.waitForFunction(() => window.__swVUI?.ui?.current, { timeout: 120000 });
 const result = await page.evaluate(async () => {
   const out = [];

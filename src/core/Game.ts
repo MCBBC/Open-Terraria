@@ -7,7 +7,7 @@ import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
-import { World, ChestData } from '../world/World';
+import { Clock, World, ChestData } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
@@ -324,8 +324,9 @@ export interface GameCallbacks {
 /** Main.time 口径（Main.cs 昼夜计时）：黎明 4:30（timeOfDay 0.25）归零，
  *  白天 54000 ticks、夜晚 32400 ticks。WorldGen.IsAlchemyPlantHarvestable（:66214）用。 */
 function vanillaMainTime(timeOfDay: number): number {
-  if (timeOfDay >= 0.25 && timeOfDay < 0.75) return (timeOfDay - 0.25) * 54000;
-  return timeOfDay >= 0.75 ? (timeOfDay - 0.75) * 32400 : (timeOfDay + 0.25) * 32400;
+  // timeOfDay↔Main.time：tick 恒速 86400t/周期 → 昼 (t-DAWN)*86400 / 夜 (t-DUSK mod 1)*86400
+  if (timeOfDay >= Clock.DAWN && timeOfDay < Clock.DUSK) return (timeOfDay - Clock.DAWN) * 86400;
+  return (((timeOfDay - Clock.DUSK) % 1) + 1) % 1 * 86400;
 }
 
 export class Game implements GameHooks {
@@ -356,6 +357,7 @@ export class Game implements GameHooks {
   private lastTime = 0;
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
+  private _prevRightDown = false;
   /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
   private invasionWarn = 0;
   /** 月事件 wave≥15 胜利后的当日强制季节（原版 Main.forceHalloweenForToday /
@@ -822,9 +824,10 @@ export class Game implements GameHooks {
     for (const [, pup] of this.netProjPuppets) {
       const pr = pup.p as Entity & { hostile?: boolean; damage?: number; projId?: number };
       if (!pr.hostile || pr.dead) continue;
-      // review F3：判定用权威位（netAx/netAy，与 NPC 接触伤害同标准）——插值渲染位
-      // 在快照周期内最多滞后 4 tick，高速弹（32px/t）误差可达 128px
-      if (hitPlayer({ x: pr.netAx, y: pr.netAy, w: pr.w, h: pr.h }, this, pr.damage ?? 0)) {
+      // 判定用渲染位（插值+速度外推）而非权威位：原版各端本地模拟，"所见即所中"
+      // 才是客户端权威语义；权威位在差分快照间隔内（慢速弹最长 60t）会冻结在过期
+      // 位置——review F3 改权威位实测造成慢速敌弹系统性漏判（ax 漂出玩家盒仍判不中）
+      if (hitPlayer(pr, this, pr.damage ?? 0)) {
         statusPlayer(this, pr.projId ?? 0);
       }
     }
@@ -1979,6 +1982,25 @@ export class Game implements GameHooks {
         }
       }
     }
+    // ④ 右键集火（ItemCheck_MinionAltFeatureUse :48952 + MinionNPCTargetAim :55975：
+    // 召唤杖右键 → hitbox 距鼠标最近敌；同目标再右键取消 toggle）
+    if (inp.rightDown && !this._prevRightDown) {
+      const held0 = this.player.inv.heldItem();
+      const cw0 = held0 ? combatWeapon(ITEM_DEFS[held0.id]) : null;
+      if (cw0 && cw0.kind === 'summon') {
+        const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        let bestId = -1, bestD = Infinity;
+        for (const e of this.entities.enemies) {
+          const en = e as Enemy;
+          if (en.dead) continue;
+          if (Math.hypot(en.cx - this.player.cx, en.cy - this.player.cy) > 3000) continue;
+          const d = Math.hypot(en.cx - wx, en.cy - wy);
+          if (d < bestD) { bestD = d; bestId = en.id; }
+        }
+        this.player.minionTargetId = this.player.minionTargetId === bestId ? -1 : bestId;
+      }
+    }
+    this._prevRightDown = inp.rightDown;
     // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
     // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
     // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。
@@ -2028,9 +2050,9 @@ export class Game implements GameHooks {
     //      每格 NPC 尝试 AttemptToConvertNPCToEvil——兔/企鹅/海鸥/金鱼/松鼠族 →
     //      腐化变体（猩红世界换猩红表）。敌怪走 transformTo，小动物实体替换为敌怪）----
     if (w.clock.bloodMoon) {
-      for (const n of this.entities.npcs) {
+      for (const n of this.entities.enemies) {
         const e = n as Enemy;
-        if (e.dead || e instanceof TownNPC) continue;
+        if (e.dead) continue;
         const id = e.vanillaId ?? -1;
         const pair = BLOOD_MOON_EVIL.get(id);
         if (pair) e.transformTo(w.crimson ? pair[1] : pair[0], w.store);
@@ -2262,7 +2284,7 @@ export class Game implements GameHooks {
       const ct = w.clock.timeOfDay, pt = this._lastClockT;
       this._lastClockT = ct;
       const crossed = (a: number) => pt < a && ct >= a;
-      if (crossed(0.25)) {
+      if (crossed(Clock.DAWN)) {
         // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
@@ -2345,7 +2367,7 @@ export class Game implements GameHooks {
           }
         }
       }
-      if (crossed(0.75)) {
+      if (crossed(Clock.DUSK)) {
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
         // UpdateTime_StartNight 内位于血月 roll 之前）
         w.clock.eclipse = false;
@@ -2359,7 +2381,7 @@ export class Game implements GameHooks {
       }
       // 入夜事件压制（Main.cs:64717：LanternNight.LanternsUp → stopEvents=true，
       // 血月/入夜 Boss 召唤等 roll 整段跳过；须在 CheckNight 之后判读——当夜刚兑现也算）
-      if (crossed(0.75)
+      if (crossed(Clock.DUSK)
         && !LanternNight.lanternsUp
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
         && w.moonEvent.kind === 0      // 月事件进行中不 roll 血月（Main.cs:64300-64306 压制）
@@ -3322,16 +3344,22 @@ export class Game implements GameHooks {
       if (ammoSlot >= 0 && ammoDef) {
         const ammoC = ammoDef.vid != null || viIdFromKey(ammoDef.key) >= 0
           ? itemCombat(ammoDef.vid ?? viIdFromKey(ammoDef.key)) : null;
-        const speed = (bowC?.shootSpeed ?? rg?.projSpeed ?? 7) + (ammoC?.shootSpeed ?? 0);
+        // 箭速：射手 buff ×1.2（cap 20，:52717）+ 箭袋族 ×1.1（:52711）——仅箭族吃
+        const isArrowKind = bowC?.useAmmo !== 97 && bowC?.useAmmo !== 771 && bowC?.useAmmo !== 283;
+        let speed = (bowC?.shootSpeed ?? rg?.projSpeed ?? 7) + (ammoC?.shootSpeed ?? 0);
+        if (isArrowKind) speed = Math.min(20, speed * this.player.buffs.arrowSpeedMult
+          * (this.player.equipStats.quiver ? 1.1 : 1));
         // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
         // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
         // 弹药分道（Player.cs:3820 bowEffectiveDamage 拆分）：箭吃箭袋/射手/蘑菇矿箭头，
       // 弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
       const rKind = bowC?.useAmmo === 97 ? 'bullet' : bowC?.useAmmo === 771 ? 'rocket' : bowC?.useAmmo === 283 ? 'other' : 'arrow';
-      const damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
-        const knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
+      let damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
+        let knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
+        if (isArrowKind && this.player.equipStats.quiver) knockback *= 1.1; // 箭袋击退 ×1.1（:52713）
         const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
+        if (isArrowKind && this.player.equipStats.moltenQuiver && projId === 1) damage += 2; // 熔箭袋木箭→火矢+2（:52700，火矢 proj 换体从略）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
         const ax = this.player.cx + Math.cos(ang) * 14;
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
@@ -7049,7 +7077,7 @@ export class Game implements GameHooks {
         if (f > 37800 / 43200) return dialog(7 + r3());   // 傍晚 7-9
         return dialog(10 + r3());                          // 白昼 10-12
       }
-      const nf = w.clock.timeOfDay < 0.25 ? w.clock.timeOfDay / 0.25 : (w.clock.timeOfDay - 0.75) / 0.25;
+      const nf = (((w.clock.timeOfDay - Clock.DUSK) % 1) + 1) % 1 / 0.375; // 夜内进度 0-1（32400t 窗口）
       if (nf < 9720 / 43200) return dialog(r2() ? 19 : 18);
       if (nf > 22680 / 43200) return dialog(r2() ? 21 : 20);
       return dialog(22 + r3());                            // 深夜 22-24
@@ -7501,7 +7529,7 @@ export class Game implements GameHooks {
       (n) => n instanceof TownNPC && !n.dead && n.npcKey === 'travelling_merchant') as TownNPC | undefined;
     if (tm) {
       // 离场：白天过 48600（昼内进度 0.8）或入夜，且玩家离屏后移除（UnspawnTravelNPC）
-      if (!w.clock.isDay || t > 0.25 + 0.8 * 0.5) {
+      if (!w.clock.isDay || (t - Clock.DAWN) / 0.625 > 0.8) { // 昼内进度 >0.8（48600t 语义）
         const d = Math.hypot(tm.cx - this.player.cx, tm.cy - this.player.cy);
         if (d > TILE * 62) {
           tm.dead = true;
@@ -7903,8 +7931,9 @@ export class Game implements GameHooks {
     if (enemy && enemy.vanillaId != null) {
       const oa = this.world.oldOnesArmy;
       if (oa.ongoing) {
-        // 小妖精类死亡登记尸点（黑暗魔法师 RaiseGoblins 的复活源，:733-736）
-        if (enemy.vanillaId >= 551 && enemy.vanillaId <= 565) {
+        // 小妖精三档死亡登记尸点（黑暗魔法师 RaiseGoblins 的复活源，NPC.cs:80040-80052
+        // switch case 552/553/554——仅 Goblin T1/T2/T3；555+ 与 551 不登记）
+        if (enemy.vanillaId >= 552 && enemy.vanillaId <= 554) {
           dd2AnnounceGoblinDeath(oa, enemy.cx, enemy.y + enemy.h);
         }
         const diff = this.player.appearance?.difficulty ?? 0;

@@ -9,7 +9,7 @@ page.on('request', (r) => {
   if (r.url().includes('/sounds/')) soundReqs.push(r.url().split('/sounds/')[1]);
 });
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 120000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 120000 });
 await new Promise((r) => setTimeout(r, 3000));
 
 const out = await page.evaluate(async () => {

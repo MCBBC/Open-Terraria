@@ -1,6 +1,6 @@
 // 临时诊断（跑完即删）
 import { it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
 import { runOceanSandPass } from '../src/world/gen/vanilla/BeachPass';
@@ -18,7 +18,7 @@ import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass'
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
-import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runUnderworldPass, __uwWinDump, __pillarWins } from '../src/world/gen/vanilla/UnderworldPass';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
 
 it('diag uw', () => {
@@ -35,6 +35,19 @@ it('diag uw', () => {
   runFloatingIslandsPass(st, rng, gs); runDirtToMudPass(st, rng, gs); runSiltPass(st, rng, gs);
   runShiniesPass(st, rng, gs); runWebsPass(st, rng, gs); runUnderworldPass(st, rng, gs);
   const V = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
+  writeFileSync('/tmp/js-w.txt', __uwWinDump());
+  writeFileSync('/tmp/js-pw.txt', __pillarWins());
+  {
+    let m = '';
+    for (let y2 = 900; y2 <= 1110; y2++) {
+      for (let x2 = 25; x2 < 714; x2++) {
+        const k2 = st.idx(x2, y2);
+        m += st.flags[k2] && V(st.type[k2]) === 633 ? '1' : '0';
+      }
+      m += '\n';
+    }
+    writeFileSync('/tmp/js-633.txt', m);
+  }
   const cs = readFileSync('/tmp/cs-uw.txt', 'utf8').split('\n');
   let n = 0; const pat = new Map<string, number>();
   for (let y = 900; y < 1200; y++) {

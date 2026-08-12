@@ -2,7 +2,7 @@ import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
-await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 const run = () => page.evaluate(() => new Promise((res) => {
   const t0 = Date.now();
   const iv = setInterval(() => {
@@ -72,7 +72,7 @@ for (let a = 0; a < 12; a++) {
     if (!/navigation|detached/i.test(e.message)) throw e;
     console.log('retry', a + 1, e.message.slice(0, 60));
     await new Promise((r2) => setTimeout(r2, 2500));
-    await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
+    await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {});
   }
 }
 console.log('PROBE GAVE UP');

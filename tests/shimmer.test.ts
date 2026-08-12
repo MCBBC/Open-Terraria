@@ -28,7 +28,15 @@ describe('转化表提取（ItemID.cs / NPCID.cs Sets）', () => {
     expect(getTransformToItem(947)).toBe(1106);
     expect(getTransformToItem(8)).toBe(5353);        // 火炬 → 骨炬
     expect(getTransformToItem(206)).toBe(207);       // 凝胶 ↔ 精炼凝胶族
-    expect(getTransformToItem(3461)).toBe(0);        // 月相砖动态分支未接（GAP）
+    expect(getTransformToItem(3461)).toBe(0);        // 无月相参 → 动态分支不启用（表外）
+    // 月相砖动态分支全 8 相位（ShimmerTransforms.cs:108-125;MoonPhase 枚举序 0-7）
+    const LUNAR = [5408, 5401, 5403, 5402, 5406, 5407, 5405, 5404]; // Full/TQL/HL/QL/Empty/QR/HR/TQR
+    for (let ph = 0; ph < 8; ph++) {
+      expect(getTransformToItem(3461, ph)).toBe(LUNAR[ph]);
+      // 转化目标物品必须已注册(★曾缺 5402/5406/5408 → 对应月相转化静默丢物)
+      expect(internalIdOfVanilla(LUNAR[ph])).toBeGreaterThanOrEqual(0);
+    }
+    expect(canShimmerItem(3461, false, 3)).toBe(true); // 有月相 → 可微光化(无参时 false)
     expect(getTransformToItem(4837)).toBe(999);      // 绿宝石 → 金皇冠（源在键侧）
   });
 

@@ -124,7 +124,7 @@ export class TitleMenu {
       const dt = Math.min(100, now - last);
       last = now;
       const frames = dt / (1000 / 60);
-      const isDay = menuTimeInfo.timeOfDay > 0.25 && menuTimeInfo.timeOfDay < 0.75;
+      const isDay = menuTimeInfo.timeOfDay > 0.1875 && menuTimeInfo.timeOfDay < 0.8125;
       logoA = Math.max(0, Math.min(255, logoA + (isDay ? 2 : -2) * frames));
       this.logoDay.style.opacity = String(logoA / 255);
       this.logoNight.style.opacity = String((255 - logoA) / 255);

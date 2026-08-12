@@ -157,7 +157,7 @@ export class ItemDrop extends Entity {
     const vid = vanillaIdOfItem(this.itemId);
     const inShimmer = st.inBounds(tx, ty)
       && st.liquid[st.idx(tx, ty)] > 0 && st.liquidType[st.idx(tx, ty)] === 4;
-    if (inShimmer && canShimmerItem(vid)) {
+    if (inShimmer && canShimmerItem(vid, false, game.world.clock.moonPhase)) {
       this.shimmerTime += 0.01;
       if (this.shimmerTime > 0.9) {
         this.shimmerTime = 0.9;
@@ -173,7 +173,7 @@ export class ItemDrop extends Entity {
    *  560 登记未移植（src/stats/Shimmer.ts GAP 清单） */
   private getShimmered(game: GameHooks): void {
     const vid = vanillaIdOfItem(this.itemId);
-    const target = getTransformToItem(vid);
+    const target = getTransformToItem(vid, game.world.clock.moonPhase);   // 3461 月相砖动态分支
     if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
       // 钱币 → 微光化币（:1791-1810）：面额放大后 AddCoinLuck（距离 <1000px 才累计，
       // LuckState.addCoinLuck 1:1），物品消失

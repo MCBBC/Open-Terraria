@@ -72,7 +72,7 @@ export class Bobber extends Entity {
     if (game) {
       const w = game.world as World;
       const t = w.clock.timeOfDay;
-      const isDay = t > 0.25 && t < 0.75;
+      const isDay = w.clock.isDay; // 昼夜边界以 Clock 为准（4:30/19:30）
       lvl = Math.floor(lvl * fishingPowerMultiplier({
         raining: !!w.weather?.raining,
         cloudBGAlpha: w.weather?.cloudAlpha ?? 0,

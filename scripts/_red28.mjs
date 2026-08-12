@@ -9,7 +9,7 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0' });
 await page.waitForFunction(() => window.__swLoadJson, { timeout: 60000 });
 await page.evaluate((t) => window.__swLoadJson(t), readFileSync('/Users/vinlic/Downloads/map-12345世界 (2).json', 'utf8'));
 await page.waitForFunction(() => window.__swGame && window.__swGame.world && window.__swGame.world.store, { timeout: 600000, polling: 2000 });

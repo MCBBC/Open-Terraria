@@ -10,7 +10,7 @@ let l10nReqNames = [];
 page.on('request', (r) => { if (r.url().includes('/l10n/')) l10nReqNames.push(r.url().split('/l10n/')[1]); });
 
 // ① 默认启动:中文(先清残留 options,保证从默认态开始)
-await page.goto('http://localhost:5199/', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await page.evaluate(() => localStorage.removeItem('sandboxworld.options'));
 await page.reload({ waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });

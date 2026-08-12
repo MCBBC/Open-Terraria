@@ -6,8 +6,11 @@
 // 失败重试(cs:15283-15300):前 1e4 次不变 x 带;>20000 次放宽到 0.8/0.2 带,
 // y 下限改为 ws+120;成功后 GenVars.shimmerPosition → gs.shimmerX/Y。
 // aether 树(cs:35057-35083):500 次 X±70 / Y±2 采样,两侧整砖即种
-// TryGrowingTreeByType(583-589 宝石树)——实现见 TreePass.growGemTree
-// (GrowTreeWithSettings 1:1;宝石树砍伐掉落/树苗生长未接,静态种植)。
+// TryGrowingTreeByType(583-589 宝石树)——实现见 TreePass.growGemTree(GrowTreeWithSettings
+// 1:1,含 GemTreeGroundTest 石/苔 + WallTest 洞穴墙)。砍伐掉落与树苗再生长均已接:
+// Game.fellImportedTree(KillTile_GetItemDrops :65754-65802 + SetGemTreeDrops,1/10 宝石
+// /9/10 石块,干基 50% gemcorn 4851-4857)与 Game.growSaplings(590 树苗地下 1/5,
+// :72924-72960)。(2026-08-12 头注曾过时声称未接,已核正)
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';

@@ -3,6 +3,7 @@
 // (Game 挥砍段"小动物:任何挥击一击致死"),弹幕此前漏判,箭射松鼠无效果。
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
+import { projectileData } from '../data/vanillaProjectiles';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -61,6 +62,87 @@ export function hitPlayer(
   const ifr = p.iframes;
   game.damagePlayer(dmg, self.x + self.w / 2, self.y + self.h / 2);
   return p.iframes > ifr; // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）
+}
+
+// ================= 弹幕反射管线（原版 Projectile.cs:12050-12060 + NPC.cs:67003-67059） =================
+
+/** 可反射 aiStyle 白名单（Projectile.CanBeReflected，Projectile.cs:20224）：
+ *  1 箭/子弹直飞弹、2 抛物线投掷物、8/21/24/28/29/131 各特化直线弹。
+ *  另有 type 728（超级星星）/955（坠落星）无条件可反射（:20220）。 */
+const REFLECTABLE_AI_STYLES = new Set([1, 2, 8, 21, 24, 28, 29, 131]);
+
+/** 可反射弹体（调用方自报运动学字段；hostile/reflected/damage 参与门禁） */
+export interface ReflectableProj {
+  x: number; y: number; w: number; h: number;
+  vx: number; vy: number;
+  damage: number;
+  hostile?: boolean;
+  /** 已反射标记（本仓显式防重复；原版靠 friendly→hostile 翻转天然拦截二次反射） */
+  reflected?: boolean;
+}
+
+/** 原版 Projectile.CanBeReflected（Projectile.cs:20216-20230）：
+ *  active && friendly && !hostile && damage>0，且 type∈{728,955} 或
+ *  aiStyle∈{1,2,8,21,24,28,29,131}。本仓 friendly 无字段——非 hostile 即友方。 */
+export function projCanBeReflected(
+  projId: number,
+  proj: Pick<ReflectableProj, 'hostile' | 'damage'>,
+): boolean {
+  if (proj.hostile || !(proj.damage > 0)) return false;
+  if (projId === 728 || projId === 955) return true;
+  return REFLECTABLE_AI_STYLES.has(projectileData(projId)?.aiStyle ?? -1);
+}
+
+/** 原版 NPC.ReflectProjectile（NPC.cs:67036-67059）：
+ *  - 音效 Item150 + 尘 31×3（velocity×0.3）；
+ *  - reflected=true、friendly=false、hostile=true（owner 不变——"朝发射者"
+ *    方向读 Main.player[owner]，本仓单主角恒为 game.player）；
+ *  - 速度 = normalize(随机方向×原速 + 朝发射者×20) × 原速（:67047-67055，
+ *    即随机散射偏向回打玩家；原速取 oldVelocity.Length，此处用当前速度近似）；
+ *  - damage ÷2 两次（int 语义 ≈ ÷4）+ penetrate=1（穿透归一，穿透字段的
+ *    清理由调用方按各自存储执行）。 */
+export function reflectProjectile(proj: ReflectableProj, game: GameHooks): void {
+  const cx = proj.x + proj.w / 2, cy = proj.y + proj.h / 2;
+  // Item_150 未入音效提取库（public/sounds 无此 wav）：playSfxFile 未命中静默，
+  // 回退 tink（Tink_0/1 金属弹开近似）——素材补齐后自动切真声
+  if (!game.playSfxFile?.('Item_150', 1, cx, cy)) game.playSfx('tink', 0.9, cx, cy);
+  game.spawnParticles(cx, cy, '#D8D8E0', 3, 0.6, { life: 24, damp: 0.9 });
+  proj.reflected = true;
+  proj.hostile = true;
+  // 反射向量（NPC.cs:67047-67055）
+  const p = game.player;
+  const speed = Math.hypot(proj.vx, proj.vy);
+  let ox = p.cx - cx, oy = p.cy - cy;
+  const od = Math.hypot(ox, oy);
+  if (od > 0.001) { ox /= od; oy /= od; }
+  else if (speed > 0.001) { ox = -proj.vx / speed; oy = -proj.vy / speed; } // 重合退化:原路弹回
+  else { ox = 0; oy = -1; }
+  // 随机方向 = Main.rand.Next(-100,101) 双轴归一（此处 [-1,1) 均匀近似）
+  const rx = Math.random() * 2 - 1, ry = Math.random() * 2 - 1;
+  let dx = rx * speed + ox * 20, dy = ry * speed + oy * 20;
+  const dl = Math.hypot(dx, dy);
+  if (dl > 0.001) { proj.vx = (dx / dl) * speed; proj.vy = (dy / dl) * speed; }
+  else { proj.vx = ox * 6; proj.vy = oy * 6; } // 零速退化:低速直飞回发射者
+  // 伤害衰减（int 连除两次）+ penetrate=1（:67056-67058）
+  proj.damage = Math.floor(Math.floor(proj.damage / 2) / 2);
+}
+
+/** 弹体命中敌怪分支的反射门禁 + 执行（原版 Projectile.cs:12050-12060：
+ *  flag6 = targetNPC.reflectsProjectiles（getGoodWorld 星弹特例未接入——运行时
+ *  无 FTW 标志），命中重叠本身即 NPC.CanReflectProjectile 的 Hitbox 相交）。
+ *  返回 true = 已反射，调用方跳过本次伤害结算并结束本帧命中迭代
+ *  （对应原版 keepIterating=false; return）。 */
+export function tryReflectProjectile(
+  proj: ReflectableProj,
+  projId: number,
+  e: { reflectsProjectiles?: boolean },
+  game: GameHooks,
+): boolean {
+  if (!e.reflectsProjectiles) return false;
+  if (proj.reflected) return false; // 显式防重复（原版由 hostile 翻转天然拦截）
+  if (!projCanBeReflected(projId, proj)) return false;
+  reflectProjectile(proj, game);
+  return true;
 }
 
 /** 敌弹命中玩家的状态授予(原版 Projectile.StatusPlayer :11450+,仅在

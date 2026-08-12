@@ -6,7 +6,7 @@ const page = await browser.newPage();
 let r = null;
 for (let att = 0; att < 12 && r === null; att++) {
   try {
-    await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
     r = await page.evaluate(() => new Promise((res) => {
   const t0 = Date.now();
   const iv = setInterval(async () => {

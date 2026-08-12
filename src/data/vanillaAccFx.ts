@@ -49,6 +49,7 @@ export interface AccFx {
   luckyCoin?: number;    // 幸运币：近战命中掉钱
   discount?: number;     // 折扣卡：商店/重铸 8 折
   quiver?: number;       // 魔法箭袋族
+  moltenQuiver?: number; // 熔箭袋 4002：木箭→火矢 +2 伤（:52700）
   arrowDmg?: number;     // 箭伤加成（+0.1/件）
   ammoSave?: number;     // 20% 概率不耗弹
   huntressSave?: number; // 10% 概率不耗弹

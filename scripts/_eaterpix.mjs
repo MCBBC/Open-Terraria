@@ -7,7 +7,7 @@ const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGE ERROR:', e.message));
 for (let attempt = 1; attempt <= 3; attempt++) {
   try {
-    await page.goto('http://localhost:5199', { waitUntil: 'networkidle0', timeout: 90000 });
+    await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0', timeout: 90000 });
     break;
   } catch (e) { console.log(`goto retry ${attempt}: ${e.message}`); }
 }

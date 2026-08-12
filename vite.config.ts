@@ -90,6 +90,19 @@ function vanillaAtlasAuto(): Plugin {
   };
 }
 
+// —— 并行会话探针稳定性(2026-08-12)——
+// 问题:多个并行会话共用同一 dev server(5199),任一会话改源码 → HMR/full-reload
+// 把其他会话正在跑的 puppeteer 探针页面打断(navigation 错误反复 retry)。
+// 方案:跑探针的会话起"私有静默实例"并指向它:
+//   SW_PORT=5201 SW_NO_HMR=1 SW_CACHE=/tmp/sw-vite-5201 npx vite
+//   SW_NO_HMR=1 → server.hmr=false:不发任何 reload 推送,页面稳定;watcher 仍正常
+//   失效 transform 缓存,探针每次 page.goto 都拿到最新代码。
+//   SW_CACHE → 独立预打包缓存,避免多实例并发 optimizeDeps 竞争。
+// 约定:共享 5199 保留 HMR(人工试玩体验不变);任何会话不得 kill 5199;
+// 探针脚本一律读 SW_ORIGIN(缺省回退 5199)。详见 memory: parallel-vite-sessions。
+const PORT = Number(process.env.SW_PORT ?? 5199);
+const NO_HMR = process.env.SW_NO_HMR === '1';
+
 export default defineConfig({
   resolve: {
     extensions: ['.ts', '.mts', '.mjs', '.js', '.jsx', '.tsx', '.json'],
@@ -97,5 +110,13 @@ export default defineConfig({
   // worker 打包格式：默认 'iife' 遇到 worker 图内代码分割/动态 import 会构建报错；
   // 'es' 与 dev 态 module worker 一致（worldGen.worker 及其依赖全为静态 import）
   worker: { format: 'es' },
+  server: {
+    port: PORT,
+    // 端口被占直接报错而非静默漂移(+1/+2…)——防"以为在 5199 实际在 5190"的
+    // 双实例错位(曾致 VUI/UITextures 双模块"光标消失")
+    strictPort: true,
+    hmr: NO_HMR ? false : undefined,
+  },
+  cacheDir: process.env.SW_CACHE ?? 'node_modules/.vite',
   plugins: [vanillaAtlasAuto(), l10nAuditAuto()],
 });

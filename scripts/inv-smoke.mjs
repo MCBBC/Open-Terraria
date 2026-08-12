@@ -5,7 +5,7 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errs.push('console: ' + m.text()); });
-await page.goto('http://localhost:5199', {waitUntil:'networkidle0'});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
 await page.type('input', 'inv-smoke');
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');

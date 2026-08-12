@@ -1,0 +1,760 @@
+// 图鉴 UI 面板（DOM，M-补齐清单 #2）——对照 Terraria.GameContent.UI.States/
+// UIBestiaryTest.cs（1.4.5.6）+ UI.Elements/UIBestiaryEntryGrid.cs：
+//   网格 72×72 单元（GetEntriesToShow：cols=floor(w/72) rows=floor(h/72)，分页按页偏移）
+//   范围文本 "{first}-{last} ({total})"（GetRangeText）；FixBestiaryRange 钳制
+//   顶栏：◀ ▶ + 范围 + 排序 + 筛选 + 搜索（UIWrappedSearchBar）
+//   底栏：完成度百分比 + 进度条（FillPercent；填充 rgb(51,137,255) 底 rgb(35,43,81)）
+//   面板底色 rgb(33,43,79)*0.8（BuildPage UIPanel.BackgroundColor）
+//   条目卡：头像（NPC 表首帧）+ 名字；未解锁剪影（UnlockableNPCEntryIcon 语义）
+//   详情栏（右侧，UIBestiaryEntryInfoPage 位置）：
+//     解锁档 UnlockState 1 头像/2 +属性/3 +掉落/4 +掉落率（Bestiary.ts unlockState）
+//     掉落表 = vanilla-npcdrops.json 规则树展平（ItemDropBestiaryInfoElement 近似）
+// 打开入口：背包面板图鉴按钮（原版 BestiaryMenuButton Main.cs:41905）+ 暂停菜单。
+// 键位：Esc / E 关闭（DOM 面板惯例；capture 阶段拦截防 main.ts 暂停键二次消费）。
+// 登记缺口（数据层暂无，待后续批次）：
+//   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 稀有度 / 群系 / 事件标签
+//     （AddNPCBiomeRelationships 系）——Bestiary.ts 条目无 rarity/biome 字段
+//   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId）/ Sort_Rarity
+//     （NpcBestiaryRarityStars）——两表未提取
+//   - 详情：风味文本（FlavorTextBestiaryInfoElement）/ 出没环境（SpawnCondition）
+//     / 头像背景（IBestiaryBackgroundImagePathAndColorProvider）
+import { Lang } from '../i18n/Lang';
+import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
+import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
+import { VANILLA_NPCS } from '../data/vanillaNpcs';
+import { npcValueOf } from '../drops/NpcDrops';
+import dropData from '../data/vanilla-npcdrops.json';
+import { UISfx } from '../vui/UISfx';
+import type { SpriteAtlas } from '../assets/SpriteAtlas';
+import {
+  bestiaryEntries, bestiaryCreditId, UnlockState,
+  type BestiaryEntryDef, type BestiaryTracker,
+} from '../data/Bestiary';
+
+/* eslint-disable @typescript-eslint/no-explicit-any */
+type Rule = any;
+
+// ============ 纯逻辑（Node 可单测；DOM 渲染只是其消费方） ============
+
+/** UIBestiaryEntryGrid.GetEntriesToShow：单元 72×72（UIBestiaryEntryButton 尺寸） */
+export const BST_CELL = 72;
+
+export function bestiaryGridSize(w: number, h: number): { cols: number; rows: number; perPage: number } {
+  const cols = Math.max(1, Math.floor(w / BST_CELL));
+  const rows = Math.max(1, Math.floor(h / BST_CELL));
+  return { cols, rows, perPage: cols * rows };
+}
+
+/** UIBestiaryEntryGrid.GetRangeText："{first}-{last} ({total})"，空集 "0-0 (0)" */
+export function bestiaryRangeText(atIndex: number, last: number, perPage: number): string {
+  const end = Math.min(last, atIndex + perPage);
+  const first = Math.min(atIndex + 1, end);
+  return `${first}-${end} (${last})`;
+}
+
+/** FixBestiaryRange：偏移钳制到 [0, max(0, last - perPage)] */
+export function clampBestiaryOffset(atIndex: number, offset: number, last: number, perPage: number): number {
+  const max = Math.max(0, last - perPage);
+  return Math.min(Math.max(atIndex + offset, 0), max);
+}
+
+/** 分页数（探针口径：546 条 / 每页条数 → 页数） */
+export function bestiaryPageCount(total: number, perPage: number): number {
+  if (perPage <= 0) return 0;
+  return Math.ceil(total / perPage);
+}
+
+export type BestiarySortKey = 'unlocks' | 'id' | 'alpha' | 'attack' | 'defense' | 'coins' | 'hp';
+/** SortingSteps 注册序（RegisterSortSteps）——本面板可选步（缺 BestiaryID/Rarity 两步） */
+export const BESTIARY_SORT_KEYS: BestiarySortKey[] = ['unlocks', 'id', 'alpha', 'attack', 'defense', 'coins', 'hp'];
+
+export function sortLabel(key: BestiarySortKey): string {
+  switch (key) {
+    case 'unlocks': return Lang.text('BestiaryInfo.Sort_Unlocks');
+    case 'id': return Lang.text('BestiaryInfo.Sort_ID');
+    case 'alpha': return Lang.text('BestiaryInfo.Sort_Alphabetical');
+    case 'attack': return Lang.text('BestiaryInfo.Sort_Attack');
+    case 'defense': return Lang.text('BestiaryInfo.Sort_Defense');
+    case 'coins': return Lang.text('BestiaryInfo.Sort_Coins');
+    case 'hp': return Lang.text('BestiaryInfo.Sort_HitPoints');
+  }
+}
+
+export interface BestiaryFilter {
+  search: string;
+  /** 条目类别（本仓自有维度，无原版键） */
+  kind: 'all' | 'enemy' | 'town' | 'critter';
+  /** Filters.ByBoss（BestiaryInfo.IsBoss） */
+  boss: boolean;
+  /** Filters.ByUnlockState（BestiaryInfo.IfUnlocked）；'no' 为反向（本仓补充） */
+  unlocked: 'all' | 'yes' | 'no';
+}
+
+export const DEFAULT_BESTIARY_FILTER: BestiaryFilter = { search: '', kind: 'all', boss: false, unlocked: 'all' };
+
+export interface BestiaryRow {
+  entry: BestiaryEntryDef;
+  /** 条目代表 NPC id（图标/属性取自它；归并族取母体） */
+  npcId: number;
+  state: UnlockState;
+  name: string;
+  /** 击杀数（kill 来源 creditId 的计数；非击杀条目 0） */
+  kills: number;
+}
+
+/** creditId → 母体 NPC id（BESTIARY_CREDIT_REDIRECT 归并族取未被重定向者，正 id 优先） */
+let repIdCache: Map<string, number> | null = null;
+export function bestiaryRepNpcId(creditId: string): number {
+  if (!repIdCache) {
+    repIdCache = new Map();
+    const R = BESTIARY_CREDIT_REDIRECT as Record<number, number>;
+    const put = (id: number) => {
+      const cid = NPC_NAME_BY_ID[id] ?? String(id);
+      if (!repIdCache!.has(cid)) repIdCache!.set(cid, id);
+    };
+    for (const key of Object.keys(NPC_NAME_BY_ID)) {
+      const id = Number(key);
+      if (!Number.isInteger(id) || id === 0) continue;
+      if (R[id] === undefined && id > 0) put(id);   // 母体（正 id）
+    }
+    for (const key of Object.keys(NPC_NAME_BY_ID)) {
+      const id = Number(key);
+      if (!Number.isInteger(id) || id === 0) continue;
+      if (R[id] !== undefined) put(R[id]);           // 变体族回填母体
+    }
+    for (const key of Object.keys(NPC_NAME_BY_ID)) {
+      const id = Number(key);
+      // 负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）代表自身
+      if (Number.isInteger(id) && id !== 0) put(id);
+    }
+  }
+  const fallback = Number(creditId);
+  return repIdCache.get(creditId) ?? (Number.isFinite(fallback) ? fallback : 0);
+}
+
+/** BestiaryEntry.Enemy（Populator）+ NPCID.Sets.ShouldBeCountedAsBossForBestiary
+ *  的 creditId 集（Boss 筛选用；Enemy.ts VANILLA_BOSS_IDS 同表） */
+const BOSS_CREDITS = new Set([
+  4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398,
+  439, 636, 657, 325, 327, 345, 346, 517, 422, 507, 493, 664,
+].map(bestiaryCreditId));
+
+export function isBossCredit(creditId: string): boolean {
+  return BOSS_CREDITS.has(creditId);
+}
+
+/** 全条目行化（bestiaryEntries × tracker.unlockState × 名字解析） */
+export function bestiaryRows(tracker: BestiaryTracker): BestiaryRow[] {
+  const out: BestiaryRow[] = [];
+  for (const entry of bestiaryEntries()) {
+    let kills = 0;
+    for (const s of entry.sources) {
+      if (s.t === 'kill') kills = Math.max(kills, tracker.kills.get(s.credit) ?? 0);
+    }
+    const npcId = bestiaryRepNpcId(entry.creditId);
+    const state = tracker.unlockState(entry);
+    out.push({
+      entry, npcId, kills, state,
+      // 未解锁不显示名（原版图标 hover "???"）
+      name: state > UnlockState.NotKnown ? npcDisplayName(npcId, entry.creditId) : '???',
+    });
+  }
+  return out;
+}
+
+/** 条目显示名：正 id 走 Lang.npcName；负 netID（史莱姆/世吞段变体）Lang.npcName
+ *  会取 abs 误命中他者，改按内部名直查；都缺回退 creditId */
+export function npcDisplayName(npcId: number, fallback: string): string {
+  if (npcId > 0) return Lang.npcName(npcId) ?? fallback;
+  const internal = NPC_NAME_BY_ID[npcId];
+  if (internal && Lang.has(`NPCName.${internal}`)) return Lang.text(`NPCName.${internal}`);
+  return fallback;
+}
+
+/** 排序（SortingSteps 各 Compare 的数据层等价；无数据步缺省，平手按 npcId 升序） */
+export function sortBestiaryRows(rows: BestiaryRow[], key: BestiarySortKey): void {
+  const stat = (r: BestiaryRow, f: 'lifeMax' | 'damage' | 'defense'): number =>
+    VANILLA_NPCS[String(r.npcId)]?.[f] ?? -1;
+  const cmp: Record<BestiarySortKey, (a: BestiaryRow, b: BestiaryRow) => number> = {
+    // ByUnlockState：解锁档降序（已解锁在前）
+    unlocks: (a, b) => b.state - a.state || a.npcId - b.npcId,
+    // ByNetId 升序
+    id: (a, b) => a.npcId - b.npcId,
+    // Alphabetical：显示名升序
+    alpha: (a, b) => a.name.localeCompare(b.name, 'zh') || a.npcId - b.npcId,
+    // ByStat 族：降序（无数据条目沉底）
+    attack: (a, b) => stat(b, 'damage') - stat(a, 'damage') || a.npcId - b.npcId,
+    defense: (a, b) => stat(b, 'defense') - stat(a, 'defense') || a.npcId - b.npcId,
+    coins: (a, b) => npcValueOf(b.npcId) - npcValueOf(a.npcId) || a.npcId - b.npcId,
+    hp: (a, b) => stat(b, 'lifeMax') - stat(a, 'lifeMax') || a.npcId - b.npcId,
+  };
+  rows.sort(cmp[key]);
+}
+
+/** 筛选（Filters.BySearch/ByUnlockState/ByBoss + 本仓 kind 维度） */
+export function filterBestiaryRows(rows: BestiaryRow[], f: BestiaryFilter): BestiaryRow[] {
+  const q = f.search.trim().toLowerCase();
+  return rows.filter((r) => {
+    if (f.kind !== 'all' && r.entry.kind !== f.kind) return false;
+    if (f.boss && !isBossCredit(r.entry.creditId)) return false;
+    if (f.unlocked === 'yes' && r.state === UnlockState.NotKnown) return false;
+    if (f.unlocked === 'no' && r.state > UnlockState.NotKnown) return false;
+    // BySearch：未解锁条目不提供搜索串（原版 NamePlate 隐藏）
+    if (q && (r.state === UnlockState.NotKnown || !r.name.toLowerCase().includes(q))) return false;
+    return true;
+  });
+}
+
+// ============ 掉落表展平（ItemDropBestiaryInfoElement 近似） ============
+
+export interface DropLine {
+  item: number;
+  /** 掉率（0-1；null = 非概率掉落如 noRepeat 池/事件掉落） */
+  chance: number | null;
+  min: number;
+  max: number;
+  /** 条件名（Bestiary.ItemDropConditions.<name> 取文案） */
+  cond: string | null;
+  /** 专家/大师分支标签 */
+  tag: string | null;
+}
+
+const DROP_ENTRIES: Array<{ npcs?: number[]; global?: boolean; rule: Rule }> = (dropData as any).entries;
+const dropRulesByNpc = new Map<number, Rule[]>();
+for (const e of DROP_ENTRIES) {
+  if (e.global) continue; // 全局规则不计入条目掉落表（原版按条目注册展示）
+  for (const n of e.npcs ?? []) {
+    let l = dropRulesByNpc.get(n);
+    if (!l) dropRulesByNpc.set(n, l = []);
+    l.push(e.rule);
+  }
+}
+
+function pushDrop(out: DropLine[], item: number, chance: number | null, min: number, max: number, cond: string | null, tag: string | null) {
+  if (!item) return;
+  out.push({ item, chance: chance === null ? null : Math.min(1, chance), min, max, cond, tag });
+}
+
+function walkDrop(rule: Rule, out: DropLine[], gate: number, tag: string | null, cond: string | null): void {
+  if (!rule || typeof rule !== 'object') return;
+  const c = rule.cond?.name ?? cond;
+  const num = rule.num ?? 1;
+  switch (rule.k) {
+    case 'common': case 'rerolls': case 'cond':
+    case 'local': case 'perPlayer':
+      pushDrop(out, rule.item, gate * (num / (rule.denom ?? 1)), rule.min ?? 1, rule.max ?? 1, c, tag);
+      break;
+    case 'oneOf':
+      for (const id of rule.ids ?? []) pushDrop(out, id, gate * (num / (rule.denom ?? 1)), 1, 1, c, tag);
+      break;
+    case 'expert': // DropBasedOnExpertMode：normal/expert 双列展示
+      walkDrop(rule.normal, out, gate, tag, cond);
+      walkDrop(rule.expert, out, gate, 'IsExpert', cond);
+      return;
+    case 'master':
+      walkDrop(rule.def, out, gate, tag, cond);
+      walkDrop(rule.master, out, gate, 'IsMasterMode', cond);
+      return;
+    case 'masterExpert': // master > expert > def
+      walkDrop(rule.def, out, gate, tag, cond);
+      walkDrop(rule.expert, out, gate, 'IsExpert', cond);
+      walkDrop(rule.master, out, gate, 'IsMasterMode', cond);
+      return;
+    case 'masterCommon':
+      pushDrop(out, rule.item, gate, 1, 1, c, 'IsMasterMode');
+      break;
+    case 'masterAll':
+      pushDrop(out, rule.item, gate / (rule.denom ?? 1), 1, 1, c, 'IsMasterMode');
+      break;
+    case 'bossBag': // 非专家分支 = DropNothing
+      pushDrop(out, rule.item, gate, 1, 1, c, 'IsExpert');
+      break;
+    case 'oneOfRules': // OneFromRulesRule：过 1/denom 后等权取一子树
+      for (const r of rule.rules ?? []) walkDrop(r, out, gate / (rule.denom ?? 1), tag, cond);
+      return;
+    case 'noRepeat': // 不放回抽样池：恒掉 count 件（概率由池构成）
+      for (const id of rule.ids ?? []) pushDrop(out, id, null, 1, 1, c, tag);
+      break;
+    case 'dropOneByOne': // 四塔碎片：12-20 块（参数未数值化，见 NpcDrops.dropOneByOne）
+      pushDrop(out, rule.item, gate, 12, 20, c, tag);
+      break;
+    case 'mechSpawn': // 三王召唤物各 1/2500
+      pushDrop(out, 556, gate / 2500, 1, 1, c, tag);
+      pushDrop(out, 544, gate / 2500, 1, 1, c, tag);
+      pushDrop(out, 557, gate / 2500, 1, 1, c, tag);
+      break;
+    case 'gate': { // LeadingConditionRule：条件沿 OnSuccess 链下传
+      for (const ch of rule.chain ?? []) walkDrop(ch.rule, out, gate, tag, c);
+      return;
+    }
+    case 'nothing': case 'listRef': case 'slimeBody': case 'statueMimic':
+      return;
+    default:
+      return; // 未知 kind 静默跳过（掉落求值运行时另有 warnOnce 兜底）
+  }
+  for (const ch of rule.chain ?? []) walkDrop(ch.rule, out, gate, tag, cond);
+}
+
+/** 展平某 NPC 的掉落规则树 → 展示行（去重 + 按掉率降序） */
+export function flattenDropsForNpc(npcId: number): DropLine[] {
+  const rules = dropRulesByNpc.get(npcId);
+  if (!rules) return [];
+  const out: DropLine[] = [];
+  for (const r of rules) walkDrop(r, out, 1, null, null);
+  const seen = new Set<string>();
+  const deduped = out.filter((d) => {
+    const k = `${d.item}|${d.chance}|${d.min}|${d.max}|${d.cond}|${d.tag}`;
+    if (seen.has(k)) return false;
+    seen.add(k);
+    return true;
+  });
+  deduped.sort((a, b) => (b.chance ?? -1) - (a.chance ?? -1) || a.item - b.item);
+  return deduped;
+}
+
+export function dropRateText(chance: number): string {
+  const pct = chance * 100;
+  const s = pct >= 100 ? '100' : String(Math.round(pct * 100) / 100);
+  return `${s}%`;
+}
+
+function dropTagText(tag: string): string {
+  const key = `Bestiary.ItemDropConditions.${tag}`;
+  const t = Lang.has(key) ? Lang.text(key) : '';
+  return t || tag;
+}
+function dropCondText(cond: string): string {
+  const key = `Bestiary.ItemDropConditions.${cond}`;
+  const t = Lang.has(key) ? Lang.text(key) : '';
+  return t; // 原版空串条件（NotExpert 等）不显示
+}
+
+// ============ DOM 面板 ============
+
+const CSS = `
+.sw-bst { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:min(1040px,96vw); height:min(740px,92vh); z-index:30; cursor:auto;
+  display:flex; flex-direction:column;
+  background:rgba(33,43,79,0.9); border:2px solid #7d92d6; border-radius:6px;
+  color:#e8ecf8; font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif;
+  box-shadow:0 8px 40px rgba(0,0,0,.6); }
+.sw-bst-top { display:flex; align-items:center; gap:6px; padding:8px 10px 6px; flex:none; }
+.sw-bst-nav { width:30px; height:26px; flex:none; padding:0; margin:0; font-size:13px;
+  background:#3a4680; color:#e8e8f4; border:1px solid #7d92d6; border-radius:4px; cursor:pointer; }
+.sw-bst-nav:hover { background:#4a5aa0; }
+.sw-bst-range { min-width:118px; text-align:center; background:rgb(35,40,83); color:#cfd6f2;
+  border-radius:4px; padding:4px 8px; font-size:12px; flex:none; }
+.sw-bst-sel, .sw-bst-search { background:#232c52; color:#e8e8f4; border:1px solid #3a4680;
+  border-radius:4px; padding:4px 6px; font-family:inherit; font-size:12px; }
+.sw-bst-search { width:110px; flex:none; }
+.sw-bst-chips { display:flex; gap:4px; flex:1; flex-wrap:wrap; }
+.sw-bst-chip { padding:4px 8px; font-size:11px; background:#232c52; border:1px solid #3a4680;
+  border-radius:4px; cursor:pointer; color:#cfd6f2; font-family:inherit; }
+.sw-bst-chip.active { background:#5a6ac0; color:#fff; outline:1px solid #ffd76e; }
+.sw-bst-back { flex:none; padding:5px 14px; font-size:12px; }
+.sw-bst-main { flex:1; display:flex; gap:8px; padding:0 10px; min-height:0; }
+.sw-bst-gridwrap { flex:1; min-width:0; position:relative; overflow:hidden; }
+.sw-bst-grid { display:grid; }
+.sw-bst-cell { width:72px; height:72px; position:relative; flex:none;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:1px;
+  cursor:pointer; background:rgba(20,25,50,0.85); border-radius:3px; }
+.sw-bst-cell:hover { background:rgba(42,52,100,1); outline:1px solid #8fa0e0; }
+.sw-bst-cell.sel { outline:2px solid #ffd76e; }
+.sw-bst-cell canvas { width:44px; height:44px; image-rendering:pixelated; }
+.sw-bst-cell.sw-bst-lock canvas { filter:brightness(0) opacity(0.55); }
+.sw-bst-name { font-size:10px; line-height:1.1; max-width:68px; white-space:nowrap;
+  overflow:hidden; text-overflow:ellipsis; color:#cfd6f2; }
+.sw-bst-cell.sw-bst-lock .sw-bst-name { color:#586088; }
+.sw-bst-kills { position:absolute; right:3px; top:2px; font-size:9px; color:#ffe8a0; }
+.sw-bst-empty { position:absolute; inset:0; display:flex; align-items:center;
+  justify-content:center; color:#8a90b8; font-size:13px; }
+.sw-bst-info { width:296px; flex:none; overflow-y:auto; background:rgba(20,25,50,0.8);
+  border:1px solid #3a4680; border-radius:4px; padding:10px; font-size:12px; }
+.sw-bst-info h3 { margin:0 0 4px; font-size:15px; color:#ffe8a0; font-weight:normal;
+  text-shadow:1px 1px 0 #000; word-break:break-all; }
+.sw-bst-tags { display:flex; gap:4px; flex-wrap:wrap; margin-bottom:6px; }
+.sw-bst-tag { font-size:10px; padding:1px 6px; border-radius:3px; background:#3a4680; color:#cfd6f2; }
+.sw-bst-tag.boss { background:#7a3a3a; }
+.sw-bst-info .row { display:flex; justify-content:space-between; gap:8px;
+  padding:2px 0; border-bottom:1px solid rgba(90,106,160,0.25); }
+.sw-bst-info .row span:first-child { color:#8a90b8; }
+.sw-bst-info .row span:last-child { color:#e8ecf8; }
+.sw-bst-sec { margin:8px 0 4px; color:#ffe8a0; font-size:12px; }
+.sw-bst-drop { display:flex; align-items:center; gap:6px; padding:2px 0; }
+.sw-bst-drop canvas { width:22px; height:22px; flex:none; image-rendering:pixelated; }
+.sw-bst-drop .nm { flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sw-bst-drop .rt { color:#9adf9a; flex:none; }
+.sw-bst-drop .cd { display:block; font-size:10px; color:#8a90b8; }
+.sw-bst-bottom { display:flex; align-items:center; gap:10px; padding:6px 10px 10px; flex:none; }
+.sw-bst-pct { flex:none; font-size:12px; color:#cfd6f2; }
+.sw-bst-bar { flex:1; height:15px; background:rgb(35,43,81); border-radius:3px; overflow:hidden; }
+.sw-bst-bar i { display:block; height:100%; background:rgb(51,137,255); }
+`;
+
+export interface BestiaryPanelFlow {
+  getTracker(): BestiaryTracker;
+  atlas?: SpriteAtlas | null;
+  onBack(): void;
+}
+
+export class BestiaryPanel {
+  private panel: HTMLElement;
+  private gridWrap!: HTMLElement;
+  private gridEl!: HTMLElement;
+  private rangeEl!: HTMLElement;
+  private infoEl!: HTMLElement;
+  private pctEl!: HTMLElement;
+  private barEl!: HTMLElement;
+  private searchEl!: HTMLInputElement;
+  private chipsEl!: HTMLElement;
+  private ro: ResizeObserver | null = null;
+  private escHandler = (e: KeyboardEvent) => {
+    if (e.code === 'Escape' || e.code === 'KeyE') {
+      e.stopImmediatePropagation();
+      e.preventDefault();
+      this.close();
+    }
+  };
+  private filter: BestiaryFilter = { ...DEFAULT_BESTIARY_FILTER };
+  private sortKey: BestiarySortKey = 'unlocks';
+  private offset = 0;
+  private perPage = 40;
+  private working: BestiaryRow[] = [];
+  private selected: BestiaryRow | null = null;
+  private sortSel: HTMLSelectElement | null = null;
+
+  constructor(private parent: HTMLElement, private flow: BestiaryPanelFlow) {
+    if (!document.getElementById('sw-bst-style')) {
+      const style = document.createElement('style');
+      style.id = 'sw-bst-style';
+      style.textContent = CSS;
+      document.head.appendChild(style);
+    }
+    this.panel = document.createElement('div');
+    this.panel.className = 'sw-bst';
+    this.panel.innerHTML = `
+      <div class="sw-bst-top">
+        <button class="sw-bst-nav" data-nav="-1">◀</button>
+        <button class="sw-bst-nav" data-nav="1">▶</button>
+        <div class="sw-bst-range">0-0 (0)</div>
+        <select class="sw-bst-sel" data-sort></select>
+        <div class="sw-bst-chips"></div>
+        <input class="sw-bst-search" type="text" placeholder="搜索" data-search />
+        <button class="sw-bst-nav sw-bst-back" data-close></button>
+      </div>
+      <div class="sw-bst-main">
+        <div class="sw-bst-gridwrap"><div class="sw-bst-grid"></div><div class="sw-bst-empty" hidden></div></div>
+        <div class="sw-bst-info"></div>
+      </div>
+      <div class="sw-bst-bottom">
+        <div class="sw-bst-pct"></div>
+        <div class="sw-bst-bar"><i style="width:0%"></i></div>
+      </div>
+    `;
+    this.gridWrap = this.panel.querySelector('.sw-bst-gridwrap')!;
+    this.gridEl = this.panel.querySelector('.sw-bst-grid')!;
+    this.rangeEl = this.panel.querySelector('.sw-bst-range')!;
+    this.infoEl = this.panel.querySelector('.sw-bst-info')!;
+    this.pctEl = this.panel.querySelector('.sw-bst-pct')!;
+    this.barEl = this.panel.querySelector('.sw-bst-bar i') as HTMLElement;
+    this.searchEl = this.panel.querySelector('[data-search]') as HTMLInputElement;
+    this.chipsEl = this.panel.querySelector('.sw-bst-chips')!;
+    this.sortSel = this.panel.querySelector('[data-sort]') as HTMLSelectElement;
+    this.buildSortSel();
+    this.buildChips();
+    this.panel.querySelector('[data-close]')!.textContent = Lang.text('UI.Back');
+    this.panel.querySelector('[data-close]')!.addEventListener('click', () => this.close());
+    this.panel.querySelectorAll('[data-nav]').forEach((b) => {
+      (b as HTMLElement).addEventListener('click', () => this.page(Number((b as HTMLElement).dataset.nav)));
+    });
+    this.searchEl.addEventListener('input', () => { this.filter.search = this.searchEl.value; this.offset = 0; this.refresh(); });
+    this.sortSel.addEventListener('change', () => {
+      this.sortKey = (this.sortSel!.value || 'unlocks') as BestiarySortKey;
+      this.offset = 0;
+      this.refresh();
+    });
+    // capture 阶段拦截：防 main.ts 全局 Esc/E 处理器同时关暂停菜单/背包
+    window.addEventListener('keydown', this.escHandler, true);
+    if (typeof ResizeObserver !== 'undefined') {
+      this.ro = new ResizeObserver(() => this.refresh());
+      this.ro.observe(this.gridWrap);
+    }
+    parent.appendChild(this.panel);
+    this.refresh();
+    UISfx.click();
+  }
+
+  private buildSortSel() {
+    if (!this.sortSel) return;
+    for (const k of BESTIARY_SORT_KEYS) {
+      const o = document.createElement('option');
+      o.value = k;
+      o.textContent = sortLabel(k);
+      this.sortSel.appendChild(o);
+    }
+    this.sortSel.value = this.sortKey;
+  }
+
+  private chip(label: string, active: boolean, fn: () => void): HTMLElement {
+    const b = document.createElement('button');
+    b.className = 'sw-bst-chip' + (active ? ' active' : '');
+    b.textContent = label;
+    b.addEventListener('click', () => { fn(); this.offset = 0; this.refresh(); });
+    return b;
+  }
+
+  private buildChips() {
+    const f = this.filter;
+    const kinds: Array<BestiaryFilter['kind']> = ['all', 'enemy', 'town', 'critter'];
+    const kindLabel: Record<string, string> = { all: '全部', enemy: '敌怪', town: '城镇', critter: '小动物' };
+    this.chipsEl.replaceChildren();
+    for (const k of kinds) {
+      this.chipsEl.appendChild(this.chip(kindLabel[k], f.kind === k, () => { f.kind = k; this.buildChips(); }));
+    }
+    this.chipsEl.appendChild(this.chip(
+      Lang.text('BestiaryInfo.IsBoss'), f.boss, () => { f.boss = !f.boss; this.buildChips(); }));
+    const ul = f.unlocked;
+    this.chipsEl.appendChild(this.chip(
+      Lang.text('BestiaryInfo.IfUnlocked'), ul === 'yes', () => { f.unlocked = ul === 'yes' ? 'all' : 'yes'; this.buildChips(); }));
+    this.chipsEl.appendChild(this.chip(
+      '未解锁', ul === 'no', () => { f.unlocked = ul === 'no' ? 'all' : 'no'; this.buildChips(); }));
+  }
+
+  /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度） */
+  refresh() {
+    const rows = bestiaryRows(this.flow.getTracker());
+    sortBestiaryRows(rows, this.sortKey);
+    this.working = filterBestiaryRows(rows, this.filter);
+    const { cols, rows: gridRows, perPage } = bestiaryGridSize(this.gridWrap.clientWidth, this.gridWrap.clientHeight);
+    this.perPage = perPage;
+    this.gridEl.style.gridTemplateColumns = `repeat(${cols}, 72px)`;
+    this.offset = clampBestiaryOffset(this.offset, 0, this.working.length, perPage);
+    this.rangeEl.textContent = bestiaryRangeText(this.offset, this.working.length, perPage);
+    void gridRows;
+    this.fillGrid();
+    this.updateProgress();
+    this.renderInfo();
+  }
+
+  private page(dir: number) {
+    this.offset = clampBestiaryOffset(this.offset, dir * this.perPage, this.working.length, this.perPage);
+    this.refresh();
+  }
+
+  private fillGrid() {
+    this.gridEl.replaceChildren();
+    const empty = this.gridWrap.querySelector('.sw-bst-empty') as HTMLElement;
+    if (this.working.length === 0) {
+      empty.hidden = false;
+      return;
+    }
+    empty.hidden = true;
+    const end = Math.min(this.working.length, this.offset + this.perPage);
+    for (let i = this.offset; i < end; i++) {
+      const r = this.working[i];
+      const cell = document.createElement('div');
+      cell.className = 'sw-bst-cell' + (r.state === UnlockState.NotKnown ? ' sw-bst-lock' : '');
+      if (this.selected && this.selected.entry.creditId === r.entry.creditId) cell.classList.add('sel');
+      cell.dataset.credit = r.entry.creditId;
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      cell.appendChild(canvas);
+      const name = document.createElement('div');
+      name.className = 'sw-bst-name';
+      name.textContent = r.name;
+      cell.appendChild(name);
+      if (r.kills > 0 && r.state >= UnlockState.PortraitOnly) {
+        const kills = document.createElement('div');
+        kills.className = 'sw-bst-kills';
+        kills.textContent = String(r.kills);
+        cell.appendChild(kills);
+      }
+      cell.addEventListener('click', () => { this.selected = r; this.refresh(); });
+      this.drawPortrait(canvas, r.npcId);
+      this.gridEl.appendChild(cell);
+    }
+  }
+
+  /** 头像 = NPC 表首帧（UnlockableNPCEntryIcon 用整表绘制；DOM 取 frame0 缩放）。
+   *  负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）无独立贴图文件，
+   *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。 */
+  private drawPortrait(canvas: HTMLCanvasElement, npcId: number) {
+    const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
+    const paint = (img: HTMLImageElement) => {
+      const frames = VANILLA_NPCS[String(npcId)]?.frames ?? 1;
+      const fh = Math.max(1, Math.floor(img.height / frames));
+      const cx = canvas.getContext('2d');
+      if (!cx) return;
+      cx.imageSmoothingEnabled = false;
+      cx.clearRect(0, 0, canvas.width, canvas.height);
+      const s = Math.min(64 / img.width, 64 / fh);
+      const w = img.width * s, h = fh * s;
+      cx.drawImage(img, 0, 0, img.width, fh, (64 - w) / 2, (64 - h) / 2, w, h);
+    };
+    const atlas = this.flow.atlas ?? null;
+    const cached = atlas ? atlas.vimages.get(`vanilla/NPC_${sheetId}.png`) ?? null : null;
+    if (cached) { paint(cached); return; }
+    const img = new Image();
+    img.onload = () => paint(img);
+    img.src = `sprites/vanilla/NPC_${sheetId}.png`;
+  }
+
+  /** 掉落行物品小图标（atlas.vicon 懒载未就绪时仅文字） */
+  private itemIcon(itemId: number): HTMLCanvasElement | null {
+    const atlas = this.flow.atlas ?? null;
+    if (!atlas) return null;
+    const ar = atlas.vicon(itemId);
+    if (!ar) return null;
+    const c = document.createElement('canvas');
+    c.width = 22; c.height = 22;
+    const cx = c.getContext('2d')!;
+    cx.imageSmoothingEnabled = false;
+    const s = Math.min(22 / ar.sw, 22 / ar.sh);
+    const w = ar.sw * s, h = ar.sh * s;
+    cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (22 - w) / 2, (22 - h) / 2, w, h);
+    return c;
+  }
+
+  private updateProgress() {
+    const c = this.flow.getTracker().completion();
+    const pct = Math.round(c.percent * 10000) / 100;
+    const txt = Lang.text('BestiaryInfo.PercentCollected').replace('{Percent}', `${pct}%`);
+    this.pctEl.textContent = txt;
+    this.pctEl.title = `${c.unlocked}/${c.total}`;
+    this.barEl.style.width = `${c.percent * 100}%`;
+  }
+
+  /** 右侧详情栏（UIBestiaryEntryInfoPage.FillInfoForEntry；未选时空白态） */
+  private renderInfo() {
+    const r = this.selected;
+    if (!r) {
+      this.infoEl.replaceChildren();
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#8a90b8;text-align:center;margin-top:24px;';
+      hint.textContent = '点击条目查看详情';
+      this.infoEl.appendChild(hint);
+      return;
+    }
+    const st = r.state;
+    this.infoEl.replaceChildren();
+    const h3 = document.createElement('h3');
+    h3.textContent = st > UnlockState.NotKnown ? r.name : '???';
+    this.infoEl.appendChild(h3);
+    const tags = document.createElement('div');
+    tags.className = 'sw-bst-tags';
+    const mkTag = (label: string, boss = false) => {
+      const t = document.createElement('span');
+      t.className = 'sw-bst-tag' + (boss ? ' boss' : '');
+      t.textContent = label;
+      tags.appendChild(t);
+    };
+    mkTag(st > UnlockState.NotKnown ? Lang.text('BestiaryInfo.IfUnlocked') : '未解锁');
+    if (isBossCredit(r.entry.creditId)) mkTag(Lang.text('BestiaryInfo.IsBoss'), true);
+    if (r.entry.kind === 'critter') mkTag('小动物');
+    if (r.entry.goldGate) mkTag('金小动物');
+    this.infoEl.appendChild(tags);
+    // 大头像
+    const canvas = document.createElement('canvas');
+    canvas.width = 96; canvas.height = 96;
+    canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
+    if (st === UnlockState.NotKnown) canvas.style.filter = 'brightness(0) opacity(0.55)';
+    this.infoEl.appendChild(canvas);
+    this.drawPortrait(canvas, r.npcId);
+    // 击杀数（NPCKillCounterInfoElement）
+    if (r.kills > 0 && st >= UnlockState.PortraitOnly) {
+      const row = this.infoRow(Lang.text('BestiaryInfo.Slain'), String(r.kills));
+      this.infoEl.appendChild(row);
+    }
+    // 属性（NPCStatsReportInfoElement：UnlockState ≥ Stats 才可见）
+    if (st >= UnlockState.Stats) {
+      const v = VANILLA_NPCS[String(r.npcId)];
+      if (v) {
+        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Life'), String(v.lifeMax)));
+        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Attack'), String(v.damage)));
+        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Defense'), String(v.defense)));
+        const kb = Math.round(v.knockBackResist * 100);
+        this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Knockback'), `${kb}%`));
+      }
+    }
+    // 掉落表（ItemDropBestiaryInfoElement：≥ DropsNoRates 列表，≥ DropsWithRates 带掉率）
+    if (st >= UnlockState.DropsNoRates) {
+      const sec = document.createElement('div');
+      sec.className = 'sw-bst-sec';
+      sec.textContent = '掉落';
+      this.infoEl.appendChild(sec);
+      const drops = flattenDropsForNpc(r.npcId);
+      if (drops.length === 0) {
+        const none = document.createElement('div');
+        none.style.cssText = 'color:#8a90b8;';
+        none.textContent = '（无掉落记录）';
+        this.infoEl.appendChild(none);
+      }
+      const shown = drops.slice(0, 30);
+      for (const d of shown) {
+        const line = document.createElement('div');
+        line.className = 'sw-bst-drop';
+        const icon = this.itemIcon(d.item);
+        if (icon) line.appendChild(icon);
+        const nm = document.createElement('span');
+        nm.className = 'nm';
+        const iname = Lang.itemName(d.item) ?? String(d.item);
+        nm.textContent = iname + (d.min !== d.max ? ` ×${d.min}-${d.max}` : d.min > 1 ? ` ×${d.min}` : '');
+        const notes = [d.cond ? dropCondText(d.cond) : '', d.tag ? dropTagText(d.tag) : ''].filter(Boolean);
+        if (notes.length) {
+          const cd = document.createElement('span');
+          cd.className = 'cd';
+          cd.textContent = notes.join(' · ');
+          nm.appendChild(cd);
+        }
+        line.appendChild(nm);
+        if (st >= UnlockState.DropsWithRates && d.chance !== null) {
+          const rt = document.createElement('span');
+          rt.className = 'rt';
+          rt.textContent = dropRateText(d.chance);
+          line.appendChild(rt);
+        }
+        this.infoEl.appendChild(line);
+      }
+      if (drops.length > shown.length) {
+        const more = document.createElement('div');
+        more.style.cssText = 'color:#8a90b8;';
+        more.textContent = `…另有 ${drops.length - shown.length} 条`;
+        this.infoEl.appendChild(more);
+      }
+    } else if (st === UnlockState.PortraitOnly) {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
+      hint.textContent = r.entry.kind === 'town'
+        ? '与该 NPC 对话可记录更多信息'
+        : '继续击杀可解锁属性与掉落信息';
+      this.infoEl.appendChild(hint);
+    } else {
+      const hint = document.createElement('div');
+      hint.style.cssText = 'color:#8a90b8;margin-top:8px;';
+      hint.textContent = r.entry.kind === 'town'
+        ? '与该 NPC 对话以记录'
+        : r.entry.kind === 'critter' ? '发现该生物以记录' : '击败该怪物以记录';
+      this.infoEl.appendChild(hint);
+    }
+  }
+
+  private infoRow(label: string, value: string): HTMLElement {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const a = document.createElement('span');
+    a.textContent = label;
+    const b = document.createElement('span');
+    b.textContent = value;
+    row.append(a, b);
+    return row;
+  }
+
+  close() {
+    window.removeEventListener('keydown', this.escHandler, true);
+    this.ro?.disconnect();
+    this.ro = null;
+    this.selected = null;
+    this.panel.remove();
+    this.flow.onBack();
+  }
+}

@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox']});
 const page = await browser.newPage();
 page.on('pageerror', e => console.log('ERR:', e.message));
-await page.goto('http://localhost:5199', {waitUntil:'networkidle0'});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
 const which = process.argv[2] || 'gen';
 const wldBuf = which === 'ref' ? Array.from(readFileSync('/Users/vinlic/Downloads/不负责任的女妖啤酒厂.wld')) : null;
 const out = await page.evaluate(async ([mode, wldBuf]) => {

@@ -512,8 +512,13 @@ item({ key: 'vi_3382_stardust_plate', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_3270_item_frame', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_3771_ancient_horn', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_4281_finch_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5407_star_royale_brick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5401_lunar_rust_brick', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_5407_star_royale_brick', name: '', maxStack: 999, value: 1, tile: 'v_675_star_royale_brick' });
+item({ key: 'vi_5401_lunar_rust_brick', name: '', maxStack: 999, value: 1, tile: 'v_669_lunar_rust_brick' });
+// 月相砖族补全（3461 微光转化目标，ItemID.cs:5401-5408;★曾缺 5402/5406/5408 →
+// 转化到这三相静默丢物;tile 744-751? 见 vanilla sheet 注册——砖块放置链按需接）
+item({ key: 'vi_5402_dark_celestial_brick', name: '', maxStack: 999, value: 1, tile: 'v_670_dark_celestial_brick' });
+item({ key: 'vi_5406_mercury_brick', name: '', maxStack: 999, value: 1, tile: 'v_674_mercury_brick' });
+item({ key: 'vi_5408_heavenforge_brick', name: '', maxStack: 999, value: 1, tile: 'v_676_heavenforge_brick' });
 item({ key: 'vi_4716_mollusk_whistle', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_3540_phantasm', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2176_shroomite_digging_claw', name: '', maxStack: 999, value: 1 });
@@ -572,9 +577,9 @@ item({ key: 'vi_5387_raynbro_s_pants', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5386_raynbro_s_hoodie', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5390_raynbro_s_hood', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5338_aegis_fruit', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5404_cosmic_ember_brick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5405_cryocore_brick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5403_astra_brick', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_5404_cosmic_ember_brick', name: '', maxStack: 999, value: 1, tile: 'v_672_cosmic_ember_brick' });
+item({ key: 'vi_5405_cryocore_brick', name: '', maxStack: 999, value: 1, tile: 'v_673_cryocore_brick' });
+item({ key: 'vi_5403_astra_brick', name: '', maxStack: 999, value: 1, tile: 'v_671_astra_brick' });
 item({ key: 'vi_346_safe', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_4829_cat_license', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_3335_demon_heart', name: '', maxStack: 999, value: 1 });

@@ -725,7 +725,7 @@ export class Renderer {
       // 映射到原版 24h 表盘（Utils.GetDayTimeAs24FloatStartingFromMidnight :738-745）：
       // 我方黎明 timeOfDay=0.25 ↔ 4.5h；取模防午夜负值
       hour24: ((((clock0 ? clock0.timeOfDay : 0.5) - 0.25) % 1 + 1) % 1) * 24 + 4.5,
-      nightElapsed01: (((clock0 ? clock0.timeOfDay : 0) - 0.75) % 1 + 1) % 1,
+      nightElapsed01: (((clock0 ? clock0.timeOfDay : 0) - 0.8125) % 1 + 1) % 1,
       fullMoon: clock0?.moonPhase === 0,
       worldBloodMoon: !!clock0?.bloodMoon,
       cloudAlpha: world.weather?.cloudAlpha ?? 0,

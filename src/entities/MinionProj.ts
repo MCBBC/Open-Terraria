@@ -10,6 +10,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
+import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
@@ -451,6 +452,14 @@ export class MinionProj extends Entity {
       if (d < bestD) { bestD = d; best = en; }
       if (en.whipTagT && en.whipTagT > 0 && d < taggedD) { taggedD = d; tagged = en; }
     }
+    // 右键集火优先（OwnerMinionAttackTargetNPC 模板 :27431：有效且距本随从 <900）
+    const focus = (p as unknown as { minionTargetId?: number }).minionTargetId ?? -1;
+    if (focus >= 0) {
+      for (const e of game.enemies()) {
+        const en = e as never as EnemyLike;
+        if (!en.dead && en.id === focus && Math.hypot(en.cx - this.cx, en.cy - this.cy) < 900) return en;
+      }
+    }
     return tagged ?? best;
   }
 
@@ -489,7 +498,7 @@ export class MinionProj extends Entity {
               vx = ((tgt.cx - mx) / d) * 9; vy = ((tgt.cy - my) / d) * 9;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              new Arrow(mx - 5, my - 5, vx, vy, dmgOf(), this.knockback, 668, null, { grav: 0.2 }),
+              Object.assign(new Arrow(mx - 5, my - 5, vx, vy, dmgOf(), this.knockback, 668, null, { grav: 0.2 }), { whipTagShot: true }),
               'projectiles');
           }
           if (++this.sFireT >= 24) { this.sFire = 0; this.sCool = 60; } // num6*num7=24、num8=60
@@ -513,7 +522,7 @@ export class MinionProj extends Entity {
               vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - (this.y + 20)) / d) * 16;
             }
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null, { grav: 0 }),
+              Object.assign(new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null, { grav: 0 }), { whipTagShot: true }),
               'projectiles');
           }
           if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = 160; }
@@ -594,8 +603,8 @@ export class MinionProj extends Entity {
           } else {
             const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
             (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-              new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
-                dmgOf(), this.knockback, ss.shot, null, { grav: 0 }),
+              Object.assign(new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
+                dmgOf(), this.knockback, ss.shot, null, { grav: 0 }), { whipTagShot: true }),
               'projectiles');
           }
         }
@@ -610,7 +619,7 @@ export class MinionProj extends Entity {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            new Arrow(this.cx, this.cy, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null),
+            Object.assign(new Arrow(this.cx, this.cy, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null), { whipTagShot: true }),
             'projectiles');
         }
       }
@@ -708,6 +717,8 @@ export class MinionProj extends Entity {
       if (this.shootCd > 0) this.shootCd--;
       else {
         const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+        // 387 双子激光眼需视线（:28982 CanHitLine 门；AI_062 五族无此门）
+        if (this.projId === 387 && !canHit(game.world.store, this.x, this.y, this.w, this.h, tgt.x, tgt.y, tgt.w, tgt.h)) return;
         if (d <= shooter.range) {
           this.shootCd = shooter.cd;
           const j = shooter.jitter ?? 0;
@@ -715,10 +726,10 @@ export class MinionProj extends Entity {
           const ay = tgt.cy + (Math.random() * 2 - 1) * j - this.cy;
           const al = Math.hypot(ax, ay) || 1;
           const dmg = Math.max(1, Math.round(dmg0 * (shooter.dmgMul ?? 1)));
-          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
-              dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 }),
-            'projectiles');
+          const shot = new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
+            dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
+          shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
         }
       }
     }

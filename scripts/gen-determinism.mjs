@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({executablePath:'/Applications/Google Chr
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push(e.message));
-await page.goto('http://localhost:5199', {waitUntil:'domcontentloaded', timeout:60000});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'domcontentloaded', timeout:60000});
 const out = await page.evaluate(async () => {
   const mod = await import('/src/world/gen/WorldGen.ts');
   const hash = (st) => {

@@ -5,7 +5,7 @@ const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push(e.message));
 page.on('console', m => { if (m.type() === 'error') errs.push(m.text()); });
-await page.goto('http://localhost:5199', {waitUntil:'networkidle0'});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
 const t0 = Date.now();
 const out = await page.evaluate(async (tStart) => {
   const mod = await import('/src/world/gen/WorldGen.ts');

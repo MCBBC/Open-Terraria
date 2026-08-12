@@ -7,7 +7,7 @@ const SAVE = '/Users/vinlic/Downloads/map-12345世界 (2).json';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 }, protocolTimeout: 600000 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0' });
 await page.waitForFunction(() => window.__swLoadJson, { timeout: 60000 });
 const saveText = readFileSync(SAVE, 'utf8');
 console.log('存档', saveText.length, '字节,通过 __swLoadJson 加载…');

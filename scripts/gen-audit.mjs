@@ -4,7 +4,7 @@ import { readFileSync } from 'fs';
 const browser = await puppeteer.launch({executablePath:'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome', headless:'new', args:['--no-sandbox'], defaultViewport:{width:1400,height:900}});
 const page = await browser.newPage();
 page.on('pageerror', e => console.log('ERR:', e.message));
-await page.goto('http://localhost:5199', {waitUntil:'networkidle0'});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
 const oursJson = readFileSync('/Users/vinlic/Downloads/map-新世界 (2).json', 'utf8');
 const wldBuf = Array.from(readFileSync('/Users/vinlic/Downloads/不负责任的女妖啤酒厂.wld'));
 const out = await page.evaluate(async ([oursJson, wldBuf]) => {

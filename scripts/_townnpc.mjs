@@ -6,7 +6,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0' });
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });

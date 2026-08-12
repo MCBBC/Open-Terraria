@@ -2,7 +2,7 @@
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const URL = process.env.URL || 'http://localhost:5199';
+const URL = process.env.URL || '' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '';
 import { resolve } from 'node:path';
 const WLD = resolve('Starter_World Master.wld');
 

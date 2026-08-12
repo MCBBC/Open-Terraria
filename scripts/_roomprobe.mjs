@@ -44,7 +44,7 @@ const mkPage = async () => {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', String(e.message).slice(0, 300)));
   page.setDefaultTimeout(300000); // 世界生成 evaluate 可能分钟级
-  await page.goto(process.env.PROBE_GAME_URL ?? 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(process.env.PROBE_GAME_URL ?? '' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(1500);
   // 预热动态导入（data/items.ts 等）：触发可能的 vite 依赖再优化+全页 reload，
   // 必须发生在游戏状态建立之前——中后期 reload 会杀掉进行中的 evaluate（context destroyed）
@@ -506,10 +506,11 @@ try {
       const bPos = await pageB.evaluate(() => ({ x: window.__swGame.player.cx, y: window.__swGame.player.cy }));
       // 房主直接在 B 身上生成 hostile 弹（projId 9=EyeLaser，grav=0 微速漂移 vx=0.5）：
       // 零飞行 = 免地形干扰的确定性重叠；微速 = 每 2-4 tick 触发差分快照持续刷新傀儡
-      await pageA.evaluate(async (pos) => {
-        await window.__swFlow.spawnHostileProj(pos.x, pos.y, 0.5, 0, 15, 9, 0);
+      const projSpawn = await pageA.evaluate(async (pos) => {
+        const p = await window.__swFlow.spawnHostileProj(pos.x, pos.y, 0.5, 0, 15, 9, 0);
         const g = window.__swGame;
         for (let i = 0; i < 90; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); } // 广播 msg27（带 bit7）
+        return p ? p.id : -1;
       }, bPos);
       // B 泵循环：傀儡到达 + netPuppetProjContact 本地结算
       await pageB.evaluate(async () => {
@@ -523,21 +524,44 @@ try {
       await sleep(600); // msg16 中继窗口
       const projDmg = await pageB.evaluate(() => window.__swGame.player.hp);
       const aHp2 = await pageA.evaluate(() => window.__swGame.net.players.get(1)?.hp ?? -1);
-      // 中间态诊断：房主真身弹体存活数 / B 端总傀儡数 / B iframes
+      // 中间态诊断：房主真身弹体存活数 / B 端总傀儡数 / B iframes / 傀儡明细
       const diag = {
         aArrows: await pageA.evaluate(() => window.__swGame.entities.projectiles.filter((p) => !p.netPuppet && !p.dead).length),
         bTotal: await pageB.evaluate(() => window.__swGame.netProjPuppets.size),
         bIfr: await pageB.evaluate(() => window.__swGame.player.iframes),
+        pup: await pageB.evaluate(() => {
+          for (const [, pup] of window.__swGame.netProjPuppets) {
+            const p = pup.p;
+            return { hostile: !!p.hostile, dmg: p.damage ?? -1, ax: Math.round(p.netAx), ay: Math.round(p.netAy), x: Math.round(p.x), y: Math.round(p.y), px: Math.round(window.__swGame.player.x), py: Math.round(window.__swGame.player.y) };
+          }
+          return null;
+        }),
       };
       check('敌对弹幕对访客伤害（v5 bit7 + Damage_EVP 本地结算）', projDmg < 100, `B hp=${projDmg}/100 ${JSON.stringify(diag)}`);
       check('弹幕伤害经 msg16 中继到房主', aHp2 === projDmg, `A侧=${aHp2} B侧=${projDmg}`);
-      // 弹体命中不销毁（原版 :13811 穿透不消耗语义）——傀儡应仍存在或自然超时
-      const pupHostile = await pageB.evaluate(() => {
-        let n = 0;
-        for (const [, pup] of window.__swGame.netProjPuppets) if (pup.p.hostile) n++;
-        return n;
-      });
-      check('hostile 弹幕傀儡重建（bit7 解码）', pupHostile >= 1, `hostile傀儡=${pupHostile} 总傀儡=${diag.bTotal}`);
+      // 弹体命中不销毁（原版 :13811 穿透不消耗语义）——傀儡应仍存在或自然超时。
+      // 轮询 3s：傀儡创建是纯网络事件，headless 投递时序偶发迟到（曾 flaky）
+      let pupHostile = 0;
+      for (let i = 0; i < 6 && pupHostile < 1; i++) {
+        pupHostile = await pageB.evaluate(() => {
+          let n = 0;
+          for (const [, pup] of window.__swGame.netProjPuppets) if (pup.p.hostile) n++;
+          return n;
+        }).catch(() => 0);
+        if (pupHostile < 1) await sleep(500);
+      }
+      check('hostile 弹幕傀儡重建（bit7 解码）', pupHostile >= 1, `hostile傀儡=${pupHostile}`);
+      // ---- v6 msg28：房主击杀真身弹 → 消亡上报 → B 傀儡即时移除（替代 180t 超时）----
+      if (projSpawn > 0) {
+        await pageA.evaluate(async (pid) => {
+          const g = window.__swGame;
+          for (const ent of g.entities.projectiles) if (ent.id === pid) ent.dead = true;
+          for (let i = 0; i < 30; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); } // netProjLast 清理 → msg28
+        }, projSpawn);
+        await sleep(800); // 中继 + 事件驱动移除（无需 B 侧泵）
+        const gone = await pageB.evaluate(() => window.__swGame.netProjPuppets.size).catch(() => -1);
+        check('msg28 弹幕消亡即时移除傀儡', gone === 0, `puppets=${gone}`);
+      }
     }
 
     // 箱子同步：B 请求开箱（msg31）→ 服务器权威内容（msg32）→ protectItems 编辑被拒。

@@ -9,7 +9,7 @@ const page = await browser.newPage();
 const save = readFileSync(SAVE, 'utf8');
 
 async function attempt() {
-  await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
   const r = await page.evaluate(async (saveTxt) => {
     const t0 = Date.now();
     while (!window.__swGame?.player && Date.now() - t0 < 60000) {

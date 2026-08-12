@@ -7,7 +7,7 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
-await page.goto('http://localhost:5199', { waitUntil: 'networkidle0' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'networkidle0' });
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 0; });
 await page.click('button');
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 600000 });

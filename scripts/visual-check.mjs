@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({executablePath:'/Applications/Google Chr
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', e => errs.push(e.message));
-await page.goto('http://localhost:5199', {waitUntil:'networkidle0'});
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', {waitUntil:'networkidle0'});
 await page.type('input', 'visual-check');
 await page.evaluate(() => { document.querySelector('select').selectedIndex = 1; }); // 2100×700
 await page.click('button');

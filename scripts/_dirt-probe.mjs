@@ -8,7 +8,7 @@ const b = await puppeteer.launch({
 const p = await b.newPage();
 p.on('pageerror', e => console.log('ERR:', String(e).slice(0, 300)));
 p.on('console', m => { const t = m.text(); if (t.includes('ERR') || t.includes('warn')) console.log('CON:', t.slice(0, 200)); });
-await p.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+await p.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
 await p.waitForFunction(() => window.__swGame && window.__swGame.liquid && window.__swGame.renderer?.minimap, { timeout: 600000 });
 await new Promise(r => setTimeout(r, 1500));
 

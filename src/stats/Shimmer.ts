@@ -25,7 +25,7 @@
 //   GAP 登记（未移植）：
 //     - decraft 反 craft（需配方引擎运行时 + RecipeSets.PostSkeletron/PostGolem 锁）
 //     - makeNPC 小动物放生、4986 彩虹史莱姆解锁、560 史莱素雨触发
-//     - 3461 月相砖（需月相运行时）——音乐盒动态分支已按 placeStyle 实现
+//     - 3461 月相砖:已按 GetLunarBrickTransformFromMoonPhase(:113-125)接通(月相参)
 //     - 微光视觉（shimmerTransparency 半透明 / 微光化物品上浮白光 dust 309）
 //     - 小动物（Critter）入微光转化（aiStyle 67 族）、Boss 免微光名单
 //     - 联机同步（NetMessage 145/146 ShimmeredItem/ShimmerEffect）
@@ -88,11 +88,19 @@ export function getShimmerEquivalentType(vid: number, forDecrafting = false): nu
  *  90→5538 / 89→5579 / 97→5638 / 96→5639 / 其余→576（钢琴） */
 const MUSIC_BOX_TRANSFORM: Record<number, number> = { 90: 5538, 89: 5579, 97: 5638, 96: 5639 };
 
+/** 月相砖动态分支（ShimmerTransforms.cs:108-110 + GetLunarBrickTransformFromMoonPhase
+ *  :113-125;MoonPhase 枚举序 = Main.moonPhase 0-7:Terraaria.Enums/MoonPhase.cs）:
+ *  Full→5408 / TQL→5401 / HL→5403 / QL→5402 / Empty→5406 / QR→5407 / HR→5405 / TQR→5404 */
+const LUNAR_BRICK_TRANSFORM = [5408, 5401, 5403, 5402, 5406, 5407, 5405, 5404];
+
 /** ShimmerTransforms.GetTransformToItem（:88-111）：表优先；音乐盒按 placeStyle；
- *  3461 月相砖需月相运行时（GAP）返回 0 */
-export function getTransformToItem(vid: number): number {
+ *  3461 月相砖按当前月相（运行时由调用方传 world.clock.moonPhase） */
+export function getTransformToItem(vid: number, moonPhase?: number): number {
   const t = ITEM_TRANSFORM[vid];
   if (t !== undefined && t > 0) return t;
+  if (vid === 3461 && moonPhase !== undefined) {
+    return LUNAR_BRICK_TRANSFORM[moonPhase & 7];
+  }
   const def = ITEM_DEFS[internalIdOfVanilla(vid)];
   if (def?.tile === 'v_139_musicboxes' && def.placeStyle !== undefined) {
     return MUSIC_BOX_TRANSFORM[def.placeStyle] ?? 576;
@@ -107,9 +115,9 @@ export function isItemTransformLocked(vid: number, downedMoonlord: boolean): boo
 
 /** Item.CanShimmer（Item.cs:49045-49068）本仓子集：
  *  可转 = 未锁 + (有转化目标 ∨ 钱币)。decraft/makeNPC/特例未移植（GAP） */
-export function canShimmerItem(vid: number, downedMoonlord = false): boolean {
+export function canShimmerItem(vid: number, downedMoonlord = false, moonPhase?: number): boolean {
   if (isItemTransformLocked(vid, downedMoonlord)) return false;
-  return getTransformToItem(vid) > 0 || COMMON_COIN.has(vid);
+  return getTransformToItem(vid, moonPhase) > 0 || COMMON_COIN.has(vid);
 }
 
 /** 钱币→微光化币面额放大（WorldItem.cs:1791-1810）：铜 ×1 / 银 ×100 / 金 ×10000 /

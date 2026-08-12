@@ -4,7 +4,7 @@ const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new'
 const page = await browser.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
-await page.goto('http://localhost:5199/?play=small&torch=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small&torch=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
 let inGame = false;
 for (let i = 0; i < 90 && !inGame; i++) {
   inGame = await page.evaluate(() => !!(window.__swGame && window.__swGame.renderer)).catch(() => false);

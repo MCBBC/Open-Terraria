@@ -731,6 +731,12 @@ export function drawVanillaCell(
     const meta = atlas.vmeta(sheet);
     if (meta && fw > 0) {
       const imgW = atlas.ensureVImage(meta.sheet)?.width ?? 0;
+      // ★TEMP 调试:陶罐(28)重排判定输入(用后即删)
+      if (sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg
+        && (x === 3385 || x === 3386) && (y === 189 || y === 190)) {
+        console.warn('[potDbg4]', x, y, 'grid', JSON.stringify(meta.grid), 'stride', JSON.stringify(meta.stride),
+          'imgW', imgW, 'ofx', ofx, 'fw', fw, 'fh', fh, '触发重排', ofx + meta.grid[0] > imgW);
+      }
       if (imgW > 0 && ofx + meta.grid[0] > imgW) {
         const objW = fw * meta.stride[0];
         const bandH = (fh || 1) * meta.stride[1];
@@ -748,6 +754,12 @@ export function drawVanillaCell(
     // 样式横向排列 36px/个，closed 状态占前 2 行，下面是开启动画帧）
     r = atlas.vframeAt(sheet, ofx, ofy);
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
+    // ★TEMP 调试:陶罐(28)style 路径取帧结果(定位错位 bug,用后即删)
+    if (sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg) {
+      console.warn('[potDbg2] style', x, y, 'fx', fx, 'fy', fy, '→ ofx', ofx, 'ofy', ofy,
+        'r', r ? `${r.sx},${r.sy} ${r.sw}x${r.sh}` : 'NULL',
+        'imgSize', r ? `${r.img.width}x${r.img.height}` : '-');
+    }
   }
   if (!r) return;
   // tileTop(GetTileDrawData 权威,静态表 + 条件项)与 C 类手动偏移
@@ -844,6 +856,13 @@ export function drawVanillaCell(
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
   const [vx, vy] = vectorOffset(sheet, fx, fy, slope);
+  // ★TEMP 调试:陶罐(28)最终绘制参数 + 画后回读(定位错位 bug,用后即删)
+  const dbgPot = sheet === 28 && (window as unknown as { __potDbg?: boolean }).__potDbg
+    && (x === 3385 || x === 3386) && (y === 189 || y === 190);
+  if (dbgPot) {
+    console.warn('[potDbg3]', x, y, 'src', asx, asy, asw, ash, 'dst', Math.round(fdx + vx), Math.round(dpy + vy),
+      'flip', FLIP_X_EVEN.has(sheet) && x % 2 === 0, 'alpha', ctx.globalAlpha, 'imgOk', r.img.width > 0);
+  }
   // X 镜像(植物/藤蔓变体:x%2==0 翻转)
   if (FLIP_X_EVEN.has(sheet) && x % 2 === 0) {
     ctx.save();
@@ -853,6 +872,12 @@ export function drawVanillaCell(
     ctx.restore();
   } else {
     ctx.drawImage(r.img, asx, asy, asw, ash, fdx + vx, dpy + vy, asw, ash);
+  }
+  if (dbgPot) {
+    const rd = ctx.getImageData(Math.round(fdx), Math.round(dpy), 16, 16).data;
+    let op = 0;
+    for (let k = 3; k < rd.length; k += 4) if (rd[k] > 40) op++;
+    console.warn('[potDbg3]', x, y, '画后回读 op =', op);
   }
   void fw; void fh;
 }

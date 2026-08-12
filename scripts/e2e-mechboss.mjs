@@ -7,7 +7,7 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 page.on('pageerror', (e) => console.log('PAGEERR:', e.message.slice(0, 200)));
-await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded' });
+await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded' });
 await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 420000 });
 await new Promise((r) => setTimeout(r, 2500));
 const res = await page.evaluate(async () => {

@@ -36,7 +36,7 @@ const out = await p.evaluate(async () => {
   // ④ 狼人：月亮符 485 + 夜间
   wear([0, 0, 0]);
   giveAcc(485);
-  g.world.clock.timeOfDay = 0.8;  // 夜（isDay 是派生 getter）
+  g.world.clock.timeOfDay = 0.9;  // 夜（新边界 0.8125 起）（isDay 是派生 getter）
   await new Promise(s => setTimeout(s, 300));
   r.werewolf = { melee: M(pl.damageMult('melee')), magic: M(pl.damageMult('magic')) };
   g.world.clock.timeOfDay = 0.5;
