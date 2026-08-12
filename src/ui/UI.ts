@@ -1922,8 +1922,8 @@ export class UI {
     const slotEl = this.slotEl(COIN_START + k, 'inv');
     if (!slotEl) return;
     this.coinBusy[k] = true;
-    const img = slotEl.querySelector('img');
-    const cnt = slotEl.querySelector('.cnt');
+    const img = slotEl.querySelector<HTMLImageElement>('img');
+    const cnt = slotEl.querySelector<HTMLElement>('.cnt');
     // 自旋层（CoinSlot.DrawItemCoin：Coin_k 8 帧竖条，跳帧窗 9-13 推进）
     let spin: HTMLElement | null = null;
     let t = 0;

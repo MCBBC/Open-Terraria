@@ -61,9 +61,11 @@ function placeStalactite(
   const v = Math.min(2, Math.max(0, variation));
   void v; // 变体只影响 frameX/Y——哈希无关
   const inCol = (ay: number) => ay >= 0 && ay < st.h && st.flags[st.idx(x, ay)] === 0;
-  if (x >= 764 && x <= 944) console.log(`stalJS in=${x},${y} small=${preferSmall} up=${y - 1 >= 0 ? TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? 0 : 0} dn=${y + 1 < st.h ? TILE_DEFS[st.type[st.idx(x, y + 1)]]?.vanilla?.sheet ?? 0 : 0} solidUp=${solidTileAt(st, x, y - 1)}`);
+  // ★族判定用原版 sheet id（内部 id ≠ 原版号——曾直比内部 id 致 95 处钟乳石只出 3 处）
+  const sheetAt = (ax: number, ay: number) =>
+    (ay >= 0 && ay < st.h && ax >= 0 && ax < st.w) ? TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? 0 : 0;
   if (solidTileAt(st, x, y - 1) && inCol(y) && inCol(y + 1)) {
-    const ab = y - 1 >= 0 ? st.type[st.idx(x, y - 1)] : 0;
+    const ab = sheetAt(x, y - 1);
     const rockFam = ab === 1 || ab === 117 || ab === 25 || ab === 203;   // tileMoss 此阶段无
     if (ab === 147 || ab === 161 || ab === 163 || ab === 164 || ab === 200) {
       if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); }
@@ -74,7 +76,7 @@ function placeStalactite(
     if (ab === 368) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
     if (ab === 367) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
   } else if (solidTileAt(st, x, y + 1) && inCol(y) && y - 1 >= 0 && y - 1 < st.h && st.flags[st.idx(x, y - 1)] === 0) {
-    const bl = y + 1 < st.h ? st.type[st.idx(x, y + 1)] : 0;
+    const bl = sheetAt(x, y + 1);
     const rockFam = bl === 1 || bl === 117 || bl === 25 || bl === 203;
     if (rockFam) { if (preferSmall) put(x, y); else { put(x, y - 1); put(x, y); } }
     if (bl === 225) put(x, y);

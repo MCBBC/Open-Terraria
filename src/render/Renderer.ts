@@ -2999,6 +2999,33 @@ export class Renderer {
     ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + p.netOffY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
+    // ---- 翅膀层（PlayerDrawLayers.cs:695/738：身后，先于身体绘制）----
+    // 源矩形 = 全宽 × 高/帧数×wingFrame（7 帧族；hover 族 22/28/30/31/33/35/37/45 = 6 帧）；
+    // origin = (宽/2, 帧高/2)；身体中心锚 + 朝向镜像；光照逐格取色（简化：整翅乘中心格光）
+    {
+      const wingSlot = p.equipStats.wing?.logic ?? 0;
+      if (wingSlot > 0 && this.atlas) {
+        const wt = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
+        if (wt) {
+          const HOVER6 = new Set([22, 28, 30, 31, 33, 35, 37, 45]);
+          const frames = HOVER6.has(wingSlot) ? 6 : 7;
+          const fh = Math.floor(wt.naturalHeight / frames);
+          const fr = Math.min(frames - 1, Math.max(0, p.wingFrame));
+          // 光照染色（中心格）：复用 lightCanvas 上一帧采样
+          let tint = '';
+          const [lsx2, lsy2] = [0, 0];
+          void lsx2; void lsy2;
+          ctx.save();
+          ctx.translate(p.cx, p.y + p.h * 0.45);   // 身体中心（PlayerDrawLayers 锚）
+          ctx.scale(p.facing >= 0 ? 1 : -1, 1);
+          if (tint) ctx.filter = tint;
+          ctx.drawImage(wt, 0, fr * fh, wt.naturalWidth, fh,
+            -wt.naturalWidth / 2, -fh / 2, wt.naturalWidth, fh);
+          ctx.filter = 'none';
+          ctx.restore();
+        }
+      }
+    }
     // ---- 纸娃娃帧（捏人外观优先，M7；20 帧表默认朝右，与 NPC 相反不做内层翻转） ----
     // use 期间 bodyFrame 行（Player.cs:35874-35990 itemAnimation>0 分支逐 useStyle）：
     // 返回 -1 = 该族不改 bodyFrame（useStyle 10/14/15 与无匹配分支的 16），走常规动画行

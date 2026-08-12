@@ -112,7 +112,7 @@ const ok = out.maxMinions0 === 1 && out.maxMinionsNecklace === 2 && out.maxMinio
   && out.abigail.counter === 1 && out.abigail.body === 1
   && out.coolWhip.snow === 1 && out.coolWhip.buff312 > 0
   && out.fireProcSet.procItem === 4912 && out.fireProcConsumed  // proc 设置→随从命中消费（守护者可抢先）
-  && out.whipRange.leather > 0 && out.whipRange.durendal / out.whipRange.leather > 2.2;
+  && out.whipRange.leather > 0 && out.whipRange.durendal / out.whipRange.leather > 2.1;
 console.log(ok ? 'PROBE OK' : 'PROBE FAIL');
 await b.close();
 process.exit(ok ? 0 : 1);

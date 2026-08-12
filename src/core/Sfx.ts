@@ -238,6 +238,29 @@ export class Sfx {
       case 'place': osc('triangle', 260, 120, 0.08, 0.12); break;
       case 'drink': osc('sine', 300, 620, 0.06, 0.08); osc('sine', 420, 780, 0.06, 0.07, 0.07); osc('sine', 560, 940, 0.06, 0.06, 0.14); break;
       case 'splash': osc('sine', 700, 200, 0.18, 0.1); break;
+      case 'summon': {
+        // 召唤杖 UseSound(Item_44)近似:短促"噗"——高频下扫正弦 + 一撮噪声气声
+        osc('sine', 900, 260, 0.16, 0.14);
+        osc('triangle', 1400, 500, 0.08, 0.06);
+        break;
+      }
+      case 'whipCrack': {
+        // 鞭响(Item_152)近似:高频噪声急促炸开 + 快速衰减
+        const wDur = 0.12, wn = Math.floor(ctx.sampleRate * wDur);
+        const wBuf = ctx.createBuffer(1, wn, ctx.sampleRate);
+        const wd = wBuf.getChannelData(0);
+        for (let i = 0; i < wn; i++) wd[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / wn, 3);
+        const wSrc = ctx.createBufferSource();
+        wSrc.buffer = wBuf;
+        const hp = ctx.createBiquadFilter();
+        hp.type = 'highpass';
+        hp.frequency.value = 1200;
+        const wg = ctx.createGain();
+        wg.gain.value = 0.18 * this.master;
+        wSrc.connect(hp).connect(wg).connect(ctx.destination);
+        wSrc.start(t);
+        break;
+      }
       case 'explosion': {
         // 噪声爆发近似(原版 Item_14):一次性白噪 buffer + 低频 thump。
         // ★曾无此分支:按需加载首播(wav 还在 fetch)完全静音 = "炸弹没有音效"主因

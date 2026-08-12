@@ -36,11 +36,12 @@ import {
   spawnMonsterFromGate as dd2SpawnMonsterFromGate, raiseGoblins as dd2RaiseGoblins,
   canRaiseGoblinsHere as dd2CanRaiseGoblinsHere, findArenaHitbox as dd2FindArenaHitbox,
   announceGoblinDeath as dd2AnnounceGoblinDeath, shouldDropCrystals as dd2ShouldDropCrystals,
-  summonBetsy as dd2SummonBetsy, type OldOnesArmyHost, type OldOnesArmyState,
+  summonBetsy as dd2SummonBetsy, shouldBlockBuilding, type OldOnesArmyHost,
 } from '../world/OldOnesArmy';
 import {
   scanPylons, pylonAnchorAt, mapFocusRect, checkPylonTeleport,
-  pylonItemTypeFromStyle, type TeleportPylonInfo, type NpcHomeLike,
+  pylonItemTypeFromStyle, pylonStyleFromFrame, hasPylonOfType,
+  type TeleportPylonInfo, type NpcHomeLike,
 } from '../world/TeleportPylons';
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
@@ -1095,8 +1096,11 @@ export class Game implements GameHooks {
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
       'chop', 'tink', 'shatter', 'coin', 'door_open', 'door_close', 'splash', 'bowShoot', 'throw', 'roar', 'thunder',
-      'explosion']); // Item_14 爆炸声(炸弹/手雷/炸药/巨石)——不预热则首爆静音
+      'explosion', 'summon', 'whipCrack']); // Item_14 爆炸/Item_44 召唤/Item_152 鞭——不预热则首播静音
     this.sfx.preloadFiles(['Drip_0', 'Drip_1', 'Drip_2']); // 滴水溅落（SoundID 39，Gore 碰撞/入水）
+    // 敌怪弹幕发射音（Dart DART_STYLE sfx 直放文件名）：箭 Item_5 已在 bowShoot 预热,
+    // 其余不预热则各射击怪本局首射静音
+    this.sfx.preloadFiles(['Item_8', 'Item_11', 'Item_12', 'Item_17', 'Item_20', 'Item_28', 'Item_154']);
     // 滴水溅落音钩子（Gore.cs :971-984：落地 Drip_0/1 随机、入水 Drip_2、位置 +8；
     // 带坐标走 2500px 距离衰减，flag4 水型已在 NatureParticles 内静音）
     natureParticles.onDripSplash = (x, y, wet) => {
@@ -1704,6 +1708,8 @@ export class Game implements GameHooks {
       const inMap = inp.mouseX >= r.x && inp.mouseX <= r.x + r.w && inp.mouseY >= r.y && inp.mouseY <= r.y + r.h;
       if (!fm.open && inMap && !inp.uiBlocking && !this.renderer.minimapUiHover) {
         fm.open = true;
+        // 晶塔表刷新（图标层 TeleportPylonsMapLayer 恒绘制——小地图入口打开也可点塔）
+        this.refreshPylons();
         // 打开即放大到主角：锚点 = 主角 tile 坐标 → 屏幕中心，
         // zoom 从 0.5 缓动到 2，缓动期间 applyMapAnchor 每帧补偿 pan，主角始终居中
         fm.zoom = 0.5;
@@ -3811,6 +3817,13 @@ export class Game implements GameHooks {
       this.breakHive(x, y);
       return;
     }
+    // 传送晶塔：整件破碎（TETeleportationPylon.Framing_CheckTile :77-125——
+    // 3×4 任一格破坏即整塔清除并掉放置物品）+ 晶塔表刷新（OnRemoved →
+    // RequestImmediateUpdate，:105-108）
+    if (type === TILE_BY_KEY['v_597_pylons']) {
+      this.breakPylon(x, y);
+      return;
+    }
     // 附魔剑圣地之剑（原版 KillTile case 187/706, WorldGen.cs:49676/49838-49848）：
     // 真 187 style17（锚点帧 918-970）→ 1/30 泰拉魔刃(4144) 否则附魔剑(989)；
     // 706 回声恒掉 4144。假剑 186 style15 无掉落走 def.drop:null 兜底，不在此拦。
@@ -4387,6 +4400,19 @@ export class Game implements GameHooks {
     if (!this.inTileRange(tx, ty, (this.player.equipStats.tileRange ? 3 : 0) + (this.player.buffs.has(BuffType.Builder) ? 1 : 0))) return;
     const tileId = TILE_BY_KEY[itemDef.tile!];
     const def = TILE_DEFS[tileId];
+    // 旧日军团竞技场建造封锁（Player.cs:25669-25672：DD2Event.Ongoing &&
+    // ShouldBlockBuilding → 禁改方块，DD2Event.cs:794-796 包围盒判定）
+    if (this.world.oldOnesArmy.ongoing
+      && shouldBlockBuilding(this.world.oldOnesArmy, tx * TILE + 8, ty * TILE + 8)) {
+      return;
+    }
+    // 传送晶塔放置门（TETeleportationPylon.PlacementPreviewHook_CheckIfCanPlace :158-166）：
+    // 同型晶塔全图仅一座（HasPylonOfType TeleportPylonsSystem.cs:41-44）
+    if (def?.vanilla?.sheet === 597) {
+      this.refreshPylons();
+      const style = itemDef.placeStyle ?? 0;
+      if (hasPylonOfType(this.pylons, style)) return;
+    }
     // 橡实: 只能种在草块正上方
     if (itemDef.key === 'acorn' && st.get(tx, ty + 1) !== T.GRASS) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
@@ -5082,17 +5108,40 @@ export class Game implements GameHooks {
     this.renderer.pylons = this.pylons;
   }
 
+  /** 晶塔整件破碎（TETeleportationPylon.Framing_CheckTile :77-125）：
+   *  按帧回推 3×4 锚点 → 清整塔 → 掉对应样式的放置物品（GetPylonItemTypeFromTileStyle） */
+  private breakPylon(x: number, y: number): void {
+    const st = this.world.store;
+    const anchor = pylonAnchorAt(this.world, x, y);
+    if (!anchor) { st.setTile(x, y, 0); return; }
+    const i0 = st.idx(x, y);
+    const style = pylonStyleFromFrame(st.frameX[i0]);
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 0; dy < 4; dy++) {
+        if (st.inBounds(anchor.x + dx, anchor.y + dy)
+          && st.get(anchor.x + dx, anchor.y + dy) === TILE_BY_KEY['v_597_pylons']) {
+          st.setTile(anchor.x + dx, anchor.y + dy, 0);
+        }
+      }
+    }
+    this.chunks.markDirtyArea(anchor.x - 1, anchor.y - 1, anchor.x + 3, anchor.y + 4);
+    const key = VANILLA_ITEM_KEY_BY_ID[pylonItemTypeFromStyle(style)];
+    if (key) this.spawnDrop(anchor.x * TILE + 24, anchor.y * TILE, key, 1, 0, -2);
+    this.sfx.play('place');
+    this.refreshPylons();
+  }
+
   /** 全屏地图上点晶塔图标 → HandleTeleportRequest 门禁（TeleportPylonsSystem.cs:100-205）。
+   *  地图无论经晶塔右键还是小地图打开，图标层恒在（TeleportPylonsMapLayer 每帧绘制）；
+   *  玩家不在任何晶塔 ±60 格内时门禁第 1 档自然拒绝。
    *  返回 true = 已消费本次点击（传送或失败文案），false = 未点中图标（回落普通选点） */
   private tryPylonMapTeleport(tx: number, ty: number): boolean {
-    if (!this.mapPylonTile) return false;
     // 图标中心 = 锚点 + (1.5, 2)（TeleportPylonsMapLayer.cs:56/63 PositionInTiles+(1.5,2)）
     let hit: TeleportPylonInfo | null = null;
     for (const p of this.pylons) {
       if (Math.abs(tx - (p.x + 1.5)) <= 2 && Math.abs(ty - (p.y + 2)) <= 2) { hit = p; break; }
     }
     if (!hit) return false;
-    if (hit.x === this.mapPylonTile.x && hit.y === this.mapPylonTile.y) return false;  // 本塔不可选
     // 当前塔：原版按"玩家可达范围内且过 NPC/群系门的塔"求（:155-192）——单人语义 =
     // 玩家 ±60 格内的塔（IsPlayerNearAPylon）
     const ptx = Math.floor(this.player.x / TILE), pty = Math.floor(this.player.y / TILE);
@@ -7546,9 +7595,14 @@ export class Game implements GameHooks {
     if (res.waveAnnounce) {
       this.newText(invasionWaveText(res.waveAnnounce), 175, 55, 255);
       if (res.summonBetsy) {
+        // SummonBetsy（:929-943）→ SpawnOnPlayer(551)：SpawnBoss default 分支广播
+        // Announcement.HasAwoken（NPC.cs:81466-81472）
         const crystal = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 548);
-        dd2SummonBetsy(oa, this.dd2Host(), crystal ? crystal.cx : this.player.cx,
-          crystal ? crystal.cy : this.player.cy);
+        const cx = crystal ? crystal.cx : this.player.cx;
+        const cy = crystal ? crystal.cy : this.player.cy;
+        if (dd2SummonBetsy(oa, this.dd2Host(), cx, cy)) {
+          this.newText(Lang.text('Announcement.HasAwoken', Lang.npcName(551) ?? 'Betsy'), 175, 75, 255);
+        }
       }
     }
     if (res.lose) {

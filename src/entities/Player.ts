@@ -711,7 +711,7 @@ export class Player extends Entity {
       if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
       if (this.onGround) {
         this.wingTime = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
-        this.rocketTime = 7;          // rocketTimeMax（:2612）
+        this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;  // :2612 + :26436（无靴恒 0）
         this.rocketDelay = 0;
         this.canRocket = false;
         this.rocketRelease = false;
@@ -724,8 +724,24 @@ export class Player extends Entity {
         //   jump==0 && vy≠0；hover 族 + ↓+跳 也算 :26505）
         const flying =
           (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
-          || (eq.wing?.hover && this.inputJump && hoverDown && this.wingTime > 0);
-        if (flying) this.wingMovement(wings, hoverDown, JS);
+          || (eq.wing !== null && eq.wing.hover && this.inputJump && hoverDown && this.wingTime > 0);
+        this.wingFlapping = flying;
+        if (flying) {
+          this.wingMovement(wings, hoverDown, JS);
+          // WingFrame 通用 flap（:29425+ 各族主干）：6t/帧循环 1→2→3→2
+          this.wingFrameCounter++;
+          const beat = 6;
+          const phase = Math.floor(this.wingFrameCounter / beat) % 4;
+          this.wingFrame = [1, 2, 3, 2][phase];
+        } else if (this.vy !== 0 && this.inputJump) {
+          this.wingFrame = 2;      // 滑翔固定帧（各族主干 else-if 段）
+          this.wingFrameCounter = 0;
+        } else if (this.vy !== 0) {
+          this.wingFrame = 2;      // 空中下落张翼
+        } else {
+          this.wingFrame = 0;      // 地面收起
+          this.wingFrameCounter = 0;
+        }
         // ---- 火箭靴（:26548-26628）：翅膀不可用（无翅或时间尽）才接管 ----
         if (!flying && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
           && this.inputJump && this.rocketDelay === 0 && this.canRocket && this.rocketRelease) {
@@ -1089,6 +1105,11 @@ export class Player extends Entity {
   wingRelease = true;
   /** 飞毯触发门（CarpetMovement :21575：起跳后置 true，触发一次即 false） */
   canCarpet = true;
+  /** 翅膀动画帧（WingFrame :29002：0 收起 / flap 循环 1→2→3→2 / 滑翔 2）+ 拍速计数 */
+  wingFrame = 0;
+  private wingFrameCounter = 0;
+  /** 本帧翅膀飞行中（Renderer 挑帧用；wingMovement 置位） */
+  wingFlapping = false;
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;
   /** 冲刺：双击窗口（±15）/ 方向 / 持续 tick / 冷却（dashTime/dashDelay） */

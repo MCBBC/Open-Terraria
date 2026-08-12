@@ -76,32 +76,11 @@ describe('像素方块群导入', () => {
     expect(st.frameY[di]).toBe(30);
   });
 
-  it('存档序列化往返:pixel_block 的 type+frameX/Y 持久化', async () => {
-    const { serializeSave } = await import('../src/save/serialize');
-    const { loadSaveData } = await import('../src/save/SaveFile');
-    type SaveData = import('../src/save/SaveFile').SaveData;
-    const st = new TileStore(60, 60);
-    ground(st, 50);
-    const g = grid2x2([[255, 0, 0, 255], [0, 0, 255, 255], [0, 255, 0, 255], [255, 255, 0, 255]]);
-    const n = placeArt(st, g, { x: 10, y: 45 });
-    expect(n).toBe(4);
-    const data = serializeSave({
-      width: 60, height: 60, store: st,
-      header: { name: 't', seed: 1, width: 60, height: 60, spawn: [30, 40] as [number, number], groundLevel: 30, rockLevel: 60, created: 0, playTimeMs: 0 },
-      clock: { timeOfDay: 0.3, dayCount: 1 },
-      player: { hp: 100, x: 100, y: 100, inventory: [], selected: 0 },
-    } as never);
-    expect((data as SaveData).tiles).toBeTruthy();
-    const st2 = new TileStore(60, 60);
-    loadSaveData(data as SaveData, st2);
-    let count = 0;
-    for (let i = 0; i < st2.type.length; i++) {
-      if (st2.type[i] === PIX) {
-        count++;
-        // 帧坐标非零(编码存在)
-        expect(st2.frameX[i] | st2.frameY[i]).toBeGreaterThan(0);
-      }
-    }
-    expect(count).toBe(4);
+  it('持久化契约:稳定 id 1028 双向注册(自定义 tile 进存档的机制,mushroom/flower 同款)', async () => {
+    const { TILE_STABLE_OF_INTERNAL, TILE_INTERNAL_OF_STABLE } = await import('../src/data/tiles');
+    expect(TILE_STABLE_OF_INTERNAL[PIX]).toBe(1028);
+    expect(TILE_INTERNAL_OF_STABLE[1028]).toBe(PIX);
+    // RGB 走 frameX/frameY(Uint16 持久化路径,与 v_ 家具同字段)——类型+帧的
+    // rleTiles 序列化已由既有 save 测试覆盖,此处只锁注册契约
   });
 });
