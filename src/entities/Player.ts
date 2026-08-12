@@ -1362,6 +1362,7 @@ export class Player extends Entity {
       moveAndCollide(this, world, this.vx, this.vy);
       this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
     }
+    this.bordersMovement(world);
     // StepUp 抬升检测（原版 gfxOffY）：水平移动中被抬升 ≤16px → 渲染缓动补偿
     const lifted = preY - this.y;
     if (this.inputX !== 0 && lifted > 0.5 && lifted <= 16.1) this.stepRenderY = lifted;
@@ -1663,6 +1664,31 @@ export class Player extends Entity {
   /** 重力方向（R7：1 普通 / -1 倒置——重力药水 buff 18 激活时按 Up 切换，Player.gravDir）
    *  倒置 = 重力/跳跃/落点起点全部取反；onGround 由 hitHead 近似（天花板当地板） */
   gravDir: 1 | -1 = 1;
+  /** 世界边界钳制（原版 Player.BordersMovement，Player.cs:23771-23844；
+   *  碰撞积分后调用，调用点对应原版 :27968）。
+   *  边界 = 世界边缘内缩 640px（=40 格 = offLimitBorderTiles×16，Main.cs:433）：
+   *  - 左/右越线 → 钳回 + vx=0（原版另置 cameraX=0 抗镜头抖动，本仓库无对应，略）
+   *  - 顶越线 → 钳回 + vy 下推至 ≥0.11 + gravDir 复位 1（原版 remix/forcedGravity
+   *    分支出界即死，普通世界取 else 支——:23797-23818）
+   *  - 底越线 → 【出界即死】KillMe 原因 21 伤害 10（:23829-23834——地狱地板
+   *    挖穿/坠落兜底；走 damage 直杀近似，iframes 只延迟一 tick 不改语义） */
+  bordersMovement(world: import('../world/World').World): void {
+    const B = 640;                              // offLimitBorderTiles(40) × 16
+    const wPx = world.store.w * TILE;           // Main.rightWorld
+    const hPx = world.store.h * TILE;           // Main.bottomWorld（leftWorld/topWorld=0）
+    if (this.x < B) { this.x = B; this.vx = 0; }
+    if (this.x > wPx - B - this.w) { this.x = wPx - B - this.w; this.vx = 0; }
+    if (this.y < B) {
+      this.y = B;
+      if (this.vy < 0.11) this.vy = 0.11;
+      this.gravDir = 1;
+    }
+    if (this.y > hPx - B) {
+      this.damage(10000, this.cx, this.y - 10); // KillMe(ByOther 21, 10.0) 直死
+      this.y = hPx - B;
+      this.vy = 0;
+    }
+  }
   /** 贴墙缓降中（spikedBoots 攀壁） */
   wallCling = false;
   /** 拾取范围扩展（宝藏磁石/金戒指族，px；defaultItemGrabRange=42） */

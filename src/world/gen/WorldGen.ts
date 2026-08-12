@@ -83,6 +83,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 原版 SettleLiquidsPart2（cs:21051，管线尾二次沉降）由 generateWorld 之后
     // worker/Game 的 settleWorldLiquids('gen') 承担。
     { name: '水体沉降', run: liquidSettlePass },
+    // 沙上清水（原版 RemoveSurfaceWaterAboveSand cs:16295-16326，注册序
+    // SettleLiquids(16215) < 本 pass < Oasis(16327) < ShellPiles(16385)）：
+    // 地表沙柱上方的悬空水清除——零掷骰纯扫描（2026-08-12 前整 pass 缺失）
+    { name: '沙上清水', run: surfaceWaterAboveSandPass },
     // 海滩装饰（原版 ShellPiles cs:16393-16501）：贝壳堆。原版注册序
     // SettleLiquids(16215) < ShellPiles(16385) < SmoothWorld(16507)——必须在半砖平滑
     // 之前，否则堆出的散沙/孤立单格无人回收（2026-08-12 前排管线末尾=海里单体沙来源之一）
@@ -91,6 +95,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
     { name: '半砖平滑', run: halfBrickSmoothPass },
     { name: '瀑布唇缘', run: waterfallLipPass },
+    // 薄冰（原版 FragileIceOverIceBiomeWater cs:16756-16785 + MakeWateryIceThing
+    // cs:80206，注册序 Waterfalls(16697) < 本 pass < CaveWallVariety(16786)）：
+    // 冰原水面上铺 BreakableIce 162——零掷骰（2026-08-12 前整 pass 缺失）
+    { name: '薄冰', run: fragileIcePass },
     // 洞穴墙变体斑（原版 CaveWallVariety cs:16786，注册序 Waterfalls(16697) <
     // 本 pass < LifeCrystals(16847)）：泥土墙 196-199/丛林 204-207/石墙 208-215
     // —— CaveWalls 主 pass（苔藓槽后）的前置墙基之一
@@ -150,6 +158,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '宝石系统', run: vanillaGems },
     // 长苔藓（原版 LongMoss cs:20915）：苔藓块四向冒芽，位于 ExposedGems 之后
     { name: '长苔藓', run: vanillaLongMoss },
+    // 蜂巢幼虫（原版 BeeLarvaInBeehives cs:21018-21050，注册序 LongMoss(20915) <
+    // 本 pass < SettleLiquidsPart2(21051)）：蜂巢 pass 只登记坐标，托台清空+幼虫
+    // 放置推迟到这里——过早放置会被中途宝箱/装饰 pass 破坏
+    { name: '蜂巢幼虫', run: beeLarvaPass },
     // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
@@ -182,7 +194,7 @@ import { runWebsPass as runVanillaWebsPass } from './vanilla/WebsPass';
 import { runUnderworldPass } from './vanilla/UnderworldPass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
-import { runMudCavesPass } from './vanilla/Spread';
+import { runMudCavesPass, spreadGrass } from './vanilla/Spread';
 import { runDesertPass } from './vanilla/DesertPass';
 import { runMushroomPass } from './vanilla/MushroomPass';
 import { runMarbleGranitePass } from './vanilla/MarbleGranitePass';
@@ -620,6 +632,27 @@ function waterfallLipPass({ store, rng }: GenCtx) {
   runWaterfallLipPass(store, rng, gs);
 }
 
+// 沙上清水（RemoveSurfaceWaterAboveSand cs:16295）：零掷骰
+function surfaceWaterAboveSandPass({ store }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runRemoveSurfaceWaterAboveSandPass(store, gs);
+}
+
+// 薄冰（FragileIceOverIceBiomeWater cs:16756）：零掷骰
+function fragileIcePass({ store }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runFragileIcePass(store, gs);
+}
+
+// 蜂巢幼虫（BeeLarvaInBeehives cs:21018）：蜂巢 pass 已登记坐标，此处放置
+function beeLarvaPass({ store }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runBeeLarvaPass(store, gs);
+}
+
 // 地狱要塞 HellFort(5列×10行网格塔)——地狱层就绪后
 function vanillaHellHouses({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
@@ -639,55 +672,12 @@ function hellforgesPass({ store, rng }: GenCtx) {
   runHellforgesPass(store, rng);
 }
 
-// 矿/骨堆(原版 pass 77 Piles,cs:18928:w*0.06 次尝试,洞穴地面放小堆 185/骨堆 186)
+// 矿/骨堆（原版 pass 81 Piles，cs:18900-19599 七子段 1:1——见 vanilla/PilesPass.ts；
+// 旧实现 w*0.06 单段近似 + 30% 小堆/骨堆自造掷骰，与原版完全不符，已整体替换）
 function pilesPass({ store, rng }: GenCtx) {
-  const { w, h } = store;
-  const SMALL = TILE_BY_KEY['v_185_small_decos']!;
-  const BONE = TILE_BY_KEY['v_186_decos_3x2']!;
-  const tries = Math.floor(w * 0.06);
-  let fail = 0;
-  for (let n = 0; n < tries && fail < 10000; ) {
-    const x = rng.int(20, w - 21);
-    const y = rng.int(20, h - 20);
-    // 落到第一个实心地面(与洞穴箱同式)
-    let gy = y, guard = 0;
-    while (guard++ < 400 && store.inBounds(x, gy) && !store.flags[store.idx(x, gy)]) gy++;
-    // 原版地面门（PlaceTile case 186 → SolidTileAllowBottomSlope :49284/:70211）：
-    // 下方须实心且【非半砖非顶坡】（topSlope=slope 1/2）——斜坡沙上不生成装饰；
-    // 骨堆跨 3 列（185 单列），整片地面都要平
-    let groundOk = true;
-    for (let dx = 0; dx < 3 && groundOk; dx++) {
-      if (!store.inBounds(x + dx, gy)) { groundOk = false; break; }
-      const gi = store.idx(x + dx, gy);
-      if (!TILE_DEFS[store.type[gi]]?.solid
-        || store.half[gi] === 1 || (store.slope[gi] >= 1 && store.slope[gi] <= 2)) groundOk = false;
-    }
-    if (!groundOk) { fail++; continue; }
-    const i = store.idx(x, gy - 1);
-    if (!store.inBounds(x, gy - 1) || store.flags[i]) { fail++; continue; }
-    if (store.liquid[i] > 100) { fail++; continue; }
-    if (rng.next() < 0.7) {
-      // 小堆 185:1×1,风格 ×18(fx 带 +18 偏移的下半帧;placeSmallPile size-0 语义)
-      const style = rng.int(0, 9);
-      store.setTileSilent(x, gy - 1, SMALL, style * 18, 0);
-    } else {
-      // 骨堆 186:3×2,风格 ×54(3 列 stride)
-      let ok = true;
-      for (let dx = 0; dx < 3 && ok; dx++) {
-        for (let dy = 1; dy <= 2 && ok; dy++) {
-          if (!store.inBounds(x + dx, gy - dy) || store.flags[store.idx(x + dx, gy - dy)]) ok = false;
-        }
-      }
-      if (!ok) { fail++; continue; }
-      const style = rng.int(0, 1);
-      for (let dx = 0; dx < 3; dx++) {
-        for (let dy = 0; dy < 2; dy++) {
-          store.setTileSilent(x + dx, gy - 2 + dy, BONE, style * 54 + dx * 18, dy * 18);
-        }
-      }
-    }
-    n++;
-  }
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runPilesPass(store, rng, gs);
 }
 
 // 生物群系感知地表装饰(替代旧 surfacePass 的种树部分)
@@ -964,7 +954,7 @@ function potPass({ store, rng }: GenCtx) {
         }
         if (gs2 === 23 || gs2 === 25 || gs2 === 22 || gs2 === 163) style = rng.int(16, 18); // 腐化草/黑檀石/魔矿/紫冰
         if (gs2 === 199 || gs2 === 203 || gs2 === 204 || gs2 === 200) style = rng.int(22, 24);
-        if (sheetOf(ground) === 368) style = rng.int(31, 33);
+        if (sheetOf(ground) === 367) style = rng.int(31, 33);  // cs:18264：大理石 367 → 31-33（曾错查 368 花岗岩）
         if (ground === LIHZARD) style = rng.int(28, 30);
         if (MARBLE_WALLS.has(store.wall[store.idx(x, y)])) style = rng.int(34, 36);
         if (y > h - 200) style = rng.int(13, 15);  // Main.UnderworldLayer = maxTilesY-200
@@ -999,6 +989,9 @@ function placePot(store: TileStore, rng: RNG, x: number, y: number, type: number
   return true;
 }
 
+/** tile 379（SpawnPoint 回避族，cs:19683/19704-19707：列扫描跳过 + IsTileNearby(10) 重试） */
+const TILE_379 = TILE_BY_KEY['v_379_bubble'] ?? -1;
+
 /** oceanDepths（WorldGen.cs:10968）：y > oceanLevel 直接 false；海滩列才 true */
 function oceanDepthsAt(store: TileStore, gs: GenState, x: number, y: number): boolean {
   const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
@@ -1015,16 +1008,11 @@ function oceanDepthsAt(store: TileStore, gs: GenState, x: number, y: number): bo
 // ---------- 表面 ----------
 function surfacePass({ store, surface, rng, world }: GenCtx) {
   const { w } = store;
-  // 铺草（原版 pass 73 Spreading Grass 尾段 L8731-8755：每列首个实心格为泥土 → SpreadGrass）
-  // 旧实现用生成早期 surface[] 数组定位列顶——山坡/洞穴口露石露土全漏，树密度被卡死
-  for (let x = 10; x < w - 10; x++) {
-    for (let y = 0; y < world.groundLevel - 1; y++) {
-      const i = store.idx(x, y);
-      if (!store.flags[i]) continue;
-      if (store.type[i] === T.DIRT) store.setTileSilent(x, y, T.GRASS);
-      break; // 只处理首个实心格
-    }
-  }
+  const gs0 = ctxGs[0];
+  // 铺草（原版 SpreadingGrassOnSurfaceSunflowersEvilsOnSurfaceAndLavaCleanup cs:18349-18460）：
+  //  段① 丛林草 3×3 邻接泥土填充 + 地表暴露石/黏土/矿 7×7 扫描转周边群系；
+  //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）
+  if (gs0) spreadingGrassPass(store, gs0);
   // 原版 pass 82 Planting Trees（铺草之后、杂草之前——原版 73<82<86 顺序）
   {
     const gs = ctxGs[0];
@@ -1037,57 +1025,119 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
     const gs = ctxGs[0];
     if (gs) runAlchemyHerbsPass(store, rng, gs);
   }
-  // 地表植物装饰——原版 pass GrassPlantsEvilPlantsAndPumpkinsOnSurface（WorldGen.cs:20201-20266）+
-  // PlaceTile 液体拒绝（WorldGen.cs:59477：tile 3/24/201/637 在液体中不放）。
-  // 门禁 1:1：只铺在草族 tile 上方（普通草 2→tile 3 / 腐化草 23→24 / 猩红草 199→201 /
-  // 丛林草 60→73 / 蘑菇草 70→71 发光蘑菇株）；沙滩/海水自然无杂草。
+  // 地表植物（原版 GrassPlantsEvilPlantsAndPumpkinsOnSurface cs:20232-20263）：
+  //  只铺草族上方（2→3 / 23→24 / 199→201 / 633→637）；帧分布与荆棘转化在
+  //  PlaceTile(3/24/201/637) 分支内（见 SurfaceDecorPasses.placePlantTile）。
+  //  旧实现自造 82%/13%/每格必铺掷骰 + 丛林草→73（原版不处理丛林草）——已替换
+  runGrassPlantsPass(store, rng);
+  // 发光蘑菇株/丛林植物（原版 GlowingMushroomPlantsUndergroundAndJunglePlants cs:20278-20303）：
+  //  蘑菇草 70 → 3 次巨型蘑菇树尝试后 PlaceTile(71)；丛林草 60 → 61；蜥蜴砖 226 → 1/5 也 → 61
   {
-    const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block'] ?? 0;
-    const CRIMSON_GRASS = TILE_BY_KEY['v_199_crimson_grass_block'] ?? 0;
-    const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block'] ?? 0;
-    const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block'] ?? 0;
-    const CORRUPT_PLANTS = TILE_BY_KEY['v_24_corruption_short_plants'] ?? 0;
-    const CRIMSON_PLANTS = TILE_BY_KEY['v_201_crimson_short_plants'] ?? 0;
-    const JUNGLE_PLANTS = TILE_BY_KEY['v_73_forest_tall_plants'] ?? 0;
-    const GLOW_SHROOM = TILE_BY_KEY['v_71_mushroom_plant'] ?? 0;
-    const CORRUPT_THORNS = TILE_BY_KEY['v_32_corruption_thorns'] ?? 0;
-    const CRIMSON_THORNS = TILE_BY_KEY['v_352_crimtane_thorns'] ?? 0;
-    const GRASS_FX = [0, 18, 36, 54, 72, 90];
-    const FLOWER_FX = [108, 126, 162, 180, 216, 252, 342, 540, 594];
-    const plantAbove = (x: number, y: number, type: number, fx: number) => {
-      if (y < 1 || !store.inBounds(x, y)) return;
-      const i = store.idx(x, y);
-      if (store.flags[i] || store.liquid[i] > 0) return; // 上方格须空气且无液体
-      store.setTileSilent(x, y, type, fx, 0);
-    };
-    for (let x = 0; x < w; x++) {
-      for (let y = 1; y < store.h; y++) {
-        const bi = store.idx(x, y);
-        if (!store.flags[bi]) continue;
-        const below = store.type[bi];
-        if (below === T.GRASS) {
-          // 普通草：每格必铺（原版语义），变体 = 草丛 6 / 花 9 / 蘑菇(144)
-          const r = rng.next();
-          if (r < 0.82) plantAbove(x, y - 1, T.TALLGRASS, GRASS_FX[Math.floor(rng.next() * 6)]);
-          else if (r < 0.97) plantAbove(x, y - 1, T.FLOWER, FLOWER_FX[Math.floor(rng.next() * 9)]);
-          else plantAbove(x, y - 1, T.MUSHROOM, 144);
-        } else if (below === CORRUPT_GRASS) {
-          // 腐化草 13% → 荆棘 32（原版 IsFitToPlaceFlowerIn 分支）；帧 144 = 邪恶蘑菇
-          if (rng.next() < 0.13 && CORRUPT_THORNS) plantAbove(x, y - 1, CORRUPT_THORNS, 0);
-          else plantAbove(x, y - 1, CORRUPT_PLANTS, rng.next() < 0.08 ? 144 : Math.floor(rng.next() * 6) * 18);
-        } else if (below === CRIMSON_GRASS) {
-          if (rng.next() < 0.13 && CRIMSON_THORNS) plantAbove(x, y - 1, CRIMSON_THORNS, 0);
-          else plantAbove(x, y - 1, CRIMSON_PLANTS, Math.floor(rng.next() * 11) * 18);
-        } else if (below === JUNGLE_GRASS) {
-          plantAbove(x, y - 1, JUNGLE_PLANTS, Math.floor(rng.next() * 6) * 18);
-        } else if (below === MUSH_GRASS && GLOW_SHROOM) {
-          // 蘑菇草 → 发光蘑菇株（v_71 5 变体；GlowingMushroomPlants pass 语义）
-          plantAbove(x, y - 1, GLOW_SHROOM, Math.floor(rng.next() * 5) * 18);
+    const gs = ctxGs[0];
+    if (gs) runGlowingMushroomPlantsPass(store, rng, gs);
+  }
+  // 树已由 vanilla/TreePass.ts（原版 pass 82 AddTrees/GrowTree/GrowPalmTree/GrowEpicTree）替换
+  void surface; void world; void w;
+}
+
+/** SpreadingGrass 段①②（cs:18354-18460）1:1 */
+function spreadingGrassPass(store: World['store'], gs: GenState) {
+  const w = store.w;
+  const sheetAt = (x: number, y: number): number => {
+    if (!store.inBounds(x, y)) return -1;
+    const i = store.idx(x, y);
+    return store.flags[i] ? (TILE_DEFS[store.type[i]]?.vanilla?.sheet ?? -1) : -1;
+  };
+  // ---- 段①（cs:18354-18432）：丛林草邻接填充 + 暴露石/矿群系转换 ----
+  for (let i = 50; i < w - 50; i++) {
+    for (let j = 50; j <= gs.worldSurface; j++) {
+      const ii = store.idx(i, j);
+      if (!store.flags[ii]) continue;
+      const s = sheetAt(i, j);
+      if (s === 60) {
+        // 丛林草 3×3 邻接的泥土(0)：上格空 → 60（草）否则 59（泥）
+        for (let k = i - 1; k <= i + 1; k++) {
+          for (let l = j - 1; l <= j + 1; l++) {
+            if (!store.inBounds(k, l)) continue;
+            const ki = store.idx(k, l);
+            if (store.flags[ki] && sheetAt(k, l) === 0) {
+              store.type[ki] = !store.flags[store.idx(k, l - 1)]
+                ? TILE_BY_KEY['v_60_jungle_grass_block']! : TILE_BY_KEY['mud']!;
+            }
+          }
+        }
+      } else if (s === 1 || s === 40 || ORE_SHEETS.has(s)) {
+        // 石/黏土/矿：7×7 扫描定目标群系 + 上方是否有露天（n<j 且无墙）
+        let flag = false;
+        let num2 = 0;
+        for (let m = i - 3; m <= i + 3; m++) {
+          for (let n = j - 3; n <= j + 3; n++) {
+            if (!store.inBounds(m, n)) continue;
+            const ni = store.idx(m, n);
+            if (store.flags[ni]) {
+              const ns = sheetAt(m, n);
+              if (ns === 53 || num2 === 53) num2 = 53;
+              else if (ns === 59 || ns === 60 || ns === 147 || ns === 161 || ns === 199 || ns === 23) num2 = ns;
+            } else if (n < j && store.wall[ni] === 0) {
+              flag = true;
+            }
+          }
+        }
+        if (flag) {
+          switch (num2) {
+            case 23:
+            case 199:
+              // 腐化/猩红：上格有块 → 不转（num2 归 0 = 转泥土）
+              if (store.flags[store.idx(i, j - 1)]) num2 = 0;
+              break;
+            case 59:
+            case 60:
+              // cs:18421 jungleMinX/MaxX 此 pass 时仍为 Reset 初值 -1/-1（cs:21004
+              // 才赋值）→ 恒不触发，bug-for-bug 保留
+              break;
+            default:
+              break;
+          }
+          // cs:18431：无条件 type = num2（num2=0 即转泥土——露天石/黏土/矿泥化）
+          store.type[ii] = num2 === 0 ? T.DIRT : sheetToTile(num2);
         }
       }
     }
   }
-  // 树已由 vanilla/TreePass.ts（原版 pass 82 AddTrees/GrowTree/GrowPalmTree/GrowEpicTree）替换
+  // ---- 段②（cs:18432-18460）：逐列 SpreadGrass 递归（flag2=空气无墙时重置）----
+  for (let x = 10; x < w - 10; x++) {
+    let flag2 = true;
+    for (let y = 0; y < gs.worldSurface - 1; y++) {
+      const yi = store.idx(x, y);
+      if (store.flags[yi]) {
+        if (flag2 && sheetAt(x, y) === 0) {
+          // SpreadGrass(x, y, 0, 2, repeat)（cs:75210）——泥→草递归扩散，
+          // 深度上限近似原版 grassSpread≤1000（try/catch 栈溢出回退）
+          spreadGrass(store, x, y, T.DIRT, T.GRASS, true);
+        }
+        if (y > gs.worldSurfaceHigh) break;
+        flag2 = false;
+      } else if (store.wall[yi] === 0) {
+        flag2 = true;
+      }
+    }
+  }
+}
+
+/** TileID.Sets.Ore（SurfaceDecorPasses 同表）——段① 的"矿"判定 */
+const ORE_SHEETS = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
+/** sheet id → 本仓内部 tile id（段① 转换目标用；仅 53/59/60/147/161/199/23 可能命中） */
+const SHEET_TO_TILE = new Map<number, number>();
+{
+  TILE_DEFS.forEach((d, id) => {
+    const sh = d?.vanilla?.sheet;
+    if (typeof sh === 'number' && [53, 59, 60, 147, 161, 199, 23].includes(sh) && !SHEET_TO_TILE.has(sh)) {
+      SHEET_TO_TILE.set(sh, id);
+    }
+  });
+}
+function sheetToTile(sheet: number): number {
+  return SHEET_TO_TILE.get(sheet) ?? T.DIRT;
 }
 
 // ---------- 结构（地下小屋 + 宝箱） ----------
@@ -1143,8 +1193,9 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     const x = Math.floor(store.w / 2) + rng.int(-range, range); // Next(-num2, num2+1)
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
-      // 首个【实心】格——首个 active 格可能是树干(solid:false)致浮空出生
-      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid) { sx = x; sy = y; break; }
+      // 首个实心格（原版 cs:19683 仅 active && type!=379——379 是非实心装饰格，
+      // 实心判据天然跳过；solid 判据防树干致浮空出生，保留）
+      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
     }
     let bad = false;
     range++;
@@ -1155,6 +1206,18 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     for (const dy of [1, 2, 3]) {
       if (store.liquid[store.idx(sx, Math.max(0, sy - dy))] > 0) { bad = true; break; }
     }
+    // IsTileNearby(379, 10)（cs:19704-19707）：±10 盒内有 379 → 重试
+    if (!bad) {
+      outer:
+      for (let nx = sx - 10; nx <= sx + 10; nx++) {
+        for (let ny = sy - 10; ny <= sy + 10; ny++) {
+          if (store.inBounds(nx, ny) && store.flags[store.idx(nx, ny)] && store.type[store.idx(nx, ny)] === TILE_379) {
+            bad = true;
+            break outer;
+          }
+        }
+      }
+    }
     if (!bad) break;
   }
   let widen = 10;
@@ -1163,7 +1226,7 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
     const x = rng.int(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
-      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid) { sx = x; sy = y; break; }
+      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
     }
     widen++;
   }

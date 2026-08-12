@@ -109,13 +109,13 @@ describe('MinionProj 行为', () => {
     const h = hooks as unknown as GameHooks & { entities: { add: (e: unknown, b: string) => void } };
     const shots = () => ((enemy as unknown as { __shots?: unknown[] }).__shots ?? []).length;
     for (let k = 0; k < 119; k++) s.fixedUpdate(1, h);
-    expect(shots()).toBe(0);   // 初冷 ai[0]=120（:27176-27181）
+    expect(shots()).toBe(0);   // 初冷 ai[0]=120（:27176-27181；含初始 tick 衰减）
     for (let k = 0; k < 11; k++) s.fixedUpdate(1, h);
-    expect(shots()).toBe(1);   // 第 120t 首发并重置 60（:27282-27288）
-    for (let k = 0; k < 59; k++) s.fixedUpdate(1, h);
+    expect(shots()).toBe(1);   // 第 121t 首发并重置 60（:27282-27288）
+    for (let k = 0; k < 50; k++) s.fixedUpdate(1, h);
     expect(shots()).toBe(1);   // 60t 冷却期内不再发
-    for (let k = 0; k < 2; k++) s.fixedUpdate(1, h);
-    expect(shots()).toBe(2);   // 第 180t 第二发
+    s.fixedUpdate(1, h);
+    expect(shots()).toBe(2);   // 第 181t 第二发（60t 射速）
     expect(s.dead).toBe(false);
     s.life = 1;
     s.fixedUpdate(1, h);

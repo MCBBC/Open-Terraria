@@ -19,6 +19,7 @@ export let __uwEndPeek = 0;
 export let __uwTreeInfo = '';
 let uwTreeCand = 0, uwTreeGrow = 0;
 export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
+  uwTreeCand = 0; uwTreeGrow = 0;
   const { w, h } = st;
   // ① 边界 + 灰烬带 + 界下清空
   let boundary = h - rng.int(150, 189);               // Next(150,190)

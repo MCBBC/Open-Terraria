@@ -4,7 +4,8 @@
 //   flying：悬停玩家侧后环形槽位 → 锁定最近敌 ≤700px 俯冲突进（接触伤害+同敌冷却）
 //           → >1300px 瞬移回玩家（原版 minion 回收语义）
 //   ground ：重力+碰撞，地面追击最近敌，接触伤害
-//   sentry ：定点（施法点），每 60t 朝最近敌 ≤600px 射一弹（Arrow 复用）
+//   sentry ：定点（施法点）。aiStyle 53 三族 1:1（初冷 120、射速 60/60/90、扇区炮口）；
+//            OOA 四塔（AI_130/134/137/138）与 aiStyle 123（月门/彩虹水晶）各按原版
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -1092,7 +1093,12 @@ export class MinionProj extends Entity {
     if (!ctx) return;
     const frames = projFrameCount(this.projId);
     let frame: number;
-    if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
+    if (this.projId === 623) {
+      frame = this.gA0 === 2 ? this.gFrame : this.gFrame % 8; // AI_120：攻击 12-19 / 行走 0-7
+    } else if (this.projId === 317) {
+      // AI_054：4fc 循环（0-3 飞 / 4-7 扑，:27543-27594）
+      frame = (this.ravenZone === 1 ? 4 : 0) + (Math.floor(this.age / 4) % 4);
+    } else if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
       frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 4) : 0;
     } else if (this.sentry && BALLISTA_TOWER.has(this.projId)) {
       frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 5) : 0;
