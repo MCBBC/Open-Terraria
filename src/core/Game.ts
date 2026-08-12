@@ -104,12 +104,13 @@ import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS } from '../stats/Buffs';
 import { options } from './Options';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
-import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost } from '../player/SmartSelect';
+import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost, type SmartSelectSlot } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
 import { windSway } from '../render/WindSway';
+import { natureParticles } from '../render/NatureParticles';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
@@ -737,6 +738,8 @@ export class Game implements GameHooks {
   smartSelect = new SmartSelect();
   /** SelectedItemState.Hotbar 镜像（Player.cs:391）：最近一次 0-9 快捷栏选择 */
   private smartSelectHotbar = 0;
+  /** Smart Select 槽画像复用缓冲（smartSelectSlots 每帧原地填充） */
+  private _smartSelectSlots: SmartSelectSlot[] = Array.from({ length: INV_SIZE }, () => ({ ...EMPTY_SLOT }));
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
   wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
   /** 宏伟蓝图拖拽锚点(tile 坐标) */
@@ -1995,6 +1998,10 @@ export class Game implements GameHooks {
     windSway.update(this.world.weather?.windSpeedCurrent ?? 0,
       { x: player.x, y: player.y, w: player.w, h: player.h, vx: player.vx, vy: player.vy, dead: player.dead },
       viewTW, viewTH);
+    // 自然层粒子（落叶/滴水 Gore 物理）：绑定世界 + 推进
+    natureParticles.bindStore(this.world.store);
+    natureParticles.updateLeaves(windSway.wind, this.world.groundLevel * TILE);
+    natureParticles.updateDrips(this.world.groundLevel * TILE);
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
@@ -2465,22 +2472,24 @@ export class Game implements GameHooks {
    * 0-49 背包 + 50-53 钱币 + 54-57 弹药——case 4/5 信号枪弹药门扫到 57（:17374/:17410）。
    * 三力取 vanilla-itemfunc 全量（Hamaxe 斧+锤 / Drax 镐+斧 副力保留），legacy def.tool
    * 画像只覆盖自身类型主力（与 updateUse 的工具判定同序）。
+   * 结果写入复用缓冲（每帧调用，防分配热点——perf-audit-2026-08 口径）。
    */
-  private smartSelectSlots() {
+  private smartSelectSlots(): SmartSelectSlot[] {
     const inv = this.player.inv;
-    const out = [];
     for (let i = 0; i < INV_SIZE; i++) {
       const it = inv.slots[i];
-      if (!it) { out.push(EMPTY_SLOT); continue; }
+      const buf = this._smartSelectSlots[i];
+      if (!it) { this._smartSelectSlots[i] = EMPTY_SLOT; continue; }
       const def = ITEM_DEFS[it.id];
-      out.push(smartSelectSlotOf(
+      this._smartSelectSlots[i] = smartSelectSlotOf(
         def,
         it.stack,
         itemFuncOfInternal(it.id, def?.key ?? ''),
         def?.tool ? { type: def.tool.type as 'pick' | 'axe' | 'hammer', power: def.tool.power ?? 0 } : null,
-      ));
+        buf === EMPTY_SLOT ? undefined : buf,
+      );
     }
-    return out;
+    return this._smartSelectSlots;
   }
 
   private updateUse(dt: number) {

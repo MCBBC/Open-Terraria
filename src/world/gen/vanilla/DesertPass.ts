@@ -489,7 +489,6 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
     genAll(px, py + 2, data, new PlaceWall(0));
-    console.log(`[dbg] larvaAt px=${px} py=${py} hr=${holeRadius} data=${data.size} keys=[${[...data].slice(0, 5).join(',')}]`);
   }
 
   // ---- PitEntrance.cs 1:1（零掷骰）：漏斗形直落竖井 ----

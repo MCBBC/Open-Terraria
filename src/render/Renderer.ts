@@ -42,7 +42,8 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
-import { drawWindSwayTiles } from './WindSway';
+import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
+import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
@@ -567,7 +568,13 @@ export class Renderer {
     // 此处逐帧动态绘制（草/药草/藤蔓/吊挂植物/树冠树枝；世界变换内世界坐标，
     // 光照合成在后自动受光）——渲染共享态 renderEnv.wind 已在 render() 顶部注入
     if (this.atlas) {
-      drawWindSwayTiles(ctx, this.atlas, world, cam, z);
+      drawWindSwayTiles(ctx, this.atlas, world, cam, z, clock, this.waterStyle, {
+        corrupt: !!this.scene?.zoneCorrupt,
+        crimson: !!this.scene?.zoneCrimson,
+        hallow: !!this.scene?.zoneHallow,
+      });
+      // 自然层粒子（原版 Gore：落叶/滴水——DrawGores 在 tile 层后实体前）
+      natureParticles.draw(ctx, this.atlas);
     }
 
     // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)
@@ -643,6 +650,25 @@ export class Renderer {
     this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts);
 
     ctx.restore();
+
+    // 6c. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器，此处
+    //     可见性公式 1:1 + 太阳位暖色加性光晕近似；vis=0 时零开销）
+    const litVis = litNatureVisibility(clock);
+    if (litVis > 0.003) {
+      const ft = ((clock.timeOfDay - 0.25) / 0.5);
+      const sunX = Math.max(0, Math.min(1, ft)) * viewW;
+      const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+      const sunY = dip * 250 + 180;
+      const r = viewW * 0.55;
+      const grad = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, r);
+      grad.addColorStop(0, `rgba(255,206,130,${(litVis * 0.85).toFixed(3)})`);
+      grad.addColorStop(1, 'rgba(255,206,130,0)');
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, viewW, viewH);
+      ctx.restore();
+    }
 
     // 7. 光照合成
     this.compositeLight(cam, viewW, viewH, lightR, lightG, lightB, lightRX, lightRY, lightRW, lightRH);

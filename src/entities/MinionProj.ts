@@ -25,6 +25,16 @@ const AURA_TOWER = new Set([688, 689, 690]);
  *  中心上方 48px 处 144×144 盒内有敌 → 原地爆炸（proj 694/695/696 等价 AoE），
  *  冷却 GetExplosiveTrapCooldown=90 */
 const TRAP_TOWER = new Set([691, 692, 693]);
+/** AI_062 族随从帧语义（Projectile.cs:62868-62971）：[每帧 tick, 循环帧数, 攻击帧偏移]
+ *  373 黄蜂 2t/帧 0-2；375 小鬼 5t/帧 0-3，攻击中(ai[1]<24)→+4（真攻击帧!）；
+ *  407 蜘蛛 2t/帧 0-5；423/613 3t/帧 0-3 */
+const AI062_FRAMES: Record<number, [number, number, number]> = {
+  373: [2, 3, 0],
+  375: [5, 4, 4],
+  407: [2, 6, 0],
+  423: [3, 4, 0],
+  613: [3, 4, 0],
+};
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
 interface EnemyLike {
@@ -70,6 +80,8 @@ export class MinionProj extends Entity {
   sCool = 0;
   /** 朝向（哨兵 spriteDirection / 随从渲染翻转） */
   facing = 1;
+  /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
+  attackFlash = 0;
 
   constructor(
     x: number, y: number, projId: number, damage: number, knockback: number,

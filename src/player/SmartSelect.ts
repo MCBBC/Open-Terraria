@@ -108,30 +108,34 @@ export const EMPTY_SLOT: SmartSelectSlot = {
   vid: 0, stack: 0, pick: 0, axe: 0, hammer: 0, ammo: 0, useAmmo: 0, tileBoost: 0,
 };
 
-/** 由 ItemDef + 三力画像构建槽语义（Game 每帧对 0-57 构建；见 Game.smartSelectSlots） */
+/** 由 ItemDef + 三力画像构建槽语义（Game 每帧对 0-57 构建）。
+ *  传 into 则原地填充（每帧复用缓冲，防分配热点）；legacy def.tool 画像只覆盖自身类型的
+ *  主力（Game 工具判定同序 def.tool 优先），vi_ 双工具（Hamaxe 斧+锤 / Drax 镐+斧）
+ *  其余副力保留 itemfunc 全量 */
 export function smartSelectSlotOf(
   def: ItemDef | null | undefined,
   stack: number,
   itemFunc: { pick?: number; axe?: number; hammer?: number; ammo?: number; useAmmo?: number } | null | undefined,
   toolOverride?: { type: 'pick' | 'axe' | 'hammer'; power: number } | null,
+  into?: SmartSelectSlot,
 ): SmartSelectSlot {
   const vid = vanillaItemIdOf(def) ?? 0;
   const pick = itemFunc?.pick ?? 0;
   const axe = itemFunc?.axe ?? 0;
   const hammer = itemFunc?.hammer ?? 0;
-  // legacy def.tool 画像只覆盖自身类型的主力（Game 工具判定同序 def.tool 优先）；
-  // vi_ 双工具（Hamaxe 斧+锤 / Drax 镐+斧）其余副力保留 itemfunc 全量
   const t = toolOverride;
-  return {
-    vid,
-    stack,
-    pick: t?.type === 'pick' ? t.power : pick,
-    axe: t?.type === 'axe' ? t.power : axe,
-    hammer: t?.type === 'hammer' ? t.power : hammer,
-    ammo: itemFunc?.ammo ?? 0,
-    useAmmo: itemFunc?.useAmmo ?? 0,
-    tileBoost: 0,
+  const out: SmartSelectSlot = into ?? {
+    vid: 0, stack: 0, pick: 0, axe: 0, hammer: 0, ammo: 0, useAmmo: 0, tileBoost: 0,
   };
+  out.vid = vid;
+  out.stack = stack;
+  out.pick = t?.type === 'pick' ? t.power : pick;
+  out.axe = t?.type === 'axe' ? t.power : axe;
+  out.hammer = t?.type === 'hammer' ? t.power : hammer;
+  out.ammo = itemFunc?.ammo ?? 0;
+  out.useAmmo = itemFunc?.useAmmo ?? 0;
+  out.tileBoost = 0;
+  return out;
 }
 
 export interface SmartSelectPlayer {

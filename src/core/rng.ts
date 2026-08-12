@@ -250,9 +250,11 @@ export class FastRandom {
 
   /** WithModifier(int x, int y)(L32-35)：
    *  modifier = (ulong)(x + 2654435769u + ((long)y << 6)) + ((ulong)y >> 2)
-   *  x + 2654435769u 在 C# 里是 long（int+uint 提升），负 x 也安全 */
+   *  坑：C# 的 (ulong)y 是 64 位补码（负 y → 巨值再右移），不能写 JS 的
+   *  `y >>> 0`（32 位截断）——DesertHive 的 hj=-20 行曾因此整行门骰错位 */
   withModifierXY(x: number, y: number): FastRandom {
-    const mod = BigInt(x + 2654435769 + (y << 6)) + (BigInt(y >>> 0) >> 2n);
+    const u64y = BigInt(y) & 0xffffffffffffffffn;   // (ulong)y：64 位补码
+    const mod = BigInt(x + 2654435769 + (y << 6)) + (u64y >> 2n);
     return this.withModifier(mod);
   }
 
