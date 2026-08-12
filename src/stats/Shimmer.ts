@@ -32,8 +32,10 @@
 //       RecipeGroup 组代表并列错位已修：tools/extract-itemrare.mjs 工厂盲区
 //       （buyPrice/SetShopValues/标签列/扫描越界）修复后重提，value 2344→4256 条）
 //     - 3461 月相砖:已按 GetLunarBrickTransformFromMoonPhase(:113-125)接通(月相参)
-//     - 微光视觉（shimmerTransparency 半透明 / 微光化物品上浮白光 dust 309）
-//     - Boss 免微光名单（NPCID.Sets.ShimmerImmunity）
+//     - 微光化物品上浮白光（WorldItem.cs:488-497 dust 309 四色 1/30t + 渐亮
+//       AddLight (1-shimmerTime)*0.8）——已移植（ItemDrop 浮游段 + Game 点光扫描）
+//     - NPC 免微光名单（NPCID.Sets.ShimmerImmunity, NPCID.cs:4837 →
+//       NPC.cs:17773 buffImmune[353]）——已移植（isNpcShimmerImmune）
 //     - 联机同步（NetMessage 145/146 ShimmeredItem/ShimmerEffect）
 import shimmerJson from '../data/vanilla-shimmer.json';
 import { getDecraftingRecipeIndex, recipeAt, RECIPE_GROUP_ITEMS } from '../data/vanillaRecipes';
@@ -52,6 +54,12 @@ const COMMON_COIN = new Set<number>((shimmerJson as Json).commonCoin as number[]
 const NPC_TRANSFORM = (shimmerJson as Json).npcTransformTo as Record<string, number>;
 const NPC_TRANSFORM_ITEM = (shimmerJson as Json).npcTransformToItem as Record<string, number>;
 const NPC_TOWN_TRANSFORM = new Set<number>((shimmerJson as Json).npcTownTransform as number[]);
+/** NPCID.Sets.ShimmerImmunity（NPCID.cs:4837，131 id）：城镇宠物（637/638/656/670/
+ *  678-684）、Boss 及部件（50 史莱姆王、245-249 石巨人、657-660 史莱姆皇后、115/116
+ *  血肉墙之口、139 探针、5 克苏鲁之眼仆从）、事件军（325/344 树妖/常绿尖叫树、
+ *  381-429 火星暴乱、516-523 日耀星团、548-578 撒旦军队）、微光原住民（676/677）、
+ *  小动物（356 蝶）等——浸微光不挂 buff 353 → 不进 shimmering */
+const NPC_SHIMMER_IMMUNITY = new Set<number>((shimmerJson as Json).npcShimmerImmunity as number[]);
 const ITEM_MAKE_NPC = (shimmerJson as Json).itemMakeNPC as Record<string, number>;
 
 // ============ 内部物品 id ↔ 原版物品 id ============
@@ -287,6 +295,14 @@ export function npcShimmerTransformToItem(npcId: number): number {
 /** NPCID.Sets.ShimmerTownTransform（城镇 NPC 微光变体，ai[0]=25） */
 export function isNpcTownShimmerable(npcId: number): boolean {
   return NPC_TOWN_TRANSFORM.has(npcId);
+}
+
+/** NPCID.Sets.ShimmerImmunity（NPC.cs:17773 `buffImmune[353] = ShimmerImmunity[type]`；
+ *  NPC.cs:93313-93321 buff 353 挂不上 → shimmering 恒 false → 永不触发 GetShimmered）。
+ *  入口门语义：**免表只挡 buff 进场**，aiStyle 67 小动物的直通分支（:34586-34598
+ *  中心格微光即刻 GetShimmered，不经 buff）不受本表约束 */
+export function isNpcShimmerImmune(npcId: number): boolean {
+  return NPC_SHIMMER_IMMUNITY.has(npcId);
 }
 
 // ============ 玩家脱困传送（ShimmerHelper.FindSpotWithoutShimmer 近似） ============

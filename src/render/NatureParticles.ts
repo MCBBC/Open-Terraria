@@ -1,5 +1,8 @@
 // 自然层粒子 1:1：落叶（Gore SpecialAI 3 / Gore_UpdateLeaf :1104-1215）+ 滴水
-//（Gore IsDrip 状态机 :383-530 + 碰撞转溅落 :955-985 + EmitLiquidDrops TileDrawing :7714）。
+//（Gore IsDrip 状态机 :383-530 + 碰撞转溅落 :955-985 + EmitLiquidDrops TileDrawing :7714）
+// + 墓地环境云雾（AmbientWindSystem.cs 全量 + Gore SpecialAI 4/5：
+//  UpdateAmbientFloorCloud :111-148 / UpdateAmbientAirborneCloud :157-202，
+//  gore 1087-1090 地面云 · 1091/1093 空中云链）。
 // 贴图 = Gore_N.png 懒加载（vanilla-atlas MISC 段已拷入 public/sprites/vanilla/）。
 // 物理逐分支对源：落叶下落用 vy 兼作相位累加器走圆弧（UnitY.RotatedBy(vy)=(−sin,cos)，
 // Y 取 |·|，地表加风力 ×4），碰撞 → vy=-1 转落地滑移/褪色支；滴水 0-6 蓄滴
@@ -36,6 +39,20 @@ interface Drip {
   dead: boolean;
 }
 
+/** 墓地云雾（Gore 1087-1093，SpecialAI 4=地面云 / 5=空中云链） */
+interface Cloud {
+  x: number; y: number;
+  vx: number; vy: number;
+  /** Gore.alpha：0=不透明 → 255=全透明（GetAlpha :1486 opacity=(255-alpha)/255） */
+  alpha: number;
+  timeLeft: number;
+  scale: number;
+  type: number;
+  rotation: number;
+  airborne: boolean;
+  dead: boolean;
+}
+
 /** 盒碰撞（Gore 走 Collision.TileCollision 3-14px 盒）：逐轴探测，撞轴归零并回报 */
 function boxCollide(st: TileStore, x: number, y: number, vx: number, vy: number, size: number): { nx: number; ny: number; nvx: number; nvy: number; hitX: boolean; hitY: boolean } {
   let nx = x, ny = y, hitX = false, hitY = false;
@@ -63,14 +80,17 @@ function boxCollide(st: TileStore, x: number, y: number, vx: number, vy: number,
 export class NatureParticles {
   leaves: Leaf[] = [];
   drips: Drip[] = [];
+  clouds: Cloud[] = [];
   private st: TileStore | null = null;
   maxLeaves = 220;
   maxDrips = 90;
+  /** 云雾池上限（原版共用 600 格 gore 池；云雾独占上限防挤占视效预算） */
+  maxClouds = 160;
   /** 滴水溅落音钩子（Game 注入 Sfx；Gore.cs :971-984：SoundID 39=Drip，
    *  落地 variant rand(0,1) / 入水 variant 2，位置 +8,+8；flag4 水型本模块内静音） */
   onDripSplash: ((x: number, y: number, wet: boolean) => void) | null = null;
 
-  clear(): void { this.leaves.length = 0; this.drips.length = 0; }
+  clear(): void { this.leaves.length = 0; this.drips.length = 0; this.clouds.length = 0; this.windCounter = 0; this.airSpots.length = 0; }
   /** Game 每帧绑定当前世界 store */
   bindStore(st: TileStore): void { this.st = st; }
 
@@ -240,6 +260,157 @@ export class NatureParticles {
     this.onDripSplash?.(d.x + 8, d.y + 8, wet);
   }
 
+  // ================= 墓地环境云雾（AmbientWindSystem.cs + Gore SpecialAI 4/5） =================
+  // AmbientWindSystem.Update（:23-52）：ZoneGraveyard 才产云；工作区 = 玩家中心
+  // 120×30 格；逐格 TrySpawningWind（地面云 1/120 + 1/3 复生上层、空中云位
+  // 1/120000 候选），每 30 tick 消化空中云位 → SpawnAirborneCloud 链。
+
+  private windCounter = 0;
+  private airSpots: Array<{ x: number; y: number }> = [];
+
+  /** AmbientWindSystem.Update + 既有云雾推进。出墓地只停生成，已生云雾照常漂散
+   *  （原版 gore 池独立于 Zone 判定） */
+  updateAmbientWind(graveyard: boolean, wind: number, px: number, py: number): void {
+    const st = this.st;
+    if (!st) return;
+    for (const c of this.clouds) {
+      if (c.dead) continue;
+      if (c.airborne) this.stepAirborneCloud(c);
+      else this.stepFloorCloud(c, wind);
+    }
+    if (this.clouds.length > 0) this.clouds = this.clouds.filter((c) => !c.dead);
+    if (!graveyard) { this.windCounter = 0; this.airSpots.length = 0; return; }
+    this.windCounter++;
+    const cx = Math.floor(px / TILE), cy = Math.floor(py / TILE);
+    const x0 = cx - 60, y0 = cy - 15;                       // GetTileWorkSpace（:60-66）
+    for (let x = x0; x < x0 + 120; x++) {
+      for (let y = y0; y < y0 + 30; y++) {
+        this.trySpawningWind(x, y);
+      }
+    }
+    if (this.windCounter % 30 === 0) {                      // :46-49
+      for (const s of this.airSpots) this.spawnAirborneCloud(s.x, s.y, wind);
+      this.airSpots.length = 0;
+    }
+  }
+
+  /** AmbientWindSystem.TrySpawningWind（:69-93） */
+  private trySpawningWind(x: number, y: number): void {
+    const st = this.st!;
+    if (!st.inBounds(x, y) || x < 10 || y < 10 || x >= st.w - 10 || y >= st.h - 10) return; // InWorld(,10)
+    this.testAirCloud(x, y);
+    const i = st.idx(x, y);
+    if (st.type[i] === 0 || st.slope[i] > 0 || st.half[i] || !st.isSolid(x, y)) return;
+    if (!st.isSolid(x, y - 1) && Math.random() < 1 / 120) {
+      this.spawnFloorCloud(x, y);
+      if (Math.random() < 1 / 3) this.spawnFloorCloud(x, y - 1);   // :89-92
+    }
+  }
+
+  /** TestAirCloud（:151-166）：1/120000 且十字 ±2 格全允许风 → 空中云位 */
+  private testAirCloud(x: number, y: number): void {
+    if (Math.random() >= 1 / 120000) return;
+    const st = this.st!;
+    for (let d = -2; d <= 2; d++) {
+      if (d === 0) continue;
+      if (!this.tileAllowsWind(x + d, y) || !this.tileAllowsWind(x, y + d)) return;
+    }
+    this.airSpots.push({ x, y });
+  }
+
+  /** DoesTileAllowWind（:168-172）：空气/非实心格允许风 */
+  private tileAllowsWind(x: number, y: number): boolean {
+    const st = this.st!;
+    if (!st.inBounds(x, y)) return false;
+    return st.type[st.idx(x, y)] === 0 || !st.isSolid(x, y);
+  }
+
+  /** SpawnFloorCloud（:121-133）：(x,y-1) 格中心出生，上浮 0-16px；
+   *  上浮 <4px 换贴地皮型 1090，否则 1087-1089；vx = 0.4×视觉风 */
+  private spawnFloorCloud(x: number, y: number): void {
+    if (this.clouds.length >= this.maxClouds) return;
+    const lift = 16 * Math.random();
+    const type = lift < 4 ? 1090 : 1087 + Math.floor(Math.random() * 3);
+    this.clouds.push({
+      x: x * TILE + 8, y: (y - 1) * TILE + 8 - lift,
+      vx: 0, vy: 0, alpha: 0, timeLeft: 600,          // NewGore 初始（Gore.cs:1347-1352）
+      scale: 0.8 + Math.random() * 0.2, type, rotation: 0, airborne: false, dead: false,
+    });
+  }
+
+  /** SpawnAirborneCloud（:80-118）：沿缓转向航向排 2-5（1/4 时 9-15）朵云链，
+   *  贴型 1091/1093 交替，尺度 1.1+rand×2.2（变体 ×1.2/×0.2） */
+  private spawnAirborneCloud(x: number, y: number, wind: number): void {
+    let n = 2 + Math.floor(Math.random() * 4);        // Next(2,6)
+    let baseScale = 1.1, varScale = 2.2;
+    if (Math.random() < 0.25) { n = 9 + Math.floor(Math.random() * 7); baseScale = 1.1; varScale = 1.2; }
+    else if (Math.random() < 0.25) { n = 9 + Math.floor(Math.random() * 7); baseScale = 1.1; varScale = 0.2; }
+    const TURN = 0.023561945;
+    let turn = TURN * (Math.random() * 2 - 1);
+    let step = TURN * (Math.random() * 2 - 1);
+    while (step > -0.011780973 && step < 0.011780973) {
+      step = TURN * (Math.random() * 2 - 1);
+    }
+    turn -= step * n * 0.5;                            // :89
+    let px = x * TILE + 8, py = y * TILE + 8;
+    for (let i = 0; i < n; i++) {
+      if (Math.random() < 0.1) step *= Math.random() * 2 - 1;   // :94-97
+      const jx = (Math.random() * 2 - 1) * 4, jy = (Math.random() * 2 - 1) * 4;  // NextVector2Circular(4,4)
+      const type = 1091 + (Math.random() < 0.5 ? 0 : 2);        // 1091 + Next(2)*2
+      const scale = baseScale + Math.random() * varScale;
+      const ang = turn + step;
+      const dx = Math.cos(ang) * 1.4, dy = Math.sin(ang) * 1.4; // UnitX.RotatedBy(num9)*1.4
+      if (this.clouds.length < this.maxClouds) {
+        this.clouds.push({
+          x: px + jx - 10, y: py + jy,                // vector2 + vector3 - (10,0)
+          vx: dx * wind, vy: dy * wind,               // vector4 * WindForVisuals
+          alpha: 0, timeLeft: 600, scale, type, rotation: ang, airborne: true, dead: false,
+        });
+      }
+      px += dx * 6.5 * scale;                          // vector2 += vector4 * 6.5 * num8
+      turn = ang;
+    }
+  }
+
+  /** UpdateAmbientFloorCloud（Gore.cs:111-148）：贴地漂移；头部格实心（钻墙）或
+   *  下方两格全空（悬空）或 timeLeft≤30 → 淡出至 255 消散 */
+  private stepFloorCloud(c: Cloud, wind: number): void {
+    c.timeLeft -= 1;                                   // DisappearSpeed 默认 1
+    if (c.timeLeft <= 0) { c.dead = true; return; }
+    const st = this.st!;
+    const hx = Math.floor((c.x + 15) / TILE), hy = Math.floor(c.y / TILE);
+    if (!st.inBounds(hx, hy) || hy + 2 >= st.h) { c.dead = true; return; }
+    let flag = st.isSolid(hx, hy) || (!st.isSolid(hx, hy + 1) && !st.isSolid(hx, hy + 2));
+    if (c.timeLeft <= 30) flag = true;
+    c.vx = 0.4 * wind;
+    if (!flag) { if (c.alpha > 220) c.alpha--; }
+    else {
+      c.alpha++;
+      if (c.alpha >= 255) { c.dead = true; return; }
+    }
+    c.x += c.vx;
+  }
+
+  /** UpdateAmbientAirborneCloud（Gore.cs:157-202）：航向 = 速度角；头部格实心或
+   *  timeLeft≤60 → 1/5 概率逐帧淡出 */
+  private stepAirborneCloud(c: Cloud): void {
+    c.timeLeft -= 1;
+    if (c.timeLeft <= 0) { c.dead = true; return; }
+    const st = this.st!;
+    const hx = Math.floor((c.x + 15) / TILE), hy = Math.floor(c.y / TILE);
+    if (!st.inBounds(hx, hy)) { c.dead = true; return; }
+    c.rotation = Math.atan2(c.vy, c.vx);
+    let flag = st.isSolid(hx, hy);
+    if (c.timeLeft <= 60) flag = true;
+    if (!flag) { if (c.alpha > 240 && Math.random() < 0.2) c.alpha--; }
+    else {
+      if (Math.random() < 0.2) c.alpha++;
+      if (c.alpha >= 255) { c.dead = true; return; }
+    }
+    c.x += c.vx;
+    c.y += c.vy;
+  }
+
   // ================= 绘制 =================
 
   draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas): void {
@@ -259,6 +430,20 @@ export class NatureParticles {
       const fh = img.naturalHeight / 15;
       ctx.globalAlpha = 1 - d.alpha / 255;
       ctx.drawImage(img, 0, d.frame * fh, img.naturalWidth, fh, d.x, d.y, img.naturalWidth, fh);
+    }
+    // 云雾：Main.DrawGore（Main.cs:21749-21756）——中心锚 + scale + rotation，
+    // 不透明度 = (255-alpha)/255（Gore.GetAlpha :1486）
+    for (const c of this.clouds) {
+      const img = atlas.ensureVImage(`vanilla/Gore_${c.type}.png`);
+      if (!img || !img.complete || img.naturalWidth === 0) continue;
+      const w = img.naturalWidth, h = img.naturalHeight;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, (255 - c.alpha) / 255);
+      ctx.translate(c.x + w / 2, c.y + h / 2);
+      if (c.rotation) ctx.rotate(c.rotation);
+      if (c.scale !== 1) ctx.scale(c.scale, c.scale);
+      ctx.drawImage(img, -w / 2, -h / 2);
+      ctx.restore();
     }
     ctx.globalAlpha = 1;
   }

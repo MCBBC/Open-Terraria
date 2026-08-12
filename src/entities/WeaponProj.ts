@@ -11,8 +11,9 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
-import { hitCritters, playEnemyHitSound, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound, tryReflectProjectile } from './projTargets';
 import { applyProjStatus, applyMeleeImbue } from './projStatus';
+import { projectileData } from '../data/vanillaProjectiles';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
@@ -67,7 +68,7 @@ type ReflectableWeaponProj = {
 };
 
 function hitEnemies(
-  self: { x: number; y: number; w: number; h: number; damage: number; knockback: number },
+  self: { x: number; y: number; w: number; h: number; vx: number; damage: number; knockback: number },
   game: GameHooks,
   hitCd: HitCooldown,
   cooldown: number,
@@ -76,6 +77,9 @@ function hitEnemies(
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
   hitCritters(self, game);
+  // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效,杀裁缝师即此链);
+  // 穿透型不消耗穿透语义(NPC.hurt 8t iframes 自去重)
+  hitTownNpcs(self, game, self.damage, Math.sign(self.vx) * 2);
   const me = self as ReflectableWeaponProj;
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
@@ -112,7 +116,15 @@ function hitEnemies(
   }
 }
 
-// ================= 回旋镖（aiStyle 3，AI_003） =================
+// ================= 回旋镖（aiStyle 3，AI_003_Boomerang，Projectile.cs:36623） =================
+
+/** 返回段型号参数（AI_003 返回分支 :532-582）：num28=目标速率 / num29=加速度，
+ *  缺省 9/0.4。特例族（Phaseblade 40/3、866/182/106 16/1.2 等）按型号覆写 */
+const BOOMERANG_RETURN: Record<number, [number, number]> = {
+  19: [20, 1.5], 33: [18, 1.2], 106: [16, 1.2], 182: [16, 1.2],
+  272: [20, 1.5], 866: [16, 1.2], 333: [12, 0.6], 301: [15, 3],
+  320: [15, 3], 383: [16, 4], 1000: [9.5, 0.4],
+};
 
 export class Boomerang extends Entity {
   w = 22; h = 22; // 原版 SetDefaults（type 6：22×22）
@@ -123,10 +135,12 @@ export class Boomerang extends Entity {
   critChance = 0.04;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
-  /** 旋转角（回旋镖持续自旋） */
+  /** rotation（出程=飞行向+π/4 定角,返回段自旋 0.4/t——AI_003 尾段 :675-706） */
   private rot = 0;
-  /** 飞出段累计；返回段置 true */
+  /** ai[0]：0 飞出 / 1 返回 */
   private returning = false;
+  /** ai[1]：飞出段计数（≥30t 自动回收,:434-438） */
+  private outT = 0;
   private hitCd = new HitCooldown();
   life = 900;
   dead = false;
@@ -149,40 +163,69 @@ export class Boomerang extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
     const p = game.player;
-    this.rot += 0.35;
     this.hitCd.tick();
+    const solidAt = (x: number, y: number): boolean => {
+      const tx = Math.floor((x + this.w / 2) / TILE), ty = Math.floor((y + this.h / 2) / TILE);
+      return game.world.store.inBounds(tx, ty) && game.world.store.isSolid(tx, ty);
+    };
     if (!this.returning) {
-      // 飞出段：速度衰减（原版摩擦），衰减到阈值/撞墙 → 进入返回段
-      this.vx *= 0.985;
-      this.vy *= 0.985;
+      // 飞出段：直线【无摩擦】（AI_003 无速度衰减——旧实现 0.985 摩擦+低速回收
+      // 完全失真）;30t 定时回收 / 撞墙·出界回收（:434-438/:123-133）
+      this.outT++;
       this.x += this.vx;
       this.y += this.vy;
-      const tx = Math.floor((this.x + this.w / 2) / TILE);
-      const ty = Math.floor((this.y + this.h / 2) / TILE);
-      if (game.world.store.isSolid(tx, ty) || Math.hypot(this.vx, this.vy) < 2.2) {
+      // 出程旋转 = 飞行向 + π/4（:675-677,不自旋）+ 50% 尾尘（:678-686 近似）
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
+      if (Math.random() < 0.5) {
+        game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#D0E8FF', 1, 0.4, { life: 18, grav: 0, size: 2 });
+      }
+      if (this.outT >= 30 || solidAt(this.x, this.y)
+        || this.x < TILE * 10 || this.y < TILE * 10
+        || this.x > (game.world.store.w - 10) * TILE || this.y > (game.world.store.h - 10) * TILE) {
         this.returning = true;
+        this.outT = 0;
         this.hitCd.clear(); // 返程可再次命中（原版去而复返二次伤害语义）
-        // 轻微弹出防嵌入墙内
-        this.x -= this.vx; this.y -= this.vy;
+        if (solidAt(this.x, this.y)) { this.x -= this.vx; this.y -= this.vy; } // 弹出防嵌墙
       }
     } else {
-      // 返回段：朝主角加速（原版 AI_003 尾段朝 owner 归位）
-      const dx = p.cx - (this.x + this.w / 2);
-      const dy = p.cy - (this.y + this.h / 2);
+      // 返回段：tileCollide=false 穿墙（:496）;目标速度制——朝玩家 num28 px/t,
+      // 每轴逼近 num29/t,目标异号再 ×2（:586-660）;>3000px Kill（:606-610）
+      const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+      let dx = p.cx - cx, dy = p.cy - cy;
       const d = Math.hypot(dx, dy) || 1;
-      this.vx += (dx / d) * 0.9;
-      this.vy += (dy / d) * 0.9;
-      const sp = Math.hypot(this.vx, this.vy);
-      if (sp > 12) { this.vx = (this.vx / sp) * 12; this.vy = (this.vy / sp) * 12; }
+      if (d > 3000) { this.dead = true; return; }
+      const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? [9, 0.4];
+      dx = (dx / d) * spd; dy = (dy / d) * spd;
+      if (this.vx < dx) { this.vx += acc; if (this.vx < 0 && dx > 0) this.vx += acc; }
+      else if (this.vx > dx) { this.vx -= acc; if (this.vx > 0 && dx < 0) this.vx -= acc; }
+      if (this.vy < dy) { this.vy += acc; if (this.vy < 0 && dy > 0) this.vy += acc; }
+      else if (this.vy > dy) { this.vy -= acc; if (this.vy > 0 && dy < 0) this.vy -= acc; }
       this.x += this.vx;
       this.y += this.vy;
-      if (d < 16) { this.dead = true; return; } // 回到手中
+      // 返回段自旋 0.4/t × direction（:704-706）
+      this.rot += 0.4 * Math.sign(this.vx || 1);
+      // 收手 = 与玩家 AABB 相交即 Kill（:663-673）
+      if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+        this.dead = true; return;
+      }
     }
     hitEnemies(this, game, this.hitCd, 20, Math.sign(this.vx));
   }
 }
 
-// ================= 长矛（aiStyle 19，AI_019 随角色前刺） =================
+// ================= 长矛（aiStyle 19，AI_019_Spears，Projectile.cs:43198） =================
+
+/** 每型号伸缩参数（AI_019_Spears_GetSpearOffsetRelativeToPlayer :43417-43540 switch）：
+ *  [初始偏移 num6, 伸出速 num7, 缩回速 num8]——位移 = dir × shootSpeed × offset。
+ *  aiStyle 161（新短剑 802/842/938-945）不在此 AI,归 spear kind 直刺近似(GAP) */
+const SPEAR_PARAMS: Record<number, [number, number, number]> = {
+  46: [3, 1.4, 1.6], 105: [3, 2.1, 2.4], 367: [3, 1.5, 1.6], 368: [3, 1.4, 1.5],
+  222: [3, 2.1, 2.4], 342: [3, 2.1, 2.4], 47: [4, 0.9, 1.2], 153: [4, 1.3, 1.5],
+  49: [4, 0.85, 1.1], 730: [8, 1.2, 1.5], 877: [28, 0.4, 0.4], 878: [28, 0.4, 0.4],
+  879: [28, 0.4, 0.4], 64: [3, 1.7, 1.9], 215: [3, 1.7, 1.9],
+  66: [3, 1.9, 2.1], 97: [3, 1.9, 2.1], 212: [3, 1.9, 2.1], 218: [3, 1.9, 2.1],
+  130: [3, 1.0, 1.3], 1103: [4, 0.85, 1.1],
+};
 
 export class SpearProj extends Entity {
   w = 20; h = 20;
@@ -196,27 +239,32 @@ export class SpearProj extends Entity {
   /** 刺出方向（单位向量，原版出手时定死） */
   private dx: number;
   private dy: number;
-  /** 最大刺出距离 px（原版 spear reach ≈ 5.5 格 + shootSpeed 修正） */
-  private reach: number;
+  /** 原版 item.shootSpeed（velocity 模长——位移=offset×此值,勿当单位向量用） */
+  private spd: number;
   private t = 0;
   private dur: number;
+  /** 型号伸缩参数 */
+  private prm: [number, number, number];
   private hitCd = new HitCooldown();
   dead = false;
 
-  constructor(dirX: number, dirY: number, reach: number, dur: number, damage: number, knockback: number, projId: number) {
+  constructor(dirX: number, dirY: number, spd: number, dur: number, damage: number, knockback: number, projId: number) {
     super();
     const n = Math.hypot(dirX, dirY) || 1;
     this.dx = dirX / n;
     this.dy = dirY / n;
-    this.reach = reach;
+    this.spd = spd;
     this.dur = dur;
     this.damage = damage;
     this.knockback = knockback;
     this.projId = projId;
+    this.prm = SPEAR_PARAMS[projId] ?? [3, 1.9, 2.1];
   }
 
   draw(r: Renderer, cam: Camera): void {
-    drawProj(r, cam, this, this.projId, Math.atan2(this.dy, this.dx) + Math.PI / 2, '#A0A0B0');
+    // rotation = atan2(vy,vx)+π/2+π/4；spriteDirection==-1 再 -π/2（:43271-43276）
+    const base = Math.atan2(this.dy, this.dx) + Math.PI / 2 + Math.PI / 4;
+    drawProj(r, cam, this, this.projId, this.dx < 0 ? base - Math.PI / 2 : base, '#A0A0B0');
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -224,17 +272,41 @@ export class SpearProj extends Entity {
     if (this.netPuppet) { this.netPuppetStep(); return; }
     this.t++;
     if (this.t >= this.dur) { this.dead = true; return; }
-    // 原版 AI_019：矛锚定在角色中心，沿出手方向伸缩（sin 曲线 0→reach→0）
-    const k = Math.sin((this.t / this.dur) * Math.PI);
-    const ext = k * this.reach;
+    // AI_019 伸缩包络 1:1（:43441-43540）：
+    //   itemAnimation 从 max 递减；伸出相占前 2/3（num5 增长），缩回相占后 1/3（num10 增长）
+    const max = this.dur;
+    const num3 = Math.floor(max / 3);
+    const itemAnim = Math.max(0, max - this.t);
+    const num4 = Math.min(itemAnim, num3);
+    const num5 = itemAnim - num4;
+    const num9 = (max - num3) - num5;
+    const num10 = num3 - num4;
+    const [n6, n7, n8] = this.prm;
+    const offset = n6 + n7 * num9 - n8 * num10;
     const p = game.player;
-    this.x = p.cx - this.w / 2 + this.dx * ext;
-    this.y = p.cy - this.h / 2 + this.dy * ext;
+    this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
+    this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
     hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1); // 一次突刺每敌只结算一次
   }
 }
 
 // ================= 悠悠球 / 连枷（aiStyle 99 / 15，channel 语义） =================
+
+/** 悠悠球型号三表（ProjectileID.cs:185/187/189 全量 1:1；键=projId，缺省=表默认） */
+export const YOYO_RANGE: Record<number, number> = { // 最大射程 px（默认 200）
+  541: 130, 548: 170, 542: 195, 543: 207, 544: 215, 534: 220, 564: 225, 999: 225,
+  545: 235, 562: 235, 563: 250, 546: 275, 552: 270, 553: 330, 547: 280, 549: 290,
+  554: 340, 550: 370, 551: 370, 555: 360, 603: 400,
+};
+export const YOYO_TOP: Record<number, number> = {  // 顶速（默认 10）
+  541: 9, 548: 11, 542: 12.5, 543: 12, 544: 13, 534: 13, 564: 14, 999: 14,
+  545: 14, 562: 17, 563: 12, 546: 15, 552: 14, 553: 15, 547: 17, 549: 16,
+  554: 16, 550: 16, 551: 16, 555: 16.5, 603: 17.5,
+};
+export const YOYO_LIFE: Record<number, number> = {  // 寿命倍率（默认 -1=无限）
+  541: 3, 548: 5, 542: 7, 543: 6, 544: 8, 534: 9, 564: 11, 999: 11,
+  545: 13, 563: 30, 562: 16, 553: 12, 546: 16, 552: 15, 549: 14,
+};
 
 export class YoyoProj extends Entity {
   w = 16; h = 16;
@@ -256,7 +328,13 @@ export class YoyoProj extends Entity {
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
   handX = 0;
   handY = 0;
+  /** 存活秒数（AI_099 localAI[0]/60 ÷(1+ms)/2,超 YOYO_LIFE 回收） */
+  private lifeT = 0;
+  /** 回收锁（ai[0]=-1 终态:松手/超寿命/1.3×超程后不可复活,需重新使用掷出） */
+  private recalled = false;
   life = 7200;
+  /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
+  topSpeed = 10;
   dead = false;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
@@ -295,41 +373,71 @@ export class YoyoProj extends Entity {
     this.handX = p.cx;
     this.handY = p.cy;
     this.hitCd.tick();
-    if (!this.channel()) {
-      // 松手/切走：回收到手（原版 channel 结束语义）
+    // ---- AI_099_2_Yoyos 参数链（:64945-64977）----
+    const ms = p.attackSpeedMult || 1;
+    const msRange = (1 + ms * 3) / 4;          // 射程/顶速缩放(:64974-64975)
+    let range = YOYO_RANGE[this.projId] ?? 200;
+    if (p.equipStats.yoyoString) range = range * 1.25 + 30;  // 线圈 yoyoString(:64971)
+    range /= msRange;
+    let top = (YOYO_TOP[this.projId] ?? 10) / msRange;
+    let inertia = Math.max(1, 14 - top / 2);   // num7(:64968-64971)
+    const deadZone = 5 + top / 2;              // num9 光标死区半径(:64972)
+    // 寿命（:64840-64854）：秒数 ÷(1+ms)/2,超 YoyosLifeTimeMultiplier → 回收态
+    this.lifeT += 1 / 60 / ((1 + ms) / 2);
+    let lifeMul = YOYO_LIFE[this.projId] ?? -1;
+    if (p.equipStats.yoyoString && lifeMul > 0) lifeMul *= 1.5;
+    const expired = lifeMul !== -1 && this.lifeT > lifeMul;
+    if (this.recalled || !this.channel() || expired) {
+      this.recalled = true;
+      // 回收态（ai[0]=-1,:65152-65172）：惯性 ×0.8 取整、顶速 ×1.5、穿墙,
+      // lerp 朝玩家;距手 <num8+10 或 >2000 → Kill
+      inertia = Math.floor(inertia * 0.8);
+      top *= 1.5;
       const dx = p.cx - (this.x + this.w / 2);
       const dy = p.cy - (this.y + this.h / 2);
-      const d = Math.hypot(dx, dy) || 1;
-      this.vx = (dx / d) * 16;
-      this.vy = (dy / d) * 16;
+      const d = Math.hypot(dx, dy);
+      if (d < top + 10 || d === 0 || d > 2000) { this.dead = true; return; }
+      this.vx = (this.vx * (inertia - 1) + (dx / d) * top) / inertia;
+      this.vy = (this.vy * (inertia - 1) + (dy / d) * top) / inertia;
       this.x += this.vx;
       this.y += this.vy;
-      if (d < 16) this.dead = true;
+      hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx));
       return;
     }
-    // 追光标（原版 AI_099：朝光标位置加速，限线长内）
+    // ---- 活跃态（:64983-65148）----
+    if (Math.hypot(this.vx, this.vy) > top) { this.vx *= 0.98; this.vy *= 0.98; }
+    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
+    const dPlayer = Math.hypot(p.cx - cx, p.cy - cy);
+    const overRange = dPlayer > range;          // flag3:超程减速
+    if (dPlayer > range * 1.3) { this.recalled = true; return; } // flag4:1.3×超程强制回收(下帧走回收态)
+    // 光标目标钳在射程内（:65002-65034）
     const t = this.target();
-    const dx = t.x - (this.x + this.w / 2);
-    const dy = t.y - (this.y + this.h / 2);
-    const d = Math.hypot(dx, dy) || 1;
-    this.vx += (dx / d) * 0.55;
-    this.vy += (dy / d) * 0.55 + 0.02;
-    const sp = Math.hypot(this.vx, this.vy);
-    const cap = 13;
-    if (sp > cap) { this.vx = (this.vx / sp) * cap; this.vy = (this.vy / sp) * cap; }
+    let tx = t.x, ty = t.y;
+    let tdx = tx - p.cx, tdy = ty - p.cy;
+    const td = Math.hypot(tdx, tdy);
+    if (td > range) { tdx = (tdx / td) * range; tdy = (tdy / td) * range; tx = p.cx + tdx; ty = p.cy + tdy; }
+    if (overRange) {
+      inertia /= 2; top *= 2;
+      if (cx > p.cx && this.vx > 0) this.vx *= 0.5;
+      if (cy > p.cy && this.vy > 0) this.vy *= 0.5;
+      if (cx < p.cx && this.vx < 0) this.vx *= 0.5;
+      if (cy < p.cy && this.vy < 0) this.vy *= 0.5;
+    }
+    // lerp 逼近目标（:65071-65083）：死区外 velocity=(v×(num7-1)+dir×min(d/2,top))/num7
+    const dx2 = tx - cx, dy2 = ty - cy;
+    const d2 = Math.hypot(dx2, dy2);
+    if (d2 > deadZone) {
+      const step = overRange ? Math.min(d2 / 2, top / 2) : Math.min(d2 / 2, top);
+      const k = overRange ? 1 : inertia; // flag3 时 num7=1（:65066-65067）
+      this.vx = (this.vx * (k - 1) + (dx2 / d2) * step) / k;
+      this.vy = (this.vy * (k - 1) + (dy2 / d2) * step) / k;
+    } else {
+      this.vx *= 0.8; this.vy *= 0.8;  // 死区内衰减(:65127)
+    }
     this.x += this.vx;
     this.y += this.vy;
-    // 线长约束：超出即向手方向拉回
-    const ox = this.x + this.w / 2 - p.cx;
-    const oy = this.y + this.h / 2 - p.cy;
-    const od = Math.hypot(ox, oy);
-    if (od > this.stringLen) {
-      const k = this.stringLen / od;
-      this.x = p.cx + ox * k - this.w / 2;
-      this.y = p.cy + oy * k - this.h / 2;
-    }
-    // 弹墙（原版 yoyo tileCollide=false 穿墙，连枷也穿；不做碰撞）
-    hitEnemies(this, game, this.hitCd, 15, Math.sign(this.vx));
+    // yoyo tileCollide=false 穿墙;命中冷却 10t(SetDefaults localNPCHitCooldown)
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx));
   }
 }
 
@@ -395,7 +503,10 @@ function chainImg(name: string): HTMLImageElement | null {
 }
 
 export class FlailProj extends Entity {
-  w = 22; h = 22;
+  /** 原版碰撞盒按型号(Projectile.SetDefaults):247/757=34 / 947/948=20 /
+   *  1058=26 / 其余 22——写死 22 会让 5 个型号命中盒失真,2026-08-13 review */
+  w: number;
+  h: number;
   damage: number;
   knockback: number;
   projId: number;
@@ -435,6 +546,9 @@ export class FlailProj extends Entity {
     this.channel = channel;
     this.target = target;
     this.prm = { ...FLAIL_DEFAULT, ...FLAIL_PARAMS[projId] };
+    const pd = projectileData(projId);
+    this.w = pd?.width ?? 22;
+    this.h = pd?.height ?? 22;
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -457,12 +571,13 @@ export class FlailProj extends Entity {
       ctx.stroke();
       return;
     }
-    // 光照采样（Lighting.GetColor 每节一次；拿不到则全亮）
-    const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } }).lighting;
+    // 光照采样（Lighting.GetColor 每节一次；拿不到则全亮。
+    // ★lightAt 返回 0..255(Renderer 同源 /255 消费)——不除即恒满亮的静默 bug,2026-08-13 review)
+    const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } | null }).lighting;
     const lightAt = (wx: number, wy: number): number => {
       if (!lighting) return 1;
       const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
-      return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2)) ;
+      return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2) / 255);
     };
     // 球心 → 臂方向（playerArmPosition.MoveTowards(center,4) 近似为手部）
     const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
@@ -618,14 +733,14 @@ export class FlailProj extends Entity {
       const nx = this.x + this.vx;
       if (solid(nx, this.y)) {
         this.vx = -lvx * rest;
-        if (Math.abs(lvx) > 4) this.bounces++;
-        this.hitTileFx(game, nx, this.y);
+        this.bounces++; // localAI[0]:每次接触都计(:41001/:41010)——只计 >4 会让缓磨墙永不触发逃生
+        if (Math.abs(lvx) > 4) this.hitTileFx(game, nx, this.y); // num2>0 门=音尘(:40999)
       } else this.x = nx;
       const ny = this.y + this.vy;
       if (solid(this.x, ny)) {
         this.vy = -lvy * rest;
-        if (Math.abs(lvy) > 4) this.bounces++;
-        this.hitTileFx(game, this.x, ny);
+        this.bounces++;
+        if (Math.abs(lvy) > 4) this.hitTileFx(game, this.x, ny);
       } else this.y = ny;
       // 掷出态撞墙 → 坠落态（:41027-41037 + CreateImpactExplosion 音尘近似）
       if (this.st === 1 && (this.vx !== lvx || this.vy !== lvy)) {

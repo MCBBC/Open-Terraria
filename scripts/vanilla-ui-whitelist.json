@@ -1,6 +1,5 @@
 [
   "logo_1.png", "logo_2.png",
-  // FancyClassic 资源条（FancyClassicPlayerResourcesDisplaySet；展平键 UI_PlayerResourceSets_FancyClassic_*）
   "UI/PlayerResourceSets/FancyClassic/Heart_Left.png",
   "UI/PlayerResourceSets/FancyClassic/Heart_Middle.png",
   "UI/PlayerResourceSets/FancyClassic/Heart_Right.png",

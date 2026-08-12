@@ -31,6 +31,11 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（读档路径回传;旧包缺省 0） */
   altarCount?: number;
+  /** 困难矿世界锁定选种（WorldGen.SavedOreTiers；旧包缺省 -1 = 未砸过,首砸重 roll） */
+  savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
+  /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却） */
+  sundial?: number; moondial?: number;
+  fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;
   /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转；旧包缺省={}） */
   seedFlags?: import('../world/gen/SeedEasterEggs').SeedFlags;
   /** 天气快照（读档路径回传;旧包缺省=晴） */

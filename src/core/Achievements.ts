@@ -60,6 +60,7 @@ export class Achievements {
     try {
       const data = JSON.parse(raw) as {
         v: number; c?: string[]; f?: Record<string, number[]>;
+        m?: Record<string, Record<string, number[]>>;
         n?: Record<string, Record<string, number>>;
       };
       if (data.v !== 1) return;
@@ -69,10 +70,28 @@ export class Achievements {
           if (done) this.condState.set(`${ach}#${i}`, { done: true });
         });
       }
+      for (const [ach, conds] of Object.entries(data.m ?? {})) {
+        for (const [k, ids] of Object.entries(conds)) {
+          const idx = Number(k);
+          const def = this.defs.find((d) => d.name === ach);
+          const cond = def?.conditions[idx];
+          if (!cond?.ids) continue;
+          const doneIds = new Set(ids);
+          this.condState.set(`${ach}#${idx}`, {
+            doneIds, done: doneIds.size >= cond.ids.length,
+          });
+        }
+      }
       for (const [ach, conds] of Object.entries(data.n ?? {})) {
         for (const [k, v] of Object.entries(conds)) {
           const idx = Number(k);
-          this.condState.set(`${ach}#${idx}`, { done: v >= 1, val: v });
+          // ★ done 必须对阈值判定（曾写 v>=1——中途进度重载会被误判完成）
+          const def = this.defs.find((d) => d.name === ach);
+          const cond = def?.conditions[idx];
+          const threshold = (cond?.kind === 'int' || cond?.kind === 'float') ? cond.value : undefined;
+          this.condState.set(`${ach}#${idx}`, {
+            done: threshold != null ? v >= threshold : false, val: v,
+          });
         }
       }
     } catch { /* 损坏数据静默丢弃（原版 Load 同样容错） */ }
@@ -81,6 +100,7 @@ export class Achievements {
   private save(): void {
     const c = [...this.completed.keys()];
     const f: Record<string, number[]> = {};
+    const m: Record<string, Record<string, number[]>> = {};
     const n: Record<string, Record<string, number>> = {};
     for (const def of this.defs) {
       def.conditions.forEach((cond, i) => {
@@ -88,12 +108,14 @@ export class Achievements {
         if (!st) return;
         if (cond.kind === 'int' || cond.kind === 'float') {
           if (st.val) (n[def.name] ??= {})[String(i)] = st.val;
+        } else if (st.doneIds?.size) {
+          (m[def.name] ??= {})[String(i)] = [...st.doneIds];
         } else if (st.done) {
           (f[def.name] ??= [])[i] = 1;
         }
       });
     }
-    this.store?.save(JSON.stringify({ v: 1, c, f, n }));
+    this.store?.save(JSON.stringify({ v: 1, c, f, m, n }));
   }
 
   // ---- 查询 ----
@@ -130,16 +152,14 @@ export class Achievements {
     return { completed: done, doneConds: done, totalConds: def.conditions.length, ratio };
   }
 
-  /** 未完成且可显示的成就（Advisor 列表：有进度或有近完成条件者优先） */
-  advisorList(): AchDef[] {
-    return this.defs.filter((d) => !this.completed.get(d.name));
-  }
-
   /** 定义列表（注册原序——菜单列表序） */
   defList(): AchDef[] { return this.defs; }
 
   /** 弹出解锁队列（UI toast 消费） */
   popUnlocked(): string[] { const q = this.unlockedQueue; this.unlockedQueue = []; return q; }
+
+  /** 手动落盘（原版退出时存 achievements.dat 的等价点；Game 存档时调用） */
+  flush(): void { this.save(); }
 
   // ---- 通知入口（AchievementsHelper 对应方法） ----
   notifyItemPickup(itemId: number): void { this.notifyId('itemPickup', itemId); }
@@ -274,15 +294,16 @@ export class Achievements {
   private mayhem3down = false;
 
   mechaMayhemStart(activeTypes: number[]): void {
-    // ScanForMechs：127=毁灭者 134=机械骷髅王( SkeletronPrime=127? 按 Helper 源码：
-    // foundSkeletronPrime |= 127；foundDestroyer |= 134；Twins = 125 && 126)
+    // ScanForMechs（cs:495-503）：Prime=127 / Destroyer=134 / Twins=125&&126 同场齐备
     const has = (t: number) => activeTypes.includes(t);
     this.mayhemOK = has(127) && has(134) && has(125) && has(126);
   }
 
   mechaMayhemClear(activeTypes: number[]): void {
+    // ScanForMechs：Twins 仅在 125+126 同时在场才算 found（cs:495-503）
     const has = (t: number) => activeTypes.includes(t);
-    if (!(has(127) || has(134) || has(125) || has(126))) {
+    const twins = has(125) && has(126);
+    if (!(has(127) || has(134) || twins)) {
       this.mayhem1down = this.mayhem2down = this.mayhem3down = false;
     }
   }

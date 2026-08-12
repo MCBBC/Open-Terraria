@@ -29,18 +29,18 @@ const lerpValue = (a: number, b: number, x: number) =>
 
 export class FancyResourceBars {
   private t = {
-    heartLeft: loadTex('Heart_Left'),          // 28×30
-    heartMiddle: loadTex('Heart_Middle'),      // 24×30
-    heartRight: loadTex('Heart_Right'),        // 26×30
-    heartRightFancy: loadTex('Heart_Right_Fancy'), // 36×38（末格华丽帽）
-    heartFill: loadTex('Heart_Fill'),          // 22×22
-    heartFillHoney: loadTex('Heart_Fill_B'),   // 22×22（生命果金填充）
-    heartSingle: loadTex('Heart_Single_Fancy'), // 36×38（单心）
-    starTop: loadTex('Star_A'),                // 30×26
-    starMiddle: loadTex('Star_B'),             // 30×22
-    starBottom: loadTex('Star_C'),             // 30×28
-    starSingle: loadTex('Star_Single'),        // 30×32
-    starFill: loadTex('Star_Fill'),            // 22×24
+    heartLeft: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Left'),          // 28×30
+    heartMiddle: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Middle'),      // 24×30
+    heartRight: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right'),        // 26×30
+    heartRightFancy: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Right_Fancy'), // 36×38（末格华丽帽）
+    heartFill: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill'),          // 22×22
+    heartFillHoney: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Fill_B'),   // 22×22（生命果金填充）
+    heartSingle: loadTex('UI_PlayerResourceSets_FancyClassic_Heart_Single_Fancy'), // 36×38（单心）
+    starTop: loadTex('UI_PlayerResourceSets_FancyClassic_Star_A'),                // 30×26
+    starMiddle: loadTex('UI_PlayerResourceSets_FancyClassic_Star_B'),             // 30×22
+    starBottom: loadTex('UI_PlayerResourceSets_FancyClassic_Star_C'),             // 30×28
+    starSingle: loadTex('UI_PlayerResourceSets_FancyClassic_Star_Single'),        // 30×32
+    starFill: loadTex('UI_PlayerResourceSets_FancyClassic_Star_Fill'),            // 22×24
   };
 
   /** 每帧绘制（游戏画布屏幕坐标） */

@@ -284,3 +284,98 @@ export function isNpcValidForBestiaryKillCredit(vanillaId: number, isBoss: boole
   if (vanillaId === 13 || vanillaId === 14 || vanillaId === 15) return isBoss;
   return true;
 }
+
+// ============ 排序 id + 稀有度星（ContentSamples.NpcBestiarySortingId / NpcBestiaryRarityStars） ============
+// 数据来源 tools/extract-bestiary.mjs → vanilla-bestiary.json：
+//   TownNPCBestiaryPriority :4427 / NormalGoldCritterBestiaryPriority :4407 /
+//   BossBestiaryPriority :4416（GetSortedBestiaryEntriesList orderby 三键）+
+//   NPC.cs SetDefaults if 链 rarity 赋值 + ContentSamples.FillNpcRarities 显式覆盖(:1084-1220)
+import bestiaryJson from './vanilla-bestiary.json';
+
+type BestiaryJson = typeof bestiaryJson;
+const TOWN_PRIORITY: number[] = (bestiaryJson as BestiaryJson).townNpcBestiaryPriority;
+const GOLD_CRITTER_PRIORITY: number[] = (bestiaryJson as BestiaryJson).normalGoldCritterBestiaryPriority;
+const BOSS_PRIORITY: number[] = (bestiaryJson as BestiaryJson).bossBestiaryPriority;
+const NPC_RARITY: Record<string, number> = (bestiaryJson as BestiaryJson).npcRarity;
+const STAR_OVERRIDES: Record<string, number> = (bestiaryJson as BestiaryJson).rarityStarOverrides;
+
+/** NPC.isLikeATownNPC（NPC.cs:6772-6781）：453 恒真，其余走 townNPC 旗 */
+export function isLikeATownNpc(npcId: number): boolean {
+  return npcId === 453 || BESTIARY_TOWN_IDS.has(npcId);
+}
+
+/** ContentSamples.GetNPCBestiaryRarityStarsCount（:1223-1285）1:1：
+ *  1 + rarity（1→+1 / 2→+1.5 / 3→+2 / 4→+2.5 / 5→+3 / >5→+3.5）+ boss 0.5 +
+ *  战力阈（>50→+1 / >150→+1.5 / >500→+2 / >1000→+2.5 / >5000→+3 / >10000→+3.5），
+ *  钳 5 取整。FillNpcRarities 先全量算公式再显式覆盖（城镇 1-3 / Boss 4-5 段），
+ *  覆盖优先。stats 缺表（1405 json 缺 id）按 0 计——与原版 SetDefaults 后的
+ *  实际值可能偏差，登记待办 */
+export function bestiaryRarityStars(npcId: number): number {
+  const o = STAR_OVERRIDES[npcId];
+  if (o !== undefined) return o;
+  const v = VANILLA_NPCS[String(npcId)];
+  const rarity = NPC_RARITY[npcId] ?? 0;
+  const boss = VANILLA_BOSS_IDS.has(npcId);
+  let n = 1 + rarity;
+  if (rarity === 1) n += 1;
+  else if (rarity === 2) n += 1.5;
+  else if (rarity === 3) n += 2;
+  else if (rarity === 4) n += 2.5;
+  else if (rarity === 5) n += 3;
+  else if (rarity > 0) n += 3.5;
+  if (boss) n += 0.5;
+  const power = (v?.damage ?? 0) + (v?.defense ?? 0) + Math.floor((v?.lifeMax ?? 0) / 4);
+  if (power > 10000) n += 3.5;
+  else if (power > 5000) n += 3;
+  else if (power > 1000) n += 2.5;
+  else if (power > 500) n += 2;
+  else if (power > 150) n += 1.5;
+  else if (power > 50) n += 1;
+  return Math.trunc(Math.min(n, 5));
+}
+
+let sortingIdCache: Map<number, number> | null = null;
+
+/** ContentSamples.CreateBestiarySortingIds（:1063-1073）——GetSortedBestiaryEntriesList
+ *  （BestiaryHelper，ContentSamples.cs:745-753）九键 orderby 链的稳定全序 → 1..N 序号：
+ *  城镇优先位 → !isLikeATownNPC → 金小动物优先位 → !CountsAsACritter → Boss 优先位 →
+ *  群系组序 → aiStyle → 战力 → 星数（全升序；IndexOf 缺席 = MAX，Boss 缺席 = -1）。
+ *  ⚠️ 第 6 键 GetLowestBiomeGroupIndex（:762-772）未提取——需 BestiaryDatabase 逐 NPC
+ *  的 SpawnCondition 过滤元素表（BestiaryDatabaseNPCsPopulator 逐条注册，无静态源），
+ *  此处以常量 0 代入：同档普通敌怪的组内相对序与原版有偏差，登记待办 */
+export function bestiarySortingId(npcId: number): number {
+  if (!sortingIdCache) {
+    sortingIdCache = new Map();
+    const townIdx = new Map(TOWN_PRIORITY.map((id, i) => [id, i]));
+    const goldIdx = new Map(GOLD_CRITTER_PRIORITY.map((id, i) => [id, i]));
+    const bossIdx = new Map(BOSS_PRIORITY.map((id, i) => [id, i]));
+    const MAX = Number.MAX_SAFE_INTEGER;
+    const sortKey = (id: number): number[] => {
+      const v = VANILLA_NPCS[String(id)];
+      return [
+        townIdx.get(id) ?? MAX,                 // GetBestiaryTownPriority
+        isLikeATownNpc(id) ? 0 : 1,             // !isLikeATownNPC
+        goldIdx.get(id) ?? MAX,                 // GetBestiaryNormalGoldCritterPriority
+        countsAsACritter(id) ? 0 : 1,           // !CountsAsACritter
+        bossIdx.get(id) ?? -1,                  // GetBestiaryBossPriority
+        0,                                      // GetLowestBiomeGroupIndex（未提取，登记）
+        v?.aiStyle ?? 0,
+        ((v?.damage ?? 0) + (v?.defense ?? 0) + Math.floor((v?.lifeMax ?? 0) / 4)) * 4, // 战力 ×4 保整
+        bestiaryRarityStars(id),
+      ];
+    };
+    const ids = Object.keys(NPC_NAME_BY_ID)
+      .map(Number)
+      .filter((n) => Number.isInteger(n) && n !== 0);
+    ids.sort((a, b) => {
+      const ka = sortKey(a);
+      const kb = sortKey(b);
+      for (let i = 0; i < ka.length; i++) {
+        if (ka[i] !== kb[i]) return ka[i] - kb[i];
+      }
+      return a - b;   // 全键平手：稳定序（原版 List 稳定排序保持注册序）
+    });
+    ids.forEach((id, i) => sortingIdCache!.set(id, i + 1));
+  }
+  return sortingIdCache.get(npcId) ?? Number.MAX_SAFE_INTEGER;
+}

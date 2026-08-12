@@ -50,11 +50,15 @@ export class SaveClient {
       moonPhase: world.clock.moonPhase, moonType: world.moonType,
       difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
       journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
+      sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
+      fastForwardTimeToDawn: world.fastForwardTimeToDawn,
+      fastForwardTimeToDusk: world.fastForwardTimeToDusk,
       chests: world.chests, signs: world.signs, flags: world.flags,
       weather: weatherToSave(world.weather),
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
         x: world.invasionX, delay: world.invasionDelay },
       altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+      savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
       bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
       // 挂物族存放物：内部 id 直传（worker 侧 serializeSave 统一过稳定 id 表）
       furniture: world.furnitureItems,

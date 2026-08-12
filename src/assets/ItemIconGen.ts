@@ -228,56 +228,9 @@ function genItemIcon(key: string): HTMLCanvasElement {
   if (key.endsWith('_ore')) {
     return drawOreIcon(metals[key.replace('_ore', '')] ?? MATS.copper);
   }
-  switch (key) {
-    case 'gel':
-      return simple('#000', (s) => {
-        for (let x = 4; x <= 11; x++) for (let y = 6; y <= 12; y++) {
-          if ((x === 4 || x === 11) && (y === 6 || y === 12)) continue;
-          s(x, y, y === 6 ? '#8CE88C' : y === 12 ? '#3AA03A' : '#5FD35F');
-        }
-        s(6, 8, '#B0F5B0'); s(7, 8, '#B0F5B0');
-      });
-    case 'mushroom_item':
-      return simple('#000', (s) => {
-        for (let x = 5; x <= 10; x++) s(x, 9, '#E8DFC8');
-        for (let x = 3; x <= 12; x++) s(x, 8, x < 5 || x > 10 ? MATS.copper.dark : MATS.copper.base);
-        for (let x = 5; x <= 10; x++) s(x, 7, MATS.copper.light);
-        s(5, 8, '#F0E8D8'); s(10, 7, '#F0E8D8');
-      });
-    case 'lens':
-      return simple('#000', (s) => {
-        for (let x = 4; x <= 11; x++) for (let y = 4; y <= 11; y++) {
-          const dx = x - 7.5, dy = y - 7.5;
-          if (dx * dx + dy * dy < 15) s(x, y, (dx < 0 && dy < 0) ? '#FFFFFF' : MATS.eye.base);
-        }
-        s(7, 7, '#202020'); s(8, 7, '#202020'); s(7, 8, '#202020'); s(8, 8, '#202020');
-      });
-    case 'suspicious_eye':
-      return simple('#000', (s) => {
-        for (let x = 2; x <= 13; x++) for (let y = 2; y <= 13; y++) {
-          const dx = x - 7.5, dy = y - 7.5;
-          if (dx * dx + dy * dy < 30) s(x, y, MATS.eye.base);
-        }
-        for (let x = 6; x <= 9; x++) for (let y = 5; y <= 10; y++) s(x, y, MATS.eyeRed.base);
-        s(7, 7, '#101010'); s(8, 7, '#101010'); s(7, 8, '#101010'); s(8, 8, '#101010');
-      });
-    case 'lesser_healing_potion':
-      return simple('#000', (s) => {
-        for (let x = 6; x <= 9; x++) for (let y = 3; y <= 5; y++) s(x, y, '#9A8060');
-        for (let x = 5; x <= 10; x++) for (let y = 6; y <= 13; y++) {
-          if ((x === 5 || x === 10) && (y === 6 || y === 13)) continue;
-          s(x, y, y < 9 ? '#E83050' : '#B01838');
-        }
-        s(6, 7, '#FF7088');
-      });
-    case 'coin_copper':
-      return simple('#000', (s) => {
-        for (let x = 5; x <= 10; x++) for (let y = 5; y <= 10; y++) {
-          const dx = x - 7.5, dy = y - 7.5;
-          if (dx * dx + dy * dy < 8) s(x, y, (dx < 0 && dy < 0) ? MATS.copper.light : MATS.copper.base);
-        }
-      });
-  }
+  // (本地键专属像素画分支 gel/mushroom_item/lens/suspicious_eye/
+  //  lesser_healing_potion/coin_copper 已随本地物品退役移除——vi_ 物品图标
+  //  走原版 Item_Atlas,此兜底仅服务残余 place_v_/无素材条目)
   // 兜底：问号块
   return simple('#888', (s) => {
     for (let x = 3; x <= 12; x++) for (let y = 3; y <= 12; y++) s(x, y, '#777');

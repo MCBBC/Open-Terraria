@@ -564,6 +564,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       // 世界难度（WldParser.ts:108-111 gameMode 位；Main.cs:2677）——
       // 0 经典 1 专家 2 大师 3 旅程，loadSaveData 回填 world.difficulty
       difficulty: wld.gameMode,
+      // 日晷/月晷快进四件套（WF:2120/2203/2449-2450）——曾整组丢弃
+      sundialCooldown: wld.sundialCooldown,
+      moondialCooldown: wld.moondialCooldown,
+      fastForwardTimeToDawn: wld.fastForwardTimeToDawn,
+      fastForwardTimeToDusk: wld.fastForwardTimeToDusk,
     },
     clock: { timeOfDay, dayCount: 1,
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）

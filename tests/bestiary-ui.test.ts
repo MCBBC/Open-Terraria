@@ -7,10 +7,12 @@
 import { describe, it, expect, beforeAll } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { languageManager } from '../src/i18n/LanguageManager';
+import { Lang } from '../src/i18n/Lang';
 import {
   BST_CELL, bestiaryGridSize, bestiaryRangeText, clampBestiaryOffset,
   bestiaryPageCount, bestiaryRows, filterBestiaryRows, sortBestiaryRows,
   bestiaryRepNpcId, isBossCredit, flattenDropsForNpc, dropRateText,
+  bestiarySpawnConditions, bestiaryFlavorText, SPAWN_BY_NPC,
   DEFAULT_BESTIARY_FILTER, type BestiarySortKey,
 } from '../src/ui/BestiaryPanel';
 import { BestiaryTracker, UnlockState, bestiaryCreditId, bestiaryEntries } from '../src/data/Bestiary';
@@ -203,5 +205,50 @@ describe('掉落表展平（ItemDropBestiaryInfoElement 近似）', () => {
   it('未知/无规则 NPC 返回空（不炸）', () => {
     expect(flattenDropsForNpc(0)).toEqual([]);
     expect(flattenDropsForNpc(46)).toEqual([]); // 兔子无击杀掉落注册
+  });
+});
+
+// 出没环境 + 风味文本（BestiaryDatabaseNPCsPopulator :14-302/:802/:1661 +
+// BestiaryEntry.cs:42-47 / TryGivingEntryFlavorTextIfItIsMissing populator:685-714）。
+// 数据 = tools/extract-bestiary-spawn.mjs → vanilla-bestiary-spawn.json（60 条件 ×
+// 681 NPC × 839 注册项），显示名 = Lang（Bestiary_Biomes/Times/Events/Invasions）。
+describe('出没环境与风味文本', () => {
+  it('bestiarySpawnConditions：注册序保留 + langKey/显示名（蓝史莱姆 1 = 地表+白天）', () => {
+    const conds = bestiarySpawnConditions(1);
+    expect(conds.map((c) => c.key)).toEqual(['Bestiary_Biomes.Surface', 'Bestiary_Times.DayTime']);
+    expect(conds.map((c) => c.label)).toEqual(['地表', '白天']);
+    expect(conds[0].priority).toBe(0);   // Surface DisplayTextPriority=0
+    expect(conds[1].priority).toBe(36);  // DayTime=36
+  });
+
+  it('僵尸 3 = 夜间（Times.NightTime 37）；未知 id 空集不炸', () => {
+    const conds = bestiarySpawnConditions(3);
+    expect(conds).toHaveLength(1);
+    expect(conds[0].key).toBe('Bestiary_Times.NightTime');
+    expect(conds[0].label).toBe('夜间');
+    expect(bestiarySpawnConditions(999999)).toEqual([]);
+  });
+
+  it('风味文本：有键直取 Bestiary_FlavorText.npc_<内部名>（BestiaryEntry.cs:42-47）', () => {
+    expect(bestiaryFlavorText(3)).toBe(Lang.text('Bestiary_FlavorText.npc_Zombie'));
+    expect(bestiaryFlavorText(3)).toContain('食脑怪');
+    expect(bestiaryFlavorText(4)).toBe(Lang.text('Bestiary_FlavorText.npc_EyeofCthulhu'));
+  });
+
+  it('风味缺失回退：最高 DisplayTextPriority 出没环境 → Bestiary_BiomeText.biome_*（populator:685-714）', () => {
+    // 8 DevourerBody：无风味键；条件 = 腐化之地(7) + 地下腐化之地(8) → 取后者
+    expect(Lang.has('Bestiary_FlavorText.npc_DevourerBody')).toBe(false);
+    const f = bestiaryFlavorText(8);
+    expect(f).toBe(Lang.text('Bestiary_BiomeText.biome_UndergroundCorruption'));
+    expect(f).toContain('腐化之地');
+  });
+
+  it('提取表规模锁：60 条件 / 681 NPC（防提取脚本回归漏块）', () => {
+    expect(bestiarySpawnConditions(-1)).toHaveLength(2);  // 绿史莱姆变种：腐化 + 地下腐化
+    expect(bestiarySpawnConditions(50)[0].key).toBe('Bestiary_Biomes.Surface'); // 史莱姆王
+    let n = 0;
+    for (const p of Object.keys(SPAWN_BY_NPC)) n += SPAWN_BY_NPC[p].length;
+    expect(Object.keys(SPAWN_BY_NPC)).toHaveLength(681);
+    expect(n).toBe(839);
   });
 });

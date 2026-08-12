@@ -41,6 +41,11 @@ export interface GenState {
   dungeonTheme: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
+  /** GenVars.CurrentDungeonGenVars.generatingDungeonPositionX（DungeonCrawler.cs:346 初值
+   *  =爬升锚 x，:394 回写=**最高房 InnerBounds.Center.X**）。Pyramids 地牢回避带（cs:15447）
+   *  消费的是它，不是 Reset 期 dungeonLocation——两字段混用会把回避带平移数百格
+   *  （2026-08-12 金字塔会话 handoff 疑点，已核实修复） */
+  generatingDungeonPositionX: number;
   lAltarX: number;             // 神庙祭坛 3×2 左上角（GenVars.lAltarX/Y 语义；-1=未放置）
   lAltarY: number;
   dungeonEntY: number;        // 入口门厅可站立点 Y
@@ -132,7 +137,7 @@ export function newGenState(w: number, h: number): GenState {
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
-    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
+    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, generatingDungeonPositionX: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
     shellStartXLeft: 0, shellStartYLeft: 0, shellStartXRight: 0, shellStartYRight: 0,

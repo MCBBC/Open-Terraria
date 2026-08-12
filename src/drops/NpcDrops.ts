@@ -81,6 +81,10 @@ export interface NpcDropCtx {
   ai3?: number;
   /** NPC localAI[3]（引擎未承载，恒 undefined → 依赖它的分支恒 false） */
   localAi3?: number;
+  /** NPC.HasPlayerTarget（NPC.cs:6603 = target∈[0,255)；TargetClosest 的 TryTrackingTarget
+   *  无距离门，单人 = 玩家存活非 ghost）。五个悠悠球掉落条件的数据源（Conditions.cs:1136-1244），
+   *  Enemy 击杀处注入 */
+  hasPlayerTarget?: boolean;
   /** NPC.AnyNPCs(type)（Enemy 注入存活同型扫描；MissingTwin 条件数据源） */
   anyNpcOfType?: (type: number) => boolean;
   extras?: DropExtras;
@@ -118,6 +122,11 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'IsHardmode': return ctx.hardMode;
     case 'NotRemixSeedHardmode': return ctx.hardMode;
     case 'RemixSeedHardmode': return false;
+    // Conditions.cs:1370-1394 / :1318-1342：!remixWorld && !hardMode / remixWorld && !hardMode。
+    // remix 秘密种子未实装（remixWorld 恒 false）→ 前者退化为 !hardMode（同 NotRemixSeedHardmode
+    // 的退化约定），后者恒 false。曾双双落 default → 冰模仿怪 629 肉前池链整支失效
+    case 'NotRemixSeedEasymode': return !ctx.hardMode;
+    case 'RemixSeedEasymode': return false;
     case 'RemixSeed': return false;
     case 'NotRemixSeed': return true;
     case 'NeverTrue': return false;
@@ -126,9 +135,14 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
     case 'IsCrimsonAndNotExpert': return ctx.crimson && !ctx.isExpert;
     case 'IsCorruptionAndNotExpert': return !ctx.crimson && !ctx.isExpert;
     case 'IsChristmas': return !!ex?.xmas;
-    case 'HalloweenWeapons':
-    case 'HalloweenGoodieBagDrop': return !!ex?.halloween;
-    case 'XmasPresentDrop': return !!ex?.xmas;
+    case 'HalloweenWeapons': return !!ex?.halloween;
+    case 'HalloweenGoodieBagDrop': case 'XmasPresentDrop': {
+      // Conditions.cs:891-934：季节门之外还有 NPC 门——lifeMax>1 && damage>0 && !friendly
+      // && type∉{121 墓穴爬虫,23 诅咒骷髅头} && value>0（曾只看季节，雕像怪 0 value 也会掉袋）
+      const seasonal = name === 'HalloweenGoodieBagDrop' ? !!ex?.halloween : !!ex?.xmas;
+      return seasonal && ctx.lifeMax > 1 && ctx.damage > 0 && !ctx.friendly
+        && ctx.type !== 121 && ctx.type !== 23 && ctx.value > 0;
+    }
     case 'DontStarveIsUp': return false;
     case 'TenthAnniversaryIsUp': return false;
     case 'DontStarveIsNotUp': case 'TenthAnniversaryIsNotUp': return true;
@@ -200,7 +214,9 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
         && ctx.y / 16 > ctx.underworldTileY;
     case 'SoulOfLight': case 'SoulOfNight': {
       // SoulOfWhateverConditionCanDrop(Conditions.cs:1574)：hardMode && lifeMax>1 &&
-      // !friendly && !boss && y>rockLayer && value>=1，排除史莱姆/鸟妖族等
+      // !friendly && !boss && y>rockLayer && value>=1；先拒 NPCID.Sets.DontDropDungeonKeysOrSouls
+      // （= {23} 诅咒骷髅头，NPCID.cs:4438）再排除 switch 黑名单 {1,13,14,15,121,535}
+      if (ctx.type === 23) return false;
       if (!ctx.hardMode || ctx.lifeMax <= 1 || ctx.friendly || ctx.boss || ctx.value < 1) return false;
       if (ctx.y / 16 <= ctx.rockLayerTile) return false;
       if ([1, 13, 14, 15, 121, 535].includes(ctx.type)) return false;
@@ -213,8 +229,9 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
         && (ctx.x / 16 < 380 || ctx.x / 16 > ctx.maxTilesX - 380);
     case 'JungleKeyCondition': case 'CorruptKeyCondition': case 'CrimsonKeyCondition':
     case 'HallowKeyCondition': case 'FrozenKeyCondition': case 'DesertKeyCondition': {
-      // Conditions.cs:986-1120：value>0 && hardMode && 玩家在对应 zone（Desert 还需非海滩）
-      if (ctx.value <= 0 || !ctx.hardMode) return false;
+      // Conditions.cs:986-1120：value>0 && !DontDropDungeonKeysOrSouls（={23}，NPCID.cs:4438）
+      // && hardMode && 玩家在对应 zone（Desert 还需非海滩）
+      if (ctx.value <= 0 || !ctx.hardMode || ctx.type === 23) return false;
       switch (name) {
         case 'JungleKeyCondition': return !!ex?.zoneJungle;
         case 'HallowKeyCondition': return !!ex?.zoneHallow;
@@ -225,21 +242,38 @@ export function evalCond(name: string, args: unknown[], ctx: NpcDropCtx): boolea
       }
       return false;
     }
-    case 'YoyoCascade': // Conditions.cs:1136 !hardMode && lifeMax>5 && !friendly && value>0 && y>maxTilesY-350 && downedBoss3
-      return !ctx.hardMode && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0
+    // 五个悠悠球条件（Conditions.cs:1136-1244）共用谓词：HasPlayerTarget + lifeMax>5 +
+    // !friendly + value>0（曾漏 HasPlayerTarget——NPC.cs:6603，Enemy 注入 ctx.hasPlayerTarget）
+    case 'YoyoCascade': // !hardMode && y>maxTilesY-350 && downedBoss3
+      return !ctx.hardMode && !!ctx.hasPlayerTarget && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0
         && ctx.y / 16 > ctx.maxTilesY - 350 && downed(ctx, 35);
-    case 'YoyosAmarok': // hardMode && ZoneSnow && lifeMax>5 && !friendly && value>0
-      return ctx.hardMode && !!ex?.zoneSnow && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
-    case 'YoyosYelets': // hardMode && ZoneJungle && downedMechAny && …
+    case 'YoyosAmarok': // hardMode && ZoneSnow
+      return ctx.hardMode && !!ex?.zoneSnow && !!ctx.hasPlayerTarget
+        && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
+    case 'YoyosYelets': // hardMode && ZoneJungle && downedMechAny
       return ctx.hardMode && !!ex?.zoneJungle && (downed(ctx, 134) || downed(ctx, 125) || downed(ctx, 127))
-        && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
-    case 'YoyosKraken': // hardMode && ZoneDungeon && downedPlantera && …
+        && !!ctx.hasPlayerTarget && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
+    case 'YoyosKraken': // hardMode && ZoneDungeon && downedPlantera
       return ctx.hardMode && !!ex?.zoneDungeon && downed(ctx, 262)
-        && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
-    case 'YoyosHelFire': // hardMode && !ZoneDungeon && y>(rockLayer+maxTilesY*2)/3 && …
+        && !!ctx.hasPlayerTarget && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
+    case 'YoyosHelFire': // hardMode && !ZoneDungeon && y>(rockLayer+maxTilesY*2)/3
       return ctx.hardMode && !ex?.zoneDungeon
         && ctx.y / 16 > (ctx.rockLayerTile + ctx.maxTilesY * 2) / 3
-        && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
+        && !!ctx.hasPlayerTarget && ctx.lifeMax > 5 && !ctx.friendly && ctx.value > 0;
+    // —— 以下条件在当前 JSON 未出现（提取器按注册表收敛），但 Conditions.cs 有定义、
+    //    语义可精确实现：先补齐避免未来重建后落 default 假绿 ——
+    case 'NotMasterMode': return !ctx.isMaster;            // Conditions.cs:484
+    case 'IsMasterMode': return ctx.isMaster;              // Conditions.cs:694
+    case 'IsCrimson': return ctx.crimson;                  // Conditions.cs:712（WorldGen.crimson）
+    case 'IsCorruption': return !ctx.crimson;              // Conditions.cs:730
+    case 'MechanicalBossesDummyCondition': return true;    // Conditions.cs:372
+    case 'PlayerNeedsHealing': return ctx.hp < ctx.hpMax;  // Conditions.cs:561
+    case 'IsPumpkinMoon': return ctx.moonEvent?.kind === 2; // Conditions.cs:231
+    case 'SkyblockIsNotUp': return true;                   // Conditions.cs:1534（天空盒世界未实装）
+    case 'DropExtraGel': return false;                     // Conditions.cs:448（zenith 秘密种子特性）
+    case 'NotDropExtraGel': return true;                   // Conditions.cs:466
+    // 备案（无法精确实现，当前 JSON 也未用到）：IsUsingSpecificAIValues(Conditions.cs:27)
+    // 需按槽位比对 ai[0..3]——ctx 仅承载 ai3，若未来注册表引用需先扩 ctx
     default:
       warnOnce(`cond:${name}`, `未知掉落条件 ${name}（按 false 处理）`);
       return false;
@@ -262,6 +296,21 @@ function rollLuck(ctx: NpcDropCtx, denom: number, num: number): boolean {
   return ctx.rng.int(0, denom - 1) < num;
 }
 
+/** 规则掷骰统一入口：JSON 的 noLuck 标记（NotScalingWithLuck 族）此前被忽略——
+ *  CommonDropNotScalingWithLuck.cs:17 / OneFromOptionsNotScaledWithLuckDropRule.cs:115
+ *  用 info.rng.Next(denom)<num（不进 Luck.RollLuck），必须走直掷而非 rollLuck，
+ *  否则幸运玩家在这些规则上白吃加成（如 EoC 专家 Ore 池 NormalvsExpert…NotScalingWithLuck）。
+ *  denom<=1 直接过与 rollLuck 同约定（结果恒真，仅差一次空抽） */
+function tryRoll(ctx: NpcDropCtx, rule: Rule): boolean {
+  const denom = rule.denom ?? 1;
+  const num = rule.num ?? 1;
+  if (rule.noLuck) {
+    if (denom <= 1) return true;
+    return ctx.rng.int(0, denom - 1) < num;
+  }
+  return rollLuck(ctx, denom, num);
+}
+
 function pushDrop(out: NpcDropOutcome, id: number, n: number) {
   if (n > 0) out.drops.push({ id, n });
 }
@@ -276,16 +325,16 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
   let state: State;
   switch (rule.k) {
     case 'common': {
-      if (rollLuck(ctx, rule.denom, rule.num ?? 1)) {
+      if (tryRoll(ctx, rule)) {
         pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1));
         state = 'success';
       } else state = 'failedRoll';
       break;
     }
     case 'rerolls': {
-      // CommonDropWithRerolls：rerolls+1 次掷骰任一成功
+      // CommonDropWithRerolls：rerolls+1 次掷骰任一成功（继承 RollLuck，无 noLuck 变体）
       let hit = false;
-      for (let i = 0; i <= (rule.rerolls ?? 0); i++) hit = hit || rollLuck(ctx, rule.denom, rule.num ?? 1);
+      for (let i = 0; i <= (rule.rerolls ?? 0); i++) hit = hit || rollLuck(ctx, rule.denom ?? 1, rule.num ?? 1);
       if (hit) { pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1)); state = 'success'; }
       else state = 'failedRoll';
       break;
@@ -293,15 +342,21 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
     case 'cond': {
       // ItemDropWithConditionRule：条件不过 = DoesntFillConditions（failedRoll 链不进）
       if (!condPass(rule, ctx)) { state = 'failedCond'; break; }
-      if (rollLuck(ctx, rule.denom, rule.num ?? 1)) {
+      if (rollLuck(ctx, rule.denom ?? 1, rule.num ?? 1)) {
         pushDrop(out, rule.item, ctx.rng.int(rule.min ?? 1, rule.max ?? 1));
         state = 'success';
       } else state = 'failedRoll';
       break;
     }
     case 'oneOf': {
-      // OneFromOptionsDropRule：过掷后等权取一
-      if (rollLuck(ctx, rule.denom, rule.num ?? 1)) {
+      // OneFromOptionsDropRule：过掷后等权取一。提取器保证 ids 非空（空池会带
+      // _unresolved 备案），防御性兜底防 ids.length-1 为负
+      if (!rule.ids?.length) {
+        if (rule._unresolved) warnOnce(`unresolved:${rule._unresolved}`, `oneOf 池未解析：${rule._unresolved}（跳过）`);
+        state = 'failedRoll';
+        break;
+      }
+      if (tryRoll(ctx, rule)) {
         pushDrop(out, rule.ids[ctx.rng.int(0, rule.ids.length - 1)], 1);
         state = 'success';
       } else state = 'failedRoll';
@@ -338,8 +393,13 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
     }
     case 'masterAll': { // DropBasedOnMasterMode(DropNothing, perPlayer(item, denom, IsMasterMode))
       if (ctx.isMaster) {
-        // perPlayer 规则 TryDropping 恒 Success，掷骰在掉落内部决定
-        if (rollLuck(ctx, rule.denom ?? 1, 1)) pushDrop(out, rule.item, 1);
+        // DropPerPlayerOnThePlayer → CommonCode.DropItemForEachInteractingPlayerOnThePlayer
+        // （CommonCode.cs:57-70）：掷骰 rng.Next(denom)<1（不走 Luck）；且无论掷中与否
+        // 收尾 `npc.value = 0f`——即大师模式 Boss 掉宠物这条恒清钱币（曾漏：宠物+钱币双掉）
+        out.zeroValue = true;
+        if ((rule.denom ?? 1) > 1 && ctx.rng.int(0, (rule.denom ?? 1) - 1) < 1) {
+          pushDrop(out, rule.item, 1);
+        }
         state = 'success';
       } else state = 'failedCond';
       break;
@@ -424,8 +484,10 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       break;
     }
     default:
-      warnOnce(`rule:${rule.k}`, `未实现的规则 kind ${rule.k}（跳过）`);
-      state = 'success';
+      // 未知 kind：按 DoesntFillConditions 处理（曾返回 success——会让挂在它身上的
+      // OnSuccess 链整支误触发；failedCond 则三条链全部不进，语义最保守）
+      warnOnce(`rule:${rule.k}`, `未实现的规则 kind ${rule.k}（按 failedCond 跳过）`);
+      state = 'failedCond';
       break;
   }
   // 链：按父状态门控（Chains.cs TryIfSucceeded/TryIfFailedRandomRoll/TryIfDoesntFillConditions）
@@ -453,25 +515,36 @@ export function resolveDrops(ctx: NpcDropCtx): NpcDropOutcome {
   return out;
 }
 
-// ============ 钱币管线（NPCLoot_DropMoney :80412 1:1，luck=0 → 单掷） ============
+// ============ 钱币管线（NPCLoot_DropMoney :80412 1:1） ============
 export function rollCoins(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
-  // NPCLoot_DropMoney :80414：|luck| 概率 → 掷两次取后者（幸运重掷）
-  if ((ctx.luck ?? 0) !== 0 && ctx.rng.next() < Math.abs(ctx.luck!)) {
-    return rollCoinsOnce(value, ctx, bloodMoon, midas);
+  // :80414-80417：|luck| 概率掷两轮；:80477-80487 第一轮存底，第二轮 luck>0 取大 /
+  // luck<0 取小（幸运取极值——曾两个分支都是单掷，重掷门形同虚设）
+  const luck = ctx.luck ?? 0;
+  const twice = luck !== 0 && ctx.rng.next() < Math.abs(luck);
+  let num = coinAmountOnce(value, ctx, bloodMoon, midas);
+  if (twice) {
+    const second = coinAmountOnce(value, ctx, bloodMoon, midas);
+    num = luck > 0 ? Math.max(num, second) : Math.min(num, second);
   }
-  return rollCoinsOnce(value, ctx, bloodMoon, midas);
+  return splitCoins(num, ctx.rng);
 }
-function rollCoinsOnce(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas = false): ResolvedDrop[] {
+/** 单轮金额（:80422-80459 的乘子链，抽签顺序照抄：midas 在基线掷之前） */
+function coinAmountOnce(value: number, ctx: NpcDropCtx, bloodMoon: boolean, midas: boolean): number {
   const rng = ctx.rng;
-  let num = value * (1 + rng.int(-20, 75) * 0.01); // Next(-20,76) → [-20,75]
-  if (midas) num *= 1 + rng.int(10, 50) * 0.01;   // 金药剂 midas（:80426 Next(10,51) 左闭右开 → int(10,50)；rng.int(a,b)=Next(a,b+1) 约定）
+  let num = value;
+  if (midas) num *= 1 + rng.int(10, 50) * 0.01;   // 金药剂 midas（:80422 Next(10,51) 左闭右开 → int(10,50)；rng.int(a,b)=Next(a,b+1) 约定）
+  num *= 1 + rng.int(-20, 75) * 0.01;             // :80425 Next(-20,76) → [-20,75]
   if (rng.int(0, 1) === 0) num *= 1 + rng.int(5, 10) * 0.01;    // 1/2 ×(1.05-1.10)
   if (rng.int(0, 3) === 0) num *= 1 + rng.int(10, 20) * 0.01;   // 1/4 ×(1.10-1.20)
   if (rng.int(0, 7) === 0) num *= 1 + rng.int(15, 30) * 0.01;   // 1/8 ×(1.15-1.30)
   if (rng.int(0, 15) === 0) num *= 1 + rng.int(20, 40) * 0.01;  // 1/16 ×(1.20-1.40)
   if (rng.int(0, 31) === 0) num *= 1 + rng.int(25, 50) * 0.01;  // 1/32 ×(1.25-1.50)
   if (rng.int(0, 63) === 0) num *= 1 + rng.int(50, 100) * 0.01; // 1/64 ×(1.50-2.00)
-  if (bloodMoon) num *= 1 + rng.int(0, 100) * 0.01;
+  if (bloodMoon) num *= 1 + rng.int(0, 100) * 0.01;             // :80457 Next(101)
+  return num;
+}
+/** 贪心拆币（:80489-80540，大额先裂变再按面额摊） */
+function splitCoins(num: number, rng: RNG): ResolvedDrop[] {
   const drops: ResolvedDrop[] = [];
   while (Math.floor(num) > 0) {
     if (num > 1000000) {

@@ -192,9 +192,16 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect([areaPlayer.w, areaPlayer.h]).toEqual([44, 60]);
     expect(areaPlayer.rows).toHaveLength(60);
 
-    // tiles.focus：三焦点键（hover/相机中心/玩家脚下）齐全
+    // tiles.focus：三焦点键（hover/相机中心/玩家脚下）+ 5×5 邻域环转储两份
+    //（DebugReport.ts:627 hoverRing/playerRing——贴图问题现场常不在焦点上）
     const focus = tiles.focus as Record<string, Record<string, unknown>>;
-    expect(Object.keys(focus).sort()).toEqual(['camera', 'hover', 'player']);
+    expect(Object.keys(focus).sort()).toEqual(['camera', 'hover', 'hoverRing', 'player', 'playerRing']);
+    // 环键形如 "x,y"（仅保留非空格；焦点自身不入环）
+    for (const ringKey of ['hoverRing', 'playerRing']) {
+      const ring = focus[ringKey] as Record<string, unknown> | null;
+      if (!ring) continue;
+      for (const k of Object.keys(ring)) expect(k).toMatch(/^-?\d+,-?\d+$/);
+    }
     // hover=(11,30) 泥土：cell 链（def 字段/帧编码 blend/墙 62）
     const hov = focus.hover;
     expect([hov.x, hov.y]).toEqual([11, 30]);

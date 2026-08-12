@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { RNG } from '../src/core/rng';
 import {
-  resolveDrops, rollCoins, rollHeartsAndStars, npcValueOf,
+  resolveDrops, rollCoins, rollHeartsAndStars, npcValueOf, evalCond,
   type NpcDropCtx,
 } from '../src/drops/NpcDrops';
 import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
@@ -186,5 +186,107 @@ describe('怪物掉落采样（行为）', () => {
   it('恶魔眼晶状体→可疑眼球条件（EoC 击败后不掉，条件恒 false）', () => {
     const { counts } = sample(2, 200, { flags: {} });
     expect(counts.get(43) ?? 0).toBe(0); // EyeOfCthulhuDefeatedAndNoAltarsInWorld 恒 false
+  });
+});
+
+describe('提取器三盲区 + 求值器门（2026-08-13 审计修复）', () => {
+  const HALLOWEEN = {
+    zoneHallow: false, zoneCorrupt: false, zoneCrimson: false, zoneJungle: false,
+    zoneSnow: false, zoneDesert: false, zoneDungeon: false, zoneBeach: false,
+    bloodMoon: false, halloween: true, xmas: false, windy: false,
+  };
+  const CRIMSON_DEEP = {
+    zoneHallow: false, zoneCorrupt: false, zoneCrimson: true, zoneJungle: false,
+    zoneSnow: false, zoneDesert: false, zoneDungeon: false, zoneBeach: false,
+    bloodMoon: false, halloween: false, xmas: false, windy: false,
+  };
+
+  it('盲区1：masterAll 用类字段 _masterModeDropRng=4 → 宠物 ≈25%（曾 denom=1 恒掉）', () => {
+    // EoC 4 大师模式：4798 宠物 1/4；且 CommonCode 收尾 value=0 → 恒清钱币（曾漏）
+    const master = sample(4, 2000, { isExpert: true, isMaster: true });
+    const pet = master.counts.get(4798) ?? 0;
+    expect(pet).toBeGreaterThan(400);   // 期望 500
+    expect(pet).toBeLessThan(600);
+    expect(master.zeroValue).toBe(true);
+  });
+
+  it('盲区2：ByCondition chanceNumerator 是第 6 参 → 蜂后 Beenade 3/4×10-30（曾 num=30 恒掉）', () => {
+    // ItemDropDatabase.cs:551：ByCondition(NotExpert, 1130, 4, 10, 30, 3)——npc 222 蜂后
+    const { counts } = sample(222, 400, {});
+    const n = counts.get(1130) ?? 0;
+    expect(n).toBeGreaterThan(4200);    // 期望 400×0.75×20 = 6000 件
+    expect(n).toBeLessThan(7800);
+  });
+
+  it('盲区3：冰模仿怪 629 肉前池（RegisterIceMimic_GetEasyModeItemPool 方法实参）', () => {
+    // :244-250 池 {670,724,950,(1319),987,1579}；挂 NotRemixSeedEasymode 门（曾恒 false → 整支丢失）
+    const pool = [670, 724, 950, 1319, 987, 1579];
+    const { counts, perKill } = sample(629, 300, {});
+    let hits = 0;
+    for (const ids of perKill) {
+      const inPool = ids.filter((x) => pool.includes(x));
+      expect(inPool.length).toBeLessThanOrEqual(1);   // 每杀至多一件
+      hits += inPool.length;
+    }
+    expect(hits).toBeGreaterThan(255);   // 1/20 主骰失败后恒掉 → ≈95%
+    expect(counts.has(676)).toBe(false);  // 硬模式独占项不出
+    expect(counts.has(1264)).toBe(false);
+  });
+
+  it('条件补齐：NotRemixSeedEasymode = !hardMode / RemixSeedEasymode 恒 false（Conditions.cs:1370/1318）', () => {
+    expect(evalCond('NotRemixSeedEasymode', [], mkCtx({ hardMode: false }))).toBe(true);
+    expect(evalCond('NotRemixSeedEasymode', [], mkCtx({ hardMode: true }))).toBe(false);
+    expect(evalCond('RemixSeedEasymode', [], mkCtx({ hardMode: false }))).toBe(false);
+    expect(evalCond('RemixSeedEasymode', [], mkCtx({ hardMode: true }))).toBe(false);
+  });
+
+  it('noLuck 门：NotScalingWithLuck 规则不吃幸运（576 的 3865 恒 1/7）', () => {
+    // CommonDropNotScalingWithLuck.cs:17 用 rng.Next 直掷；若走 RollLuck，
+    // luck=1 时命中率升到 (ln7-ln3)/4 ≈ 21%，本断言即红
+    const rate = (luck: number) => (sample(576, 3000, { luck }).counts.get(3865) ?? 0) / 3000;
+    const r0 = rate(0), r1 = rate(1);
+    expect(r0).toBeGreaterThan(0.11);    // 1/7 ≈ 0.143
+    expect(r0).toBeLessThan(0.18);
+    expect(Math.abs(r1 - r0)).toBeLessThan(0.05);
+  });
+
+  it('礼物袋 NPC 门（Conditions.cs:891-934）：value=0 与 type=23 排除', () => {
+    const ok = sample(3, 800, { extras: HALLOWEEN });
+    expect(ok.counts.get(1774) ?? 0).toBeGreaterThan(2);    // 1/80 → 期望 10
+    const statue = sample(3, 800, { extras: HALLOWEEN, statueSpawned: true, value: 0 });
+    expect(statue.counts.get(1774) ?? 0).toBe(0);           // 雕像怪 value=0（Wiring.cs:2479）
+    const skull = sample(23, 800, { extras: HALLOWEEN });
+    expect(skull.counts.get(1774) ?? 0).toBe(0);            // 诅咒骷髅头显式排除
+  });
+
+  it('魂/钥匙排除 NPCID.Sets.DontDropDungeonKeysOrSouls = {23}（NPCID.cs:4438）', () => {
+    const deep = { hardMode: true, y: 12000, extras: CRIMSON_DEEP };   // y/16=750 > rockLayer 400
+    const zombie = sample(3, 500, deep);
+    expect(zombie.counts.get(521) ?? 0).toBeGreaterThan(40);  // 暗夜之魂 1/5 → 期望 100
+    const skull = sample(23, 500, deep);
+    expect(skull.counts.get(521) ?? 0).toBe(0);               // 诅咒骷髅头不掉魂（曾掉）
+  });
+
+  it('悠悠球五条件补 HasPlayerTarget（NPC.cs:6603）', () => {
+    const yoyo = {
+      hardMode: false, y: (1200 - 100) * 16,          // y/16=1100 > maxTilesY-350=850
+      flags: { downed_35: true },                     // downedBoss3（骷髅王）
+    };
+    expect(evalCond('YoyoCascade', [], mkCtx({ ...yoyo, hasPlayerTarget: true }))).toBe(true);
+    expect(evalCond('YoyoCascade', [], mkCtx({ ...yoyo, hasPlayerTarget: false }))).toBe(false);
+    expect(evalCond('YoyoCascade', [], mkCtx({ ...yoyo, hasPlayerTarget: undefined }))).toBe(false);
+  });
+
+  it('钱币幸运重掷：双轮取极值（NPC.cs:80414-80487，曾重掷门形同虚设）', () => {
+    const total = (cs: Array<{ id: number; n: number }>) =>
+      cs.reduce((s, c) => s + c.n * (c.id === 71 ? 1 : c.id === 72 ? 100 : c.id === 73 ? 10000 : 1000000), 0);
+    const mean = (luck: number) => {
+      let s = 0;
+      for (let i = 0; i < 3000; i++) s += total(rollCoins(1000, mkCtx({ rng: new RNG(i * 13 + 7), luck }), false));
+      return s / 3000;
+    };
+    const base = mean(0), good = mean(1), bad = mean(-1);
+    expect(good).toBeGreaterThan(base * 1.03);   // luck>0 取两轮较大
+    expect(bad).toBeLessThan(base * 0.97);       // luck<0 取两轮较小
   });
 });

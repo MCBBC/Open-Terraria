@@ -15,13 +15,7 @@ const ASH = T.ASH;
 const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
 const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
 
-export let __uwEndPeek = 0;
-export let __uwTreeInfo = '';
-export const __uwStagePeeks: number[] = [];
-let uwTreeCand = 0, uwTreeGrow = 0, uwTreeConv = 0;
 export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
-  uwTreeCand = 0; uwTreeGrow = 0; uwTreeConv = 0;
-  __uwStagePeeks.length = 0;
   const { w, h } = st;
   // ① 边界 + 灰烬带 + 界下清空
   let boundary = h - rng.int(150, 189);               // Next(150,190)
@@ -40,7 +34,6 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ② 岩浆线
   let lavaY = lavaSeed;
   for (let x = 10; x < w - 10; x++) {
@@ -52,7 +45,6 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!st.flags[i]) { st.liquid[i] = 255; st.liquidType[i] = 2; }
     }
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ③ 1/50 列大灰烬丘陵
   for (let x = 0; x < w; x++) {
     if (rng.next() * 50 >= 1) continue;               // ≡ Next(50)==0
@@ -63,7 +55,6 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       speedX: 0, speedY: rng.int(1, 2), noYChange: true,
     });
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ④ 1/13 列灰烬柱 + 横向灰烬团 + 挖掘隧道
   for (let x = 0; x < w; x++) {
     if (rng.next() * 13 >= 1) continue;               // ≡ Next(13)==0
@@ -106,7 +97,6 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       });
     }
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ⑤ 随机小挖掘（w 个）
   for (let n = 0; n < w; n++) {
     tileRunner(st, rng, gs, rng.int(20, w - 21), rng.int(h - 180, h - 11), {
@@ -120,14 +110,12 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!st.flags[i]) { st.liquid[i] = 255; st.liquidType[i] = 2; }
     }
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ⑦ 地狱石脉（面积×0.0008）
   for (let n = 0, cnt = Math.trunc(w * h * 0.0008); n < cnt; n++) {
     tileRunner(st, rng, gs, rng.int(0, w - 1), rng.int(h - 140, h - 1), {
       strength: rng.int(2, 6), steps: rng.int(3, 6), type: HELLSTONE,
     });
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
   // ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915）：外缘 17% 带
   const outer = (x: number) => x < w * 0.17 || x > w * 0.83;
   for (let x = 25; x < w - 25; x++) {
@@ -143,7 +131,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (!st.flags[st.idx(x + ox, y + oy)]) { exposed = true; break; }
         }
       }
-      if (exposed) { st.type[i] = ASH_GRASS; uwTreeConv++; }   // 8 邻任一暴露（含界外）
+      if (exposed) st.type[i] = ASH_GRASS;           // 8 邻任一暴露（含界外）
     }
   }
   for (let x = 25; x < w - 25; x++) {
@@ -152,12 +140,8 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       const i = st.idx(x, y);
       if (st.type[i] !== ASH_GRASS || !st.flags[i]) continue;
       if (y - 1 < 0 || st.flags[st.idx(x, y - 1)]) continue;
-      uwTreeCand++;
-      if (rng.int(0, 2) === 0) { uwTreeGrow++; growAshTree(st, rng, x, y); }
+      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);   // Next(3)==0 → TryGrowingTreeByType(634)
     }
   }
-  __uwStagePeeks.push(rng.vanilla.peek());
-  __uwEndPeek = rng.vanilla.peek();
-  __uwTreeInfo = `conv=${uwTreeConv} cand=${uwTreeCand} grow=${uwTreeGrow}`;
   void gs;
 }

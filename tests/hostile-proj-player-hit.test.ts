@@ -5,6 +5,7 @@
 //  2. hostile 弹命中不消耗弹体（原版 :13811-13829 仅特判型递减）；
 //  3. 玩家自己的弹（hostile=false 默认）不伤玩家；
 //  4. 348 FrostWave 命中 → Chilled/Frozen 授予（Projectile.StatusPlayer :11554-11567）。
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';

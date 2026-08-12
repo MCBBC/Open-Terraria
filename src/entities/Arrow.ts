@@ -4,7 +4,7 @@
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
 import { applyProjStatus } from './projStatus';
-import { hitCritters, hitPlayer, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
+import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
@@ -90,6 +90,11 @@ export class Arrow extends Entity {
   whipTagShot = false;
   /** 命中施加 OnFire 300t（1106 火舌 :11002-11004） */
   ignite = false;
+  /** 暴击加成（百分点，spawn 侧注入：player.critChance(kind)+item.crit；基 4% 另计。
+   *  审计 §6：此前硬编码 4% 导致远程/魔法/投掷吃不到装备/套装/词缀/item.crit */
+  critBonus = 0;
+  /** 暴击总概率阈值（0-1，spawn 侧一次性算好；未设=按 critBonus+4%） */
+  critChance = 0;
   /** 星云套 booster 回调（StrikeNPC :12892-12905：魔法弹命中 → Game 判定掉落） */
   nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
@@ -179,6 +184,9 @@ export class Arrow extends Entity {
     // Player.damage 自带 iframes 去重（= 原版 player.immune 门禁）；
     // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800）
     if (this.hostile && hitPlayer(this, game, this.damage)) statusPlayer(game, this.projId);
+    // 敌对弹命中城镇 NPC(原版 flag2 分支:hostile && victim.friendly,Projectile.cs:11975-11976);
+    // 不消耗弹体(原版该分支不动 keepIterating)
+    if (this.hostile) hitTownNpcs(this, game, this.damage, 0, 'hostile');
     // 反射后的弹体 friendly 已翻（原版 Damage NPC 需 friendly 门禁，小动物也是 NPC）
     // ——不再伤小动物/敌怪，只走上方 hitPlayer 回打发射者
     if (this.reflected) return;
@@ -214,8 +222,8 @@ export class Arrow extends Entity {
           dmg = res.dmg;
           crit = res.crit;
         } else {
-          // 暴击：玩家远程基础 4%（原版 ranged 初始 4）
-          crit = Math.random() < 0.04;
+          // 暴击：基 4% + spawn 注入的系暴击/item.crit（P:2300-2304/P:25230-25232）
+          crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
           if (crit) dmg *= 2;
         }
         if (this.ignite) {
@@ -242,6 +250,10 @@ export class Arrow extends Entity {
         if (--this.pierce <= 0) { this.killNow(game); return; }
       }
     }
+    // 城镇 NPC 受击(原版 Projectile.Damage 对 friendly NPC 同样生效——杀裁缝师
+    // 召骷髅王即此链);穿透/销毁语义与敌怪一致
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)
+      && --this.pierce <= 0) { this.killNow(game); return; }
   }
 
   /** aiStyle 14 撞块反弹（Projectile.cs:18314-18327 默认档：法向 ×-0.5，低速归零）。

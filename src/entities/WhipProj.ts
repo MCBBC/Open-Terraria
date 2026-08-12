@@ -10,7 +10,8 @@
 //  第 n 个敌 ×falloff^(n-1)）；命中施加 tag（TagEffectState.TryApplyTagToNPC
 //  TagEffectState.cs:178-186 + WhipTagEffect.cs:58-70）并启用 proc（:12936-12981）。
 import { Entity } from './Entity';
-import { applyProjStatus } from './projStatus';
+import { applyProjStatus, applyMeleeImbue } from './projStatus';
+import { hitTownNpcs } from './projTargets';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { projFrameImg, projFrameCount } from './Arrow';
@@ -228,6 +229,10 @@ export class WhipProj extends Entity {
   /** 单次曲线快照的命中结算（tag/proc/debuff/buff 语义见各段注释） */
   private tryHit(game: GameHooks, owner: Player | null, pts: V2[]): void {
     for (const p of pts) {
+      // 城镇 NPC:巫毒窄门(原版鞭=friendly 弹,同 Damage_PVE_Inner :11970-11972——
+      // 仅向导 22/裁缝师 54 装备对应巫毒娃娃时可伤;18×18 控制点盒同敌怪判定)
+      hitTownNpcs({ x: p.x - 9, y: p.y - 9, w: 18, h: 18 }, game, this.dmgNow,
+        Math.sign(p.x - this.x) * 2, 'playerProj');
       for (const ent of game.enemies()) {
         const e = ent as unknown as { id: number; dead: boolean; x: number; y: number; w: number; h: number;
           hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean } & import('./WhipTag').WhipTagged;
@@ -239,6 +244,11 @@ export class WhipProj extends Entity {
         e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, -1, game);
         // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        // 武器浸剂(StatusNPC:10559 门含 whip:IsAWhip)——鞭命中同享药剂 debuff
+        applyMeleeImbue((game.player as unknown as { buffs: { has: (b: never) => boolean } }).buffs,
+          e as unknown as Record<string, number>,
+          () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
+            ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
         // 衰减链（:12604-12678）：每次命中后鞭 damage 字段 ×falloff
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
         // tag（TagEffectState.TryApplyTagToNPC :12758-12760 → ApplyTagToNPC :178-186）

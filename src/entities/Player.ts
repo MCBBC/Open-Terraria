@@ -11,6 +11,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { viIdFromKey } from '../data/vanillaItemCombat';
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
@@ -116,6 +117,10 @@ export class Player extends Entity {
   private stickyBreak = 0;
   private surfaceJumpCd = 0;  // 水面起跳冷却
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
+  /** 自然回血爬坡计时（Player.lifeRegenTime：受击 :37784 / DoT :18781+ / 流血 :19000 清零，
+   *  每 tick 基础 +1（:18930）、蜂蜜 +2（:18954）；本仓自然回血为恒 1HP/s 简化，爬坡只
+   *  决定"出伤后多久开始回"（首档阈值 300t :19003）——蜂蜜 3 倍速抵达 */
+  lifeRegenTime = 0;
   /** 本 tick 落地冲击速度（碰撞前 vy≥3 落地才非 0；Game 消费：起爆器 411 坠落触发） */
   landImpactVy = 0;
   private regenAccum = 0;
@@ -228,6 +233,7 @@ export class Player extends Entity {
     wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
     dash: number; blackBelt: boolean; bees: boolean; carpet: boolean;
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
+    killGuide: boolean; killClothier: boolean;   // 巫毒娃娃 267/1307
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
     quiver: boolean;
@@ -285,6 +291,7 @@ export class Player extends Entity {
     let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
+  let killGuide = false, killClothier = false;   // 巫毒娃娃 267/1307(Player.cs UpdateEquips killGuide/killClothier)
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
@@ -296,6 +303,11 @@ export class Player extends Entity {
       const s = this.inv.armor[i];
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
+      // 巫毒娃娃(Player.cs:8801 killGuide / :8804 killClothier):装备即置位——
+      // 玩家弹幕/近战对向导(22)/裁缝师(54) 的伤害门(Projectile.cs:11970-11972)
+      const accVid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      if (accVid === 267) killGuide = true;
+      else if (accVid === 1307) killClothier = true;
       // 翅膀（Item.wingSlot>0 → WingStatsInitializer 全字段；多翅膀取首个）
       const wingSlot = statOfInternal(s.id)?.wing;
       if (wingSlot && wingSlot > 0 && !wing) {
@@ -481,6 +493,7 @@ export class Player extends Entity {
       wing, dash, blackBelt, bees, carpet,
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
+      killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
@@ -677,9 +690,13 @@ export class Player extends Entity {
       }
     }
     // 自然回血：脱离战斗 5 秒后每秒缓回 1 点（流血 Bleeding 清 lifeRegenTime → 阻断,:18998；
-    // 遮挡 Obstructed 163 的 bleed 同门——:11424 bleed=true 同消费点）
+    // 遮挡 Obstructed 163 的 bleed 同门——:11424 bleed=true 同消费点）。
+    // 爬坡计时 lifeRegenTime：基础 +1/tick（:18930）、蜂蜜 +2（:18954）→ 蜂蜜态 3 倍速
+    // 触达首档阈值；DoT/流血同样清零（:18781+/:19000）——DoT 期间自然回血重启爬坡
     this.sinceHurt++;
-    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp
+    this.lifeRegenTime += 1 + (this.buffs.has(BuffType.Honey) ? 2 : 0);
+    if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
+    if (this.lifeRegenTime >= 300 && this.hp > 0 && this.hp < this.maxHp
       && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
       this.regenAccum += dt;
       if (this.regenAccum >= 1) {
@@ -750,9 +767,11 @@ export class Player extends Entity {
     const canWaterWalk = this.equipStats.waterWalk || this.buffs.canWaterWalk;
     const lavaProbeH = canWaterWalk ? this.h - 6 : this.h;
     this.inLava = liquidCollision(world.store, this.x, this.y, this.w, lavaProbeH, 2); // LavaCollision 盒判定
-    // 蜂蜜浸入（Player.cs:27436）：湿判定命中蜂蜜 → AddBuff(48, 1800t=30s) + honeyWet。
+    // 蜂蜜浸入（Player.cs:27436：Collision.honey 命中 → AddBuff(48, 1800t=30s) + honeyWet）。
+    // 判定 = Collision.WetCollision（Collision.cs:1573-1625）：**全身盒**扫蜂蜜格且
+    // liquid>0（任一残量即算）——曾只查脚底单格且 liq>30，脚不沾蜜但身体没入时漏判。
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
-    this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
+    this.inHoney = liquidCollision(world.store, this.x, this.y, this.w, this.h, 3);
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
     // 微光浸入（Player.cs:27420-27434）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
     // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内不授予
@@ -858,8 +877,14 @@ export class Player extends Entity {
       }
     }
     // HurtTiles 接触伤害（Collision.cs:3128 + Player.cs:27296/28507）:
-    // 尖刺/木尖刺/荆棘族直接伤害 + 流血,陨石/狱石族 Burning,沙族窒息,荆棘族触碰毁块
-    const ht = hurtTiles(world.store, this.x, this.y, this.w, this.h,
+    // 尖刺/木尖刺/荆棘族直接伤害 + 流血,陨石/狱石族 Burning,沙族窒息,荆棘族触碰毁块。
+    // 骑矿车时按坐骑盒采样（Mount.cs mounts[6]：玩家 hitbox 即车 20×52，
+    // heightBoost 10——用 20×42 玩家盒会漏掉车底 10px,贴轨尖刺扫不到）
+    const rideBox = this.ridingCart && this.cart
+      ? { x: this.cart.x, y: this.cart.y, w: this.cart.w, h: this.cart.h }
+      : null;
+    const ht = hurtTiles(world.store, rideBox?.x ?? this.x, rideBox?.y ?? this.y,
+      rideBox?.w ?? this.w, rideBox?.h ?? this.h,
       this.equipStats.fireWalk || this.buffs.obsidianSkin); // 黑曜石皮含 fireWalk（:9576）
     if (ht) this.applyTouchDamage(game, ht);
 
@@ -1454,8 +1479,14 @@ export class Player extends Entity {
     if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;
     else this.stepRenderY = 0;
     // ---- 职业状态机（对账批实装）----
-    // 狼人（月亮符 485 + 夜间：Player.cs:11488 链 wolfAcc&&night）
-    if (this.equipStats.wolfAcc && !(game.world.clock?.isDay ?? true)) this.buffs.apply(BuffType.Werewolf, 2);
+    // 狼人（月亮符 485 + 夜间：Player.cs:11488-11501 链 !dayTime && wolfAcc && !merman——
+    // else 分支 DelBuff：人鱼化（accMerman 浸水态 merman）期间狼人 buff 直接移除，
+    // 回复/近战加成随 buff 一起失效）
+    if (this.equipStats.wolfAcc && !this.merman && !(game.world.clock?.isDay ?? true)) {
+      this.buffs.apply(BuffType.Werewolf, 2);
+    } else if (this.buffs.has(BuffType.Werewolf)) {
+      this.buffs.remove(BuffType.Werewolf);
+    }
     // 磨刀站 3198 就近常驻（每 60t 扫 41×25 区）
     if (--this.sharpenedCd <= 0) {
       this.sharpenedCd = 60;
@@ -1824,6 +1855,7 @@ export class Player extends Entity {
     // 十字项链/星星面纱：无敌帧翻倍（longInvince）
     this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
     this.sinceHurt = 0; // 受击打断自然回血
+    this.lifeRegenTime = 0; // 同源清零（Player.Hurt :37784 lifeRegenTime=0）
     // 甲虫攻击球受击掉一颗
     if (this.beetleOrbs > 0) this.beetleOrbs--;
     // 混乱之脑（:37488-37496：受击 1/6 → buff 321 + 困惑近敌；damage 无 game 参→脉冲标志）

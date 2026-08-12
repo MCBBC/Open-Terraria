@@ -161,4 +161,46 @@ describe('Achievements 引擎语义', () => {
     a.mechaMayhemKill(127, []);
     expect(a.isCompleted('MECHA_MAYHEM')).toBe(false);
   });
+
+  it('计数条件中途进度持久化不误判完成（review 修复：load 对阈值判 done）', () => {
+    const st = memStore();
+    const a1 = new Achievements(st);
+    for (let i = 0; i < 5000; i++) a1.handleMining();   // 中途进度 5000/10000
+    a1.notifyItemPickup(9);                             // TIMBER 完成 → 触发一次落盘
+    const a2 = new Achievements(st);                    // 重载
+    expect(a2.isCompleted('BULLDOZER')).toBe(false);    // ★ 不得因 v>=1 误判完成
+    expect(a2.progressOf('BULLDOZER').ratio).toBeCloseTo(0.5);
+    for (let i = 0; i < 5000; i++) a2.handleMining();
+    expect(a2.isCompleted('BULLDOZER')).toBe(true);
+  });
+
+  it('CreateMany 逐 id 部分进度持久化往返（STAR_DESTROYER 3/4 塔）', () => {
+    const st = memStore();
+    const a1 = new Achievements(st);
+    a1.notifyNPCKilled(517);
+    a1.notifyNPCKilled(422);
+    a1.notifyNPCKilled(507);
+    a1.flush();
+    const a2 = new Achievements(st);
+    expect(a2.isCompleted('STAR_DESTROYER')).toBe(false);
+    expect(a2.progressOf('STAR_DESTROYER').doneConds).toBe(0); // 主条件未完成
+    a2.notifyNPCKilled(493);                                    // 第四塔
+    expect(a2.isCompleted('STAR_DESTROYER')).toBe(true);
+  });
+
+  it('MechaMayhem 场上双子单眼在场即无 Mech（ScanForMechs twins=双眼同在）', () => {
+    const a = new Achievements(null);
+    a.mechaMayhemStart([125, 126, 134, 127]);
+    a.mechaMayhemKill(125, [126, 134, 127]);
+    a.mechaMayhemKill(126, [134, 127]);
+    a.mechaMayhemKill(134, [127]);
+    a.mechaMayhemKill(127, []);
+    expect(a.isCompleted('MECHA_MAYHEM')).toBe(true);
+    // 下一夜召唤：Clear 扫描单眼在场（126 残留）——Twins 需双眼同在 → 视为无 Mech → 重置
+    a.mechaMayhemClear([126]);
+    // 新窗口重开：双眼 + 毁灭者 + 骷髅王
+    a.mechaMayhemStart([125, 126, 134, 127]);
+    a.mechaMayhemKill(127, [125, 126, 134]);
+    expect(a.isCompleted('MECHA_MAYHEM')).toBe(true); // 已完成（成就粘性）
+  });
 });

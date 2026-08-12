@@ -10,7 +10,7 @@ import { describe, it, expect } from 'vitest';
 import {
   canShimmerItem, coinLuckAmount, findShimmerFreeSpot, shimmerTeleportPos,
   getShimmerEquivalentType, getTransformToItem,
-  internalIdOfVanilla, isNpcTownShimmerable, npcShimmerTransformTo,
+  internalIdOfVanilla, isNpcShimmerImmune, isNpcTownShimmerable, npcShimmerTransformTo,
   npcShimmerTransformToItem, vanillaIdOfItem,
 } from '../src/stats/Shimmer';
 import { LuckState } from '../src/stats/Luck';
@@ -327,5 +327,64 @@ describe('微光封输入回归探针（buff 353 frozen 语义 + 图标来源 + 
     for (let i = 0; i < 200 && !e!.dead; i++) e!.fixedUpdate(1 / 60, h as never);
     // ShimmerTransformToNPC 换型（vanillaId 变）或 TransformToItem 掉物后消散（dead）
     expect(e!.dead || e!.vanillaId !== orig).toBe(true);
+  });
+});
+
+describe('NPC 免微光名单（NPCID.Sets.ShimmerImmunity, NPCID.cs:4837 → NPC.cs:17773 buffImmune[353]）', () => {
+  it('131 id：Boss（50/245-249/657-660）、城镇宠物（637/638/656/670/678-684）、微光原住民（676/677）在表；僵尸 3 / EoC 4 不在', () => {
+    // Boss 及部件
+    for (const id of [50, 245, 246, 247, 248, 249, 657, 658, 659, 660, 5, 115, 116, 139]) {
+      expect(isNpcShimmerImmune(id), `npc ${id}`).toBe(true);
+    }
+    // 城镇宠物（housingCategory=1 全员）
+    for (const id of [637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]) {
+      expect(isNpcShimmerImmune(id), `npc ${id}`).toBe(true);
+    }
+    // 微光原住民 / 小动物
+    expect(isNpcShimmerImmune(676)).toBe(true);  // ShimmerSlime
+    expect(isNpcShimmerImmune(677)).toBe(true);  // Shimmerfly
+    expect(isNpcShimmerImmune(356)).toBe(true);  // Butterfly
+    // 非免表：可正常进 shimmering（GetShimmered 无表项时为空操作）
+    expect(isNpcShimmerImmune(3)).toBe(false);   // 僵尸（有转化链）
+    expect(isNpcShimmerImmune(4)).toBe(false);   // EoC——免表无此 id
+    expect(isNpcShimmerImmune(1)).toBe(false);   // 蓝史莱姆（→ 676 微光史莱姆）
+  });
+
+  it('免表敌怪浸微光不转化（入口门 buffImmune[353] → shimmering 恒 false）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const h = hooks(w, p);
+    // 5 = 克苏鲁仆从（ShimmerImmunity 成员，且不在任何转化表——转化与否可判）
+    const e = Enemy.fromVanilla(5, 20 * TILE, 34 * TILE);
+    expect(e).not.toBeNull();
+    expect(e!.vanillaId).toBe(5);
+    for (let i = 0; i < 400 && !e!.dead; i++) e!.fixedUpdate(1 / 60, h as never);
+    expect(e!.dead).toBe(false);
+    expect(e!.vanillaId).toBe(5);
+  });
+});
+
+describe('微光化物品上浮白光（WorldItem.cs:486-511 dust 309 + (1-shimmerTime)*0.8 光）', () => {
+  it('转化后 shimmerTime 1 → 衰减 0.01/t：lightRGB 渐亮 0→0.8；尘 1/30t 量级', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    let dust = 0;
+    const h = {
+      ...hooks(w, p),
+      spawnParticles: () => { dust++; },
+    } as GameHooks;
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[8]], 1); // 火炬 → 5353 骨炬
+    for (let i = 0; i < 400 && !d.shimmered; i++) d.fixedUpdate(1, h);   // 沉底 + 90t 浸入
+    expect(d.shimmered).toBe(true);
+    expect(d.shimmerTime).toBe(1);               // GetShimmered 尾段 :1948
+    expect(d.lightRGB).toEqual([0, 0, 0]);       // (1-1)*0.8：转化瞬间不亮
+    for (let i = 0; i < 100; i++) d.fixedUpdate(1, h);   // :552-558 衰减（shimmered 同走）
+    expect(d.shimmerTime).toBeCloseTo(0, 5);
+    const l = d.lightRGB!;
+    expect(l[0]).toBeCloseTo(0.8, 5);
+    expect(l[1]).toBeCloseTo(0.8, 5);
+    expect(l[2]).toBeCloseTo(0.8, 5);
+    expect(dust).toBeGreaterThan(0);             // 上浮白光尘已出
+    expect(dust).toBeLessThan(80);               // ~1/30t × 250t ≈ 8 枚的量级上限
   });
 });

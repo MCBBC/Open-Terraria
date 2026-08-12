@@ -85,6 +85,26 @@ const IGNORED_IN_HOUSE_SCORE = new Set([4, 3, 73, 82, 83, 84, 386]);
 const BASIC_CHEST = new Set([21, 467]);
 /** ScoreRoom_CanBeHomeSpot（WorldGen.cs:5967-5978）：boulder 379 不可作家 */
 const BOULDER_SHEET = 379;
+
+// ================= 同房判定（TownRoomManager.CanNPCsLiveWithEachOther） =================
+
+/** NPC.housingCategory=1 全表（NPC.cs SetDefaults 仅四处赋值 ：17159/:17243/:17429/:17542）：
+ *  城镇宠物——637 城镇猫 / 638 城镇狗 / 656 城镇兔 / 670 蓝史莱姆 / 678-684 史莱姆
+ *  变体（绿/紫/老/黄/铜/彩虹/粉）；其余全部 = 0（含所有城镇 NPC） */
+const HOUSING_CATEGORY_PET = new Set([637, 638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
+
+/** NPC.housingCategory（NPC.cs:8450 重置 0；上表四块赋 1） */
+export function npcHousingCategory(npcId: number): 0 | 1 {
+  return HOUSING_CATEGORY_PET.has(npcId) ? 1 : 0;
+}
+
+/** TownRoomManager.CanNPCsLiveWithEachOther（TownRoomManager.cs:153-155）：
+ *  `npc1.housingCategory != npc2.housingCategory`——**同类别不可同房**：
+ *  城镇 NPC 之间互斥、宠物之间互斥；一名城镇 NPC + 一只宠物可同房。
+ *  （ScoreRoom/QuickFindHome 的占用豁免消费位，WorldGen.cs:5587/5737/5754） */
+export function canNPCsLiveWithEachOther(npc1ByType: number, npc2ByType: number): boolean {
+  return npcHousingCategory(npc1ByType) !== npcHousingCategory(npc2ByType);
+}
 /** 原版门/闸 tile id（ScoreRoom 杂物扫描 5873 行） */
 const DOOR_CLOSED_SHEET = 10;
 const DOOR_OPEN_SHEET = 11;
@@ -122,19 +142,32 @@ export interface RoomScore {
   hasStandingSpace: boolean;
 }
 
+export interface Occupant { x: number; y: number; /** 入住者原版 NPC id（CanNPCsLiveWithEachOther 判定；缺省按 cat 0 城镇 NPC） */ npcId?: number }
+
 /**
  * ScoreRoom 1:1（WorldGen.cs:5804-5940）：对已判合格的房间打分并选家位点。
- * occupied = 已入住 NPC 的 home tile（home 与 home-1 同在房内视为占用）。
+ * occupied = 已入住 NPC 的 home tile（home 与 home-1 同在房内视为占用者）；
+ * askingNpcId = 申请入住的 NPC id（占用豁免用：同 housingCategory 才判占用，
+ * WorldGen.cs:5754 CanNPCsLiveWithEachOther——城镇 NPC 与城镇宠物可同房）。
  */
-export function scoreRoom(st: TileStore, room: Room, occupied: Array<{ x: number; y: number }>): RoomScore {
+export function scoreRoom(
+  st: TileStore, room: Room,
+  occupied: Array<{ x: number; y: number; npcId?: number }>,
+  askingNpcId = -1,
+): RoomScore {
   const fail: RoomScore = { score: 0, x: room.standX, y: room.standY, roomEvil: false, hasStandingSpace: false };
-  // ① 占用检查（ScoreRoom_IsThisRoomOccupiedBySomeone 5747-5767）：home 与 home-1
-  //    都在房内 → 整房作废。（原版还有 TownManager.CanNPCsLiveWithEachOther 的
-  //    共享房豁免——宠物同居体系未移植，一律视为占用）
+  // ① 占用检查（ScoreRoom_IsThisRoomOccupiedBySomeone WorldGen.cs:5750-5763）：home 与
+  //    home-1 都在房内者视为占用者——CanNPCsLiveWithEachOther 不同类别（城镇+宠物）可
+  //    同房：兼容者不入占用、记入 sharedX（:5758），其 home 列 ±3 格内站位评分压至 1
+  //    （:5882-5886 避让）；同类别则整房作废（hiScore=-1）
+  let sharedX = -1;
   for (const h of occupied) {
     if (h.x < 1 || h.y < 1 || h.x >= st.w || h.y >= st.h) continue;
     if (room.tiles.has(st.idx(h.x, h.y)) && room.tiles.has(st.idx(h.x, h.y - 1))) {
-      return { score: -1, x: room.standX, y: room.standY, roomEvil: false, hasStandingSpace: false };
+      if (!canNPCsLiveWithEachOther(askingNpcId, h.npcId ?? -1)) {
+        return { score: -1, x: room.standX, y: room.standY, roomEvil: false, hasStandingSpace: false };
+      }
+      sharedX = h.x;
     }
   }
   // 房间包围盒（原版 roomX1..roomY2 随泛洪扩张，含边界格）
@@ -200,6 +233,8 @@ export function scoreRoom(st: TileStore, room: Room, occupied: Array<{ x: number
         }
       }
       if (num > 0) hasStandingSpace = true;
+      // 共用房避让（WorldGen.cs:5882-5886）：与同居者 home 列距离 <3 的站位评分压至 1
+      if (sharedX >= 0 && num >= 1 && Math.abs(sharedX - i) < 3) num = 1;
       if (num > 0 && chests > 0) { num -= 30 * chests; if (num < 1) num = 1; }
       if (num > 0 && centerCol > 0) { num -= 15 * centerCol; if (num < 1) num = 1; }
       if (num <= hiScore) continue;
@@ -320,11 +355,12 @@ function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
  * 全图找一间无人入住的合格房屋（房间枚举为本仓库自有——原版无"全图找房"，
  * QuickFindHome 是对既有 home 的单房校验；房内站位选择 = ScoreRoom 1:1）。
  * 多房择优：取 ScoreRoom 分最高者，同分取离锚点近（原版单房无此维度）。
- * occupied = 已入住 NPC 的 home tile 列表。
+ * occupied = 已入住 NPC 的 home tile 列表（npcId 供同房豁免判定）。
+ * askingNpcId = 申请入住者（ScoreRoom 占用豁免 + 共用房避让）。
  */
 export function findFreeHouse(
-  st: TileStore, occupied: Array<{ x: number; y: number }>,
-  nearX?: number, nearY?: number,
+  st: TileStore, occupied: Array<{ x: number; y: number; npcId?: number }>,
+  nearX?: number, nearY?: number, askingNpcId = -1,
 ): Room | null {
   const anchorX = nearX ?? Math.floor(st.w / 2);
   const anchorY = nearY ?? 0;
@@ -339,7 +375,7 @@ export function findFreeHouse(
       const room = checkRoom(st, x, y);
       if (!room) continue;
       // ScoreRoom：占用/邪恶度/站位打分一体（占用返回 -1）
-      const s = scoreRoom(st, room, occupied);
+      const s = scoreRoom(st, room, occupied, askingNpcId);
       if (s.score <= 0) continue;
       const d = Math.abs(s.x - anchorX) + Math.abs((s.y - 1) - anchorY);
       if (s.score > bestScore || (s.score === bestScore && d < bestD)) {

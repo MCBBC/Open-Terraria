@@ -9,6 +9,8 @@
 //       ShimmerTransformToItem   :4839 NPC → 物品后消散
 //       ShimmerTownTransform     :4841 城镇 NPC 微光变体（ai[0]=25）
 //       ShimmerTransformToNPC    :4843 NPC → NPC（Transform）
+//       ShimmerImmunity          :4837 免微光名单（NPC.cs:17773 → buffImmune[353]，
+//                                 免表内 NPC 不进 shimmering/不触发 GetShimmered）
 //   - Item.cs SetDefaults：DefaultToCapturedCritter(npcId)（:47613-47626）→
 //       itemMakeNPC 玻璃瓶小动物物品 → 放生 NPC id（入微光 WorldItem.cs:1855-1876）
 // 注意 CreateIntSet(default, k, v, ...) 是奇偶键值对；CreateBoolSet(list) 是成员表。
@@ -111,6 +113,7 @@ const data = {
   npcTransformTo: intSetMap(npcid, 'ShimmerTransformToNPC'),
   npcTransformToItem: intSetMap(npcid, 'ShimmerTransformToItem'),
   npcTownTransform: boolSetList(npcid, 'ShimmerTownTransform'),
+  npcShimmerImmunity: boolSetList(npcid, 'ShimmerImmunity'),
 };
 
 writeFileSync(`${ROOT}/game/src/data/vanilla-shimmer.json`, JSON.stringify(data));

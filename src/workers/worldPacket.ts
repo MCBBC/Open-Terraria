@@ -32,6 +32,10 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    savedOreTiers: { ...world.savedOreTiers },
+    sundial: world.sundialCooldown, moondial: world.moondialCooldown,   // WF:1311/1417
+    fastForwardTimeToDawn: world.fastForwardTimeToDawn,                 // WF:1342
+    fastForwardTimeToDusk: world.fastForwardTimeToDusk,                 // WF:1416
     seedFlags: world.seedFlags,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
     pendingTownNpcs: world.pendingTownNpcs,

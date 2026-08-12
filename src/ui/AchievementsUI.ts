@@ -78,11 +78,12 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
-/** 图标帧 → CSS background-position（锁定态 X+528） */
-function glyphStyle(div: HTMLElement, iconIndex: number, locked: boolean): void {
-  const x = (iconIndex % 8) * 66 + (locked ? 528 : 0);
-  const y = Math.floor(iconIndex / 8) * 66;
-  div.style.backgroundPosition = `${-x}px ${-y}px`;
+/** 图标帧 → CSS background-position（引擎 iconFrameOf：66 步长/8 列/锁定 +528） */
+function glyphStyle(div: HTMLElement, a: Game['achievements'], name: string): void {
+  const f = a.iconFrameOf(name);
+  if (!f) return;
+  const x = f.locked ? f.x + f.lockedDx : f.x;
+  div.style.backgroundPosition = `${-x}px ${-f.y}px`;
 }
 
 // ---- 成就菜单（开关式：再次调用关闭） ----
@@ -142,13 +143,13 @@ export function openAchievementsPanel(game: Game): void {
     let doneN = 0;
     for (const def of a.defList()) {
       if (a.isCompleted(def.name)) doneN++;
-      if (!catOn[def.category]) continue;
-      const iconIdx = a.iconIndex(def.name);
+      // 未归类成就（-1，如 GAIN_TORCH_GODS_FAVOR）不受过滤行影响恒显示
+      if (def.category >= 0 && !catOn[def.category]) continue;
       const done = a.isCompleted(def.name);
       const row = el('div', 'sw-ach-row' + (done ? ' done' : ''));
       const icon = el('div', 'sw-ach-icon');
       const glyph = el('div', 'glyph');
-      glyphStyle(glyph, iconIdx, !done);
+      glyphStyle(glyph, a, def.name);
       icon.appendChild(glyph);
       const border = el('img') as HTMLImageElement;
       border.className = 'border';
@@ -216,7 +217,7 @@ export function createAchievementAdvisor(game: Game): HTMLElement & { update(): 
     }
     if (!best) { card.style.display = 'none'; return; }
     card.style.display = 'flex';
-    glyphStyle(glyph, a.iconIndex(best.name), true);
+    glyphStyle(glyph, a, best.name);
     tx.textContent = Lang.text(`Achievements.${best.name}_Name`);
   };
   card.update();

@@ -101,6 +101,7 @@ describe('自有存档格式', () => {
     world.invasionType = 1; world.invasionSize = 80; world.invasionSizeStart = 80;
     world.invasionX = 100; world.invasionDelay = 3600;
     world.altarCount = 2;
+    world.savedOreTiers = { cobalt: 221, mythril: 108, adamantite: -1 };
     world.chests.push({ x: 5, y: 5, locked: true, items: [null] });
     world.pendingTownNpcs = [
       { key: 'merchant', x: 800, y: 400, home: [10, 8], givenName: '阿三' },
@@ -121,6 +122,7 @@ describe('自有存档格式', () => {
     expect(back.world.invasionType).toBe(1);
     expect(back.world.invasionSizeStart).toBe(80);
     expect(back.world.altarCount).toBe(2);
+    expect(back.world.savedOreTiers).toEqual({ cobalt: 221, mythril: 108, adamantite: -1 }); // SavedOreTiers 往返
     expect(back.world.chests[0].locked).toBe(true);
     // 城镇 NPC 段(NPC 段 WF:1703-1750)
     expect(back.world.pendingTownNpcs).toHaveLength(2);

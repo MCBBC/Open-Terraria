@@ -16,6 +16,10 @@ export interface EnemyDef {
   dayOnly?: boolean;
   underground?: boolean; // 倾向地下生成
   xp?: number;
+  /** NPC.value（铜币）。fromVanilla 写入 ScaleStats 后的缩放值
+   *  （NPC.cs:18110 EnemyMoneyDropMultiplier.Sample(difficulty)：专家/大师 ×2.5）；
+   *  击杀掉钱消费（Enemy 掉落 ctx.value）。经典档 = npcValueOf 原值 */
+  value?: number;
   fireImmune?: boolean;
   hellOnly?: boolean;
   avoidWater?: boolean;   // 飞行避水行为（前方液体上抛脱离）

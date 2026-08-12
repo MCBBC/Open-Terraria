@@ -276,6 +276,10 @@ export class LiquidSim {
         this.bufX[this.bufTail] = x;
         this.bufY[this.bufTail] = y;
         this.bufTail++;
+        // LiquidBuffer.AddBuffer :115:入队即置 checkingLiquid——缺此则同 tick 同格
+        // 二次 AddWater 会重复入队(原版经 :13 checkingLiquid 门拒绝;清扫 :380
+        // 先清后 addWater 语义不变)
+        this.checking[i] = 1;
       }
       return;
     }

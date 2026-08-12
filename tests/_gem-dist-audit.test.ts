@@ -67,15 +67,15 @@ function statsOf(
     }
     if (!st) throw new Error('未拿到宝石系统快照');
     const stN = st; // 闭包内不可变别名（TS 收窄不进闭包）
-    const ours = statsOf(st.w, st.h, (x, y) => {
-      const i = st.idx(x, y);
+    const ours = statsOf(stN.w, stN.h, (x, y) => {
+      const i = stN.idx(x, y);
       const d = (dx: number, dy: number) => {
-        if (x + dx < 0 || y + dy < 0 || x + dx >= st.w || y + dy >= st.h) return false;
-        const j = st.idx(x + dx, y + dy);
-        return st.flags[j] === 1;
+        if (x + dx < 0 || y + dy < 0 || x + dx >= stN.w || y + dy >= stN.h) return false;
+        const j = stN.idx(x + dx, y + dy);
+        return stN.flags[j] === 1;
       };
       return {
-        t: st.type[i], a: st.flags[i], fx: st.frameX[i], wall: st.wall[i],
+        t: stN.type[i], a: stN.flags[i], fx: stN.frameX[i], wall: stN.wall[i],
         solidNb: d(-1, 0) || d(1, 0) || d(0, -1) || d(0, 1),
       };
     });
@@ -94,23 +94,23 @@ function statsOf(
     for (let y = 337; y < 900; y++) for (let x = 0; x < gw; x++) { const i = y * gw + x; gCells2.push({ a: g.tiles.active[i], wall: g.tiles.wall[i] }); }
     console.log('GOLDEN amberBand:', JSON.stringify(bandAir(gCells2)));
     const oCells: Array<{ a: number; wall: number }> = [];
-    for (let y = 457; y < 900; y++) for (let x = 0; x < st.w; x++) { const i = st.idx(x, y); oCells.push({ a: st.flags[i], wall: st.wall[i] }); }
+    for (let y = 457; y < 900; y++) for (let x = 0; x < stN.w; x++) { const i = stN.idx(x, y); oCells.push({ a: stN.flags[i], wall: stN.wall[i] }); }
     console.log('OURS   band:', JSON.stringify(bandAir(oCells)));
     const oCells2: Array<{ a: number; wall: number }> = [];
-    for (let y = 337; y < 900; y++) for (let x = 0; x < st.w; x++) { const i = st.idx(x, y); oCells2.push({ a: st.flags[i], wall: st.wall[i] }); }
+    for (let y = 337; y < 900; y++) for (let x = 0; x < stN.w; x++) { const i = stN.idx(x, y); oCells2.push({ a: stN.flags[i], wall: stN.wall[i] }); }
     console.log('OURS   amberBand:', JSON.stringify(bandAir(oCells2)));
 
     // ---- 归属拆分：冰系(雪界内) / 沙漠墙腔(187/216) / 其余=地下单格 ----
     const gs = lastGenState();
     let ice = 0, desert = 0, other = 0;
-    for (let y = 0; y < st.h; y++) {
-      for (let x = 0; x < st.w; x++) {
-        const i = st.idx(x, y);
-        if (!st.flags[i] || st.type[i] !== EXPOSED) continue;
+    for (let y = 0; y < stN.h; y++) {
+      for (let x = 0; x < stN.w; x++) {
+        const i = stN.idx(x, y);
+        if (!stN.flags[i] || stN.type[i] !== EXPOSED) continue;
         const inSnow = gs?.snowMinX && y < gs.snowMinX.length
           && x >= (gs.snowMinX[y] ?? 1e9) && x <= (gs.snowMaxX?.[y] ?? -1e9);
         if (inSnow) ice++;
-        else if (st.wall[i] === 187 || st.wall[i] === 216) desert++;
+        else if (stN.wall[i] === 187 || stN.wall[i] === 216) desert++;
         else other++;
       }
     }
@@ -167,14 +167,14 @@ function statsOf(
       }
       return { a: g.tiles.active[i], wall: g.tiles.wall[i], solidNb: nb };
     })));
-    console.log('OURS   cavity:', JSON.stringify(cavity(st.w, st.h, (x, y) => {
-      const i = st.idx(x, y);
+    console.log('OURS   cavity:', JSON.stringify(cavity(stN.w, stN.h, (x, y) => {
+      const i = stN.idx(x, y);
       let nb = false;
       for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
-        if (!st.inBounds(x + dx, y + dy)) continue;
-        if (st.flags[st.idx(x + dx, y + dy)]) nb = true;
+        if (!stN.inBounds(x + dx, y + dy)) continue;
+        if (stN.flags[stN.idx(x + dx, y + dy)]) nb = true;
       }
-      return { a: st.flags[i], wall: st.wall[i], solidNb: nb };
+      return { a: stN.flags[i], wall: stN.wall[i], solidNb: nb };
     })));
 
     // ---- 金标沙漠装饰(485蚁卵/751鼬/484仙人掌/165/187)锚点与帧实证 ----

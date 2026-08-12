@@ -1,0 +1,92 @@
+// 城镇 NPC 受击链回归(原版三源):
+// ① 玩家弹幕/近战 = 巫毒窄门(Damage_PVE_Inner :11970-11972:仅向导 22+向导娃 267 /
+//    裁缝师 54+裁缝娃 1307);② 敌怪弹/陷阱弹 = hostile 分支恒命中(:11975 flag2);
+// ③ 敌怪接触(GetHurtByOtherNPCs :93605)/岩浆(:94511)/溺水(:96118)走 TownNPC 内置。
+import { describe, it, expect } from 'vitest';
+import { World } from '../src/world/World';
+import { TownNPC } from '../src/entities/TownNPC';
+import { Inventory } from '../src/items/Inventory';
+import { hitTownNpcs } from '../src/entities/projTargets';
+import { TILE } from '../src/core/constants';
+
+function makeEnv(npcList: TownNPC[], enemyList: Array<{ x: number; y: number; w: number; h: number }> = [], killGuide = false) {
+  const world = new World(200, 200, 100, 'hurt-test');
+  for (let x = 20; x <= 180; x++) world.store.setTileSilent(x, 100, 1);
+  const game = {
+    world,
+    player: { x: -9999, y: -9999, w: 0, h: 0, dead: true, equipStats: { killGuide, killClothier: false } },
+    enemies: () => enemyList,
+    npcs: () => npcList,
+    spawnParticles: () => {}, playSfx: () => {}, playSfxFiles: () => {},
+    addDamageNumber: () => {}, critters: () => [],
+  } as never;
+  return { world, game };
+}
+
+const box = { x: 100 * 16 - 10, y: 98 * 16, w: 20, h: 20 };
+
+describe('城镇 NPC 受击链(巫毒门/hostile/环境)', () => {
+  it('玩家弹幕无娃娃:向导/裁缝师均免疫(原版 :11970-11972 窄门)', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    const { game } = makeEnv([guide], [], false);
+    const hp0 = guide.hp;
+    expect(hitTownNpcs(box, game, 30, 2, 'playerProj')).toBe(false);
+    expect(guide.hp).toBe(hp0);
+  });
+
+  it('玩家弹幕 + 向导巫毒娃娃:向导(22)可伤,其他 NPC 仍免疫', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    const merch = new TownNPC('merchant', 102 * 16, 99 * 16, new Inventory());
+    const { game } = makeEnv([guide, merch], [], true);
+    const g0 = guide.hp, m0 = merch.hp;
+    hitTownNpcs(box, game, 30, 2, 'playerProj');
+    expect(guide.hp).toBeLessThan(g0);      // 22 + killGuide → 命中
+    expect(merch.hp).toBe(m0);              // 17 无门 → 免疫
+  });
+
+  it('敌怪弹(hostile 分支):任意城镇 NPC 恒命中(原版 :11975 flag2)', () => {
+    const merch = new TownNPC('merchant', 100 * 16, 99 * 16, new Inventory());
+    const { game } = makeEnv([merch], [], false);
+    const m0 = merch.hp;
+    expect(hitTownNpcs(box, game, 25, 0, 'hostile')).toBe(true);
+    expect(merch.hp).toBeLessThan(m0);
+  });
+
+  it('敌怪接触(GetHurtByOtherNPCs :93605):重叠敌伤 NPC,30t 专属冷却', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    guide.stationary = true;
+    const enemy = { x: 100 * 16 + 4, y: 96 * 16, w: 20, h: 40, dead: false, damage: 40 };
+    const { game } = makeEnv([guide], [enemy]);
+    guide.fixedUpdate(1 / 60, game); // 首帧即应互殴
+    expect(guide.hp).toBeLessThan(250);
+    const hp1 = guide.hp;
+    guide.fixedUpdate(1 / 60, game); // 冷却内不二连
+    expect(guide.hp).toBe(hp1);
+  });
+
+  it('岩浆(:94511):50 直伤 + 30t 冷却', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    guide.stationary = true;
+    const { world, game } = makeEnv([guide], []);
+    for (let y = 95; y <= 99; y++) { // 落定前后中心格都覆盖
+      world.store.liquid[world.store.idx(100, y)] = 255;
+      world.store.liquidType[world.store.idx(100, y)] = 2;
+    }
+    for (let t = 0; t < 5; t++) guide.fixedUpdate(1 / 60, game);
+    // hurt 扣防:50 - def(15)*0.5 = 42.5 → round 43
+    expect(guide.hp).toBe(250 - 43);
+  });
+
+  it('溺水(:96118):呼吸耗尽后每 7t 掉 2(不过防御)', () => {
+    const guide = new TownNPC('guide', 100 * 16, 99 * 16, new Inventory());
+    guide.stationary = true;
+    const { world, game } = makeEnv([guide], []);
+    // 头部格(落定后 y≈97;95-99 全列注水覆盖起跳/落定两种位置)
+    for (let y = 95; y <= 99; y++) {
+      world.store.liquid[world.store.idx(100, y)] = 255;
+      world.store.liquidType[world.store.idx(100, y)] = 1;
+    }
+    for (let t = 0; t < 200 * 7 + 10; t++) guide.fixedUpdate(1 / 60, game);
+    expect(guide.hp).toBeLessThan(250);
+  });
+});

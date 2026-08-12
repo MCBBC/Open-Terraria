@@ -2790,7 +2790,6 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
             else typ[uti] = 57;                                               // ★只写 type 不激活（原版语义）
         }
     }
-    Console.Error.WriteLine($"UW1={(int)r.Peek()} n1={(double)r.Peek()}");
     for (int ux = 10; ux < W - 10; ux++)         // ② 岩浆线
     {
         uwNum2 += (int)r.Next(-10, 11);
@@ -2802,7 +2801,6 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
             if (act[uti] == 0) { liqT[uti] = 1; liq[uti] = 255; }
         }
     }
-    Console.Error.WriteLine($"UW2={(int)r.Peek()}");
     for (int ux = 0; ux < W; ux++)               // ③ 1/50 列大灰烬丘陵
     {
         if ((int)r.Next(50) == 0)
@@ -2812,7 +2810,6 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
             TileRunner((int)r.Next(0, W), uy + (int)r.Next(20, 50), (int)r.Next(15, 20), 1000, 57, true, 0.0, (int)r.Next(1, 3), true);
         }
     }
-    Console.Error.WriteLine($"UW3={(int)r.Peek()}");
     for (int ux = 0; ux < W; ux++)               // ④ 1/13 列灰烬柱 + 横团 + 挖掘
     {
         if ((int)r.Next(13) == 0)
@@ -2836,7 +2833,6 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
                 TileRunner(ux + (int)r.Next(-15, 15), uy + (int)r.Next(-15, 10), (int)r.Next(15, 30), (int)r.Next(5, 20), -2, false, (int)r.Next(-1, 3), (int)r.Next(-1, 3));
         }
     }
-    Console.Error.WriteLine($"UW4={(int)r.Peek()}");
     for (int un = 0; un < W; un++)               // ⑤ 随机小挖掘
         TileRunner((int)r.Next(20, W - 20), (int)r.Next(H - 180, H - 10), (int)r.Next(2, 7), (int)r.Next(2, 7), -2);
     for (int ux = 0; ux < W; ux++)               // ⑥ 底部岩浆层 h-145/144
@@ -2847,11 +2843,9 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
             if (act[uti] == 0) { liq[uti] = 255; liqT[uti] = 1; }
         }
     }
-    Console.Error.WriteLine($"UW5={(int)r.Peek()}");
     int uwOre = (int)((double)(W * H) * 0.0008); // ⑦ 地狱石脉
     for (int un = 0; un < uwOre; un++)
         TileRunner((int)r.Next(0, W), (int)r.Next(H - 140, H), (int)r.Next(2, 7), (int)r.Next(3, 7), 58);
-    Console.Error.WriteLine($"UW6={(int)r.Peek()}");
     // ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915，外缘 17% 带）
     for (int ux = 25; ux < W - 25; ux++)
     {
@@ -2884,7 +2878,6 @@ int[] uwConv={0}, uwCand={0}, uwGrow={0};
         }
     }
 }
-    Console.Error.WriteLine($"UW7={(int)r.Peek()} conv={uwConv[0]} cand={uwCand[0]} grow={uwGrow[0]}");
 Checkpoint("underworld");
 
 // ================= Pass 29 CorruptionAndCrimson（cs:13919-14613 + ChasmRunnerSideways cs:75323 + CanEvilReplace cs:75527 + CrimStart cs:75543 + CrimPlaceHearts cs:75854 + ChasmRunner cs:76066）=================
@@ -2956,12 +2949,8 @@ void ChasmRunnerSidewaysGen(int i, int j, int direction, int steps)
     double vx2 = (int)r.Next(10, 21) * 0.1 * direction;
     double vy2 = (int)r.Next(-10, 10) * 0.01;
     double rad = (int)r.Next(5) + 7;
-    Console.Error.WriteLine($"SWIN dir={direction} j={j} steps={steps} vx={vx2} vy={vy2} r={rad} p={(int)r.Peek()}");
-    int swIt = 0;
     while (rad > 0.0)
     {
-        if (swIt < 40) Console.Error.WriteLine($"SI{swIt} n={sn} r={rad} px={vx} py={vy} p={(int)r.Peek()}");
-        swIt++;
         if (sn > 0.0)
         {
             rad += (int)r.Next(3);
@@ -2973,7 +2962,6 @@ void ChasmRunnerSidewaysGen(int i, int j, int direction, int steps)
         else rad -= (int)r.Next(4);
         if (vy > rockLayer && sn > 0.0) sn = 0.0;
         sn -= 1.0;
-        if (swIt <= 40) Console.Error.WriteLine($"SS{swIt} p={(int)r.Peek()}");
         int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
         int y0 = Math.Max(0, (int)(vy - rad * 0.5)), y1 = Math.Min(H, (int)(vy + rad * 0.5));
         for (int k = x0; k < x1; k++)
@@ -3035,11 +3023,8 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
     double vy2 = (int)r.Next(11) * 0.2 + 0.5;
     int num3 = 5;
     double rad = (int)r.Next(5) + 7;
-    int crIt = 0;
     while (rad > 0.0)
     {
-        if (crIt < 150) Console.Error.WriteLine($"CI{crIt} n={sn} r={rad} px={vx} py={vy} p={(int)r.Peek()}");
-        crIt++;
         if (sn > 0.0)
         {
             rad += (int)r.Next(3);
@@ -3051,16 +3036,12 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
         else if (vy > wsN + 45.0) rad -= (int)r.Next(4);
         if (vy > rockLayer && sn > 0.0) sn = 0.0;
         sn -= 1.0;
-        if (crIt < 27) Console.Error.WriteLine($"CS{crIt} p={(int)r.Peek()}");
         if (!flag && vy > wsN + 20.0)
         {
             flag = true;
             ChasmRunnerSidewaysGen((int)vx, (int)vy, -1, (int)r.Next(20, 40));
-            if (crIt < 27) Console.Error.WriteLine($"CW- {crIt} p={(int)r.Peek()}");
             ChasmRunnerSidewaysGen((int)vx, (int)vy, 1, (int)r.Next(20, 40));
-            if (crIt < 27) Console.Error.WriteLine($"CW+ {crIt} p={(int)r.Peek()}");
         }
-        if (crIt < 27) Console.Error.WriteLine($"CC{crIt} p={(int)r.Peek()}");
         if (sn > (double)num3)
         {
             int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
@@ -3106,10 +3087,8 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                 }
             }
         }
-        if (crIt < 27) Console.Error.WriteLine($"CO{crIt} p={(int)r.Peek()}");
         vx += vx2; vy += vy2;
         vx2 += (int)r.Next(-10, 11) * 0.01;
-        if (crIt < 27) Console.Error.WriteLine($"CH{crIt} p={(int)r.Peek()}");
         if (vx2 > 0.3) vx2 = 0.3;
         if (vx2 < -0.3) vx2 = -0.3;
         int x0b = Math.Max(1, (int)(vx - rad * 1.1)), x1b = Math.Min(W - 1, (int)(vx + rad * 1.1));
@@ -3125,7 +3104,6 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                     if (typ[ti] != 31) typ[ti] = 25;
                 }
             }
-        if (crIt >= 20 && crIt < 30) Console.Error.WriteLine($"S1{crIt} p={(int)r.Peek()}");
         for (int k = x0b; k < x1b; k++)
             for (int l = y0b; l < y1b; l++)
             {
@@ -3137,7 +3115,6 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                     if (l > j + (int)r.Next(3, 20)) wal[ti] = 3;
                 }
             }
-        if (crIt >= 20 && crIt < 30) Console.Error.WriteLine($"S2{crIt} p={(int)r.Peek()}");
     }
 }
 void CrimVeinGen(double px, double py, double ivx, double ivy)
@@ -3148,12 +3125,8 @@ void CrimVeinGen(double px, double py, double ivx, double ivy)
     double sx = px, sy = py;
     int trip = (int)r.Next(100, 150);
     if (ivy < 0.0) trip -= 25;
-    Console.Error.WriteLine($"VW s={sx},{sy} iv={ivx},{ivy} trip={trip}");
-    int vwIt = 0;
     while (flag)
     {
-        if (vwIt < 6) Console.Error.WriteLine($"VK{vwIt} p={vx},{vy} r={rad} ppeek={(int)r.Peek()}");
-        vwIt++;
         rad += (int)r.Next(-50, 51) * 0.02;
         if (rad < 15.0) rad = 15.0;
         if (rad > 25.0) rad = 25.0;
@@ -3215,23 +3188,6 @@ void CrimEntGen(double px, double py, int crimDir)
         px += vx; py += vy;
     }
 }
-string CrPhaseHash(int hc)
-{
-    uint h = 0x811c9dc5;
-    for (int hx = Math.Max(0, hc - 300); hx < Math.Min(W, hc + 300); hx++)
-        for (int hy = 240; hy < 700; hy++)
-        {
-            int hi2 = hy * W + hx;
-            h = (h ^ (uint)(typ[hi2] & 0xff)) * 16777619u;
-            h = (h ^ (uint)((typ[hi2] >> 8) & 0xff)) * 16777619u;
-            h = (h ^ act[hi2]) * 16777619u;
-            h = (h ^ (uint)(wal[hi2] & 0xff)) * 16777619u;
-            h = (h ^ (uint)((wal[hi2] >> 8) & 0xff)) * 16777619u;
-        }
-    return h.ToString("x8");
-}
-int cp1Dumped = 0;
-int cp6Dumped = 0;
 void CrimStartGen(int i, int j)
 {
     double wsN = worldSurface;
@@ -3247,12 +3203,8 @@ void CrimStartGen(int i, int j)
     double rad = (int)r.Next(15, 26);
     bool flag = true;
     int num4 = 0;
-    int mwIt = 0;
-    Console.Error.WriteLine($"MW startY={startY} j={j} ws={worldSurface}");
     while (flag)
     {
-        if (mwIt < 20) Console.Error.WriteLine($"MK{mwIt} px={vx} py={vy} r={rad} p={(int)r.Peek()}");
-        mwIt++;
         rad += (int)r.Next(-50, 51) * 0.01;
         if (rad < 15.0) rad = 15.0;
         if (rad > 25.0) rad = 25.0;
@@ -3292,19 +3244,6 @@ void CrimStartGen(int i, int j)
         vx += vx2; vy += vy2;
         if (vy > wsN + 100.0) flag = false;
     }
-    Console.Error.WriteLine($"CP1 p={(int)r.Peek()} h={CrPhaseHash(i)}");
-    if (cp1Dumped == 0)
-    {
-        cp1Dumped = 1;
-        var gb = new StringBuilder();
-        for (int gx = i - 320; gx < i + 320; gx++)
-            for (int gy = 200; gy < 700; gy++)
-            {
-                int gi = gy * W + gx;
-                if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gb.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
-            }
-        File.WriteAllText("/tmp/oracle-cp1.txt", gb.ToString());
-    }
     rad = (int)r.Next(40, 55);
     for (int n = 0; n < 50; n++)
     {
@@ -3331,9 +3270,7 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
-    Console.Error.WriteLine($"CP2 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     int veinCount = (int)r.Next(5, 9);
-    Console.Error.WriteLine($"VN={veinCount}");
     var veinDirs = new List<(double x, double y)>();
     for (int n = 0; n < veinCount; n++)
     {
@@ -3361,11 +3298,8 @@ void CrimStartGen(int i, int j)
             if (tries > 10000) break;
         }
         veinDirs.Add((dx3, dy3));
-        Console.Error.WriteLine($"VE{n} in p={(int)r.Peek()} dv={dx3},{dy3}");
         CrimVeinGen((double)sx, (double)sy, dx3, dy3);
-        Console.Error.WriteLine($"VE{n} out p={(int)r.Peek()}");
     }
-    Console.Error.WriteLine($"CP3 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     int shellMinX = W, shellMaxX = 0;
     vx = i; vy = startY;
     rad = (int)r.Next(25, 35);
@@ -3406,7 +3340,6 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
-    Console.Error.WriteLine($"CP4 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     for (int x = shellMinX; x <= shellMaxX; x++)
     {
         int y = startY;
@@ -3422,21 +3355,7 @@ void CrimStartGen(int i, int j)
             }
         }
     }
-    Console.Error.WriteLine($"CP5 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     CrimEntGen(vx, vy, crimDir);
-    Console.Error.WriteLine($"CP6 p={(int)r.Peek()} h={CrPhaseHash(i)}");
-    if (cp6Dumped == 0)
-    {
-        cp6Dumped = 1;
-        var gb2 = new StringBuilder();
-        for (int gx = i - 320; gx < i + 320; gx++)
-            for (int gy = 200; gy < 700; gy++)
-            {
-                int gi = gy * W + gx;
-                if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gb2.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
-            }
-        File.WriteAllText("/tmp/oracle-cp6.txt", gb2.ToString());
-    }
 }
 void CrimPlaceHeartsGen()
 {
@@ -3501,7 +3420,6 @@ void CrimPlaceHeartsGen()
         if (ox < BEACH_DISTANCE || ox > W - BEACH_DISTANCE) return true;
         return false;
     }
-    Console.Error.WriteLine($"CR0={(int)r.Peek()}");
     int crCx = 0;
     for (int g = 0; (double)g < groupCount; g++)
     {
@@ -3533,7 +3451,6 @@ void CrimPlaceHeartsGen()
             if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
         }
         crCx = cx;
-        Console.Error.WriteLine($"CRg{g}={(int)r.Peek()} cx={cx} zLo={zLo} zHi={zHi}");
         if (crimson)
         {
             CrimStartGen(cx, (int)cNum - 10);
@@ -3554,7 +3471,6 @@ void CrimPlaceHeartsGen()
                     }
                 }
             }
-            Console.Error.WriteLine($"CRc{g}={(int)r.Peek()}");
             // 地表转换带（cs:14131-14199）
             double band = cNum2 + 40.0;
             for (int x = zLo; x < zHi; x++)
@@ -3591,7 +3507,6 @@ void CrimPlaceHeartsGen()
                     else if (typ[ti] == 397) typ[ti] = 399;
                 }
             }
-            Console.Error.WriteLine($"CRb{g}={(int)r.Peek()}");
             // 祭坛（cs:14201-14239）
             int altarCount = (int)r.Next(10, 15);
             for (int a = 0; a < altarCount; a++)
@@ -3644,23 +3559,17 @@ void CrimPlaceHeartsGen()
                             if (l == cx)
                             {
                                 cooldown = 20;
-                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} main y={n} cd={cooldown} p0={(int)r.Peek()}");
                                 ChasmRunnerGen(l, n, (int)r.Next(150) + 150, true);
-                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} mainDone p={(int)r.Peek()}");
                             }
                             else if ((int)r.Next(35) == 0 && cooldown == 0)
                             {
                                 cooldown = 30;
-                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} side y={n} cd={cooldown} p={(int)r.Peek()}");
                                 ChasmRunnerGen(l, n, (int)r.Next(50) + 50, true);
-                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} sideDone p={(int)r.Peek()}");
                             }
-                            else if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} skip y={n} cd={cooldown} p={(int)r.Peek()}");
                             break;
                         }
                     }
                 }
-                Console.Error.WriteLine($"x={l} p={(int)r.Peek()}");
                 // 丛林草→腐化丛林草（cs:14392-14404）
                 for (int n = (int)cNum; (double)n < cNum2 - 1.0; n++)
                 {
@@ -3676,7 +3585,6 @@ void CrimPlaceHeartsGen()
                     }
                 }
             }
-            Console.Error.WriteLine($"CRc{g}={(int)r.Peek()}");
             // 地表转换带（cs:14406-14484）
             double band = cNum2 + 40.0;
             for (int x = zLo; x < zHi; x++)
@@ -3712,7 +3620,6 @@ void CrimPlaceHeartsGen()
                     else if (typ[ti] == 397) typ[ti] = 398;
                 }
             }
-            Console.Error.WriteLine($"CRb{g}={(int)r.Peek()}");
             // 暗影球周黑檀石囊（cs:14546-14581，仅本组区间）
             for (int x = zLo; x < zHi; x++)
             {
@@ -3739,29 +3646,13 @@ void CrimPlaceHeartsGen()
                 }
             }
         }
-        Console.Error.WriteLine($"CRend{g}={(int)r.Peek()}");
     }
     if (crimson)
     {
-        Console.Error.Write($"HEARTS n={heartPosG.Count} pts=");
-        foreach (var hp in heartPosG) Console.Error.Write($"({hp.x},{hp.y})");
-        Console.Error.WriteLine($" pre={(int)r.Peek()}");
         CrimPlaceHeartsGen();
-        Console.Error.WriteLine($"HEARTS done p={(int)r.Peek()}");
     }   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
 }
-    Console.Error.WriteLine($"CRend={(int)r.Peek()}");
 Checkpoint("corruption");
-{
-    var gsB = new StringBuilder();
-    for (int gx = 800; gx < 1950; gx++)
-        for (int gy = 240; gy < 700; gy++)
-        {
-            int gi = gy * W + gx;
-            if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gsB.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
-        }
-    File.WriteAllText("/tmp/oracle-grid.txt", gsB.ToString());
-}
 
 
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================
@@ -3881,7 +3772,7 @@ void SonOfLakinater(int li, int lj)
                 lkY++;
                 if ((double)lkY >= (double)worldSurface || wal[lkY * W + lkX0] > 0) { lkFlag = true; break; }
             }
-            if (!lkFlag && typ[lkY * W + lkX0] == 53) lkFlag = true;
+            if (!lkFlag && typ[lkY * W + lkX0] == 53) { lkFlag = true; }
             if (lkFlag) continue;
             for (int m = lkX0 - 50; m <= lkX0 + 50; m++)
                 for (int n = lkY - 50; n <= lkY + 50; n++)
@@ -3897,12 +3788,13 @@ void SonOfLakinater(int li, int lj)
                 lkY++;
                 if ((double)lkY > (double)worldSurface - 50.0) lkFlag = true;
             }
-            if (lkFlag || lkY - lkAnchor <= 10) continue;
+            if (lkFlag) continue;
+            if (lkY - lkAnchor <= 10) continue;
             for (int m = lkX0 - 60; m <= lkX0 + 60; m++)
             {
                 int ty2 = lkY - 20;
                 if (m < 0 || m >= W || ty2 < 0 || ty2 >= H) continue;
-                if (act[ty2 * W + m] != 0 || wal[ty2 * W + m] > 0) lkFlag = true;
+                if (act[ty2 * W + m] != 0 || wal[ty2 * W + m] > 0) { lkFlag = true; }
             }
             if (lkFlag) continue;
             int lkSolid = 0;

@@ -5,7 +5,7 @@
 // pass 铺——wall 等价是独立对账项）。
 // 金标再生成：dotnet run tools/golden/caves-oracle.cs <seedInt> <evil> <out.json>
 import { describe, it, expect } from 'vitest';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
@@ -25,10 +25,10 @@ import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass'
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
-import { runUnderworldPass, __uwEndPeek, __uwTreeInfo } from '../src/world/gen/vanilla/UnderworldPass';
+import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
-import { runCorruptionPass, __crDump } from '../src/world/gen/vanilla/CorruptionPass';
+import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -113,30 +113,9 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   // （位置正确），转录后将插在 lakes 前与 slush 后。
   runWebsPass(st, rng, gs); snap('webs');
   runUnderworldPass(st, rng, gs); snap('underworld');
-  {
-    let n633 = 0, n634 = 0;
-    for (let q = 0; q < st.type.length; q++) {
-      const v = V_ID[st.type[q]];
-      if (st.flags[q] && v === 633) n633++;
-      if (st.flags[q] && v === 634) n634++;
-    }
-    writeFileSync(`/tmp/js-uwpeek-${seedText.replace(/[^A-Za-z0-9]/g, '_')}.txt`, `${__uwEndPeek} ${__uwTreeInfo} n633=${n633} n634=${n634}\n`);
-  }
   // #29 Corruption（cs:13919，oracle 已转录；#32 Dungeon 未转录——其 JS 实现仍在
   // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
   runCorruptionPass(st, rng, gs);
-  writeFileSync('/tmp/js-crdump.txt', __crDump());
-  {
-    const lines: string[] = [];
-    for (let gx = 800; gx < 1950; gx++) {
-      for (let gy = 240; gy < 700; gy++) {
-        const gi = st.idx(gx, gy);
-        const sheet = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? 0;
-        if (sheet !== 0 || st.flags[gi] || st.wall[gi] !== 0) lines.push(`${gx} ${gy} ${sheet} ${st.flags[gi]} ${st.wall[gi]}`);
-      }
-    }
-    writeFileSync(`/tmp/js-grid-${seedText.replace(/[^A-Za-z0-9]/g, '_')}.txt`, `${lines.join('\n')}\n`);
-  }
   snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）

@@ -70,6 +70,10 @@ export interface SaveData {
     journeyTimeRate?: number;
     /** 旅程时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448；旧档缺省 false） */
     journeyFreezeTime?: boolean;
+    /** 日晷冷却/快进到黎明（WorldFile.cs:1311/1342；旧档缺省 0/false） */
+    sundialCooldown?: number; fastForwardTimeToDawn?: boolean;
+    /** 月晷冷却/快进到黄昏（WorldFile.cs:1416-1417；旧档缺省 0/false） */
+    moondialCooldown?: number; fastForwardTimeToDusk?: boolean;
   };
   clock: {
     timeOfDay: number; dayCount: number;
@@ -81,6 +85,8 @@ export interface SaveData {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
   altarCount?: number;
+  /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
+  savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
   tiles: string;   // base64 RLE
   walls: string;
   liquid: string;
@@ -164,11 +170,16 @@ export interface SaveMeta {
   /** 旅程时间倍率/冻结（CreativePowers.cs:866/:1448；旧档缺省 1/false） */
   journeyTimeRate?: number;
   journeyFreezeTime?: boolean;
+  /** 日晷/月晷快进四件套（WorldFile.cs:1311/1342/1416-1417；旧档缺省 0/0/false/false） */
+  sundialCooldown?: number; moondialCooldown?: number;
+  fastForwardTimeToDawn?: boolean; fastForwardTimeToDusk?: boolean;
   chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
   altarCount?: number;
+  /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
+  savedOreTiers?: { cobalt: number; mythril: number; adamantite: number };
   /** 图鉴三桶（杀数/遇数/聊天）——data/Bestiary.ts BestiarySave */
   bestiary?: import('../data/Bestiary').BestiarySave;
 }
@@ -252,6 +263,10 @@ export function serializeSave(
       difficulty: meta.difficulty ?? 0,   // Main.GameMode（旧档缺省=经典）
       journeyTimeRate: meta.journeyTimeRate ?? 1,
       journeyFreezeTime: meta.journeyFreezeTime ?? false,
+      sundialCooldown: meta.sundialCooldown ?? 0,
+      moondialCooldown: meta.moondialCooldown ?? 0,
+      fastForwardTimeToDawn: meta.fastForwardTimeToDawn ?? false,
+      fastForwardTimeToDusk: meta.fastForwardTimeToDusk ?? false,
     },
     clock: {
       timeOfDay: meta.timeOfDay, dayCount: meta.dayCount,
@@ -260,6 +275,7 @@ export function serializeSave(
     },
     invasion: meta.invasion ?? { type: 0, size: 0, sizeStart: 0, x: 0, delay: 0 },
     altarCount: meta.altarCount ?? 0,
+    savedOreTiers: meta.savedOreTiers ?? { cobalt: -1, mythril: -1, adamantite: -1 },
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
     walls: bytesToB64(rlePairs(st.wall)),
     liquid: bytesToB64(rlePairs(st.liquid)),

@@ -791,7 +791,12 @@ export class Renderer {
       worldBloodMoon: !!clock0?.bloodMoon,
       cloudAlpha: world.weather?.cloudAlpha ?? 0,
       // Main.GraveyardVisualIntensity（SceneState.cs:124 墓地雾激活门）：Game 侧
-      // updateWeather 每帧把平滑值写入 weather.graveyardVisual
+      // updateWeather 每帧把平滑值写入 weather.graveyardVisual。
+      // 注：原版 TileDrawing.cs:2752-2777 另有"墓碑灵魂火苗"块（typeCache==85 且
+      // GraveyardVisualIntensity>0 → GetTileFlameData 火苗叠加），但 GetTileFlameData
+      // （:1873-1925）switch 只覆盖 270/271/581，default 走 Main.tileFlame[type]——
+      // Main.cs:9210-9222 的 tileFlame 表无 85 → flameCount=0，循环零次 = **原版死
+      // 代码**（1.4.5.6 实测不渲染任何火苗），无物可移植，勿再登记
       graveyardIntensity: world.weather?.graveyardVisual ?? 0,
     });
     this._monoFrameMs = this._liquidNow;

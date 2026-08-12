@@ -11,10 +11,13 @@ export interface GameHooks {
   spawnTownShot?(shot: import('./TownShot').TownShot): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
+  /** 城镇 NPC 列表(受击判定用;Game 实现 = entities.npcs 桶) */
+  npcs?(): unknown[];
   /** 在世界上生成掉落物（返回实体便于染色等后处理） */
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
-  /** 对玩家造成伤害（attacker 用于荆棘反伤） */
-  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown): void;
+  /** 对玩家造成伤害（attacker 用于荆棘反伤/死亡归因；contactOnly=true 表示伤害源是
+   *  NPC 接触（Player.cs:30880-30970 分支）——荆棘只在接触分支反伤，弹幕命中不触发） */
+  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown, contactOnly?: boolean): void;
   /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */

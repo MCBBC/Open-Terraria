@@ -7,10 +7,12 @@ import { CRITTER_BY_KEY, CritterDef } from '../data/critters';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { avoidWater } from './waterAvoid';
-import { npcShimmerTransformTo } from '../stats/Shimmer';
+import { isNpcShimmerImmune, npcShimmerTransformTo } from '../stats/Shimmer';
 
-export class Critter extends Entity {
-  stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
+/** aiStyle 67 小动物（NPC.cs SetDefaults :13505/:13519/:17215）：直通微光分支成员 */
+const CRITTER_AISTYLE_67 = new Set([359, 360, 655]);
+
+export class Critter extends Entity {  stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
   def: CritterDef;
   facing = 1;
   animT = 0;
@@ -31,6 +33,8 @@ export class Critter extends Entity {
   // 动画帧窗口（蝴蝶表含 8 物种 × 3 帧，只播本物种）
   animBase = 0;
   animLen = 0; // 0 = 用全表
+  /** 微光浸入进度（≈shimmerTransparency ×100，NPC.cs:92468-92483 +0.01/t，90t 阈值） */
+  shimmerT = 0;
   // 鸟类巡航：持久航向，偶尔小角度转向（直线巡航不像原地打转）
   heading = (Math.random() - 0.5) * Math.PI * 2;
   headingT = 120 + Math.floor(Math.random() * 200);
@@ -147,17 +151,29 @@ export class Critter extends Entity {
     }
   }
 
-  /** 入微光（NPC.GetShimmered :92502-92533 小动物侧）：中心格微光液面 >30 即触发。
+  /** 入微光。两条路径（原版入口门不同）：
+   *  ① aiStyle 67 小动物（NPC.cs:34586-34598：359 蜗牛/360 发光蜗牛/655 熔岩蜗牛）
+   *    ——中心格微光液面 >30 即刻 GetShimmered，无浸入计时、免表不拦；
+   *  ② 其余小动物走 buff 353 路径（:94268 接触 → shimmerTransparency +0.01/t
+   *    （:92468）>0.9 → GetShimmered；入口门 buffImmune[353]=ShimmerImmunity
+   *    （:17773）——蝴蝶 356 等免表成员永不转化）。
    *  返回 true = 已转化（本帧 AI 终止，原版 :34596 触发后 return） */
   private tryShimmer(game: GameHooks): boolean {
     const st = game.world.store;
     const tx = Math.floor(this.cx / TILE);
     const ty = Math.floor(this.cy / TILE);
-    if (!st.inBounds(tx, ty)) return false;
-    const i = st.idx(tx, ty);
-    if (!(st.liquidType[i] === 4 && st.liquid[i] > 30)) return false;
     const to = npcShimmerTransformTo(this.def.npc);
     if (to < 0) return false;   // 无表项：分支链落空，小动物留在微光里不消散
+    const inShimmer = st.inBounds(tx, ty) && st.liquidType[st.idx(tx, ty)] === 4
+      && st.liquid[st.idx(tx, ty)] > 30;
+    if (!inShimmer) {
+      if (this.shimmerT > 0) this.shimmerT--;   // 离池衰减（:92484-92500）
+      return false;
+    }
+    if (!CRITTER_AISTYLE_67.has(this.def.npc)) {
+      if (isNpcShimmerImmune(this.def.npc)) return false;   // :17773 免表门
+      if (this.shimmerT < 90) { this.shimmerT++; return false; }
+    }
     this.dead = true;
     // NPC.Transform(:81850)：贴底重定位（脚底对齐落点）；新实体微光化渐显
     const e = game.spawnNpcByVanilla?.(to, this.cx, this.y + this.h);

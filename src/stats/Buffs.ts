@@ -253,9 +253,20 @@ const DOT_CHUNK: Partial<Record<BuffType, number>> = {
   [BuffType.Suffocation]: 5,
 };
 
+/** 环境 DoT 表（NaturalLifeRegen :18779-18911 的 onFire→burned→suffocating 顺序，
+ *  速率 = lifeRegen 负项 / 2 = HP/s）。每个 DoT 结算前先清零正 lifeRegen——
+ *  恢复类 buff 不能抵消 DoT（tick 内消费） */
+const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
+  [BuffType.OnFire, -4],      // lifeRegen-8（:18793，vampireSeed 分支未移植）
+  [BuffType.Burning, -30],    // lifeRegen-60（:18862，另 moveSpeed×0.5 在 moveSpeedMult）
+  [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
+];
+
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
+  /** 狼人回复独立累加器（:11496 lifeRegen++ 恒 0.5 HP/s，与篝火强度/节拍无关） */
+  werewolfAccum = 0;
   lanternAccum = 0;
   /** 当前篝火光环强度(Game 每 20tick 扫描写入:篝火+1,心灯额外+1) */
   campfireHeal = 1;
@@ -312,28 +323,39 @@ export class BuffState {
       if (left <= 0) this.active.delete(t);
       else this.active.set(t, left);
     }
-    // 定额 HP/s buff（Regeneration 2 HP/s / Honey 1 HP/s）
+    // ---- UpdateBuffs 正项（Player.cs:9640+）：Regeneration lifeRegen+=4（2 HP/s）、
+    //      Honey :18955 lifeRegen+=2（1 HP/s）、狼人 :11496 lifeRegen+=1（0.5 HP/s）。
+    //      注意原版这些都在 NaturalLifeRegen 的 DoT 段（:18779+）**之前**求值——
+    //      DoT 的 if(lifeRegen>0) lifeRegen=0 会把它们整池清零（见下）----
     heal += this.rateAccum(BuffType.Regen, 2, dt);
     heal += this.rateAccum(BuffType.Honey, 1, dt);
-    // 环境 DoT debuff（Player.cs:18793-18934 lifeRegen 负项 / 2 = HP/s）——
-    // 分块弹出（DOT_CHUNK），净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费
-    const dots =
-      this.rateAccum(BuffType.OnFire, -4, dt)         // lifeRegen-8
-      + this.rateAccum(BuffType.Burning, -30, dt)     // lifeRegen-60
-      + this.rateAccum(BuffType.Suffocation, -20, dt); // lifeRegen-40
-    heal += dots;
-    if (dots < 0) this.dotChunkOut += -dots;
-    // 蜂蜜对冲（Player.cs:18934-18940:lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s）——
-    // DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
-    const dotActive = heal < 0;
-    if (dotActive && this.active.has(BuffType.Honey)) {
-      heal += this.rateAccum(BuffType.Honey, 2, dt, true);
-    }
     if (this.active.has(BuffType.Werewolf)) {
-      // 狼人 lifeRegen++（:11496）= 0.5 HP/s → 每 2 秒 1 HP
-      this.campfireAccum += dt;
-      if (this.campfireAccum >= 2) { this.campfireAccum -= 2; heal += this.campfireHeal; }
+      // 狼人 lifeRegen++（:11496）= 0.5 HP/s → 每 2 秒恒 1 HP（独立累加器，勿与篝火
+      // 共用 campfireAccum/campfireHeal——曾误挂致篝火不在时狼人回复随强度归零/错峰）
+      this.werewolfAccum += dt;
+      if (this.werewolfAccum >= 2) { this.werewolfAccum -= 2; heal += 1; }
     }
+    // ---- DoT 段（NaturalLifeRegen :18779-18911）：每个 DoT 先 if(lifeRegen>0)
+    //      lifeRegen=0 再累加负项——恢复类 buff **不能**抵消 OnFire/Burning 等
+    //      （曾直接相加，恢复池被 DoT 按净额吃掉）。分块弹出（DOT_CHUNK），
+    //      净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费 ----
+    let dots = 0;
+    for (const [t, hpPerSec] of ENV_DOTS) {
+      if (!this.active.has(t)) continue;
+      if (heal > 0) heal = 0;                       // :18781 等 if (lifeRegen > 0) lifeRegen = 0
+      const d = this.rateAccum(t, hpPerSec, dt);
+      dots += d;
+      heal += d;
+    }
+    if (dots < 0) this.dotChunkOut += -dots;
+    // 蜂蜜对冲（Player.cs:18915-18922：lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s，
+    // 且对冲后钳回 ≤0）——DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
+    if (heal < 0 && this.active.has(BuffType.Honey)) {
+      heal += this.rateAccum(BuffType.Honey, 2, dt, true);
+      if (heal > 0) heal = 0;
+    }
+    // ---- 光环正项（NaturalLifeRegen :18988-18993，位于 DoT 段之后——篝火/心灯
+    //      的 lifeRegen 按原版可对冲 DoT）----
     if (this.active.has(BuffType.Campfire)) {
       // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:18990/12244-12245)→ 每 2 秒 1 HP
       this.campfireAccum += dt;

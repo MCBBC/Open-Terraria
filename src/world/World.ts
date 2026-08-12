@@ -76,13 +76,35 @@ export class World {
   journeyTimeRate = 1;
   /** 旅程模式时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448——开启时 dayRate=0） */
   journeyFreezeTime = false;
+  /** 附魔日晷/月晷快进（Main.fastForwardTimeToDawn/Dusk + sundialCooldown/moondialCooldown，
+   *  Main.cs:6240-6268 Sundialing/Moondialing：使用置旗 + 冷却 8 天；快进中 dayRate=60。
+   *  清旗点 = UpdateTime_StartDay :64844-64847（dawn）/ StartNight :64691-64694（dusk），
+   *  冷却递减 = StartDay :64885-64887（sundial）/ StartNight :64695-64697（moondial），
+   *  血月清零 = StartNight :64892-64893。随世界存档持久化（WorldFile.cs:1311/1342/1416-1417） */
+  fastForwardTimeToDawn = false;
+  fastForwardTimeToDusk = false;
+  sundialCooldown = 0;
+  moondialCooldown = 0;
+  /** 全员熟睡旗（CurrentFrameFlags.SleepingPlayersCount==ActivePlayersCount && >0，
+   *  Main.cs:6280-6285——Game 每 tick 下发；单人 = 本地玩家 sleeping && timeSleeping>=120） */
+  allSleeping = false;
+  /** IsFastForwardingTime（Main.cs:6230-6238）——事件 roll 压制门共用 */
+  isFastForwardingTime(): boolean { return this.fastForwardTimeToDawn || this.fastForwardTimeToDusk; }
   /** 专家世界（Main.cs:2775-2777：GameMode==1/2 → Difficulty≥Expert；旅程 3 不算） */
   get isExpert(): boolean { return this.difficulty === 1 || this.difficulty === 2; }
   /** 大师世界（Main.cs:2779-2780：仅 GameMode==2） */
   get isMaster(): boolean { return this.difficulty === 2; }
   /** 旅程世界（Main.cs:2696 IsJourneyMode：GameMode==3） */
   get isJourney(): boolean { return this.difficulty === 3; }
-  /** 时间推进倍率（Main.cs:6278-6290 UpdateTimeRate：冻结 0 / 否则 TargetTimeRate；gameMenu 恒 1） */
+  /** 当前 dayRate（Main.cs:6270-6294 UpdateTimeRate 1:1）：快进恒 60；
+   *  否则冻结 0 / TargetTimeRate × 全员睡 5。时钟/天气/税计时/旅行商概率全链消费 */
+  dayRate(): number {
+    if (this.isFastForwardingTime()) return 60;
+    if (this.journeyFreezeTime) return 0;
+    return this.journeyTimeRate * (this.allSleeping ? 5 : 1);
+  }
+  /** 时间推进倍率（Main.cs:6278-6290 UpdateTimeRate：冻结 0 / 否则 TargetTimeRate；gameMenu 恒 1）
+   *  ——不含快进/睡觉两档的旧入口，保留给不参与 dayRate 链的调用方 */
   journeyTimeScale(): number { return this.journeyFreezeTime ? 0 : this.journeyTimeRate; }
   /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转用。
    *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入恒 {}） */
@@ -111,6 +133,10 @@ export class World {
    *  SmashAltar 矿物三档轮换的波次源（%3 选档 /3+1 衰减），海盗入侵自然 roll 的
    *  altarCount>0 门（Main.cs:64938） */
   altarCount = 0;
+  /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307 随存档持久化）：
+   *  每档矿种全世界二选一固定——钴 107/钯 221、秘银 108/山铜 222、精金 111/钛 223。
+   *  -1 = 尚未砸过该档（SmashAltar 首砸 roll 一次并锁定）；存 sheet id */
+  savedOreTiers = { cobalt: -1, mythril: -1, adamantite: -1 };
   /** 图鉴统计（BestiaryUnlocksTracker——原版 IPersistentPerWorldContent，随世界存档：
    *  WorldFile.cs:3399 Save/:3405 Load。杀数/遇数/聊天三桶，数据层见 data/Bestiary.ts） */
   bestiary = new BestiaryTracker();
@@ -229,6 +255,15 @@ export class World {
     if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
       w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }
     if (p.altarCount !== undefined) w.altarCount = p.altarCount;
+    // 困难矿锁定选种（WorldGen.SavedOreTiers；旧档缺省 -1/-1/-1 = 未砸过，首砸重 roll）
+    if (p.savedOreTiers !== undefined) w.savedOreTiers = { ...p.savedOreTiers };
+    // 日晷/月晷四件套（WorldFile.cs:1311/1342/1416-1417；旧包缺省=无快进无冷却）
+    if (p.sundial !== undefined) {
+      w.sundialCooldown = p.sundial;
+      w.moondialCooldown = p.moondial ?? 0;
+      w.fastForwardTimeToDawn = p.fastForwardTimeToDawn ?? false;
+      w.fastForwardTimeToDusk = p.fastForwardTimeToDusk ?? false;
+    }
     if (p.weather) w.applyWeather(p.weather);
     if (p.bestiary) w.applyBestiary(p.bestiary);
     w.pendingTownNpcs = p.pendingTownNpcs;

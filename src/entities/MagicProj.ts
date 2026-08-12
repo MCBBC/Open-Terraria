@@ -1,7 +1,7 @@
 // 魔法投射物(原版 Projectile 14 Spark / 短命发光弹语义):
 // 直线飞行、撞块消失、命中伤害、寿命短(原版 spark 30tick)。
 import { Entity } from './Entity';
-import { hitCritters, playEnemyHitSound } from './projTargets';
+import { hitCritters, hitTownNpcs, playEnemyHitSound } from './projTargets';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -58,5 +58,7 @@ export class MagicProj extends Entity {
         return;
       }
     }
+    // 城镇 NPC 受击(原版 friendly 弹对 NPC 同效;一碰即碎同敌怪)
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)) { this.dead = true; return; }
   }
 }

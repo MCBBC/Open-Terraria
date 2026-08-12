@@ -43,6 +43,12 @@ export interface WldWorld {
   hardMode: boolean;
   /** 原版 gameMode（0 经典 1 专家 2 大师 3 旅程；v<209 无此字段=0） */
   gameMode: number;
+  /** 日晷/月晷快进四件套（WF:2120/2203/2449-2450；v<113 无 sundial 位=0、
+   *  v<264 无月晷位=0/false——与 WorldFile 缺省分支一致） */
+  sundialCooldown: number;
+  fastForwardTimeToDawn: boolean;
+  fastForwardTimeToDusk: boolean;
+  moondialCooldown: number;
   treeX: number[];
   treeStyle: number[];
   treeTops: number[];
@@ -107,6 +113,12 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const tilesWide = r.i32();
   // gameMode
   let gameMode = 0;
+  // 日晷/月晷快进四件套（WorldFile.cs:2120 sundialCooldown / :2203 fastForwardTimeToDawn /
+  // :2449-2450 fastForwardTimeToDusk + moondialCooldown——version>=264 才有月晷位）
+  let sundialCooldown = 0;
+  let fastForwardTimeToDawn = false;
+  let fastForwardTimeToDusk = false;
+  let moondialCooldown = 0;
   if (version >= 209) {
     gameMode = r.i32();
     if (version >= 222) r.boolean(); // drunk
@@ -151,7 +163,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 257) r.boolean(); // party of doom
   r.i32(); r.i32(); r.i32(); r.f64(); // invasion
   const slimeRainTime = version >= 118 ? r.f64() : 0; // slime rain（Main.slimeRainTime：>0 进行中 <0 冷却）
-  if (version >= 113) r.u8(); // sundial
+  if (version >= 113) sundialCooldown = r.u8(); // WF:2120 Main.sundialCooldown
   const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
   r.i32(); r.i32(); r.i32(); // ore tiers
   for (let i = 0; i < 8; i++) r.u8(); // bg styles
@@ -177,7 +189,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
       for (let i = 0; i < m; i++) r.u16();
     }
   }
-  if (version >= 140) r.boolean(); // fastForwardTime
+  if (version >= 140) fastForwardTimeToDawn = r.boolean(); // WF:2203
   r.boolean(); // fishron
   if (version >= 140) { r.boolean(); r.boolean(); r.boolean(); } // martians/cultist/moonlord
   for (let i = 0; i < 5; i++) r.boolean(); // holiday bosses
@@ -212,7 +224,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 259) r.boolean();
   if (version >= 260) r.boolean();
   if (version >= 261) { for (let i = 0; i < 7; i++) r.boolean(); }
-  if (version >= 264) { r.boolean(); r.u8(); }
+  if (version >= 264) { fastForwardTimeToDusk = r.boolean(); moondialCooldown = r.u8(); } // WF:2449-2450
   if (version >= 287) { r.boolean(); r.boolean(); }
   if (version >= 288) r.boolean();
   if (version >= 296) r.boolean();
@@ -285,6 +297,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,
+    sundialCooldown, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },

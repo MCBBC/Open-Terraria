@@ -78,6 +78,14 @@ export class TownNPC extends Entity {
   emote = -1;
   emoteLife = 0;
   emoteTotal = 0;
+  // ---- 环境与互殴受击(NPC.cs :91538 族调用点的三件套)----
+  /** 岩浆专属冷却(原版 immune[255]=30,Collision_LavaCollision :94522) */
+  private lavaCd = 0;
+  /** NPC 互殴专属冷却(原版 immune[255]=30,GetHurtByOtherNPCs :93667;初始 0) */
+  private npcVsCd = 0;
+  /** 溺水呼吸(NPC.CheckDrowning :96118:初始 200,水内每 7t -1,离水 +3/t) */
+  private breath = 200;
+  private breathCounter = 0;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -196,6 +204,10 @@ export class TownNPC extends Entity {
     // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
     if (this.attackUpdate(world, game)) wantDir = 0;
 
+    // ---- 环境与互殴受击(NPC.cs:91534-91544:townNPC 每帧 CheckDrowning +
+    //      GetHurtByOtherNPCs;岩浆走 Collision_LavaCollision :94511-94530)----
+    this.envHurtUpdate(world, game);
+
     // ---- 表情气泡(空闲随机冒泡;原版各情境 NewBubble 的可见子集)----
     if (this.emoteLife > 0) this.emoteLife--;
     else if (this.onGround && !this.talking && this.atkState === 0 && Math.random() < 1 / 3600) {
@@ -243,6 +255,65 @@ export class TownNPC extends Entity {
       if (this.frame >= total - extra) this.frame = 2;
     }
 
+  }
+
+  /** 环境与互殴受击(NPC.cs:91534-91544 的 townNPC 分支三件套):
+   *  ① 岩浆(Collision_LavaCollision :94511-94530):immun[255]=30 + StrikeNPC(50) 直伤
+   *    (OnFire buff 24/420t 未接城镇 NPC buff 系统,略——登记)
+   *  ② 溺水(NPC.CheckDrowning :96118-96154):水内每 7t breath--;breath≤0 后
+   *    每 7t life-=2,归零一击 StrikeNPC(2);离水 breath+3/t cap 200
+   *  ③ 敌怪互殴(GetHurtByOtherNPCs :93605-93690):任一 !friendly 且 damage>0 的
+   *    NPC 接触 → StrikeNPC(DamageVar(attacker.damage), 6, 方向),immune[255]=30;
+   *    dryadWard 荆棘反伤(num5/3)与 HurtingBees 未接,略
+   *  Enemy.def.damage 已含难度缩放(ScaleStats),DamageVar≈1(Classic)直用。 */
+  private envHurtUpdate(world: import('../world/World').World, game: GameHooks): void {
+    if (this.dead) return;
+    const st = world.store;
+    if (this.lavaCd > 0) this.lavaCd--;
+    if (this.npcVsCd > 0) this.npcVsCd--;
+    const ci = st.idx(
+      Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))),
+      Math.max(0, Math.min(st.h - 1, Math.floor(this.cy / TILE))),
+    );
+    // ① 岩浆(:94511-94530)
+    if (st.liquid[ci] > 30 && st.liquidType[ci] === 2 && this.lavaCd <= 0) {
+      this.lavaCd = 30;
+      this.hurt(50, 0, 0, game);
+    }
+    // ② 溺水(:96118-96154;DrownCollision=头部浸水,取头顶格)
+    const headY = Math.max(0, Math.floor((this.y + 6) / TILE));
+    const hi = st.idx(Math.max(0, Math.min(st.w - 1, Math.floor(this.cx / TILE))), headY);
+    const submerged = st.liquid[hi] > 30 && st.liquidType[hi] === 1;
+    if (submerged) {
+      if (++this.breathCounter >= 7) {
+        this.breathCounter = 0;
+        this.breath--;
+        if (this.breath <= 0) {
+          this.breath = 0;
+          this.hp -= 2; // life-=2 直伤(不过防御,原版 :96137)
+          if (this.hp <= 0) { this.hp = 1; this.hurt(2, 0, 0, game); } // :96141-96144 致死一击
+          else game.addDamageNumber(this.cx, this.y, 2, false, '#FFD060');
+        }
+      }
+    } else {
+      this.breath = Math.min(200, this.breath + 3);
+      this.breathCounter = 0;
+    }
+    // ③ 敌怪互殴(:93605-93690)
+    if (this.npcVsCd <= 0) {
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+          damage?: number; def?: { damage?: number } };
+        if (e.dead) continue;
+        const dmg = e.damage ?? e.def?.damage ?? 0;
+        if (dmg <= 0) continue;
+        if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+        const dir = e.x + e.w / 2 > this.cx ? -1 : 1; // :93662 攻击者在右侧 → 向左击退
+        this.npcVsCd = 30;                              // immune[255]=30
+        this.hurt(dmg, dir * 6, 0, game);               // kb=6(:93661)
+        break;
+      }
+    }
   }
 
   /** 城镇 NPC 自卫攻击（AI_007 攻击态机,NPC.cs:54747-55538 + 触发门 :55621-55966）。

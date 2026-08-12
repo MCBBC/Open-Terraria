@@ -4,6 +4,7 @@
 import type { GameHooks } from './types';
 import { BuffType } from '../stats/Buffs';
 import { projectileData } from '../data/vanillaProjectiles';
+import { hostileProjectileDamage, mainDifficulty } from '../stats/ScaleStats';
 
 export interface CritterLike {
   x: number; y: number; w: number; h: number;
@@ -18,28 +19,41 @@ export function projOverlap(ax: number, ay: number, aw: number, ah: number, e: {
 }
 
 /** 命中小动物:一击致死。返回是否命中(调用方按各自语义消耗穿透/销毁弹体) */
-/** 城镇 NPC 受击判定(玩家武器/友方弹幕/敌怪接触/巨石共用)。
- *  原版 Projectile.Damage 的 NPC 碰撞对 friendly 城镇 NPC 同样生效——
- *  杀裁缝师召骷髅王即此链;本作曾仅陷阱弹(Dart)命中城镇 NPC。
- *  TownNPC.hurt 自带 8t 无敌帧去重;返回是否实际造成伤害。 */
+/** 城镇 NPC 受击判定(玩家弹幕/敌怪弹幕共用)。门禁照原版两分支:
+ *  - 'playerProj'(friendly 弹):Projectile.Damage_PVE_Inner :11970-11976 巫毒窄门——
+ *    仅向导 22(装备向导巫毒娃娃 267→player.killGuide)/裁缝师 54(裁缝娃 1307→
+ *    killClothier)可被玩家弹幕/近战伤害;其余城镇 NPC 玩家武器一律无效
+ *  - 'hostile'(敌怪弹/陷阱弹):原版 flag2 分支(hostile && victim.friendly)恒命中
+ *  TownNPC.hurt 自带 8t 无敌帧去重;kbx=0 时按相对方位自动击退方向。 */
 export function hitTownNpcs(
   self: { x: number; y: number; w: number; h: number },
   game: GameHooks,
   dmg: number,
   kbx = 0,
+  source: 'playerProj' | 'hostile' = 'playerProj',
 ): boolean {
   const list = (game as unknown as { npcs?: () => unknown[] }).npcs?.() ?? [];
+  // player 可为 null(测试 fakeHooks/导入早期帧)——加空守卫
+  const eq = (game.player as unknown as { equipStats?: { killGuide?: boolean; killClothier?: boolean } } | null)
+    ?.equipStats;
   let any = false;
   for (const ent of list) {
     const n = ent as {
       x: number; y: number; w: number; h: number; dead: boolean;
       hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
-      bound?: boolean; talking?: boolean;
+      bound?: boolean; vanillaId?: number;
     };
     if (n.dead || typeof n.hurt !== 'function') continue;
     if (n.bound) continue; // 被缚待救不可打(近似;原版 bound 型有独立受击语义)
     if (!projOverlap(self.x, self.y, self.w, self.h, n)) continue;
-    if (n.hurt(dmg, kbx, 0, game)) any = true;
+    if (source === 'playerProj') {
+      // 巫毒窄门(:11970-11972):22→killGuide / 54→killClothier,其余 false
+      const vid = n.vanillaId ?? -1;
+      const doll = vid === 22 ? eq?.killGuide : vid === 54 ? eq?.killClothier : false;
+      if (!doll) continue;
+    }
+    const kb = kbx !== 0 ? kbx : Math.sign(n.x + n.w / 2 - (self.x + self.w / 2)) * 2 || 1;
+    if (n.hurt(dmg, kb, 0, game)) any = true;
   }
   return any;
 }
@@ -86,7 +100,14 @@ export function hitPlayer(
   if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
   const ifr = p.iframes;
-  game.damagePlayer(dmg, self.x + self.w / 2, self.y + self.h / 2);
+  // ★ 玩家受伤难度乘区（Projectile.cs:13770，Damage_EVP 段）：
+  //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`
+  //   hostileDamageScaling = GameDifficultyData.HostileProjectileDamageMultiplier
+  //   （Projectile.cs:264/544：旅程 0.5 / 经典 1 / 专家 2 / 大师 3）。
+  //   NPC 接触伤害不走这里——其难度缩放在生成时由 NPC.ScaleStats 完成
+  //   （Enemy.def.damage 已是缩放值），在此再乘会双重缩放。
+  //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
+  game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)), self.x + self.w / 2, self.y + self.h / 2);
   return p.iframes > ifr; // damage 落地才置无敌帧（闪避不置，对应 Hurt 返回 0）
 }
 

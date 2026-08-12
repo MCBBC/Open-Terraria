@@ -7,7 +7,7 @@ import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE, ITEM_STABLE_OF_INTERNAL } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE, ITEM_BY_KEY } from '../data/items';
 import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
 import type { SavedItem as SavedItemT } from './serialize';
 import { weatherToSave } from '../world/weather/Weather';
@@ -55,11 +55,15 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     seedFlags: { ...world.seedFlags },
     difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
     journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
+    sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
+    fastForwardTimeToDawn: world.fastForwardTimeToDawn,
+    fastForwardTimeToDusk: world.fastForwardTimeToDusk,
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+    savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
@@ -113,6 +117,10 @@ export function saveWorldOnly(world: World): string {
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
+    sundialCooldown: world.sundialCooldown, moondialCooldown: world.moondialCooldown,
+    fastForwardTimeToDawn: world.fastForwardTimeToDawn,
+    fastForwardTimeToDusk: world.fastForwardTimeToDusk,
     bestiary: world.bestiary.toSave(),  // BestiaryUnlocksTracker（WorldFile.cs:3399）
     // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
     furniture: world.furnitureItems,
@@ -142,9 +150,10 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     const key = LEGACY_KEY_OF_INTERNAL_V3[it.id];
     if (key === undefined) return it;
     if (/^vi_(\d+)_/.test(key)) {
-      // vi_ 键:用稳定表还原(同 vid 双注册归一首个,内容等价)
-      const stable = ITEM_STABLE_OF_INTERNAL[it.id];
-      return { ...it, id: stable !== undefined && stable !== 0 ? ITEM_INTERNAL_OF_STABLE.get(stable) ?? it.id : it.id };
+      // vi_ 键:键本身仍在注册表(蛇形/驼峰双注册内容等价),直接反查内部 id。
+      // ★ 不能经 ITEM_STABLE_OF_INTERNAL[裸下标] —— 本地 184 条删除后下标整体左移
+      const id = ITEM_BY_KEY[key];
+      return id !== undefined ? { ...it, id } : it;
     }
     // 本地键:退役映射(→vi_);纯自创删除键→归 0
     const viId = viIdOfRetired(key);
@@ -200,6 +209,11 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   // 旅程时间倍率/冻结（CreativePowers.cs:866/:1448）——旧档缺省 1/false
   if (data.header.journeyTimeRate !== undefined) world.journeyTimeRate = data.header.journeyTimeRate;
   if (data.header.journeyFreezeTime !== undefined) world.journeyFreezeTime = data.header.journeyFreezeTime;
+  // 日晷/月晷四件套（WorldFile.cs:1311/1342/1416-1417；旧档缺省=无快进无冷却）
+  if (data.header.sundialCooldown !== undefined) world.sundialCooldown = data.header.sundialCooldown;
+  if (data.header.moondialCooldown !== undefined) world.moondialCooldown = data.header.moondialCooldown;
+  if (data.header.fastForwardTimeToDawn !== undefined) world.fastForwardTimeToDawn = data.header.fastForwardTimeToDawn;
+  if (data.header.fastForwardTimeToDusk !== undefined) world.fastForwardTimeToDusk = data.header.fastForwardTimeToDusk;
   if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
     world.invasionType = data.invasion.type;
     world.invasionSize = data.invasion.size;
@@ -208,6 +222,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     world.invasionDelay = data.invasion.delay;
   }
   if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
+  if (data.savedOreTiers != null) world.savedOreTiers = { ...data.savedOreTiers }; // 旧档缺省 -1 未砸过
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
   world.chests = v3Chests;      // v3 id 翻译+locked 透传
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）

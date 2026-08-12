@@ -16,6 +16,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, losClear } from './bossAI';
+import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
 
 // Main.wofDrawAreaTop/Bottom(NPC.cs Main 静态;单只血肉墙语义,墙初始化时复位 -1)
 let wofDrawAreaTop = -1;
@@ -338,8 +339,10 @@ export function hungryAI(e: Enemy, game: GameHooks, player: Player | null) {
   // ai0 初值 -1120(史莱姆语义)复位:非墙生成的 Hungry 挂空腔中点
   if (!e.bInit) { e.bInit = true; if (e.ai0 < -1000) e.ai0 = 0.5; }
 
-  // :26308-26335 挂墙半径/伤害/防御随墙血量变化(经典档;expert 的 defense 恢复与
-  //        槽位倍率 :26337-26358 不实现)
+  // :26308-26335 挂墙半径/伤害/防御随墙血量变化；<50%：伤害 60 防 30（经典半径 700，
+  //   专家半径不变但步进 num414+0.066）；<75%：伤害 45 防 20（经典半径 500 / 专家 +0.033）
+  //   ——注意半径改值被【经典档门】包住，专家档走步进加成
+  const expert = mainExpertMode(game.world);   // Main.expertMode（Main.cs:2762）
   let num414 = 0.1;   // 步进
   let num415 = 300;   // 挂墙半径
   const b = baseOf(e);
@@ -348,15 +351,31 @@ export function hungryAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (head.hp < head.maxHp * 0.5) {
     num416 = 60;
     e.def.defense = 30;
-    num415 = 700;
+    if (!expert) num415 = 700;
+    else num414 += 0.066;
   } else if (head.hp < head.maxHp * 0.75) {
     num416 = 45;
     e.def.defense = 20;
-    num415 = 500;
+    if (!expert) num415 = 500;
+    else num414 += 0.033;
   } else {
     e.def.defense = b.def;
   }
-  if (num416 > 0) e.def.damage = num416; // :26333-26335 GetAttackDamage_ScaledByDifficulty 经典=原值
+  // :26333-26335 damage = GetAttackDamage_ScaledByDifficulty(num416)（EnemyDamageMultiplier）
+  if (num416 > 0) e.def.damage = getAttackDamageScaledByDifficulty(num416, e.difficulty);
+  // :26337-26358 专家档尾段：①defense = defDefense（撤销上面的 30/20 血量防修正）；
+  //   ②挂墙半径按 whoAmI 槽位乘： %4==0 ×1.75、%4==1 ×1.5、%4==2 ×1.25（%4==3 不乘），
+  //   再 %3==0 ×1.5、%3==1 ×1.25，最后整体 ×0.75。本仓无 NPC 槽位 → 用实体 id 取模
+  //   （Entity.id 递增发放，槽位分布近似，结构性差异已在文件头登记）
+  if (expert) {
+    e.def.defense = b.def;
+    if (e.id % 4 === 0) num415 *= 1.75;
+    if (e.id % 4 === 1) num415 *= 1.5;
+    if (e.id % 4 === 2) num415 *= 1.25;
+    if (e.id % 3 === 0) num415 *= 1.5;
+    if (e.id % 3 === 1) num415 *= 1.25;
+    num415 *= 0.75;
+  }
 
   // ---- 锚点(:26360-26362):墙中心 X,空腔顶 + 跨度×ai0 ----
   const num417 = head.cx;
@@ -392,7 +411,26 @@ export function hungryAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.vy -= num414;
       if (e.vy > 0 && num420 < 0) e.vy -= num414 * 2.5;
     }
-    const num422 = 4; // 速度钳(经典;:26426-26449 expert 按血量与相对墙向加成不实现)
+    // :26423-26426 速度钳：经典档恒 4；专家档按墙血量与"相对墙行进向"加成
+    //   （:26427-26459，Main.wofNPCIndex>=0 恒真——headOf 已保证墙在场）：
+    //   num423 = 1.5，墙血比 <0.75/0.5/0.25/0.1 各 +0.7/+0.7/+0.9/+0.9，
+    //   再 ×1.25 +0.3 → num422 += num423×0.35；
+    //   本体在 Hungry 左侧且墙向右行 → num422 += 6（右侧且向左行同）；
+    //   最后四轴钳 ±num422（:26461-26474）
+    let num422 = 4;
+    if (expert) {
+      let num423 = 1.5;
+      const lifeRatio = head.hp / head.maxHp;
+      if (lifeRatio < 0.75) num423 += 0.7;
+      if (lifeRatio < 0.5) num423 += 0.7;
+      if (lifeRatio < 0.25) num423 += 0.9;
+      if (lifeRatio < 0.1) num423 += 0.9;
+      num423 *= 1.25;
+      num423 += 0.3;
+      num422 += num423 * 0.35;
+      if (e.cx < head.cx && head.vx > 0) num422 += 6;
+      if (e.cx > head.cx && head.vx < 0) num422 += 6;
+    }
     e.vx = clamp(e.vx, -num422, num422);
     e.vy = clamp(e.vy, -num422, num422);
   } else if (e.ai1 > 0) {

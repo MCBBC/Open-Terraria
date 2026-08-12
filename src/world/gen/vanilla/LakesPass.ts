@@ -153,7 +153,7 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         y++;
         if (y >= gs.worldSurface || st.wall[st.idx(x, y)] > 0) { bad = true; break; }
       }
-      if (!bad && st.type[st.idx(x, y)] === SAND) bad = true;
+      if (!bad && st.type[st.idx(x, y)] === SAND) { bad = true; }
       if (bad) continue;
       // ±50 无猩红石/宝箱
       for (let dx = -50; dx <= 50 && !bad; dx++) {
@@ -167,17 +167,24 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (bad) continue;
       // 两侧 ±20 皆实心为止下沉（上限 worldSurface-50）
       const anchor = y;
-      const solidAt = (xx: number, yy: number) => st.inBounds(xx, yy) && st.flags[st.idx(xx, yy)];
+      // SolidTile（cs:10959）= active && tileSolid——曾只判 active（±20 下沉与 121×121
+      // 实心率把树/草饰等非实心活格也计入 → 实心率虚高、湖位错选）
+      const solidAt = (xx: number, yy: number) => {
+        if (!st.inBounds(xx, yy)) return false;
+        const ii = st.idx(xx, yy);
+        return !!st.flags[ii] && !!TILE_DEFS[st.type[ii]]?.solid;
+      };
       while (!solidAt(x - 20, y) || !solidAt(x + 20, y)) {
         y++;
         if (y > gs.worldSurface - 50) { bad = true; break; }
       }
-      if (bad || y - anchor <= 10) continue;
+      if (bad) continue;
+      if (y - anchor <= 10) continue;
       // ±60 顶部 20 格净空（无块无墙）
       for (let dx = -60; dx <= 60 && !bad; dx++) {
         const ty = y - 20;
         if (!st.inBounds(x + dx, ty)) continue;
-        if (st.flags[st.idx(x + dx, ty)] || st.wall[st.idx(x + dx, ty)] > 0) bad = true;
+        if (st.flags[st.idx(x + dx, ty)] || st.wall[st.idx(x + dx, ty)] > 0) { bad = true; }
       }
       if (bad) continue;
       // 121×121 实心率 ≥80%

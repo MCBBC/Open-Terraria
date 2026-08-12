@@ -6,6 +6,7 @@ import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { Enemy } from '../src/entities/Enemy';
 import { Arrow } from '../src/entities/Arrow';
 import { TrapShot } from '../src/entities/Dart';

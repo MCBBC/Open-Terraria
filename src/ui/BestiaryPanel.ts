@@ -16,18 +16,20 @@
 //     （AddNPCBiomeRelationships 系）——Bestiary.ts 条目无 rarity/biome 字段
 //   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId）/ Sort_Rarity
 //     （NpcBestiaryRarityStars）——两表未提取
-//   - 详情：风味文本（FlavorTextBestiaryInfoElement）/ 出没环境（SpawnCondition）
-//     / 头像背景（IBestiaryBackgroundImagePathAndColorProvider）
+//   - 头像背景（IBestiaryBackgroundImagePathAndColorProvider：SpawnCondition 的
+//     MapBG 贴图 + Visuals.* 装饰叠层 Rain/Blizzard/Moon/Meteor，可由条件推导）
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
 import { VANILLA_NPCS } from '../data/vanillaNpcs';
 import { npcValueOf } from '../drops/NpcDrops';
 import dropData from '../data/vanilla-npcdrops.json';
+import spawnData from '../data/vanilla-bestiary-spawn.json';
 import { UISfx } from '../vui/UISfx';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
+  bestiaryRarityStars, bestiarySortingId,
   type BestiaryEntryDef, type BestiaryTracker,
 } from '../data/Bestiary';
 
@@ -64,14 +66,17 @@ export function bestiaryPageCount(total: number, perPage: number): number {
   return Math.ceil(total / perPage);
 }
 
-export type BestiarySortKey = 'unlocks' | 'id' | 'alpha' | 'attack' | 'defense' | 'coins' | 'hp';
-/** SortingSteps 注册序（RegisterSortSteps）——本面板可选步（缺 BestiaryID/Rarity 两步） */
-export const BESTIARY_SORT_KEYS: BestiarySortKey[] = ['unlocks', 'id', 'alpha', 'attack', 'defense', 'coins', 'hp'];
+export type BestiarySortKey = 'unlocks' | 'id' | 'bestiaryId' | 'alpha' | 'rarity' | 'attack' | 'defense' | 'coins' | 'hp';
+/** SortingSteps 注册序（UIBestiaryEntry.SortingSteps RegisterSortSteps：Unlocks → ID →
+ *  BestiaryID → Alphabetical → Rarity → Attack → Defense → Coins → HitPoints） */
+export const BESTIARY_SORT_KEYS: BestiarySortKey[] = ['unlocks', 'id', 'bestiaryId', 'alpha', 'rarity', 'attack', 'defense', 'coins', 'hp'];
 
 export function sortLabel(key: BestiarySortKey): string {
   switch (key) {
     case 'unlocks': return Lang.text('BestiaryInfo.Sort_Unlocks');
     case 'id': return Lang.text('BestiaryInfo.Sort_ID');
+    case 'bestiaryId': return Lang.text('BestiaryInfo.Sort_BestiaryID');
+    case 'rarity': return Lang.text('BestiaryInfo.Sort_Rarity');
     case 'alpha': return Lang.text('BestiaryInfo.Sort_Alphabetical');
     case 'attack': return Lang.text('BestiaryInfo.Sort_Attack');
     case 'defense': return Lang.text('BestiaryInfo.Sort_Defense');
@@ -180,6 +185,10 @@ export function sortBestiaryRows(rows: BestiaryRow[], key: BestiarySortKey): voi
     unlocks: (a, b) => b.state - a.state || a.npcId - b.npcId,
     // ByNetId 升序
     id: (a, b) => a.npcId - b.npcId,
+    // ByBestiaryId：ContentSamples.NpcBestiarySortingId（九键 orderby 链序号）升序
+    bestiaryId: (a, b) => bestiarySortingId(a.npcId) - bestiarySortingId(b.npcId),
+    // ByRarity：NpcBestiaryRarityStars 降序
+    rarity: (a, b) => bestiaryRarityStars(b.npcId) - bestiaryRarityStars(a.npcId) || a.npcId - b.npcId,
     // Alphabetical：显示名升序
     alpha: (a, b) => a.name.localeCompare(b.name, 'zh') || a.npcId - b.npcId,
     // ByStat 族：降序（无数据条目沉底）
@@ -327,6 +336,45 @@ function dropCondText(cond: string): string {
   const key = `Bestiary.ItemDropConditions.${cond}`;
   const t = Lang.has(key) ? Lang.text(key) : '';
   return t; // 原版空串条件（NotExpert 等）不显示
+}
+
+// ============ 出没环境 + 风味文本（BestiaryDatabaseNPCsPopulator + BestiaryEntry） ============
+
+type SpawnJson = typeof spawnData;
+/** SpawnCondition 静态声明（populator :14-302）：路径 → langKey + DisplayTextPriority */
+const SPAWN_CONDITIONS = (spawnData as SpawnJson).conditions as Record<string, { key: string; priority: number }>;
+/** FindEntryByNPCID(id).Info.AddRange 注册序（populator :802/:1661，×732） */
+export const SPAWN_BY_NPC = (spawnData as SpawnJson).byNpc as Record<string, string[]>;
+
+export interface SpawnConditionLine { key: string; label: string; priority: number }
+
+/** 出没环境条目（UIBestiaryEntryInfoPage 按注册序呈现；解锁门 NotKnown 之外恒显，
+ *  FilterProviderInfoElement.cs:47-50）。netId 变种（-1..-13）按负 id 直查原表 */
+export function bestiarySpawnConditions(npcId: number): SpawnConditionLine[] {
+  const paths = SPAWN_BY_NPC[String(npcId)];
+  if (!paths) return [];
+  return paths.map((p) => {
+    const c = SPAWN_CONDITIONS[p];
+    return { key: c.key, label: Lang.has(c.key) ? Lang.text(c.key) : c.key, priority: c.priority };
+  });
+}
+
+/** 风味文本（BestiaryEntry.cs:42-47 Enemy/TownNPC/Critter 三工厂同构）：
+ *  `Bestiary_FlavorText.npc_<NPCName 内部名>`（Language.Exists 门，564 键）；
+ *  缺失回退 TryGivingEntryFlavorTextIfItIsMissing（populator:685-714）——取
+ *  DisplayTextPriority 最高的出没环境（并列取注册序后者），映射
+ *  `Bestiary_BiomeText.biome_<键名去类别>`（Bestiary_Biomes.Surface → biome_Surface）。
+ *  两路都无 → null（条目无风味块） */
+export function bestiaryFlavorText(npcId: number): string | null {
+  const internal = NPC_NAME_BY_ID[npcId > 0 ? npcId : -npcId];
+  const key = internal ? `Bestiary_FlavorText.npc_${internal}` : '';
+  if (key && Lang.has(key)) return Lang.text(key);
+  const conds = bestiarySpawnConditions(npcId);
+  if (conds.length === 0) return null;
+  let best = conds[0];
+  for (const c of conds) if (c.priority >= best.priority) best = c; // >=：并列取后者（原版 :698）
+  const fb = `Bestiary_BiomeText.biome_${best.key.slice(best.key.indexOf('.') + 1)}`;
+  return Lang.has(fb) ? Lang.text(fb) : null;
 }
 
 // ============ DOM 面板 ============
@@ -653,6 +701,26 @@ export class BestiaryPanel {
     if (r.entry.kind === 'critter') mkTag('小动物');
     if (r.entry.goldGate) mkTag('金小动物');
     this.infoEl.appendChild(tags);
+    // 出没环境（SpawnConditionBestiaryInfoElement 族，populator :802/:1661 注册序；
+    // 解锁门 = 非 NotKnown，FilterProviderInfoElement.cs:47-50——比属性更早可见）
+    if (st > UnlockState.NotKnown) {
+      const conds = bestiarySpawnConditions(r.npcId);
+      if (conds.length) {
+        const sec = document.createElement('div');
+        sec.className = 'sw-bst-sec';
+        sec.textContent = '出没环境'; // 原版信息页分区无独立 lang 键（与"掉落"同处理）
+        this.infoEl.appendChild(sec);
+        const wrap = document.createElement('div');
+        wrap.className = 'sw-bst-tags';
+        for (const c of conds) {
+          const t = document.createElement('span');
+          t.className = 'sw-bst-tag';
+          t.textContent = c.label;
+          wrap.appendChild(t);
+        }
+        this.infoEl.appendChild(wrap);
+      }
+    }
     // 大头像
     const canvas = document.createElement('canvas');
     canvas.width = 96; canvas.height = 96;
@@ -665,8 +733,28 @@ export class BestiaryPanel {
       const row = this.infoRow(Lang.text('BestiaryInfo.Slain'), String(r.kills));
       this.infoEl.appendChild(row);
     }
+    // 风味文本（FlavorTextBestiaryInfoElement：解锁 ≥ Stats 才呈现，:21-24）：
+    // `Bestiary_FlavorText.npc_<名>` 直取，缺失回退最高优先出没环境的 biome 文本
+    if (st >= UnlockState.Stats) {
+      const flavor = bestiaryFlavorText(r.npcId);
+      if (flavor) {
+        const p = document.createElement('p');
+        p.style.cssText = 'margin:6px 0 2px;font-size:11px;line-height:1.5;color:#cfd6f2;'
+          + 'background:rgba(43,56,101,0.55);border-radius:4px;padding:6px;';
+        p.textContent = flavor;
+        this.infoEl.appendChild(p);
+      }
+    }
     // 属性（NPCStatsReportInfoElement：UnlockState ≥ Stats 才可见）
     if (st >= UnlockState.Stats) {
+      // 稀有度星（ContentSamples.NpcBestiaryRarityStars：0-5；原版以星形图标列呈现，
+      // 此处以文本星近似并按星数着色 1-5 灰→金）
+      const stars = bestiaryRarityStars(r.npcId);
+      if (stars > 0) {
+        const starRow = this.infoRow('稀有度', '★'.repeat(stars));
+        starRow.style.color = stars >= 4 ? '#e8c05a' : stars >= 2 ? '#b8c0d8' : '#8a90b8';
+        this.infoEl.appendChild(starRow);
+      }
       const v = VANILLA_NPCS[String(r.npcId)];
       if (v) {
         this.infoEl.appendChild(this.infoRow(Lang.text('BestiaryInfo.Life'), String(v.lifeMax)));

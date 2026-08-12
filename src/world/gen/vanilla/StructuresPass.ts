@@ -547,10 +547,13 @@ export function runPyramidPass(
     const num = cand.x;
     if (num <= 300 || num >= st.w - 300) continue;
     // 地牢侧回避（cs:15450-15452）：dungeonSide>Left 时须 num ≥ dungeonX+0.15w；
-    // dungeonSide<Right 时须 num ≤ dungeonX-0.15w（任一不过即拒）
+    // dungeonSide<Right 时须 num ≤ dungeonX-0.15w（任一不过即拒）。
+    // ★dungeonX 此处 = generatingDungeonPositionX（DungeonCrawler.cs:394 最高房中心 X），
+    //   非 Reset 期 dungeonLocation（2026-08-12 金字塔 handoff 疑点核实修复）
+    const dgX = gs.generatingDungeonPositionX || gs.dungeonLocation;
     const band = st.w * 0.15;
-    if (!(gs.dungeonSide > -1 || !(num < gs.dungeonLocation + band))) continue;
-    if (!(gs.dungeonSide < 1 || !(num > gs.dungeonLocation - band))) continue;
+    if (!(gs.dungeonSide > -1 || !(num < dgX + band))) continue;
+    if (!(gs.dungeonSide < 1 || !(num > dgX - band))) continue;
     let k = cand.y;
     while (k < st.h && st.inBounds(num, k) && !st.flags[st.idx(num, k)]) k++;
     if (k >= gs.worldSurface) continue;

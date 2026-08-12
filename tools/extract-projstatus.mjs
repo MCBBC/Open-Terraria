@@ -45,6 +45,24 @@ console.log(`顶层条件块: ${blocks.length}`);
 // ---- 逐块解析 ----
 const table = {};
 const skipped = [];
+
+/** 时长表达式 → {durMin, durMax}(tick);不识别返回 null */
+function parseDur(dExpr) {
+  const mul = /^60 \* Main\.rand\.Next\((\d+), (\d+)\)$/.exec(dExpr);
+  const rng = /^Main\.rand\.Next\((\d+), (\d+)\)$/.exec(dExpr);
+  const one = /^Main\.rand\.Next\((\d+)\)$/.exec(dExpr);
+  // confused 族:60 * (int)((double)Main.rand.Next(a, b) * 0.1) → 60×[trunc(a×0.1)..trunc((b-1)×0.1)]
+  const mulF = /^60 \* \(int\)\(\(double\)Main\.rand\.Next\((\d+), (\d+)\) \* 0\.1\)$/.exec(dExpr);
+  // Oiled 族(套装门已跳过,兜底):Main.rand.Next(a, b) * 30
+  const rng30 = /^Main\.rand\.Next\((\d+), (\d+)\) \* 30$/.exec(dExpr);
+  if (mul) return { durMin: 60 * +mul[1], durMax: 60 * (+mul[2] - 1) };
+  if (rng) return { durMin: +rng[1], durMax: +rng[2] - 1 };
+  if (one) return { durMin: 0, durMax: +one[1] - 1 }; // 裸 Next(K)=0..K-1 tick(勿×60,2026-08-13 review)
+  if (mulF) return { durMin: 60 * Math.trunc(+mulF[1] * 0.1), durMax: 60 * Math.trunc((+mulF[2] - 1) * 0.1) };
+  if (rng30) return { durMin: 30 * +rng30[1], durMax: 30 * (+rng30[2] - 1) };
+  if (/^\d+$/.test(dExpr)) return { durMin: +dExpr, durMax: +dExpr };
+  return null;
+}
 for (const b of blocks) {
   const cond = b.cond;
   const bodyText = b.bodyLines.join('\n');
@@ -63,35 +81,50 @@ for (const b of blocks) {
       .replace(/[{}]/g, '').trim();
     if (stripped.length > 2) { skipped.push([cond, '复杂块:' + stripped.slice(0, 60)]); continue; }
   }
-  // 概率门:cond 内或体内 `Main.rand.Next(K) == 0`(1/K) / `!= 0`(1-1/K)
-  let chance = 1;
-  const cm = /Main\.rand\.Next\((\d+)\) *== *0/.exec(cond + bodyText);
-  const cm2 = /Main\.rand\.Next\((\d+)\) *!= *0/.exec(cond + bodyText);
-  if (cm) chance = 1 / +cm[1];
-  else if (cm2) chance = 1 - 1 / +cm2[1];
-  // AddBuff 逐条
+  // 概率门分两层:cond 外层门 + 体内嵌套门。
+  // ★ else 分支陷阱(2026-08-13 review 实锤):嵌套 `if (rand(K)==0) {A} else {B}` 的
+  //   else 概率是 (K-1)/K 而非 1/K——此前 cond+body 首个 rand 匹配一把抓,285/267/
+  //   504/163 族 else 分支全被标错。现按形状分流:
+  //   a) 嵌套双分支(A/else B)→ A=outer×1/K,B=outer×(K-1)/K
+  //   b) 嵌套单门包单 AddBuff(35/948 族)→ chance=outer×1/K(或 !=0 → 1-1/K)
+  //   c) 其余多 AddBuff+嵌套门 → 防御性跳过(人工核对)
+  let chanceOuter = 1;
+  const oc = /Main\.rand\.Next\((\d+)\) *== *0/.exec(cond);
+  const oc2 = /Main\.rand\.Next\((\d+)\) *!= *0/.exec(cond);
+  if (oc) chanceOuter = 1 / +oc[1];
+  else if (oc2) chanceOuter = 1 - 1 / +oc2[1];
   const adds = [...bodyText.matchAll(/nPC\.AddBuff\((\d+), (.+?)\);/g)];
   if (!adds.length) { skipped.push([cond, '无 AddBuff']); continue; }
+  // a) 嵌套双分支(压平空白匹配:`if (rand(K)==0) { A } else { B }`)
+  const flat = bodyText.replace(/\s+/g, ' ');
+  const twoBranch = /if \(Main\.rand\.Next\((\d+)\) == 0\) \{ nPC\.AddBuff\((\d+), (.+?)\); \} else \{ nPC\.AddBuff\((\d+), (.+?)\); \}/.exec(flat);
+  const nestedGate = /if \(Main\.rand\.Next\(\d+\)/.test(bodyText);
+  if (twoBranch && adds.length === 2) {
+    const k = +twoBranch[1];
+    const pairs = [[twoBranch[2], twoBranch[3], chanceOuter / k], [twoBranch[4], twoBranch[5], chanceOuter * (k - 1) / k]];
+    for (const [buffS, dExprRaw, chance] of pairs) {
+      const dur = parseDur(dExprRaw.trim());
+      if (!dur) { skipped.push([cond, `时长表达式不识别: AddBuff(${buffS}, ${dExprRaw})`]); continue; }
+      for (const t of typeIds) (table[t] ??= []).push({ buff: +buffS, chance, ...dur });
+    }
+    continue;
+  }
+  if (nestedGate && adds.length > 1) { skipped.push([cond, '多 AddBuff+嵌套门(形状未识别)']); continue; }
+  // b/c) 单 chance = 外层 × 体内单门
+  let chance = chanceOuter;
+  if (nestedGate) {
+    const nc = /Main\.rand\.Next\((\d+)\) *== *0/.exec(bodyText);
+    const nc2 = /Main\.rand\.Next\((\d+)\) *!= *0/.exec(bodyText);
+    if (nc) chance *= 1 / +nc[1];
+    else if (nc2) chance *= 1 - 1 / +nc2[1];
+  }
   for (const a of adds) {
     const buff = +a[1];
-    let dExpr = a[2].trim();
-    let durMin, durMax;
-    const mul = /^60 \* Main\.rand\.Next\((\d+), (\d+)\)$/.exec(dExpr);
-    const rng = /^Main\.rand\.Next\((\d+), (\d+)\)$/.exec(dExpr);
-    const one = /^Main\.rand\.Next\((\d+)\)$/.exec(dExpr);
-    // confused 族:60 * (int)((double)Main.rand.Next(a, b) * 0.1) → 60×[trunc(a×0.1)..trunc((b-1)×0.1)]
-    const mulF = /^60 \* \(int\)\(\(double\)Main\.rand\.Next\((\d+), (\d+)\) \* 0\.1\)$/.exec(dExpr);
-    // Oiled 族(套装门已跳过,兜底):Main.rand.Next(a, b) * 30
-    const rng30 = /^Main\.rand\.Next\((\d+), (\d+)\) \* 30$/.exec(dExpr);
-    if (mul) { durMin = 60 * +mul[1]; durMax = 60 * (+mul[2] - 1); }
-    else if (rng) { durMin = +rng[1]; durMax = +rng[2] - 1; }
-    else if (one) { durMin = 0; durMax = 60 * (+one[1] - 1); }
-    else if (mulF) { durMin = 60 * Math.trunc(+mulF[1] * 0.1); durMax = 60 * Math.trunc((+mulF[2] - 1) * 0.1); }
-    else if (rng30) { durMin = 30 * +rng30[1]; durMax = 30 * (+rng30[2] - 1); }
-    else if (/^\d+$/.test(dExpr)) { durMin = durMax = +dExpr; }
-    else { skipped.push([cond, `时长表达式不识别: AddBuff(${buff}, ${dExpr})`]); continue; }
+    const dExpr = a[2].trim();
+    const dur = parseDur(dExpr);
+    if (!dur) { skipped.push([cond, `时长表达式不识别: AddBuff(${buff}, ${dExpr})`]); continue; }
     for (const t of typeIds) {
-      (table[t] ??= []).push({ buff, chance, durMin, durMax });
+      (table[t] ??= []).push({ buff, chance, ...dur });
     }
   }
 }

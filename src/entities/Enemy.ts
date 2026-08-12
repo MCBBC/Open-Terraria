@@ -49,7 +49,9 @@ import {
   resolveDrops, rollCoins, rollHeartsAndStars, rollBossPotionsAndHearts,
   dropVelocity, npcValueOf, type NpcDropCtx,
 } from '../drops/NpcDrops';
-import { npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
+import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
+import { scaleStats, getAttackDamageForProjectiles, type ScalingStats } from '../stats/ScaleStats';
+import { BuffType } from '../stats/Buffs';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
@@ -111,6 +113,16 @@ export class Enemy extends Entity {
   /** 原版 NPC id（数据驱动路径启用时非空） */
   vanillaId: number | null = null;
   vanilla: VanillaNpc | null = null;
+  /** npc.difficulty（ScaleStats 写入，NPC.cs:18086 = strengthOverride ?? Main.Difficulty）：
+   *  原版档位浮点（Classic 1/Expert 2/Master 3，getGoodWorld +1）——AI 段
+   *  GetAttackDamage_ScaledByDifficulty/ForProjectiles（如饥饿者 :26341）消费。
+   *  未进 ScaleStats 门（friendly/townNPC/无伤小动物）保持 0（原版字段初值） */
+  difficulty = 0;
+  /** defDamage 的【未缩放】基线（ScaleStats 前的 v.damage，critter/friendly 归零后值）。
+   *  敌怪弹幕出膛原版一律用 ForProjectiles(基线, 基线×N) 这类显式档位 lerp
+   *  （NPC.cs:21180 等），命中玩家的难度乘区在 Projectile.cs:13770 统一做——
+   *  若此处误用缩放后的 def.damage 会与命中端乘区叠加成双重缩放 */
+  baseDamage = 0;
   /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
    *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
   spawnedFromStatue = false;
@@ -251,23 +263,46 @@ export class Enemy extends Entity {
     const hit = vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1';
     const kill = vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1';
     const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14;
+    // ---- NPC.ScaleStats（NPC.cs:18081-18105，NewNPC→SetDefaults 后调用 :8322/:17791）----
+    // 世界难度轴（Main.Difficulty → 生命/伤害/钱/击退倍率 + 逐类型系数 +
+    // 专家困难模式兜底增强）。Boss **不豁免**（仅 ExpertHardmode 段跳过 :18471）。
+    // 上下文经 bindScaleStatsWorld 注入（Game.afterWorldLoad；原版 Main 静态单例语义），
+    // 未绑定=经典档（倍率恒 1，仅 lifeMax<6 下限与类型系数在 Classic 档同样无变化）。
+    const rawDamage = (v.critter || v.friendly) ? 0 : v.damage;   // def.damage 基线
+    const rawKb = v.knockBackResist ?? 0.5;                       // 原版"承受比例"语义
+    const ss: ScalingStats = {
+      type: id, lifeMax: v.lifeMax, damage: v.damage, value: npcValueOf(id),
+      defense: v.defense, knockBackResist: rawKb,
+      boss: VANILLA_BOSS_IDS.has(id), friendly: !!v.friendly, townNPC: !!v.townNPC,
+      scale: v.scale ?? 1, difficulty: 0,
+    };
+    scaleStats(ss);
+    e.difficulty = ss.difficulty;          // npc.difficulty（AI 段 GetAttackDamage_* 消费）
+    e.baseDamage = rawDamage;              // defDamage 快照的【未缩放】基线（弹幕出膛用）
+    const kbr = Math.max(0, Math.min(0.89, 1 - ss.knockBackResist));  // 缩放后再转本仓"抗性"语义
     e.def = {
       ...e.def,
       // friendly（被缚 NPC 等城镇系）与 critter 一样零接触伤害——原版 friendly 旗
-      name: v.name, hp: v.lifeMax, damage: (v.critter || v.friendly) ? 0 : v.damage, defense: v.defense,
+      name: v.name, hp: ss.lifeMax, damage: rawDamage !== 0 ? ss.damage : 0, defense: ss.defense,
       // 原版 knockBackResist 是"承受击退的比例"（0.5=吃一半）；本仓库语义是
       // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
-      knockbackResist: Math.max(0, Math.min(0.89, 1 - (v.knockBackResist ?? 0.5))),
+      // （缩放在上面 ScaleStats 内按原版语义完成，这里只做语义换算）
+      knockbackResist: kbr,
       width: Math.round(v.width * (v.scale ?? 1)), height: Math.round(v.height * (v.scale ?? 1)), flying,
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
       hitSound: [hit], killedSound: [kill], drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
-      // 小动物：无接触伤害、不夜行
+      // ScaleStats 后的 npc.value（EnemyMoneyDropMultiplier 已乘，经典档=原值；
+      // 弹体 NPC 不缩）——击杀掉钱消费位（Enemy.ts 掉落 ctx.value）
+      value: ss.value,
+      // 小动物：无接触伤害、不夜行（ScaleStats 对 damage=0/lifeMax≤5 的它们本就不进门）
       ...(v.critter ? { damage: 0, nightOnly: false } : {}),
     };
-    e.hp = v.lifeMax;
-    e.maxHp = v.lifeMax;
+    // 接触伤害：战斗怪 = ScaleStats 缩放后 npc.damage（damage!=0 的 friendly/critter
+    // 恒 0，与旧归零语义一致）
+    e.hp = ss.lifeMax;
+    e.maxHp = ss.lifeMax;
     // 碰撞盒乘 npc.scale(NPC.cs:17747-17748 width/height=(int)(×scale))——
     // 史莱姆王/毁灭者 1.25、血肉墙 1.2:此前未乘,贴图放大了盒子没放大,
     // 判定区比视觉小一圈(与渲染 scale 不一致的"盒贴图不匹配"来源)
@@ -666,8 +701,12 @@ export class Enemy extends Entity {
     // 微光接触（NPC.cs:94268-94274）：WetCollision 盒命中微光 → shimmerWet +
     // TryAddingRepeatedBuff(353,100)；buff 353 → shimmering（:93313-93321）→
     // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered。离池衰减
-    // （:92484-92500）视觉侧未接（GAP），此处只保留转化触发计时
-    if (this.vanillaId !== null && !this.def.boss) {
+    // （:92484-92500）视觉侧未接（GAP），此处只保留转化触发计时。
+    // 入口门（NPC.cs:17773）：buffImmune[353] = ShimmerImmunity[type]——免表 NPC
+    // （史莱姆王/石巨人/史莱姆皇后/城镇宠物/事件军…，isNpcShimmerImmune）不进
+    // shimmering；非免表 Boss（克苏鲁之眼 4 等）原版照进，GetShimmered 无表项
+    // 时为空操作（npcGetShimmered 同语义提前返回）
+    if (this.vanillaId !== null && !isNpcShimmerImmune(this.vanillaId)) {
       if (liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 4)) {
         this.shimmerT += 1;
         if (this.shimmerT > 90) this.npcGetShimmered(game);
@@ -717,7 +756,14 @@ export class Enemy extends Entity {
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
     // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"
     if (hasPlayer && this.aabbOverlaps(player) && this.def.damage > 0) {
-      game.damagePlayer(this.def.damage, this.cx, this.cy, this);
+      // 蜂蜜史莱姆（NPC 1 且 ai[1]=1125，Player.cs:30902-30908 接触分支最前）：
+      // AddBuff(48 Honey, 1800t=30s) 后 continue——**免接触伤害/击退/无敌帧**，
+      // 语义是"蹭一身蜜"而非攻击（此前仅 SLIME_ITEM_COLORS 染色，接触照常掉血）
+      if (this.vanillaId === 1 && this.ai1 === 1125) {
+        player.buffs?.apply(BuffType.Honey, 30);
+      } else {
+        game.damagePlayer(this.def.damage, this.cx, this.cy, this, true);
+      }
     }
 
     // Despawn 系统（原版 CheckActive, NPC.cs:78669-78798 + EncourageDespawn :7228-7235）：
@@ -1419,22 +1465,25 @@ export class Enemy extends Entity {
   /** NPC.GetShimmered（NPC.cs:92502-92584）子集：雕像产怪直接消散（:92504-92519）→
    *  ShimmerTransformToNPC 则 Transform（:92521-92533）→ ShimmerTransformToItem 则
    *  掉微光化物品后消散（:92535-92560）。表来自 tools/extract-shimmer.mjs
-   *  （114 NPC 对 + 15 NPC→物品）。Boss 豁免（VANILLA_BOSS_IDS 外的 mini 部件走
-   *  上层表语义）；城镇变体分支（:92560-92573）在 TownNPC 侧实现 */
+   *  （114 NPC 对 + 15 NPC→物品）。原版四分支全落空时整函数为空操作（无表项 Boss
+   *  浸微光仅反复空调用，:92502-92573 无 else 兜底）——先判分支可达再出转化特效，
+   *  避免每 90t 粒子空刷；城镇变体分支（:92560-92573）在 TownNPC 侧实现 */
   private npcGetShimmered(game: GameHooks): void {
     if (this.vanillaId === null) return;
+    const toNpc = npcShimmerTransformTo(this.vanillaId);
+    const toItem = npcShimmerTransformToItem(this.vanillaId);
+    // 空操作门：非雕像产怪且无任何转化目标 → 原版同帧不产生任何副作用
+    if (!this.spawnedFromStatue && !(toNpc >= 0 && toNpc !== this.vanillaId) && toItem < 0) return;
     this.shimmerT = 0;
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 10, 1.4, { life: 30, grav: -0.04 });
     if (this.spawnedFromStatue) {           // SpawnedFromStatue → active=false（:92508-92514）
       this.dead = true;
       return;
     }
-    const toNpc = npcShimmerTransformTo(this.vanillaId);
     if (toNpc >= 0 && toNpc !== this.vanillaId) {
       this.transformTo(toNpc, game.world.store);
       return;
     }
-    const toItem = npcShimmerTransformToItem(this.vanillaId);
     if (toItem >= 0) {
       const key = VANILLA_ITEM_KEY_BY_ID[toItem];
       if (key) {
@@ -3601,7 +3650,13 @@ export class Enemy extends Entity {
         const vid = this.vanillaId;
         const proj = vid <= 282 ? 293 : vid <= 284 ? 290 : 291;
         const spd = vid <= 282 ? 4 : vid <= 284 ? 6 : 8;
-        const dmg = vid <= 282 || vid >= 285 ? 40 : 30;
+        // :21180 num104 = GetAttackDamage_ForProjectiles(num104, num104*0.8) =
+        // Remap(difficulty, Classic, Expert, 基线, 基线×0.8)（大师钳在 Expert 端）。
+        // 弹体基线【不】用缩放后的 def.damage——命中玩家的难度乘区在
+        // projTargets.hitPlayer（Projectile.cs:13770）统一做，双乘会 ×4
+        const dmg = getAttackDamageForProjectiles(
+          vid <= 282 || vid >= 285 ? 40 : 30,
+          (vid <= 282 || vid >= 285 ? 40 : 30) * 0.8, this.difficulty);
         let dx = player.cx - this.cx, dy = player.cy - this.cy;
         if (vid === 283 || vid === 284) {           // :21163-21166 散布 + 前置补偿
           dx += (Math.random() * 60 - 30) - player.vx * 10;
@@ -3615,7 +3670,11 @@ export class Enemy extends Entity {
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
         const d = Math.hypot(dx, dy) || 1;
         const spd = 3.4;
-        const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.def.damage);
+        // 出膛基线用【未缩放】baseDamage（原版法师族弹体基线均为 SetDefaults 常数，
+        // 如 :21788 num162=25 / :21230 type172 num111=40，不吃 ScaleStats）——
+        // 难度乘区由 projTargets.hitPlayer（Projectile.cs:13770）统一施加。
+        // （本分支为通用法师近似：原版逐类型基线 25/40 未按型映射，登记）
+        const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.baseDamage);
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       }
       this.chargesLeft--;
@@ -4235,12 +4294,21 @@ export class Enemy extends Entity {
           maxTilesX: w.w, maxTilesY: w.h,
           lifeMax: this.maxHp, friendly: false, boss: !!this.def.boss,
           damage: this.def.damage ?? 0,
-          value: this.spawnedFromStatue ? 0 : npcValueOf(netId), // 雕像产怪 value=0（Wiring.cs:2479）
+          // value：ScaleStats 后的缩放值（def.value，NPC.cs:18110 EnemyMoneyDropMultiplier）；
+          // 雕像产怪 value=0（Wiring.cs:2479）——雕像归零优先于难度缩放。
+          // ★负 netID 变体走 npcValueOf(netId) 原值：原版 SetDefaultsFromNetId（NPC.cs:7633+）
+          //   先 SetDefaults_ForNetId（含 ScaleStats）再硬覆写 damage/life/value 常数，
+          //   覆写后【不再缩放】→ 变体 value 是未缩放原值，不得用基底缩放值顶掉
+          value: this.spawnedFromStatue ? 0
+            : (netId === this.vanillaId ? (this.def.value ?? npcValueOf(netId)) : npcValueOf(netId)),
           statueSpawned: this.spawnedFromStatue,
           hp: p.hp, hpMax: p.maxHp, mana: p.mana, manaMax: p.maxMana,
           luck: p.luck,
           moonEvent: game.moonEventCtx?.() ?? undefined,
           ai3: this.ai3, // NPC ai[3]：RedHatSkeletron / 光之女皇暴怒掉落条件
+          // NPC.HasPlayerTarget（NPC.cs:6603）：TryTrackingTarget 无距离门，
+          // 单人 = 玩家存活非 ghost——悠悠球五条件（Conditions.cs:1136-1244）数据源
+          hasPlayerTarget: !!p && !p.dead,
           anyNpcOfType: (t) => game.enemies().some((o) => {
             const e2 = o as Enemy;
             return e2 !== this && !e2.dead && e2.vanillaId === t;

@@ -77,226 +77,163 @@ function item(d: Partial<ItemDef> & { key: string; name: string }) {
 }
 
 // ---- 基础方块 ----
-item({ key: 'dirt_block', name: '泥土块', tile: 'dirt' });
-item({ key: 'stone_block', name: '石块', tile: 'stone' });
-item({ key: 'wood', name: '木材', tile: 'wood' });
-item({ key: 'sand_block', name: '沙块', tile: 'sand' });
-item({ key: 'snow_block', name: '雪块', tile: 'snow' });
-item({ key: 'platform', name: '木平台', tile: 'platform', maxStack: 999 });
-item({ key: 'torch', name: '火把', tile: 'torch' });
-item({ key: 'door', name: '木门', tile: 'door_closed', maxStack: 99 });
-item({ key: 'workbench', name: '工作台', tile: 'workbench', maxStack: 99 });
-item({ key: 'furnace', name: '熔炉', tile: 'furnace', maxStack: 99 });
-item({ key: 'anvil', name: '铁砧', tile: 'anvil', maxStack: 99 });
-item({ key: 'chest', name: '宝箱', tile: 'chest', maxStack: 99 });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ---- 材料 ----
-item({ key: 'gel', name: '凝胶', desc: '史莱姆的残留物' });
-item({ key: 'acorn', name: '橡实', desc: '种在草块上会长成树', maxStack: 99, tile: 'acorn_sapling' });
-item({ key: 'mushroom_item', name: '蘑菇', heal: 15, value: 1,
-  // 原版 item 5（Item.cs:1424）：useStyle 2 咀嚼、healLife 15、potion=true（触发药水病）
-  potion: { buff: 'resistance', duration: 60, isHealType: true } });
-item({ key: 'copper_ore', name: '铜矿', desc: '可在熔炉炼成铜锭' });
-item({ key: 'iron_ore', name: '铁矿' });
-item({ key: 'silver_ore', name: '银矿' });
-item({ key: 'gold_ore', name: '金矿' });
-item({ key: 'copper_bar', name: '铜锭' });
-item({ key: 'iron_bar', name: '铁锭' });
-item({ key: 'silver_bar', name: '银锭' });
-item({ key: 'gold_bar', name: '金锭' });
-item({ key: 'lens', name: '晶状体', desc: '恶魔眼的眼睛' });
-item({ key: 'suspicious_eye', name: '可疑的眼球', desc: '夜间使用会召唤不祥之物…', maxStack: 20 });
-item({ key: 'lesser_healing_potion', name: '弱效治疗药水', heal: 50, maxStack: 30,
-  // 原版 188 治疗药水族（DefaultToHealingPotion）：useStyle 9 举杯、potion=true
-  potion: { buff: 'resistance', duration: 60, isHealType: true } });
-item({ key: 'coin_copper', name: '铜币', maxStack: 999, value: 1 });
-item({ key: 'coin_silver', name: '银币', maxStack: 999, value: 100 });
-item({ key: 'coin_gold', name: '金币', maxStack: 999, value: 10000 });
-item({ key: 'coin_platinum', name: '铂金币', maxStack: 999, value: 1000000, vid: 73 }); // 金币雨（WorldGen.cs:71848）
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+ // 金币雨（WorldGen.cs:71848）
 
 // ---- 药水（Buff 来源;buffType/buffTime 对齐 1456 Item.cs case 288-305）----
 // 时长换算:buffTime/60 = 秒(Regeneration/Swiftness/Ironskin/Thorns 均 28800t=480s=8min)
-item({ key: 'heal_potion', name: '治疗药水', maxStack: 30, heal: 100, desc: '回复 100 生命',
-  potion: { buff: 'resistance', duration: 60, isHealType: true } });
-item({ key: 'agility_potion', name: '敏捷药水', maxStack: 30, desc: '移速 +25%，持续 8 分钟',
-  potion: { buff: 'agility', duration: 480, isHealType: false } });
-item({ key: 'ironskin_potion', name: '铁皮药水', maxStack: 30, desc: '防御 +8，持续 8 分钟',
-  potion: { buff: 'ironskin', duration: 480, isHealType: false } });
-item({ key: 'thorns_potion', name: '荆棘药水', maxStack: 30, desc: '受击反弹全额接触伤害，持续 8 分钟',
-  potion: { buff: 'thorns', duration: 480, isHealType: false } });
-item({ key: 'regen_potion', name: '恢复药水', maxStack: 30, desc: '每秒回复 2 生命，持续 8 分钟',
-  // 原版 Regeneration Potion 是 buff 药水(heal=0),不触发 PotionSickness → isHealType:false
-  potion: { buff: 'regen', duration: 480, isHealType: false } });
+
+
+
+
+
 // ---- 药水 buff 族第二批（Item.cs case 288/291/293/294/295/302/303 buffTime/60 = 秒）----
-item({ key: 'obsidian_skin_potion', name: '黑曜石皮药水', maxStack: 30, desc: '免疫岩浆与灼烧，持续 6 分钟',
-  potion: { buff: 'obsidianSkin', duration: 360, isHealType: false } });   // 21600t
-item({ key: 'gills_potion', name: '鱼鳃药水', maxStack: 30, desc: '可在水下呼吸，持续 4 分钟',
-  potion: { buff: 'gills', duration: 240, isHealType: false } });          // 14400t
-item({ key: 'mana_regen_potion', name: '魔力再生药水', maxStack: 30, desc: '大幅提升魔力恢复，持续 8 分钟',
-  potion: { buff: 'manaRegen', duration: 480, isHealType: false } });      // 28800t
-item({ key: 'magic_power_potion', name: '魔法力量药水', maxStack: 30, desc: '魔法伤害 +20%，持续 4 分钟',
-  potion: { buff: 'magicPower', duration: 240, isHealType: false } });     // 14400t
-item({ key: 'featherfall_potion', name: '羽落药水', maxStack: 30, desc: '减缓下落速度，持续 10 分钟',
-  potion: { buff: 'featherfall', duration: 600, isHealType: false } });    // 36000t
-item({ key: 'water_walking_potion', name: '水上行走药水', maxStack: 30, desc: '可在水面行走，持续 10 分钟',
-  potion: { buff: 'waterWalking', duration: 600, isHealType: false } });   // 36000t
-item({ key: 'archery_potion', name: '射手药水', maxStack: 30, desc: '箭伤害 ×1.1，持续 8 分钟',
-  potion: { buff: 'archery', duration: 480, isHealType: false } });        // 28800t
-item({ key: 'night_owl_potion', name: '夜枭药水', maxStack: 30, desc: '改善黑暗与水下视觉，持续 10 分钟',
-  potion: { buff: 'nightOwl', duration: 600, isHealType: false } });       // 36000t(Item 299→buff 12)
+   // 21600t
+          // 14400t
+      // 28800t
+     // 14400t
+    // 36000t
+   // 36000t
+        // 28800t
+       // 36000t(Item 299→buff 12)
 
 // ---- 配饰（移植自 Maples Accessory）----
-item({ key: 'lucky_horseshoe', name: '幸运马掌', maxStack: 1, accessory: 'lucky_horseshoe',
-  desc: '免疫摔落伤害' });
-item({ key: 'feral_claws', name: '猛爪手套', maxStack: 1, accessory: 'feral_claws',
-  desc: '近战攻速 ×2，伤害 +5' });
+
+
 
 // ---- 盔甲（铜/铁/银/金三件套，防御取原版）----
-const armorTiers: Array<[string, string, [number, number, number]]> = [
-  // key 前缀, 显示前缀, [头盔, 胸甲, 胫甲] 防御
-  ['copper', '铜', [1, 2, 1]],
-  ['iron', '铁', [2, 3, 2]],
-  ['silver', '银', [3, 4, 3]],
-  ['gold', '金', [4, 5, 4]],
-];
-const armorParts: Array<[string, string, ArmorSlot]> = [
-  ['helmet', '头盔', 0], ['chainmail', '胸甲', 1], ['greaves', '胫甲', 2],
-];
-for (const [prefix, cn, defs] of armorTiers) {
-  armorParts.forEach(([suffix, cnPart, slot], k) => {
-    item({
-      key: `${prefix}_${suffix}`, name: `${cn}${cnPart}`, maxStack: 1,
-      armor: { slot, defense: defs[k] },
-      desc: `防御 +${defs[k]}`,
-    });
-  });
-}
+// (本地盔甲循环定义已退役——vi_89-92/80-83/76-79 原版盔甲经 vanilla-itemstats 自动接装备)
 
 // ---- 工具/武器（数值 = 官方原版 1.4.0.5 Item.cs SetDefaults，铜币价值）----
 // 木镐/木斧为自定义低档（原版无对应）；木剑(24)=官方 7 伤、木锤(196)=官方 25 锤力
-item({ key: 'wood_pickaxe', name: '木镐', maxStack: 1, value: 50,
-  tool: { type: 'pick', power: 12, damage: 2, speed: 23, useTime: 17, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'wood_axe', name: '木斧', maxStack: 1, value: 50,
-  tool: { type: 'axe', power: 4, damage: 2, speed: 30, useTime: 22, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'wood_sword', name: '木剑', maxStack: 1, value: 100,
-  tool: { type: 'sword', damage: 7, speed: 25, useTime: 25, knockback: 4, reach: 2.2 * 16 } });
-item({ key: 'wood_hammer', name: '木锤', maxStack: 1, value: 50,
-  tool: { type: 'hammer', power: 25, damage: 2, speed: 37, useTime: 25, knockback: 5.5, reach: 2.4 * 16 },
-  desc: '敲除背景墙' });
+
+
+
+
 // 铜（3509/3506/3508/3505）
-item({ key: 'copper_pickaxe', name: '铜镐', maxStack: 1, value: 500,
-  tool: { type: 'pick', power: 35, damage: 4, speed: 23, useTime: 15, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'copper_axe', name: '铜斧', maxStack: 1, value: 400,
-  tool: { type: 'axe', power: 7, damage: 3, speed: 30, useTime: 21, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'copper_sword', name: '铜剑', maxStack: 1, value: 450,
-  tool: { type: 'sword', damage: 8, speed: 23, useTime: 23, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'copper_hammer', name: '铜锤', maxStack: 1, value: 400,
-  tool: { type: 'hammer', power: 35, damage: 4, speed: 33, useTime: 23, knockback: 5.5, reach: 2.4 * 16 },
-  desc: '敲除背景墙' });
+
+
+
+
 // 铁（1/10/4/7）
-item({ key: 'iron_pickaxe', name: '铁镐', maxStack: 1, value: 2000,
-  tool: { type: 'pick', power: 40, damage: 5, speed: 20, useTime: 13, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'iron_axe', name: '铁斧', maxStack: 1, value: 1600,
-  tool: { type: 'axe', power: 9, damage: 5, speed: 27, useTime: 19, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'iron_sword', name: '铁剑', maxStack: 1, value: 1800,
-  tool: { type: 'sword', damage: 10, speed: 21, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'iron_hammer', name: '铁锤', maxStack: 1, value: 1600,
-  tool: { type: 'hammer', power: 40, damage: 7, speed: 30, useTime: 20, knockback: 5.5, reach: 2.4 * 16 },
-  desc: '敲除背景墙' });
+
+
+
+
 // 银（3515/3512/3514/3511）
-item({ key: 'silver_pickaxe', name: '银镐', maxStack: 1, value: 5000,
-  tool: { type: 'pick', power: 45, damage: 6, speed: 19, useTime: 11, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'silver_axe', name: '银斧', maxStack: 1, value: 4000,
-  tool: { type: 'axe', power: 10, damage: 6, speed: 26, useTime: 18, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'silver_sword', name: '银剑', maxStack: 1, value: 4500,
-  tool: { type: 'sword', damage: 11, speed: 21, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'silver_hammer', name: '银锤', maxStack: 1, value: 4000,
-  tool: { type: 'hammer', power: 45, damage: 9, speed: 29, useTime: 19, knockback: 5.5, reach: 2.4 * 16 },
-  desc: '敲除背景墙' });
+
+
+
+
 // 金（3521/3518/3520/3517）
-item({ key: 'gold_pickaxe', name: '金镐', maxStack: 1, value: 10000,
-  tool: { type: 'pick', power: 55, damage: 6, speed: 20, useTime: 17, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'gold_axe', name: '金斧', maxStack: 1, value: 8000,
-  tool: { type: 'axe', power: 11, damage: 7, speed: 26, useTime: 18, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'gold_sword', name: '金剑', maxStack: 1, value: 9000,
-  tool: { type: 'sword', damage: 13, speed: 20, useTime: 20, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'gold_hammer', name: '金锤', maxStack: 1, value: 8000,
-  tool: { type: 'hammer', power: 55, damage: 9, speed: 28, useTime: 23, knockback: 5.5, reach: 2.4 * 16 },
-  desc: '敲除背景墙' });
+
+
+
+
 
 // ===================== 原版素材批次：新材料 / 方块 / 家具 =====================
 // ---- 替代矿与困难模式矿（先做美术/掉落） ----
-item({ key: 'tin_ore', name: '锡矿' });
-item({ key: 'lead_ore', name: '铅矿' });
-item({ key: 'tungsten_ore', name: '钨矿' });
-item({ key: 'platinum_ore', name: '铂金矿' });
-item({ key: 'tin_bar', name: '锡锭' });
-item({ key: 'lead_bar', name: '铅锭' });
-item({ key: 'tungsten_bar', name: '钨锭' });
-item({ key: 'platinum_bar', name: '铂金锭' });
-item({ key: 'demonite_ore', name: '魔矿' });
-item({ key: 'meteorite', name: '陨石' });
-item({ key: 'hellstone', name: '狱石' });
-item({ key: 'crimtane_ore', name: '猩红矿' });
-item({ key: 'cobalt_ore', name: '钴矿' });
-item({ key: 'mythril_ore', name: '秘银矿' });
-item({ key: 'adamantite_ore', name: '精金矿' });
-item({ key: 'palladium_ore', name: '钯金矿' });
-item({ key: 'orichalcum_ore', name: '山铜矿' });
-item({ key: 'titanium_ore', name: '钛矿' });
-item({ key: 'chlorophyte_ore', name: '叶绿矿' });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ---- 宝石 ----
-item({ key: 'sapphire', name: '蓝宝石', value: 15 });
-item({ key: 'ruby', name: '红宝石', value: 22 });
-item({ key: 'emerald', name: '翡翠', value: 15 });
-item({ key: 'topaz', name: '黄玉', value: 11 });
-item({ key: 'amethyst', name: '紫水晶', value: 11 });
-item({ key: 'diamond', name: '钻石', value: 30 });
+
+
+
+
+
+
 
 // ---- 冰雪 / 沙漠 / 基础方块 ----
-item({ key: 'ice_block', name: '冰块', tile: 'ice' });
-item({ key: 'ice_brick', name: '冰砖', tile: 'ice_brick' });
-item({ key: 'snow_brick', name: '雪砖', tile: 'snow_brick' });
-item({ key: 'sandstone_block', name: '沙岩', tile: 'sandstone' });
-item({ key: 'hardened_sand_block', name: '硬化沙块', tile: 'hardened_sand' });
-item({ key: 'desert_fossil', name: '沙漠化石' });
-item({ key: 'clay_block', name: '粘土块', tile: 'clay' });
-item({ key: 'glass', name: '玻璃', tile: 'glass' });
-item({ key: 'obsidian', name: '黑曜石', tile: 'obsidian' });
-item({ key: 'gray_brick', name: '灰砖', tile: 'gray_brick' });
-item({ key: 'red_brick', name: '红砖', tile: 'red_brick' });
-item({ key: 'mud_block', name: '泥块', tile: 'mud' });
-item({ key: 'silt_block', name: '淤泥块', tile: 'silt' });
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ---- 家具 ----
-item({ key: 'table', name: '木桌', tile: 'table', maxStack: 99 });
-item({ key: 'chair', name: '木椅', tile: 'chair', maxStack: 99 });
-item({ key: 'bed', name: '床', tile: 'bed', maxStack: 99 });
-item({ key: 'bookcase', name: '书架', tile: 'bookcase', maxStack: 99 });
-item({ key: 'grandfather_clock', name: '落地钟', tile: 'grandfather_clock', maxStack: 99 });
-item({ key: 'piano', name: '钢琴', tile: 'piano', maxStack: 99 });
-item({ key: 'dresser', name: '梳妆台', tile: 'dresser', maxStack: 99 });
-item({ key: 'bench', name: '长凳', tile: 'bench', maxStack: 99 });
-item({ key: 'bathtub', name: '浴缸', tile: 'bathtub', maxStack: 99 });
-item({ key: 'keg', name: '酒桶', tile: 'keg', maxStack: 99 });
-item({ key: 'cooking_pot', name: '汤锅', tile: 'cooking_pot', maxStack: 99 });
-item({ key: 'clay_pot', name: '陶盆', tile: 'clay_pot', maxStack: 99 });
-item({ key: 'tombstone', name: '墓碑', tile: 'tombstone_v', maxStack: 99 });
-item({ key: 'life_crystal', name: '水晶之心', maxStack: 99, desc: '古老的生命结晶' });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // 上限扩容三件套（Player.cs:44655-44700 ItemCheck_Use*；vi_ 前缀自动映射原版图标）
 item({ key: 'vi_109_mana_crystal', name: '魔力水晶', maxStack: 99, desc: '使用：魔力上限 +20（上限 200）' });
 item({ key: 'vi_1291_life_fruit', name: '生命果', maxStack: 99, desc: '生命上限 ≥400 时使用：+5（上限 500）' });
-item({ key: 'candle', name: '蜡烛', tile: 'candle', maxStack: 99 });
-item({ key: 'chandelier', name: '吊灯', tile: 'chandelier', maxStack: 99 });
-item({ key: 'lantern', name: '吊挂灯笼', tile: 'lantern', maxStack: 99 });
-item({ key: 'candelabra', name: '烛台', tile: 'candelabra', maxStack: 99 });
-item({ key: 'chinese_lantern', name: '中式灯笼', tile: 'chinese_lantern', maxStack: 99 });
-item({ key: 'skull_lantern', name: '骷髅灯笼', tile: 'skull_lantern', maxStack: 99 });
-item({ key: 'water_candle', name: '水蜡烛', tile: 'water_candle', maxStack: 99 });
+
+
+
+
+
+
+
 // 瓦罐战利品
-item({ key: 'bomb', name: '小型炸弹', maxStack: 99, desc: '用力扔出去会爆炸…（待实装）', value: 5 });
-item({ key: 'rope', name: '攀爬绳', maxStack: 999, desc: '左键放置绳列,触碰可攀爬', value: 1, tile: 'v_213_rope' });
+
+
 
 export interface ItemStack { id: number; stack: number; }
 export function mkStack(key: string, stack = 1): ItemStack | null {
@@ -727,10 +664,10 @@ for (const td of TILE_DEFS) {
 void 0;
 
 // ---- 阶段 5:生物群系草种子(种出对应草块)----
-item({ key: 'corrupt_grass_seeds', name: '腐化草地种子', maxStack: 999, value: 1, tile: 'v_23_corrupt_grass_block' });
-item({ key: 'crimson_grass_seeds', name: '猩红草地种子', maxStack: 999, value: 1, tile: 'v_199_crimson_grass_block' });
-item({ key: 'jungle_grass_seeds', name: '丛林草地种子', maxStack: 999, value: 1, tile: 'v_60_jungle_grass_block' });
-item({ key: 'mushroom_grass_seeds', name: '蘑菇草地种子', maxStack: 999, value: 1, tile: 'v_70_mushroom_grass_block' });
+
+
+
+
 
 
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
@@ -841,80 +778,64 @@ item({ key: 'vi_4856_GemTreeDiamondSeed', name: '钻石宝石橡实', maxStack: 
 item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 6 });
 
 // ---- 阶段 6:功能道具(桶三态/绳圈) ----
-item({ key: 'empty_bucket', name: '空桶', maxStack: 99, value: 1, desc: '右键舀取液体' });
-item({ key: 'water_bucket', name: '水桶', maxStack: 1, value: 1, desc: '右键放置水' });
-item({ key: 'lava_bucket', name: '岩浆桶', maxStack: 1, value: 1, desc: '右键放置岩浆' });
-item({ key: 'honey_bucket', name: '蜂蜜桶', maxStack: 1, value: 1, desc: '右键放置蜂蜜' });
+
+
+
+
 
 // ---- 阶段 6 第三轮:替代矿工具链(官方数值,与铜/铁/银/金同档) ----
-item({ key: 'tin_pickaxe', name: '锡镐', maxStack: 1, value: 400,
-  tool: { type: 'pick', power: 35, damage: 4, speed: 23, knockback: 2, reach: 2.6 * 16 } });
-item({ key: 'tin_axe', name: '锡斧', maxStack: 1, value: 350,
-  tool: { type: 'axe', power: 7, damage: 3, speed: 30, knockback: 4.5, reach: 2.4 * 16 } });
-item({ key: 'tin_sword', name: '锡剑', maxStack: 1, value: 450,
-  tool: { type: 'sword', damage: 8, speed: 23, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'lead_pickaxe', name: '铅镐', maxStack: 1, value: 900,
-  tool: { type: 'pick', power: 45, damage: 5, speed: 22, knockback: 2.5, reach: 2.6 * 16 } });
-item({ key: 'lead_axe', name: '铅斧', maxStack: 1, value: 800,
-  tool: { type: 'axe', power: 9, damage: 4, speed: 30, knockback: 5, reach: 2.4 * 16 } });
-item({ key: 'lead_sword', name: '铅剑', maxStack: 1, value: 900,
-  tool: { type: 'sword', damage: 10, speed: 23, knockback: 5, reach: 2.2 * 16 } });
-item({ key: 'tungsten_pickaxe', name: '钨镐', maxStack: 1, value: 1800,
-  tool: { type: 'pick', power: 55, damage: 6, speed: 21, knockback: 2.5, reach: 2.6 * 16 } });
-item({ key: 'tungsten_axe', name: '钨斧', maxStack: 1, value: 1600,
-  tool: { type: 'axe', power: 11, damage: 5, speed: 29, knockback: 5.5, reach: 2.4 * 16 } });
-item({ key: 'tungsten_sword', name: '钨剑', maxStack: 1, value: 1800,
-  tool: { type: 'sword', damage: 13, speed: 22, knockback: 5.5, reach: 2.2 * 16 } });
-item({ key: 'platinum_pickaxe', name: '铂金镐', maxStack: 1, value: 3600,
-  tool: { type: 'pick', power: 59, damage: 7, speed: 20, knockback: 3, reach: 2.6 * 16 } });
-item({ key: 'platinum_axe', name: '铂金斧', maxStack: 1, value: 3200,
-  tool: { type: 'axe', power: 13, damage: 6, speed: 28, knockback: 6, reach: 2.4 * 16 } });
-item({ key: 'platinum_sword', name: '铂金剑', maxStack: 1, value: 3600,
-  tool: { type: 'sword', damage: 15, speed: 22, knockback: 6, reach: 2.2 * 16 } });
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ---- 阶段 6 第五轮:弓箭系统(官方数值 Item.cs:2996-3010:木弓伤4/UseTime30/射速6.1/击退0) ----
-item({ key: 'wooden_bow', name: '木弓', maxStack: 1, value: 100, vid: 39,
-  ranged: { damage: 4, speed: 30, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.1, vid: 39 } });
-item({ key: 'wooden_arrow', name: '木箭', maxStack: 999, value: 1, vid: 40, ammoId: 40 });
-item({ key: 'flaming_arrow', name: '燃烧箭', maxStack: 999, value: 1, vid: 41, ammoId: 40 });
-item({ key: 'iron_bow', name: '铁弓', maxStack: 1, value: 360, vid: 99,
-  ranged: { damage: 8, speed: 28, knockback: 0, ammo: 'wooden_arrow', projSpeed: 6.6, vid: 99 } });
+
+
+
+
 
 // ---- 阶段 6 第六轮:矿车 ----
-item({ key: 'minecart_item', name: '矿车', maxStack: 99, value: 1, desc: '右键轨道放置并骑乘' });
+
 
 // ---- 阶段 6 第八轮:魔法武器(官方 Item.cs:30765-30778,火花法杖=ItemID 3069:伤14/魔力2/UseTime26/射速7/暴击10) ----
-item({ key: 'wand_of_sparking', name: '火花法杖', maxStack: 1, value: 100,
-  magic: { damage: 14, speed: 26, manaCost: 2, projSpeed: 7, proj: 'spark' } });
-item({ key: 'amethyst_bolt', name: '紫晶法杖', maxStack: 1, value: 900,
-  magic: { damage: 14, speed: 26, manaCost: 5, projSpeed: 9, proj: 'bolt' } });
+
+
 
 // ---- 阶段 6 第九轮:Boss 召唤物(官方:蠕虫食物 70/血腥脊椎 1331/史莱姆王冠 560) ----
-item({ key: 'worm_food', name: '蠕虫食物', maxStack: 20, value: 1, desc: '腐化之地使用:召唤世界吞噬者' });
+
 // 入侵触发物品（Player.ItemCheck_UseEventItems，Player.cs:43243/43260/43277）
-item({ key: 'goblin_battle_standard', name: '哥布林战旗', vid: 361, maxStack: 20, value: 1, desc: '任意时刻:召唤哥布林军队' });
-item({ key: 'snow_globe', name: '雪球', vid: 602, maxStack: 20, value: 1, desc: '使用:召唤雪人军团' });
-item({ key: 'pirate_map', name: '海盗地图', vid: 1301, maxStack: 20, value: 1, desc: '使用:召唤海盗入侵' });
-item({ key: 'bloody_spine', name: '血腥脊椎', maxStack: 20, value: 1, desc: '猩红之地使用:召唤克苏鲁之脑' });
-item({ key: 'slime_crown', name: '史莱姆王冠', maxStack: 20, value: 1, desc: '任意时刻:召唤史莱姆王' });
+
+
+
+
+
 
 // ---- 机械三王召唤物(官方 556 机械蠕虫/544 机械魔眼/557 机械骷髅头;需夜晚+困难模式) ----
-item({ key: 'mechanical_worm', name: '机械蠕虫', maxStack: 20, value: 1, vid: 556, desc: '夜晚使用:召唤毁灭者' });
-item({ key: 'mechanical_eye', name: '机械魔眼', maxStack: 20, value: 1, vid: 544, desc: '夜晚使用:召唤双子魔眼' });
-item({ key: 'mechanical_skull', name: '机械骷髅头', maxStack: 20, value: 1, vid: 557, desc: '夜晚使用:召唤机械骷髅王' });
+
+
+
 
 // ---- 电路工具(原版 530 电线/509,850,851,3612 扳手/510 剪线钳/849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图) ----
 // 位掩码见 world/Wiring.ts TOOL_*。扳手消耗背包中的 wire(原版语义:找第一组 530 扣 1)
-item({ key: 'wire', name: '电线', maxStack: 999, value: 1, desc: '四色扳手与宏伟蓝图的耗材' });
-item({ key: 'red_wrench', name: '红扳手', maxStack: 1, value: 1, wireTool: { place: 1 }, desc: '左键铺红线(消耗电线)' });
-item({ key: 'blue_wrench', name: '蓝扳手', maxStack: 1, value: 1, wireTool: { place: 2 }, desc: '左键铺蓝线(消耗电线)' });
-item({ key: 'green_wrench', name: '绿扳手', maxStack: 1, value: 1, wireTool: { place: 4 }, desc: '左键铺绿线(消耗电线)' });
-item({ key: 'yellow_wrench', name: '黄扳手', maxStack: 1, value: 1, wireTool: { place: 8 }, desc: '左键铺黄线(消耗电线)' });
-item({ key: 'wire_cutter', name: '钢丝钳', maxStack: 1, value: 1, wireTool: { cutter: true }, desc: '左键剪线(优先级:致动器>黄>绿>蓝>红)' });
-item({ key: 'actuator_item', name: '致动器', maxStack: 999, value: 1, wireTool: { place: 16 }, desc: '左键给方块装致动器,通电缩入' });
-item({ key: 'actuation_rod', name: '致动魔杖', maxStack: 1, value: 1, wireTool: { rod: true }, desc: '左键手动翻转方块致动状态' });
-item({ key: 'multicolor_wrench', name: '五彩扳手', maxStack: 1, value: 1, wireTool: { place: 15, grand: false }, desc: 'R 键切换模式(四色/剪线/致动器),左键单点' });
-item({ key: 'grand_design', name: '宏伟蓝图', maxStack: 1, value: 1, wireTool: { place: 15, grand: true }, desc: '拖拽批量铺线(R 键切换模式)' });
+
+
+
+
+
+
+
+
+
+
 
 
 // ===================== 存档稳定 id(根治 ITEM_DEFS 数组下标漂移;存档 v3 起生效) =====================

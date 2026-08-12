@@ -115,40 +115,41 @@ export function tileRunner(
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
         // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻)
-        if (o.mudWall && y > gs.worldSurface && st.wall[st.idx(x, y - 1)] !== 2
+        // ★局部化:twall=st.wall 提局部 + idx 内联(泥 runner 每格 5-8 次跳读,热点)
+        if (o.mudWall && y > gs.worldSurface && twall[ti - stW] !== 2
           && y < st.h - 210 - rng.int(0, 2)
           && dist < strength * 0.45 * (1 + rng.int(-10, 10) * 0.01)) {
           if (y > gs.lavaLine - rng.int(0, 3) - 50) {
-            if (st.wall[st.idx(x, y - 1)] !== 64 && st.wall[st.idx(x, y + 1)] !== 64
-              && st.wall[st.idx(x - 1, y)] !== 64 && st.wall[st.idx(x + 1, y)] !== 64) st.wall[ti] = 15;
-          } else if (st.wall[st.idx(x, y - 1)] !== 15 && st.wall[st.idx(x, y + 1)] !== 15
-            && st.wall[st.idx(x - 1, y)] !== 15 && st.wall[st.idx(x + 1, y)] !== 15) {
-            st.wall[ti] = 64;
+            if (twall[ti - stW] !== 64 && twall[ti + stW] !== 64
+              && twall[ti - 1] !== 64 && twall[ti + 1] !== 64) twall[ti] = 15;
+          } else if (twall[ti - stW] !== 15 && twall[ti + stW] !== 15
+            && twall[ti - 1] !== 15 && twall[ti + 1] !== 15) {
+            twall[ti] = 64;
           }
         }
         // granite/marble 伴生墙(cs L46503-46506):核心 0.3R 内同步铺墙 180/178
         if (type === GRANITE || type === MARBLE) {
           if (dist < strength * 0.3 * (1 + rng.int(-10, 10) * 0.01)) {
-            st.wall[ti] = type === GRANITE ? 180 : 178;
+            twall[ti] = type === GRANITE ? 180 : 178;
           }
         }
         if (type < 0) {
           // 挖空:仅活性沙不挖(原版 active&&type==53 保护);-2 在活性块上填液体
-          if (st.flags[ti] && st.type[ti] === T.SAND) continue;
-          if (type === -2 && st.flags[ti] && (y < gs.waterLine || y > gs.lavaLine)) {
-            st.liquid[ti] = 255;
-            st.liquidType[ti] = y > gs.lavaLine ? 2 : 1;
+          if (tf[ti] && ty[ti] === T.SAND) continue;
+          if (type === -2 && tf[ti] && (y < gs.waterLine || y > gs.lavaLine)) {
+            tliq[ti] = 255;
+            tltype[ti] = y > gs.lavaLine ? 2 : 1;
           }
           // 原版 active(false) **保留 type**（幽灵语义）——挖除清零会让后续
           // 拒绝采样/flag4 判定读错（收尾洞穴循环实测分叉点）
-          st.flags[ti] = 0;
+          tf[ti] = 0;
         } else {
           // 铺设:原版 flag4 规则（1456 cs:77277-77330）。结构语义：
           // overRide 仅门禁"保护计算"，**不门禁写入**——!flag4 一律写 type
           //（overRide=false 时 flag4 恒 false，活性块照写）
           let flag4 = false;
-          const cur = st.type[ti];
-          if (overRide && st.flags[ti]) {
+          const cur = ty[ti];
+          if (overRide && tf[ti]) {
             // Main.tileStone[type](放置类型是宝石族)且目标非石头 → flag4
             flag4 = STONE_PLACED.has(type) && cur !== T.STONE;
             // CanBeClearedDuringGeneration:false 的 tile 被覆盖时恒 flag4
@@ -175,16 +176,16 @@ export function tileRunner(
               flag4 = !ORE_SET.has(type);
             }
           }
-          if (!flag4) st.type[ti] = type;
+          if (!flag4) ty[ti] = type;
           if (addTile) {
-            st.flags[ti] = 1;
-            st.liquid[ti] = 0;
-            st.liquidType[ti] = 0;
+            tf[ti] = 1;
+            tliq[ti] = 0;
+            tltype[ti] = 0;
           }
-          if (noYChange && y < gs.worldSurface && type !== MUD) st.wall[ti] = 2;
-          if (type === MUD && y > gs.waterLine && st.liquid[ti] > 0) {
-            st.liquid[ti] = 0;
-            st.liquidType[ti] = 0;
+          if (noYChange && y < gs.worldSurface && type !== MUD) twall[ti] = 2;
+          if (type === MUD && y > gs.waterLine && tliq[ti] > 0) {
+            tliq[ti] = 0;
+            tltype[ti] = 0;
           }
         }
       }

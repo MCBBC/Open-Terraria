@@ -136,6 +136,17 @@ export class ItemDrop extends Entity {
         // 已微光化：无重力上浮（:486-511 gravity=0，vy -0.05/t 钳 -4）
         this.vy = Math.max(this.vy - 0.05, -4);
         this.vx *= 0.95;
+        // 上浮白光尘（WorldItem.cs:488-497）：1/30t 一枚 dust 309，盒内随机点 +
+        // 抖动 X∈[-8,5) Y∈[-8,5)，四色表 1/1/1/3 权重（255,255,210 / 190,245,255 /
+        // 255,150,255 / 190,175,255），scale×1.1、velocity×0.3 近似静态
+        if (Math.random() < 1 / 30) {
+          const c = Math.floor(Math.random() * 6);
+          const color = c === 0 ? '#FFFFD2' : c === 1 ? '#BEF5FF' : c === 2 ? '#FF96FF' : '#BEAFFF';
+          game.spawnParticles(
+            this.x + Math.random() * this.w + (Math.random() * 13 - 8),
+            this.y + Math.random() * this.h + (Math.random() * 13 - 8),
+            color, 1, 0.3, { life: 40 + Math.random() * 12, grav: -0.01, size: 1.1 });
+        }
       } else {
         // 微光浸入重力（:434-441：0.065 / maxFall 4，比水 0.08/5 更缓）
         const g = this.shimmerWet ? GRAVITY * 0.7 * (0.065 / 0.3) : GRAVITY * 0.7;
@@ -153,9 +164,26 @@ export class ItemDrop extends Entity {
     const wasWater = this.inWater;
     this.inWater = li > 80 && (liqType === 1 || liqType === 3);
     if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 0.35);
-    if (this.shimmerWet && !this.shimmered) this.updateShimmer(game);
+    if (this.shimmerWet && !this.shimmered) {
+      this.updateShimmer(game);
+    } else if (this.shimmerTime > 0) {
+      // WorldItem.cs:552-558（shimmered 也走）：转化后 shimmerTime 自 1 衰减 -0.01/t
+      // ——驱动上浮白光渐亮（lightRGB 读 (1-shimmerTime)*0.8，:511）
+      this.shimmerTime = Math.max(0, this.shimmerTime - 0.01);
+    }
     void ITEM_DEFS;
   }
+
+  /** 上浮白光（WorldItem.cs:511 AddLight(Center,(1-shimmerTime)*0.8 ×3)）：
+   *  转化瞬间 shimmerTime=1 不发光，漂浮 100t 内渐亮至 0.8——Game 点光扫描
+   *  drops 桶消费本 getter */
+  get lightRGB(): [number, number, number] | null {
+    if (!this.shimmered) return null;
+    const k = (1 - this.shimmerTime) * 0.8;
+    return [k, k, k];
+  }
+  /** 光源锚点缺省（实体中心，Game 扫描回退语义） */
+  lightRGBAt: { x: number; y: number } | null = null;
 
   /** WorldItem.Shimmering（:806-840）：脚上方格是微光且可转化 → 进度 +0.01/t，
    *  >0.9 触发 GetShimmered；不在微光中则进度衰减。转化触发在本地玩家侧语义

@@ -8,8 +8,10 @@ import { describe, it, expect } from 'vitest';
 import {
   bestiaryEntries, bestiaryCreditId, countsAsACritter, unlockStateByKillCount,
   BestiaryTracker, isNpcValidForBestiaryKillCredit, BESTIARY_TOWN_IDS,
+  bestiaryRarityStars, bestiarySortingId,
   UnlockState,
 } from '../src/data/Bestiary';
+import { BESTIARY_SORT_KEYS, sortLabel } from '../src/ui/BestiaryPanel';
 import { NPC_NAME_BY_ID } from '../src/i18n/idNames.generated';
 import { saveGame, loadSave } from '../src/save/SaveFile';
 import { World } from '../src/world/World';
@@ -148,5 +150,42 @@ describe('图鉴数据层（Bestiary）', () => {
     // 旧档缺省 = 空三桶
     const fresh = loadSave(saveGame(new World(64, 32, 7, '空'), new Player(0, 0, new Inventory()), 0));
     expect(fresh.world.bestiary.completion().unlocked).toBe(0);
+  });
+});
+
+// ============ 排序 id + 稀有度星（ContentSamples.NpcBestiarySortingId / NpcBestiaryRarityStars） ============
+
+describe('NpcBestiarySortingId 排序 + NpcBestiaryRarityStars 稀有度（2026-08-13 散项批）', () => {
+  it('城镇优先位表（NPCID.cs:4427）：向导 22 首位 → 排序 id 全表最小', () => {
+    expect(bestiarySortingId(22)).toBe(1);
+    // 城镇链 17/18/38/369... 紧随其后且单调升
+    expect(bestiarySortingId(17)).toBeGreaterThan(bestiarySortingId(22));
+    expect(bestiarySortingId(17)).toBeLessThan(bestiarySortingId(18));
+  });
+
+  it('金小动物优先位（:4407）先于普通敌怪：46 兔 < 442 金鸟', () => {
+    expect(bestiarySortingId(46)).toBeLessThan(bestiarySortingId(442));
+  });
+
+  it('Boss 优先位（:4416）：缺席 = IndexOf 的 -1 → 非 Boss 先于 Boss 段（原版语义）', () => {
+    // 4 EoC 是 BossBestiaryPriority 第 2 位（664 TorchGod 首）；城镇/小动物段之后。
+    // GetBestiaryBossPriority 对非 Boss 返回 -1（小于一切表内下标）→ 普通敌怪 3
+    // 僵尸反而在 Boss 段之前（忠实原版，勿"修正"为 MAX）
+    expect(bestiarySortingId(4)).toBeGreaterThan(bestiarySortingId(46));
+    expect(bestiarySortingId(3)).toBeLessThan(bestiarySortingId(4));
+  });
+
+  it('稀有度星：城镇显式覆盖（22=1）/ Boss 覆盖段 4-5 / 小动物公式档（46 兔=1）', () => {
+    expect(bestiaryRarityStars(22)).toBe(1);      // FillNpcRarities 覆盖
+    expect(bestiaryRarityStars(398)).toBeGreaterThanOrEqual(4);   // Boss 段
+    expect(bestiaryRarityStars(398)).toBeLessThanOrEqual(5);
+    expect(bestiaryRarityStars(46)).toBe(1);      // 公式：rarity0 + 战力 1 档
+  });
+
+  it('排序步注册序含 BestiaryID/Rarity 两新步（原登记缺口闭合）', () => {
+    expect(BESTIARY_SORT_KEYS).toEqual(
+      ['unlocks', 'id', 'bestiaryId', 'alpha', 'rarity', 'attack', 'defense', 'coins', 'hp']);
+    expect(sortLabel('bestiaryId')).toBeTruthy();
+    expect(sortLabel('rarity')).toBeTruthy();
   });
 });

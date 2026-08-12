@@ -699,6 +699,8 @@ export class DukeSharknadoTornado extends Entity {
       const colTop = Math.min(this.topY, this.cy);
       const colH = Math.abs(this.cy - this.topY) + this.h;
       if (Math.abs(p.cx - this.cx) < halfW + p.w / 2 && Math.abs(p.cy - (colTop + colH / 2)) < colH / 2 + p.h / 2) {
+        // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
+        // （反伤只在 NPC 接触分支 Player.cs:30910-30944）
         game.damagePlayer(this.big ? 160 : 80, this.cx, this.cy, this.src);
       }
     }
@@ -1068,7 +1070,9 @@ export class MLDeathray extends Entity {
     }
     this.len = lerp(this.len, dist, amt);
 
-    // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)
+    // 命中:玩家矩形 vs 束线段(线宽 36·scale),伤害走 damagePlayer(iframes 节流)。
+    // 弹幕命中：attacker 仅做死亡归因，contactOnly 缺省 false → 荆棘不反伤
+    // （反伤只在 NPC 接触分支 Player.cs:30910-30944）
     if (p && !p.dead && segHitsRect(this.cx, this.cy, dirX * this.len, dirY * this.len, wSq, p)) {
       game.damagePlayer(this.dmg, this.cx, this.cy, src);
     }

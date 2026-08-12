@@ -1,5 +1,6 @@
 // 箭矢图块碰撞回归:阻挡只看实心(Main.tileSolid 语义)——
 // 树干 solid:false 不挡箭(曾 tileType!==0 一刀切,箭被树挡住),实心块照常挡。
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';

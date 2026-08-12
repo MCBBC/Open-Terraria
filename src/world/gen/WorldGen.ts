@@ -558,9 +558,13 @@ function vanillaCaves({ store, rng }: GenCtx) {
 function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
-  runGrassPass(store, rng, gs);          // 17 Grass
-  const jx = runJunglePass(store, rng, gs); // JunglePass
+  // 临时子级计时探针(env 门,BIOME_TIMER=1 生效;测量后移除)
+  const _bt = typeof process !== 'undefined' && (process.env as Record<string, string | undefined>).BIOME_TIMER === '1';
+  const _bmark = (n: string) => { if (_bt) { (globalThis as { __btLast?: number }).__btLast = performance.now(); (globalThis as { __btName?: string }).__btName = n; } };
+  const _bend = () => { if (_bt) { const t = performance.now() - ((globalThis as { __btLast?: number }).__btLast ?? 0); console.log(`BT ${((globalThis as { __btName?: string }).__btName ?? '')}=${Math.round(t)}ms`); } };
+  _bmark('ice'); runIceBiomePass(store, rng, gs); _bend();       // 16 Generate Ice Biome
+  _bmark('grass'); runGrassPass(store, rng, gs); _bend();          // 17 Grass
+  _bmark('jungle'); const jx = runJunglePass(store, rng, gs); _bend(); // JunglePass
   world.jungleX = jx;
   // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
   // 覆盖表面所致;我们补这一步让丛林表面成草皮而非裸土)
@@ -577,20 +581,20 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   }
   // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
-  runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
-  runDesertPass(store, rng, gs);         // 19 Full Desert
-  runMushroomPass(store, rng, gs);       // 20 Mushroom Patches
-  runMarbleGranitePass(store, rng, gs);  // 21/22 Marble/Granite
-  runFloatingIslandsPass(store, rng, gs); // 23 Floating Islands（原在蘑菇前——注册序修正）
-  runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
-  runShiniesPass(store, rng, gs);        // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
-  runVanillaWebsPass(store, rng, gs);     // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
-  runUnderworldPass(store, rng, gs);     // 28 Underworld（cs:13697——原管线末"地狱"槽；
+  _bmark('mudcaves'); runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!); _bend();
+  _bmark('desert'); runDesertPass(store, rng, gs); _bend(); // 19 Full Desert
+  _bmark('mushroom'); runMushroomPass(store, rng, gs); _bend(); // 20 Mushroom Patches
+  _bmark('marble'); runMarbleGranitePass(store, rng, gs); _bend(); // 21/22 Marble/Granite
+  _bmark('islands'); runFloatingIslandsPass(store, rng, gs); _bend(); // 23 Floating Islands（原在蘑菇前——注册序修正）
+  _bmark('silt'); runDirtToMudAndSiltPass(store, rng, gs); _bend(); // 24 Dirt To Mud / 25 Silt
+  _bmark('shinies'); runShiniesPass(store, rng, gs); _bend(); // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
+  _bmark('webs'); runVanillaWebsPass(store, rng, gs); _bend(); // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
+  _bmark('underworld'); runUnderworldPass(store, rng, gs); _bend(); // 28 Underworld（cs:13697——原管线末"地狱"槽；
                                         //  地狱屋/地狱箱/熔炉等依赖槽在数组其后 = 地狱 pass 之后 ✓）
-  runCorruptionPass(store, rng, gs);     // 29 Corruption/Crimson
-  runLakesPass(store, rng, gs);          // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
-  runSlushPass(store, gs);               // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
-  runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  _bmark('corrupt'); runCorruptionPass(store, rng, gs); _bend(); // 29 Corruption/Crimson
+  _bmark('lakes'); runLakesPass(store, rng, gs); _bend(); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
+  _bmark('slush'); runSlushPass(store, gs); _bend(); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
+  _bmark('dungeon'); runDungeonPass(store, rng, gs, world.chests); _bend(); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
   // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
   // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
@@ -598,15 +602,15 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）
-  runMountainCavesPass(store, rng, gs);
-  runBeachesPass(store, rng, gs);
+  _bmark('mcaves'); runMountainCavesPass(store, rng, gs); _bend();
+  _bmark('beaches'); runBeachesPass(store, rng, gs); _bend();
   // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
   for (let x = 0; x < store.w; x++) {
     for (let y = 0; y < store.h; y++) {
       if (store.flags[store.idx(x, y)]) { surface[x] = y; break; }
     }
   }
-  runGemsPass(store, rng, gs);           // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
+  _bmark('gems'); runGemsPass(store, rng, gs); _bend(); // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
   // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
   //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
   //   Temple(15911) < Beehives(16005) < JungleShrines(16059) < Statues(16947) <
@@ -615,7 +619,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
-  const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
+  _bmark('oceancaves'); const oceanTreasures = runOceanCavesPass(store, rng, gs); _bend(); // 海洋洞窟蠕虫+宝藏点记录
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
   // SurfaceWaterInJungle(15887)——世界树插在金字塔后、丛林灌水前（方案 A 原版位置）。
@@ -857,115 +861,6 @@ function hellPass({ store, rng }: GenCtx) {
   const gsUW = ctxGs[0];
   if (!gsUW) return;
   runUnderworldPass(store, rng, gsUW);
-}
-function hellPassLegacy({ store, rng }: GenCtx) {
-  const st = store;
-  const ASH = T.ASH;
-  const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
-  // 1) 边界 + 灰烬带 + 界下清空
-  let boundary = st.h - rng.int(150, 189);
-  for (let x = 0; x < st.w; x++) {
-    boundary += rng.int(-3, 3);
-    if (boundary < st.h - 190) boundary = st.h - 190;
-    if (boundary > st.h - 160) boundary = st.h - 160;
-    const ashTop = boundary - 20 - rng.int(0, 2);
-    for (let y = ashTop; y < st.h; y++) {
-      const i = st.idx(x, y);
-      if (y >= boundary) {
-        st.type[i] = 0; st.flags[i] = 0;
-        st.liquid[i] = 0; st.liquidType[i] = 0;
-      } else {
-        st.type[i] = ASH; st.flags[i] = 1;
-        // 原版地狱本体无自然墙（空腔无墙，NPC 可刷）——此前涂 wall 1（可放置墙，
-        // 在 spawner WALL_HOUSE 表内）→ 地狱刷怪点被"房屋墙门"(NPC.cs L886)全拒，
-        // 地狱恒不刷怪
-      }
-    }
-  }
-  // 2) 岩浆线
-  let lavaY = st.h - rng.int(40, 69);
-  for (let x = 10; x < st.w - 10; x++) {
-    lavaY += rng.int(-10, 10);
-    if (lavaY > st.h - 60) lavaY = st.h - 60;
-    if (lavaY < st.h - 100) lavaY = st.h - 120;
-    for (let y = lavaY; y < st.h - 10; y++) {
-      const i = st.idx(x, y);
-      if (!st.flags[i]) { st.liquid[i] = 255; st.liquidType[i] = 2; }
-    }
-  }
-  const gs = ctxGs[0]!;
-  // 3a) 大灰烬丘陵(1/50 列):巨型竖直灰烬 runner 填充虚空
-  for (let x = 0; x < st.w; x++) {
-    if (rng.next() * 50 >= 1) continue;
-    let y = st.h - 65;
-    while (!st.flags[st.idx(x, y)] && y > st.h - 135) y--;
-    tileRunnerHell(st, rng, gs, rng.int(0, st.w - 1), y + rng.int(20, 49),
-      rng.int(15, 19), 1000, ASH, true, 0, rng.int(1, 2), true);
-  }
-  // 3b) 每列 1/13:竖直灰烬柱 + 横向灰烬团 + 挖掘隧道(填岩浆)
-  for (let x = 0; x < st.w; x++) {
-    if (rng.next() * 13 >= 1) continue;
-    let y = st.h - 65;
-    while ((st.liquid[st.idx(x, y)] > 0 || st.flags[st.idx(x, y)]) && y > st.h - 140) y--;
-    let scaleF = rng.int(1, 2);
-    if (rng.next() * 3 < 1) scaleF *= 0.5;
-    tileRunnerHell(st, rng, gs, x, y - rng.int(2, 4), rng.int(5, 29), 1000, ASH, true, 0, rng.int(1, 2), true);
-    if (rng.next() < 0.5) {
-      tileRunnerHell(st, rng, gs, x, y - rng.int(2, 4), Math.floor(rng.int(5, 14) * scaleF), Math.floor(rng.int(10, 14) * scaleF), ASH, true, 1, 0.3, false);
-    }
-    if (rng.next() < 0.5) {
-      const s2 = rng.int(1, 2);
-      tileRunnerHell(st, rng, gs, x, y - rng.int(2, 4), Math.floor(rng.int(5, 14) * s2), Math.floor(rng.int(10, 14) * s2), ASH, true, -1, 0.3, false);
-    }
-    tileRunnerHell(st, rng, gs, x + rng.int(-10, 9), y + rng.int(-10, 10), rng.int(5, 14), rng.int(5, 9), -2, false, rng.int(-1, 2), rng.int(-1, 2), false);
-    if (rng.next() * 3 < 1) {
-      tileRunnerHell(st, rng, gs, x + rng.int(-10, 9), y + rng.int(-10, 10), rng.int(10, 29), rng.int(10, 19), -2, false, rng.int(-1, 2), rng.int(-1, 2), false);
-    }
-    if (rng.next() * 5 < 1) {
-      tileRunnerHell(st, rng, gs, x + rng.int(-15, 14), y + rng.int(-15, 9), rng.int(15, 29), rng.int(5, 19), -2, false, rng.int(-1, 2), rng.int(-1, 2), false);
-    }
-  }
-  // 3c) 随机小挖掘(w 个)
-  for (let n = 0; n < st.w; n++) {
-    tileRunnerHell(st, rng, gs, rng.int(20, st.w - 21), rng.int(st.h - 180, st.h - 11),
-      rng.int(2, 6), rng.int(2, 6), -2, false, 0, 0, false);
-  }
-  // 4) 底部岩浆层(h-145/144)+ 地狱石脉
-  for (let x = 0; x < st.w; x++) {
-    for (const dy of [145, 144]) {
-      const i = st.idx(x, st.h - dy);
-      if (!st.flags[i]) { st.liquid[i] = 255; st.liquidType[i] = 2; }
-    }
-  }
-  for (let n = 0; n < st.w * st.h * 0.0008; n++) {
-    tileRunnerHell(st, rng, gs, rng.int(0, st.w - 1), rng.int(st.h - 140, st.h - 1),
-      rng.int(2, 6), rng.int(3, 6), HELLSTONE, false, 0, 0, false);
-  }
-  // 5) 灰烬草 633 + 灰烬树 634（cs:13869-13915）：仅地图外缘 17% 带——
-  //    y∈[h-300, h-100±1) 的灰烬 57 任一 8 邻暴露 → 633（藤 638 的上游）；
-  //    再对 y∈[h-200, h-50) 的 633（上方空气）1/3 → TryGrowingTreeByType(634)
-  const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
-  const outerBand = (x: number) => x < st.w * 0.17 || x > st.w * 0.83;
-  for (let x = 25; x < st.w - 25; x++) {
-    if (!outerBand(x)) continue;
-    for (let y = st.h - 300; y < st.h - 100 + rng.int(-1, 1); y++) {
-      const i = st.idx(x, y);
-      if (st.type[i] !== ASH || !st.flags[i]) continue;
-      const exposed = !st.flags[st.idx(x - 1, y - 1)] || !st.flags[st.idx(x, y - 1)]
-        || !st.flags[st.idx(x + 1, y - 1)] || !st.flags[st.idx(x - 1, y)]
-        || !st.flags[st.idx(x + 1, y)] || !st.flags[st.idx(x - 1, y + 1)]
-        || !st.flags[st.idx(x, y + 1)] || !st.flags[st.idx(x + 1, y + 1)];
-      if (exposed) st.type[i] = ASH_GRASS;
-    }
-  }
-  for (let x = 25; x < st.w - 25; x++) {
-    if (!outerBand(x)) continue;
-    for (let y = st.h - 200; y < st.h - 50; y++) {
-      const i = st.idx(x, y);
-      if (st.type[i] !== ASH_GRASS || !st.flags[i] || st.flags[st.idx(x, y - 1)]) continue;
-      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);
-    }
-  }
 }
 
 /** 地狱专用 runner:超界安全(地狱区常越界) */

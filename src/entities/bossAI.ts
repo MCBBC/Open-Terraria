@@ -5,6 +5,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
+import { mainExpertMode, getAttackDamageForProjectiles } from '../stats/ScaleStats';
 import { canHit } from '../physics/LineOfSight';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
@@ -244,7 +245,7 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
  *  （旧"冲刺时半透明"近似已退役）。
  *  距离消散 :32555-32567（曼哈顿 >6000px）；玩家死/离猩红 :32810-32826
  *  （localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；
- *  ZoneCrimson 未建模仅 dead 触发——登记）。 */
+ *  ZoneCrimson 读 world.scene.zoneCrimson）。 */
 export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | null) {
   const st = game.world.store;
   // :32555-32567 TargetClosest 后曼哈顿 >6000 → active=false（记逃走）
@@ -252,15 +253,15 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
     e.dead = true; e.bossFled = true;
     return;
   }
-  // 初次生成爬行者（:32540-32553）：GetBrainOfCthuluCreepersCount(:51330)=20
-  // （getGoodWorld 40 不建模）；出点 = 本体中心 ±(width/height) 随机，
+  // 初次生成爬行者（:32540-32553）：GetBrainOfCthuluCreepersCount(:51330-51338)=20，
+  // getGoodWorld（for the worthy 种子）= 40；出点 = 本体中心 ±(width/height) 随机，
   // 初速 = Next(-30,31)*0.1。爬行者锚定本体（原版 crimsonBoss 静态位 → master 引用）
   // 本仓 ai0 缺省 -1120 是史莱姆 hop 计数哨兵；原版 NPC.ai[0] 缺省 0（一阶段态）。
   // 放在 bInit 门之外：存档载入的实体同样需要归一（载入值 0/-1..-3 不受影响）
   if (e.ai0 === -1120) e.ai0 = 0;
   if (!e.bInit) {
     e.bInit = true;
-    for (let k = 0; k < 20; k++) {
+    for (let k = 0; k < (game.world.seedFlags?.getGoodWorld ? 40 : 20); k++) {
       const c = spawnPart(game, e, 267);
       if (!c) continue;
       c.master = e;
@@ -376,9 +377,13 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
   }
   e.x += e.vx;
   e.y += e.vy;
-  // :32810-32826 玩家死（ZoneCrimson 未建模）→ 下坠逃离尾段（原版在状态机之后）：
-  //   localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；恢复则计数递减
-  const playerGone = !player || player.dead;
+  // :32810-32826 玩家死 || !玩家 ZoneCrimson（玩家离开猩红群系，SceneMetrics
+  //   本帧快照 world.scene.zoneCrimson）→ 下坠逃离尾段（原版在状态机之后）：
+  //   localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；恢复则计数递减。
+  //   scene 为 null（本帧未扫/宿主无快照）视作"在猩红内"不逃离——原版 ZoneCrimson
+  //   是玩家字段，扫描后才有意义，null 不等价 false
+  const scene = game.world.scene;
+  const playerGone = !player || player.dead || (scene != null && !scene.zoneCrimson);
   if (playerGone) {
     if (e.lai3 < 120) e.lai3 += 1;
     if (e.lai3 > 60) e.vy += (e.lai3 - 60) * 0.25;
@@ -427,8 +432,10 @@ function pickTeleportSpot(
 
 /** 267 爬行者（NPC.cs:32828-32914 全核 1:1，SetDefaults :12388-12400）：
  *  ai[0]=0 环绕态：距主体 >90px 时 8 速逼近（(v*15+dir)/16）后 return；
- *  ≤90px 且 |v|<8 时两轴 ×1.05；掷 1/200（专家 1/100）→ 8 速直冲玩家、ai[0]=1。
- *  ai[0]=1 扑咬态：经典档无追踪（专家 (v*99+dir*9)/100 :32872-32886）；
+ *  ≤90px 且 |v|<8 时两轴 ×1.05；直冲门 :32857 = `(expertMode && Next(100)==0) || Next(200)==0`
+ *  （专家两掷串联：命中概率 1/100+(99/100)(1/200)≈1.5%）→ 8 速直冲玩家、ai[0]=1。
+ *  ai[0]=1 扑咬态：专家追踪 :32872-32886——单位向量朝玩家 ×9（getGoodWorld ×12），
+ *  (v*99+dir)/100（FTW (v*49+dir)/50）；经典档无追踪。
  *  距主体 >700px 回环绕；否则 !justHit 即 return（保持直飞），
  *  justHit 时按 knockBackResist 分流（=0 → 计数 ai[1] 超 5 回环绕，
  *  否则立即回环绕——267 原值 0.8 → 一击即回）。主体不在 → 消散（:32830-32835）。 */
@@ -438,6 +445,8 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
   const boss = e.master;
   // :32830-32835 crimsonBoss<0（主体不在）→ active=false
   if (!boss || boss.dead || boss.vanillaId !== 266) { e.dead = true; return; }
+  // Main.expertMode（Main.cs:2762，getGoodWorld 抬档同样成立）
+  const expert = mainExpertMode(game.world);
   const player = _player && !_player.dead ? _player : null;
   if (e.ai0 === 0) {
     // :32836-32856 环绕态：ai[1]=0；距主体 >90px 逼近
@@ -454,8 +463,10 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
       e.vy *= 1.05;
       e.vx *= 1.05;
     }
-    // :32857-32869 掷 1/200（专家 1/100）→ 8 速直冲玩家、转扑咬态
-    if (player && Math.floor(Math.random() * 200) === 0) {
+    // :32857-32869 直冲门（TargetClosest 后 8 速直冲玩家、转扑咬态）：
+    //   `netMode!=1 && ((expertMode && Next(100)==0) || Next(200)==0)`
+    //   ★ 掷骰顺序照原版：专家先掷 Next(100)，未中再掷 Next(200)（短路求值）
+    if (player && ((expert && Math.floor(Math.random() * 100) === 0) || Math.floor(Math.random() * 200) === 0)) {
       const pdx = player.cx - e.cx, pdy = player.cy - e.cy;
       const pd = Math.hypot(pdx, pdy) || 1;
       e.vx = (pdx / pd) * 8;
@@ -466,6 +477,22 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
     return;
   }
   // ---- 扑咬态 ai[0]=1（:32871-32913）----
+  // :32872-32886 专家追踪：朝玩家单位向量 ×9（FTW ×12），
+  //   velocity = (v*99+dir)/100（FTW (v*49+dir)/50）——经典档直飞不追踪
+  if (expert && player) {
+    let tx = player.cx - e.cx, ty = player.cy - e.cy;
+    const tl = Math.hypot(tx, ty) || 1;
+    tx /= tl; ty /= tl;                       // vector101.Normalize()
+    if (game.world.seedFlags?.getGoodWorld) {
+      tx *= 12; ty *= 12;
+      e.vx = (e.vx * 49 + tx) / 50;
+      e.vy = (e.vy * 49 + ty) / 50;
+    } else {
+      tx *= 9; ty *= 9;
+      e.vx = (e.vx * 99 + tx) / 100;
+      e.vy = (e.vy * 99 + ty) / 100;
+    }
+  }
   // :32887-32894 距主体 >700px → 回环绕
   const bdx = boss.cx - e.cx, bdy = boss.cy - e.cy;
   if (Math.hypot(bdx, bdy) > 700) {
@@ -1146,8 +1173,10 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
         n8 += (Math.floor(Math.random() * 41) - 20) * 0.05;
         n9 += (Math.floor(Math.random() * 41) - 20) * 0.05;
         // :50223 伤害 GetAttackDamage_ForProjectiles(22, 18) = Remap(difficulty, Classic,
-        //   Expert, 22, 18)——经典档取 22；弹型 100（:50224），timeLeft 300（:50235）
-        shoot(game, ox + n8 * 5, oy + n9 * 5, n8, n9, 22, 100, 300);
+        //   Expert, 22, 18)——经典 22 / 专家及以上 18（大师钳在 Expert 端）；
+        //   命中玩家的难度乘区另由 projTargets.hitPlayer（Projectile.cs:13770）施加
+        //   （专家 22×1→18×2=36，与原版一致）。弹型 100（:50224），timeLeft 300（:50235）
+        shoot(game, ox + n8 * 5, oy + n9 * 5, n8, n9, getAttackDamageForProjectiles(22, 18, e.difficulty), 100, 300);
       }
     }
   }

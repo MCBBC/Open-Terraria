@@ -177,6 +177,9 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   let best = dc.rooms[0];
   for (const r of dc.rooms) if (r.t < best.t) best = r;
   dc.entranceX = best.cx;
+  // DungeonCrawler.cs:394 回写：generatingDungeonPositionX = 最高房中心 X
+  // （Pyramids 地牢回避带 cs:15447 消费端——曾缺，Pyramids 误读 Reset 期 dungeonLocation）
+  gs.generatingDungeonPositionX = dc.entranceX;
   dx = best.cx; dy = best.cy;
   {
     // legacy 盲爬(1405 结构 + 1456 的 100 上限):外壳探测到开放天空即停

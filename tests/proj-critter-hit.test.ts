@@ -1,5 +1,6 @@
 // 弹幕命中小动物回归:原版小动物是 NPC,任何伤害即死——
 // 箭/法弹此前只遍历 enemies 桶,critters 桶漏判,射松鼠无效果。
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { Critter } from '../src/entities/Critter';

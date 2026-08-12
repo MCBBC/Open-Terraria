@@ -5,6 +5,7 @@ import { projectileData, AI_ANCHORED, AI_BOOMERANG, AI_FLAIL, AI_GLOWSTICK, AI_G
 
 export interface ItemCombat {
   damage?: number;
+  crit?: number;           // Item.crit（武器自带暴击，GetWeaponCrit P:25230-25232 消费）
   knockBack?: number;
   useTime?: number;
   useAnimation?: number;

@@ -445,3 +445,56 @@ describe('Minecart 坐骑实体（Mount 6 + 每帧 TrackCollision）', () => {
     expect(sawBoost).toBe(true);
   });
 });
+
+// 车上接触伤害（Mount 6 玩家 hitbox 即车 20×52，heightBoost 10——Mount.cs mounts[6]）：
+// TouchDamage 采样盒必须用坐骑盒；20×42 玩家盒会漏掉车底 10px（贴轨尖刺扫不到）
+import { World } from '../src/world/World';
+import { BuffType } from '../src/stats/Buffs';
+import { TILE } from '../src/core/constants';
+
+describe('骑乘接触伤害（HurtTiles 采样盒 = 坐骑盒）', () => {
+  /** 尖刺格 (20,30)（y ∈ [480,496)）+ 车底探入 4px 的坐骑/玩家对（世界高 120：
+   *  HurtTiles 扫描上界 h-40 须 >30 才扫得到该行，Collision.cs:3128）
+   *  车盒底 = 480+4 = 484（命中）；42px 玩家盒底 = 474（差 10px 不中） */
+  function setup(): { world: World; p: Player; cart: Minecart } {
+    const world = new World(60, 120, 42, 'cart-spike');
+    const spike = TILE_BY_KEY['v_48_spike'];
+    expect(spike).toBeGreaterThanOrEqual(0);
+    world.store.setTileSilent(20, 30, spike);
+    const cart = new Minecart();
+    cart.x = 20 * TILE; cart.y = 480 - 48;   // 车底 484：探入尖刺上缘 4px
+    const p = new Player(cart.x, cart.y, new Inventory());
+    return { world, p, cart };
+  }
+
+  function hooksFor(w: World, p: Player): GameHooks {
+    return {
+      world: w, player: p,
+      enemies: () => [], critters: () => [],
+      spawnDrop: () => null,
+      damagePlayer: () => {},
+      addDamageNumber: () => {}, cutTile: () => {},
+      onEnemyKilled: () => {}, spawnEnemy: () => {},
+      spawnParticles: () => {}, notifyInventoryChanged: () => {},
+      playSfx: () => {}, playSfxFiles: () => {}, showPickupLabel: () => {},
+    } as unknown as GameHooks;
+  }
+
+  it('骑乘中：车底 10px 内的尖刺照常结算（直接伤 + 流血）', () => {
+    const { world, p, cart } = setup();
+    const hp0 = p.hp;
+    p.ridingCart = true;
+    p.cart = cart;
+    p.fixedUpdate(1 / 60, hooksFor(world, p));
+    expect(p.hp).toBeLessThan(hp0);                          // 尖刺 60 直伤
+    expect(p.buffs.has(BuffType.Bleeding)).toBe(true);       // TouchDamageBleeding 48
+  });
+
+  it('不骑乘对照：同位置 42px 玩家盒差 10px 接不到尖刺（首 tick 无伤）', () => {
+    const { world, p } = setup();
+    const hp0 = p.hp;
+    p.fixedUpdate(1 / 60, hooksFor(world, p));               // 未骑乘：移动积分前采样
+    expect(p.hp).toBe(hp0);
+    expect(p.buffs.has(BuffType.Bleeding)).toBe(false);
+  });
+});

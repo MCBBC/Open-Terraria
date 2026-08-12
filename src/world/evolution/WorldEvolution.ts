@@ -863,13 +863,14 @@ export class WorldEvolution {
         }
       }
     }
-    // 叶绿生长（cs:69712-69731）：深处丛林草 1/300 → 周围 10 格泥/丛林草 → 叶绿
+    // 叶绿生长（cs:69712-69731）：深处丛林草 1/300 → 周围 10 格泥块(59) → 叶绿
+    //（原版目标严格 ==59,曾误含丛林草 60 直转矿）
     if (j > (this.host.worldSurface + this.host.rockLevel) / 2) {
       if (sheet === 60 && Math.random() < 1 / 300) {
         const x = i + Math.floor(Math.random() * 21) - 10;
         const y = j + Math.floor(Math.random() * 21) - 10;
         const s2 = sheetOf(this.typeAt(x, y));
-        if (this.active(x, y) && (s2 === 59 || s2 === 60)
+        if (this.active(x, y) && s2 === 59
           && (!this.active(x, y - 1) || ![5, 236, 702, 238].includes(sheetOf(this.typeAt(x, y - 1))))
           && this.canChlorophyteGrow(x, y)) {
           this.convert(x, y, 8);
