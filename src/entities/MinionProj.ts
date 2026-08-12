@@ -122,6 +122,7 @@ export class MinionProj extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     void dt;
     this.age++;
+    if (this.attackFlash > 0) this.attackFlash--;
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
       // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
@@ -289,6 +290,7 @@ export class MinionProj extends Entity {
       const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
       const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic')) + tag);
       en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
+      this.attackFlash = 24; // AI_062 攻击帧门（小鬼 ai[1]<24 → frame+4）
     }
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
     void TILE;
@@ -309,6 +311,12 @@ export class MinionProj extends Entity {
       frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 5) : 0;
     } else if (this.sentry && TRAP_TOWER.has(this.projId)) {
       frame = Math.floor(this.age / 12) % frames; // AI_138 frameCounter 12t 连续循环
+    } else if (AI062_FRAMES[this.projId]) {
+      // AI_062 族（Projectile.cs:62868-62971）：每帧 tick 循环帧表；
+      // 小鬼攻击中（attackFlash>0）frame += 4（ai[1]<24 → 帧偏移，真攻击帧）
+      const [tickPer, count, atkOff] = AI062_FRAMES[this.projId];
+      frame = Math.floor(this.age / tickPer) % count;
+      if (atkOff && this.attackFlash > 0) frame += atkOff;
     } else {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }

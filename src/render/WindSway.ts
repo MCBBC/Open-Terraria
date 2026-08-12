@@ -881,4 +881,4 @@ export function drawWindSwayTiles(
 }
 
 /** 测试辅助：暴露内部状态 */
-export const _windSwayInternals = { counters, windGrid, getWindCycle, windGridPush, inAPlaceWithWind, SWAY_REC };
+export const _windSwayInternals = { counters, windGrid, getWindCycle, windGridPush, inAPlaceWithWind, SWAY_REC, multiVineVariant };
