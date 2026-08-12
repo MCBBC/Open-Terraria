@@ -330,9 +330,8 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
  *  偏移(钳到半径 num415)",速度钳 ±4(经典);受击 → ai1=10 脱落数 tick 自由飞行;
  *  墙血 <75%/<50% 时半径 300→500→700、伤害 45/60、防御 20/30。 */
 export function hungryAI(e: Enemy, game: GameHooks, player: Player | null) {
-  // :26299-26301 justHit → ai[1]=10(Enemy 无 justHit 字段,以受击无敌帧近似:hurt 置
-  // iframes=8,受击后的数 tick 内保持脱落)
-  if (e.iframes > 0) e.ai1 = 10;
+  // :26299-26301 justHit（受击单帧旗标，hurt() 置位）→ ai[1]=10（脱落 10t 后回挂墙态）
+  if (e.justHit) e.ai1 = 10;
   const head = headOf(e, game);
   // :26303-26306 Main.wofNPCIndex<0(墙已不在)→ 自毁
   if (!head) { e.dead = true; return; }

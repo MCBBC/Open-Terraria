@@ -39,12 +39,25 @@ export function specialTileLight(
       const LANTERN_LIGHT: Record<number, [number, number, number]> = {
         0: [0.7, 0.65, 0.55], 1: [0.9, 0.75, 0.6], 2: [0.8, 0.6, 0.6],
         3: [0.65, 0.5, 0.2], 4: [0.5, 0.7, 0.4], 5: [0.9, 0.4, 0.2],
-        6: [0.7, 0.75, 0.3], 7: [0.8, 0.8, 0.8], 8: [0.75, 0.6, 0.3],
-        9: [0.9, 0.2, 0.4], 11: [0.85, 0.6, 1], 14: [1, 0.95, 0.65],
+        6: [0.7, 0.75, 0.3], 8: [0.75, 0.6, 0.3],
+        // 7/9 = demonTorch 调制档，见下方动态分支
+        11: [0.85, 0.6, 1], 14: [1, 0.95, 0.65],
       };
-      // 样式 7/9 原版叠加 demonTorch 调制(Main.demonTorch 全局比值)——
-      // 恶魔火把计数系统未实装,取中值 0.5 近似
-      return LANTERN_LIGHT[Math.floor(frameY / 36)] ?? [0.7, 0.65, 0.55];
+      // 样式 7/9 原版叠加 Main.demonTorch 调制——并非火把计数，而是全局三角波
+      // （Main.cs:1286 初值 1、DoUpdate_AnimateTileGlows :18089-18100 ±0.01/t 钳 0..1，
+      // 周期 200t）：style7 cs:2638-2645 R=G=0.9-d*0.2、B=0.7+d*0.2；
+      // style9 cs:2646-2652 R=1-d*0.1、G=0.3-d*0.2、B=0.5+d*0.2（FlickerClock.demonTorch
+      // 已同构维护该波形，旧"取中值 0.5 近似"已退役）
+      const st = Math.floor(frameY / 36);
+      if (st === 7) {
+        const n14 = flicker.demonTorch * 0.2;
+        return [0.9 - n14, 0.9 - n14, 0.7 + n14];
+      }
+      if (st === 9) {
+        const d = flicker.demonTorch;
+        return [1 - d * 0.1, 0.3 - d * 0.2, 0.5 + d * 0.2];
+      }
+      return LANTERN_LIGHT[st] ?? [0.7, 0.65, 0.55];
     }
     case 126:
       if (frameX < 36) {

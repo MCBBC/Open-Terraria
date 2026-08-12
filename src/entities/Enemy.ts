@@ -3273,33 +3273,51 @@ export class Enemy extends Entity {
       // 湿/入墙 → 爆（cs:43089-43102）
       const selfSolid = st.isSolid(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
       if (this.inWater || slave.inWater || selfSolid) { pop(); return; }
-      // X 朝向（TargetClosest 近似：有玩家朝玩家，否则顺风）加速至 num5（cs:43114-43128）
-      const dir = player && !player.dead ? (player.cx > this.cx ? 1 : -1) : (wind > 0 ? 1 : -1);
-      this.facing = dir;
+      // X 朝向 = 原版 direction（TargetClosest 首帧 :48257 / 爆支 :48309 / collideY :48322
+      // → SetTargetTrackingValues :78559-78567：目标中心 X ≥ 本体中心 X 取 1 否则 -1）；
+      // 无有效目标保留原 direction（原版无顺风兜底，旧行为是无玩家时顺风）
+      if (player && !player.dead) this.facing = player.cx >= this.cx ? 1 : -1;
+      const dir = this.facing;
       const num5 = 2 + Math.abs(wind) * 2;
       if (Math.sign(this.vx) !== dir || Math.abs(this.vx) < num5) {
         this.vx += dir * 0.01;
         if (this.vx * dir < 0) this.vx += Math.abs(this.vx) > num5 ? dir * 0.1 : dir * 0.05;
         else if (Math.abs(this.vx) > num5) this.vx = dir * num5;
       }
-      // 前方探测（num6/num7，8+num3 格 → num3 简化 0，cs:43130-43153）
+      // 目标相对本体底边的高差（cs:48292-48303）：zero = 目标中心 − 本体底边；
+      // 目标在上(zy<0)时 num3 = (int)zy / -16（目标高出本体底边多少格）；
+      // num2 = zero.Length()（底边到目标中心的距离，非中心距）；direction 与目标方位
+      // 不一致则 num3 归 0
+      let num3 = 0, num2 = Infinity;
+      if (player && !player.dead) {
+        const zx = player.cx - this.cx;
+        const zy = player.cy - (this.y + this.h);
+        if (zy < 0) num3 = Math.trunc(Math.trunc(zy) / -16);
+        num2 = Math.hypot(zx, zy);
+        if (dir !== Math.sign(zx)) num3 = 0;
+      }
+      // 前方探测（num6/num7，cs:48344-48364：深度 num8 = 8 + num3，
+      // 近距判定线 num7 + 5 + num3）
       const num6 = Math.floor((this.x + this.w / 2) / TILE) + dir;
       const num7 = Math.floor((this.y + this.h) / TILE);
+      const num8 = 8 + num3;
       let open = true, near = false;
-      for (let i = num7; i < num7 + 8; i++) {
+      for (let i = num7; i < num7 + num8; i++) {
         if (!st.inBounds(num6, i)) break;
         const ii = st.idx(num6, i);
         if (st.isSolid(num6, i) || st.liquid[ii] > 0) {
-          if (i < num7 + 5) near = true;
+          if (i < num7 + 5 + num3) near = true;
           open = false;
           break;
         }
       }
-      // 玩家 400px 内 → 跟随 Y（±0.035，cs:43155-43175）；否则探测升降（+0.05/-0.1/-0.2 钳 [-4,2]）
-      const pD = player && !player.dead ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
-      if (pD < 400) {
-        if (this.cy + this.h / 4 > player!.cy && this.vy > -2) this.vy -= this.vy > 0 ? 0.07 : 0.035;
-        else if (this.cy + this.h / 4 < player!.cy && this.vy < 2) this.vy += this.vy < 0 ? 0.07 : 0.035;
+      // 目标 400px 内且有视线（cs:48365-48385：num2<400 && Collision.CanHit）→ 跟随 Y；
+      // 比较位 = 本体 Center.Y+height/4 对 目标 position.Y+height/4（非中心对中心）；
+      // 否则探测升降（+0.05/-0.1/-0.2 钳 [-4,2]）
+      if (num2 < 400 && player && this.canSeePlayer(st, player)) {
+        const by = this.cy + this.h / 4, py = player.cy - player.h / 4;
+        if (by > py && this.vy > -2) this.vy -= this.vy > 0 ? 0.07 : 0.035;
+        else if (by < py && this.vy < 2) this.vy += this.vy < 0 ? 0.07 : 0.035;
       } else {
         if (open) this.vy += 0.05; else this.vy -= 0.1;
         if (near) this.vy -= 0.2;
@@ -4092,6 +4110,14 @@ export class Enemy extends Entity {
       this.dummyShake = Math.max(20, Math.min(120, dmg));
       this.dummyHitDir = Math.sign(kbx) || this.dummyHitDir;
       this.iframes = 8;
+      return true;
+    }
+    // 猪鲨爆裂泡泡（NPC 371，StrikeNPC cs:82102-82107）：伤害清零(num=0)不扣血，
+    // 直接转入爆炸态 ai[0]=1/ai[1]=4 + dontTakeDamage——"被击即爆"而非"被打死"；
+    // aiStyle 70 (:35180-35194) 据此扩 100×100 并 EncourageDespawn(3) 消散
+    if (this.vanillaId === 371) {
+      this.ai0 = 1; this.ai1 = 4;
+      this.iframes = 8; // dontTakeDamage（爆炸 4t 内不可再受击）
       return true;
     }
     // 原版 Main.CalculateDamageNPCsTake：dmg - defense*0.5，下限 1

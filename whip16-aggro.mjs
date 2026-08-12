@@ -31,7 +31,7 @@ const out = await p.evaluate(async () => {
   r.stealthSwing = { dir: en.seekDirX(pl) };
   // ④ 潜行但近距（<门限）：正常转身
   pl.useTime = 0;
-  const nx = en.cx - 200; const ox = pl.x;
+  const nx = en.cx - 60; const ox = pl.x; // 门限≈(尺寸和/4+800)≈830px；近距须<80px
   pl.x = nx - pl.w / 2;
   r.stealthNear = { dir: en.seekDirX(pl) };
   pl.x = ox;

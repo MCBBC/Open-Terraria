@@ -941,19 +941,31 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   e.spin = Math.atan2(e.vy, e.vx) + Math.PI / 2;
   e.x += e.vx;
   e.y += e.vy;
-  // 段链跟随(linkDist 44 = 44*scale;原版 num24) + 探针弹幕
+  // 段链跟随(linkDist 44 = 44*scale;原版 num24) + 毁灭者激光(NPC.cs:50204-50241)
   driveChain(e, 44);
-  if (!buried) {
-    for (let s = e.wormNext; s; s = s.wormNext) {
-      if (s.vanillaId !== 135 || s.dead) continue;
-      // 原版 135:localAI[0] += Next(4),达 Next(1400,26000) 触发(期望 ~6850t/节);
-      // 近似为每 tick 2/6850 概率 + 视线检查
-      if (Math.random() < 2 / 6850 && losClear(game, s.cx, s.cy, player.cx, player.cy)) {
-        const dx = player.cx - s.cx + (Math.random() - 0.5) * 40;
-        const dy = player.cy - s.cy + (Math.random() - 0.5) * 40;
-        const d = Math.hypot(dx, dy) || 1;
-        shoot(game, s.cx + dx / d * 5, s.cy + dy / d * 5,
-          dx / d * 8 + (Math.random() - 0.5) * 2, dy / d * 8 + (Math.random() - 0.5) * 2, 22, 100);
+  for (let s = e.wormNext; s; s = s.wormNext) {
+    if (s.vanillaId !== 135 || s.dead) continue;
+    // :50206-50208 真实概率公式：localAI[0] += Next(4)（0..3 均匀，均值 1.5/t），
+    // 阈值【每 tick 重掷】Next(1400, 26000)（1400..25999 均匀）——计数器须先爬过
+    // 1400 才有非零命中率，命中概率随计数线性升高后清零。无"每 tick 2/6850"这类
+    // 常数率（旧近似已退役）；原版本段无埋地豁免，遮挡全靠下方 CanHit 门
+    s.lai0 += Math.floor(Math.random() * 4);
+    if (s.lai0 >= 1400 + Math.floor(Math.random() * 24600)) {
+      s.lai0 = 0;
+      // :50210-50212 TargetClosest 后 Collision.CanHit(段盒, 玩家盒)——埋地段被此门挡掉
+      if (losClear(game, s.cx, s.cy, player.cx, player.cy)) {
+        // :50215-50230 弹道：目标中心 ±20px 抖动 → 归一化到 8 速 → 再 ±20×0.05 速抖动；
+        //   出膛点 = 段中心 + 单位速度×5（:50232-50233）
+        const ox = s.x + s.w * 0.5, oy = s.y + s.h / 2;
+        let n8 = player.cx - ox + (Math.floor(Math.random() * 41) - 20);
+        let n9 = player.cy - oy + (Math.floor(Math.random() * 41) - 20);
+        const n10 = 8 / Math.hypot(n8, n9);
+        n8 *= n10; n9 *= n10;
+        n8 += (Math.floor(Math.random() * 41) - 20) * 0.05;
+        n9 += (Math.floor(Math.random() * 41) - 20) * 0.05;
+        // :50223 伤害 GetAttackDamage_ForProjectiles(22, 18) = Remap(difficulty, Classic,
+        //   Expert, 22, 18)——经典档取 22；弹型 100（:50224），timeLeft 300（:50235）
+        shoot(game, ox + n8 * 5, oy + n9 * 5, n8, n9, 22, 100, 300);
       }
     }
   }

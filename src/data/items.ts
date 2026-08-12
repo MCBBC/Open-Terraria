@@ -920,7 +920,8 @@ item({ key: 'grand_design', name: '宏伟蓝图', maxStack: 1, value: 1, wireToo
 // ===================== 存档稳定 id(根治 ITEM_DEFS 数组下标漂移;存档 v3 起生效) =====================
 // vi_* 稳定 id = 原版物品 id(key 内嵌);自造物品 = 私有段 10000+(下表,2026-08 冻结快照)。
 // ★ PRIV_ITEM_STABLE 冻结表 append-only:新自造物品只许表尾追加,已分配号码永不复用/改派。
-const PRIV_ITEM_STABLE: Record<string, number> = {
+// (本地物品退役后本表保留为纯数据:读档 remap 的 10000+ 段→vi_ 解码源,见 data/itemMigration.ts)
+export const PRIV_ITEM_STABLE: Record<string, number> = {
   'dirt_block': 10000, 'stone_block': 10001, 'wood': 10002, 'sand_block': 10003,
   'snow_block': 10004, 'platform': 10005, 'torch': 10006, 'door': 10007,
   'workbench': 10008, 'furnace': 10009, 'anvil': 10010, 'chest': 10011,

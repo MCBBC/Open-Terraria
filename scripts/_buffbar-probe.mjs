@@ -28,7 +28,13 @@ const geo = await page.evaluate(async () => {
     g.player.buffs.apply(t, 120);
   }
   g.ui?.refreshBuffs?.();
-  await new Promise((r) => setTimeout(r, 1500));
+  // 等 Game 的秒级回调自然刷新（g.ui 不在 Game 上时手动找 .sw-buff 容器轮询）
+  for (let w = 0; w < 12; w++) {
+    await new Promise((r) => setTimeout(r, 1000));
+    const vis = document.querySelectorAll('.sw-buff').length
+      && [...document.querySelectorAll('.sw-buff')].some((c) => c.style.display !== 'none');
+    if (vis) break;
+  }
   const bar = document.querySelector('.sw-buff')?.parentElement
     ?? document.querySelector('div[style*="top:76px"]')
     ?? g.ui?.buffBar;
@@ -39,7 +45,9 @@ const geo = await page.evaluate(async () => {
     const img = c.querySelector('img');
     return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), src: (img?.src ?? '').slice(-40) };
   });
-  return { bar: { x: br.x, y: br.y, w: br.width, h: br.height, cls: bar.className, display: getComputedStyle(bar).display, dir: getComputedStyle(bar).flexDirection, wrap: getComputedStyle(bar).flexWrap }, items };
+  return { bar: { x: br.x, y: br.y, w: br.width, h: br.height, cls: bar.className, display: getComputedStyle(bar).display, dir: getComputedStyle(bar).flexDirection, wrap: getComputedStyle(bar).flexWrap },
+    items,
+    dbg: { active: [...g.player.buffs.active.entries()], hasUi: !!g.ui, uiType: typeof g.ui, childCount: bar.children.length, dispNone: [...bar.children].filter((c) => c.style.display === 'none').length } };
 });
 console.log(JSON.stringify(geo, null, 1));
 // 截左上角 buff 栏区域(页面坐标,viewport 1280x800)

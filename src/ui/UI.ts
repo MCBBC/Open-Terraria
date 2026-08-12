@@ -130,7 +130,11 @@ const CSS = `
   font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
   animation:sw-name-pulse 2s ease-in-out infinite alternate; }
 @keyframes sw-name-pulse { from { opacity:0.35; } to { opacity:1; } }
-/* 垃圾桶：原版槽底 = Inventory_Back7（ItemSlot.cs:2063 context 6），无附加图标 */
+/* 垃圾桶：原版槽底 = Inventory_Back7（ItemSlot.cs:2063 context 6）。
+ * 空槽时画 Trash.png（ItemSlot.cs:2514-2520：32×32 居中，scale 0.85，
+ *  颜色 Color(100,100,100,100) = 亮度×0.39 + alpha×0.39） */
+.sw-trash .sw-trash-icon { position:absolute; inset:8px; width:27px; height:27px;
+  image-rendering:pixelated; pointer-events:none; filter:brightness(0.39); opacity:0.39; }
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 .sw-drag-ghost { position:fixed; z-index:200; pointer-events:none; width:40px; height:40px; }
@@ -1520,9 +1524,12 @@ export class UI {
           this.game.player.inv.trySwitchingLoadout(k);
           this.game.sfx.play('menuTick', 0.6); // SoundID 12（TrySwitchingLoadout）
           // 切套白闪（GetColorByLoadout :2554-2559：Remap(dt,0,30,0.5,0)³→白）
+          // ★ class 必须播完即摘：display:none→block 会使 CSS 动画重播，
+          //   残留 class 会导致此后每次打开背包全体槽位白闪
           this.invPanel.classList.remove('sw-loadout-flash');
           void this.invPanel.offsetWidth;
           this.invPanel.classList.add('sw-loadout-flash');
+          setTimeout(() => this.invPanel.classList.remove('sw-loadout-flash'), 600);
           this.refreshAll();
         });
         row.appendChild(b);

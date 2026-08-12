@@ -9703,7 +9703,9 @@ export class Game implements GameHooks {
           const t = st.type[ii];
           out.add(t);
           if (ALCHEMY.has(t)) this._alchemyTable = true;
-          // CountsAsWaterForCrafting（水槽 172/207 近似：本仓库按 sheet 判）
+          // CountsAsWaterForCrafting（TileID.cs:281 = CreateBoolSet(172, 207)，仅水槽 172
+          // 与 207 两档；本仓 vanilla.sheet 即原版 tile id，sheet∈{172,207} 与该 Set 等值，
+          // 非近似。消费点 Player.cs AdjTiles :35230-35232 → adjWaterSource）
           const sheet = TILE_DEFS[t]?.vanilla?.sheet;
           if (sheet === 172 || sheet === 207) this._nearLiquid.water = true;
         }

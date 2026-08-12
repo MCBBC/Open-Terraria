@@ -805,7 +805,10 @@ export function sharkronAI(e: Enemy, game: GameHooks, player: Player | null): vo
  *  简化:ai3 的随机 scale(:35134)无 Enemy 对应字段,仅记录不应用。 */
 export function dukeBubbleAI(e: Enemy, game: GameHooks, player: Player | null) {
   void game;
-  if (e.ai0 !== 1 && e.hp < e.maxHp) { e.ai0 = 1; e.ai1 = 4; e.hp = e.maxHp; } // justHit→爆
+  // :35180-35194 受击（justHit 单帧旗标）→ 无敌 + 爆炸体积；hp 损失本身不触发——
+  // 真身是 StrikeNPC cs:82102-82107（371 伤害清零、ai0=1/ai1=4/dontTakeDamage），
+  // 已由 Enemy.hurt() 同构处理，此处 justHit 为 AI 侧兜底
+  if (e.ai0 !== 1 && e.justHit) { e.ai0 = 1; e.ai1 = 4; }
   if (!e.bInit && player) { // :35124-35131 初速 = 朝玩家 ±100px 随机偏移 × 11~17.7 速
     e.bInit = true;
     e.ai0 = 0; e.ai1 = 0;

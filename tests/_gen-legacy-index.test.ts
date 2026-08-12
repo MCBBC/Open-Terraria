@@ -15,10 +15,10 @@ describe('legacyItemIndex 迁移锚生成', () => {
       new URL('../src/data/legacyItemIndex.generated.json', import.meta.url),
       JSON.stringify(keys),
     );
-    // 基线断言:前 172 个下标全是本地键(退役基线);总条数与注册表一致
-    const localPrefix = keys.slice(0, 172).filter((k) => k.startsWith('vi_') || k.startsWith('place_v_'));
-    expect(localPrefix, JSON.stringify(localPrefix.slice(0, 5))).toEqual([]);
+    // 基线断言:注册表首个为本地键(退役基线锚点);总条数与注册表一致。
+    // 快照为裸数组(同键双注册各有下标,按原样记录)
     expect(keys[0]).toBe('dirt_block');
+    expect(keys.length).toBe(ITEM_DEFS.length);
     expect(keys.length).toBeGreaterThan(6000);
     const localCount = keys.filter((k) => !k.startsWith('vi_') && !k.startsWith('place_v_')).length;
     // eslint-disable-next-line no-console

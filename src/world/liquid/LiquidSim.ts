@@ -101,8 +101,19 @@ export class LiquidSim {
   private stuckCount = 0;
   private stuckAmount = 0; // 原版 ReInit 置 0（Liquid.cs:69）
   private disposed = false;
-  /** LiquidBuffer 溢出缓冲（Liquid.cs:840-843 入队 / 799-807 清扫轮回灌，上限 49998） */
-  private buffer: Array<{ x: number; y: number }> = [];
+  /** LiquidBuffer 溢出缓冲（Liquid.cs:840-843 入队 / 799-807 清扫轮回灌，上限 49998）。
+   *  定长 Int32Array 对 + head/tail 环形语义(非环形,tail 到顶即丢——原版上限语义)——
+   *  ★曾用 Array.shift() 出队,O(n) × 万次回灌 = 沉降 O(n²) 主热点;头指针出队 O(1) */
+  private static readonly BUFFER_CAP = 49998;
+  private bufX = new Int32Array(LiquidSim.BUFFER_CAP);
+  private bufY = new Int32Array(LiquidSim.BUFFER_CAP);
+  private bufHead = 0;   // 下一个出队位
+  private bufTail = 0;   // 下一个入队位(bufTail-bufHead = 元素数)
+  /** 实心判定 LUT(热路径查表替代 TILE_DEFS 属性链;定义同源=构造时用原判定式逐 id 预计算):
+   *  solidNP[id]=solid&&!platform(blocksLiquid/addWater/waterCheck 用);
+   *  solidFull[id]=solid&&!platform&&!half&&!slope(solidTileFull 用) */
+  private solidNP!: Uint8Array;
+  private solidFull!: Uint8Array;
   /** 水死/岩浆死内部 tile id 集（Main.tileWaterDeath/tileLavaDeath 经 sheet 反查） */
   private readonly waterDeathIds: Set<number>;
   private readonly lavaDeathIds: Set<number>;
@@ -197,10 +208,18 @@ export class LiquidSim {
       this.addWater(x, y - 1); this.addWater(x, y + 1);
       this.addWater(x - 1, y); this.addWater(x + 1, y);
     });
+    // 实心 LUT(零风险:TILE_DEFS 构造后不变;逐 id 用原判定式预计算)。
+    // solidFull 不可整体预计算——half/slope 是格级属性,仅把 TILE_DEFS 链换成 LUT。
+    const NT = TILE_DEFS.length;
+    this.solidNP = new Uint8Array(NT);
+    for (let id = 0; id < NT; id++) {
+      const d = TILE_DEFS[id];
+      if (d && d.solid && !d.platform) this.solidNP[id] = 1;
+    }
   }
 
   /** 溢出缓冲长度（Game 的生成期轮上限计算用，原版 LiquidBuffer.numLiquidBuffer） */
-  get bufferLen(): number { return this.buffer.length; }
+  get bufferLen(): number { return this.bufTail - this.bufHead; }
 
   /** 丢弃模拟器：预沉降临时实例调用，停止响应唤醒 */
   dispose() {
@@ -248,7 +267,19 @@ export class LiquidSim {
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
       // 原版走 LiquidBuffer 缓冲、清扫轮回灌（Liquid.cs:840-843），超缓冲上限才丢
-      if (this.buffer.length < 49998) this.buffer.push({ x, y });
+      if (this.bufTail - this.bufHead < LiquidSim.BUFFER_CAP) {
+        if (this.bufTail === LiquidSim.BUFFER_CAP) {
+          // ★到顶且 head>0:前移压缩(原版 Array.shift 后 push 可重新装满;曾漏此步
+          // → 越界写静默丢条目,与原版容量语义不等价,A/B 哈希报警)
+          this.bufX.copyWithin(0, this.bufHead, this.bufTail);
+          this.bufY.copyWithin(0, this.bufHead, this.bufTail);
+          this.bufTail -= this.bufHead;
+          this.bufHead = 0;
+        }
+        this.bufX[this.bufTail] = x;
+        this.bufY[this.bufTail] = y;
+        this.bufTail++;
+      }
       return;
     }
     this.checking[i] = 1;
@@ -276,7 +307,7 @@ export class LiquidSim {
     // 自底向上逐行 QuickWater 强制沉降，每次调用处理 5 行，到顶后 WaterCheck 退出
     if (!this.quickSettle) {
       if (!this.panicMode) {
-        if (this.buffer.length >= 45000) {
+        if (this.bufTail - this.bufHead >= 45000) {
           this.panicCounter++;
           if (this.panicCounter > 3600) {
             this.panicMode = true;
@@ -284,7 +315,7 @@ export class LiquidSim {
             this.panicY = st.h - 3;
             this.liquids.length = 0;
             this.numLiquid = 0;
-            this.buffer.length = 0;
+            this.bufHead = 0; this.bufTail = 0;
           }
         } else {
           this.panicCounter = 0;
@@ -343,12 +374,14 @@ export class LiquidSim {
         }
       }
       // LiquidBuffer 回灌：按剩余空位逐个重新入列（Liquid.cs:799-807）
-      if (this.buffer.length > 0) {
-        const free = Math.min(this.curMaxLiquid - this.numLiquid, this.buffer.length);
+      if (this.bufTail > this.bufHead) {
+        const free = Math.min(this.curMaxLiquid - this.numLiquid, this.bufTail - this.bufHead);
         for (let n = 0; n < free; n++) {
-          const b = this.buffer.shift()!;
-          this.checking[this.idx(b.x, b.y)] = 0;
-          this.addWater(b.x, b.y);
+          const bx = this.bufX[this.bufHead];
+          const by = this.bufY[this.bufHead];
+          this.bufHead++;
+          this.checking[this.idx(bx, by)] = 0;
+          this.addWater(bx, by);
         }
       }
       // 卡死检测：活动量长期不变 → 清空列表靠唤醒自愈（Liquid.cs:808-824）
@@ -1060,7 +1093,7 @@ export class LiquidSim {
     const st = this.world.store;
     this.liquids.length = 0;
     this.numLiquid = 0;
-    this.buffer.length = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
+    this.bufHead = 0; this.bufTail = 0; // 原版 WaterCheck 首行清 LiquidBuffer（WorldGen.cs:48959）
     this.checking.fill(0);
     for (let x = 1; x < st.w - 1; x++) {
       for (let y = st.h - 2; y > 0; y--) {

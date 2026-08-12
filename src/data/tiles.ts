@@ -909,6 +909,20 @@ for (let i = 1; i < TILE_DEFS.length; i++) {
   TILE_INTERNAL_OF_STABLE[s] = i;
 }
 
+/** sheet(=原版 TileID) → 首个同 sheet def 的内部 tile id(-1=未注册)。
+ *  放置回填(itemfunc.createTile → def.tile)与 wld 兜底导入共用(WldImport SHEET_FALLBACK 同语义) */
+export const TILE_INTERNAL_BY_SHEET = new Map<number, number>();
+/** sheet → 首个同 sheet def 的 tile key */
+export const TILE_KEY_BY_SHEET = new Map<number, string>();
+{
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    const sh = TILE_DEFS[i].vanilla?.sheet;
+    if (sh === undefined || TILE_INTERNAL_BY_SHEET.has(sh)) continue;
+    TILE_INTERNAL_BY_SHEET.set(sh, i);
+    TILE_KEY_BY_SHEET.set(sh, TILE_DEFS[i].key);
+  }
+}
+
 // ===================== 墙注册表（TEdit walls.json 全量生成） =====================
 wallDef({ id: 0, key: 'w0_none', name: '', mapColor: '#000000', opacity: 0 });
 wallDef({ id: 1, key: 'w1_stone', name: '', mapColor: '#353535', opacity: 1 });
