@@ -37,10 +37,19 @@ const PREVENTS_ACTUATION_UNDER = new Set([21, 467, 26, 77, 88, 470, 475, 237, 59
 /** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 树干承载检查用 */
 const IS_A_TREE_TRUNK = new Set([5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634]);
 
+/** TileID.Sets.Boulders（1456 TileID.cs:195）：138 巨石/484 滚动仙人掌/664 弹跳巨石/
+ *  665 生命水晶巨石/711 彩虹/712 屎/713 岩浆/714 蜘蛛/715 地牢/716 友好 */
+const BOULDER_SHEETS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+
 export class Wiring {
   readonly st: TileStore;
   /** 器件表(P3 注入) */
   device: DeviceHandler | null = null;
+  /** 巨石失撑下落钩子（devices.ts 装配）：致动缩入后上格为 Boulders 族 tile 时调用。
+   *  原版数据点：巨石 tile 被杀 → Projectile 99（1456 cs:48765-48769：spawn
+   *  (x*16+15.5, y*16+16)、初速 0/0、伤害 70、击退 10）。引擎按"失撑即坠"接——
+   *  原版由 KillTile 触发该转换，巨石陷阱（压板→致动石栅→巨石坠下）观测行为一致 */
+  boulderFall: ((x: number, y: number, sheet: number) => void) | null = null;
   /** 传送器对执行(引擎侧搬迁玩家/敌人;P3 注入) */
   teleportPair: ((a: [number, number], b: [number, number]) => void) | null = null;
   /** 世界地表行(蜥蜴砖致动限制 Wiring.cs:2375) */
@@ -610,6 +619,17 @@ export class Wiring {
       if (!this.canKillTile(i, j)) return;
     }
     st.setActuated(i, j, true);
+    // 支撑缩入 → 上格巨石失撑下落（巨石陷阱演出；数据点见 boulderFall 注释）
+    if (st.inBounds(i, j - 1)) {
+      const up = st.idx(i, j - 1);
+      if (st.flags[up]) {
+        const ush = TILE_DEFS[st.type[up]]?.vanilla?.sheet ?? -1;
+        if (BOULDER_SHEETS.has(ush)) {
+          st.type[up] = 0; st.flags[up] = 0;   // KillTile 清格 → 转 Projectile 99
+          this.boulderFall?.(i, j - 1, ush);
+        }
+      }
+    }
   }
 
   /** WorldGen.CanKillTile 结构子集（WorldGen.cs:62249-62358，致动缩入门用）：

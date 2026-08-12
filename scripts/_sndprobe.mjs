@@ -3,8 +3,11 @@ import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
-await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
-const r = await page.evaluate(() => new Promise((res) => {
+let r = null;
+for (let att = 0; att < 12 && r === null; att++) {
+  try {
+    await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    r = await page.evaluate(() => new Promise((res) => {
   const t0 = Date.now();
   const iv = setInterval(async () => {
     if (window.__swGame?.player) {
@@ -31,10 +34,15 @@ const r = await page.evaluate(() => new Promise((res) => {
       if (s.preloadFiles) { s.preloadFiles(['Item_14']); }
       await new Promise((r2) => setTimeout(r2, 800));
       out.afterPreload = s.buffers.has('Item_14');
-      out.explosionMap = WAV ? 'n/a' : 'n/a';
       res(JSON.stringify(out));
     } else if (Date.now() - t0 > 60000) { clearInterval(iv); res('timeout'); }
   }, 300);
-}));
+    }));
+  } catch (e) {
+    if (!/navigation|detached/i.test(e.message)) throw e;
+    console.log('retry', att);
+    await new Promise((r2) => setTimeout(r2, 2500));
+  }
+}
 console.log(r);
 await browser.close();

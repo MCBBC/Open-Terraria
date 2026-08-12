@@ -351,9 +351,11 @@ describe('SelectedItemState 覆盖/还原（Player.cs:383-517 粘滞语义）', 
     const st = mkSt();
     const slots = mkSlots([0, torch()], [1, glowstick()]);
     const ss = new SmartSelect();
-    const env = mkEnv(st, { slots, selectedItem: 0, mouseX: -40, mouseY: 8 }); // 格 (-3,0)
-    expect(ss.lookup(env)).toBe(0);             // 越界 = 空 Tile → 策略 0 → 槽 0 火把命中即定（:17340-17344）
-    expect(ss.strategy).toBe(STRATEGY.TORCH);
+    // 格 (-3,0)：越界 = 空 Tile → 策略 0；但鼠标离玩家中心 1010px > 200 → 修正策略 5
+    //（:17297-17305）→ case 5 手持已是火把则留候选给荧光棒（:17397-17401）→ 槽 1
+    const env = mkEnv(st, { slots, selectedItem: 0, mouseX: -40, mouseY: 8 });
+    expect(ss.lookup(env)).toBe(1);
+    expect(ss.strategy).toBe(STRATEGY.FAR_LIGHT);
   });
 });
 

@@ -834,4 +834,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
 export function attachDevices(w: Wiring, ctx: DeviceCtx): void {
   w.device = (ww, sheet, x, y) => deviceTable(ww, ctx, sheet, x, y);
   w.teleportPair = (a, b) => ctx.teleportPair(a, b);
+  // 巨石失撑下落（Wiring.boulderFall）：KillTile(138) → Projectile 99 的数据点
+  // （1456 cs:48766：spawn (x*16+15.5, y*16+16)、初速 0/0、伤害 70）
+  w.boulderFall = (x, y, _sheet) => {
+    ctx.shootProjectile(x * 16 + 15.5, y * 16 + 16, 0, 0, 70, 'boulder');
+  };
 }

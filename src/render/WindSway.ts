@@ -443,7 +443,7 @@ function multiGrassRotFactor(sheet: number): number {
 /** DrawMultiTileGrassInWind（:9080-9190）：整株绕底部中心摆，上部摆幅大 */
 function drawMultiGrass(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, ax: number, ay: number, type: number, worldSurface: number,
+  rec: SwayRec, ax: number, ay: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const i0 = st.idx(ax, ay);
@@ -589,48 +589,81 @@ function multiVineAnchor(sheet: number, fx: number, fy: number): boolean {
     default: return fx % 36 === 0 && fy % 36 === 0; // 95/126/444
   }
 }
-/** (num4 X 系数, num5 Y 系数, offX)——:9430-9532 各 case 基础值（34/42/126 等
- *  变体级 num3/num5 微调表从简，取 case 基础值；91/465 用默认 -4） */
-function multiVineParams(sheet: number): { nx: number; ny: number; offX: number } {
-  switch (sheet) {
-    case 591: case 592: return { nx: 0.5, ny: -2, offX: 0 };
-    case 698: return { nx: 0.5, ny: -1, offX: -10 };
-    case 91: case 465: return { nx: 1, ny: -4, offX: 0 };
-    default: return { nx: 1, ny: 0, offX: 0 }; // 34/42/95/126/270/271/444/454/572/581/660
+/** MultiTileVine 变体参数（:9428-9532 全量 1:1）。
+ *  num3: null=按高度分式 / 常数=覆盖；num5: Y 偏移系数；num2Mul: 旋转量缩放；
+ *  flag2: pivot 下移 16px 且顶行静止（部分形态）。91/465 用默认（num3=null, num5=-4）。 */
+interface MultiVineVariant { num3: number | null; num5: number; num2Mul: number; flag2: boolean; nx: number; offX: number }
+function multiVineVariant(sheet: number, fx: number, fy: number): MultiVineVariant {
+  const v: MultiVineVariant = { num3: null, num5: -4, num2Mul: 1, flag2: false, nx: 1, offX: 0 };
+  if (sheet === 34 || sheet === 126) {
+    v.num3 = 1; v.num5 = 0;
+    const key = Math.floor(fy / 54) + Math.floor(fx / 108) * 37;
+    switch (key) {
+      case 9: v.num3 = null; v.num5 = -1; v.flag2 = true; v.num2Mul = 0.3; break;
+      case 11: v.num2Mul = 0.5; break;
+      case 12: case 18: case 21: v.num3 = null; v.num5 = -1; break;
+      case 23: case 35: v.num3 = 0; break;
+      case 25: case 36: case 39: v.num3 = null; v.num5 = -1; v.flag2 = true; break;
+      case 32: case 33: v.num2Mul = 0.5; break;
+      case 37: v.num3 = null; v.num5 = -1; v.flag2 = true; v.num2Mul = 0.5; break;
+      case 40: case 41: case 42: case 43: v.num3 = null; v.num5 = -2; v.flag2 = true; v.num2Mul = 0.5; break;
+      case 44: v.num3 = null; v.num5 = -3; break;
+      case 54: case 55: case 60: case 65: case 67: case 68: case 70: v.num3 = 0; break;
+    }
+  } else if (sheet === 42) {
+    v.num3 = 1; v.num5 = 0;
+    switch (Math.floor(fy / 36)) {
+      case 0: case 12: case 14: case 28: case 34: case 38: v.num3 = null; v.num5 = -1; break;
+      case 9: case 30: case 32: case 33: case 35: v.num3 = 0; break;
+      case 39: case 40: case 41: case 42: case 43: v.num3 = null; v.num5 = -1; v.flag2 = true; break;
+      case 54: case 55: case 60: case 65: case 67: case 70: v.num3 = 0; break;
+    }
+  } else if (sheet === 95 || sheet === 270 || sheet === 271 || sheet === 444
+    || sheet === 454 || sheet === 572 || sheet === 581 || sheet === 660) {
+    v.num3 = 1; v.num5 = 0;
+  } else if (sheet === 591 || sheet === 592) {
+    v.nx = 0.5; v.num5 = -2;
+    // 592 的 GlowMask[294] 叠画 glowColor alpha=0（:9519-9522）——恒不可见，从略
+  } else if (sheet === 698) {
+    v.nx = 0.5; v.num5 = -1; v.offX = -10;
   }
+  return v;
 }
 
 /** DrawMultiTileVinesInWind（:9407-9700）：吊挂植物绕顶部中心摆，下部摆幅大 */
 function drawMultiVine(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, ax: number, ay: number, type: number, worldSurface: number,
+  rec: SwayRec, ax: number, ay: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const i0 = st.idx(ax, ay);
   if (!multiVineAnchor(rec.sheet, st.frameX[i0], st.frameY[i0])) return;
   const { sx, sy } = multiVineSize(rec.sheet);
-  const { nx, ny, offX } = multiVineParams(rec.sheet);
+  const { num3, num5, num2Mul, flag2, nx, offX } = multiVineVariant(rec.sheet, st.frameX[i0], st.frameY[i0]);
   // 风值 = sunflower 相位波 + 多圈扰动；不在风口则只余扰动（:9418-9424）
-  let wc = getWindCycle(ax, ay, counters.sunflower, worldSurface);
+  let wc = getWindCycle(ax, ay, counters.sunflower, ENV.worldSurface, ENV.remix);
   const base = wc;
   wc += highestWindGridPushComplex(ax, ay, sy, 60, 1.26, 3, true);
-  const windy = inAPlaceWithWind(st, ax, ay, sx, sy, worldSurface);
+  const windy = inAPlaceWithWind(st, ax, ay, sx, sy, ENV.worldSurface, ENV.remix);
   if (!windy) wc -= base;
   // 锚点=顶部中心（+(-2)）；平台下方吊挂再上移 8（IsBelowANonHammeredPlatform :38315：
   // 上方 Platform 族 + 非半砖 + 坡 0）。offX(698 的 -10) 同时作用于 dest——
   // 原版 offSet 进 vector 与 vector3 相消只留 origin 侧、dest=vector3+offSet+(0,offY)
   let pivotX = ax * TILE + sx * TILE * 0.5 + offX;
   let pivotY = ay * TILE - 2;
+  if (flag2) pivotY += 16; // :9533-9536
   if (ax > 0) {
     const ai = st.idx(ax, ay - 1);
     const above = TILE_DEFS[st.type[ai]];
     if (above?.platform && !st.half[ai] && st.slope[ai] === 0) pivotY -= 8;
   }
-  const ROT = -0.15; // num2（0.15 后 *= -1）
+  const ROT = -0.15 * num2Mul; // num2（0.15 后 *= -1，变体可再缩放）
   for (let j = 0; j < sy; j++) {
     let hFrac = (j + 1) / sy; // 与 MultiGrass 相反：越靠下摆幅越大
     if (hFrac === 0) hFrac = 0.1;
-    const offY = Math.abs(wc) * ny * hFrac;
+    if (num3 !== null) hFrac = num3; // 变体覆盖高度分式
+    if (flag2 && j === 0) hFrac = 0; // flag2 顶行静止（:9649-9652）
+    const offY = Math.abs(wc) * num5 * hFrac;
     for (let k = 0; k < sx; k++) {
       const cx = ax + k, cy = ay + j;
       if (!st.inBounds(cx, cy)) continue;
@@ -642,21 +675,103 @@ function drawMultiVine(
   }
 }
 
-/** DrawTrees（:8184-8460）：树冠/树枝摆动（墙后不摆 flag=tile.wall>0）。
+/** EmitTreeLeaves（:7905-8013 1:1）：频率门 + 位置偏移 + 落叶生成 */
+function emitTreeLeaves(x: number, y: number, fx: number, fy: number, grassX: number, gore: number): void {
+  if (!leafEmits(gore)) return;
+  const flag = (gore >= 917 && gore <= 925) || (gore >= 1113 && gore <= 1121);
+  let n = windSway.leafFreq;
+  if (flag) n /= 2;                                   // 特殊叶频率减半
+  if ((y < ENV.worldSurface) === ENV.remix) n = 10000; // DoesWindBlowAtThisHeight
+  const isBranch = grassX !== x;
+  if (isBranch) n *= 3;                               // 枝上叶频率 ×3 稀释
+  if (n < 1 || Math.floor(Math.random() * n) !== 0) return;
+  let vx = x * TILE + 8, vy = y * TILE + 8;
+  if (isBranch) {
+    vx += (x - grassX) * 12; // num4 = tilePosX - grassPosX（符号：grassX 在枝侧）
+    const num5 = fy === 220 ? 1 : fy === 242 ? 2 : 0;
+    if (fx === 66) {
+      if (num5 <= 1) vy += -6;
+      else vy += 8;
+    } else {
+      if (num5 === 0) vy += 4;
+      else if (num5 === 1) { vx += 2; vy += -6; }
+      else { vx += 6; vy += -6; }
+    }
+  } else {
+    vx += -16; vy += -16;
+    if (flag) vy -= Math.floor(Math.random() * 28) * 4;
+  }
+  // 起点须非实心（:8008）
+  const tx = Math.floor((vx + 6) / TILE), ty = Math.floor((vy + 6) / TILE);
+  if (ST.inBounds(tx, ty) && ST.isSolid(tx, ty)) return;
+  natureParticles.spawnLeaf(vx, vy, gore);
+}
+
+/** DrawTrees（:8184-8460）：树冠/树枝摆动（墙后不摆 flag=tile.wall>0）+ 落叶喷出。
  *  冠/枝标记帧判定沿用本仓 drawTreeCell 约定 = fy>=198（含 fx=0 顶冠变体；
  *  原版 fx>=22 门是因为 fx=0 走 DrawSingleTile 普通路径，我们不区分） */
 function drawTreeSway(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  sheet: number, x: number, y: number, fx: number, fy: number, worldSurface: number,
+  sheet: number, x: number, y: number, fx: number, fy: number,
   trees?: TreeStyleData,
 ): void {
   const isPalm = sheet === 323;
   const isCrownCell = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198);
   if (!isCrownCell) return;
   const idx = st.idx(x, y);
+  if (st.liquid[idx] > 0) return; // EmitTreeLeaves 液体门（:7912-7915）——冠整格水下不出叶不摆
   let sway = 0;
-  if (st.wall[idx] === 0) sway = getWindCycle(x, y, counters.tree, worldSurface);
+  if (st.wall[idx] === 0) sway = getWindCycle(x, y, counters.tree, ENV.worldSurface, ENV.remix);
   drawTreeCell(ctx, atlas, st, x, y, fx, fy, x * TILE, y * TILE, sheet, true, trees, sway);
+  // 落叶：grassPosX = 枝方向侧树干列（GetCommonTreeFoliageData num13：44→+1 / 66→-1 / 顶→0）
+  const grassX = x + (fx === 44 ? 1 : fx === 66 ? -1 : 0);
+  const scan = scanTreeType(st, grassX, y);
+  const grassSheet = TILE_DEFS[scan.type]?.vanilla?.sheet ?? -1;
+  emitTreeLeaves(x, y, fx, fy, grassX, getTreeLeaf(x, fx, fy, sheet, grassSheet));
+}
+
+// ---- EmitLiquidDrops 滴水源（路由 :695-700）----
+/** 373 丛林叶/374 蜂巢叶/375 叶/461 垂叶/709 微光叶 */
+const DRIP_TILES = new Set([373, 374, 375, 461, 709]);
+
+/** EmitLiquidDrops（TileDrawing :7714-7790 1:1）：冷却 rand(num*2) + 区域查重 + 水型映射 */
+function emitLiquidDrops(st: TileStore, x: number, y: number, i: number, sheet: number): void {
+  let num = 60;
+  if (sheet === 374) num = 120;
+  else if (sheet === 375 || sheet === 461) num = 180;
+  if (st.liquid[i] !== 0) return;
+  if (Math.floor(Math.random() * (num * 2)) !== 0) return;
+  // 区域查重：矩形 (x*16-34, y*16-100, 84, 400) 内已有活跃滴 → 本帧不喷
+  const rx = x * TILE - 34, ry = y * TILE - 100;
+  for (const d of natureParticles.drips) {
+    if (d.x + 16 > rx && d.x < rx + 84 && d.y + 16 > ry && d.y < ry + 400) return;
+  }
+  natureParticles.spawnDrip(x * TILE, y * TILE, dripGoreFor(sheet, ENV.waterStyle, ENV.zones));
+}
+
+// ================= LitNature 晨昏光效（NextNatureRenderer :105-170） =================
+// 原版为 LitNature 像素着色器（晨昏日光穿过植被的光束，SideFlags 即其接缝输入；
+// 非着色器回退 = 普通直绘）。Canvas 2D 无着色器——可见性公式 1:1 + 太阳位暖色
+// 加性光晕近似（光晕全屏而非仅植被=近似，强度按 vis 上限 0.16 很弱）。
+const remap = (v: number, a: number, b: number, c: number, d: number) =>
+  Math.max(0, Math.min(1, (v - a) / (b - a))) * (d - c) + c;
+
+/** DrawAfterAllObjects 可见性（:117-147 1:1）：仅昼；晨/昏双窗，日食清零，×0.4 ×太阳地平线因子 */
+export function litNatureVisibility(clock: Clock): number {
+  const t = clock.timeOfDay;
+  if (!(t > 0.25 && t < 0.75)) return 0;
+  const time = ((t - 0.25) / 0.5) * 54000;
+  const dawn = remap(time, 1200, 5400, 0, 1) * remap(time, 1200, 7200, 1, 0) * 0.3;
+  let dusk = remap(time, 54000 - 10800, 54000 - 4200, 0, 1) * remap(time, 54000 - 1800, 54000 - 600, 1, 0) * 0.4;
+  dusk *= dusk;
+  let vis = Math.max(dawn, dusk);
+  if (clock.eclipse) vis = 0;
+  vis *= 0.4;
+  // 太阳地平线因子：num4 = Remap(min(sunX, 1-sunX), 0, 1/96, 0, 1)（sunX≈屏幕占比）
+  const ft = time / 54000;
+  const edge = Math.min(ft, 1 - ft);
+  vis *= remap(edge, 0, 1 / 96, 0, 1);
+  return vis;
 }
 
 // ================= 主入口 =================
@@ -670,9 +785,26 @@ interface SwayCam { x: number; y: number; zoom: number; viewW: number; viewH: nu
 export function drawWindSwayTiles(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, world: World,
   cam: SwayCam, z: number,
+  clock?: Clock, waterStyle = 0,
+  zones: { corrupt: boolean; crimson: boolean; hallow: boolean } = { corrupt: false, crimson: false, hallow: false },
 ): void {
   const st = world.store;
-  const worldSurface = world.groundLevel;
+  ST = st;
+  const t = clock?.timeOfDay ?? 0.5;
+  const isDay = t > 0.25 && t < 0.75;
+  ENV = {
+    worldSurface: world.groundLevel,
+    remix: !!(world as { remixWorld?: boolean }).remixWorld,
+    worldH: world.h,
+    dayTime: isDay,
+    moonPhase: clock?.moonPhase ?? 0,
+    bloodMoon: clock?.bloodMoon ?? false,
+    raining: !!world.weather?.raining,
+    cloudAlpha: world.weather?.cloudAlpha ?? 0,
+    mainTime: isDay ? ((t - 0.25) / 0.5) * 54000 : 0,
+    waterStyle,
+    zones,
+  };
   const trees: TreeStyleData = {
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     worldSurface: world.groundLevel, worldW: world.w,
@@ -704,36 +836,42 @@ export function drawWindSwayTiles(
           };
           switch (rec.kind) {
             case SwayKind.MultiVine:
-              if (group === 1) drawMultiVine(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              if (group === 1) drawMultiVine(ctx, atlas, st, rec, x, y, type, trees);
               break;
             case SwayKind.MultiGrass:
-              if (group === 1) drawMultiGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              if (group === 1) drawMultiGrass(ctx, atlas, st, rec, x, y, type, trees);
               break;
             case SwayKind.Basic:
-              if (group === 2) drawBasicGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              if (group === 2) drawBasicGrass(ctx, atlas, st, rec, x, y, type, trees);
               break;
             case SwayKind.Directional:
-              if (group === 2) drawDirectionalGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              if (group === 2) drawDirectionalGrass(ctx, atlas, st, rec, x, y, type, trees);
               break;
             case SwayKind.VineThread:
               // 锚点=藤顶（上方非藤才起链——CrawlToTopOfVineAndAddSpecialPoint）
               if (group === 3 && isAnchorVine(VINE_THREADS, -1)) {
-                drawVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+                drawVineStrip(ctx, atlas, st, rec, x, y, type, trees);
               }
               break;
             case SwayKind.ReverseVine:
               if (group === 3 && isAnchorVine(REVERSE_VINE, +1)) {
-                drawRisingVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+                drawRisingVineStrip(ctx, atlas, st, rec, x, y, type, trees);
               }
               break;
           }
           continue;
         }
+        // 滴水源图块（EmitLiquidDrops :698-700：373 丛林叶/374/375/461/709——非摆动族，
+        // 烘焙层照常绘制，此处仅概率喷滴）
+        if (group === 2) {
+          const v0 = TILE_DEFS[type]?.vanilla;
+          if (v0 && DRIP_TILES.has(v0.sheet)) emitLiquidDrops(st, x, y, i, v0.sheet);
+        }
         // 树族冠/枝标记格（非摆动集合但需动态摆动；干身仍在烘焙层）
         if (group === 3) {
           const v = TILE_DEFS[type]?.vanilla;
           if (v && TREE_SWAY_SHEETS.has(v.sheet) && v.sheet !== 72) {
-            drawTreeSway(ctx, atlas, st, v.sheet, x, y, st.frameX[i], st.frameY[i], worldSurface, trees);
+            drawTreeSway(ctx, atlas, st, v.sheet, x, y, st.frameX[i], st.frameY[i], trees);
           }
         }
       }
