@@ -32,8 +32,9 @@ export class TownNPC extends Entity {
   /** 定点站岗（守卫老人）：门口地带是山坡+塔心竖井,白天的自由游走会坠入地牢；
    *  原版观感也是整日守在门口走廊 */
   stationary = false;
-  /** 被绑待救援（原版 BoundGoblin105/BoundWizard106/BoundMechanic123/WebbedStylist122/
-   *  Golfer589：原地不动，右键解救 → savedXxx 旗标置位成为正式城镇 NPC） */
+  /** 被绑待救援（原版为独立 NPC 类型：BoundGoblin105/BoundWizard106/BoundMechanic123/
+   *  WebbedStylist354/GolferRescue589，本作以本标记近似；渲染按真帧走各捆绑姿态表——
+   *  Renderer.BOUND_NPC_SHEET。原地不动，右键解救 → savedXxx 旗标置位成为正式城镇 NPC） */
   bound = false;
   // ---- NPC 开关门（原版 AI_007，NPC.cs:54478 开门 / 54243 过门关门）----
   private closeDoor = false;
@@ -109,8 +110,12 @@ export class TownNPC extends Entity {
       }
     }
 
-    // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc
+    // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc / 净化粉
+    // （原版 bound 类型同走 TargetClosest + spriteDirection，NPC.cs:19813-19816：
+    //  恒面向最近玩家——捆绑姿态转向救援者）
     if (this.bound) {
+      const bp = (game as unknown as { player: Player }).player;
+      if (bp && !bp.dead) this.facing = bp.cx < this.cx ? -1 : 1;
       this.vx = 0;
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, world, this.vx, this.vy);

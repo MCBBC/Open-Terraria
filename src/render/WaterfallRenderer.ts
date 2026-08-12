@@ -110,15 +110,32 @@ export class WaterfallRenderer {
     }
   }
 
-  /** 绘制（DrawWaterfall 行 211-803 的主体路径）。
-   *  ★水体瀑布贴图恒 Waterfall_0——原版水通道 DrawWaterfall(Style=0)
-   *  （WaterfallManager.Draw :1173）,case 0 的 num12=Style 即 0:群系水色只作用于
-   *  水体(LiquidRenderer 液色),不换瀑布贴图。曾误读为 num12=waterStyle → 腐化区
-   *  套用 Waterfall_2(灰色迪斯科喷泉贴图)="水瀑布颜色错误"报告的根因 */
-  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number) {
-    if (!atlas || this.falls.length === 0) return;
+  /** 水样式 → 瀑布贴图偏移表（WaterfallManager.Draw :1173-1227 通道表逐对提取:
+   *  DrawWaterfall(贴图号, liquidAlpha[水样式号])——贴图 1/2 被岩浆/迪斯科喷泉占用,
+   *  水样式从 2 起错位;猩红 10→13、地下沙漠 12→23、地狱 13→24;样式 11 蜂蜜走
+   *  液体类型 14 通道、14 微光走 25,均无水通道。★曾两连错:恒等映射(样式 2 套到
+   *  灰色迪斯科贴图 Waterfall_2)与"恒 Waterfall_0"——后者只看了第一条通道) */
+  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number, waterStyle = 0) {
+    if (!atlas) {
+      // atlas 缺失也留痕（debugState 消费）；条目空则由 debugState 的 count:0 表达
+      this.lastDraw = { ms: nowMs, regular: Math.floor(nowMs / 50) % 16, slow: Math.floor(nowMs / 117) % 16,
+        atlasReady: false, sheetsOk: [false, false, false], waterStyle, waterfallSheet: null };
+      return;
+    }
+    if (this.falls.length === 0) return;
     this.litCells.length = 0; // 岩浆光照格每帧重建(防无岩浆帧残留旧光)
     const tex = SHEET.map((s) => atlas.ensureVImage(s) ?? null);
+    // 水体瀑布按群系水色换贴图(通道表偏移;未知样式回退 0)
+    const STYLE_TEX: Record<number, number> = {
+      0: 0, 2: 3, 3: 4, 4: 5, 5: 6, 6: 7, 7: 8, 8: 9, 9: 10, 10: 13, 12: 23, 13: 24,
+    };
+    const waterTex = atlas.ensureVImage(`vanilla/Waterfall_${STYLE_TEX[waterStyle] ?? 0}.png`);
+    if (waterTex) tex[0] = waterTex;
+    // 最近一次 draw 参数（debugState 消费；atlas 缺失/条目空也记录——这本身是
+    // "瀑布没画出来/水瀑布颜色错误"类报告的关键证据）
+    this.lastDraw = { ms: nowMs, regular: Math.floor(nowMs / 50) % 16, slow: Math.floor(nowMs / 117) % 16,
+      atlasReady: true, sheetsOk: [!!tex[0], !!tex[1], !!tex[2]],
+      waterStyle, waterfallSheet: `vanilla/Waterfall_${STYLE_TEX[waterStyle] ?? 0}.png` };
     if (!tex[0] && !tex[1] && !tex[2]) return;
     // 帧动画：水 3 tick/帧、岩浆蜂蜜 7 tick/帧（1 tick ≈ 16.67ms）
     const regular = Math.floor(nowMs / 50) % 16;
@@ -334,4 +351,23 @@ export class WaterfallRenderer {
   get count() { return this.falls.length; }
   /** 最近一帧岩浆瀑布的绘制格(x,y 扁平对;AddLight 消费用) */
   litCells: number[] = [];
+  /** 最近一次 draw 的关键参数（F5 调试报告消费；null = 尚未绘制过） */
+  private lastDraw: { ms: number; regular: number; slow: number; atlasReady: boolean; sheetsOk: [boolean, boolean, boolean]; waterStyle?: number; waterfallSheet?: string | null } | null = null;
+
+  /** 调试快照（DebugReport render.subsystems.waterfall）：条目数/类型分布/最近 draw 参数 */
+  debugState(): object {
+    const byType: Record<string, number> = { water: 0, lava: 0, honey: 0, rain: 0, snow: 0, ashRain: 0 };
+    const names = ['water', 'lava', 'honey', 'rain', 'snow', 'ashRain'] as const;
+    for (const wf of this.falls) {
+      if (wf.type >= 0 && wf.type < names.length) byType[names[wf.type]]++;
+    }
+    return {
+      count: this.falls.length,
+      byType,
+      findFrame: this.findFrame,
+      lastFindFrame: this.lastFind,
+      litCells: this.litCells.length >> 1,
+      lastDraw: this.lastDraw,
+    };
+  }
 }

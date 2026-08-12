@@ -50,6 +50,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
     bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
     moonPhase: world.clock.moonPhase, moonType: world.moonType,
+    seedFlags: { ...world.seedFlags },
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -159,6 +160,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   if (data.clock.eclipse !== undefined) world.clock.eclipse = data.clock.eclipse;
   if (data.clock.moonPhase !== undefined) world.clock.moonPhase = data.clock.moonPhase;
   if (data.header.moonType !== undefined) world.moonType = data.header.moonType;
+  if (data.header.seedFlags) world.seedFlags = { ...data.header.seedFlags };
   if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
     world.invasionType = data.invasion.type;
     world.invasionSize = data.invasion.size;

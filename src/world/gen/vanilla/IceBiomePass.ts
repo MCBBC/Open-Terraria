@@ -78,7 +78,7 @@ export function runSlushPass(st: TileStore, gs: GenState): void {
   const SILT = TILE_BY_KEY['silt']!;
   const SLUSH = TILE_BY_KEY['v_224_slush_block']!;
   const STONE = TILE_BY_KEY['stone']!;
-  for (let y = gs.snowTop; y <= gs.snowBottom && y < st.h; y++) {
+  for (let y = gs.snowTop; y < gs.snowBottom && y < st.h; y++) {  // 原版 i < snowBottom（排他——曾含末行）
     for (let x = gs.snowMinX[y]; x < gs.snowMaxX[y]; x++) {
       const i = st.idx(x, y);
       const t = st.type[i];                       // ★原版 switch 不判 active（幽灵格一并转化）

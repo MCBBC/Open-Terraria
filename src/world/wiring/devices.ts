@@ -5,6 +5,7 @@
 import type { Wiring } from '../Wiring';
 import type { TrapShotKind } from '../../entities/Dart';
 import { TILE_BY_KEY } from '../../data/tiles';
+import { flipSwitchTrack } from '../MinecartTrack';
 
 /** 器件运行环境(Game 实现;保持窄接口以便单测注入) */
 export interface DeviceCtx {
@@ -778,10 +779,12 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       if (to) st.setTile(x, y, to, st.frameX[i], st.frameY[i]);
       return true;
     }
-    case 314: // 压板轨道（Wiring.cs:1429-1433）：CheckMech 5 + FlipSwitchTrack 翻转轨道指向。
-      // 【依赖登记】FlipSwitchTrack 依赖矿车轨道系统（轨道帧族 314 的箭头帧语义），
-      // 矿车系统接入前只走冷却注册，不翻帧
-      w.checkMech(x, y, 5);
+    case 314: // 压板轨道（Wiring.cs:1746-1752）：CheckMech 5 + FlipSwitchTrack 翻转轨道指向。
+      // FlipSwitchTrack（Minecart.cs:1302-1325）：普通型前/后轨互换（分叉换边）、
+      // 加速型 FrameTrack(pound) 循环下一个加速向
+      if (w.checkMech(x, y, 5)) {
+        flipSwitchTrack(st, x, y);
+      }
       return true;
     case 335: { // 烟花盒 2×2（Wiring.cs:1511-1523 → WorldGen.LaunchRocketSmall WorldGen.cs:62208-62222）
       const num72 = y - Math.floor(st.frameY[i] / 18);

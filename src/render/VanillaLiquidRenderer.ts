@@ -80,13 +80,46 @@ let _hasLE: Uint8Array, _hasRE: Uint8Array, _hasTE: Uint8Array, _hasBE: Uint8Arr
 let _isHalfA: Uint8Array;
 let _fx: Int16Array, _fy: Int16Array;
 
+// ---- 调试快照（F5 DebugReport render.subsystems.liquids 消费；模块级因本渲染器是自由函数）----
+export interface LiquidDebugState {
+  /** 最近一次 draw 的调用序号（双 pass 各 +1 → 每帧 +2） */
+  calls: number;
+  /** 最近一次 draw 时刻 ms */
+  lastMs: number;
+  /** 群系水色 id（CalculateWaterStyle 结果；水贴图 Misc_water_<n>.png 的 n） */
+  waterStyle: number;
+  /** 当前群系水色解析出的水体贴图名 */
+  waterSheet: string;
+  /** 最近一次 draw 是否背景 pass */
+  isBackground: boolean;
+  /** 动画参数（1456 双帧机制） */
+  animFrame: number;
+  waterfallFrame: number;
+  windSpeed: number;
+  /** 最近一次 draw 的可见 tile 窗口（padding 前） */
+  window: [number, number, number, number];
+  /** 最近一次 draw 命中的液体类型表（原版 LiquidType 键 → 贴图是否就绪） */
+  sheetsReady: Array<[number, boolean]>;
+  atlasReady: boolean;
+}
+const _liqDebug: LiquidDebugState = {
+  calls: 0, lastMs: 0, waterStyle: 0, waterSheet: '', isBackground: false,
+  animFrame: 0, waterfallFrame: 0, windSpeed: 0, window: [0, 0, 0, 0],
+  sheetsReady: [], atlasReady: false,
+};
+
+/** 液体渲染调试快照（只读消费；DebugReport render.subsystems.liquids） */
+export function liquidDebugState(): LiquidDebugState {
+  return _liqDebug;
+}
+
 export function drawVanillaLiquids(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null,
   st: TileStore, groundLevel: number,
   tx0: number, ty0: number, tx1: number, ty1: number,
   nowMs: number, isBackground = false, windSpeed = 0, waterStyle = 0,
 ): void {
-  if (!atlas) return;
+  if (!atlas) { _liqDebug.atlasReady = false; return; }
   const PAD = 2;
   const px0 = tx0 - PAD, py0 = ty0 - PAD;
   const pw = tx1 - tx0 + 1 + PAD * 2, ph = ty1 - ty0 + 1 + PAD * 2;
@@ -406,6 +439,19 @@ export function drawVanillaLiquids(
   //   仅左侧有水 → 格左 4px 竖条(:4113-4116);仅右侧 → 格右 4px(:4118-4121)
   //   左右都有   → 整格 16 宽(:4108-4111);深度按液体量 num6=(256-max)/32*2 从底收
   if (isBackground) drawLiquidBehindTiles(ctx, atlas, st, groundLevel, tx0, ty0, tx1, ty1, waterStyle);
+
+  // ---- 调试快照落盘（DebugReport render.subsystems.liquids）----
+  _liqDebug.calls++;
+  _liqDebug.lastMs = nowMs;
+  _liqDebug.waterStyle = waterStyle;
+  _liqDebug.waterSheet = waterSheet(0, waterStyle);
+  _liqDebug.isBackground = isBackground;
+  _liqDebug.animFrame = animFrame;
+  _liqDebug.waterfallFrame = waterfallFrame;
+  _liqDebug.windSpeed = windSpeed;
+  _liqDebug.window = [tx0, ty0, tx1, ty1];
+  _liqDebug.sheetsReady = [...texCache.entries()].map(([vt, t]) => [vt, !!t] as [number, boolean]);
+  _liqDebug.atlasReady = true;
 
   ctx.globalAlpha = 1;
 }

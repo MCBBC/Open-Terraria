@@ -42,14 +42,45 @@ export function pickPool(opts: {
   return opts.depth === 'cavern' || opts.depth === 'underworld' ? FISH_POOLS.cavern : FISH_POOLS.surface;
 }
 
-/** 掷一次渔获（FishingCheck 精简主干）：返回原版物品 id。
- *  power = 竿力+饵力+药水；cratePotion 提升箱率；低 power 提高 junk */
-export function rollCatch(power: number, pool: FishPool, cratePotion: boolean): number {
-  const crateChance = 0.1 + (cratePotion ? 0.1 : 0);
+/** 稀有档独立 roll（FishingCheck_RollDropLevels :20106-20167：各档独立掷，
+ *  分母 = max(⌊4500/L⌉类整除⌋, 下限)——可同时命中，不互斥） */
+export interface DropRarity { legendary: boolean; veryrare: boolean; rare: boolean; uncommon: boolean }
+export function rollRarities(L: number): DropRarity {
+  const one = (num: number, min: number) => Math.random() < 1 / Math.max(Math.floor(num / Math.max(1, L)), min);
+  return {
+    legendary: one(4500, 6),   // :20134/20160
+    veryrare: one(2250, 5),    // :20130/20156
+    rare: one(1050, 4),        // :20126/20152
+    uncommon: one(300, 3),     // :20122/20148
+  };
+}
+
+/** 掷一次渔获（FishingCheck 规则表序：Junk→Crate→RareDrops→普通池；
+ *  GameContentFishDropPopulator 注册序 :12-30，第一条命中即返回）。
+ *  power = 钓鱼力（含乘区）；ctx = 血月/战斗书旗标（4382 门 :19650-19654） */
+export function rollCatch(
+  power: number, pool: FishPool, cratePotion: boolean,
+  ctx?: { rarity: DropRarity; bloodMoon: boolean; combatBook: boolean },
+): number {
+  const L = Math.max(1, Math.floor(power));
+  // junk（原版 :19326 双 Next(50) 门——水量未跟踪，用低力近似公式）
   const junkChance = Math.max(0.05, 0.35 - power * 0.004);
-  const r = Math.random();
-  if (pool.crates?.length && r < crateChance) return pool.crates[Math.floor(Math.random() * pool.crates.length)];
-  if (pool.junk?.length && r < crateChance + junkChance) return pool.junk[Math.floor(Math.random() * pool.junk.length)];
+  if (pool.junk?.length && Math.random() < junkChance) {
+    return pool.junk[Math.floor(Math.random() * pool.junk.length)];
+  }
+  // crate（:20113-20117：10%，宝匣药水 +15）
+  if (pool.crates?.length && Math.random() < 0.1 + (cratePotion ? 0.15 : 0)) {
+    return pool.crates[Math.floor(Math.random() * pool.crates.length)];
+  }
+  // RareDrops 传说族（:196-201，串行独立 roll 各自失败才落下一条）：
+  //   血月 4382（须 !combatBookWasUsed）→ 血月 5240 → 2423/3225/2420
+  if (ctx?.rarity) {
+    if (ctx.rarity.legendary && ctx.bloodMoon && !ctx.combatBook && Math.random() < 0.5) return 4382;
+    if (ctx.rarity.legendary && ctx.bloodMoon && Math.random() < 0.5) return 5240;
+    if (ctx.rarity.legendary && Math.random() < 0.2) return 2423;
+    if (ctx.rarity.legendary && Math.random() < 0.2) return 3225;
+    if (ctx.rarity.legendary && Math.random() < 0.1) return 2420;
+  }
   return pool.fish[Math.floor(Math.random() * pool.fish.length)];
 }
 

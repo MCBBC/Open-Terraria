@@ -27,6 +27,10 @@ export const TILE_ANIM_RATE: Record<number, number> = {
   355: 5,  // 炼金台
   377: 5,  // 磨刀站（4 帧，pitch 38）
   499: 5,  // 腐变室 Decay Chamber（8 帧）
+  // 矿车轨道加速带（Main.cs:18734-18741：5 帧循环）。★只用于 advanceAnim 重烘焙节奏；
+  // 帧行偏移不走本表 pitch 语义（frameX/frameY 是轨道连接 ID）——由
+  // MinecartTrack.sourceRectOf(frameID, boosterAnimFrame()) 处理，ChunkCache 已特判
+  314: 10,
 };
 
 /** pitch 54 特例组（其余走默认 38，TileDrawing GetTileDrawData switch 实证） */

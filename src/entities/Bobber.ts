@@ -8,7 +8,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { pickPool, rollCatch, fishingPowerMultiplier } from '../data/vanillaFishing';
+import { pickPool, rollCatch, rollRarities, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import type { World } from '../world/World';
@@ -133,10 +133,16 @@ export class Bobber extends Entity {
       if (inWater && w.clock.bloodMoon && !w.clock.isDay) {
         const chance = this.poleVid === 4325 ? 3 : 6;
         if (Math.random() < 1 / chance) {
-          const hard = w.flags.hardMode;
-          const poolE = hard ? [620, 621, 586, 587] : [586, 587];
-          this.catchEnemy = hard && Math.random() < 0.1 ? 618
-            : poolE[Math.floor(Math.random() * poolE.length)];
+          // 红色城镇史莱姆首获（:19413-19416：世界级一次性旗标，1/5 优先于敌怪表；
+          //  收竿侧置 unlockedSlimeRedSpawn）
+          if (!w.flags.unlockedSlimeRedSpawn && Math.random() < 0.2) {
+            this.catchEnemy = 682;
+          } else {
+            const hard = w.flags.hardMode;
+            const poolE = hard ? [620, 621, 586, 587] : [586, 587];
+            this.catchEnemy = hard && Math.random() < 0.1 ? 618
+              : poolE[Math.floor(Math.random() * poolE.length)];
+          }
           this.biteT = 60;
           game.playSfx('splash', 0.8);
           game.spawnParticles(this.cx, this.cy, '#C04040', 6, 1.5, { life: 24 });
@@ -149,7 +155,11 @@ export class Bobber extends Entity {
         depth: this.depthOf(game),
         zoneOcean: this.zoneOcean(game),
       });
-      this.catchId = rollCatch(power, pool, p.buffs.has(BuffType.Crate));
+      this.catchId = rollCatch(power, pool, p.buffs.has(BuffType.Crate), {
+        rarity: rollRarities(power),
+        bloodMoon: !!w.clock.bloodMoon,
+        combatBook: !!w.flags.combatBookWasUsed,
+      });
       void power;
       this.biteT = 60;
       game.playSfx('splash', 0.8);

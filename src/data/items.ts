@@ -653,6 +653,10 @@ item({ key: 'vi_1175_headstone', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_25_wooden_door', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_46_light_s_bane', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2340_minecart_track', name: '', maxStack: 999, value: 1 });
+// 轨道族放置物（Minecart.PlaceTrack style：0 普通 / 1 压板(2492) / 2 左加速(2739)）。
+// key 沿用全量注册的 vanilla.json 命名（vi_<id>_<key>），只补 tile/placeStyle
+item({ key: 'vi_2492_PressureTrack', name: '', maxStack: 999, value: 1, tile: 'v_314_minecart_track', placeStyle: 1 });
+item({ key: 'vi_2739_BoosterTrack', name: '', maxStack: 999, value: 1, tile: 'v_314_minecart_track', placeStyle: 2 });
 item({ key: 'vi_498_mannequin', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_4721_mushroom_beam', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_819_living_wood_door', name: '', maxStack: 999, value: 1 });

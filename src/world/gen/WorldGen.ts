@@ -37,6 +37,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // 位级金标见 tests/unified-random.test.ts。
   const seed = translateSeed(cfg.seedText || String(Date.now()));
   const world = new World(cfg.width, cfg.height, seed, cfg.name ?? '新世界');
+  world.seedFlags = parseSeed(cfg.seedText || '').flags; // 运行时消费（血月 1/6 十周年 / drunk 黎明翻转）
   const rng = new RNG(seed);
   // 注：曾在此 createNoise2D(() => rng.next())——simplex 构造即消耗 RNG 流
   //（建置换表 256+ 次），而全管线无消费者。种子等价必须零预耗，已删除。
@@ -214,6 +215,7 @@ export function runResetAndTerrain(cfg: { width: number; height: number; seedTex
 } {
   const seed = translateSeed(cfg.seedText);
   const world = new World(cfg.width, cfg.height, seed);
+  world.seedFlags = parseSeed(cfg.seedText).flags;
   const rng = new RNG(seed);
   const ctx: GenCtx = {
     world, store: world.store, rng,

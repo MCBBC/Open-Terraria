@@ -20,6 +20,8 @@ function willWaterStayPut(st: TileStore, x: number, y: number): boolean {
 
 /** SonOfLakinater（L48516）：向下蜿蜒湖腔。lava 恒 false（getGoodWorld 不支持） */
 function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, strengthMultiplier = 1): void {
+  // cs:80357 头部 Next(3)（liquidType——普通世界恒水，但掷骰必消耗！曾缺失致流偏移）
+  rng.int(0, 2);
   let radius = rng.int(15, 30) * strengthMultiplier;   // num1（1/5 ×1.3）
   let steps = rng.int(30, 60);                         // num2
   if (rng.int(0, 4) === 0) { radius *= 1.3; steps *= 1.3; }
@@ -123,6 +125,12 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (Math.abs(x - gs.mCaveX[c]) < 100) { bad = true; break; }
         }
       }
+      // cs:14660-14666：隧道 ±100 避让（GenVars.tunnelX/numTunnels——曾缺失致首湖错位）
+      if (!bad) {
+        for (let c = 0; c < gs.numTunnels; c++) {
+          if (Math.abs(x - gs.tunnelX[c]) < 100) { bad = true; break; }
+        }
+      }
       if (bad) continue;
       // 自 worldSurfaceLow-20 向下找实心
       let y = gs.worldSurfaceLow - 20;
@@ -176,9 +184,7 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (inDesert) continue;
-      console.log(`lakeJS ${x},${y} peek=${rng.vanilla.peek()}`);
       sonOfLakinater(st, rng, gs, x, y, 1);
-      console.log(`lakeDoneJS peek=${rng.vanilla.peek()}`);
       lakeX.push(x);
       break;
     }

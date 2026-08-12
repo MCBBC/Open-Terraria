@@ -61,6 +61,7 @@ export interface SaveData {
     created: number; playTimeMs: number;
     wldVersion?: number;
     moonType?: number;   // 月亮贴图样式（原版 header WF:1252；旧档缺省 0 标准月）
+    seedFlags?: Record<string, boolean>; // 彩蛋种子旗标（旧档缺省={}）
   };
   clock: {
     timeOfDay: number; dayCount: number;
@@ -147,6 +148,7 @@ export interface SaveMeta {
   crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
   timeOfDay: number; dayCount: number;
   bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number; moonType?: number;
+  seedFlags?: Record<string, boolean>;
   chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
@@ -222,6 +224,7 @@ export function serializeSave(
       crimson: meta.crimson, dungeonX: meta.dungeonX, dungeonY: meta.dungeonY, jungleX: meta.jungleX,
       created: Date.now(), playTimeMs,
       moonType: meta.moonType ?? 0,
+      seedFlags: meta.seedFlags,
     },
     clock: {
       timeOfDay: meta.timeOfDay, dayCount: meta.dayCount,

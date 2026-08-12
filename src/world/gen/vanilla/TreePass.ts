@@ -243,30 +243,24 @@ const ASH_PROFILE: TreeProfile = {
 
 /** GrowTreeWithSettings（cs:30546-30967）1:1：宝石树/观赏树共用骨架。
  *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
-let treeSeqJS = 0;
-export function __treeSeqReset() { treeSeqJS = 0; }
 export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile): boolean {
-  treeSeqJS++;
-  const DBG = treeSeqJS <= 80;
+
   // 越过树苗找地面行（cs:30547-30550）
   let num = y;
   while (st.inBounds(x, num) && st.flags[st.idx(x, num)] && st.type[st.idx(x, num)] === p.sapling) num++;
   if (!st.inBounds(x, num) || num < 1) return false;
   // 基座上一格三列无液体（cs:30551-30554）
   if (st.liquid[st.idx(x - 1, num - 1)] !== 0 || st.liquid[st.idx(x, num - 1)] !== 0 || st.liquid[st.idx(x + 1, num - 1)] !== 0) return false;
-  if (DBG) console.log(`treeJS#${treeSeqJS} ${x},${y} liq`);
   // 基座整砖 + 墙白名单 + GroundTest（cs:30555-30566）
   const gi = st.idx(x, num);
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
-  if (!p.walls.has(st.wall[st.idx(x, num - 1)])) { if (DBG) console.log(`treeJS#${treeSeqJS} wallFail`); return false; }
+  if (!p.walls.has(st.wall[st.idx(x, num - 1)])) return false;
   if (!p.ground.has(st.type[gi])) return false;
-  if (DBG) console.log(`treeJS#${treeSeqJS} ${x},${y} ground`);
   // 两侧至少一侧同基座（cs:30568-30571）
   const fitSide = (dx: number) => st.inBounds(x + dx, num)
     && st.flags[st.idx(x + dx, num)] && p.ground.has(st.type[st.idx(x + dx, num)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
   const height = rng.int(p.heightMin, p.heightMax);    // Next(TreeHeightMin, TreeHeightMax+1)
-  if (DBG) console.log(`treeJS#${treeSeqJS} height=${height}`);
   const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
   // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）
   if (x - 2 < 0 || x + 2 >= st.w || num - num4 < 0) return false;
@@ -274,7 +268,7 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
     for (let ey = num - num4; ey <= num - 1; ey++) {
       const ei = st.idx(ex, ey);
       if (!st.flags[ei]) continue;
-      if (!GEM_EMPTY_ALLOW.has(st.type[ei])) { if (DBG) console.log(`treeJS#${treeSeqJS} emptyFail`); return false; }
+      if (!GEM_EMPTY_ALLOW.has(st.type[ei])) return false;
     }
   }
   // 干身帧循环（cs:30590-30816）：与 GrowTree 同表，tile 换成宝石树干

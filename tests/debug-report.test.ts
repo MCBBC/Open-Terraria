@@ -11,6 +11,9 @@ import { ChunkCache } from '../src/render/ChunkCache';
 import { LightingEngine } from '../src/lighting/LightingEngine';
 import { Wiring } from '../src/world/Wiring';
 import { TILE } from '../src/core/constants';
+import { EMPTY_SCENE } from '../src/world/SceneMetrics';
+import { WaterfallRenderer } from '../src/render/WaterfallRenderer';
+import { SpriteAtlas } from '../src/assets/SpriteAtlas';
 import {
   collectDebugReport,
   encodeRle,
@@ -58,6 +61,7 @@ function sampleGame() {
   lighting.dirty = true;
   lighting.addLight(10, 30, 1, 0.8, 0.5);
   const wiring = new Wiring(world.store);
+  const scene = { ...EMPTY_SCENE, tileX: 11, tileY: 28, zoneCorrupt: true, snowTileCount: 42, fountainColor: -1 };
   const game = {
     world,
     player,
@@ -65,6 +69,8 @@ function sampleGame() {
     chunks,
     lighting,
     wiring,
+    scene,
+    renderer: { waterfalls: new WaterfallRenderer() },
     pylons: [{ x: 5, y: 6, type: 2 }],
     smartCursor: { wanted: true, showing: true, x: 10, y: 30, lockedDirection: { x: 1, y: 0 } },
     smartSelect: { strategy: 3, slot: 2 },
@@ -72,6 +78,10 @@ function sampleGame() {
     forceShowWires: false,
     paused: false,
     fps: 59.5,
+    // 真实 SpriteAtlas（vanilla.json 元数据可用；vimages 全空 = 表未载）
+    atlas: new SpriteAtlas(),
+    // 鼠标 hover → (11,30) 泥土格（screenToWorld 手算路径：桩相机无 tileUnder）
+    input: { mouseX: 430, mouseY: 330 },
     camera: { x: 10 * TILE, y: 29 * TILE, zoom: 1.25, zoomTarget: 1.25, viewW: 800, viewH: 600 },
     debugSnapshot: () => ({
       fps: 59.5,
@@ -133,6 +143,7 @@ describe('F5 调试报告（机器优先 JSON）', () => {
       screenshot: false,
       playTimeMs: 123456,
       errors: [{ t: 1, kind: 2, msg: 'boom', stack: 'at x (y.ts:1)' }],
+      warnings: [{ t: 2, msg: '[VanillaTiler] 源矩形越界,该格不绘制(每键仅一次): sheet 28' }],
       instanceCount: 2,
     }) as Record<string, Record<string, unknown>>;
 
@@ -145,6 +156,8 @@ describe('F5 调试报告（机器优先 JSON）', () => {
 
     // errors ring（注入透传）
     expect(r.errors).toEqual([{ t: 1, kind: 2, msg: 'boom', stack: 'at x (y.ts:1)' }]);
+    // warnings ring（注入透传；缺省读 globalThis.__swWarns）
+    expect(r.warnings).toEqual([{ t: 2, msg: '[VanillaTiler] 源矩形越界,该格不绘制(每键仅一次): sheet 28' }]);
 
     // instance（HMR 双实例检测：注入 2）
     expect(r.instance.gameMounts).toBe(2);
@@ -158,6 +171,16 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect((r.world.clock as Record<string, unknown>).bloodMoon).toBe(1);
     expect((r.world.weather as Record<string, unknown>).raining).toBe(1);
 
+    // world.zones（SceneMetrics 快照；布尔 0/1、计数原值、器件态）
+    const zones = r.world.zones as Record<string, Record<string, unknown>>;
+    expect(zones.tileX).toBe(11);
+    expect(zones.tileY).toBe(28);
+    expect(zones.zone.corrupt).toBe(1);
+    expect(zones.zone.crimson).toBe(0);
+    expect(zones.counts.snowTile).toBe(42);
+    expect(zones.devices.fountainColor).toBe(-1);
+    expect(zones.devices.musicBoxStyle).toBe(-1);
+
     // tiles：直方图 + 玩家 ±32 区域
     const tiles = r.tiles as Record<string, unknown>;
     expect(tiles.total).toBe(80 * 60);
@@ -169,6 +192,29 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect([areaPlayer.w, areaPlayer.h]).toEqual([44, 60]);
     expect(areaPlayer.rows).toHaveLength(60);
 
+    // tiles.focus：三焦点键（hover/相机中心/玩家脚下）齐全
+    const focus = tiles.focus as Record<string, Record<string, unknown>>;
+    expect(Object.keys(focus).sort()).toEqual(['camera', 'hover', 'player']);
+    // hover=(11,30) 泥土：cell 链（def 字段/帧编码 blend/墙 62）
+    const hov = focus.hover;
+    expect([hov.x, hov.y]).toEqual([11, 30]);
+    expect(hov.cell).toMatchObject({ type: 1, key: 'dirt', sheet: 0, frameMode: 'blend', wall: 62, fx: 0, fy: 0, solid: true, platform: false, framed: false });
+    // atlas 链：vmeta 命中；表未载 → loaded false/png 尺寸 null/按 meta 网格判界不越界
+    expect(hov.atlas).toMatchObject({ sheet: 0, loaded: false, pngW: null, pngH: null, oob: false, boundsBasis: 'meta' });
+    expect(Array.isArray((hov.atlas as Record<string, unknown>).stride)).toBe(true);
+    // sample：node 无 DOM → 安全降级 null（不抛）
+    expect(hov.sample).toBeNull();
+    // frameEngine：blend 模式 → 仅 mode，无 auto/tileAnim/findFrame
+    expect(hov.frameEngine).toMatchObject({ mode: 'blend', auto: null, tileAnim: null, findFrame: null });
+    // 相机中心格 (10,29) 空格：cell.type 0、atlas/frameEngine 降级 null
+    expect([focus.camera.x, focus.camera.y]).toEqual([10, 29]);
+    expect((focus.camera.cell as Record<string, unknown>).type).toBe(0);
+    expect(focus.camera.atlas).toBeNull();
+    expect(focus.camera.frameEngine).toBeNull();
+    // 玩家脚下格 (11,28) 空格
+    expect([focus.player.x, focus.player.y]).toEqual([11, 28]);
+    expect((focus.player.cell as Record<string, unknown>).type).toBe(0);
+
     // render：ChunkCache 陈旧哨兵可见
     const cc = (r.render as Record<string, Record<string, unknown>>).chunkCache;
     expect(cc.chunks).toBe(1);
@@ -177,11 +223,26 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect(cc.maxChunks).toBe(384);
     expect(cc.lastFlushMs).toBe(6.5);
 
-    // lighting
+    // render.subsystems（渲染器 debugState() 钩子收集；未绘制时 count/lastDraw 保守值）
+    const subs = (r.render as Record<string, Record<string, unknown>>).subsystems;
+    const wf = subs.waterfall as Record<string, unknown>;
+    expect(wf.count).toBe(0);
+    expect(wf.byType).toMatchObject({ water: 0, lava: 0, honey: 0, rain: 0, snow: 0, ashRain: 0 });
+    expect((wf.lastDraw as unknown) === null).toBe(true);
+    const liq = subs.liquids as Record<string, unknown>;
+    expect(liq.calls).toBe(0);
+    expect(liq.waterStyle).toBe(0);
+    expect(Array.isArray(liq.sheetsReady)).toBe(true);
+
+    // lighting.samples（相机中心格 + 玩家格；区域未建立 → 三通道 0）
     const li = r.lighting as Record<string, unknown>;
     expect(li.dirty).toBe(1);
     expect(li.perFrameCount).toBe(1); // addLight 1 条未消费
     expect((li.heldLight as unknown) === null).toBe(true);
+    const samples = (li.samples as Record<string, [number, number, number, number, number]>);
+    expect(samples.camera).toEqual([10, 29, 0, 0, 0]); // cam (10*TILE, 29*TILE)
+    expect(samples.player![0]).toBe(11);               // ptx=11（现有 tiles 断言同源）
+    expect(samples.player!.slice(2)).toEqual([0, 0, 0]);
 
     // entities：ai0 初值 -1120 直接可查（史莱姆 ai[0]==0 门陷阱点）
     expect((r.entities as Record<string, unknown>).counts).toMatchObject({ enemies: 1, drops: 0, npcs: 0 });
@@ -227,6 +288,47 @@ describe('F5 调试报告（机器优先 JSON）', () => {
     expect(r.shot.main).toBeNull();
     expect(r.shot.minimap).toBeNull();
     expect(r.shot.mainOmitted).toBe(false);
+    expect(r.shot.minimapOmitted).toBe(false);
+  });
+
+  it('缺 scene/renderer/lighting 样本：新段落缺省安全降级（不抛、键在）', () => {
+    const { game } = sampleGame();
+    const bare = { ...game, scene: undefined, renderer: undefined, lighting: undefined };
+    const r = collectDebugReport(bare as unknown as Game) as Record<string, Record<string, unknown>>;
+    // world.zones 缺 scene → null
+    expect((r.world.zones as unknown) === null).toBe(true);
+    // render.subsystems 键恒在；waterfall 缺钩子 → null，liquids 是模块态恒有
+    const subs = r.render.subsystems as Record<string, unknown>;
+    expect(Object.keys(subs).sort()).toEqual(['liquids', 'waterfall']);
+    expect((subs.waterfall as unknown) === null).toBe(true);
+    // lighting 段整体缺省 → null（样本连引擎都没有）
+    expect((r.lighting as unknown) === null).toBe(true);
+  });
+
+  it('tiles.focus 源矩形越界标记 + hover 缺 input / 无 DOM 采样降级', () => {
+    const { game } = sampleGame();
+    // 石头 sheet 1 塞一张 16×16 假图：相机中心对准 (10,31) 石块（fx=fy=18）
+    // → 18+16 > 16 源矩形越界，按已载图尺寸判定（boundsBasis=image）
+    const atlas = new SpriteAtlas();
+    const stoneMeta = atlas.vmeta(1)!;
+    expect(stoneMeta).not.toBeNull();
+    atlas.vimages.set(stoneMeta.sheet, { naturalWidth: 16, naturalHeight: 16, width: 16, height: 16 } as unknown as HTMLImageElement);
+    const r = collectDebugReport({
+      ...game,
+      atlas,
+      camera: { x: 10 * TILE, y: 31 * TILE, zoom: 1.25, zoomTarget: 1.25, viewW: 800, viewH: 600 },
+    } as unknown as Game, { screenshot: false }) as Record<string, Record<string, unknown>>;
+    const focus = (r.tiles as Record<string, unknown>).focus as Record<string, Record<string, unknown>>;
+    const cam = focus.camera;
+    expect([cam.x, cam.y]).toEqual([10, 31]);
+    expect(cam.cell).toMatchObject({ type: 2, key: 'stone', fx: 18, fy: 18, frameMode: 'blend' });
+    expect(cam.atlas).toMatchObject({ sheet: 1, loaded: true, boundsBasis: 'image', oob: true });
+    expect((cam.atlas as Record<string, unknown>).src).toMatchObject({ sx: 18, sy: 18 });
+    // 越界 + node 无 DOM → sample 不采样，安全降级 null
+    expect(cam.sample).toBeNull();
+    // hover 缺 input → 整键 null
+    const r2 = collectDebugReport({ ...game, input: undefined } as unknown as Game, { screenshot: false });
+    expect(((r2.tiles as Record<string, unknown>).focus as Record<string, unknown>).hover).toBeNull();
   });
 
   it('玩家 ±32 区域含放置块的完整 cell 串', () => {

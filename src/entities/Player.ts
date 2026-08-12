@@ -82,7 +82,7 @@ export class Player extends Entity {
   /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费） */
   immuneAlpha = 0;
   // 摔伤追踪
-  private fallStartY: number | null = null;
+  fallStartY: number | null = null;   // 矿车骑乘同步清空（车上不计摔伤），公开给 Minecart
   /** 蛛网挣扎计数（原版 stickyBreak，Player.cs:22653） */
   private stickyBreak = 0;
   private surfaceJumpCd = 0;  // 水面起跳冷却
@@ -124,6 +124,12 @@ export class Player extends Entity {
   /** 联机远端挥舞动画（msg13 useItem 位驱动；Game 派生，Renderer 以 swing 参数消费）。
    *  本地玩家不用（本地走 Game.swing） */
   swingNet: { t: number; dur: number; item: number } | null = null;
+  /** 矿车骑乘中（原版 mount.Active && mount.Cart）：常规移动/跳跃/重力由 Minecart
+   *  实体接管（Player.cs:27783-27850 TrackCollision 段），fixedUpdate 提前返回；
+   *  渲染层消费本标志取坐姿帧（mount.BodyFrame=3）并叠画车身 */
+  ridingCart = false;
+  /** 当前所骑矿车（渲染层叠画车身/倾角用；Game 挂载） */
+  cart: import('./Minecart').Minecart | null = null;
 
   constructor(x: number, y: number, inv: Inventory) {
     super();
@@ -751,6 +757,15 @@ export class Player extends Entity {
     // 冰冻 Frozen(47,Player.cs:9749 frozen=true)：整帧封移动输入——跳跃/攀绳/矿车
     // 同读这些标志,一并归零(原版 Update 段 control* 清零语义)。帧末由 Game 重灌输入
     if (this.buffs.has(BuffType.Frozen)) { this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false; }
+    // 矿车骑乘（mount.Cart 语义）：移动/跳跃/重力/碰撞全部由 Minecart 实体接管
+    //（原版 Player.Update :27783-27850 的 TrackCollision 段替代常规移动链）。
+    // 上面的 buff/液体/受伤逻辑照常 tick；位置每 tick 由矿车回写。
+    if (this.ridingCart) {
+      this.vx = 0; this.vy = 0;
+      this.onGround = true;
+      this.fallStartY = null;
+      return;
+    }
     const ix = this.inputX;
     let accel = PLAYER_WALK_ACCEL;
     if (!this.onGround && this.equipStats.wing && this.vy !== 0) {

@@ -6,6 +6,7 @@ import { ChunkCache } from './ChunkCache';
 import type { World, Clock } from '../world/World';
 import type { AssetBundle } from '../assets/AssetGen';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
+import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
@@ -108,8 +109,8 @@ const BAT_SKIP_LAST = new Set([49, 51, 60, 634]);
 // 134-136=毁灭者链、261-265=世花族(孢子/本体/钩蔓/触须)、370=猪鲨、396/397=月总头/手、657=史莱姆皇后(飞行倾斜)
 const ROTATION_NPC = new Set([35, 68, 113, 114, 115, 125, 126, 127, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249, 261, 262, 263, 264, 265, 370, 396, 397, 657]);
 
-/** 按原版 FindFrame 分族规则算当前帧 index */
-function vanillaFrameIdx(e: Enemy, frames: number): number {
+/** 按原版 FindFrame 分族规则算当前帧 index（导出供 DebugReport tiles.focus.frameEngine 复算） */
+export function vanillaFrameIdx(e: Enemy, frames: number): number {
   const id = e.vanillaId ?? 0;
   const ai = e.vanilla?.aiStyle ?? 0;
   const t = e.animT; // tick 计数（≈原版 frameCounter 驱动源）
@@ -1165,7 +1166,7 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
     const now = this._liquidNow; // 与液体双 pass 同帧同时刻
     this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
-    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);  // 水体瀑布恒 Waterfall_0(:1173)
+    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now, this.waterStyle);  // 群系水色→瀑布贴图(通道表偏移)
     // 岩浆瀑布发光(AddLight :1075-1080:r≈0.55×0.4 脉动,g=r×0.3,b=r×0.1 橙光;
     // mouseTextColor 闪烁项取定值近似)——非岩浆瀑布 litCells 为空,零开销
     const lit = this.waterfalls.litCells;
@@ -3019,6 +3020,27 @@ export class Renderer {
     }
   }
 
+  /** bound 姿态专属贴图表（原版 1:1：捆绑待救 NPC 是【独立 NPC 类型】而非 ai[0] 态——
+   *  NPCID.cs:11275 BoundGoblin=105 / 11277 BoundWizard=106 / 11311 BoundMechanic=123 /
+   *  11773 WebbedStylist=354 / 12243 GolferRescue=589；税务官则是地狱敌怪
+   *  DemonTaxCollector(酷刑者)=534（净化粉命中 Transform 441，Projectile.cs:13651））。
+   *  各表为单帧捆绑姿态（534 是 8 帧敌怪表、589 是 13 帧表），FindFrame 无专属 case → 恒帧 0 */
+  private static readonly BOUND_NPC_SHEET: Record<string, number> = {
+    goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354, golfer: 589, tax_collector: 534,
+  };
+
+  /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）
+   *  ——vnpc 懒加载会按 frames=1 把 62×624 整条画出，故此处显式帧数切片 */
+  private boundNpcSheet(n: TownNPC): DrawRect | null {
+    const id = Renderer.BOUND_NPC_SHEET[n.npcKey];
+    if (!id || !this.atlas) return null;
+    const img = this.atlas.ensureVImage(`vanilla/NPC_${id}.png`);
+    if (!img) return null;
+    const frames = id === 589 ? 13 : id === 534 ? 8 : 1;
+    const fh = Math.max(1, Math.floor(img.height / frames));
+    return { img, sx: 0, sy: 0, sw: img.width, sh: Math.min(fh, img.height) };
+  }
+
   private drawTownNPC(n: TownNPC) {
     const ctx = this.ctx;
     // 血条与怪物同规（原版 DrawInterface_14 对 friendly NPC 同函数绘制：
@@ -3028,13 +3050,14 @@ export class Renderer {
     // 注意：不再回退 Maples 角色/NPC_1.png——那是原版绿史莱姆贴图（Maples 沿用原版命名），
     // 曾导致全部城镇 NPC 显示为史莱姆
     if (this.atlas) {
-      const r = this.atlas.vnpc(n.vanillaId, n.frame);
+      // bound 态：走专属捆绑姿态表（原版是独立 NPC 类型，见 BOUND_NPC_SHEET 注释）
+      const r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
       if (r) {
         ctx.save();
         // 底锚 + 逐帧实测底部透明行数补偿(spriteBottomPad):帧底 ~2px 透明边距
         // 裸底锚悬空 2px、中心锚入地 2px(实测反馈)——pad 补偿保证贴地,
         // 与怪物(:854)/纸娃娃(:1266)/legacy(:1301)统一
-        const pad = this.spriteBottomPad(r, `npc${n.vanillaId}:f${n.frame}`);
+        const pad = this.spriteBottomPad(r, `npc${n.bound ? 'bound' : n.vanillaId}:f${n.frame}`);
         ctx.translate(n.cx, n.y + n.h); // 脚底中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
@@ -3117,9 +3140,18 @@ export class Renderer {
     // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
     if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
+    // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
+    // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
+    const cart = p.ridingCart ? p.cart : null;
+    const gfxOff = cart ? cart.gfxOffY : 0;
+    if (cart && cart.rotation !== 0) {
+      ctx.translate(p.cx, p.y + p.h);
+      ctx.rotate(cart.rotation);
+      ctx.translate(-p.cx, -(p.y + p.h));
+    }
     // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感；
     // 联机远端叠加 netOffset（原版 Player.netOffset 平滑收敛，本地玩家恒 0）
-    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + p.netOffY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
+    ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
     // ---- 翅膀层（PlayerDrawLayers.cs:695/738：身后，先于身体绘制）----
@@ -3154,6 +3186,7 @@ export class Renderer {
       if (doll) {
         let row = 0; // 0 站立
         if (useRow >= 0) row = useRow;
+        else if (cart) row = 3;  // 坐骑 BodyFrame=3（Player.cs:36059 bodyFrame=Height*mount.BodyFrame）
         else if (Math.abs(p.vx) > 0.3 && p.onGround) {
           // ★行走循环优先于静持行——原版 PlayerFrame（cs:36012 静持 vs :36178
           // velocity.X!=0 走路）静持行确实在前，但原版身体/腿是【分图层】：静持只钉
@@ -3197,6 +3230,8 @@ export class Renderer {
       if (useRow >= 0) {
         const rowFrame = af['Player_' + (useRow === 0 ? 12 : useRow === 4 ? 14 : 19 + useRow)];
         frame = rowFrame ?? idle;
+      } else if (cart) {
+        frame = af['Player_21'] ?? idle;  // bodyFrame 行 3 → 动作帧池 21（收势/坐姿）
       } else if (Math.abs(p.vx) > 0.3 && p.onGround) {
         // ★行走循环优先于静持行（与纸娃娃路径同因：原版身体/腿分图层，静持只钉
         // 身体行、腿照常走 legFrame 循环（cs:36178）；单层帧近似下静持行让位）
@@ -3238,6 +3273,30 @@ export class Renderer {
     }
 
     ctx.restore();
+    // ---- 矿车车身（Mount.Draw frontTexture :5500/5826-5835 1:1）----
+    // 锚点 = 玩家位 + (w/2 + XOffset*dir, h/2 + YOffset(13) + PlayerOffset(8))，
+    // 源矩形 = (0, 帧高*frame, 50, 帧高)、origin = (25, 帧高/2)；轮组 3 帧×12t。
+    // 旋转与玩家同轴（上方 fullRotation 变换），故此处再绕同一原点转一次
+    if (cart && this.atlas) {
+      const img = this.atlas.ensureVImage(cart.texture);
+      if (img) {
+        const frames = 3;
+        const fh = Math.floor(img.height / frames);
+        const fr = Math.min(frames - 1, Math.max(0, cart.animFrame));
+        const anchorX = p.x + p.w / 2 + p.facing;         // width/2 + XOffset(1)*dir
+        // height 用坐骑 hitbox（42 + heightBoost 10 = 52）：height/2 + YOffset(13) + PlayerOffset(8)
+        const anchorY = p.y + cart.h / 2 + 13 + 8;
+        ctx.save();
+        if (cart.rotation !== 0) {
+          ctx.translate(p.cx, p.y + p.h);
+          ctx.rotate(cart.rotation);
+          ctx.translate(-p.cx, -(p.y + p.h));
+        }
+        ctx.drawImage(img, 0, fr * fh, img.width, fh,
+          anchorX - img.width / 2, anchorY + gfxOff - fh / 2, img.width, fh);
+        ctx.restore();
+      }
+    }
     // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住
     if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool) {
       this.drawUseItem(ctx, p, swing);

@@ -513,6 +513,45 @@ export class GlowstickProj extends Entity {
   }
 }
 
+// ================= 净化粉/邪恶粉云（proj 10/11/463，aiStyle 6，cs:22399-22533） =================
+
+/** 粉末云 1:1（SetDefaults cs:637-662：64×64 命中盒、tileCollide=false、penetrate=-1、
+ *  alpha=255 本体不可见——视觉全靠尘粒；AI_006 cs:22399-22533：速度 ×0.95 衰减、
+ *  寿命 180 tick、首 tick 30 粒尘、每 tick 命中盒内逐格 Convert + Damage_TryUsingPowders
+ *  （:13646）NPC 转化。tile/NPC 实效经 GameHooks.applyPowder 回调——实体层不触
+ *  World/实体桶，与 cutTile/breakTile 同构） */
+export class PowderProj extends Entity {
+  w = 64; h = 64;
+  projId: number;
+  dead = false;
+  private t = 0;
+  private dusted = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, projId: number) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.projId = projId;
+  }
+
+  draw(): void { /* 原版 alpha=255：本体不绘制（cs:643），尘粒即全部视觉 */ }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    this.t++;
+    if (this.t >= 180) { this.dead = true; return; } // ai[0]==180 → Kill（cs:22406）
+    this.vx *= 0.95; this.vy *= 0.95;                // cs:22403
+    this.x += this.vx;
+    this.y += this.vy;
+    if (!this.dusted) {
+      // 首帧尘团（cs:22411-22452：30 粒，dust = 10+type → 净化 20 / 邪恶 21 / 猩红 231）
+      this.dusted = true;
+      const color = this.projId === 10 ? '#DCE8E2' : this.projId === 11 ? '#B070D0' : '#D06070';
+      game.spawnParticles(this.cx, this.cy, color, 30, 1.6, { life: 45, damp: 0.94, size: 2 });
+    }
+    game.applyPowder?.(this.projId, this.x, this.y, this.w, this.h);
+  }
+}
+
 // ================= Torch God 火把弹幕（proj 949，AI_184 cs:40100） =================
 
 /** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 20 伤。

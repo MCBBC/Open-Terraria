@@ -50,6 +50,23 @@ window.addEventListener('unhandledrejection', (e) =>
     origError(...args);
   };
 }
+// 警告 ring（F5 报告 warnings 段数据源；与错误环分离——告警刷屏不能挤掉真错误）。
+// 全量捕获 console.warn：渲染层的 warn-once（如 VanillaTiler 源矩形越界/取帧失败）
+// 随手入环，任何模块无需单独接线
+const WARN_RING_CAP = 50;
+function pushSwWarn(msg: unknown) {
+  const w = window as unknown as { __swWarns?: Array<{ t: number; msg: string }> };
+  if (!Array.isArray(w.__swWarns)) w.__swWarns = [];
+  w.__swWarns.push({ t: Date.now(), msg: String(msg).slice(0, 500) });
+  if (w.__swWarns.length > WARN_RING_CAP) w.__swWarns.shift();
+}
+{
+  const origWarn = console.warn;
+  console.warn = (...args: unknown[]) => {
+    pushSwWarn(args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a))).join(' '));
+    origWarn(...args);
+  };
+}
 
 ui.onBestiary = () => flow.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
 const audio = new AudioSystem();

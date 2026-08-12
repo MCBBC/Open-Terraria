@@ -20,7 +20,7 @@ export interface GameHooks {
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
   /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */
-  breakTile(x: number, y: number): void;
+  breakTile?(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 出生敌人 */
@@ -42,12 +42,19 @@ export interface GameHooks {
   notifyInventoryChanged(): void;
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒） */
   onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number): void;
+  /** 粉末云实效（净化粉 proj 10 / 邪恶粉 11 / 猩红粉 463，Projectile.cs:22399-22533
+   *  AI_006 每帧回调）：命中盒内逐格 WorldGen.Convert + Damage_TryUsingPowders（:13646）
+   *  NPC 转化。Game 实现（evolution.convert + bound 税务官 Transform 链） */
+  applyPowder?(projId: number, x: number, y: number, w: number, h: number): void;
   /** 吸血链（Projectile.vampireHeal/ghostHeal）：返回实际回复 HP（0 = 未生效） */
   applyLifeSteal?(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic?: boolean): number;
   /** 播放音效 */
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）。
+   *  Game 实现：路由到 Wiring.hitSwitch（压板/轨道族直接 TripWire） */
+  hitTrackSwitch?(i: number, j: number): void;
   /** 按原版文件名直播（无合成兜底；缓冲未就位时仅触发后台懒加载，本播静默） */
   playSfxFile?(file: string, vol?: number, x?: number, y?: number): void;
   /** 拾取物品时在主角旁飘出物品名 */

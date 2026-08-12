@@ -1104,7 +1104,7 @@ export class Enemy extends Entity {
             if (this.doorHit >= 10) {
               this.doorHit = 0;
               if (this.vanillaId === 26) {
-                game.breakTile(dtx, dty); // GoblinPeon 拆门（:60439-60444）
+                game.breakTile?.(dtx, dty); // GoblinPeon 拆门（:60439-60444）
                 this.doorWarm = 0;
               } else if (!openDoor(st, dtx, dty, dir)) {
                 const clock = game.world.clock;

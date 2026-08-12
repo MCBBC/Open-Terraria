@@ -8,6 +8,11 @@ import { TILE } from '../core/constants';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { getUVForMasks } from './BlendFraming';
 import { tileAnim } from './TileAnim';
+import {
+  sourceRectOf, boosterAnimFrame, drawLeftDecoration, drawRightDecoration,
+  drawBumper, drawBouncyBumper,
+  DECOR_LEFT_DOWN, DECOR_RIGHT_DOWN, DECOR_BOUNCY_BUMPER, DECOR_REGULAR_BUMPER,
+} from '../world/MinecartTrack';
 
 type Frame = [number, number];
 
@@ -543,14 +548,40 @@ export function drawCactusCell(
   }
 }
 
-/** 绘制一格原版图块。
- *  auto：现场算帧；style：显式 18px 帧偏移。
+/** 矿车轨道格绘制（TileDrawing.DrawTile_MinecartTrack :3823-3857 1:1）。
+ *  frameX = 前轨连接 ID、frameY = 后轨连接 ID（0xFFFF = -1 无后轨）。
+ *  层序：后轨 → 前轨 → 下行装饰(36/37, 画在下一格) → 挡板(39 普通 / 38 弹性, 画在上一格)。
+ *  加速轨道（type 2）随 boosterAnimFrame() 滚动帧行（Main.cs:18734-18741） */
+function drawMinecartTrackCell(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  x: number, y: number, px: number, py: number, fx: number, fy: number,
+): void {
+  const back = fy === 0xFFFF ? -1 : fy;
+  const front = fx >= 40 ? 0 : fx;
+  const anim = boosterAnimFrame();
+  const draw = (frameID: number, ox: number, oy: number): void => {
+    const s = sourceRectOf(frameID, anim);
+    if (!s) return;
+    const r = atlas.vrect(314, s.sx, s.sy, 16, 16);
+    if (r) ctx.drawImage(r.img, r.sx, r.sy, 16, 16, px + ox, py + oy, TILE, TILE);
+  };
+  if (back >= 0) draw(back, 0, 0);
+  draw(front, 0, 0);
+  if (back >= 0 && drawLeftDecoration(back)) draw(DECOR_LEFT_DOWN, 0, TILE);
+  if (drawLeftDecoration(front)) draw(DECOR_LEFT_DOWN, 0, TILE);
+  if (back >= 0 && drawRightDecoration(back)) draw(DECOR_RIGHT_DOWN, 0, TILE);
+  if (drawRightDecoration(front)) draw(DECOR_RIGHT_DOWN, 0, TILE);
+  if (drawBumper(front)) draw(DECOR_REGULAR_BUMPER, 0, -TILE);
+  else if (drawBouncyBumper(front)) draw(DECOR_BOUNCY_BUMPER, 0, -TILE);
+  void x; void y;
+}
+
+/** 绘制一格原版图块。 *  auto：现场算帧；style：显式 18px 帧偏移。
  *  重要修正：wld 里多格家具每格 frameX 往往全 0（不是 0/18 交错），
  *  直接用存储帧会让 2 格宽家具两格都画锚点帧（重复左侧贴图）。
  *  style 模式改为：若本格帧偏移为 0，向左/上扫描同类同物体格子，
  *  按到锚点的格距重算帧偏移（锚点=左侧或上方最近格） */
-export function drawVanillaCell(
-  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
   sheet: number, frame: 'auto' | 'style' | 'blend', fw: number, fh: number,
   st: TileStore, x: number, y: number, type: number,
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
@@ -563,6 +594,9 @@ export function drawVanillaCell(
   if (PIX !== undefined && type === PIX) { drawPixelBlock(ctx, st, x, y, fx, fy, px, py); return; }
   // 751/752(睡着的掘地龟/啮龙蛋):仅锚点帧 (0,0) 绘制,非锚点格整格跳过(:1034-1048)
   if ((sheet === 751 || sheet === 752) && (fx !== 0 || fy !== 0)) return;
+  // 矿车轨道（tile 314）：frameX/frameY = 前/后轨【连接 ID】（0-35，非 18px 像素偏移！）。
+  // 后轨先画、前轨后画；下行装饰画在下一格、挡板画在上一格（TileDrawing.cs:3823-3857）
+  if (sheet === 314) { drawMinecartTrackCell(ctx, atlas, x, y, px, py, fx, fy); return; }
   // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634 + 棕榈 323 + 蘑菇树 72）：
   // 树冠/树枝标记帧 + 生物群系树干（TEdit 同一套逻辑）。
   // 棕榈干身 frameY 是倾斜偏移（跨列）——主遍跳过，整棵由树族外扩遍绘制防裁剪
@@ -749,7 +783,16 @@ export function drawVanillaCell(
     r = atlas.vframeAt(sheet, ofx, ofy);
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
   }
-  if (!r) return;
+  if (!r) {
+    // 取帧双落空:图片未载(瞬态,onVImageLoaded 会重烘焙)或 vmeta 缺失(永久)。
+    // warn-once 区分排查——永久缺失曾静默吞掉整类 tile
+    if (!SRC_OOB_WARNED.has(`n${sheet}`)) {
+      SRC_OOB_WARNED.add(`n${sheet}`);
+      console.warn(`[VanillaTiler] sheet ${sheet} 取帧失败(仅一次): 帧(${fx},${fy})` +
+        ` img=${atlas.ensureVImage(`vanilla/Tiles_${sheet}.png`) ? '已载' : '未载'} vmeta=${atlas.vmeta(sheet) ? '有' : '无'}`);
+    }
+    return;
+  }
   // tileTop(GetTileDrawData 权威,静态表 + 条件项)与 C 类手动偏移
   const cond = tileTopCond(sheet, fx, fy);
   let dyOff = cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
@@ -839,7 +882,17 @@ export function drawVanillaCell(
   const adj = drawAdjust(sheet, fx, fy, x, y, r.img.width, r.img.height, st, st.w);
   const asx = adj.sx ?? r.sx, asy = adj.sy ?? r.sy;
   const asw = adj.sw ?? r.sw, ash = adj.sh ?? r.sh;
-  if (asx < 0 || asy < 0 || asx + asw > r.img.width || asy + ash > r.img.height) return;
+  if (asx < 0 || asy < 0 || asx + asw > r.img.width || asy + ash > r.img.height) {
+    // 源矩形越界:静默 return 曾让 id 空间碰撞 bug(物品 case 错抄进 drawAdjust,
+    // sheet 28 陶罐被劫持)潜伏数日,表现为神秘空格。此处 warn-once 暴露同类问题。
+    const bk = `b${sheet}:${asx},${asy},${asw}x${ash}`;
+    if (!SRC_OOB_WARNED.has(bk)) {
+      SRC_OOB_WARNED.add(bk);
+      console.warn(`[VanillaTiler] 源矩形越界,该格不绘制(每键仅一次): sheet ${sheet} ` +
+        `帧(${fx},${fy}) → 调整后(${asx},${asy} ${asw}x${ash}) > 表 ${r.img.width}x${r.img.height}`);
+    }
+    return;
+  }
   // 尺寸覆写后重新居中(711 豁免)
   const fdx = px - (sheet === 711 ? 0 : (asw - TILE) / 2);
   // C 类手动偏移(DrawSingleTile :1032-1186)
@@ -979,6 +1032,8 @@ const SMOOTH_BORDER = new Set([321, 157, 208, 159, 190, 80, 251, 202, 229, 56, 3
 
 /** X 镜像翻转(GetTileDrawData:x % 2 == 0 → FlipHorizontally,植物/藤蔓变体的原版来源) */
 const FLIP_X_EVEN = new Set([3, 20, 24, 52, 61, 62, 71, 73, 74, 81, 82, 83, 84, 110, 113, 115, 201, 205, 227, 270, 271, 324, 382, 519, 528, 529, 571, 572, 581, 590, 595, 615, 624, 636, 638, 656, 660, 700, 701, 703]);
+/** 源矩形越界 warn-once 键去重(防每帧刷屏;换世界不重置可接受——键含 sheet+矩形) */
+const SRC_OOB_WARNED = new Set<string>();
 
 /** tileHeight=18 组(:4933-4977 + 20/590/595/615/79/90 + 114 高度+2)——grid 仍是 16 的需覆写 */
 const HEIGHT_18 = new Set([16, 17, 20, 26, 32, 69, 72, 77, 79, 90, 114, 124, 137, 138, 352, 462, 487, 488, 574, 575, 576, 577, 578, 590, 595, 615, 664, 695, 704, 712, 713, 714, 715, 716]);

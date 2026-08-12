@@ -188,7 +188,7 @@ export class World {
     if (p.clock.bloodMoon !== undefined) w.clock.bloodMoon = p.clock.bloodMoon;
     if (p.clock.eclipse !== undefined) w.clock.eclipse = p.clock.eclipse;
     if (p.clock.moonPhase !== undefined) w.clock.moonPhase = p.clock.moonPhase;
-    if (p.seedFlags) w.seedFlags = p.seedFlags;
+    if (p.seedFlags) w.seedFlags = { ...p.seedFlags };
     if (p.moonType !== undefined) w.moonType = p.moonType;
     if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
       w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }

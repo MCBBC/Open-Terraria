@@ -702,10 +702,25 @@ export class DukeSharknadoTornado extends Entity {
     }
   }
 
-  /** v6 联机打包：kind=6，tag=big 标记。访客重建后本地跑生长/摇摆/列伤害
-   *  （确定性自包含 AI），仅出鲨经 !netPuppet 门禁排除（msg23 同步） */
+  /** v6 联机打包：kind=6，tag=`${big},${剩余段数ai1},${段倒计时ai0}`。
+   *  近似收紧②：携带生长状态——中途入视野的龙卷按快照段盒+段数确定性恢复
+   *  （topY = 快照y + 当前段半高,与房主同公式）,不再从零重长 */
   netProjMeta() {
-    return { kind: 6, tag: this.big ? '1' : '0', aux: 0, dmg: 0 };
+    return { kind: 6, tag: `${this.big ? 1 : 0},${this.ai1},${this.ai0}`, aux: 0, dmg: 0 };
+  }
+
+  /** v6 近似收紧②：访客重建时由快照段盒 + ai1/ai0 恢复生长态。
+   *  topY 与 ai1 是确定性函数关系（resize: y = topY − h(ai1)/2），故由
+   *  snapY 反解即可精确对齐房主当前态（含列顶位置,判定盒不再错位） */
+  netStateSync(ai1: number, ai0: number, snapX: number, snapY: number): void {
+    if (!Number.isFinite(ai1) || ai1 < 0 || ai1 > this.ai1Start) return; // 非法态保持新建
+    this.ai1 = ai1;
+    this.ai0 = Number.isFinite(ai0) ? ai0 : 10;
+    this.segs = this.ai1Start - ai1;
+    this.resize();
+    this.x = snapX;                    // cx = snapX + w/2,resize 后 x = cx − w/2 = snapX
+    this.topY = snapY + this.h / 2;    // 反解列顶（y = topY − h/2 的逆）
+    this.y = snapY;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -1008,6 +1023,13 @@ export class MLDeathray extends Entity {
   private get maxScale(): number { return this.kind === 'head' ? 1 : 0.4; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
+    // v6 近似收紧①：束角回写——快照把房主实时角度放在 vx/vy 通道（exVx/exVy），
+    // 傀儡消费式同步（读后清零防下一 tick 重复回拉振荡）；快照间隙内本地按扫速
+    // 自推插值。后台页暂停恢复后由下一快照纠偏（此前只按首帧角自推会永久漂移）
+    if (this.netPuppet && (this.vx !== 0 || this.vy !== 0)) {
+      this.angle = Math.atan2(this.vy, this.vx);
+      this.vx = 0; this.vy = 0;
+    }
     // v6 联机：傀儡端按 netId 找锚（msg23 傀儡）；本端真身按本地 id
     const src = this.srcNetId
       ? (game.enemies() as Enemy[]).find((n) => n.netId === this.srcNetId)

@@ -15,7 +15,8 @@
 //   - Collision.CanHitLine（GrowMoreVines 的加权计数）→ 仅计数不判视线
 //   - PlayerLOS（球茎/蜂巢/蚁狮幼虫隐藏性）→ 玩家距离 >50 格视为不可见
 //   - 装饰变体帧（PlaceTile 后 TileFrame 随机化）→ 直接随机变体帧
-//   - 净化粉/环境转换器 Convert 其余 case（5/6/7/10 净化）不在演化路径，未移植
+//   - 环境转换器 Convert 其余 case（5/6/7/10/12/13）不在演化路径，未移植；
+//     case 11 净化已由净化粉弹体链补齐（见 convert()，Projectile.cs:22494 消费方）
 import type { TileStore } from '../TileStore';
 import { TILE_DEFS } from '../../data/tiles';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
@@ -61,6 +62,8 @@ const CONV_SNOW = new Set([147]);
 const WALL_CONV_GRASS = new Set([63, 64, 65, 66, 67, 68, 69, 70, 81, 264, 265, 268]);
 const WALL_CONV_STONE = new Set([1, 61, 185, 3, 28, 83, 262, 274, 246, 248, 269, 349]);
 const WALL_CONV_HARD_SAND = new Set([216, 217, 219, 218, 304, 305, 307, 306]);
+// WallID.Sets.Conversion.Dirt（WallID.cs:15）——净化的墙分支（Convert case 11）专用
+const WALL_CONV_DIRT = new Set([2, 16]);
 const WALL_CONV_SANDSTONE = new Set([187, 220, 222, 221, 275, 308, 310, 309]);
 const WALL_CONV_PURE_SAND = new Set([216, 187, 304, 275]);
 const WALL_CONV_NEW1 = new Set([188, 192, 200, 204, 212, 276, 280, 288, 292, 300]);
@@ -801,6 +804,36 @@ export class WorldEvolution {
         else if (sheet === 400 || sheet === 401) this.setType(i, j, S(396));
         else if ([24, 32, 201, 205, 352, 636].includes(sheet)) this.kill(i, j);
         break;
+      case 11: { // 净化（cs:55792-55902：净化粉弹体 10 逐格调用——邪恶/神圣族还原原状）
+        if (walls) {
+          const fossil = wall === 61 || wall === 185 || wall === 262 || wall === 274;
+          if (WALL_CONV_STONE.has(wall) && wall !== 349 && !fossil) convWall(349);
+          else if (wall === 69 || wall === 70 || wall === 81) {
+            // 腐化/猩红/神圣草墙 → 地表原版草墙族（9/10 → 63，1/10 → 65；地下 64）
+            convWall(j < this.host.worldSurface ? (Math.random() * 10 < 9 ? 63 : 65) : 64);
+          } else if (wall === 262) convWall(61);
+          else if (wall === 274) convWall(185);
+          else if (WALL_CONV_DIRT.has(wall) && wall !== 2) convWall(2);
+          else if (WALL_CONV_NEW1.has(wall) && wall !== 212) convWall(212);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 213) convWall(213);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 214) convWall(214);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 215) convWall(215);
+          else if (WALL_CONV_HARD_SAND.has(wall) && wall !== 216) convWall(216);
+          else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 187) convWall(187);
+        }
+        // 火把净化（type 4 → style 0，Convert_ActuallyConvertTorch）未接——
+        // 既有 case 1-4 同样不处理火把转换，保持一致（GAP）
+        if (!tiles) break;
+        if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 60) convTile(60);
+        else if (CONV_GOLF_GRASS.has(sheet) && sheet !== 477) convTile(477);
+        else if (CONV_GRASS.has(sheet) && sheet !== 2 && sheet !== 477) convTile(2);
+        else if (CONV_STONE.has(sheet) && sheet !== 1) convTile(1);
+        else if (CONV_ICE.has(sheet) && sheet !== 161) convTile(161);
+        else if (CONV_SAND.has(sheet) && sheet !== 53) convTile(53);
+        else if (CONV_HARD_SAND.has(sheet) && sheet !== 397) convTile(397);
+        else if (CONV_SANDSTONE.has(sheet) && sheet !== 396) convTile(396);
+        break;
+      }
     }
   }
 

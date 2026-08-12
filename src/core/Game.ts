@@ -161,11 +161,13 @@ import { Arrow } from '../entities/Arrow';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
-import { Minecart } from '../entities/Minecart';
+import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
+import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
+import { canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import type { DropExtras } from '../drops/NpcDrops';
@@ -180,6 +182,11 @@ const AMMO_BULLET = 14;
  *  Revolver 2269 / Gatligator 2270）。其余枪械走 Item_11 通用枪声 */
 const GUN_SHOTGUN_VIDS = new Set([534, 964, 3788, 4703]);
 const GUN_HANDGUN_VIDS = new Set([164, 219, 1255, 1929, 2269, 2270]);
+
+/** 粉末族物品 → 弹体（ItemID.cs: PurificationPowder 66 → ProjectileID 10 / VilePowder 67
+ *  → 11 / ViciousPowder 2886 → 463；Item.cs SetDefaults shoot）。注：其余 shoot=10 的
+ *  物品（96/98/434 等）弹体不是粉末云语义，不在此表——按物品 id 精确门禁 */
+const POWDER_PROJ_BY_ITEM: Record<number, number> = { 66: 10, 67: 11, 2886: 463 };
 
 /** legacy（无 vid）物品的原版 useStyle 补表——Boss 召唤物与生命水晶在
  *  Item.cs SetDefaults 均为 4（举过头）：544/556/557 机械三王、560 史莱姆王冠、
@@ -730,8 +737,14 @@ export class Game implements GameHooks {
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
       // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）----
-      case 5: return new DukeSharknadoBolt(s.x, s.y, s.vx, s.vy, s.tag === '1', false, null as unknown as Enemy);
-      case 6: return new DukeSharknadoTornado(s.x, s.y, s.tag === '1', null as unknown as Enemy);
+      case 5: return new DukeSharknadoBolt(s.x, s.y, s.vx, s.vy, s.tag[0] === '1', false, null as unknown as Enemy);
+      case 6: {
+        // 近似收紧②：tag=`${big},${ai1},${ai0}`——中途入视野的龙卷按快照恢复生长态
+        const [bigBit, ai1s, ai0s] = s.tag.split(',').map(Number);
+        const t = new DukeSharknadoTornado(s.x, s.y, bigBit === 1, null as unknown as Enemy);
+        t.netStateSync(ai1s, ai0s, s.x, s.y);
+        return t;
+      }
       case 7: {
         const [srcId, kindBit] = s.tag.split(',').map(Number);
         const m = new MLDeathray(this.netFindAnchor(s, srcId), kindBit === 0 ? 'head' : 'core',
@@ -960,6 +973,113 @@ export class Game implements GameHooks {
   heldWaterCandle = false;
   trackTile = TILE_BY_KEY['v_314_minecart_track'] ?? 0;
   minecart: import('../entities/Minecart').Minecart | null = null;
+  /** 坐骑键（R）边沿锁（上/下车都只吃一次按下） */
+  private cartKeyLatch = false;
+
+  /** 物品 → 矿车贴图（矿车族召唤物；含内部占位 minecart_item = vanilla 2343） */
+  private cartTextureOfItem(internalId: number): string | null {
+    const key = ITEM_DEFS[internalId]?.key ?? '';
+    if (key === 'minecart_item') return DEFAULT_CART_TEXTURE;
+    const vid = viIdFromKey(key);
+    return vid >= 0 ? CART_TEXTURES[vid] ?? null : null;
+  }
+
+  /** 上车（TrackHook proj 403 语义：GetOnTrack 吸附 + 落点实心门 :22407）。
+   *  返回 false = 落点被实心卡住，上车失败 */
+  private mountMinecartAt(tx: number, ty: number, texture: string): boolean {
+    if (this.minecart) return false;
+    const st = this.world.store;
+    const cart = new Minecart();
+    cart.texture = texture;
+    cart.superCart = this.superCartUnlocked();
+    const snap = getOnTrack(st, tx, ty, this.player.x, this.player.y, cart.w, cart.h);
+    if (snap) { cart.x = snap.x; cart.y = snap.y; }
+    else { cart.x = tx * TILE + 8 - cart.w / 2; cart.y = (ty + 1) * TILE - cart.h; }
+    // 落点实心门（Projectile 403：!Collision.SolidCollision(Position, width, height-20)）
+    for (let sx = Math.floor(cart.x / TILE); sx <= Math.floor((cart.x + cart.w - 1) / TILE); sx++) {
+      for (let sy = Math.floor((cart.y + 20) / TILE); sy <= Math.floor((cart.y + cart.h - 1) / TILE); sy++) {
+        if (st.inBounds(sx, sy) && st.isSolid(sx, sy)) return false;
+      }
+    }
+    cart.mounted = true;
+    this.entities.add(cart, 'props');
+    this.minecart = cart;
+    this.player.ridingCart = true;
+    this.player.cart = cart;
+    // 上车声（DelegateMethods.Minecart.LandingSound = SoundID.Item53）
+    this.playSfxFile('Item_53', 0.7, cart.x, cart.y);
+    return true;
+  }
+
+  /** 下车（Mount.TryDismount：位置保持、坐骑消失——矿车 buff 结束即移除） */
+  private dismountMinecart(): void {
+    const cart = this.minecart;
+    if (!cart) return;
+    const p = this.player;
+    p.x = cart.x;
+    p.y = cart.y;
+    p.vx = 0;
+    p.vy = 0;
+    p.ridingCart = false;
+    p.cart = null;
+    cart.mounted = false;
+    cart.dead = true;
+    this.minecart = null;
+  }
+
+  /** QuickMinecart（Player.cs:5796-5827）：射程内取视线可达的最近轨道格上车 */
+  private tryQuickMinecart(): void {
+    if (this.minecart) return;
+    const st = this.world.store;
+    const p = this.player;
+    const ptx = Math.floor(p.cx / TILE), pty = Math.floor(p.cy / TILE);
+    // TileReachCheckSettings.Simple 同款射程盒（inTileRange 口径：x 5 / y 3 + tileBoost）
+    const tb = (p.equipStats.tileRange ? 3 : 0) + (p.buffs.has(BuffType.Builder) ? 1 : 0);
+    const rx = Math.min(20, 5) + tb, ry = Math.min(20, 3) + tb;
+    let best: { x: number; y: number } | null = null;
+    let bestD = Infinity;
+    for (let x = ptx - rx; x <= ptx + rx; x++) {
+      for (let y = pty - ry; y <= pty + ry; y++) {
+        if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== this.trackTile) continue;
+        const wx = x * TILE + 8, wy = y * TILE + 8;
+        const d = Math.hypot(wx - p.cx, wy - p.cy);
+        if (d < bestD && canHitLine(st, p.cx, p.cy, 0, 0, wx, wy, 0, 0)) {
+          bestD = d;
+          best = { x, y };
+        }
+      }
+    }
+    if (best) {
+      // 贴图优先级：矿车装备槽（miscEquips[2]）> 手持 > 背包首件（TrackHook 近似）
+      const tex = this.bestCartTexture();
+      this.mountMinecartAt(best.x, best.y, tex);
+    }
+  }
+
+  /** 玩家可用的矿车贴图（miscEquips[2] 装备矿车 > 手持 > 背包扫描；无则基础矿车） */
+  private bestCartTexture(): string {
+    const misc = this.player.inv.miscEquips?.[2];
+    if (misc) {
+      const t = this.cartTextureOfItem(misc.id);
+      if (t) return t;
+    }
+    const held = this.player.inv.heldItem();
+    if (held) {
+      const t = this.cartTextureOfItem(held.id);
+      if (t) return t;
+    }
+    for (const s of this.player.inv.slots) {
+      if (!s) continue;
+      const t = this.cartTextureOfItem(s.id);
+      if (t) return t;
+    }
+    return DEFAULT_CART_TEXTURE;
+  }
+
+  /** 矿车升级套件解锁态（Player.unlockedSuperCart；持久化于世界 flags） */
+  private superCartUnlocked(): boolean {
+    return !!(this.world.flags as Record<string, boolean>).superCart;
+  }
   trapCooldown = new Map<string, number>();
   plateLatch = new Set<string>();
   /** 压板/测重板每 tick 复用缓冲(2026-08 审计 G9,清零复用) */
@@ -1465,11 +1585,12 @@ export class Game implements GameHooks {
    *  巫师仅困难模式。
    *  近似与原版差异（依赖登记）：
    *  ① 原版为独立 NPC 类型 105 BoundGoblin / 106 BoundWizard / 123 BoundMechanic /
-   *    354 WebbedStylist / 589 GolferRescue（各自捆绑姿态贴图表），本作以 TownNPC.bound
-   *    统一近似——缺五张专属贴图与独立类型渲染分支；
-   *  ② 税务官原版是地狱 DemonTaxCollector(534) 被净化粉（弹体 10）命中 →
-   *    NPC.Transform(441)（Projectile.cs:13650-13657），本作直接 bound 解救——
-   *    缺净化粉物品/投掷弹体与 Transform 链 */
+   *    354 WebbedStylist / 589 GolferRescue，本作以 TownNPC.bound 统一近似——
+   *    渲染已按真帧走五张捆绑姿态表 + 税务官 534 酷刑者表（Renderer.BOUND_NPC_SHEET）；
+   *  ② 税务官原版是地狱 DemonTaxCollector(534) 被净化粉（弹体 10，PowderProj）命中 →
+   *    NPC.Transform(441)（Projectile.cs:13650-13657）——链已实装（Game.applyPowder）；
+   *    右键对话解救保留为便捷兜底（原版 534 是敌怪不可对话，差异登记）；
+   *  ③ 净化粉本身树妖商店未进货（vanilla-shopstock.json 无 66/67/2886），获取链缺（登记） */
   private placeBoundRescueNpcs() {
     const st = this.world.store;
     // 机械师：地牢入口向下找地牢墙内空气落脚
@@ -1550,6 +1671,40 @@ export class Game implements GameHooks {
     this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', name), 50, 125, 255);
     this.spawnParticles(npc.cx, npc.cy, '#9AE85A', 14, 2);
     this.playSfxFiles(['NPC_Hit_1'], 0.6);
+  }
+
+  /** 粉末云实效（PowderProj 每帧回调；原版 AI_006 cs:22460-22533 逐格 Convert +
+   *  Damage_TryUsingPowders cs:13646-13680 NPC 转化）：
+   *  proj 10 净化 → Convert case 11；11 → 腐化 1；463 → 猩红 4（均 tiles+walls）
+   *  NPC 转化：10 命中 bound 税务官（原版地狱酷刑者 534 → Transform 441，:13651-13655）
+   *  → 走 freeBoundNpc 转正。687 城镇史莱姆黄 → 683 链无对应实体（未实装，登记）；
+   *  11/463 的 AttemptToConvertNPCToEvil（兔/企鹅击杀等）未接（登记） */
+  applyPowder(projId: number, x: number, y: number, w: number, h: number): void {
+    const convType = projId === 10 ? 11 : projId === 11 ? 1 : projId === 463 ? 4 : -1;
+    if (convType > 0) {
+      const st = this.world.store;
+      // 命中盒外扩 ±1 格的遍历窗（cs:22460-22466），窗内再做盒-格矩形相交判定
+      const x0 = Math.max(0, Math.floor(x / TILE) - 1);
+      const x1 = Math.min(st.w - 1, Math.floor((x + w) / TILE) + 1);
+      const y0 = Math.max(0, Math.floor(y / TILE) - 1);
+      const y1 = Math.min(st.h - 1, Math.floor((y + h) / TILE) + 1);
+      for (let i = x0; i <= x1; i++) {
+        for (let j = y0; j <= y1; j++) {
+          const tx = i * TILE, ty = j * TILE;
+          if (x + w <= tx || x >= tx + TILE || y + h <= ty || y >= ty + TILE) continue;
+          this.evolution.convert(i, j, convType);
+        }
+      }
+    }
+    if (projId !== 10) return;
+    for (const n of this.entities.npcs) {
+      const npc = n as TownNPC;
+      if (!(npc instanceof TownNPC) || npc.dead || !npc.bound) continue;
+      if (npc.npcKey !== 'tax_collector') continue; // 原版 534 是唯一受净化粉转化的 NPC
+      if (x < npc.x + npc.w && x + w > npc.x && y < npc.y + npc.h && y + h > npc.y) {
+        this.freeBoundNpc(npc);
+      }
+    }
   }
 
   /** 守卫老人(NPC 37)生成/重生（原版 dungeonX/Y = 入口站立点 cs L72510-72527）。
@@ -2318,6 +2473,11 @@ export class Game implements GameHooks {
         // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
+        // drunkWorld 黎明翻转世界邪恶类型（Main.cs:64883-64886：!dayTime 期交替腐化/猩红）
+        if (w.seedFlags?.drunkWorld) w.crimson = !w.crimson;
+        // 自然召唤旗白天清除（UpdateTime :64625-64626）
+        this.spawnEyePending = false;
+        this.spawnHardBossPending = 0;
         // 灯笼夜对黎明事件 roll 的压制（Main.cs:64541 ShouldNormalEventsBeAbleToStart
         // 在 StartDay 之前求值——此时 CheckMorning 未跑，LanternsUp 仍为真 → stopEvents）
         const lanternStopEvents = LanternNight.lanternsUp;
@@ -2409,16 +2569,75 @@ export class Game implements GameHooks {
           this.newText(Lang.misc(99), 255, 0, 160);
         }
       }
+      // EoC 自然召唤 roll（StartNight :64732-64764）：!downedBoss1（BossesKeepSpawning
+      // = getGood×dontStarve×非十周年 / 天顶 noAltars 豁免）&& maxHp>=200 && def>10 &&
+      // 1/3（天顶 1/10）&& 城镇 NPC>=4 → spawnEye + misc[9]（入夜事件压制同血月）
+      this.spawnEyePending = false;
+      this.spawnHardBossPending = 0;
+      if (crossed(Clock.DUSK) && !LanternNight.lanternsUp) {
+        const sf = w.seedFlags ?? {};
+        const bossesKeepSpawning = !!(sf.getGoodWorld && sf.theConstant && !sf.tenthAnniversary);
+        const eocEligible = !w.flags['downed_4'] || bossesKeepSpawning || !!sf.skyblock;
+        const townCount = this.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length;
+        if (eocEligible && player.maxHp >= 200 && player.defense > 10
+          && townCount >= 4 && Math.random() < (sf.skyblock ? 1 / 10 : 1 / 3)) {
+          this.spawnEyePending = true;
+          this.newText(Lang.misc(9), 50, 255, 130);
+        } else if (!this.spawnEyePending && w.flags.hardMode && w.altarCount > 0
+          && w.moonEvent.kind === 0 && !this.boss
+          && !(w.flags['downed_125'] && w.flags['downed_126'] && w.flags['downed_127'])
+          && Math.random() < 1 / 10) {
+          // 机械 Boss 自然召唤 roll（:64765-64811）：1/10、无月事件、场上无 Boss、
+          // 三机械未全灭 → 三选一（只选未击败；1000 次重抽语义）+ misc[28/29/30]
+          for (let k = 0; k < 1000; k++) {
+            const n = 1 + Math.floor(Math.random() * 3);
+            const flag = n === 1 ? 'downed_125' : n === 2 ? 'downed_126' : 'downed_127';
+            if (!w.flags[flag] || bossesKeepSpawning) {
+              this.spawnHardBossPending = n;
+              this.newText(Lang.misc(27 + n), 50, 255, 130);
+              break;
+            }
+          }
+        }
+      }
       // 入夜事件压制（Main.cs:64717：LanternNight.LanternsUp → stopEvents=true，
       // 血月/入夜 Boss 召唤等 roll 整段跳过；须在 CheckNight 之后判读——当夜刚兑现也算）
       if (crossed(Clock.DUSK)
         && !LanternNight.lanternsUp
+        && !this.spawnEyePending // 血月与 EoC 同夜互斥（:64818 !WorldGen.spawnEye 门）
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
         && w.moonEvent.kind === 0      // 月事件进行中不 roll 血月（Main.cs:64300-64306 压制）
-        && player.maxHp > 120 && Math.random() < 1 / 9) {
-        // 黄昏血月 roll（Main.cs:64813-64831：1/9，新月不行，需生命上限>120）
+        && player.maxHp > 120 && Math.random() < 1 / (w.seedFlags?.tenthAnniversary ? 6 : 9)) {
+        // 黄昏血月 roll（Main.cs:64813-64831：1/9（十周年种子 1/6 :64815-64817），
+        // 新月不行，需生命上限>120；spawnEye 门（:64818）见入夜 EoC roll——同夜命中则本 roll 整体跳过）
         w.clock.bloodMoon = true;
         this.newText(Lang.misc(8), 50, 255, 130);
+      }
+    }
+    // ---- 自然 Boss 夜间生成（UpdateTime :64547-64621：夜间 time>4860 后每 tick；
+    //      玩家条件 = active && !dead && y<worldSurface*16(或出生点在地下) &&
+    //      4500px 内无月总(CanSpawnEnemiesNear :255)；EoC 命中即清旗，机械一次性）----
+    if (!w.clock.isDay && !player.dead) {
+      const nightTicks = (((w.clock.timeOfDay - Clock.DUSK) % 1 + 1) % 1) / (1 - (Clock.DUSK - Clock.DAWN)) * 32400;
+      const nearMoonLord = this.entities.enemies.some((e) => {
+        const en = e as Enemy;
+        return !en.dead && en.vanillaId === 398
+          && Math.hypot(en.cx - player.cx, en.cy - player.cy) < 4500;
+      });
+      const surfaceOk = player.y < w.groundLevel * TILE || w.spawnY > w.groundLevel;
+      if (nightTicks > 4860 && surfaceOk && !nearMoonLord) {
+        const offCols = Math.ceil((this.camera.viewW / this.camera.zoom / 2 + 300) / TILE);
+        const offTx = Math.floor(player.cx / TILE) + (Math.random() < 0.5 ? -1 : 1) * offCols;
+        if (this.spawnEyePending) {
+          this.spawnEyePending = false; // 清旗无条件（:64553-64555）
+          this.summonBossAtTx('eye_of_cthulhu', offTx);
+        } else if (this.spawnHardBossPending > 0) {
+          const n = this.spawnHardBossPending;
+          this.spawnHardBossPending = 0; // 一次性机会：无论成败清零（:64596）
+          if (!this.boss) {
+            this.summonBossAtTx(n === 1 ? 'destroyer' : n === 2 ? 'twins' : 'skeletron_prime', offTx);
+          }
+        }
       }
     }
     // ---- 税务员税款累积（Main.cs:64462-64470：在场时每 3600 tick(游戏 1 小时)
@@ -3006,28 +3225,37 @@ export class Game implements GameHooks {
 
   private updateUse(dt: number) {
     const inp = this.input;
-    // 矿车骑乘驱动:左右加速,跳车
+    void dt;
+    // ---- 矿车坐骑（Mount 6 + Minecart.cs 轨道运动学；物理在 Minecart.fixedUpdate）----
     if (this.minecart) {
       const cart = this.minecart;
-      const ix = this.player.inputX;
-      if (ix !== 0) cart.vx = Math.max(-8, Math.min(8, cart.vx + ix * 0.15));
-      if (inp.down('KeyR')) {
-        // 跳车(原版 R 键下车;Space 与跳跃共用会误触)
-        this.player.x = cart.x;
-        this.player.y = cart.y - 24;
-        this.player.vy = -4;
-        cart.mounted = false;
-        this.minecart = null;
+      const [mtx, mty] = this.camera.tileUnder(inp.mouseX, inp.mouseY);
+      const mType = this.world.store.get(mtx, mty);
+      // R（坐骑键）：骑乘中下车（Player.TryToDismount 路径 :5768-5776）
+      if (inp.down('KeyR') && !this.cartKeyLatch) {
+        this.dismountMinecart();
+        this.cartKeyLatch = true;
+      }
+      if (!inp.down('KeyR')) this.cartKeyLatch = false;
+      // 右键轨道：骑乘中 → 下车（Player.cs:32806-32812 type==314 && mount.Cart 分支）
+      if (inp.rightDown && mType === this.trackTile && this.trackTile !== 0) {
+        this.dismountMinecart();
         this.input.rightDown = false;
       }
-      // 玩家跟随车位置
-      this.player.x = cart.x;
-      this.player.y = cart.y - 26;
-      this.player.vx = cart.vx;
-      this.player.vy = 0;
-      if (cart.dead) { this.minecart = null; }
+      if (cart.dead || !cart.mounted) {
+        this.minecart = null;
+        this.player.ridingCart = false;
+        this.player.cart = null;
+      }
       return;
     }
+    // R（坐骑键）：未骑乘 + 附近有轨道 → QuickMinecart 上车（Player.cs:5796-5827：
+    // 射程内取最近轨道格 + CanHitLine 视线门）
+    if (inp.down('KeyR') && !this.cartKeyLatch && this.trackTile !== 0) {
+      this.cartKeyLatch = true;
+      this.tryQuickMinecart();
+    }
+    if (!inp.down('KeyR')) this.cartKeyLatch = false;
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
     // 时间调整按钮/面板悬停同理（renderer.timeUiHover 渲染期写入）
     if (inp.uiBlocking || this.player.dead || this.renderer.fullMap.open || this.renderer.timeUiHover || this.renderer.weatherUiHover) {
@@ -3042,19 +3270,14 @@ export class Game implements GameHooks {
     const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
     const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
 
-    // 右键：手持矿车点轨道(最优先,防 NPC 交谈拦截)→ 附近宝箱 → NPC 交谈 → 交互
+    // 右键：手持矿车族物品点轨道(最优先,防 NPC 交谈拦截)→ 附近宝箱 → NPC 交谈 → 交互
+    //（Player.cs:32806-32812：右键轨道格 → LaunchMinecartHook；矿车是坐骑召唤物，不消耗）
     const type = this.world.store.get(tx, ty);
     if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0) {
       const h = this.player.inv.heldItem();
-      if (h && ITEM_DEFS[h.id]?.key === 'minecart_item') {
-        const cart = new Minecart();
-        cart.x = tx * TILE; cart.y = (ty - 1) * TILE;
-        this.entities.add(cart, 'props');
-        this.minecart = cart;
-        cart.mounted = true;
-        this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.cb.onInventoryChanged();
-        this.input.rightDown = false;
+      const tex = h ? this.cartTextureOfItem(h.id) : null;
+      if (tex) {
+        if (this.mountMinecartAt(tx, ty, tex)) this.input.rightDown = false;
         return;
       }
     }
@@ -3064,6 +3287,17 @@ export class Game implements GameHooks {
         this.tryOpenChest(nearChest);
         this.input.rightDown = false;
       } else if (this.talkToNearbyNpc(tx, ty)) {
+        this.input.rightDown = false;
+      } else if (heldDef && viIdFromKey(heldDef.key) === 5289) {
+        // 矿车升级套件（Item 5289 MinecartPowerup → Player.unlockedSuperCart = true）：
+        // 永久解锁 SuperCart 档（runSpeed 20/accel 0.1/jump 5.15，Mount.cs:371-379），
+        // 持久化于世界 flags；已解锁时不再消耗
+        if (!this.superCartUnlocked()) {
+          (this.world.flags as Record<string, boolean>).superCart = true;
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.cb.onInventoryChanged();
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
+        }
         this.input.rightDown = false;
       } else if (heldDef?.key === 'suspicious_eye') {
         if (!this.world.clock.isDay) {
@@ -3426,18 +3660,28 @@ export class Game implements GameHooks {
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
       const px = this.player.cx + Math.cos(ang) * 14;
       const py = this.player.cy - 4 + Math.sin(ang) * 14;
-      // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）。
-      // ★伤害对账：1.4.4+ 投掷系并入 melee（Item 277 手里剑 SetDefaults melee=true）——
-      // 乘区=近战链×词缀+armorPen（此前裸 tc.damage 完全无乘区）
-      const psT = this.heldPrefixStat();
-      const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('melee'))
-        + this.player.equipStats.armorPen + this.player.meleeArmorPen); // 磨刀穿甲含投掷
-      let pen = projectileData(tc.shoot)?.penetrate ?? 1;
-      if (pen < 0) pen = 6;
-      pen = Math.max(1, Math.min(pen, 6));
-      this.entities.add(new Arrow(px, py,
-        Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
-        dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen }), 'projectiles');
+      // 粉末族（净化粉 66 / 邪恶粉 67 / 猩红粉 2886）：proj 10/11/463 是 aiStyle 6
+      // 粉末云（64×64 无碰撞盒、180 tick、无重力），不是 aiStyle 2 抛物投掷物——
+      // 必须先于下方 Arrow 分流，否则退化成"可回收的投掷刀"（GAP 补齐）。
+      // 云体以玩家为中心生成（原版 ItemCheck_Shoot 弹心 = 人物中心）
+      const powderProj = POWDER_PROJ_BY_ITEM[vid];
+      if (powderProj) {
+        this.entities.add(new PowderProj(this.player.cx - 32, this.player.cy - 32,
+          Math.cos(ang) * (c?.shootSpeed ?? 4), Math.sin(ang) * (c?.shootSpeed ?? 4), powderProj), 'projectiles');
+      } else {
+        // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）。
+        // ★伤害对账：1.4.4+ 投掷系并入 melee（Item 277 手里剑 SetDefaults melee=true）——
+        // 乘区=近战链×词缀+armorPen（此前裸 tc.damage 完全无乘区）
+        const psT = this.heldPrefixStat();
+        const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('melee'))
+          + this.player.equipStats.armorPen + this.player.meleeArmorPen); // 磨刀穿甲含投掷
+        let pen = projectileData(tc.shoot)?.penetrate ?? 1;
+        if (pen < 0) pen = 6;
+        pen = Math.max(1, Math.min(pen, 6));
+        this.entities.add(new Arrow(px, py,
+          Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
+          dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen }), 'projectiles');
+      }
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
       this.sfx.play('throw');
@@ -3567,18 +3811,7 @@ export class Game implements GameHooks {
         // 已有浮标 → 收竿（咬钩中给渔获，否则收回）
         const bobber = this.entities.projectiles.find((e) => e instanceof Bobber && !e.dead) as Bobber | undefined;
         if (bobber) {
-          const caught = bobber.reel(this);
-          if (caught > 0) {
-            const key = VANILLA_ITEM_KEY_BY_ID[caught];
-            if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, 1, 0, -2);
-            this.cb.onInventoryChanged?.();
-          } else if (bobber.catchEnemy > 0) {
-            // 血月钓鱼敌怪（FishingCheck_RollEnemySpawns :19399）：生成于浮标处
-            const en = Enemy.fromVanilla(bobber.catchEnemy, bobber.cx - 8, bobber.cy - 8);
-            if (en) this.entities.add(en, 'enemies');
-            this.cb.onInventoryChanged?.();
-          }
-          bobber.dead = true;
+          this.reelBobber(bobber);
         } else {
           // 抛竿：需背包有鱼饵（bait>0），取第一个
           let baitSlot = -1, baitPower = 0;
@@ -3917,6 +4150,16 @@ export class Game implements GameHooks {
     }
     // 锤：敲除背景墙（无墙则无事发生；也可清装饰）
     if (toolType === 'hammer') {
+      // 矿车轨道锤击（Player.cs:45442-45447）：FrameTrack(pound) 循环切换连接/加速向
+      if (type === this.trackTile && this.trackTile !== 0) {
+        if (this.tickCount - this.lastMineHitTick >= Math.max(8, speed)) {
+          this.lastMineHitTick = this.tickCount;
+          frameTrack(this.world.store, tx, ty, true);
+          this.sfx.play('tink');
+        }
+        this.mining = null;
+        return;
+      }
       // 原版锤循环（Player.cs:45625-45695）：整砖→半砖→slope1→2→3→4→整砖。
       // 方向感知：右实左空 → 先 slope2；上实下空（天花板模式）→ 先 slope3/4。
       // 平台族的锤循环（:45394-45440 平台坡面/楼梯）未接入——依赖登记：
@@ -4156,6 +4399,23 @@ export class Game implements GameHooks {
         this.spawnDrop(ax * TILE + 8, ay * TILE, 'vi_1291_life_fruit', 1);
       }
       this.spawnParticles(x * TILE + 8, y * TILE + 8, '#E180CE', 8, 1.8);
+      return;
+    }
+    // 矿车轨道（KillTile 314）：清除 + 六邻重 framing（邻线自动改道）+ 按
+    // 轨道类型掉对应物品（Minecart.GetTrackItem：普通 2340 / 压板 2492 / 加速 2739）
+    if (type === this.trackTile && this.trackTile !== 0) {
+      const i0 = st.idx(x, y);
+      const frame = st.frameX[i0] >= 36 ? 0 : st.frameX[i0];
+      const vid = trackItemId(frame);
+      const dropKey = vid === 2340 ? 'vi_2340_minecart_track'
+        : vid === 2492 ? 'vi_2492_PressureTrack'
+        : vid === 2739 ? 'vi_2739_BoosterTrack'
+        : 'place_v_314_minecart_track';
+      st.setTile(x, y, 0);
+      frameTrackArea(st, x, y);
+      this.spawnDrop(x * TILE + 8, y * TILE + 8, dropKey, 1);
+      this.spawnParticles(x * TILE + 8, y * TILE + 8, '#B5A47D', 6, 1.5);
+      this.sfx.play('dig');
       return;
     }
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
@@ -4789,10 +5049,26 @@ export class Game implements GameHooks {
     }
     // 支撑检查：非漂浮。原版权威 = TileObjectData.CanPlace（TileObjectData.cs 每_tile
     // 锚点表：AnchorTop/Bottom/Wall/AlternateTiles + 方向备选），全量锚点表未提取——
-    // 此处以"下/上/侧邻任一格有内容或墙"近似（依赖登记：TileObjectData 锚点类型表）
-    const needSupport = def.solid || def.platform || def.framed;
+    // 此处以"下/上/侧邻任一格有内容或墙"近似（依赖登记：TileObjectData 锚点类型表）。
+    // 矿车轨道（314）例外：无锚点可悬空铺设（TileObjectData 314 无 Anchor 项）
+    const isTrack = def.vanilla?.sheet === TRACK_SHEET;
+    const needSupport = !isTrack && (def.solid || def.platform || def.framed);
     if (needSupport && !this.hasSupport(tx, ty, ow, oh)) return;
     if (this.player.useTime > 0) return;
+
+    // 矿车轨道（WorldGen.PlaceTile case 314 → Minecart.PlaceTrack + SquareTileFrame：
+    // frameX/frameY 是连接 ID 非 18px 像素偏移，随后 FrameTrack 按邻接定型；
+    // style = placeStyle：0 普通 / 1 压板(2492) / 2 左加速(2739)；声效 Item52）
+    if (isTrack) {
+      const style = Math.max(0, Math.min(3, itemDef.placeStyle ?? 0));
+      placeTrack(st, tx, ty, style);
+      frameTrackArea(st, tx, ty);
+      this.player.inv.removeAt(this.player.inv.selected, 1);
+      this.player.useTime = 14;
+      this.playSfxFile('Item_52', 0.8, tx * TILE, ty * TILE);
+      this.cb.onInventoryChanged();
+      return;
+    }
 
     // 放置
     const isVanillaStyle = !!def.vanilla && def.vanilla.frame === 'style';
@@ -5706,6 +5982,10 @@ export class Game implements GameHooks {
    *  雨声层 gain = cloudAlpha×atmo；渲染 hooks（雪区比例/沙尘门）随 scene 刷新 */
   /** 墓园视觉强度（SceneState.UpdateGraveyard：lerp(16,36,count) 向目标 0.02/0.1 逼近——持久缓动） */
   private graveyardIntensity = 0;
+  /** 自然 Boss 召唤运行时态（WorldGen.spawnEye/spawnHardBoss :4140/:4142——不入存档，
+   *  clearWorld 重置=进世界清零；与血月 roll 互斥门 :64818） */
+  private spawnEyePending = false;
+  private spawnHardBossPending = 0;
 
   /** 天气预设（小地图天气面板按钮；面板见 Renderer.drawMinimap 天气段）：
    *  clear=停雨停沙尘停史莱姆 / cloudy=云量 120 / lightrain=0.15 / heavyrain=0.65 /
@@ -7441,6 +7721,61 @@ export class Game implements GameHooks {
     // extract-shops.mjs 未捕获该 if 门——与 moonPhase 同类缺口，此处直接补）。
     // 原版 SetDefaults(4702) 无价格覆盖 → 按 item value 100 铜出售
     if (npc.vanillaId === 208 && LanternNight.lanternsUp) out.push([4702, 100] as [number, number]);
+    // ---- 月相分档专柜（extract-shops.mjs 只记 cond:'moonPhase' 未捕获 case 值——
+    //      剔除恒真条目，按 Chest.cs switch 实表补 8 相位档）----
+    const phase = this.world.clock.moonPhase;
+    const price = (id: number) => ITEM_VALUES[String(id)] ?? 100;
+    const day = this.world.clock.isDay;
+    const add = (ids: number[]) => { for (const id of ids) out.push([id, price(id)] as [number, number]); };
+    if (npc.npcKey !== 'travelling_merchant') {
+      // 上述条目按相位重排（JSON 无 moonPhase 条目的 NPC 也进——分档表是权威）
+      switch (npc.vanillaId) {
+        case 453: { // 骷髅商（Chest.cs:2780-2940）
+          add([[284], [946], [3069], [4341], [285], [953], [3068], [3084]][phase]);
+          add(phase % 2 === 0 ? [3001] : this.world.flags.hardMode ? [188] : [28]);
+          add(!day || phase === 0 ? [3002] : [282]);
+          add(phase === 0 || phase === 1 || phase === 4 || phase === 5 ? [3003] : [40]);
+          add([[3310], [3313], [3312], [3311]][phase % 4]);
+          add(phase === 1 || phase === 2 ? [5640] : phase === 3 || phase === 5 ? [5641] : [5642]);
+          if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
+          break;
+        }
+        case 20: // 树妖盆栽树（:1650-1697：moonPhase/2 三件套）
+          add([4430, 4431, 4432, 4433, 4434, 4435, 4436, 4437, 4438, 4439, 4440, 4441].slice(
+            Math.floor(phase / 2) * 3, Math.floor(phase / 2) * 3 + (this.world.flags.hardMode ? 3 : 2)));
+          break;
+        case 54: // 裁缝套装（:1795-1923）
+          if (phase === 0) { add([245, 246]); if (!day) add([1288, 1289]); }
+          else if (phase === 1) add([325, 326]);
+          else if (this.world.flags.hardMode) {
+            if (phase === 2) add([869]);
+            else if (phase === 3) add([4994, 4997]);
+            else if (phase === 4) add([864, 865]);
+            else if (phase === 5) add([4995, 4998]);
+            else if (phase === 6) add([873, 874, 875]);
+            else add([4996, 4999]);
+          }
+          break;
+        case 124: // 机械师（:2058-2062：渔夫在场且奇相位 → 机械师钓竿）
+          if (phase % 2 === 1 && this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.vanillaId === 369)) {
+            add([2295]);
+          }
+          break;
+        case 207: if (phase === 0) add([2871, 2872]); break; // 染料商满月暗影/负片染料（:2233-2237）
+        case 353: if ((phase % 2 === 0) === day) add([1981]); break; // 造型师时光染料（:2720-2724）
+        case 633: { // 动物学家（:3358-3380 配对耳尾 + :3249-3252 满月夜狼人画）
+          const pair = [[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)];
+          add(pair);
+          if (phase === 0 && !day) add([5253]);
+          break;
+        }
+      }
+    }
+    // Painter 第二商店（case 25 :2456-2587）画作——并入主列表（月相四画 :2482-2506 + 常驻 1490）
+    if (npc.vanillaId === 227) {
+      add([1490]);
+      add([[1481], [1482], [1483], [1484]][Math.floor(phase / 2)]);
+    }
     return out;
   }
 
@@ -7455,10 +7790,10 @@ export class Game implements GameHooks {
       case 'downedBoss3': return !!(f['downed_35'] || f.downedSkeletron);
       case 'downedMechBossAny':
         return !!(f['downed_125'] || f['downed_126'] || f['downed_127'] || f['downed_134']);
-      // 月相门：extract-shops.mjs 只记了「gate 文本含 moonPhase」，未捕获 switch case
-      // 的具体相位值（裁缝染料线/骷髅商杂货/动物学家收藏品均按 8 相分档）——恒真近似，
-      // 分档需重提数据（依赖登记：extract-shops.mjs 捕获 case 相位 + JSON 再生）
-      case 'moonPhase': return true;
+      case 'moonPhase':
+        // 月相门：extract-shops.mjs 未捕获 case 相位值——恒 false，分档上架由
+        // shopStockFor 的相位实表负责（改 true 会全相位重复上架）
+        return false;
       case 'night': return !this.world.clock.isDay;
       case 'day': return this.world.clock.isDay;
       case 'zoneSnow': return !!this.scene?.zoneSnow;
@@ -8519,6 +8854,12 @@ export class Game implements GameHooks {
     this.sfx.playWavFile(file, vol ?? 1, x, y);
   }
 
+  /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）：
+   *  路由到 Wiring.hitSwitch——压板/轨道族直接 TripWire（Wiring.cs:167-171） */
+  hitTrackSwitch(i: number, j: number): void {
+    this.wiring?.hitSwitch(i, j);
+  }
+
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */
   private invNotifyAt = -100;
   private invNotifyPending = false;
@@ -8985,6 +9326,30 @@ export class Game implements GameHooks {
   // ================= 召唤 Boss =================
 
   /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
+  /** 收竿结算（Player.cs:51530-51598 ItemCheck_CheckFishingBobber）：物品掉落 /
+   *  血月敌怪（浮标处；618 +64px）/ 682 红城镇史莱姆一次性入镇 */
+  private reelBobber(bobber: Bobber): void {
+    const caught = bobber.reel(this);
+    if (caught > 0) {
+      const key = VANILLA_ITEM_KEY_BY_ID[caught];
+      if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, 1, 0, -2);
+      this.cb.onInventoryChanged?.();
+    } else if (bobber.catchEnemy > 0) {
+      const id = bobber.catchEnemy;
+      if (id === 682) {
+        this.world.flags.unlockedSlimeRedSpawn = true; // 世界级一次性（WorldFile :1413/:2433 持久化）
+        const slime = new TownNPC('town_slime_red', bobber.cx, bobber.cy);
+        this.entities.add(slime, 'npcs');
+        this.cb.onToast(Lang.itemName(682) ?? '红色城镇史莱姆加入了小镇！');
+      } else {
+        const en = Enemy.fromVanilla(id, bobber.cx - 8, bobber.cy - 8 + (id === 618 ? 64 : 0));
+        if (en) this.entities.add(en, 'enemies');
+      }
+      this.cb.onInventoryChanged?.();
+    }
+    bobber.dead = true;
+  }
+
   summonBoss(key: string): void {
     if (this.boss) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossActive')); return; }
     const side = Math.random() < 0.5 ? -1 : 1;
@@ -9007,7 +9372,7 @@ export class Game implements GameHooks {
       if (st.type[st.idx(tx, ty)] !== 0) break;
     }
     const spawnY = Math.max(4, ty - 12) * TILE;
-    const vanillaId = key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
+    const vanillaId = key === 'eye_of_cthulhu' ? 4 : key === 'eater_of_worlds_head' ? 13 : key === 'king_slime' ? 50 : key === 'brain_of_cthulhu' ? 266
       : key === 'skeletron_head' ? 35 : key === 'queen_bee' ? 222 : key === 'skeletron_prime' ? 127
       : key === 'destroyer' ? 134 : key === 'twins' ? 125 : key === 'wall_of_flesh' ? 113
       : key === 'lunatic_cultist' ? 439 : key === 'empress_of_light' ? 636 : key === 'queen_slime' ? 657

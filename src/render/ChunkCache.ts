@@ -246,6 +246,13 @@ export class ChunkCache {
             let set215 = this.animChunksBySheet.get(215);
             if (!set215) { set215 = new Set(); this.animChunksBySheet.set(215, set215); }
             set215.add(ChunkCache.key(cx, cy));
+          } else if (def.vanilla.sheet === 314) {
+            // 矿车轨道加速带动画（Main.cs:18734-18741 每 10 tick 推进、5 帧回卷）：
+            // 只注册重烘焙——frameY 是后轨连接 ID，勿走 addFrY 帧偏移；
+            // 帧行偏移由 drawMinecartTrackCell → sourceRectOf(frameID, anim) 处理
+            let set314 = this.animChunksBySheet.get(314);
+            if (!set314) { set314 = new Set(); this.animChunksBySheet.set(314, set314); }
+            set314.add(ChunkCache.key(cx, cy));
           } else if (TILE_ANIM_RATE[def.vanilla.sheet]) {
             const rows = this.autotiler.atlas.vmeta(def.vanilla.sheet)?.rows ?? 0;
             fy += animYOffset(def.vanilla.sheet, rows * 18);
