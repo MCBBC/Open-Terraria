@@ -116,6 +116,8 @@ export class BiomeBackground {
   private bgDelay = 0;
   private alphaFront = new Array(16).fill(0);
   private alphaFar = new Array(16).fill(0);
+  /** 岩浆背景动画累计 ms（magmaBGFrameCounter 每 8 tick=133.33ms 推帧,mod 3） */
+  private magmaFrameT = 0;
   /** 地下风格（≈Main.undergroundBackground/oldUndergroundBackground/ugBackTransition） */
   ugStyle = 0;
   private ugOld = 0;
@@ -541,13 +543,38 @@ export class BiomeBackground {
           }
         }
       }
-      // 岩浆带（slot6 岩浆体 + slot4 过渡条 + slot5 地狱柱）
-      tile(slots[6], magmaTop);
-      tile(slots[4], magmaTop - 200, 200);
-      // 地狱黑幕（DrawUnderworldBlackBox :52803：magmaTop 以下全黑）
-      if (magmaTop < viewH) {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, Math.max(0, magmaTop), viewW, viewH - Math.max(0, magmaTop));
+      // 岩浆带（slot6=125+hell 岩浆体,3 帧动画行 sourceY=frame*96;带区 magmaTop→UnderworldLayer）
+      {
+        const im6 = slots[6] ? this.img(slots[6]) : null;
+        if (im6 && im6.complete && im6.naturalWidth) {
+          const frameH = im6.naturalHeight / 3;   // 160×288 = 3 帧 × 96px
+          const sy = Math.min(2, magmaFrame) * frameH;
+          const wS = im6.naturalWidth;
+          const loops = Math.ceil(viewW / wS) + 1;
+          for (let i = 0; i < loops; i++) {
+            let yy = magmaTop;
+            while (yy < Math.min(uwScreenY, viewH)) {
+              ctx.drawImage(im6, 0, sy, wS, frameH, i * wS, yy, wS, frameH);
+              yy += frameH;
+            }
+          }
+        }
+        // slot4 岩浆过渡条（DrawMagmaTransition :52765）
+        tile(slots[4], magmaTop - 200, 200);
+        // 岩浆海表面波纹条（slot5=185+hell,160×48 取 16px 行 sourceY=frame*16,
+        // 画在 UnderworldLayer 高度 :52488-52497——★曾从未绘制="地狱背景缺失"组成项）
+        const im5 = slots[5] ? this.img(slots[5]) : null;
+        if (im5 && im5.complete && im5.naturalWidth) {
+          const sy = Math.min(2, magmaFrame) * 16;
+          const wS = im5.naturalWidth;
+          const loops = Math.ceil(viewW / wS) + 1;
+          const stripY = Math.max(magmaTop, uwScreenY);
+          if (stripY > -32 && stripY < viewH) {
+            for (let i = 0; i < loops; i++) {
+              ctx.drawImage(im5, 0, sy, wS, 16, i * wS, stripY, wS, 16);
+            }
+          }
+        }
       }
       // 表面过渡条（slot0：地表附近横条）
       if (dirtTop > -64 && dirtTop < viewH + 64) tile(slots[0], dirtTop - 16, 32);

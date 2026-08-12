@@ -599,7 +599,7 @@ function drawLiquidBehindTiles(
         if (n.lq > maxLq) { maxLq = n.lq; lt = toVanillaType(n.lt); }
       };
       if (fL) consider(L); if (fR) consider(R); if (fU) consider(U); if (fD) consider(D);
-      const tex = texFor(lt); // lt=3 微光走 Liquid_14（原版 DrawTile_LiquidBehindTile 微光分支省略彩色叠加）
+      const tex = texFor(lt); // lt=3 微光走 Liquid_14
       if (!tex) continue;
 
       // ---- 液体矩形计算(:4069-4123) ----
@@ -647,6 +647,21 @@ function drawLiquidBehindTiles(
       const dstH = srcH; // 源=目标尺寸(原版 DrawPartialLiquid 同源同目标)
       const dstW = srcW;
 
+      // ---- 微光分支（TileDrawing.cs:4188-4191 num2==14）----
+      // 原版 SetShimmerVertexColors 把四角顶点色【整体重置】为 White×opacity×
+      // GetShimmerBaseColor(角)——上方整段 num7 透明度/光照计算对微光全部丢弃，
+      // opacity = solidLayer ? 0.75 : 1。本函数只在背景 pass 调用（= 原版
+      // DrawLiquidBehindTiles :462 的 solidLayer:false 调用点）→ opacity 1。
+      // 彩色叠加【该有】：旧注释"省略彩色叠加"与末尾的 multiply 叠加自相矛盾，
+      // 按源码对齐为"不透明直画 + 2×2 子块波色 multiply"（与前景 DrawShimmer 同式）。
+      if (lt === 3) {
+        ctx.globalAlpha = 1;
+        ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
+        if (srcW >= 8) applyShimmerBaseTint(ctx, x, y, px, py, dstW, dstH,
+          (performance.now() / 1000) * 60);
+        continue;
+      }
+
       // ---- 不透明度(:4126-4146) ----
       // 地上=1.0(有墙压 0.6,墙 21→0.9);地下=0.5 基线
       let alpha = 0.5;
@@ -658,16 +673,6 @@ function drawLiquidBehindTiles(
       }
       ctx.globalAlpha = alpha;
       ctx.drawImage(tex, rx, ry, srcW, srcH, px, py, dstW, dstH);
-      // 微光彩色叠加（TileDrawing.cs:4189-4191：num2==14 → SetShimmerVertexColors，
-      // solidLayer(背景 pass) opacity 0.75 / 前景 1）——逐顶点波色以整格 multiply 近似
-      if (lt === 3 && srcW >= 8) {
-        const bc = shimmerBaseColor(x + 0.5, y + 0.5, (performance.now() / 1000) * 60);
-        ctx.save();
-        ctx.globalCompositeOperation = 'multiply';
-        ctx.fillStyle = `rgb(${bc[0]},${bc[1]},${bc[2]})`;
-        ctx.fillRect(px, py, dstW, dstH);
-        ctx.restore();
-      }
     }
   }
   ctx.globalAlpha = 1;
