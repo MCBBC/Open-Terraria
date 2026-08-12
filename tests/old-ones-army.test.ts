@@ -59,6 +59,7 @@ function makeHost(crystalAlive = true, arenaHalf = 80): HostLog & { host: OldOne
       seed = (Math.imul(seed, 1103515245) + 12345) & 0x7fffffff;
       return seed % n;
     },
+    activePlayersCount: () => 1,   // 单机（DD2Event.cs:1267/:1578 缩放循环零次）
   };
   return { host, spawned, dropped, msgs, counts };
 }
@@ -330,7 +331,7 @@ describe('出怪钩子（SpawnMonsterFromGate :556-570 / D1 :1026-1127）', () =
     expect(spawned[0].id).toBe(564);
   });
 
-  it('T2 按本波 enemy 表出怪（等价边界：D2 逐怪概率表降级为表内抽取）', () => {
+  it('T2 波 2 按概率链出怪且必落表内（D2 表 :1290-1300 1:1 后仍满足构成断言）', () => {
     const w = makeWorld();
     const st = w.oldOnesArmy;
     const { host, spawned } = makeHost();

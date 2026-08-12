@@ -1182,7 +1182,14 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
         wmax.set(sh, w); hmax.set(sh, h2);
       }
       if (w === 0) continue;
-      if (store.frameX[i] >= w || store.frameY[i] >= h2) { store.frameX[i] = 0; store.frameY[i] = 0; }
+      // ★ 回绕区间（≥32768）是【刻意的有符号偏移】——棕榈 323 干身/树冠的
+      // frameY=倾斜像素（65534=-2 等，VanillaTiler.ts palm 分支同约定解码），
+      // 不是格位索引，绝不可清（左倾棕榈被清 → 树冠+倾斜全部消失）。
+      // 残留脏帧只会是小正值，只对正值做越表判定
+      const fxv = store.frameX[i], fyv = store.frameY[i];
+      if (fxv < 32768 && fyv < 32768 && (fxv >= w || fyv >= h2)) {
+        store.frameX[i] = 0; store.frameY[i] = 0;
+      }
     }
   }
   // ---- 原版 Spawn Point（1456 注册 cs:19605，实现 19605-19724）：中心随机扩张采样，自然地表，不改地形 ----

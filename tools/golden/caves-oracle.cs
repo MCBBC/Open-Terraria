@@ -2720,6 +2720,7 @@ void GrowAshTree(int tx, int ty)
     Put(tx, num - height);
 }
 
+int[] uwConv={0}, uwCand={0}, uwGrow={0};
 // ================= Pass 28 Underworld（cs:13697-13918 普通世界分支）=================
 // ★Liquid.QuickWater(-2)（cs:13788）两侧一致省略（液体模拟子系统，见遗留）；
 //  AddHellHouses 在 JS 侧为独立槽（本链其后）——两侧一致。
@@ -2738,6 +2739,7 @@ void GrowAshTree(int tx, int ty)
             else typ[uti] = 57;                                               // ★只写 type 不激活（原版语义）
         }
     }
+    Console.Error.WriteLine($"UW1={(int)r.Peek()} n1={(double)r.Peek()}");
     for (int ux = 10; ux < W - 10; ux++)         // ② 岩浆线
     {
         uwNum2 += (int)r.Next(-10, 11);
@@ -2749,6 +2751,7 @@ void GrowAshTree(int tx, int ty)
             if (act[uti] == 0) { liqT[uti] = 1; liq[uti] = 255; }
         }
     }
+    Console.Error.WriteLine($"UW2={(int)r.Peek()}");
     for (int ux = 0; ux < W; ux++)               // ③ 1/50 列大灰烬丘陵
     {
         if ((int)r.Next(50) == 0)
@@ -2758,6 +2761,7 @@ void GrowAshTree(int tx, int ty)
             TileRunner((int)r.Next(0, W), uy + (int)r.Next(20, 50), (int)r.Next(15, 20), 1000, 57, true, 0.0, (int)r.Next(1, 3), true);
         }
     }
+    Console.Error.WriteLine($"UW3={(int)r.Peek()}");
     for (int ux = 0; ux < W; ux++)               // ④ 1/13 列灰烬柱 + 横团 + 挖掘
     {
         if ((int)r.Next(13) == 0)
@@ -2781,6 +2785,7 @@ void GrowAshTree(int tx, int ty)
                 TileRunner(ux + (int)r.Next(-15, 15), uy + (int)r.Next(-15, 10), (int)r.Next(15, 30), (int)r.Next(5, 20), -2, false, (int)r.Next(-1, 3), (int)r.Next(-1, 3));
         }
     }
+    Console.Error.WriteLine($"UW4={(int)r.Peek()}");
     for (int un = 0; un < W; un++)               // ⑤ 随机小挖掘
         TileRunner((int)r.Next(20, W - 20), (int)r.Next(H - 180, H - 10), (int)r.Next(2, 7), (int)r.Next(2, 7), -2);
     for (int ux = 0; ux < W; ux++)               // ⑥ 底部岩浆层 h-145/144
@@ -2791,9 +2796,11 @@ void GrowAshTree(int tx, int ty)
             if (act[uti] == 0) { liq[uti] = 255; liqT[uti] = 1; }
         }
     }
+    Console.Error.WriteLine($"UW5={(int)r.Peek()}");
     int uwOre = (int)((double)(W * H) * 0.0008); // ⑦ 地狱石脉
     for (int un = 0; un < uwOre; un++)
         TileRunner((int)r.Next(0, W), (int)r.Next(H - 140, H), (int)r.Next(2, 7), (int)r.Next(3, 7), 58);
+    Console.Error.WriteLine($"UW6={(int)r.Peek()}");
     // ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915，外缘 17% 带）
     for (int ux = 25; ux < W - 25; ux++)
     {
@@ -2808,7 +2815,7 @@ void GrowAshTree(int tx, int ty)
                 for (int ox = -1; ox <= 1 && !exposed; ox++)
                     for (int oy = -1; oy <= 1; oy++)
                         if (act[(uy + oy) * W + ux + ox] == 0) { exposed = true; break; }
-                if (exposed) typ[uti] = 633;
+                if (exposed) { typ[uti] = 633; uwConv[0]++; }
             }
         }
     }
@@ -2820,11 +2827,13 @@ void GrowAshTree(int tx, int ty)
             {
                 int uti = uy * W + ux;
                 if (typ[uti] != 633 || act[uti] == 0 || act[(uy - 1) * W + ux] != 0) continue;
-                if ((int)r.Next(3) == 0) GrowAshTree(ux, uy);
+                uwCand[0]++;
+                if ((int)r.Next(3) == 0) { uwGrow[0]++; GrowAshTree(ux, uy); }
             }
         }
     }
 }
+    Console.Error.WriteLine($"UW7={(int)r.Peek()} conv={uwConv[0]} cand={uwCand[0]} grow={uwGrow[0]}");
 Checkpoint("underworld");
 
 // ================= Pass 29 CorruptionAndCrimson（cs:13919-14613 + ChasmRunnerSideways cs:75323 + CanEvilReplace cs:75527 + CrimStart cs:75543 + CrimPlaceHearts cs:75854 + ChasmRunner cs:76066）=================

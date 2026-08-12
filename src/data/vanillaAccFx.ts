@@ -54,6 +54,7 @@ export interface AccFx {
   ammoSave?: number;     // 20% 概率不耗弹
   huntressSave?: number; // 10% 概率不耗弹
   kbGlove?: number;      // 力量手套族：近战击退翻倍
+  autoReuseGlove?: number; // 力量手套族：近战武器自动连挥（Player.TryAllowingItemReuse :52040-52042）
   yoyoString?: number;   // 悠悠球线：射程 +
   tileSpeed?: number;    // 采矿/放置加速
   wallSpeed?: number;    // 铺墙加速
@@ -83,6 +84,15 @@ const FX = fxJson as Record<string, AccFx>;
 // ApplyEquipFunctional（:14652/:14689/:14701，divingHelm 与 flipper 并存）；
 // 497/861/3110 → accMerman（:15019/:14587/:14855）。
 const BEHAVIOR_FX: Record<string, AccFx> = {
+  // 力量手套族 autoReuseGlove（Player.ApplyEquipFunctional if-chain：
+  // 211 猛爪手套 :14559-14562 / 897 强力手套 :14753-14756 / 1343 机械手套 :14761-14764 /
+  // 936 烈火手套 :14823-14826 / 3992 泰坦手套 :13995-13999——各只置旗 + meleeSpeed += 0.12，
+  // 数值段在 vanilla-accfx.json 已有，此处补布尔行为）
+  '211': { autoReuseGlove: 1 },
+  '897': { autoReuseGlove: 1 },
+  '1343': { autoReuseGlove: 1 },
+  '936': { autoReuseGlove: 1 },
+  '3992': { autoReuseGlove: 1 },
   '268': { divingHelm: 1 },
   '394': { divingHelm: 1 },
   '1860': { divingHelm: 1, jellyfishGlow: 1 },   // 浸水 AddLight(1.8,0.4,1.2)（:14682-14688）

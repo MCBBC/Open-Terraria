@@ -86,9 +86,9 @@ describe('Bobber 状态机', () => {
     let landed = false;
     for (let k = 0; k < 200; k++) { b.fixedUpdate(1, hooks); if (b.floating) { landed = true; break; } }
     expect(landed).toBe(true);
-    // 咬钩（等待 300-210=90t 上下 + 60 随机）
+    // 咬钩（AI_061 累积器 1:1：钓鱼力 45 → 每 tick 期望 +4.3，>660 触发一次咬钩判定）
     let bit = false;
-    for (let k = 0; k < 400; k++) { b.fixedUpdate(1, hooks); if (b.biteT > 0) { bit = true; break; } }
+    for (let k = 0; k < 2000; k++) { b.fixedUpdate(1, hooks); if (b.biteT > 0) { bit = true; break; } }
     expect(bit).toBe(true);
     expect(b.catchId).toBeGreaterThan(0);
     // 收竿
@@ -97,17 +97,17 @@ describe('Bobber 状态机', () => {
     expect(caught).toBeGreaterThan(0);
     expect(b.dead).toBe(true);
   });
-  it('错过咬钩窗口 → catchId 清零（空竿）', () => {
+  it('错过咬钩窗口 → catchId 清零（空竿，ai[1] 归零即逃脱）', () => {
     const { hooks, player } = makeHooks({ x: 62, y: 95, w: 30 });
     const b = new Bobber(player.cx, player.y - 10, 5, -4, 50, 0, 50, () => player);
     let landed2 = false;
     for (let k = 0; k < 300; k++) { b.fixedUpdate(1, hooks); if (b.floating) { landed2 = true; break; } }
     expect(landed2).toBe(true);
     let bit = false;
-    for (let k = 0; k < 300; k++) { b.fixedUpdate(1, hooks); if (b.biteT > 0) { bit = true; break; } }
+    for (let k = 0; k < 2000; k++) { b.fixedUpdate(1, hooks); if (b.biteT > 0) { bit = true; break; } }
     expect(bit).toBe(true);
-    // 等窗口过
-    for (let k = 0; k < 70; k++) b.fixedUpdate(1, hooks);
+    // 窗口 = rand(-240,-90) - 钓鱼力(100) → 幅度 191-340，每 tick -= rand(1,5)
+    for (let k = 0; k < 800; k++) { b.fixedUpdate(1, hooks); if (b.biteT === 0) break; }
     expect(b.catchId).toBe(0);
     expect(b.reel(hooks)).toBe(0);
   });

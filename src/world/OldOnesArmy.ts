@@ -21,9 +21,6 @@
 // canRaiseGoblinsHere / stopInvasion / reportLoss / findArenaHitbox / difficulty）。
 //
 // 等价边界（备案原版行号）：
-//   - Difficulty_2/3_SpawnMonsterFromGate（:1240-1442 / :1545-1704，逐怪概率+上限
-//     出怪表）未逐行转录——T2/T3 出怪按同波 enemy 表 + D1 同构上限（50 基线）出怪；
-//     波次构成/击杀分值/进波门槛（:1147-1238 / :1452-1544）全量 1:1。
 //   - 奖牌/魔力掉落点位挂在水晶 548 上（原版 DropItemInstanced/NewItem 同锚）。
 //   - NPCDamageTracker（伤害统计）不移植（原版仅 /damage 指令用）。
 import type { World } from './World';
@@ -81,6 +78,9 @@ export interface OldOnesArmyHost {
   findGroundY(tileX: number, tileY: number): number | null;
   /** Main.rand.Next(n) */
   rand(n: number): number;
+  /** Main.CurrentFrameFlags.ActivePlayersCount（T2/T3 出怪配额的 ×1.3 多人缩放，
+   *  DD2Event.cs:1267-1275 / :1578-1586；单机恒 1） */
+  activePlayersCount(): number;
   /** 起始公告已发的波 1 推进等不需要；Betsy 召唤走 spawnNpc（SummonBetsy :929-943） */
 }
 
@@ -519,27 +519,217 @@ export function spawnMonsterD1(
   }
 }
 
-/** T2/T3 出怪（等价边界：原版逐怪概率表 :1240-1442 / :1545-1704 未逐行转录）。
- *  按本波 enemy 表等权出怪；波 5+ 额外出第二只（对齐 D1 case 3/5 的双出语义）；
- *  场上同类 ≥50 不出（对齐基线 cap）。T3 波 7 首只恒为 Betsy 551 不在此出
- *  （SummonBetsy :929-943 由 updateTime 触发）。 */
-export function spawnMonsterFromGate(
+/** Difficulty_2_SpawnMonsterFromGate（DD2Event.cs:1240-1442）1:1。
+ *  配额（:1246-1266）：num=50 基线 / num2(562 枯萎兽)=5(>1→8,>3→10,>5→12) /
+ *  num3(559 死灵法师)=5(>4→7) / num4(568 神秘专家)=2 / num5(572 龙)=8(>3→12) /
+ *  num6(570 巨型飞行史莱姆)=3(>5→5)。
+ *  多人缩放（:1267-1275）：for i=1..ActivePlayersCount-1 —— 注意原版把 num5/num6
+ *  错写成 num*1.3 / num*1.35（引用基线 num 而非自身），此处按原样转录。 */
+function spawnMonsterD2(
+  st: OldOnesArmyState, host: OldOnesArmyHost, x: number, y: number, leftGate: boolean,
+): void {
+  let num = 50;                                                           // :1246
+  let num2 = 5;
+  if (st.waveNumber > 1) num2 = 8;                                        // :1248-1254
+  if (st.waveNumber > 3) num2 = 10;
+  if (st.waveNumber > 5) num2 = 12;
+  let num3 = 5;
+  if (st.waveNumber > 4) num3 = 7;                                        // :1256-1259
+  const num4 = 2;                                                         // :1260
+  let num5 = 8;
+  if (st.waveNumber > 3) num5 = 12;                                       // :1261-1264
+  let num6 = 3;
+  if (st.waveNumber > 5) num6 = 5;                                        // :1265-1266
+  for (let i = 1; i < host.activePlayersCount(); i++) {                   // :1267-1275
+    num = Math.trunc(num * 1.3);
+    num2 = Math.trunc(num2 * 1.3);
+    num5 = Math.trunc(num * 1.3);   // 原版笔误照录：引用 num（:1273）
+    num6 = Math.trunc(num * 1.35);  // 原版笔误照录：引用 num（:1274）
+  }
+  switch (st.waveNumber) {                                                // :1279-1437
+    case 1:   // :1281-1289
+      if (host.rand(20) === 0 && host.countNpcs(562) < num2) host.spawnNpc(562, x, y);
+      else if (host.countNpcs(553) < num) host.spawnNpc(553, x, y);
+      break;
+    case 2:   // :1290-1300
+      if (host.rand(3) === 0 && host.countNpcs(572) < num5) host.spawnNpc(572, x, y);
+      else if (host.rand(8) === 0 && host.countNpcs(562) < num2) host.spawnNpc(562, x, y);
+      else if (host.countNpcs(553) < num) host.spawnNpc(553, x, y);
+      break;
+    case 3:   // :1301-1319
+      if (host.rand(7) === 0 && host.countNpcs(572) < num5) host.spawnNpc(572, x, y);
+      else if (host.rand(10) === 0 && host.countNpcs(559) < num3) host.spawnNpc(559, x, y);
+      else if (host.rand(8) === 0 && host.countNpcs(562) < num2) host.spawnNpc(562, x, y);
+      else if (host.countNpcs(553) + host.countNpcs(556) < num) {
+        if (host.rand(4) === 0) host.spawnNpc(556, x, y);                  // :1315-1317
+        host.spawnNpc(553, x, y);                                         // :1318（双出：556 可选 + 553 必出）
+      }
+      break;
+    case 4:   // :1320-1337
+      if (host.rand(10) === 0 && host.countNpcs(570) < num6) host.spawnNpc(570, x, y);
+      else if (host.rand(12) === 0 && host.countNpcs(559) < num3) host.spawnNpc(559, x, y);
+      else if (host.rand(6) === 0 && host.countNpcs(562) < num2) host.spawnNpc(562, x, y);
+      else if (host.rand(3) === 0 && host.countNpcs(572) < num5) host.spawnNpc(572, x, y);
+      else if (host.countNpcs(553) < num) host.spawnNpc(553, x, y);
+      break;
+    case 5:   // :1338-1363
+      if (host.rand(7) === 0 && host.countNpcs(570) < num6) host.spawnNpc(570, x, y);
+      else if (host.rand(10) === 0 && host.countNpcs(559) < num3) host.spawnNpc(559, x, y);
+      else if (host.rand(4) === 0 && host.countNpcs(572) + host.countNpcs(574) < num5) {
+        host.spawnNpc(host.rand(2) !== 0 ? 574 : 572, x, y);              // :1348（Next(2)!=0 → 574）
+      } else if (host.countNpcs(553) + host.countNpcs(556) < num) {
+        if (host.rand(3) === 0) host.spawnNpc(556, x, y);                 // :1356-1358
+        host.spawnNpc(553, x, y);                                         // :1359（双出）
+      }
+      break;
+    case 6:   // :1364-1393
+      if (host.rand(7) === 0 && host.countNpcs(570) < num6) host.spawnNpc(570, x, y);
+      else if (host.rand(17) === 0 && host.countNpcs(568) < num4) host.spawnNpc(568, x, y);
+      else if (host.rand(5) === 0 && host.countNpcs(572) + host.countNpcs(574) < num5) {
+        host.spawnNpc(host.rand(2) === 0 ? 574 : 572, x, y);              // :1374（Next(2)==0 → 574）
+      } else if (host.rand(9) === 0 && host.countNpcs(559) < num3) host.spawnNpc(559, x, y);
+      else if (host.rand(3) === 0 && host.countNpcs(562) < num2) host.spawnNpc(562, x, y);
+      else if (host.countNpcs(553) + host.countNpcs(556) < num) {
+        if (host.rand(3) !== 0) host.spawnNpc(556, x, y);                 // :1389-1390（Next(3)!=0 → 556）
+        host.spawnNpc(553, x, y);                                         // :1391（双出）
+      }
+      break;
+    case 7: {  // :1394-1428
+      const s = invasionStatus(st, null);
+      if ((!leftGate || host.rand(2) === 0) && s.kills > s.required * 0.1 && !host.anyNpc(576)) {
+        host.spawnNpc(576, x, y);   // 双足翼龙长老（:1401-1404）
+      } else if (host.rand(7) === 0 && host.countNpcs(570) < num6) host.spawnNpc(570, x, y);
+      else if (host.rand(17) === 0 && host.countNpcs(568) < num4) host.spawnNpc(568, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(572) + host.countNpcs(574) < num5) {
+        host.spawnNpc(host.rand(3) === 0 ? 574 : 572, x, y);              // :1410（Next(3)==0 → 574）
+      } else if (host.rand(11) === 0 && host.countNpcs(559) < num3) host.spawnNpc(559, x, y);
+      else if (host.countNpcs(553) + host.countNpcs(556) < num) {
+        if (host.rand(2) === 0) host.spawnNpc(556, x, y);                 // :1418-1420
+        host.spawnNpc(553, x, y);                                         // :1421（双出）
+      }
+      break;
+    }
+    default:
+      host.spawnNpc(553, x, y);
+      break;
+  }
+}
+
+/** Difficulty_3_SpawnMonsterFromGate（DD2Event.cs:1545-1766）1:1。
+ *  配额（:1551-1572）：num=60 基线 / num2(563 痛苦巨口)=7(>1→9,>3→12,>5→15) /
+ *  num3(560 黑暗魔法师 T3 型)=7(>4→10) / num4(569 拜斯特的侍从)=2(>5→3) /
+ *  num5(573 斯克雷成人)=12(>3→18) / num6(571 电球)=4(>5→6) / num7(578 报复者)=4。
+ *  多人缩放（:1574-1583）同 T2——num5/num6 原版引用 num 的笔误照录。
+ *  波 6 是两条独立 if 链（:1699-1726 与 :1727-1747，中间无 else）——可一拍双组。 */
+function spawnMonsterD3(
   st: OldOnesArmyState, host: OldOnesArmyHost, x: number, y: number, leftGate: boolean,
 ): void {
   void leftGate;
-  if (st.ongoingDifficulty === 1) {
-    spawnMonsterD1(st, host, x, y, leftGate);
-    return;
+  let num = 60;                                                           // :1551
+  let num2 = 7;
+  if (st.waveNumber > 1) num2 = 9;                                        // :1553-1559
+  if (st.waveNumber > 3) num2 = 12;
+  if (st.waveNumber > 5) num2 = 15;
+  let num3 = 7;
+  if (st.waveNumber > 4) num3 = 10;                                       // :1561-1564
+  let num4 = 2;
+  if (st.waveNumber > 5) num4 = 3;                                        // :1565-1568
+  let num5 = 12;
+  if (st.waveNumber > 3) num5 = 18;                                       // :1569-1572
+  let num6 = 4;
+  if (st.waveNumber > 5) num6 = 6;                                        // :1573-1576
+  let num7 = 4;                                                           // :1577
+  for (let i = 1; i < host.activePlayersCount(); i++) {                   // :1578-1586
+    num = Math.trunc(num * 1.3);
+    num2 = Math.trunc(num2 * 1.3);
+    num5 = Math.trunc(num * 1.3);   // 原版笔误照录（:1582）
+    num6 = Math.trunc(num * 1.35);  // 原版笔误照录（:1583）
+    num7 = Math.trunc(num7 * 1.3);
   }
-  const ids = enemiesForWave(st, st.waveNumber).filter((id) => id !== 551);
-  if (!ids.length) return;
-  const pick = ids[host.rand(ids.length)];
-  if (host.countNpcs(pick) >= 50) return;
-  host.spawnNpc(pick, x, y);
-  if (st.waveNumber >= 3 && host.rand(3) === 0) {
-    const second = ids[host.rand(ids.length)];
-    if (host.countNpcs(second) < 50) host.spawnNpc(second, x, y);
+  switch (st.waveNumber) {                                                // :1590-1755
+    case 1:   // :1592-1605
+      if (host.rand(18) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.countNpcs(554) < num) {
+        if (host.rand(7) === 0) host.spawnNpc(557, x, y);                 // :1600-1602
+        host.spawnNpc(554, x, y);                                         // :1603（双出）
+      }
+      break;
+    case 2:   // :1606-1627
+      if (host.rand(3) === 0 && host.countNpcs(578) < num7) host.spawnNpc(578, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.rand(3) === 0 && host.countNpcs(573) < num5) host.spawnNpc(573, x, y);
+      else if (host.countNpcs(554) < num) {
+        if (host.rand(4) === 0) host.spawnNpc(557, x, y);                 // :1623-1625
+        host.spawnNpc(554, x, y);                                         // :1626（双出）
+      }
+      break;
+    case 3:   // :1628-1646
+      if (host.rand(13) === 0 && host.countNpcs(571) < num6) host.spawnNpc(571, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(573) < num5) host.spawnNpc(573, x, y);
+      else if (host.rand(10) === 0 && host.countNpcs(560) < num3) host.spawnNpc(560, x, y);
+      else if (host.rand(8) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.countNpcs(554) + host.countNpcs(557) < num) host.spawnNpc(554, x, y);
+      break;
+    case 4:   // :1647-1669
+      if (host.rand(24) === 0 && !host.anyNpc(565)) host.spawnNpc(565, x, y);  // 黑暗魔法师 T3 型
+      else if (host.rand(12) === 0 && host.countNpcs(571) < num6) host.spawnNpc(571, x, y);
+      else if (host.rand(15) === 0 && host.countNpcs(560) < num3) host.spawnNpc(560, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.rand(5) === 0 && host.countNpcs(573) + host.countNpcs(575) < num5) {
+        host.spawnNpc(host.rand(3) === 0 ? 575 : 573, x, y);              // :1663（Next(3)==0 → 575）
+      } else if (host.countNpcs(554) < num) host.spawnNpc(554, x, y);
+      break;
+    case 5:   // :1670-1696
+      if (host.rand(20) === 0 && !host.anyNpc(577)) host.spawnNpc(577, x, y);  // 食人魔 T3 型
+      else if (host.rand(17) === 0 && host.countNpcs(569) < num4) host.spawnNpc(569, x, y);
+      else if (host.rand(8) === 0 && host.countNpcs(571) < num6) host.spawnNpc(571, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(573) + host.countNpcs(575) < num5) {
+        host.spawnNpc(host.rand(4) === 0 ? 575 : 573, x, y);              // :1683（Next(4)==0 → 575）
+      } else if (host.countNpcs(554) + host.countNpcs(557) < num) {
+        if (host.rand(3) === 0) host.spawnNpc(557, x, y);                 // :1689-1691
+        host.spawnNpc(554, x, y);                                         // :1692（双出）
+      }
+      break;
+    case 6: {  // :1697-1749 —— 两条独立 if 链（无 else 连接）
+      // 链一（:1699-1710）
+      if (host.rand(20) === 0 && !host.anyNpc(577)) host.spawnNpc(577, x, y);
+      else if (host.rand(20) === 0 && !host.anyNpc(565)) host.spawnNpc(565, x, y);
+      else if (host.rand(12) === 0 && host.countNpcs(571) < num6) host.spawnNpc(571, x, y);
+      else if (host.rand(25) === 0 && host.countNpcs(569) < num4) host.spawnNpc(569, x, y);
+      // 链二（:1711-1731）
+      if (host.rand(7) === 0 && host.countNpcs(578) < num7) host.spawnNpc(578, x, y);
+      else if (host.rand(7) === 0 && host.countNpcs(573) + host.countNpcs(575) < num5) {
+        host.spawnNpc(host.rand(3) === 0 ? 575 : 573, x, y);              // :1715
+      } else if (host.rand(5) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.countNpcs(554) + host.countNpcs(557) < num) {
+        if (host.rand(3) === 0) host.spawnNpc(557, x, y);                 // :1724-1726
+        host.spawnNpc(554, x, y);                                         // :1727（双出）
+      }
+      break;
+    }
+    case 7:   // :1732-1753
+      if (host.rand(20) === 0 && host.countNpcs(571) < num6) host.spawnNpc(571, x, y);
+      else if (host.rand(17) === 0 && host.countNpcs(569) < num4) host.spawnNpc(569, x, y);
+      else if (host.rand(10) === 0 && host.countNpcs(563) < num2) host.spawnNpc(563, x, y);
+      else if (host.countNpcs(554) + host.countNpcs(557) < num) {
+        if (host.rand(5) === 0) host.spawnNpc(557, x, y);                 // :1747-1749
+        host.spawnNpc(554, x, y);                                         // :1750（双出）
+      }
+      break;
+    default:
+      host.spawnNpc(554, x, y);
+      break;
   }
+}
+
+/** 出怪总入口（SpawnMonsterFromGate：门 549 节拍调用）。Betsy 551 不在门出——
+ *  T3 波 7 起始帧由 SummonBetsy（:929-943）经 updateTime 触发。 */
+export function spawnMonsterFromGate(
+  st: OldOnesArmyState, host: OldOnesArmyHost, x: number, y: number, leftGate: boolean,
+): void {
+  if (st.ongoingDifficulty === 3) { spawnMonsterD3(st, host, x, y, leftGate); return; }
+  if (st.ongoingDifficulty === 2) { spawnMonsterD2(st, host, x, y, leftGate); return; }
+  spawnMonsterD1(st, host, x, y, leftGate);
 }
 
 // ---------------------------------------------------------------------------

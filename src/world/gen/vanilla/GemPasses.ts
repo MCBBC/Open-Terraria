@@ -56,9 +56,69 @@ function randGemStyle(rng: RNG): number {
   return 5;
 }
 
-/** 放 1 格暴露晶簇（style 帧 = style*18） */
-function placeExposed(st: TileStore, x: number, y: number, style: number): void {
-  st.setTile(x, y, EXPOSED, style * 18, 0);
+// ---- PlaceTile(178) 锚定链（:59717-59725 + CheckAndAdjust :60338 + ValidAnchor :60321）----
+// 原版 PlaceTile 的 num==178 分支：CheckAndAdjustMultiDirectionalTile 通过才放置
+// （frameY=Next(3)*18 仅在成功时掷）——锚 = 四邻存在可贴的实心格。此前无条件直放 =
+// 4763 vs 金标 816（5.8×）、悬空 774 vs 0（2026-08-12 用户标注"四处散布的宝石"）。
+/** TileID.Sets.Boulders + type==10 门（:60324：巨石/门不可作锚） */
+const ANCHOR_BANNED = idsByVanillaSheet(10, 138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+/** type==380 特例（SolidTileAllowTopSlope :60411） */
+const TYPE_380 = idsByVanillaSheet(380);
+
+/** ValidAnchorForMultiDirectionalTile（:60321）：dir 0=上锚 1=下锚 2=左锚 3=右锚。
+ *  生成期无 inActive；slope 原版编码 1/2=底坡 3/4=顶坡，left=2|4 right=1|3。 */
+function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
+  if (!st.inBounds(x, y)) return true; // Main.tile 索引器 null 防御 → true（随后 tileSolid 门拦截）
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (ANCHOR_BANNED.has(t)) return false;
+  if (!st.flags[i]) return false;
+  const d = TILE_DEFS[t];
+  if (!d) return false;
+  const solid = d.solid, platform = d.platform;
+  const half = st.half[i] === 1, sl = st.slope[i];
+  const topSlope = sl === 3 || sl === 4, bottomSlope = sl === 1 || sl === 2;
+  const leftSlope = sl === 2 || sl === 4, rightSlope = sl === 1 || sl === 3;
+  if (dir === 0) {
+    // SolidTileAllowTopSlope（:60399）：(tileSolid||380) && ((!平台&&!底坡)||(平台&&半砖))
+    return (solid || TYPE_380.has(t)) && ((!platform && !bottomSlope) || (platform && half));
+  }
+  if (dir === 1) {
+    // SolidTileAllowBottomSlope：（tileSolid||tileSolidTop近似平台）&&!顶坡&&!半砖
+    return (solid || platform) && !topSlope && !half;
+  }
+  if (dir === 2) {
+    // SolidTileAllowLeftSlope：tileSolid && !半砖 && !右坡 && !平台
+    return solid && !half && !rightSlope && !platform;
+  }
+  // dir 3：SolidTileAllowRightSlope 镜像
+  return solid && !half && !leftSlope && !platform;
+}
+
+/** CheckAndAdjustMultiDirectionalTile（:60338）：下>左>右>上优先，锚类型须 tileSolid&&!tileSolidTop。
+ *  返回的 newFrameDirection 对 178 不消费帧（frameY 另掷），此处只需布尔门。 */
+function checkMultiDirAnchor(st: TileStore, i: number, j: number): boolean {
+  const belowOk = validAnchor(st, i, j + 1, 1);
+  const leftOk = validAnchor(st, i - 1, j, 2);
+  const rightOk = validAnchor(st, i + 1, j, 3);
+  const aboveOk = validAnchor(st, i, j - 1, 0);
+  const solidNonTop = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const k = st.idx(x, y);
+    const d = TILE_DEFS[st.type[k]];
+    return !!d && d.solid && !d.platform;
+  };
+  if (belowOk && solidNonTop(i, j + 1)) return true;
+  if (leftOk && solidNonTop(i - 1, j)) return true;
+  if (rightOk && solidNonTop(i + 1, j)) return true;
+  if (aboveOk && solidNonTop(i, j - 1)) return true;
+  return false;
+}
+
+/** 放 1 格暴露晶簇（= PlaceTile 178 分支：锚定门 + style 帧 + 成功才掷 frameY） */
+function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+  if (!checkMultiDirAnchor(st, x, y)) return;
+  st.setTile(x, y, EXPOSED, style * 18, rng.nextInt(3) * 18);
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============
@@ -134,7 +194,7 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
           }
         } else {
           st.wall[ii] = GEM_WALL_BASE + randGem();
-          if (rng.nextInt(2) === 0) placeExposed(st, x, y, randGem());
+          if (rng.nextInt(2) === 0) placeExposed(st, rng, x, y, randGem());
           for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
             const ni = st.idx(x + dx, y + dy);
             if (!seen.has(ni)) next.push([x + dx, y + dy]);
@@ -169,7 +229,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
       for (let jy = y - wt; jy < y + wb; jy++) {
         if (jx < 40 || jx >= st.w - 40 || jy < 40 || jy >= st.h - 40) continue;
         const ji = st.idx(jx, jy);
-        if (!st.flags[ji]) placeExposed(st, jx, jy, style);
+        if (!st.flags[ji]) placeExposed(st, rng, jx, jy, style);
       }
     }
   }
@@ -184,7 +244,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) continue;
     const wl = st.wall[ii];
     if (wl === 27 || WALL_DUNGEON.has(wl)) continue;
-    placeExposed(st, x, y, randGemStyle(rng));
+    placeExposed(st, rng, x, y, randGemStyle(rng));
   }
   // 琥珀（:20891-20913）：w 次，y∈[ws, h-300)，墙 187/216 → 不对称窗口（各 1-3）
   // 的空气格放 style=6 晶簇
@@ -200,7 +260,7 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
       for (let jy = y - at; jy < y + ab; jy++) {
         if (!st.inBounds(jx, jy)) continue;
         const ji = st.idx(jx, jy);
-        if (!st.flags[ji]) placeExposed(st, jx, jy, 6);
+        if (!st.flags[ji]) placeExposed(st, rng, jx, jy, 6);
       }
     }
   }

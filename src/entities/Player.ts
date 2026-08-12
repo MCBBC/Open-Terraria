@@ -212,6 +212,7 @@ export class Player extends Entity {
     critMelee: number; critRanged: number; critMagic: number;
     moveMult: number; meleeSpeed: number;
     accRunSpeed: number;   // 靴族 accRunSpeed 原值（0=未装备）
+    autoReuseGlove: boolean; // 力量手套族：近战武器自动连挥（Player.cs:52040-52042）
     extraFall: number; lavaMax: number; armorPen: number;
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
@@ -278,7 +279,7 @@ export class Player extends Entity {
     let beetleDef = false;
     let flipper = false, longInvince = false, spikedBoots = false;
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
-    let ammoSave = false, kbGlove = false, yoyoString = false;
+    let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
@@ -347,6 +348,7 @@ export class Player extends Entity {
         if (fx.discount) discount = true;
         if (fx.ammoSave || fx.huntressSave) ammoSave = true;
         if (fx.kbGlove) kbGlove = true;
+        if (fx.autoReuseGlove) autoReuseGlove = true;   // 力量手套族：近战自动连挥
         if (fx.yoyoString) yoyoString = true;
         if (fx.tileSpeed) tileSpeed = true;
         if (fx.wallSpeed) wallSpeed = true;
@@ -472,7 +474,7 @@ export class Player extends Entity {
       wing, dash, blackBelt, bees, carpet,
       jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
-      arrowDmg, ammoSave, kbGlove, yoyoString,
+      arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
@@ -515,19 +517,19 @@ export class Player extends Entity {
   get thornsActive(): boolean {
     return this.buffs.hasThorns;
   }
-  /** 近战攻速倍率（猛爪手套 ×2 + 装备 meleeSpeed 67-80 词缀/狂战士手套累加 + 醉酒近战速 ×1.1） */
+  /** 近战攻速倍率（CapAttackSpeeds + TurnAttackSpeedToUseTimeMultiplier，Player.cs
+   *  :28555-28574 1:1）：meleeSpeed 加法总和（装备 0.12 档 + 词缀 77-80 + 套装 + buff）
+   *  封顶 3 后取倒数，作为 useAnimation/useTime 的时长乘数。原"猛爪手套 ×2"档已废——
+   *  原版猛爪手套 211 只给 meleeSpeed += 0.12 + autoReuseGlove（:14559-14562），
+   *  0.12 已经 vanilla-accfx.json 走 equipStats.meleeSpeed，不应再翻倍。 */
   get attackSpeedMult(): number {
-    return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
+    const raw = (1 + this.equipStats.meleeSpeed)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
       * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
       * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
-      * (1 + 0.1 * this.beetleOrbs)                           // 甲虫攻击球攻速（:10071+）
-
-      * (1 + this.buffs.wellFedMeleeSpeed);   // 食物近战速 +5/7.5/10%（:11528+）
-  }
-  /** 近战伤害加成（猛爪手套 +5） */
-  get meleeDamageBonus(): number {
-    return this.hasFeralClaws ? 5 : 0;
+      * (1 + 0.1 * this.beetleOrbs)                          // 甲虫攻击球攻速（:10071+）
+      * (1 + this.buffs.wellFedMeleeSpeed);                  // 食物近战速 +5/7.5/10%（:11528+）
+    return raw > 3 ? 1 / 3 : 1 / raw;                        // :28566-28573
   }
   /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；四系分道——summon 是独立
    *  minionDamage 链：装备走 SUMMON_GEAR/SET，不含 magic-only 来源） */

@@ -7,6 +7,7 @@ import {
 } from '../src/data/vanillaRecipes';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
+import { RECIPES } from '../src/data/recipes';
 
 const ctx = (over: Partial<VanillaCraftCtx> = {}): VanillaCraftCtx => ({
   nearbyInternal: new Set(),
@@ -72,5 +73,30 @@ describe('可用性计算', () => {
     const fakeNearby = new Set<number>(mithril); // 模拟站点扫描（内部 id 近似用 sheet id 演示）
     // envOk 用 SHEET_TO_INTERNAL——此处直接断言展开链语义
     expect(mithril).toContain(16);
+  });
+});
+
+// ---- 自制配方表防回归（2026-08 重复配方事故：木锤×2/钨锭×2/铂锭×2 + vi_ 产物双显） ----
+describe('自制配方表 RECIPES 去重 + 与原版表不重叠', () => {
+  it('内部无重复配方（out+count+station+inputs 全同）', () => {
+    const seen = new Set<string>();
+    for (const r of RECIPES) {
+      const key = `${r.out}|${r.count}|${r.station}|${r.inputs.map(([k, n]) => `${k}x${n}`).sort().join(',')}`;
+      expect(seen.has(key), `重复配方: ${r.out}`).toBe(false);
+      seen.add(key);
+    }
+  });
+
+  it('产物禁用 vi_ 前缀（防与原版配方段双显；vi_ 一律走 vanilla-recipes）', () => {
+    const bad = RECIPES.filter((r) => r.out.startsWith('vi_'));
+    expect(bad, `vi_ 产物: ${bad.map((r) => r.out).join(',')}`).toEqual([]);
+  });
+
+  it('木锤恰好一条；魔力水晶走原版表（徒手坠星×5）', () => {
+    expect(RECIPES.filter((r) => r.out === 'wood_hammer')).toHaveLength(1);
+    expect(RECIPES.some((r) => r.out === 'vi_109_mana_crystal')).toBe(false);
+    const mc = VANILLA_RECIPES.find((r) => r.create === 109)!;
+    expect(mc.tile).toBe(-1); // 徒手
+    expect(mc.items).toEqual([{ id: 75, stack: 5 }]);
   });
 });

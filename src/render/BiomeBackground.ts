@@ -159,7 +159,20 @@ export class BiomeBackground {
   private hellBack = 0;
   private caveBackX: number[] = [];
   private caveBackStyle: number[] = [];
+  private underworldStyle = 0;
   private seededFor = -1;
+  /** 地狱多层背景贴图缓存(Underworld_0-13,与 Background_N 分池) */
+  private hellImgs = new Map<number, HTMLImageElement | null>();
+  private hellFrameT = 0;
+  private hellImg(n: number): HTMLImageElement | null {
+    if (n < 0) return null;
+    if (this.hellImgs.has(n)) return this.hellImgs.get(n) ?? null;
+    if (typeof Image === 'undefined') return null;   // node 测试环境(浏览器外无 Image)
+    const im = new Image();
+    im.src = `sprites/vanilla/Underworld_${n}.png`;
+    this.hellImgs.set(n, im);
+    return im;
+  }
 
   private img(n: number): HTMLImageElement | null {
     if (n < 0) return null;
@@ -225,6 +238,8 @@ export class BiomeBackground {
     this.iceBack = seedPick(s, 31, 4);
     this.jungleBack = seedPick(s, 32, 2);
     this.hellBack = seedPick(s, 33, 3);
+    // 地狱多层背景风格(WorldGen.cs:7975 setBG(9, Next(3));World.underworldBG 若有存档值优先)
+    this.underworldStyle = world.underworldBG || seedPick(s, 34, 3);
     // caveBackX 四段边界（原版 worldgen 期设定；按世界宽近似重建）+ 每段基础风格 0..6
     const w = world.store.w;
     this.caveBackX = [Math.floor(w * 0.22), Math.floor(w * 0.42), Math.floor(w * 0.65)];
@@ -472,6 +487,10 @@ export class BiomeBackground {
       ctx.fillStyle = '#000';
       ctx.fillRect(0, 0, viewW, viewH);
     }
+    // 地狱多层远景背景(DrawUnderworldBackground :52082-52228,画在带层之下):
+    // gate = 屏底 ≥ (h-220)*16(:52086);原版画在 DrawBG 相位(带层之前),深层带层退化
+    // 后整屏由本层接管——层0 底部黑补 (11,3,7) 兜底(:52219-52223)
+    this.drawHellLayers(ctx, world, cam, viewW, viewH, dtMs);
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
       ctx.save();
@@ -583,5 +602,77 @@ export class BiomeBackground {
     };
     drawSlots(oldSlots, 1 - alpha);
     drawSlots(newSlots, alpha);
+  }
+
+  /** 地狱多层远景背景 1:1(Main.cs DrawUnderworldBackground :52082-52228):
+   *  wiki"地狱背景"= 岩柱/岩浆湖/熔岩瀑布岛屿/山体洞穴,五层视差(近→远 parallax
+   *  1/3..1/11),风格集 0:[0-4] 1:[5-9] 2:[10,11,12,13,9](WorldGen.cs:7578-7597);
+   *  2×2 四帧行动画(帧 8fps,贴图 1/6/7/8/13,:52117-52206 各自 Y 偏移) */
+  private drawHellLayers(
+    ctx: CanvasRenderingContext2D, world: World, cam: Cam,
+    viewW: number, viewH: number, dtMs: number,
+  ): void {
+    const h = world.store.h;
+    const camTopY = cam.y - viewH / 2;
+    if (camTopY + viewH < (h - 220) * 16) return;   // :52086 屏底未及 h-220
+    this.seedFor(world);
+    this.hellFrameT += dtMs;
+    const frame = Math.floor(this.hellFrameT / 1000 * 8) % 4;   // (int)(GlobalTime*8)%4
+    const SETS = [[0, 1, 2, 3, 4], [5, 6, 7, 8, 9], [10, 11, 12, 13, 9]];
+    const set = SETS[this.underworldStyle] ?? SETS[0];
+    const uwPx = (h - 200) * 16;                     // UnderworldLayer*16 锚
+    const pushUp = (1.25 - 1) * 0.5 * 200;           // zoomForPushUp=GameZoomTarget;取 1.25
+    for (let idx = 4; idx >= 0; idx--) {             // :52092 远→近(4→0)
+      const texId = set[idx];
+      const im = this.hellImg(texId);
+      if (!im || !im.complete || im.naturalWidth === 0) continue;
+      const num2 = idx * 2 + 3;                      // :52109 深度
+      const inv = 1 / num2;                          // vector = 1/num2(纵横同)
+      const scale = texId === 4 ? 0.5 : 1.3;         // num3(:52113;贴图4细柱条 0.5)
+      // 2×2 四帧行动画 + 各贴图 Y/X 偏移(:52117-52206)
+      let sx = 0, sy = 0, sw = im.naturalWidth, sh = im.naturalHeight;
+      let zeroX = 0, zeroY = 0;
+      const anim = texId === 1 || texId === 6 || texId === 7 || texId === 8 || texId === 13;
+      if (anim) {
+        sx = (texId === 1 ? (frame >> 1) : (frame % 2)) * (sw >> 1);
+        sy = (texId === 1 ? (frame % 2) : (frame >> 1)) * (sh >> 1);
+        sw >>= 1; sh >>= 1;
+      }
+      switch (texId) {
+        case 1: zeroY += 175; break;
+        case 2: zeroY += 100; break;
+        case 3: zeroY += 75; break;
+        case 6: zeroY += -60; break;
+        case 7: zeroX -= 400; zeroY += 90; break;
+        case 8: zeroY += 90; break;
+        case 9: zeroY += -30; break;
+        case 10: zeroY += 250 * num2; break;
+        case 11: zeroY += 100 * num2; break;
+        case 12: zeroY += 20 * num2; break;
+        case 13: zeroY += 20 * num2; break;
+      }
+      zeroY -= pushUp;                               // :52198
+      let vecX = Math.floor(sw * 0.5 * scale);       // vec = Size*0.5(动画已半) *num3 后 Floor
+      let vecY = Math.floor(sh * 0.5 * scale);
+      const num10 = scale * sw;                      // 单次绘制宽
+      const num11 = Math.floor((cam.x * inv - vecX + zeroX - viewW / 2) / num10);   // :52201
+      const num13 = Math.floor(scale * ((sw - 1) / inv));                           // :52204
+      // vec2(:52205-52206):X 按 num11 锚定平铺;Y 锚 UnderworldLayer 经深度投影
+      let x0 = Math.floor(((num11 - 2) * num13 + vecX - cam.x) * inv + viewW / 2 - vecX + zeroX);
+      const y0 = Math.floor((uwPx + vecY - cam.y) * inv + viewH / 2 - vecY + zeroY);
+      const loops = Math.ceil(viewW / num10);
+      const dh = sh * scale;
+      for (let i = num11 - 2; i <= num11 + 4 + loops; i++) {
+        ctx.drawImage(im, sx, sy, sw, sh, x0, y0, num10, dh);
+        if (idx === 0) {                             // 层0 底部黑补 rgb(11,3,7)(:52219-52223)
+          const bot = y0 + dh;
+          if (bot < viewH) {
+            ctx.fillStyle = 'rgb(11,3,7)';
+            ctx.fillRect(x0, bot, num10, viewH - bot);
+          }
+        }
+        x0 += num10;
+      }
+    }
   }
 }

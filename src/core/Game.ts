@@ -2591,8 +2591,10 @@ export class Game implements GameHooks {
       this.player.buffs.lanternHeal = heart ? 1 : 0;
     }
     // ---- 环境光环四族（SceneMetrics.cs:385-411 + Player.cs:25235-25266 授予链）：
-    // 瓶中星(42 frameY 252-286→158)、向日葵(27→146，墓园覆盖略)、猫堡垒(506 frameX<72→215)、
-    // 和平蜡烛(372 frameX<18→157)——AddBuff 2t 自动续
+    // 瓶中星(42 frameY 252-286→158)、向日葵(27→146，墓地压制见下)、猫堡垒(506 frameX<72→215)、
+    // 和平蜡烛(372 frameX<18→157)——AddBuff 2t 自动续。
+    // 向日葵 HasSunflower 门（SceneMetrics.cs:626-631）：墓碑计数 > GraveyardTileMin(16)
+    // 时 HasSunflower=false——墓地内向日葵不再给"快乐！"buff（:25262-25265）
     if (this.tickCount % 20 === 0) {
       const ptx3 = Math.floor(this.player.cx / TILE), pty3 = Math.floor(this.player.cy / TILE);
       let star = false, sun = false, bast = false, peace = false;
@@ -2611,7 +2613,7 @@ export class Game implements GameHooks {
       }
       const b = this.player.buffs;
       if (star) b.apply(BuffType.StarInBottle, 0.5);
-      if (sun) b.apply(BuffType.Sunflower, 0.5);
+      if (sun && this.scene.hasSunflower) b.apply(BuffType.Sunflower, 0.5);
       if (bast) b.apply(BuffType.CatBast, 0.5);
       if (peace) b.apply(BuffType.PeaceCandle, 0.5);
       this.peaceCandleNear = peace;
@@ -3582,9 +3584,20 @@ export class Game implements GameHooks {
       return;
     }
 
-    // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速配饰：猛爪手套 ×2）
+    // 近战挥剑（vi_ 数据驱动近战武器同走挥击，数值取 combat 表；攻速倍率 =
+    // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）
     const cw = heldDef ? combatWeapon(heldDef) : null;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
+    // TEMP-DBG ⑯帧内 gate 打点（定位星云探针 ucw=0 疑案，调毕即删）
+    {
+      const d = this._gateDbg ??= { n: 0, held: 0, useT: 0, cwOk: 0, cwKinds: {} as Record<string, number> };
+      d.n++;
+      if (heldDef) d.held++;
+      if (this.player.useTime === 0) d.useT++;
+      if (cw && cw.kind !== 'melee') d.cwOk++;
+      const k = cw ? cw.kind : 'null';
+      d.cwKinds[k] = (d.cwKinds[k] ?? 0) + 1;
+    }
     if (tool?.type === 'sword' || cwMelee) {
       // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
       // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）
@@ -3596,7 +3609,11 @@ export class Game implements GameHooks {
       const reuseSpd = nativeSpd != null
         ? animSpd
         : Math.max(2, Math.round((cwMelee!.useTime) / this.player.attackSpeedMult));
-      const autoReuse = cwMelee ? cwMelee.autoReuse : true; // 原生 legacy sword 保持持按连挥
+      // TryAllowingItemReuse（Player.cs:52036-52053）：autoReuseGlove（力量手套族配饰）给
+      // 近战武器补自动连挥——唯 type 3030 除外；原生 legacy sword 保持持按连挥
+      const heldVid = heldDef?.vid ?? -1;
+      const gloveReuse = this.player.equipStats.autoReuseGlove && heldVid !== 3030;
+      const autoReuse = cwMelee ? (cwMelee.autoReuse || gloveReuse) : true;
       const clickEdge = inp.mouseDown && !this.prevSwingMouse;
       const canChain = autoReuse || clickEdge; // 非 autoReuse 武器需重新点击（原版语义）
       // 词缀乘区（Item.Prefix :551：damage=round(damage×dmg)、knockBack×kb）
@@ -6153,6 +6170,8 @@ export class Game implements GameHooks {
         return null;
       },
       rand: (n) => Math.floor(Math.random() * n),
+      // Main.CurrentFrameFlags.ActivePlayersCount（DD2Event.cs:1267/:1578）：本机 + 远端
+      activePlayersCount: () => 1 + (this.net?.players.size ?? 0),
     };
   }
 
@@ -6323,6 +6342,8 @@ export class Game implements GameHooks {
   /** 高尔夫折扣计时（GolfState.golfScoreTime :30-47：每 tick+1，挥杆清零，
    *  进洞 SetScoreTime=3600；一杆进洞系数 = time/3600） */
   private golfScoreTime = 3600;
+  /** TEMP-DBG（ucw gate 打点，updateUse 内 ⑯帧计数——调试会话遗留，勿删待其收尾） */
+  private _gateDbg?: { n: number; held: number; useT: number; cwOk: number; cwKinds: Record<string, number> };
   /** 高尔夫瞄准态（AI_150 channel 语义：按住瞄准/松开击球/右键取消） */
   private golfAim = false;
   private golfAimBall: import('../entities/GolfBall').GolfBall | null = null;
@@ -7205,7 +7226,7 @@ export class Game implements GameHooks {
         * this.player.damageMult('melee')) + this.player.equipStats.armorPen + this.player.meleeArmorPen;
       this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
-      const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
+      const dmg = Math.max(1, Math.round(baseDmg * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;
       // 击退 = 官方击退值（原版 knockBack 2-5.5 → 速度系数 0.65）；
       // 力量手套族 kbGlove 近战击退翻倍
@@ -10379,11 +10400,14 @@ export class Game implements GameHooks {
         proxy.inv.selected = Math.min(rp.selectedItem, 9); // 快捷栏 0-9（heldItem 依赖）
       }
       // useItem 位 → 远端挥舞动画（原版：远端客户端以 controlUseItem 跑 ItemCheck 设置
-      // itemAnimation；此处派生等价 swing——时长按本地同公式，攻速配饰差异忽略）
+      // itemAnimation；此处派生等价 swing——时长按本地同公式，攻速配饰倍率取代理自身
+      // equipStats（msg5 已同步远端盔甲/配饰，Player.attackSpeedMult = CapAttackSpeeds
+      // 倒数档，Player.cs:28555-28574））
       if (!stale && rp.useItem) {
         const heldId = proxy.inv.heldItem()?.id ?? -1;
         if (!proxy.swingNet || proxy.swingNet.item !== heldId || proxy.swingNet.t <= 0) {
-          proxy.swingNet = { t: this.remoteSwingDur(heldId), dur: this.remoteSwingDur(heldId), item: heldId };
+          const dur = this.remoteSwingDur(heldId, proxy);
+          proxy.swingNet = { t: dur, dur, item: heldId };
         } else proxy.swingNet.t--;
       } else if (proxy.swingNet) {
         proxy.swingNet.t--;
@@ -10403,14 +10427,20 @@ export class Game implements GameHooks {
   }
 
   /** 远端挥舞时长（对齐本地各分支公式，Game.useItem 派生处：剑/近战 max(12,useTime)、
-   *  镐斧锤 max(14,speed)、其它 30；攻速配饰倍率远端不可见，取基础值） */
-  private remoteSwingDur(itemId: number): number {
+   *  镐斧锤 max(14,speed)、其它 30；近战/工具分支除以代理自身 attackSpeedMult——
+   *  远端盔甲/配饰经 msg5 已拷入代理背包，CapAttackSpeeds 倒数档同本地公式） */
+  private remoteSwingDur(itemId: number, proxy?: Player): number {
     if (itemId < 0) return 30;
     const def = ITEM_DEFS[itemId];
     if (!def) return 30;
-    const cw = combatWeapon(def);
-    if (def.tool?.type === 'sword' || cw?.kind === 'melee') return Math.max(12, cw?.useTime ?? def.tool?.speed ?? 42);
-    if (def.tool && (def.tool.type === 'pick' || def.tool.type === 'axe' || def.tool.type === 'hammer')) return Math.max(14, def.tool.speed ?? 46);
+    const spd = proxy ? proxy.attackSpeedMult : 1;
+    if (def.tool?.type === 'sword' || combatWeapon(def)?.kind === 'melee') {
+      const cw = combatWeapon(def);
+      return Math.max(12, Math.round((cw?.useTime ?? def.tool?.speed ?? 42) / spd));
+    }
+    if (def.tool && (def.tool.type === 'pick' || def.tool.type === 'axe' || def.tool.type === 'hammer')) {
+      return Math.max(14, Math.round((def.tool.speed ?? 46) / spd));
+    }
     return 30;
   }
 

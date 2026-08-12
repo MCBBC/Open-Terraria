@@ -112,7 +112,10 @@ export function auditWorldRender(st: AuditStoreView, maxReport = 200): AuditRepo
       if (meta && meta.cols > 0 && meta.rows > 0) {
         const texW = meta.cols * meta.grid[0] + (meta.cols - 1) * 2;
         const texH = meta.rows * meta.grid[1] + (meta.rows - 1) * 2;
-        if (fx >= texW || fy >= texH || fx < 0 || fy < 0) {
+        // ★ 回绕区间（≥32768）= 刻意的有符号倾斜偏移（棕榈 323）——跳过不判，
+        // 残留脏帧只会是小正值
+        if (fx >= 32768 || fy >= 32768) { /* signed lean offset: 合法 */ }
+        else if (fx >= texW || fy >= texH) {
           push('error', x, y, sheet, `帧越表: fx=${fx},fy=${fy} 超 ${texW}×${texH}`);
           continue;
         }

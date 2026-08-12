@@ -68,6 +68,9 @@ const T = (() => {
     CRIMSTONE: get('v_203_crimstone_block'), CRIMSON_PLANT: get('v_201_crimson_short_plants'),
     CRIMSAND_THORN: get('v_352_crimtane_thorns'), CRIMSON_HARDSAND: get('v_399_crimson_hardened_sand_block'),
     SUNFLOWER: get('v_27_sunflower'),
+    // 墓碑 85（SceneMetrics.cs:622 GraveyardTileCount）：Tombstones 单 tile 覆盖全部
+    // 6 种墓碑（GraveMarker/Cross/Headstone/Gravestone/Obelisk/Golden 均为 style 变体）
+    TOMBSTONE: get('tombstone_v'),
     // 神圣族计数(SceneMetrics.cs:603)：109 神圣草/492 神圣修剪草/110 神圣矮草/
     // 113 神圣高草/117 珍珠岩/402 神圣硬化沙/403 神圣沙岩（116 珍珠沙/164 粉冰见上）
     HALLOW_GRASS: get('v_109_hallowed_grass_block'), HALLOW_MOWED_GRASS: get('v_492_hallowed_mowed_grass_block'),
@@ -466,6 +469,9 @@ export class VanillaSpawner {
     this.ZoneJungle = this.zoneCounts.jungle >= 140;
     this.ZoneGlowshroom = this.zoneCounts.mushroom >= 100;
     this.ZoneMeteor = this.zoneCounts.meteor >= 75;
+    // ZoneGraveyard（SceneMetrics.cs:622-623/686）：墓碑 85 计数 − 向日葵/2（下取整、钳 ≥0）
+    //  ≥ GraveyardTileThreshold 28——向日葵每 2 株抵 1 块墓碑
+    this.ZoneGraveyard = this.zoneCounts.graveyard >= 28;
     // ZoneDungeon 不在此设置：原版取玩家 SceneMetrics（SetSpawnFlags L300），见 setPlayerFlags
     // ---- 蜘蛛巢旗标（L1045-1079）:岩石层~地狱层 && 非地牢时 ----
     // 1/3 概率扫落点 ±Next(5,15) 立方盒内任意墙 62;否则查玩家所站格墙 62。
@@ -499,7 +505,7 @@ export class VanillaSpawner {
    *  原版 SceneMetrics 每帧增量维护；本类无帧钩子 → 0.5s 或玩家移动 ≥32 格才重算（近似） */
   private zoneStamp = -1;
   private zoneCX = -99999; private zoneCY = -99999;
-  private zoneCounts = { evil: 0, blood: 0, holy: 0, snow: 0, jungle: 0, mushroom: 0, meteor: 0 };
+  private zoneCounts = { evil: 0, blood: 0, holy: 0, snow: 0, jungle: 0, mushroom: 0, meteor: 0, graveyard: 0 };
 
   private refreshZoneCounts(cx: number, cy: number): void {
     const now = performance.now();
@@ -509,7 +515,7 @@ export class VanillaSpawner {
     const st = this.world.store;
     const x0 = Math.max(2, cx - 84), x1 = Math.min(st.w - 3, cx + 84);
     const y0 = Math.max(2, cy - 61), y1 = Math.min(st.h - 3, cy + 61);
-    let evil = 0, blood = 0, holy = 0, snow = 0, jungle = 0, mushroom = 0, sunflower = 0, meteor = 0;
+    let evil = 0, blood = 0, holy = 0, snow = 0, jungle = 0, mushroom = 0, sunflower = 0, meteor = 0, tomb = 0;
     for (let y = y0; y <= y1; y++) {
       const row = y * st.w;
       for (let x = x0; x <= x1; x++) {
@@ -523,6 +529,7 @@ export class VanillaSpawner {
         else if (JUNGLE_LOOKUP[t]) jungle++;
         else if (MUSHROOM_LOOKUP[t]) mushroom++;
         else if (t === T.METEORITE) meteor++;
+        else if (t === T.TOMBSTONE) tomb++;
         else if (t === T.SUNFLOWER) sunflower++;
       }
     }
@@ -537,6 +544,8 @@ export class VanillaSpawner {
     this.zoneCounts = {
       evil: Math.max(0, evil), blood: Math.max(0, blood), holy: Math.max(0, holy),
       snow, jungle, mushroom, meteor,
+      // GraveyardTileCount（SceneMetrics.cs:622-623/632-634）：85 计数 − 向日葵/2，钳 ≥0
+      graveyard: Math.max(0, tomb - (sunflower >> 1)),
     };
   }
 
@@ -676,16 +685,31 @@ export class VanillaSpawner {
         }
       } else {
         // 地表/洞穴侧(:765-832)：高友好率；命中时 maxSpawns×0.6（:782/:805/:821）；
-        // townNPCs==0 → 永不友好(不出小动物)；墓地段（:770-778/:793-800/:815-822）未实装
+        // townNPCs==0 → 永不友好(不出小动物)。
+        // 墓地段（:770-778/:793-800/:815-822）：ZoneGraveyard && (!ZonePeaceCandle || 1/3)
+        //  → spawnRate 放宽（×1.66/×2.33/×3）且友好掷骰概率骤降（1/9 / 1/6 / 1/3）——
+        //  墓地有城镇 NPC 也会高密度刷怪（墓地小动物只有蛆/鼠，:2008-2014）
+        const gy = this.ZoneGraveyard && (!peaceCandle || this.rateRng() < 1 / 3);
         if (townNPCs === 1) {
-          if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :779-783
+          if (gy) {
+            spawnRate = Math.floor(spawnRate * 1.66);                       // :771
+            if (this.rateRng() < 1 / 9) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :773-775
+          } else if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :779-783
           else spawnRate = Math.floor(spawnRate * 2);
         } else if (townNPCs === 2) {
-          if (this.rateRng() < 2 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :802-806
+          if (gy) {
+            spawnRate = Math.floor(spawnRate * 2.33);                       // :794
+            if (this.rateRng() < 1 / 6) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :796-798
+          } else if (this.rateRng() < 2 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :802-806
           else spawnRate = Math.floor(spawnRate * 3);
         } else if (townNPCs >= 3) {
-          this.friendlyHit();   // :826-828 非 ftw 恒友好(专家 1/30 例外未实装)
-          maxSpawns = Math.floor(maxSpawns * 0.6); // :830 无条件削减（专家例外轮也削）
+          if (gy) {
+            spawnRate = Math.floor(spawnRate * 3);                          // :816
+            if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :818-820
+          } else {
+            this.friendlyHit();   // :826-828 非 ftw 恒友好(专家 1/30 例外未实装)
+            maxSpawns = Math.floor(maxSpawns * 0.6); // :830 无条件削减（专家例外轮也削）
+          }
         }
       }
     }
@@ -1286,6 +1310,15 @@ export class VanillaSpawner {
       if (N(3)) return D(67);     // 螃蟹（L1826-1829）
       return D(64);               // 粉水母兜底（L1830-1833）
     }
+    // ---- 墓地雕像宝箱怪（NPC.cs:1478，原版链位在入侵段之后、水池段之前）----
+    //  downedBoss3 && ZoneGraveyard && !noWorms && RollBadLuckExtreme(25) && 场上无 690
+    //  && IsThisAGoodPlaceForAStatueMimic（:43751 = 落脚 2 格实心 + 上方 3 格净空，与
+    //  邻近是否有雕像无关——名字只是历史）。该支不受 spawnFriendly 门（同链更早的
+    //  兄弟分支），友好轮也可命中。690 immortal+aiStyle126（伪装雕像待敌靠近）
+    if (this.downedBoss3 && this.ZoneGraveyard && !this.noWorms && N(25) && !any(690)
+      && this.isGoodPlaceForAStatueMimic()) {
+      return D(690);
+    }
     // ---- 水池段（L1839-1905）----
     //  两支 else-if（原版 L1839 / L1895,均带 !spawnFriendly 门）;友好轮落 SpawnAnNPC
     //  :2006 的 spawnFriendly 段(水中小动物 :2136+),本仓该段走水中小动物近似于 A 段内
@@ -1327,6 +1360,13 @@ export class VanillaSpawner {
         return D(63);
       }
       // A/B 均未命中 → 原版落入 L1906+ 腐化/猩红水段（非本段范围），交回主链
+    }
+    // ---- 墓地友好轮（SpawnAnNPC :2008-2014，spawnFriendly 段首支）----
+    //  ZoneGraveyard 时友好轮恒走本支：非水域 50/50 蛆 606 / 鼠 610，水域直接空过——
+    //  不受昼夜门限制（原版本支无 dayTime 条件），也不落后续小动物链
+    if (this.spawnFriendlyCycle && this.ZoneGraveyard) {
+      if (!this.waterTile) return D(N(2) ? 610 : 606);
+      return null;
     }
     // ---- 雨天深层宝石松鼠/兔（NPC.cs:2289-2296，case 2/109/477/492 雨分支首两支）----
     //  门：raining && spawnTileY <= UnderworldLayer && deeperThanRockLayer，各 1/5；

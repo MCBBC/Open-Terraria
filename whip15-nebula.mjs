@@ -50,6 +50,9 @@ const out = await p.evaluate(async () => {
   await new Promise(s2 => setTimeout(s2, 1500)); // 等吸附拾取
   g.entities.add = oa;
   r.bolts = bolts; r.cd = pl.nebulaCD; r.ucw = ucwCalls; g.useCombatWeapon = ocw;
+  r.gateDbg = JSON.parse(JSON.stringify(g._gateDbg ?? {}));
+  r.annotate = g.annotateMode; r.minecart = !!g.minecart;
+  r.annotate = g.annotateMode; r.mining = !!g.mining;
   r.heldSamples = [];
   for (let i = 0; i < 10; i++) { r.heldSamples.push(ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none'); await new Promise(s3 => setTimeout(s3, 100)); }
   r.heldAfter = r.heldSamples[r.heldSamples.length - 1];
@@ -60,6 +63,11 @@ const out = await p.evaluate(async () => {
   r.cwNow = heldNow ? combatWeapon(ITEM_DEFS[heldNow.id])?.kind ?? 'nullcw' : 'noheld';
   r.defMagic = JSON.stringify(ITEM_DEFS[heldNow?.id ?? -1]?.magic ?? null).slice(0, 80);
   r.projs = g.entities.projectiles.filter((e) => e?.constructor?.name === 'MagicProj').length;
+  // 合成直调 useCombatWeapon（绕开输入管线，验证实现链本体）
+  try { const hI = pl.inv.heldItem(); g.useCombatWeapon(combatWeapon(ITEM_DEFS[hI.id]), ITEM_DEFS[hI.id]); } catch (e2) { r.directErr = String(e2).slice(0, 120); }
+  pl.nebulaCD = 0;
+  await new Promise(s3 => setTimeout(s3, 300));
+  r.direct = { manaAfter2: pl.mana, bolts2: bolts };
   r.nebula = [...pl.nebula];
   r.levels = pl.nebula[0] + pl.nebula[1] + pl.nebula[2];
   r.summonMult = Math.round(pl.summonDamageMult * 100) / 100; // 1+0.66+0.15×dmg级

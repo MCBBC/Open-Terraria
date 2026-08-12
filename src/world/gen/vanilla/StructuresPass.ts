@@ -926,3 +926,243 @@ export function matureHerbPlants(st: TileStore, rng: RNG, gs: GenState): void {
     }
   }
 }
+
+// ================= Pass 96 CactusPalmTreesAndCoral（cs:21115-21325 + PlantCactus cs:54176 +
+// GrowCactus cs:56584-56805）1:1 =================
+// 原版同一 pass 三段列扫描（cs:21198-21202 switch）：
+//   n=0 左海滩段 x∈[5,380)      maxValue=Next(3,13)  flag=false → 珊瑚/贝壳
+//   n=1 中段     x∈[400,w-400)  maxValue=8           flag=true  → 水盒棕榈/仙人掌
+//   n=2 右海滩段 x∈[w-380,w-5)  maxValue=Next(3,13)  flag=false → 珊瑚/贝壳
+// 命中列（Next(maxValue)==0）自 y=0 扫到 worldSurface-1 找首个沙族面（53/112/234）
+// 且上格空墙 0 → 分支处理。未命中列走海滨燕麦段（见下方备案）。
+// 注册序：SettleLiquidsPart2AndNotTheBees(21051) < 本 pass(21115) < TileCleanup(21327)。
+// 已知近似（备案，接线时评估掷骰流影响）：
+//   - pass 头部绿洲消费段（cs:21129-21153：绿洲棕榈 323/海滨燕麦/绿洲植物 530）未实现；
+//   - 未命中列的 PlantSeaOat/GrowSeaOat/PlaceOasisPlant 段（cs:21302-21320）未实现；
+//   - SquareTileFrame 对仙人掌为 no-op：渲染端 cactusFrameAt（WorldGen.CactusFrame
+//     1:1，render/VanillaTiler.ts）按邻接实时求帧，生成期无需写帧。
+/** TileID.Sets.Conversion.Sand（TileID.cs:30）：53/112/116/234 */
+const SAND_CONV = idsByVanillaSheet(53, 112, 116, 234);
+/** 列扫描门沙族（cs:21210：仅 53/112/234——珍珠沙 116 不在生成期地表） */
+const SAND_GATE = idsByVanillaSheet(53, 112, 234);
+const CORAL = TILE_BY_KEY['v_81_coral']!;
+const SEASHELLS = TILE_BY_KEY['v_324_seashells']!;
+/** WorldGen.cs:4258-4262 readonly 常量：水盒宽/高/液量阈值 */
+const CACTUS_WATER_WIDTH = 50;
+const CACTUS_WATER_HEIGHT = 25;
+const CACTUS_WATER_LIMIT = 25;
+
+/** GrowCactus（cs:56584-56805）单步语义：
+ *  锚点 (i,j) 须 nactive 的仙人掌或沙族、非半砖（生成期无 slope 门）、上格无液；
+ *  50×25 水盒（[i-50,i+50)×[j-25,j+25)，InWorld 内求和）液量和/255 > 25 即停。
+ *  沙锚（cs:56611-56642）：上方三格净空；13×5 邻域（[i-6,i+6]×[j-3,j+1]，InWorld 5
+ *  余量）内仙人掌 ≥4 即停、沙计数 >10 才在上格冒仙人掌；1/2 清锚格 slope。
+ *  仙人掌锚（cs:56643-56804）：扫基列顶（列尽向更长邻臂列平移）→ 高度门
+ *  （[num-2,num+2]×[j-(11-num6),j+num6] 盒内仙人掌数 ≥ Next(11,13) 即停，drunkWorld
+ *  分支不触发）→ num7==0 时横向分叉三选一（Next(3)：0 西臂 / 1 东臂 / 否则
+ *  num6 < Next(2,8) 且上格净空继续上长）；num7!=0 时臂上补格。 */
+export function growCactus(st: TileStore, rng: RNG, i: number, j: number): void {
+  if (j <= 0 || !st.inBounds(i, j) || !st.inBounds(i, j - 1)) return;   // cs:56586 + C# OOB 读 = 空格
+  const anchor = st.idx(i, j);
+  const anchorType = st.type[anchor];
+  if (!st.flags[anchor] || st.half[anchor] !== 0
+    || (anchorType !== CACTUS && !SAND_CONV.has(anchorType))
+    || st.liquid[st.idx(i, j - 1)] > 0) return;
+  // ---- 50×25 水盒（cs:56599-56609；remix 分支不触发）----
+  let water = 0;
+  for (let k = i - CACTUS_WATER_WIDTH; k < i + CACTUS_WATER_WIDTH; k++) {
+    for (let l = j - CACTUS_WATER_HEIGHT; l < j + CACTUS_WATER_HEIGHT; l++) {
+      if (st.inBounds(k, l)) water += st.liquid[st.idx(k, l)];
+    }
+  }
+  if (Math.trunc(water / 255) > CACTUS_WATER_LIMIT) return;
+  const activeAt = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1;
+  const isCactus = (x: number, y: number): boolean =>
+    st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1 && st.type[st.idx(x, y)] === CACTUS;
+  const place = (x: number, y: number): void => {
+    st.setTileSilent(x, y, CACTUS, 0, 0);   // CopyPaintAndCoating：生成期无涂装
+    // SquareTileFrame（cs:56638 等）：仙人掌帧由渲染端 cactusFrameAt 实时求（备案）
+  };
+
+  if (SAND_CONV.has(anchorType)) {
+    // ---- 沙锚：在上格冒新仙人掌（cs:56611-56642）----
+    if (activeAt(i, j - 1) || activeAt(i - 1, j - 1) || activeAt(i + 1, j - 1)) return;
+    let cacti = 0, sand = 0;
+    sandScan:
+    for (let m = i - 6; m <= i + 6; m++) {
+      for (let n = j - 3; n <= j + 1; n++) {
+        // InWorld(m, n, 5)（cs:9635）：5 格余量
+        if (m < 5 || m >= st.w - 5 || n < 5 || n >= st.h - 5) continue;
+        const kk = st.idx(m, n);
+        if (!st.flags[kk]) continue;
+        const t = st.type[kk];
+        if (t === CACTUS) {
+          cacti++;
+          if (cacti >= 4) return;           // cs:56629：邻域仙人掌 ≥4 即停
+        }
+        if (SAND_CONV.has(t)) {
+          sand++;
+          if (sand > 10) break sandScan;    // cs:56635：>10 提前出局（两层 break）
+        }
+      }
+    }
+    if (sand > 10) {
+      if (rng.int(0, 1) === 0) st.slope[anchor] = 0;   // cs:56640：isGeneratingOrLoadingWorld 恒真
+      place(i, j - 1);
+    }
+    return;
+  }
+  if (anchorType !== CACTUS) return;         // cs:56643（防御；上部门已保证）
+
+  // ---- 仙人掌锚：向顶扫基列（cs:56644-56661）----
+  let num = i, num2 = j;
+  while (isCactus(num, num2)) {
+    num2++;
+    if (!isCactus(num, num2)) {
+      // 列尽：邻臂列在同深且其上一格也是仙人掌 → 基列平移到臂列
+      if (isCactus(num - 1, num2) && isCactus(num - 1, num2 - 1) && num >= i) num--;
+      if (isCactus(num + 1, num2) && isCactus(num + 1, num2 - 1) && num <= i) num++;
+    }
+  }
+  num2--;
+  const num6 = num2 - j;                     // 锚上方高度
+  const num7 = i - num;                      // 基列横偏
+  num = i - num7;                            // cs:56664：镜像基列
+  num2 = j;
+  const num8 = 11 - num6;
+  // ---- 高度门（cs:56666-56679）：盒内仙人掌计数 ≥ Next(11,13) 即停 ----
+  let num9 = 0;
+  for (let num10 = num - 2; num10 <= num + 2; num10++) {
+    for (let num11 = num2 - num8; num11 <= num2 + num6; num11++) {
+      if (isCactus(num10, num11)) num9++;
+    }
+  }
+  if (num9 >= rng.int(11, 12)) return;       // cs:56678：num9 >= Next(11,13)
+  num = i;
+  num2 = j;
+  if (num7 === 0) {
+    if (num6 === 0) {
+      // cs:56687-56701：孤格 → 直上一格
+      if (!activeAt(num, num2 - 1)) place(num, num2 - 1);
+      return;
+    }
+    // ---- 横向分叉三选一（cs:56703-56758）----
+    let flag = false, flag2 = false;
+    if (isCactus(num, num2 - 1)) {
+      // 西臂净空五连格（含对角/隔一格）
+      if (!activeAt(num - 1, num2) && !activeAt(num - 2, num2 + 1) && !activeAt(num - 1, num2 - 1)
+        && !activeAt(num - 1, num2 + 1) && !activeAt(num - 2, num2)) flag = true;
+      // 东臂镜像
+      if (!activeAt(num + 1, num2) && !activeAt(num + 2, num2 + 1) && !activeAt(num + 1, num2 - 1)
+        && !activeAt(num + 1, num2 + 1) && !activeAt(num + 2, num2)) flag2 = true;
+    }
+    const num12 = rng.int(0, 2);             // cs:56726：Next(3) 三选一
+    if (num12 === 0 && flag) {
+      place(num - 1, num2);                  // 西臂
+    } else if (num12 === 1 && flag2) {
+      place(num + 1, num2);                  // 东臂
+    } else if (num6 < rng.int(2, 7)          // cs:56741：Next(2,8) 上长门
+      && !isCactus(num - 1, num2 - 1) && !isCactus(num + 1, num2 - 1)
+      && !activeAt(num, num2 - 1)) {
+      place(num, num2 - 1);                  // 继续上长
+    }
+  } else if (!activeAt(num, num2 - 1) && !activeAt(num, num2 - 2)
+    && !activeAt(num + num7, num2 - 1) && isCactus(num - num7, num2 - 1)) {
+    // cs:56764-56780：臂列锚 → 补直上一格（对侧臂须存在）
+    place(num, num2 - 1);
+  }
+}
+
+/** PlantCactus（cs:54176-54187）：锚点一次 GrowCactus + 150 次随机邻域尝试
+ *  （x∈[i-1,i+1]、y∈[j-10,j+1]）→ 天然成簇 */
+export function plantCactus(st: TileStore, rng: RNG, i: number, j: number): void {
+  growCactus(st, rng, i, j);
+  for (let k = 0; k < 150; k++) {
+    const i2 = rng.int(i - 1, i + 1);        // Next(i-1, i+2)
+    const j2 = rng.int(j - 10, j + 1);       // Next(j-10, j+2)
+    growCactus(st, rng, i2, j2);
+  }
+}
+
+/** RollRandomSeaShellStyle（cs:45176-45192）：Next(2) 起，1/10→2、1/10→3、1/50→4
+ *  （四次掷骰顺序固定） */
+function rollRandomSeaShellStyle(rng: RNG): number {
+  let result = rng.int(0, 1);
+  if (rng.int(0, 9) === 0) result = 2;
+  if (rng.int(0, 9) === 0) result = 3;
+  if (rng.int(0, 49) === 0) result = 4;
+  return result;
+}
+
+/** PlaceTile 81 珊瑚（cs:60214-60218）生成期有效子集：上格空、下格整砖实心
+ *  （cs:59455-59463）；frameX = 26*Next(6)。81 非固体 → 可在水下放置。 */
+function placeCoral(st: TileStore, rng: RNG, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y - 1) || !st.inBounds(x, y + 1)) return false;
+  if (st.flags[st.idx(x, y - 1)]) return false;
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi] || !TILE_DEFS[st.type[bi]]?.solid
+    || st.half[bi] !== 0 || st.slope[bi] !== 0) return false;
+  st.setTileSilent(x, y, CORAL, 26 * rng.int(0, 5), 0);
+  return true;
+}
+
+/** PlaceTile 324 贝壳 → Place1x1（cs:60166-60171 + 45194-45210）：下格 SolidTile2；
+ *  frameX = 22*Next(3)、frameY = 22*style */
+function placeSeaShell(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return false;
+  const bi = st.idx(x, y + 1);
+  if (!(st.flags[bi] && TILE_DEFS[st.type[bi]]?.solid
+    && st.slope[bi] === 0 && st.half[bi] === 0)) return false;
+  st.setTileSilent(x, y, SEASHELLS, 22 * rng.int(0, 2), 22 * style);
+  return true;
+}
+
+/** pass 96 本体。Skyblock.denyAllGeneration（cs:21117）→ 整段跳过（零掷骰）。 */
+export function runCactusPalmTreesAndCoralPass(st: TileStore, rng: RNG, gs: GenState): void {
+  if (gs.seedFlags.skyblock) return;
+  const w = st.w;
+  const num = 8;                             // cs:21120（remixWorldGen=2 不触发）
+  const num7 = 380;                          // cs:21127
+  const maxL = rng.int(3, 12);               // cs:21123 Next(3,13)——左段列距骰
+  const maxR = rng.int(3, 12);               // cs:21124 Next(3,13)——右段列距骰
+  rng.int(2, 5); rng.int(2, 5);              // cs:21125-21126 Next(2,6)×2——死骰（声明后未用）
+  // cs:21129-21153：绿洲棕榈/海滨燕麦/绿洲植物 530 消费段未实现（备案）
+  const yTop = gs.worldSurface - 1;          // cs:21198：num13 = worldSurface - 1
+  for (let n = 0; n < 3; n++) {
+    let x0: number, x1: number, flag: boolean, maxValue: number;
+    if (n === 0) { x0 = 5; x1 = num7; flag = false; maxValue = maxL; }
+    else if (n === 1) { x0 = 400; x1 = w - 400; flag = true; maxValue = num; }
+    else { x0 = w - num7; x1 = w - 5; flag = false; maxValue = maxR; }
+    for (let x = x0; x < x1; x++) {
+      if (rng.nextInt(maxValue) !== 0) continue;   // else 分支（燕麦段 cs:21302-21320）备案
+      // y=0 起扫（cs:21205）；y<1 时上格越界（C# OOB 读 = 空格 → 门必过但
+      // 放置目标 y-1<0 不可写）——等价跳过
+      for (let y = 1; y < yTop && y < st.h; y++) {
+        const ti = st.idx(x, y);
+        if (!st.flags[ti] || !SAND_GATE.has(st.type[ti])) continue;   // cs:21208-21211
+        const ai = st.idx(x, y - 1);
+        if (st.flags[ai] || st.wall[ai] !== 0) continue;              // cs:21213-21216
+        if (flag) {
+          // ---- 中段：湖畔水盒棕榈 / 仙人掌（cs:21257-21279；水盒逻辑在
+          //      TreePass.waterBoxPalmCheck——超限已掷 Next(4) 时不再 PlantCactus）----
+          if (!waterBoxPalmCheck(st, rng, x, y)) plantCactus(st, rng, x, y);
+        } else {
+          // ---- 两端海滩段：珊瑚 81 / 贝壳 324（cs:21283-21299）----
+          if (st.inBounds(x, y - 4)
+            && st.liquid[st.idx(x, y - 2)] === 255
+            && st.liquid[st.idx(x, y - 3)] === 255
+            && st.liquid[st.idx(x, y - 4)] === 255) {
+            if (rng.int(0, 1) === 0) placeCoral(st, rng, x, y - 1);
+            else placeSeaShell(st, rng, x, y - 1, rollRandomSeaShellStyle(rng));
+            break;                          // cs:21292：放置后跳出本列扫描
+          }
+          if (st.inBounds(x, y - 2) && st.liquid[st.idx(x, y - 2)] === 0 && y < gs.worldSurface) {
+            placeSeaShell(st, rng, x, y - 1, rollRandomSeaShellStyle(rng));
+            break;                          // cs:21299
+          }
+        }
+      }
+    }
+  }
+}

@@ -50,6 +50,10 @@ const MUSHROOM_THRESHOLD = 100;
 const METEOR_THRESHOLD = 75;
 const DUNGEON_THRESHOLD = 250;
 const GRAVEYARD_THRESHOLD = 28;
+/** GraveyardTileMin（SceneMetrics.cs:62 =16）：不做 Zone 判定（阈值是 28）——只驱动
+ *  HasSunflower 压制门（:628-631）与视觉强度分级下界（SceneState.UpdateGraveyard :415-418
+ *  GetLerpValue(16,36,count)，消费端 Game.updateWeather 已按 16/36 字面实现） */
+const GRAVEYARD_TILE_MIN = 16;
 
 /** 地牢墙集合（Main.cs:10507-10514 wallDungeon 全表：主题墙 7/8/9 + 1.4 变体墙 94-99；
  *  41/43/44 是地牢"砖 tile"的 id,不是墙——此前误混入导致变体墙区域 zoneDungeon 永假） */
@@ -104,6 +108,9 @@ export interface SceneFlags {
   bloodMoonMonolith: boolean;
   /** 派对进行中（BirthdayParty.PartyIsUp：ManualParty/GenuineParty；入夜 CheckNight 结束） */
   partyUp: boolean;
+  /** HasSunflower（SceneMetrics.cs:594/626-630）：窗口内有向日葵 且 墓碑计数 ≤ GraveyardTileMin(16)。
+   *  墓地压制向日葵的"快乐！"buff（Player.cs:25262-25265 授予链 → buff 146） */
+  hasSunflower: boolean;
 }
 
 export const EMPTY_SCENE: SceneFlags = {
@@ -116,6 +123,7 @@ export const EMPTY_SCENE: SceneFlags = {
   zoneGraveyard: false, zoneDungeon: false, zoneTemple: false, zoneBeach: false,
   zoneUndergroundDesert: false, townNPCCount: 0,
   musicBoxStyle: -1, fountainColor: -1, monolithType: -1, bloodMoonMonolith: false, partyUp: false,
+  hasSunflower: false,
 };
 
 const countSet = (counts: Map<number, number>, set: Set<number>): number => {
@@ -189,7 +197,12 @@ export function scanScene(
   const dungeonTiles = countSet(counts, DUNGEON_TILES);
   // DesertSandTileCount（SceneMetrics L665：sand - oceanSand；oceanSand 在扫描循环内按 oceanDepths 逐格计）
   const desert = Math.max(0, countSet(counts, SAND_TILES) - oceanSand);
+  // 墓碑族（L622-623）：GraveyardTileCount = _tileCounts[85] − _tileCounts[27]/2（下取整、负值钳 0）。
+  // tile 85 = Tombstones 全部 6 种墓碑变体（同 tile 不同 style），无独立 tile——旧注疑 545 有误
   const graveyard = Math.max(0, countSet(counts, GRAVEYARD_TILES) - (sunflower >> 1));
+  // HasSunflower（L626-631）：有向日葵 且 GraveyardTileCount ≤ GraveyardTileMin(16)——
+  // 墓碑够多时向日葵的快乐 buff 被压制（比较在 <0 钳位之前，但 >16 必为正，顺序无差）
+  const hasSunflower = sunflower > 0 && graveyard <= GRAVEYARD_TILE_MIN;
 
   // Zone 判定（CalculateZones L673-697）
   const zoneUnderworldHeight = tileY > underworldLayer;
@@ -220,6 +233,7 @@ export function scanScene(
     desertSandTileCount: desert, // DesertSandTileCount = max(0, SandTileCount - OceanSandTileCount)（L665，
     // 海洋沙 = isDesertBiomeSand ∩ oceanDepths 逐格计，扫描窗内与原版一致）
     graveyardTileCount: graveyard,
+    hasSunflower,
     zoneGlowshroom: mushroom >= MUSHROOM_THRESHOLD,
     zoneMeteor: meteor >= METEOR_THRESHOLD,
     zoneGraveyard: graveyard >= GRAVEYARD_THRESHOLD,

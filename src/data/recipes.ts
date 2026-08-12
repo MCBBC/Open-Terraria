@@ -19,9 +19,6 @@ export const RECIPES: Recipe[] = [
   { out: 'wood_axe', count: 1, station: 'workbench', inputs: [['wood', 9]] },
   { out: 'wood_sword', count: 1, station: 'workbench', inputs: [['wood', 7]] },
   { out: 'wood_hammer', count: 1, station: 'workbench', inputs: [['wood', 8]] },
-  // 背景墙（原版 Recipe：工作台，1 材 → 4 墙）
-  { out: 'vi_93_wood_wall', count: 4, station: 'workbench', inputs: [['wood', 1]] },
-  { out: 'vi_26_stone_wall', count: 4, station: 'workbench', inputs: [['stone_block', 1]] },
   // 熔炼
   { out: 'copper_bar', count: 1, station: 'furnace', inputs: [['copper_ore', 3]] },
   { out: 'iron_bar', count: 1, station: 'furnace', inputs: [['iron_ore', 3]] },
@@ -35,7 +32,6 @@ export const RECIPES: Recipe[] = [
   { out: 'iron_pickaxe', count: 1, station: 'anvil', inputs: [['iron_bar', 8], ['wood', 3]] },
   { out: 'iron_axe', count: 1, station: 'anvil', inputs: [['iron_bar', 6], ['wood', 3]] },
   { out: 'iron_sword', count: 1, station: 'anvil', inputs: [['iron_bar', 7]] },
-  { out: 'wood_hammer', count: 1, station: 'workbench', inputs: [['wood', 8]] },
   { out: 'iron_hammer', count: 1, station: 'anvil', inputs: [['iron_bar', 6], ['wood', 3]] },
   { out: 'silver_pickaxe', count: 1, station: 'anvil', inputs: [['silver_bar', 8], ['wood', 3]] },
   { out: 'silver_sword', count: 1, station: 'anvil', inputs: [['silver_bar', 7]] },
@@ -64,11 +60,9 @@ export const RECIPES: Recipe[] = [
   { out: 'ironskin_potion', count: 1, station: 'workbench', inputs: [['stone_block', 5], ['iron_bar', 1]] },
   { out: 'thorns_potion', count: 1, station: 'workbench', inputs: [['wood', 5], ['lens', 1]] },
   // ---- 原版素材批次：方块 / 家具 / 熔炼 ----
-  // 替代矿熔炼
+  // 替代矿熔炼（钨/铂已在上文"熔炼"段,勿重复登记）
   { out: 'tin_bar', count: 1, station: 'furnace', inputs: [['tin_ore', 3]] },
   { out: 'lead_bar', count: 1, station: 'furnace', inputs: [['lead_ore', 3]] },
-  { out: 'tungsten_bar', count: 1, station: 'furnace', inputs: [['tungsten_ore', 4]] },
-  { out: 'platinum_bar', count: 1, station: 'furnace', inputs: [['platinum_ore', 4]] },
   // 方块加工
   { out: 'glass', count: 1, station: 'furnace', inputs: [['sand_block', 2]] },
   { out: 'gray_brick', count: 2, station: 'furnace', inputs: [['stone_block', 2]] },
@@ -113,6 +107,7 @@ export const RECIPES: Recipe[] = [
   { out: 'platinum_pickaxe', count: 1, station: 'anvil', inputs: [['platinum_bar', 8], ['wood', 3]] },
   { out: 'platinum_axe', count: 1, station: 'anvil', inputs: [['platinum_bar', 6], ['wood', 3]] },
   { out: 'platinum_sword', count: 1, station: 'anvil', inputs: [['platinum_bar', 7]] },
-  // 魔力水晶（原版：坠落之星×3 徒手合成）
-  { out: 'vi_109_mana_crystal', count: 1, station: 'hand', inputs: [['vi_75_fallen_star', 3]] },
+  // 注：vi_ 产物（木墙 93/石墙 26/魔力水晶 109 等）一律走原版配方段
+  // （vanilla-recipes.json），本表禁登——防双显。魔力水晶原版为徒手
+  // 坠星×5（曾误写 ×3）。
 ];
