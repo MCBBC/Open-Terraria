@@ -74,7 +74,7 @@ import {
   furnitureSlotCount, fitsFurniture, type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
-import { VI, VI_KEY } from '../data/itemKeys';
+import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
@@ -4138,9 +4138,8 @@ export class Game implements GameHooks {
         this.sfx.play('tink');
         this.input.mouseDown = false;
       }
-    } else if (heldDef && (heldDef.key === 'empty_bucket' || heldDef.key === 'water_bucket'
-      || heldDef.key === 'lava_bucket' || heldDef.key === 'honey_bucket')) {
-      this.useBucket(heldDef.key, tx, ty);
+    } else if (heldDef && [205, 206, 207, 1128].includes(viIdFromKey(heldDef.key))) {
+      this.useBucket(viIdFromKey(heldDef.key), tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
       // ---- 高尔夫球放置（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
       //      指针格净空且下方实心 → 落球（每玩家同时一球：旧球回收）
@@ -4943,11 +4942,11 @@ export class Game implements GameHooks {
       // 原版 Main.rand：Next(40)==0 → 种子；否则 Next(2)==0 → 发光蘑菇
       const roll = sheet === 71 ? new RNG((Math.random() * 1e9) | 0) : null;
       const mushroomDrop =
-        sheet === 3 && fx === 144 ? 'mushroom_item'
+        sheet === 3 && fx === 144 ? VI(5)
           : sheet === 24 && fx === 144 ? VANILLA_ITEM_KEY_BY_ID[60]
             : sheet === 201 && fx === 270 ? VANILLA_ITEM_KEY_BY_ID[2887]
               : sheet === 71 && roll
-                ? (roll.nextInt(40) === 0 ? 'mushroom_grass_seeds'
+                ? (roll.nextInt(40) === 0 ? VI_KEY.MUSHROOM_GRASS_SEEDS
                   : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null)
                 : null;
       if (mushroomDrop && ITEM_BY_KEY[mushroomDrop] !== undefined) {
@@ -5095,7 +5094,7 @@ export class Game implements GameHooks {
     const wood = Math.max(1, Math.floor(height * 0.8));
     for (let p = 0; p < wood; p++) {
       const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
-      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, VI_KEY.WOOD, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
     }
     for (const b of branchSpots) {
       this.spawnDrop(b.x * TILE + 8, b.y * TILE + 8, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
@@ -5106,7 +5105,7 @@ export class Game implements GameHooks {
       for (let a = 0; a < nAcorn; a++) {
         const ax = x + (Math.random() - 0.5) * 2.5;
         const ay = top + Math.random() * height * 0.4;
-        this.spawnDrop(ax * TILE + 8, ay * TILE, 'acorn', 1, (Math.random() - 0.5) * 3, -3 - Math.random());
+        this.spawnDrop(ax * TILE + 8, ay * TILE, VI_KEY.ACORN, 1, (Math.random() - 0.5) * 3, -3 - Math.random());
       }
     }
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
@@ -5136,8 +5135,8 @@ export class Game implements GameHooks {
     }
     // 战利品（近似：首破固定 + 之后随机）
     const drops: Array<[string, number]> = !this.world.flags.shadowOrbSmashed
-      ? (isDemonHeart ? [['coin_gold', 1], ['gel', 100]] : [['suspicious_eye', 1], ['gel', 100]])
-      : [['coin_silver', 5], ['gel', 60]];
+      ? (isDemonHeart ? [[VI_KEY.COIN.GOLD, 1], [VI_KEY.GEL, 100]] : [[VI_KEY.SUSPICIOUS_EYE, 1], [VI_KEY.GEL, 100]])
+      : [[VI_KEY.COIN.SILVER, 5], [VI_KEY.GEL, 60]];
     for (const [key, n] of drops) {
       this.spawnDrop(ax * TILE + 8, ay * TILE + 8, key, n, (Math.random() - 0.5) * 3, -3);
     }
@@ -5197,7 +5196,7 @@ export class Game implements GameHooks {
       for (let yy = top; yy <= bottom; yy++) {
         const dropId = Math.random() < 0.1 ? gemId : 3;   // 1/10 宝石 / 9/10 石块
         const stack = dropId === 3 ? 1 + Math.floor(Math.random() * 2) : 1;
-        const key = dropId === 3 ? 'stone_block' : VANILLA_ITEM_KEY_BY_ID[dropId];
+        const key = dropId === 3 ? VI_KEY.STONE : VANILLA_ITEM_KEY_BY_ID[dropId];
         if (key && ITEM_BY_KEY[key] !== undefined) {
           this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, yy * TILE,
             key, stack, (Math.random() - 0.5) * 2, -2 - Math.random());
@@ -5218,7 +5217,7 @@ export class Game implements GameHooks {
     const wood = Math.max(1, Math.floor(height * 0.8));
     for (let p = 0; p < wood; p++) {
       const dropY = (top + Math.floor((p + 0.5) * height / wood)) * TILE;
-      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, 'wood', 1, (Math.random() - 0.5) * 2, -2 - Math.random());
+      this.spawnDrop(x * TILE + 8 + (Math.random() - 0.5) * 14, dropY, VI_KEY.WOOD, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
     }
     // 橡实：与自有树同规则（75% 掉 2-3 颗，沿树冠区域散落供补种）
     if (Math.random() < 0.75) {
@@ -5226,7 +5225,7 @@ export class Game implements GameHooks {
       for (let a = 0; a < nAcorn; a++) {
         const ax = x + (Math.random() - 0.5) * 2.5;
         const ay = top + Math.random() * height * 0.4;
-        this.spawnDrop(ax * TILE + 8, ay * TILE, 'acorn', 1, (Math.random() - 0.5) * 3, -3 - Math.random());
+        this.spawnDrop(ax * TILE + 8, ay * TILE, VI_KEY.ACORN, 1, (Math.random() - 0.5) * 3, -3 - Math.random());
       }
     }
     this.spawnParticles(x * TILE + 8, top * TILE + 8, '#2E8B3D', 14, 2.2);
@@ -5271,11 +5270,11 @@ export class Game implements GameHooks {
       this.grandAnchor = null;
       const mode = this.wireToolMode;
       const wires = mode & TOOL_CUTTER ? 9999 : inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
-      const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(ITEM_BY_KEY['actuator_item'] ?? -1);
+      const actuators = mode & TOOL_CUTTER ? 9999 : inv.countOf(VI_ID(849));
       const res = w.massWireOperation(a, [tx, ty], mode, wires, actuators);
       if (!(mode & TOOL_CUTTER)) {
         if (res.wire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, res.wire);
-        if (res.actuator > 0) inv.remove(ITEM_BY_KEY['actuator_item'] ?? -1, res.actuator);
+        if (res.actuator > 0) inv.remove(VI_ID(849), res.actuator);
       }
       this.player.useTime = 10;
       this.sfx.play('place');
@@ -5283,7 +5282,7 @@ export class Game implements GameHooks {
       return;
     }
     // 五彩扳手:单点,用当前模式
-    const mode = itemDef.key === 'multicolor_wrench' ? this.wireToolMode : (wt.place ?? 0);
+    const mode = viIdFromKey(itemDef.key) === 3625 ? this.wireToolMode : (wt.place ?? 0);
     if (mode & TOOL_CUTTER) {
       const done =
         (mode & TOOL_ACTUATOR ? w.killActuator(tx, ty) : false) ||
@@ -5303,7 +5302,7 @@ export class Game implements GameHooks {
     for (const [m, bit] of colorBits) if (mode & m && !(st.wire[st.idx(tx, ty)] & bit)) needWire++;
     if (mode & TOOL_ACTUATOR && !(st.wire[st.idx(tx, ty)] & TileStore.WIRE_ACTUATOR)) needActuator++;
     const wireHave = inv.countOf(ITEM_BY_KEY['wire'] ?? -1);
-    const actHave = inv.countOf(ITEM_BY_KEY['actuator_item'] ?? -1);
+    const actHave = inv.countOf(VI_ID(849));
     if (needWire > wireHave || needActuator > actHave) {
       this.cb.onToast(needActuator > actHave ? Lang.text('Mods.SandboxWorld.Toast.NoActuator') : Lang.text('Mods.SandboxWorld.Toast.NoWire'));
       return;
@@ -5315,7 +5314,7 @@ export class Game implements GameHooks {
     if (mode & TOOL_ACTUATOR && w.placeActuator(tx, ty)) placed = true;
     if (placed) {
       if (needWire > 0) inv.remove(ITEM_BY_KEY['wire'] ?? -1, needWire);
-      if (needActuator > 0) inv.remove(ITEM_BY_KEY['actuator_item'] ?? -1, needActuator);
+      if (needActuator > 0) inv.remove(VI_ID(849), needActuator);
       this.player.useTime = 5;
       this.sfx.play('place');
       this.cb.onInventoryChanged();
@@ -6960,18 +6959,18 @@ export class Game implements GameHooks {
    *    舀空目标格后向四邻同类回吸至满 255（差额随桶带走）；舀蜂蜜→蜂蜜桶/岩浆→岩浆桶
    *  满桶倾倒（:45805-45838）：目标格已有液体 ≥200 拒绝（不覆盖半格液体）；
    *    已有异类液体拒绝；active 且实心且非 solidTop（tile 546 除外）拒绝；倾 255 */
-  private useBucket(key: string, tx: number, ty: number): void {
+  private useBucket(bucketVid: number, tx: number, ty: number): void {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
-    const liqTypeMap: Record<string, number> = { water_bucket: 1, lava_bucket: 2, honey_bucket: 3 };
-    const swap = (toKey: string) => {
+    const liqTypeMap: Record<number, number> = { 206: 1, 207: 2, 1128: 3 };
+    const swap = (toVid: number) => {
       // 原版语义:桶在手中原格替换(不跳格)
-      this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[toKey], stack: 1 };
+      this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[VI(toVid)], stack: 1 };
       this.cb.onInventoryChanged();
       this.player.useTime = 30;
       this.input.rightDown = false;
     };
-    if (key === 'empty_bucket') {
+    if (bucketVid === 205) {
       const i = st.idx(tx, ty);
       if (st.liquid[i] <= 0) return;
       const t = st.liquidType[i] || 1;
@@ -7001,10 +7000,10 @@ export class Game implements GameHooks {
         }
       }
       this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45774）
-      swap(t === 2 ? 'lava_bucket' : t === 3 ? 'honey_bucket' : 'water_bucket');
+      swap(t === 2 ? 207 : t === 3 ? 1128 : 206);
     } else {
       const i = st.idx(tx, ty);
-      const lt = liqTypeMap[key];
+      const lt = liqTypeMap[bucketVid];
       // 倾倒门（:45805-45808）：液体 ≥200 / 异类液体 / 实心块（546 陆地块例外）拒绝
       if (st.liquid[i] >= 200) return;
       if (st.liquid[i] > 0 && (st.liquidType[i] || 1) !== lt) return;
@@ -7012,7 +7011,7 @@ export class Game implements GameHooks {
       if (st.flags[i] && td && td.solid && !td.platform && td.vanilla?.sheet !== 546) return;
       st.setLiquid(tx, ty, 255, lt);
       this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45816/45833）
-      swap('empty_bucket');
+      swap(205);
     }
   }
 
@@ -9799,7 +9798,7 @@ export class Game implements GameHooks {
       if (st.type[i] !== TORCH_ID) continue;
       if (torchStillAnchored(st, tx, ty, st.frameX[i])) continue;
       st.setTile(tx, ty, 0);
-      this.spawnDrop(tx * TILE + 8, ty * TILE, 'torch', 1);
+      this.spawnDrop(tx * TILE + 8, ty * TILE, VI_KEY.TORCH, 1);
       this.sfx.play('dig');
     }
   }

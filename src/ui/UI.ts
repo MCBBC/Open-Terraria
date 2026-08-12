@@ -1789,8 +1789,18 @@ export class UI {
       }
       ui.block.style.display = 'flex';
       ui.block.title = `${buffName(t)}：${buffDesc(t)}`;
-      const iconId = this.buffIconItem.get(t);
-      if (iconId && !ui.icon.src) ui.icon.src = iconUrl(this.game, iconId);
+      // 原版 DrawBuffIcon（Main.cs:42736）：TextureAssets.Buff[type] 原大绘制——
+      // 用原版 Buff_{vanillaBuff} 贴图（2026-08-13 前：误用对应药水物品图标）
+      const want = `/sprites/vanilla/Buff_${BUFF_DEFS[t].vanillaBuff}.png`;
+      if (!ui.icon.src.endsWith(want)) {
+        ui.icon.onerror = () => {
+          // 素材缺失兜底：退回药水物品图标（缺表时仍可见）
+          const iconId = this.buffIconItem.get(t);
+          if (iconId && this.game) ui.icon.src = iconUrl(this.game, iconId);
+          ui.icon.onerror = null;
+        };
+        ui.icon.src = want;
+      }
       const s = Math.ceil(left);
       ui.time.textContent = s >= 60
         ? (s % 60

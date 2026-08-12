@@ -333,13 +333,15 @@ export class TownNPC extends Entity {
     let bestL: { cx: number; cy: number; d: number } | null = null;
     let bestR: { cx: number; cy: number; d: number } | null = null;
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean };
       if (e.dead) continue;
-      const dx = e.cx - this.cx;
-      const d = Math.hypot(dx, e.cy - this.cy);
+      // 中心由 x/y/w/h 推导(敌实体有 cx/cy,但勿依赖——判距门曾因 NaN 恒假失效)
+      const ecx = e.x + e.w / 2, ecy = e.y + e.h / 2;
+      const dx = ecx - this.cx;
+      const d = Math.hypot(dx, ecy - this.cy);
       if (d >= range) continue;
       if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-      const cand = { cx: e.cx, cy: e.cy, d };
+      const cand = { cx: ecx, cy: ecy, d };
       if (dx < 0) { if (!bestL || d < bestL.d) bestL = cand; }
       else { if (!bestR || d < bestR.d) bestR = cand; }
     }
