@@ -3,20 +3,19 @@
 // 半砖是原版"水浸润到方块贴图透明区"与瀑布触发（WaterfallManager 靠 halfBrick 唇缘）
 // 的核心：Smooth World 把地表凸起砸成半砖/坡面，Waterfalls pass 专门在水边唇缘砸半砖。
 // 坡面渲染见 VanillaTiler.drawSlopedFrame（TileDrawing.cs:1328-1360 切条 1:1）。
-// 仍近似原版处（可接受偏差，逐条对照 1456 源码后保留）：
-//  - CanPoundTile 的原版黑名单（10/48/137/232/380/387/388/476/484 + Boulders + 生成期 190/30
-//    + ForbidsSloping 上方表 + CanKillTile）近似为"solid && !platform && !framed"
-//  - CanBeClearedDuringGeneration 门禁（16520）未移植（默认全 true 的自然方块占绝大多数）
+// 仍近似原版处（逐条对照 1456 源码后保留）：
+//  - CanPoundTile 的 CanKillTile 结构检查（cs:62249）近似为 !framed
+//    （黑名单/Boulders/生成期 190,30/ForbidsSloping 上方表均已 1:1，见 canPoundTile）
 //  - SolidTile 的 tileSolidTop 近似为 !platform；PlaceTile 的 495 特判未移植
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
-import { idsByVanillaSheet } from './TileRunner';
+import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
 
 /** 各排除表按原版 vanilla tile id 构建（经 idsByVanillaSheet 转内部 id） */
 const T = { // 排除表用的原版 id 集
-  MUSHROOM_TREE: idsByVanillaSheet(136),
+  SWITCH: idsByVanillaSheet(136),
   STATUE: idsByVanillaSheet(137),
   /** Loop B 主排除（16661）：137 雕像/48 尖刺/232 木刺/191 活木/151 沙岩砖/274 地牢砖? /75/76 黑曜石狱石砖 */
   LOOP_B_SKIP: idsByVanillaSheet(137, 48, 232, 191, 151, 274, 75, 76),
@@ -25,6 +24,8 @@ const T = { // 排除表用的原版 id 集
   NO_FILL_SIDE: idsByVanillaSheet(190, 48, 232),
   /** Conversion.Sand（TileID.cs:30）：沙族 → Loop B 走 Tile.SmoothSlope */
   SAND: idsByVanillaSheet(53, 112, 116, 234),
+  /** TileID.Sets.PreventsSlopesDuringGeneration（1456 TileID.cs:323）：48/137/232/191/151/274/135/442/428 */
+  PREVENTS_SLOPES: idsByVanillaSheet(48, 137, 232, 191, 151, 274, 135, 442, 428),
 };
 
 /** blockType()==0 判定（悬顶分支旁格检查用）：非活性格或整砖格（half/slope 均为 0） */
@@ -49,13 +50,37 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
   return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
 }
 
-/** 可砸判定（WorldGen.cs:49122 CanPoundTile 简化）：实心非平台非框架物 */
-function canPoundTile(st: TileStore, x: number, y: number): boolean {
+/** 可砸判定（1456 WorldGen.cs:81434 CanPoundTile 1:1 表）：
+ *  ① type 黑名单（cs:81448）：10 门/48 尖刺/137 陷阱/232 木刺/380 花盆箱/387 陷阱门/
+ *    388 高闸/476 高尔夫洞/484 滚动仙人掌
+ *  ② TileID.Sets.Boulders（TileID.cs:195）：138/484/664/665/711-716
+ *  ③ 生成期追加：190 荧光菇块 / 30 木平台（cs:81462-81471）
+ *  ④ 上格 ForbidsSloping（cs:81494）：21 箱/26 祭坛/77 熔炉/88/235 传送器/237 蜥蜴祭坛/
+ *    441 假箱/467 箱2/468/470 模型/475 帽架/488 倒木/597 传送塔
+ *  ⑤ CanKillTile 结构检查（cs:62249）——仍为近似（生成期主要拦截宝箱/巨石邻接，
+ *    ①②④已覆盖生成期实际命中面）
+ *  另要求 active 且 tileSolid 非 tileSolidTop（原版隐含：非实心块砸不出半砖） */
+const POUND_BLACKLIST = idsByVanillaSheet(10, 48, 137, 232, 380, 387, 388, 476, 484);
+const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+const POUND_GEN_SKIP = idsByVanillaSheet(190, 30);
+const FORBIDS_SLOPING = idsByVanillaSheet(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
+
+export function canPoundTile(st: TileStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false; // 同 solidTile：幽灵 tile 不可砸
   const t = st.type[i];
   if (t === 0) return false;
+  if (POUND_BLACKLIST.has(t)) return false;
+  if (BOULDERS.has(t)) return false;
+  if (POUND_GEN_SKIP.has(t)) return false;
+  // ④ 上格 ForbidsSloping（cs:81475-81478：上格 active 且禁坡物 → 不可砸）
+  if (st.inBounds(x, y - 1)) {
+    const up = st.idx(x, y - 1);
+    if (st.flags[up] && FORBIDS_SLOPING.has(st.type[up])) return false;
+  }
   const d = TILE_DEFS[t];
+  // !framed ≈ CanKillTile 的框架物拦截（箱/罐/雕像等不可砸半砖）——CanKillTile 整体仍近似
   return !!d && d.solid && !d.platform && !d.framed;
 }
 
@@ -107,8 +132,9 @@ function smoothSlope(st: TileStore, x: number, y: number): void {
   }
 }
 
-/** 砸半砖（WorldGen.cs:49198 PoundTile 的生成期路径）：切换 halfBrick 位 */
-function poundTile(st: TileStore, x: number, y: number): boolean {
+/** 砸半砖（1456 WorldGen.cs:81544 PoundTile 生成期路径）：切换 halfBrick 位。
+ *  导出供蜂巢蜂蜜坠落凹槽（HiveBiome.CreateDentForHoneyFall）等 pass 复用 */
+export function poundTile(st: TileStore, x: number, y: number): boolean {
   if (!canPoundTile(st, x, y)) return false;
   const i = st.idx(x, y);
   st.half[i] = st.half[i] ? 0 : 1;
@@ -124,15 +150,20 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
     for (let j = 20; j < h - 20; j++) {
       const ti = st.idx(i, j);
       const t = st.type[ti];
-      const d = TILE_DEFS[t];
-      // PreventsSlopesDuringGeneration 门禁（16516）≈ framed 物体跳过（近似,见文件头）
-      if (d && d.framed) continue;
+      // 主门禁（1456 cs:16516）：本格与上格均"非活性 或 不在 PreventsSlopesDuringGeneration"
+      // ——此前近似为 framed 物体跳过（漏 135 压板/442/428 压力垫，且不查上格）
+      const okSlope = (yy: number): boolean => {
+        if (!st.inBounds(i, yy)) return true;
+        const k = st.idx(i, yy);
+        return !st.flags[k] || !T.PREVENTS_SLOPES.has(st.type[k]);
+      };
+      if (!okSlope(j) || !okSlope(j - 1)) continue;
       if (!st.flags[st.idx(i, j - 1)]) {
-        // 上方无块（16518）：旁格非蘑菇树 136 才处理
-        if (!T.MUSHROOM_TREE.has(st.type[st.idx(i - 1, j)]) || !st.flags[st.idx(i - 1, j)]) {
-          if (!T.MUSHROOM_TREE.has(st.type[st.idx(i + 1, j)]) || !st.flags[st.idx(i + 1, j)]) {
-            // 上方无块：对凸起顶端做半砖/削除
-            if (solidTile(st, i, j)) {
+        // 上方无块（16518）：旁格非开关 136 才处理（136=Switch，旧注释误标蘑菇树）
+        if (!T.SWITCH.has(st.type[st.idx(i - 1, j)]) || !st.flags[st.idx(i - 1, j)]) {
+          if (!T.SWITCH.has(st.type[st.idx(i + 1, j)]) || !st.flags[st.idx(i + 1, j)]) {
+            // 上方无块：对凸起顶端做半砖/削除（16520 还要求 CanBeClearedDuringGeneration）
+            if (solidTile(st, i, j) && !NOT_CLEARABLE.has(t)) {
               const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
               if (!st.half[li] && !st.half[ri] && st.slope[li] === 0 && st.slope[ri] === 0) {
                 if (solidTile(st, i, j + 1)) {

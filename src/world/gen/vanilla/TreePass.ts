@@ -181,13 +181,24 @@ function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   return true;
 }
 
-// ===================== 宝石树（GemTree_* profile，GrowTreeWithSettings） =====================
+// ===================== GrowTreeWithSettings 族（宝石树 + 观赏树柳/樱） =====================
 // ShimmerMakeBiome 的 aether 树走 TryGrowingTreeByType(583-589)（WorldGen.cs:30500-30542 →
-// GrowTreeWithSettings 30546-30967）。七种宝石树共用一个 profile（cs:3795-3872）：
-//   GroundTest=GemTreeGroundTest(Stone/Moss 集)，WallTest=GemTreeWallTest，
-//   TreeHeightMin/Max=7/12，TreeTopPaddingNeeded=4，SaplingTileType=590
+// GrowTreeWithSettings 30546-30967）；AddTrees 的 1/20 观赏树走 616 柳 / 596 樱（cs:31558-31566）。
 // 干身帧表与 GrowTree 完全同构（同一 switch，cs:30604-30700），复用 TRUNK。
-/** GemTreeGroundTest（cs:30461）：TileID.Sets.Conversion.Stone{1,25,117,203} ∪ Moss */
+
+/** GrowTreeSettings profile（cs:3795-3886）：宝石树七种 + 观赏树柳/樱共用同一骨架，
+ *  差异只在 GroundTest/WallTest/SaplingTileType/TreeTileType（高度均 7-12、Padding 4） */
+export interface TreeProfile {
+  treeTile: number;
+  sapling: number;
+  ground: Set<number>;   // GroundTest 谓词集
+  walls: Set<number>;    // WallTest 谓词集
+  heightMin: number;
+  heightMax: number;     // 含端（Next(min, max+1)）
+  topPadding: number;    // TreeTopPaddingNeeded
+}
+
+/** GemTreeGroundTest（cs:30461）：Conversion.Stone{1,25,117,203} ∪ Moss */
 const GEM_GROUND = idsByVanillaSheet(1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627);
 /** IsTileTypeFitForTree 全集（cs:29852，含 633/661/662——基座根部 tuft 的适树判定） */
 const GEM_TREE_FIT = idsByVanillaSheet(2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662);
@@ -196,29 +207,52 @@ const GEM_WALLS = new Set([
   0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80,
   2, 54, 55, 56, 57, 58, 59, 61, 185, 196, 197, 198, 199, 208, 209, 210, 211, 212, 213, 214, 215,
 ]);
+/** DefaultTreeWallTest（cs:30417）= WallID.Sets.AllowsPlantsToGrow（WallID.cs:58） */
+const DEFAULT_TREE_WALLS = new Set<number>([
+  0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80,
+]);
+/** VanityTreeGroundTest（cs:30474）：Conversion.Grass{2,23,199,109,477,492} 去掉 23/199 */
+const VANITY_GROUND = idsByVanillaSheet(2, 109, 477, 492);
 /** EmptyTileCheck ignoreID=20（树苗族门）：活跃格仅容忍树族 tile 残留（cs:31611-31683） */
 const GEM_EMPTY_ALLOW = idsByVanillaSheet(3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655);
 
-/** GrowTreeWithSettings（cs:30546-30967）宝石树路径 1:1。
- *  treeTileType = 583-589（黄玉/紫晶/蓝玉/翡翠/红宝石/钻石/琥珀，cs:35063-35079 num24 映射） */
-export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeTileType: number): boolean {
-  // 越过树苗(590)找地面行（cs:30547-30550）
+const GEM_PROFILE: TreeProfile = {
+  treeTile: -1, sapling: GEM_SAPLING, ground: GEM_GROUND, walls: GEM_WALLS,
+  heightMin: 7, heightMax: 12, topPadding: 4,
+};
+const SAKURA_PROFILE: TreeProfile = {
+  treeTile: TILE_BY_KEY['v_596_vanity_tree_sakura']!,
+  sapling: TILE_BY_KEY['v_595_sakura_sapling']!,
+  ground: VANITY_GROUND, walls: DEFAULT_TREE_WALLS,
+  heightMin: 7, heightMax: 12, topPadding: 4,
+};
+const WILLOW_PROFILE: TreeProfile = {
+  treeTile: TILE_BY_KEY['v_616_vanity_tree_yellow_willow']!,
+  sapling: TILE_BY_KEY['v_615_yellow_willow_sapling']!,
+  ground: VANITY_GROUND, walls: DEFAULT_TREE_WALLS,
+  heightMin: 7, heightMax: 12, topPadding: 4,
+};
+
+/** GrowTreeWithSettings（cs:30546-30967）1:1：宝石树/观赏树共用骨架。
+ *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
+export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: number, p: TreeProfile): boolean {
+  // 越过树苗找地面行（cs:30547-30550）
   let num = y;
-  while (st.inBounds(x, num) && st.flags[st.idx(x, num)] && st.type[st.idx(x, num)] === GEM_SAPLING) num++;
+  while (st.inBounds(x, num) && st.flags[st.idx(x, num)] && st.type[st.idx(x, num)] === p.sapling) num++;
   if (!st.inBounds(x, num) || num < 1) return false;
   // 基座上一格三列无液体（cs:30551-30554）
   if (st.liquid[st.idx(x - 1, num - 1)] !== 0 || st.liquid[st.idx(x, num - 1)] !== 0 || st.liquid[st.idx(x + 1, num - 1)] !== 0) return false;
-  // 基座整砖 + 墙白名单 + 石/苔藓基座（cs:30555-30566）
+  // 基座整砖 + 墙白名单 + GroundTest（cs:30555-30566）
   const gi = st.idx(x, num);
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
-  if (!GEM_WALLS.has(st.wall[st.idx(x, num - 1)])) return false;
-  if (!GEM_GROUND.has(st.type[gi])) return false;
+  if (!p.walls.has(st.wall[st.idx(x, num - 1)])) return false;
+  if (!p.ground.has(st.type[gi])) return false;
   // 两侧至少一侧同基座（cs:30568-30571）
   const fitSide = (dx: number) => st.inBounds(x + dx, num)
-    && st.flags[st.idx(x + dx, num)] && GEM_GROUND.has(st.type[st.idx(x + dx, num)]);
+    && st.flags[st.idx(x + dx, num)] && p.ground.has(st.type[st.idx(x + dx, num)]);
   if (!fitSide(-1) && !fitSide(1)) return false;
-  const height = rng.int(7, 12);                       // Next(TreeHeightMin, TreeHeightMax+1)
-  const num4 = height + 4;                             // + TreeTopPaddingNeeded
+  const height = rng.int(p.heightMin, p.heightMax);    // Next(TreeHeightMin, TreeHeightMax+1)
+  const num4 = height + p.topPadding;                  // + TreeTopPaddingNeeded
   // EmptyTileCheck(x-2, x+2, num-num4, num-1, 20)（cs:30580-30582）
   if (x - 2 < 0 || x + 2 >= st.w || num - num4 < 0) return false;
   for (let ex = x - 2; ex <= x + 2; ex++) {
@@ -239,16 +273,16 @@ export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeT
     if (num6 === 6 || num6 === 7) flagR = true;
     const num5 = rng.int(0, 2);
     const [fx, fy] = TRUNK[num6][num5];
-    st.setTileSilent(x, i, treeTileType, fx, fy);
+    st.setTileSilent(x, i, p.treeTile, fx, fy);
     if (num6 === 5 || num6 === 7) {                    // 左枝（cs:30741-30764）
       const k = rng.int(0, 2);
       const [bfx, bfy] = rng.int(0, 2) < 2 ? [44, 198 + k * 22] : [66, k * 22];
-      st.setTileSilent(x - 1, i, treeTileType, bfx, bfy);
+      st.setTileSilent(x - 1, i, p.treeTile, bfx, bfy);
     }
     if (num6 === 6 || num6 === 7) {                    // 右枝（cs:30766-30789）
       const k = rng.int(0, 2);
       const [bfx, bfy] = rng.int(0, 2) < 2 ? [66, 198 + k * 22] : [88, 66 + k * 22];
-      st.setTileSilent(x + 1, i, treeTileType, bfx, bfy);
+      st.setTileSilent(x + 1, i, p.treeTile, bfx, bfy);
     }
   }
   // 基座 tuft（cs:30819-30858）：两侧地面适树（草族）才出，各 1/3 概率抹除；
@@ -261,20 +295,31 @@ export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeT
   let tL = tuftFit(-1), tR = tuftFit(1);
   if (rng.int(0, 2) === 0) tL = false;
   if (rng.int(0, 2) === 0) tR = false;
-  if (tR) st.setTileSilent(x + 1, num - 1, treeTileType, 22, 132 + rng.int(0, 2) * 22);
-  if (tL) st.setTileSilent(x - 1, num - 1, treeTileType, 44, 132 + rng.int(0, 2) * 22);
+  if (tR) st.setTileSilent(x + 1, num - 1, p.treeTile, 22, 132 + rng.int(0, 2) * 22);
+  if (tL) st.setTileSilent(x - 1, num - 1, p.treeTile, 44, 132 + rng.int(0, 2) * 22);
   if (tL || tR) {
     const baseFx = tL && tR ? 88 : tL ? 0 : 66;        // 基座干身帧（cs:30901-30930）
-    st.setTileSilent(x, num - 1, treeTileType, baseFx, 132 + rng.int(0, 2) * 22);
+    st.setTileSilent(x, num - 1, p.treeTile, baseFx, 132 + rng.int(0, 2) * 22);
   }
   // 树冠标记帧（cs:30932-30967）：12/13 fx=22 否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
-  st.setTileSilent(x, num - height, treeTileType, crownFx, 198 + rng.int(0, 2) * 22);
+  st.setTileSilent(x, num - height, p.treeTile, crownFx, 198 + rng.int(0, 2) * 22);
   return true;
 }
 
-/** AddTrees（L15642）：逐列尝试（~1.6 列间距）；沙滩棕榈按每侧固定概率；
- *  草上 1/20 观赏树（柳/樱 GrowTreeWithSettings 未移植——缺对应生成管线，留待 C 批） */
+/** 宝石树（TryGrowingTreeByType 583-589 → GemTree_* profile）。
+ *  treeTileType = 583-589（黄玉/紫晶/蓝玉/翡翠/红宝石/钻石/琥珀，cs:35063-35079 num24 映射） */
+export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeTileType: number): boolean {
+  return growTreeWithSettings(st, rng, x, y, { ...GEM_PROFILE, treeTile: treeTileType });
+}
+
+/** 观赏树（TryGrowingTreeByType 616 柳 / 596 樱 → VanityTree_Willow/Sakura profile，cs:3872-3894） */
+export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, willow: boolean): boolean {
+  return growTreeWithSettings(st, rng, x, y, willow ? WILLOW_PROFILE : SAKURA_PROFILE);
+}
+
+/** AddTrees（1456 cs:31523-31578）1:1：逐列尝试（~1.6 列间距）；沙滩棕榈按每侧固定概率；
+ *  草上 1/20 观赏树（type==2 且 Next(20)==0 → Next(2)==0 ? 柳 616 : 樱 596），否则普通树 5 */
 export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
   // EpicTree 林区（pass 82 头段，L9656-9666）：w*0.003 个 25-50 半宽林区逐格尝试
   for (let n = 0; n < st.w * 0.003; n++) {
@@ -286,12 +331,19 @@ export function runTreePass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   const palmL = 0.1 + rng.next() * 0.35;          // 每侧棕榈概率（L15644-45）
   const palmR = 0.1 + rng.next() * 0.35;
+  const GRASS_TILE = T.GRASS;                     // tile 2（vanilla 草）
   for (let x = 1; x < st.w - 1; x++) {
     for (let y = 20; y < gs.worldSurface; y++) {
       if (x < 380) {
         if (rng.next() < palmL && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y);
       } else if (x > st.w - 380) {
         if (rng.next() < palmR && st.liquid[st.idx(x, y)] === 0) growPalmTree(st, rng, x, y);
+      }
+      // 1/20 观赏树（cs:31558-31566）：active 且 type==2 且 Next(20)==0 → 柳/樱对半
+      const yi = st.idx(x, y);
+      if (st.flags[yi] && st.type[yi] === GRASS_TILE && rng.int(0, 19) === 0) {
+        growVanityTree(st, rng, x, y, rng.int(0, 1) === 0);
+        continue;
       }
       growTree(st, rng, gs, x, y);
     }

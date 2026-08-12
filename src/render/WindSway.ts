@@ -13,11 +13,27 @@
 // 逐帧动态绘制（等价原版 AddSpecialPoint 特殊绘制路径）。光照合成在其后，自动受光。
 import { TILE } from '../core/constants';
 import { TILE_DEFS } from '../data/tiles';
-import { drawVanillaCell, drawTreeCell, type TreeStyleData } from './VanillaTiler';
+import { drawVanillaCell, drawTreeCell, scanTreeType, type TreeStyleData } from './VanillaTiler';
+import { natureParticles, getTreeLeaf, leafEmits, dripGoreFor } from './NatureParticles';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
-import type { World } from '../world/World';
+import type { World, Clock } from '../world/World';
 import { options } from '../core/Options';
+
+/** 帧级环境（drawWindSwayTiles 每帧构建，贯穿全部绘制分支） */
+export interface SwayEnv {
+  worldSurface: number;        // Main.worldSurface（tile 行）
+  remix: boolean;              // Main.remixWorld（"don't dig up" 种子；风门/药草判定翻转）
+  worldH: number;              // Main.maxTilesY（remix 药草判定用）
+  dayTime: boolean;            // Main.dayTime
+  moonPhase: number;           // Main.moonPhase
+  bloodMoon: boolean;          // Main.bloodMoon
+  raining: boolean;            // Main.raining
+  cloudAlpha: number;          // Main.cloudAlpha
+  mainTime: number;            // Main.time（昼 0-54000；夜为 0——药草 style5 只查昼）
+  waterStyle: number;          // Main.waterStyle（滴水 gore 映射）
+  zones: { corrupt: boolean; crimson: boolean; hallow: boolean }; // SceneMetrics（滴水 461）
+}
 
 // ---- TileID.Sets（TileID.cs :263-275 / WallID.cs :54） ----
 /** SwaysInWindBasic：走 DrawBasicGrass 逐格摆动（:273） */
@@ -78,6 +94,9 @@ export function swayBakeSkip(type: number, frameX: number): boolean {
 }
 
 // ================= WindGrid（WindGrid.cs 1:1） =================
+// 尺寸 = 屏幕绘制区（EnsureWindGridSize :7899 传 GetScreenDrawArea 视区宽高，
+// 非全图！）+ 取模环形寻址（tileX % width——WindGrid.GetWindTime 原文如此）。
+// 只增不减（SetSize Math.Max 语义）。全图建格是 6400×1800≈70MB 的浪费。
 
 class WindGrid {
   private time: Int32Array | null = null;
@@ -94,7 +113,10 @@ class WindGrid {
     this.dirY = new Int8Array(this.w * this.h);
   }
 
-  reset(): void { this.time = null; this.w = 1; this.h = 1; }
+  private slot(x: number, y: number): number {
+    // C# % 对非负 tile 坐标等价；负坐标防御性回正（调用方已钳 ≥0）
+    return (((y % this.h) + this.h) % this.h) * this.w + (((x % this.w) + this.w) % this.w);
+  }
 
   /** Update() :48-55：gameTime++ + 玩家扫描（设置门控同原版 Update） */
   scan(player: { x: number; y: number; w: number; h: number; vx: number; vy: number; dead?: boolean } | null): void {
@@ -108,18 +130,18 @@ class WindGrid {
     const y0 = Math.floor(player.y / TILE), y1 = Math.floor((player.y + player.h) / TILE);
     for (let ty = y0; ty <= y1; ty++) {
       for (let tx = x0; tx <= x1; tx++) {
-        if (tx < 0 || ty < 0 || tx >= this.w || ty >= this.h) continue;
-        const i = ty * this.w + tx;
+        if (tx < 0 || ty < 0) continue;
+        const i = this.slot(tx, ty);
         this.time![i] = this.gameTime;
         this.dirX![i] = dx; this.dirY![i] = dy;
       }
     }
   }
 
-  /** GetWindTime :57-69：threshold 内才有效，返回 [剩余时间, dirX, dirY] */
+  /** GetWindTime :57-69：threshold 内才有效，返回 [elapsed, dirX, dirY]（刚标记=0） */
   windTime(x: number, y: number, threshold: number): [number, number, number] {
-    if (!this.time || x < 0 || y < 0 || x >= this.w || y >= this.h) return [0, 0, 0];
-    const i = y * this.w + x;
+    if (!this.time || x < 0 || y < 0) return [0, 0, 0];
+    const i = this.slot(x, y);
     const t = this.time[i];
     if (t + threshold < this.gameTime) return [0, 0, 0];
     return [this.gameTime - t, this.dirX![i], this.dirY![i]];
@@ -133,33 +155,49 @@ const lerpValue = (a: number, b: number, x: number) =>
 
 const counters = { tree: 0, grass: 0, sunflower: 0, vine: 0 };
 const windGrid = new WindGrid();
+/** UpdateLeafFrequency（:7839-7903）档位表 + 尾乘 ×7 */
+let leafFrequency = 2000 * 7;
+const LEAF_FREQ_TABLE: Array<[number, number]> = [
+  [0.1, 2000], [0.2, 1000], [0.3, 450], [0.4, 300], [0.5, 200], [0.6, 130],
+  [0.7, 75], [0.8, 50], [0.9, 40], [1.0, 30], [1.1, 20],
+];
+function updateLeafFrequency(absWind: number): void {
+  let f = 10;
+  for (const [max, v] of LEAF_FREQ_TABLE) {
+    if (absWind <= max) { f = v; break; }
+  }
+  leafFrequency = f * 7;
+}
 
 export const windSway = {
   /** Main.WindForVisuals = windSpeedCurrent（Main.cs:2896） */
   wind: 0,
+  /** _leafFrequency（EmitTreeLeaves 频率门；测试窥探） */
+  get leafFreq(): number { return leafFrequency; },
 
-  /** 每固定 tick 推进（Game.fixedUpdate；对齐 TileDrawing.Update :372-381） */
-  update(wind: number, player: { x: number; y: number; w: number; h: number; vx: number; vy: number; dead?: boolean } | null, worldW: number, worldH: number): void {
+  /** 每固定 tick 推进（Game.fixedUpdate；对齐 TileDrawing.Update :372-381）。
+   *  gridW/gridH = 视区 tile 尺寸（原版 EnsureWindGridSize 传屏幕绘制区，非全图） */
+  update(wind: number, player: { x: number; y: number; w: number; h: number; vx: number; vy: number; dead?: boolean } | null, gridW: number, gridH: number): void {
     this.wind = options.data.swayInWind ? wind : 0;
     const n = lerpValue(0.08, 1.2, Math.abs(this.wind)); // GetLerpValue(0.08,1.2,|wind|)
     counters.tree += 1 / 240 + (1 / 240) * n * 2;
     counters.grass += 1 / 180 + (1 / 180) * n * 4;
     counters.sunflower += 1 / 420 + (1 / 420) * n * 5;
     counters.vine += 1 / 120 + (1 / 120) * n * 0.4000000059604645;
-    windGrid.ensure(worldW, worldH);
+    updateLeafFrequency(Math.abs(this.wind));
+    windGrid.ensure(gridW, gridH);
     windGrid.scan(player);
   },
-
-  /** 换世界重置扰动网格 */
-  reset(): void { windGrid.reset(); },
 };
 
-/** GetWindCycle（:7800-7822）：相位波 + 全局风偏置 + 无风门；地下恒 0 */
-export function getWindCycle(x: number, y: number, counter: number, worldSurface: number): number {
+/** GetWindCycle（:7800-7822）：相位波 + 全局风偏置 + 无风门；
+ *  remix 世界翻转地表门（"don't dig up"：地下才有风） */
+export function getWindCycle(x: number, y: number, counter: number, worldSurface: number, remix = false): number {
   if (!options.data.swayInWind) return 0;
   const phase = x * 0.5 + Math.floor(y / 100) * 0.5; // 每格位置偏移相位 → 波浪感
   let v = Math.cos(counter * 6.2831854820251465 + phase) * 0.5;
-  if (y >= worldSurface) return 0; // 非 remix 世界：仅地表以上有风
+  const aboveSurface = y < worldSurface;
+  if (aboveSurface === remix) return 0; // DoesWindBlowAtThisHeight 翻转语义
   v += windSway.wind;
   return v * lerpValue(0.08, 0.18, Math.abs(windSway.wind));
 }
@@ -203,9 +241,10 @@ function highestWindGridPushComplex(x: number, y: number, sizeY: number, totalTi
   return result;
 }
 
-/** WorldGen.InAPlaceWithWind（:87603）：地表 + 区域内无液体、无挡风墙 */
-function inAPlaceWithWind(st: TileStore, x: number, y: number, w: number, h: number, worldSurface: number): boolean {
-  if (y >= worldSurface) return false; // DoesWindBlowAtThisHeight（非 remix）
+/** WorldGen.InAPlaceWithWind（:87603）：地表（remix 翻转）+ 区域内无液体、无挡风墙 */
+function inAPlaceWithWind(st: TileStore, x: number, y: number, w: number, h: number, worldSurface: number, remix = false): boolean {
+  const aboveSurface = y < worldSurface;
+  if (aboveSurface === remix) return false; // DoesWindBlowAtThisHeight
   for (let j = 0; j < h; j++) {
     for (let i = 0; i < w; i++) {
       const tx = x + i, ty = y + j;
@@ -221,55 +260,117 @@ function inAPlaceWithWind(st: TileStore, x: number, y: number, w: number, h: num
 
 // ================= 绘制 =================
 
-/** 单格绘制 + 变换（pivot=旋转轴心世界坐标；dest 相对偏移）。sway 全 0 时直绘 */
+/** 帧级环境（drawWindSwayTiles 每帧注入；单线程渲染下模块态直读） */
+let ENV: SwayEnv = {
+  worldSurface: 99999, remix: false, worldH: 0, dayTime: true, moonPhase: 0,
+  bloodMoon: false, raining: false, cloudAlpha: 0, mainTime: 0, waterStyle: 0,
+  zones: { corrupt: false, crimson: false, hallow: false },
+};
+
+/** IsAlchemyPlantHarvestable（WorldGen.cs:66198 1:1）：药草成熟（贴图换 84 开花帧）。
+ *  style = frameX/18（原版整除直传）；style 2/6 原版即不判（恒不成熟） */
+export function isAlchemyPlantHarvestable(style: number, y: number): boolean {
+  if (style === 0 && ENV.dayTime) return true;                    // 盛开草（昼）
+  if (style === 1 && !ENV.dayTime) return true;                   // 月光草（夜）
+  if (style === 3 && !ENV.dayTime && (ENV.bloodMoon || ENV.moonPhase === 0)) return true; // 死亡草
+  if (style === 4 && (ENV.raining || ENV.cloudAlpha > 0)) return true;                  // 寒颤棘
+  if (style === 5) {                                              // 珍珠花
+    let below = y > ENV.worldSurface;
+    if (ENV.remix) below = y < ENV.worldH - 350;
+    if ((!ENV.raining || below) && ENV.mainTime > 40500) return true;
+  }
+  return false;
+}
+
+/** 单格绘制 + 变换（pivot=旋转轴心世界坐标；dest 相对偏移）。
+ *  sway 全 0 时直绘；glow 回调在主贴图后同变换内执行（glowmask 叠画） */
 function drawCell(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
   rec: SwayRec, x: number, y: number, type: number,
   px: number, py: number, pivotX: number, pivotY: number, rot: number, offX: number, offY: number,
   trees?: TreeStyleData,
+  glow?: (dpx: number, dpy: number) => void,
 ): void {
   const fx = st.frameX[st.idx(x, y)], fy = st.frameY[st.idx(x, y)];
-  if (rot === 0 && offX === 0 && offY === 0) {
+  const draw = (dpx: number, dpy: number) => {
     drawVanillaCell(ctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
-      (t) => t === type, px, py, fx, fy, trees);
+      (t) => t === type, dpx, dpy, fx, fy, trees);
+  };
+  if (rot === 0 && offX === 0 && offY === 0) {
+    draw(px, py);
+    if (glow) glow(px, py);
     return;
   }
   ctx.save();
   ctx.translate(pivotX, pivotY);
   ctx.rotate(rot);
   ctx.translate(-pivotX, -pivotY);
-  drawVanillaCell(ctx, atlas, rec.sheet, rec.frame, rec.fw, rec.fh, st, x, y, type,
-    (t) => t === type, px + offX, py + offY, fx, fy, trees);
+  draw(px + offX, py + offY);
+  if (glow) glow(px + offX, py + offY);
   ctx.restore();
+}
+
+/** 基础草 glowmask（GetTileDrawData :6152-6171）：656/701 → Glow_329 白×脉冲；
+ *  637 → 自身贴图 Lerp(White,油漆色,0.75)（无油漆=纯白重绘提亮） */
+function basicGrassGlow(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, rec: SwayRec, x: number, y: number): ((dpx: number, dpy: number) => void) | undefined {
+  if (rec.sheet !== 656 && rec.sheet !== 701 && rec.sheet !== 637) return undefined;
+  return (dpx, dpy) => {
+    const i = ST.idx(x, y);
+    const fx = ST.frameX[i], fy = ST.frameY[i];
+    if (rec.sheet === 637) {
+      // 自身贴图重绘（Lerp(White,color,0.75)，color=油漆色——无油漆恒白）
+      const img = atlas.ensureVImage(`vanilla/Tiles_${rec.sheet}.png`);
+      if (!img || !img.complete) return;
+      ctx.drawImage(img, fx, fy, TILE, TILE, dpx, dpy, TILE, TILE);
+      return;
+    }
+    const img = atlas.ensureVImage('vanilla/Glow_329.png');
+    if (!img || !img.complete) return;
+    // glowColor = White × (mouseTextColor/255)——鼠标文本脉冲近似
+    ctx.globalAlpha = 0.88 + 0.12 * Math.sin(performance.now() / 180);
+    ctx.drawImage(img, fx, fy, TILE, TILE, dpx, dpy, TILE, TILE);
+    ctx.globalAlpha = 1;
+  };
+}
+
+/** 药草成熟交换：83 → 84 开花贴图（DrawBasicGrass :8511-8516 / Directional 同款） */
+function herbSwapRec(rec: SwayRec, x: number, y: number): SwayRec {
+  if (rec.sheet !== 83) return rec;
+  const i = ST.idx(x, y);
+  const style = Math.floor(ST.frameX[i] / 18);
+  if (!isAlchemyPlantHarvestable(style, y)) return rec;
+  return { ...rec, sheet: 84 };
 }
 
 /** DrawBasicGrass（:8497-8536）：逐格摆动 */
 function drawBasicGrass(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, x: number, y: number, type: number, worldSurface: number,
+  rec: SwayRec, x: number, y: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const i = st.idx(x, y);
-  let sway = getWindCycle(x, y, counters.grass, worldSurface);
+  let sway = getWindCycle(x, y, counters.grass, ENV.worldSurface, ENV.remix);
   if (!ALLOWS_WIND.has(st.wall[i])) sway = 0;
-  if (!inAPlaceWithWind(st, x, y, 1, 1, worldSurface)) sway = 0;
+  if (!inAPlaceWithWind(st, x, y, 1, 1, ENV.worldSurface, ENV.remix)) sway = 0;
   sway += windGridPush(x, y, 20, 0.35);
   const px = x * TILE, py = y * TILE;
+  const drawRec = herbSwapRec(rec, x, y);
   // 原版 position=(格心+8,+16)+摆动偏移；origin=(8,16) → dest=(px+sway, py+|sway|)
-  drawCell(ctx, atlas, st, rec, x, y, type, px, py,
-    px + 8 + sway, py + 16 + Math.abs(sway), sway * 0.1, sway, Math.abs(sway), trees);
+  drawCell(ctx, atlas, st, drawRec, x, y, type, px, py,
+    px + 8 + sway, py + 16 + Math.abs(sway), sway * 0.1, sway, Math.abs(sway), trees,
+    basicGrassGlow(ctx, atlas, drawRec, x, y));
 }
 
 /** DrawAnyDirectionalGrass（:8538-8634）：tile 184 四向生长植物 */
 function drawDirectionalGrass(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, x: number, y: number, type: number, worldSurface: number,
+  rec: SwayRec, x: number, y: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const i = st.idx(x, y);
-  let sway = getWindCycle(x, y, counters.grass, worldSurface);
+  let sway = getWindCycle(x, y, counters.grass, ENV.worldSurface, ENV.remix);
   if (!ALLOWS_WIND.has(st.wall[i])) sway = 0;
-  if (!inAPlaceWithWind(st, x, y, 1, 1, worldSurface)) sway = 0;
+  if (!inAPlaceWithWind(st, x, y, 1, 1, ENV.worldSurface, ENV.remix)) sway = 0;
   const push = { x: 0, y: 0 };
   windGridPush2Axis(x, y, 20, 0.35, push);
   const px = x * TILE, py = y * TILE;
@@ -298,8 +399,12 @@ function drawDirectionalGrass(
       break;
   }
   sway += push.x * dirX + push.y * dirY; // 旋转量含扰动（位置用扰动前值——原版顺序）
-  drawCell(ctx, atlas, st, rec, x, y, type, px, py, pivotX, pivotY, sway * 0.1, offX, offY, trees);
+  const drawRec = herbSwapRec(rec, x, y);
+  drawCell(ctx, atlas, st, drawRec, x, y, type, px, py, pivotX, pivotY, sway * 0.1, offX, offY, trees);
 }
+
+/** 当前帧 store 引用（glow/药草查帧用；drawWindSwayTiles 注入） */
+let ST: TileStore = null as unknown as TileStore;
 
 // MultiTileGrass 尺寸/锚点表（DrawMultiTileGrass :8922-8970 + 路由 :608-690）
 function multiGrassSize(sheet: number, fy: number): { sx: number; sy: number } {
@@ -327,7 +432,8 @@ function multiGrassAnchor(sheet: number, fx: number, fy: number): boolean {
     default: return fy === 0 && fx % 36 === 0; // 485/489/490/521-527
   }
 }
-/** 旋转量系数 num（DrawMultiTileGrassInWind switch :9099-9116：27→0.07；521-527→0 且恒不摆） */
+/** 旋转量系数 num（DrawMultiTileGrassInWind switch :9099-9116：27→0.07；521-527→0
+ *  且 flag=false——num3 归 0 后 offY 同为 0，完全静态，走特殊路径只为不入普通层） */
 function multiGrassRotFactor(sheet: number): number {
   if (sheet === 27) return 0.07;
   if (sheet >= 521 && sheet <= 527) return 0;
@@ -353,13 +459,32 @@ function drawMultiGrass(
     if (!multiGrassAnchor(rec.sheet, st.frameX[i0], st.frameY[i0])) return;
     ({ sx, sy } = multiGrassSize(rec.sheet, st.frameY[i0]));
   }
-  const windy = rec.sheet === 519
-    ? inAPlaceWithWind(st, ax, ay, sx, 1, worldSurface)
-    : inAPlaceWithWind(st, ax, ay, sx, sy, worldSurface);
-  const wc = getWindCycle(ax, ay, counters.sunflower, worldSurface);
   const rotFactor = multiGrassRotFactor(rec.sheet);
+  if (rotFactor === 0) {
+    // 521-527 族原版恒不摆（num=0 且 flag=false）——纯静态直绘
+    for (let j = 0; j < sy; j++) {
+      for (let k = 0; k < sx; k++) {
+        const cx = ax + k, cy = ay + j;
+        if (!st.inBounds(cx, cy)) continue;
+        const idx = st.idx(cx, cy);
+        if (st.type[idx] !== type || !st.flags[idx]) continue;
+        drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE, cy * TILE, 0, 0, 0, 0, 0, trees);
+      }
+    }
+    return;
+  }
+  const windy = rec.sheet === 519
+    ? inAPlaceWithWind(st, ax, ay, sx, 1, ENV.worldSurface, ENV.remix)
+    : inAPlaceWithWind(st, ax, ay, sx, sy, ENV.worldSurface, ENV.remix);
+  const wc = getWindCycle(ax, ay, counters.sunflower, ENV.worldSurface, ENV.remix);
   const pivotX = ax * TILE + sx * TILE * 0.5;
   const pivotBaseY = ay * TILE + TILE * sy;
+  // 27 香蒲 glowmask（:9096/9174 flag2 族：同贴图 fy+74 白色重绘）
+  const cattailGlow = rec.sheet === 27 ? (dpx: number, dpy: number, idx2: number) => {
+    const img = atlas.ensureVImage('vanilla/Tiles_27.png');
+    if (!img || !img.complete) return;
+    ctx.drawImage(img, st.frameX[idx2], st.frameY[idx2] + 74, TILE, TILE, dpx, dpy, TILE, TILE);
+  } : undefined;
   for (let j = 0; j < sy; j++) {
     const cy = ay + j;
     if (cy >= st.h) break;
@@ -373,7 +498,8 @@ function drawMultiGrass(
       const idx = st.idx(cx, cy);
       if (st.type[idx] !== type || !st.flags[idx]) continue;
       drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE, cy * TILE,
-        pivotX, pivotBaseY + offY, wc * rotFactor * hFrac, 0, offY, trees);
+        pivotX, pivotBaseY + offY, wc * rotFactor * hFrac, 0, offY, trees,
+        cattailGlow ? ((dpx, dpy) => cattailGlow(dpx, dpy, idx)) : undefined);
     }
   }
 }
@@ -381,13 +507,13 @@ function drawMultiGrass(
 /** DrawVineStrip（:9170-9256）：下垂藤蔓链式摆（每段绕上段末端旋转） */
 function drawVineStrip(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, x: number, startY: number, type: number, worldSurface: number,
+  rec: SwayRec, x: number, startY: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const amount = Math.max(0, Math.min(1, Math.abs(windSway.wind) / 1.2));
   const amt = 0.2 + (1 - 0.2) * amount; // Lerp(0.2,1,amount)
   let segRot = -0.08 * amt;
-  const wc = getWindCycle(x, startY, counters.vine, worldSurface);
+  const wc = getWindCycle(x, startY, counters.vine, ENV.worldSurface, ENV.remix);
   let vx = x * TILE + 8, vy = startY * TILE - 2;
   let pushChain = 0, lastPush = 0, windySegs = 0;
   for (let y = startY; y < Math.min(st.h, startY + 80); y++) {
@@ -397,7 +523,7 @@ function drawVineStrip(
     if (!VINE_THREADS.has(sheet)) break;
     if (windySegs >= 5) segRot += 0.0075 * amt;
     if (windySegs >= 2) segRot += 0.0025;
-    if (ALLOWS_WIND.has(st.wall[idx]) && y < worldSurface) windySegs++;
+    if (ALLOWS_WIND.has(st.wall[idx]) && (y < ENV.worldSurface) !== ENV.remix) windySegs++;
     const push = windGridPush(x, y, 20, 0.01);
     pushChain = (push !== 0 || lastPush === 0) ? pushChain - push : pushChain * -0.78;
     lastPush = push;
@@ -413,13 +539,13 @@ function drawVineStrip(
 /** DrawRisingVineStrip（:9258-9340）：549 向上生长链 */
 function drawRisingVineStrip(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
-  rec: SwayRec, x: number, startY: number, type: number, worldSurface: number,
+  rec: SwayRec, x: number, startY: number, type: number,
   trees?: TreeStyleData,
 ): void {
   const amount = Math.max(0, Math.min(1, Math.abs(windSway.wind) / 1.2));
   const amt = 0.2 + 0.8 * amount;
   let segRot = -0.08 * amt;
-  const wc = getWindCycle(x, startY, counters.vine, worldSurface);
+  const wc = getWindCycle(x, startY, counters.vine, ENV.worldSurface, ENV.remix);
   let vx = x * TILE + 8, vy = startY * TILE + TILE + 2;
   let pushChain = 0, lastPush = 0, windySegs = 0;
   for (let y = startY; y > Math.max(0, startY - 80); y--) {
@@ -429,7 +555,7 @@ function drawRisingVineStrip(
     if (!REVERSE_VINE.has(sheet)) break;
     if (windySegs >= 5) segRot += 0.0075 * amt;
     if (windySegs >= 2) segRot += 0.0025;
-    if (ALLOWS_WIND.has(st.wall[idx]) && y < worldSurface) windySegs++;
+    if (ALLOWS_WIND.has(st.wall[idx]) && (y < ENV.worldSurface) !== ENV.remix) windySegs++;
     const push = windGridPush(x, y, 40, -0.004);
     pushChain = (push !== 0 || lastPush === 0) ? pushChain - push : pushChain * -0.78;
     lastPush = push;
@@ -490,12 +616,16 @@ function drawMultiVine(
   wc += highestWindGridPushComplex(ax, ay, sy, 60, 1.26, 3, true);
   const windy = inAPlaceWithWind(st, ax, ay, sx, sy, worldSurface);
   if (!windy) wc -= base;
-  // 锚点=顶部中心（+(-2)）；平台下方吊挂再上移 8（IsBelowANonHammeredPlatform 近似）
+  // 锚点=顶部中心（+(-2)）；平台下方吊挂再上移 8（IsBelowANonHammeredPlatform :38315：
+  // 上方 Platform 族 + 非半砖 + 坡 0）。offX(698 的 -10) 同时作用于 dest——
+  // 原版 offSet 进 vector 与 vector3 相消只留 origin 侧、dest=vector3+offSet+(0,offY)
   let pivotX = ax * TILE + sx * TILE * 0.5 + offX;
   let pivotY = ay * TILE - 2;
-  const above = st.inBounds(ax, ay - 1) ? st.type[st.idx(ax, ay - 1)] : 0;
-  const aboveIsPlatform = !!TILE_DEFS[above]?.vanilla && TILE_DEFS[above]?.vanilla?.sheet === 19;
-  if (aboveIsPlatform) pivotY -= 8;
+  if (ax > 0) {
+    const ai = st.idx(ax, ay - 1);
+    const above = TILE_DEFS[st.type[ai]];
+    if (above?.platform && !st.half[ai] && st.slope[ai] === 0) pivotY -= 8;
+  }
   const ROT = -0.15; // num2（0.15 后 *= -1）
   for (let j = 0; j < sy; j++) {
     let hFrac = (j + 1) / sy; // 与 MultiGrass 相反：越靠下摆幅越大
@@ -506,20 +636,22 @@ function drawMultiVine(
       if (!st.inBounds(cx, cy)) continue;
       const idx = st.idx(cx, cy);
       if (st.type[idx] !== type || !st.flags[idx]) continue;
-      drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE, cy * TILE,
+      drawCell(ctx, atlas, st, rec, cx, cy, type, cx * TILE + offX, cy * TILE,
         pivotX, pivotY + offY, wc * ROT * hFrac, 0, offY, trees);
     }
   }
 }
 
-/** DrawTrees（:8184-8460）：树冠/树枝摆动（墙后不摆 flag=tile.wall>0） */
+/** DrawTrees（:8184-8460）：树冠/树枝摆动（墙后不摆 flag=tile.wall>0）。
+ *  冠/枝标记帧判定沿用本仓 drawTreeCell 约定 = fy>=198（含 fx=0 顶冠变体；
+ *  原版 fx>=22 门是因为 fx=0 走 DrawSingleTile 普通路径，我们不区分） */
 function drawTreeSway(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, st: TileStore,
   sheet: number, x: number, y: number, fx: number, fy: number, worldSurface: number,
   trees?: TreeStyleData,
 ): void {
   const isPalm = sheet === 323;
-  const isCrownCell = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198 && fx >= 22);
+  const isCrownCell = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198);
   if (!isCrownCell) return;
   const idx = st.idx(x, y);
   let sway = 0;
@@ -531,7 +663,10 @@ function drawTreeSway(
 
 interface SwayCam { x: number; y: number; zoom: number; viewW: number; viewH: number }
 
-/** 视区内全部摆动图块逐帧绘制（Renderer tile 层之后调用；世界变换内，世界坐标） */
+/** 视区内全部摆动图块逐帧绘制（Renderer tile 层之后调用；世界变换内，世界坐标）。
+ *  分发顺序对齐原版 PostDrawTiles :428-436：MultiTileVines → MultiTileGrass →
+ *  Grass → AnyDirectionalGrass → Trees → Vines → ReverseVines（家族间有层级：
+ *  树冠盖在草之上）。家族内序 = 行扫描（原版特殊点即主循环行扫描收集，等价）。 */
 export function drawWindSwayTiles(
   ctx: CanvasRenderingContext2D, atlas: SpriteAtlas, world: World,
   cam: SwayCam, z: number,
@@ -547,45 +682,64 @@ export function drawWindSwayTiles(
   const tx1 = Math.min(st.w - 1, Math.floor((cam.x + cam.viewW / 2 / z) / TILE) + M);
   const ty0 = Math.max(0, Math.floor((cam.y - cam.viewH / 2 / z) / TILE) - M);
   const ty1 = Math.min(st.h - 1, Math.floor((cam.y + cam.viewH / 2 / z) / TILE) + M);
-  for (let y = ty0; y <= ty1; y++) {
-    for (let x = tx0; x <= tx1; x++) {
-      const i = st.idx(x, y);
-      if (!st.flags[i]) continue;
-      const type = st.type[i];
-      const rec = SWAY_REC.get(type);
-      if (rec) {
-        // 原版路由同款例外：530/705 高段与 227 排除帧不走摆动路径（烘焙已画）
-        if (rec.sheet === 530 && st.frameX[i] >= 270) continue;
-        if (rec.sheet === 705 && st.frameX[i] % 486 >= 270) continue;
-        if (rec.sheet === 227 && SWAY_227_EXCLUDE_FX.has(st.frameX[i])) continue;
-        switch (rec.kind) {
-          case SwayKind.Basic: drawBasicGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees); break;
-          case SwayKind.Directional: drawDirectionalGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees); break;
-          case SwayKind.MultiGrass: drawMultiGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees); break;
-          case SwayKind.MultiVine: drawMultiVine(ctx, atlas, st, rec, x, y, type, worldSurface, trees); break;
-          case SwayKind.VineThread: {
-            // 锚点=藤顶（上方非藤才起链——CrawlToTopOfVineAndAddSpecialPoint）
-            const up = st.inBounds(x, y - 1) && st.flags[st.idx(x, y - 1)]
-              && VINE_THREADS.has(TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? -1);
-            if (!up) drawVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
-            break;
+
+  /** 单遍扫描，group 选择本遍要处理的家族（1:MultiVine+MultiGrass 2:Basic+Directional
+   *  3:Tree+VineThread+ReverseVine） */
+  const sweep = (group: 1 | 2 | 3): void => {
+    for (let y = ty0; y <= ty1; y++) {
+      for (let x = tx0; x <= tx1; x++) {
+        const i = st.idx(x, y);
+        if (!st.flags[i]) continue;
+        const type = st.type[i];
+        const rec = SWAY_REC.get(type);
+        if (rec) {
+          // 原版路由同款例外：530/705 高段与 227 排除帧不走摆动路径（烘焙已画）
+          if (rec.sheet === 530 && st.frameX[i] >= 270) continue;
+          if (rec.sheet === 705 && st.frameX[i] % 486 >= 270) continue;
+          if (rec.sheet === 227 && SWAY_227_EXCLUDE_FX.has(st.frameX[i])) continue;
+          const isAnchorVine = (set: Set<number>, dy: number) => {
+            const ny = y + dy;
+            return !(st.inBounds(x, ny) && st.flags[st.idx(x, ny)]
+              && set.has(TILE_DEFS[st.type[st.idx(x, ny)]]?.vanilla?.sheet ?? -1));
+          };
+          switch (rec.kind) {
+            case SwayKind.MultiVine:
+              if (group === 1) drawMultiVine(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              break;
+            case SwayKind.MultiGrass:
+              if (group === 1) drawMultiGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              break;
+            case SwayKind.Basic:
+              if (group === 2) drawBasicGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              break;
+            case SwayKind.Directional:
+              if (group === 2) drawDirectionalGrass(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              break;
+            case SwayKind.VineThread:
+              // 锚点=藤顶（上方非藤才起链——CrawlToTopOfVineAndAddSpecialPoint）
+              if (group === 3 && isAnchorVine(VINE_THREADS, -1)) {
+                drawVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              }
+              break;
+            case SwayKind.ReverseVine:
+              if (group === 3 && isAnchorVine(REVERSE_VINE, +1)) {
+                drawRisingVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
+              }
+              break;
           }
-          case SwayKind.ReverseVine: {
-            const dn = st.inBounds(x, y + 1) && st.flags[st.idx(x, y + 1)]
-              && REVERSE_VINE.has(TILE_DEFS[st.type[st.idx(x, y + 1)]]?.vanilla?.sheet ?? -1);
-            if (!dn) drawRisingVineStrip(ctx, atlas, st, rec, x, y, type, worldSurface, trees);
-            break;
+          continue;
+        }
+        // 树族冠/枝标记格（非摆动集合但需动态摆动；干身仍在烘焙层）
+        if (group === 3) {
+          const v = TILE_DEFS[type]?.vanilla;
+          if (v && TREE_SWAY_SHEETS.has(v.sheet) && v.sheet !== 72) {
+            drawTreeSway(ctx, atlas, st, v.sheet, x, y, st.frameX[i], st.frameY[i], worldSurface, trees);
           }
         }
-        continue;
-      }
-      // 树族冠/枝标记格（非摆动集合但需动态摆动；干身仍在烘焙层）
-      const v = TILE_DEFS[type]?.vanilla;
-      if (v && TREE_SWAY_SHEETS.has(v.sheet) && v.sheet !== 72) {
-        drawTreeSway(ctx, atlas, st, v.sheet, x, y, st.frameX[i], st.frameY[i], worldSurface, trees);
       }
     }
-  }
+  };
+  sweep(1); sweep(2); sweep(3);
 }
 
 /** 测试辅助：暴露内部状态 */

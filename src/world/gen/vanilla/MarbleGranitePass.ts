@@ -3,7 +3,7 @@
 // 上半中空(墙 178)+下半实心大理石(367),边缘毛化。
 // 花岗岩:200×200 岩浆区——大实心花岗岩体(368,墙 180)+ digTunnel 蜿蜒洞。
 // 位置:cs:12830/12915 均匀矩形采样(n/num*(w-200)+100 起宽 (w-160或200)/num 的带内均匀掷点,
-// y∈[rockLayer+20, h-220]),避开中部 45-55% 与冰雪/丛林/沙漠带(BiomeTileCheck 半径 50 简化为 30)。
+// y∈[rockLayer+20, h-220]),避开中部 45-55% 与冰雪/蘑菇/沙漠/彼此(BiomeTileCheck 半径 50 逐格,cs:10949)。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -12,8 +12,9 @@ import { tileRunner, digTunnel } from './TileRunner';
 
 const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
-const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!;
-const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
+const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
+const MUSHROOM_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
+const MUSHROOM_TREE = TILE_BY_KEY['v_72_mushroom_tree']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
 
 /** 原版 WorldGenRange(Configuration.json "Count")取值(WorldGenRange.cs:GetRandom)。
@@ -51,12 +52,22 @@ function pickOrigin(
 }
 
 function biomeClear(st: TileStore, x: number, y: number): boolean {
-  // BiomeTileCheck 简化:半径 30 内无冰雪/丛林/沙漠材料
-  for (let dx = -30; dx <= 30; dx += 5) {
-    for (let dy = -30; dy <= 30; dy += 5) {
-      if (!st.inBounds(x + dx, y + dy)) continue;
-      const t = st.type[st.idx(x + dx, y + dy)];
-      if (t === SNOW || t === ICE || t === JUNGLE_GRASS || t === SANDSTONE || t === HARDSAND) return false;
+  // BiomeTileCheck（1456 cs:10949）1:1：半径 50、逐格（非步进采样）。
+  // 拒绝 tile 集：368 花岗岩 / 367 大理石 / 147 雪 / 161 冰 / 162 薄冰 /
+  // 70 蘑菇草 / 72 蘑菇树 / 396 沙岩 / 397 硬化沙（active 才判）；
+  // 墙 187/216（地下沙漠腔/壳）无视 active 直接拒绝。
+  const num = 50;
+  for (let i = x - num; i <= x + num; i++) {
+    for (let j = y - num; j <= y + num; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const k = st.idx(i, j);
+      if (st.flags[k]) {
+        const t = st.type[k];
+        if (t === GRANITE || t === MARBLE || t === SNOW || t === ICE || t === THIN_ICE
+          || t === MUSHROOM_GRASS || t === MUSHROOM_TREE || t === SANDSTONE || t === HARDSAND) return false;
+      }
+      const wl = st.wall[k];
+      if (wl === 187 || wl === 216) return false;
     }
   }
   return true;

@@ -12,7 +12,12 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { idsByVanillaSheet } from './TileRunner';
+import { solidTile } from './HalfBrickPass';
 import { growGemTree } from './TreePass';
+
+/** Main.tileMoss（TileID.cs）：苔藓族 sheet 集（石族钟乳石帧判定用） */
+const MOSS_SHEETS = new Set<number>(Array.from(idsByVanillaSheet(182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627)).map((id) => TILE_DEFS[id]?.vanilla?.sheet ?? -1));
 
 const STONE = TILE_BY_KEY['stone']!;         // 原版 type 1
 const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 原版 type 165(PlaceTight)
@@ -203,16 +208,92 @@ function shimmerOpening(st: TileStore, rng: RNG, dir: number, X: number, Y: numb
   }
 }
 
-/** cs:38329 PlaceTight 简化:石笋 165(PreferSmall 随机 1-2 格高,雪原小支不触发) */
+/** PlaceTight（1456 cs:38329，spiders=false）1:1。
+ *  门禁：!anyShimmer(x,y) && (!active(x,y) || type!=231 幼虫) → 掷 Next(2) preferSmall +
+ *  Next(3) variation（门禁过即掷，放置成败都消费）。上方实心 → 垂挂钟乳石；否则下方实心
+ *  且上方净空 → 地面石笋（spiders 路径在 HiveSpiderPass.placeTightWebs）。 */
 function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
-  if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return;
-  if (!st.inBounds(x, y - 1) || !st.flags[st.idx(x, y - 1)]) return; // SolidTile(x, y-1)
-  if (st.inBounds(x, y + 1) && st.flags[st.idx(x, y + 1)]) return;   // !(x,y+1).active
-  const preferSmall = rng.int(0, 1) === 0;
-  const variation = rng.int(0, 2);
-  const fx = variation * 18;
-  st.setTileSilent(x, y, STALACTITE, fx, 0);
-  if (!preferSmall && st.inBounds(x, y + 1) && !st.flags[st.idx(x, y + 1)]) {
-    st.setTileSilent(x, y + 1, STALACTITE, fx, 18);
+  const yi = st.idx(x, y);
+  const liq = st.liquid[yi];
+  if (liq > 0 && st.liquidType[yi] === LIQ_SHIMMER) return;
+  if (st.flags[yi] && st.type[yi] === stLarva()) return;
+  const preferSmall = rng.int(0, 1) === 0;   // genRand.Next(2) == 0
+  const variation = rng.int(0, 2);           // genRand.Next(3)
+  placeUncheckedStalactite(st, x, y, preferSmall, variation);
+}
+
+/** 幼虫 tile 231（蜂巢专用；以太无蜂巢，惰性查表防硬依赖） */
+let _larva = -1;
+function stLarva(): number {
+  if (_larva < 0) _larva = TILE_BY_KEY['v_231_larva'] ?? 0;
+  return _larva;
+}
+
+/** PlaceUncheckedStalactite（cs:38371，spiders=false）1:1。
+ *  按上方/下方支撑块类型分派帧组（后续 if 覆盖式，与原版一致）：
+ *   冰雪族 147/161/163/164/200 → fx=var*18；石族 1/苔藓/117/25/203 → fx=54+var*18；
+ *   蜂巢 225 → fx=162+var*18（恒小号）；沙岩 396/397 → 378+；花岗岩 368 → 432+；大理石 367 → 486+。
+ *  preferSmall=单格 fy=72（垂挂）/90（地面）；否则双格 fy=0/18（垂挂）或 36/54（地面）。 */
+function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
+  if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return;
+  const sheetOf = (xx: number, yy: number) => {
+    if (!st.inBounds(xx, yy)) return -1;
+    const i = st.idx(xx, yy);
+    return st.flags[i] ? (TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1) : -1;
+  };
+  const put = (xx: number, yy: number, fx: number, fy: number) => {
+    if (!st.inBounds(xx, yy)) return;
+    const i = st.idx(xx, yy);
+    st.type[i] = STALACTITE; st.flags[i] = 1; st.slope[i] = 0;
+    st.frameX[i] = fx; st.frameY[i] = fy;
+  };
+  const ICEY = new Set([147, 161, 163, 164, 200]);
+  const STONY = new Set([1, 117, 25, 203]);
+  const mossSheet = (s: number) => MOSS_SHEETS.has(s);
+  if (solidTile(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
+    // 垂挂钟乳石
+    const above = sheetOf(x, y - 1);
+    if (ICEY.has(above)) {
+      if (preferSmall) put(x, y, variation * 18, 72);
+      else { put(x, y, variation * 18, 0); put(x, y + 1, variation * 18, 18); }
+    }
+    if (STONY.has(above) || mossSheet(above)) {
+      if (preferSmall) put(x, y, 54 + variation * 18, 72);
+      else { put(x, y, 54 + variation * 18, 0); put(x, y + 1, 54 + variation * 18, 18); }
+    }
+    if (above === 225) put(x, y, 162 + variation * 18, 72);
+    if (above === 396 || above === 397) {
+      if (preferSmall) put(x, y, 378 + variation * 18, 72);
+      else { put(x, y, 378 + variation * 18, 0); put(x, y + 1, 378 + variation * 18, 18); }
+    }
+    if (above === 368) {
+      if (preferSmall) put(x, y, 432 + variation * 18, 72);
+      else { put(x, y, 432 + variation * 18, 0); put(x, y + 1, 432 + variation * 18, 18); }
+    }
+    if (above === 367) {
+      if (preferSmall) put(x, y, 486 + variation * 18, 72);
+      else { put(x, y, 486 + variation * 18, 0); put(x, y + 1, 486 + variation * 18, 18); }
+    }
+    return;
+  }
+  // 地面石笋：下方实心 + 本格/上格净空
+  if (!solidTile(st, x, y + 1) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y - 1)]) return;
+  const below = sheetOf(x, y + 1);
+  if (STONY.has(below) || mossSheet(below)) {
+    if (preferSmall) put(x, y, 54 + variation * 18, 90);
+    else { put(x, y - 1, 54 + variation * 18, 36); put(x, y, 54 + variation * 18, 54); }
+  }
+  if (below === 225) put(x, y, 162 + variation * 18, 90);
+  if (below === 396 || below === 397) {
+    if (preferSmall) put(x, y, 378 + variation * 18, 90);
+    else { put(x, y - 1, 378 + variation * 18, 36); put(x, y, 378 + variation * 18, 54); }
+  }
+  if (below === 368) {
+    if (preferSmall) put(x, y, 432 + variation * 18, 90);
+    else { put(x, y - 1, 432 + variation * 18, 36); put(x, y, 432 + variation * 18, 54); }
+  }
+  if (below === 367) {
+    if (preferSmall) put(x, y, 486 + variation * 18, 90);
+    else { put(x, y - 1, 486 + variation * 18, 36); put(x, y, 486 + variation * 18, 54); }
   }
 }

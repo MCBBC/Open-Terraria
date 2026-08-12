@@ -45,7 +45,7 @@ import { furnitureStyleBase } from '../world/FurnitureStyle';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
-import { itemFuncOfVid } from '../data/vanillaItemFunc';
+import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
@@ -83,7 +83,7 @@ import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
-import { Inventory } from '../items/Inventory';
+import { Inventory, INV_SIZE } from '../items/Inventory';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
 const IMPORTED_TREE_TYPES = new Set<number>(
@@ -104,6 +104,7 @@ import { entityNet, makeNetId, netIdLocal } from '../net/entitySyncHooks';
 import { BuffType, BUFF_DEFS } from '../stats/Buffs';
 import { options } from './Options';
 import { SmartCursor, smartCursorArrowAllowed, type SmartCursorSettings } from '../player/SmartCursor';
+import { SmartSelect, wetCollision, smartSelectSlotOf, EMPTY_SLOT, type SmartSelectEnv, type SmartSelectHost } from '../player/SmartSelect';
 import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
@@ -119,6 +120,7 @@ import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
+import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
 import { Minecart } from '../entities/Minecart';
 import { FallingBlock } from '../entities/FallingBlock';
@@ -731,6 +733,10 @@ export class Game implements GameHooks {
   wiring: Wiring | null = null;
   /** 智能光标（SmartCursorHelper.cs 全量移植；状态机 + 39 策略链） */
   smartCursor = new SmartCursor();
+  /** 智能选取（Smart Select，Player.cs:17283-17562 1:1；Shift 按住自动换手持工具/光源） */
+  smartSelect = new SmartSelect();
+  /** SelectedItemState.Hotbar 镜像（Player.cs:391）：最近一次 0-9 快捷栏选择 */
+  private smartSelectHotbar = 0;
   /** 多彩扳手/宏伟蓝图当前模式(TOOL_* 位组合;R 键循环) */
   wireToolMode = TOOL_RED | TOOL_GREEN | TOOL_BLUE | TOOL_YELLOW;
   /** 宏伟蓝图拖拽锚点(tile 坐标) */
@@ -1652,6 +1658,9 @@ export class Game implements GameHooks {
 
     // ---- 智能光标（每帧 lookup；结果供 updateUse 覆盖目标格 + 渲染黄框） ----
     this.updateSmartCursor();
+    // ---- 智能选取（Player.cs:24923 selectedItemState.Update：Shift 按住自动换手持
+    //      工具/光源；须在 updateUse 前跑，同帧换选即被使用路径看到） ----
+    this.updateSmartSelect();
     // ---- 使用物品（鼠标） ----
     this.updateUse(dt);
     this.prevSwingMouse = !!this.input?.mouseDown; // 挥剑点击沿（非 autoReuse 武器需重新点击）
@@ -1977,13 +1986,15 @@ export class Game implements GameHooks {
     this.camera.clamp();
     this.chunks.flushDirty();
     this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
-    windSway.update(this.world.weather?.windSpeedCurrent ?? 0,
-      { x: player.x, y: player.y, w: player.w, h: player.h, vx: player.vx, vy: player.vy, dead: player.dead },
-      this.world.w, this.world.h); // 风摆动相位钟 + 玩家扰动网格（TileDrawing.Update 1:1）
     tickEmotes();
     this.tickNpcEmotes();
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;
     const viewTH = Math.ceil(this.camera.viewH / this.camera.zoom / TILE) + 2;
+    // 风摆动相位钟 + 玩家扰动网格（TileDrawing.Update 1:1）。网格按视区尺寸建格
+    //（原版 EnsureWindGridSize 传屏幕绘制区 + 取模环形寻址，非全图）
+    windSway.update(this.world.weather?.windSpeedCurrent ?? 0,
+      { x: player.x, y: player.y, w: player.w, h: player.h, vx: player.vx, vy: player.vy, dead: player.dead },
+      viewTW, viewTH);
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
@@ -2391,6 +2402,85 @@ export class Game implements GameHooks {
     });
     // 指针切到 Cursors[12] 智能光标帧（Main.cs:47442-47513 num=11+smart.ToInt()）
     VUI.smartCursorOn = sc.showing;
+  }
+
+  /**
+   * 智能选取每帧驱动（Player.cs:17283-17562 SmartSelectLookup 族）。
+   * 与智能光标独立、可同按：Shift（键绑定 "SmartSelect" = LeftShift，PlayerInput.cs:1898）
+   * 按住 → 按鼠标所指格的策略优先级（提取机 7 / 大炮 6 / 锤 1 / 斧 2 / 刮漆 8 / 镐 3 /
+   * 湿格水下光源 4）在 0-49 找对应工具自动切过去；松开还原原槽（SelectedItemState.overridden）。
+   * 与智能光标共存：两系统互不知晓，同一帧可各自生效。
+   */
+  private updateSmartSelect() {
+    const inp = this.input;
+    const p = this.player;
+    if (!inp || !p) return;
+    // controlTorch（TriggersSet.cs:794）。Input.down 自带 uiBlocking 门 = 原版
+    // 键盘 UI 模式/mouseInterface 让位（TriggersSet.cs:782-784）的等价；
+    // 全屏地图打开时输入归地图（对应原版 MapFullscreen 输入模式无 SmartSelect 触发）
+    const controlTorch = inp.down('ShiftLeft') && !this.renderer.fullMap.open;
+    const [mx, my] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+    const canvas = this.renderer.canvas;
+    // Main.screenPosition（视区左上角世界坐标；camera.x/y 是视区中心）
+    const screenTopY = this.camera.y - canvas.height / 2 / this.camera.zoom;
+    const env: SmartSelectEnv = {
+      controlTorch,
+      usingGamepad: false,                       // PlayerInput.UsingGamepad（本作无手柄）
+      st: this.world.store,
+      mouseX: mx, mouseY: my,
+      screenTopY,
+      screenHeight: canvas.height / this.camera.zoom,
+      player: {
+        x: p.x, y: p.y, w: p.w, h: p.h,
+        gravDir: 1,                              // 反重力未实装（同 SmartCursor 口径）
+        // Player.wet（Player.cs:27540 经 Collision.WetCollision Collision.cs:1575 判定）；
+        // p.inWater 为脚部液量>100 的简化门，此处按原版命中盒中心盒求交精确复刻
+        wet: p.inWater || wetCollision(this.world.store, p.x, p.y, p.w, p.h),
+      },
+      slots: this.smartSelectSlots(),
+      selectedItem: p.inv.selected,
+      // IsInTileInteractionRange（Player.cs:31548，Simple 档 tileRangeX=5/tileRangeY=3 + TB）
+      inRange: (tx, ty, tb) => this.inTileRange(tx, ty, tb),
+    };
+    // SelectedItemState（Player.cs:383-517）宿主：换选/还原由 SmartSelect 代管
+    // SelectedItemState.Hotbar（:391）= 最近一次 0-9 快捷栏选择（Select :437-439 item<10 时记）；
+    // 本作数字键直写 inv.selected，故在此跟随记录
+    if (p.inv.selected <= 9) this.smartSelectHotbar = p.inv.selected;
+    const host: SmartSelectHost = {
+      selected: p.inv.selected,
+      hotbar: this.smartSelectHotbar,
+      canChangeImmediately: !this.swing && p.useTime === 0,
+      // CanChangeSelectedItemImmediately（Player.cs:386-393）：itemAnimation/itemTime 空——
+      // 本作 swing = itemAnimation、player.useTime = itemTime；reuseDelay/channel/
+      // pendingItemReuse 未实装
+      isSlotEmpty: (i) => !p.inv.slots[i],
+      onSelectionChanged: () => this.cb.onInventoryChanged(),
+    };
+    this.smartSelect.update(env, host);
+    p.inv.selected = host.selected;
+  }
+
+  /**
+   * inventory 0-57 的 Smart Select 槽画像（Player.cs:17326 的 inventory[i].type 等窄视图）。
+   * 0-49 背包 + 50-53 钱币 + 54-57 弹药——case 4/5 信号枪弹药门扫到 57（:17374/:17410）。
+   * 三力取 vanilla-itemfunc 全量（Hamaxe 斧+锤 / Drax 镐+斧 副力保留），legacy def.tool
+   * 画像只覆盖自身类型主力（与 updateUse 的工具判定同序）。
+   */
+  private smartSelectSlots() {
+    const inv = this.player.inv;
+    const out = [];
+    for (let i = 0; i < INV_SIZE; i++) {
+      const it = inv.slots[i];
+      if (!it) { out.push(EMPTY_SLOT); continue; }
+      const def = ITEM_DEFS[it.id];
+      out.push(smartSelectSlotOf(
+        def,
+        it.stack,
+        itemFuncOfInternal(it.id, def?.key ?? ''),
+        def?.tool ? { type: def.tool.type as 'pick' | 'axe' | 'hammer', power: def.tool.power ?? 0 } : null,
+      ));
+    }
+    return out;
   }
 
   private updateUse(dt: number) {
@@ -3027,6 +3117,22 @@ export class Game implements GameHooks {
           cw.damage, cw.knockback, cw.shoot), 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
+        break;
+      }
+      case 'whip': {
+        // 鞭（ProjectileAI_Whip 主干简化）：从玩家朝鼠标甩出/收回（时长=useAnimation），
+        // 命中敌人伤害+tag（UniqueTagEffects TagDamage，240t 内随从对该敌 +N）
+        const whip = cw as Extract<typeof cw, { kind: 'whip' }>;
+        const owner = this.player;
+        this.entities.add(new WhipProj(
+          owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
+          Math.max(1, Math.round(whip.damage * owner.damageMult('magic'))),
+          whip.knockback, whip.useTime, whip.shootSpeed,
+          () => (owner.dead ? null : owner),
+        ), 'projectiles');
+        this.player.useTime = whip.useTime;
+        this.sfx.play('throw');
+        this.input.mouseDown = false;
         break;
       }
       case 'summon': {

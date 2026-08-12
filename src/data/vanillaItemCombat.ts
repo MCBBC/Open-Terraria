@@ -24,6 +24,10 @@ export interface ItemCombat {
 
 const RAW = combatJson as unknown as Record<string, ItemCombat>;
 
+// ---- 鞭系（DefaultToWhip 提取，Item.cs SetDefaults switch 共 18 把）----
+import whipsJson from './vanilla-whips.json';
+const WHIPS = whipsJson as unknown as Record<string, { proj: number; dmg: number; kb: number; speed: number; anim: number }>;
+
 // ---- 提取缺口补丁（tools/extract-itemcombat.mjs 只解析 case 内字面赋值）----
 // DefaultToSpear/DefaultToStaff/DefaultToMagicWeapon/DefaultToRangedWeapon 的形参
 // 赋值（Item.cs:47630/:48045/:48057）漏提：4347/4348/4703/5629 仅剩 damage/knockBack、
@@ -80,6 +84,7 @@ export function viIdFromKey(key: string): number {
 export type CombatWeapon =
   | { kind: 'melee'; damage: number; knockback: number; useTime: number; useAnimation: number; autoReuse: boolean; shoot?: number; shootSpeed?: number }
   | { kind: 'summon'; shoot: number; sentry: boolean; damage: number; knockback: number; useTime: number; shootSpeed: number }
+  | { kind: 'whip'; shoot: number; damage: number; knockback: number; useTime: number; shootSpeed: number; itemId: number }
   | {
       kind: 'boomerang' | 'spear' | 'yoyo' | 'flail' | 'grenade' | 'glowstick' | 'magic' | 'shot' | 'summon';
       shoot: number;
@@ -105,6 +110,15 @@ export interface CombatWeaponItemLike {
 export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   const vid = def.vid ?? viIdFromKey(def.key);
   if (vid < 0) return null;
+  // 鞭（DefaultToWhip，Item.cs:47439——提取器漏提，独立表 src/data/vanilla-whips.json 全 18 把）
+  const whip = WHIPS[String(vid)];
+  if (whip) {
+    return {
+      kind: 'whip', itemId: vid,
+      shoot: whip.proj, damage: whip.dmg, knockback: whip.kb,
+      useTime: whip.anim, shootSpeed: whip.speed,
+    };
+  }
   const c = itemCombat(vid);
   if (!c || c.useAmmo || c.ammo) return null; // 弓弩/弹药体系不在此分流
   const shoot = c.shoot ?? 0;

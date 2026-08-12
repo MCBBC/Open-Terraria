@@ -167,8 +167,9 @@ export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): Deser
 
 // ---- 入口 + 蜂巢（Sub-C + Sub-B）。DesertBiome.Place 顺序（cs:21-42）：
 //  mound → UpdateSurfaceMap → 入口（33% 门+Next(4)） → DesertHive.Place → CleanupArea。
-//  入口必须在 Hive 之前（两侧共享同一条 genRand 流，次序即流位置） ----
-export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState, desc: DesertDesc): void {
+//  入口必须在 Hive 之前（两侧共享同一条 genRand 流，次序即流位置）。
+//  afterEntrance：入口完成、Hive 之前的对账钩子（oracle 的 desertentrance 检查点） ----
+export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState, desc: DesertDesc, afterEntrance?: () => void): void {
   const W = st.w, H = st.h;
   // UpdateSurfaceMap 后的表面图（DesertBiome.cs:22）；Surface[absoluteX]
   const surf2 = (ax: number) => desc.surface2[ax - desc.surface2X];
@@ -306,7 +307,12 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     }
   }
   const genRectWH = (ox: number, oy: number, w: number, h: number, act: Ga) => genRect(ox, oy, 0, 0, w, h, act);
-  const decode = (k: number): [number, number] => [Math.trunc(k / 4194304), (k % 4194304) - 2097152];
+  // 解码必须 floor（oracle 的算术右移 >>22 同义）：trunc 对负 dx 会偏 1，
+  // 令 genAll(All 形状) 的墙清零整体落空（负 dx 半区全写成界外 → 静默 no-op）
+  const decode = (k: number): [number, number] => {
+    const dx = Math.floor(k / 4194304);
+    return [dx, k - dx * 4194304 - 2097152];
+  };
   function genAll(ox: number, oy: number, d: Set<number>, act: Ga): void {   // ModShapes.All
     for (const k of d) {
       const [dx, dy] = decode(k);
@@ -376,6 +382,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
     else if (kind === 2) larvaHoleEntrance();
     else pitEntrance();
   }
+  afterEntrance?.();
 
   // ---- ChambersEntrance.cs 1:1：地表沙盘 + 之字形下行隧道 ----
   function chambersEntrance(): void {
@@ -482,6 +489,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       }
     }
     genAll(px, py + 2, data, new PlaceWall(0));
+    console.log(`[dbg] larvaAt px=${px} py=${py} hr=${holeRadius} data=${data.size} keys=[${[...data].slice(0, 5).join(',')}]`);
   }
 
   // ---- PitEntrance.cs 1:1（零掷骰）：漏斗形直落竖井 ----

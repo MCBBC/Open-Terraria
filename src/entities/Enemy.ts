@@ -114,6 +114,10 @@ export class Enemy extends Entity {
   /** 雕像产怪（Wiring.cs:2480 SpawnedFromStatue）：value=0 不掉钱、
    *  肉前集合不掉战利品、StatueSpawnedDropRarity 概率门（NPCLoot :79648-79654） */
   spawnedFromStatue = false;
+  /** 鞭 tag（Projectile.ApplyTag → npc.whipTimeLeft 系）：剩余 tick 与附加伤害
+   *  （240t=4 秒；随从命中被 tag 敌伤害 +whipTagDmg） */
+  whipTagT = 0;
+  whipTagDmg = 0;
   /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
   stepUp = true;
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
@@ -370,6 +374,7 @@ export class Enemy extends Entity {
     if (this.justHitT > 0) this.justHitT--;
     this.lightRGB = null; // 点光由 AI 每帧重写（不残留上一帧状态）
     if (this.hpBarT > 0) this.hpBarT--;
+    if (this.whipTagT > 0) this.whipTagT--;
     if (this.squash !== 0) this.squash *= 0.85;
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
@@ -1301,13 +1306,17 @@ export class Enemy extends Entity {
     }
     if (player && !player.dead) this.facing = this.seekDirX(player);
     const dir = this.facing;
+    // (:24151-24170) else-if 链:基础 ∓0.1;>3(同向满速不可达档)/>0(逆行)追加 ∓0.05;
+    // 曾把逆行追加错写成 ∓0.1(减速过猛)
     if (dir === -1 && this.vx > -3) {
       this.vx -= 0.1;
-      if (this.vx > 0) this.vx -= 0.1;
+      if (this.vx > 3) this.vx -= 0.1;
+      else if (this.vx > 0) this.vx -= 0.05;
       if (this.vx < -3) this.vx = -3;
     } else if (dir === 1 && this.vx < 3) {
       this.vx += 0.1;
-      if (this.vx < 0) this.vx += 0.1;
+      if (this.vx < -3) this.vx += 0.1;
+      else if (this.vx < 0) this.vx += 0.05;
       if (this.vx > 3) this.vx = 3;
     }
     // 悬停目标(:24172-24174):player.Y - h/2;水平距离>50 → 再抬 100px。
@@ -1317,7 +1326,7 @@ export class Enemy extends Entity {
     if (player && Math.abs(player.cx - this.cx) > 50) ty -= 100;
     if (this.y < ty) {
       this.vy += 0.05;
-      if (this.vy < 0) this.vy -= 0.01;
+      if (this.vy < 0) this.vy += 0.01;   // :24183-24185 上行中额外 +0.01 减速(曾写反 -0.01)
     } else {
       this.vy -= 0.05;
       if (this.vy > 0) this.vy -= 0.01;
@@ -1333,6 +1342,12 @@ export class Enemy extends Entity {
     if (this.hitHead || this.onGround) {
       this.vy = -oldVy * 0.5;
       if (Math.abs(this.vy) < 1) this.vy = this.vy >= 0 ? 1 : -1;
+    }
+    // 入水(:24194-24208):vy>0 ×0.95 阻下落,恒 -0.5 上浮,下限 -4
+    if (this.inWater) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
     }
   }
 

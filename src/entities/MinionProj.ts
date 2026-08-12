@@ -15,10 +15,21 @@ import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
 const FLAMEBURST_TOWER = new Set([663, 665, 667]);
+/** 弩车三档（AI_134 :65584）：帧 0 待机、帧 1-5 开火（每 5t）、第 12t 出弩箭 680
+ *  （速 16，T2 21）、25t 结束、冷却 GetBallistraShotDelay=160 */
+const BALLISTA_TOWER = new Set([677, 678, 679]);
+/** 闪电光环三档（AI_137 :65910）：非射击——光环场伤害（宽 ≤999 扫描增长，
+ *  localNPCHitCooldown=3）；帧 6 张连续循环 */
+const AURA_TOWER = new Set([688, 689, 690]);
+/** 爆炸机关三档（AI_138 :66059）：帧 4 张每 12t 连续循环；触发检测每 3t——
+ *  中心上方 48px 处 144×144 盒内有敌 → 原地爆炸（proj 694/695/696 等价 AoE），
+ *  冷却 GetExplosiveTrapCooldown=90 */
+const TRAP_TOWER = new Set([691, 692, 693]);
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
+  dead: boolean;
   hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
 }
 
@@ -77,19 +88,23 @@ export class MinionProj extends Entity {
     this.ownerRef = owner;
   }
 
-  /** 最近敌人（无目标 null）——鸭子类型最小形状 */
+  /** 最近敌人（无目标 null）。鞭 tag 优先（原版随从锁定被鞭标记目标：
+   *  Projectile.ApplyTag → npc.whipSet/whipTime，随从 TargetSlot 优先取 tag 敌） */
   private nearestEnemy(game: GameHooks, maxRange: number): EnemyLike | null {
     const p = this.ownerRef();
     if (!p) return null;
     let best: EnemyLike | null = null;
     let bestD = maxRange;
+    let tagged: EnemyLike | null = null;
+    let taggedD = maxRange;
     for (const e of game.enemies()) {
-      const en = e as never as EnemyLike & { dead: boolean };
+      const en = e as never as EnemyLike & { dead: boolean; whipTagT?: number };
       if (!en || en.dead) continue;
       const d = Math.hypot(en.cx - this.cx, en.cy - this.cy);
       if (d < bestD) { bestD = d; best = en; }
+      if (en.whipTagT && en.whipTagT > 0 && d < taggedD) { taggedD = d; tagged = en; }
     }
-    return best;
+    return tagged ?? best;
   }
 
   fixedUpdate(dt: number, game: GameHooks) {
@@ -130,7 +145,72 @@ export class MinionProj extends Entity {
         }
         return;
       }
-      // 其他哨兵：定点炮台，60t 一发（近似）
+      // 弩车族（AI_134）：帧 0 待机 → 帧表 1-5（每 5t）→ 第 12t 弩箭 680（速 16）
+      // → 25t 结束 → 冷却 160（GetBallistraShotDelay）
+      if (BALLISTA_TOWER.has(this.projId)) {
+        if (this.sFire === 0) {
+          const tgt = this.nearestEnemy(game, 900);
+          if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
+          if (tgt && this.sCool <= 0) { this.sFire = 1; this.sFireT = 0; }
+          if (this.sCool > 0) this.sCool--;
+        } else {
+          if (this.sFireT === 12) {
+            const tgt = this.nearestEnemy(game, 900);
+            let vx = this.facing * 16, vy = 0;
+            if (tgt) {
+              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - (this.y + 20)) || 1;
+              vx = ((tgt.cx - this.cx) / d) * 16; vy = ((tgt.cy - (this.y + 20)) / d) * 16;
+            }
+            (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+              new Arrow(this.cx, this.y + 20, vx, vy, dmgOf(), this.knockback, 680, null, { grav: 0 }),
+              'projectiles');
+          }
+          if (++this.sFireT >= 25) { this.sFire = 0; this.sCool = 160; }
+        }
+        return;
+      }
+      // 闪电光环族（AI_137）：非射击——每 3t 对塔周 4 格盒内敌人场伤
+      // （localNPCHitCooldown=3；宽 999 扫描增长近似为固定 4 格盒）
+      if (AURA_TOWER.has(this.projId)) {
+        if (--this.sCool <= 0) {
+          this.sCool = 3;
+          for (const ent of game.enemies()) {
+            const en = ent as EnemyLike & { dead: boolean };
+            if (en.dead) continue;
+            if (Math.abs(en.cx - this.cx) > TILE * 4 || Math.abs(en.cy - this.cy) > TILE * 4) continue;
+            if (!this.hitCd.ready(en.id, 3)) continue;
+            en.hurt(dmgOf(), 0, 0, game);
+          }
+        }
+        return;
+      }
+      // 爆炸机关族（AI_138）：每 3t 探测中心上方 48px 的 144×144 盒——有敌即
+      // 原地爆炸 AoE（proj 694 等价）+ 粒子 + 冷却 90（GetExplosiveTrapCooldown）
+      if (TRAP_TOWER.has(this.projId)) {
+        if (--this.sCool <= 0) {
+          this.sCool = 3;
+          const ecx = this.cx, ecy = this.cy - 48;
+          const hit = (game.enemies() as EnemyLike[]).some((en) =>
+            !en.dead && Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2);
+          if (hit) {
+            this.sCool = 90;
+            let boom = 0;
+            for (const ent of game.enemies()) {
+              const en = ent as EnemyLike & { dead: boolean };
+              if (en.dead) continue;
+              if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
+                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game);
+                boom++;
+              }
+            }
+            void boom;
+            game.spawnParticles(ecx, ecy, '#FFB040', 18, 4, { life: 36 });
+            game.playSfx('explode', 0.8, this.cx, this.cy);
+          }
+        }
+        return;
+      }
+      // 其余哨兵：定点炮台，60t 一发（兜底近似）
       const tgt = this.nearestEnemy(game, 600);
       if (tgt) {
         this.shootCd--;
@@ -187,13 +267,15 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, game.world, this.vx, this.vy);
     }
-    // 接触伤害（同敌 20t 冷却；伤害吃玩家 summon≈magic 乘区）
+    // 接触伤害（同敌 20t 冷却；伤害吃玩家 summon≈magic 乘区；
+    // 敌方有鞭 tag → +whipTagDmg，Projectile.ApplyTag 系语义）
     for (const e of game.enemies()) {
-      const en = e as never as EnemyLike & { dead: boolean };
+      const en = e as never as EnemyLike & { dead: boolean; whipTagT?: number; whipTagDmg?: number };
       if (en.dead) continue;
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       if (!this.hitCd.ready(en.id, 20)) continue;
-      const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic')));
+      const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
+      const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic')) + tag);
       en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
     }
     // 玩家死亡/过远不消失（原版随从持续到上限驱逐或卸装）——仅跟随
@@ -211,6 +293,10 @@ export class MinionProj extends Entity {
     let frame: number;
     if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
       frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 4) : 0;
+    } else if (this.sentry && BALLISTA_TOWER.has(this.projId)) {
+      frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 5) : 0;
+    } else if (this.sentry && TRAP_TOWER.has(this.projId)) {
+      frame = Math.floor(this.age / 12) % frames; // AI_138 frameCounter 12t 连续循环
     } else {
       frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
     }

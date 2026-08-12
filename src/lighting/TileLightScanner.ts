@@ -112,15 +112,23 @@ export class TileLightScanner {
     return Mask.None;
   }
 
-  /** 该格是否暴露于"天空/地狱光"(ApplySurfaceLight 的可见性判定:不挡太阳 + 墙透光) */
-  private exposed(st: TileStore, i: number): boolean {
+  /** 该格是否暴露于"天空/地狱光"(ApplySurfaceLight :3170 / ApplyHellLight :3270
+   *  同构判定)。放行 = 满足下列任一 + 墙透光：
+   *    ① 非活动(空气/水) 或 非挡阳类型；② 坡面/半砖 且【四邻液量全为 0】
+   *  ——挡阳实心格（海底泥沙等）恒不放行：深水下海底不播天光，亮度只经水层
+   *  传播衰减而来。此前误植为"自身 liquid>=200 才挡"= 海底方块自身无液被放行
+   *  → 水底地面满天光自发光 */
+  private exposed(st: TileStore, x: number, y: number): boolean {
+    const i = st.idx(x, y);
     const type = st.type[i];
     if (type !== 0) {
       const actuated = (st.wire[i] & TileStore.WIRE_ACTUATED) !== 0;
-      // 挡太阳条件 = 会挡光的实心格 + 非坡面 + 非半砖 + 未致动 + 液体 < 200
-      // (原版 sloped/halfBrick/inActive 例外 + liquid<200 规则,:3161-3189)
-      if (!actuated && this.blocksLight[type] && st.slope[i] === 0 && st.half[i] === 0
-        && st.liquid[i] >= 200) return false;
+      if (!actuated && this.blocksLight[type]) {
+        if (st.slope[i] === 0 && st.half[i] === 0) return false;
+        // 坡面/半砖例外：四邻必须全干（:3170 第三析取支的邻格 liquid==0）
+        if (st.liquid[st.idx(x, y - 1)] !== 0 || st.liquid[st.idx(x, y + 1)] !== 0
+          || st.liquid[st.idx(x - 1, y)] !== 0 || st.liquid[st.idx(x + 1, y)] !== 0) return false;
+      }
     }
     const wall = st.wall[i];
     return wall === 0 || WALL_LIGHT.has(wall);
@@ -148,11 +156,16 @@ export class TileLightScanner {
         map.mask[li] = this.getMask(st, i);
 
         let lr = 0, lg = 0, lb = 0;
+        // ★ 深度门 liquid<200（ApplySurfaceLight :3172 / ApplyHellLight :3270）：
+        //   仅液量 <200（表面 ~4/5 格）播满天空/地狱光；深层液体不播——亮度靠
+        //   表层向深水传播（水衰减逐格 0.88×0.91 系）→ 水体越深越暗。此前漏此门
+        //   整个水柱每层播满 = 深水自发光
+        const shallowLiquid = st.liquid[i] < 200;
         // ① 天空 / 地狱(:94-101)
         if (ty <= w.groundLevel) {
-          if (this.exposed(st, i)) { lr = skyR; lg = skyG; lb = skyB; }
+          if (shallowLiquid && this.exposed(st, tx, ty)) { lr = skyR; lg = skyG; lb = skyB; }
         } else if (ty > w.lavaLine) {
-          if (this.exposed(st, i)) { lr = Math.max(lr, hellR); lg = Math.max(lg, hellG); lb = Math.max(lb, hellB); }
+          if (shallowLiquid && this.exposed(st, tx, ty)) { lr = Math.max(lr, hellR); lg = Math.max(lg, hellG); lb = Math.max(lb, hellB); }
         }
         // ② 发光墙(:102;大多要求 !LightIsBlocked——此处墙在实心块后不可见,实心格直接跳过)
         const wall = st.wall[i];

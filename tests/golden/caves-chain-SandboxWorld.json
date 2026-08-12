@@ -20,6 +20,9 @@
     "grass|7b0e92f0 5d202084 54459dfd d7385cfd",
     "jungle|9f942776 6d189ff4 5f56216f 5b424cad",
     "mudcaves|4092940a 282bd10c 5f56216f 5b424cad",
-    "desertmound|eac8496e eeb1720d ffd79c4d e26b0672"
+    "desertmound|eac8496e eeb1720d ffd79c4d e26b0672",
+    "desertentrance|e77521ae 1435de8d db6c2a1e e26b0672",
+    "deserthive|bc9e360f a954cf14 b761a5bd b7711fed",
+    "desertdone|bc9e360f a954cf14 b761a5bd b7711fed"
   ]
 }

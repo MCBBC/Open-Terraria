@@ -9,6 +9,7 @@ import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
+import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickPass';
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -83,13 +84,13 @@ function dentForHoneyFall(st: TileStore, x: number, y: number, dirIn: number): v
   y++;
   let num = 0;
   let cx = x;
-  while ((num < 4 || st.isSolid(cx, y)) && cx > 10 && cx < st.w - 10) {
+  while ((num < 4 || solidTileHB(st, cx, y)) && cx > 10 && cx < st.w - 10) {
     num++;
     cx += dir;
-    if (st.isSolid(cx, y)) {
-      // PoundTile:半砖化(我们没有半砖生成语义,简化为清除)
-      const i = st.idx(cx, y);
-      st.type[i] = 0; st.flags[i] = 0;
+    if (solidTileHB(st, cx, y)) {
+      // WorldGen.PoundTile（HiveBiome.cs:338）：半砖 toggle（非清除）——
+      // 砸后该格不再是 SolidTile，循环随即退出，与原版控制流一致
+      poundTileHB(st, cx, y);
       if (!st.flags[st.idx(cx, y + 1)]) {
         st.type[st.idx(cx, y + 1)] = HIVE;
         st.flags[st.idx(cx, y + 1)] = 1;

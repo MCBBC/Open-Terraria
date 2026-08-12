@@ -117,6 +117,23 @@ const MISC = [
   'Extra_187.png', 'Extra_188.png',
   // 塔护盾 ForceField 着色器载体（Main.cs:23806 DrawData 600×600 原图 Misc/Perlin）
   'Misc/Perlin.png',
+  // ---- 风摆动/自然粒子（WindSway/NatureParticles）----
+  // 落叶 gore（GetTreeLeaf 表 + SpecialAI 3 族 910-925/1113-1121/1248-1255,1257）
+  'Gore_910.png', 'Gore_911.png', 'Gore_912.png', 'Gore_913.png', 'Gore_914.png',
+  'Gore_915.png', 'Gore_916.png', 'Gore_917.png', 'Gore_918.png', 'Gore_919.png',
+  'Gore_920.png', 'Gore_921.png', 'Gore_922.png', 'Gore_923.png', 'Gore_924.png',
+  'Gore_925.png',
+  'Gore_1113.png', 'Gore_1114.png', 'Gore_1115.png', 'Gore_1116.png', 'Gore_1117.png',
+  'Gore_1118.png', 'Gore_1119.png', 'Gore_1120.png', 'Gore_1121.png',
+  'Gore_1248.png', 'Gore_1249.png', 'Gore_1250.png', 'Gore_1251.png', 'Gore_1252.png',
+  'Gore_1253.png', 'Gore_1254.png', 'Gore_1255.png', 'Gore_1257.png',
+  // 滴水 gore（EmitLiquidDrops 水型映射 706-717 + 1147/943/1160-1162/1383）
+  'Gore_706.png', 'Gore_707.png', 'Gore_708.png', 'Gore_709.png', 'Gore_710.png',
+  'Gore_711.png', 'Gore_712.png', 'Gore_713.png', 'Gore_714.png', 'Gore_715.png',
+  'Gore_716.png', 'Gore_717.png', 'Gore_943.png', 'Gore_1147.png',
+  'Gore_1160.png', 'Gore_1161.png', 'Gore_1162.png', 'Gore_1383.png',
+  // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）
+  'Glow_294.png', 'Glow_315.png', 'Glow_316.png', 'Glow_317.png', 'Glow_329.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

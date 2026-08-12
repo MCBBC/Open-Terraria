@@ -6,6 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { tileRunner } from './TileRunner';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
@@ -18,6 +19,10 @@ const SNOW_BRICK = TILE_BY_KEY['ice']!;   // sheet 161=Ice Block（旧 key v_161
 const CORRUPT_ICE = TILE_BY_KEY['v_163_purple_ice_block']!;   // 163=Purple Ice
 const CRIMSON_ICE = TILE_BY_KEY['v_200_red_ice_block']!;   // 200=Red Ice
 const CRIMSON_HARDSAND = TILE_BY_KEY['v_399_crimson_hardened_sand_block']!;
+const CORRUPT_SANDSTONE = TILE_BY_KEY['v_400_corrupt_sandstone_block']!;
+const CRIMSON_SANDSTONE = TILE_BY_KEY['v_401_crimson_sandstone_block']!;
+const CORRUPT_JUNGLE_GRASS = TILE_BY_KEY['v_661_corrupt_jungle_grass_block']!;
+const CRIMSON_JUNGLE_GRASS = TILE_BY_KEY['v_662_crimson_jungle_grass_block']!;
 const ICE = TILE_BY_KEY['ice']!;
 const MUD = TILE_BY_KEY['mud']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
@@ -26,6 +31,7 @@ const ALTAR = TILE_BY_KEY['v_26_altars']!;
 const ORB = TILE_BY_KEY['v_31_orb_heart']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
+const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉）
 
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
@@ -149,8 +155,9 @@ function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi:
       if (t === T.STONE) {
         if (inCore) st.type[i] = crimson ? CRIMSTONE : EBONSTONE;
       } else if (t === T.GRASS) st.type[i] = crimson ? CRIMSON_GRASS : CORRUPT_GRASS;
+      else if (t === JUNGLE_GRASS) st.type[i] = crimson ? CRIMSON_JUNGLE_GRASS : CORRUPT_JUNGLE_GRASS; // 1456 cs:14219/14540 60→662/661（1.4.5 新增邪恶丛林草）
       else if (t === SNOW_BRICK) st.type[i] = crimson ? CRIMSON_ICE : CORRUPT_ICE; // 原版 161→163/200(cs L6397)
-      else if (t === SANDSTONE) { /* 腐化沙岩 v_400/v_401 暂缺 */ }
+      else if (t === SANDSTONE) st.type[i] = crimson ? CRIMSON_SANDSTONE : CORRUPT_SANDSTONE; // 396→401/400（无 inCore 门，cs:14223/14544）
       else if (t === HARDSAND) st.type[i] = crimson ? CRIMSON_HARDSAND : CORRUPT_HARDSAND;
     }
   }
@@ -382,20 +389,16 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
       }
     }
   }
-  // 1/3 概率末端魔矿脉
+  // 1/3 概率末端魔矿脉（cs:75534-75541）：TileRunner(x, y, Next(2,6), Next(3,7), 22)
   if (rng.int(0, 2) !== 0) return;
   const x = Math.floor(px);
   let y = Math.floor(py);
   while (!st.flags[st.idx(x, y)] && y < st.h - 2) y++;
-  // 魔矿 22 缺独立 tile,用黑檀石小脉近似
-  for (let dx = -2; dx <= 2; dx++) {
-    for (let dy = -2; dy <= 2; dy++) {
-      if (dx * dx + dy * dy <= 4 && st.inBounds(x + dx, y + dy)) {
-        st.flags[st.idx(x + dx, y + dy)] = 1;
-        st.type[st.idx(x + dx, y + dy)] = EBONSTONE;
-      }
-    }
-  }
+  tileRunner(st, rng, gs, x, y, {
+    strength: rng.int(2, 5),   // genRand.Next(2, 6)
+    steps: rng.int(3, 6),      // genRand.Next(3, 7)
+    type: DEMONITE, addTile: false,
+  });
 }
 
 /** CrimStart(L45443):弹坑隧道 + CrimVein 血管(5-8 条,终点=恶魔之心) */

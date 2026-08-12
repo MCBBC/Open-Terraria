@@ -44,7 +44,7 @@ function hashGrids(st: { type: Uint16Array; flags: Uint8Array; liquid: Uint8Arra
 /** wall 单独哈希——只对沙漠段启用：此前 pass 的 JS 墙与 oracle 有既知偏差
  *  （Terrain 自加渲染墙），到 desertmound 为止 wall 不具裁决力；沙漠 Sub-B/C
  *  以墙(187/216)为核心输出，从这里开始逐哈希比对。 */
-function hashWalls(st: { wall: Uint16Array }): number {
+function hashWalls(st: { wall: Uint16Array }): string {
   return fnv1a(st.wall);
 }
 
@@ -83,9 +83,9 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runMudCavesPass(st, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
   out.set('mudcaves', hashGrids(st));
   const desc = runDesertMoundOnly(st, rng, gs); out.set('desertmound', hashGrids(st));
-  // Sub-C 入口 + Sub-B 蜂巢（DesertBiome.Place 顺序：入口先于 Hive）
-  runDesertEntrancesAndHive(st, rng, gs, desc);
-  snap('desertentrance');
+  // Sub-C 入口 + Sub-B 蜂巢（DesertBiome.Place 顺序：入口先于 Hive）。
+  // afterEntrance 钩子对齐 oracle 的 desertentrance 检查点位（入口后、Hive 前）
+  runDesertEntrancesAndHive(st, rng, gs, desc, () => snap('desertentrance'));
   snap('deserthive');        // AddTileVariance 完
   snap('desertdone');        // CleanupArea 仅帧号——状态同 deserthive
   return { grids: out, walls: outWall };

@@ -1,6 +1,7 @@
 // 程序化世界生成管线：地形 → 洞穴 → 矿石 → 液体 → 表面 → 结构
 // 分帧执行以显示进度。纯函数式 pass，每个 pass 直接写 TileStore（生成期用 silent 写入）。
 import { RNG, translateSeed } from '../../core/rng';
+import type { TileStore } from '../TileStore';
 import { T, TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { World } from '../World';
 
@@ -454,7 +455,7 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
   // 全图 type==191 连通核补墙 244（零掷骰）。
   runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)
   runLivingTreeWallsPass(store, gs);                 // Living Tree Walls(活木墙)
-  runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(丛林湿隧道灌水)
+  runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
   runTemplePass(store, rng, gs, world.chests);  // Jungle Temple(之字形房间链+走廊+门+宝箱)
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)
   const shrineSpots = runJungleShrinePass(store, rng, gs);  // 丛林神龛(壳+腔+火把+金字塔顶)
@@ -721,80 +722,99 @@ function potPass({ store, rng }: GenCtx) {
   const surfHigh = Math.max(1, Math.floor(gs.worldSurfaceHigh));
   const surfLow = Math.floor(gs.worldSurfaceLow);
 
-  const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
+  const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!;
   const JUNGLE = TILE_BY_KEY['v_60_jungle_grass_block']!;
-  const CORRUPT = new Set<number>([
-    TILE_BY_KEY['v_23_corrupt_grass_block']!, TILE_BY_KEY['v_112_ebonsand_block']!,
-    TILE_BY_KEY['v_116_pearlsand_block']!, TILE_BY_KEY['v_163_corrupt_ice_block']!,
-  ].filter((v) => v !== undefined));
-  const CRIMSON = new Set<number>([
-    TILE_BY_KEY['v_199_crimson_grass_block']!, TILE_BY_KEY['v_203_crimstone_block']!,
-    TILE_BY_KEY['v_204_crimsand_block']!, TILE_BY_KEY['v_200_crimson_ice_block']!,
-  ].filter((v) => v !== undefined));
-  const GRANITE = TILE_BY_KEY['v_368_granite_block'] ?? -1; // 368 = 花岗岩块(样式由墙 187/216/223 判定)
   const LIHZARD = TILE_BY_KEY['v_226_lihzahrd_brick'] ?? -1;
   const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
   const MARBLE_WALLS = new Set([187, 216, 223]);
 
-  /** cs:18220-18272 样式选择(按地面 tile / 墙 / 深度) */
-  const potStyle = (x: number, y: number, ground: number, wall: number): number => {
-    if (ground === SNOW || ground === ICE || ground === THIN_ICE) return rng.int(4, 6);
-    if (ground === JUNGLE) return rng.int(7, 9);
-    if (DUNGEON_WALLS.has(wall)) return rng.int(10, 12);
-    if (CORRUPT.has(ground)) return rng.int(16, 18);
-    if (CRIMSON.has(ground)) return rng.int(22, 24);
-    if (ground === GRANITE) return rng.int(31, 33);
-    if (ground === LIHZARD) return rng.int(28, 30);
-    if (MARBLE_WALLS.has(wall)) return rng.int(34, 36);
-    if (y > gs.rockLevel && y > h - 260) return rng.int(13, 15); // 地狱(cs: UnderworldLayer)
-    return rng.int(0, 3);
-  };
-
-  for (let n = 0; n < count; ) {
+  for (let n = 0; n < count; n++) {
     const progress = n / count;
-    let y0 = rng.int(surfHigh, Math.max(surfHigh + 1, h - 10));
-    if (progress > 0.93) y0 = h - 150;          // 尾段强制地狱行(cs:18194)
-    else if (progress > 0.75) y0 = surfLow;     // 后 1/4 起地表浅层(cs:18196)
-    const x = rng.int(20, w - 20);
-    // 向下扫描(cs:18210-18286):遇首个实心后进入候选模式,
-    // 在满足"地表以下或背面有墙"的空腔地面放(2×2 净空+双列实心,PlacePot cs:54082)
-    let foundSolid = false;
-    let fail = true;
-    for (let y = y0; y < h - 20 && fail; y++) {
-      const t = store.get(x, y);
-      if (!foundSolid) {
-        if (t !== 0 && TILE_DEFS[t]?.solid && !store.liquid[store.idx(x, y - 1)]) foundSolid = true;
-        continue;
-      }
-      // cs:18216 门禁:y < Main.worldSurface(平均地表线)时必须有墙——
-      // 曾误用 worldSurfaceLow(谷底线,几乎恒小于 y)→ 地表露天处全放,陶罐泛滥
-      if (y < gs.worldSurface && store.wall[store.idx(x, y)] === 0) continue;
-      // cs:18244 oceanDepths 排除:浅于 oceanLevel=(ws+rockLevel)/2+40 且在海滩列 → 拒绝
-      if (y <= (gs.worldSurface + gs.rockLevel) / 2 + 40
-        && (x < gs.beachDistance || x > w - gs.beachDistance)) continue;
-      const ground = store.get(x, y + 1);
-      if (ground === 0 || !TILE_DEFS[ground]?.solid) continue;
-      if (store.liquid[store.idx(x, y)] > 0) continue;
-      // PlacePot 2×2 净空 + (x,y+1)(x+1,y+1) 实心 + 半砖/坡面检查(本仓库半砖简化跳过)
-      let ok = true;
-      for (let dx = 0; dx < 2 && ok; dx++) {
-        for (let dy = -1; dy <= 0; dy++) {
-          if (store.isActive(x + dx, y + dy)) ok = false;
+    // 原版外层 while(!flag) 重试：每罐最多 10000 次全列尝试（cs:18198/18290 num7）
+    let placed = false;
+    for (let attempt = 0; attempt < 10000 && !placed; attempt++) {
+      let y0 = rng.int(surfHigh, Math.max(surfHigh + 1, h - 10));
+      if (progress > 0.93) y0 = h - 150;          // 尾段强制地狱行(cs:18194)
+      else if (progress > 0.75) y0 = surfLow;     // 后 1/4 起地表浅层(cs:18196)
+      const x = rng.int(20, w - 20);
+      // 向下扫描(cs:18210-18286):遇首个实心(且上格非岩浆/微光)后进入候选模式
+      let foundSolid = false;
+      for (let y = y0; y < h - 20 && !placed; y++) {
+        const t = store.get(x, y);
+        if (!foundSolid) {
+          const liq = store.liquid[store.idx(x, y - 1)];
+          const ltype = store.liquidType[store.idx(x, y - 1)];
+          if (t !== 0 && TILE_DEFS[t]?.solid && !(liq > 0 && ltype === 2) && !(liq > 0 && ltype === 4)) foundSolid = true;
+          continue;
         }
-        if (!store.isSolid(x + dx, y + 1)) ok = false;
-      }
-      if (!ok) continue;
-      const style = potStyle(x, y, ground, store.wall[store.idx(x, y)]);
-      const variant = rng.int(0, 2) * 36;
-      for (let dx = 0; dx < 2; dx++) {
-        for (let dy = -1; dy <= 0; dy++) {
-          store.setTileSilent(x + dx, y + dy, POT, dx * 18 + variant, (dy + 1) * 18 + style * 36);
+        // cs:18216 门禁:y < Main.worldSurface(平均地表线)时必须有墙——
+        // 曾误用 worldSurfaceLow(谷底线,几乎恒小于 y)→ 地表露天处全放,陶罐泛滥
+        if (y < gs.worldSurface && store.wall[store.idx(x, y)] === 0) continue;
+        // cs:18220：style=Next(0,4) 在该行通过墙门禁后立即掷（ground 门禁之前——
+        // 消费顺序 1:1，漏掷会平移后续 RNG 流）
+        let style = rng.int(0, 3);
+        const ground = store.get(x, y + 1);
+        if (ground === 0 || !store.flags[store.idx(x, y + 1)]) continue;
+        const liq2 = store.liquid[store.idx(x, y)];
+        const ltype2 = store.liquidType[store.idx(x, y)];
+        if ((liq2 > 0 && ltype2 === 2) || (liq2 > 0 && ltype2 === 4)) continue; // anyLava/anyShimmer 才拒（水/蜜可放）
+        if (oceanDepthsAt(store, gs, x, y)) continue;
+        // 样式覆写链（cs:18235-18266，非互斥、后命中覆盖先命中；RNG 仅在命中时消耗）
+        const sheetOf = (id: number) => TILE_DEFS[id]?.vanilla?.sheet ?? -1;
+        const gs2 = sheetOf(ground);
+        if (ground === SNOW || ground === ICE || gs2 === 162) style = rng.int(4, 6);
+        if (ground === JUNGLE) style = rng.int(7, 9);
+        {
+          const wl = store.wall[store.idx(x, y)];
+          // IsDungeonPlatformOrShelf（cs:11507）：type19 且 frameY/18 ∈ {6,7,8,9..12}
+          const shelfRow = Math.floor(store.frameY[store.idx(x, y + 1)] / 18);
+          const inDun = DUNGEON_WALLS.has(wl)
+            || gs2 === 41 || gs2 === 43 || gs2 === 44 || gs2 === 481 || gs2 === 482 || gs2 === 483
+            || (gs2 === 19 && shelfRow >= 6 && shelfRow <= 12);
+          if (inDun) style = rng.int(10, 12);
         }
+        if (gs2 === 23 || gs2 === 25 || gs2 === 22 || gs2 === 163) style = rng.int(16, 18); // 腐化草/黑檀石/魔矿/紫冰
+        if (gs2 === 199 || gs2 === 203 || gs2 === 204 || gs2 === 200) style = rng.int(22, 24);
+        if (sheetOf(ground) === 368) style = rng.int(31, 33);
+        if (ground === LIHZARD) style = rng.int(28, 30);
+        if (MARBLE_WALLS.has(store.wall[store.idx(x, y)])) style = rng.int(34, 36);
+        if (y > h - 200) style = rng.int(13, 15);  // Main.UnderworldLayer = maxTilesY-200
+        // PlacePot（cs:54082）：2×2 净空 + 双列下方 nactive/整砖/无坡/实心
+        if (!placePot(store, rng, x, y, POT, style)) continue;
+        placed = true;
       }
-      fail = false;
     }
-    n++; // 原版每轮无论成败都推进 num8(10000 次失败预算内重试,这里简化为固定轮数)
   }
+}
+
+/** PlacePot（1456 WorldGen.cs:54082）1:1：2×2（x..x+1, y-1..y）须净空；
+ *  下方双列须 nactive && !halfBrick && slope==0 && tileSolid；成功才掷 Next(3) 变体 */
+function placePot(store: TileStore, rng: RNG, x: number, y: number, type: number, style: number): boolean {
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      if (!store.inBounds(x + dx, y + dy) || store.flags[store.idx(x + dx, y + dy)]) return false;
+    }
+    if (!store.inBounds(x + dx, y + 1)) return false;
+    const gi = store.idx(x + dx, y + 1);
+    if (!store.flags[gi] || store.half[gi] || store.slope[gi] !== 0) return false;
+    const d = TILE_DEFS[store.type[gi]];
+    if (!d?.solid) return false;
+  }
+  const variant = rng.int(0, 2) * 36;   // genRand.Next(3)*36（仅成功时消费）
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      store.setTileSilent(x + dx, y + dy, type, dx * 18 + variant, (dy + 1) * 18 + style * 36);
+      store.half[store.idx(x + dx, y + dy)] = 0;
+    }
+  }
+  return true;
+}
+
+/** oceanDepths（WorldGen.cs:10968）：y > oceanLevel 直接 false；海滩列才 true */
+function oceanDepthsAt(store: TileStore, gs: GenState, x: number, y: number): boolean {
+  const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
+  if (y > oceanLevel) return false;
+  return x < gs.beachDistance || x > store.w - gs.beachDistance;
 }
 
 // ---------- 矿石 ----------

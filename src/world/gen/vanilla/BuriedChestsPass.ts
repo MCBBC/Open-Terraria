@@ -12,6 +12,8 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
+import { idsByVanillaSheet } from './TileRunner';
+import { solidTile as solidTileHB } from './HalfBrickPass';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -20,6 +22,9 @@ const ICE = TILE_BY_KEY['ice']!;
 const THIN_ICE = TILE_BY_KEY['thin_ice']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
 const TALTAR = TILE_BY_KEY['v_237_lihzahrd_altar']!;
+const LARVA = TILE_BY_KEY['v_231_larva']!;
+/** TileID.Sets.Boulders（TileID.cs:195）：138/484/664/665/711-716 */
+const BOULDER_TILES = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
 
 export type ChestSink = Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
 
@@ -272,27 +277,36 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   return items;
 }
 
-/** AddBuriedChest 近似:从 (i,j) 向下落,按上下文解析样式与战利品,2×2 放置。
- *  opts.loot: 原版物品 id(number)或物品 key(string,vi_ 反解主件/legacy 直入) */
+/** AddBuriedChest（1456 cs:35920）下落/门禁段 1:1：
+ *  自 j 向下扫至 k < maxTilesY-10，逐行检查 anyShimmer / 幼虫 231 → 整体失败；
+ *  首个 SolidTile（半砖/坡面不算，WorldGen.SolidTile）落定。
+ *  ±2 邻域（InWorld 100 边距）有 Boulders{138,484,664,665,711-716}/祭坛 26/蜥蜴祭坛 237 → 失败。
+ *  样式/战利品解析与 2×2 放置沿用本仓库 rollChestLoot 管线。 */
 export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
   i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags } = {},
 ): boolean {
-  // ±2 内不得有滚石/祭坛/其他宝箱(原版 num4=2 检查)
+  // ±2 内不得有滚石/祭坛（cs:35957-35966：InWorld(n,num6,100) && Boulders || 26 || 237）
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = -2; dy <= 2; dy++) {
-      if (!st.inBounds(i + dx, j + dy)) continue;
-      const t = st.type[st.idx(i + dx, j + dy)];
-      if (!st.flags[st.idx(i + dx, j + dy)]) continue;
-      if (t === ALTAR || t === TALTAR || t === CHEST || t === CHEST2) return false;
+      const xx = i + dx, yy = j + dy;
+      if (xx < 100 || yy < 100 || xx >= st.w - 100 || yy >= st.h - 100) continue;
+      const k = st.idx(xx, yy);
+      if (!st.flags[k]) continue;
+      const t = st.type[k];
+      if (BOULDER_TILES.has(t) || t === ALTAR || t === TALTAR) return false;
     }
   }
-  // 下落到地面
+  // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
   let gy = j;
-  let guard = 0;
-  while (guard++ < 400 && st.inBounds(i, gy) && !st.flags[st.idx(i, gy)]) gy++;
-  if (!st.inBounds(i, gy) || !st.flags[st.idx(i, gy)]) return false;
-  if (!TILE_DEFS[st.type[st.idx(i, gy)]]?.solid) return false;
+  for (; gy < st.h - 10; gy++) {
+    const k = st.idx(i, gy);
+    if (st.liquid[k] > 0 && st.liquidType[k] === 4) return false;              // anyShimmer → 整体失败
+    if (st.flags[k] && st.type[k] === LARVA) return false;                      // 幼虫 231 → 整体失败
+    if (solidTileHB(st, i, gy)) break;                                          // 首个 SolidTile 落定
+  }
+  if (gy >= st.h - 10) return false;
+  if (!solidTileHB(st, i, gy)) return false;
 
   let tile = opts.tile ?? CHEST;
   let style = opts.style;

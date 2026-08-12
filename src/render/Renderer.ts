@@ -118,8 +118,10 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 栖息态 NPC（秃鹫 61 cs:24082 ai[0]=0 栖息 / 宝箱怪 85 族 cs:25645 ai[0]=0 伪装）：
   // 静止帧 0；激活后从帧 1 起循环
   if (ai === 17 || ai === 25) {
-    if ((e as Enemy & { ai0: number }).ai0 === 0) return 0;
-    return frames > 1 ? 1 + Math.floor(t / 8) % (frames - 1) : 0;
+    // FindFrame case 61(:74235-74255):vx==vy==0 → 帧0(栖息);飞行帧每 5 tick 推进
+    // (:74247 num148=5),原版用 frameCounter(栖息清零)——全局 t 连续循环视觉等价
+    if (e.vx === 0 && e.vy === 0) return 0;
+    return frames > 1 ? 1 + Math.floor(t / 5) % (frames - 1) : 0;
   }
   // 爬墙蜘蛛族（FindFrame case 165/237/238/240/531, cs:73795-73817）：
   // frameCounter += (|vx|+|vy|)×0.5（531 ×0.4），24 一循环 4 帧
@@ -1194,7 +1196,7 @@ export class Renderer {
           // 蜜蜂 210/211 倾斜 vx*0.2；其余（噬魂怪族等）朝目标/速度方向转头。
           // 全族统一转头会让黄蜂蜜蜂飞行中整只倒转=贴图翻转观感
           const id5 = e.vanillaId;
-          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235)) ctx.rotate(e.vx * 0.1);
+          if (id5 === 42 || id5 === 176 || id5 === 205 || (id5 >= 231 && id5 <= 235) || id5 === 61) ctx.rotate(e.vx * 0.1);  // 61 秃鹫 FindFrame rotation=vx*0.1(:74240)
           else if (id5 === 210 || id5 === 211) ctx.rotate(e.vx * 0.2);
           else ctx.rotate(e.visAngle);
         }

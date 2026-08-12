@@ -6,9 +6,9 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
-import { digTunnel } from './TileRunner';
+import { placeBuriedChest } from './BuriedChestsPass';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 /** 雨云 196（IslandGen :23062 num9=196——islandStyle 0/1/13 默认雨云主体；
@@ -313,100 +313,291 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
 }
 
 const SANDSTONE_BRICK = TILE_BY_KEY['v_151_sandstone_brick']!;
-const CHEST = TILE_BY_KEY['chest']!;
+const TORCH = TILE_BY_KEY['torch']!;
+const POT = TILE_BY_KEY['pot']!;
+const SMALL185 = TILE_BY_KEY['v_185_small_decos']!;
+const SAND = TILE_BY_KEY['sand']!;
+const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 
-/** 金字塔(pass 38 Pyramids 简化)：候选来自 DunesPass.runDunesPass（原版 DunesAndPyramidLocations
- *  WorldGen.cs:11570-11599 → GenVars.PyrX/PyrY，此处 = gs.pyramidSpots）；
- *  Pyramids pass(cs:15426-15489)再校验：x∈(300,w-300)、自 PyrY 下扫首个实心格 < worldSurface
- *  且为沙(cs:15455)、与既有金字塔距 ≥220(cs:15466)。gs.pyramidSpots 为空时回退旧自掷候选。 */
+/** Pyramids pass（1456 cs:15426-15534）1:1：候选全部来自 DunesPass（GenVars.PyrX/PyrY）。
+ *  校验链：x∈(300,w-300) → 地牢侧带回避（cs:15450-15452）→ 自 PyrY 下扫首个活性格
+ *  须 < worldSurface 且为沙 53 → 与**全部先序候选**（含已被拒者）距 ≥220 → k-- 后 Pyramid()。
+ *  无候选时直接无金字塔（原版路径如此；旧自掷兜底已删——非原版且白耗 RNG）。 */
 export function runPyramidPass(
   st: TileStore, rng: RNG, gs: GenState,
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
 ): void {
-  const SAND = TILE_BY_KEY['sand'] ?? 0;
-  let spots: Array<{ x: number; y: number }> = [];
-  if (gs.pyramidSpots.length > 0) {
-    // cs:15446-15489 消费 PyrX/PyrY：自候选 y 下扫到首个实心格，须在 worldSurface 上且为沙
-    for (const cand of gs.pyramidSpots) {
-      if (cand.x <= 300 || cand.x >= st.w - 300) continue;
-      if (spots.some((s) => Math.abs(s.x - cand.x) < 220)) continue; // cs:15466 间距 ≥220
-      let y = cand.y;
-      while (y < gs.worldSurface && !(st.inBounds(cand.x, y) && st.flags[st.idx(cand.x, y)])) y++;
-      if (y >= gs.worldSurface) continue;
-      if (st.type[st.idx(cand.x, y)] !== SAND) continue; // cs:15455 沙列门禁
-      spots.push({ x: cand.x, y: y - 1 }); // cs:15470 k--
+  const accepted: Array<{ x: number; y: number }> = [];
+  for (let idx = 0; idx < gs.pyramidSpots.length; idx++) {
+    const cand = gs.pyramidSpots[idx];
+    const num = cand.x;
+    if (num <= 300 || num >= st.w - 300) continue;
+    // 地牢侧回避（cs:15450-15452）：dungeonSide>Left 时须 num ≥ dungeonX+0.15w；
+    // dungeonSide<Right 时须 num ≤ dungeonX-0.15w（任一不过即拒）
+    const band = st.w * 0.15;
+    if (!(gs.dungeonSide > -1 || !(num < gs.dungeonLocation + band))) continue;
+    if (!(gs.dungeonSide < 1 || !(num > gs.dungeonLocation - band))) continue;
+    let k = cand.y;
+    while (k < st.h && st.inBounds(num, k) && !st.flags[st.idx(num, k)]) k++;
+    if (k >= gs.worldSurface) continue;
+    if (st.type[st.idx(num, k)] !== SAND) continue;   // cs:15455 沙列门禁
+    // 与全部先序候选（PyrX[0..idx-1]）取最小距，须 ≥220（cs:15460-15472）
+    let minDist = st.w;
+    for (let l = 0; l < idx; l++) minDist = Math.min(minDist, Math.abs(num - gs.pyramidSpots[l].x));
+    if (minDist >= 220) {
+      k--;
+      pyramid(st, rng, gs, chests, num, k, 75, 125, false);
+      accepted.push({ x: num, y: k });
     }
-  } else {
-    // 回退：旧自掷候选（沙丘 pass 未产出时的兜底，非原版路径）
-    const van = st.w / 4200;
-    for (let tries = 0; tries < 200 && spots.length < 2; tries++) {
-      const ox = rng.int(500, st.w - 501);
-      if (Math.abs(ox - gs.jungleX) < Math.floor(600 * van)) continue;
-      if (Math.abs(ox - st.w / 2) < 300) continue;
-      if (ox > gs.snowOriginLeft - 300 && ox < gs.snowOriginRight + 300) continue;
-      const px = ox + (rng.next() < 0.5 ? -1 : 1) * rng.int(0, 200);
-      let surf = -1;
-      for (let y = 0; y < gs.worldSurface; y++) {
-        if (st.flags[st.idx(px, y)]) { surf = y; break; }
-      }
-      if (surf < 0 || st.type[st.idx(px, surf)] !== SAND) continue;
-      if (spots.some((s) => Math.abs(s.x - px) < 220)) continue;
-      spots.push({ x: px, y: surf + 20 });
-    }
-  }
-  for (const spot of spots) {
-    const size = rng.int(14, 20); // 半宽
-    const baseY = Math.min(st.h - 260, spot.y + rng.int(60, 90));
-    if (spot.x < size + 5 || spot.x > st.w - size - 5) continue;
-    // 金字塔主体(逐层收窄)
-    for (let layer = 0; layer < size; layer++) {
-      const halfW = size - layer;
-      for (let x = spot.x - halfW; x <= spot.x + halfW; x++) {
-        for (let y = baseY - layer; y <= baseY - layer; y++) {
-          const i = st.idx(x, y);
-          st.type[i] = SANDSTONE_BRICK; st.flags[i] = 1;
-          st.wall[i] = 34; // SandstoneBrickUnsafe
-        }
-      }
-    }
-    // 内腔(倒阶梯掏空)
-    for (let layer = 2; layer < size - 2; layer++) {
-      const halfW = size - layer - 2;
-      for (let x = spot.x - halfW; x <= spot.x + halfW; x++) {
-        const i = st.idx(x, baseY - layer);
-        st.type[i] = 0; st.flags[i] = 0;
-      }
-    }
-    // 宝箱(内腔底部,cs L12417-12426):style1 金箱,战利品三选一
-    // (857 沙暴瓶/848 法老面具/934 飞毯)
-    const bx = spot.x, by = baseY - 2;
-    st.setTileSilent(bx, by, CHEST, 1 * 36, 0);
-    st.setTileSilent(bx + 1, by, CHEST, 1 * 36 + 18, 0);
-    st.setTileSilent(bx, by + 1, CHEST, 1 * 36, 18);
-    st.setTileSilent(bx + 1, by + 1, CHEST, 1 * 36 + 18, 18);
-    const lootKeys = ['vi_857_sandstorm_in_a_bottle', 'vi_848_PharaohsMask', 'vi_934_FlyingCarpet'];
-    const lootId = ITEM_BY_KEY[lootKeys[rng.int(0, 2)]];
-    chests.push({
-      x: bx, y: by,
-      items: lootId !== undefined ? [{ id: lootId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null),
-    });
   }
 }
 
-/** Wet Jungle(pass 43 简化):从丛林草 tile 起挖湿隧道(灌水) */
-export function runWetJunglePass(st: TileStore, rng: RNG, gs: GenState): void {
-  const core = (gs as any).jungleCoreX ?? gs.jungleX;
-  const JG = JUNGLE_GRASS;
-  const tunnels = Math.max(4, Math.floor(st.w / 500)); // C# (int)
-  let dug = 0;
-  for (let n = 0; n < tunnels * 60 && dug < tunnels; n++) {
-    const x = core + rng.int(-Math.floor(st.w * 0.12), Math.floor(st.w * 0.12));
-    const y = rng.int(gs.rockLevel, Math.max(gs.rockLevel + 1, st.h - 500));
-    if (!st.inBounds(x, y) || st.type[st.idx(x, y)] !== JG || !st.flags[st.idx(x, y)]) continue;
-    const dx = rng.int(-100, 100) * 0.01, dy = rng.int(-100, 100) * 0.01;
-    digTunnel(st, rng, x, y, dx, dy, rng.int(30, 120), rng.int(3, 6), true);
-    dug++;
+/** WorldGen.Pyramid（1456 cs:27816-28160）1:1：沙岩砖 151 主体 + 墙 34 +
+ *  入口阶梯掏空 → 之字形下行隧道（端点房间：金箱 1 号主件 848/857/934 三选一、
+ *  小堆 185×N、四支火把 91、整排瓦罐 28 style25-27）→ 长出口隧道。
+ *  RNG 消费顺序逐掷对齐（num2/num3/num5/num8/num11/num12/房间段/出口段）。 */
+function pyramid(
+  st: TileStore, rng: RNG, gs: GenState,
+  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
+  i: number, j: number, pyramidMinDepth: number, pyramidMaxDepth: number, noTunnel: boolean,
+): boolean {
+  const num = SANDSTONE_BRICK;   // 151
+  const wall = 34;               // SandstoneBrickUnsafe
+  const gi = st.idx(i, j);
+  if (st.flags[gi] && (st.type[gi] === num || st.wall[gi] === 151)) return false;
+  const active = (x: number, y: number) => st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
+  const deact = (x: number, y: number) => { if (st.inBounds(x, y)) st.flags[st.idx(x, y)] = 0; };
+  const setBrick = (x: number, y: number) => {
+    if (!st.inBounds(x, y)) return;
+    const k = st.idx(x, y);
+    st.type[k] = num; st.flags[k] = 1; st.half[k] = 0; st.slope[k] = 0;
+  };
+  const num2 = j - rng.int(0, 6);                       // j - Next(0,7)
+  const num3 = rng.int(9, 12);                          // Next(9,13)
+  let num4 = 1;
+  const num5 = j + rng.int(pyramidMinDepth, pyramidMaxDepth - 1); // Next(75,125)
+  // 主体：逐层加宽的实心沙岩砖塔（cs:27859-27868）
+  for (let k = num2; k < num5; k++) {
+    for (let l = i - num4; l < i + num4 - 1; l++) setBrick(l, k);
+    num4++;
   }
+  // 封闭区刷墙 34（cs:27870-27888：3×3 全砖）
+  for (let m = i - num4 - 5; m <= i + num4 + 5; m++) {
+    for (let n = j - 1; n <= num5 + 1; n++) {
+      let all = true;
+      for (let a = m - 1; a <= m + 1 && all; a++) {
+        for (let b = n - 1; b <= n + 1; b++) {
+          if (!st.inBounds(a, b) || !st.flags[st.idx(a, b)] || st.type[st.idx(a, b)] !== num) { all = false; break; }
+        }
+      }
+      if (all && st.inBounds(m, n)) st.wall[st.idx(m, n)] = wall;
+    }
+  }
+  let num8 = 1;
+  if (rng.int(0, 1) === 0) num8 = -1;                   // Next(2)==0 → -1
+  let num9 = i - num3 * num8;
+  let num10 = j + num3;
+  const num11 = rng.int(5, 7);                          // Next(5,8)
+  let flag2 = true;
+  let num12 = rng.int(20, 29);                          // Next(20,30)
+  // 入口掏空（cs:27903-27924）：自沙面斜向下切阶梯
+  while (flag2) {
+    flag2 = false;
+    let flag3 = false;
+    for (let n13 = num10; n13 <= num10 + num11; n13++) {
+      const n14 = num9;
+      if (active(n14, n13 - 1) && st.type[st.idx(n14, n13 - 1)] === SAND) flag3 = true;
+      if (active(n14, n13) && st.type[st.idx(n14, n13)] === num) {
+        if (st.inBounds(n14, n13 + 1)) st.wall[st.idx(n14, n13 + 1)] = wall;
+        if (st.inBounds(n14 + num8, n13)) st.wall[st.idx(n14 + num8, n13)] = wall;
+        deact(n14, n13);
+        flag2 = true;
+      }
+      if (flag3 && st.inBounds(n14, n13)) {
+        const k = st.idx(n14, n13);
+        st.type[k] = SAND; st.flags[k] = 1; st.half[k] = 0; st.slope[k] = 0;
+      }
+    }
+    num9 -= num8;
+  }
+  num9 = i - num3 * num8;
+  let flag4 = true;
+  let flag5 = false;
+  flag2 = true;
+  // 之字形下行隧道 + 端点房间（cs:27928-28046）
+  while (flag2) {
+    for (let n15 = num10; n15 <= num10 + num11; n15++) deact(num9, n15);
+    num9 += num8;
+    num10++;
+    num12--;
+    if (num10 >= num5 - num11 * 2) num12 = 10;
+    if (num12 <= 0) {
+      let flag6 = false;
+      if (!flag4 && !flag5) {
+        if (noTunnel) flag2 = false;
+        flag5 = true;
+        flag6 = true;
+        const num17 = rng.int(7, 12);                   // Next(7,13)
+        const num18 = rng.int(23, 27);                  // Next(23,28)
+        const num19 = num18;
+        const num20 = num9;
+        let cur = num18;
+        while (cur > 0) {
+          for (let n21 = num10 - num17 + num11; n21 <= num10 + num11; n21++) {
+            if (cur === num19 || cur === 1) {
+              if (n21 >= num10 - num17 + num11 + 2) deact(num9, n21);
+            } else if (cur === num19 - 1 || cur === 2 || cur === num19 - 2 || cur === 3) {
+              if (n21 >= num10 - num17 + num11 + 1) deact(num9, n21);
+            } else deact(num9, n21);
+          }
+          cur--;
+          num9 += num8;
+        }
+        const num22 = num9 - num8;
+        const num23 = Math.min(num22, num20);
+        const num24 = Math.max(num22, num20);
+        // 主件三选一（cs:28000-28016：0→848 法老面具 / 1→857 沙暴瓶 / 2→934 飞毯）
+        let num25 = rng.int(0, 2);
+        if (num25 === 0) num25 = rng.int(0, 2);
+        const lootKeys = ['vi_848_PharaohsMask', 'vi_857_sandstorm_in_a_bottle', 'vi_934_FlyingCarpet'];
+        const lootKey = lootKeys[num25];
+        placeBuriedChest(st, rng, gs, chests, Math.floor((num23 + num24) / 2), num10, {
+          style: 1, loot: lootKey,
+        });
+        const num26 = rng.int(1, 9);                    // Next(1,10)
+        for (let n27 = 0; n27 < num26; n27++) {
+          const i2 = rng.int(num23, num24);
+          const j2 = num10 + num11;
+          placeSmallPile(st, i2, j2, rng.int(16, 18), 1);   // Next(16,19)
+        }
+        placeTorch(st, num23 + 2, num10 - num17 + num11 + 1, rng.int(4, 6));   // Next(4,7)
+        placeTorch(st, num23 + 3, num10 - num17 + num11, rng.int(4, 6));
+        placeTorch(st, num24 - 2, num10 - num17 + num11 + 1, rng.int(4, 6));
+        placeTorch(st, num24 - 3, num10 - num17 + num11, rng.int(4, 6));
+        for (let n28 = num23; n28 <= num24; n28++) {
+          placePotRow(st, rng, n28, num10 + num11, rng.int(25, 27));   // Next(25,28)
+        }
+      }
+      if (flag4) {
+        flag4 = false;
+        num8 *= -1;
+        num12 = rng.int(15, 19);                        // Next(15,20)
+      } else if (flag6) {
+        num12 = rng.int(10, 14);                        // Next(10,15)
+      } else {
+        num8 *= -1;
+        num12 = rng.int(20, 39);                        // Next(20,40)
+      }
+    }
+    if (num10 >= num5 - num11) flag2 = false;
+  }
+  if (noTunnel) return true;
+  // 长出口隧道（cs:28052-28157）
+  let num29 = rng.int(100, 199);                        // Next(100,200)
+  let num30 = rng.int(500, 799);                        // Next(500,800)
+  flag2 = true;
+  const num31 = num11;
+  num12 = rng.int(10, 49);                              // Next(10,50)
+  if (num8 === 1) num9 -= num31;
+  const num32 = rng.int(5, 9);                          // Next(5,10)
+  while (flag2) {
+    num29--;
+    num30--;
+    num12--;
+    const lo = num9 - num32 - rng.int(0, 1);            // Next(0,2) 循环头各掷一次
+    const hi = num9 + num31 + num32 + rng.int(0, 1);
+    for (let n33 = lo; n33 <= hi; n33++) {
+      const n34 = num10;
+      if (n33 >= num9 && n33 <= num9 + num31) {
+        deact(n33, n34);
+      } else if (st.inBounds(n33, n34) && !DUNGEON_WALLS.has(st.wall[st.idx(n33, n34)])) {
+        setBrick(n33, n34);
+      }
+      if (n33 >= num9 - 1 && n33 <= num9 + 1 + num31 && st.inBounds(n33, n34)
+        && !DUNGEON_WALLS.has(st.wall[st.idx(n33, n34)])) {
+        st.wall[st.idx(n33, n34)] = wall;
+      }
+    }
+    num10++;
+    num9 += num8;
+    if (num29 <= 0) {
+      flag2 = false;
+      for (let n35 = num9 + 1; n35 <= num9 + num31 - 1; n35++) {
+        if (active(n35, num10)) flag2 = true;
+      }
+    }
+    if (num12 < 0) {
+      num12 = rng.int(10, 49);
+      num8 *= -1;
+    }
+    if (num30 <= 0) flag2 = false;
+  }
+  return true;
+}
+
+/** PlaceTile(91, style)（火把）：frameX=22*style */
+function placeTorch(st: TileStore, x: number, y: number, style: number): void {
+  if (!st.inBounds(x, y)) return;
+  st.setTileSilent(x, y, TORCH, style * 22, 0);
+}
+
+/** PlaceSmallPile（size1=2×1）：fx=pileStyle*36(+18)，fy=18；下方双列实心 + 双格净空 */
+function placeSmallPile(st: TileStore, x: number, y: number, pileStyle: number, pileSize: number): void {
+  if (pileSize !== 1) return;
+  const solidAt = (xx: number, yy: number) => st.inBounds(xx, yy) && st.flags[st.idx(xx, yy)] !== 0
+    && !!TILE_DEFS[st.type[st.idx(xx, yy)]]?.solid;
+  if (!solidAt(x, y + 1) || !solidAt(x + 1, y + 1)) return;
+  if (!st.inBounds(x, y) || st.flags[st.idx(x, y)]) return;
+  if (!st.inBounds(x + 1, y) || st.flags[st.idx(x + 1, y)]) return;
+  st.setTileSilent(x, y, SMALL185, pileStyle * 36, 18);
+  st.setTileSilent(x + 1, y, SMALL185, pileStyle * 36 + 18, 18);
+}
+
+/** PlacePot（1456 cs:54082）：style 由调用方掷；变体 Next(3) 仅在放置成功时消费 */
+function placePotRow(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      if (!st.inBounds(x + dx, y + dy) || st.flags[st.idx(x + dx, y + dy)]) return;
+    }
+    if (!st.inBounds(x + dx, y + 1)) return;
+    const k = st.idx(x + dx, y + 1);
+    if (!st.flags[k] || st.half[k] || st.slope[k] !== 0) return;
+    if (!TILE_DEFS[st.type[k]]?.solid) return;
+  }
+  const variant = rng.int(0, 2) * 36;
+  for (let dx = 0; dx < 2; dx++) {
+    for (let dy = -1; dy <= 0; dy++) {
+      st.setTileSilent(x + dx, y + dy, POT, dx * 18 + variant, (dy + 1) * 18 + style * 36);
+      st.half[st.idx(x + dx, y + dy)] = 0;
+    }
+  }
+}
+
+/** SurfaceWaterInJungle（1456 cs:15887-15909）1:1：逐列自 worldSurfaceLow 扫到
+ *  worldSurface-1，首个活性格若是丛林草 60 → 其上两格灌满水（liquidType 0=水）。
+ *  原版整 pass 零 RNG——旧实现误作"挖湿隧道"（digTunnel 消耗大量 RNG 且语义完全不符）。 */
+export function runWetJunglePass(st: TileStore, _rng: RNG, gs: GenState): void {
+  const h = st.h;
+  for (let i = 0; i < st.w; i++) {
+    for (let j = Math.floor(gs.worldSurfaceLow); j < gs.worldSurface - 1; j++) {
+      if (!st.inBounds(i, j)) break;
+      const k = st.idx(i, j);
+      if (!st.flags[k]) continue;
+      if (st.type[k] === JUNGLE_GRASS) {
+        // (i, j-1) 与 (i, j-2)：liquid=255、liquidType 0（原版编码 0=水 → 本仓库 1）
+        if (st.inBounds(i, j - 1)) {
+          const a = st.idx(i, j - 1);
+          st.liquid[a] = 255; st.liquidType[a] = 1;
+        }
+        if (st.inBounds(i, j - 2)) {
+          const b = st.idx(i, j - 2);
+          st.liquid[b] = 255; st.liquidType[b] = 1;
+        }
+      }
+      break; // 首个活性格即止（原版 break）
+    }
+  }
+  void h;
 }
 
 
