@@ -952,8 +952,9 @@ export class Game implements GameHooks {
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);
       if (code === 'Minus' || code === 'NumpadSubtract') this.setZoom(this.camera?.zoomTarget - 0.15);
-      // F11:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault 防浏览器全屏)
-      if (code === 'F11') this.openPixelArtImport();
+      // F2:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault)。
+      // 原 F11 与系统/浏览器全屏冲突,2026-08-12 改 F2
+      if (code === 'F2') this.openPixelArtImport();
       // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (code === 'KeyR') {
         const held = this.player?.inv.heldItem();
@@ -2460,7 +2461,9 @@ export class Game implements GameHooks {
         const l = (ent as Enemy).lightRGB;
         if (!l) continue;
         const e2 = ent as Enemy;
-        const tx2 = Math.floor(e2.cx / TILE), ty2 = Math.floor(e2.cy / TILE);
+        // 光源像素坐标覆盖（火把僵尸 590/591 手持火把偏移格；缺省=实体中心）
+        const at = (ent as Enemy).lightRGBAt;
+        const tx2 = Math.floor((at ? at.x : e2.cx) / TILE), ty2 = Math.floor((at ? at.y : e2.cy) / TILE);
         if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
       }
     }
@@ -9023,13 +9026,19 @@ export class Game implements GameHooks {
         if (w.moonEvent.kind !== 0) {
           const group = -w.moonEvent.kind;
           const need = REQUIRED_POINTS[w.moonEvent.waveNumber] ?? 0;
-          if (need > 0 && !w.clock.isDay && this.player.cy <= w.groundLevel * 16) {
+          // wave20 需求恒 0（lookup[20]=0）——原版仍显示（Main.cs:47006-47016 无 need>0 门）：
+          // 文案 arg1 换 Game.InvasionPoints（:47163）、进度条满格（:47167-47170）
+          if (!w.clock.isDay && this.player.cy <= w.groundLevel * 16) {
             for (const e of this.entities.enemies) {
               const en = e as unknown as { x: number; y: number; vanillaId?: number | null };
               if (en.vanillaId != null && MOON_EVENT_GROUP[en.vanillaId] === group
                 && Math.abs(en.x - this.player.cx) < 5000 && Math.abs(en.y - this.player.cy) < 5000) {
+                const pct = need > 0 ? Math.min(1, w.moonEvent.waveKills / need) : 1;
+                const label = need > 0 ? undefined : Lang.text('Game.WaveMessage',
+                  w.moonEvent.waveNumber,
+                  Lang.text('Game.InvasionPoints', Math.floor(w.moonEvent.waveKills)));
                 return { name: Lang.inter(w.moonEvent.kind === MOON_KIND_PUMPKIN ? 84 : 83),
-                  pct: Math.min(1, w.moonEvent.waveKills / need) };
+                  pct, label };
               }
             }
           }

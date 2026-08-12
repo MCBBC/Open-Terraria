@@ -679,7 +679,7 @@ export class Renderer {
     mineProgress = 0,
     flicker: FlickerClock | null = null,
     remotePlayers: Player[] = [],
-    invasion: { name: string; pct: number } | null = null,
+    invasion: { name: string; pct: number; label?: string } | null = null,
   ) {
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
@@ -4387,8 +4387,10 @@ export class Renderer {
     ctx.fillText('绿=主角 橙=中心 红=怪物 蓝=动物 黄=鼠标', 14, 136);
   }
 
-  /** 入侵进度条（原版进度已完成的百分比；Boss 条下方 30px） */
-  private drawInvasionBar(ctx: CanvasRenderingContext2D, viewW: number, invasion: { name: string; pct: number }) {
+  /** 入侵进度条（原版进度已完成的百分比；Boss 条下方 30px）。
+   *  label：整段文案覆盖（月事件 wave20 需求恒 0 → Main.cs:47163 用
+   *  Game.InvasionPoints 代替百分比、进度条满格 :47167-47170） */
+  private drawInvasionBar(ctx: CanvasRenderingContext2D, viewW: number, invasion: { name: string; pct: number; label?: string }) {
     const w = Math.min(560, viewW - 200);
     const x = (viewW - w) / 2, y = 28 + 30;
     ctx.fillStyle = 'rgba(0,0,0,0.55)';
@@ -4400,7 +4402,8 @@ export class Renderer {
     ctx.font = 'bold 13px sans-serif';
     ctx.fillStyle = '#FFF';
     ctx.textAlign = 'center';
-    ctx.fillText(`${invasion.name}  ${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`, viewW / 2, y + 15);
+    const pctTxt = `${Math.floor(Math.max(0, Math.min(1, invasion.pct)) * 100)}%`;
+    ctx.fillText(`${invasion.name}  ${invasion.label ?? pctTxt}`, viewW / 2, y + 15);
   }
 
   /** Boss 头像贴图索引（NPCID.Sets.BossHeadTextures，NPCID.cs:4861 全量对照）：

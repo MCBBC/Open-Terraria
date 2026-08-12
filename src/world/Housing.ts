@@ -68,6 +68,8 @@ export interface Room {
 const MAX_TILES = 750;
 const MAX_ROOM_SPAN = 100;
 const MIN_TILES = 60;
+/** TileID.Sets.HousingWalls（TileID.cs:377）：栅栏 11 / 高门 386 / 389 */
+const HOUSING_WALL_TILES = new Set([11, 386, 389]);
 
 // ================= ScoreRoom 静态表（WorldGen.cs:5773-5788 GetTileTypeCountByCategory） =================
 
@@ -234,7 +236,26 @@ export function checkRoom(st: TileStore, doorX: number, doorY: number): Room | n
   return null;
 }
 
-/** 泛洪填充一个房间（4 向；门/平台/实心为边界） */
+/** CheckRoom 宽松墙证据（WorldGen.cs:6150-6169）：横竖各 ±2 的 5×1 窗口内出现
+ *  房墙（Main.wallHouse）或 nactive 且 tileSolid/HousingWalls 的 tile。
+ *  flag=横向证据、flag2=纵向证据——两向都须命中，否则按漏墙处理（:6171-6184） */
+function hasLooseWallEvidence(st: TileStore, x: number, y: number): boolean {
+  // TileID.Sets.HousingWalls（TileID.cs:377）：11 栅栏 / 386 高门 / 389
+  const wallLike = (ii: number): boolean => {
+    if (WALL_HOUSE.has(st.wall[ii])) return true;
+    if (!st.flags[ii]) return false;
+    return tileSolidLike(st.type[ii]) || HOUSING_WALL_TILES.has(sheetOf(st.type[ii]));
+  };
+  let horiz = false, vert = false;
+  for (let k = -2; k <= 2; k++) {
+    if (st.inBounds(x + k, y) && wallLike(st.idx(x + k, y))) horiz = true;
+    if (st.inBounds(x, y + k) && wallLike(st.idx(x, y + k))) vert = true;
+  }
+  return horiz && vert;
+}
+
+/** 泛洪填充一个房间（8 向 = 原版 StartRoomCheck 邻居压栈 j,k∈-1..1，:6037-6043；
+ *  对角穿墙连通是原版语义；门/平台/实心为边界） */
 function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
   const tiles = new Set<number>();
   let hasTable = false, hasChair = false, hasLight = false, hasDoor = false;
@@ -248,16 +269,17 @@ function floodRoom(st: TileStore, sx: number, sy: number): Room | null {
     const x = i % st.w, y = (i / st.w) | 0;
     const t = st.type[i];
     const def = t ? TILE_DEFS[t] : undefined;
-    // 纯空气格必须背靠房墙（原版 CheckRoom 墙判定；家具格豁免。原版还允许
-    // "自身无墙但 3×1 邻接实心/房墙"的宽松分支——见 WorldGen.cs:6155-6169，未移植）
-    if (!st.flags[i] && !WALL_HOUSE.has(st.wall[i])) return null;
+    // 纯空气格必须背靠房墙（原版 CheckRoom 墙判定；家具格豁免）。宽松分支
+    // （WorldGen.cs:6150-6185）：自身无房墙时，横/竖各 ±2 的 5×1 窗口内出现
+    // 房墙或实心/HousingWalls tile（nactive）即算有墙——横竖两向须都有证据
+    if (!st.flags[i] && !WALL_HOUSE.has(st.wall[i]) && !hasLooseWallEvidence(st, x, y)) return null;
     if (st.flags[i] && def) {
       if (isDoorType(t)) { hasDoor = true; }
       else if (def.light) hasLight = true;
       else if (countsAsTable(def.key, def.vanilla?.sheet)) hasTable = true;
       else if (countsAsChair(def.key, def.vanilla?.sheet)) hasChair = true;
     }
-    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]] as const) {
+    for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const) {
       const nx = x + dx, ny = y + dy;
       if (nx < 1 || ny < 1 || nx >= st.w - 1 || ny >= st.h - 1) return null; // 漏到世界边
       const ni = st.idx(nx, ny);

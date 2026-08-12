@@ -47,6 +47,7 @@ import {
   resolveDrops, rollCoins, rollHeartsAndStars, rollBossPotionsAndHearts,
   dropVelocity, npcValueOf, type NpcDropCtx,
 } from '../drops/NpcDrops';
+import { npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimmer';
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
@@ -315,6 +316,9 @@ export class Enemy extends Entity {
   lavaWet = false;
   onFireT = 0;
   onFireDoT = 0;
+  /** 微光浸入进度（≈shimmerTransparency ×100，NPC.cs:92468-92483：+0.01/t，
+   *  90t 到 0.9 阈值触发 NPC.GetShimmered；离池 -0.01/t） */
+  shimmerT = 0;
   /** 武器浸剂 debuff（R2，近战命中施加；单位=秒）
    *  DoT 对应 NPC.cs UpdateNPC_BuffApplyDOTs（lifeRegen/2 = HP/s）：
    *  poison lifeRegen-12→6HP/s(:92590)、venom -60→30(:92706)、cursed(onFire2) -48→24(:92690) */
@@ -347,6 +351,9 @@ export class Enemy extends Entity {
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
+  /** 点光像素坐标覆盖（缺省=实体中心）：光源不在中心格的原版语义位——
+   *  火把僵尸 590/591 手持火把（NPC.cs:57309-57366，±22/±36px 偏移格） */
+  lightRGBAt: { x: number; y: number } | null = null;
   lai0 = 0;              // localAI 语义位（萤火虫：闪烁间隔计时）
   lai1 = 0;              // localAI 语义位（萤火虫：发光剩余帧）
   /** 原版 justHit 语义（本 tick 内受过击） */
@@ -425,6 +432,7 @@ export class Enemy extends Entity {
     if (this.iframes > 0) this.iframes--;
     if (this.justHitT > 0) this.justHitT--;
     this.lightRGB = null; // 点光由 AI 每帧重写（不残留上一帧状态）
+    this.lightRGBAt = null;
     if (this.hpBarT > 0) this.hpBarT--;
     if (this.whipTagT > 0) this.whipTagT--;
     if (this.whipProcT > 0) this.whipProcT--;
@@ -461,6 +469,11 @@ export class Enemy extends Entity {
           }
           if (this.vanillaId === 379 || this.vanillaId === 380) cultistArcherWake(this);
           this.fighterAI(game, p);
+          // 火把僵尸 590/591 手持火把发光（NPC.cs:57309-57366 AI_003 内 type 段）：
+          //  590 按朝向取 (Center±22 / y+6) 格，火把格与相邻格均无液体才点亮；
+          //  591 持械变体 !wet 即亮，偏移 ±36/±28（专家变体，尘需 ai[2]==0 门）。
+          //  色 (1, 0.95, 0.8) = 与手持火把同色；尘 6 号 1/30 概率
+          if (this.vanillaId === 590 || this.vanillaId === 591) this.torchZombieLight(game);
           // AI_003 火星尾段（bossAI_martian.ts）：军官 383 带盾无敌/补盾、工程师 386 放炮塔
           if (this.vanillaId === 383 || this.vanillaId === 386) martianFighterExtras(this, game, p);
           break;                                                        // AI_003 战士族（原版通用核）
@@ -634,6 +647,18 @@ export class Enemy extends Entity {
     }
     // 入水熄灭 onFire（NPC.cs:94284 TryRemovingWaterPerishableEffects:水湿(非岩浆)→DelBuff 24）
     if (this.inWater && !this.lavaWet) this.onFireT = 0;
+    // 微光接触（NPC.cs:94268-94274）：WetCollision 盒命中微光 → shimmerWet +
+    // TryAddingRepeatedBuff(353,100)；buff 353 → shimmering（:93313-93321）→
+    // shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered。离池衰减
+    // （:92484-92500）视觉侧未接（GAP），此处只保留转化触发计时
+    if (this.vanillaId !== null && !this.def.boss) {
+      if (liquidCollision(game.world.store, this.x, this.y, this.w, this.h, 4)) {
+        this.shimmerT += 1;
+        if (this.shimmerT > 90) this.npcGetShimmered(game);
+      } else if (this.shimmerT > 0) {
+        this.shimmerT -= 1;
+      }
+    }
     // onFire DoT（NPC.cs:92619:lifeRegen-8 = 4 HP/s,无防御结算）+ 火尘粒子（:92187）
     if (this.onFireT > 0) {
       this.onFireT -= dt;
@@ -947,6 +972,37 @@ export class Enemy extends Entity {
     this.vx = 0;
     moveAndCollide(this, game.world, this.vx, this.vy);
     this.hp = this.maxHp; // immortal：血量恒满（cs:14535 lifeMax=1000 + immortal）
+  }
+
+  /** 火把僵尸 590/591 手持火把点光（NPC.cs:57309-57366，AI_003 内 type 段 1:1）。
+   *  590：光源格 = floor((Center.x + dir 偏移)/16)，y 取 floor((y+6)/16)；火把格与
+   *  相邻格（dir 侧）液体均须为 0。591（持械专家变体）：!wet 即亮，偏移 ±36/±28、
+   *  y+24。色均 (1, 0.95, 0.8)；尘 6 号 1/30（591 另有 ai[2]==0 门）。 */
+  private torchZombieLight(game: GameHooks) {
+    const st = game.world.store;
+    if (this.vanillaId === 590) {
+      const ty = Math.floor((this.y + 6) / TILE);
+      const left = this.facing < 0;           // 原版 spriteDirection < 0
+      const tx = Math.floor((this.cx + (left ? -22 : 14)) / TILE);
+      const near = left ? tx + 1 : tx - 1;
+      if (!st.inBounds(tx, ty) || !st.inBounds(near, ty)) return;
+      if (st.liquid[st.idx(tx, ty)] !== 0 || st.liquid[st.idx(near, ty)] !== 0) return;
+      this.lightRGB = [1, 0.95, 0.8];
+      this.lightRGBAt = { x: tx * TILE, y: ty * TILE };
+      if (Math.random() * 30 < 1) {
+        game.spawnParticles(this.cx + (left ? -22 : 14), this.y + 6, '#C87830', 1, 0.3, { life: 20 });
+      }
+      return;
+    }
+    // 591：wet 门（原版 Collision.WetCollision ≈ 中心格 liquid>20 近似）+ ai[2]==0 尘门
+    const tx2 = Math.floor(this.cx / TILE), ty2 = Math.floor(this.cy / TILE);
+    if (st.inBounds(tx2, ty2) && st.liquid[st.idx(tx2, ty2)] > 20) return;
+    const left2 = this.facing < 0;
+    this.lightRGB = [1, 0.95, 0.8];
+    this.lightRGBAt = { x: this.cx + (left2 ? -36 : 28), y: this.y + 24 };
+    if (this.ai2 === 0 && Math.random() * 30 < 1) {
+      game.spawnParticles(this.cx + (left2 ? -36 : 28), this.y + 24, '#C87830', 1, 0.3, { life: 20 });
+    }
   }
 
   private fighterAI(game: GameHooks, player: Player | null) {    const st = game.world.store;
@@ -1293,6 +1349,35 @@ export class Enemy extends Entity {
   /** 外部 AI 文件的 Transform 入口（骑手 390 失坐骑 → 382,cs:36291） */
   transformTo(id: number, st: GameHooks['world']['store']): boolean {
     return this.tryTransformTo(id, st);
+  }
+
+  /** NPC.GetShimmered（NPC.cs:92502-92584）子集：雕像产怪直接消散（:92504-92519）→
+   *  ShimmerTransformToNPC 则 Transform（:92521-92533）→ ShimmerTransformToItem 则
+   *  掉微光化物品后消散（:92535-92560）。表来自 tools/extract-shimmer.mjs
+   *  （114 NPC 对 + 15 NPC→物品）。Boss 豁免（VANILLA_BOSS_IDS 外的 mini 部件走
+   *  上层表语义）；城镇变体分支（:92560-92573）在 TownNPC 侧实现 */
+  private npcGetShimmered(game: GameHooks): void {
+    if (this.vanillaId === null) return;
+    this.shimmerT = 0;
+    game.spawnParticles(this.cx, this.cy, '#BFE8FF', 10, 1.4, { life: 30, grav: -0.04 });
+    if (this.spawnedFromStatue) {           // SpawnedFromStatue → active=false（:92508-92514）
+      this.dead = true;
+      return;
+    }
+    const toNpc = npcShimmerTransformTo(this.vanillaId);
+    if (toNpc >= 0 && toNpc !== this.vanillaId) {
+      this.transformTo(toNpc, game.world.store);
+      return;
+    }
+    const toItem = npcShimmerTransformToItem(this.vanillaId);
+    if (toItem >= 0) {
+      const key = VANILLA_ITEM_KEY_BY_ID[toItem];
+      if (key) {
+        const d = game.spawnDrop(this.cx, this.cy, key, 1);
+        if (d) { d.shimmered = true; d.shimmerTime = 1; }  // 微光化物品上浮（:92540-92545）
+      }
+      this.dead = true;                    // noSpawnCycle + active=false（:92557-92559）
+    }
   }
 
   /** AI_040 爬墙蜘蛛族 1:1（NPC.cs:29784-30022）：无重力、贴背景墙表面爬行。

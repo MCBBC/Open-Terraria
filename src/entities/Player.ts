@@ -18,6 +18,7 @@ import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
+import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
 // 对齐原版体感：跳跃/小坡绝不受伤（原版约 25 格起伤）；落水另行豁免
@@ -59,6 +60,13 @@ export class Player extends Entity {
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
   inHoney = false;
+  /** 微光浸入（原版 shimmerWet，Player.cs:27420-27424：Collision.shimmer 盒命中） */
+  inShimmer = false;
+  /** 微光化态（buff 353，Player.cs:11381-11388）：frozen 封输入 + fallStart 重置 +
+   *  受击免疫（Hurt :37591-37595 直接 0）+ 慢沉（:24117-24119 ×0.9） */
+  shimmering = false;
+  /** 微光滞留 tick（TryToShimmerUnstuck :28378：钳 0-7200，shimmering +1/否则 -10） */
+  timeShimmering = 0;
   // 气口：5 个气泡，共 23.33 秒（原版参数），每颗 ≈4.67 秒
   static readonly BREATH_BUBBLES = 5;
   static readonly BREATH_SECONDS = 23.33;
@@ -568,7 +576,9 @@ export class Player extends Entity {
       Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE),
     )];
     const wasInWater = this.inWater;
-    this.inWater = liq > 100;
+    // wet 判定排除微光（Collision.cs:1418 WetCollision 只认 !lava && !shimmer）
+    this.inWater = liq > 100 && world.store.liquidType[
+      world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE))] !== 4;
     // 入水瞬间：水花声（出水不响）
     if (this.inWater && !wasInWater) game.playSfx('splash');
     const centerIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + this.h - 4) / TILE));
@@ -581,6 +591,22 @@ export class Player extends Entity {
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
     this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
+    // 微光浸入（Player.cs:27420-27434）：盒命中微光 → shimmerWet；本地玩家非免疫且
+    // 脚格是微光且在地狱层之上 → AddBuff(353, 60)（每 tick 刷新 = 浸着恒微光化）。
+    // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内微光不生效
+    // （:11391-11397 position.Y/16 > UnderworldLayer → DelBuff）
+    this.inShimmer = world.store.liquidType[centerIdx] === 4 && liq > 30;
+    this.shimmering = this.inShimmer && this.y / TILE < world.lavaLine;
+    // TryToShimmerUnstuck（:28377-28389）：timeShimmering 钳 0-7200（shimmering +1/
+    // 否则 -10）；≥3600 或 ≥1200 且有任意输入 → ShimmerUnstuck 传送脱困
+    this.timeShimmering = Math.max(0, Math.min(7200,
+      this.timeShimmering + (this.shimmering ? 1 : -10)));
+    if (this.shimmering || this.timeShimmering > 0) {
+      const anyInput = this.inputX !== 0 || this.inputJump || this.inputUp || this.inputDown;
+      if (this.timeShimmering >= 3600 || (this.timeShimmering >= 1200 && anyInput)) {
+        this.shimmerUnstuck(game, world);
+      }
+    }
     const headIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 8) / TILE), // 鼻子位置（头顶下方半格）
     );
     const headLiq = world.store.liquid[headIdx];
@@ -728,6 +754,21 @@ export class Player extends Entity {
         this.vy *= 0.7;
       }
       this.fallStartY = null; // 绳上不计摔伤
+    } else
+    // 微光物理（Player.cs:24115-24127 else if (shimmerWet || shimmering) 分支）
+    if (this.inShimmer && !this.shimmering) {
+      // 非微光化态浸微光：gravity 0.15（水 0.3 的一半）+ jumpHeight 23/jumpSpeed 5.51
+      // （:24219-24223）——更轻、可大跳离池；微光不计摔伤
+      if (this.inputJump) this.vy = Math.max(this.vy - 0.62, -5.5);
+      this.vy += GRAVITY * 0.15;
+      this.vy = Math.max(-5.5, Math.min(3.0, this.vy));
+      this.fallStartY = null;
+    } else if (this.shimmering) {
+      // buff 353（:11381-11388）：frozen 封输入 + fallStart 重置（免摔伤）；
+      // 物理 :24117-24119 gravity/maxFall ×0.9（近似正常慢沉，原地等脱困传送）
+      this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
+      this.vy = Math.min(this.vy + GRAVITY * 0.7 * 0.9, MAX_FALL_SPEED * 0.9);
+      this.fallStartY = null;
     } else
     // 跳跃 / 游泳
     if (this.inWater) {
@@ -1090,7 +1131,7 @@ export class Player extends Entity {
     if (--this.sharpenedCd <= 0) {
       this.sharpenedCd = 60;
       const stt = game.world.store;
-      const tid = TILE_BY_KEY['v_3198_sharpening_station'] ?? -1;
+      const tid = TILE_BY_KEY['v_377_sharpening_station'] ?? -1;
       if (tid > 0) {
         const tx0 = Math.floor(this.cx / TILE) - 20, tx1 = tx0 + 40;
         const ty0 = Math.floor(this.cy / TILE) - 12, ty1 = ty0 + 25;
@@ -1320,6 +1361,9 @@ export class Player extends Entity {
   /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked）。
    *  knockback=false 用于窒息等环境伤害（只掉血不击退） */
   damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
+    // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
+    // 本仓 damage 以 false 表示完全免伤——Boss 专属弹幕 371 等不可闪避源未移植）
+    if (this.shimmering) return false;
     if (this.iframes > 0 || this.dead) return false;
     const eq = this.equipStats;
     // 黑带/忍者大师装备 10% 闪避（Player.Hurt :9772 blackBelt 分支）
@@ -1346,6 +1390,28 @@ export class Player extends Entity {
       this.vy = -3;
     }
     return true;
+  }
+
+  /** ShimmerUnstuck（Player.cs:28394-28428）：timeShimmering 清零，找最近无微光
+   *  落点传送（TryFindingShimmerFreeSpot :28414-28440，落点 = spot+(0,-2)px、
+   *  velocity=(0,0.0001)），清微光化态；找不到则保持原位等下一轮（原版同样仅
+   *  StartUnstuck 辅助）。传送附带短暂无敌帧（原版 Teleport style 12 的 immune
+   *  语义近似——落点邻敌免秒杀） */
+  private shimmerUnstuck(game: GameHooks, world: import('../world/World').World): void {
+    this.timeShimmering = 0;
+    const st = world.store;
+    const spot = findShimmerFreeSpot(st, Math.floor(this.cx / TILE), Math.floor(this.y / TILE));
+    if (!spot) return;
+    const p = shimmerTeleportPos(spot);
+    this.x = p.x;
+    this.y = p.y;
+    this.vx = 0;
+    this.vy = 0.0001;
+    this.shimmering = false;
+    this.inShimmer = false;
+    this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
+    game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
+    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
   }
 
   /** ApplyTouchDamage（Player.cs:28507）1:1:直接伤害(护甲结算)→灼烧/流血 buff→

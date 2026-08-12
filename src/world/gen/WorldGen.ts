@@ -151,6 +151,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
+import { parseSeed } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
@@ -228,6 +229,9 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   // 世界种子 int——DesertHive 的 FastRandom(seed).WithModifier(57005) 主种子
   // （DesertHive.cs:253，与 genRand 完全独立的第二条随机流）
   gs.seed = translateSeed(cfg.seedText);
+  // 彩蛋种子旗标（SeedEasterEggs.parseSeed）——特殊种子 pass 分支消费（GemPasses 等）；
+  // 金标种子 flags 恒空集 → 掷骰流位置不受影响
+  gs.seedFlags = parseSeed(cfg.seedText).flags;
   // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。

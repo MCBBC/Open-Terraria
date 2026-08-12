@@ -10,6 +10,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES } from '../data/tiles';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
+import { isNpcTownShimmerable } from '../stats/Shimmer';
 import { newNpcName } from '../i18n/RandomText';
 
 export interface NpcHome { x: number; y: number; }
@@ -42,6 +43,9 @@ export class TownNPC extends Entity {
   /** 正在与玩家对话（原版 AI_007 :53721：talkNPC==本体 → ai[0]=0 站定、面向玩家） */
   talking = false;
   talkCooldown = 0;
+  /** 微光化变体（NPCID.Sets.ShimmerTownTransform 入微光 → NPC.cs:92560-92573
+   *  ai[0]=25 传送离场回归；本仓 = 标记 + 回家，变体贴图/对话差分登记 GAP） */
+  shimmered = false;
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -86,6 +90,24 @@ export class TownNPC extends Entity {
     this.animT++;
     if (this.iframes > 0) this.iframes--;
     const world = game.world;
+
+    // 微光化城镇变体（NPC.GetShimmered :92560-92573：ShimmerTownTransform → ai[0]=25
+    // 微光传送离场，回归后为微光变体 IsShimmerVariant）。本仓净效果：入微光即标记
+    // 微光化并传送回家（原版 AI_007_TownEntities_Shimmer_TeleportToLandingSpot 的
+    // "离场→稍后回归"由入驻轮天然承担）。变体贴图/对话差分未接（GAP）
+    if (!this.shimmered && isNpcTownShimmerable(this.vanillaId)) {
+      const si = world.store.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+      if (world.store.liquid[si] > 30 && world.store.liquidType[si] === 4) {
+        this.shimmered = true;
+        game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
+        game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+        if (this.home) {
+          this.x = this.home.x * TILE + 8 - this.w / 2;
+          this.y = this.home.y * TILE - this.h;
+          this.vx = 0; this.vy = 0;
+        }
+      }
+    }
 
     // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc
     if (this.bound) {

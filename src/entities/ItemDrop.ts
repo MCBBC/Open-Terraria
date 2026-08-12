@@ -5,6 +5,9 @@ import { GRAVITY, MAX_FALL_SPEED, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../c
 import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS } from '../data/items';
 import type { Player } from './Player';
+import {
+  canShimmerItem, coinLuckAmount, getTransformToItem, internalIdOfVanilla, vanillaIdOfItem,
+} from '../stats/Shimmer';
 
 export class ItemDrop extends Entity {
   w = 12; h = 12;
@@ -17,6 +20,13 @@ export class ItemDrop extends Entity {
   /** 心(58)/星(184) 是 pickup 类物品（ItemID.Sets.IsAPickup, ItemID.cs:248）：
    *  碰触即回血 20 / 回蓝 100 并消失，永不进背包（Player.PickupItem :34610-34630） */
   pickup?: 'heart' | 'star';
+  // ---- 微光（WorldItem.cs:25-27/434/486-558/806-840/1781-1931）----
+  /** 浸在微光中（Collision.shimmer 盒命中，:434/:944） */
+  shimmerWet = false;
+  /** 已被微光转化（上浮漂浮、暂不可拾取，:34466 速度 <0.2 才可拾） */
+  shimmered = false;
+  /** 微光浸入进度 0-1（:27/:806-840 +0.01/t，>0.9 触发 GetShimmered；离池衰减） */
+  shimmerTime = 0;
 
   constructor(x: number, y: number, itemId: number, stack = 1, vx = 0, vy = -2) {
     super();
@@ -50,8 +60,9 @@ export class ItemDrop extends Entity {
       const inGrabRange =
         this.x < player.x + player.w + GRAB_RANGE && this.x + this.w > player.x - GRAB_RANGE &&
         this.y < player.y + player.h + GRAB_RANGE && this.y + this.h > player.y - GRAB_RANGE;
-      if (touching) {
-        // 心/星 pickup：直接回复并消失，不进背包（原版拾取即 Heal(20)/mana+100+ClearOut）
+      // 微光化物品上浮中不可拾（GrabItems Player.cs:34466：shimmered 且速度 ≥0.2 跳过）
+      const grabbable = !(this.shimmered && Math.hypot(this.vx, this.vy) >= 0.2);
+      if (touching && grabbable) {
         if (this.pickup) {
           if (this.pickup === 'heart') {
             player.hp = Math.min(player.maxHp, player.hp + 20);
@@ -106,17 +117,84 @@ export class ItemDrop extends Entity {
       this.x += this.vx;
       this.y += this.vy;
     } else {
-      this.vy = Math.min(this.vy + GRAVITY * 0.7, MAX_FALL_SPEED);
-      this.vx *= 0.96;
+      // 液体采样（身体中心格；本仓液体编码 1水 2岩浆 3蜂蜜 4微光）
+      const st0 = game.world.store;
+      const ci = st0.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
+      this.shimmerWet = st0.liquidType[ci] === 4 && st0.liquid[ci] > 30;
+      if (this.shimmered) {
+        // 已微光化：无重力上浮（:486-511 gravity=0，vy -0.05/t 钳 -4）
+        this.vy = Math.max(this.vy - 0.05, -4);
+        this.vx *= 0.95;
+      } else {
+        // 微光浸入重力（:434-441：0.065 / maxFall 4，比水 0.08/5 更缓）
+        const g = this.shimmerWet ? GRAVITY * 0.7 * (0.065 / 0.3) : GRAVITY * 0.7;
+        const mf = this.shimmerWet ? 4 : MAX_FALL_SPEED;
+        this.vy = Math.min(this.vy + g, mf);
+        this.vx *= 0.96;
+      }
       moveAndCollide(this, game.world, this.vx, this.vy);
     }
-    // 入水小水花声（掉落物轻，音量小）
+    // 入水小水花声（掉落物轻，音量小）。wet 判定排除岩浆/微光（Collision.cs:1418
+    // WetCollision 只认 !lava && !shimmer）；微光入池走专属 Shimmer 音（:19 style 4）
     const st = game.world.store;
     const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
+    const liqType = st.liquidType[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
     const wasWater = this.inWater;
-    this.inWater = li > 80;
+    this.inWater = li > 80 && (liqType === 1 || liqType === 3);
     if (this.inWater && !wasWater && this.vy > 1.2) game.playSfx('splash', 0.35);
+    if (this.shimmerWet && !this.shimmered) this.updateShimmer(game);
     void ITEM_DEFS;
+  }
+
+  /** WorldItem.Shimmering（:806-840）：脚上方格是微光且可转化 → 进度 +0.01/t，
+   *  >0.9 触发 GetShimmered；不在微光中则进度衰减。转化触发在本地玩家侧语义
+   *  （netMode!=1 门对单人恒真） */
+  private updateShimmer(game: GameHooks): void {
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE);
+    // :810-812 采样 (Center.X/16, position.Y/16 - 1)——物品顶上一格
+    const ty = Math.floor(this.y / TILE) - 1;
+    const vid = vanillaIdOfItem(this.itemId);
+    const inShimmer = st.inBounds(tx, ty)
+      && st.liquid[st.idx(tx, ty)] > 0 && st.liquidType[st.idx(tx, ty)] === 4;
+    if (inShimmer && canShimmerItem(vid)) {
+      this.shimmerTime += 0.01;
+      if (this.shimmerTime > 0.9) {
+        this.shimmerTime = 0.9;
+        this.getShimmered(game);
+      }
+    } else if (this.shimmerTime > 0) {
+      this.shimmerTime = Math.max(0, this.shimmerTime - 0.01);
+    }
+  }
+
+  /** WorldItem.GetShimmered（:1781-1931）本仓子集：钱币 → coinLuck（Luck.ts 数值位
+   *  接通）；ShimmerTransformToItem → 换为目标物品原堆叠。decraft/makeNPC/特例 4986、
+   *  560 登记未移植（src/stats/Shimmer.ts GAP 清单） */
+  private getShimmered(game: GameHooks): void {
+    const vid = vanillaIdOfItem(this.itemId);
+    const target = getTransformToItem(vid);
+    if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
+      // 钱币 → 微光化币（:1791-1810）：面额放大后 AddCoinLuck（距离 <1000px 才累计，
+      // LuckState.addCoinLuck 1:1），物品消失
+      const amount = coinLuckAmount(vid, this.stack);
+      const player = (game as unknown as { player: Player }).player;
+      const dist = Math.hypot(player.cx - this.cx, player.cy - this.cy);
+      player.luckState.addCoinLuck(dist, amount);
+      this.stack = 0;
+      this.dead = true;
+      return;
+    }
+    if (target > 0) {
+      const iid = internalIdOfVanilla(target);
+      if (iid >= 0) {
+        this.itemId = iid;       // SetDefaults(target) 原堆叠保留（:1813-1817）
+        this.shimmered = true;    // 上浮漂浮
+        this.shimmerTime = 1;
+        this.vx *= 0.1; this.vy *= 0.1;
+        game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      }
+    }
   }
 
   inWater = false;
