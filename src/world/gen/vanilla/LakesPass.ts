@@ -176,7 +176,9 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (inDesert) continue;
+      console.log(`lakeJS ${x},${y} peek=${rng.vanilla.peek()}`);
       sonOfLakinater(st, rng, gs, x, y, 1);
+      console.log(`lakeDoneJS peek=${rng.vanilla.peek()}`);
       lakeX.push(x);
       break;
     }

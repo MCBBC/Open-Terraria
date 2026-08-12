@@ -82,7 +82,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (pillarSeqJS < 40) {
         let w3 = '';
         for (let y4 = 1045; y4 <= 1060; y4++) for (let x4 = 400; x4 <= 420; x4++) { const k4 = st.idx(x4, y4); w3 += String(st.flags[k4] ? V(st.type[k4]) : 0).padStart(3, ' '); }
-        pillarWinsJS[pillarSeqJS] = w3;
+        pillarWinsJS[pillarSeqJS] = `${p1v},${p2v} s=${p3v} vy=${p4v} | ` + w3;
       }
       pillarSeqJS++;
     }
@@ -103,7 +103,8 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       });
     }
     {
-      const d1 = x + rng.int(-10, 9), d2 = y + rng.int(-10, 10), d3 = rng.int(5, 14), d4 = rng.int(5, 9), d5 = rng.int(-1, 2), d6 = rng.int(-1, 2);
+      // Next(-10,10)×2 → 闭区间映射 int(-10,9)（曾误 int(-10,10)=Next(-10,11) 竖向差 1）
+      const d1 = x + rng.int(-10, 9), d2 = y + rng.int(-10, 9), d3 = rng.int(5, 14), d4 = rng.int(5, 9), d5 = rng.int(-1, 2), d6 = rng.int(-1, 2);
       if (pillarSeqJS === 27) console.log(`r27JS dig1 ${d1},${d2} s=${d3} st=${d4} v=${d5},${d6} pre=${rng.vanilla.peek()}`);
       tileRunner(st, rng, gs, d1, d2, { strength: d3, steps: d4, type: -2, speedX: d5, speedY: d6 });
       if (pillarSeqJS === 27) {
@@ -114,7 +115,7 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (pillarSeqJS === 27) console.log(`r27JS dig1Done post=${rng.vanilla.peek()}`);
     }
     if (rng.next() * 3 < 1) {
-      tileRunner(st, rng, gs, x + rng.int(-10, 9), y + rng.int(-10, 10), {
+      tileRunner(st, rng, gs, x + rng.int(-10, 9), y + rng.int(-10, 9), {
         strength: rng.int(10, 29), steps: rng.int(10, 19), type: -2,
         speedX: rng.int(-1, 2), speedY: rng.int(-1, 2),
       });

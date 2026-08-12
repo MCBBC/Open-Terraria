@@ -1165,7 +1165,7 @@ export class Renderer {
     const ty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
     const now = this._liquidNow; // 与液体双 pass 同帧同时刻
     this.waterfalls.findWaterfalls(world.store, tx0, ty0, tx1, ty1, Math.floor(now / 16.67));
-    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now, this.waterStyle);
+    this.waterfalls.draw(this.ctx, this.atlas, world.store, world.groundLevel, now);  // 水体瀑布恒 Waterfall_0(:1173)
     // 岩浆瀑布发光(AddLight :1075-1080:r≈0.55×0.4 脉动,g=r×0.3,b=r×0.1 橙光;
     // mouseTextColor 闪烁项取定值近似)——非岩浆瀑布 litCells 为空,零开销
     const lit = this.waterfalls.litCells;

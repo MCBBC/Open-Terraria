@@ -29,6 +29,8 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（读档路径回传;旧包缺省 0） */
   altarCount?: number;
+  /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转；旧包缺省={}） */
+  seedFlags?: Record<string, boolean>;
   /** 天气快照（读档路径回传;旧包缺省=晴） */
   weather?: WeatherSave;
   /** 图鉴三桶（读档路径回传;旧包缺省=空） */

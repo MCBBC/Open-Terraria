@@ -20,9 +20,37 @@ import { options } from './core/Options';
 import { VuiDemoState } from './vui/states/VuiDemoState';
 import { createFlow } from './mainFlow';
 import type { FlowHandle } from './mainFlow';
+import { downloadDebugReport } from './debug/DebugReport';
 
 const root = document.getElementById('game-root')!;
 const ui = new UI(root);
+
+// ---- 调试报告基础设施：错误 ring（F5 报告 errors 段唯一数据源）----
+// kind: 0=pageerror 1=unhandledrejection 2=console.error；stack 取首行
+interface SwErrorRecord { t: number; kind: number; msg: string; stack: string | null }
+const ERR_RING_CAP = 50;
+function pushSwError(kind: number, msg: unknown, stack: string | null | undefined) {
+  const w = window as unknown as { __swErrors?: SwErrorRecord[] };
+  if (!Array.isArray(w.__swErrors)) w.__swErrors = [];
+  w.__swErrors.push({
+    t: Date.now(), kind,
+    msg: String(msg).slice(0, 500),
+    stack: stack ? stack.split('\n')[0].slice(0, 300) : null,
+  });
+  if (w.__swErrors.length > ERR_RING_CAP) w.__swErrors.shift();
+}
+window.addEventListener('error', (e) => pushSwError(0, e.message, e.error instanceof Error ? e.error.stack : null));
+window.addEventListener('unhandledrejection', (e) =>
+  pushSwError(1, e.reason instanceof Error ? `${e.reason.name}: ${e.reason.message}` : e.reason, e.reason instanceof Error ? e.reason.stack : null));
+{
+  const origError = console.error;
+  console.error = (...args: unknown[]) => {
+    const err = args.find((a): a is Error => a instanceof Error);
+    pushSwError(2, args.map((a) => (a instanceof Error ? `${a.name}: ${a.message}` : String(a))).join(' '), err ? err.stack : null);
+    origError(...args);
+  };
+}
+
 ui.onBestiary = () => flow.openBestiary(); // 背包面板图鉴按钮（原版 BestiaryMenuButton）
 const audio = new AudioSystem();
 let atlas: SpriteAtlas | null = null;
@@ -106,10 +134,15 @@ window.addEventListener('keydown', (e) => {
       game.world.exploredVersion++; // 使迷雾缓存失效重建
       ui.toast('已消除全图迷雾');
       break;
-    case 'F5':
+    case 'F5': {
+      // 一键调试报告（机器优先 JSON）：标注系统实现保留，仅解绑 F5（可另配键）
       e.preventDefault();
-      toggleAnnotate();
+      const r = downloadDebugReport(game, {
+        playTimeMs: (flow as FlowHandle & { playStartNow: number }).playStartNow,
+      });
+      ui.toast(r.triggered ? `调试报告已生成：${r.filename}` : '调试报告已生成（浏览器拦截下载，可从 __swDebugReport 取）');
       break;
+    }
     case 'F6':
       e.preventDefault();
       flow.doSave();

@@ -89,6 +89,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function enterGame(g: Game) {
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
+    // HMR 双实例检测（F5 调试报告 instance 段）：每次挂载计数 +1，>1 即模块分叉
+    (window as unknown as { __swInstanceCount?: number }).__swInstanceCount =
+      ((window as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0) + 1;
     // E2E/控制台调试:tile key → 内部 id 反查(测试脚本放置图块用)
     (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
       (TILE_BY_KEY as Record<string, number>)[k] ?? -1;

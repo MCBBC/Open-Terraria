@@ -110,14 +110,15 @@ export class WaterfallRenderer {
     }
   }
 
-  /** 绘制（DrawWaterfall 行 211-803 的主体路径；style 固定 0=水） */
-  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number, waterStyle = 0) {
+  /** 绘制（DrawWaterfall 行 211-803 的主体路径）。
+   *  ★水体瀑布贴图恒 Waterfall_0——原版水通道 DrawWaterfall(Style=0)
+   *  （WaterfallManager.Draw :1173）,case 0 的 num12=Style 即 0:群系水色只作用于
+   *  水体(LiquidRenderer 液色),不换瀑布贴图。曾误读为 num12=waterStyle → 腐化区
+   *  套用 Waterfall_2(灰色迪斯科喷泉贴图)="水瀑布颜色错误"报告的根因 */
+  draw(ctx: CanvasRenderingContext2D, atlas: SpriteAtlas | null, st: TileStore, groundLevel: number, nowMs: number) {
     if (!atlas || this.falls.length === 0) return;
     this.litCells.length = 0; // 岩浆光照格每帧重建(防无岩浆帧残留旧光)
     const tex = SHEET.map((s) => atlas.ensureVImage(s) ?? null);
-    // 水类型走群系贴图（WaterfallManager :528 case 0 → num12 = Style = waterStyle）
-    const waterTex = atlas.ensureVImage(`vanilla/Waterfall_${Math.max(0, Math.min(13, waterStyle))}.png`);
-    if (waterTex) tex[0] = waterTex;
     if (!tex[0] && !tex[1] && !tex[2]) return;
     // 帧动画：水 3 tick/帧、岩浆蜂蜜 7 tick/帧（1 tick ≈ 16.67ms）
     const regular = Math.floor(nowMs / 50) % 16;

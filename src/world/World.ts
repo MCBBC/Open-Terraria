@@ -52,6 +52,9 @@ export class World {
   store: TileStore;
   /** 本帧 SceneMetrics 快照（Game 每帧写；Enemy 判 zoneGraveyard 等只读用） */
   scene: import('./SceneMetrics').SceneFlags | null = null;
+  /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转用。
+   *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入恒 {}） */
+  seedFlags: import('./gen/SeedEasterEggs').SeedFlags = {};
   name: string;
   seed: number;
   spawnX = 0; spawnY = 0;
@@ -185,6 +188,7 @@ export class World {
     if (p.clock.bloodMoon !== undefined) w.clock.bloodMoon = p.clock.bloodMoon;
     if (p.clock.eclipse !== undefined) w.clock.eclipse = p.clock.eclipse;
     if (p.clock.moonPhase !== undefined) w.clock.moonPhase = p.clock.moonPhase;
+    if (p.seedFlags) w.seedFlags = p.seedFlags;
     if (p.moonType !== undefined) w.moonType = p.moonType;
     if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
       w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }

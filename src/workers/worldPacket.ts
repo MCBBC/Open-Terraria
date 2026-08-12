@@ -31,6 +31,7 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    seedFlags: world.seedFlags,
     weather: world.weatherToSave(), bestiary: world.bestiary.toSave(),
     pendingTownNpcs: world.pendingTownNpcs,
     chests: world.chests,
