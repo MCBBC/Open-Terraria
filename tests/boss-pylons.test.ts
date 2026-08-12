@@ -44,7 +44,7 @@ interface HostSpy extends OldOnesArmyHost {
 }
 function makeHost(over: Partial<OldOnesArmyHost> = {}): HostSpy {
   const spy: HostSpy = {
-    spawned: [], drops: [], messages: [], npcCounts: new Map(), hasCrystal: true,
+    spawned: [], drops: [], messages: [], npcCounts: new Map(), hasCrystal: false,
     broadcast: (text, r, g, b) => { spy.messages.push({ text, r, g, b }); },
     spawnNpc: (id, x, y) => { spy.spawned.push({ id, x, y }); },
     countNpcs: (id) => spy.npcCounts.get(id) ?? 0,
@@ -63,24 +63,26 @@ describe('蜥蜴祭坛 237 → 石巨人 245（NPC.cs:81284-81330）', () => {
   const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar'];
   it('祭坛 tile/电池物品注册在册（237/1293）', () => {
     expect(ALTAR).toBeTruthy();
-    expect(ITEM_BY_KEY['vi_1293_lihzahrd_power_cell']).toBeGreaterThanOrEqual(0);
-    expect(VANILLA_ITEM_KEY_BY_ID[1293]).toBe('vi_1293_lihzahrd_power_cell');
+    // 电池 1293 走 vanilla.json 自动注册（vi_<id>_<PascalKey>），Game 按原版 id 寻物
+    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[1293]]).toBeGreaterThanOrEqual(0);
+    expect(VANILLA_ITEM_KEY_BY_ID[1293]).toBe('vi_1293_LihzahrdPowerCell');
   });
 
   it('落位：±20 格找顶中格(frameX18/frameY0)，y=(上+上+下)/3 向上偏置', () => {
     const w = makeWorld();
     const st = w.store;
-    // 祭坛 3×2：顶中格 (100,50)；上方最近实心 49，下方最近实心 51 → gy=(49+49+51)/3=49
+    // 祭坛 3×2 锚点 (100,50)：frameX18/frameY0 的顶中格在 (101,50)；
+    // 中列上方最近实心 49、下方最近实心 51 → gy=(49+49+51)/3=49
     for (let dx = 0; dx < 3; dx++) {
       for (let dy = 0; dy < 2; dy++) st.setTile(100 + dx, 50 + dy, ALTAR, dx * 18, dy * 18);
     }
-    for (let y = 40; y < 50; y++) st.setTile(100, y, 1);
-    for (let y = 51; y <= 70; y++) st.setTile(100, y, 1);
-    const spot = golemSpawnFromAltar(st, ALTAR, 100, 52);
+    for (let y = 40; y < 50; y++) st.setTile(101, y, 1);
+    for (let y = 51; y <= 70; y++) st.setTile(101, y, 1);
+    const spot = golemSpawnFromAltar(st, ALTAR, 101, 52);
     expect(spot).not.toBeNull();
-    expect(spot!.x).toBe(100 * TILE + 8);    // NewNPC x = 祭坛列中心（:81325）
+    expect(spot!.x).toBe(101 * TILE + 8);    // NewNPC x = 顶中格列中心（:81325）
     expect(spot!.y).toBe(49 * TILE);          // gy（:81324）
-    expect(spot!.altarX).toBe(100);
+    expect(spot!.altarX).toBe(101);
     expect(spot!.altarY).toBe(50);
   });
 
@@ -106,10 +108,12 @@ describe('蜥蜴祭坛 237 → 石巨人 245（NPC.cs:81284-81330）', () => {
 describe('永恒水晶座 466 → 旧日军团（Player.cs:31930-31977 + DD2Event.cs）', () => {
   it('水晶座/水晶/魔力/奖牌物品注册在册（466/3828/3822/3817）', () => {
     expect(TILE_BY_KEY['v_466_elder_cystal_stand']).toBeTruthy();
-    expect(ITEM_BY_KEY['vi_3828_eternia_crystal']).toBeGreaterThanOrEqual(0);
-    expect(VANILLA_ITEM_KEY_BY_ID[3828]).toBe('vi_3828_eternia_crystal');
-    expect(VANILLA_ITEM_KEY_BY_ID[3822]).toBe('vi_3822_etherian_mana');
-    expect(VANILLA_ITEM_KEY_BY_ID[3817]).toBe('vi_3817_defender_medal');
+    // 三件均由 vanilla.json 自动注册循环建条目（items.ts 尾部 _vim 循环）
+    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3828]]).toBeGreaterThanOrEqual(0);
+    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3822]]).toBeGreaterThanOrEqual(0);
+    expect(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3817]]).toBeGreaterThanOrEqual(0);
+    expect(VANILLA_ITEM_KEY_BY_ID[3828]).toBe('vi_3828_DD2ElderCrystal');
+    expect(VANILLA_ITEM_KEY_BY_ID[3817]).toBe('vi_3817_DefenderMedal');
   });
 
   it('num28 底行回推（:31938-31946）：frameY 0/18/36/54 → +3/+2/+1/+0', () => {
@@ -231,7 +235,9 @@ describe('永恒水晶座 466 → 旧日军团（Player.cs:31930-31977 + DD2Even
     st.waveNumber = 5;
     st.timeLeftUntilSpawningBegins = 0;
     st.waveKills = 139;
-    const r = checkProgress(st, 552, false, null);
+    // :1121-1131——wave5 kills>=139 后仅黑暗魔法师（564/565）计 1 分
+    expect(checkProgress(st, 552, false, null).victoryScene).toBe(false);
+    const r = checkProgress(st, 564, false, null);
     expect(r.victoryScene).toBe(true);
     expect(st.wonThisRun).toBe(true);
     expect(checkProgress(st, 552, false, null).waveComplete).toBeNull();
@@ -257,6 +263,7 @@ describe('永恒水晶座 466 → 旧日军团（Player.cs:31930-31977 + DD2Even
     const st = newOldOnesArmyState();
     startInvasion(st, w);
     const host = makeHost();
+    host.hasCrystal = true;   // 水晶 548 在场（UpdateTime :218 门禁）
     for (let i = 0; i < 299; i++) {
       expect(updateTime(st, host, null).waveAnnounce).toBeNull();
     }
@@ -272,6 +279,7 @@ describe('永恒水晶座 466 → 旧日军团（Player.cs:31930-31977 + DD2Even
     const st = newOldOnesArmyState();
     st.timeLeftUntilSpawningBegins = 1800;
     const host = makeHost();
+    host.hasCrystal = true;   // 水晶落座（IsStandActive :1783-1795）
     expect(isStandActive(host, 6, 7)).toBe(true);   // 水晶 (100,120) 距座中心 (104,120) <36px
     expect(requestToSkipWaitTime(st, host, 6, 7)).toBe(true);
     expect(st.timeLeftUntilSpawningBegins).toBe(60);
@@ -322,7 +330,7 @@ describe('永恒水晶座 466 → 旧日军团（Player.cs:31930-31977 + DD2Even
       { x: 1000, y: 2000, w: 20, h: 40 },
       { x: 3000, y: 2200, w: 30, h: 60 },
     ]);
-    expect(st.arena).toEqual({ x: 200, y: 1200, w: 2830, h: 2060 });
+    expect(st.arena).toEqual({ x: 200, y: 1200, w: 3630, h: 1860 });
     expect(st.arenaCooldown).toBe(60);
   });
 
@@ -401,28 +409,29 @@ describe('传送晶塔 597（TeleportPylonsSystem.cs）', () => {
   });
 
   it('群系要求（DoesPylonAcceptTeleportation :254-312）', () => {
-    const w = makeWorld(300, 400);
+    const w = makeWorld(1000, 400);   // 宽世界：x=500 距两缘 >380（Beach/纯净共用的边缘门）
     w.groundLevel = 50;
     const pure = { ...EMPTY_SCENE };
-    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 100, 40)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 500, 40)).toBe(true);
     // 纯净塔：地下拒绝（:264-266）/ 群系 tile 达标拒绝（:270-273）/ 世界边缘 380 拒绝（:269）
-    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 100, 60)).toBe(false);
-    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, { ...EMPTY_SCENE, zoneJungle: true }, 100, 40)).toBe(false);
-    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 100, 40 + 380)).toBe(false);
-    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 299, 40)).toBe(false);
-    // 丛林/神圣/雪原/沙漠塔 = Zone 判定（:278-296）
-    expect(pylonAcceptsTeleportation(PYLON.Jungle, w, { ...EMPTY_SCENE, zoneJungle: true }, 100, 100)).toBe(true);
-    expect(pylonAcceptsTeleportation(PYLON.Jungle, w, pure, 100, 100)).toBe(false);
-    expect(pylonAcceptsTeleportation(PYLON.Hallow, w, { ...EMPTY_SCENE, zoneHallow: true }, 100, 100)).toBe(true);
-    expect(pylonAcceptsTeleportation(PYLON.Snow, w, { ...EMPTY_SCENE, zoneSnow: true }, 100, 100)).toBe(true);
-    expect(pylonAcceptsTeleportation(PYLON.Desert, w, { ...EMPTY_SCENE, zoneDesert: true }, 100, 100)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 500, 60)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, { ...EMPTY_SCENE, zoneJungle: true }, 500, 40)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 990, 40)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.SurfacePurity, w, pure, 10, 40)).toBe(false);
+    // 丛林/神圣/雪原/沙漠/发光蘑菇塔 = Zone 判定（:278-296）
+    expect(pylonAcceptsTeleportation(PYLON.Jungle, w, { ...EMPTY_SCENE, zoneJungle: true }, 500, 100)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Jungle, w, pure, 500, 100)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.Hallow, w, { ...EMPTY_SCENE, zoneHallow: true }, 500, 100)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Snow, w, { ...EMPTY_SCENE, zoneSnow: true }, 500, 100)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Desert, w, { ...EMPTY_SCENE, zoneDesert: true }, 500, 100)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.GlowingMushroom, w, { ...EMPTY_SCENE, zoneGlowshroom: true }, 500, 100)).toBe(true);
     // Victory 恒真（:300）；地下塔 worldSurface 含（:298）
-    expect(pylonAcceptsTeleportation(PYLON.Victory, w, pure, 100, 300)).toBe(true);
-    expect(pylonAcceptsTeleportation(PYLON.Underground, w, pure, 100, 50)).toBe(true);
-    expect(pylonAcceptsTeleportation(PYLON.Underground, w, pure, 100, 49)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.Victory, w, pure, 500, 300)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Underground, w, pure, 500, 50)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Underground, w, pure, 500, 49)).toBe(false);
     // 地狱塔 = UnderworldLayer（maxTilesY-200 = 200，:302）
-    expect(pylonAcceptsTeleportation(PYLON.Underworld, w, pure, 100, 195)).toBe(false);
-    expect(pylonAcceptsTeleportation(PYLON.Underworld, w, pure, 100, 250)).toBe(true);
+    expect(pylonAcceptsTeleportation(PYLON.Underworld, w, pure, 500, 195)).toBe(false);
+    expect(pylonAcceptsTeleportation(PYLON.Underworld, w, pure, 500, 250)).toBe(true);
   });
 
   it('门禁五连（HandleTeleportRequest :100-205）：失败文案逐档', () => {
@@ -476,10 +485,10 @@ describe('传送晶塔 597（TeleportPylonsSystem.cs）', () => {
       { x: 300, y: 100, type: 8 },
     ];
     const f = mapFocusRect(pylons, { x: 100, y: 60 }, 1920, 1080);
-    // 盒 = (80,40)-(320,120) → 中心 (200,80)；scale = min(1880/240, 1040/80) = 13
+    // 盒 = (80,40)-(320,120) → 中心 (200,80)；scale = min((1920-40)/240, (1080-40)/80)
     expect(f.cx).toBe(200);
     expect(f.cy).toBe(80);
-    expect(f.scale).toBeCloseTo(13, 5);
+    expect(f.scale).toBeCloseTo(1880 / 240, 5);
   });
 });
 

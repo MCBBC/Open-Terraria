@@ -459,12 +459,21 @@ export class Game implements GameHooks {
   private netProjLast = new Map<number, { x: number; y: number; t: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
 
+  /** 快照广播轮转游标（review C4：固定遍历序 + >=24 break 会让第 25 个起的实体
+   *  永远拿不到快照（入侵/血月 >24 同屏移动怪时后段集体饿死被误清）。游标本轮
+   *  断在哪、下轮从哪继续，公平轮转） */
+  private netNpcCursor = 0;
+  private netProjCursor = 0;
+
   /** 房主：NPC 快照广播（15Hz，变化驱动 + 2s 兜底；对齐原版 msg23 netUpdate 思想） */
   private netNpcBroadcast() {
     const net = this.net!;
     const snaps: NpcSnap[] = [];
-    for (const ent of this.entities.enemies) {
-      const e = ent as Enemy;
+    const list = this.entities.enemies;
+    const n = list.length;
+    let examined = 0;
+    for (; examined < n && snaps.length < 24; examined++) {
+      const e = list[(this.netNpcCursor + examined) % n] as Enemy;
       if (e.netPuppet) continue;
       let last = this.netNpcLast.get(e.id);
       if (!last) {
@@ -480,10 +489,10 @@ export class Game implements GameHooks {
         hp: e.hp, maxHp: e.maxHp, animT: e.animT,
         flags: e.def.boss ? 1 : 0,
       });
-      if (snaps.length >= 24) break; // 防超帧，余量下轮
     }
-    // 清理已消亡敌人的差分基准
-    if (snaps.length < 24) {
+    this.netNpcCursor = (this.netNpcCursor + examined) % Math.max(1, n);
+    // 清理已消亡敌人的差分基准（游标轮转下无条件跑——成本与主循环同阶）
+    {
       const alive = new Set<number>();
       for (const ent of this.entities.enemies) alive.add((ent as Enemy).id);
       for (const id of this.netNpcLast.keys()) if (!alive.has(id)) this.netNpcLast.delete(id);
@@ -495,8 +504,11 @@ export class Game implements GameHooks {
   private netProjBroadcast() {
     const net = this.net!;
     const snaps: ProjSnap[] = [];
-    for (const ent of this.entities.projectiles) {
-      const p = ent as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
+    const list = this.entities.projectiles;
+    const n = list.length;
+    let examined = 0;
+    for (; examined < n && snaps.length < 24; examined++) {
+      const p = list[(this.netProjCursor + examined) % n] as Entity & { projId?: number; damage?: number; kind?: string; color?: string; life?: number };
       if (p.netPuppet || p.dead) continue;
       let last = this.netProjLast.get(p.id);
       if (!last) {
@@ -513,8 +525,8 @@ export class Game implements GameHooks {
       else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
       if (kind < 0) continue; // 未知弹幕类不同步（渲染缺类）
       snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
-      if (snaps.length >= 24) break;
     }
+    this.netProjCursor = (this.netProjCursor + examined) % Math.max(1, n);
     net.sendProjectileBatch(snaps);
   }
 
@@ -546,12 +558,11 @@ export class Game implements GameHooks {
         // 原生键退普通构造
         const vm = s.key.match(/^v_(\d+)$/);
         const e = vm ? Enemy.fromVanilla(parseInt(vm[1], 10), s.x, s.y) : new Enemy(s.key, s.x, s.y);
-        if (!e) return;
+        if (!e) continue; // review C2：未知 vanillaId（数据表缺口）只丢这一条，勿中止整批（否则同帧其余傀儡饿死被误清）
         e.x = s.x; e.y = s.y; // 快照坐标=左上（Enemy 构造按中心偏移，直接覆写）
         e.netPuppet = true;
         e.netId = s.netId;
         e.hp = s.hp; e.maxHp = s.maxHp;
-        e.netAx = s.x; e.netAy = s.y; e.netIt = 1; // P3.2：新建傀儡直接落位（无插值起点）
         this.entities.add(e, 'enemies');
         if (e.def.boss) this.boss = e;
         pup = { e, seen: this.tickCount };
@@ -8953,7 +8964,8 @@ export class Game implements GameHooks {
       }
       // 控制位 → 输入（原版：远端玩家以同步的 control* 跑 Player.Update）。
       // P1.1 AOI 配套：>1.5s 无 msg13（超出对端视野被过滤/断流）→ 冻结输入，
-      // 防陈旧控制位驱动的"幽灵行走"（静止心跳 1s，正常通路不会触发）
+      // 防陈旧控制位驱动的"幽灵行走"（静止心跳 1s，正常通路不会触发）。
+      // review C5：useItem 一并冻结——否则断流后代理原地无限空挥
       const stale = performance.now() - rp.lastFresh > 1500;
       proxy.inputX = stale ? 0 : (rp.left ? -1 : 0) + (rp.right ? 1 : 0);
       proxy.inputJump = !stale && rp.jump;
@@ -8961,11 +8973,18 @@ export class Game implements GameHooks {
       proxy.inputUp = !stale && rp.up;
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
-      // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）
-      try {
-        const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
-        if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
-      } catch { /* 保持默认外观 */ }
+      // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）。
+      // review C10：仅在外观串变化时解析（msg4 才变）——60TPS×每玩家 JSON.parse 纯浪费
+      {
+        const meta = proxy as unknown as { __netAppearance?: string };
+        if (meta.__netAppearance !== rp.appearance) {
+          meta.__netAppearance = rp.appearance;
+          try {
+            const parsed = JSON.parse(rp.appearance) as Record<string, unknown>;
+            if (parsed && typeof parsed.hair === 'number') proxy.appearance = parsed as never;
+          } catch { /* 保持默认外观 */ }
+        }
+      }
       // 物品/装备（msg5）：拷入代理背包——手持物 holdStyle/挥舞动画/盔甲纸娃娃渲染依赖。
       // 数组直接共享（代理只读不写，远端真权威在各自客户端）
       const bag = net.remoteItems.get(slot);
@@ -8977,7 +8996,7 @@ export class Game implements GameHooks {
       }
       // useItem 位 → 远端挥舞动画（原版：远端客户端以 controlUseItem 跑 ItemCheck 设置
       // itemAnimation；此处派生等价 swing——时长按本地同公式，攻速配饰差异忽略）
-      if (rp.useItem) {
+      if (!stale && rp.useItem) {
         const heldId = proxy.inv.heldItem()?.id ?? -1;
         if (!proxy.swingNet || proxy.swingNet.item !== heldId || proxy.swingNet.t <= 0) {
           proxy.swingNet = { t: this.remoteSwingDur(heldId), dur: this.remoteSwingDur(heldId), item: heldId };

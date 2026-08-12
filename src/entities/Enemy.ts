@@ -133,6 +133,45 @@ export class Enemy extends Entity {
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
   prevX = 0; prevY = 0;
 
+  // ===================== 原版 npc.oldPos/oldRot 历史缓冲（DrawNPC 拖尾族） =====================
+  // 原版 NPC.oldPos/oldRot 容量 10，UpdateNPC 头部整体后移一格 → oldPos[i] = i tick 前
+  // 的左上角坐标。Main.cs DrawNPC 拖尾族读 0..9：蠕虫族 125-131（:24660 间隔 2 取 5 份）、
+  // 火月怪 419（:24638 取 0..6 七份渐隐 + 帧行 5-7 循环）。
+  // 定长预分配（性能审计"每帧分配热点"清单），零逐 tick 分配；联机傀儡路径同样推入
+  // （fixedUpdate 头部早退分支内单独调用）——傀儡只有快照推进但拖尾同样需要历史。
+  private static readonly HIST_N = 10;
+  private histX = new Float64Array(Enemy.HIST_N);
+  private histY = new Float64Array(Enemy.HIST_N);
+  private histRot = new Float64Array(Enemy.HIST_N);
+  private histHead = 0;   // 最新条目下标
+  private histCount = 0;  // 已填条数（<10 时拖尾按实际深度截断）
+
+  /** fixedUpdate 尾部推入当前快照（位置=左上角，旋转=visAngle≈npc.rotation） */
+  private pushHistory(): void {
+    this.histHead = (this.histHead + 1) % Enemy.HIST_N;
+    if (this.histCount < Enemy.HIST_N) this.histCount++;
+    this.histX[this.histHead] = this.x;
+    this.histY[this.histHead] = this.y;
+    this.histRot[this.histHead] = this.visAngle;
+  }
+
+  /** i tick 前的历史条数（拖尾最大可用深度） */
+  historyDepth(): number { return this.histCount; }
+  /** i tick 前的左上角 X（i 超出已填深度时取最旧条目） */
+  histXAt(i: number): number {
+    const d = Math.min(Math.max(0, i), this.histCount - 1);
+    return this.histX[(this.histHead - d + Enemy.HIST_N * 2) % Enemy.HIST_N];
+  }
+  histYAt(i: number): number {
+    const d = Math.min(Math.max(0, i), this.histCount - 1);
+    return this.histY[(this.histHead - d + Enemy.HIST_N * 2) % Enemy.HIST_N];
+  }
+  /** i tick 前的自转角（原版 oldRot[i]） */
+  histRotAt(i: number): number {
+    const d = Math.min(Math.max(0, i), this.histCount - 1);
+    return this.histRot[(this.histHead - d + Enemy.HIST_N * 2) % Enemy.HIST_N];
+  }
+
   /** AI_006 头部（L18645 通用常数 maxSpd=8 accel=0.07；穿墙直行；段链跟随） */
   private wormAI(game: GameHooks, player: Player | null) {
     // 玩家死亡（:51532-51539）：TargetClosest 落空 → EncourageDespawn(300) 缓慢消散
@@ -372,6 +411,7 @@ export class Enemy extends Entity {
       this.onGround = Math.abs(this.vy) < 0.6;
       if (Math.abs(this.vx) > 0.05) this.walkCycleT += Math.abs(this.vx);
       if (this.iframes > 0) this.iframes--;
+      this.pushHistory();   // 傀儡无本地 AI 但拖尾渲染同样需要历史位置
       return;
     }
     this.aiT++;
@@ -666,6 +706,7 @@ export class Enemy extends Entity {
         }
       }
     }
+    this.pushHistory();   // 原版 npc.oldPos/oldRot（DrawNPC 拖尾族 419/125-131 读）
   }
 
   /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7228-7235）：timeLeft 封顶 + 置鼓励旗 */
@@ -1044,10 +1085,16 @@ export class Enemy extends Entity {
       if (this.ai3 === 0) this.ai3 = 30 + Math.floor(Math.random() * 870);
       if (this.vy === 0 && this.facing === (player.cx > this.cx ? 1 : -1)
         && this.ai2 >= this.ai3 * (this.hp / this.maxHp) + 30 && this.canSeePlayer(st, player)) {
-        this.shootDart(game, this.cx, this.cy,
-          player.cx - this.cx + (Math.random() * 80 - 40),
-          player.cy - this.cy + (Math.random() * 80 - 40), 15, 32, 257);
+        // 枪口（cs:59323/:59340）：基点 (cx + 10×朝向, y + 20) 瞄准（含 ±40 散布），
+        // 出生点再沿弹向 +vel×3（速 15 → 前移 45px）
+        const baseX = this.cx + 10 * this.facing, baseY = this.y + 20;
+        const bdx = player.cx - baseX + (Math.random() * 80 - 40);
+        const bdy = player.cy - baseY + (Math.random() * 80 - 40);
+        const bd = Math.hypot(bdx, bdy) || 1;
+        this.shootDart(game, baseX + (bdx / bd) * 45, baseY + (bdy / bd) * 45,
+          bdx, bdy, 15, 32, 257);
         this.ai2 = 0; this.ai3 = 0;
+        return;
       }
     }
     // ---- 岩石巨人 631 投石（cs:56733-56760）：320px 内 + 视线 → 100 帧前摇，

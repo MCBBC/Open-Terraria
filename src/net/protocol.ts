@@ -2,7 +2,7 @@
 // 帧格式对齐原版：[u16 len][u8 msgId][payload...]，小端，包上限 65535B。
 // 消息 ID 尽量沿用原版 MessageID 编号（Hello=1/SLOT=3/WorldData=7/TileSection=10/
 // PlayerSpawn=12/PlayerControls=13/TileManipulation=17/SetTime=18/NetModules=82/Ping=154）；
-// 编码字段为本仓库 v1 简化集（protoVer 门禁，protoVer=1）。
+// 编码字段为本仓库简化集（protoVer 门禁，当前 v4——见 PROTO_VER 注释）。
 
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
@@ -46,7 +46,8 @@ export const enum Msg {
                        //    eflags.bit0=含 key 全量(u32 netId + u16 codeId + str key)
                        //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
-                       //   {u16 count, [u32 netId, str key, f32 x,y,vx,vy, f32 rot]}
+                       //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
+                       //   （kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；注释曾误写 rot）
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
@@ -192,11 +193,12 @@ export class FrameParser {
       }
     } finally {
       this._draining = false;
-    }
-    // 回调同步消费完 subarray 视图后才压缩缓冲（期间禁止 append，见上）
-    if (p > 0) {
-      if (p < this.len) this.buf.copyWithin(0, p, this.len);
-      this.len -= p;
+      // 压缩必须在 finally：回调抛错时 p 已前进，若不归位会从 0 重放同一批帧
+      // → 同一异常反复抛出，连接永久毒化（review C3）
+      if (p > 0) {
+        if (p < this.len) this.buf.copyWithin(0, p, this.len);
+        this.len -= p;
+      }
     }
     return any || this.len > 0;
   }

@@ -189,7 +189,7 @@ export class UI {
     (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
   }
 
-  private slotContent(where: SlotWhere, i: number): { id: number; stack: number } | null {
+  private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean } | null {
     if (where === 'inv') return this.game.player.inv.slots[i];
     if (where === 'armor') return this.game.player.inv.armor[i];
     if (where === 'dye') return this.game.player.inv.dye[i];
@@ -1464,14 +1464,26 @@ export class UI {
       row.appendChild(el('div', 'sw-lbl', '预设'));
       this.loadoutBtns = [];
       for (let k = 0; k < 3; k++) {
-        const b = el('button', 'sw-btn');
-        b.textContent = `${k + 1}`;
-        b.style.cssText = 'margin:0; width:34px; padding:4px 0; font-size:13px;';
+        // 原版 DrawLoadoutButtons（Main.cs:41395-41431）：Extra[259] 3×3 图集——
+        // 行 = loadout 配色，列 = 常态 0 / 选中 1 / 悬停 2（OurFavoriteColor 染色帧）
+        const b = el('button', 'sw-btn sw-loadout-btn');
+        b.dataset.lo = String(k);
+        b.style.cssText = 'margin:0; width:32px; height:32px; padding:0; border:none; flex:none;'
+          + 'background:url(sprites/vanilla/Extra_259.png); background-size:300% 300%;'
+          + 'image-rendering:pixelated; cursor:pointer;';
+        const frame = (col: number) => { b.style.backgroundPosition = `${col * 50}% ${k * 50}%`; };
+        frame(0);
+        b.addEventListener('mouseenter', () => { if (this.game.player.inv.currentLoadout !== k) frame(2); });
+        b.addEventListener('mouseleave', () => { if (this.game.player.inv.currentLoadout !== k) frame(0); });
         b.addEventListener('mousedown', (e) => {
           e.stopPropagation();
           if (this.game.player.inv.currentLoadout === k) return;
           this.game.player.inv.trySwitchingLoadout(k);
           this.game.sfx.play('menuTick', 0.6); // SoundID 12（TrySwitchingLoadout）
+          // 切套白闪（GetColorByLoadout :2554-2559：Remap(dt,0,30,0.5,0)³→白）
+          this.invPanel.classList.remove('sw-loadout-flash');
+          void this.invPanel.offsetWidth;
+          this.invPanel.classList.add('sw-loadout-flash');
           this.refreshAll();
         });
         row.appendChild(b);
@@ -1511,15 +1523,29 @@ export class UI {
       col.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
       return col;
     };
-    // 装备页：四列装备 + 一列染料（染料[10] = 0-2 盔甲 + 3-9 配饰，ItemSlot context 12）
+    // 装备页：三列 L→R = 染料 | 时装 | 装备（原版 DrawInventory :40830-40968：
+    //  x=sw-186/-139/-92 单列纵向 47px 列距；配饰段相对盔甲段下移 num35=4px）。
+    //  两段式竖列（盔甲段 + 4px 组距 + 配饰段）
+    const vcol2 = (label: string, a: number, na: number, b: number, nb: number, where: SlotWhere) => {
+      const col = el('div');
+      col.appendChild(el('div', 'sw-lbl', label));
+      const wrap = el('div');
+      wrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+      for (let k = 0; k < na; k++) wrap.appendChild(this.makeSlotEl(a + k, where));
+      for (let k = 0; k < nb; k++) {
+        const sl = this.makeSlotEl(b + k, where);
+        if (k === 0) sl.style.marginTop = '4px'; // 段组距（原版 num35=4）
+        wrap.appendChild(sl);
+      }
+      col.appendChild(wrap);
+      col.style.cssText = 'display:flex; flex-direction:column;';
+      return col;
+    };
     this.eqPageEl = el('div');
-    this.eqPageEl.style.cssText = 'display:flex; gap:6px;';
-    this.eqPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 'armor'));
-    this.eqPageEl.appendChild(vcol(Lang.text('LegacyInterface.9'), 3, 5, 'armor')); // 配饰 armor[3-7]
-    this.eqPageEl.appendChild(vcol(Lang.text('LegacyInterface.57'), 0, 3, 'dye'));  // 染料 dye[0-2]
-    this.eqPageEl.appendChild(vcol('', 3, 7, 'dye'));                                // 染料 dye[3-9]
-    this.eqPageEl.appendChild(vcol(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 'armor'));
-    this.eqPageEl.appendChild(vcol('', 13, 5, 'armor')); // 时装配饰 armor[13-17]（8/9 需解锁暂隐）
+    this.eqPageEl.style.cssText = 'display:flex; gap:2px;'; // 原版 47px 列距≈贴列
+    this.eqPageEl.appendChild(vcol2(Lang.text('LegacyInterface.57'), 0, 3, 3, 7, 'dye'));            // 染料 dye[0-2]+[3-9]
+    this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Vanity'), 10, 3, 13, 5, 'armor')); // 时装 armor[10-12]+[13-17]
+    this.eqPageEl.appendChild(vcol2(Lang.text('Mods.SandboxWorld.UI.Equipment'), 0, 3, 3, 5, 'armor')); // 装备 armor[0-2]+[3-7]
     left.appendChild(this.eqPageEl);
     // 杂项页：miscEquips[5]（宠物/光源/矿车/坐骑/抓钩，context 19/20/18/17/16）+ miscDyes[5]（context 33）
     this.miscPageEl = el('div');
@@ -1537,11 +1563,12 @@ export class UI {
     this.miscPageEl.appendChild(miscCol);
     this.miscPageEl.appendChild(vcol('染料', 0, 5, 'miscDye'));
     left.appendChild(this.miscPageEl);
-    // 垃圾桶（持久槽；可交换取回）
+    // 垃圾桶（持久槽；可交换取回）——原版 (448,258) scale0.85=44px、槽底 Back7（context 6）
     const trashWrap = el('div');
     trashWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.3')));
     const trash = el('div', 'sw-slot trash sw-trash');
-    trash.style.cssText = 'width:44px; height:44px; flex:none;';
+    trash.style.cssText = 'width:44px; height:44px; flex:none;'
+      + 'background-image:url(sprites/vanilla/Inventory_Back7.png);';
     trash.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       if (this.heldStack) {
@@ -1555,23 +1582,30 @@ export class UI {
     });
     this.trashEl = trash;
     trashWrap.appendChild(trash);
-    // 钱币 4 格（50-53）+ 弹药 4 格（54-57）
-    const coinWrap = el('div');
-    coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.26')));
-    const coinRow = el('div');
-    coinRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,52px); gap:4px;';
-    for (let k = 0; k < 4; k++) coinRow.appendChild(this.makeSlotEl(COIN_START + k, 'inv'));
-    coinWrap.appendChild(coinRow);
-    coinWrap.appendChild(el('div', 'sw-lbl', Lang.text('LegacyInterface.27')));
-    const ammoRow = el('div');
-    ammoRow.style.cssText = 'display:grid; grid-template-columns:repeat(4,52px); gap:4px;';
-    for (let k = 0; k < 4; k++) ammoRow.appendChild(this.makeSlotEl(AMMO_START + k, 'inv'));
-    coinWrap.appendChild(ammoRow);
-    coinWrap.style.cssText = 'display:flex; flex-direction:column; gap:4px;';
+    // 钱币 4 格（50-53）+ 弹药 4 格（54-57）——原版 Main.cs:41189-41224：
+    //  inventoryScale 0.6 → 31px 竖列、间距 33.6px（gap 2.6），Coins x=497 / Ammo x=534
+    const coinAmmo = el('div');
+    coinAmmo.style.cssText = 'display:flex; gap:5px;';
+    const mkCol = (label: string, from: number) => {
+      const col = el('div');
+      col.appendChild(el('div', 'sw-lbl', label));
+      const colSlots = el('div');
+      colSlots.style.cssText = 'display:flex; flex-direction:column; gap:2.6px;';
+      for (let k = 0; k < 4; k++) {
+        const sl = this.makeSlotEl(from + k, 'inv');
+        sl.classList.add('sm');
+        colSlots.appendChild(sl);
+      }
+      col.appendChild(colSlots);
+      col.style.cssText = 'display:flex; flex-direction:column;';
+      return col;
+    };
+    coinAmmo.appendChild(mkCol(Lang.text('LegacyInterface.26'), COIN_START));
+    coinAmmo.appendChild(mkCol(Lang.text('LegacyInterface.27'), AMMO_START));
     const rightRail = el('div');
-    rightRail.style.cssText = 'display:flex; flex-direction:column; gap:6px;';
+    rightRail.style.cssText = 'display:flex; gap:8px; align-items:flex-start;';
     rightRail.appendChild(trashWrap);
-    rightRail.appendChild(coinWrap);
+    rightRail.appendChild(coinAmmo);
     left.appendChild(rightRail);
     body.appendChild(left);
 
@@ -1775,6 +1809,7 @@ export class UI {
     const chest = this.openChest;
     if (!chest) return;
     const inv = this.game.player.inv;
+    const movedChest = new Map<number, number>(); // 箱格 → 物品 id（glow 分层用）
     for (let i = 0; i < 54; i++) { // 0-53（含钱币栏堆叠）
       const cur = inv.slots[i];
       if (!cur || cur.favorited) continue;
@@ -1785,7 +1820,19 @@ export class UI {
         const put = Math.min(max - cs.stack, cur.stack);
         cs.stack += put;
         cur.stack -= put;
+        if (put > 0 && !movedChest.has(k)) movedChest.set(k, cur.id);
         if (cur.stack <= 0) { inv.slots[i] = null; break; }
+      }
+    }
+    // 转移脉冲（ItemSorting :1513-1529：按类型分层 hue=(层+0.5)/层数 渐进彩虹）
+    if (movedChest.size) {
+      const order = new Map<number, number>();
+      for (const id of movedChest.values()) {
+        if (!order.has(id)) order.set(id, order.size);
+      }
+      const n = order.size;
+      for (const [k, id] of movedChest) {
+        this.setSlotGlow('chest', k, ((order.get(id) ?? 0) + 0.5) / n);
       }
     }
     this.game.sfx.play('pickup');
@@ -1813,6 +1860,103 @@ export class UI {
   closeChest() {
     this.openChest = null;
     this.chestPanel.style.display = 'none';
+  }
+
+  // ============ 槽底贴图 / Loadout 染色 / 转移脉冲 / 金币跳字 ============
+
+  /** LoadoutSlotColors（ItemSlot.cs:322-340）——行=loadout，列=context 组
+   *  （TryGetSlotColor :2567：8,10 装备→0 / 9,11 时装→1 / 12 染料→2） */
+  private static readonly LOADOUT_COLORS: ReadonlyArray<readonly [string, string, string]> = [
+    ['rgb(50,106,64)', 'rgb(46,106,98)', 'rgb(45,85,105)'],
+    ['rgb(35,106,126)', 'rgb(50,89,140)', 'rgb(57,70,128)'],
+    ['rgb(122,63,83)', 'rgb(104,46,85)', 'rgb(84,37,87)'],
+  ];
+
+  /** 槽底贴图按 context（ItemSlot.Draw :1983-2142 逐 case：
+   *  装备/时装/染料=13 / 杂项装备=3 / 杂项染料=12 / 箱=5 / 其余=默认 Back；
+   *  收藏=10 覆盖（:1987，除 13/21/22/14/35 等——快捷栏不在本路径） */
+  private paintSlotChrome(slotEl: HTMLElement, where: SlotWhere, i: number): void {
+    let tex = 'Inventory_Back';
+    let tint: string | null = null;
+    if (where === 'armor' || where === 'dye') {
+      tex = 'Inventory_Back13';
+      const lo = UI.LOADOUT_COLORS[this.game.player.inv.currentLoadout] ?? UI.LOADOUT_COLORS[0];
+      tint = where === 'dye' ? lo[2] : i <= 9 ? lo[0] : lo[1];
+    } else if (where === 'misc') tex = 'Inventory_Back3';
+    else if (where === 'miscDye') tex = 'Inventory_Back12';
+    else if (where === 'chest') tex = 'Inventory_Back5';
+    const content = this.slotContent(where, i);
+    if (content?.favorited) tex = 'Inventory_Back10';
+    slotEl.style.backgroundImage = `url(sprites/vanilla/${tex}.png)`;
+    if (tint) slotEl.style.setProperty('--slot-tint', tint);
+    else slotEl.style.removeProperty('--slot-tint');
+  }
+
+  /** 物品转移 hue 脉冲（ItemSlot.SetGlow :428 + :2144-2152：贴图换 Back13 +
+   *  hslToRgb(hue,1,0.5) 色层 (time/300)²/2 衰减 5s；CSS 动画近似二次曲线） */
+  setSlotGlow(where: SlotWhere, i: number, hue: number): void {
+    const slotEl = this.slotEl(i, where);
+    if (!slotEl) return;
+    slotEl.querySelector('.sw-glow-overlay')?.remove();
+    slotEl.style.backgroundImage = 'url(sprites/vanilla/Inventory_Back13.png)';
+    const ov = el('div', 'sw-glow-overlay');
+    ov.style.setProperty('--glow', `hsl(${(hue * 360).toFixed(1)} 100% 50%)`);
+    ov.addEventListener('animationend', () => {
+      ov.remove();
+      if (this.game) this.paintSlotChrome(slotEl, where, i);
+    });
+    slotEl.appendChild(ov);
+  }
+
+  /** CoinSlot 动画表（CoinSlot.cs :228-249：Jump 25 帧×JumpScale10 / Text 17 帧 / 自旋 8 帧） */
+  private static readonly COIN_JUMP = [0, .23748, .43408, .59366, .72007, .81717, .88881, .93885, .97115, .98955,
+    .99793, 1, 1, 1, .99793, .98955, .97115, .93885, .88881, .81717, .72007, .59366, .43408, .23748, 0];
+  private static readonly COIN_TEXT = [1, 1.0107, 1.0391, 1.0791, 1.125, 1.1709, 1.2109, 1.2393, 1.25, 1.2393,
+    1.2109, 1.1709, 1.125, 1.0791, 1.0391, 1.0107, 1];
+  private prevCoinStack = [-1, -1, -1, -1];
+  private coinBusy = [false, false, false, false];
+
+  /** 金币跳字（CoinSlot.UpdateState：堆叠变化 → 跳 25 帧 + 计数弹跳缩放 + 自旋帧） */
+  private coinJump(k: number): void {
+    if (this.coinBusy[k]) return;
+    const slotEl = this.slotEl(COIN_START + k, 'inv');
+    if (!slotEl) return;
+    this.coinBusy[k] = true;
+    const img = slotEl.querySelector('img');
+    const cnt = slotEl.querySelector('.cnt');
+    // 自旋层（CoinSlot.DrawItemCoin：Coin_k 8 帧竖条，跳帧窗 9-13 推进）
+    let spin: HTMLElement | null = null;
+    let t = 0;
+    let last = 0;
+    const step = (now: number) => {
+      if (!last) last = now;
+      while (now - last >= 16.7 && t < 25) {
+        last += 16.7;
+        t++;
+        const jump = UI.COIN_JUMP[t] ?? 0;
+        if (img) img.style.transform = `translateY(${(-jump * 10).toFixed(1)}px)`;
+        if (cnt) cnt.style.transform = `scale(${UI.COIN_TEXT[Math.min(t, 16)]})`;
+        if (t >= 9 && t <= 13) {
+          if (!spin) {
+            spin = el('div');
+            spin.style.cssText = 'position:absolute; inset:4px; pointer-events:none; image-rendering:pixelated;'
+              + `background:url(sprites/vanilla/Coin_${k}.png); background-size:100% 800%;`;
+            slotEl.appendChild(spin);
+            img && (img.style.visibility = 'hidden');
+          }
+          spin.style.backgroundPositionY = `${(Math.floor((t - 9) * 1.4) % 7) * 12.5}%`;
+        } else if (spin) {
+          spin.remove(); spin = null;
+          if (img) img.style.visibility = '';
+        }
+      }
+      if (t < 25) { requestAnimationFrame(step); return; }
+      if (img) { img.style.transform = ''; img.style.visibility = ''; }
+      if (cnt) cnt.style.transform = '';
+      spin?.remove();
+      this.coinBusy[k] = false;
+    };
+    requestAnimationFrame(step);
   }
 
   // ============ 刷新 ============
@@ -1880,26 +2024,44 @@ export class UI {
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
       const slotEl = this.slotEl(i, 'inv');
-      if (slotEl) this.paintSlot(slotEl, inv.slots[i]);
+      if (slotEl) {
+        this.paintSlot(slotEl, inv.slots[i]);
+        this.paintSlotChrome(slotEl, 'inv', i);
+      }
+    }
+    // 金币跳字（CoinSlot：堆叠变化触发；弹药槽不跳——原版仅钱币族动画）
+    for (let k = 0; k < 4; k++) {
+      const st = inv.slots[COIN_START + k]?.stack ?? 0;
+      if (st !== this.prevCoinStack[k]) {
+        this.prevCoinStack[k] = st;
+        this.coinJump(k);
+      }
     }
     // 装备列全量重绘（armor[20] / dye[10] / miscEquips[5] / miscDyes[5]）
     for (const where of ['armor', 'dye', 'misc', 'miscDye'] as const) {
       const arr = this.equipArray(where);
       for (let i = 0; i < arr.length; i++) {
         const slotEl = this.slotEl(i, where);
-        if (slotEl) this.paintSlot(slotEl, arr[i]);
+        if (slotEl) {
+          this.paintSlot(slotEl, arr[i]);
+          this.paintSlotChrome(slotEl, where, i);
+        }
       }
     }
-    // Loadout 高亮（当前套金色描边）
+    // Loadout 按钮（Extra[259] 图集：选中=列1；悬停态由 mouseenter/leave 管）
     this.loadoutBtns.forEach((b, k) => {
-      b.style.borderColor = k === inv.currentLoadout ? '#ffd75a' : '#6a5a8a';
+      const cur = k === inv.currentLoadout;
+      b.style.backgroundPosition = `${(cur ? 1 : 0) * 50}% ${k * 50}%`;
     });
     this.refreshBuffs();
     if (this.openChest) {
       const n = Math.min(40, this.openChest.items.length);
       for (let i = 0; i < n; i++) {
         const slotEl = this.slotEl(i, 'chest');
-        if (slotEl) this.paintSlot(slotEl, this.openChest.items[i]);
+        if (slotEl) {
+          this.paintSlot(slotEl, this.openChest.items[i]);
+          this.paintSlotChrome(slotEl, 'chest', i);
+        }
       }
     }
     this.refreshCrafting();

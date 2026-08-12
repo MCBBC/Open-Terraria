@@ -61,6 +61,7 @@ function placeStalactite(
   const v = Math.min(2, Math.max(0, variation));
   void v; // 变体只影响 frameX/Y——哈希无关
   const inCol = (ay: number) => ay >= 0 && ay < st.h && st.flags[st.idx(x, ay)] === 0;
+  if (x >= 764 && x <= 944) console.log(`stalJS in=${x},${y} small=${preferSmall} up=${y - 1 >= 0 ? TILE_DEFS[st.type[st.idx(x, y - 1)]]?.vanilla?.sheet ?? 0 : 0} dn=${y + 1 < st.h ? TILE_DEFS[st.type[st.idx(x, y + 1)]]?.vanilla?.sheet ?? 0 : 0} solidUp=${solidTileAt(st, x, y - 1)}`);
   if (solidTileAt(st, x, y - 1) && inCol(y) && inCol(y + 1)) {
     const ab = y - 1 >= 0 ? st.type[st.idx(x, y - 1)] : 0;
     const rockFam = ab === 1 || ab === 117 || ab === 25 || ab === 203;   // tileMoss 此阶段无

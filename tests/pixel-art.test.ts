@@ -60,13 +60,11 @@ describe('像素方块群导入', () => {
     st.setTileSilent(10, 45, DIRT); // (10,45) 已占用 → 跳过
     const n = placeArt(st, g, { x: 10, y: 45 });
     expect(n).toBe(2); // 红/绿放置,透明与占用跳过(深色落在占用格)
-    // 编码往返:红格 (10,45)?? 占用跳过后红格应在 (10,45) 被跳过——重算:
-    // 2×2 格位:tl(10,45)=红→占用跳过;tr(11,45)=透明;bl(10,46)=绿;br(11,46)=深色
-    expect(n).toBe(2);
+    // 编码往返:2×2 格位 tl(10,45)=红→占用跳过;tr(11,45)=透明;bl(10,46)=绿;br(11,46)=深色
     const gi = st.idx(10, 46);
     expect(st.type[gi]).toBe(PIX);
-    expect(st.frameX[gi]).toBe((0 << 8) | (255 || 1)); // g=255 → fx=255? (0||1)<<8|255 = 256|255=511
-    // 精确解码:g = fx & 255 = 255, r = fx >> 8 = 1(纯 0 红 ||1), b = fy = 1
+    // 绿 (0,255,0):fx = ((0||1)<<8)|(255||1) = 511;解码 r=fx>>8=1(纯0红||1), g=fx&255=255, b=fy=1
+    expect(st.frameX[gi]).toBe(511);
     expect(st.frameX[gi] & 255).toBe(255);
     expect(st.frameX[gi] >> 8).toBe(1);
     expect(st.frameY[gi]).toBe(1);
@@ -80,7 +78,8 @@ describe('像素方块群导入', () => {
 
   it('存档序列化往返:pixel_block 的 type+frameX/Y 持久化', async () => {
     const { serializeSave } = await import('../src/save/serialize');
-    const { loadSaveData, type SaveData } = await import('../src/save/SaveFile');
+    const { loadSaveData } = await import('../src/save/SaveFile');
+    type SaveData = import('../src/save/SaveFile').SaveData;
     const st = new TileStore(60, 60);
     ground(st, 50);
     const g = grid2x2([[255, 0, 0, 255], [0, 0, 255, 255], [0, 255, 0, 255], [255, 255, 0, 255]]);

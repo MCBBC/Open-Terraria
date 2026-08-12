@@ -134,7 +134,7 @@ const MISC = [
   'Gore_1160.png', 'Gore_1161.png', 'Gore_1162.png', 'Gore_1383.png',
   // 背包槽底变体（ItemSlot.Draw :1983-2142 逐 context 贴图：
   //  3=杂项装备 7=垃圾桶 12=杂项染料 13=装备/时装/染料列+发光态 21=红脉冲）
-  'Inventory_Back3.png', 'Inventory_Back7.png', 'Inventory_Back12.png', 'Inventory_Back13.png',
+  'Inventory_Back3.png', 'Inventory_Back5.png', 'Inventory_Back7.png', 'Inventory_Back12.png', 'Inventory_Back13.png',
   'Inventory_Back21.png',
   // Loadout 按钮图集（Main.cs:41395 Extra[259] 3×3：列=常态/选中/悬停，行=loadout 配色）
   'Extra_259.png',
@@ -142,6 +142,16 @@ const MISC = [
   'Coin_0.png', 'Coin_1.png', 'Coin_2.png', 'Coin_3.png',
   // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）
   'Glow_294.png', 'Glow_315.png', 'Glow_316.png', 'Glow_317.png', 'Glow_329.png',
+  // ---- GlowMask 第二批（Main.cs DrawNPC 拖尾/底锚族，oldPos 历史缓冲接入）----
+  // 399 火星探测器（:24564-24575：本体 Glow_100 + Extra_20 状态灯(ai0+1 行) + Glow_101 罩）
+  'Glow_100.png', 'Glow_101.png', 'Extra_20.png',
+  // 416 火龙怪骑士（:24531-24535：底心 +4px 锚 Glow_156 本体 + 速度四向 ×0.5 四份）
+  'Glow_156.png',
+  // 419 火月怪（:25677-25696 本体+vel4/UnitX4；ai2<=-9 时 :24610-24645 oldPos 0..6 拖尾，
+  //   帧行 (frameRow-3-i)%3+5 循环、scale Lerp(0.75,1.2,(10-i)/10)）
+  'Glow_154.png',
+  // 421 吮脑怪（:25618-25621 case 421：底锚 Glow_146 A=128-α/2）
+  'Glow_146.png',
 ];
 for (const m of MISC) {
   const src = join(ASSETS, m);

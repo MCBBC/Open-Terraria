@@ -888,8 +888,8 @@ const DART_STYLE: Record<number, DartStyle> = {
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
   // ---- 史后三法师（NPC.cs:21146-21191,timeLeft 均覆写 300）----
   // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 ~6×101≈606px/t
-  //    全屋瞬达),life 100(SetDefaults)
-  290: { w: 4, h: 4, rot: 'align90', life: 100, updates: 100, fallback: '#B090FF' },
+  //    全屋瞬达);life 300(NPC.cs:21191 对 281-286 射击统一覆写,覆盖 SetDefaults 的 100)
+  290: { w: 4, h: 4, rot: 'align90', life: 300, updates: 100, fallback: '#B090FF' },
   // 291 地狱火弹(魔法师 285/286):12×12,alpha255 渐入,tileCollide=false,Kill→130×130 爆炸
   //    (弹 292,半宽 65;原版 aiStyle50 到点即爆——此处撞人/到期爆,到点判据登记待补)
   291: { w: 12, h: 12, rot: 'align90', alpha0: 255, fade: 50, life: 300, noTile: true, rocket: 65, fallback: '#FF9040' },

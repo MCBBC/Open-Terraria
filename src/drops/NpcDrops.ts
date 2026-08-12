@@ -7,7 +7,8 @@
 // - 心/星：NPC.cs NPCLoot_DropCommonLifeAndMana(:80332)
 // - Boss 药水+心：DoDeathEvents_DropBossPotionsAndHearts(:79790)
 // - 初速度：Item.cs:49325-49337 vx∈[-3,3] vy∈[-4,-1.5]
-// 偏差（记录）：luck 恒 0（RollLuck ≡ rng.Next(denom)）；NotFromStatue 恒 true；
+// 偏差（记录）：luck 已接（Enemy 击杀处注入 Player.luck——src/stats/Luck.ts 聚合，
+//   RecalculateLuck :28672-28697；仅未移植来源（瓢虫/微光币等）恒 0）；NotFromStatue 恒 true；
 // 天空盒/DST 联动条件恒 false；月事件四条件已实现（ctx.moonEvent 注入，见 evalCond）。
 // RedHatSkeletron/MissingTwin/EmpressOfLightIsGenuinelyEnraged 经 ctx.ai3/
 // anyNpcOfType 接通（Enemy 注入）；MechdusaKill/NamedNPC/

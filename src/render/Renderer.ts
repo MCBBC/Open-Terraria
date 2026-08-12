@@ -1559,7 +1559,8 @@ export class Renderer {
         }
         // NPC GlowMask 发光叠画（Main.cs DrawNPC 内硬编码 switch，见 drawNpcGlow 表）
         // ——与基础精灵同变换叠加（原版同一 position/origin 二次 Draw）
-        this.drawNpcGlow(e, r);
+        // bx/by = 基础精灵目标左上（地面型=底锚+pad / 飞行型=中心锚），发光层与本体同锚
+        this.drawNpcGlow(e, r, -r.sw / 2, anchorY + eocOff);
         ctx.restore();
         ctx.globalAlpha = 1;
         ctx.globalCompositeOperation = 'source-over';
@@ -1704,13 +1705,21 @@ export class Renderer {
   // 原版 NPC 无通用 glowMask 字段（与 Projectile/Item 不同）：发光层是 DrawNPC 里
   // 逐类型硬编码的 TextureAssets.GlowMask[N] 二次 Draw。下表为全量对照（1.4.5.6
   // Main.cs:23099/23480/23594/23746-23776/23878-23886/24218-24226/24531-24535）：
-  //   mode 'frame'   同帧整图叠加（火星飞碟族/Betsy/暗黑魔法师/永恒水晶/银河织带）
+  //   mode 'frame'   同帧整图叠加（火星飞碟族/Betsy/暗黑魔法师/永恒水晶/银河织带/探测器/吮脑怪）
   //   mode 'vel4'    以速度向量四向旋转偏移画 4 份灰 A=64 拷贝（四塔 + 火星飞骑 416）
-  // 未接（登记）：Glow_100/101（case 94 前）、Glow_154（case 384 拖尾）、Glow_146
-  // （case 662 族）、Glow_156（火星飞骑 416 :24531-24535，同 vel4 模式但锚点是
-  // 底心 +4px 特例）——前三处依赖 oldPos 拖尾链，本渲染层无逐 NPC 历史缓冲；
+  //   mode 'trail'   419 火月怪：本体罩 + vel4/UnitX4 + ai2<=-9 时 oldPos 0..6 拖尾
+  //                  （:24610-24645，Enemy.historyDepth/histXAt 历史缓冲）
+  // 第二批已接（原"未接登记"销核）：Glow_100/101+Extra_20（399 探测器 :24564-24575）、
+  // Glow_156（416 火龙怪骑士 :24531-24535 底心 +4px 锚 + vel4×0.5）、Glow_154（419 :25677-25696
+  // + 拖尾）、Glow_146（421 吮脑怪 :25618-25621 A=128-α/2）。
   // Projectile glowMask（:34327-34378）与 Item glowMask（:38072-38213）不在本批。
-  private static readonly NPC_GLOW: Record<number, { tex: string; mode: 'frame' | 'vel4' }> = {
+  private static readonly NPC_GLOW: Record<number, {
+    tex: string; mode: 'frame' | 'vel4' | 'trail';
+    /** vel4 速度偏移倍率（四塔 4；416 骑手 :24538 为 0.5 + 光照项） */
+    velMult?: number;
+    /** 399 探测器状态灯（:24571-24575）：Extra_20(ai0+1 行) 本体 + glow 罩，dy=+24px */
+    lamp?: { tex: string; glow: string; dy: number };
+  }> = {
     392: { tex: 'vanilla/Glow_48.png', mode: 'frame' },   // 火星飞碟主体（:24218 Color(200,200,200,0)）
     395: { tex: 'vanilla/Glow_49.png', mode: 'frame' },   // 飞碟核心（:24222）
     394: { tex: 'vanilla/Glow_50.png', mode: 'frame' },   // 飞碟炮塔（:24226）
@@ -1723,27 +1732,41 @@ export class Renderer {
     493: { tex: 'vanilla/Glow_132.png', mode: 'vel4' },   // 星尘塔（:23746）
     507: { tex: 'vanilla/Glow_143.png', mode: 'vel4' },   // 星云塔（:23756）
     517: { tex: 'vanilla/Glow_162.png', mode: 'vel4' },   // 星璇塔（:23776，+UnitX*2 偏移）
+    // ---- 第二批（底锚/拖尾族）----
+    399: { tex: 'vanilla/Glow_100.png', mode: 'frame',   // 火星探测器：本体罩 A=127-α/2（:24564）
+      lamp: { tex: 'vanilla/Extra_20.png', glow: 'vanilla/Glow_101.png', dy: 24 } },
+    416: { tex: 'vanilla/Glow_156.png', mode: 'vel4', velMult: 0.5 },  // 火龙怪骑士（:24531-24535）
+    419: { tex: 'vanilla/Glow_154.png', mode: 'trail' }, // 火月怪（:25677-25696 + :24610-24645 拖尾）
+    421: { tex: 'vanilla/Glow_146.png', mode: 'frame' }, // 吮脑怪：底锚 A=128-α/2（:25618-25621）
   };
 
-  /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内，
-   *  原点=精灵锚点），按表内 mode 分流。additive（XNA 默认 AlphaBlend + 贴图
-   *  自带发光色的语义，用 lighter 还原"叠加提亮"观感） */
-  private drawNpcGlow(e: Enemy, r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number }) {
+  /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内）。
+   *  bx/by = 基础精灵在本变换内的目标左上（与本体严格同锚——地面型底锚/飞行型
+   *  中心锚由调用方传入，各层不再自行假设锚点）。
+   *  additive（XNA 默认 AlphaBlend + 贴图自带发光色的语义，用 lighter 还原
+   *  "叠加提亮"观感） */
+  private drawNpcGlow(
+    e: Enemy,
+    r: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    bx: number, by: number,
+  ) {
     if (!this.atlas) return;
     const g = Renderer.NPC_GLOW[e.vanillaId ?? -1];
     if (!g) return;
-    const gr = this.atlas.vmisc(g.tex);
-    if (!gr) return;
+    const img = this.atlas.ensureVImage(g.tex);   // 懒加载（首帧 null，次帧生效）
+    if (!img) return;
     const ctx = this.ctx;
+    const frames = Math.max(1, e.vanilla?.frames ?? 1);
     const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
-    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    const alphaRaw = Math.min(255, Math.max(e.spawnAlpha, 0));
+    const opacity = 1 - alphaRaw / 255; // NPC.Opacity
+    // Glow 表与 NPC 表同布局（同宽 × 帧数行）；帧行 = 当前帧（原版一律 rCurrentNPC.frame）
+    const gh = Math.max(1, Math.floor(img.height / frames));
+    const row = Math.min(frames - 1, Math.max(0, Math.floor(r.sy / Math.max(1, r.sh))));
+    const sy = Math.min(img.height - gh, row * gh);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
     if (g.mode === 'frame') {
-      // 同帧整图叠加：源矩形取 Glow_N 的对应帧带（Glow 表帧高 = 表高/帧数；
-      // 与 NPC 表帧高的逐像素对齐未逐一校验——登记，观感为发光罩层）
-      const gh = Math.max(1, Math.floor(gr.sh / Math.max(1, e.vanilla?.frames ?? 1)));
-      const idx = Math.min((e.vanilla?.frames ?? 1) - 1, Math.floor(r.sy / Math.max(1, r.sh)));
       let alpha = 0.8;
       let flashPulse = 1;
       if (e.vanillaId === 551) { alpha = (66 / 255) * 1.3; }              // :23099 A=66 ×(0.7+0.3*lerp)
@@ -1753,14 +1776,30 @@ export class Renderer {
         const t3 = (performance.now() / 1000) % 3 / 3;
         flashPulse = t3 > 0.5 ? 1 - t3 : t3;
         alpha = 0.6 * Math.max(0, flashPulse);
-      } else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
+      } else if (e.vanillaId === 399) { alpha = (127 - alphaRaw / 2) / 255; }  // :24568 Color(127-α/2,…)
+      else if (e.vanillaId === 421) { alpha = (128 - alphaRaw / 2) / 255; }    // :25622 Color(128-α/2,…)
+      else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
-      ctx.drawImage(gr.img, gr.sx, Math.min(gr.sh - gh, idx * gh), gr.sw, gh,
-        -r.sw / 2, -r.sh / 2, r.sw, r.sh);
-    } else {
-      // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份（:23750/:23850 Color(64,64,64,0)）
-      // ——原版在世界坐标偏移，此处转回本变换局部坐标（当前原点=精灵锚点，需平移 (cx,cy)-锚）
-      const num = 4 + 0 * 4; // (GetAlpha-0.5).Length()*4 光照项恒 0（我们无逐 NPC 光照）
+      ctx.drawImage(img, 0, sy, img.width, gh, bx, by, r.sw, r.sh);
+      // 399 探测器状态灯（:24571-24575）：Extra_20 按 ai0+1 取行，画在本体下方 +24px，
+      // 再叠 Glow_101 同源矩形罩（A=127-α/2）
+      if (g.lamp) {
+        const lamp = this.atlas.ensureVImage(g.lamp.tex);
+        const lampGlow = this.atlas.ensureVImage(g.lamp.glow);
+        if (lamp && lampGlow) {
+          const rows = 4, lh = lamp.height / rows;
+          const lrow = Math.max(0, Math.min(rows - 1, Math.floor(e.ai0) + 1)); // Frame(1,4,0,ai0+1)
+          const lx = -lamp.width / 2;                    // 水平居中（原版 X=本体 drawPos.X=中心）
+          const ly = by + g.lamp.dy / scale;             // 世界 px +24 → 局部除 scale
+          ctx.globalAlpha = opacity;                     // GetAlpha(npcColor)
+          ctx.drawImage(lamp, 0, lrow * lh, lamp.width, lh, lx, ly, lamp.width, lh);
+          ctx.globalAlpha = Math.max(0, Math.min(1, (127 - alphaRaw / 2) / 255));
+          ctx.drawImage(lampGlow, 0, lrow * lh, lampGlow.width, lh, lx, ly, lamp.width, lh);
+        }
+      }
+    } else if (g.mode === 'vel4') {
+      // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份灰 A=64（:23750/:24535）
+      const num = g.velMult ?? 4; // (GetAlpha-0.5).Length()*k 光照项恒 0（我们无逐 NPC 光照）
       ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2;
@@ -1768,7 +1807,49 @@ export class Renderer {
         const dx = ((e.vx * Math.cos(a) - e.vy * Math.sin(a)) * num) / scale;
         const dy = ((e.vx * Math.sin(a) + e.vy * Math.cos(a)) * num) / scale
           + (e.vanillaId === 517 ? 2 : 0);
-        ctx.drawImage(gr.img, gr.sx, gr.sy, gr.sw, gr.sh, -r.sw / 2 + dx, -r.sh / 2 + dy, r.sw, r.sh);
+        ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
+      }
+    } else {
+      // trail：419 火月怪（:25677-25696 本体罩 + 分支四向残影；:24610-24645 拖尾）
+      // 本体罩 Color(255-α,…) → 全亮白×Opacity
+      ctx.globalAlpha = Math.max(0, Math.min(1, opacity));
+      ctx.drawImage(img, 0, sy, img.width, gh, bx, by, r.sw, r.sh);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
+      if (e.ai2 >= -6) {
+        // vel4 ×0.5（:25681-25686 num208 = 0.5 + 光照项）
+        for (let k = 0; k < 4; k++) {
+          const a = k * Math.PI / 2;
+          const dx = ((e.vx * Math.cos(a) - e.vy * Math.sin(a)) * 0.5) / scale;
+          const dy = ((e.vx * Math.sin(a) + e.vy * Math.cos(a)) * 0.5) / scale;
+          ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
+        }
+      } else {
+        // UnitX.RotatedBy(k*π/2)×4：固定四向 4px（:25688-25697 num210=4）
+        for (let k = 0; k < 4; k++) {
+          const dx = (Math.cos(k * Math.PI / 2) * 4) / scale;
+          const dy = (Math.sin(k * Math.PI / 2) * 4) / scale;
+          ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
+        }
+      }
+      // 旋刃冲刺拖尾（:24610-24645，ai2<=-9）：oldPos 0..6 七份，帧行 (curRow-3-i)%3+5
+      // 循环、scale Lerp(0.75,1.2,(10-i)/10)、白度 (10-i)/20 渐隐。独立平移到历史
+      // 位置（世界坐标）——bx/by 恰为"底锚相对偏移"，直接复用
+      if (e.ai2 <= -9) {
+        const depth = Math.min(7, e.historyDepth());
+        for (let i = Math.min(6, depth - 1); i >= 0; i--) {
+          let trow = (row - 3 - i) % 3;
+          if (trow < 0) trow += 3;
+          trow += 5;
+          const tsy = Math.min(img.height - gh, trow * gh);
+          const ts = 0.75 + 0.45 * ((10 - i) / 10);   // Lerp(0.75,1.2,(10-i)/10)
+          ctx.save();
+          ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h);
+          ctx.rotate(e.histRotAt(i));
+          ctx.scale(ts, ts);
+          ctx.globalAlpha = Math.max(0, Math.min(1, (10 - i) / 20)); // White×(10-i)/20, A=0
+          ctx.drawImage(img, 0, tsy, img.width, gh, bx, by, r.sw, r.sh);
+          ctx.restore();
+        }
       }
     }
     ctx.restore();

@@ -13,7 +13,8 @@
 //   - Main.cs:64288 云层：cloudBGActive=0、numClouds 钳 30
 //   - Main.cs:64331 下雨中 → StopRain；:64353 无雨时不新 roll（LanternsUp 或 NextNight）
 //   - Main.cs:58249 LanternsUp 时风场步进直接 return（灯笼夜无风）
-//   - Player.cs:28680 RecalculateLuck：luck += 0.3（本仓幸运 stat 未聚合——getter 备用）
+//   - Player.cs:28680 RecalculateLuck：luck += 0.3（已接——Game 每 tick 写
+//     player.luckState.lanternsUp，src/stats/Luck.ts 聚合）
 //   - Chest.cs:2282 派对女孩商店：LanternsUp 时上架 4702 放飞灯笼
 //   - NPC.cs:95480 向导对话：Lantern1(!downedMoonlord)/Lantern2(downedMoonlord)
 //   - SkyManager "Lantern" → LanternSky（夜空灯笼，Extra_134 三变体，SkyRenderer 落位）

@@ -1642,8 +1642,9 @@ export class VanillaSpawner {
       }
       // L4518：hard 1/50 血月 && 场上无小丑 109 → Clown
       if (hardMode && N(50) && clock.bloodMoon && !any(109)) return D(109);
-      // L4523/4529：血月/墓园 RollOnlyBadLuck(300)（幸运度未接 → 按 1/300 近似）
-      //  → The Groom 53 / The Bride 536
+      // L4523/4529：血月/墓园 RollOnlyBadLuck(300) → The Groom 53 / The Bride 536。
+      //  RollOnlyBadLuck 正运无加成（Luck.cs:31-38）→ luck≥0 时 N(300) 即精确；
+      //  仅负运态有偏差（登记：负 luck 时应收窄为 [150,300)，见 src/stats/Luck.ts）
       if (clock.bloodMoon && N(300)) return D(53);
       if (clock.bloodMoon && N(300)) return D(536);
       // L4533：新月（moonPhase==0）hard 2/3 → Werewolf 104

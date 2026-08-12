@@ -407,8 +407,9 @@ export class ClientNet {
       }
       case Msg.SyncNPC: {
         // v4 短码格式：每条 1B eflags——bit0=含 key 全量(u32 netId+u16 codeId+str key)，
-        // bit1=boss；否则仅 u16 codeId（查本端 codeId→netId/key 表）。未知短码静默丢弃
-        // （≤2s 全量兜底自动补；AOI 重入视野/短码表清空后的自愈路径）
+        // bit1=boss；否则仅 u16 codeId（查本端 codeId→netId/key 表）。
+        // 未知短码：**先把本条剩余字段读完再丢弃**——continue 前不消费会让读指针错位，
+        // 毒化整条连接（review C1）；自愈靠 ≤2s 全量兜底重发
         const n = r.u16();
         const snaps: NpcSnap[] = [];
         for (let i = 0; i < n; i++) {
@@ -422,16 +423,13 @@ export class ClientNet {
           } else {
             const code = r.u16();
             const e = this.npcCodes.get(code);
-            if (!e) continue; // 未知短码：跳过本条
-            netId = e.netId;
-            key = e.key;
+            netId = e?.netId ?? 0;
+            key = e?.key ?? '';
           }
-          snaps.push({
-            netId, key,
-            x: r.f32(), y: r.f32(), vx: r.f32(), vy: r.f32(),
-            hp: r.i16(), maxHp: r.i16(),
-            animT: r.u16(), flags: eflags & 2 ? 1 : 0,
-          });
+          const x = r.f32(), y = r.f32(), vx = r.f32(), vy = r.f32();
+          const hp = r.i16(), maxHp = r.i16(), animT = r.u16();
+          if (!netId) continue; // 未知短码：字段已消费，仅丢弃本条快照
+          snaps.push({ netId, key, x, y, vx, vy, hp, maxHp, animT, flags: eflags & 2 ? 1 : 0 });
         }
         this.hooks.onNpcSnapshot?.(snaps);
         return;
