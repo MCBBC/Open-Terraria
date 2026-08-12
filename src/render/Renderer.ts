@@ -1806,12 +1806,16 @@ export class Renderer {
     } else if (g.mode === 'vel4') {
       // vel4：velocity.RotatedBy(k*π/2) × num 偏移画 4 份灰 A=64（:23750/:24535）
       const num = g.velMult ?? 4; // (GetAlpha-0.5).Length()*k 光照项恒 0（我们无逐 NPC 光照）
+      // 416 骑手速度恒 0（AI_075 吸附零速）——原版此处取坐骑 415 的速度
+      // （Main.cs:24516 spinningpoint3 = npc[415].velocity）
+      const svx = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vx : e.vx;
+      const svy = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vy : e.vy;
       ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
       for (let k = 0; k < 4; k++) {
         const a = k * Math.PI / 2;
         // 世界坐标偏移 → 本变换局部（当前原点=精灵锚点，除 scale 还原）
-        const dx = ((e.vx * Math.cos(a) - e.vy * Math.sin(a)) * num) / scale;
-        const dy = ((e.vx * Math.sin(a) + e.vy * Math.cos(a)) * num) / scale
+        const dx = ((svx * Math.cos(a) - svy * Math.sin(a)) * num) / scale;
+        const dy = ((svx * Math.sin(a) + svy * Math.cos(a)) * num) / scale
           + (e.vanillaId === 517 ? 2 : 0);
         ctx.drawImage(img, 0, sy, img.width, gh, bx + dx, by + dy, r.sw, r.sh);
       }

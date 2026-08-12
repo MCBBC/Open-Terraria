@@ -55,16 +55,16 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
  *  191-194 俾格米→195 掷矛(AI_026 :58795,sp11,CD30,射程800,抖动±20)；
  *  387 双子激光眼→389(:28982 sp8 ×1.15 伤,CD~45,需视线)；
  *  1094 Foxparks→1097 火球(:58815 sp11 CD42 无抖动) */
-const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; range: number; dmgMul?: number; jitter?: number }> = {
+const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; range: number; dmgMul?: number; jitter?: number; grav?: number; life?: number }> = {
   373: { shot: 374, speed: 10, cd: 36, range: 1000 },
-  375: { shot: 376, speed: 11, cd: 68, range: 1000 },
+  375: { shot: 376, speed: 11, cd: 68, range: 1000, life: 100 },  // 火球 timeLeft=100
   407: { shot: 408, speed: 20, cd: 30, range: 1000 },
   423: { shot: 433, speed: 4, cd: 24, range: 400 },
   613: { shot: 614, speed: 14, cd: 36, range: 500 },
-  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
-  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
-  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
-  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
+  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 }, // 掷矛抛物线(aiStyle 1)
+  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
+  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
+  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20, grav: 0.3 },
   387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15 },
   1094: { shot: 1097, speed: 11, cd: 42, range: 800 },
 };
@@ -135,6 +135,8 @@ export class MinionProj extends Entity {
   private dashT = 0;
   /** 家族一次性初始化（龙链生成） */
   private spawned = false;
+  /** 渲染旋转（龙链：段朝向 = 指向父段 +PI/2，同原版 rotation=velocity.ToRotation()+PI/2） */
+  rot = 0;
   private pounceCd = 0;
 
   // ---- 旗舰家族分支（行号见各方法注释；均在通用运动前 return）----
@@ -185,6 +187,7 @@ export class MinionProj extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
+    if (Math.hypot(this.vx, this.vy) > 0.5) this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;
     const fd = tgt ? Math.sign(tgt.cx - this.cx) : Math.sign(this.vx);
     if (fd !== 0) this.facing = fd;
     this.contact(game, dmg0 * scale, 7);
@@ -218,6 +221,7 @@ export class MinionProj extends Entity {
     const d = Math.hypot(dx, dy) || 1;
     this.x = par.cx - (dx / d) * 16 - this.w / 2;
     this.y = par.cy - (dy / d) * 16 - this.h / 2;
+    this.rot = Math.atan2(par.cy - this.cy, par.cx - this.cx) + Math.PI / 2;
     const segN = this.peerCount(game, 626) + this.peerCount(game, 627);
     this.contact(game, dmg0 * (1 + 0.23 * Math.min(50, segN)), 7);
   }
@@ -262,7 +266,8 @@ export class MinionProj extends Entity {
         this.x += ((tgt.cx - this.cx) / d) * 12;
         this.y += ((tgt.cy - this.cy) / d) * 12;
       }
-      this.contact(game, dmg0 * scale * 1.5, 10, 58);
+      // 818 冲刺伤 ×(1.5+0.4×(宝石数-1))（:12108）
+      this.contact(game, dmg0 * scale * (1.5 + 0.4 * (gems - 1)), 10, 58);
       return;
     }
     if (this.pounceCd > 0) this.pounceCd--;
@@ -712,7 +717,7 @@ export class MinionProj extends Entity {
           const dmg = Math.max(1, Math.round(dmg0 * (shooter.dmgMul ?? 1)));
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
-              dmg, this.knockback, shooter.shot, null, { grav: 0 }),
+              dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 }),
             'projectiles');
         }
       }
@@ -751,7 +756,8 @@ export class MinionProj extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
-    if (this.facing < 0) ctx.scale(-1, 1); // spriteDirection 翻转（随从+哨兵通用）
+    if (this.rot !== 0) ctx.rotate(this.rot); // 龙链旋转（rotation=vel 方向+PI/2）
+    else if (this.facing < 0) ctx.scale(-1, 1); // spriteDirection 翻转（随从+哨兵通用）
     if (img) {
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {

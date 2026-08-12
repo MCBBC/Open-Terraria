@@ -122,14 +122,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onInventoryChanged: () => ui.refreshAll(),
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
-      // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)
-      onChat: (t, r, g, b) => ui.chatMessage(t, r, g, b),
+      // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)；
+      // width = NewTextMultiline WidthLimit（广播盒 460px 折行，-1 不限）
+      onChat: (t, r, g, b, width) => ui.chatMessage(t, r, g, b, width),
       // NPC 对话系统(SetTalkNPC + GetChat)
       onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
       onNpcShop: (title, items, copper) => ui.showNpcShop(title, items, copper),
       onReadSign: (text) => ui.showSign(text),
+      onEditSign: (x, y, text) => ui.editSign(x, y, text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
     }, atlas);
@@ -195,6 +197,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         g.player.banks[b] = src.concat(Array(Math.max(0, 40 - src.length)).fill(null)).slice(0, 40);
       }
     }
+    // Buff 槽（PL:53913-53925;Main.buffNoSave 已在序列化侧过滤）
+    g.player.buffs.applySaved(player.buffs);
+    if (player.taxMoney !== undefined) g.player.taxMoney = player.taxMoney;   // PL:53839
+    if (player.deathsPve !== undefined) g.player.deathsPve = player.deathsPve; // PL:53840
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示
     g.cb.onInventoryChanged();
@@ -210,12 +216,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const client = new WorldGenClient();
       if (await client.probe()) {
         try {
-          const { world, player } = await client.loadSave({ key }, {
+          const { world, player, save } = await client.loadSave({ key }, {
             onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
           });
           const g = makeGame();
           await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
         } catch (e) {
           if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
@@ -239,23 +246,25 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const client = new WorldGenClient();
       if (await client.probe()) {
         try {
-          const { world, player } = await client.loadSave({ json: text }, {
+          const { world, player, save } = await client.loadSave({ json: text }, {
             onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
           });
           const g = makeGame();
           await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
+          g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
         } catch (e) {
           if (!(e instanceof (await import('./workers/WorldGenClient')).WorldGenUnavailable)) throw e;
           // worker 失败 → 主线程 fallback
         }
       }
-      const { world, player } = loadSave(text);
+      const { world, player, data } = loadSave(text);
       const g = makeGame();
       ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
       applyPlayer(g, player);
+      g.eventsApplySave(data.events);
     } catch (e) {
       console.error(e);
       ui.hideProgress();
@@ -341,7 +350,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           difficulty: 0, evil: game.world.crimson ? 1 : 0,
         });
       }
-      const json = saveGame(game.world, game.player, Date.now() - playStart, game.townNpcsForSave());
+      const json = saveGame(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave());
       await worldStore.save(currentWorld, json, Date.now() - playStart);
       const lobbyPort = addr.includes(':') ? parseInt(addr.split(':')[1], 10) : 7778;
       const host = addr.includes(':') ? addr.split(':')[0] : addr;
@@ -561,7 +570,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // 存档序列化走后台 worker(RLE+base64+JSON 全套离主线程;主线程只付一次
     // 全图数组结构化克隆的 memcpy),不可用时 SaveClient 内部回退同步 saveGame
     saveClient.ensure();
-    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave()).then((json) => {
+    void saveClient.save(game.world, game.player, Date.now() - playStart, game.townNpcsForSave(), game.eventsForSave()).then((json) => {
       const mb = json.length / 1024 / 1024;
       void kvSetCompat(json).then((where) => {
         if (where === 'fail') ui.toast(Lang.text('Mods.SandboxWorld.Toast.SaveFailedStorage'));
@@ -614,6 +623,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (!e) return null;
       game.entities.add(e, 'enemies');
       return { id: e.id, x: e.x, y: e.y, hp: e.hp };
+    },
+    /** 探针桥：敌对弹幕（原版 Projectile.hostile）——v5 msg27 bit7 链路 + 访客 Damage_EVP 本地结算的 E2E 验证。
+     *  grav 默认 0（直飞激光语义；Arrow 类默认 0.3 抛物线会让探针弹坠离目标） */
+    spawnHostileProj: async (x: number, y: number, vx: number, vy: number, dmg: number, projId = 9, grav = 0) => {
+      const { Arrow } = await import('./entities/Arrow');
+      if (!game) return null;
+      const p = new Arrow(x, y, vx, vy, dmg, 0, projId, null, { hostile: true, grav });
+      game.entities.add(p, 'projectiles');
+      return { id: p.id };
     },
   };
 

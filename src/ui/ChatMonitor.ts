@@ -41,11 +41,14 @@ export class ChatMonitor {
     parent.appendChild(this.root);
   }
 
-  /** Main.NewText(text, R, G, B) */
-  message(text: string, r = 255, g = 255, b = 255): void {
+  /** Main.NewText(text, R, G, B)。width = NewTextMultiline WidthLimit（px，-1 不限：
+   *  RemadeChatMonitor.AddNewMessage 的 widthLimitInPixels——消息容器按该宽度折行，
+   *  广播盒公告 = 460） */
+  message(text: string, r = 255, g = 255, b = 255, width = -1): void {
     const line = document.createElement('div');
     line.className = 'sw-chat-line';
     line.style.color = `rgb(${r},${g},${b})`;
+    if (width > 0) line.style.maxWidth = `${width}px`;
     line.textContent = text;
     this.root.appendChild(line);
     this.nodes.push(line);

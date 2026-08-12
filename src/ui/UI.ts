@@ -298,6 +298,37 @@ export class UI {
     this.root.appendChild(panel);
   }
 
+  /** 广播盒文本编辑（Player.cs:32231-32250 OpenSign → 原版聊天行输入框；
+   *  DOM 近似为文本域 + 保存按钮）。保存写回 Sign 登记（Sign.TextSign） */
+  editSign(x: number, y: number, text: string) {
+    const panel = el('div', 'sw-panel');
+    panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:420px; max-height:70vh; overflow:auto;';
+    panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.Sign.Title')));
+    const body = el('div');
+    body.style.cssText = 'font-size:12px; color:#9a8ab8; margin:8px 0 4px;';
+    body.textContent = Lang.text('Mods.SandboxWorld.Sign.Hint');
+    panel.appendChild(body);
+    const input = el('textarea') as HTMLTextAreaElement;
+    input.value = text;
+    input.style.cssText = 'width:100%; height:110px; resize:vertical; font-size:13px; color:#d8d4e4; background:#14121c; border:1px solid #3a3350; border-radius:4px; padding:6px;';
+    input.placeholder = Lang.text('Mods.SandboxWorld.Sign.Placeholder');
+    panel.appendChild(input);
+    const row = el('div');
+    row.style.cssText = 'display:flex; gap:8px; margin-top:10px; justify-content:flex-end;';
+    const cancel = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
+    cancel.addEventListener('click', () => panel.remove());
+    row.appendChild(cancel);
+    const save = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.Sign.Save'));
+    save.addEventListener('click', () => {
+      this.game?.setSignText(x, y, input.value);
+      panel.remove();
+    });
+    row.appendChild(save);
+    panel.appendChild(row);
+    this.root.appendChild(panel);
+    input.focus();
+  }
+
   /** 兼容报告弹窗：降级/清空/跳过内容列表 + 导出详情 JSON */
   showCompatReport(rpt: CompatReport) {
     // 不 closeAll：会把已初始化的 HUD（快捷栏等）一起拆掉，报告只叠加一层
@@ -2344,7 +2375,7 @@ export class UI {
     this.chatMonitor?.clear();
     this.chatMonitor = new ChatMonitor(this.root, () => UISfx.sfx.play('menuTick', 0.6));
     // 回放进世界前缓冲的消息(如新世界出生时的 NPC 入驻公告)
-    for (const [t, r, g, b] of this.chatPending) this.chatMonitor.message(t, r, g, b);
+    for (const [t, r, g, b, width] of this.chatPending) this.chatMonitor.message(t, r, g, b, width);
     this.chatPending = [];
 
     this.buildInventoryPanel();
@@ -2383,10 +2414,10 @@ export class UI {
   private chatMonitor: ChatMonitor | null = null;
   /** 消息缓冲:ChatMonitor 未建(initInGame 之前,如新世界 afterWorldLoad
    *  发出的 NPC 入驻公告)时暂存,initInGame 创建后回放——曾直接丢弃 */
-  private chatPending: Array<[string, number, number, number]> = [];
-  chatMessage(text: string, r = 255, g = 255, b = 255): void {
-    if (this.chatMonitor) this.chatMonitor.message(text, r, g, b);
-    else this.chatPending.push([text, r, g, b]);
+  private chatPending: Array<[string, number, number, number, number]> = [];
+  chatMessage(text: string, r = 255, g = 255, b = 255, width = -1): void {
+    if (this.chatMonitor) this.chatMonitor.message(text, r, g, b, width);
+    else this.chatPending.push([text, r, g, b, width]);
   }
 
   // ---- NPC 对话系统(SetTalkNPC + GetChat;内容在 Game 生成,此处纯渲染) ----

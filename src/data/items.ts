@@ -711,6 +711,7 @@ item({ key: 'mushroom_grass_seeds', name: '蘑菇草地种子', maxStack: 999, v
 
 // ---- 阶段 5:原版物品全量注册(6146 件,图标走 atlas.vicon(id) 回退) ----
 import vanillaItemMeta from '../../public/sprites/vanilla.json';
+import { MUSIC_BOX_ITEM_BY_STYLE } from '../world/wiring/devices';
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
 item({ key: 'vi_103_nightmare_pickaxe', name: '', maxStack: 999, value: 1 });
@@ -763,6 +764,40 @@ for (const [idStr, m] of Object.entries(_vim)) {
   VANILLA_ITEM_KEY_BY_ID[Number(idStr)] = ik; // 已注册的同样入表（wld 导入按 id 反查）
   if (byKey[ik] !== undefined) continue;
   item({ key: ik, name: '', maxStack: 999, value: 1 });
+}
+
+// ---- 音乐盒唱片全量 101 曲（Item.cs DefaultToMusicBox：createTile=139、
+// placeStyle=曲目 style、accessory；style 表 = WorldGen.GetItemDrop_MusicBoxes
+// :43138-43366 逆表）。6146 静音盒无素材不在 vanilla.json，单独注册。
+// 放置帧走 FurnitureStyle case 139（frameY = style*36）；录音变身链见
+// world/wiring/devices.ts musicBoxRecordItem（Player.cs:15053） ----
+item({ key: 'vi_6146_MusicBoxSilence', name: '', maxStack: 1, value: 100000, tile: 'v_139_musicboxes', placeStyle: 100 });
+for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
+  const mbKey = VANILLA_ITEM_KEY_BY_ID[MUSIC_BOX_ITEM_BY_STYLE[mbStyle]];
+  if (mbKey === undefined) continue; // vanilla.json 缺素材的唱片不注册（放置链用不到）
+  const mbDef = ITEM_DEFS[byKey[mbKey]];
+  if (!mbDef) continue;
+  mbDef.tile = 'v_139_musicboxes';
+  mbDef.placeStyle = mbStyle;
+  mbDef.maxStack = 1;   // 原版唱片 maxStack 1（DefaultToMusicBox 非 stackable）
+  mbDef.value = 100000; // DefaultToMusicBox value = 10 金
+}
+
+// ---- 水喷泉全量 10 色（Item.cs createTile=207：909 纯净/910 沙漠 940-945 丛林·
+// 冰雪·腐化·猩红·神圣·血月/4922 洞穴/4417 绿洲；placeStyle 0-9 =
+// WorldGen.Check2xX :38199-38226 掉落表逆表）。放置帧 X 向 style*36（fw=2，
+// FurnitureStyle default 分支即正确） ----
+const FOUNTAIN_ITEM_STYLE: Array<[number, number]> = [
+  [909, 0], [910, 1], [940, 2], [941, 3], [942, 4], [943, 5], [944, 6], [945, 7], [4922, 8], [4417, 9],
+];
+for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
+  const fnKey = VANILLA_ITEM_KEY_BY_ID[fnVid];
+  if (fnKey === undefined) continue;
+  const fnDef = ITEM_DEFS[byKey[fnKey]];
+  if (!fnDef) continue;
+  fnDef.tile = 'v_207_water_fountains';
+  fnDef.placeStyle = fnStyle;
+  fnDef.maxStack = 99;
 }
 void 0;
 

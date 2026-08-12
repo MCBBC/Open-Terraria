@@ -34,7 +34,7 @@ function readVarint(u8: Uint8Array, pos: { i: number }): number {
 }
 
 /** 主线程同步存档(兼容入口/worker 回退路径)。常规保存请走 SaveClient.saveAsync */
-export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs']): string {
+export function saveGame(world: World, player: Player, playTimeMs: number, townNpcs?: SaveData['npcs'], events?: SaveData['events']): string {
   const st = world.store;
   const view: SaveStoreView = {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
@@ -48,6 +48,8 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
     timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
+    bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
+    moonPhase: world.clock.moonPhase, moonType: world.moonType,
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -70,8 +72,11 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     miscDyes: player.inv.miscDyes,
     loadouts: player.inv.loadouts,
     currentLoadout: player.inv.currentLoadout,
+    buffs: player.buffs.toSave(),       // buffType+buffTime 槽（PL:53913-53925）
+    taxMoney: player.taxMoney,          // PL:53839
+    deathsPve: player.deathsPve,        // PL:53840
   };
-  return serializeSave(view, meta, playerData, playTimeMs);
+  return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
 }
 
 export function loadSave(json: string): ReturnType<typeof loadSaveData> {
@@ -114,7 +119,7 @@ export function saveWorldOnly(world: World): string {
 
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
-export function loadSaveData(data: SaveData): { world: World; player: SaveData['player'] } {
+export function loadSaveData(data: SaveData): { world: World; player: SaveData['player']; data: SaveData } {
   // v3 物品稳定 id → internal(箱子/背包/储物就地重写;v2 旧档直读)
   const v3 = (data.version ?? 1) >= 3;
   const mapItem = (it: { id: number; stack: number } | null) =>
@@ -147,6 +152,11 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   if (data.header.jungleX !== undefined) world.jungleX = data.header.jungleX;
   world.clock.timeOfDay = data.clock.timeOfDay;
   world.clock.dayCount = data.clock.dayCount;
+  // 原版 header _temp 三件套（WF:1276-1278）;旧档缺省=无血月/无日食/满月
+  if (data.clock.bloodMoon !== undefined) world.clock.bloodMoon = data.clock.bloodMoon;
+  if (data.clock.eclipse !== undefined) world.clock.eclipse = data.clock.eclipse;
+  if (data.clock.moonPhase !== undefined) world.clock.moonPhase = data.clock.moonPhase;
+  if (data.header.moonType !== undefined) world.moonType = data.header.moonType;
   if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
     world.invasionType = data.invasion.type;
     world.invasionSize = data.invasion.size;
@@ -156,12 +166,14 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   }
   if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
-  world.chests = data.chests;
+  world.chests = data.chests;   // locked 随箱对象直传（serialize 段已带）
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;
   // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp
   // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
   applyLunarSave(world);
+  // 城镇 NPC 段（原版 NPC 段 WF:1703-1750;旧档/曾断链=空数组 → 走新世界出生分支）
+  if (data.npcs?.length) world.pendingTownNpcs = data.npcs;
   if (data.signs) world.signs = data.signs;
   // 挂物族存放物（v3 稳定 id → 内部 id；未知 id 归 0 由 furnitureFromSave 置空槽）
   world.furnitureItems = furnitureFromSave(
@@ -251,5 +263,5 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
       for (let k = 0; k < run && i < st.liquid.length; k++, i++) st.liquid[i] = v;
     }
   }
-  return { world, player: data.player };
+  return { world, player: data.player, data };
 }

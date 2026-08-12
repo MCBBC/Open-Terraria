@@ -108,9 +108,8 @@ function flipCell(w: Wiring, x: number, y: number, delta: number): void {
 
 /** 音乐盒 style → MusicID 全表（Main.cs:11002-11403 ActiveMusicBox if-chain，100 条；
  *  style = tile 139 frameY/36，即放置物品 placeStyle = 曲目号）。
- *  style 100 = 静音（SceneMetrics.cs:474-480 frameY/36==100 → MusicBoxSilence）。
- *  【依赖登记】录制机制（空盒放置后 5 分钟内录当前曲，Player/Item 侧改 frameY）未移植；
- *  唱片物品的 placeStyle→曲目链在本表，放置物品接入后即全量生效 */
+ *  style 100 = 静音（SceneMetrics.cs:474-480 frameY/36==100 → MusicBoxSilence，
+ *  Main.cs:11405-11440 flag2 → _musicSilencerCounter 240t 渐弱——Music.ts 返回 0 等价） */
 export const MB_STYLE_TO_MUSIC: readonly number[] = [
   1, 2, 3, 6, 4, 5, 7, 8, 10, 9,
   12, 11, 13, 14, 15, 16, 17, 18, 19, 20,
@@ -137,6 +136,75 @@ export function musicBoxStyleOf(frameX: number, frameY: number): number {
 export function fountainColorOf(frameX: number, frameY: number): number {
   if (frameY < 72) return -1;
   return FOUNTAIN_COLOR[Math.floor(frameX / 36)] ?? -1;
+}
+
+// ============ 音乐盒物品表（Item.cs DefaultToMusicBox + WorldGen.GetItemDrop_MusicBoxes） ============
+
+/** 空音乐盒物品（ItemID.MusicBox = 576，Item.cs:8082-8089：accessory 无 createTile）。
+ *  录音入口：装备在配饰槽时按当前 BGM 变身（Player.cs:15053） */
+export const MUSIC_BOX_EMPTY_VID = 576;
+
+/** 音乐盒 style → 录得物品 vid 全表 101 条（WorldGen.cs:43138-43366
+ *  GetItemDrop_MusicBoxes 1:1；与 Item.cs SetDefaults DefaultToMusicBox(placeStyle)
+ *  调用点互为逆表）。
+ *  style 0-12 → 562+style；13-27 → 1596+style-13；28 起为离散表；越界兜底 576（空盒） */
+export const MUSIC_BOX_ITEM_BY_STYLE: readonly number[] = [
+  562, 563, 564, 565, 566, 567, 568, 569, 570, 571,
+  572, 573, 574, 1596, 1597, 1598, 1599, 1600, 1601, 1602,
+  1603, 1604, 1605, 1606, 1607, 1608, 1609, 1610, 1963, 1964,
+  1965, 2742, 3044, 3235, 3236, 3237, 3370, 3371, 3796, 3869,
+  4082, 4078, 4079, 4077, 4080, 4081, 4237, 4356, 4357, 4358,
+  4421, 4606, 4979, 4985, 4990, 4991, 4992, 5006, 5014, 5015,
+  5016, 5017, 5018, 5019, 5020, 5021, 5022, 5023, 5024, 5025,
+  5026, 5027, 5028, 5029, 5030, 5031, 5032, 5033, 5034, 5035,
+  5036, 5037, 5038, 5039, 5040, 5044, 5112, 5362, 5578, 5538,
+  5579, 5580, 5539, 5581, 5582, 5637, 5638, 5639, 6144, 6145,
+  6146,
+];
+
+/** MusicID.Sets.CanBeRecorded（MusicID.cs:9）：全集可录，仅 {0,28,45,102} 除外 */
+const MUSIC_NOT_RECORDABLE = new Set([0, 28, 45, 102]);
+/** Main.maxMusic（Main.cs:435） */
+const MAX_MUSIC = 105;
+
+/** 录音（Player.cs:15053-15366 ApplyEquipFunctional 1:1）：装备空盒 576 时按当前
+ *  BGM（Main.curMusic）掷 1/540 → 录得对应唱片物品 vid。
+ *  门：curMusic ∈ (0,105] 且 CanBeRecorded；style = MB_STYLE_TO_MUSIC.indexOf(curMusic)
+ *  （= 原版 curMusic→num3/if-chain 的逆映射），无映射（如 50 TitleIntro）返回 -1。
+ *  注：原版先播 Item166 再判映射——无映射时只响声不变身，由调用方复刻 */
+export function musicBoxRecordItem(curMusic: number): number {
+  if (curMusic <= 0 || curMusic > MAX_MUSIC) return -1;
+  if (MUSIC_NOT_RECORDABLE.has(curMusic)) return -1;
+  const style = MB_STYLE_TO_MUSIC.indexOf(curMusic);
+  if (style < 0) return -1;
+  return MUSIC_BOX_ITEM_BY_STYLE[style] ?? -1;
+}
+
+/** 音乐盒掉落（WorldGen.cs:51221-51295 CheckMB）：style = frameY/36（破坏前帧），
+ *  掉 GetItemDrop_MusicBoxes(style)；越界 style 兜底空盒 576 */
+export function musicBoxDropItemOf(style: number): number {
+  return MUSIC_BOX_ITEM_BY_STYLE[style] ?? 576;
+}
+
+/** 喷泉 style → 物品 vid（WorldGen.cs:38199-38226 Check2xX case 207：
+ *  0→909 纯净 / 1→910 沙漠 / 2-7→938+style 丛林·冰雪·腐化·猩红·神圣·血月 /
+ *  8→4922 洞穴 / 9→4417 绿洲；Item.cs createTile=207 placeStyle 互为逆表） */
+export const FOUNTAIN_ITEM_BY_STYLE: readonly number[] = [909, 910, 940, 941, 942, 943, 944, 945, 4922, 4417];
+
+/** 喷泉掉落：style = frameX/36（破坏前帧）；越界返回 -1（Check2xX default 不掉） */
+export function fountainDropItemOf(style: number): number {
+  return FOUNTAIN_ITEM_BY_STYLE[style] ?? -1;
+}
+
+/** 广播盒播报（Wiring.cs:1204-1217 1:1）：读锚点告示牌 → 粉色多行聊天公告。
+ *  - 无登记 / 空白文本 → null（:1208-1211 静默返回）
+ *  - Color.Pink = (255,105,180)；NewTextMultiline WidthLimit=460（RemadeChatMonitor
+ *    单条容器内按 460px 折行；色值与宽度原样透传给聊天渲染层）
+ *  - AnnouncementBoxDisabled / AnnouncementBoxRange：设置系统未接，恒可用 + 全图
+ *    （默认值 false / -1，Main.cs 设置项） */
+export function announcementBoxBroadcast(signText: string | null | undefined): { text: string; r: number; g: number; b: number; width: number } | null {
+  if (signText == null || signText.trim() === '') return null;
+  return { text: signText, r: 255, g: 105, b: 180, width: 460 };
 }
 
 /** 天塔柱类型（SceneMetrics.cs:524-541）：410=style(frameX/36, 0星璇/1星云/2星尘/3耀斑)、

@@ -116,7 +116,7 @@ export class WorldGenClient {
       onProgress?: (phase: string, p: number) => void;
       timeoutMs?: number;
     },
-  ): Promise<{ world: World; player: unknown }> {
+  ): Promise<{ world: World; player: unknown; save?: unknown }> {
     const w = await this.ensureWorker();
     const id = this.nextId++;
     return new Promise((resolve, reject) => {
@@ -130,7 +130,7 @@ export class WorldGenClient {
         reject,
         onProgress: cb?.onProgress as Pending['onProgress'],
         timer,
-        onLoadResult: (ev) => resolve({ world: World.fromPacket(ev.world), player: ev.player }),
+        onLoadResult: (ev) => resolve({ world: World.fromPacket(ev.world), player: ev.player, save: ev.save }),
       });
       w.postMessage({ id, type: 'saveParse', key: args.key, json: args.json, save: args.save as never } satisfies WorldWorkerRequest);
     });

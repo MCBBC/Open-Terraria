@@ -60,8 +60,14 @@ export interface SaveData {
     treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
     created: number; playTimeMs: number;
     wldVersion?: number;
+    moonType?: number;   // 月亮贴图样式（原版 header WF:1252；旧档缺省 0 标准月）
   };
-  clock: { timeOfDay: number; dayCount: number };
+  clock: {
+    timeOfDay: number; dayCount: number;
+    /** 原版 header _tempBloodMoon/_tempEclipse/_tempMoonPhase（WF:1276-1278,读写血月/日食/月相;
+     *  旧档缺省=false/0/0——血月按夜重掷、月相回满月） */
+    bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number;
+  };
   /** 入侵状态（原版 WorldFile.cs:1306-1339 五元组；旧档缺省=无入侵） */
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
@@ -72,7 +78,7 @@ export interface SaveData {
   liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜 4微光）
   wire?: string;       // base64 RLE 电路位（bit0-3 四色线 bit4 致动器 bit5 已致动；旧档缺此字段=全 0）
   blocks?: string;     // base64 RLE 半砖/坡面（0=整砖 1=半砖 2-5=slope1-4;旧档缺=全整砖）
-  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>;
+  chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
   player: {
     hp: number; x: number; y: number;
     inventory: Array<SavedItem | null>;
@@ -91,9 +97,24 @@ export interface SaveData {
     /** 三套 Loadout（EquipmentLoadout：armor[20]+dye[10]；当前套序号） */
     loadouts?: Array<{ armor: Array<SavedItem | null>; dye: Array<SavedItem | null> }>;
     currentLoadout?: number;
+    /** Buff 槽（原版 buffType+buffTime 44 槽,PL:53913-53925;[vanillaBuffId, 剩余秒],
+     *  Main.buffNoSave 已过滤——旧档缺省=无 buff） */
+    buffs?: Array<[number, number]>;
+    /** 税务员累积税款（Player.taxMoney 铜币,PL:53839;旧档缺省 0） */
+    taxMoney?: number;
+    /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
+    deathsPve?: number;
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
+  /** 世界事件态（原版 header 内 party/灯笼夜段,WF:1361-1368/1381-1384;旧档缺省=无派对无预约） */
+  events?: {
+    partyManual: boolean;            // BirthdayParty.ManualParty
+    lanternManual: boolean;          // 服务端手动灯笼（本仓无入口,位保留）
+    lanternGenuine: boolean;         // 真灯笼夜兑现中
+    lanternNext: boolean;            // 次夜灯笼夜预约
+    lanternCooldown: number;         // 冷却夜数
+  };
   /** 挂物族存放物（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
    *  原版 TileEntity 段的最小等价，旧档缺省无） */
   furniture?: FurnitureSaveEntry[];
@@ -125,6 +146,7 @@ export interface SaveMeta {
   treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
   crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
   timeOfDay: number; dayCount: number;
+  bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number; moonType?: number;
   chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
@@ -179,6 +201,7 @@ export function serializeSave(
   st: SaveStoreView, meta: SaveMeta,
   player: SaveData['player'], playTimeMs: number,
   townNpcs?: SaveData['npcs'],
+  events?: SaveData['events'],
 ): string {
   // 幽灵净化:存档格式不携带 active 位(加载时 type≠0 即激活),
   // 非活性格上的残留 type 必须归零,否则重读后全部变成浮空实体块
@@ -198,8 +221,13 @@ export function serializeSave(
       treeX: meta.treeX, treeStyle: meta.treeStyle, treeTops: meta.treeTops,
       crimson: meta.crimson, dungeonX: meta.dungeonX, dungeonY: meta.dungeonY, jungleX: meta.jungleX,
       created: Date.now(), playTimeMs,
+      moonType: meta.moonType ?? 0,
     },
-    clock: { timeOfDay: meta.timeOfDay, dayCount: meta.dayCount },
+    clock: {
+      timeOfDay: meta.timeOfDay, dayCount: meta.dayCount,
+      bloodMoon: meta.bloodMoon ?? false, eclipse: meta.eclipse ?? false,
+      moonPhase: meta.moonPhase ?? 0,
+    },
     invasion: meta.invasion ?? { type: 0, size: 0, sizeStart: 0, x: 0, delay: 0 },
     altarCount: meta.altarCount ?? 0,
     tiles: bytesToB64(rleTiles(st, TILE_STABLE_OF_INTERNAL)),
@@ -208,9 +236,9 @@ export function serializeSave(
     liquidType: bytesToB64(rlePairs(st.liquidType)),
     wire: bytesToB64(rlePairs(st.wire)),
     blocks: bytesToB64(rlePairs(combineBlocks(st.half, st.slope))),
-    chests: meta.chests.map((c) => ({ x: c.x, y: c.y, items: c.items.map(mapItem) })),
+    chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, items: c.items.map(mapItem) })),
     player: { ...player, inventory: player.inventory.map(mapItem), banks: player.banks?.map((b) => b.map(mapItem)) },
-    npcs: [],
+    npcs: townNpcs ?? [],   // 城镇 NPC 段(WorldFile.cs:1703-1750 NPC 段;曾硬编码 [] 断链)
     signs: meta.signs,
     // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）
     furniture: meta.furniture?.map((e) => ({
@@ -219,6 +247,7 @@ export function serializeSave(
     })),
     flags: meta.flags,
     weather: meta.weather,
+    events,
     bestiary: meta.bestiary,
     idScheme: 'sheet',
   };

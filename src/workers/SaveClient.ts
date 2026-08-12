@@ -24,17 +24,17 @@ export class SaveClient {
   private chain: Promise<unknown> = Promise.resolve();
 
   /** 后台存档(串行):成功返回与 saveGame 逐位一致的 JSON;任何失败回退同步路径 */
-  save(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs']): Promise<string> {
+  save(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs'], events?: import('../save/serialize').SaveData['events']): Promise<string> {
     const run = this.chain
       .catch(() => undefined) // 前序失败不阻塞本次
-      .then(() => this.doSave(world, player, playTimeMs, townNpcs));
+      .then(() => this.doSave(world, player, playTimeMs, townNpcs, events));
     this.chain = run;
     return run;
   }
 
-  private async doSave(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs']): Promise<string> {
+  private async doSave(world: World, player: Player, playTimeMs: number, townNpcs?: import('../save/serialize').SaveData['npcs'], events?: import('../save/serialize').SaveData['events']): Promise<string> {
     const w = this.worker;
-    if (this.broken || !w) return saveGame(world, player, playTimeMs, townNpcs);
+    if (this.broken || !w) return saveGame(world, player, playTimeMs, townNpcs, events);
     const st = world.store;
     const id = this.nextId++;
     void townNpcs; // 附进 meta 消息（下方展开处）
@@ -85,16 +85,16 @@ export class SaveClient {
       }, SAVE_TIMEOUT_MS);
     });
     try {
-      w.postMessage({ type: 'save', id, w: st.w, h: st.h, bufs, meta, player: playerData, playTimeMs, townNpcs });
+      w.postMessage({ type: 'save', id, w: st.w, h: st.h, bufs, meta, player: playerData, playTimeMs, townNpcs, events });
     } catch {
       const p = this.pending.get(id);
       if (p) { this.pending.delete(id); }
-      return saveGame(world, player, playTimeMs);
+      return saveGame(world, player, playTimeMs, townNpcs, events);
     }
     try {
       return await promise;
     } catch {
-      return saveGame(world, player, playTimeMs); // 回退同步
+      return saveGame(world, player, playTimeMs, townNpcs, events); // 回退同步
     }
   }
 

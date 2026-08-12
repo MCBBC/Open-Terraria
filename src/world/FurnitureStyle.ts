@@ -32,6 +32,10 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     case 187: return [(style % 35) * 54, Math.floor(style / 35) * 36]; // Y 步=块高 36(16+2+18,非均匀行高)
     // 15 椅子（TileObjectData :4164 StyleHorizontal=false）：style 竖排 Y 步 38
     case 15: return [0, style * 38];
+    // 139 八音盒（Item.cs DefaultToMusicBox placeStyle + SceneMetrics.cs:474 读
+    //  frameY/36 = 曲目 style）：StyleHorizontal=false 竖排 Y 步 36；开关档 X 0/36
+    // （Wiring SwitchMB :50977）。此前走 default X 向 → 唱片全放成曲目 0
+    case 139: return [0, style * 36];
     default: return [style * fw * 18, 0];
   }
 }

@@ -88,6 +88,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
     // 曾在生物群系 pass 里随洞穴箱一起放 → 被后续 hellPass 重写 100% 抹除
     { name: '地狱箱', run: underworldChestsPass },
+    // 苔藓（原版 MossAndMossCaves cs:17573，注册序 BuriedChests 17066 < 本 pass <
+    // Pots 18186）：霓虹苔藓洞 + 苔藓斑/散点/地狱氦苔藓——洞穴系全部定型后只做
+    // 石→苔藓点状替换；长苔藓 pass（20915）的上游，缺它则全图 0 长苔藓
+    { name: '苔藓', run: vanillaMoss },
     // 地狱熔炉(原版 Hellforges,cs:18298:w/200 个,墙 13/14 门禁)
     { name: '地狱熔炉', run: hellforgesPass },
     // （原版管线地下小屋/散箱已由生物群系 pass 内的 CaveHousePass/BuriedChestsPass/
@@ -106,6 +110,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 给 Flowers(20592) 消费
     { name: '倒木水景', run: vanillaFallenLogs },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 草墙（原版 SurfaceDirtWallsToGrassWalls cs:19734，注册序 Piles 18900 之后的
+    // SpawnPoint 19605 < 本 pass < DyePlants 20126）：地表泥土墙洞 → 草墙 63/花墙 65——
+    // Vines pass 花藤 382 的上游（藤头墙 ∈ {63,65,66,68} 才出花藤）
+    { name: '草墙', run: vanillaGrassWall },
     // 染料植物（原版 DyePlants cs:20126）：plantDye + MatureTheHerbPlants +
     // GrowGlowTulips(656) + PlaceChilletEggs(752)，位于 AlchemyHerbs(20109) 之后
     { name: '染料植物', run: vanillaDyePlants },
@@ -161,8 +169,10 @@ import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
+import { runMossAndMossCavesPass } from './vanilla/MossPass';
+import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
-import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
+import { runTreePass, randomizeTreeStyle, growAshTree } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
 import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
@@ -654,6 +664,20 @@ function vanillaGems({ store, rng }: GenCtx) {
   runGemTreesPass(store, rng, gs);
 }
 
+// 苔藓（原版 MossAndMossCaves cs:17573-17833）
+function vanillaMoss({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runMossAndMossCavesPass(store, rng, gs);
+}
+
+// 草墙（原版 SurfaceDirtWallsToGrassWalls cs:19734-19824）
+function vanillaGrassWall({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runGrassWallPass(store, rng, gs);
+}
+
 // 海滩装饰：贝壳堆 + 海藻（原版 ShellPiles pass + GrowCheckSeaweed）
 function vanillaBeachDecor({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
@@ -758,6 +782,31 @@ function hellPass({ store, rng }: GenCtx) {
   for (let n = 0; n < st.w * st.h * 0.0008; n++) {
     tileRunnerHell(st, rng, gs, rng.int(0, st.w - 1), rng.int(st.h - 140, st.h - 1),
       rng.int(2, 6), rng.int(3, 6), HELLSTONE, false, 0, 0, false);
+  }
+  // 5) 灰烬草 633 + 灰烬树 634（cs:13869-13915）：仅地图外缘 17% 带——
+  //    y∈[h-300, h-100±1) 的灰烬 57 任一 8 邻暴露 → 633（藤 638 的上游）；
+  //    再对 y∈[h-200, h-50) 的 633（上方空气）1/3 → TryGrowingTreeByType(634)
+  const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
+  const outerBand = (x: number) => x < st.w * 0.17 || x > st.w * 0.83;
+  for (let x = 25; x < st.w - 25; x++) {
+    if (!outerBand(x)) continue;
+    for (let y = st.h - 300; y < st.h - 100 + rng.int(-1, 1); y++) {
+      const i = st.idx(x, y);
+      if (st.type[i] !== ASH || !st.flags[i]) continue;
+      const exposed = !st.flags[st.idx(x - 1, y - 1)] || !st.flags[st.idx(x, y - 1)]
+        || !st.flags[st.idx(x + 1, y - 1)] || !st.flags[st.idx(x - 1, y)]
+        || !st.flags[st.idx(x + 1, y)] || !st.flags[st.idx(x - 1, y + 1)]
+        || !st.flags[st.idx(x, y + 1)] || !st.flags[st.idx(x + 1, y + 1)];
+      if (exposed) st.type[i] = ASH_GRASS;
+    }
+  }
+  for (let x = 25; x < st.w - 25; x++) {
+    if (!outerBand(x)) continue;
+    for (let y = st.h - 200; y < st.h - 50; y++) {
+      const i = st.idx(x, y);
+      if (st.type[i] !== ASH_GRASS || !st.flags[i] || st.flags[st.idx(x, y - 1)]) continue;
+      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);
+    }
   }
 }
 

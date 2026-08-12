@@ -57,7 +57,7 @@ ctx.onmessage = async (e) => {
       await settleWorldLiquids(world, 'load',
         (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p: 0.3 + p * 0.5 }));
       const { packet, transfer } = packWorld(world);
-      ctx.postMessage({ id: req.id, type: 'result', world: packet, player }, transfer);
+      ctx.postMessage({ id: req.id, type: 'result', world: packet, player, save: data }, transfer);
       return;
     }
   } catch (err) {

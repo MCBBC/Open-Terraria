@@ -365,8 +365,11 @@ void TileRunner(double i, double j, double strength, int steps, int type,
         }
     }
 }
+// TileID.Sets.Ore（TileID.cs:399）：19 个。曾误抄成 20/203/70/21/116/234/1110 的杂表
+// → 沙岩(396/397)上铺矿的 flag4 判定与 JS ORE_SET 分叉（ores checkpoint 纯 type 差）
 static bool IsOre(int t) =>
-    t is 7 or 166 or 6 or 167 or 9 or 168 or 8 or 169 or 20 or 203 or 70 or 107 or 21 or 204 or 108 or 221 or 37 or 1110 or 6 or 116 or 234;
+    t is 7 or 166 or 6 or 167 or 9 or 168 or 8 or 169 or 22 or 204 or 37 or 58
+      or 107 or 221 or 108 or 222 or 111 or 223 or 211;
 
 (double, double) DigTunnel(double X, double Y, double xDir, double yDir, int steps, int size, bool wet = false)
 {

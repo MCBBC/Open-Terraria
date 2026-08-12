@@ -185,6 +185,22 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Obstructed]: { vanillaBuff: 163, descKey: 'BuffDescription.Obstructed', fallbackName: '遮挡' },
 };
 
+/** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
+ *  含 173-181 整段 for 循环）——本仓仅存 BUFF_DEFS 已映射项,交集生效 */
+const BUFF_NO_SAVE = new Set([
+  20, 22, 23, 24, 28, 29, 30, 31, 34, 35, 37, 38, 39, 43, 44, 46, 47, 48,
+  58, 59, 60, 62, 63, 64, 67, 68, 69, 70, 72, 80, 87, 88, 89, 93, 94, 95,
+  96, 97, 98, 99, 100, 103, 119, 120, 125, 126, 133, 134, 135, 137, 139,
+  140, 144, 146, 147, 150, 158, 159, 161, 163, 164, 170, 171, 172, 173, 174,
+  175, 176, 177, 178, 179, 180, 181, 182, 187, 188, 194, 195, 196, 197, 198,
+  199, 205, 213, 214, 215, 263, 271, 320, 321, 322, 325, 335, 348, 353, 355,
+  366, 385, 386,
+]);
+/** vanilla buff id → 本仓 BuffType 反查（存档恢复用） */
+const BUFF_TYPE_BY_VANILLA = new Map<number, BuffType>(
+  (Object.keys(BUFF_DEFS) as unknown as BuffType[]).map((t) => [BUFF_DEFS[t].vanillaBuff, t]),
+);
+
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
 export function buffName(t: BuffType): string {
   return Lang.buffName(BUFF_DEFS[t].vanillaBuff) ?? BUFF_DEFS[t].fallbackName;
@@ -219,6 +235,26 @@ export class BuffState {
   }
   remove(type: BuffType) {
     this.active.delete(type);
+  }
+  /** 存档序列化（Player.cs:53913-53925 buffType+buffTime 槽位语义）:
+   *  存 vanilla id + 剩余秒;Main.buffNoSave 名单(Main.cs:8896-8990)过滤不落盘的 buff */
+  toSave(): Array<[number, number]> {
+    const out: Array<[number, number]> = [];
+    for (const [t, sec] of this.active) {
+      const v = BUFF_DEFS[t]?.vanillaBuff;
+      if (v === undefined || BUFF_NO_SAVE.has(v)) continue;
+      out.push([v, Math.max(1, Math.round(sec))]);
+    }
+    return out;
+  }
+  /** 读档恢复（旧档/导入缺省=无 buff;未知 vanilla id 静默丢弃——后续接入的 buff 不丢档） */
+  applySaved(list: Array<[number, number]> | undefined): void {
+    if (!list) return;
+    for (const [v, sec] of list) {
+      if (BUFF_NO_SAVE.has(v)) continue;
+      const t = BUFF_TYPE_BY_VANILLA.get(v);
+      if (t !== undefined) this.active.set(t, sec);
+    }
   }
   /** 每逻辑帧（dt 秒）。返回本帧生命净变化（正=回复,负=持续伤害/DoT,无视无敌帧与防御） */
   tick(dt: number): number {

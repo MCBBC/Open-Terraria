@@ -150,7 +150,9 @@ export class WeatherState {
   slimeRain = false;
   slimeRainTime = 0;
   slimeRainKillCount = 0;
-  /** 瓢虫雨 boost（Main.cs：ladyBug 幸运套装驱动；无幸运系统时恒 0——字段位保留） */
+  /** 瓢虫雨 boost（Main.cs：ladybug 幸运套装驱动；无幸运系统时恒 0——字段位保留）。
+   *  接线（luck 批）：杀瓢虫 604/605 +1800 钳 18000（LadyBugKilled cs:82334-82338），
+   *  雨 schedule 第三分支 1/num2 提前开雨（:64384）+ UpdateTime 按 dayRate 衰减（:64296） */
   ladyBugRainBoost = 0;
   /** 墓园视觉强度镜像（Game 每帧从 graveyardIntensity 下发；渲染端 ProcessCloudAlpha 用） */
   graveyardVisual = 0;
@@ -236,6 +238,8 @@ export class WeatherState {
       if (this.numClouds > 30) this.numClouds = 30;
       if (this.numCloudsTemp > 30) this.numCloudsTemp = 30;
     }
+    // 瓢虫雨加成衰减（Main.cs:64296-64299 UpdateTime：杀瓢虫累积的提前降雨余量）
+    if (this.ladyBugRainBoost > 0) this.ladyBugRainBoost -= ctx.dayRate;
     this.updateLightningTimers(ctx);
     this.updateWind(ctx);
     this.updateCloudAlpha(ctx);
@@ -546,6 +550,8 @@ export class WeatherState {
       if (canStart) {
         if (this.rng.int(0, Math.round(num2 * 5.75) - 1) === 0) this.tryStartRain(ctx);
         else if (this.cloudBGActive >= 1 && this.rng.int(0, Math.round(num2 * 4.25) - 1) === 0) this.tryStartRain(ctx);
+        // 瓢虫雨加成（Main.cs:64384-64386：杀瓢虫累积余量 >0 时 1/num2 提前开雨）
+        else if (this.ladyBugRainBoost > 0 && this.rng.int(0, num2 - 1) === 0) this.tryStartRain(ctx);
       }
     }
   }

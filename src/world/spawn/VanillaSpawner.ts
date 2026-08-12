@@ -1337,6 +1337,16 @@ export class VanillaSpawner {
           if (N(2)) return D(148);
           return D(149);
         }
+        // 瓢虫 604/605（cs:2413-2445）：起风日（TooWindyForButterflies=|windSpeedTarget|
+        // ≥0.4，NPC.cs:6801）替换蝴蝶段——仅草族 tile（case 2/109/477/492）。
+        // butterflyChance 动态值 1..20（4/5 启用、1/5 关闭，cs:94582-94599），原版
+        // 门 Next(butterflyChance/2) 取期望 ≈ 1/5；金瓢虫 RollLuck(goldCritterChance)
+        // =1/400（luck 修正走 N(400)）。原版成群 1-4 只，本仓单只（API 限制同蜻蜓段）
+        if ((t === T.GRASS || t === 477)
+          && Math.abs(this.world.weather.windSpeedTarget) >= 0.4
+          && !this.world.weather.raining && N(5)) {
+          return D(N(400) ? 605 : 604);
+        }
         // 森林小动物概率表（原版 butterflyChance/stinkBugChance 动态值，取代表值）
         const r = rng.next();
         if (r < 0.2) return D(357);       // 蚯蚓

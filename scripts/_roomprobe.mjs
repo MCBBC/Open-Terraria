@@ -492,6 +492,47 @@ try {
     const aHp = await pageA.evaluate(() => window.__swGame.net.players.get(1)?.hp ?? -1);
     check('HP 中继（msg16）', aHp === 55, `A侧=${aHp}`);
 
+    // ---- v5 敌对弹幕：房主发射 hostile 弹 → 访客傀儡带 bit7 → 本地结算 Damage_EVP ----
+    {
+      // B 满血归位 + 泵一轮刷新服务器侧位置（headless 节流下 >5s 无 msg13 会被判盲跳过中继）
+      await pageB.evaluate(async () => {
+        const g = window.__swGame;
+        g.player.hp = 100;
+        g.player.iframes = 0;
+        for (let i = 0; i < 6; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
+        await new Promise((r) => setTimeout(r, 100));
+        g.net.tick();
+      });
+      const bPos = await pageB.evaluate(() => ({ x: window.__swGame.player.cx, y: window.__swGame.player.cy }));
+      // 房主在 B 左侧 240px 处发射 hostile 弹（projId 9=EyeLaser，直飞 grav=0）朝 B 飞行
+      await pageA.evaluate(async (pos) => {
+        await window.__swFlow.spawnHostileProj(pos.x - 240, pos.y, 3, 0, 15, 9, 0);
+        const g = window.__swGame;
+        for (let i = 0; i < 90; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); } // 广播 msg27（带 bit7）
+      }, bPos);
+      // B 泵循环：傀儡到达 + netPuppetProjContact 本地结算（240px @3px/tick = 80 tick）
+      await pageB.evaluate(async () => {
+        const g = window.__swGame;
+        for (let i = 0; i < 150; i++) {
+          g.fixedUpdate(1 / 60);
+          g.postUpdate();
+          if (i % 10 === 0) await new Promise((r) => setTimeout(r, 30));
+        }
+      });
+      await sleep(600); // msg16 中继窗口
+      const projDmg = await pageB.evaluate(() => window.__swGame.player.hp);
+      const aHp2 = await pageA.evaluate(() => window.__swGame.net.players.get(1)?.hp ?? -1);
+      check('敌对弹幕对访客伤害（v5 bit7 + Damage_EVP 本地结算）', projDmg < 100, `B hp=${projDmg}/100`);
+      check('弹幕伤害经 msg16 中继到房主', aHp2 === projDmg, `A侧=${aHp2} B侧=${projDmg}`);
+      // 弹体命中不销毁（原版 :13811 穿透不消耗语义）——傀儡应仍存在或自然超时
+      const pupHostile = await pageB.evaluate(() => {
+        let n = 0;
+        for (const [, pup] of window.__swGame.netProjPuppets) if (pup.p.hostile) n++;
+        return n;
+      });
+      check('hostile 弹幕傀儡重建（bit7 解码）', pupHostile >= 1, `hostile傀儡=${pupHostile}`);
+    }
+
     // 箱子同步：B 请求开箱（msg31）→ 服务器权威内容（msg32）→ protectItems 编辑被拒。
     // 锚点从 lobby 码校验端点拿（客户端只加载出生点条带，本地扫不到远处箱子）
     const chestTile = await fetch(`http://127.0.0.1:${LOBBY}/rooms/${created.code}`).then((r) => r.json()).then((d) => d.chest ?? null);

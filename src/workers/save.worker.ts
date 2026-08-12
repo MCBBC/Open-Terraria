@@ -18,6 +18,7 @@ interface SaveRequest {
   player: SaveData['player'];
   playTimeMs: number;
   townNpcs?: import('../save/serialize').SaveData['npcs'];
+  events?: import('../save/serialize').SaveData['events'];
 }
 
 self.onmessage = (e: MessageEvent<SaveRequest>) => {
@@ -37,7 +38,7 @@ self.onmessage = (e: MessageEvent<SaveRequest>) => {
       slope: new Uint8Array(req.bufs.slope),
     };
     const meta: SaveMeta = { ...req.meta, w: req.w, h: req.h };
-    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs);
+    const json = serializeSave(view, meta, req.player, req.playTimeMs, req.townNpcs, req.events);
     (self as unknown as Worker).postMessage({ type: 'saved', id: req.id, json });
   } catch (err) {
     (self as unknown as Worker).postMessage({ type: 'error', id: req.id, message: String(err) });

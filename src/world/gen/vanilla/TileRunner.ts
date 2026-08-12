@@ -161,7 +161,10 @@ export function tileRunner(
             } else if (cur === MARBLE || cur === GRANITE) {
               if (type === MUD) flag4 = true;
             } else if (cur === SANDSTONE || cur === HARDSAND) {
-              if (!ORE_SET.has(type)) flag4 = true;
+              // 原版 case 396/397（cs:77308-77311）：**赋值** flag4 = !TileID.Sets.Ore[type]
+              // ——会覆盖前面 CanBeClearedDuringGeneration 置的 true（矿石可替换沙岩/硬化沙）。
+              // 曾写成"非矿石才置 true"→ 矿石被 NOT_CLEARABLE 拦住，整片沙漠矿石缺失
+              flag4 = !ORE_SET.has(type);
             }
           }
           if (!flag4) st.type[ti] = type;

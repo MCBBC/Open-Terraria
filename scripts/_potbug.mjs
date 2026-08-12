@@ -23,10 +23,10 @@ const setup = await page.evaluate(() => {
   // 清空 + 平台
   for (let x = px - 12; x <= px + 16; x++) for (let y = y0 - 6; y <= y0 + 2; y++) st.setTile(x, y, 0);
   for (let x = px - 12; x <= px + 16; x++) st.setTile(x, y0, DIRT);
-  // 陶罐 A(真帧,样式 0):4 格 (0,0)(18,0)(0,18)(18,18)
+  // 陶罐 A(真帧,样式列4行24——用户标注同款 (72,432)):4 格规整偏移
   const ax = px - 6, ay = y0 - 2;
-  st.setTile(ax, ay, POT, 0, 0); st.setTile(ax + 1, ay, POT, 18, 0);
-  st.setTile(ax, ay + 1, POT, 0, 18); st.setTile(ax + 1, ay + 1, POT, 18, 18);
+  st.setTile(ax, ay, POT, 72, 432); st.setTile(ax + 1, ay, POT, 90, 432);
+  st.setTile(ax, ay + 1, POT, 72, 450); st.setTile(ax + 1, ay + 1, POT, 90, 450);
   // 陶罐 B(全零帧,样式随机第 2 行 36):锚点重建路径
   const bx = px + 2;
   st.setTile(bx, ay, POT, 0, 0); st.setTile(bx + 1, ay, POT, 0, 0);

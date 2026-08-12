@@ -232,6 +232,14 @@ const WILLOW_PROFILE: TreeProfile = {
   ground: VANITY_GROUND, walls: DEFAULT_TREE_WALLS,
   heightMin: 7, heightMax: 12, topPadding: 4,
 };
+/** AshTreeGroundTest（cs:30487-30501）：仅灰烬草 633 */
+const ASH_GROUND = idsByVanillaSheet(633);
+const ASH_PROFILE: TreeProfile = {
+  treeTile: TILE_BY_KEY['v_634_ash_tree']!,
+  sapling: GEM_SAPLING,   // Tree_Ash.SaplingTileType=20（cs:3901；growTreeWithSettings 不消费）
+  ground: ASH_GROUND, walls: DEFAULT_TREE_WALLS,
+  heightMin: 7, heightMax: 12, topPadding: 4,   // Tree_Ash 高度 7-12 / Padding 4（cs:3898-3901）
+};
 
 /** GrowTreeWithSettings（cs:30546-30967）1:1：宝石树/观赏树共用骨架。
  *  干身帧表与 GrowTree 同构（同一 switch，cs:30604-30700），复用 TRUNK。 */
@@ -316,6 +324,12 @@ export function growGemTree(st: TileStore, rng: RNG, x: number, y: number, treeT
 /** 观赏树（TryGrowingTreeByType 616 柳 / 596 樱 → VanityTree_Willow/Sakura profile，cs:3872-3894） */
 export function growVanityTree(st: TileStore, rng: RNG, x: number, y: number, willow: boolean): boolean {
   return growTreeWithSettings(st, rng, x, y, willow ? WILLOW_PROFILE : SAKURA_PROFILE);
+}
+
+/** 灰烬树（TryGrowingTreeByType 634 → GrowTreeSettings.Profiles.Tree_Ash，cs:3894-3903/
+ *  30538）：灰烬草 633 基座、高 7-12。地狱 pass 铺 633 后 1/3 概率逐点尝试（cs:13885） */
+export function growAshTree(st: TileStore, rng: RNG, x: number, y: number): boolean {
+  return growTreeWithSettings(st, rng, x, y, ASH_PROFILE);
 }
 
 /** AddTrees（1456 cs:31523-31578）1:1：逐列尝试（~1.6 列间距）；沙滩棕榈按每侧固定概率；

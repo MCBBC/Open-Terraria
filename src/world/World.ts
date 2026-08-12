@@ -1,6 +1,6 @@
 // 世界门面：TileStore + 元数据 + 实体容器 + 昼夜时钟
 import { TileStore } from './TileStore';
-import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weather';
+import { WeatherState, applyWeatherSave, weatherToSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
 import { newMoonEventState } from './MoonEvent';
 import { newOldOnesArmyState } from './OldOnesArmy';
@@ -72,7 +72,10 @@ export class World {
   /** 图鉴统计（BestiaryUnlocksTracker——原版 IPersistentPerWorldContent，随世界存档：
    *  WorldFile.cs:3399 Save/:3405 Load。杀数/遇数/聊天三桶，数据层见 data/Bestiary.ts） */
   bestiary = new BestiaryTracker();
-  /** 读档回填（loadSaveData；WorldPacket 不走这里，包内即活存储） */
+  weatherToSave(): import('./weather/Weather').WeatherSave | undefined {
+    return weatherToSave(this.weather);
+  }
+  /** 读档/worker 包回填（loadSaveData 与 WorldPacket.fromPacket 两条路径共用） */
   applyBestiary(data: BestiarySave | undefined): void {
     this.bestiary = BestiaryTracker.fromSave(data);
   }
@@ -86,6 +89,8 @@ export class World {
   /** 以太生物群系中心（GenVars.shimmerPosition；无微光世界为 0）。ShimmerPass 写入，
    *  生成期沉降 ShimmerRemoveWater（WorldGen.cs:34859）按此清腔内非微光液体 */
   shimmerX = 0;
+  /** 月亮贴图样式（原版 header moonType 0-8,WF:1252;SkyRenderer 消费） */
+  moonType = 0;
   shimmerY = 0;
   /** 世界级生物群系常量(原版 header,生成期 Reset pass 掷出) */
   crimson = false;          // true=猩红 false=腐化
@@ -170,6 +175,16 @@ export class World {
     w.exploredVersion = p.exploredVersion;
     w.clock.timeOfDay = p.clock.timeOfDay;
     w.clock.dayCount = p.clock.dayCount;
+    if (p.clock.bloodMoon !== undefined) w.clock.bloodMoon = p.clock.bloodMoon;
+    if (p.clock.eclipse !== undefined) w.clock.eclipse = p.clock.eclipse;
+    if (p.clock.moonPhase !== undefined) w.clock.moonPhase = p.clock.moonPhase;
+    if (p.moonType !== undefined) w.moonType = p.moonType;
+    if (p.invasion) { w.invasionType = p.invasion.type; w.invasionSize = p.invasion.size;
+      w.invasionSizeStart = p.invasion.sizeStart; w.invasionX = p.invasion.x; w.invasionDelay = p.invasion.delay; }
+    if (p.altarCount !== undefined) w.altarCount = p.altarCount;
+    if (p.weather) w.applyWeather(p.weather);
+    if (p.bestiary) w.applyBestiary(p.bestiary);
+    w.pendingTownNpcs = p.pendingTownNpcs;
     w.chests = p.chests;
     w.signs = p.signs;
     w.furnitureItems = p.furnitureItems ?? [];

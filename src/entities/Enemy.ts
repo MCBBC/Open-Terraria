@@ -3261,6 +3261,16 @@ export class Enemy extends Entity {
    *  +vy+=0.2、前方 1 格下 4 格有水 → 起飞（cs:48036-48075） */
   private ladybugAI(game: GameHooks, _player: Player | null) {
     const st = game.world.store;
+    // 玩家身体接触活瓢虫 → 好运（NPC.UpdateNPC 接触段 cs:78730-78732 →
+    // LadyBugLuck :82366：800px 内按距离^6 衰减，详见 LuckState.ladyBugTouched；
+    // 仅 604/605——同 AI_115 的椿象 669 不参与）
+    if (_player && !_player.dead && (this.vanillaId === 604 || this.vanillaId === 605)) {
+      if (this.x < _player.x + _player.w && this.x + this.w > _player.x
+        && this.y < _player.y + _player.h && this.y + this.h > _player.y) {
+        _player.luckState?.ladyBugTouched(
+          Math.hypot(this.cx - _player.cx, this.cy - _player.cy), this.vanillaId === 605);
+      }
+    }
     if (!this.aiInit) { this.aiInit = true; this.ai0 = Math.random() * Math.PI * 2; this.ai1 = 60 + Math.floor(Math.random() * 120); this.ai2 = 0; }
     this.ai1 -= 1;
     if (this.ai1 <= 0) {
@@ -3964,6 +3974,17 @@ export class Enemy extends Entity {
         return false;
       }
       this.dead = true;
+      // 瓢虫被杀 → 坏运（NPC.checkDead cs:78838-78840 → LadyBugKilled :82332）：
+      // 604 普通 / 605 金瓢虫（距离衰减公式见 LuckState.ladyBugKilled）；
+      // 副产物 ladyBugRainBoost +1800 钳 18000（cs:82334-82338，雨调度提前开雨）
+      if (this.vanillaId === 604 || this.vanillaId === 605) {
+        const pl = (game as unknown as { player?: Player }).player;
+        if (pl && !pl.dead) {
+          pl.luckState?.ladyBugKilled(Math.hypot(this.cx - pl.cx, this.cy - pl.cy), this.vanillaId === 605);
+        }
+        const w = game.world.weather;
+        w.ladyBugRainBoost = Math.min(18000, w.ladyBugRainBoost + 1800);
+      }
       // 风气球 594 爆裂：解冻挂载史莱姆（原版 HitEffect :82586-82594 slave ai[0]=0 + 上移 10）
       if (this.vanillaId === 594) {
         const slave = (game.enemies() as Enemy[]).find((n) => n.id === this.ai3 && n.ai0 === -999);

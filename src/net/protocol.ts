@@ -7,9 +7,10 @@
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
  *  v3：实体同步族（msg16/21/23/27/42）+ 箱子权威（msg31/32）+ sessionToken 重连
- *  v4：msg23 S→C 短码格式（key 每次全量→codeId 短码+按需全量）+ RoomPolicy 尾部 u16 maxPlayers。
- *      server 与 game 同仓库同时发布，不做 v3 向后兼容 */
-export const PROTO_VER = 4;
+ *  v4：msg23 S→C 短码格式（key 每次全量→codeId 短码+按需全量）+ RoomPolicy 尾部 u16 maxPlayers
+ *  v5：msg27 kind 高位 bit7=hostile（仅 kind0/Arrow 有效——原版 Projectile.hostile 位，
+ *      访客端据此对敌对弹幕傀儡本地结算 Damage_EVP）。server 与 game 同仓库同时发布，不做向后兼容 */
+export const PROTO_VER = 5;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
@@ -47,7 +48,9 @@ export const enum Msg {
                        //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
-                       //   （kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；注释曾误写 rot）
+                       //   （kind 低 3 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；
+                       //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起仅 kind0 携带，
+                       //    访客端对 hostile 傀儡本地结算 Damage_EVP；注释曾误写 rot）
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}

@@ -49,9 +49,14 @@ import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
-import { attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith } from '../world/wiring/devices';
+import {
+  attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith,
+  musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxBroadcast,
+  MUSIC_BOX_EMPTY_VID,
+} from '../world/wiring/devices';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, type PartyState } from '../world/wiring/party';
 import { LanternNight } from '../world/LanternNight';
+import type { SaveData } from '../save/serialize';
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
 import {
   rollExtractinatorDrop, extractinatorMode, extractinatorUseTime, mathRand,
@@ -109,7 +114,7 @@ import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
-import { Inventory, INV_SIZE } from '../items/Inventory';
+import { Inventory, INV_SIZE, ACC_ARMOR_START } from '../items/Inventory';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
 const IMPORTED_TREE_TYPES = new Set<number>(
@@ -145,6 +150,7 @@ import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
+import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
@@ -286,7 +292,8 @@ export interface GameCallbacks {
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
-  onChat?: (text: string, r: number, g: number, b: number) => void;
+  /** width = NewTextMultiline WidthLimit（-1 不限；广播盒 460） */
+  onChat?: (text: string, r: number, g: number, b: number, width?: number) => void;
   /** NPC 对话框(SetTalkNPC):name/chat/buttons → UI 渲染 */
   onNpcDialog?: (name: string, chat: string, buttons: Array<{ id: 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'close'; label: string }>, portrait?: string | null) => void;
   onNpcDialogClose?: () => void;
@@ -297,6 +304,8 @@ export interface GameCallbacks {
   onBuffsChanged?: () => void;
   /** 读墓碑/告示牌（Sign 阅读界面） */
   onReadSign?: (text: string) => void;
+  /** 广播盒右键（Player.cs:32231-32250 OpenSign）：开文本编辑面板（锚点+现文本） */
+  onEditSign?: (x: number, y: number, text: string) => void;
   onDayNight?: (isDay: boolean) => void;
   /** 环境选曲变化（MusicID；0=静音）。原版 UpdateAudio_DecideOnNewMusic 驱动 */
   onMusic?: (musicId: number) => void;
@@ -520,7 +529,11 @@ export class Game implements GameHooks {
       if (Math.abs(p.x - last.x) < 1 && Math.abs(p.y - last.y) < 1 && this.tickCount - last.t < 60) continue;
       last.x = p.x; last.y = p.y; last.t = this.tickCount;
       let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
-      if (p instanceof Arrow) { kind = 0; tag = String(p.projId ?? 1); }
+      if (p instanceof Arrow) {
+        kind = 0; tag = String(p.projId ?? 1);
+        // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
+        if (p.hostile) kind |= 0x80;
+      }
       else if (p instanceof Dart) { kind = 2; tag = String(p.projId ?? 0); }
       else if (p.projId !== undefined) { kind = 1; tag = String(p.projId); }
       else if (p instanceof TrapShot) { kind = 3; tag = p.kind ?? 'dart'; }
@@ -633,8 +646,11 @@ export class Game implements GameHooks {
   }
 
   private netMakeProj(s: ProjSnap): Entity | null {
-    switch (s.kind) {
-      case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1);
+    // v5：bit7 = hostile（原版 Projectile.hostile，仅 kind0/Arrow 语义有效）——
+    // 访客端据此对敌对弹幕傀儡本地结算 Damage_EVP（见 netPuppetProjContact）
+    const hostile = (s.kind & 0x80) !== 0;
+    switch (s.kind & 0x7f) {
+      case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1, null, { hostile });
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
       case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0);
       case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind);
@@ -700,6 +716,19 @@ export class Game implements GameHooks {
       if (!(e.netAx < p.x + p.w && e.netAx + e.w > p.x && e.netAy < p.y + p.h && e.netAy + e.h > p.y)) continue;
       this.damagePlayer(dmg, e.cx, e.cy, e);
       e.iframes = 8;
+    }
+  }
+
+  /** 访客：敌对弹幕傀儡本地结算（原版 Projectile.Damage_EVP，Projectile.cs:13706-13830）。
+   *  语义与近战接触伤害同模型：玩家 HP 客户端权威 + msg16 中继（原版玩家伤害即本地
+   *  结算——每端各自跑弹幕命中本地玩家判定）。hitPlayer 内含原版门禁链：
+   *  hostile + dmg>0 / player.immune(iframes) / AABB 相交；命中【不消耗穿透】
+   *  （:13811-13829 特判除外），弹体照常飞行；debuff 授予以实际伤害为准（statusPlayer）。 */
+  private netPuppetProjContact() {
+    for (const [, pup] of this.netProjPuppets) {
+      const pr = pup.p as Entity & { hostile?: boolean; damage?: number; projId?: number };
+      if (!pr.hostile || pr.dead) continue;
+      if (hitPlayer(pr, this, pr.damage ?? 0)) statusPlayer(this, pr.projId ?? 0);
     }
   }
   /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
@@ -1110,6 +1139,7 @@ export class Game implements GameHooks {
     // ---- 天气系统接线：状态机已在 world.weather（存档/wld 导入回填）；
     //  天空云联动 + 雨滴/沙尘渲染器 attach；hooks 字段每帧由 fixedUpdate 刷新 ----
     this.renderer.sky.attachWeather(w.weather);
+    this.renderer.sky.moonType = this.world.moonType;   // 原版 header moonType（WF:1252）
     this.weatherHooks = {
       lightAt: (tx, ty) => this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255],
       atmo: 1,
@@ -1699,6 +1729,27 @@ export class Game implements GameHooks {
       }
     }
     const player = this.player;
+
+    // ---- 八音盒录音（Player.cs:15053-15366 ApplyEquipFunctional 1:1）：配饰槽
+    // armor[3-9]（原版 :12543-12550 for m=3..9）装备空盒 576 时，每 tick 掷 1/540
+    // （Main.rand.Next(540)==0）——当前 BGM ∈(0,105] 且 CanBeRecorded 即命中。
+    // 原版先播 Item166 再走变身 if-chain（无映射曲只响声不变身），此处同序；
+    // 变身目标 = musicBoxRecordItem（curMusic→style→vid，WorldGen :43138 逆表） ----
+    if (this.lastMusic > 0 && this.lastMusic <= 105) {
+      for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+        const slot = player.inv.armor[acc];
+        if (!slot) continue;
+        const heldDef = ITEM_DEFS[slot.id];
+        if (!heldDef || viIdFromKey(heldDef.key) !== MUSIC_BOX_EMPTY_VID) continue;
+        if (Math.floor(Math.random() * 540) !== 0) continue;
+        this.sfx.play('record');   // SoundID.Item166（录音完成音）
+        const recKey = VANILLA_ITEM_KEY_BY_ID[musicBoxRecordItem(this.lastMusic)];
+        const recId = recKey !== undefined ? ITEM_BY_KEY[recKey] : undefined;
+        if (recId === undefined) continue;   // 曲目无映射（如 50 TitleIntro）/唱片未注册
+        player.inv.armor[acc] = { id: recId, stack: 1 };
+        this.cb.onInventoryChanged();
+      }
+    }
 
     // ---- 玩家输入 ----
     const inp = this.input;
@@ -3909,6 +3960,8 @@ export class Game implements GameHooks {
     // 候选落空回退帧最小格（约定无关：家具顶行锚/陶罐底行锚均可）
     if ((def.w ?? 1) > 1 || (def.h ?? 1) > 1) {
       const ow = def.w ?? 1, oh = def.h ?? 1;
+      // 破坏前帧捕获（八音盒/喷泉按帧带定掉落物；清格会归零帧）
+      const preFrameX = st.frameX[st.idx(x, y)], preFrameY = st.frameY[st.idx(x, y)];
       let ax = x, ay = y, best = Infinity, hasCandidate = false;
       for (let dx = -(ow - 1); dx <= ow - 1; dx++) {
         for (let dy = -(oh - 1); dy <= oh - 1; dy++) {
@@ -3933,8 +3986,23 @@ export class Game implements GameHooks {
       }
       // 掉落:drop:null = 显式无掉落(原版装饰类,如 165 冰凌/蛛网卵袋);仅 undefined
       // 才走 v_ 回收兜底(place_v_ 再放置)。曾用 ?? ——null 同样触发兜底,null 语义失效
-      const dropKey = def.drop === undefined ? (def.key.startsWith('v_') ? 'place_' + def.key : '') : def.drop;
+      let dropKey = def.drop === undefined ? (def.key.startsWith('v_') ? 'place_' + def.key : '') : def.drop;
+      // 八音盒/喷泉按帧带掉对应唱片/喷泉（CheckMB :51288-51292 /
+      // Check2xX :38199-38226——139 style=frameY/36、207 style=frameX/36；
+      // KillTile_GetItemDrops 两 tile 均在无掉落表里，掉落全走帧检分支）
+      const framedSheet = def.vanilla?.sheet ?? -1;
+      if (framedSheet === 139) {
+        dropKey = VANILLA_ITEM_KEY_BY_ID[musicBoxDropItemOf(Math.floor(preFrameY / 36))] ?? dropKey;
+      } else if (framedSheet === 207) {
+        const fDrop = fountainDropItemOf(Math.floor(preFrameX / 36));
+        if (fDrop > 0) dropKey = VANILLA_ITEM_KEY_BY_ID[fDrop] ?? dropKey;
+      }
       if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
+      // 告示牌族（Main.tileSign {55,85,425,573}，Main.cs:9990-9993）破坏 → 注销
+      // 牌面文本登记（WorldGen.cs:43733 Sign.KillSign，帧检分支）
+      if (framedSheet === 55 || framedSheet === 85 || framedSheet === 425 || framedSheet === 573) {
+        this.world.signs = this.world.signs.filter((s) => !(s.x === ax && s.y === ay));
+      }
       // 宝箱内容物掉出
       if (type === T.CHEST) this.dumpChest(ax, ay);
       // 挂物族：空物破坏 → 移除存放记录（TileEntityType.Kill，TileEntity.cs:110-116；
@@ -4720,6 +4788,7 @@ export class Game implements GameHooks {
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
       || FURNITURE_TILE_KIND.has(type) // 挂物族右键会改存放物（世界状态）
       || sh === 35 || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
+      || sh === 425
     );
     if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     // ---- 挂物族（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
@@ -4764,6 +4833,13 @@ export class Game implements GameHooks {
         this.net.requestChestOpen(tx, ty);
         this.input.rightDown = false;
       }
+    } else if (sh === 425) {
+      // 广播盒右键（Player.cs:32231-32250 tileSign 分支 → OpenSign）：按帧回算
+      // 2×2 锚点（:32240-32245 frameX/18、frameY/18），Sign.ReadSign(anchor,
+      // CreateIfMissing:true) 懒建空牌项 → 文本编辑面板（保存走 setSignText）
+      const iBox = st.idx(tx, ty);
+      this.openSignEditor(tx - Math.floor(st.frameX[iBox] / 18), ty - Math.floor(st.frameY[iBox] / 18));
+      this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['tombstone_v']) {
       // 墓碑：读碑文（原版 Sign 阅读；碑文在 2×2 锚点登记，点任意一格都能读到）
       const sign = this.world.signs.find((s) =>
@@ -5484,7 +5560,7 @@ export class Game implements GameHooks {
       graveyardIntensity: this.graveyardIntensity,
       hardMode: !!w.flags.hardMode,
       noOtherEvent: !w.clock.bloodMoon && this.world.invasionType === 0,
-      downedSlimeKing: !!w.flags.downedSlimeKing,
+      downedSlimeKing: !!(w.flags.downedSlimeKing ?? w.flags.downed_50),  // 击败键=downed_50(50=史莱姆王)
       maxTilesX: w.w,
       worldSurface: gl,
       viewCenterY: viewCY,
@@ -5706,17 +5782,37 @@ export class Game implements GameHooks {
         if (x !== undefined && y !== undefined) this.sfxAt(n as SfxName, x, y);
         else this.sfx.play(n as SfxName);
       },
-      // 广播盒（Wiring.cs:1177-1230）：锚点 2×2 内的告示牌文本 → 聊天广播。
-      // 原版 NewTextMultiline 粉色多行——toast 单行近似（聊天多行渲染未接入）
+      // 广播盒（Wiring.cs:1177-1230 1:1）：Sign.ReadSign(anchor, CreateIfMissing:false)
+      // ——锚点精确匹配（原版按锚点格查 Main.sign，非重叠扫描），无登记/空文本静默；
+      // 命中 → NewTextMultiline(text, pink, 460)（色值/折行宽度见 announcementBoxBroadcast）
       announce: (x: number, y: number) => {
-        const sign = this.world.signs.find((s) => x >= s.x && x <= s.x + 1 && y >= s.y && y <= s.y + 1);
-        if (sign && sign.text.trim()) this.cb.onToast(sign.text);
+        const sign = this.world.signs.find((s) => s.x === x && s.y === y);
+        const msg = announcementBoxBroadcast(sign?.text);
+        if (msg) this.newText(msg.text, msg.r, msg.g, msg.b, msg.width);
       },
       // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty）
       toggleParty: () => {
         toggleManualParty(this.partyState);
       },
     };
+  }
+
+  /** 广播盒右键（Player.cs:32231-32250）：Sign.ReadSign(anchor, CreateIfMissing:true)
+   *  ——锚点无登记则懒建空牌项（Sign.cs:45-59），再开文本编辑面板 */
+  private openSignEditor(x: number, y: number): void {
+    let sign = this.world.signs.find((s) => s.x === x && s.y === y);
+    if (!sign) {
+      sign = { x, y, text: '' };
+      this.world.signs.push(sign);
+    }
+    this.cb.onEditSign?.(x, y, sign.text);
+  }
+
+  /** 编辑面板保存（Sign.TextSign :63-77：按登记下标写回文本） */
+  setSignText(x: number, y: number, text: string): void {
+    const sign = this.world.signs.find((s) => s.x === x && s.y === y);
+    if (!sign) return;
+    sign.text = text;
   }
 
   /** 传送器对(Wiring.cs:2314-2365):板上 48×48 判定框内实体双向搬迁 */
@@ -7500,6 +7596,7 @@ export class Game implements GameHooks {
       }
       if (p.hp <= 0) {
         p.dead = true;
+        p.deathsPve++;              // numberOfDeathsPVE（PL:53840,存档持久化）
         p.respawnTimer = 0;
         // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
         // 掉钱按难度（Player.DropCoins :53351-53390：普通掉一半/专家 1/4/大师不掉；
@@ -8091,6 +8188,27 @@ export class Game implements GameHooks {
         bound: n.bound || undefined,
         givenName: n.givenName,
       }));
+  }
+
+  /** 世界事件态存档（原版 header party/灯笼夜段 WF:1361-1368/1381-1384） */
+  eventsForSave(): SaveData['events'] {
+    return {
+      partyManual: this.partyState.manualParty,
+      lanternManual: LanternNight.manualLanterns,
+      lanternGenuine: LanternNight.genuineLanterns,
+      lanternNext: LanternNight.nextNightIsLanternNight,
+      lanternCooldown: LanternNight.lanternNightsOnCooldown,
+    };
+  }
+
+  /** 读档恢复事件态（旧档缺省=无派对无预约） */
+  eventsApplySave(ev: SaveData['events'] | undefined): void {
+    if (!ev) return;
+    this.partyState.manualParty = !!ev.partyManual;
+    LanternNight.manualLanterns = !!ev.lanternManual;
+    LanternNight.genuineLanterns = !!ev.lanternGenuine;
+    LanternNight.nextNightIsLanternNight = !!ev.lanternNext;
+    LanternNight.lanternNightsOnCooldown = ev.lanternCooldown ?? 0;
   }
 
   /** 拾取物品飘名（主角旁浅白文本）。同一时间只保留一个，
@@ -8782,9 +8900,11 @@ export class Game implements GameHooks {
     return false;
   }
 
-  /** Main.NewText(Main.cs:64095):左下角消息列。颜色 = ChatColors.cs 五色 */
-  newText(text: string, r = 255, g = 255, b = 255): void {
-    this.cb.onChat?.(text, r, g, b);
+  /** Main.NewText(Main.cs:64095):左下角消息列。颜色 = ChatColors.cs 五色。
+   *  width = NewTextMultiline 的 WidthLimit（Main.cs:64101，广播盒 460px 折行），
+   *  缺省 -1 = 不限（ChatMonitor 默认宽度） */
+  newText(text: string, r = 255, g = 255, b = 255, width = -1): void {
+    this.cb.onChat?.(text, r, g, b, width);
   }
 
   /** Announcement 类消息便捷封装(NPC.cs/WorldGen.cs BroadcastChatMessage 语义) */
@@ -8956,7 +9076,7 @@ export class Game implements GameHooks {
           }
           this.lighting.dirty = true;
         },
-        onChat: (text, r, g, b) => this.newText(text, r, g, b),
+        onChat: (text, r, g, b, width) => this.newText(text, r, g, b, width),
         onKick: (reason) => {
           this.cb.onToast?.(reason);
           fail(reason);
@@ -9020,7 +9140,7 @@ export class Game implements GameHooks {
         this.netDropSweep();
       }
       if (this.tickCount % 30 === 0) this.netSweepPuppets();
-      if (!this.net.policy.isHost) this.netPuppetContact();
+      if (!this.net.policy.isHost) { this.netPuppetContact(); this.netPuppetProjContact(); }
     }
   }
 

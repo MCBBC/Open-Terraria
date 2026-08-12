@@ -53,6 +53,8 @@ export class Player extends Entity {
   headUnderwater = false;
   /** 税务员累积税款（Player.cs:792 taxMoney，铜币；对话「收集」领取） */
   taxMoney = 0;
+  /** PVE 死亡计数（Player.numberOfDeathsPVE，PL:53840；存档 player 段持久化） */
+  deathsPve = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */

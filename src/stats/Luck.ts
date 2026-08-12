@@ -24,8 +24,11 @@
 //       RollOnlyBadLuckExtreme    仅负运 [0, N/10)，否则恒 -1（永不命中）
 //   来源接线状态（已接/登记见 get luck 注释与 Game.ts 扫描位）：
 //     已接：幸运药水 buff 257 / 灯笼夜 / 花园地精扫描 / 火炬幸运扫描 / 装备
-//           （幸运币 855 / 马掌族）/ 钱币幸运数值位
-//     登记：瓢虫 359/360（本仓无该小动物）、buff 383（风筝幸运，未入 BuffType）、
+//           （幸运币 855 / 马掌族）/ 钱币幸运数值位 / 瓢虫 604/605（击杀=坏运
+//           Enemy.hurt cs:82338；触碰=好运 ladybugAI cs:78730。原登记 ID 359/360
+//           为旧版误记——1.4.5.6 瓢虫是 NPC 604 Ladybug / 605 Gold Ladybug，
+//           359/360 实为蜗牛；生成在 VanillaSpawner 起风日分支 cs:2413）
+//     登记：buff 383（风筝幸运，未入 BuffType）、
 //           buff 120（Stinky）、银河珍珠 5340、碎镜 810、微光化币（微光未移植）。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
