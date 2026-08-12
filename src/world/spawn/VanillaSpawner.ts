@@ -75,6 +75,7 @@ const T = (() => {
     // 神圣族计数(SceneMetrics.cs:603)：109 神圣草/492 神圣修剪草/110 神圣矮草/
     // 113 神圣高草/117 珍珠岩/402 神圣硬化沙/403 神圣沙岩（116 珍珠沙/164 粉冰见上）
     HALLOW_GRASS: get('v_109_hallowed_grass_block'), HALLOW_MOWED_GRASS: get('v_492_hallowed_mowed_grass_block'),
+    MOWED_GRASS: get('v_477_mowed_grass_block'),
     HALLOW_PLANT: get('v_110_hallow_short_plants'), HALLOW_TALL_PLANT: get('v_113_hallow_tall_plants'),
     PEARLSTONE_BLOCK: get('v_117_pearlstone_block'), HALLOW_HARDSAND: get('v_402_hallow_hardened_sand_block'),
     HALLOW_SANDSTONE: get('v_403_hallow_sandstone_block'),
@@ -1409,7 +1410,7 @@ export class VanillaSpawner {
     // ---- 小动物（spawnFriendly 段 L2006-2535，白天 + 草/土 tile + Next(15) 门）----
     //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）
     if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
-      (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === 477)) {
+      (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === T.MOWED_GRASS)) {
       if (N(15)) {
         if (t === T.SNOW || t === T.SNOW_BRICK) {
           // 雪原小动物（L148→148|149 Next(2)）
@@ -1421,7 +1422,7 @@ export class VanillaSpawner {
         // butterflyChance 动态值 1..20（4/5 启用、1/5 关闭，cs:94582-94599），原版
         // 门 Next(butterflyChance/2) 取期望 ≈ 1/5；金瓢虫 RollLuck(goldCritterChance)
         // =1/400（luck 修正走 N(400)）。原版成群 1-4 只，本仓单只（API 限制同蜻蜓段）
-        if ((t === T.GRASS || t === 477)
+        if ((t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)
           && Math.abs(this.world.weather.windSpeedTarget) >= 0.4
           && !this.world.weather.raining && N(5)) {
           return D(N(400) ? 605 : 604);
@@ -1680,7 +1681,7 @@ export class VanillaSpawner {
         || t === T.HOLLOW_ICE || t === T.SNOW || t === T.THIN_ICE;
       // ---- 墓地蛆/鼠（L4082-4091，surfaceSpawn 段首、昼池之前）----
       //  ZoneGraveyard && !waterTile && 草族落脚（2/477）&& 1/10 → 50/50 蛆 606 / 鼠 610
-      if (this.ZoneGraveyard && !this.waterTile && (t === T.GRASS || t === 477) && N(10)) {
+      if (this.ZoneGraveyard && !this.waterTile && (t === T.GRASS || t === T.MOWED_GRASS) && N(10)) {
         return D(N(2) ? 610 : 606);
       }
       // ---- 白昼（L4109-4435：!ZoneGraveyard && dayTime 大昼池）----
@@ -1708,7 +1709,9 @@ export class VanillaSpawner {
         const downwind = (this.pX - this.spawnTileX) * this.world.weather.windSpeedTarget > 0;
         if (!this.waterTile && spawnWallEmpty && windyDay && downwind) {
           if (!N(3)) return D(594);
-          if ((t === T.GRASS || t === 477) && !N(10)) return D(628);
+          // NPC.cs:4112:草族门 = 2/477/109/492/147/161(修剪草/神圣修剪草/雪/冰全在内)
+          if ((t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS
+            || t === T.SNOW || t === T.ICE) && !N(10)) return D(628);
         }
         // L4435：池底基础史莱姆
         if (!this.waterTile) return D(this.getBasicSlimeToSpawn(true, t, rng));
@@ -1721,7 +1724,7 @@ export class VanillaSpawner {
       //  1/fireFlyChance（原版为每世界 roll 的随机值 setFireFlyChance L94555，取代表值 30）
       const tooWindy = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
       if (!this.ZoneGraveyard && !tooWindy && !raining
-        && (t === T.GRASS || t === 477 || t === T.HALLOW_GRASS)
+        && (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS)
         && N(30) && this.spawnTileY <= this.world.groundLevel) {
         return D(t === T.HALLOW_GRASS ? 358 : 355);
       }

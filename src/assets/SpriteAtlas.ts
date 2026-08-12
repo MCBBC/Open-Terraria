@@ -506,47 +506,11 @@ export function atlasIconForKey(atlas: SpriteAtlas, key: string): DrawRect | nul
 
 // 我们的 item key → 原版物品图标 id（TEdit items.json 核实；Maples 缺图标的用这层）
 export const VANILLA_ITEM_ICON_MAP: Record<string, number> = {
-  dirt_block: 2, stone_block: 3, sand_block: 169, snow_block: 593,
-  platform: 94, door: 25, chest: 48, torch: 8,
-  mushroom_item: 5, gel: 23, acorn: 27,
-  copper_ore: 12, iron_ore: 11, silver_ore: 14, gold_ore: 13,
-  copper_bar: 20, iron_bar: 22, silver_bar: 21, gold_bar: 19,
-  lens: 38, suspicious_eye: 43,
-  iron_sword: 4,   // IronBroadsword（ItemID.cs:1547）
+  cs: 1547,
   // 电路工具(id-maps items.json 核实:530 电线/509,850,851,3612 四色扳手/510 钢丝钳/
   // 849 致动器/3620 致动魔杖/3625 五彩扳手/3611 宏伟蓝图)
-  wire: 530, red_wrench: 509, blue_wrench: 850, green_wrench: 851, yellow_wrench: 3612,
-  wire_cutter: 510, actuator_item: 849, actuation_rod: 3620,
-  multicolor_wrench: 3625, grand_design: 3611,
-  lesser_healing_potion: 28, coin_copper: 71,
-  heal_potion: 188, agility_potion: 290, ironskin_potion: 292,
-  thorns_potion: 301, regen_potion: 289,
-  wood_sword: 24, wood_hammer: 196,
-  copper_pickaxe: 3509, copper_axe: 3506, copper_sword: 3508, copper_hammer: 3505,
-  iron_pickaxe: 1, iron_axe: 10, silver_pickaxe: 3515, silver_axe: 3512,
-  silver_hammer: 3511, gold_pickaxe: 3521, gold_axe: 3518, gold_hammer: 3517,
   // 盔甲三件套（原版 id：胫甲 76-79 / 胸甲 80-83 / 头盔 89-92）
-  copper_greaves: 76, iron_greaves: 77, silver_greaves: 78, gold_greaves: 79,
-  copper_chainmail: 80, iron_chainmail: 81, silver_chainmail: 82, gold_chainmail: 83,
-  copper_helmet: 89, iron_helmet: 90, silver_helmet: 91, gold_helmet: 92,
-  coin_silver: 72, coin_gold: 73,
   // ---- 原版批次新材料 / 方块 / 家具 ----
-  tin_ore: 699, lead_ore: 700, tungsten_ore: 701, platinum_ore: 702,
-  tin_bar: 703, lead_bar: 704, tungsten_bar: 705, platinum_bar: 706,
-  demonite_ore: 56, meteorite: 116, hellstone: 174,
-  crimtane_ore: 880, cobalt_ore: 364, mythril_ore: 365, adamantite_ore: 366,
-  palladium_ore: 1104, orichalcum_ore: 1105, titanium_ore: 1106, chlorophyte_ore: 947,
-  sapphire: 177, ruby: 178, emerald: 179, topaz: 180, amethyst: 181, diamond: 182,
-  ice_block: 664, ice_brick: 883, snow_brick: 594,
-  sandstone_block: 3271, hardened_sand_block: 3272, desert_fossil: 3347,
-  clay_block: 133, glass: 170, obsidian: 173, gray_brick: 129, red_brick: 131,
-  mud_block: 176, silt_block: 424,
-  table: 32, chair: 34, bed: 224, bookcase: 354, grandfather_clock: 359,
-  piano: 333, dresser: 334, bench: 335, bathtub: 336, keg: 352, cooking_pot: 345,
-  clay_pot: 222, tombstone: 321, life_crystal: 29,
-  candle: 105, chandelier: 106, lantern: 136, candelabra: 349,
-  chinese_lantern: 344, skull_lantern: 347, water_candle: 148,
-  bomb: 166, rope: 965,
   // wld 导入补全物品图标
   vi_2350_recall_potion: 2350,
   vi_188_healing_potion: 188,
@@ -921,18 +885,4 @@ vi_678_red_potion: 678,
   vi_5525_cursed_piper_flute: 5525,
   // ---- 旧 UI 移除迁移补全（2026-08-09，全部 id 经 TEdit items.json 核实；
   //      木镐/木斧原版不存在，用铜镐 3509/铜斧 3506 代位） ----
-  wood: 9, workbench: 36, furnace: 33, anvil: 35,
-  wood_pickaxe: 3509, wood_axe: 3506, iron_hammer: 7,
-  silver_sword: 3514, gold_sword: 3520, iron_bow: 99,
-  wooden_bow: 39, wooden_arrow: 40, flaming_arrow: 41,
-  tin_pickaxe: 3503, tin_axe: 3500, tin_sword: 3502,
-  lead_pickaxe: 3497, lead_axe: 3494, lead_sword: 3496,
-  tungsten_pickaxe: 3491, tungsten_axe: 3488, tungsten_sword: 3490,
-  platinum_pickaxe: 3485, platinum_axe: 3482, platinum_sword: 3484,
-  corrupt_grass_seeds: 59, crimson_grass_seeds: 2171,
-  jungle_grass_seeds: 195, mushroom_grass_seeds: 194,
-  empty_bucket: 205, water_bucket: 206, lava_bucket: 207, honey_bucket: 1128,
-  lucky_horseshoe: 158, feral_claws: 211,
-  minecart_item: 2343, wand_of_sparking: 3069, amethyst_bolt: 739,  // 紫晶法杖=Amethyst Staff
-  worm_food: 70, bloody_spine: 1331, slime_crown: 560,
 };

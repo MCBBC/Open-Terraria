@@ -15,8 +15,8 @@ export interface GameHooks {
   spawnDrop(x: number, y: number, itemKey: string, count?: number, vx?: number, vy?: number): import('./ItemDrop').ItemDrop | null;
   /** 对玩家造成伤害（attacker 用于荆棘反伤） */
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: unknown): void;
-  /** 伤害数字飘字 */
-  addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string): void;
+  /** 伤害数字飘字（dot=true 走 CombatText dot 样式:更小更短带重力,DoT 族用） */
+  addDamageNumber(x: number, y: number, amount: number, crit: boolean, color?: string, dot?: boolean): void;
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
@@ -25,8 +25,13 @@ export interface GameHooks {
   breakTile?(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
+  /** 成就系统（拾取通知等；仅 Game 本体注入） */
+  achievements?: import('../core/Achievements').Achievements;
   /** 出生敌人 */
   spawnEnemy(key: string, x: number, y: number): void;
+  /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。
+   *  Game 实现：入 critters 桶（同 spawnCritter 的 spawnVanilla 语义），联机访客拒绝 */
+  spawnNpcByVanilla?(id: number, x: number, y: number): import('./Enemy').Enemy | null;
   /** 粒子 */
   spawnParticles(
     x: number, y: number, color: string, count: number, speed?: number,

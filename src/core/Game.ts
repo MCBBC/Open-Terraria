@@ -85,7 +85,6 @@ for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBu
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
-import { RECIPES } from '../data/recipes';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
@@ -166,7 +165,7 @@ import { Arrow } from '../entities/Arrow';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
@@ -198,11 +197,7 @@ const POWDER_PROJ_BY_ITEM: Record<number, number> = { 66: 10, 67: 11, 2886: 463 
 /** legacy（无 vid）物品的原版 useStyle 补表——Boss 召唤物与生命水晶在
  *  Item.cs SetDefaults 均为 4（举过头）：544/556/557 机械三王、560 史莱姆王冠、
  *  70 蠕虫食物、1331 血腥脊椎、29 生命水晶、88 可疑眼球 */
-const LEGACY_USE_STYLE: Record<string, number> = {
-  suspicious_eye: 4, worm_food: 4, bloody_spine: 4, slime_crown: 4,
-  mechanical_worm: 4, mechanical_eye: 4, mechanical_skull: 4, life_crystal: 4,
-};
-
+// (LEGACY_USE_STYLE 本地键表已随本地物品退役移除:vi_ 全量走 itemfunc.useStyle)
 /** 旅行商人动态商店池（Chest.SetupTravelShop_GetItem/GetPainting 提取，tools/extract-travelshop.mjs） */
 const TRAVEL_POOL = travelshopJson as {
   items: Array<{ id: number; tier: number; cond: string | null }>;
@@ -305,12 +300,9 @@ const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
 // （WorldGen.cs:60436）未败骷髅王时地牢墙不可锤/不可被 TileReplacement 替换
 const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-// 上表 → 内部 tile id（vanilla.sheet 反查）
-const sheetToInternal = (sheet: number): number => {
-  const d = TILE_DEFS.find((t) => t?.vanilla?.sheet === sheet);
-  return d ? TILE_DEFS.indexOf(d) : -1;
-};
-const TILE_NO_FAIL = new Set<number>([...TILE_NO_FAIL_SHEETS].map(sheetToInternal).filter((v) => v >= 0));
+// (已删除 sheetToInternal/TILE_NO_FAIL 内部 id 换算——2026-08-13 审计:唯一消费点
+//  传 sheet,换算后的集合 58 项误命中导致大量方块被一击秒挖;消费点已改用
+//  TILE_NO_FAIL_SHEETS 原表)
 
 const TILE_CUT = new Set<number>(
   TILE_DEFS.reduce<number[]>((acc, d, id) => {
@@ -326,22 +318,14 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
   [362, 363, 364, 365],// 鸟
   [602, 603], [608, 609], [616, 617],
 ];
-/** 掉落物 → 原版物品 id（vi_NNN 前缀解析；原生 key 走稳定表反查） */
-const NATIVE_ITEM_VID: Record<string, number> = {
-  coin_copper: 71, coin_silver: 72, coin_gold: 73, coin_platinum: 74,
-  gel: 23, torch: 8, lens: 236, stone_block: 3, dirt_block: 2, wood: 9,
-  lesser_healing_potion: 28,
-};
+// (NATIVE_ITEM_VID 本地键表已随本地物品退役移除:vi_ 前缀解析全覆盖)
 function dropVanillaId(d: ItemDrop): number {
   return slotVanillaId(d.itemId);
 }
 
-/** 内部 item id → 原版 item id（vi_<id>_ 键解析；原生 key 走 NATIVE_ITEM_VID） */
+/** 内部 item id → 原版 item id（vi_<id>_ 键解析;非 vi_ 键恒 -1） */
 function slotVanillaId(itemId: number): number {
-  const key = ITEM_DEFS[itemId]?.key ?? '';
-  const vid = viIdFromKey(key);
-  if (vid >= 0) return vid;
-  return NATIVE_ITEM_VID[key] ?? -1;
+  return viIdFromKey(ITEM_DEFS[itemId]?.key ?? '');
 }
 
 /** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
@@ -2341,6 +2325,15 @@ export class Game implements GameHooks {
     // 成就：跑动里程（AchievementsHelper.HandleRunning → MARATHON_MEDALIST；
     // 原版按玩家位移像素累计，锚点 x 差值同义）
     this.achNotifyRunning(Math.abs(player.x - achPxBefore));
+    // 成就：抵达世界顶/底（Player.BordersMovement :23781 顶 y<640 → event 11；
+    // :23850 底 y>bottomWorld-640-118-height → event 10）
+    if (player.y < 640) {
+      this.achievements.handleSpecialEvent(11,
+        { statLifeMax: player.maxHp, statManaMax: player.maxMana });
+    } else if (player.y > this.world.store.h * TILE - 640 - 118 - player.h) {
+      this.achievements.handleSpecialEvent(10,
+        { statLifeMax: player.maxHp, statManaMax: player.maxMana });
+    }
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -3278,12 +3271,41 @@ export class Game implements GameHooks {
     }
     // 就地压缩(2026-08 审计 G9:此前每 tick 两个 filter 新数组)
     compactByLife(this.particles);
+    // 飘字更新 1:1（CombatText.Update:131-206）。label 类（物品名）走旧轨迹;
+    // 数字类:alpha 0.6~1 闪烁 → 速度演化（dot 加重力,暴击双重衰减）→ 寿命内
+    // scale 生长（dot 封顶 0.8）→ 寿命归零后 scale 收缩至 0.1 才消亡（暴击每 t
+    // 先 +0.07 补偿=净 -0.03,收尾更久,且 alphaDir=-1 淡出）
+    let wn = 0;
     for (const d of this.dmgNumbers) {
-      d.life--;
+      if (d.label) {
+        d.life--;
+        d.y += d.vy;
+        d.vy *= 0.94;
+        if (d.life > 0) this.dmgNumbers[wn++] = d;
+        continue;
+      }
+      d.alpha = (d.alpha ?? 1) + (d.alphaDir ?? -1) * 0.05;
+      if (d.alpha <= 0.6) d.alphaDir = 1;
+      if (d.alpha >= 1) { d.alpha = 1; d.alphaDir = -1; }
+      if (d.dot) d.vy += 0.15;
+      else { d.vy *= 0.92; if (d.crit) d.vy *= 0.92; }
+      d.vx = (d.vx ?? 0) * 0.93;
+      d.x += d.vx;
       d.y += d.vy;
-      d.vy *= 0.94;
+      // 原版先 lifeTime-- 再判 ≤0（:162-163）:寿命 1→0 那一 tick 即进收缩期
+      d.life--;
+      if (d.life > 0) {
+        if (d.crit) d.rotation = (d.rotation ?? 0) + (d.vx < 0 ? 0.001 : -0.001);
+        if (d.dot) d.scale = Math.min(0.8, (d.scale ?? 0) + 0.5);
+        else d.scale = Math.min(1, (d.scale ?? 0) + 0.1);
+        this.dmgNumbers[wn++] = d;
+      } else {
+        d.scale = (d.scale ?? 1) - 0.1;
+        if (d.crit) { d.alphaDir = -1; d.scale += 0.07; }
+        if ((d.scale ?? 1) >= 0.1) this.dmgNumbers[wn++] = d; // 收缩期保留,scale<0.1 消亡
+      }
     }
-    compactByLife(this.dmgNumbers);
+    this.dmgNumbers.length = wn;
 
     inp.endFrame();
 
@@ -3362,9 +3384,14 @@ export class Game implements GameHooks {
     if (!def) return 1;
     const vid = def.vid ?? viIdFromKey(def.key);
     if (vid >= 0) return itemFuncOfVid(vid)?.useStyle ?? 1;
-    if (def.potion || def.heal) return 9; // 治疗类（含仅标 heal 的 legacy）
-    // legacy 无 vid 的原版 4 族（Boss 召唤物/生命水晶，Item.cs SetDefaults useStyle=4）
-    return LEGACY_USE_STYLE[def.key] ?? 1;
+    if (def.potion || def.heal) return 9; // 治疗类（仅标 heal 的残余占位）
+    return 1;
+  }
+
+  /** 手持物 useStyle（按本仓库 item id 入口；规则同 heldUseStyle）——
+   *  远端 swingNet 构造用（simulateRemotePlayers 无 ITEM_DEFS 条目时回退 1） */
+  private useStyleOfVid(itemId: number): number {
+    return this.heldUseStyle(ITEM_DEFS[itemId] ?? null);
   }
 
   /** 使用动画时长（Player.itemAnimationMax = item.useAnimation）：
@@ -3796,9 +3823,12 @@ export class Game implements GameHooks {
     //  路由——4 举过头（镜子/机械三王召唤）/5 朝鼠标静持（火把族非放置路径）/
     //  9 举杯（增益药水 DefaultToHealingPotion）/2 咀嚼（食物 DefaultToFood）/
     //  6 饮用旋转（回归药水）；此前的统一 30t 挥砍对 395 件 4/5/9 族全错族）
-    // （召唤武器例外——交给下方 cw 分发 kind='summon'）
+    // （召唤武器例外——交给下方 cw 分发 kind='summon'；spear/yoyo/flail/boomerang 四族
+    //  原版 noUseGraphic=true（Item.cs case 220 等,DefaultToSpear :47637 全 202 处）——
+    //  投射物即本体,此处再画持物 = 角色旁多出一个静态武器图标,一并排除）
     if (heldDef && inp.mouseDown && this.player.useTime === 0 && !heldDef.tool
-      && cw?.kind !== 'summon') {
+      && cw?.kind !== 'summon' && cw?.kind !== 'spear' && cw?.kind !== 'yoyo'
+      && cw?.kind !== 'flail' && cw?.kind !== 'boomerang') {
       this.useSwing(heldDef);
       // 召唤道具（原版左键使用）
       if (viIdFromKey(heldDef.key) === 43) {
@@ -3866,6 +3896,9 @@ export class Game implements GameHooks {
         this.player.useTime = 30;
         this.sfx.play('drink');
         this.cb.onInventoryChanged();
+        // 成就：魔力水晶使用（Player.cs:44667 HandleSpecialEvent(1)）
+        this.achievements.handleSpecialEvent(1,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_1291_life_fruit') {
@@ -3882,6 +3915,9 @@ export class Game implements GameHooks {
         this.player.useTime = 30;
         this.sfx.play('drink');
         this.cb.onInventoryChanged();
+        // 成就：生命果使用（Player.cs:44683 HandleSpecialEvent(2)）
+        this.achievements.handleSpecialEvent(2,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_5340_galaxy_pearl') {
@@ -4232,6 +4268,9 @@ export class Game implements GameHooks {
             bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
             this.entities.add(bob, 'projectiles');
             this.sfx.play('throw');
+            // 成就：抛竿（Player.cs:48652 HandleSpecialEvent(7) → THROWING_LINES）
+            this.achievements.handleSpecialEvent(7,
+              { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
           }
         }
         this.input.mouseDown = false;
@@ -4268,6 +4307,11 @@ export class Game implements GameHooks {
       damage: Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1) * this.player.damageMult(dmgKind)) + this.player.equipStats.armorPen),
       knockback: cwIn.knockback * (ps?.kb ?? 1),
     };
+    // GetWeaponCrit（Player.cs:42531 族）= 4 基础 + 武器 item.crit + 装备/buff——
+    // 投射物近战四族此前写死 4%（Sunfury item.crit=7 原版应 11%）
+    const critVid = def.vid ?? viIdFromKey(def.key);
+    const critTotal = 0.04 + (itemCombat(critVid)?.crit ?? 0) / 100
+      + this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee') / 100;
     // 使用姿势（Player.ItemCheck：itemAnimation>0 期间持物可见）。
     // ★ spear/yoyo/flail/boomerang 族源码 noUseGraphic=true（DefaultToSpear :47637 等
     //   202 处）——投射物即本体，挥动再画持物会重影，这四族不加 swing
@@ -4309,9 +4353,11 @@ export class Game implements GameHooks {
       }
       case 'boomerang': {
         // AI_003：飞出减速→返回主角（非消耗，回手即消失）
-        this.entities.add(new Boomerang(px, py,
+        const bom = new Boomerang(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          cw.damage, cw.knockback, cw.shoot), 'projectiles');
+          cw.damage, cw.knockback, cw.shoot);
+        bom.critChance = critTotal;
+        this.entities.add(bom, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
         break;
@@ -4319,8 +4365,10 @@ export class Game implements GameHooks {
       case 'spear': {
         // AI_019：随角色前刺（一个 useTime 周期伸缩一次）
         const reach = Math.min(170, 60 + cw.shootSpeed * 12);
-        this.entities.add(new SpearProj(Math.cos(ang), Math.sin(ang), reach, cw.useTime,
-          cw.damage, cw.knockback, cw.shoot), 'projectiles');
+        const spear = new SpearProj(Math.cos(ang), Math.sin(ang), reach, cw.useTime,
+          cw.damage, cw.knockback, cw.shoot);
+        spear.critChance = critTotal;
+        this.entities.add(spear, 'projectiles');
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
         break;
@@ -4387,25 +4435,40 @@ export class Game implements GameHooks {
         this.input.mouseDown = false;
         break;
       }
-      case 'yoyo':
       case 'flail': {
+        // AI_015_Flails（Projectile.cs:41051）：按住=绕体旋转,松手朝鼠标掷出,
+        // 撞墙坠落→垂地悬荡→回收全状态机;同物品仅一个球在场
+        const itemId = ITEM_BY_KEY[def.key];
+        for (const e of this.entities.projectiles) {
+          if (e instanceof FlailProj && e.projId === cw.shoot) return;
+        }
+        const flailP = new FlailProj(px, py, cw.damage, cw.knockback, cw.shoot,
+          // ★ channel 用 mouseHeld(电平语义):mouseDown 是边沿消费量,本分支掷出后
+          //   即清零,真实按住期间无新 mousedown 事件回填 → channel 恒 false,链球
+          //   出生 1 帧即判松手回收消失(阳炎之怒"没起效"根因,2026-08-13)
+          () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
+          () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
+        flailP.critChance = critTotal;
+        this.entities.add(flailP, 'projectiles');
+        this.player.useTime = cw.useTime;
+        this.sfx.play('throw'); // UseSound=SoundID.Item1(Item.cs case 220)
+        this.input.mouseDown = false; // 本击只负责掷出,旋转/掷出由 channel 回调判定
+        break;
+      }
+      case 'yoyo': {
         // AI_099 channel：同物品已有悠悠球在场则不重复掷出（原版每把悠悠球仅一个）
-        const flail = cw.kind === 'flail';
         const itemId = ITEM_BY_KEY[def.key];
         for (const e of this.entities.projectiles) {
           const y = e as YoyoProj;
           if (y instanceof YoyoProj && y.projId === cw.shoot) return;
         }
         // 悠悠球线（yoyoString：射程 +60%，YoyoBag 语义）
-        const stringLen = (flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10)
+        const stringLen = (220 + cw.shootSpeed * 10)
           * (this.player.equipStats.yoyoString ? 1.6 : 1);
         const yoyo = new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
-          // ★ channel 用 mouseHeld(电平语义):mouseDown 是边沿消费量,本分支掷出后
-          //   即清零,真实按住期间无新 mousedown 事件回填 → channel 恒 false,链球
-          //   出生 1 帧即判松手回收消失(阳炎之怒"没起效"根因,2026-08-13)
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
-          () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
-          flail);
+          () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
+        yoyo.critChance = critTotal;
         // 配重球（counterWeight：悠悠球命中时落配重投射物，原版环绕弹的直线坠落近似）
         if (this.player.equipStats.counterWeight) {
           (yoyo as unknown as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight =
@@ -4666,7 +4729,10 @@ export class Game implements GameHooks {
     const d = TILE_DEFS[type];
     const sheet = d?.vanilla?.sheet ?? -1;
     let dmg: number;
-    if (TILE_NO_FAIL.has(sheet)) {
+    // ★口径修正(2026-08-13 id 空间审计):TILE_NO_FAIL 曾被换算成内部 id 集合而
+    // 此处传 sheet——68 项意图表仅 7 项碰巧命中,58 种无关方块(雪/冰/锡矿/平台…)
+    // 被误判"一击秒挖",真正的 noFail 族(火把/草药)反而失效。改用 sheet 口径原表
+    if (TILE_NO_FAIL_SHEETS.has(sheet)) {
       // tileNoFail（Main.cs:7138-10198 表）：一次挥击直接破坏（原版 num2=100）
       dmg = 100;
     } else if (TILE_AXE_SHEETS.has(sheet)) {
@@ -5171,7 +5237,7 @@ export class Game implements GameHooks {
     if (TILE_DEFS[type]?.vanilla?.sheet === 72) {
       const roll = new RNG((Math.random() * 1e9) | 0);
       for (let yy = top; yy <= bottom; yy++) {
-        const key = roll.nextInt(40) === 0 ? 'mushroom_grass_seeds'
+        const key = roll.nextInt(40) === 0 ? VI_KEY.MUSHROOM_GRASS_SEEDS
           : roll.nextInt(2) === 0 ? 'vi_183_glowing_mushroom' : null;
         if (key && ITEM_BY_KEY[key] !== undefined) {
           this.spawnDrop(x * TILE + 8, yy * TILE + 8, key, 1, (Math.random() - 0.5) * 2, -2 - Math.random());
@@ -5420,13 +5486,13 @@ export class Game implements GameHooks {
       if (hasPylonOfType(this.pylons, style)) return;
     }
     // 橡实: 只能种在草块正上方
-    if (itemDef.key === 'acorn' && st.get(tx, ty + 1) !== T.GRASS) {
+    if (viIdFromKey(itemDef.key) === 27 && st.get(tx, ty + 1) !== T.GRASS) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AcornGrassOnly'));
       return;
     }
     const ow = def.w ?? 1, oh = def.h ?? 1;
     // 绳索(RopeCoil 语义):从放置点向下延伸至实心/最多 10 格
-    if (itemDef.key === 'rope') {
+    if (viIdFromKey(itemDef.key) === 965) {
       const ropeTile = TILE_BY_KEY['v_213_rope']!;
       let placed = 0;
       for (let y = ty; y < ty + 10; y++) {
@@ -5577,17 +5643,18 @@ export class Game implements GameHooks {
         }
       }
     }
-    // 马桶(497)朝向（TileObjectData :4189 StyleHorizontal+WrapLimit2+Direction=PlaceLeft：
-    // 方向占一个样式列——变体步长 36、方向 +18；素材 72px=2变体×2方向 吻合）：
-    // 重写帧 = placeStyle*36(变体带) + (facing==1?18:0) + 列内偏移
+    // 马桶(497)（TileObjectData :4167-4184 与椅 15 同构：Style1x2+WrapLimit2+Multiplier2+
+    // PaddingFix(0,2)+Direction=PlaceLeft/PlaceRight；TileDrawing.cs:6344-6350 `tileFrameY/40`
+    // 行带实证 → 变体沿 Y 步 40（此前误写 X 步 36）；朝向档 frameX += 18（同椅 15）：
+    // 重写帧 = (facing==1?18:0) + 列内偏移，Y = placeStyle*40 + 行内偏移
     if (def.vanilla?.sheet === 497) {
       for (let dy2 = 0; dy2 < oh; dy2++) {
         for (let dx3 = 0; dx3 < ow; dx3++) {
           const px2 = tx + dx3, py2 = ty + dy2;
           if (!st.inBounds(px2, py2)) continue;
           st.setTile(px2, py2, tileId,
-            (itemDef.placeStyle ?? 0) * 36 + (this.player.facing === 1 ? 18 : 0) + dx3 * 18,
-            dy2 * 18);
+            (this.player.facing === 1 ? 18 : 0) + dx3 * 18,
+            (itemDef.placeStyle ?? 0) * 40 + dy2 * 18);
         }
       }
     }
@@ -6555,7 +6622,9 @@ export class Game implements GameHooks {
           if (st.inBounds(tx0 + dx, ty0 + dy) && st.isSolid(tx0 + dx, ty0 + dy)) { solid = true; break; }
         }
         if (solid) return;
-        const key = type === 71 ? VI(72) : type === 72 ? VI(73) : VI(74);
+        // type 即原版钱币 item id 71/72/73(铜/银/金,Weather.cs 对齐 cs:71836)——
+        // 曾整体 +1 错位(铜雨掉银/银雨掉金/金雨掉铂,每次降雨 ×100 通胀)
+        const key = VI(type);
         this.spawnDrop(x, y, key, stack, 0, 3);
       },
       onThunder: (distPx) => {
@@ -7241,15 +7310,20 @@ export class Game implements GameHooks {
     const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
       : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
     let offX: number, offY: number;
+    // ★两套三段阈值同源但产物不同，须拆开：命中盒扩展 phase（cs:44520-44541：
+    // 早段(anim≥0.666max ⟺ pAnim≥2/3)×2/×1.4、晚段(anim<0.333max ⟺ pAnim≤1/3)×1.4/×1.1）
+    // 与基座持位 tier（cs:49957-50095，同 Renderer.drawUseItem case 1——末段→前持位、
+    // 起手→后举位）。此前共用一个 phase，把基座持位也接反（早段取了前持位）
     const phase: 0 | 1 | 2 = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
+    const tier: 0 | 1 | 2 = pAnim <= 1 / 3 ? 0 : pAnim < 2 / 3 ? 1 : 2;
     const hitUs = this.swing.useStyle ?? 1;
     if (hitUs === 3) {
       // useStyle 3（雨伞 946/4707）单一持位（cs:50279-50294）：
       // offX = fw/2-4-max(pAnim*fw*1.2-10, 8)、offY = 顶+24
       offX = sprW * 0.5 - 4 - Math.max(pAnim * sprW * 1.2 - 10, 8);
       offY = 24;
-    } else if (phase === 0) { offX = sprW * 0.5 - xTier(sprW, 0); offY = yTier(sprH, 0); }
-    else if (phase === 1) { offX = sprW * 0.5 - xTier(sprW, 1); offY = yTier(sprH, 1); }
+    } else if (tier === 0) { offX = sprW * 0.5 - xTier(sprW, 0); offY = yTier(sprH, 0); }
+    else if (tier === 1) { offX = sprW * 0.5 - xTier(sprW, 1); offY = yTier(sprH, 1); }
     else { offX = -(sprW * 0.5 - xTier(sprW, 2)); offY = yTier(sprH, 2); }
     const p = this.player;
     let bx = p.cx + p.facing * offX;
@@ -7562,7 +7636,7 @@ export class Game implements GameHooks {
       }
       case 'demolitionist': {
         // SpawnAllowed_Demolitionist：背包有炸弹系物品（ItemsThatCountAsBombs 表近似）
-        const bombKeys = new Set(['bomb', 'vi_166_bomb', 'vi_167_dynamite', 'vi_168_grenade',
+        const bombKeys = new Set(['vi_166_bomb', 'vi_167_dynamite', 'vi_168_grenade',
           'vi_4423_scarab_bomb', 'vi_4824_wet_bomb', 'vi_453_bomb_statue']);
         return p.inv.slots.some((s) => s && bombKeys.has(ITEM_DEFS[s.id]?.key ?? ''));
       }
@@ -8838,8 +8912,22 @@ export class Game implements GameHooks {
     }
   }
 
-  addDamageNumber(x: number, y: number, amount: number, crit: boolean, color = '#FFF') {
-    this.dmgNumbers.push({ x, y, vy: -1.6, value: amount, crit, color, life: 50 });
+  /** CombatText.NewText 1:1（CombatText.cs:59-118）：普通 vy=-7/life=60、暴击
+   *  vy=-14/life=120 + 水平漂移 vx±1.25 + 0.12rad 初始旋转（随 vx 正负）、
+   *  dot vy=-4/life=40;scale=0 起、alpha=1 起闪烁;盒内随机偏移防连发数字完全
+   *  叠加（原版 ±W/2,±H/2,此处取 ±8/±6 近似） */
+  addDamageNumber(x: number, y: number, amount: number, crit: boolean, color = '#FFF', dot = false) {
+    const vx = crit ? (Math.floor(Math.random() * 51) - 25) * 0.05 : 0; // rand(-25,26)*0.05
+    this.dmgNumbers.push({
+      x: x + Math.random() * 16 - 8,
+      y: y + Math.random() * 12 - 6,
+      vx,
+      vy: dot ? -4 : crit ? -14 : -7,
+      value: amount, crit, dot, color,
+      life: dot ? 40 : crit ? 120 : 60,
+      scale: 0, alpha: 1, alphaDir: -1,
+      rotation: crit ? 0.12 * (vx < 0 ? -1 : 1) : 0, // lifeTime/2*0.002 = 0.12
+    });
   }
 
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发）：
@@ -9353,6 +9441,18 @@ export class Game implements GameHooks {
     const e = new Enemy(key, x, y);
     this.entities.add(e, 'enemies');
     if (e.def.boss) this.boss = e;
+    return e;
+  }
+
+  /** 按原版 NPC id 出生（小动物入微光 NPC.GetShimmered→Transform、WorldItem 放生
+   *  ReleaseNPC 的落点）。联机访客拒绝——转化权威在房主（同 spawnEnemy 门禁）。
+   *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
+  spawnNpcByVanilla(id: number, x: number, y: number): Enemy | null {
+    if (this.net && !this.net.policy.isHost) return null;
+    const e = Enemy.fromVanilla(id, x, y);
+    if (!e) return null;
+    e.id = this.entities.nextId++;
+    this.entities.add(e, 'critters');
     return e;
   }
 
@@ -9871,24 +9971,7 @@ export class Game implements GameHooks {
     return found;
   }
 
-  canCraft(r: (typeof RECIPES)[number]): boolean {
-    if (!this.stationsNearby().has(r.station)) return false;
-    return r.inputs.every(([key, n]) => this.player.inv.countOf(ITEM_BY_KEY[key]) >= n);
-  }
-
-  craft(r: (typeof RECIPES)[number]) {
-    if (!this.canCraft(r)) return;
-    for (const [key, n] of r.inputs) this.player.inv.remove(ITEM_BY_KEY[key], n);
-    this.player.inv.add(ITEM_BY_KEY[r.out], r.count);
-    // 成就：合成通知（AchievementsHelper.NotifyItemCraft）
-    {
-      const vid = vanillaIdOfItem(ITEM_BY_KEY[r.out]);
-      if (vid != null) this.achievements.notifyItemCraft(vid);
-    }
-    // 原版合成音 = SoundID 7 物品抓取（成品上鼠标的 grab 声，ItemSlot 族 PlaySound(7)）
-    this.sfx.play('pickup');
-    this.cb.onInventoryChanged();
-  }
+  // (canCraft/craft 自制配方链已随 RECIPES 表退役移除——合成统一走 vanillaCraft)
 
   // ================= 原版配方（1456 全量 2688 条） =================
 
@@ -10108,8 +10191,9 @@ export class Game implements GameHooks {
           // 血肉墙:地狱层落位(原版向导巫毒娃娃入熔岩;2 眼+11 饥饿者由 AI 首帧补)
           head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
         }
-        // 成就：MechaMayhem 启动判定（Mech 入场时扫描场上三机械是否齐备）
-        if (vanillaId === 125 || vanillaId === 126 || vanillaId === 127 || vanillaId === 134) {
+        // 成就：MechaMayhem 启动判定（Mech 入场时扫描场上三机械是否齐备；
+        // 126 由 125 召唤分支同帧入列，扫描读实体表自然包含）
+        if (vanillaId === 125 || vanillaId === 127 || vanillaId === 134) {
           this.achievements.mechaMayhemStart(
             (this.entities.enemies as Enemy[]).filter((e) => !e.dead && e.vanillaId != null)
               .map((e) => e.vanillaId!));
@@ -10614,7 +10698,10 @@ export class Game implements GameHooks {
         const heldId = proxy.inv.heldItem()?.id ?? -1;
         if (!proxy.swingNet || proxy.swingNet.item !== heldId || proxy.swingNet.t <= 0) {
           const dur = this.remoteSwingDur(heldId, proxy);
-          proxy.swingNet = { t: dur, dur, item: heldId };
+          // useStyle/aim 与本地 useSwing 同构：远端 msg13 不带瞄准角，aim 取 0（正前方）——
+          // 缺这两字段时 Renderer 退化为剑挥（远端喝药/开枪/举火把全错）
+          const us = this.useStyleOfVid(heldId);
+          proxy.swingNet = { t: dur, dur, item: heldId, useStyle: us, aim: us === 5 || us === 13 ? 0 : undefined };
         } else proxy.swingNet.t--;
       } else if (proxy.swingNet) {
         proxy.swingNet.t--;

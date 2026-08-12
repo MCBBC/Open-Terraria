@@ -34,7 +34,7 @@ describe('物品全量多语言覆盖', () => {
     }
     // 抽查既有物品
     expect(Lang.itemNameByKey('vi_75_fallen_star')).toBe('坠落之星');
-    expect(Lang.itemNameByKey('copper_pickaxe')).toBe('铜镐');
+    expect(Lang.itemNameByKey(VANILLA_ITEM_KEY_BY_ID[3509])).toBe('铜镐');
   });
 
   it('place_v_* 放置物品名 = 方块译名（place_v_144_timers → 1秒计时器）', () => {

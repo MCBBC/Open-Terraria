@@ -1,5 +1,6 @@
 // drop:null 语义回归:显式无掉落的图块(原版装饰类,如 165 冰凌/蜘蛛巢卵袋)
 // 曾因 breakTileAt/breakTile 用 ?? 把 null 也走 place_v_ 兜底,挖蜘蛛巢掉出"冰凌"物品。
+import { VANILLA_ITEM_KEY_BY_ID } from '../src/data/items';
 import { describe, it, expect } from 'vitest';
 import { World } from '../src/world/World';
 import { TILE_BY_KEY } from '../src/data/tiles';
@@ -15,6 +16,6 @@ describe('drop:null = 显式无掉落', () => {
   it('普通图块掉落不受影响(dirt → dirt_block)', () => {
     const world = new World(64, 32, 42, '测试');
     world.store.setTile(32, 16, TILE_BY_KEY['dirt']!, 0, 0);
-    expect(world.breakTileAt(32, 16)).toBe('dirt_block');
+    expect(world.breakTileAt(32, 16)).toBe(VANILLA_ITEM_KEY_BY_ID[2]); // drop 数字 vid→vi_ 键
   });
 });

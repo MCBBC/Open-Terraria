@@ -85,12 +85,18 @@ export function spreadGrassAll(st: TileStore, dirt: number, grass: number, cente
 export function runMudCavesPass(st: TileStore, dirt: number, grass: number): void {
   const { w, h } = st;
   let grassSpread = 0;
+  // 热循环局部化 + solid LUT(定义同源=原判定式逐 id 预计算;洪水逐格 3×3 窗判定)
+  const ty = st.type, tf = st.flags, tlt = st.liquidType, tl = st.liquid;
+  const SOLID = new Uint8Array(TILE_DEFS.length);
+  for (let id = 0; id < TILE_DEFS.length; id++) {
+    if (TILE_DEFS[id]?.solid) SOLID[id] = 1;
+  }
 
   const spread = (x: number, y: number): void => {
     // InWorld(i,j,10)（cs:75218）
     if (x < 10 || x >= w - 10 || y < 10 || y >= h - 10) return;
-    const ci = st.idx(x, y);
-    if (!st.flags[ci] || st.type[ci] !== dirt) return;
+    const ci = y * w + x;
+    if (!tf[ci] || ty[ci] !== dirt) return;
     // 生成期 dirt==0 的地表限高门禁：dirt=59 不触发；type==dirt && active → 不 return
     // 3×3 窗口（clamp 到世界界，cs:75240-75251）
     const x0 = Math.max(0, x - 1), x1 = Math.min(w, x + 2);
@@ -98,21 +104,21 @@ export function runMudCavesPass(st: TileStore, dirt: number, grass: number): voi
     let enclosed = true;
     for (let k = x0; k < x1; k++) {
       for (let l = y0; l < y1; l++) {
-        const wi = st.idx(k, l);
-        if (!st.flags[wi] || !TILE_DEFS[st.type[wi]]?.solid) enclosed = false;
+        const wi = l * w + k;
+        if (!tf[wi] || !SOLID[ty[wi]]) enclosed = false;
         // ★岩浆只 break 内层循环（cs:75260-75264）——后续列可再把 enclosed 拉回 false；
         // 曾实现为"遇岩浆直接 return"≠原版
-        if (st.liquidType[wi] === 2 && st.liquid[wi] > 0) { enclosed = true; break; }
+        if (tlt[wi] === 2 && tl[wi] > 0) { enclosed = true; break; }
       }
     }
     if (enclosed) return;
-    if (NOT_CLEARABLE.has(st.type[ci])) return;
+    if (NOT_CLEARABLE.has(ty[ci])) return;
     // flag2（Conversion.Grass[dirt]）的 Convert 分支仅 grass=23/199/109——本调用 grass=60 直写
-    st.type[ci] = grass;
+    ty[ci] = grass;
     for (let m = x0; m < x1; m++) {
       for (let n = y0; n < y1; n++) {
-        const ni = st.idx(m, n);
-        if (st.flags[ni] && st.type[ni] === dirt && grassSpread < 1000) {
+        const ni = n * w + m;
+        if (tf[ni] && ty[ni] === dirt && grassSpread < 1000) {
           grassSpread++;
           spread(m, n);
           grassSpread--;

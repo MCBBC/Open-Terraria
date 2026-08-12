@@ -11,6 +11,7 @@ import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
 import { BuffState, BuffType } from '../stats/Buffs';
 import { LuckState } from '../stats/Luck';
 import { ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
 import { accFxOfInternal } from '../data/vanillaAccFx';
@@ -164,8 +165,10 @@ export class Player extends Entity {
   netOffX = 0;
   netOffY = 0;
   /** 联机远端挥舞动画（msg13 useItem 位驱动；Game 派生，Renderer 以 swing 参数消费）。
+   *  useStyle/aim 与本地 Game.swing 同构（远端无瞄准角同步，aim 取 0=正前方）——
+   *  缺失时 Renderer 退化为 useStyle 1 剑挥（喝药/开枪/举火把全错）。
    *  本地玩家不用（本地走 Game.swing） */
-  swingNet: { t: number; dur: number; item: number } | null = null;
+  swingNet: { t: number; dur: number; item: number; useStyle?: number; aim?: number } | null = null;
   /** 矿车骑乘中（原版 mount.Active && mount.Cart）：常规移动/跳跃/重力由 Minecart
    *  实体接管（Player.cs:27783-27850 TrackCollision 段），fixedUpdate 提前返回；
    *  渲染层消费本标志取坐姿帧（mount.BodyFrame=3）并叠画车身 */
@@ -180,17 +183,21 @@ export class Player extends Entity {
   }
 
   // ---- 配饰效果（重算式聚合，幂等）----
+  /** Lucky Horseshoe 158（本地 accessory 枚举退役,vid 判定） */
   get hasHorseshoe(): boolean {
+    const want = VI_ID(158);
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) { // armor[3-9] 配饰槽（原版 Player.cs:36326）
       const s = this.inv.armor[i];
-      if (s && ITEM_DEFS[s.id]?.accessory === 'lucky_horseshoe') return true;
+      if (s && s.id === want) return true;
     }
     return false;
   }
+  /** Feral Claws 211 */
   get hasFeralClaws(): boolean {
+    const want = VI_ID(211);
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
-      if (s && ITEM_DEFS[s.id]?.accessory === 'feral_claws') return true;
+      if (s && s.id === want) return true;
     }
     return false;
   }
@@ -654,7 +661,7 @@ export class Player extends Entity {
       // LifeRegen 色 (255,60,70) + dot:true;原版 DoT 不触发受击闪烁/无敌帧/音效
       // ——故不进 damage(),死亡原因仍是 ByOther 默认包
       const dot = this.buffs.consumeDotChunk();
-      if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46');
+      if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46', true);
       if (this.hp <= 0) this.lastDamageCause = { kind: 'default' }; // DoT 致死=默认死亡包
     }
     // 恐慌项链加速窗口倒计时

@@ -7,6 +7,7 @@
 import type { SpriteAtlas, DrawRect } from '../assets/SpriteAtlas';
 import type { TileStore } from '../world/TileStore';
 import { TILE } from '../core/constants';
+import { tileAnim } from './TileAnim';
 
 // 4 位基数掩码位序（与 tile framing 不同！）：N=1 W=2 E=4 S=8
 // 20×4 查找表（TEdit WallFrameLookup）：mask → [v0,v1,v2,v3] 的 (col,row)
@@ -57,6 +58,43 @@ const LAZURE = [
 
 const STRIDE = 36; // 32px 帧 + 4px 间隔
 
+// ============ 墙动画（Main.DoUpdate_AnimateWalls，Main.cs:19181-19305）============
+// 动画墙表 468×1440 = 13 列 × 40 行（36px/行）＝ 8 个动画带 × 5 行/带
+// （WallDrawing.cs:119 `wallFrameY + wallFrame[wall]*180`，180px=5 行）。
+// rate 归一化同 tile 表：counter>=N → 每 N tick
+export const WALL_ANIM_RATE: Record<number, number> = {
+  136: 5, 137: 10, 168: 5, 169: 5, 172: 10, 225: 5, 226: 10, 227: 5,
+  347: 10, 357: 5, 365: 8,
+};
+
+/** 242/243 星彩玻璃（WallDrawing.cs:122-127）：不走全局 wallFrame，逐格错相——
+ *  (counter + x*11 + y*27) % 160，每 20 tick 一带共 8 带（counter 每 tick +1） */
+export function starGlassBand(tick: number, x: number, y: number): number {
+  return Math.floor((((tick + x * 11 + y * 27) % 160) + 160) % 160 / 20);
+}
+
+/** 该墙当前动画带（无动画返回 0）。225 回卷 2 带（Main.cs:19241-19249 `>1`），
+ *  其余 8 带（`>7`） */
+export function wallAnimFrame(wallId: number): number {
+  const rate = WALL_ANIM_RATE[wallId];
+  if (!rate) return 0;
+  const frames = wallId === 225 ? 2 : 8;
+  return Math.floor(tileAnim.tick / rate) % frames;
+}
+
+/** 换帧行列的推进节奏（ChunkCache.advanceAnim 重烘焙判定用）：
+ *  0=无动画；1=逐格错相（星彩玻璃，每 tick 都有格换带）；否则=表内 rate */
+export function wallAnimRate(wallId: number): number {
+  if (wallId === 242 || wallId === 243) return 1;
+  return WALL_ANIM_RATE[wallId] ?? 0;
+}
+
+/** 动画带 → 本渲染器行偏移（5 行/带） */
+export function wallAnimBandRows(wallId: number, x: number, y: number): number {
+  if (wallId === 242 || wallId === 243) return starGlassBand(tileAnim.tick, x, y) * 5;
+  return wallAnimFrame(wallId) * 5;
+}
+
 export class VanillaWallTiler {
   private imgCache = new Map<number, HTMLImageElement | null>();
 
@@ -105,7 +143,9 @@ export class VanillaWallTiler {
     const entry = WALL_LOOKUP[mask];
     if (!entry) return;
     const fr = entry[v] ?? entry[0];
-    const sx = fr[0] * STRIDE, sy = fr[1] * STRIDE;
+    // 动画带（DoUpdate_AnimateWalls）：行 += 带×5（180px=5 行，WallDrawing.cs:119）
+    const bandRows = wallAnimBandRows(wallId, x, y);
+    const sx = fr[0] * STRIDE, sy = (fr[1] + bandRows) * STRIDE;
     if (sx + 32 > img.width || sy + 32 > img.height) return; // 变体3 超出矮表（默认模式不会发生）
     ctx.drawImage(img, sx, sy, 32, 32, px - TILE / 2, py - TILE / 2, 32, 32);
   }
@@ -124,7 +164,7 @@ export class VanillaWallTiler {
     else if (lf === 2) v = LAZURE[x % 2][y % 2] - 1;
     else v = ((x * 7) + (y * 11)) % 3;
     const fr = WALL_LOOKUP[mask]?.[v] ?? [1, 1];
-    return { col: fr[0], row: fr[1] };
+    return { col: fr[0], row: fr[1] + wallAnimBandRows(wallId, x, y) };
   }
 
   hasTexture(wallId: number): boolean {

@@ -71,7 +71,7 @@ describe('反射管线（Arrow 命中 419 冲刺置标敌）', () => {
     const hurtLog: number[] = [];
     const e = makeEnemy(true, hurtLog);
     const { game, player } = makeCtx([e], 8 * 16); // 玩家在敌左侧
-    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, 'wooden_arrow', { grav: 0 });
+    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, VANILLA_ITEM_KEY_BY_ID[40], { grav: 0 });
     const hp0 = player.hp;
     for (let i = 0; i < 4 && !arrow.reflected; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.reflected).toBe(true);
@@ -89,7 +89,7 @@ describe('反射管线（Arrow 命中 419 冲刺置标敌）', () => {
     const hurtLog: number[] = [];
     const e = makeEnemy(true, hurtLog);
     const { game } = makeCtx([e], 8 * 16);
-    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, 'wooden_arrow', { grav: 0 });
+    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, VANILLA_ITEM_KEY_BY_ID[40], { grav: 0 });
     for (let i = 0; i < 4 && !arrow.reflected; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.reflected).toBe(true);
     // 反射后 CanBeReflected 即失效（原版 friendly/hostile 翻转天然拦截）
@@ -106,7 +106,7 @@ describe('反射管线（Arrow 命中 419 冲刺置标敌）', () => {
     const hurtLog: number[] = [];
     const e = makeEnemy(false, hurtLog);
     const { game } = makeCtx([e], 8 * 16);
-    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, 'wooden_arrow', { grav: 0 });
+    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, VANILLA_ITEM_KEY_BY_ID[40], { grav: 0 });
     for (let i = 0; i < 6 && !arrow.dead; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.reflected).toBe(false);
     expect(arrow.hostile).toBe(false);
@@ -129,7 +129,7 @@ describe('反射管线（Arrow 命中 419 冲刺置标敌）', () => {
     const hurtLog: number[] = [];
     const e = makeEnemy(true, hurtLog);
     const { game } = makeCtx([e], 8 * 16);
-    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, 'wooden_arrow', { grav: 0 });
+    const arrow = new Arrow(20 * 16 - 12, 10 * 16, 8, 0, 40, 0, 1, VANILLA_ITEM_KEY_BY_ID[40], { grav: 0 });
     arrow.netPuppet = true;
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.reflected).toBe(false);

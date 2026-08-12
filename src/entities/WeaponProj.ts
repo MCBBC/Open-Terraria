@@ -1,8 +1,8 @@
 // 数据驱动近战/爆炸武器投射物（1456 aiStyle 家族行为，Game.useCombatWeapon 派发）：
 //   Boomerang  aiStyle 3   —— 飞出减速后返回主角（AI_003）
 //   SpearProj  aiStyle 19/161 —— 随主角前刺伸缩（AI_019 的 owner 相对位移简化）
-//   YoyoProj   aiStyle 99  —— 按住鼠标滞留追光标，松手收回（AI_099 channel 语义）；
-//                              连枷 aiStyle 15 复用（甩链球近似，重力头由加速度兜住）
+//   YoyoProj   aiStyle 99  —— 按住鼠标滞留追光标，松手收回（AI_099 channel 语义）
+//   FlailProj  aiStyle 15  —— AI_015_Flails 全状态机（旋转/掷出/回拉/坠落/悬荡/回收）
 //   GrenadeProj aiStyle 16 —— 弹跳 + 引信爆炸（手雷 180/炸弹 150/炸药 135 tick）
 // 贴图统一 Projectile_N.png 懒加载（Arrow.projSprite 共享缓存）。
 import { Entity } from './Entity';
@@ -12,6 +12,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitCritters, playEnemyHitSound, tryReflectProjectile } from './projTargets';
+import { applyProjStatus, applyMeleeImbue } from './projStatus';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
@@ -59,6 +60,10 @@ type ReflectableWeaponProj = {
   projId?: number;
   hostile?: boolean;
   reflected?: boolean;
+  /** 暴击率（GetWeaponCrit：4 基础+武器 item.crit+装备/buff,Game 侧算好传入） */
+  critChance?: number;
+  /** 近战系投射物（吃武器浸剂 meleeEnchant,StatusNPC:10559 门 (melee||whip)） */
+  meleeProj?: boolean;
 };
 
 function hitEnemies(
@@ -82,11 +87,23 @@ function hitEnemies(
     // 回旋镖 aiStyle3/长矛 19/161/悠悠球 99/15 均不在表内不反射，白名单内新弹型自动生效
     if (me.projId !== undefined && tryReflectProjectile(me, me.projId, e, game)) return;
     if (!hitCd.ready(e.id, cooldown)) continue;
-    const crit = Math.random() < 0.04;
+    // 暴击 = GetWeaponCrit 语义:4 基础 + 武器 item.crit + 装备/buff（Game 侧合并传入；
+    // 此前全族写死 4%——Sunfury 原版 crit=7 应为 11%）
+    const crit = Math.random() < (me.critChance ?? 0.04);
     const dmg = crit ? self.damage * 2 : self.damage;
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
     e.hurt(dmg, kdir * self.knockback * 0.65, -2.5, game);
+    // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
+    applyProjStatus(me.projId, e as unknown as Record<string, number>);
+    // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
+    // 时长 Player.cs:6141-6171;挥砍侧同表在 Game 挥击结算）
+    if (me.meleeProj) {
+      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean } };
+      applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
+        () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
+          ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+    }
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     // 配重球（counterWeight 装备时悠悠球命中落配重：YoyoBag 语义近似——
     // spawnWeight 回调由 Game 注入（无实体循环依赖）；伤害 = 武器 100%（原版））
@@ -102,6 +119,10 @@ export class Boomerang extends Entity {
   damage: number;
   knockback: number;
   projId: number;
+  /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
+  critChance = 0.04;
+  /** 近战系（吃武器浸剂） */
+  meleeProj = true;
   /** 旋转角（回旋镖持续自旋） */
   private rot = 0;
   /** 飞出段累计；返回段置 true */
@@ -168,6 +189,10 @@ export class SpearProj extends Entity {
   damage: number;
   knockback: number;
   projId: number;
+  /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
+  critChance = 0.04;
+  /** 近战系（吃武器浸剂） */
+  meleeProj = true;
   /** 刺出方向（单位向量，原版出手时定死） */
   private dx: number;
   private dy: number;
@@ -216,14 +241,16 @@ export class YoyoProj extends Entity {
   damage: number;
   knockback: number;
   projId: number;
+  /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
+  critChance = 0.04;
+  /** 近战系（吃武器浸剂） */
+  meleeProj = true;
   /** 持续按住判定（原版 channel：按住时悠悠球滞留追光标） */
   private channel: () => boolean;
   /** 光标世界坐标 getter */
   private target: () => { x: number; y: number };
   /** 线长上限 px（原版 stringLength，按 shootSpeed 修正） */
   private stringLen: number;
-  /** 连枷头带重力（aiStyle 15 的链球比悠悠球更坠） */
-  private flail: boolean;
   private hitCd = new HitCooldown();
   private rot = 0;
   /** 手部坐标（线起点，fixedUpdate 每帧刷新为主角中心） */
@@ -233,7 +260,7 @@ export class YoyoProj extends Entity {
   dead = false;
 
   constructor(x: number, y: number, damage: number, knockback: number, projId: number,
-    stringLen: number, channel: () => boolean, target: () => { x: number; y: number }, flail = false) {
+    stringLen: number, channel: () => boolean, target: () => { x: number; y: number }) {
     super();
     this.x = x; this.y = y;
     this.handX = x; this.handY = y;
@@ -243,14 +270,13 @@ export class YoyoProj extends Entity {
     this.stringLen = stringLen;
     this.channel = channel;
     this.target = target;
-    this.flail = flail;
   }
 
   draw(r: Renderer, cam: Camera): void {
     // 线（原版 yoyo string / 连枷链：手部 → 球体）。世界坐标(实体循环在世界变换内)
     const c = r.canvas.getContext('2d');
     if (c) {
-      c.strokeStyle = this.flail ? '#605848' : '#D0D0D8';
+      c.strokeStyle = '#D0D0D8';
       c.lineWidth = 1.5;
       c.beginPath();
       c.moveTo(this.handX, this.handY);
@@ -287,9 +313,9 @@ export class YoyoProj extends Entity {
     const dy = t.y - (this.y + this.h / 2);
     const d = Math.hypot(dx, dy) || 1;
     this.vx += (dx / d) * 0.55;
-    this.vy += (dy / d) * 0.55 + (this.flail ? 0.12 : 0.02);
+    this.vy += (dy / d) * 0.55 + 0.02;
     const sp = Math.hypot(this.vx, this.vy);
-    const cap = this.flail ? 11 : 13;
+    const cap = 13;
     if (sp > cap) { this.vx = (this.vx / sp) * cap; this.vy = (this.vy / sp) * cap; }
     this.x += this.vx;
     this.y += this.vy;
@@ -304,6 +330,341 @@ export class YoyoProj extends Entity {
     }
     // 弹墙（原版 yoyo tileCollide=false 穿墙，连枷也穿；不做碰撞）
     hitEnemies(this, game, this.hitCd, 15, Math.sign(this.vx));
+  }
+}
+
+// ================= 连枷/链球（aiStyle 15，AI_015_Flails，Projectile.cs:41051-41506） =================
+
+/** 每型号参数（Projectile.cs:41070-41115 switch 各 case + 默认值；单位 px/tick/tick）。
+ *  meleeSpeed 缩放链（:41116-41124）：throwSpd/farPull/pullAccel/retractKill/returnAccel/
+ *  returnKill ×(1/meleeSpeed)——orbitRadius(num15)不缩放 */
+interface FlailParams {
+  flightTicks: number;  // num:掷出态飞行上限 tick（超时 → 回拉）
+  throwSpeed: number;   // num2:松手掷出初速
+  pullAccel: number;    // num4:回拉态 MoveTowards 步长
+  retractKill: number;  // num5:回拉态距手 ≤ 此值即消失
+  returnAccel: number;  // num6:回收态 MoveTowards 步长
+  returnKill: number;   // num7:回收态距手 ≤ 此值即消失
+  farPullSpeed: number; // num9:远端回拉目标速率
+  orbitRadius: number;  // num15:旋转态绕体半径
+  spinHitCd: number;    // num12:旋转态每敌命中冷却
+  thrownHitCd: number;  // num13:掷出/回拉/坠落态冷却
+}
+const FLAIL_DEFAULT: FlailParams = {
+  flightTicks: 10, throwSpeed: 24, pullAccel: 3, retractKill: 16,
+  returnAccel: 6, returnKill: 48, farPullSpeed: 14, orbitRadius: 30,
+  spinHitCd: 15, thrownHitCd: 10,
+};
+const FLAIL_PARAMS: Record<number, Partial<FlailParams>> = {
+  25:  { flightTicks: 15, throwSpeed: 14, retractKill: 10, returnKill: 15 },
+  26:  { flightTicks: 15, throwSpeed: 16, retractKill: 13, returnKill: 17, orbitRadius: 32 },
+  35:  { flightTicks: 15, throwSpeed: 17, retractKill: 14, returnKill: 18, orbitRadius: 37 },
+  63:  { flightTicks: 13, throwSpeed: 21, retractKill: 20, returnKill: 24, spinHitCd: 12 },
+  154: { flightTicks: 15, throwSpeed: 15, retractKill: 11, returnKill: 16 },
+  247: { flightTicks: 13, throwSpeed: 23, spinHitCd: 12, orbitRadius: 40 },
+  757: { flightTicks: 13, throwSpeed: 22, retractKill: 22, returnKill: 26, spinHitCd: 12, orbitRadius: 35 },
+  947: { flightTicks: 13, throwSpeed: 12, retractKill: 8, returnKill: 13 },
+  948: { flightTicks: 13, throwSpeed: 12, retractKill: 8, returnKill: 13 },
+  1058: { flightTicks: 16, throwSpeed: 23, spinHitCd: 10, orbitRadius: 45 },
+};
+
+/** 链贴图（DrawProj_FlailChains Main.cs:34757-34781 switch）：型号 → Chain_N；
+ *  948 三段混排（前 4 节 Chain43 全亮 → 2 节 Chain42 → 其余 Chain41）；
+ *  757 = Extra_99 六帧竖条动画链 */
+function flailChainTex(projId: number): string {
+  switch (projId) {
+    case 25: return 'Chain2';
+    case 35: return 'Chain6';
+    case 63: return 'Chain7';
+    case 154: return 'Chain13';
+    case 247: return 'Chain19';
+    case 947: case 948: return 'Chain41';
+    case 757: return 'Extra_99';
+    default: return 'Chain3';
+  }
+}
+const chainImgCache = new Map<string, HTMLImageElement>();
+function chainImg(name: string): HTMLImageElement | null {
+  let img = chainImgCache.get(name);
+  if (img !== undefined) return img ?? null;
+  if (typeof Image === 'undefined') return null;
+  img = new Image();
+  img.src = `sprites/vanilla/${name}.png`;
+  chainImgCache.set(name, img);
+  return img;
+}
+
+export class FlailProj extends Entity {
+  w = 22; h = 22;
+  damage: number;
+  knockback: number;
+  projId: number;
+  /** GetWeaponCrit 合并值（Game 侧传入；缺省 4 基础） */
+  critChance = 0.04;
+  /** 近战系（吃武器浸剂） */
+  meleeProj = true;
+  /** channel 电平（mouseHeld && 手持原物品 && !uiBlocking）——Game 注入 */
+  private channel: () => boolean;
+  /** 鼠标世界坐标 getter（松手掷出方向） */
+  private target: () => { x: number; y: number };
+  private prm: FlailParams;
+  /** ai[0] 状态：0 旋转 / 1 掷出 / 2 回拉 / 5 坠落 / 6 垂地悬荡 / 4 回收 */
+  private st = 0;
+  /** ai[1] 状态内计数 */
+  private stT = 0;
+  /** localAI[1] 旋转态累计 tick */
+  private spinT = 0;
+  /** localAI[0] 弹墙累计（AI_015_HandleMovementCollision:41006） */
+  private bounces = 0;
+  private rotation = 0;
+  private hitCd = new HitCooldown();
+  /** 手部坐标（链条起点，每 tick 刷新） */
+  handX = 0;
+  handY = 0;
+  life = 7200;
+  dead = false;
+
+  constructor(x: number, y: number, damage: number, knockback: number, projId: number,
+    channel: () => boolean, target: () => { x: number; y: number }) {
+    super();
+    this.x = x; this.y = y;
+    this.handX = x; this.handY = y;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.projId = projId;
+    this.channel = channel;
+    this.target = target;
+    this.prm = { ...FLAIL_DEFAULT, ...FLAIL_PARAMS[projId] };
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (ctx) this.drawChain(ctx, r);
+    drawProj(r, cam, this, this.projId, this.rotation, '#E04040');
+  }
+
+  /** 链条（DrawProj_FlailChains Main.cs:34752-34842 1:1）：球心 → 手臂方向逐节
+   *  步长=链节高，每节按所在格光照着色；948 三段混排 / 757 六帧动画链 */
+  private drawChain(ctx: CanvasRenderingContext2D, r: Renderer): void {
+    const img = chainImg(flailChainTex(this.projId));
+    if (!img || !img.complete || img.naturalWidth === 0) {
+      // 贴图未就绪兜底：细线（旧实现形态）
+      ctx.strokeStyle = '#605848';
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(this.handX, this.handY);
+      ctx.lineTo(this.x + this.w / 2, this.y + this.h / 2);
+      ctx.stroke();
+      return;
+    }
+    // 光照采样（Lighting.GetColor 每节一次；拿不到则全亮）
+    const lighting = (r as unknown as { lighting?: { lightAt: (tx: number, ty: number) => [number, number, number] } }).lighting;
+    const lightAt = (wx: number, wy: number): number => {
+      if (!lighting) return 1;
+      const [lr, lg, lb] = lighting.lightAt(Math.floor(wx / TILE), Math.floor(wy / TILE));
+      return Math.min(1, (lr * 0.3 + lg * 0.5 + lb * 0.2)) ;
+    };
+    // 球心 → 臂方向（playerArmPosition.MoveTowards(center,4) 近似为手部）
+    const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+    let dx = this.handX - cx0, dy = this.handY - cy0;
+    const d = Math.hypot(dx, dy);
+    if (d < 1) return;
+    dx /= d; dy /= d;
+    const frames = this.projId === 757 ? 6 : 1;
+    const linkH = img.naturalHeight / frames + (this.projId === 757 ? -2 : 0);
+    const rotation = Math.atan2(dy, dx) + Math.PI / 2;
+    let px = cx0, py = cy0;
+    let i = 0;
+    for (let remain = d + linkH / 2; remain > 0; remain -= linkH, i++) {
+      let tex = img;
+      let sy = 0, sh = img.naturalHeight;
+      if (this.projId === 757) { sy = (i % 6) * (img.naturalHeight / 6); sh = img.naturalHeight / 6; }
+      else if (this.projId === 948) {
+        // 三段：前 4 节 Chain43（全亮）→ 2 节 Chain42（最低亮度 140）→ 其余 Chain41
+        if (i < 4) { tex = chainImg('Chain43') ?? img; }
+        else if (i < 6) { tex = chainImg('Chain42') ?? img; }
+      }
+      if (!tex.complete || tex.naturalWidth === 0) tex = img;
+      const alpha = this.projId === 948 && i < 4 ? 1
+        : this.projId === 948 && i < 6 ? Math.max(lightAt(px, py), 140 / 255)
+          : lightAt(px, py);
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rotation);
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = Math.max(0.15, alpha);
+      ctx.drawImage(tex, 0, sy, tex.naturalWidth, sh, -tex.naturalWidth / 2, -sh / 2, tex.naturalWidth, sh);
+      ctx.restore();
+      px += dx * linkH;
+      py += dy * linkH;
+    }
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }
+    const p = game.player;
+    this.handX = p.cx;
+    this.handY = p.cy;
+    this.hitCd.tick();
+    // meleeSpeed 缩放链（:41116-41124,1/meleeSpeed）——repo attackSpeedMult 语义同向(>1 更快)
+    const inv = 1 / (p.attackSpeedMult || 1);
+    const throwSpd = this.prm.throwSpeed * inv;
+    const pullAccel = this.prm.pullAccel * inv;
+    const retractKill = this.prm.retractKill * inv;
+    const returnAccel = this.prm.returnAccel * inv;
+    const returnKill = this.prm.returnKill * inv;
+    const farPull = this.prm.farPullSpeed * inv;
+    const maxRange = 800;
+    // 击杀门（:41053-41060）：主角死亡/离手 900×(1/meleeSpeed)
+    const distHand = () => Math.hypot(this.x + this.w / 2 - p.cx, this.y + this.h / 2 - p.cy);
+    if (p.dead || distHand() > 900 * inv) { this.dead = true; return; }
+    const held = this.channel();
+    // num17/num18(:41129-41130):链长上限=掷速×飞行tick;垂地悬荡放行 +160
+    const num17 = throwSpd * this.prm.flightTicks;
+    const num18 = num17 + 160;
+    let cd = 10; // num11 默认每敌冷却
+    switch (this.st) {
+      case 0: { // 旋转态（:41163-41212）：绕体公转,松手朝鼠标掷出
+        if (!held) {
+          this.st = 1; this.stT = 0;
+          const t = this.target();
+          const dx = t.x - p.cx, dy = t.y - p.cy;
+          const dd = Math.hypot(dx, dy) || 1;
+          this.vx = (dx / dd) * throwSpd + p.vx;
+          this.vy = (dy / dd) * throwSpd + p.vy;
+          this.x = p.cx - this.w / 2;
+          this.y = p.cy - this.h / 2;
+          this.hitCd.clear(); // ResetLocalNPCHitImmunity
+          cd = this.prm.thrownHitCd;
+          break;
+        }
+        this.spinT++;
+        // :41189-41197 vector6 = (direction,0).RotatedBy(π×10×(t/60)×direction);
+        // Y×0.8;向下(gravDir>0)再减半——扁椭圆轨迹,上快下慢。
+        // direction 取朝鼠标侧（原版 ChangeDir(vector5.X>0?1:-1) :41203;不直接改
+        // player.facing,登记 GAP）
+        const t0 = this.target();
+        const dir = (t0.x >= p.cx ? 1 : -1);
+        const a = Math.PI * 10 * (this.spinT / 60) * dir;
+        let ox = Math.cos(a) * dir, oy = Math.sin(a) * dir;
+        oy *= 0.8;
+        if (oy > 0) oy *= 0.5;
+        this.x = p.cx + ox * this.prm.orbitRadius - this.w / 2;
+        this.y = p.cy + oy * this.prm.orbitRadius - this.h / 2;
+        this.vx = 0; this.vy = 0;
+        cd = this.prm.spinHitCd;
+        break;
+      }
+      case 1: { // 掷出态（:41243-41273）：直线无重力;超时/超程 → 回拉;再按 → 垂地
+        this.stT++;
+        if (held) { this.st = 6; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; }
+        if (this.stT >= this.prm.flightTicks || distHand() >= maxRange) {
+          this.st = 2; this.stT = 0; this.vx *= 0.3; this.vy *= 0.3;
+        }
+        cd = this.prm.thrownHitCd;
+        break;
+      }
+      case 2: { // 回拉态（:41275-41290）：向手回拉,近手消失;再按 → 垂地
+        if (distHand() <= retractKill) { this.dead = true; return; }
+        if (held) { this.st = 6; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; }
+        this.vx *= 0.98; this.vy *= 0.98;
+        this.moveTowardsHand(p, retractKill, pullAccel);
+        cd = this.prm.thrownHitCd;
+        break;
+      }
+      case 5: { // 坠落态（:41346-41362,撞墙入口见下方 tile 碰撞）：重力坠地
+        this.stT++;
+        if (this.stT >= this.prm.flightTicks + 5) { this.st = 6; this.stT = 0; break; }
+        cd = this.prm.thrownHitCd;
+        this.vy += 0.6;
+        this.vx *= 0.95;
+        break;
+      }
+      case 6: { // 垂地悬荡态（:41364-41376）：持按垂链;松手/超程 → 回收
+        if (!held || distHand() > num18) { this.st = 4; this.stT = 0; break; }
+        this.vy += 0.8;
+        this.vx *= 0.95;
+        break;
+      }
+      case 4: { // 回收态（:41292-41234 区段 case 4:41321-41344）：无视碰撞回手
+        if (distHand() <= returnKill) { this.dead = true; return; }
+        this.vx *= 0.98; this.vy *= 0.98;
+        this.moveTowardsHand(p, returnKill, returnAccel);
+        // 越手击杀（:41337-41343 Dot(dirToHand, dirFrom(目标点))<0 → Kill）
+        const tx2 = this.x + this.w / 2 + this.vx, ty2 = this.y + this.h / 2 + this.vy;
+        const hx = p.cx - tx2, hy = p.cy - ty2;
+        const hd = Math.hypot(hx, hy) || 1;
+        const sx = (p.cx - (this.x + this.w / 2)) / (distHand() || 1);
+        const sy = (p.cy - (this.y + this.h / 2)) / (distHand() || 1);
+        if (sx * (hx / hd) + sy * (hy / hd) < 0) { this.dead = true; return; }
+        break;
+      }
+      default: break;
+    }
+    // 位移 + tile 碰撞（AI_015_HandleMovementCollision :40982-41049）：
+    // 旋转态位置由 AI 直接钉死不积分;回收态 tileCollide=false
+    if (this.st !== 0 && this.st !== 4) {
+      const rest = this.st === 1 || this.st === 5 ? 0.4 : this.st === 6 ? 0 : 0.2;
+      const world = game.world;
+      const solid = (x: number, y: number): boolean => {
+        const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
+        const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
+        for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+          if (world.store.inBounds(tx, ty) && world.store.isSolid(tx, ty)) return true;
+        }
+        return false;
+      };
+      const lvx = this.vx, lvy = this.vy;
+      const nx = this.x + this.vx;
+      if (solid(nx, this.y)) {
+        this.vx = -lvx * rest;
+        if (Math.abs(lvx) > 4) this.bounces++;
+        this.hitTileFx(game, nx, this.y);
+      } else this.x = nx;
+      const ny = this.y + this.vy;
+      if (solid(this.x, ny)) {
+        this.vy = -lvy * rest;
+        if (Math.abs(lvy) > 4) this.bounces++;
+        this.hitTileFx(game, this.x, ny);
+      } else this.y = ny;
+      // 掷出态撞墙 → 坠落态（:41027-41037 + CreateImpactExplosion 音尘近似）
+      if (this.st === 1 && (this.vx !== lvx || this.vy !== lvy)) {
+        this.st = 5; this.stT = 0;
+      }
+      // 卡死逃生（:41040-41045）：弹墙≥10 次且非 3/0/5/6 态 → 强制回收
+      if (this.st !== 3 && this.st !== 0 && this.st !== 5 && this.st !== 6 && this.bounces >= 10) {
+        this.st = 4; this.stT = 0;
+      }
+    }
+    // 旋转（:41476-41484 flag 通用段）：速度>1 对齐速度向,否则按 vx 缓转
+    const spd = Math.hypot(this.vx, this.vy);
+    if (spd > 1) this.rotation = Math.atan2(this.vy, this.vx) + this.vx * 0.1;
+    else this.rotation += this.vx * 0.1;
+    // 火尘（AI_015_Flails_Dust :41778-41785:type 35 每帧 1 颗火尘 noGravity）
+    if (this.projId === 35 || this.projId === 948) {
+      game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#FF8830', 1, 0.5,
+        { life: 20, grav: 0, size: 2 });
+    } else if (this.projId === 26) {
+      // :41770-41775 hallow 尘近似
+      if (Math.random() < 0.2) game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#B0A0FF', 1, 0.5, { life: 20, grav: 0, size: 2 });
+    }
+    hitEnemies(this, game, this.hitCd, cd, Math.sign(this.vx) || 1);
+  }
+
+  /** velocity MoveTowards(手方向×targetSpd, accel)（:41281-41285/:41325-41329 同式） */
+  private moveTowardsHand(p: { cx: number; cy: number }, targetSpd: number, accel: number): void {
+    const d = Math.hypot(p.cx - (this.x + this.w / 2), p.cy - (this.y + this.h / 2)) || 1;
+    const tx = ((p.cx - (this.x + this.w / 2)) / d) * targetSpd;
+    const ty = ((p.cy - (this.y + this.h / 2)) / d) * targetSpd;
+    const ddx = tx - this.vx, ddy = ty - this.vy;
+    const dd = Math.hypot(ddx, ddy);
+    if (dd <= accel) { this.vx = tx; this.vy = ty; }
+    else { this.vx += (ddx / dd) * accel; this.vy += (ddy / dd) * accel; }
+  }
+
+  /** 撞墙反馈（Collision.HitTiles + SoundID 0 音尘近似——挖掘音未接,登记 GAP） */
+  private hitTileFx(game: GameHooks, hx: number, hy: number): void {
+    game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3, 1.5, { life: 14, size: 2 });
   }
 }
 

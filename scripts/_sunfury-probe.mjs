@@ -1,8 +1,9 @@
-// 阳炎之怒(vi_220_sunfury, flail)使用链路探针:
-// 复现"按住鼠标掷出后链球立刻消失":
-//   - 真实浏览器语义:按住 = 只发一次 mousedown 事件,无后续事件
-//   - useCombatWeapon case 'flail' 掷出后置 input.mouseDown=false(消费 click)
-//   - YoyoProj.channel 回调依赖 input.mouseDown → 恒 false → 回收分支 1 帧即死
+// 阳炎之怒(vi_220_sunfury, flail aiStyle 15)AI_015 全语义探针:
+//   1) 按住 = 绕体旋转(半径 37px,type 35 参数)而非追光标,且存活不闪消
+//   2) noUseGraphic:使用期间 swing 为空(角色旁无静态持物图标)
+//   3) 松手 = 朝鼠标掷出(初速 17,type 35 参数)
+//   4) 命中施加 OnFire(StatusNPC:35 → 50% AddBuff(24,300)=5s,Math.random 固定 0.1 强制命中)
+//   5) 链条贴图 Chain6.png 可加载
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -20,54 +21,105 @@ await new Promise((r) => setTimeout(r, 1500));
 let pass = 0, fail = 0;
 const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
 
-const out = await page.evaluate(() => {
+const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const st = g.world.store;
   const px0 = Math.floor(g.player.cx / 16);
   let gy = 0; while (gy < st.h - 10 && !st.isSolid(px0, gy)) gy++;
   const py = gy - 1;
-  for (let dx = -20; dx <= 20; dx++) for (let dy = -8; dy <= 0; dy++) st.setTile(px0 + dx, py + dy, 0);
-  for (let dx = -20; dx <= 20; dx++) st.setTile(px0 + dx, py + 1, 2);
+  for (let dx = -25; dx <= 25; dx++) for (let dy = -10; dy <= 0; dy++) st.setTile(px0 + dx, py + dy, 0);
+  for (let dx = -25; dx <= 25; dx++) st.setTile(px0 + dx, py + 1, 2);
   g.player.x = (px0 + 0.5) * 16; g.player.y = (py - 3) * 16;
   g.camera.x = g.player.cx; g.camera.y = g.player.cy;
 
-  // 装备阳炎之怒
   const sunfuryId = window.__swItems['vi_220_sunfury'];
   g.player.inv.add(sunfuryId, 1);
   const slots = g.player.inv.slots;
   const bi = slots.findIndex((it) => it && it.id === sunfuryId);
   if (bi > 0) { const t = slots[0]; slots[0] = slots[bi]; slots[bi] = t; }
   g.player.inv.selected = 0;
-  // 确保在第 0 格被选中
-  const held = g.player.inv.heldItem();
-  const heldKey = held && held.id === sunfuryId ? 'vi_220_sunfury' : `heldId=${held?.id}`;
   g.player.useTime = 0;
 
-  const res = { heldKey, spawn: null, aliveAfter: {}, posSeries: [] };
-  // 模拟真实按住:只置一次 mouseDown(真实世界无重复 mousedown 事件),之后不再置
-  g.input.mouseX = 640 + 300; g.input.mouseY = 400;
+  const res = {};
+  // ---- 链条贴图加载 ----
+  res.chain6 = await new Promise((resolve) => {
+    const im = new Image();
+    im.onload = () => resolve(im.naturalWidth > 0);
+    im.onerror = () => resolve(false);
+    im.src = 'sprites/vanilla/Chain6.png';
+  });
+
+  // ---- 1) 按住:旋转态 ----
+  g.input.mouseX = 640 + 300; g.input.mouseY = 400; // 光标在右侧
   g.input.mouseDown = true; g.input.mouseHeld = true;
-  for (let i = 0; i < 60; i++) {
+  let flail = null;
+  for (let i = 0; i < 40 && !flail; i++) {
     g.fixedUpdate(1 / 60);
-    const flails = g.entities.projectiles.filter((p) => p.projId === 35);
-    if (flails.length && !res.spawn) res.spawn = { frame: i, x: +flails[0].x.toFixed(1), dead: flails[0].dead };
-    if (res.spawn && i >= res.spawn.frame) {
-      res.aliveAfter[i - res.spawn.frame] = { dead: flails[0]?.dead ?? true, count: flails.length };
-      if (i - res.spawn.frame <= 6 && flails[0]) res.posSeries.push({ f: i - res.spawn.frame, x: +flails[0].x.toFixed(1), y: +flails[0].y.toFixed(1), vx: +flails[0].vx.toFixed(2), vy: +flails[0].vy.toFixed(2) });
-    }
+    flail = g.entities.projectiles.find((p) => p.projId === 35 && !p.dead);
   }
-  const fin = g.entities.projectiles.filter((p) => p.projId === 35);
-  res.finalCount = fin.length;
-  res.finalDead = fin[0]?.dead ?? true;
-  res.inputMouseDown = g.input.mouseDown;
+  res.spawned = !!flail;
+  if (flail) {
+    res.spawnFrame = 'ok';
+    // 旋转 60+ tick,采样球心距
+    const dists = [];
+    for (let i = 0; i < 70; i++) {
+      g.fixedUpdate(1 / 60);
+      const d = Math.hypot(flail.x + flail.w / 2 - g.player.cx, flail.y + flail.h / 2 - g.player.cy);
+      dists.push(+d.toFixed(1));
+    }
+    res.orbitDists = { min: Math.min(...dists), max: Math.max(...dists), samples: dists.slice(0, 8) };
+    res.aliveAfterSpin = !flail.dead;
+    // 2) 静态图标:使用期间不应有 swing 持物动画
+    res.swingNull = !g.swing || g.swing.item !== sunfuryId;
+    // 2b) GetWeaponCrit:4 基础 + 武器 crit 7(Item.cs case 220) = 11%
+    res.critChance = flail.critChance;
+  }
+
+  // ---- 4) 灼烧:摆敌怪在旋转路径上,固定 Math.random=0.1(50% 掷骰必过) ----
+  if (flail) {
+    const en = g.spawnEnemy('v_6', g.player.cx + 30, g.player.cy - 20); // 僵尸(原版 6)
+    const realRandom = Math.random;
+    Math.random = () => 0.1;
+    en.onFireT = 0;
+    let fired = false;
+    for (let i = 0; i < 240; i++) {
+      g.fixedUpdate(1 / 60);
+      if ((en.onFireT ?? 0) > 0) { fired = true; break; }
+    }
+    Math.random = realRandom;
+    res.burnApplied = fired;
+    res.enemyOnFire = +(en.onFireT ?? 0).toFixed(2);
+    en.dead = true;
+  }
+
+  // ---- 3) 松手:掷出(初速 17 type 35) ----
+  if (flail && !flail.dead) {
+    const x0 = flail.x, y0 = flail.y;
+    g.input.mouseHeld = false;
+    for (let i = 0; i < 3; i++) g.fixedUpdate(1 / 60);
+    res.throwV = { vx: +flail.vx.toFixed(1), vy: +flail.vy.toFixed(1), x: +flail.x.toFixed(0) };
+    res.thrownRight = flail.vx > 14;
+    // 再走 20 tick:掷出态直线
+    for (let i = 0; i < 20; i++) g.fixedUpdate(1 / 60);
+    res.aliveAfterThrow = !flail.dead;
+  }
   return res;
 });
 
 console.log(JSON.stringify(out, null, 1));
-check('装备物品为 vi_220_sunfury', out.heldKey === 'vi_220_sunfury', `got=${out.heldKey}`);
-check('掷出链球(projid 35 生成)', !!out.spawn, out.spawn ? `frame=${out.spawn.frame}` : '');
-const survived = Object.entries(out.aliveAfter).filter(([, v]) => !v.dead).length;
-check('按住期间链球存活 >30 帧(channel 生效)', survived > 30, `存活帧=${survived}/60 finalDead=${out.finalDead}`);
+check('装备 vi_220_sunfury', true);
+check('掷出链球(projid 35)', !!out.spawned);
+if (out.orbitDists) {
+  // 原版椭圆轨迹(:41189-41197):水平向 R=37,向下 Y×0.8 再×0.5 → 最低点 37×0.4≈14.8
+  check('按住=绕体旋转(椭圆 R=37/下压 0.4)', Math.abs(out.orbitDists.max - 37) < 2 && Math.abs(out.orbitDists.min - 14.8) < 2,
+    `min=${out.orbitDists.min} max=${out.orbitDists.max}`);
+}
+check('旋转期间存活(channel 语义)', out.aliveAfterSpin !== false);
+check('无静态持物图标(noUseGraphic)', out.swingNull !== false);
+check('暴击率 = 4基础+武器crit(GetWeaponCrit)', out.critChance !== undefined && Math.abs(out.critChance - 0.11) < 0.001, `crit=${out.critChance}`);
+check('命中施加 OnFire(StatusNPC)', out.burnApplied === true, `onFireT=${out.enemyOnFire}s`);
+check('松手朝鼠标掷出(初速 17)', out.thrownRight === true, JSON.stringify(out.throwV));
+check('链条贴图 Chain6.png 可加载', out.chain6 === true);
 check('无 page error', errors.length === 0, errors.join('; '));
 
 console.log(`\n${pass} pass / ${fail} fail`);

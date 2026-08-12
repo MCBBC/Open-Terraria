@@ -3,7 +3,7 @@ import { saveGame, loadSave } from '../src/save/SaveFile';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { ITEM_BY_KEY } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY } from '../src/data/items';
 import { T, W } from '../src/data/tiles';
 import { BUFF_DEFS, BuffType } from '../src/stats/Buffs';
 import { packWorld } from '../src/workers/worldPacket';
@@ -23,10 +23,10 @@ describe('自有存档格式', () => {
     st.setTileSilent(10, 21, 0);
     st.setTileSilent(10, 22, 0);
     st.setLiquid(10, 22, 255, 1);
-    world.chests.push({ x: 5, y: 5, items: [{ id: ITEM_BY_KEY['torch'], stack: 3 }, null] });
+    world.chests.push({ x: 5, y: 5, items: [{ id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[8]], stack: 3 }, null] });
 
     const inv = new Inventory();
-    inv.add(ITEM_BY_KEY['dirt_block'], 77);
+    inv.add(ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[2]], 77);
     const player = new Player(100, 100, inv);
     player.hp = 88;
 

@@ -29,7 +29,7 @@ describe('弹幕命中小动物', () => {
     expect(squirrel.dead).toBe(false);
     const game = makeGame([squirrel]);
     // 松鼠在 (40,20) 格;箭从左侧水平飞入
-    const arrow = new Arrow(40 * 16 - 20, 20 * 16 + 4, 8, 0, 9, 1, 1, 'wooden_arrow');
+    const arrow = new Arrow(40 * 16 - 20, 20 * 16 + 4, 8, 0, 9, 1, 1, VANILLA_ITEM_KEY_BY_ID[40]);
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(squirrel.dead).toBe(true);
     expect(arrow.dead).toBe(true);
@@ -48,7 +48,7 @@ describe('弹幕命中小动物', () => {
     const squirrel = new Critter('squirrel', 40 * 16 + 8, 20 * 16 + 8);
     const game = makeGame([squirrel]);
     // 箭在松鼠下方 3 格飞过
-    const arrow = new Arrow(40 * 16 - 20, 23 * 16, 8, 0, 9, 1, 1, 'wooden_arrow');
+    const arrow = new Arrow(40 * 16 - 20, 23 * 16, 8, 0, 9, 1, 1, VANILLA_ITEM_KEY_BY_ID[40]);
     for (let i = 0; i < 8; i++) arrow.fixedUpdate(1 / 60, game);
     expect(squirrel.dead).toBe(false);
     expect(arrow.dead).toBe(false);

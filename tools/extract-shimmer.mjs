@@ -57,32 +57,48 @@ const npcid = read('Terarria1456/Terraria.ID/NPCID.cs');
 const itemcs = read('Terarria1456/Terraria/Item.cs');
 
 /** Item.cs SetDefaults 内 `case N:` → DefaultToCapturedCritter(X) 扫描。
- *  只收 SetDefaults 顶层 case（2 个 tab 缩进）——内层 switch 的 case 更深，
- *  避免多标签 fallthrough（如 1993/2001 共体）之外的内层标签污染。
- *  多标签共享体（case A: case B: 同一 DefaultToCapturedCritter）逐标签登记 */
+ *  作用域规则（SetDefaults 反编译结构：case 标签深度 d，体语句深度 d+1，
+ *  终止符 break/return/goto 深度 d+1）：
+ *   - 同深度连续标签 = 多标签共体（2889-2895 → 442+type-2889 逐标签求值）
+ *   - 更深标签 = 内层 switch(type) 作用域（2205 → 148、2673 → 374 均在内层）
+ *   - 终止符清空 labelDepth ≥ 深度-1 的全部组（防外层已终标签滞留误挂）
+ *  参数支持字面量与 `(short)(含 type 表达式)`（:27385/:37069/:39530/:39540 工厂式） */
 function capturedCritterMap(src) {
   const out = {};
-  const lines = src.split('\n');
-  let pending = [];
-  let sawSwitch = false;
-  for (const line of lines) {
-    if (/^	public void SetDefaults\(/.test(line) || /^	private void SetDefaults\(/.test(line)) sawSwitch = true;
-    if (/^\t\tcase (\d+):\s*$/.test(line)) {
-      pending.push(parseInt(RegExp.$1, 10));
+  let groups = []; // { ids: number[], depth }——后进 = 更内层作用域
+  for (const line of src.split('\n')) {
+    const cm = line.match(/^(\t*)case (\d+):\s*$/);
+    if (cm) {
+      const depth = cm[1].length;
+      const id = parseInt(cm[2], 10);
+      const top = groups[groups.length - 1];
+      if (top && top.depth === depth) top.ids.push(id);
+      else groups.push({ ids: [id], depth });
       continue;
     }
-    const m = line.match(/^\t\t\tDefaultToCapturedCritter\((\d+)\);/);
-    if (m && pending.length) {
-      for (const id of pending) out[id] = parseInt(m[1], 10);
-      pending = [];
+    if (/^\t*(break;|return;|return |goto )/.test(line)) {
+      const d = (line.match(/^\t*/) ?? [''])[0].length;
+      groups = groups.filter((g) => g.depth < d - 1);
       continue;
     }
-    // 块结束（break/return/goto）清空待定标签
-    if (/^\t\t\t(break|return|goto )/.test(line)) pending = [];
-    // 深层标签（内层 switch 体）不记入 pending 但也不能穿透到外层——
-    // DefaultToCapturedCritter 只出现在 3 tab 深度，安全
+    const m = line.match(/^\t+DefaultToCapturedCritter\((.+)\);$/);
+    if (m) {
+      const g = groups[groups.length - 1];
+      if (g) for (const id of g.ids) out[id] = evalCritterArg(m[1], id);
+    }
   }
   return out;
+}
+
+/** DefaultToCapturedCritter 实参求值：字面量或含 `type`（=物品 id）的算术式 */
+function evalCritterArg(arg, itemId) {
+  const wrap = arg.match(/^\(short\)\((.+)\)$/);
+  const expr = wrap ? wrap[1] : arg;
+  if (!/^[\d+\-*/(). type]+$/.test(expr)) {
+    throw new Error(`unparsed DefaultToCapturedCritter arg: ${arg}`);
+  }
+  // eslint-disable-next-line no-new-func
+  return new Function('type', `"use strict";return (${expr});`)(itemId);
 }
 
 const data = {

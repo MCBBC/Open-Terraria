@@ -628,7 +628,11 @@ export class MinionProj extends Entity {
       en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game); };
       const res = resolveWhipTagHit(en, dmg, game,
         (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
-      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
+      // 击退 = 武器 kb×0.5（本作接触系数）+ minionKB 加算（GetWeaponKnockback :52477-52482：
+      // 大力士甲虫/纸莎草 +2——首版聚合了 equipStats.minionKB 但漏消费，终审补接）
+      const owner0 = this.ownerRef();
+      const mkb = (owner0 as unknown as { equipStats?: { minionKB?: number } } | null)?.equipStats?.minionKB ?? 0;
+      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5 + mkb, -1, game);
       this.attackFlash = 24;
       anyHit = true;
     }

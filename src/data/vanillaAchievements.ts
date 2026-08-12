@@ -115,7 +115,7 @@ const RAW: RawDef[] = [
   ['INTO_ORBIT', [flag('Reach')]],
   ['ROCK_BOTTOM', [flag('Reach')]],
   ['MECHA_MAYHEM', [prog(21)]],
-  ['GELATIN_WORLD_TOUR', [killedMany(-5, -6, 1, 81, 71, -3, 147, 138, -10, 50, 59, 16, -7, 244, -8, -1, -2, 184, 204, 225, -9, 141), killed(183, -24, -25), killedMany(-4)]],
+  ['GELATIN_WORLD_TOUR', [killedMany(-5, -6, 1, 81, 71, -3, 147, 138, -10, 50, 59, 16, -7, 244, -8, -1, -2, 184, 204, 225, -9, 141), killed(183, -24, -25), killed(-4)]],
   ['FASHION_STATEMENT', [flag('Equip')]],
   ['VEHICULAR_MANSLAUGHTER', [flag('Hit')]],
   ['BULLDOZER', [intC('Pick', 10000)]],

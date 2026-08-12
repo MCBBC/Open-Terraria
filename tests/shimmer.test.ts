@@ -124,8 +124,7 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
   it('金币 73 入池 90t → 消失并按 ×10000 计入 coinLuck', () => {
     const w = shimmerWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
-    const key = 'coin_gold';
-    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key], 2);
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[73]], 2);
     expect(vanillaIdOfItem(d.itemId)).toBe(73);
     for (let i = 0; i < 200 && !d.dead; i++) d.fixedUpdate(1, hooks(w, p));
     expect(d.dead).toBe(true);
@@ -135,7 +134,7 @@ describe('掉落物入微光（WorldItem.Shimmering + GetShimmered）', () => {
   it('火炬 8 入池 → 换成 5353 原堆叠保留并微光化上浮（shimmered）', () => {
     const w = shimmerWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
-    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY['torch'], 5);
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[8]], 5);
     for (let i = 0; i < 300; i++) {
       d.fixedUpdate(1, hooks(w, p));
       if (d.shimmered) break;

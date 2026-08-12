@@ -2,7 +2,7 @@
 import { describe, it, expect } from 'vitest';
 import { combatWeapon, thrownCombat, projGravity } from '../src/data/vanillaItemCombat';
 import { projectileData } from '../src/data/vanillaProjectiles';
-import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
 
 const def = (key: string) => ITEM_DEFS[ITEM_BY_KEY[key]];
 
@@ -60,7 +60,7 @@ describe('vi_* 武器分类（combatWeapon）', () => {
   });
 
   it('弓（useAmmo 体系）不被 combatWeapon 分流', () => {
-    expect(combatWeapon({ key: 'wooden_bow', vid: 39 })).toBeNull();
+    expect(combatWeapon({ key: VANILLA_ITEM_KEY_BY_ID[39] })).toBeNull();
   });
 });
 

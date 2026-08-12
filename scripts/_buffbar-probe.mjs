@@ -5,6 +5,7 @@ import fs from 'node:fs';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
+await page.bringToFront();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -14,17 +15,12 @@ for (let i = 0; i < 150 && !inGame; i++) {
   if (!inGame) await new Promise((r) => setTimeout(r, 2000));
 }
 if (!inGame) { console.error('未进游戏', errors.slice(0, 3)); process.exit(1); }
-await page.evaluate(async () => { await window.__swGame.newWorld('12345', 4200, 1200, () => {}); });
-let ready = false;
-for (let i = 0; i < 150 && !ready; i++) {
-  ready = await page.evaluate(() => { const g = window.__swGame; return !!(g && g.world && g.world.store && g.world.store.w === 4200); }).catch(() => false);
-  if (!ready) await new Promise((r) => setTimeout(r, 2000));
-}
 // 授予多个 buff + 刷新 UI
 const geo = await page.evaluate(async () => {
   const g = window.__swGame;
   const mods = await import('/src/stats/Buffs.ts');
-  for (const t of [mods.BuffType.Agility, mods.BuffType.Ironskin, mods.BuffType.Regen, mods.BuffType.Honey, mods.BuffType.Thorns, mods.BuffType.NightOwl, mods.BuffType.OnFire]) {
+  for (const t of [mods.BuffType.Agility, mods.BuffType.Ironskin, mods.BuffType.Regen, mods.BuffType.Honey, mods.BuffType.Thorns, mods.BuffType.NightOwl, mods.BuffType.OnFire,
+    mods.BuffType.Battle, mods.BuffType.Mining, mods.BuffType.Builder, mods.BuffType.Calming, mods.BuffType.Heartreach]) {
     g.player.buffs.apply(t, 120);
   }
   g.ui?.refreshBuffs?.();
@@ -48,7 +44,8 @@ const geo = await page.evaluate(async () => {
   });
   return { bar: { x: br.x, y: br.y, w: br.width, h: br.height, cls: bar.className, display: getComputedStyle(bar).display, dir: getComputedStyle(bar).flexDirection, wrap: getComputedStyle(bar).flexWrap },
     items,
-    dbg: { active: [...g.player.buffs.active.entries()], hasUi: !!g.ui, uiType: typeof g.ui, childCount: bar.children.length, dispNone: [...bar.children].filter((c) => c.style.display === 'none').length } };
+    dbg: { active: [...g.player.buffs.active.entries()], hasUi: !!g.ui, uiType: typeof g.ui, childCount: bar.children.length, dispNone: [...bar.children].filter((c) => c.style.display === 'none').length,
+      tick: g.tickCount, visibility: document.visibilityState, cb: typeof g.cb } };
 });
 console.log(JSON.stringify(geo, null, 1));
 // 截左上角 buff 栏区域(页面坐标,viewport 1280x800)

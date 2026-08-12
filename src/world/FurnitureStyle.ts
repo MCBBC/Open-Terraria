@@ -33,8 +33,10 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     // 15 椅子（TileObjectData :4132-4164 Style1x2、StyleHorizontal=false、
     //  StyleWrapLimit=2、StyleMultiplier=2、PaddingFix(0,2)）：FullHeight=(16+2)+(18+2)+2
     //  =40——style 竖排 Y 步 40（Tiles_15 72×2038 行带 0/40/80…实测；曾误写 38
-    //  漏 PaddingFix.Y，每样式偏 2px）；朝向档在 X 0/18（flip +18）
+    //  漏 PaddingFix.Y，每样式偏 2px）；朝向档在 X 0/18（flip +18）。
+    //  497 马桶同构（:4167-4184 同参数组；TileDrawing.cs:6344-6350 `tileFrameY/40` 行带）
     case 15: return [0, style * 40];
+    case 497: return [0, style * 40];
     // 79 床 / 90 浴缸（Style4x2 同椅子模式：WrapLimit=2、Multiplier=2、H=false）：
     // style 竖排 Y 步 36，朝向档在 X 0/72
     case 79: case 90: return [0, style * 36];
@@ -42,6 +44,10 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     //  frameY/36 = 曲目 style）：StyleHorizontal=false 竖排 Y 步 36；开关档 X 0/36
     // （Wiring SwitchMB :50977）。此前走 default X 向 → 唱片全放成曲目 0
     case 139: return [0, style * 36];
+    // ★备案（未加专属 case，勿一刀切）：388/389 高门（TallGate）与 617 遗物座的
+    // TileObjectData 均 StyleHorizontal=false（变体竖排），default 的 X 向 style*fw*18
+    // 对它们是错的——当前生成/放置链无 placeStyle>0 实例不触发，一旦引入多变体
+    // 须按表补竖排 case（参考 15/79/139 的写法）
     default: return [style * fw * 18, 0];
   }
 }

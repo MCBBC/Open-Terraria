@@ -7,6 +7,7 @@ import { CRITTER_BY_KEY, CritterDef } from '../data/critters';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { avoidWater } from './waterAvoid';
+import { npcShimmerTransformTo } from '../stats/Shimmer';
 
 export class Critter extends Entity {
   stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
@@ -54,6 +55,12 @@ export class Critter extends Entity {
   fixedUpdate(dt: number, game: GameHooks) {
     this.animT++;
     if (this.iframes > 0) this.iframes--;
+    // 入微光转化（NPC.cs:34586-34598 aiStyle 67 分支首判：中心格 shimmer 液面 >30
+    // 即刻 GetShimmered——无 90t 浸入进度）。GetShimmered(:92502-92533)：
+    // ShimmerTransformToNPC → Transform（表内小动物兔/鸟/松鼠/蝴蝶/金系…全部 →
+    // 677 微光蝇，NPCID.cs:4843）；螃蟹 67 无表项 → 分支链落空，原地保留不消散。
+    // 雕像产怪直接消散分支(:92504)对本仓野生小动物不适用
+    if (this.tryShimmer(game)) return;
     // 每帧刷新在水状态（此前只在 groundAI 里更新——起飞后不再跑 groundAI，
     // inWater 冻结为 true 导致飞行时渲染恒选游水帧）
     const st0 = game.world.store;
@@ -138,6 +145,25 @@ export class Critter extends Entity {
       const d = Math.hypot(player.cx - this.cx, player.cy - this.cy);
       if (d > TILE * 70) this.dead = true;
     }
+  }
+
+  /** 入微光（NPC.GetShimmered :92502-92533 小动物侧）：中心格微光液面 >30 即触发。
+   *  返回 true = 已转化（本帧 AI 终止，原版 :34596 触发后 return） */
+  private tryShimmer(game: GameHooks): boolean {
+    const st = game.world.store;
+    const tx = Math.floor(this.cx / TILE);
+    const ty = Math.floor(this.cy / TILE);
+    if (!st.inBounds(tx, ty)) return false;
+    const i = st.idx(tx, ty);
+    if (!(st.liquidType[i] === 4 && st.liquid[i] > 30)) return false;
+    const to = npcShimmerTransformTo(this.def.npc);
+    if (to < 0) return false;   // 无表项：分支链落空，小动物留在微光里不消散
+    this.dead = true;
+    // NPC.Transform(:81850)：贴底重定位（脚底对齐落点）；新实体微光化渐显
+    const e = game.spawnNpcByVanilla?.(to, this.cx, this.y + this.h);
+    if (e) { e.spawnAlpha = 254; e.alphaFade = true; }
+    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+    return true;
   }
 
   /** 鸭子自发行为轮盘：上岸 / 下水 / 起飞 低频切换（每 3-5 秒掷一次） */

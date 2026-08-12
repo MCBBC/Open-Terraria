@@ -10,6 +10,7 @@ import { TILE_BY_KEY, TILE_DEFS } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
+import { VI_KEY } from './data/itemKeys';
 import { parseWldToSave } from './wld/WldImport';
 import { Inventory } from './items/Inventory';
 import { VUI } from './vui/VUI';
@@ -317,10 +318,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       // 每次导入多出 2×20~50MB 峰值,且让 5 份全图副本并存更久)
       const { world } = loadSaveData(save);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.7 + p * 0.3));
-      g.player.inv.add(ITEM_BY_KEY['copper_pickaxe'], 1);
-      g.player.inv.add(ITEM_BY_KEY['copper_axe'], 1);
-      g.player.inv.add(ITEM_BY_KEY['copper_sword'], 1);
-      g.player.inv.add(ITEM_BY_KEY['torch'], 20);
+      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.PICK], 1);
+      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
+      g.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
+      g.player.inv.add(ITEM_BY_KEY[VI_KEY.TORCH], 20);
       ui.toast(Lang.text('Mods.SandboxWorld.Toast.WldImported', save.header.name ?? '', save.header.wldVersion ?? 0));
       // 登记世界槽位并持久化：导入不再是一次性的，重进游戏可在世界列表中看到并继续游玩
       await worldStore.ensureLoaded();

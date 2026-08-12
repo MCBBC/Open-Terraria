@@ -6,8 +6,10 @@
 //       ② ShimmerTransformToItem 有对应 → SetDefaults(target) 原堆叠保留
 //       ③ decraft 反合成（GetDecraftingRecipeIndex + RecipeSets 骷髅王/石巨人双锁
 //          + WorldItem.cs:1878-1946 返还计算/掉落）——已移植（见 decraft 段 + ItemDrop）
-//       ④ makeNPC（小动物笼放生物品）→ NPC.ReleaseNPC，登记
-//       ⑤ 特例 4986 彩虹史莱姆解锁 / 560 史莱姆雨，登记
+//       ④ 4986 闪耀史莱姆气球 → 解锁 681 彩虹史莱姆（:1816-1837，仅首次）——已移植
+//       ⑤ 560 史莱姆王冠 → 触发史莱姆雨（:1838-1854，雨中不可再入）——已移植
+//       ⑥ makeNPC 瓶中小动物 → ReleaseNPC 放生（:1855-1877，目标优先
+//          ShimmerTransformToNPC[makeNPC]）——已移植
 //       转化后 shimmered=true 上浮（gravity 0，vy -0.05/t 钳 -4，WorldItem.cs:486-511）
 //   - 玩家 Player.cs：触微光 shimmerWet(:27420-27434，脚格 shimmer 且在地狱层之上
 //       → AddBuff(353,60))；buff 353(:11381-11428) shimmering=true + frozen + fallStart
@@ -19,16 +21,19 @@
 //       shimmerTransparency +0.01/t（:92468-92483）>0.9 → GetShimmered(:92502-92584)：
 //       雕像产怪直接消散 / ShimmerTransformToNPC → Transform / ShimmerTransformToItem →
 //       出微光化物品后消散 / ShimmerTownTransform → ai[0]=25（城镇变体传送）
-//   - 转化表来源：tools/extract-shimmer.mjs 从 ItemID.cs/NPCID.cs Sets 提取 →
-//       src/data/vanilla-shimmer.json（312 物品对 + 114 NPC 对 + 15 NPC→物品 +
-//       29 城镇变体 + CommonCoin/PostMoonlord）
+//       小动物（aiStyle 67，:34586-34598）：中心格微光液面 >30 即刻触发 GetShimmered
+//       （无 90t 浸入进度）——已移植（entities/Critter.ts tryShimmer）
+//   - 转化表来源：tools/extract-shimmer.mjs 从 ItemID.cs/NPCID.cs Sets +
+//       Item.cs DefaultToCapturedCritter 提取 → src/data/vanilla-shimmer.json
+//       （312 物品对 + 114 NPC 对 + 15 NPC→物品 + 29 城镇变体 + 93 瓶中小动物 +
+//       CommonCoin/PostMoonlord）
 //   GAP 登记（未移植）：
 //     - decraft 反 craft：已移植（vanillaRecipes 索引 + 本文件 decraft 段 + ItemDrop 分支；
-//       遗留：RecipeGroup 组代表 3 组同价并列错位，见 tools/extract-itemrare.mjs 头注）
-//     - makeNPC 小动物放生、4986 彩虹史莱姆解锁、560 史莱素雨触发
+//       RecipeGroup 组代表并列错位已修：tools/extract-itemrare.mjs 工厂盲区
+//       （buyPrice/SetShopValues/标签列/扫描越界）修复后重提，value 2344→4256 条）
 //     - 3461 月相砖:已按 GetLunarBrickTransformFromMoonPhase(:113-125)接通(月相参)
 //     - 微光视觉（shimmerTransparency 半透明 / 微光化物品上浮白光 dust 309）
-//     - 小动物（Critter）入微光转化（aiStyle 67 族）、Boss 免微光名单
+//     - Boss 免微光名单（NPCID.Sets.ShimmerImmunity）
 //     - 联机同步（NetMessage 145/146 ShimmeredItem/ShimmerEffect）
 import shimmerJson from '../data/vanilla-shimmer.json';
 import { getDecraftingRecipeIndex, recipeAt, RECIPE_GROUP_ITEMS } from '../data/vanillaRecipes';
@@ -47,6 +52,7 @@ const COMMON_COIN = new Set<number>((shimmerJson as Json).commonCoin as number[]
 const NPC_TRANSFORM = (shimmerJson as Json).npcTransformTo as Record<string, number>;
 const NPC_TRANSFORM_ITEM = (shimmerJson as Json).npcTransformToItem as Record<string, number>;
 const NPC_TOWN_TRANSFORM = new Set<number>((shimmerJson as Json).npcTownTransform as number[]);
+const ITEM_MAKE_NPC = (shimmerJson as Json).itemMakeNPC as Record<string, number>;
 
 // ============ 内部物品 id ↔ 原版物品 id ============
 
@@ -223,17 +229,34 @@ export function decraftOutcome(
   return { piles, consumed: times * r.createStack, spread: (r.items[1]?.stack ?? 0) > 0 };
 }
 
-/** Item.CanShimmer（Item.cs:49045-49068）2026-08-13 补 decraft 位（:49056）：
- *  可转 = 未锁 + (有转化目标 ∨ **可分解且未锁** ∨ 钱币)。
+/** Item.CanShimmer（Item.cs:49045-49061）全分支 1:1：
+ *  ① 月后锁 → false（:49048）
+ *  ② 560 史莱姆王冠且雨进行中 → false（:49052）
+ *  ③ (:49056) 无转化目标 ∧ 不可分解 ∧ 非钱币 ∧ (非 4986 或已解锁彩虹史莱姆)
+ *     → 只剩 makeNPC > 0 一条路（:49058）——4986 未解锁时特例放行（:49060）
  *  decraftCtx 缺省 = 不启用 decraft 判定（调用方旧签名兼容） */
 export function canShimmerItem(
   vid: number, downedMoonlord = false, moonPhase?: number,
   decraftCtx?: { stack: number; crimsonWorld: boolean; downedBoss3: boolean; downedGolemBoss: boolean },
+  shimmerCtx?: { slimeRain?: boolean; rainbowSlimeUnlocked?: boolean },
 ): boolean {
   if (isItemTransformLocked(vid, downedMoonlord)) return false;
-  if (getTransformToItem(vid, moonPhase) > 0 || COMMON_COIN.has(vid)) return true;
-  if (decraftCtx) return isItemDecraftableAndUnlocked(vid, decraftCtx.stack, decraftCtx.crimsonWorld, decraftCtx.downedBoss3, decraftCtx.downedGolemBoss);
-  return false;
+  if (vid === 560 && shimmerCtx?.slimeRain) return false;
+  const special4986 = vid === 4986 && !shimmerCtx?.rainbowSlimeUnlocked; // :49056 反例
+  if (!special4986
+    && getTransformToItem(vid, moonPhase) <= 0
+    && !COMMON_COIN.has(vid)
+    && !(decraftCtx && isItemDecraftableAndUnlocked(vid, decraftCtx.stack, decraftCtx.crimsonWorld, decraftCtx.downedBoss3, decraftCtx.downedGolemBoss))) {
+    return makeNpcOfItem(vid) > 0;
+  }
+  return true;
+}
+
+/** Item.makeNPC（Item.cs:47613-47626 DefaultToCapturedCritter）：瓶中小动物物品 →
+ *  放生 NPC id。tools/extract-shimmer.mjs 从 DefaultToCapturedCritter 调用点提取
+ *  （含 (short)(type - 4334 + 595) 族工厂式逐标签求值），0 = 非放生物品 */
+export function makeNpcOfItem(vid: number): number {
+  return ITEM_MAKE_NPC[vid] ?? 0;
 }
 
 /** 钱币→微光化币面额放大（WorldItem.cs:1791-1810）：铜 ×1 / 银 ×100 / 金 ×10000 /

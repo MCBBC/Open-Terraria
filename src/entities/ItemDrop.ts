@@ -10,6 +10,7 @@ import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
   decraftOutcome, isItemDecraftableAndUnlocked,
   internalIdOfVanilla, vanillaIdOfItem,
+  makeNpcOfItem, npcShimmerTransformTo,
 } from '../stats/Shimmer';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 
@@ -85,7 +86,7 @@ export class ItemDrop extends Entity {
         //  WorldItem 拾取路径，合成/初始装备不经此）
         if (left < before) {
           const vid = vanillaIdOfItem(this.itemId);
-          if (vid > 0) game.achievements.notifyItemPickup(vid);
+          if (vid > 0) game.achievements?.notifyItemPickup(vid);
         }
         if (left === 0) {
           this.dead = true;
@@ -177,7 +178,12 @@ export class ItemDrop extends Entity {
     };
     // 月后锁取世界 flags（原版 NPC.downedMoonlord；恒 false 会把月后物永久挡在微光外）
     const downedMoonlord = !!flags['downed_398'];
-    if (inShimmer && canShimmerItem(vid, downedMoonlord, game.world.clock.moonPhase, decraftCtx)) {
+    // :49052/:49056 运行时门：560 雨中禁入 / 4986 已解锁彩虹史莱姆后禁入
+    const shimmerCtx = {
+      slimeRain: !!(game.world as unknown as { weather?: { slimeRain?: boolean } }).weather?.slimeRain,
+      rainbowSlimeUnlocked: !!flags['unlockedSlimeRainbowSpawn'],
+    };
+    if (inShimmer && canShimmerItem(vid, downedMoonlord, game.world.clock.moonPhase, decraftCtx, shimmerCtx)) {
       this.shimmerTime += 0.01;
       if (this.shimmerTime > 0.9) {
         this.shimmerTime = 0.9;
@@ -188,10 +194,10 @@ export class ItemDrop extends Entity {
     }
   }
 
-  /** WorldItem.GetShimmered（:1781-1931）分支顺序 1:1：钱币(:1790) →
-   *  ShimmerTransformToItem(:1812) → decraft(:1878) → makeNPC/特例 4986、560
-   *  登记未移植（Shimmer.ts GAP 清单）。**decraft 必须排在钱币/转化之后**：
-   *  钱币 71-74 与火炬 8 等都有 IsCrafted 配方，放前面会抢走转化/coinLuck 分支 */
+  /** WorldItem.GetShimmered（:1781-1931）分支顺序 1:1：钱币(:1786) →
+   *  ShimmerTransformToItem(:1809) → 4986 彩虹史莱姆解锁(:1816) → 560 史莱姆雨
+   *  (:1838) → makeNPC 放生(:1855) → decraft(:1878)。**decraft 必须排在钱币/转化
+   *  之后**：钱币 71-74 与火炬 8 等都有 IsCrafted 配方，放前面会抢走转化/coinLuck 分支 */
   private getShimmered(game: GameHooks): void {
     const vid = vanillaIdOfItem(this.itemId);
     if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
@@ -216,6 +222,55 @@ export class ItemDrop extends Entity {
         game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
         return;
       }
+    }
+    // 4986 闪耀史莱姆气球（:1816-1837）：首次入微光 → 解锁彩虹史莱姆城镇 NPC 681
+    // （从 Center.X+4 落点出生，继承物品速度，shimmerTransparency=1 渐显）并消耗 1 个；
+    // 已解锁则整组分支跳过（return，物品原样滞留微光）
+    if (vid === 4986) {
+      const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
+      if (flags['unlockedSlimeRainbowSpawn']) return;         // :1818-1821
+      flags['unlockedSlimeRainbowSpawn'] = true;              // NPC.unlockedSlimeRainbowSpawn
+      const e = game.spawnNpcByVanilla?.(681, this.cx + 4, this.cy);
+      if (e) { e.vx = this.vx; e.spawnAlpha = 254; e.alphaFade = true; }
+      // WorldGen.CheckAchievement_RealEstateAndTownSlimes(:1831)——成就项未接，登记
+      this.stack--;
+      if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1832-1836 type=0
+      else this.shimmerTime = 1;                                   // :1948-1951 共尾
+      this.vx *= 0.1; this.vy *= 0.1;                              // :1958
+      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      return;
+    }
+    // 560 史莱姆王冠（:1838-1854）：雨未进行 → 触发史莱姆雨并消耗 1 个
+    if (vid === 560) {
+      const wd = (game.world as unknown as { weather?: { slimeRain?: boolean; startSlimeRain?: () => void } }).weather;
+      if (wd?.slimeRain) return;                              // :1840-1843
+      wd?.startSlimeRain?.();                                 // Main.StartSlimeRain
+      this.stack--;
+      if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1845-1848
+      else this.shimmered = true;                                  // :1850-1853
+      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      return;
+    }
+    // makeNPC 瓶中小动物（:1855-1877）：逐个放生（上限 min(stack, 空闲 NPC 槽, 50)），
+    // 放生目标优先 ShimmerTransformToNPC[makeNPC]（表内小动物全 → 677 微光蝇）
+    const makeNpc = makeNpcOfItem(vid);
+    if (makeNpc > 0) {
+      const to = npcShimmerTransformTo(makeNpc);
+      const npcId = to >= 0 ? to : makeNpc;                  // :1866
+      // NPC.GetAvailableAmountOfNPCsToSpawnUpToSlot(:81435)：0..199 空闲槽数，钳 stack
+      const active = (game.enemies?.().length ?? 0) + (game.critters?.().length ?? 0);
+      let left = Math.min(this.stack, Math.max(0, 200 - active));
+      for (let guard = 50; guard > 0 && left > 0 && this.stack > 0; guard--, left--) {  // :1860 num3=50
+        this.stack--;
+        const e = game.spawnNpcByVanilla?.(npcId, this.cx, this.y + this.h);
+        if (e) { e.spawnAlpha = 254; e.alphaFade = true; }    // :1869 shimmerTransparency=1
+      }
+      this.shimmered = true;                                  // :1872
+      if (this.stack <= 0) { this.stack = 0; this.dead = true; }   // :1873-1876
+      else this.shimmerTime = 1;
+      this.vx *= 0.1; this.vy *= 0.1;
+      game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      return;
     }
     this.tryDecraft(game, vid);   // :1878 else-if 链末端
   }

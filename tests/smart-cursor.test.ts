@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
 import {
   SmartCursor, hitLine, hitLineWall, hitWallSubstep, canHitWithCheck, isOpenDoorAnchorFrame,
   sheetOf, smartCursorArrowAllowed,
@@ -40,12 +40,12 @@ function mkEnv(
   };
 }
 
-const pick = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['copper_pickaxe']], tool: { type: 'pick' as const, power: 35 } });
-const axe = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['copper_axe']], tool: { type: 'axe' as const, power: 7 } });
-const hammer = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['wood_hammer']], tool: { type: 'hammer' as const, power: 25 } });
-const torchItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['torch']], tool: null });
-const dirtItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['dirt_block']], tool: null });
-const platformItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['platform']], tool: null });
+const pick = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]]], tool: { type: 'pick' as const, power: 35 } });
+const axe = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3506]]], tool: { type: 'axe' as const, power: 7 } });
+const hammer = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[196]]], tool: { type: 'hammer' as const, power: 25 } });
+const torchItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[8]]], tool: null });
+const dirtItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[2]]], tool: null });
+const platformItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[94]]], tool: null });
 const wallItem = () => ({ def: ITEM_DEFS[ITEM_BY_KEY['vi_93_wood_wall']], tool: null }); // wallId 4（房墙）
 
 /** 跑一次 lookup 并返回目标（无目标 null） */
@@ -275,7 +275,7 @@ describe('其余策略抽样', () => {
     const st = new TileStore(W, H);
     st.setLiquid(100, 97, 200, 1); // 一格 200 的水（3×3 内同类总量 >100）
     st.setLiquid(104, 97, 10, 1);  // 太少
-    const target = run(mkEnv(st, mouseAt(104, 97), { def: ITEM_DEFS[ITEM_BY_KEY['empty_bucket']], tool: null }));
+    const target = run(mkEnv(st, mouseAt(104, 97), { def: ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[205]]], tool: null }));
     expect(target).toEqual({ x: 100, y: 97 });
   });
 
@@ -284,7 +284,7 @@ describe('其余策略抽样', () => {
     for (let y = 93; y <= 99; y++) st.setTile(103, y, T.STONE);   // 石墙（镐目标）
     for (let y = 90; y <= 96; y++) st.setTile(104, y, T.TREE);    // 树（斧目标 → 根 96）
     // 镐 + 副斧力（def.axePower 桥，Drax 579 语义）
-    const dual = { ...ITEM_DEFS[ITEM_BY_KEY['copper_pickaxe']], key: 'test_drax', axePower: 100 };
+    const dual = { ...ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]]], key: 'test_drax', axePower: 100 };
     const held = { def: dual, tool: { type: 'pick' as const, power: 55 } };
     const t1 = run(mkEnv(st, mouseAt(120, 95), held, {
       settings: { ...DEFAULT_SMART_CURSOR_SETTINGS, smartAxeAfterPickaxe: false },

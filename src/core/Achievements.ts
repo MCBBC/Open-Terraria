@@ -135,6 +135,9 @@ export class Achievements {
     return this.defs.filter((d) => !this.completed.get(d.name));
   }
 
+  /** 定义列表（注册原序——菜单列表序） */
+  defList(): AchDef[] { return this.defs; }
+
   /** 弹出解锁队列（UI toast 消费） */
   popUnlocked(): string[] { const q = this.unlockedQueue; this.unlockedQueue = []; return q; }
 

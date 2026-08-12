@@ -3148,8 +3148,12 @@ void CrimVeinGen(double px, double py, double ivx, double ivy)
     double sx = px, sy = py;
     int trip = (int)r.Next(100, 150);
     if (ivy < 0.0) trip -= 25;
+    Console.Error.WriteLine($"VW s={sx},{sy} iv={ivx},{ivy} trip={trip}");
+    int vwIt = 0;
     while (flag)
     {
+        if (vwIt < 6) Console.Error.WriteLine($"VK{vwIt} p={vx},{vy} r={rad} ppeek={(int)r.Peek()}");
+        vwIt++;
         rad += (int)r.Next(-50, 51) * 0.02;
         if (rad < 15.0) rad = 15.0;
         if (rad > 25.0) rad = 25.0;
@@ -3211,6 +3215,23 @@ void CrimEntGen(double px, double py, int crimDir)
         px += vx; py += vy;
     }
 }
+string CrPhaseHash(int hc)
+{
+    uint h = 0x811c9dc5;
+    for (int hx = Math.Max(0, hc - 300); hx < Math.Min(W, hc + 300); hx++)
+        for (int hy = 240; hy < 700; hy++)
+        {
+            int hi2 = hy * W + hx;
+            h = (h ^ (uint)(typ[hi2] & 0xff)) * 16777619u;
+            h = (h ^ (uint)((typ[hi2] >> 8) & 0xff)) * 16777619u;
+            h = (h ^ act[hi2]) * 16777619u;
+            h = (h ^ (uint)(wal[hi2] & 0xff)) * 16777619u;
+            h = (h ^ (uint)((wal[hi2] >> 8) & 0xff)) * 16777619u;
+        }
+    return h.ToString("x8");
+}
+int cp1Dumped = 0;
+int cp6Dumped = 0;
 void CrimStartGen(int i, int j)
 {
     double wsN = worldSurface;
@@ -3226,8 +3247,12 @@ void CrimStartGen(int i, int j)
     double rad = (int)r.Next(15, 26);
     bool flag = true;
     int num4 = 0;
+    int mwIt = 0;
+    Console.Error.WriteLine($"MW startY={startY} j={j} ws={worldSurface}");
     while (flag)
     {
+        if (mwIt < 20) Console.Error.WriteLine($"MK{mwIt} px={vx} py={vy} r={rad} p={(int)r.Peek()}");
+        mwIt++;
         rad += (int)r.Next(-50, 51) * 0.01;
         if (rad < 15.0) rad = 15.0;
         if (rad > 25.0) rad = 25.0;
@@ -3267,7 +3292,19 @@ void CrimStartGen(int i, int j)
         vx += vx2; vy += vy2;
         if (vy > wsN + 100.0) flag = false;
     }
-    Console.Error.WriteLine($"CP1 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP1 p={(int)r.Peek()} h={CrPhaseHash(i)}");
+    if (cp1Dumped == 0)
+    {
+        cp1Dumped = 1;
+        var gb = new StringBuilder();
+        for (int gx = i - 320; gx < i + 320; gx++)
+            for (int gy = 200; gy < 700; gy++)
+            {
+                int gi = gy * W + gx;
+                if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gb.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
+            }
+        File.WriteAllText("/tmp/oracle-cp1.txt", gb.ToString());
+    }
     rad = (int)r.Next(40, 55);
     for (int n = 0; n < 50; n++)
     {
@@ -3294,7 +3331,7 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
-    Console.Error.WriteLine($"CP2 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP2 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     int veinCount = (int)r.Next(5, 9);
     Console.Error.WriteLine($"VN={veinCount}");
     var veinDirs = new List<(double x, double y)>();
@@ -3328,7 +3365,7 @@ void CrimStartGen(int i, int j)
         CrimVeinGen((double)sx, (double)sy, dx3, dy3);
         Console.Error.WriteLine($"VE{n} out p={(int)r.Peek()}");
     }
-    Console.Error.WriteLine($"CP3 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP3 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     int shellMinX = W, shellMaxX = 0;
     vx = i; vy = startY;
     rad = (int)r.Next(25, 35);
@@ -3369,7 +3406,7 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
-    Console.Error.WriteLine($"CP4 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP4 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     for (int x = shellMinX; x <= shellMaxX; x++)
     {
         int y = startY;
@@ -3385,9 +3422,21 @@ void CrimStartGen(int i, int j)
             }
         }
     }
-    Console.Error.WriteLine($"CP5 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP5 p={(int)r.Peek()} h={CrPhaseHash(i)}");
     CrimEntGen(vx, vy, crimDir);
-    Console.Error.WriteLine($"CP6 p={(int)r.Peek()}");
+    Console.Error.WriteLine($"CP6 p={(int)r.Peek()} h={CrPhaseHash(i)}");
+    if (cp6Dumped == 0)
+    {
+        cp6Dumped = 1;
+        var gb2 = new StringBuilder();
+        for (int gx = i - 320; gx < i + 320; gx++)
+            for (int gy = 200; gy < 700; gy++)
+            {
+                int gi = gy * W + gx;
+                if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gb2.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
+            }
+        File.WriteAllText("/tmp/oracle-cp6.txt", gb2.ToString());
+    }
 }
 void CrimPlaceHeartsGen()
 {
@@ -3453,6 +3502,7 @@ void CrimPlaceHeartsGen()
         return false;
     }
     Console.Error.WriteLine($"CR0={(int)r.Peek()}");
+    int crCx = 0;
     for (int g = 0; (double)g < groupCount; g++)
     {
         int snowLo = sMin, snowHi = sMax, jungLo = jMin, jungHi = jMax;
@@ -3482,6 +3532,7 @@ void CrimPlaceHeartsGen()
             if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }
             if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
         }
+        crCx = cx;
         Console.Error.WriteLine($"CRg{g}={(int)r.Peek()} cx={cx} zLo={zLo} zHi={zHi}");
         if (crimson)
         {
@@ -3690,7 +3741,14 @@ void CrimPlaceHeartsGen()
         }
         Console.Error.WriteLine($"CRend{g}={(int)r.Peek()}");
     }
-    if (crimson) CrimPlaceHeartsGen();   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
+    if (crimson)
+    {
+        Console.Error.Write($"HEARTS n={heartPosG.Count} pts=");
+        foreach (var hp in heartPosG) Console.Error.Write($"({hp.x},{hp.y})");
+        Console.Error.WriteLine($" pre={(int)r.Peek()}");
+        CrimPlaceHeartsGen();
+        Console.Error.WriteLine($"HEARTS done p={(int)r.Peek()}");
+    }   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
 }
     Console.Error.WriteLine($"CRend={(int)r.Peek()}");
 Checkpoint("corruption");

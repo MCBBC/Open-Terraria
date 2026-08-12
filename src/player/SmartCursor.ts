@@ -1213,7 +1213,7 @@ export class SmartCursor {
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     const vid = sem.vid;
-    const isTorch = (vid != null && TORCH_ITEMS.has(vid)) || sem.createTileSheet === 4 || env.held.def?.key === 'torch';
+    const isTorch = (vid != null && TORCH_ITEMS.has(vid)) || sem.createTileSheet === 4; // 本地 'torch' 支已随退役移除(vi_8 走 vid)
     if (!isTorch || taken()) return; // :2804
     const st = env.st;
     const notWaterTorch = vid == null || !WATER_TORCH_ITEMS.has(vid); // :2809
@@ -1490,7 +1490,7 @@ export class SmartCursor {
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
     const vid = sem.vid;
-    const isBucket = vid === 205 || env.held.def?.key === 'empty_bucket';
+    const isBucket = vid === 205;
     if (!isBucket || taken()) return;
     const st = env.st;
     const targets: Pt[] = [];
@@ -1520,7 +1520,7 @@ export class SmartCursor {
     env: SmartCursorEnv, sem: HeldSemantics, reach: Region,
     set: (x: number, y: number) => void, taken: () => boolean,
   ): void {
-    const isActuatorItem = sem.vid === 849 || env.held.def?.key === 'actuator_item';
+    const isActuatorItem = sem.vid === 849;
     if (!isActuatorItem || taken()) return;
     const st = env.st;
     const targets: Pt[] = [];

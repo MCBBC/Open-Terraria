@@ -184,7 +184,11 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
   if (DBG) console.log(`CRend=${rng.vanilla.peek()}`);
-  if (gs.crimson) crimPlaceHearts(st, rng, hearts);
+  if (gs.crimson) {
+    if (DBG) console.log(`HEARTS n=${hearts.length} pts=${JSON.stringify(hearts)} pre=${rng.vanilla.peek()}`);
+    crimPlaceHearts(st, rng, hearts);
+    if (DBG) console.log(`HEARTS done p=${rng.vanilla.peek()}`);
+  }
   if (typeof process !== 'undefined' && process.env.CRDBG) {
     import('node:fs').then(m => m.writeFileSync('/tmp/js-cr.txt', COLBUF.join('\n'))).catch(() => {});
   }
@@ -526,6 +530,20 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
  *  终点囊群 50 球；血管 5-8 条（方向拒绝采样★原版 quirk：间距比较用主通道末速度
  *  val2 而非新采样——cs:75790-75797）；地表囊群 50 球+列填充；CrimEnt 入口。
  *  hearts 由调用方收集（原版 CrimPlaceHearts 全组后统一放）。 */
+function phaseHash(st: TileStore, cx: number): string {
+  let h = 0x811c9dc5;
+  const step = (v: number) => { h = (Math.imul(h ^ (v & 0xff), 16777619)) >>> 0; };
+  for (let x = Math.max(0, cx - 300); x < Math.min(st.w, cx + 300); x++) {
+    for (let y = 240; y < 700; y++) {
+      const i = st.idx(x, y);
+      const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? 0;
+      step(sheet); step(sheet >>> 8); step(st.flags[i]); step(st.wall[i]); step(st.wall[i] >>> 8);
+    }
+  }
+  return h.toString(16);
+}
+let cp1Dumped = false;
+let cp1Dumped2 = false;
 function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, hearts: Array<[number, number]>): void {
   const solidAt = (x: number, y: number) =>
     st.inBounds(x, y) && st.flags[st.idx(x, y)] && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;  // SolidTile
@@ -539,13 +557,18 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
   if (vx < 0) crimDir = -1;
   let radius = rng.int(15, 25);                                // Next(15,26)
   let recenter = 0;
+  let mwIt = 0;
+  if (DBG) console.log(`MW startY=${startY} j=${j} ws=${gs.worldSurface}`);
   for (;;) {
+    if (DBG && mwIt < 20) console.log(`MK${mwIt} px=${px} py=${py} r=${radius} p=${rng.vanilla.peek()}`);
+    mwIt++;
     radius += rng.int(-50, 50) * 0.01;
     radius = Math.max(15, Math.min(25, radius));
-    const x0 = Math.floor(px - radius / 2), x1 = Math.floor(px + radius / 2);
-    const y0 = Math.floor(py - radius / 2), y1 = Math.floor(py + radius / 2);
-    for (let x = x0; x < x1; x++) {
-      for (let y = y0; y < y1; y++) {
+    // ★原版上界是裸 double（cs:75583 l < vx + rad/2）——Math.floor 会丢末行/末列
+    const x0 = Math.trunc(px - radius / 2), x1u = px + radius / 2;
+    const y0 = Math.trunc(py - radius / 2), y1u = py + radius / 2;
+    for (let x = x0; x < x1u; x++) {
+      for (let y = y0; y < y1u; y++) {
         if (!st.inBounds(x, y)) continue;
         if (!canEvilReplace(st, x, y)) continue;
         const d = Math.abs(x - px) + Math.abs(y - py);
@@ -573,7 +596,16 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     px += vx; py += vy;
     if (py > gs.worldSurface + 100) break;
   }
-  if (DBG) console.log(`CP1 p=${rng.vanilla.peek()}`);
+  if (DBG) console.log(`CP1 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
+  if (DBG && typeof process !== 'undefined' && !cp1Dumped) {
+    cp1Dumped = true;
+    const L: string[] = [];
+    for (let gx = i - 320; gx < i + 320; gx++) for (let gy = 200; gy < 700; gy++) {
+      const gi = st.idx(gx, gy); const sh = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? 0;
+      if (sh || st.flags[gi] || st.wall[gi]) L.push(`${gx} ${gy} ${sh} ${st.flags[gi]} ${st.wall[gi]}`);
+    }
+    import('node:fs').then(m => m.writeFileSync('/tmp/js-cp1.txt', L.join('\n') + '\n')).catch(() => {});
+  }
   // 终点囊群（cs:75700-75732）：50 个半径 40-54 椭球（x/y 独立 ±20% 缩放）
   let endR = rng.int(40, 54);                                  // Next(40,55)
   for (let n = 0; n < 50; n++) {
@@ -596,7 +628,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
-  if (DBG) console.log(`CP2 p=${rng.vanilla.peek()}`);
+  if (DBG) console.log(`CP2 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
   // 血管（cs:75735-75779）
   const veinCount = rng.int(5, 8);                             // Next(5,9)
   if (DBG) console.log(`VN=${veinCount}`);
@@ -627,7 +659,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     hearts.push(crimVein(st, rng, Math.floor(px), Math.floor(py), dvx, dvy));
     if (DBG) console.log(`VE${n} out p=${rng.vanilla.peek()}`);
   }
-  if (DBG) console.log(`CP3 p=${rng.vanilla.peek()}`);
+  if (DBG) console.log(`CP3 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
   // 地表囊群（cs:75781-75832）
   px = i; py = startY;
   endR = rng.int(25, 34);                                      // Next(25,35)
@@ -662,7 +694,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
-  if (DBG) console.log(`CP4 p=${rng.vanilla.peek()}`);
+  if (DBG) console.log(`CP4 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
   // 列填充（cs:75834-75848）：壳覆盖范围内每列向下补猩红石（★CanEvilReplace 才消耗）
   for (let x = shellMinX; x <= shellMaxX; x++) {
     let y = startY;
@@ -677,11 +709,21 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
-  // CrimEnt（cs:75989-76030）：★入口锚 = (i, startY)（曾用上升后的 sy）；
-  //   crimDir 语义 = vx<0 → -1，内部速度 = 2*-crimDir（曾方向取反）
-  if (DBG) console.log(`CP5 p=${rng.vanilla.peek()}`);
-  crimEnt(st, rng, i, startY, crimDir);
-  if (DBG) console.log(`CP6 p=${rng.vanilla.peek()}`);
+  // CrimEnt（cs:75852）：锚 = 壳群行走后的 (val.X, val.Y) = (i, startY-累计抬升)——
+  //   非 startY（曾误传 startY → 入口隧道整体下移 rise 格）。
+  //   crimDir 语义 = vx<0 → -1，内部速度 = 2*-crimDir
+  if (DBG) console.log(`CP5 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
+  crimEnt(st, rng, px, py, crimDir);
+  if (DBG) console.log(`CP6 p=${rng.vanilla.peek()} h=${phaseHash(st, i)}`);
+  if (DBG && typeof process !== 'undefined' && !cp1Dumped2) {
+    cp1Dumped2 = true;
+    const L: string[] = [];
+    for (let gx = i - 320; gx < i + 320; gx++) for (let gy = 200; gy < 700; gy++) {
+      const gi = st.idx(gx, gy); const sh = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? 0;
+      if (sh || st.flags[gi] || st.wall[gi]) L.push(`${gx} ${gy} ${sh} ${st.flags[gi]} ${st.wall[gi]}`);
+    }
+    import('node:fs').then(m => m.writeFileSync('/tmp/js-cp6.txt', L.join('\n') + '\n')).catch(() => {});
+  }
 }
 
 /** CrimVein（cs:76035-76064）1:1：核心 0.2R 挖空(墙83)/壳 0.5R 猩红石(0.4R 墙)；
@@ -691,13 +733,17 @@ function crimVein(st: TileStore, rng: RNG, sx: number, sy: number, ivx: number, 
   let trip = rng.int(100, 149) - (ivy < 0 ? 25 : 0);           // Next(100,150)
   let px = sx + 0.0, py = sy + 0.0;
   let vx = ivx, vy = ivy;
+  if (DBG) console.log(`VW s=${sx},${sy} iv=${ivx},${ivy} trip=${trip}`);
+  let vwIt = 0;
   while (Math.abs(px - sx) + Math.abs(py - sy) <= trip) {
+    if (DBG && vwIt < 6) console.log(`VK${vwIt} p=${px.toFixed(2)},${py.toFixed(2)} r=${radius} ppeek=${rng.vanilla.peek()}`);
+    vwIt++;
     radius += rng.int(-50, 50) * 0.02;
     radius = Math.max(15, Math.min(25, radius));
-    const x0 = Math.floor(px - radius / 2), x1 = Math.floor(px + radius / 2);
-    const y0 = Math.floor(py - radius / 2), y1 = Math.floor(py + radius / 2);
-    for (let x = x0; x < x1; x++) {
-      for (let y = y0; y < y1; y++) {
+    const x0 = Math.trunc(px - radius / 2), x1u = px + radius / 2;
+    const y0 = Math.trunc(py - radius / 2), y1u = py + radius / 2;
+    for (let x = x0; x < x1u; x++) {
+      for (let y = y0; y < y1u; y++) {
         if (!st.inBounds(x, y)) continue;
         if (!canEvilReplace(st, x, y)) continue;
         const d = Math.hypot(x - px, y - py);
@@ -732,10 +778,10 @@ function crimEnt(st: TileStore, rng: RNG, x0: number, y0: number, crimDir: numbe
     if (misses >= 20) alive = false;
     radius += rng.int(-10, 10) * 0.02;                        // Next(-10,11)
     radius = Math.max(6, Math.min(10, radius));
-    const bx0 = Math.floor(px - radius / 2), bx1 = Math.floor(px + radius / 2);
-    const by0 = Math.floor(py - radius / 2), by1 = Math.floor(py + radius / 2);
-    for (let x = bx0; x < bx1; x++) {
-      for (let y = by0; y < by1; y++) {
+    const bx0 = Math.trunc(px - radius / 2), bx1u = px + radius / 2;
+    const by0 = Math.trunc(py - radius / 2), by1u = py + radius / 2;
+    for (let x = bx0; x < bx1u; x++) {
+      for (let y = by0; y < by1u; y++) {
         if (!st.inBounds(x, y)) continue;
         if (!canEvilReplace(st, x, y)) continue;
         const ti = st.idx(x, y);

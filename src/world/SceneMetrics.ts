@@ -140,7 +140,10 @@ export function scanScene(
 ): SceneFlags {
   const st = world.store;
   const w = st.w, h = st.h;
-  const underworldLayer = world.lavaLine || (h - 200); // Main.UnderworldLayer = maxTilesY-200
+  // Main.UnderworldLayer = maxTilesY-200(Main.cs:2863,恒 h-200)。曾误用
+  // world.lavaLine(GenVars.lavaLine≈(rockLayer+h)/2,非 h-200)——地狱高度带提前
+  // ~170 格,污染地狱背景与丛林深度抑制(2026-08-13 全仓审计)
+  const underworldLayer = h - 200;
   const worldSurface = world.groundLevel;
   const rockLevel = world.rockLevel;
   const tileX = Math.floor(centerX / 16);
@@ -171,8 +174,10 @@ export function scanScene(
       // 同屏多柱时后扫到的激活柱生效；渲染侧权威扫描在 render/MonolithFilters.ts
       const fxSh = FX_SHEET_IDS.get(t);
       if (fxSh !== undefined) {
-        if (fxSh === 139) mbStyle = musicBoxStyleOf(st.frameX[i], st.frameY[i]);
-        else if (fxSh === 207) fountain = fountainColorOf(st.frameX[i], st.frameY[i]);
+        // 帧态门（cs:471-525：八音盒/喷泉须激活帧才赋值——关态器件不得清掉先前
+        // 扫到的激活态;天塔柱同款门已有 mt>=0）
+        if (fxSh === 139) { const s = musicBoxStyleOf(st.frameX[i], st.frameY[i]); if (s >= 0) mbStyle = s; }
+        else if (fxSh === 207) { const c = fountainColorOf(st.frameX[i], st.frameY[i]); if (c >= 0) fountain = c; }
         else if (fxSh === 410 || fxSh === 509) {
           const mt = monolithTypeOf(fxSh, st.frameX[i], st.frameY[i]);
           if (mt >= 0) monolith = mt;
@@ -181,10 +186,11 @@ export function scanScene(
     }
   }
 
-  // 聚合（AggregateTileCounts L603-670：含神圣/邪恶/猩红互减、向日葵 -10）
-  let holy = countSet(counts, HOLY_TILES);
-  let evil = countSet(counts, EVIL_TILES) + sunflower * -10;
-  let blood = countSet(counts, BLOOD_TILES) + sunflower * -10;
+  // 聚合（AggregateTileCounts cs:636-664：互减前后各钳位一次——向日葵过剩使
+  // evil/blood 为负时,漏前置钳位会把 holy 虚增(2026-08-13 审计修正)）
+  let holy = Math.max(0, countSet(counts, HOLY_TILES));
+  let evil = Math.max(0, countSet(counts, EVIL_TILES) + sunflower * -10);
+  let blood = Math.max(0, countSet(counts, BLOOD_TILES) + sunflower * -10);
   const holyRaw = holy;
   holy -= evil; holy -= blood;
   evil -= holyRaw; blood -= holyRaw;

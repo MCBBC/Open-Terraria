@@ -1,7 +1,7 @@
 // 消耗型投掷武器（手里剑/飞刀等）数据链路测试
 import { describe, it, expect } from 'vitest';
 import { itemCombat } from '../src/data/vanillaItemCombat';
-import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
+import { VANILLA_ITEM_KEY_BY_ID, ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
 
 function viIdFromKey(key: string): number {
   const m = key.match(/^vi_(\d+)_/);
@@ -43,7 +43,7 @@ describe('消耗型投掷武器', () => {
   });
 
   it('木箭（弹药）不被误判为投掷武器', () => {
-    const arrow = ITEM_DEFS[ITEM_BY_KEY['wooden_arrow']];
+    const arrow = ITEM_DEFS[ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[40]]];
     expect(arrow).toBeDefined();
     const c40 = itemCombat(40);
     expect(c40?.ammo).toBe(40); // 是弹药而非投掷物

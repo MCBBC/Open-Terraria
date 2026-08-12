@@ -91,7 +91,7 @@ const BIOME_TORCH_ITEM: Record<number, number> = {
   4383: 16, 4384: 17, 4385: 18, 4386: 19, 4387: 20, 4388: 21, 5293: 22, 5353: 23,
 };
 export function torchStyleOfItemKey(key: string): number {
-  if (key === 'torch') return 0;
+  // 本地 'torch'→style0 支已随退役移除:vi_8_Torch 由下方 BIOME_TORCH_ITEM[8] 命中 style0
   const m = /^vi_(\d+)_/.exec(key);
   if (!m) return 0;
   const id = Number(m[1]);

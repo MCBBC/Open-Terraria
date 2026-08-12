@@ -186,9 +186,13 @@ function placeStatue(st: TileStore, x: number, y: number, idx: number): boolean 
       if (st.flags[st.idx(x + dx, y + dy)]) return false;
     }
   }
+  // 雕像帧换行（Place2xX case 105，cs:39716-39720）：每行 55 列——
+  // frameX=(style%55)*36、frameY=floor(style/55)*54（与 StatuesPass 同实现；
+  // 此前单轴 style*36，style≥55 越界错位）
+  const row = Math.floor(style / 55);
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 3; dy++) {
-      st.setTileSilent(x + dx, y - 2 + dy, tile, style * 36 + dx * 18, dy * 18);
+      st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
     }
   }
   if (STATUES_WITH_TRAPS.has(idx)) placeStatueTrap(st, x, y);

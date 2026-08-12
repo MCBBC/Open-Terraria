@@ -2,10 +2,12 @@
 // Recipe.UpdateWhichItemsAreCrafted :15110-15127）。选取规则 = 注册序 last-wins 的
 // IsCrafted；猩红/腐化世界覆盖分支；双锁 = 配方含 154 骨头（骷髅王）/ 1101 丛林蜥蜴
 // 砖（石巨人）。探针全部对照 vanilla-recipes.json + Terarria1456 源码手工核出。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import {
   canShimmerItem, decraftOutcome, isItemDecraftableAndUnlocked, isRecipeIndexDecraftLocked,
+  groupDecraftItemId, makeNpcOfItem,
 } from '../src/stats/Shimmer';
+import itemValueJson from '../src/data/vanilla-itemvalue.json';
 import { ItemDrop } from '../src/entities/ItemDrop';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -204,5 +206,107 @@ describe('掉落物端到端（分支顺序 ：1790 钱币 → :1812 转化 → 
     for (let i = 0; i < 400 && !d2.dead; i++) d2.fixedUpdate(1, hooks(w, p, spawned2));
     expect(d2.dead).toBe(true);
     expect(spawned2).toHaveLength(2);
+  });
+});
+
+// ============ 2026-08-13 散项批：value 表工厂盲区修复 + makeNPC/4986/560 ============
+
+describe('RecipeGroup.DecraftItemId 并列组代表（value 表修复回归）', () => {
+  // tools/extract-itemrare.mjs 曾缺 buyPrice/SetShopValues/标签列求值：1250-1252 读 0
+  // 抢占气球三组代表（原版 OrderBy(value).First() 取注册序首个 399/1163/983）
+  it('气球三组（509/510/511）同价并列 → 注册序首位代表 399/1163/983', () => {
+    expect(groupDecraftItemId(11)).toBe(399);
+    expect(groupDecraftItemId(12)).toBe(1163);
+    expect(groupDecraftItemId(13)).toBe(983);
+  });
+
+  it('贝壳组 16：2625=500 < 2626=1000 → 组代表 2625（DefaultToSeaShell 工厂值）', () => {
+    expect(groupDecraftItemId(16)).toBe(2625);
+  });
+
+  it('宝石小动物组 22 / 水母组 30：全员同价 → 注册序首位 4838 / 2436', () => {
+    expect(groupDecraftItemId(22)).toBe(4838);
+    expect(groupDecraftItemId(30)).toBe(2436);
+  });
+
+  it('buyPrice 求值回归：1250/1251/1252 = 150000（旧表缺 → 0）', () => {
+    expect(itemValueJson['1250']).toBe(150000);
+    expect(itemValueJson['1251']).toBe(150000);
+    expect(itemValueJson['1252']).toBe(150000);
+  });
+});
+
+describe('makeNPC 放生 / 4986 彩虹史莱姆 / 560 史莱姆雨（WorldItem.cs:1816-1877）', () => {
+  let npcSpawns: Array<{ id: number; x: number; y: number }>;
+
+  beforeEach(() => { npcSpawns = []; });
+
+  function hooksNpc(w: World, p: Player, spawned: Spawned[]): GameHooks {
+    return {
+      ...hooks(w, p, spawned),
+      spawnNpcByVanilla: (id: number, x: number, y: number) => {
+        npcSpawns.push({ id, x, y });
+        return null;
+      },
+    } as unknown as GameHooks;
+  }
+
+  it('CanShimmer 门：瓶中小动物走 makeNPC 位（:49058），4986 已解锁后禁入（:49056）', () => {
+    // 1992 瓶中萤火虫（DefaultToCapturedCritter(355)，Item.cs:21292）
+    expect(makeNpcOfItem(1992)).toBe(355);
+    expect(canShimmerItem(1992, true)).toBe(true);
+    // 4986 未解锁 → 特例放行；解锁后且无转化/配方 → 禁入
+    expect(canShimmerItem(4986, false, undefined, undefined, { rainbowSlimeUnlocked: false })).toBe(true);
+    expect(canShimmerItem(4986, false, undefined, undefined, { rainbowSlimeUnlocked: true })).toBe(false);
+    // 560 雨进行中禁入（:49052 先于 :49056 求值）；非雨态经 decraft 位放行
+    //（史莱姆王冠 20 凝胶+金冠 IsCrafted 配方 → IsItemDecraftableAndIsDecraftUnlocked）
+    const crown = { stack: 1, crimsonWorld: false, downedBoss3: true, downedGolemBoss: true };
+    expect(canShimmerItem(560, false, undefined, crown, { slimeRain: true })).toBe(false);
+    expect(canShimmerItem(560, false, undefined, crown, { slimeRain: false })).toBe(true);
+  });
+
+  it('瓶中小动物入池 → 放生（目标优先 ShimmerTransformToNPC → 677 微光蝇）并逐个消耗', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const spawned: Spawned[] = [];
+    const key = VANILLA_ITEM_KEY_BY_ID[1992];
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key!], 3);
+    for (let i = 0; i < 400 && !d.shimmered; i++) d.fixedUpdate(1, hooksNpc(w, p, spawned));
+    expect(d.shimmered).toBe(true);
+    expect(d.stack).toBe(0);            // 3 个放生 3 只（:1860-1871）
+    expect(d.dead).toBe(true);          // stack ≤ 0 → type=0（:1873-1876）
+    expect(npcSpawns).toHaveLength(3);
+    expect(npcSpawns.every((s) => s.id === 677)).toBe(true);   // :1866 表项优先
+  });
+
+  it('4986 首次入池 → 解锁彩虹史莱姆 681 并消耗；再次入池不再转化', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const spawned: Spawned[] = [];
+    const key = VANILLA_ITEM_KEY_BY_ID[4986];
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key!], 2);
+    for (let i = 0; i < 400 && npcSpawns.length === 0; i++) d.fixedUpdate(1, hooksNpc(w, p, spawned));
+    expect(w.flags['unlockedSlimeRainbowSpawn']).toBe(true);   // :1822
+    expect(npcSpawns).toHaveLength(1);
+    expect(npcSpawns[0].id).toBe(681);                          // :1824
+    expect(d.stack).toBe(1);                                    // :1832 stack--
+    expect(d.dead).toBe(false);
+    // 已解锁：CanShimmer 关门，物品滞留微光不再触发
+    const d2 = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key!], 1);
+    for (let i = 0; i < 400; i++) d2.fixedUpdate(1, hooksNpc(w, p, spawned));
+    expect(npcSpawns).toHaveLength(1);
+    expect(d2.dead).toBe(false);
+  });
+
+  it('560 史莱姆王冠入池 → 触发史莱姆雨并消耗（雨中禁入由 CanShimmer 把门）', () => {
+    const w = shimmerWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const spawned: Spawned[] = [];
+    const key = VANILLA_ITEM_KEY_BY_ID[560];
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[key!], 2);
+    for (let i = 0; i < 400 && !w.weather.slimeRain; i++) d.fixedUpdate(1, hooksNpc(w, p, spawned));
+    expect(w.weather.slimeRain).toBe(true);    // Main.StartSlimeRain（:1844）
+    expect(d.stack).toBe(1);                   // :1845 stack--
+    expect(d.shimmered).toBe(true);            // :1852 剩余 stack 微光化
   });
 });

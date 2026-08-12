@@ -105,47 +105,14 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   do { lanternStyles[1] = rng.int(0, 6); } while (lanternStyles[1] === lanternStyles[0]);
   do { lanternStyles[2] = rng.int(0, 6); } while (lanternStyles[2] === lanternStyles[0] || lanternStyles[2] === lanternStyles[1]);
   rng.nextInt(4);
-  // ---- 1456 入口位置预计算(DungeonCrawler.cs L280-326):锚点 ±300 内拒绝采样地表点
-  // (从 y=10 下扫到首个"有内容"格:实心/液体/墙),校验无云块(±15 方框 + 上方 50 带)
-  // 与头顶余量(ny-40-RoughHeight40>0);成功则锚点迁移到入口旁(±25),爬升改为
-  // 沿直线分段走向入口(Precalculated),否则回退 legacy 盲爬。根治:盲爬探测点落在
-  // 高坡时楼梯被迫越坡堆积、后一次外壳埋掉前一次挖空 → 实心砖瘤封死下行通道 ----
-  let entPos: [number, number] | null = null;
-  {
-    const CLOUD = new Set<number>(
-      ['v_189_cloud_block', 'v_196_rain_cloud_block', 'v_460_snow_cloud_block']
-        .map((k) => TILE_BY_KEY[k])
-        .filter((v): v is number => v !== undefined),
-    );
-    let found = false, nx = 0, ny = 0;
-    for (let t = 0; t < 3000 && !found; t++) {
-      nx = gs.dungeonLocation - 300 + rng.int(0, 599);
-      if (nx <= gs.beachDistance || nx >= w - gs.beachDistance) continue;
-      ny = 10;
-      while (ny < st.h - 2) {
-        const i = st.idx(nx, ny);
-        if (st.flags[i] || st.liquid[i] > 0 || st.wall[i] > 0) break;
-        ny++;
-      }
-      let cloud = false;
-      for (let dx = -15; dx <= 15 && !cloud; dx++) {
-        for (let dy = -15; dy <= 15; dy++) {
-          if (st.inBounds(nx + dx, ny + dy) && CLOUD.has(st.type[st.idx(nx + dx, ny + dy)])) { cloud = true; break; }
-        }
-      }
-      for (let dx = -50; dx < 50 && !cloud; dx++) {
-        for (let y = Math.max(50, ny - 50); y < ny; y++) {
-          if (st.inBounds(nx + dx, y) && CLOUD.has(st.type[st.idx(nx + dx, y)])) { cloud = true; break; }
-        }
-      }
-      if (cloud || ny - 80 <= 0) continue;
-      found = true;
-    }
-    if (found) {
-      gs.dungeonLocation = nx + 25 - rng.int(0, 49);
-      entPos = [nx, ny];
-    }
-  }
+  // ---- 入口位置预计算(DungeonCrawler.cs:275-318 + :818-849):仅 Dome/Tower 入口
+  // 设 PrecalculateEntrancePosition=true;Legacy(普通世界默认)为 false →
+  // SetupDungeonDataVariables 在 useSkewed 掷后**直接 return,整段 ±300 拒绝采样
+  // 不执行**,dungeonLocation 保持 Reset 值,入口由爬升大厅(MakeDungeon_Generate
+  // NextEntranceHall_Legacy,DungeonCrawler.cs:443)自然爬出地表决定。
+  // 此前误把该 Dome/Tower 专属漂移套在 legacy 上:接受条件只挡云与净空,沙丘顶
+  // (越高越空)几乎必过 → 入口被系统性吸到沙丘顶,要塞东侧开口被沙丘封死
+  // (2026-08-13 地牢走廊沙堵根因;顺带该循环多消耗 0~6000 颗共享流样本) ----
   const x0 = gs.dungeonLocation;
   if (x0 < 30 || x0 > w - 30) return;
   // 原版主题在 **Dunes pass 头**已掷（SetupDungeonGenVarVariables，cs:11542）；
@@ -153,7 +120,10 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   const theme = gs.dungeonTheme >= 0 ? gs.dungeonTheme : rng.int(0, 2);
   const brick = theme === 0 ? BLUE : theme === 1 ? GREEN : PINK;
   const wallId = brick === BLUE ? 7 : brick === GREEN ? 8 : 9;
-  // 深度:找实心(L6565)
+  // 深度锚点:1456 Dungeon pass 主体(cs:14828-14870)1:1——
+  // (worldSurface+rockLevel)/2 ± 200 起;下方 10 格内无实心则向下扫到实心;
+  // 起点即实心则**上爬至非实心(上限 60)再下压 60-num4**(原版 quirk,保证锚点
+  // 埋在地表下);无任何 clamp(曾自加 worldSurface+10 钳制,非原版)
   let y0 = Math.floor((gs.worldSurface + gs.rockLevel) / 2) + rng.int(-200, 199);
   let solid = false;
   for (let d = 0; d < 10; d++) if (st.flags[st.idx(x0, y0 + d)]) { solid = true; break; }
@@ -161,7 +131,14 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
     const cap = Math.floor((gs.worldSurface + gs.rockLevel) / 2) + 200;
     while (y0 < cap && !st.flags[st.idx(x0, y0 + 10)]) y0++;
   }
-  y0 = Math.max(gs.worldSurface + 10, Math.min(h - 220, y0));
+  if (solid) {
+    let up = 0;
+    while (st.inBounds(x0, y0 - up) && st.flags[st.idx(x0, y0 - up)]) {
+      up++;
+      if (up === 60) break;
+    }
+    if (up < 60) y0 += 60 - up;
+  }
   const dc = new DungeonCtx(brick, wallId, x0, y0);
   dc.shelfStyles = shelfStyles;
   dc.lanternStyles = lanternStyles;
@@ -195,37 +172,13 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   }
   dungeonRoom(st, rng, gs, dc, dx, dy);
   // ---- 爬升到地表(1456 语义,DungeonCrawler.cs L400-449):上限 100;num8 到 0 后
-  // 每轮 1/5 概率 halls(forceX)+room 分支(原版 num8 保持在 0) ----
+  // 每轮 1/5 概率 halls(forceX)+room 分支(原版 num8 保持在 0)。legacy 无预计算,
+  // 只走盲爬一条路(cs:443 GenerateNextEntranceHall_Legacy) ----
   let best = dc.rooms[0];
   for (const r of dc.rooms) if (r.t < best.t) best = r;
   dc.entranceX = best.cx;
   dx = best.cx; dy = best.cy;
-  if (entPos) {
-    // 预计算模式:沿直线分段走向入口,每段 10-29 步,剩余距离耗尽即达(确定性终止)
-    let remaining = Math.hypot(entPos[0] - dx, entPos[1] - dy);
-    let delay = 5, guard = 0;
-    while (remaining > 0 && guard++ < 100) {
-      if (delay > 0) delay--;
-      if (delay === 0 && rng.next() < 0.2 && dy > gs.worldSurface + 100) {
-        delay = 10;
-        const sx = dx, sy = dy;
-        [dx, dy] = dungeonHalls(st, rng, gs, dc, dx, dy, true);
-        dungeonRoom(st, rng, gs, dc, dx, dy);
-        dx = sx; dy = sy;
-      }
-      let steps = rng.int(10, 29);
-      if (steps > remaining) steps = Math.max(1, Math.floor(remaining));
-      const d = Math.hypot(entPos[0] - dx, entPos[1] - dy) || 1;
-      const res = dungeonStairs(st, rng, gs, dc, dx, dy, {
-        vx: (entPos[0] - dx) / d, vy: (entPos[1] - dy) / d, steps,
-      });
-      dx = res[0]; dy = res[1];
-      remaining -= steps;
-    }
-    dx = entPos[0]; dy = entPos[1];
-    dungeonEnt(st, rng, gs, dc, dx, dy);
-    gs.dungeonY = entPos[1];   // 入口地表 Y（刷怪门槛 CheckToSpawnDungeonEnemies）
-  } else {
+  {
     // legacy 盲爬(1405 结构 + 1456 的 100 上限):外壳探测到开放天空即停
     let reached = false;
     let delay = 5, guard = 0;

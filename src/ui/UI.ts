@@ -3,11 +3,11 @@ import type { Game } from '../core/Game';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
-import { RECIPES } from '../data/recipes';
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
 import { atlasIconForKey } from '../assets/SpriteAtlas';
+import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
 import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
@@ -17,6 +17,7 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
+import { openAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
 import type { ChestData } from '../world/World';
 
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
@@ -714,6 +715,8 @@ export class UI {
     else if (where === 'misc') inv.miscEquips[i] = tmp ?? null;
     else inv.miscDyes[i] = tmp ?? null;
     this.game.sfx.play('menuTick', 0.6);
+    // 成就：装备态检查（AchievementsHelper.HandleOnEquip）
+    this.game.achNotifyEquipChanged();
   }
 
   /** Shift+左键快速转移（GetAlternateClickAction :563-662 主干）：
@@ -889,6 +892,8 @@ export class UI {
         this.heldStack = cur;
       }
       this.refreshAll();
+      // 成就：装备态检查（拖拽落装备位 = HandleOnEquip 同义路径）
+      this.game.achNotifyEquipChanged();
       return;
     }
     if (where === 'inv') {
@@ -1484,6 +1489,8 @@ export class UI {
   }
 
   trashEl: HTMLElement | null = null;
+  /** 成就提示牌（背包内 Advisor 卡） */
+  achAdvisorEl: (HTMLElement & { update(): void }) | null = null;
   /** 装备/杂项页签与 Loadout 按钮（背包面板顶部） */
   private eqPageEl: HTMLElement | null = null;
   private miscPageEl: HTMLElement | null = null;
@@ -1567,6 +1574,16 @@ export class UI {
         this.onBestiary?.();
       });
       row.appendChild(bBst);
+      // 成就入口（原版设置菜单 Lang.menu[131] + AchievementAdvisor 卡片点击
+      // IngameFancyUI.OpenAchievements——本作在背包顶栏直接给按钮）
+      const bAch = el('button', 'sw-btn', Lang.text('UI.Achievements'));
+      bAch.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+      bAch.addEventListener('mousedown', (e) => {
+        e.stopPropagation();
+        this.closeInventory();
+        openAchievementsPanel(this.game);
+      });
+      row.appendChild(bAch);
       this.invPanel.appendChild(row);
     }
 
@@ -1669,6 +1686,9 @@ export class UI {
     rightRail.appendChild(trashWrap);
     rightRail.appendChild(coinAmmo);
     left.appendChild(rightRail);
+    // 成就提示牌（AchievementAdvisor：未完成成就小卡，点击开成就菜单）
+    this.achAdvisorEl = createAchievementAdvisor(this.game);
+    left.appendChild(this.achAdvisorEl);
     body.appendChild(left);
 
     // 背包 10×4（10-39）
@@ -1739,53 +1759,59 @@ export class UI {
     this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-direction:row; flex-wrap:wrap; width:418px; column-gap:6px; row-gap:18px; align-content:flex-start;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
-    for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey,
-      BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
-      BuffType.ObsidianSkin, BuffType.Gills, BuffType.ManaRegen, BuffType.MagicPower,
-      BuffType.Featherfall, BuffType.WaterWalking, BuffType.Archery, BuffType.NightOwl,
-      BuffType.Shimmered]) {
-      const block = el('div', 'sw-buff');
-      block.style.display = 'none';
-      block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
-      const icon = el('img') as HTMLImageElement;
-      icon.draggable = false;
-      icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block;';
-      block.appendChild(icon);
-      const time = el('span', '', '');
-      time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
-      block.appendChild(time);
-      // 悬停高亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4——CSS 渐变近似）
-      block.addEventListener('mouseenter', () => { icon.style.filter = 'brightness(1.35)'; });
-      block.addEventListener('mouseleave', () => { icon.style.filter = ''; });
-      // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12）
-      block.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        if (!this.game) return;
-        this.game.player.buffs.remove(t);
-        this.game.sfx.play('menuTick');
-        this.refreshBuffs();
-      });
-      this.buffBar.appendChild(block);
-      this.buffBlocks.set(t, { block, icon, time });
-    }
+    // 块按激活顺序动态创建（原版按 buff 槽序全量显示，无白名单——此前硬编码
+    // 19 种，战斗/镇静/挖矿/糖分冲刺等 20+ 种永不显示）
+  }
+
+  /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化） */
+  private makeBuffBlock(t: BuffType): { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement } {
+    const block = el('div', 'sw-buff');
+    block.style.display = 'none';
+    block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
+    const icon = el('img') as HTMLImageElement;
+    icon.draggable = false;
+    // 原版 buffAlpha（Main.cs:42732/42750-42777）：基准 0.4、悬停渐亮至 1.0、
+    // 离开回落 0.4——alpha 通道本身（Color×alpha），非 brightness
+    icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block; opacity:0.4; transition:opacity 0.2s linear;';
+    block.appendChild(icon);
+    const time = el('span', '', '');
+    time.style.cssText = 'position:absolute; left:-4px; right:-4px; top:34px; text-align:center; font-size:11px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000; white-space:nowrap;';
+    block.appendChild(time);
+    // 悬停提亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4 的 CSS 近似）
+    block.addEventListener('mouseenter', () => { icon.style.opacity = '1'; });
+    block.addEventListener('mouseleave', () => { icon.style.opacity = '0.4'; });
+    // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12）
+    block.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (!this.game) return;
+      this.game.player.buffs.remove(t);
+      this.game.sfx.play('menuTick');
+      this.refreshBuffs();
+    });
+    return { block, icon, time };
   }
 
   buffBar: HTMLElement | null = null;
   buffBlocks = new Map<BuffType, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
 
   /** 每秒左右调用一次（由 Game 经 callbacks 驱动）。
-   *  原版行为（Main.cs:42622）：背包/华美 UI 打开时整栏不画；时长文字用
-   *  LocalizedDuration 缩写格式（zh-Hans "30秒"/"2分30秒"），仅剩 >2 tick 时显示 */
+   *  原版行为（Main.cs:42618-42640）：遍历 buff 槽按序显示全部激活 buff；
+   *  背包/华美 UI 打开时整栏不画；时长文字用 LocalizedDuration 缩写格式
+   *  （zh-Hans "30秒"/"2分30秒"），仅剩 >2 tick 时显示 */
   refreshBuffs() {
     if (!this.game || !this.buffBar) return;
     const buffs = this.game.player.buffs;
     const invOpen = this.invPanel.style.display === 'block';
     this.buffBar.style.display = invOpen ? 'none' : 'flex';
-    for (const [t, ui] of this.buffBlocks) {
-      const left = buffs.active.get(t);
-      if (left === undefined) {
-        ui.block.style.display = 'none';
-        continue;
+    const seen = new Set<BuffType>();
+    for (const [t, left] of buffs.active) {
+      seen.add(t);
+      let ui = this.buffBlocks.get(t);
+      if (!ui) {
+        // 动态建块：无白名单，任何激活 buff 都显示（原版按 buff 槽序）
+        ui = this.makeBuffBlock(t);
+        this.buffBar.appendChild(ui.block);
+        this.buffBlocks.set(t, ui);
       }
       ui.block.style.display = 'flex';
       ui.block.title = `${buffName(t)}：${buffDesc(t)}`;
@@ -1808,9 +1834,12 @@ export class UI {
           : Lang.text('Mods.SandboxWorld.Time.Minutes', Math.floor(s / 60)))
         : Lang.text('Mods.SandboxWorld.Time.Seconds', s);
     }
+    for (const [t, ui] of this.buffBlocks) {
+      if (!seen.has(t)) ui.block.style.display = 'none';
+    }
   }
 
-  // Buff → 显示用物品图标（药水图标即 Buff 图标）
+  // Buff → 物品图标（仅作原版 Buff 贴图缺失时的兜底——正道是 Buff_{vanillaBuff}.png）
   buffIconItem = new Map<BuffType, number>();
 
   private buildChestPanel() {
@@ -2099,6 +2128,7 @@ export class UI {
     if (!this.game) return;
     this.moveGhost();
     this.paintTrash();
+    this.achAdvisorEl?.update();
     this.refreshHotbar();
     const inv = this.game.player.inv;
     for (let i = 10; i < INV_SIZE; i++) {
@@ -2157,31 +2187,8 @@ export class UI {
       stationsEl.textContent = Lang.text('Mods.SandboxWorld.UI.CraftStations', [...stations].map((s) => stName[s] ?? s).join('、'));
     }
     this.craftListEl.innerHTML = '';
-    for (const r of RECIPES) {
-      if (!stations.has(r.station)) continue;
-      const ok = game.canCraft(r);
-      const row = el('div', 'sw-recipe' + (ok ? '' : ' no'));
-      const outDef = ITEM_DEFS[game.itemId(r.out)];
-      const img = el('img') as HTMLImageElement;
-      img.src = iconUrl(game, game.itemId(r.out));
-      row.appendChild(img);
-      const label = el('span', '', `${Lang.itemNameByKey(outDef.key)}${r.count > 1 ? ` ×${r.count}` : ''}`);
-      row.appendChild(label);
-      const mats = el('span', '', r.inputs.map(([k, n]) => {
-        const have = game.player.inv.countOf(game.itemId(k));
-        return ` ${Lang.itemNameByKey(ITEM_DEFS[game.itemId(k)].key)} ${have}/${n}`;
-      }).join(' ·'));
-      mats.style.cssText = 'margin-left:auto; color:#9a8ab8; font-size:11px; text-align:right;';
-      row.appendChild(mats);
-      if (ok) {
-        row.onclick = () => {
-          game.craft(r);
-          this.refreshAll();
-        };
-      }
-      this.craftListEl.appendChild(row);
-    }
-    // ---- 原版配方（2688 条，Recipe.UpdateRecipeList 主干：环境+材料双门） ----
+    // 自制 RECIPES 表已随本地物品退役整体移除——合成列表只留原版配方段
+    // （3173 条，Recipe.UpdateRecipeList 主干：环境+材料双门）
     this.refreshVanillaCrafting();
   }
 
@@ -2436,16 +2443,16 @@ export class UI {
     this.buildHud(this.game);
     // Buff → 图标物品映射
     const map: Array<[BuffType, string]> = [
-      [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
-      [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
-      [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
+      [BuffType.Agility, VI(290)], [BuffType.Ironskin, VI(292)],
+      [BuffType.Resistance, VI(188)], [BuffType.Thorns, VI(301)],
+      [BuffType.Regen, VI(289)], [BuffType.Honey, VI(1128)],
       // 环境 debuff(原版用专属 buff 贴图,此处以近义物品图标近似)
-      [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
-      [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
-      [BuffType.ObsidianSkin, 'obsidian_skin_potion'], [BuffType.Gills, 'gills_potion'],
-      [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
-      [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
-      [BuffType.Archery, 'archery_potion'], [BuffType.NightOwl, 'night_owl_potion'],
+      [BuffType.OnFire, VI(8)], [BuffType.Burning, VI(117)],
+      [BuffType.Bleeding, VI(28)], [BuffType.Suffocation, VI(169)],
+      [BuffType.ObsidianSkin, VI(288)], [BuffType.Gills, VI(291)],
+      [BuffType.ManaRegen, VI(293)], [BuffType.MagicPower, VI(294)],
+      [BuffType.Featherfall, VI(295)], [BuffType.WaterWalking, VI(302)],
+      [BuffType.Archery, VI(303)], [BuffType.NightOwl, VI(299)],
       // R1 数值批（vi_ 药水物品图标）
       [BuffType.Battle, 'vi_300_BattlePotion'], [BuffType.Calming, 'vi_2324_CalmingPotion'],
       [BuffType.Mining, 'vi_2322_MiningPotion'], [BuffType.Builder, 'vi_2325_BuilderPotion'],
@@ -2514,15 +2521,15 @@ export class UI {
   initInGameLite() {
     this.buildBuffBar();
     const map: Array<[BuffType, string]> = [
-      [BuffType.Agility, 'agility_potion'], [BuffType.Ironskin, 'ironskin_potion'],
-      [BuffType.Resistance, 'heal_potion'], [BuffType.Thorns, 'thorns_potion'],
-      [BuffType.Regen, 'regen_potion'], [BuffType.Honey, 'honey_bucket'],
-      [BuffType.OnFire, 'torch'], [BuffType.Burning, 'meteorite'],
-      [BuffType.Bleeding, 'lesser_healing_potion'], [BuffType.Suffocation, 'sand_block'],
-      [BuffType.ObsidianSkin, 'obsidian_skin_potion'], [BuffType.Gills, 'gills_potion'],
-      [BuffType.ManaRegen, 'mana_regen_potion'], [BuffType.MagicPower, 'magic_power_potion'],
-      [BuffType.Featherfall, 'featherfall_potion'], [BuffType.WaterWalking, 'water_walking_potion'],
-      [BuffType.Archery, 'archery_potion'], [BuffType.NightOwl, 'night_owl_potion'],
+      [BuffType.Agility, VI(290)], [BuffType.Ironskin, VI(292)],
+      [BuffType.Resistance, VI(188)], [BuffType.Thorns, VI(301)],
+      [BuffType.Regen, VI(289)], [BuffType.Honey, VI(1128)],
+      [BuffType.OnFire, VI(8)], [BuffType.Burning, VI(117)],
+      [BuffType.Bleeding, VI(28)], [BuffType.Suffocation, VI(169)],
+      [BuffType.ObsidianSkin, VI(288)], [BuffType.Gills, VI(291)],
+      [BuffType.ManaRegen, VI(293)], [BuffType.MagicPower, VI(294)],
+      [BuffType.Featherfall, VI(295)], [BuffType.WaterWalking, VI(302)],
+      [BuffType.Archery, VI(303)], [BuffType.NightOwl, VI(299)],
       // R1 数值批（vi_ 药水物品图标）
       [BuffType.Battle, 'vi_300_BattlePotion'], [BuffType.Calming, 'vi_2324_CalmingPotion'],
       [BuffType.Mining, 'vi_2322_MiningPotion'], [BuffType.Builder, 'vi_2325_BuilderPotion'],

@@ -33,6 +33,9 @@ mkdirSync(OUT_DIR, { recursive: true });
 const MISC = [
   'Bubble.png',
   'Flame.png',   // 岩浆宽限火焰条（Main.cs:42900 DrawInterface_Resources_Breath）
+  // 表情气泡总表(EmoteBubble.Draw :201 Extra[48]:8 列 × (2+(Count-1)/4) 行、
+  // 34px/格;边框帧 (0,0)/(1,0)、图标 (emote*2%8+frame, 1+emote/4))
+  'Extra_48.png',
   // 翅膀贴图（PlayerDrawLayers.cs:695/738：全宽 × 高/7 帧竖排；hover 族高/6）
   ...Array.from({ length: 52 }, (_, i) => `Wings_${i}.png`),
   // 原版云朵（Cloud.cs 常用 0-3；9-13 雨云/18-21 风暴云随天气系统后补）
@@ -147,6 +150,12 @@ const MISC = [
   'Coin_0.png', 'Coin_1.png', 'Coin_2.png', 'Coin_3.png',
   // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）
   'Glow_294.png', 'Glow_315.png', 'Glow_316.png', 'Glow_317.png', 'Glow_329.png',
+  // ---- 连枷链球链条（DrawProj_FlailChains Main.cs:34757-34781 per-type switch）----
+  // 25→Chain2 / 35→Chain6 / 63→Chain7 / 154→Chain13 / 247→Chain19 /
+  // 947→Chain41（948 混排前段 Chain43→Chain42→Chain41）/ 默认 26 等→Chain3 /
+  // 757 Drippler Crippler → Extra_99 六帧动画链
+  'Chain2.png', 'Chain3.png', 'Chain6.png', 'Chain7.png', 'Chain13.png', 'Chain19.png',
+  'Chain41.png', 'Chain42.png', 'Chain43.png', 'Extra_99.png',
   // ---- GlowMask 第二批（Main.cs DrawNPC 拖尾/底锚族，oldPos 历史缓冲接入）----
   // 399 火星探测器（:24564-24575：本体 Glow_100 + Extra_20 状态灯(ai0+1 行) + Glow_101 罩）
   'Glow_100.png', 'Glow_101.png', 'Extra_20.png',

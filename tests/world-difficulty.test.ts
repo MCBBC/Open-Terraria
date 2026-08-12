@@ -65,8 +65,8 @@ describe('中核死亡掉物品（Player.cs:38254 DropItems(gemsOnly=false)）',
 
   it('dropInventoryOnDeath：背包/盔甲/染料/杂项全掉 + 清空 + 发还铜三件（:53463）', () => {
     const inv = new Inventory();
-    const torch = ITEM_BY_KEY['torch']!;
-    const pick = ITEM_BY_KEY['copper_pickaxe']!;
+    const torch = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[8]]!;
+    const pick = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[3509]]!;
     inv.slots[5] = { id: torch, stack: 30 };
     inv.slots[10] = { id: pick, stack: 1 };
     inv.armor[0] = { id: pick, stack: 1 };
@@ -77,8 +77,8 @@ describe('中核死亡掉物品（Player.cs:38254 DropItems(gemsOnly=false)）',
     dropInventoryOnDeath(inv, (key, stack) => dropped.push([key, stack]));
     // 6 件全掉（含 Loadout 备份仓）
     expect(dropped.length).toBe(6);
-    expect(dropped.some(([k, n]) => k === 'torch' && n === 30)).toBe(true);
-    expect(dropped.some(([k, n]) => k === 'copper_pickaxe' && n === 1)).toBe(true);
+    expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[8] && n === 30)).toBe(true);
+    expect(dropped.some(([k, n]) => k === VANILLA_ITEM_KEY_BY_ID[3509] && n === 1)).toBe(true);
     // 槽位清空
     expect(inv.slots.every((s) => s === null)).toBe(false);   // [0-2] 被发还起始三件
     expect(inv.slots.slice(3).every((s) => s === null)).toBe(true);

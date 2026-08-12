@@ -257,7 +257,9 @@ export class WaterfallRenderer {
         const lag31 = n18;                              // num31 = 本格决策前的 num18
         // ---- 走向决策（:579-647）----
         slopeDir = 0;
-        if (topSlopeAt(cx, cy + 1) && !st.half[ci] && st.type[bi] !== 19) {
+        if (topSlopeAt(cx, cy + 1) && !st.half[ci] && TILE_DEFS[st.type[bi]]?.vanilla?.sheet !== 19) {
+          // cs:590 原文 tile5.type != 19 = 平台豁免——曾直传原版 id 19 进内部空间
+          // (内部 19=蘑菇,平台豁免失效)
           // flag2 坡面分支：下方顶坡 → 贴坡斜行（num30=num32=±1, num33=1）
           slopeDir = st.slope[bi] === 1 ? 1 : -1;
           dx = slopeDir; dy = 1; hDir = slopeDir; n18 = slopeDir;

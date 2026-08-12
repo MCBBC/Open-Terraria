@@ -73,6 +73,11 @@ export class TownNPC extends Entity {
   private atkBurstIdx = 0;
   /** world.flags.hardMode 缓存(attackUpdate 每 tick 刷新) */
   private hardModeFlag = false;
+  // ---- 表情气泡(EmoteBubble 近见;原版情境驱动多处 NewBubble,此处取空闲随机冒泡)----
+  /** 当前表情 id(≥0 显示;-1 无) */
+  emote = -1;
+  emoteLife = 0;
+  emoteTotal = 0;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -97,6 +102,8 @@ export class TownNPC extends Entity {
     this.hp -= dmg;
     this.iframes = 8;
     game.addDamageNumber(this.cx, this.y, dmg, false, '#FFD060');
+    // 受击血粒子(原版 StrikeNPC 尘近似,与 Enemy.hurt 同规)
+    game.spawnParticles(this.cx, this.cy, '#B01818', 5, 1.4, { life: 22, grav: 0.06 });
     this.vx += kbx * 0.6;
     if (this.hp <= 0) {
       this.dead = true;
@@ -188,6 +195,13 @@ export class TownNPC extends Entity {
 
     // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
     if (this.attackUpdate(world, game)) wantDir = 0;
+
+    // ---- 表情气泡(空闲随机冒泡;原版各情境 NewBubble 的可见子集)----
+    if (this.emoteLife > 0) this.emoteLife--;
+    else if (this.onGround && !this.talking && this.atkState === 0 && Math.random() < 1 / 3600) {
+      this.emote = Math.floor(Math.random() * 121);   // EmoteID.Count≈121(图标总表 8×32 格内)
+      this.emoteTotal = this.emoteLife = 240;
+    }
 
     this.vx += wantDir * 0.06;
     this.vx = Math.max(-0.8, Math.min(0.8, this.vx));

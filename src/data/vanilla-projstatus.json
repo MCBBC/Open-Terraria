@@ -1,0 +1,760 @@
+{
+ "2": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 180,
+   "durMax": 180
+  }
+ ],
+ "19": [
+  {
+   "buff": 24,
+   "chance": 0.5,
+   "durMin": 360,
+   "durMax": 360
+  }
+ ],
+ "23": [
+  {
+   "buff": 30,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 720
+  }
+ ],
+ "33": [
+  {
+   "buff": 20,
+   "chance": 0.5,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "34": [
+  {
+   "buff": 24,
+   "chance": 0.5,
+   "durMin": 240,
+   "durMax": 479
+  }
+ ],
+ "35": [
+  {
+   "buff": 24,
+   "chance": 0.5,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "46": [
+  {
+   "buff": 153,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 299
+  }
+ ],
+ "54": [
+  {
+   "buff": 20,
+   "chance": 0.5,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "63": [
+  {
+   "buff": 31,
+   "chance": 0.8,
+   "durMin": 120,
+   "durMax": 240
+  }
+ ],
+ "95": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "98": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "103": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "104": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "113": [
+  {
+   "buff": 44,
+   "chance": 0.5,
+   "durMin": 180,
+   "durMax": 180
+  }
+ ],
+ "119": [
+  {
+   "buff": 324,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 240
+  }
+ ],
+ "163": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 600,
+   "durMax": 600
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "172": [
+  {
+   "buff": 44,
+   "chance": 0.3333333333333333,
+   "durMin": 180,
+   "durMax": 180
+  }
+ ],
+ "182": [
+  {
+   "buff": 375,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 720
+  }
+ ],
+ "184": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 900,
+   "durMax": 900
+  }
+ ],
+ "188": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 1200,
+   "durMax": 1200
+  }
+ ],
+ "190": [
+  {
+   "buff": 375,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 360
+  }
+ ],
+ "195": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 600
+  }
+ ],
+ "253": [
+  {
+   "buff": 324,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 480
+  }
+ ],
+ "262": [
+  {
+   "buff": 31,
+   "chance": 0.3333333333333333,
+   "durMin": 60,
+   "durMax": 120
+  }
+ ],
+ "265": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 1800,
+   "durMax": 1800
+  }
+ ],
+ "267": [
+  {
+   "buff": 20,
+   "chance": 0.3333333333333333,
+   "durMin": 3600,
+   "durMax": 3600
+  },
+  {
+   "buff": 20,
+   "chance": 0.3333333333333333,
+   "durMin": 1800,
+   "durMax": 1800
+  }
+ ],
+ "278": [
+  {
+   "buff": 69,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "279": [
+  {
+   "buff": 69,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "280": [
+  {
+   "buff": 69,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "282": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "283": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "285": [
+  {
+   "buff": 31,
+   "chance": 0.3333333333333333,
+   "durMin": 180,
+   "durMax": 180
+  },
+  {
+   "buff": 31,
+   "chance": 0.3333333333333333,
+   "durMin": 60,
+   "durMax": 60
+  }
+ ],
+ "287": [
+  {
+   "buff": 72,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 120
+  }
+ ],
+ "295": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 900
+  }
+ ],
+ "296": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 900
+  }
+ ],
+ "301": [
+  {
+   "buff": 36,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 1200
+  }
+ ],
+ "309": [
+  {
+   "buff": 324,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "310": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 600,
+   "durMax": 600
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "320": [
+  {
+   "buff": 30,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 300
+  }
+ ],
+ "355": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 1800,
+   "durMax": 1800
+  }
+ ],
+ "359": [
+  {
+   "buff": 324,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "374": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 360
+  }
+ ],
+ "376": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "379": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 240
+  }
+ ],
+ "383": [
+  {
+   "buff": 31,
+   "chance": 0.3333333333333333,
+   "durMin": 60,
+   "durMax": 120
+  }
+ ],
+ "476": [
+  {
+   "buff": 151,
+   "chance": 1,
+   "durMin": 30,
+   "durMax": 30
+  }
+ ],
+ "478": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "479": [
+  {
+   "buff": 69,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 840
+  }
+ ],
+ "480": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 360
+  }
+ ],
+ "482": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "495": [
+  {
+   "buff": 153,
+   "chance": 1,
+   "durMin": 120,
+   "durMax": 299
+  }
+ ],
+ "496": [
+  {
+   "buff": 153,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 479
+  }
+ ],
+ "497": [
+  {
+   "buff": 153,
+   "chance": 1,
+   "durMin": 60,
+   "durMax": 179
+  }
+ ],
+ "504": [
+  {
+   "buff": 323,
+   "chance": 0.5,
+   "durMin": 60,
+   "durMax": 239
+  },
+  {
+   "buff": 323,
+   "chance": 0.5,
+   "durMin": 60,
+   "durMax": 119
+  }
+ ],
+ "523": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 1740
+  }
+ ],
+ "524": [
+  {
+   "buff": 69,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 420
+  }
+ ],
+ "545": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 60,
+   "durMax": 239
+  }
+ ],
+ "552": [
+  {
+   "buff": 324,
+   "chance": 0.6666666666666667,
+   "durMin": 120,
+   "durMax": 319
+  }
+ ],
+ "553": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 479
+  }
+ ],
+ "567": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 600
+  }
+ ],
+ "568": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 600
+  }
+ ],
+ "583": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 300
+  }
+ ],
+ "585": [
+  {
+   "buff": 153,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 600
+  }
+ ],
+ "611": [
+  {
+   "buff": 189,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "612": [
+  {
+   "buff": 189,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "664": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 180,
+   "durMax": 300
+  }
+ ],
+ "666": [
+  {
+   "buff": 323,
+   "chance": 0.5,
+   "durMin": 180,
+   "durMax": 480
+  }
+ ],
+ "668": [
+  {
+   "buff": 323,
+   "chance": 0.6666666666666667,
+   "durMin": 360,
+   "durMax": 480
+  }
+ ],
+ "669": [
+  {
+   "buff": 31,
+   "chance": 0.05,
+   "durMin": 120,
+   "durMax": 300
+  }
+ ],
+ "706": [
+  {
+   "buff": 323,
+   "chance": 1,
+   "durMin": 480,
+   "durMax": 480
+  }
+ ],
+ "711": [
+  {
+   "buff": 203,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "948": [
+  {
+   "buff": 24,
+   "chance": 0.16666666666666666,
+   "durMin": 120,
+   "durMax": 180
+  }
+ ],
+ "953": [
+  {
+   "buff": 189,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "976": [
+  {
+   "buff": 20,
+   "chance": 0.25,
+   "durMin": 420,
+   "durMax": 420
+  }
+ ],
+ "978": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 180
+  }
+ ],
+ "980": [
+  {
+   "buff": 70,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "1008": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 600,
+   "durMax": 600
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "1009": [
+  {
+   "buff": 39,
+   "chance": 1,
+   "durMin": 600,
+   "durMax": 600
+  }
+ ],
+ "1010": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 600,
+   "durMax": 600
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "1011": [
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 600,
+   "durMax": 600
+  },
+  {
+   "buff": 24,
+   "chance": 0.3333333333333333,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "1026": [
+  {
+   "buff": 20,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 599
+  }
+ ],
+ "1053": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ],
+ "1078": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 599
+  }
+ ],
+ "1083": [
+  {
+   "buff": 30,
+   "chance": 1,
+   "durMin": 240,
+   "durMax": 360
+  }
+ ],
+ "1097": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 599
+  }
+ ],
+ "1103": [
+  {
+   "buff": 137,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 180
+  }
+ ],
+ "1104": [
+  {
+   "buff": 137,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 180
+  },
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 180,
+   "durMax": 300
+  }
+ ],
+ "1106": [
+  {
+   "buff": 24,
+   "chance": 1,
+   "durMin": 300,
+   "durMax": 300
+  }
+ ]
+}

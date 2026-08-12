@@ -28,7 +28,7 @@ describe('箭矢穿过非实心图块', () => {
     expect(TILE_DEFS[TREE].solid).toBe(false);
     // 树干格在 (32, 16),箭水平飞入
     world.store.setTile(32, 16, TREE, 0, 0);
-    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, 'wooden_arrow');
+    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, VANILLA_ITEM_KEY_BY_ID[40]);
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     // 穿过后应存活且已越过树格
     expect(arrow.dead).toBe(false);
@@ -40,7 +40,7 @@ describe('箭矢穿过非实心图块', () => {
     const DIRT = TILE_BY_KEY['dirt']!;
     expect(TILE_DEFS[DIRT].solid).toBe(true);
     world.store.setTile(32, 16, DIRT, 0, 0);
-    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, 'wooden_arrow');
+    const arrow = new Arrow(32 * 16 - 12, 16 * 16 + 3, 6, 0, 10, 0, 1, VANILLA_ITEM_KEY_BY_ID[40]);
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     expect(arrow.dead).toBe(true);
   });

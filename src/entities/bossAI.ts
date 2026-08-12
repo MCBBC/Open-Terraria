@@ -255,12 +255,16 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
   // 初次生成爬行者（:32540-32553）：GetBrainOfCthuluCreepersCount(:51330)=20
   // （getGoodWorld 40 不建模）；出点 = 本体中心 ±(width/height) 随机，
   // 初速 = Next(-30,31)*0.1。爬行者锚定本体（原版 crimsonBoss 静态位 → master 引用）
+  // 本仓 ai0 缺省 -1120 是史莱姆 hop 计数哨兵；原版 NPC.ai[0] 缺省 0（一阶段态）。
+  // 放在 bInit 门之外：存档载入的实体同样需要归一（载入值 0/-1..-3 不受影响）
+  if (e.ai0 === -1120) e.ai0 = 0;
   if (!e.bInit) {
     e.bInit = true;
     for (let k = 0; k < 20; k++) {
       const c = spawnPart(game, e, 267);
       if (!c) continue;
       c.master = e;
+      c.ai0 = 0; // 原版 ai[0] 缺省 0（环绕态）
       c.x = e.cx + (Math.floor(Math.random() * (2 * e.w)) - e.w) - c.w / 2;
       c.y = e.cy + (Math.floor(Math.random() * (2 * e.h)) - e.h) - c.h / 2;
       c.vx = (Math.floor(Math.random() * 61) - 30) * 0.1;
@@ -429,6 +433,8 @@ function pickTeleportSpot(
  *  justHit 时按 knockBackResist 分流（=0 → 计数 ai[1] 超 5 回环绕，
  *  否则立即回环绕——267 原值 0.8 → 一击即回）。主体不在 → 消散（:32830-32835）。 */
 export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
+  // 本仓 ai0 缺省 -1120（史莱姆哨兵）归一到原版缺省 0（环绕态）
+  if (e.ai0 === -1120) e.ai0 = 0;
   const boss = e.master;
   // :32830-32835 crimsonBoss<0（主体不在）→ active=false
   if (!boss || boss.dead || boss.vanillaId !== 266) { e.dead = true; return; }

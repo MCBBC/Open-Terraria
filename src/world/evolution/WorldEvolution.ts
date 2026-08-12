@@ -186,8 +186,9 @@ export class WorldEvolution {
     st.setTile(x, y, t, (style + (variants > 1 ? Math.floor(Math.random() * variants) : 0)) * 18, 0);
     return true;
   }
-  /** 放置 w×h 整件（帧 dx*18, dy*18；区域全空才放） */
-  private placeBlock(x: number, y: number, sheet: number, w: number, h: number): boolean {
+  /** 放置 w×h 整件（帧 dx*18, dy*18；区域全空才放）。styleX=样式基偏移（X 轴，
+   *  如 2×2 横排样式族 style*36，TileObjectData StyleHorizontal=true） */
+  private placeBlock(x: number, y: number, sheet: number, w: number, h: number, styleX = 0): boolean {
     const st = this.host.store;
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
       if (!st.inBounds(x + dx, y + dy) || this.active(x + dx, y + dy)) return false;
@@ -195,7 +196,7 @@ export class WorldEvolution {
     const t = S(sheet);
     if (!t) return false;
     for (let dx = 0; dx < w; dx++) for (let dy = 0; dy < h; dy++) {
-      st.setTile(x + dx, y + dy, t, dx * 18, dy * 18);
+      st.setTile(x + dx, y + dy, t, styleX + dx * 18, dy * 18);
     }
     return true;
   }
@@ -430,12 +431,15 @@ export class WorldEvolution {
       // 原版 num15 = j for 62）；60 驱动则为 j+1
       this.placeJungleBlock2x2(i, j, 444, sheet === 62 ? j : j + 1);
     } else if (sheet === 396 && Math.random() < 1 / 80 && !this.playerLOS(i, j)) {
-      // 蚁狮幼虫（485/稀有 751，cs:73608-73693）：上方 3 格净空
-      if (Math.random() < 1 / 100) { this.place1(i, j - 1, 751, 0); }
+      // 蚁狮幼虫（485/稀有 751，cs:73608-73693）：PlaceTile(i, j-1, num24, style)——
+      // 两 id 均 Style2x2（TileObjectData.cs:3504-3511 / 3997-4011），主体占 j-2..j-1 两行
+      // （锚 Origin=(0,1) 底行坐沙面）；485 变体 StyleHorizontal+WrapLimit4 →
+      // frameX=style*36（cs:73687 style=genRand.Next(4)；此前 1×1+style*18 双错）
+      if (Math.random() < 1 / 100) { this.placeBlock(i, j - 2, 751, 2, 2); }
       else {
         let clear = true;
         for (let d = -1; d >= -3; d--) { if (this.active(i, j + d)) { clear = false; break; } }
-        if (clear) this.place1(i, j - 1, 485, Math.floor(Math.random() * 4));
+        if (clear) this.placeBlock(i, j - 2, 485, 2, 2, Math.floor(Math.random() * 4) * 36);
       }
     } else if (sheet === 69) {
       this.growSpike(i, j, 69, 60);

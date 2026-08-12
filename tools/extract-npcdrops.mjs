@@ -185,10 +185,14 @@ function condOf(n) {
   }
   return null;
 }
+const fields = new Map();  // 类字段常量（_masterModeDropRng = 4）——方法边界不清空
 function lit(n) {
   if (n?.t === 'num') return n.v;
   // 局部 int 变量（chanceDenominator = 9 之类作规则参数）：查声明表
   if (n?.t === 'id' && ints.has(n.name)) return ints.get(n.name);
+  // 类字段常量（MasterModeDropOnAllPlayers(4960, _masterModeDropRng)）：
+  // 方法级 ints 在 private void 边界被清空，类字段跨方法存活，必须单独一张表
+  if (n?.t === 'id' && fields.has(n.name)) return fields.get(n.name);
   return undefined;
 }
 function commonArgs(a, defaults = [1, 1, 1]) {
@@ -242,6 +246,38 @@ function render(n) {
   return '?';
 }
 
+// ============ 已知池方法 → id 列表（方法体不参与规则流解析，按原文件原文备案） ============
+// OneFromOptions(1, RegisterIceMimic_GetEasyModeItemPool(isRemix: true)) 这类把池工厂方法
+// 当实参的写法，lit() 解析不出（→ ids:[] 假绿）。池内容一律照抄 ItemDropDatabase.cs 原文。
+const POOL_METHODS = {
+  // :244-250：int[]{670,724,950,0,987,1579}，obj[3] = isRemix ? 725 : 1319
+  RegisterIceMimic_GetEasyModeItemPool: (args) => {
+    const isRemix = boolArg(args[0]);
+    return [670, 724, 950, isRemix ? 725 : 1319, 987, 1579];
+  },
+};
+function boolArg(n) {
+  if (n?.t === 'id') return n.name === 'true' ? true : n.name === 'false' ? false : undefined;
+  return undefined;
+}
+/** oneOf 类规则的 id 实参批量取值：数字/local int/类字段进 ids；已知池方法展开进 ids；
+ *  其余无法解析的表达式 → _unresolved 备案（禁止静默丢成空数组——运行时 rng.int(0,-1) 出 undefined） */
+function idsFromArgs(args) {
+  const ids = [];
+  const unresolved = [];
+  for (const arg of args) {
+    const v = lit(arg);
+    if (v !== undefined) { ids.push(v); continue; }
+    if (arg?.t === 'id' && arrays.has(arg.name)) { ids.push(...arrays.get(arg.name)); continue; }
+    if (arg?.t === 'call' && !arg.base && POOL_METHODS[arg.fn]) {
+      ids.push(...POOL_METHODS[arg.fn](arg.args));
+      continue;
+    }
+    if (arg && arg.t !== 'bad') unresolved.push(render(arg));
+  }
+  return { ids, unresolved };
+}
+
 function callRule(n) {
   const a = n.args;
   const fn = n.fn.includes('.') ? n.fn.slice(n.fn.lastIndexOf('.') + 1) : n.fn;  // ItemDropRule.Common → Common
@@ -255,9 +291,11 @@ function callRule(n) {
       const [d, mn, mx] = commonArgs(a.slice(2));
       return { k: 'rerolls', item: lit(a[0]), denom: d, min: mn, max: mx, rerolls: lit(a[1]) ?? 0 };
     }
-    case 'ByCondition': { // (cond, item, denom=1,min=1,max=1,num=1)
+    case 'ByCondition': { // (cond, item, denom=1, min=1, max=1, num=1)——ItemDropRule.cs:40
+      // chanceNumerator 是第 6 参（a[5]）：曾误取 a[4]=maximumDropped（1130 → num=30 恒掉，
+      // 应 num=3 即 75%，ItemDropDatabase.cs:551 Deerclops）
       const [d, mn, mx] = commonArgs(a.slice(2));
-      return { k: 'cond', cond: condOf(a[0]), item: lit(a[1]), denom: d, min: mn, max: mx, num: lit(a[4]) ?? 1 };
+      return { k: 'cond', cond: condOf(a[0]), item: lit(a[1]), denom: d, min: mn, max: mx, num: lit(a[5]) ?? 1 };
     }
     case 'Food': { // (item, denom, min=1,max=1) 条件 NotFromStatue（我们恒真）
       const [mn, mx] = commonArgs(a.slice(2));
@@ -267,17 +305,23 @@ function callRule(n) {
     case 'OneFromOptionsNotScalingWithLuck': case 'OneFromOptionsNotScalingWithLuckWithX': {
       const num = fn.includes('WithNumerator') || fn.endsWith('WithX') ? lit(a[1]) ?? 1 : 1;
       const idsFrom = fn.includes('WithNumerator') || fn.endsWith('WithX') ? 2 : 1;
-      return { k: 'oneOf', denom: lit(a[0]) ?? 1, num, ids: a.slice(idsFrom).map(lit).filter(v => v !== undefined), noLuck: fn.includes('NotScaling') };
+      const { ids, unresolved } = idsFromArgs(a.slice(idsFrom));
+      const out = { k: 'oneOf', denom: lit(a[0]) ?? 1, num, ids, noLuck: fn.includes('NotScaling') };
+      if (unresolved.length) out._unresolved = unresolved.join('; ');
+      return out;
     }
     case 'ExpertGetsRerolls': // (item, denom, expertRerolls)
       return { k: 'expert', normal: { k: 'rerolls', item: lit(a[0]), denom: lit(a[1]), min: 1, max: 1, rerolls: 0 }, expert: { k: 'rerolls', item: lit(a[0]), denom: lit(a[1]), min: 1, max: 1, rerolls: lit(a[2]) ?? 0 } };
     case 'NormalvsExpert': case 'NormalvsExpertNotScalingWithLuck':
       return { k: 'expert', normal: { k: 'common', item: lit(a[0]), denom: lit(a[1]), min: 1, max: 1, noLuck: fn.includes('Not') }, expert: { k: 'common', item: lit(a[0]), denom: lit(a[2]), min: 1, max: 1, noLuck: fn.includes('Not') } };
     case 'NormalvsExpertOneFromOptions': case 'NormalvsExpertOneFromOptionsNotScalingWithLuck': {
-      const ids = a.slice(3).map(lit).filter(v => v !== undefined);
-      return { k: 'expert',
-        normal: { k: 'oneOf', denom: lit(a[1]), num: 1, ids, noLuck: fn.includes('NotScaling') },
-        expert: { k: 'oneOf', denom: lit(a[2]), num: 1, ids, noLuck: fn.includes('NotScaling') } };
+      const { ids, unresolved } = idsFromArgs(a.slice(3));
+      const noLuck = fn.includes('NotScaling');
+      const out = { k: 'expert',
+        normal: { k: 'oneOf', denom: lit(a[1]), num: 1, ids, noLuck },
+        expert: { k: 'oneOf', denom: lit(a[2]), num: 1, ids, noLuck } };
+      if (unresolved.length) out._unresolved = unresolved.join('; ');
+      return out;
     }
     case 'BossBag': return { k: 'bossBag', item: lit(a[0]) };
     case 'BossBagByCondition': return { k: 'bossBag', item: lit(a[1]), cond: condOf(a[0]) };
@@ -316,8 +360,12 @@ function newRule(n) {
       const [mn, mx] = commonArgs(a.slice(2));
       return { k: 'cond', cond: condOf(a[4]), item: lit(a[0]), denom: lit(a[1]), min: mn, max: mx, num: lit(a[5]) ?? 1 };
     }
-    case 'OneFromOptionsDropRule': case 'OneFromOptionsNotScaledWithLuckDropRule':
-      return { k: 'oneOf', denom: lit(a[0]), num: lit(a[1]) ?? 1, ids: a.slice(2).map(lit).filter(v => v !== undefined), noLuck: n.cls.includes('Not') };
+    case 'OneFromOptionsDropRule': case 'OneFromOptionsNotScaledWithLuckDropRule': {
+      const { ids, unresolved } = idsFromArgs(a.slice(2));
+      const out = { k: 'oneOf', denom: lit(a[0]), num: lit(a[1]) ?? 1, ids, noLuck: n.cls.includes('Not') };
+      if (unresolved.length) out._unresolved = unresolved.join('; ');
+      return out;
+    }
     case 'DropBasedOnExpertMode': return { k: 'expert', normal: toRule(a[0]), expert: toRule(a[1]) };
     case 'DropBasedOnMasterMode': return { k: 'master', def: toRule(a[0]), master: toRule(a[1]) };
     case 'DropBasedOnMasterAndExpertMode': return { k: 'masterExpert', def: toRule(a[0]), expert: toRule(a[1]), master: toRule(a[2]) };
@@ -475,6 +523,12 @@ const flushStmt = (stmt) => {
   // 方法边界
   const mm = /^\s*private void ([A-Za-z0-9_]+)\(\)/.exec(stmt);
   if (mm) { rules.clear(); ints.clear(); arrays.clear(); paramss.clear(); emittedRefs.clear(); return; }
+  // 类字段常量（private int _masterModeDropRng = 4; :15）→ fields 表，lit() 引用回填。
+  // 非锚定 + 行首匹配：类声明行的 `{` 不是语句边界（buf 尾无 ')'），首个字段语句会粘在
+  // "public class …\n{" 之后，^\s* 锚定会漏；方法级 ints 在 private void 边界被清空，
+  // 类字段必须单独一张跨方法存活的表
+  const fm = /(?:^|\n)\s*(?:private|public|internal|protected)\s+(?:static\s+|readonly\s+|const\s+)*[\w.<>?\[\]]+\s+([A-Za-z_]\w*)\s*=\s*(-?\d+)\s*;/.exec(stmt);
+  if (fm) { fields.set(fm[1], parseInt(fm[2], 10)); return; }
   try {
     // 数组声明
     let m = /^(?:\w+\[\]|\w+)\s+(\w+)\s*=\s*new\s+\w+\[\d*\]\s*\{/.exec(s) ;
@@ -484,6 +538,11 @@ const flushStmt = (stmt) => {
       if (expr.t === 'newarr') arrays.set(m[1], expr.items.map(x => lit(x)).filter(v => v !== undefined));
       return;
     }
+    // 无初始化器空数组（int[] options = new int[0]; :1191）→ 池在原版即为空
+    // （OneFromOptions(8, options)，且整体挂在 NeverTrue 门后）。不捕获会被
+    // idsFromArgs 误报 _unresolved
+    m = /^(?:\w+\[\]|\w+)\s+(\w+)\s*=\s*new\s+\w+\[\d*\]\s*;/.exec(s);
+    if (m) { arrays.set(m[1], []); return; }
     // int/short 声明（Boss helper 的 short type = 127 等）
     m = /^(?:int|short|long)\s+(\w+)\s*=\s*(-?\d+)/.exec(s);
     if (m) { ints.set(m[1], parseInt(m[2], 10)); return; }
@@ -641,3 +700,11 @@ console.log('entries:', entries.length, '| global:', entries.filter(e => e.globa
 console.log('unknown:', stats.unknown.length, stats.unknown.slice(0, 12));
 console.log('npc values:', Object.keys(values).length, '| slimeBody items:', Object.keys(slimeBody).length);
 console.log('conds:', JSON.stringify(stats.conds));
+console.log('class fields:', JSON.stringify(Object.fromEntries(fields)));
+const unresolvedNodes = [];
+(function walk(o) {
+  if (!o || typeof o !== 'object') return;
+  if (typeof o._unresolved === 'string') unresolvedNodes.push(o._unresolved);
+  for (const k in o) walk(o[k]);
+})(entries);
+console.log('_unresolved:', unresolvedNodes.length, unresolvedNodes.slice(0, 8));

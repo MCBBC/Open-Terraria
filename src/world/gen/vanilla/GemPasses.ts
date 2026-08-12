@@ -123,35 +123,78 @@ function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: numb
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============
+/** solid LUT(countTiles 洪水逐格判定;定义同源=原判定式逐 id 预计算) */
+const SOLID_LUT = new Uint8Array(TILE_DEFS.length);
+for (let _i = 0; _i < TILE_DEFS.length; _i++) {
+  if (TILE_DEFS[_i]?.solid) SOLID_LUT[_i] = 1;
+}
+
 export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
   // 裸 double 比较（cs:17534：`for i < w*0.003`）——不取整，12.6 也进 13 次
   const num = st.w * 0.003;
   // nextCount（WorldGen.cs:9506-9581）：洪泛连通空气腔；wall!=0 即封顶；lavaOk=false
   // 时岩浆格 lavaCount++ 且立即封顶（含空气格岩浆）；ice 只认 147/161
+  // ★零风险优化(2026-08-13):原 Set<number>+元组数组 → 平坦 Int32Array 栈 +
+  // Uint8Array seen(visited 列表局部清除)。push 四邻顺序与 pop 语义逐点保持
+  // (DFS 下邻优先),掷骰/判定序列不变。
+  const seenArr = new Uint8Array(st.w * st.h);
+  const visited: number[] = [];
+  const stackX = new Int32Array(4096);
+  const stackY = new Int32Array(4096);
   const countTiles = (sx: number, sy: number): { air: number; lava: number; ice: number; rock: number } => {
     let air = 0, lava = 0, ice = 0, rock = 0;
-    const seen = new Set<number>();
-    const stack: Array<[number, number]> = [[sx, sy]];
-    while (stack.length) {
-      const [x, y] = stack.pop()!;
+    let sp = 0;
+    stackX[sp] = sx; stackY[sp] = sy; sp++;
+    while (sp > 0) {
       if (air >= 300) break;                                  // numTileCount >= maxTileCount(300)
-      if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) return { air: 300, lava, ice, rock };
+      sp--;
+      const x = stackX[sp], y = stackY[sp];
+      if (x <= 1 || x >= st.w - 1 || y <= 1 || y >= st.h - 1) {
+        for (const v of visited) seenArr[v] = 0;
+        visited.length = 0;
+        return { air: 300, lava, ice, rock };
+      }
       const ii = st.idx(x, y);
-      if (seen.has(ii)) continue;
-      seen.add(ii);
-      if (st.wall[ii] === 244) return { air: 300, lava, ice, rock };
-      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.SHIMMER) return { air: 300, lava, ice, rock };
-      if (st.wall[ii] !== 0) return { air: 300, lava, ice, rock };                              // jungle=false
-      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.LAVA) { lava++; return { air: 300, lava, ice, rock }; }
+      if (seenArr[ii]) continue;
+      seenArr[ii] = 1;
+      visited.push(ii);
+      if (st.wall[ii] === 244) {
+        for (const v of visited) seenArr[v] = 0;
+        visited.length = 0;
+        return { air: 300, lava, ice, rock };
+      }
+      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.SHIMMER) {
+        for (const v of visited) seenArr[v] = 0;
+        visited.length = 0;
+        return { air: 300, lava, ice, rock };
+      }
+      if (st.wall[ii] !== 0) {
+        for (const v of visited) seenArr[v] = 0;
+        visited.length = 0;
+        return { air: 300, lava, ice, rock };                  // jungle=false
+      }
+      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.LAVA) {
+        lava++;
+        for (const v of visited) seenArr[v] = 0;
+        visited.length = 0;
+        return { air: 300, lava, ice, rock };
+      }
       if (st.flags[ii]) { // 实心：只计数不扩散
         if (ICE_COUNT.has(st.type[ii])) ice++;
         else if (st.type[ii] === STONE) rock++;
       }
-      if (!st.flags[ii] || !TILE_DEFS[st.type[ii]]?.solid) {
+      if (!st.flags[ii] || !SOLID_LUT[st.type[ii]]) {
         air++;
-        stack.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+        // 四邻入栈(与原 push 顺序一致,pop 取尾 = 下邻先访)。
+        // 栈深上界 = 4×300(air≤300,超即 break,仅 air 格入栈)+1 < 4096,无需增长
+        stackX[sp] = x - 1; stackY[sp] = y; sp++;
+        stackX[sp] = x + 1; stackY[sp] = y; sp++;
+        stackX[sp] = x; stackY[sp] = y - 1; sp++;
+        stackX[sp] = x; stackY[sp] = y + 1; sp++;
       }
     }
+    for (const v of visited) seenArr[v] = 0;
+    visited.length = 0;
     return { air, lava, ice, rock };
   };
   for (let i = 0; i < num; i++) {

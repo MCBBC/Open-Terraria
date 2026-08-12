@@ -1,6 +1,8 @@
 // 一次性诊断：暴露晶簇(tile 178)分布对账——原版金标 12345世界.wld vs 我们 generateWorld(12345)
-// 运行：npx vitest run tests/_gem-dist-audit.test.ts
+// 默认 skip（对账数据已落记忆，勿拖慢并行会话的全量套件）；
+// 手动跑：SW_AUDIT=1 npx vitest run tests/_gem-dist-audit.test.ts
 import { describe, it } from 'vitest';
+const AUDIT = !!process.env.SW_AUDIT;
 import { generateWorld, lastGenState } from '../src/world/gen/WorldGen';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { loadGolden } from './golden-wld-meta.test';
@@ -41,7 +43,7 @@ function statsOf(
   return s;
 }
 
-describe('宝石分布对账(一次性)', () => {
+(AUDIT ? describe : describe.skip)('宝石分布对账(一次性)', () => {
   it('金标 vs 我们: tile 178 总量/深度带/悬空比例', async () => {
     const g = loadGolden('12345世界.wld');
     const gw = g.tilesWide, gh = g.tilesHigh;

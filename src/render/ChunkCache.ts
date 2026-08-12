@@ -34,6 +34,9 @@ export class ChunkCache {
   truncatesWalls: number[] = [];
   /** 含动画 tile 的 chunk，按 sheet 分组（换帧时只重建对应 chunk，避免全量重烘焙） */
   private animChunksBySheet = new Map<number, Set<number>>();
+  /** 含动画墙的 chunk，按 wallId 分组（墙无 sheet 概念；DoUpdate_AnimateWalls 的
+   *  11 类换带墙 + 242/243 星彩玻璃逐格错相——换带时只重建对应 chunk） */
+  private animChunksByWall = new Map<number, Set<number>>();
   /** LRU 上限:每 chunk 2×256² canvas = 512KB;384 chunk ≈ 196MB(缩放 0.5 时
    *  可视 ~100 chunk 仍绰绰有余)。此前 Map 只增不减——跑图积累无界(内存泄漏 #1) */
   static readonly MAX_CHUNKS = 384;
@@ -52,6 +55,7 @@ export class ChunkCache {
     this.chunks.clear();
     this.dirtyQueue.length = 0;
     this.animChunksBySheet.clear();
+    this.animChunksByWall.clear();
   }
 
   constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null) {
@@ -124,15 +128,24 @@ export class ChunkCache {
     this.lastFlushCount = n;
   }
 
-  /** 动画时钟推进（Game 每帧调用）：sheet 到达换帧 tick → 只重建含该 sheet 的 chunk。
-   *  原版语义 = AnimateTiles 每 rate tick 推进 tileFrame；帧内 chunk 复用零开销 */
+  /** 动画时钟推进（Game 每帧调用）：sheet/wallId 到达换帧行 tick → 只重建对应 chunk。
+   *  原版语义 = AnimateTiles / DoUpdate_AnimateWalls 每 rate tick 推进一帧；
+   *  帧内 chunk 复用零开销 */
   advanceAnim(): void {
     tileAnim.tick++;
-    if (!this.animChunksBySheet.size) return;
-    for (const [sheet, set] of this.animChunksBySheet) {
-      const rate = TILE_ANIM_RATE[sheet];
-      if (!rate || tileAnim.tick % rate !== 0) continue;
-      for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+    if (this.animChunksBySheet.size) {
+      for (const [sheet, set] of this.animChunksBySheet) {
+        const rate = TILE_ANIM_RATE[sheet];
+        if (!rate || tileAnim.tick % rate !== 0) continue;
+        for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+      }
+    }
+    if (this.animChunksByWall.size) {
+      for (const [wallId, set] of this.animChunksByWall) {
+        const rate = wallAnimRate(wallId);
+        if (!rate || tileAnim.tick % rate !== 0) continue;
+        for (const k of set) this.markDirty(k & 0xffff, (k >> 16) & 0xffff);
+      }
     }
   }
 

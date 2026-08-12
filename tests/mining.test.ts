@@ -5,6 +5,8 @@
 // tileNoFail（草丛 sheet 3 等）：100 → 1 击
 import { describe, it, expect } from 'vitest';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../src/data/items';
+import { itemFuncOfVid } from '../src/data/vanillaItemFunc';
+import { itemCombat } from '../src/data/vanillaItemCombat';
 import { TILE_DEFS, TILE_BY_KEY } from '../src/data/tiles';
 
 /** 原版每击伤害（Game.tryMine 移植的同一公式——此处独立复算做回归锚） */
@@ -36,22 +38,24 @@ const hits = (sheet: number, toolType: 'pick' | 'axe', power: number): number =>
 
 describe('工具数据（原版 Item.cs SetDefaults 提取值核对）', () => {
   it('铜镐/铜斧/铁镐/铁斧/银/金 全字段', () => {
-    const expect_ = (key: string, type: string, power: number, damage: number, useTime: number) => {
-      const t = ITEM_DEFS[ITEM_BY_KEY[key]]?.tool;
-      expect(t?.type).toBe(type);
-      expect(t?.power).toBe(power);
-      expect(t?.damage).toBe(damage);
-      expect(t?.useTime).toBe(useTime);
+    // 本地工具 def 已退役:vi_ 工具数值走 itemfunc(力)+itemcombat(伤害/useTime)桥
+    const expect_ = (vid: number, type: 'pick' | 'axe' | 'hammer', power: number, damage: number, useTime: number) => {
+      const f = itemFuncOfVid(vid)!;
+      expect(f.pick ?? f.axe ?? f.hammer).toBe(power);
+      expect(f.pick !== undefined ? 'pick' : f.axe !== undefined ? 'axe' : 'hammer').toBe(type);
+      const c = itemCombat(vid)!;
+      expect(c.damage).toBe(damage);
+      expect(c.useTime).toBe(useTime);
     };
-    expect_('copper_pickaxe', 'pick', 35, 4, 15);   // 3509
-    expect_('copper_axe', 'axe', 7, 3, 21);          // 3506
-    expect_('iron_pickaxe', 'pick', 40, 5, 13);       // 1
-    expect_('iron_axe', 'axe', 9, 5, 19);             // 10
-    expect_('silver_pickaxe', 'pick', 45, 6, 11);     // 3515
-    expect_('silver_axe', 'axe', 10, 6, 18);          // 3512
-    expect_('gold_pickaxe', 'pick', 55, 6, 17);       // 3521
-    expect_('gold_axe', 'axe', 11, 7, 18);            // 3518
-    expect_('wood_hammer', 'hammer', 25, 2, 25);      // 196
+    expect_(3509, 'pick', 35, 4, 15);   // Copper Pickaxe
+    expect_(3506, 'axe', 7, 3, 21);     // Copper Axe
+    expect_(1, 'pick', 40, 5, 13);      // Iron Pickaxe
+    expect_(10, 'axe', 9, 5, 19);       // Iron Axe
+    expect_(3515, 'pick', 45, 6, 11);   // Silver Pickaxe
+    expect_(3512, 'axe', 10, 6, 18);    // Silver Axe
+    expect_(3521, 'pick', 55, 6, 17);   // Gold Pickaxe
+    expect_(3518, 'axe', 11, 7, 18);    // Gold Axe
+    expect_(196, 'hammer', 25, 2, 25);  // Wooden Hammer
   });
 });
 

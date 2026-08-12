@@ -60,6 +60,13 @@ export interface TileRunnerOpts {
 }
 
 
+/** framed 活性跳过判定 LUT(TileRunner 内层逐格热路径;定义同源=原判定式逐 id 预计算) */
+const FRAMED_SKIP = new Uint8Array(TILE_DEFS.length);
+for (let _i = 0; _i < TILE_DEFS.length; _i++) {
+  const _d = TILE_DEFS[_i];
+  if (_d && _d.framed && !_d.decor) FRAMED_SKIP[_i] = 1;
+}
+
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -84,13 +91,16 @@ export function tileRunner(
   rng.nextIntRange(0, 4);
 
 
+  // 热循环局部化(零语义:typed array 引用与 w 提为局部;idx 内联 y*w+x)
+  const stW = st.w;
+  const ty = st.type, tf = st.flags, twall = st.wall, tliq = st.liquid, tltype = st.liquidType;
   while (num1 > 0 && num2 > 0) {
     // 泥向上钻出世界顶即停(原版)
     if (py < 0 && num2 > 0 && type === MUD) num2 = 0;
     num1 = strength * (num2 / steps);
     num2--;
     const x0 = Math.max(1, Math.floor(px - num1 * 0.5));
-    const x1 = Math.min(st.w - 1, Math.floor(px + num1 * 0.5));
+    const x1 = Math.min(stW - 1, Math.floor(px + num1 * 0.5));
     const y0 = Math.max(1, Math.floor(py - num1 * 0.5));
     const y1 = Math.min(st.h - 1, Math.floor(py + num1 * 0.5));
     for (let x = x0; x < x1; x++) {
@@ -99,13 +109,11 @@ export function tileRunner(
         // 这些格不消耗菱形判定骰）。近似映射：framed && !decor（树/箱/门等）；
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
-        const ci0 = st.idx(x, y);
-        const cdef = TILE_DEFS[st.type[ci0]];
-                if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
-        if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;
+        const ti = y * stW + x;   // ★曾重复 idx(ci0+ti 同值);内联
+        if (tf[ti] && FRAMED_SKIP[ty[ti]]) continue;
+        if (ignoreTileType >= 0 && ty[ti] === ignoreTileType && tf[ti]) continue;
         const dist = Math.abs(x - px) + Math.abs(y - py);
         if (dist >= strength * 0.5 * (1 + rng.int(-10, 10) * 0.015)) continue;
-        const ti = st.idx(x, y);
         // 丛林泥墙(原版 mudWall 分支:浅层墙 15,深层墙 64,均避让四邻)
         if (o.mudWall && y > gs.worldSurface && st.wall[st.idx(x, y - 1)] !== 2
           && y < st.h - 210 - rng.int(0, 2)

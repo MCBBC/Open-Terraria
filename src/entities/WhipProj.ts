@@ -10,6 +10,7 @@
 //  第 n 个敌 ×falloff^(n-1)）；命中施加 tag（TagEffectState.TryApplyTagToNPC
 //  TagEffectState.cs:178-186 + WhipTagEffect.cs:58-70）并启用 proc（:12936-12981）。
 import { Entity } from './Entity';
+import { applyProjStatus } from './projStatus';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { projFrameImg, projFrameCount } from './Arrow';
@@ -236,6 +237,8 @@ export class WhipProj extends Entity {
         this.hitSet.add(e.id);
         const dmg = this.dmgNow; // 当前鞭伤（已含召唤乘区+护穿；衰减链前）
         e.hurt(dmg, Math.sign(p.x - this.x) * this.knockback, -1, game);
+        // 命中 debuff（StatusNPC:10555——鞭型按 projId 查表,1104 火鞭等）
+        applyProjStatus(this.projId, e as unknown as Record<string, number>);
         // 衰减链（:12604-12678）：每次命中后鞭 damage 字段 ×falloff
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
         // tag（TagEffectState.TryApplyTagToNPC :12758-12760 → ApplyTagToNPC :178-186）

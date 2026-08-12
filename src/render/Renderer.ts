@@ -54,7 +54,7 @@ import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { viIdFromKey } from '../data/vanillaItemCombat';
-import type { FurnitureKind } from '../world/FurnitureItems';
+import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
 
@@ -75,6 +75,31 @@ const STAFF_ITEMS = new Set([
   1446, 1801, 1930, 1931, 2188, 2750, 3006, 3051, 3209, 3210, 3377, 3476, 3569,
   3571, 3787, 3852, 3870, 4062, 5065,
 ]);
+
+/** Main.DrawPlayerItemPos（Main.cs:3305-3663）1:1：useStyle 5 非法杖（枪/弓）握把。
+ *  值 = [num（origin.X = -num），dy（result.Y = H/2 + dy）]；缺省 [10, 0]。
+ *  外层 switch 在前（95..1835）；default 内层 switch 只对未命中外层的 id 生效
+ *  （内层 case 2626 num=-4 为不可达反编译残留，2624 以外层 num=4 为准） */
+const ITEM_DRAW_POS_DEF: readonly [number, number] = [10, 0];
+const ITEM_DRAW_POS: Record<number, readonly [number, number]> = {
+  95: [6, 2], 5629: [4, -2], 1295: [4, 0], 5464: [2, 0], 3611: [2, 0], 5495: [-2, 0],
+  3350: [2, 0], 2624: [4, 0], 3018: [2, 0], 3007: [4, -1], 3107: [4, 2], 3008: [-7, 2],
+  1255: [6, 0], 2269: [2, 2], 1265: [-8, 4], 2272: [0, 4], 3029: [4, 0], 4381: [4, 0],
+  2796: [-28, 2], 2797: [0, 0], 2610: [0, 0], 2623: [-30, -4], 3546: [-14, -6], 1835: [-2, 2],
+  3859: [-2, 0], 2888: [6, 0], 2223: [2, -2], 1782: [0, 4], 1929: [0, 2], 2270: [-4, 0],
+  1784: [0, 4], 1000: [6, 0], 1178: [4, 0], 1319: [0, 0], 1297: [-8, 0], 1121: [6, -2],
+  1314: [2, 0], 1258: [2, -2], 1155: [-10, -2], 1156: [-2, 0], 4703: [-3, -2], 5117: [-1, 0],
+  96: [-8, 2], 1870: [-8, 2], 1260: [-8, 2], 1254: [-6, 2], 98: [-5, -2], 534: [-2, 1],
+  679: [0, 2], 964: [0, 0], 533: [-7, -2], 1553: [-10, -2], 506: [0, -2], 1910: [0, -2],
+  494: [-2, 0], 508: [-2, 0], 434: [0, -2], 514: [0, 3],
+  435: [-2, -2], 436: [-2, -2], 481: [-2, -2], 578: [-2, -2], 1187: [-2, -2],
+  1194: [-2, -2], 1201: [-2, -2], 1229: [-2, -2],
+  197: [-5, 4], 4060: [-2, 4], 126: [4, 4], 800: [4, 2], 127: [4, 2], 157: [6, 2],
+  160: [-8, 0], 164: [0, 2], 219: [0, 2], 165: [4, 4], 272: [4, 4], 3870: [4, 4],
+  266: [0, 2], 281: [6, -6], 986: [6, -10], 682: [4, 0], 4953: [-4, 0],
+  758: [-10, 0], 759: [-8, 2], 5460: [0, -6], 760: [-2, 2], 1946: [-2, 2],
+  779: [0, 2], 5134: [0, 2], 905: [-5, 0], 930: [4, 2], 3788: [2, 2], 5668: [-13, 0],
+};
 
 /** OffsetsPlayerHeadgear（Main.cs:504-525，按 bodyFrame.Y/56 行索引）：
  *  行 0-6→y2 / 7-9→y0 / 10-13→y2 / 14-16→y0 / 17-19→y2（X 恒 0）。
@@ -150,24 +175,33 @@ export function vanillaFrameIdx(e: Enemy, frames: number): number {
   if (id === 42 || (id >= 231 && id <= 235)) {
     return [0, 1, 2, 1][Math.floor(t / 2) % 4];
   }
-  // 蝙蝠族（L75585）：每 6 tick 推进，全循环（部分类型不含末帧）
+  // 蝙蝠族（case 49 块 cs:75523-75585）：每 6 tick 推进、回卷含帧 0
+  // （cs:75577-75584 `if (frame.Y >= num*num305) frame.Y = 0`——此前 max(1,…) 跳过帧 0）
   if (ai === 14) {
     const cap = BAT_SKIP_LAST.has(id) ? frames - 1 : frames;
-    return Math.max(1, Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap)));
+    return Math.min(frames - 1, Math.floor(t / 6) % Math.max(1, cap));
   }
   // 史莱姆（case 1, L71506）：每 8 tick 推进，全循环
   if (ai === 1) return Math.floor(t / 8) % frames;
   // 骷髅王头/手（case 35/36, L67378+）：仅 RedHatSkeletron（ai[3]==1 红帽变种）才切帧；
   // 常规骷髅王恒帧 0——此前走通用全循环会闪到表内"红帽骷髅"帧
   if (ai === 11 || ai === 12) return 0;
-  // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 L70172-70262）：腾空=1；站定=0；
-  // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1、>6 推进、越界回卷帧2）
+  // 城镇 NPC（aiStyle 7，FindFrame 城镇分支 cs:70159-70240）：腾空=1；
+  // 站定帧（cs:70163-70181）：638 是 0-7 待机循环（4t 推进）、140/489=帧1、其余=帧0；
+  // 行走帧 2..frames-extra-1 循环（frameCounter += |vx|*2+1，阈值 num109：
+  // 632/534/638/656=12（489=8 且 counter 加 |vx|*1+0.5）、其余 6）
   if (ai === 7) {
     if (!e.onGround) return 1;
-    if (!walking) return 0;
+    if (!walking) {
+      if (id === 638) return Math.min(7, Math.floor(t / 4) % Math.min(8, frames));
+      if (id === 140 || id === 489) return Math.min(1, frames - 1);
+      return 0;
+    }
     const extra = townExtraFrames(id);
     const len = Math.max(1, frames - extra - 2);
-    return 2 + (Math.floor((e.walkCycleT * 2 + t) / 6) % len);
+    if (id === 489) return 2 + (Math.floor((e.walkCycleT + t * 0.5) / 8) % len);
+    const step = id === 632 || id === 534 || id === 638 || id === 656 ? 12 : 6;
+    return 2 + (Math.floor((e.walkCycleT * 2 + t) / step) % len);
   }
   // 战士族/107（L70155-70252）：站定=0；行走从帧 2 起按 |vx|*2+1 累加、>6 推进、循环回 2
   if (ai === 3 || ai === 26 || ai === 107) {
@@ -390,7 +424,25 @@ export function deerclopsNextFrame(
   return idx;
 }
 
-export interface DamageNumber { x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number; label?: string; }
+/** 飘字。数字类 1:1 CombatText.cs（spawn: NewText:59-121 / update: Update:131-206）:
+ *  vy 普通恒 -7/t、暴击 -14/t、dot -4/t;life 60/120/40;scale 从 0 每 t+0.1 长到 1
+ *  （dot +0.5 封顶 0.8）;alpha 0.6~1 闪烁;寿命归零后 scale 收缩至 0.1 消亡。
+ *  label 类（物品名）不走原版链,保持旧轨迹,新字段可缺省 */
+export interface DamageNumber {
+  x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number;
+  label?: string;
+  /** 水平漂移（暴击 NewText ±1.25）;缺省 0 */
+  vx?: number;
+  /** dot 飘字（HurtLifeRegen/中毒族 DoT:更小更短,带重力） */
+  dot?: boolean;
+  /** 字号缩放（NewText scale=0 起,Update 每 t+0.1/0.5）;缺省 1=恒定 */
+  scale?: number;
+  /** 闪烁 alpha 0.6~1（Update ±0.05/t）;缺省 1 */
+  alpha?: number;
+  alphaDir?: number;
+  /** 暴击旋转（NewText 0.12rad 起,Update ±0.001/t 漂移） */
+  rotation?: number;
+}
 
 export class Minimap {
   canvas: HTMLCanvasElement;
@@ -981,15 +1033,16 @@ export class Renderer {
       });
     }
 
-    // 8. 飘字（受光照影响后画）
+    // 8. 飘字（受光照影响后画）。数字类样式 1:1 CombatText:scale 从 0 长到 1
+    //    （dot 封顶 0.8 → 字号偏小）、alpha 0.6~1 闪烁、暴击 0.12rad 旋转漂移
     ctx.save();
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
     for (const d of dmgNumbers) {
-      ctx.globalAlpha = Math.min(1, d.life / 30);
       const [sx, sy] = cam.worldToScreen(d.x, d.y);
-      // 物品名飘字：带阴影浅白文本
+      // 物品名飘字：带阴影浅白文本（非原版链,保持旧样式）
       if (d.label) {
+        ctx.globalAlpha = Math.min(1, d.life / 30);
         ctx.font = '13px sans-serif';
         ctx.strokeStyle = 'rgba(0,0,0,0.75)';
         ctx.lineWidth = 3;
@@ -998,12 +1051,24 @@ export class Renderer {
         ctx.fillText(d.label, sx, sy);
         continue;
       }
+      const scale = d.scale ?? 1;
+      ctx.globalAlpha = d.alpha ?? 1;
       ctx.fillStyle = d.color;
-      ctx.font = d.crit ? 'bold 18px monospace' : 'bold 14px monospace';
+      ctx.font = `bold ${Math.max(1, Math.round((d.crit ? 18 : 14) * scale))}px monospace`;
       ctx.strokeStyle = '#000';
       ctx.lineWidth = 3;
-      ctx.strokeText(String(d.value), sx, sy);
-      ctx.fillText(String(d.value), sx, sy);
+      const rot = d.rotation ?? 0;
+      if (rot !== 0) {
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(rot);
+        ctx.strokeText(String(d.value), 0, 0);
+        ctx.fillText(String(d.value), 0, 0);
+        ctx.restore();
+      } else {
+        ctx.strokeText(String(d.value), sx, sy);
+        ctx.fillText(String(d.value), sx, sy);
+      }
     }
     ctx.restore();
 
@@ -1320,7 +1385,7 @@ export class Renderer {
     4, 35, 36, 50, 113, 114, 125, 126, 127, 128, 129, 130, 131, 222, 262, 266,
     245, 246, 247, 248, 249, 564, 565, 551, 576, 577, 87, 510, 454, 621, 439, 370,
   ]);
-  /** NPCAddHeight（Main.cs:21852-21977）：血条在脚底 +10 之上的额外下沉（视觉修正） */
+  /** NPCAddHeight（Main.cs:21840-22005）：血条在脚底 +10 之上的额外下沉（视觉修正） */
   private static readonly HB_ADD_H: Record<number, number> = {
     125: 30, 126: 30, 54: 2, 205: 8, 182: 24, 178: 2, 6: 26, 173: 26, 94: 14,
     7: 13, 8: 13, 9: 13, 98: 13, 99: 13, 100: 13, 95: 13, 96: 13, 97: 13,
@@ -1330,6 +1395,8 @@ export class Renderer {
     83: 20, 84: 20, 150: 10, 151: 10, 158: 10, 152: 6, 153: 2, 154: 2,
     165: 10, 237: 10, 238: 10, 240: 10, 531: 10, 39: 26, 40: 26, 41: 26,
     87: 56, 88: 56, 89: 56, 90: 56, 91: 56, 92: 56, 134: 30, 135: 30, 136: 30, 169: 8,
+    174: 6, 369: 2, 376: 6, 579: -2, 612: 2, 613: 2,
+    269: -2, 270: -2, 271: -2, 274: -2, 277: -2,
   };
 
   /** 受伤实体血条（DrawInterface_14_EntityHealthBars Main.cs:45203 + DrawHealthBar :21748）：
@@ -3086,6 +3153,26 @@ export class Renderer {
     // 血条与怪物同规（原版 DrawInterface_14 对 friendly NPC 同函数绘制：
     // life != lifeMax 即常驻显示——城镇 NPC 受伤掉血后可见；贴图条加载未就绪也照画）
     this.drawEnemyHpBar(n);
+    // ---- 表情气泡（EmoteBubble.Draw :201-224：Extra[48] 8 列网格 34px/格；
+    //      首尾 6t 用边框帧 (1,0) 否则 (0,0)；图标 (emote*2%8+anim, 1+emote/4)。
+    //      头顶底锚（GetPosition 的头顶锚近似）----
+    if (n.emote >= 0 && n.emoteLife > 0 && this.atlas) {
+      const sheet = this.atlas.ensureVImage('vanilla/Extra_48.png');
+      if (sheet) {
+        const F = 34;
+        const pop = n.emoteLife < 6 || n.emoteTotal - n.emoteLife < 6;
+        ctx.save();
+        ctx.translate(n.cx, n.y - 2);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(sheet, (pop ? 1 : 0) * F, 0, F, F, -F / 2, -F, F, F);
+        if (!pop) {
+          const anim = Math.floor((n.emoteTotal - n.emoteLife) / 12) % 2;
+          ctx.drawImage(sheet, (n.emote * 2 % 8 + anim) * F, (1 + Math.floor(n.emote / 4)) * F,
+            F, F, -F / 2, -F, F, F);
+        }
+        ctx.restore();
+      }
+    }
     // ---- 原版贴图条（Images/NPC_{id}，40×56 帧、默认朝左）：帧语义见 TownNPC.fixedUpdate ----
     // 注意：不再回退 Maples 角色/NPC_1.png——那是原版绿史莱姆贴图（Maples 沿用原版命名），
     // 曾导致全部城镇 NPC 显示为史莱姆
@@ -3127,14 +3214,18 @@ export class Renderer {
     // 雨伞族 holdStyle=2 等静持时也渲染（ItemCheck_ApplyHoldStyle :49496 逐值持位）；
     // noWet（火把 noWet=true）→ 水下不显示（与手持光源熄灭同步）。
     // holdStyle 数据源 = vanilla-itemfunc（40 件）∪ DefaultToTorch 批量族（提取漏，
-    // HOLD_STYLE_ITEMS 手工补）；7 无持位分支（仅 bodyFrame 行 11）不画
+    // HOLD_STYLE_ITEMS 手工补）∪ IsFood 批量（Item.cs:48519 `if (Sets.IsFood) holdStyle=1`
+    // 在 SetDefaults 公共尾部强制——在库食物 4023/4291/5275/5277/5278/1912/1919 等提取漏，
+    // 此前静持不显示）；7 无持位分支（仅 bodyFrame 行 11）不画
     let staticHoldStyle = 0;
     if (!swing) {
       const held = p.inv.heldItem();
       const def = held ? ITEM_DEFS[held.id] : undefined;
       if (held && def && !p.inWater) {
-        const vid = def.key === 'torch' ? 8 : viIdFromKey(def.key);
-        const hs = vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
+        const vid = viIdFromKey(def.key); // vi_8_Torch 自动解析 8(本地特判已退役)
+        // IsFood 门在最前：原版公共尾段无条件覆盖（即使 itemfunc 已录也以 1 为准）
+        const hs = vid >= 0 && VANILLA_IS_FOOD.has(vid) ? 1
+          : vid >= 0 ? itemFuncOfVid(vid)?.holdStyle ?? (HOLD_STYLE_ITEMS.has(vid) ? 1 : 0) : 0;
         staticHoldStyle = hs === 7 ? 0 : hs;
         if (staticHoldStyle) {
           const ar = this.atlasIcon(held.id);
@@ -3377,8 +3468,11 @@ export class Renderer {
         return n >= 0.5 ? 3 : 2;
       }
       case 5: {
-        // :35986-36005：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4
-        const n21 = (swing.aim ?? 0) * p.facing;
+        // :35986-36005：默认行3；itemRotation*dir < -0.75 → 行2、> 0.6 → 行4。
+        // itemRotation = Atan2(aimY*dir, aimX*dir)（:46730）——朝左时与裸 aim 相差 ±π，
+        // 此前直接 aim*facing 同源错位
+        const irot = Math.atan2(Math.sin(swing.aim ?? 0) * p.facing, Math.cos(swing.aim ?? 0) * p.facing);
+        const n21 = irot * p.facing;
         if (n21 < -0.75) return 2;
         if (n21 > 0.6) return 4;
         return 3;
@@ -3407,22 +3501,38 @@ export class Renderer {
     const pAnim = Math.min(1, Math.max(0, swing.t / swing.dur));
     const fw = ar ? ar.sw : 14, fh = ar ? ar.sh : 14;
     const us = swing.useStyle ?? 1;
-    // → { rot, offX, offY }（dir=1 空间）；hide = 原版把 itemLocation 挪到 -1000（不画）
-    let rot = 0, offX = 0, offY = 0, hide = false;
+    // ★aim 方向化（Player.cs:46730/46737：itemRotation = Atan2(aimY*dir, aimX*dir)——
+    //  原版朝左时以翻转 sprite + 该角绘制；本项目是镜像空间，等价本地绘制角 = π-aim
+    //  （镜像共轭 mirror∘rot(θ)=rot(−θ)∘mirror，模 2π 后世界指向与 aim 一致）。
+    //  useStyle 5（法杖/枪弓）与 13（短剑）消费；aim 未传取 0（正前方）
+    const aim = p.facing === -1 ? Math.PI - (swing.aim ?? 0) : (swing.aim ?? 0);
+    // → { rot, offX, offY, drawOX, drawOY }（dir=1 空间）；hide = 原版把 itemLocation
+    // 挪到 -1000（不画）。drawO* = itemLocation（握点）在精灵矩形内的锚定偏移，
+    // 默认底左角 (0,-fh)（PlayerDrawLayers.cs:3260 origin=(W/2-W/2*dir, H)）
+    let rot = 0, offX = 0, offY = 0, hide = false, drawOX = 0, drawOY = -fh;
+    // useStyle 1 三段持位 tier（Player.cs:49957-50095）——case 1 与 default 共用
+    const swingTier = (ph: 0 | 1 | 2): { x: number; y: number } => {
+      const xT = (w: number) => ph === 0
+        ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
+        : ph === 1
+          ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
+          : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
+      const yT = (h: number) => ph === 0 ? 24
+        : h > 64 ? 14 : h > 52 ? 12 : ph === 1 && h > 32 ? 8 : 10;
+      // phase2（起手）持位在身后（:50071 `center - (w/2-num6)*dir`）
+      return ph === 2
+        ? { x: -(fw * 0.5 - xT(fw)), y: yT(fh) }
+        : { x: fw * 0.5 - xT(fw), y: yT(fh) };
+    };
     switch (us) {
       case 1: {
-        // useStyle=1（:49939-50108）1:1：约 200° 线性挥砍弧 + 三段持位
+        // useStyle=1（:49939-50108）1:1：约 200° 线性挥砍弧 + 三段持位。
+        // ★时段方向：pAnim ≡ itemAnimation/itemAnimationMax（随 t 递减，与 rot 公式同源）——
+        //  末段(anim<0.333max ⟺ pAnim≤1/3)→前持位(phase0) / 中段→(phase1) /
+        //  起手(anim≥0.666max ⟺ pAnim≥2/3)→后举位(phase2)。此前按"递增进度"整段接反
         rot = (pAnim - 0.5) * -3.5 - 0.3;
-        const xTier = (w: number, phase: 0 | 1 | 2) => phase === 0
-          ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10
-          : phase === 1
-            ? w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10
-            : w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6;
-        const yTier = (h: number, phase: 0 | 1 | 2) => phase === 0 ? 24
-          : h > 64 ? 14 : h > 52 ? 12 : phase === 1 && h > 32 ? 8 : 10;
-        if (pAnim > 2 / 3) { offX = fw * 0.5 - xTier(fw, 0); offY = yTier(fh, 0); }
-        else if (pAnim > 1 / 3) { offX = fw * 0.5 - xTier(fw, 1); offY = yTier(fh, 1); }
-        else { offX = -(fw * 0.5 - xTier(fw, 2)); offY = yTier(fh, 2); }
+        const seg = pAnim <= 1 / 3 ? swingTier(0) : pAnim < 2 / 3 ? swingTier(1) : swingTier(2);
+        offX = seg.x; offY = seg.y;
         break;
       }
       case 2: {
@@ -3435,11 +3545,15 @@ export class Renderer {
         break;
       }
       case 3: {
-        // 雨伞（:50279-50312）：收势段（pAnim>0.666）itemLocation=-1000 不画
+        // 雨伞（:50279-50312）：起手段（anim>0.666max ⟺ pAnim>0.666）itemLocation=-1000 不画
         if (pAnim > 0.666) { hide = true; break; }
         rot = 0.8;
         offX = fw * 0.5 - 4 - Math.max(pAnim * fw * 1.2 - 10, 8);
         offY = 24;
+        // 946/4707 特判（Player.cs:50302-50305 itemLocation.X-=6*dir +
+        // PlayerDrawLayers.cs:3314-3318 绘制位 Y-=22*gravDir、绘制角=-1.57*-direction）
+        const vid3 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        if (vid3 === 946 || vid3 === 4707) { offX -= 6; offY -= 22; rot = 1.57; }
         break;
       }
       case 4: {
@@ -3453,16 +3567,27 @@ export class Renderer {
       case 5: {
         // 朝鼠标静持（:50339-50422 + :46708 itemRotation=瞄准角）：
         // 法杖族钉 MountedCenter+瞄准向量×6；默认 X=中心-2*dir、Y=中心-fh/2
-        rot = swing.aim ?? 0;
         const vid = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
-        if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; }          // :50343
-        else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; }    // :50349
+        if (vid === 3779) { offX = 6; offY = p.h * 0.5 + 6; rot = 0; }      // :50343（itemRotation=0）
+        else if (vid === 4262) { offX = -6; offY = p.h * 0.5 - 6; rot = 0; } // :50349
         else if (vid >= 0 && STAFF_ITEMS.has(vid)) {
-          offX = Math.cos(rot) * 6;
-          offY = p.h * 0.5 + Math.sin(rot) * 6;
+          // :50382-50383 itemLocation = MountedCenter + itemRotation 向量×6（3476 为 14）；
+          // ★绘制角 = itemRotation + 0.785*direction（PlayerDrawLayers.cs:3370——法杖斜持
+          // 45°，此前漏叠 → 34 件法杖全少转 45°）
+          offX = Math.cos(aim) * 6;
+          offY = p.h * 0.5 + Math.sin(aim) * 6;
+          rot = aim + 0.785;
         } else {
+          // 非法杖（枪/弓/悠悠球等）：X=中心-2*dir、Y=MountedCenter-fh/2（:50387），
+          // 绘制角 = itemRotation（PlayerDrawLayers.cs:3444）
           offX = -2;
           offY = p.h * 0.5 - fh * 0.5;
+          rot = aim;
+          // ★握把 origin=(-num9,H/2)（PlayerDrawLayers.cs:3434-3443 + Main.cs:3305
+          // DrawPlayerItemPos）：num9 默认 10、逐 id 修正；dir=-1 时原版取 (W+num9,H/2)，
+          // 镜像空间等价 → 精灵左上角钉在握点 +（num9, dy）
+          const dp = vid >= 0 ? ITEM_DRAW_POS[vid] ?? ITEM_DRAW_POS_DEF : ITEM_DRAW_POS_DEF;
+          drawOX = dp[0]; drawOY = dp[1];
         }
         break;
       }
@@ -3486,14 +3611,20 @@ export class Renderer {
         const hy = 10 * Math.sin(num11) - 2 + 3 * Math.cos(num11);
         offX = hx + (8 + (2 - 8) * t);
         offY = p.h * 0.5 + hy;
+        // ★轴心（PlayerDrawLayers.cs:3263-3275 useStyle 9）：origin = Size*(0.5,0.4)
+        // （5009/5042/5645 为 (0.26,0.5)；朝左时原版取 X=1-X——镜像空间恒用 dir=1 值）
+        const vid9 = viIdFromKey(ITEM_DEFS[swing.item]?.key ?? '');
+        if (vid9 === 5009 || vid9 === 5042 || vid9 === 5645) { drawOX = -fw * 0.26; drawOY = -fh * 0.5; }
+        else { drawOX = -fw * 0.5; drawOY = -fh * 0.4; }
         break;
       }
       case 13: {
-        // 短剑突刺（:50423-50446）：复合手臂持位 GetFrontHandPosition(stretch, aim-π/2)，
-        // stretch 按 1-pAnim 档 Quarter(6)/ThreeQuarters(8)/Full(10)；绘制旋转 = aim
+        // 短剑突刺（:50423-50446）：复合手臂持位 GetFrontHandPosition(stretch, itemRotation-π/2)，
+        // stretch 按 1-pAnim 档 Quarter(6)/ThreeQuarters(8)/Full(10)；绘制旋转 = itemRotation
+        // （本地空间 = 方向化 aim，见函数头）
         const n24 = 1 - pAnim;
         const mult = n24 <= 0.33 ? 6 : n24 <= 0.66 ? 8 : 10;
-        rot = swing.aim ?? 0;
+        rot = aim;
         offX = mult * Math.cos(rot) - 4 - 3 * Math.sin(rot);
         offY = p.h * 0.5 + mult * Math.sin(rot) - 2 + 3 * Math.cos(rot);
         break;
@@ -3517,10 +3648,10 @@ export class Renderer {
         break;
       }
       default: {
-        // 7/8/10/11/12 等未入表族（本批物品无）回退 useStyle 1 挥砍
+        // 7/8/10/11/12 等未入表族回退 useStyle 1 挥砍（三段持位与 case 1 同款同步）
         rot = (pAnim - 0.5) * -3.5 - 0.3;
-        offX = fw * 0.5 - 10;
-        offY = 24;
+        const seg = pAnim <= 1 / 3 ? swingTier(0) : pAnim < 2 / 3 ? swingTier(1) : swingTier(2);
+        offX = seg.x; offY = seg.y;
         break;
       }
     }
@@ -3530,12 +3661,13 @@ export class Renderer {
     if (p.facing === -1) ctx.scale(-1, 1); // 镜像空间：旋转自动随镜像取反（与原版 -direction 因子等价）
     ctx.rotate(rot);
     if (ar) {
-      // 原版 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
+      // 默认 origin = (W*0.5 − W*0.5*dir, H)（PlayerDrawLayers.cs:3260）：
       // dir=1 → 底左角 / dir=−1 → 底右角钉在 itemLocation（握点）旋转——
-      // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, 0, -fh, ar.sw, ar.sh);
+      // 镜像空间里统一画在 (0,−fh) 即底左角=握点，镜像自动翻成底右角；
+      // useStyle 5 非法杖（握把 (-num9,H/2)）与 9（Size*(0.5,0.4) 轴心）经 drawOX/drawOY 覆盖
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, drawOX, drawOY, ar.sw, ar.sh);
     } else if (icon) {
-      ctx.drawImage(icon, 0, -14, 14, 14);
+      ctx.drawImage(icon, drawOX, -14, 14, 14);
     }
     ctx.restore();
   }

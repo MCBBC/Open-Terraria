@@ -95,10 +95,11 @@ function deactivate(st: TileStore, x: number, y: number): void {
   st.type[i] = 0; st.flags[i] = 0; st.half[i] = 0; st.slope[i] = 0;
 }
 
-/** WorldGen.PlaceTile(x, y, 19, …, style)（cs:28312/28741/29063/29103）：平台 1×1，style*18 横排 */
+/** WorldGen.PlaceTile(x, y, 19, …, style)（cs:28312/28741/29063/29103）：平台 1×1，
+ *  变体竖排 Y 步 18（与 DungeonPass/HellFortPass 的平台帧一致——此前误写 X 轴） */
 function placePlatform(st: TileStore, x: number, y: number, style: number): void {
   if (!st.inBounds(x, y)) return;
-  st.setTileSilent(x, y, PLATFORM, style * 18, 0);
+  st.setTileSilent(x, y, PLATFORM, 0, style * 18);
 }
 /** PlaceTile(x, Y, 10, …, style)（cs:29430/29466/28972/29100）：门锚=底行 Y（占 Y-2..Y），
  *  本仓库 placeDoorClosed 锚=顶行 → Y-2 */
