@@ -132,7 +132,7 @@ export function mourningWoodAI(e: Enemy, game: GameHooks, player: Player | null)
   // 点光(:32958-32965)：底部 -30px
   e.lightRGB = ever ? [0.3, 0.16, 0.125] : [0.3, 0.125, 0.06];
   // TargetClosest 仅夜间(:32943-32946)——白天保留上一朝向
-  if (!isDay && player && !player.dead) e.facing = player.cx > e.cx ? 1 : -1;
+  if (!isDay && player && !player.dead) e.facing = e.seekDirX(player);
   let flag56 = false;
 
   if (isDay) {
@@ -298,7 +298,7 @@ export function pumpkingAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   // 首帧生双刃(:33300-33316)：ai0=-1 左 / +1 右（右刃 ai3=150 预蓄）
   if (e.ai0 === 0) {
-    if (player) e.facing = player.cx > e.cx ? 1 : -1;
+    if (player) e.facing = e.seekDirX(player);
     e.ai0 = 1;
     for (const side of [-1, 1]) {
       const b = spawnPart(game, e, 328);
@@ -326,7 +326,7 @@ export function pumpkingAI(e: Enemy, game: GameHooks, player: Player | null) {
       if (e.ai3 !== 1) { e.ai1 = 0; e.ai2 = 0; }
       else {
         e.ai1 = 1; e.ai2 = 0;
-        if (player) e.facing = player.cx > e.cx ? 1 : -1;
+        if (player) e.facing = e.seekDirX(player);
       }
     }
     if (player) {
@@ -509,7 +509,7 @@ export function iceQueenAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.x += e.vx; e.y += e.vy;
     return;
   }
-  e.facing = player.cx > e.cx ? 1 : -1;             // TargetClosest（各态首行）
+  e.facing = e.seekDirX(player);             // TargetClosest（各态首行）
 
   if (e.ai0 === 0) {
     // 滑翔(:33601-33686)：固定水平朝向 ai[2]（与玩家同侧），越过 800px 才回摆
@@ -648,7 +648,7 @@ export function santaNK1AI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.hp < e.maxHp * 0.25) num980 = 5;
   // 点光(:33918-33923)：中心格非实心时
   if (!solidTileAt(game, e.cx, e.cy)) e.lightRGB = [0.3, 0.26, 0.05];
-  if (!isDay && player && !player.dead) e.facing = player.cx > e.cx ? 1 : -1;   // :33909-33912
+  if (!isDay && player && !player.dead) e.facing = e.seekDirX(player);   // :33909-33912
   let flag58 = false;
 
   if (isDay) {
@@ -660,7 +660,7 @@ export function santaNK1AI(e: Enemy, game: GameHooks, player: Player | null) {
       // 蓄招(:33932-33941)
       e.ai1 += 1;
       if (e.ai1 >= 300 && player) {
-        e.facing = player.cx > e.cx ? 1 : -1;        // TargetClosest
+        e.facing = e.seekDirX(player);        // TargetClosest
         e.ai1 = 0;
         e.ai0 = 1;
       }
@@ -747,7 +747,7 @@ export function elfCopterAI(e: Enemy, game: GameHooks, player: Player | null) {
   const L = la(e);
   if (!e.bInit) { e.bInit = true; L[0] = 0; }
   if (!player) { e.x += e.vx; e.y += e.vy; return; }
-  e.facing = player.cx > e.cx ? 1 : -1;             // TargetClosest(:34157)
+  e.facing = e.seekDirX(player);             // TargetClosest(:34157)
   e.visAngle = Math.abs(e.vx) * e.facing * 0.1;      // rotation(:34158)
   const ox = e.cx + e.facing * 20, oy = e.cy + 6;    // vector121(:34160)
   let dx = player.cx - ox, dy = player.y - oy;
@@ -801,7 +801,7 @@ export function elfCopterAI(e: Enemy, game: GameHooks, player: Player | null) {
 export function flockoAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; }
   if (!player) { e.x += e.vx; e.y += e.vy; return; }
-  e.facing = player.cx > e.cx ? 1 : -1;             // TargetClosest(:34210)
+  e.facing = e.seekDirX(player);             // TargetClosest(:34210)
   const ox = e.cx + e.facing * 20, oy = e.cy + 6;    // vector122(:34212)
   let dx = player.cx - ox, dy = player.cy - oy;
   const dist = Math.hypot(dx, dy) || 1;
@@ -869,7 +869,7 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   if (vid === 144 && e.ai1 >= 3) {
     // Stabby 停顿(:29153-29170)
-    e.facing = player && player.cx > e.cx ? 1 : -1;   // TargetClosest
+    e.facing = player ? e.seekDirX(player) : -1;   // TargetClosest
     if (onG) {
       e.vx *= 0.9;
       if (e.vx > -0.3 && e.vx < 0.3) e.vx = 0;
@@ -878,7 +878,7 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (vid === 145 && e.ai1 >= 3) {
     // SnowBalla 投掷停顿(:29172-29206)：第 8 拍投雪球 109
-    e.facing = player && player.cx > e.cx ? 1 : -1;
+    e.facing = player ? e.seekDirX(player) : -1;
     if (onG) {
       e.vx *= 0.9;
       if (e.vx > -0.3 && e.vx < 0.3) e.vx = 0;
@@ -897,7 +897,7 @@ export function snowmanAI(e: Enemy, game: GameHooks, player: Player | null) {
     if (onG) {
       if (L[2] === e.x) { e.facing *= -1; e.ai3 = 60; }   // 原地白跳转向
       L[2] = e.x;
-      if (e.ai3 === 0 && player) e.facing = player.cx > e.cx ? 1 : -1;   // TargetClosest
+      if (e.ai3 === 0 && player) e.facing = e.seekDirX(player);   // TargetClosest
       e.ai0 += 1;
       if (e.ai0 > 2) {
         e.ai0 = 0;

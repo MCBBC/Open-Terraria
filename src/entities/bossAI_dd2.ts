@@ -504,10 +504,10 @@ function walkerKernel(
     } else {
       x[0] = e.x; x[1] = e.y; x[2] = 0;
     }
-    if (player && !player.dead) e.facing = player.cx > e.cx ? 1 : -1;  // TargetClosest
+    if (player && !player.dead) e.facing = e.seekDirX(player);  // TargetClosest
   } else {
     x[2] += 1;
-    if (player && !player.dead) e.facing = player.cx > e.cx ? 1 : -1;
+    if (player && !player.dead) e.facing = e.seekDirX(player);
   }
   // ---- 施法僵直（cs:42387-42389 / :66554-66555）：AI 早退但碰撞步照跑 ----
   if (castDamp > 0) {
@@ -706,7 +706,7 @@ function moveSandShark(e: Enemy, game: GameHooks, vx: number, vy: number): void 
 export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; e.dirY = 1; }
   const x = dd2LocalAI(e);
-  if (e.facing === 0) e.facing = player && player.cx > e.cx ? 1 : -1;   // :42625-42627
+  if (e.facing === 0) e.facing = player ? e.seekDirX(player) : -1;   // :42625-42627
   // ---- 在沙判定（:42629-42634）：中心格是沙族 tile 或湿 ----
   const ctx = Math.floor(e.cx / TILE), cty = Math.floor(e.cy / TILE);
   const ct = tileTypeAt(game, ctx, cty);

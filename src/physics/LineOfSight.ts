@@ -1,0 +1,138 @@
+// Collision.CanHit / CanHitLine 1:1（Terarria1456, 1.4.5.6）：
+//   CanHit     Collision.cs:388-480（Point 重载，实体矩形 → 中心 tile 起止）
+//   CanHitLine Collision.cs:590-785（分数步进 Bresenham，三 tile 一组 ANY 判阻挡）
+//
+// 逐 tile 扫描（替换旧的 8px 采样近似），关键语义：
+//  - 阻挡 tile = active && !inActive(致动) && tileSolid[type] && !tileSolidTop[type]
+//    （CanHit 额外要求 slope==0 && !halfBrick；CanHitLine 不查半砖/坡面——原文如此）
+//  - 半砖/坡面/平台(solidTop)/已致动 tile 一律不阻挡视线；
+//    开门态是独立 tile id（tileSolid=false），天然不阻挡。
+//  - CanHit：沿主轴逐格走，"上下(或左右)两邻格均为整块实心"= 被夹住 → false；
+//    落脚格本身可穿才继续走，落脚格为整块实心即出循环 → false。
+//  - CanHitLine：每步检查 当前+两邻格 ANY 整实心 → false；步末落脚格实心 → false。
+//  - 起止 tile 钳制：x∈[1,maxTilesX-1]、y∈[1,maxTilesY-40]；越界 tile 视同 null → false。
+import { TILE_DEFS } from '../data/tiles';
+import type { TileStore } from '../world/TileStore';
+import { TileStore as TS } from '../world/TileStore';
+
+type Store = Pick<TileStore, 'w' | 'h' | 'type' | 'wire' | 'half' | 'slope' | 'inBounds' | 'idx'>;
+
+/** tile == null（未加载/越界）→ 调用方 return false */
+function isNull(st: Store, x: number, y: number): boolean {
+  return !st.inBounds(x, y);
+}
+
+/** CanHit 的整块实心判定（Collision.cs:443-447 / :449-453 条件串）：
+ *  active && !inActive && tileSolid && !tileSolidTop && slope==0 && !halfBrick */
+function fullSolid(st: Store, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0) return false;                                   // !active()
+  if (st.wire[i] & TS.WIRE_ACTUATED) return false;             // inActive()
+  const d = TILE_DEFS[t];
+  return !!d && d.solid && !d.platform && st.slope[i] === 0 && st.half[i] === 0;
+}
+
+/** CanHitLine 的整块实心判定（不查 slope/halfBrick，cs:707-709） */
+function plainSolid(st: Store, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (t === 0) return false;
+  if (st.wire[i] & TS.WIRE_ACTUATED) return false;
+  const d = TILE_DEFS[t];
+  return !!d && d.solid && !d.platform;
+}
+
+/** CanHit 循环条件取反：当前格"可穿"才继续走（cs:477） */
+function passable(st: Store, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  const t = st.type[i];
+  if (st.wire[i] & TS.WIRE_ACTUATED) return true;              // inActive → 可穿
+  if (t === 0) return true;                                    // !active → 可穿
+  const d = TILE_DEFS[t];
+  return !d || !d.solid || !!d.platform;                       // !tileSolid || tileSolidTop
+}
+
+/** 实体中心 tile 起止 + 原版钳制（cs:390-431） */
+function centerTiles(st: Store, x1: number, y1: number, w1: number, h1: number,
+  x2: number, y2: number, w2: number, h2: number): [number, number, number, number] {
+  let n1 = Math.floor((x1 + w1 / 2) / 16);
+  let n2 = Math.floor((y1 + h1 / 2) / 16);
+  let n3 = Math.floor((x2 + w2 / 2) / 16);
+  let n4 = Math.floor((y2 + h2 / 2) / 16);
+  if (n1 <= 1) n1 = 1; else if (n1 >= st.w) n1 = st.w - 1;
+  if (n3 <= 1) n3 = 1; else if (n3 >= st.w) n3 = st.w - 1;
+  if (n2 <= 1) n2 = 1; else if (n2 >= st.h - 40) n2 = st.h - 40;
+  if (n4 <= 1) n4 = 1; else if (n4 >= st.h - 40) n4 = st.h - 40;
+  return [n1, n2, n3, n4];
+}
+
+/** Collision.CanHit（cs:388-480）：起点矩形左上角像素坐标 + 尺寸 → 目标同构 */
+export function canHit(st: Store, x1: number, y1: number, w1: number, h1: number,
+  x2: number, y2: number, w2: number, h2: number): boolean {
+  let [num, num2, num3, num4] = centerTiles(st, x1, y1, w1, h1, x2, y2, w2, h2);
+  for (;;) {
+    const d5 = Math.abs(num - num3), d6 = Math.abs(num2 - num4);
+    if (num === num3 && num2 === num4) return true;
+    if (d5 > d6) {
+      num += num >= num3 ? -1 : 1;
+      if (isNull(st, num, num2 - 1) || isNull(st, num, num2 + 1)) return false;
+      if (fullSolid(st, num, num2 - 1) && fullSolid(st, num, num2 + 1)) return false;
+    } else {
+      num2 += num2 >= num4 ? -1 : 1;
+      if (isNull(st, num - 1, num2) || isNull(st, num + 1, num2)) return false;
+      if (fullSolid(st, num - 1, num2) && fullSolid(st, num + 1, num2)) return false;
+    }
+    if (isNull(st, num, num2)) return false;
+    if (!passable(st, num, num2)) return false;                // 落脚格整实心 → 阻挡
+  }
+}
+
+/** Collision.CanHitLine（cs:590-785）：分数步进逐格扫描，ANY 整实心即阻挡 */
+export function canHitLine(st: Store, x1: number, y1: number, w1: number, h1: number,
+  x2: number, y2: number, w2: number, h2: number): boolean {
+  const [num, num2, num3, num4] = centerTiles(st, x1, y1, w1, h1, x2, y2, w2, h2);
+  const d5 = Math.abs(num - num3), d6 = Math.abs(num2 - num4);
+  if (d5 === 0 && d6 === 0) return true;
+  let stepX = 1, stepY = 1;                                   // num7/num8
+  if (d5 === 0) stepX = 0;
+  else if (d6 === 0) stepY = 0;
+  else if (d5 > d6) stepX = d5 / d6;
+  else stepY = d6 / d5;
+  let accX = 0, accY = 0;                                     // num9/num10
+  let phase = num2 < num4 ? 2 : 1;                            // num11：2=先行 X 步
+  let remX = Math.floor(d5), remY = Math.floor(d6);           // num12/num13
+  const sx = Math.sign(num3 - num), sy = Math.sign(num4 - num2);
+  let cx = num, cy = num2;
+  let done = false, lastSingle = false;                       // flag / flag2
+  for (;;) {
+    if (phase === 2) {
+      accX += stepX;
+      const steps = Math.floor(accX);
+      accX -= steps;
+      for (let j = 0; j < steps; j++) {
+        if (isNull(st, cx, cy - 1) || isNull(st, cx, cy) || isNull(st, cx, cy + 1)) return false;
+        if (plainSolid(st, cx, cy - 1) || plainSolid(st, cx, cy + 1) || plainSolid(st, cx, cy)) return false;
+        if (remX === 0 && remY === 0) { done = true; break; }
+        cx += sx; remX--;
+        if (remX === 0 && remY === 0 && steps === 1) lastSingle = true;
+      }
+      if (remY !== 0) phase = 1;
+    } else {
+      accY += stepY;
+      const steps = Math.floor(accY);
+      accY -= steps;
+      for (let i = 0; i < steps; i++) {
+        if (isNull(st, cx - 1, cy) || isNull(st, cx, cy) || isNull(st, cx + 1, cy)) return false;
+        if (plainSolid(st, cx - 1, cy) || plainSolid(st, cx + 1, cy) || plainSolid(st, cx, cy)) return false;
+        if (remX === 0 && remY === 0) { done = true; break; }
+        cy += sy; remY--;
+        if (remX === 0 && remY === 0 && steps === 1) lastSingle = true;
+      }
+      if (remX !== 0) phase = 2;
+    }
+    if (isNull(st, cx, cy)) return false;
+    if (plainSolid(st, cx, cy)) return false;
+    if (done || lastSingle) return true;
+  }
+}

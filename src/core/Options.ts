@@ -14,6 +14,7 @@ export interface OptionsData {
   smartBlocksEnabled: boolean;         // SmartBlocksEnabled（默认 true）
   smartHoldCanReleaseMidUse: boolean;  // SmartCursorHoldCanReleaseMidUse（默认 true）
   backgrounds: boolean;                // Main.BackgroundEnabled（Main.cs:790，config.json 持久化；默认 true）
+  swayInWind: boolean;                 // Main.SettingsEnabled_TilesSwayInWind（图块在风中摆动；默认 true）
 }
 
 const KEY = 'sandboxworld.options';
@@ -30,6 +31,7 @@ export class OptionsStore {
     smartBlocksEnabled: true,
     smartHoldCanReleaseMidUse: true,
     backgrounds: true,
+    swayInWind: true,
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];

@@ -253,6 +253,9 @@ export function drawTreeCell(
   sheet = 5,
   foliageOnly = false,
   trees?: TreeStyleData,
+  /** 风摆动值（GetWindCycle 树相位钟，WindSway.ts 注入；0=静态，烘焙路径不传）。
+   *  偏移/旋转按原版 DrawTrees :8277-8460：树冠 ±2px/0.08rad、树枝 ±0.06rad */
+  sway = 0,
 ): void {
   const style = TREE_SHEET_STYLES[sheet] ?? 0;
   // 棕榈树（tile 323）：树冠帧藏在树干列内（frameX 88-132，无独立标记格）。
@@ -281,8 +284,20 @@ export function drawTreeCell(
       // 底部锚定居中 + X 偏移 = frameY【像素·有符号】（原版 dest.X += V*zoom/16，
       // zoom=16 即 V 像素；65534 = -2 的 u16 回绕）
       const leanCrown = fy >= 32768 ? fy - 65536 : fy;
-      ctx.drawImage(img15, sx15, sy15, 80, 80,
-        px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
+      // 风摆（原版 :8423-8457 case 323：off ×2/|×2|、rot 0.08、绕底部中心）
+      if (sway !== 0) {
+        const dx15 = px + (TILE - 80) / 2 + leanCrown + sway * 2;
+        const dy15 = py + TILE - 80 + Math.abs(sway) * 2;
+        ctx.save();
+        ctx.translate(dx15 + 40, dy15 + 80);
+        ctx.rotate(sway * 0.08);
+        ctx.translate(-dx15 - 40, -dy15 - 80);
+        ctx.drawImage(img15, sx15, sy15, 80, 80, dx15, dy15, 80, 80);
+        ctx.restore();
+      } else {
+        ctx.drawImage(img15, sx15, sy15, 80, 80,
+          px + (TILE - 80) / 2 + leanCrown, py + TILE - 80, 80, 80);
+      }
       return;
     }
     // 干身（原版 GetTileDrawData case 323：20×20 顶锚定、X 居中 -2——向下溢出
@@ -350,7 +365,24 @@ export function drawTreeCell(
     if (anchor === 0) { dx = px + (TILE - sw) / 2; dy = py + TILE - sh; }
     else if (anchor === 1) { dx = px + TILE - sw; dy = py + (TILE - sh) / 2; }
     else { dy = py + (TILE - sh) / 2; }
-    ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+    if (sway !== 0) {
+      // 原版 DrawTrees 偏移/旋转（:8255-8428）：
+      //   顶冠(anchor0)  off=(2s, 2|s|)、rot=0.08s、绕 dest 底中
+      //   左枝(anchor1)  offX=(s>0?s:0)+2|s|、rot=0.06s、绕 dest+(40,24)
+      //   右枝(anchor2)  offX=(s<0?s:0)-2|s|、rot=0.06s、绕 dest+(0,30)
+      let offX = 0, offY = 0, rot = 0, pivOX = 0, pivOY = 0;
+      if (anchor === 0) { offX = sway * 2; offY = Math.abs(sway) * 2; rot = sway * 0.08; pivOX = sw / 2; pivOY = sh; }
+      else if (anchor === 1) { offX = (sway > 0 ? sway : 0) + Math.abs(sway) * 2; rot = sway * 0.06; pivOX = 40; pivOY = 24; }
+      else { offX = (sway < 0 ? sway : 0) - Math.abs(sway) * 2; rot = sway * 0.06; pivOX = 0; pivOY = 30; }
+      ctx.save();
+      ctx.translate(dx + offX + pivOX, dy + offY + pivOY);
+      ctx.rotate(rot);
+      ctx.translate(-(dx + offX + pivOX), -(dy + offY + pivOY));
+      ctx.drawImage(img, sx, sy, sw, sh, dx + offX, dy + offY, sw, sh);
+      ctx.restore();
+    } else {
+      ctx.drawImage(img, sx, sy, sw, sh, dx, dy, sw, sh);
+    }
     return;
   }
   if (foliageOnly) return; // 外扩遍只画树冠/树枝

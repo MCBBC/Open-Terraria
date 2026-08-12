@@ -1,6 +1,8 @@
 // Java Random 克隆(Terrarria1456/Terraria.Utilities/FastRandom.cs:7-88 一比一)。
 // 48 位 LCG:seed = (seed*25214903917 + 11) & (2^48-1);Next(bits) = seed >> (48-bits)。
 // 用于水波纹逐格随机(LightMap.Blur)与蜡烛/篝火闪烁(TileLightScanner)。
+// 注意：本文件是光照系统专用副本——世界生成侧（DesertHive 等）请用
+// src/core/rng.ts 的 FastRandom（同一原版类，带 Next(max)/NextDouble/WithModifier(x,y)）。
 const MULTIPLIER = 25214903917n;
 const ADD = 11n;
 const MASK = 0xffffffffffffn; // 2^48 - 1

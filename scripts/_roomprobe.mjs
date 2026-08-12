@@ -8,16 +8,13 @@
 // 7) 公开性过滤：非公开房不在列表、但码可查
 // 用法：node scripts/_roomprobe.mjs
 import puppeteer from 'puppeteer-core';
-import { spawn } from 'node:child_process';
+import { WebSocket, Writer, PROTO_MAGIC, PROTO_VER, Msg, makeTinySave, spawnServer } from './_netfake.mjs';
 
-const SERVER_DIR = new URL('../../server/', import.meta.url).pathname;
 const PORT = 7901; // ws
 const LOBBY = PORT + 1; // http
 
-// ---- 起 server ----
-const server = spawn('npx', ['tsx', 'src/index.ts', '--port', String(PORT)], {
-  cwd: SERVER_DIR, stdio: ['ignore', 'pipe', 'pipe'],
-});
+// ---- 起 server（detached 进程组：防"杀 npx 包装留 tsx 孤儿"——2026-08 实踩） ----
+const server = spawnServer(PORT);
 const serverLog = [];
 server.stdout.on('data', (d) => { const s = d.toString(); serverLog.push(s); if (s.includes('[dbg]')) process.stdout.write(s); });
 server.stderr.on('data', (d) => serverLog.push(d.toString()));
@@ -31,7 +28,7 @@ const waitServer = async () => {
 };
 if (!(await waitServer())) {
   console.log('FAIL: 服务器启动超时\n' + serverLog.slice(-10).join(''));
-  server.kill();
+  server.killGroup();
   process.exit(1);
 }
 console.log('server up');
@@ -78,6 +75,53 @@ try {
   check('公开房出现在列表（含保护标记）', !!listed && listed.protectTiles === true && listed.protectItems === true, JSON.stringify(listed ?? null));
   const codeRes = await fetch(`http://127.0.0.1:${LOBBY}/rooms/${created.code}`).then((r) => r.json());
   check('码校验可达', codeRes.ok === true && codeRes.protectTiles === true);
+
+  // ---- P0.1 /stats 观测端点 ----
+  const stats0 = await fetch(`http://127.0.0.1:${LOBBY}/stats`).then((r) => r.json());
+  check('/stats 可达（全局+逐房+字段齐）', stats0.ok === true && stats0.total && stats0.rooms
+    && 'sendDrops' in stats0.total && 'outKbS' in stats0.rooms[0] && 'stripHit' in stats0.rooms[0],
+    `rooms=${stats0.rooms?.length} total=${JSON.stringify(stats0.total)}`);
+  check('公开房列表含 maxPlayers（P0.2）', !!listed && typeof listed.maxPlayers === 'number' && listed.maxPlayers >= 2,
+    `maxPlayers=${listed?.maxPlayers}`);
+
+  // ---- P0.2 单房人数上限：maxPlayers=2 的房，第三个连接被 Kick('房间已满') ----
+  {
+    const tiny = await fetch(`http://127.0.0.1:${LOBBY}/rooms`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: '满员房', public: false, maxPlayers: 2, save: makeTinySave() }),
+    }).then((r) => r.json());
+    check('maxPlayers=2 房创建成功', !!tiny.ok && !!tiny.code, tiny.error ?? '');
+    if (tiny.ok) {
+      const results = await Promise.all([0, 1, 2].map((i) => new Promise((resolve) => {
+        const ws = new WebSocket(`ws://127.0.0.1:${PORT}/${tiny.code}`);
+        let settled = false;
+        const done = (v) => { if (!settled) { settled = true; try { ws.close(); } catch {} resolve(v); } };
+        ws.on('open', () => ws.send(new Writer(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(`满员${i}`).str('').finish()));
+        ws.on('message', (data) => {
+          let p = 0;
+          while (p + 3 <= data.length) {
+            const len = data.readUInt16LE(p);
+            if (data[p + 2] === Msg.PlayerSlot) return done({ slot: true });
+            if (data[p + 2] === Msg.Kick) {
+              let q = p + 3;
+              const n = data.readUInt16LE(q); q += 2;
+              return done({ kick: data.toString('utf8', q, q + n) });
+            }
+            if (len < 3) break;
+            p += len;
+          }
+        });
+        ws.on('close', () => done({ closed: true }));
+        ws.on('error', () => done({ err: true }));
+        setTimeout(() => done({ timeout: true }), 8000);
+      })));
+      const kicks = results.filter((r) => r.kick);
+      check('第三连接被拒（房间已满）', kicks.length === 1 && kicks[0].kick.includes('房间已满'),
+        JSON.stringify(results));
+      // 清房（释放 slot 给后续断言无关紧要——独立房间）
+      await fetch(`http://127.0.0.1:${LOBBY}/rooms/${tiny.code}?token=${encodeURIComponent(tiny.hostToken)}`, { method: 'DELETE' });
+    }
+  }
 
   // ---- A 房主进房 ----
   const hostUrl = `ws://127.0.0.1:${PORT}/${created.code}?token=${encodeURIComponent(created.hostToken)}`;
@@ -142,6 +186,39 @@ try {
     const seeB = await pageA.evaluate(() => [...window.__swGame.net.players.values()].filter((p) => p.active).length);
     const seeA = await pageB.evaluate(() => [...window.__swGame.net.players.values()].filter((p) => p.active).length);
     check('双端互见', seeB >= 1 && seeA >= 1, `A侧=${seeB} B侧=${seeA}`);
+
+    // ---- P1.1 AOI（玩家态）：B 传送 6000px 外（>1920×1.6 滞回外径）→ A 侧代理冻结 ----
+    const bHome = await pageB.evaluate(() => ({ x: window.__swGame.player.x, y: window.__swGame.player.y }));
+    await pageB.evaluate(async (home) => {
+      const g = window.__swGame;
+      const far = home.x + 6000;
+      for (let i = 0; i < 12; i++) {
+        g.player.x = far; g.player.vx = 0; g.player.vy = 0;
+        g.fixedUpdate(1 / 60); g.postUpdate();
+        await new Promise((r) => setTimeout(r, 70)); // 让 66ms 节流放行上报新位置
+      }
+    }, bHome);
+    await sleep(2500); // 越过 1.5s stale 冻结阈值
+    const frozen = await pageA.evaluate(() => {
+      const g = window.__swGame;
+      const rp = g.net.players.get(1);
+      const px = g.remotePlayerProxies.find((p) => p.__netSlot === 1);
+      return { age: performance.now() - (rp?.lastFresh ?? 0), inputX: px?.inputX ?? null, hasProxy: !!px };
+    });
+    check('AOI：B 出视野 → A 侧代理冻结（防幽灵行走）', frozen.hasProxy && frozen.age > 1500 && frozen.inputX === 0,
+      JSON.stringify(frozen));
+    // B 回到 A 身边 → 恢复接收
+    await pageB.evaluate(async (home) => {
+      const g = window.__swGame;
+      for (let i = 0; i < 12; i++) {
+        g.player.x = home.x; g.player.y = home.y; g.player.vx = 0; g.player.vy = 0;
+        g.fixedUpdate(1 / 60); g.postUpdate();
+        await new Promise((r) => setTimeout(r, 70));
+      }
+    }, bHome);
+    await sleep(1500);
+    const resumed = await pageA.evaluate(() => performance.now() - (window.__swGame.net.players.get(1)?.lastFresh ?? 0));
+    check('AOI：B 回视野 → 恢复接收 msg13', resumed < 1500, `age=${resumed.toFixed(0)}ms`);
 
     // ---- 破坏保护：B（非房主）tile op 被拒 + correction 回滚 ----
     const t0 = await pageB.evaluate(() => {
@@ -291,6 +368,10 @@ try {
     }
     check('NPC 快照→访客傀儡（msg23）', !!bNpc && bNpc.key === 'v_3' && bNpc.puppet === true, JSON.stringify(bNpc));
 
+    // P1.2 msg23 短码表（v4）：快照驱动 npcCodes 表填充（S→C 短码格式工作正常）
+    const codes = await pageB.evaluate(() => window.__swGame.net.npcCodes.size);
+    check('msg23 短码表填充（v4 短码格式生效）', codes >= 1, `npcCodes=${codes}`);
+
     // B 打击傀儡 → msg42 → 房主权威扣血
     if (bNpc) {
       const strike = await pageB.evaluate(async (id) => {
@@ -312,6 +393,36 @@ try {
       await sleep(600);
       const bHp = await pageB.evaluate((id) => window.__swGame.netNpcPuppets.get(id)?.e.hp ?? -1, npcPos.id);
       check('傀儡 hp 随快照收敛', bHp === hostHp, `B=${bHp} host=${hostHp}`);
+
+      // ---- P1.1 AOI（NPC 态）：B 远离 → msg23 停发 → 傀儡 300 tick 清扫；回来自动重建 ----
+      const bHome2 = await pageB.evaluate(() => ({ x: window.__swGame.player.x, y: window.__swGame.player.y }));
+      await pageB.evaluate(async (home) => {
+        const g = window.__swGame;
+        const far = home.x + 6000;
+        for (let i = 0; i < 12; i++) {
+          g.player.x = far; g.player.vx = 0; g.player.vy = 0;
+          g.fixedUpdate(1 / 60); g.postUpdate();
+          await new Promise((r) => setTimeout(r, 70));
+        }
+      }, bHome2);
+      await sleep(6500); // 300 tick(5s) 傀儡清扫 + 余量
+      const pupFar = await pageB.evaluate(() => window.__swGame.netNpcPuppets.size);
+      check('AOI：B 出视野 → NPC 傀儡被清扫', pupFar === 0, `puppets=${pupFar}`);
+      await pageB.evaluate(async (home) => {
+        const g = window.__swGame;
+        for (let i = 0; i < 12; i++) {
+          g.player.x = home.x; g.player.y = home.y; g.player.vx = 0; g.player.vy = 0;
+          g.fixedUpdate(1 / 60); g.postUpdate();
+          await new Promise((r) => setTimeout(r, 70));
+        }
+      }, bHome2);
+      // 回视野后房主 2s 兜底全量重播（AOI 重入自愈路径：短码已知集过期 → 全量带 key）
+      let pupBack = 0;
+      for (let i = 0; i < 8 && pupBack < 1; i++) {
+        await sleep(1000);
+        pupBack = await pageB.evaluate(() => window.__swGame.netNpcPuppets.size).catch(() => 0);
+      }
+      check('AOI：B 回视野 → NPC 傀儡重建（2s 兜底重入）', pupBack >= 1, `puppets=${pupBack}`);
     }
 
     // 房主掉落物 → B 傀儡 → B 拾取 → take 上报 → 房主真身移除
@@ -429,6 +540,12 @@ try {
     check('加入公告（"X已加入。"）', !!joinMsg, JSON.stringify(joinMsg ?? null));
     check('离开公告（"X已离开。"，强制断线触发）', !!leaveMsg, JSON.stringify(leaveMsg ?? null));
     check('公告颜色 (255,240,20)', !!joinMsg && joinMsg[1] === 255 && joinMsg[2] === 240 && joinMsg[3] === 20);
+
+    // ---- P2.1 section 编码缓存：重连重发出生点条带应命中缓存 ----
+    const statsR = await fetch(`http://127.0.0.1:${LOBBY}/stats`).then((r) => r.json());
+    const roomR = (statsR.rooms ?? []).find((rm) => rm.code === created.code);
+    check('strip 编码缓存命中（重连场景）', !!roomR && roomR.stripHit > 0,
+      `hit=${roomR?.stripHit} miss=${roomR?.stripMiss}`);
   }
 
   // ---- 公开性过滤：非公开房不在列表、码可查 ----
@@ -490,6 +607,36 @@ try {
   check('进世界后进度遮罩已消失（不再卡"接收世界数据"）', overlay.visible === false, JSON.stringify(overlay));
   const cOk = await pageC.evaluate(() => ({ active: window.__swGame.net.active, isHost: window.__swGame.net.policy.isHost }));
   check('UI 进房 policy 正确（访客）', cOk.active === true && cOk.isHost === false, JSON.stringify(cOk));
+
+  // ---- P3.1 持久化：SIGTERM 落盘 → --world 重启 → 常驻房可查 ----
+  {
+    const { existsSync } = await import('node:fs');
+    const path = await import('node:path');
+    const { ROOT } = await import('./_netfake.mjs');
+    const worldFile = path.join(ROOT, 'server', 'worlds', `room-${created.code}.json`);
+    server.killGroup(); // SIGTERM → 优雅落盘退出
+    let exited = false;
+    for (let i = 0; i < 100 && !exited; i++) { await sleep(100); exited = server.exitCode !== null; }
+    check('SIGTERM 优雅退出', exited, `exitCode=${server.exitCode}`);
+    check('SIGTERM 落盘世界档（room-<code>.json）', existsSync(worldFile), worldFile);
+    if (existsSync(worldFile)) {
+      const server2 = spawnServer(7905, ['--world', worldFile]);
+      const log2 = [];
+      server2.stdout.on('data', (d) => log2.push(d.toString()));
+      server2.stderr.on('data', (d) => log2.push(d.toString()));
+      let up2 = false;
+      for (let i = 0; i < 100 && !up2; i++) { await sleep(200); up2 = log2.join('').includes('ws://0.0.0.0:7905'); }
+      check('--world 重启成功（常驻房）', up2, log2.slice(-3).join('').slice(0, 200));
+      if (up2) {
+        const list3 = await fetch('http://127.0.0.1:7906/rooms').then((r) => r.json()).catch(() => null);
+        const persisted = (list3?.rooms ?? []).length >= 1;
+        check('常驻房出现在新服列表（世界存活）', persisted, JSON.stringify(list3?.rooms?.map((r) => r.code) ?? null));
+        server2.killGroup();
+      } else {
+        server2.killGroup();
+      }
+    }
+  }
 } catch (e) {
   // 瞬态异常（vite HMR 全页 reload / context destroyed——开发期并行改码触发）：
   // 标记整轮重试（finally 清理端口后由尾部 respawn）；非瞬态如实抛出
@@ -503,7 +650,7 @@ try {
     throw e;
   }
 } finally {
-  server.kill();
+  server.killGroup();
   await browser.close();
 }
 console.log(`\n${pass} passed, ${fail} failed`);

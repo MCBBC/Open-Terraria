@@ -545,7 +545,7 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     e.ai0 = 13; e.ai1 = 0; e.ai2 += 1;
     e.vx /= 4; e.vy /= 4;
   }
-  if (player) e.facing = player.cx > e.cx ? 1 : -1;
+  if (player) e.facing = e.seekDirX(player);
   if (!player) {
     // 目标彻底失效:上方已强制 ai0=13,此处推进淡出自毁(:47236/:47264-47271)
     e.spawnAlpha = Math.min(254, e.spawnAlpha + 5);

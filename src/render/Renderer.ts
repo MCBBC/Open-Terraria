@@ -42,6 +42,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
+import { drawWindSwayTiles } from './WindSway';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
@@ -558,6 +559,13 @@ export class Renderer {
         if (!chunkVisible(cx, cy)) continue;
         ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
       }
+    }
+
+    // 2c''.5 风摆动图层（原版 TileDrawing 特殊绘制路径）：摆动图块已摘出烘焙，
+    // 此处逐帧动态绘制（草/药草/藤蔓/吊挂植物/树冠树枝；世界变换内世界坐标，
+    // 光照合成在后自动受光）——渲染共享态 renderEnv.wind 已在 render() 顶部注入
+    if (this.atlas) {
+      drawWindSwayTiles(ctx, this.atlas, world, cam, z);
     }
 
     // 2c'. 导线覆盖层(原版画在水之上实体之下,Main.cs:46721;手持电路工具或 F7 时可见)

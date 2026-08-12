@@ -43,7 +43,9 @@ describe('爬墙蜘蛛形态互转（AI_003↔AI_040）', () => {
     const e = Enemy.fromVanilla(165, 30 * 16, 26 * 16)!;
     const hooks = fakeHooks(w) as never;
     // 有玩家在上方 → 爬墙追击（有视线分支伺服上升）
-    (hooks as unknown as { player: { cx: number; cy: number; dead: boolean } }).player = {
+    // （canSeePlayer 走 Collision.CanHit 实体矩形语义,假玩家须带 x/y/w/h）
+    (hooks as unknown as { player: { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean } }).player = {
+      x: 30 * 16 - 10, y: 22 * 16 - 21, w: 20, h: 42,
       cx: 30 * 16, cy: 22 * 16, dead: false,
     } as never;
     const y0 = e.y;

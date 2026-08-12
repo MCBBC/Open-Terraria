@@ -81,9 +81,18 @@ describe('小动物 AI 家族', () => {
   it('蝴蝶 356（aiStyle 65）：垂直避障——贴地出生被弹起（洞穴内无上方干扰）', () => {
     const { w, hooks } = critterWorld(null);
     for (let x = 20; x <= 60; x++) w.store.setTileSilent(x, 30, 2); // 顶棚（30 格内 → aboveClear 不触发）
-    const e = Enemy.fromVanilla(356, 40 * 16, 58 * 16)!; // 地板上方 2 格（下 4 格内有实心）
-    for (let t = 0; t < 150; t++) e.fixedUpdate(1 / 60, hooks);
-    expect(e.cy).toBeLessThan(58 * 16); // belowSolid 反向 → 上飘离开地面
+    // AI_065 漂移目标重选用 Math.random——不种子化则随机游走方向随机，
+    // "150tick 后必须上飘"的硬阈值天生 flaky（同萤火虫 355 案）
+    let seed = 54321;
+    const realRandom = Math.random;
+    Math.random = () => { seed = (seed * 1103515245 + 12345) & 0x7fffffff; return seed / 0x80000000; };
+    try {
+      const e = Enemy.fromVanilla(356, 40 * 16, 58 * 16)!; // 地板上方 2 格（下 4 格内有实心）
+      for (let t = 0; t < 150; t++) e.fixedUpdate(1 / 60, hooks);
+      expect(e.cy).toBeLessThan(58 * 16); // belowSolid 反向 → 上飘离开地面
+    } finally {
+      Math.random = realRandom;
+    }
   });
 
   it('蠕虫 357（aiStyle 66）：静止/蠕动循环、蠕动速度 0.2', () => {

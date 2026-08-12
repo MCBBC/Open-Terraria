@@ -190,6 +190,9 @@ export function runResetAndTerrain(cfg: { width: number; height: number; seedTex
 
 function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   const gs = newGenState(store.w, store.h);
+  // 世界种子 int——DesertHive 的 FastRandom(seed).WithModifier(57005) 主种子
+  // （DesertHive.cs:253，与 genRand 完全独立的第二条随机流）
+  gs.seed = translateSeed(cfg.seedText);
   // ===== Reset 掷骰（1456 WorldGen.generateWorld cs:11159-11472 逐行 1:1）=====
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。

@@ -45,7 +45,7 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
         // 泥/石保持原类型 → 后续 pass 读到错类型（幽灵一致性分叉）
         if (st.wall[i] === 2) st.wall[i] = 40;
         const t = st.type[i];
-        if (t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;
+        if (t === 0 || t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;
         else if (t === T.STONE) st.type[i] = ICE;
       } else {
         thickness += rng.int(-3, 3);
@@ -60,7 +60,7 @@ export function runIceBiomePass(st: TileStore, rng: RNG, gs: GenState): void {
           // 同上：不判 active（幽灵格一并转化）
           if (st.wall[i] === 2) st.wall[i] = 40;
           const t = st.type[i];
-          if (t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;
+          if (t === 0 || t === T.DIRT || t === T.GRASS || t === CORRUPT_GRASS || t === CLAY || t === T.SAND) st.type[i] = T.SNOW;
           else if (t === T.STONE) st.type[i] = ICE;
         }
       }

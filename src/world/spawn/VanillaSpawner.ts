@@ -537,7 +537,8 @@ export class VanillaSpawner {
   /** GetSpawnRate（L383-668，单机非 remix 分支）：
    *  defaultSpawnRate=600 / defaultMaxSpawns=5（L6108/6110）。
    *  深度带/昼夜/附近怪分层/水蜡烛修正 + clamp（L655-662）。
-   *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed/隐身/仙女未实现（无对应系统）
+   *  血月/日食/南瓜月（月事件覆盖见函数首分支）/和平蜡烛/向日葵/calmed 均已实现（:581-642）；
+   *  隐身/仙女倍率未实现（依赖 stealth/luck 子系统，登记 docs/spawn-parity-gaps.md）。
    *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
@@ -1524,8 +1525,8 @@ export class VanillaSpawner {
     }
     // ---- 沙漠地表（L3859-3928，沙尘暴外简化为沙漠 tile 段）----
     // 原版 L3859 沙地族 = 53 沙/112 黑檀沙/116 珍珠沙/234 猩红沙/397 硬化沙/396 沙岩/404 化石；
-    // L4397：黄沙 && 1/5 && Spawning_SandstoneCheck（沙岩邻接未接 → 近似恒真）→ 蚁狮 69，
-    // 否则秃鹫 61
+    // L4374：黄沙 && 1/5 && Spawning_SandstoneCheck（spawningSandstoneCheck :1887 已 1:1 接入，
+    // 旧注"近似恒真"为过期残留）→ 蚁狮 69，否则秃鹫 61
     if (t === T.SAND || t === T.HARDENED_SAND || t === T.SANDSTONE || t === T.FOSSIL) {
       if (!hardMode) {
         // L4374：!waterTile && 黄沙 53 && 1/5 && Spawning_SandstoneCheck（落脚向下 8 行、

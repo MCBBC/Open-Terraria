@@ -5,6 +5,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
+import { canHit } from '../physics/LineOfSight';
 import { MagicProj } from './MagicProj';
 import { Arrow } from './Arrow';
 
@@ -320,16 +321,11 @@ export function seek(e: Enemy, tx: number, ty: number, spd: number, acc: number)
   e.vx = accelTo(e.vx, (dx / d) * spd, acc);
   e.vy = accelTo(e.vy, (dy / d) * spd, acc);
 }
-/** 直线视线(原版 Collision.CanHit 近似:8px 采样无实心块) */
+/** 直线视线(Collision.CanHit 1:1,Collision.cs:388-480:逐 tile 扫描,半砖/坡面/
+ *  平台/已致动/开门态不阻挡,"两邻格均整实心"=被夹住 → 无视线;8px 采样近似已退役)。
+ *  入参为像素点对(w=h=0 → 中心=该点);原版 CanHitLine 场景见 physics/LineOfSight */
 export function losClear(game: GameHooks, x0: number, y0: number, x1: number, y1: number): boolean {
-  const st = game.world.store;
-  const steps = Math.max(1, Math.ceil(Math.hypot(x1 - x0, y1 - y0) / 8));
-  for (let i = 1; i < steps; i++) {
-    const t = i / steps;
-    const tx = Math.floor((x0 + (x1 - x0) * t) / TILE), ty = Math.floor((y0 + (y1 - y0) * t) / TILE);
-    if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return false;
-  }
-  return true;
+  return canHit(game.world.store, x0, y0, 0, 0, x1, y1, 0, 0);
 }
 /** Boss 弹幕:直飞(grav 0)+ 原版 Projectile_N 贴图。
  *  hostile=true(原版 Projectile.hostile):命中玩家结算——所有走本出口的弹都是

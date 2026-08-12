@@ -10,6 +10,7 @@ import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { vanillaNpc, vanillaSoundName, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
@@ -36,6 +37,7 @@ import {
   moonLordFreeEyeAI, moonLeechAI, cultistTabletAI, lunaticDevoteeAI,
   cultistArcherStandbyAI, cultistArcherWake, phantomAI, bigMimicAI,
   mothronAI, mothronEggAI, babyMothronAI, graniteElementalAI,
+  starCellAI, smallStarCellAI, flowInvaderAI, nebulaFloaterAI, solarSlimeAI,
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
@@ -278,9 +280,22 @@ export class Enemy extends Entity {
   ichorT = 0;
   /** midas(72)：掉钱 ×1.1-1.5（NPC.cs:80424） */
   midasT = 0;
-  /** confused(31)：纳米药剂——AI 反向（近似：每秒翻转水平速度） */
+  /** confused(31)：纳米药剂/浸剂命中——buff 存量（秒）。语义见 {@link confused} */
   confusedT = 0;
-  private confuseFlip = 0;
+  /** 原版 confused 全局语义（NPC.TargetClosest 尾段 NPC.cs:78569-78572）：
+   *  `if (confused) direction *= -1;`——各 AI 族用 direction 决定水平移动方向，
+   *  因此 confused = 索敌的水平方向反向（directionY 不反转）。本仓各 AI 的
+   *  "TargetClosest"= 从玩家算 facing 的赋值点，统一走 {@link seekDirX} 应用反转；
+   *  直接用玩家坐标差算位移向量的族（AI_005 蜂群/AI_013 植物/AI_056 地牢之魂）
+   *  原版不读 direction，同样不反转（勿在这些族接 confused）。 */
+  get confused(): boolean { return this.confusedT > 0; }
+  /** TargetClosest + confused 反转（NPC.cs:78555-78572）：返回朝玩家的水平方向。
+   *  无玩家时保持现方向（原版 TargetClosest 无目标不重算） */
+  seekDirX(player: Player | null): number {
+    if (!player) return this.facing;
+    const raw = player.cx > this.cx ? 1 : -1;
+    return this.confused ? -raw : raw;
+  }
   /** 本 tick 实体点光（原版 Lighting.AddLight，Game 渲染前扫描落入光照引擎）；
    *  AI 每帧重写，null=不发光（萤火虫闪烁/发光蜗牛/魔化夜 crawler） */
   lightRGB: [number, number, number] | null = null;
@@ -469,14 +484,15 @@ export class Enemy extends Entity {
         case 26: this.chargerAI(game, p); break;                        // AI_026 独角兽/冲锋族（原版核）
         case 107: this.chargerAI(game, p, 1); break;                    // AI_107 ImprovedWalkers（0.07/±1.0 walker 档，NPC.145.cs:43153 引擎核同构）
         case 94: this.towerAI(game, p); break;                          // AI_094 星璇四塔（NPC.cs:41029-41443，核心 1:1）
-        // ---- 星璇塔四组专属怪 AI 一期近似（docs/event-lunar-pillars.md §4）----
-        // 74 穿心者（悬浮俯冲）→ AI_002 飘浮眼核；75 日耀骑手 → AI_003 战士核；
-        // 85 星细胞/星云头蟹、95 小星细胞、96 水流入侵者、99 日耀耀斑（漂浮追击族）→ AI_005 蜂群核；
-        // 97 星云悬浮脑（瞬移+弹幕）→ AI_008 法师核。二期按各自 AI_0XX 1:1 补齐
-        // （74/75 已由火星批 bossAI_martian.ts 1:1 落位：388 无人机/418 Corite、
-        //   390 骑手/392-394 飞碟部件/416 日耀骑手——见下方火星族分发）
-        case 85: case 95: case 96: case 99: this.swarmerAI(game, p); break;
-        case 97: this.casterAI(game, p); break;
+        // ---- 星璇塔四组专属怪 1:1（bossAI_lunar_misc.ts；docs/event-lunar-pillars.md §4）----
+        // 74 穿心者 418 / 75 日耀骑手 416 已由火星批 bossAI_martian.ts 落位（见下方
+        // 火星族分发）；85/95/96/97/99 五族 1:1 内核在 lunar_misc（一期近似档已退役）。
+        // 勘误：NPC 408 无 NewNPC 调用源（docs §4"408 由投射物 539 生成"不成立）。
+        case 85: starCellAI(this, game, p); break;                    // AI_085 星细胞 405/星云头蟹 421（六态寻路+吸附）
+        case 95: smallStarCellAI(this, game, p); break;               // AI_095 小星细胞 406（300t 长大 Transform 405）
+        case 96: flowInvaderAI(this, game, p); break;                 // AI_096 水流入侵者 407(/408)（悬顶伺服+甩 539）
+        case 97: nebulaFloaterAI(this, game, p); break;               // AI_097 星云悬浮脑 420（瞬移+环绕球 574→弹 576）
+        case 99: solarSlimeAI(this, game, p); break;                  // AI_099 日耀黏液 519（坠落→落地 5t 自爆）
         // ---- 月事件（南瓜月/霜月）Boss 族 1:1（bossAI_moon_events.ts）----
         case 57: mourningWoodAI(this, game, p); break;                  // AI_057 悲木 325/常世吼 344（cs:32937 悬浮树怪+分阶段弹幕）
         case 58: pumpkingAI(this, game, p); break;                       // AI_058 南瓜王 327（cs:33246 悬浮/俯冲+生双刃）
@@ -595,12 +611,9 @@ export class Enemy extends Entity {
     }
     if (this.ichorT > 0) this.ichorT -= dt;
     if (this.midasT > 0) this.midasT -= dt;
-    if (this.confusedT > 0) {
-      this.confusedT -= dt;
-      // 纳米（confused 近似）：每 60t 翻转水平速度方向（原版 AI 反向 :29811）
-      this.confuseFlip += dt;
-      if (this.confuseFlip >= 1) { this.confuseFlip = 0; this.vx *= -1; }
-    }
+    // confused（buff 31）存量倒数；反向语义在各 AI 的索敌点（seekDirX）按
+    // 原版 TargetClosest :78569 应用——不再对 vx 做周期翻转（旧近似已移除）
+    if (this.confusedT > 0) this.confusedT -= dt;
 
     // 接触伤害（带上攻击者引用，供荆棘反伤）。damage=0（小动物等友好生物）不触发——
     // 否则 damagePlayer(0) 仍会击退/闪红，表现为"兔子撞我有攻击性"
@@ -709,9 +722,9 @@ export class Enemy extends Entity {
     }
     // ai[2] 卡墙冷却期间不索敌（L61938）
     if (this.ai2 > 0) this.ai2--;
-    // 激愤时索敌：direction 朝玩家；被动时保持现方向
+    // 激愤时索敌：direction 朝玩家；被动时保持现方向（confused 反向走 seekDirX）
     if (flag3 && this.ai2 === 0 && player) {
-      this.facing = player.cx > this.cx ? 1 : -1;
+      this.facing = this.seekDirX(player);
     }
     // 蚱蜢被动档（cs:61479）：无激愤时走"走路档"——0.2 慢爬不进跳循环
     if (grasshopper && !flag3) {
@@ -868,8 +881,8 @@ export class Enemy extends Entity {
       }
       if (this.facing === 0) this.facing = 1;
     } else if (player) {
-      // 方向：朝玩家（无玩家则保持）
-      this.facing = player.cx > this.cx ? 1 : -1;
+      // 方向：朝玩家（无玩家则保持）；confused 反向（TargetClosest :78569）
+      this.facing = this.seekDirX(player);
     }
     const dir = this.facing;
     // 前方探测点（L24561-24562）：体中心前 15px、脚底上 15px
@@ -935,7 +948,8 @@ export class Enemy extends Entity {
     if (this.vanillaId === 198 && this.hp <= this.maxHp * 0.55) {
       this.tryTransformTo(199, st);
     }
-    // 地面摩擦（原版经由 SlopeCollision 的速度衰减近似）
+    // 地面摩擦（依赖 slope 坡面碰撞系统未实装——TileStore.slope 已存数据但
+    // Collision.SlopeCollision 逐面摩擦未接，此处 0.85 衰减为性能近似，登记待接）
     if (this.onGround) this.vx *= 0.85;
     // ---- 战士族远程攻击（NPC.cs:59464-60085：落地 + 视线 + 距离<射程 → 举枪蓄力，
     // 半程发射；justHit 打断蓄力 cs:59489。覆盖入侵弓手 + 地牢/沙漠常驻射击怪）----
@@ -947,7 +961,7 @@ export class Enemy extends Entity {
       if (this.ai3 > 0) {           // 瞄准中：减速 + 半程发射
         if (this.ai0 > 0) this.ai0--;
         this.vx *= 0.9;
-        this.facing = player.cx > this.cx ? 1 : -1;
+        this.facing = this.seekDirX(player);
         if (this.ai0 === fireAt && this.ai0 > 0) {
           const ox = this.cx, oy = this.cy + (R.oy ?? 0);
           const shots = R.burst ?? 1;
@@ -1149,7 +1163,7 @@ export class Enemy extends Entity {
     if (dist === 0) { sx = this.vx; sy = this.vy; }
     else { sx = (tx / dist) * maxSpd; sy = (ty / dist) * maxSpd; }
     // direction（TargetClosest 语义：朝目标水平方向；死亡保持）
-    if (alive) this.facing = player!.cx > this.cx ? 1 : -1;
+    if (alive) this.facing = this.seekDirX(player!);
     const los = alive ? this.canSeePlayer(st, player!) : false;
     if (!los) {
       // 无视线：振荡漂移（:29833-29878）——ai[0] 驱动的 X/Y 交替扰动 + 微弱趋目标分量
@@ -1207,17 +1221,10 @@ export class Enemy extends Entity {
     }
   }
 
-  /** Collision.CanHit 近似：路径上被任一实心块阻挡即无视线（背景墙不阻挡） */
+  /** Collision.CanHit 1:1（Collision.cs:388-480）：实体矩形 → 逐 tile 扫描。
+   *  半砖/坡面/平台/已致动/开门态不阻挡；"两邻格均为整实心"= 被夹住 → 无视线 */
   private canSeePlayer(st: GameHooks['world']['store'], p: Player): boolean {
-    const dx = p.cx - this.cx, dy = p.cy - this.cy;
-    const steps = Math.ceil(Math.hypot(dx, dy) / (TILE / 2));
-    for (let s = 1; s < steps; s++) {
-      const lx = Math.floor((this.cx + (dx * s) / steps) / TILE);
-      const ly = Math.floor((this.cy + (dy * s) / steps) / TILE);
-      if (!st.inBounds(lx, ly)) return false;
-      if (st.isSolid(lx, ly)) return false;
-    }
-    return true;
+    return canHit(st, this.x, this.y, this.w, this.h, p.x, p.y, p.w, p.h);
   }
 
   /** AI_042 失落女孩 1:1（NPC.cs:30281-30310）：伪装成无害 NPC 静止站立（无移动逻辑，
@@ -1249,7 +1256,7 @@ export class Enemy extends Entity {
    *  无任何移动）；376 睡渔夫/579 醉酒酒保水上漂流（wet → vy=-0.4 上浮 + 缓漂）。
    *  解救（对话 Transform 成对应城镇 NPC）在 TownNPC 侧；Enemy 侧仅防御性兜底 */
   private boundNPCAI(game: GameHooks, player: Player | null) {
-    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    if (player && !player.dead) this.facing = this.seekDirX(player);
     this.vx *= 0.93;
     if (Math.abs(this.vx) < 0.1) this.vx = 0;
     const st = game.world.store;
@@ -1292,7 +1299,7 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
-    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    if (player && !player.dead) this.facing = this.seekDirX(player);
     const dir = this.facing;
     if (dir === -1 && this.vx > -3) {
       this.vx -= 0.1;
@@ -1400,10 +1407,11 @@ export class Enemy extends Entity {
    *  200px 盒 / life<max / 有速度 → 显形；ai[0]=1 跳跃循环——落地 ai[2] 计数，
    *  不足 12（首跳）/20 帧 vx×0.9 蓄力，然后小跳（vx=dir*3.5, vy=-4）×2 →
    *  第三跳大跳（vx=dir*2.5, vy=-8）清零循环；空中朝 dir 补 |vx|≥1（±0.1/帧）。
-   *  341 礼物宝箱怪仅雪月索敌（flag36）——雪月未引入，保持伪装不索敌近似 */
+   *  341 礼物宝箱怪仅雪月索敌（flag36 = snowMoon，NPC.cs SpawnNPC 传入）——雪月已落地
+   *  （MoonEvent），索敌门按 world.moonEvent.kind===1（霜月）判定 */
   private mimicAI(game: GameHooks, player: Player | null) {
     if (this.ai0 < 0) this.ai0 = 0;
-    const flag36 = this.vanillaId === 341;
+    const flag36 = this.vanillaId === 341 && game.world.moonEvent.kind === 1;
     if (this.ai0 === 0) {
       // 同 AI_017：唤醒判定用重力前速度（站立态 vy==0 不误触发）
       const preVy = this.vy;
@@ -1418,7 +1426,7 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       return;
     }
-    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    if (player && !player.dead) this.facing = this.seekDirX(player);
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround && this.vy === 0) {
@@ -1566,7 +1574,7 @@ export class Enemy extends Entity {
     if (this.ai2 === 0) { this.ai0 = -100; this.ai2 = 1; }
     else if (this.ai2 > 1) this.ai2 -= 1;
     const derpling = this.vanillaId === 177;
-    if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+    if (player && !player.dead) this.facing = this.seekDirX(player);
     const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -1672,7 +1680,7 @@ export class Enemy extends Entity {
   private dungeonSpiritAI(_game: GameHooks, player: Player | null) {
     let ex: number, ey: number;
     if (player && !player.dead) {
-      this.facing = player.cx > this.cx ? 1 : -1;
+      this.facing = this.seekDirX(player);
       const d = Math.hypot(player.cx - this.cx, player.cy - this.cy) || 1;
       ex = ((player.cx - this.cx) / d) * 12;
       ey = ((player.cy - this.cy) / d) * 12;
@@ -1714,7 +1722,8 @@ export class Enemy extends Entity {
       dirY = -1;
       cx = 4; cy = 2.5;
     } else {
-      dirX = player.cx > this.cx ? 1 : -1;
+      // TargetClosest（confused 反转 X；directionY 原版不反转）
+      dirX = this.seekDirX(player);
       dirY = player.cy > this.cy ? 1 : -1;
       const rage = this.vanillaId === 133 && this.hp < this.maxHp * 0.5;
       cx = rage ? 6 : 4;
@@ -2115,7 +2124,7 @@ export class Enemy extends Entity {
     if (!this.aiInit) { this.aiInit = true;
       if ((game as unknown as { player?: Player }).player) {
         const p = (game as unknown as { player: Player }).player;
-        this.facing = p.cx > this.cx ? 1 : -1;
+        this.facing = this.seekDirX(p);
       }
       this.dirY = 1;
       this.ai0 = 1;
@@ -2149,7 +2158,7 @@ export class Enemy extends Entity {
     if (this.stuckT >= 30) { this.facing *= -1; this.stuckT = 0; }
     if (player && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 200) {
       this.stuckT = 0;
-      this.facing = player.cx > this.cx ? 1 : -1;
+      this.facing = this.seekDirX(player);
     }
     const dir = this.facing;
     const accel = 0.07;
@@ -2281,7 +2290,7 @@ export class Enemy extends Entity {
   private swimAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
-    if (player) this.facing = player.cx > this.cx ? 1 : -1;
+    if (player) this.facing = this.seekDirX(player);
     const dirX = player ? this.facing : (this.vx >= 0 ? 1 : -1);
     const dirY = player ? (player.cy > this.cy ? 1 : -1) : 0;
     const ara = this.vanillaId === 157;
@@ -2870,7 +2879,7 @@ export class Enemy extends Entity {
       if (player && !player.dead && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 250) this.ai2 = 1;
     } else {
       // 追随飞（cs:48453 状态 1）
-      if (player && !player.dead) this.facing = player.cx > this.cx ? 1 : -1;
+      if (player && !player.dead) this.facing = this.seekDirX(player);
       const target = this.facing * 4.5;
       this.vx += Math.sign(target - this.vx) * 0.1;
       const aheadX = Math.floor((this.cx + this.facing * 24) / TILE);
@@ -3192,7 +3201,7 @@ export class Enemy extends Entity {
     this.vx *= 0.9; this.vy *= 0.9;
     this.x += this.vx; this.y += this.vy; // noGravity 悬浮直移
     if (!player) return;
-    this.facing = player.cx > this.cx ? 1 : -1;
+    this.facing = this.seekDirX(player);
     // 传送计时（原版阈值 ~200 tick；用 aiT 累计）
     if (this.aiT > 200) {
       const st = game.world.store;

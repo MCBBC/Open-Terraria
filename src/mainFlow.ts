@@ -326,7 +326,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   /** 探针桥：当前世界序列化后向中央服务器建房（返回 {code, hostToken}） */
-  async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean } = {}): Promise<{ code: string; hostToken: string; error?: string }> {
+  async function createRoom(addr: string, opts: { name?: string; public?: boolean; protectTiles?: boolean; protectItems?: boolean; maxPlayers?: number } = {}): Promise<{ code: string; hostToken: string; error?: string }> {
     try {
       if (!game) return { error: 'no game', code: '', hostToken: '' };
       const { saveGame } = await import('./save/SaveFile');
@@ -349,6 +349,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
           public: opts.public ?? true,
           protectTiles: !!opts.protectTiles,
           protectItems: !!opts.protectItems,
+          maxPlayers: opts.maxPlayers,
           save: json,
         }),
       });

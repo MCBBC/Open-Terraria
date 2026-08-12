@@ -36,9 +36,9 @@ const ctx: any = {
   globalAlpha: 1,
   imageSmoothingEnabled: true,
   save() {}, restore() {},
-  translate(x, y) { this._tx = x; this._ty = y; },
+  translate(x: number, y: number) { this._tx = x; this._ty = y; },
   scale() { this._flip = true; },
-  drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh) {
+  drawImage(img: unknown, sx: number, sy: number, sw: number, sh: number, dx: number, dy: number, dw: number, dh: number) {
     // 还原镜像:drawFlipped 先 translate(px+dw,py) 再 scale(-1,1),画于 (0,0,dw,dh)
     let px = dx, py = dy;
     if (this._flip) { px = this._tx - dw; py = this._ty; }

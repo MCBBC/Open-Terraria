@@ -436,18 +436,20 @@ export class TrapShot extends Entity {
     // age 1 ↔ 原版 ai[0]==0（首帧 6 尘 216 + 1 gore）；age 2..11 ↔ ai[0] 1..10（2 尘 + 1/5 gore）；
     // age 12 ↔ ai[0]=11 > 10 → Kill。尘向上（speedY -2，velX×0.5，:49299-49305）；
     // gore 580-582（:49308-49312）以 2 粒亮水珠近似
+    if (this.age > 11) {
+      this.dead = true;
+      return;
+    }
     const burst = game.spawnBurst;
     if (!burst) return;
     if (this.age === 1) {
       burst(cx, cy, FW_DUST.d216_water, 6, 2, -Math.PI / 2, 0.9, { xMul: 0.5, life: 26, damp: 0.96 });
       burst(cx, cy, '#D8ECFA', 2, 2.5, -Math.PI / 2, 0.7, { life: 32, damp: 0.97 });
-    } else if (this.age <= 11) {
+    } else {
       burst(cx, cy, FW_DUST.d216_water, 2, 2, -Math.PI / 2, 0.9, { xMul: 0.5, life: 26, damp: 0.96 });
       if (Math.random() < 0.2) {
         burst(cx, cy, '#D8ECFA', 2, 2.5, -Math.PI / 2, 0.7, { life: 32, damp: 0.97 });
       }
-    } else {
-      this.dead = true;
     }
   }
 

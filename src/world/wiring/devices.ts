@@ -712,7 +712,9 @@ export function deviceTable(w: Wiring, ctx: DeviceCtx, sheet: number, x: number,
       w.skipCell(num73, num72); w.skipCell(num73 + 1, num72);
       w.skipCell(num73, num72 + 1); w.skipCell(num73 + 1, num72 + 1);
       if (!w.checkMech(num73, num72, 30)) return true; // CheckMech 30（:1518-1520）
-      // LaunchRocketSmall：弹 415+rand(4)（红/绿/蓝/黄）、速度 (0,-8)、damage 0（:62213-62215）
+      // LaunchRocketSmall 的 frameX/frameY==18 再回退（WorldGen.cs:62210-62213）对电路路径是
+      // 空操作——num73/num72 已是 2×2 锚点（frameX/frameY==0），此处不再重复
+      // 弹 415+rand(4)（红/绿/蓝/黄）、速度 (0,-8)、damage 0（:62213-62215）
       ctx.shootProjectile(num73 * 16 + 16, num72 * 16 + 2, 0, -8, 0, 'fireworksBoxRocket', Math.floor(Math.random() * 4));
       return true;
     }

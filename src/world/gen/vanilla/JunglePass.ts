@@ -6,15 +6,12 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
-import { tileRunner, gp2Begin, gp2End, gp2Dump } from './TileRunner';
+import { tileRunner } from './TileRunner';
 
 const MUD = TILE_BY_KEY['mud']!;
 const GEMS = ['gem_sapphire', 'gem_ruby', 'gem_emerald', 'gem_topaz', 'gem_amethyst', 'gem_diamond'].map((k) => TILE_BY_KEY[k]!);
 
 export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
-  const GH1: string[] = [];
-  const ghAt = (tag: string) => { const i = st.idx(3395, 315); GH1.push(`${tag}:t${st.type[i]}a${st.flags[i]}`); };
-  const PT: string[] = [];
   const { w, h } = st;
   const scale = (w / 4200) * 1.5;
   const van = w / 4200;
@@ -48,22 +45,20 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
     }
   };
 
-  ghAt('entry');
   applyRandomMovement(100, 100);
   zeroX += x; zeroY += y;
   placeFirstPassMud(3);
-  placeGemsAt(0, 2); ghAt('r1');
+  placeGemsAt(0, 2);
   applyRandomMovement(250, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(0);
-  placeGemsAt(2, 2); ghAt('r2');
+  placeGemsAt(2, 2);
   const oldX = x, oldY = y;
   applyRandomMovement(400, 150);
   zeroX += x; zeroY += y;
   placeFirstPassMud(-3);
-  placeGemsAt(4, 2); ghAt('r3');
+  placeGemsAt(4, 2);
 
-  PT.push(`g3_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   // 巨型泥 runner:三次移动点的均值为中心
   const cx = Math.floor(zeroX / 3), cy = Math.floor(zeroY / 3);
   // 原版 Next((int)(400*ws), (int)(600*ws)) 上界开（曾闭区间多 1 档）
@@ -72,20 +67,12 @@ export function runJunglePass(st: TileStore, rng: RNG, gs: GenState): number {
   const i = Math.max(gs.beachLeftEnd + Math.floor(num2 / 2) + num3, Math.min(gs.beachRightStart - Math.floor(num2 / 2) - num3, cx));
   // JunglePass.cs:50-54：noYChange:true——vy=-20 保持原速直上；缺失时被钳到 ±1
   // （曾致泥柱矮、泥量大范围横向堆积，丛林地下形态与原版明显不同）
-  gp2Begin();
   tileRunner(st, rng, gs, i, cy, { strength: num2, steps: 10000, type: MUD, speedY: -20, noYChange: true, mudWall: true });
-  ghAt('big');
-  gp2End();
-  console.log('GP2DUMP ' + gp2Dump());
-  console.log('GH1 ' + GH1.join(' '));
   // 泥柱中心记录给后续(丛林表面草化)
   (gs as any).jungleCoreX = i;
   const jungleXOut = generateTunnelToSurface(st, rng, gs, i, cy);
-  PT.push(`big_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   generateHolesInMudWalls(st, rng, gs);
-  PT.push(`holes_t=${st.type[st.idx(3405, 308)]}a${st.flags[st.idx(3405, 308)]}`);
   generateFinishingTouches(st, rng, gs, oldX, oldY, scale, van);
-  console.log('PT ' + PT.join(' '));
   return jungleXOut;
 }
 
@@ -234,24 +221,14 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
     }
   }
   // 泥内石囊 + 宝石
-  const L3: string[] = [];
   for (let n = 0; n <= 300 * scale; n++) {
     let i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
     let j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
-    let tries = 1;
-    if (n < 3) L3.push(`s${tries}@${i2},${j2}=${st.type[st.idx(i2, j2)]}`);
     while (!(i2 >= 1 && i2 < st.w - 1 && j2 >= 1 && j2 < st.h - 1 && st.type[st.idx(i2, j2)] === MUD)) {
       i2 = oldX + rng.int(-Math.floor(600 * scale), Math.floor(600 * scale) - 1);
       j2 = oldY + rng.int(-Math.floor(200 * scale), Math.floor(200 * scale) - 1);
-      tries++;
-      if (n < 3) L3.push(`s${tries}@${i2},${j2}=${st.type[st.idx(i2, j2)]}`);
     }
-    if (n < 40) L3.push(`n${n}@${i2},${j2}t${tries}`);
-    if (n < 3) L3.push(`E${n}pk${rng.vanilla.peek()}`);
-    const sStr = rng.int(4, 9), sStp = rng.int(5, 29);
-    if (n < 3) L3.push(`P${n}s${sStr}k${sStp}pk${rng.vanilla.peek()}`);
-    tileRunner(st, rng, gs, i2, j2, { strength: sStr, steps: sStp, type: T.STONE });
-    if (n < 3) L3.push(`X${n}pk${rng.vanilla.peek()}`);
+    tileRunner(st, rng, gs, i2, j2, { strength: rng.int(4, 9), steps: rng.int(5, 29), type: T.STONE });
     if (rng.next() * 4 < 1) {
       // ★原版掷序（cs:269-271）：type2(Next 63,69) 在实参求值**之前**求值 →
       // type → x偏移 → y偏移 → strength → steps（对象字面量会把 type 排到最后=流错位）
@@ -261,5 +238,4 @@ function generateFinishingTouches(st: TileStore, rng: RNG, gs: GenState, oldX: n
         { strength: rng.int(3, 6), steps: rng.int(4, 7), type: gtype });
     }
   }
-  console.log('L3LOG ' + L3.join(' '));
 }

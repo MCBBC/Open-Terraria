@@ -135,7 +135,9 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
         for (let y = 0; y < yEnd && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {
-            st.flags[i] = 0; st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0;
+            // 原版仅 active(false)（cs:15014）——保留 type 幽灵（曾清零，
+            // 与 oracle 天空/海盆幽灵分叉 6383 格）
+            st.flags[i] = 0;
             if (y > waterY) { st.liquid[i] = 255; st.liquidType[i] = 1; }
             else if (y === waterY) { st.liquid[i] = 127; st.liquidType[i] = 1; }
           } else if (y > waterY) {
@@ -162,7 +164,9 @@ export function runBeachesPass(st: TileStore, rng: RNG, gs: GenState): void {
         for (let y = 0; y < yEnd && y < st.h; y++) {
           const i = st.idx(x, y);
           if (y < waterY + depth * 0.75 - 3) {
-            st.flags[i] = 0; st.type[i] = 0; st.frameX[i] = 0; st.frameY[i] = 0;
+            // 原版仅 active(false)（cs:15014）——保留 type 幽灵（曾清零，
+            // 与 oracle 天空/海盆幽灵分叉 6383 格）
+            st.flags[i] = 0;
             if (y > waterY) { st.liquid[i] = 255; st.liquidType[i] = 1; }
             else if (y === waterY) { st.liquid[i] = 127; st.liquidType[i] = 1; }
           } else if (y > waterY) {

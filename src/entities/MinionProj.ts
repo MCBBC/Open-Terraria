@@ -12,6 +12,10 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 
+/** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
+ *  帧 1-6 开火动画、第 12t 出火球 668 */
+const FLAMEBURST_TOWER = new Set([663, 665, 667]);
+
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
@@ -49,6 +53,12 @@ export class MinionProj extends Entity {
   onGround = false;
   /** 存活 tick（多帧贴图动画驱动） */
   age = 0;
+  /** 哨兵开火状态机（AI_130）：0=待机 1=开火动画中 */
+  sFire = 0;
+  sFireT = 0;
+  sCool = 0;
+  /** 朝向（哨兵 spriteDirection / 随从渲染翻转） */
+  facing = 1;
 
   constructor(
     x: number, y: number, projId: number, damage: number, knockback: number,
@@ -87,17 +97,48 @@ export class MinionProj extends Entity {
     this.age++;
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
-      // 哨兵：定点炮台，60t 一发
+      // 落地（AI_130 尾部 :65420：tileCollide=true + velocity.Y += 0.2）
+      this.vy = Math.min(this.vy + 0.2, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, 0, this.vy);
+      const owner = this.ownerRef();
+      const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1)));
+      // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
+      // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
+      // Bottom+(dir*6,-46) 发火球 668）→ 24t 结束回待机并冷却 60t（num8）
+      if (FLAMEBURST_TOWER.has(this.projId)) {
+        if (this.sFire === 0) {
+          const tgt = this.nearestEnemy(game, 900);
+          if (tgt && this.sCool <= 0) {
+            this.facing = tgt.cx >= this.cx ? 1 : -1; // direction = Sign(指向)（:65386）
+            this.sFire = 1; this.sFireT = 0;
+          }
+          if (this.sCool > 0) this.sCool--;
+        } else {
+          if (this.sFireT === 12) {
+            const tgt = this.nearestEnemy(game, 900);
+            const mx = this.cx + this.facing * 6, my = this.y + this.h - 46; // 炮口（:65316）
+            let vx = this.facing * 9, vy = 0;
+            if (tgt) {
+              const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+              vx = ((tgt.cx - mx) / d) * 9; vy = ((tgt.cy - my) / d) * 9;
+            }
+            (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+              new Arrow(mx - 5, my - 5, vx, vy, dmgOf(), this.knockback, 668, null, { grav: 0.2 }),
+              'projectiles');
+          }
+          if (++this.sFireT >= 24) { this.sFire = 0; this.sCool = 60; } // num6*num7=24、num8=60
+        }
+        return;
+      }
+      // 其他哨兵：定点炮台，60t 一发（近似）
       const tgt = this.nearestEnemy(game, 600);
       if (tgt) {
         this.shootCd--;
         if (this.shootCd <= 0) {
           this.shootCd = 60;
           const ang = Math.atan2(tgt.cy - this.cy, tgt.cx - this.cx);
-          const owner = this.ownerRef();
-          const dmg = Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1)));
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
-            new Arrow(this.cx, this.cy, Math.cos(ang) * 6, Math.sin(ang) * 6, dmg, this.knockback, this.projId, null),
+            new Arrow(this.cx, this.cy, Math.cos(ang) * 6, Math.sin(ang) * 6, dmgOf(), this.knockback, this.projId, null),
             'projectiles');
         }
       }
@@ -161,16 +202,23 @@ export class MinionProj extends Entity {
 
   draw(r: import('../render/Renderer').Renderer): void {
     // 世界坐标绘制（Renderer 实体循环在世界变换内）——投射物贴图懒加载通道同 Arrow。
-    // 原版投射物贴图是竖向多帧行（projFrames 表）：按帧高切片 + age 驱动动画，
-    // 1:1 像素尺寸（整图压 32px 会把 12 帧行压成胶片条）
+    // 原版投射物贴图是竖向多帧行（projFrames 表）：按帧高切片，1:1 像素尺寸。
+    // 爆炸烈焰塔走 AI_130 帧状态机（待机帧 0 / 开火帧 1-6 每 4t），其余哨兵/随从
+    // age/8 匀速循环；哨兵按 facing 翻转（原版 spriteDirection）
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
     const frames = projFrameCount(this.projId);
-    const frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
+    let frame: number;
+    if (this.sentry && FLAMEBURST_TOWER.has(this.projId)) {
+      frame = this.sFire === 1 ? 1 + Math.floor(this.sFireT / 4) : 0;
+    } else {
+      frame = frames > 1 ? Math.floor(this.age / 8) % frames : 0;
+    }
     const img = projFrameImg(this.projId, frame);
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
+    if (this.sentry && this.facing < 0) ctx.scale(-1, 1);
     if (img) {
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {

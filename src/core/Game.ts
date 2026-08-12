@@ -108,6 +108,7 @@ import { VUI } from '../vui/VUI';
 import { SpriteAtlas, VANILLA_ITEM_ICON_MAP, atlasIconForKey } from '../assets/SpriteAtlas';
 import { AutoTiler } from '../render/AutoTiler';
 import { VanillaWallTiler } from '../render/VanillaWallTiler';
+import { windSway } from '../render/WindSway';
 import { TILE_PARTICLE_RULES } from '../render/TileParticles';
 import { Sfx, SfxName } from './Sfx';
 import { HitTile } from './HitTile';
@@ -1976,6 +1977,9 @@ export class Game implements GameHooks {
     this.camera.clamp();
     this.chunks.flushDirty();
     this.chunks.advanceAnim(); // 动画陈设（制冰机/固化机/篝火/熔炉等）：换帧 tick 重建含动画 chunk
+    windSway.update(this.world.weather?.windSpeedCurrent ?? 0,
+      { x: player.x, y: player.y, w: player.w, h: player.h, vx: player.vx, vy: player.vy, dead: player.dead },
+      this.world.w, this.world.h); // 风摆动相位钟 + 玩家扰动网格（TileDrawing.Update 1:1）
     tickEmotes();
     this.tickNpcEmotes();
     const viewTW = Math.ceil(this.camera.viewW / this.camera.zoom / TILE) + 2;

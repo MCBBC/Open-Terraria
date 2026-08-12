@@ -232,13 +232,6 @@ if (num7w < num6w + num14)
 double gvWorldSurfaceLow = num5w, gvWorldSurfaceHigh = num6w;
 double gvRockLayerLow = num7w, gvRockLayerHigh = num8w;
 double gvWorldSurface = num3w, gvRockLayer = num4w;
-Action<string> SkyGh = (tag) =>
-    {
-        uint h = 2166136261;
-        for (int yy = 0; yy <= 120; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-        Console.WriteLine($"SKYGH {tag} {h}");
-    };
-    SkyGh("terrain");
 Checkpoint("terrain");
 
 Console.WriteLine($"terrain ok: worldSurface={worldSurface} rockLayer={rockLayer} waterLine={waterLine} lavaLine={lavaLine}");
@@ -251,14 +244,10 @@ void TileRunner(double i, double j, double strength, int steps, int type,
 {
     double num1 = strength, num2 = steps;
     double px = i, py = j;
-    var GP2C = steps == 10000 ? new List<string>() : null;
-    int ITRN = 0;
-    long GP2C_N = 0;
     double vx = (int)r.Next(-10, 11) * 0.1, vy = (int)r.Next(-10, 11) * 0.1;
     if (speedX != 0.0 || speedY != 0.0) { vx = speedX; vy = speedY; }
     int num3l = 0;
     r.Next(4); // num3 液体类型（普通世界结果弃用）
-    if (GP2C != null) GP2C.Add($"CALL i={i:R} j={j:R} s={strength} st={steps} t={type} at={addTile} ny={noYChange} ov={overRide} mw={mudWallFlag}");
     while (num1 > 0.0 && num2 > 0.0)
     {
         if (py < 0.0 && num2 > 0.0 && type == 59) num2 = 0.0;
@@ -274,13 +263,6 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             for (int y = y0; y < y1; y++)
             {
                 int ti = y * W + x;
-                if (GP2C != null) {
-                    GP2C_N++;
-                    if ((GP2C_N >= 673000 && GP2C_N <= 674100) || GP2C_N % 50000 == 0) {
-                        GP2C.Add($"c{GP2C_N}@{x},{y}a{act[ti]}t{typ[ti]}=pk{(int)r.Peek()}");
-                    }
-                }
-                if (GP2C != null && x == 3401 && y == 581) GP2C.Add($"S@{px:0.0},{py:0.0} a{act[ti]}t{typ[ti]}=pk{(int)r.Peek()}");
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -324,7 +306,6 @@ void TileRunner(double i, double j, double strength, int steps, int type,
                         if (cur == 1 && type == 59)
                         {
                             int f4r = (int)r.Next(-50, 50);
-                            if (x == 3405 && y == 308) Console.WriteLine($"CF4 roll={f4r} y={y} wS={worldSurface} pass={y < worldSurface + f4r} py={py:0.0}");
                             if (y < worldSurface + f4r) flag4 = true;
                         }
                         else if (FLAG3_ALWAYS.Contains(cur)) flag4 = true;
@@ -344,8 +325,6 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             }
         }
         px += vx; py += vy;
-        ITRN++;
-        if (GP2C != null && ITRN <= 210) GP2C.Add($"it{ITRN} px={px:R} py={py:R} vx={vx:R} vy={vy:R} n1={num1:R} n2={num2:R} pk={(int)r.Peek()}");
         // 大半径阶梯（cs:77370-77450）：50..900 每档 val+=vel, num2-=1, 2 发速度骰（Y 先 X 后）
         double[] thrs = { 50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900 };
         foreach (var thr in thrs)
@@ -369,7 +348,6 @@ void TileRunner(double i, double j, double strength, int steps, int type,
         {
             if (vy > 1.0) vy = 1.0; if (vy < -1.0) vy = -1.0;
         }
-        if (GP2C != null) File.WriteAllText("/tmp/cs-gp2.txt", string.Join(" ", GP2C));
         if (type == 59 && !noYChange)
         {
             if (vy > 0.5) vy = 0.5; if (vy < -0.5) vy = -0.5;
@@ -626,7 +604,6 @@ void PlaceCurvedLine(int sx, int sy, int ex, int ey, (int, int) anchor, int[] su
         }
     }
 }
-SkyGh("dunes");
 Checkpoint("dunes");
 
 // ================= Pass 2：OceanSand（cs:11603-11711）=================
@@ -685,7 +662,6 @@ for (int i = 0; i < 3; i++)
     }
     File.WriteAllText("/tmp/cs-sand.txt", string.Join(",", prof));
 }
-SkyGh("oceansand");
 Checkpoint("oceansand");
 
 // ================= Pass 3：SandPatches（cs:11712-11737）=================
@@ -700,7 +676,6 @@ Checkpoint("oceansand");
         TileRunner(num2, num3, (int)r.Next(15, 70), (int)r.Next(20, 130), 53);
     }
 }
-SkyGh("sandpatches");
 Checkpoint("sandpatches");
 
 // ================= Pass 4：Tunnels（cs:11745-11808）=================
@@ -735,7 +710,6 @@ Checkpoint("sandpatches");
         }
     }
 }
-SkyGh("tunnels");
 Checkpoint("tunnels");
 
 var mCaveX = new List<int>();
@@ -779,7 +753,6 @@ var mCaveY = new List<int>();
         }
     }
 }
-SkyGh("mountaincaves");
 Checkpoint("mountaincaves");
 
 // ================= Pass 6：DirtWallBackgrounds（cs:11883-11921）=================
@@ -803,7 +776,6 @@ Checkpoint("mountaincaves");
         }
     }
 }
-SkyGh("dirtwallbg");
 Checkpoint("dirtwallbg");
 
 // ================= Pass 7-9：RocksInDirt / DirtInRocks / Clay（cs:11922-12033）=================
@@ -848,8 +820,6 @@ for (int x = 5; x < W - 5; x++)
 }
 File.WriteAllBytes("/tmp/cs-typ2.bin", ToBytes(typ));
 File.WriteAllBytes("/tmp/cs-act2.bin", act);
-SkyGh("rocksclay");
-File.WriteAllBytes("/tmp/cs-rc.bin", ToBytes(typ));
 Checkpoint("rocksclay");
 
 // ================= Pass 10：SmallHoles（cs:12034-12092）=================
@@ -876,7 +846,6 @@ Checkpoint("rocksclay");
         TileRunner(num2, num3, num4, num5, type);
     }
 }
-SkyGh("smallholes");
 Checkpoint("smallholes");
 
 // ================= Pass 11：DirtLayerCaves（cs:12094-12134）=================
@@ -942,7 +911,6 @@ Checkpoint("rocklayer");
     for (int n = 0; n < cavCount; n++)
         Caverer((int)r.Next(340, W - 340), (int)r.Next(yLo, yHi));
 }
-SkyGh("surfacecaves");
 Checkpoint("surfacecaves");
 
 // ================= Pass 34：MountainCaveOpenings（cs:14932-14947，按我们的执行序紧跟洞穴链）=================
@@ -1037,12 +1005,6 @@ for (int i = 0; i < mCaveX.Count; i++)
     CaveOpenater(mCaveX[i], mCaveY[i]);
     Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
 }
-{
-    uint h = 2166136261;
-    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-    Console.WriteLine($"BAND mcopen {h}");
-}
-SkyGh("mcopenings");
 Checkpoint("mcopenings");
 
 // ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
@@ -1122,12 +1084,6 @@ var beachDbg = new List<string>();
 File.WriteAllBytes("/tmp/cs-act4.bin", act);
 File.WriteAllBytes("/tmp/cs-act5.bin", act);
 File.WriteAllText("/tmp/cs-beach2.txt", string.Join(" ", beachDbg));
-{
-    uint h = 2166136261;
-    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-    Console.WriteLine($"BAND beaches {h}");
-}
-SkyGh("beaches");
 Checkpoint("beaches");
 
 // ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================
@@ -1183,12 +1139,6 @@ var snowMaxXArr = new int[H];
         }
     }
 }
-{
-    uint h = 2166136261;
-    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-    Console.WriteLine($"BAND ice {h}");
-}
-SkyGh("icebiome");
 Checkpoint("icebiome");
 
 // ================= Grass（cs:12454-12507）=================
@@ -1216,12 +1166,6 @@ Checkpoint("icebiome");
         { act[y2 * W + x2] = 1; typ[y2 * W + x2] = 2; }
     }
 }
-{
-    uint h = 2166136261;
-    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-    Console.WriteLine($"BAND grass {h}");
-}
-SkyGh("grass");
 Checkpoint("grass");
 
 // ================= Jungle（JunglePass.cs 全文 1:1）=================
@@ -1246,20 +1190,16 @@ Checkpoint("grass");
         for (int i = 0; (double)i < 6.0 * ws; i++)
             TileRunner(x + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), y + (int)r.Next(-(int)(125 * ws), (int)(125 * ws)), (int)r.Next(3, 7), (int)r.Next(3, 8), (int)r.Next(baseGem, baseGem + variants));
     }
-    var CGH = new List<string>();
-    Action<string> ghAt = (tag) => { int ii = 315 * W + 3395; CGH.Add($"{tag}:t{typ[ii]}a{act[ii]}"); };
-    ghAt("entry");
     Move(ref jx, ref jy, 100, 100); zeroX += jx; zeroY += jy;
-    var CJP3 = new List<string>();
     PlaceFirstPassMud(jx, jy, 3);
-    PlaceGemsAt(jx, jy, 63, 2); ghAt("r1");
+    PlaceGemsAt(jx, jy, 63, 2);
     Move(ref jx, ref jy, 250, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, 0);
-    PlaceGemsAt(jx, jy, 65, 2); ghAt("r2");
+    PlaceGemsAt(jx, jy, 65, 2);
     int oldX = jx, oldY = jy;
     Move(ref jx, ref jy, 400, 150); zeroX += jx; zeroY += jy;
     PlaceFirstPassMud(jx, jy, -3);
-    PlaceGemsAt(jx, jy, 67, 2); ghAt("r3");
+    PlaceGemsAt(jx, jy, 67, 2);
         jx = zeroX / 3; jy = zeroY / 3;
     int bigNum = (int)r.Next((int)(400 * ws), (int)(600 * ws));
     int pad = (int)(25 * ws);
@@ -1349,9 +1289,7 @@ Checkpoint("grass");
         { hx = (int)r.Next(20, W - 20); hy = (int)r.Next(worldSurface + 10, H - 200); }
         MudWallRunner(hx, hy);
     }
-    var CPT = new List<string>();
     // GenerateFinishingTouches（cs:219-280）
-    CPT.Add($"g3_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     int fx = oldX, fy = oldY;
     for (int i = 0; (double)i <= 20.0 * ws; i++)
     {
@@ -1359,7 +1297,6 @@ Checkpoint("grass");
         fy += (int)r.Next((int)(-5 * ws), (int)(6 * ws));
         TileRunner(fx, fy, (int)r.Next(40, 100), (int)r.Next(300, 500), 59);
     }
-    CPT.Add($"big_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
     for (int j = 0; (double)j <= 10.0 * ws; j++)
     {
         int c2x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
@@ -1373,39 +1310,19 @@ Checkpoint("grass");
             TileRunner(c2x, c2y, (int)r.Next(10, 20), (int)r.Next(30, 70), type);
         }
     }
-    CPT.Add($"holes_t={typ[308 * W + 3405]}a{act[308 * W + 3405]}");
-    ghAt("big");
-    var L3C = new List<string>();
     for (int l = 0; (double)l <= 300.0 * ws; l++)
     {
         int c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws));
         int c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws));
-        int tries = 1;
-        if (l < 3) L3C.Add($"s{tries}@{c3x},{c3y}=" + (c3x >= 0 && c3x < W && c3y >= 0 && c3y < H ? typ[c3y * W + c3x].ToString() : "oob"));
         while (c3x < 1 || c3x >= W - 1 || c3y < 1 || c3y >= H - 1 || typ[c3y * W + c3x] != 59)
-        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); tries++; if (l < 3) L3C.Add($"s{tries}@{c3x},{c3y}=" + (c3x >= 0 && c3x < W && c3y >= 0 && c3y < H ? typ[c3y * W + c3x].ToString() : "oob")); }
-        if (l < 40) L3C.Add($"n{l}@{c3x},{c3y}t{tries}");
-        if (l < 3) L3C.Add($"E{l}pk{(int)r.Peek()}");
+        { c3x = oldX + (int)r.Next(-(int)(600 * ws), (int)(600 * ws)); c3y = oldY + (int)r.Next(-(int)(200 * ws), (int)(200 * ws)); }
         int sStr = (int)r.Next(4, 10), sStp = (int)r.Next(5, 30);
-        if (l < 3) L3C.Add($"P{l}s{sStr}k{sStp}pk{(int)r.Peek()}");
         TileRunner(c3x, c3y, sStr, sStp, 1);
-        if (l < 3) L3C.Add($"X{l}pk{(int)r.Peek()}");
         int gate = (int)r.Next(4);
-        if (l < 3) L3C.Add($"G{l}={gate}pk{(int)r.Peek()}");
         if (gate == 0)
         { int gt = (int)r.Next(63, 69); int gx = c3x + (int)r.Next(-1, 2); int gy = c3y + (int)r.Next(-1, 2); int gstr = (int)r.Next(3, 7); int gstp = (int)r.Next(4, 8);
-          if (l < 3) L3C.Add($"GEM{l}t{gt}@{gx},{gy}s{gstr}k{gstp}pk{(int)r.Peek()}");
           TileRunner(gx, gy, gstr, gstp, gt); }
     }
-    File.WriteAllText("/tmp/cs-pt.txt", string.Join(" ", CPT) + " || " + string.Join(" ", CGH));
-    File.WriteAllBytes("/tmp/cs-act6.bin", act);
-    File.WriteAllText("/tmp/cs-l3.txt", string.Join(" ", L3C));
-    File.WriteAllBytes("/tmp/cs-jt.bin", ToBytes(typ));
-}
-{
-    uint h = 2166136261;
-    for (int yy = 150; yy <= 400; yy++) for (int xx = 0; xx < W; xx++) { int ii = yy * W + xx; if (act[ii] == 1) continue; h = (h ^ (uint)(typ[ii] + 1)) * 16777619u; }
-    Console.WriteLine($"BAND jungle {h}");
 }
 Checkpoint("jungle");
 
@@ -1484,7 +1401,9 @@ Checkpoint("jungle");
 Checkpoint("mudcaves");
 
 // ================= Desert Sub-A（DesertBiome pass cs:12532 + DesertDescription + SandMound）=================
-// 注意：入口(33%+Next4)与 Hive 未含——本检查点只到 mound 完成后
+// Sub-B（DesertHive）与 Sub-C（入口 4 形状）转录至 Checkpoint("desertdone")。
+// DesertDescription 字段（DesertDescription.cs:73-83；普通世界 num7=0）
+int dBC = 0, dBR = 0, dX = 0, dTop = 0, dW = 0, dH = 0, dHiveTop = 0;
 int[] SurfFromArea(int startX, int width)
 {
     int half = H / 2;
@@ -1567,6 +1486,7 @@ bool DesertPlaceMound(int x)
             typ[y * W + cx] = 53; act[y * W + cx] = 1; liq[y * W + cx] = 0;
         }
     }
+    dBC = blockCols; dBR = blockRows; dX = ox; dTop = topY; dW = dw; dH = dh; dHiveTop = hiveTop;
     return true;
 }
 {
@@ -1589,6 +1509,368 @@ bool DesertPlaceMound(int x)
     }
 }
 Checkpoint("desertmound");
+
+// ================= Desert Sub-C 入口（DesertBiome.cs:22-40 + Biomes/Desert/*Entrance.cs）=================
+// ChanceOfEntrance 被 Configuration.json 覆盖为 0.5（代码默认 0.3333 是坑）
+int[] dSurf2 = SurfFromArea(dX - 5, dW + 10);   // UpdateSurfaceMap（DesertBiome.cs:22）
+int DSurf(int ax) => dSurf2[ax - (dX - 5)];      // SurfaceMap.this[absoluteX]
+WC.A = act; WC.T = typ; WC.Wl = wal; WC.L = liq; WC.R = r; WC.SOLID = SOLID; WC.W = W; WC.H = H;
+
+// ---- ChambersEntrance.cs 1:1 ----
+void DesertChambers()
+{
+    int num = (dX + dW / 2) + (int)r.Next(-40, 41);       // Desert.Center.X + Next(-40,41)
+    int px = num, py = DSurf(num);
+    var shapeData = new HashSet<long>();
+    var data = new HashSet<long>();
+    int ox = px, oy = py + 2;
+    GW.GenCircle(ox, oy, 24, 12, GW.Chain(new GW.BlotchesA(), GW.Out(new GW.SetTileA(53), shapeData)));
+    int hnum = dHiveTop - py;                             // Hive.Top - position.Y
+    int num2 = (int)r.Next(2) != 0 ? 1 : -1;
+    var list = new List<(double x, double y, double dir)> { (px + -num2 * 26, (double)(py - 8), (double)num2) };
+    int num3 = (int)r.Next(2, 4);
+    for (int i = 0; i < num3; i++)
+    {
+        int num4 = (int)((double)(i + 1) / (double)num3 * (double)hnum) + (int)r.Next(-8, 9);
+        int num5 = num2 * (int)r.Next(20, 41);
+        int num6 = (int)r.Next(18, 29);
+        GW.GenCircle(px, py, num6 / 2, 3, GW.Chain(new GW.OffsetA(num5, num4), new GW.BlotchesA(), GW.Out(new GW.ClearA(), data), new GW.PlaceWallA(187)));
+        list.Add((num5 + num6 / 2 * -num2 + px, (double)(num4 + py), (double)(-num2)));
+        num2 *= -1;
+    }
+    GW.GenOutline(px, py, data, GW.Chain(new GW.ExpandA(1), new GW.OnlyTilesA(53), new GW.SetTileA(397), new GW.PlaceWallA(187)));
+    GA pairAct = GW.Chain(new GW.IsSolidA(), new GW.BlotchesA(), new GW.ClearA(), new GW.ExpandA(1), new GW.PlaceWallA(187), new GW.OnlyTilesA(53), new GW.SetTileA(397));
+    for (int j = 1; j < list.Count; j++)
+    {
+        var pa = list[j - 1]; var pb = list[j];
+        double connLen = Math.Abs(pb.x - pa.x) * 1.5;
+        for (double t = 0.0; t <= 1.0; t += 0.02)
+        {
+            double ax = pa.x + pa.dir * connLen * t, ay = pa.y;
+            double bx = pb.x + pb.dir * connLen * (1.0 - t), by = pb.y;
+            double cx = pa.x + (pb.x - pa.x) * t, cy = pa.y + (pb.y - pa.y) * t;   // Lerp(p0,p1,t)
+            double dx = ax + (cx - ax) * t, dy = ay + (cy - ay) * t;                // Lerp(v,v3,t)
+            double ex = cx + (bx - cx) * t, ey = cy + (by - cy) * t;                // Lerp(v3,v2,t)
+            double fx = dx + (ex - dx) * t, fy = dy + (ey - dy) * t;                // Lerp(v4,v5,t)
+            GW.GenRectWH((int)fx, (int)fy, 2, 4, pairAct);
+        }
+    }
+    GW.GenRect(ox, oy, -29, -12, 29, 0, GW.Chain(new GW.NotInShapeA(shapeData), new GW.ExpandA(1), new GW.PlaceWallA(0)));
+}
+
+// ---- AnthillEntrance.cs 1:1 ----
+void DesertAnthill()
+{
+    int num = (int)r.Next(2, 4);
+    for (int i = 0; i < num; i++)
+    {
+        int holeRadius = (int)r.Next(15, 18);
+        int num2 = (int)((double)(i + 1) / (double)(num + 1) * (double)(dW + 10)) + dX;  // Surface.Width=dW+10
+        DesertAnthillAt(num2, DSurf(num2), holeRadius);
+    }
+}
+void DesertAnthillAt(int px, int py, int holeRadius)
+{
+    var data = new HashSet<long>();
+    int ox = px, oy = py + 6;
+    GW.GenTail(ox, oy, holeRadius * 2, 0.0, -(double)holeRadius * 1.5, GW.Out(new GW.SetTileA(53), data));
+    GA pairA = GW.Chain(new GW.BlotchesA(), new GW.IsSolidA(), new GW.ClearA(), new GW.PlaceWallA(187));
+    GA pairB = GW.Chain(new GW.IsSolidA(), new GW.ClearA(), new GW.PlaceWallA(187));
+    GA pairC = GW.Chain(new GW.IsSolidA(), new GW.SetTileA(397), new GW.PlaceWallA(187));
+    GA pairD = GW.Chain(new GW.SkipWallsA(187), new GW.SetTileA(53));
+    GA pairE = new GW.PlaceWallA(187);
+    int num = px;
+    for (int i = py - holeRadius - 3; i < dHiveTop + (py - dTop) * 2 + 12; i++)
+    {
+        GW.GenRectWH(num, i, 1, 1, i < py ? pairB : pairA);
+        GW.GenCircle(num, i, 2, 3, pairC);
+        if (i % 3 == 0 && i >= py)
+        {
+            num += (int)r.Next(-1, 2);
+            GW.GenRectWH(num, i, 1, 1, pairA);
+            if (i >= py + 5)
+            {
+                GW.GenCircle(num, i, holeRadius, 3, pairD);
+                GW.GenCircle(num, i, holeRadius - 2, 3, pairE);
+            }
+            GW.GenCircle(num, i, 2, 3, pairC);
+        }
+    }
+    GW.GenCircle(ox, oy - (int)((double)holeRadius * 1.5) + 3, holeRadius / 2, holeRadius / 3, GW.Chain(new GW.ClearTileA(), new GW.ExpandA(1), new GW.PlaceWallA(0)));
+    // All(data)+Smooth：仅坡面/半砖——哈希无关，两侧一致省略
+}
+
+// ---- LarvaHoleEntrance.cs 1:1 ----
+void DesertLarvaHole()
+{
+    int num = (int)r.Next(2, 4);
+    for (int i = 0; i < num; i++)
+    {
+        int holeRadius = (int)r.Next(13, 16);
+        int num2 = (int)((double)(i + 1) / (double)(num + 1) * (double)(dW + 10)) + dX;
+        DesertLarvaAt(num2, DSurf(num2), holeRadius);
+    }
+}
+void DesertLarvaAt(int px, int py, int holeRadius)
+{
+    var data = new HashSet<long>();
+    GW.GenRect(px, py, -holeRadius, -holeRadius * 2, holeRadius, 0, GW.Out(new GW.ClearA(), data));
+    GW.GenTail(px, py, holeRadius * 2, 0.0, (double)holeRadius * 1.5, GW.Out(new GW.ClearA(), data));
+    // All(data)+Offset(0,1)+Expand(1)+IsSolid+Smooth：仅坡面——哈希无关，省略
+    GA pairA = GW.Chain(new GW.BlotchesA(), new GW.IsSolidA(), new GW.ClearA(), new GW.PlaceWallA(187));
+    GA pairB = GW.Chain(new GW.IsSolidA(), new GW.SetTileA(397), new GW.PlaceWallA(187));
+    int num = px;
+    for (int i = py + (int)((double)holeRadius * 1.5); i < dHiveTop + (py - dTop) * 2 + 12; i++)
+    {
+        GW.GenRectWH(num, i, 1, 1, pairA);
+        GW.GenCircle(num, i, 2, 3, pairB);
+        if (i % 3 == 0)
+        {
+            num += (int)r.Next(-1, 2);
+            GW.GenRectWH(num, i, 1, 1, pairA);
+            GW.GenCircle(num, i, 2, 3, pairB);
+        }
+    }
+    GW.GenAll(px, py + 2, data, new GW.PlaceWallA(0));
+}
+
+// ---- PitEntrance.cs 1:1（零掷骰）----
+double PitSmootherStep(double delta)
+{
+    delta = Math.Clamp(delta, 0.0, 1.0);
+    return 1.0 - Math.Cos(delta * 3.1415927410125732) * 0.5 - 0.5;
+}
+double PitScale(double yProgress)
+    => yProgress < 0.6 ? 1.0 : (1.0 - PitSmootherStep((yProgress - 0.6) / 0.4)) * 0.5 + 0.5;
+void DesertPit()
+{
+    int holeRadius = (int)r.Next(6, 9);
+    int px = dX + dW / 2, py = DSurf(dX + dW / 2);        // CombinedArea.Center.X
+    for (int i = -holeRadius - 3; i < holeRadius + 3; i++)
+    {
+        int cx = i + px;
+        if (cx < 0 || cx >= W) continue;
+        int sj = DSurf(cx);
+        for (int j = sj; j <= dHiveTop + 10; j++)
+        {
+            if (j < 0 || j >= H) continue;
+            double value = Math.Clamp((double)(j - sj) / (double)(dHiveTop - dTop), 0.0, 1.0);
+            int num3 = (int)(PitScale(value) * (double)holeRadius);
+            int ti = j * W + cx;
+            if (Math.Abs(i) < num3) { act[ti] = 0; typ[ti] = 0; wal[ti] = 0; liq[ti] = 0; }        // ClearEverything
+            else if (Math.Abs(i) < num3 + 3 && value > 0.35) { typ[ti] = 397; act[ti] = 1; liq[ti] = 0; }  // ResetToType(397)
+            double num4 = Math.Abs((double)i / (double)holeRadius);
+            num4 *= num4;
+            if (Math.Abs(i) < num3 + 3 && (double)(j - py) > 15.0 - 3.0 * num4) wal[ti] = 187;
+        }
+    }
+    holeRadius += 4;
+    for (int k = -holeRadius; k < holeRadius; k++)
+    {
+        int cx = k + px;
+        if (cx < 0 || cx >= W) continue;
+        int num5 = Math.Min(10, (holeRadius - Math.Abs(k)) * (holeRadius - Math.Abs(k)));
+        for (int l = 0; l < num5; l++)
+        {
+            int y = l + DSurf(cx);
+            if (y < 0 || y >= H) continue;
+            int ti = y * W + cx;
+            act[ti] = 0; typ[ti] = 0; wal[ti] = 0; liq[ti] = 0;
+        }
+    }
+}
+
+if ((double)r.NextDouble() <= 0.5)
+{
+    switch ((int)r.Next(4))
+    {
+        case 0: DesertChambers(); break;
+        case 1: DesertAnthill(); break;
+        case 2: DesertLarvaHole(); break;
+        case 3: DesertPit(); break;
+    }
+}
+Checkpoint("desertentrance");
+
+// ================= Desert Sub-B Hive（DesertHive.cs 1:1）=================
+{
+    // ---- ClusterGroup.Generate（椭圆散点→深度2 DFS→AttemptClaim→≥4 重组）----
+    var dhMap = new bool[dBC, dBR];
+    {
+        int e1 = dBC / 2 - 1, e2 = dBR / 2 - 1;
+        int e3 = (e1 + 1) * (e1 + 1);
+        for (int ei = 0; ei <= e2 * 2; ei++)      // 原版 i ∈ [0, 2*(H/2-1)]——末行不散点！
+        {
+            double e4 = (double)e1 / (double)e2 * (double)(ei - e2);
+            int e5 = Math.Min(e1, (int)Math.Sqrt((double)e3 - e4 * e4));
+            for (int ej = e1 - e5; ej <= e1 + e5; ej++)
+                dhMap[ej, ei] = (int)r.Next(2) == 0;
+        }
+    }
+    var dhPCs = new List<List<(int x, int y)>>();
+    void dhSearch(int x, int y, int level, List<(int x, int y)> pc)
+    {
+        pc.Add((x, y));
+        dhMap[x, y] = false;
+        level--;
+        if (level == -1) return;
+        if (x > 0 && dhMap[x - 1, y]) dhSearch(x - 1, y, level, pc);
+        if (x < dBC - 1 && dhMap[x + 1, y]) dhSearch(x + 1, y, level, pc);
+        if (y > 0 && dhMap[x, y - 1]) dhSearch(x, y - 1, level, pc);
+        if (y < dBR - 1 && dhMap[x, y + 1]) dhSearch(x, y + 1, level, pc);
+    }
+    for (int sk = 0; sk < dBC; sk++)
+        for (int sl = 0; sl < dBR; sl++)
+            if (dhMap[sk, sl] && (int)r.Next(2) == 0)
+            {
+                var spc = new List<(int x, int y)>();
+                dhSearch(sk, sl, 2, spc);
+                if (spc.Count > 2) dhPCs.Add(spc);
+            }
+    var dhIdx = new int[dBC, dBR];
+    for (int fm = 0; fm < dBC; fm++)
+        for (int fn = 0; fn < dBR; fn++)
+            dhIdx[fm, fn] = -1;
+    for (int fc = 0; fc < dhPCs.Count; fc++)
+        foreach (var fp in dhPCs[fc]) dhIdx[fp.x, fp.y] = fc;
+    void dhClaim(int x, int y, int index)
+    {
+        int cn = dhIdx[x, y];
+        if (cn == -1 || cn == index) return;
+        int cv = (int)r.Next(2) == 0 ? -1 : index;
+        foreach (var cp in dhPCs[cn]) dhIdx[cp.x, cp.y] = cv;
+    }
+    for (int gc = 0; gc < dhPCs.Count; gc++)
+        foreach (var gp in dhPCs[gc])
+        {
+            if (dhIdx[gp.x, gp.y] == -1) break;
+            int gi = dhIdx[gp.x, gp.y];
+            if (gp.x > 0) dhClaim(gp.x - 1, gp.y, gi);
+            if (gp.x < dBC - 1) dhClaim(gp.x + 1, gp.y, gi);
+            if (gp.y > 0) dhClaim(gp.x, gp.y - 1, gi);
+            if (gp.y < dBR - 1) dhClaim(gp.x, gp.y + 1, gi);
+        }
+    {
+        foreach (var pc0 in dhPCs) pc0.Clear();
+        for (int rx = 0; rx < dBC; rx++)
+            for (int ry = 0; ry < dBR; ry++)
+                if (dhIdx[rx, ry] != -1) dhPCs[dhIdx[rx, ry]].Add((rx, ry));
+        foreach (var pc1 in dhPCs)
+            if (pc1.Count < 4) pc1.Clear();
+    }
+    var dhClusters = new List<List<(double x, double y)>>();
+    foreach (var pc2 in dhPCs)
+    {
+        if (pc2.Count <= 0) continue;
+        var cl = new List<(double x, double y)>();
+        foreach (var bp in pc2)
+            cl.Add((bp.x + ((double)r.NextDouble() - 0.5) * 0.5, bp.y + ((double)r.NextDouble() - 0.5) * 0.5));
+        dhClusters.Add(cl);
+    }
+
+    // ---- PlaceClustersArea（场强分层；shell 类型骰与 0.25 门用 FastRandom，非 genRand！）----
+    var dhFr = new FR((ulong)(long)seed).Mod(57005UL);
+    for (int hi = dX - 20; hi < dX + dW + 20; hi++)
+    {
+        for (int hj = dHiveTop - 20; hj < dHiveTop + dH + 20; hj++)
+        {
+            if (hi < 1 || hi >= W - 1 || hj < 1 || hj >= H - 1) continue;   // InWorld(i,j,1)
+            int hti = hj * W + hi;
+            double f1 = 0.0; int f2 = -1; double f3 = 0.0;
+            ushort hType = 53;
+            if (dhFr.Next(3) == 0) hType = 397;
+            int n4 = hi - dX, n5 = hj - dHiveTop;
+            double vx = ((double)n4 - 2.0) / (double)dW * (double)dBC;   // (p-BlockScale/2)/Hive*Cluster
+            double vy = ((double)n5 - 1.0) / (double)dH * (double)dBR;
+            for (int hk = 0; hk < dhClusters.Count; hk++)
+            {
+                var hcl = dhClusters[hk];
+                if (Math.Abs(hcl[0].x - vx) > 10.0 || Math.Abs(hcl[0].y - vy) > 10.0) continue;
+                double f6 = 0.0;
+                foreach (var hb in hcl)
+                {
+                    double ddx = hb.x - vx, ddy = hb.y - vy;
+                    f6 += 1.0 / (ddx * ddx + ddy * ddy);
+                }
+                if (f6 > f1) { if (f1 > f3) f3 = f1; f1 = f6; f2 = hk; }
+                else if (f6 > f3) f3 = f6;
+            }
+            double f7 = f1 + f3;
+            double hex = ((double)n4 - 2.0) / (double)dW * 2.0 - 1.0;
+            double hey = ((double)n5 - 1.0) / (double)dH * 2.0 - 1.0;
+            bool hEdge = Math.Sqrt(hex * hex + hey * hey) >= 0.8;        // Vector2D.Length()
+            bool hFlag2 = true;
+            if (f7 > 3.5)
+            {
+                act[hti] = 0; typ[hti] = 0; wal[hti] = 0; liq[hti] = 0;  // ClearEverything
+                wal[hti] = 187;
+                if (f2 % 15 == 2) { typ[hti] = 404; act[hti] = 1; liq[hti] = 0; }  // ResetToType
+            }
+            else if (f7 > 1.8)
+            {
+                wal[hti] = 187;
+                if ((double)hj < (double)worldSurface) liq[hti] = 0;     // else lava()：liq 量不变
+                if (!hEdge || act[hti] != 0) { typ[hti] = 396; act[hti] = 1; liq[hti] = 0; }
+            }
+            else if (f7 > 0.7 || !hEdge)
+            {
+                wal[hti] = 216;
+                liq[hti] = 0;
+                if (!hEdge || act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; }
+            }
+            else if (f7 > 0.25)
+            {
+                var hFr2 = dhFr.ModXY(n4, n5);
+                double f8 = (f7 - 0.25) / 0.45;
+                if (hFr2.NextDouble() < f8)
+                {
+                    wal[hti] = 187;
+                    if ((double)hj < (double)worldSurface) liq[hti] = 0;
+                    if (act[hti] != 0) { typ[hti] = hType; act[hti] = 1; liq[hti] = 0; }
+                }
+            }
+            else hFlag2 = false;
+            // hFlag2 → UpdateDesertHiveBounds（纯边界追踪，无哈希效应）
+        }
+    }
+
+    // ---- AddTileVariance（DesertHive.cs:413-499）----
+    for (int vi = -20; vi < dW + 20; vi++)
+    {
+        for (int vj = -20; vj < dH + 20; vj++)
+        {
+            int vx2 = vi + dX, vy2 = vj + dHiveTop;
+            if (vx2 < 1 || vx2 >= W - 1 || vy2 < 1 || vy2 >= H - 1) continue;
+            int vti = vy2 * W + vx2;
+            bool vs1 = vy2 + 1 < H && act[(vy2 + 1) * W + vx2] != 0 && SOLID.Contains(typ[(vy2 + 1) * W + vx2]);
+            bool vs2 = vy2 + 2 < H && act[(vy2 + 2) * W + vx2] != 0 && SOLID.Contains(typ[(vy2 + 2) * W + vx2]);
+            if (typ[vti] == 53 && (!vs1 || !vs2)) typ[vti] = 397;
+        }
+    }
+    for (int wk = -20; wk < dW + 20; wk++)
+    {
+        for (int wl = -20; wl < dH + 20; wl++)
+        {
+            int wx = wk + dX, wy = wl + dHiveTop;
+            if (wx < 5 || wx >= W - 5 || wy < 5 || wy >= H - 5) continue;
+            int wti = wy * W + wx;
+            if (act[wti] == 0 || typ[wti] != 396) continue;
+            bool wFlag = true;
+            for (int wn = -1; wn >= -3; wn--)
+                if (wy + wn >= 0 && (act[(wy + wn) * W + wx] != 0 || act[(wy + wn) * W + wx + 1] != 0)) { wFlag = false; break; }
+            bool wFlag2 = true;
+            for (int wm = 1; wm <= 3; wm++)
+                if (wy + wm < H && (act[(wy + wm) * W + wx] != 0 || act[(wy + wm) * W + wx + 1] != 0)) { wFlag2 = false; break; }
+            // 装饰（485/751/484/165/187）两侧一致省略放置，掷骰照原序消耗保持流对齐
+            if (wFlag && (int)r.Next(20) == 0) { int wStyle = (int)r.Next(4); if ((int)r.Next(30) == 0) wStyle = 0; }
+            else if (wFlag && (int)r.Next(5) == 0) { }
+            else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0) { }
+            else if (wFlag && (int)r.Next(5) == 0) { }
+        }
+    }
+}
+Checkpoint("deserthive");
+Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {
@@ -1645,3 +1927,261 @@ sb.AppendLine("}");
 File.WriteAllText(outPath, sb.ToString());
 File.WriteAllText(outPath + ".ghost", string.Join("\n", ghostPts));
 Console.WriteLine($"written {outPath} ({checkpoints.Count} checkpoints)");
+
+// ================= Terraria.Utilities.FastRandom（FastRandom.cs 1:1）=================
+class FR
+{
+    static ulong FrNextSeed(ulong s) => (s * 25214903917UL + 11UL) & 0xFFFFFFFFFFFFUL;
+    public ulong S;
+    public FR(ulong s) { S = s; }
+    public FR Mod(ulong m) => new FR(FrNextSeed(m) ^ S);                       // WithModifier(ulong)
+    public FR ModXY(int x, int y) => Mod((ulong)(x + 2654435769u + ((long)y << 6)) + ((ulong)y >> 2)); // WithModifier(int,int)
+    int Bits(int bits) { S = FrNextSeed(S); return (int)(S >> (48 - bits)); }   // NextBits
+    public int Next(int max)
+    {
+        if ((max & -max) == max) return (int)((long)max * (long)Bits(31) >> 31);
+        int num, r2;
+        do { num = Bits(31); r2 = num % max; } while (num - r2 + (max - 1) < 0);
+        return r2;
+    }
+    public double NextDouble() => (float)Bits(32) * 4.656613E-10f;
+}
+
+// ================= WorldBuilding 微框架（GenAction/GenShape/Actions/Modifiers/Shapes 1:1）=================
+// 只实现沙漠入口用到的子集；哈希无关的副作用（SquareWallFrame/SmoothSlope）省略。
+static class WC
+{
+    public static byte[] A; public static ushort[] T, Wl; public static byte[] L;
+    public static dynamic R; public static HashSet<ushort> SOLID;
+    public static int W, H;
+    public static bool InW(int x, int y) => x >= 0 && x < W && y >= 0 && y < H;
+    public static long Key(int dx, int dy) => ((long)dx << 22) | (uint)(dy + (1 << 21));
+}
+
+abstract class GA
+{
+    public GA N;                       // NextAction
+    public HashSet<long> O;            // OutputData
+    public abstract bool Apply(int ox, int oy, int x, int y);
+    protected bool UA(int ox, int oy, int x, int y)
+    {
+        if (O != null) O.Add(WC.Key(x - ox, y - oy));
+        return N?.Apply(ox, oy, x, y) ?? true;
+    }
+}
+
+static class GW
+{
+    public static GA Chain(params GA[] xs)   // Actions.Chain：串 NextAction，返回链首
+    {
+        for (int i = 0; i < xs.Length - 1; i++) xs[i].N = xs[i + 1];
+        return xs[0];
+    }
+    public static GA Out(GA a, HashSet<long> o) { a.O = o; return a; }  // GenAction.Output
+
+    // ---- Modifiers（Modifiers.cs 1:1）----
+    public class BlotchesA : GA   // 默认 scale=2 chance=0.3：先掷 1 次 NextDouble 弃，再判 chance
+    {
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            WC.R.NextDouble();
+            if ((double)WC.R.NextDouble() < 0.3)
+            {
+                bool f = false;
+                int a = (int)WC.R.Next(-1, 1), b = (int)WC.R.Next(0, 2), c = (int)WC.R.Next(-1, 1), d = (int)WC.R.Next(0, 2);
+                for (int i = a; i <= b; i++)
+                    for (int j = c; j <= d; j++)
+                        f |= !UA(ox, oy, x + i, y + j);
+                return !f;
+            }
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class OffsetA : GA
+    {
+        public int X, Y;
+        public OffsetA(int x, int y) { X = x; Y = y; }
+        public override bool Apply(int ox, int oy, int x, int y) => UA(ox, oy, x + X, y + Y);
+    }
+    public class ExpandA : GA
+    {
+        public int E;
+        public ExpandA(int e) { E = e; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            bool f = false;
+            for (int i = -E; i <= E; i++)
+                for (int j = -E; j <= E; j++)
+                    f |= !UA(ox, oy, x + i, y + j);
+            return !f;
+        }
+    }
+    public class IsSolidA : GA   // active && tileSolid[type]（SolidOrSlopedTile 简化——此阶段无坡面/半砖）
+    {
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (!WC.InW(x, y)) return false;
+            int i = y * WC.W + x;
+            if (WC.A[i] == 0 || !WC.SOLID.Contains(WC.T[i])) return false;
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class NotInShapeA : GA
+    {
+        public HashSet<long> D;
+        public NotInShapeA(HashSet<long> d) { D = d; }
+        public override bool Apply(int ox, int oy, int x, int y)
+            => D.Contains(WC.Key(x - ox, y - oy)) ? false : UA(ox, oy, x, y);
+    }
+    public class OnlyTilesA : GA
+    {
+        public ushort Tt;
+        public OnlyTilesA(ushort t) { Tt = t; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (!WC.InW(x, y)) return false;
+            int i = y * WC.W + x;
+            if (WC.A[i] == 0 || WC.T[i] != Tt) return false;
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class SkipWallsA : GA
+    {
+        public ushort Wt;
+        public SkipWallsA(ushort w) { Wt = w; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (!WC.InW(x, y)) return false;
+            if (WC.Wl[y * WC.W + x] == Wt) return false;
+            return UA(ox, oy, x, y);
+        }
+    }
+
+    // ---- Actions（Actions.cs 1:1）----
+    public class ClearA : GA   // ClearEverything
+    {
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.A[i] = 0; WC.T[i] = 0; WC.Wl[i] = 0; WC.L[i] = 0; }
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class ClearTileA : GA   // ClearTile()：active=false（type/wall/liquid 保留）
+    {
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (WC.InW(x, y)) WC.A[y * WC.W + x] = 0;
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class SetTileA : GA  // Clear(~(Wiring|Actuator)) + type + active → wall/liquid 清零
+    {
+        public ushort Tt;
+        public SetTileA(ushort t) { Tt = t; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (WC.InW(x, y)) { int i = y * WC.W + x; WC.T[i] = Tt; WC.A[i] = 1; WC.Wl[i] = 0; WC.L[i] = 0; }
+            return UA(ox, oy, x, y);
+        }
+    }
+    public class PlaceWallA : GA // wall = type（SquareWallFrame 哈希无关）
+    {
+        public ushort Wt;
+        public PlaceWallA(ushort w) { Wt = w; }
+        public override bool Apply(int ox, int oy, int x, int y)
+        {
+            if (WC.InW(x, y)) WC.Wl[y * WC.W + x] = Wt;
+            return UA(ox, oy, x, y);
+        }
+    }
+
+    // ---- Shapes（Shapes.cs 1:1；quitOnFail 恒 false → Apply 返回值不中断遍历）----
+    public static void GenCircle(int ox, int oy, int hR, int vR, GA act)
+    {
+        int num = (hR + 1) * (hR + 1);
+        for (int i = oy - vR; i <= oy + vR; i++)
+        {
+            double n2 = (double)hR / (double)vR * (double)(i - oy);
+            int n3 = Math.Min(hR, (int)Math.Sqrt((double)num - n2 * n2));
+            for (int j = ox - n3; j <= ox + n3; j++) act.Apply(ox, oy, j, i);
+        }
+    }
+    public static void GenRect(int ox, int oy, int l, int t, int r, int b, GA act)
+    {
+        for (int i = ox + l; i < ox + r; i++)
+            for (int j = oy + t; j < oy + b; j++) act.Apply(ox, oy, i, j);
+    }
+    public static void GenRectWH(int ox, int oy, int w, int h, GA act) => GenRect(ox, oy, 0, 0, w, h, act);
+    public static (int dx, int dy) Decode(long k) => ((int)(k >> 22), (int)((k & ((1L << 22) - 1)) - (1 << 21)));
+    public static void GenAll(int ox, int oy, HashSet<long> d, GA act)   // ModShapes.All
+    {
+        foreach (var k in d)
+        {
+            var (dx, dy) = Decode(k);
+            act.Apply(ox, oy, ox + dx, oy + dy);
+        }
+    }
+    public static void GenOutline(int ox, int oy, HashSet<long> d, GA act)   // OuterOutline（useDiagonals=true）
+    {
+        int[] offs = { 1, 0, -1, 0, 0, 1, 0, -1, 1, 1, 1, -1, -1, 1, -1, -1 };
+        foreach (var k in d)
+        {
+            var (dx, dy) = Decode(k);
+            for (int i = 0; i < 16; i += 2)
+                if (!d.Contains(WC.Key(dx + offs[i], dy + offs[i + 1])))
+                    act.Apply(ox, oy, ox + dx + offs[i], oy + dy + offs[i + 1]);
+        }
+    }
+    public static void GenTail(int ox, int oy, double width, double ex, double ey, GA act)   // Shapes.Tail
+    {
+        double w = width * 16.0, exo = ex * 16.0, eyo = ey * 16.0;
+        double sx = ox << 4, sy = oy << 4;
+        PlotTileTale(sx, sy, sx + exo, sy + eyo, w, (x, y) => { act.Apply(ox, oy, x, y); return true; });
+    }
+    static bool PlotLineAct(int x0, int y0, int x1, int y1, Func<int, int, bool> plot, bool jump)  // Utils.PlotLine
+    {
+        if (x0 == x1 && y0 == y1) return plot(x0, y0);
+        bool flag = Math.Abs(y1 - y0) > Math.Abs(x1 - x0);
+        if (flag) { (x0, y0) = (y0, x0); (x1, y1) = (y1, x1); }
+        int num = Math.Abs(x1 - x0), num2 = Math.Abs(y1 - y0);
+        int num3 = num / 2, num4 = y0;
+        int num5 = x0 < x1 ? 1 : -1, num6 = y0 < y1 ? 1 : -1;
+        for (int i = x0; i != x1; i += num5)
+        {
+            if (flag) { if (!plot(num4, i)) return false; }
+            else if (!plot(i, num4)) return false;
+            num3 -= num2;
+            if (num3 >= 0) continue;
+            num4 += num6;
+            if (!jump)
+            {
+                if (flag) { if (!plot(num4, i)) return false; }
+                else if (!plot(i, num4)) return false;
+            }
+            num3 += num;
+        }
+        return true;
+    }
+    static void PlotTileTale(double startX, double startY, double endX, double endY, double width, Func<int, int, bool> plot)  // Utils.PlotTileTale
+    {
+        double halfWidth = width / 2.0;
+        double vx = endX - startX, vy = endY - startY;
+        double len = Math.Sqrt(vx * vx + vy * vy);
+        double ux = vx / len, uy = vy / len;
+        double px = -uy, py = ux;
+        int psx = (int)(startX / 16.0), psy = (int)(startY / 16.0);
+        int pex = (int)(endX / 16.0), pey = (int)(endY / 16.0);
+        int length = 0;
+        PlotLineAct(psx, psy, pex, pey, (x, y) => { length++; return true; }, true);
+        length--;
+        int curLength = 0;
+        PlotLineAct(psx, psy, pex, pey, delegate (int x, int y)
+        {
+            double num = 1.0 - (double)curLength / (double)length;
+            curLength++;
+            int p2x = (int)((startX - px * halfWidth * num) / 16.0), p2y = (int)((startY - py * halfWidth * num) / 16.0);
+            int p3x = (int)((startX + px * halfWidth * num) / 16.0), p3y = (int)((startY + py * halfWidth * num) / 16.0);
+            return PlotLineAct(x + p2x - psx, y + p2y - psy, x + p3x - psx, y + p3y - psy, plot, jump: false);
+        }, jump: true);
+    }
+}

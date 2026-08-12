@@ -3,6 +3,7 @@ import { CHUNK, TILE } from '../core/constants';
 import { T, TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
+import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, animYOffset, campfireYOffset } from './TileAnim';
 import { VanillaWallTiler } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
@@ -227,6 +228,9 @@ export class ChunkCache {
         ctx.globalAlpha = actuated ? 0.3 : 1;
         const def = TILE_DEFS[type];
         if (!def) { ctx.fillStyle = '#808080'; ctx.fillRect(px, py, TILE, TILE); continue; }
+        // 风摆动图块（草/藤/吊挂植物/树冠标记帧）：摘出静态烘焙，
+        // 由 Renderer 的 WindSway overlay 逐帧动态绘制（原版 AddSpecialPoint 特殊路径）
+        if (def.vanilla && swayBakeSkip(type, st.frameX[i])) continue;
         // 原版素材图块（TileDef.vanilla）：TEdit framing 查找表（auto）或显式 18px 帧（style）
         if (def.vanilla && this.autotiler) {
           // 动画陈设（原版 AnimateTiles/GetTileDrawData addFrY）：frameY += 帧索引*pitch
@@ -327,15 +331,11 @@ export class ChunkCache {
       }
     }
 
-    // ---- 第四遍：原版树冠/树枝（tile 5 标记帧，跨 chunk 外扩绘制） ----
-    // 树冠 80×80 / 树枝 40×40 跨多格，主遍跳过这些标记帧，由此外扩遍统一绘制防裁剪。
-    // 棕榈（323）整棵都在此绘制：干身 frameY 是倾斜偏移（最大 ±12px 跨列），
-    // 主遍画会在 chunk 边缘列被裁剪 → 干+冠全部走外扩遍
+    // ---- 第四遍：树静态部分（跨 chunk 外扩绘制） ----
+    // 风摆动系统接管后：树冠/树枝标记帧不再烘焙（Renderer WindSway overlay 逐帧摆动），
+    // 本遍只保留棕榈干身（倾斜跨列必须外扩遍）与蘑菇树顶（72 原版不摆动）。
     if (this.autotiler) {
-      const treeIds = ['tree', 'v_72_mushroom_tree', 'v_323_palm_trees', 'v_5_trees',
-        'v_583_topaz_tree', 'v_584_amethyst_tree', 'v_585_sapphire_tree', 'v_586_emerald_tree',
-        'v_587_ruby_tree', 'v_588_diamond_tree', 'v_589_amber_tree',
-        'v_596_vanity_tree_sakura', 'v_616_vanity_tree_yellow_willow', 'v_634_ash_tree']
+      const treeIds = ['v_72_mushroom_tree', 'v_323_palm_trees']
         .map((k) => TILE_BY_KEY[k]).filter((id) => id !== undefined);
       for (const v5 of treeIds) {
         const EXT = 6;
@@ -347,20 +347,18 @@ export class ChunkCache {
             const fx = st.frameX[i], fy = st.frameY[i];
             const def = TILE_DEFS[st.type[i]];
             const sheet = def?.vanilla?.sheet ?? 5;
-            const isPalm = sheet === 323;
-            const isCrown = isPalm ? (fx >= 88 && fx <= 132) : (fy >= 198); // 原版只看 frameY
-            if (isPalm) {
-              // 棕榈：干+冠都画（干身倾斜跨列，必须外扩遍）
+            const trees = { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
+              worldSurface: this.world.groundLevel, worldW: this.world.w };
+            if (sheet === 323) {
+              const isCrown = fx >= 88 && fx <= 132;
+              if (isCrown) continue; // 棕榈冠 → WindSway overlay
+              // 棕榈干身（倾斜跨列，必须外扩遍）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, isCrown,
-                { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
-                worldSurface: this.world.groundLevel, worldW: this.world.w });
-            } else if (isCrown) {
-              // 其他树：仅标记帧（干身由主遍绘制）
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, false, trees);
+            } else {
+              // 蘑菇树：顶格标记帧原版不摆动，保留烘焙（DrawTrees switch 无 case 72）
               drawTreeCell(ctx, this.autotiler.atlas, st, tx, ty, fx, fy,
-                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true,
-                { treeX: this.world.treeX, treeStyle: this.world.treeStyle, treeTops: this.world.treeTops,
-                worldSurface: this.world.groundLevel, worldW: this.world.w });
+                tx * TILE - x0 * TILE, ty * TILE - y0 * TILE, sheet, true, trees);
             }
           }
         }

@@ -60,15 +60,6 @@ export interface TileRunnerOpts {
 }
 
 
-const GP2: string[] = [];
-let GP2_N = 0;
-let GP2_ON = false;
-export function gp2Begin() { GP2_ON = true; GP2.length = 0; GP2_N = 0; }
-export function gp2End() { GP2_ON = false; }
-const ITR: string[] = [];
-let ITR_N = 0;
-export function gp2Dump() { return GP2.join(' ') + ' || ' + ITR.join(' '); }
-
 export function tileRunner(
   st: TileStore, rng: RNG, gs: GenState,
   i: number, j: number, o: TileRunnerOpts,
@@ -80,7 +71,6 @@ export function tileRunner(
   const ignoreTileType = o.ignoreTileType ?? -1;
   let num1 = strength;          // 当前半径(衰减)
   let num2 = steps;             // 剩余步数
-  let itLocal = 0;              // 本次调用的迭代计数(ITR 追踪用)
   let px = i + 0.0, py = j + 0.0;
   // 原版初始速度 Next(-10,11)*0.1(0.1 步长离散);仅 speedX/speedY 任一非 0 才覆写
   let vx = rng.int(-10, 10) * 0.1;
@@ -92,9 +82,6 @@ export function tileRunner(
   // 普通世界短路不掷；else if (Next(4)==0) 的 Next(4) **每次调用必掷**（普通世界
   // 结果弃用，num3 恒 0=水）。缺失则每次调用流偏 1 格——种子等价致命。
   rng.nextIntRange(0, 4);
-  if (GP2_ON && steps === 10000) {
-    ITR.push(`CALL i=${i} j=${j} s=${strength} st=${steps} t=${type} at=${addTile} ny=${noYChange} ov=${overRide} mw=${!!o.mudWall}`);
-  }
 
 
   while (num1 > 0 && num2 > 0) {
@@ -113,15 +100,6 @@ export function tileRunner(
         // 植物 decor≈tileCut 不跳。洞穴链阶段世界尚无 framed 活性块，零影响，
         // 后续矿石 pass 与结构 pass 有相对序保证，此门禁主要防未来反序调用。
         const ci0 = st.idx(x, y);
-        if (GP2_ON && steps === 10000) {
-          GP2_N++;
-          if ((GP2_N >= 673000 && GP2_N <= 674100) || GP2_N % 50000 === 0) {
-            GP2.push(`c${GP2_N}@${x},${y}a${st.flags[ci0]}t${st.type[ci0]}=pk${rng.vanilla.peek()}`);
-          }
-        }
-        if (GP2_ON && (x === 3401 && y === 581)) {
-          GP2.push(`S@${px.toFixed(1)},${py.toFixed(1)} a${st.flags[ci0]}t${st.type[ci0]}=pk${rng.vanilla.peek()}`);
-        }
         const cdef = TILE_DEFS[st.type[ci0]];
                 if (st.flags[ci0] && cdef?.framed && !cdef.decor) continue;
         if (ignoreTileType >= 0 && st.type[ci0] === ignoreTileType && st.flags[ci0]) continue;
@@ -171,7 +149,6 @@ export function tileRunner(
               // 泥不替换近地表的石头(±50 抖动)
               if (type === MUD) {
                 const f4r = rng.int(-50, 49);
-                if (x === 3405 && y === 308 && Math.abs(y - py) < 700) console.log(`F4@${x},${y} roll=${f4r} y=${y} wS=${gs.worldSurface} thr=${gs.worldSurface + f4r} pass=${y < gs.worldSurface + f4r} py=${py.toFixed(1)}`);
                 if (y < gs.worldSurface + f4r) flag4 = true;
               }
             } else if (FLAG3_ALWAYS.has(cur)) {
@@ -203,10 +180,6 @@ export function tileRunner(
     }
     // 移动 + 大半径加速(原版 12 档阶梯 50..900,每档速度抖动 ±0.05)
     px += vx; py += vy;
-    itLocal++;
-    if (GP2_ON && steps === 10000 && itLocal <= 210) {
-      ITR.push(`it${itLocal} px=${px} py=${py} vx=${vx} vy=${vy} n1=${num1} n2=${num2} pk=${rng.vanilla.peek()}`);
-    }
     for (const thr of [50, 100, 150, 200, 250, 300, 400, 500, 600, 700, 800, 900]) {
       if (num1 > thr) {
         px += vx; py += vy;

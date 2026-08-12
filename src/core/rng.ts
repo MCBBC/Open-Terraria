@@ -219,3 +219,71 @@ export function hash2(x: number, y: number, seed: number): number {
   h ^= h >>> 12;
   return (h >>> 0) / 4294967296;
 }
+
+// ── FastRandom（Terraria.Utilities/FastRandom.cs:7-88 一比一）─────────────────
+// 48 位 LCG（Java Random 同族），与 UnifiedRandom 完全独立的第二条随机流。
+// 原版世界生成里凡显式 `new FastRandom(seed).WithModifier(...)` 的掷骰走这里
+// （DesertHive.PlaceClustersArea 的 shell 类型骰/0.25 门、光照等）——绝不可用
+// RNG/UnifiedRandom 代替，否则流偏移不可查。光照系统的副本在
+// src/lighting/FastRandom.ts（同源、API 子集），此处是世界生成权威实现。
+const FR_MULTIPLIER = 25214903917n;
+const FR_ADD = 11n;
+const FR_MASK = 0xffffffffffffn; // 2^48 - 1
+
+export class FastRandom {
+  private seed: bigint;
+
+  constructor(seed: bigint | number) {
+    this.seed = (typeof seed === 'bigint' ? seed : BigInt(seed)) & FR_MASK;
+  }
+
+  /** NextSeed(L85-88)：静态推进，不动自身状态 */
+  static nextSeed(seed: bigint): bigint {
+    return (seed * FR_MULTIPLIER + FR_ADD) & FR_MASK;
+  }
+
+  /** WithModifier(ulong)(L27-30)：新实例种子 = NextSeed(m) ^ 原 Seed（不改自身） */
+  withModifier(m: number | bigint): FastRandom {
+    const mod = typeof m === 'bigint' ? m : BigInt(m);
+    return new FastRandom(FastRandom.nextSeed(mod) ^ this.seed);
+  }
+
+  /** WithModifier(int x, int y)(L32-35)：
+   *  modifier = (ulong)(x + 2654435769u + ((long)y << 6)) + ((ulong)y >> 2)
+   *  x + 2654435769u 在 C# 里是 long（int+uint 提升），负 x 也安全 */
+  withModifierXY(x: number, y: number): FastRandom {
+    const mod = BigInt(x + 2654435769 + (y << 6)) + (BigInt(y >>> 0) >> 2n);
+    return this.withModifier(mod);
+  }
+
+  /** NextBits(b)(L47-51)：前进一步并取高 b 位 */
+  private nextBits(bits: number): number {
+    this.seed = FastRandom.nextSeed(this.seed);
+    return Number(this.seed >> BigInt(48 - bits));
+  }
+
+  /** Next(max)(L63-78)（= Next(min,max) 的 range 部分）；2 的幂走快速路径，
+   *  其余拒绝采样——溢出带判据 num <= 2^31-1-(max-1) 与原版 int32 回绕等价 */
+  nextMax(max: number): number {
+    if ((max & -max) === max) {
+      // (int)((long)max * NextBits(31) >> 31)
+      return Math.floor((max * this.nextBits(31)) / 2147483648);
+    }
+    for (;;) {
+      const num = this.nextBits(31);          // [0, 2^31)
+      const rem = num % max;
+      if (num <= 2147483647 - (max - 1)) return rem;
+    }
+  }
+
+  /** NextDouble()(L58-61)：`(float)NextBits(32) * 4.656613E-10f`——两个坑：
+   *  1. NextBits(32)=(int)(seed>>16) 是 unchecked ulong→int 回绕，≥2^31 取负；
+   *  2. 乘法在 float（24 位尾数）精度——必须 fround，否则与 C# 位级不等。
+   *  结果因此可落在 [-1,1)（原版事实，DesertHive 0.25 门直接消费） */
+  nextDouble(): number {
+    this.seed = FastRandom.nextSeed(this.seed);
+    const raw = Number(this.seed >> 16n);
+    const b32 = raw >= 2 ** 31 ? raw - 2 ** 32 : raw; // (int) unchecked 回绕
+    return Math.fround(Math.fround(b32) * Math.fround(4.656613e-10));
+  }
+}

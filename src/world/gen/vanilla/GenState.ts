@@ -2,6 +2,8 @@
 // 105 个 pass 按序读写,顺序不可调换。
 export interface GenState {
   // 世界常量（Reset / Terrain pass 输出）
+  /** 世界种子 int（translateSeed 产物；DesertHive 的 FastRandom(seed).WithModifier(57005) 消费） */
+  seed: number;
   worldSurface: number;   // 平均地表 y（tile）
   worldSurfaceLow: number;
   worldSurfaceHigh: number;
@@ -75,6 +77,7 @@ export interface GenState {
 
 export function newGenState(w: number, h: number): GenState {
   return {
+    seed: 0,
     worldSurface: Math.floor(h * 0.3), worldSurfaceLow: 0, worldSurfaceHigh: 0,
     rockLevel: Math.floor(h * 0.42), rockLevelLow: 0, rockLevelHigh: 0,
     waterLine: Math.floor(h * 0.35), lavaLine: h - 200,
