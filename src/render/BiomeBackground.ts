@@ -443,13 +443,33 @@ export class BiomeBackground {
     camTopY: number, viewW: number, viewH: number,
   ) {
     const worldID = world.seed >>> 0;
-    const lavaLine = (world.lavaLine || world.store.h - 200) * 16;
     const newSlots = ugSlots(this.ugStyle, this.iceBack, this.jungleBack, this.hellBack, worldID);
     const oldSlots = ugSlots(this.ugOld, this.iceBack, this.jungleBack, this.hellBack, worldID);
     const alpha = this.ugAlpha;
     // 垂直分层边界（屏幕空间 y；原版 bgTopY 语义 = 层世界 y - screenPosition.Y）
     const dirtTop = world.groundLevel * 16 - camTopY + 16;             // DrawBackground_DirtBackground :52824
-    const magmaTop = lavaLine - camTopY + 16 + 600 - 8;                // DrawBackground_DrawMagmaLayer :52276
+    // 岩浆带顶（:52237 magmaLayer 公式：ws + floor((h-330-ws)/6)*6 - 5——★曾误用
+    // lavaLine(h-200) 整条带低 ~135 格）;bgTopY = magmaLayer*16 - screenY + 16 + 600 - 8
+    const magmaLayerTile = Math.floor(world.groundLevel
+      + Math.floor((world.store.h - 330 - world.groundLevel) / 6) * 6) - 5;
+    const magmaTop = magmaLayerTile * 16 - camTopY + 16 + 600 - 8;     // DrawBackground_DrawMagmaLayer :52276
+    // UnderworldLayer（h-200）屏幕 y——岩浆带底 + 表面波纹条位置 + 黑盒下界
+    const uwScreenY = (world.store.h - 200) * 16 - camTopY;
+    // 岩浆 3 帧动画（Main.cs:61657-61665：magmaBGFrameCounter 每 8 tick 推进,mod 3;
+    // 8 tick = 133.33ms）。岩浆体 125+hell(160×288=3 帧×96px)与表面条 185+hell
+    // (160×48,取 16px 行×3 帧)共用同一 frame
+    this.magmaFrameT += dtMs;
+    const magmaFrame = Math.floor(this.magmaFrameT / 133.33) % 3;
+    // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒最先打底】→ Rock → Magma。
+    // 曾把黑盒画在带层之后 → 盖掉岩浆带 = "地狱背景缺失/接近地狱层叠错误"报告根因;
+    // 接近地狱时屏上方背景渐黑正是原版观感（黑盒打底后仅岩层/岩浆重画）
+    if (magmaTop < viewH) {
+      const blackBottom = Math.min(viewH + 200, uwScreenY);
+      if (blackBottom > 0) {
+        ctx.fillStyle = '#000';
+        ctx.fillRect(0, 0, viewW, Math.max(0, blackBottom));
+      }
+    }
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
       ctx.save();

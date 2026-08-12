@@ -33,12 +33,19 @@ function waterSheet(vt: number, waterStyle = 0): string {
 function shimmerWave(x: number, y: number, tVis: number): number {
   return Math.sin(((x + y / 6) / 10 - tVis / 360) * Math.PI * 2);
 }
-/** GetShimmerBaseColor :803-807：Lerp((0.647,0.510,0.933),(0.804,0.804,1), 0.1+wave×0.4) → 0-255 */
-function shimmerBaseColor(x: number, y: number, tVis: number): [number, number, number] {
+/** GetShimmerBaseColor :803-807（float 版）：Lerp((0.647,0.510,0.933),(0.804,0.804,1), 0.1+wave×0.4) → 0-255 浮点。
+ *  原版 SetShimmerVertexColors :745-759 对四角 (x,y)(x+1,y)(x,y+1)(x+1,y+1) 分别取值、顶点间插值；
+ *  float 版供 2×2 子块双线性插值用，取整只发生在最终拼 rgb() 时（插值中途取整会丢精度）。 */
+function shimmerBaseColorF(x: number, y: number, tVis: number): [number, number, number] {
   const w = shimmerWave(x, y, tVis);
   const k = 0.1 + w * 0.4;
-  const lerp = (a: number, b: number) => Math.round(255 * (a + (b - a) * k));
+  const lerp = (a: number, b: number) => 255 * (a + (b - a) * k);
   return [lerp(0.64705884, 41 / 51), lerp(26 / 51, 41 / 51), lerp(14 / 15, 1)];
+}
+/** shimmerBaseColorF 的取整包装（整格单色场景：瓦后路径等） */
+function shimmerBaseColor(x: number, y: number, tVis: number): [number, number, number] {
+  const c = shimmerBaseColorF(x, y, tVis);
+  return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])];
 }
 /** SimpleWhiteNoise :793-797（uint 乘加混淆） */
 function shimmerWhiteNoise(x: number, y: number): number {
@@ -65,6 +72,89 @@ function shimmerFrame(top: boolean, x: number, y: number, tVis: number): number 
   let num = ((x + 0.5 + (y + 0.5) / 6) / 10) - tVis / 360;
   if (!top) num += (x + 0.5) + (y + 0.5);
   return ((Math.floor(num) % 16) + 16) % 16;
+}
+
+/**
+ * 基底层波色叠加（SetShimmerVertexColors :745-759 的 Canvas2D 最优可达）。
+ * 原版四角顶点色 = white × opacity × GetShimmerBaseColor(角)，顶点间插值；
+ * Canvas2D 无顶点色，故把 16×16 tile 分 2×2 子块（8×8），每子块取四角双线性
+ * 插值在其中心位置的色，以 multiply 叠在已画的 water_14 上（=纹理×色，同原版 modulate）。
+ */
+function applyShimmerBaseTint(
+  ctx: CanvasRenderingContext2D, x: number, y: number,
+  dstX: number, dstY: number, w: number, h: number, tVis: number,
+): void {
+  const c00 = shimmerBaseColorF(x, y, tVis), c10 = shimmerBaseColorF(x + 1, y, tVis);
+  const c01 = shimmerBaseColorF(x, y + 1, tVis), c11 = shimmerBaseColorF(x + 1, y + 1, tVis);
+  ctx.save();
+  ctx.globalCompositeOperation = 'multiply';
+  const subW = Math.ceil(w / 2), subH = Math.ceil(h / 2);
+  for (let by = 0; by < 2; by++) {
+    for (let bx = 0; bx < 2; bx++) {
+      const bw = Math.min(subW, w - bx * subW), bh = Math.min(subH, h - by * subH);
+      if (bw <= 0 || bh <= 0) continue;
+      // 子块中心在 tile 内的归一化位置（dstX 相对 x*16 有壁值裁剪偏移）→ 四角双线性插值
+      const u = (dstX + bx * subW + bw / 2 - x * 16) / 16;
+      const v = (dstY + by * subH + bh / 2 - y * 16) / 16;
+      const ch = (i: number) => c00[i] * (1 - u) * (1 - v) + c10[i] * u * (1 - v)
+        + c01[i] * (1 - u) * v + c11[i] * u * v;
+      ctx.fillStyle = `rgb(${Math.round(ch(0))},${Math.round(ch(1))},${Math.round(ch(2))})`;
+      ctx.fillRect(dstX + bx * subW, dstY + by * subH, bw, bh);
+    }
+  }
+  ctx.restore();
+}
+
+// ---- sparkle 彩虹（Main.hslToRgb，Main.cs:47266-47290 1:1）----
+function hue2rgb(v1: number, v2: number, vH: number): number {
+  if (vH < 0) vH += 1;
+  if (vH > 1) vH -= 1;
+  if (6 * vH < 1) return v1 + (v2 - v1) * 6 * vH;
+  if (2 * vH < 1) return v2;
+  if (3 * vH < 1) return v1 + (v2 - v1) * ((2 / 3) - vH) * 6;
+  return v1;
+}
+/** Main.hslToRgb 1:1（GetShimmerGlitterColor :766-771 以 s=1/l=0.5 调用）→ RGB 0-1 */
+function hslToRgb(hue: number, sat: number, lum: number): [number, number, number] {
+  if (sat === 0) return [lum, lum, lum];
+  const v2 = lum < 0.5 ? lum * (1 + sat) : lum + sat - lum * sat;
+  const v1 = 2 * lum - v2;
+  return [hue2rgb(v1, v2, hue + 1 / 3), hue2rgb(v1, v2, hue), hue2rgb(v1, v2, hue - 1 / 3)];
+}
+
+// ---- sparkle 染色变体缓存（离线预渲染）----
+// 关键：sparkle 闪纹是近纯白像素（饱和度 0），CSS hue-rotate 对纯白是 no-op——
+// 旧实现 ctx.filter=hue-rotate 等于没上色，闪纹显示为白色而非原版彩虹。
+// 故离线预渲染染色副本：hue 量化 16 档（((px+py/6)+t/30)/6 % 1），每档一条
+// water_14 的 sparkle 带（X∈[48,宽)，:721 sourceRectangle.X += 48）整条染色，惰性构建。
+// 染色 = 纹理×HSL 色（modulate，同原版顶点色乘法）：画 sprite → multiply 填色 →
+// destination-in 复贴恢复 alpha 掩码（单用 source-atop 会把 RGB 替换成平色、
+// 丢掉闪纹的明暗纹理细节；multiply 单用会给透明区上色）。
+// 绘制沿用原版源矩形 (sx+48, srcY+80*fr)（在副本内即 −48），一条带覆盖全部
+// 帧行/变体子矩形——避免逐帧×hue 的 16×16 变体随 sx/sy 爆炸，单 hue 一份即可。
+const SPARKLE_HUE_STEPS = 16;
+const _sparkleTintCache = new Map<number, HTMLCanvasElement>();
+function shimmerSparkleTint(tex: HTMLImageElement, hueIdx: number): HTMLCanvasElement | null {
+  let c = _sparkleTintCache.get(hueIdx);
+  if (c) return c;
+  const bandX = 48;                     // :721 sparkle 带 X 偏移（water_14 第 4-6 列 16px 带）
+  const bandW = tex.width - bandX;
+  if (bandW <= 0 || typeof document === 'undefined') return null;
+  c = document.createElement('canvas');
+  c.width = bandW; c.height = tex.height;
+  const cc = c.getContext('2d');
+  if (!cc) return null;
+  cc.imageSmoothingEnabled = false;
+  cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);
+  const [r, g, b] = hslToRgb(hueIdx / SPARKLE_HUE_STEPS, 1, 0.5);
+  cc.globalCompositeOperation = 'multiply';
+  cc.fillStyle = `rgb(${Math.round(r * 255)},${Math.round(g * 255)},${Math.round(b * 255)})`;
+  cc.fillRect(0, 0, bandW, tex.height);
+  cc.globalCompositeOperation = 'destination-in';
+  cc.drawImage(tex, bandX, 0, bandW, tex.height, 0, 0, bandW, tex.height);
+  cc.globalCompositeOperation = 'source-over';
+  _sparkleTintCache.set(hueIdx, c);
+  return c;
 }
 
 // ---- 类型数组池(2026-08 审计 G1):此前每 pass 分配 24 个数组 ×2 pass/帧
@@ -388,34 +478,38 @@ export function drawVanillaLiquids(
       // ②sparkle 层：源矩形 X+48（water_14 的第 4 列 16px 闪纹带）、Y+80×GetShimmerFrame
       // 16 帧动画，仅 flag（非内部/瀑布帧）或 (x+y)%2==0 的格子画（:720-729）
       // ③sparkle 顶点色 = GetShimmerGlitterColor 漂移彩虹 + 呼吸 alpha（:766-790）
-      // Canvas 无逐顶点色：基底层用整格 multiply 叠波色近似（薄边缘条 sw<8 跳过防
-      // 透明像素被压暗）；sparkle 彩虹用 hue-rotate 近似、alpha 1:1
+      // Canvas 无逐顶点色：基底层 2×2 子块双线性 multiply（applyShimmerBaseTint，
+      // 薄边缘条 sw<8 跳过防透明像素被压暗）；sparkle 用离线染色变体（hue 16 档量化）、
+      // alpha 取四角均值
       if (vt === 3) {
         const tVis = (nowMs / 1000) * 60;                      // ≈ Main.timeForVisualEffects（帧计数）
         const dstX = x * 16 + Math.floor(n2 * 16), dstY = y * 16 + Math.floor(n4 * 16);
         ctx.globalAlpha = Math.min(1, opacity[i] * (isBackground ? 1 : 0.75));
         ctx.drawImage(tex, sx, srcY, sw, sh, dstX, dstY, sw, sh);
-        if (sw >= 8) {
-          const bc = shimmerBaseColor(x + 0.5, y + 0.5, tVis);
-          ctx.save();
-          ctx.globalCompositeOperation = 'multiply';
-          ctx.fillStyle = `rgb(${bc[0]},${bc[1]},${bc[2]})`;
-          ctx.fillRect(dstX, dstY, sw, sh);
-          ctx.restore();
-        }
+        if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, sh, tVis);
         const flag = !(sx === 16 || sy % 80 === 48);           // :719
         if (flag || (x + y) % 2 === 0) {
-          const ga = shimmerGlitterOpacity(flag, x, y, tVis);  // :773-790
+          // alpha = 四角 GetShimmerGlitterOpacity 平均（原版逐顶点插值，Canvas2D
+          // 最优可达；top 四角恒 0.5 → 均值仍 0.5）。注意 sparkle 不乘前景 0.75/
+          // 背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接 ×= ptr->Opacity
+          const ga = (shimmerGlitterOpacity(flag, x, y, tVis)
+            + shimmerGlitterOpacity(flag, x + 1, y, tVis)
+            + shimmerGlitterOpacity(flag, x, y + 1, tVis)
+            + shimmerGlitterOpacity(flag, x + 1, y + 1, tVis)) * 0.25;  // :773-790
           if (ga > 0.02) {
             const fr = shimmerFrame(flag, x, y, tVis);         // :791-801
             const sSrcX = sx + 48, sSrcY = srcY + 80 * fr;
             if (sSrcX + sw <= tex.width && sSrcY + sh <= tex.height) {
               const hue = (((x + y / 6) + tVis / 30) / 6) % 1; // :767 彩虹相位
+              const hueIdx = ((Math.floor(hue * SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS)
+                + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
+              const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
               ctx.save();
-              ctx.globalCompositeOperation = 'lighter';
+              // 原版第二次 tileBatch.Draw 是普通 alpha 混合（非叠加），顶点色=彩虹×glitter
+              ctx.globalCompositeOperation = 'source-over';
               ctx.globalAlpha = Math.min(1, opacity[i] * ga);
-              ctx.filter = `hue-rotate(${Math.floor(hue * 360)}deg)`;
-              ctx.drawImage(tex, sSrcX, sSrcY, sw, sh, dstX, dstY, sw, sh);
+              ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
+                dstX, dstY, sw, sh);
               ctx.restore();
             }
           }
