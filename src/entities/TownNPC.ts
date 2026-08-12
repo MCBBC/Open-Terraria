@@ -290,18 +290,13 @@ export class TownNPC extends Entity {
     return true;
   }
 
-  /** 当前类型的态参数(10/12/14;15 走 TOWN_SWING) */
-  private atkParams(atkType: 0 | 1 | 2 | 3): TownShotParams | { swing: true } | undefined {
-    const hard = (game_worldFlagsHardMode(this), true); // 占位防误用——见下方实现
-    void hard;
-    const table = atkType === 0 ? TOWN_MELEE : atkType === 1 ? TOWN_BOW : TOWN_MAGIC;
+  /** 当前类型的态参数(10/12/14;15 走 TOWN_SWING);hardMode 覆盖按 world.flags */
+  private atkParams(atkType: 0 | 1 | 2 | 3): TownShotParams | undefined {
+    const table = atkType === 0 ? TOWN_MELEE : atkType === 1 ? TOWN_BOW : atkType === 2 ? TOWN_MAGIC : undefined;
+    if (!table) return undefined;
     const base = table[this.vanillaId];
     if (!base) return undefined;
-    // hardMode 覆盖(world.flags.hardMode)
-    const hm = base.hardMode;
-    if (hm && this.hardModeRef) {
-      return { ...base, ...hm } as TownShotParams;
-    }
+    if (base.hardMode && this.hardModeRef) return { ...base, ...base.hardMode } as TownShotParams;
     return base;
   }
   /** hardMode 引用(构造后由 Game 注入;避免 TownNPC 持 world) */

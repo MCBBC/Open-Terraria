@@ -84,7 +84,7 @@ describe('数值（1.4.5.6 UpdateBuffs L9640+）', () => {
 describe('环境 DoT 分块（HurtLifeRegen Player.cs:19136-19212）', () => {
   it('Burning：30 HP/s 且按原版 -600 阈值整块弹 5（每 10t 一块）', () => {
     const b = new BuffState();
-    b.apply(BuffType.Burning, 5);
+    b.apply(BuffType.Burning, 20);
     let dmg = 0;
     for (let k = 0; k < 600; k++) dmg += b.tick(1 / 60);      // 10 秒 = 300 HP
     expect(dmg).toBeLessThanOrEqual(-290);                    // 30 HP/s(浮点边界)

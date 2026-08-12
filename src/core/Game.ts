@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
-import { Achievements } from './Achievements';
+import { Achievements, achVidOfInternalItem } from './Achievements';
+import { statOfInternal } from '../data/vanillaItemStats';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -2727,6 +2728,10 @@ export class Game implements GameHooks {
       this._lastClockT = ct;
       const crossed = (a: number) => pt < a && ct >= a;
       if (crossed(Clock.DAWN)) {
+        // 成就：熬过一夜（Main.cs:64894 event 1）+ 血月夜结束（:64862-64866 event 5，
+        // 血月旗在清除前求值——本块首两行即原序）
+        this.achievements.notifyProgressionEvent(1);
+        if (w.clock.bloodMoon) this.achievements.notifyProgressionEvent(5);
         // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
@@ -2816,7 +2821,9 @@ export class Game implements GameHooks {
       }
       if (crossed(Clock.DUSK)) {
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
-        // UpdateTime_StartNight 内位于血月 roll 之前）
+        // UpdateTime_StartNight 内位于血月 roll 之前）；
+        // 成就：挺过日食（event 3，旗在清除前求值）
+        if (w.clock.eclipse) this.achievements.notifyProgressionEvent(3);
         w.clock.eclipse = false;
         // 灯笼夜入夜兑现（Main.cs:64709 = LanternNight.CheckNight → NaturalAttempt）：
         // 首胜预约 NextNightIsLanternNight 或月总已杀后的 1/14 自然 roll（冷却 5-10 夜）
@@ -2919,6 +2926,11 @@ export class Game implements GameHooks {
         this.newText(Lang.misc(inv.announce), 175, 75, 255);   // ChatColors.BossOrEvent 紫
       }
       if (inv.won) {
+        // 成就：入侵胜利 progression event（Main.cs:63786-63800：
+        // goblin 10 / pirate 11 / snow legion 12 / martian 13）
+        this.achievements.notifyProgressionEvent(
+          inv.won === INVASION_GOBLIN ? 10 : inv.won === INVASION_PIRATE ? 11
+            : inv.won === INVASION_SNOW_LEGION ? 12 : 13);
         // SetEventFlagCleared（NPC.cs:79557-79564）：首次胜利置旗；原版首胜还会经
         // OnGameEventClearedForTheFirstTime → LanternNight.NextNightIsLanternNight = true
         // （次夜灯笼夜：LanternsUp 状态 + 灯笼视觉 + 向导 Lantern1/2 对话段）。
@@ -8814,6 +8826,11 @@ export class Game implements GameHooks {
       // 专家/大师判定读世界难度（Main.expertMode/masterMode，Main.cs:2775/:2779）
       const ann = addMoonEventKill(this.world, enemy.vanillaId, this.world.isExpert, this.world.isMaster);
       if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
+      // 成就：月事件 15 波（NPC.cs:79369 霜月 event 14 / :79503 南瓜月 event 15——
+      // 进波公告非 Empty 且 waveNumber==15 时触发）
+      if (this.world.moonEvent.waveNumber >= 15) {
+        this.achievements.notifyProgressionEvent(this.world.moonEvent.kind === MOON_KIND_PUMPKIN ? 15 : 14);
+      }
     }
     // 星璇塔事件（NPC.cs:80080-80146）：
     //  本组专属怪死亡 → 发射 629 TowerDamageBolt → 命中塔盾 -1（归属表 LunarEvent.MINION_TOWER）；
@@ -8863,6 +8880,56 @@ export class Game implements GameHooks {
     const betsy = (this.entities.enemies as Enemy[]).find((e) => !e.dead && e.vanillaId === 551);
     return betsy ? betsy.hp / betsy.maxHp : null;
   }
+
+  // ================= 成就系统钩子（AchievementsHelper 移植） =================
+
+  /** 进世界成就基线（AchievementsHelper.OnPlayerEnteredWorld :100-192）：
+   *  背包/装备/染料/杂项全量"拾取"通知 + 装备态检查（含进包即满足的旗标成就） */
+  achOnWorldEnter(): void {
+    const inv = this.player.inv;
+    const notifyAll = (arr: ReadonlyArray<{ id: number; stack: number } | null>) => {
+      for (const s of arr) {
+        if (!s) continue;
+        const vid = achVidOfInternalItem(s.id);
+        if (vid != null) this.achievements.notifyItemPickup(vid);
+      }
+    };
+    notifyAll(inv.slots); notifyAll(inv.armor); notifyAll(inv.dye);
+    notifyAll(inv.miscEquips); notifyAll(inv.miscDyes);
+    if (this.player.maxMana > 20) this.achievements.completeFlag('STAR_POWER', 'Use');
+    this.achCheckEquipState();
+  }
+
+  /** 装备态成就检查（OnPlayerEnteredWorld :166-191 + HandleOnEquip :247-281 合并求值）：
+   *  抓钩→HOLD_ON_TIGHT / 坐骑→THE_CAVALRY / 翅膀→HEAD_IN_THE_CLOUDS /
+   *  三件套→MATCHING_ATTIRE / 时装三件→FASHION_STATEMENT / 全染料→DYE_HARD /
+   *  Torch God 恩惠→GAIN_TORCH_GODS_FAVOR（unlockedBiomeTorches 等价：包内持有 5043） */
+  achCheckEquipState(): void {
+    const inv = this.player.inv;
+    const a = this.achievements;
+    if (inv.miscEquips[4]) a.completeFlag('HOLD_ON_TIGHT', 'Equip');
+    if (inv.miscEquips[3]) a.completeFlag('THE_CAVALRY', 'Equip');
+    for (const s of inv.armor) {
+      if (s && (statOfInternal(s.id)?.wing ?? 0) > 0) { a.completeFlag('HEAD_IN_THE_CLOUDS', 'Equip'); break; }
+    }
+    if (inv.armor[0] && inv.armor[1] && inv.armor[2]) a.completeFlag('MATCHING_ATTIRE', 'Equip');
+    if (inv.armor[10] && inv.armor[11] && inv.armor[12]) a.completeFlag('FASHION_STATEMENT', 'Equip');
+    let allDye = inv.dye.every((s) => !!s);
+    if (allDye) allDye = inv.miscDyes.every((s) => !!s);
+    if (allDye) a.completeFlag('DYE_HARD', 'Equip');
+    if (inv.slots.some((s) => s && achVidOfInternalItem(s.id) === 5043)) {
+      a.completeFlag('GAIN_TORCH_GODS_FAVOR', 'Use');
+    }
+    // 生命/魔力双满 → TOPPED_OFF（:139-143）
+    if (this.player.maxHp >= 500 && this.player.maxMana >= 200) a.completeFlag('TOPPED_OFF', 'Use');
+  }
+
+  /** UI 装备变更后调用（HandleOnEquip 语义合并进 achCheckEquipState） */
+  achNotifyEquipChanged(): void { this.achCheckEquipState(); }
+
+  /** 跑动里程（AchievementsHelper.HandleRunning——MARATHON_MEDALIST） */
+  achNotifyRunning(px: number): void { this.achievements.handleRunning(px); }
+
 
   /** StartVictoryScene（DD2Event.cs:481-507）：水晶 548 ai[1]=2 / 门 549 撤收 */
   private startDD2VictoryScene(): void {

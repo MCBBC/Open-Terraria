@@ -225,12 +225,21 @@ export function serializeSave(
   for (let i = 0; i < st.type.length; i++) {
     if (!st.flags[i] && st.type[i] !== 0) st.type[i] = 0;
   }
-  // 物品 id → 稳定 id(箱子/背包/储物;量小直接遍历)
-  const mapItem = (it: { id: number; stack: number } | null) =>
-    it ? { id: it.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[it.id] ?? 0, stack: it.stack } : null;
+  // 物品 id → 稳定 id(全槽位统一;量小直接遍历)。保留 favorited/prefix。
+  // v4 起 armor/dye/trash/miscEquips/miscDyes/loadouts 也走稳定 id(v3 曾裸透传内部
+  // 下标——注册表一变即错位;本地物品退役时顺手根治)
+  const mapItem = (it: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) =>
+    it
+      ? {
+        id: it.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[it.id] ?? 0,
+        stack: it.stack,
+        favorited: it.favorited || undefined,
+        prefix: it.prefix || undefined,
+      }
+      : null;
   const data: SaveData = {
     format: 'sandboxworld.save',
-    version: 3,
+    version: 4,
     header: {
       name: meta.name, seed: meta.seed, width: meta.w, height: meta.h,
       spawn: [meta.spawnX, meta.spawnY], groundLevel: meta.groundLevel, rockLevel: meta.rockLevel,
@@ -258,7 +267,21 @@ export function serializeSave(
     wire: bytesToB64(rlePairs(st.wire)),
     blocks: bytesToB64(rlePairs(combineBlocks(st.half, st.slope))),
     chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, items: c.items.map(mapItem) })),
-    player: { ...player, inventory: player.inventory.map(mapItem), banks: player.banks?.map((b) => b.map(mapItem)) },
+    // v4:armor/dye/trash/miscEquips/miscDyes/loadouts 逐槽稳定 id(v3 是裸内部下标)
+    player: {
+      ...player,
+      inventory: player.inventory.map(mapItem),
+      banks: player.banks?.map((b) => b.map(mapItem)),
+      armor: player.armor?.map(mapItem),
+      dye: player.dye?.map(mapItem),
+      trash: mapItem(player.trash ?? null),
+      miscEquips: player.miscEquips?.map(mapItem),
+      miscDyes: player.miscDyes?.map(mapItem),
+      loadouts: player.loadouts?.map((l) => ({
+        armor: l.armor.map(mapItem),
+        dye: l.dye.map(mapItem),
+      })),
+    },
     npcs: townNpcs ?? [],   // 城镇 NPC 段(WorldFile.cs:1703-1750 NPC 段;曾硬编码 [] 断链)
     signs: meta.signs,
     // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）

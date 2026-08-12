@@ -7,7 +7,9 @@ import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE, ITEM_STABLE_OF_INTERNAL } from '../data/items';
+import { LEGACY_KEY_OF_INTERNAL_V3, viIdOfRetired } from '../data/itemMigration';
+import type { SavedItem as SavedItemT } from './serialize';
 import { weatherToSave } from '../world/weather/Weather';
 import { applyLunarSave } from '../world/LunarEvent';
 import { furnitureFromSave } from '../world/FurnitureItems';
@@ -125,10 +127,29 @@ export function saveWorldOnly(world: World): string {
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
 export function loadSaveData(data: SaveData): { world: World; player: SaveData['player']; data: SaveData } {
-  // v3 物品稳定 id → internal(箱子/背包/储物就地重写;v2 旧档直读)
+  // 物品 id 还原(箱子/背包/储物就地重写):v3+ 走稳定 id;v2 旧档直读(接受破损政策)。
+  // v4 起 armor/dye/trash/misc/loadouts 也是稳定 id;v3 恰为裸内部下标——用迁移锚
+  // 快照(LEGACY_KEY_OF_INTERNAL_V3)反查 key 再转 vi_/原定义(本地物品退役兼容层)
   const v3 = (data.version ?? 1) >= 3;
-  const mapItem = (it: { id: number; stack: number } | null) =>
-    it && v3 ? { id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0, stack: it.stack } : it;
+  const v4 = (data.version ?? 1) >= 4;
+  const mapItem = (it: SavedItemT | null): SavedItemT | null =>
+    it && v3 ? { ...it, id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0 } : it;
+  const mapLegacySlot = (it: SavedItemT | null): SavedItemT | null => {
+    if (!it) return it;
+    if (v4) return mapItem(it);
+    if (!v3) return it; // v2 及更早:裸下标直读
+    // v3:armor/dye/trash/misc/loadouts 段 = 保存时构建的裸内部下标
+    const key = LEGACY_KEY_OF_INTERNAL_V3[it.id];
+    if (key === undefined) return it;
+    if (/^vi_(\d+)_/.test(key)) {
+      // vi_ 键:用稳定表还原(同 vid 双注册归一首个,内容等价)
+      const stable = ITEM_STABLE_OF_INTERNAL[it.id];
+      return { ...it, id: stable !== undefined && stable !== 0 ? ITEM_INTERNAL_OF_STABLE.get(stable) ?? it.id : it.id };
+    }
+    // 本地键:退役映射(→vi_);纯自创删除键→归 0
+    const viId = viIdOfRetired(key);
+    return { ...it, id: viId > 0 ? viId : 0 };
+  };
   // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
   // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
   const v3Chests = v3
@@ -139,6 +160,15 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
       ...data.player,
       inventory: data.player.inventory.map(mapItem),
       banks: data.player.banks?.map((b) => b.map(mapItem)),
+      armor: data.player.armor?.map(mapLegacySlot),
+      dye: data.player.dye?.map(mapLegacySlot),
+      trash: mapLegacySlot(data.player.trash ?? null),
+      miscEquips: data.player.miscEquips?.map(mapLegacySlot),
+      miscDyes: data.player.miscDyes?.map(mapLegacySlot),
+      loadouts: data.player.loadouts?.map((l) => ({
+        armor: l.armor.map(mapLegacySlot),
+        dye: l.dye.map(mapLegacySlot),
+      })),
     };
   }
   const world = new WorldClass(data.header.width, data.header.height, data.header.seed, data.header.name);

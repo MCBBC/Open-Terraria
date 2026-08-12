@@ -365,7 +365,9 @@ export class BuffState {
       while (left >= 1) { left -= 1; heal += 1; }
     } else {
       const chunk = DOT_CHUNK[t] ?? 1;
-      while (left <= -chunk) { left += chunk; heal -= chunk; }
+      // 原版 lifeRegenCount 是整数累加（-600/-120 阈值精确）;此处 dt 浮点积分
+      // 在块边界会差 ~1e-15（如 1/3×15=4.999…）,补 epsilon 保证阈值时点对齐
+      while (left <= -chunk + 1e-9) { left += chunk; heal -= chunk; }
     }
     this.rateLeft.set(key, left);
     return heal;

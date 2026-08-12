@@ -15,6 +15,15 @@ import {
   ACH_DEFS, ACH_ICON_INDEX, achIconFrame, ACH_ICON_LOCKED_DX,
   type AchCondDef, type AchDef,
 } from '../data/vanillaAchievements';
+import { ITEM_DEFS } from '../data/items';
+
+/** 内部 item id → 原版 item id（vid 字段优先；vi_ 键前缀解析；无 → null） */
+export function achVidOfInternalItem(id: number): number | null {
+  const def = ITEM_DEFS[id];
+  if (!def) return null;
+  if (def.vid != null) return def.vid;
+  return def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : null;
+}
 
 /** 持久化存储（localStorage 门面；测试可注入内存版） */
 export interface AchStore {
