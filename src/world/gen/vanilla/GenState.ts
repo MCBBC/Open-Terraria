@@ -103,6 +103,13 @@ export interface GenState {
   /** GenVars.larvaX/larvaY（蜂巢 pass 登记，BeeLarvaInBeehives cs:21018 消费） */
   larvaX: number[];
   larvaY: number[];
+  /** 绿洲登记（GenVars.oasisPosition/oasisWidth/numOasis，GenVars.cs:260-268；上限
+   *  maxOasis=20）：Oasis pass（cs:16327）写，CactusPalmTreesAndCoral 头段（cs:21129-
+   *  21153）消费——绿洲棕榈 323 / 海滨燕麦 / 绿洲植物 530（本仓库未实现，备案） */
+  oasisX: number[];
+  oasisY: number[];
+  oasisW: number[];
+  numOasis: number;
 }
 
 export function newGenState(w: number, h: number): GenState {
@@ -135,5 +142,6 @@ export function newGenState(w: number, h: number): GenState {
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
     larvaX: [], larvaY: [],                                    // BeeLarva pass（cs:21018）消费
+    oasisX: [], oasisY: [], oasisW: [], numOasis: 0,           // Oasis pass（cs:16327）登记
   };
 }

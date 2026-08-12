@@ -113,7 +113,15 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   // （位置正确），转录后将插在 lakes 前与 slush 后。
   runWebsPass(st, rng, gs); snap('webs');
   runUnderworldPass(st, rng, gs); snap('underworld');
-  writeFileSync(`/tmp/js-uwpeek-${seedText.replace(/[^A-Za-z0-9]/g, '_')}.txt`, `${__uwEndPeek} ${__uwTreeInfo}\n`);
+  {
+    let n633 = 0, n634 = 0;
+    for (let q = 0; q < st.type.length; q++) {
+      const v = V_ID[st.type[q]];
+      if (st.flags[q] && v === 633) n633++;
+      if (st.flags[q] && v === 634) n634++;
+    }
+    writeFileSync(`/tmp/js-uwpeek-${seedText.replace(/[^A-Za-z0-9]/g, '_')}.txt`, `${__uwEndPeek} ${__uwTreeInfo} n633=${n633} n634=${n634}\n`);
+  }
   // #29 Corruption（cs:13919，oracle 已转录；#32 Dungeon 未转录——其 JS 实现仍在
   // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
   runCorruptionPass(st, rng, gs);

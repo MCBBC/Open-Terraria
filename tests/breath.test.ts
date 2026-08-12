@@ -193,14 +193,13 @@ describe('呼吸豁免（CheckDrowning 前置链）', () => {
     flood(w, p);
     step(p, w, 70);
     expect(p.breath).toBe(200); // ftw：水下(flag=true) → 翻转为不淹
-    // 水上（flag=false）→ 翻转为淹：擦掉 gills 先建立对照
-    p.buffs.remove(BuffType.Gills);
+    // 抽干水（水上 flag=false → 翻转为淹）
+    const cx = Math.floor(p.cx / 16);
+    for (let j = 20; j < 60; j++) {
+      for (let i = cx - 6; i <= cx + 6; i++) w.store.setLiquid(i, j, 0, 0);
+    }
     step(p, w, 70);
-    expect(p.breath).toBeLessThan(200);
-    const b0 = p.breath;
-    p.buffs.apply(BuffType.Gills, 60);
-    step(p, w, 70); // 出水区段内 breath 应继续下降（水上 flag=false → !flag=true 淹）
-    expect(p.breath).toBeLessThan(b0);
+    expect(p.breath).toBe(190); // ftw：水上反而淹（与普通世界 gills 相反）
   });
 });
 

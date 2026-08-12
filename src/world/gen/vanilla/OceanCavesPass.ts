@@ -2,6 +2,7 @@
 // 地牢侧海洋(左/右)各 1/3 概率生成一条向陆蠕行的隧洞(oceanCave cs:76703):
 // 半径 17-25 → 4 衰减、寿命 600-800;海砂岩壳(内 397 硬化沙/外 53 沙)+ 空腔灌水;
 // 大半径段记录 ≤2 宝藏点 → 后续 style17 水箱,战利品 NextFromList [863,186,277,187,4404]。
+import { LIQUID_TYPE } from '../../TileStore';
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -195,7 +196,9 @@ export function runUnderwaterChestsPass(
       x = x >= st.w ? Math.floor(x + num / 2) : Math.floor(x - num / 2);
       if (st.inBounds(x, y)) {
         const i = st.idx(x, y);
-        if (st.liquid[i] > 250 && st.liquidType[i] === 0) {
+        // liquidType 修 2026-08-12:同 BuriedChestsPass——本仓库 +1 编码,水=LIQUID_TYPE.WATER
+        // (原 ===0 永假 → 海洋洞窟水中箱特性静默失效)
+        if (st.liquid[i] > 250 && st.liquidType[i] === LIQUID_TYPE.WATER) {
           if (placeBuriedChest(st, rng, gs, chests, x, y, {
             style: 17, loot: main, flags: { water: true }, trySlope: true,
           })) break;

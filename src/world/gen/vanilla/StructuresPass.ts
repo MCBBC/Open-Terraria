@@ -9,6 +9,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
+import { waterBoxPalmCheck } from './TreePass';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as _solidTileHB } from './HalfBrickPass';
 
@@ -481,8 +482,6 @@ function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
 export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const isSoft = (t: number) => t === T.TALLGRASS || t === T.FLOWER || t === T.MUSHROOM || t === VINE;
-  const ud = gs.undergroundDesert;
-  const inDesert = (x: number) => !!ud && x >= ud.x0 && x <= ud.x1;
   let x = rng.int(6, 14);
   let sinceLast = 0;
   while (x < w - 6) {
@@ -494,19 +493,8 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
       const ground = st.type[st.idx(x, sy)];
       const relaxed = sinceLast >= 24;
       // ---- 树已由 vanilla/TreePass.ts 替换（原版 AddTrees 逐列语义）----
-      // ---- 仙人掌(沙漠沙/邪恶沙面)----
-      if ((ground === T.SAND || ground === EBONSAND || ground === CRIMSAND) && inDesert(x)
-        && !st.flags[st.idx(x, sy - 1)] && rng.next() < 0.12) {
-        const ch = rng.int(2, 5);
-        let ok = true;
-        for (let dy = 1; dy <= ch; dy++) if (st.flags[st.idx(x, sy - dy)]) { ok = false; break; }
-        if (ok) {
-          for (let dy = 1; dy <= ch; dy++) st.setTileSilent(x, sy - dy, CACTUS, 0, 0);
-          x += rng.int(4, 9);
-          sinceLast = 0;
-          continue;
-        }
-      }
+      // ---- 仙人掌已由本文件 runCactusPalmTreesAndCoralPass 替换（原版 pass 96
+      //      CactusPalmTreesAndCoral：GrowCactus 成簇语义；旧「12% 直柱 2-5 格」简化已删）----
       // ---- 杂草/花/蘑菇 ----(藤蔓在下方统一扫描)
       // ---- 杂草/花/蘑菇 ----
       if (!st.flags[st.idx(x, sy - 1)] && (ground === T.GRASS || ground === JUNGLE_GRASS || ground === T.SNOW)) {

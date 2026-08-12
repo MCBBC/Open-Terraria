@@ -19,8 +19,14 @@ interface Pending {
   resolve: (w: World) => void;
   reject: (e: unknown) => void;
   onProgress?: (phase: string, label: string, p: number) => void;
+  lastPhase?: string;
   onPreview?: (f: PreviewFrame) => void;
   timer: ReturnType<typeof setTimeout>;
+  /** 静默看门狗(2026-08-12):生成中无事件 >STALL_WARN_MS → console.error 点名卡点 pass */
+  lastEventAt?: number;
+  lastLabel?: string;
+  stallWarned?: boolean;
+  stallTimer?: ReturnType<typeof setInterval>;
   /** loadSave 专用结果处理器（world + player） */
   onLoadResult?: (ev: Extract<WorldWorkerEvent, { type: 'result' }>) => void;
 }
@@ -29,6 +35,10 @@ interface Pending {
 const HANDSHAKE_MS = 3000;
 /** 任务超时看门狗：大世界 8400×2400 生成余量（超时 terminate 杀掉挂死任务） */
 const DEFAULT_TIMEOUT_MS = 180000;
+/** 静默看门狗阈值：生成中超过此时长无任何 worker 事件 → 控制台点名(pass 内死循环
+ *  的最早信号——2026-08-12 水中箱 liquidType 死循环卡了整场才被发现,本看门狗 30s 即报) */
+const STALL_WARN_MS = 30_000;
+const STALL_CHECK_MS = 10_000;
 
 export class WorldGenClient {
   private worker: Worker | null = null;
@@ -100,11 +110,27 @@ export class WorldGenClient {
         this.teardown(); // 杀掉挂死任务，下次请求重新 spawn
         reject(new WorldGenUnavailable('生成超时'));
       }, cb?.timeoutMs ?? DEFAULT_TIMEOUT_MS);
-      this.pending.set(id, {
+      const pend: Pending = {
         resolve, reject,
         onProgress: cb?.onProgress as Pending['onProgress'], onPreview: cb?.onPreview,
         timer,
-      });
+        lastEventAt: Date.now(), lastLabel: '开始', stallWarned: false,
+        stallTimer: setInterval(() => {
+          if (!pend.lastEventAt) return;
+          const silent = Date.now() - pend.lastEventAt;
+          if (silent > STALL_WARN_MS) {
+            // 只报一次;点名最后进度 + 静默时长,指向"pass 内部死循环"排查路径
+            console.error(
+              `[worldGen] ⚠️ 生成疑似卡死：已 ${Math.round(silent / 1000)}s 无进展` +
+              `（最后进度：${pend.lastLabel}${pend.lastPhase ? ` [${pend.lastPhase}]` : ''}）。` +
+              `pass 为同步代码,内部死循环会停摆事件循环——排查该 pass 内的 while/拒绝采样` +
+              `（参考 liquidType +1 编码血案,3 分钟硬超时后将自动终止）`,
+            );
+            pend.stallWarned = true;
+          }
+        }, STALL_CHECK_MS),
+      };
+      this.pending.set(id, pend);
       w.postMessage({ id, type: 'generate', cfg } satisfies WorldWorkerRequest);
     });
   }
@@ -141,6 +167,7 @@ export class WorldGenClient {
     if (ev.type === 'result') {
       if (!p) return;
       clearTimeout(p.timer);
+      if (p.stallTimer) clearInterval(p.stallTimer);
       this.pending.delete(ev.id);
       if (p.onLoadResult) p.onLoadResult(ev);
       else p.resolve(World.fromPacket(ev.world));
@@ -149,11 +176,13 @@ export class WorldGenClient {
     if (ev.type === 'error') {
       if (!p) return;
       clearTimeout(p.timer);
+      if (p.stallTimer) clearInterval(p.stallTimer);
       this.pending.delete(ev.id);
       p.reject(new Error(`[worldGen worker] ${ev.message}`));
       return;
     }
     if (ev.type === 'progress') {
+      if (p) { p.lastEventAt = Date.now(); p.lastLabel = ev.label ?? ''; p.lastPhase = ev.phase; }
       p?.onProgress?.(ev.phase, ev.label ?? '', ev.p);
       return;
     }

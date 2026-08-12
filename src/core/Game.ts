@@ -2307,6 +2307,12 @@ export class Game implements GameHooks {
     }
     this._prevRightDown = inp.rightDown;
     this.updateNebulaBoosters();
+    if (this.player.sleeping) {
+      const bx = Math.floor(this.player.cx / TILE), by = Math.floor((this.player.y + this.player.h + 2) / TILE);
+      if (!w.store.inBounds(bx, by) || w.store.type[w.store.idx(bx, by)] !== (TILE_BY_KEY['bed'] ?? -1)) {
+        this.player.sleeping = false; // 床格失效（SH:98-101）
+      }
+    }
     // ⑤ Foxparks 5664 手持喷火通道（PC:42669-42690 TryUsingFoxsparksAbility：
     // 按住期间已有 1094 进 ai[0]=1000 喷火态 + SetDummyItemTime(2) 锁 useTime）
     {
@@ -5663,10 +5669,23 @@ export class Game implements GameHooks {
       // statLifeMax<400 → +20 上限并回满该部分,放置物消耗
       this.usePlacedLifeCrystal(tx, ty);
     } else if (type === TILE_BY_KEY['bed']) {
-      // 床:设重生点(vanilla Player.FindBed 语义;敌怪环绕检查略)
-      this.world.spawnX = tx + 1;
-      this.world.spawnY = ty - 1;
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
+      // 床（PC:32183-32228）：上侧（枕）悬停=设重生点；下侧（脚）悬停=睡觉（无夜间限制）
+      const fx = this.world.store.frameX[this.world.store.idx(tx, ty)];
+      const bottomSide = (fx % 72 < 36) !== (Math.floor(fx / 72) === 1); // PC:32869-32878
+      if (bottomSide && Math.hypot(this.player.cx - (tx + 2) * TILE, this.player.cy - ty * TILE) <= 96) {
+        // StartSleeping（SH:155-191）：搬锚点+清速；再点同床=起床（SH:170-173）
+        this.player.sleeping = !this.player.sleeping;
+        if (this.player.sleeping) {
+          this.player.timeSleeping = 0;
+          this.player.vx = 0; this.player.vy = 0;
+          this.player.x = (tx + 1) * TILE; this.player.y = (ty - 1) * TILE; // 锚点=床上格
+          this.player.facing = Math.floor(fx / 72) === 0 ? -1 : 1; // SH:204-210 床朝向
+        }
+      } else {
+        this.world.spawnX = tx + 1;
+        this.world.spawnY = ty - 1;
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SpawnSet'));
+      }
       this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_125_crystal_ball'] || type === TILE_BY_KEY['v_354_bewitching_table']
       || type === TILE_BY_KEY['v_377_sharpening_station'] || type === TILE_BY_KEY['v_287_ammo_box']

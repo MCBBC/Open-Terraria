@@ -263,9 +263,12 @@ export class WhipProj extends Entity {
             const a = pts[i], b = pts[i + 1];
             const dx = b.x - a.x, dy = b.y - a.y;
             const d = Math.hypot(dx, dy) || 1;
-            // 垂直方向（-π/2 旋转）× (1±3) 随机速率（:13875-13878）
-            const s = 1 + (Math.random() * 2 - 1) * 3;
-            add(new Arrow(a.x, a.y, -dy / d * s, dx / d * s, starDmg, this.knockback, 1039, null,
+            // 垂直方向（:13875-13878）：(dx,dy) 旋转 -π/2×player.direction×gravDir
+            //  （gravDir 恒 1）——facing>0 → (dy,-dx)；facing<0 → (-dy,dx)，
+            //  再乘 (1+NextFloatDirection×3) 随机速率（可负 → 反向）
+            const f = owner ? owner.facing : 1;
+            const s = (1 + (Math.random() * 2 - 1) * 3) * (f >= 0 ? 1 : -1);
+            add(new Arrow(a.x, a.y, dy / d * s, -dx / d * s, starDmg, this.knockback, 1039, null,
               { grav: 0, life: 240 }), 'projectiles');
           }
         }

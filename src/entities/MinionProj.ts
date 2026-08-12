@@ -910,10 +910,9 @@ export class MinionProj extends Entity {
         if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
         if (tgt && this.sCool <= 0) {
           this.sCool = ss.cd;
-          // 炮口（aiStyle 53 :27324：308/377 头部帧偏移≈+24*facing；966 Center-16Y；641 本体中心）
-          const mOff = this.projId === 308 || this.projId === 377 ? this.facing * 24 : 0;
-          const mx = this.cx + mOff;
-          const my = this.projId === 966 ? this.cy - 16 : this.cy - 2;
+          // 炮口（641 月门本体中心上方 2px 近似；643 彩虹水晶走 volley 落点分支）
+          const mx = this.cx;
+          const my = this.cy - 2;
           if (ss.volley) {
             // 彩虹水晶 643：3 连目标区随机落点（:34005——距离越远散布越大 0.5-1.25×）
             for (let i = 0; i < ss.volley; i++) {

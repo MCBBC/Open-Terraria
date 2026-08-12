@@ -181,6 +181,26 @@ function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   return true;
 }
 
+/** 湖畔棕榈水盒段（CactusPalmTreesAndCoral 中段 flag 分支，cs:21257-21273）：
+ *  沙面锚点 (x,y) 的 50×25 水盒（[x-50,x+50)×[y-25,y+25)，InWorld 内液量求和，
+ *  常量 cactusWaterWidth/Height/Limit = 50/25/25，cs:4258-4262）内液量和 /255 > 25
+ *  时掷 Next(4)==0 → GrowPalmTree（TryGrowingTreeByType(323) → cs:30508-30509）。
+ *  返回 true = 水盒超限（Next(4) 已掷，可能已种棕榈）→ 仙人掌段不再 PlantCactus；
+ *  返回 false = 水盒未超限 → 由调用方走 PlantCactus（cs:21274）。 */
+export function waterBoxPalmCheck(st: TileStore, rng: RNG, x: number, y: number): boolean {
+  let sum = 0;
+  for (let k = x - 50; k < x + 50; k++) {
+    for (let l = y - 25; l < y + 25; l++) {
+      if (st.inBounds(k, l)) sum += st.liquid[st.idx(k, l)];
+    }
+  }
+  if (Math.trunc(sum / 255) > 25) {
+    if (rng.int(0, 3) === 0) growPalmTree(st, rng, x, y);
+    return true;
+  }
+  return false;
+}
+
 // ===================== GrowTreeWithSettings 族（宝石树 + 观赏树柳/樱） =====================
 // ShimmerMakeBiome 的 aether 树走 TryGrowingTreeByType(583-589)（WorldGen.cs:30500-30542 →
 // GrowTreeWithSettings 30546-30967）；AddTrees 的 1/20 观赏树走 616 柳 / 596 樱（cs:31558-31566）。

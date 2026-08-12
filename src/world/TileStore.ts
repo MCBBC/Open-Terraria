@@ -2,6 +2,19 @@
 import { TILE_DEFS } from '../data/tiles';
 import { TileOpAction } from '../net/protocol';
 
+/** 液体类型唯一真源(原版 LiquidID +1 编码:Water=0→1/Lava=1→2/Honey=2→3,4=微光)。
+ *  ⚠️ 从原版 C# 移植液体判断时**禁止裸写 0/1/2**——必须用本枚举。
+ *  血案 2026-08-12:水中箱 pass 照抄 `liquidType()!=0` 判水(原版 Water=0),
+ *  本仓库水=1 恒真 → 拒绝采样死循环,世界生成卡"生物群系"。
+ *  (grep `liquidType.*=== *0\b|liquidType.*!== *0\b` 可快速排查同类移植错位) */
+export const enum LIQUID_TYPE {
+  NONE = 0,
+  WATER = 1,
+  LAVA = 2,
+  HONEY = 3,
+  SHIMMER = 4,
+}
+
 export class TileStore {
   readonly w: number;
   readonly h: number;
@@ -11,7 +24,7 @@ export class TileStore {
   readonly frameY: Uint16Array;
   readonly wall: Uint16Array; // 原版 wld 墙 id（0-366）
   readonly liquid: Uint8Array;   // 0-255 液量
-  readonly liquidType: Uint8Array; // 0无 1水 2岩浆 3蜂蜜 4微光(原版 liquidType 3,本仓库 +1 编码;任意液体遇微光 → Aetherium 块 659)
+  readonly liquidType: Uint8Array; // 取值见 LIQUID_TYPE(原版 +1 编码——照抄 C# liquidType()==0 判水必错,见 LIQUID_TYPE 注释)
   readonly half: Uint8Array;      // halfBrick 位（原版 Tile.cs bTileHeader bit1）：下半 8px 实心
   readonly slope: Uint8Array;     // 坡面 0-4（原版编码；渲染暂未支持，生成期少用）
   readonly wire: Uint8Array;      // 电路位（原版 Tile.cs sTileHeader）：bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动(inActive)

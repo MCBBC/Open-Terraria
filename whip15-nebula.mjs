@@ -35,6 +35,9 @@ const out = await p.evaluate(async () => {
   pl.inv.selected = 0;
   r.writeTest = { id64: id64 ?? 'undef', syncKey: ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none',
     slot0: JSON.stringify(pl.inv.slots[0]) };
+  let ucwCalls = 0; const ocw = g.useCombatWeapon.bind(g);
+  g.useCombatWorkerFix = null;
+  g.useCombatWeapon = (cwIn, def) => { ucwCalls++; return ocw(cwIn, def); };
   const hold = setInterval(() => {
     pl.useTime = 0;
     g.input.mouseX = g.renderer.canvas.width / 2 + 120; g.input.mouseY = g.renderer.canvas.height / 2;
@@ -46,13 +49,17 @@ const out = await p.evaluate(async () => {
   pl.x = tgt.x - 30; pl.y = tgt.y; // 走到 booster 掉落点（原版 42px 抓取需近身）
   await new Promise(s2 => setTimeout(s2, 1500)); // 等吸附拾取
   g.entities.add = oa;
-  r.bolts = bolts; r.cd = pl.nebulaCD;
-  r.heldAfter = ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none';
+  r.bolts = bolts; r.cd = pl.nebulaCD; r.ucw = ucwCalls; g.useCombatWeapon = ocw;
+  r.heldSamples = [];
+  for (let i = 0; i < 10; i++) { r.heldSamples.push(ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none'); await new Promise(s3 => setTimeout(s3, 100)); }
+  r.heldAfter = r.heldSamples[r.heldSamples.length - 1];
   r.manaAfter = pl.mana;
   r.cwStaff = combatWeapon(hd0 ?? hd)?.kind ?? 'null';
   r.gate = { mouseDown: g.input.mouseDown, useTime: pl.useTime, uiBlocking: g.input.uiBlocking ?? false };
   const heldNow = pl.inv.heldItem();
   r.cwNow = heldNow ? combatWeapon(ITEM_DEFS[heldNow.id])?.kind ?? 'nullcw' : 'noheld';
+  r.defMagic = JSON.stringify(ITEM_DEFS[heldNow?.id ?? -1]?.magic ?? null).slice(0, 80);
+  r.projs = g.entities.projectiles.filter((e) => e?.constructor?.name === 'MagicProj').length;
   r.nebula = [...pl.nebula];
   r.levels = pl.nebula[0] + pl.nebula[1] + pl.nebula[2];
   r.summonMult = Math.round(pl.summonDamageMult * 100) / 100; // 1+0.66+0.15×dmg级

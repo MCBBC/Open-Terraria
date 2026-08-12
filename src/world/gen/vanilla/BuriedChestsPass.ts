@@ -7,6 +7,7 @@
 //   UnderworldChestCount 10-15 ScaleWith:WorldWidth(÷4200)。
 // 战利品 = AddBuriedChest(cs:35920-37560)1:1:按深度四分支(地表/金/洞穴/地狱),
 //   主件 + 概率杂物表 + 主题旗标池(ice/desert/ivy/water/hell/sky 附加物)。
+import { LIQUID_TYPE } from '../../TileStore';
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -526,11 +527,20 @@ export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests
       for (let tries = 0; tries < 10000 && !ok; tries++) {
         let x = rng.int(50, w - 51);                                    // Next(50, w-50)
         let y = rng.int(yLo, st.h - 201);                               // Next(?, h-200)
-        // cs:17425-17428：液体不足或非水 → 重掷（重掷 y 域换 [50, h-200)）
-        while (st.liquid[st.idx(x, y)] < 250 || st.liquidType[st.idx(x, y)] !== 0) {
+        // cs:17425-17428：液体不足或非水 → 重掷（重掷 y 域换 [50, h-200)）。
+        // liquidType 修 2026-08-12：本仓库 +1 编码(水=LIQUID_TYPE.WATER=1)——照抄原版
+        // !==0(原版 Water=0) 会让水格恒不命中,拒绝采样死循环(世界生成卡"生物群系"根因)。
+        // 守卫:100 万掷未命中 → 大声报错降级继续(防同类移植错位再变静默死循环)
+        let __guard = 0;
+        while (st.liquid[st.idx(x, y)] < 250 || st.liquidType[st.idx(x, y)] !== LIQUID_TYPE.WATER) {
           x = rng.int(50, w - 51);
           y = rng.int(50, st.h - 201);
+          if (++__guard >= 1_000_000) {
+            console.error('[worldgen] runWaterChestsPass 拒绝采样 100 万掷未命中水中格——疑似 liquidType/liquid 编码错位或本世界无合格水体,降级跳过本箱');
+            break;
+          }
         }
+        if (__guard >= 1_000_000) continue;
         // cs:17427：trySlope 门 = 落点在海滩带内（x < 380 || x > w-380）
         if (placeBuriedChest(st, rng, gs, chests, x, y, {
           style: 17, loot: main, flags: { water: true },

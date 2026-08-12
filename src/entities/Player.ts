@@ -154,6 +154,10 @@ export class Player extends Entity {
   private sharpenedCd = 0;
   /** BOC 受击脉冲（fixedUpdate 消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
+  /** 睡眠（PlayerSleepingHelper SH:155-191：脚侧悬停右键入睡；床失效/移动输入/挥武器唤醒。
+   *  ★受伤不唤醒（StopSleeping 全调用点仅 5 处，SH:98-131）。睡熟阈值 120t（SH:11） */
+  sleeping = false;
+  timeSleeping = 0;
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
    *  本地玩家恒 0 */
