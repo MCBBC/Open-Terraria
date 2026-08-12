@@ -88,6 +88,17 @@ export class Player extends Entity {
    *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
    *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
   whipBuffs: Record<number, number> = {};
+  /** 星云层数（0-3，8s 刷新；套装 on-mana-spent 触发近似原版击杀掉 booster） */
+  nebulaStacks = 0;
+  private nebulaT = 0;
+  /** 甲虫攻击球（0-3）：近战命中蓄能，受击掉一颗 */
+  beetleOrbs = 0;
+  private beetleCharge = 0;
+  /** 潜行 0(可见)-1(满)：蘑菇矿/星璇套按住↓静立蓄积（:25500/:25542） */
+  stealth = 0;
+  private sharpenedCd = 0;
+  /** BOC 受击脉冲（fixedUpdate 消费：buff 321 + 困惑近敌） */
+  bocPulse = 0;
   /** 联机远端位置平滑偏移（原版 Player.netOffset，MessageBuffer.cs case 13 注入、
    *  Player.UpdateNetOffset :28240 衰减）：模拟位置与权威快照的差，渲染时叠加。
    *  本地玩家恒 0 */
@@ -145,6 +156,10 @@ export class Player extends Entity {
     jumpSpd: number; flipper: boolean; longInvince: boolean; spikedBoots: boolean;
     treasureMagnet: boolean; goldRing: boolean; luckyCoin: boolean; discount: boolean;
     arrowDmg: number; ammoSave: boolean; kbGlove: boolean; yoyoString: boolean;
+    arrowStack: number;      // 箭袋 additiveStack（仅箭，:14785）
+    shroomiteType: 'arrow' | 'bullet' | 'rocket' | null;
+    shroomiteSet: boolean; vortexSet: boolean; nebulaSet: boolean; beetleOff: boolean;
+    wolfAcc: boolean; boc: boolean;
     tileSpeed: boolean; wallSpeed: boolean; tileRange: boolean; pStone: boolean;
     counterWeight: boolean; manaMagnet: boolean; magicCuffs: boolean; manaFlower: boolean;
     setBonus: ReturnType<typeof activeArmorSetBonus> | null;
@@ -178,6 +193,9 @@ export class Player extends Entity {
     let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
     let dash = 0, blackBelt = false, bees = false, carpet = false;
     let jumpSpd = 0, arrowDmg = 0;
+    let wolfAcc = false, boc = false;
+    let shroomiteType: 'arrow' | 'bullet' | 'rocket' | null = null;
+    let shroomiteSet = false, vortexSet = false, nebulaSet = false, beetleOff = false;
     let flipper = false, longInvince = false, spikedBoots = false;
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false;
@@ -233,7 +251,9 @@ export class Player extends Entity {
         if (fx.bees) bees = true;
         if (fx.carpet) carpet = true;
         if (fx.jumpSpd) jumpSpd = Math.max(jumpSpd, fx.jumpSpd);
-        if (fx.arrowDmg) arrowDmg += fx.arrowDmg;
+        if (fx.arrowDmg) arrowDmg += fx.arrowDmg; // 箭袋 +0.1（仅箭吃，见 rangedDamageMult）
+        if (fx.nightWolf) wolfAcc = true;
+        if (fx.brainOfConfusion) boc = true;
         if (fx.flipper) flipper = true;
         if (fx.longInvince) longInvince = true;
         if (fx.spikedBoots) spikedBoots = true;
@@ -293,6 +313,19 @@ export class Player extends Entity {
       if (fx.whipRange) whipRange += fx.whipRange;
     };
     for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
+    // 套装/头盔 type 检测（vid 直查）：蘑菇矿头 1546箭/1547弹/1548火箭（:13274-13288）
+    const aVid = (i: number): number => {
+      const d = ITEM_DEFS[this.inv.armor[i]?.id ?? -1];
+      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    };
+    const [hVid, bVid, lVid] = [aVid(0), aVid(1), aVid(2)];
+    if (hVid === 1546) shroomiteType = 'arrow';
+    else if (hVid === 1547) shroomiteType = 'bullet';
+    else if (hVid === 1548) shroomiteType = 'rocket';
+    shroomiteSet = (hVid >= 1546 && hVid <= 1548) && bVid === 1549 && lVid === 1550;
+    vortexSet = hVid === 2757 && bVid === 2758 && lVid === 2759;
+    nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
+    beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲（壳 2201 是防御版）
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     const sb = activeArmorSetBonus(this);
@@ -345,6 +378,8 @@ export class Player extends Entity {
       jumpSpd, flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
       arrowDmg, ammoSave, kbGlove, yoyoString,
+      arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,
+      wolfAcc, boc,
       tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
       manaMagnet, magicCuffs, manaFlower,
       setBonus: sb, manaCostMul,
@@ -383,6 +418,8 @@ export class Player extends Entity {
   get attackSpeedMult(): number {
     return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
+      * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
+      * (1 + 0.1 * this.beetleOrbs)                           // 甲虫攻击球攻速（:10071+）
 
       * (1 + this.buffs.wellFedMeleeSpeed);   // 食物近战速 +5/7.5/10%（:11528+）
   }
@@ -399,7 +436,9 @@ export class Player extends Entity {
       // 来源（怒气/食物）+ 召唤装备链；MagicPower/Archery 等 class 来源不吃
       let m = 1 + st.minionDmg;
       if (this.buffs.has(BuffType.Rage)) m += 0.1;
+      if (this.buffs.has(BuffType.BrainOfConfusionBuff)) m += 0.1; // BOC 321（:9639-9646）
       m += this.buffs.wellFedDamage;
+      m += 0.15 * this.nebulaStacks;   // 星云 179-181 每级四系 +15%（:10116）
       return m;
     }
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
@@ -410,9 +449,44 @@ export class Player extends Entity {
     if (kind === 'ranged') m *= this.buffs.arrowDmgMult;   // Archery ×1.1（:9712,ranged 近义）
     // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
     if (this.buffs.has(BuffType.Rage)) m += 0.1;
-    if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) m += 0.1;
+    if (kind === 'melee') {
+      if (this.buffs.has(BuffType.Tipsy)) m += 0.1;
+      if (this.buffs.has(BuffType.Werewolf)) m += 0.051;      // 狼人（:11488）
+      m += 0.1 * this.beetleOrbs;                              // 甲虫攻击球每颗 +10%（:10071+）
+    }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
+    m += 0.15 * this.nebulaStacks;   // 星云四系 +15%/层
     return m;
+  }
+  /** 远程分道乘区（Player.cs:3820-3824 bowEffectiveDamage 拆分）：
+   *  箭 = (rangedDamage + 箭袋stack) × Archery × 蘑菇矿箭头 1.12 × 潜行增伤；
+   *  弹/火箭 = rangedDamage × 对应蘑菇矿头 1.12 × 潜行；其他（飞镖等）= rangedDamage */
+  rangedDamageMult(kind: 'arrow' | 'bullet' | 'rocket' | 'other'): number {
+    const st = this.equipStats;
+    const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff）
+    const stealthBonus = 1 + (1 - this.stealth) * (st.vortexSet ? 0.8 : st.shroomiteSet ? 0.6 : 0);
+    if (kind === 'arrow') {
+      return (base + st.arrowStack) * this.buffs.arrowDmgMult
+        * (st.shroomiteType === 'arrow' ? 1.12 : 1) * stealthBonus;
+    }
+    if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1) * stealthBonus;
+    if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
+    return base;
+  }
+  /** 近战护甲穿透（磨刀 159：meleeArmorPenetration += 12，仅近战/投掷） */
+  get meleeArmorPen(): number {
+    return this.buffs.has(BuffType.Sharpened) ? 12 : 0;
+  }
+  /** 星云套：耗魔 15% 概率叠层（近似原版击杀掉 booster 拾取；8s 全层刷新） */
+  onManaSpent(): void {
+    if (!this.equipStats.nebulaSet || Math.random() >= 0.15) return;
+    this.nebulaStacks = Math.min(3, this.nebulaStacks + 1);
+    this.nebulaT = 480;
+  }
+  /** 甲虫进攻套：近战命中蓄能（45 次/球，满 3 球；受击掉球见 damage()） */
+  onMeleeHit(): void {
+    if (!this.equipStats.beetleOff) return;
+    if (++this.beetleCharge >= 45) { this.beetleCharge = 0; this.beetleOrbs = Math.min(3, this.beetleOrbs + 1); }
   }
   /** 装备暴击率（critX 段 + 词缀 67/68） */
   critChance(kind: 'melee' | 'ranged' | 'magic'): number {
@@ -420,7 +494,13 @@ export class Player extends Entity {
     let c = kind === 'melee' ? st.critMelee : kind === 'ranged' ? st.critRanged : st.critMagic;
     // R1 药水：暴怒(115)全系暴击 +10（:9890）；醉酒(25)近战暴击 +2（:11515）
     if (this.buffs.has(BuffType.Wrath)) c += 10;
+    if (this.buffs.has(BuffType.BrainOfConfusionBuff)) c += 10; // BOC（:9639）
     if (kind === 'melee' && this.buffs.has(BuffType.Tipsy)) c += 2;
+    if (kind === 'melee' && this.buffs.has(BuffType.Werewolf)) c += 2; // 狼人（:11493）
+    if (kind === 'ranged') {
+      if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
+      c += Math.round((1 - this.stealth) * (this.equipStats.vortexSet ? 20 : 10)); // 潜行暴击（:25506/:25544）
+    }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     return c;
   }
@@ -1003,6 +1083,38 @@ export class Player extends Entity {
     // 台阶视觉缓动：每帧向 0 收敛
     if (this.stepRenderY > 0.5) this.stepRenderY *= 0.55;
     else this.stepRenderY = 0;
+    // ---- 职业状态机（对账批实装）----
+    // 狼人（月亮符 485 + 夜间：Player.cs:11488 链 wolfAcc&&night）
+    if (this.equipStats.wolfAcc && !(game.world.clock?.isDay ?? true)) this.buffs.apply(BuffType.Werewolf, 2);
+    // 磨刀站 3198 就近常驻（每 60t 扫 41×25 区）
+    if (--this.sharpenedCd <= 0) {
+      this.sharpenedCd = 60;
+      const stt = game.world.store;
+      const tid = TILE_BY_KEY['v_3198_sharpening_station'] ?? -1;
+      if (tid > 0) {
+        const tx0 = Math.floor(this.cx / TILE) - 20, tx1 = tx0 + 40;
+        const ty0 = Math.floor(this.cy / TILE) - 12, ty1 = ty0 + 25;
+        outer: for (let ty = ty0; ty <= ty1; ty++) for (let tx = tx0; tx <= tx1; tx++) {
+          if (stt.inBounds(tx, ty) && stt.type[stt.idx(tx, ty)] === tid) { this.buffs.apply(BuffType.Sharpened, 2); break outer; }
+        }
+      }
+    }
+    // BOC 受击脉冲消费
+    if (this.bocPulse > 0) {
+      this.bocPulse = 0;
+      this.buffs.apply(BuffType.BrainOfConfusionBuff, 4);
+      for (const e of game.enemies()) {
+        const en = e as { cx?: number; cy?: number; confusedT?: number; dead?: boolean };
+        if (en.dead || en.cx === undefined || en.cy === undefined) continue;
+        if (Math.abs(en.cx - this.cx) < 300 && Math.abs(en.cy - this.cy) < 200) en.confusedT = 4;
+      }
+    }
+    // 潜行（蘑菇矿/星璇套：按住↓静立蓄 1/60t，动则散 1/15t）
+    const stealthSet = this.equipStats.shroomiteSet || this.equipStats.vortexSet;
+    if (stealthSet && this.inputDown && this.onGround && Math.abs(this.vx) < 0.6) this.stealth = Math.min(1, this.stealth + 1 / 60);
+    else this.stealth = Math.max(0, this.stealth - 1 / 15);
+    // 星云层数衰减（8s 全层刷新）
+    if (this.nebulaStacks > 0 && --this.nebulaT <= 0) { this.nebulaStacks = 0; }
     // 鞭 buff 倒计时（WhipTagEffect.PlayerBuffTime=180 系）
     for (const k of Object.keys(this.whipBuffs)) {
       if (--this.whipBuffs[Number(k)] <= 0) delete this.whipBuffs[Number(k)];
@@ -1219,6 +1331,10 @@ export class Player extends Entity {
     // 十字项链/星星面纱：无敌帧翻倍（longInvince）
     this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
     this.sinceHurt = 0; // 受击打断自然回血
+    // 甲虫攻击球受击掉一颗
+    if (this.beetleOrbs > 0) this.beetleOrbs--;
+    // 混乱之脑（:37488-37496：受击 1/6 → buff 321 + 困惑近敌；damage 无 game 参→脉冲标志）
+    if (this.equipStats.boc && Math.random() < 1 / 6) this.bocPulse = 1;
     // 恐慌项链：受击触发 5 秒移速爆发（panicTime=300，PanicSpeedBoost :25034）
     if (eq.panic) this.panicTime = 300;
     // 魔力手铐（magicCuffs :37678）：受伤回蓝 = 原始伤害 1:1（防前数值）

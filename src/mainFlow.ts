@@ -69,6 +69,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   const worldStore = new WorldStore();
 
   // 隐藏文件输入（DOM 能力，VUI 按钮触发）
+  // E2E/控制台调试:直接加载存档 JSON 文本(菜单阶段可用,绕过设置面板 file input)
+  (window as unknown as { __swLoadJson?: (t: string) => Promise<void> }).__swLoadJson = (t: string) => loadFromJson(t);
   const fileInput = document.createElement('input');
   fileInput.type = 'file';
   fileInput.accept = '.json';
@@ -88,6 +90,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // E2E/控制台调试:tile key → 内部 id 反查(测试脚本放置图块用)
     (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
       (TILE_BY_KEY as Record<string, number>)[k] ?? -1;
+    // E2E/控制台调试:直接加载存档 JSON 文本(绕过设置面板的 file input)
+    // (挂模块级而非 enterGame:菜单阶段测试脚本就要用)
     // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
     (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
       liquidLab(g);

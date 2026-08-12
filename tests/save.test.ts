@@ -6,6 +6,8 @@ import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { T, W } from '../src/data/tiles';
 import { BUFF_DEFS, BuffType } from '../src/stats/Buffs';
+import { packWorld } from '../src/workers/worldPacket';
+import { World as WorldClass } from '../src/world/World';
 
 describe('自有存档格式', () => {
   it('RLE 编解码往返一致', () => {
@@ -141,6 +143,27 @@ describe('自有存档格式', () => {
     expect(saved.some(([v]) => v === 87)).toBe(false);   // 87 在 NO_SAVE 名单
     expect(saved.some(([v]) => v === 999)).toBe(false);  // 未知 id 无 BUFF_DEFS 条目
     expect(saved.some(([v]) => v === 26)).toBe(true);
+  });
+
+
+  it('worker packet 往返:invasion/altarCount/weather/bestiary/npcs/clock三件套/moonType 不蒸发(packWorld 黑洞回归)', () => {
+    const world = new World(64, 32, 42, 'packet');
+    world.clock.bloodMoon = true; world.clock.eclipse = false; world.clock.moonPhase = 3;
+    world.moonType = 2;
+    world.invasionType = 2; world.invasionSize = 60; world.invasionSizeStart = 60;
+    world.invasionX = 55; world.invasionDelay = 1200;
+    world.altarCount = 3;
+    world.pendingTownNpcs = [{ key: 'goblin_tinkerer', x: 10, y: 20, home: null, bound: true }];
+    const { packet } = packWorld(world);
+    const w2 = World.fromPacket(packet);
+    expect(w2.clock.bloodMoon).toBe(true);
+    expect(w2.clock.moonPhase).toBe(3);
+    expect(w2.moonType).toBe(2);
+    expect(w2.invasionType).toBe(2);
+    expect(w2.invasionDelay).toBe(1200);
+    expect(w2.altarCount).toBe(3);
+    expect(w2.pendingTownNpcs).toHaveLength(1);
+    expect(w2.pendingTownNpcs![0].bound).toBe(true);
   });
 
 });

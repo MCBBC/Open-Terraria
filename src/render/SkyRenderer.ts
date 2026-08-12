@@ -65,6 +65,9 @@ export class SkyRenderer {
     }
     this.sunTex = loadTex('Sun.png');
     for (let i = 0; i <= 8; i++) this.moonTexs[i] = loadTex(`Moon_${i}.png`);
+    // 事件月亮(Main.cs:62400-62408):南瓜月 kind=2 / 霜月 kind=1,同为 50×400 相位竖条
+    this.pumpkinMoonTex = loadTex('Moon_Pumpkin.png');
+    this.snowMoonTex = loadTex('Moon_Snow.png');
     // 风场初值(Main.cs:10800):current = ±0.8 随机,计数 7200-28800 帧
     this.wind = (Math.floor(Math.random() * 1601) - 800) * 0.001;
     this.windCounter = 7200 + Math.floor(Math.random() * 21601);
@@ -72,6 +75,9 @@ export class SkyRenderer {
 
   sunTex: HTMLImageElement;
   moonTexs: Array<HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
+  /** 事件月亮（kind 1=霜月 Snow / 2=南瓜月 Pumpkin,Main.cs:62400-62408） */
+  pumpkinMoonTex: HTMLImageElement;
+  snowMoonTex: HTMLImageElement;
   /** 世界月亮样式(原版 header moonType 0-8;默认 0 标准月) */
   moonType = 0;
 
@@ -203,8 +209,8 @@ export class SkyRenderer {
   }
 
   // ---- 器件驱动的天空效果（SceneMetrics 器件态；Renderer 每帧写入）----
-  fx: { monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number } =
-    { monolith: -1, party: false, surfaceY: 0, worldW: 0, worldH: 0 };
+  fx: { monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number; moonEventKind: 0 | 1 | 2 } =
+    { monolith: -1, party: false, surfaceY: 0, worldW: 0, worldH: 0, moonEventKind: 0 };
 
   /** 天塔柱全屏滤镜颜色/不透明度（ScreenEffectInitializer.cs:18-21 FilterMiniTower 1:1；
    *  类型映射 SceneState.cs:111-115：0 星璇/1 星云/2 星尘/3 耀斑/4 月总）。
@@ -574,7 +580,9 @@ export class SkyRenderer {
         ctx.restore();
       }
     } else {
-      const tex = this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
+      const tex = this.fx.moonEventKind === 2 ? this.pumpkinMoonTex
+        : this.fx.moonEventKind === 1 ? this.snowMoonTex
+          : this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
       if (tex && tex.complete && tex.naturalWidth > 0) {
         const mw = tex.width; // 相位帧宽(50)
         const ft = nightTime / 32400;

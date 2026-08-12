@@ -92,6 +92,8 @@ const MISC = [
   // 日月(Main.cs:62279 DrawSunAndMoon):太阳整图 + 月亮 8 相位竖条(Moon_N 50×400)
   'Sun.png',
   ...Array.from({ length: 9 }, (_, i) => `Moon_${i}.png`),
+  // 事件月亮(Main.cs:62400-62408):南瓜月/霜月 50×400 同相位竖条;醉酒世界单图 56×66
+  'Moon_Pumpkin.png', 'Moon_Snow.png', 'Moon_Smiley.png',
   // 世界背景图全量（地表视差层/地下层/地狱层；仅落盘，运行时由 BiomeBackground 懒加载——
   // 不进 SpriteAtlas VANILLA_MISC 常驻表，避免 344 张整图常驻内存）
   ...Array.from({ length: 344 }, (_, i) => `Background_${i}.png`),

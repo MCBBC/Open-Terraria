@@ -102,6 +102,8 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
+  Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
+  BrainOfConfusionBuff = 72, // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
   ManaSickness = 69, // 魔力眩晕(94,喝蓝 AddBuff 300t)：magicDamage *= 1-0.25×(剩余/300)
                    //   （Player.cs:10000-10004 + :25616；满 debuff -25% 线性恢复。
                    //   ★33 是 Weak(近战-5.1%伤/速) 勿混）
@@ -158,6 +160,8 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Rage]: { vanillaBuff: 117, descKey: 'Mods.SandboxWorld.Buff.Rage.Desc', fallbackName: '暴怒' },  // 原版 Wrath 药水
   [BuffType.Tipsy]: { vanillaBuff: 25, descKey: 'Mods.SandboxWorld.Buff.Tipsy.Desc', fallbackName: '醉酒' },
   [BuffType.ManaSickness]: { vanillaBuff: 94, descKey: 'Mods.SandboxWorld.Buff.ManaSickness.Desc', fallbackName: '魔力眩晕' },
+  [BuffType.Werewolf]: { vanillaBuff: 28, descKey: 'Mods.SandboxWorld.Buff.Werewolf.Desc', fallbackName: '狼人' },
+  [BuffType.BrainOfConfusionBuff]: { vanillaBuff: 321, descKey: 'Mods.SandboxWorld.Buff.BrainOfConfusionBuff.Desc', fallbackName: '混乱之脑' },
   [BuffType.ImbueVenom]: { vanillaBuff: 71, descKey: 'Mods.SandboxWorld.Buff.ImbueVenom.Desc', fallbackName: '武器浸剂：毒液' },
   [BuffType.ImbueCursed]: { vanillaBuff: 73, descKey: 'Mods.SandboxWorld.Buff.ImbueCursed.Desc', fallbackName: '武器浸剂：诅咒焰' },
   [BuffType.ImbueFire]: { vanillaBuff: 74, descKey: 'Mods.SandboxWorld.Buff.ImbueFire.Desc', fallbackName: '武器浸剂：烈火' },

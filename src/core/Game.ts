@@ -3188,7 +3188,10 @@ export class Game implements GameHooks {
         // 词缀乘区只作用于武器基伤（GetWeaponDamage：item.damage 含词缀，弹药另加）；
         // 装备远程伤害乘区（侦察镜/复仇者徽章等）
         const ps = this.heldPrefixStat();
-        const damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.damageMult('ranged')) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
+        // 弹药分道（Player.cs:3820 bowEffectiveDamage 拆分）：箭吃箭袋/射手/蘑菇矿箭头，
+      // 弹/火箭吃对应蘑菇矿头；Archery 不再误伤枪械
+      const rKind = bowC?.useAmmo === 97 ? 'bullet' : bowC?.useAmmo === 771 ? 'rocket' : bowC?.useAmmo === 283 ? 'other' : 'arrow';
+      const damage = Math.round((bowC?.damage ?? rg?.damage ?? 1) * (ps?.dmg ?? 1) * this.player.rangedDamageMult(rKind)) + (ammoC?.damage ?? 0) + this.player.equipStats.armorPen;
         const knockback = (bowC?.knockBack ?? rg?.knockback ?? 2) * (ps?.kb ?? 1) + (ammoC?.knockBack ?? 0);
         const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
@@ -3232,7 +3235,7 @@ export class Game implements GameHooks {
       // 乘区=近战链×词缀+armorPen（此前裸 tc.damage 完全无乘区）
       const psT = this.heldPrefixStat();
       const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('melee'))
-        + this.player.equipStats.armorPen);
+        + this.player.equipStats.armorPen + this.player.meleeArmorPen); // 磨刀穿甲含投掷
       let pen = projectileData(tc.shoot)?.penetrate ?? 1;
       if (pen < 0) pen = 6;
       pen = Math.max(1, Math.min(pen, 6));
@@ -3327,6 +3330,7 @@ export class Game implements GameHooks {
       }
       if (this.player.mana >= mgCost) {
         this.player.mana -= mgCost;
+        this.player.onManaSpent(); // 星云套叠层
         const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
         const mx = this.player.cx + Math.cos(ang) * 14;
         const my = this.player.cy - 4 + Math.sin(ang) * 14;
@@ -6345,7 +6349,8 @@ export class Game implements GameHooks {
       // vi_ 数据驱动近战武器优先取挥击时缓存的 combat 表伤害/击退（swing.dmg/kb）；
       // 装备全系伤害乘区（徽章/险恶词缀等，ApplyEquipFunctional dmgMelee 段）
       const baseDmg = ((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
-        * this.player.damageMult('melee')) + this.player.equipStats.armorPen;
+        * this.player.damageMult('melee')) + this.player.equipStats.armorPen + this.player.meleeArmorPen;
+      this.player.onMeleeHit(); // 甲虫进攻套蓄能（命中结算前计数无碍）
       // 原版 Main.DamageVar：±15% 浮动（1 + rand(-15..15)/100）
       const dmg = Math.max(1, Math.round((baseDmg + this.player.meleeDamageBonus) * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
       const kdir = Math.sign(e.cx - p.cx) || this.player.facing;

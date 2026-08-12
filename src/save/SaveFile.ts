@@ -124,8 +124,10 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   const v3 = (data.version ?? 1) >= 3;
   const mapItem = (it: { id: number; stack: number } | null) =>
     it && v3 ? { id: it.id === 0 ? 0 : ITEM_INTERNAL_OF_STABLE.get(it.id) ?? 0, stack: it.stack } : it;
+  // v3 稳定 id → 内部 id(含 locked 透传);★曾未接线直接用 data.chests——
+  // 现有物品 stable≡internal 掩盖,自定义物品进箱即错
   const v3Chests = v3
-    ? data.chests.map((c) => ({ x: c.x, y: c.y, items: c.items.map(mapItem) }))
+    ? data.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked, items: c.items.map(mapItem) }))
     : data.chests;
   if (v3 && data.player) {
     data.player = {
@@ -166,7 +168,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   }
   if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
   world.applyBestiary(data.bestiary); // 图鉴三桶（旧档缺省=空）
-  world.chests = data.chests;   // locked 随箱对象直传（serialize 段已带）
+  world.chests = v3Chests;      // v3 id 翻译+locked 透传
   if (data.weather) world.applyWeather(data.weather); // 天气回填（旧档缺省=晴）
   world.flags = data.flags;
   // 星璇塔运行时态回填（WorldFile.cs:2220-2255 尾段：downedTower*/towerActive*/lunarApocalypseUp

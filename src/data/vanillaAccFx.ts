@@ -62,6 +62,8 @@ export interface AccFx {
   manaMagnet?: number;   // 魔力磁石：魔力星吸附范围 +
   pStone?: number;       // 贤者之石（药水 CD -25%）
   magicCuffs?: number;   // 魔力手铐：受伤回蓝（raw damage 1:1）
+  nightWolf?: number;    // 月亮符：夜晚 Werewolf buff(28)（melee+5.1%伤/+2暴/+5.1%速）
+  brainOfConfusion?: number; // 混乱之脑：受击 1/6 → buff321（三系+10暴+召唤+10%伤）
   manaFlower?: number;   // 魔力花族：耗魔 -8% + 魔力不足自动喝蓝
 }
 

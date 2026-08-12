@@ -724,6 +724,8 @@ export class Renderer {
       surfaceY: world.groundLevel * TILE,
       worldW: world.w,
       worldH: world.h,
+      // 事件月亮(Main.cs:62400-62408):0 无 / 1 霜月 / 2 南瓜月
+      moonEventKind: (world.moonEvent?.kind ?? 0) as 0 | 1 | 2,
     };
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 

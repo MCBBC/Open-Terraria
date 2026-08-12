@@ -22,7 +22,7 @@ function sheetId(sheet: number): number {
   return -1;
 }
 
-function flatWorld(): { w: World; hooks: unknown } {
+function flatWorld(): { w: World; hooks: import('../src/entities/types').GameHooks } {
   const w = new World(120, 80, 42, 'dash');
   w.groundLevel = 40;
   const st = w.store;
@@ -40,7 +40,7 @@ function flatWorld(): { w: World; hooks: unknown } {
     onEnemyKilled: () => {}, critters: () => [] as unknown[],
     cutTile: () => {}, addLight: () => {},
   } as never;
-  return { w, hooks };
+  return { w, hooks: hooks as never as import('../src/entities/types').GameHooks };
 }
 
 describe('419 日耀旋刃怪冲刺（NPC.cs:57114-57173）', () => {
