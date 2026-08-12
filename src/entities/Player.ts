@@ -407,7 +407,7 @@ export class Player extends Entity {
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
-      jumpSpd, flipper, longInvince, spikedBoots,
+      jumpSpd: jumpSpd + (this.buffs.has(BuffType.Werewolf) ? 0.2 : 0), flipper, longInvince, spikedBoots,
       treasureMagnet, goldRing, luckyCoin, discount,
       arrowDmg, ammoSave, kbGlove, yoyoString,
     quiver: equipHasQuiver,

@@ -491,6 +491,7 @@ export class MinionProj extends Entity {
         } else {
           if (this.sFireT === 12) {
             const tgt = this.nearestEnemy(game, 900);
+            game.playSfx('dd2Flameburst', 0.9, this.cx, this.cy); // AI_131 :65533（弹幕 localAI[0]==0）
             const mx = this.cx + this.facing * 6, my = this.y + this.h - 46; // 炮口（:65316）
             let vx = this.facing * 9, vy = 0;
             if (tgt) {
@@ -516,6 +517,7 @@ export class MinionProj extends Entity {
         } else {
           if (this.sFireT === 12) {
             const tgt = this.nearestEnemy(game, 900);
+            game.playSfx('dd2Ballista', 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
             let vx = this.facing * 16, vy = 0;
             if (tgt) {
               const d = Math.hypot(tgt.cx - this.cx, tgt.cy - (this.y + 20)) || 1;
@@ -556,6 +558,7 @@ export class MinionProj extends Entity {
             !en.dead && Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2);
           if (hit) {
             this.sCool = 90;
+            game.playSfx('dd2Explosive', 0.9); // AI_138 :66104（无位置参数）
             let boom = 0;
             for (const ent of game.enemies()) {
               const en = ent as EnemyLike & { dead: boolean };

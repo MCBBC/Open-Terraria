@@ -83,13 +83,9 @@ const out = await page.evaluate(async () => {
   g.player.baseMaxHp = 400; g.player.hp = 400;
   const realRand = Math.random;
   Math.random = () => 0; // 命中 1/3 与 1/10
-  const before = w.clock.timeOfDay;
-  w.clock.timeOfDay = 0.9; // 入夜穿越
-  g._lastClockT = before; // 强制 crossed(DUSK) 视角
-  // 直调 fixedUpdate 一次太重——检查字段需要触发；直接改用公开路径：重放一次昼夜事件段不可行，
-  // 改为断言 EoC roll 结果通过下一帧自然推进。此处先恢复随机。
+  w.clock.timeOfDay = 0.9; // 入夜穿越（_lastClockT 由真实 tick 保存的旧昼值 → crossed 成立）
+  await new Promise(r => setTimeout(r, 60)); // 让一个 fixed tick 在桩随机下跑
   Math.random = realRand;
-  await new Promise(r => setTimeout(r, 200));
   res.eocRolled = g.spawnEyePending === true || g.spawnHardBossPending > 0; // 满足全部门+桩随机→其一必中
   g.spawnEyePending = false; g.spawnHardBossPending = 0;
   for (const n of [...g.entities.npcs]) if (n.npcKey === 'merchant') n.dead = true;
@@ -107,14 +103,12 @@ const out = await page.evaluate(async () => {
   const nautilus = g.entities.enemies.find((e) => e.vanillaId === 618 && !e.dead);
   res.nautilusSpawned = !!nautilus;
 
-  // 4) drunk 黎明翻转
+  // 4) drunk 黎明翻转（timeOfDay 连续推进跨越 DAWN——不跨午夜数字跳变）
   w.seedFlags = { drunkWorld: true };
-  const tBefore = w.clock.timeOfDay;
-  w.clock.timeOfDay = 0.2; // 黎明穿越
-  await new Promise(r => setTimeout(r, 200));
+  w.clock.timeOfDay = 0.18;
+  await new Promise(r => setTimeout(r, 400)); // 自然推进越过 0.1875 DAWN
   res.drunkFlipped = w.crimson === true; // 新世界默认 false → 翻一次
   w.seedFlags = {};
-  void tBefore;
   return res;
 });
 

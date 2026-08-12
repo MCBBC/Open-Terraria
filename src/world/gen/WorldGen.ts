@@ -143,6 +143,13 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     await passes[i].run(ctx, () => {});
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
+    if (true) {  // DBG 临时
+      let ashN = 0;
+      for (let q = 0; q < store.wall.length; q++) const keyAsh = TILE_BY_KEY['ash'];
+      void keyAsh;
+      if (store.flags[q] && TILE_DEFS[store.type[q]]?.vanilla?.sheet === 57) ashN++;
+      console.log(`[ashdbg] ${i} ${passes[i].name} -> ${ashN}`);
+    }
   }
 
   finalize(ctx);

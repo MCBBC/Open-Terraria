@@ -15,6 +15,10 @@ export type SfxName =
   | 'thunder'   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
   | 'mech'       // 原版 SoundID 28（Mech_0：器件右键切换音，Player.cs:31762/31799/31803）
   | 'portalOrange' | 'portalBlue' // 原版 Item_115 / Item_114（传送门弹撞块落门音，Projectile.cs:16675-16683）
+  | 'dd2Flameburst'  // DD2_FlameburstTowerShot（Sounds/Custom/dd2_flameburst_tower_shot_0-2，AI_131 :65533）
+  | 'dd2Ballista'    // DD2_BallistaTowerShot（AI_134 :65674）
+  | 'dd2Explosive'   // DD2_ExplosiveTrapExplode（AI_138 :66104）
+  | 'dd2Zap'         // DD2_LightningAuraZap（AI_137 :65947）
   | 'whipCrack'   // 原版 Item_152（DefaultToWhip UseSound——鞭甩响，Item.cs:47448）
   | 'summon'      // 原版 Item_44（召唤杖通用 UseSound）
   // ---- 液体六配对专属轨（SoundID.cs:823-827 CreateTrackable("liquids_*",3,Ambient)，原 Sounds/Custom/）----
@@ -54,6 +58,10 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
+  dd2Flameburst: ['Custom/dd2_flameburst_tower_shot_0', 'Custom/dd2_flameburst_tower_shot_1', 'Custom/dd2_flameburst_tower_shot_2'],
+  dd2Ballista: ['Custom/dd2_ballista_tower_shot_0', 'Custom/dd2_ballista_tower_shot_1', 'Custom/dd2_ballista_tower_shot_2'],
+  dd2Explosive: ['Custom/dd2_explosive_trap_explode_0', 'Custom/dd2_explosive_trap_explode_1', 'Custom/dd2_explosive_trap_explode_2'],
+  dd2Zap: ['Custom/dd2_lightning_aura_zap_0', 'Custom/dd2_lightning_aura_zap_1', 'Custom/dd2_lightning_aura_zap_2', 'Custom/dd2_lightning_aura_zap_3'],
   whipCrack: ['Item_152'],
   summon: ['Item_44'],
   beeSummon: ['Item_173'],

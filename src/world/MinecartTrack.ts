@@ -113,7 +113,7 @@ function buildTables(): void {
   defFrame(14, NO_CONNECTION, MIDDLE, [2, 0], [[0, OPEN_END]]);
   defFrame(15, MIDDLE, NO_CONNECTION, [3, 0], [[7, OPEN_END]]);
   defFrame(16, BOTTOM, NO_CONNECTION, [4, 0],
-    [[0, 1], [1, 2], [2, 3], [3, 4], [4, 5], [5, 6], [6, RAMP_END], [7, RAMP_END]]);
+    [[0, 1], [1, 2], [2, RAMP_END], [3, RAMP_END], [4, RAMP_END], [5, RAMP_END], [6, RAMP_END], [7, RAMP_END]]);
   defFrame(17, NO_CONNECTION, BOTTOM, [5, 0],
     [[0, RAMP_END], [1, RAMP_END], [2, 6], [3, 5], [4, 4], [5, 3], [6, 2], [7, 1]]);
   defFrame(18, TOP, NO_CONNECTION, [6, 0],
@@ -291,14 +291,16 @@ function writeFrames(st: TileStore, i: number, j: number, front: number, back: n
 export function frameTrack(st: TileStore, i: number, j: number, pound = false, mute = false): boolean {
   if (!st.inBounds(i, j)) return false;
   const idx = st.idx(i, j);
-  if (!isTrackCell(st, idx)) {
+  // 仅认 tile 类型/active；frameX 可为 -1（PlaceTrack 初始态，Minecart.cs:959-962 mute 门）
+  if (!(TRACK_TILE >= 0 && !!(st.flags[idx] & 1) && st.type[idx] === TRACK_TILE)) {
     if (mute) return false;
     writeFrames(st, i, j, 0, -1);
     return false;
   }
-  const num = frontTrack(st, idx);          // 当前前轨
+  const num = frontTrack(st, idx);          // 当前前轨（可为 -1：刚放置未定型）
   const num2 = backTrack(st, idx);          // 当前后轨
-  const num3 = trackTypeOf(num);            // 当前轨道类型
+  // Minecart.cs:966：非法前轨按普通型（0）处理——放置首帧 -1 走默认分支
+  const num3 = num >= 0 && num < TRACK_FRAMES ? TRACK_TYPE[num] : TYPE_NORMAL;
   let num4 = -1;                            // array 下标（前轨）
   let num5 = -1;                            // array 下标（后轨）
   const array = TRACK_SWITCH_OPTIONS[nearbyMask(st, i, j)];
@@ -627,12 +629,14 @@ export function trackCollision(
           trackState2 = ON_FRONT;
           break;
         }
-        case RAMP_END:  // -3：斜坡起飞——水平速度保持，垂直 = |vx|/√2 方向翻转
+        case RAMP_END:  // -3：斜坡起飞——水平速度保持，垂直 = |vx|/√2（±45° 旋转）
           if (trackState === ON_FRONT) {
             trackState = NO_TRACK;
+            // Minecart.cs:696：vx>0 看 leftConn（==BOTTOM → -45° 上抛，否则 +45° 下抛）；
+            // vx<0 镜像看 rightConn
             const rot = r.vx > 0
-              ? (leftConnOf(num9) !== BOTTOM ? -Math.PI / 4 : Math.PI / 4)
-              : (rightConnOf(num9) !== BOTTOM ? Math.PI / 4 : -Math.PI / 4);
+              ? (leftConnOf(num9) !== BOTTOM ? Math.PI / 4 : -Math.PI / 4)
+              : (rightConnOf(num9) !== BOTTOM ? -Math.PI / 4 : Math.PI / 4);
             vector5.x = r.vx * Math.cos(rot);
             vector5.y = r.vx * Math.sin(rot);
             vector5.x = r.vx;

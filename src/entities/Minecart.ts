@@ -198,6 +198,19 @@ export class Minecart extends Entity {
     if (bits & (1 << FLAG_BOOST_LEFT)) this.trackBoost -= TRACK_BOOST_DELTA;
     if (bits & (1 << FLAG_BOOST_RIGHT)) this.trackBoost += TRACK_BOOST_DELTA;
 
+    // ---- 位置积分（原版在 TrackCollision 后由常规碰撞段 position += velocity 完成：
+    // TrackCollision 只改速度 + 贴轨 Y 快照。轨道非实心——横向撞实心墙即停回退）----
+    this.x += this.vx;
+    this.y += this.vy;
+    if (this.vx !== 0) {
+      const headX = Math.floor((this.x + this.w / 2 + Math.sign(this.vx) * this.w / 2) / 16);
+      const feetY = Math.floor((this.y + this.h - 4) / 16);
+      if (st.inBounds(headX, feetY) && st.isSolid(headX, feetY)) {
+        this.x -= this.vx;
+        this.vx = 0;
+      }
+    }
+
     if (Math.abs(this.vx) > 0.1) this.animTick++;
     else this.animTick = 0;
 

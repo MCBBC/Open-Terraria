@@ -7740,10 +7740,15 @@ export class Game implements GameHooks {
           if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
           break;
         }
-        case 20: // 树妖盆栽树（:1650-1697：moonPhase/2 三件套）
+        case 20: { // 树妖盆栽树（:1650-1697：moonPhase/2 三件套；提取器把相位 switch
+          // 摊平成 hardMode/无门条目——先清 out 里的 4430-4441 再按相位补）
+          for (let i = out.length - 1; i >= 0; i--) {
+            if (out[i][0] >= 4430 && out[i][0] <= 4441) out.splice(i, 1);
+          }
           add([4430, 4431, 4432, 4433, 4434, 4435, 4436, 4437, 4438, 4439, 4440, 4441].slice(
             Math.floor(phase / 2) * 3, Math.floor(phase / 2) * 3 + (this.world.flags.hardMode ? 3 : 2)));
           break;
+        }
         case 54: // 裁缝套装（:1795-1923）
           if (phase === 0) { add([245, 246]); if (!day) add([1288, 1289]); }
           else if (phase === 1) add([325, 326]);

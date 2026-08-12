@@ -298,6 +298,11 @@ export class BuffState {
     if (dotActive && this.active.has(BuffType.Honey)) {
       heal += this.rateAccum(BuffType.Honey, 2, dt, true);
     }
+    if (this.active.has(BuffType.Werewolf)) {
+      // 狼人 lifeRegen++（:11496）= 0.5 HP/s → 每 2 秒 1 HP
+      this.campfireAccum += dt;
+      if (this.campfireAccum >= 2) { this.campfireAccum -= 2; heal += this.campfireHeal; }
+    }
     if (this.active.has(BuffType.Campfire)) {
       // 原版 lifeRegen+1 = 0.5 HP/s(Player.cs:18990/12244-12245)→ 每 2 秒 1 HP
       this.campfireAccum += dt;
@@ -338,6 +343,7 @@ export class BuffState {
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
+    if (this.active.has(BuffType.Werewolf)) m *= 1.05;      // 狼人 moveSpeed += 0.05（:11498）
     if (this.active.has(BuffType.KiteBuff)) m += 0.25;       // 风筝 moveSpeed += 0.25（:9614）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
@@ -348,6 +354,7 @@ export class BuffState {
     if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
     if (this.active.has(BuffType.Tipsy)) d -= 4;            // 醉酒 statDefense -= 4（:11514）
     if (this.active.has(BuffType.Weak)) d -= 4;              // 虚弱 statDefense -= 4（:11509）
+    if (this.active.has(BuffType.Werewolf)) d += 3;         // 狼人 statDefense += 3（:11497）
     d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
     return d;
   }
