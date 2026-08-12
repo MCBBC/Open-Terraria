@@ -2603,7 +2603,7 @@ Checkpoint("silt");
 // ================= Pass 26 OresAndShinies（cs:13233-13658 普通世界分支）=================
 void ShinyBand(double oCount, int yMin, int yMax, int sMin, int sMax, int stMin, int stMax, int oType)
 {
-    for (int oi = 0; (double)oi < oCount; oi++)
+    for (int oi = 0; oi < (int)oCount; oi++)   // 原版计数先 (int) 截断（cs:13455）
         TileRunner((int)r.Next(0, W), (int)r.Next(yMin, yMax), (int)r.Next(sMin, sMax), (int)r.Next(stMin, stMax), oType);
 }
 {

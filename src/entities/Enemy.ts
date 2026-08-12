@@ -388,6 +388,13 @@ export class Enemy extends Entity {
   bInit = false;
   /** 部件 → 主体引用（骷髅王手 36 → 头：渲染臂骨 IK 与存活判定用） */
   master: Enemy | null = null;
+  /** 原版 NPC.reflectsProjectiles（NPC.cs:6019）：冲刺中反射玩家弹幕（419 旋刃怪
+   *  cs:57171 置位；Projectile.cs:12050 命中前反射——CanBeReflected 弹型白名单 +
+   *  ReflectProjectile cs:67036 反向归属玩家管线未接，登记依赖） */
+  reflectsProjectiles = false;
+  /** 原版 NPC.takenDamageMultiplier（NPC.cs:6018，StrikeNPC :81997-82000 防
+   *  御结算后 ×N）：419 旋刃冲刺中受击 ×3（cs:57172） */
+  takenDamageMultiplier = 1;
 
   constructor(public key: string, x: number, y: number) {
     super();
@@ -965,6 +972,12 @@ export class Enemy extends Entity {
       // 方向：朝玩家（无玩家则保持）；confused 反向（TargetClosest :78569）
       this.facing = this.seekDirX(player);
     }
+    // ---- 419 日耀旋刃怪（AI_003_Fighters cs:57114-57173 type==419 段）：旋刃冲刺
+    //  状态机。该段位于原版通用行走段之前，各分支 return 跳过本 tick 行走/跳跃/远程——
+    //  helper 返回 true = 已自管重力+碰撞，调用方直接收尾
+    if (this.vanillaId === 419 && player && !player.dead && this.solenianDashAI(game, player)) {
+      return;
+    }
     const dir = this.facing;
     // 前方探测点（L24561-24562）：体中心前 15px、脚底上 15px
     const fx = Math.floor((this.x + this.w / 2 + 15 * dir) / TILE);
@@ -1110,6 +1123,64 @@ export class Enemy extends Entity {
         if (this.ai2 >= 100) this.ai2 = 0;
       } else this.ai2 = 0;
     }
+  }
+
+  /** 419 日耀旋刃怪冲刺（NPC.cs:57114-57173，AI_003_Fighters 内 type==419 专属段，
+   *  位于通用行走段之前——各分支 return 跳过行走/跳跃/远程，仅留全局重力+碰撞）。
+   *  ai[2] 状态机（num40=6 / num41=10 / num42=16）：
+   *    >0   落地恢复倒数（触地或受击置 60）
+   *    0    巡航：面朝玩家 + 视线 → -1（本 tick 仍走通用段，cs 无 return）
+   *    -1..-6  蓄力：vx×0.9
+   *    -7   发射：朝 player.Top+(0,-30) 方向 ×16
+   *    <-7  冲刺：-17 起 vy+0.15 钳 24（前 10t 无重力增量）；反射弹幕 + 受击 ×3
+   *  拖尾渲染（ai2≤-9 oldPos 拖尾）已就位：Renderer NPC_GLOW[419] mode 'trail'。
+   *  @returns true = 冲刺族本 tick 已自管重力+碰撞，调用方应跳过通用战士段 */
+  private solenianDashAI(game: GameHooks, player: Player): boolean {
+    const WINDUP = 6;    // num40：蓄力 tick 数（-1..-6）
+    const DASH_SPEED = 16; // num42：冲刺初速
+    this.reflectsProjectiles = false;
+    this.takenDamageMultiplier = 1;
+    if (this.ai2 > 0) this.ai2 -= 1;
+    if (this.ai2 === 0) {
+      // 巡航待发（cs:57124-57131）：面朝玩家（direction 与玩家水平侧一致）+ 中心视线
+      if (((player.cx < this.cx && this.facing < 0) || (player.cx > this.cx && this.facing > 0))
+        && this.canSeePlayer(game.world.store, player)) {
+        this.ai2 = -1;
+      }
+      return false;   // 未触发/刚起手 → 本 tick 走通用行走段（cs 该分支无 return）
+    }
+    if (this.ai2 < 0 && this.ai2 > -WINDUP) {
+      // 蓄力减速（cs:57135-57140）
+      this.ai2 -= 1;
+      this.vx *= 0.9;
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return true;
+    }
+    if (this.ai2 === -WINDUP) {
+      // 发射（cs:57141-57152）：朝玩家头顶上方 30px 直冲；零向量退化 (spriteDirection,-1)
+      this.ai2 -= 1;
+      let dx = player.cx - this.cx;
+      let dy = (player.y - 30) - this.cy;   // player.Top + (0,-30)
+      let d = Math.hypot(dx, dy);
+      if (d < 0.001) { dx = this.facing || 1; dy = -1; d = Math.hypot(dx, dy); }
+      this.vx = (dx / d) * DASH_SPEED;
+      this.vy = (dy / d) * DASH_SPEED;
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return true;
+    }
+    // 冲刺（ai2 < -6，cs:57153-57172）
+    this.ai2 -= 1;
+    // 落地判定读上一 tick 碰撞结果（原版 velocity.Y==0f 是碰撞后清零值）
+    if (this.vy === 0) this.ai2 = 60;
+    else if (this.ai2 < -WINDUP - 10) this.vy = Math.min(this.vy + 0.15, 24); // num41=10
+    this.reflectsProjectiles = true;
+    this.takenDamageMultiplier = 3;
+    if (this.justHit) this.ai2 = 60;
+    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    return true;
   }
 
   /** AI_003 远程战士参数（NPC.cs:59464-60095 各 type 修正汇总）：
@@ -3867,6 +3938,9 @@ export class Enemy extends Entity {
     const pen = this.ichorT > 0 ? 7 : 0;
     const effDef = def > dmg * 2 ? dmg * 2 : def;
     dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
+    // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
+    // （419 旋刃怪冲刺中 ×3，cs:57172）
+    if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒

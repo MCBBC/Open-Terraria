@@ -99,6 +99,9 @@ export interface SaveData {
   furniture?: FurnitureSaveEntry[];
   flags: Record<string, boolean>;
   weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
+  /** 图鉴统计（BestiaryUnlocksTracker——原版随世界文件持久化 WorldFile.cs:3399/3405；
+   *  旧档缺省=空三桶） */
+  bestiary?: import('../data/Bestiary').BestiarySave;
 }
 
 /** 存档物品实例（Inventory.InvItem 的可序列化形——favorited/prefix 为实例态可选字段） */
@@ -127,6 +130,8 @@ export interface SaveMeta {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
   altarCount?: number;
+  /** 图鉴三桶（杀数/遇数/聊天）——data/Bestiary.ts BestiarySave */
+  bestiary?: import('../data/Bestiary').BestiarySave;
 }
 
 export function rlePairs(values: ArrayLike<number>): Uint8Array {
@@ -214,6 +219,7 @@ export function serializeSave(
     })),
     flags: meta.flags,
     weather: meta.weather,
+    bestiary: meta.bestiary,
     idScheme: 'sheet',
   };
   return JSON.stringify(data);

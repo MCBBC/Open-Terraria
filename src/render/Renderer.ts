@@ -1463,7 +1463,13 @@ export class Renderer {
         // 裸底锚会悬空 2px、中心锚会入地 2px(实测反馈),pad 补偿数学上保证贴地。
         // 与纸娃娃(:1266)/legacy(:1301)/小动物(:763)四路统一
         const grounded = !flying;
-        ctx.translate(e.cx, grounded ? e.y + e.h : e.cy);
+        // 416 日耀掠兽骑手（Main.cs:24508-24515 case 416 独占）：绘制位置吸附坐骑
+        // 415 的 Bottom（AI 锚 Center+(-spriteDir*10,-30) 只喂碰撞盒——骑手视觉上
+        // 双脚踩在掠兽脚平面，+4px 是帧底透明边距，与地面族 pad 同义）。
+        // 其余 aiStyle 75 骑手（390）原版无此绘制覆写，仍用 AI 位
+        const snapMount = e.vanillaId === 416 && e.master && !e.master.dead ? e.master : null;
+        ctx.translate(snapMount ? snapMount.cx : e.cx,
+          snapMount ? snapMount.y + snapMount.h : (grounded ? e.y + e.h : e.cy));
         // 旋转族:整体随自转角旋转(原版 npc.rotation;朝向翻转不适用)。
         // 4=克眼 visAngle;35/68=骷髅王头 spin;125/126=双子;127-131=Prime 头+部件;134-136=毁灭者链
         const rotId = ROTATION_NPC.has(e.vanillaId);
@@ -3011,17 +3017,12 @@ export class Renderer {
           const frames = HOVER6.has(wingSlot) ? 6 : 7;
           const fh = Math.floor(wt.naturalHeight / frames);
           const fr = Math.min(frames - 1, Math.max(0, p.wingFrame));
-          // 光照染色（中心格）：复用 lightCanvas 上一帧采样
-          let tint = '';
-          const [lsx2, lsy2] = [0, 0];
-          void lsx2; void lsy2;
+          // （光照染色待接：compositeLight 全屏 multiply 已覆盖翅膀——无独立 tint 需要）
           ctx.save();
           ctx.translate(p.cx, p.y + p.h * 0.45);   // 身体中心（PlayerDrawLayers 锚）
           ctx.scale(p.facing >= 0 ? 1 : -1, 1);
-          if (tint) ctx.filter = tint;
           ctx.drawImage(wt, 0, fr * fh, wt.naturalWidth, fh,
             -wt.naturalWidth / 2, -fh / 2, wt.naturalWidth, fh);
-          ctx.filter = 'none';
           ctx.restore();
         }
       }
@@ -4111,7 +4112,7 @@ export class Renderer {
   ) {
     if (!this.pylons.length) { this.pylonHoverName = null; return; }
     const fm = this.fullMap;
-    const icon = this.atlas ? this.atlas.vui('Images_Extra_182.png') : null;
+    const icon = this.atlas ? this.atlas.vui('Extra_182.png') : null;
     // 玩家 ±60 格内无晶塔 → 半透明（IsPlayerNearAPylon :70-73；近似取相机中心玩家位）
     const p = this._lastPlayer;
     const dim = p ? !this.pylons.some((py) =>

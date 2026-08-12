@@ -6,6 +6,7 @@ import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData } from './save/SaveFile';
 import { saveClient } from './workers/SaveClient';
+import { TILE_BY_KEY } from './data/tiles';
 import { setupLiquidLab as liquidLab } from '../scripts/liquidlab';
 import { kvGet, kvHas } from './save/KvStore';
 import { ITEM_BY_KEY } from './data/items';
@@ -84,6 +85,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function enterGame(g: Game) {
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
+    // E2E/控制台调试:tile key → 内部 id 反查(测试脚本放置图块用)
+    (window as unknown as { __swTileByKey?: (k: string) => number }).__swTileByKey = (k: string) =>
+      (TILE_BY_KEY as Record<string, number>)[k] ?? -1;
     // 液体浸润实验台:?liquidlab 参数 / window.__swLiquidLab() 控制台命令
     (window as unknown as { __swLiquidLab?: () => void }).__swLiquidLab = () => {
       liquidLab(g);

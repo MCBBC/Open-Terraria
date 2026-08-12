@@ -6,6 +6,7 @@ import { newMoonEventState } from './MoonEvent';
 import { newOldOnesArmyState } from './OldOnesArmy';
 import { newLunarEventState } from './LunarEvent';
 import type { FurnitureItemRecord } from './FurnitureItems';
+import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
@@ -68,6 +69,13 @@ export class World {
    *  SmashAltar 矿物三档轮换的波次源（%3 选档 /3+1 衰减），海盗入侵自然 roll 的
    *  altarCount>0 门（Main.cs:64938） */
   altarCount = 0;
+  /** 图鉴统计（BestiaryUnlocksTracker——原版 IPersistentPerWorldContent，随世界存档：
+   *  WorldFile.cs:3399 Save/:3405 Load。杀数/遇数/聊天三桶，数据层见 data/Bestiary.ts） */
+  bestiary = new BestiaryTracker();
+  /** 读档回填（loadSaveData；WorldPacket 不走这里，包内即活存储） */
+  applyBestiary(data: BestiarySave | undefined): void {
+    this.bestiary = BestiaryTracker.fromSave(data);
+  }
   // 树登记：砍树干时找到整棵树（roots → 范围）
   trees: Array<{ x: number; y: number; h: number }> = [];
   /** 战争迷雾：1 = 已探索。按 tile 粒度。 */

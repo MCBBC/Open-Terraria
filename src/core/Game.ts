@@ -101,6 +101,7 @@ import { Critter } from '../entities/Critter';
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
+import { countsAsACritter, isNpcValidForBestiaryKillCredit } from '../data/Bestiary';
 
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
@@ -1812,6 +1813,21 @@ export class Game implements GameHooks {
     }
 
     player.fixedUpdate(dt, this);
+    // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
+    // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
+    // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
+    {
+      const px = player.x - 300, py = player.y - 200;
+      const pw = player.w + 600, ph = player.h + 400;
+      for (const n of this.entities.npcs) {
+        const e = n as Enemy;
+        if (e.dead || e instanceof TownNPC || e.vanillaId == null) continue;
+        if (!countsAsACritter(e.vanillaId)) continue;
+        if (e.x < px + pw && e.x + e.w > px && e.y < py + ph && e.y + e.h > py) {
+          w.bestiary.registerSight(e.vanillaNetId !== 0 ? e.vanillaNetId : e.vanillaId);
+        }
+      }
+    }
     // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
     // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
     // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。
@@ -6492,9 +6508,9 @@ export class Game implements GameHooks {
         // 圣诞老人(cs:65277)：圣诞季（现实日期 12/15-31，checkXMas）
         return this.world.clock.xMas;
       case 'zoologist':
-        // 动物学家(cs:65327)：图鉴完成度 ≥10%——Bestiary 系统未移植，门旗
-        // bestiaryTenPercent 无置位点（依赖登记：图鉴进度统计 + 置位）
-        return !!this.world.flags['bestiaryTenPercent'];
+        // 动物学家(cs:65375)：图鉴完成度 ≥10%（Main.GetBestiaryProgressReport = 已解锁条目/
+        // 总条目；数据层 data/Bestiary.ts。原版另有 vampireSeed 世界分支——种子系统未实装）
+        return this.world.bestiary.completion().percent >= 0.1;
       case 'party_girl':
         // 派对女孩(cs:65249-65253)：每轮 1/40 重掷（另需在场 NPC ≥20，见优先级链）
         return Math.random() < 1 / 40;
@@ -6662,6 +6678,8 @@ export class Game implements GameHooks {
   /** 打开对话框:台词/按钮按 NPC 类型生成,UI 经 onNpcDialog 渲染 */
   private openNpcDialog(npc: TownNPC) {
     this.dialogNpc = npc;
+    // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记）
+    this.world.bestiary.registerChat(npc.vanillaId);
     npc.talking = true;  // 原版 AI_007:53721 对话中站定面向玩家
     npc.talkCooldown = 30;
     this.sfx.play('menuOpen'); // 对话面板打开音（原版 UI 面板开合语义 id 10/11）
@@ -7518,6 +7536,15 @@ export class Game implements GameHooks {
   onEnemyKilled(key: string, enemy?: Enemy) {
     // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>)
     void key;
+    // 图鉴杀数（NPC.cs:79640-79643 NPCLoot→RegisterKill：netID 记账经 GetBestiaryCreditId
+    // 归并变体/部位；IsNPCValidForBestiaryKillCredit 门在数据层。原版另有 GetWereThereAnyInteractions
+    // 门（雕像产怪无玩家交互不计）——本仓 hurt 无伤害源参数，近似为全部计入，仅环境击杀的
+    // 雕像怪是偏差面）
+    if (enemy && enemy.vanillaId != null
+      && isNpcValidForBestiaryKillCredit(enemy.vanillaId, !!enemy.def.boss)) {
+      this.world.bestiary.registerKill(enemy.vanillaNetId !== 0 && enemy.vanillaNetId != null
+        ? enemy.vanillaNetId : enemy.vanillaId);
+    }
     // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
       if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId) && !this.boss) {

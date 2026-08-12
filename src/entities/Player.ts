@@ -590,7 +590,7 @@ export class Player extends Entity {
     let accel = PLAYER_WALK_ACCEL;
     if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
       const ws = wingStatOf(this.equipStats.wing.logic);
-      const hoverDownMove = this.inputDown && this.inputJump && ws.hover;
+      const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
       accel *= hoverDownMove && ws.hover ? ws.hoverAccelMult : ws.accelMult;
     }
     if (ix !== 0) {
@@ -605,7 +605,7 @@ export class Player extends Entity {
     // hover 下落态改用 DownHoverSpeedOverride 档）
     if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
       const ws = wingStatOf(this.equipStats.wing.logic);
-      const hoverDownMove = this.inputDown && this.inputJump && ws.hover;
+      const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
       const spd = hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed;
       if (spd > maxSpd) maxSpd = spd;
     }
@@ -646,7 +646,7 @@ export class Player extends Entity {
         // 站在液面等价落地：重置多段跳/飞行/飞毯，允许起跳离水面
         this.extraJumps = [...this.equipStats.jumpOpts];
         const eqW = this.equipStats;
-        this.wingTime = eqW.wing ? eqW.wing.time + (eqW.rocketBoots > 0 ? 42 : 0) : 0;
+        this.wingTime = eqW.wing ? eqW.wing.time : 0;
         this.rocketTime = 7; this.rocketRelease = true; this.rocketDelay = 0;
         this.canCarpet = true;
         this.carpetTime = 300;
@@ -710,7 +710,7 @@ export class Player extends Entity {
       // 松跳重触发（原版 :20765 松跳段独立于地面状态——rocketRelease/wingRelease）
       if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
       if (this.onGround) {
-        this.wingTime = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
+        this.wingTime = eq.wing ? eq.wing.time : 0;   // :26169 = wingTimeMax（FlyTime）
         this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;  // :2612 + :26436（无靴恒 0）
         this.rocketDelay = 0;
         this.canRocket = false;
@@ -720,12 +720,13 @@ export class Player extends Entity {
       } else {
         // canRocket 门（:26487）：vy > -jumpSpeed 且 vy≠0
         if (this.vy > -JS && this.vy !== 0) this.canRocket = true;
+        // vy==0 恢复 rocketTime（:26540：velocity.Y==0 即回满，含撞顶悬停等非落地场景）
+        if (this.vy === 0) this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;
         // flag19 = 翅膀飞行中（:26500-26510：wings>0 && controlJump && wingTime>0 &&
         //   jump==0 && vy≠0；hover 族 + ↓+跳 也算 :26505）
         const flying =
           (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
           || (eq.wing !== null && eq.wing.hover && this.inputJump && hoverDown && this.wingTime > 0);
-        this.wingFlapping = flying;
         if (flying) {
           this.wingMovement(wings, hoverDown, JS);
           // WingFrame 通用 flap（:29425+ 各族主干）：6t/帧循环 1→2→3→2
@@ -741,6 +742,15 @@ export class Player extends Entity {
         } else {
           this.wingFrame = 0;      // 地面收起
           this.wingFrameCounter = 0;
+        }
+        // 翅膀+火箭靴动态合并（:26523-26531）：空中且 rocketTime 有余 →
+        // 剩余脉冲×6 并入 wingTime（上限 = wingTimeMax + 本次转换量），rocketTime 清零
+        if (wings > 0 && eq.rocketBoots > 0 && this.vy !== 0 && this.rocketTime > 0) {
+          const add = this.rocketTime * 6;
+          this.wingTime += add;
+          const cap = (eq.wing ? eq.wing.time : 0) + add;
+          if (this.wingTime > cap) this.wingTime = cap;
+          this.rocketTime = 0;
         }
         // ---- 火箭靴（:26548-26628）：翅膀不可用（无翅或时间尽）才接管 ----
         if (!flying && (this.wingTime <= 0 || wings === 0) && eq.rocketBoots > 0
@@ -1070,16 +1080,14 @@ export class Player extends Entity {
         else { num2 = 0.95; num3 = 4.5; }
         num5 = 0.15; num4 = 1; num = 0.125;
         if (this.inputUp) {
+          // TryingToHoverUp 附加推力（:21821-21838 / :21866-21883 同构）
           this.vy -= 0.4;
           if (this.vy > 0) this.vy -= 1;
           else if (this.vy > -JS) this.vy -= 0.2;
           if (this.vy < -JS * 3) this.vy = -JS * 3;
         }
-        if (hoverDown && !this.inputJump === false && this.vy !== 0) {
-          // TryingToHoverDown && !controlJump 分支仅 hover-up 族 44/45（:21855）：
-          // 本方法只在 inputJump 成立时调用 → 该分支永不触发，保留语义注释
-        }
-        void hoverDown;
+        // （:21855/:21900 TryingToHoverDown && !controlJump 下沉分支在原版调用门
+        //  flag19（要求 controlJump）下不可达——反编译证实为死分支，不移植）
       }
       if (wings === 29 || wings === 32) { num2 = 0.85; num5 = 0.15; num4 = 1; num3 = 3; num = 0.135; }
       if (wings === 30 || wings === 31) { num4 = 1; num3 = 2.45; if (!hoverDown) num = 0.15; }
@@ -1108,8 +1116,7 @@ export class Player extends Entity {
   /** 翅膀动画帧（WingFrame :29002：0 收起 / flap 循环 1→2→3→2 / 滑翔 2）+ 拍速计数 */
   wingFrame = 0;
   private wingFrameCounter = 0;
-  /** 本帧翅膀飞行中（Renderer 挑帧用；wingMovement 置位） */
-  wingFlapping = false;
+
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;
   /** 冲刺：双击窗口（±15）/ 方向 / 持续 tick / 冷却（dashTime/dashDelay） */

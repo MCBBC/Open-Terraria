@@ -2029,12 +2029,13 @@ export class UI {
         this.paintSlotChrome(slotEl, 'inv', i);
       }
     }
-    // 金币跳字（CoinSlot：堆叠变化触发；弹药槽不跳——原版仅钱币族动画）
+    // 金币跳字（CoinSlot：堆叠变化触发且槽内有币——原版仅钱币族动画，空槽不跳）
     for (let k = 0; k < 4; k++) {
-      const st = inv.slots[COIN_START + k]?.stack ?? 0;
+      const cur = inv.slots[COIN_START + k];
+      const st = cur?.stack ?? 0;
       if (st !== this.prevCoinStack[k]) {
         this.prevCoinStack[k] = st;
-        this.coinJump(k);
+        if (cur) this.coinJump(k);
       }
     }
     // 装备列全量重绘（armor[20] / dye[10] / miscEquips[5] / miscDyes[5]）
