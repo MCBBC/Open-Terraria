@@ -1089,3 +1089,33 @@ for (const [idS, tp] of Object.entries(VANILLA_TOOL_POWERS)) {
   def.tool = { type: type as ToolType, power: tp.pick ?? tp.hammer ?? 0 };
   if (tp.axe !== undefined) def.axePower = tp.axe;
 }
+
+// ---- 放置语义全量回填(vanilla-itemfunc.json Item.cs createTile/placeStyle 提取)：
+// tryPlace(Game)要求 def.tile,vi_ 骨架此前只有手写特例能放置。此处注册期把
+// itemfunc.createTile(=原版 TileID)经 sheet 反查落到 v_ tile key——蛇形/驼峰
+// 双注册都刷,仅填 undefined(手写字段优先)。1040 条 createTile 全部可解析(753 sheet)。
+import { itemFuncOfVid } from './vanillaItemFunc';
+import { TILE_KEY_BY_SHEET } from './tiles';
+{
+  let filled = 0;
+  for (let i = 0; i < ITEM_DEFS.length; i++) {
+    const m = /^vi_(\d+)_/.exec(ITEM_DEFS[i].key);
+    if (!m) continue;
+    const f = itemFuncOfVid(Number(m[1]));
+    if (!f) continue;
+    const d = ITEM_DEFS[i];
+    if (d.tile === undefined && f.createTile !== undefined && f.createTile !== -1) {
+      const tk = TILE_KEY_BY_SHEET.get(f.createTile);
+      if (tk !== undefined) { d.tile = tk; filled++; }
+    }
+    if (f.placeStyle !== undefined && f.placeStyle !== 0 && d.placeStyle === undefined) {
+      d.placeStyle = f.placeStyle;
+    }
+  }
+  // 钱币 maxStack=100(原版;Inventory 100 进位依赖)
+  for (const vid of [71, 72, 73, 74]) {
+    const k = VANILLA_ITEM_KEY_BY_ID[vid];
+    if (k !== undefined && ITEM_BY_KEY[k] !== undefined) ITEM_DEFS[ITEM_BY_KEY[k]].maxStack = 100;
+  }
+  void filled;
+}

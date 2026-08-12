@@ -54,6 +54,44 @@ describe('沉降 A/B(冻结输入)', () => {
     const t0 = performance.now();
     await settleWorldLiquids(world, 'gen');
     const ms = Math.round(performance.now() - t0);
+    if (process.env.SETTLE_PHASES) {
+      // 阶段计时:重建世界再分步计时(与 settle.ts 同序,仅诊断)
+      const s2 = JSON.parse(readFileSync(SNAP, 'utf8')) as Snap;
+      const w2 = new World(s2.w, s2.h, s2.seed, s2.name);
+      const st2 = w2.store;
+      st2.type.set(s2.type); st2.flags.set(s2.flags); st2.wall.set(s2.wall);
+      st2.liquid.set(s2.liquid); st2.liquidType.set(s2.liquidType);
+      st2.half.set(s2.half); st2.slope.set(s2.slope);
+      w2.groundLevel = s2.groundLevel; w2.rockLevel = s2.rockLevel; w2.lavaLine = s2.lavaLine;
+      w2.shimmerX = s2.shimmerX; w2.shimmerY = s2.shimmerY;
+      const { LiquidSim } = await import('../src/world/liquid/LiquidSim');
+      const sim = new LiquidSim(w2);
+      sim.isGeneratingOrLoadingWorld = true;
+      sim.generatingWorld = true;
+      sim.shimmerCenter = w2.shimmerX > 0 ? { x: w2.shimmerX, y: w2.shimmerY } : null;
+      const tp = (label: string, fn: () => void) => {
+        const a = performance.now(); fn();
+        console.log(`PHASE ${label}=${Math.round(performance.now() - a)}ms`);
+      };
+      tp('quickWater', () => sim.quickWater());
+      tp('waterCheck', () => sim.waterCheck());
+      sim.quickSettle = true;
+      let rounds = 0, iters = 0;
+      tp('rounds', () => {
+        for (let round = 0; round < 10; round++) {
+          const MAX_ITER = Math.max(1000, (sim.numLiquid + sim.bufferLen) * 5);
+          let ri = 0;
+          while (sim.numLiquid > 0 && ri < MAX_ITER) { sim.updateLiquid(); ri++; iters++; }
+          sim.waterCheck();
+          rounds++;
+          if (sim.numLiquid === 0) break;
+        }
+      });
+      sim.quickSettle = false;
+      tp('finalCheck', () => { sim.waterCheck(); sim.finalGenMergeCheck(); });
+      console.log(`PHASE rounds=${rounds} iters=${iters} endNum=${sim.numLiquid}`);
+      void st;
+    }
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
     console.log(`SETTLE_AB ms=${ms} hash=${hash}`);

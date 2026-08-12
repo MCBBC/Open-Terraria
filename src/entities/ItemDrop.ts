@@ -4,6 +4,7 @@ import type { GameHooks } from './types';
 import { GRAVITY, MAX_FALL_SPEED, MAGNET_RADIUS, PICKUP_DELAY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS } from '../data/items';
+import { coinIndexOf } from '../items/Inventory';
 import type { Player } from './Player';
 import {
   canShimmerItem, coinLuckAmount, getTransformToItem,
@@ -83,9 +84,9 @@ export class ItemDrop extends Entity {
         if (left === 0) {
           this.dead = true;
           game.notifyInventoryChanged();
-          // 铜币拾取用专属音效，其余走通用拾取
+          // 钱币拾取用专属音效，其余走通用拾取（vi_71-74 单轨）
           // 音量略低（0.75）：拾取与挖掘声同时触发时两者都可闻，不被 Grab 盖住
-          game.playSfx(ITEM_DEFS[this.itemId]?.key === 'coin_copper' ? 'coin' : 'pickup', 0.75);
+          game.playSfx(coinIndexOf(this.itemId) >= 0 ? 'coin' : 'pickup', 0.75);
           const def = ITEM_DEFS[this.itemId];
           if (def) game.showPickupLabel(def.key);
           return;
@@ -168,7 +169,9 @@ export class ItemDrop extends Entity {
       downedBoss3: !!(flags['downed_35'] || flags.downedSkeletron),
       downedGolemBoss: !!flags['downed_245'],
     };
-    if (inShimmer && canShimmerItem(vid, false, game.world.clock.moonPhase, decraftCtx)) {
+    // 月后锁取世界 flags（原版 NPC.downedMoonlord；恒 false 会把月后物永久挡在微光外）
+    const downedMoonlord = !!flags['downed_398'];
+    if (inShimmer && canShimmerItem(vid, downedMoonlord, game.world.clock.moonPhase, decraftCtx)) {
       this.shimmerTime += 0.01;
       if (this.shimmerTime > 0.9) {
         this.shimmerTime = 0.9;

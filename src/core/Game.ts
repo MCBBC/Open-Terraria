@@ -1,4 +1,5 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
+import { Achievements } from './Achievements';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -60,10 +61,9 @@ import type { SaveData } from '../save/serialize';
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
 import {
   rollExtractinatorDrop, extractinatorMode, extractinatorUseTime, mathRand,
-  CHLOROPHYTE_TRADES, COIN_KEY_BY_VID, findExtractinatorChest,
+  CHLOROPHYTE_TRADES, findExtractinatorChest,
   extractinatorConsumeFromChest, type ExtractDrop,
 } from '../world/Extractinator';
-import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { furnitureStyleBase } from '../world/FurnitureStyle';
 import {
@@ -72,6 +72,7 @@ import {
   furnitureSlotCount, fitsFurniture, type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
+import { VI, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
@@ -124,7 +125,7 @@ import { ChunkCache } from '../render/ChunkCache';
 import { Renderer, Particle, DamageNumber, Minimap } from '../render/Renderer';
 import { LightingEngine } from '../lighting/LightingEngine';
 import { updateLightDecay } from '../lighting/lightTables';
-import { Inventory, INV_SIZE, ACC_ARMOR_START } from '../items/Inventory';
+import { Inventory, INV_SIZE, ACC_ARMOR_START, coinIndexOf, COIN_VALUES, COIN_KEYS } from '../items/Inventory';
 
 // 导入的原版树族 tile（fellImportedTree 整棵砍伐）：普通树 + 宝石树 + 装饰树 + 灰烬树
 const IMPORTED_TREE_TYPES = new Set<number>(
@@ -174,6 +175,7 @@ import { canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import type { DropExtras } from '../drops/NpcDrops';
+import { npcValueOf } from '../drops/NpcDrops';
 
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
@@ -445,6 +447,12 @@ export class Game implements GameHooks {
   evolution!: WorldEvolution;
   /** Torch God 彩蛋事件（Player.cs:17585-17770）：>100 根点燃火把地下触发 */
   torchGod!: TorchGodEvent;
+  /** 成就系统（AchievementManager + AchievementsHelper 移植；跨世界 localStorage 持久化） */
+  achievements = new Achievements(
+    typeof localStorage !== 'undefined'
+      ? { load: () => localStorage.getItem('sbw.achievements.v1'), save: (s) => localStorage.setItem('sbw.achievements.v1', s) }
+      : null,
+  );
   /** 黑暗视野（buff 80 Blackout）：updateLightDecay ×0.85 */
   blackout = false;
   entities = new EntityManager();
@@ -4312,7 +4320,10 @@ export class Game implements GameHooks {
         const stringLen = (flail ? 200 + cw.shootSpeed * 10 : 220 + cw.shootSpeed * 10)
           * (this.player.equipStats.yoyoString ? 1.6 : 1);
         const yoyo = new YoyoProj(px, py, cw.damage, cw.knockback, cw.shoot, stringLen,
-          () => this.input.mouseDown && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
+          // ★ channel 用 mouseHeld(电平语义):mouseDown 是边沿消费量,本分支掷出后
+          //   即清零,真实按住期间无新 mousedown 事件回填 → channel 恒 false,链球
+          //   出生 1 帧即判松手回收消失(阳炎之怒"没起效"根因,2026-08-13)
+          () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; },
           flail);
         // 配重球（counterWeight：悠悠球命中时落配重投射物，原版环绕弹的直线坠落近似）
@@ -5811,7 +5822,7 @@ export class Game implements GameHooks {
    *  此处落在提取机顶格上方，带向上初速便于拾取） */
   private dropFromExtractinator(drop: ExtractDrop, tx: number, ty: number): void {
     if (drop.itemType <= 0) return;
-    const key = COIN_KEY_BY_VID[drop.itemType] ?? VANILLA_ITEM_KEY_BY_ID[drop.itemType];
+    const key = VANILLA_ITEM_KEY_BY_ID[drop.itemType];
     if (key && ITEM_BY_KEY[key] !== undefined) {
       this.spawnDrop(tx * TILE + 24, (ty - 1) * TILE, key, drop.stack, 0, -2);
     }
@@ -5833,7 +5844,7 @@ export class Game implements GameHooks {
 
   /** 提取机通电产物掉落（Wiring.cs:2588 Item.NewItem 32×32 判定框中心） */
   private dropItemStackImpl(vanillaItemId: number, stack: number, px: number, py: number): void {
-    const key = COIN_KEY_BY_VID[vanillaItemId] ?? VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
+    const key = VANILLA_ITEM_KEY_BY_ID[vanillaItemId];
     if (key && ITEM_BY_KEY[key] !== undefined) this.spawnDrop(px, py, key, stack, 0, -2);
   }
 
@@ -6444,7 +6455,7 @@ export class Game implements GameHooks {
           if (st.inBounds(tx0 + dx, ty0 + dy) && st.isSolid(tx0 + dx, ty0 + dy)) { solid = true; break; }
         }
         if (solid) return;
-        const key = type === 71 ? 'coin_silver' : type === 72 ? 'coin_gold' : 'coin_platinum';
+        const key = type === 71 ? VI(72) : type === 72 ? VI(73) : VI(74);
         this.spawnDrop(x, y, key, stack, 0, 3);
       },
       onThunder: (distPx) => {
@@ -6993,11 +7004,10 @@ export class Game implements GameHooks {
     const w = this.world;
     const underworldY = w.store.h - 200; // UnderworldLayer ≈ maxTilesY-200
     const flag = y < w.rockLevel;         // 原版 flag：j < rockLayer（地表+泥土层）
-    // item id → 我们 key：VANILLA_ITEM_KEY_BY_ID 全量映射（vi_ 表覆盖 6146 件）+
-    // 原生 def 覆盖（火把/铜币有原生实现）
+    // item id → 我们 key：VANILLA_ITEM_KEY_BY_ID 全量映射（vi_ 表覆盖 6146 件）。
+    // 原生 def 覆盖段已退役（曾把火把/金币折到本地键,后者还把 73 金折成铜币——既有 bug）
     const drop = (itemId: number, n = 1): ItemDrop | null => {
-      const override: Record<number, string> = { 8: 'torch', 73: 'coin_copper' };
-      const key = override[itemId] ?? VANILLA_ITEM_KEY_BY_ID[itemId];
+      const key = VANILLA_ITEM_KEY_BY_ID[itemId];
       if (!key) return null;
       return this.spawnDrop(x * TILE + 8, y * TILE + 8, key, n, (Math.random() - 0.5) * 2.4, -2 - Math.random());
     };
@@ -7235,9 +7245,20 @@ export class Game implements GameHooks {
       if (this.player.buffs.has(BuffType.ImbueParty)) {
         this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
       }
-      // 幸运币（hasLuckyCoin：近战命中 20% 掉 1-5 铜币，Player.SpawnCoins 近似）
-      if (this.player.equipStats.luckyCoin && Math.random() < 0.2) {
-        this.spawnDrop(e.cx, e.y, 'coin_copper', 1 + Math.floor(Math.random() * 5), 0, -2);
+      // 幸运币（Player.cs:43892-43916，近战 on-hit）：门 = NPC.value>0（雕像产怪
+      // value=0，Wiring.cs:2479）&& hasLuckyCoin && rand.Next(5)==0；
+      // 币种 71 铜、rand.Next(10)==0 升 72 银、rand.Next(100)==0 升 73 金（顺序覆盖）；
+      // stack = rand.Next(1, 11)（1-10，旧"1-5 铜"近似已退役）；
+      // velocity.Y = Next(-20,1)*0.2、X = Next(10,31)*0.2*direction（玩家朝向）
+      const luckyNetId = e.vanillaNetId !== 0 ? e.vanillaNetId : (e.vanillaId ?? 0);
+      if (!e.spawnedFromStatue && npcValueOf(luckyNetId) > 0
+        && this.player.equipStats.luckyCoin && Math.random() < 0.2) {
+        let coinKey = VI_KEY.COIN.COPPER;
+        if (Math.random() < 0.1) coinKey = VI_KEY.COIN.SILVER;
+        if (Math.random() < 0.01) coinKey = VI_KEY.COIN.GOLD;
+        const cvx = (10 + Math.floor(Math.random() * 21)) * 0.2 * this.player.facing;
+        const cvy = (Math.floor(Math.random() * 21) - 20) * 0.2;
+        this.spawnDrop(e.cx, e.y, coinKey, 1 + Math.floor(Math.random() * 10), cvx, cvy);
       }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
@@ -7417,15 +7438,13 @@ export class Game implements GameHooks {
       case 'guide':
         return true;
       case 'merchant': {
-        // SpawnAllowed_Merchant：玩家硬币合计 ≥ 5000 铜（50 银；71铜/72银/73金/74铂）
+        // SpawnAllowed_Merchant：玩家硬币合计 ≥ 5000 铜（50 银；71铜/72银/73金/74铂全计）
         let copper = 0;
         for (const s of p.inv.slots) {
           if (!s) continue;
-          const def = ITEM_DEFS[s.id];
-          if (!def) continue;
-          if (def.key === 'coin_copper') copper += s.stack;
-          else if (def.key === 'coin_silver') copper += s.stack * 100;
-          else if (def.key === 'coin_gold') copper += s.stack * 10000;
+          const ci = coinIndexOf(s.id);
+          if (ci < 0) continue;
+          copper += s.stack * COIN_VALUES[ci];
           if (copper >= 5000) return true;
         }
         return false;
@@ -8451,15 +8470,17 @@ export class Game implements GameHooks {
     this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.TaxCollected', t));
   }
 
-  /** 铜币入包（按面额拆分；spendCopper 的镜像） */
+  /** 铜币入包（按面额拆分含铂金档；spendCopper 的镜像；vi_71-74 单轨） */
   private gainCopper(n: number): void {
     const inv = this.player.inv;
-    const gold = Math.floor(n / 10000);
+    const plat = Math.floor(n / 1000000);
+    const gold = Math.floor((n % 1000000) / 10000);
     const silver = Math.floor((n % 10000) / 100);
     const copper = n % 100;
-    if (gold) inv.add(ITEM_BY_KEY['coin_gold'], gold);
-    if (silver) inv.add(ITEM_BY_KEY['coin_silver'], silver);
-    if (copper) inv.add(ITEM_BY_KEY['coin_copper'], copper);
+    if (plat) inv.add(ITEM_BY_KEY[VI_KEY.COIN.PLATINUM], plat);
+    if (gold) inv.add(ITEM_BY_KEY[VI_KEY.COIN.GOLD], gold);
+    if (silver) inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], silver);
+    if (copper) inv.add(ITEM_BY_KEY[VI_KEY.COIN.COPPER], copper);
   }
 
   /** 护士治疗:费用 = 缺失生命 × 0.75 铜(下限 3);满血拒绝 */
@@ -8477,30 +8498,24 @@ export class Game implements GameHooks {
     this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
   }
 
-  /** 扣铜币:全背包三种币换算清点,整额清空后按面额找零(vanilla BuyItem 语义近似) */
+  /** 扣铜币:全背包四档币换算清点,整额清空后按面额找零(vanilla BuyItem 语义;vi_71-74 单轨) */
   private spendCopper(n: number): boolean {
     const inv = this.player.inv;
     if (this.coinsOwned() < n) return false;
     const change = this.coinsOwned() - n;
     for (let i = 0; i < inv.slots.length; i++) {
       const sl = inv.slots[i];
-      if (!sl) continue;
-      if (sl.id === ITEM_BY_KEY['coin_copper'] || sl.id === ITEM_BY_KEY['coin_silver']
-        || sl.id === ITEM_BY_KEY['coin_gold'] || sl.id === ITEM_BY_KEY['coin_platinum']
-        || sl.id === ITEM_BY_KEY['vi_71_CopperCoin'] || sl.id === ITEM_BY_KEY['vi_72_SilverCoin']
-        || sl.id === ITEM_BY_KEY['vi_73_GoldCoin'] || sl.id === ITEM_BY_KEY['vi_74_PlatinumCoin']) {
-        inv.slots[i] = null;
-      }
+      if (sl && coinIndexOf(sl.id) >= 0) inv.slots[i] = null;
     }
     // 按面额回流(铂→金→银→铜,栈内合并)
     const plat = Math.floor(change / 1000000);
     const gold = Math.floor((change % 1000000) / 10000);
     const silver = Math.floor((change % 10000) / 100);
     const copper = change % 100;
-    if (plat) inv.add(ITEM_BY_KEY['coin_platinum'], plat);
-    if (gold) inv.add(ITEM_BY_KEY['coin_gold'], gold);
-    if (silver) inv.add(ITEM_BY_KEY['coin_silver'], silver);
-    if (copper) inv.add(ITEM_BY_KEY['coin_copper'], copper);
+    if (plat) inv.add(ITEM_BY_KEY[VI_KEY.COIN.PLATINUM], plat);
+    if (gold) inv.add(ITEM_BY_KEY[VI_KEY.COIN.GOLD], gold);
+    if (silver) inv.add(ITEM_BY_KEY[VI_KEY.COIN.SILVER], silver);
+    if (copper) inv.add(ITEM_BY_KEY[VI_KEY.COIN.COPPER], copper);
     return true;
   }
 
@@ -8608,25 +8623,57 @@ export class Game implements GameHooks {
     if (ok) {
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
       if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
-      // 星星斗篷（Player.SpawnStar 近似）：受击召 3 颗落星砸附近敌人
-      if (p.equipStats.starCloak) this.spawnStarCloakStars();
-      // 蜂蜜斗篷/蜂巢背带（Player.SpawnBees :2147 近似）：受击放 1-3 只蜂（proj 181/183/189）
+      // 星星斗篷族受击反击（Player.cs:37826-37870）：3 颗星，出点 x=position.X+Next(-400,400)、
+      // y=position.Y-Next(500,800)，速度 = 朝(玩家中心 X 再 ±100 抖动)归一化到 23 速；
+      // 弹型按装备 override 件取（manaCloak 723 > beeCloak 724 > starVeil 725 > starCloak 726），
+      // 伤害 75（专家 ×2/大师 ×3，经典档 75）、击退 5。
+      // ai1=position.Y（星光落点线）与 timeLeft 未建模——Arrow 无 ai 槽，登记依赖
+      const star = this.starCloakRetaliate();
+      if (star.active) {
+        for (let k = 0; k < 3; k++) {
+          const sx = p.x + (Math.floor(Math.random() * 800) - 400);
+          const sy = p.y - (500 + Math.floor(Math.random() * 300));
+          let n15 = (p.x + p.w / 2) - sx + (Math.floor(Math.random() * 201) - 100);
+          let n16 = (p.y + p.h / 2) - sy;
+          const n17 = 23 / Math.hypot(n15, n16);
+          n15 *= n17; n16 *= n17;
+          this.entities.add(new Arrow(sx, sy, n15, n16, 75, 5, star.projType, null), 'projectiles');
+        }
+      }
+      // 蜂蜜斗篷/蜂巢族受击反击（Player.cs:37871-37907）：
+      //   数量 num19 = 1 + (Next(3)==0) + (Next(3)==0) + (strongBees && Next(3)==0)
+      //     （1/2/3/4 只，概率 4/9·4/9·2/9·…，非旧"1-3 均匀"）；
+      //   基伤 num20 = strongBees ? 18 : 13（专家 ×1.5/大师 ×2）；
+      //   beeType（:12006-12015）strongBees 且 Next(2)==0 → 566（巨蜂），否则 181；
+      //   beeDamage（:12017-12025）181 → num20+Next(2)、566 → num20+Next(1,4)；
+      //   beeKB（:12026-12032）566 → 0.5、181 → 0；出点 = 玩家左上角（position.X/Y）；
+      //   初速 = Next(-35,36)*0.02（aiStyle 36 追踪 AI 未建模，以下方瞄敌近似，登记）；
+      //   反击后 AddBuff(48 Honey, 300t=5s)（:37906）；原版此处无声效（旧 beeSummon 已删）
       if (p.equipStats.bees) {
-        const n = 1 + Math.floor(Math.random() * 3);
-        for (let k = 0; k < n; k++) {
-          const tx = p.cx + (Math.random() - 0.5) * 48;
-          const ty = p.cy - 20 + (Math.random() - 0.5) * 24;
+        const strong = this.hasHivePack();
+        let num19 = 1;
+        if (Math.floor(Math.random() * 3) === 0) num19++;
+        if (Math.floor(Math.random() * 3) === 0) num19++;
+        if (strong && Math.floor(Math.random() * 3) === 0) num19++;
+        const num20 = strong ? 18 : 13;
+        for (let k = 0; k < num19; k++) {
+          const makeStrong = strong && Math.floor(Math.random() * 2) === 0;
+          const beeType = makeStrong ? 566 : 181;
+          const beeDmg = makeStrong ? num20 + 1 + Math.floor(Math.random() * 3)
+            : num20 + Math.floor(Math.random() * 2);
+          const beeKb = makeStrong ? 0.5 : 0;
           const tgt = this.entities.enemies.find((e) => {
             const en = e as Enemy;
             return !en.dead && Math.abs(en.cx - p.cx) < 500;
           }) as Enemy | undefined;
           const ang = tgt
-            ? Math.atan2(tgt.cy - ty, tgt.cx - tx)
+            ? Math.atan2(tgt.cy - p.cy, tgt.cx - p.cx)
             : -Math.PI / 2 + (Math.random() - 0.5);
-          this.entities.add(new Arrow(tx, ty, Math.cos(ang) * 3.4, Math.sin(ang) * 3.4,
-            Math.round(9 * p.damageMult('melee')), 0.5, 181, null), 'projectiles');
+          const spd = 3.4; // aiStyle 36 追踪档出速占位（真值 ±0.7 抖动由追踪 AI 接管）
+          this.entities.add(new Arrow(p.x, p.y, Math.cos(ang) * spd, Math.sin(ang) * spd,
+            beeDmg, beeKb, beeType, null), 'projectiles');
         }
-        this.sfx.play('beeSummon');
+        p.buffs.apply(BuffType.Honey, 5);
       }
       // 致死一击：不播受击声，只播死亡声（保证最后听到的音效是死亡）
       if (p.hp <= 0) this.sfx.play('pkilled');
@@ -8673,19 +8720,14 @@ export class Game implements GameHooks {
           const keep = deathCoinKeepFraction(this.world.difficulty);  // Main.GameMode（Main.cs:2677）
           let lost = 0;
           const face = [1, 100, 10000, 1000000];
-          const coinKeys = [
-            ['coin_copper', 'vi_71_CopperCoin'], ['coin_silver', 'vi_72_SilverCoin'],
-            ['coin_gold', 'vi_73_GoldCoin'], ['coin_platinum', 'vi_74_PlatinumCoin'],
-          ];
-          coinKeys.forEach(([ck, vk], ci) => {
-            for (const k of [ck, vk]) {
-              const id = ITEM_BY_KEY[k];
-              if (id === undefined) continue;
-              const n = p.inv.countOf(id);
-              if (n > 0) {
-                lost += (n - Math.floor(n * keep)) * face[ci];
-                p.inv.remove(id, n - Math.floor(n * keep));
-              }
+          // vi_71-74 单轨(本地 coin_* 双轨兼容段已随退役移除)
+          COIN_KEYS.forEach((ck, ci) => {
+            const id = ITEM_BY_KEY[ck];
+            if (id === undefined) return;
+            const n = p.inv.countOf(id);
+            if (n > 0) {
+              lost += (n - Math.floor(n * keep)) * face[ci];
+              p.inv.remove(id, n - Math.floor(n * keep));
             }
           });
           this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
@@ -8740,6 +8782,13 @@ export class Game implements GameHooks {
   }
 
   onEnemyKilled(key: string, enemy?: Enemy) {
+    // 成就：NPC 击杀通知（AchievementsHelper.NotifyNPCKilledDirect）+ MechaMayhem 推进
+    if (enemy?.vanillaId != null) {
+      this.achievements.notifyNPCKilled(enemy.vanillaNetId ?? enemy.vanillaId);
+      this.achievements.mechaMayhemKill(enemy.vanillaId,
+        (this.entities.enemies as Enemy[]).filter((e) => !e.dead && e.vanillaId != null)
+          .map((e) => e.vanillaId!));
+    }
     // Boss 击败记账已由 Boss 逻辑块通用化(downed_<vanillaId>)
     void key;
     // 图鉴杀数（NPC.cs:79640-79643 NPCLoot→RegisterKill：netID 记账经 GetBestiaryCreditId
@@ -9756,23 +9805,33 @@ export class Game implements GameHooks {
     this.cb.onInventoryChanged?.();
   }
 
-  /** 星星斗篷落星（Player.SpawnStar 近似）：附近敌人上空召 3 颗星（投射物 92，伤 30） */
-  private spawnStarCloakStars(): void {
-    const p = this.player;
-    const targets = this.entities.enemies
-      .filter((e) => {
-        const en = e as Enemy;
-        return !en.dead && Math.abs(en.cx - p.cx) < 420 && Math.abs(en.cy - p.cy) < 300;
-      })
-      .slice(0, 3) as Enemy[];
-    if (!targets.length) return;
-    for (const t of targets) {
-      this.entities.add(new Arrow(
-        t.cx + (Math.random() - 0.5) * 120, t.cy - 320, 0, 0,
-        Math.round(30 * p.damageMult('magic')), 3, 92, null,
-      ), 'projectiles');
+  /** 星光斗篷族反击态（Player.cs:37826-37863）：active = 装备任一星光斗篷族件
+   *  （starCloak 880 / starVeil 929 / beeCloak 1247 / manaCloak 982）；
+   *  projType 按 override 件优先级 manaCloak 723 > beeCloak 724 > starVeil 725 > 726。
+   *  装备扫描读配饰槽 armor[3..9]（原版 :12543-12550），accfx 仅 880/1247 带 starCloak
+   *  位，929/982 无该位——equipStats.starCloak 会漏检，故此处直接扫原版 id */
+  private starCloakRetaliate(): { active: boolean; projType: number } {
+    let veil = false, bee = false, mana = false;
+    for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+      const s = this.player.inv.armor[acc];
+      if (!s) continue;
+      const vid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
+      if (vid === 929) veil = true;
+      else if (vid === 1247) bee = true;
+      else if (vid === 982) mana = true;
     }
-    this.sfx.play('bowShoot');
+    const active = this.player.equipStats.starCloak || veil || bee || mana;
+    return { active, projType: mana ? 723 : bee ? 724 : veil ? 725 : 726 };
+  }
+
+  /** 蜂巢背心（Hive Pack 3333，Player.cs:14795-14798 strongBees=true）：强化蜂 566 与
+   *  数量/基伤加成（accfx 未收录该件，按原版 id 扫配饰槽） */
+  private hasHivePack(): boolean {
+    for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+      const s = this.player.inv.armor[acc];
+      if (s && viIdFromKey(ITEM_DEFS[s.id]?.key ?? '') === 3333) return true;
+    }
+    return false;
   }
 
   // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
@@ -10085,15 +10144,16 @@ export class Game implements GameHooks {
   }
 
   /** 身家（铜币计价）——商店/重铸扣费与墓碑金币门槛（>100000 → 金墓碑 527-531）。
-   *  同时计 legacy coin_* 与原版 vi_71-74 两套钱币（wld 导入的钱币是后者） */
+   *  vi_71-74 单轨（本地 coin_* 双轨段已随退役移除） */
   coinsOwned(): number {
     const p = this.player;
-    const n = (key: string, mult: number) => {
-      const id = ITEM_BY_KEY[key];
-      return id !== undefined ? p.inv.countOf(id) * mult : 0;
-    };
-    return n('coin_copper', 1) + n('coin_silver', 100) + n('coin_gold', 10000) + n('coin_platinum', 1000000)
-      + n('vi_71_CopperCoin', 1) + n('vi_72_SilverCoin', 100) + n('vi_73_GoldCoin', 10000) + n('vi_74_PlatinumCoin', 1000000);
+    let total = 0;
+    for (const s of p.inv.slots) {
+      if (!s) continue;
+      const ci = coinIndexOf(s.id);
+      if (ci >= 0) total += s.stack * COIN_VALUES[ci];
+    }
+    return total;
   }
 
   /** 角色名（死亡文本/墓碑碑文用；未命名回退） */

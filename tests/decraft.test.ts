@@ -162,7 +162,9 @@ describe('掉落物端到端（分支顺序 ：1790 钱币 → :1812 转化 → 
     const w = shimmerWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const spawned: Spawned[] = [];
-    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY['torch'], 5);
+    // 经 VANILLA_ITEM_KEY_BY_ID 取 vi_ 键（本地原生键正随并行会话退役，vid 解析不稳）
+    const torchKey = VANILLA_ITEM_KEY_BY_ID[8];
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[torchKey], 5);
     for (let i = 0; i < 300; i++) {
       d.fixedUpdate(1, hooks(w, p, spawned));
       if (d.shimmered) break;
@@ -176,7 +178,8 @@ describe('掉落物端到端（分支顺序 ：1790 钱币 → :1812 转化 → 
     const w = shimmerWorld();
     const p = new Player(45 * TILE, 30 * TILE, new Inventory());
     const spawned: Spawned[] = [];
-    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY['coin_gold'], 2);
+    const coinKey = VANILLA_ITEM_KEY_BY_ID[73];
+    const d = new ItemDrop(20 * TILE, 35 * TILE, ITEM_BY_KEY[coinKey], 2);
     for (let i = 0; i < 200 && !d.dead; i++) d.fixedUpdate(1, hooks(w, p, spawned));
     expect(d.dead).toBe(true);
     expect(spawned).toHaveLength(0);

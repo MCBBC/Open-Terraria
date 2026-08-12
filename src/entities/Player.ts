@@ -650,6 +650,11 @@ export class Player extends Entity {
     if (buffHeal > 0 && this.hp > 0) this.hp = Math.min(this.maxHp, this.hp + buffHeal);
     else if (buffHeal < 0 && this.hp > 0) {
       this.hp = Math.max(0, this.hp + buffHeal);
+      // HurtLifeRegen 飘字（Player.cs:19207-19212）：DoT 分块伤害弹掉血数字,
+      // LifeRegen 色 (255,60,70) + dot:true;原版 DoT 不触发受击闪烁/无敌帧/音效
+      // ——故不进 damage(),死亡原因仍是 ByOther 默认包
+      const dot = this.buffs.consumeDotChunk();
+      if (dot > 0) game.addDamageNumber(this.cx, this.y, dot, false, '#FF3C46');
       if (this.hp <= 0) this.lastDamageCause = { kind: 'default' }; // DoT 致死=默认死亡包
     }
     // 恐慌项链加速窗口倒计时

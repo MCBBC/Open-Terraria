@@ -16,7 +16,7 @@ import { Lang } from '../i18n/Lang';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
-import { COIN_START, AMMO_START, INV_SIZE } from '../items/Inventory';
+import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import type { ChestData } from '../world/World';
 
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
@@ -81,7 +81,8 @@ const CSS = `
 .sw-root { position:fixed; inset:0; pointer-events:none; font-family:inherit; z-index:10; }
 /* ---- 原版风格：深蓝面板 + 浅蓝描边 ---- */
 .sw-panel { pointer-events:auto;
-  background:linear-gradient(rgba(38,50,90,0.96), rgba(22,30,58,0.97));
+  /* 原版 UIPanel：PanelBackground × Color(63,82,151)*0.785 —— 半透底 */
+  background:linear-gradient(rgba(38,50,90,0.78), rgba(22,30,58,0.8));
   border:2px solid #7d92d6; border-radius:6px; color:#e8ecf8; padding:12px;
   box-shadow:0 0 0 2px rgba(10,14,30,0.8), 0 6px 28px rgba(0,0,0,0.65),
     inset 0 0 18px rgba(90,120,220,0.12); }
@@ -1473,6 +1474,12 @@ export class UI {
       if (this.game.player.inv.trash!.stack > 1) {
         this.trashEl.appendChild(el('span', 'cnt', String(this.game.player.inv.trash!.stack)));
       }
+    } else {
+      // 空槽画垃圾桶图标（ItemSlot.cs:2514-2520：Trash.png 居中，灰半透）
+      const im = el('img', 'sw-trash-icon') as HTMLImageElement;
+      im.src = 'sprites/vanilla/Trash.png';
+      im.draggable = false;
+      this.trashEl.appendChild(im);
     }
   }
 
@@ -1848,8 +1855,7 @@ export class UI {
     for (let i = 0; i < 50; i++) { // 0-49 背包（钱币 50-53 不动）
       const cur = inv.slots[i];
       if (!cur || cur.favorited) continue;
-      if (cur.id === ITEM_BY_KEY['coin_copper'] || cur.id === ITEM_BY_KEY['coin_silver']
-        || cur.id === ITEM_BY_KEY['coin_gold'] || cur.id === ITEM_BY_KEY['coin_platinum']) continue;
+      if (coinIndexOf(cur.id) >= 0) continue; // 钱币不存箱（Coin 槽 50-53 归属）
       if (chest.items.some((cs) => cs && cs.id === cur.id)) continue; // 箱内已有类型 → 跳过（走 QuickStack）
       const empty = chest.items.findIndex((cs) => !cs);
       if (empty < 0) break; // 箱满

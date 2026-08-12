@@ -12,6 +12,13 @@ import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES } from '../data/tiles';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable } from '../stats/Shimmer';
 import { newNpcName } from '../i18n/RandomText';
+import { canHit } from '../physics/LineOfSight';
+import {
+  TOWN_ATTACK_TIME, TOWN_ATTACK_CHANCE, TOWN_ATTACK_TYPE, TOWN_DANGER_RANGE,
+  TOWN_MELEE, TOWN_BOW, TOWN_MAGIC, TOWN_SWING, TOWN_PRETTY_SAFE,
+  type TownShotParams, townNpcDamageMult,
+} from '../data/vanillaTownAttack';
+import { TownShot } from './TownShot';
 
 export interface NpcHome { x: number; y: number; }
 
@@ -52,6 +59,18 @@ export class TownNPC extends Entity {
   hp: number;
   maxHp: number;
   iframes = 0;
+  // ---- 自卫攻击（AI_007 攻击态 ai[0]=10/12/14/15,NPC.cs:54747-55538）----
+  /** 当前攻击态(0 空闲 / 10 近战弹 / 12 弓 / 14 魔法 / 15 挥击) */
+  private atkState = 0;
+  /** ai[1]:态倒计时(AttackTime) */
+  private atkTimer = 0;
+  /** localAI[1]:触发冷却(flag31 门) */
+  private atkCd = 0;
+  /** localAI[3]:态内 tick 计数 */
+  private atkTick = 0;
+  /** 当前发射档 num46/55/65(连发升级链推进) */
+  private atkNextShot = 0;
+  private atkBurstIdx = 0;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -164,6 +183,9 @@ export class TownNPC extends Entity {
       const dx = this.home.x * TILE + 8 - this.cx;
       if (Math.abs(dx) > TILE) wantDir = Math.sign(dx);
     }
+
+    // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
+    if (this.attackUpdate(world, game)) wantDir = 0;
 
     this.vx += wantDir * 0.06;
     this.vx = Math.max(-0.8, Math.min(0.8, this.vx));

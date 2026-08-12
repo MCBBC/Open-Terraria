@@ -573,6 +573,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
     px += vx; py += vy;
     if (py > gs.worldSurface + 100) break;
   }
+  if (DBG) console.log(`CP1 p=${rng.vanilla.peek()}`);
   // 终点囊群（cs:75700-75732）：50 个半径 40-54 椭球（x/y 独立 ±20% 缩放）
   let endR = rng.int(40, 54);                                  // Next(40,55)
   for (let n = 0; n < 50; n++) {
@@ -595,8 +596,10 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
+  if (DBG) console.log(`CP2 p=${rng.vanilla.peek()}`);
   // 血管（cs:75735-75779）
   const veinCount = rng.int(5, 8);                             // Next(5,9)
+  if (DBG) console.log(`VN=${veinCount}`);
   const usedV: Array<[number, number]> = [];
   for (let n = 0; n < veinCount; n++) {
     let dvx = 0, dvy = 0, tries = 0;
@@ -619,8 +622,11 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       if (!clash || tries > 10000) break;
     }
     usedV.push([dvx, dvy]);
+    if (DBG) console.log(`VE${n} in p=${rng.vanilla.peek()} dv=${dvx},${dvy}`);
     hearts.push(crimVein(st, rng, Math.floor(px), Math.floor(py), dvx, dvy));
+    if (DBG) console.log(`VE${n} out p=${rng.vanilla.peek()}`);
   }
+  if (DBG) console.log(`CP3 p=${rng.vanilla.peek()}`);
   // 地表囊群（cs:75781-75832）
   px = i; py = startY;
   endR = rng.int(25, 34);                                      // Next(25,35)
@@ -655,6 +661,7 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
       }
     }
   }
+  if (DBG) console.log(`CP4 p=${rng.vanilla.peek()}`);
   // 列填充（cs:75834-75848）：壳覆盖范围内每列向下补猩红石（★CanEvilReplace 才消耗）
   for (let x = shellMinX; x <= shellMaxX; x++) {
     let y = startY;
@@ -671,7 +678,9 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
   }
   // CrimEnt（cs:75989-76030）：★入口锚 = (i, startY)（曾用上升后的 sy）；
   //   crimDir 语义 = vx<0 → -1，内部速度 = 2*-crimDir（曾方向取反）
+  if (DBG) console.log(`CP5 p=${rng.vanilla.peek()}`);
   crimEnt(st, rng, i, startY, crimDir);
+  if (DBG) console.log(`CP6 p=${rng.vanilla.peek()}`);
 }
 
 /** CrimVein（cs:76035-76064）1:1：核心 0.2R 挖空(墙83)/壳 0.5R 猩红石(0.4R 墙)；

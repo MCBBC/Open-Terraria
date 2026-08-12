@@ -9,6 +9,7 @@
 // 旧版（2026-08-11 前）自创布局 0-39 背包/40-44 配饰/45-47 盔甲/48-50 时装/51-53 钱币
 // 的存档迁移见 SaveFile.loadSaveData 的 legacyInventoryMigrate。
 import { ITEM_DEFS, ITEM_BY_KEY, type ArmorSlot } from '../data/items';
+import { VI_KEY } from '../data/itemKeys';
 import { isDyeItem, miscSlotAccepts } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { itemCombat, viIdFromKey } from '../data/vanillaItemCombat';
@@ -36,7 +37,10 @@ export const LOADOUT_COUNT = 3;
 export const ACC_ARMOR_START = 3;
 /** armor[10] 起 = 时装（镜像 index 差 10） */
 export const VANITY_ARMOR_START = 10;
-export const COIN_KEYS = ['coin_copper', 'coin_silver', 'coin_gold', 'coin_platinum'] as const;
+// 原版钱币 vi_71-74 单轨(本地 coin_* 已退役;消费点一律经本表派生)
+export const COIN_KEYS = [
+  VI_KEY.COIN.COPPER, VI_KEY.COIN.SILVER, VI_KEY.COIN.GOLD, VI_KEY.COIN.PLATINUM,
+] as const;
 /** 钱币面额（Item.cs:42-48：铜1/银100/金10000/铂1000000） */
 export const COIN_VALUES = [1, 100, 10000, 1000000];
 

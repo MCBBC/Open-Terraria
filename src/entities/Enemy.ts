@@ -53,13 +53,8 @@ import { npcShimmerTransformTo, npcShimmerTransformToItem } from '../stats/Shimm
 
 /** 无 key 映射的原版物品 id（一次性告警用） */
 const UNMAPPED_WARNED = new Set<number>();
-/** 有原生实现的原版物品 id → 原生 key（钱币=货币计数/凝胶火把晶状体=配方素材，
- *  必须走原生 def 而非 vi_ 占位注册） */
-const NATIVE_DROP_KEY: Record<number, string> = {
-  71: 'coin_copper', 72: 'coin_silver', 73: 'coin_gold', 74: 'coin_platinum',
-  23: 'gel', 8: 'torch', 236: 'lens', 3: 'stone_block', 2: 'dirt_block', 9: 'wood',
-  28: 'lesser_healing_potion',
-};
+// 原生 def 覆盖表(钱币/凝胶/火把/晶状体→本地键)已随本地物品退役移除:
+// 全量 vi_ 注册(VANILLA_ITEM_KEY_BY_ID)直接覆盖;236 曾误当 Lens(实为 Black Lens)
 /** 雕像产怪战利品门（NPCID.Sets，NPC.cs :79648-79654 NPCLoot 早退用） */
 const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
 /** DoesntDespawnToInactivity 名单（NPC.cs:78584-78641）中本批涉及的仪式/月总链类型——
@@ -284,6 +279,9 @@ export class Enemy extends Entity {
     // 钳到 254 并置 alphaFade,由 fixedUpdate 逐 tick 减回 0（原版 AI_006 渐显）
     if (e.spawnAlpha >= 255) { e.spawnAlpha = 254; e.alphaFade = true; }
     e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
+    // 266 克脑 SetDefaults :12372 dontTakeDamage=true——一阶段（爬行者存活）不可击，
+    // AI_054 二阶段入场段 :32589 自行解除（存档载入即二阶段也由该段下一 tick 清除）
+    if (id === 266) e.dontTakeDamage = true;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -369,6 +367,11 @@ export class Enemy extends Entity {
   lightRGBAt: { x: number; y: number } | null = null;
   lai0 = 0;              // localAI 语义位（萤火虫：闪烁间隔计时）
   lai1 = 0;              // localAI 语义位（萤火虫：发光剩余帧）
+  lai2 = 0;              // localAI[2] 语义位（AI_054 克脑：二阶段入场演出门）
+  lai3 = 0;              // localAI[3] 语义位（AI_054 克脑：玩家死/离场下坠计数）
+  /** 原版 NPC.dontTakeDamage（SetDefaults 静态置位，如 266 克脑 :12372 一阶段
+   *  不可击；AI 段自行清除）。与 iframes 不同：持续态而非帧计数 */
+  dontTakeDamage = false;
   /** 原版 justHit 语义（本 tick 内受过击） */
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
@@ -4103,6 +4106,7 @@ export class Enemy extends Entity {
     }
     const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
     if (this.iframes > 0) return false;
+    if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
     // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，
     // 受击只记摇晃强度+方向（渲染帧端消费），掉血由 dummyAI 回满
@@ -4247,7 +4251,7 @@ export class Enemy extends Entity {
           if (!UNMAPPED_WARNED.has(id)) { UNMAPPED_WARNED.add(id); console.warn(`[NpcDrops] 物品 ${id} 无 key 映射，跳过`); }
         };
         const spawn = (id: number, n: number): ItemDrop | null => {
-          const key = NATIVE_DROP_KEY[id] ?? VANILLA_ITEM_KEY_BY_ID[id];
+          const key = VANILLA_ITEM_KEY_BY_ID[id];
           if (!key) { unmapped(id); return null; }
           const v = dropVelocity(rng);
           const drop = game.spawnDrop(this.cx, this.cy, key, n, v.vx, v.vy);

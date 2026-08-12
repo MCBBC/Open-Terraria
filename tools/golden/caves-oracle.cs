@@ -3267,6 +3267,7 @@ void CrimStartGen(int i, int j)
         vx += vx2; vy += vy2;
         if (vy > wsN + 100.0) flag = false;
     }
+    Console.Error.WriteLine($"CP1 p={(int)r.Peek()}");
     rad = (int)r.Next(40, 55);
     for (int n = 0; n < 50; n++)
     {
@@ -3293,7 +3294,9 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
+    Console.Error.WriteLine($"CP2 p={(int)r.Peek()}");
     int veinCount = (int)r.Next(5, 9);
+    Console.Error.WriteLine($"VN={veinCount}");
     var veinDirs = new List<(double x, double y)>();
     for (int n = 0; n < veinCount; n++)
     {
@@ -3321,8 +3324,11 @@ void CrimStartGen(int i, int j)
             if (tries > 10000) break;
         }
         veinDirs.Add((dx3, dy3));
+        Console.Error.WriteLine($"VE{n} in p={(int)r.Peek()} dv={dx3},{dy3}");
         CrimVeinGen((double)sx, (double)sy, dx3, dy3);
+        Console.Error.WriteLine($"VE{n} out p={(int)r.Peek()}");
     }
+    Console.Error.WriteLine($"CP3 p={(int)r.Peek()}");
     int shellMinX = W, shellMaxX = 0;
     vx = i; vy = startY;
     rad = (int)r.Next(25, 35);
@@ -3363,6 +3369,7 @@ void CrimStartGen(int i, int j)
                 }
             }
     }
+    Console.Error.WriteLine($"CP4 p={(int)r.Peek()}");
     for (int x = shellMinX; x <= shellMaxX; x++)
     {
         int y = startY;
@@ -3378,7 +3385,9 @@ void CrimStartGen(int i, int j)
             }
         }
     }
+    Console.Error.WriteLine($"CP5 p={(int)r.Peek()}");
     CrimEntGen(vx, vy, crimDir);
+    Console.Error.WriteLine($"CP6 p={(int)r.Peek()}");
 }
 void CrimPlaceHeartsGen()
 {

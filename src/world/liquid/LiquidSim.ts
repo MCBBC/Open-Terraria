@@ -238,8 +238,7 @@ export class LiquidSim {
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
     if (!st.flags[i]) return false;
-    const d = TILE_DEFS[st.type[i]];
-    return !!d && d.solid && !d.platform;
+    return this.solidNP[st.type[i]] === 1;
   }
 
   /** WorldGen.SolidTile 语义（WorldGen.cs:42370）：实心 && !平台 && !半砖 && !坡面。
@@ -249,8 +248,7 @@ export class LiquidSim {
     if (x < 0 || y < 0 || x >= st.w || y >= st.h) return true;
     const i = this.idx(x, y);
     if (!st.flags[i]) return false;
-    const d = TILE_DEFS[st.type[i]];
-    return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+    return this.solidNP[st.type[i]] === 1 && !st.half[i] && st.slope[i] === 0;
   }
 
   // ================= AddWater（Liquid.cs:835-872） =================
@@ -262,8 +260,7 @@ export class LiquidSim {
     if (this.checking[i] || st.liquid[i] === 0) return;
     const t = st.type[i];
     if (t !== 0 && st.flags[i]) {
-      const d = TILE_DEFS[t];
-      if (d && d.solid && !d.platform) return;
+      if (this.solidNP[t] === 1) return;
     }
     if (this.numLiquid >= this.curMaxLiquid - 1) {
       // 原版走 LiquidBuffer 缓冲、清扫轮回灌（Liquid.cs:840-843），超缓冲上限才丢
@@ -1101,8 +1098,7 @@ export class LiquidSim {
         if (st.liquid[i] === 0) continue;
         const t = st.type[i];
         if (t !== 0 && st.flags[i]) {
-          const d = TILE_DEFS[t];
-          if (d && d.solid && !d.platform) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例；nactive 门）
+          if (this.solidNP[t] === 1) { st.liquid[i] = 0; continue; } // 实心格内液体清零（1456 无 379 系统特例；nactive 门）
           // 1456 WaterCheck L81172-81187：液体冲毁可死亡方块（走 KillTile）
           if (st.liquidType[i] === 2) { if (this.lavaDeathIds.has(t)) this.killTile?.(x, y); }
           else if (this.waterDeathIds.has(t)) this.killTile?.(x, y);

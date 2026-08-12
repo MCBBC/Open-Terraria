@@ -67,10 +67,7 @@ const ORE_PREHM = [12, 11, 14, 13, 699, 700, 701, 702] as const;
  *  12/11/14/13/699/700/701/702 + 364 钴/1104 钯/365 秘银/1105 山铜/366 精金/1106 钛金） */
 const ORE_HM = [12, 11, 14, 13, 699, 700, 701, 702, 364, 1104, 365, 1105, 366, 1106] as const;
 
-/** 钱币（71 铜/72 银/73 金/74 铂）→ 掉落用 coin key（Game 侧消费） */
-export const COIN_KEY_BY_VID: Readonly<Record<number, string>> = {
-  71: 'coin_copper', 72: 'coin_silver', 73: 'coin_gold', 74: 'coin_platinum',
-};
+// 钱币(71-74)→本地 coin key 表已随本地物品退役移除:Game 侧直接 VANILLA_ITEM_KEY_BY_ID
 
 /**
  * RollExtractinatorDrop（ExtractinatorHelper.cs:5-488）1:1。

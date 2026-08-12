@@ -4,8 +4,8 @@
 //       ① 钱币（CommonCoin 71-74）→ 面额放大入 coinLuck（铜 1× / 银 ×100 /
 //          金 ×10000 / 铂 stack 钳 1 后 ×1000000），AddCoinLuck(:17943-17955 距离<1000px)
 //       ② ShimmerTransformToItem 有对应 → SetDefaults(target) 原堆叠保留
-//       ③ decraft（ShimmerTransforms.GetDecraftingRecipeIndex + RecipeSets 月后/
-//          骷髅王/石巨人锁）——需运行时配方引擎，登记未移植（见文件尾 GAP 清单）
+//       ③ decraft 反合成（GetDecraftingRecipeIndex + RecipeSets 骷髅王/石巨人双锁
+//          + WorldItem.cs:1878-1946 返还计算/掉落）——已移植（见 decraft 段 + ItemDrop）
 //       ④ makeNPC（小动物笼放生物品）→ NPC.ReleaseNPC，登记
 //       ⑤ 特例 4986 彩虹史莱姆解锁 / 560 史莱姆雨，登记
 //       转化后 shimmered=true 上浮（gravity 0，vy -0.05/t 钳 -4，WorldItem.cs:486-511）
@@ -23,7 +23,8 @@
 //       src/data/vanilla-shimmer.json（312 物品对 + 114 NPC 对 + 15 NPC→物品 +
 //       29 城镇变体 + CommonCoin/PostMoonlord）
 //   GAP 登记（未移植）：
-//     - decraft 反 craft（需配方引擎运行时 + RecipeSets.PostSkeletron/PostGolem 锁）
+//     - decraft 反 craft：已移植（vanillaRecipes 索引 + 本文件 decraft 段 + ItemDrop 分支；
+//       遗留：RecipeGroup 组代表 3 组同价并列错位，见 tools/extract-itemrare.mjs 头注）
 //     - makeNPC 小动物放生、4986 彩虹史莱姆解锁、560 史莱素雨触发
 //     - 3461 月相砖:已按 GetLunarBrickTransformFromMoonPhase(:113-125)接通(月相参)
 //     - 微光视觉（shimmerTransparency 半透明 / 微光化物品上浮白光 dust 309）
@@ -49,21 +50,14 @@ const NPC_TOWN_TRANSFORM = new Set<number>((shimmerJson as Json).npcTownTransfor
 
 // ============ 内部物品 id ↔ 原版物品 id ============
 
-/** 原生 key（钱币/凝胶等）→ 原版 id（Game.ts NATIVE_ITEM_VID 同表；vi_ 键走前缀解析） */
-const NATIVE_ITEM_VID: Record<string, number> = {
-  coin_copper: 71, coin_silver: 72, coin_gold: 73, coin_platinum: 74,
-  gel: 23, torch: 8, lens: 236, stone_block: 3, dirt_block: 2, wood: 9,
-  lesser_healing_potion: 28,
-};
+// 原生 key→原版 id 表(钱币/凝胶等本地键)已随本地物品退役移除:vi_ 键前缀解析全覆盖
 
 /** 内部 item id → 原版 item id（无映射 -1） */
 export function vanillaIdOfItem(itemId: number): number {
   const def = ITEM_DEFS[itemId];
   if (!def) return -1;
   if (def.vid !== undefined) return def.vid;
-  const vi = viIdFromKey(def.key);
-  if (vi >= 0) return vi;
-  return NATIVE_ITEM_VID[def.key] ?? -1;
+  return viIdFromKey(def.key);
 }
 
 /** 原版 item id → 内部 item id（未注册 -1；全量物品经 VANILLA_ITEM_KEY_BY_ID 占位注册） */

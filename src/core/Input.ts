@@ -3,6 +3,11 @@ export class Input {
   keys = new Set<string>();
   mouseX = 0; mouseY = 0;
   mouseDown = false;
+  /** 左键物理按住态(mousedown→true/mouseup→false,不随点击消费清零)。
+   *  mouseDown 是"边沿消费"语义(use 代码用完置 false,等下一次真实点击),
+   *  悠悠球/连枷 channel 等需要"电平"语义的判定必须用本字段——否则掷出当帧
+   *  被 use 清掉后无 mousedown 事件回填,链球出生 1 帧即判松手回收(2026-08-13) */
+  mouseHeld = false;
   rightDown = false;
   uiBlocking = false;     // 背包/合成等打开时为 true
   wheelDelta = 0;
@@ -36,7 +41,7 @@ export class Input {
       if (e.code === 'F2') e.preventDefault(); // 像素画导入(Game)——原 F11 与系统全屏冲突,改 F2（防浏览器快捷）
     }) as EventListener);
     onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
-    onWin('blur', (() => this.keys.clear()) as EventListener);
+    onWin('blur', (() => { this.keys.clear(); this.mouseHeld = false; }) as EventListener);
     onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
       this.mouseX = e.clientX - r.left;
@@ -46,11 +51,11 @@ export class Input {
     onWin('mousedown', ((e: MouseEvent) => {
       // UI 面板上的点击不穿透为游戏输入
       if ((e.target as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn')) return;
-      if (e.button === 0) this.mouseDown = true;
+      if (e.button === 0) { this.mouseDown = true; this.mouseHeld = true; }
       if (e.button === 2) this.rightDown = true;
     }) as EventListener);
     onWin('mouseup', ((e: MouseEvent) => {
-      if (e.button === 0) this.mouseDown = false;
+      if (e.button === 0) { this.mouseDown = false; this.mouseHeld = false; }
       if (e.button === 2) this.rightDown = false;
     }) as EventListener);
     onEl('contextmenu', (e) => e.preventDefault());

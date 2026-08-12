@@ -11,7 +11,9 @@ import { atlasIconForKey, VANILLA_ITEM_ICON_MAP } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
+import { options } from '../core/Options';
 import { VanillaResourceBars } from './ResourceBars';
+import { FancyResourceBars } from './FancyResourceBars';
 import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
@@ -573,6 +575,7 @@ export class Renderer {
   biomeBg = new BiomeBackground();
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
   resourceBars = new VanillaResourceBars();
+  fancyBars = new FancyResourceBars();
   /** 原版呼吸计（DrawInterface_Resources_Breath 移植：玩家头顶 10 气泡/火焰条） */
   breathMeter = new VanillaBreathMeter();
   /** 背包是否打开（Main.playerInventory 语义——Game.render 经 __swUI 注入） */
@@ -1043,8 +1046,10 @@ export class Renderer {
     // 原版右下角黄条——偏差记录）
     if (invasion) this.drawInvasionBar(ctx, viewW, invasion);
 
-    // 11. 生命/魔力资源条（原版 ClassicPlayerResourcesDisplaySet：右上红心排 + 右缘魔力星）
-    this.resourceBars.draw(ctx, player, viewW, flicker);
+    // 11. 生命/魔力资源条（原版默认 "New"=FancyClassic 金框分格样式；Classic 为
+    //     朴素心/星——PlayerResourceSetsManager2.cs:26-31 五样式，此处两主样式可切）
+    if (options.data.resourceBarStyle === 'classic') this.resourceBars.draw(ctx, player, viewW, flicker);
+    else this.fancyBars.draw(ctx, player, viewW, flicker);
     // 11b. 呼吸计（原版 DrawInterface_Resources_Breath Main.cs:42824：玩家头顶
     //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
     this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);

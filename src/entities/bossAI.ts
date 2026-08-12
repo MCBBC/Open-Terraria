@@ -230,78 +230,254 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   collideGround(e, game);
 }
 
-/** AI_054 克苏鲁之脑(NPC.cs AI_054 + 267 爬行者环):
- *  一阶段(爬行者存活时无敌:dontTakeDamage)脑体悬空不动,爬行者环绕玩家;
- *  爬行者全灭 → 二阶段:瞬移冲刺(3 点环绕) + 幻影(简化:冲刺时半透明)。 */
+/** AI_054 克苏鲁之脑 266（NPC.cs:32537-32827 全核 1:1）：
+ *  SetDefaults :12370-12386 dontTakeDamage=true（fromVanilla 已置位）→ 一阶段不可击；
+ *  爬行者清零 → ai[0]=-1 进二阶段（入场演出一次性 + 解除无敌）。
+ *  一阶段 ai[0]：0 缓追玩家（1 速 :32703-32723）+ 瞬移计时 localAI[1] 达
+ *  120+Next(300) 选点(:32744-32785，12..40 格偏移、目标速度向投影 +16×speed、
+ *  101 次后无条件 / 非实心且(>75 次或 CanHit) 才收)→ 1 渐隐(+5/t 到 255)→
+ *  落点瞬移(:32788-32799)→ 2 渐显(-5/t 到 0)→ 回 0。
+ *  二阶段 ai[0]<0：-1 追踪 8 速 ((v*50+dir)/51 :32591-32600)，计时 localAI[1]
+ *  达 60+Next(120)（justHit 时 -Next(5) :32605-32609）→ -2（v×0.9、ai[3]+=25/t
+ *  到 255 后瞬移 :32660-32681）→ -3（ai[3]-=25/t 回 -1 :32682-32699），alpha 跟 ai[3]。
+ *  注：原版**无幻影分身机制**——所谓"幻影"即这套 alpha 渐隐/渐显瞬移循环
+ *  （旧"冲刺时半透明"近似已退役）。
+ *  距离消散 :32555-32567（曼哈顿 >6000px）；玩家死/离猩红 :32810-32826
+ *  （localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；
+ *  ZoneCrimson 未建模仅 dead 触发——登记）。 */
 export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | null) {
-  // 玩家死/远离（:32557-32566/:32810-32822）：曼哈顿 >6000px 瞬消；
-  // 玩家死 → localAI[3] 计数 120，>60 后 vy+=(n-60)*0.25 越坠越快钻地逃离、ai[0]=2、alpha=10
-  // （原版还含 !ZoneCrimson 触发——跨群系判定未实现，仅 dead）
+  const st = game.world.store;
+  // :32555-32567 TargetClosest 后曼哈顿 >6000 → active=false（记逃走）
   if (player && Math.abs(player.cx - e.cx) + Math.abs(player.cy - e.cy) > 6000) {
     e.dead = true; e.bossFled = true;
     return;
   }
-  if (!player) {
-    e.encourageDespawn(750); // 原版无显式 EncourageDespawn，靠 CheckActive timeLeft(750) 收尾
-    e.ai3++;
-    if (e.ai3 > 60) {
-      e.vy += (e.ai3 - 60) * 0.25;
-      e.ai0 = 2;
-      e.spawnAlpha = Math.max(e.spawnAlpha, 245);
-    }
-    e.x += e.vx; e.y += e.vy;
-    return;
-  }
-  const enemies = game.enemies() as unknown[];
-  // 初次:补生成爬行者(原版 371-393 只)——必须先于爬行者计数,
-  // 否则首 tick 爬行者为 0 直接落二阶段,永远不生成
+  // 初次生成爬行者（:32540-32553）：GetBrainOfCthuluCreepersCount(:51330)=20
+  // （getGoodWorld 40 不建模）；出点 = 本体中心 ±(width/height) 随机，
+  // 初速 = Next(-30,31)*0.1。爬行者锚定本体（原版 crimsonBoss 静态位 → master 引用）
   if (!e.bInit) {
     e.bInit = true;
-    for (let k = 0; k < 8; k++) {
+    for (let k = 0; k < 20; k++) {
       const c = spawnPart(game, e, 267);
-      if (c) {
-        const ang = (k / 8) * Math.PI * 2;
-        c.x = player.cx + Math.cos(ang) * 150;
-        c.y = player.cy + Math.sin(ang) * 150;
-      }
+      if (!c) continue;
+      c.master = e;
+      c.x = e.cx + (Math.floor(Math.random() * (2 * e.w)) - e.w) - c.w / 2;
+      c.y = e.cy + (Math.floor(Math.random() * (2 * e.h)) - e.h) - c.h / 2;
+      c.vx = (Math.floor(Math.random() * 61) - 30) * 0.1;
+      c.vy = (Math.floor(Math.random() * 61) - 30) * 0.1;
     }
   }
-  const creepers = enemies.filter((n) => (n as Enemy).vanillaId === 267 && !(n as Enemy).dead);
-  if (creepers.length > 0) {
-    // 一阶段:无敌 + 悬浮微移(原版 ai[0]=0 悬空不动;爬行者环攻击)
-    e.iframes = 2;
-    e.vx *= 0.9; e.vy *= 0.9;
+  // 一阶段爬行者计数（:32726-32742）
+  const creepers = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 267);
+
+  if (e.ai0 < 0) {
+    // ---- 二阶段（:32569-32699）----
+    // :32575-32588 入场演出一次性（localAI[2] 门）：SoundID 3（Zombie_1）+
+    //   血块 gore 392-395（gore 未接 → 粒子近似，登记）+ 尘 5 号 ×20 + SoundID 15
+    //   （ZombieMoan wav 未提取 → 略，登记）
+    if (e.lai2 === 0) {
+      e.lai2 = 1;
+      game.playSfxFiles(['Zombie_1'], 1, e.cx, e.cy);
+      game.spawnParticles(e.cx, e.cy, '#A03050', 20, 2);
+      game.playSfxFiles(['Zombie_2'], 0.8, e.cx, e.cy);
+    }
+    // :32589 爬行者全灭后解除一阶段无敌（SetDefaults :12372 置位）
+    e.dontTakeDamage = false;
+    // :32590-32600 追踪：8 速逼近（(v*50+dir)/51）
+    if (player) {
+      const dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      e.vx = (e.vx * 50 + (dx / d) * 8) / 51;
+      e.vy = (e.vy * 50 + (dy / d) * 8) / 51;
+    }
+    if (e.ai0 === -1) {
+      // :32603-32657 瞬移计时：localAI[1]+1，justHit 抵扣 Next(5)；
+      //   达 60+Next(120)（单人无 netMode 附加段 :32611-32614）→ 选点 → ai[0]=-2
+      e.lai1 += 1;
+      if (e.justHit) e.lai1 -= Math.floor(Math.random() * 5);
+      const num859 = 60 + Math.floor(Math.random() * 120);
+      if (e.lai1 >= num859 && player) {
+        e.lai1 = 0;
+        const spot = pickTeleportSpot(st, e, player, 10, 12, false);
+        e.ai3 = 0;
+        e.ai0 = -2;
+        e.ai1 = spot.x; e.ai2 = spot.y;
+      }
+    } else if (e.ai0 === -2) {
+      // :32660-32681 渐隐：v×0.9，ai[3]+=25/t（单人档），到 255 → 落点瞬移
+      e.vx *= 0.9; e.vy *= 0.9;
+      e.ai3 += 25;
+      if (e.ai3 >= 255) {
+        e.ai3 = 255;
+        e.x = e.ai1 * TILE - e.w / 2;
+        e.y = e.ai2 * TILE - e.h / 2;
+        game.playSfxFiles(['Item_8'], 1, e.cx, e.cy); // SoundID.Item8
+        e.ai0 = -3;
+      }
+      e.spawnAlpha = e.ai3;
+    } else if (e.ai0 === -3) {
+      // :32682-32699 渐显：ai[3]-=25/t，≤0 回 -1
+      e.ai3 -= 25;
+      if (e.ai3 <= 0) {
+        e.ai3 = 0;
+        e.ai0 = -1;
+      }
+      e.spawnAlpha = e.ai3;
+    }
+  } else {
+    // ---- 一阶段（:32701-32808）----
+    // :32703-32723 缓追玩家：1 速（getGoodWorld ×3 不建模），<1px 直达
+    if (player) {
+      let dx = player.cx - e.cx, dy = player.cy - e.cy;
+      const num870 = 1;
+      const d = Math.hypot(dx, dy);
+      if (d < num870) {
+        e.vx = dx; e.vy = dy;
+      } else {
+        e.vx = (dx / d) * num870;
+        e.vy = (dy / d) * num870;
+      }
+    }
+    if (e.ai0 === 0) {
+      // :32726-32742 爬行者清零 → 二阶段
+      if (creepers.length === 0) {
+        e.ai0 = -1;
+        e.lai1 = 0;
+        e.spawnAlpha = 0;
+      }
+      // :32743-32785 瞬移计时：120+Next(300) → 选点（12..40 格）→ ai[0]=1
+      if (player) {
+        e.lai1 += 1;
+        if (e.lai1 >= 120 + Math.floor(Math.random() * 300)) {
+          e.lai1 = 0;
+          const spot = pickTeleportSpot(st, e, player, 12, 40, true);
+          e.ai0 = 1;
+          e.ai1 = spot.x; e.ai2 = spot.y;
+        }
+      }
+    } else if (e.ai0 === 1) {
+      // :32788-32799 渐隐：+5/t 到 255 → 落点瞬移 → ai[0]=2
+      e.spawnAlpha = Math.min(255, e.spawnAlpha + 5);
+      if (e.spawnAlpha >= 255) {
+        game.playSfxFiles(['Item_8'], 1, e.cx, e.cy); // SoundID.Item8
+        e.x = e.ai1 * TILE - e.w / 2;
+        e.y = e.ai2 * TILE - e.h / 2;
+        e.ai0 = 2;
+      }
+    } else if (e.ai0 === 2) {
+      // :32800-32808 渐显：-5/t 到 0 → ai[0]=0
+      e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
+      if (e.spawnAlpha <= 0) e.ai0 = 0;
+    }
+  }
+  e.x += e.vx;
+  e.y += e.vy;
+  // :32810-32826 玩家死（ZoneCrimson 未建模）→ 下坠逃离尾段（原版在状态机之后）：
+  //   localAI[3] 钳 120，>60 后 vy+=(n-60)*0.25、ai[0]=2、alpha=10；恢复则计数递减
+  const playerGone = !player || player.dead;
+  if (playerGone) {
+    if (e.lai3 < 120) e.lai3 += 1;
+    if (e.lai3 > 60) e.vy += (e.lai3 - 60) * 0.25;
+    e.ai0 = 2;
+    e.spawnAlpha = 10;
+  } else if (e.lai3 > 0) {
+    e.lai3 -= 1;
+  }
+}
+
+/** 克脑瞬移选点（一阶段 :32748-32784 / 二阶段 :32620-32656 同构，参数不同）：
+ *  以玩家所在格为原点，min..max 格随机偏移（各 50% 取负）；偏移向量与玩家速度
+ *  同向（点积>0）时沿自身方向外推 16×speed px；一阶段收点条件 =
+ *  101 次后无条件 或（非实心 且（76 次后 或 对玩家 CanHit）），二阶段 =
+ *  101 次后无条件 或 非实心。返回 tile 坐标。 */
+function pickTeleportSpot(
+  st: GameHooks['world']['store'], _e: Enemy, p: Player,
+  min: number, max: number, losGate: boolean,
+): { x: number; y: number } {
+  const pxSpeed = Math.hypot(p.vx, p.vy);
+  let tries = 0;
+  let tx = Math.floor(p.cx / TILE), ty = Math.floor(p.cy / TILE);
+  for (;;) {
+    tries++;
+    let a = min + Math.floor(Math.random() * (max - min + 1));
+    let b = min + Math.floor(Math.random() * (max - min + 1));
+    if (Math.floor(Math.random() * 2) === 0) a *= -1;
+    if (Math.floor(Math.random() * 2) === 0) b *= -1;
+    let vx = a * TILE, vy = b * TILE;
+    // 玩家速度与偏移同向 → 外推（SafeNormalize 后 ×16×speed）
+    if (p.vx * vx + p.vy * vy > 0) {
+      const vl = Math.hypot(vx, vy) || 1;
+      vx += (vx / vl) * 16 * pxSpeed;
+      vy += (vy / vl) * 16 * pxSpeed;
+    }
+    tx = Math.floor(p.cx / TILE) + Math.trunc(vx / TILE);
+    ty = Math.floor(p.cy / TILE) + Math.trunc(vy / TILE);
+    if (st.inBounds(tx, ty)) {
+      const solid = st.isSolid(tx, ty); // WorldGen.SolidTile
+      const canSee = losGate && canHit(st, tx * TILE, ty * TILE, 1, 1, p.x, p.y, p.w, p.h);
+      if (tries > 100 || (!solid && (!losGate || tries > 75 || canSee))) break;
+    } else if (tries > 100) break;
+  }
+  return { x: tx, y: ty };
+}
+
+/** 267 爬行者（NPC.cs:32828-32914 全核 1:1，SetDefaults :12388-12400）：
+ *  ai[0]=0 环绕态：距主体 >90px 时 8 速逼近（(v*15+dir)/16）后 return；
+ *  ≤90px 且 |v|<8 时两轴 ×1.05；掷 1/200（专家 1/100）→ 8 速直冲玩家、ai[0]=1。
+ *  ai[0]=1 扑咬态：经典档无追踪（专家 (v*99+dir*9)/100 :32872-32886）；
+ *  距主体 >700px 回环绕；否则 !justHit 即 return（保持直飞），
+ *  justHit 时按 knockBackResist 分流（=0 → 计数 ai[1] 超 5 回环绕，
+ *  否则立即回环绕——267 原值 0.8 → 一击即回）。主体不在 → 消散（:32830-32835）。 */
+export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
+  const boss = e.master;
+  // :32830-32835 crimsonBoss<0（主体不在）→ active=false
+  if (!boss || boss.dead || boss.vanillaId !== 266) { e.dead = true; return; }
+  const player = _player && !_player.dead ? _player : null;
+  if (e.ai0 === 0) {
+    // :32836-32856 环绕态：ai[1]=0；距主体 >90px 逼近
+    e.ai1 = 0;
+    const dx = boss.cx - e.cx, dy = boss.cy - e.cy;
+    const d = Math.hypot(dx, dy);
+    if (d > 90) {
+      e.vx = (e.vx * 15 + (dx / d) * 8) / 16;
+      e.vy = (e.vy * 15 + (dy / d) * 8) / 16;
+      e.x += e.vx; e.y += e.vy;
+      return;
+    }
+    if (Math.abs(e.vx) + Math.abs(e.vy) < 8) {
+      e.vy *= 1.05;
+      e.vx *= 1.05;
+    }
+    // :32857-32869 掷 1/200（专家 1/100）→ 8 速直冲玩家、转扑咬态
+    if (player && Math.floor(Math.random() * 200) === 0) {
+      const pdx = player.cx - e.cx, pdy = player.cy - e.cy;
+      const pd = Math.hypot(pdx, pdy) || 1;
+      e.vx = (pdx / pd) * 8;
+      e.vy = (pdy / pd) * 8;
+      e.ai0 = 1;
+    }
     e.x += e.vx; e.y += e.vy;
     return;
   }
-  // 二阶段:瞬移冲刺循环(ai0 计 60t 一冲)
-  e.ai0 += 1;
-  e.spawnAlpha = 0;
-  if (e.ai0 % 60 === 0) {
-    // 瞬移到玩家周围随机点,朝玩家冲刺
-    const ang = Math.random() * Math.PI * 2;
-    e.x = player.cx + Math.cos(ang) * 200 - e.w / 2;
-    e.y = player.cy + Math.sin(ang) * 200 - e.h / 2;
-    const dx = player.cx - e.cx, dy = player.cy - e.cy;
-    const d = Math.hypot(dx, dy) || 1;
-    e.vx = (dx / d) * 9; e.vy = (dy / d) * 9;
-    game.spawnParticles(e.cx, e.cy, '#A03050', 10, 2);
+  // ---- 扑咬态 ai[0]=1（:32871-32913）----
+  // :32887-32894 距主体 >700px → 回环绕
+  const bdx = boss.cx - e.cx, bdy = boss.cy - e.cy;
+  if (Math.hypot(bdx, bdy) > 700) {
+    e.ai0 = 0;
+  } else {
+    // :32897-32900 未受击保持直飞（经典档无追踪）
+    if (!e.justHit) { e.x += e.vx; e.y += e.vy; return; }
+    // :32901-32912 knockBackResist==0（本仓 = 抗性 1.0）→ 计数 ai[1]>5 回环绕；
+    //   否则一击即回（267 原值 0.8 走此支）
+    if ((e.def.knockbackResist ?? 0) >= 1) {
+      e.ai1 += 1;
+      if (e.ai1 > 5) e.ai0 = 0;
+    } else {
+      e.ai0 = 0;
+    }
   }
-  e.x += e.vx; e.y += e.vy;
-}
-
-/** 267 爬行者(NPC.cs AI_055 简化):环绕主人/玩家漂移 + 接触伤害 */
-export function creeperAI(e: Enemy, game: GameHooks, player: Player | null) {
-  if (!player) { e.x += e.vx; e.y += e.vy; return; }
-  e.ai0 += 0.02;
-  // 环绕玩家(半径 100-160 摆动)
-  const r = 130 + Math.sin(e.aiT * 0.03) * 30;
-  const tx = player.cx - e.w / 2 + Math.cos(e.ai0) * r;
-  const ty = player.cy - e.h / 2 + Math.sin(e.ai0) * r;
-  e.vx += (tx - e.x) * 0.01;
-  e.vy += (ty - e.y) * 0.01;
-  e.vx *= 0.92; e.vy *= 0.92;
-  e.x += e.vx; e.y += e.vy;
+  e.x += e.vx;
+  e.y += e.vy;
   void game;
 }
 

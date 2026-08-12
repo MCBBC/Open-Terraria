@@ -242,6 +242,17 @@ const HP_PER_SEC: Partial<Record<BuffType, number>> = {
   [BuffType.Honey]: 1,   // lifeRegen+2
 };
 
+/** DoT 分块大小（Player.cs:19136-19204 结算 + HurtLifeRegen:19207）：burned/
+ *  suffocating 走 -600 阈值分支 → 每 600 life-regen 点弹 HurtLifeRegen(5)；
+ *  其余（OnFire 等）走通用 -120 分支 → 每 120 点弹 1。换算到时间：
+ *  Burning(−60/t)=每 10t 弹 5（≈3 次/秒飘字）、Suffocation(−40/t)=每 15t 弹 5、
+ *  OnFire(−8/t)=每 15t 弹 1。掉血须整块弹出并伴随 LifeRegen 色(255,60,70)
+ *  dot 飘字（CombatText.cs:24 / NewText dot:true），非每帧静默 1 HP 滴流 */
+const DOT_CHUNK: Partial<Record<BuffType, number>> = {
+  [BuffType.Burning]: 5,
+  [BuffType.Suffocation]: 5,
+};
+
 export class BuffState {
   active = new Map<BuffType, number>(); // 剩余秒（≈buffTime/60）
   campfireAccum = 0;
@@ -286,6 +297,13 @@ export class BuffState {
       if (t !== undefined) this.active.set(t, sec);
     }
   }
+  /** 本帧弹出的 DoT 分块伤害合计（HurtLifeRegen 语义,Player 消费后弹出飘字并清零） */
+  private dotChunkOut = 0;
+  consumeDotChunk(): number {
+    const c = this.dotChunkOut;
+    this.dotChunkOut = 0;
+    return c;
+  }
   /** 每逻辑帧（dt 秒）。返回本帧生命净变化（正=回复,负=持续伤害/DoT,无视无敌帧与防御） */
   tick(dt: number): number {
     let heal = 0;
@@ -297,10 +315,14 @@ export class BuffState {
     // 定额 HP/s buff（Regeneration 2 HP/s / Honey 1 HP/s）
     heal += this.rateAccum(BuffType.Regen, 2, dt);
     heal += this.rateAccum(BuffType.Honey, 1, dt);
-    // 环境 DoT debuff（Player.cs:18793-18934 lifeRegen 负项 / 2 = HP/s）
-    heal += this.rateAccum(BuffType.OnFire, -4, dt);        // lifeRegen-8
-    heal += this.rateAccum(BuffType.Burning, -30, dt);      // lifeRegen-60
-    heal += this.rateAccum(BuffType.Suffocation, -20, dt);  // lifeRegen-40
+    // 环境 DoT debuff（Player.cs:18793-18934 lifeRegen 负项 / 2 = HP/s）——
+    // 分块弹出（DOT_CHUNK），净伤害记入 dotChunkOut 供 HurtLifeRegen 飘字消费
+    const dots =
+      this.rateAccum(BuffType.OnFire, -4, dt)         // lifeRegen-8
+      + this.rateAccum(BuffType.Burning, -30, dt)     // lifeRegen-60
+      + this.rateAccum(BuffType.Suffocation, -20, dt); // lifeRegen-40
+    heal += dots;
+    if (dots < 0) this.dotChunkOut += -dots;
     // 蜂蜜对冲（Player.cs:18934-18940:lifeRegen<0 时 honey 额外 lifeRegen+4 = +2 HP/s）——
     // DoT 系统已实装,补上 buff-system-port 备忘里标"暂缺"的分支
     const dotActive = heal < 0;
@@ -330,7 +352,9 @@ export class BuffState {
     return heal;
   }
   /** 定额回复/伤害 buff 的独立累加器（Map 存每 buff 的秒余数;负速率=DoT）。
-   *  separate=true 用独立累加器键(蜂蜜对冲与常规蜂蜜回复分账,避免共用余数) */
+   *  separate=true 用独立累加器键(蜂蜜对冲与常规蜂蜜回复分账,避免共用余数)。
+   *  负速率按 DOT_CHUNK 整块弹出（≈原版 lifeRegenCount 阈值分块）;buff 到期时
+   *  不足一块的余数丢弃(原版同样只在整阈值结算) */
   private rateLeft = new Map<string, number>();
   private rateAccum(t: BuffType, hpPerSec: number, dt: number, separate = false): number {
     if (!this.active.has(t)) { this.rateLeft.delete(`${t}:${separate}`); return 0; }
@@ -340,7 +364,8 @@ export class BuffState {
     if (hpPerSec >= 0) {
       while (left >= 1) { left -= 1; heal += 1; }
     } else {
-      while (left <= -1) { left += 1; heal -= 1; }
+      const chunk = DOT_CHUNK[t] ?? 1;
+      while (left <= -chunk) { left += chunk; heal -= chunk; }
     }
     this.rateLeft.set(key, left);
     return heal;
