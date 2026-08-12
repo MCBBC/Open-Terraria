@@ -367,17 +367,27 @@ export function runTemplePass(
       if (all) st.wall[st.idx(x, y)] = 87;
     }
   }
-  // ---- 祭坛 237(L17609-17678):末间中心 ±15 重试,直接 3×2 帧放置 ----
+  // ---- 祭坛 237（makeTemple 尾 cs:34241-34315 1:1）：末间中心 ±15 拒绝采样，
+  //      Place3x2 锚点门（底行下三列 SolidTile2）；1000 次失败走强制兜底 ----
+  // SolidTile2（cs:70178）：active+tileSolid+slope0+非半砖
+  const solidTile2 = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const j = st.idx(x, y);
+    if (!st.flags[j]) return false;
+    const d = TILE_DEFS[st.type[j]];
+    return !!d && d.solid && st.slope[j] === 0 && !st.half[j];
+  };
   const lastR = rooms[rooms.length - 1];
   const acx = lastR.x + Math.floor(lastR.w / 2);
   const acy = lastR.y + Math.floor(lastR.h / 2);
-  let altarPlaced = false;
-  for (let tries = 0; tries < 1000 && !altarPlaced; tries++) {
+  let altarX = -1, altarY = -1;
+  for (let tries = 0; tries < 1000 && altarX < 0; tries++) {
     const ax = acx + 15 - rng.int(0, 29);
     const ay = acy + 15 - rng.int(0, 29);
     if (!st.inBounds(ax, ay) || st.wall[st.idx(ax, ay)] !== 87) continue;
     // PlaceTile 语义:落点须在挖空区(墙 87 且非实心)
     if (st.flags[st.idx(ax, ay)]) continue;
+    // Place3x2 空置门（cs:52109-52120）：3×2 全空
     let clear = true;
     for (let dx = 0; dx <= 2 && clear; dx++) {
       for (let dy = 0; dy <= 1; dy++) {
@@ -385,17 +395,73 @@ export function runTemplePass(
       }
     }
     if (!clear) continue;
+    // ★ Place3x2 锚点门（cs:52127-52153，default 分支）：底行下三列 SolidTile2
+    // ——此前缺此门：采样框下方几乎必然是空气 → 祭坛悬空
+    let anchored = true;
+    for (let dx = 0; dx <= 2; dx++) {
+      if (!solidTile2(ax + dx, ay + 2)) { anchored = false; break; }
+    }
+    if (!anchored) continue;
     for (let dx = 0; dx <= 2; dx++) {
       for (let dy = 0; dy <= 1; dy++) {
         st.setTileSilent(ax + dx, ay + dy, ALTAR, dx * 18, dy * 18);
       }
     }
-    altarPlaced = true;
+    altarX = ax; altarY = ay;
   }
+  // ---- 兜底（cs:34261-34315 1:1）：中心 ±10 抖动 → 向下扫到首个实心 →
+  //      强制铺 3 格蜥蜴砖地板 → 锚点改地板上一格、x 左移 1 → 清周围 → 强制放置
+  if (altarX < 0) {
+    let fx = acx + rng.int(-10, 10);
+    let fy = acy + rng.int(-10, 10);
+    while (st.inBounds(fx, fy) && !st.flags[st.idx(fx, fy)]) fy++;
+    if (st.inBounds(fx, fy)) {
+      for (let dx = -1; dx <= 1; dx++) {
+        if (!st.inBounds(fx + dx, fy)) continue;
+        const j = st.idx(fx + dx, fy);
+        st.type[j] = BRICK; st.flags[j] = 1;
+        st.slope[j] = 0; st.half[j] = 0; st.liquid[j] = 0;
+      }
+      fy -= 2; fx -= 1;   // 底中锚 → 3×2 左上角
+      if (st.inBounds(fx, fy)) {
+        for (let dx = -1; dx <= 3; dx++) {
+          for (let dy = -1; dy <= 1; dy++) {
+            if (st.inBounds(fx + dx, fy + dy)) {
+              const j = st.idx(fx + dx, fy + dy);
+              st.type[j] = 0; st.flags[j] = 0;
+            }
+          }
+        }
+        for (let dx = 0; dx <= 2; dx++) {
+          for (let dy = 0; dy <= 1; dy++) {
+            st.setTileSilent(fx + dx, fy + dy, ALTAR, dx * 18, dy * 18);
+          }
+        }
+        altarX = fx; altarY = fy;
+      }
+    }
+  }
+  gs.lAltarX = altarX; gs.lAltarY = altarY;
   // ---- templePart2（1456 cs:34497-34685）1:1 五段：陷阱 → 宝箱 → 雕像 → 家具 → 挂饰 ----
   // 顺序对齐原版：宝箱在尖刺陷阱段**之后**（旧版反序且公式为房数×1.1×(1±25%)）
-  void altarPlaced;
   templePart2(st, rng, gs, chests, rooms);
+  // ---- LihzahrdAltar 终保 pass（cs:21753-21791 1:1）：重放祭坛 6 格 + 正下方
+  //      三格强制 226 地板（防悬空最终保险；原版为独立 pass，此处并入末尾等效）；
+  //      顺带 cs:21744-21746：祭坛正下方木刺 232 → 226
+  if (altarX >= 0) {
+    for (let dx = 0; dx <= 2; dx++) {
+      for (let dy = 0; dy <= 1; dy++) {
+        if (st.inBounds(altarX + dx, altarY + dy)) {
+          st.setTileSilent(altarX + dx, altarY + dy, ALTAR, dx * 18, dy * 18);
+        }
+      }
+      const bj = st.inBounds(altarX + dx, altarY + 2) ? st.idx(altarX + dx, altarY + 2) : -1;
+      if (bj >= 0) {
+        st.type[bj] = BRICK; st.flags[bj] = 1;
+        st.slope[bj] = 0; st.half[bj] = 0; st.liquid[bj] = 0;
+      }
+    }
+  }
 }
 
 /** templePart2（1456 cs:34497-34685）1:1。tRooms=房间数；各段预算公式与
@@ -473,7 +539,8 @@ function templePart2(
   }
 
   // ---- 4. 蜥蜴家具（cs:34585-34632）：预算 = 房数×1.35×(1+Next(-15,26)%) ----
-  //  Next(3)：0→桌 14 style10 / 1→椅 15 style9 / 2→工作台 18 style12
+  //  Next(3)（cs:34608-34630 原文配对，勿旋转）：0→工作台 18 style10 /
+  //  1→桌 14 style9 / 2→椅 15 style12（曾把三对整体错抄一位→神庙出木椅）
   {
     let budget = tRooms * 1.35 * (1 + rng.int(-15, 25) * 0.01);
     let fails = 0;
@@ -491,10 +558,10 @@ function templePart2(
         if (fy <= by) {
           const kind = rng.int(0, 2);                 // Next(3)
           const spec = kind === 0
-            ? { tile: TILE_BY_KEY['table']!, style: 10 }
+            ? { tile: TILE_BY_KEY['workbench']!, style: 10 }
             : kind === 1
-              ? { tile: TILE_BY_KEY['chair']!, style: 9 }
-              : { tile: TILE_BY_KEY['workbench']!, style: 12 };
+              ? { tile: TILE_BY_KEY['table']!, style: 9 }
+              : { tile: TILE_BY_KEY['chair']!, style: 12 };
           if (placeFurn(st, x2, fy, spec.tile, spec.style)) budget -= 1;
         }
       }

@@ -662,29 +662,37 @@ export class VanillaSpawner {
     if (!this.invaders && ((!bloodMoon) || dayTime) && !zoneEvil) {
       const deep = playerYpx / TILE > w.h - 200;   // :711 player.Center.Y/16 > UnderworldLayer
       if (deep) {
-        // 地狱侧(:713-759):友好概率低
+        // 地狱侧(:713-763)：友好概率低；命中时 maxSpawns×0.5（:724/:741/:757——
+        // 削减只在 friendly 命中分支内，未命中只放宽 spawnRate）
         if (townNPCs === 1) {
-          if (this.rateRng() < 1 / 10) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 1.25);
+          if (this.rateRng() < 1 / 10) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :722-727
+          else spawnRate = Math.floor(spawnRate * 1.25);
         } else if (townNPCs === 2) {
-          if (this.rateRng() < 1 / 5) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 1.5);
+          if (this.rateRng() < 1 / 5) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :736-743
+          else spawnRate = Math.floor(spawnRate * 1.5);
         } else if (townNPCs >= 3) {
-          if (this.rateRng() < 1 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 2);
+          if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.5); } // :753-759
+          else spawnRate = Math.floor(spawnRate * 2);
         }
       } else {
-        // 地表/洞穴侧(:760-831):高友好率;townNPCs==0 → 永不友好(不出小动物)
+        // 地表/洞穴侧(:765-832)：高友好率；命中时 maxSpawns×0.6（:782/:805/:821）；
+        // townNPCs==0 → 永不友好(不出小动物)；墓地段（:770-778/:793-800/:815-822）未实装
         if (townNPCs === 1) {
-          if (this.rateRng() < 1 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 2);
+          if (this.rateRng() < 1 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :779-783
+          else spawnRate = Math.floor(spawnRate * 2);
         } else if (townNPCs === 2) {
-          if (this.rateRng() < 2 / 3) this.friendlyHit(); else spawnRate = Math.floor(spawnRate * 3);
+          if (this.rateRng() < 2 / 3) { this.friendlyHit(); maxSpawns = Math.floor(maxSpawns * 0.6); } // :802-806
+          else spawnRate = Math.floor(spawnRate * 3);
         } else if (townNPCs >= 3) {
-          this.friendlyHit();   // :824 非 ftw 恒友好(专家 1/30 例外未实装)
+          this.friendlyHit();   // :826-828 非 ftw 恒友好(专家 1/30 例外未实装)
+          maxSpawns = Math.floor(maxSpawns * 0.6); // :830 无条件削减（专家例外轮也削）
         }
       }
     }
     return { spawnRate, maxSpawns };
   }
-  /** friendly 命中(:723/:740/:756/:804/:828):本仓签名限制,乘数由调用侧返回值体现——
-   *  这里直接改 spawnFriendlyCycle;maxSpawns×0.5(地狱)/×0.6(地表) 简化统一按 0.6 */
+  /** friendly 命中（:723/:740/:756/:804/:828）：只置 spawnFriendlyCycle；
+   *  maxSpawns 削减（地狱 ×0.5 / 地表 ×0.6，且 town≥3 地表无条件）在分支就地执行 */
   private friendlyHit(): void {
     this.spawnFriendlyCycle = true;
   }

@@ -92,6 +92,25 @@ function parseSwitch(body) {
   return out;
 }
 
+/** 块内嵌套 `if (type == N) {…}` 单守卫覆盖条目（id → 块）。
+ *  1456 惯用法:case 贯穿组共享体 + `if (type == K) { 个别字段覆盖 }`
+ *  （链锤 5011/5012 组共享 shoot=947,5012 嵌套 if 里 shoot=948——
+ *  曾漏提致烈焰链锤发射未点燃的 947）*/
+function nestedTypeIfCases(block) {
+  const out = [];
+  const re = /(?:else\s+)?if\s*\(\s*type\s*==\s*(\d+)\s*\)\s*\{/g;
+  let m;
+  while ((m = re.exec(block))) {
+    let depth = 0, close = m.index + m[0].length - 1;
+    for (let i = close; i < block.length; i++) {
+      if (block[i] === '{') depth++;
+      else if (block[i] === '}') { depth--; if (depth === 0) { close = i; break; } }
+    }
+    out.push({ id: +m[1], block: block.slice(m.index + m[0].length, close) });
+  }
+  return out;
+}
+
 /** 块内嵌套 switch(type) 的 case 条目（id → 块） */
 function nestedSwitchCases(block) {
   const out = [];
@@ -182,6 +201,12 @@ for (const body of bodies) {
     for (const id of ids) applyRec(id, lines);
     // 嵌套 switch(type)：按其自身 id 合并（悠悠球 per-id damage/shoot 在这里）
     for (const { id, block: nb } of nestedSwitchCases(block)) {
+      applyRec(id, depth1Lines(nb));
+    }
+    // 嵌套 `if (type == K)` 单守卫覆盖：仅守卫 id 属于本 case 组才合并
+    //（防跨组污染;else 分支体不归属任何 id,跳过）
+    for (const { id, block: nb } of nestedTypeIfCases(block)) {
+      if (!ids.includes(id)) continue;
       applyRec(id, depth1Lines(nb));
     }
   }

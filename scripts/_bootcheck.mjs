@@ -4,7 +4,7 @@ const page = await browser.newPage();
 page.on('console', m => { const t = m.text(); if (/error|Error|warn/i.test(t)) console.log('CONSOLE:', t.slice(0, 300)); });
 page.on('pageerror', e => console.log('PAGEERROR:', String(e).slice(0, 400)));
 try {
-  await page.goto('http://localhost:5377/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5377') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
   const r = await page.evaluate(() => new Promise((res) => {
     const t0 = Date.now();
     const iv = setInterval(() => {

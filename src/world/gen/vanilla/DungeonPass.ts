@@ -44,6 +44,7 @@ const BATHTUB = TILE_BY_KEY['bathtub']!;
 const BED = TILE_BY_KEY['bed']!;
 const LAMP = TILE_BY_KEY['v_93_lamps']!;
 const CLOCK = TILE_BY_KEY['grandfather_clock']!;
+const BOOKCASE = TILE_BY_KEY['bookcase']!;
 const DSWITCH = TILE_BY_KEY['v_136_switch']!;
 const HANGING = TILE_BY_KEY['v_240_wall_hangings_3x3']!;
 const CATACOMB = TILE_BY_KEY['v_241_catacombs']!;
@@ -1199,13 +1200,17 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
 
   // ---- 8. 地面家具(cs L19287-19613):13 类,2000×w/4200 次尝试 ----
   {
-    // 样式表(cs L19317-19365):墙 7 / 8 / 9
+    // 样式表(cs L19317-19365,值=ItemID.Sets.DerivedPlacementDetails 逐项核对):
+    // 墙 7 / 8 / 9。ftype3=书架 101(item1414-1416 → 1/2/3)、ftype10=路灯 93
+    // (item2645-2647 → placeStyle 22+type-2643 = 24/25/26)、ftype11=烛台 100
+    // (item2664-2666 → 22+type-2664 = 22/23/24)——灯/烛台两列曾互换、书架值曾
+    // 贴给烛台（2026-08-12 审计修正）
     const S = wallType === 7
-      ? [13, 10, 11, 1, 46, 1, 5, 11, 5, 6, 21, 22, 24, 30]
+      ? [13, 10, 11, 1, 46, 1, 5, 11, 5, 6, 21, 24, 22, 30]
       : wallType === 8
-        ? [14, 11, 12, 2, 47, 2, 6, 12, 6, 7, 22, 23, 25, 31]
-        : [15, 12, 13, 3, 48, 3, 7, 13, 7, 8, 23, 24, 26, 32];
-    const [sChair, sTable, sDresser, sCandle, sStatue, sCandelabra, sBed, sPiano, sDresser2, sBench, sTub, sLamp, sCandelabra2, sClock] = S;
+        ? [14, 11, 12, 2, 47, 2, 6, 12, 6, 7, 22, 25, 23, 31]
+        : [15, 12, 13, 3, 48, 3, 7, 13, 7, 8, 23, 26, 24, 32];
+    const [sChair, sTable, sDresser, sCandle, sStatue, sBookcase, sBed, sPiano, sDresser2, sBench, sTub, sLamp, sCandelabra2, sClock] = S;
     let alchemyLeft = 1 + Math.floor(w / 4200);
     let bewitchLeft = 1 + Math.floor(w / 4200);
     const attempts = Math.floor(2000 * (w / 4200));
@@ -1298,7 +1303,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
           break;
         }
         case 2: placeFurn(st, cx0, floorY, STATUE, sStatue); break;
-        case 3: placeFurn(st, cx0, floorY, CANDELABRA, sCandelabra, 'bottom', 1, true, 72); break; // 烛台样式 Y 步72(skip2)
+        case 3: placeFurn(st, cx0, floorY, BOOKCASE, sBookcase); break; // 书架 101(item1414-1416,横排)
         case 4: {
           if (placeFurn(st, cx0, floorY, CHAIR, sChair) && rng.int(0, 1) === 0) flipFurn(st, cx0, floorY, CHAIR);
           break;
@@ -1492,8 +1497,10 @@ export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: numb
   }
   const sheet = TILE_DEFS[tile]?.vanilla?.sheet ?? -1;
   // 权威布局表(FurnitureStyle.ts,TileObjectData+贴图实测):表内 sheet 直接用,
-  // 表外尊重调用参数(竖排 styleRowH / 横排列步 styleColW),最终回退通用横排
-  const inTable = [42, 33, 49, 34, 100, 93, 91, 240, 241, 242, 245, 246].includes(sheet);
+  // 表外尊重调用参数(竖排 styleRowH / 横排列步 styleColW),最终回退通用横排。
+  // 15/139/187 曾漏登记→椅子全落通用横排回退而实为竖排(神庙木椅 2026-08-12),
+  // 已补全与 FurnitureStyle.ts 覆盖面同步
+  const inTable = [42, 33, 49, 34, 100, 93, 91, 240, 241, 242, 245, 246, 15, 139, 187, 79, 90].includes(sheet);
   let bx: number, by: number;
   if (inTable) [bx, by] = furnitureStyleBase(sheet, style, fw);
   else if (styleRowH !== undefined) { bx = 0; by = style * styleRowH; }

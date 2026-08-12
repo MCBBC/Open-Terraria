@@ -3374,7 +3374,10 @@ export class Game implements GameHooks {
       }
     }
     if (inp.rightDown) {
-      const nearChest = this.findChestNear(tx, ty);
+      // 光标格本身是蜥蜴祭坛时跳过 ±1 格宝箱搜索——神庙宝箱全庙随机散布可能
+      // 贴着祭坛，原版无 ±1 搜索（点到箱本体才开箱）；不跳过则右键祭坛变成开箱
+      const cursorIsAltar = type === TILE_BY_KEY['v_237_lihzahrd_altar'];
+      const nearChest = cursorIsAltar ? null : this.findChestNear(tx, ty);
       if (nearChest) {
         this.tryOpenChest(nearChest);
         this.input.rightDown = false;
@@ -3870,6 +3873,7 @@ export class Game implements GameHooks {
         const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color);
         this.entities.add(proj, 'projectiles');
         this.player.useTime = mg.speed;
+        this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
         // 法杖 useStyle 5：朝鼠标静持姿势（Player.cs:46708 itemRotation=瞄准角）
         this.useSwing(heldDef, ang);
         this.sfx.play('tink');
@@ -4131,6 +4135,7 @@ export class Game implements GameHooks {
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: pen }), 'projectiles');
         this.player.useTime = cw.useTime;
+        this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
         this.sfx.play('tink');
         this.input.mouseDown = false;
         break;
@@ -5675,8 +5680,19 @@ export class Game implements GameHooks {
   private useLihzahrdAltar(tx: number, ty: number): void {
     void tx; void ty;
     const w = this.world;
-    // 条件门（:32307）
-    if (this.hasNpcId(245) || !w.flags.hardMode || !w.flags['downed_262']) {
+    // 条件门（:32307；原版静默——本作按惯例给反馈，偏差已记录）
+    if (this.hasNpcId(245)) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.BossAlreadyHere'));
+      this.input.rightDown = false;
+      return;
+    }
+    if (!w.flags.hardMode) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedHardMode'));
+      this.input.rightDown = false;
+      return;
+    }
+    if (!w.flags['downed_262']) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedDownedPlant'));
       this.input.rightDown = false;
       return;
     }

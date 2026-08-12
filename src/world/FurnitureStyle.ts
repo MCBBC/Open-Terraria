@@ -30,8 +30,14 @@ export function furnitureStyleBase(sheet: number, style: number, fw: number): [n
     // ——LivingTree 叶下地被 style 47-51（cs:28695）在第二行（Y=54）。此前 default
     // 单轴 style*54 → style≥35 越界 1890 表宽
     case 187: return [(style % 35) * 54, Math.floor(style / 35) * 36]; // Y 步=块高 36(16+2+18,非均匀行高)
-    // 15 椅子（TileObjectData :4164 StyleHorizontal=false）：style 竖排 Y 步 38
-    case 15: return [0, style * 38];
+    // 15 椅子（TileObjectData :4132-4164 Style1x2、StyleHorizontal=false、
+    //  StyleWrapLimit=2、StyleMultiplier=2、PaddingFix(0,2)）：FullHeight=(16+2)+(18+2)+2
+    //  =40——style 竖排 Y 步 40（Tiles_15 72×2038 行带 0/40/80…实测；曾误写 38
+    //  漏 PaddingFix.Y，每样式偏 2px）；朝向档在 X 0/18（flip +18）
+    case 15: return [0, style * 40];
+    // 79 床 / 90 浴缸（Style4x2 同椅子模式：WrapLimit=2、Multiplier=2、H=false）：
+    // style 竖排 Y 步 36，朝向档在 X 0/72
+    case 79: case 90: return [0, style * 36];
     // 139 八音盒（Item.cs DefaultToMusicBox placeStyle + SceneMetrics.cs:474 读
     //  frameY/36 = 曲目 style）：StyleHorizontal=false 竖排 Y 步 36；开关档 X 0/36
     // （Wiring SwitchMB :50977）。此前走 default X 向 → 唱片全放成曲目 0

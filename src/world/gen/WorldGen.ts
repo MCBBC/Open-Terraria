@@ -83,6 +83,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // （半砖 = 原版水浸润/瀑布触发的核心，见 HalfBrickPass.ts）
     { name: '半砖平滑', run: halfBrickSmoothPass },
     { name: '瀑布唇缘', run: waterfallLipPass },
+    // 洞穴墙变体斑（原版 CaveWallVariety cs:16786，注册序 Waterfalls(16697) <
+    // 本 pass < LifeCrystals(16847)）：泥土墙 196-199/丛林 204-207/石墙 208-215
+    // —— CaveWalls 主 pass（苔藓槽后）的前置墙基之一
+    { name: '洞穴墙变体', run: caveWallVarietyPass },
     { name: '生命水晶', run: vanillaLifeCrystals },
     // 地狱(Underworld 28) 已按注册序并入 vanillaBiomes（Webs 27 后、Corruption 29 前）
     { name: '地狱屋', run: vanillaHellHouses },
@@ -92,7 +96,16 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 苔藓（原版 MossAndMossCaves cs:17573，注册序 BuriedChests 17066 < 本 pass <
     // Pots 18186）：霓虹苔藓洞 + 苔藓斑/散点/地狱氦苔藓——洞穴系全部定型后只做
     // 石→苔藓点状替换；长苔藓 pass（20915）的上游，缺它则全图 0 长苔藓
+    // 宝石洞（原版 GemCaves cs:17528，注册序 < Moss(17573) < CaveWalls(17819)）：
+    // 必须先于 CaveWalls——Spread.Gem 遇墙不扩散，先刷墙会压制宝石洞；
+    // 此前挤在"宝石系统"槽（Moss 后近 30 槽）= 顺序偏差，已归位
+    { name: '宝石洞', run: gemCavesPass },
     { name: '苔藓', run: vanillaMoss },
+    // 洞穴自然墙（原版 CaveWallsInEnclosedSpaces cs:17819，注册序 Moss(17573) <
+    // 本 pass < UndergroundJungleTrees(17952)）：封闭腔刷洞穴背景墙 + 丛林泥墙段。
+    // 地下自然墙唯二来源之一（另一=DirtWallBackgrounds 近地表）——缺它全洞穴无墙,
+    // 暴露晶簇(178,贴墙装饰)悬空(2026-08-12 用户标注)
+    { name: '洞穴墙', run: caveWallsPass },
     // 地狱熔炉(原版 Hellforges,cs:18298:w/200 个,墙 13/14 门禁)
     { name: '地狱熔炉', run: hellforgesPass },
     // （原版管线地下小屋/散箱已由生物群系 pass 内的 CaveHousePass/BuriedChestsPass/
@@ -124,8 +137,8 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '地表花', run: vanillaFlowers },
     // 地表蘑菇（原版 Mushrooms cs:20744）：蘑菇斑帧重刷
     { name: '地表蘑菇', run: vanillaMushrooms },
-    // 宝石系统（原版 GemCaves(17528) < ExposedGems(20842/20874) <
-    // SpeleothemsAndGemTrees(22196)：装饰之后、海滩装饰之前）
+    // 宝石系统（原版 ExposedGems(20842/20874) < SpeleothemsAndGemTrees(22196)：
+    // 装饰之后、海滩装饰之前；GemCaves 已前移"宝石洞"槽）
     { name: '宝石系统', run: vanillaGems },
     // 长苔藓（原版 LongMoss cs:20915）：苔藓块四向冒芽，位于 ExposedGems 之后
     { name: '长苔藓', run: vanillaLongMoss },
@@ -173,6 +186,7 @@ import { runCleanupPass } from './vanilla/CleanupPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
+import { runCaveWallsPass, runCaveWallVarietyPass } from './vanilla/CaveWallsPass';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
@@ -666,13 +680,32 @@ function vanillaSurfaceDecor({ store, rng }: GenCtx) {
   runTrapsPass(store, rng, gs); // 原版 pass 76 Traps（返回 slot15 排查计数回归）
 }
 
-// 宝石系统（原版序 GemCaves → ExposedGems → SpeleothemsAndGemTrees）
-function vanillaGems({ store, rng }: GenCtx) {
+// 宝石系统（原版序 GemCaves → ExposedGems → SpeleothemsAndGemTrees；
+// GemCaves 已按注册序前移到"宝石洞"独立槽——必须先于苔藓与洞穴墙）
+function gemCavesPass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runGemCavesPass(store, rng, gs);
+}
+
+function vanillaGems({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
   runExposedGemsPass(store, rng, gs);
   runGemTreesPass(store, rng, gs);
+}
+
+// 洞穴墙（CaveWallsInEnclosedSpaces cs:17819）+ 墙变体（CaveWallVariety cs:16786）
+function caveWallsPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runCaveWallsPass(store, rng, gs);
+}
+
+function caveWallVarietyPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runCaveWallVarietyPass(store, rng, gs);
 }
 
 // 苔藓（原版 MossAndMossCaves cs:17573-17833）

@@ -66,6 +66,9 @@ export interface AccFx {
   nightWolf?: number;    // 月亮符：夜晚 Werewolf buff(28)（melee+5.1%伤/+2暴/+5.1%速）
   brainOfConfusion?: number; // 混乱之脑：受击 1/6 → buff321（三系+10暴+召唤+10%伤）
   manaFlower?: number;   // 魔力花族：耗魔 -8% + 魔力不足自动喝蓝
+  // ---- 魔力回复直值（Player.ApplyEquipFunctional :14379-14383，仅魔力斗篷 982）----
+  manaRegenBonus?: number;       // manaRegenBonus += N（每帧产额加成）
+  manaRegenDelayBonus?: number;  // manaRegenDelayBonus += X（惩罚期额外衰减/tick）
 }
 
 const FX = fxJson as Record<string, AccFx>;

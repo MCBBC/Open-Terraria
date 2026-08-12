@@ -57,8 +57,9 @@ export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
 
 /** Spread.Wall2（cs:3387-3470）1:1：墙蔓延 BFS。
  *  实心格不涂不扩散；不可替换墙阻断；停空气位墙（63）遇 wall==0 跳过；
- *  计数上限 5000；停空气位墙额外扩散对角与 ±2 横向 */
-function spreadWall2(st: TileStore, sx: number, sy: number, wallType: number): void {
+ *  计数上限 5000；停空气位墙额外扩散对角与 ±2 横向。
+ *  导出供 CaveWallsPass（丛林泥墙段 cs:17946）复用 */
+export function spreadWall2(st: TileStore, sx: number, sy: number, wallType: number): void {
   if (!st.inBounds(sx, sy)) return;
   let out = 0;
   const seen = new Set<number>();

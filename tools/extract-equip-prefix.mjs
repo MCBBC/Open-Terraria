@@ -204,6 +204,9 @@ const ACC_PATTERNS = [
   ['magicCuffs', /magicCuffs = true;/],           // 魔力手铐：受伤回蓝
   ['manaFlower', /manaFlower = true;/],           // 磁花：耗魔 -8%+魔力不足自动喝蓝
   ['pStone', /pStone = true;/],                   // 贤者之石（药水 CD -25%，暂存）
+  // ---- 魔力回复直值（:14379-14383 魔力斗篷 982：+20 魔 + 回复双字段）----
+  ['manaRegenBonus', /manaRegenBonus \+= (\d+);/],            // 每帧产额加成（UpdateManaRegen :19254）
+  ['manaRegenDelayBonus', /manaRegenDelayBonus \+= ([\d.]+)f;/], // 惩罚期额外衰减/tick（:19237）
 ];
 // 跳跃选项多值字段：一个物品可同时授予 Cloud+Sandstorm+Blizzard（三合一瓶 1164）
 const JUMP_OPTS_RE = /hasJumpOption_(\w+) = true;/g;

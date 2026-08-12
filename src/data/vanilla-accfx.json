@@ -374,7 +374,9 @@
     "dashType": 1
   },
   "982": {
-    "mana": 20
+    "mana": 20,
+    "manaRegenBonus": 25,
+    "manaRegenDelayBonus": 1
   },
   "983": {
     "jumpBoost": 1,

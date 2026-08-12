@@ -40,7 +40,7 @@ export enum BuffType {
   // ---- 环境光环 + 工作站 buff（SceneMetrics 扫描 / Player.cs:25235-25266 授予链）----
   Sunflower = 19,    // 向日葵(146,光环)：moveSpeed +0.1 再 ×1.1（两步复合 ≈×1.21,Player.cs:10598）
   CatBast = 20,      // 猫堡垒(215,光环)：statDefense +5（:9778）
-  StarInBottle = 21, // 瓶中星(158,光环)：manaRegenDelay×0.5+manaRegenBonus+10（:9629）→本作回蓝×2
+  StarInBottle = 21, // 瓶中星(158,光环)：manaRegenDelayBonus+0.5 + manaRegenBonus+10（:9629-9632）
   PeaceCandle = 22,  // 和平蜡烛(157,光环)：刷怪 spawnRate×1.3/max×0.7（NPC.cs:645）
   Clairvoyance = 23, // 预见(29,水晶球右键,1800s)：manaMax+20/magicDmg+5%/crit+2/manaCost-2%（:11481）
   Sharpened = 24,    // 磨刀石(159,右键)：近战穿甲 +12（:9625，穿甲系统未接先登记）
@@ -111,6 +111,9 @@ export enum BuffType {
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
+  Shimmered = 77,   // 微光化(353,浸微光每 tick 刷新)：frozen 封输入+免伤+慢沉——
+                    //   语义由 Player.shimmering 字段承载（:11381-11388），本条目仅作
+                    //   BuffState 登记（左上角图标/名称/持续时间显示）
   ManaSickness = 69, // 魔力眩晕(94,喝蓝 AddBuff 300t)：magicDamage *= 1-0.25×(剩余/300)
                    //   （Player.cs:10000-10004 + :25616；满 debuff -25% 线性恢复。
                    //   ★33 是 Weak(近战-5.1%伤/速) 勿混）
@@ -170,6 +173,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Werewolf]: { vanillaBuff: 28, descKey: 'Mods.SandboxWorld.Buff.Werewolf.Desc', fallbackName: '狼人' },
   [BuffType.BrainOfConfusionBuff]: { vanillaBuff: 321, descKey: 'Mods.SandboxWorld.Buff.BrainOfConfusionBuff.Desc', fallbackName: '混乱之脑' },
   [BuffType.Weak]: { vanillaBuff: 33, descKey: 'Mods.SandboxWorld.Buff.Weak.Desc', fallbackName: '虚弱' },
+  [BuffType.Shimmered]: { vanillaBuff: 353, descKey: 'Mods.SandboxWorld.Buff.Shimmered.Desc', fallbackName: '微光化' },
   [BuffType.ImbueVenom]: { vanillaBuff: 71, descKey: 'Mods.SandboxWorld.Buff.ImbueVenom.Desc', fallbackName: '武器浸剂：毒液' },
   [BuffType.ImbueCursed]: { vanillaBuff: 73, descKey: 'Mods.SandboxWorld.Buff.ImbueCursed.Desc', fallbackName: '武器浸剂：诅咒焰' },
   [BuffType.ImbueFire]: { vanillaBuff: 74, descKey: 'Mods.SandboxWorld.Buff.ImbueFire.Desc', fallbackName: '武器浸剂：烈火' },

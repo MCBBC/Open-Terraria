@@ -41,6 +41,8 @@ export interface GenState {
   dungeonTheme: number;
   dungeonY: number;           // 地牢入口地表 Y（DungeonPass 回填；刷怪门槛 dungeonY+40 用）
   dungeonEntX: number;        // 入口门厅可站立点 X（DungeonPass 回填；原版 dungeonX 语义=老头锚）
+  lAltarX: number;             // 神庙祭坛 3×2 左上角（GenVars.lAltarX/Y 语义；-1=未放置）
+  lAltarY: number;
   dungeonEntY: number;        // 入口门厅可站立点 Y
   jungleX: number;            // 丛林（与地牢异侧）
   snowOriginLeft: number;
@@ -103,7 +105,7 @@ export function newGenState(w: number, h: number): GenState {
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,
     oreTiers: { copper: 0, iron: 0, silver: 0, gold: 0 },
-    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, jungleX: 0,
+    dungeonSide: 1, dungeonX: 0, dungeonLocation: 0, dungeonTheme: -1, dungeonY: 0, dungeonEntX: 0, dungeonEntY: 0, lAltarX: -1, lAltarY: -1, jungleX: 0,
     snowOriginLeft: 0, snowOriginRight: 0,
     beachLeftEnd: 0, beachRightStart: 0,
     treeX: [0, 0, 0], treeStyle: [0, 0, 0, 0], genTrees: [], lakeX: [],

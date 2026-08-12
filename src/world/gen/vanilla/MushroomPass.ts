@@ -18,8 +18,18 @@ const THIN_ICE = TILE_BY_KEY['thin_ice']!;
 /** SpreadGrass（cs:75210，本 pass 以 repeat:false 调用）：零掷骰、单格转换。
  *  门禁序：InWorld(,10) → active&&type==dirt → 3×3 全实心(或触岩浆)拒绝 →
  *  CanBeClearedDuringGeneration 拒绝 → type=grass。 */
-function spreadGrassOnce(st: TileStore, i: number, j: number, dirt: number, grass: number): void {
+/** SpreadGrass 递归洪水计数（cs:75316 grassSpread < 1000，mushroom/corruption 共用） */
+export const grassSpreadState = { n: 0 };
+let _wsRef: () => number = () => 300;
+export function setWorldSurfaceRef(fn: () => number): void { _wsRef = fn; }
+
+/** SpreadGrass（cs:75210）：dirt==0 时 j≥worldSurface 拒绝（cs:75243 第二门禁——
+ *  corruption 的 0→23/199 只在地表以上铺）。repeat=true 时 3×3 邻格递归（限 1000） */
+export function spreadGrassOnce(
+  st: TileStore, i: number, j: number, dirt: number, grass: number, repeat = false,
+): void {
   if (i < 10 || i >= st.w - 10 || j < 10 || j >= st.h - 10) return;   // InWorld(i,j,10)
+  if (dirt === 0 && j >= _wsRef()) return;                            // (j >= worldSurface && dirt==0)
   const ti = st.idx(i, j);
   if (!st.flags[ti] || st.type[ti] !== dirt) return;
   let enclosed = true;
@@ -35,6 +45,19 @@ function spreadGrassOnce(st: TileStore, i: number, j: number, dirt: number, gras
   const d = TILE_DEFS[st.type[ti]];
   if (d?.vanilla?.sheet != null && NOT_CLEARABLE.has(d.vanilla.sheet)) return;
   st.type[ti] = grass;
+  // 递归洪水（cs:75309-75320）：3×3 邻格同 dirt，grassSpread < 1000
+  if (!repeat) return;
+  for (let m = i - 1; m <= i + 1; m++) {
+    for (let n = j - 1; n <= j + 1; n++) {
+      if (m < 0 || m >= st.w || n < 0 || n >= st.h) continue;
+      const ni = st.idx(m, n);
+      if (st.flags[ni] && st.type[ni] === dirt && grassSpreadState.n < 1000) {
+        grassSpreadState.n++;
+        spreadGrassOnce(st, m, n, dirt, grass, true);
+        grassSpreadState.n--;
+      }
+    }
+  }
 }
 
 /** 生成期不可清表（WorldGen.CanBeClearedDuringGeneration 的项目侧近似；
@@ -45,6 +68,7 @@ const NOT_CLEARABLE = new Set<number>([
 export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
 
   const { w, h } = st;
+  setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁用   // SpreadGrass 的 dirt==0 地表门禁用
   let mCount = w / 700;
   if (mCount > 50) mCount = 50;                    // GenVars.maxMushroomBiomes = 50
   const placed: Array<[number, number]> = [];
