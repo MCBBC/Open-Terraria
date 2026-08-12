@@ -890,7 +890,8 @@ const PRIV_TILE_STABLE: Record<string, number> = {
   tree: 1026,                                      // 自有树(真身 v_5_trees 独占 sheet 5)
   'v_389_tall_gate_open': 1027,                    // 开门态变体(真身 v_389_tallgateopen 独占 389)
   pixel_block: 1028,                               // 自研像素方块(F11 图片导入):RGB 编码进 frameX/Y,渲染端直画
-  dirt: 1028,                                      // sheet=0 让位存档 air 哨兵
+  dirt: 1029,                                      // sheet=0 让位存档 air 哨兵(★曾误派 1028 与 pixel_block
+                                                    //  冲突→pixel_block 双表被丢→图片方块群存档即变 air 丢失)
 };
 /** internal id → 稳定 id(保存方向;serialize 内联查表) */
 export const TILE_STABLE_OF_INTERNAL = new Uint16Array(TILE_DEFS.length);

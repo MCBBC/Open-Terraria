@@ -103,7 +103,8 @@ export enum BuffType {
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
-  BrainOfConfusionBuff = 72, // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
+  BrainOfConfusionBuff = 72,
+  Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
   ManaSickness = 69, // 魔力眩晕(94,喝蓝 AddBuff 300t)：magicDamage *= 1-0.25×(剩余/300)
                    //   （Player.cs:10000-10004 + :25616；满 debuff -25% 线性恢复。
                    //   ★33 是 Weak(近战-5.1%伤/速) 勿混）
@@ -162,6 +163,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.ManaSickness]: { vanillaBuff: 94, descKey: 'Mods.SandboxWorld.Buff.ManaSickness.Desc', fallbackName: '魔力眩晕' },
   [BuffType.Werewolf]: { vanillaBuff: 28, descKey: 'Mods.SandboxWorld.Buff.Werewolf.Desc', fallbackName: '狼人' },
   [BuffType.BrainOfConfusionBuff]: { vanillaBuff: 321, descKey: 'Mods.SandboxWorld.Buff.BrainOfConfusionBuff.Desc', fallbackName: '混乱之脑' },
+  [BuffType.Weak]: { vanillaBuff: 33, descKey: 'Mods.SandboxWorld.Buff.Weak.Desc', fallbackName: '虚弱' },
   [BuffType.ImbueVenom]: { vanillaBuff: 71, descKey: 'Mods.SandboxWorld.Buff.ImbueVenom.Desc', fallbackName: '武器浸剂：毒液' },
   [BuffType.ImbueCursed]: { vanillaBuff: 73, descKey: 'Mods.SandboxWorld.Buff.ImbueCursed.Desc', fallbackName: '武器浸剂：诅咒焰' },
   [BuffType.ImbueFire]: { vanillaBuff: 74, descKey: 'Mods.SandboxWorld.Buff.ImbueFire.Desc', fallbackName: '武器浸剂：烈火' },
@@ -325,6 +327,7 @@ export class BuffState {
     if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
+    if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
@@ -333,6 +336,7 @@ export class BuffState {
     let d = this.active.has(BuffType.Ironskin) ? 8 : 0;     // Ironskin statDefense += 8（1456）
     if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
     if (this.active.has(BuffType.Tipsy)) d -= 4;            // 醉酒 statDefense -= 4（:11514）
+    if (this.active.has(BuffType.Weak)) d -= 4;              // 虚弱 statDefense -= 4（:11509）
     d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
     return d;
   }

@@ -25,6 +25,8 @@ export interface DeviceCtx {
   hasFountainAt?(tx: number, ty: number): boolean;
   /** 统计附近某类投射物数量(尖刺球惩罚表/兔兔炮场内上限用) */
   countProjectiles(kind: 'spiky' | 'bunny', px: number, py: number, radius: number): number;
+  /** 尖刺球预算惩罚(Wiring.cs 1456 :1952-1966):场上每个 185 按距 (px,py) 距离扣分 */
+  spikyBudgetPenalty?(px: number, py: number): number;
   /** 门开关(原版 HitWireSingle 10/11:随机方向+反向重试) */
   doorOpen(x: number, y: number): boolean;
   doorClose(x: number, y: number): boolean;
@@ -329,23 +331,19 @@ function fireTrap(w: Wiring, ctx: DeviceCtx, x: number, y: number): void {
     const px = x * 16 + 8 + 10 * dirX, py = y * 16 + 8 + 10 * dirY;
     ctx.shootProjectile(px, py, dirX * speed, dirY * speed, dmg, kind === 0 ? 'dart' : kind === 1 ? 'superdart' : 'flame');
   } else if (kind === 3) {
-    // 尖刺球:CheckMech 300 + 同场数量惩罚表(Wiring.cs:1536-1599)
+    // 尖刺球(Wiring.cs:1536-1599 / 1456 :1944-1976):CheckMech 300 + 场上每个 185
+    // 按自身距离扣预算(<50→50 <100→15 <200→10 <300→8 <400→6 <500→5 <700→4
+    // <900→3 <1200→2 其余 1),预算>0 才发。发射无视朝向(1405 曾按 frameX 定向,
+    // 1456 改为纯下丢,取 1456):固定方块底 (x*16+8, y*16+22),
+    // vx=rand(-20,21)*0.05 ∈[-1,1]、vy=4+rand(0,21)*0.05 ∈[4,5]
     if (!w.checkMech(x, y, 300)) return;
     let budget = 200;
-    const near = ctx.countProjectiles('spiky', x * 16 + 8, y * 16 + 8, 1200);
-    for (let k = 0; k < near; k++) {
-      budget -= k < 1 ? 50 : k < 2 ? 15 : k < 4 ? 10 : k < 7 ? 8 : k < 12 ? 6 : k < 20 ? 5 : k < 38 ? 4 : k < 65 ? 3 : k < 105 ? 2 : 1;
-    }
+    if (ctx.spikyBudgetPenalty) budget -= ctx.spikyBudgetPenalty(x * 16 + 8, y * 16 + 8);
+    else budget -= ctx.countProjectiles('spiky', x * 16 + 8, y * 16 + 8, 1200) * 8;
     if (budget <= 0) return;
-    let dx = 0, dy = 0;
-    switch (Math.floor(st.frameX[i] / 18)) {
-      case 0: case 1: dy = 1; break;
-      case 2: dy = -1; break;
-      case 3: dx = -1; break;
-      case 4: dx = 1; break;
-    }
-    const px = x * 16 + 8 + 14 * dx, py = y * 16 + 8 + 14 * dy;
-    ctx.shootProjectile(px, py, dx * 4, dy * 4, 40, 'spiky');
+    ctx.shootProjectile(x * 16 + 8, y * 16 + 22,
+      (Math.floor(Math.random() * 41) - 20) * 0.05,
+      4 + Math.floor(Math.random() * 21) * 0.05, 40, 'spiky');
   } else if (kind === 4) {
     // 下向火焰(CheckMech 90)
     if (!w.checkMech(x, y, 90)) return;

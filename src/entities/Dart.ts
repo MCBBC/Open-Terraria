@@ -27,6 +27,8 @@ const TRAP_SHOT_STYLE: Record<string, {
   /** 隐形弹（733 alpha=255 SetDefaults）：纯尘/gore 发射器，不画本体 */
   invisible?: boolean;
   spin?: boolean | 'roll' | 'bunny'; rotOff?: number;
+  /** spin=true 时的滚转系数(尖刺球 aiStyle14 = vx*0.14,1405 :21630;其余默认 0.03) */
+  spinK?: number;
   trail?: { colors: string[]; count: number; life: number; grav: number };
   /** 炮弹族：前 N tick 直线无重力（Projectile.cs:21546/26844 ai[0]>=18 才加重力） */
   gravDelay?: number;
@@ -49,7 +51,8 @@ const TRAP_SHOT_STYLE: Record<string, {
   flame: { w: 10, h: 10, color: '#FF8030', grav: 0, proj: 'vanilla/Projectile_187.png', fw: 16, fh: 16,
     trail: { colors: ['#FF8030', '#FFC040', '#FF5010'], count: 2, life: 16, grav: -0.03 } },
   spear: { w: 6, h: 14, color: '#B8B8C0', grav: 0, proj: 'vanilla/Projectile_186.png', fw: 10, fh: 16, rotOff: Math.PI / 2 },
-  spiky: { w: 12, h: 12, color: '#8A8F96', grav: 0.18, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true },
+  // 185 尖刺球(SetDefaults 1405:2255/1456:2449):14×14 aiStyle14 penetrate-1 timeLeft 900
+  spiky: { w: 14, h: 14, color: '#8A8F96', grav: 0.3, proj: 'vanilla/Projectile_185.png', fw: 16, fh: 16, spin: true, spinK: 0.14 },
   boulder: { w: 14, h: 14, color: '#9A8C72', grav: 0.22, proj: 'vanilla/Projectile_99.png', fw: 32, fh: 32, spin: true },
   geyser: { w: 10, h: 14, color: '#B8E8F0', grav: 0.02, proj: 'vanilla/Projectile_654.png', fw: 16, fh: 16,
     trail: { colors: ['#E8F4F8', '#C8E4EE'], count: 1, life: 26, grav: -0.015 } },
@@ -122,6 +125,13 @@ export const FW_DUST: Record<string, string> = {
 export const FW_RAINBOW = [FW_DUST.d219_red, FW_DUST.d220_green, FW_DUST.d221_blue,
   FW_DUST.d222_yellow, FW_DUST.d223_pink];
 
+/** 弹体中心点是否入实心块(尖刺球分轴碰撞用;近似原版 Collision.TileCollision 的轴阻挡) */
+function shotCenterSolid(game: GameHooks, e: { x: number; y: number; w: number; h: number }): boolean {
+  const tx = Math.floor((e.x + e.w / 2) / TILE);
+  const ty = Math.floor((e.y + e.h / 2) / TILE);
+  return game.world.store.isSolid(tx, ty);
+}
+
 export class TrapShot extends Entity {
   w = 8; h = 8;
   vx: number;
@@ -140,6 +150,9 @@ export class TrapShot extends Entity {
   private age = 0;
   life = 600;
   dead = false;
+  /** 敌对弹（原版 Projectile.hostile，= !style.friendly：机关/陷阱类弹伤玩家，
+   *  烟花等 friendly 类不伤）。联机 v5：随 msg27 bit7 下发，访客傀儡据此本地结算 */
+  hostile: boolean;
 
   /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕 */
   private static blankTex = new Set<string>();
@@ -172,8 +185,9 @@ export class TrapShot extends Entity {
     this.form = form;
     if (anchor) { this.ax = anchor[0]; this.ay = anchor[1]; }
     this.w = s.w; this.h = s.h;
-    if (kind === 'spiky') this.life = 1800; // 原版尖刺球 timeLeft 1800
+    if (kind === 'spiky') this.life = 900; // 原版 185 timeLeft 900(1405/1456 SetDefaults 同)
     if (s.life !== undefined) this.life = s.life; // 炮弹族 timeLeft（SetDefaults 默认 3600 / 281=600）
+    this.hostile = !s.friendly;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -219,8 +233,8 @@ export class TrapShot extends Entity {
     this.age++;
     // 首帧发射音（Projectile.AI：162=Projectile.cs:21542-21546 / 281=26830-26833 SoundID.Item14）
     if (this.age === 1 && st.launchSfx) game.playSfx(st.launchSfx, 1, this.x + this.w / 2, this.y + this.h / 2);
-    // 滚转：尖刺球/巨石近似 | 炮弹族按原版
-    if (st.spin === true) this.rot += this.vx * 0.03;
+    // 滚转：尖刺球 aiStyle14 = vx*0.14(1405 :21630)/巨石近似 0.03 | 炮弹族按原版
+    if (st.spin === true) this.rot += this.vx * (st.spinK ?? 0.03);
     else if (st.spin === 'roll') {
       // aiStyle2（Projectile.cs:21528）：rotation += (|vx|+|vy|)*0.03*direction
       this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx < 0 ? -1 : 1);
@@ -228,7 +242,22 @@ export class TrapShot extends Entity {
       // aiStyle49（Projectile.cs:26841）：rotation += vx*0.05 + direction*0.05
       this.rot += this.vx * 0.05 + (this.vx < 0 ? -1 : 1) * 0.05;
     }
-    if (st.gravDelay !== undefined) {
+    if (this.kind === 'spiky') {
+      // aiStyle 14 默认尾部(1405 :21600-21608 / 1456 同):vy==0 贴地时额外 vx*=0.95;
+      // 每帧 vx*=0.98、重力 0.3、终端速度 15.9
+      if (this.vy === 0) this.vx *= 0.95;
+      this.vx *= 0.98;
+      this.vy += 0.3;
+      if (this.vy > 15.9) this.vy = 15.9;
+      // 分轴积分 + type 185 反弹响应(1405 :13302-13307 / 1456 :18289-18297,
+      // 原 TileCollision 把被挡轴速度清零、本段按 lastVelocity 以 0.9 系数弹回):
+      // X 阻挡 → vx=-lastVx*0.9;Y 阻挡且 lastVy>1 → vy=-lastVy*0.9,否则 vy=0 落定不微弹
+      const lvx = this.vx, lvy = this.vy;
+      this.x += this.vx;
+      if (shotCenterSolid(game, this)) { this.x -= this.vx; this.vx = -lvx * 0.9; }
+      this.y += this.vy;
+      if (shotCenterSolid(game, this)) { this.y -= this.vy; this.vy = lvy > 1 ? -lvy * 0.9 : 0; }
+    } else if (st.gravDelay !== undefined) {
       // 炮弹族弧线：前 gravDelay tick 直线，之后 vy+=grav / vx*=xDamp
       // （162/281=Projectile.cs:21546-21550/26844-26849 的 ai[0]>=18；166=:21879-21884 的 >=20）
       if (this.age >= st.gravDelay) {
@@ -239,8 +268,10 @@ export class TrapShot extends Entity {
     } else {
       this.vy += st.grav;
     }
-    this.x += this.vx;
-    this.y += this.vy;
+    if (this.kind !== 'spiky') {
+      this.x += this.vx;
+      this.y += this.vy;
+    }
     // 粒子拖尾(原版火焰陷阱/热喷泉的视觉主体是沿途粒子;每 2 tick 一次防刷屏)
     if (st.trail && (this.life & 1) === 0) {
       game.spawnParticles(
@@ -266,8 +297,8 @@ export class TrapShot extends Entity {
         this.dead = true;
         return;
       }
-      // 尖刺球/巨石:撞块反弹衰减
-      if (this.kind === 'spiky' || this.kind === 'boulder') {
+      // 巨石:撞块反弹衰减(尖刺球已走上方 aiStyle14 分轴反弹链,不在此列)
+      if (this.kind === 'boulder') {
         if (Math.abs(this.vy) > 1) { this.vy *= -0.4; this.vx *= 0.7; this.y -= this.vy; }
         else { this.vy = 0; this.vx *= 0.94; }
       } else if (st.blast) {
@@ -535,6 +566,10 @@ export class Dart extends Entity {
   dead = false;
   /** 原版弹型（0 = 无表项回退色块）；所有射击怪按 NPC.cs 发射点对号入座 */
   projId: number;
+  /** 敌对弹（原版 Projectile.hostile；Dart 类本地玩家命中为无条件，敌我区分由发射点
+   *  显式置位——Enemy.shootDart 咽喉与各直构处=true，玩家武器弹默认 false 不误伤）。
+   *  联机 v5：随 msg27 bit7 下发，访客傀儡据此本地结算 */
+  hostile: boolean;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
@@ -553,6 +588,7 @@ export class Dart extends Entity {
       this.dir = Math.sign(vx) || 1;
       if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
     }
+    this.hostile = false; // 默认非敌对——敌怪发射点（Enemy.shootDart 咽喉 + 直构处）显式置位
   }
 
   draw(r: Renderer, _cam: Camera): void {

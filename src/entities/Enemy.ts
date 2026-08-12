@@ -751,8 +751,10 @@ export class Enemy extends Entity {
    *  projId = 原版弹型（Dart.ts DART_STYLE 表,贴图/旋转/重力/加速 1:1） */
   private shootDart(game: GameHooks, ox: number, oy: number, tx: number, ty: number, speed: number, dmg: number, projId = 0): void {
     const d = Math.hypot(tx, ty) || 1;
+    const dart = new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg, projId);
+    dart.hostile = true; // 敌怪发射弹（原版 Projectile.hostile）——联机 v5 随 msg27 bit7 下发
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
-      .add(new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg, projId), 'projectiles');
+      .add(dart, 'projectiles');
   }
 
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {
@@ -2655,9 +2657,11 @@ export class Enemy extends Entity {
         const spd = this.vanillaId === 122 ? 7 : 5;
         const dmg = this.vanillaId === 122 ? 25 : 45;
         const ang = Math.atan2(dy, dx) + (this.vanillaId === 122 ? (Math.random() - 0.5) * 0.157 : 0);
+        const angDart = new Dart(this.cx, this.cy, Math.cos(ang) * spd, Math.sin(ang) * spd, dmg,
+          this.vanillaId === 122 ? 84 : 128);
+        angDart.hostile = true; // 122 粉激光眼/169 冰元素直构弹——敌怪弹（v5 bit7）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
-          .add(new Dart(this.cx, this.cy, Math.cos(ang) * spd, Math.sin(ang) * spd, dmg,
-            this.vanillaId === 122 ? 84 : 128), 'projectiles');
+          .add(angDart, 'projectiles');
       }
       if (this.ai3 > 0) {
         this.ai3++;
@@ -3279,7 +3283,9 @@ export class Enemy extends Entity {
           const vx = dir * 2 + dir * (Math.floor(Math.random() * 12) - 2) * 0.25;
           let vy = -2 + (10 + Math.floor(Math.random() * 12) - 6) * 0.25;
           if (vy > -3) vy = -3;
-          ents.add(new Dart(this.cx + dir * 6, this.cy, vx, vy, 7, 836), 'projectiles');
+          const seedDart = new Dart(this.cx + dir * 6, this.cy, vx, vy, 7, 836);
+          seedDart.hostile = true; // 628 蒲公英籽直构弹——敌怪弹（v5 bit7）
+          ents.add(seedDart, 'projectiles');
         }
       }
     }
@@ -3520,6 +3526,7 @@ export class Enemy extends Entity {
         }
         const d = Math.hypot(dx, dy) || 1;
         const dart = new Dart(this.cx, this.y, (dx / d) * spd, (dy / d) * spd, dmg, proj);
+        dart.hostile = true; // 史后三法师直构弹——敌怪弹（v5 bit7）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       } else {
         const dx = player.cx - this.cx, dy = player.cy - this.cy;

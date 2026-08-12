@@ -184,8 +184,9 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
 // ============ SpeleothemsAndGemTrees 宝石树（:22196-22282） ============
 export function runGemTreesPass(st: TileStore, rng: RNG, _gs: GenState): void {
   // 全列扫描 j∈[worldSurface, h-20)（:22208-22210）：上方无液体 + 1/5 → 7 选 1 尝试
-  // （tenthAnniversary/drunkWorld 恒尝试——seedFlags 灌入已接；金标种子旗标恒空）
-  const f = _gs.seedFlags;
+  // （tenthAnniversary/drunkWorld 恒尝试——seedFlags 灌入已接；金标种子旗标恒空。
+  // 测试/旧调用方可能不带 seedFlags，判空兜底）
+  const f = _gs.seedFlags ?? {};
   const alwaysTry = !!(f.tenthAnniversary || f.drunkWorld);
   for (let x = 4; x < st.w - 4; x++) {
     for (let y = _gs.worldSurface; y < st.h - 20; y++) {

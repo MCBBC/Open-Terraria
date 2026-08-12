@@ -534,14 +534,26 @@ export class Game implements GameHooks {
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
         if (p.hostile) kind |= 0x80;
       }
-      else if (p instanceof Dart) { kind = 2; tag = String(p.projId ?? 0); }
+      else if (p instanceof Dart) {
+        kind = 2; tag = String(p.projId ?? 0);
+        if (p.hostile) kind |= 0x80; // 射击怪弹（!style.friendly）——review F1：此前整族漏覆盖
+      }
       else if (p.projId !== undefined) { kind = 1; tag = String(p.projId); }
-      else if (p instanceof TrapShot) { kind = 3; tag = p.kind ?? 'dart'; }
+      else if (p instanceof TrapShot) {
+        kind = 3; tag = p.kind ?? 'dart';
+        if (p.hostile) kind |= 0x80; // 机关/陷阱弹（环境危害，原版伤所有玩家）
+      }
       else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
       if (kind < 0) continue; // 未知弹幕类不同步（渲染缺类）
       snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
     }
     this.netProjCursor = (this.netProjCursor + examined) % Math.max(1, n);
+    // review F9：清理已消亡弹幕的差分基准（对照 NPC 侧——否则 Map 随会话无界增长）
+    {
+      const alive = new Set<number>();
+      for (const ent of this.entities.projectiles) alive.add(ent.id);
+      for (const id of this.netProjLast.keys()) if (!alive.has(id)) this.netProjLast.delete(id);
+    }
     net.sendProjectileBatch(snaps);
   }
 
@@ -652,8 +664,8 @@ export class Game implements GameHooks {
     switch (s.kind & 0x7f) {
       case 0: return new Arrow(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1, null, { hostile });
       case 1: return new Boomerang(s.x, s.y, s.vx, s.vy, s.dmg, 0, parseInt(s.tag, 10) || 1); // WeaponProj 族共用 drawProj(projId) 渲染，取代表类重建
-      case 2: return new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0);
-      case 3: return new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind);
+      case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
+      case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
       default: return null;
     }
@@ -728,7 +740,11 @@ export class Game implements GameHooks {
     for (const [, pup] of this.netProjPuppets) {
       const pr = pup.p as Entity & { hostile?: boolean; damage?: number; projId?: number };
       if (!pr.hostile || pr.dead) continue;
-      if (hitPlayer(pr, this, pr.damage ?? 0)) statusPlayer(this, pr.projId ?? 0);
+      // review F3：判定用权威位（netAx/netAy，与 NPC 接触伤害同标准）——插值渲染位
+      // 在快照周期内最多滞后 4 tick，高速弹（32px/t）误差可达 128px
+      if (hitPlayer({ x: pr.netAx, y: pr.netAy, w: pr.w, h: pr.h }, this, pr.damage ?? 0)) {
+        statusPlayer(this, pr.projId ?? 0);
+      }
     }
   }
   /** 远端玩家渲染代理（net.players → drawPlayer 可用形状，net 激活时每帧同步） */
@@ -5761,6 +5777,18 @@ export class Game implements GameHooks {
         }
         return n;
       },
+      spikyBudgetPenalty: (px: number, py: number) => {
+        // Wiring.cs 1456 :1952-1966:每个场上 185 按距离扣预算
+        // (<50→50 <100→15 <200→10 <300→8 <400→6 <500→5 <700→4 <900→3 <1200→2 其余 1)
+        let pen = 0;
+        for (const e of this.entities.projectiles) {
+          if (!(e instanceof TrapShot) || e.kind !== 'spiky' || e.dead) continue;
+          const d = Math.hypot(e.x + e.w / 2 - px, e.y + e.h / 2 - py);
+          pen += d < 50 ? 50 : d < 100 ? 15 : d < 200 ? 10 : d < 300 ? 8
+            : d < 400 ? 6 : d < 500 ? 5 : d < 700 ? 4 : d < 900 ? 3 : d < 1200 ? 2 : 1;
+        }
+        return pen;
+      },
       doorOpen: (x: number, y: number) => {
         // 原版 HitWireSingle 10/11:随机方向 + 反向重试(WorldGen.OpenDoor)
         const dir = Math.random() < 0.5 ? 1 : -1;
@@ -7575,6 +7603,8 @@ export class Game implements GameHooks {
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
+      // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
+      if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
       // 星星斗篷（Player.SpawnStar 近似）：受击召 3 颗落星砸附近敌人
       if (p.equipStats.starCloak) this.spawnStarCloakStars();
       // 蜂蜜斗篷/蜂巢背带（Player.SpawnBees :2147 近似）：受击放 1-3 只蜂（proj 181/183/189）
@@ -7774,7 +7804,7 @@ export class Game implements GameHooks {
     };
   }
 
-  // ================= F11 图片 → 像素方块群(自研,原版无) =================
+  // ================= F2 图片 → 像素方块群(自研,原版无;原键 F11 与系统全屏冲突) =================
   /** 隐藏 file input(复用单例,每次置空 value 支持重复上传同一文件) */
   private pixelArtInput: HTMLInputElement | null = null;
   openPixelArtImport(): void {

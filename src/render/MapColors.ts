@@ -2,7 +2,7 @@
 // 返回 0xRRGGBB（字符串 hex 在热循环里太慢）。
 // 注意：游戏内小地图（Renderer.colorFor/redrawAll LUT）是独立实现，未走本函数——
 // 两份语义需保持一致（活性 tile > 液体 >32 > 墙 > 天空, MapHelper.cs GetWallType）。
-import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
+import { TILE_DEFS, WALL_DEFS , TILE_BY_KEY } from '../data/tiles';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor } from '../data/vanillaMapColors';
 import type { TileStore } from '../world/TileStore';
 
@@ -38,6 +38,12 @@ export function mapColor24(st: TileStore, x: number, y: number): number {
   const i = st.idx(x, y);
   const t = st.flags[i] ? st.type[i] : 0;
   if (t !== 0) {
+    // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y（r<<8|g, b）——按原像素色显示
+    const PIX = TILE_BY_KEY['pixel_block'];
+    if (PIX !== undefined && t === PIX) {
+      const fx = st.frameX[i], fy = st.frameY[i];
+      return ((fx >> 8) << 16) | ((fx & 255) << 8) | fy;
+    }
     // 原版色优先（sheet 直查）；legacy def 回落 mapColor
     const sheet = TILE_DEFS[t]?.vanilla?.sheet;
     if (sheet !== undefined) {

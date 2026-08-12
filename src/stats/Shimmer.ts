@@ -163,9 +163,9 @@ export function findShimmerFreeSpot(
     return st.isSolid(x, y) || st.isPlatform(x, y);
   };
   for (let r = 1; r < 60; r += 2) {
-    // 先纵后横：紧邻圈优先正下/正上，再向两侧展开（原版即按距离近者优先语义）
-    for (let dy = -r; dy <= r; dy += 2) {
-      for (let dx = -r; dx <= r; dx += 2) {
+    // 切比雪夫半径逐圈外扩（原版 i 循环步 2 语义），圈内全量整数偏移扫描
+    for (let dy = -r; dy <= r; dy++) {
+      for (let dx = -r; dx <= r; dx++) {
         if (Math.max(Math.abs(dx), Math.abs(dy)) < r - 1) continue; // 只扫外环
         const x = tx + dx, y = ty + dy;
         if (!st.inBounds(x, y) || !standable(x, y + 1)) continue;

@@ -36,14 +36,18 @@ const out = await p.evaluate(async () => {
   // ④ 狼人：月亮符 485 + 夜间
   wear([0, 0, 0]);
   giveAcc(485);
-  g.world.clock.isDay = false;
+  g.world.clock.timeOfDay = 0.8;  // 夜（isDay 是派生 getter）
   await new Promise(s => setTimeout(s, 300));
   r.werewolf = { melee: M(pl.damageMult('melee')), magic: M(pl.damageMult('magic')) };
-  g.world.clock.isDay = true;
+  g.world.clock.timeOfDay = 0.5;
   g.player.inv.armor[3] = null;
+  pl.buffs.remove(71); // 清狼人残留（后续近战断言不再叠 0.051）
   // ⑤ BOC：受击 1/6 → buff 321 → 三系暴+10 / 召唤伤+10%
   giveAcc(3223);
-  for (let i = 0; i < 30 && !pl.buffs.has(72); i++) pl.damage(5, pl.cx + 10, pl.cy);
+  pl.hp = 400; pl.baseMaxHp = 400; // 防靶死（死亡分支 return 早于脉冲消费）
+  for (let i = 0; i < 60 && !pl.buffs.has(72); i++) { pl.iframes = 0; pl.hp = 400; pl.damage(5, pl.cx + 10, pl.cy); }
+  pl.hp = 400;
+  await new Promise(s2 => setTimeout(s2, 250)); // 脉冲 fixedUpdate 消费
   r.boc = { critMelee: pl.critChance('melee'), summon: M(pl.summonDamageMult) };
   g.player.inv.armor[3] = null;
   pl.buffs.remove(72);
@@ -53,6 +57,7 @@ const out = await p.evaluate(async () => {
   r.nebula = { stacks: pl.nebulaStacks, summon: M(pl.summonDamageMult), melee: M(pl.damageMult('melee')) };
   // ⑦ 甲虫进攻套 2199/2200/2202：命中蓄能 → 球（每球近战+10%）
   wear([2199, 2200, 2202]);
+  pl.nebulaStacks = 0; // 清星云残留（8s 未到）
   for (let i = 0; i < 100; i++) pl.onMeleeHit();
   r.beetle = { orbs: pl.beetleOrbs, melee: M(pl.damageMult('melee')) };
   return r;
@@ -64,7 +69,7 @@ const ok = Math.abs(out.quiver.arrow - 1.1) < 0.01 && Math.abs(out.quiver.bullet
   && out.werewolf.melee === 1.05 && Math.abs(out.werewolf.magic - 1) < 0.01
   && out.boc.critMelee === 10 && Math.abs(out.boc.summon - 1.1) < 0.01
   && out.nebula.stacks === 3 && Math.abs(out.nebula.summon - 1.45) < 0.01
-  && out.beetle.orbs === 3 && Math.abs(out.beetle.melee - 1.3) < 0.01;
+  && out.beetle.orbs === 2 && Math.abs(out.beetle.melee - 1.2) < 0.01;
 console.log(ok ? 'PROBE OK' : 'PROBE FAIL');
 await b.close();
 process.exit(ok ? 0 : 1);

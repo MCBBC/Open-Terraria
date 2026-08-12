@@ -2,7 +2,7 @@
 // 帧格式对齐原版：[u16 len][u8 msgId][payload...]，小端，包上限 65535B。
 // 消息 ID 尽量沿用原版 MessageID 编号（Hello=1/SLOT=3/WorldData=7/TileSection=10/
 // PlayerSpawn=12/PlayerControls=13/TileManipulation=17/SetTime=18/NetModules=82/Ping=154）；
-// 编码字段为本仓库简化集（protoVer 门禁，当前 v4——见 PROTO_VER 注释）。
+// 编码字段为本仓库简化集（protoVer 门禁，当前 v5——见 PROTO_VER 注释）。
 
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
@@ -48,9 +48,9 @@ export const enum Msg {
                        //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
-                       //   （kind 低 3 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；
-                       //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起仅 kind0 携带，
-                       //    访客端对 hostile 傀儡本地结算 Damage_EVP；注释曾误写 rot）
+                       //   （kind 低 7 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；
+                       //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
+                       //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP）
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}

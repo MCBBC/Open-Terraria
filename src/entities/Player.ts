@@ -375,7 +375,7 @@ export class Player extends Entity {
     }
     return {
       def, mana, hpPerSec: life / 2, // lifeRegen 单位 = 每半秒（NaturalLifeRegen 语义）
-      dmgMelee, dmgRanged: dmgRanged + arrowDmg, dmgMagic,
+      dmgMelee, dmgRanged, dmgMagic,   // 箭袋 arrowDmg 移入 arrowStack（仅箭吃，:3820）
       critMelee, critRanged, critMagic,
       moveMult, meleeSpeed,
       extraFall, lavaMax, armorPen, rocketBoots,
@@ -427,6 +427,7 @@ export class Player extends Entity {
     return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
       * (this.buffs.has(BuffType.Werewolf) ? 1.051 : 1)      // 狼人 meleeSpeed += 5.1%（:11489）
+      * (this.buffs.has(BuffType.Weak) ? 0.949 : 1)          // 虚弱 meleeSpeed -= 5.1%（:11507）
       * (1 + 0.1 * this.beetleOrbs)                           // 甲虫攻击球攻速（:10071+）
 
       * (1 + this.buffs.wellFedMeleeSpeed);   // 食物近战速 +5/7.5/10%（:11528+）
@@ -460,6 +461,7 @@ export class Player extends Entity {
     if (kind === 'melee') {
       if (this.buffs.has(BuffType.Tipsy)) m += 0.1;
       if (this.buffs.has(BuffType.Werewolf)) m += 0.051;      // 狼人（:11488）
+      if (this.buffs.has(BuffType.Weak)) m -= 0.051;         // 虚弱（:11506）
       m += 0.1 * this.beetleOrbs;                              // 甲虫攻击球每颗 +10%（:10071+）
     }
     m += this.buffs.wellFedDamage;   // 食物三档全系 +5/7.5/10%（:11527+）
@@ -507,7 +509,7 @@ export class Player extends Entity {
     if (kind === 'melee' && this.buffs.has(BuffType.Werewolf)) c += 2; // 狼人（:11493）
     if (kind === 'ranged') {
       if (this.equipStats.shroomiteType) c += 5; // 蘑菇矿头 rangedCrit+5（:13274+）
-      c += Math.round((1 - this.stealth) * (this.equipStats.vortexSet ? 20 : 10)); // 潜行暴击（:25506/:25544）
+      if (st.shroomiteSet || st.vortexSet) c += Math.round((1 - this.stealth) * (st.vortexSet ? 20 : 10)); // 潜行暴击
     }
     c += this.buffs.wellFedCrit;    // 食物三档全系暴击 +2/3/4（:11525+）
     return c;

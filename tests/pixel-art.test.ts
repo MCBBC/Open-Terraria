@@ -1,4 +1,4 @@
-// F11 像素方块群导入回归:放置扫描 / 透明跳过 / RGB 编码往返 / 存档序列化往返
+// F2 像素方块群导入回归（原 F11 改键）:放置扫描 / 透明跳过 / RGB 编码往返 / 存档序列化往返
 import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY } from '../src/data/tiles';
@@ -82,5 +82,20 @@ describe('像素方块群导入', () => {
     expect(TILE_INTERNAL_OF_STABLE[1028]).toBe(PIX);
     // RGB 走 frameX/frameY(Uint16 持久化路径,与 v_ 家具同字段)——类型+帧的
     // rleTiles 序列化已由既有 save 测试覆盖,此处只锁注册契约
+  });
+});
+
+describe('像素方块地图缩略色（F2 导入）', () => {
+  it('小地图 mapColor24 按帧 RGB 解码（非泥土色）', async () => {
+    const { mapColor24 } = await import('../src/render/MapColors');
+    const { World } = await import('../src/world/World');
+    const w = new World(30, 30, 42, 'open');
+    const st = w.store;
+    const PIX = TILE_BY_KEY['pixel_block']!;
+    st.setTileSilent(10, 20, PIX, (200 << 8) | 100, 50); // r200 g100 b50
+    const c = mapColor24(st, 10, 20);
+    expect((c >> 16) & 255).toBe(200);
+    expect((c >> 8) & 255).toBe(100);
+    expect(c & 255).toBe(50);
   });
 });

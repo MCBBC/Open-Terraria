@@ -48,7 +48,7 @@ import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
 import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
-import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
+import { TILE_DEFS, WALL_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import type { FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
@@ -92,6 +92,8 @@ import { Critter } from '../entities/Critter';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
+
+const PIXEL_ART_TILE = TILE_BY_KEY['pixel_block'] ?? -1; // 自研像素方块（F2 图片导入，RGB 在 frameX/Y）
 
 // 光照合成 4-tap 标量缓冲(替代每像素 [r,g,b] 元组,2026-08 审计 G2)
 const _lightTap = new Uint8Array(12);
@@ -480,7 +482,7 @@ export class Minimap {
     const lut = this._mapLUT;
     const img = ctx.createImageData(world.w, world.h);
     const buf = new Uint32Array(img.data.buffer);
-    const { type, wall, liquid, liquidType } = st;
+    const { type, wall, liquid, liquidType, frameX, frameY } = st;
     const surf = Math.max(1, world.groundLevel), rock = Math.max(surf + 1, world.rockLevel);
     for (let y = 0; y < world.h; y++) {
       // 背景（无 tile/液体/墙）：天空渐变（y<世界面，CalcSkyGradient lerp）/ 土层底 / 石层底
@@ -490,7 +492,16 @@ export class Minimap {
       for (let x = 0; x < world.w; x++) {
         const i = y * world.w + x;
         const t = type[i];
-        if (t !== 0) { buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue; }
+        if (t !== 0) {
+          // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y（r<<8|g, b，0→1 兜底）——
+          // 小地图按原像素色显示，此前走 sheet:0 泥土色恒为 #976B4B
+          if (t === PIXEL_ART_TILE) {
+            const r = frameX[i] >> 8, g = frameX[i] & 255, b = frameY[i];
+            buf[i] = 0xff000000 | ((b & 255) << 16) | ((g & 255) << 8) | (r & 255);
+            continue;
+          }
+          buf[i] = lut.tiles[t] ?? lut.tiles[0]; continue;
+        }
         if (liquid[i] > 32) {
           const lt = liquidType[i];
           buf[i] = lut.liq[lt >= 1 && lt <= 4 ? lt : 1];
@@ -1452,6 +1463,9 @@ export class Renderer {
       // 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）：翅膀/双臂/
       // 二阶段覆层独占——通用路径只画本体，缺背后大翼与攻击态手臂帧
       if (e.vanillaId === 636) { this.drawEmpress(e); return; }
+      // 402 星尘织带蠕虫（Main.cs:23848-23889 case 402 独占）：单 NPC 自绘
+      // oldPos 拖尾（403/404 节段 + Glow_133/134 加色）+ 头本体与 Glow_135
+      if (e.vanillaId === 402) { this.drawStardustWorm(e); return; }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
@@ -1906,6 +1920,75 @@ export class Renderer {
    *  - 携带史莱姆（slave ai0=-999）时：帧 0 以 slave 的 alpha+color 两遍绘制
    *    （气球壳染成史莱姆色），scale 取 slave.scale；之后叠 ai[2] 变体帧
    *  - 锚点 = npc.Top + origin(0.5,0)（顶部居中）,随 rotation(visAngle) 倾斜 */
+  /** 402 星尘织带蠕虫（Main.cs:23848-23889 case 402 独占自绘，1:1）：
+   *  单 NPC 无段链——视觉节段 = oldPos 间隔 2 取样，每档两份（第二份向更旧帧
+   *  lerp 0.5 补位），贴图 404/403 交替 + Glow_134/133 加色罩（A=0 白的 additive
+   *  语义用 lighter 还原）。本体 alpha = Opacity×(0.8−0.14·i/2)、glow = 1−0.14·i/2，
+   *  全乘生命末段渐隐 num291（ai[2] 0→600 计时，最后 5% 线性淡出 :23858-23861）。
+   *  头 = NPC_402 + Glow_135×num291。锚点 = 碰撞盒中心（origin halfSize），旋转
+   *  随 visAngle/oldRot。【未接登记】DrawPrettyStarSparkle（:23888 头部星尘闪光，
+   *  独立 sparkle 绘制原语）未移植。 */
+  private drawStardustWorm(e: Enemy) {
+    const ctx = this.ctx;
+    if (!this.atlas) return;
+    const head = this.atlas.ensureVImage('vanilla/NPC_402.png');
+    const segA = this.atlas.ensureVImage('vanilla/NPC_403.png');
+    const segB = this.atlas.ensureVImage('vanilla/NPC_404.png');
+    const glowA = this.atlas.ensureVImage('vanilla/Glow_133.png');
+    const glowB = this.atlas.ensureVImage('vanilla/Glow_134.png');
+    const glowH = this.atlas.ensureVImage('vanilla/Glow_135.png');
+    if (!head || !segA || !segB) return;
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    // Utils.Remap（:23860-23861 渐隐曲线）
+    const remap = (x: number, a: number, b: number, c: number, d: number): number =>
+      x <= a ? c : x >= b ? d : c + ((d - c) * (x - a)) / (b - a);
+    const LIFE = 600, LIFE_LAST = 570;                    // num288/num289（:23858-23859）
+    const n290 = remap(e.ai2, 0, LIFE, 0, 1);
+    const n291 = 1 - remap(n290, 0.5, LIFE_LAST / LIFE, 0, 1) * remap(n290, LIFE_LAST / LIFE, 1, 1, 0);
+    const fade = Math.max(0, Math.min(1, n291));          // ai2 恒 0（计时未接）时 = 1
+    const num287 = (2 / 10) * 0.7;                        // 2/oldPos.Length×0.7（:23857）
+    const drawSeg = (
+      img: HTMLImageElement, glow: HTMLImageElement | null,
+      px: number, py: number, rot: number, aBody: number, aGlow: number,
+    ) => {
+      ctx.save();
+      ctx.translate(px, py);
+      ctx.rotate(rot);
+      ctx.scale(scale, scale);
+      ctx.globalAlpha = Math.max(0, Math.min(1, aBody * opacity));
+      ctx.drawImage(img, -img.width / 2, -img.height / 2);
+      if (glow) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = Math.max(0, Math.min(1, aGlow));
+        ctx.drawImage(glow, -glow.width / 2, -glow.height / 2);
+        ctx.globalCompositeOperation = 'source-over';
+      }
+      ctx.restore();
+    };
+    // 节段拖尾（:23862-23883）：oldPos 9→1 间隔 2；每档两份（第二份向 oldPos[i-1] lerp .5）
+    const depth = e.historyDepth();
+    let seg = 0;
+    for (let i = Math.min(9, depth - 1); i >= 1; i -= 2) {
+      for (let k = 0; k < 2; k++) {
+        const tex = seg % 2 === 0 ? segB : segA;          // num286==0 → 404，交替
+        const glow = seg % 2 === 0 ? glowB : glowA;
+        let px = e.histXAt(i) + e.w / 2, py = e.histYAt(i) + e.h / 2;
+        let rot = e.histRotAt(i);
+        if (k === 1) {
+          px += (e.histXAt(i - 1) - e.histXAt(i)) * 0.5;
+          py += (e.histYAt(i - 1) - e.histYAt(i)) * 0.5;
+          rot = e.histRotAt(i - 1) * 0.5 + e.histRotAt(i) * 0.5;
+        }
+        drawSeg(tex, glow, px, py, rot,
+          (0.8 - (num287 * i) / 2) * fade, (1 - (num287 * i) / 2) * fade);
+        seg++;
+      }
+    }
+    // 头本体 + Glow_135×num291（:23884-23887）
+    drawSeg(head, glowH, e.cx, e.cy, e.visAngle, 1, fade);
+  }
+
   private drawWindyBalloon(e: Enemy, entities: unknown[]) {
     const ctx = this.ctx;
     const img = this.atlas!.ensureVImage('vanilla/NPC_594.png');
