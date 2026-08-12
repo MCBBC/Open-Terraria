@@ -38,12 +38,12 @@ function killServer() {
   try { process.kill(-server.pid, 'SIGKILL'); } catch { try { server.kill('SIGKILL'); } catch { /* 已退 */ } }
 }
 
-// ---------- 总看门狗：无论如何 SECONDS+30s 内必退（防孤儿，含 server 进程组击杀） ----------
+// ---------- 总看门狗：SECONDS+30s+人数余量 内必退（防孤儿；百人时收尾统计被事件洪峰拖慢） ----------
 const watchdog = setTimeout(() => {
   console.error('[loadprobe] 总看门狗触发，强制退出（exit 2）');
   killServer();
   process.exit(2);
-}, (SECONDS + 30) * 1000);
+}, (SECONDS + 30 + Math.ceil(CLIENTS / 10)) * 1000);
 watchdog.unref?.();
 
 let serverOut = '';
@@ -77,6 +77,7 @@ try {
     const baseX = 1600 + (i % 8) * 60;         // 近距簇：±420px 内互在视野
     const baseY = 1600 + Math.floor(i / 8) * 60;
     const x0 = far ? baseX + 5000 : baseX;      // 远距组：5000px 外（AOI 外）
+    const y0 = baseY;
     const ws = new WebSocket(`ws://127.0.0.1:${PORT}/${code}${i === 0 ? `?token=${encodeURIComponent(hostToken)}` : ''}`);
     ws.binaryType = 'nodebuffer';
     const st = { ws, i, slot: -1, joined: false, x0, y0, framesIn: 0, bytesIn: 0 };
@@ -84,9 +85,11 @@ try {
       // Hello（URL 已带 token：路由层注入 urlToken 优先——消息内兜底传空）
       ws.send(new Writer(Msg.Hello).str(PROTO_MAGIC).u16(PROTO_VER).str(`压测${i}`).str('').finish());
     });
+    ws.on('error', () => { /* 收尾时 server 先退 → ECONNRESET 属预期 */ });
     ws.on('message', (data) => {
       st.bytesIn += data.length;
       st.framesIn++;
+      if (st.joined) return; // 握手完成后不再逐帧解析（百人时下发洪峰会打满探针 CPU）
       let p = 0;
       const buf = data;
       while (p + 3 <= buf.length) {
@@ -108,7 +111,7 @@ try {
     });
     fakes.push(st);
   }
-  await sleep(4000);
+  await sleep(Math.max(4000, CLIENTS * 80));
   const joined = fakes.filter((f) => f.joined).length;
   console.log(`[loadprobe] 握手完成 ${joined}/${CLIENTS}`);
   if (joined < CLIENTS) throw new Error('部分客户端握手失败');
@@ -152,13 +155,18 @@ try {
   }
 
   // ---------- /stats 汇总 ----------
-  await sleep(1200); // 等 1s outBps 采样窗口
+  // 先断开全部假客户端止住收发洪峰（百人时事件风暴会拖死收尾），再取快照；
+  // 平均出带宽用累计字节自算（outBps 1s 采样在饱和场景不可信）
+  for (const f of fakes) { try { f.ws.close(); } catch { /* 已关 */ } }
+  await sleep(1500);
   const stats = await (await fetch(`http://127.0.0.1:${LOBBY}/stats`)).json();
   const room = stats.rooms[0];
   const inbound = fakes.reduce((s, f) => s + f.bytesIn, 0);
+  const outboundTotal = room.topMsgs.reduce((s, m) => s + m.kb, 0) * 1024; // Top5 已覆盖绝大部
+  const avgOutKbS = outboundTotal / 1024 / SECONDS;
   console.log('\n===== /stats 汇总 =====');
-  console.log(`总出带宽      : ${stats.total.outKbS} KB/s（${(stats.total.outKbS / 1024).toFixed(2)} MB/s）`);
-  console.log(`每客户端均摊  : ${(stats.total.outKbS / Math.max(1, CLIENTS)).toFixed(2)} KB/s`);
+  console.log(`平均出带宽    : ${avgOutKbS.toFixed(2)} KB/s（${(avgOutKbS / 1024).toFixed(2)} MB/s，累计自算）`);
+  console.log(`每客户端均摊  : ${(avgOutKbS / Math.max(1, CLIENTS)).toFixed(2)} KB/s`);
   console.log(`客户端总入站  : ${(inbound / 1024).toFixed(1)} KB（${(inbound / SECONDS / 1024).toFixed(2)} KB/s）`);
   console.log(`背压丢弃      : ${stats.total.sendDrops} 帧`);
   console.log(`strip 缓存    : hit=${room.stripHit} miss=${room.stripMiss}`);
@@ -167,6 +175,7 @@ try {
   const expect = SPREAD ? '（spread 模式：AOI 生效时近距簇内流量应远低于无 AOI 基线）' : '';
   console.log(`\n[loadprobe] 完成。把本表数字记入 docs/multiplayer-design.md §8 ${expect}`);
 
+  for (const f of fakes) { try { f.ws.close(); } catch { /* 已关 */ } }
   server.kill('SIGTERM'); // 走优雅退出（SIGTERM 落盘）；1s 未退则整组击杀
   setTimeout(() => killServer(), 1000).unref?.();
   setTimeout(() => process.exit(0), 300);

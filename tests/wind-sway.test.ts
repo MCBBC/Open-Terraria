@@ -253,12 +253,16 @@ describe('落叶（GetTreeLeaf / EmitTreeLeaves 频率）', () => {
     expect(getTreeLeaf(0, 22, 198, 5, 116)).toBe(919);
     expect(getTreeLeaf(0, 22, 198, 5, 147)).toBe(913);
   });
-  it('通用草错帧：x%6 → 1113-1121（帧组映射）', () => {
+  it('未知草型不出叶（原版 switch 无 default → passStyle=-1）', () => {
+    expect(getTreeLeaf(0, 22, 198, 5, 0)).toBe(-1);
+    expect(getTreeLeaf(0, 22, 198, 5, 999)).toBe(-1);
+  });
+  it('109/492 中空树：x%3 错帧 → 917-925（style!=20 支）', () => {
     const ids = new Set<number>();
-    for (let x = 0; x < 24; x++) ids.add(getTreeLeaf(x, 22, 198, 5, 0));
+    for (let x = 0; x < 24; x++) ids.add(getTreeLeaf(x, 22, 198, 5, 109));
     for (const id of ids) {
-      expect(id).toBeGreaterThanOrEqual(1113);
-      expect(id).toBeLessThanOrEqual(1121);
+      expect(id).toBeGreaterThanOrEqual(917);
+      expect(id).toBeLessThanOrEqual(925);
     }
     expect(ids.size).toBeGreaterThan(1); // 错帧产生了不同叶型
   });

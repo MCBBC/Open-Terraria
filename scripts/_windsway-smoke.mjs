@@ -186,19 +186,33 @@ const out = await page.evaluate(async () => {
   } catch (e) { res.gateErr = String(e); }
 
   // 6.5 落叶：高风下树冠区数秒内喷出落叶（EmitTreeLeaves 频率门 + 粒子上限）
-  const np = (await import('/src/render/NatureParticles.ts')).natureParticles;
+  const np = window.__swNatureParticles ?? (await import('/src/render/NatureParticles.ts')).natureParticles; // app 实例优先（HMR 双实例防误读）
   g.world.weather.windSpeedCurrent = 0.8; g.world.weather.windSpeedTarget = 0.8;
   p.x = (treeX - 6) * 16; p.y = (groundY - 2) * 16; p.vx = 0; p.vy = 0;
   if (treeX >= 0) {
     await new Promise(r => setTimeout(r, 400));
     np.clear();
     let peak = 0;
+    const gores = new Set();
     for (let i = 0; i < 30; i++) {
       peak = Math.max(peak, np.leaves.length);
+      for (const l of np.leaves) gores.add(l.gore);
       await new Promise(r => setTimeout(r, 100));
     }
     res.leafPeak = peak;
     res.leavesOk = peak > 0;
+    res.leafGores = [...gores].sort((a, b) => a - b);
+    // 合法叶色族：普通草 910-925（910 绿/911 雪/915 沙…）+ 装饰/宝石树 1248-1257
+    //（樱花粉/黄柳黄/宝石彩）；1113-1121=中空树彩叶——普通树出这些即 bug 信号
+    res.leafColorOk = res.leafGores.every((g) => (g >= 910 && g <= 925) || (g >= 1248 && g <= 1257));
+
+    // 暂停门（_isActiveAndNotPaused）：paused 时不再喷新叶（已有叶冻结）
+    np.clear();
+    g.paused = true;
+    await new Promise(r => setTimeout(r, 1200));
+    res.pausedLeafCount = np.leaves.length;
+    res.pauseGateOk = np.leaves.length === 0;
+    g.paused = false;
   }
 
   // 7. 性能：草密集区逐帧动态绘制的帧间隔（p95 应 < 20ms）
@@ -217,6 +231,38 @@ const out = await page.evaluate(async () => {
   return res;
 });
 
+// 落叶链路调试（叶色修复验证）：树标记 fx/fy、树底地面 tile、gore 选择
+try {
+  const dbg = await page.evaluate(async () => {
+    const { TILE_DEFS } = await import('/src/data/tiles.ts');
+    const vt = await import('/src/render/VanillaTiler.ts');
+    const npMod = await import('/src/render/NatureParticles.ts');
+    const ws = await import('/src/render/WindSway.ts');
+    const g = window.__swGame, st = g.world.store;
+    const markers = [];
+    const px = g.player.cx / 16, py = g.player.cy / 16;
+    for (let dy = -40; dy <= 4; dy++) for (let dx = -120; dx <= 120; dx++) {
+      const x = Math.floor(px) + dx, y = Math.floor(py) + dy;
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      const d = TILE_DEFS[st.type[i]];
+      if (d?.vanilla?.sheet === 5 && st.frameY[i] >= 198) markers.push({ x, y, fx: st.frameX[i], fy: st.frameY[i] });
+    }
+    if (!markers.length) return { markers: [] };
+    const m = markers[0];
+    const scan = vt.scanTreeType(st, m.x, m.y);
+    const baseIdx = st.idx(m.x, scan.floorY);
+    const baseTile = TILE_DEFS[st.type[baseIdx]];
+    return {
+      marker: m, markers: markers.length,
+      scan,
+      baseTile: { key: baseTile?.key, sheet: baseTile?.vanilla?.sheet },
+      gore: npMod.getTreeLeaf(m.x, m.fx, m.fy, 5, baseTile?.vanilla?.sheet ?? -1),
+      emits: true, active: ws.windSway.active, leafFreq: ws.windSway.leafFreq, paused: g.paused,
+    };
+  });
+  console.log('LEAF-DBG', JSON.stringify(dbg));
+} catch (e) { console.log('LEAF-DBG-ERR', String(e)); }
 console.log(JSON.stringify(out, null, 1));
 console.log('ERRORS', JSON.stringify(errs));
 await browser.close();

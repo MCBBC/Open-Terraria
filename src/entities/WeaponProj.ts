@@ -497,3 +497,48 @@ export class GlowstickProj extends Entity {
     this.x = nx; this.y = ny;
   }
 }
+
+// ================= Torch God 火把弹幕（proj 949，AI_184 cs:40100） =================
+
+/** 直线飞行火把：射程(rangePx)耗尽前穿墙，之后撞块即毁；命中玩家 20 伤。
+ *  ai0=尘色/ai1=射程——尘迹省略（粒子钩子未接），伤害/碰撞 1:1 */
+export class TorchGodProj extends Entity {
+  w = 4; h = 4;
+  vx: number; vy: number;
+  damage = 20;
+  projId = 949;
+  dead = false;
+  private rangeLeft: number;
+  private tileCollide = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, rangePx: number) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.rangeLeft = rangePx;
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, 949, Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060');
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const st = game.world.store;
+    // ai[1] -= velocity.Length()（:40112-40119）：射程内 tileCollide=false
+    this.rangeLeft -= Math.hypot(this.vx, this.vy);
+    if (this.rangeLeft <= 0) this.tileCollide = true;
+    const nx = this.x + this.vx, ny = this.y + this.vy;
+    if (this.tileCollide) {
+      const tx = Math.floor((nx + this.w / 2) / TILE), ty = Math.floor((ny + this.h / 2) / TILE);
+      if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.dead = true; return; }
+    }
+    // 命中玩家（无敌帧由 Player.damage 侧处理）
+    const p = game.player;
+    if (nx < p.x + p.w && nx + this.w > p.x && ny < p.y + p.h && ny + this.h > p.y) {
+      p.damage(this.damage, Math.sign(p.cx - (nx + this.w / 2)) || 1, 0, game as never);
+      this.dead = true;
+      return;
+    }
+    this.x = nx; this.y = ny;
+  }
+}

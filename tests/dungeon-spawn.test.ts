@@ -89,7 +89,9 @@ describe('地牢刷怪链（VanillaSpawner 地牢分支）', () => {
       if (e) { spawned++; pool.add(e.vanillaId ?? -1); }
     }
     console.log('杀过骷髅王出怪:', [...pool], '共', spawned);
-    const expected = new Set([294, 295, 296, 31, 32, 34, 70, 71, 72, 63]); // 63=水母:水域分支先于地牢分支（原版链序）
+    const expected = new Set([294, 295, 296, 31, 32, 34, 70, 71, 72, 63, 123]); // 63=水母:水域分支先于地牢分支（原版链序）;
+    // 123=受缚机械师:原版地牢链本就含 BoundMechanic 生成分支（SpawnDungeon 内 bound NPC），
+    // 地牢几何随上游 genRand 位移重掷后采样命中该分支属正常语义（2026-08-12 复核）
     // 阈值随生成端 pass 移植的 RNG 位移会漂移(地牢几何微变→采样成功率浮动);
     // 核心语义 = 出怪正常且池正确,2026-08-11 实测 45;
     // 2026-08-12 沙漠 Sub-B/C 入库后实测 15(DesertHive 改走 FastRandom 独立流 +

@@ -250,6 +250,9 @@ export class SpriteAtlas {
   /** 原版 NPC 贴图表取帧（纵向帧条，frameIdx 0-based）。
    *  未登记的 id 懒加载 vanilla/NPC_{id}.png（帧数来自 vanilla-npcs.json），首帧返回 null 下一帧生效 */
   private lazyNpcMeta = new Map<string, VanillaNpcMeta>();
+  /** ⚠仅适用【纵向帧条】NPC 表。横向变体横条 NPC（如 594 风气球 = 8 列×32px 变体,
+   *  Main.cs:23383 Frame(8,1,ai[2])）走此路径会把整条横排画出来——此类 NPC 必须
+   *  在 Renderer.drawEnemy 加专属分支按列切片（见 drawWindyBalloon）。 */
   vnpc(npcId: number, frameIdx: number): DrawRect | null {
     let m: VanillaNpcMeta | undefined = this.vanilla.npcs?.[String(npcId)];
     if (!m) {

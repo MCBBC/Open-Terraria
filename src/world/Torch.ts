@@ -73,3 +73,28 @@ export function torchStillAnchored(st: TileStore, tx: number, ty: number, frameX
     default: return st.isSolid(tx, ty + 1) || st.wall[st.idx(tx, ty)] !== 0;
   }
 }
+
+// ---- 水炬（TileObjectData :4604-4616 addSubTile 8/11/17）：水中不死、可水中放置 ----
+/** 水炬 torchId 集（普通火把 WaterDeath=true；水炬三色 false + WaterPlacement Allowed） */
+export const WATER_TORCH_STYLES = new Set([8, 11, 17]);
+
+/** 该火把 tile（frameY）是否水炬样式——液体冲毁豁免/水中放置门 */
+export function isWaterTorchStyle(frameY: number): boolean {
+  return WATER_TORCH_STYLES.has(Math.floor(frameY / 22));
+}
+
+/** 物品 key → 放置火把样式 torchId（Item.cs SetDefaults placeStyle + 生物群系火把显式表）。
+ *  彩色火把 427-433 = id-426（1-7）；群系火把 BIOME 表；水炬 = 8（咒火 523）/11（灵液 1333）
+ *  /17（珊瑚 4384）；legacy 'torch' 与其余 → 0 */
+const BIOME_TORCH_ITEM: Record<number, number> = {
+  523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
+  4383: 16, 4384: 17, 4385: 18, 4386: 19, 4387: 20, 4388: 21, 5293: 22, 5353: 23,
+};
+export function torchStyleOfItemKey(key: string): number {
+  if (key === 'torch') return 0;
+  const m = /^vi_(\d+)_/.exec(key);
+  if (!m) return 0;
+  const id = Number(m[1]);
+  if (id >= 427 && id <= 433) return id - 426;
+  return BIOME_TORCH_ITEM[id] ?? 0;
+}

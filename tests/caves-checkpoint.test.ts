@@ -75,8 +75,10 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runRocksAndClayPass(st, rng, gs); out.set('rocksclay', hashGrids(st));
   runSmallHolesPass(st, rng, gs); out.set('smallholes', hashGrids(st));
   runCavesPass(st, rng, gs); out.set('surfacecaves', hashGrids(st));
-  runMountainCavesPass(st, rng, gs); out.set('mcopenings', hashGrids(st));
-  runBeachesPass(st, rng, gs); out.set('beaches', hashGrids(st));
+  // 1456 注册序（执行序=注册序，WorldGenerator.cs:447）：
+  //   14 SurfaceCaves → 16 IceBiome → 17 Grass → Jungle(12497) → 18 MudCaves →
+  //   19 Desert → … → 32 Dungeon → 33 MCOpenings → 34 Beaches → 35 Gems。
+  //   mcopenings/beaches 原紧跟 surfacecaves（注册序修正移到 Dungeon 后）。
   runIceBiomePass(st, rng, gs); out.set('icebiome', hashGrids(st));
   runGrassPass(st, rng, gs); out.set('grass', hashGrids(st));
   runJunglePass(st, rng, gs); out.set('jungle', hashGrids(st));
@@ -88,6 +90,10 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runDesertEntrancesAndHive(st, rng, gs, desc, () => snap('desertentrance'));
   snap('deserthive');        // AddTileVariance 完
   snap('desertdone');        // CleanupArea 仅帧号——状态同 deserthive
+  // 26-32 段（Mushroom/Marble/Granite/Islands/DirtToMud/Silt/Ores/Underworld/
+  // Corruption/Lakes/Slush/Dungeon）oracle 尚未转录 → mcopenings/beaches 暂挂其后
+  runMountainCavesPass(st, rng, gs); snap('mcopenings');
+  runBeachesPass(st, rng, gs); snap('beaches');
   return { grids: out, walls: outWall };
 }
 
@@ -112,8 +118,8 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
       const ours = res.grids;
       const names = ['terrain', 'dunes', 'oceansand', 'sandpatches', 'tunnels',
         'mountaincaves', 'dirtwallbg', 'rocksclay', 'smallholes', 'surfacecaves',
-        'mcopenings', 'beaches', 'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
-        'desertentrance', 'deserthive', 'desertdone'];
+        'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
+        'desertentrance', 'deserthive', 'desertdone', 'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

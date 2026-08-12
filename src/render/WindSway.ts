@@ -82,11 +82,18 @@ const SWAY_REC = new Map<number, SwayRec>();
   }
 }
 
+/** 滴水锚点 tile（路由 :694-698 `continue`——原版【永不绘制】，只作 EmitLiquidDrops 源） */
+export const NO_DRAW_SHEETS = new Set([373, 374, 375, 461, 709]);
+
 /** ChunkCache 烘焙摘除判定：摆动图块不走静态烘焙。
  *  例外（原版路由语义）：530 的 fx≥270 段、705 的 fx%486≥270 段、227 排除帧 → 普通路径烘焙。 */
 export function swayBakeSkip(type: number, frameX: number): boolean {
   const r = SWAY_REC.get(type);
-  if (!r) return false;
+  if (!r) {
+    // 滴水锚点（373/374/375/461/709）：原版主循环 continue 永不绘制——烘焙同样跳过
+    const v = TILE_DEFS[type]?.vanilla;
+    return !!v && NO_DRAW_SHEETS.has(v.sheet);
+  }
   if (r.sheet === 530 && frameX >= 270) return false;
   if (r.sheet === 705 && frameX % 486 >= 270) return false;
   if (r.sheet === 227 && SWAY_227_EXCLUDE_FX.has(frameX)) return false;
@@ -174,6 +181,9 @@ export const windSway = {
   wind: 0,
   /** _leafFrequency（EmitTreeLeaves 频率门；测试窥探） */
   get leafFreq(): number { return leafFrequency; },
+  /** _isActiveAndNotPaused（FocusHelper.AllowTileDrawingToEmitEffects）——
+   *  Game 每帧写：暂停时落叶不再喷出（已落粒子物理由 fixedUpdate 的 !paused 门冻结） */
+  active: true,
 
   /** 每固定 tick 推进（Game.fixedUpdate；对齐 TileDrawing.Update :372-381）。
    *  gridW/gridH = 视区 tile 尺寸（原版 EnsureWindGridSize 传屏幕绘制区，非全图） */
@@ -677,6 +687,7 @@ function drawMultiVine(
 
 /** EmitTreeLeaves（:7905-8013 1:1）：频率门 + 位置偏移 + 落叶生成 */
 function emitTreeLeaves(x: number, y: number, fx: number, fy: number, grassX: number, gore: number): void {
+  if (!windSway.active) return; // _isActiveAndNotPaused 门（:7907-7910）
   if (!leafEmits(gore)) return;
   const flag = (gore >= 917 && gore <= 925) || (gore >= 1113 && gore <= 1121);
   let n = windSway.leafFreq;
@@ -720,13 +731,18 @@ function drawTreeSway(
   if (!isCrownCell) return;
   const idx = st.idx(x, y);
   if (st.liquid[idx] > 0) return; // EmitTreeLeaves 液体门（:7912-7915）——冠整格水下不出叶不摆
+  // fx=0 顶冠变体：原版 DrawTrees 门是 frameX>=22（fx=0 走普通路径=静态、不摆、不出叶）
+  const isVariantTop = !isPalm && fx < 22;
   let sway = 0;
-  if (st.wall[idx] === 0) sway = getWindCycle(x, y, counters.tree, ENV.worldSurface, ENV.remix);
+  if (!isVariantTop && st.wall[idx] === 0) sway = getWindCycle(x, y, counters.tree, ENV.worldSurface, ENV.remix);
   drawTreeCell(ctx, atlas, st, x, y, fx, fy, x * TILE, y * TILE, sheet, true, trees, sway);
-  // 落叶：grassPosX = 枝方向侧树干列（GetCommonTreeFoliageData num13：44→+1 / 66→-1 / 顶→0）
+  if (isVariantTop || isPalm) return; // 棕榈冠原版无 EmitTreeLeaves（DrawTrees 323 块只画不喷）
+  // 落叶：grassPosX = 枝方向侧树干列（GetCommonTreeFoliageData num13：44→+1 / 66→-1 / 顶→0）；
+  // t 参数 = 树底【地面 tile】（Main.tile[grassPosX, floorY]）——不是 scanTreeType 的 style 序号！
   const grassX = x + (fx === 44 ? 1 : fx === 66 ? -1 : 0);
   const scan = scanTreeType(st, grassX, y);
-  const grassSheet = TILE_DEFS[scan.type]?.vanilla?.sheet ?? -1;
+  const baseIdx = st.idx(grassX, scan.floorY);
+  const grassSheet = TILE_DEFS[st.type[baseIdx]]?.vanilla?.sheet ?? -1;
   emitTreeLeaves(x, y, fx, fy, grassX, getTreeLeaf(x, fx, fy, sheet, grassSheet));
 }
 

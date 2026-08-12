@@ -19,7 +19,7 @@ import type { TileStore } from '../world/TileStore';
  *  SceneState.cs:331-332 的特殊门）。注意 SwitchMonolith 对 509 翻帧步长是 54
  *  （WorldGen.cs:51085-51092），但 SceneMetrics 判激活用 ≥56——两处照抄，勿"修齐"。 */
 const MONO_THRESHOLD: Record<number, number> = {
-  410: 56, 509: 56, 480: 54, 657: 54, 720: 54, 721: 54, 725: 54, 733: 54,
+  410: 56, 509: 56, 480: 54, 657: 54, 658: 54, 720: 54, 721: 54, 725: 54, 733: 54,
 };
 
 /** 内部 tile id → sheet（只含柱族，扫描循环内 Set 命中后才做 Map 反查） */
@@ -284,7 +284,8 @@ export class MonolithFilters {
    *  shimmerAlpha 反向加权血月滤镜 BloodMoonScreenShaderData.cs:16-18） */
   shimmerAlpha = 0;
   shimmerDarken = 0;
-  private shimmerBrightenDelay = 0;
+  /** SceneState._shimmerBrightenDelay（:341 置 4、:346-350 归零后才衰减 alpha） */
+  shimmerBrightenDelay = 0;
   /** 血月滤镜本帧 UseOpacity（BloodMoonScreenShaderData.Update :10-21） */
   bloodMoonUseOpacity = 0;
   /** Sepia 本帧参数（SepiaScreenShaderData.Update） */
@@ -319,7 +320,8 @@ export class MonolithFilters {
 
   /** 每帧推进（SceneState.UpdateSceneEffects + FilterManager.Update） */
   update(dtMs: number, scan: MonolithSceneState, env: MonolithEnv): void {
-    const dt = Math.min(dtMs, 100) / 1000;
+    // FilterManager.cs:95-101：ElapsedGameTime.TotalSeconds（真实 dt，无上限夹取）
+    const dt = Math.max(0, dtMs) / 1000;
     const act = this.activation(scan, env);
     for (const f of this.filters) {
       f.active = !!act.get(f.def.sceneKey);
@@ -341,9 +343,13 @@ export class MonolithFilters {
         this.shimmerBrightenDelay = 4;
       }
     } else {
-      this.shimmerDarken = moveTowards(this.shimmerDarken, 0, 0.05 * 60 * dt);     // :344
+      // :343-351：先 darken 归零，再 brightenDelay 归零，最后才衰减 shimmerAlpha
+      this.shimmerDarken = moveTowards(this.shimmerDarken, 0, 0.05 * 60 * dt);
       if (this.shimmerDarken === 0) {
-        this.shimmerBrightenDelay = moveTowards(this.shimmerBrightenDelay, 0, 1 * 60 * dt); // :345-347
+        this.shimmerBrightenDelay = moveTowards(this.shimmerBrightenDelay, 0, 1 * 60 * dt);
+      }
+      if (this.shimmerBrightenDelay === 0) {
+        this.shimmerAlpha = moveTowards(this.shimmerAlpha, 0, 0.05 * 60 * dt);
       }
     }
 

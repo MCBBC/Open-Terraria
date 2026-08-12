@@ -60,16 +60,16 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 并同时掷金字塔候选(cs:11591-11599 → gs.pyramidSpots)
     { name: '沙丘', run: vanillaDunes },
     { name: '洞穴', run: vanillaCaves },
-    { name: '海滩', run: vanillaBeaches },
+    // 海滩(33 MountainCaveOpenings+34 Beaches)与矿石(26 OresAndShinies)原在此处
+    // 各占一槽——已按 1456 注册序并入 vanillaBiomes（分别在 Dungeon(32) 后与 Silt(25) 后）。
     { name: '生物群系', run: vanillaBiomes },
     // 原版 1456 注册序:OresAndShinies(13233) → Lakes(14613) → DirtWallCleanup(15310)
     // → SettleLiquids(16215) → SmoothWorld(16507) → Waterfalls(16697) → LifeCrystals(16847)。
     // 生命水晶曾排在湖泊之前——湖泊 pass 挖湖盆会掏空已放水晶的脚下 → 凭空悬浮
     // （唯一硬约束:水晶在 Lakes 之后;平滑/瀑布在其前的原版序可完整对齐）
-    { name: '矿石', run: vanillaShinies },
     { name: '液体', run: vanillaLakes },
     // 原版注册序 Lakes(14613) < Shimmer(15256) < DirtWallCleanup(15310)：
-    // 微光以太在此挖洞灌液，清理/沉降在其后
+    // 微光以太在此挖洞灌液，清理/沉降在其后（Slush 31 已随 Lakes 入"液体"槽）
     { name: '微光', run: vanillaShimmer },
     { name: '清理', run: vanillaCleanup },
     // 原版 SettleLiquids（cs:16215）：Lakes 之后、SmoothWorld/Waterfalls 之前的中途
@@ -357,18 +357,13 @@ function vanillaMicroBiomes({ store, rng }: GenCtx) {
 }
 
 function vanillaLakes({ store, rng }: GenCtx) {
-  // 原版 pass 31 Lakes + pass 36 Gems（cs 注册序 31<36）
+  // 原版 1456 注册序 Lakes(30, cs:14613) → Slush(31) →（32 Dungeon 及其后段在
+  // vanillaBiomes 内，Dungeon/Lakes 倒挂是既有偏差另案）→ Shimmer(38)。
+  // Gems(35) 已按注册序拆到 Beaches(34) 之后（vanillaBiomes 内）。
   const gs = ctxGs[0];
   if (!gs) return;
   runLakesPass(store, rng, gs);
-  runGemsPass(store, rng, gs);
-}
-
-function vanillaShinies({ store, rng }: GenCtx) {
-  // 原版 pass 27 Shinies（替换自研 orePass）
-  const gs = ctxGs[0];
-  if (!gs) return;
-  runShiniesPass(store, rng, gs);
+  runSlushPass(store, gs);               // 31 Slush（原在 DirtToMud 后、Corruption 前——注册序修正）
 }
 
 function vanillaCaves({ store, rng }: GenCtx) {
@@ -388,25 +383,18 @@ function vanillaCaves({ store, rng }: GenCtx) {
   runCavesPass(store, rng, gs);
 }
 
-function vanillaBeaches({ store, rng, surface }: GenCtx) {
+// 原版 1456 真实注册序（执行序=注册序，WorldGenerator.cs:447 _passes[PassResults.Count]）：
+//   14 SurfaceCaves → 15 WavyCaves(仅饥荒世界,普通零消耗) → 16 IceBiome → 17 Grass
+//   → 18 MudCaves → 19 Desert → 20 Mushroom → 21 Marble → 22 Granite → 23 FloatingIslands
+//   → 24 DirtToMud → 25 Silt → 26 OresAndShinies → 27 Webs(未移植) → 28 Underworld
+//   → 29 Corruption → 30 Lakes → 31 Slush → 32 Dungeon → 33 MountainCaveOpenings
+//   → 34 Beaches → 35 Gems → 36 GravitatingSand → 37 OceanCaves → 38 Shimmer → 39 DirtWallCleanup
+// 本函数内对齐到 16-35 段（Underworld 28 在管线末"地狱"槽、Webs 27 后置——既有偏差另案）。
+function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
-  runMountainCavesPass(store, rng, gs); // 原版 pass 34 Mountain Caves(山侧开口+蜿蜒,先于海滩)
-  runBeachesPass(store, rng, gs);
-  // 海盆挖完后刷新 surface[](后续旧 pass 依赖)
-  for (let x = 0; x < store.w; x++) {
-    for (let y = 0; y < store.h; y++) {
-      if (store.flags[store.idx(x, y)]) { surface[x] = y; break; }
-    }
-  }
-}
-
-// 原版 pass 15-22:冰原→草种→丛林→泥转丛林草→沙漠→蘑菇→大理石/花岗岩
-function vanillaBiomes({ store, rng, world }: GenCtx) {
-  const gs = ctxGs[0];
-  if (!gs) return;
-  runIceBiomePass(store, rng, gs);       // 15 Generate Ice Biome
-  runGrassPass(store, rng, gs);          // 16 Grass
+  runIceBiomePass(store, rng, gs);       // 16 Generate Ice Biome
+  runGrassPass(store, rng, gs);          // 17 Grass
   const jx = runJunglePass(store, rng, gs); // JunglePass
   world.jungleX = jx;
   // 丛林表面泥化:泥柱核心区 ±0.12w 内,表层 10 格 dirt→mud(原版巨型 runner
@@ -422,23 +410,33 @@ function vanillaBiomes({ store, rng, world }: GenCtx) {
       }
     }
   }
-  // 17 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
+  // 18 Mud Caves To Grass（cs:12499-12530 原版精确版：全图递归洪水+散块清除；
   // 曾用近似 spreadGrassAll 中心限距+2 轮快照——caves-oracle 位级对账后替换）
   runMudCavesPass(store, TILE_BY_KEY['mud']!, TILE_BY_KEY['v_60_jungle_grass_block']!);
-  runDesertPass(store, rng, gs);         // 18 Full Desert
-  runFloatingIslandsPass(store, rng, gs); // 19 Floating Islands
+  runDesertPass(store, rng, gs);         // 19 Full Desert
   runMushroomPass(store, rng, gs);       // 20 Mushroom Patches
   runMarbleGranitePass(store, rng, gs);  // 21/22 Marble/Granite
-  runDirtToMudAndSiltPass(store, rng, gs); // 23 Dirt To Mud / 24 Silt
-  runSlushPass(store, gs);                 // 原版 pass 33 Slush（在 DirtToMud/Silt(25/26) 之后——泥已生成）
-  runCorruptionPass(store, rng, gs);     // 28 Corruption/Crimson
-  runDungeonPass(store, rng, gs, world.chests); // 30 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
+  runFloatingIslandsPass(store, rng, gs); // 23 Floating Islands（原在蘑菇前——注册序修正）
+  runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
+  runShiniesPass(store, rng, gs);        // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
+  runCorruptionPass(store, rng, gs);     // 29 Corruption/Crimson
+  runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
   // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
   // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
   // 守卫老人出生/游走锚)——塔心锚点会把老人漏进塔内
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
+  // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）
+  runMountainCavesPass(store, rng, gs);
+  runBeachesPass(store, rng, gs);
+  // 海盆挖完后刷新 surface[](后续旧 pass 依赖;本函数之后才到那些 pass)
+  for (let x = 0; x < store.w; x++) {
+    for (let y = 0; y < store.h; y++) {
+      if (store.flags[store.idx(x, y)]) { surface[x] = y; break; }
+    }
+  }
+  runGemsPass(store, rng, gs);           // 35 Gems（原捆绑在 Lakes 槽——注册序修正移到 Beaches 后）
   // 原版 1456 注册序（WorldGen.cs 行号 = 唯一权威，2026-08-11 review 依此重排）：
   //   OceanCaves(15228) < Pyramids(15426) < SurfaceWaterInJungle(15887) <
   //   Temple(15911) < Beehives(16005) < JungleShrines(16059) < Statues(16947) <

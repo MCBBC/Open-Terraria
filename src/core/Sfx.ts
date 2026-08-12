@@ -14,7 +14,9 @@ export type SfxName =
   | 'beeSummon'  // 原版 SoundID.Item173（Abeemination 蜂后召唤音，Player.cs:43185——Boss 召唤音唯一非 Roar 例外）
   | 'thunder'   // 原版 SoundID 43（Thunder_0-5，NewLightning 的 thunderDelay 归零时播）
   | 'mech'       // 原版 SoundID 28（Mech_0：器件右键切换音，Player.cs:31762/31799/31803）
-  | 'portalOrange' | 'portalBlue'; // 原版 Item_115 / Item_114（传送门弹撞块落门音，Projectile.cs:16675-16683）
+  | 'portalOrange' | 'portalBlue' // 原版 Item_115 / Item_114（传送门弹撞块落门音，Projectile.cs:16675-16683）
+  | 'whipCrack'   // 原版 Item_152（DefaultToWhip UseSound——鞭甩响，Item.cs:47448）
+  | 'summon';     // 原版 Item_44（召唤杖通用 UseSound）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -42,6 +44,8 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
+  whipCrack: ['Item_152'],
+  summon: ['Item_44'],
   beeSummon: ['Item_173'],
   thunder: ['Thunder_0', 'Thunder_1', 'Thunder_2', 'Thunder_3', 'Thunder_4', 'Thunder_5'],
   mech: ['Mech_0'],

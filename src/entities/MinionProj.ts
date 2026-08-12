@@ -140,7 +140,7 @@ export class MinionProj extends Entity {
       moveAndCollide(this, game.world, 0, this.vy);
       const owner = this.ownerRef();
       // 随从伤害 = 基础 × magic 乘区；荆棘鞭 buff(314) 命中 +10%（Player.minionDamage 系）
-      const thorn = owner && (owner as unknown as { whipBuffs?: Record<number, number> }).whipBuffs?.[314] > 0 ? 1.1 : 1;
+      const thorn = (owner as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
       const dmgOf = () => Math.max(1, Math.round(this.damage * (owner ? owner.damageMult('magic') : 1) * thorn));
       // 爆炸烈焰塔族（AI_130，Projectile.cs:65194-65450 1:1）：
       // 待机帧 0 → 锁定目标(900px 内)转向 → 开火动画帧 1-6 每 4t（第 12t 从炮口
@@ -253,6 +253,12 @@ export class MinionProj extends Entity {
     const p = this.ownerRef();
     if (!p) { this.dead = true; return; }
     const tgt = this.nearestEnemy(game, 700);
+    // 朝向（AI_062 :62975：velocity.X>0 → spriteDirection=-1；近似取
+    // 追敌方向/移动方向的水平符号）
+    {
+      const dirX = tgt ? Math.sign(tgt.cx - this.cx) : Math.sign(this.vx);
+      if (dirX !== 0) this.facing = dirX;
+    }
     if (!this.ground) {
       // 飞行：无目标 → 环形槽位悬停玩家侧后；有目标 → 俯冲
       if (tgt) {
@@ -300,7 +306,7 @@ export class MinionProj extends Entity {
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       if (!this.hitCd.ready(en.id, 20)) continue;
       const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
-      const thornM = (p as unknown as { whipBuffs?: Record<number, number> }).whipBuffs?.[314] > 0 ? 1.1 : 1;
+      const thornM = (p as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
       const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic') * thornM) + tag);
       en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
       this.attackFlash = 24; // AI_062 攻击帧门（小鬼 ai[1]<24 → frame+4）
@@ -337,7 +343,7 @@ export class MinionProj extends Entity {
     ctx.save();
     ctx.translate(this.cx, this.cy);
     ctx.imageSmoothingEnabled = false;
-    if (this.sentry && this.facing < 0) ctx.scale(-1, 1);
+    if (this.facing < 0) ctx.scale(-1, 1); // spriteDirection 翻转（随从+哨兵通用）
     if (img) {
       ctx.drawImage(img, -img.width / 2, -img.height / 2);
     } else {

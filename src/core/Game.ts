@@ -10,7 +10,8 @@ import { World, ChestData } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
-import { torchAnchorFrame, torchStillAnchored } from '../world/Torch';
+import { torchAnchorFrame, torchStillAnchored, torchStyleOfItemKey, isWaterTorchStyle } from '../world/Torch';
+import { TorchGodEvent } from '../world/TorchGod';
 import { findFreeHouse, WALL_HOUSE } from '../world/Housing';
 import {
   INVASION_GOBLIN, INVASION_NONE, INVASION_PIRATE, INVASION_SNOW_LEGION, INVASION_MARTIAN,
@@ -119,7 +120,7 @@ import { Dart } from '../entities/Dart';
 import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
@@ -265,6 +266,10 @@ export class Game implements GameHooks {
   liquid!: LiquidSim;
   /** 世界运行时演化（WorldGen.UpdateWorld 移植）：草蔓延/藤蔓/药草/邪恶扩散 */
   evolution!: WorldEvolution;
+  /** Torch God 彩蛋事件（Player.cs:17585-17770）：>100 根点燃火把地下触发 */
+  torchGod!: TorchGodEvent;
+  /** 黑暗视野（buff 80 Blackout）：updateLightDecay ×0.85 */
+  blackout = false;
   entities = new EntityManager();
   input: Input;
   cb: GameCallbacks;
@@ -1090,8 +1095,35 @@ export class Game implements GameHooks {
       get windSpeedCurrent() { return w.weather?.windSpeedCurrent ?? 0; },
       playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
     });
+    // Torch God 彩蛋事件（触发扫描/熄灭/弹幕 949/复燃/掉 5043）
+    this.torchGod = new TorchGodEvent({
+      store: w.store,
+      worldSurface: w.groundLevel,
+      playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
+      hasVanillaItem: (vid) => {
+        const key = VANILLA_ITEM_KEY_BY_ID[vid];
+        const id = key ? ITEM_BY_KEY[key] : undefined;
+        if (id === undefined) return false;
+        return this.player.inv.slots.some((sl) => sl && sl.id === id && sl.stack > 0);
+      },
+      spawnTorchBolt: (x, y, vx, vy, rangePx) => {
+        const e = new TorchGodProj(x, y, vx, vy, rangePx);
+        e.id = this.entities.nextId++;
+        this.entities.add(e, 'projectiles');
+      },
+      dropVanillaItem: (vid, px, py) => {
+        const key = VANILLA_ITEM_KEY_BY_ID[vid];
+        if (key) this.spawnDrop(px, py, key, 1);
+      },
+      setBlackout: (on) => { this.blackout = on; },
+    });
     // 1456 AddWater/WaterCheck 尾部 KillTile（液体冲毁火把等）：走 breakTile（掉落+音效+帧刷新）
-    this.liquid.killTile = (x, y) => this.breakTile(x, y);
+    this.liquid.killTile = (x, y) => {
+      // 水炬豁免（CheckWaterDeath subtile 8/11/17 WaterDeath=false）：水冲不灭
+      const i = w.store.idx(x, y);
+      if (TILE_DEFS[w.store.type[i]]?.vanilla?.sheet === 4 && isWaterTorchStyle(w.store.frameY[i])) return;
+      this.breakTile(x, y);
+    };
     // 液体交互音（WorldGen.PlayLiquidChangeSound :4577-4599，六种配对）：
     // LavaWater{水,岩浆}/HoneyWater{水,蜜}/HoneyLava{岩浆,蜜} 原版为 XACT 专属轨
     // （liquids_water_lava 等，素材未解包进 public/sounds——资产依赖登记，暂以
@@ -1387,6 +1419,9 @@ export class Game implements GameHooks {
   private frame(now: number) {
     const elapsed = Math.min((now - this.lastTime) / 1000, 0.25);
     this.lastTime = now;
+    windSway.active = !this.paused; // _isActiveAndNotPaused（暂停不喷落叶；物理随 !paused 冻结）
+    // 调试桥：暴露 app 实例（HMR 双实例防探针误读——EmoteBubble 同款教训）
+    (window as unknown as { __swNatureParticles?: typeof natureParticles }).__swNatureParticles = natureParticles;
     if (!this.paused) {
       this.acc += elapsed;
       let steps = 0;
@@ -2014,7 +2049,7 @@ export class Game implements GameHooks {
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
-    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl));
+    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl), this.blackout);
     // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
     // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
     // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：
@@ -2047,6 +2082,19 @@ export class Game implements GameHooks {
       } else if (gvid >= 0 && GLOWSTICK_LIGHT[gvid]) {
         heldRGB = GLOWSTICK_LIGHT[gvid];
       }
+    }
+    // 水炬三色（ItemID.Sets.WaterTorches = 523/1333/4384，ItemID.cs:1194）：
+    // EmitHeldItemLight 的 (Torches && !wet) || WaterTorches——水炬水下也亮
+    const WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
+    const heldVid0 = heldDef ? (heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key)) : -1;
+    if (!heldRGB && heldDef && WATER_TORCH_ITEMS.has(heldVid0)) {
+      const BIOME_TORCH_ITEM2: Record<number, number> = {
+        523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
+        4383: 16, 4384: 17, 4385: 18, 4386: 19, 4387: 20, 4388: 21, 5293: 22, 5353: 23,
+      };
+      const t = BIOME_TORCH_ITEM2[heldVid0];
+      const c = t !== undefined ? TORCH_LIGHT[t] : undefined;
+      heldRGB = c ? [...c] as [number, number, number] : [1, 0.95, 0.8];
     }
     if (!heldRGB && heldDef && !player.inWater) {
       const vid = heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key);
@@ -2155,6 +2203,7 @@ export class Game implements GameHooks {
     // 世界运行时演化（原版 WorldGen.UpdateWorld 1:1，见 src/world/evolution/）：
     // 草蔓延/藤蔓/仙人掌/药草/苔藓/蛛网/贝壳/困难模式邪恶神圣蔓延+水晶叶绿
     this.evolution.update();
+    this.torchGod.update();
     // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
     if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
       this.spawnCritter();
@@ -3100,9 +3149,12 @@ export class Game implements GameHooks {
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
         const er = Game.EXPLODE_RADIUS[cw.shoot] ?? 0;
+        // 实体伤害盒(Projectile.Kill :74885/:74951):炸弹 28/手雷 30 = 22×22 盒半宽 11;
+        // 炸药棍 29 = 200×200 盒半宽 100——与地形破坏半径【无关】
+        const hurtBox = cw.shoot === 29 ? 100 : 11;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0)), 'projectiles');
+          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox)), 'projectiles');
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -3149,7 +3201,7 @@ export class Game implements GameHooks {
           () => (owner.dead ? null : owner),
         ), 'projectiles');
         this.player.useTime = whip.useTime;
-        this.sfx.play('throw');
+        this.sfx.playWav('whipCrack', 0.9, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
       }
@@ -3174,7 +3226,7 @@ export class Game implements GameHooks {
           () => (owner.dead ? null : owner),
         ), 'projectiles');
         this.player.useTime = cw.useTime;
-        this.sfx.play('throw');
+        this.sfx.playWav('summon', 0.9, this.player.cx, this.player.cy); // 召唤杖 UseSound=Item44
         this.input.mouseDown = false;
         break;
       }
@@ -4119,13 +4171,18 @@ export class Game implements GameHooks {
       return;
     }
     // 火把锚定（TileObjectData tile4 + TileObject.CanPlace 1:1）：
-    // 底锚(0)→左锚(22)→右锚(44)→墙锚(0)；液体中拒绝（水炬样式 8/11/17 未实装）
+    // 底锚(0)→左锚(22)→右锚(44)→墙锚(0)；普通火把液体中拒绝、水炬 8/11/17 允许
     if (tileId === T.TORCH) {
       if (this.player.useTime > 0) return;
       if (st.isActive(tx, ty)) return;
       const frame = torchAnchorFrame(st, tx, ty);
-      if (frame < 0 || st.liquid[st.idx(tx, ty)] > 0) return;
-      st.setTile(tx, ty, tileId, frame, 0);
+      // placeStyle（Item.cs placeStyle→TileObjectData subtile）：彩色 427-433 /
+      // 群系火把显式表 / 水炬 8/11/17——此前恒 0 = 群系火把放成普通火把（色光全失）
+      const style = torchStyleOfItemKey(itemDef.key);
+      if (frame < 0) return;
+      // 液体门（WaterPlacement）：普通火把 NotAllowed、水炬三色 Allowed
+      if (st.liquid[st.idx(tx, ty)] > 0 && !isWaterTorchStyle(style * 22)) return;
+      st.setTile(tx, ty, tileId, frame, style * 22);
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = 14;
       this.sfx.play('place');

@@ -322,21 +322,9 @@ export function getTreeLeaf(markerX: number, frameX: number, frameY: number, tre
       const MAP = [2, 1, 7, 4, 5, 6, 3, 8, 0];
       return 917 + (MAP[treeFrame] ?? 2);
     }
-    default: {
-      // 通用：x%6 错帧 + treeFrame 组映射（:29674-29736）→ 196+组 再 +917 = 1113-1121
-      const m = markerX % 6;
-      if (m >= 1) treeFrame += m * 3;
-      let group = 0;
-      if (treeFrame >= 3) group = 1;
-      if (treeFrame >= 4) group = 2;
-      if (treeFrame >= 5) group = 1;
-      if (treeFrame >= 6) group = 3;
-      if (treeFrame >= 7) group = 4;
-      if (treeFrame >= 8) group = 5;
-      if (treeFrame >= 9) group = 6;
-      if (treeFrame >= 12) group = 7;
-      if (treeFrame >= 15) group = 8;
-      return 1113 + group;
-    }
+    default:
+      return -1; // 原版 switch 无 default 分支——未知草型 passStyle=-1，不出叶。
+      // 注：109/492 的 style20 子支（→1113-1121 彩叶）依赖 GetHollowTreeFoliageStyle
+      // 种子派生值，取 style!=20 支（917-925）为准——中空树为稀有种子景观。
   }
 }

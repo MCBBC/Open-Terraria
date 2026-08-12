@@ -32,14 +32,15 @@ const WATER_DECAY_BY_STYLE: Array<[number, number, number]> = [
   [0.9, 1.0, 1.02],     // 13 地狱
 ];
 /** Game 每帧调用:按当前群系水色 + 夜枭更新衰减表(:137-187 主干) */
-export function updateLightDecay(waterStyle: number, nightVisionOn: boolean): void {
+export function updateLightDecay(waterStyle: number, nightVisionOn: boolean, blackoutOn = false): void {
   nightVision = nightVisionOn;
   const base = WATER_DECAY_BY_STYLE[Math.max(0, Math.min(13, waterStyle))];
   DECAY_WATER = [base[0] * 0.91, base[1] * 0.91, base[2] * 0.91];
-  DECAY_AIR = 0.91 * (nightVision ? NIGHT_VISION_MUL : 1);
-  DECAY_SOLID = 0.56 * (nightVision ? NIGHT_VISION_MUL : 1);
-  // 原版另有 blind ×0.95 / blackout ×0.85 / headcovered ×0.85 与
-  // SceneState.airLightDecay/solidLightDecay 调制——对应系统未实装,跳过
+  // blackout（buff 80，Torch God 事件每 tick 刷新）×0.85（UpdateLightDecay :181-183）
+  const blk = blackoutOn ? 0.85 : 1;
+  DECAY_AIR = 0.91 * (nightVision ? NIGHT_VISION_MUL : 1) * blk;
+  DECAY_SOLID = 0.56 * (nightVision ? NIGHT_VISION_MUL : 1) * blk;
+  // 原版另有 blind ×0.95 / headcovered ×0.85 与 SceneState 调制——对应系统未实装,跳过
 }
 /** 通道熄灭阈值(LightMap.cs:132/148/164) */
 export const DEAD_THRESHOLD = 0.0185;

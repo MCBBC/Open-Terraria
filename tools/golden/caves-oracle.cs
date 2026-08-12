@@ -652,16 +652,6 @@ for (int i = 0; i < 3; i++)
     }
 }
 // 逐列沙顶剖面（诊断用）
-{
-    var prof = new List<string>();
-    for (int x = 2300; x < 2760; x++)
-    {
-        int top = -1;
-        for (int y = 0; y < 600; y++) if (act[y * W + x] == 1 && typ[y * W + x] == 53) { top = y; break; }
-        prof.Add(top.ToString());
-    }
-    File.WriteAllText("/tmp/cs-sand.txt", string.Join(",", prof));
-}
 Checkpoint("oceansand");
 
 // ================= Pass 3：SandPatches（cs:11712-11737）=================
@@ -818,8 +808,6 @@ for (int x = 5; x < W - 5; x++)
         break;
     }
 }
-File.WriteAllBytes("/tmp/cs-typ2.bin", ToBytes(typ));
-File.WriteAllBytes("/tmp/cs-act2.bin", act);
 Checkpoint("rocksclay");
 
 // ================= Pass 10：SmallHoles（cs:12034-12092）=================
@@ -913,180 +901,8 @@ Checkpoint("rocklayer");
 }
 Checkpoint("surfacecaves");
 
-// ================= Pass 34：MountainCaveOpenings（cs:14932-14947，按我们的执行序紧跟洞穴链）=================
-void CaveOpenater(int i, int j)
-{
-    double num = (int)r.Next(7, 12);
-    double num2 = num;
-    int dir = 1;
-    if ((int)r.Next(2) == 0) dir = -1;
-    if ((int)r.Next(10) != 0) dir = (i < W / 2) ? 1 : -1;
-    double px = i, py = j;
-    int steps = 100;
-    double vx = dir, vy = 0.0;
-    while (steps > 0)
-    {
-        int hx = (int)px, hy = (int)py;
-        if (hx < 0) hx = 0; if (hx > W - 1) hx = W - 1;
-        if (hy < 0) hy = 0; if (hy > H - 1) hy = H - 1;
-        int hi = hy * W + hx;
-        if (wal[hi] == 0 || (act[hi] == 1 && NOT_CLEAR.Contains(typ[hi]))) steps = 0;
-        steps--;
-        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
-        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
-        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
-        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
-        num2 = num * (int)r.Next(80, 120) * 0.01;
-        for (int x = x0; x < x1; x++)
-            for (int y = y0; y < y1; y++)
-            {
-                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
-                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && !NOT_CLEAR.Contains(typ[y * W + x]))
-                    act[y * W + x] = 0;
-            }
-        px += vx; py += vy;
-        vx += (int)r.Next(-10, 11) * 0.05;
-        vy += (int)r.Next(-10, 11) * 0.05;
-        if (vx > dir + 0.5) vx = dir + 0.5;
-        if (vx < dir - 0.5) vx = dir - 0.5;
-        if (vy > 0.0) vy = 0.0;
-        if (vy < -0.5) vy = -0.5;
-    }
-}
-void Cavinator2(int i, int j, int steps)
-{
-    double num = (int)r.Next(7, 15);
-    double num2 = num;
-    int dir = 1;
-    if ((int)r.Next(2) == 0) dir = -1;
-    double px = i, py = j;
-    int num4 = (int)r.Next(20, 40);
-    double vx = dir, vy = (int)r.Next(10, 20) * 0.01;
-    while (num4 > 0)
-    {
-        num4--;
-        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
-        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
-        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
-        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
-        num2 = num * (int)r.Next(80, 120) * 0.01;
-        bool stop = false;
-        for (int x = x0; x < x1 && !stop; x++)
-        {
-            for (int y = y0; y < y1; y++)
-            {
-                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
-                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4)
-                {
-                    int ti = y * W + x;
-                    if ((act[ti] == 1 && TILE_DUNGEON.Contains(typ[ti])) || WALL_DUNGEON.Contains(wal[ti]))
-                    { num4 = 0; stop = true; break; }
-                    // 原版 cs:80763：active && (!CanBeCleared || type==53) → continue（跳过不可清/沙）
-                    if (act[ti] == 1 && (NOT_CLEAR.Contains(typ[ti]) || typ[ti] == 53)) { /* skip */ }
-                    else if (act[ti] == 1) act[ti] = 0;
-                }
-                if (num4 <= 0) break;
-            }
-            if (num4 <= 0) break;
-        }
-        if (num4 <= 0) break;
-        px += vx; py += vy;
-        vx += (int)r.Next(-10, 11) * 0.05;
-        vy += (int)r.Next(-10, 11) * 0.05;
-        if (vx > dir + 0.5) vx = dir + 0.5;
-        if (vx < dir - 0.5) vx = dir - 0.5;
-        if (vy > 2.0) vy = 2.0;
-        if (vy < 0.0) vy = 0.0;
-    }
-    if (steps > 0 && (int)py < rockLayer + 50) Cavinator2((int)px, (int)py, steps - 1);
-}
-for (int i = 0; i < mCaveX.Count; i++)
-{
-    CaveOpenater(mCaveX[i], mCaveY[i]);
-    Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
-}
-Checkpoint("mcopenings");
 
-// ================= Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）=================
-var beachDbg = new List<string>();
-{
-    bool floridaL = false, floridaR = false;
-    if ((int)r.Next(4) == 0)
-    {
-        if ((int)r.Next(2) == 0) floridaL = true; else floridaR = true;
-    }
-
-    for (int side = 0; side < 2; side++)
-    {
-        if (side == 0)
-        {
-            int waterX = (int)r.Next(220, 260);
-            if (dungeonRight) waterX = 275;
-            int cap = leftBeachEnd - 50;
-            if (waterX > cap) waterX = cap;
-            int j = 0;
-            while (j < H && act[j * W + (waterX - 1)] == 0) j++;
-            j += (int)r.Next(1, 5);
-            int count = 0; double depth = 1.0;
-            for (int x = waterX - 1; x >= 0; x--)
-            {
-                if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
-                else depth += 1.0;
-                int pad = (int)r.Next(15, 20);
-                int yEnd = (int)((double)j + depth + pad);
-                if (x >= 134 && x <= 156) beachDbg.Add($"{x}:w{j}:y{yEnd}:d{depth:0.0}");
-                for (int y = 0; y < yEnd && y < H; y++)
-                {
-                    int ti = y * W + x;
-                    if ((double)y < (double)j + depth * 0.75 - 3.0)
-                    {
-                        act[ti] = 0;
-                        if (y > j) liq[ti] = 255;
-                        else if (y == j) liq[ti] = 127;
-                    }
-                    else if (y > j) { typ[ti] = 53; act[ti] = 1; }
-                    wal[ti] = 0;
-                }
-            }
-        }
-        else
-        {
-            int waterX = W - (int)r.Next(220, 260);
-            if (!dungeonRight) waterX = W - 275;
-            int cap = rightBeachStart + 50;
-            if (waterX < cap) waterX = cap;
-            int l = 0;
-            while (l < H && act[l * W + waterX] == 0) l++;
-            l += (int)r.Next(1, 5);
-            int count = 0; double depth = 1.0;
-            for (int x = waterX; x < W; x++)
-            {
-                if (x < W - 30) { count++; depth = TuneOceanDepth(count, depth, floridaR); }
-                else depth += 1.0;
-                int pad = (int)r.Next(15, 20);
-                int yEnd = (int)((double)l + depth + pad);
-                for (int y = 0; y < yEnd && y < H; y++)
-                {
-                    int ti = y * W + x;
-                    if ((double)y < (double)l + depth * 0.75 - 3.0)
-                    {
-                        act[ti] = 0;
-                        if (y > l) liq[ti] = 255;
-                        else if (y == l) liq[ti] = 127;
-                    }
-                    else if (y > l) { typ[ti] = 53; act[ti] = 1; }
-                    wal[ti] = 0;
-                }
-            }
-        }
-    }
-}
-File.WriteAllBytes("/tmp/cs-act4.bin", act);
-File.WriteAllBytes("/tmp/cs-act5.bin", act);
-File.WriteAllText("/tmp/cs-beach2.txt", string.Join(" ", beachDbg));
-Checkpoint("beaches");
-
-// ================= IceBiome（cs:12343-12440，按我们的执行序：生物群系链首）=================
+// ================= Pass 16：IceBiome（cs:12343-12440，1456 注册序紧跟 SurfaceCaves）=================
 var snowMinXArr = new int[H];
 var snowMaxXArr = new int[H];
 {
@@ -1871,6 +1687,177 @@ Checkpoint("desertentrance");
 }
 Checkpoint("deserthive");
 Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
+
+// ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================
+// 1456 注册序在 Dungeon(32) 之后——本 oracle 尚未转录 26-32 段（Mushroom/Marble/
+// Granite/Islands/DirtToMud/Silt/Ores/Underworld/Corruption/Lakes/Slush/Dungeon），
+// 故暂挂在 desertdone 之后；★26-32 段转录后须把本块插回其前（即 Dungeon 之后）。
+void CaveOpenater(int i, int j)
+{
+    double num = (int)r.Next(7, 12);
+    double num2 = num;
+    int dir = 1;
+    if ((int)r.Next(2) == 0) dir = -1;
+    if ((int)r.Next(10) != 0) dir = (i < W / 2) ? 1 : -1;
+    double px = i, py = j;
+    int steps = 100;
+    double vx = dir, vy = 0.0;
+    while (steps > 0)
+    {
+        int hx = (int)px, hy = (int)py;
+        if (hx < 0) hx = 0; if (hx > W - 1) hx = W - 1;
+        if (hy < 0) hy = 0; if (hy > H - 1) hy = H - 1;
+        int hi = hy * W + hx;
+        if (wal[hi] == 0 || (act[hi] == 1 && NOT_CLEAR.Contains(typ[hi]))) steps = 0;
+        steps--;
+        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
+        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
+        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
+        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
+        num2 = num * (int)r.Next(80, 120) * 0.01;
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && !NOT_CLEAR.Contains(typ[y * W + x]))
+                    act[y * W + x] = 0;
+            }
+        px += vx; py += vy;
+        vx += (int)r.Next(-10, 11) * 0.05;
+        vy += (int)r.Next(-10, 11) * 0.05;
+        if (vx > dir + 0.5) vx = dir + 0.5;
+        if (vx < dir - 0.5) vx = dir - 0.5;
+        if (vy > 0.0) vy = 0.0;
+        if (vy < -0.5) vy = -0.5;
+    }
+}
+void Cavinator2(int i, int j, int steps)
+{
+    double num = (int)r.Next(7, 15);
+    double num2 = num;
+    int dir = 1;
+    if ((int)r.Next(2) == 0) dir = -1;
+    double px = i, py = j;
+    int num4 = (int)r.Next(20, 40);
+    double vx = dir, vy = (int)r.Next(10, 20) * 0.01;
+    while (num4 > 0)
+    {
+        num4--;
+        int x0 = (int)(px - num * 0.5), x1 = (int)(px + num * 0.5);
+        int y0 = (int)(py - num * 0.5), y1 = (int)(py + num * 0.5);
+        if (x0 < 0) x0 = 0; if (x1 > W) x1 = W;
+        if (y0 < 0) y0 = 0; if (y1 > H) y1 = H;
+        num2 = num * (int)r.Next(80, 120) * 0.01;
+        bool stop = false;
+        for (int x = x0; x < x1 && !stop; x++)
+        {
+            for (int y = y0; y < y1; y++)
+            {
+                double ddx = Math.Abs(x - px), ddy = Math.Abs(y - py);
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4)
+                {
+                    int ti = y * W + x;
+                    if ((act[ti] == 1 && TILE_DUNGEON.Contains(typ[ti])) || WALL_DUNGEON.Contains(wal[ti]))
+                    { num4 = 0; stop = true; break; }
+                    // 原版 cs:80763：active && (!CanBeCleared || type==53) → continue（跳过不可清/沙）
+                    if (act[ti] == 1 && (NOT_CLEAR.Contains(typ[ti]) || typ[ti] == 53)) { /* skip */ }
+                    else if (act[ti] == 1) act[ti] = 0;
+                }
+                if (num4 <= 0) break;
+            }
+            if (num4 <= 0) break;
+        }
+        if (num4 <= 0) break;
+        px += vx; py += vy;
+        vx += (int)r.Next(-10, 11) * 0.05;
+        vy += (int)r.Next(-10, 11) * 0.05;
+        if (vx > dir + 0.5) vx = dir + 0.5;
+        if (vx < dir - 0.5) vx = dir - 0.5;
+        if (vy > 2.0) vy = 2.0;
+        if (vy < 0.0) vy = 0.0;
+    }
+    if (steps > 0 && (int)py < rockLayer + 50) Cavinator2((int)px, (int)py, steps - 1);
+}
+for (int i = 0; i < mCaveX.Count; i++)
+{
+    CaveOpenater(mCaveX[i], mCaveY[i]);
+    Cavinator2(mCaveX[i], mCaveY[i], (int)r.Next(40, 50));
+}
+Checkpoint("mcopenings");
+
+// ---- Beaches（cs:14947-15087 + TuneOceanDepth cs:27104）----
+{
+    bool floridaL = false, floridaR = false;
+    if ((int)r.Next(4) == 0)
+    {
+        if ((int)r.Next(2) == 0) floridaL = true; else floridaR = true;
+    }
+
+    for (int side = 0; side < 2; side++)
+    {
+        if (side == 0)
+        {
+            int waterX = (int)r.Next(220, 260);
+            if (dungeonRight) waterX = 275;
+            int cap = leftBeachEnd - 50;
+            if (waterX > cap) waterX = cap;
+            int j = 0;
+            while (j < H && act[j * W + (waterX - 1)] == 0) j++;
+            j += (int)r.Next(1, 5);
+            int count = 0; double depth = 1.0;
+            for (int x = waterX - 1; x >= 0; x--)
+            {
+                if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
+                else depth += 1.0;
+                int pad = (int)r.Next(15, 20);
+                int yEnd = (int)((double)j + depth + pad);
+                for (int y = 0; y < yEnd && y < H; y++)
+                {
+                    int ti = y * W + x;
+                    if ((double)y < (double)j + depth * 0.75 - 3.0)
+                    {
+                        act[ti] = 0;
+                        if (y > j) liq[ti] = 255;
+                        else if (y == j) liq[ti] = 127;
+                    }
+                    else if (y > j) { typ[ti] = 53; act[ti] = 1; }
+                    wal[ti] = 0;
+                }
+            }
+        }
+        else
+        {
+            int waterX = W - (int)r.Next(220, 260);
+            if (!dungeonRight) waterX = W - 275;
+            int cap = rightBeachStart + 50;
+            if (waterX < cap) waterX = cap;
+            int l = 0;
+            while (l < H && act[l * W + waterX] == 0) l++;
+            l += (int)r.Next(1, 5);
+            int count = 0; double depth = 1.0;
+            for (int x = waterX; x < W; x++)
+            {
+                if (x < W - 30) { count++; depth = TuneOceanDepth(count, depth, floridaR); }
+                else depth += 1.0;
+                int pad = (int)r.Next(15, 20);
+                int yEnd = (int)((double)l + depth + pad);
+                for (int y = 0; y < yEnd && y < H; y++)
+                {
+                    int ti = y * W + x;
+                    if ((double)y < (double)l + depth * 0.75 - 3.0)
+                    {
+                        act[ti] = 0;
+                        if (y > l) liq[ti] = 255;
+                        else if (y == l) liq[ti] = 127;
+                    }
+                    else if (y > l) { typ[ti] = 53; act[ti] = 1; }
+                    wal[ti] = 0;
+                }
+            }
+        }
+    }
+}
+Checkpoint("beaches");
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {
