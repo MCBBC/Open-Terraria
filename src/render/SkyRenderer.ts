@@ -1,6 +1,7 @@
 // 天空渲染：昼夜渐变、太阳/月亮、星星、云
 import type { Clock } from '../world/World';
 import { shade, mix } from '../assets/Palette';
+import { LanternNight } from '../world/LanternNight';
 
 // 天空关键色 [时刻, 顶色, 底色]（时刻 0-1）
 const SKY_KEYS: Array<[number, string, string]> = [
@@ -202,7 +203,8 @@ export class SkyRenderer {
   }
 
   // ---- 器件驱动的天空效果（SceneMetrics 器件态；Renderer 每帧写入）----
-  fx: { monolith: number; party: boolean; surfaceY: number } = { monolith: -1, party: false, surfaceY: 0 };
+  fx: { monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number } =
+    { monolith: -1, party: false, surfaceY: 0, worldW: 0, worldH: 0 };
 
   /** 天塔柱全屏滤镜颜色/不透明度（ScreenEffectInitializer.cs:18-21 FilterMiniTower 1:1；
    *  类型映射 SceneState.cs:111-115：0 星璇/1 星云/2 星尘/3 耀斑/4 月总）。
@@ -247,6 +249,140 @@ export class SkyRenderer {
       depth: 1.6 + Math.random() * 1.75,
       speed: -1.5 - 2.5 * Math.random(),
     });
+  }
+
+  // ---- 灯笼夜天空（LanternSky.cs 1:1，贴图 Extra_134 三变体 20×20）----
+  private lanternTex: HTMLImageElement | null = null;
+  private lanternOpacity = 0;   // _opacity：±0.01/帧向 LanternsUp 逼近（Update :119）
+  private lanterns: Array<{
+    x: number; y: number; depth: number; speed: number; variant: number;
+    time: number; timeMax: number; rot: number; active: boolean;
+  }> = [];
+  private lanternsLeaving = false;
+
+  /** ResetLantern（LanternSky.cs:103-111）：depth = (1-i/N)×4.4+1.6、
+   *  speed = -1.5-2.5×rand、变体 0-2、漂浮倒计时 (2000+rand1200)×2 */
+  private resetLantern(l: { depth: number; speed: number; variant: number; time: number; timeMax: number }, i: number): void {
+    l.depth = (1 - i / this.lanterns.length) * 4.4 + 1.6;
+    l.speed = -1.5 - 2.5 * Math.random();
+    l.variant = Math.floor(Math.random() * 3);
+    l.time = (2000 + Math.floor(Math.random() * 1200)) * 2;
+    l.timeMax = l.time;
+  }
+
+  /** GenerateLanterns（:83-101）：N = maxTilesY/4，Y 带在世界地表上方（视口高度的
+   *  0.7 视差源 → num..num-screenHeight 对应世界 px 带） */
+  private generateLanterns(): void {
+    const N = Math.max(24, Math.floor(this.fx.worldH / 4));
+    this.lanterns = new Array(N);
+    const surfacePx = this.fx.surfaceY * 1; // tile → px（fx.surfaceY 已是 px）
+    for (let i = 0; i < N; i++) {
+      const l = {
+        x: Math.random() * this.fx.worldW * 16, y: 0,
+        depth: 0, speed: 0, variant: 0, time: 0, timeMax: 1, rot: 0, active: true,
+      };
+      // 原版 y 带 = rand(minValue..num)，num = screenY×0.7 - 屏高、min = num - 地表px
+      l.y = surfacePx - 900 + Math.random() * 900;
+      this.resetLantern(l, i);
+      l.active = true;
+      this.lanterns[i] = l;
+    }
+  }
+
+  /** 灯笼夜夜空绘制（LanternSky.Update/Draw 1:1：浮升 + 风漂移 + 深度视差 + X 4000 包裹）。
+   *  载体注明：原版为 SkyManager「Lantern」自定义天空层（spritebatch），此处 canvas 2D
+   *  以同参数直接绘制（视差 (1/depth, 0.9/depth)×1.2、深度 alpha 分档 0.3-1.0、
+   *  三份旋转光晕副本 + 主贴图 :243-254） */
+  private drawLanterns(ctx: CanvasRenderingContext2D, viewW: number, viewH: number, camX: number, camY: number, dtMs: number): void {
+    const up = LanternNight.lanternsUp;
+    // _opacity ±0.01/帧（:119）
+    this.lanternOpacity = Math.max(0, Math.min(1, this.lanternOpacity + (up ? 0.01 : -0.01) * (dtMs / (1000 / 60))));
+    if (this.lanternOpacity <= 0.001) {
+      if (!up) { this.lanterns.length = 0; this.lanternsLeaving = false; }
+      return;
+    }
+    // 相机在地表以下不画（Draw :165：screenPosition.Y > worldSurface×16 直接返回）
+    if (camY > this.fx.surfaceY) return;
+    if (!this.lanternTex) {
+      const im = new Image();
+      im.src = 'sprites/vanilla/Extra_134.png';
+      this.lanternTex = im;
+    }
+    if (this.lanterns.length === 0 || (up && this.lanternsLeaving)) {
+      this.generateLanterns();
+      this.lanternsLeaving = false;
+    }
+    if (!up && !this.lanternsLeaving) this.lanternsLeaving = true; // Deactivate：升顶后逐个熄灭
+    const tex = this.lanternTex;
+    const frames = dtMs / (1000 / 60);
+    const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
+    const w0 = wind === 0 ? 0.1 : wind;   // Update :126-130
+    const N = this.lanterns.length;
+    let drawing = 0;
+    for (let i = 0; i < N; i++) {
+      const l = this.lanterns[i];
+      if (!l.active) continue;
+      // Update :131-149
+      const num2 = Math.sin(l.x / 120) * 0.5;
+      l.y += num2 * 0.5 * frames;
+      l.y += (l.speed * (l.time / l.timeMax)) * 0.5 * frames;   // FloatAdjustedSpeed
+      l.x += (0.1 + w0) * (3 - l.speed) * 0.5 * ((i / N) + 1.5) / 2.5 * frames;
+      l.rot = num2 * (w0 < 0 ? -1 : 1) * 0.5;
+      l.time = Math.max(0, l.time - frames);
+      if (l.y < 300) {
+        if (!this.lanternsLeaving) {
+          this.resetLantern(l, i);
+          l.y = this.fx.surfaceY + 1600;
+          l.x = Math.random() * this.fx.worldW * 16;
+        } else {
+          l.active = false;
+          continue;
+        }
+      }
+      drawing++;
+    }
+    if (drawing === 0 || !tex || !tex.complete || tex.naturalWidth === 0) return;
+    const fw = tex.naturalWidth / 3, fh = tex.naturalHeight;
+    const cx = camX + viewW / 2, cy = camY + viewH / 2; // 屏中心（世界 px）
+    const hourY = Math.sin(((performance.now() / 1000) % 6) / 6 * Math.PI * 2); // GlobalTime 6s 环绕的 Y 分量
+    const flicker = hourY * 0.2 + 0.8;                  // DrawLantern :245-246
+    for (let i = 0; i < N; i++) {
+      const l = this.lanterns[i];
+      if (!l.active) continue;
+      // 深度 alpha 分档（:196-224）
+      let mul = 1;
+      if (l.depth > 5) mul = 0.3;
+      else if (l.depth > 4.5) mul = 0.4;
+      else if (l.depth > 4) mul = 0.5;
+      else if (l.depth > 3.5) mul = 0.6;
+      else if (l.depth > 3) mul = 0.7;
+      else if (l.depth > 2.5) mul = 0.8;
+      else if (l.depth > 2) mul = 0.9;
+      const scale = (1 / l.depth) * 1.2, scaleY = (0.9 / l.depth) * 1.2;
+      // 视差（:225-234）：(pos-屏中心)×(scale, scaleY)+屏中心，X 模 4000 包裹
+      let sx = (l.x - cx) * scale + cx - camX;
+      const sy = (l.y - cy) * scaleY + cy - camY;
+      sx = (((sx + 500) % 4000) + 4000) % 4000 - 500;
+      if (sx < -100 || sx > viewW + 100 || sy < -100 || sy > viewH + 100) continue;
+      // 光晕三副本（:248-252）：绕 (0,2) 旋转 120° 均布 × 环绕 Y
+      const glowA = 0.4 * mul * this.lanternOpacity * flicker;
+      ctx.save();
+      ctx.translate(sx, sy);
+      ctx.rotate(l.rot);
+      ctx.imageSmoothingEnabled = false;
+      ctx.globalAlpha = glowA;
+      for (let k = 0; k < 3; k++) {
+        const a = (Math.PI * 2 * k) / 3 + l.rot;
+        ctx.drawImage(tex, fw * l.variant, 0, fw, fh,
+          Math.cos(a) * 2 * hourY - (fw * scale * 2) / 2,
+          Math.sin(a) * 2 * hourY - (fh * scale * 2) / 2, fw * scale * 2, fh * scale * 2);
+      }
+      // 主贴图：Color(250,120,60,120) × 分档 × 不透明度（:194-253）
+      ctx.globalAlpha = 0.47 * mul * this.lanternOpacity;
+      ctx.drawImage(tex, fw * l.variant, 0, fw, fh, -(fw * scale * 2) / 2, -(fh * scale * 2) / 2, fw * scale * 2, fh * scale * 2);
+      ctx.restore();
+    }
+    ctx.globalAlpha = 1;
   }
 
   /** 派对气球绘制（PartySky.Update/Draw :130-198 精简核：上升 + 风漂移 + 视差 1/depth） */
@@ -373,7 +509,7 @@ export class SkyRenderer {
     return [SKY_KEYS[0][1], SKY_KEYS[0][2]];
   }
 
-  draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7) {
+  draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7, camY = 0) {
     const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
     const grad = ctx.createLinearGradient(0, 0, 0, viewH);
@@ -463,6 +599,8 @@ export class SkyRenderer {
 
     // 派对气球（PartySky：BirthdayParty.PartyIsUp 时 SkyManager 激活）
     this.drawPartyBalloons(ctx, viewW, viewH, camX, dtMs);
+    // 灯笼夜夜空（LanternSky：灯笼浮升层，需相机 Y 判地表门）
+    this.drawLanterns(ctx, viewW, viewH, camX, camY, dtMs);
 
     // 远山最后绘制（最前层）：太阳和云在山后，不会出现在山前
     this.drawMountains(ctx, viewW, viewH, camX);

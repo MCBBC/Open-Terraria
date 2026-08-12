@@ -42,6 +42,8 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   chests: ChestData[];
   signs: Array<{ x: number; y: number; text: string }>;
+  /** 挂物族存放物（物品框/武器架/模特/帽架/食物盘/展示罐；生成路径无、读档路径有） */
+  furnitureItems?: import('../world/FurnitureItems').FurnitureItemRecord[];
   trees: Array<{ x: number; y: number; h: number }>;
   flags: Record<string, boolean>;
   treeX: number[]; treeStyle: number[]; treeTops: number[];

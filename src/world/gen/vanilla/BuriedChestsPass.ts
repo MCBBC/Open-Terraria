@@ -179,8 +179,10 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
     if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 19)); // 冰火把/火把
     if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
-  } else if (gy < ctx.worldH - 250) {
-    // ===== 洞穴箱(rockLayer ≤ gy < h-250,cs:36789-37163)=====
+  } else if (gy <= ctx.worldH - 205) {
+    // ===== 洞穴箱(rockLevel ≤ gy ≤ h-205,cs:36789-37163)=====
+    // ★门对齐原版：战利品 flag8 与样式 num9=4 共用 y > h-205 一道门（cs:36162-36164）
+    // ——此前自造 h-250 分界 = h-250..h-205 带出"地狱战利品装金箱"(地狱上缘可见)
     if (mainVanillaId > 0) {
       push(mainVanillaId);
       if (flags.ice && rng.int(0, 4) === 0) push(3199);       // 1/5 冰镜
@@ -222,7 +224,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? (flags.ice ? 974 : 8) : 282, rng.int(15, 30)); // 火把/荧光棒
     if (rng.int(0, 1) === 0) push(73, rng.int(1, 2));         // 金币
   } else {
-    // ===== 地狱箱(gy ≥ h-250,cs:37163-37360)=====
+    // ===== 地狱箱(gy > h-205,cs:37163-37360;与 style 4 同门)=====
     if (mainVanillaId > 0) {
       push(mainVanillaId);
       if (rng.int(0, 4) === 0) push(5010);                    // 1/5 宝藏磁铁

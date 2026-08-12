@@ -34,6 +34,7 @@ import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import { attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith } from '../world/wiring/devices';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, type PartyState } from '../world/wiring/party';
+import { LanternNight } from '../world/LanternNight';
 import { placePortal as placePortalAt, portalRegistry, clearPortals, type Portal } from '../entities/Portal';
 import {
   rollExtractinatorDrop, extractinatorMode, extractinatorUseTime, mathRand,
@@ -43,6 +44,11 @@ import {
 import { ITEM_MAP } from '../wld/WldImport';
 import { TILE_DEFS, T, TILE_BY_KEY } from '../data/tiles';
 import { furnitureStyleBase } from '../world/FurnitureStyle';
+import {
+  FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
+  furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
+  furnitureSlotCount, fitsFurniture, type FurnitureKind,
+} from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
@@ -148,6 +154,30 @@ const TRAVEL_POOL = travelshopJson as {
 };
 /** 物品 value 表（vanilla-shopstock.json 附带；旅行商定价用） */
 const ITEM_VALUES = (shopstockJson as { values: Record<string, number> }).values;
+
+/** Boss netID → 首胜事件 id（NPC.cs:80014-80291 SetEventFlagCleared 实参）：
+ *  击败 Boss 除记账外还触发 OnGameEventClearedForTheFirstTime → 次夜灯笼夜预约
+ *  （排除集 4 哀木/21 圣诞树/22 圣诞坦克不在本表）。石人双体/双子双体等
+ *  多 netID Boss 映射到同一事件 id。 */
+const BOSS_GAME_EVENT_BY_NPC: Record<number, number> = {
+  50: 11,          // KingSlime
+  222: 8,          // QueenBee
+  4: 13,           // EyeOfCthulhu（downedBoss1）
+  13: 14, 266: 14, // EaterOfWorlds / BrainOfCthulhu（downedBoss2）
+  35: 15,          // SkeletronHead（downedBoss3）
+  113: 19,         // WallOfFlesh（StartHardmode）
+  262: 12,         // Plantera
+  245: 6, 246: 6,  // Golem 头/身
+  370: 7,          // DukeFishron
+  439: 9,          // LunaticCultist
+  398: 10,         // MoonLordCore
+  657: 24,         // QueenSlime
+  636: 23,         // EmpressOfLight
+  668: 25,         // Deerclops
+  134: 16,         // Destroyer（downedMechBoss1）
+  125: 17, 126: 17,// Retinazer / Spazmatism（downedMechBoss2）
+  127: 18,         // SkeletronPrime（downedMechBoss3）
+};
 
 // ---- 原版 Main.tileCut 可砍集合（Main.cs:7312-7754 全表 38 项，经 vanilla.sheet 反查内部 id） ----
 // 挥击范围内命中即 KillTile：杂草/藤蔓/药草芽等直接碎，瓦罐(28)走整罐碎裂+掉落
@@ -1155,6 +1185,7 @@ export class Game implements GameHooks {
     this.entities.clear();
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
     partyWorldClear(this.partyState);
+    LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备 = 原版经典开局三件套（铜镐/铜斧/铜剑），其余一概不给——
     // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
@@ -1849,6 +1880,11 @@ export class Game implements GameHooks {
         ? { t: intensity, x: player.cx, y: player.cy } : null;
     }
 
+    // ---- 灯笼夜 UpdateTime（Main.cs:64429 = LanternNight.UpdateTime 每帧位）：
+    //      真灯笼不再满足 LanternsCanPersist（血月/入侵/月总倒计时/刷出 Boss）即提前收场。
+    //      入夜 CheckNight / 黎明 CheckMorning 在下方昼夜事件 crossing 段触发 ----
+    LanternNight.updateTime(this.lanternCtx());
+
     // ---- Boss 逻辑 ----
     if (this.boss) {
       // 原版无通用"日出剔除 Boss"机制：EoC 白天走 AI_004 自漂离、骷髅王族白天狂暴、
@@ -1867,6 +1903,14 @@ export class Game implements GameHooks {
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
+          // 首胜灯笼夜预约（NPC.cs NPCLoot 各 case SetEventFlagCleared 实参 →
+          // OnGameEventClearedForTheFirstTime default/10/16-18 翻转；4/21/22 排除）。
+          // id 表：11 史王 8 蜂后 13 EoC 14 世吞|克脑 15 骷髅王 19 肉山 12 世纪之花
+          // 6 石头人 7 猪鲨 9 邪教徒 10 月总 24 史后 23 光女 25 鹿角怪 16/17/18 三王
+          if (this.boss.vanillaId != null) {
+            const ev = BOSS_GAME_EVENT_BY_NPC[this.boss.vanillaId];
+            if (ev !== undefined) LanternNight.onGameEventCleared(ev);
+          }
           // 星璇塔触发（NPC.cs:80194-80197：教徒 439 死 → TriggerLunarApocalypse——
           // downed_439 通用置位处直接追加，四塔就位 + 满盾 + misc[43] 公告）
           if (this.boss.vanillaId === 439) this.triggerLunarApocalypse();
@@ -1894,6 +1938,11 @@ export class Game implements GameHooks {
         // 黎明：月相推进 + 血月清除 + 季节重算（Main.cs:64877-64890）
         w.clock.moonPhase = (w.clock.moonPhase + 1) % 8;
         w.clock.bloodMoon = false;
+        // 灯笼夜对黎明事件 roll 的压制（Main.cs:64541 ShouldNormalEventsBeAbleToStart
+        // 在 StartDay 之前求值——此时 CheckMorning 未跑，LanternsUp 仍为真 → stopEvents）
+        const lanternStopEvents = LanternNight.lanternsUp;
+        // 灯笼夜黎明收场（Main.cs:64854 = LanternNight.CheckMorning）：双旗清零
+        LanternNight.checkMorning();
         // ---- 月事件黎明结算（UpdateTime_StartDay :64867-64871，顺序固定：
         //      总分广播 → 强制季节 → stop；须在下方日食 roll 之前）----
         // CheckForMoonEventsStartingTemporarySeasons（Main.cs:10833-10862 1:1）：
@@ -1942,13 +1991,14 @@ export class Game implements GameHooks {
         if (w.invasionDelay > 0) w.invasionDelay--;
         // 日食自然 roll（Main.cs:64898-64920）：hardMode && downedMechBossAny &&
         // 1/20 → eclipse=true + 公告 LegacyMisc.20（remix 的 misc.106 无对应世界）。
-        // 原版与当日哥布林/海盗 roll 互斥（同一段 if/else）——命中日食则跳过入侵 roll
+        // 原版与当日哥布林/海盗 roll 互斥（同一段 if/else）——命中日食则跳过入侵 roll。
+        // 灯笼夜压掉整段（StartDay 头部 stopEvents → return，:64893-64895）
         const mechAny = !!(w.flags['downed_125'] || w.flags['downed_126']
           || w.flags['downed_127'] || w.flags['downed_134']);
-        if (w.flags.hardMode && mechAny && Math.random() < 1 / 20) {
+        if (!lanternStopEvents && w.flags.hardMode && mechAny && Math.random() < 1 / 20) {
           w.clock.eclipse = true;
           this.newText(Lang.misc(20), 50, 255, 130);   // ChatColors.World
-        } else {
+        } else if (!lanternStopEvents) {
           // 哥布林军队自然 roll（Main.cs:64927-64936）：需砸过暗影珠/猩红之心；
           // 未击败过 1/3，已击败 hardMode 1/60 否则 1/30
           if (w.flags.shadowOrbSmashed && w.invasionType === INVASION_NONE
@@ -1971,12 +2021,18 @@ export class Game implements GameHooks {
         // 夜幕：日食清除（Main.cs:64721——日食全天持续，入夜即结束；
         // UpdateTime_StartNight 内位于血月 roll 之前）
         w.clock.eclipse = false;
+        // 灯笼夜入夜兑现（Main.cs:64709 = LanternNight.CheckNight → NaturalAttempt）：
+        // 首胜预约 NextNightIsLanternNight 或月总已杀后的 1/14 自然 roll（冷却 5-10 夜）
+        LanternNight.checkNight(this.lanternCtx());
         // 派对入夜结算（BirthdayParty.CheckNight :40-53）：进行中则结束 + 粉字广播 misc[99]
         if (partyCheckNight(this.partyState)) {
           this.newText(Lang.misc(99), 255, 0, 160);
         }
       }
+      // 入夜事件压制（Main.cs:64717：LanternNight.LanternsUp → stopEvents=true，
+      // 血月/入夜 Boss 召唤等 roll 整段跳过；须在 CheckNight 之后判读——当夜刚兑现也算）
       if (crossed(0.75)
+        && !LanternNight.lanternsUp
         && !w.clock.bloodMoon && w.clock.moonPhase !== 4
         && w.moonEvent.kind === 0      // 月事件进行中不 roll 血月（Main.cs:64300-64306 压制）
         && player.maxHp > 120 && Math.random() < 1 / 9) {
@@ -2006,12 +2062,16 @@ export class Game implements GameHooks {
         // SetEventFlagCleared（NPC.cs:79557-79564）：首次胜利置旗；原版首胜还会经
         // OnGameEventClearedForTheFirstTime → LanternNight.NextNightIsLanternNight = true
         // （次夜灯笼夜：LanternsUp 状态 + 灯笼视觉 + 向导 Lantern1/2 对话段）。
-        // LanternNight 系统未移植——依赖登记：NextNightIsLanternNight 翻转/次日
-        // LanternsUp 态/灯笼渲染与对话消费点
         if (inv.won === INVASION_GOBLIN) w.flags['downedGoblins'] = true;
         else if (inv.won === INVASION_SNOW_LEGION) w.flags['downedFrost'] = true;
         else if (inv.won === INVASION_PIRATE) w.flags['downedPirates'] = true;
         else if (inv.won === INVASION_MARTIAN) w.flags['downedMartians'] = true;
+        // 首胜事件 id（Main.cs:63785-63800 SetEventFlagCleared 实参）：goblin 0 /
+        // frost 1 / pirates 2 / martians 3——均落入 switch default → 预约次夜灯笼夜
+        const eventId = inv.won === INVASION_GOBLIN ? 0
+          : inv.won === INVASION_SNOW_LEGION ? 1
+            : inv.won === INVASION_PIRATE ? 2 : 3;
+        LanternNight.onGameEventCleared(eventId);
       }
     }
     // ---- 旅行商人（Main.cs:64484-64505 + WorldGen.SpawnTravelNPC :5188）：
@@ -3632,6 +3692,26 @@ export class Game implements GameHooks {
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
+    // 挂物族（原版 KillTile 前置特例，WorldGen.cs:63703-63746）：
+    //  框/武器架/食物盘/展示罐【有物】→ 本次击打只弹出存放物、方块保留
+    //   （KillTile_DropItems :63703-63738 DropItem 后提前 return；第二击才真正破坏）；
+    //  模特/帽架【有物】→ 整件不可破坏（TEDisplayDoll.IsBreakable :877-891 /
+    //   TEHatRack.IsBreakable :369-376 → WorldGen.cs:62540-62560
+    //   CheckTileBreakability2_ShouldTileSurvive）
+    if (FURNITURE_TILE_KIND.has(type)) {
+      const fKind = FURNITURE_TILE_KIND.get(type)!;
+      const [fax, fay] = furnitureAnchor(st, fKind, x, y);
+      const fbr = furnitureTryBreak(this.world.furnitureItems, fKind, fax, fay);
+      if (fbr.result === 'pop') {
+        if (fbr.item) {
+          this.spawnDrop(fax * TILE + 8, fay * TILE, ITEM_DEFS[fbr.item.id].key, fbr.item.stack, 0, -2);
+        }
+        this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 4, 1.2);
+        return;
+      }
+      if (fbr.result === 'blocked') return;
+      // 'break'：空物 → 落入下方 object/普通清除路径，记录在清除点移除
+    }
     // object：找锚点整体移除。锚点 = 命中格 (2w-1)×(2h-1) 邻域内同类型、帧相位为 (0,0)
     // （fv%(w*18)==0 且 fyv%(h*18)==0，兼容 style 偏移）、且 w×h 框包含命中格的候选中
     // 帧最小的格——两个同款物体紧邻时也能选对所属的那件（全局最小帧会误选隔壁那件）；
@@ -3666,6 +3746,9 @@ export class Game implements GameHooks {
       if (dropKey) this.spawnDrop(ax * TILE + 8, ay * TILE, dropKey, 1);
       // 宝箱内容物掉出
       if (type === T.CHEST) this.dumpChest(ax, ay);
+      // 挂物族：空物破坏 → 移除存放记录（TileEntityType.Kill，TileEntity.cs:110-116；
+      //  挂物族锚点公式与通用锚点算法在这些 tile 上一致，直接用 ax/ay）
+      if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, ax, ay);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
@@ -3707,6 +3790,8 @@ export class Game implements GameHooks {
     // 普通（★ 帧必须在清格前捕获——setTile(0) 清零 frameX）
     const fxHere = st.frameX[st.idx(x, y)];
     st.setTile(x, y, 0);
+    // 挂物族 1×1（食物盘 520）：破坏 → 移除存放记录（TileEntityType.Kill）
+    if (FURNITURE_TILE_KIND.has(type)) removeFurnitureAt(this.world.furnitureItems, x, y);
     // 宝石暴露晶簇（KillTile_GetItemDrops case 178，:65545-65569）：
     // style=frameX/18 → 0紫181/1黄180/2蓝177/3翠179/4红178/5钻182/6琥珀999
     if (def.vanilla?.sheet === 178) {
@@ -4249,6 +4334,17 @@ export class Game implements GameHooks {
     if (tileId === T.CHEST) {
       this.world.chests.push({ x: tx, y: ty, items: Array(10).fill(null) });
     }
+    // 挂物族放置登记（原版 TileLoader.PlaceTile → TE*.Hook_AfterPlacement：
+    //  TEItemFrame.cs:15 / TEWeaponsRack.cs:40 / TEDisplayDoll.cs:123 / TEHatRack.cs:31 /
+    //  TEFoodPlatter.cs:15 / TEDeadCellsDisplayJar.cs:15 → TileEntityType.Place）。
+    //  记录在放置点(=锚点左上格)登记；空记录等价于无物，交互侧取用时也会按需补建
+    if (FURNITURE_TILE_KIND.has(tileId)) {
+      const fKind = FURNITURE_TILE_KIND.get(tileId)!;
+      this.world.furnitureItems.push({
+        x: tx, y: ty, kind: fKind,
+        slots: new Array(furnitureSlotCount(fKind)).fill(null),
+      });
+    }
     // 陷阱(137)朝向 = 放置时玩家面朝方向（Player.cs:40209 PlaceThing_Tiles_PlaceIt_SpinTraps：
     // direction==1 → frameX += 18）。全样式通用（frameY=种类，frameX=方向）；放置后不可再调向
     if (def.vanilla?.sheet === 137 && this.player.facing === 1) {
@@ -4326,6 +4422,80 @@ export class Game implements GameHooks {
     return false;
   }
 
+  /**
+   * 挂物族右键交互（Player.cs:32093-32121 → TE*.OnPlayerInteraction 1:1）：
+   *  手持可放且未收藏 → 放入（单槽族 TryPlacing :83-100：占位物先弹出为掉落，
+   *   再写入新物 stack=1，手持 -1；模特/帽架 TryFitting :680-725/:337-369：
+   *   多叠放 1 克隆/单叠整槽交换，回写手持格）；
+   *  否则 → 取出（单槽族 = OnPlayerInteraction else 分支 :134-151 →
+   *   KillTile(fail:true) → KillTile_DropItems :63703 提前 return：存放物弹为
+   *   世界掉落、方块保留；模特/帽架原版此时打开槽位 UI（BasicOpenCloseInteraction
+   *   TileEntity.cs:250-285），本作无该 UI，最小等价 = 按原版槽位序取首个非空，
+   *   空手优先回手持格（保留词缀），否则入包、装不下掉落）
+   */
+  private useFurnitureInteraction(tx: number, ty: number, kind: FurnitureKind) {
+    const st = this.world.store;
+    const [ax, ay] = furnitureAnchor(st, kind, tx, ty);
+    const list = this.world.furnitureItems;
+    const held = this.player.inv.heldItem();
+    const vid = held ? slotVanillaId(held.id) : -1;
+    if (held && vid > 0 && !held.favorited && fitsFurniture(kind, vid)) {
+      if (kind === 'display_doll') {
+        const r = dollPlace(list, ax, ay, held, vid);
+        if (r) {
+          if (r.swappedOut) {
+            // 整槽交换（Utils.Swap）：换出物回手持格，取消收藏（TEDisplayDoll.cs:707）
+            this.player.inv.slots[this.player.inv.selected] = { ...r.swappedOut, favorited: false };
+          } else if (held.stack <= 0) {
+            this.player.inv.slots[this.player.inv.selected] = null;
+          }
+          this.sfx.play('pickup'); // SoundID 7（TryFitting :698）
+          this.cb.onInventoryChanged();
+        }
+      } else if (kind === 'hat_rack') {
+        const r = hatRackPlace(list, ax, ay, held, vid);
+        if (r) {
+          if (r.swappedOut) this.player.inv.slots[this.player.inv.selected] = { ...r.swappedOut, favorited: false };
+          else if (held.stack <= 0) this.player.inv.slots[this.player.inv.selected] = null;
+          this.sfx.play('pickup'); // SoundID 7（TEHatRack.cs:351）
+          this.cb.onInventoryChanged();
+        }
+      } else {
+        const r = furniturePlaceSingle(list, kind, ax, ay, held, vid);
+        if (r.ok) {
+          // 占位旧物先弹出（TryPlacing :91-93 result.DropItem → 世界掉落）
+          if (r.replaced) {
+            this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[r.replaced.id].key, r.replaced.stack, 0, -2);
+          }
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.cb.onInventoryChanged();
+        }
+      }
+      this.input.rightDown = false;
+      return;
+    }
+    // 取出
+    if (kind === 'display_doll' || kind === 'hat_rack') {
+      const taken = furnitureTakeFirst(list, kind, ax, ay);
+      if (taken) {
+        const sel = this.player.inv.selected;
+        if (!this.player.inv.slots[sel]) {
+          this.player.inv.slots[sel] = { id: taken.item.id, stack: taken.item.stack, prefix: taken.item.prefix };
+        } else {
+          const left = this.player.inv.add(taken.item.id, taken.item.stack);
+          if (left > 0) this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[taken.item.id].key, left, 0, -2);
+        }
+        this.cb.onInventoryChanged();
+      }
+    } else {
+      const popped = furniturePopSingle(list, kind, ax, ay);
+      if (popped) {
+        this.spawnDrop(ax * TILE + 8, ay * TILE, ITEM_DEFS[popped.id].key, popped.stack, 0, -2);
+      }
+    }
+    this.input.rightDown = false;
+  }
+
   private interactAt(tx: number, ty: number) {
     const st = this.world.store;
     // 距离门（原版 Player.IsInTileInteractionRange Simple：约 5 格）——此前整个
@@ -4344,9 +4514,17 @@ export class Game implements GameHooks {
       type === T.DOOR_CLOSED || type === T.DOOR_OPEN || type === TILE_BY_KEY['v_83_herbs_mature']
       || type === TILE_BY_KEY['v_84_herbs_bloom'] || type === TILE_BY_KEY['crystal_heart']
       || type === TILE_BY_KEY['v_132_lever'] || type === TILE_BY_KEY['v_136_switch'] || type === TILE_BY_KEY['v_144_timers']
+      || FURNITURE_TILE_KIND.has(type) // 挂物族右键会改存放物（世界状态）
       || sh === 35 || sh === 139 || sh === 207 || sh === 410 || sh === 480 || sh === 509 || sh === 455
     );
     if (editDenied) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
+    // ---- 挂物族（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
+    //  Player.cs:32093-32121 右键分支 → TE*.OnPlayerInteraction，全量语义在
+    //  world/FurnitureItems.ts）----
+    if (FURNITURE_TILE_KIND.has(type)) {
+      this.useFurnitureInteraction(tx, ty, FURNITURE_TILE_KIND.get(type)!);
+      return;
+    }
     // ---- 提取机（tile 219 普通版 / 642 叶绿版；Player.cs:41008-41049
     //  PlaceThing_ItemInExtractinator 1:1，全量转化表见 world/Extractinator.ts）----
     if (type === (TILE_BY_KEY['v_219_extractinator'] ?? -1)
@@ -4824,6 +5002,10 @@ export class Game implements GameHooks {
       // Main.BackgroundEnabled（Main.cs:790）：设置项「背景 开/关」（Options.backgrounds，
       // 默认 true）——cloudBGAlpha 阴天渐变门（Main.cs:58783）
       backgroundEnabled: options.data.backgrounds,
+      // 灯笼夜天气压制（Main.cs:64288 云钳 30 / :64331 停雨 / :64353 不开新雨 /
+      // :58249 风场停掷）
+      lanternsUp: LanternNight.lanternsUp,
+      nextNightIsLanternNight: LanternNight.nextNightIsLanternNight,
       onCoinRain: (x, y, type, stack) => {
         // 非实心 32×32 门（WorldGen.cs:71847）
         const st = w.store;
@@ -6058,8 +6240,8 @@ export class Game implements GameHooks {
   }
 
   /** 台词 = NPC.GetChat(NPC.cs:94974+) type 17/18/22/37/19/20/38 分支 1:1。
-   *  环境事件文案（HasSpecialEventText 墓园/派对/雨/风日/风暴 + 向导日食/史莱姆雨）
-   *  已接；灯笼夜（LanternNight 系统未移植）与 DD2 段跳过，走常规池。
+   *  环境事件文案（HasSpecialEventText 墓园/派对/雨/风日/风暴 + 向导日食/史莱姆雨/
+   *  灯笼夜 Lantern1/2）已接；DD2 段跳过，走常规池。
    *  曾把未覆盖类型全部落到守卫老人自建文案池——向导会说出"解除诅咒"台词,已修 */
   private townNpcChat(npc: TownNPC): string {
     const p = this.player;
@@ -6109,10 +6291,14 @@ export class Game implements GameHooks {
       return dialog(48 + Math.floor(Math.random() * 4));                   // 48-51
     }
     if (npc.vanillaId === 22) {
-      // 向导(cs:95473-95489)：血月 170-172 → 灯笼夜 Lantern1/2（LanternNight 系统
-      // 未移植——登记）→ 日食 Eclipse → 史莱姆雨 SlimeRain → 夜晚 173 → 白天
+      // 向导(cs:95473-95489)：血月 170-172 → 灯笼夜 Lantern1/2（cs:95480：
+      // LanternsUp && !downedMoonlord → Lantern1 / LanternsUp && downedMoonlord →
+      // Lantern2）→ 日食 Eclipse → 史莱姆雨 SlimeRain → 夜晚 173 → 白天
       // hardMode Chatter 池（8 选 1）→ 白天 174-176
       if (w.clock.bloodMoon) return dialog(170 + r3());
+      if (LanternNight.lanternsUp) {
+        return Lang.text(w.flags['downed_398'] ? 'GuideSpecialText.Lantern2' : 'GuideSpecialText.Lantern1');
+      }
       if (w.clock.eclipse) return Lang.text('GuideSpecialText.Eclipse');
       if (w.weather.slimeRain) return Lang.text('GuideSpecialText.SlimeRain');
       if (!w.clock.isDay) return dialog(173);
@@ -6420,7 +6606,12 @@ export class Game implements GameHooks {
     if (npc.npcKey === 'travelling_merchant') return this.travelStock.slice();  // 动态股票
     const stock = Game.SHOPSTOCK[String(npc.vanillaId)];
     if (!stock) return [];
-    return stock.filter((s) => this.shopCondOk(s.cond)).map((s) => [s.id, s.price ?? 100]);
+    const out: Array<[number, number]> = stock.filter((s) => this.shopCondOk(s.cond)).map((s) => [s.id, s.price ?? 100] as [number, number]);
+    // 派对女孩灯笼夜专柜（Chest.cs:2282：LanternNight.LanternsUp → 上架 4702 放飞灯笼；
+    // extract-shops.mjs 未捕获该 if 门——与 moonPhase 同类缺口，此处直接补）。
+    // 原版 SetDefaults(4702) 无价格覆盖 → 按 item value 100 铜出售
+    if (npc.vanillaId === 208 && LanternNight.lanternsUp) out.push([4702, 100] as [number, number]);
+    return out;
   }
 
   /** 商店上架门（Chest.SetupShop if 门 → 本作状态映射；未实现事件门不上架） */
@@ -6450,9 +6641,39 @@ export class Game implements GameHooks {
       case 'xMas': return this.world.clock.xMas;
       case 'eclipse': return !!this.world.clock.eclipse; // 日食（电子人 774 等）
       case 'party': return partyIsUp(this.partyState);   // 派对进行中（派对商品族）
+      case 'lanternNight': return LanternNight.lanternsUp; // 灯笼夜（派对女孩 4702 放飞灯笼）
       default: return false;
     }
   }
+
+  // ---- LanternNight 上下文（LanternNight.cs 静态字段读取点 → 本仓世界态映射）----
+
+  /** LanternCtx：LanternsCanStart/Persist 的五门 + BossIsActive（:59-79） */
+  private lanternCtx() {
+    const w = this.world;
+    return {
+      bloodMoon: !!w.clock.bloodMoon,
+      pumpkinMoon: w.moonEvent.kind === MOON_KIND_PUMPKIN,
+      snowMoon: w.moonEvent.kind === MOON_KIND_FROST,
+      invasionType: w.invasionType,
+      moonLordCountdown: w.lunarEvent.moonLordCountdown,
+      // WorldGen.spawnMeteor——本仓陨石坠落系统未移植恒 false（登记：spawnMeteor 位）
+      spawnMeteor: false,
+      downedMoonlord: !!w.flags['downed_398'],
+      // BossIsActive（:68-79）：boss 或 13-15（世吞体节/克脑爬行者）——本仓 Boss 单槽
+      // + 入场怪近似为「Boss 槽在场或世吞体节/爬行者在场」
+      bossActive: () => {
+        if (this.boss && !this.boss.dead) return true;
+        return this.entities.enemies.some((n) => {
+          const en = n as Enemy;
+          return !en.dead && en.vanillaId != null && en.vanillaId >= 13 && en.vanillaId <= 15;
+        });
+      },
+    };
+  }
+
+  /** 灯笼夜概率/状态入口（供调试与对话/天气消费方读） */
+  get lanternsUp(): boolean { return LanternNight.lanternsUp; }
 
   private openNpcShop() {
     const npc = this.dialogNpc;

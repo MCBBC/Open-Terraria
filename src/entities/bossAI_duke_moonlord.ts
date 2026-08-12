@@ -22,6 +22,8 @@ import type { Renderer } from '../render/Renderer';
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
+import { projSprite } from './Arrow';
+import { BuffType } from '../stats/Buffs';
 
 // ---------------------------------------------------------------------------
 // 通用工具
@@ -842,12 +844,80 @@ function spawnTrueEye(game: GameHooks, part: Enemy): void {
   eye.ai0 = 0; eye.ai1 = 0; eye.ai2 = 0; eye.ai3 = part.ai3;
 }
 
+/** 月噬弹 456（Projectile.cs:5008 SetDefaults + aiStyle 85 :30678-30750）：
+ *  16×16 / hostile / 0 伤 / noTileCollide / timeLeft 600。ai[0]>0 出击段：每 tick 朝
+ *  玩家 min(16, 距离) 直飞，贴身 <20px 时 AddBuff(145 MoonLeech, 840t/专家 960t)
+ *  （:30722-30732，本仓经典模式恒 840t = 14s）；age≥330 或玩家失联 → ai[0] 翻负
+ *  回程段：朝 额前(0,+216) 直飞，<20px Kill（吸血视觉闭环）。
+ *  弹体自旋角 = (源心 - 玩家心 + (0,216)).ToRotation() + π/2（:30717）。 */
+export class MoonLeechProj extends Entity {
+  w = 16; h = 16;
+  vx = 0; vy = 0;
+  private srcId: number;
+  private out = true;      // ai[0] 符号：true = 出击 / false = 回程
+  private age = 0;         // localAI[0]
+  private fed = false;     // localAI[1]（已吸血，不重复授 buff）
+  private life = 600;      // timeLeft
+  dead = false;
+
+  constructor(src: Enemy, player: Player) {
+    super();
+    this.srcId = src.id;
+    this.x = src.cx - this.w / 2;
+    this.y = src.cy + 216 - this.h / 2;   // 额前 (0,+216)
+    const dx = player.cx - this.cx, dy = player.cy - this.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    this.vx = (dx / d) * 6; this.vy = (dy / d) * 6;   // :37823 出速 6（AI 段接管为 16 上限）
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    const player = game.player;
+    if (--this.life <= 0 || !src || src.dead) { this.dead = true; return; }
+    if (!player || player.dead) { if (this.out) this.out = false; }   // :30706-30712 玩家失联即回程
+    this.age++;
+    if (this.age >= 330 && this.out) this.out = false;                // :30702-30705
+    // 出击：朝玩家心直飞（:30722-30725）；回程：朝源额前 (0,+216)（:30734-30738）
+    const tx = this.out ? player.cx : src.cx;
+    const ty = this.out ? player.cy : src.cy + 216;
+    const dx = tx - this.cx, dy = ty - this.cy;
+    const d = Math.hypot(dx, dy);
+    const spd = Math.min(16, d);
+    if (d > 0.001) { this.vx = (dx / d) * spd; this.vy = (dy / d) * spd; }
+    this.x += this.vx; this.y += this.vy;
+    // 贴身结算：出击段 <20px 授 MoonLeech 145（:30726-30732）；回程段 <20px Kill（:30740-30743）
+    if (this.out && d < 20 && !this.fed) {
+      this.fed = true;
+      player.buffs.apply(BuffType.MoonLeech, 840 / 60);
+    } else if (!this.out && d < 20) {
+      this.dead = true;
+    }
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = projSprite(456);
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    // 自旋（:30717）：(源心 - 玩家心 + (0,216)) 角 + π/2——回程矢量已同向，直接用速度角近似
+    const ang = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(ang);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.h);
+    ctx.restore();
+  }
+}
+
 /** 月噬怪召出(:37828-37842 残肢 / :37975-37989 月噬攻击):头在 lt/inSlot=120/180/240
  *  于玩家处召 NPC 401,ai[0]=头 whoAmI+1 / ai[1]=源弹 456 索引。
- *  原版门禁 = 玩家身中 MoonLeech debuff 145(由 456 月噬弹命中赋予);本仓 456 为
- *  0 伤纯视觉弹且 debuff 145 未实装——按「月噬弹已射出即视为命中」无条件补召
+ *  原版门禁 = 遍历全部 456 弹,其 ai[1] 指向的玩家 FindBuffIndex(145) != -1 才召
+ *  （每弹一只）。本仓单玩家:debuff 145 已由 MoonLeechProj 贴身授予 → 玩家身中
+ *  MoonLeech 即召,等价替换旧「弹已射出即命中」无条件近似
  *  (ai[1] 源弹索引以 -1 代,moonLeechAI 以出生点代弹着点,不受影响)。 */
 function spawnMoonLeech(game: GameHooks, head: Enemy, player: Player): void {
+  if (!player.buffs.moonLeech) return;
   const leech = spawnPart(game, head, 401);
   if (!leech) return;
   leech.x = player.cx - leech.w / 2;
@@ -1380,10 +1450,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
     if (e.ai2 >= 555) e.ai2 = 0;
     if (e.ai2 >= 120 && player) { // :37805-37843 残肢期月噬循环
       const lt = e.ai2 - 120;
-      if (lt === 0) { // :37811-37827 从额前 216px 发月噬 456(0 伤,纯吸血视觉)
-        const dx = player.cx - e.cx, dy = player.cy - (e.cy + 216);
-        const d = Math.hypot(dx, dy) || 1;
-        shoot(game, e.cx, e.cy + 216, (dx / d) * 6, (dy / d) * 6, 0, 456, 600);
+      if (lt === 0) { // :37811-37827 从额前 216px 发月噬 456(0 伤,纯吸血视觉→MoonLeechProj)
+        addProj(game, new MoonLeechProj(e, player));
       }
       // :37828-37842 lt=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
       if ((lt === 120 || lt === 180 || lt === 240)) spawnMoonLeech(game, e, player);
@@ -1427,10 +1495,8 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
   } else if (e.ai0 === 2) { // 月噬(:37953-37990)
     f2T = 2;
     f3T = 3;
-    if (inSlot === 0 && player) { // :37958-37973 额前 216px 朝玩家月噬 456(0 伤)
-      const dx = player.cx - e.cx, dy = player.cy - (e.cy + 216);
-      const d = Math.hypot(dx, dy) || 1;
-      shoot(game, e.cx, e.cy + 216, (dx / d) * 6, (dy / d) * 6, 0, 456, 600);
+    if (inSlot === 0 && player) { // :37958-37973 额前 216px 朝玩家月噬 456(0 伤,MoonLeechProj)
+      addProj(game, new MoonLeechProj(e, player));
     }
     // :37975-37989 inSlot=120/180/240 于玩家处召 401 月噬怪(门禁说明见 spawnMoonLeech)
     if (player && (inSlot === 120 || inSlot === 180 || inSlot === 240)) spawnMoonLeech(game, e, player);

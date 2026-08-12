@@ -44,7 +44,7 @@ const mkPage = async () => {
   const page = await browser.newPage();
   page.on('pageerror', (e) => console.log('[pageerror]', String(e.message).slice(0, 300)));
   page.setDefaultTimeout(300000); // 世界生成 evaluate 可能分钟级
-  await page.goto('http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
+  await page.goto(process.env.PROBE_GAME_URL ?? 'http://localhost:5199', { waitUntil: 'domcontentloaded', timeout: 60000 });
   await sleep(1500);
   // 预热动态导入（data/items.ts 等）：触发可能的 vite 依赖再优化+全页 reload，
   // 必须发生在游戏状态建立之前——中后期 reload 会杀掉进行中的 evaluate（context destroyed）

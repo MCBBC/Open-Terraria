@@ -544,7 +544,9 @@ function placeStatueTemple(st: TileStore, x: number, y: number, style: number): 
   }
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 3; dy++) {
-      st.setTileSilent(x + dx, y - 2 + dy, STATUE, style * 36 + dx * 18, dy * 18);
+      // 雕像帧 55 列换行（cs:39716-39720；神庙 style 43-45 <55 本可不过防御性同款）
+      const row = Math.floor(style / 55);
+      st.setTileSilent(x + dx, y - 2 + dy, STATUE, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
     }
   }
   return true;

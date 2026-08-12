@@ -98,9 +98,13 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!ok) { fail++; if (fail >= 10000) { done = true; } continue; }
       const tile = sheet === 349 ? STATUE_349 : STATUE_105;
       if (!tile) { done = true; break; }
+      // 雕像帧换行（PlaceTile case 105，cs:39716-39720）：每行 55 列——
+      // frameX=(style%55)*36、frameY=floor(style/55)*54。此前单轴 style*36，
+      // style≥55 全部越界错位（Tiles_105 宽 1980=55 列）
+      const row = Math.floor(style / 55);
       for (let dx = 0; dx < 2; dx++) {
         for (let dy = 0; dy < 3; dy++) {
-          st.setTileSilent(x + dx, y - 2 + dy, tile, style * 36 + dx * 18, dy * 18);
+          st.setTileSilent(x + dx, y - 2 + dy, tile, (style - row * 55) * 36 + dx * 18, row * 54 + dy * 18);
         }
       }
       if (STATUES_WITH_TRAPS.has(num)) placeStatueTrap(st, x, y);

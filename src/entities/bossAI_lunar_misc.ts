@@ -33,13 +33,14 @@
 //   bossAI_duke_moonlord 导出的 MLDeathray 类 'core' 档)。星璇塔四组专属怪
 //   aiStyle 85/95/96/97/99（405/421/406/407(/408)/420/519）已在本文件 1:1 落位
 //   （文件尾段），Enemy.ts 一期近似档（swarmerAI/casterAI）退役；421 头顶吸附的
-//   Obstructed(buff 163)遮屏效果未实装（几何吸附已 1:1），遗留。
+//   Obstructed(buff 163)已实装（每 tick AddBuff 续期 + Renderer 遮屏滤镜）。
 // 弹幕贴图 Projectile_{452,454,462}.png 已入 sprites/vanilla(原 RENDER_PROXY 代渲退役,
 //   见 shootL 注释);455 走 MLDeathray 类自绘;526 仪式粒子有贴图但带 ai[0..1] 归巢弹道,降级为粒子。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE, GRAVITY, MAX_FALL_SPEED } from '../core/constants';
+import { BuffType } from '../stats/Buffs';
 import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
@@ -1267,8 +1268,11 @@ export function starCellAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.x = p.cx + dir * 4 - e.w / 2;
       e.y = p.y - e.h / 2;
       e.vx = 0; e.vy = 0;
-      // AddBuff(163 Obstructed,59)——本仓无 Obstructed 遮屏 buff,未实装(偏差登记,
-      // 原 hide=ai[0]==5 同理不隐藏,否则吸附期完全不可见)
+      // AddBuff(163 Obstructed,59) 每 tick 续期(:39197-39201)——BuffState.apply 取
+      // max 合并,吸附期间恒 ≤1s 存量,脱落后自然消退。遮屏视觉在 Renderer
+      // drawScreenObstruction（ScreenObstruction.cs 1:1）。
+      // （原版另以 hide=ai[0]==5 隐藏本体——保持可见为已登记偏差,否则吸附期完全不可见）
+      p.buffs.apply(BuffType.Obstructed, 59 / 60);
     }
     starCellTail(e, game, is405);
     return;

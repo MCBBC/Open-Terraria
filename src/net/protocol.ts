@@ -168,8 +168,10 @@ export class FrameParser {
 
   /** 解析所有完整帧；返回 false 表示缓冲为空。
    *  脏流防护：len 非法时按字节重同步（此前 break 不前进 → 永久失步 + 缓冲无限增长）。
-   *  缓冲上限 256KB：超限重置（半包攻击防御） */
-  private static readonly MAX_BUFFER = 256 * 1024;
+   *  缓冲上限：超限重置（半包攻击防御）。P1.3 合包后单条 WS 消息可达 512KB
+   *  （服务器 FLUSH_SLICE 切片；25 条 strip 拼发），上限须高于切片粒度——
+   *  2026-08 实踩：沿用 256KB 旧值会把进房 strip 大包整包丢弃 → 世界组装永久卡死 */
+  private static readonly MAX_BUFFER = 4 * 1024 * 1024;
   drain(cb: (msgId: number, r: NetReader) => void): boolean {
     if (this._draining) throw new Error('FrameParser: drain 重入');
     if (this.len < 3) return this.len > 0;

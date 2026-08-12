@@ -7,6 +7,7 @@
 import { TILE_STABLE_OF_INTERNAL } from '../data/tiles';
 import { ITEM_STABLE_OF_INTERNAL } from '../data/items';
 import type { WeatherSave } from '../world/weather/Weather';
+import type { FurnitureSaveEntry } from '../world/FurnitureItems';
 
 class ByteWriter {
   buf = new Uint8Array(1 << 16);
@@ -93,6 +94,9 @@ export interface SaveData {
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）
+  /** 挂物族存放物（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
+   *  原版 TileEntity 段的最小等价，旧档缺省无） */
+  furniture?: FurnitureSaveEntry[];
   flags: Record<string, boolean>;
   weather?: WeatherSave; // 天气快照（雨/风/云/沙尘暴；旧档缺省=晴）
 }
@@ -118,7 +122,7 @@ export interface SaveMeta {
   treeX?: number[]; treeStyle?: number[]; treeTops?: number[];
   crimson?: boolean; dungeonX?: number; dungeonY?: number; jungleX?: number;
   timeOfDay: number; dayCount: number;
-  chests: SaveData['chests']; signs?: SaveData['signs']; flags: Record<string, boolean>;
+  chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（WorldGen.altarCount，WorldFile.cs:1303/2100；旧档缺省 0） */
@@ -203,6 +207,11 @@ export function serializeSave(
     player: { ...player, inventory: player.inventory.map(mapItem), banks: player.banks?.map((b) => b.map(mapItem)) },
     npcs: [],
     signs: meta.signs,
+    // 挂物族：存放物 id 走与 chests 相同的稳定 id 映射（mapItem 同构，保留 prefix）
+    furniture: meta.furniture?.map((e) => ({
+      x: e.x, y: e.y, kind: e.kind,
+      slots: e.slots.map((s) => (s ? { id: s.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[s.id] ?? 0, stack: s.stack, prefix: s.prefix } : null)),
+    })),
     flags: meta.flags,
     weather: meta.weather,
     idScheme: 'sheet',

@@ -4,6 +4,7 @@ import { WeatherState, applyWeatherSave, type WeatherSave } from './weather/Weat
 import { T, TILE_DEFS } from '../data/tiles';
 import { newMoonEventState } from './MoonEvent';
 import { newLunarEventState } from './LunarEvent';
+import type { FurnitureItemRecord } from './FurnitureItems';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
@@ -55,6 +56,9 @@ export class World {
   chests: ChestData[] = [];
   /** 墓碑碑文（原版 Sign 系统的最小子集）：锚点 = 墓碑 tile 左上格 */
   signs: Array<{ x: number; y: number; text: string }> = [];
+  /** 挂物族存放物（物品框 395/武器架 471/模特 470/帽架 475/食物盘 520/展示罐 698；
+   *  原版 TileEntity 体系的最小等价，锚点 = 物件左上格。见 world/FurnitureItems.ts */
+  furnitureItems: FurnitureItemRecord[] = [];
   /** 读档/wld 导入携带的城镇 NPC（afterWorldLoad 原位生成后清空；原版 WorldFile town NPC 段） */
   pendingTownNpcs?: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   // Boss 进度旗标
@@ -154,6 +158,7 @@ export class World {
     w.clock.dayCount = p.clock.dayCount;
     w.chests = p.chests;
     w.signs = p.signs;
+    w.furnitureItems = p.furnitureItems ?? [];
     w.trees = p.trees;
     w.flags = p.flags;
     w.treeX = p.treeX; w.treeStyle = p.treeStyle; w.treeTops = p.treeTops;

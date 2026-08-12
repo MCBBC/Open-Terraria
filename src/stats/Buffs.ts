@@ -95,6 +95,16 @@ export enum BuffType {
   WellFed = 64,   // 饱腹(26)：def+2/全系暴击+2/全系伤+5%/近战速+5%/移速+20%/镐速-5%（:11523）
   WellFed2 = 65,  // 很饱(206)：def+3/暴击+3/伤+7.5%/近战速+7.5%/移速+30%/镐速-10%（:11539）
   WellFed3 = 66,  // 饕餮(207)：def+4/暴击+4/伤+10%/近战速+10%/移速+40%/镐速-15%（:11555）
+  // ---- 后期批（Player.cs UpdateBuffs 逐条对 1456）----
+  MoonLeech = 67,  // 月噬(145)：吸血/幽灵/治疗弹回复全禁（moonLeech，:11454-11457）
+                   //   ——由月总月噬弹 456 贴身 20px 授予（Projectile.cs:30722-30732，
+                   //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
+                   //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
+                   //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
+  Obstructed = 68, // 遮挡(163)：headcovered + bleed（:11421-11425）——bleed 清自然恢复
+                   //   计时（:18998 同流血 30）；headcovered → ScreenObstruction 遮屏
+                   //   （目标 0.95/步进 0.3，ScreenObstruction.cs:27-31）。
+                   //   由星云头蟹 421 头顶吸附每 tick AddBuff(163,59)（NPC.cs:39199）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -170,6 +180,9 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.WellFed]: { vanillaBuff: 26, descKey: 'BuffDescription.WellFed', fallbackName: '饱腹' },
   [BuffType.WellFed2]: { vanillaBuff: 206, descKey: 'BuffDescription.WellFed2', fallbackName: '很饱' },
   [BuffType.WellFed3]: { vanillaBuff: 207, descKey: 'BuffDescription.WellFed3', fallbackName: '饕餮' },
+  // 后期批：描述直接用原版 BuffDescription（12 语言现成，语义一致，同 Chilled/Honey 先例）
+  [BuffType.MoonLeech]: { vanillaBuff: 145, descKey: 'BuffDescription.MoonLeech', fallbackName: '月噬' },
+  [BuffType.Obstructed]: { vanillaBuff: 163, descKey: 'BuffDescription.Obstructed', fallbackName: '遮挡' },
 };
 
 /** Buff 名:原版 BuffName.<Internal>(Lang 未就绪回退中文兜底) */
@@ -319,6 +332,20 @@ export class BuffState {
   }
   get healBlocked(): boolean {
     return this.active.has(BuffType.Resistance);
+  }
+  // ---- 月噬 145（Player.cs:11454-11457 moonLeech = true）----
+  // 消费点（Projectile.cs）：12879 吸血弹 304 vampireHeal / 12885 ghostHeal /
+  // 27124 aiStyle 52 治疗弹拾取——三处均在 !moonLeech 门内。本仓吸血/治疗弹链
+  // 未实装，效果位在此备用；实际载荷 = NPC 401 月噬怪召唤门禁（原版以
+  // FindBuffIndex(145) 判，见 bossAI_duke_moonlord.spawnMoonLeech）
+  get moonLeech(): boolean {
+    return this.active.has(BuffType.MoonLeech);
+  }
+  // ---- 遮挡 163（Player.cs:11421-11425 headcovered + bleed）----
+  /** bleed 语义（:18998）：清 lifeRegenTime → 自然恢复计时归零阻断（同流血 30）。
+   *  Player.ts 自然回血段与 Bleeding 同门消费 */
+  get obstructed(): boolean {
+    return this.active.has(BuffType.Obstructed);
   }
   // ---- 药水族效果聚合（Player.cs UpdateBuffs 各 case 1:1）----
   /** 黑曜石皮:lavaImmune + fireWalk + 着火免疫（:9573-9577） */

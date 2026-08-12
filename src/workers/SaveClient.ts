@@ -7,6 +7,8 @@ import type { Player } from '../entities/Player';
 import type { SaveData, SaveMeta } from '../save/serialize';
 import { saveGame } from '../save/SaveFile';
 import { weatherToSave } from '../world/weather/Weather';
+import { ITEM_STABLE_OF_INTERNAL } from '../data/items';
+import { furnitureToSave } from '../world/FurnitureItems';
 
 const HANDSHAKE_MS = 2000;
 const SAVE_TIMEOUT_MS = 20000;
@@ -51,6 +53,7 @@ export class SaveClient {
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
         x: world.invasionX, delay: world.invasionDelay },
       altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+      furniture: furnitureToSave(world.furnitureItems, (id) => ITEM_STABLE_OF_INTERNAL[id] ?? 0),
     };
     const playerData: SaveData['player'] = {
       hp: player.hp, x: player.x, y: player.y,

@@ -39,6 +39,11 @@ export interface WeatherCtx {
   /** Main.BackgroundEnabled（Main.cs:790，设置项"背景: 开/关"，默认 true）。
    *  cloudBGAlpha 渐变门（Main.cs:58783）；缺省 true 与原版默认一致 */
   backgroundEnabled?: boolean;
+  /** 灯笼夜当夜态（LanternNight.LanternsUp）：阴天层清零+云量钳 30（Main.cs:64288）、
+   *  下雨立即停（:64331）、风场停掷（:58249）。缺省 false */
+  lanternsUp?: boolean;
+  /** 灯笼夜预约态（NextNightIsLanternNight）：无雨时不新开雨（Main.cs:64353） */
+  nextNightIsLanternNight?: boolean;
   /** 金币雨掉落回调（WorldGen.cs:71817-71858：type 71 银/72 金/73 铂金） */
   onCoinRain?: (x: number, y: number, type: 71 | 72 | 73, stack: number) => void;
   /** 雷声落点回调（thunderDelay 归零时；参数 = 与玩家的距离 px，已含方向由 Game 决定播放） */
@@ -224,6 +229,13 @@ export class WeatherState {
   /** 每 tick 调用（60Hz；暂停/菜单不调） */
   update(ctx: WeatherCtx) {
     this.maxTilesXRef = ctx.maxTilesX;
+    // 灯笼夜天空压制（UpdateTime 头段 Main.cs:64288-64294）：阴天层直接清零，
+    // 云量超 30 钳回 30——灯笼夜是晴朗夜
+    if (ctx.lanternsUp) {
+      this.cloudBGActive = 0;
+      if (this.numClouds > 30) this.numClouds = 30;
+      if (this.numCloudsTemp > 30) this.numCloudsTemp = 30;
+    }
     this.updateLightningTimers(ctx);
     this.updateWind(ctx);
     this.updateCloudAlpha(ctx);
@@ -372,7 +384,9 @@ export class WeatherState {
       this.windSpeedCurrent -= step;
       if (this.windSpeedCurrent < target) this.windSpeedCurrent = target;
     }
-    // windCounter 掷 target 增量（L58252-58295）
+    // windCounter 掷 target 增量（L58252-58295）——灯笼夜整段跳过（Main.cs:58249：
+    // LanternsUp → return；风场保持当前值漂移到既定 target，不再重掷）
+    if (ctx.lanternsUp) return;
     this.windCounter--;
     if (this.windCounter <= 0) {
       const prevSign = this.windSpeedTarget < 0 ? -1 : 1;
@@ -513,6 +527,8 @@ export class WeatherState {
   /** 雨调度（UpdateTime 段 Main.cs:64327-64390） */
   private updateRainSchedule(ctx: WeatherCtx) {
     if (this.raining) {
+      // 灯笼夜落雨立即停（Main.cs:64331-64335：LanternsUp → StopRain，不改雨强渐变）
+      if (ctx.lanternsUp) { this.stopRain(); return; }
       this.rainTime -= ctx.dayRate;
       if (ctx.dayRate > 0) {
         const num = Math.floor(86400 / ctx.dayRate / 24); // 3600
@@ -523,6 +539,8 @@ export class WeatherState {
         }
       }
     } else {
+      // 灯笼夜当夜或次夜预约都不开新雨（Main.cs:64353 else-if 门）
+      if (ctx.lanternsUp || ctx.nextNightIsLanternNight) return;
       const num2 = Math.floor(86400 / Math.max(1, ctx.dayRate));
       let canStart = ctx.dayRate !== 0 && ctx.playerStrongEnough;
       if (canStart) {

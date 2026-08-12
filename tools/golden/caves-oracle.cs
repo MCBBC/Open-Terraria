@@ -66,6 +66,9 @@ var SOLID = new HashSet<ushort> { 0,1,2,7,6,9,8,30,10,53,147,57,166,167,168,169,
    688,689,690,691,692,708,712,717,718,719,722,726,727,728,729,730,731,732,734,735,
    736,737,738,739,740,741,742,743,744,745,746,747,748,749,750, };
 
+// tileFrameImportant && !tileCut（cs:77217 TileRunner 首门禁）——项目侧近似集，
+// 与 JS TileRunner 的 `TILE_DEFS[].framed && !decor` 同源生成（pass 20 起世界出现 165 等活性 framed 物）
+var FRAMED_NOT_CUT = new HashSet<ushort> { 5,10,13,16,17,18,21,26,29,36,50,55,77,81,82,86,91,93,97,99,102,103,105,106,110,113,114,125,128,129,132,133,134,135,136,137,138,141,144,165,171,172,178,184,185,186,187,207,215,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,245,246,247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,334,337,339,349,354,355,356,358,359,360,361,362,363,364,373,374,375,376,377,378,387,388,389,390,391,392,393,394,395,405,406,411,412,413,414,427,435,436,437,438,439,443,444,453,454,456,457,461,462,463,464,465,466,467,469,470,471,475,476,484,485,486,487,488,489,490,491,493,494,499,505,506,510,511,518,519,520,521,522,523,524,525,526,527,529,530,532,533,538,542,543,544,545,547,548,549,550,551,552,553,554,555,556,558,559,560,567,568,569,570,571,572,573,579,580,581,582,583,584,585,586,587,588,589,590,591,592,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,733,751,752 };
 var NOT_CLEAR = new HashSet<ushort> { 396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237 };
 bool CanBeCleared(ushort t) => !NOT_CLEAR.Contains(t);
 bool IsSolidT(ushort t) => SOLID.Contains(t);
@@ -81,7 +84,11 @@ r.Next(10, 200);                                              // numClouds
 while (true) { double wf = (double)r.NextDouble(); r.Next(2); if (wf != 0) break; }
 { var p = new List<int> { 274, 220, 112, 218, 3019 }; while (p.Count > 0) p.RemoveAt((int)r.Next(p.Count)); }
 r.Next(86400 * 2, 86400 * 3); r.Next(8640, 86400);
-r.Next(2); r.Next(2); r.Next(2); r.Next(2);                   // 矿石替代对
+bool oreCu166 = (int)r.Next(2) == 0;                            // 矿石替代对（cs:11292-11311）
+bool oreFe167 = (int)r.Next(2) == 0;                            // Next(2)==0 → 166/167/168/169
+bool oreAg168 = (int)r.Next(2) == 0;
+bool oreAu169 = (int)r.Next(2) == 0;
+int oreCu = oreCu166 ? 166 : 7, oreFe = oreFe167 ? 167 : 6, oreAg = oreAg168 ? 168 : 9, oreAu = oreAu169 ? 169 : 8;
 bool crimson = (int)r.Next(2) == 0;
 if (evil == 0) crimson = false; if (evil == 1) crimson = true;
 r.Next(int.MaxValue);                                         // WorldId
@@ -263,6 +270,8 @@ void TileRunner(double i, double j, double strength, int steps, int type,
             for (int y = y0; y < y1; y++)
             {
                 int ti = y * W + x;
+                if (act[ti] != 0 && FRAMED_NOT_CUT.Contains(typ[ti])) continue;      // cs:77217
+                if (ignoreTileType >= 0 && act[ti] != 0 && typ[ti] == ignoreTileType) continue;  // cs:77219
                 double dist = Math.Abs(x - px) + Math.Abs(y - py);
                 if (dist >= strength * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)) continue;
                 if (mudWallFlag && y > worldSurface && wal[(y - 1) * W + x] != 2
@@ -1687,6 +1696,932 @@ Checkpoint("desertentrance");
 }
 Checkpoint("deserthive");
 Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
+
+// ================= Pass 20 GlowingMushroomPatches（cs:12581-12709 + ShroomPatch cs:80540 + SpreadGrass cs:75210）=================
+void SpreadGrassGen(int gi, int gj, int gdirt, int ggrass)
+{
+    if (gi < 10 || gi >= W - 10 || gj < 10 || gj >= H - 10) return;   // InWorld(i,j,10)
+    int gi2 = gj * W + gi;
+    if (act[gi2] == 0 || typ[gi2] != gdirt) return;
+    int gx0 = Math.Max(0, gi - 1), gx1 = Math.Min(W, gi + 2);
+    int gy0 = Math.Max(0, gj - 1), gy1 = Math.Min(H, gj + 2);
+    bool gEnclosed = true;
+    for (int gk = gx0; gk < gx1; gk++)
+        for (int gl = gy0; gl < gy1; gl++)
+        {
+            int gti = gl * W + gk;
+            if (act[gti] == 0 || !SOLID.Contains(typ[gti])) gEnclosed = false;
+            if (liqT[gti] == 1 && liq[gti] > 0) { gEnclosed = true; break; }   // lava
+        }
+    if (gEnclosed || NOT_CLEAR.Contains(typ[gi2])) return;    // CanBeClearedDuringGeneration
+    typ[gi2] = (ushort)ggrass;
+}
+void ShroomPatch(int si, int sj)
+{
+    double sn = (int)r.Next(80, 100);
+    double sn2 = (int)r.Next(20, 26);
+    double sn3 = W / 4200.0;
+    sn *= sn3; sn2 *= sn3;
+    double sn4 = sn2 - 1.0, sn5 = sn;
+    double svx = si, svy = sj - sn2 * 0.3;
+    double sv2x = (int)r.Next(-100, 101) * 0.005, sv2y = (int)r.Next(-200, -100) * 0.005;
+    while (sn > 0.0 && sn2 > 0.0)
+    {
+        sn -= (int)r.Next(3);
+        sn2 -= 1.0;
+        int sx0 = Math.Max(0, (int)(svx - sn * 0.5)), sx1 = Math.Min(W, (int)(svx + sn * 0.5));
+        int sy0 = Math.Max(0, (int)(svy - sn * 0.5)), sy1 = Math.Min(H, (int)(svy + sn * 0.5));
+        sn5 = sn * (int)r.Next(80, 120) * 0.01;
+        for (int sk = sx0; sk < sx1; sk++)
+            for (int sl = sy0; sl < sy1; sl++)
+            {
+                double sd0 = Math.Abs((double)sk - svx);
+                double sd1 = Math.Abs(((double)sl - svy) * 2.3);
+                double sd2 = Math.Sqrt(sd0 * sd0 + sd1 * sd1);
+                int sti = sl * W + sk;
+                if (sd2 < sn5 * 0.8 && liqT[sti] == 1) liq[sti] = 0;    // tile.lava()
+                if (sd2 < sn5 * 0.2 && (double)sl < svy)
+                {
+                    act[sti] = 0;
+                    if (wal[sti] > 0) wal[sti] = 80;
+                }
+                else if (sd2 < sn5 * 0.4 * (0.95 + (double)r.NextDouble() * 0.1))
+                {
+                    typ[sti] = 59;
+                    if (sn2 == sn4 && (double)sl > svy) act[sti] = 1;
+                    if (wal[sti] > 0) wal[sti] = 80;
+                }
+            }
+        svx += sv2x; svy += sv2y;
+        svx += sv2x;                                  // 原版 val+=val2 后再 val.X+=val2.X（X 双倍步进）
+        sv2x += (int)r.Next(-100, 110) * 0.005;
+        sv2y -= (int)r.Next(110) * 0.005;
+        if (sv2x > -0.5 && sv2x < 0.5) sv2x = sv2x < 0.0 ? -0.5 : 0.5;
+        if (sv2x > 0.5) sv2x = 0.5;
+        if (sv2x < -0.5) sv2x = -0.5;
+        if (sv2y > 0.5) sv2y = 0.5;
+        if (sv2y < -0.5) sv2y = -0.5;
+        for (int sm = 0; sm < 2; sm++)
+        {
+            int s13 = (int)svx + (int)r.Next(-20, 20);
+            int s14 = (int)svy + (int)r.Next(0, 20);
+            while (s13 >= 0 && s13 < W && s14 >= 0 && s14 < H && act[s14 * W + s13] == 0 && typ[s14 * W + s13] != 59)
+            { s13 = (int)svx + (int)r.Next(-20, 20); s14 = (int)svy + (int)r.Next(0, 20); }
+            TileRunner(s13, s14, (int)r.Next(10, 20), (int)r.Next(10, 20), 59, false, 0.0, 2.0, true);
+        }
+    }
+}
+{
+    double mnCount = W / 700.0;
+    if (mnCount > 50) mnCount = 50;                  // GenVars.maxMushroomBiomes = 50
+    var mushPts = new List<(int x, int y)>();
+    int mushN = 0;
+    int dsX = dX - 10, dsY = dTop - 10, dsR = dX - 10 + dW + 20, dsB = dTop - 10 + dHiveTop + dH - dTop + 20;  // UndergroundDesertLocation
+    for (int mk = 0; (double)mk < mnCount; mk++)
+    {
+        int m2 = 0; bool mflag = true;
+        while (mflag)
+        {
+            int m3 = (int)r.Next((int)(W * 0.2), (int)(W * 0.8));
+            if (m2 > W / 4) m3 = (int)r.Next((int)(W * 0.025), (int)(W * 0.975));
+            int m4 = (int)r.Next(rockLayer + 50, H - 300);   // Main.rockLayer
+            mflag = false;
+            for (int ml = m3 - 100; ml < m3 + 100; ml += 3)
+                for (int mm = m4 - 100; mm < m4 + 100; mm += 3)
+                {
+                    if (ml >= 0 && ml < W && mm >= 0 && mm < H)
+                    {
+                        int mti = mm * W + ml;
+                        if (act[mti] != 0)
+                        {
+                            ushort mtt = typ[mti];
+                            if (mtt == 147 || mtt == 161 || mtt == 162 || mtt == 60 || mtt == 368 || mtt == 367) { mflag = true; break; }
+                        }
+                        if (ml >= dsX && ml < dsR && mm >= dsY && mm < dsB) { mflag = true; break; }
+                    }
+                    else { mflag = true; break; }
+                }
+            if (!mflag)
+                for (int mp = 0; mp < mushN; mp++)
+                    if (Math.Sqrt((double)((mushPts[mp].x - m3) * (mushPts[mp].x - m3) + (mushPts[mp].y - m4) * (mushPts[mp].y - m4))) < 500.0) mflag = true;
+            if (!mflag && mushN < 50)
+            {
+                ShroomPatch(m3, m4);
+                for (int mq = 0; mq < 5; mq++) ShroomPatch(m3 + (int)r.Next(-40, 41), m4 + (int)r.Next(-40, 41));
+                mushPts.Add((m3, m4)); mushN++;
+            }
+            m2++;
+            if (m2 > W / 2) break;
+        }
+    }
+    // SpreadGrass 扫描（cs:12721-12730 普通世界分支；InWorld(i,j,50)）
+    for (int sgx = 0; sgx < W; sgx++)
+        for (int sgy = worldSurface; sgy < H; sgy++)
+        {
+            int sgti = sgy * W + sgx;
+            if (sgx >= 50 && sgx < W - 50 && sgy >= 50 && sgy < H - 50 && act[sgti] != 0)
+                SpreadGrassGen(sgx, sgy, 59, 70);
+        }
+    // 蘑菇草饰面第二循环（cs:12731-12769）：KillTile/PlaceTile(59)/Next(4) 散点
+    for (int h2x = 0; h2x < W; h2x++)
+        for (int h2y = worldSurface; h2y < H; h2y++)
+        {
+            int h2ti = h2y * W + h2x;
+            if (act[h2ti] == 0 || typ[h2ti] != 70) continue;
+            for (int ix = h2x - 1; ix <= h2x + 1; ix++)
+                for (int iy = h2y - 1; iy <= h2y + 1; iy++)
+                {
+                    if (ix < 0 || ix >= W || iy < 0 || iy >= H) continue;
+                    int iti = iy * W + ix;
+                    bool iwL = ix > 0 && act[iy * W + ix - 1] != 0, iwR = ix < W - 1 && act[iy * W + ix + 1] != 0;
+                    bool iwU = iy > 0 && act[(iy - 1) * W + ix] != 0, iwD = iy < H - 1 && act[(iy + 1) * W + ix] != 0;
+                    if (act[iti] != 0)
+                    {
+                        if (!iwL && !iwR) act[iti] = 0;                 // KillTile（生成期无掉落无 RNG）
+                        else if (!iwU && !iwD) act[iti] = 0;
+                    }
+                    else if (iwL && iwR)
+                    {
+                        typ[iti] = 59; act[iti] = 1;                    // PlaceTile(59) 默认分支
+                        if (ix > 0 && typ[h2y * W + ix - 1] == 70) typ[h2y * W + ix - 1] = 59;
+                        if (ix < W - 1 && typ[h2y * W + ix + 1] == 70) typ[h2y * W + ix + 1] = 59;
+                    }
+                    else if (iwU && iwD)
+                    {
+                        typ[iti] = 59; act[iti] = 1;
+                        if (h2y > 0 && typ[(h2y - 1) * W + h2x] == 70) typ[(h2y - 1) * W + h2x] = 59;
+                        if (h2y < H - 1 && typ[(h2y + 1) * W + h2x] == 70) typ[(h2y + 1) * W + h2x] = 59;
+                    }
+                }
+            if ((int)r.Next(4) == 0)
+            {
+                int scx = h2x + (int)r.Next(-20, 21), scy = h2y + (int)r.Next(-20, 21);
+                if (scx >= 0 && scx < W && scy >= 0 && scy < H && typ[scy * W + scx] == 59) typ[scy * W + scx] = 70;
+            }
+        }
+}
+Checkpoint("mushroom");
+
+// ================= Pass 21/22 共用：BiomeTileCheck（cs:10949）+ PlaceTight/Stalactite（cs:38329/38353）=================
+bool BiomeTileCheck(int bx, int by)
+{
+    for (int i = bx - 50; i <= bx + 50; i++)
+        for (int j = by - 50; j <= by + 50; j++)
+        {
+            if (i < 0 || i >= W || j < 0 || j >= H) continue;
+            int ti = j * W + i;
+            if (act[ti] != 0)
+            {
+                ushort t = typ[ti];
+                if (t == 368 || t == 367 || t == 147 || t == 161 || t == 162 || t == 70 || t == 72 || t == 396 || t == 397) return true;
+            }
+            if (wal[ti] == 187 || wal[ti] == 216) return true;
+        }
+    return false;
+}
+bool SolidTileGen(int sx, int sy) => sx >= 0 && sx < W && sy >= 0 && sy < H && act[sy * W + sx] != 0 && SOLID.Contains(typ[sy * W + sx]);
+void PlaceStalactite(int x, int y, bool preferSmall, int variation)   // PlaceUncheckedStalactite 哈希通道语义
+{
+    variation = Math.Clamp(variation, 0, 2);
+    void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = 165; act[ay * W + ax] = 1; } }
+    if (SolidTileGen(x, y - 1) && y >= 0 && y < H && act[y * W + x] == 0 && y + 1 >= 0 && y + 1 < H && act[(y + 1) * W + x] == 0)
+    {
+        ushort ab = y - 1 >= 0 ? typ[(y - 1) * W + x] : (ushort)0;
+        bool rockFam = ab == 1 || ab == 117 || ab == 25 || ab == 203;   // tileMoss 此阶段无
+        if (ab == 147 || ab == 161 || ab == 163 || ab == 164 || ab == 200) { if (preferSmall) Put(x, y); else { Put(x, y); Put(x, y + 1); } }
+        if (rockFam) { if (preferSmall) Put(x, y); else { Put(x, y); Put(x, y + 1); } }
+        if (ab == 225) Put(x, y);
+        if (ab == 396 || ab == 397) { if (preferSmall) Put(x, y); else { Put(x, y); Put(x, y + 1); } }
+        if (ab == 368) { if (preferSmall) Put(x, y); else { Put(x, y); Put(x, y + 1); } }
+        if (ab == 367) { if (preferSmall) Put(x, y); else { Put(x, y); Put(x, y + 1); } }
+    }
+    else if (SolidTileGen(x, y + 1) && y >= 0 && y < H && act[y * W + x] == 0 && y - 1 >= 0 && y - 1 < H && act[(y - 1) * W + x] == 0)
+    {
+        ushort bl = y + 1 < H ? typ[(y + 1) * W + x] : (ushort)0;
+        bool rockFam = bl == 1 || bl == 117 || bl == 25 || bl == 203;
+        if (rockFam) { if (preferSmall) Put(x, y); else { Put(x, y - 1); Put(x, y); } }
+        if (bl == 225) Put(x, y);
+        if (bl == 396 || bl == 397) { if (preferSmall) Put(x, y); else { Put(x, y - 1); Put(x, y); } }
+        if (bl == 368) { if (preferSmall) Put(x, y); else { Put(x, y - 1); Put(x, y); } }
+        if (bl == 367) { if (preferSmall) Put(x, y); else { Put(x, y - 1); Put(x, y); } }
+    }
+}
+void PlaceTightGen(int tx, int ty)   // cs:38329（生成期 shimmer 恒无 → 门禁只剩 231）
+{
+    if (tx < 0 || tx >= W || ty < 0 || ty >= H) return;
+    int tti = ty * W + tx;
+    if (act[tti] != 0 && typ[tti] == 231) return;
+    PlaceStalactite(tx, ty, (int)r.Next(2) == 0, (int)r.Next(3));
+}
+
+// ================= Pass 21 Marble（cs:12800 + MarbleBiome.cs）=================
+bool MarblePlace(int mox, int moy)
+{
+    if (BiomeTileCheck(mox, moy)) return false;
+    int bn = (int)r.Next(80, 150) / 3;
+    int bn2 = (int)r.Next(40, 60) / 3;
+    int bn3 = (bn2 * 3 - (int)r.Next(20, 30)) / 3;
+    int bOX = mox - bn * 3 / 2, bOY = moy - bn2 * 3 / 2;
+    // Slab 状态机（MarbleBiome.SlabStates）：0空 1实心 2半砖 3右下 4左下 5右上 6左上
+    var slabState = new int[bn + 2, bn2 + 2];
+    var slabWall = new bool[bn + 2, bn2 + 2];
+    bool GroupSolid(int gxx, int gyy)
+    {
+        int cnt = 0;
+        for (int a = 0; a < 3; a++) for (int b = 0; b < 3; b++) if (SolidTileGen(gxx + a, gyy + b)) cnt++;
+        return cnt > 0;   // scale/4*3 = 0（int 除）
+    }
+    for (int bi = -1; bi < bn + 1; bi++)
+    {
+        double bn4 = (double)(bi - bn / 2) / (double)bn + 0.5;
+        int bn5 = (int)((0.5 - Math.Abs(bn4 - 0.5)) * 5.0) - 2;
+        for (int bj = -1; bj < bn2 + 1; bj++)
+        {
+            bool bHasWall = true, bFlag = false;
+            bool bFlag2 = GroupSolid(bi * 3 + bOX, bj * 3 + bOY);
+            int bn6 = Math.Abs(bj - bn2 / 2) - bn3 / 4 + bn5;
+            if (bn6 > 3) { bFlag = bFlag2; bHasWall = false; }
+            else if (bn6 > 0) { bFlag = bj - bn2 / 2 > 0 || bFlag2; bHasWall = bj - bn2 / 2 < 0 || bn6 <= 2; }
+            else if (bn6 == 0) bFlag = (int)r.Next(2) == 0 && (bj - bn2 / 2 > 0 || bFlag2);
+            if (Math.Abs(bn4 - 0.5) > 0.35 + (double)r.NextDouble() * 0.1 && !bFlag2) { bHasWall = false; bFlag = false; }
+            slabState[bi + 1, bj + 1] = bFlag ? 1 : 0;
+            slabWall[bi + 1, bj + 1] = bHasWall;
+        }
+    }
+    bool SlabSolid(int st, int lx, int ly, int scale) => st switch
+    {
+        0 => false, 1 => true, 2 => ly >= scale / 2, 3 => lx >= scale - ly,
+        4 => lx < ly, 5 => lx > ly, 6 => lx < scale - ly, _ => true,
+    };
+    for (int bk = 0; bk < bn; bk++)          // SmoothSlope（slab 状态形状重分类）
+        for (int bl = 0; bl < bn2; bl++)
+        {
+            int sx2 = bk + 1, sy2 = bl + 1;
+            if (slabState[sx2, sy2] == 0) continue;
+            bool up = slabState[sx2, sy2 - 1] != 0, dn = slabState[sx2, sy2 + 1] != 0;
+            bool lf = slabState[sx2 - 1, sy2] != 0, rt = slabState[sx2 + 1, sy2] != 0;
+            int code = ((up ? 1 : 0) << 3) | ((dn ? 1 : 0) << 2) | ((lf ? 1 : 0) << 1) | (rt ? 1 : 0);
+            slabState[sx2, sy2] = code switch { 10 => 6, 9 => 5, 6 => 4, 5 => 3, 4 => 2, _ => 1 };
+        }
+    int bn7 = bn / 2, bn8 = bn2 / 2;
+    int bn9 = (bn8 + 1) * (bn8 + 1);
+    double bvv = (double)r.NextDouble() * 2.0 - 1.0;
+    double bvv2 = (double)r.NextDouble() * 2.0 - 1.0;
+    double bvv3 = (double)r.NextDouble() * 2.0 - 1.0;
+    double bn11 = 0.0;
+    for (int bm = 0; bm <= bn; bm++)
+    {
+        double bn12 = (double)bn8 / (double)bn7 * (double)(bm - bn7);
+        int bn13 = Math.Min(bn8, (int)Math.Sqrt(Math.Max(0.0, (double)bn9 - bn12 * bn12)));
+        bn11 = bm >= bn / 2 ? bn11 + (bvv2 + (bvv3 - bvv2) * ((double)bm / (double)(bn / 2) - 1.0))
+                            : bn11 + (bvv + (bvv2 - bvv) * ((double)bm / (double)(bn / 2)));
+        for (int bnn = bn8 - bn13; bnn <= bn8 + bn13; bnn++)
+        {
+            int pOX = bm * 3 + bOX, pOY = bnn * 3 + bOY + (int)bn11;
+            int pst = slabState[bm + 1, bnn + 1];
+            bool pWall = slabWall[bm + 1, bnn + 1];
+            int pn4 = 0, pn5 = 3;             // PlaceSlab(scale=3)
+            for (int pi = -1; pi < 4; pi++)
+            {
+                if ((pi == -1 || pi == 3) && (int)r.Next(2) == 0) continue;
+                if ((int)r.Next(2) == 0) pn4--;
+                if ((int)r.Next(2) == 0) pn5++;
+                for (int pj = pn4; pj < pn5; pj++)
+                {
+                    int px = pOX + pi, py = pOY + pj;
+                    if (px < 0 || px >= W || py < 0 || py >= H) continue;
+                    int pti = py * W + px;
+                    typ[pti] = IsOre(typ[pti]) ? typ[pti] : (ushort)367;   // ResetToType：矿石保留
+                    act[pti] = SlabSolid(pst, pi, pj, 3) ? (byte)1 : (byte)0;
+                    liq[pti] = 0;
+                    if (pWall) wal[pti] = 178;
+                    if (SolidTileGen(px, py - 1) && (int)r.Next(4) == 0) PlaceTightGen(px, py);
+                    if (SolidTileGen(px, py) && (int)r.Next(4) == 0) PlaceTightGen(px, py - 1);
+                }
+            }
+        }
+    }
+    return true;
+}
+{
+    int mbCount = (int)r.Next(4, 9);                 // WorldGenRange(4,8,WorldArea) scale=1
+    int mbPlaced = 0, mbFails = 0;
+    while (mbPlaced < mbCount)
+    {
+        double mb5 = (double)mbPlaced / (double)mbCount;
+        int mbX = 0, mbY = 0; bool mbFlag = false;
+        int mb6 = 100;
+        while (!mbFlag)
+        {
+            mb6--;
+            if (mb6 <= 0) break;
+            int mbx0 = (int)(mb5 * (double)(W - 200)) + 100;
+            mbX = (int)r.Next(mbx0, mbx0 + (int)((double)(W - 160) / (double)mbCount));
+            int mby0 = (int)gvRockLayer + 20;        // GenVars.rockLayer（raw double 截断）
+            mbY = (int)r.Next(mby0, mby0 + (H - ((int)gvRockLayer + 40) - 200));
+            while ((double)mbX > W * 0.45 && (double)mbX < W * 0.55) mbX = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
+            mbFlag = true;
+        }
+        mbFails++;
+        if (mbFlag && MarblePlace(mbX, mbY)) { mbPlaced++; mbFails = 0; }
+        else if (mbFails > W * 10) { mbCount = mbPlaced; mbPlaced++; mbFails = 0; }
+    }
+}
+Checkpoint("marble");
+
+// ================= Pass 22 Granite（cs:12884 + GraniteBiome.cs）=================
+void GranitePlace(int gox0, int goy0)
+{
+    if (gox0 < 0 || gox0 >= W || goy0 < 0 || goy0 >= H || act[goy0 * W + gox0] != 0) return;
+    int gox = gox0 - 100, goy = goy0 - 100;          // 200×200 magma 图
+    var gPres = new double[200, 200];
+    var gRes = new double[200, 200];
+    var gAct = new bool[200, 200];
+    for (int a = 0; a < 200; a++)
+        for (int b = 0; b < 200; b++)
+            gRes[a, b] = SolidTileGen(a + gox, b + goy) ? 4.0 : 1.0;
+    // 8 邻域单位向量（Vector2D.Normalize）
+    double[] nvx = { -0.7071067811865476, -1, -0.7071067811865476, 0, 0, 0, 0.7071067811865476, 1, 0.7071067811865476 };
+    double[] nvy = { -0.7071067811865476, 0, 0.7071067811865476, -1, 0, 1, -0.7071067811865476, 0, 0.7071067811865476 };
+    int gx3 = 100, gx4 = 100, gy3 = 100, gy4 = 100;
+    var tPres = new double[200, 200];
+    var tRes = new double[200, 200];
+    var tAct = new bool[200, 200];
+    for (int it = 0; it < 300; it++)
+    {
+        for (int a = 0; a < 200; a++) for (int b = 0; b < 200; b++) { tPres[a, b] = gPres[a, b]; tRes[a, b] = gRes[a, b]; tAct[a, b] = gAct[a, b]; }
+        for (int j = gx3; j <= gx4; j++)
+            for (int k = gy3; k <= gy4; k++)
+            {
+                if (!gAct[j, k]) continue;
+                double sum = 0.0, vx = 0.0, vy = 0.0;
+                for (int l = -1; l <= 1; l++)
+                    for (int m = -1; m <= 1; m++)
+                    {
+                        if (l == 0 && m == 0) continue;
+                        int vi = (l + 1) * 3 + (m + 1);
+                        double np = gPres[j + l, k + m];
+                        if (gPres[j, k] > 0.01 && !gAct[j + l, k + m])
+                        {
+                            if (l == -1) gx3 = Math.Clamp(j + l, 1, gx3); else gx4 = Math.Clamp(j + l, gx4, 198);
+                            if (m == -1) gy3 = Math.Clamp(k + m, 1, gy3); else gy4 = Math.Clamp(k + m, gy4, 198);
+                            tAct[j + l, k + m] = true;
+                        }
+                        sum += np;
+                        vx += np * nvx[vi]; vy += np * nvy[vi];
+                    }
+                sum /= 8.0;
+                if (sum > gRes[j, k])
+                {
+                    double len = Math.Sqrt(vx * vx + vy * vy) / 8.0;
+                    double nv = Math.Max(sum - len - gPres[j, k], 0.0) + len + gPres[j, k] * 0.875 - gRes[j, k];
+                    nv = Math.Max(0.0, nv);
+                    tPres[j, k] = nv;
+                    tRes[j, k] = Math.Max(0.0, gRes[j, k] - nv * 0.02);
+                }
+            }
+        if (it < 2) { tPres[100, 100] = 25.0; tAct[100, 100] = true; }
+        var sp1 = gPres; gPres = tPres; tPres = sp1;
+        var sp2 = gRes; gRes = tRes; tRes = sp2;
+        var sp3 = gAct; gAct = tAct; tAct = sp3;
+    }
+    bool GraniteUseLava()
+    {
+        if (goy + 100 <= lavaLine - 30) return false;
+        for (int a = -50; a < 50; a++)
+            for (int b = -50; b < 50; b++)
+            {
+                int ax = gox + 100 + a, ay = goy + 100 + b;
+                if (ax >= 10 && ax < W - 10 && ay >= 10 && ay < H - 10 && act[ay * W + ax] != 0)
+                {
+                    ushort t = typ[ay * W + ax];
+                    if (t == 147 || t == 200 || (t >= 161 && t <= 163)) return false;
+                }
+            }
+        return true;
+    }
+    bool useLava = GraniteUseLava();
+    for (int i = gx3; i <= gx4; i++)
+        for (int j = gy3; j <= gy4; j++)
+        {
+            int tx = gox + i, ty = goy + j;
+            if (tx < 10 || tx >= W - 10 || ty < 10 || ty >= H - 10 || !gAct[i, j]) continue;
+            int ti = ty * W + tx;
+            double gnum = Math.Sin((double)(goy + j) * 0.4) * 0.7 + 1.2;
+            double gnum2 = 0.2 + 0.5 / Math.Sqrt(Math.Max(0.0, gPres[i, j] - gRes[i, j]));
+            if (Math.Max(1.0 - Math.Max(0.0, gnum * gnum2), gPres[i, j] / 15.0) > 0.35 + (SolidTileGen(tx, ty) ? 0.0 : 0.5))
+            {
+                typ[ti] = IsOre(typ[ti]) ? typ[ti] : (ushort)368;
+                act[ti] = 1; liq[ti] = 0;
+                wal[ti] = 180;
+            }
+            else if (gRes[i, j] < 0.01)
+            {
+                act[ti] = 0;                       // ClearTile
+                wal[ti] = 180;
+            }
+            if (liq[ti] > 0 && useLava) liqT[ti] = 1;
+        }
+    // CleanupTiles：3×3 实心邻 <3 的活性花岗岩清除
+    var cleanList = new List<(int x, int y)>();
+    for (int i = gx3; i <= gx4; i++)
+        for (int j = gy3; j <= gy4; j++)
+        {
+            if (!gAct[i, j]) continue;
+            int tx = gox + i, ty = goy + j;
+            if (tx < 10 || tx >= W - 10 || ty < 10 || ty >= H - 10 || !SolidTileGen(tx, ty)) continue;
+            int cnt = 0;
+            for (int a = -1; a <= 1; a++) for (int b = -1; b <= 1; b++) if (SolidTileGen(tx + a, ty + b)) cnt++;
+            if (cnt < 3) cleanList.Add((tx, ty));
+        }
+    foreach (var cp in cleanList) { act[cp.y * W + cp.x] = 0; wal[cp.y * W + cp.x] = 180; }
+    // PlaceDecorations：FastRandom(seed).WithModifier(65440) 独立流
+    var gFr = new FR((ulong)(long)seed).Mod(65440UL);
+    for (int i = gx3; i <= gx4; i++)
+        for (int j = gy3; j <= gy4; j++)
+        {
+            int tx = gox + i, ty = goy + j;
+            if (tx < 10 || tx >= W - 10 || ty < 10 || ty >= H - 10 || !gAct[i, j]) continue;
+            var gFr2 = gFr.ModXY(tx, ty);
+            if (gFr2.Next(8) == 0 && act[ty * W + tx] != 0)
+            {
+                if (ty + 1 < H && act[(ty + 1) * W + tx] == 0) PlaceStalactite(tx, ty + 1, gFr2.Next(2) == 0, gFr2.Next(3));
+                if (ty - 1 >= 0 && act[(ty - 1) * W + tx] == 0) PlaceStalactite(tx, ty - 1, gFr2.Next(2) == 0, gFr2.Next(3));
+            }
+            if (gFr2.Next(2) == 0) { /* Tile.SmoothSlope —— 坡面哈希无关 */ }
+        }
+}
+{
+    int gnCount = (int)r.Next(4, 9);                 // WorldGenRange(4,8,WorldWidth) scale=1
+    var gnPts = new List<(int x, int y)>();
+    int gnPlaced = 0, gnFails = 0;
+    while (gnPlaced < gnCount)
+    {
+        double gn5 = (double)gnPlaced / (double)gnCount;
+        int gnX = 0, gnY = 0; bool gnFlag = false;
+        int gn7 = 100;
+        while (!gnFlag)
+        {
+            gn7--;
+            if (gn7 <= 0) break;
+            int gnx0 = (int)(gn5 * (double)(W - 200)) + 100;
+            gnX = (int)r.Next(gnx0, gnx0 + (int)((double)(W - 200) / (double)gnCount));
+            int gny0 = (int)gvRockLayer + 20;
+            gnY = (int)r.Next(gny0, gny0 + (H - ((int)gvRockLayer + 40) - 200));
+            while ((double)gnX > W * 0.45 && (double)gnX < W * 0.55) gnX = (int)r.Next(BEACH_DISTANCE, W - BEACH_DISTANCE);
+            gnFlag = true;
+        }
+        gnFails++;
+        if (gnFlag && !BiomeTileCheck(gnX, gnY) && !(gnX >= 0 && gnX < W && gnY >= 0 && gnY < H && act[gnY * W + gnX] != 0))
+        { gnPts.Add((gnX, gnY)); gnPlaced++; }
+        else if (gnFails > W * 10) { gnCount = gnPlaced; gnPlaced++; gnFails = 0; }
+    }
+    for (int gi = 0; gi < gnCount && gi < gnPts.Count; gi++) GranitePlace(gnPts[gi].x, gnPts[gi].y);
+}
+Checkpoint("granite");
+
+// ================= Pass 23 FloatingIslands（cs:12976 + CloudIsland cs:78618 + CloudLake cs:79068）=================
+bool WaterStaysPut(int wx, int wy)   // WillWaterPlacedHereStayPut（cs:79050）
+{
+    bool Side(int ax, int ay)
+    {
+        if (ax < 0 || ax >= W || ay < 0 || ay >= H) return false;
+        int ti = ay * W + ax;
+        return (act[ti] != 0 && SOLID.Contains(typ[ti])) || liq[ti] == 255;
+    }
+    return Side(wx, wy + 1) && Side(wx - 1, wy) && Side(wx + 1, wy);
+}
+void CloudIsland(int ci, int cj)
+{
+    double inum = (int)r.Next(100, 150);
+    double inum2 = inum;
+    double inum3 = (int)r.Next(20, 30);
+    int i4 = ci, i5 = ci, i6 = cj, i7 = cj;
+    ushort iTile = 189;
+    double ivx = ci, ivy = cj;
+    double iv2x = (int)r.Next(-20, 21) * 0.2;
+    while (iv2x > -2.0 && iv2x < 2.0) iv2x = (int)r.Next(-20, 21) * 0.2;
+    double iv2y = (int)r.Next(-20, -10) * 0.02;
+    while (inum > 0.0 && inum3 > 0.0)            // ① 主体云盘
+    {
+        inum -= (int)r.Next(4);
+        inum3 -= 1.0;
+        int ix0 = Math.Max(0, (int)(ivx - inum * 0.5)), ix1 = Math.Min(W, (int)(ivx + inum * 0.5));
+        int iy0 = Math.Max(0, (int)(ivy - inum * 0.5)), iy1 = Math.Min(H, (int)(ivy + inum * 0.5));
+        inum2 = inum * (int)r.Next(80, 120) * 0.01;
+        double iTop = ivy + 1.0;
+        for (int ik = ix0; ik < ix1; ik++)
+        {
+            if ((int)r.Next(2) == 0) iTop += (int)r.Next(-1, 2);
+            if (iTop < ivy) iTop = ivy;
+            if (iTop > ivy + 2.0) iTop = ivy + 2.0;
+            for (int im = iy0; im < iy1; im++)
+            {
+                if ((double)im <= iTop) continue;
+                double idx = Math.Abs((double)ik - ivx);
+                double idy = Math.Abs((double)im - ivy) * 3.0;
+                if (Math.Sqrt(idx * idx + idy * idy) >= inum2 * 0.4) continue;
+                if (ik < i4) i4 = ik;
+                if (ik > i5) i5 = ik;
+                if (im < i6) i6 = im;
+                if (im > i7) i7 = im;
+                int iti = im * W + ik;
+                act[iti] = 1; typ[iti] = iTile;
+            }
+        }
+        ivx += iv2x; ivy += iv2y;
+        iv2x += (int)r.Next(-20, 21) * 0.05;
+        if (iv2x > 1.0) iv2x = 1.0;
+        if (iv2x < -1.0) iv2x = -1.0;
+        if (iv2y > 0.2) iv2y = -0.2;
+        if (iv2y < -0.2) iv2y = -0.2;
+    }
+    int ir17 = i4 + (int)r.Next(5);              // ② 底缘雨云凸包
+    int ir19 = 0;
+    for (; ir17 < i5; ir17 += (int)r.Next(ir19, (int)((double)ir19 * 1.5)))
+    {
+        int ir18 = i7;
+        while (ir17 >= 15 && ir17 < W - 15 && ir18 >= 15 && ir18 < H - 15 && act[ir18 * W + ir17] == 0) ir18--;
+        ir18 += (int)r.Next(-3, 4);
+        ir19 = (int)r.Next(4, 8);
+        int ir20 = iTile;
+        if ((int)r.Next(4) == 0) ir20 = 196;
+        for (int an = ir17 - ir19; an <= ir17 + ir19; an++)
+            for (int ay = ir18 - ir19; ay <= ir18 + ir19; ay++)
+            {
+                if (ay <= i6 || an < 0 || an >= W || ay < 0 || ay >= H) continue;
+                double ddx = Math.Abs(an - ir17);
+                double ddy = Math.Abs(ay - ir18) * 2;
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < (double)(ir19 + (int)r.Next(2)))
+                {
+                    act[ay * W + an] = 1; typ[ay * W + an] = (ushort)ir20;
+                }
+            }
+    }
+    inum = (int)r.Next(80, 95);                  // ③ 土芯：云→土(0)
+    inum2 = inum;
+    inum3 = (int)r.Next(10, 15);
+    ivx = ci; ivy = i6;
+    iv2x = (int)r.Next(-20, 21) * 0.2;
+    while (iv2x > -2.0 && iv2x < 2.0) iv2x = (int)r.Next(-20, 21) * 0.2;
+    iv2y = (int)r.Next(-20, -10) * 0.02;
+    while (inum > 0.0 && inum3 > 0.0)
+    {
+        inum -= (int)r.Next(4);
+        inum3 -= 1.0;
+        int ix0 = Math.Max(0, (int)(ivx - inum * 0.5)), ix1 = Math.Min(W, (int)(ivx + inum * 0.5));
+        int iy0 = Math.Max(0, i6 - 1), iy1 = Math.Min(H, (int)(ivy + inum * 0.5));
+        inum2 = inum * (int)r.Next(80, 120) * 0.01;
+        double iTop2 = ivy + 1.0;
+        for (int ik = ix0; ik < ix1; ik++)
+        {
+            if ((int)r.Next(2) == 0) iTop2 += (int)r.Next(-1, 2);
+            if (iTop2 < ivy) iTop2 = ivy;
+            if (iTop2 > ivy + 2.0) iTop2 = ivy + 2.0;
+            for (int im = iy0; im < iy1; im++)
+            {
+                if ((double)im <= iTop2) continue;
+                int iti = im * W + ik;
+                double idx = Math.Abs((double)ik - ivx);
+                double idy = Math.Abs((double)im - ivy) * 3.0;
+                if (Math.Sqrt(idx * idx + idy * idy) < inum2 * 0.4 && typ[iti] == iTile) typ[iti] = 0;
+            }
+        }
+        ivx += iv2x; ivy += iv2y;
+        iv2x += (int)r.Next(-20, 21) * 0.05;
+        if (iv2x > 1.0) iv2x = 1.0;
+        if (iv2x < -1.0) iv2x = -1.0;
+        if (iv2y > 0.2) iv2y = -0.2;
+        if (iv2y < -0.2) iv2y = -0.2;
+    }
+    int ir29 = i4 + (int)r.Next(5);              // ④ 土面云斑
+    while (ir29 < i5)
+    {
+        int ir30 = i7;
+        while ((ir30 < 0 || ir30 >= H || ir29 < 0 || ir29 >= W || act[ir30 * W + ir29] == 0 || typ[ir30 * W + ir29] != 0) && ir29 < i5)
+        {
+            ir30--;
+            if (ir30 < i6) { ir30 = i7; ir29 += (int)r.Next(1, 4); }
+        }
+        if (ir29 >= i5) continue;
+        ir30 += (int)r.Next(0, 4);
+        int ir31 = (int)r.Next(2, 5);
+        for (int an = ir29 - ir31; an <= ir29 + ir31; an++)
+            for (int ay = ir30 - ir31; ay <= ir30 + ir31; ay++)
+            {
+                if (ay <= i6 || an < 0 || an >= W || ay < 0 || ay >= H) continue;
+                double ddx = Math.Abs(an - ir29);
+                double ddy = Math.Abs(ay - ir30) * 2;
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < (double)ir31) typ[ay * W + an] = iTile;
+            }
+        ir29 += (int)r.Next(ir31, (int)((double)ir31 * 1.5));
+    }
+    for (int an = i4 - 20; an <= i5 + 20; an++)  // ⑤ 全实心区填墙 73
+        for (int ay = i6 - 20; ay <= i7 + 20; ay++)
+        {
+            if (an < 0 || an >= W || ay < 0 || ay >= H) continue;
+            bool ok = true;
+            for (int ox = an - 1; ox <= an + 1; ox++)
+                for (int oy = ay - 1; oy <= ay + 1; oy++)
+                {
+                    if (ox < 0 || ox >= W || oy < 0 || oy >= H) { ok = false; continue; }
+                    int oti = oy * W + ox;
+                    if (act[oti] == 0 || (wal[oti] > 0 && wal[oti] != 73)) ok = false;
+                }
+            if (ok) wal[ay * W + an] = 73;
+        }
+    for (int ax = i4; ax <= i5; ax++)            // ⑥ 岛面水池
+    {
+        int ay2 = i6 - 10;
+        while (ay2 + 1 < H && act[(ay2 + 1) * W + ax] == 0) ay2++;
+        if (ay2 >= i7) continue;
+        if (ax < 0 || ax >= W || ay2 + 1 >= H || typ[(ay2 + 1) * W + ax] != iTile) continue;
+        if ((int)r.Next(10) == 0)
+        {
+            int wid = (int)r.Next(1, 3);
+            for (int wx = ax - wid; wx <= ax + wid; wx++)
+            {
+                if (wx < 0 || wx >= W) continue;
+                if (ay2 >= 0 && ay2 < H && typ[ay2 * W + wx] == iTile && WaterStaysPut(wx, ay2)) { act[ay2 * W + wx] = 0; liq[ay2 * W + wx] = 255; liqT[ay2 * W + wx] = 0; }
+                if (ay2 + 1 < H && typ[(ay2 + 1) * W + wx] == iTile && WaterStaysPut(wx, ay2 + 1)) { act[(ay2 + 1) * W + wx] = 0; liq[(ay2 + 1) * W + wx] = 255; liqT[(ay2 + 1) * W + wx] = 0; }
+                if (wx > ax - wid && wx < ax + 2 && ay2 + 2 < H && typ[(ay2 + 2) * W + wx] == iTile && WaterStaysPut(wx, ay2 + 2)) { act[(ay2 + 2) * W + wx] = 0; liq[(ay2 + 2) * W + wx] = 255; liqT[(ay2 + 2) * W + wx] = 0; }
+            }
+        }
+        if (ax >= 0 && ax < W && ay2 >= 0 && ay2 < H)
+        {
+            if ((int)r.Next(5) == 0 && WaterStaysPut(ax, ay2)) liq[ay2 * W + ax] = 255;
+            liqT[ay2 * W + ax] = 0;
+        }
+    }
+    int iPuffs = (int)r.Next(4);                 // ⑦ 岛上方云 puff + 水滴
+    for (int ip = 0; ip <= iPuffs; ip++)
+    {
+        int ipx = (int)r.Next(i4 - 5, i5 + 5);
+        int ipy = i6 - (int)r.Next(20, 40);
+        int ipr = (int)r.Next(4, 8);
+        int ipMat = iTile;
+        if ((int)r.Next(2) == 0) ipMat = 196;
+        for (int an = ipx - ipr; an <= ipx + ipr; an++)
+            for (int ay = ipy - ipr; ay <= ipy + ipr; ay++)
+            {
+                if (an < 0 || an >= W || ay < 0 || ay >= H) continue;
+                double ddx = Math.Abs(an - ipx);
+                double ddy = Math.Abs(ay - ipy) * 2;
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < (double)(ipr + (int)r.Next(-1, 2)))
+                {
+                    act[ay * W + an] = 1; typ[ay * W + an] = (ushort)ipMat;
+                }
+            }
+        for (int an = ipx - ipr + 2; an <= ipx + ipr - 2; an++)
+        {
+            int ay3 = ipy - ipr;
+            while (ay3 < H && act[ay3 * W + an] == 0) ay3++;
+            if (an >= 0 && an < W && ay3 >= 0 && ay3 < H && WaterStaysPut(an, ay3))
+            {
+                act[ay3 * W + an] = 0; liq[ay3 * W + an] = 255; liqT[ay3 * W + an] = 0;
+            }
+        }
+    }
+}
+void CloudLake(int ci, int cj)
+{
+    double lnum = (int)r.Next(100, 150);
+    double lnum2 = lnum;
+    double lnum3 = (int)r.Next(20, 30);
+    int l4 = ci, l5 = ci, l6 = cj, l7 = cj;
+    ushort lTile = 189;
+    double lvx = ci, lvy = cj;
+    double lv2x = (int)r.Next(-20, 21) * 0.2;
+    while (lv2x > -2.0 && lv2x < 2.0) lv2x = (int)r.Next(-20, 21) * 0.2;
+    double lv2y = (int)r.Next(-20, -10) * 0.02;
+    while (lnum > 0.0 && lnum3 > 0.0)            // ① 主体云盘（同 CloudIsland）
+    {
+        lnum -= (int)r.Next(4);
+        lnum3 -= 1.0;
+        int ix0 = Math.Max(0, (int)(lvx - lnum * 0.5)), ix1 = Math.Min(W, (int)(lvx + lnum * 0.5));
+        int iy0 = Math.Max(0, (int)(lvy - lnum * 0.5)), iy1 = Math.Min(H, (int)(lvy + lnum * 0.5));
+        lnum2 = lnum * (int)r.Next(80, 120) * 0.01;
+        double lTop = lvy + 1.0;
+        for (int ik = ix0; ik < ix1; ik++)
+        {
+            if ((int)r.Next(2) == 0) lTop += (int)r.Next(-1, 2);
+            if (lTop < lvy) lTop = lvy;
+            if (lTop > lvy + 2.0) lTop = lvy + 2.0;
+            for (int im = iy0; im < iy1; im++)
+            {
+                if ((double)im <= lTop) continue;
+                double idx = Math.Abs((double)ik - lvx);
+                double idy = Math.Abs((double)im - lvy) * 3.0;
+                if (Math.Sqrt(idx * idx + idy * idy) >= lnum2 * 0.4) continue;
+                if (ik < l4) l4 = ik;
+                if (ik > l5) l5 = ik;
+                if (im < l6) l6 = im;
+                if (im > l7) l7 = im;
+                act[im * W + ik] = 1; typ[im * W + ik] = lTile;
+            }
+        }
+        lvx += lv2x; lvy += lv2y;
+        lv2x += (int)r.Next(-20, 21) * 0.05;
+        if (lv2x > 1.0) lv2x = 1.0;
+        if (lv2x < -1.0) lv2x = -1.0;
+        if (lv2y > 0.2) lv2y = -0.2;
+        if (lv2y < -0.2) lv2y = -0.2;
+    }
+    int lr17 = l4 + (int)r.Next(5);              // ② 底缘雨云凸包
+    int lr19 = 0;
+    for (; lr17 < l5; lr17 += (int)r.Next(lr19, (int)((double)lr19 * 1.5)))
+    {
+        int lr18 = l7;
+        while (lr18 >= 0 && act[lr18 * W + lr17] == 0) lr18--;   // CloudLake 无 InWorld 门
+        lr18 += (int)r.Next(-3, 4);
+        lr19 = (int)r.Next(4, 8);
+        int lr20 = lTile;
+        if ((int)r.Next(4) == 0) lr20 = 196;
+        for (int an = lr17 - lr19; an <= lr17 + lr19; an++)
+            for (int ay = lr18 - lr19; ay <= lr18 + lr19; ay++)
+            {
+                if (ay <= l6) continue;
+                double ddx = Math.Abs(an - lr17);
+                double ddy = Math.Abs(ay - lr18) * 2;
+                if (Math.Sqrt(ddx * ddx + ddy * ddy) < (double)(lr19 + (int)r.Next(2)))
+                {
+                    act[ay * W + an] = 1; typ[ay * W + an] = (ushort)lr20;
+                }
+            }
+    }
+    lnum = (int)r.Next(80, 95);                  // ③ 湖盆挖除 + 灌水
+    lnum2 = lnum;
+    lnum3 = (int)r.Next(10, 15);
+    lvx = ci; lvy = l6;
+    lv2x = (int)r.Next(-20, 21) * 0.2;
+    while (lv2x > -2.0 && lv2x < 2.0) lv2x = (int)r.Next(-20, 21) * 0.2;
+    lv2y = (int)r.Next(-20, -10) * 0.02;
+    while (lnum > 0.0 && lnum3 > 0.0)
+    {
+        lnum -= (int)r.Next(4);
+        lnum3 -= 1.0;
+        int ix0 = Math.Max(0, (int)(lvx - lnum * 0.5)), ix1 = Math.Min(W, (int)(lvx + lnum * 0.5));
+        int iy0 = Math.Max(0, l6 - 1), iy1 = Math.Min(H, (int)(lvy + lnum * 0.5));
+        lnum2 = lnum * (int)r.Next(80, 120) * 0.01;
+        double lTop2 = lvy + 1.0;
+        for (int ik = ix0; ik < ix1; ik++)
+        {
+            if ((int)r.Next(2) == 0) lTop2 += (int)r.Next(-1, 2);
+            if (lTop2 < lvy) lTop2 = lvy;
+            if (lTop2 > lvy + 2.0) lTop2 = lvy + 2.0;
+            for (int im = iy0; im < iy1; im++)
+            {
+                if ((double)im <= lTop2 - 2.0) continue;
+                int lti = im * W + ik;
+                double idx = Math.Abs((double)ik - lvx);
+                double idy = Math.Abs((double)im - lvy) * 3.0;
+                if (!(Math.Sqrt(idx * idx + idy * idy) < lnum2 * 0.4) || typ[lti] != lTile) continue;
+                act[lti] = 0;
+                wal[lti] = 0;
+                if (ik - 1 >= 0) wal[im * W + ik - 1] = 0;
+                if (ik + 1 < W) wal[im * W + ik + 1] = 0;
+                if (im - 1 >= 0) wal[(im - 1) * W + ik] = 0;
+                if (ik - 1 >= 0 && im - 1 >= 0) wal[(im - 1) * W + ik - 1] = 0;
+                if (ik + 1 < W && im - 1 >= 0) wal[(im - 1) * W + ik + 1] = 0;
+                if ((double)im > lTop2 + 1.0)
+                {
+                    if (WaterStaysPut(ik, im)) liq[lti] = 255;
+                    liqT[lti] = 0;
+                }
+            }
+        }
+        lvx += lv2x; lvy += lv2y;
+        lv2x += (int)r.Next(-20, 21) * 0.05;
+        if (lv2x > 1.0) lv2x = 1.0;
+        if (lv2x < -1.0) lv2x = -1.0;
+        if (lv2y > 0.2) lv2y = -0.2;
+        if (lv2y < 0.0) lv2y = 0.0;              // CloudLake 湖盆段 Y 下限 0（非 -0.2）
+    }
+    for (int an = l4 - 20; an <= l5 + 20; an++)  // ④ 墙 73（同 CloudIsland）
+        for (int ay = l6 - 20; ay <= l7 + 20; ay++)
+        {
+            if (an < 0 || an >= W || ay < 0 || ay >= H) continue;
+            bool ok = true;
+            for (int ox = an - 1; ox <= an + 1; ox++)
+                for (int oy = ay - 1; oy <= ay + 1; oy++)
+                {
+                    if (ox < 0 || ox >= W || oy < 0 || oy >= H) { ok = false; continue; }
+                    int oti = oy * W + ox;
+                    if (act[oti] == 0 || (wal[oti] > 0 && wal[oti] != 73)) ok = false;
+                }
+            if (ok) wal[ay * W + an] = 73;
+        }
+    for (int ax = l4; ax <= l5; ax++)            // ⑤ 湖面水
+    {
+        int ay2 = l6 - 10;
+        while (ay2 + 1 < H && act[(ay2 + 1) * W + ax] == 0) ay2++;
+        if (ay2 >= l7) continue;
+        if (ax < 0 || ax >= W || ay2 + 1 >= H || typ[(ay2 + 1) * W + ax] != lTile) continue;
+        if ((int)r.Next(10) == 0)
+        {
+            int wid = (int)r.Next(1, 3);
+            for (int wx = ax - wid; wx <= ax + wid; wx++)
+            {
+                if (wx < 0 || wx >= W) continue;
+                if (ay2 >= 0 && ay2 < H && typ[ay2 * W + wx] == lTile && WaterStaysPut(wx, ay2)) { act[ay2 * W + wx] = 0; liq[ay2 * W + wx] = 255; liqT[ay2 * W + wx] = 0; }
+                if (ay2 + 1 < H && typ[(ay2 + 1) * W + wx] == lTile && WaterStaysPut(wx, ay2 + 1)) { act[(ay2 + 1) * W + wx] = 0; liq[(ay2 + 1) * W + wx] = 255; liqT[(ay2 + 1) * W + wx] = 0; }
+                if (wx > ax - wid && wx < ax + 2 && ay2 + 2 < H && typ[(ay2 + 2) * W + wx] == lTile && WaterStaysPut(wx, ay2 + 2)) { act[(ay2 + 2) * W + wx] = 0; liq[(ay2 + 2) * W + wx] = 255; liqT[(ay2 + 2) * W + wx] = 0; }
+            }
+        }
+        if (ax >= 0 && ax < W && ay2 >= 0 && ay2 < H)
+        {
+            if ((int)r.Next(5) == 0 && WaterStaysPut(ax, ay2)) liq[ay2 * W + ax] = 255;
+            liqT[ay2 * W + ax] = 0;
+        }
+    }
+}
+{
+    int isCount = (int)(W * 0.0008);              // 3（4200 宽）
+    int isLakes = 0;
+    int isTotal = isCount + 1;                    // GenVars.skyLakes = 1（4200 宽）
+    var isHousesX = new List<int>();
+    var isHousesY = new List<int>();
+    for (int ii = 0; (double)ii < (double)isTotal; ii++)
+    {
+        int isBudget = W;
+        while (--isBudget > 0)
+        {
+            bool isOk = true;
+            int isX = (int)r.Next((int)(W * 0.1), (int)(W * 0.9));
+            while (isX > W / 2 - 150 && isX < W / 2 + 150) isX = (int)r.Next((int)(W * 0.1), (int)(W * 0.9));
+            for (int hj = 0; hj < isHousesX.Count; hj++)
+                if (isX > isHousesX[hj] - 180 && isX < isHousesX[hj] + 180) { isOk = false; break; }
+            if (!isOk) continue;
+            isOk = false;
+            int isY = 0;
+            for (int k = 200; k < worldSurface && k < H; k++)
+                if (act[k * W + isX] != 0) { isY = k; isOk = true; break; }
+            if (!isOk) continue;
+            isBudget = -1;
+            int isTop = Math.Min((int)r.Next(90, isY - 100), (int)gvWorldSurfaceLow - 50);
+            bool isLake = isLakes >= isCount;
+            if (isLake) CloudLake(isX, isTop);
+            else CloudIsland(isX, isTop);
+            isHousesX.Add(isX); isHousesY.Add(isTop);
+            isLakes++;
+        }
+    }
+}
+Checkpoint("islands");
+
+// ================= Pass 24 DirtToMud（cs:13172-13191）=================
+{
+    double dmCount = (double)(W * H) * 0.001;
+    for (int dmi = 0; (double)dmi < dmCount; dmi++)
+        TileRunner((int)r.Next(0, W), (int)r.Next((int)gvRockLayerLow, H), (int)r.Next(2, 6), (int)r.Next(2, 40), 59, false, 0.0, 0.0, false, true, 53);
+}
+Checkpoint("dirttomud");
+
+// ================= Pass 25 Silt（cs:13192-13231）=================
+{
+    int siCount = (int)((float)(W * H) * 0.0001f);
+    for (int si1 = 0; si1 < siCount; si1++)
+    {
+        int sx = (int)r.Next(0, W);
+        int sy = (int)r.Next((int)gvRockLayerHigh, H);
+        if (wal[sy * W + sx] != 187 && wal[sy * W + sx] != 216)
+            TileRunner(sx, sy, (int)r.Next(5, 12), (int)r.Next(15, 50), 123);
+    }
+    int siCount2 = (int)((float)(W * H) * 0.0005f);
+    for (int si2 = 0; si2 < siCount2; si2++)
+    {
+        int sx = (int)r.Next(0, W);
+        int sy = (int)r.Next((int)gvRockLayerHigh, H);
+        if (wal[sy * W + sx] != 187 && wal[sy * W + sx] != 216)
+            TileRunner(sx, sy, (int)r.Next(2, 5), (int)r.Next(2, 5), 123);
+    }
+}
+Checkpoint("silt");
+
+// ================= Pass 26 OresAndShinies（cs:13233-13658 普通世界分支）=================
+void ShinyBand(double oCount, int yMin, int yMax, int sMin, int sMax, int stMin, int stMax, int oType)
+{
+    for (int oi = 0; (double)oi < oCount; oi++)
+        TileRunner((int)r.Next(0, W), (int)r.Next(yMin, yMax), (int)r.Next(sMin, sMax), (int)r.Next(stMin, stMax), oType);
+}
+{
+    double area = (double)(W * H);
+    ShinyBand(area * 6E-05, (int)gvWorldSurfaceLow, (int)gvWorldSurfaceHigh, 3, 6, 2, 6, oreCu);
+    ShinyBand(area * 8E-05, (int)gvWorldSurfaceHigh, (int)gvRockLayerHigh, 3, 7, 3, 7, oreCu);
+    ShinyBand(area * 0.0002, (int)gvRockLayerLow, H, 4, 9, 4, 8, oreCu);
+    ShinyBand(area * 3E-05, (int)gvWorldSurfaceLow, (int)gvWorldSurfaceHigh, 3, 7, 2, 5, oreFe);
+    ShinyBand(area * 8E-05, (int)gvWorldSurfaceHigh, (int)gvRockLayerHigh, 3, 6, 3, 6, oreFe);
+    ShinyBand(area * 0.0002, (int)gvRockLayerLow, H, 4, 9, 4, 8, oreFe);
+    ShinyBand(area * 2.6E-05, (int)gvWorldSurfaceHigh, (int)gvRockLayerHigh, 3, 6, 3, 6, oreAg);
+    ShinyBand(area * 0.00015, (int)gvRockLayerLow, H, 4, 9, 4, 8, oreAg);
+    ShinyBand(area * 0.00012, (int)gvRockLayerLow, H, 4, 8, 4, 8, oreAu);
+    ShinyBand(area * 0.00017, 0, (int)gvWorldSurfaceLow, 4, 9, 4, 8, oreAg);
+    ShinyBand(area * 0.00012, 0, (int)gvWorldSurfaceLow - 20, 4, 8, 4, 8, oreAu);
+    // 邪恶矿：crimson→204，否则 22（drunk 分支不适用）
+    ShinyBand(area * 2.25E-05, rockLayer, H, 3, 6, 4, 8, crimson ? 204 : 22);
+}
+Checkpoint("ores");
+
 
 // ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================
 // 1456 注册序在 Dungeon(32) 之后——本 oracle 尚未转录 26-32 段（Mushroom/Marble/

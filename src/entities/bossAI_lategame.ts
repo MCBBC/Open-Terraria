@@ -8,8 +8,12 @@
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
+import type { Camera } from '../render/Camera';
+import type { Renderer } from '../render/Renderer';
 import { TILE } from '../core/constants';
 import { spawnPart, shoot, losClear } from './bossAI';
+import { Entity } from './Entity';
+import { projSprite } from './Arrow';
 
 // ===================== 共用工具(与 bossAI.ts 同语义,私有副本) =====================
 
@@ -129,6 +133,77 @@ function cultistPick(e: Enemy, phase2: boolean): number {
 function cultistClones(game: GameHooks, parent: Enemy): Enemy[] {
   return (game.enemies() as Enemy[]).filter(
     (n) => !n.dead && n.vanillaId === 440 && laOf(n).la3 === parent);
+}
+
+/** 仪式圈弹 490（Projectile.cs:5383 SetDefaults + aiStyle 89 :31193-31326）：
+ *  14×14 / hostile / alpha 255 / timeLeft 600 / noTileCollide，锚定源邪教徒 ai[1]。
+ *  淡入 300t（alpha -5/t 钳 0）→ 淡出（+12/t）；scale = (1-alpha/255)×0.6 随透明度
+ *  张合；rotation 每 t +π/210；alpha==0 时每 t 2 颗 228 号紫尘沿 204×scale 半径
+ *  向心收拢；出生播 Item123（本仓以 roar 低量近似）。
+ *  ai[0]==300 时原版召 NPC 454 幻影龙（场上无）否则 521 章鱼头（:31282-31292）——
+ *  两 AI 族未移植（登记：CultistDragonHead/AncientCultistSquidhead），此处不召，
+ *  圈弹视觉/淡入淡出/自旋 1:1。锚（439）消亡即 Kill（:31305-31320）。 */
+export class CultistRitualCircle extends Entity {
+  w = 14; h = 14;
+  private srcId: number;
+  private age = 0;         // ai[0]
+  private alpha = 255;
+  private rot = 0;
+  private soundPlayed = false;  // localAI[1]
+  dead = false;
+
+  constructor(src: Enemy) {
+    super();
+    this.srcId = src.id;
+    this.x = src.cx - this.w / 2;
+    this.y = src.cy - this.h / 2;
+  }
+
+  /** (1-alpha/255)×0.6（:31208-31210） */
+  private get scale(): number { return (1 - this.alpha / 255) * 0.6; }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    // 锚消亡即 Kill（:31305-31320 flag44：ai[1] NPC 非活跃/非 439 族）
+    if (!src || src.dead || src.vanillaId !== 439) { this.dead = true; return; }
+    // 淡入/淡出（:31195-31210）：age<300 alpha-5/t，之后 +12/t
+    this.alpha += this.age < 300 ? -5 : 12;
+    this.alpha = Math.max(0, Math.min(255, this.alpha));
+    this.rot += Math.PI / 210;                          // :31211
+    if (!this.soundPlayed) {
+      this.soundPlayed = true;
+      game.playSfx('roar', 0.4);                        // SoundID.Item123 近似
+    }
+    // 完全显现期的收拢紫尘（:31218-31250，尘 228 / 半径 204×scale / 内圈 ×0.42）
+    if (this.alpha === 0) {
+      for (let k = 0; k < 2; k++) {
+        const inner = k === 1;
+        const a = Math.random() * Math.PI * 2;
+        const rr = 204 * this.scale * (inner ? 0.42 : 1);
+        game.spawnParticles(this.cx + Math.cos(a) * rr, this.cy + Math.sin(a) * rr,
+          '#A060E0', 1, inner ? 1.5 : 2, { life: 30 });
+      }
+    }
+    this.age++;
+    // :31282-31292 age==300 召 454/521——两 AI 族未移植（登记），跳过
+    if (this.age >= 320) this.dead = true;              // :31294-31298
+  }
+
+  draw(r: Renderer, _cam: Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = projSprite(490);
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    const s = this.scale;
+    if (s <= 0.01) return;
+    const iw = img.naturalWidth, ih = img.naturalHeight;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    ctx.drawImage(img, -iw * s / 2, -ih * s / 2, iw * s, ih * s);
+    ctx.restore();
+  }
 }
 
 /** 克隆体生成出口(:65646-65650 NewNPC 440:X,Y 是底部中心坐标且 Y 再 +真身 height/2;
@@ -360,10 +435,12 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       if (t === 30 && isReal) {
         // :65636-65675:环绕自身半径 180 的 num29 环位重定位——
         //   补位克隆体(总数目标 6,每轮至多新造 2),余下槽位重排既有克隆体;
-        //   真身取「距玩家最远」槽(num31 = 最近槽的对侧);490 仪式圈弹未实装,
-        //   圈心(=重定位前中心)存 la2 供本态朝向用
+        //   真身取「距玩家最远」槽(num31 = 最近槽的对侧);圈心(=重定位前中心)存
+        //   la2 供本态朝向用,并于此原位发 490 仪式圈弹（:65643，ai[1]=真身索引）
         la.la1 += 1; // localAI[1] 仪式代数(:65637)
         la.la2 = { x: e.cx, y: e.cy };
+        (game as unknown as { entities: { add: (en: Entity, b: string) => void } }).entities
+          .add(new CultistRitualCircle(e), 'projectiles');
         const clones = cultistClones(game, e);
         let num28 = 6 - clones.length; // :65643-65647
         if (num28 > 2) num28 = 2;

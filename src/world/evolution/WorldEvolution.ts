@@ -294,9 +294,14 @@ export class WorldEvolution {
       const fx = st.frameX[this.at(i, j)];
       if (fx < 144) this.setType(i, j, S(113));
     }
-    // 水淹分支（cs:72202-72230）：丛林草/神庙砖浸水 → GrassGrowth；空水格 1/600 睡莲/香蒲（未接）
+    // 水淹分支（cs:72202-72245）：浸水格——丛林草/神庙砖(60/226) → GrassGrowth；
+    // 空水格（!active）各以 1/600 放睡莲(518)/香蒲(519)（else-if 链互斥，:72237-72248）
     const liq = this.liquidAt(i, j);
-    if (liq > 32 && (sheet === 60 || sheet === 226)) this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
+    if (liq > 32) {
+      if (sheet === 60 || sheet === 226) this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
+      else if (!act && Math.random() < 1 / 600) this.place1(i, j, 518);
+      else if (!act && Math.random() < 1 / 600) this.place1(i, j, 519);
+    }
     // 墙蔓延（邪恶草墙/硬化沙墙）
     if (this.allowedToSpread) {
       this.spreadGrassWalls(wallDist, i, j);

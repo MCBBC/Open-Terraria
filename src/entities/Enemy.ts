@@ -14,7 +14,7 @@ import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { avoidWater } from './waterAvoid';
-import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy } from './bossAI';
+import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy, shoot } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
 import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from './bossAI_queenbee_plantera';
@@ -788,6 +788,33 @@ export class Enemy extends Entity {
         const aimY = player.y - this.cy - Math.random() * 200;
         this.shootDart(game, this.cx, this.cy, player.cx - this.cx, aimY, 4.5, 9);
         this.ai3 = 50;
+      }
+    }
+    // ---- 史后仆从凝胶弹（cs:61668-61840：658 蓝 / 659 粉）：落地 + 有视线 + 冷却尽
+    // → 单发上抛凝胶弹（658→920 蓝 / 659→921 粉）。门 = |ΔX|<500 且 |ΔY|<550 且
+    // CanHit 且 velocity.Y==0（cs:61690-61694/:61747-61749）；瞄准点 Y 上抬
+    // rand(0,200) 补抛物线，基速 (4.5/距)×2，距离 >350 再 ×2（658）/×1.75（659）、
+    // >250 ×1.5（658）/×1.25（659）；伤 = MultiLerp(15,17,20) 经典档 15；冷却
+    // 50t（658）/40t（659）；射击时 ai[0]=-40 压跳 + vx×0.9。
+    // 专家分支（658 CountNPCS<5 门三星连发 920 ×(m-1,-4) 档 6 速 + 距离增益）未启用
+    const queenMinion = this.vanillaId === 658 || this.vanillaId === 659;
+    if (queenMinion && player && !player.dead && !inWater && this.onGround) {
+      if (this.ai3 > 0) this.ai3 -= 1;
+      const mdx = player.cx - this.cx;
+      const mdy = player.cy - this.cy;
+      const mdist = Math.hypot(mdx, mdy);
+      if (Math.abs(mdx) < 500 && Math.abs(mdy) < 550 && this.ai3 === 0
+        && this.canSeePlayer(st, player)) {
+        this.ai0 = -40; // 压制下一跳（cs:61721/:61751）
+        this.vx *= 0.9;
+        const aimY = player.y - this.cy - Math.random() * 200;   // :61724/:61758
+        let k = (4.5 / (Math.hypot(mdx, aimY) || 1)) * 2;        // :61726-61727
+        if (mdist > 350) k *= this.vanillaId === 658 ? 2 : 1.75; // :61728-61733
+        else if (mdist > 250) k *= this.vanillaId === 658 ? 1.5 : 1.25;
+        // 920/921 均为 aiStyle 1 弹跳凝胶弹（Projectile.cs:8443-8457）；本仓敌弹出口
+        // 统一 grav 0 直飞（shoot），上抛补偿已含在瞄准点
+        shoot(game, this.cx, this.cy, mdx * k, aimY * k, 15, this.vanillaId === 658 ? 920 : 921, 240);
+        this.ai3 = this.vanillaId === 658 ? 50 : 40;             // :61735/:61770
       }
     }
     // 重力+碰撞（原版经由 NPC 碰撞；水中浮力为原版 wet 行为）

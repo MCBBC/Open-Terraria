@@ -28,6 +28,7 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount },
     chests: world.chests,
     signs: world.signs,
+    furnitureItems: world.furnitureItems,
     trees: world.trees,
     flags: world.flags,
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,

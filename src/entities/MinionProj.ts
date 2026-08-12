@@ -46,6 +46,41 @@ const MINION_FRAMES: Record<number, [number, number, number]> = {
   1025: [8, 4, 0],  // 藤壶：慢循环
 };
 
+/** 远程射击随从表（Projectile.cs AI_062/AI_026/aiStyle66 射击分支提取）：
+ *  shot=射出弹幕 speed=弹速 cd=冷却 t(源码 ai[1] 递增率折算：373 rand(1,4)/t>90≈36；
+ *  375/407/423/613 +1~2/t 折算) range=射击门距 dmgMul=伤害倍率 jitter=瞄准随机抖动 px。
+ *  373 黄蜂→374 毒刺(:63116 sp10)；375 小鬼→376 火球(sp11)；
+ *  407 风暴(鲨鱼龙卷)→408(sp20)；423 Xeno UFO→433 光束(sp4,≤400px 门,:63136)；
+ *  613 星尘细胞→614(sp14,≤500px 门)；
+ *  191-194 俾格米→195 掷矛(AI_026 :58795,sp11,CD30,射程800,抖动±20)；
+ *  387 双子激光眼→389(:28982 sp8 ×1.15 伤,CD~45,需视线)；
+ *  1094 Foxparks→1097 火球(:58815 sp11 CD42 无抖动) */
+const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; range: number; dmgMul?: number; jitter?: number }> = {
+  373: { shot: 374, speed: 10, cd: 36, range: 1000 },
+  375: { shot: 376, speed: 11, cd: 68, range: 1000 },
+  407: { shot: 408, speed: 20, cd: 30, range: 1000 },
+  423: { shot: 433, speed: 4, cd: 24, range: 400 },
+  613: { shot: 614, speed: 14, cd: 36, range: 500 },
+  191: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
+  192: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
+  193: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
+  194: { shot: 195, speed: 11, cd: 30, range: 800, jitter: 20 },
+  387: { shot: 389, speed: 8, cd: 45, range: 1000, dmgMul: 1.15 },
+  1094: { shot: 1097, speed: 11, cd: 42, range: 800 },
+};
+
+/** 其他哨兵射击表（aiStyle 53 :27300 / aiStyle 123 :33990 提取；射程门 1000）：
+ *  308 冰九头蛇→309 冰弹 sp9 CD60（炮口 +24*facing）；377 蜘蛛皇后→378 蛛卵 sp9 CD60；
+ *  966 猎犬→967 sp12.5 CD90（Center-16Y）；641 月门→642 传送门弹 CD30（10t 蓄+20t 冷）；
+ *  643 彩虹水晶→644×3 目标区随机落点 CD50（:34000 三连，距离越远散布越大） */
+const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; volley?: number }> = {
+  308: { shot: 309, speed: 9, cd: 60 },
+  377: { shot: 378, speed: 9, cd: 60 },
+  966: { shot: 967, speed: 12.5, cd: 90 },
+  641: { shot: 642, speed: 9, cd: 30 },
+  643: { shot: 644, speed: 0, cd: 50, volley: 3 },
+};
+
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
@@ -235,6 +270,45 @@ export class MinionProj extends Entity {
         }
         return;
       }
+      // 其他哨兵五族（aiStyle 53/123：冰九头蛇/蜘蛛皇后/猎犬/月门/彩虹水晶）
+      const ss = SENTRY_SHOOT[this.projId];
+      if (ss) {
+        const tgt = this.nearestEnemy(game, 1000);
+        if (tgt) this.facing = tgt.cx >= this.cx ? 1 : -1;
+        if (tgt && this.sCool <= 0) {
+          this.sCool = ss.cd;
+          // 炮口（aiStyle 53 :27324：308/377 头部帧偏移≈+24*facing；966 Center-16Y；641 本体中心）
+          const mOff = this.projId === 308 || this.projId === 377 ? this.facing * 24 : 0;
+          const mx = this.cx + mOff;
+          const my = this.projId === 966 ? this.cy - 16 : this.cy - 2;
+          if (ss.volley) {
+            // 彩虹水晶 643：3 连目标区随机落点（:34005——距离越远散布越大 0.5-1.25×）
+            for (let i = 0; i < ss.volley; i++) {
+              const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
+              const spread = 0.1 + 0.65 * Math.max(0, Math.min(1, (800 - Math.min(800, d)) / 600));
+              const px = tgt.cx + (Math.random() - 0.5) * 2 * (20 + spread * 60);
+              const py = tgt.cy + (Math.random() - 0.5) * 2 * (20 + spread * 60);
+              // 644 是原地爆裂弹（零速生成,短时引爆）→ 落点直接 AoE
+              for (const ent of game.enemies()) {
+                const en = ent as EnemyLike & { dead: boolean };
+                if (en.dead) continue;
+                if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
+                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game);
+                }
+              }
+              game.spawnParticles(px, py, `hsl(${Math.floor(Math.random() * 360)},90%,65%)`, 8, 2.4, { life: 26 });
+            }
+          } else {
+            const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+            (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+              new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * ss.speed, ((tgt.cy - my) / d) * ss.speed,
+                dmgOf(), this.knockback, ss.shot, null, { grav: 0 }),
+              'projectiles');
+          }
+        }
+        if (this.sCool > 0) this.sCool--;
+        return;
+      }
       // 其余哨兵：定点炮台，60t 一发（兜底近似）
       const tgt = this.nearestEnemy(game, 600);
       if (tgt) {
@@ -252,7 +326,10 @@ export class MinionProj extends Entity {
     // 随从
     const p = this.ownerRef();
     if (!p) { this.dead = true; return; }
-    const tgt = this.nearestEnemy(game, 700);
+    const tgt = this.nearestEnemy(game, MINION_SHOOT[this.projId] ? 1000 : 700);
+    // 基础伤害（× summon≈magic 乘区 × 荆棘鞭 +10%）——射击/接触共用
+    const thornM0 = (p as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
+    const dmg0 = Math.max(1, Math.round(this.damage * p.damageMult('magic') * thornM0));
     // 朝向（AI_062 :62975：velocity.X>0 → spriteDirection=-1；近似取
     // 追敌方向/移动方向的水平符号）
     {
@@ -298,6 +375,28 @@ export class MinionProj extends Entity {
       this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
       moveAndCollide(this, game.world, this.vx, this.vy);
     }
+    // 远程射击（AI_062/AI_026/aiStyle66 射击族：射程门内且冷却好 → 朝目标发射专属弹幕）。
+    // 俾格米掷矛带 ±20px 随机抖动（AI_026 :58788 rand(-20,21)/rand(-20,20)）；射击与接触
+    // 伤害并存（原版随从移动中也带接触判定）
+    const shooter = MINION_SHOOT[this.projId];
+    if (tgt && shooter) {
+      if (this.shootCd > 0) this.shootCd--;
+      else {
+        const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy);
+        if (d <= shooter.range) {
+          this.shootCd = shooter.cd;
+          const j = shooter.jitter ?? 0;
+          const ax = tgt.cx + (Math.random() * 2 - 1) * j - this.cx;
+          const ay = tgt.cy + (Math.random() * 2 - 1) * j - this.cy;
+          const al = Math.hypot(ax, ay) || 1;
+          const dmg = Math.max(1, Math.round(dmg0 * (shooter.dmgMul ?? 1)));
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+            new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
+              dmg, this.knockback, shooter.shot, null, { grav: 0 }),
+            'projectiles');
+        }
+      }
+    }
     // 接触伤害（同敌 20t 冷却；伤害吃玩家 summon≈magic 乘区；
     // 敌方有鞭 tag → +whipTagDmg，Projectile.ApplyTag 系语义）
     for (const e of game.enemies()) {
@@ -306,8 +405,7 @@ export class MinionProj extends Entity {
       if (!(this.x < en.x + en.w && this.x + this.w > en.x && this.y < en.y + en.h && this.y + this.h > en.y)) continue;
       if (!this.hitCd.ready(en.id, 20)) continue;
       const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
-      const thornM = (p as unknown as { whipBuffs?: Record<number, number> })?.whipBuffs?.[314] ? 1.1 : 1;
-      const dmg = Math.max(1, Math.round(this.damage * p.damageMult('magic') * thornM) + tag);
+      const dmg = dmg0 + tag;
       en.hurt(dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
       this.attackFlash = 24; // AI_062 攻击帧门（小鬼 ai[1]<24 → frame+4）
     }

@@ -521,13 +521,15 @@ export class Renderer {
     this.updateWaterStyle(world, cam);
     this.easeFullMap();
 
-    // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线）
+    // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线 / 世界尺寸）
     this.sky.fx = {
       monolith: this.monoScan.activeMonolithType,
       party: !!this.scene?.partyUp,
       surfaceY: world.groundLevel * TILE,
+      worldW: world.w,
+      worldH: world.h,
     };
-    this.sky.draw(ctx, clock, viewW, viewH, cam.x);
+    this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
     if (this.scene) {
@@ -710,6 +712,10 @@ export class Renderer {
 
     // 7c. MoonLordShake 屏幕后处理（Main.cs:64437-64447）：光照合成后、HUD 前叠红色靶心脉冲
     this.drawMoonLordShake(ctx, cam, viewW, viewH);
+
+    // 7c-bis. ScreenObstruction 遮屏（ScreenObstruction.cs 1:1）：星云头蟹 421 头顶吸附
+    // 授 Obstructed(163) → headcovered → 目标 0.95/步进 0.3 的黑幕逼近，玩家矩形开孔
+    this.updateAndDrawScreenObstruction(ctx, cam, viewW, viewH, player);
 
     // 7d. 天塔柱族全屏滤镜（FilterManager.EndCapture :136-176：世界整屏合成、
     //     HUD 之前；EffectPriority 升序 → Medium 先 VeryHigh 后）。开关链：
@@ -2890,6 +2896,62 @@ export class Renderer {
     g.addColorStop(1, `rgba(190,10,10,${Math.min(0.7, 0.55 * m.t * pulse).toFixed(3)})`);
     ctx.fillStyle = g;
     ctx.fillRect(0, 0, viewW, viewH);
+  }
+
+  // ---- ScreenObstruction 遮屏（ScreenObstruction.cs 1:1，Obstructed buff 163 载体）----
+  /** screenObstruction 当前黑幕强度（Update 的静态位；调试/探针可读） */
+  screenObstruction = 0;
+  private obstructionLastSpeed = 0.1;   // lastSpeed（:9）
+  private obstructionTex: HTMLImageElement | null = null;
+
+  /** Update（:12-41）+ Draw（:43-63）合并：headcovered（buff 163）→ 目标 0.95/步进
+   *  0.3；解除后以 lastSpeed 回落。绘制 = 黑幕四象限围出玩家矩形孔（MagicPixel 四
+   *  quad :57-60）+ Extra_49 洞沿羽化贴图（:61，100×100） */
+  private updateAndDrawScreenObstruction(
+    ctx: CanvasRenderingContext2D, cam: Camera, viewW: number, viewH: number, player: Player,
+  ): void {
+    const headcovered = player.buffs.obstructed;   // Player.cs:11421（buff 163 → headcovered）
+    let target = 0;
+    let amount = 0.1;
+    if (headcovered) { target = 0.95; amount = 0.3; }   // :27-31
+    if (target === 0 && this.screenObstruction !== 0) amount = this.obstructionLastSpeed;
+    else this.obstructionLastSpeed = amount;            // :32-39
+    // MoveTowards(amount/帧，60Hz 帧步进)
+    const frames = 1;
+    const step = amount * frames;
+    if (this.screenObstruction < target) this.screenObstruction = Math.min(target, this.screenObstruction + step);
+    else if (this.screenObstruction > target) this.screenObstruction = Math.max(target, this.screenObstruction - step);
+    if (this.screenObstruction <= 0.001) return;
+    // 玩家矩形孔（:50-52）：getRect 以 Extra_49 宽 100 为基准 Inflate，+10/2 竖偏
+    const HOLE = 100, num2 = 10;
+    const [px, py] = cam.worldToScreen(player.x, player.y);
+    const rw = HOLE, rh = HOLE;   // Inflate 到 100×100（玩家 20×42 基准 + 均分补齐）
+    const rect = {
+      left: Math.round(px + player.w / 2 - rw / 2),
+      top: Math.round(py + player.h / 2 - rh / 2 + num2 / 2 - num2),
+      right: 0, bottom: 0,
+    };
+    rect.right = rect.left + rw;
+    rect.bottom = rect.top + rh;
+    const a = Math.min(0.95, this.screenObstruction);
+    ctx.save();
+    ctx.fillStyle = `rgba(0,0,0,${a})`;
+    ctx.fillRect(0, 0, viewW, Math.max(0, rect.top));                                   // 上
+    ctx.fillRect(rect.right, 0, Math.max(0, viewW - rect.right), viewH);                // 右
+    ctx.fillRect(0, rect.bottom, viewW, Math.max(0, viewH - rect.bottom));              // 下
+    ctx.fillRect(0, 0, Math.max(0, rect.left), viewH);                                  // 左
+    if (!this.obstructionTex) {
+      const im = new Image();
+      im.src = 'sprites/vanilla/Extra_49.png';
+      this.obstructionTex = im;
+    }
+    const tex = this.obstructionTex;
+    if (tex && tex.complete && tex.naturalWidth > 0) {
+      ctx.globalAlpha = a;
+      ctx.drawImage(tex, rect.left, rect.top, rw, rh);
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
   }
 
   private drawSmartCursor(

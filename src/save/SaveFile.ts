@@ -7,9 +7,10 @@ import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE, ITEM_STABLE_OF_INTERNAL } from '../data/items';
 import { weatherToSave } from '../world/weather/Weather';
 import { applyLunarSave } from '../world/LunarEvent';
+import { furnitureFromSave, furnitureToSave } from '../world/FurnitureItems';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -52,6 +53,8 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+    // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
+    furniture: furnitureToSave(world.furnitureItems, (id) => ITEM_STABLE_OF_INTERNAL[id] ?? 0),
   };
   const playerData: SaveData['player'] = {
     hp: player.hp, x: player.x, y: player.y,
@@ -96,6 +99,7 @@ export function saveWorldOnly(world: World): string {
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    furniture: furnitureToSave(world.furnitureItems, (id) => ITEM_STABLE_OF_INTERNAL[id] ?? 0),
   };
   const placeholderPlayer: SaveData['player'] = {
     hp: 0, x: world.spawnX * 16, y: world.spawnY * 16,
@@ -154,6 +158,11 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   // 三类 bool 走 flags 落盘；盾值不存——TowerActive=true 读档重置满盾）
   applyLunarSave(world);
   if (data.signs) world.signs = data.signs;
+  // 挂物族存放物（v3 稳定 id → 内部 id；未知 id 归 0 由 furnitureFromSave 置空槽）
+  world.furnitureItems = furnitureFromSave(
+    data.furniture,
+    (id) => (v3 ? ITEM_INTERNAL_OF_STABLE.get(id) ?? 0 : id),
+  );
 
   const st = world.store;
   // tiles(v3:RLE 里的 type 是稳定 id,查 INTERNAL_OF_STABLE 还原;v2 旧档=内部下标直读)

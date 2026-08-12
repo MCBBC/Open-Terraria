@@ -378,9 +378,11 @@ export class Player extends Entity {
         this.hp = Math.min(this.maxHp, this.hp + n);
       }
     }
-    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点（流血 Bleeding 清 lifeRegenTime → 阻断,:18998）
+    // 自然回血：脱离战斗 5 秒后每秒缓回 1 点（流血 Bleeding 清 lifeRegenTime → 阻断,:18998；
+    // 遮挡 Obstructed 163 的 bleed 同门——:11424 bleed=true 同消费点）
     this.sinceHurt++;
-    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp && !this.buffs.has(BuffType.Bleeding)) {
+    if (this.sinceHurt > 300 && this.hp > 0 && this.hp < this.maxHp
+      && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
       this.regenAccum += dt;
       if (this.regenAccum >= 1) {
         this.regenAccum -= 1;
