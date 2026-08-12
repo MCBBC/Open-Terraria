@@ -586,9 +586,11 @@ export class DukeSharknadoBolt extends Entity {
     }
   }
 
-  /** v6 联机打包：kind=5，tag=big 标记（访客重建后本地跑确定性运动，见 kill 傀儡门禁） */
-  netProjMeta() {
-    return { kind: 5, tag: this.big ? '1' : '0', aux: 0, dmg: 0 };
+  /** v6 联机打包：kind=5，tag=big 标记（访客重建后本地跑确定性运动，见 kill 傀儡门禁）。
+   *  终审 M1：速度经 exVx/exVy 通道携带（本类运动用私有 vx0/vy0，Entity.vx/vy 恒 0——
+   *  不补则访客重建的小弹水平静止原地摆到寿终） */
+  netProjMeta(): NetProjMeta {
+    return { kind: 5, tag: this.big ? '1' : '0', aux: 0, dmg: 0, exVx: this.vx0, exVy: this.vy0 };
   }
 
   draw(r: Renderer, _cam: Camera): void {

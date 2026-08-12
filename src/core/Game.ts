@@ -601,7 +601,8 @@ export class Game implements GameHooks {
     net.sendNpcSnapshot(snaps);
   }
 
-  /** 双向：本地弹幕快照（15Hz 变化驱动；kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj） */
+  /** 双向：本地弹幕快照（15Hz 变化驱动；kind: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot
+   *  4=MagicProj；v6 增 5=DukeSharknadoBolt 6=龙卷 7=MLDeathray 8=LunarOrb——见 netMakeProj） */
   private netProjBroadcast() {
     const net = this.net!;
     const snaps: ProjSnap[] = [];
@@ -743,7 +744,8 @@ export class Game implements GameHooks {
     }
   }
 
-  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类，纯视觉——不跑命中） */  private netApplyProjSnaps(snaps: ProjSnap[]) {
+  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类；kind0-4 纯视觉，5-8 本地跑确定性 AI） */
+  private netApplyProjSnaps(snaps: ProjSnap[]) {
     for (const s of snaps) {
       let pup = this.netProjPuppets.get(s.netId);
       if (!pup || pup.p.dead) {
@@ -751,7 +753,6 @@ export class Game implements GameHooks {
         if (!p) continue;
         p.netPuppet = true;
         p.netId = s.netId;
-        p.netAx = s.x; p.netAy = s.y; p.netIt = 1; // P3.2：新建直接落位
         this.entities.add(p, 'projectiles');
         pup = { p, seen: this.tickCount };
         this.netProjPuppets.set(s.netId, pup);
@@ -765,7 +766,9 @@ export class Game implements GameHooks {
   /** v6：按 netId 找锚定 NPC 傀儡（Boss 锚定弹体的 src/parent；sender slot 取自弹幕 netId 高位） */
   private netFindAnchor(s: ProjSnap, srcId?: number): Enemy | null {
     if (srcId === undefined || srcId <= 0) return null;
-    const anchorNetId = ((s.netId >>> 24) << 24) | (srcId & 0xffffff);
+    // 终审 L1：乘法而非位运算合成——((slot)<<24)|id 在 slot≥128 溢出 int32 成负数，
+    // 与傀儡 netId(r.u32() 正值)永不相等 → v6 锚定全部失效(js-bitwise-int32-traps 同族)
+    const anchorNetId = (s.netId >>> 24) * 0x1000000 + (srcId & 0xffffff);
     for (const [, pup] of this.netNpcPuppets) if (pup.e.netId === anchorNetId) return pup.e;
     return null;
   }
@@ -780,8 +783,10 @@ export class Game implements GameHooks {
       case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
-      // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）----
-      case 5: return new DukeSharknadoBolt(s.x, s.y, s.vx, s.vy, s.tag[0] === '1', false, null as unknown as Enemy);
+      // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）。
+      // 终审 M3：Bolt/Orb 构造函数按**中心**坐标入参，快照是左上角——须换算，
+      // 否则访客端整体偏移 (-w/2,-h/2) 且快照不写 x/y 无法自纠 ----
+      case 5: return new DukeSharknadoBolt(s.x + 15, s.y + 15, s.vx, s.vy, s.tag[0] === '1', false, null as unknown as Enemy);
       case 6: {
         // 近似收紧②：tag=`${big},${ai1},${ai0}`——中途入视野的龙卷按快照恢复生长态
         const [bigBit, ai1s, ai0s] = s.tag.split(',').map(Number);
@@ -793,13 +798,15 @@ export class Game implements GameHooks {
         const [srcId, kindBit] = s.tag.split(',').map(Number);
         const m = new MLDeathray(this.netFindAnchor(s, srcId), kindBit === 0 ? 'head' : 'core',
           Math.atan2(s.vy, s.vx), (s.aux || 0) / 10000, s.dmg, s.x, s.y);
-        m.srcNetId = ((s.netId >>> 24) << 24) | ((srcId || 0) & 0xffffff); // 锚未到也不死等（傀儡随后到即接上）
+        m.srcNetId = (s.netId >>> 24) * 0x1000000 + ((srcId || 0) & 0xffffff); // 锚未到也不死等（傀儡随后到即接上）
         return m;
       }
       case 8: {
         const [kind, parentId] = s.tag.split(',').map(Number);
-        const o = new LunarOrb(this.netFindAnchor(s, parentId), kind === 574 ? 574 : 539, s.vx, s.vy, s.dmg, s.x, s.y);
-        o.parentNetId = ((s.netId >>> 24) << 24) | ((parentId || 0) & 0xffffff);
+        const is574 = kind === 574;
+        // Orb 尺寸按 kind（539=18×30 / 574=18×18），中心换算同 M3
+        const o = new LunarOrb(this.netFindAnchor(s, parentId), is574 ? 574 : 539, s.vx, s.vy, s.dmg, s.x + 9, s.y + (is574 ? 9 : 15));
+        o.parentNetId = (s.netId >>> 24) * 0x1000000 + ((parentId || 0) & 0xffffff);
         return o;
       }
       default: return null;
@@ -2441,7 +2448,7 @@ export class Game implements GameHooks {
         const vh = this.camera.viewH / (this.camera.zoom || 1);
         const slime = sp.slimeRainSpawns(player.cx, player.cy,
           this.entities.enemies.reduce((s, e) => s + ((e as Enemy).vanilla?.npcSlots ?? 1), 0),
-          vw, vh, new RNG((Math.random() * 1e9) | 0), false);
+          vw, vh, new RNG((Math.random() * 1e9) | 0), this.world.isExpert); // NPC.cs:5829 expertMode（曾硬编码 false）
         if (slime) {
           slime.id = this.entities.nextId++;
           this.entities.enemies.push(slime);
@@ -6121,7 +6128,7 @@ export class Game implements GameHooks {
     const dayTimeTicks = w.clock.isDay ? ((w.clock.timeOfDay - 0.25) / 0.5) * 54000 : 0;
     weather.setWorldSize(w.w, w.h);
     weather.update({
-      dayRate: 1,
+      dayRate: w.journeyTimeScale(), // Main.cs:64320-64409 天气全链吃 dayRate（旅程倍率/冻结，曾写死 1）
       dayTime: w.clock.isDay,
       dayTimeTicks,
       playerStrongEnough: this.player.maxHp >= 120,
@@ -6739,8 +6746,8 @@ export class Game implements GameHooks {
       }
       return;
     }
-    // L57505：num10 = rand(7)（expert 才 -1）
-    const num10 = R(7);
+    // L57505：num10 = rand(7)（expert 才 -1，WorldGen.cs:57482-57486——曾漏实现此偏移）
+    const num10 = R(7) - (this.world.isExpert ? 1 : 0);
     // 载入期液体收敛(waterCheck→killTile→breakTile→smashPot)可能砸水边瓦罐,
     // 此时 player 尚未创建(afterWorldLoad 尾部)——无主角视为"受伤"走蘑菇分支,
     // 掉落物随后被 entities.clear() 清掉,无泄漏
@@ -8248,6 +8255,10 @@ export class Game implements GameHooks {
         // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
         // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
         const charDiff = p.appearance?.difficulty ?? 0;
+        // 先记死亡时身家（Player.cs:38247-38250 lostCoins=coinsOwned——死亡 UI「掉了{0}」；
+        // 软核/旅程随后被 DropCoins 实际掉落额覆盖 :38318-38324，中核/硬核的钱随
+        // 物品全掉 → 身家即损失额）
+        this.lostCoins = this.coinsOwned();
         // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
         // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
         if (dropsAllItemsOnDeath(charDiff)) {
@@ -9797,18 +9808,33 @@ export class Game implements GameHooks {
           this.net = net;
           net.gameWorld = world;
           // 重连自愈（review ③）：世界重组装后清本地真掉落的 netId 与差分基准——
-          // 断连窗口丢失的 spawn 上报由此重播（pendingFrames 断连清空过一轮），
-          // 陈旧 netDropSeen 条目也不再发幽灵 take
+          // 断连窗口丢失的 spawn 上报由此重播，陈旧 netDropSeen 条目也不再发幽灵 take
           for (const ent of this.entities.drops) {
             const d = ent as ItemDrop;
             if (!d.netPuppet) d.netId = 0;
           }
           this.netDropSeen.clear();
+          // 终审 H2：傀儡三表+差分基准+箱子 watch+远端代理全清——entities.clear() 后
+          // 旧傀儡成孤儿（不在桶里 dead=false），同 netId 快照会命中孤儿只做 netSnapTo
+          // 不重新入桶 → 重连后怪/弹幕对访客永久隐形，孤儿 NPC 还能用陈旧 netAx 摸你
+          this.netNpcPuppets.clear();
+          this.netDropPuppets.clear();
+          this.netProjPuppets.clear();
+          this.netNpcLast.clear();
+          this.netProjLast.clear();
+          this.netChestWatch.length = 0;
+          this.remotePlayerProxies = [];
           // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
           world.store.netReporter = (op) => net.reportTileOp(op);
           // 实体同步钩子（Enemy.hurt 傀儡分支 → StrikeNPC 上报）
           entityNet.reportStrike = (netId, rawDmg, kbx, kby) => net.sendStrike(netId, rawDmg, kbx, kby);
           this.loadWorld(world, (label, p) => onProgress?.(label, p), { settled: true }).then(() => {
+            // 终审 H1：SSC 暂存消费——loadWorld 完成后新 Player 就绪，此刻应用才不丢
+            if (net.pendingSSC) {
+              const json = net.pendingSSC;
+              net.pendingSSC = null;
+              this.netApplySSC(json);
+            }
             if (settled) return;
             settled = true;
             resolve();
@@ -9843,7 +9869,7 @@ export class Game implements GameHooks {
         onItemOp: (op) => this.netApplyItemOp(op),
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
-        onSSC: (json) => this.netApplySSC(json),
+        // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
         onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
         onHp: (slot, hp, maxHp) => {
           const rp = net.players.get(slot);

@@ -89,7 +89,8 @@ const out = await page.evaluate(async () => {
   }
   const shield = g.itemId('vi_156_CobaltShield');
   if (shield) g.player.inv.armor[3] = { id: shield, stack: 1 };
-  g.player.buffs.defenseBonus = 5; // 铁甲 7 + 5 = 12 > 10 门
+  const { BuffType } = await import('/src/stats/Buffs.ts');
+  g.player.buffs.apply(BuffType.Ironskin, 60); // 铁皮 +8（:1456）→ 7+8=15 > 10 门
   const realRand = Math.random;
   Math.random = () => 0; // 命中 1/3 与 1/10
   w.clock.timeOfDay = 0.9; // 入夜穿越（_lastClockT 由真实 tick 保存的旧昼值 → crossed 成立）

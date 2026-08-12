@@ -1513,7 +1513,11 @@ export class Player extends Entity {
   private shimmerUnstuck(game: GameHooks, world: import('../world/World').World): void {
     this.timeShimmering = 0;
     const st = world.store;
-    const spot = findShimmerFreeSpot(st, Math.floor(this.cx / TILE), Math.floor(this.y / TILE));
+    // 三层兜底（原版 :28442-28469）：玩家周围 → 出生点——保证封闭洞穴内也必脱困
+    const spot = findShimmerFreeSpot(
+      st, Math.floor(this.cx / TILE), Math.floor(this.y / TILE),
+      world.spawnX, world.spawnY,
+    );
     if (!spot) return;
     const p = shimmerTeleportPos(spot);
     this.x = p.x;

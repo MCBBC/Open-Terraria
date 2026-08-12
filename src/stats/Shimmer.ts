@@ -152,11 +152,15 @@ export function isNpcTownShimmerable(npcId: number): boolean {
 
 // ============ 玩家脱困传送（ShimmerHelper.FindSpotWithoutShimmer 近似） ============
 
-/** TryFindingShimmerFreeSpot（Player.cs:28414-28440）净效果版：以 (tx,ty) 为心，
+/** TryFindingShimmerFreeSpot（Player.cs:28414-28469）净效果版：以 (tx,ty) 为心，
  *  半径 r ∈ {1,3,…,59}（原版 num=60 循环步 2）找第一个「3 格高无实心无微光 +
- *  脚下可站（solid 或 solidTop）」的落点。找不到返回 null（调用方保持原位） */
+ *  下方 100px（7 格）内有地面（IsSpotShimmerFree :28477 第二判——原版要求
+ *  SolidCollision(+height, 100)，非紧贴一格；旧实现过严致湖底斜坡/半砖旁找不到）」
+ *  的落点。**三层兜底**（原版 :28442-28469）：玩家周围失败 → 世界出生点周围 →
+ *  主出生点（本仓二者同源 spawnX/Y，合并为一层）——保证必能脱困，不会永久卡住 */
 export function findShimmerFreeSpot(
   st: TileStore, tx: number, ty: number,
+  fallbackTx?: number, fallbackTy?: number,
 ): { x: number; y: number } | null {
   const clear = (x: number, y: number): boolean => {
     for (let j = y - 2; j <= y; j++) {
@@ -166,22 +170,31 @@ export function findShimmerFreeSpot(
     }
     return true;
   };
-  const standable = (x: number, y: number): boolean => {
-    if (!st.inBounds(x, y)) return false;
-    return st.isSolid(x, y) || st.isPlatform(x, y);
+  // 原版第二判：落点下方 100px（约 7 格）内存在 solid 或 solidTop（allowSolidTop=true）
+  const groundBelow = (x: number, y: number): boolean => {
+    for (let j = y + 1; j <= y + 7; j++) {
+      if (!st.inBounds(x, j)) return false;
+      if (st.isSolid(x, j) || st.isPlatform(x, j)) return true;
+    }
+    return false;
   };
-  for (let r = 1; r < 60; r += 2) {
-    // 切比雪夫半径逐圈外扩（原版 i 循环步 2 语义），圈内全量整数偏移扫描
-    for (let dy = -r; dy <= r; dy++) {
-      for (let dx = -r; dx <= r; dx++) {
-        if (Math.max(Math.abs(dx), Math.abs(dy)) < r - 1) continue; // 只扫外环
-        const x = tx + dx, y = ty + dy;
-        if (!st.inBounds(x, y) || !standable(x, y + 1)) continue;
-        if (clear(x, y)) return { x, y };
+  const search = (cx: number, cy: number): { x: number; y: number } | null => {
+    for (let r = 1; r < 60; r += 2) {
+      // 切比雪夫半径逐圈外扩（原版 i 循环步 2 语义；原版仅扫环上 8 点/圈，
+      // 此处全量整数扫描为其超集——命中的落点满足同一谓词，行为相容）
+      for (let dy = -r; dy <= r; dy++) {
+        for (let dx = -r; dx <= r; dx++) {
+          if (Math.max(Math.abs(dx), Math.abs(dy)) < r - 1) continue; // 只扫外环
+          const x = cx + dx, y = cy + dy;
+          if (!st.inBounds(x, y) || !groundBelow(x, y)) continue;
+          if (clear(x, y)) return { x, y };
+        }
       }
     }
-  }
-  return null;
+    return null;
+  };
+  return search(tx, ty)
+    ?? (fallbackTx !== undefined && fallbackTy !== undefined ? search(fallbackTx, fallbackTy) : null);
 }
 
 /** 世界坐标落点 → 玩家传送位（ShimmerUnstuck :28400-28402：spot + (0,-2) 像素） */

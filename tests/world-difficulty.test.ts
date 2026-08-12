@@ -38,11 +38,11 @@ describe('世界难度 getter 枚举（Main.cs:2696/:2775-2780）', () => {
 });
 
 describe('死亡掉钱：世界难度定档 × 角色难度定是否掉（Player.cs:38318 + DropCoins :53351）', () => {
-  it('掉钱档位：经典留 1/2 / 专家留 3/4（掉 1/4）/ 大师全掉', () => {
+  it('掉钱档位（Player.cs:53351-53380 num2=保留份额）：经典留 1/2 / 专家留 1/4（掉 3/4）/ 大师全掉', () => {
     expect(deathCoinKeepFraction(0)).toBe(0.5);
     expect(deathCoinKeepFraction(3)).toBe(0.5);   // 旅程世界按经典
-    expect(deathCoinKeepFraction(1)).toBe(0.75);  // 专家：专家世界+软核角色 → 掉 1/4
-    expect(deathCoinKeepFraction(2)).toBe(1);     // 大师不掉（全留在尸体上掉落物里）
+    expect(deathCoinKeepFraction(1)).toBe(0.25);  // 专家：掉 3/4（曾误写 0.75 掉 1/4）
+    expect(deathCoinKeepFraction(2)).toBe(0);     // 大师全掉（曾误写 1 不掉）
   });
 
   it('角色门：软核/旅程走 DropCoins，中核/硬核不走（钱随物品全掉）', () => {

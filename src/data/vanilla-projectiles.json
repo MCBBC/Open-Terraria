@@ -7563,5 +7563,47 @@
   "melee": true,
   "tileCollide": false,
   "ignoreWater": true
+ },
+ "663": {
+  "aiStyle": 130
+ },
+ "664": {
+  "aiStyle": 130
+ },
+ "665": {
+  "aiStyle": 130
+ },
+ "666": {
+  "aiStyle": 130
+ },
+ "667": {
+  "aiStyle": 130
+ },
+ "677": {
+  "aiStyle": 134
+ },
+ "678": {
+  "aiStyle": 134
+ },
+ "679": {
+  "aiStyle": 134
+ },
+ "688": {
+  "aiStyle": 137
+ },
+ "689": {
+  "aiStyle": 137
+ },
+ "690": {
+  "aiStyle": 137
+ },
+ "691": {
+  "aiStyle": 138
+ },
+ "692": {
+  "aiStyle": 138
+ },
+ "693": {
+  "aiStyle": 138
  }
 }

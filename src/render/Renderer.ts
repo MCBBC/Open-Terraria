@@ -3182,7 +3182,10 @@ export class Renderer {
     const useRow = swing ? this.useStyleBodyRow(swing, p) : -1;
     let drawn = false;
     if (p.appearance) {
-      const doll = compositePaperDoll(p.appearance, dollEquipFromInv(p.inv, this.atlas));
+      let dollEquip = dollEquipFromInv(p.inv, this.atlas);
+      // ⑮ 狼人形态（PlayerFrame :35457-35484：wereWolf 时盔甲槽强制 38/21/20）
+      if (p.buffs.has(BuffType.Werewolf)) dollEquip = { head: 38, body: 21, legs: 20 };
+      const doll = compositePaperDoll(p.appearance, dollEquip);
       if (doll) {
         let row = 0; // 0 站立
         if (useRow >= 0) row = useRow;

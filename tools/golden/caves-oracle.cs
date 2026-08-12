@@ -685,6 +685,8 @@ Checkpoint("oceansand");
 Checkpoint("sandpatches");
 
 // ================= Pass 4：Tunnels（cs:11745-11808）=================
+int dsX = 0, dsY = 0, dsR = 0, dsB = 0;
+int grassSpread = 0;   // SpreadGrass 洪水计数（mushroom/corruption 共用）   // UndergroundDesertLocation（corruption 避让消费）
 var tunX = new List<int>();              // GenVars.tunnelX（Lakes 避让消费）
 int snowTopGen = 0, snowBottomGen = 0;   // GenVars.snowTop/snowBottom（Slush 消费）
 {
@@ -1165,7 +1167,7 @@ Checkpoint("jungle");
 
 // ================= MudCavesToJungleGrass（cs:12499-12530，零 RNG 状态机）=================
 {
-    int grassSpread = 0;
+
     void SpreadGrass(int i, int j)
     {
         if (i < 10 || i >= W - 10 || j < 10 || j >= H - 10) return; // InWorld(i,j,10)
@@ -1349,6 +1351,8 @@ Checkpoint("desertmound");
 
 // ================= Desert Sub-C 入口（DesertBiome.cs:22-40 + Biomes/Desert/*Entrance.cs）=================
 // ChanceOfEntrance 被 Configuration.json 覆盖为 0.5（代码默认 0.3333 是坑）
+// ExportDescriptionToEngine（DesertBiome.cs:54-56）：CombinedArea.Inflate(10,10)
+dsX = dX - 10; dsY = dTop - 10; dsR = dX + dW + 10; dsB = dTop + dHiveTop + dH - dTop + 10;
 int[] dSurf2 = SurfFromArea(dX - 5, dW + 10);   // UpdateSurfaceMap（DesertBiome.cs:22）
 int DSurf(int ax) => dSurf2[ax - (dX - 5)];      // SurfaceMap.this[absoluteX]
 WC.A = act; WC.T = typ; WC.Wl = wal; WC.L = liq; WC.R = r; WC.SOLID = SOLID; WC.W = W; WC.H = H;
@@ -1790,7 +1794,7 @@ void ShroomPatch(int si, int sj)
     if (mnCount > 50) mnCount = 50;                  // GenVars.maxMushroomBiomes = 50
     var mushPts = new List<(int x, int y)>();
     int mushN = 0;
-    int dsX = dX - 10, dsY = dTop - 10, dsR = dX - 10 + dW + 20, dsB = dTop - 10 + dHiveTop + dH - dTop + 20;  // UndergroundDesertLocation
+    // UndergroundDesertLocation 见顶级 dsX/dsY/dsR/dsB（沙漠段落盘后回填）
     for (int mk = 0; (double)mk < mnCount; mk++)
     {
         int m2 = 0; bool mflag = true;
@@ -2819,6 +2823,754 @@ void GrowAshTree(int tx, int ty)
     }
 }
 Checkpoint("underworld");
+
+// ================= Pass 29 CorruptionAndCrimson（cs:13919-14613 + ChasmRunnerSideways cs:75323 + CanEvilReplace cs:75527 + CrimStart cs:75543 + CrimPlaceHearts cs:75854 + ChasmRunner cs:76066）=================
+// 普通世界：flipInfections/drunk/remix/tenthAnniversary 全 false；dungeonSide = dungeonRight ? 1 : -1
+bool CanEvilReplace(int cx, int cy)
+{
+    int t = act[cy * W + cx] != 0 ? typ[cy * W + cx] : -1;
+    ushort wl = wal[cy * W + cx];
+    if (t >= 0 && (TILE_DUNGEON.Contains((ushort)t) || (t >= 481 && t <= 483))) return false;
+    if (WALL_DUNGEON.Contains(wl)) return false;
+    return true;
+}
+bool IsTileNearby26(int nx, int ny, int type, int distance)
+{
+    for (int i = nx - distance; i <= nx + distance; i++)
+        for (int j = ny - distance; j <= ny + distance; j++)
+        {
+            if (i < 0 || i >= W || j < 0 || j >= H) continue;
+            int ti = j * W + i;
+            if (act[ti] != 0 && typ[ti] == (ushort)type) return true;
+        }
+    return false;
+}
+void Place3x2Altar(int px, int py, int style)
+{
+    if (px < 5 || px > W - 5 || py < 5 || py > H - 5) return;
+    bool ok = true;
+    for (int i = px - 1; i < px + 2; i++)
+    {
+        for (int j = py - 1; j < py + 1; j++)
+            if (act[j * W + i] != 0) ok = false;
+        if (!SolidTileGen(i, py + 1)) ok = false;   // SolidTile2≈SolidTile（无半砖阶段）
+        if (typ[(py + 1) * W + i] == 523) ok = false;  // TileID.Sets.Boulders（巨石）
+    }
+    if (!ok) return;
+    short f = (short)(54 * style);
+    for (int i = 0; i < 3; i++)
+        for (int j = 0; j < 2; j++)
+        {
+            int ti = (py - 1 + j) * W + (px - 1 + i);
+            typ[ti] = 26; act[ti] = 1;
+        }
+}
+void AddShadowOrbGen(int ox, int oy, bool crimsonHeart)
+{
+    if (ox < 10 || ox > W - 10 || oy < 10 || oy > H - 10) return;
+    for (int i = ox - 1; i < ox + 1; i++)
+        for (int j = oy - 1; j < oy + 1; j++)
+            if (act[j * W + i] != 0 && typ[j * W + i] == 31) return;
+    for (int i = 0; i < 2; i++)
+        for (int j = 0; j < 2; j++)
+        {
+            int ti = (oy - 1 + j) * W + (ox - 1 + i);
+            typ[ti] = 31; act[ti] = 1;
+        }
+}
+var heartPosG = new List<(int x, int y)>();
+void ChasmRunnerSidewaysGen(int i, int j, int direction, int steps)
+{
+    double sn = steps;
+    double vx = i, vy = j;
+    double vx2 = (int)r.Next(10, 21) * 0.1 * direction;
+    double vy2 = (int)r.Next(-10, 10) * 0.01;
+    double rad = (int)r.Next(5) + 7;
+    while (rad > 0.0)
+    {
+        if (sn > 0.0)
+        {
+            rad += (int)r.Next(3);
+            rad -= (int)r.Next(3);
+            if (rad < 7.0) rad = 7.0;
+            if (rad > 20.0) rad = 20.0;
+            if (sn == 1.0 && rad < 10.0) rad = 10.0;
+        }
+        else rad -= (int)r.Next(4);
+        if (vy > rockLayer && sn > 0.0) sn = 0.0;
+        sn -= 1.0;
+        int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
+        int y0 = Math.Max(0, (int)(vy - rad * 0.5)), y1 = Math.Min(H, (int)(vy + rad * 0.5));
+        for (int k = x0; k < x1; k++)
+            for (int l = y0; l < y1; l++)
+            {
+                int ti = l * W + k;
+                if (CanEvilReplace(k, l) && Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)
+                    && typ[ti] != 31 && typ[ti] != 22 && typ[ti] != 204)
+                    act[ti] = 0;
+            }
+        vx += vx2; vy += vy2;
+        vy2 += (int)r.Next(-10, 10) * 0.1;
+        if (vy < (double)(j - 20)) vy2 += (int)r.Next(20) * 0.01;
+        if (vy > (double)(j + 20)) vy2 -= (int)r.Next(20) * 0.01;
+        if (vy2 < -0.5) vy2 = -0.5;
+        if (vy2 > 0.5) vy2 = 0.5;
+        vx2 += (int)r.Next(-10, 11) * 0.01;
+        if (direction == -1) { if (vx2 > -0.5) vx2 = -0.5; if (vx2 < -2.0) vx2 = -2.0; }
+        else { if (vx2 < 0.5) vx2 = 0.5; if (vx2 > 2.0) vx2 = 2.0; }
+        int x2 = Math.Max(1, (int)(vx - rad * 1.1)), x3 = Math.Min(W - 1, (int)(vx + rad * 1.1));
+        int y2 = Math.Max(0, (int)(vy - rad * 1.1)), y3 = Math.Min(H, (int)(vy + rad * 1.1));
+        for (int k = x2; k < x3; k++)
+            for (int l = y2; l < y3; l++)
+            {
+                int ti = l * W + k;
+                if (CanEvilReplace(k, l) && Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 1.1 * (1.0 + (int)r.Next(-10, 11) * 0.015) && wal[ti] != 3)
+                {
+                    if (act[ti] == 0 || (typ[ti] != 31 && typ[ti] != 22 && typ[ti] != 204)) typ[ti] = 25;
+                    act[ti] = 1;
+                    if (wal[ti] == 2) wal[ti] = 0;
+                }
+            }
+        for (int k = x2; k < x3; k++)
+            for (int l = y2; l < y3; l++)
+            {
+                int ti = l * W + k;
+                if (CanEvilReplace(k, l) && Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 1.1 * (1.0 + (int)r.Next(-10, 11) * 0.015) && wal[ti] != 3)
+                {
+                    if (act[ti] == 0 || (typ[ti] != 31 && typ[ti] != 22 && typ[ti] != 204)) typ[ti] = 25;
+                    act[ti] = 1;
+                    wal[ti] = 3;
+                }
+            }
+    }
+    if ((int)r.Next(3) == 0)
+    {
+        int ox = (int)vx, oy = (int)vy;
+        while (oy < H && act[oy * W + ox] == 0) oy++;
+        TileRunner(ox, oy, (int)r.Next(2, 6), (int)r.Next(3, 7), 22);
+    }
+}
+void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
+{
+    double wsN = worldSurface;
+    bool flag = false, flag2 = !makeOrb, flag3 = false;
+    double sn = steps;
+    double vx = i, vy = j;
+    double vx2 = (int)r.Next(-10, 11) * 0.1;
+    double vy2 = (int)r.Next(11) * 0.2 + 0.5;
+    int num3 = 5;
+    double rad = (int)r.Next(5) + 7;
+    while (rad > 0.0)
+    {
+        if (sn > 0.0)
+        {
+            rad += (int)r.Next(3);
+            rad -= (int)r.Next(3);
+            if (rad < 7.0) rad = 7.0;
+            if (rad > 20.0) rad = 20.0;
+            if (sn == 1.0 && rad < 10.0) rad = 10.0;
+        }
+        else if (vy > wsN + 45.0) rad -= (int)r.Next(4);
+        if (vy > rockLayer && sn > 0.0) sn = 0.0;
+        sn -= 1.0;
+        if (!flag && vy > wsN + 20.0)
+        {
+            flag = true;
+            ChasmRunnerSidewaysGen((int)vx, (int)vy, -1, (int)r.Next(20, 40));
+            ChasmRunnerSidewaysGen((int)vx, (int)vy, 1, (int)r.Next(20, 40));
+        }
+        if (sn > (double)num3)
+        {
+            int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
+            int y0 = Math.Max(0, (int)(vy - rad * 0.5)), y1 = Math.Min(H, (int)(vy + rad * 0.5));
+            for (int k = x0; k < x1; k++)
+                for (int l = y0; l < y1; l++)
+                {
+                    int ti = l * W + k;
+                    if (Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 0.5 * (1.0 + (int)r.Next(-10, 11) * 0.015)
+                        && CanEvilReplace(k, l) && typ[ti] != 31 && typ[ti] != 22 && typ[ti] != 204)
+                        act[ti] = 0;
+                }
+        }
+        if (sn <= 2.0 && vy < wsN + 45.0) sn = 2.0;
+        if (sn <= 0.0)
+        {
+            if (!flag2)
+            {
+                flag2 = true;
+                AddShadowOrbGen((int)vx, (int)vy, false);
+            }
+            else if (!flag3)
+            {
+                flag3 = false;
+                bool done = false;
+                int tries = 0;
+                while (!done)
+                {
+                    int ox = (int)r.Next((int)vx - 25, (int)vx + 25);
+                    int oy = (int)r.Next((int)vy - 50, (int)vy);
+                    if (ox < 5) ox = 5;
+                    if (ox > W - 5) ox = W - 5;
+                    if (oy < 5) oy = 5;
+                    if (oy > H - 5) oy = H - 5;
+                    if ((double)oy > wsN)
+                    {
+                        if (!IsTileNearby26(ox, oy, 26, 3)) Place3x2Altar(ox, oy, 0);
+                        if (typ[oy * W + ox] == 26) { done = true; continue; }
+                        tries++;
+                        if (tries >= 10000) done = true;
+                    }
+                    else done = true;
+                }
+            }
+        }
+        vx += vx2; vy += vy2;
+        vx2 += (int)r.Next(-10, 11) * 0.01;
+        if (vx2 > 0.3) vx2 = 0.3;
+        if (vx2 < -0.3) vx2 = -0.3;
+        int x0b = Math.Max(1, (int)(vx - rad * 1.1)), x1b = Math.Min(W - 1, (int)(vx + rad * 1.1));
+        int y0b = Math.Max(0, (int)(vy - rad * 1.1)), y1b = Math.Min(H, (int)(vy + rad * 1.1));
+        for (int k = x0b; k < x1b; k++)
+            for (int l = y0b; l < y1b; l++)
+            {
+                int ti = l * W + k;
+                if (CanEvilReplace(k, l) && Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 1.1 * (1.0 + (int)r.Next(-10, 11) * 0.015))
+                {
+                    if (typ[ti] != 25 && l > j + (int)r.Next(3, 20)) act[ti] = 1;
+                    if (steps <= num3) act[ti] = 1;
+                    if (typ[ti] != 31) typ[ti] = 25;
+                }
+            }
+        for (int k = x0b; k < x1b; k++)
+            for (int l = y0b; l < y1b; l++)
+            {
+                int ti = l * W + k;
+                if (CanEvilReplace(k, l) && Math.Abs((double)k - vx) + Math.Abs((double)l - vy) < rad * 1.1 * (1.0 + (int)r.Next(-10, 11) * 0.015))
+                {
+                    if (typ[ti] != 31) typ[ti] = 25;
+                    if (steps <= num3) act[ti] = 1;
+                    if (l > j + (int)r.Next(3, 20)) wal[ti] = 3;
+                }
+            }
+    }
+}
+void CrimVeinGen(double px, double py, double ivx, double ivy)
+{
+    double rad = (int)r.Next(15, 26);
+    bool flag = true;
+    double vx = ivx, vy = ivy;
+    double sx = px, sy = py;
+    int trip = (int)r.Next(100, 150);
+    if (ivy < 0.0) trip -= 25;
+    while (flag)
+    {
+        rad += (int)r.Next(-50, 51) * 0.02;
+        if (rad < 15.0) rad = 15.0;
+        if (rad > 25.0) rad = 25.0;
+        for (int i = (int)(px - rad / 2.0); (double)i < px + rad / 2.0; i++)
+            for (int j = (int)(py - rad / 2.0); (double)j < py + rad / 2.0; j++)
+            {
+                if (i < 0 || i >= W || j < 0 || j >= H) continue;
+                if (!CanEvilReplace(i, j)) continue;
+                int ti = j * W + i;
+                double d = Math.Sqrt((double)(i - px) * (i - px) + (double)(j - py) * (j - py));
+                if (d < rad * 0.2)
+                {
+                    act[ti] = 0; wal[ti] = 83;
+                }
+                else if (d < rad * 0.5 && wal[ti] != 83)
+                {
+                    act[ti] = 1; typ[ti] = 203;
+                    if (d < rad * 0.4) wal[ti] = 83;
+                }
+            }
+        vx += (int)r.Next(-50, 51) * 0.05;
+        vy += (int)r.Next(-50, 51) * 0.05;
+        if (vy < ivy - 0.75) vy = ivy - 0.75;
+        if (vy > ivy + 0.75) vy = ivy + 0.75;
+        if (vx < ivx - 0.75) vx = ivx - 0.75;
+        if (vx > ivx + 0.75) vx = ivx + 0.75;
+        px += vx; py += vy;
+        if (Math.Abs(px - sx) + Math.Abs(py - sy) > (double)trip) flag = false;
+    }
+    heartPosG.Add(((int)px, (int)py));
+}
+void CrimEntGen(double px, double py, int crimDir)
+{
+    double num = 0.0;
+    double rad = (int)r.Next(6, 11);
+    bool flag = true;
+    double vx = 2.0, vy = (int)r.Next(-20, 0) * 0.01;
+    vx *= -crimDir;
+    while (flag)
+    {
+        num += 1.0;
+        if (num >= 20.0) flag = false;
+        rad += (int)r.Next(-10, 11) * 0.02;
+        if (rad < 6.0) rad = 6.0;
+        if (rad > 10.0) rad = 10.0;
+        for (int i = (int)(px - rad / 2.0); (double)i < px + rad / 2.0; i++)
+            for (int j = (int)(py - rad / 2.0); (double)j < py + rad / 2.0; j++)
+            {
+                if (i < 0 || i >= W || j < 0 || j >= H) continue;
+                if (!CanEvilReplace(i, j)) continue;
+                int ti = j * W + i;
+                if (Math.Sqrt((double)(i - px) * (i - px) + (double)(j - py) * (j - py)) < rad * 0.5 && act[ti] != 0 && typ[ti] == 203)
+                {
+                    act[ti] = 0;
+                    flag = true;
+                    num = 0.0;
+                }
+            }
+        px += vx; py += vy;
+    }
+}
+void CrimStartGen(int i, int j)
+{
+    double wsN = worldSurface;
+    int crimDir = 1;
+    int k = j;
+    if ((double)k > wsN) k = (int)wsN;
+    for (; k < H && !SolidTileGen(i, k); k++) { }
+    int startY = k;
+    double vx = i, vy = k;
+    double vx2 = (int)r.Next(-20, 21) * 0.1;
+    double vy2 = (int)r.Next(20, 201) * 0.01;
+    if (vx2 < 0.0) crimDir = -1;
+    double rad = (int)r.Next(15, 26);
+    bool flag = true;
+    int num4 = 0;
+    while (flag)
+    {
+        rad += (int)r.Next(-50, 51) * 0.01;
+        if (rad < 15.0) rad = 15.0;
+        if (rad > 25.0) rad = 25.0;
+        for (int l = (int)(vx - rad / 2.0); (double)l < vx + rad / 2.0; l++)
+            for (int m = (int)(vy - rad / 2.0); (double)m < vy + rad / 2.0; m++)
+            {
+                if (l < 0 || l >= W || m < 0 || m >= H) continue;
+                if (!CanEvilReplace(l, m)) continue;
+                int ti = m * W + l;
+                if (m > startY)
+                {
+                    if (Math.Abs((double)l - vx) + Math.Abs((double)m - vy) < rad * 0.3)
+                    {
+                        act[ti] = 0; wal[ti] = 83;
+                    }
+                    else if (Math.Abs((double)l - vx) + Math.Abs((double)m - vy) < rad * 0.8 && wal[ti] != 83)
+                    {
+                        act[ti] = 1; typ[ti] = 203;
+                        if (Math.Abs((double)l - vx) + Math.Abs((double)m - vy) < rad * 0.6) wal[ti] = 83;
+                    }
+                }
+                else if (Math.Abs((double)l - vx) + Math.Abs((double)m - vy) < rad * 0.3 && act[ti] != 0)
+                {
+                    act[ti] = 0; wal[ti] = 83;
+                }
+            }
+        if (vx > (double)(i + 50)) num4 = -100;
+        if (vx < (double)(i - 50)) num4 = 100;
+        if (num4 < 0) vx2 -= (int)r.Next(20, 51) * 0.01;
+        else if (num4 > 0) vx2 += (int)r.Next(20, 51) * 0.01;
+        else vx2 += (int)r.Next(-50, 51) * 0.01;
+        vy2 += (int)r.Next(-50, 51) * 0.01;
+        if (vy2 < 0.25) vy2 = 0.25;
+        if (vy2 > 2.0) vy2 = 2.0;
+        if (vx2 < -2.0) vx2 = -2.0;
+        if (vx2 > 2.0) vx2 = 2.0;
+        vx += vx2; vy += vy2;
+        if (vy > wsN + 100.0) flag = false;
+    }
+    rad = (int)r.Next(40, 55);
+    for (int n = 0; n < 50; n++)
+    {
+        int cx = (int)vx + (int)r.Next(-20, 21);
+        int cy = (int)vy + (int)r.Next(-20, 21);
+        for (int i2 = (int)((double)cx - rad / 2.0); (double)i2 < (double)cx + rad / 2.0; i2++)
+            for (int j2 = (int)((double)cy - rad / 2.0); (double)j2 < (double)cy + rad / 2.0; j2++)
+            {
+                if (i2 < 0 || i2 >= W || j2 < 0 || j2 >= H) continue;
+                if (!CanEvilReplace(i2, j2)) continue;
+                int ti = j2 * W + i2;
+                double ddx = Math.Abs(i2 - cx), ddy = Math.Abs(j2 - cy);
+                double s1 = 1.0 + (int)r.Next(-20, 21) * 0.01;
+                double s2 = 1.0 + (int)r.Next(-20, 21) * 0.01;
+                double d = Math.Sqrt(ddx * ddx * s1 * s1 + ddy * ddy * s2 * s2);
+                if (d < rad * 0.25)
+                {
+                    act[ti] = 0; wal[ti] = 83;
+                }
+                else if (d < rad * 0.4 && wal[ti] != 83)
+                {
+                    act[ti] = 1; typ[ti] = 203;
+                    if (d < rad * 0.35) wal[ti] = 83;
+                }
+            }
+    }
+    int veinCount = (int)r.Next(5, 9);
+    var veinDirs = new List<(double x, double y)>();
+    for (int n = 0; n < veinCount; n++)
+    {
+        int sx = (int)vx, sy = (int)vy;
+        int tries = 0;
+        bool flag2 = true;
+        double dx3 = (int)r.Next(-20, 21) * 0.15, dy3 = (int)r.Next(0, 21) * 0.15;
+        while (flag2)
+        {
+            dx3 = (int)r.Next(-20, 21) * 0.15; dy3 = (int)r.Next(0, 21) * 0.15;
+            while (Math.Abs(dx3) + Math.Abs(dy3) < 1.5)
+            {
+                dx3 = (int)r.Next(-20, 21) * 0.15; dy3 = (int)r.Next(0, 21) * 0.15;
+            }
+            flag2 = false;
+            for (int p = 0; p < n; p++)
+            {
+                // ★原版 quirk：此处比较的是 val2（主通道末速度）而非新采样的 val3（cs:75790-75797）
+                if (vx2 > veinDirs[p].x - 0.75 && vx2 < veinDirs[p].x + 0.75 && vy2 > veinDirs[p].y - 0.75 && vy2 < veinDirs[p].y + 0.75)
+                {
+                    flag2 = true; tries++;
+                    break;
+                }
+            }
+            if (tries > 10000) break;
+        }
+        veinDirs.Add((dx3, dy3));
+        CrimVeinGen((double)sx, (double)sy, dx3, dy3);
+    }
+    int shellMinX = W, shellMaxX = 0;
+    vx = i; vy = startY;
+    rad = (int)r.Next(25, 35);
+    double rise = (int)r.Next(0, 6);
+    for (int n = 0; n < 50; n++)
+    {
+        if (rise > 0.0)
+        {
+            double step = (int)r.Next(10, 30) * 0.01;
+            rise -= step;
+            vy -= step;
+        }
+        int cx = (int)vx + (int)r.Next(-2, 3);
+        int cy = (int)vy + (int)r.Next(-2, 3);
+        for (int i2 = (int)((double)cx - rad / 2.0); (double)i2 < (double)cx + rad / 2.0; i2++)
+            for (int j2 = (int)((double)cy - rad / 2.0); (double)j2 < (double)cy + rad / 2.0; j2++)
+            {
+                if (i2 < 0 || i2 >= W || j2 < 0 || j2 >= H) continue;
+                if (!CanEvilReplace(i2, j2)) continue;
+                int ti = j2 * W + i2;
+                double ddx = Math.Abs(i2 - cx), ddy = Math.Abs(j2 - cy);
+                double s1 = 1.0 + (int)r.Next(-20, 21) * 0.005;
+                double s2 = 1.0 + (int)r.Next(-20, 21) * 0.005;
+                double d = Math.Sqrt(ddx * ddx * s1 * s1 + ddy * ddy * s2 * s2);
+                if (d < rad * 0.2 * ((int)r.Next(90, 111) * 0.01))
+                {
+                    act[ti] = 0; wal[ti] = 83;
+                }
+                else if (d < rad * 0.45)
+                {
+                    if (i2 < shellMinX) shellMinX = i2;
+                    if (i2 > shellMaxX) shellMaxX = i2;
+                    if (wal[ti] != 83)
+                    {
+                        act[ti] = 1; typ[ti] = 203;
+                        if (d < rad * 0.35) wal[ti] = 83;
+                    }
+                }
+            }
+    }
+    for (int x = shellMinX; x <= shellMaxX; x++)
+    {
+        int y = startY;
+        while (y < H && ((act[y * W + x] != 0 && typ[y * W + x] == 203) || wal[y * W + x] == 83)) y++;
+        int fill = (int)r.Next(15, 20);
+        while (y < H && act[y * W + x] == 0 && fill > 0 && wal[y * W + x] != 83)
+        {
+            if (CanEvilReplace(x, y))
+            {
+                fill--;
+                typ[y * W + x] = 203; act[y * W + x] = 1;
+                y++;
+            }
+        }
+    }
+    CrimEntGen(vx, vy, crimDir);
+}
+void CrimPlaceHeartsGen()
+{
+    for (int i = 0; i < heartPosG.Count; i++)
+    {
+        int num = (int)r.Next(16, 21);
+        int x = heartPosG[i].x, y = heartPosG[i].y;
+        for (int j = x - num / 2; j < x + num / 2; j++)
+            for (int k = y - num / 2; k < y + num / 2; k++)
+            {
+                if (j < 0 || j >= W || k < 0 || k >= H) continue;
+                if (Math.Sqrt((double)(j - x) * (j - x) + (double)(k - y) * (k - y)) < (double)num * 0.4)
+                {
+                    int ti = k * W + j;
+                    act[ti] = 1; typ[ti] = 203; wal[ti] = 83;
+                }
+            }
+    }
+    for (int i = 0; i < heartPosG.Count; i++)
+    {
+        int num = (int)r.Next(10, 14);
+        int x = heartPosG[i].x, y = heartPosG[i].y;
+        for (int j = x - num / 2; j < x + num / 2; j++)
+            for (int k = y - num / 2; k < y + num / 2; k++)
+            {
+                if (j < 0 || j >= W || k < 0 || k >= H) continue;
+                if (Math.Sqrt((double)(j - x) * (j - x) + (double)(k - y) * (k - y)) < (double)num * 0.3)
+                {
+                    int ti = k * W + j;
+                    act[ti] = 0; wal[ti] = 83;
+                }
+            }
+    }
+    for (int i = 0; i < heartPosG.Count; i++)
+        AddShadowOrbGen(heartPosG[i].x, heartPosG[i].y, true);
+}
+{
+    double cNum = gvWorldSurfaceLow;                 // GenVars.worldSurfaceLow（raw double）
+    double cNum2 = worldSurface;                    // Main.worldSurface
+    int jMin = W, jMax = 0, sMin = W, sMax = 0;
+    for (int i = 0; i < W; i++)
+        for (int j = 0; (double)j < cNum2; j++)
+        {
+            int ti = j * W + i;
+            if (act[ti] == 0) continue;
+            if (typ[ti] == 60) { if (i < jMin) jMin = i; if (i > jMax) jMax = i; }
+            else if (typ[ti] == 147 || typ[ti] == 161) { if (i < sMin) sMin = i; if (i > sMax) sMax = i; }
+        }
+    int pad = 10;
+    jMin -= pad; jMax += pad; sMin -= pad; sMax += pad;
+    int beachAvoid = 380;                           // evilBiomeBeachAvoidance = 320+60
+    int dungeonAvoid = 100;
+    int midFixer = 50;                              // evilBiomeAvoidanceMidFixer
+    double groupCount = (double)W * 0.00045;        // ★裸 double：4200 → 1.89 → 两组！
+    int dSide = dungeonRight ? 1 : -1;
+    for (int g = 0; (double)g < groupCount; g++)
+    {
+        int snowLo = sMin, snowHi = sMax, jungLo = jMin, jungHi = jMax;
+        int cx = 0, zLo = 0, zHi = 0;
+        bool ok = false;
+        while (!ok)
+        {
+            ok = true;
+            int mid = W / 2, midAvoid = 200;
+            cx = (int)r.Next(beachAvoid, W - beachAvoid);
+            zLo = cx - (int)r.Next(200) - 100;
+            zHi = cx + (int)r.Next(200) + 100;
+            if (zLo < beachAvoid) zLo = beachAvoid;
+            if (zHi > W - beachAvoid) zHi = W - beachAvoid;
+            if (cx < zLo + midFixer) cx = zLo + midFixer;
+            if (cx > zHi - midFixer) cx = zHi - midFixer;
+            if (dSide <= -1 && zLo < 400) zLo = 400;
+            else if (dSide >= 1 && zLo > W - 400) zLo = W - 400;
+            if (zLo < dungeonLocation + dungeonAvoid && zHi > dungeonLocation - dungeonAvoid) ok = false;
+            if (cx > mid - midAvoid && cx < mid + midAvoid) ok = false;
+            if (zLo > mid - midAvoid && zLo < mid + midAvoid) ok = false;
+            if (zHi > mid - midAvoid && zHi < mid + midAvoid) ok = false;
+            // UndergroundDesertLocation（Inflate(10,10) 后）
+            if (cx > dsX && cx < dsR) ok = false;
+            if (zLo > dsX && zLo < dsR) ok = false;
+            if (zHi > dsX && zHi < dsR) ok = false;
+            if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }
+            if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
+        }
+        if (crimson)
+        {
+            CrimStartGen(cx, (int)cNum - 10);
+            // 丛林草→猩红丛林草（cs:14110-14122：仅 type 60）
+            for (int l = zLo; l < zHi; l++)
+            {
+                for (int n = (int)cNum; (double)n < cNum2 - 1.0; n++)
+                {
+                    if (act[n * W + l] != 0)
+                    {
+                        int end = n + (int)r.Next(10, 14);
+                        for (int n2 = n; n2 < end; n2++)
+                        {
+                            if (act[n2 * W + l] != 0 && typ[n2 * W + l] == 60 && l >= zLo + (int)r.Next(5) && l < zHi - (int)r.Next(5))
+                                typ[n2 * W + l] = 662;
+                        }
+                        break;
+                    }
+                }
+            }
+            // 地表转换带（cs:14131-14199）
+            double band = cNum2 + 40.0;
+            for (int x = zLo; x < zHi; x++)
+            {
+                band += (double)(int)r.Next(-2, 3);
+                if (band < cNum2 + 30.0) band = cNum2 + 30.0;
+                if (band > cNum2 + 50.0) band = cNum2 + 50.0;
+                bool first = false;
+                double bandStart = cNum;
+                for (int y = (int)bandStart; (double)y < band; y++)
+                {
+                    // 边缘抖动门（cs:14145-14147）：内圈免骰，外圈 Next(2)
+                    if (!((x > zLo + 1 && x < zHi - 2) || (int)r.Next(2) != 0)) continue;
+                    if (!((!(y <= bandStart + 1.0) && !(y >= band - 2.0)) || (int)r.Next(2) != 0)) continue;
+                    int ti = y * W + x;
+                    if (act[ti] == 0) continue;
+                    if (typ[ti] == 53 && x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 234;
+                    if ((double)y < cNum2 - 1.0 && !first)
+                    {
+                        if (typ[ti] == 0) { typ[ti] = 199; }         // SpreadGrass(0→199)：见下方扩展
+                        else if (typ[ti] == 59) { grassSpread = 0; SpreadGrassGen(x, y, 59, 662); }
+                    }
+                    first = true;
+                    if (wal[ti] == 216) wal[ti] = 218;
+                    else if (wal[ti] == 187) wal[ti] = 221;
+                    if (typ[ti] == 1)
+                    {
+                        if (x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 203;
+                    }
+                    else if (typ[ti] == 2) typ[ti] = 199;
+                    else if (typ[ti] == 60) typ[ti] = 662;
+                    else if (typ[ti] == 161) typ[ti] = 200;
+                    else if (typ[ti] == 396) typ[ti] = 401;
+                    else if (typ[ti] == 397) typ[ti] = 399;
+                }
+            }
+            // 祭坛（cs:14201-14239）
+            int altarCount = (int)r.Next(10, 15);
+            for (int a = 0; a < altarCount; a++)
+            {
+                int tries = 0, widen = 0;
+                bool done = false;
+                while (!done)
+                {
+                    tries++;
+                    int ax = (int)r.Next(zLo - widen, zHi + widen);
+                    int ay = (int)r.Next((int)(cNum2 - (double)(widen / 2)), (int)(cNum2 + 100.0 + (double)widen));
+                    if (tries > 100) { widen++; tries = 0; }
+                    if (act[ay * W + ax] == 0)
+                    {
+                        for (; ay < H && act[ay * W + ax] == 0; ay++) { }
+                        ay--;
+                    }
+                    else
+                    {
+                        while (ay >= 0 && act[ay * W + ax] != 0 && (double)ay > cNum2) ay--;
+                    }
+                    if ((widen > 10 || (act[(ay + 1) * W + ax] != 0 && typ[(ay + 1) * W + ax] == 203)) && !IsTileNearby26(ax, ay, 26, 3))
+                    {
+                        Place3x2Altar(ax, ay, 1);
+                        if (typ[ay * W + ax] == 26) done = true;
+                    }
+                    if (widen > 100) done = true;
+                }
+            }
+        }
+        else
+        {
+            // 腐化裂隙（cs:14368-14390）
+            int cooldown = 0;
+            for (int l = zLo; l < zHi; l++)
+            {
+                if (cooldown > 0) cooldown--;
+                if (l == cx || cooldown == 0)
+                {
+                    for (int n = (int)cNum; (double)n < cNum2 - 1.0; n++)
+                    {
+                        if (act[n * W + l] != 0 || wal[n * W + l] > 0)
+                        {
+                            if (l == cx)
+                            {
+                                cooldown = 20;
+                                ChasmRunnerGen(l, n, (int)r.Next(150) + 150, true);
+                            }
+                            else if ((int)r.Next(35) == 0 && cooldown == 0)
+                            {
+                                cooldown = 30;
+                                ChasmRunnerGen(l, n, (int)r.Next(50) + 50, true);
+                            }
+                            break;
+                        }
+                    }
+                }
+                // 丛林草→腐化丛林草（cs:14392-14404）
+                for (int n = (int)cNum; (double)n < cNum2 - 1.0; n++)
+                {
+                    if (act[n * W + l] != 0)
+                    {
+                        int end = n + (int)r.Next(10, 14);
+                        for (int n2 = n; n2 < end; n2++)
+                        {
+                            if (act[n2 * W + l] != 0 && typ[n2 * W + l] == 60 && l >= zLo + (int)r.Next(5) && l < zHi - (int)r.Next(5))
+                                typ[n2 * W + l] = 661;
+                        }
+                        break;
+                    }
+                }
+            }
+            // 地表转换带（cs:14406-14484）
+            double band = cNum2 + 40.0;
+            for (int x = zLo; x < zHi; x++)
+            {
+                band += (double)(int)r.Next(-2, 3);
+                if (band < cNum2 + 30.0) band = cNum2 + 30.0;
+                if (band > cNum2 + 50.0) band = cNum2 + 50.0;
+                bool first = false;
+                double bandStart = cNum;
+                for (int y = (int)bandStart; (double)y < band; y++)
+                {
+                    if (!((x > zLo + 1 && x < zHi - 2) || (int)r.Next(2) != 0)) continue;
+                    if (!((!(y <= bandStart + 1.0) && !(y >= band - 2.0)) || (int)r.Next(2) != 0)) continue;
+                    int ti = y * W + x;
+                    if (act[ti] == 0) continue;
+                    if (typ[ti] == 53 && x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 112;
+                    if ((double)y < cNum2 - 1.0 && !first)
+                    {
+                        if (typ[ti] == 0) { typ[ti] = 23; }          // SpreadGrass(0→23)
+                        else if (typ[ti] == 59) { grassSpread = 0; SpreadGrassGen(x, y, 59, 661); }
+                    }
+                    first = true;
+                    if (wal[ti] == 216) wal[ti] = 217;
+                    else if (wal[ti] == 187) wal[ti] = 220;
+                    if (typ[ti] == 1)
+                    {
+                        if (x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 25;
+                    }
+                    else if (typ[ti] == 2) typ[ti] = 23;
+                    else if (typ[ti] == 60) typ[ti] = 661;
+                    else if (typ[ti] == 161) typ[ti] = 163;
+                    else if (typ[ti] == 396) typ[ti] = 400;
+                    else if (typ[ti] == 397) typ[ti] = 398;
+                }
+            }
+            // 暗影球周黑檀石囊（cs:14546-14581，仅本组区间）
+            for (int x = zLo; x < zHi; x++)
+            {
+                for (int y = 0; y < H - 50; y++)
+                {
+                    if (act[y * W + x] == 0 || typ[y * W + x] != 31) continue;
+                    for (int dx = -13; dx < 13; dx++)
+                    {
+                        if (x + dx <= 10 || x + dx >= W - 10) continue;
+                        for (int dy = -13; dy < 13; dy++)
+                        {
+                            int y2 = y + dy;
+                            if (y2 < 0 || y2 >= H) continue;
+                            int ti = y2 * W + (x + dx);
+                            if (Math.Abs(dx) + Math.Abs(dy) < 9 + (int)r.Next(11) && (int)r.Next(3) != 0 && typ[ti] != 31)
+                            {
+                                act[ti] = 1; typ[ti] = 25;
+                                if (Math.Abs(dx) <= 1 && Math.Abs(dy) <= 1) act[ti] = 0;
+                            }
+                            if (typ[ti] != 31 && Math.Abs(dx) <= 2 + (int)r.Next(3) && Math.Abs(dy) <= 2 + (int)r.Next(3))
+                                act[ti] = 0;      // 原版仅 active=false（type 保留为幽灵）
+                        }
+                    }
+                }
+            }
+        }
+    }
+    if (crimson) CrimPlaceHeartsGen();   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
+}
+Checkpoint("corruption");
+
 
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================
 // 注：#29 Corruption（cs:13919）未转录——插入位在本块之前（JS 侧在 vanillaBiomes 内已先跑）

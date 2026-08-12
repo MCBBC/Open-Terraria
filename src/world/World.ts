@@ -15,9 +15,11 @@ export interface ChestData { x: number; y: number; items: Array<{ id: number; st
  *  （0 经典 1 专家 2 大师 3 旅程按经典，Main.cs:2775-2780）。角色难度只决定
  *  是否走 DropCoins（见 Appearance.dropsCoinsOnDeath），不决定档位 */
 export function deathCoinKeepFraction(worldDifficulty: number): number {
-  if (worldDifficulty === 2) return 1;      // Main.masterMode：num2=0 全掉（:53359）
-  if (worldDifficulty === 1) return 0.75;   // Main.expertMode：num2=stack/4 → 留 3/4（:53356）
-  return 0.5;                               // 经典/旅程：num2=stack/2 → 留一半（:53553 附近 :53353）
+  // 原版 Player.DropCoins :53351-53380：num2 = stack/2(经典)/stack/4(专家)/0(大师) 是
+  // **留在身上的份额**（num3 = stack - num2 才落地）——曾把 num2 误当掉出份额写反。
+  if (worldDifficulty === 2) return 0;      // masterMode：num2=0 全掉（:53359）
+  if (worldDifficulty === 1) return 0.25;   // expertMode：num2=stack/4 → 掉 3/4（:53356）
+  return 0.5;                              // 经典/旅程：num2=stack/2 → 掉 1/2（:53353）
 }
 
 export class Clock {

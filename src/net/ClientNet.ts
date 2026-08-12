@@ -1,6 +1,7 @@
 // 多人联机客户端（netMode==1，docs/multiplayer-design.md §4）。
 // 握手 → 世界流式组装 → 玩家互见 + tile 操作上报/应用 + 时间对齐。
-// v1 未同步（客户端本地）：NPC/弹幕/掉落/箱子/液体模拟结果。
+// v6 已同步：NPC(msg23 短码)/弹幕(msg27 kind0-8+hostile)/掉落(msg21)/箱子(msg31/32)。
+// 客户端本地：液体模拟（原版 v1 既定边界）、傀儡插值（快照驱动）。
 import {
   PROTO_MAGIC, PROTO_VER, Msg, NetModule,
   NetWriter, NetReader, FrameParser, TileOp, TileOpAction, readTileBatch, decodeStrip,
@@ -115,6 +116,8 @@ export class ClientNet {
   private tileQueue: TileOp[] = [];
   /** msg23 短码表（v4：codeId → {netId, key}；服务器端分配，全量条目重建） */
   private npcCodes = new Map<number, { netId: number; key: string }>();
+  /** v6 msg201 暂存（世界就绪后由 Game 消费，见 SscSync case 注释——竞态防护） */
+  pendingSSC: string | null = null;
   /** msg21 上行合帧暂存（P1.3：netDropSweep 每 4 tick 逐条发 → 攒到 tick 冲洗拼一条 WS 消息） */
   private pendingFrames: Uint8Array[] = [];
   private lastStateSent = 0;
@@ -488,8 +491,10 @@ export class ClientNet {
         return;
       }
       case Msg.SscSync: {
-        // v6 msg201：服务器角色档（--ssc）——应用由 Game 侧 hook 负责
-        this.hooks.onSSC?.(r.str());
+        // v6 msg201：服务器角色档（--ssc）。**暂存不即用**——本帧与 PlayerSpawn 同批
+        // 到达，onWorldReady→loadWorld 内部 await 让出栈后若立刻应用会写到即将被
+        // 重建替换的旧 Player 上整体丢失（终审 H1）。由 Game 在 loadWorld 完成后消费
+        this.pendingSSC = r.str();
         return;
       }
       case Msg.Ping:
@@ -742,13 +747,16 @@ export class ClientNet {
   }
 
   /** 弹幕消亡上报（v6 msg28，双向）：自己拥有的弹幕消亡时批量上报，
-   *  接收端即时移除傀儡（替代纯 180t 超时清扫——消幽灵弹窗口 + 消亡闪烁） */
+   *  接收端即时移除傀儡（替代纯 180t 超时清扫——消幽灵弹窗口 + 消亡闪烁）。
+   *  终审 L2：服务器 n>64 整包拒——分片成 ≤64 的多帧，防大清场丢尾 */
   sendProjDespawn(netIds: number[]) {
-    if (!netIds.length) return;
-    const w = new NetWriter(Msg.ProjDespawn);
-    w.u16(Math.min(netIds.length, 64));
-    for (const id of netIds.slice(0, 64)) w.u32(id);
-    this.send(w.finish());
+    for (let i = 0; i < netIds.length; i += 64) {
+      const chunk = netIds.slice(i, i + 64);
+      const w = new NetWriter(Msg.ProjDespawn);
+      w.u16(chunk.length);
+      for (const id of chunk) w.u32(id);
+      this.send(w.finish());
+    }
   }
 
   /** 傀儡受击上报（msg42，访客→房主；Enemy.hurt 内经 entityNet 注入调用） */

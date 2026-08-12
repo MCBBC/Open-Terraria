@@ -2,7 +2,7 @@
 // 帧格式对齐原版：[u16 len][u8 msgId][payload...]，小端，包上限 65535B。
 // 消息 ID 尽量沿用原版 MessageID 编号（Hello=1/SLOT=3/WorldData=7/TileSection=10/
 // PlayerSpawn=12/PlayerControls=13/TileManipulation=17/SetTime=18/NetModules=82/Ping=154）；
-// 编码字段为本仓库简化集（protoVer 门禁，当前 v5——见 PROTO_VER 注释）。
+// 编码字段为本仓库简化集（protoVer 门禁，当前 v6——演进史见 PROTO_VER 注释）。
 
 export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
