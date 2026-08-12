@@ -1,0 +1,49 @@
+// 一次性诊断：buff 栏实况截图 + 布局几何
+// 运行：SW_ORIGIN=http://localhost:5201 node tools/run-diag.mjs --timeout=300000 scripts/_buffbar-probe.mjs
+import puppeteer from 'puppeteer-core';
+import fs from 'node:fs';
+const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', args: ['--no-sandbox'], defaultViewport: { width: 1280, height: 800 } });
+const page = await browser.newPage();
+const errors = [];
+page.on('pageerror', (e) => errors.push(e.message));
+await page.goto((process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+let inGame = false;
+for (let i = 0; i < 150 && !inGame; i++) {
+  inGame = await page.evaluate(() => !!(window.__swGame && window.__swGame.renderer)).catch(() => false);
+  if (!inGame) await new Promise((r) => setTimeout(r, 2000));
+}
+if (!inGame) { console.error('未进游戏', errors.slice(0, 3)); process.exit(1); }
+await page.evaluate(async () => { await window.__swGame.newWorld('12345', 4200, 1200, () => {}); });
+let ready = false;
+for (let i = 0; i < 150 && !ready; i++) {
+  ready = await page.evaluate(() => { const g = window.__swGame; return !!(g && g.world && g.world.store && g.world.store.w === 4200); }).catch(() => false);
+  if (!ready) await new Promise((r) => setTimeout(r, 2000));
+}
+// 授予多个 buff + 刷新 UI
+const geo = await page.evaluate(async () => {
+  const g = window.__swGame;
+  const mods = await import('/src/stats/Buffs.ts');
+  for (const t of [mods.BuffType.Agility, mods.BuffType.Ironskin, mods.BuffType.Regen, mods.BuffType.Honey, mods.BuffType.Thorns, mods.BuffType.NightOwl, mods.BuffType.OnFire]) {
+    g.player.buffs.apply(t, 120);
+  }
+  g.ui?.refreshBuffs?.();
+  await new Promise((r) => setTimeout(r, 1500));
+  const bar = document.querySelector('.sw-buff')?.parentElement
+    ?? document.querySelector('div[style*="top:76px"]')
+    ?? g.ui?.buffBar;
+  if (!bar) return { err: 'buffBar 未找到' };
+  const br = bar.getBoundingClientRect();
+  const items = [...bar.children].filter((c) => c.style.display !== 'none').map((c) => {
+    const r = c.getBoundingClientRect();
+    const img = c.querySelector('img');
+    return { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height), src: (img?.src ?? '').slice(-40) };
+  });
+  return { bar: { x: br.x, y: br.y, w: br.width, h: br.height, cls: bar.className, display: getComputedStyle(bar).display, dir: getComputedStyle(bar).flexDirection, wrap: getComputedStyle(bar).flexWrap }, items };
+});
+console.log(JSON.stringify(geo, null, 1));
+// 截左上角 buff 栏区域(页面坐标,viewport 1280x800)
+const shot = await page.screenshot({ clip: { x: 0, y: 0, width: 470, height: 200 } });
+fs.writeFileSync('/tmp/buffbar.png', shot);
+console.log('pageerrors:', errors.slice(0, 3));
+await browser.close();

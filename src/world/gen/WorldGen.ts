@@ -126,12 +126,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 地下自然墙唯二来源之一（另一=DirtWallBackgrounds 近地表）——缺它全洞穴无墙,
     // 暴露晶簇(178,贴墙装饰)悬空(2026-08-12 用户标注)
     { name: '洞穴墙', run: caveWallsPass },
+    // 瓦罐（原版 PotsGraveyardsAndBoulderPiles cs:18108,注册序 CaveWalls(17819) <
+    // 本 pass < Hellforges(18298)）——曾排在熔炉后=与原版对调,2026-08-13 归位
+    { name: '瓦罐', run: potPass },
     // 地狱熔炉(原版 Hellforges,cs:18298:w/200 个,墙 13/14 门禁)
     { name: '地狱熔炉', run: hellforgesPass },
-    // （原版管线地下小屋/散箱已由生物群系 pass 内的 CaveHousePass/BuriedChestsPass/
-    // SurfaceChestsPass 完整覆盖,legacy structurePass 已删除——再跑会双倍密度+空箱）
-    // 瓦罐（原版 pass 75 PotsGraveyardsAndBoulderPiles 位置：Hellforges 76 之前）
-    { name: '瓦罐', run: potPass },
     // 矿骨堆（原版 pass 81 Piles 位置）
     { name: '矿骨堆', run: pilesPass },
     // 表面（legacy 外壳：铺草=原版 pass 77 SpreadingGrass；内嵌 vanilla TreePass
@@ -148,9 +147,21 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // SpawnPoint 19605 < 本 pass < DyePlants 20126）：地表泥土墙洞 → 草墙 63/花墙 65——
     // Vines pass 花藤 382 的上游（藤头墙 ∈ {63,65,66,68} 才出花藤）
     { name: '草墙', run: vanillaGrassWall },
+    // 栽树（原版 Planting Trees cs:20085，注册序 GrassWall(19734) < 本 pass <
+    // AlchemyHerbs(20109)）——曾内嵌"表面"槽（地表矿石/倒木/陷阱/矿骨堆/草墙之前）,
+    // 2026-08-13 归位（Batch D）
+    { name: '栽树', run: treesPass },
+    // 炼金草药（原版 AlchemyHerbs cs:20109，Trees 之后、DyePlants(20126) 之前）
+    { name: '炼金草药', run: alchemyHerbsSlot },
     // 染料植物（原版 DyePlants cs:20126）：plantDye + MatureTheHerbPlants +
     // GrowGlowTulips(656) + PlaceChilletEggs(752)，位于 AlchemyHerbs(20109) 之后
     { name: '染料植物', run: vanillaDyePlants },
+    // 蛛网蜂巢（原版 WebsInSpiderCavesAndHoney cs:20140，注册序 DyePlants(20126) <
+    // 本 pass < GrassPlants(20232)）——曾内嵌 vanillaBiomes 尾（提前约 40 槽）,归位
+    { name: '蛛网蜂巢', run: websInSpiderCavesSlot },
+    // 地表植物（原版 GrassPlants cs:20232 + GlowingMushroomPlants cs:20278，注册序
+    // Webs(20140) < 两者 < Vines(20338)）——曾内嵌"表面"槽,归位
+    { name: '地表植物', run: grassPlantsSlot },
     // 藤蔓（原版 Vines cs:20338）：六类藤蔓逐列生长 + 丛林蜂巢凹龛
     { name: '藤蔓', run: vanillaVines },
     // 地表花（原版 Flowers cs:20592）：花圃重帧，消费 gs.logX/logY
@@ -625,7 +636,8 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runWaterChestsPass(store, rng, gs, world.chests); // Water Chests(水中 style17;1.4.4 概念保留)
   // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用删除
   runSpiderNestPass(store, rng, gs, world.chests); // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
-  runWebsInSpiderCavesPass(store, rng, gs);     // Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
+  // WebsInSpiderCavesAndHoney(cs:20140)曾内嵌于此（提前约 40 槽）——2026-08-13
+  // 按注册序(DyePlants 20126 < 本 pass < GrassPlants 20232)拆出独立槽归位（Batch D）
   runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
   runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)
 }
@@ -765,6 +777,31 @@ function brokenTrapCleanupPass({ store, world }: GenCtx) {
 
 function finalCleanupPass({ store }: GenCtx) {
   runFinalCleanupPass(store, ctxGs[0]!);
+}
+
+// ---- Batch D 顺序归位包装(2026-08-13)----
+// 原版注册序:GrassWall(19734) < SpawnStarterNPCs(19830,读档侧) < Trees(20085)
+// < AlchemyHerbs(20109) < DyePlants(20126) < WebsInSpiderCavesAndHoney(20140)
+// < GrassPlants(20232) < GlowingMushroomPlants+JunglePlants(20278) < Vines(20338)
+function treesPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (gs) runTreePass(store, rng, gs);
+}
+
+function alchemyHerbsSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (gs) runAlchemyHerbsPass(store, rng, gs);
+}
+
+function websInSpiderCavesSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (gs) runWebsInSpiderCavesPass(store, rng, gs);
+}
+
+function grassPlantsSlot({ store, rng }: GenCtx) {
+  runGrassPlantsPass(store, rng);
+  const gs = ctxGs[0];
+  if (gs) runGlowingMushroomPlantsPass(store, rng, gs);
 }
 
 function caveWallVarietyPass({ store, rng }: GenCtx) {
@@ -1063,38 +1100,15 @@ function oceanDepthsAt(store: TileStore, gs: GenState, x: number, y: number): bo
 // 已由 vanilla/LakesPass.ts（原版 pass 31）替换，旧 liquidPass 删除
 
 // ---------- 表面 ----------
-function surfacePass({ store, surface, rng, world }: GenCtx) {
-  const { w } = store;
+function surfacePass({ store, surface, world }: GenCtx) {
   const gs0 = ctxGs[0];
   // 铺草（原版 SpreadingGrassOnSurfaceSunflowersEvilsOnSurfaceAndLavaCleanup cs:18349-18460）：
   //  段① 丛林草 3×3 邻接泥土填充 + 地表暴露石/黏土/矿 7×7 扫描转周边群系；
-  //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）
+  //  段② 逐列 SpreadGrass 递归扩散（flag2 空气重置——洞穴口露土处也补草）。
+  //  Trees/AlchemyHerbs/GrassPlants/GlowingMushroomPlants 曾内嵌于此（地表矿石/倒木/
+  //  陷阱/矿骨堆/草墙之前）——2026-08-13 按 1456 注册序拆出独立槽归位（Batch D）
   if (gs0) spreadingGrassPass(store, gs0);
-  // 原版 pass 82 Planting Trees（铺草之后、杂草之前——原版 73<82<86 顺序）
-  {
-    const gs = ctxGs[0];
-    if (gs) runTreePass(store, rng, gs);
-  }
-  // 原版 pass AlchemyHerbs(20109)：Trees 之后、DyePlants(20126) 之前——w×1.7 次 PlantAlch。
-  // MatureTheHerbPlants(45757) 原版在 DyePlants pass 内调用（cs:20135），已随染料植物
-  // pass 下沉——此处不再调（熟成时机 1:1）
-  {
-    const gs = ctxGs[0];
-    if (gs) runAlchemyHerbsPass(store, rng, gs);
-  }
-  // 地表植物（原版 GrassPlantsEvilPlantsAndPumpkinsOnSurface cs:20232-20263）：
-  //  只铺草族上方（2→3 / 23→24 / 199→201 / 633→637）；帧分布与荆棘转化在
-  //  PlaceTile(3/24/201/637) 分支内（见 SurfaceDecorPasses.placePlantTile）。
-  //  旧实现自造 82%/13%/每格必铺掷骰 + 丛林草→73（原版不处理丛林草）——已替换
-  runGrassPlantsPass(store, rng);
-  // 发光蘑菇株/丛林植物（原版 GlowingMushroomPlantsUndergroundAndJunglePlants cs:20278-20303）：
-  //  蘑菇草 70 → 3 次巨型蘑菇树尝试后 PlaceTile(71)；丛林草 60 → 61；蜥蜴砖 226 → 1/5 也 → 61
-  {
-    const gs = ctxGs[0];
-    if (gs) runGlowingMushroomPlantsPass(store, rng, gs);
-  }
-  // 树已由 vanilla/TreePass.ts（原版 pass 82 AddTrees/GrowTree/GrowPalmTree/GrowEpicTree）替换
-  void surface; void world; void w;
+  void surface; void world;
 }
 
 /** SpreadingGrass 段①②（cs:18354-18460）1:1 */

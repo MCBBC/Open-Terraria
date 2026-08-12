@@ -15,6 +15,12 @@ export interface VanillaRecipe {
   groups: number[];
   honey?: boolean; water?: boolean; lava?: boolean;
   snow?: boolean; graveyard?: boolean; alchemy?: boolean;
+  /** decraft 族(2026-08-13 提取器补提,Recipe.cs 裸赋值 :1064/:1140/:1145) */
+  notDecraftable?: boolean;
+  crimson?: boolean;
+  corruption?: boolean;
+  /** AddCustomShimmerResult(:173)——decraft 产物覆盖表 [[id,stack],...] */
+  shimmer?: Array<[number, number]>;
 }
 
 const DOC = recipesJson as unknown as {
@@ -30,6 +36,43 @@ export const RECIPE_GROUP_ITEMS = DOC.groupItems;
 export const TILE_COUNTS_AS = DOC.tileCountsAs;
 
 /** 站点继承递归展开（Player.SetAdjTile :35192-35208）：tile 本身 + CountsAs 链全部置位 */
+// ================= decraft 索引表（Recipe.UpdateWhichItemsAreCrafted :15110-15127 1:1） =================
+// 注册序遍历后写 = last-wins（原版同款）; notDecraftable 跳过 IsCrafted;
+// crimson/corruption 配方写各自专属表（GetDecraftingRecipeIndex 按世界 evil 取用）。
+// 惰性构建一次（模块加载即建,3173 条线性扫）。
+const IS_CRAFTED = new Map<number, number>();
+const IS_CRAFTED_CRIMSON = new Map<number, number>();
+const IS_CRAFTED_CORRUPTION = new Map<number, number>();
+{
+  const rs = DOC.recipes;
+  for (let i = 0; i < rs.length; i++) {
+    const r = rs[i];
+    if (!r.notDecraftable) IS_CRAFTED.set(r.create, i);
+    if (r.crimson) IS_CRAFTED_CRIMSON.set(r.create, i);
+    if (r.corruption) IS_CRAFTED_CORRUPTION.set(r.create, i);
+  }
+}
+
+/** ShimmerTransforms.GetDecraftingRecipeIndex（ShimmerTransforms.cs:15-31）:
+ *  IsCrafted<0 → -1;猩红世界取 crimson 表(≥0 才用),腐化世界同理,否则 IsCrafted */
+export function getDecraftingRecipeIndex(vid: number, crimsonWorld: boolean): number {
+  const base = IS_CRAFTED.get(vid) ?? -1;
+  if (base < 0) return -1;
+  if (crimsonWorld) {
+    const c = IS_CRAFTED_CRIMSON.get(vid) ?? -1;
+    if (c >= 0) return c;
+  } else {
+    const c = IS_CRAFTED_CORRUPTION.get(vid) ?? -1;
+    if (c >= 0) return c;
+  }
+  return base;
+}
+
+/** 按索引取配方（decraft 执行端用） */
+export function recipeAt(index: number): VanillaRecipe | undefined {
+  return DOC.recipes[index];
+}
+
 export function expandStationTiles(tile: number): number[] {
   const out = [tile];
   let cur = tile;
@@ -74,9 +117,21 @@ export function collectOwnedItems(inv: Inventory): Map<number, number> {
   return owned;
 }
 
-/** 材料匹配（RequiredItemEntry.Matches Recipe.cs:35-42）：普通物比 id，组查假 id */
-function itemMatches(reqId: number, groupIds: number[], owned: Map<number, number>): number {
-  if (reqId >= 1000000) return owned.get(reqId) ?? 0;
+/** 材料槽 → 所属组（CreateRequiredItemQuickLookups :15043-15056：槽 id 命中本配方
+ *  接受组的 ValidItems → 该槽重标记为组）。哨兵 id(≥1000000,提取器遗留)按同义处理 */
+function groupOf(r: VanillaRecipe, reqId: number): number {
+  if (reqId >= 1000000) return reqId - 1000000;
+  for (const g of r.groups) {
+    if ((RECIPE_GROUP_ITEMS[String(g)] ?? []).includes(reqId)) return g;
+  }
+  return -1;
+}
+
+/** 材料匹配（RequiredItemEntry.Matches Recipe.cs:35-42）：组槽 = 组内全体持有量之和
+ *  （collectOwnedItems 已按假 id 聚合）——持 Boreal 木(5215)可满足 Wood 组槽 */
+function itemMatches(r: VanillaRecipe, reqId: number, owned: Map<number, number>): number {
+  const g = groupOf(r, reqId);
+  if (g >= 0) return owned.get(1000000 + g) ?? 0;
   return owned.get(reqId) ?? 0;
 }
 
@@ -85,7 +140,7 @@ function itemMatches(reqId: number, groupIds: number[], owned: Map<number, numbe
 export function craftableCount(r: VanillaRecipe, owned: Map<number, number>): number {
   let min = Infinity;
   for (const req of r.items) {
-    const have = itemMatches(req.id, r.groups, owned);
+    const have = itemMatches(r, req.id, owned);
     if (have < req.stack) return 0;
     min = Math.min(min, Math.floor(have / req.stack));
   }
@@ -185,9 +240,11 @@ export function consumeMaterials(inv: Inventory, r: VanillaRecipe, times = 1, al
       need -= discounted;
       if (need <= 0) continue;
     }
-    // 组材料：按组内物品依序扣
-    if (req.id >= 1000000) {
-      const items = RECIPE_GROUP_ITEMS[String(req.id - 1000000)] ?? [];
+    // 组材料（groupOf:占位 id/哨兵 id 统一判定,ConsumeFromInventory :451 语义——
+    // 组槽可扣组内任一成员,依序补足）
+    const gid = groupOf(r, req.id);
+    if (gid >= 0) {
+      const items = RECIPE_GROUP_ITEMS[String(gid)] ?? [];
       for (const gid of items) {
         if (need <= 0) break;
         const key = VID_TO_KEY.get(gid);

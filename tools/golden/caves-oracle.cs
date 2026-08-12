@@ -2956,8 +2956,12 @@ void ChasmRunnerSidewaysGen(int i, int j, int direction, int steps)
     double vx2 = (int)r.Next(10, 21) * 0.1 * direction;
     double vy2 = (int)r.Next(-10, 10) * 0.01;
     double rad = (int)r.Next(5) + 7;
+    Console.Error.WriteLine($"SWIN dir={direction} j={j} steps={steps} vx={vx2} vy={vy2} r={rad} p={(int)r.Peek()}");
+    int swIt = 0;
     while (rad > 0.0)
     {
+        if (swIt < 40) Console.Error.WriteLine($"SI{swIt} n={sn} r={rad} px={vx} py={vy} p={(int)r.Peek()}");
+        swIt++;
         if (sn > 0.0)
         {
             rad += (int)r.Next(3);
@@ -2969,6 +2973,7 @@ void ChasmRunnerSidewaysGen(int i, int j, int direction, int steps)
         else rad -= (int)r.Next(4);
         if (vy > rockLayer && sn > 0.0) sn = 0.0;
         sn -= 1.0;
+        if (swIt <= 40) Console.Error.WriteLine($"SS{swIt} p={(int)r.Peek()}");
         int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
         int y0 = Math.Max(0, (int)(vy - rad * 0.5)), y1 = Math.Min(H, (int)(vy + rad * 0.5));
         for (int k = x0; k < x1; k++)
@@ -3046,16 +3051,16 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
         else if (vy > wsN + 45.0) rad -= (int)r.Next(4);
         if (vy > rockLayer && sn > 0.0) sn = 0.0;
         sn -= 1.0;
-        if (crIt < 25) Console.Error.WriteLine($"CS{crIt} p={(int)r.Peek()}");
+        if (crIt < 27) Console.Error.WriteLine($"CS{crIt} p={(int)r.Peek()}");
         if (!flag && vy > wsN + 20.0)
         {
             flag = true;
             ChasmRunnerSidewaysGen((int)vx, (int)vy, -1, (int)r.Next(20, 40));
-            if (crIt < 25) Console.Error.WriteLine($"CW- {crIt} p={(int)r.Peek()}");
+            if (crIt < 27) Console.Error.WriteLine($"CW- {crIt} p={(int)r.Peek()}");
             ChasmRunnerSidewaysGen((int)vx, (int)vy, 1, (int)r.Next(20, 40));
-            if (crIt < 25) Console.Error.WriteLine($"CW+ {crIt} p={(int)r.Peek()}");
+            if (crIt < 27) Console.Error.WriteLine($"CW+ {crIt} p={(int)r.Peek()}");
         }
-        if (crIt < 25) Console.Error.WriteLine($"CC{crIt} p={(int)r.Peek()}");
+        if (crIt < 27) Console.Error.WriteLine($"CC{crIt} p={(int)r.Peek()}");
         if (sn > (double)num3)
         {
             int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
@@ -3101,10 +3106,10 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                 }
             }
         }
-        if (crIt < 25) Console.Error.WriteLine($"CO{crIt} p={(int)r.Peek()}");
+        if (crIt < 27) Console.Error.WriteLine($"CO{crIt} p={(int)r.Peek()}");
         vx += vx2; vy += vy2;
         vx2 += (int)r.Next(-10, 11) * 0.01;
-        if (crIt < 25) Console.Error.WriteLine($"CH{crIt} p={(int)r.Peek()}");
+        if (crIt < 27) Console.Error.WriteLine($"CH{crIt} p={(int)r.Peek()}");
         if (vx2 > 0.3) vx2 = 0.3;
         if (vx2 < -0.3) vx2 = -0.3;
         int x0b = Math.Max(1, (int)(vx - rad * 1.1)), x1b = Math.Min(W - 1, (int)(vx + rad * 1.1));
@@ -3120,6 +3125,7 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                     if (typ[ti] != 31) typ[ti] = 25;
                 }
             }
+        if (crIt >= 20 && crIt < 30) Console.Error.WriteLine($"S1{crIt} p={(int)r.Peek()}");
         for (int k = x0b; k < x1b; k++)
             for (int l = y0b; l < y1b; l++)
             {
@@ -3131,6 +3137,7 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                     if (l > j + (int)r.Next(3, 20)) wal[ti] = 3;
                 }
             }
+        if (crIt >= 20 && crIt < 30) Console.Error.WriteLine($"S2{crIt} p={(int)r.Peek()}");
     }
 }
 void CrimVeinGen(double px, double py, double ivx, double ivy)
@@ -3678,6 +3685,16 @@ void CrimPlaceHeartsGen()
 }
     Console.Error.WriteLine($"CRend={(int)r.Peek()}");
 Checkpoint("corruption");
+{
+    var gsB = new StringBuilder();
+    for (int gx = 880; gx < 1300; gx++)
+        for (int gy = 240; gy < 660; gy++)
+        {
+            int gi = gy * W + gx;
+            if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gsB.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");
+        }
+    File.WriteAllText("/tmp/oracle-grid.txt", gsB.ToString());
+}
 
 
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================

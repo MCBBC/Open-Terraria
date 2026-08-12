@@ -213,7 +213,9 @@ function convertSurface(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi:
       if (y < gs.worldSurface - 1 && !first) {
         if (st.type[i] === T.DIRT) {
           grassSpreadState.n = 0;
-          spreadGrassOnce(st, x, y, 0, crimson ? CRIMSON_GRASS : CORRUPT_GRASS, true);  // SpreadGrass(0→199/23)
+          // SpreadGrass(0→199/23)：原版 dirt=0（泥土）——内部侧传 T.DIRT（曾传 0=EMPTY，
+          // type!==dirt 门全拒 → 邪恶草一格不铺）
+          spreadGrassOnce(st, x, y, T.DIRT, crimson ? CRIMSON_GRASS : CORRUPT_GRASS, true);
         } else if (st.type[i] === MUD) {
           grassSpreadState.n = 0;
           spreadGrassOnce(st, x, y, MUD, crimson ? CRIMSON_JUNGLE_GRASS : CORRUPT_JUNGLE_GRASS, true); // 59→662/661
@@ -337,7 +339,7 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
   const num3 = 5;
   let crIt = 0;
   while (radius > 0) {
-    if (DBG && crIt < 150) console.log(`CI${crIt} n=${num1} r=${radius} px=${px.toFixed(2)} py=${py.toFixed(2)} p=${rng.vanilla.peek()}`);
+    if (DBG && crIt < 150) console.log(`CI${crIt} n=${num1} r=${radius} px=${px} py=${py} p=${rng.vanilla.peek()}`);
     crIt++;
     if (num1 > 0) {
       radius += rng.int(0, 2) - rng.int(0, 2);                // Next(3) 两次
@@ -349,15 +351,15 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
     }
     if (py > gs.rockLevel && num1 > 0) num1 = 0;
     num1--;
-    if (DBG && crIt < 25) console.log(`CS${crIt} p=${rng.vanilla.peek()}`);
+    if (DBG && crIt < 27) console.log(`CS${crIt} p=${rng.vanilla.peek()}`);
     if (!sideways && py > gs.worldSurface + 20) {
       sideways = true;
       chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), -1, rng.int(20, 39));  // Next(20,40)
-      if (DBG && crIt < 25) console.log(`CW- ${crIt} p=${rng.vanilla.peek()}`);
+      if (DBG && crIt < 27) console.log(`CW- ${crIt} p=${rng.vanilla.peek()}`);
       chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), 1, rng.int(20, 39));
-      if (DBG && crIt < 25) console.log(`CW+ ${crIt} p=${rng.vanilla.peek()}`);
+      if (DBG && crIt < 27) console.log(`CW+ ${crIt} p=${rng.vanilla.peek()}`);
     }
-    if (DBG && crIt < 25) console.log(`CC${crIt} p=${rng.vanilla.peek()}`);
+    if (DBG && crIt < 27) console.log(`CC${crIt} p=${rng.vanilla.peek()}`);
     // 挖空（cs:76110-76119：num2>5 才挖；CanEvilReplace+非坛/魔矿/猩红矿三门）
     if (num1 > 5) {
       const x0 = Math.max(0, Math.floor(px - radius * 0.5)), x1 = Math.min(st.w - 1, Math.floor(px + radius * 0.5));
@@ -396,11 +398,11 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         }
       }
     }
-    if (DBG && crIt < 25) console.log(`CO${crIt} p=${rng.vanilla.peek()}`);
+    if (DBG && crIt < 27) console.log(`CO${crIt} p=${rng.vanilla.peek()}`);
     px += vx; py += vy;
     vx += rng.int(-10, 10) * 0.01;
     vx = Math.max(-0.3, Math.min(0.3, vx));
-    if (DBG && crIt < 25) console.log(`CH${crIt} p=${rng.vanilla.peek()}`);
+    if (DBG && crIt < 27) console.log(`CH${crIt} p=${rng.vanilla.peek()}`);
     // 壳1（cs:76282-76296）：CanEvilReplace + 激活/type=25
     const x0 = Math.max(1, Math.floor(px - radius * 1.1)), x1 = Math.min(st.w - 1, Math.floor(px + radius * 1.1));
     const y0 = Math.max(0, Math.floor(py - radius * 1.1)), y1 = Math.min(st.h, Math.floor(py + radius * 1.1));
@@ -415,6 +417,7 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         }
       }
     }
+    if (DBG && crIt >= 20 && crIt < 30) console.log(`S1${crIt} p=${rng.vanilla.peek()}`);
     // 壳2（cs:76309-76322）：type=25 + 激活 + 墙3
     for (let x = x0; x < x1; x++) {
       for (let y = y0; y < y1; y++) {
@@ -427,6 +430,7 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         }
       }
     }
+    if (DBG && crIt >= 20 && crIt < 30) console.log(`S2${crIt} p=${rng.vanilla.peek()}`);
   }
 }
 
@@ -437,9 +441,13 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
   let num1 = steps + 0.0;
   let px = i + 0.0, py = j + 0.0;
   let vx = rng.int(10, 20) * 0.1 * direction;                  // Next(10,21)
-  let vy = rng.int(-10, -1) * 0.01;                            // Next(-10,10)
+  let vy = rng.int(-10, 9) * 0.01;                             // Next(-10,10)（曾误 int(-10,-1)=Next(-10,0)）
   let radius = rng.int(0, 4) + 7;
+  if (DBG) console.log(`SWIN dir=${direction} j=${j} steps=${steps} vx=${vx} vy=${vy} r=${radius} p=${rng.vanilla.peek()}`);
+  let swIt = 0;
   while (radius > 0) {
+    if (DBG && swIt < 40) console.log(`SI${swIt} n=${num1} r=${radius} px=${px} py=${py} p=${rng.vanilla.peek()}`);
+    swIt++;
     if (num1 > 0) {
       radius += rng.int(0, 2) - rng.int(0, 2);
       if (radius < 7) radius = 7;
@@ -448,6 +456,7 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
     } else radius -= rng.int(0, 3);
     if (py > gs.rockLevel && num1 > 0) num1 = 0;
     num1--;
+    if (DBG && swIt <= 40) console.log(`SS${swIt} p=${rng.vanilla.peek()}`);
     const x0 = Math.max(0, Math.floor(px - radius * 0.5)), x1 = Math.min(st.w - 1, Math.floor(px + radius * 0.5));
     const y0 = Math.max(0, Math.floor(py - radius * 0.5)), y1 = Math.min(st.h, Math.floor(py + radius * 0.5));
     for (let x = x0; x < x1; x++) {

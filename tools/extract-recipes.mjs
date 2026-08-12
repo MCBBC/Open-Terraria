@@ -309,6 +309,9 @@ for (let i = 0; i < baseCount; i++) {
     tile: r.tile,
     items: [{ id: r.create, stack: r.createStack }],
     groups: [],
+    // 原版反向配方注册后立即置 notDecraftable（Recipe.cs:16608/16632）——
+    // 平台/墙反转配方不进 IsCrafted，微光 decraft 不反它们
+    notDecraftable: true,
   });
 }
 out.push(...reverseOut);

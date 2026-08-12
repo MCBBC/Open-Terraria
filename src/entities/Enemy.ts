@@ -349,6 +349,15 @@ export class Enemy extends Entity {
    *  无玩家时保持现方向（原版 TargetClosest 无目标不重算） */
   seekDirX(player: Player | null): number {
     if (!player) return this.facing;
+    // ⑫-2 aggro 不转身门（NPC.cs:78447-78452 TargetClosest 尾段）：玩家未挥击
+    // （itemAnimation≈useTime）&& aggro<0（潜行）&& 有效距离 > (双方尺寸和/4+800)
+    // && 非 Boss → 保留旧朝向（潜行侧袭不被察觉）；否则正常面向玩家。
+    // ★单人下这就是 aggro 的全部消费位（TargetClosest 的多玩家选距在单人退化）
+    const agg = (player as unknown as { aggro?: number }).aggro ?? 0;
+    if (agg < 0 && player.useTime <= 0 && !this.def.boss) {
+      const eff = Math.hypot(player.cx - this.cx, player.cy - this.cy) - agg;
+      if (eff > (player.w + player.h + this.w + this.h) / 4 + 800) return this.facing;
+    }
     const raw = player.cx > this.cx ? 1 : -1;
     return this.confused ? -raw : raw;
   }

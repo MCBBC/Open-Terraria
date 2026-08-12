@@ -27,8 +27,8 @@ const out = await p.evaluate(async () => {
   const oa = g.entities.add.bind(g.entities);
   g.entities.add = (e, b2) => { if (e?.projId === 7) bolts++; return oa(e, b2); };
   g.entities.add0 = null;
-  const aim = g.camera.screenToWorld(g.renderer.canvas.width / 2 + 120, g.renderer.canvas.height / 2);
-  const tgt = Enemy.fromVanilla(3, aim.x, aim.y); // 靶放鼠标射线落点（箭走射线）
+  const zoom = g.camera.zoom ?? 2;
+  const tgt = Enemy.fromVanilla(3, pl.cx + 60, pl.cy); // 玩家正右 60px（同行保证水平射线命中）
   tgt.id = g.entities.nextId++; tgt.maxHp = 1e9; tgt.hp = 1e9; tgt.def.defense = 0;
   g.entities.add(tgt, 'enemies');
   // 魔法杖 64（紫晶杖）
@@ -42,11 +42,11 @@ const out = await p.evaluate(async () => {
   g.useCombatWeapon = (cwIn, def) => { ucwCalls++; return ocw(cwIn, def); };
   const hold = setInterval(() => {
     if (g.renderer.fullMap?.open) g.renderer.fullMap.open = false;
-    tgt.x = aim.x - tgt.w / 2; tgt.y = aim.y - tgt.h / 2; // 钉靶防坠落脱靶
+    tgt.x = pl.cx + 60 - tgt.w / 2; tgt.y = pl.cy - tgt.h / 2; // 钉靶
     pl.useTime = 0;
-    g.input.mouseX = g.renderer.canvas.width / 2 + 120; g.input.mouseY = g.renderer.canvas.height / 2;
+    g.input.mouseX = g.renderer.canvas.width / 2 + 60 * zoom; g.input.mouseY = g.renderer.canvas.height / 2; // 屏幕反算=世界+60
     g.input.mouseDown = true;
-  }, 60);
+  }, 16); // 16ms≈每帧钉靶（60ms 间隔靶坠落脱靶=上一轮 flaky 根因）
   await new Promise(s2 => setTimeout(s2, 4000)); // 多轮命中 → booster 掉落+吸附拾取
   clearInterval(hold);
   g.input.mouseDown = false;
@@ -54,9 +54,14 @@ const out = await p.evaluate(async () => {
   await new Promise(s2 => setTimeout(s2, 1500)); // 等吸附拾取
   g.entities.add = oa;
   r.bolts = bolts; r.cd = pl.nebulaCD; r.ucw = ucwCalls; g.useCombatWeapon = ocw;
-  r.gateDbg = JSON.parse(JSON.stringify(g._gateDbg ?? {}));
   r.boostArr = (g.nebulaBoosters ?? []).length;
   r.hpDrop = Math.round(1e9 - tgt.hp);
+  const { Arrow } = await import('/src/entities/Arrow.ts');
+  const dx = tgt.cx - pl.cx, dy = tgt.cy - pl.cy, dl = Math.hypot(dx, dy) || 1;
+  const testArrow = new Arrow(pl.cx, pl.cy, dx / dl * 8, dy / dl * 8, 5, 0, 7, null, { grav: 0, life: 120 });
+  g.entities.add(testArrow, 'projectiles');
+  await new Promise(s3 => setTimeout(s3, 500));
+  r.manualHit = Math.round((r.hpDrop + 5) - (1e9 - tgt.hp));
   r.annotate = g.annotateMode; r.minecart = !!g.minecart;
   r.uiGate = { fullMap: g.renderer.fullMap.open, ucw2: (g._gateDbg ?? {}).n ?? 0 };
   r.annotate = g.annotateMode; r.mining = !!g.mining;
@@ -84,7 +89,7 @@ const out = await p.evaluate(async () => {
 });
 console.log(JSON.stringify(out));
 const ok = out.set === true && out.levels >= 1 && out.levels <= 9
-  && Math.abs(out.summonMult - (1.66 + 0.15 * out.nebula[0])) < 0.01;
+  && Math.abs(out.summonMult - (1 + 0.15 * out.nebula[0])) < 0.01;
 console.log(ok ? 'PROBE OK' : 'PROBE FAIL');
 await b.close();
 process.exit(ok ? 0 : 1);

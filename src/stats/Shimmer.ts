@@ -30,6 +30,8 @@
 //     - 小动物（Critter）入微光转化（aiStyle 67 族）、Boss 免微光名单
 //     - 联机同步（NetMessage 145/146 ShimmeredItem/ShimmerEffect）
 import shimmerJson from '../data/vanilla-shimmer.json';
+import { getDecraftingRecipeIndex, recipeAt, RECIPE_GROUP_ITEMS } from '../data/vanillaRecipes';
+import itemValueJson from '../data/vanilla-itemvalue.json';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { viIdFromKey } from '../data/vanillaItemCombat';
 import type { TileStore } from '../world/TileStore';
@@ -113,11 +115,131 @@ export function isItemTransformLocked(vid: number, downedMoonlord: boolean): boo
   return !downedMoonlord && ITEM_POST_MOONLORD.has(vid);
 }
 
-/** Item.CanShimmer（Item.cs:49045-49068）本仓子集：
- *  可转 = 未锁 + (有转化目标 ∨ 钱币)。decraft/makeNPC/特例未移植（GAP） */
-export function canShimmerItem(vid: number, downedMoonlord = false, moonPhase?: number): boolean {
+// ============ decraft（ShimmerTransforms.cs 2026-08-13 完整移植,替换 GAP） ============
+
+/** 解锁门（ShimmerTransforms.UpdateRecipeSets :82-86：RecipeSets.PostSkeletron =
+ *  配方含材料 154(骨头);PostGolem = 含 1101）+ IsRecipeIndexDecraftLocked(:47-62) */
+export function isRecipeIndexDecraftLocked(
+  recipeIndex: number,
+  downedBoss3: boolean,     // NPC.downedBoss3(骷髅王;本仓 flags downed_35/downedSkeletron)
+  downedGolemBoss: boolean, // NPC.downedGolemBoss(本仓 flags downed_245)
+): boolean {
+  if (recipeIndex < 0) return false;
+  const r = recipeAt(recipeIndex);
+  if (!r) return false;
+  if (!downedBoss3 && r.items.some((it) => it.id === 154)) return true;
+  if (!downedGolemBoss && r.items.some((it) => it.id === 1101)) return true;
+  return false;
+}
+
+/** ShimmerTransforms.IsItemDecraftableAndIsDecraftUnlocked（:64-80）：
+ *  等价物(forDecrafting)有配方 + 未锁 + stack ≥ createStack */
+export function isItemDecraftableAndUnlocked(
+  vid: number, stack: number,
+  crimsonWorld: boolean, downedBoss3: boolean, downedGolemBoss: boolean,
+): boolean {
+  const eq = getShimmerEquivalentType(vid, true);
+  const idx = getDecraftingRecipeIndex(eq, crimsonWorld);
+  if (isRecipeIndexDecraftLocked(idx, downedBoss3, downedGolemBoss)) return false;
+  if (idx < 0) return false;
+  const r = recipeAt(idx)!;
+  return Math.floor(stack / r.createStack) > 0;
+}
+
+/** Item.FindDecraftAmount（Item.cs:49063-49071）：stack / createStack(向下取整) */
+export function findDecraftAmount(vid: number, stack: number, crimsonWorld: boolean): number {
+  const idx = getDecraftingRecipeIndex(getShimmerEquivalentType(vid, true), crimsonWorld);
+  if (idx < 0) return -1;
+  return Math.floor(stack / recipeAt(idx)!.createStack);
+}
+
+/** RecipeGroup.DecraftItemId（RecipeGroup.cs:59）：组内**价值最低**物品代表
+ *  （OrderBy(value).First()——等价取组注册序首个,稳定排序）。
+ *  ⚠️ value 表语义:value JSON 只存 SetDefaults case 内显式赋值;**缺表 = 原版
+ *  value 0**（Item.ResetStats :48596 的重置默认）,绝非"未知"。曾误用
+ *  MAX_SAFE_INTEGER 回退 → Wood 组(9 无显式 value=0)被 5215(显式 value)抢位,
+ *  与原版"木配方 decraft 返还普通木材"相悖 */
+const GROUP_DECRAFT_ID = new Map<number, number>();
+export function groupDecraftItemId(groupId: number): number {
+  const hit = GROUP_DECRAFT_ID.get(groupId);
+  if (hit !== undefined) return hit;
+  const items = RECIPE_GROUP_ITEMS[String(groupId)] ?? [];
+  let best = items[0] ?? 0;
+  let bestV = Number.MAX_SAFE_INTEGER;
+  for (const it of items) {
+    const v = (itemValueJson as Record<string, number>)[String(it)] ?? 0; // 缺表=原版 0(ResetStats 默认)
+    if (v < bestV) { bestV = v; best = it; }
+  }
+  GROUP_DECRAFT_ID.set(groupId, best);
+  return best;
+}
+
+/** 材料 → decraft 返还物（WorldItem.cs:1895-1897 IsRecipeGroup ? DecraftItemId : id）：
+ *  材料命中本配方任一 acceptedGroup → 返组代表（groupDecraftItemId） */
+function decraftItemFor(r: NonNullable<ReturnType<typeof recipeAt>>, itemId: number): number {
+  for (const gid of r.groups) {
+    const items = RECIPE_GROUP_ITEMS[String(gid)];
+    if (items && (items as number[]).includes(itemId)) return groupDecraftItemId(gid);
+  }
+  return itemId;
+}
+
+export interface DecraftPile { vid: number; stack: number }
+
+export interface DecraftOutcome {
+  /** 返还垛（配方材料序；单垛 ≤9999，超额拆垛 = 原版逐垛独立 Item.NewItem :1913-1921） */
+  piles: DecraftPile[];
+  /** 原物品消耗量（次数 × createStack，:1927） */
+  consumed: number;
+  /** ≥2 材料 → 掉落物按序号抛撒（requiredItem[1].stack > 0，:1882） */
+  spread: boolean;
+}
+
+/** decraft 返还计算（WorldItem.GetShimmered :1879-1934 纯函数化）：
+ *  无配方 / 次数 0 → null。rand3 语义 = Main.rand.Next(3)，仅 alchemy 配方消费
+ *  （逐单位 1/3 概率蒸发，:1904-1911）；注入以便测试确定性断言 */
+export function decraftOutcome(
+  vid: number, stack: number,
+  crimsonWorld: boolean,
+  rand3: () => number = () => Math.floor(Math.random() * 3),
+): DecraftOutcome | null {
+  const idx = getDecraftingRecipeIndex(getShimmerEquivalentType(vid, true), crimsonWorld);
+  if (idx < 0) return null;
+  const r = recipeAt(idx)!;
+  const times = Math.floor(stack / r.createStack);
+  if (times <= 0) return null;
+  // AddCustomShimmerResult 覆盖表（:1884-1891）替代材料表
+  const entries: Array<{ id: number; stack: number }> = r.shimmer?.length
+    ? r.shimmer.map(([id, st]) => ({ id, stack: st }))
+    : r.items;
+  const piles: DecraftPile[] = [];
+  for (const e of entries) {
+    if (e.id <= 0 || e.stack <= 0) break;      // :1898-1901 requiredItem 空位终止
+    let qty = times * e.stack;
+    if (r.alchemy) {
+      for (let u = qty; u > 0; u--) if (rand3() === 0) qty--;
+    }
+    const target = decraftItemFor(r, e.id);
+    while (qty > 0) {
+      const chunk = Math.min(qty, 9999);       // :1913-1916
+      piles.push({ vid: target, stack: chunk });
+      qty -= chunk;
+    }
+  }
+  return { piles, consumed: times * r.createStack, spread: (r.items[1]?.stack ?? 0) > 0 };
+}
+
+/** Item.CanShimmer（Item.cs:49045-49068）2026-08-13 补 decraft 位（:49056）：
+ *  可转 = 未锁 + (有转化目标 ∨ **可分解且未锁** ∨ 钱币)。
+ *  decraftCtx 缺省 = 不启用 decraft 判定（调用方旧签名兼容） */
+export function canShimmerItem(
+  vid: number, downedMoonlord = false, moonPhase?: number,
+  decraftCtx?: { stack: number; crimsonWorld: boolean; downedBoss3: boolean; downedGolemBoss: boolean },
+): boolean {
   if (isItemTransformLocked(vid, downedMoonlord)) return false;
-  return getTransformToItem(vid, moonPhase) > 0 || COMMON_COIN.has(vid);
+  if (getTransformToItem(vid, moonPhase) > 0 || COMMON_COIN.has(vid)) return true;
+  if (decraftCtx) return isItemDecraftableAndUnlocked(vid, decraftCtx.stack, decraftCtx.crimsonWorld, decraftCtx.downedBoss3, decraftCtx.downedGolemBoss);
+  return false;
 }
 
 /** 钱币→微光化币面额放大（WorldItem.cs:1791-1810）：铜 ×1 / 银 ×100 / 金 ×10000 /

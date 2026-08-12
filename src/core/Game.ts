@@ -3589,16 +3589,6 @@ export class Game implements GameHooks {
     // Player.attackSpeedMult = CapAttackSpeeds 倒数档，Player.cs:28555-28574）
     const cw = heldDef ? combatWeapon(heldDef) : null;
     const cwMelee = cw?.kind === 'melee' ? cw : null;
-    // TEMP-DBG ⑯帧内 gate 打点（定位星云探针 ucw=0 疑案，调毕即删）
-    {
-      const d = this._gateDbg ??= { n: 0, held: 0, useT: 0, cwOk: 0, cwKinds: {} as Record<string, number> };
-      d.n++;
-      if (heldDef) d.held++;
-      if (this.player.useTime === 0) d.useT++;
-      if (cw && cw.kind !== 'melee') d.cwOk++;
-      const k = cw ? cw.kind : 'null';
-      d.cwKinds[k] = (d.cwKinds[k] ?? 0) + 1;
-    }
     if (tool?.type === 'sword' || cwMelee) {
       // ★挥击时长 = useAnimation、复用冷却 = useTime（Player.ItemCheck：itemAnimationMax 与
       // itemTime 分立；1790 件 vi 武器两者不同——此前把 useTime 当动画时长，挥速虚快 35%+）

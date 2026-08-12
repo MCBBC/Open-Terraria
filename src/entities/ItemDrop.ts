@@ -6,8 +6,11 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { ITEM_DEFS } from '../data/items';
 import type { Player } from './Player';
 import {
-  canShimmerItem, coinLuckAmount, getTransformToItem, internalIdOfVanilla, vanillaIdOfItem,
+  canShimmerItem, coinLuckAmount, getTransformToItem,
+  decraftOutcome, isItemDecraftableAndUnlocked,
+  internalIdOfVanilla, vanillaIdOfItem,
 } from '../stats/Shimmer';
+import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 
 export class ItemDrop extends Entity {
   w = 12; h = 12;
@@ -157,7 +160,15 @@ export class ItemDrop extends Entity {
     const vid = vanillaIdOfItem(this.itemId);
     const inShimmer = st.inBounds(tx, ty)
       && st.liquid[st.idx(tx, ty)] > 0 && st.liquidType[st.idx(tx, ty)] === 4;
-    if (inShimmer && canShimmerItem(vid, false, game.world.clock.moonPhase)) {
+    const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
+    // :49056 decraft 位:有配方可分解的物品也进入微光(原先只有转化目标才进)
+    const decraftCtx = {
+      stack: this.stack,
+      crimsonWorld: !!game.world.crimson,
+      downedBoss3: !!(flags['downed_35'] || flags.downedSkeletron),
+      downedGolemBoss: !!flags['downed_245'],
+    };
+    if (inShimmer && canShimmerItem(vid, false, game.world.clock.moonPhase, decraftCtx)) {
       this.shimmerTime += 0.01;
       if (this.shimmerTime > 0.9) {
         this.shimmerTime = 0.9;
@@ -168,12 +179,12 @@ export class ItemDrop extends Entity {
     }
   }
 
-  /** WorldItem.GetShimmered（:1781-1931）本仓子集：钱币 → coinLuck（Luck.ts 数值位
-   *  接通）；ShimmerTransformToItem → 换为目标物品原堆叠。decraft/makeNPC/特例 4986、
-   *  560 登记未移植（src/stats/Shimmer.ts GAP 清单） */
+  /** WorldItem.GetShimmered（:1781-1931）分支顺序 1:1：钱币(:1790) →
+   *  ShimmerTransformToItem(:1812) → decraft(:1878) → makeNPC/特例 4986、560
+   *  登记未移植（Shimmer.ts GAP 清单）。**decraft 必须排在钱币/转化之后**：
+   *  钱币 71-74 与火炬 8 等都有 IsCrafted 配方，放前面会抢走转化/coinLuck 分支 */
   private getShimmered(game: GameHooks): void {
     const vid = vanillaIdOfItem(this.itemId);
-    const target = getTransformToItem(vid, game.world.clock.moonPhase);   // 3461 月相砖动态分支
     if (vid === 71 || vid === 72 || vid === 73 || vid === 74) {
       // 钱币 → 微光化币（:1791-1810）：面额放大后 AddCoinLuck（距离 <1000px 才累计，
       // LuckState.addCoinLuck 1:1），物品消失
@@ -185,6 +196,7 @@ export class ItemDrop extends Entity {
       this.dead = true;
       return;
     }
+    const target = getTransformToItem(vid, game.world.clock.moonPhase);   // 3461 月相砖动态分支
     if (target > 0) {
       const iid = internalIdOfVanilla(target);
       if (iid >= 0) {
@@ -193,8 +205,44 @@ export class ItemDrop extends Entity {
         this.shimmerTime = 1;
         this.vx *= 0.1; this.vy *= 0.1;
         game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+        return;
       }
     }
+    this.tryDecraft(game, vid);   // :1878 else-if 链末端
+  }
+
+  /** WorldItem.GetShimmered decraft 分支（:1878-1946）1:1：
+   *  纯计算走 Shimmer.decraftOutcome（材料序返还；组材料【替换】为组代表
+   *  RecipeGroup.DecraftItemId——非追加；customShimmerResults 覆盖表；炼金逐单位
+   *  1/3 蒸发；单垛 ≤9999）。此处仅负责逐垛 spawn（shimmered 上浮 + ≥2 材料
+   *  按序号散射）与扣减 */
+  private tryDecraft(game: GameHooks, vid: number): boolean {
+    const flags = (game.world as unknown as { flags: Record<string, boolean> }).flags ?? {};
+    const crimsonWorld = !!game.world.crimson;
+    const downedBoss3 = !!(flags['downed_35'] || flags.downedSkeletron);
+    const downedGolemBoss = !!flags['downed_245'];
+    // :1878 入口 = IsItemDecraftableAndIsDecraftUnlocked（配方存在 ∧ 未锁 ∧ ≥1 次）
+    if (!isItemDecraftableAndUnlocked(vid, this.stack, crimsonWorld, downedBoss3, downedGolemBoss)) {
+      return false;
+    }
+    const outcome = decraftOutcome(vid, this.stack, crimsonWorld);
+    if (!outcome) return false;   // 空垛不回退：炼金全蒸发时原版照扣 stack（:1879-1933）
+    outcome.piles.forEach((p, k) => {
+      const key = VANILLA_ITEM_KEY_BY_ID[p.vid];
+      if (!key) return;
+      const n = k + 1;   // 原版 num7 自 1 起（:1881/1929-1936）
+      let vx = this.vx * 0.1;
+      if (outcome.spread) vx = n * (1 + n * 0.05) * (n % 2 === 0 ? -1 : 1);
+      const d = game.spawnDrop(this.cx, this.cy, key, p.stack, vx, this.vy * 0.1);
+      if (!d) return;
+      d.shimmered = true;   // :1924 上浮漂浮
+      d.shimmerTime = 1;    // :1923
+    });
+    this.stack -= outcome.consumed;              // :1927 stack -= 次数×createStack
+    if (this.stack <= 0) { this.stack = 0; this.dead = true; }
+    else this.shimmerTime = 1;                   // :1936 剩余 stack 保留并重置浸入进度
+    game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+    return true;
   }
 
   inWater = false;

@@ -126,6 +126,17 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
   runCorruptionPass(st, rng, gs);
   writeFileSync('/tmp/js-crdump.txt', __crDump());
+  {
+    const lines: string[] = [];
+    for (let gx = 880; gx < 1300; gx++) {
+      for (let gy = 240; gy < 660; gy++) {
+        const gi = st.idx(gx, gy);
+        const sheet = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? 0;
+        if (sheet !== 0 || st.flags[gi] || st.wall[gi] !== 0) lines.push(`${gx} ${gy} ${sheet} ${st.flags[gi]} ${st.wall[gi]}`);
+      }
+    }
+    writeFileSync(`/tmp/js-grid-${seedText.replace(/[^A-Za-z0-9]/g, '_')}.txt`, `${lines.join('\n')}\n`);
+  }
   snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
