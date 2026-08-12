@@ -1518,6 +1518,27 @@ export class Renderer {
         const pad = grounded ? this.spriteBottomPad(r, `npc${e.vanillaId}:f${frameIdx}`) : 0;
         const anchorY = grounded ? -r.sh + pad : -r.sh / 2;
         const eocOff = e.vanillaId === 4 ? (frameIdx < 3 ? 23 : 30) : 0;
+        // ---- 冲刺残影（Main.cs:25469 EoC：ai[1]≥4 且 ai[0]==3 冲刺态 → 沿 oldPos 画
+        //      9 层鬼影，每层 RGBA × 0.5×(10−i)/20（越旧越淡），同一帧/旋转/镜像，
+        //      锚点同本体（中心+eocOff）。本体先画在变换内→此处插在本体前 = 鬼影在身后。
+        //      门条件近似为 dashing && phase≥2（原版 ai[1] 计连冲次数 ≥4 档）----
+        if (e.vanillaId === 4 && e.dashing && e.phase >= 2) {
+          for (let i = 1; i < 10; i++) {
+            const depth = e.historyDepth();
+            if (i >= depth) break;
+            const ga = (10 - i) / 40;   // 0.5 × (10-i)/20
+            if (ga <= 0.01) continue;
+            ctx.save();
+            ctx.translate(e.histXAt(i) + e.w / 2, e.histYAt(i) + e.h / 2);
+            ctx.rotate(e.visAngle);
+            ctx.scale(scale, scale);
+            if (!rotationDriven && e.facing > 0) ctx.scale(-1, 1);
+            ctx.globalAlpha = ga * (1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255);
+            ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh / 2 + eocOff, r.sw, r.sh);
+            ctx.restore();
+          }
+          ctx.globalAlpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+        }
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, anchorY + eocOff, r.sw, r.sh);
         // 原版 color 二次绘制（Main.cs:24527 + NPC.GetColor L94903）：color≠default 时用
         // 同贴图再画一遍、逐像素乘 color（XNA SpriteBatch 天生贴轮廓）；

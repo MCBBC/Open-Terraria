@@ -255,7 +255,7 @@ function exportTexFixes() {
 }
 
 function saveGameCompat(g: Game): string {
-  return saveGame(g.world, g.player, (flow as FlowHandle & { playStartNow: number }).playStartNow, g.townNpcsForSave());
+  return saveGame(g.world, g.player, (flow as FlowHandle & { playStartNow: number }).playStartNow, g.townNpcsForSave(), g.eventsForSave());
 }
 
 // 暴露 tile/key 常量给调试控制台

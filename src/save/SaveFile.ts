@@ -72,9 +72,9 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     miscDyes: player.inv.miscDyes,
     loadouts: player.inv.loadouts,
     currentLoadout: player.inv.currentLoadout,
-    buffs: player.buffs.toSave(),       // buffType+buffTime 槽（PL:53913-53925）
-    taxMoney: player.taxMoney,          // PL:53839
-    deathsPve: player.deathsPve,        // PL:53840
+    buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
+    taxMoney: player.taxMoney ?? 0,         // PL:53839
+    deathsPve: player.deathsPve ?? 0,       // PL:53840
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
 }

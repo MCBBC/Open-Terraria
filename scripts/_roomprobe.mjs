@@ -504,16 +504,17 @@ try {
         g.net.tick();
       });
       const bPos = await pageB.evaluate(() => ({ x: window.__swGame.player.cx, y: window.__swGame.player.cy }));
-      // 房主在 B 左侧 240px 处发射 hostile 弹（projId 9=EyeLaser，直飞 grav=0）朝 B 飞行
+      // 房主直接在 B 身上生成 hostile 弹（projId 9=EyeLaser，grav=0 微速漂移 vx=0.5）：
+      // 零飞行 = 免地形干扰的确定性重叠；微速 = 每 2-4 tick 触发差分快照持续刷新傀儡
       await pageA.evaluate(async (pos) => {
-        await window.__swFlow.spawnHostileProj(pos.x - 240, pos.y, 3, 0, 15, 9, 0);
+        await window.__swFlow.spawnHostileProj(pos.x, pos.y, 0.5, 0, 15, 9, 0);
         const g = window.__swGame;
         for (let i = 0; i < 90; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); } // 广播 msg27（带 bit7）
       }, bPos);
-      // B 泵循环：傀儡到达 + netPuppetProjContact 本地结算（240px @3px/tick = 80 tick）
+      // B 泵循环：傀儡到达 + netPuppetProjContact 本地结算
       await pageB.evaluate(async () => {
         const g = window.__swGame;
-        for (let i = 0; i < 150; i++) {
+        for (let i = 0; i < 90; i++) {
           g.fixedUpdate(1 / 60);
           g.postUpdate();
           if (i % 10 === 0) await new Promise((r) => setTimeout(r, 30));

@@ -5,6 +5,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { ITEM_BY_KEY } from '../src/data/items';
 import { T, W } from '../src/data/tiles';
+import { BUFF_DEFS, BuffType } from '../src/stats/Buffs';
 
 describe('自有存档格式', () => {
   it('RLE 编解码往返一致', () => {
@@ -89,4 +90,57 @@ describe('自有存档格式', () => {
     // 大世界规则地形应在数百 KB 量级（base64 会膨胀 ~1.33x）
     expect(json.length).toBeLessThan(8 * 1024 * 1024);
   });
+
+  it('存档对齐批(2026-08-12):npcs/buffs/税金/死亡计数/血月日月相/moonType/箱锁 往返', () => {
+    const world = new World(64, 32, 42, '测试');
+    world.clock.bloodMoon = true;
+    world.clock.moonPhase = 5;
+    world.moonType = 3;
+    world.invasionType = 1; world.invasionSize = 80; world.invasionSizeStart = 80;
+    world.invasionX = 100; world.invasionDelay = 3600;
+    world.altarCount = 2;
+    world.chests.push({ x: 5, y: 5, locked: true, items: [null] });
+    world.pendingTownNpcs = [
+      { key: 'merchant', x: 800, y: 400, home: [10, 8], givenName: '阿三' },
+      { key: 'nurse', x: 900, y: 400, home: null },
+    ];
+    const player = new Player(100, 100, new Inventory());
+    player.taxMoney = 12345;
+    player.deathsPve = 7;
+    player.buffs.apply(/* Ironskin */ 1, 120);
+    player.buffs.apply(/* Campfire=87 号光环型 buff,在 NO_SAVE 名单 → 不落盘 */ 5, 99);
+
+    const npcs = world.pendingTownNpcs.slice();
+    const back = loadSave(saveGame(world, player, 0, npcs));
+    // 世界态
+    expect(back.world.clock.bloodMoon).toBe(true);
+    expect(back.world.clock.moonPhase).toBe(5);
+    expect(back.world.moonType).toBe(3);
+    expect(back.world.invasionType).toBe(1);
+    expect(back.world.invasionSizeStart).toBe(80);
+    expect(back.world.altarCount).toBe(2);
+    expect(back.world.chests[0].locked).toBe(true);
+    // 城镇 NPC 段(NPC 段 WF:1703-1750)
+    expect(back.world.pendingTownNpcs).toHaveLength(2);
+    expect(back.world.pendingTownNpcs![0].givenName).toBe('阿三');
+    expect(back.world.pendingTownNpcs![1].home).toBeNull();
+    // 玩家态
+    expect(back.player.taxMoney).toBe(12345);
+    expect(back.player.deathsPve).toBe(7);
+    expect(back.player.buffs).toEqual([[5, 120]]);   // Ironskin→vanilla 5;Campfire 87 被过滤
+  });
+
+  it('BuffState.toSave/applySaved:buffNoSave 过滤(Main.cs:8896-8990)+未知 id 容忍', () => {
+    const player = new Player(100, 100, new Inventory());
+    player.buffs.applySaved([[26, 600], [999, 60], [87, 30]]); // 饱腹(26 可存)/未知/光环 87
+    // vanilla 26 → 本仓 WellFed(经 BUFF_DEFS 反查,不硬编码枚举值)
+    const wellFed = (Object.keys(BUFF_DEFS) as unknown as BuffType[])
+      .find((t) => BUFF_DEFS[t].vanillaBuff === 26)!;
+    expect(player.buffs.has(wellFed)).toBe(true);
+    const saved = player.buffs.toSave();
+    expect(saved.some(([v]) => v === 87)).toBe(false);   // 87 在 NO_SAVE 名单
+    expect(saved.some(([v]) => v === 999)).toBe(false);  // 未知 id 无 BUFF_DEFS 条目
+    expect(saved.some(([v]) => v === 26)).toBe(true);
+  });
+
 });

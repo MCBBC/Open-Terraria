@@ -946,8 +946,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       treeStyle: wld.treeStyle,
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
       crimson: wld.isCrimson,
+      moonType: wld.moonType,
     },
-    clock: { timeOfDay, dayCount: 1 },
+    clock: { timeOfDay, dayCount: 1,
+      // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）
+      bloodMoon: wld.bloodMoon, eclipse: wld.eclipse, moonPhase: wld.moonPhase },
     weather: wld.weather ? {
       raining: wld.weather.raining,
       rainTime: wld.weather.rainTime,

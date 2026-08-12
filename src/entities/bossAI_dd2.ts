@@ -123,6 +123,25 @@ const angleTowards = (cur: number, tgt: number, maxStep: number): number => {
 // DD2Event 事件依赖占位（Game 未接线 → 全部按"无事件"语义:不出怪/不召骷髅/
 // 胜负演出不触发事件收场）。Game 接线示例：
 //   DD2_EVENT_HOOKS.spawnMonsterFromGate = (g, x, y, left) => ...
+//
+// ★ 事件本体接线登记（2026-08-12 收尾批精确登记，未实现）——依赖清单：
+//   1. 状态机宿主：Terraria.GameContent.Events/DD2Event.cs 全文（_downedGoblins、
+//      OngoingDifficulty、LaneSpawnRate/UpdateTime/UpdateSpawns/SpawnMonsterFromGate
+//      :556、RaiseGoblins :732、FindArenaHitbox、StopInvasion/ReportLoss）。
+//      本仓落位建议 src/world/OldOnesArmy.ts（状态机/波次表已有：enemiesForWave/
+//      pointsWorth/checkProgress/updateTime/startInvasion/stopInvasion 全 1:1），
+//      缺的是"以太水晶放置物 612 站上水晶 548 → startInvasion"的触发链与
+//      Game 每 tick 的 updateTime/checkProgress 驱动。
+//   2. 触发链：物品 3827/3828/3829（三档魔杖）放 Stand 466（ElderCrystalStand，ItemCheck 系）+
+//      Stand 上交互 → 放水晶 NPC 548（ETowerCrystalCheck，Projectile 660）→
+//      事件 30t 后开波（DD2Event.cs TimeCRotate 到点开打）。
+//   3. 九钩子接线位：Game.ts 每 tick 驱动 + 下方 DD2_EVENT_HOOKS 赋值：
+//      laneSpawnRate/enemySpawningOnHold/spawnMonsterFromGate（106 出怪节拍）、
+//      raiseGoblins/canRaiseGoblinsHere（109 召骷髅）、stopInvasion/reportLoss
+//      （105 胜负收场）、findArenaHitbox（105）、difficulty（DD2 难度档）。
+//   4. 产出收益：酒保 579 敷援链（docs/spawn-parity-gaps.md 登记）、
+//      ShouldDropCrystals 3822（NPCLoot :80084 已读 DD2Event 位）、
+//      readyForTier2/Tier3（OldOnesArmy.ts 已有）。
 // ---------------------------------------------------------------------------
 export const DD2_EVENT_HOOKS = {
   /** DD2Event.LaneSpawnRate（默认 60,:59） */

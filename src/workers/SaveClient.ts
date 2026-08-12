@@ -46,6 +46,8 @@ export class SaveClient {
       treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
       crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
       timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
+      bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
+      moonPhase: world.clock.moonPhase, moonType: world.moonType,
       chests: world.chests, signs: world.signs, flags: world.flags,
       weather: weatherToSave(world.weather),
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -67,6 +69,9 @@ export class SaveClient {
       miscDyes: player.inv.miscDyes,
       loadouts: player.inv.loadouts,
       currentLoadout: player.inv.currentLoadout,
+      buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
+      taxMoney: player.taxMoney ?? 0,         // PL:53839
+      deathsPve: player.deathsPve ?? 0,       // PL:53840
     };
     // ★ 不 transfer:st.* 是活数组,transfer 会 detach 游戏状态;结构化克隆在发送线程
     // 完成(一次 memcpy),游戏内后续写入不影响已快照的副本

@@ -361,10 +361,10 @@ export class Player extends Entity {
   get maxMana(): number {
     return this.baseMaxMana + this.equipStats.mana + this.buffs.manaMaxBonus; // 星力手环族等 + 水晶球预见 +20（:11481)
   }
-  /** 随从/鞭伤害乘区（GetWeaponDamageMultiplier summon → minionDamage 链：
-   *  装备 magic 系 + buff 通用（damageMult('magic') 已含）× SUMMON_GEAR/SET 加算乘区） */
+  /** 随从/鞭伤害乘区（GetWeaponDamageMultiplier summon → minionDamage 链：独立第四链，
+   *  不再复用 magic——MagicPower 等 magic-only 来源不吃召唤；四系通用来源照常） */
   get summonDamageMult(): number {
-    return this.damageMult('magic') * (1 + this.equipStats.minionDmg);
+    return this.damageMult('summon');
   }
   /** 随从上限（Player.cs:9855+ buff + ApplyEquipFunctional 散件/配饰 + 套装层） */
   get maxMinions(): number {
@@ -383,17 +383,30 @@ export class Player extends Entity {
   get attackSpeedMult(): number {
     return (1 + this.equipStats.meleeSpeed) * (this.hasFeralClaws ? 2 : 1)
       * (this.buffs.has(BuffType.Tipsy) ? 1.1 : 1)
+
       * (1 + this.buffs.wellFedMeleeSpeed);   // 食物近战速 +5/7.5/10%（:11528+）
   }
   /** 近战伤害加成（猛爪手套 +5） */
   get meleeDamageBonus(): number {
     return this.hasFeralClaws ? 5 : 0;
   }
-  /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；melee/ranged/magic 分道） */
-  damageMult(kind: 'melee' | 'ranged' | 'magic'): number {
+  /** 全系伤害加成装备聚合（ApplyEquipFunctional dmgX 段；四系分道——summon 是独立
+   *  minionDamage 链：装备走 SUMMON_GEAR/SET，不含 magic-only 来源） */
+  damageMult(kind: 'melee' | 'ranged' | 'magic' | 'summon'): number {
     const st = this.equipStats;
+    if (kind === 'summon') {
+      // minionDamage 链（Player.cs GetWeaponDamageMultiplier summon 分支）：仅四系通用
+      // 来源（怒气/食物）+ 召唤装备链；MagicPower/Archery 等 class 来源不吃
+      let m = 1 + st.minionDmg;
+      if (this.buffs.has(BuffType.Rage)) m += 0.1;
+      m += this.buffs.wellFedDamage;
+      return m;
+    }
     let m = 1 + (kind === 'melee' ? st.dmgMelee : kind === 'ranged' ? st.dmgRanged : st.dmgMagic);
-    if (kind === 'magic') m += this.buffs.magicDmgBonus;   // MagicPower +20%（:9669）
+    if (kind === 'magic') {
+      m += this.buffs.magicDmgBonus;            // MagicPower +20%（:9669）
+      m *= this.buffs.manaSickMagicMult;        // 魔力眩晕最高 -25% 线性恢复（:10003/:25616）
+    }
     if (kind === 'ranged') m *= this.buffs.arrowDmgMult;   // Archery ×1.1（:9712,ranged 近义）
     // R1 药水：怒气(117)全系 +10%（:9947）；醉酒(25)近战 +10%（:11513）
     if (this.buffs.has(BuffType.Rage)) m += 0.1;

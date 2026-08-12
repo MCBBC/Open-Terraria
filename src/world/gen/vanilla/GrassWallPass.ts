@@ -29,7 +29,7 @@ const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
 
 /** countDirtTiles/nextDirtCount（cs:9618-9653）1:1：无实心且墙为泥土墙(2)/洞穴墙
  *  (59) 的连通腔计数；遇冰块(147/161)或 {244,83,3,187,216} 墙直接封顶 */
-function countDirtTiles(st: TileStore, sx: number, sy: number): number {
+export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
   let count = 0;
   const seen = new Set<number>();
   const stack: Array<[number, number]> = [[sx, sy]];

@@ -1918,6 +1918,9 @@ export class UI {
     else if (where === 'chest') tex = 'Inventory_Back5';
     const content = this.slotContent(where, i);
     if (content?.favorited) tex = 'Inventory_Back10';
+    // 权威重绘：清掉残留的 glow 色层（面板 display:none 期间动画被 cancel 而非
+    // end——overlay 会以基础样式（不透明）卡死在槽上，重开面板即一排色块）
+    slotEl.querySelector('.sw-glow-overlay')?.remove();
     slotEl.style.backgroundImage = `url(sprites/vanilla/${tex}.png)`;
     if (tint) slotEl.style.setProperty('--slot-tint', tint);
     else slotEl.style.removeProperty('--slot-tint');
@@ -2232,7 +2235,9 @@ export class UI {
     if (!focusR) return;
     for (const req of focusR.items) {
       const chip = el('div', 'sw-slot');
-      chip.style.cssText += 'width:38px; height:38px;';
+      // context 22 槽底 = Inventory_Back4（ItemSlot.cs:2101-2123）
+      chip.style.cssText += 'width:38px; height:38px;'
+        + 'background-image:url(sprites/vanilla-ui/Inventory_Back4.png);';
       const k = ingredientKey(req.id < 1000000 ? req.id : (RECIPE_GROUP_ITEMS[String(reqIdShift(req.id))]?.[0] ?? req.id));
       if (k) {
         const img = el('img') as HTMLImageElement;

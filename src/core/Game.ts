@@ -51,7 +51,7 @@ import { TileStore } from '../world/TileStore';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
   attachDevices, geyserTrap, switchMB, switchFountain, switchMonolith,
-  musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxBroadcast,
+  musicBoxRecordItem, musicBoxDropItemOf, fountainDropItemOf, announcementBoxMessage,
   MUSIC_BOX_EMPTY_VID,
 } from '../world/wiring/devices';
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, type PartyState } from '../world/wiring/party';
@@ -2568,6 +2568,7 @@ export class Game implements GameHooks {
       const f = itemFuncOfVid(+m[1]);
       if (f?.healMana && f.consumable && !f.createTile) {
         this.player.mana = Math.min(this.player.maxMana, this.player.mana + f.healMana);
+        this.player.buffs.apply(BuffType.ManaSickness, 5); // 魔力眩晕（300t/瓶）
         inv.removeAt(i, 1);
         this.sfx.play('drink');
         this.cb.onInventoryChanged();
@@ -3144,6 +3145,7 @@ export class Game implements GameHooks {
           }
           if (ff.healMana) {
             this.player.mana = Math.min(this.player.maxMana, this.player.mana + ff.healMana);
+            this.player.buffs.apply(BuffType.ManaSickness, 5); // 魔力眩晕（300t/瓶,max 合并）
           }
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.player.useTime = 60;
@@ -3225,13 +3227,18 @@ export class Game implements GameHooks {
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
       const px = this.player.cx + Math.cos(ang) * 14;
       const py = this.player.cy - 4 + Math.sin(ang) * 14;
-      // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）
+      // 穿透取原版 penetrate（手里剑 4；-1 无限上限 6）。
+      // ★伤害对账：1.4.4+ 投掷系并入 melee（Item 277 手里剑 SetDefaults melee=true）——
+      // 乘区=近战链×词缀+armorPen（此前裸 tc.damage 完全无乘区）
+      const psT = this.heldPrefixStat();
+      const dmgT = Math.max(1, Math.round(tc.damage * (psT?.dmg ?? 1) * this.player.damageMult('melee'))
+        + this.player.equipStats.armorPen);
       let pen = projectileData(tc.shoot)?.penetrate ?? 1;
       if (pen < 0) pen = 6;
       pen = Math.max(1, Math.min(pen, 6));
       this.entities.add(new Arrow(px, py,
         Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
-        tc.damage, c?.knockBack ?? 0, tc.shoot, heldDef.key, { pierce: pen }), 'projectiles');
+        dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen }), 'projectiles');
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
       this.sfx.play('throw');
@@ -5783,11 +5790,10 @@ export class Game implements GameHooks {
         else this.sfx.play(n as SfxName);
       },
       // 广播盒（Wiring.cs:1177-1230 1:1）：Sign.ReadSign(anchor, CreateIfMissing:false)
-      // ——锚点精确匹配（原版按锚点格查 Main.sign，非重叠扫描），无登记/空文本静默；
-      // 命中 → NewTextMultiline(text, pink, 460)（色值/折行宽度见 announcementBoxBroadcast）
+      // ——锚点精确匹配，无登记/空文本静默；命中 → NewTextMultiline(text, pink, 460)
+      // （全链在 announcementBoxMessage，色值/折行宽度同源）
       announce: (x: number, y: number) => {
-        const sign = this.world.signs.find((s) => s.x === x && s.y === y);
-        const msg = announcementBoxBroadcast(sign?.text);
+        const msg = announcementBoxMessage(this.world.signs, x, y);
         if (msg) this.newText(msg.text, msg.r, msg.g, msg.b, msg.width);
       },
       // 派对纪念碑（Wiring.cs:2037-2039 → BirthdayParty.ToggleManualParty）

@@ -84,7 +84,7 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!flag && placed.length < 50) {
         shroomPatch(st, rng, gs, x, y);
         for (let k = 0; k < 5; k++) { shroomPatch(st, rng, gs, x + rng.int(-40, 40), y + rng.int(-40, 40)); }
-        placed.push([x, y]); console.log(`mushPlaceJS ${x},${y}`);
+        placed.push([x, y]);
       }
       tries++;
       if (tries > Math.floor(w / 2)) break;
@@ -137,7 +137,7 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
 
 /** ShroomPatch（cs:80540）1:1：泥 blob 随机游走，上空挖空、墙→80、尾端 2 支泥 runner */
 function shroomPatch(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
-  console.log(`patchCallJS ${i},${j}`);
+
   const van = st.w / 4200;
   let num = rng.int(80, 99);                       // Next(80,100)
   let num2 = rng.int(20, 25) * van;                // Next(20,26) × 缩放

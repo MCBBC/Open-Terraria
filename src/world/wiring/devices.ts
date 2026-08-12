@@ -207,6 +207,17 @@ export function announcementBoxBroadcast(signText: string | null | undefined): {
   return { text: signText, r: 255, g: 105, b: 180, width: 460 };
 }
 
+/** 广播盒触发全链（Wiring.cs:1185-1217）：Sign.ReadSign(anchor, CreateIfMissing:false)
+ *  ——按锚点精确查 Main.sign 登记（Sign.cs:36-44 逐项比对 x/y），无登记/空白文本
+ *  静默（:1208-1211 return）；命中 → 粉色多行公告（NewTextMultiline） */
+export function announcementBoxMessage(
+  signs: ReadonlyArray<{ x: number; y: number; text: string }>,
+  x: number, y: number,
+): { text: string; r: number; g: number; b: number; width: number } | null {
+  const sign = signs.find((s) => s.x === x && s.y === y);
+  return announcementBoxBroadcast(sign?.text);
+}
+
 /** 天塔柱类型（SceneMetrics.cs:524-541）：410=style(frameX/36, 0星璇/1星云/2星尘/3耀斑)、
  *  509=4 月总；-1 = 关。480 血月柱走 bloodMoonMonolithOf。
  *  【依赖登记】657 回声/658 微光/720 CRT/721 复古/725 黑白/733 收音机柱的屏幕滤镜未接入 */

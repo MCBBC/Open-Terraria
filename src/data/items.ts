@@ -768,13 +768,18 @@ for (const [idStr, m] of Object.entries(_vim)) {
 
 // ---- 音乐盒唱片全量 101 曲（Item.cs DefaultToMusicBox：createTile=139、
 // placeStyle=曲目 style、accessory；style 表 = WorldGen.GetItemDrop_MusicBoxes
-// :43138-43366 逆表）。6146 静音盒无素材不在 vanilla.json，单独注册。
+// :43138-43366 逆表）。6145 彩虹巨石/6146 静音盒无素材不在 vanilla.json，单独注册。
 // 放置帧走 FurnitureStyle case 139（frameY = style*36）；录音变身链见
 // world/wiring/devices.ts musicBoxRecordItem（Player.cs:15053） ----
-item({ key: 'vi_6146_MusicBoxSilence', name: '', maxStack: 1, value: 100000, tile: 'v_139_musicboxes', placeStyle: 100 });
+const MB_NO_SPRITE: Record<number, number> = { 6145: 99, 6146: 100 };
+for (const [mbVid, mbStyle] of Object.entries(MB_NO_SPRITE)) {
+  const mbKey = `vi_${mbVid}_MusicBox${Number(mbVid) === 6146 ? 'Silence' : 'RainbowBoulder'}`;
+  VANILLA_ITEM_KEY_BY_ID[Number(mbVid)] = mbKey; // 掉落/录音链按 vid 反查
+  item({ key: mbKey, name: '', maxStack: 1, value: 100000, tile: 'v_139_musicboxes', placeStyle: mbStyle });
+}
 for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
   const mbKey = VANILLA_ITEM_KEY_BY_ID[MUSIC_BOX_ITEM_BY_STYLE[mbStyle]];
-  if (mbKey === undefined) continue; // vanilla.json 缺素材的唱片不注册（放置链用不到）
+  if (mbKey === undefined) continue; // 6145/6146 无素材，上方单独注册
   const mbDef = ITEM_DEFS[byKey[mbKey]];
   if (!mbDef) continue;
   mbDef.tile = 'v_139_musicboxes';

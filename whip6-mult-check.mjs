@@ -19,6 +19,20 @@ const out = await p.evaluate(async () => {
   const r = {};
   r.rangedMult = Math.round(g.player.damageMult('ranged') * 100) / 100; // 1.15
   r.summonMult = Math.round(g.player.summonDamageMult * 100) / 100;     // 仍 1.0
+  // MagicPower(+20% magic-only) 不得污染召唤链（旧公式 summon=magic×… 会得 1.2）
+  g.player.buffs.apply(14, 10);  // BuffType.MagicPower=14
+  r.magicMult = Math.round(g.player.damageMult('magic') * 100) / 100;   // 1.2
+  r.summonMultWithMagicBuff = Math.round(g.player.summonDamageMult * 100) / 100; // 仍 1.0
+  g.player.buffs.remove(14);
+  // Rage(+10% 四系) 应进召唤链
+  g.player.buffs.apply(40, 10);  // BuffType.Rage=40（vanillaBuff 117=原版 Wrath 药水）
+  r.summonMultWithRage = Math.round(g.player.summonDamageMult * 100) / 100; // 1.1
+  g.player.buffs.remove(40);
+  // 魔力眩晕(69)：满档 magic ×0.75，召唤链不受影响
+  g.player.buffs.apply(69, 5);
+  r.magicMultManaSick = Math.round(g.player.damageMult('magic') * 100) / 100; // 0.75
+  r.summonMultManaSick = Math.round(g.player.summonDamageMult * 100) / 100;   // 1.0
+  g.player.buffs.remove(69);
   // 靶 + 随从（基伤 10）
   const tgt = Enemy.fromVanilla(3, g.player.cx + 150, g.player.cy);
   tgt.id = g.entities.nextId++;
@@ -32,7 +46,10 @@ const out = await p.evaluate(async () => {
   return r;
 });
 console.log(JSON.stringify(out));
-const ok = Math.abs(out.rangedMult - 1.15) < 0.01 && Math.abs(out.summonMult - 1) < 0.01 && out.hpDrop === 20;  // 500ms=2 跳×基伤10（修复前=24）
+const ok = Math.abs(out.rangedMult - 1.15) < 0.01 && Math.abs(out.summonMult - 1) < 0.01 && out.hpDrop === 20
+  && Math.abs(out.magicMult - 1.2) < 0.01 && Math.abs(out.summonMultWithMagicBuff - 1) < 0.01
+  && Math.abs(out.summonMultWithRage - 1.1) < 0.01
+  && Math.abs(out.magicMultManaSick - 0.75) < 0.02 && Math.abs(out.summonMultManaSick - 1) < 0.01;  // 500ms=2 跳×基伤10（修复前=24）
 console.log(ok ? 'PROBE OK' : 'PROBE FAIL');
 await b.close();
 process.exit(ok ? 0 : 1);

@@ -7,29 +7,24 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { tileRunner } from './TileRunner';
-import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { T, TILE_BY_KEY } from '../../../data/tiles';
 
 /** 单深度带放矿：count 次尝试，y∈[yMin,yMax)，strength/steps 各自区间 */
-let bandIdxJS = 0;
 function band(
   st: TileStore, rng: RNG, gs: GenState,
   count: number, yMin: number, yMax: number,
   type: number, s: [number, number], steps: [number, number],
 ) {
-  const bid = bandIdxJS++;
   for (let i = 0; i < count; i++) {
     const x = rng.int(0, st.w - 1);              // Next(0, maxTilesX)
     const y = rng.int(Math.max(0, yMin), yMax - 1); // Next(yMin, yMax)
-    const s0 = rng.int(s[0], s[1]), st0 = rng.int(steps[0], steps[1]);
-    if (shinySeqJS < 320) console.log(`oreRJS#${shinySeqJS} ${x},${y} s=${s0} st=${st0} pre=${rng.vanilla.peek()}`);
-    shinySeqJS++;
-    tileRunner(st, rng, gs, x, y, { strength: s0, steps: st0, type, addTile: false });
-    if (shinySeqJS <= 320) console.log(`oreRdJS#${shinySeqJS - 1} post=${rng.vanilla.peek()}`);
+    tileRunner(st, rng, gs, x, y, {
+      strength: rng.int(s[0], s[1]), steps: rng.int(steps[0], steps[1]),
+      type, addTile: false,
+    });
   }
-  console.log(`oreBandJS ${bid} n=${count} peek=${rng.vanilla.peek()}`);
 }
 
-let shinySeqJS = 0;
 const _origInt = null;
 export function runShiniesPass(st: TileStore, rng: RNG, gs: GenState): void {
   const area = st.w * st.h;

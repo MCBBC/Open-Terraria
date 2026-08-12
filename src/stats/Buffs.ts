@@ -59,8 +59,9 @@ export enum BuffType {
   AmmoReservation = 36, // 弹药储备(112,480s)：20% 不耗弹（PickAmmo :52751）
   Lifeforce = 37,     // 生命力(113,300s)：maxHp +20%（statLifeMax2 += max/5/20*20,:9883）
   Endurance = 38,     // 耐久(114,300s)：endurance+0.1 → 受伤×0.9（:9886）
-  Wrath = 39,         // 暴怒(115,240s)：全系暴击+10（:9890）
-  Rage = 40,          // 怒气(117,240s)：全系伤害+10%（:9947）
+  Wrath = 39,         // ★标签对调说明：本枚举名 Wrath 实挂 vanillaBuff 115=原版 Rage 药水(怒气)：
+                      //   melee/ranged/magic 暴击+10（:9888-9893，召唤不吃——GetWeaponCrit summon=0）
+  Rage = 40,          // ★本枚举名 Rage 实挂 vanillaBuff 117=原版 Wrath 药水(暴怒)：四系伤害+10%（:9947）
   Tipsy = 41,         // 醉酒(25,清酒)：def-4/近战暴击+2/近战伤+10%/近战速+10%（:11513）
   // ---- R2 武器浸剂（meleeEnchant 表 Player.cs:11604-11636 → 敌 debuff :6141-6171）----
   ImbueVenom = 42,    // 毒液药剂(71)→敌 Venom(70) 5-10s（30HP/s）
@@ -101,6 +102,9 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
+  ManaSickness = 69, // 魔力眩晕(94,喝蓝 AddBuff 300t)：magicDamage *= 1-0.25×(剩余/300)
+                   //   （Player.cs:10000-10004 + :25616；满 debuff -25% 线性恢复。
+                   //   ★33 是 Weak(近战-5.1%伤/速) 勿混）
   Obstructed = 68, // 遮挡(163)：headcovered + bleed（:11421-11425）——bleed 清自然恢复
                    //   计时（:18998 同流血 30）；headcovered → ScreenObstruction 遮屏
                    //   （目标 0.95/步进 0.3，ScreenObstruction.cs:27-31）。
@@ -150,9 +154,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.AmmoReservation]: { vanillaBuff: 112, descKey: 'Mods.SandboxWorld.Buff.AmmoReservation.Desc', fallbackName: '弹药储备' },
   [BuffType.Lifeforce]: { vanillaBuff: 113, descKey: 'Mods.SandboxWorld.Buff.Lifeforce.Desc', fallbackName: '生命力' },
   [BuffType.Endurance]: { vanillaBuff: 114, descKey: 'Mods.SandboxWorld.Buff.Endurance.Desc', fallbackName: '耐久' },
-  [BuffType.Wrath]: { vanillaBuff: 115, descKey: 'Mods.SandboxWorld.Buff.Wrath.Desc', fallbackName: '暴怒' },
-  [BuffType.Rage]: { vanillaBuff: 117, descKey: 'Mods.SandboxWorld.Buff.Rage.Desc', fallbackName: '怒气' },
+  [BuffType.Wrath]: { vanillaBuff: 115, descKey: 'Mods.SandboxWorld.Buff.Wrath.Desc', fallbackName: '怒气' },  // 原版 Rage 药水
+  [BuffType.Rage]: { vanillaBuff: 117, descKey: 'Mods.SandboxWorld.Buff.Rage.Desc', fallbackName: '暴怒' },  // 原版 Wrath 药水
   [BuffType.Tipsy]: { vanillaBuff: 25, descKey: 'Mods.SandboxWorld.Buff.Tipsy.Desc', fallbackName: '醉酒' },
+  [BuffType.ManaSickness]: { vanillaBuff: 94, descKey: 'Mods.SandboxWorld.Buff.ManaSickness.Desc', fallbackName: '魔力眩晕' },
   [BuffType.ImbueVenom]: { vanillaBuff: 71, descKey: 'Mods.SandboxWorld.Buff.ImbueVenom.Desc', fallbackName: '武器浸剂：毒液' },
   [BuffType.ImbueCursed]: { vanillaBuff: 73, descKey: 'Mods.SandboxWorld.Buff.ImbueCursed.Desc', fallbackName: '武器浸剂：诅咒焰' },
   [BuffType.ImbueFire]: { vanillaBuff: 74, descKey: 'Mods.SandboxWorld.Buff.ImbueFire.Desc', fallbackName: '武器浸剂：烈火' },
@@ -405,6 +410,12 @@ export class BuffState {
     return this.active.has(BuffType.MagicPower) ? 0.2 : 0;
   }
   /** 箭伤 ×1.1（:9712;本仓库 ranged 管道统一消费,乘 ranged 全系——近义注明） */
+  /** 魔力眩晕 magic 减伤（Player.cs:10003：0.25×剩余/300；apply 用秒，300t=5s） */
+  get manaSickMagicMult(): number {
+    const left = this.active.get(BuffType.ManaSickness);
+    if (left === undefined) return 1;
+    return 1 - Math.min(0.25, 0.25 * (left / 5));
+  }
   get arrowDmgMult(): number {
     return this.active.has(BuffType.Archery) ? 1.1 : 1;
   }

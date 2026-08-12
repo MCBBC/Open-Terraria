@@ -42,6 +42,11 @@ function setMoss(st: TileStore, x: number, mossType: number[]): { wall: number; 
 /** Spread.Moss（cs:3497-3549）1:1 BFS：起点洞腔涂苔藓墙。
  *  实心格或已有墙 → 不扩散；active 且无墙 → 补墙；石头(1) → 换苔藓块；
  *  无墙空气 → 涂墙并向四邻扩散（有墙/实心天然阻断） */
+function mossWallCount(st: TileStore): number {
+  let n = 0;
+  for (let i = 0; i < st.wall.length; i++) if (st.wall[i] >= 54 && st.wall[i] <= 58) n++;
+  return n;
+}
 function spreadMoss(st: TileStore, x: number, y: number, wall: number, tile: number): void {
   if (!st.inBounds(x, y)) return;
   const seen = new Set<number>();
@@ -182,6 +187,7 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
     }
     return { air: capped ? MAX : air, lava, ice, rock, shroom };
   };
+  let mossOkCount = 0;
   const patches = Math.floor(st.w * 0.01);
   for (let n = 0; n < patches; n++) {
     let x = rng.nextIntRange(200, st.w - 200);
@@ -200,7 +206,10 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
     }
     if (!ok) continue;
     const m = setMoss(st, x, mossType);
+    const wBefore = mossWallCount(st);
     spreadMoss(st, x, y, m.wall, m.tile);
+    console.log(`mossPatch ok x=${x} y=${y} walls+${mossWallCount(st) - wBefore}`);
+    mossOkCount++;
   }
 
   // ---- 全图散点（cs:17714-17723）：每列一次随机石头 → 苔藓 ----

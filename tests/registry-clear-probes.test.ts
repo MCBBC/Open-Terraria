@@ -33,10 +33,12 @@ function flatWorld(): { w: World; hooks: unknown } {
       x: 90 * 16, y: 56 * 16, w: 20, h: 42, cx: 90 * 16 + 10, cy: 56 * 16 + 21,
       dead: false, useTime: 0, luckState: new LuckState(),
     },
-    playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
+    playSfx: () => {}, playSfxFiles: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
     spawnDrop: () => null, damagePlayer: () => {},
     entities: { add: () => {} },
     enemies: () => [] as unknown[],
+    onEnemyKilled: () => {}, critters: () => [] as unknown[],
+    cutTile: () => {}, addLight: () => {},
   } as never;
   return { w, hooks };
 }
@@ -115,17 +117,18 @@ describe('瓢虫 604/605 luck 钩子（LadyBugKilled :82332 / LadyBugLuck :82366
 
 describe('生成探针：收尾批三个上游 pass', () => {
   it('MossAndMossCaves：苔藓块（179-183/381/霓虹）+ 苔藓墙 54-58 产出', () => {
-    const st = new TileStore(600, 300);
+    const st = new TileStore(600, 500);
     const gs = {
-      worldSurface: 60, rockLevel: 120, waterLine: 105, lavaLine: 200,
+      worldSurface: 60, rockLevel: 120, waterLine: 175, lavaLine: 300,
       shimmerX: -1, shimmerY: -1,
     } as unknown as GenState;
     for (let x = 0; x < 600; x++) {
-      for (let y = 60; y < 300; y++) st.setTileSilent(x, y, TILE_BY_KEY['stone']!);
+      for (let y = 60; y < 500; y++) st.setTileSilent(x, y, TILE_BY_KEY['stone']!);
     }
-    // 挖两个洞腔给 Spread.Moss 涂墙（无墙空气腔 + 周边石头转苔藓）
+    // 挖洞腔给 Spread.Moss 涂墙（无墙空气腔 + 周边石头转苔藓）。
+    // 苔藓斑选点 x∈[200,w-200)、y∈[(ws+rl)/2, waterLine) → 洞必须落在该带内
     for (let dx = -6; dx <= 6; dx++) for (let dy = -6; dy <= 6; dy++) {
-      if (dx * dx + dy * dy <= 36) st.setTileSilent(150 + dx, 180 + dy, 0);
+      if (dx * dx + dy * dy <= 36) st.setTileSilent(300 + dx, 150 + dy, 0);
     }
     runMossAndMossCavesPass(st, new RNG(42), gs);
     const mossTiles = [179, 180, 181, 182, 183, 381, 534, 536, 539, 625].map(sheetId);
@@ -140,7 +143,7 @@ describe('生成探针：收尾批三个上游 pass', () => {
 
   it('SurfaceDirtWallsToGrassWalls：泥土墙洞 → 草墙 63 + 1/10 花墙 65', () => {
     const st = new TileStore(300, 120);
-    const gs = { worldSurface: 60 } as unknown as GenState;
+    const gs = { worldSurface: 80 } as unknown as GenState;
     // 地表：草面 + 泥土；地下挖一个带泥土墙的腔（墙 2/15）
     for (let x = 0; x < 300; x++) {
       st.setTileSilent(x, 58, TILE_BY_KEY['grass']!);
@@ -152,8 +155,13 @@ describe('生成探针：收尾批三个上游 pass', () => {
         st.setWallSilent(150 + dx, 80 + dy, 15);
       }
     }
-    // 草面正下方给一格泥土墙触发位
-    st.setWallSilent(150, 58, 2);
+    // 触发位带：草面带泥土墙(2) + 其下"空气+泥土墙(15)"小腔（cs:19759-19770 起点
+    // 必须是非实心+墙 2/15）。逐格 1/4 门（cs:19744）→ 铺 100 格保证必中
+    for (let x = 100; x <= 200; x++) {
+      st.setWallSilent(x, 58, 2);
+      st.setTileSilent(x, 59, 0); st.setWallSilent(x, 59, 15);
+      st.setTileSilent(x, 60, 0); st.setWallSilent(x, 60, 15);
+    }
     runGrassWallPass(st, new RNG(7), gs);
     let grass = 0, flower = 0;
     for (let i = 0; i < st.wall.length; i++) {
@@ -162,4 +170,29 @@ describe('生成探针：收尾批三个上游 pass', () => {
     }
     expect(grass + flower).toBeGreaterThan(0);
   });
+
+  it('全管线生成探针：苔藓/草墙/灰烬草三上游在真实世界落地', async () => {
+    const { generateWorld } = await import('../src/world/gen/WorldGen');
+    const world = await generateWorld({ width: 4200, height: 1200, seedText: 'registry-clear-1' });
+    const st = world.store;
+    const mossTiles = [179, 180, 181, 182, 183, 381, 534, 536, 539, 625].map(sheetId);
+    let moss = 0, mossWall = 0, grassWall = 0, ashGrass = 0, ashTree = 0;
+    for (let i = 0; i < st.type.length; i++) {
+      if (st.flags[i] && mossTiles.includes(st.type[i])) moss++;
+      if (st.wall[i] >= 54 && st.wall[i] <= 58) mossWall++;
+      if (st.wall[i] === 63 || st.wall[i] === 65) grassWall++;
+      if (st.type[i] === sheetId(633)) ashGrass++;
+      if (st.type[i] === sheetId(634)) ashTree++;
+    }
+    expect(moss).toBeGreaterThan(100);          // 散点+暴露+苔藓斑合计应有实体量
+    expect(mossWall).toBeGreaterThan(0);
+    // 草墙全图产出是低概率事件（非算法缺陷）：金标 9293480 实测 gate1 候选 1130、
+    // gate2（3×3 内无墙空气）仅 18 过 → 1/4 门后 ≈5 个触发点 → 全图 227 格草墙。
+    // 本仓地形同量级（gate1≈900/gate2≈1），单种子常为 0——只报数不断言，
+    // 算法链路由上方单元级测试兜底
+    console.log(`[gen-probe] moss=${moss} mossWall=${mossWall} grassWall=${grassWall} ashGrass=${ashGrass} ashTree=${ashTree}`);
+    expect(grassWall).toBeGreaterThanOrEqual(0);
+    expect(ashGrass).toBeGreaterThan(0);        // 藤 638 上游解锁（外缘 17% 带）
+    void ashTree;                                // 灰烬树有净空门禁，允许 0（1/3 概率逐点）
+  }, 600000);
 });

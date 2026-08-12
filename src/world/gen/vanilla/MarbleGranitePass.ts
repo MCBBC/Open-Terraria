@@ -94,10 +94,12 @@ function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
   placeStalactite(st, x, y, rng.int(0, 1) === 0, rng.int(0, 2));
 }
 
-/** TileID.Sets.Ore 项目侧近似（与 caves-oracle IsOre 同源） */
+/** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。
+ *  曾抄成 20/203/70/21/116/234 的杂表 → 花岗岩体内矿石被吞（granite checkpoint 纯 type 差） */
+const VANILLA_ORE = new Set([7, 166, 6, 167, 9, 168, 8, 169, 22, 204, 37, 58, 107, 221, 108, 222, 111, 223, 211]);
 function isOreType(t: number): boolean {
   const v = TILE_DEFS[t]?.vanilla?.sheet;
-  return v != null && [7, 166, 6, 167, 9, 168, 8, 169, 20, 203, 70, 107, 21, 204, 108, 221, 37, 1110, 116, 234].includes(v);
+  return v != null && VANILLA_ORE.has(v);
 }
 
 export function runMarbleGranitePass(st: TileStore, rng: RNG, gs: GenState): void {

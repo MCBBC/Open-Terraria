@@ -34,6 +34,11 @@ export interface WldWorld {
   rockLevel: number;
   time: number;
   dayTime: boolean;
+  /** 原版 header(WF:1252/1276-1278):月亮样式/月相/血月/日食 */
+  moonType: number;
+  moonPhase: number;
+  bloodMoon: boolean;
+  eclipse: boolean;
   isCrimson: boolean;
   hardMode: boolean;
   /** 原版 gameMode（0 经典 1 专家 2 大师 3 旅程；v<209 无此字段=0） */
@@ -118,7 +123,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   }
   if (version >= 141) r.i64(); // creationTime
   if (version >= 284) r.i64(); // lastPlayed
-  r.u8(); // moonType
+  const moonType = r.u8(); // moonType
   const treeX = [r.i32(), r.i32(), r.i32()];       // 世界横向 4 区分界（树样式用）
   let treeTops: number[] = [];                    // TreeTops 13 区域变体（v≥211 优先于 header treeStyle）
   const treeStyle = [r.i32(), r.i32(), r.i32(), r.i32()]; // 各区森林树样式
@@ -131,9 +136,9 @@ export function parseWld(buf: Uint8Array): WldWorld {
   const rockLevel = r.f64();
   const time = r.f64();
   const dayTime = r.boolean();
-  r.i32(); // moonPhase
-  r.boolean(); // blood moon
-  r.boolean(); // eclipse
+  const moonPhase = r.i32(); // moonPhase
+  const bloodMoon = r.boolean(); // blood moon
+  const eclipse = r.boolean(); // eclipse
   const dungeonX = r.i32(), dungeonY = r.i32(); // 地牢入口坐标（dungeonX/Y）
   const isCrimson = r.boolean();
   for (let i = 0; i < 10; i++) r.boolean(); // downed bosses
@@ -278,7 +283,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
 
   return {
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
-    groundLevel, rockLevel, time, dayTime, isCrimson, hardMode, gameMode,
+    groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
+    isCrimson, hardMode, gameMode,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },

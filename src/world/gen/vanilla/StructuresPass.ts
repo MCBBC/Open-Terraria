@@ -59,11 +59,9 @@ export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): v
       const y = Math.min(rng.int(90, surf - 101), gs.worldSurfaceLow - 50);
       // GenVars.worldSurfaceLow（raw double 截断）——注意非 gs.worldSurfaceLow
       const isLake = lakes >= isCount;
-      console.log(`islandJS ${x},${y} lake=${isLake} budget=${budget} peek=${rng.vanilla.peek()}`);
-      if (isLake) cloudLake(st, rng, x, y);
+          if (isLake) cloudLake(st, rng, x, y);
       else cloudIsland(st, rng, x, y);
-      console.log(`islandDoneJS peek=${rng.vanilla.peek()}`);
-      housesX.push(x); housesY.push(y);
+          housesX.push(x); housesY.push(y);
       gs.floatingIslands.push({ x, y, style: 0, isLake });
       if (!isLake) lakes++;
     }
@@ -123,7 +121,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
     if (vy > 0.2) vy = -0.2;
     if (vy < -0.2) vy = -0.2;
   }
-  console.log(`ciPhaseJS ciS1 peek=${rng.vanilla.peek()} bbox=${b4},${b5},${b6},${b7}`);
   let r17 = b4 + rng.int(0, 4);                      // ② 底缘雨云凸包：num4+Next(5)
   let r19 = 0;
   // 步进 Next(r,(int)(r*1.5))——闭区间-1
@@ -132,7 +129,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
     while (r17 >= 15 && r17 < st.w - 15 && r18 >= 15 && r18 < st.h - 15 && st.flags[st.idx(r17, r18)] === 0) r18--;
     r18 += rng.int(-3, 3);                           // Next(-3,4)
     r19 = rng.int(4, 7);                             // Next(4,8)
-    console.log(`bumpJS x=${r17} y=${r18} r=${r19} peek=${rng.vanilla.peek()}`);
     let mat = tile;
     if (rng.int(0, 3) === 0) mat = RAIN_CLOUD;       // Next(4)==0 → 196
     for (let x = r17 - r19; x <= r17 + r19; x++) {
@@ -146,7 +142,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
       }
     }
   }
-  console.log(`ciPhaseJS ciS2 peek=${rng.vanilla.peek()}`);
   num = rng.int(80, 94);                             // ③ 土芯：Next(80,95)
   num2 = num;
   num3 = rng.int(10, 14);                            // Next(10,15)
@@ -179,7 +174,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
     if (vy > 0.2) vy = -0.2;
     if (vy < -0.2) vy = -0.2;
   }
-  console.log(`ciPhaseJS ciS3 peek=${rng.vanilla.peek()}`);
   {                                                  // ④ 土面云斑：找活性土格向上盖云
     let cx = b4 + rng.int(0, 4);
     while (cx < b5) {
@@ -215,7 +209,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
       if (all) st.wall[st.idx(x, y)] = 73;
     }
   }
-  console.log(`ciPhaseJS ciS4 peek=${rng.vanilla.peek()}`);
   for (let x = b4; x <= b5; x++) {                   // ⑥ 岛面水池
     let y = b6 - 10;
     while (y + 1 < st.h && st.flags[st.idx(x, y + 1)] === 0) y++;
@@ -245,7 +238,6 @@ function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
       st.liquidType[st.idx(x, y)] = 1;
     }
   }
-  console.log(`ciPhaseJS ciS5 peek=${rng.vanilla.peek()}`);
   const puffs = rng.int(0, 3);                       // ⑦ 岛上方云 puff：Next(4)
   for (let n = 0; n <= puffs; n++) {
     const cx = rng.int(b4 - 5, b5 + 4);              // Next(num4-5, num5+5)
