@@ -83,7 +83,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '半砖平滑', run: halfBrickSmoothPass },
     { name: '瀑布唇缘', run: waterfallLipPass },
     { name: '生命水晶', run: vanillaLifeCrystals },
-    { name: '地狱', run: hellPass },
+    // 地狱(Underworld 28) 已按注册序并入 vanillaBiomes（Webs 27 后、Corruption 29 前）
     { name: '地狱屋', run: vanillaHellHouses },
     // 地狱箱:必须在地狱地形+地狱屋之后(原版 Underworld 29 < Buried Chests 59);
     // 曾在生物群系 pass 里随洞穴箱一起放 → 被后续 hellPass 重写 100% 抹除
@@ -156,6 +156,8 @@ import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
 import { runOceanSandPass, runBeachesPass, runBeachDecorPass } from './vanilla/BeachPass';
 import { runIceBiomePass, runSlushPass } from './vanilla/IceBiomePass';
+import { runWebsPass as runVanillaWebsPass } from './vanilla/WebsPass';
+import { runUnderworldPass } from './vanilla/UnderworldPass';
 import { runGrassPass } from './vanilla/GrassPass';
 import { runJunglePass } from './vanilla/JunglePass';
 import { runMudCavesPass } from './vanilla/Spread';
@@ -439,13 +441,11 @@ function vanillaMicroBiomes({ store, rng }: GenCtx) {
 }
 
 function vanillaLakes({ store, rng }: GenCtx) {
-  // 原版 1456 注册序 Lakes(30, cs:14613) → Slush(31) →（32 Dungeon 及其后段在
-  // vanillaBiomes 内，Dungeon/Lakes 倒挂是既有偏差另案）→ Shimmer(38)。
-  // Gems(35) 已按注册序拆到 Beaches(34) 之后（vanillaBiomes 内）。
+  // Lakes(30)/Slush(31) 已按注册序并入 vanillaBiomes（Corruption(29) 后、Dungeon(32) 前）
+  // ——本槽保留空壳防外部引用。
+  void store; void rng;
   const gs = ctxGs[0];
   if (!gs) return;
-  runLakesPass(store, rng, gs);
-  runSlushPass(store, gs);               // 31 Slush（原在 DirtToMud 后、Corruption 前——注册序修正）
 }
 
 function vanillaCaves({ store, rng }: GenCtx) {
@@ -546,7 +546,7 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runJungleChestsPass(store, rng, gs, world.chests, shrineSpots); // 常春藤箱(神龛中心)
   runUnderwaterChestsPass(store, rng, gs, world.chests, oceanTreasures); // 海洋洞窟水箱
   runWaterChestsPass(store, rng, gs, world.chests); // Water Chests(水中 style17;1.4.4 概念保留)
-  runWebsPass(store, rng, gs);                  // Webs(全局天花板蛛网 runner 51;1456 注册 13659 早段,后放防被清,语义近 WebsInSpiderCaves)
+  // Webs(51) 已按注册序回到 #27 位（vanillaBiomes 前段）——此处旧迟置调用删除
   runSpiderNestPass(store, rng, gs, world.chests); // Spider Caves(countTiles 门+波前BFS刷墙62+蛛网罐/箱/垂网/覆饰)
   runWebsInSpiderCavesPass(store, rng, gs);     // Webs In Spider Caves(墙62 9/10蛛网51)+蜂巢钟乳石/蜂蜜
   runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
@@ -705,6 +705,11 @@ function nextFrame(): Promise<void> {
 // 3) 大灰烬丘陵(addTile 填充虚空)+ 横向灰烬团 + 挖掘隧道(填岩浆);
 // 4) 底部 h-145/144 岩浆层 + 地狱石 58 矿脉
 function hellPass({ store, rng }: GenCtx) {
+  const gsUW = ctxGs[0];
+  if (!gsUW) return;
+  runUnderworldPass(store, rng, gsUW);
+}
+function hellPassLegacy({ store, rng }: GenCtx) {
   const st = store;
   const ASH = T.ASH;
   const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;

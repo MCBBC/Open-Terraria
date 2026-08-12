@@ -498,6 +498,17 @@ function addProj(game: GameHooks, p: Entity): void {
 //  ai1>0(状态 8 克苏弹)→ 追踪玩家,速 4(+12 狂暴)+age/20,贴身 50px Kill。
 //  Kill:小弹原地落 384 鲨鱼龙卷(伤 40);大弹自弹体 tile 向下扫描 100 格落 386
 //  克苏龙卷(伤 80)——龙卷接触伤另按原版 hostile ×2 规则结算(Projectile.cs:13781)。
+/** v6 联机弹体打包元数据（Boss 锚定弹体族共用形状，Game.netProjBroadcast 消费） */
+export interface NetProjMeta {
+  kind: number;        // msg27 kind（5-8）
+  tag: string;         // 锚参数打包（各类自定义，≤32 字符）
+  aux: number;         // i16 辅助通道
+  dmg: number;         // 快照 dmg 字段
+  /** 可选：以 vx/vy 通道携带的角度方向（重建端 atan2 还原） */
+  exVx?: number;
+  exVy?: number;
+}
+
 export class DukeSharknadoBolt extends Entity {
   w = 30; h = 30; // SetDefaults 385
   private vx0: number;
@@ -551,10 +562,13 @@ export class DukeSharknadoBolt extends Entity {
     if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { this.kill(game); return; }
   }
 
-  /** Kill(:70714-70778):尘环 + 落龙卷(小 384 / 大 386 向下扫描地面) */
+  /** Kill(:70714-70778):尘环 + 落龙卷(小 384 / 大 386 向下扫描地面)。
+   *  v6 联机傀儡:运动/消亡本地自算(确定性),但不落龙卷——房主的龙卷经 kind6 同步,
+   *  双端各自生成会重复 */
   private kill(game: GameHooks): void {
     this.dead = true;
     game.spawnParticles(this.cx, this.cy, '#7FB8E8', 10, 2.4, { life: 24, damp: 0.94 });
+    if (this.netPuppet) return;
     if (this.big) {
       // :70752-70770 自弹体 tile 向下扫 100 格,落点 = 首个实心/液体格上沿 -24px
       const st = game.world.store;
@@ -570,6 +584,11 @@ export class DukeSharknadoBolt extends Entity {
       const dir = Math.sign(this.vx0) || 1;
       addProj(game, new DukeSharknadoTornado(this.cx - dir * 30, this.cy - 4, false, this.src));
     }
+  }
+
+  /** v6 联机打包：kind=5，tag=big 标记（访客重建后本地跑确定性运动，见 kill 傀儡门禁） */
+  netProjMeta() {
+    return { kind: 5, tag: this.big ? '1' : '0', aux: 0, dmg: 0 };
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -642,9 +661,10 @@ export class DukeSharknadoTornado extends Entity {
       // :28363-28390 子段落点:列顶再上移 (42·sP + 42·sC)/2 − 2
       const sP = this.scaleOf(this.ai1), sC = this.scaleOf(this.ai1 - 1);
       this.topY -= (42 * sP) / 2 + (42 * sC) / 2 - 2;
-      // 出鲨(:28372-28385):ai1 % 模 == 0 且 ai1≠0 → NewNPC 372/373 于列顶
+      // 出鲨(:28372-28385):ai1 % 模 == 0 且 ai1≠0 → NewNPC 372/373 于列顶。
+      // v6 傀儡不出鲨——房主的鲨鱼经 msg23 同步,双端各出会翻倍
       const mod = this.big ? 2 : 4;
-      if (this.ai1 % mod === 0 && this.ai1 !== 0) {
+      if (!this.netPuppet && this.ai1 % mod === 0 && this.ai1 !== 0) {
         const shark = spawnPart(game, this.src, this.big ? 373 : 372);
         if (shark) {
           shark.x = this.cx - shark.w / 2;
@@ -680,6 +700,12 @@ export class DukeSharknadoTornado extends Entity {
         game.damagePlayer(this.big ? 160 : 80, this.cx, this.cy, this.src);
       }
     }
+  }
+
+  /** v6 联机打包：kind=6，tag=big 标记。访客重建后本地跑生长/摇摆/列伤害
+   *  （确定性自包含 AI），仅出鲨经 !netPuppet 门禁排除（msg23 同步） */
+  netProjMeta() {
+    return { kind: 6, tag: this.big ? '1' : '0', aux: 0, dmg: 0 };
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -939,6 +965,8 @@ function spawnMoonLeech(game: GameHooks, head: Enemy, player: Player): void {
 export class MLDeathray extends Entity {
   w = 36; h = 36; // SetDefaults 455
   private srcId: number;
+  /** v6 联机：锚定 NPC 的 netId（访客端锚=msg23 傀儡；0=本端真身走 srcId 查找） */
+  srcNetId = 0;
   /** 'head' = 396 头眼 / 'core' = 400 真眼(本仓折叠到核心 398) */
   private kind: 'head' | 'core';
   /** 扫射角速度(原版 ai[0] = ±2π/540) */
@@ -951,24 +979,41 @@ export class MLDeathray extends Entity {
   private dmg: number;
   dead = false;
 
-  constructor(src: Enemy, kind: 'head' | 'core', angle: number, sweep: number, dmg: number) {
+  constructor(src: Enemy | null, kind: 'head' | 'core', angle: number, sweep: number, dmg: number, x?: number, y?: number) {
     super();
-    this.srcId = src.id;
+    this.srcId = src?.id ?? 0;
     this.kind = kind;
     this.angle = angle;
     this.sweep = sweep;
     this.dmg = dmg;
-    this.x = src.cx - this.w / 2;
-    this.y = src.cy - this.h / 2;
+    // v6 傀儡重建：src=null 时由调用方传显式坐标（真身路径 src 必非空）
+    this.x = (x ?? src!.cx) - this.w / 2;
+    this.y = (y ?? src!.cy) - this.h / 2;
+  }
+
+  /** v6 联机打包：kind=7，tag=`${srcId},${head|core}`，aux=扫速×10000，
+   *  束角经 vx/vy 通道携带（重建端 atan2 还原后本地扫射——确定性自包含） */
+  netProjMeta(): NetProjMeta {
+    return {
+      kind: 7,
+      tag: `${this.srcId},${this.kind === 'head' ? 0 : 1}`,
+      aux: Math.max(-32768, Math.min(32767, Math.round(this.sweep * 10000))),
+      dmg: this.dmg,
+      exVx: Math.cos(this.angle) * 1000,
+      exVy: Math.sin(this.angle) * 1000,
+    };
   }
 
   /** scale 上限:头 1.0 / 真眼 0.4(:30468-30478 num728) */
   private get maxScale(): number { return this.kind === 'head' ? 1 : 0.4; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    const src = (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
+    // v6 联机：傀儡端按 netId 找锚（msg23 傀儡）；本端真身按本地 id
+    const src = this.srcNetId
+      ? (game.enemies() as Enemy[]).find((n) => n.netId === this.srcNetId)
+      : (game.enemies() as Enemy[]).find((n) => n.id === this.srcId);
     if (!src || src.dead) { this.dead = true; return; }        // 源消亡即 Kill(:30297)
-    if (this.kind === 'head' && src.ai0 === -2) { this.dead = true; return; } // :30296 头闭眼残肢
+    if (!this.netPuppet && this.kind === 'head' && src.ai0 === -2) { this.dead = true; return; } // :30296 头闭眼残肢（ai0 不同步,傀儡跳过——msg28 兜底）
     this.age++;
     if (this.age >= 180) { this.dead = true; return; }         // :30472 寿命 180t
     this.angle += this.sweep;                                  // :30521 rotation += ai[0]

@@ -5,10 +5,10 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { TILE_BY_KEY } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 
-const WEBS = TILE_BY_KEY['v_51_webs']!;
+const WEBS = TILE_BY_KEY['v_51_cobweb']!;
 
 export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;

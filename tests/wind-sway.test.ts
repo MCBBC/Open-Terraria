@@ -318,3 +318,32 @@ describe('litNatureVisibility（NextNatureRenderer :117-147）', () => {
     expect(litNatureVisibility(ec)).toBe(0);
   });
 });
+
+// ============ 月亮周期补齐（六轮） ============
+import { fishingPowerMultiplier } from '../src/data/vanillaFishing';
+
+describe('Fishing_GetPowerMultiplier（Player.cs:41560-41605）', () => {
+  const base = { raining: false, cloudBGAlpha: 0, dayTime: true, time: 10000, moonPhase: 2, bloodMoon: false }; // 10000=上午中性段（无时段乘区）
+  it('基准恒等（晴昼无月相修正）', () => {
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 2 })).toBeCloseTo(1, 6);
+  });
+  it('雨×1.2 / 云×1.1 叠乘', () => {
+    expect(fishingPowerMultiplier({ ...base, raining: true })).toBeCloseTo(1.2, 6);
+    expect(fishingPowerMultiplier({ ...base, raining: true, cloudBGAlpha: 0.5 })).toBeCloseTo(1.32, 6);
+  });
+  it('晨昏×1.3 / 正午×0.8 / 前半夜×0.8', () => {
+    expect(fishingPowerMultiplier({ ...base, time: 3000 })).toBeCloseTo(1.3, 6);
+    expect(fishingPowerMultiplier({ ...base, time: 50000 })).toBeCloseTo(1.3, 6);
+    expect(fishingPowerMultiplier({ ...base, time: 30000 })).toBeCloseTo(0.8, 6);
+    expect(fishingPowerMultiplier({ ...base, dayTime: false, time: 10000 })).toBeCloseTo(0.8, 6);
+  });
+  it('月相：满月×1.1 / 1,7 ×1.05 / 3,5 ×0.95 / 新月×0.9 / 血月×1.1', () => {
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 0 })).toBeCloseTo(1.1, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 1 })).toBeCloseTo(1.05, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 7 })).toBeCloseTo(1.05, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 3 })).toBeCloseTo(0.95, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 5 })).toBeCloseTo(0.95, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 4 })).toBeCloseTo(0.9, 6);
+    expect(fishingPowerMultiplier({ ...base, moonPhase: 4, bloodMoon: true })).toBeCloseTo(0.99, 6);
+  });
+});

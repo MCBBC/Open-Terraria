@@ -81,10 +81,9 @@ export function runSlushPass(st: TileStore, gs: GenState): void {
   for (let y = gs.snowTop; y <= gs.snowBottom && y < st.h; y++) {
     for (let x = gs.snowMinX[y]; x < gs.snowMaxX[y]; x++) {
       const i = st.idx(x, y);
-      if (!st.flags[i]) continue;
-      const t = st.type[i];
+      const t = st.type[i];                       // ★原版 switch 不判 active（幽灵格一并转化）
       if (t === STONE) {
-        st.setTileSilent(x, y, ICE);
+        st.type[i] = ICE;                         // 只写 type，保 active 态（原版语义）
       } else if (t === MUD || t === SILT) {
         let nearGrass = false;
         for (let dy = -3; dy <= 3 && !nearGrass; dy++) {
@@ -96,7 +95,7 @@ export function runSlushPass(st: TileStore, gs: GenState): void {
             if (sh === 60 || sh === 70 || sh === 71 || sh === 72) { nearGrass = true; break; }
           }
         }
-        if (!nearGrass) st.setTileSilent(x, y, SLUSH);
+        if (!nearGrass) st.type[i] = SLUSH;
       }
     }
   }

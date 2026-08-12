@@ -2,7 +2,7 @@
 // + 原版 NPC 数据驱动路径（vanillaId）：属性/AI/音效/贴图来自 vanilla-npcs.json（SetDefaults 提取）
 import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
-import { TILE_BY_KEY } from '../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { liquidCollision } from '../stats/TouchDamage';
 import { NPC_LAVA_IMMUNE } from '../data/npcLavaImmune';
 import type { GameHooks } from './types';
@@ -41,6 +41,7 @@ import {
 } from './bossAI_lunar_misc';
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
+import { openDoor } from '../world/Door';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
@@ -956,6 +957,9 @@ export class Enemy extends Entity {
   /** AI_092 训练假人（NPC 488，NPC.cs:40871-40914）：静止站立于锚定 tile（tile 378，
    *  ai0/ai1 = 锚点 tile 坐标）；锚 tile 被破坏 → 消失。受击显示伤害数字+播声音+
    *  摇晃动画（shake = clamp(dmg,20,120)，帧由渲染层读取），永不死亡（immortal）。 */
+  doorWarm = 0;            // 攻门蓄势（AI_003 ai[0]：站定累计 60）
+  doorHit = 0;             // 攻门累计（AI_003 ai[1]：每 tick +5 至 10 尝试）
+  doorCd = 0;              // 脱离冷却（AI_003 ai[3]=num21=30t）
   dummyShake = 0;          // localAI[0]：受击摇晃强度（20..120，每 tick -1）
   dummyHitDir = 0;         // localAI[1]：受击方向
   dummyAnchor: [number, number] | null = null;  // ai[0]/ai[1]：tile 378 锚点
@@ -1079,6 +1083,43 @@ export class Enemy extends Entity {
         && !solidAt(fx, fy + 1) && !solidAt(fx + dir, fy + 1)) {
         this.vy = -8;                       // 前方悬空且目标在上方 → 大跳 + 冲刺
         this.vx *= 1.5;
+      }
+    }
+    // ---- 门交互（AI_003 :64716-64780 攻门态语义 + AI_007 :60390-60460 不放弃门）----
+    // 前方脚上一格是关闭的门（sheet 10）→ 攻门：先 60t 站定蓄势（ai[0]），后每
+    // tick +5（tall gate 388 +2）累计至 10 → 尝试开门（失败 30t 脱离 ai[3]=num21）；
+    // 血月/墓园不脱离（AI_007 flag27 反义：(!bloodMoon||getGoodWorld)&&!graveyard），
+    // 持续攻门直到开出；GoblinPeon 26 直接拆门（KillTile → 掉门物品）。
+    if (this.doorCd > 0) {
+      this.doorCd--;
+    } else if (this.vy === 0 && dir !== 0 && vxSign === dir) {
+      const dtx = fx, dty = fy - 1;
+      if (st.inBounds(dtx, dty) && st.flags[st.idx(dtx, dty)]) {
+        const dDef = TILE_DEFS[st.type[st.idx(dtx, dty)]];
+        if (dDef?.vanilla?.sheet === 10) {
+          this.doorWarm = (this.doorWarm ?? 0) + 1;
+          this.vx *= 0.7; // 攻门贴门减速（velocity.X = 0.5×-direction 语义近似）
+          if (this.doorWarm >= 60) {
+            this.doorHit = (this.doorHit ?? 0) + 5;
+            if (this.doorHit >= 10) {
+              this.doorHit = 0;
+              if (this.vanillaId === 26) {
+                game.breakTile(dtx, dty); // GoblinPeon 拆门（:60439-60444）
+                this.doorWarm = 0;
+              } else if (!openDoor(st, dtx, dty, dir)) {
+                const clock = game.world.clock;
+                if (!clock.bloodMoon && !game.world.scene?.zoneGraveyard) {
+                  this.doorCd = 30; // 非血月：一次失败即脱离 30t（:60447-60450）
+                }
+              } else {
+                this.doorWarm = 0; // 开出 → 重新蓄势
+              }
+            }
+          }
+        } else {
+          this.doorWarm = 0;
+          this.doorHit = 0;
+        }
       }
     }
     // ---- 蜘蛛上墙形态切换（NPC.cs:59273-59293）：站定（velocity.Y==0）且身边有

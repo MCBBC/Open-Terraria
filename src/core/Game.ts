@@ -103,6 +103,14 @@ import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
+/** 血月腐化变换表（AttemptToConvertNPCToEvil :93122-93149：[腐化, 猩红]）——
+ *  兔 46/企鹅 303/海鸥 337/蚱蜢? 443/鼠 540 → 47/464；金鱼族 55/230/592/593 → 57/465；
+ *  松鼠 148/149 → 168/470 */
+const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
+  [46, [47, 464]], [303, [47, 464]], [337, [47, 464]], [443, [47, 464]], [540, [47, 464]],
+  [55, [57, 465]], [230, [57, 465]], [592, [57, 465]], [593, [57, 465]],
+  [148, [168, 470]], [149, [168, 470]],
+]);
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
@@ -151,6 +159,8 @@ import { TrapShot, TowerBolt } from '../entities/Dart';
 import type { TrapShotKind } from '../entities/Dart';
 import { Arrow } from '../entities/Arrow';
 import { hitPlayer, statusPlayer } from '../entities/projTargets';
+import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
+import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
@@ -529,6 +539,7 @@ export class Game implements GameHooks {
       if (Math.abs(p.x - last.x) < 1 && Math.abs(p.y - last.y) < 1 && this.tickCount - last.t < 60) continue;
       last.x = p.x; last.y = p.y; last.t = this.tickCount;
       let kind = -1, tag = '', dmg = Math.max(-32768, Math.min(32767, Math.round(p.damage ?? 0))), aux = 0;
+      let exVx: number | undefined, exVy: number | undefined; // v6：meta 通道的角度方向覆写
       if (p instanceof Arrow) {
         kind = 0; tag = String(p.projId ?? 1);
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
@@ -544,15 +555,30 @@ export class Game implements GameHooks {
         if (p.hostile) kind |= 0x80; // 机关/陷阱弹（环境危害，原版伤所有玩家）
       }
       else if (p.color !== undefined) { kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600)); }
+      else if (typeof (p as { netProjMeta?: unknown }).netProjMeta === 'function') {
+        // v6：Boss 锚定弹体族（DukeSharknadoBolt/龙卷/MLDeathray/LunarOrb）——
+        // 访客重建真类、本地跑确定性 AI（锚=msg23 傀儡，见 netMakeProj case 5-8）
+        const m = (p as unknown as { netProjMeta: () => import('../entities/bossAI_duke_moonlord').NetProjMeta }).netProjMeta();
+        kind = m.kind; tag = m.tag.slice(0, 32); aux = m.aux; dmg = m.dmg;
+        if (m.exVx !== undefined) { exVx = m.exVx; exVy = m.exVy ?? 0; }
+      }
       if (kind < 0) continue; // 未知弹幕类不同步（渲染缺类）
-      snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: p.vx, vy: p.vy });
+      snaps.push({ netId: makeNetId(net.mySlot, p.id), kind, tag, dmg, aux, x: p.x, y: p.y, vx: exVx ?? p.vx, vy: exVy ?? p.vy });
     }
     this.netProjCursor = (this.netProjCursor + examined) % Math.max(1, n);
-    // review F9：清理已消亡弹幕的差分基准（对照 NPC 侧——否则 Map 随会话无界增长）
+    // review F9：清理已消亡弹幕的差分基准（对照 NPC 侧——否则 Map 随会话无界增长）。
+    // ⑤ msg28：消亡即上报——接收端即时移除傀儡（消幽灵弹 180t 窗口 + 消亡闪烁）
     {
       const alive = new Set<number>();
       for (const ent of this.entities.projectiles) alive.add(ent.id);
-      for (const id of this.netProjLast.keys()) if (!alive.has(id)) this.netProjLast.delete(id);
+      const despawns: number[] = [];
+      for (const id of this.netProjLast.keys()) {
+        if (!alive.has(id)) {
+          this.netProjLast.delete(id);
+          despawns.push(makeNetId(net.mySlot, id));
+        }
+      }
+      if (despawns.length) net.sendProjDespawn(despawns);
     }
     net.sendProjectileBatch(snaps);
   }
@@ -637,8 +663,7 @@ export class Game implements GameHooks {
     }
   }
 
-  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类，纯视觉——不跑命中） */
-  private netApplyProjSnaps(snaps: ProjSnap[]) {
+  /** msg27 回包：弹幕傀儡 upsert（按 kind 重建真类，纯视觉——不跑命中） */  private netApplyProjSnaps(snaps: ProjSnap[]) {
     for (const s of snaps) {
       let pup = this.netProjPuppets.get(s.netId);
       if (!pup || pup.p.dead) {
@@ -657,6 +682,14 @@ export class Game implements GameHooks {
     }
   }
 
+  /** v6：按 netId 找锚定 NPC 傀儡（Boss 锚定弹体的 src/parent；sender slot 取自弹幕 netId 高位） */
+  private netFindAnchor(s: ProjSnap, srcId?: number): Enemy | null {
+    if (srcId === undefined || srcId <= 0) return null;
+    const anchorNetId = ((s.netId >>> 24) << 24) | (srcId & 0xffffff);
+    for (const [, pup] of this.netNpcPuppets) if (pup.e.netId === anchorNetId) return pup.e;
+    return null;
+  }
+
   private netMakeProj(s: ProjSnap): Entity | null {
     // v5：bit7 = hostile（原版 Projectile.hostile，仅 kind0/Arrow 语义有效）——
     // 访客端据此对敌对弹幕傀儡本地结算 Damage_EVP（见 netPuppetProjContact）
@@ -667,6 +700,22 @@ export class Game implements GameHooks {
       case 2: { const d = new Dart(s.x, s.y, s.vx, s.vy, s.dmg, parseInt(s.tag, 10) || 0); d.hostile = hostile; return d; }
       case 3: { const t = new TrapShot(s.x, s.y, s.vx, s.vy, s.dmg, (s.tag || 'dart') as TrapShotKind); t.hostile = hostile; return t; }
       case 4: return new MagicProj(s.x, s.y, s.vx, s.vy, s.dmg, Math.max(60, s.aux), s.tag || '#8090FF');
+      // ---- v6：Boss 锚定弹体——重建真类，本地跑确定性 AI（锚=msg23 傀儡）----
+      case 5: return new DukeSharknadoBolt(s.x, s.y, s.vx, s.vy, s.tag === '1', false, null as unknown as Enemy);
+      case 6: return new DukeSharknadoTornado(s.x, s.y, s.tag === '1', null as unknown as Enemy);
+      case 7: {
+        const [srcId, kindBit] = s.tag.split(',').map(Number);
+        const m = new MLDeathray(this.netFindAnchor(s, srcId), kindBit === 0 ? 'head' : 'core',
+          Math.atan2(s.vy, s.vx), (s.aux || 0) / 10000, s.dmg, s.x, s.y);
+        m.srcNetId = ((s.netId >>> 24) << 24) | ((srcId || 0) & 0xffffff); // 锚未到也不死等（傀儡随后到即接上）
+        return m;
+      }
+      case 8: {
+        const [kind, parentId] = s.tag.split(',').map(Number);
+        const o = new LunarOrb(this.netFindAnchor(s, parentId), kind === 574 ? 574 : 539, s.vx, s.vy, s.dmg, s.x, s.y);
+        o.parentNetId = ((s.netId >>> 24) << 24) | ((parentId || 0) & 0xffffff);
+        return o;
+      }
       default: return null;
     }
   }
@@ -682,6 +731,39 @@ export class Game implements GameHooks {
       this.addDamageNumber(e.cx, e.y, dealt, false, '#FF7060');
       return;
     }
+  }
+
+  /** msg28 回包：弹幕消亡即时移除傀儡（v6——替代纯超时清扫的补刀路径） */
+  private netRemoveProjPuppets(ids: number[]) {
+    for (const id of ids) {
+      const pup = this.netProjPuppets.get(id);
+      if (pup) {
+        pup.p.dead = true;
+        this.netProjPuppets.delete(id);
+      }
+    }
+  }
+
+  /** v6 msg201：SSC 服务器角色档应用（--ssc 房）——覆盖本地角色后重 dump 对齐服务器快照。
+   *  语义=原版 ServerSideCharacter：角色进度存服务器、跨设备恢复；信任模型同原版（非反作弊） */
+  private netApplySSC(recordJson: string) {
+    try {
+      const rec = JSON.parse(recordJson) as {
+        hp: number; maxHp: number; x: number; y: number;
+        inv: Array<{ id: number; stack: number } | null>;
+        armor: Array<{ id: number; stack: number } | null>;
+        dye: Array<{ id: number; stack: number } | null>;
+      };
+      const p = this.player;
+      if (rec.hp > 0) p.hp = rec.hp;
+      if (rec.maxHp >= 100) p.baseMaxHp = rec.maxHp;
+      if (Number.isFinite(rec.x) && Number.isFinite(rec.y)) { p.x = rec.x; p.y = rec.y; }
+      if (Array.isArray(rec.inv)) p.inv.slots = rec.inv;
+      if (Array.isArray(rec.armor)) p.inv.armor = rec.armor;
+      if (Array.isArray(rec.dye)) p.inv.dye = rec.dye;
+      this.cb.onInventoryChanged?.();
+      this.net?.tick(); // 重 dump：服务器累积快照与本端对齐
+    } catch { /* 损坏档忽略，保持本地角色 */ }
   }
 
   /** 傀儡清扫：死亡/超时无快照（掉线房主、宿主清场）→ 移除 */
@@ -1633,6 +1715,7 @@ export class Game implements GameHooks {
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1080;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
+      w.scene = this.scene; // Enemy 等只读消费（zoneGraveyard 攻门门等）
       this.player.zoneDesert = this.scene.zoneDesert; // 沙丘行者靴消费
       // ---- 幸运度环境扫描（Player.TryRecalculatingTorchLuck :17580-17939 净效果版）----
       // 火炬窗 81×81（原版每 tick 一行、81 tick 一轮——15t 整窗直扫节流等价）+
@@ -1940,6 +2023,28 @@ export class Game implements GameHooks {
         this.wiring.hitSwitch(dx, dy);
       }
       player.landImpactVy = 0; // 消费（防多帧重复）
+    }
+    // ---- 血月小动物腐化（UpdateNPC_BloodMoonTransformations :93107-93149：血月中
+    //      每格 NPC 尝试 AttemptToConvertNPCToEvil——兔/企鹅/海鸥/金鱼/松鼠族 →
+    //      腐化变体（猩红世界换猩红表）。敌怪走 transformTo，小动物实体替换为敌怪）----
+    if (w.clock.bloodMoon) {
+      for (const n of this.entities.npcs) {
+        const e = n as Enemy;
+        if (e.dead || e instanceof TownNPC) continue;
+        const id = e.vanillaId ?? -1;
+        const pair = BLOOD_MOON_EVIL.get(id);
+        if (pair) e.transformTo(w.crimson ? pair[1] : pair[0], w.store);
+      }
+      for (const c of this.entities.critters) {
+        const cr = c as Critter;
+        if (cr.dead) continue;
+        const pair = BLOOD_MOON_EVIL.get(cr.def.npc);
+        if (pair) {
+          cr.dead = true;
+          const en = Enemy.fromVanilla(w.crimson ? pair[1] : pair[0], cr.x, cr.y);
+          if (en) this.entities.add(en, 'enemies');
+        }
+      }
     }
     this.updateTallGateAuto();
     if (player.dead) {
@@ -3380,6 +3485,22 @@ export class Game implements GameHooks {
       || heldDef.key === 'lava_bucket' || heldDef.key === 'honey_bucket')) {
       this.useBucket(heldDef.key, tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
+      // ---- 血泪 4271（Player.cs:43329-43345 + CanUseItem :51435）：夜且非血月可用 →
+      //      StartBloodMoon：sound 15、moonPhase==4(新月)时拨到 5、misc[8] 公告。
+      //      昼/血月中不可用（原版 CanUseItem 返回 false = 静默无效）。
+      if (/^vi_4271_/.test(heldDef.key)) {
+        const wk = this.world;
+        if (!wk.clock.isDay && !wk.clock.bloodMoon) {
+          this.sfx.play('throw'); // SoundID 15 ≈ Item_1（throw 通道）
+          wk.clock.bloodMoon = true;
+          if (wk.clock.moonPhase === 4) wk.clock.moonPhase = 5;
+          this.newText(Lang.misc(8), 50, 255, 130);
+          this.player.useTime = 30;
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.cb.onInventoryChanged?.();
+        }
+        this.input.mouseDown = false;
+      }
       // ---- 钓鱼（R7）：钓竿抛/收（vanilla-itemfunc fishingPole>0；AI_61 浮标）----
       const fm = /^vi_(\d+)_/.exec(heldDef.key);
       const ff = fm ? itemFuncOfVid(+fm[1]) : null;
@@ -3392,6 +3513,11 @@ export class Game implements GameHooks {
           if (caught > 0) {
             const key = VANILLA_ITEM_KEY_BY_ID[caught];
             if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, 1, 0, -2);
+            this.cb.onInventoryChanged?.();
+          } else if (bobber.catchEnemy > 0) {
+            // 血月钓鱼敌怪（FishingCheck_RollEnemySpawns :19399）：生成于浮标处
+            const en = Enemy.fromVanilla(bobber.catchEnemy, bobber.cx - 8, bobber.cy - 8);
+            if (en) this.entities.add(en, 'enemies');
             this.cb.onInventoryChanged?.();
           }
           bobber.dead = true;
@@ -3410,12 +3536,14 @@ export class Game implements GameHooks {
           } else {
             const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
             const owner = this.player;
-            this.entities.add(new Bobber(
+            const bob = new Bobber(
               this.player.cx + Math.cos(ang) * 12, this.player.cy - 6,
               Math.cos(ang) * 9, Math.sin(ang) * 9 - 3,
               ff.fishingPole, baitSlot, baitPower,
               () => (owner.dead ? null : owner),
-            ), 'projectiles');
+            );
+            bob.poleVid = fm ? +fm[1] : 0; // 血肉抛竿 4325 敌怪概率判定用
+            this.entities.add(bob, 'projectiles');
             this.sfx.play('throw');
           }
         }
@@ -3896,7 +4024,7 @@ export class Game implements GameHooks {
   }
 
   /** 破坏 tile：处理树整体砍伐与 object 锚点 */
-  private breakTile(x: number, y: number) {
+  breakTile(x: number, y: number) {
     const st = this.world.store;
     const type = st.get(x, y);
     if (type === 0) return;
@@ -9157,6 +9285,14 @@ export class Game implements GameHooks {
         onWorldReady: (world) => {
           this.net = net;
           net.gameWorld = world;
+          // 重连自愈（review ③）：世界重组装后清本地真掉落的 netId 与差分基准——
+          // 断连窗口丢失的 spawn 上报由此重播（pendingFrames 断连清空过一轮），
+          // 陈旧 netDropSeen 条目也不再发幽灵 take
+          for (const ent of this.entities.drops) {
+            const d = ent as ItemDrop;
+            if (!d.netPuppet) d.netId = 0;
+          }
+          this.netDropSeen.clear();
           // 进世界（settled：世界已在服务器沉降过；tileReporter 注入上报链）
           world.store.netReporter = (op) => net.reportTileOp(op);
           // 实体同步钩子（Enemy.hurt 傀儡分支 → StrikeNPC 上报）
@@ -9195,6 +9331,8 @@ export class Game implements GameHooks {
         onNpcSnapshot: (snaps) => this.netApplyNpcSnaps(snaps),
         onItemOp: (op) => this.netApplyItemOp(op),
         onProjectileSync: (snaps) => this.netApplyProjSnaps(snaps),
+        onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
+        onSSC: (json) => this.netApplySSC(json),
         onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
         onHp: (slot, hp, maxHp) => {
           const rp = net.players.get(slot);

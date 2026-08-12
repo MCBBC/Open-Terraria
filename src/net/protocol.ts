@@ -8,9 +8,12 @@ export const PROTO_MAGIC = 'SW1';
 /** v2：msg13 对齐原版 PlayerControls 布局（控制位+position+velocity）。
  *  v3：实体同步族（msg16/21/23/27/42）+ 箱子权威（msg31/32）+ sessionToken 重连
  *  v4：msg23 S→C 短码格式（key 每次全量→codeId 短码+按需全量）+ RoomPolicy 尾部 u16 maxPlayers
- *  v5：msg27 kind 高位 bit7=hostile（仅 kind0/Arrow 有效——原版 Projectile.hostile 位，
- *      访客端据此对敌对弹幕傀儡本地结算 Damage_EVP）。server 与 game 同仓库同时发布，不做向后兼容 */
-export const PROTO_VER = 5;
+ *  v5：msg27 kind 高位 bit7=hostile（原版 Projectile.hostile 位——访客端据此对敌对弹幕
+ *      傀儡本地结算 Damage_EVP；服务器剥除非房主置位）
+ *  v6：msg27 kind 5-8（锚定 Boss 的自包含弹体：DukeSharknadoBolt/龙卷/MLDeathray/LunarOrb，
+ *      tag 打包锚参数，访客重建真类本地跑确定性 AI）+ msg28 弹幕消亡上报（消幽灵弹窗口）+
+ *      msg201 SSC 角色档下发（--ssc）。server 与 game 同仓库同时发布，不做向后兼容 */
+export const PROTO_VER = 6;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
@@ -48,9 +51,14 @@ export const enum Msg {
                        //             bit1=boss；否则仅 u16 codeId（客户端 codeId→netId/key 表）]}
   SyncProjectile = 27, // 双向（各自的弹幕互播，原版同号）：
                        //   {u16 count, [u32 netId, u8 kind, str tag, i16 dmg, i16 aux, f32 x,y,vx,vy]}
-                       //   （kind 低 7 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj；
+                       //   （kind 低 7 位: 0=Arrow 1=WeaponProj族 2=Dart 3=TrapShot 4=MagicProj
+                       //    5=DukeSharknadoBolt 6=DukeSharknadoTornado 7=MLDeathray 8=LunarOrb（v6：
+                       //    Boss 锚定弹体，tag 打包锚参数——见 Game.netProjBroadcast 各分支注释）；
                        //    bit7(0x80)=hostile——原版 Projectile.hostile，v5 起 kind0/2/3 携带
                        //    （服务器剥除非房主置位），访客端对 hostile 傀儡本地结算 Damage_EVP）
+  ProjDespawn = 28,  // C→S→广播（v6）：{u16 count, [u32 netId]}——弹幕消亡上报，
+                    //   各端对自己拥有的弹幕在消亡时批量上报，接收端即时移除傀儡
+                    //   （替代纯 180t 超时清扫：消除幽灵弹窗口 + 消亡闪烁）
   RequestChestOpen = 31, // C→S {i32 x, i32 y}（箱子锚点；原版同号）
   SyncChestItem = 32,  // S→C 下发 / C→S 槽位编辑（原版同号 SyncChestItem）：
                        //   {u16 chestIdx, i32 x, i32 y, u16 count, [u8 slot, u16 itemId, u16 stack]}
@@ -61,6 +69,10 @@ export const enum Msg {
   Ping = 154,         // 简化独立心跳（module2 并存预留）
   // ---- v3 房间制扩展（docs/multiplayer-design.md §房间） ----
   RoomPolicy = 200,   // S→C {roomCode, roomName, isHost, protectTiles, protectItems, u16 maxPlayers(v4)}
+  SscSync = 201,      // S→C（v6，--ssc 启用时）{str recordJson}——服务器角色档下发。
+                      //   record = {hp, maxHp, x, y, inv, armor, dye, savedAt}（id=内部下标，
+                      //   同版本 registry 一致）。客户端进房应用覆盖本地角色。
+                      //   语义=存档型 SSC（原版 ServerSideCharacter 同款信任模型，非反作弊）
 }
 
 /** NetModule 表（0-2 对齐原版 NetworkInitializer.cs 注册序：Liquid/Text/Ping；

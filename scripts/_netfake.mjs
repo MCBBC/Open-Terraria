@@ -8,7 +8,7 @@ export const { WebSocket } = require('ws');
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 export const PROTO_MAGIC = 'SW1';
-export const PROTO_VER = 5;
+export const PROTO_VER = 6;
 export const Msg = {
   Hello: 1, Kick: 2, PlayerSlot: 3, SyncPlayer: 4, RequestWorldData: 6, WorldData: 7,
   SpawnTileData: 8, StatusText: 9, TileSection: 10, PlayerSpawn: 12, PlayerState: 13,

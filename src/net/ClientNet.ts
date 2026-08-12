@@ -81,6 +81,10 @@ export interface ClientNetHooks {
   onItemOp?: (op: ItemOpMsg) => void;
   /** 弹幕快照到达（msg27；Game 维护傀儡池） */
   onProjectileSync?: (snaps: ProjSnap[]) => void;
+  /** 弹幕消亡到达（v6 msg28；Game 即时移除傀儡） */
+  onProjDespawn?: (netIds: number[]) => void;
+  /** SSC 角色档到达（v6 msg201，--ssc 启用；Game 应用覆盖本地角色） */
+  onSSC?: (recordJson: string) => void;
   /** 打击到达（msg42；房主权威结算） */
   onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number) => void;
   /** 远端玩家 HP（msg16 中继） */
@@ -375,8 +379,12 @@ export class ClientNet {
           const slot = r.u8();
           const text = r.str();
           const cr = r.u8(), cg = r.u8(), cb = r.u8();
-          const name = this.players.get(slot)?.name ?? `玩家${slot}`;
-          this.hooks.onChat?.(`<${name}> ${text}`, cr, cg, cb);
+          // slot=255 = 服务器系统公告（房主交接等）——直显无名字前缀
+          if (slot === 255) this.hooks.onChat?.(text, cr, cg, cb);
+          else {
+            const name = this.players.get(slot)?.name ?? `玩家${slot}`;
+            this.hooks.onChat?.(`<${name}> ${text}`, cr, cg, cb);
+          }
         } else if (moduleId === NetModule.JoinLeave) {
           // 加入/离开公告（原版服务器 Lang.mp[19]/[20] 广播，色 (255,240,20)）
           const slot = r.u8();
@@ -465,10 +473,23 @@ export class ClientNet {
         this.hooks.onStrike?.(netId, dmg, kbx, kby);
         return;
       }
+      case Msg.ProjDespawn: {
+        // v6 msg28：消亡批量——未知 netId 为无主傀儡，直接忽略
+        const n = Math.min(r.u16(), 64);
+        const ids: number[] = [];
+        for (let i = 0; i < n; i++) ids.push(r.u32());
+        if (ids.length) this.hooks.onProjDespawn?.(ids);
+        return;
+      }
       case Msg.PlayerLifeMana: {
         const slot = r.u8();
         const hp = r.i16(), maxHp = r.i16();
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
+        return;
+      }
+      case Msg.SscSync: {
+        // v6 msg201：服务器角色档（--ssc）——应用由 Game 侧 hook 负责
+        this.hooks.onSSC?.(r.str());
         return;
       }
       case Msg.Ping:
@@ -717,6 +738,16 @@ export class ClientNet {
       w.i16(s.dmg); w.i16(s.aux);
       w.f32(s.x); w.f32(s.y); w.f32(s.vx); w.f32(s.vy);
     }
+    this.send(w.finish());
+  }
+
+  /** 弹幕消亡上报（v6 msg28，双向）：自己拥有的弹幕消亡时批量上报，
+   *  接收端即时移除傀儡（替代纯 180t 超时清扫——消幽灵弹窗口 + 消亡闪烁） */
+  sendProjDespawn(netIds: number[]) {
+    if (!netIds.length) return;
+    const w = new NetWriter(Msg.ProjDespawn);
+    w.u16(Math.min(netIds.length, 64));
+    for (const id of netIds.slice(0, 64)) w.u32(id);
     this.send(w.finish());
   }
 

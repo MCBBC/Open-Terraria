@@ -30,7 +30,7 @@ export class Bobber extends Entity {
   /** 渔获原版 id → 钓起时落物用 */
   private waitT: number;
   private polePower: number;
-  private poleVid = 0;
+  poleVid = 0;
   private baitSlot: number;
   private baitPower: number;
   private ownerRef: () => Player | null;

@@ -1,0 +1,134 @@
+// 补齐清单打包批回归（事件月亮/进度条 wave20 在渲染层，此处覆盖可单测项）：
+//  1. GenState.seedFlags 灌入（parseSeed → vanillaTerrain；金标种子旗标恒空）
+//  2. 风筝 buff 383（KiteBuff：移速/镐速/kiteLuck 三档）+ 恶臭 buff 120（luck −0.25）
+//  3. 银河珍珠 5340 / 漂亮镜子 5577 物品注册（vi_ 前缀图标管线可达）
+//  4. 火把僵尸 590/591 手持火把点光（Enemy.torchZombieLight）
+//  5. 吸血链（Arrow 命中 → applyLifeSteal 分发：304=vampire / magic=ghost）
+import { describe, it, expect } from 'vitest';
+import { parseSeed } from '../src/world/gen/SeedEasterEggs';
+import { newGenState } from '../src/world/gen/vanilla/GenState';
+import { BuffState, BuffType } from '../src/stats/Buffs';
+import { Player } from '../src/entities/Player';
+import { Inventory } from '../src/items/Inventory';
+import { ITEM_BY_KEY } from '../src/data/items';
+import { Enemy } from '../src/entities/Enemy';
+import { Arrow } from '../src/entities/Arrow';
+import { World } from '../src/world/World';
+import type { GameHooks } from '../src/entities/types';
+
+describe('GenState.seedFlags 灌入（SeedEasterEggs.parseSeed）', () => {
+  it('醉酒/十周年种子旗标解析；金标种子旗标恒空', () => {
+    expect(parseSeed('drunk world').flags.drunkWorld).toBe(true);
+    expect(parseSeed('celebrationmk10').flags.tenthAnniversary).toBe(true);
+    expect(parseSeed('9293480').flags).toEqual({});
+    expect(newGenState(100, 100).seedFlags).toEqual({});
+  });
+});
+
+describe('风筝 buff 383 / 恶臭 buff 120（Player.cs:9612-9623 / :9958-9961）', () => {
+  it('KiteBuff：移速 +0.25、镐速 ×0.85、kiteLuck 180s 一档钳 3', () => {
+    const b = new BuffState();
+    expect(b.kiteLuckLevel).toBe(0);
+    b.apply(BuffType.KiteBuff, 179);
+    expect(b.kiteLuckLevel).toBe(0);
+    b.apply(BuffType.KiteBuff, 360);
+    expect(b.kiteLuckLevel).toBe(2);
+    b.apply(BuffType.KiteBuff, 10_000);
+    expect(b.kiteLuckLevel).toBe(3);
+    expect(b.pickSpeedMult).toBeCloseTo(0.85, 5);
+    const noKite = new BuffState();
+    expect(noKite.moveSpeedMult).toBe(1);
+    b.remove(BuffType.KiteBuff);
+    expect(b.moveSpeedMult).toBe(1);
+    b.apply(BuffType.KiteBuff, 600);
+    expect(b.moveSpeedMult).toBeCloseTo(1.25, 5);
+  });
+
+  it('luck 聚合：风筝档 +0.1/3·档、恶臭 −0.25（RecalculateLuck :28675/:28687-28690）', () => {
+    const p = new Player(0, 0, new Inventory());
+    p.buffs.apply(BuffType.KiteBuff, 360);
+    expect(p.luck).toBeCloseTo((2 * 0.1) / 3, 5);
+    p.buffs.apply(BuffType.Stinky, 60);
+    expect(p.luck).toBeCloseTo((2 * 0.1) / 3 - 0.25, 5);
+  });
+});
+
+describe('幸运消耗品/投掷物注册（5340 银河珍珠 / 5577 漂亮镜子）', () => {
+  it('vi_5340 / vi_5577 均在物品表（vi_ 前缀图标管线可达）', () => {
+    expect(ITEM_BY_KEY['vi_5340_galaxy_pearl']).toBeDefined();
+    expect(ITEM_BY_KEY['vi_5577_pretty_mirror']).toBeDefined();
+  });
+});
+
+describe('火把僵尸 590/591 手持火把点光（NPC.cs:57309-57366）', () => {
+  function gameStub(): GameHooks {
+    return {
+      world: new World(80, 40, 7, '测试'),
+      player: new Player(0, 0, new Inventory()),
+      enemies: () => [], critters: () => [], spawnDrop: () => null,
+      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      spawnParticles: () => {}, playSfxFiles: () => {},
+    } as unknown as GameHooks;
+  }
+  it('590：朝左取 (cx−22, y+6) 格；空气无液体 → (1, 0.95, 0.8)', () => {
+    const e = Enemy.fromVanilla(590, 40 * 16, 20 * 16);
+    expect(e).not.toBeNull();
+    if (!e) return;
+    e.facing = -1;
+    (e as unknown as { torchZombieLight: (g: GameHooks) => void }).torchZombieLight(gameStub());
+    expect(e.lightRGB).toEqual([1, 0.95, 0.8]);
+    expect(e.lightRGBAt).toEqual({ x: Math.floor((e.cx - 22) / 16) * 16, y: Math.floor((e.y + 6) / 16) * 16 });
+  });
+  it('591：专家持械变体非水即亮，偏移 (cx−36, y+24)', () => {
+    const e = Enemy.fromVanilla(591, 40 * 16, 20 * 16);
+    expect(e).not.toBeNull();
+    if (!e) return;
+    e.facing = -1;
+    (e as unknown as { torchZombieLight: (g: GameHooks) => void }).torchZombieLight(gameStub());
+    expect(e.lightRGB).toEqual([1, 0.95, 0.8]);
+    expect(e.lightRGBAt).toEqual({ x: e.cx - 36, y: e.y + 24 });
+  });
+});
+
+describe('吸血链分发（Projectile.cs:12877-12892）', () => {
+  interface Log { calls: Array<[string, number]>; }
+  function makeGame(log: Log, enemy: unknown): GameHooks {
+    return {
+      world: new World(64, 32, 42, '测试'),
+      player: new Player(0, 0, new Inventory()),
+      enemies: () => [enemy], critters: () => [], spawnDrop: () => null,
+      damagePlayer: () => {}, addDamageNumber: () => {}, cutTile: () => {},
+      spawnParticles: () => {}, playSfxFiles: () => {},
+      applyLifeSteal: (kind: 'vampire' | 'ghost', dmg: number) => { log.calls.push([kind, dmg]); return 0; },
+    } as unknown as GameHooks;
+  }
+  function targetEnemy(x: number): { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: () => boolean } {
+    return { x, y: 16 * 16, w: 16, h: 16, id: 1, dead: false, hurt: () => true };
+  }
+
+  it('吸血鬼飞刀 304 命中 → vampire（系数 0.075 侧）', () => {
+    const log: Log = { calls: [] };
+    const game = makeGame(log, targetEnemy(30 * 16));
+    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 100, 0, 304, null, { grav: 0, life: 300, pierce: 1 });
+    for (let i = 0; i < 8 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
+    expect(log.calls.length).toBe(1);
+    expect(log.calls[0][0]).toBe('vampire');
+    expect(log.calls[0][1]).toBe(100);
+  });
+
+  it('魔法弹命中 → ghost；非魔法非 304 弹不分发', () => {
+    const log: Log = { calls: [] };
+    const game = makeGame(log, targetEnemy(30 * 16));
+    // 恶魔镰刀 15（vanilla-projectiles magic=true）
+    const a = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 15, null, { grav: 0, life: 300, pierce: 1 });
+    for (let i = 0; i < 8 && !a.dead; i++) a.fixedUpdate(1 / 60, game);
+    expect(log.calls.length).toBe(1);
+    expect(log.calls[0][0]).toBe('ghost');
+    const log2: Log = { calls: [] };
+    const game2 = makeGame(log2, targetEnemy(30 * 16));
+    // 木箭 1（melee/ranged 均非）→ 不进吸血链
+    const b = new Arrow(30 * 16 - 30, 16 * 16 + 8, 6, 0, 60, 0, 1, null, { grav: 0, life: 300, pierce: 1 });
+    for (let i = 0; i < 8 && !b.dead; i++) b.fixedUpdate(1 / 60, game2);
+    expect(log2.calls.length).toBe(0);
+  });
+});

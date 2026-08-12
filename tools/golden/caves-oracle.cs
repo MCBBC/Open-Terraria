@@ -2665,7 +2665,7 @@ void GrowAshTree(int tx, int ty)
 {
     // 越过树苗（灰烬区无树苗 → 立即停）
     int num = ty;
-    while (num < H && act[num * W + tx] != 0 && typ[num * W + tx] == 20) num++;
+    while (num < H && act[num * W + tx] != 0 && typ[num * W + tx] == 590) num++;   // 树苗 590
     if (num >= H || num < 1) return;
     // 基座上一格三列无液体
     if (liq[(num - 1) * W + tx - 1] != 0 || liq[(num - 1) * W + tx] != 0 || liq[(num - 1) * W + tx + 1] != 0) return;
@@ -2695,11 +2695,10 @@ void GrowAshTree(int tx, int ty)
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
-        int num5 = (int)r.Next(3);
-        void Put2(int ax, int ay) { Put(ax, ay); }
-        Put2(tx, i);
-        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); Put2(tx - 1, i); }
-        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); Put2(tx + 1, i); }
+        int num5 = (int)r.Next(3);                              // 干身帧骰（帧值不入哈希）
+        Put(tx, i);
+        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
+        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
     }
     // 基座 tuft：两侧地面须灰烬草（GEM_TREE_FIT 口径此处即 633）——地狱腔天然全跳
     bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && typ[num * W + tx + dx] == 633;

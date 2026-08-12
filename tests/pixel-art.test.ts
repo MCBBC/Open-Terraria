@@ -98,4 +98,42 @@ describe('像素方块地图缩略色（F2 导入）', () => {
     expect((c >> 8) & 255).toBe(100);
     expect(c & 255).toBe(50);
   });
+
+  it('小地图增量路径（flushDirty→colorFor）放置后即显原色，无需重载', async () => {
+    // vitest 默认 node 环境：桩掉 document，捕 fillRect 的 fillStyle 断言写入色
+    const fills = new Map<string, string>();
+    const ctx2d = {
+      fillStyle: '',
+      fillRect(x: number, y: number, _w: number, _h: number) { fills.set(`${x},${y}`, this.fillStyle); },
+      createImageData(w: number, h: number) { return { width: w, height: h, data: new Uint8ClampedArray(w * h * 4) }; },
+      putImageData() {},
+    };
+    const prevDoc = (globalThis as { document?: unknown }).document;
+    (globalThis as { document?: unknown }).document = {
+      createElement: () => ({ width: 0, height: 0, getContext: () => ctx2d }),
+    } as unknown as Document;
+    try {
+      const { Minimap } = await import('../src/render/Renderer');
+      const { World } = await import('../src/world/World');
+      const w = new World(60, 60, 42, 'open');
+      const mm = new Minimap(w);
+      // 构造时 redrawAll 已清空 dirtyChunks；placeArt 走 setTile → onTileChanged → MarkDirty
+      const g = grid2x2([
+        [200, 100, 50, 255], // tl (10,45) → #c86432
+        [0, 0, 0, 0],        // tr 透明跳过
+        [12, 34, 56, 255],   // bl (10,46) → #0c2238
+        [0, 0, 0, 0],
+      ]);
+      expect(placeArt(w.store, g, { x: 10, y: 45 })).toBe(2);
+      expect(mm.dirtyChunks.size).toBeGreaterThan(0); // 放置确实落进脏块队列
+      mm.flushDirty(); // 增量刷新（不重跑 redrawAll）
+      expect(fills.get('10,45')).toBe('#c86432');
+      expect(fills.get('10,46')).toBe('#0c2238');
+      // colorFor 直查（与 redrawAll :498 分支同公式/同字节序）
+      expect(mm.colorFor(10, 45)).toBe('#c86432');
+      expect(mm.colorFor(10, 46)).toBe('#0c2238');
+    } finally {
+      (globalThis as { document?: unknown }).document = prevDoc;
+    }
+  });
 });

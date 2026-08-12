@@ -11,7 +11,7 @@ const MUD = TILE_BY_KEY['mud']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SAND = TILE_BY_KEY['sand']!;
 const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block'] ?? -1;
-const CHEST = TILE_BY_KEY['chest']!;
+const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block'] ?? -1;  // 原版 25=黑檀石（曾误当 chest）
 
 /** WillWaterPlacedHereStayPut 近似：下方实心且自身无液体 → 水放得住 */
 function willWaterStayPut(st: TileStore, x: number, y: number): boolean {
@@ -138,7 +138,8 @@ export function runLakesPass(st: TileStore, rng: RNG, gs: GenState): void {
         for (let dy = -50; dy <= 50; dy++) {
           if (!st.inBounds(x + dx, y + dy)) continue;
           const t = st.type[st.idx(x + dx, y + dy)];
-          if (st.flags[st.idx(x + dx, y + dy)] && (t === CRIMSTONE || t === CHEST)) { bad = true; break; }
+          // 原版 cs:14690 不判 active：type==203/25（猩红石/黑檀石）即拒
+          if (t === CRIMSTONE || t === EBONSTONE) { bad = true; break; }
         }
       }
       if (bad) continue;

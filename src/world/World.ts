@@ -45,6 +45,8 @@ export class Clock {
 
 export class World {
   store: TileStore;
+  /** 本帧 SceneMetrics 快照（Game 每帧写；Enemy 判 zoneGraveyard 等只读用） */
+  scene: import('./SceneMetrics').SceneFlags | null = null;
   name: string;
   seed: number;
   spawnX = 0; spawnY = 0;

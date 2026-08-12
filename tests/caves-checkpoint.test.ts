@@ -24,6 +24,10 @@ import { runMarblePass, runGranitePass } from '../src/world/gen/vanilla/MarbleGr
 import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass';
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
+import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
+import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
+import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -103,8 +107,13 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runDirtToMudPass(st, rng, gs); snap('dirttomud');
   runSiltPass(st, rng, gs); snap('silt');
   runShiniesPass(st, rng, gs); snap('ores');
-  // 27-32 段（Webs/Underworld/Corruption/Lakes/Slush/Dungeon）oracle 尚未转录
-  // → mcopenings/beaches 暂挂其后
+  // #27/28/30/31（1456 注册序 13659/13697/14613/14756）。
+  // #29 Corruption、#32 Dungeon oracle 尚未转录——其 JS 实现仍在 vanillaBiomes 内
+  // （位置正确），转录后将插在 lakes 前与 slush 后。
+  runWebsPass(st, rng, gs); snap('webs');
+  runUnderworldPass(st, rng, gs); snap('underworld');
+  runLakesPass(st, rng, gs); snap('lakes');
+  runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
   runBeachesPass(st, rng, gs); snap('beaches');
   return { grids: out, walls: outWall };
@@ -134,7 +143,7 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
         'desertentrance', 'deserthive', 'desertdone',
         'mushroom', 'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores',
-        'mcopenings', 'beaches'];
+        'webs', 'underworld', 'lakes', 'slush', 'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

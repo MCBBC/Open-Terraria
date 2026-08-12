@@ -415,6 +415,13 @@ export class Minimap {
     const i = st.idx(x, y);
     const hex = (c: number[]): string => `#${c[0].toString(16).padStart(2, '0')}${c[1].toString(16).padStart(2, '0')}${c[2].toString(16).padStart(2, '0')}`;
     if (st.flags[i] && st.type[i] !== 0) {
+      // 自研像素方块（F2 图片导入）：RGB 编码在 frameX/Y——与 redrawAll 的
+      // PIXEL_ART_TILE 分支同公式。增量路径（flushDirty→colorFor）此前漏掉此分支，
+      // 放置后小地图仍显泥土色，须存档重载走全量重建才恢复原色
+      if (st.type[i] === PIXEL_ART_TILE) {
+        const r = (st.frameX[i] >> 8) & 255, g = st.frameX[i] & 255, b = st.frameY[i] & 255;
+        return `#${(r << 16 | g << 8 | b).toString(16).padStart(6, '0')}`;
+      }
       const d = TILE_DEFS[st.type[i]];
       if (d?.vanilla?.sheet !== undefined) {
         const vc = vanillaTileMapColor(d.vanilla.sheet);

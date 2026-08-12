@@ -1370,7 +1370,7 @@ export class Player extends Entity {
     if (l.usedGalaxyPearl) v += 0.03;                        // :28676-28678
     if (l.lanternsUp) v += 0.3;                              // :28679-28682
     if (l.hasGardenGnomeNearby) v += 0.2;                    // :28683-28686
-    if (this.buffs.has(BuffType.Stinky)) v -= 0.25;          // :28687-28690（buff 120 → stinky）
+    if (l.stinky || this.buffs.has(BuffType.Stinky)) v -= 0.25; // :28687-28690（buff 120 → stinky；l.stinky 为环境外注入位）
     v += this.luckEquipmentBonus;                            // :28692
     v += l.coinLuckValue;                                    // :28693
     if (l.brokenMirrorBadLuck) v -= 0.25;                    // :28694-28696

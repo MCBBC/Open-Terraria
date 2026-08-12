@@ -92,6 +92,7 @@ function shimmerWorld(): World {
     st.setTile(x, 40, 1);               // 池底
     for (let y = 33; y < 40; y++) st.setLiquid(x, y, 255, 4); // 微光满格
   }
+  for (let x = 30; x < 46; x++) st.setTile(x, 40, 1); // 池外实地（脱困传送落点候选）
   w.lavaLine = 50;
   return w;
 }

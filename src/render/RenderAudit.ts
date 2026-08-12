@@ -11,7 +11,7 @@
 //  ⑤ 多格物件帧连续性 w×h>1 物件各格帧相位差≠18 = 物件残缺断裂（warn）
 //  ⑥ 火把锚定 用 torchStillAnchored——浮空火把（error）
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
-import { torchStillAnchored } from '../world/Torch';
+// 火把锚定判定内联（torchStillAnchored 依赖 TileStore 方法，审计视图是纯数组）
 
 /** 审计所需的最小存储视图（TileStore 本体满足） */
 export interface AuditStoreView {
@@ -55,6 +55,14 @@ const STRIDE_WHITELIST = new Set([
 ]);
 /** 火把：X 步长 22（锚 0/22/44 + 未点燃 66 档） */
 const SHEET_TORCH = 4;
+
+/** 视图内的实心判定（TileStore.isSolid 语义：active+solid） */
+function solidAt(st: AuditStoreView, x: number, y: number): boolean {
+  if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
+  const j = y * st.w + x;
+  if (!st.flags[j]) return false;
+  return !!TILE_DEFS[st.type[j]]?.solid;
+}
 
 /** 全量审计。maxReport 每类问题上限（防刷屏；bySheet 计数不受限） */
 export function auditWorldRender(st: AuditStoreView, maxReport = 200): AuditReport {
@@ -115,12 +123,18 @@ export function auditWorldRender(st: AuditStoreView, maxReport = 200): AuditRepo
           push('error', x, y, sheet, `帧未对齐步长: fx=${fx},fy=${fy} stride=${meta.stride}`);
         }
       }
-      // ⑥ 火把锚定（只查锚格：fx 为 22 倍数且非未点燃偏移奇点）
+      // ⑥ 火把锚定（Torch.ts torchStillAnchored 语义内联；树干侧锚近似省略）
       if (sheet === SHEET_TORCH && torchReported < 50) {
         if (fx % 22 !== 0) { push('error', x, y, sheet, `火把帧非法: fx=${fx} 非 22 步长`); torchReported++; }
-        else if (!torchStillAnchored(st as unknown as Parameters<typeof torchStillAnchored>[0], x, y, fx)) {
-          push('error', x, y, sheet, `浮空火把: fx=${fx} 无底锚/侧锚/墙锚`);
-          torchReported++;
+        else {
+          const lit = fx % 66 < 22 ? fx % 22 : fx % 66;   // 剥未点燃 66 档取锚位
+          const anchor = lit === 0
+            ? (solidAt(st, x, y + 1) || st.wall[i] !== 0)
+            : lit === 22 ? solidAt(st, x - 1, y) : solidAt(st, x + 1, y);
+          if (!anchor) {
+            push('error', x, y, sheet, `浮空火把: fx=${fx} 无底锚/侧锚/墙锚`);
+            torchReported++;
+          }
         }
       }
       // ⑤ 多格物件帧连续性（只查锚格：相位 (0,0)）

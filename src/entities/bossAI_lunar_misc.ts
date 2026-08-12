@@ -47,7 +47,7 @@ import { Arrow } from './Arrow';
 import { projFrameImg } from './Arrow';
 import { Entity } from './Entity';
 import { canHitLine } from '../physics/LineOfSight';
-import { MLDeathray } from './bossAI_duke_moonlord';
+import { MLDeathray, type NetProjMeta } from './bossAI_duke_moonlord';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
@@ -1614,6 +1614,8 @@ export class LunarOrb extends Entity {
   vx: number; vy: number;
   readonly kind: 539 | 574;
   readonly parentId: number;
+  /** v6 联机：父体 netId（访客端父=msg23 傀儡；0=本端真身走 parentId 查找） */
+  parentNetId = 0;
   private ai0 = 0;
   private dmg: number;
   private life = 600;
@@ -1621,22 +1623,33 @@ export class LunarOrb extends Entity {
   private frameT = 0;
   dead = false;
 
-  constructor(parent: Enemy, kind: 539 | 574, vx: number, vy: number, dmg: number) {
+  constructor(parent: Enemy | null, kind: 539 | 574, vx: number, vy: number, dmg: number, x?: number, y?: number) {
     super();
     this.kind = kind;
-    this.parentId = parent.id;
+    this.parentId = parent?.id ?? 0;
     this.vx = vx; this.vy = vy;
     this.dmg = dmg;
     if (kind === 539) { this.w = 18; this.h = 30; }
-    this.x = parent.cx - this.w / 2;
-    this.y = parent.cy - this.h / 2;
+    // v6 傀儡重建：parent=null 时由调用方传显式坐标
+    this.x = (x ?? parent!.cx) - this.w / 2;
+    this.y = (y ?? parent!.cy) - this.h / 2;
+  }
+
+  /** v6 联机打包：kind=8，tag=`${539|574},${parentId}`。
+   *  访客重建后本地跑盘旋/冲刺/爆炸（确定性自包含，父=傀儡）；
+   *  574 的线发 576 弹经 !netPuppet 门禁排除（房主侧已发） */
+  netProjMeta(): NetProjMeta {
+    return { kind: 8, tag: `${this.kind},${this.parentId}`, aux: 0, dmg: this.dmg };
   }
 
   /** 悬浮脑瞬移同步:全场计时 -30(:41682-41691) */
   delay(t: number): void { this.ai0 -= t; }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
-    const parent = (game.enemies() as Enemy[]).find((n) => n.id === this.parentId);
+    // v6 联机：傀儡端按 netId 找父（msg23 傀儡）；本端真身按本地 id
+    const parent = this.parentNetId
+      ? (game.enemies() as Enemy[]).find((n) => n.netId === this.parentNetId)
+      : (game.enemies() as Enemy[]).find((n) => n.id === this.parentId);
     const orbitT = this.kind === 539 ? 210 : 180;
     const alive = !!parent && !parent.dead;
     if (this.kind === 574 && !alive) { this.dead = true; return; }   // :32083-32092
@@ -1661,8 +1674,9 @@ export class LunarOrb extends Entity {
         const d = Math.hypot(dx, dy) || 1;
         this.vx = (dx / d) * 16; this.vy = (dy / d) * 16;
       } else {
-        // 线发 576 弹(:32204-32211):CanHitLine 门,8 速 65 伤;发射后重置计时
-        if (!p.dead && canHitLine(game.world.store, this.cx, this.cy, 0, 0, p.cx, p.cy, 0, 0)) {
+        // 线发 576 弹(:32204-32211):CanHitLine 门,8 速 65 伤;发射后重置计时。
+        // v6 傀儡不本地线发——房主的 576 弹经 msg27 同步,双端各发会翻倍
+        if (!this.netPuppet && !p.dead && canHitLine(game.world.store, this.cx, this.cy, 0, 0, p.cx, p.cy, 0, 0)) {
           const dx = p.cx - this.cx, dy = p.cy - this.cy;
           const d = Math.hypot(dx, dy) || 1;
           (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(

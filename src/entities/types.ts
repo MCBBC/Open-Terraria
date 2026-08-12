@@ -19,6 +19,8 @@ export interface GameHooks {
   cutTile(x: number, y: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */
   placePortal?(x: number, y: number, vx: number, vy: number, form: number): void;
+  /** 破坏 tile（掉落+音效+帧刷新；Enemy 攻门拆门 = WorldGen.KillTile 语义） */
+  breakTile(x: number, y: number): void;
   /** 敌人死亡 */
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 出生敌人 */
