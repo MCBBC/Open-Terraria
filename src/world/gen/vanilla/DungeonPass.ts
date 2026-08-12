@@ -298,10 +298,12 @@ function dungeonHalls(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix:
   let radius = rng.int(4, 5);
   const baseR = radius;
   let steps = rng.int(35, 79);
+  // 危险走廊(LegacyDungeonHall.cs:206-209):CrackedBrickChance=0.166(DungeonHallSettings
+  // .cs:15,Legacy 子类未覆写)先掷、恒消费——此前顺序对调且值用 0.2,还误加
+  // !forceX 短路(forceX 也照掷)
+  const dangerous = rng.next() <= 0.166;
   if (forceX) steps += 20;
-  else if (rng.next() < 0.2) { radius *= 2; steps = Math.floor(steps / 2); }
-  // 危险走廊(原版 1/5):内部填裂砖而非挖空
-  const dangerous = !forceX && rng.next() < 0.2;
+  else if (rng.nextInt(5) === 0) { radius *= 2; steps = Math.floor(steps / 2); }
   // 方向
   let vx = 0, vy = 0;
   {

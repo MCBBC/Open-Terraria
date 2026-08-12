@@ -17,7 +17,7 @@ import { accFxOfInternal } from '../data/vanillaAccFx';
 import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummonStats';
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
-import { hurtTiles, liquidCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
+import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
 
 // 摔伤参数（移植自 Maples Player.Fall，单位换算为 tile）
@@ -81,16 +81,26 @@ export class Player extends Entity {
   /** 微光浸入（原版 shimmerWet，Player.cs:27420-27424：Collision.shimmer 盒命中） */
   inShimmer = false;
   /** 微光化态（buff 353，Player.cs:11381-11388）：frozen 封输入 + fallStart 重置 +
-   *  受击免疫（Hurt :37591-37595 直接 0）+ 慢沉（:24117-24119 ×0.9） */
+   *  受击免疫（Hurt :37591-37595 直接 0）+ 穿墙下坠（:27868 velocity×0.375 完全
+   *  绕过 tile collision；:24117-24119 gravity/maxFall ×0.9）——直到落入能容纳的
+   *  空腔（盒覆盖全非实心）才实体化（:11403-11419 DelBuff） */
   shimmering = false;
   /** 微光滞留 tick（TryToShimmerUnstuck :28378：钳 0-7200，shimmering +1/否则 -10） */
   timeShimmering = 0;
-  // 气口：5 个气泡，共 23.33 秒（原版参数），每颗 ≈4.67 秒
-  static readonly BREATH_BUBBLES = 5;
-  static readonly BREATH_SECONDS = 23.33;
-  breath = Player.BREATH_BUBBLES;
-  private breathAccum = 0;
-  private drownAccum = 0;
+  /** 微光化半透明（Player.cs:18147-18162 shimmerTransparency：shimmering +0.015/t
+   *  钳 0.8；解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 Sound 19 style 3）。
+   *  渲染侧 globalAlpha = 1 - 值（GetAlpha :53253 三通道乘 (1-t) 近似） */
+  shimmerTransparency = 0;
+  // ---- 呼吸 1:1（Player.cs:1402-1406 / CheckDrowning :22914-23002）----
+  breathMax = 200;   // :1404（全源码无修改点——潜水头盔加的是 breathCDMax ×6 非 breathMax）
+  breath = 200;      // :1406（显示侧气泡数 = breathMax/20 = 10）
+  breathCD = 0;      // :1402（每 tick +1，≥breathCDMax 时 breath--）
+  /** 原版 itemAnimation 等效（>0 = 挥舞动画中）：芦苇管换气门禁（:22920/:3698）
+   *  用。Game.fixedUpdate 每帧注入（swing 在 postUpdate 递减，读到的是上一帧尾值，
+   *  ≤1 tick 偏差，注释存档） */
+  itemAnimTicks = 0;
+  /** accMerman 人鱼化态（:22965 merman=true，水中呼吸；本作仅标志，变身渲染后续） */
+  merman = false;
   inLava = false;
   private lavaAccum = 0;
   animTime = 0;          // 走路动画计时
@@ -110,6 +120,8 @@ export class Player extends Entity {
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
+  /** 高尔夫累计分（Player.cs:1792 AccumulateGolfingScore——Golfer 商店门槛/月相画门） */
+  golferScoreAccumulated = 0;
   /** 鞭命中授予的玩家 buff（WhipTagEffect.PlayerBuffId → 剩余 tick；
    *  效果实装（:9790-9802）：311 镰鞭=鞭攻速+35%、308 剑鞭=+25%、314 荆棘鞭=+12%
    *  ——Game 鞭 useTime 结算读取；312/365 登记持续期（效果端暂不接） */
@@ -226,6 +238,9 @@ export class Player extends Entity {
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
     summonSet: SummonSetFx | null;
+    // ---- 呼吸族（GrantArmorBenefits/ApplyEquipFunctional 行为型）----
+    divingHelm: boolean;   // accDivingHelm（Player.cs:12829/14652）：breathCDMax ×6
+    merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
   } {
     /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
     function activeArmorSetBonus(self: Player) {
@@ -261,6 +276,7 @@ export class Player extends Entity {
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
+    let divingHelm = false, merman = false;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -336,6 +352,8 @@ export class Player extends Entity {
         if (fx.manaRegenBonus) manaRegenBonus += fx.manaRegenBonus;           // 魔力斗篷 982（:14383）
         if (fx.manaRegenDelayBonus) manaRegenDelayBonus += fx.manaRegenDelayBonus; // 982（:14382）
         if (fx.counterWeight) counterWeight = true;
+        if (fx.divingHelm) divingHelm = true;   // 394/1860/1861 潜水装备族
+        if (fx.merman) merman = true;           // 497/861/3110 贝壳族
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
       // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
@@ -374,6 +392,11 @@ export class Player extends Entity {
       if (fx.whipRange) whipRange += fx.whipRange;
     };
     for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
+    // GrantArmorBenefits 盔甲三件扫描（Player.cs:12826-12831）：armor 268 潜水头盔 → accDivingHelm
+    for (let i = 0; i < 3; i++) {
+      const s = this.inv.armor[i];
+      if (s && accFxOfInternal(s.id)?.divingHelm) divingHelm = true;
+    }
     // 套装/头盔 type 检测（vid 直查）：蘑菇矿头 1546箭/1547弹/1548火箭（:13274-13288）
     const aVid = (i: number): number => {
       const d = ITEM_DEFS[this.inv.armor[i]?.id ?? -1];
@@ -453,6 +476,7 @@ export class Player extends Entity {
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
       summonSet,
+      divingHelm, merman,
     };
   }
   get maxHp(): number {
@@ -707,14 +731,51 @@ export class Player extends Entity {
     // BuffState.apply 是 max 合并（AddBuff 语义），浸着恒 30s，离开后自然倒计时
     this.inHoney = world.store.liquidType[centerIdx] === 3 && liq > 30;
     if (this.inHoney) this.buffs.apply(BuffType.Honey, 30);
-    // 微光浸入（Player.cs:27420-27434）：盒命中微光 → shimmerWet；本地玩家非免疫且
-    // 脚格是微光且在地狱层之上 → AddBuff(353, 60)（每 tick 刷新 = 浸着恒微光化）。
-    // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内微光不生效
-    // （:11391-11397 position.Y/16 > UnderworldLayer → DelBuff）
+    // 微光浸入（Player.cs:27420-27434）：shimmerWet + 地狱层之上 → AddBuff(353, 60t=1s)。
+    // shimmerImmune（:14981 原版旗标来源未移植）恒 false；地狱层内不授予
+    // （:27430 采样处即有 position.Y/16 < UnderworldLayer 门）
     this.inShimmer = world.store.liquidType[centerIdx] === 4 && liq > 30;
-    this.shimmering = this.inShimmer && this.y / TILE < world.lavaLine;
-    // buff 353 登记（每 tick 刷新 1s = 浸着恒显示；离开后 ≤1s 消失）——左上角图标依赖
-    if (this.shimmering) this.buffs.apply(BuffType.Shimmered, 1);
+    if (this.inShimmer && this.y / TILE < world.lavaLine) this.buffs.apply(BuffType.Shimmered, 1);
+    // buff 353 处理段（Player.cs:11381-11419）：buff 在 → shimmering=true + frozen
+    // 封输入（下方移动积分前的 Frozen∪Shimmering 清零段消费）+ fallStart 重置（免摔伤）。
+    // 注意：本 tick 内 DelBuff 后 shimmering 保留到下 tick 才复位（原版 :18168 帧首
+    // shimmering=false、buff 循环内置位——同帧移除不撤销本帧穿落）
+    if (this.buffs.has(BuffType.Shimmered)) {
+      this.shimmering = true;
+      this.fallStartY = null;
+      if (this.y / TILE > world.lavaLine) {
+        // 地狱层门（:11391-11397）position.Y/16 > UnderworldLayer → DelBuff
+        this.buffs.remove(BuffType.Shimmered);
+      } else if (this.inShimmer) {
+        // 浸液中（:11399-11402）：buffTime=60t=1s 刷新（穿落全程浸着恒续期）
+        this.buffs.apply(BuffType.Shimmered, 1);
+      } else {
+        // 穿落落点检查（:11403-11419）：逐格扫玩家盒覆盖的全部 tile——
+        // 任一实心（SolidTile3）→ buffTime=6t=0.1s 继续穿落；全非实心 →
+        // DelBuff 实体化（此刻悬/站在该容纳空间，下 tick 起恢复常规碰撞）
+        let inSolid = false;
+        const sx0 = Math.floor(this.x / TILE), sx1 = Math.floor((this.x + this.w) / TILE);
+        const sy0 = Math.floor(this.y / TILE), sy1 = Math.floor((this.y + this.h) / TILE);
+        outer: for (let sy = sy0; sy <= sy1; sy++) {
+          for (let sx = sx0; sx <= sx1; sx++) {
+            if (world.store.inBounds(sx, sy) && world.store.isSolid(sx, sy)) { inSolid = true; break outer; }
+          }
+        }
+        if (inSolid) this.buffs.set(BuffType.Shimmered, 0.1);
+        else this.buffs.remove(BuffType.Shimmered);
+      }
+    } else {
+      this.shimmering = false; // 帧首复位（:18168 shimmering=false 语义）
+    }
+    // shimmerTransparency（Player.cs:18147-18162）：shimmering +0.015/t 钳 0.8；
+    // 解除后 -0.015/t 回 0，衰减起始帧（恰 0.8）播 Sound 19 style 3
+    // （本作 sfx 库无独立 style 3 样本，shimmerSplash 近似）
+    if (this.shimmering) {
+      this.shimmerTransparency = Math.min(0.8, this.shimmerTransparency + 0.015);
+    } else if (this.shimmerTransparency > 0) {
+      if (this.shimmerTransparency >= 0.8) game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);
+      this.shimmerTransparency = Math.max(0, this.shimmerTransparency - 0.015);
+    }
     // TryToShimmerUnstuck（:28377-28389）：timeShimmering 钳 0-7200（shimmering +1/
     // 否则 -10）；≥3600 或 ≥1200 且有任意输入 → ShimmerUnstuck 传送脱困
     this.timeShimmering = Math.max(0, Math.min(7200,
@@ -728,8 +789,8 @@ export class Player extends Entity {
     const headIdx = world.store.idx(Math.floor(this.cx / TILE), Math.floor((this.y + 8) / TILE), // 鼻子位置（头顶下方半格）
     );
     const headLiq = world.store.liquid[headIdx];
-    const prevHeadUnderwater = this.headUnderwater; // 旧值（判定"刚出水"必须用更新前状态）
-    // 气口消耗只对水（原版 DrownCollision 不含水蜜/岩浆——蜂蜜和岩浆不会淹死）
+    // 纯视觉字段：Renderer 水下色调滤镜/调试面板在用。溺水判定已走 drownCollision
+    // （CheckDrowning 1:1），勿以此字段做机制决策
     this.headUnderwater = headLiq > 40 && world.store.liquidType[headIdx] === 1;
     // 岩浆伤害 1:1（Player.cs:27350-27440）：盒判定接触 → lavaTime 宽限（护身符族）耗尽后
     // 单发 80（Hurt 全结算：防御+无敌帧）+ 着火 OnFire 7s（AddBuff(24,420)）；
@@ -772,45 +833,57 @@ export class Player extends Entity {
       this.equipStats.fireWalk || this.buffs.obsidianSkin); // 黑曜石皮含 fireWalk（:9576）
     if (ht) this.applyTouchDamage(game, ht);
 
-    // 气口：头部浸水时 23.33 秒耗尽，耗尽后每秒掉 10 血；出水立即恢复；
-    // 鱼鳃 buff（gills,:9656）水下呼吸不耗
-    const wasHead = prevHeadUnderwater;
-    if (this.headUnderwater && !this.buffs.gills) {
-      this.breathAccum += dt;
-      const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
-      while (this.breathAccum >= per && this.breath > 0) {
-        this.breathAccum -= per;
-        this.breath--;
-      }
-      if (this.breath <= 0) {
-        this.drownAccum += dt;
-        if (this.drownAccum >= 1) {
-          this.drownAccum -= 1;
-          this.lastDamageCause = { kind: 'drowned' };
-          this.damage(10, this.cx, this.y - 10, false); // 窒息环境伤害：只掉血，无击退
-          game.playSfx('drown');
-          game.addDamageNumber(this.cx, this.y, 10, false, '#FF5050'); // 与受击同色
+    // ---- CheckDrowning 1:1（Player.cs:22914-23002，本地玩家门 = Main.myPlayer==whoAmI）----
+    // 原版 flag = DrownCollision（Collision.cs:1385：头部盒判定，**蜂蜜也淹**，
+    // 只排岩浆/微光——旧实现只认水是错的）
+    let drown = drownCollision(world.store, this.x, this.y, this.w, this.h,
+      this.gravDir === -1 ? -1 : 1);
+    // 鱼缸头盔（armor[0]∈{250,4275}，:22917）：恒淹（戴着鱼缸无法呼吸）
+    const headVid = (() => {
+      const d = ITEM_DEFS[this.inv.armor[0]?.id ?? -1];
+      return d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    })();
+    if (headVid === 250 || headVid === 4275) drown = true;
+    // 芦苇管出水口（:22920-22945）：非挥舞中时采样头顶 44px 前偏 6px 格，
+    // 该格液体<128 且非实心 → 不淹（管口在水面上）。原版整段 try/catch 吞越界
+    if (this.hasBreathingReed && this.itemAnimTicks === 0) {
+      const rx = Math.floor((this.x + this.w / 2 + 6 * this.facing) / TILE);
+      const ry = Math.floor((this.y + (this.gravDir === -1 ? this.h : 0) - 44 * this.gravDir) / TILE);
+      if (world.store.inBounds(rx, ry)) {
+        const ri = world.store.idx(rx, ry);
+        if (world.store.liquid[ri] < 128
+          && (!world.store.isActive(rx, ry) || !world.store.isSolid(rx, ry) || world.store.isPlatform(rx, ry))) {
+          drown = false;
         }
       }
-    } else if (wasHead || this.breath < Player.BREATH_BUBBLES) {
-      // 出水补气。关键：刚出水时 breath 可能仍为满值但有一颗正在渐隐消耗中
-      // （breathAccum > 0）——只判 breath==5 会跳过补气导致气泡瞬间消失。
-      // 余量取「整口气 + 正在消耗那颗的剩余比例」的精确小数，从该状态回满
-      const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
-      const drainRemain = wasHead ? Math.max(0, Math.min(1, 1 - this.breathAccum / per)) : 1;
-      this.refillFrom = Math.min(Player.BREATH_BUBBLES, this.breath - 1 + drainRemain);
-      const missing = 1 - this.refillFrom / Player.BREATH_BUBBLES;
-      this.breath = Player.BREATH_BUBBLES;
-      this.breathAccum = 0;
-      this.drownAccum = 0;
-      // 补气时长：缺口比例（1.11s × 缺口），保底 0.55s 能看清；满后停留 0.35s 再隐藏
-      this.refillDur = Math.max(0.55, 1.11 * missing);
-      this.refillT = 0;
     }
-    // 补气动画推进（补满后停留 REFILL_HOLD 再隐藏）
-    if (this.refillT >= 0) {
-      this.refillT += dt;
-      if (this.refillT >= this.refillDur + 0.15) this.refillT = -1;
+    // gills（:22946-22949）：flag = getGoodWorld && !flag——仅 ftw 种子翻转，本作不支持
+    if (this.buffs.gills) drown = false; // buff 4 直接免淹（普通种子语义）
+    if (this.shimmering) drown = false;  // :22950-22952 微光化不淹
+    // mount.Type==4 史莱姆鞍豁免（:22953）：本作无坐骑，省略
+    if (this.equipStats.merman) {        // :22957-22964 accMerman：水中不耗气并人鱼化
+      if (drown) this.merman = true;
+      drown = false;
+    } else {
+      this.merman = false;
+    }
+    if (drown) {
+      this.breathCD++;
+      if (this.breathCD >= this.breathCDMax) {
+        this.breathCD = 0;
+        this.breath--;
+        if (this.breath === 0) game.playSfx('drown'); // SoundID 23，恰减到 0 那轮播一次
+        if (this.breath <= 0) {
+          this.breath = 0;
+          this.lastDamageCause = { kind: 'drowned' }; // PlayerDeathReason.ByOther(1)
+          // statLife -= 2 直伤（:22981-22991）：不过防御/不吃无敌帧，不走 damage()
+          this.hp -= 2;
+          if (this.hp <= 0) this.hp = 0; // KillMe(ByOther(1),10) 交由下方统一死亡结算
+        }
+      }
+    } else {
+      this.breath = Math.min(this.breathMax, this.breath + 3); // :22995-23000 每 tick +3
+      this.breathCD = 0;
     }
 
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
@@ -931,8 +1004,9 @@ export class Player extends Entity {
     } else if (this.shimmering) {
       // buff 353（:11381-11388）：frozen 封输入（输入清零在上方移动积分前的
       // Frozen∪Shimmering 段执行——此处只做物理）+ fallStart 重置（免摔伤）；
-      // 物理 :24117-24119 gravity/maxFall ×0.9（近似正常慢沉，原地等脱困传送）
-      this.vy = Math.min(this.vy + GRAVITY * 0.7 * 0.9, MAX_FALL_SPEED * 0.9);
+      // 物理 :24117-24119 gravity/maxFall ×0.9——速度只用于积分，位移走下方
+      // :27868 的 velocity×0.375 穿墙下坠（绕过 tile collision）
+      this.vy = Math.min(this.vy + GRAVITY * 0.9, MAX_FALL_SPEED * 0.9);
       this.fallStartY = null;
     } else
     // 跳跃 / 游泳
@@ -1277,8 +1351,17 @@ export class Player extends Entity {
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
     const preY = this.y;
-    moveAndCollide(this, world, this.vx, this.vy);
-    this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
+    if (this.shimmering) {
+      // 穿墙下坠（Player.cs:27868-27870）：position += velocity × 0.375（num111）——
+      // **完全绕过 tile collision**（moveAndCollide/DryCollision 不跑），穿湖底与
+      // 岩层直落；onGround/hitWall 不更新（原版同语义——穿墙中不落地不贴墙）
+      this.x += this.vx * 0.375;
+      this.y += this.vy * 0.375;
+      this.landImpactVy = 0;
+    } else {
+      moveAndCollide(this, world, this.vx, this.vy);
+      this.landImpactVy = this.onGround && impactVy >= 3 ? impactVy : 0;
+    }
     // StepUp 抬升检测（原版 gfxOffY）：水平移动中被抬升 ≤16px → 渲染缓动补偿
     const lifted = preY - this.y;
     if (this.inputX !== 0 && lifted > 0.5 && lifted <= 16.1) this.stepRenderY = lifted;
@@ -1450,20 +1533,21 @@ export class Player extends Entity {
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
   }
 
-  /** 出水补气动画进度 0..1（-1 = 未在补气） */
-  refillT = -1;
-  refillDur = 1.11; // 本次补气总时长（按出水时的缺口比例：1.11s × 缺口）
-  refillFrom = 0;   // 出水时的余量（补气动画从此处起填）
-  static readonly REFILL_HOLD = 0.35; // 补满后满格停留时长
-  get refill01(): number {
-    return this.refillT < 0 ? 1 : Math.min(1, this.refillT / this.refillDur);
+  /** breathCDMax（Player.cs:3693-3710，属性每次读重算）：基础 7 tick；
+   *  芦苇管（手持 186 且非挥舞中）×2；accDivingHelm ×6 → 7/14/42 */
+  get breathCDMax(): number {
+    let n = 7;
+    if (this.hasBreathingReed && this.itemAnimTicks === 0) n *= 2;
+    if (this.equipStats.divingHelm) n *= 6;
+    return n;
   }
-
-  /** 当前正在消耗的那口气泡进度 0..1（1=满，趋 0 渐隐）；头部浸水外为 0 */
-  get breathDrain01(): number {
-    if (!this.headUnderwater || this.breath <= 0) return 0;
-    const per = Player.BREATH_SECONDS / Player.BREATH_BUBBLES;
-    return Math.max(0, Math.min(1, 1 - this.breathAccum / per));
+  /** hasBreathingReed（Player.cs:3974-3987）：选中快捷栏格为 186 芦苇管。
+   *  原版 mount.Active 时查 MountID.Sets.DontHoldItems——本作无坐骑，省略 */
+  get hasBreathingReed(): boolean {
+    const held = this.inv.heldItem();
+    if (!held) return false;
+    const d = ITEM_DEFS[held.id];
+    return (d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1)) === 186;
   }
 
   // 输入状态由 Game 每帧写入
@@ -1682,10 +1766,10 @@ export class Player extends Entity {
   }
 
   /** ShimmerUnstuck（Player.cs:28394-28428）：timeShimmering 清零，找最近无微光
-   *  落点传送（TryFindingShimmerFreeSpot :28414-28440，落点 = spot+(0,-2)px、
-   *  velocity=(0,0.0001)），清微光化态；找不到则保持原位等下一轮（原版同样仅
-   *  StartUnstuck 辅助）。传送附带短暂无敌帧（原版 Teleport style 12 的 immune
-   *  语义近似——落点邻敌免秒杀） */
+   *  落点传送（TryFindingShimmerFreeSpot :28414-28440，落点 = ShimmerHelper 盒左上角
+   *  再 +(0,-2)px、velocity=(0,0.0001)），清微光化态；找不到则保持原位等下一轮
+   *  （原版同样仅 StartUnstuck 辅助）。传送附带短暂无敌帧（原版 Teleport style 12
+   *  的 immune 语义近似——落点邻敌免秒杀） */
   private shimmerUnstuck(game: GameHooks, world: import('../world/World').World): void {
     this.timeShimmering = 0;
     const st = world.store;
@@ -1695,13 +1779,14 @@ export class Player extends Entity {
       world.spawnX, world.spawnY,
     );
     if (!spot) return;
-    const p = shimmerTeleportPos(spot);
+    const p = shimmerTeleportPos(spot, this.w, this.h);
     this.x = p.x;
     this.y = p.y;
     this.vx = 0;
     this.vy = 0.0001;
     this.shimmering = false;
     this.inShimmer = false;
+    this.buffs.remove(BuffType.Shimmered); // :28406 ClearBuff(353)——传送即解除微光化
     this.iframes = Math.max(this.iframes, PLAYER_IFRAME_TICKS);
     game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
     game.playSfx('shimmerSplash', 0.75, this.cx, this.cy);

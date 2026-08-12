@@ -1,6 +1,6 @@
 // 蜂巢(pass 45,HiveBiome.cs 1:1)+ 蜘蛛巢(1456 SpiderCaves L17455 / Spread.Spider L3653 1:1)
 // + Webs 全局蛛网 pass(L13659)+ WebsInSpiderCavesAndHoney(L20140)。
-// 蜂巢:主巢+卫星巢+隧道链(每巢各不相同);剖面=核心40%蜂蜜/0.6墙86空腔/0.75实心蜂壳;
+// 蜂巢:主巢+隧道链(每巢各不相同)+蜂蜜斑(HoneyPatchBiome);剖面=核心40%蜂蜜/0.6墙86空腔/0.75实心蜂壳;
 // 链终点幼虫托台(BOSS 房)。蜘蛛巢:countTiles 门(500≤空腔≤3499)采样 + 波前 BFS 刷墙62
 // + 内饰(蛛网罐28/蛛网宝箱939/垂网165/覆饰187/小堆185);后续 pass 补 9/10 蛛网51+蜂巢钟乳石。
 import type { TileStore } from '../../TileStore';
@@ -16,6 +16,7 @@ const LARVA = TILE_BY_KEY['v_231_larva']!;
 const COBWEB = TILE_BY_KEY['v_51_cobweb']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const MUDT = TILE_BY_KEY['mud']!;
+const LIHARD = TILE_BY_KEY['v_226_lihzahrd_brick']!;
 
 /** CreateHiveTunnel(HiveBiome.cs:135)1:1:基础半径 12-20,步数每迭代净 -2,
  *  三阈值各自独立 ±0.5% 抖动且基于基础半径;±10 格墙 87(神庙)/地表空墙 → 整条作废 */
@@ -99,11 +100,145 @@ function dentForHoneyFall(st: TileStore, x: number, y: number, dirIn: number): v
   }
 }
 
+/** 蜂蜜斑微群系(HoneyPatchBiome.cs:8-48)1:1。
+ *  锚点:origin 实心 → 拒;向下 ≤80 找首个实心再 +2。门禁:圆 15 实心中丛林土/草
+ *  (59/60)占比 ≥75% 且草(60)≥2 → 圆 8 实心 ≥20 → 保护图 16×16 → 近地狱/
+ *  ±150 步进 10 有神庙砖 226 或墙 83/3/87 → 拒。
+ *  塑形:圆 8 RadialDither(0,10) 蜂壳 229;圆(4,3) Blotches 挖蜜池(矩形掩码
+ *  [-6,6]×[0,3] 记 ShapeData + 灌蜜);内轮廓(origin+1,掩码 [1,3])补泥 59;
+ *  All(data) 外扩 1 圈、y≥锚行、非实心无蜜 → 蜂壳 229。
+ *  RNG:RadialDither 每点 1 掷(Shapes.Circle 行主序自上而下)、Blotches 每点
+ *  2 掷(+命中补 4 掷)——与原版逐点对齐。 */
+function placeHoneyPatch(
+  st: TileStore, rng: RNG, gs: GenState,
+  protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number }>,
+  ox: number, oy: number,
+): boolean {
+  // HoneyPatchBiome.cs:10-13
+  if (st.inBounds(ox, oy) && st.flags[st.idx(ox, oy)] && solidTileHB(st, ox, oy)) return false;
+  // cs:14-18:Searches.Down(80)+IsSolid(含 origin 本格),命中行 +2
+  let ry = -1;
+  for (let k = 0; k < 80 && oy + k < st.h; k++) {
+    if (solidTileHB(st, ox, oy + k)) { ry = oy + k; break; }
+  }
+  if (ry < 0) return false;
+  ry += 2;
+  const rx = ox;
+  // cs:22-26:圆 15 三计数门(Scanner 链:实心 / 60∪59 / 60)
+  const circleRows = (hR: number, vR: number, fn: (dx: number, dy: number) => void): void => {
+    const rr = (hR + 1) * (hR + 1);
+    for (let dy = -vR; dy <= vR; dy++) {
+      const num2 = (hR / vR) * dy;
+      const half = Math.min(hR, Math.trunc(Math.sqrt(rr - num2 * num2)));
+      for (let dx = -half; dx <= half; dx++) fn(dx, dy);
+    }
+  };
+  let solid = 0, mudOrGrass = 0, grass = 0;
+  circleRows(15, 15, (dx, dy) => {
+    if (!st.inBounds(rx + dx, ry + dy)) return;
+    const i = st.idx(rx + dx, ry + dy);
+    if (!st.flags[i] || !TILE_DEFS[st.type[i]]?.solid) return;
+    solid++;
+    const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+    if (sheet === 60 || sheet === 59) mudOrGrass++;
+    if (sheet === 60) grass++;
+  });
+  if (solid === 0 || mudOrGrass / solid < 0.75 || grass < 2) return false;
+  // cs:28-32:圆 8 实心 ≥20
+  let solid8 = 0;
+  circleRows(8, 8, (dx, dy) => {
+    if (solidTileHB(st, rx + dx, ry + dy)) solid8++;
+  });
+  if (solid8 < 20) return false;
+  // cs:33-36:保护图 CanPlace(16×16)
+  const rect = { x0: rx - 8, y0: ry - 8, x1: rx + 8, y1: ry + 8 };
+  if (protectedRects.some((p) => p.x0 < rect.x1 && rect.x0 < p.x1 && p.y0 < rect.y1 && rect.y0 < p.y1)) return false;
+  // cs:37-40 + TooCloseToImportantLocations(cs:50-81)
+  if (ry >= gs.lavaLine - 30) return false;
+  for (let i = rx - 150; i < rx + 150; i += 10) {
+    if (i <= 0 || i > st.w - 1) continue;
+    for (let j = ry - 150; j < ry + 150; j += 10) {
+      if (j <= 0 || j > st.h - 1) continue;
+      const ii = st.idx(i, j);
+      if (st.flags[ii] && st.type[ii] === LIHARD) return false;
+      if (st.wall[ii] === 83 || st.wall[ii] === 3 || st.wall[ii] === 87) return false;
+    }
+  }
+  // cs:41:圆 8 + RadialDither(0,10) + IsSolid → SetTile(229)
+  circleRows(8, 8, (dx, dy) => {
+    const num2 = Math.max(0, Math.min(1, Math.sqrt(dx * dx + dy * dy) / 10));
+    if (rng.next() > num2 && solidTileHB(st, rx + dx, ry + dy)) {
+      const i = st.idx(rx + dx, ry + dy);
+      st.type[i] = HIVE; st.flags[i] = 1;
+      st.liquid[i] = 0; st.liquidType[i] = 0;
+    }
+  });
+  // cs:43:圆(4,3) + Blotches(scale2,chance0.3) + IsSolid + ClearTile
+  //   + RectangleMask(-6,6,0,3).Output(data) + SetLiquid(2=蜂蜜)
+  const key = (qx: number, qy: number) => (qx + 16) * 64 + (qy + 16);
+  const data = new Set<number>();
+  circleRows(4, 3, (dx, dy) => {
+    rng.next();   // Blotches 首掷丢弃
+    const pts: Array<[number, number]> = [];
+    if (rng.next() < 0.3) {
+      const bx0 = rng.int(-1, 0), bx1 = rng.int(0, 1);
+      const by0 = rng.int(-1, 0), by1 = rng.int(0, 1);
+      for (let bi = bx0; bi <= bx1; bi++) for (let bj = by0; bj <= by1; bj++) pts.push([dx + bi, dy + bj]);
+    } else {
+      pts.push([dx, dy]);
+    }
+    for (const [qx, qy] of pts) {
+      if (!solidTileHB(st, rx + qx, ry + qy)) continue;
+      const i = st.idx(rx + qx, ry + qy);
+      st.flags[i] = 0;   // ClearTile
+      if (qx >= -6 && qx <= 6 && qy >= 0 && qy <= 3) {
+        data.add(key(qx, qy));
+        st.liquid[i] = 255; st.liquidType[i] = 3;   // 蜂蜜
+      }
+    }
+  });
+  // cs:44:InnerOutline(data)@origin+(0,1) + IsEmpty + RectangleMask(-6,6,1,3) → 泥 59
+  const NEIGH8: Array<[number, number]> = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+  for (const k of data) {
+    const qx = Math.trunc(k / 64) - 16, qy = (k % 64) - 16;
+    let edge = false;
+    for (const [nx, ny] of NEIGH8) {
+      if (!data.has(key(qx + nx, qy + ny))) { edge = true; break; }
+    }
+    if (!edge) continue;
+    const px = rx + qx, py = ry + 1 + qy;
+    if (!st.inBounds(px, py)) continue;
+    const i = st.idx(px, py);
+    if (st.flags[i]) continue;                          // IsEmpty
+    if (qx < -6 || qx > 6 || qy < 1 || qy > 3) continue;   // RectangleMask
+    st.type[i] = MUDT; st.flags[i] = 1;
+  }
+  // cs:45:All(data)@origin + Expand(1) + IsBelowHeight(ry,inclusive) + IsNotSolid
+  //   + NoLiquid(蜂蜜) → 蜂壳 229
+  for (const k of data) {
+    const qx = Math.trunc(k / 64) - 16, qy = (k % 64) - 16;
+    for (let ex = -1; ex <= 1; ex++) {
+      for (let ey = -1; ey <= 1; ey++) {
+        const px = rx + qx + ex, py = ry + qy + ey;
+        if (!st.inBounds(px, py) || py < ry) continue;   // IsBelowHeight(含锚行)
+        const i = st.idx(px, py);
+        if (st.flags[i] && TILE_DEFS[st.type[i]]?.solid) continue;   // IsNotSolid
+        if (st.liquid[i] > 0 && st.liquidType[i] === 3) continue;    // NoLiquid(蜂蜜)
+        st.type[i] = HIVE; st.flags[i] = 1;
+      }
+    }
+  }
+  protectedRects.push(rect);   // cs:46
+  return true;
+}
+
 /** Hives(pass 45,HiveBiome.Place):隧道链每段从段起点扇形展开,段终点接续 */
 export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
   const s = st.w / 4200;
   const count = 1 + rng.int(Math.floor(5 * s), Math.max(Math.floor(5 * s) + 1, Math.floor(8 * s)) - 1);
   const yMin = Math.floor((gs.worldSurface + gs.rockLevel) / 2);
+  // 结构保护图近似(无全局 StructureMap):主巢 ±50(padding 5)与蜂蜜斑 16×16 互斥
+  const protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number }> = [];
   let placed = 0;
   for (let n = 0; n < count * 100 && placed < count; n++) {
     // 原版 RandomWorldPoint((ws+rl)>>1, 20, 300, 20)（WorldGen.cs:16028，cs:27255
@@ -191,16 +326,20 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
     }
-    // 卫星巢(0-4 个,半径 30-90)
-    const sats = rng.int(0, 4);
-    for (let k = 0; k < sats; k++) {
-      const ang = rng.next() * Math.PI * 2;
-      const rad = 30 + rng.next() * 60;
-      const sx2 = Math.floor(x + Math.cos(ang) * rad);
-      const sy2 = Math.floor(y + Math.sin(ang) * rad * 0.6);
-      if (!st.inBounds(sx2, sy2) || !st.flags[st.idx(sx2, sy2)]) continue;
-      hiveTunnel(st, rng, gs, sx2, sy2);
+    // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
+    //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
+    //   NextDouble*2π,y 无压缩;落点横向 50 边距内或放置失败则不计
+    const patches = rng.int(0, 4);
+    let done = 0, budget = 10000;
+    while (done < patches && budget > 0) {
+      const rad = rng.next() * 60 + 30;
+      const ang = rng.next() * 6.2831854820251465;
+      const hx = Math.trunc(Math.cos(ang) * rad) + x;
+      const hy = Math.trunc(Math.sin(ang) * rad) + y;
+      budget--;
+      if (hx > 50 && hx < st.w - 50 && placeHoneyPatch(st, rng, gs, protectedRects, hx, hy)) done++;
     }
+    protectedRects.push({ x0: x - 45, y0: y - 45, x1: x + 55, y1: y + 55 });   // AddProtectedStructure(±50, padding 5)
     placed++;
   }
 }

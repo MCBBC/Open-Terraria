@@ -162,8 +162,8 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
 /** ShroomPatch（cs:80540）1:1：泥 blob 随机游走，上空挖空、墙→80、尾端 2 支泥 runner */
 function shroomPatch(st: TileStore, rng: RNG, gs: GenState, i: number, j: number): void {
 
-  const van = st.w / 4200;
-  let num = rng.int(80, 99);                       // Next(80,100)
+  const van = st.w / 4200;                          // num3 缩放(cs:80567;FTW ×1.5 未接)
+  let num = rng.int(80, 99) * van;                 // Next(80,100) × 缩放——num 曾漏乘(2026-08-12 审计)
   let num2 = rng.int(20, 25) * van;                // Next(20,26) × 缩放
   const num4 = num2 - 1;                           // 首圈标记
   let px = i + 0.0, py = j - num2 * 0.3;

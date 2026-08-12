@@ -70,7 +70,8 @@ export class TownNPC extends Entity {
    *  条件满足 → 重新入驻，≈次日回归），无需独立重生系统 */
   hurt(dmg: number, kbx: number, _kby: number, game: GameHooks): boolean {
     if (this.iframes > 0 || this.dead) return false;
-    const def = VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15;
+    const books = (game.world.flags.combatBookWasUsed ? 1 : 0) + (game.world.flags.combatBookVolumeTwoWasUsed ? 1 : 0);
+    const def = (VANILLA_NPCS[String(this.vanillaId)]?.defense ?? 15) + books * 8; // NPC.cs:53419
     dmg = Math.max(1, Math.round(dmg - def * 0.5));
     this.hp -= dmg;
     this.iframes = 8;
@@ -87,10 +88,24 @@ export class TownNPC extends Entity {
     return true;
   }
 
+  /** 战斗书增益（NPC.cs:53419-53430：每本 lifeMax+250 / 伤害出力×0.8 / 移速+0.25 /
+   *  防+8——伤害/移速两项无对应战斗系统，落 lifeMax/防；每本可叠加，由调用方按旗标次数调） */
+  applyCombatBook(): void {
+    this.maxHp += 250;
+    this.hp = Math.min(this.maxHp, this.hp + 250);
+  }
+
+  private cbApplied = false;
   fixedUpdate(dt: number, game: GameHooks) {
     this.animT++;
     if (this.iframes > 0) this.iframes--;
     const world = game.world;
+    // 战斗书增益一次性套用（后入驻的 NPC 在首 tick 补；使用书时对在场者即时叠）
+    if (!this.cbApplied) {
+      this.cbApplied = true;
+      const books0 = (world.flags.combatBookWasUsed ? 1 : 0) + (world.flags.combatBookVolumeTwoWasUsed ? 1 : 0);
+      for (let k = 0; k < books0; k++) this.applyCombatBook();
+    }
 
     // 微光化城镇变体（NPC.GetShimmered :92560-92573：ShimmerTownTransform → ai[0]=25
     // 微光传送离场，回归后为微光变体 IsShimmerVariant）。本仓净效果：入微光即标记

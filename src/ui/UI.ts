@@ -1062,6 +1062,12 @@ export class UI {
 
   // ============ 背包 + 合成 ============
 
+  /** 背包面板是否打开（原版 Main.playerInventory 语义——呼吸计锚点分支用，
+   *  Game.render 经 window.__swUI 读取；与 UI.ts:802 同款活取） */
+  get inventoryOpen(): boolean {
+    return !!this.invPanel && this.invPanel.style.display === 'block';
+  }
+
   openInventory() {
     if (this.invPanel.style.display === 'block') {
       this.closeInventory();

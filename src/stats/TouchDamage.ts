@@ -71,6 +71,44 @@ export function liquidCollision(st: TileStore, px: number, py: number, pw: numbe
 }
 
 /**
+ * Collision.DrownCollision（Collision.cs:1385-1444）1:1——头部浸液判定。
+ * 头部采样盒:X=px+pw/2 居中宽 min(10,pw),Y=py-2(gravDir==-1 时 +ph/2-6),
+ * 高 min(12,ph)。命中条件:液体>0 且非岩浆(2)非微光(4)——**蜂蜜(3)也可淹**
+ * ——且该格不在豁免行(gravDir==1 取扫描首行,否则末行-1;豁免行若
+ * active+solid+非 solidTop 则不计,即头顶贴实心块时该行液体不算)。
+ * 液面高度:drop=(256-liquid)/32,表面 Y=j*16+drop*2,有效高 16-trunc(drop*2)。
+ * 偏差:tileSolidTop≈isPlatform(平台近似);includeSlopes 玩家调用不传,省略。
+ */
+export function drownCollision(
+  st: TileStore, px: number, py: number, pw: number, ph: number, gravDir: 1 | -1,
+): boolean {
+  const TS = 16;
+  const num = Math.min(10, pw), num2 = Math.min(12, ph);
+  const vx = px + pw / 2 - num / 2;
+  const vy = py - 2 + (gravDir === -1 ? ph / 2 - 6 : 0);
+  const i0 = Math.max(0, Math.floor(px / TS) - 1);
+  const i1 = Math.min(st.w - 1, Math.floor((px + pw) / TS) + 2);
+  const j0 = Math.max(0, Math.floor(py / TS) - 1);
+  const j1 = Math.min(st.h - 40, Math.floor((py + ph) / TS) + 2);
+  const topRow = gravDir === 1 ? j0 : j1 - 1; // 豁免判定行(原版 num4)
+  for (let i = i0; i < i1; i++) {
+    for (let j = j0; j < j1; j++) {
+      const idx = st.idx(i, j);
+      const liq = st.liquid[idx], lt = st.liquidType[idx];
+      if (liq <= 0 || lt === 2 || lt === 4) continue; // !lava && !shimmer
+      if (j === topRow && st.isActive(i, j) && st.isSolid(i, j) && !st.isPlatform(i, j)) continue;
+      const drop = (256 - liq) / 32;
+      const surfY = j * TS + drop * 2;
+      const surfH = TS - Math.trunc(drop * 2);
+      if (vx + num > i * TS && vx < i * TS + TS && vy + num2 > surfY && vy < surfY + surfH) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+/**
  * Collision.StickyTiles（Collision.cs:3375）:盒内蛛网(51)/活木(229,无坡)命中。
  * 返回命中格（供 StickyMovement 挣断销毁）;未命中返回 null。
  */

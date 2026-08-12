@@ -111,6 +111,8 @@ export interface SaveData {
     buffs?: Array<[number, number]>;
     /** 税务员累积税款（Player.taxMoney 铜币,PL:53839;旧档缺省 0） */
     taxMoney?: number;
+    /** 高尔夫累计分（Player.golferScoreAccumulated :1792;旧档缺省 0） */
+    golferScoreAccumulated?: number;
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
   };

@@ -81,6 +81,9 @@ export interface GenState {
   /** 微光以太中心（Shimmer pass cs:15301 GenVars.shimmerPosition；-1 = 未生成） */
   shimmerX: number;
   shimmerY: number;
+  /** 丛林小屋样式（Reset 掷 cs:11182 Next(5)，原值 0-4；cs:11333-11352 映射
+   *  0→119/1→120/2→158/3→175/4→45——JungleShrinePass 复用，不再重掷） */
+  jungleHut: number;
 
   // 宝箱战利品序（AddBuriedChest 全局态,cs:11262/36165/10130）
   hellChestItems: number[] | null; // 每世界乱序 [274,220,112,218,3019]（首只地狱箱时掷）
@@ -124,6 +127,7 @@ export function newGenState(w: number, h: number): GenState {
     pyramidSpots: [],
     floatingIslands: [],
     shimmerX: -1, shimmerY: -1,
+    jungleHut: 0,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）

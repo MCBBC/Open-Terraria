@@ -69,9 +69,26 @@ export interface AccFx {
   // ---- 魔力回复直值（Player.ApplyEquipFunctional :14379-14383，仅魔力斗篷 982）----
   manaRegenBonus?: number;       // manaRegenBonus += N（每帧产额加成）
   manaRegenDelayBonus?: number;  // manaRegenDelayBonus += X（惩罚期额外衰减/tick）
+  // ---- 呼吸族（行为型，见 BEHAVIOR_FX）----
+  divingHelm?: number;  // accDivingHelm：breathCDMax ×6（潜水头盔/三件潜水装备）
+  merman?: number;      // accMerman：水中不耗气并人鱼化（月亮/天界/海神贝壳）
 }
 
 const FX = fxJson as Record<string, AccFx>;
+
+// 呼吸族行为表：原版 if-chain 行为型效果，提取器不进 json，代码层补齐（生成数据勿手改）。
+// 268 走 GrantArmorBenefits（Player.cs:12829-12831）；394/1860/1861 走
+// ApplyEquipFunctional（:14652/:14689/:14701，divingHelm 与 flipper 并存）；
+// 497/861/3110 → accMerman（:15019/:14587/:14855）。
+const BEHAVIOR_FX: Record<string, AccFx> = {
+  '268': { divingHelm: 1 },
+  '394': { divingHelm: 1 },
+  '1860': { divingHelm: 1 },
+  '1861': { divingHelm: 1 },
+  '497': { merman: 1 },
+  '861': { merman: 1 },
+  '3110': { merman: 1 },
+};
 
 const FX_BY_IID = (() => {
   const m = new Map<number, AccFx>();
@@ -80,7 +97,9 @@ const FX_BY_IID = (() => {
     if (!d) continue;
     const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
     if (vid < 0) continue;
-    const fx = FX[String(vid)];
+    const json = FX[String(vid)];
+    const extra = BEHAVIOR_FX[String(vid)];
+    const fx = json || extra ? { ...json, ...extra } : null;
     if (fx) m.set(i, fx);
   }
   return m;

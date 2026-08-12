@@ -48,6 +48,7 @@ export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: numbe
 // 树木专用：Tree_Tops/Branches（树冠树枝，TEdit style 0-10）+ Tiles_5_N（生物群系树干）
 export const VANILLA_MISC = [
   'vanilla/Bubble.png',
+  'vanilla/Flame.png',     // 岩浆宽限火焰条（Main.cs:42900）
   'vanilla/Ninja.png',      // 史莱姆王体内忍者（Main.cs:22817 叠画）
   'vanilla/Extra_39.png',   // 史莱姆王头顶金冠（Main.cs:25571-25595 叠画；Extra_39.png 82×56）
   'vanilla/Gore_734.png',   // 史莱姆王王冠 Gore（专家模式传送时抛出，NPC.cs:43550）

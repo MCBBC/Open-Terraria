@@ -153,10 +153,15 @@ export function isNpcTownShimmerable(npcId: number): boolean {
 // ============ 玩家脱困传送（ShimmerHelper.FindSpotWithoutShimmer 近似） ============
 
 /** TryFindingShimmerFreeSpot（Player.cs:28414-28469）净效果版：以 (tx,ty) 为心，
- *  半径 r ∈ {1,3,…,59}（原版 num=60 循环步 2）找第一个「3 格高无实心无微光 +
- *  下方 100px（7 格）内有地面（IsSpotShimmerFree :28477 第二判——原版要求
- *  SolidCollision(+height, 100)，非紧贴一格；旧实现过严致湖底斜坡/半砖旁找不到）」
- *  的落点。**三层兜底**（原版 :28442-28469）：玩家周围失败 → 世界出生点周围 →
+ *  半径 r ∈ {1,3,…,59}（原版 num=60 循环步 2）找第一个满足 IsSpotShimmerFree
+ *  （ShimmerHelper.cs:67-82 三判）的落点：
+ *  ① 玩家盒 3 格高（y-2..y）无实心无微光（SolidCollision(landing, w, h)）
+ *  ② 下方 100px（7 格）内有地面（SolidCollision(+height, 100, allowSolidTop)——
+ *     非紧贴一格；旧实现过严致湖底斜坡/半砖旁找不到）
+ *  ③ 玩家盒 + 下方 100px 全无微光（WetCollision(landing, w, h+100) && shimmer → 拒）——
+ *     旧实现漏此判：湖面之上 3 格空气 + 湖面在 7 格内的列被当有效落点 → 传送后
+ *     落回湖里（用户实测"传送完还在湖里"）
+ *  **三层兜底**（原版 :28442-28469）：玩家周围失败 → 世界出生点周围 →
  *  主出生点（本仓二者同源 spawnX/Y，合并为一层）——保证必能脱困，不会永久卡住 */
 export function findShimmerFreeSpot(
   st: TileStore, tx: number, ty: number,
@@ -178,6 +183,16 @@ export function findShimmerFreeSpot(
     }
     return false;
   };
+  // 原版第三判（ShimmerHelper.cs:80-81 WetCollision(landing, w, h+100)）：落点
+  // 下方 100px 内不得有微光——微光列（如湖面正上方的空气）视为无效落点
+  const shimmerBelow = (x: number, y: number): boolean => {
+    for (let j = y + 1; j <= y + 7; j++) {
+      if (!st.inBounds(x, j)) return false;
+      const i = st.idx(x, j);
+      if (st.liquid[i] > 0 && st.liquidType[i] === 4) return false;
+    }
+    return true;
+  };
   const search = (cx: number, cy: number): { x: number; y: number } | null => {
     for (let r = 1; r < 60; r += 2) {
       // 切比雪夫半径逐圈外扩（原版 i 循环步 2 语义；原版仅扫环上 8 点/圈，
@@ -186,7 +201,7 @@ export function findShimmerFreeSpot(
         for (let dx = -r; dx <= r; dx++) {
           if (Math.max(Math.abs(dx), Math.abs(dy)) < r - 1) continue; // 只扫外环
           const x = cx + dx, y = cy + dy;
-          if (!st.inBounds(x, y) || !groundBelow(x, y)) continue;
+          if (!st.inBounds(x, y) || !groundBelow(x, y) || !shimmerBelow(x, y)) continue;
           if (clear(x, y)) return { x, y };
         }
       }
@@ -197,7 +212,13 @@ export function findShimmerFreeSpot(
     ?? (fallbackTx !== undefined && fallbackTy !== undefined ? search(fallbackTx, fallbackTy) : null);
 }
 
-/** 世界坐标落点 → 玩家传送位（ShimmerUnstuck :28400-28402：spot + (0,-2) 像素） */
-export function shimmerTeleportPos(spot: { x: number; y: number }): { x: number; y: number } {
-  return { x: spot.x * TILE, y: spot.y * TILE - 2 };
+/** 世界坐标落点 → 玩家传送位（左上角 px 锚，ShimmerHelper.cs:9 + Player.cs:28400-28402）。
+ *  原版 FindSpotWithoutShimmer 返回 vector2 = (tile*16, tile*16) + (-width/2, -height)——
+ *  即【玩家盒左上角】坐标（脚底正好贴 tile 底边）；ShimmerUnstuck 再 Teleport(vector+(0,-2))。
+ *  旧实现 {x: tile*16, y: tile*16-2} 漏掉 -width/2/-height → 盒顶对齐格顶、脚部沉入
+ *  下方实心 40px = 用户实测"半身在地里"。默认 20/42 = Player 构造尺寸（Player.cs:55083）。 */
+export function shimmerTeleportPos(
+  spot: { x: number; y: number }, w = 20, h = 42,
+): { x: number; y: number } {
+  return { x: spot.x * TILE - w / 2, y: spot.y * TILE - h - 2 };
 }

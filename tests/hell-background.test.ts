@@ -48,7 +48,8 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
   it('黑盒在带层【之前】打底且下界=UnderworldLayer(层序 :52267 在 Rock/Magma 前)', () => {
     const bg = new BiomeBackground();
     stubImgs(bg);
-    bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;   // 无过渡,单份
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg.ugStyle;   // 无过渡,单份
     const { ctx, calls } = recorder();
     const world = hellWorld();
     const camY = (600 - 300) * 16;            // 玩家在 h-300(岩浆带 263..400 格内)
@@ -59,17 +60,17 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     const firstImg = calls.findIndex(c => c.op === 'img');
     expect(rectIdx).toBeGreaterThanOrEqual(0);
     expect(firstImg).toBeGreaterThan(rectIdx);       // 黑盒先于一切贴图
-    // 高度 = min(viewH+200, UnderworldLayer 屏 y)——原版 num=screenHeight+200 上限
-    // (hellBlackBoxBottom 仅在更小时收窄,:52810-52817)
+    // ★整屏黑底:原版黑盒 min(screenH+200, hellBlackBoxBottom) 的钳制只在清屏色=纯黑下
+    // 成立(深层各带层不画、清屏黑兜底);本仓清屏非黑 → 岩浆带可见时整屏铺黑(视觉等价)
     const hRect = calls[rectIdx].args as number[];
-    const camTopY = camY - 800 / 2;
-    expect(hRect[3]).toBeCloseTo(Math.min(800 + 200, (600 - 200) * 16 - camTopY), 0);
+    expect(hRect[3]).toBe(800);   // viewH 整屏
   });
 
   it('岩浆带顶 = magmaLayer 公式(h-335 带,非 lavaLine h-200——曾低 ~135 格 :52237)', () => {
     const bg = new BiomeBackground();
     stubImgs(bg);
-    bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg.ugStyle;
     const { ctx, calls } = recorder();
     const world = hellWorld();
     const camY = (600 - 300) * 16;
@@ -85,7 +86,8 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
   it('岩浆体按 magmaFrame 行取帧(3 帧×96px;surface 条 185+hell 取 frame*16 行 :52488-97)', () => {
     const bg = new BiomeBackground();
     stubImgs(bg);
-    bg.ugAlpha = 1; bg.ugOld = bg.ugStyle;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg.ugStyle;
     const { ctx, calls } = recorder();
     const world = hellWorld();
     // 相机移到 UnderworldLayer(h-200)附近:岩浆带底+表面波纹条同屏(:52488 条在带底)
@@ -103,7 +105,8 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     // 因 magmaFrameT 跨帧调用累计——原版 magmaBGFrame 同为全局持久计数)
     const bg2 = new BiomeBackground();
     stubImgs(bg2);
-    bg2.ugAlpha = 1; bg2.ugOld = bg2.ugStyle;
+    (bg2 as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
+    (bg2 as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg2.ugStyle;
     const { ctx: ctx2, calls: calls2 } = recorder();
     (bg2 as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
       .drawUnderground(ctx2, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 400);

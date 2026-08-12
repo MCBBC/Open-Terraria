@@ -263,8 +263,9 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   // 原版在 AddPasses 循环之前按此固定顺序消耗 Main.rand（种子等价的流位置契约）。
   // 天气/背景/月亮等值我们未消费——照掷照弃，只保留 GenState 下游字段。
   const W = store.w;
-  // ① jungleHut（cs:11179）——丛林小屋样式映射，未消费
-  rng.nextInt(5);
+  // ① jungleHut（cs:11182 Next(5)，cs:11333-11352 映射 0-4→119/120/158/175/45）
+  //    JungleShrinePass 复用本值（曾照掷照弃致 pass 内重掷、流位+样式双偏）
+  gs.jungleHut = rng.nextInt(5);
   // ② crimsonLeft（cs:11235）——邪恶群系左右分布，未消费
   rng.nextInt(2);
   // ③ RandomizeWeather（cs:7736-7746）：numClouds + 风速 do-while

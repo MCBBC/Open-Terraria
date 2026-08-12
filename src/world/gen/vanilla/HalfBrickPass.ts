@@ -286,7 +286,8 @@ export function runWaterfallLipPass(st: TileStore, _rng: RNG, _gs: GenState): vo
     for (let j = 20; j < h - 20; j++) {
       if (!solidTile(st, i, j)) continue;
       const li = st.idx(i - 1, j), ri = st.idx(i + 1, j);
-      if (st.type[li] !== 0 || st.type[ri] !== 0) continue;
+      // cs:16709:左右邻须 !active(曾误用 type!==0 → 幽灵格侧邻漏砸半砖)
+      if (st.flags[li] !== 0 || st.flags[ri] !== 0) continue;
       if (!solidTile(st, i, j + 1)) continue;
       if (st.liquid[li] === 0 && st.liquid[ri] === 0) continue;
       // 上方 8-20 格内已有半砖则跳过（原版防连续砸穿）

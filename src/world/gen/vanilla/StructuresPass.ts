@@ -418,31 +418,63 @@ function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
   }
 }
 
-/** 生命水晶(pass 57):area×2e-5,岩层空腔地面 */
+/** 生命水晶(pass 57,cs:16863-16904):area×2e-5 次;每次拒绝采样上限 10000
+ *  (skyblock=10,本仓库非 skyblock)。★掷序 Y 先 X 后(cs:16886/16891)。 */
 export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   const yMin = Math.floor((gs.worldSurface * 2 + gs.rockLevel) / 3);
   const count = Math.floor(w * h * 0.00002);
-  let placed = 0;
-  for (let n = 0; n < count * 30 && placed < count; n++) {
-    const x = rng.int(40, w - 41);
-    const y = rng.int(yMin, Math.max(yMin + 1, h - 300));
-    if (!st.inBounds(x, y + 1) || !st.inBounds(x + 1, y + 1)) continue;
-    // 2×2 净空 + 下方实心
-    let clear = true;
-    for (let dx = 0; dx < 2; dx++) {
-      for (let dy = 0; dy < 2; dy++) {
-        if (st.flags[st.idx(x + dx, y - dy)]) { clear = false; break; }
+  const maxTries = 10000;
+  for (let n = 0; n < count; n++) {
+    let done = false;
+    for (let tries = 0; !done && tries < maxTries; tries++) {
+      const y = rng.int(yMin, h - 301);               // cs:16886 Next(yMin, h-300)
+      const x = rng.int(40, w - 41);                  // cs:16891 Next(40, w-40)
+      done = addLifeCrystal(st, x, y);
+    }
+  }
+}
+
+/** AddLifeCrystal(cs:32077-32144)1:1:自 j 向下扫列 i 首个实心活性格,
+ *  锚行 num = k-1。anyLava/anyShimmer/EmptyTileCheck/wallDungeon 四门 →
+ *  锚列 i-1..i 的 num+1 底座须 nactive(active 且非半砖)+tileSolid,
+ *  底座坡面/半砖复位(cs:32114-32123);心占 (i-1..i, num-1..num)。 */
+function addLifeCrystal(st: TileStore, i: number, j: number): boolean {
+  const { h } = st;
+  if (!st.inBounds(i, j)) return false;
+  for (let k = j; k < h; k++) {
+    const ki = st.idx(i, k);
+    if (!st.flags[ki] || !TILE_DEFS[st.type[ki]]?.solid) continue;
+    const num = k - 1;
+    const at = (xx: number, yy: number) => st.idx(xx, yy);
+    if (!st.inBounds(i, num - 1) || !st.inBounds(i - 1, num - 1)
+      || !st.inBounds(i, num + 1) || !st.inBounds(i - 1, num + 1)) return false;
+    // cs:32084-32088:心位/邻位有岩浆、心位有微光 → false
+    if ((st.liquid[at(i, num - 1)] > 0 && st.liquidType[at(i, num - 1)] === 2)
+      || (st.liquid[at(i - 1, num - 1)] > 0 && st.liquidType[at(i - 1, num - 1)] === 2)) return false;
+    if (st.liquid[at(i, num - 1)] > 0 && st.liquidType[at(i, num - 1)] === 4) return false;
+    // cs:32092 EmptyTileCheck(i-1, i, num-1, num):心位 2×2 无活性块
+    for (let xx = i - 1; xx <= i; xx++) {
+      for (let yy = num - 1; yy <= num; yy++) {
+        if (st.flags[at(xx, yy)]) return false;
       }
     }
-    if (!clear || !st.isSolid(x, y + 1) || !st.isSolid(x + 1, y + 1)) continue;
-    // 原版 AddLifeCrystal(cs:16023-16038):顶行 frameY=0、底行 18
-    st.setTileSilent(x, y - 1, HEART, 0, 0);
-    st.setTileSilent(x + 1, y - 1, HEART, 18, 0);
-    st.setTileSilent(x, y, HEART, 0, 18);
-    st.setTileSilent(x + 1, y, HEART, 18, 18);
-    placed++;
+    // cs:32096:锚行墙为地牢墙 → false
+    if (DUNGEON_WALLS.has(st.wall[at(i, num)])) return false;
+    // cs:32104-32113:底座(i-1, num+1)/(i, num+1) 须 nactive(active 且非半砖)+tileSolid
+    for (const bx of [i - 1, i]) {
+      const bi = at(bx, num + 1);
+      if (!st.flags[bi] || st.half[bi] || !TILE_DEFS[st.type[bi]]?.solid) return false;
+      if (st.half[bi] !== 0 || st.slope[bi] !== 0) { st.half[bi] = 0; st.slope[bi] = 0; }  // 坡面复位
+    }
+    // cs:32124-32139:四格心,frameX 0/18、frameY 0/18
+    st.setTileSilent(i - 1, num - 1, HEART, 0, 0);
+    st.setTileSilent(i, num - 1, HEART, 18, 0);
+    st.setTileSilent(i - 1, num, HEART, 0, 18);
+    st.setTileSilent(i, num, HEART, 18, 18);
+    return true;
   }
+  return false;
 }
 
 /** 地表装饰:按生物群系种树/仙人掌/藤蔓/蘑菇(原版 pass 60+ 系列简化) */
@@ -660,7 +692,7 @@ function pyramid(
         });
         const num26 = rng.int(1, 9);                    // Next(1,10)
         for (let n27 = 0; n27 < num26; n27++) {
-          const i2 = rng.int(num23, num24);
+          const i2 = rng.int(num23, num24 - 1);         // cs:28025 Next(num23, num24) 上界不含
           const j2 = num10 + num11;
           placeSmallPile(st, i2, j2, rng.int(16, 18), 1);   // Next(16,19)
         }
@@ -698,9 +730,10 @@ function pyramid(
     num29--;
     num30--;
     num12--;
-    const lo = num9 - num32 - rng.int(0, 1);            // Next(0,2) 循环头各掷一次
-    const hi = num9 + num31 + num32 + rng.int(0, 1);
-    for (let n33 = lo; n33 <= hi; n33++) {
+    // ★cs:28078:for 条件里的 Next(0,2) 每列求值一次(C# 条件逐迭代重算)——
+    //   上界须逐列重掷(曾每外层只掷一次);下界 init 仍只掷一次
+    const lo = num9 - num32 - rng.int(0, 1);            // init:1×Next(0,2)
+    for (let n33 = lo; n33 <= num9 + num31 + num32 + rng.int(0, 1); n33++) {
       const n34 = num10;
       if (n33 >= num9 && n33 <= num9 + num31) {
         deact(n33, n34);

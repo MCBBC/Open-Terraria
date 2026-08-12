@@ -167,6 +167,7 @@ import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodPro
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
+import { GolfBall, GOLF_CLUBS } from '../entities/GolfBall';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHitLine } from '../physics/LineOfSight';
@@ -2020,7 +2021,7 @@ export class Game implements GameHooks {
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
       w.scene = this.scene; // Enemy 等只读消费（zoneGraveyard 攻门门等）
-      this.player.zoneDesert = this.scene.zoneDesert; // 沙丘行者靴消费
+      this.player.zoneDesert = this.scene.zoneDesert; // 沙漠区旗标（沙丘行者靴已改消费 runningOnSand，:26225-26231）
       // ---- 幸运度环境扫描（Player.TryRecalculatingTorchLuck :17580-17939 净效果版）----
       // 火炬窗 81×81（原版每 tick 一行、81 tick 一轮——15t 整窗直扫节流等价）+
       // 地精窗 169×124（SceneMetrics _tileCounts[567]）；群系判定复用 scene（Zone 标志），
@@ -2267,6 +2268,9 @@ export class Game implements GameHooks {
       }
     }
 
+    // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
+    // 此处读到上一帧尾值，≤1 tick 偏差）
+    player.itemAnimTicks = this.swing?.t ?? 0;
     player.fixedUpdate(dt, this);
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
@@ -2755,6 +2759,8 @@ export class Game implements GameHooks {
         this.newText(Lang.misc(8), 50, 255, 130);
       }
     }
+    // ---- 高尔夫计时推进（GolfState.cs:30-36 每帧+1，封顶 3600）----
+    if (this.golfScoreTime < 3600) this.golfScoreTime++;
     // ---- 自然 Boss 夜间生成（UpdateTime :64547-64621：夜间 time>4860 后每 tick；
     //      玩家条件 = active && !dead && y<worldSurface*16(或出生点在地下) &&
     //      4500px 内无月总(CanSpawnEnemiesNear :255)；EoC 命中即清旗，机械一次性）----
@@ -3933,6 +3939,69 @@ export class Game implements GameHooks {
       || heldDef.key === 'lava_bucket' || heldDef.key === 'honey_bucket')) {
       this.useBucket(heldDef.key, tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
+      // ---- 高尔夫球放置（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
+      //      指针格净空且下方实心 → 落球（每玩家同时一球：旧球回收）
+      const bm = /^vi_(\d+)_/.exec(heldDef.key);
+      const bvid = bm ? +bm[1] : 0;
+      if (bvid === 3989 || (bvid >= 4242 && bvid <= 4253)) {
+        const st = this.world.store;
+        const gx = Math.floor(inp.mouseX / this.camera.zoom + this.camera.x - this.renderer.canvas.width / this.camera.zoom / 2);
+        const gy = Math.floor(inp.mouseY / this.camera.zoom + this.camera.y - this.renderer.canvas.height / this.camera.zoom / 2);
+        const btx = Math.floor(gx / TILE), bty = Math.floor(gy / TILE);
+        const air = st.inBounds(btx, bty) && !st.flags[st.idx(btx, bty)];
+        const floorOk = st.inBounds(btx, bty + 1) && st.isSolid(btx, bty + 1);
+        if (air && floorOk) {
+          for (const e of this.entities.projectiles) {
+            if (e instanceof GolfBall && !e.dead) e.dead = true;
+          }
+          const ownerRef = this.player;
+          const projId = bvid === 3989 ? 721 : 739 + (bvid - 4242);
+          this.entities.add(new GolfBall(btx * TILE + 3, (bty + 1) * TILE - 10, projId,
+            () => ownerRef), 'projectiles');
+          this.player.useTime = 15;
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.sfx.play('dig', 0.7);
+          this.cb.onInventoryChanged?.();
+        }
+        this.input.mouseDown = false;
+      }
+      // ---- 球杆挥击（GOLF_CLUBS 杆型表：80px 内的球朝指针方向击出）
+      else if (bvid > 0 && GOLF_CLUBS[bvid]) {
+        const [speed, loft] = GOLF_CLUBS[bvid];
+        const aimX = inp.mouseX / this.camera.zoom + this.camera.x - this.renderer.canvas.width / this.camera.zoom / 2;
+        const aimY = inp.mouseY / this.camera.zoom + this.camera.y - this.renderer.canvas.height / this.camera.zoom / 2;
+        let hit = false;
+        for (const e of this.entities.projectiles) {
+          const ball = e as GolfBall;
+          if (!(ball instanceof GolfBall) || ball.dead) continue;
+          if (Math.hypot(ball.cx - this.player.cx, ball.cy - this.player.cy) > 80) continue;
+          ball.clubHit(aimX - ball.cx, aimY - ball.cy, speed, loft);
+          hit = true;
+        }
+        if (hit) {
+          this.sfx.play('tink', 0.8, this.player.cx, this.player.cy);
+          this.golfScoreTime = 0; // 挥杆重置一杆进洞折扣计时（GolfState.RecordSwing 语义）
+        }
+        this.useSwing(heldDef, Math.atan2(aimY - this.player.cy, aimX - this.player.cx));
+        this.player.useTime = 30;
+        this.input.mouseDown = false;
+      }
+      // ---- 战斗书 4382/5336（Player.cs:44703-44730 ItemCheck_UseCombatBook）：
+      //      世界级一次性旗标 + 世界公告；不消耗（ApplyItemTime 仅冷却）
+      else if (bvid === 4382 || bvid === 5336) {
+        const flagKey = bvid === 4382 ? 'combatBookWasUsed' : 'combatBookVolumeTwoWasUsed';
+        if (!this.world.flags[flagKey]) {
+          this.world.flags[flagKey] = true;
+          this.newText(Lang.text(bvid === 4382 ? 'Misc.CombatBookUsed' : 'Misc.CombatBookVolumeTwoUsed'), 50, 255, 130);
+          this.player.useTime = 30;
+          // 场上城镇 NPC 立即吃到增益（NPC.cs:53419：lifeMax+250/伤×0.8/速+0.25/防+8）
+          for (const n of this.entities.npcs) {
+            const tn = n as TownNPC;
+            if (tn instanceof TownNPC && !tn.dead) tn.applyCombatBook();
+          }
+        }
+        this.input.mouseDown = false;
+      }
       // ---- 血泪 4271（Player.cs:43329-43345 + CanUseItem :51435）：夜且非血月可用 →
       //      StartBloodMoon：sound 15、moonPhase==4(新月)时拨到 5、misc[8] 公告。
       //      昼/血月中不可用（原版 CanUseItem 返回 false = 静默无效）。
@@ -6150,6 +6219,9 @@ export class Game implements GameHooks {
   /** 自然 Boss 召唤运行时态（WorldGen.spawnEye/spawnHardBoss :4140/:4142——不入存档，
    *  clearWorld 重置=进世界清零；与血月 roll 互斥门 :64818） */
   private spawnEyePending = false;
+  /** 高尔夫折扣计时（GolfState.golfScoreTime :30-47：每 tick+1，挥杆清零，
+   *  进洞 SetScoreTime=3600；一杆进洞系数 = time/3600） */
+  private golfScoreTime = 3600;
   private spawnHardBossPending = 0;
 
   /** 天气预设（小地图天气面板按钮；面板见 Renderer.drawMinimap 天气段）：
@@ -7933,10 +8005,28 @@ export class Game implements GameHooks {
           break;
         case 207: if (phase === 0) add([2871, 2872]); break; // 染料商满月暗影/负片染料（:2233-2237）
         case 353: if ((phase % 2 === 0) === day) add([1981]); break; // 造型师时光染料（:2720-2724）
+        case 588: { // 高尔夫球手（Chest.cs:3147-3238 分数门槛 + :3216 月相画）
+          const gs = this.player.golferScoreAccumulated;
+          if (gs > 500) add([4092, 4093, 4094, 4039, 4265, 4599]);
+          if (gs > 1000) add([4591, 4592, 4593, 4594, 4600]);
+          if (gs >= 2000) {
+            add([4595, 4596, 4597, 4598, 4601]);
+            if (this.world.flags.downedSkeletron) add([4264]); // :3188 && downedBoss3 → 高尔夫球车
+            add([[4658], [4659], [4660], [4661]][Math.floor(phase / 2)]); // 月相四画
+          }
+          break;
+        }
+        case 663: // 公主（Chest.cs:3427-3445：十周年+hardMode+击败海盗 → 相位对海盗四件）
+          if (this.world.seedFlags?.tenthAnniversary && this.world.flags.hardMode && this.world.flags['downedPirates']
+            && ![2584, 854, 855, 905].some((id) => out.some((e) => e[0] === id))) {
+            add([[2584], [854], [855], [905]][Math.floor(phase / 2)]);
+          }
+          break;
         case 633: { // 动物学家（:3358-3380 配对耳尾 + :3249-3252 满月夜狼人画）
           const pair = [[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)];
           add(pair);
           if (phase === 0 && !day) add([5253]);
+          if (this.player.golferScoreAccumulated >= 2000) add([4744]); // :1951 猎人斗篷
           break;
         }
       }
@@ -7945,6 +8035,7 @@ export class Game implements GameHooks {
     if (npc.vanillaId === 227) {
       add([1490]);
       add([[1481], [1482], [1483], [1484]][Math.floor(phase / 2)]);
+      if (this.player.golferScoreAccumulated > 500) add([4743]); // :2250 橄榄球画
     }
     return out;
   }
@@ -8135,6 +8226,14 @@ export class Game implements GameHooks {
     };
     const stock: number[] = [];
     const canAdd = (id: number) => id > 0 && !stock.includes(id);
+    // 件数：4-6 基础 + 运气/专家加件（SetupTravelShop :1245-1280——原版先掷 num 再进
+    // 首件环，掷骰次序即 RNG 消费次序，1:1 保持此序）
+    let num = 4 + Math.floor(Math.random() * 3);
+    if (rollZero(4)) num++;
+    if (rollZero(8)) num++;
+    if (rollZero(16)) num++;
+    if (rollZero(32)) num++;
+    if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
     // 首件（:1276-1299）：仅 hardMode 才有此环；while num2<5000 + 每轮先降档 +
     // minimumRarity=2；成功入店即 break
     if (this.world.flags.hardMode) {
@@ -8146,13 +8245,6 @@ export class Game implements GameHooks {
         if (canAdd(it)) { stock.push(it); break; }
       }
     }
-    // 件数：4-6 基础 + 运气加件（SetupTravelShop :1251-1262 RollLuck(4/8/16/32)==0 → num++）
-    let num = 4 + Math.floor(Math.random() * 3);
-    if (rollZero(4)) num++;
-    if (rollZero(8)) num++;
-    if (rollZero(16)) num++;
-    if (rollZero(32)) num++;
-    if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
     // 主件环（:1300-1308）：added<num 且无尝试上限——原版同（概率上必然终止，
     // 此处仅挂防死循环护栏，正常永不可达）
     let guard = 0;
@@ -8322,7 +8414,7 @@ export class Game implements GameHooks {
 
   /** 星云 booster 实体（原版是 Item 3453-55：WI:418 重力 0.1；PC:34497 抓取 42px 内
    *  PullItem 速度 12/acc 5；拾取 → NebulaLevelup（3453 伤/3454 命/3455 魔）+ 音效 7） */
-  private nebulaBoosters: Array<{ x: number; y: number; vx: number; vy: number; fam: 0 | 1 | 2 }> = [];
+  private nebulaBoosters: Array<{ x: number; y: number; vx: number; vy: number; fam: 0 | 1 | 2 | -1 }> = [];
   private spawnNebulaBooster(x: number, y: number): void {
     const fam = (Math.floor(Math.random() * 3) as 0 | 1 | 2); // SelectRandom(3453,3454,3455)
     const side = Math.random() < 0.5 ? -1 : 1;
@@ -8350,14 +8442,16 @@ export class Game implements GameHooks {
       const tb = this.world.store;
       const tx = Math.floor(b.x / TILE), ty = Math.floor(b.y / TILE);
       if (tb.inBounds(tx, ty) && tb.isSolid(tx, ty)) { b.y -= b.vy; b.vy = 0; b.vx *= 0.9; }
-      if (d < 20) { // 碰体拾取（PC:34476-34480）
-        p.nebulaLevelup(b.fam);
+      if (d < 20 && b.fam !== -1) { // 碰体拾取（PC:34476-34480;已回收跳过）
+        const fam = b.fam; // 收窄 0|1|2(下述 -1 标记回收前留存)
+        p.nebulaLevelup(fam);
         this.sfx.play('pickup', 1, -1); // SoundID 7（PC:34601）
-        b.fam = -1 as unknown as 0 | 1 | 2; // 标记回收
-        this.spawnParticles(b.x, b.y, ['#FF6AD5', '#FF3C3C', '#3CB8FF'][b.fam === -1 ? 0 : b.fam], 6, 2, { life: 24 });
+        // 先用原 fam 取色再覆盖 -1 标记回收——顺序颠倒会令三色 boosters 全喷粉色
+        this.spawnParticles(b.x, b.y, ['#FF6AD5', '#FF3C3C', '#3CB8FF'][fam], 6, 2, { life: 24 });
+        b.fam = -1; // 标记回收
       }
     }
-    this.nebulaBoosters = this.nebulaBoosters.filter((b) => (b.fam as number) !== -1);
+    this.nebulaBoosters = this.nebulaBoosters.filter((b) => b.fam !== -1);
   }
 
   damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy) {
@@ -9572,6 +9666,22 @@ export class Game implements GameHooks {
   // ================= 召唤 Boss =================
 
   /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
+  /** 进洞计分（GolfHelper.PutBallInCup :85-121 + GolfState.cs:151-160）：
+   *  score = ⌊位移tile ÷ (杆数+2)⌋ × 系数（2 杆以上 SetScoreTime→1.0；一杆进洞
+   *  golfScoreTime/3600）；>0 才累计；聊天广播 + 计时重置 */
+  golfBallScored(ball: GolfBall): void {
+    const distTiles = Math.floor(ball.dist / TILE);
+    const denom = ball.swings + 2; // hitsMade+2（GolfBallTrackRecord.cs:13-19）
+    const factor = ball.swings > 1 ? 1 : this.golfScoreTime / 3600;
+    const score = Math.floor(distTiles / denom) * (ball.swings > 1 ? 1 : factor);
+    this.golfScoreTime = 0; // ResetScoreTime
+    if (ball.swings > 0 && score > 0) {
+      this.player.golferScoreAccumulated = Math.min(1e9, this.player.golferScoreAccumulated + Math.floor(score));
+      this.newText(Lang.text('Game.BallBounceResultGolf_' + (ball.swings > 1 ? 'Plural' : 'Single'),
+        ball.swings, Math.floor(score)), 50, 255, 130);
+    }
+  }
+
   /** 收竿结算（Player.cs:51530-51598 ItemCheck_CheckFishingBobber）：物品掉落 /
    *  血月敌怪（浮标处；618 +64px）/ 682 红城镇史莱姆一次性入镇 */
   private reelBobber(bobber: Bobber): void {
@@ -9855,6 +9965,11 @@ export class Game implements GameHooks {
     p.x = this.world.spawnX * TILE + 8;
     p.y = (this.world.spawnY - 3) * TILE;
     p.vx = 0; p.vy = 0;
+    // 呼吸/岩浆宽限重置（Player.cs:37158 lavaTime=lavaMax / :37173 breath=breathMax；
+    // 旧实现两者都没重置——戴护身符重生后进岩浆会被误判宽限已耗尽）
+    p.breath = p.breathMax;
+    p.breathCD = 0;
+    p.lavaImmuneTicks = p.equipStats.lavaMax;
   }
 
   // ================= 渲染 =================
@@ -9865,6 +9980,9 @@ export class Game implements GameHooks {
     this.renderer.scene = this.scene; // 群系背景（BiomeBackground）每帧注入最新环境采样
     this.renderer.deathLostCoins = this.lostCoins; // 死亡 UI「掉了{0}」每帧注入
     this.renderer.annotateMarks = this.annotateMode ? this.marks : null;
+    // 背包开合（Main.playerInventory 语义）→ 呼吸计锚点分支（Main.cs:42838/42845）
+    this.renderer.playerInventory =
+      (window as unknown as { __swUI?: { inventoryOpen?: boolean } }).__swUI?.inventoryOpen ?? false;
     // 导线可见性:手持电路工具(mech)或 F7 强制(Main.cs:43548 DrawWires 开关语义)
     const held = this.player.inv.heldItem();
     this.renderer.showWires = this.forceShowWires || !!held && !!ITEM_DEFS[held.id]?.wireTool;

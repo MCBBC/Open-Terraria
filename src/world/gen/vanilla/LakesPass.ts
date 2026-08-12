@@ -74,10 +74,8 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
               st.liquidType[ti2] = 1;
             }
           }
-          const wasGrass = st.flags[ti] && (st.type[ti] === MUD || st.type[ti] === JUNGLE_GRASS);
-          st.setTileSilent(x, y, 0);
-          // 原版此处 SpreadGrass 邻格（59/60 转草）——草传播未移植，跳过（后续 pass 铺草）
-          void wasGrass;
+          st.flags[ti] = 0;   // ★原版 cs:80469 仅 active(false)——type 保留为幽灵格（曾误清 type）
+          // 原版此处 type==59/60 时 SpreadGrass 邻格——草传播未移植，跳过（后续 pass 铺草）
         } else if (y > j + 1 && dist < r && st.liquid[ti] === 0) {
           // 腔壁壳（cs:80477-80484）：窄处 + ★非活性 + 自身/左/右/下有墙 →
           //   type = WallTypeToTerrainTileType[wall]（WallID.cs:66：40→147、71→161、
@@ -100,7 +98,7 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
             const width = (1 - Math.abs(x - i) / Math.max(1, x1 - i)) * 2.3;
             const pow = width ** 4;
             if (y < entranceY && fx < r * 0.4 + Math.abs(y - entranceY) * 0.5 * pow) {
-              st.setTileSilent(x, y, 0);
+              st.flags[ti] = 0;   // ★原版 cs:80506 仅 active(false)——type 保留为幽灵格
             }
           }
         }

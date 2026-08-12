@@ -111,8 +111,8 @@ export enum BuffType {
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
-  Shimmered = 77,   // 微光化(353,浸微光每 tick 刷新)：frozen 封输入+免伤+慢沉——
-                    //   语义由 Player.shimmering 字段承载（:11381-11388），本条目仅作
+  Shimmered = 77,   // 微光化(353,浸微光每 tick 刷新)：frozen 封输入+免伤+穿墙下坠——
+                    //   语义由 Player.shimmering 字段承载（:11381-11419），本条目仅作
                     //   BuffState 登记（左上角图标/名称/持续时间显示）
   ManaSickness = 69, // 魔力眩晕(94,喝蓝 AddBuff 300t)：magicDamage *= 1-0.25×(剩余/300)
                    //   （Player.cs:10000-10004 + :25616；满 debuff -25% 线性恢复。
@@ -260,6 +260,11 @@ export class BuffState {
   }
   remove(type: BuffType) {
     this.active.delete(type);
+  }
+  /** 直写剩余秒（原版 `buffTime[i] = n` 赋值语义，可缩短——区别于 apply 的
+   *  AddBuff max 合并）。消费方：玩家微光穿落 buffTime=6t 刷新（Player.cs:11416） */
+  set(type: BuffType, durationSec: number) {
+    this.active.set(type, durationSec);
   }
   /** 存档序列化（Player.cs:53913-53925 buffType+buffTime 槽位语义）:
    *  存 vanilla id + 剩余秒;Main.buffNoSave 名单(Main.cs:8896-8990)过滤不落盘的 buff */

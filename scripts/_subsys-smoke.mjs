@@ -116,6 +116,32 @@ const out = await page.evaluate(async () => {
   const nautilus = g.entities.enemies.find((e) => e.vanillaId === 618 && !e.dead);
   res.nautilusSpawned = !!nautilus;
 
+  // 3.5) 战斗书 4382 使用 → 世界旗标 + 在场城镇 NPC 吃增益
+  const bookId = g.itemId('vi_4382_CombatBook');
+  res.bookIdValid = typeof bookId === 'number' && bookId > 0;
+  g.player.inv.slots[g.player.inv.selected] = { id: bookId, stack: 1 };
+  const tn0 = g.entities.npcs.find((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'guide');
+  const hp0 = tn0?.maxHp;
+  g.player.useTime = 0; g.input.mouseDown = true;
+  g.updateUse(1 / 60); g.input.mouseDown = false;
+  res.bookFlag = w.flags.combatBookWasUsed === true;
+  res.bookBuff = tn0 ? tn0.maxHp === hp0 + 250 : false;
+
+  // 3.6) 高尔夫：放球 → 挥杆 → 直调计分 → 分数门商店
+  const { GolfBall } = await import('/src/entities/GolfBall.ts');
+  const ball = new GolfBall(g.player.cx + 40, g.player.y - 20, 721, () => g.player);
+  ball.clubHit(1, 0, 12, -4); // 木杆 160px
+  ball.x += 160; // 模拟滚动位移
+  ball.clubHit(1, 0, 10, -3); // 第二杆
+  ball.swings = 2; ball.dist = 320;
+  priv('golfBallScored', ball);
+  res.golfScore = g.player.golferScoreAccumulated; // ⌊320/16⌋/(2+2)=5
+  // 直接拉满 2000 验证商店门
+  g.player.golferScoreAccumulated = 2000;
+  const golferNpc = new TownNPC('golfer', g.player.cx, g.player.cy);
+  const golfStock = priv('shopStockFor', golferNpc).map((e) => e[0]);
+  res.golferGates = { paintings: golfStock.includes(4658) || golfStock.includes(4659) || golfStock.includes(4660) || golfStock.includes(4661), goldTrophy: golfStock.includes(4601), proClubs: golfStock.includes(4595) };
+
   // 4) drunk 黎明翻转（timeOfDay 连续推进跨越 DAWN——不跨午夜数字跳变）
   w.seedFlags = { drunkWorld: true };
   w.clock.timeOfDay = 0.18;

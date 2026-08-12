@@ -8,7 +8,7 @@
 //  5. 玩家脱困落点搜索（findShimmerFreeSpot：微光内不放、最近空气落点优先）
 import { describe, it, expect } from 'vitest';
 import {
-  canShimmerItem, coinLuckAmount, findShimmerFreeSpot,
+  canShimmerItem, coinLuckAmount, findShimmerFreeSpot, shimmerTeleportPos,
   getShimmerEquivalentType, getTransformToItem,
   internalIdOfVanilla, isNpcTownShimmerable, npcShimmerTransformTo,
   npcShimmerTransformToItem, vanillaIdOfItem,
@@ -202,9 +202,67 @@ describe('玩家脱困落点（ShimmerHelper.FindSpotWithoutShimmer 近似）', 
     expect(Math.abs(spot!.x - 130)).toBeLessThan(60);
     expect(st.liquid[st.idx(spot!.x, spot!.y)] === 0 || st.liquidType[st.idx(spot!.x, spot!.y)] !== 4).toBe(true);
   });
+
+  it('落点下方 7 格内有微光 → 拒绝（ShimmerHelper.cs:80-81 第三判 WetCollision(h+100)）', () => {
+    const w = shimmerWorld();
+    const st = w.store;
+    // 独立小池（x=50 列）：空气 34-36 / 实地 37 / 微光 38-40 / 实地 41。
+    // 无第三判时 (50,36) 是"3 格空气 + 下方实地"的理想落点 → 传送后落回微光里
+    st.setTile(50, 37, 1);
+    for (let y = 38; y <= 40; y++) st.setLiquid(50, y, 255, 4);
+    st.setTile(50, 41, 1);
+    const spot = findShimmerFreeSpot(st, 50, 36);
+    expect(spot).not.toBeNull();
+    // 微光列（x=50）本身不得被选为落点
+    expect(spot!.x).not.toBe(50);
+    // 被选落点的下方 7 格必须全无微光
+    for (let j = spot!.y + 1; j <= spot!.y + 7; j++) {
+      const i = st.idx(spot!.x, j);
+      expect(st.liquid[i] === 0 || st.liquidType[i] !== 4).toBe(true);
+    }
+  });
+
+  it('传送锚点 = 玩家盒左上角（ShimmerHelper.cs:9 vector + Player.cs:28400-28402 +(0,-2)）', () => {
+    // 原版落点向量 = (tile*16, tile*16) + (-w/2, -h)，Teleport 再 +(0,-2)——
+    // 旧实现 {tile*16, tile*16-2} 漏 -w/2/-h → 脚部沉入下方实心 40px（半身入地）
+    expect(shimmerTeleportPos({ x: 100, y: 200 })).toEqual({ x: 100 * TILE - 10, y: 200 * TILE - 44 });
+    expect(shimmerTeleportPos({ x: 0, y: 0 }, 20, 42)).toEqual({ x: -10, y: -44 });
+  });
 });
 
-describe('玩家浸微光（buff 353 + 脱困传送，Player.cs:27420/11381/28377）', () => {
+describe('玩家浸微光（buff 353 + 穿墙下坠 + 脱困传送，Player.cs:27420/11381/27868/28377）', () => {
+  it('穿墙下坠 → 落入空腔实体化（:27868 velocity×0.375 绕过碰撞 + :11403-11419 落点检查）', () => {
+    const w = shimmerWorld();
+    const st = w.store;
+    const p = new Player(20 * TILE, 36 * TILE, new Inventory());
+    const h = hooks(w, p);
+    p.inputX = 1; p.inputJump = true;          // 封输入：穿落全程不得横移
+    const x0 = p.x, y0 = p.y;
+    const boxSolid = (): boolean => {
+      for (let ty = Math.floor(p.y / TILE); ty <= Math.floor((p.y + p.h) / TILE); ty++)
+        for (let tx = Math.floor(p.x / TILE); tx <= Math.floor((p.x + p.w) / TILE); tx++)
+          if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      return false;
+    };
+    let piercedSolid = false;   // 穿落中盒覆盖实心格（池底 row 40）且脱离液面仍 shimmering
+    let pierceBuffTime = -1;    // 穿落段 buffTime=6t=0.1s 刷新（:11416）
+    let solidified = false;     // 全非实心容纳空间 → DelBuff 实体化
+    for (let i = 0; i < 600 && !(piercedSolid && solidified); i++) {
+      p.fixedUpdate(1 / 60, h);
+      if (p.shimmering && !p.inShimmer && boxSolid()) {
+        piercedSolid = true;
+        pierceBuffTime = p.buffs.active.get(BuffType.Shimmered) ?? -1;
+      }
+      if (piercedSolid && !p.shimmering && !p.buffs.has(BuffType.Shimmered)) solidified = true;
+    }
+    expect(p.y).toBeGreaterThan(y0);           // 下坠（旧实现的"原地慢沉"已废）
+    expect(p.x).toBe(x0);                      // 封输入 → 无横移
+    expect(piercedSolid).toBe(true);           // 穿入实心格（无视 tile collision）
+    expect(pierceBuffTime).toBeCloseTo(0.1, 5);// 6t = 0.1s 穿落刷新
+    expect(solidified).toBe(true);             // 盒覆盖全非实心 → 实体化
+    expect(p.y).toBeGreaterThanOrEqual(41 * TILE); // 已穿出池底实心层（row 40）下方
+  });
+
   it('入微光：shimmering 置位 + 受击免疫 + timeShimmering 累积；脱困传送落点无微光', () => {
     const w = shimmerWorld();
     const p = new Player(20 * TILE, 36 * TILE, new Inventory());
@@ -251,6 +309,7 @@ describe('微光封输入回归探针（buff 353 frozen 语义 + 图标来源 + 
     expect(p.inShimmer).toBe(true);
     expect(p.shimmering).toBe(true);
     expect(p.buffs.has(BuffType.Shimmered)).toBe(true);  // 左上角 debuff 图标显示前提
+    expect(p.buffs.active.get(BuffType.Shimmered)).toBeCloseTo(1, 5); // 浸液 60t=1s 刷新（:11400）
     expect(p.inputX).toBe(0);                            // 清零生效（先于 const ix 消费点）
     expect(Math.abs(p.vx)).toBeLessThan(0.05);           // 无水平加速 → 摩擦钳零
     expect(p.x).toBe(x0);                                // 微光中不可位移

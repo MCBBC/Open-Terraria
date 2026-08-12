@@ -56,8 +56,9 @@ export function countDirtTiles(st: TileStore, sx: number, sy: number): number {
 }
 
 /** Spread.Wall2（cs:3387-3470）1:1：墙蔓延 BFS。
- *  实心格不涂不扩散；不可替换墙阻断；停空气位墙（63）遇 wall==0 跳过；
- *  计数上限 5000；停空气位墙额外扩散对角与 ±2 横向。
+ *  非实心格：涂墙+扩散（不可替换墙阻断；停空气位墙(63)遇 wall==0 跳过；
+ *  计数上限 5000；停空气位墙额外扩散对角与 ±2 横向）；
+ *  实心活性格只刷背面墙不扩散（cs:3489-3492）。
  *  导出供 CaveWallsPass（丛林泥墙段 cs:17946）复用 */
 export function spreadWall2(st: TileStore, sx: number, sy: number, wallType: number): void {
   if (!st.inBounds(sx, sy)) return;
@@ -73,15 +74,19 @@ export function spreadWall2(st: TileStore, sx: number, sy: number, wallType: num
       if (seen.has(ii)) continue;
       seen.add(ii);
       if (st.wall[ii] === wallType || WALL_CANNOT_REPLACE.has(st.wall[ii])) continue;
-      if (isSolidTile(st, x, y)) continue;
-      if (stopsAtAir && st.wall[ii] === 0) continue;
-      out++;
-      if (out >= MAX_WALL_OUT) continue;
-      st.wall[ii] = wallType;
-      next.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
-      if (stopsAtAir) {
-        next.push([x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1],
-          [x - 2, y], [x + 2, y]);
+      if (!isSolidTile(st, x, y)) {
+        if (stopsAtAir && st.wall[ii] === 0) continue;
+        out++;
+        if (out >= MAX_WALL_OUT) continue;
+        st.wall[ii] = wallType;
+        next.push([x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]);
+        if (stopsAtAir) {
+          next.push([x - 1, y - 1], [x + 1, y - 1], [x - 1, y + 1], [x + 1, y + 1],
+            [x - 2, y], [x + 2, y]);
+        }
+      } else if (st.flags[ii]) {
+        // cs:3489-3492:SolidTile=true(必 active)→ 只刷背面墙、不入队扩散(曾整体 continue)
+        st.wall[ii] = wallType;
       }
     }
     frontier = next;

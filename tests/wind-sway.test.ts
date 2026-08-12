@@ -381,3 +381,21 @@ describe('种子旗标（血月 1/6 十周年 / drunkWorld 翻转）', () => {
     expect(parseSeed('12345').flags.tenthAnniversary).toBeUndefined();
   });
 });
+
+// ============ 残留接入（八轮：战斗书/高尔夫计分/分数商店门） ============
+import { GOLF_CLUBS } from '../src/entities/GolfBall';
+
+describe('高尔夫计分链（GolfState.cs:151-160）', () => {
+  it('杆型表 12 支齐全且速度梯度 putter<driver', () => {
+    expect(Object.keys(GOLF_CLUBS)).toHaveLength(12);
+    expect(GOLF_CLUBS[4092][0]).toBeLessThan(GOLF_CLUBS[4094][0]); // 推杆 < 木杆
+    expect(GOLF_CLUBS[4598][0]).toBeGreaterThan(GOLF_CLUBS[4094][0]); // 叶绿木 > 普通木
+  });
+  it('计分公式形状：⌊tile位移÷(杆数+2)⌋——杆数稀释', () => {
+    // 模拟：160px(10 tile) 位移
+    const score = (distPx: number, swings: number) => Math.floor(Math.floor(distPx / 16) / (swings + 2));
+    expect(score(160, 1)).toBe(3);  // 10/3
+    expect(score(160, 3)).toBe(2);  // 10/5
+    expect(score(160, 8)).toBe(1);  // 10/10
+  });
+});

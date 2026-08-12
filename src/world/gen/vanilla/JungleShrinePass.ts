@@ -31,17 +31,20 @@ const BAD_TILES = new Set([sheetTile(225), sheetTile(229), TILE_BY_KEY['v_226_li
 export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Array<{ x: number; y: number }> {
   const { w, h } = st;
   const spots: Array<{ x: number; y: number }> = [];
-  // jungleHut 每世界五选一(cs:11182 Next(5) → cs:11335 switch)
-  const hutIdx = rng.int(0, 4);
+  // jungleHut 每世界五选一——值来自 Reset 掷(cs:11182 Next(5) → cs:11333-11352 映射),
+  // 此处复用 gs.jungleHut 不再重掷(曾重掷致流位+样式双偏)
+  const hutIdx = gs.jungleHut;
   const hutTile = HUT_TILES[hutIdx];
-  if (hutTile < 0) return spots;
+  if (hutTile === undefined || hutTile < 0) return spots;
   const hutWall = HUT_WALLS[hutIdx];
 
-  const count = Math.floor(rng.int(7, 11) * (w / 4200));
+  // cs:16065-16068:num3 = Next(7,12) × w/4200(裸 double),循环条件是浮点比较
+  //   i < num3——非整数倍时按 ceil 计(如 6300 宽 7×1.5=10.5 → 11 座,勿 floor)
+  const num3 = rng.int(7, 11) * (w / 4200);
   let x = rng.int(40, w - 41);
   let y = rng.int(Math.floor((gs.worldSurface + gs.rockLevel) / 2), h - 401);
   let retries = 0;
-  for (let i = 0; i < count; i++) {
+  for (let i = 0; i < num3; i++) {
     let placed = false;
     while (!placed) {
       retries++;
@@ -83,12 +86,14 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
           st.setWallSilent(lx, ly, hutWall);
         }
       }
-      // 腔内火把(样式 3 丛林火把,cs:16139-16150;帧 22px 步长)
+      // 腔内火把(样式 3 丛林火把,cs:16152-16154)。★样式在 Y 轴(PlaceTile case4
+      //   cs:59863 frameY=22*style,与 StructuresPass.placeTorch 同);y 上界
+      //   cs:16153 Next(num2-num6, num2+num6-2) 不含上界
       for (let t = 0; t < 100; t++) {
         const tx = rng.int(x - halfW, x + halfW);
-        const ty = rng.int(y - halfH, y + halfH - 2);
+        const ty = rng.int(y - halfH, y + halfH - 3);
         if (!st.flags[st.idx(tx, ty)]) {
-          st.setTileSilent(tx, ty, TORCH, 3 * 22, 0);
+          st.setTileSilent(tx, ty, TORCH, 0, 3 * 22);
           break;
         }
       }

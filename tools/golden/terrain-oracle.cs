@@ -44,6 +44,8 @@ for (int i = 0; i < 2; i++) { int s = i == 0 ? ts0 : ts1; if (s == 0 && (int)r.N
 r.Next(1050, 3150);
 int cb0 = (int)r.Next(8); int cb1 = (int)r.Next(8);
 while (cb1 == cb0) cb1 = (int)r.Next(8);
+// RandomizeCaveBackgrounds 尾部无条件 3 掷(cs:8211-8213;2026-08-12 审计补)
+r.Next(4); r.Next(3); r.Next(2);
 // RandomizeBackgrounds
 Func<int> rollForest = () => {
     int n = (int)r.Next(14);

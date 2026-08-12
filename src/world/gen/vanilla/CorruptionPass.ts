@@ -84,7 +84,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
     // 拒绝采样（cs:13979-14009）：地牢侧钳制 → 地牢 ±100 → 中央 ±200 → 沙漠 → 雪原 → 丛林
     while (!ok) {
       ok = true;
-      cx = rng.int(beachAvoid, w - 1 - beachAvoid);            // Next(380, w-380)
+      cx = rng.int(500, w - 501);                              // Next(num8=500, w-500)(cs:13976/14012);曾误用 380 避滩值
       zLo = cx - rng.int(0, 199) - 100;                        // Next(200)
       zHi = cx + rng.int(0, 199) + 100;
       if (zLo < beachAvoid) zLo = beachAvoid;
@@ -171,6 +171,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
   if (gs.crimson) crimPlaceHearts(st, rng, hearts);
+  if (typeof process !== 'undefined' && process.env.CRDBG) {
+    import('node:fs').then(m => m.writeFileSync('/tmp/js-cr.txt', COLBUF.join('\n'))).catch(() => {});
+  }
 }
 
 /** 地表转换带（cs:14131-14199 猩红 / cs:14406-14484 腐化）1:1。
@@ -229,6 +232,11 @@ function placeAltars(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: nu
       tries++;
       let x = rng.int(zLo - widen, zHi - 1 + widen);            // Next(zLo-widen, zHi+widen)
       let y = rng.int(Math.floor(gs.worldSurface - widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
+      // oceanDepths 重掷环（cs:14252-14256）：落点入海洋带则两点全重掷
+      while (oceanDepths(st, gs, x, y)) {
+        x = rng.int(zLo - widen, zHi - 1 + widen);
+        y = rng.int(Math.floor(gs.worldSurface - widen / 2), Math.floor(gs.worldSurface + 100 + widen) - 1);
+      }
       if (tries > 100) { widen++; tries = 0; }                  // ★原版先 widen 后找面
       if (!st.flags[st.idx(x, y)]) {
         while (y < st.h - 1 && !st.flags[st.idx(x, y)]) y++;
@@ -244,6 +252,13 @@ function placeAltars(st: TileStore, rng: RNG, gs: GenState, zLo: number, zHi: nu
       if (widen > 100) done = true;
     }
   }
+}
+
+/** oceanDepths（cs:10978-10989）：y 超过 oceanLevel 直接 false；横向上
+ *  进沙滩带（beachDistance 内）返回 true。oceanLevel=(worldSurface+rockLayer)/2+40（cs:4393）。 */
+function oceanDepths(st: TileStore, gs: GenState, x: number, y: number): boolean {
+  if (y > (gs.worldSurface + gs.rockLevel) / 2 + 40) return false;
+  return x < gs.beachDistance || x > st.w - gs.beachDistance;
 }
 
 /** IsTileNearby（cs:8828）：★须 active（曾漏 → 幽灵坛误判邻坛） */

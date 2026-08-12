@@ -508,9 +508,13 @@ export function drawVanillaLiquids(
         if (sw >= 8) applyShimmerBaseTint(ctx, x, y, dstX, dstY, sw, sh, tVis);
         const flag = !(sx === 16 || sy % 80 === 48);           // :719
         if (flag || (x + y) % 2 === 0) {
-          // alpha = 四角 GetShimmerGlitterOpacity 平均（原版逐顶点插值，Canvas2D
-          // 最优可达；top 四角恒 0.5 → 均值仍 0.5）。注意 sparkle 不乘前景 0.75/
-          // 背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接 ×= ptr->Opacity
+          // alpha = 像素亮度（tintSparkleBand 已把灰度写进 alpha）× 四角
+          // GetShimmerGlitterOpacity 均值。四角均值与原版逐顶点双线性插值的面积均值
+          // 数值等价（全网格采样验证平均差 0.0000），top（=有干燥邻边的表层/边缘格，
+          // :719 flag=true）四角恒 0.5；body（全浸没 (sx,sy)=(16,48) 内部格）复算
+          // 均值 0.09 / 峰值 0.34 → 星点恒为极淡彩虹（近白微闪）。注意 sparkle 不乘
+          // 前景 0.75/背景 1 系数——SetShimmerVertexColors_Sparkle :732-743 直接
+          // ×= ptr->Opacity
           const ga = (shimmerGlitterOpacity(flag, x, y, tVis)
             + shimmerGlitterOpacity(flag, x + 1, y, tVis)
             + shimmerGlitterOpacity(flag, x, y + 1, tVis)
@@ -528,8 +532,15 @@ export function drawVanillaLiquids(
                 + SPARKLE_HUE_STEPS) % SPARKLE_HUE_STEPS;
               const spark = shimmerSparkleTint(tex, hueIdx);   // 染色带；null 则退回原图（无彩虹）
               ctx.save();
-              // 原版第二次 tileBatch.Draw 是普通 alpha 混合（非叠加），顶点色=彩虹×glitter
-              ctx.globalCompositeOperation = 'source-over';
+              // 原版 sparkle pass 是【加色叠加】非 source-over：GetShimmerGlitterColor
+              // :766-771 先 color.A=0 再 vector4×glitter → 顶点 alpha 恒 0、RGB 已预乘
+              // glitter 强度；tileBatch = SpriteBatch 默认 AlphaBlend（预乘 (One,
+              // InvSrcAlpha)，TileBatch.Begin :216）→ 最终像素 = 基底 + 灰度纹素×彩虹×
+              // glitter×tileOpacity，黑底纹素贡献恰为 0、基色不被替换。旧实现 source-over
+              // 以饱和彩虹【替换】基色（dst×(1-a)+彩虹×a）→ body 星点呈高可见度彩色块
+              // （用户实测"闪光点变成彩色的"），改 'lighter' 后 body 星点 = 基底上微弱
+              // 增亮的近白微闪、表面白基底上呈漂移彩虹条（与原版一致）。
+              ctx.globalCompositeOperation = 'lighter';
               ctx.globalAlpha = Math.min(1, opacity[i] * ga);
               ctx.drawImage(spark ?? tex, sSrcX + (spark ? -48 : 0), sSrcY, sw, sh,
                 dstX, dstY, sw, sh);

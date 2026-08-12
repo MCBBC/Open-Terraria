@@ -77,6 +77,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     currentLoadout: player.inv.currentLoadout,
     buffs: player.buffs?.toSave?.() ?? [],  // buffType+buffTime 槽（PL:53913-53925;桩 player 容忍）
     taxMoney: player.taxMoney ?? 0,         // PL:53839
+    golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
     deathsPve: player.deathsPve ?? 0,       // PL:53840
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);

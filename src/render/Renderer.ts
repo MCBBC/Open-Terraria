@@ -12,6 +12,7 @@ import { TOOL_CUTTER } from '../world/Wiring';
 import { compositePaperDoll, dollFrame } from '../player/PaperDoll';
 import type { Inventory } from '../items/Inventory';
 import { VanillaResourceBars } from './ResourceBars';
+import { VanillaBreathMeter } from './BreathMeter';
 import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene, type MonolithSceneState } from './MonolithFilters';
 import type { FlickerClock } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
@@ -572,6 +573,10 @@ export class Renderer {
   biomeBg = new BiomeBackground();
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
   resourceBars = new VanillaResourceBars();
+  /** 原版呼吸计（DrawInterface_Resources_Breath 移植：玩家头顶 10 气泡/火焰条） */
+  breathMeter = new VanillaBreathMeter();
+  /** 背包是否打开（Main.playerInventory 语义——Game.render 经 __swUI 注入） */
+  playerInventory = false;
   /** 天塔柱族全屏滤镜（SceneMetrics 视区扫描 + SceneState/FilterManager 状态机；
    *  本帧器件态见 monoScan） */
   readonly monoFilters = new MonolithFilters();
@@ -1015,6 +1020,9 @@ export class Renderer {
 
     // 11. 生命/魔力资源条（原版 ClassicPlayerResourcesDisplaySet：右上红心排 + 右缘魔力星）
     this.resourceBars.draw(ctx, player, viewW, flicker);
+    // 11b. 呼吸计（原版 DrawInterface_Resources_Breath Main.cs:42824：玩家头顶
+    //      100px 屏幕 10 气泡；岩浆宽限耗损时换火焰条）
+    this.breathMeter.draw(ctx, player, cam, viewH, this.atlas, this.playerInventory);
 
     // 12. 死亡画面（DrawInterface_35_YouDied Main.cs:44765 + 灰化遮罩）
     if (player.dead) this.drawDeathScreen(ctx, player, viewW, viewH);
@@ -3139,7 +3147,12 @@ export class Renderer {
     ctx.save();
     // 水下滤镜：只作用于主角本体素材（蓝色调：去饱和 + 压暗 + 蓝移）
     if (p.headUnderwater) ctx.filter = 'sepia(0.45) hue-rotate(175deg) saturate(0.9) brightness(0.82)';
-    if (p.iframes > 0 && p.iframes % 6 < 2) ctx.globalAlpha = 0.45;
+    let bodyAlpha = 1;
+    if (p.iframes > 0 && p.iframes % 6 < 2) bodyAlpha = 0.45;
+    // 微光化半透明（Player.cs:18147-18162 shimmerTransparency → GetAlpha :53253
+    // 颜色三通道乘 (1-t) ≈ globalAlpha 1-t；t>0.8 起还有淡紫色调，此处只做透明）
+    if (p.shimmerTransparency > 0) bodyAlpha *= 1 - p.shimmerTransparency;
+    if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
     // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
     // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
     const cart = p.ridingCart ? p.cart : null;
@@ -3303,47 +3316,6 @@ export class Renderer {
     // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住
     if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool) {
       this.drawUseItem(ctx, p, swing);
-    }
-
-    // 气口气泡：头部浸水时显示（在朝向变换外绘制——左右移动不镜像），
-    // 随气量消散；整体更透明
-    if (p.headUnderwater || p.breath < 5 || p.refillT >= 0) {
-      const gap = 12.5; // 间距 12.5px，气泡直径 11px，留 ~1.5px 视觉分隔
-      const baseX = p.cx - (5 * gap) / 2 + gap / 2, baseY = p.y - p.h * 0.4 - 14;
-      // 优先原版 Bubble.png（22×22，不透明），程序化圆仅兜底
-      const bub = this.atlas ? this.atlas.vmisc('vanilla/Bubble.png') : null;
-      // 平滑气量 = (气口-1) + 当前正在消耗那颗的剩余比例 → 逐个渐隐（不画已耗尽的）。
-      // 直接 breath+drain 会在扣气瞬间把气泡重新顶满一格
-      // 水下：平滑消耗（当前颗渐隐）；出水：0.8s 快速补满动画
-      let display: number;
-      if (p.refillT >= 0) {
-        // 从余量处起填：refillFrom + 缺口 × 进度（不从第一颗重新冒）
-        display = p.refillFrom + (5 - p.refillFrom) * p.refill01;
-      } else {
-        const drain = p.headUnderwater && p.breath > 0 ? p.breathDrain01 : 1;
-        display = p.breath - 1 + drain;
-      }
-      // 5 个槽位固定占位（消耗时槽位不挪动，只是该槽的气泡渐隐消失）
-      for (let b = 0; b < 5; b++) {
-        const v = display - b; // 该颗的可见度：≥1 满，0..1 渐隐，≤0 跳过
-        if (v <= 0) continue;
-        const bx = baseX + b * gap;
-        const by = baseY;
-        ctx.globalAlpha = Math.min(1, v);
-        if (bub) {
-          ctx.drawImage(bub.img, bub.sx, bub.sy, bub.sw, bub.sh, bx - 5.5, by - 5.5, 11, 11);
-        } else {
-          ctx.fillStyle = '#BFE3FF';
-          ctx.beginPath();
-          ctx.arc(bx, by, 4.5, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.fillStyle = 'rgba(255,255,255,0.5)';
-          ctx.beginPath();
-          ctx.arc(bx - 1.5, by - 1.5, 1.5, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      }
-      ctx.globalAlpha = 1;
     }
 
     void world;

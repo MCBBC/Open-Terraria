@@ -68,18 +68,21 @@ export function runGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
     const type = TILE_BY_KEY[key]!;
     const count = Math.floor(st.w * density * 0.2);
     for (let i = 0; i < count; i++) {
-      // 拒绝采样：直到命中石头（原版死循环到命中为止；限 64 次防极端卡死）
-      let x = rng.int(0, st.w - 1);
-      let y = rng.int(gs.worldSurface, st.h - 1);
-      for (let tries = 0; tries < 64 && st.type[st.idx(x, y)] !== T.STONE; tries++) {
+      // cs:15144-15152:do-while 至多 3 轮采样(num2 从 3 递减,命中即停);
+      // 3 轮全 miss 则 num2==0 跳过 TileRunner。命中判定 = active() && type==1
+      let tries = 3, x = 0, y = 0, hit = false;
+      do {
         x = rng.int(0, st.w - 1);
         y = rng.int(gs.worldSurface, st.h - 1);
+        const ii = st.idx(x, y);
+        hit = st.flags[ii] !== 0 && st.type[ii] === T.STONE;
+      } while (!hit && --tries > 0);
+      if (tries !== 0) {
+        tileRunner(st, rng, gs, x, y, {
+          strength: rng.int(2, 5), steps: rng.int(3, 6), // Next(2,6)/Next(3,7)
+          type, addTile: false,
+        });
       }
-      if (st.type[st.idx(x, y)] !== T.STONE) continue;
-      tileRunner(st, rng, gs, x, y, {
-        strength: rng.int(2, 5), steps: rng.int(3, 6), // Next(2,6)/Next(3,7)
-        type, addTile: false,
-      });
     }
   }
   sandArch(st);

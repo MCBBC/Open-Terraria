@@ -32,6 +32,7 @@ mkdirSync(OUT_DIR, { recursive: true });
 // 杂项单图素材（呼吸气泡等，非表驱动）+ 树木专用贴图（TEdit WorldRenderXna 逻辑）
 const MISC = [
   'Bubble.png',
+  'Flame.png',   // 岩浆宽限火焰条（Main.cs:42900 DrawInterface_Resources_Breath）
   // 翅膀贴图（PlayerDrawLayers.cs:695/738：全宽 × 高/7 帧竖排；hover 族高/6）
   ...Array.from({ length: 52 }, (_, i) => `Wings_${i}.png`),
   // 原版云朵（Cloud.cs 常用 0-3；9-13 雨云/18-21 风暴云随天气系统后补）

@@ -50,8 +50,9 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
     gs.dungeonSide < 1
       ? rng.int(Math.trunc(w * (wide ? 0.8 : 0.89)), w - 201)
       : rng.int(200, Math.trunc(w * (wide ? 0.2 : 0.11)) - 1);
-  let x = pickX(false);
+  // ★cs:15273-15274 首掷是 Y 先 X 后(与重试环内的顺序一致;重试环 cs:15291-15292 同为 Y 先)
   let y = rng.int(yLoBase, yHi - 1);
+  let x = pickX(false);
   let tries = 0;
   while (!shimmerMakeBiome(st, rng, gs, x, y)) {
     tries++;
@@ -92,7 +93,11 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
     }
   }
   let n13 = Y, n14 = Y - n8;
-  // cs:34930-35050:主体塑形
+  // cs:34925-34934:主体塑形前的 num13/num14 预掷(各 1×Next(4),命中再补 1×Next(2);
+  // ★num14 预掷是减号 Y-n8-Next(2),环内是加号 Y-n8+Next(2))
+  if (rng.int(0, 3) === 0) n13 = Y - rng.int(0, 1);
+  if (rng.int(0, 3) === 0) n14 = Y - n8 - rng.int(0, 1);
+  // cs:34935-35050:主体塑形
   for (let k = y0; k <= y1; k++) {
     for (let l = x0; l <= x1; l++) {
       const i = st.idx(l, k);
@@ -140,8 +145,11 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
       n17 -= 4;
       let n18 = rng.int(5, 9);   // Next(5,10)
       let n19 = rng.int(15, 20); // Next(15,21)
+      // cs:35013:n 在 while 前初始化、每轮内层 for 重赋 m-n18——
+      // 退出时保留最后一轮内层 for 的初值(而非循环后的 n18)
+      let n = m - n18;
       while (n18 > 0) {
-        for (let n = m - n18; n < m + n18; n++) {
+        for (n = m - n18; n < m + n18; n++) {
           if (!st.inBounds(n, n17)) continue;
           const ti = st.idx(n, n17);
           st.type[ti] = STONE; st.flags[ti] = 1;
@@ -152,7 +160,7 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
         n19--;
         n17++;
       }
-      const n = m + n18 - rng.int(1, 2); // 循环退出后 n == m+num18,再退 Next(1,3)
+      n -= rng.int(1, 2); // cs:35035:末轮内层 for 的 n 再退 Next(1,3)
       if (st.inBounds(n, n17 - 2)) { const ti = st.idx(n, n17 - 2); st.type[ti] = STONE; st.flags[ti] = 1; }
       if (st.inBounds(n, n17 - 1)) { const ti = st.idx(n, n17 - 1); st.type[ti] = STONE; st.flags[ti] = 1; }
       if (st.inBounds(n, n17)) { const ti = st.idx(n, n17); st.type[ti] = STONE; st.flags[ti] = 1; }

@@ -15,7 +15,8 @@ export function runCleanupPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w } = st;
   // 1) 表层墙清理两遍(cs L6877-6938):
   //    左→右(3..w-4):中央清 2/40/64/86;右→左(w-5..5):中央清 2/40/64(不重复清蜂巢墙)。
-  //    邻列两遍都只清 2/40;沙系 tile(53/112/234,第二遍仅 53)跳过邻列清理
+  //    邻列两遍都只清 2/40;邻列清理门禁 = !active || type∉沙系(53/112/234,第二遍仅 53),
+  //    ±2/±3 的 Next(2) 仅当墙命中才消费(cs:15340 短路)
   for (let dir = 0; dir < 2; dir++) {
     const from = dir === 0 ? 3 : w - 5;
     const to = dir === 0 ? w - 4 : 5;
@@ -24,19 +25,26 @@ export function runCleanupPass(st: TileStore, rng: RNG, gs: GenState): void {
       for (let y = 0; y < gs.worldSurface; y++) {
         if (open) {
           clearWallSet(st, x, y, dir === 0 ? [2, 40, 64, 86] : [2, 40, 64]);
-          const t = st.type[st.idx(x, y)];
+          const ii = st.idx(x, y);
           const isSand = dir === 0
-            ? (t === T.SAND || t === EBONSAND || t === CRIMSAND)
-            : t === T.SAND;
-          if (!isSand) {
-            if (clearWallSet(st, x - 1, y, [2, 40])) { /* 邻列 1 恒清 */ }
-            if (rng.next() < 0.5) clearWallSet(st, x - 2, y, [2, 40]);
-            if (rng.next() < 0.5) clearWallSet(st, x - 3, y, [2, 40]);
+            ? (st.type[ii] === T.SAND || st.type[ii] === EBONSAND || st.type[ii] === CRIMSAND)
+            : st.type[ii] === T.SAND;
+          // cs:15334 门禁 = !active || type∉{53,112,234}(幽灵沙列有 type 无 flags,也进门并掷 4 骰)
+          if (!st.flags[ii] || !isSand) {
+            clearWallSet(st, x - 1, y, [2, 40]);
+            // cs:15340/15344/15352/15356:±2/±3 的 Next(2) 仅当墙∈{2,40} 才消费(&& 短路)
+            const rollIf = (xx: number) => {
+              const ji = st.idx(xx, y);
+              if ((st.wall[ji] === 2 || st.wall[ji] === 40) && rng.next() < 0.5) st.wall[ji] = 0;
+            };
+            rollIf(x - 2);
+            rollIf(x - 3);
             clearWallSet(st, x + 1, y, [2, 40]);
-            if (rng.next() < 0.5) clearWallSet(st, x + 2, y, [2, 40]);
-            if (rng.next() < 0.5) clearWallSet(st, x + 3, y, [2, 40]);
+            rollIf(x + 2);
+            rollIf(x + 3);
+            // cs:15360-15364:flag=false 在非沙分支内,仅 active 才关(原在分支外)
+            if (st.flags[ii]) open = false;
           }
-          if (st.flags[st.idx(x, y)]) open = false;
         } else {
           // 重新开放判定:本格与下方 4 格、左右 2 格全无墙且上方 4 格无活性块
           let reopen = true;

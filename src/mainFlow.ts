@@ -222,6 +222,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     // Buff 槽（PL:53913-53925;Main.buffNoSave 已在序列化侧过滤）
     g.player.buffs.applySaved(player.buffs);
     if (player.taxMoney !== undefined) g.player.taxMoney = player.taxMoney;   // PL:53839
+    if (player.golferScoreAccumulated) g.player.golferScoreAccumulated = player.golferScoreAccumulated; // PL:1792
     if (player.deathsPve !== undefined) g.player.deathsPve = player.deathsPve; // PL:53840
     // ★ 读档回填后必须刷 UI：HUD 快捷栏在 makeGame 时以空背包画过一次，
     //   此前不刷新 → 存档道具要等用户点工具栏/开背包才显示

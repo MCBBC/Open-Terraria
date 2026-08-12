@@ -117,7 +117,7 @@ function generateTunnelToSurface(st: TileStore, rng: RNG, gs: GenState, i: numbe
     // 偶发分支洞穴
     if (count > 10 && rng.int(0, 49) < count) {
       count = 0;
-      const side = rng.next() < 0.5 ? -2 : 2;
+      const side = rng.next() < 0.5 ? 2 : -2;   // 原版 num4 默认 -2、Next(2)==0 才 +2(JunglePass.cs:178-182),曾写反
       tileRunner(st, rng, gs, Math.floor(px), Math.floor(py), {
         strength: rng.int(3, 19), steps: rng.int(10, 99), type: -1, speedX: side,
       });

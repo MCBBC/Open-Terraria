@@ -464,14 +464,13 @@ export class BiomeBackground {
     this.magmaFrameT += dtMs;
     const magmaFrame = Math.floor(this.magmaFrameT / 133.33) % 3;
     // ★层序（:52265-52270）：SurfaceTransition → Dirt → 【黑盒最先打底】→ Rock → Magma。
-    // 曾把黑盒画在带层之后 → 盖掉岩浆带 = "地狱背景缺失/接近地狱层叠错误"报告根因;
-    // 接近地狱时屏上方背景渐黑正是原版观感（黑盒打底后仅岩层/岩浆重画）
+    // 原版黑盒高度 min(screenH+200, hellBlackBoxBottom) 的钳制只在【清屏色=纯黑】下成立
+    // （深层时各带层 loopsY≤0 全不画、黑盒也退化为负高不画 → 清屏黑兜底）;本仓清屏非黑,
+    // 视觉等价做法:岩浆带可见时整屏黑底先铺,带层随后重画——深处(UnderworldLayer 之下)
+    // 即原版的纯黑地狱背景(曾露天空渐变="远景背景完全空白"报告根因)
     if (magmaTop < viewH) {
-      const blackBottom = Math.min(viewH + 200, uwScreenY);
-      if (blackBottom > 0) {
-        ctx.fillStyle = '#000';
-        ctx.fillRect(0, 0, viewW, Math.max(0, blackBottom));
-      }
+      ctx.fillStyle = '#000';
+      ctx.fillRect(0, 0, viewW, viewH);
     }
     const drawSlots = (slots: number[], a: number) => {
       if (a <= 0.01) return;
