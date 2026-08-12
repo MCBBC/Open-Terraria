@@ -8,7 +8,7 @@ import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { GRAVITY, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
-import { pickPool, rollCatch } from '../data/vanillaFishing';
+import { pickPool, rollCatch, fishingPowerMultiplier } from '../data/vanillaFishing';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import type { World } from '../world/World';
@@ -25,9 +25,12 @@ export class Bobber extends Entity {
   biteT = 0;
   /** 咬钩时的渔获（声呐药水预掷展示） */
   catchId = 0;
+  /** 血月咬钩敌怪（FishingCheck_RollEnemySpawns）——收竿由 Game 侧生成 */
+  catchEnemy = 0;
   /** 渔获原版 id → 钓起时落物用 */
   private waitT: number;
   private polePower: number;
+  private poleVid = 0;
   private baitSlot: number;
   private baitPower: number;
   private ownerRef: () => Player | null;
@@ -50,8 +53,10 @@ export class Bobber extends Entity {
     this.waitT = Math.round(300 - Math.min(210, power * 3.2)) + Math.floor(Math.random() * 60);
   }
 
-  /** 钓鱼力（竿+饵+药水 121 +15；声呐 122/宝匣 123 由收竿侧消费） */
-  private fishingPower(p: Player): number {
+  /** 钓鱼力（竿+饵+药水 121 +15；声呐 122/宝匣 123 由收竿侧消费）。
+   *  game 传入时追加 Fishing_GetPowerMultiplier 乘区（Player.cs:41560-41605：
+   *  雨/云/晨昏/正午/前半夜/月相/血月） */
+  private fishingPower(p: Player, game?: GameHooks): number {
     // buff 121 钓鱼药水 +15（Player.cs:9831 fishingSkill += 15）
     let lvl = this.polePower + this.baitPower + (p.buffs.has(BuffType.Fishing) ? 15 : 0);
     // 幸运度修正（Projectile.cs:19267-19276 FishingAttempt 主干，1:1）：
@@ -62,6 +67,20 @@ export class Bobber extends Entity {
       if (Math.random() < -luck) lvl = Math.floor(lvl * (0.9 - Math.random() * 0.3));
     } else if (Math.random() < luck) {
       lvl = Math.floor(lvl * (1.1 + Math.random() * 0.3));
+    }
+    // Fishing_GetPowerMultiplier（:41560-41605）：天气/时段/月相/血月乘区
+    if (game) {
+      const w = game.world as World;
+      const t = w.clock.timeOfDay;
+      const isDay = t > 0.25 && t < 0.75;
+      lvl = Math.floor(lvl * fishingPowerMultiplier({
+        raining: !!w.weather?.raining,
+        cloudBGAlpha: w.weather?.cloudAlpha ?? 0,
+        dayTime: isDay,
+        time: isDay ? ((t - 0.25) / 0.5) * 54000 : ((((t - 0.75) + 1) % 1) / 0.5) * 32400,
+        moonPhase: w.clock.moonPhase,
+        bloodMoon: !!w.clock.bloodMoon,
+      }));
     }
     return lvl;
   }
@@ -104,7 +123,26 @@ export class Bobber extends Entity {
       }
     } else if (--this.waitT <= 0) {
       // 咬钩：掷渔获（声呐预展示）；窗口 60t
-      const power = this.fishingPower(p);
+      const power = this.fishingPower(p, game);
+      // 血月钓鱼敌怪（FishingCheck_RollEnemySpawns :19399-19427）：水中、血月夜、
+      // 1/6（血肉抛竿 4325 → 1/3）→ 咬的是敌怪：困难 {620,621,586,587}+1/10 恐惧鹦鹉螺
+      // 618；非困难 {586,587}。682 分支需 bestiary 解锁旗标（未跟踪，从略）。
+      this.catchEnemy = 0;
+      const w = game.world as World;
+      const inWater = st.liquidType[idx] !== 2 && st.liquidType[idx] !== 3;
+      if (inWater && w.clock.bloodMoon && !w.clock.isDay) {
+        const chance = this.poleVid === 4325 ? 3 : 6;
+        if (Math.random() < 1 / chance) {
+          const hard = w.flags.hardMode;
+          const poolE = hard ? [620, 621, 586, 587] : [586, 587];
+          this.catchEnemy = hard && Math.random() < 0.1 ? 618
+            : poolE[Math.floor(Math.random() * poolE.length)];
+          this.biteT = 60;
+          game.playSfx('splash', 0.8);
+          game.spawnParticles(this.cx, this.cy, '#C04040', 6, 1.5, { life: 24 });
+          return;
+        }
+      }
       const pool = pickPool({
         liquid: (st.liquidType[idx] === 2 ? 'lava' : st.liquidType[idx] === 3 ? 'honey' : 'water'),
         zone: this.zoneOf(game),
@@ -119,9 +157,9 @@ export class Bobber extends Entity {
     }
   }
 
-  /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵）；消耗鱼饵 */
+  /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵/血月敌怪——后者查 catchEnemy）；消耗鱼饵 */
   reel(game: GameHooks): number {
-    if (this.biteT <= 0 || !this.catchId) return 0;
+    if (this.biteT <= 0 || (!this.catchId && !this.catchEnemy)) return 0;
     const p = this.ownerRef();
     if (!p) return 0;
     // 声呐药水（buff 122）：咬钩时已掷——由 Game 侧显示（本实体的 catchId 预存）

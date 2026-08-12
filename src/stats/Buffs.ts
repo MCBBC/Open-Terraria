@@ -102,6 +102,12 @@ export enum BuffType {
                    //   840t/专家 960t）；消费点 Projectile.cs:12879/12885/27124。
                    //   本仓吸血/治疗弹链未实装，效果位 getter 备用；
                    //   载荷在 NPC 401 召唤门禁（bossAI_duke_moonlord）
+  KiteBuff = 75,   // 风筝(383)：移速 +25% / 镐速 −15% / 放置速度 +15%（:9614-9617）+
+                   //   kiteLuckLevel 三档 = clamp(buffTime/10800,0,3)（:9618-9623，
+                   //   luck += 档×0.1/3 :28675）。授予物品（风筝族 4371 等）未移植，登记
+  Stinky = 76,     // 恶臭(120)：luck −0.25（:9958-9961 stinky / :28687-28690）。
+                   //   授予 = 恶臭药水 1332 / 弹幕 1080 命中（Projectile.cs:67585-67590
+                   //   ApplyBuffTo(120,600)）——物品与弹体未移植，登记
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
@@ -194,6 +200,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // 后期批：描述直接用原版 BuffDescription（12 语言现成，语义一致，同 Chilled/Honey 先例）
   [BuffType.MoonLeech]: { vanillaBuff: 145, descKey: 'BuffDescription.MoonLeech', fallbackName: '月噬' },
   [BuffType.Obstructed]: { vanillaBuff: 163, descKey: 'BuffDescription.Obstructed', fallbackName: '遮挡' },
+  // 幸运来源批（RecalculateLuck :28675/:28687-28690 消费）：风筝 383 / 恶臭 120。
+  // ★120 在 BUFF_NO_SAVE 名单内（环境类，不落盘）
+  [BuffType.KiteBuff]: { vanillaBuff: 383, descKey: 'BuffDescription.Kite', fallbackName: '腾灵' },
+  [BuffType.Stinky]: { vanillaBuff: 120, descKey: 'BuffDescription.Stinky', fallbackName: '恶臭' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -328,6 +338,7 @@ export class BuffState {
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）
+    if (this.active.has(BuffType.KiteBuff)) m += 0.25;       // 风筝 moveSpeed += 0.25（:9614）
     if (this.active.has(BuffType.SugarRush)) m *= 1.2;       // 糖分冲刺 moveSpeed += 0.2（:9634）
     m += [0, 0.2, 0.3, 0.4][this.wellFedTier];               // 食物 moveSpeed += 0.2/0.3/0.4（:11532+）
     return m;
@@ -372,6 +383,19 @@ export class BuffState {
   /** 镐速 +5/10/15%（pickSpeed -= ,:11534+）→ 挖掘倍率 */
   get wellFedPickMult(): number {
     return [1, 0.95, 0.9, 0.85][this.wellFedTier];
+  }
+  // ---- 风筝 buff 383（Player.cs:9612-9623）----
+  /** kiteLuckLevel（:9618-9623）：clamp(buffTime/10800, 0, 3)。active 存秒，
+   *  10800 tick = 180s 一档；无 buff = 0（luck += 档×0.1/3，RecalculateLuck :28675） */
+  get kiteLuckLevel(): number {
+    const left = this.active.get(BuffType.KiteBuff);
+    if (left === undefined) return 0;
+    return Math.max(0, Math.min(3, Math.floor(left / 180)));
+  }
+  /** 挖掘冷却倍率（pickSpeed 语义，越小越快）：食物档 × 风筝 pickSpeed−0.15（:9616）。
+   *  tileSpeed/wallSpeed 放置速度位（:9616-9617）本仓未建模，登记 */
+  get pickSpeedMult(): number {
+    return this.wellFedPickMult * (this.active.has(BuffType.KiteBuff) ? 0.85 : 1);
   }
   get healthBonus(): number {
     return this.active.has(BuffType.Resistance) ? 80 : 0;

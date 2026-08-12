@@ -68,6 +68,10 @@ var SOLID = new HashSet<ushort> { 0,1,2,7,6,9,8,30,10,53,147,57,166,167,168,169,
 
 // tileFrameImportant && !tileCut（cs:77217 TileRunner 首门禁）——项目侧近似集，
 // 与 JS TileRunner 的 `TILE_DEFS[].framed && !decor` 同源生成（pass 20 起世界出现 165 等活性 framed 物）
+// GrowTree 墙白名单（JS TreePass.DEFAULT_TREE_WALLS）与 EmptyTileCheck 空格白名单
+// （JS GEM_EMPTY_ALLOW = sheet 3,24,32,61,62,69,71,73,74,82,83,84,110,113,184,201,233,352,485,529,530,637,655）
+var TREE_WALLS = new HashSet<ushort> { 0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80 };
+var EMPTY_ALLOW = new HashSet<ushort> { 3, 24, 32, 61, 62, 69, 71, 73, 74, 82, 83, 84, 110, 113, 184, 201, 233, 352, 485, 529, 530, 637, 655 };
 var FRAMED_NOT_CUT = new HashSet<ushort> { 5,10,13,16,17,18,21,26,29,36,50,55,77,81,82,86,91,93,97,99,102,103,105,106,110,113,114,125,128,129,132,133,134,135,136,137,138,141,144,165,171,172,178,184,185,186,187,207,215,217,218,219,220,227,228,231,233,235,236,237,238,239,240,241,242,243,245,246,247,254,269,270,271,275,276,277,278,279,280,281,282,283,285,286,287,288,289,290,291,292,293,294,295,296,297,298,299,300,301,302,303,304,305,306,307,308,309,310,314,316,317,318,319,320,323,324,334,337,339,349,354,355,356,358,359,360,361,362,363,364,373,374,375,376,377,378,387,388,389,390,391,392,393,394,395,405,406,411,412,413,414,427,435,436,437,438,439,443,444,453,454,456,457,461,462,463,464,465,466,467,469,470,471,475,476,484,485,486,487,488,489,490,491,493,494,499,505,506,510,511,518,519,520,521,522,523,524,525,526,527,529,530,532,533,538,542,543,544,545,547,548,549,550,551,552,553,554,555,556,558,559,560,567,568,569,570,571,572,573,579,580,581,582,583,584,585,586,587,588,589,590,591,592,595,596,597,598,599,600,601,602,603,604,605,606,607,608,609,610,611,612,613,614,615,616,617,619,620,621,622,623,624,629,630,631,632,634,637,639,640,642,643,644,645,646,647,648,649,650,651,652,653,654,656,657,658,660,663,664,665,693,694,695,696,698,699,700,701,702,703,704,705,706,707,709,710,711,712,713,714,715,716,720,721,723,724,725,726,733,751,752 };
 var NOT_CLEAR = new HashSet<ushort> { 396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237 };
 bool CanBeCleared(ushort t) => !NOT_CLEAR.Contains(t);
@@ -681,6 +685,8 @@ Checkpoint("oceansand");
 Checkpoint("sandpatches");
 
 // ================= Pass 4：Tunnels（cs:11745-11808）=================
+var tunX = new List<int>();              // GenVars.tunnelX（Lakes 避让消费）
+int snowTopGen = 0, snowBottomGen = 0;   // GenVars.snowTop/snowBottom（Slush 消费）
 {
     int num = (int)((double)W * 0.0015);
     int numTunnels = 0;
@@ -705,6 +711,7 @@ Checkpoint("sandpatches");
             }
         } while (flag);
         numTunnels++;
+        tunX.Add(array[5]);                    // GenVars.tunnelX[numTunnels] = array[5]（Lakes 避让用）
         for (int l = 0; l < 10; l++)
         {
             TileRunner(array[l], array2[l], (int)r.Next(5, 8), (int)r.Next(6, 9), 0, true, -2.0, -0.3);
@@ -918,6 +925,7 @@ Checkpoint("surfacecaves");
 var snowMinXArr = new int[H];
 var snowMaxXArr = new int[H];
 {
+    snowTopGen = worldSurface;
     int snowTop = worldSurface;
     int convLine = lavaLine - (int)r.Next(160, 200);
     int left = snowL, right = snowR;
@@ -935,6 +943,7 @@ var snowMaxXArr = new int[H];
         else if ((int)r.Next(4) == 0) { left--; right--; }
         snowMinXArr[i] = left;
         snowMaxXArr[i] = right;
+        if (snowBottomGen < i) snowBottomGen = i;   // GenVars.snowBottom（cs:12447）
         for (int j = left; j < right; j++)
         {
             if (j < 0 || j >= W) continue; // vanilla 落 padding（丢弃）
@@ -2627,6 +2636,390 @@ void ShinyBand(double oCount, int yMin, int yMax, int sMin, int sMax, int stMin,
 }
 Checkpoint("ores");
 
+// ================= Pass 27 Webs（cs:13659-13696）=================
+{
+    int wbCount = (int)((double)(W * H) * 0.0006);
+    for (int wi = 0; wi < wbCount; wi++)
+    {
+        int wj = (int)r.Next(20, W - 20);
+        int wn = (int)r.Next((int)gvWorldSurfaceHigh, H - 20);
+        if (wi < mCaveX.Count) { wj = mCaveX[wi]; wn = mCaveY[wi]; }   // 前 numMCaves 个锚在山洞口
+        if (act[wn * W + wj] == 0 && ((double)wn > (double)worldSurface || wal[wn * W + wj] > 0))
+        {
+            while (act[wn * W + wj] == 0 && wn > (int)gvWorldSurfaceLow) wn--;
+            wn++;
+            int wdir = (int)r.Next(2) == 0 ? -1 : 1;
+            for (; act[wn * W + wj] == 0 && wj > 10 && wj < W - 10; wj += wdir) { }
+            wj -= wdir;
+            if ((double)wn > (double)worldSurface || wal[wn * W + wj] > 0)
+                TileRunner(wj, wn, (int)r.Next(4, 11), (int)r.Next(2, 4), 51, true, wdir, -1.0, false, false, -1);
+        }
+    }
+}
+Checkpoint("webs");
+
+// GrowAshTree —— JS TreePass.growTreeWithSettings(ASH_PROFILE) 哈希通道镜像。
+// 只需 type/active 落点一致 + 掷骰序一致（帧值不入哈希）：干身行循环的
+// num6(含冲突重掷)/num5/左右枝 k、tuft 双门、基座、树冠骰全部照 JS 顺序。
+void GrowAshTree(int tx, int ty)
+{
+    // 越过树苗（灰烬区无树苗 → 立即停）
+    int num = ty;
+    while (num < H && act[num * W + tx] != 0 && typ[num * W + tx] == 20) num++;
+    if (num >= H || num < 1) return;
+    // 基座上一格三列无液体
+    if (liq[(num - 1) * W + tx - 1] != 0 || liq[(num - 1) * W + tx] != 0 || liq[(num - 1) * W + tx + 1] != 0) return;
+    int gi = num * W + tx;
+    if (act[gi] == 0) return;                                  // 基座须整砖（half/slope 此阶段无）
+    if (!TREE_WALLS.Contains(wal[(num - 1) * W + tx])) return; // 墙白名单
+    if (typ[gi] != 633) return;                                // AshTreeGroundTest：仅灰烬草
+    bool sideFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && typ[num * W + tx + dx] == 633;
+    if (!sideFit(-1) && !sideFit(1)) return;
+    int height = (int)r.Next(7, 13);
+    int num4 = height + 4;                                     // TreeTopPaddingNeeded = 4
+    if (tx - 2 < 0 || tx + 2 >= W || num - num4 < 0) return;
+    for (int ex = tx - 2; ex <= tx + 2; ex++)
+        for (int ey = num - num4; ey <= num - 1; ey++)
+        {
+            int ei = ey * W + ex;
+            if (act[ei] == 0) continue;
+            if (!EMPTY_ALLOW.Contains(typ[ei])) return;        // EmptyTileCheck 白名单
+        }
+    void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = 634; act[ay * W + ax] = 1; } }
+    bool flagL = false, flagR = false;
+    for (int i = num - height; i < num; i++)
+    {
+        int num6 = (int)r.Next(10);
+        if (i == num - 1 || i == num - height) num6 = 0;
+        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) num6 = (int)r.Next(10);
+        flagL = false; flagR = false;
+        if (num6 == 5 || num6 == 7) flagL = true;
+        if (num6 == 6 || num6 == 7) flagR = true;
+        int num5 = (int)r.Next(3);
+        void Put2(int ax, int ay) { Put(ax, ay); }
+        Put2(tx, i);
+        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); Put2(tx - 1, i); }
+        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); Put2(tx + 1, i); }
+    }
+    // 基座 tuft：两侧地面须灰烬草（GEM_TREE_FIT 口径此处即 633）——地狱腔天然全跳
+    bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && typ[num * W + tx + dx] == 633;
+    bool tL = tuftFit(-1), tR = tuftFit(1);
+    if ((int)r.Next(3) == 0) tL = false;
+    if ((int)r.Next(3) == 0) tR = false;
+    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
+    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1); }
+    if (tL || tR) { int k = (int)r.Next(3); Put(tx, num - 1); }
+    int crownFx = (int)r.Next(13) != 0 ? 22 : 0;               // 帧值不入哈希，仅保骰
+    int crownK = (int)r.Next(3);
+    Put(tx, num - height);
+}
+
+// ================= Pass 28 Underworld（cs:13697-13918 普通世界分支）=================
+// ★Liquid.QuickWater(-2)（cs:13788）两侧一致省略（液体模拟子系统，见遗留）；
+//  AddHellHouses 在 JS 侧为独立槽（本链其后）——两侧一致。
+{
+    int uwNum = H - (int)r.Next(150, 190);
+    int uwNum2 = H - (int)r.Next(40, 70);
+    for (int ux = 0; ux < W; ux++)               // ① 灰烬带 + 界下清空
+    {
+        uwNum += (int)r.Next(-3, 4);
+        if (uwNum < H - 190) uwNum = H - 190;
+        if (uwNum > H - 160) uwNum = H - 160;
+        for (int uy = uwNum - 20 - (int)r.Next(3); uy < H; uy++)
+        {
+            int uti = uy * W + ux;
+            if (uy >= uwNum) { act[uti] = 0; liqT[uti] = 0; liq[uti] = 0; }   // active(false)（type 保留）
+            else typ[uti] = 57;                                               // ★只写 type 不激活（原版语义）
+        }
+    }
+    for (int ux = 10; ux < W - 10; ux++)         // ② 岩浆线
+    {
+        uwNum2 += (int)r.Next(-10, 11);
+        if (uwNum2 > H - 60) uwNum2 = H - 60;
+        if (uwNum2 < H - 100) uwNum2 = H - 120;
+        for (int uy = uwNum2; uy < H - 10; uy++)
+        {
+            int uti = uy * W + ux;
+            if (act[uti] == 0) { liqT[uti] = 1; liq[uti] = 255; }
+        }
+    }
+    for (int ux = 0; ux < W; ux++)               // ③ 1/50 列大灰烬丘陵
+    {
+        if ((int)r.Next(50) == 0)
+        {
+            int uy = H - 65;
+            while (act[uy * W + ux] == 0 && uy > H - 135) uy--;
+            TileRunner((int)r.Next(0, W), uy + (int)r.Next(20, 50), (int)r.Next(15, 20), 1000, 57, true, 0.0, (int)r.Next(1, 3), true);
+        }
+    }
+    for (int ux = 0; ux < W; ux++)               // ④ 1/13 列灰烬柱 + 横团 + 挖掘
+    {
+        if ((int)r.Next(13) == 0)
+        {
+            int uy = H - 65;
+            while ((liq[uy * W + ux] > 0 || act[uy * W + ux] != 0) && uy > H - 140) uy--;
+            TileRunner(ux, uy - (int)r.Next(2, 5), (int)r.Next(5, 30), 1000, 57, true, 0.0, (int)r.Next(1, 3), true);
+            double uwS = (int)r.Next(1, 3);
+            if ((int)r.Next(3) == 0) uwS *= 0.5;
+            if ((int)r.Next(2) == 0)
+                TileRunner(ux, uy - (int)r.Next(2, 5), (int)((double)(int)r.Next(5, 15) * uwS), (int)((double)(int)r.Next(10, 15) * uwS), 57, true, 1.0, 0.3);
+            if ((int)r.Next(2) == 0)
+            {
+                uwS = (int)r.Next(1, 3);
+                TileRunner(ux, uy - (int)r.Next(2, 5), (int)((double)(int)r.Next(5, 15) * uwS), (int)((double)(int)r.Next(10, 15) * uwS), 57, true, -1.0, 0.3);
+            }
+            TileRunner(ux + (int)r.Next(-10, 10), uy + (int)r.Next(-10, 10), (int)r.Next(5, 15), (int)r.Next(5, 10), -2, false, (int)r.Next(-1, 3), (int)r.Next(-1, 3));
+            if ((int)r.Next(3) == 0)
+                TileRunner(ux + (int)r.Next(-10, 10), uy + (int)r.Next(-10, 10), (int)r.Next(10, 30), (int)r.Next(10, 20), -2, false, (int)r.Next(-1, 3), (int)r.Next(-1, 3));
+            if ((int)r.Next(5) == 0)
+                TileRunner(ux + (int)r.Next(-15, 15), uy + (int)r.Next(-15, 10), (int)r.Next(15, 30), (int)r.Next(5, 20), -2, false, (int)r.Next(-1, 3), (int)r.Next(-1, 3));
+        }
+    }
+    for (int un = 0; un < W; un++)               // ⑤ 随机小挖掘
+        TileRunner((int)r.Next(20, W - 20), (int)r.Next(H - 180, H - 10), (int)r.Next(2, 7), (int)r.Next(2, 7), -2);
+    for (int ux = 0; ux < W; ux++)               // ⑥ 底部岩浆层 h-145/144
+    {
+        for (int dy = 145; dy >= 144; dy--)
+        {
+            int uti = (H - dy) * W + ux;
+            if (act[uti] == 0) { liq[uti] = 255; liqT[uti] = 1; }
+        }
+    }
+    int uwOre = (int)((double)(W * H) * 0.0008); // ⑦ 地狱石脉
+    for (int un = 0; un < uwOre; un++)
+        TileRunner((int)r.Next(0, W), (int)r.Next(H - 140, H), (int)r.Next(2, 7), (int)r.Next(3, 7), 58);
+    // ⑧ 灰烬草 633 + 灰烬树 634（cs:13869-13915，外缘 17% 带）
+    for (int ux = 25; ux < W - 25; ux++)
+    {
+        if ((double)ux < (double)W * 0.17 || (double)ux > (double)W * 0.83)
+        {
+            int uwEnd = H - 100 + (int)r.Next(-1, 2);
+            for (int uy = H - 300; uy < uwEnd; uy++)
+            {
+                int uti = uy * W + ux;
+                if (typ[uti] != 57 || act[uti] == 0) continue;
+                bool exposed = false;
+                for (int ox = -1; ox <= 1 && !exposed; ox++)
+                    for (int oy = -1; oy <= 1; oy++)
+                        if (act[(uy + oy) * W + ux + ox] == 0) { exposed = true; break; }
+                if (exposed) typ[uti] = 633;
+            }
+        }
+    }
+    for (int ux = 25; ux < W - 25; ux++)
+    {
+        if ((double)ux < (double)W * 0.17 || (double)ux > (double)W * 0.83)
+        {
+            for (int uy = H - 200; uy < H - 50; uy++)
+            {
+                int uti = uy * W + ux;
+                if (typ[uti] != 633 || act[uti] == 0 || act[(uy - 1) * W + ux] != 0) continue;
+                if ((int)r.Next(3) == 0) GrowAshTree(ux, uy);
+            }
+        }
+    }
+}
+Checkpoint("underworld");
+
+// ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================
+// 注：#29 Corruption（cs:13919）未转录——插入位在本块之前（JS 侧在 vanillaBiomes 内已先跑）
+void SonOfLakinater(int li, int lj)
+{
+    // liquidType：1/3 概率（getGood/drunk 分支不适用 → 恒 0=水）
+    int lType = 0;
+    if ((int)r.Next(3) == 0) { /* getGoodWorldGen false → 保持水 */ }
+    double lnum = (int)r.Next(15, 31);
+    double lnum2 = (int)r.Next(30, 61);
+    if ((int)r.Next(5) == 0) { lnum *= 1.3; lnum2 *= 1.3; }
+    double lvx = li, lvy = lj;
+    double lnum3 = (double)r.NextDouble() * 0.002;
+    double lv2x, lv2y;
+    if ((int)r.Next(4) != 0) lv2x = (int)r.Next(-15, 16) * 0.01;
+    else { lv2x = (int)r.Next(-50, 51) * 0.01; lnum3 = (double)r.NextDouble() * 0.004 + 0.001; }
+    lv2y = (int)r.Next(101) * 0.01;
+    double lnum5 = lnum2;
+    while (lnum > 3.0 && lnum2 > 0.0)
+    {
+        lnum -= (int)r.Next(11) * 0.1;
+        lnum2 -= 1.0;
+        int lx0 = Math.Max(0, (int)(lvx - lnum * 4.0)), lx1 = Math.Min(W, (int)(lvx + lnum * 4.0));
+        int ly0 = Math.Max(0, (int)(lvy - lnum * 3.0)), ly1 = Math.Min(H, (int)(lvy + lnum * 2.0));
+        double lnum4 = lnum;
+        int lEntr = lj + 5;
+        for (int lk = lx0; lk < lx1; lk++)
+        {
+            for (int ll = ly0; ll < ly1; ll++)
+            {
+                double lvA = Math.Abs((double)lk - lvx) * 0.6;
+                double lvB = Math.Abs((double)ll - lvy) * 1.4;
+                double lvC = Math.Abs((double)lk - lvx) * 0.3;
+                double lvD = Math.Abs((double)ll - lvy) * 5.0;
+                double lt = lnum2 / lnum5;
+                lvA = lvA + (lvC - lvA) * lt;
+                lvB = lvB + (lvD - lvB) * lt;
+                double ldist = Math.Sqrt(lvA * lvA + lvB * lvB);
+                int lti = ll * W + lk;
+                if (ldist < lnum4 * 0.4)
+                {
+                    if (ll >= lj)
+                    {
+                        if (ll <= lj + 1)
+                        {
+                            // WillWaterPlacedHereStayPut（JS 近似：下方实心且自身无液体）
+                            bool stay = ll + 1 < H && act[(ll + 1) * W + lk] != 0 && liq[lti] == 0;
+                            if (stay) { liq[lti] = 255; liqT[lti] = (byte)lType; }
+                        }
+                        else { liq[lti] = 255; liqT[lti] = (byte)lType; }
+                    }
+                    act[lti] = 0;                     // 湖腔掏空（type 保留=幽灵，SpreadGrass 邻传两侧一致省略）
+                }
+                else if (ll > lj + 1 && ldist < lnum4 && liq[lti] == 0)
+                {
+                    // 腔壁壳：JS 侧仅置 active（不动 type）——两侧一致
+                    if (Math.Abs((double)lk - lvx) * 0.8 < lnum4 && wal[lti] > 0
+                        && wal[ll * W + lk - 1] > 0 && wal[ll * W + lk + 1] > 0 && wal[(ll + 1) * W + lk] > 0)
+                        act[lti] = 1;
+                }
+                else
+                {
+                    // 首步上方漏斗入口
+                    if (ll >= lj || lnum2 != lnum5 - 1.0 || !((double)ll > gvWorldSurfaceLow - 20.0) || act[lti] == 0 || CLOUDS.Contains(typ[lti])) continue;
+                    double fx = Math.Abs(lk - li) * 0.7;
+                    double fy = Math.Abs(ll - lEntr) * 1.35;
+                    ldist = Math.Sqrt(fx * fx + fy * fy);
+                    double lnum12 = lnum4 * 0.4;
+                    double lnum13 = (double)Math.Abs(lk - li) / (double)(lx1 - li);
+                    lnum13 = 1.0 - lnum13;
+                    lnum13 *= 2.3;
+                    lnum13 *= lnum13;
+                    lnum13 *= lnum13;
+                    if (ll < lEntr && fx < lnum12 + (double)Math.Abs(ll - lEntr) * 0.5 * lnum13) act[lti] = 0;
+                }
+            }
+        }
+        lvx += lv2x; lvy += lv2y;
+        lv2x += (int)r.Next(-100, 101) * lnum3;
+        lv2y += (int)r.Next(-100, 101) * 0.01;
+        if (lv2x > 1.0) lv2x = 1.0;
+        if (lv2x < -1.0) lv2x = -1.0;
+        if (lv2y > 1.0) lv2y = 1.0;
+        double lfloor = 0.5 * (1.0 - lnum2 / lnum5);
+        if (lv2y < lfloor) lv2y = lfloor;
+    }
+}
+{
+    double lkNum = W / 4200.0;
+    int lkTries = (int)r.Next((int)(lkNum * 3.0), (int)(lkNum * 6.0));
+    var lkX = new List<int>();
+    int lkNum3 = W / 4;
+    for (int lki = 0; lki < lkTries; lki++)
+    {
+        if (lkX.Count >= 50 - 1) break;                       // GenVars.maxLakes = 50
+        while (lkNum3 > 0)
+        {
+            bool lkFlag = false;
+            lkNum3--;
+            int lkX0 = (int)r.Next(340, W - 340);              // lakesBeachAvoidance = 320+20
+            while ((double)lkX0 > W * 0.45 && (double)lkX0 < W * 0.55) lkX0 = (int)r.Next(340, W - 340);
+            for (int j = 0; j < lkX.Count; j++)
+                if (Math.Abs(lkX0 - lkX[j]) < 150) { lkFlag = true; break; }
+            for (int k = 0; k < mCaveX.Count; k++)
+                if (Math.Abs(lkX0 - mCaveX[k]) < 100) { lkFlag = true; break; }
+            for (int l = 0; l < tunX.Count; l++)
+                if (Math.Abs(lkX0 - tunX[l]) < 100) { lkFlag = true; break; }
+            if (lkFlag) continue;
+            int lkY = (int)gvWorldSurfaceLow - 20;
+            while (act[lkY * W + lkX0] == 0)
+            {
+                lkY++;
+                if ((double)lkY >= (double)worldSurface || wal[lkY * W + lkX0] > 0) { lkFlag = true; break; }
+            }
+            if (!lkFlag && typ[lkY * W + lkX0] == 53) lkFlag = true;
+            if (lkFlag) continue;
+            for (int m = lkX0 - 50; m <= lkX0 + 50; m++)
+                for (int n = lkY - 50; n <= lkY + 50; n++)
+                {
+                    if (m < 0 || m >= W || n < 0 || n >= H) continue;
+                    // ★原版不判 active：type==203/25（猩红石/黑檀石）即拒
+                    if (typ[n * W + m] == 203 || typ[n * W + m] == 25) { lkFlag = true; break; }
+                }
+            if (lkFlag) continue;
+            int lkAnchor = lkY;
+            while (!SolidTileGen(lkX0 - 20, lkY) || !SolidTileGen(lkX0 + 20, lkY))
+            {
+                lkY++;
+                if ((double)lkY > (double)worldSurface - 50.0) lkFlag = true;
+            }
+            if (lkFlag || lkY - lkAnchor <= 10) continue;
+            for (int m = lkX0 - 60; m <= lkX0 + 60; m++)
+            {
+                int ty2 = lkY - 20;
+                if (m < 0 || m >= W || ty2 < 0 || ty2 >= H) continue;
+                if (act[ty2 * W + m] != 0 || wal[ty2 * W + m] > 0) lkFlag = true;
+            }
+            if (lkFlag) continue;
+            int lkSolid = 0;
+            for (int m = lkX0 - 60; m <= lkX0 + 60; m++)
+                for (int n = lkY; n <= lkY + 120; n++)
+                {
+                    if (m < 0 || m >= W || n < 0 || n >= H) continue;
+                    if (SolidTileGen(m, n)) lkSolid++;
+                }
+            int lkTotal = 121 * 121;
+            if (!((double)lkSolid < (double)lkTotal * 0.8))
+            {
+                // UndergroundDesertLocation.Intersects(±8) —— 墙 187/216 近似（JS 同口径）
+                bool lkDesert = false;
+                for (int m = -8; m <= 8 && !lkDesert; m++)
+                    for (int n = -8; n <= 8; n++)
+                    {
+                        int mx = lkX0 + m, my = lkY + n;
+                        if (mx < 0 || mx >= W || my < 0 || my >= H) continue;
+                        ushort wl = wal[my * W + mx];
+                        if (wl == 187 || wl == 216 || wl == 217) { lkDesert = true; break; }
+                    }
+                if (!lkDesert)
+                {
+                    SonOfLakinater(lkX0, lkY);
+                    lkX.Add(lkX0);
+                    break;
+                }
+            }
+        }
+    }
+}
+Checkpoint("lakes");
+
+// ================= Pass 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756-14815）=================
+{
+    for (int sy = snowTopGen; sy < snowBottomGen; sy++)
+    {
+        for (int sx = snowMinXArr[sy]; sx < snowMaxXArr[sy]; sx++)
+        {
+            ushort st = typ[sy * W + sx];
+            switch (st)
+            {
+                case 123: typ[sy * W + sx] = 224; break;      // 沙泥→雪泥（不判 active）
+                case 59:
+                {
+                    bool ok = true;
+                    for (int k = sx - 3; k <= sx + 3; k++)
+                        for (int l = sy - 3; l <= sy + 3; l++)
+                        {
+                            if (k < 0 || k >= W || l < 0 || l >= H) continue;
+                            ushort t2 = typ[l * W + k];
+                            if (act[l * W + k] != 0 && (t2 == 60 || t2 == 70 || t2 == 71 || t2 == 72)) { ok = false; break; }
+                        }
+                    if (ok) typ[sy * W + sx] = 224;
+                    break;
+                }
+                case 1: typ[sy * W + sx] = 161; break;        // 石→冰（不判 active）
+            }
+        }
+    }
+}
+Checkpoint("slush");
+// ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
 
 // ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================
 // 1456 注册序在 Dungeon(32) 之后——本 oracle 尚未转录 26-32 段（Mushroom/Marble/
@@ -2798,6 +3191,10 @@ Checkpoint("mcopenings");
     }
 }
 Checkpoint("beaches");
+//   本行与 mcopenings 块之间（原版真实位 29/32）。
+
+
+
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {

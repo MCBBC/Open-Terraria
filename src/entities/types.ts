@@ -38,6 +38,10 @@ export interface GameHooks {
   ): void;
   /** 拾取物品后刷新 UI（掉落物实体调用） */
   notifyInventoryChanged(): void;
+  /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒） */
+  onProjectileDeath?(projId: number, x: number, y: number, w?: number, h?: number): void;
+  /** 吸血链（Projectile.vampireHeal/ghostHeal）：返回实际回复 HP（0 = 未生效） */
+  applyLifeSteal?(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic?: boolean): number;
   /** 播放音效 */
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;

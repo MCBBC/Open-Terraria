@@ -428,6 +428,13 @@ export class VanillaSpawner {
       }
     }
     this.surfaceSpawn = spawnTileY <= this.world.groundLevel;
+    // L1146-1153 第二支：岩石层-20 以下的落点在血月（或日食昼）且处于世界中带
+    // （x ∈ (0.38w+50, 0.62w)）→ 强制地表化（血月僵尸从地下刷怪口涌向地表的语义）
+    if (spawnTileY > this.world.rockLevel - 20
+      && ((this.world.clock?.bloodMoon) || (this.world.clock?.eclipse && this.world.clock?.isDay))
+      && spawnTileX > st.w * 0.38 + 50 && spawnTileX < st.w * 0.62) {
+      this.surfaceSpawn = true;
+    }
     this.deeperThanRockLayer = spawnTileY >= this.world.rockLevel;
     this.underGround = spawnTileY > this.world.groundLevel && spawnTileY < this.world.rockLevel;
     // isOcean（L1104 1:1）：(边缘 && Main.tileSand[spawnTileType] && 岩石层上)

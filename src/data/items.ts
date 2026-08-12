@@ -494,6 +494,11 @@ item({ key: 'vi_4756_grox_the_great_s_chestplate', name: '', maxStack: 999, valu
 item({ key: 'vi_4757_grox_the_great_s_greaves', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5000_terraspark_boots', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5339_arcane_crystal', name: '', maxStack: 999, value: 1 });
+// 永久幸运消耗品（Player.cs:44786-44789：一次性 usedGalaxyPearl → luck +0.03 :28676-28678）
+item({ key: 'vi_5340_galaxy_pearl', name: '', maxStack: 999, value: 1 });
+// 漂亮镜子（Item 5577：投掷消耗品，shoot 1085；碎裂近身 150px → brokenMirrorBadLuckTime
+// 25200，Projectile.cs:67554-67574）——投掷走 thrownCombat 通用管线
+item({ key: 'vi_5577_pretty_mirror', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5391_uncumbering_stone', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2585_slime_hook', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_313_daybloom', name: '', maxStack: 999, value: 1 });

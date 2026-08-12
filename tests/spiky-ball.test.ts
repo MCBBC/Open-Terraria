@@ -32,10 +32,10 @@ describe('尖刺球 185 物理对拍(aiStyle14 + 碰撞响应)', () => {
 
   it('重力 0.3/tick + 横向摩擦 0.98 + 终端 15.9', () => {
     const { game } = makeWorld();
-    const s = new TrapShot(60 * 16, 10 * 16, 1, 0, 40, 'spiky');
+    const s = new TrapShot(60 * 16, 10 * 16, 1, 0.5, 40, 'spiky');
     const vy0 = s.vy, vx0 = s.vx;
     s.fixedUpdate(1, game);
-    // vy: 0 +0.3;vx: 1*0.98
+    // vy≠0 无贴地 0.95:vy+0.3、vx*0.98(vy==0 时另叠 0.95,:21600-21608)
     expect(s.vy).toBeCloseTo(vy0 + 0.3, 5);
     expect(s.vx).toBeCloseTo(vx0 * 0.98, 5);
     s.vy = 20;
@@ -47,17 +47,19 @@ describe('尖刺球 185 物理对拍(aiStyle14 + 碰撞响应)', () => {
     const { game } = makeWorld();
     // 从 y=90*16 下落,记录每次触地反弹后的 vy
     const s = new TrapShot(60 * 16, 90 * 16, 0.3, 0, 40, 'spiky');
-    const bounces: number[] = [];
     let prevVy = 0;
+    let flips = 0;
     for (let t = 0; t < 300; t++) {
       s.fixedUpdate(1, game);
       if (s.dead) break;
-      // 反弹瞬间:vy 由正转负
-      if (prevVy > 0 && s.vy < 0) bounces.push(-s.vy / prevVy);
+      // 反弹瞬间:vy 由正转负;本 tick 先加重力(+0.3)再按 0.9 弹回
+      if (prevVy > 0 && s.vy < 0) {
+        expect(s.vy).toBeCloseTo(-0.9 * (prevVy + 0.3), 5);
+        flips++;
+      }
       prevVy = s.vy;
     }
-    expect(bounces.length).toBeGreaterThanOrEqual(2);         // 至少两跳(0.4 系数时几乎只剩一跳)
-    for (const r of bounces) expect(r).toBeCloseTo(0.9, 3);    // 系数 0.9
+    expect(flips).toBeGreaterThanOrEqual(2);   // 至少两跳(0.4 系数时几乎只剩一跳)
   });
 
   it('最终落定:vy==0 贴地且位置稳定,vx 持续衰减不死亡', () => {
@@ -76,12 +78,14 @@ describe('尖刺球 185 物理对拍(aiStyle14 + 碰撞响应)', () => {
     const { game } = makeWorld();
     // 贴地滚向左墙 x=50(实心列),观察 vx 翻转
     const s = new TrapShot(52 * 16, 98 * 16, -3, 0, 40, 'spiky');
-    let flipped = 0;
+    let ratio = 0;
     for (let t = 0; t < 60; t++) {
       const px = s.vx;
       s.fixedUpdate(1, game);
-      if (px < 0 && s.vx > 0) { flipped = s.vx / (-px); break; }
+      if (px < 0 && s.vx > 0) { ratio = s.vx / (-px); break; }
     }
-    expect(flipped).toBeCloseTo(0.9, 3);
+    // 0.9 × 0.98(贴地当 tick 叠 0.95 → 0.838);必须远大于旧实现 0.7 衰减
+    expect(ratio).toBeGreaterThan(0.83);
+    expect(ratio).toBeLessThanOrEqual(0.882 + 1e-9);
   });
 });

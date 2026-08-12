@@ -164,3 +164,34 @@ describe('玩家脱困落点（ShimmerHelper.FindSpotWithoutShimmer 近似）', 
     expect(spot!.y).toBeLessThan(40);
   });
 });
+
+describe('玩家浸微光（buff 353 + 脱困传送，Player.cs:27420/11381/28377）', () => {
+  it('入微光：shimmering 置位 + 受击免疫 + timeShimmering 累积；脱困传送落点无微光', () => {
+    const w = shimmerWorld();
+    const p = new Player(20 * TILE, 36 * TILE, new Inventory());
+    const h = hooks(w, p);
+    p.fixedUpdate(1 / 60, h);
+    expect(p.inShimmer).toBe(true);
+    expect(p.shimmering).toBe(true);          // y=36 < lavaLine 50 → buff 353 生效
+    expect(p.timeShimmering).toBe(1);
+    expect(p.damage(9999, p.cx, p.cy)).toBe(false); // Hurt :37591-37595 直接 0
+    // 强制走脱困（≥1200 且有输入）：传送到池外无微光落点
+    p.timeShimmering = 1200;
+    p.inputX = 1;
+    p.fixedUpdate(1 / 60, h);
+    const st = w.store;
+    const i = st.idx(Math.floor(p.cx / TILE), Math.floor((p.y + p.h - 4) / TILE));
+    expect(st.liquid[i] === 0 || st.liquidType[i] !== 4).toBe(true); // 落点不在微光里
+    expect(p.shimmering).toBe(false);
+    expect(p.timeShimmering).toBe(0);
+  });
+
+  it('地狱层内微光不生效（:11391-11397 position.Y/16 > UnderworldLayer → DelBuff）', () => {
+    const w = shimmerWorld();
+    w.lavaLine = 30;                          // 玩家 y=36 已入地狱层
+    const p = new Player(20 * TILE, 36 * TILE, new Inventory());
+    p.fixedUpdate(1 / 60, hooks(w, p));
+    expect(p.inShimmer).toBe(true);
+    expect(p.shimmering).toBe(false);
+  });
+});

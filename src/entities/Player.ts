@@ -102,8 +102,12 @@ export class Player extends Entity {
   /** 甲虫攻击球（0-3）：近战命中蓄能，受击掉一颗 */
   beetleOrbs = 0;
   private beetleCharge = 0;
-  /** 潜行 0(可见)-1(满)：蘑菇矿/星璇套按住↓静立蓄积（:25500/:25542） */
+  /** 潜行 0(可见)-1(满)：蘑菇矿=移动蓄/星璇=双击↓开关（:25500/:25542） */
   stealth = 0;
+  private stealthTimer = 0;
+  vortexStealthActive = false;
+  private prevDown = false;
+  private downTapT = 0;
   private sharpenedCd = 0;
   /** BOC 受击脉冲（fixedUpdate 消费：buff 321 + 困惑近敌） */
   bocPulse = 0;
@@ -476,8 +480,10 @@ export class Player extends Entity {
     const base = this.damageMult('ranged'); // rangedDamage 全链（装备+四系 buff）
     const stealthBonus = 1 + (1 - this.stealth) * (st.vortexSet ? 0.8 : st.shroomiteSet ? 0.6 : 0);
     if (kind === 'arrow') {
-      return (base + st.arrowStack) * this.buffs.arrowDmgMult
-        * (st.shroomiteType === 'arrow' ? 1.12 : 1) * stealthBonus;
+      // bowEffectiveDamage :3820 = (rangedDamage/arrowMult + stack) × arrowMult²
+      //   = (rangedDamage + stack×arrowMult) × arrowMult——stack 段平方差异在此
+      const arrowMult = this.buffs.arrowDmgMult * (st.shroomiteType === 'arrow' ? 1.12 : 1);
+      return (base + st.arrowStack * arrowMult) * arrowMult * stealthBonus;
     }
     if (kind === 'bullet') return base * (st.shroomiteType === 'bullet' ? 1.12 : 1) * stealthBonus;
     if (kind === 'rocket') return base * (st.shroomiteType === 'rocket' ? 1.12 : 1) * stealthBonus;
@@ -705,7 +711,8 @@ export class Player extends Entity {
     }
 
     // 水平（敏捷 Buff 提速 + 装备移速（赫尔墨斯靴族 runSpeed/词缀 73-76）；蜂蜜比水更黏滞）
-    const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1);
+    const speedMult = this.buffs.moveSpeedMult * this.equipStats.moveMult * (this.inHoney ? 0.5 : 1)
+      * (this.vortexStealthActive && this.stealth > 0 ? 0.3 : 1); // 星璇潜行移速（:25563）
     // 冰冻 Frozen(47,Player.cs:9749 frozen=true)：整帧封移动输入——跳跃/攀绳/矿车
     // 同读这些标志,一并归零(原版 Update 段 control* 清零语义)。帧末由 Game 重灌输入
     if (this.buffs.has(BuffType.Frozen)) { this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false; }
@@ -1152,10 +1159,33 @@ export class Player extends Entity {
         if (Math.abs(en.cx - this.cx) < 300 && Math.abs(en.cy - this.cy) < 200) en.confusedT = 4;
       }
     }
-    // 潜行（蘑菇矿/星璇套：按住↓静立蓄 1/60t，动则散 1/15t）
-    const stealthSet = this.equipStats.shroomiteSet || this.equipStats.vortexSet;
-    if (stealthSet && this.inputDown && this.onGround && Math.abs(this.vx) < 0.6) this.stealth = Math.min(1, this.stealth + 1 / 60);
-    else this.stealth = Math.max(0, this.stealth - 1 / 15);
+    // 潜行（1:1 改写 :25500-25567）：蘑菇矿套=移动蓄(|vx|+|vy|)×0.0075/t、静止散 0.015/t
+    // （攻击中 itemAnimation 门→近似 useTime>0 暂停 5t）；星璇套=双击↓开关 vortexStealthActive
+    // （开时 stealth 从满每 t -0.04、移速 ×0.3；再双击关）——星璇的增伤/暴在乘区读同一 stealth
+    if (this.equipStats.shroomiteSet) {
+      if (this.useTime > 0) this.stealthTimer = 5;
+      const still = Math.abs(this.vx) < 0.1 && Math.abs(this.vy) < 0.1;
+      if (still) {
+        if (this.stealthTimer === 0 && this.stealth > 0) this.stealth = Math.max(0, this.stealth - 0.015);
+      } else {
+        this.stealth = Math.min(1, this.stealth + (Math.abs(this.vx) + Math.abs(this.vy)) * 0.0075);
+      }
+      if (this.stealthTimer > 0) this.stealthTimer--;
+    } else if (this.equipStats.vortexSet) {
+      // 双击↓检测（KeyDoubleTap :24740-24749 窗口 15t）
+      const downNow = this.inputDown;
+      if (downNow && !this.prevDown && this.downTapT > 0) {
+        this.vortexStealthActive = !this.vortexStealthActive;
+        if (this.vortexStealthActive) this.stealth = 1;
+      }
+      if (downNow && !this.prevDown) this.downTapT = 15;
+      else if (this.downTapT > 0) this.downTapT--;
+      this.prevDown = downNow;
+      if (this.vortexStealthActive) this.stealth = Math.max(0, this.stealth - 0.04);
+    } else {
+      this.stealth = 0;
+      this.vortexStealthActive = false;
+    }
     // 星云层数衰减（8s 全层刷新）
     if (this.nebulaStacks > 0 && --this.nebulaT <= 0) { this.nebulaStacks = 0; }
     // 鞭 buff 倒计时（WhipTagEffect.PlayerBuffTime=180 系）
@@ -1320,6 +1350,10 @@ export class Player extends Entity {
   /** 幸运度聚合态（src/stats/Luck.ts LuckState；环境因子由 Game 扫描写入，
    *  RecalculateLuck :28672-28697 各项见 LuckState 注释） */
   readonly luckState = new LuckState();
+  /** 吸血预算（Player.cs:962 初始 99999 → 首帧 Update 钳到上限；本体语义 =
+   *  每秒可吸血总量池）。Game 每 tick 回充：普通 +0.6 钳 80 / 专家 +0.5 钳 70
+   *  （:24196-24216）。吸血命中扣全额浮点（Projectile.cs:11417/:11444） */
+  lifeSteal = 80;
   /** 幸运值（RecalculateLuck :28672-28697 1:1）：
    *  luck = 瓢虫×0.2 + 火炬×0.2 + 药水档×0.1 + 风筝档×0.1/3 + 银河珍珠 0.03
    *        + 灯笼夜 0.3 + 地精 0.2 − 臭屁 0.25 + 装备 + 钱币 − 碎镜 0.25。
@@ -1332,10 +1366,11 @@ export class Player extends Entity {
     const l = this.luckState;
     let v = l.ladyBugLuck * 0.2 + l.torchLuck * 0.2;        // :28673
     v += this.luckPotionTier * 0.1;                          // :28674（buff 257 三档）
+    v += this.kiteLuckTier * (0.1 / 3);                      // :28675（buff 383 三档）
     if (l.usedGalaxyPearl) v += 0.03;                        // :28676-28678
     if (l.lanternsUp) v += 0.3;                              // :28679-28682
     if (l.hasGardenGnomeNearby) v += 0.2;                    // :28683-28686
-    if (l.stinky) v -= 0.25;                                 // :28687-28690
+    if (this.buffs.has(BuffType.Stinky)) v -= 0.25;          // :28687-28690（buff 120 → stinky）
     v += this.luckEquipmentBonus;                            // :28692
     v += l.coinLuckValue;                                    // :28693
     if (l.brokenMirrorBadLuck) v -= 0.25;                    // :28694-28696
@@ -1346,6 +1381,11 @@ export class Player extends Entity {
     const left = this.buffs.active.get(BuffType.Luck);
     if (left === undefined) return 0;
     return left > 600 ? 3 : left > 300 ? 2 : 1;
+  }
+  /** kiteLuckLevel（Player.cs:9618-9623 buff 383）：clamp(buffTime/10800, 0, 3)——
+   *  active 存秒，10800t=180s 一档；无 buff = 0（luck += 档×0.1/3 :28675） */
+  get kiteLuckTier(): number {
+    return this.buffs.kiteLuckLevel;
   }
   /** equipmentBasedLuckBonus（Player.cs:12629-12647）：
    *  幸运币 855 +0.05（hasLuck_LuckyCoin）/ 马掌族 +0.05（hasLuck_LuckyHorseshoe）。

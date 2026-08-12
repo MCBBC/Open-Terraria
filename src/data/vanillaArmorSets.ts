@@ -18,6 +18,8 @@ export interface ArmorSetBonus {
   fireWalk?: boolean;
   ammoCost80?: boolean;
   manaCostMul?: number;      // manaCost -=（折扣）
+  ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
+  ghostHurt?: boolean;       // 幽灵伤害头（Spectre Mask :15856-15860，engine 未接）
   name?: string;             // ArmorSetBonus.*（调试/后续 UI 展示）
 }
 
@@ -60,4 +62,9 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '9|9|9': { dmgMelee: 0.1, fireWalk: true, name: 'Molten' },
   // 霜寒 46：近远程伤 +10%（frostBurn engine）
   '46|27|26': { dmgMelee: 0.1, dmgRanged: 0.1, name: 'Frost' },
+  // 幽灵套（Spectre Robe 66 / Pants 55；Player.cs:15850-15860）：
+  // 头 101 兜帽 → ghostHeal（魔法命中回血，魔法伤 −40%）；
+  // 头 156 面具 → ghostHurt（伤害强化 engine 未接，登记）
+  '101|66|55': { ghostHeal: true, dmgMagic: -0.4, name: 'SpectreHealing' },
+  '156|66|55': { ghostHurt: true, name: 'SpectreDamage' },
 };

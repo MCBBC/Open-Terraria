@@ -28,8 +28,12 @@
 //           Enemy.hurt cs:82338；触碰=好运 ladybugAI cs:78730。原登记 ID 359/360
 //           为旧版误记——1.4.5.6 瓢虫是 NPC 604 Ladybug / 605 Gold Ladybug，
 //           359/360 实为蜗牛；生成在 VanillaSpawner 起风日分支 cs:2413）
-//     登记：buff 383（风筝幸运，未入 BuffType）、
-//           buff 120（Stinky）、银河珍珠 5340、碎镜 810、微光化币（微光未移植）。
+//     登记→已接（幸运来源批）：buff 383 风筝三档（BuffType.KiteBuff）、buff 120 恶臭
+//           （BuffType.Stinky，Player.luck 直读）、银河珍珠 5340（vi_5340_galaxy_pearl
+//           使用置 usedGalaxyPearl）、碎镜（vi_5577_pretty_mirror 投掷弹 1085 消亡近身
+//           150px → brokenMirrorBadLuckTime；原版此处弹体 id=1085，旧注释"810"系 1.4.0.5 编号）。
+//     仍登记：微光化币（微光未移植）；风筝/恶臭 buff 的授予物品（风筝族 4371 等/恶臭
+//           药水 1332/弹幕 1080）未移植。
 import { TILE_DEFS } from '../data/tiles';
 import type { TileStore } from '../world/TileStore';
 
@@ -92,9 +96,11 @@ export class LuckState {
   lanternsUp = false;
   /** 装备幸运（equipmentBasedLuckBonus：四叶草族/马掌族/幸运币；Player 侧聚合写入） */
   equipmentLuckBonus = 0;
-  /** 银河珍珠已用（Player.cs:44786-44789 一次性）——物品 5340 未入物品表，登记 */
+  /** 银河珍珠已用（Player.cs:44786-44789 一次性）——物品 vi_5340_galaxy_pearl 已注册，
+   *  Game 使用分支（useTime 45）置位后消耗 */
   usedGalaxyPearl = false;
-  /** Stinky（buff 120，:9958-9961）——臭屁药水未移植，登记 */
+  /** Stinky（buff 120，:9958-9961）——Player.luck 直接读 BuffType.Stinky（buff 在
+   *  即 stinky）；此位仅作环境外注入备用。授予来源（恶臭药水 1332/弹幕 1080）未移植 */
   stinky = false;
   /** 碎镜负面计时 tick（brokenMirrorBadLuckTime，UpdateBrokenMirrorLuck :28700-28711） */
   brokenMirrorBadLuckTime = 0;

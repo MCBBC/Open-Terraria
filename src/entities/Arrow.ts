@@ -25,6 +25,7 @@ export function projSprite(projId: number): HTMLImageElement | null {
  *  未列入的恒 1 帧。投射物贴图是【竖向多帧行】——帧高 = 图高/帧数，
  *  整图绘制会把多帧压成胶片条（史莱姆随从 266 曾 12 帧压成一坨） */
 import projFramesJson from '../data/vanilla-projframes.json';
+import { projectileData } from '../data/vanillaProjectiles';
 const PROJ_FRAMES = projFramesJson as Record<string, number>;
 export function projFrameCount(projId: number): number {
   return PROJ_FRAMES[String(projId)] ?? 1;
@@ -130,10 +131,17 @@ export class Arrow extends Entity {
     ctx.restore();
   }
 
+  /** 统一消亡出口（Projectile.Kill 语义钩子）：碎镜 1085 近身 150px 坏运等
+   *  按弹型分发由 Game 侧 onProjectileDeath 消费 */
+  private killNow(game: GameHooks): void {
+    this.dead = true;
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+  }
+
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.life <= 0) { this.dead = true; return; }
+    if (--this.life <= 0) { this.killNow(game); return; }
     const world = game.world;
     // aiStyle 1/2 通用重力（原版箭 0.3/tick 抛物线；直飞弹 grav=0）
     if (this.grav !== 0) this.vy = Math.min(this.vy + this.grav, 16);
@@ -141,7 +149,7 @@ export class Arrow extends Entity {
     this.y += this.vy;
     const tx = Math.floor((this.x + this.w / 2) / TILE);
     const ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (!world.store.inBounds(tx, ty)) { this.dead = true; return; }
+    if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
     const tileType = world.store.get(tx, ty);
     if (tileType !== 0) {
       // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍
@@ -153,7 +161,7 @@ export class Arrow extends Entity {
       if (this.bounce && this.bounceOff(game)) return;
       // 实心块：1/3 概率回收掉落（原版箭 Kill 的掉落），然后消失
       if (this.dropKey && Math.random() < 1 / 3) game.spawnDrop(this.x, this.y, this.dropKey, 1);
-      this.dead = true;
+      this.killNow(game);
       return;
     }
     // 敌对弹命中玩家（原版 Projectile.Damage_EVP :13706-13830）：不消耗弹体，
@@ -161,7 +169,7 @@ export class Arrow extends Entity {
     // 实际造成伤害才走 StatusPlayer 的 debuff 授予（:13798-13800）
     if (this.hostile && hitPlayer(this, game, this.damage)) statusPlayer(game, this.projId);
     // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
-    if (hitCritters(this, game)) { this.dead = true; return; }
+    if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean; def?: { hitSound?: string[] } };
@@ -175,7 +183,17 @@ export class Arrow extends Entity {
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
-        if (--this.pierce <= 0) { this.dead = true; return; }
+        // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----
+        // 吸血鬼飞刀 304 → vampireHeal（:12879-12882，!moonLeech 门）；
+        // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:12883-12888，canGhostHeal 全 true
+        // 近似——雕像产怪 flag 未实装）。ghostHurt（幽灵伤害头 156）未接，登记。
+        // numHits = 含本次的命中数（原版 StrikeNPC 先自增，hitSet.size 此时已含本敌）
+        if (this.projId === 304) {
+          game.applyLifeSteal?.('vampire', Math.round(dmg), this.hitSet.size, this.x, this.y);
+        } else if (projectileData(this.projId)?.magic) {
+          game.applyLifeSteal?.('ghost', Math.round(dmg), this.hitSet.size, this.x, this.y, true);
+        }
+        if (--this.pierce <= 0) { this.killNow(game); return; }
       }
     }
   }

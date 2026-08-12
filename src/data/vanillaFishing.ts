@@ -52,3 +52,23 @@ export function rollCatch(power: number, pool: FishPool, cratePotion: boolean): 
   if (pool.junk?.length && r < crateChance + junkChance) return pool.junk[Math.floor(Math.random() * pool.junk.length)];
   return pool.fish[Math.floor(Math.random() * pool.fish.length)];
 }
+
+/** Fishing_GetPowerMultiplier（Player.cs:41560-41605 1:1）：天气/时段/月相/血月乘区。
+ *  time = 当时段 tick（昼 0-54000 / 夜 0-32400）。 */
+export function fishingPowerMultiplier(ctx: {
+  raining: boolean; cloudBGAlpha: number; dayTime: boolean; time: number;
+  moonPhase: number; bloodMoon: boolean;
+}): number {
+  let m = 1;
+  if (ctx.raining) m *= 1.2;
+  if (ctx.cloudBGAlpha > 0) m *= 1.1;
+  if (ctx.dayTime && (ctx.time < 5400 || ctx.time > 48600)) m *= 1.3;          // 晨昏
+  if (ctx.dayTime && ctx.time > 16200 && ctx.time < 37800) m *= 0.8;           // 正午
+  if (!ctx.dayTime && ctx.time > 6480 && ctx.time < 25920) m *= 0.8;           // 前半夜
+  if (ctx.moonPhase === 0) m *= 1.1;                                           // 满月
+  if (ctx.moonPhase === 1 || ctx.moonPhase === 7) m *= 1.05;
+  if (ctx.moonPhase === 3 || ctx.moonPhase === 5) m *= 0.95;
+  if (ctx.moonPhase === 4) m *= 0.9;                                           // 新月
+  if (ctx.bloodMoon) m *= 1.1;
+  return m;
+}

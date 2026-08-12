@@ -2495,6 +2495,11 @@ export class Game implements GameHooks {
     const pl = this.player.luckState;
     pl.lanternsUp = LanternNight.lanternsUp;   // RecalculateLuck :28679（每帧读边）
     pl.update();
+    // ---- 吸血预算回充（Player.cs:24196-24216：专家 +0.5/t 钳 70；普通 +0.6/t 钳 80）----
+    {
+      const expert = (this.player.appearance?.difficulty ?? 0) >= 1;
+      this.player.lifeSteal = Math.min(expert ? 70 : 80, this.player.lifeSteal + (expert ? 0.5 : 0.6));
+    }
     // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
     if (this.tickCount % 120 === 0 && this.entities.critters.length < 8) {
       this.spawnCritter();
@@ -3137,6 +3142,15 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.player.useTime = Math.max(this.player.useTime, 30);
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && heldDef.key === 'vi_5340_galaxy_pearl') {
+      // 银河珍珠（Player.cs:44786-44789：一次性 usedGalaxyPearl → luck +0.03 :28676-28678；
+      // 已用过 → 无动作不消耗，原版 !usedGalaxyPearl 门）
+      if (!this.player.luckState.usedGalaxyPearl) {
+        this.player.luckState.usedGalaxyPearl = true;
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onInventoryChanged();
+      }
+      this.player.useTime = 45;   // Item 5340 useTime（Item.cs:42342）
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && this.consumableFuncGate(heldDef)) {
       // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
       // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
@@ -3797,8 +3811,9 @@ export class Game implements GameHooks {
     //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
     //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
     const tileSpeedMult = (this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1;
-    // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）→ 冷却按原版 useTime/pickSpeed 缩短
-    const pickMult = this.player.buffs.wellFedPickMult;
+    // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）× 风筝 −15%（:9616）→
+    // 冷却按原版 useTime/pickSpeed 缩短
+    const pickMult = this.player.buffs.pickSpeedMult;
     const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult / pickMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
@@ -7672,6 +7687,42 @@ export class Game implements GameHooks {
 
   addDamageNumber(x: number, y: number, amount: number, crit: boolean, color = '#FFF') {
     this.dmgNumbers.push({ x, y, vy: -1.6, value: amount, crit, color, life: 50 });
+  }
+
+  /** 弹幕消亡钩子（Projectile.Kill 按弹型分发）：
+   *  碎镜 1085（Projectile.cs:67554-67574）——弹体命中盒外扩 150px 与玩家矩形
+   *  相交 → brokenMirrorBadLuckTime = 25200（luck −0.25 档，UpdateBrokenMirrorLuck
+   *  :28700-28711 衰减）。原版此处另有 Gore 1394-1397 碎片与尘 330——未移植，登记 */
+  onProjectileDeath(projId: number, x: number, y: number, w = 0, h = 0) {
+    if (projId !== 1085) return;
+    const R = 150;
+    const p = this.player;
+    if (x - R < p.x + p.w && x + w + R > p.x && y - R < p.y + p.h && y + h + R > p.y) {
+      p.luckState.brokenMirrorBadLuckTime = 25200;
+    }
+  }
+
+  /** 吸血链（Projectile.vampireHeal :11439-11448 / ghostHeal :11404-11437 语义）：
+   *  回复系数 = 吸血鬼飞刀 0.075 / 幽灵治疗 0.2−numHits×0.05（钳 >0，:11407-11411）；
+   *  floor ≥1 且预算 >0 才生效（:11413/:11442），预算扣全额浮点（:11417/:11444）。
+   *  ghost 侧旗标门在调用点（:12885 ghostHeal && !moonLeech）——此处双保险；
+   *  非魔法弹预算照扣不回复（:11418-11421 原文顺序）。
+   *  【近似登记】原版经治疗弹 305/298 飞达玩家后结算（含鬼疗跨队友选最缺血者
+   *  :11424-11434）——本仓直回当前玩家；canGhostHeal 按恒 true；ghostHurt 未接 */
+  applyLifeSteal(kind: 'vampire' | 'ghost', dmg: number, numHits: number, x: number, y: number, isMagic = false): number {
+    const p = this.player;
+    if (p.buffs.moonLeech) return 0;                       // 月噬 145 全禁（:12879/:12885）
+    if (kind === 'ghost' && !p.equipStats.setBonus?.ghostHeal) return 0;
+    const rate = kind === 'vampire' ? 0.075 : 0.2 - numHits * 0.05;
+    if (rate <= 0) return 0;
+    const heal = dmg * rate;
+    const n = Math.floor(heal);
+    if (n <= 0 || p.lifeSteal <= 0) return 0;
+    p.lifeSteal -= heal;
+    if (kind === 'ghost' && !isMagic) return 0;            // 预算已扣，非魔法不回复
+    p.hp = Math.min(p.maxHp, p.hp + n);
+    this.addDamageNumber(x, y - 10, n, false, '#40E080');
+    return n;
   }
 
   onEnemyKilled(key: string, enemy?: Enemy) {
