@@ -80,3 +80,37 @@ describe('数值（1.4.5.6 UpdateBuffs L9640+）', () => {
     expect(healed).toBeLessThanOrEqual(15);
   });
 });
+
+describe('环境 DoT 分块（HurtLifeRegen Player.cs:19136-19212）', () => {
+  it('Burning：30 HP/s 且按原版 -600 阈值整块弹 5（每 10t 一块）', () => {
+    const b = new BuffState();
+    b.apply(BuffType.Burning, 5);
+    let dmg = 0;
+    for (let k = 0; k < 600; k++) dmg += b.tick(1 / 60);      // 10 秒 = 300 HP
+    expect(dmg).toBeLessThanOrEqual(-290);                    // 30 HP/s(浮点边界)
+    expect(dmg).toBeGreaterThanOrEqual(-300);
+    // 分块时序:前 9 tick 静默,第 10 tick 弹 5
+    const b2 = new BuffState();
+    b2.apply(BuffType.Burning, 1);
+    for (let k = 0; k < 9; k++) { b2.tick(1 / 60); expect(b2.consumeDotChunk()).toBe(0); }
+    b2.tick(1 / 60);
+    expect(b2.consumeDotChunk()).toBe(5);
+    expect(b2.consumeDotChunk()).toBe(0);                     // 一次性消费后清零
+  });
+
+  it('Suffocation：同 -600 分支整块弹 5（每 15t 一块）', () => {
+    const b = new BuffState();
+    b.apply(BuffType.Suffocation, 1);
+    for (let k = 0; k < 14; k++) { b.tick(1 / 60); expect(b.consumeDotChunk()).toBe(0); }
+    b.tick(1 / 60);
+    expect(b.consumeDotChunk()).toBe(5);
+  });
+
+  it('OnFire：走通用 -120 分支,每 15t 弹 1', () => {
+    const b = new BuffState();
+    b.apply(BuffType.OnFire, 1);
+    for (let k = 0; k < 14; k++) { b.tick(1 / 60); expect(b.consumeDotChunk()).toBe(0); }
+    b.tick(1 / 60);
+    expect(b.consumeDotChunk()).toBe(1);
+  });
+});

@@ -5,7 +5,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   rollExtractinatorDrop, extractinatorMode, extractinatorUseTime,
-  EXTRACTINATOR_MODE, CHLOROPHYTE_TRADES, COIN_KEY_BY_VID,
+  EXTRACTINATOR_MODE, CHLOROPHYTE_TRADES,
   findExtractinatorChest, extractinatorConsumeFromChest,
   type ExtractinatorRand, type ExtractChest,
 } from '../src/world/Extractinator';
@@ -177,7 +177,7 @@ describe('转化表健全性', () => {
       62, 195, 194, 2, 1125, 169, 177, 178, 179, 180, 181, 182, 999,
       12, 11, 14, 13, 699, 700, 701, 702, 364, 1104, 365, 1105, 366, 1106];
     for (const vid of outputs) {
-      const key = COIN_KEY_BY_VID[vid] ?? VANILLA_ITEM_KEY_BY_ID[vid];
+      const key = VANILLA_ITEM_KEY_BY_ID[vid];
       expect(key, `产物 ${vid} 无 key`).toBeTruthy();
       expect(ITEM_BY_KEY[key!], `产物 ${vid} 未注册`).toBeDefined();
     }

@@ -236,6 +236,14 @@ export class SettingsPanel {
     } else if (this.cat === 'ui') {
       this.content.append(
         this.slider(Lang.text('Mods.SandboxWorld.Settings.UiScale'), 0.75, 1.5, 0.05, () => d.uiScale, (v) => void options.set('uiScale', v).then(() => this.applyUi())),
+        // 资源条样式（原版 PlayerResourceSetsManager2 五样式之两主样式：
+        // 'New'=FancyClassic 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）
+        this.modeRow(
+          Lang.text('LegacyInterface.49'),
+          () => d.resourceBarStyle,
+          () => d.resourceBarStyle === 'fancy' ? '华丽（金框）' : '经典（朴素）',
+          () => void options.set('resourceBarStyle', d.resourceBarStyle === 'fancy' ? 'classic' : 'fancy'),
+        ),
         this.langGrid(),
       );
       const hint = document.createElement('div');

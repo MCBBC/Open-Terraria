@@ -229,6 +229,200 @@ export class TownNPC extends Entity {
 
   }
 
+  /** 城镇 NPC 自卫攻击（AI_007 攻击态机,NPC.cs:54747-55538 + 触发门 :55621-55966）。
+   *  返回 true = 攻击态中(调用方停走)。语义对照:
+   *  - flag31 门 ≈ 空闲+站地+触发冷却尽+探测范围内有可打敌(flag16;stinky 分支无系统跳过)
+   *  - 掷骰 rand(max(1,chance×num3))==0,num3=2(209 ÷3),:53813/:53562
+   *  - 入态:ai[1]=AttackTime,面向目标;态内每 tick ai[1]--/localAI[3]++/vx×0.8
+   *  - 发射档:localAI[3]==num46/55/65;连发链 `localAI[3]>档 → 推下一档`(:55066 族)
+   *  - 退出:ai[1]<=0 → 冷却 localAI[1] = cdBase/2 + rand(cdRand)(:54927-54934 族)
+   *  近似项:难度伤害缩放恒 Classic=1(Journey/Expert 切换未接);633 狼人变体/
+   *  108 连发 1-3/160·663 落点弹重掷等特化在发射端按 note 近似 */
+  private attackUpdate(world: import('../world/World').World, game: GameHooks): boolean {
+    if (this.atkCd > 0) this.atkCd--;
+    const atkType = TOWN_ATTACK_TYPE[this.vanillaId];
+    if (atkType === undefined) return false;
+    if (this.atkState === 0) {
+      // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55621 flag31 + :55864 族掷骰)
+      if (!this.onGround || this.atkCd > 0 || this.talking) return false;
+      const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
+      const target = this.pickSideTarget(world, game, range);
+      if (!target) return false;
+      let chance = TOWN_ATTACK_CHANCE[this.vanillaId] ?? 1;
+      let num3 = 2;                             // :53413(Skyblock ÷1.5 未接)
+      if (this.vanillaId === 209) num3 /= 3;    // :53548 蒸汽朋克人三倍勤
+      const gate = Math.max(1, Math.floor(chance * num3));
+      if (Math.random() >= 1 / gate) return false;  // rand(gate)==0
+      const params = this.atkParams(atkType);
+      if (!params && atkType !== 3) return false;
+      this.atkState = atkType === 0 ? 10 : atkType === 1 ? 12 : atkType === 2 ? 14 : 15;
+      this.atkTimer = TOWN_ATTACK_TIME[this.vanillaId] ?? 30;
+      this.atkTick = 0;
+      this.atkBurstIdx = 0;
+      this.atkNextShot = (params as TownShotParams | undefined)?.shootTick ?? 1;
+      this.facing = (target as { cx: number }).cx < this.cx ? -1 : 1;
+      return true;
+    }
+    // ---- 态内推进 ----
+    this.atkTimer--;
+    this.atkTick++;
+    this.vx *= 0.8;
+    const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
+    if (this.atkState === 15) {
+      this.swingUpdate(world, game);
+    } else {
+      const params = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId]) as TownShotParams;
+      // 连发链:localAI[3] 超过当前档 → 推下一档(原版逐档 if 链)
+      const burst = params.burst ?? [];
+      while (this.atkBurstIdx < burst.length && this.atkTick > this.atkNextShot) {
+        this.atkNextShot = burst[this.atkBurstIdx++];
+      }
+      if (this.atkTick === this.atkNextShot) this.shootAt(world, game, params, range);
+    }
+    if (this.atkTimer <= 0) {
+      // 退出 + 冷却(:54927/:55199/:55397/:55529 族):localAI[1] = cdBase/2 + rand(cdRand)
+      const p = this.atkParams(TOWN_ATTACK_TYPE[this.vanillaId]);
+      const cdBase = (p as TownShotParams | undefined)?.cdBase ?? 10;
+      const cdRand = (p as TownShotParams | undefined)?.cdRand ?? 1;
+      this.atkState = 0;
+      this.atkCd = Math.floor(cdBase / 2) + Math.floor(Math.random() * Math.max(1, cdRand));
+    }
+    return true;
+  }
+
+  /** 当前类型的态参数(10/12/14;15 走 TOWN_SWING) */
+  private atkParams(atkType: 0 | 1 | 2 | 3): TownShotParams | { swing: true } | undefined {
+    const hard = (game_worldFlagsHardMode(this), true); // 占位防误用——见下方实现
+    void hard;
+    const table = atkType === 0 ? TOWN_MELEE : atkType === 1 ? TOWN_BOW : TOWN_MAGIC;
+    const base = table[this.vanillaId];
+    if (!base) return undefined;
+    // hardMode 覆盖(world.flags.hardMode)
+    const hm = base.hardMode;
+    if (hm && this.hardModeRef) {
+      return { ...base, ...hm } as TownShotParams;
+    }
+    return base;
+  }
+  /** hardMode 引用(构造后由 Game 注入;避免 TownNPC 持 world) */
+  hardModeRef = false;
+
+  /** 挥击态(15):前方矩形近战判定(:55469-55494;原版逐 tick 弧形挥击,近似中段一击) */
+  private swingUpdate(_world: import('../world/World').World, game: GameHooks): void {
+    const sw = TOWN_SWING[this.vanillaId];
+    if (!sw) return;
+    const t = TOWN_ATTACK_TIME[this.vanillaId] ?? 15;
+    if (this.atkTick !== Math.max(1, Math.floor(t / 2))) return; // 挥击中段
+    const rect = sw.rect;
+    const rx = this.facing === 1 ? this.cx : this.cx - rect;
+    const ry = this.cy - rect / 2;
+    let dmg = sw.dmg;
+    let kb = sw.kb;
+    if (this.vanillaId === 441 && this.givenName === 'Andrew') { dmg *= 2; kb *= 2; } // 猫单特典 :55431
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+        hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean };
+      if (e.dead) continue;
+      if (!(rx < e.x + e.w && rx + rect > e.x && ry < e.y + e.h && ry + rect > e.y)) continue;
+      if (e.hurt(Math.round(dmg * townNpcDamageMult(0)), this.facing * kb, 0, game)) {
+        game.addDamageNumber(e.x, e.y, dmg, false, '#FFD060');
+      }
+    }
+  }
+
+  /** 探测范围内按侧取最近可打敌(:53887-53958 近侧目标;LOS=Collision.CanHit) */
+  private pickSideTarget(world: import('../world/World').World, game: GameHooks, range: number):
+    { cx: number; cy: number } | null {
+    let bestL: { cx: number; cy: number; d: number } | null = null;
+    let bestR: { cx: number; cy: number; d: number } | null = null;
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean };
+      if (e.dead) continue;
+      const dx = e.cx - this.cx;
+      const dy = e.cy - this.cy;
+      const d = Math.hypot(dx, dy);
+      if (d >= range) continue;
+      if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+      const slot = dx < 0
+        ? (!bestL || d < bestL.d ? { cx: e.cx, cy: e.cy, d } : bestL)
+        : (!bestR || d < bestR.d ? { cx: e.cx, cy: e.cy, d } : bestR);
+      if (dx < 0) bestL = slot; else bestR = slot;
+    }
+    // num15 侧选择(:53960):两侧都有 → 距离近者;仅一侧 → 该侧
+    if (bestL && bestR) return bestL.d <= bestR.d ? bestL : bestR;
+    return bestL ?? bestR;
+  }
+
+  /** 发射(:54903/:55175/:55325 三族瞄准公式统一在此) */
+  private shootAt(world: import('../world/World').World, game: GameHooks, params: TownShotParams, range: number): void {
+    const st = world.store;
+    const hardMode = this.hardModeRef;
+    let proj = params.proj;
+    let dmg = params.dmg;
+    let speed = params.speed;
+    let kb = params.kb;
+    let spread = params.spread;
+    // 229 PrettySafe 近距保命换炮弹(:55128-55135)
+    const pretty = TOWN_PRETTY_SAFE[this.vanillaId];
+    const target = this.pickSideTarget(world, game, range);
+    if (params.panic && pretty && target && Math.hypot(target.cx - this.cx, target.cy - this.cy) < pretty
+      && this.atkTick === params.shootTick) {
+      proj = params.panic.proj; dmg = params.panic.dmg; speed = params.panic.speed;
+      kb = params.panic.kb; spread = params.panic.spread;
+    }
+    // 209 三选一弹(:55139)
+    if (this.vanillaId === 209 && !params.panic) {
+      const pick = [134, 133, 135][Math.floor(Math.random() * 3)];
+      proj = pick;
+      const m: Record<number, [number, number, number, number, number]> = {
+        134: [20, 13, 4, 0.1, 20], 133: [25, 10, 6, 0.2, 10], 135: [30, 12, 7, 0.2, 30],
+      };
+      [dmg, speed, kb, spread] = [m[pick][0], m[pick][1], m[pick][2], m[pick][3]];
+    }
+    void hardMode;
+    // 瞄准:弓 = 目标上抬 aimLift 取向;近战/魔法 = aimLiftScaled×(dist/range 归一)上抬
+    let vx = this.facing, vy = 0;
+    if (target) {
+      let lift = params.aimLift ?? 0;
+      if (this.atkState === 10 || this.atkState === 14) {
+        const dist = Math.hypot(target.cx - this.cx, target.cy - this.cy);
+        lift = (params.aimLiftScaled ?? 0) * Math.max(0, Math.min(1, dist / range));
+        vy = -1; // 近战/魔法默认上抛分量(初值 -UnitY)
+      }
+      const dx = target.cx - this.cx;
+      const dy = target.cy - lift - this.cy;
+      const dl = Math.hypot(dx, dy) || 1;
+      vx = dx / dl; vy = dy / dl;
+      if (Math.sign(vx) !== this.facing) { vx = this.facing; vy = this.atkState === 12 ? 0 : -1; }
+    } else if (this.atkState !== 12) {
+      vy = -1;
+    }
+    vx *= speed; vy *= speed;
+    // 散布(Utils.RandomVector2 ±spread;近战态恒 0)
+    if (spread > 0) {
+      vx += (Math.random() * 2 - 1) * spread;
+      vy += (Math.random() * 2 - 1) * spread;
+    }
+    const dmgFinal = Math.round(dmg * townNpcDamageMult(0));
+    const sx = this.cx + this.facing * 16 - 5;
+    const sy = this.cy - 2 - 5;
+    // 落点弹(160/663):目标区域生成 velocity=0;实心重掷近似 ≤5 次
+    if (speed === 0 && target) {
+      for (let k = 0; k < 5; k++) {
+        const px = target.cx - 16 + Math.random() * 32;
+        const py = target.cy - 16 + Math.random() * 32;
+        if (!st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE))) {
+          game.spawnEntity?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj, { noGravity: true }), 'projectiles');
+          return;
+        }
+      }
+      return;
+    }
+    game.spawnEntity?.(new TownShot(sx, sy, vx, vy, dmgFinal, kb, proj, {
+      life: this.vanillaId === 588 ? 480 : undefined,
+    }), 'projectiles');
+  }
+
   /** 城镇 NPC 开关门（原版 NPC.cs:54478-54500/54243-54252，含高门 389 族 ShiftTallGate） */
   private npcDoorUpdate(world: import('../world/World').World, game: GameHooks) {
     const st = world.store;

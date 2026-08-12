@@ -603,8 +603,9 @@ function crimStart(st: TileStore, rng: RNG, gs: GenState, i: number, j: number, 
   const usedV: Array<[number, number]> = [];
   for (let n = 0; n < veinCount; n++) {
     let dvx = 0, dvy = 0, tries = 0;
+    rng.int(-20, 20); rng.int(0, 20);                          // ★ctor 死代码骰（cs:75754，值即弃）
     for (;;) {
-      dvx = rng.int(-20, 20) * 0.15;                           // 两次 ctor（首对是死代码骰）
+      dvx = rng.int(-20, 20) * 0.15;                           // while 顶部重采样
       dvy = rng.int(0, 20) * 0.15;
       while (Math.abs(dvx) + Math.abs(dvy) < 1.5) {
         dvx = rng.int(-20, 20) * 0.15;

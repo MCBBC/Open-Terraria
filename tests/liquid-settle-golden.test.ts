@@ -55,6 +55,6 @@ describe('液体沉降 golden(优化等价性闸门)', () => {
     const st = world.store;
     const hash = [st.liquid, st.liquidType, st.type, st.flags].map((a) =>
       fnv1a(new Uint8Array(a.buffer, a.byteOffset, a.byteLength))).join(' ');
-    expect(hash).toBe('f4caef32 4e249996 9cd2fedb 6026f9bb');
+    expect(hash).toBe('f4f6614e d6806ecf b6f70ec5 e84ee6b5');   // golden(与优化前逐字节一致,冻结快照 A/B 验证)
   }, 120000);
 });
