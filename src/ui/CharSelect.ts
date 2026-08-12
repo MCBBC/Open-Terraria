@@ -5,7 +5,8 @@ import { compositePaperDoll, dollFrame, walkFrame } from '../player/PaperDoll';
 import { Lang } from '../i18n/Lang';
 
 export interface CharSelectFlow {
-  onPlay(a: Appearance): void;
+  /** id = CharacterMeta.id（流程层硬核消亡回写角色存档用；旧调用方可忽略） */
+  onPlay(a: Appearance, id?: number): void;
   onNew(): void;
   onBack(): void;
 }
@@ -113,7 +114,9 @@ export class CharSelectPanel {
       name.style.color = `rgb(${dc.r},${dc.g},${dc.b})`;
       const sub = document.createElement('div');
       sub.className = 'sub';
-      sub.textContent = DIFFICULTY_INFO[appearance.difficulty]?.label ?? '';
+      sub.textContent = appearance.hardcoreDead
+        ? Lang.text('Mods.SandboxWorld.CharSelect.HardcoreDead')
+        : DIFFICULTY_INFO[appearance.difficulty]?.label ?? '';
       info.append(name, sub);
       // 操作
       const ops = document.createElement('div');
@@ -126,7 +129,16 @@ export class CharSelectPanel {
         ops.appendChild(b);
       };
       const a = appearance;
-      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Enter'), true, () => this.close(() => this.flow.onPlay(a)));
+      // 硬核角色已消亡（hardcoreDead 标记；原版死亡即删 .plr 档）：灰显 + 禁止进入
+      const dead = !!a.hardcoreDead;
+      if (dead) {
+        el.style.opacity = '0.45';
+        el.style.cursor = 'not-allowed';
+      }
+      mk(Lang.text('Mods.SandboxWorld.WorldSelect.Enter'), true, () => {
+        if (a.hardcoreDead) return;
+        this.close(() => this.flow.onPlay(a, meta.id));
+      });
       mk(Lang.text('Mods.SandboxWorld.CharSelect.Rename'), false, async () => {
         const name2 = prompt(Lang.text('Mods.SandboxWorld.CharSelect.RenamePrompt'), a.name);
         if (name2 == null) return;
@@ -141,8 +153,11 @@ export class CharSelectPanel {
         await this.reload();
       });
       el.append(canvas, info, ops);
-      // 整行点击/双击 = 进入（操作按钮已 stopPropagation）
-      const enter = () => this.close(() => this.flow.onPlay(a));
+      // 整行点击/双击 = 进入（操作按钮已 stopPropagation；硬核消亡角色禁入）
+      const enter = () => {
+        if (a.hardcoreDead) return;
+        this.close(() => this.flow.onPlay(a, meta.id));
+      };
       el.addEventListener('click', enter);
       el.addEventListener('dblclick', enter);
       this.body.appendChild(el);

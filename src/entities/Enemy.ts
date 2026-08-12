@@ -4166,14 +4166,16 @@ export class Enemy extends Entity {
         if (!statueSkip) {
         const w = game.world;
         const p = game.player;
-        const diff = p.appearance?.difficulty ?? 0;
+        // 专家/大师判定读**世界难度**（Main.expertMode/masterMode = GameMode 1/2，
+        // Main.cs:2775/:2779）——角色难度（软/中/硬核）只管死亡惩罚，不参与掉落
+        // （曾错接 p.appearance.difficulty：专家掉落/宝袋被角色难度误触发）
         // vanillaNetId 默认 0=无变体：netId/value 查表都要把 0 归一到 type
         const netId = this.vanillaNetId !== 0 ? this.vanillaNetId : this.vanillaId;
         const ctx: NpcDropCtx = {
           rng,
           netId,
           type: this.vanillaId,
-          isExpert: diff >= 2, isMaster: diff >= 3,
+          isExpert: w.isExpert, isMaster: w.isMaster,
           hardMode: !!w.flags.hardMode, crimson: !!w.crimson,
           flags: w.flags,
           x: this.cx, y: this.cy,

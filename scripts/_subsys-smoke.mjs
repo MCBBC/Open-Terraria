@@ -81,12 +81,23 @@ const out = await page.evaluate(async () => {
   w.clock.moonPhase = 2;
   for (let i = 0; i < 4; i++) g.entities.add(new TownNPC('merchant', g.player.cx + i * 40, g.player.cy - 80), 'npcs');
   g.player.baseMaxHp = 400; g.player.hp = 400;
+  // 防御>10：铁甲三件（每件 3/2/2 → 7）+ 配饰位硬背 +6？简化：直接塞 iron armor 头胸腿 + 铁盾类
+  const iron = ['vi_90_IronHelmet', 'vi_81_IronChainmail', 'vi_77_IronGreaves'];
+  for (let k = 0; k < 3; k++) {
+    const id = g.itemId(iron[k]);
+    if (id) g.player.inv.armor[k] = { id, stack: 1 };
+  }
+  const shield = g.itemId('vi_156_CobaltShield');
+  if (shield) g.player.inv.armor[3] = { id: shield, stack: 1 };
+  g.player.buffs.defenseBonus = 5; // 铁甲 7 + 5 = 12 > 10 门
   const realRand = Math.random;
   Math.random = () => 0; // 命中 1/3 与 1/10
   w.clock.timeOfDay = 0.9; // 入夜穿越（_lastClockT 由真实 tick 保存的旧昼值 → crossed 成立）
   await new Promise(r => setTimeout(r, 60)); // 让一个 fixed tick 在桩随机下跑
   Math.random = realRand;
-  res.eocRolled = g.spawnEyePending === true || g.spawnHardBossPending > 0; // 满足全部门+桩随机→其一必中
+  const LanternNightProxy = null;
+  res.eocDbg = { maxHp: g.player.maxHp, def: g.player.defense, town: g.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length, tod: w.clock.timeOfDay, lastT: g._lastClockT, lanterns: LanternNightProxy };
+  res.eocRolled = g.spawnEyePending === true || g.spawnHardBossPending > 0;
   g.spawnEyePending = false; g.spawnHardBossPending = 0;
   for (const n of [...g.entities.npcs]) if (n.npcKey === 'merchant') n.dead = true;
 

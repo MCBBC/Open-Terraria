@@ -143,13 +143,6 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     await passes[i].run(ctx, () => {});
     // 部分世界回调（生成期实时预览）：pass 完成即暴露，不等 finalize
     if (cfg.onWorldPartial) cfg.onWorldPartial(world, i, passes[i].name);
-    if (true) {  // DBG 临时
-      let ashN = 0;
-      for (let q = 0; q < store.wall.length; q++) const keyAsh = TILE_BY_KEY['ash'];
-      void keyAsh;
-      if (store.flags[q] && TILE_DEFS[store.type[q]]?.vanilla?.sheet === 57) ashN++;
-      console.log(`[ashdbg] ${i} ${passes[i].name} -> ${ashN}`);
-    }
   }
 
   finalize(ctx);
@@ -192,7 +185,7 @@ import {
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
 } from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
-import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runWebsPass } from './vanilla/HiveSpiderPass';
+import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
 import { runTemplePass } from './vanilla/TemplePass';
@@ -510,7 +503,12 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runFloatingIslandsPass(store, rng, gs); // 23 Floating Islands（原在蘑菇前——注册序修正）
   runDirtToMudAndSiltPass(store, rng, gs); // 24 Dirt To Mud / 25 Silt
   runShiniesPass(store, rng, gs);        // 26 Ores And Shinies（原在很后"矿石"槽——移到 Silt 后=Webs 位）
+  runVanillaWebsPass(store, rng, gs);     // 27 Webs（cs:13659——原后置防被清，注册序修正回 27 位）
+  runUnderworldPass(store, rng, gs);     // 28 Underworld（cs:13697——原管线末"地狱"槽；
+                                        //  地狱屋/地狱箱/熔炉等依赖槽在数组其后 = 地狱 pass 之后 ✓）
   runCorruptionPass(store, rng, gs);     // 29 Corruption/Crimson
+  runLakesPass(store, rng, gs);          // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
+  runSlushPass(store, gs);               // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
   // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。

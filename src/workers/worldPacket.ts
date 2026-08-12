@@ -25,6 +25,7 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     groundLevel: world.groundLevel, rockLevel: world.rockLevel, lavaLine: world.lavaLine,
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
     exploredVersion: world.exploredVersion,
+    difficulty: world.difficulty,   // Main.GameMode（worker 读档路径回传;生成路径写 GenConfig）
     clock: { timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
       bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse, moonPhase: world.clock.moonPhase },
     moonType: world.moonType,

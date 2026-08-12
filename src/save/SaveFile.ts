@@ -51,6 +51,8 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
     moonPhase: world.clock.moonPhase, moonType: world.moonType,
     seedFlags: { ...world.seedFlags },
+    difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
+    journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -102,6 +104,7 @@ export function saveWorldOnly(world: World): string {
     treeX: world.treeX, treeStyle: world.treeStyle, treeTops: world.treeTops,
     crimson: world.crimson, dungeonX: world.dungeonX, dungeonY: world.dungeonY, jungleX: world.jungleX,
     timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
+    difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）——服务器档随世界下发
     chests: world.chests, signs: world.signs, flags: world.flags,
     weather: weatherToSave(world.weather),
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
@@ -161,6 +164,11 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   if (data.clock.moonPhase !== undefined) world.clock.moonPhase = data.clock.moonPhase;
   if (data.header.moonType !== undefined) world.moonType = data.header.moonType;
   if (data.header.seedFlags) world.seedFlags = { ...data.header.seedFlags };
+  // 世界难度（Main.GameMode，Main.cs:2677）——旧档缺省 0=经典
+  if (data.header.difficulty !== undefined) world.difficulty = data.header.difficulty;
+  // 旅程时间倍率/冻结（CreativePowers.cs:866/:1448）——旧档缺省 1/false
+  if (data.header.journeyTimeRate !== undefined) world.journeyTimeRate = data.header.journeyTimeRate;
+  if (data.header.journeyFreezeTime !== undefined) world.journeyFreezeTime = data.header.journeyFreezeTime;
   if (data.invasion) { // 入侵五元组回填（旧档缺省=无入侵）
     world.invasionType = data.invasion.type;
     world.invasionSize = data.invasion.size;

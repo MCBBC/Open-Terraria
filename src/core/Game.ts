@@ -7,7 +7,7 @@ import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input } from './Input';
 import { buildAssets, AssetBundle } from '../assets/AssetGen';
-import { Clock, World, ChestData } from '../world/World';
+import { Clock, World, ChestData, deathCoinKeepFraction } from '../world/World';
 import { breakHiveBlock, larvaSummonInRange } from '../world/hive';
 import { generateWorld } from '../world/gen/WorldGen';
 import { openDoor, closeDoor, clearDoorAt, shiftTallGate } from '../world/Door';
@@ -75,6 +75,7 @@ import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
+import { dropsAllItemsOnDeath, dropsCoinsOnDeath } from '../player/Appearance';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
 const BUFF_BY_VANILLA = new Map<number, BuffType>();
 for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBuff, Number(bt) as BuffType);
@@ -304,6 +305,46 @@ function compactByLife<T extends { life: number }>(list: T[]): void {
   list.length = w;
 }
 
+/** 中核/硬核死亡掉落全部物品（Player.DropItems :53398-53470 gemsOnly=false 分支）：
+ *  背包+盔甲+染料+杂项装备+杂项染料+三套 Loadout 全部以掉落物形式撒在死亡点
+ *  （TryDroppingSingleItem :53480-53496：随机抛射速度由调用方注入），随后发还
+ *  铜制起始三件套（:53463-53468 inventory[0]=3507 短剑/[1]=3509 镐/[2]=3506 斧）。
+ *  软核/旅程走 gemsOnly=true 只掉宝石（1522-1527/3643）——本仓无背包宝石，近似为不掉。
+ *  spawn 回调注入使其可脱离 Game 实例单测（key+stack 逐件回调） */
+export function dropInventoryOnDeath(
+  inv: import('../items/Inventory').Inventory,
+  spawn: (key: string, stack: number) => void,
+): void {
+  const drop = (slots: Array<{ id: number; stack: number } | null>) => {
+    for (const s of slots) {
+      if (!s || s.id === 0 || s.stack <= 0) continue;
+      // 槽位存的是内部 id → 先查内部表（自定义物品 key 唯一权威）；
+      // VANILLA_ITEM_KEY_BY_ID 以 vanilla id 为键，不能反过来用（内部 id 撞号会掉错物品）
+      const key = ITEM_DEFS[s.id]?.key ?? VANILLA_ITEM_KEY_BY_ID[s.id];
+      if (key) spawn(key, s.stack);
+    }
+  };
+  drop(inv.slots);
+  drop(inv.armor);
+  drop(inv.dye);
+  drop(inv.miscEquips);
+  drop(inv.miscDyes);
+  for (const l of inv.loadouts) { drop(l.armor); drop(l.dye); }  // EquipmentLoadout.TryDroppingItems
+  inv.slots.fill(null);
+  inv.armor.fill(null);
+  inv.dye.fill(null);
+  inv.miscEquips.fill(null);
+  inv.miscDyes.fill(null);
+  for (const l of inv.loadouts) { l.armor.fill(null); l.dye.fill(null); }
+  // 发还铜制起始三件套（原版 1:1 顺序：[0]短剑 3507 / [1]镐 3509 / [2]斧 3506）
+  const starter = [VANILLA_ITEM_KEY_BY_ID[3507] ?? 'copper_sword',
+    VANILLA_ITEM_KEY_BY_ID[3509] ?? 'copper_pickaxe', VANILLA_ITEM_KEY_BY_ID[3506] ?? 'copper_axe'];
+  starter.forEach((key, i) => {
+    const id = ITEM_BY_KEY[key];
+    if (id !== undefined) inv.slots[i] = { id, stack: 1 };
+  });
+}
+
 export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
@@ -326,6 +367,9 @@ export interface GameCallbacks {
   onDayNight?: (isDay: boolean) => void;
   /** 环境选曲变化（MusicID；0=静音）。原版 UpdateAudio_DecideOnNewMusic 驱动 */
   onMusic?: (musicId: number) => void;
+  /** 硬核角色死亡消亡（Player.cs:38255 HardcoreDeathPenalty）：外观已标 hardcoreDead，
+   *  由流程层回写 CharacterStore 持久化（原版 KillMeForGood :38173+ 直接删 .plr 档） */
+  onHardcoreDeath?: (appearance: import('../player/Appearance').Appearance) => void;
 }
 
 /** Main.time 口径（Main.cs 昼夜计时）：黎明 4:30（timeOfDay 0.25）归零，
@@ -1052,12 +1096,12 @@ export class Game implements GameHooks {
     if (best) {
       // 贴图优先级：矿车装备槽（miscEquips[2]）> 手持 > 背包首件（TrackHook 近似）
       const tex = this.bestCartTexture();
-      this.mountMinecartAt(best.x, best.y, tex);
+      if (tex) this.mountMinecartAt(best.x, best.y, tex);
     }
   }
 
-  /** 玩家可用的矿车贴图（miscEquips[2] 装备矿车 > 手持 > 背包扫描；无则基础矿车） */
-  private bestCartTexture(): string {
+  /** 玩家可用的矿车贴图（miscEquips[2] 装备矿车 > 手持 > 背包扫描；无矿车返回 null） */
+  private bestCartTexture(): string | null {
     const misc = this.player.inv.miscEquips?.[2];
     if (misc) {
       const t = this.cartTextureOfItem(misc.id);
@@ -1073,7 +1117,7 @@ export class Game implements GameHooks {
       const t = this.cartTextureOfItem(s.id);
       if (t) return t;
     }
-    return DEFAULT_CART_TEXTURE;
+    return null;
   }
 
   /** 矿车升级套件解锁态（Player.unlockedSuperCart；持久化于世界 flags） */
@@ -1203,6 +1247,15 @@ export class Game implements GameHooks {
       // F2:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault)。
       // 原 F11 与系统/浏览器全屏冲突,2026-08-12 改 F2
       if (code === 'F2') this.openPixelArtImport();
+      // T:旅程模式时间倍率循环（CreativePowers.ModifyTimeRate.TargetTimeRate 1-24×，
+      // CreativePowers.cs:866-884；Main.cs:6278 UpdateTimeRate 消费）——仅旅程世界可用，
+      // 原版为时间菜单滑杆，此处取最小实现：按键循环常用档 + toast
+      if (code === 'KeyT' && this.world?.isJourney) {
+        const rates = [1, 2, 4, 8, 16, 24];
+        const cur = rates.indexOf(this.world.journeyTimeRate);
+        this.world.journeyTimeRate = rates[(cur + 1) % rates.length];
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.JourneyTimeRate', String(this.world.journeyTimeRate)));
+      }
       // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (code === 'KeyR') {
         const held = this.player?.inv.heldItem();
@@ -1227,9 +1280,12 @@ export class Game implements GameHooks {
 
   // ================= 生命周期 =================
 
-  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
+  async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
     this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
     const settleLabel = () => Lang.text('Mods.SandboxWorld.Progress.SettleLiquids');
+    // 世界难度（Main.GameMode，Main.cs:2677）：worker/主线程两路生成完成后统一灌入——
+    // worker GenConfig 不带此字段，fromPacket 回 0，此处覆盖（创建 UI 已选档）
+    const applyDifficulty = () => { if (opts?.difficulty !== undefined) this.world.difficulty = opts.difficulty; };
     // ---- worker 路径（generate + settle 一条链在后台完成，UI 全程不卡） ----
     if (!this.genClient) this.genClient = new WorldGenClient();
     if (await this.genClient.probe()) {
@@ -1247,6 +1303,7 @@ export class Game implements GameHooks {
         );
         await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
         onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
+        applyDifficulty();
         this.afterWorldLoad();
         this.cb.onWorldReady();
         return;
@@ -1263,6 +1320,7 @@ export class Game implements GameHooks {
     // 进图前贴图预载(用户要求:不进图后才动态加载)
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.87 + p * 0.13));
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.Done'), 1);
+    applyDifficulty();
     this.afterWorldLoad();
     this.cb.onWorldReady();
   }
@@ -1857,7 +1915,9 @@ export class Game implements GameHooks {
     const w = this.world;
     // 下落沙:消费候选队列(有界,防止沙漠整柱同帧转换尖峰)
     if (this.sandQueue.length) this.drainSandQueue();
-    w.clock.tick(dt * 1000);
+    // 旅程时间倍率（Main.cs:6278-6294 UpdateTimeRate：dayRate = TargetTimeRate、
+    // FreezeTime 开启时 0——时间推进按倍率缩放；非旅程世界恒 1 不变速）
+    w.clock.tick(dt * 1000 * w.journeyTimeScale());
     // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
     this.updateWeather();
     // 昼夜切换：公告走原版消息列（Main.NewText→LegacyChatMonitor；ChatColors.World 50,255,130）
@@ -2872,8 +2932,10 @@ export class Game implements GameHooks {
     pl.lanternsUp = LanternNight.lanternsUp;   // RecalculateLuck :28679（每帧读边）
     pl.update();
     // ---- 吸血预算回充（Player.cs:24196-24216：专家 +0.5/t 钳 70；普通 +0.6/t 钳 80）----
+    // 专家判定读**世界难度** Main.expertMode（Main.cs:2775：GameMode 1/2）——
+    // 角色难度（软/中/硬核）只管死亡惩罚，不参与此处（曾错接 appearance.difficulty）
     {
-      const expert = (this.player.appearance?.difficulty ?? 0) >= 1;
+      const expert = w.isExpert;
       this.player.lifeSteal = Math.min(expert ? 70 : 80, this.player.lifeSteal + (expert ? 0.5 : 0.6));
     }
     // 小动物环境生成：按昼夜在地表视野外生成，上限 8 只
@@ -3223,9 +3285,8 @@ export class Game implements GameHooks {
     return this._smartSelectSlots;
   }
 
-  private updateUse(dt: number) {
+  private updateUse(_dt: number) {
     const inp = this.input;
-    void dt;
     // ---- 矿车坐骑（Mount 6 + Minecart.cs 轨道运动学；物理在 Minecart.fixedUpdate）----
     if (this.minecart) {
       const cart = this.minecart;
@@ -3270,12 +3331,12 @@ export class Game implements GameHooks {
     const tool = heldDef?.tool ?? (held ? this.itemFuncTool(held.id) : undefined);
     const vw2 = this.renderer.canvas.width, vh2 = this.renderer.canvas.height;
 
-    // 右键：手持矿车族物品点轨道(最优先,防 NPC 交谈拦截)→ 附近宝箱 → NPC 交谈 → 交互
-    //（Player.cs:32806-32812：右键轨道格 → LaunchMinecartHook；矿车是坐骑召唤物，不消耗）
+    // 右键轨道：(最优先,防 NPC 交谈拦截) → 附近宝箱 → NPC 交谈 → 交互
+    //（Player.cs:32806-32812：右键轨道格 → LaunchMinecartHook——与手持物品无关，
+    //  用"最佳矿车"（装备槽 > 手持 > 背包）；矿车是坐骑召唤物，不消耗）
     const type = this.world.store.get(tx, ty);
     if (inp.rightDown && !this.minecart && type === this.trackTile && this.trackTile !== 0) {
-      const h = this.player.inv.heldItem();
-      const tex = h ? this.cartTextureOfItem(h.id) : null;
+      const tex = this.bestCartTexture();
       if (tex) {
         if (this.mountMinecartAt(tx, ty, tex)) this.input.rightDown = false;
         return;
@@ -6065,7 +6126,7 @@ export class Game implements GameHooks {
       dayTimeTicks,
       playerStrongEnough: this.player.maxHp >= 120,
       playerReadyForKingSlime: this.player.maxHp > 140 && this.player.defense > 8, // Main.cs:64645
-      expertMode: false,
+      expertMode: w.isExpert,   // Main.expertMode（Main.cs:2775）：史莱姆雨自然触发门（:64373-64409 就绪||专家）
       atmo,
       aboveRockLayer: pty < rl,
       graveyardIntensity: this.graveyardIntensity,
@@ -6689,7 +6750,7 @@ export class Game implements GameHooks {
       // 专家模式（大师也算）再 1/2、1/2 两颗
       dropHeart();
       if (R(2) === 0) dropHeart();
-      if ((pl?.appearance?.difficulty ?? 0) >= 2) {
+      if ((pl && this.world.isExpert)) {   // WorldGen.cs:57520 Main.expertMode（世界难度）
         if (R(2) === 0) dropHeart();
         if (R(2) === 0) dropHeart();
       }
@@ -7976,7 +8037,7 @@ export class Game implements GameHooks {
     if (rollZero(8)) num++;
     if (rollZero(16)) num++;
     if (rollZero(32)) num++;
-    if ((this.player.appearance?.difficulty ?? 0) >= 2 && rollZero(2)) num++; // :1263 expert
+    if (this.world.isExpert && rollZero(2)) num++; // Chest.cs:1263 Main.expertMode（世界难度）
     let guard = 0;
     while (stock.length < num && guard++ < 500) {
       const it = pick(TRAVEL_POOL.items, 0);
@@ -8184,28 +8245,47 @@ export class Game implements GameHooks {
         p.deathsPve++;              // numberOfDeathsPVE（PL:53840,存档持久化）
         p.respawnTimer = 0;
         // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
-        // 掉钱按难度（Player.DropCoins :53351-53390：普通掉一半/专家 1/4/大师不掉；
-        // 0=经典 1=专家 2=大师 3=旅程按经典）。垃圾桶死亡清空（Player.cs:53394）
-        const diff = p.appearance?.difficulty ?? 0;
-        const keep = diff === 2 ? 1 : diff === 1 ? 0.75 : 0.5;
-        let lost = 0;
-        const face = [1, 100, 10000, 1000000];
-        const coinKeys = [
-          ['coin_copper', 'vi_71_CopperCoin'], ['coin_silver', 'vi_72_SilverCoin'],
-          ['coin_gold', 'vi_73_GoldCoin'], ['coin_platinum', 'vi_74_PlatinumCoin'],
-        ];
-        coinKeys.forEach(([ck, vk], ci) => {
-          for (const k of [ck, vk]) {
-            const id = ITEM_BY_KEY[k];
-            if (id === undefined) continue;
-            const n = p.inv.countOf(id);
-            if (n > 0) {
-              lost += (n - Math.floor(n * keep)) * face[ci];
-              p.inv.remove(id, n - Math.floor(n * keep));
+        // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
+        // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
+        const charDiff = p.appearance?.difficulty ?? 0;
+        // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
+        // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
+        if (dropsAllItemsOnDeath(charDiff)) {
+          dropInventoryOnDeath(p.inv, (key, stack) => {
+            this.spawnDrop(p.cx, p.cy, key, stack, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+          });
+        }
+        // 硬核：角色消亡（Player.cs:38255-38257 HardcoreDeathPenalty → KillMeForGood :38173+
+        // 删 .plr 角色档 + ghost 化 :16894；本仓最小集 = 标记不可重生 + 流程层回写角色存档）
+        if (charDiff === 2 && p.appearance && !p.appearance.hardcoreDead) {
+          p.appearance = { ...p.appearance, hardcoreDead: true };
+          this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HardcoreDeath', this.playerName()));
+          this.cb.onHardcoreDeath?.(p.appearance);
+        }
+        // 软核/旅程：掉钱（Player.cs:38318-38326 difficulty==0||3 才走 DropCoins；
+        // DropCoins :53351-53390 掉钱档按**世界难度**：经典掉一半/专家 3/4/大师全掉）
+        if (dropsCoinsOnDeath(charDiff)) {
+          const keep = deathCoinKeepFraction(this.world.difficulty);  // Main.GameMode（Main.cs:2677）
+          let lost = 0;
+          const face = [1, 100, 10000, 1000000];
+          const coinKeys = [
+            ['coin_copper', 'vi_71_CopperCoin'], ['coin_silver', 'vi_72_SilverCoin'],
+            ['coin_gold', 'vi_73_GoldCoin'], ['coin_platinum', 'vi_74_PlatinumCoin'],
+          ];
+          coinKeys.forEach(([ck, vk], ci) => {
+            for (const k of [ck, vk]) {
+              const id = ITEM_BY_KEY[k];
+              if (id === undefined) continue;
+              const n = p.inv.countOf(id);
+              if (n > 0) {
+                lost += (n - Math.floor(n * keep)) * face[ci];
+                p.inv.remove(id, n - Math.floor(n * keep));
+              }
             }
-          }
-        });
-        this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
+          });
+          this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
+        }
+        // 垃圾桶死亡清空（Player.cs:53394 mouseItem/trashItem 语义）
         p.inv.trash = null;
       }
     }
@@ -8274,8 +8354,8 @@ export class Game implements GameHooks {
     // 对齐原版 checkDead NPCLoot → CheckProgress 顺序 NPC.cs:79020-79021），
     // 保证本波掉落 gate 用的是进波前的 wave。进波公告由此处广播
     if (enemy && enemy.vanillaId != null && moonEventActive(this.world)) {
-      const diff = this.player.appearance?.difficulty ?? 0;
-      const ann = addMoonEventKill(this.world, enemy.vanillaId, diff >= 2, diff >= 3);
+      // 专家/大师判定读世界难度（Main.expertMode/masterMode，Main.cs:2775/:2779）
+      const ann = addMoonEventKill(this.world, enemy.vanillaId, this.world.isExpert, this.world.isMaster);
       if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
     }
     // 星璇塔事件（NPC.cs:80080-80146）：
@@ -8306,8 +8386,8 @@ export class Game implements GameHooks {
         if (enemy.vanillaId >= 552 && enemy.vanillaId <= 554) {
           dd2AnnounceGoblinDeath(oa, enemy.cx, enemy.y + enemy.h);
         }
-        const diff = this.player.appearance?.difficulty ?? 0;
-        const prog = dd2CheckProgress(oa, enemy.vanillaId, diff >= 2, this.betsyLifeRatio());
+        // 专家判定读世界难度（DD2Event.CheckProgress 的 Main.expertMode，Main.cs:2775）
+        const prog = dd2CheckProgress(oa, enemy.vanillaId, this.world.isExpert, this.betsyLifeRatio());
         if (prog.waveComplete) {
           this.newText(Lang.text(prog.waveComplete), 175, 55, 255);   // INFO_NEW_WAVE_COLOR
           if (prog.medals > 0) this.dd2Host().dropAtCrystal(3817, prog.medals);
@@ -9600,9 +9680,11 @@ export class Game implements GameHooks {
     return this.player.appearance?.name?.trim() || Lang.text('Mods.SandboxWorld.DefaultPlayerName');
   }
 
-
   respawnPlayer() {
     const p = this.player;
+    // 硬核角色已消亡（Player.cs:16894 difficulty==2 死亡后 ghost=true 不再重生；
+    // 本仓最小集 = hardcoreDead 标记 → 不允许重生，死亡画面停留）
+    if (p.appearance?.hardcoreDead) return;
     p.hp = p.maxHp;
     p.dead = false;
     p.iframes = 90;

@@ -48,6 +48,8 @@ export class SaveClient {
       timeOfDay: world.clock.timeOfDay, dayCount: world.clock.dayCount,
       bloodMoon: world.clock.bloodMoon, eclipse: world.clock.eclipse,
       moonPhase: world.clock.moonPhase, moonType: world.moonType,
+      difficulty: world.difficulty,   // Main.GameMode（Main.cs:2677）
+      journeyTimeRate: world.journeyTimeRate, journeyFreezeTime: world.journeyFreezeTime,
       chests: world.chests, signs: world.signs, flags: world.flags,
       weather: weatherToSave(world.weather),
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,

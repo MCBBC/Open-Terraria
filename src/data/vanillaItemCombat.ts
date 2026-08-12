@@ -147,7 +147,8 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
     if (c.summon) {
       // 召唤武器（31 件）：按投射物 AI 分流哨兵（53/54/123 定点炮台）与随从（其余飞行/地面）
-      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 54 || ai === 123, ...base };
+      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 54 || ai === 123 || ai === 130 || ai === 134 || ai === 137 || ai === 138, // OOA 四塔(aiStyle 130/134/137/138)是哨兵——曾漏标走随从路径
+        ...base };
     }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };
     // ★ melee+shoot（附魔剑 989/波刃 190 等 46 件）：原版语义 = 挥砍为主 +

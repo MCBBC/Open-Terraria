@@ -17,6 +17,21 @@ export interface Appearance {
   pantsColor: RGBColor;
   shoeColor: RGBColor;
   difficulty: Difficulty;
+  /** 硬核角色已消亡（Player.cs:38255 HardcoreDeathPenalty 的本仓持久化标记：
+   *  死亡后置 true → respawnPlayer 拒绝重生 + 角色列表灰显；原版直接删 .plr 档） */
+  hardcoreDead?: boolean;
+}
+
+/** 死亡是否掉全部物品（Player.cs:38254 DropItems(gemsOnly=false)：中核 1 / 硬核 2；
+ *  软核/旅程走 gemsOnly=true 只掉宝石） */
+export function dropsAllItemsOnDeath(charDifficulty: number): boolean {
+  return charDifficulty === 1 || charDifficulty === 2;
+}
+
+/** 死亡是否走掉钱管线（Player.cs:38318 difficulty==0||3 才调 DropCoins：
+ *  软核 0 / 旅程 3；中核硬核的钱币作为普通物品随 DropItems 全掉） */
+export function dropsCoinsOnDeath(charDifficulty: number): boolean {
+  return charDifficulty === 0 || charDifficulty === 3;
 }
 
 /** 原版默认色（Player.cs:199-205） */
@@ -71,6 +86,7 @@ export function validateAppearance(a: Partial<Appearance> | null | undefined): A
     pantsColor: c(a.pantsColor, d.pantsColor),
     shoeColor: c(a.shoeColor, d.shoeColor),
     difficulty: ([0, 1, 2, 3] as number[]).includes(a.difficulty as number) ? (a.difficulty as Difficulty) : 0,
+    hardcoreDead: a.hardcoreDead === true ? true : undefined,   // 硬核消亡标记（旧数据缺省未消亡）
   };
 }
 

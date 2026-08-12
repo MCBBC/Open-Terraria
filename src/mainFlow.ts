@@ -66,6 +66,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   });
   let quickSaveExists = false;
   let selectedAppearance: Appearance | null = null;
+  /** 当前角色槽位 id（硬核消亡时回写 CharacterStore 用；直载存档/无角色时为 null） */
+  let selectedCharId: number | null = null;
   let currentWorld: WorldMeta | null = null;
   const charStore = new CharacterStore();
   const worldStore = new WorldStore();
@@ -148,6 +150,12 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onEditSign: (x, y, text) => ui.editSign(x, y, text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
       onMusic: (id) => audio.playMusic(id),
+      // 硬核角色死亡消亡（Player.cs:38255 HardcoreDeathPenalty）：标记回写角色存档，
+      // 重进角色列表即灰显禁入（原版 KillMeForGood :38173+ 直接删 .plr 档）
+      onHardcoreDeath: async (appearance) => {
+        selectedAppearance = appearance;
+        if (selectedCharId != null) await charStore.update(selectedCharId, appearance);
+      },
     }, atlas);
     return g;
   }
@@ -220,6 +228,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     g.cb.onInventoryChanged();
   }
 
+  /** 旧档无 header.difficulty（本次修复前创建的专家/大师世界）→ 以槽位
+   *  WorldMeta.difficulty 回填 world.difficulty；新档以 header 为权威跳过 */
+  let difficultyFallback: number | null = null;
+  function applyDifficultyFallback(world: import('./world/World').World, save?: { header?: { difficulty?: number } }) {
+    if (difficultyFallback == null || save?.header?.difficulty !== undefined) return;
+    world.difficulty = difficultyFallback;
+  }
+
   /** 按 IDB key 读档：主路径 worker 内直读 IDB（免大 JSON 字符串结构化克隆到
    *  worker 的主线程序列化开销——大存档实测秒级 100% CPU）；worker 不可用时
    *  才在主线程 kvGet 走 fallback */
@@ -234,6 +250,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
           });
           const g = makeGame();
+          applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
@@ -264,6 +281,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
             onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
           });
           const g = makeGame();
+          applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
           await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
@@ -274,6 +292,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         }
       }
       const { world, player, data } = loadSave(text);
+      applyDifficultyFallback(world, data);
       const g = makeGame();
       ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
       await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
@@ -430,6 +449,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       },
       onPickCharacter: async (id: number) => {
         selectedAppearance = await charStore.get(id);
+        selectedCharId = id;
       },
     });
     panelRoot = panel.root;
@@ -442,8 +462,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     titleMenu?.destroy();
     titleMenu = null;
     new CharSelectPanel(root, charStore, {
-      onPlay: (a) => {
+      onPlay: (a, id) => {
         selectedAppearance = a;
+        selectedCharId = id ?? null;
         showWorldSelect();
       },
       onNew: () => {
@@ -482,7 +503,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  + 结构化克隆双开销；fallback 时 worldStore.load 取回全文走 loadFromJson） */
   async function loadWorldFlow(meta: WorldMeta) {
     currentWorld = meta;
-    await loadFromKey(`sandboxworld.world.${meta.id}`);
+    // 旧档（无 header.difficulty）以槽位 meta 回填世界难度；finally 清防泄漏到
+    // 后续 quickLoad/文件导入路径（那些场景 fallback=null 不生效）
+    difficultyFallback = meta.difficulty;
+    try {
+      await loadFromKey(`sandboxworld.world.${meta.id}`);
+    } finally {
+      difficultyFallback = null;
+    }
   }
 
   /** 创建新世界：原版生成页（双进度条+实时地图预览）→ 注册槽位 → 进游戏 */
@@ -495,6 +523,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       {
         name: cfg.name,
         evil: cfg.evil,
+        difficulty: cfg.difficulty,   // 世界难度 = Main.GameMode（Main.cs:2677；创建 UI 四档）
         onWorldPartial: (world) => loadState.attachWorld(world), // 主线程 fallback：列扫描预览
         onPreview: (f) => loadState.attachPreview(f),            // worker 路径：位图预览
       });

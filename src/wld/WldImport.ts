@@ -947,6 +947,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       treeTops: wld.treeTops?.length ? wld.treeTops : undefined,
       crimson: wld.isCrimson,
       moonType: wld.moonType,
+      // 世界难度（WldParser.ts:108-111 gameMode 位；Main.cs:2677）——
+      // 0 经典 1 专家 2 大师 3 旅程，loadSaveData 回填 world.difficulty
+      difficulty: wld.gameMode,
     },
     clock: { timeOfDay, dayCount: 1,
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）

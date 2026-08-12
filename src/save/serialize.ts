@@ -62,6 +62,14 @@ export interface SaveData {
     wldVersion?: number;
     moonType?: number;   // 月亮贴图样式（原版 header WF:1252；旧档缺省 0 标准月）
     seedFlags?: Record<string, boolean>; // 彩蛋种子旗标（旧档缺省={}）
+    /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程；
+     *  原版随 WorldFileData 持久化；旧档缺省 0=经典） */
+    difficulty?: number;
+    /** 旅程时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884；
+     *  IPersistentPerWorldContent 随世界存档；旧档缺省 1） */
+    journeyTimeRate?: number;
+    /** 旅程时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448；旧档缺省 false） */
+    journeyFreezeTime?: boolean;
   };
   clock: {
     timeOfDay: number; dayCount: number;
@@ -149,6 +157,11 @@ export interface SaveMeta {
   timeOfDay: number; dayCount: number;
   bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number; moonType?: number;
   seedFlags?: Record<string, boolean>;
+  /** 世界难度 = Main.GameMode（Main.cs:2677；旧档缺省 0=经典） */
+  difficulty?: number;
+  /** 旅程时间倍率/冻结（CreativePowers.cs:866/:1448；旧档缺省 1/false） */
+  journeyTimeRate?: number;
+  journeyFreezeTime?: boolean;
   chests: SaveData['chests']; signs?: SaveData['signs']; furniture?: FurnitureSaveEntry[]; flags: Record<string, boolean>;
   weather?: WeatherSave;
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
@@ -225,6 +238,9 @@ export function serializeSave(
       created: Date.now(), playTimeMs,
       moonType: meta.moonType ?? 0,
       seedFlags: meta.seedFlags,
+      difficulty: meta.difficulty ?? 0,   // Main.GameMode（旧档缺省=经典）
+      journeyTimeRate: meta.journeyTimeRate ?? 1,
+      journeyFreezeTime: meta.journeyFreezeTime ?? false,
     },
     clock: {
       timeOfDay: meta.timeOfDay, dayCount: meta.dayCount,

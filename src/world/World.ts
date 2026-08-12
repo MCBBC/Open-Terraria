@@ -10,6 +10,16 @@ import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
 
 export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
 
+/** 死亡掉钱保留比例（返回值 = 留在身上的份额；Player.DropCoins :53351-53390）：
+ *  经典/旅程世界掉一半 / 专家掉 3/4 / 大师全掉——按**世界难度** Main.GameMode
+ *  （0 经典 1 专家 2 大师 3 旅程按经典，Main.cs:2775-2780）。角色难度只决定
+ *  是否走 DropCoins（见 Appearance.dropsCoinsOnDeath），不决定档位 */
+export function deathCoinKeepFraction(worldDifficulty: number): number {
+  if (worldDifficulty === 2) return 1;      // Main.masterMode：num2=0 全掉（:53359）
+  if (worldDifficulty === 1) return 0.75;   // Main.expertMode：num2=stack/4 → 留 3/4（:53356）
+  return 0.5;                               // 经典/旅程：num2=stack/2 → 留一半（:53553 附近 :53353）
+}
+
 export class Clock {
   /** 昼夜边界（1:1 Main.time：昼 4:30AM-7:30PM=54000t、夜 32400t；0=午夜线性 24h） */
   static readonly DAWN = 4.5 / 24;   // 0.1875
@@ -52,6 +62,25 @@ export class World {
   store: TileStore;
   /** 本帧 SceneMetrics 快照（Game 每帧写；Enemy 判 zoneGraveyard 等只读用） */
   scene: import('./SceneMetrics').SceneFlags | null = null;
+  /** 世界难度 = 原版 Main.GameMode（Main.cs:2677，ActiveWorldFileData.GameMode）：
+   *  0 经典 / 1 专家 / 2 大师 / 3 旅程。与角色难度（Appearance.difficulty 0软/1中/2硬/3旅）
+   *  是**两条独立轴**——世界难度管掉落倍率/吸血预算/掉钱档/旅行商店等 gameplay 门；
+   *  角色难度只管死亡惩罚（软核掉钱/中核掉物品/硬核角色消亡）。创建 UI 写入、
+   *  存档 header 持久化、wld 导入按 WldParser.gameMode 回填（旧档/worker 包缺省=0 经典） */
+  difficulty = 0;
+  /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
+   *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */
+  journeyTimeRate = 1;
+  /** 旅程模式时间冻结（CreativePowers.FreezeTime，CreativePowers.cs:1448——开启时 dayRate=0） */
+  journeyFreezeTime = false;
+  /** 专家世界（Main.cs:2775-2777：GameMode==1/2 → Difficulty≥Expert；旅程 3 不算） */
+  get isExpert(): boolean { return this.difficulty === 1 || this.difficulty === 2; }
+  /** 大师世界（Main.cs:2779-2780：仅 GameMode==2） */
+  get isMaster(): boolean { return this.difficulty === 2; }
+  /** 旅程世界（Main.cs:2696 IsJourneyMode：GameMode==3） */
+  get isJourney(): boolean { return this.difficulty === 3; }
+  /** 时间推进倍率（Main.cs:6278-6290 UpdateTimeRate：冻结 0 / 否则 TargetTimeRate；gameMenu 恒 1） */
+  journeyTimeScale(): number { return this.journeyFreezeTime ? 0 : this.journeyTimeRate; }
   /** 彩蛋种子旗标（SeedEasterEggs.parseSeed；血月 1/6 十周年 / drunkWorld 黎明翻转用。
    *  生成期灌入 + 存档 header.seedFlags 持久化；wld 导入恒 {}） */
   seedFlags: import('./gen/SeedEasterEggs').SeedFlags = {};
@@ -183,6 +212,7 @@ export class World {
     w.groundLevel = p.groundLevel; w.rockLevel = p.rockLevel; w.lavaLine = p.lavaLine;
     w.crimson = p.crimson; w.dungeonX = p.dungeonX; w.dungeonY = p.dungeonY; w.jungleX = p.jungleX;
     w.exploredVersion = p.exploredVersion;
+    if (p.difficulty !== undefined) w.difficulty = p.difficulty;   // Main.GameMode（旧包缺省 0）
     w.clock.timeOfDay = p.clock.timeOfDay;
     w.clock.dayCount = p.clock.dayCount;
     if (p.clock.bloodMoon !== undefined) w.clock.bloodMoon = p.clock.bloodMoon;

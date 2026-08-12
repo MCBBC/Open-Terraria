@@ -13,6 +13,10 @@ import {
   FLAG_BOOST_LEFT, FLAG_BOOST_RIGHT, PLAYER_DEFAULT_GRAVITY,
   type TrackRider,
 } from '../src/world/MinecartTrack';
+import { Minecart } from '../src/entities/Minecart';
+import { Inventory } from '../src/items/Inventory';
+import type { GameHooks } from '../src/entities/types';
+import { Player } from '../src/entities/Player';
 
 const TRACK = TILE_BY_KEY['v_314_minecart_track'] ?? -1;
 expect(TRACK).toBeGreaterThanOrEqual(0);
@@ -230,6 +234,7 @@ describe('TrackCollision 轨道运动学（Minecart.TrackCollision 1:1）', () =
     const st = mkStore();
     line(st, 8, 12, 2);
     seg(st, 10, 12, 14);   // 左开放端（L=-1,R=1，左端子段 -4）
+    frameTrack(st, 9, 12, false);   // 左邻端盖改道回平接
     const r = seatFlat(8, 12, 6);
     let derailed = false;
     for (let t = 0; t < 120 && !derailed; t++) {
@@ -257,6 +262,7 @@ describe('TrackCollision 轨道运动学（Minecart.TrackCollision 1:1）', () =
     const st = mkStore();
     line(st, 8, 12, 2);
     seg(st, 10, 12, 25);   // 右端弹性挡板
+    frameTrack(st, 9, 12, false);   // 左邻端盖改道回平接（勿动本格弹性帧）
     const r = seatFlat(8, 12, 7);
     let bounced = false;
     for (let t = 0; t < 120 && !bounced; t++) {
@@ -271,7 +277,7 @@ describe('TrackCollision 轨道运动学（Minecart.TrackCollision 1:1）', () =
     line(st, 8, 12, 2);
     seg(st, 10, 12, 30);    // boostRight（frame 30）
     seg(st, 11, 12, 1);
-    frameTrackArea(st, 10, 12);
+    frameTrack(st, 9, 12, false);   // 左邻端盖改道回平接（本格加速帧保持 30）
     const boostFrame = st.frameX[st.idx(10, 12)];
     expect(trackTypeOf(boostFrame)).toBe(2);
     const r = seatFlat(8, 12, 3);
@@ -295,6 +301,7 @@ describe('TrackCollision 轨道运动学（Minecart.TrackCollision 1:1）', () =
     const st = mkStore();
     line(st, 8, 12, 2);
     seg(st, 10, 12, 21);   // 压板平段
+    frameTrack(st, 9, 12, false);   // 左邻端盖改道回平接
     const r = seatFlat(8, 12, 4);
     let hit = false;
     for (let t = 0; t < 120 && !hit; t++) {
@@ -327,5 +334,114 @@ describe('上轨吸附（Minecart.GetOnTrack / OnTrack 1:1）', () => {
     const pos = getOnTrack(st, 8, 8, 8 * 16 + 14, 8 * 16, W, H);   // 磁石 x 落子段 7
     expect(pos).not.toBeNull();
     expect(pos!.y + 52).toBeLessThan(8 * 16 + 14);   // 吸到子段 0/1 的更高轨面
+  });
+});
+
+describe('Minecart 坐骑实体（Mount 6 + 每帧 TrackCollision）', () => {
+  /** 最小 GameHooks 桩：只供实体读输入/写回玩家/播声 */
+  function mkHooks(st: TileStore, p: Player): GameHooks {
+    return {
+      world: { store: st } as unknown as GameHooks['world'],
+      player: p,
+      enemies: () => [],
+      critters: () => [],
+      spawnDrop: () => null,
+      damagePlayer: () => {},
+      addDamageNumber: () => {},
+      cutTile: () => {},
+      onEnemyKilled: () => {},
+      spawnEnemy: () => {},
+      spawnParticles: () => {},
+      notifyInventoryChanged: () => {},
+      playSfx: () => {},
+      playSfxFiles: () => {},
+      showPickupLabel: () => {},
+      hitTrackSwitch: () => {},
+    };
+  }
+  function mkPlayer(): Player {
+    const inv = new Inventory();
+    const p = new Player(0, 0, inv);
+    return p;
+  }
+  function mountedCart(st: TileStore, tx: number, ty: number): { cart: Minecart; p: Player; game: GameHooks } {
+    const p = mkPlayer();
+    const cart = new Minecart();
+    const snap = getOnTrack(st, tx, ty, tx * 16, ty * 16 - 40, cart.w, cart.h);
+    cart.x = snap ? snap.x : tx * 16;
+    cart.y = snap ? snap.y : ty * 16 + FLAT_H - cart.h;
+    cart.mounted = true;
+    return { cart, p, game: mkHooks(st, p) };
+  }
+
+  it('上轨 + 持右：贴轨加速（0.04/tick，上限 13），玩家坐骑位回写', () => {
+    const st = mkStore(60, 40);
+    line(st, 8, 12, 30);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    p.inputX = 1;
+    const x0 = cart.x;
+    for (let t = 0; t < 120; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.onTrackNow).toBe(true);
+    expect(cart.vx).toBeGreaterThan(3);          // ~0.04×120（贴轨期全额累积）
+    expect(cart.vx).toBeLessThanOrEqual(13);     // maxRunSpeed 上限
+    expect(cart.x).toBeGreaterThan(x0 + 100);
+    expect(p.x).toBe(cart.x);                    // 坐骑位锁定
+    expect(p.y).toBe(cart.y);
+    expect(p.onGround).toBe(true);
+    expect(p.vy).toBe(0);
+  });
+  it('松开输入：速度保持（原版车上无摩擦，Player.cs:19546 起无 else 衰减分支）', () => {
+    const st = mkStore(60, 40);
+    line(st, 8, 12, 30);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    p.inputX = 1;
+    for (let t = 0; t < 60; t++) cart.fixedUpdate(1 / 60, game);
+    const vx = cart.vx;
+    p.inputX = 0;
+    for (let t = 0; t < 30; t++) cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(vx, 5);
+  });
+  it('跳跃（松键重按门）：vy = -5.15、jump = 15；按住续推', () => {
+    const st = mkStore(60, 40);
+    line(st, 8, 12, 30);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    // 先贴轨稳定
+    for (let t = 0; t < 5; t++) cart.fixedUpdate(1 / 60, game);
+    p.inputJump = true;
+    cart.fixedUpdate(1 / 60, game);
+    // 原版时序：JumpMovement 先置 -jumpSpeed，重力段其后 +0.4（Player.cs:26422→27033）
+    expect(cart.vy).toBeCloseTo(-5.15 + 0.4, 5);
+    expect(cart.jump).toBe(15);
+    cart.fixedUpdate(1 / 60, game);   // 按住续推（jump>0 段每帧重置 -jumpSpeed）
+    expect(cart.vy).toBeCloseTo(-5.15 + 0.4, 5);
+    expect(cart.jump).toBe(14);
+  });
+  it('反向输入：先 runSlowdown 抵消再加速（Player.cs:19567-19573）', () => {
+    const st = mkStore(60, 40);
+    line(st, 8, 12, 30);
+    const { cart, p, game } = mountedCart(st, 9, 12);
+    p.inputX = 1;
+    for (let t = 0; t < 90; t++) cart.fixedUpdate(1 / 60, game);
+    const vx = cart.vx;
+    p.inputX = -1;
+    cart.fixedUpdate(1 / 60, game);
+    // 反推一帧 = -(runSlowdown 0.2 + accel 0.04)
+    expect(cart.vx).toBeCloseTo(vx - 0.24, 5);
+  });
+  it('加速轨道过车：trackBoost ∓/±4 并入（下帧生效、钳 ±13）', () => {
+    const st = mkStore(60, 40);
+    line(st, 8, 12, 2);
+    seg(st, 10, 12, 30);
+    seg(st, 11, 12, 1);
+    frameTrack(st, 9, 12, false);
+    const { cart, p, game } = mountedCart(st, 8, 12);
+    p.inputX = 1;
+    let sawBoost = false;
+    for (let t = 0; t < 300; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      if (cart.trackBoost !== 0) sawBoost = true;
+      if (sawBoost && cart.trackBoost === 0) break;   // 已并入
+    }
+    expect(sawBoost).toBe(true);
   });
 });

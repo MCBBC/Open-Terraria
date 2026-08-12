@@ -22,6 +22,8 @@ export interface WorldPacket {
   groundLevel: number; rockLevel: number; lavaLine: number;
   crimson: boolean; dungeonX: number; dungeonY: number; jungleX: number;
   exploredVersion: number;
+  /** 世界难度 = Main.GameMode（0 经典 1 专家 2 大师 3 旅程；旧包缺省 0） */
+  difficulty?: number;
   clock: { timeOfDay: number; dayCount: number; bloodMoon?: boolean; eclipse?: boolean; moonPhase?: number };
   /** 月亮贴图样式（原版 header moonType；旧包缺省 0） */
   moonType?: number;

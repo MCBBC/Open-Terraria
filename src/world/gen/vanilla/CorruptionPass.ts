@@ -5,7 +5,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
@@ -28,10 +28,23 @@ const MUD = TILE_BY_KEY['mud']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SNOW = TILE_BY_KEY['snow']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
+/** CanEvilReplace(WorldGen.cs:76182-76197):地牢砖族(tileDungeon 41/43/44/677-679,Main.cs:7941-7946)
+ *  /裂砖族(CrackedBricks 481-483)/地牢墙(wallDungeon 7-9/94-99,Main.cs:10507-10515)不可替换 */
+const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
+const WALL_DUNGEON = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
+function canEvilReplace(st: TileStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  if (st.flags[i]) {
+    const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
+    if (TILE_DUNGEON.has(sheet) || (sheet >= 481 && sheet <= 483)) return false;  // tileDungeon ∪ CrackedBricks
+  }
+  return !WALL_DUNGEON.has(st.wall[i]);
+}
 const ORB = TILE_BY_KEY['v_31_orb_heart']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!;
 const HARDSAND = TILE_BY_KEY['hardened_sand']!;
-const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉）
+const DEMONITE = TILE_BY_KEY['ore_demonite']!;   // tile 22（侧裂隙末端魔矿脉 + 挖空保护 :76191）
+const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空保护 :76191）
 
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
@@ -265,8 +278,11 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         for (let y = y0; y < y1; y++) {
           const ti = st.idx(x, y);
           if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
-            && st.type[ti] !== ORB) {
-            st.flags[ti] = 0; // 只清 active 保留 type(原版 KillTile)——壳层才不会回填隧道
+            && canEvilReplace(st, x, y)
+            && st.type[ti] !== ORB && st.type[ti] !== DEMONITE && st.type[ti] !== CRIMTANE) {
+            // 原版挖空门 :76187-76191:CanEvilReplace + type∉{31 球, 22 魔矿, 204 猩红矿}
+            // ——只清 active 保留 type(原版 KillTile)——壳层才不会回填隧道
+            st.flags[ti] = 0;
           }
         }
       }
@@ -278,6 +294,9 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         addShadowOrb(st, Math.floor(px), Math.floor(py), false);
       } else if (!altarPlaced) {
         altarPlaced = true;
+        // 原版 :76210-76240:纯随机点直过 IsTileNearby(26,3)+Place3x2,失败重试 10000——
+        // ★无落点吸附(吸附是散布版 :14278 猩红专属)。曾自加吸附把祭坛钉在地表,
+        // 恰是后续裂隙竖挖必经之路 → 祭坛被打幽灵出 2 格残片(2026-08-12 用户报告)
         let tries = 0, done = false;
         while (!done) {
           let x = rng.int(Math.floor(px) - 25, Math.floor(px) + 24);
@@ -285,17 +304,10 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
           x = Math.max(5, Math.min(st.w - 5, x));
           y = Math.max(5, Math.min(st.h - 5, y));
           if (y > gs.worldSurface) {
-            // 落点吸附(原版):空气则落到地面,实心则升到表面
-            if (!st.flags[st.idx(x, y)]) {
-              while (!st.flags[st.idx(x, y)] && y < st.h - 2) y++;
-              y--;
-            } else {
-              while (st.flags[st.idx(x, y)] && y > 4) y--;
-            }
             if (!isTileNearby(st, x, y, ALTAR, 3)) place3x2(st, x, y, ALTAR, 0);
             if (st.type[st.idx(x, y)] === ALTAR) done = true;
             else if (++tries >= 10000) done = true;
-          } else if (++tries >= 10000) done = true; // 原版此处直接放弃;小世界采样带浅,改为重试
+          } else done = true;   // y≤worldSurface 直接放弃(原版 :76237-76239)
         }
       }
     }
@@ -351,7 +363,9 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
       for (let y = y0; y < y1; y++) {
         const ti = st.idx(x, y);
         if (Math.abs(x - px) + Math.abs(y - py) < radius * 0.5 * (1 + rng.int(-10, 10) * 0.015)
-          && st.type[ti] !== ORB) {
+          && canEvilReplace(st, x, y)
+          && st.type[ti] !== ORB && st.type[ti] !== DEMONITE && st.type[ti] !== CRIMTANE) {
+          // 原版挖空门 :75414 同款三条件(球/魔矿/猩红矿 + CanEvilReplace)
           st.flags[ti] = 0; // 只清 active(原版 KillTile)——壳层不回填
         }
       }
