@@ -421,6 +421,11 @@ def({ key: 'v_5_trees', name: '', decor: true, framed: true, opacity: 0, pick: 0
 def({ key: 'v_80_cactus', name: '', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#497811', drop: null, vanilla: { sheet: 80, frame: 'style', fw: 1, fh: 1 } });
 
 def({ key: 'v_3_forest_short_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
+// 自研像素方块(F11 图片→像素画工具,原版无此功能):实心 framed 块,RGB 编码进
+// frameX=((r||1)<<8)|(g||1) / frameY=(b||1)(||1 防 0,0 触发 style 路径锚点重建扫描)。
+// 渲染端 drawVanillaCell 顶部独占分支直画纯色+斜面,不取任何素材表。
+// 可破坏(走镐挖路径)/进存档(type+frames 既有持久化,零格式改动)/联机走 setTile 上报。
+def({ key: 'pixel_block', name: '像素方块', solid: true, framed: true, opacity: 1, pick: 0, mapColor: '#888888', drop: null, vanilla: { sheet: 0, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_73_forest_tall_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1BC56D', drop: null, vanilla: { sheet: 73, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_61_jungle_short_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#87C41A', drop: null, light: [107, 207, 133], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 61, frame: 'style', fw: 1, fh: 1 } }); // 丛林矮草（16x20 表）
 def({ key: 'v_74_jungle_tall_plants', name: '', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#60C51B', drop: null, vanilla: { sheet: 74, frame: 'style', fw: 1, fh: 2 } }); // 丛林高草（16x32 两格高）
@@ -884,6 +889,7 @@ const PRIV_TILE_STABLE: Record<string, number> = {
   mushroom: 1023, flower: 1024, tallgrass: 1025,  // 自造装饰(真身 v_3_forest_short_plants 独占 sheet 3)
   tree: 1026,                                      // 自有树(真身 v_5_trees 独占 sheet 5)
   'v_389_tall_gate_open': 1027,                    // 开门态变体(真身 v_389_tallgateopen 独占 389)
+  pixel_block: 1028,                               // 自研像素方块(F11 图片导入):RGB 编码进 frameX/Y,渲染端直画
   dirt: 1028,                                      // sheet=0 让位存档 air 哨兵
 };
 /** internal id → 稳定 id(保存方向;serialize 内联查表) */

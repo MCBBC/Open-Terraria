@@ -132,6 +132,14 @@ const MISC = [
   'Gore_711.png', 'Gore_712.png', 'Gore_713.png', 'Gore_714.png', 'Gore_715.png',
   'Gore_716.png', 'Gore_717.png', 'Gore_943.png', 'Gore_1147.png',
   'Gore_1160.png', 'Gore_1161.png', 'Gore_1162.png', 'Gore_1383.png',
+  // 背包槽底变体（ItemSlot.Draw :1983-2142 逐 context 贴图：
+  //  3=杂项装备 7=垃圾桶 12=杂项染料 13=装备/时装/染料列+发光态 21=红脉冲）
+  'Inventory_Back3.png', 'Inventory_Back7.png', 'Inventory_Back12.png', 'Inventory_Back13.png',
+  'Inventory_Back21.png',
+  // Loadout 按钮图集（Main.cs:41395 Extra[259] 3×3：列=常态/选中/悬停，行=loadout 配色）
+  'Extra_259.png',
+  // 金币旋转帧（CoinSlot.DrawItemCoin：Coin_N 8 帧竖条，背包金币跳字动画）
+  'Coin_0.png', 'Coin_1.png', 'Coin_2.png', 'Coin_3.png',
   // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）
   'Glow_294.png', 'Glow_315.png', 'Glow_316.png', 'Glow_317.png', 'Glow_329.png',
 ];

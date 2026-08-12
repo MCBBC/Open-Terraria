@@ -707,6 +707,8 @@ export class Player extends Entity {
       const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
       const JS = PLAYER_JUMP_SPEED;                // jumpSpeed 基准（原版 5.301 系按本地尺度）
       // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
+      // 松跳重触发（原版 :20765 松跳段独立于地面状态——rocketRelease/wingRelease）
+      if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
       if (this.onGround) {
         this.wingTime = eq.wing ? eq.wing.time + (eq.rocketBoots > 0 ? 42 : 0) : 0;
         this.rocketTime = 7;          // rocketTimeMax（:2612）
@@ -716,7 +718,6 @@ export class Player extends Entity {
         this.canCarpet = true;        // :26173
         this.carpetTime = 300;
       } else {
-        if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
         // canRocket 门（:26487）：vy > -jumpSpeed 且 vy≠0
         if (this.vy > -JS && this.vy !== 0) this.canRocket = true;
         // flag19 = 翅膀飞行中（:26500-26510：wings>0 && controlJump && wingTime>0 &&

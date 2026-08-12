@@ -26,13 +26,33 @@ const FILES = [
   // 门/水/Boss
   'Door_Closed', 'Door_Opened', 'Splash_0', 'Splash_1', 'Drip_0', 'Drown',
   'Roar_0', 'Roar_1',
+  // 落水全变体（原版 SoundID 19 Splash，style 0-5；微光配对走 style 4 = Splash_4）
+  'Splash_2', 'Splash_3', 'Splash_4', 'Splash_5',
+  // 枪族 UseSound（Item.cs：Item36 霰弹枪族 534/964/3788/4703；Item41 手枪族
+  // 164/219/1255/1929/2269/2270；Item11 为其余枪械通用——Item_11 此前已在库内）
+  'Item_36', 'Item_41',
+  // 邪教徒仪式圈 490（Projectile.cs:31221 SoundID.Item123）
+  'Item_123',
+  // 塔灭碎裂双音之一（NPC.cs:41118-41121 SoundID 22 = Unlock；另一为 NPC_Killed_1 已在库）
+  'Unlock',
+  // 蜂后专属吼（NPC.cs:30488 PlaySound(29,…,125)——"Zombie"族实为逐 NPC 语音槽位）
+  'Zombie_125',
+];
+
+// 原版 Sounds/Custom/ 子目录（XACT Trackable 族：液体六配对专属轨，各 3 变体；
+// SoundID.cs:823-827 LiquidsHoneyWater/HoneyLava/WaterLava = CreateTrackable(…,3,Ambient)）
+// 落位展平到 public/sounds/ 根（fetch 以 sounds/<name>.wav 直取，无子目录）
+const CUSTOM = [
+  'Custom/liquids_water_lava_0', 'Custom/liquids_water_lava_1', 'Custom/liquids_water_lava_2',
+  'Custom/liquids_honey_water_0', 'Custom/liquids_honey_water_1', 'Custom/liquids_honey_water_2',
+  'Custom/liquids_honey_lava_0', 'Custom/liquids_honey_lava_1', 'Custom/liquids_honey_lava_2',
 ];
 
 let n = 0;
-for (const f of FILES) {
+for (const f of [...FILES, ...CUSTOM]) {
   const src = join(SRC, f + '.wav');
   if (!existsSync(src)) { console.warn('缺失:', f); continue; }
-  copyFileSync(src, join(DST, f + '.wav'));
+  copyFileSync(src, join(DST, f.replace('Custom/', '') + '.wav'));
   n++;
 }
-console.log(`copy-sfx: ${n}/${FILES.length}`);
+console.log(`copy-sfx: ${n}/${FILES.length + CUSTOM.length}`);

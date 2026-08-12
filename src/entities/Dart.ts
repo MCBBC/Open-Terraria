@@ -8,7 +8,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
-import { projFrameImg } from './Arrow';
+import { projFrameImg, projSprite } from './Arrow';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -566,22 +566,35 @@ export class Dart extends Entity {
       ctx.fillRect(this.x, this.y, this.w, this.h);
       return;
     }
-    // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)
-    if (!st.noTex) {
+    // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)——不画本体
+    if (st.noTex) return;
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    ctx.globalAlpha = this.netPuppet ? 1 : Math.max(0, 1 - this.alpha / 255); // 傀儡不跑 dartStep,alpha 恒初始 → 恒可见
+    let drawn = false;
+    if (st.hFrames) {
+      // 836 蒲公英籽:横向 4 列胶片(Frame(4,1,frame),Main.cs:33247)——projFrameImg 竖切不适用
+      const full = projSprite(this.projId);
+      if (full && full.complete && full.naturalWidth > 0) {
+        const fw = full.naturalWidth / st.hFrames;
+        const idx = Math.min(st.hFrames - 1, this.frame);
+        ctx.drawImage(full, Math.round(idx * fw), 0, Math.round(fw), full.naturalHeight,
+          -fw * this.scale / 2, -full.naturalHeight * this.scale / 2, fw * this.scale, full.naturalHeight * this.scale);
+        drawn = true;
+      }
+    } else {
       const img = projFrameImg(this.projId, this.frame);
       if (img) {
-        ctx.save();
-        ctx.translate(this.cx, this.cy);
-        ctx.rotate(this.rot);
-        ctx.imageSmoothingEnabled = false;
-        ctx.globalAlpha = Math.max(0, 1 - this.alpha / 255);
         const dw = img.width * this.scale, dh = img.height * this.scale;
         ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
-        ctx.restore();
-        ctx.globalAlpha = 1;
-        return;
+        drawn = true;
       }
     }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    if (drawn) return;
     // 贴图未就绪:短线兜底(方向与弹速一致)
     ctx.strokeStyle = st.fallback ?? '#C8B89A';
     ctx.lineWidth = 2;
@@ -791,6 +804,7 @@ interface DartStyle {
   shrink?: number;                       // scale 递减(288)
   frameRand?: number;                    // 出生随机帧(909)
   animEvery?: number;                    // 帧动画步进(836:6)
+  hFrames?: number;                      // 横向胶片列数(836=4,Frame(4,1,frame) Main.cs:33247)
   windSeed?: boolean;                    // 836 风力转向 AI
   home?: { spd: number; lerp: number; range: number };   // 293 追踪(AI_051)
   noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
@@ -822,9 +836,12 @@ const DART_STYLE: Record<number, DartStyle> = {
     trail: { color: '#A8D8F0', count: 2 }, sfx: ['Item_28'], fallback: '#C8ECFF' },
   // 174 冰刺/176 丛林刺/605 尖刺史莱姆刺(尖刺史莱姆 184/204/535):
   //    6×6,重力 174/605:0.15@5(:54017)/176:0.05@15(:54310)
-  174: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5, fallback: '#B8E0F0' },
-  176: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.05, gravDelay: 15, fallback: '#7AC868' },
-  605: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5, fallback: '#D8D0C0' },
+  174: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
+    sfx: ['Item_17'], fallback: '#B8E0F0' },   // 发射音 Item17(:52163-52167)
+  176: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.05, gravDelay: 15,
+    sfx: ['Item_17'], fallback: '#7AC868' },   // :52241-52245
+  605: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5,
+    sfx: ['Item_154'], fallback: '#D8D0C0' },  // 605 族 Item154(:52213-52223)
   // 177 冰水吐涎(冰鱼人 206 :59859):10×10 旋转恒 0,alpha255;尘 137 ×3
   177: { w: 10, h: 10, rot: 'none', alpha0: 255, fade: 50,
     trail: { color: '#BFE8F0', count: 2 }, fallback: '#A8D8E8' },
@@ -882,7 +899,7 @@ const DART_STYLE: Record<number, DartStyle> = {
     home: { spd: 3, lerp: 101, range: 200 },
     trail: { color: '#C8C0FF', count: 2 }, sfx: ['Item_8'], fallback: '#D8D0FF' },
   // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
-  836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, windSeed: true, fallback: '#E8E8D0' },
+  836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, hFrames: 4, windSeed: true, fallback: '#E8E8D0' },
 };
 
 /**

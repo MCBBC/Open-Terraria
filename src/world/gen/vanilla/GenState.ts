@@ -91,7 +91,7 @@ export function newGenState(w: number, h: number): GenState {
     worldSurface: Math.floor(h * 0.3), worldSurfaceLow: 0, worldSurfaceHigh: 0,
     rockLevel: Math.floor(h * 0.42), rockLevelLow: 0, rockLevelHigh: 0,
     waterLine: Math.floor(h * 0.35), lavaLine: h - 200,
-    beachDistance: Math.max(24, Math.floor(w * 0.06)),
+    beachDistance: 380,  // 原版 WorldGen.beachDistance = 380（cs:4102 readonly 常量，不随尺寸缩放；曾误用 w*0.06=252 → 大理石/花岗岩采样重掷范围分叉）
     genWorldSurface: 0, genRockLayer: 0, genWorldSurfaceHigh: 0,
     tunnelX: new Array(50).fill(0), numTunnels: 0,
     crimson: false,

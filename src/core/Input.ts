@@ -30,6 +30,7 @@ export class Input {
       this.keys.add(e.code);
       this.keydownHandlers.forEach((fn) => fn(e.code));
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();
+      if (e.code === 'F11') e.preventDefault(); // 像素画导入(Game),防浏览器全屏
     }) as EventListener);
     onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
     onWin('blur', (() => this.keys.clear()) as EventListener);

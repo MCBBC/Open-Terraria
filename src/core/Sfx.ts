@@ -16,7 +16,16 @@ export type SfxName =
   | 'mech'       // 原版 SoundID 28（Mech_0：器件右键切换音，Player.cs:31762/31799/31803）
   | 'portalOrange' | 'portalBlue' // 原版 Item_115 / Item_114（传送门弹撞块落门音，Projectile.cs:16675-16683）
   | 'whipCrack'   // 原版 Item_152（DefaultToWhip UseSound——鞭甩响，Item.cs:47448）
-  | 'summon';     // 原版 Item_44（召唤杖通用 UseSound）
+  | 'summon'      // 原版 Item_44（召唤杖通用 UseSound）
+  // ---- 液体六配对专属轨（SoundID.cs:823-827 CreateTrackable("liquids_*",3,Ambient)，原 Sounds/Custom/）----
+  | 'liquidWaterLava'   // 水岩浆（TileChangeType.LavaWater）
+  | 'liquidHoneyWater'  // 水蜂蜜
+  | 'liquidHoneyLava'   // 岩浆蜂蜜
+  | 'shimmerSplash'     // 微光×3：原版即 PlaySound(19,…,4) = Splash_4（音量 ×0.75）
+  // ---- 枪族 UseSound（Item.cs：其余枪械通用 Item_11，此前已在库内）----
+  | 'gunShot'      // SoundID.Item11 枪械通用
+  | 'gunShotgun'   // SoundID.Item36 霰弹枪族 534/964/3788/4703
+  | 'gunHandgun';  // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -51,6 +60,15 @@ const WAV_MAP: Record<SfxName, string[]> = {
   mech: ['Mech_0'],
   portalOrange: ['Item_115'],   // form 0（ai[1]==0 → Item115，Projectile.cs:16675-16683）
   portalBlue: ['Item_114'],     // form 1
+  // 液体六配对专属轨（各 3 变体随机；SoundID.cs:823-827）
+  liquidWaterLava: ['liquids_water_lava_0', 'liquids_water_lava_1', 'liquids_water_lava_2'],
+  liquidHoneyWater: ['liquids_honey_water_0', 'liquids_honey_water_1', 'liquids_honey_water_2'],
+  liquidHoneyLava: ['liquids_honey_lava_0', 'liquids_honey_lava_1', 'liquids_honey_lava_2'],
+  shimmerSplash: ['Splash_4'],  // PlaySound(19,…,4)：微光配对固定 style 4（LegacySoundPlayer.cs:885 音量 ×0.75）
+  // 枪族（Item.cs UseSound；弓 Item_5 见 bowShoot）
+  gunShot: ['Item_11'],
+  gunShotgun: ['Item_36'],
+  gunHandgun: ['Item_41'],
   // 以下无原版素材，走合成
   drink: [],
 };

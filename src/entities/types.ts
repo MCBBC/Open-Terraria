@@ -42,6 +42,8 @@ export interface GameHooks {
   // 世界坐标声（原版 SoundEngine.PlaySound 带 x/y）：x/y 省略 = UI/玩家动作声不衰减
   playSfx(name: string, vol?: number, x?: number, y?: number): void;
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number): void; // 怪物专属声效（原版文件名列表）
+  /** 按原版文件名直播（无合成兜底；缓冲未就位时仅触发后台懒加载，本播静默） */
+  playSfxFile?(file: string, vol?: number, x?: number, y?: number): void;
   /** 拾取物品时在主角旁飘出物品名 */
   showPickupLabel(itemKey: string): void;
   /** 掉落系统补充上下文（灵魂/钥匙/风筝等条件）：Game 实现，缺省则这些条件按 false */

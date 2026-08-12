@@ -45,7 +45,7 @@ const out = await p.evaluate(async () => {
   g.input.mouseDown = false;
   await sleep(400);
   // ③随从朝向：把敌放到随从左侧 → facing 应翻 -1
-  const minion = g.entities.projectiles.find((e) => e instanceof MinionProj && !e.sentry);
+  const minion = g.entities.projectiles.find((e) => e?.constructor?.name === 'MinionProj' && !e.sentry);
   res.minionSpawned = !!minion;
   if (minion) {
     res.f0 = minion.facing;

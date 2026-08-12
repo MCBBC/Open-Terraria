@@ -30,7 +30,7 @@ const out = await p.evaluate(async () => {
     g.input.mouseDown = false;
     await sleep(400);
   };
-  const ids = () => g.entities.projectiles.filter((e) => e instanceof MinionProj && !e.dead).map((m) => m.projId);
+  const ids = () => g.entities.projectiles.filter((e) => e?.constructor?.name === 'MinionProj' && !e.dead).map((m) => m.projId);
   const count = (id) => ids().filter((x) => x === id).length;
 
   // ① 数值链：裸装 maxMinions=1
@@ -70,15 +70,18 @@ const out = await p.evaluate(async () => {
   for (const e of [...g.entities.projectiles]) e.dead = true;
   await sleep(400);
 
-  // ⑤ 酷鞭 4911 → 雪花 917 + buff 312
-  give(4911); await use();
-  res.coolWhip = { snow: count(917), buff312: g.player.whipBuffs[312] ?? 0 };
-
-  // ⑥ 火鞭 4912 命中 → proc 挂上；随从命中 → proc 消费
+  // ⑤ 酷鞭 4911 → 命中出雪花 917 + buff 312（需靶在场）
   const tgt = Enemy.fromVanilla(3, g.player.cx + 120, g.player.cy);
   tgt.id = g.entities.nextId++;
   tgt.maxHp = 1e9; tgt.hp = 1e9; tgt.def.defense = 0;
   g.entities.add(tgt, 'enemies');
+  give(4911); await use();
+  res.coolWhip = { snow: count(917), buff312: g.player.whipBuffs[312] ?? 0 };
+  tgt.whipProcT = 0;
+
+  // ⑥ 火鞭 4912 命中 → proc 挂上（清光随从防守护者抢消费）；随从命中 → proc 消费
+  for (const e of [...g.entities.projectiles]) e.dead = true;
+  await sleep(300);
   g.input.mouseX = g.renderer.canvas.width / 2 + 100;
   g.input.mouseY = g.renderer.canvas.height / 2;
   give(4912); await use(400);

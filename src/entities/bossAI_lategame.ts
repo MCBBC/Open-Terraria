@@ -139,7 +139,7 @@ function cultistClones(game: GameHooks, parent: Enemy): Enemy[] {
  *  14×14 / hostile / alpha 255 / timeLeft 600 / noTileCollide，锚定源邪教徒 ai[1]。
  *  淡入 300t（alpha -5/t 钳 0）→ 淡出（+12/t）；scale = (1-alpha/255)×0.6 随透明度
  *  张合；rotation 每 t +π/210；alpha==0 时每 t 2 颗 228 号紫尘沿 204×scale 半径
- *  向心收拢；出生播 Item123（本仓以 roar 低量近似）。
+ *  向心收拢；出生播 Item123（真轨 Item_123.wav 已落位，roar 近似销核）。
  *  ai[0]==300 时原版召 NPC 454 幻影龙（场上无）否则 521 章鱼头（:31282-31292）——
  *  两 AI 族未移植（登记：CultistDragonHead/AncientCultistSquidhead），此处不召，
  *  圈弹视觉/淡入淡出/自旋 1:1。锚（439）消亡即 Kill（:31305-31320）。 */
@@ -172,7 +172,8 @@ export class CultistRitualCircle extends Entity {
     this.rot += Math.PI / 210;                          // :31211
     if (!this.soundPlayed) {
       this.soundPlayed = true;
-      game.playSfx('roar', 0.4);                        // SoundID.Item123 近似
+      // SoundID.Item123（Projectile.cs:31221，无坐标 = 全量不衰减）——原 roar 近似已销核
+      game.playSfxFile?.('Item_123', 1);
     }
     // 完全显现期的收拢紫尘（:31218-31250，尘 228 / 半径 204×scale / 内圈 ×0.42）
     if (this.alpha === 0) {

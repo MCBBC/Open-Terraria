@@ -556,6 +556,11 @@ export function drawVanillaCell(
   same: (t: number) => boolean, px: number, py: number, fx: number, fy: number,
   trees?: TreeStyleData,
 ): void {
+  // ★自研像素方块(F11 图片导入,原版无):RGB 编码在 frameX/frameY——
+  // fx = ((r||1)<<8)|(g||1)、fy = (b||1)。纯色+斜面直画,不取素材表;
+  // 空邻边缘加深描边呈现"方块"质感。实心 framed → 可镐挖/进存档/联机上报全走既有链路。
+  const PIX = TILE_BY_KEY['pixel_block'];
+  if (PIX !== undefined && type === PIX) { drawPixelBlock(ctx, st, x, y, fx, fy, px, py); return; }
   // 751/752(睡着的掘地龟/啮龙蛋):仅锚点帧 (0,0) 绘制,非锚点格整格跳过(:1034-1048)
   if ((sheet === 751 || sheet === 752) && (fx !== 0 || fy !== 0)) return;
   // 树木族（tile 5 + 宝石树 583-589 + 装饰树 596/616 + 灰烬树 634 + 棕榈 323 + 蘑菇树 72）：
@@ -939,6 +944,30 @@ function vectorOffset(sheet: number, fx: number, fy: number, slope: number): [nu
     case 442: return Math.floor(fx / 22) === 3 ? [2, 0] : [0, 0];       // :1060-1068
     default: return [0, 0];
   }
+}
+
+/** 自研像素方块绘制:16×16 纯色 + 斜面(顶亮 18%/底暗 18%)+ 空邻边描边(-35%),
+ *  复刻原版方块的光影质感(顶受光/底背光/悬空边缘显轮廓)。RGB 解码:
+ *  r = fx>>8、g = fx&255、b = fy&255(写入端 ||1 防 0,0) */
+function drawPixelBlock(
+  ctx: CanvasRenderingContext2D, st: TileStore, x: number, y: number,
+  fx: number, fy: number, px: number, py: number,
+): void {
+  const r = fx >> 8, g = fx & 255, b = fy & 255;
+  const shade = (f: number) => `rgb(${Math.min(255, Math.round(r * f))},${Math.min(255, Math.round(g * f))},${Math.min(255, Math.round(b * f))})`;
+  ctx.fillStyle = shade(1);
+  ctx.fillRect(px, py, TILE, TILE);
+  ctx.fillStyle = shade(1.18);                       // 顶受光带
+  ctx.fillRect(px, py, TILE, 3);
+  ctx.fillStyle = shade(0.82);                       // 底背光带
+  ctx.fillRect(px, py + TILE - 3, TILE, 3);
+  // 空邻边缘描边(左/右/上/下,有邻块则融合不描)
+  ctx.fillStyle = shade(0.65);
+  const emptyAt = (dx: number, dy: number) => !st.inBounds(x + dx, y + dy) || !st.flags[st.idx(x + dx, y + dy)];
+  if (emptyAt(-1, 0)) ctx.fillRect(px, py, 1, TILE);
+  if (emptyAt(1, 0)) ctx.fillRect(px + TILE - 1, py, 1, TILE);
+  if (emptyAt(0, -1)) ctx.fillRect(px, py, TILE, 1);
+  if (emptyAt(0, 1)) ctx.fillRect(px, py + TILE - 1, TILE, 1);
 }
 
 /** 坡面/邻接特判 Set(TileID.cs 原文) */

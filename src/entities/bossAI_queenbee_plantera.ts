@@ -101,7 +101,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
         e.vx = (dx / d) * num664;
         e.vy = (dy / d) * num664;
         e.facing = direction;
-        game.playSfx('roar', 0.5);   // SoundEngine.PlaySound(29, ..., 125) 蜂后冲刺吼,近似
+        game.playSfxFile?.('Zombie_125', 1, e.cx, e.cy); // :30488 PlaySound(29,…,125) 蜂后冲刺吼真轨（"Zombie"族=逐 NPC 语音槽位；原 roar 近似销核）
       } else {
         // 悬浮(:30500-30565):Y 朝玩家 0.15(+0.5*num658) 钳 ±12(+3*num658);
         // X 三段 >600 加速 / <300 反向 / 中带阻尼 0.8,钳 ±16
@@ -183,7 +183,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
         bee.vy = (dy / d) * 5;
         // 原版 localAI[0]=60(蜜蜂寿命锚);本框架 swarmerAI 无该语义,Despawn 系统兜底
       }
-      game.playSfx('hit', 0.4);   // SoundID 3(NPCHit 系)近似
+      game.playSfx('hit', 1, e.cx, e.cy);   // :30752 PlaySound(3,x,y) 无 style → NPC_Hit_1（真轨已接，0.4→1 恢复原版音量）
     }
     if (distToPlayer > 400 || !losClear(game, vx78, vy78 - 30, player!.cx, player!.cy)) {
       // 拉近(:30779-30823):以毒刺口为基准 14 速 / 0.1 步进
@@ -225,7 +225,7 @@ export function queenBeeAI(e: Enemy, game: GameHooks, player: Player | null) {
       dx *= t;
       dy *= t;
       shoot(game, vx80, vy80, dx, dy, 11, 719, 300);   // 伤害 11 / timeLeft 300(:30875-30889)
-      game.playSfx('hit', 0.4);                        // SoundID.Item17 近似
+      game.playSfxFiles(['Item_17'], 1, e.cx, e.cy);   // SoundID.Item17 真轨（WAV_MAP 命中 Item_17.wav，近似销核）
     }
     if (!losClear(game, vx80, vy80 - 30, player!.cx, player!.cy)) {
       // 隔墙:直接朝玩家 14 速 / 0.1 步进(:30890-30934)

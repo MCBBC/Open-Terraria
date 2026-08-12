@@ -16,6 +16,8 @@
 //     类外围；负面 luck 源头是瓢虫 NPC 359/360 与碎镜，不是蝙蝠。）
 //   - 掷骰消费三态（Luck.cs 全文，Terraria.GameContent/Luck.cs:5-60）：
 //       RollLuck                  正运改掷 [N/2, N)、负运改掷 [N, 2N)、否则 [0, N)
+//                                 （正/负运均以 |luck| 概率触发；改掷窗口使 P(==0)
+//                                  分别 ≈1.39/N 与 ≈0.69/N——负运不是恒不中）
 //       RollBadLuck               反向
 //       RollOnlyBadLuck           仅负运收窄为 [N/2, N)（正运无加成）
 //       RollBadLuckExtreme        正运 [0, N*10)、负运 [0, N/10)

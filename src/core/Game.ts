@@ -2,6 +2,7 @@
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
+import { imageToGrid, findArtPlacement, placeArt } from '../dev/PixelArtImport';
 import { stepConveyor, conveyorCarriesEnemy } from '../physics/Conveyor';
 import { RNG } from './rng';
 import { Input } from './Input';
@@ -42,6 +43,7 @@ import {
   pylonItemTypeFromStyle, type TeleportPylonInfo, type NpcHomeLike,
 } from '../world/TeleportPylons';
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
+import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore } from '../world/TileStore';
@@ -153,6 +155,13 @@ import type { DropExtras } from '../drops/NpcDrops';
 const FIXED_DT = 1 / 60;
 /** 原版 AmmoID.Bullet（与 AMMO_ARROW=40 同源，AmmoID.cs） */
 const AMMO_BULLET = 14;
+
+/** 枪族专属 UseSound 武器（Item.cs SetDefaults）：
+ *  Item_36 霰弹枪族（Shotgun 534 / Boomstick 964 / OnyxBlaster 3788 / QuadBarrel 4703）；
+ *  Item_41 手枪族（Handgun 164 / PhoenixBlaster 219 / VenusMagnum 1255 / ChainGun 1929 /
+ *  Revolver 2269 / Gatligator 2270）。其余枪械走 Item_11 通用枪声 */
+const GUN_SHOTGUN_VIDS = new Set([534, 964, 3788, 4703]);
+const GUN_HANDGUN_VIDS = new Set([164, 219, 1255, 1929, 2269, 2270]);
 
 /** legacy（无 vid）物品的原版 useStyle 补表——Boss 召唤物与生命水晶在
  *  Item.cs SetDefaults 均为 4（举过头）：544/556/557 机械三王、560 史莱姆王冠、
@@ -901,6 +910,8 @@ export class Game implements GameHooks {
       // 缩放调节
       if (code === 'Equal' || code === 'NumpadAdd') this.setZoom(this.camera?.zoomTarget + 0.15);
       if (code === 'Minus' || code === 'NumpadSubtract') this.setZoom(this.camera?.zoomTarget - 0.15);
+      // F11:图片 → 像素方块群导入(自研创意工具,原版无;Input 已 preventDefault 防浏览器全屏)
+      if (code === 'F11') this.openPixelArtImport();
       // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (code === 'KeyR') {
         const held = this.player?.inv.heldItem();
@@ -1181,14 +1192,19 @@ export class Game implements GameHooks {
       this.breakTile(x, y);
     };
     // 液体交互音（WorldGen.PlayLiquidChangeSound :4577-4599，六种配对）：
-    // LavaWater{水,岩浆}/HoneyWater{水,蜜}/HoneyLava{岩浆,蜜} 原版为 XACT 专属轨
-    // （liquids_water_lava 等，素材未解包进 public/sounds——资产依赖登记，暂以
-    // SoundID 19 Splash 代）；Shimmer×3{微光,水/岩浆/蜜} 原版即 PlaySound(19,…,4)
-    // （本仓库液体编码 1水/2岩浆/3蜂蜜/4微光，配对任意序）
+    // LavaWater{水,岩浆}/HoneyWater{水,蜜}/HoneyLava{岩浆,蜜} = liquids_* 专属轨
+    // （SoundID.cs:823-827 CreateTrackable 各 3 变体，素材已从 Sounds/Custom/ 落位
+    // public/sounds/——登记销核）；Shimmer×3{微光,水/岩浆/蜜} 原版即 PlaySound(19,…,4)
+    // = Splash_4（LegacySoundPlayer.cs:885 音量 ×0.75）。
+    // 本仓库液体编码 1水/2岩浆/3蜂蜜/4微光，配对任意序
     this.liquid.liquidChangeSound = (x, y, a, b) => {
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (lo < 1 || hi > 4 || lo === hi) return; // 同类/越界不发声
-      this.sfx.play('splash', 1, x * TILE + 8, y * TILE + 8);
+      const px = x * TILE + 8, py = y * TILE + 8;   // :4582 x*16+count*8（count 取 1）
+      if (hi === 4) { this.sfx.play('shimmerSplash', 0.75, px, py); return; }
+      const name = lo === 1 && hi === 2 ? 'liquidWaterLava'
+        : lo === 1 && hi === 3 ? 'liquidHoneyWater' : 'liquidHoneyLava';
+      this.sfx.play(name, 1, px, py);
     };
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
@@ -3099,7 +3115,12 @@ export class Game implements GameHooks {
         this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
         // useStyle 5（弓枪族恒 5）：朝鼠标静持姿势 + 身体行档（Player.cs:46708 itemRotation=瞄准角）
         this.useSwing(heldDef, ang);
-        this.sfx.play('bowShoot'); // 枪族原版 Item11/36/41 素材未提取，暂与弓共用（登记依赖）
+        // 发射音（原版 Item.cs UseSound）：弓（useAmmo 40）=Item_5；枪械通用=Item_11；
+        // 霰弹枪族 534/964/3788/4703=Item_36；手枪族 164/219/1255/1929/2269/2270=Item_41
+        // （Item_36/41 此前登记"素材未提取"，现已落位 public/sounds/——销核）
+        this.sfx.play(useAmmo === AMMO_ARROW ? 'bowShoot'
+          : GUN_SHOTGUN_VIDS.has(bowVid) ? 'gunShotgun'
+          : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
       }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && cw && cw.kind !== 'melee') {
@@ -4913,7 +4934,7 @@ export class Game implements GameHooks {
   // ================= 蜥蜴祭坛 237 / 永恒水晶座 466 / 传送晶塔 597 =================
 
   /** 蜥蜴祭坛右键（Player.cs:32303-32335 1:1）：条件门 !AnyNPCs(245) && hardMode
-   *  && downedPlantBoss → 顺序扫 58 格消耗蜥蜴能量电池 1293（:32309-32319）→
+   *  && downedPlantBoss → 顺序扫背包消耗蜥蜴能量电池 1293（:32309-32319）→
    *  SoundID 15 Roar（:32328）→ NPC.SpawnOnPlayer(245)。
    *  条件不满足时原版**静默**（无提示文本——flag8=false 直接无事发生）。 */
   private useLihzahrdAltar(tx: number, ty: number): void {
@@ -4924,51 +4945,47 @@ export class Game implements GameHooks {
       this.input.rightDown = false;
       return;
     }
-    // 电池消耗（:32309-32319：inventory 顺序首个 1293 → stack-1 → 空则整格清空）
-    const cellId = ITEM_BY_KEY['vi_1293_lihzahrd_power_cell'];
-    let consumed = false;
-    const slots = this.player.inv.slots;
-    for (let n = 0; n < slots.length; n++) {
-      const it = slots[n];
-      if (it && it.id === cellId) {
-        it.stack--;
-        if (it.stack <= 0) slots[n] = null;
-        consumed = true;
-        break;
-      }
-    }
-    if (!consumed) { this.input.rightDown = false; return; }
-    this.cb.onInventoryChanged?.();
+    // 电池消耗（:32309-32319：inventory 顺序首个 type==1293 → stack-1 → 空则整格清空）
+    if (!this.consumeVanillaItem(1293)) { this.input.rightDown = false; return; }
     this.sfx.playWav('roar');   // SoundID 15（:32328）
     this.spawnGolemFromAltar();
     this.input.rightDown = false;
   }
 
-  /** SpawnOnPlayer case 245（NPC.cs:81284-81330 1:1）：玩家 ±20 格找祭坛顶中格
-   *  （frameX==18 && frameY==0）→ 向上/向下 50 格找实心 → 落位 y=(上+上+下)/3 →
+  /** 原版物品 id 的背包消耗（Player.ConsumeItem 语义的顺序扫描版：首格命中扣 1，
+   *  空则清格——祭坛 1293 :32309-32319 / 水晶座 3828 :31968 同构） */
+  private consumeVanillaItem(vid: number): boolean {
+    const slots = this.player.inv.slots;
+    for (let n = 0; n < slots.length; n++) {
+      const it = slots[n];
+      if (it && slotVanillaId(it.id) === vid) {
+        it.stack--;
+        if (it.stack <= 0) slots[n] = null;
+        this.cb.onInventoryChanged?.();
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /** 原版物品 id 的背包计数（HasItemInInventoryOrOpenVoidBag :31961 的背包段） */
+  private countVanillaItem(vid: number): number {
+    let n = 0;
+    for (const it of this.player.inv.slots) {
+      if (it && slotVanillaId(it.id) === vid) n += it.stack;
+    }
+    return n;
+  }
+
+  /** SpawnOnPlayer case 245（NPC.cs:81284-81330，落位计算在 world/BossSummonStations.ts）：
    *  NewNPC + 广播 Announcement.HasAwoken（:81325-81326；ChatColors.BossOrEvent）。 */
   private spawnGolemFromAltar(): void {
-    const st = this.world.store;
     const ALTAR = TILE_BY_KEY['v_237_lihzahrd_altar'];
     if (!ALTAR) return;
     const pcx = Math.floor(this.player.cx / TILE), pcy = Math.floor(this.player.cy / TILE);
-    let ax = 0, ay = 0;
-    for (let j = Math.max(0, pcx - 20); j < Math.min(st.w, pcx + 20); j++) {
-      for (let k = Math.max(0, pcy - 20); k < Math.min(st.h, pcy + 20); k++) {
-        const i = st.idx(j, k);
-        if (st.type[i] === ALTAR && st.frameX[i] === 18 && st.frameY[i] === 0) { ax = j; ay = k; }
-      }
-    }
-    if (ax <= 0 || ay <= 0) return;   // 找不到祭坛（:81308-81311）——已扣电池同原版不返还
-    let up = ay - 15, down = ay - 15; // num6/num7 初值（:81313-81314）
-    for (let y = ay; y > ay - 50; y--) {
-      if (st.inBounds(ax, y) && st.isSolid(ax, y)) { up = y; break; }
-    }
-    for (let y = ay; y < ay + 50; y++) {
-      if (st.inBounds(ax, y) && st.isSolid(ax, y)) { down = y; break; }
-    }
-    const gy = Math.floor((up + up + down) / 3);   // :81324
-    const head = Enemy.fromVanilla(245, ax * TILE + 8, gy * TILE);
+    const spot = golemSpawnFromAltar(this.world.store, ALTAR, pcx, pcy);
+    if (!spot) return;   // ±20 格内无祭坛（:81308-81311）——已扣电池同原版不返还
+    const head = Enemy.fromVanilla(245, spot.x, spot.y);
     if (!head) return;
     head.id = this.entities.nextId++;
     this.entities.add(head, 'enemies');
@@ -4987,8 +5004,8 @@ export class Game implements GameHooks {
     const st = w.store;
     const i = st.idx(tx, ty);
     const fy = st.frameY[i];
-    // num28（:31938-31946）
-    const by = ty + (fy === 0 ? 3 : fy === 18 ? 2 : fy === 36 ? 1 : 0);
+    // num28（:31938-31946，计算在 world/BossSummonStations.ts）
+    const by = ty + eterniaStandBottomRow(fy);
     const oa = w.oldOnesArmy;
     if (oa.ongoing) {
       // RequestToSkipWaitTime（:31948-31950）：波间 >60t 且水晶在座 → 直接跳到 60t
@@ -4999,9 +5016,8 @@ export class Game implements GameHooks {
       return;
     }
     // flag6 门禁链（:31954-31961）
-    const crystalId = ITEM_BY_KEY['vi_3828_eternia_crystal'];
-    const gated = !this.hasNpcId(548) && w.moonEvent.kind === 0 && crystalId !== undefined
-      && this.player.inv.countOf(crystalId) > 0;
+    const gated = !this.hasNpcId(548) && w.moonEvent.kind === 0
+      && this.countVanillaItem(3828) > 0;
     if (gated) {
       if (dd2WouldFailSpawningHere(this.dd2Host(), tx, by)) {
         // FailureMessage（DD2Event.cs:615-626，黄 255,255,0）
@@ -5010,8 +5026,7 @@ export class Game implements GameHooks {
         return;
       }
       // ConsumeItem(3828)（:31968-31970）
-      this.player.inv.remove(crystalId, 1);
-      this.cb.onInventoryChanged?.();
+      this.consumeVanillaItem(3828);
       dd2SummonCrystalDirect(oa, w, this.dd2Host(), tx, by, st.frameX[i], fy);
       // InvasionStart 广播（DD2Event.cs:285，ChatColors.World 50,255,130）
       this.newText(Lang.text('DungeonDefenders2.InvasionStart'), 50, 255, 130);
@@ -7549,6 +7564,48 @@ export class Game implements GameHooks {
     };
   }
 
+  // ================= F11 图片 → 像素方块群(自研,原版无) =================
+  /** 隐藏 file input(复用单例,每次置空 value 支持重复上传同一文件) */
+  private pixelArtInput: HTMLInputElement | null = null;
+  openPixelArtImport(): void {
+    if (!this.world) return;
+    if (!this.pixelArtInput) {
+      const inp = document.createElement('input');
+      inp.type = 'file';
+      inp.accept = 'image/*';
+      inp.style.display = 'none';
+      inp.addEventListener('change', () => this.onPixelArtFile(inp.files?.[0]));
+      document.body.appendChild(inp);
+      this.pixelArtInput = inp;
+    }
+    this.pixelArtInput.value = '';
+    this.pixelArtInput.click();
+  }
+  private async onPixelArtFile(file: File | undefined): Promise<void> {
+    if (!file || !this.world) return;
+    const toast = (k: string, a: string | number = 0) => this.cb.onToast?.(Lang.text(k, a));
+    try {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        URL.revokeObjectURL(url);
+        const grid = imageToGrid(img);
+        const st = this.world.store;
+        const p = this.player;
+        // 锚点:玩家面前(朝向 × 艺术半宽 + 10 格)
+        const anchorX = Math.floor(p.cx / TILE) + Math.sign(p.facing || 1) * (10 + (grid.w >> 1));
+        const pos = findArtPlacement(st, anchorX, Math.floor(p.cy / TILE), grid.w, grid.h);
+        if (!pos) { toast('Mods.SandboxWorld.PixelArt.NoSpace'); return; }
+        const n = placeArt(st, grid, pos);
+        toast(n > 0 ? 'Mods.SandboxWorld.PixelArt.Placed' : 'Mods.SandboxWorld.PixelArt.NoSpace', n);
+      };
+      img.onerror = () => { URL.revokeObjectURL(url); toast('Mods.SandboxWorld.PixelArt.BadImage'); };
+      img.src = url;
+    } catch {
+      toast('Mods.SandboxWorld.PixelArt.BadImage');
+    }
+  }
+
   /** 塔就位（WorldGen.TriggerLunarApocalypse 内 NewNPC 语义：锚点 = 列中心 + 底部贴格顶） */
   private spawnLunarTower(id: number, tx: number, ty: number): void {
     const e = Enemy.fromVanilla(id, tx * TILE + 8, ty * TILE);
@@ -7955,6 +8012,12 @@ export class Game implements GameHooks {
 
   playSfxFiles(files: string[], vol?: number, x?: number, y?: number) {
     if (!this.sfx.playFiles(files, vol ?? 1, x, y)) this.sfx.play('hit', vol ?? 1, x, y);
+  }
+
+  /** 按原版文件名直播（无合成兜底——音色精确的场景如蜂后吼/仪式圈）：
+   *  缓冲未就位时触发后台懒加载，本播静默（下次命中真声） */
+  playSfxFile(file: string, vol?: number, x?: number, y?: number) {
+    this.sfx.playWavFile(file, vol ?? 1, x, y);
   }
 
   /** 拾取物品后刷新 UI（带轻量节流 + 尾包补发，最多延迟 ~166ms） */

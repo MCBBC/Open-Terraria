@@ -92,10 +92,31 @@ const CSS = `
 .sw-btn:disabled { opacity:0.45; cursor:default; }
 .sw-slot { pointer-events:auto; width:52px; height:52px; background:url(sprites/vanilla/Inventory_Back.png) 0 0 / 100% 100%;
   position:relative; cursor:pointer; image-rendering:pixelated; }
+/* 原版槽底乘色通道（ItemSlot.Draw :1945+：背景贴图 × inventoryBack 灰色 180-220，
+ *  默认 220/255≈0.86 亮度；Loadout 染色/锁定灰 80 均经此 overlay 实现 MultiplyRGBA） */
+.sw-slot::before { content:''; position:absolute; inset:0; pointer-events:none;
+  background:var(--slot-tint, rgb(220,220,220)); mix-blend-mode:multiply; }
+.sw-hotbar .sw-slot::before { display:none; } /* 快捷栏 Back14/20 贴图自带 alpha 语义 */
 .sw-slot:hover { filter:brightness(1.15); }
 .sw-slot img { position:absolute; inset:8px; width:36px; height:36px; image-rendering:pixelated; }
 .sw-slot .cnt { position:absolute; left:4px; bottom:0; font-size:12px; font-weight:bold; color:#fff;
-  text-shadow:1px 1px 0 #000; }
+  text-shadow:1px 1px 0 #000; transform-origin:left bottom; }
+/* Loadout 三色（ItemSlot.LoadoutSlotColors :322-340，×inventoryBack 灰 = multiply）：
+ * 切换瞬间白闪（GetColorByLoadout :2546：Remap(dt,0,30,0.5,0)³ lerp→白） */
+@keyframes sw-loadout-flash { 0% { background:rgb(255 255 255 / 0.5); }
+  100% { background:rgb(255 255 255 / 0); } }
+.sw-loadout-flash .sw-slot::before { animation:sw-loadout-flash 0.5s ease-out; }
+/* 物品转移 hue 脉冲（ItemSlot.cs :2144-2152：贴图换 Back13 +
+ *  Lerp(基色(63,65,151)×invAlpha, hslToRgb(hue,1,0.5), (time/300)²/2)——
+ *  CSS 近似：色层 alpha 沿二次曲线 0.5→0 衰减，5s（300 tick） */
+@keyframes sw-slot-glow { 0% { opacity:0.5; } 100% { opacity:0; } }
+.sw-slot .sw-glow-overlay { position:absolute; inset:0; pointer-events:none;
+  background:var(--glow); animation:sw-slot-glow 5s cubic-bezier(0.5,0,1,1) forwards; }
+/* 金币/弹药槽 0.6 缩放（Main.cs:41193/41211 inventoryScale=0.6 → 31px、列距 33.6） */
+.sw-slot.sm { width:31px; height:31px; }
+.sw-slot.sm img { inset:4px; width:23px; height:23px; }
+.sw-slot.sm .cnt { font-size:10px; left:2px; }
+.sw-slot.sm::before { border-radius:2px; }
 /* ---- 快捷栏（原版 GUIHotbarDrawInner Main.cs:42996-43060 1:1）----
  * 贴图 52px：未选中 scale0.75（视觉 39px、y+6、alpha 147/255≈0.575）+ Back20；
  * 选中 scale1.0（52px、y=20、alpha1）+ Back14；x 步进 ⌊52×scale⌋+4（43/56）；
@@ -109,9 +130,7 @@ const CSS = `
   font-size:15px; color:#fff; text-shadow:2px 2px 0 #000; pointer-events:none;
   animation:sw-name-pulse 2s ease-in-out infinite alternate; }
 @keyframes sw-name-pulse { from { opacity:0.35; } to { opacity:1; } }
-.sw-slot.trash::after { content:'🗑'; position:absolute; left:50%; top:50%;
-  transform:translate(-50%,-52%); font-size:18px; opacity:0.55; pointer-events:none; }
-.sw-slot.trash:hover { border-color:#e08a8a; }
+/* 垃圾桶：原版槽底 = Inventory_Back7（ItemSlot.cs:2063 context 6），无附加图标 */
 .sw-lbl { font-size:12px; color:#9fb0dd; margin:6px 0 2px 0; }
 .sw-title { font-size:17px; font-weight:bold; margin-bottom:8px; color:#ffe8a0; }
 .sw-drag-ghost { position:fixed; z-index:200; pointer-events:none; width:40px; height:40px; }

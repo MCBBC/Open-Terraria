@@ -6,16 +6,6 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-// DBG 临时（node 侧脚本写盘调试用;静态 import node:fs 会炸浏览器 dev 引导 →
-// 环境门 + bundler 不可见动态 import,浏览器侧空操作）
-type Wfs = (p: string, d: string) => void;
-const writeFileSync: Wfs = (typeof process !== 'undefined' && process.versions?.node
-  && !(process as { browser?: boolean }).browser)
-  ? ((p: string, d: string) => {
-    (new Function('return import("node:fs")')() as Promise<{ writeFileSync: Wfs }>)
-      .then(m => m.writeFileSync(p, d)).catch(() => {});
-  })
-  : () => {};
 import { tileRunner } from './TileRunner';
 
 const MUD = TILE_BY_KEY['mud']!;
@@ -52,21 +42,8 @@ function spreadGrassOnce(st: TileStore, i: number, j: number, dirt: number, gras
 const NOT_CLEARABLE = new Set<number>([
   396, 400, 401, 397, 398, 399, 404, 368, 367, 41, 43, 44, 481, 482, 483, 226, 237,
 ]);
-const mutLog: string[] = [];  // DBG 临时
 export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
 
-{  // DBG 临时：mushroom 前 dump
-  const V0 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
-  let out = '';
-  for (let y = 826 - 150; y <= 826 + 150; y++) {
-    for (let x = 382 - 150; x <= 382 + 150; x++) {
-      const k = st.idx(x, y);
-      out += `${st.wall[k]},${st.flags[k] ? V0(st.type[k]) : 0};`;
-    }
-    out += '\n';
-  }
-  writeFileSync('/tmp/js-mush-pre.txt', out);
-}
   const { w, h } = st;
   let mCount = w / 700;
   if (mCount > 50) mCount = 50;                    // GenVars.maxMushroomBiomes = 50
@@ -105,25 +82,13 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       if (!flag && placed.length < 50) {
-        shroomPatch(st, rng, gs, x, y); console.log(`peek after main ${rng.vanilla.peek()}`);
-        for (let k = 0; k < 5; k++) { shroomPatch(st, rng, gs, x + rng.int(-40, 40), y + rng.int(-40, 40)); console.log(`peek after sat ${k} ${rng.vanilla.peek()}`); }
+        shroomPatch(st, rng, gs, x, y);
+        for (let k = 0; k < 5; k++) { shroomPatch(st, rng, gs, x + rng.int(-40, 40), y + rng.int(-40, 40)); }
         placed.push([x, y]); console.log(`mushPlaceJS ${x},${y}`);
       }
       tries++;
       if (tries > Math.floor(w / 2)) break;
     }
-  }
-  {  // DBG 临时：放置环后 dump
-    const V0 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
-    let out = '';
-    for (let y = 826 - 150; y <= 826 + 150; y++) {
-      for (let x = 382 - 150; x <= 382 + 150; x++) {
-        const k = st.idx(x, y);
-        out += `${st.wall[k]},${st.flags[k] ? V0(st.type[k]) : 0};`;
-      }
-      out += '\n';
-    }
-    writeFileSync('/tmp/js-mush-place.txt', out);
   }
   // SpreadGrass 全图扫描（cs:12721-12730 普通世界分支：InWorld(i,j,50)）
   for (let x = 0; x < w; x++) {
@@ -132,18 +97,6 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
         spreadGrassOnce(st, x, y, MUD, MUSH_GRASS);
       }
     }
-  }
-  {  // DBG 临时：spreadGrass 后 dump
-    const V0 = (t: number) => TILE_DEFS[t]?.vanilla?.sheet ?? 0;
-    let out = '';
-    for (let y = 826 - 150; y <= 826 + 150; y++) {
-      for (let x = 382 - 150; x <= 382 + 150; x++) {
-        const k = st.idx(x, y);
-        out += `${st.wall[k]},${st.flags[k] ? V0(st.type[k]) : 0};`;
-      }
-      out += '\n';
-    }
-    writeFileSync('/tmp/js-mush-grass.txt', out);
   }
   // 蘑菇草饰面第二循环（cs:12731-12769）
   for (let x = 0; x < w; x++) {
@@ -159,25 +112,23 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
           const iU = iy > 0 && st.flags[st.idx(ix, iy - 1)];
           const iD = iy < h - 1 && st.flags[st.idx(ix, iy + 1)];
           if (st.flags[ii]) {
-            if (!iL && !iR) { st.flags[ii] = 0; mutLog.push(`K${ix},${iy}`); }
-            else if (!iU && !iD) { st.flags[ii] = 0; mutLog.push(`K${ix},${iy}`); }
+            if (!iL && !iR) { st.flags[ii] = 0; }
+            else if (!iU && !iD) { st.flags[ii] = 0; }
           } else if (iL && iR) {
-            st.type[ii] = MUD; st.flags[ii] = 1; mutLog.push(`PL${ix},${iy}`);
-            if (ix > 0 && st.type[st.idx(ix - 1, y)] === MUSH_GRASS) { st.type[st.idx(ix - 1, y)] = MUD; mutLog.push(`C${ix - 1},${y}`); }
-            if (ix < w - 1 && st.type[st.idx(ix + 1, y)] === MUSH_GRASS) { st.type[st.idx(ix + 1, y)] = MUD; mutLog.push(`C${ix + 1},${y}`); }
+            st.type[ii] = MUD; st.flags[ii] = 1;
+            if (ix > 0 && st.type[st.idx(ix - 1, y)] === MUSH_GRASS) { st.type[st.idx(ix - 1, y)] = MUD; }
+            if (ix < w - 1 && st.type[st.idx(ix + 1, y)] === MUSH_GRASS) { st.type[st.idx(ix + 1, y)] = MUD; }
           } else if (iU && iD) {
-            st.type[ii] = MUD; st.flags[ii] = 1; mutLog.push(`PU${ix},${iy}`);
-            if (y > 0 && st.type[st.idx(x, y - 1)] === MUSH_GRASS) { st.type[st.idx(x, y - 1)] = MUD; mutLog.push(`C${x},${y - 1}`); }
-            if (y < h - 1 && st.type[st.idx(x, y + 1)] === MUSH_GRASS) { st.type[st.idx(x, y + 1)] = MUD; mutLog.push(`C${x},${y + 1}`); }
+            st.type[ii] = MUD; st.flags[ii] = 1;
+            if (y > 0 && st.type[st.idx(x, y - 1)] === MUSH_GRASS) { st.type[st.idx(x, y - 1)] = MUD; }
+            if (y < h - 1 && st.type[st.idx(x, y + 1)] === MUSH_GRASS) { st.type[st.idx(x, y + 1)] = MUD; }
           }
         }
       }
-      writeFileSync('/tmp/js-mush-mut.txt', mutLog.join('\n'));  // DBG 临时（首格即写，后同）
       if (rng.int(0, 3) === 0) {                   // Next(4)==0：1/4 散点 59→70
         const sx = x + rng.int(-20, 20), sy = y + rng.int(-20, 20);
         if (sx >= 0 && sx < w && sy >= 0 && sy < h && st.type[st.idx(sx, sy)] === MUD) {
           st.type[st.idx(sx, sy)] = MUSH_GRASS;
-          mutLog.push(`S${sx},${sy}`);
         }
       }
     }
@@ -237,12 +188,10 @@ function shroomPatch(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         x = Math.trunc(px) + rng.int(-20, 19);
         y = Math.trunc(py) + rng.int(0, 19);
       }
-      if (i === 382) console.log(`spTailJS m=${m} tgt=${x},${y} peek=${rng.vanilla.peek()}`);
       tileRunner(st, rng, gs, x, y, {
         strength: rng.int(10, 19), steps: rng.int(10, 19),   // Next(10,20)×2
         type: MUD, speedY: 2, noYChange: true,
       });
-      if (i === 382) console.log(`spTailDoneJS m=${m} peek=${rng.vanilla.peek()}`);
     }
   }
 }

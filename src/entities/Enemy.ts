@@ -3614,8 +3614,11 @@ export class Enemy extends Entity {
         game.spawnParticles(this.cx, this.y - 20, dustCol, 6, 2.4, { life: 40, grav: -0.05 });
         game.spawnParticles(this.cx, this.cy, '#F0F0F0', 1, 0.8, { life: 30, grav: 0.02 });
       }
-      // 每 60t 音效（:41118-41121 SoundID 4/22 碎裂；音效未接 → 低响咆哮近似）
-      if (this.ai1 % 60 === 1) game.playSfx('roar', 0.3, this.cx, this.cy);
+      // 每 60t 音效（:41118-41121 SoundID 4/22 双音——NPC_Killed_1 + Unlock，roar 近似销核）
+      if (this.ai1 % 60 === 1) {
+        game.playSfxFiles(['NPC_Killed_1'], 1, this.cx, this.cy);
+        game.playSfxFile?.('Unlock', 1, this.cx, this.cy);
+      }
       this.x += this.vx;
       this.y += this.vy;
       if (this.ai1 >= 180) {
