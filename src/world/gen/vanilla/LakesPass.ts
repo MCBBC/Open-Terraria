@@ -5,13 +5,19 @@
 import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 
 const MUD = TILE_BY_KEY['mud']!;
-/** WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：墙→地形 tile，未映射默认 0 */
-const WALL_TO_TERRAIN = new Map<number, number>([
+/** WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：墙→地形 tile（vanilla sheet id），
+ *  未映射默认 0=泥土。写入 st.type 前经 SHEET_TO_INTERNAL 转内部 id */
+const WALL_TO_TERRAIN_SHEET = new Map<number, number>([
   [40, 147], [71, 161], [15, 59], [86, 225], [3, 25], [83, 203], [178, 367], [180, 368],
 ]);
+const SHEET_TO_INTERNAL = new Map<number, number>();
+for (const d of TILE_DEFS) {
+  const vs = d.vanilla?.sheet;
+  if (vs !== undefined && !SHEET_TO_INTERNAL.has(vs)) SHEET_TO_INTERNAL.set(vs, TILE_BY_KEY[d.key]);
+}
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SAND = TILE_BY_KEY['sand']!;
 const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block'] ?? -1;
@@ -80,7 +86,8 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
           if (Math.abs(x - px) * 0.8 < r && !st.flags[ti] && st.wall[ti] > 0
             && st.wall[st.idx(x - 1, y)] > 0 && st.wall[st.idx(x + 1, y)] > 0
             && st.wall[st.idx(x, y + 1)] > 0) {
-            st.type[ti] = WALL_TO_TERRAIN.get(st.wall[ti]) ?? 0;
+            const sheet = WALL_TO_TERRAIN_SHEET.get(st.wall[ti]) ?? 0;
+            st.type[ti] = SHEET_TO_INTERNAL.get(sheet) ?? 0;   // 墙→地形（内部 id）
             st.flags[ti] = 1;
           }
         } else if (y < j && steps === stepsTotal - 1 && y > gs.worldSurfaceLow - 20 && st.flags[ti]) {

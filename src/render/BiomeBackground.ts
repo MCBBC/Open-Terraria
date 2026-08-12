@@ -329,7 +329,7 @@ export class BiomeBackground {
     if (cam.y < world.groundLevel * 16 + 16) {
       this.drawSurface(ctx, world, cam, camTopY, viewW, viewH, tint);
     }
-    this.drawUnderground(ctx, world, cam, camTopY, viewW, viewH);
+    this.drawUnderground(ctx, world, cam, camTopY, viewW, viewH, dtMs);
   }
 
   // ---- 地表层 ----
@@ -442,7 +442,7 @@ export class BiomeBackground {
   // ---- 地下层 ----
   private drawUnderground(
     ctx: CanvasRenderingContext2D, world: World, cam: Cam,
-    camTopY: number, viewW: number, viewH: number,
+    camTopY: number, viewW: number, viewH: number, dtMs: number,
   ) {
     const worldID = world.seed >>> 0;
     const newSlots = ugSlots(this.ugStyle, this.iceBack, this.jungleBack, this.hellBack, worldID);

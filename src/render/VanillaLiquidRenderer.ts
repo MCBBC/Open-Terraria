@@ -42,11 +42,6 @@ function shimmerBaseColorF(x: number, y: number, tVis: number): [number, number,
   const lerp = (a: number, b: number) => 255 * (a + (b - a) * k);
   return [lerp(0.64705884, 41 / 51), lerp(26 / 51, 41 / 51), lerp(14 / 15, 1)];
 }
-/** shimmerBaseColorF 的取整包装（整格单色场景：瓦后路径等） */
-function shimmerBaseColor(x: number, y: number, tVis: number): [number, number, number] {
-  const c = shimmerBaseColorF(x, y, tVis);
-  return [Math.round(c[0]), Math.round(c[1]), Math.round(c[2])];
-}
 /** SimpleWhiteNoise :793-797（uint 乘加混淆） */
 function shimmerWhiteNoise(x: number, y: number): number {
   let ux = Math.abs(Math.floor(x)) >>> 0, uy = Math.abs(Math.floor(y)) >>> 0;
