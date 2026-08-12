@@ -8,6 +8,7 @@ import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import type { Enemy } from './Enemy'; // type-only（Enemy 运行时反向依赖本文件，避免环）
+import { projFrameImg } from './Arrow';
 
 /** 电路陷阱投射物(Wiring.cs:1495-1743)。贴图 = 原版 projectile id;
  *  帧尺寸按实际解包 PNG 整图(素材为完整单帧:98 竖镖 10×28 / 184 竖火舌 10×18 /
@@ -532,41 +533,333 @@ export class Dart extends Entity {
   damage: number;
   life = 600; // tick 上限(原版 timeLeft 600)
   dead = false;
+  /** 原版弹型（0 = 无表项回退色块）；所有射击怪按 NPC.cs 发射点对号入座 */
+  projId: number;
 
-  constructor(x: number, y: number, vx: number, vy: number, damage: number) {
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, projId = 0) {
     super();
+    const st = projId ? DART_STYLE[projId] : undefined;
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
+    this.projId = projId;
+    if (st) {
+      this.w = st.w; this.h = st.h;
+      this.life = st.life ?? 600;
+      this.alpha = st.alpha0 ?? 0;
+      this.scale = st.scale ?? 1;
+      this.rot = st.rot === 'align90' || st.rot === 'a45'
+        ? Math.atan2(vy, vx) + (st.rot === 'a45' ? Math.PI / 4 : Math.PI / 2) : 0;
+      this.dir = Math.sign(vx) || 1;
+      if (st.frameRand) this.frame = Math.floor(Math.random() * st.frameRand); // 909 岩石随机帧（AI_002 :21534-21540）
+    }
   }
 
   draw(r: Renderer, _cam: Camera): void {
     // 世界坐标绘制(同 TrapShot)
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    ctx.fillStyle = '#C8B89A';
-    ctx.fillRect(this.x, this.y, this.w, this.h);
+    const st = this.projId ? DART_STYLE[this.projId] : undefined;
+    if (!st) {
+      // 无表项回退:旧色块(0 = 通用 Dart,历史遗留调用)
+      ctx.fillStyle = '#C8B89A';
+      ctx.fillRect(this.x, this.y, this.w, this.h);
+      return;
+    }
+    // 299 暗影焰:贴图 1×1 官方空桩,纯尘埃视觉(AI_001 :53759 尘 181 尾)
+    if (!st.noTex) {
+      const img = projFrameImg(this.projId, this.frame);
+      if (img) {
+        ctx.save();
+        ctx.translate(this.cx, this.cy);
+        ctx.rotate(this.rot);
+        ctx.imageSmoothingEnabled = false;
+        ctx.globalAlpha = Math.max(0, 1 - this.alpha / 255);
+        const dw = img.width * this.scale, dh = img.height * this.scale;
+        ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
+        ctx.restore();
+        ctx.globalAlpha = 1;
+        return;
+      }
+    }
+    // 贴图未就绪:短线兜底(方向与弹速一致)
+    ctx.strokeStyle = st.fallback ?? '#C8B89A';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(this.cx, this.cy);
+    ctx.lineTo(this.cx - this.vx * 1.6, this.cy - this.vy * 1.6);
+    ctx.stroke();
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
-    if (--this.life <= 0) { this.dead = true; return; }
-    const world = game.world;
+    const st = this.projId ? DART_STYLE[this.projId] : undefined;
+    if (--this.life <= 0) {
+      if (st?.rocket) this.rocketKill(game); else this.dead = true;
+      return;
+    }
+    if (!st) { this.legacyStep(game); return; }
+    // 首更新发射音（AI_001 各型 ai[1]==0 分支:81/82→Item5 :52468 / 180→Item11 :52473 /
+    // 84/257→Item12 :52408/:52418 / 572→Item17 :53410 / 44→Item8 :23723 / 115→Item8 :24835）;
+    // 96 诅咒焰 Item20 :22543 / 288 金雨 Item17 :22820 / 128/177 霜爆 Item28 :24991
+    if (this.age === 0 && st.sfx) game.playSfxFiles(st.sfx, 0.8, this.cx, this.cy);
+    // extraUpdates:原版每 tick 跑 1+extraUpdates 次完整 AI+位移(302 狙击 ×8 = 弹速 4→32px/t 的来源)
+    const sub = 1 + (st.updates ?? 0);
+    for (let i = 0; i < sub && !this.dead; i++) this.dartStep(game, st);
+  }
+
+  /** 单次原版更新（AI 重力/旋转/alpha/拖尾 + 位移 + 命中） */
+  private dartStep(game: GameHooks, st: DartStyle): void {
+    this.age++;
+    this.tick++;
+    // ---- 重力/加速（AI_001 分型重力门 & AI_018/AI_027 加速段）----
+    if (st.accel && this.age >= st.accel.from && this.age < st.accel.to) {
+      this.vx *= st.accel.mul; this.vy *= st.accel.mul;
+    }
+    if (st.grav !== undefined && this.age > (st.gravDelay ?? 0)) {
+      this.vy = Math.min(this.vy + st.grav, 16); // AI_001/AI_002 钳 16
+      if (st.xDamp) this.vx *= st.xDamp;
+    }
+    // ---- 旋转（各 aiStyle 权威语义,见 DART_STYLE 头注）----
+    switch (st.rot) {
+      case 'align90': this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2; break;
+      case 'a45': this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4; break;
+      case 'roll': this.rot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * this.dir; break;
+      case 'spin': this.rot += st.spinRate! * this.dir; break;
+      case 'tilt': this.rot = this.vx * 0.125; break;          // 836 蒲公英籽 :43312
+      case 'none': this.rot = 0; break;
+    }
+    // ---- alpha 渐入（alpha=255 SetDefaults 族;速率:'speed'=|v|*0.9 [:52782 302 族]/恒减）----
+    if (this.alpha > 0) {
+      this.alpha -= st.fade === 'speed'
+        ? Math.hypot(this.vx, this.vy) * 0.9
+        : (typeof st.fade === 'number' ? st.fade : 50);
+      if (this.alpha < 0) this.alpha = 0;
+    }
+    // ---- 115 三叉戟呼吸脉冲（AI_027 :24806-24826:15 更新起 scale ∓0.02/alpha ±30 交替）----
+    if (st.pulse && this.age > 15) {
+      if (this.pulseDir === 0) {
+        this.scale -= 0.02; this.alpha = Math.min(255, this.alpha + 30);
+        if (this.alpha >= 250) this.pulseDir = 1;
+      } else {
+        this.scale += 0.02; this.alpha = Math.max(0, this.alpha - 30);
+        if (this.alpha <= 0) this.pulseDir = 0;
+      }
+    }
+    // ---- 288 金雨 scale 递减（AI_012 :22824 scale-=0.002,归零即 Kill）----
+    if (st.shrink) {
+      this.scale -= st.shrink;
+      if (this.scale <= 0) { this.dead = true; return; }
+    }
+    // ---- 836 蒲公英籽帧动画（:43281 每 6 更新步进 4 帧循环）----
+    if (st.animEvery && this.age % st.animEvery === 0) this.frame = (this.frame + 1) % (st.frameRand ?? 4);
+    // ---- 836 蒲公英籽风力转向（:43283-43310:顺风加速漂向玩家,逆风弱漂;离玩家/玩家死 → 缓落）----
+    if (st.windSeed) {
+      const p = game.player;
+      const wind = game.world.weather?.windSpeedCurrent ?? 0;
+      const dir = p.cx > this.cx ? 1 : -1;
+      const cross = (wind > 0 ? 1 : -1) !== dir;   // flag54 = 风向与玩家方位相反
+      const cx = cross ? 1.5 : 2.5, cy = cross ? 1 : 2;
+      if (!p.dead && Math.hypot(p.cx - this.cx, p.cy - this.cy) < 800) {
+        if (!cross) {
+          this.vx += 0.05 * dir * (0.6 + Math.abs(wind));
+          if (this.vx > cx) this.vx -= 0.1;
+          if (this.vx < -cx) this.vx += 0.1;
+        }
+        if (p.y <= this.cy || cross) {
+          this.vy += 0.05;
+          if (this.vy > cx) this.vy -= 0.1;
+        } else {
+          this.vy -= 0.1;
+          if (this.vy < -cy) this.vy += 0.2;
+        }
+      } else {
+        this.vy += 0.2;
+        this.vy = Math.max(-cy, Math.min(cy, this.vy));
+      }
+    }
+    // ---- 位移 ----
     this.x += this.vx;
     this.y += this.vy;
-    // 撞实心块消失
-    const tx = Math.floor((this.x + this.w / 2) / TILE);
-    const ty = Math.floor((this.y + this.h / 2) / TILE);
-    if (world.store.isSolid(tx, ty)) { this.dead = true; return; }
-    // 命中玩家(敌对陷阱):矩形相交即消耗弹体;伤害走 damagePlayer(防御减算/受击音/
-    // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义)
+    // ---- 拖尾尘（原版每更新 NewDust;近似为低频 spawnParticles 防刷屏）----
+    if (st.trail && (this.tick & 1) === 0) {
+      game.spawnParticles(this.cx, this.cy, st.trail.color, st.trail.count, 0.4,
+        { life: st.trail.life ?? 24, damp: 0.93, grav: st.trail.grav ?? 0 });
+    }
+    // ---- 光照（SetDefaults light × Projectile.cs:15170 起分型系数）----
+    if (st.light && this.alpha < 128) this.lightRGB = st.light;
+    else this.lightRGB = null;
+    // ---- 撞实心块 ----
+    const tx = Math.floor(this.cx / TILE);
+    const ty = Math.floor(this.cy / TILE);
+    if (game.world.store.isSolid(tx, ty)) {
+      if (st.rocket) { this.rocketKill(game); return; }  // 303 火箭撞块即爆（Kill 段）
+      if (st.noTile) { /* 300 圣锤/299 暗影焰 tileCollide=false:穿墙 */ }
+      else { this.dead = true; return; }
+    }
+    // ---- 命中玩家(敌对):矩形相交即消耗弹体;伤害走 damagePlayer(防御减算/受击音/
+    // iframes 去重——无敌帧内命中不扣血但弹体照常销毁,原版语义) ----
+    if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
+      if (st.rocket) { this.rocketKill(game); return; }
+      hitPlayer(this, game, this.damage);
+      this.dead = true;
+    }
+  }
+
+  /** 303 骷髅火箭 Kill（Projectile.Kill :74533 组:128×128 伤害盒 + 22 盒烟尘/火/Gore +
+   *  SoundID.Item14;不炸地形——不在 ExplodeTiles 表 cs:75262） */
+  private rocketKill(game: GameHooks): void {
+    this.dead = true;
+    const cx = this.cx, cy = this.cy;
+    game.playSfxFiles(['Item_14'], 1, cx, cy);
+    game.spawnParticles(cx, cy, '#9A9A9A', 30, 2, { life: 40, damp: 0.96 });          // 尘 31 ×1.4
+    game.spawnParticles(cx, cy, '#FF9A3C', 20, 5, { life: 30, damp: 0.94, grav: -0.06 }); // 火 6 ×7/×3
+    game.spawnParticles(cx, cy, '#D8D8D0', 8, 3, { life: 50, damp: 0.95, size: 3 });  // Gore 61-63 四向
+    // 伤害盒（:44525 timeLeft≤3 时 Resize(128,128)——纯伤害,与地形无关）
+    const box = { x: cx - 64, y: cy - 64, w: 128, h: 128 };
+    const p = game.player;
+    if (!p.dead && box.x < p.x + p.w && box.x + box.w > p.x && box.y < p.y + p.h && box.y + box.h > p.y) {
+      hitPlayer(this, game, this.damage);
+    }
+  }
+
+  /** 无表项通用弹（projId=0 历史路径）:直线+撞块消亡 */
+  private legacyStep(game: GameHooks): void {
+    this.x += this.vx;
+    this.y += this.vy;
+    const tx = Math.floor(this.cx / TILE);
+    const ty = Math.floor(this.cy / TILE);
+    if (game.world.store.isSolid(tx, ty)) { this.dead = true; return; }
     if (projOverlap(this.x, this.y, this.w, this.h, game.player) && !game.player.dead) {
       hitPlayer(this, game, this.damage);
       this.dead = true;
     }
   }
+
+  // ---- 原版 Projectile 字段映射 ----
+  private age = 0;          // ai[0]/localAI 计数
+  private tick = 0;         // 拖尾节拍
+  private rot = 0;          // projectile.rotation
+  private alpha = 0;        // projectile.alpha(255=全透明,渐入)
+  private scale = 1;        // projectile.scale
+  private frame = 0;        // 多帧行帧号(909/836)
+  private dir = 1;          // projectile.direction(旋转符号)
+  private pulseDir = 0;     // 115 呼吸相位
+  /** 点光（Game 实体光循环读取;SetDefaults light 族） */
+  lightRGB: [number, number, number] | null = null;
 }
+
+/** 敌怪弹幕样式表——每条对应原版 Projectile 的 SetDefaults(Projectile.cs) + AI 行为。
+ *  射击怪→弹型映射（NPC.cs 发射点行号见 Enemy.ts 各调用点注释）。
+ *  旋转语义（画布与 XNA 同为顺时针正,直接套用原版公式）:
+ *   align90 = rotation = atan2(vy,vx)+π/2 每更新（AI_001 通用尾 :54868,贴图静止朝上）
+ *   a45     = atan2+π/4（115 三叉戟 AI_027 :24839）
+ *   roll    = += (|vx|+|vy|)*0.03*direction（aiStyle2 :21519:471 骨头/909 岩石/300 圣锤）
+ *   spin    = += rate*direction（44 魔镰 AI_018 :23814 rate 0.8 / 96 诅咒焰 AI_008 :22669 rate 0.3 /
+ *             31 沙球 AI_010 :55158 rate 0.1）
+ *   tilt    = rotation = vx*0.125（836 蒲公英籽 :43312）
+ *   none    = 恒 0（128 霜爆/177 冰水吐涎/288 金雨,AI_028/AI_012 无旋转更新）
+ *  alpha=255 族视觉 = 渐入（302 族按 |v|*0.9 :52782,257 恒 -10 :53036,其余家族恒减） */
+interface DartStyle {
+  w: number; h: number;                  // 碰撞盒(SetDefaults width/height)
+  scale?: number;                        // 绘制缩放(SetDefaults scale)
+  rot: 'align90' | 'a45' | 'roll' | 'spin' | 'tilt' | 'none';
+  spinRate?: number;
+  alpha0?: number;                       // 出生 alpha(255=渐入)
+  fade?: 'speed' | number;               // 渐入速率
+  light?: [number, number, number];      // 点光(SetDefaults light × :15170 分型系数)
+  grav?: number; gravDelay?: number; xDamp?: number;   // 重力档(ai0 门)
+  accel?: { from: number; to: number; mul: number };   // 加速段(ai0 区间内每更新 ×mul)
+  updates?: number;                      // extraUpdates(每 tick 完整更新次数)
+  noTile?: boolean;                      // tileCollide=false 穿墙
+  life?: number;
+  trail?: { color: string; count: number; life?: number; grav?: number };
+  sfx?: string[];                        // 发射音(原版 wav)
+  rocket?: number;                       // Kill 爆炸盒半宽(303)
+  shrink?: number;                       // scale 递减(288)
+  frameRand?: number;                    // 出生随机帧(909)
+  animEvery?: number;                    // 帧动画步进(836:6)
+  windSeed?: boolean;                    // 836 风力转向 AI
+  noTex?: boolean;                       // 贴图空桩,纯尘埃视觉(299)
+  pulse?: boolean;                       // alpha/scale 呼吸(115)
+  fallback?: string;                     // 贴图未就绪短线色
+}
+
+const DART_STYLE: Record<number, DartStyle> = {
+  // 38 哈比羽毛(NPC.cs:23483 弹型 38):14×14 aiStyle1 直飞,timeLeft 300(NPC 侧覆写)
+  38: { w: 14, h: 14, rot: 'align90', life: 300, fallback: '#E8E0D0' },
+  // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
+  55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
+  // 81/82 木箭/燃烧箭(战士族 num172 :59797/:59821):10×10,重力 0.07@20(:54009);发射音 Item5
+  81: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#D8C8A0' },
+  82: { w: 10, h: 10, rot: 'align90', grav: 0.07, gravDelay: 20, sfx: ['Item_5'], fallback: '#FFB060' },
+  // 84 粉激光(NPC 122 :24887):4×4,scale1.2,alpha255 渐入(|v|*0.9),extraUpdates2,life600,
+  //    light 0.75×(0.8,0,0.5)(:15181);发射音 Item12
+  84: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 2, life: 600,
+    light: [0.45, 0, 0.28], sfx: ['Item_12'], fallback: '#FF70E0' },
+  // 96 诅咒焰(爬行者 101 :22846):16×16,alpha100(恒),spin 0.3,light 0.8;尘 75 拖尾;Item20
+  96: { w: 16, h: 16, rot: 'spin', spinRate: 0.3, alpha0: 100,
+    light: [0.64, 0.64, 0.64], trail: { color: '#9A6AFF', count: 1 }, sfx: ['Item_20'], fallback: '#8A5AE8' },
+  // 115 邪恶三叉戟(红恶魔 156 :23533):16×16,a45,alpha255 呼吸脉冲,加速 ×1.125@ai0<30(:24753),
+  //    light 0.5×(0.5,0.05,1)(:15205);Item8
+  115: { w: 16, h: 16, rot: 'a45', alpha0: 255, fade: 50, pulse: true,
+    accel: { from: 0, to: 30, mul: 1.125 }, light: [0.25, 0.025, 0.5], sfx: ['Item_8'], fallback: '#B060FF' },
+  // 128 霜爆(冰元素 169 :24933):14×14 旋转恒 0,alpha255 渐入;尘 92 ×3;Item28
+  128: { w: 14, h: 14, rot: 'none', alpha0: 255, fade: 50,
+    trail: { color: '#A8D8F0', count: 2 }, sfx: ['Item_28'], fallback: '#C8ECFF' },
+  // 174 冰刺/176 丛林刺/605 尖刺史莱姆刺(尖刺史莱姆 184/204/535):
+  //    6×6,重力 174/605:0.15@5(:54017)/176:0.05@15(:54310)
+  174: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5, fallback: '#B8E0F0' },
+  176: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.05, gravDelay: 15, fallback: '#7AC868' },
+  605: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, grav: 0.15, gravDelay: 5, fallback: '#D8D0C0' },
+  // 177 冰水吐涎(冰鱼人 206 :59859):10×10 旋转恒 0,alpha255;尘 137 ×3
+  177: { w: 10, h: 10, rot: 'none', alpha0: 255, fade: 50,
+    trail: { color: '#BFE8F0', count: 2 }, fallback: '#A8D8E8' },
+  // 180 死眼弹(海盗 214/216/292 :59895):4×4,scale1.2,alpha255 渐入(|v|*0.9),extraUpdates1,life600,
+  //    light 0.5×(1,0.7,0.1)(:14990);Item11
+  180: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 'speed', updates: 1, life: 600,
+    light: [0.5, 0.35, 0.05], sfx: ['Item_11'], fallback: '#FFE8A0' },
+  // 257 霜束(冰雪巨人 243 :59339):4×4,scale1.2,alpha255 渐入 -10(:53036),extraUpdates1,life600;
+  //    light 0.75;Item12
+  257: { w: 4, h: 4, rot: 'align90', scale: 1.2, alpha0: 255, fade: 10, updates: 1, life: 600,
+    light: [0.18, 0.45, 0.6], sfx: ['Item_12'], fallback: '#A8E8FF' },
+  // 288 金雨(脓水粘怪 268 :25032):32×32,重力 0.075(:22835),scale -0.002/更新(:22824),
+  //    extraUpdates2,旋转恒 0;尘 170 ×3;Item17
+  288: { w: 32, h: 32, rot: 'none', alpha0: 255, fade: 50, grav: 0.075, updates: 2, shrink: 0.002,
+    trail: { color: '#E8C060', count: 2 }, sfx: ['Item_17'], fallback: '#E0B040' },
+  // 299 暗影焰(巨型诅咒颅 289 :21795):6×6,alpha255,tileCollide=false 穿墙,extraUpdates2,
+  //    贴图 1×1 空桩→纯尘埃(尘 181);Item8@第6更新(:53761)
+  299: { w: 6, h: 6, rot: 'align90', alpha0: 255, fade: 50, updates: 2, noTile: true, noTex: true,
+    trail: { color: '#7A5AFF', count: 1 }, fallback: '#7A5AFF' },
+  // 300 圣锤(圣骑士 290 :59887):38×38 roll,重力 0.2@60(:21893),tileCollide=false 穿墙;Item1
+  300: { w: 38, h: 38, rot: 'roll', grav: 0.2, gravDelay: 60, noTile: true, sfx: ['Item_1'], fallback: '#C8B860' },
+  // 302 狙击弹(骷髅神射 291 :59883):4×4,scale1.18,alpha255 渐入(|v|*0.9),extraUpdates7(!) →
+  //    弹速 4×8=32px/t,life300;light 0.3×(1,0.7,0.1);Item11
+  302: { w: 4, h: 4, rot: 'align90', scale: 1.18, alpha0: 255, fade: 'speed', updates: 7, life: 300,
+    light: [0.3, 0.21, 0.03], sfx: ['Item_11'], fallback: '#FFF0B0' },
+  // 303 火箭(骷髅爆破 293 :59893):14×20 aiStyle16 手雷族:重力 0.3 滚转,life180,Kill 128 盒爆炸
+  303: { w: 14, h: 20, rot: 'roll', grav: 0.3, life: 180, rocket: 64, fallback: '#B8B8C0' },
+  // 31 沙球(蚁狮 69 :24520):10×10,重力 0.41(AI_010 :55083),spin 0.1(:55158);尘 32
+  31: { w: 10, h: 10, rot: 'spin', spinRate: 0.1, grav: 0.41,
+    trail: { color: '#D8C890', count: 1 }, fallback: '#D8C890' },
+  // 471 骷髅骨(投骨骷髅 449-452 :59844):16×16,scale1.2,roll,重力 0.4@20+xDamp0.97(aiStyle2 通用尾 :21976)
+  471: { w: 16, h: 16, rot: 'roll', scale: 1.2, grav: 0.4, gravDelay: 20, xDamp: 0.97, fallback: '#E0D8C8' },
+  // 508 标枪(希腊骷髅 481 :59855):16×16,重力 0.3+xDamp0.98@ai0>60(:54589)
+  508: { w: 16, h: 16, rot: 'align90', grav: 0.3, gravDelay: 61, xDamp: 0.98, fallback: '#C0A880' },
+  // 572 蝾螈吐息(蝾螈族 498-506 :59849):10×10,alpha255 渐入;尘 40 ×2;Item17
+  572: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 50,
+    trail: { color: '#8AD8A0', count: 2 }, sfx: ['Item_17'], fallback: '#8AD8A0' },
+  // 44 魔鬼飞镰(恶魔 62/66 :23504):48×48,scale0.9,alpha100,spin 0.8(:23814),
+  //    加速 ×1.06@ai0[30,100)(:23816),light (0.3,0.25,0.1)(:23748);尘 27;Item8(:23723)
+  44: { w: 48, h: 48, rot: 'spin', spinRate: 0.8, scale: 0.9, alpha0: 100,
+    accel: { from: 30, to: 100, mul: 1.06 }, light: [0.3, 0.25, 0.1],
+    trail: { color: '#B08050', count: 1 }, sfx: ['Item_8'], fallback: '#B08050' },
+  // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
+  909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
+  // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
+  836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, windSeed: true, fallback: '#E8E8D0' },
+};
 
 /**
  * 629 TowerDamageBolt（Projectile.cs AI_122 :33747-33778 + Kill 段 :69784-69819）：

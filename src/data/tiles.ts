@@ -284,12 +284,12 @@ def({ key: 'v_375_honey_drip', name: '', solid: false, framed: true, opacity: 0.
 def({ key: 'v_227_dye_plants', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#4AC59B', drop: null, vanilla: { sheet: 227, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_584_amethyst_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 584, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_231_larva', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#E0C265', drop: null, vanilla: { sheet: 231, frame: 'style', fw: 3, fh: 3 } });
-def({ key: 'v_395_item_frame', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 395, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'v_395_item_frame', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', vanilla: { sheet: 395, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_241_catacombs', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 3, mapColor: '#4D4A48', drop: null, vanilla: { sheet: 241, frame: 'style', fw: 4, fh: 3 } });
 def({ key: 'v_587_ruby_tree', name: '', solid: false, framed: true, opacity: 0.05, pick: -1, axe: 0, w: 1, h: 1, mapColor: '#7F7F7F', drop: null, vanilla: { sheet: 587, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_86_loom', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 86, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_376_fishing_crates', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#A0785C', drop: null, vanilla: { sheet: 376, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'v_470_mannequins', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 470, frame: 'style', fw: 2, fh: 3 } });
+def({ key: 'v_470_mannequins', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#BF8E6F', vanilla: { sheet: 470, frame: 'style', fw: 2, fh: 3 } });
 def({ key: 'v_324_seashells', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E4D5AD', drop: null, vanilla: { sheet: 324, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_81_coral', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#F585BF', drop: null, vanilla: { sheet: 81, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_136_switch', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D5CBCC', drop: null, vanilla: { sheet: 136, frame: 'style', fw: 1, fh: 1 } });
@@ -384,7 +384,7 @@ def({ key: 'v_248_palladium_column', name: '', solid: true, opacity: 1, pick: 0,
 def({ key: 'v_340_living_cursed_fire_block', name: '', solid: false, /* 原版非实心：活性诅咒火可穿 */ opacity: 1, pick: 0, mapColor: '#60F802', blend: true, drop: null, light: [115, 255, 115], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 340, frame: 'auto' } });
 def({ key: 'v_207_water_fountains', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 4, mapColor: '#909490', drop: null, vanilla: { sheet: 207, frame: 'style', fw: 2, fh: 4 } });
 def({ key: 'v_144_timers', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#909490', drop: null, vanilla: { sheet: 144, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'v_475_hat_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 475, frame: 'style', fw: 3, fh: 4 } });
+def({ key: 'v_475_hat_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#BF8E6F', vanilla: { sheet: 475, frame: 'style', fw: 3, fh: 4 } });
 def({ key: 'v_175_tin_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', blend: true, drop: null, vanilla: { sheet: 175, frame: 'auto' } });
 def({ key: 'v_132_lever', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: null, vanilla: { sheet: 132, frame: 'style', fw: 2, fh: 2 } });
 
@@ -663,7 +663,7 @@ def({ key: 'v_460_snow_cloud_block', name: '', solid: true, opacity: 1, pick: 0,
 def({ key: 'v_462_desert_spirit_lamp', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#E7B21C', drop: null, vanilla: { sheet: 462, frame: 'style', fw: 2, fh: 1 } });
 def({ key: 'v_464_war_table', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 5, h: 4, mapColor: '#E9B780', drop: null, vanilla: { sheet: 464, frame: 'style', fw: 5, fh: 4 } });
 def({ key: 'v_465_war_table_banner', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 3, mapColor: '#3354C3', drop: null, vanilla: { sheet: 465, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'v_471_weapon_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', drop: null, vanilla: { sheet: 471, frame: 'style', fw: 3, fh: 3 } });
+def({ key: 'v_471_weapon_rack', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 3, mapColor: '#BF8E6F', vanilla: { sheet: 471, frame: 'style', fw: 3, fh: 3 } });
 def({ key: 'v_472_iron_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#BEA08C', blend: true, drop: null, vanilla: { sheet: 472, frame: 'auto' } });
 def({ key: 'v_473_lead_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#55727B', blend: true, drop: null, vanilla: { sheet: 473, frame: 'auto' } });
 def({ key: 'v_474_lesion_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#745E61', blend: true, drop: null, vanilla: { sheet: 474, frame: 'auto' } });
@@ -692,7 +692,7 @@ def({ key: 'v_514_red_moss_brick', name: '', solid: true, opacity: 1, pick: 0, m
 def({ key: 'v_515_blue_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#2B568C', blend: true, drop: null, vanilla: { sheet: 515, frame: 'auto' } });
 def({ key: 'v_516_purple_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: null, vanilla: { sheet: 516, frame: 'auto' } });
 def({ key: 'v_517_lava_moss_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#FE7902', blend: true, drop: null, vanilla: { sheet: 517, frame: 'auto' } });
-def({ key: 'v_520_plate', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', drop: null, vanilla: { sheet: 520, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'v_520_plate', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#E0DBEC', vanilla: { sheet: 520, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_521_black_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 521, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_522_blue_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 522, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_523_green_dragonfly_jar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#7AD9E8', drop: null, vanilla: { sheet: 523, frame: 'style', fw: 2, fh: 2 } });
@@ -821,7 +821,7 @@ def({ key: 'v_694_stalactite_1x2_echo', name: '', solid: false, framed: true, op
 def({ key: 'v_695_replica_demon_altar', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#77657D', drop: null, vanilla: { sheet: 695, frame: 'style', fw: 3, fh: 2 } });
 def({ key: 'v_696_replica_shadow_orb', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#8D78A8', drop: null, vanilla: { sheet: 696, frame: 'style', fw: 2, fh: 2 } });
 def({ key: 'v_697_decorative_cobweb', name: '', decor: true, opacity: 0, pick: 0, mapColor: '#C0CACB', drop: null, vanilla: { sheet: 697, frame: 'auto' } });
-def({ key: 'v_698_item_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#C8C8C8', drop: null, vanilla: { sheet: 698, frame: 'style', fw: 1, fh: 2 } });
+def({ key: 'v_698_item_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#C8C8C8', vanilla: { sheet: 698, frame: 'style', fw: 1, fh: 2 } });
 def({ key: 'v_699_alchemy_flask', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 4, h: 4, mapColor: '#8D6B59', drop: null, vanilla: { sheet: 699, frame: 'style', fw: 4, fh: 4 } });
 def({ key: 'v_700_abigails_flower_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#D25B4D', drop: null, vanilla: { sheet: 700, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_701_glow_tulip_replica', name: '', solid: false, framed: true, opacity: 0.05, pick: 0, w: 1, h: 1, mapColor: '#157CD4', drop: null, vanilla: { sheet: 701, frame: 'style', fw: 1, fh: 1 } });

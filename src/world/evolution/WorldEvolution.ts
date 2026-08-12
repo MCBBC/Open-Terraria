@@ -236,6 +236,12 @@ export class WorldEvolution {
         }
       }
     }
+    // 空水格睡莲/香蒲（cs:72237-72248，else-if 互斥各 1/600）：须在下方 !act 早退
+    // 之前判——原版液体分支（liquid>32）先于 nactive 段，空水格走本支而非刷怪段
+    if (!act && this.liquidAt(i, j) > 32) {
+      if (Math.random() < 1 / 600) this.place1(i, j, 518);
+      else if (Math.random() < 1 / 600) this.place1(i, j, 519);
+    }
     if (!act) {
       // 蛛网再生（cs:72534-72536：墙 62 + 无液体 → GrowWeb）
       if (st.wall[this.at(i, j)] === 62 && this.liquidAt(i, j) === 0) this.growWeb(i, j);
@@ -295,13 +301,8 @@ export class WorldEvolution {
       if (fx < 144) this.setType(i, j, S(113));
     }
     // 水淹分支（cs:72202-72245）：浸水格——丛林草/神庙砖(60/226) → GrassGrowth；
-    // 空水格（!active）各以 1/600 放睡莲(518)/香蒲(519)（else-if 链互斥，:72237-72248）
     const liq = this.liquidAt(i, j);
-    if (liq > 32) {
-      if (sheet === 60 || sheet === 226) this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
-      else if (!act && Math.random() < 1 / 600) this.place1(i, j, 518);
-      else if (!act && Math.random() < 1 / 600) this.place1(i, j, 519);
-    }
+    if (liq > 32 && (sheet === 60 || sheet === 226)) this.grassGrowth(i, j, minI, maxI, minJ, maxJ, false);
     // 墙蔓延（邪恶草墙/硬化沙墙）
     if (this.allowedToSpread) {
       this.spreadGrassWalls(wallDist, i, j);

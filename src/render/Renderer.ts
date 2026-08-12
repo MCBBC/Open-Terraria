@@ -50,6 +50,7 @@ import { BiomeBackground } from './BiomeBackground';
 import type { SceneFlags } from '../world/SceneMetrics';
 import { TILE_DEFS, WALL_DEFS } from '../data/tiles';
 import { viIdFromKey } from '../data/vanillaItemCombat';
+import type { FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
 
@@ -195,6 +196,193 @@ function vanillaFrameIdx(e: Enemy, frames: number): number {
   // 其余（眼/蜂群/幽灵/蠕虫段等）：每 6 tick 全循环
   return Math.floor(t / 6) % frames;
 }
+
+// ============ 2D 网格贴图 NPC 帧引擎（FindFrame 大 switch 专属 case，NPC.cs:67295+） ============
+// 这些 NPC 的贴图是【cols×rows 二维网格】而非纵向帧条，通用 vnpc 竖切会把整行画出来
+// （画错成多倍宽）。帧索引状态机按原版 FindFrame 逐 case 1:1，供 drawNpcGrid 切格。
+// 状态 {counter,idx} 由 Renderer 持 WeakMap（每 draw 调用 = 每 tick 推进一次，
+// 等价原版 FindFrame 每 update 调一次）。
+export interface NpcGridFrameState { counter: number; idx: number }
+
+/** 657 史莱姆皇后（FindFrame case 657，NPC.cs:67503-67614）。
+ *  flag13 = life≤lifeMax/2（二段）；noGravity 为 AI 侧动态位，渲染层以
+ *  `half && ai0==0`（二段待机=飞行，bossAI_lategame queenSlimeAI flying 同款判定）近似。
+ *  - 上升（(half&&飞行) || vy<0）：一段 4→7 每 4t（半血转 22 进二段循环）；
+ *    二段 20→23 每 5t 循环
+ *  - 下降（vy>0）：8→10 每 8t，停 10
+ *  - 落地（vy==0）：ai0==5 → 13/14/15 按 ai1/3%3；ai0==4 → 12/11/10 按 ai1/15；
+ *    否则 0→3 每 6t 循环（若从空中来先 10→12 每 6t 再回 0）
+ */
+export function queenSlimeNextFrame(
+  s: NpcGridFrameState, o: { half: boolean; flying: boolean; vy: number; ai0: number; ai1: number },
+): number {
+  let idx = s.idx;
+  const rising = (o.half && o.flying) || o.vy < 0;
+  if (rising) {
+    if (idx < 20 || idx > 23) {
+      if (idx < 4 || idx > 7) { idx = 4; s.counter = -1; }
+      if (++s.counter >= 4) { s.counter = 0; idx++; if (idx >= 7) idx = o.half ? 22 : 7; }
+    } else if (++s.counter >= 5) { s.counter = 0; idx++; if (idx >= 24) idx = 20; }
+  } else if (o.vy > 0) {
+    if (idx < 8 || idx > 10) { idx = 8; s.counter = -1; }
+    if (++s.counter >= 8) { s.counter = 0; idx++; if (idx >= 10) idx = 10; }
+  } else {
+    if (o.ai0 === 5) {
+      s.counter = 0;
+      idx = [13, 14, 15][Math.trunc(o.ai1 / 3) % 3] ?? 13;
+    } else if (o.ai0 === 4) {
+      s.counter = 0;
+      const k = Math.trunc(o.ai1 / 15);
+      idx = k === 1 ? 11 : (k === 2 || k === 3) ? 10 : 12;
+    } else {
+      const fromAir = idx >= 10 && idx <= 12;
+      const step = fromAir ? 6 : 10;
+      if (!fromAir && idx >= 4) { idx = 0; s.counter = -1; }
+      if (++s.counter >= step) {
+        s.counter = 0;
+        idx++;
+        if ((!fromAir || idx === 13) && idx >= 4) idx = 0;
+      }
+    }
+  }
+  s.idx = idx;
+  return idx;
+}
+
+/** 576/577 DD2 食人魔（FindFrame case 576/577，NPC.cs:68241-68380）。
+ *  frame.Y 存的是【索引】（0..47）：ai0>0&&ai1==0 走路 11→20（持 4；13/19=8、14/18=2）；
+ *  ai1==2 攻击 37→47（持 5；42=6、45=8、46=4、47=26、37/38=7；46&&vy!=0 或 38 不推进）；
+ *  ai1==1 施法 21→38 持 5；默认：腾空=43、站定=0、行走 1..10 按 |vx| 累加（60 循环） */
+export function dd2OgreNextFrame(
+  s: NpcGridFrameState, o: { ai0: number; ai1: number; vx: number; vy: number },
+): number {
+  let idx = s.idx;
+  if (o.ai0 > 0 && o.ai1 === 0) {
+    if (idx < 11 || idx > 20) { idx = 11; s.counter = 0; }
+    let hold = 4;
+    if (idx === 13 || idx === 19) hold = 8;
+    if (idx === 14 || idx === 18) hold = 2;
+    if (++s.counter >= hold && idx < 20) { s.counter = 0; idx++; }
+  } else if (o.ai0 > 0 && o.ai1 === 2) {
+    if (idx < 37 || idx > 47) { idx = 39; s.counter = 0; }
+    let hold = 5;
+    if (idx === 42) hold = 6;
+    if (idx === 45) hold = 8;
+    if (idx === 46) hold = 4;
+    if (idx === 47) hold = 26;
+    if (idx === 37 || idx === 38) hold = 7;
+    // flag12：46 腾空悬停 / 38 起手不推进（帧冻结）
+    let advance = true;
+    if (idx === 46 && o.vy !== 0) advance = false;
+    if (idx === 38) advance = false;
+    if (advance) s.counter++;
+    if (s.counter >= hold) {
+      if (idx < 47) { s.counter = 0; idx++; }
+      else { idx = 37; s.counter = 0; }
+    }
+  } else if (o.ai0 > 0 && o.ai1 === 1) {
+    if (idx < 21 || idx > 38) { idx = 21; s.counter = 0; }
+    if (++s.counter >= 5 && idx < 38) { s.counter = 0; idx++; }
+  } else {
+    if (o.vy !== 0) { s.counter = 0; idx = 43; }
+    else if (o.vx === 0) { s.counter = 0; idx = 0; }
+    else {
+      s.counter += Math.abs(o.vx);
+      if (s.counter >= 60 || s.counter < 0) s.counter = 0;
+      idx = 1 + Math.floor(s.counter / 6);
+    }
+  }
+  s.idx = idx;
+  return idx;
+}
+
+/** 696（FindFrame case 696，NPC.cs:67332-67388）：ai0==1 → 0..8 每 4t 循环；
+ *  ai0==2 → 45..53 每 4t 循环；默认 9..17 每 10t 循环 */
+export function npc696NextFrame(s: NpcGridFrameState, o: { ai0: number }): number {
+  let idx = s.idx;
+  if (o.ai0 === 1) {
+    if (idx < 0 || idx >= 8) idx = 0;
+    if (++s.counter >= 4) { s.counter = 0; if (++idx >= 8) idx = 0; }
+  } else if (o.ai0 === 2) {
+    if (idx < 45 || idx >= 53) idx = 45;
+    if (++s.counter >= 4) { s.counter = 0; if (++idx >= 53) idx = 45; }
+  } else {
+    if (idx < 9 || idx >= 17) idx = 9;
+    if (++s.counter >= 10) { s.counter = 0; if (++idx >= 17) idx = 9; }
+  }
+  s.idx = idx;
+  return idx;
+}
+
+/** 564/565 等离子灯/暗黑魔法师（FindFrame case 564/565，NPC.cs:68657-69085）。
+ *  原版是一长串 `if (frameCounter >= step*n) y3 = 帧` 阈值链——等价于每帧 step tick
+ *  的定长序列循环（序列尾清 counter）。循环长度与施法时长对齐（97/127/183 → 98/128/184t）。
+ *  - ai0>0&&ai1==0 暗影矢：[5,6,7,5,6,7,5,6,7,8,9,10,11,12] 每 7t
+ *  - ai0>0&&ai1==1 治疗：[13,14,15,16,17,18,19,20,18,19,20,21,22,23,24,25] 每 8t
+ *  - ai0>0&&ai1==2 召骷髅：[26,27,28,29,26,27,28,29,26,27,28,29,30..40] 每 8t
+ *  - 默认漂浮：counter += |v|*0.1+1（钳 0..40），帧 0..4 每 8t */
+const DARK_MAGE_CAST_SEQ: Record<number, number[]> = {
+  0: [5, 6, 7, 5, 6, 7, 5, 6, 7, 8, 9, 10, 11, 12],
+  1: [13, 14, 15, 16, 17, 18, 19, 20, 18, 19, 20, 21, 22, 23, 24, 25],
+  2: [26, 27, 28, 29, 26, 27, 28, 29, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
+};
+export function darkMageNextFrame(
+  s: NpcGridFrameState, o: { ai0: number; ai1: number; speed: number },
+): number {
+  let idx = s.idx;
+  const seq = o.ai0 > 0 ? DARK_MAGE_CAST_SEQ[o.ai1] : undefined;
+  if (seq) {
+    const per = o.ai1 === 0 ? 7 : 8;
+    // 入段越界（idx 不在本招帧区）→ 清 counter 重放（原版 if (y3<min||y3>max) frameCounter=0）
+    if (idx < seq[0] || idx > seq[seq.length - 1]) s.counter = 0;
+    if (++s.counter >= per * seq.length) s.counter = 0;
+    idx = seq[Math.min(seq.length - 1, Math.floor(s.counter / per))];
+  } else {
+    s.counter = s.counter + o.speed * 0.1 + 1;
+    if (s.counter >= 40 || s.counter < 0) s.counter = 0;
+    idx = Math.floor(s.counter / 8);
+  }
+  s.idx = idx;
+  return idx;
+}
+
+/** 668 鹿角怪（FindFrame case 668，NPC.cs:67390-67501 + :6516-6534 序列表）。
+ *  ai0==1/4 → 攻击 1 表（范围重置 12..17）；ai0==2 → 攻击 2 表（12..18）；
+ *  ai0∈{3,5,7,8} → 攻击 3 表（19..24）；每 4t 走一格、FindFrame_FromSequence 钳末帧。
+ *  默认：vy>0（或 localAI[0]==1，未移植略）→ 帧 1；vx==0 → 帧 0；
+ *  行走 counter += |vx|（钳 150）、帧 = 2+counter/15（2..11） */
+const DEERCLOPS_ATK1_FRAMES = [12, 13, 14, 13, 14, 13, 14, 13, 14, 15, 16, 17];
+const DEERCLOPS_ATK2_FRAMES = [12, 15, 16, 17, 17, 17, 17, 13, 18, 18, 18, 18, 12];
+const DEERCLOPS_ATK3_FRAMES = [19, 20, 21, 22, 21, 22, 21, 22, 23, 24, 23, 24, 23, 24, 20, 19];
+export function deerclopsNextFrame(
+  s: NpcGridFrameState, o: { ai0: number; vx: number; vy: number },
+): number {
+  let idx = s.idx;
+  // 各攻击段入段越界范围（原版 num194/num195 等显式常量，非表尾值——攻击 2 表
+  // 尾是 12、攻击 3 表尾是 19，按表尾判会误清 counter 造成 12,15,12,15 抖动）
+  const atk = o.ai0 === 1 || o.ai0 === 4 ? { seq: DEERCLOPS_ATK1_FRAMES, lo: 12, hi: 17 }
+    : o.ai0 === 2 ? { seq: DEERCLOPS_ATK2_FRAMES, lo: 12, hi: 18 }
+      : o.ai0 === 3 || o.ai0 === 5 || o.ai0 === 7 || o.ai0 === 8 ? { seq: DEERCLOPS_ATK3_FRAMES, lo: 19, hi: 24 }
+        : null;
+  if (atk) {
+    if (idx < atk.lo || idx > atk.hi) { idx = atk.lo; s.counter = 0; }
+    s.counter++;
+    idx = atk.seq[Math.min(atk.seq.length - 1, Math.floor(s.counter / 4))];
+  } else if (o.vy > 0) {
+    s.counter = 0;
+    idx = 1;
+  } else if (o.vx === 0) {
+    s.counter = 0;
+    idx = 0;
+  } else {
+    s.counter += Math.abs(o.vx);
+    if (s.counter >= 150 || s.counter < 0) s.counter = 0;
+    idx = 2 + Math.floor(s.counter / 15);
+  }
+  s.idx = idx;
+  return idx;
+}
+
 export interface DamageNumber { x: number; y: number; vy: number; value: number; crit: boolean; color: string; life: number; label?: string; }
 
 export class Minimap {
@@ -614,6 +802,9 @@ export class Renderer {
 
     // 2d. 瀑布贴图（原版画在 tile 层后、实体前，Main.cs:47460，被地形遮挡）
     this.drawWaterfalls(world, cam, viewW, viewH, z);
+
+    // 2d'. 挂物族存放物叠画（原版 TE*.Draw / 模特走 PlayerRenderer——本作画物品图标）
+    this.drawFurnitureItems(world, cam, viewW, viewH, z);
 
     // 2d'. 天气层（雨滴池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
     if (this.weatherFxActive) {
@@ -1230,6 +1421,19 @@ export class Renderer {
       // （气球壳随史莱姆染色）。通用竖切路径(json frames=1)会把整条横排 8 个气球
       // 全画出来——"完整逐帧贴图"(用户标注)
       if (e.vanillaId === 594) { this.drawWindyBalloon(e, entities); return; }
+      // ---- 2D 网格贴图 NPC（原版 Main.cs DrawNPC 专属 case + FindFrame 专属 case）----
+      // 这些表的动画帧是【cols×rows 网格】（Frame(cols,rows,fx,fy)），通用竖切路径
+      // 会把整行/整条画出来——全部走 drawNpcGrid 切格 + 各自 FindFrame 帧状态机
+      // 657 史莱姆皇后（Main.cs case 657 + FindFrame case 657）
+      if (e.vanillaId === 657) { this.drawQueenSlimeGrid(e); return; }
+      // 576/577 DD2 食人魔（Main.cs case 576/577 + FindFrame case 576/577）
+      if (e.vanillaId === 576 || e.vanillaId === 577) { this.drawDd2OgreGrid(e); return; }
+      // 696（Main.cs case 696 + FindFrame case 696）
+      if (e.vanillaId === 696) { this.drawNpc696Grid(e); return; }
+      // 564/565 暗黑魔法师 T1/T2（Main.cs case 564/565 + FindFrame case 564/565）
+      if (e.vanillaId === 564 || e.vanillaId === 565) { this.drawDarkMageGrid(e); return; }
+      // 668 鹿角怪（Main.cs DrawNPCDirect_Deerclops + FindFrame case 668）
+      if (e.vanillaId === 668) { this.drawDeerclopsGrid(e); return; }
       // 月总族独占分支（Main.cs:24325-24504 case 396/397/398）：头/手/核心各自
       // 带独立锚点与叠层（上臂/前臂/躯干/胸甲/眼/破体帧），通用路径锚点不对
       if (e.vanillaId === 398) { this.drawMoonLordCore(e, entities); return; }
@@ -1607,6 +1811,175 @@ export class Renderer {
     }
     ctx.drawImage(img, variant * fw, 0, fw, fh, -fw / 2, 0, fw, fh);
     ctx.restore();
+  }
+
+  // ===================== 2D 网格贴图 NPC（drawNpcGrid 切格族） =====================
+  /** 帧索引持久态（≈原版 NPC.frameCounter / NPC.frame.Y）：WeakMap 按 Enemy 持有，
+   *  每 draw 调用推进一次（与原版 FindFrame 每 update 调一次 1:1） */
+  private npcGridFrameState = new WeakMap<Enemy, NpcGridFrameState>();
+  private npcGridFrame(e: Enemy): NpcGridFrameState {
+    let s = this.npcGridFrameState.get(e);
+    if (!s) { s = { counter: 0, idx: 0 }; this.npcGridFrameState.set(e, s); }
+    return s;
+  }
+
+  /** 网格切格绘制：源格 = (col*cellW+padX, row*cellH+padY, cellW-2padX, cellH-2padY)，
+   *  目标锚 Bottom（+yOff），col/row 由 idx 按 perRow 折算。镜像语义对齐原版
+   *  `spriteEffects`（贴图朝左 → 朝右翻）/ `spriteEffects ^ FlipHorizontally`（贴图
+   *  朝右 → 朝左翻）——canvas scale(-1,1)+originX 与 XNA FlipHorizontally+origin 数学
+   *  等价（翻转均绕 origin 点），anchorPx 非对称锚按 spriteDirection 切换取值
+   *  （Main.cs 各 case 的 `origin.X = anchor / width-anchor` 同款） */
+  private drawNpcGrid(
+    e: Enemy, img: HTMLImageElement, cols: number, rows: number, idx: number,
+    cellW: number, cellH: number,
+    opts: {
+      perRow?: number;            // idx→(col,row) 除数；696 为 9（其 rows=27 但索引每 9 折行）
+      yOff?: number;              // Bottom 附加偏移（657 = +2）
+      anchorPx?: number;          // 非对称水平锚（576/577=94、564/565=52、668=106）；缺省水平居中
+      originYOff?: number;        // origin.Y 自帧底上抬（576/577=4、696=4、564/565=10、668=4）
+      padX?: number; padY?: number; // Frame 第 5/6 参 padding（668 各 2）
+      inflateY?: number;          // Inflate(0,-n)：sy+=n/2、sh-=n（657 = 2）
+      mirrorTexFaces?: 'left' | 'right'; // 贴图默认朝向：left=朝右翻、right=朝左翻
+      rotate?: number;
+      glowTex?: string;           // GlowMask 同布局网格切片（564/565 = Glow_225）
+      echoRowShift?: number;      // 投影层：同列 row+n 再画一遍半透明（696 = +18）
+    } = {},
+  ) {
+    const ctx = this.ctx;
+    const perRow = opts.perRow ?? rows;
+    const col = Math.floor(idx / perRow), row = idx % perRow;
+    const padX = opts.padX ?? 0, padY = opts.padY ?? 0;
+    let sx = col * cellW + padX, sy = row * cellH + padY;
+    let sw = cellW - padX * 2, sh = cellH - padY * 2;
+    if (opts.inflateY) { sy += opts.inflateY >> 1; sh -= opts.inflateY; }
+    // 越界钳制（防御性：帧态漂移时不画到表外）
+    sx = Math.max(0, Math.min(img.width - 1, sx));
+    sy = Math.max(0, Math.min(img.height - 1, sy));
+    sw = Math.max(1, Math.min(sw, img.width - sx));
+    sh = Math.max(1, Math.min(sh, img.height - sy));
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    const facingRight = e.facing > 0;
+    const mirrored = opts.mirrorTexFaces === 'right' ? !facingRight : facingRight;
+    const originX = opts.anchorPx != null ? (facingRight ? opts.anchorPx : sw - opts.anchorPx) : sw / 2;
+    const originY = sh - (opts.originYOff ?? 0);
+    ctx.save();
+    ctx.translate(e.cx, e.y + e.h + (opts.yOff ?? 0));
+    if (opts.rotate) ctx.rotate(opts.rotate);
+    ctx.scale(scale * (mirrored ? -1 : 1), scale);
+    ctx.globalAlpha = opacity;
+    ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
+    // 原版 color 二次绘制（NPC.GetColor）：XNA 预乘混合两步还原（同通用路径）
+    if (e.colorRGBA && e.colorRGBA[3] > 0) {
+      const tinted = this.tintedSprite(`npc${e.vanillaId}`, { img, sx, sy, sw, sh }, e.colorRGBA);
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.globalAlpha = e.colorRGBA[3] / 255;
+      ctx.drawImage(img, sx, sy, sw, sh, -originX, -originY, sw, sh);
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.globalAlpha = 1;
+      ctx.drawImage(tinted, -originX, -originY, sw, sh);
+      ctx.globalCompositeOperation = 'source-over';
+    }
+    // GlowMask 同布局网格叠画（原版以同一 source rect 二次 Draw，Glow 表与 NPC 表等大）
+    if (opts.glowTex && this.atlas) {
+      const g = this.atlas.vmisc(opts.glowTex);
+      if (g) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.globalAlpha = Math.max(0, Math.min(1, 0.5 * opacity)); // :23484 white.A/2×Opacity
+        ctx.drawImage(g.img, sx, sy, sw, sh, -originX, -originY, sw, sh);
+      }
+    }
+    // 投影层（696：同列 row+18，±1px 随机抖动，alpha 127×Opacity）
+    if (opts.echoRowShift) {
+      const esy = Math.min(img.height - sh, (row + opts.echoRowShift) * cellH + padY);
+      const jx = (Math.floor(Math.random() * 3)) - 1;
+      const jy = (Math.floor(Math.random() * 3)) - 1;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = Math.max(0, Math.min(1, (127 / 255) * opacity));
+      ctx.drawImage(img, sx, esy, sw, sh, -originX + jx, -originY + jy, sw, sh);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    return { sx, sy, sw, sh };
+  }
+
+  /** 657 史莱姆皇后（Main.cs case 657 :23134-23160 + FindFrame case 657 :67503-67614）：
+   *  NPC_657.png 360×1952 = 2 列×16 行（180×122/格），Frame(2,16,idx/16,idx%16) 再
+   *  Inflate(0,-2)；锚 Bottom+(0,2)、origin(w/2,帧高)、贴图朝右。
+   *  旋转 = AI 侧 spin（飞行 vx*0.1 钳 ±0.5，同通用 ROTATION_NPC 段）。
+   *  未实装（素材/系统缺）：QueenSlime shader 残影(ai0==4&&vy!=0)、Extra_186 水晶、
+   *  Extra_177 王冠、二段翅膀 DrawNPCDirect_QueenSlimeWings（Extra 表未入素材白名单） */
+  private drawQueenSlimeGrid(e: Enemy) {
+    const img = this.atlas!.ensureVImage('vanilla/NPC_657.png');
+    if (!img) return;
+    const idx = queenSlimeNextFrame(this.npcGridFrame(e), {
+      half: e.hp <= e.maxHp / 2,
+      flying: e.ai0 === 0,   // 二段待机即飞行（bossAI_lategame queenSlimeAI flying 同款）
+      vy: e.vy, ai0: e.ai0, ai1: e.ai1,
+    });
+    this.drawNpcGrid(e, img, 2, 16, idx, 180, 122, {
+      perRow: 16, yOff: 2, inflateY: 2, mirrorTexFaces: 'right', rotate: e.spin,
+    });
+  }
+
+  /** 576/577 DD2 食人魔（Main.cs case 576/577 :23301-23330 + FindFrame :68241-68380）：
+   *  NPC_576/577.png 1162×1740 = 5 列×10 行（XNA 整除 232×174/格），
+   *  Frame(5,10,idx/10,idx%10)；锚 Bottom、origin(94 或 232-94, 174-4)、贴图朝右。
+   *  未实装：localAI[3]<60 出生紫雾 3 层叠画（事件出生特效，走 spawnAlpha 渐显替代） */
+  private drawDd2OgreGrid(e: Enemy) {
+    const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
+    if (!img) return;
+    const idx = dd2OgreNextFrame(this.npcGridFrame(e), { ai0: e.ai0, ai1: e.ai1, vx: e.vx, vy: e.vy });
+    this.drawNpcGrid(e, img, 5, 10, idx, 232, 174, {
+      perRow: 10, anchorPx: 94, originYOff: 4, mirrorTexFaces: 'right',
+    });
+  }
+
+  /** 696（Main.cs case 696 :23349-23375 + FindFrame case 696 :67332-67388）：
+   *  NPC_696.png 384×1242 = 6 列×27 行（64×46/格），Frame(6,27,idx/9,idx%9)——
+   *  注意索引每 9 折行（perRow=9 而非 27）；锚 Bottom、origin(w/2,46-4)、贴图朝左
+   *  （本 case 用 spriteEffects 原样，无 ^FlipHorizontally）。
+   *  投影层：同列 row+18 半透明重绘（:23359-23367）；ai0==2 表情气泡未实装 */
+  private drawNpc696Grid(e: Enemy) {
+    const img = this.atlas!.ensureVImage('vanilla/NPC_696.png');
+    if (!img) return;
+    const idx = npc696NextFrame(this.npcGridFrame(e), { ai0: e.ai0 });
+    this.drawNpcGrid(e, img, 6, 27, idx, 64, 46, {
+      perRow: 9, originYOff: 4, mirrorTexFaces: 'left', echoRowShift: 18,
+    });
+  }
+
+  /** 564/565 暗黑魔法师 T1/T2（Main.cs case 564/565 :23413-23490 + FindFrame :68657-69085）：
+   *  NPC_564/565.png 600×972 = 5 列×9 行（120×108/格），Frame(5,9,idx/9,idx%9)；
+   *  锚 Bottom、origin(52 或 120-52, 108-10)、贴图朝右。
+   *  Glow_225 同布局（600×972）以同一格切片叠画（:23484 white.A/2×Opacity，
+   *  原 drawNpcGlow 551/564/565 alpha 分支并入此处）。
+   *  未实装：localAI[3]<60 出生旋转紫雾、四向呼吸 sway 叠层（spawnAlpha 渐显替代） */
+  private drawDarkMageGrid(e: Enemy) {
+    const img = this.atlas!.ensureVImage(`vanilla/NPC_${e.vanillaId}.png`);
+    if (!img) return;
+    const idx = darkMageNextFrame(this.npcGridFrame(e), {
+      ai0: e.ai0, ai1: e.ai1, speed: Math.hypot(e.vx, e.vy),
+    });
+    this.drawNpcGrid(e, img, 5, 9, idx, 120, 108, {
+      perRow: 9, anchorPx: 52, originYOff: 10, mirrorTexFaces: 'right',
+      glowTex: 'vanilla/Glow_225.png',
+    });
+  }
+
+  /** 668 鹿角怪（Main.cs DrawNPCDirect_Deerclops :26211-26260 + FindFrame case 668 :67390-67501）：
+   *  NPC_668.png 1090×1200 = 5 列×5 行（218×240/格），Frame(5,5,idx/5,idx%5,2,2)——
+   *  2px padding（源格各缩 2）；锚 Bottom、origin(106 或 214-106, 236-4)、贴图朝右。
+   *  spriteDirection==1 特判即 origin.X=106（朝左取 214-106），并入 drawNpcGrid anchorPx。
+   *  未实装：localAI[3]>0 出生红雾/旋转、ai0∈{7,8} 紫电 tint+5 层重影（:26243-26260） */
+  private drawDeerclopsGrid(e: Enemy) {
+    const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
+    if (!img) return;
+    const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy });
+    this.drawNpcGrid(e, img, 5, 5, idx, 218, 240, {
+      perRow: 5, padX: 2, padY: 2, anchorPx: 106, originYOff: 4, mirrorTexFaces: 'right',
+    });
   }
 
   private drawMoonLordCore(e: Enemy, entities: unknown[]) {
@@ -2286,6 +2659,65 @@ export class Renderer {
     ctx.fillStyle = rgb(1);
     ctx.fillRect(x, y, fill, 3);
     ctx.globalAlpha = 1;
+  }
+
+  /**
+   * 挂物族存放物叠画（原版 TE*.Draw：物品框/武器架/食物盘/展示罐把存放物图标画在
+   * 框体上；模特/帽架走 PlayerRenderer 画穿戴件——本作无纸娃娃渲染链，等价为在
+   * 锚点上叠画各槽位物品图标）。仅锚点画一次，视口外剔除；不进 ChunkCache 烘焙
+   * （存放物是运行时可变状态，见 world/FurnitureItems.ts）。
+   */
+  private drawFurnitureItems(world: World, cam: Camera, viewW: number, viewH: number, z: number) {
+    const list = world.furnitureItems;
+    if (!list.length || !this.atlas) return;
+    const ctx = this.ctx;
+    // 视口剔除（与 drawWires 同式）
+    const vx0 = cam.x - viewW / 2 / z - 64, vx1 = cam.x + viewW / 2 / z + 64;
+    const vy0 = cam.y - viewH / 2 / z - 80, vy1 = cam.y + viewH / 2 / z + 64;
+    for (const rec of list) {
+      const bx = rec.x * TILE, by = rec.y * TILE;
+      if (bx < vx0 || bx > vx1 || by < vy0 || by > vy1) continue;
+      if (!rec.slots.some((s) => s !== null)) continue;
+      const drawIcon = (itemId: number, cx: number, cy: number, maxSide: number) => {
+        const ar = this.atlasIcon(itemId);
+        if (!ar) return;
+        const sc = Math.min(maxSide / Math.max(ar.sw, ar.sh), 1);
+        const w = ar.sw * sc, h = ar.sh * sc;
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, cx - w / 2, cy - h / 2, w, h);
+      };
+      switch (rec.kind as FurnitureKind) {
+        case 'item_frame':     // 2×2：图标居中
+          if (rec.slots[0]) drawIcon(rec.slots[0]!.id, bx + 16, by + 16, 20);
+          break;
+        case 'weapon_rack':    // 3×3：图标居中
+          if (rec.slots[0]) drawIcon(rec.slots[0]!.id, bx + 24, by + 24, 24);
+          break;
+        case 'food_platter':   // 1×1：盘上小图标
+          if (rec.slots[0]) drawIcon(rec.slots[0]!.id, bx + 8, by + 6, 12);
+          break;
+        case 'display_jar':    // 1×2：罐心
+          if (rec.slots[0]) drawIcon(rec.slots[0]!.id, bx + 8, by + 14, 12);
+          break;
+        case 'hat_rack':       // 3×4：两顶帽子并排挂钩位（TEHatRack.Draw 双 doll 锚）
+          for (let i = 0; i < 2; i++) {
+            const s = rec.slots[i];
+            if (s) drawIcon(s.id, bx + 14 + i * 22, by + 22, 16);
+          }
+          for (let i = 0; i < 2; i++) {
+            const s = rec.slots[2 + i];
+            if (s) drawIcon(s.id, bx + 14 + i * 22, by + 40, 12);
+          }
+          break;
+        case 'display_doll':   // 2×3：穿戴件自上而下叠画（头/身/腿/配饰/坐骑/持握）
+          for (let i = 0, row = 0; i < rec.slots.length; i++) {
+            const s = rec.slots[i];
+            if (!s) continue;
+            drawIcon(s.id, bx + 16, by + 8 + row * 13, 14);
+            row++;
+          }
+          break;
+      }
+    }
   }
 
   /** 入驻旗帜（Main.cs:40152-40236 DrawNPCHousesInWorld 1:1）：

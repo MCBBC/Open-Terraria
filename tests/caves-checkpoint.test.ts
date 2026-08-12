@@ -19,6 +19,11 @@ import { runGrassPass } from '../src/world/gen/vanilla/GrassPass';
 import { runJunglePass } from '../src/world/gen/vanilla/JunglePass';
 import { runMudCavesPass } from '../src/world/gen/vanilla/Spread';
 import { runDesertMoundOnly, runDesertEntrancesAndHive } from '../src/world/gen/vanilla/DesertPass';
+import { runMushroomPass } from '../src/world/gen/vanilla/MushroomPass';
+import { runMarblePass, runGranitePass } from '../src/world/gen/vanilla/MarbleGranitePass';
+import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass';
+import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
+import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -90,8 +95,16 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   runDesertEntrancesAndHive(st, rng, gs, desc, () => snap('desertentrance'));
   snap('deserthive');        // AddTileVariance 完
   snap('desertdone');        // CleanupArea 仅帧号——状态同 deserthive
-  // 26-32 段（Mushroom/Marble/Granite/Islands/DirtToMud/Silt/Ores/Underworld/
-  // Corruption/Lakes/Slush/Dungeon）oracle 尚未转录 → mcopenings/beaches 暂挂其后
+  // #20-26（1456 注册序 12581/12800/12884/12976/13172/13192/13233）
+  runMushroomPass(st, rng, gs); snap('mushroom');
+  runMarblePass(st, rng, gs); snap('marble');
+  runGranitePass(st, rng, gs); snap('granite');
+  runFloatingIslandsPass(st, rng, gs); snap('islands');
+  runDirtToMudPass(st, rng, gs); snap('dirttomud');
+  runSiltPass(st, rng, gs); snap('silt');
+  runShiniesPass(st, rng, gs); snap('ores');
+  // 27-32 段（Webs/Underworld/Corruption/Lakes/Slush/Dungeon）oracle 尚未转录
+  // → mcopenings/beaches 暂挂其后
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
   runBeachesPass(st, rng, gs); snap('beaches');
   return { grids: out, walls: outWall };
@@ -119,7 +132,9 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
       const names = ['terrain', 'dunes', 'oceansand', 'sandpatches', 'tunnels',
         'mountaincaves', 'dirtwallbg', 'rocksclay', 'smallholes', 'surfacecaves',
         'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
-        'desertentrance', 'deserthive', 'desertdone', 'mcopenings', 'beaches'];
+        'desertentrance', 'deserthive', 'desertdone',
+        'mushroom', 'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores',
+        'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

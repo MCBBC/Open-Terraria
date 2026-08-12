@@ -22,6 +22,8 @@ function makeHooks(enemies: Array<Record<string, unknown>> = []) {
     world: { store } as never,
     player: player as never,
     enemies: () => enemies,
+    // 随从射击出口（MinionProj.fixedUpdate 射弹经 entities.add 入 projectiles 桶）
+    entities: { add: (e: unknown) => { added.push(e); } } as never,
     critters: () => [],
     spawnDrop: () => null,
     damagePlayer: () => {},

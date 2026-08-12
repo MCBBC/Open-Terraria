@@ -97,15 +97,34 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 矿骨堆（原版 pass 81 Piles 位置）
     { name: '矿骨堆', run: pilesPass },
     // 表面（legacy 外壳：铺草=原版 pass 77 SpreadingGrass；内嵌 vanilla TreePass
-    // =原版 pass 82 Trees；杂草/花=原版 pass 86-90）
+    // =原版 pass 82 Trees；AlchemyHerbs(20109)+GrassPlants(20209)）
     { name: '表面', run: surfacePass },
+    // 地表矿石（原版 SurfaceOreAndStone cs:18559）：OrePatch/StonePatch 需先有草面
+    //（SpreadingGrass 18349 < 本 pass）——放在"表面"之后、"地表装饰"(内含 Traps 18769)之前
+    { name: '地表矿石', run: vanillaSurfaceOre },
+    // 倒木（原版 FallenLogsAndWaterFeatures cs:18625，仅倒木段）：登记 gs.logX/logY
+    // 给 Flowers(20592) 消费
+    { name: '倒木水景', run: vanillaFallenLogs },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 染料植物（原版 DyePlants cs:20126）：plantDye + MatureTheHerbPlants +
+    // GrowGlowTulips(656) + PlaceChilletEggs(752)，位于 AlchemyHerbs(20109) 之后
+    { name: '染料植物', run: vanillaDyePlants },
+    // 藤蔓（原版 Vines cs:20338）：六类藤蔓逐列生长 + 丛林蜂巢凹龛
+    { name: '藤蔓', run: vanillaVines },
+    // 地表花（原版 Flowers cs:20592）：花圃重帧，消费 gs.logX/logY
+    { name: '地表花', run: vanillaFlowers },
+    // 地表蘑菇（原版 Mushrooms cs:20744）：蘑菇斑帧重刷
+    { name: '地表蘑菇', run: vanillaMushrooms },
     // 宝石系统（原版 GemCaves(17528) < ExposedGems(20842/20874) <
     // SpeleothemsAndGemTrees(22196)：装饰之后、海滩装饰之前）
     { name: '宝石系统', run: vanillaGems },
+    // 长苔藓（原版 LongMoss cs:20915）：苔藓块四向冒芽，位于 ExposedGems 之后
+    { name: '长苔藓', run: vanillaLongMoss },
     // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
+    // 水生植物（原版 LilypadsCattailsBambooAndSeaweed cs:22131）：睡莲/香蒲/竹/海藻
+    { name: '水生植物', run: vanillaLilypads },
     { name: '海滩装饰', run: vanillaBeachDecor },
   ];
 
@@ -146,7 +165,11 @@ import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPas
 import { runTreePass, randomizeTreeStyle } from './vanilla/TreePass';
 import { runLakesPass } from './vanilla/LakesPass';
 import { runTrapsPass } from './vanilla/TrapsPass';
-import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass, matureHerbPlants } from './vanilla/StructuresPass';
+import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPyramidPass, runWetJunglePass, runAlchemyHerbsPass } from './vanilla/StructuresPass';
+import {
+  runSurfaceOreAndStonePass, runFallenLogsPass, runDyePlantsPass, runVinesPass,
+  runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
+} from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runWebsPass } from './vanilla/HiveSpiderPass';
 import { tileRunner } from './vanilla/TileRunner';
@@ -347,6 +370,50 @@ function vanillaShimmer({ store, rng, world }: GenCtx) {
   // GenVars.shimmerPosition 落到 World（中途沉降 pass 在 finalize 之前就需要它）
   world.shimmerX = gs.shimmerX;
   world.shimmerY = gs.shimmerY;
+}
+
+// 原版 pass "Surface Ore And Stone"(cs:18559) + "Fallen Logs And Water Features"(cs:18625)
+function vanillaSurfaceOre({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runSurfaceOreAndStonePass(store, rng, gs);
+}
+function vanillaFallenLogs({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runFallenLogsPass(store, rng, gs);
+}
+
+// 原版表面装饰子 pass 群（cs:20126/20338/20592/20744/20915/22131，见 SurfaceDecorPasses.ts）
+function vanillaDyePlants({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runDyePlantsPass(store, rng, gs);
+}
+function vanillaVines({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runVinesPass(store, rng, gs);
+}
+function vanillaFlowers({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runFlowersPass(store, rng, gs);
+}
+function vanillaMushrooms({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runMushroomsPass(store, rng, gs);
+}
+function vanillaLongMoss({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runLongMossPass(store, rng, gs);
+}
+function vanillaLilypads({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runLilypadsPass(store, rng, gs);
 }
 
 // 原版 pass "Micro Biomes"(cs:21785):露营地标 + 炸药陷阱屋
@@ -839,14 +906,12 @@ function surfacePass({ store, surface, rng, world }: GenCtx) {
     const gs = ctxGs[0];
     if (gs) runTreePass(store, rng, gs);
   }
-  // 原版 pass AlchemyHerbs(20109)+DyePlants 的熟成段(45757)：Trees 之后、
-  // GrassPlants(20209) 之前——w×1.7 次 PlantAlch + 岩层下泥面补种/熟成
+  // 原版 pass AlchemyHerbs(20109)：Trees 之后、DyePlants(20126) 之前——w×1.7 次 PlantAlch。
+  // MatureTheHerbPlants(45757) 原版在 DyePlants pass 内调用（cs:20135），已随染料植物
+  // pass 下沉——此处不再调（熟成时机 1:1）
   {
     const gs = ctxGs[0];
-    if (gs) {
-      runAlchemyHerbsPass(store, rng, gs);
-      matureHerbPlants(store, rng, gs);
-    }
+    if (gs) runAlchemyHerbsPass(store, rng, gs);
   }
   // 地表植物装饰——原版 pass GrassPlantsEvilPlantsAndPumpkinsOnSurface（WorldGen.cs:20201-20266）+
   // PlaceTile 液体拒绝（WorldGen.cs:59477：tile 3/24/201/637 在液体中不放）。

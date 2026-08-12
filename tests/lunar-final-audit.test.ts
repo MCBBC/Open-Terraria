@@ -8,6 +8,7 @@ import { TILE_BY_KEY } from '../src/data/tiles';
 import { TileStore } from '../src/world/TileStore';
 import { canHit, canHitLine } from '../src/physics/LineOfSight';
 import { LunarOrb } from '../src/entities/bossAI_lunar_misc';
+import { BuffState } from '../src/stats/Buffs';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 160, H = 140, FLOOR = 120;
@@ -36,6 +37,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
   const player = {
     x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21,
     vx: 0, vy: 0, hp: 400, maxHp: 400, dead: false, facing: 1,
+    buffs: new BuffState(),
     aabbOverlaps: () => false,
   };
   return {

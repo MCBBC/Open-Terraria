@@ -668,11 +668,12 @@ export class Enemy extends Entity {
     this.despawnEncouraged = true;
   }
 
-  /** 敌怪弹幕发射辅助：从 (ox,oy) 朝 (tx,ty) 偏移方向以 speed 定速发射敌对 Dart */
-  private shootDart(game: GameHooks, ox: number, oy: number, tx: number, ty: number, speed: number, dmg: number): void {
+  /** 敌怪弹幕发射辅助：从 (ox,oy) 朝 (tx,ty) 偏移方向以 speed 定速发射敌对 Dart；
+   *  projId = 原版弹型（Dart.ts DART_STYLE 表,贴图/旋转/重力/加速 1:1） */
+  private shootDart(game: GameHooks, ox: number, oy: number, tx: number, ty: number, speed: number, dmg: number, projId = 0): void {
     const d = Math.hypot(tx, ty) || 1;
     (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities
-      .add(new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg), 'projectiles');
+      .add(new Dart(ox, oy, (tx / d) * speed, (ty / d) * speed, dmg, projId), 'projectiles');
   }
 
   private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {

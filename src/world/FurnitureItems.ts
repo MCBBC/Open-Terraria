@@ -460,7 +460,7 @@ export function furnitureToSave(records: FurnitureItemRecord[], mapId: (id: numb
   }));
 }
 
-/** 存档条目 → 运行时记录（mapId = 磁盘稳定 id → 内部 id；防御：未知 id 归 0 置空） */
+/** 存档条目 → 运行时记录（mapId = 磁盘稳定 id → 内部 id；防御：未知 id 归 0 → 置空槽） */
 export function furnitureFromSave(entries: FurnitureSaveEntry[] | undefined, mapId: (id: number) => number): FurnitureItemRecord[] {
   if (!entries) return [];
   const out: FurnitureItemRecord[] = [];
@@ -469,7 +469,8 @@ export function furnitureFromSave(entries: FurnitureSaveEntry[] | undefined, map
     const slots: FurnitureSlot[] = [];
     for (let i = 0; i < n; i++) {
       const s = e.slots[i];
-      if (s && s.id > 0) slots.push({ id: mapId(s.id), stack: s.stack, prefix: s.prefix });
+      const mapped = s ? mapId(s.id) : 0;
+      if (s && mapped > 0) slots.push({ id: mapped, stack: s.stack, prefix: s.prefix });
       else slots.push(null);
     }
     out.push({ x: e.x, y: e.y, kind: e.kind, slots });

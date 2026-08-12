@@ -25,290 +25,393 @@ const VINE = TILE_BY_KEY['v_52_vines']!;
 const HEART = TILE_BY_KEY['crystal_heart']!;
 
 
+// ================= Pass 23 FloatingIslands（cs:12976-13171 + CloudIsland cs:78618 + CloudLake cs:79068）1:1 =================
+// 注册序 num=(int)(w*0.0008) 座岛 + skyLakes(4200 宽=1) 座天湖；
+// 采样：x=Next(0.1w,0.9w) 避中央 ±150 → 与已放岛距 ≥180 → 该列自 y=200 起找首个活性格
+// → y=Next(90, surf-100) 再 min(y, GenVars.worldSurfaceLow-50)；预算 w 次逐岛。
+// 距离用 sqrt(dx²+dy²)（原版 Math.Sqrt——Math.hypot 有 ulp 级差异，禁用）
 export function runFloatingIslandsPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const { w } = st;
-  // 原版 pass 21（L5552-5637）：岛数 = w*0.0008，另加 skyLakes（1 + w>8000 + w>6000）。
-  // 前 islands 个 = CloudIsland，其余 = CloudLake；间距/中心避让为固定值（不缩放）
-  const islands = Math.floor(w * 0.0008);
-  let skyLakes = 1;
-  if (w > 8000) skyLakes++;
-  if (w > 6000) skyLakes++;
-  const total = islands + skyLakes;
-  const placed: number[] = [];
-  let lakeIdx = 0;
+  const { w, h } = st;
+  const isCount = Math.trunc(w * 0.0008);          // 3（4200 宽）
+  const skyLakes = 1;                               // GenVars.skyLakes（w>8000/6000 才 +1/+1）
+  const total = isCount + skyLakes;
+  const housesX: number[] = [];
+  const housesY: number[] = [];
+  let lakes = 0;
   for (let n = 0; n < total; n++) {
-    let x = 0, ok = false;
-    for (let attempt = 0; attempt < 200 && !ok; attempt++) {
-      // 原版（WorldGen.cs:13017-13028）：x = Next(0.1w, 0.9w)，仅 |x-w/2|<150 重掷。
-      // 重掷带宽扩为 ±max(150, 0.05w)：与刷怪器 skyMob 中央带（NPC.cs:1290 段：
-      // x<0.45w||x>0.55w 之外不判天空怪）完全重合——既 1:1 保留原版全域分布，
-      // 又保证岛不落进"当地表刷僵尸/水母"的窄缝（曾误修成两侧 8%~42% 带，过度收窄）
-      const band = Math.max(150, Math.floor(w * 0.05));
-      x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
-      if (Math.abs(x - w / 2) < band) continue;
-      ok = placed.every((px) => Math.abs(px - x) >= 180);
-    }
-    // 该列地表（原版从 y=200 起扫）
-    let surf = 0;
-    let found = false;
-    for (let y = 200; y < gs.worldSurface; y++) {
-      if (st.flags[st.idx(x, y)]) { surf = y; found = true; break; }
-    }
-    if (!found) continue;
-    // 原版（cs:13072/13093）：y = Next(90, surf-100) 后 min(y, worldSurfaceLow-50)，无
-    // 0.35 钳（曾有 y 钳把岛整体抬高，已删）——skyMob 由刷怪侧"露天高空"判定兜底。
-    // 下限取 102 而非原版字面 90：岛的列顶游走最多再上漂 13 格（vy -0.44×29 步），
-    // 岛树最高 29 格——90 下限时树冠可探进 y<60 深空（违反 sky-invariant 不变量；
-    // 原版岛树是从岛体随机游走找点种植、不贴最高凸起，故 90 即可，此处按实测补偿）
-    const y = Math.min(rng.int(102, Math.max(103, surf - 100)), gs.worldSurfaceLow - 50);
-    const isLake = lakeIdx >= islands;
-    if (isLake) cloudLake(st, rng, x, y);
-    else cloudIsland(st, rng, x, y);
-    placed.push(x);
-    gs.floatingIslands.push({ x, y, style: 0, isLake });
-    if (!isLake) lakeIdx++;
-  }
-}
-
-/** 雨云凸包（CloudIsland L47484-47522 / CloudLake 尾段同构）：
- *  自 bbox 左+Next(5) 起，步进 Next(r, 1.5r)；每步从岛底向上找实心面，
- *  中心下移 Next(-3,4)，椭圆 r=Next(4,8)（纵压×2），1/4 雨云 196 其余云 189 */
-function rainBumps(st: TileStore, rng: RNG, bx0: number, bx1: number, by0: number, by1: number): void {
-  const RAIN = TILE_BY_KEY['v_196_rain_cloud_block']!;
-  let r = rng.int(4, 7);
-  for (let x = bx0 + rng.int(0, 4); x < bx1; x += rng.int(r, Math.floor(r * 1.5))) {
-    let y = by1;
-    while (y > 1 && !st.flags[st.idx(x, y)]) y--;
-    const cy = y + rng.int(-3, 3);
-    r = rng.int(4, 7);
-    const mat = rng.int(0, 3) === 0 ? RAIN : CLOUD;
-    for (let dx = -r; dx <= r; dx++) {
-      for (let dy = -r; dy <= r; dy++) {
-        const tx = x + dx, ty = cy + dy;
-        if (ty <= by0 || !st.inBounds(tx, ty)) continue;
-        if (Math.hypot(dx, dy * 2) < r + rng.int(0, 1)) {
-          const ti = st.idx(tx, ty);
-          st.type[ti] = mat; st.flags[ti] = 1;
-        }
+    let budget = w;
+    while (--budget > 0) {
+      let ok = true;
+      let x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);   // Next(0.1w, 0.9w)
+      while (x > w / 2 - 150 && x < w / 2 + 150) x = rng.int(Math.floor(w * 0.1), Math.floor(w * 0.9) - 1);
+      for (let j = 0; j < housesX.length; j++) {
+        if (x > housesX[j]! - 180 && x < housesX[j]! + 180) { ok = false; break; }
       }
+      if (!ok) continue;
+      ok = false;
+      let surf = 0;
+      for (let y = 200; y < gs.worldSurface && y < h; y++) {
+        if (st.flags[st.idx(x, y)]) { surf = y; ok = true; break; }
+      }
+      if (!ok) continue;
+      budget = -1;
+      // GenVars.worldSurfaceLow（raw 截断）＝ gs.worldSurfaceLow（正数 floor≡trunc）
+      const y = Math.min(rng.int(90, surf - 101), gs.worldSurfaceLow - 50);
+      // GenVars.worldSurfaceLow（raw double 截断）——注意非 gs.worldSurfaceLow
+      const isLake = lakes >= isCount;
+      if (isLake) cloudLake(st, rng, x, y);
+      else cloudIsland(st, rng, x, y);
+      housesX.push(x); housesY.push(y);
+      gs.floatingIslands.push({ x, y, style: 0, isLake });
+      if (!isLake) lakes++;
     }
   }
 }
 
-/** CloudLake（L47704）：天湖 = 纯云盘 + 雨云凸包（无土芯/无墙/无水池） */
-function cloudLake(st: TileStore, rng: RNG, i: number, j: number): void {
-  let num1 = rng.int(100, 149);
-  let steps = rng.int(20, 29);
-  let px = i + 0.0, py = j + 0.0;
+/** WillWaterPlacedHereStayPut（cs:79050）：下/左/右三邻 = (活性实心非平台) 或 满水 */
+function waterStaysPut(st: TileStore, x: number, y: number): boolean {
+  const side = (ax: number, ay: number): boolean => {
+    if (!st.inBounds(ax, ay)) return false;
+    const k = st.idx(ax, ay);
+    return (st.flags[k] !== 0 && !!TILE_DEFS[st.type[k]]?.solid && !TILE_DEFS[st.type[k]]?.platform)
+      || st.liquid[k] === 255;
+  };
+  return side(x, y + 1) && side(x - 1, y) && side(x + 1, y);
+}
+
+/** CloudIsland（cs:78618-79066）1:1：①云盘(189) → ②底缘雨云凸包 → ③土芯(云→土) →
+ *  ④土面云斑 → ⑤墙 73 → ⑥岛面水池 → ⑦岛上方云 puff + 中心注水 */
+function cloudIsland(st: TileStore, rng: RNG, ci: number, cj: number): void {
+  const tile = CLOUD;                                // num8 = 189（雨云只在凸包/puff 出现）
+  let num = rng.int(100, 149);                       // Next(100,150)
+  let num2 = num;
+  let num3 = rng.int(20, 29);                        // Next(20,30)
+  let b4 = ci, b5 = ci, b6 = cj, b7 = cj;            // bbox
+  let px = ci + 0.0, py = cj + 0.0;
   let vx = rng.int(-20, 20) * 0.2;
   while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
   let vy = rng.int(-20, -11) * 0.02;
-  let bx0 = i, bx1 = i, by0 = j, by1 = j;
-  while (num1 > 0 && steps > 0) {
-    num1 -= rng.int(0, 3);
-    steps--;
-    const x0 = Math.max(0, Math.floor(px - num1 * 0.5)), x1 = Math.min(st.w, Math.floor(px + num1 * 0.5));
-    const y0 = Math.max(0, Math.floor(py - num1 * 0.5)), y1 = Math.min(st.h, Math.floor(py + num1 * 0.5));
-    const r = num1 * rng.int(80, 119) * 0.01;
+  while (num > 0 && num3 > 0) {                      // ① 主体云盘
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, Math.trunc(py - num * 0.5)), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
     let top = py + 1;
     for (let x = x0; x < x1; x++) {
-      if (rng.next() < 0.5) top += rng.int(-1, 1);
-      top = Math.max(py, Math.min(py + 2, top));
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);   // Next(2)==0 → Next(-1,2)
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
       for (let y = y0; y < y1; y++) {
-        if (y <= top || !st.inBounds(x, y)) continue;
-        if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
-          const ti = st.idx(x, y);
-          st.type[ti] = CLOUD; st.flags[ti] = 1;
-          bx0 = Math.min(bx0, x); bx1 = Math.max(bx1, x);
-          by0 = Math.min(by0, y); by1 = Math.max(by1, y);
-        }
+        if (y <= top) continue;
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) >= num2 * 0.4) continue;
+        if (x < b4) b4 = x;
+        if (x > b5) b5 = x;
+        if (y < b6) b6 = y;
+        if (y > b7) b7 = y;
+        const ti = st.idx(x, y);
+        st.flags[ti] = 1; st.type[ti] = tile;
       }
     }
     px += vx; py += vy;
     vx += rng.int(-20, 20) * 0.05;
-    vx = Math.max(-1, Math.min(1, vx));
-    vy = Math.max(-0.2, Math.min(0.2, vy));
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < -0.2) vy = -0.2;
   }
-  if (bx1 > bx0) rainBumps(st, rng, bx0, bx1, by0, by1);
-}
-
-/** CloudIsland（1456 cs:78618）1:1：扁平云盘（材质 189 云，纵压 3 + 顶面游走）
- *  → 雨云凸包 → 土芯（80-95，只把云 189 换土 0）→ 土芯云盖（小云团盖在土面上）
- *  → 内部云墙 73 → 逐列水池（10% 凹坑 + 1/5 单格）→ 岛上方 0-3 团带水云 puff。
- *  旧版盘体误用雨云 196（IslandHouse 的 num9）→ 土芯的 type==189 判定恒假、
- *  整芯死代码；本版对齐 CloudIsland 本体的 num8=189。 */
-function cloudIsland(st: TileStore, rng: RNG, i: number, j: number): void {
-  let num1 = rng.int(100, 149);
-  let steps = rng.int(20, 29);
-  let px = i + 0.0, py = j + 0.0;
-  let vx = rng.int(-20, 20) * 0.2;
-  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
-  let vy = rng.int(-20, -11) * 0.02;
-  let bboxX0 = i, bboxX1 = i, bboxY0 = j, bboxY1 = j;
-  while (num1 > 0 && steps > 0) {
-    num1 -= rng.int(0, 3);
-    steps--;
-    const x0 = Math.max(0, Math.floor(px - num1 * 0.5)), x1 = Math.min(st.w, Math.floor(px + num1 * 0.5));
-    const y0 = Math.max(0, Math.floor(py - num1 * 0.5)), y1 = Math.min(st.h, Math.floor(py + num1 * 0.5));
-    const r = num1 * rng.int(80, 119) * 0.01;
-    let top = py + 1; // 每列顶面游走(钳 [py, py+2])
-    for (let x = x0; x < x1; x++) {
-      if (rng.next() < 0.5) top += rng.int(-1, 1);
-      top = Math.max(py, Math.min(py + 2, top));
-      for (let y = y0; y < y1; y++) {
-        if (y <= top || !st.inBounds(x, y)) continue;
-        if (Math.hypot(x - px, (y - py) * 3) < r * 0.4) {
+  let r17 = b4 + rng.int(0, 4);                      // ② 底缘雨云凸包：num4+Next(5)
+  let r19 = 0;
+  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5))) {
+    let r18 = b7;
+    while (r17 >= 15 && r17 < st.w - 15 && r18 >= 15 && r18 < st.h - 15 && st.flags[st.idx(r17, r18)] === 0) r18--;
+    r18 += rng.int(-3, 3);                           // Next(-3,4)
+    r19 = rng.int(4, 7);                             // Next(4,8)
+    let mat = tile;
+    if (rng.int(0, 3) === 0) mat = RAIN_CLOUD;       // Next(4)==0 → 196
+    for (let x = r17 - r19; x <= r17 + r19; x++) {
+      for (let y = r18 - r19; y <= r18 + r19; y++) {
+        if (y <= b6 || !st.inBounds(x, y)) continue;
+        const ddx = Math.abs(x - r17), ddy = Math.abs(y - r18) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < r19 + rng.int(0, 1)) {   // num19 + Next(2)
           const ti = st.idx(x, y);
-          st.type[ti] = CLOUD;   // cs:78754 num8=189（雨云只在凸包/上方 puff 1/4-1/2 概率出现）
-          st.flags[ti] = 1;
-          bboxX0 = Math.min(bboxX0, x); bboxX1 = Math.max(bboxX1, x);
-          bboxY0 = Math.min(bboxY0, y); bboxY1 = Math.max(bboxY1, y);
+          st.flags[ti] = 1; st.type[ti] = mat;
         }
       }
     }
-    px += vx;
-    py += vy;
-    vx += rng.int(-20, 20) * 0.05;
-    vx = Math.max(-1, Math.min(1, vx));
-    vy = Math.max(-0.2, Math.min(0.2, vy));
   }
-  if (bboxX1 <= bboxX0) return;
-  // ---- 阶段2:雨云凸包（cs:78785-78828） ----
-  rainBumps(st, rng, bboxX0, bboxX1, bboxY0, bboxY1);
-  // ---- 阶段3:土芯(80-95,只把云 189 换土 0；起点 y=bbox 顶)----
-  let dR = rng.int(80, 94);
-  let dSteps = rng.int(10, 14);
-  let dx0 = i + 0.0, dy0 = bboxY0 + 0.0;
-  let dvx = rng.int(-20, 20) * 0.2;
-  while (dvx > -2 && dvx < 2) dvx = rng.int(-20, 20) * 0.2;
-  let dvy = rng.int(-20, -11) * 0.02;
-  while (dR > 0 && dSteps > 0) {
-    dR -= rng.int(0, 3);
-    dSteps--;
-    const x0 = Math.max(0, Math.floor(dx0 - dR * 0.5)), x1 = Math.min(st.w, Math.floor(dx0 + dR * 0.5));
-    const y0 = Math.max(0, Math.floor(bboxY0 - 1)), y1 = Math.min(st.h, Math.floor(dy0 + dR * 0.5));
-    const r = dR * rng.int(80, 119) * 0.01;
+  num = rng.int(80, 94);                             // ③ 土芯：Next(80,95)
+  num2 = num;
+  num3 = rng.int(10, 14);                            // Next(10,15)
+  px = ci + 0.0; py = b6 + 0.0;
+  vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  vy = rng.int(-20, -11) * 0.02;
+  while (num > 0 && num3 > 0) {
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, b6 - 1), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
+    let top = py + 1;
     for (let x = x0; x < x1; x++) {
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
       for (let y = y0; y < y1; y++) {
-        if (!st.inBounds(x, y)) continue;
+        if (y <= top) continue;
         const ti = st.idx(x, y);
-        if (st.type[ti] === CLOUD && Math.hypot(x - dx0, (y - dy0) * 3) < r * 0.4) {
-          st.type[ti] = T.DIRT;
-        }
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4 && st.type[ti] === tile) st.type[ti] = T.DIRT;
       }
     }
-    dx0 += dvx;
-    dy0 += dvy;
-    dvx += rng.int(-20, 20) * 0.05;
-    dvx = Math.max(-1, Math.min(1, dvx));
-    dvy = Math.max(-0.2, Math.min(0.2, dvy));
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < -0.2) vy = -0.2;
   }
-  // ---- 阶段4:土芯云盖（cs:78872-78914）：自岛底向上找首个活性土格，上方盖小云团 ----
-  {
-    let cx = bboxX0 + rng.int(0, 4);                 // num29 = num4 + Next(5)
-    while (cx < bboxX1) {
-      let cy = bboxY1;                                // 自岛底向上
-      let guard = 0;
-      while ((!st.inBounds(cx, cy) || !st.flags[st.idx(cx, cy)] || st.type[st.idx(cx, cy)] !== T.DIRT)
-        && cx < bboxX1 && guard++ < 4000) {
+  {                                                  // ④ 土面云斑：找活性土格向上盖云
+    let cx = b4 + rng.int(0, 4);
+    while (cx < b5) {
+      let cy = b7;
+      while ((cy < 0 || cy >= st.h || cx < 0 || cx >= st.w || !st.flags[st.idx(cx, cy)] || st.type[st.idx(cx, cy)] !== T.DIRT) && cx < b5) {
         cy--;
-        if (cy < bboxY0) { cy = bboxY1; cx += rng.int(1, 3); }   // Next(1,4)
+        if (cy < b6) { cy = b7; cx += rng.int(1, 3); }   // Next(1,4)
       }
-      if (cx >= bboxX1) break;
-      cy += rng.int(0, 3);                            // Next(0,4)
-      const cr = rng.int(2, 4);                       // Next(2,5)
+      if (cx >= b5) continue;
+      cy += rng.int(0, 3);                           // Next(0,4)
+      const cr = rng.int(2, 4);                      // Next(2,5)
       for (let x = cx - cr; x <= cx + cr; x++) {
         for (let y = cy - cr; y <= cy + cr; y++) {
-          if (y <= bboxY0 || !st.inBounds(x, y)) continue;
-          if (Math.hypot(x - cx, (y - cy) * 2) < cr) {
-            // 原版只写 type 不激活（空气格成幽灵、活性云格换云）
-            if (st.flags[st.idx(x, y)]) st.type[st.idx(x, y)] = CLOUD;
-          }
+          if (y <= b6 || !st.inBounds(x, y)) continue;
+          const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
+          if (Math.sqrt(ddx * ddx + ddy * ddy) < cr) st.type[st.idx(x, y)] = tile;   // 原版只写 type
         }
       }
       cx += rng.int(cr, Math.floor(cr * 1.5));
     }
   }
-  // ---- 阶段5:内部云墙（cs:78915-78971：3×3 全活性 且 本格 wall∈{0,73} → wall 73）----
-  for (let x = bboxX0 - 20; x <= bboxX1 + 20; x++) {
-    for (let y = bboxY0 - 20; y <= bboxY1 + 20; y++) {
+  for (let x = b4 - 20; x <= b5 + 20; x++) {         // ⑤ 全实心区填墙 73
+    for (let y = b6 - 20; y <= b7 + 20; y++) {
+      if (!st.inBounds(x, y)) continue;
       let all = true;
-      for (let ax = -1; ax <= 1 && all; ax++) {
-        for (let ay = -1; ay <= 1; ay++) {
-          if (!st.inBounds(x + ax, y + ay) || !st.flags[st.idx(x + ax, y + ay)]) { all = false; break; }
-          const wl = st.wall[st.idx(x + ax, y + ay)];
-          if (wl !== 0 && wl !== 73) { all = false; break; }
+      for (let ox = x - 1; ox <= x + 1; ox++) {
+        for (let oy = y - 1; oy <= y + 1; oy++) {
+          if (!st.inBounds(ox, oy)) { all = false; continue; }
+          const k = st.idx(ox, oy);
+          if (st.flags[k] === 0 || (st.wall[k] > 0 && st.wall[k] !== 73)) all = false;
         }
       }
-      if (all && st.inBounds(x, y)) st.wall[st.idx(x, y)] = 73;
+      if (all) st.wall[st.idx(x, y)] = 73;
     }
   }
-  // ---- 阶段6:水池（cs:78973-79021：逐列；10% 凹坑(宽 1-2 深 3) + 1/5 单格 + 恒 liquidType）----
-  const stayPut = (x: number, y: number): boolean => {
-    if (!st.inBounds(x, y + 1) || !st.inBounds(x - 1, y) || !st.inBounds(x + 1, y)) return false;
-    const hold = (xx: number, yy: number) => {
-      const k = st.idx(xx, yy);
-      return (st.flags[k] && !!TILE_DEFS[st.type[k]]?.solid && !TILE_DEFS[st.type[k]]?.platform)
-        || (st.liquid[k] === 255);
-    };
-    return hold(x, y + 1) && hold(x - 1, y) && hold(x + 1, y);
-  };
-  for (let x = bboxX0; x <= bboxX1; x++) {
-    let y = bboxY0 - 10;                              // num42 自 num6-10 向下找首个活性
-    let guard = 0;
-    while (st.inBounds(x, y) && !st.flags[st.idx(x, y + 1)] && guard++ < 4000) y++;
-    if (y >= bboxY1) continue;
-    if (!st.inBounds(x, y + 1) || st.type[st.idx(x, y + 1)] !== CLOUD) continue;
-    if (rng.int(0, 9) === 0) {                        // Next(10)==0 → 凹坑水池
-      const w2 = rng.int(1, 2);                       // Next(1,3)
-      for (let xx = x - w2; xx <= x + w2; xx++) {
-        for (const yy of [y, y + 1]) {
-          if (st.inBounds(xx, yy) && st.type[st.idx(xx, yy)] === CLOUD && stayPut(xx, yy)) {
-            const k = st.idx(xx, yy);
-            st.type[k] = 0; st.flags[k] = 0;
-            st.liquid[k] = 255; st.liquidType[k] = 1;
-          }
+  for (let x = b4; x <= b5; x++) {                   // ⑥ 岛面水池
+    let y = b6 - 10;
+    while (y + 1 < st.h && st.flags[st.idx(x, y + 1)] === 0) y++;
+    if (y >= b7) continue;
+    if (!st.inBounds(x, y + 1) || st.type[st.idx(x, y + 1)] !== tile) continue;
+    if (rng.int(0, 9) === 0) {                       // Next(10)==0 → 凹坑
+      const wid = rng.int(1, 2);                     // Next(1,3)
+      for (let xx = x - wid; xx <= x + wid; xx++) {
+        if (!st.inBounds(xx, y)) continue;
+        if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
+          const k = st.idx(xx, y);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
         }
-        if (xx > x - w2 && xx < x + 2 && st.inBounds(xx, y + 2)
-          && st.type[st.idx(xx, y + 2)] === CLOUD && stayPut(xx, y + 2)) {
+        if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
+          const k = st.idx(xx, y + 1);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+        if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
+          && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
           const k = st.idx(xx, y + 2);
-          st.type[k] = 0; st.flags[k] = 0;
-          st.liquid[k] = 255; st.liquidType[k] = 1;
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
         }
       }
     }
-    if (rng.int(0, 4) === 0 && stayPut(x, y)) {       // Next(5)==0 → 单格满水
-      st.liquid[st.idx(x, y)] = 255;
+    if (st.inBounds(x, y)) {
+      if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;   // Next(5)
+      st.liquidType[st.idx(x, y)] = 1;
     }
-    if (st.inBounds(x, y)) st.liquidType[st.idx(x, y)] = 1;   // 恒置水型
   }
-  // ---- 阶段7:岛上方带水云 puff（cs:79023-79066：Next(4) 团,1/2 雨云,中心注水）----
-  {
-    const puffs = rng.int(0, 3);                      // genRand.Next(4)
-    for (let n = 0; n <= puffs; n++) {
-      const cx = rng.int(bboxX0 - 5, bboxX1 + 4);     // Next(num4-5, num5+5)
-      const cy = bboxY0 - rng.int(20, 39);            // num6 - Next(20,40)
-      const cr = rng.int(4, 7);                       // Next(4,8)
-      const mat = rng.int(0, 1) === 0 ? RAIN_CLOUD : CLOUD;   // Next(2)==0 → 196
-      for (let x = cx - cr; x <= cx + cr; x++) {
-        for (let y = cy - cr; y <= cy + cr; y++) {
-          if (!st.inBounds(x, y)) continue;
-          if (Math.hypot(x - cx, (y - cy) * 2) < cr + rng.int(-1, 1)) {   // num49 + Next(-1,2)
-            const k = st.idx(x, y);
-            st.type[k] = mat; st.flags[k] = 1;
-          }
-        }
-      }
-      for (let x = cx - cr + 2; x <= cx + cr - 2; x++) {   // 中心注水
-        let y = cy - cr;
-        let guard = 0;
-        while (st.inBounds(x, y) && !st.flags[st.idx(x, y)] && guard++ < 200) y++;
-        if (st.inBounds(x, y) && stayPut(x, y)) {
+  const puffs = rng.int(0, 3);                       // ⑦ 岛上方云 puff：Next(4)
+  for (let n = 0; n <= puffs; n++) {
+    const cx = rng.int(b4 - 5, b5 + 4);              // Next(num4-5, num5+5)
+    const cy = b6 - rng.int(20, 39);                 // num6 - Next(20,40)
+    const cr = rng.int(4, 7);                        // Next(4,8)
+    let mat = tile;
+    if (rng.int(0, 1) === 0) mat = RAIN_CLOUD;       // Next(2)==0 → 196
+    for (let x = cx - cr; x <= cx + cr; x++) {
+      for (let y = cy - cr; y <= cy + cr; y++) {
+        if (!st.inBounds(x, y)) continue;
+        const ddx = Math.abs(x - cx), ddy = Math.abs(y - cy) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < cr + rng.int(-1, 1)) {   // num49 + Next(-1,2)
           const k = st.idx(x, y);
-          st.type[k] = 0; st.flags[k] = 0;
-          st.liquid[k] = 255; st.liquidType[k] = 1;
+          st.flags[k] = 1; st.type[k] = mat;
         }
       }
+    }
+    for (let x = cx - cr + 2; x <= cx + cr - 2; x++) {   // 中心注水
+      let y = cy - cr;
+      while (y < st.h && st.flags[st.idx(x, y)] === 0) y++;
+      if (st.inBounds(x, y) && waterStaysPut(st, x, y)) {
+        const k = st.idx(x, y);
+        st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+      }
+    }
+  }
+}
+
+/** CloudLake（cs:79068-79419）1:1：①云盘 → ②底缘雨云凸包（无 InWorld 门）→
+ *  ③湖盆挖除+灌水（阈值 top-2、Y 下限 0）→ ④墙 73 → ⑤湖面水 */
+function cloudLake(st: TileStore, rng: RNG, ci: number, cj: number): void {
+  const tile = CLOUD;
+  let num = rng.int(100, 149);
+  let num2 = num;
+  let num3 = rng.int(20, 29);
+  let b4 = ci, b5 = ci, b6 = cj, b7 = cj;
+  let px = ci + 0.0, py = cj + 0.0;
+  let vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  let vy = rng.int(-20, -11) * 0.02;
+  while (num > 0 && num3 > 0) {                      // ① 云盘（同 CloudIsland）
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, Math.trunc(py - num * 0.5)), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
+    let top = py + 1;
+    for (let x = x0; x < x1; x++) {
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
+      for (let y = y0; y < y1; y++) {
+        if (y <= top) continue;
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) >= num2 * 0.4) continue;
+        if (x < b4) b4 = x;
+        if (x > b5) b5 = x;
+        if (y < b6) b6 = y;
+        if (y > b7) b7 = y;
+        const ti = st.idx(x, y);
+        st.flags[ti] = 1; st.type[ti] = tile;
+      }
+    }
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < -0.2) vy = -0.2;
+  }
+  let r17 = b4 + rng.int(0, 4);                      // ② 雨云凸包（CloudLake 无 InWorld 门）
+  let r19 = 0;
+  for (; r17 < b5; r17 += rng.int(r19, Math.floor(r19 * 1.5))) {
+    let r18 = b7;
+    while (r18 >= 0 && st.flags[st.idx(r17, r18)] === 0) r18--;
+    r18 += rng.int(-3, 3);
+    r19 = rng.int(4, 7);
+    let mat = tile;
+    if (rng.int(0, 3) === 0) mat = RAIN_CLOUD;
+    for (let x = r17 - r19; x <= r17 + r19; x++) {
+      for (let y = r18 - r19; y <= r18 + r19; y++) {
+        if (y <= b6) continue;
+        const ddx = Math.abs(x - r17), ddy = Math.abs(y - r18) * 2;
+        if (Math.sqrt(ddx * ddx + ddy * ddy) < r19 + rng.int(0, 1)) {
+          if (!st.inBounds(x, y)) continue;
+          const ti = st.idx(x, y);
+          st.flags[ti] = 1; st.type[ti] = mat;
+        }
+      }
+    }
+  }
+  num = rng.int(80, 94);                             // ③ 湖盆挖除 + 灌水
+  num2 = num;
+  num3 = rng.int(10, 14);
+  px = ci + 0.0; py = b6 + 0.0;
+  vx = rng.int(-20, 20) * 0.2;
+  while (vx > -2 && vx < 2) vx = rng.int(-20, 20) * 0.2;
+  vy = rng.int(-20, -11) * 0.02;
+  while (num > 0 && num3 > 0) {
+    num -= rng.int(0, 3);
+    num3 -= 1;
+    const x0 = Math.max(0, Math.trunc(px - num * 0.5)), x1 = Math.min(st.w, Math.trunc(px + num * 0.5));
+    const y0 = Math.max(0, b6 - 1), y1 = Math.min(st.h, Math.trunc(py + num * 0.5));
+    num2 = num * rng.int(80, 119) * 0.01;
+    let top = py + 1;
+    for (let x = x0; x < x1; x++) {
+      if (rng.int(0, 1) === 0) top += rng.int(-1, 1);
+      if (top < py) top = py;
+      if (top > py + 2) top = py + 2;
+      for (let y = y0; y < y1; y++) {
+        if (y <= top - 2) continue;                  // CloudLake 阈值 top-2（岛芯是 top）
+        const ti = st.idx(x, y);
+        const ddx = Math.abs(x - px), ddy = Math.abs(y - py) * 3;
+        if (!(Math.sqrt(ddx * ddx + ddy * ddy) < num2 * 0.4) || st.type[ti] !== tile) continue;
+        st.flags[ti] = 0;
+        st.wall[ti] = 0;                             // 本格 + 四邻 + 上两角清墙
+        if (x - 1 >= 0) st.wall[st.idx(x - 1, y)] = 0;
+        if (x + 1 < st.w) st.wall[st.idx(x + 1, y)] = 0;
+        if (y - 1 >= 0) st.wall[st.idx(x, y - 1)] = 0;
+        if (x - 1 >= 0 && y - 1 >= 0) st.wall[st.idx(x - 1, y - 1)] = 0;
+        if (x + 1 < st.w && y - 1 >= 0) st.wall[st.idx(x + 1, y - 1)] = 0;
+        if (y > top + 1) {
+          if (waterStaysPut(st, x, y)) st.liquid[ti] = 255;
+          st.liquidType[ti] = 1;
+        }
+      }
+    }
+    px += vx; py += vy;
+    vx += rng.int(-20, 20) * 0.05;
+    if (vx > 1) vx = 1;
+    if (vx < -1) vx = -1;
+    if (vy > 0.2) vy = -0.2;
+    if (vy < 0) vy = 0;                              // CloudLake 湖盆段 Y 下限 0（岛芯是 -0.2）
+  }
+  for (let x = b4 - 20; x <= b5 + 20; x++) {         // ④ 墙 73
+    for (let y = b6 - 20; y <= b7 + 20; y++) {
+      if (!st.inBounds(x, y)) continue;
+      let all = true;
+      for (let ox = x - 1; ox <= x + 1; ox++) {
+        for (let oy = y - 1; oy <= y + 1; oy++) {
+          if (!st.inBounds(ox, oy)) { all = false; continue; }
+          const k = st.idx(ox, oy);
+          if (st.flags[k] === 0 || (st.wall[k] > 0 && st.wall[k] !== 73)) all = false;
+        }
+      }
+      if (all) st.wall[st.idx(x, y)] = 73;
+    }
+  }
+  for (let x = b4; x <= b5; x++) {                   // ⑤ 湖面水（同 CloudIsland ⑥）
+    let y = b6 - 10;
+    while (y + 1 < st.h && st.flags[st.idx(x, y + 1)] === 0) y++;
+    if (y >= b7) continue;
+    if (!st.inBounds(x, y + 1) || st.type[st.idx(x, y + 1)] !== tile) continue;
+    if (rng.int(0, 9) === 0) {
+      const wid = rng.int(1, 2);
+      for (let xx = x - wid; xx <= x + wid; xx++) {
+        if (!st.inBounds(xx, y)) continue;
+        if (st.type[st.idx(xx, y)] === tile && waterStaysPut(st, xx, y)) {
+          const k = st.idx(xx, y);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+        if (y + 1 < st.h && st.inBounds(xx, y + 1) && st.type[st.idx(xx, y + 1)] === tile && waterStaysPut(st, xx, y + 1)) {
+          const k = st.idx(xx, y + 1);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+        if (xx > x - wid && xx < x + 2 && y + 2 < st.h && st.inBounds(xx, y + 2)
+          && st.type[st.idx(xx, y + 2)] === tile && waterStaysPut(st, xx, y + 2)) {
+          const k = st.idx(xx, y + 2);
+          st.flags[k] = 0; st.liquid[k] = 255; st.liquidType[k] = 1;
+        }
+      }
+    }
+    if (st.inBounds(x, y)) {
+      if (rng.int(0, 4) === 0 && waterStaysPut(st, x, y)) st.liquid[st.idx(x, y)] = 255;
+      st.liquidType[st.idx(x, y)] = 1;
     }
   }
 }

@@ -501,9 +501,8 @@ function placeDye(st: TileStore, x: number, y: number, style: number): boolean {
   } else {
     if (activeAt(st, x, y - 1) && !DYE_PLANT_SIDE.has(sheetAt(st, x, y - 1))) return false;
     if (style === 6) {
-      // 冰刺株（style 6）：须长在仙人掌 80 顶上且两侧空
-      if (activeAt(st, x, y + 1) && !st.half[st.idx(x, y + 1)] && st.slope[st.idx(x, y + 1)] === 0
-        && sheetAt(st, x, y + 1) === 80
+      // 冰刺株（style 6）：须长在仙人掌 80 顶上且两侧空（nactive = active）
+      if (activeAt(st, x, y + 1) && sheetAt(st, x, y + 1) === 80
         && !activeAt(st, x - 1, y + 1) && !activeAt(st, x + 1, y + 1)) ok = true;
     } else if (solidTile(st, x, y + 1) && !activeAt(st, x, y - 1)) {
       const liq = st.liquid[i0];
@@ -601,11 +600,10 @@ function growGlowTulips(st: TileStore, rng: RNG, gs: GenState): void {
   const target = worldSize === 1 ? 4 : worldSize === 2 ? 6 : 2;
   let placed = 0;
   let budget = 10000;
-  const half = (budget / 2) | 0;
   while (placed < target) {
     budget--;
     if (budget <= 0) break;
-    const pickLeft = placed >= (target / 2) | 0 && (budget <= 7500 || rng.int(0, 1) !== 0);
+    const pickLeft = placed >= ((target / 2) | 0) && (budget <= 7500 || rng.int(0, 1) !== 0);
     const i = pickLeft ? rng.int(w - n3, w - n2 - 1) : rng.int(n2, n3 - 1);
     const j = rng.int(gs.worldSurface, h - 201);                        // Next(ws, h-200)
     if (tryGrowGlowTulip(st, rng, i, j)) placed++;
@@ -748,9 +746,10 @@ function canHitLine(st: TileStore, x1: number, y1: number, x2: number, y2: numbe
   const sx = Math.sign(num3 - num);
   const sy = Math.sign(num4 - num2);
   let done = false, done2 = false;
-  // 3 格宽 swath 任一实心非顶面格 → false（越界 = null → false）
+  // 3 格宽 swath 任一实心非顶面格 → false（越界 = null → 直接 miss）
   const blocked = (cx: number, cy: number): boolean =>
-    solidTile(st, cx - 1, cy) || solidTile(st, cx, cy) || solidTile(st, cx + 1, cy);
+    !st.inBounds(cx - 1, cy) || !st.inBounds(cx, cy) || !st.inBounds(cx + 1, cy)
+    || solidTile(st, cx - 1, cy) || solidTile(st, cx, cy) || solidTile(st, cx + 1, cy);
   do {
     if (mode === 2) {
       f1 += n7;
@@ -978,6 +977,8 @@ export function runVinesPass(st: TileStore, rng: RNG, gs: GenState): void {
 // ============================================================
 
 const FLOWER_LIST = [21, 24, 27, 30, 33, 36, 39, 42];                   // NextFromList 池（cs:20619/20683）
+const GRASS = TILE_BY_KEY['grass']!;
+const DIRT = TILE_BY_KEY['dirt']!;
 
 /** Flowers pass（cs:20592-20742）1:1：地表花圃（非 remix 分支）。
  *  消费 GenVars.logX/logY（倒木锚点优先）——须在 FallenLogs 之后运行 */
@@ -1021,8 +1022,8 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (st.wall[t5] === 0 && st.flags[t5]
               && (s5 === 2 || (oreLike(t5) && !st.flags[t4])) && allowOver) {
               if (oreLike(t5)) {
-                st.type[t5] = TILE_BY_KEY['grass']!;                    // 基座矿石/石 → 草
-                if (oreLike(t6)) st.type[t6] = TILE_BY_KEY['grass']!;
+                st.type[t5] = GRASS;                                    // 基座矿石/石 → 草
+                if (oreLike(t6)) st.type[t6] = GRASS;
               }
               killTile(st, m, n);
               if (rng.int(0, 1) === 0) {                                // Next(2)
@@ -1035,7 +1036,7 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
               const kk = st.idx(m, n);
               if (st.liquid[kk] === 0
                 && st.flags[t5] && st.slope[t5] === 0 && !st.half[t5]
-                && (s5 === 2 || s5 === 78 || s5 === 380 || s5 === 477 || s5 === 579 || st.type[t5] === TILE_BY_KEY['grass']!)
+                && (s5 === 2 || s5 === 78 || s5 === 380 || s5 === 477 || s5 === 579 || st.type[t5] === GRASS)
                 && WALL_ALLOWS_PLANTS.has(st.wall[kk]) && WALL_ALLOWS_PLANTS.has(st.wall[t5])) {
                 let fx: number;
                 if (rng.int(0, 49) === 0) fx = 144;                     // 蘑菇 1/50
@@ -1049,7 +1050,7 @@ export function runFlowersPass(st: TileStore, rng: RNG, gs: GenState): void {
                 st.frameX[kk] = (num7 + rng.int(0, 2)) * 18;            // 花圃重帧（cs:20720）
                 if (rng.int(0, 2) !== 0) st.type[kk] = PLANT_TALL;      // 2/3 → 高草/花 73
               }
-              if (oreLike(t6)) st.type[t6] = TILE_BY_KEY['dirt']!;      // 第三层矿石 → 泥土
+              if (oreLike(t6)) st.type[t6] = DIRT;                      // 第三层矿石 → 泥土
             }
           }
         }
@@ -1097,8 +1098,9 @@ function tileFrame184(st: TileStore, rng: RNG, x: number, y: number): void {
     if (!st.inBounds(x + dx, y + dy)) return -1;
     const k = st.idx(x + dx, y + dy);
     if (!st.flags[k]) return -1;
-    if (dy === 1 && bottomSlope(st, x, y + 1)) return -1;               // 下方 bottomSlope 排除
-    if (dy === -1 && (st.half[k] || topSlope(st, x, y - 1))) return -1; // 上方 half/topSlope 排除
+    // cs:85900-85907：上邻须 !bottomSlope，下邻须 !halfBrick && !topSlope；左右仅 active
+    if (dy === -1 && bottomSlope(st, x, y - 1)) return -1;
+    if (dy === 1 && (st.half[k] || topSlope(st, x, y + 1))) return -1;
     return SHEET[st.type[k]];
   };
   const below = side(0, 1), above = side(0, -1), leftS = side(-1, 0), rightS = side(1, 0);
@@ -1238,14 +1240,17 @@ function placeBamboo(st: TileStore, rng: RNG, gs: GenState, x: number, y: number
 
 /** SquareTileFrame（cs:80924）的子集实现：3×3 内只重帧本组放置的类型 */
 function squareTileFrame(st: TileStore, rng: RNG, x: number, y: number): void {
+  // 3×3 列优先（cs:80926-80934 的调用序）：x-1 列三行 → x 列三行 → x+1 列三行
   for (let d = 0; d < 9; d++) {
-    const dx = (d % 3) - 1, dy = ((d / 3) | 0) - 1;
+    const dx = ((d / 3) | 0) - 1, dy = (d % 3) - 1;
     const nx = x + dx, ny = y + dy;
     if (!st.inBounds(nx, ny)) continue;
-    const s = SHEET[st.type[st.idx(nx, ny)]];
-    if (s === 571 && st.flags[st.idx(nx, ny)]) checkBamboo(st, rng, nx, ny);
-    else if (s === 519 && st.flags[st.idx(nx, ny)]) checkCatTail(st, rng, nx, ny);
-    else if (s === 549 && st.flags[st.idx(nx, ny)]) checkUnderwaterPlant(st, nx, ny);
+    const kk = st.idx(nx, ny);
+    const s = SHEET[st.type[kk]];
+    if (!st.flags[kk]) continue;
+    if (s === 571) checkBamboo(st, rng, nx, ny);
+    else if (s === 519) checkCatTail(st, rng, nx, ny);
+    else if (s === 549) checkUnderwaterPlant(st, rng, nx, ny);
     // 184 的重帧仅在放置时调用（LongMoss pass）；518 的 CheckLilyPad 恒 no-op 未移植
   }
 }
@@ -1336,7 +1341,7 @@ function checkCatTail(st: TileStore, rng: RNG, x: number, j: number): void {
   else if (groundSheet === 199 || groundSheet === 234 || groundSheet === 662) style = 54;
   else if (groundSheet === 23 || groundSheet === 112 || groundSheet === 661) style = 72;
   else if (groundSheet === 70) style = 90;
-  if (!st.flags[st.idx(x, num2)] || st.half[st.idx(x, num2)] || st.slope[st.idx(x, num2)] !== 0) flag = true;
+  if (!st.flags[st.idx(x, num2)]) flag = true;                          // nactive（cs:58842）
   if (style < 0) flag = true;
   num = num2 - 1;
   const kNum = st.idx(x, num);
@@ -1419,7 +1424,7 @@ function placeCatTail(st: TileStore, rng: RNG, gs: GenState, x: number, j: numbe
   if (l - n < 2) return [-1, -1];
   const ground = sheetAt(st, x, l);
   const gl = st.idx(x, l);
-  if (!st.flags[gl] || st.half[gl] || st.slope[gl] !== 0) return [-1, -1];
+  if (!st.flags[gl]) return [-1, -1];                                   // nactive（cs:58708）
   let style = -1;
   if (ground === 2 || ground === 477) style = 0;
   else if (ground === 53) {
@@ -1511,8 +1516,8 @@ function canUnderwaterPlantGrow(st: TileStore, x: number, y: number, sheet: numb
   return true;
 }
 
-/** CheckUnderwaterPlant（cs:58597）1:1：海藻邻接帧重排（无 RNG） */
-function checkUnderwaterPlant(st: TileStore, x: number, y: number): void {
+/** CheckUnderwaterPlant（cs:58597）1:1：海藻邻接帧重排 */
+function checkUnderwaterPlant(st: TileStore, rng: RNG, x: number, y: number): void {
   const sheet = 549;
   if (!canUnderwaterPlantGrow(st, x, y, sheet, true)) {
     killTile(st, x, y);
@@ -1525,9 +1530,9 @@ function checkUnderwaterPlant(st: TileStore, x: number, y: number): void {
   const col = (st.frameX[k] / 18) | 0;
   st.frameY[k] = 0;
   if (upIs) {
-    if (col < 1 || col > 7) st.frameX[k] = (1 + ((Math.random() * 7) | 0)) * 18;
+    if (col < 1 || col > 7) st.frameX[k] = rng.int(1, 7) * 18;          // Next(1,8)
   } else if (dnIs) {
-    if (col < 7 || col > 12) st.frameX[k] = (7 + ((Math.random() * 6) | 0)) * 18;
+    if (col < 7 || col > 12) st.frameX[k] = rng.int(7, 12) * 18;        // Next(7,13)
   } else if (col !== 0) {
     st.frameX[k] = 0;
   }

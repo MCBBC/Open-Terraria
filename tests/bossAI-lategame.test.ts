@@ -8,6 +8,7 @@ import { Enemy } from '../src/entities/Enemy';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { spawnPart } from '../src/entities/bossAI';
+import { BuffState, BuffType } from '../src/stats/Buffs';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 160, H = 120, FLOOR = 100;
@@ -39,6 +40,7 @@ function makeHooks(world: World, playerAt: { x: number; y: number }) {
   const player = {
     x: px, y: py, w: 20, h: 42, cx: px + 10, cy: py + 21,
     vx: 0, vy: 0, hp: 400, maxHp: 400, dead: false, useTime: 1,
+    buffs: new BuffState(),
     aabbOverlaps: () => false,
   };
   const hooks = {
@@ -272,6 +274,9 @@ describe('月总召怪段(bossAI_duke_moonlord.ts)', () => {
     // 攻击表 [矢180, 闭30, 月噬435, ...]:210t 进月噬槽
     tick(h, 212, [head]);
     expect(head.ai0).toBe(2);
+    // 门禁（NPC.cs:37980 FindBuffIndex(145)）：玩家身中 MoonLeech 145 才召——
+    // 由 456 月噬弹贴身授予（MoonLeechProj），测试直接预授
+    h.player.buffs.apply(BuffType.MoonLeech, 840 / 60);
     tick(h, 121, [head]);                      // inSlot=120 当帧
     const leech = h.enemies.find((n) => n.vanillaId === 401);
     expect(leech).toBeDefined();               // :37975-37989

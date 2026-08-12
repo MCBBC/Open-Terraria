@@ -73,6 +73,16 @@ export interface GenState {
   hellChestIdx: number;            // 地狱箱主件序游标（成功一只 +1,循环）
   jungleItemIdx: number;           // 常春藤箱主件序游标（JungleItemCount）
   gennedMahoganyWands: boolean;    // 活桃花心木法杖对已给过标记（GenVars.gennedLivingMahoganyWands）
+
+  // 表面装饰 pass 共享态（GenVars）
+  /** GenVars.orePatchX/numOrePatch/maxOrePatch=50（GenVars.cs:238-242；ResetGenerator 清零 cs:8289）：
+   *  SurfaceOreAndStone(18559) 登记，石块段与后续回避用 */
+  orePatchX: Int32Array;
+  numOrePatch: number;
+  /** GenVars.logX/logY（GenVars.cs:250-252，进程级静态默认 0）：FallenLogs(18625) 50% 登记，
+   *  Flowers(20592) 消费后置 -1 */
+  logX: number;
+  logY: number;
 }
 
 export function newGenState(w: number, h: number): GenState {
@@ -99,5 +109,7 @@ export function newGenState(w: number, h: number): GenState {
     floatingIslands: [],
     shimmerX: -1, shimmerY: -1,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
+    orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
+    logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
   };
 }

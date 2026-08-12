@@ -207,7 +207,7 @@ try {
     });
     check('AOI：B 出视野 → A 侧代理冻结（防幽灵行走）', frozen.hasProxy && frozen.age > 1500 && frozen.inputX === 0,
       JSON.stringify(frozen));
-    // B 回到 A 身边 → 恢复接收
+    // B 回到 A 身边 → 恢复接收（末尾再泵一轮：headless 后台页 rAF 节流，静止心跳可能停发）
     await pageB.evaluate(async (home) => {
       const g = window.__swGame;
       for (let i = 0; i < 12; i++) {
@@ -216,7 +216,19 @@ try {
         await new Promise((r) => setTimeout(r, 70));
       }
     }, bHome);
-    await sleep(1500);
+    await sleep(1200);
+    // headless 后台页 rAF 停转：A 不泵 → 服务器判 A 盲（>5s 无 msg13）→ 不给 A 中继。
+    // 先泵 A（保持非盲），再泵 B（位移 >1px 强制即时上报），然后读 A 的新鲜度
+    await pageA.evaluate(() => {
+      const g = window.__swGame;
+      for (let i = 0; i < 4; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
+    });
+    await sleep(300);
+    await pageB.evaluate(() => {
+      const g = window.__swGame;
+      g.player.x += 2;
+      for (let i = 0; i < 4; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
+    });
     const resumed = await pageA.evaluate(() => performance.now() - (window.__swGame.net.players.get(1)?.lastFresh ?? 0));
     check('AOI：B 回视野 → 恢复接收 msg13', resumed < 1500, `age=${resumed.toFixed(0)}ms`);
 
@@ -293,9 +305,8 @@ try {
 
     // ---- msg5 物品/装备同步：手持物 + useItem 远端挥舞 ----
     const itemSync = await pageA.evaluate(async () => {
-      const { ITEM_BY_KEY } = await import('/src/data/items.ts');
+      const torch = window.__swFlow.itemByKey('torch'); // 探针桥（生产构建可用）
       const g = window.__swGame;
-      const torch = ITEM_BY_KEY['torch'];
       g.player.inv.slots[2] = { id: torch, stack: 5 };
       g.player.inv.selected = 2;
       g.net.tick(); g.net.tick(); // 差分上报冲洗
@@ -346,16 +357,15 @@ try {
     // ---- v3 实体同步：NPC 傀儡 + 打击上报 + 掉落物 + HP + 箱子 + 重连 ----
     // 房主生成一只僵尸（v_3）→ 快照广播 → B 侧傀儡
     const npcPos = await pageA.evaluate(async () => {
-      const { Enemy } = await import('/src/entities/Enemy.ts');
+      const e = await window.__swFlow.spawnVanillaEnemy(3, window.__swGame.player.cx + 80, window.__swGame.player.cy); // 探针桥
       const g = window.__swGame;
-      const e = Enemy.fromVanilla(3, g.player.cx + 80, g.player.cy);
-      g.entities.add(e, 'enemies');
       // 显式泵游戏循环（headless 背景页 rAF 可能停转——postUpdate 驱动快照广播）
       for (let i = 0; i < 60; i++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
-      return { x: e.x, y: e.y, id: e.id, hp: e.hp };
+      return e ? { x: e.x, y: e.y, id: e.id, hp: e.hp } : null;
     });
     // 房主 rAF 可能被后台节流——轮询等待快照到达（最多 6s）
     // 注意：房主自然刷怪已激活——按 netId（房主 slot=0 → netId=本地 id）精确找探针僵尸
+    if (!npcPos) { check('NPC 快照→访客傀儡（msg23）', false, 'spawnVanillaEnemy 桥失败'); }
     let bNpc = null;
     for (let i = 0; i < 6 && !bNpc; i++) {
       await sleep(1000);
@@ -364,7 +374,7 @@ try {
         if (!g) return null;
         const pup = g.netNpcPuppets.get(id);
         return pup ? { netId: pup.e.netId, key: pup.e.key, puppet: pup.e.netPuppet, hp: pup.e.hp, n: g.netNpcPuppets.size } : null;
-      }, npcPos.id).catch(() => null);
+      }, npcPos?.id).catch(() => null);
     }
     check('NPC 快照→访客傀儡（msg23）', !!bNpc && bNpc.key === 'v_3' && bNpc.puppet === true, JSON.stringify(bNpc));
 
@@ -380,18 +390,18 @@ try {
         const hpBefore = pup.hp;
         pup.hurt(30, 2, -1, g); // 触发 entityNet.reportStrike → msg42
         return { hpBefore, hpAfter: pup.hp };
-      }, npcPos.id);
+      }, npcPos?.id);
       await sleep(1200);
       const hostHp = await pageA.evaluate((id) => {
         for (const ent of window.__swGame.entities.enemies) {
           if (ent.id === id) return ent.hp;
         }
         return -1;
-      }, npcPos.id);
-      check('访客打击上报→房主权威扣血（msg42）', hostHp > 0 && hostHp < npcPos.hp, `host hp=${hostHp}/${npcPos.hp}（原 ${strike.hpBefore}）`);
+      }, npcPos?.id);
+      check('访客打击上报→房主权威扣血（msg42）', hostHp > 0 && hostHp < npcPos?.hp, `host hp=${hostHp}/${npcPos?.hp}（原 ${strike.hpBefore}）`);
       // B 侧傀儡 hp 经快照收敛到房主值
       await sleep(600);
-      const bHp = await pageB.evaluate((id) => window.__swGame.netNpcPuppets.get(id)?.e.hp ?? -1, npcPos.id);
+      const bHp = await pageB.evaluate((id) => window.__swGame.netNpcPuppets.get(id)?.e.hp ?? -1, npcPos?.id);
       check('傀儡 hp 随快照收敛', bHp === hostHp, `B=${bHp} host=${hostHp}`);
 
       // ---- P1.1 AOI（NPC 态）：B 远离 → msg23 停发 → 傀儡 300 tick 清扫；回来自动重建 ----
@@ -416,10 +426,19 @@ try {
           await new Promise((r) => setTimeout(r, 70));
         }
       }, bHome2);
-      // 回视野后房主 2s 兜底全量重播（AOI 重入自愈路径：短码已知集过期 → 全量带 key）
+      // 回视野后房主 2s 兜底全量重播（AOI 重入自愈路径：短码已知集过期 → 全量带 key）。
+      // headless rAF 停转：每轮显式泵房主 A（发 msg23）+ B（保持非盲收流）
       let pupBack = 0;
       for (let i = 0; i < 8 && pupBack < 1; i++) {
-        await sleep(1000);
+        await pageA.evaluate(() => {
+          const g = window.__swGame;
+          for (let k = 0; k < 30; k++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
+        }).catch(() => {});
+        await pageB.evaluate(() => {
+          const g = window.__swGame;
+          for (let k = 0; k < 10; k++) { g.fixedUpdate(1 / 60); g.postUpdate(); }
+        }).catch(() => {});
+        await sleep(800);
         pupBack = await pageB.evaluate(() => window.__swGame.netNpcPuppets.size).catch(() => 0);
       }
       check('AOI：B 回视野 → NPC 傀儡重建（2s 兜底重入）', pupBack >= 1, `puppets=${pupBack}`);
@@ -457,8 +476,7 @@ try {
       check('访客拾取→take→房主真身移除', hostDrops === 0 && bDrop === 0, `host=${hostDrops} B傀儡=${bDrop}`);
       // B 背包拿到火把
       const bTorch = await pageB.evaluate(async () => {
-        const { ITEM_BY_KEY } = await import('/src/data/items.ts');
-        const torch = ITEM_BY_KEY['torch'];
+        const torch = window.__swFlow.itemByKey('torch');
         return window.__swGame.player.inv.slots.some((s) => s && s.id === torch);
       });
       check('访客拾取入包（物品保护豁免拾取）', bTorch === true);
@@ -617,8 +635,12 @@ try {
     server.killGroup(); // SIGTERM → 优雅落盘退出
     let exited = false;
     for (let i = 0; i < 100 && !exited; i++) { await sleep(100); exited = server.exitCode !== null; }
+    // npx 包装进程先死（143）是预期；tsx 子进程异步落盘——轮询等文件出现（≤20s）
+    let saved = false;
+    for (let i = 0; i < 100 && !saved; i++) { await sleep(200); saved = existsSync(worldFile); }
     check('SIGTERM 优雅退出', exited, `exitCode=${server.exitCode}`);
-    check('SIGTERM 落盘世界档（room-<code>.json）', existsSync(worldFile), worldFile);
+    check('SIGTERM 落盘世界档（room-<code>.json）', saved, worldFile);
+    server.killGroup(); // 兜底：落盘后仍未退的 tsx 子进程整组击杀（防孤儿占 7901）
     if (existsSync(worldFile)) {
       const server2 = spawnServer(7905, ['--world', worldFile]);
       const log2 = [];

@@ -7,10 +7,10 @@ import type { Player } from '../entities/Player';
 import { serializeSave } from './serialize';
 import type { SaveData, SaveStoreView, SaveMeta } from './serialize';
 import { TILE_INTERNAL_OF_STABLE } from '../data/tiles';
-import { ITEM_INTERNAL_OF_STABLE, ITEM_STABLE_OF_INTERNAL } from '../data/items';
+import { ITEM_INTERNAL_OF_STABLE } from '../data/items';
 import { weatherToSave } from '../world/weather/Weather';
 import { applyLunarSave } from '../world/LunarEvent';
-import { furnitureFromSave, furnitureToSave } from '../world/FurnitureItems';
+import { furnitureFromSave } from '../world/FurnitureItems';
 
 export { bytesToB64, rlePairs, rleTiles, serializeSave } from './serialize';
 export type { SaveData, SaveStoreView, SaveMeta } from './serialize';
@@ -54,7 +54,8 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
     // 挂物族存放物（内部 id；serializeSave 内过稳定 id 表）
-    furniture: furnitureToSave(world.furnitureItems, (id) => ITEM_STABLE_OF_INTERNAL[id] ?? 0),
+    // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
+    furniture: world.furnitureItems,
   };
   const playerData: SaveData['player'] = {
     hp: player.hp, x: player.x, y: player.y,
@@ -99,7 +100,8 @@ export function saveWorldOnly(world: World): string {
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
-    furniture: furnitureToSave(world.furnitureItems, (id) => ITEM_STABLE_OF_INTERNAL[id] ?? 0),
+    // 挂物族存放物：内部 id 直传（serializeSave 内统一过稳定 id 表，与 chests 同路径）
+    furniture: world.furnitureItems,
   };
   const placeholderPlayer: SaveData['player'] = {
     hp: 0, x: world.spawnX * 16, y: world.spawnY * 16,

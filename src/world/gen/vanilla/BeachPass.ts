@@ -233,14 +233,15 @@ function shellPile(st: TileStore, rng: RNG, X: number, Y: number, worldSurface: 
   return true;
 }
 
-/** 海滩装饰：贝壳堆 + 海藻（GrowCheckSeaweed 简化 1:1：沙面+上方 4 格全满水才长） */
+/** 海滩装饰：贝壳堆（海藻已去重——1:1 版由 Lilypads pass 的 GrowCheckSeaweed 承担，
+ *  见 SurfaceDecorPasses.runLilypadsPass，cs:22177-22192 全列上扫） */
 export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const SEAWEED = TILE_BY_KEY['v_549_seaweed'] ?? 0;
   const sides: Array<[number, number, number]> = [
     [1, Math.max(1, gs.beachLeftEnd - 120), gs.beachLeftEnd],
     [-1, gs.beachRightStart, Math.min(st.w - 2, gs.beachRightStart + 120)],
   ];
   for (const [dir, x0, x1] of sides) {
+    void x0; void x1;
     // 贝壳堆：50% 概率，锚点 = 海滩边界附近沙面（原版 shellStart 扫描近似）
     if (rng.next() < 0.5) {
       const baseX = dir === 1 ? gs.beachLeftEnd - rng.int(0, 5) : gs.beachRightStart + rng.int(0, 5);
@@ -255,21 +256,6 @@ export function runBeachDecorPass(st: TileStore, rng: RNG, gs: GenState): void {
           if (off !== 0 && rng.next() >= 0.5) continue; // 原版 Next(maxValue 2..3) 门
           const x = dir === 1 ? baseX - off : baseX + off;
           shellPile(st, rng, x, Math.max(2, by - 50), gs.worldSurface + 120);
-        }
-      }
-    }
-    // 海藻：每个海洋列找沙面，上方 4 格全满水 → 2/3 放（原版 GrowCheckSeaweed 深水条件）
-    if (SEAWEED) {
-      for (let x = x0; x < x1; x++) {
-        for (let y = 2; y < st.h - 4; y++) {
-          const i = st.idx(x, y);
-          if (!st.flags[i] || st.type[i] !== T.SAND) continue;
-          const deep = [1, 2, 3, 4].every((d) => st.liquid[st.idx(x, y - d)] === 255 && !st.flags[st.idx(x, y - d)]);
-          if (deep && rng.int(0, 2) !== 0) {
-            const ai = st.idx(x, y - 1);
-            st.type[ai] = SEAWEED; st.flags[ai] = 1; st.frameX[ai] = Math.floor(rng.next() * 3) * 18; st.frameY[ai] = 0;
-          }
-          break; // 每列只处理首个沙面
         }
       }
     }

@@ -16,7 +16,6 @@ const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const MUSH_TREE = TILE_BY_KEY['v_72_mushroom_tree']!;
 const SANDSTONE = TILE_BY_KEY['sandstone']!, HARDSAND = TILE_BY_KEY['hardened_sand']!;
-const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 
 /** WorldGenRange Count（Configuration.json：Marble=WorldArea、Granite=WorldWidth，均 Min4/Max8）。
  *  4200×1200 两模式 scale 均 = 1 → Next(4,9)。 */
@@ -373,5 +372,3 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
     }
   }
 }
-
-export { CLOUD };

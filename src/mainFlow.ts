@@ -602,6 +602,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     joinRoom: (url: string, token: string) => joinRoom(url, token), // 探针桥：房间制加入
     createRoom: (addr: string, opts: Record<string, unknown>) => createRoom(addr, opts as never), // 探针桥：建房
     loadJson: (text: string) => loadFromJson(text), // 读自有 json 存档（探针）
+    itemByKey: (key: string) => ITEM_BY_KEY[key] ?? -1, // 探针桥：物品 id（生产构建也可用——页内 import('/src/...') 仅 dev 可达）
+    spawnVanillaEnemy: async (id: number, x: number, y: number) => {
+      const { Enemy } = await import('./entities/Enemy');
+      if (!game) return null;
+      const e = Enemy.fromVanilla(id, x, y);
+      if (!e) return null;
+      game.entities.add(e, 'enemies');
+      return { id: e.id, x: e.x, y: e.y, hp: e.hp };
+    },
   };
 
   return {

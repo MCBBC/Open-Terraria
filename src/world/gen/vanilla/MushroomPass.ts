@@ -84,7 +84,7 @@ export function runMushroomPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (!flag && placed.length < 50) {
         shroomPatch(st, rng, gs, x, y);
         for (let k = 0; k < 5; k++) shroomPatch(st, rng, gs, x + rng.int(-40, 40), y + rng.int(-40, 40));
-        placed.push([x, y]);
+        placed.push([x, y]); console.log(`mushPlaceJS ${x},${y}`);
       }
       tries++;
       if (tries > Math.floor(w / 2)) break;
