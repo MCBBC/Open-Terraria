@@ -12,6 +12,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
+import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
@@ -70,14 +71,19 @@ const MINION_SHOOT: Record<number, { shot: number; speed: number; cd: number; ra
   1094: { shot: 1097, speed: 11, cd: 42, range: 800 },
 };
 
-/** 其他哨兵射击表（aiStyle 53 :27300 / aiStyle 123 :33990 提取；射程门 1000）：
- *  308 冰九头蛇→309 冰弹 sp9 CD60（炮口 +24*facing）；377 蜘蛛皇后→378 蛛卵 sp9 CD60；
- *  966 猎犬→967 sp12.5 CD90（Center-16Y）；641 月门→642 传送门弹 CD30（10t 蓄+20t 冷）；
- *  643 彩虹水晶→644×3 目标区随机落点 CD50（:34000 三连，距离越远散布越大） */
+/** aiStyle 53 定点哨兵表（AI :27172-27382 1:1）：初冷 ai[0]=120（:27180），
+ *  射速 ai[0] 归零重置 60（966 猎犬 90，:27282-27288），弹速 9/9/12.5。
+ *  炮口按瞄准扇区偏移（:27289-27305，见 sentry53Fire）；射程门 1000
+ *  （AI_053_HandleSentryNPCTargeting :37845 默认 maxDistance=1000，无视线门） */
+const SENTRY53: Record<number, { shot: number; speed: number; cd: number }> = {
+  308: { shot: 309, speed: 9, cd: 60 },   // 冰九头蛇 → 309 冰弹
+  377: { shot: 378, speed: 9, cd: 60 },   // 蜘蛛皇后 → 378 蛛卵
+  966: { shot: 967, speed: 12.5, cd: 90 }, // 猎犬（Houndius）→ 967
+};
+/** aiStyle 123 哨兵射击表（:33819-34020 提取；射程门 1000）：
+ *  641 月门→642 传送门弹 CD30；643 彩虹水晶→644×3 目标区随机落点 CD50
+ *  （:34005 三连，距离越远散布越大） */
 const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; volley?: number }> = {
-  308: { shot: 309, speed: 9, cd: 60 },
-  377: { shot: 378, speed: 9, cd: 60 },
-  966: { shot: 967, speed: 12.5, cd: 90 },
   641: { shot: 642, speed: 9, cd: 30 },
   643: { shot: 644, speed: 0, cd: 50, volley: 3 },
 };
@@ -89,12 +95,36 @@ interface EnemyLike {
   hurt: (d: number, kx: number, ky: number, g: GameHooks) => boolean;
 }
 
-/** 接触伤害的每敌冷却表（原版 npc.immune[owner]≈10t） */
+/** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
+const remap01 = (value: number, from1: number, to1: number, from2: number, to2: number): number => {
+  if (value <= from1) return from2;
+  if (value >= to1) return to2;
+  return from2 + (to2 - from2) * (value - from1) / (to1 - from1);
+};
+
+/** XNA Vector2.CatmullRom（AI_162 :44091 样条插值） */
+const catmullRom = (
+  v1: { x: number; y: number }, v2: { x: number; y: number },
+  v3: { x: number; y: number }, v4: { x: number; y: number }, t: number,
+): { x: number; y: number } => {
+  const t2 = t * t, t3 = t2 * t;
+  return {
+    x: 0.5 * (2 * v2.x + (-v1.x + v3.x) * t + (2 * v1.x - 5 * v2.x + 4 * v3.x - v4.x) * t2 + (-v1.x + 3 * v2.x - 3 * v3.x + v4.x) * t3),
+    y: 0.5 * (2 * v2.y + (-v1.y + v3.y) * t + (2 * v1.y - 5 * v2.y + 4 * v3.y - v4.y) * t2 + (-v1.y + 3 * v2.y - 3 * v3.y + v4.y) * t3),
+  };
+};
+
+/** 接触伤害的每敌冷却（原版 localNPCImmunity 1:1）：
+ *  - Projectile.Update :15330 每 update 先整体衰减（DecrementLocalImmuneTimeCounters
+ *    :15926-15941），再跑碰撞（Damage_PVE :11878-11884 要求 array[i]==0）
+ *  - 命中写入 immuneArray[victimIndex] = localNPCHitCooldown（:13152-13154，
+ *    同时 targetNPC.immune[owner]=0 —— 不吃玩家的全局受击免疫）
+ *  ⇒ 命中后恰好 cd 个 tick 再命中（cd=3 → 每 3t 一跳；旧实现"先判后减"多出 1t） */
 export class MinionHitCd {
   private map = new Map<number, number>();
   ready(id: number, cd: number): boolean {
     const t = this.map.get(id) ?? 0;
-    if (t > 0) { this.map.set(id, t - 1); return false; }
+    if (t > 1) { this.map.set(id, t - 1); return false; }
     this.map.set(id, cd);
     return true;
   }
@@ -124,6 +154,11 @@ export class MinionProj extends Entity {
   sFire = 0;
   sFireT = 0;
   sCool = 0;
+  /** aiStyle 53 一次性初始化门（localAI[0]==0 → ai[0]=120，:27176-27181） */
+  sInit = 0;
+  /** 闪电光环方形场边长（AI_137 :65972-65981 净空测量；0=未测）与场中心 Y（地面点） */
+  auraSide = 0;
+  auraCy = 0;
   /** 朝向（哨兵 spriteDirection / 随从渲染翻转） */
   facing = 1;
   /** 攻击闪光 tick（AI_062 小鬼攻击帧 +4 门：命中后 24t） */
@@ -132,8 +167,19 @@ export class MinionProj extends Entity {
   noSlot = false;
   /** 龙链父段引用（626/627/628 跟随前段） */
   parentRef: (() => MinionProj | null) | null = null;
-  /** 虎/守护者冲刺状态 */
-  private dashT = 0;
+  /** 虎扑链状态（AI_067）：ai[0] 4=链发后等待 / ai[1]=剩余等待 tick（:46702-46718） */
+  private tigerA0 = 0;
+  private tigerA1 = 0;
+  /** 守护者 AI_120 状态（ai[0]/ai[1]/frameCounter/retarget 计数） */
+  private gA0 = 0;
+  private gA1 = -1;
+  private gFc = 0;
+  private gFrame = 0;
+  private gRetarget = 0;
+  /** 乌鸦 AI_054 状态（ai[0] 归位态 / ai[1] 扑击计时 / 帧区 0=飞 1=扑） */
+  private rA0 = 0;
+  private rA1 = 0;
+  ravenZone = 0;
   /** 家族一次性初始化（龙链生成） */
   private spawned = false;
   /** 渲染旋转（龙链：段朝向 = 指向父段 +PI/2，同原版 rotation=velocity.ToRotation()+PI/2） */
@@ -260,27 +306,30 @@ export class MinionProj extends Entity {
     this.facing = p.facing;
   }
 
-  /** 沙漠虎本体（833/834/835，minionSlots=0）：地面追击 + 周期冲刺（818 链近似为
-   *  直线穿墙冲刺，132 判定盒、冲刺伤 ×(1.5+0.4n)→取 1.5×缩放）；伤害 ×(1+0.4×(宝石数-1)) */
+  /** 沙漠虎本体（833/834/835，aiStyle 67）：地面追击 + 周期 818 多段扑击链
+   *  （AI_067_TigerSpecialAttack :46383-46479 1:1，链长 = 宝石数+1）。
+   *  冷却 localAI[0]（:46705-46712：成功 833→360/834→300/835→240、失败 10t 重试）；
+   *  链发后本体瞬移末段并进入 ai[0]=4 等待（:46475-46478、:46702-46718，等待期
+   *  无接触伤 Damage_CanDealDamage :11782）。接触伤害 ×(1+0.4×(宝石数-1))
+   *  （StormTiger 集 :12101-12105）；818 弹伤 ×(1.5+0.4n)（:12107-12111） */
   private tigerBody(game: GameHooks, p: Player, dmg0: number): void {
     const gems = Math.max(1, this.peerCount(game, 831));
     const scale = 1 + 0.4 * (gems - 1);
-    const cd = this.projId === 833 ? 360 : this.projId === 834 ? 300 : 240;
-    const tgt = this.nearestEnemy(game, 800);
-    if (this.dashT > 0) {
-      this.dashT--;
-      if (tgt) {
-        const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-        this.x += ((tgt.cx - this.cx) / d) * 12;
-        this.y += ((tgt.cy - this.cy) / d) * 12;
-      }
-      // 818 冲刺伤 ×(1.5+0.4×(宝石数-1))（:12108）
-      this.contact(game, dmg0 * scale * (1.5 + 0.4 * (gems - 1)), 10, 58);
+    // ai[0]==4 等待态（:46702-46718）
+    if (this.tigerA0 === 4) {
+      this.vx = this.vy = 0;
+      if (--this.tigerA1 <= 0) { this.tigerA0 = 0; this.tigerA1 = 0; }
       return;
     }
+    // 特殊攻击门（:46705-46712：localAI[0]≤0 且 damage!=0 → 尝试；成功按档冷却/失败 10t）
     if (this.pounceCd > 0) this.pounceCd--;
-    if (tgt && this.pounceCd <= 0) { this.dashT = 30; this.pounceCd = cd; return; }
+    else {
+      const cd = this.projId === 834 ? 300 : this.projId === 835 ? 240 : 360;
+      if (this.tigerSpecialAttack(game, p, dmg0)) { this.pounceCd = cd; return; }
+      this.pounceCd = 10;
+    }
     // 地面追击（AI_067 地面段近似）
+    const tgt = this.nearestEnemy(game, 800);
     if (tgt) {
       this.vx += Math.sign(tgt.cx - this.cx) * 0.12;
       this.vx = Math.max(-3.5, Math.min(3.5, this.vx));
@@ -295,6 +344,71 @@ export class MinionProj extends Entity {
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
     this.contact(game, dmg0 * scale, 10);
+  }
+
+  /** AI_067_TigerSpecialAttack（:46383-46479）：多段 818 链 1:1。
+   *  目标池 = 玩家周 1600×800 盒（:46389-46399）；nPC2 距玩家最近收尾、nPC3 距本体
+   *  最近首发，其余随机带 4×序号速度前置补位（list2 ≤ 宝石数+1，:46401-46451）；
+   *  末段落点实心则追加玩家中心（:46455-46459）；逐段 818（ai[0]=-累计t×4 延迟、
+   *  ai[1]=段时长×4，段时长 = min(min(20,30/段数), 4+ceil(距离/50)) 下限 5，
+   *  :46461-46472） */
+  private tigerSpecialAttack(game: GameHooks, p: Player, dmg0: number): boolean {
+    const ents = (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities;
+    const gems = Math.max(1, this.peerCount(game, 831));
+    const num = gems + 1; // :46388（ownedProjectileCounts[831]+1）
+    const pool: (EnemyLike & { vx?: number; vy?: number })[] = [];
+    for (const e of game.enemies()) {
+      const en = e as EnemyLike & { vx?: number; vy?: number };
+      if (!en.dead && Math.abs(en.cx - p.cx) <= 800 && Math.abs(en.cy - p.cy) <= 400) pool.push(en);
+    }
+    if (!pool.length) return false;
+    // nPC2：距玩家最近（:46402-46412）
+    let n2 = pool[0];
+    for (let j = 1; j < pool.length; j++) {
+      if (Math.hypot(n2.cx - p.cx, n2.cy - p.cy) > Math.hypot(pool[j].cx - p.cx, pool[j].cy - p.cy)) n2 = pool[j];
+    }
+    pool.splice(pool.indexOf(n2), 1);
+    // nPC3：距本体最近（:46414-46426）
+    let n3: (EnemyLike & { vx?: number; vy?: number }) | null = null;
+    if (pool.length) {
+      n3 = pool[0];
+      for (let k = 1; k < pool.length; k++) {
+        if (Math.hypot(n3.cx - this.cx, n3.cy - this.cy) > Math.hypot(pool[k].cx - this.cx, pool[k].cy - this.cy)) n3 = pool[k];
+      }
+      pool.splice(pool.indexOf(n3), 1);
+    }
+    const hops: { x: number; y: number }[] = [];
+    if (n3) hops.push({ x: n3.cx, y: n3.cy }); // :46428-46431
+    let lead = 0;
+    while (pool.length > 0 && hops.length < num - 1) { // :46433-46441（速度前置 4×(序号+1)）
+      const idx = Math.floor(Math.random() * pool.length);
+      const en = pool[idx];
+      hops.push({ x: en.cx + (en.vx ?? 0) * 4 * (lead + 1), y: en.cy + (en.vy ?? 0) * 4 * (lead + 1) });
+      pool.splice(idx, 1);
+      lead++;
+    }
+    hops.push({ x: n2.cx, y: n2.cy }); // :46443-46447（收尾 = 距玩家最近）
+    // 末段落点实心 → 追加玩家中心（:46448-46452）
+    const st = game.world.store;
+    const lastT = Math.floor(hops[hops.length - 1].x / TILE), lastY = Math.floor(hops[hops.length - 1].y / TILE);
+    if (st.inBounds(lastT, lastY) && st.isSolid(lastT, lastY)) hops.push({ x: p.cx, y: p.cy });
+    const num3 = Math.min(20, 30 / hops.length); // :46455-46457
+    let cx0 = this.cx, cy0 = this.cy, num4 = 0;
+    const add = (el: unknown) => ents.add(el, 'projectiles');
+    for (const h of hops) {
+      const hx = h.x + (cx0 < h.x ? 20 : -20); // :46459-46462（X 向前偏 20px）
+      const dx = hx - cx0, dy = h.y - cy0;
+      const dist = Math.hypot(dx, dy);
+      let num6 = Math.min(num3, 4 + Math.ceil(dist / 50)); // :46463-46468
+      if (num6 < 5) num6 = 5;
+      add(new TigerPounce(cx0, cy0, dx, dy, dmg0, () => this.ownerRef(), -num4 * 4, num6 * 4)); // :46470
+      cx0 = hx; cy0 = h.y;
+      num4 += num6; // :46473-46474
+    }
+    this.x = cx0 - this.w / 2; this.y = cy0 - this.h / 2; // base.Center = vector2（:46475）
+    this.vx = this.vy = 0;
+    this.tigerA0 = 4; this.tigerA1 = num4; // ai[0]=4 / ai[1]=总时长（:46476-46477）
+    return true;
   }
 
   /** 阿比盖尔本体 963（aiStyle 62 前段 :62109-63100）：飞行近战，<50px 挥击
@@ -324,86 +438,198 @@ export class MinionProj extends Entity {
     this.contact(game, dmg0 * scale, 20);
   }
 
-  /** 星尘守护者 623（套装奖励，Player.cs:16195）：站玩家侧后 -(5+w/2)×dir,-25；
-   *  500 内最近敌瞬移冲刺拳击（AI_120 近似） */
-  private guardianBody(game: GameHooks, p: Player, dmg0: number): void {
-    const tgt = this.nearestEnemy(game, 500);
-    if (tgt) {
-      const d = Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) || 1;
-      this.vx = (tgt.cx - this.cx) / d * 10;
-      this.vy = (tgt.cy - this.cy) / d * 10;
-      this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
-    } else {
-      const hx = p.cx - p.facing * (5 + this.w / 2), hy = p.cy - 25;
-      const dx = hx - this.cx, dy = hy - this.cy;
-      const d = Math.hypot(dx, dy) || 1;
-      const spd = Math.min(10, d * 0.1);
-      this.vx = (dx / d) * spd;
-      this.vy = (dy / d) * spd;
-      this.facing = p.facing;
+  /** 乌鸦 317（aiStyle 54，AI :27383-27590 1:1）：同类 28px 内互推 0.05
+   *  （:27397-27416）；距玩家曼哈顿 >500 → ai[0]=1 归位态（:27425-27430）。
+   *  攻击态索敌 900 曼哈顿 + 视线（:27433-27485）；无目标 → 跟随玩家上方 60px
+   *  （速 8/12，317 距>100 提速 12/15，velocity=(v×20+dir)/21 :27499-27536，
+   *  >2000 瞬移 :27519-27522，<70 漂移 ×1.01 :27537-27540）；有目标 → 扑击循环
+   *  （ai[1]==-1→17 倒数，归零后以 16/10 速冲向目标 :27557-27580，帧 4-7）。
+   *  仅扑击中有接触伤（friendly 门 :27568/:27581），localNPCHitCooldown=10（:3836）；
+   *  命中重置 ai[1]=-1（case 317 :12777-12780） */
+  private ravenBody(game: GameHooks, p: Player, dmg0: number): void {
+    // 同类分离（:27397-27416）
+    const projs = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles;
+    for (const m of projs) {
+      if (m === this || !(m instanceof MinionProj) || m.dead || m.projId !== 317) continue;
+      if (Math.abs(this.x - m.x) + Math.abs(this.y - m.y) < this.w) {
+        this.vx += this.x < m.x ? -0.05 : 0.05;
+        this.vy += this.y < m.y ? -0.05 : 0.05;
+      }
     }
-    this.x += this.vx;
-    this.y += this.vy;
-    this.contact(game, dmg0, 10);
+    // 归位门（:27425-27430：曼哈顿 > num440=500 → ai[0]=1）
+    if (Math.abs(this.cx - p.cx) + Math.abs(this.cy - p.cy) > 500) this.rA0 = 1;
+    // 索敌（仅 ai[0]==0：num439=900 曼哈顿 + CanHit 视线，:27433-27485）
+    let tgt: EnemyLike | null = null;
+    if (this.rA0 === 0) {
+      let best = 900;
+      for (const e of game.enemies()) {
+        const en = e as EnemyLike;
+        if (en.dead) continue;
+        const d = Math.abs(this.cx - en.cx) + Math.abs(this.cy - en.cy);
+        if (d < best && canHit(game.world.store, this.x, this.y, this.w, this.h, en.x, en.y, en.w, en.h)) {
+          best = d; tgt = en;
+        }
+      }
+    }
+    if (!tgt) {
+      // 跟随玩家上方 60px（:27501-27545）
+      const dx = p.cx - this.cx, dy = p.cy - 60 - this.cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist < 100 && this.rA0 === 1) this.rA0 = 0; // :27512-27517（归位态近身回攻击态）
+      if (dist > 2000) { this.x = p.cx - this.w / 2; this.y = p.cy - this.w / 2; } // :27519-27522
+      let spd = this.rA0 === 1 ? 12 : 8;              // :27501-27503
+      if (dist > 100) spd = this.rA0 === 1 ? 15 : 12; // :27524-27531（317 专属提速）
+      if (dist > 70) {
+        this.vx = (this.vx * 20 + (dx / dist) * spd) / 21; // :27533-27535
+        this.vy = (this.vy * 20 + (dy / dist) * spd) / 21;
+      } else {
+        if (this.vx === 0 && this.vy === 0) { this.vx = -0.15; this.vy = -0.05; } // :27537-27539
+        this.vx *= 1.01; this.vy *= 1.01;                                            // :27540
+      }
+      this.rot = this.vx * 0.05; // :27542
+      this.ravenZone = 0;        // 帧 0-3（:27543-27549）
+      if (Math.abs(this.vx) > 0.2) this.facing = -Math.sign(this.vx); // :27551-27553（spriteDirection=-direction）
+      this.x += this.vx; this.y += this.vy;
+      return; // friendly=false（:27544）——跟随期无接触伤
+    }
+    // 扑击循环（:27557-27590）
+    if (this.rA1 === -1) this.rA1 = 17; // :27557-27559
+    if (this.rA1 > 0) this.rA1--;
+    let charging = false;
+    if (this.rA1 === 0) {
+      // 冲刺（friendly=true :27568-27580）：速 16，距<100 → 10；velocity=(v×14+dir)/15
+      const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
+      const dist = Math.hypot(dx, dy) || 1;
+      const spd = dist < 100 ? 10 : 16;
+      this.vx = (this.vx * 14 + (dx / dist) * spd) / 15;
+      this.vy = (this.vy * 14 + (dy / dist) * spd) / 15;
+      charging = true;
+    } else if (Math.abs(this.vx) + Math.abs(this.vy) < 10) {
+      this.vx *= 1.05; this.vy *= 1.05; // :27582-27585
+    }
+    this.rot = this.vx * 0.05; // :27587
+    this.ravenZone = 1;        // 帧 4-7（:27588-27594）
+    if (Math.abs(this.vx) > 0.2) this.facing = -Math.sign(this.vx);
+    this.x += this.vx; this.y += this.vy;
+    if (charging && this.contact(game, dmg0, 10)) this.rA1 = -1; // 命中重置（:12777-12780）
   }
 
-  /** 接触伤害通用（pad=判定盒外扩，818 冲刺用）；鞭 tag + TagCrit 语义同主线 */
-  private contact(game: GameHooks, dmg: number, cd: number, pad = 0): void {
+  /** 星尘守护者 623（套装奖励，AI_120_StardustGuardian :41969-42299 1:1）：
+   *  ai[0] 状态机——0=贴身跟随（Lerp 0.05 至玩家侧后 -(5+w/2)×dir,-25，索敌 500
+   *  （|Δx-锚|≤170 门 :42036-42039）， leash 步进 0.1 :42053-42068）→ 2=冲刺拳击
+   *  （绕到目标背侧 npc-(dir×(w/2+70),-10)，velocity.MoveTowards(≤6×Remap(50..400,1..4),32)
+   *  :42220-42225，每 4t 重锁 :42227-42238）→ 失去目标/超 500 回 0。
+   *  状态 1/3 需 HasMinionRestTarget（:42079/:42250，本作无该系统——原版无目标时
+   *  即刻回退 ai[0]=0 :42255-42257，故不实装）。
+   *  命中仅状态 2：80×40 拳盒于 Center+direction×40（Colliding :14294-14300），
+   *  localNPCHitCooldown=5（:6433）；伤害走 resolveWhipTagHit（623 是 minion） */
+  private guardianBody(game: GameHooks, p: Player, dmg0: number): void {
+    const add = (e: unknown) =>
+      (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
+    const restX = p.cx - (5 + p.w / 2) * p.facing; // :41995（(5+player.width/2)×direction）
+    const restY = p.cy - 25;                        // :41996
+    if (this.gA0 === 2) {
+      // ---- 状态 2：冲刺拳击 ----
+      const tgt = this.enemyById(game, this.gA1);
+      const inRange = tgt && Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) <= 500; // :42203（Distance > num3=500 作废）
+      const nearPlayer = Math.hypot(p.cx - this.cx, p.cy - this.cy) < 500;          // :42196（flag5）
+      if (!tgt || !inRange || !nearPlayer) {
+        this.gA0 = 0; this.gA1 = -1; // :42208-42212
+        this.gFrame = 18;            // :42213-42216（收拳帧）
+      } else {
+        const dirX = tgt.cx - p.cx > 1 ? 1 : -1;    // :42220
+        // :42221 目标位 = 敌心 + (-dirX×(敌宽/2+70), -10)
+        const relX = tgt.cx - dirX * (tgt.w / 2 + 70) - this.cx;
+        const relY = tgt.cy - 10 - this.cy;
+        // :42222 maxAmount = 6×Remap(dist, 50→400, 1→4)
+        const dist = Math.hypot(relX, relY);
+        const maxAmt = 6 * remap01(dist, 50, 400, 1, 4);
+        const dl = Math.hypot(relX, relY);
+        const desX = dl <= maxAmt ? relX : relX / dl * maxAmt; // MoveTowards(Zero, rel, maxAmt)
+        const desY = dl <= maxAmt ? relY : relY / dl * maxAmt;
+        // :42224-42225 velocity.MoveTowards(desired, 32)
+        const vl = Math.hypot(desX - this.vx, desY - this.vy);
+        if (vl > 32) { this.vx += (desX - this.vx) / vl * 32; this.vy += (desY - this.vy) / vl * 32; }
+        else { this.vx = desX; this.vy = desY; }
+        this.facing = dirX; // :42226
+        this.x += this.vx; this.y += this.vy;
+        // 每 4t 重锁 500 内最近敌（:42227-42238）
+        if (++this.gRetarget >= 4) {
+          this.gRetarget = 0;
+          const nt = this.nearestEnemy(game, 500);
+          if (nt) this.gA1 = nt.id;
+        }
+        // 攻击帧 12-19（12/13 快速、14 后保持 :42173-42191）
+        if (this.gFrame < 12) this.gFrame = 12;
+        const rate = this.gFrame === 12 || this.gFrame === 13 ? 8 : 3;
+        if (++this.gFc >= rate) { this.gFc = 0; if (++this.gFrame >= 19) this.gFrame = 14; }
+        // 拳盒命中（:14294-14300：状态 2 才有碰撞，80×40 @ Center+direction×40）
+        for (const ent of game.enemies()) {
+          const en = ent as never as EnemyLike & import('./WhipTag').WhipTagged;
+          if (en.dead) continue;
+          const bx = this.cx + this.facing * 40 - 40, by = this.cy - 20;
+          if (en.x + en.w <= bx || en.x >= bx + 80 || en.y + en.h <= by || en.y >= by + 40) continue;
+          if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
+          const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy);
+          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game);
+          this.attackFlash = 24;
+        }
+      }
+      return;
+    }
+    // ---- 状态 0：贴身跟随 + 索敌 ----
+    this.x += (restX - this.cx) * 0.05; // :42022 Lerp(Center, vector, 0.05)
+    this.y += (restY - this.cy) * 0.05;
+    this.vx *= 0.5; this.vy *= 0.5;     // :42023
+    this.facing = p.facing;             // :42024
+    if (++this.gFc >= 9) { this.gFc = 0; if (++this.gFrame >= 8) this.gFrame = 0; } // :42025-42032
+    let tgt: EnemyLike | null = null;
+    if (Math.abs(this.cx - restX) <= 170) tgt = this.nearestEnemy(game, 500); // :42036-42043（num+20 门 / num2=500）
+    if (tgt) {
+      const dirX = tgt.cx > this.cx ? 1 : -1; // :42047
+      this.facing = dirX;
+      const num6 = Math.abs(restX - this.cx);
+      const num7 = Math.abs(tgt.cx - this.cx);
+      const num8 = Math.abs(restY - this.cy);
+      const num9 = Math.abs(tgt.cy - (this.y + this.h)); // npc.Y - Bottom
+      const dirY = tgt.cy > this.y + this.h ? 1 : -1;
+      // X leash（:42053-42056）：锚内或反向 且 20<|Δx|<150-锚偏+100 → 步进 0.1，否则衰减
+      if ((num6 < 150 || (restX - this.cx) * dirX < 0) && num7 > 20 && num7 < 150 - num6 + 100) {
+        this.vx += 0.1 * dirX;
+      } else this.vx *= 0.7;
+      // Y leash（:42061-42064，num4=100）
+      if ((num8 < 100 || (restY - (this.y + this.h)) * dirY < 0) && num9 > 10 && num9 < 100 - num8 + 10) {
+        this.vy += 0.1 * dirY;
+      } else this.vy *= 0.7;
+      if (num7 < 500) { this.gA0 = 2; this.gA1 = tgt.id; } // :42069-42073（num3=500 → 冲刺）
+    }
+    this.x += this.vx; this.y += this.vy; // 标准位移（velocity 持续衰减）
+  }
+
+  /** 接触伤害通用（pad=判定盒外扩）；鞭 tag + TagCrit + proc 统一走 resolveWhipTagHit
+   *  （TagEffectState.ModifyHit :216-228 / OnHit :230-243，含黑收成 OnTaggedHit 与
+   *  火鞭/星陨/花瓣/月主弹 proc 首跳）。返回是否命中过（乌鸦命中重置扑击计时） */
+  private contact(game: GameHooks, dmg: number, cd: number, pad = 0): boolean {
     const add = (e: unknown, b: string) =>
       (game as unknown as { entities: { add: (x: unknown, y: string) => void } }).entities.add(e, b);
+    let anyHit = false;
     for (const e of game.enemies()) {
-      const en = e as never as EnemyLike & {
-        dead: boolean; whipTagT?: number; whipTagDmg?: number; whipTagCrit?: number;
-        whipTagItem?: number; whipProcT?: number; whipProcItem?: number;
+      const en = e as never as EnemyLike & import('./WhipTag').WhipTagged & {
+        hurtFx?: (d: number) => void;
       };
       if (en.dead) continue;
       if (!(this.x - pad < en.x + en.w && this.x + this.w + pad > en.x
         && this.y - pad < en.y + en.h && this.y + this.h + pad > en.y)) continue;
       if (!this.hitCd.ready(en.id, cd)) continue;
-      const tag = en.whipTagT && en.whipTagT > 0 ? (en.whipTagDmg ?? 0) : 0;
-      const crit = tag > 0 && Math.random() * 100 < (en.whipTagCrit ?? 0);
-      let dmg1 = (dmg + tag) * (crit ? 2 : 1);
-      // 黑收成 OnTaggedHit（WhipTagEffect_DarkHarvest :9-20：每次 tag 命中 → 916 黑闪电，
-      // 伤害 = TagDamage×乘率，armorPen 50）——视觉走 916 弹幕
-      if (tag > 0 && en.whipTagItem === 4680) {
-        en.hurt(Math.max(1, Math.round(tag)), Math.sign(en.cx - this.cx), -1, game);
-        add(new Arrow(en.cx, en.cy, 0, -1, 0, 0, 916, null, { grav: 0, life: 24, pierce: 99 }), 'projectiles');
-        game.spawnParticles(en.cx, en.cy, '#7A3AFF', 6, 2.2, { life: 20 });
-      }
-      // proc 型鞭首跳（TagEffectState：ModifyProcHit→OnProcHit 一次性）：
-      //  4912 火鞭 ×2.75 + 918 爆炸（伤×1.75,96 盒）；5476 星陨（×1.33 自上而下）；
-      //  5477 花瓣×3（各 40）；5479 星座星（×0.33 若干）；5480 月主弹（20，3 连近似 1 发）
-      if (en.whipProcT && en.whipProcT > 0 && en.whipProcItem) {
-        const pi = en.whipProcItem;
-        en.whipProcT = 0;
-        if (pi === 4912) {
-          dmg1 *= 2.75; // ProcDamageMultiplier 1.75 → ModifyProcHit 合计 ×2.75
-          const ex = Math.max(1, Math.round(dmg * 1.75));
-          for (const ent2 of game.enemies()) {
-            const en2 = ent2 as EnemyLike & { dead: boolean };
-            if (en2.dead || Math.abs(en2.cx - en.cx) > 48 + en2.w / 2 || Math.abs(en2.cy - en.cy) > 48 + en2.h / 2) continue;
-            en2.hurt(ex, Math.sign(en2.cx - en.cx) * 2, -2, game);
-          }
-          game.spawnParticles(en.cx, en.cy, '#FF7A28', 16, 4, { life: 26 });
-        } else if (pi === 5476) {
-          add(new Arrow(en.cx - 6, en.cy - 280, 0.4, 8, Math.max(1, Math.round(dmg * 1.33)), 2, 1037, null, { grav: 0 }), 'projectiles');
-        } else if (pi === 5477) {
-          for (let i = 0; i < 3; i++) {
-            const a = Math.random() * Math.PI * 2;
-            add(new Arrow(en.cx, en.cy, Math.cos(a) * 3.5, Math.sin(a) * 3.5, 40, 2, 1038, null, { grav: 0, life: 120 }), 'projectiles');
-          }
-        } else if (pi === 5479) {
-          for (let i = 0; i < 3; i++) {
-            add(new Arrow(en.cx, en.cy - 20 - i * 30, (Math.random() - 0.5) * 2, 3,
-              Math.max(1, Math.round(dmg * 0.33)), 1, 1039, null, { grav: 0, life: 240 }), 'projectiles');
-          }
-        } else if (pi === 5480) {
-          add(new Arrow(en.cx, en.cy - 30, (Math.random() - 0.5) * 4, 6, 20, 1, 1045, null, { grav: 0 }), 'projectiles');
-        }
-      }
-      en.hurt(Math.max(1, Math.round(dmg1)), Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
+      // 黑收成 OnTaggedHit 直伤通道（916 等价）
+      en.hurtFx = (d: number) => { en.hurt(d, Math.sign(en.cx - this.cx), -1, game); };
+      const res = resolveWhipTagHit(en, dmg, game,
+        (el) => add(el, 'projectiles'), SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
+      en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback * 0.5, -1, game);
       this.attackFlash = 24;
+      anyHit = true;
     }
+    return anyHit;
   }
 
   /** 同类计数（计数器/本体伤害档位用：831 宝石数 / 970 阿比盖尔数） */
@@ -441,6 +667,16 @@ export class MinionProj extends Entity {
     this.ground = ground;
     this.life = sentry ? 60 * 600 : Infinity; // 哨兵 10 分钟（哨兵类默认时限近似）
     this.ownerRef = owner;
+  }
+
+  /** 按 id 取敌（AI_120 ai[1] 目标槽 :42198-42207 等价） */
+  private enemyById(game: GameHooks, id: number): EnemyLike | null {
+    if (id < 0) return null;
+    for (const e of game.enemies()) {
+      const en = e as EnemyLike;
+      if (!en.dead && en.id === id) return en;
+    }
+    return null;
   }
 
   /** 最近敌人（无目标 null）。鞭 tag 优先（原版随从锁定被鞭标记目标：
@@ -538,19 +774,56 @@ export class MinionProj extends Entity {
         }
         return;
       }
-      // 闪电光环族（AI_137）：非射击——每 3t 对塔周 4 格盒内敌人场伤
-      // （localNPCHitCooldown=3；宽 999 扫描增长近似为固定 4 格盒）
+      // 闪电光环族（AI_137_LightningAura :65910-66060 1:1）：非射击场伤——
+      // 落地后一次性测净空：脚下找地面（下搜 500 格）、头顶找天花板（上搜 num=10 格），
+      // 边长 = 净空px 截断 [num5×16=64, num×16=160] 再 ×2（:65953-65978，width=height
+      // 封顶 999）——即以塔为中心的方形光环场（64~320px），不再是固定 4 格盒。
+      // 每 tick 接触判定（Colliding :14537-14553：方形盒相交 + 距中心 < height/2-20 +
+      // AI_137_CanHit 视线），localNPCHitCooldown=3（:7055）→ 每 3t 一跳
       if (AURA_TOWER.has(this.projId)) {
-        if (--this.sCool <= 0) {
-          this.sCool = 3;
+        if (this.sInit === 0) {
+          this.sInit = 1;
+          const st = game.world.store;
+          const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+          let groundY = -1;
+          for (let y = ty; y < Math.min(st.h, ty + 500); y++) { // Searches.Down(500)
+            if (st.inBounds(tx, y) && st.isSolid(tx, y)) { groundY = y; break; }
+          }
+          if (groundY < 0) { this.y += 16; return; } // 无地面（:65948-65952）
+          let ceilY = -1;
+          for (let y = groundY - 1; y >= groundY - 10; y--) { // Searches.Up(num=10)
+            if (y >= 0 && st.inBounds(tx, y) && st.isSolid(tx, y)) { ceilY = y; break; }
+          }
+          if (ceilY < 0) ceilY = ty - 11; // :65956-65958（无天花板 → origin-num-1）
+          const centerY = groundY * TILE; // result.ToWorldCoordinates(8f, num6)（半砖 +8 未实装）
+          const topY = ceilY * TILE;      // result2.ToWorldCoordinates(8f, 0f)
+          let side = centerY - topY;      // :65970 base.Size = (1, center.Y - top.Y)
+          side = Math.max(64, Math.min(160, side)); // :65972-65977 [num5×16, num×16]
+          side *= 2;                      // :65978 height *= 2（width=height，封顶 999）
+          this.auraSide = Math.min(999, side);
+          this.auraCy = centerY; // base.Center = center（:65980）
+        }
+        const side = this.auraSide;
+        if (side > 0) {
           for (const ent of game.enemies()) {
-            const en = ent as EnemyLike & { dead: boolean };
+            const en = ent as EnemyLike & { dead: boolean } & import('./WhipTag').WhipTagged;
             if (en.dead) continue;
-            if (Math.abs(en.cx - this.cx) > TILE * 4 || Math.abs(en.cy - this.cy) > TILE * 4) continue;
-            if (!this.hitCd.ready(en.id, 3)) continue;
-            // SummonTagDamageMultiplier（ProjectileID.cs:31）：闪电 aura 族 tag 伤减半
-            const tagA = (en as { whipTagT?: number; whipTagDmg?: number }).whipTagT ? Math.round(((en as { whipTagDmg?: number }).whipTagDmg ?? 0) * 0.5) : 0;
-            en.hurt(dmgOf() + tagA, 0, 0, game);
+            const ax = this.cx - side / 2, ay = this.auraCy - side / 2;
+            // myRect.Intersects(targetRect)（方形场盒）
+            if (en.x + en.w <= ax || en.x >= ax + side || en.y + en.h <= ay || en.y >= ay + side) continue;
+            // targetRect.Distance(Center) < height/2-20（:14540，敌 AABB 到中心最近点距）
+            const nx = Math.max(en.x, Math.min(en.x + en.w, this.cx));
+            const ny = Math.max(en.y, Math.min(en.y + en.h, this.auraCy));
+            if (Math.hypot(this.cx - nx, this.auraCy - ny) >= side / 2 - 20) continue;
+            // AI_137_CanHit（:67170-67195）：塔顶+20 到敌中心的视线（两次弧线绕行未实装）
+            if (!canHit(game.world.store, this.cx, this.auraCy - 20, 0, 0, en.cx, en.cy, 0, 0)) continue;
+            if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
+            // 命中 armorPenetrationPercent=1（100% 护穿，:12443——Enemy.hurt 无护穿参，
+            // 登记未实装）；tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
+            const res = resolveWhipTagHit(en, dmgOf(), game,
+              (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+              SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
+            en.hurt(res.dmg, 0, 0, game);
           }
         }
         return;
@@ -582,7 +855,52 @@ export class MinionProj extends Entity {
         }
         return;
       }
-      // 其他哨兵五族（aiStyle 53/123：冰九头蛇/蜘蛛皇后/猎犬/月门/彩虹水晶）
+      // aiStyle 53 定点哨兵三族（Projectile.cs:27172-27382 1:1）：
+      // 初冷 ai[0]=120 → 锁定目标转向（瞄准扇区 num424 :27258-27279）→
+      // ai[0]≤0 开火（射速 60/60/90，弹速 9/9/12.5，:27282-27311）→ ai[0] 每 tick 递减
+      const s53 = SENTRY53[this.projId];
+      if (s53) {
+        if (this.sInit === 0) { this.sInit = 1; this.sCool = 120; } // localAI[0]==0 → ai[0]=120（:27176-27181）
+        const tgt = this.nearestEnemy(game, 1000); // AI_053_HandleSentryNPCTargeting maxDistance=1000
+        let sector = 2;
+        if (tgt) {
+          const dx = tgt.cx - this.cx, dy = tgt.cy - this.cy;
+          if (dx < 0) this.facing = -1; else this.facing = 1; // :27264-27268
+          // 瞄准扇区（:27269）：dy>0→0；|dy|>|dx|×3→4；×2→3；|dx|≤|dy|×3→（|dx|>|dy|×2→1，否则 2）；否则 0
+          sector = dy > 0 ? 0
+            : Math.abs(dy) > Math.abs(dx) * 3 ? 4
+              : Math.abs(dy) > Math.abs(dx) * 2 ? 3
+                : Math.abs(dx) > Math.abs(dy) * 3 ? 0
+                  : Math.abs(dx) > Math.abs(dy) * 2 ? 1 : 2;
+        }
+        if (tgt && this.sCool <= 0) {
+          this.sCool = s53.cd; // :27282-27288（num427=60，966→90）
+          // 炮口偏移（:27290-27305）：966 固定 Center-16Y；308/377 按扇区，
+          // 朝左再 +10X（spriteDirection<0 补偿）
+          let ox = 0, oy = -2;
+          if (this.projId !== 966) {
+            switch (sector) {
+              case 0: ox = 24 * this.facing; oy = 12; break;
+              case 1: ox = 24 * this.facing; oy = 0; break;
+              case 2: ox = 24 * this.facing; oy = -2; break;
+              case 3: ox = 14 * this.facing; oy = -6; break;
+              default: ox = 2 * this.facing; oy = -14; break;
+            }
+            if (this.facing < 0) ox += 10;
+          } else {
+            oy = -16;
+          }
+          const mx = this.cx + ox, my = this.cy + oy;
+          const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
+            Object.assign(new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
+              dmgOf(), this.knockback, s53.shot, null, { grav: 0 }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
+            'projectiles');
+        }
+        if (this.sCool > 0) this.sCool--; // :27377-27380（目标有无均递减）
+        return;
+      }
+      // 其他哨兵（aiStyle 123：月门/彩虹水晶）
       const ss = SENTRY_SHOOT[this.projId];
       if (ss) {
         const tgt = this.nearestEnemy(game, 1000);
@@ -621,9 +939,11 @@ export class MinionProj extends Entity {
         if (this.sCool > 0) this.sCool--;
         return;
       }
-      // 其余哨兵：定点炮台，60t 一发（兜底近似）
+      // 其余哨兵兜底（当前武器表内无使用者——aiStyle 53/123/130/134/137/138 全覆盖；
+      //  数值沿用 aiStyle 53 默认：初冷 120、射速 60，:27176-27181/:27286）
       const tgt = this.nearestEnemy(game, 600);
       if (tgt) {
+        if (this.sInit === 0) { this.sInit = 1; this.shootCd = 120; }
         this.shootCd--;
         if (this.shootCd <= 0) {
           this.shootCd = 60;
@@ -648,6 +968,7 @@ export class MinionProj extends Entity {
     if (this.projId >= 833 && this.projId <= 835) { this.tigerBody(game, p, dmg0); return; }
     if (this.projId === 963) { this.abigailBody(game, p, dmg0); return; }
     if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
+    if (this.projId === 317) { this.ravenBody(game, p, dmg0); return; }
     // Cool Whip 雪花哨兵 917（buff 312 维持）与 Cobwhip 蜘蛛 1036（buff 365 维持）：
     // 独立索敌 400/环绕，伤害吃 summonDamageMult
     // Foxparks 1094 喷火态（PR:56081-56159：ai[0] 1000-1003 每 4t 一发 1106；
@@ -803,4 +1124,111 @@ export class MinionProj extends Entity {
     }
     ctx.restore();
   }
+}
+
+/**
+ * 沙漠虎扑击弹 818（AI_162_TigerPounce :44056-44123 1:1）：
+ *  132×132 判定盒（:7725-7726）、ai[0]<0 延迟隐身（每 update +1，extraUpdates=3 →
+ *  每 tick 4 update :44058-44063）、起始点→(起始+velocity) 的 CatmullRom 弧线
+ *  （垂度 y=距离×1.5，端点外扩 ±0.1 :44073-44078）、ai[0] += 1/ai[1] 每 update
+ *  （:44090，时长 = ai[1]/4 tick）→ ai[0]≥1 消亡（:44119-44122）。
+ *  伤害 ×(1.5+0.4×(宝石数-1))（:12107-12111）、每敌一次（localNPCHitCooldown=-1
+ *  :7733）、818 ∈ MinionShot（ProjectileID.cs:197）→ 吃鞭 tag。
+ */
+export class TigerPounce extends Entity {
+  w = 132; h = 132;
+  dead = false;
+  rot = 0;
+  private damage: number;
+  private ivx: number;
+  private ivy: number;
+  /** ai[0]：负=延迟计数 / 正=进度（0..1）；ai[1]：时长（update 数） */
+  private a0: number;
+  private a1: number;
+  /** 起始中心（localAI[0]/[1] :44069-44070） */
+  private sx = 0;
+  private sy = 0;
+  private started = false;
+  /** Opacity（:44079-44082 每 update +0.1） */
+  private op = 0;
+  private hitSet = new Set<number>();
+  private ownerRef: () => Player | null;
+
+  constructor(
+    x: number, y: number, vx: number, vy: number, damage: number,
+    owner: () => Player | null, ai0: number, ai1: number,
+  ) {
+    super();
+    this.x = x - this.w / 2;
+    this.y = y - this.h / 2;
+    this.ivx = vx;
+    this.ivy = vy;
+    this.damage = damage;
+    this.ownerRef = owner;
+    this.a0 = ai0;
+    this.a1 = ai1;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.a0 < 0) { this.a0 += 4; return; } // 延迟隐身（:44058-44063，Opacity=0）
+    if (!this.started) { this.started = true; this.sx = this.cx; this.sy = this.cy; } // :44066-44072
+    // CatmullRom 控制点（:44073-44078：端点 -0.1/+1.1 外扩，垂度 = 距离×1.5）
+    const ex = this.sx + this.ivx, ey = this.sy + this.ivy;
+    const sag = Math.hypot(this.ivx, this.ivy) * 1.5;
+    const p1 = { x: this.sx + (ex - this.sx) * -0.1, y: this.sy + (ey - this.sy) * -0.1 + sag };
+    const p4 = { x: this.sx + (ex - this.sx) * 1.1, y: this.sy + (ey - this.sy) * 1.1 + sag };
+    if (this.op < 1) this.op += 0.4; // :44079-44082（4 update/tick 折算）
+    this.rot += Math.sign(this.ivx) * -0.8; // :44083-44085（-0.2×4 update）
+    if (this.a1 < 1) this.a1 = 60; // :44086-44089
+    this.a0 += 4 / this.a1;        // :44090（每 update 1/ai[1]，4 update/tick）
+    const t = Math.max(0, Math.min(1, this.a0));
+    const pos = catmullRom(p1, { x: this.sx, y: this.sy }, { x: ex, y: ey }, p4, t);
+    this.x = pos.x - this.w / 2;
+    this.y = pos.y - this.h / 2;
+    if (this.a0 >= 1) { this.dead = true; return; } // :44119-44122
+    // 接触（Damage 全程可伤：Damage_CanDealDamage 仅 ai[0]<1 拦截 :11782，此处已过门）
+    const gems = countStormTigerGems(game);
+    const mul = 1.5 + 0.4 * Math.max(0, gems - 1); // :12107-12111
+    const add = (e: unknown) =>
+      (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(e, 'projectiles');
+    for (const ent of game.enemies()) {
+      const en = ent as never as EnemyLike & import('./WhipTag').WhipTagged & { hurtFx?: (d: number) => void };
+      if (en.dead || this.hitSet.has(en.id)) continue; // localNPCHitCooldown=-1 每敌一次
+      if (this.x >= en.x + en.w || this.x + this.w <= en.x
+        || this.y >= en.y + en.h || this.y + this.h <= en.y) continue;
+      this.hitSet.add(en.id);
+      en.hurtFx = (d: number) => { en.hurt(d, 0, -1, game); };
+      const res = resolveWhipTagHit(en, Math.max(1, Math.round(this.damage * mul)), game,
+        add, SUMMON_TAG_MUL[818] ?? 1, en.cx, en.cy);
+      en.hurt(res.dmg, 0, -1, game); // knockBack=0（:46470 生成传 0）
+    }
+    void this.ownerRef;
+  }
+
+  draw(r: import('../render/Renderer').Renderer): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = projFrameImg(818, 0);
+    ctx.save();
+    ctx.globalAlpha = this.op;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);
+    ctx.imageSmoothingEnabled = false;
+    if (img) ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    else {
+      ctx.fillStyle = '#E8C060';
+      ctx.fillRect(-this.w / 2, -this.h / 2, this.w, this.h);
+    }
+    ctx.restore();
+  }
+}
+
+/** 玩家持有沙漠虎宝石数（ownedProjectileCounts[831]，:12107/:46388 等价） */
+function countStormTigerGems(game: GameHooks): number {
+  let n = 0;
+  for (const e of (game as unknown as { entities: { projectiles: unknown[] } }).entities.projectiles) {
+    const m = e as MinionProj;
+    if (m instanceof MinionProj && !m.dead && m.projId === 831) n++;
+  }
+  return n;
 }

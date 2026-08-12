@@ -176,12 +176,31 @@ export function runOceanCavesPass(st: TileStore, rng: RNG, gs: GenState): Array<
   return treasures;
 }
 
-/** UnderwaterChests pass(cs:17345):宝藏点 → style17 水箱,战利品五选一 */
+/** UnderwaterChests pass 的宝藏点段（cs:17348-17368）1:1：
+ *  主件 NextFromList [863,186,277,187,4404]；num 自 2.0 起步进 0.1 扩窗重试
+ *  （<50），采样域 [x±num, y±num/2]（上界 +1 含端），越右界回折 num/2；
+ *  命中液体 ≥250 且为水 → AddBuriedChest(style17, trySlope:true)。 */
 export function runUnderwaterChestsPass(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, treasures: Array<{ x: number; y: number }>,
 ): void {
   for (const t of treasures) {
-    const main = [863, 186, 277, 187, 4404][rng.int(0, 4)];
-    placeBuriedChest(st, rng, gs, chests, t.x, t.y, { style: 17, loot: main, flags: { water: true } });
+    const main = [863, 186, 277, 187, 4404][rng.int(0, 4)];        // NextFromList
+    let num = 2.0;
+    for (;;) {
+      if (num >= 50.0) break;
+      num += 0.1;
+      let x = rng.int(t.x - Math.floor(num), t.x + Math.floor(num));    // Next(x-num, x+num+1)
+      const y = rng.int(t.y - Math.floor(num / 2), t.y + Math.floor(num / 2));
+      // cs:17362：num2 越右界 → 折回 num/2（InWorld 由 placeBuriedChest 自行兜底）
+      x = x >= st.w ? Math.floor(x + num / 2) : Math.floor(x - num / 2);
+      if (st.inBounds(x, y)) {
+        const i = st.idx(x, y);
+        if (st.liquid[i] > 250 && st.liquidType[i] === 0) {
+          if (placeBuriedChest(st, rng, gs, chests, x, y, {
+            style: 17, loot: main, flags: { water: true }, trySlope: true,
+          })) break;
+        }
+      }
+    }
   }
 }

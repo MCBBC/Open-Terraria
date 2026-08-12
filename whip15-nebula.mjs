@@ -15,6 +15,12 @@ const out = await p.evaluate(async () => {
   const wear = (vids) => vids.forEach((v, i) => { pl.inv.armor[i] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]], stack: 1 }; });
   wear([2760, 2761, 2762]); // 星云套
   r.set = pl.equipStats.nebulaSet;
+  const { combatWeapon } = await import('/src/data/vanillaItemCombat.ts');
+  const { ITEM_DEFS } = await import('/src/data/items.ts');
+  const hd = ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]; const hd0 = hd;
+  r.heldEarly = hd?.key ?? 'n/a';
+  r.cw = combatWeapon(hd)?.kind ?? 'null';
+  r.mana0 = pl.mana;
   let bolts = 0;
   const oa = g.entities.add.bind(g.entities);
   g.entities.add = (e, b2) => { if (e?.projId === 7) bolts++; return oa(e, b2); };
@@ -24,8 +30,11 @@ const out = await p.evaluate(async () => {
   tgt.id = g.entities.nextId++; tgt.maxHp = 1e9; tgt.hp = 1e9; tgt.def.defense = 0;
   g.entities.add(tgt, 'enemies');
   // 魔法杖 64（紫晶杖）
-  pl.inv.slots[0] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[64]], stack: 1 };
+  const id64 = ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[64]];
+  pl.inv.slots[0] = { id: id64, stack: 1 };
   pl.inv.selected = 0;
+  r.writeTest = { id64: id64 ?? 'undef', syncKey: ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none',
+    slot0: JSON.stringify(pl.inv.slots[0]) };
   const hold = setInterval(() => {
     pl.useTime = 0;
     g.input.mouseX = g.renderer.canvas.width / 2 + 120; g.input.mouseY = g.renderer.canvas.height / 2;
@@ -38,6 +47,12 @@ const out = await p.evaluate(async () => {
   await new Promise(s2 => setTimeout(s2, 1500)); // 等吸附拾取
   g.entities.add = oa;
   r.bolts = bolts; r.cd = pl.nebulaCD;
+  r.heldAfter = ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none';
+  r.manaAfter = pl.mana;
+  r.cwStaff = combatWeapon(hd0 ?? hd)?.kind ?? 'null';
+  r.gate = { mouseDown: g.input.mouseDown, useTime: pl.useTime, uiBlocking: g.input.uiBlocking ?? false };
+  const heldNow = pl.inv.heldItem();
+  r.cwNow = heldNow ? combatWeapon(ITEM_DEFS[heldNow.id])?.kind ?? 'nullcw' : 'noheld';
   r.nebula = [...pl.nebula];
   r.levels = pl.nebula[0] + pl.nebula[1] + pl.nebula[2];
   r.summonMult = Math.round(pl.summonDamageMult * 100) / 100; // 1+0.66+0.15×dmg级

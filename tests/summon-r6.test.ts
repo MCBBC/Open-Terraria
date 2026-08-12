@@ -94,7 +94,7 @@ describe('MinionProj 行为', () => {
     m.fixedUpdate(1, h2);
     expect(Math.hypot(m.cx - player.cx, m.cy - player.cy)).toBeLessThan(100);
   });
-  it('哨兵：定点 60t 一发（added 计数）+ 寿命耗尽自灭', () => {
+  it('哨兵 aiStyle 53：初冷 120t 后每 60t 一发（Projectile.cs:27176-27288）+ 寿命耗尽自灭', () => {
     const enemy = {
       id: 2, x: 80 * 16, y: 90 * 16, w: 16, h: 24, dead: false,
       get cx() { return this.x + 8; }, get cy() { return this.y + 12; },
@@ -107,9 +107,15 @@ describe('MinionProj 行为', () => {
       add: (e: unknown) => { (enemy as unknown as { __shots?: unknown[] }).__shots = [((enemy as unknown as { __shots?: unknown[] }).__shots ?? []), e].flat(); },
     };
     const h = hooks as unknown as GameHooks & { entities: { add: (e: unknown, b: string) => void } };
-    for (let k = 0; k < 130; k++) s.fixedUpdate(1, h);
-    const shots = (enemy as unknown as { __shots?: unknown[] }).__shots ?? [];
-    expect(shots.length).toBeGreaterThanOrEqual(2);
+    const shots = () => ((enemy as unknown as { __shots?: unknown[] }).__shots ?? []).length;
+    for (let k = 0; k < 119; k++) s.fixedUpdate(1, h);
+    expect(shots()).toBe(0);   // 初冷 ai[0]=120（:27176-27181）
+    for (let k = 0; k < 11; k++) s.fixedUpdate(1, h);
+    expect(shots()).toBe(1);   // 第 120t 首发并重置 60（:27282-27288）
+    for (let k = 0; k < 59; k++) s.fixedUpdate(1, h);
+    expect(shots()).toBe(1);   // 60t 冷却期内不再发
+    for (let k = 0; k < 2; k++) s.fixedUpdate(1, h);
+    expect(shots()).toBe(2);   // 第 180t 第二发
     expect(s.dead).toBe(false);
     s.life = 1;
     s.fixedUpdate(1, h);

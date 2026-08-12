@@ -291,25 +291,26 @@ function isOre(t: number): boolean {
   return _oreSet.has(t);
 }
 
-/** pass 76 Traps 主体（cs:8936-8984）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap */
+/** pass 76 Traps 主体（cs:18796-18896）：w*0.05 次 placeTrap + w*0.003 次 PlaceSandTrap。
+ *  两段计数均为裸 double 比较（cs:18789/18866 `for i < num`，不取整） */
 export function runTrapsPass(st: TileStore, rng: RNG, gs: GenState): void {
   bouldersPlaced.length = 0; // 模块级状态须按次生成重置，否则同种子双生成发散
-  const trapTries = Math.floor(st.w * 0.05);
+  const trapTries = st.w * 0.05;
   for (let n = 0; n < trapTries; n++) {
     for (let k = 0; k < 1150; k++) {
       let x = rng.int(200, st.w - 201);                       // Next(200, w-200)
       let y = rng.int(gs.worldSurface, st.h - 211);           // Next(surface, h-210)
-      // oceanDepths 回避
+      // oceanDepths 回避（cs:18821）——海滩带是常量 beachDistance=380（cs:4102），
+      // 非 beachLeftEnd/RightStart（那是 Reset 掷的海滩宽，不是回避带）
       const oceanTop = (gs.worldSurface + gs.rockLevel) / 2 + 40;
-      const beachL = gs.beachLeftEnd, beachR = st.w - gs.beachRightStart;
-      while (y <= oceanTop && (x < beachL || x > beachR)) {
+      while (y <= oceanTop && (x < gs.beachDistance || x > st.w - gs.beachDistance)) {
         x = rng.int(200, st.w - 201);
         y = rng.int(gs.worldSurface, st.h - 211);
       }
       if (st.wall[st.idx(x, y)] === 0 && placeTrap(st, rng, gs, x, y, -1)) break;
     }
   }
-  const sandTries = Math.floor(st.w * 0.003);
+  const sandTries = st.w * 0.003;
   for (let n = 0; n < sandTries; n++) {
     for (let k = 0; k < 20000; k++) {
       const x = rng.int(Math.floor(st.w * 0.15), Math.floor(st.w * 0.85) - 1);

@@ -27,6 +27,8 @@ const MOSS_WALL_BASE = 54;
 const NEON_FORBIDDEN = idsByVanillaSheet(70, 60, 367, 368, 161, 147, 396, 397);
 /** Main.tileDungeon（Main.cs:7941-7946：41 青砖/43 蓝砖/44 绿砖/677-679 变体） */
 const DUNGEON_TILES = idsByVanillaSheet(41, 43, 44, 677, 678, 679);
+/** Main.tileMoss（Main.cs:6956-6996，按 sheet id）——尾段 SpreadGrass 的苔藓块判定 */
+const MOSS_SHEETS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 const SHIMMER_SAFETY = 150;            // shimmerSafetyDistance（WorldGen.cs:4104）
 
 const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
@@ -153,7 +155,8 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
 
   // ---- 苔藓斑（cs:17650-17713）：maxTileCount=2500 选点 → setMoss + Spread.Moss ----
   const countTiles = (sx: number, sy: number) => {
-    // countTiles/nextCount（cs:9493-9560）：洪泛无墙空气腔；有墙/岩浆即封顶
+    // countTiles/nextCount（cs:9493-9560，jungle=false）：洪泛空气腔；
+    // wall!=0 即封顶（cs:9525-9529）、墙 244/微光/岩浆封顶
     let air = 0, lava = 0, ice = 0, rock = 0, shroom = 0;
     const seen = new Set<number>();
     const stack: Array<[number, number]> = [[sx, sy]];
@@ -168,6 +171,7 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
       seen.add(ii);
       if (st.wall[ii] === 244) { capped = true; break; }
       if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) { capped = true; break; } // 微光
+      if (st.wall[ii] !== 0) { capped = true; break; }                            // jungle=false：有墙即封顶
       if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) { lava++; capped = true; break; }
       if (st.flags[ii]) {
         const sh = TILE_DEFS[st.type[ii]]?.vanilla?.sheet;
@@ -195,7 +199,8 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
       if (c.air < 2500 && c.air >= 10 && c.lava === 0 && c.ice === 0 && c.rock > 0 && c.shroom === 0) {
         ok = true; break;
       }
-      // cs:17710-17712 的重掷仅换 y（原版 quirk：重掷范围与初掷不同，bug-for-bug）
+      // cs:17698-17703 重掷 x 与 y 一起换（重掷域与初掷不同，bug-for-bug 保留）
+      x = rng.nextIntRange(200, st.w - 200);
       y = rng.nextIntRange(gs.rockLevel + 30, st.h - 230);
     }
     if (!ok) continue;
@@ -233,29 +238,49 @@ export function runMossAndMossCavesPass(st: TileStore, rng: RNG, gs: GenState): 
     }
   }
 
-  // ---- 地狱氦苔藓 381（cs:17741-17770）：0.065×w 个，25 半径框岩浆 >20 ----
-  //  ★ 同上迭代上限：选带无岩浆（选带 y<UnderworldLayer 且岩浆全在更深处）时
-  //   原版同款 while 会永不命中
+  // ---- 地狱氦苔藓 381（cs:17737-17766）：num13=w*0.065 预算 while；
+  //  命中（25 半径框岩浆>20）-1，命中但岩浆不足 -0.002，每迭代无条件 -0.001。
+  //  无迭代上限（原版 while(num13>0)；预算下限 0.001/迭代 → 迭代数有界）
   budget = st.w * 0.065;
-  for (let iter = 0; budget > 0 && iter < budget * 500; iter++) {
+  while (budget > 0) {
     const x = rng.nextIntRange(50, st.w - 50);
     const y = rng.nextIntRange(gs.waterLine, st.h - 200);
     const ii = st.idx(x, y);
-    if (!st.flags[ii] || st.type[ii] !== STONE
-      || (st.flags[st.idx(x - 1, y)] && st.flags[st.idx(x + 1, y)]
-        && st.flags[st.idx(x, y - 1)] && st.flags[st.idx(x, y + 1)])) continue;
-    let lava = 0;
-    for (let a = x - 25; a < x + 25; a++) {
-      for (let b = y - 25; b < y + 25; b++) {
-        if (st.inBounds(a, b)) {
-          const ji = st.idx(a, b);
-          if (st.liquid[ji] > 0 && st.liquidType[ji] === 2) lava++;
+    if (st.flags[ii] && st.type[ii] === STONE
+      && (!st.flags[st.idx(x - 1, y)] || !st.flags[st.idx(x + 1, y)]
+        || !st.flags[st.idx(x, y - 1)] || !st.flags[st.idx(x, y + 1)])) {
+      let lava = 0;
+      for (let a = x - 25; a < x + 25; a++) {
+        for (let b = y - 25; b < y + 25; b++) {
+          if (st.inBounds(a, b)) {
+            const ji = st.idx(a, b);
+            if (st.liquid[ji] > 0 && st.liquidType[ji] === 2) lava++;
+          }
         }
       }
+      if (lava > 20) {
+        st.type[ii] = LAVA_MOSS;
+        budget -= 1;
+      } else {
+        budget -= 0.002;
+      }
     }
-    if (lava > 20) {
-      st.type[ii] = LAVA_MOSS;
-      budget -= 1;
+    budget -= 0.001;
+  }
+
+  // ---- 尾段（cs:17767-17806）：全图每苔藓块四邻 grassSpread=0 的 SpreadGrass ----
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 0; y < st.h; y++) {
+      const ii = st.idx(x, y);
+      if (!st.flags[ii]) continue;
+      const sheet = TILE_DEFS[st.type[ii]]?.vanilla?.sheet ?? -1;
+      if (!MOSS_SHEETS.has(sheet)) continue;
+      for (let k = 0; k < 4; k++) {
+        const nx = k === 0 ? x - 1 : k === 1 ? x + 1 : x;
+        const ny = k === 2 ? y - 1 : k === 3 ? y + 1 : y;
+        // try/catch 的 repeat:false 回退对应本仓递归深度上限（无栈溢出语义，等效)
+        spreadGrass(st, nx, ny, STONE, st.type[ii], true);
+      }
     }
   }
 }

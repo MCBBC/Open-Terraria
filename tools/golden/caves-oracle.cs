@@ -1085,7 +1085,8 @@ Checkpoint("grass");
         if (num2 > 10 && (int)r.Next(50) < num2)
         {
             num2 = 0;
-            int side = (int)r.Next(2) == 0 ? -2 : 2;
+            // 原版 num4=-2; if(Next(2)==0) num4=2（JunglePass.cs:178-182）——Next(2)==0 → +2
+            int side = (int)r.Next(2) == 0 ? 2 : -2;
             TileRunner((int)px, (int)py, (int)r.Next(3, 20), (int)r.Next(10, 100), -1, false, side);
         }
         px += vx; py += vy;
@@ -3352,11 +3353,20 @@ void CrimPlaceHeartsGen()
         }
     int pad = 10;
     jMin -= pad; jMax += pad; sMin -= pad; sMax += pad;
-    int beachAvoid = 380;                           // evilBiomeBeachAvoidance = 320+60
+    int beachAvoid = 380;                           // evilBiomeBeachAvoidance = 320+60（仅 zLo/zHi 钳位）
+    int centerAvoid = 500;                          // ★中心采样 num8=500（cs:13976/14012），非 380
     int dungeonAvoid = 100;
     int midFixer = 50;                              // evilBiomeAvoidanceMidFixer
     double groupCount = (double)W * 0.00045;        // ★裸 double：4200 → 1.89 → 两组！
     int dSide = dungeonRight ? 1 : -1;
+    // oceanDepths（cs:10978）：y>oceanLevel→false；x<beachDistance||x>w-beachDistance→true。
+    // oceanLevel=(worldSurface+rockLayer)/2+40（cs:4393）
+    bool OceanDepths(int ox, int oy)
+    {
+        if ((double)oy > (worldSurface + (double)rockLayer) / 2.0 + 40.0) return false;
+        if (ox < BEACH_DISTANCE || ox > W - BEACH_DISTANCE) return true;
+        return false;
+    }
     for (int g = 0; (double)g < groupCount; g++)
     {
         int snowLo = sMin, snowHi = sMax, jungLo = jMin, jungHi = jMax;
@@ -3366,7 +3376,7 @@ void CrimPlaceHeartsGen()
         {
             ok = true;
             int mid = W / 2, midAvoid = 200;
-            cx = (int)r.Next(beachAvoid, W - beachAvoid);
+            cx = (int)r.Next(centerAvoid, W - centerAvoid);
             zLo = cx - (int)r.Next(200) - 100;
             zHi = cx + (int)r.Next(200) + 100;
             if (zLo < beachAvoid) zLo = beachAvoid;
@@ -3453,6 +3463,12 @@ void CrimPlaceHeartsGen()
                     tries++;
                     int ax = (int)r.Next(zLo - widen, zHi + widen);
                     int ay = (int)r.Next((int)(cNum2 - (double)(widen / 2)), (int)(cNum2 + 100.0 + (double)widen));
+                    // ★落点掷出海洋带则两点重掷（cs:14252-14256）
+                    while (OceanDepths(ax, ay))
+                    {
+                        ax = (int)r.Next(zLo - widen, zHi + widen);
+                        ay = (int)r.Next((int)(cNum2 - (double)(widen / 2)), (int)(cNum2 + 100.0 + (double)widen));
+                    }
                     if (tries > 100) { widen++; tries = 0; }
                     if (act[ay * W + ax] == 0)
                     {

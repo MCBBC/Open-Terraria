@@ -39,6 +39,8 @@ export interface ChestFlags {
   wooden?: boolean; // flag 木箱(style 0)——地表战利品分支门禁
 }
 
+/** Main.wallDungeon（Main.cs:10507-10513）：7/8/9 + 94-99（不含神庙墙 87——
+ *  cs:17109 的 `wallDungeon[wall] || wall == 87` 是两道独立门） */
 const DUNGEON_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
 function isDungeonWall(wl: number): boolean {
   return DUNGEON_WALLS.has(wl);
@@ -286,7 +288,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
  *  样式/战利品解析与 2×2 放置沿用本仓库 rollChestLoot 管线。 */
 export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
-  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags } = {},
+  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean } = {},
 ): boolean {
   // ±2 内不得有滚石/祭坛（cs:35957-35966：InWorld(n,num6,100) && Boulders || 26 || 237）
   for (let dx = -2; dx <= 2; dx++) {
@@ -301,14 +303,43 @@ export function placeBuriedChest(
   }
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
   let gy = j;
+  let slopeL = -1, slopeR = -1;   // trySlope 压平的坡度（失败时回填，cs:37567-37575）
   for (; gy < st.h - 10; gy++) {
     const k = st.idx(i, gy);
     if (st.liquid[k] > 0 && st.liquidType[k] === 4) return false;              // anyShimmer → 整体失败
     if (st.flags[k] && st.type[k] === LARVA) return false;                      // 幼虫 231 → 整体失败
-    if (solidTileHB(st, i, gy)) break;                                          // 首个 SolidTile 落定
+    if (solidTileHB(st, i, gy)) {
+      // trySlope 门（cs:35951-35968）：style 17 时 ±30 盒内不得有箱/越界；
+      // 压平 (i-1,gy)/(i,gy) 的顶坡供放置（失败时回填）
+      if (opts.trySlope && opts.style === 17) {
+        for (let l = i - 30; l <= i + 30; l++) {
+          for (let m = gy - 30; m <= gy + 30; m++) {
+            if (l < 5 || m < 5 || l >= st.w - 5 || m >= st.h - 5) return false;  // InWorld(l,m,5)
+            const nk = st.idx(l, m);
+            if (st.flags[nk] && (st.type[nk] === CHEST || st.type[nk] === CHEST2)) return false;
+          }
+        }
+      }
+      if (opts.trySlope) {
+        if (st.slope[st.idx(i - 1, gy)] >= 1 && st.slope[st.idx(i - 1, gy)] <= 2) {
+          slopeL = st.slope[st.idx(i - 1, gy)];
+          st.slope[st.idx(i - 1, gy)] = 0;
+        }
+        if (st.slope[k] >= 1 && st.slope[k] <= 2) {
+          slopeR = st.slope[k];
+          st.slope[k] = 0;
+        }
+      }
+      break;
+    }
   }
   if (gy >= st.h - 10) return false;
   if (!solidTileHB(st, i, gy)) return false;
+  // trySlope 失败回填（cs:37567-37575：仅压平过的格才恢复）
+  const restoreSlopes = (): void => {
+    if (slopeL > -1) st.slope[st.idx(i - 1, gy)] = slopeL;
+    if (slopeR > -1) st.slope[st.idx(i, gy)] = slopeR;
+  };
 
   let tile = opts.tile ?? CHEST;
   let style = opts.style;
@@ -356,14 +387,14 @@ export function placeBuriedChest(
 
   // 2×2 放置:顶行 frameY=0、frameX = style*36 + dx*18(PlaceChestDirect 语义)
   const topY = gy - 2;
-  if (topY < 1) return false;
+  if (topY < 1) { restoreSlopes(); return false; }
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 2; dy++) {
-      if (!st.inBounds(i + dx, topY + dy) || st.flags[st.idx(i + dx, topY + dy)]) return false;
+      if (!st.inBounds(i + dx, topY + dy) || st.flags[st.idx(i + dx, topY + dy)]) { restoreSlopes(); return false; }
     }
   }
   if (!st.inBounds(i + 1, gy) || !st.flags[st.idx(i + 1, gy)]
-    || !TILE_DEFS[st.type[st.idx(i + 1, gy)]]?.solid) return false;
+    || !TILE_DEFS[st.type[st.idx(i + 1, gy)]]?.solid) { restoreSlopes(); return false; }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 2; dy++) {
@@ -390,7 +421,8 @@ export function runBuriedChestsPass(st: TileStore, rng: RNG, gs: GenState, chest
     const x = rng.int(20, w - 21);
     const y = rng.int(yMin, h - 231);
     const wl = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : -1;
-    if (isDungeonWall(wl) || !placeBuriedChest(st, rng, gs, chests, x, y)) {
+    // cs:17109：wallDungeon[wall] || wall == 87（神庙墙 87 独立门）→ 整体重掷
+    if (isDungeonWall(wl) || wl === 87 || !placeBuriedChest(st, rng, gs, chests, x, y)) {
       fail--; continue;
     }
     n++;
@@ -422,43 +454,89 @@ export function runSurfaceChestsPass(st: TileStore, rng: RNG, gs: GenState, ches
     for (let tries = 0; tries < 2000 && !ok; tries++) {
       // cs:17244 首掷 Next(200, w-200);仅落点命中 oceanDepths(cs:17246-17254:
       // y ≤ oceanLevel=(ws+rl)/2+40 且 x 在海滩带内)才改掷 Next(300, w-300)——
-      // 原版 WorldGen.beachDistance 是常量 380(cs:4102),此处沿用 gs.beachDistance 比例值
+      // 原版 WorldGen.beachDistance 是常量 380(cs:4102)
       let x = rng.int(200, w - 201);
-      let y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface));
+      let y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface) - 1);
       const oceanLevel = (gs.worldSurface + gs.rockLevel) / 2 + 40;
       while (y <= oceanLevel && (x < gs.beachDistance || x > w - gs.beachDistance)) {
         x = rng.int(300, w - 301);
-        y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface));
+        y = rng.int(Math.floor(gs.worldSurfaceLow), Math.floor(gs.worldSurface) - 1);
       }
       if (!st.inBounds(x, y)) continue;
       const i = st.idx(x, y);
-      // 空格 + 泥土系自然墙(2/59/244)
-      if (st.flags[i] || (st.wall[i] !== 2 && st.wall[i] !== 59 && st.wall[i] !== 244)) continue;
-      const sky = st.wall[i] === 244;
-      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: sky ? 12 : 0, flags: sky ? { sky: true } : { wooden: true } })) ok = true;
+      // cs:17260-17284 两分支：空格走墙门（2/59/244，墙 244 → 天空箱）；
+      // 落点活性格走 101×101（步 2）蓄水池采样找墙 244 空格（Next(num8) 命中即换点）
+      let sky = false;
+      let cx = x, cy = y;
+      if (!st.flags[i]) {
+        if (st.wall[i] === 2 || st.wall[i] === 59 || st.wall[i] === 244) {
+          if (st.wall[i] === 244) sky = true;
+        } else {
+          continue;   // flag3=false → 本轮作废
+        }
+      } else {
+        let num8 = 1;
+        let hit = false;
+        for (let j = cx - 50; j <= cx + 50; j += 2) {
+          for (let k = cy - 50; k <= cy + 50; k += 2) {
+            if (k >= gs.worldSurface) continue;
+            if (!st.inBounds(j, k) || st.flags[st.idx(j, k)]) continue;
+            if (st.wall[st.idx(j, k)] !== 244) continue;
+            if (rng.int(0, num8 - 1) !== 0) continue;                    // Next(num8)==0
+            sky = true;
+            num8++;
+            hit = true;
+            cx = j; cy = k;
+          }
+        }
+        if (!hit) continue;   // 蓄水池无墙 244 空格 → 本轮作废
+      }
+      const flags: ChestFlags = sky ? { sky: true } : { wooden: true };
+      if (placeBuriedChest(st, rng, gs, chests, cx, cy, { style: sky ? 12 : 0, flags })) ok = true;
     }
   }
 }
 
-/** Water Chests pass(L8058):9×w/4200 个,水中(liquid≥250 且为水)放置,style 17 */
+/** UnderwaterChests 的 9×w/4200 段（cs:17381-17453）：每下标两趟 while 各 1 箱——
+ *  ① y∈[1, UnderworldLayer)（内层液体重掷域 [50, UnderworldLayer)）
+ *  ② y∈[worldSurface, UnderworldLayer)。主件序：单次 Next(10)==0 → 863，
+ *  否则计数器 186→4404→277→187（num4 每迭代无条件 ++，命中 863 也前进）。 */
 export function runWaterChestsPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w } = st;
-  const count = Math.floor(9 * (w / 4200));
-  let waterIdx = 0;
+  const num5 = w / 4200;
+  const count = 9 * num5;
+  let num4 = 0;
   for (let n = 0; n < count; n++) {
-    // 战利品序(cs L8087-8112):1/10 鲨鱼饵/水上漂靴,否则循环 芦笛/游泳圈/三叉戟/脚蹼
+    num4++;
     let main: number;
-    if (rng.int(0, 9) === 0) main = 4425;
-    else if (rng.int(0, 9) === 0) main = 863;
-    else main = [186, 4404, 277, 187][waterIdx++ % 4];
-    let ok = false;
-    for (let tries = 0; tries < 10000 && !ok; tries++) {
-      const x = rng.int(50, w - 51);
-      const y = rng.int(1, st.h - 210);
-      if (!st.inBounds(x, y)) continue;
-      const i = st.idx(x, y);
-      if (st.liquid[i] < 250 || st.liquidType[i] === 2) continue;
-      if (placeBuriedChest(st, rng, gs, chests, x, y, { style: 17, loot: main, flags: { water: true } })) ok = true;
+    if (rng.int(0, 9) === 0) {                                          // Next(10)
+      main = 863;
+    } else {
+      switch (num4) {
+        case 1: main = 186; break;
+        case 2: main = 4404; break;
+        case 3: main = 277; break;
+        default: main = 187; num4 = 0; break;
+      }
+    }
+    // 第一趟（cs:17424-17431）：y 首掷 [1, h-200)，重掷 [50, h-200)
+    for (let loop = 0; loop < 2; loop++) {
+      const yLo = loop === 0 ? 1 : Math.floor(gs.worldSurface);
+      let ok = false;
+      for (let tries = 0; tries < 10000 && !ok; tries++) {
+        let x = rng.int(50, w - 51);                                    // Next(50, w-50)
+        let y = rng.int(yLo, st.h - 201);                               // Next(?, h-200)
+        // cs:17425-17428：液体不足或非水 → 重掷（重掷 y 域换 [50, h-200)）
+        while (st.liquid[st.idx(x, y)] < 250 || st.liquidType[st.idx(x, y)] !== 0) {
+          x = rng.int(50, w - 51);
+          y = rng.int(50, st.h - 201);
+        }
+        // cs:17427：trySlope 门 = 落点在海滩带内（x < 380 || x > w-380）
+        if (placeBuriedChest(st, rng, gs, chests, x, y, {
+          style: 17, loot: main, flags: { water: true },
+          trySlope: x < gs.beachDistance || x > w - gs.beachDistance,
+        })) ok = true;
+      }
     }
   }
 }

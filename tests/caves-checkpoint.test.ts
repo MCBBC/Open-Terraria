@@ -5,7 +5,7 @@
 // pass 铺——wall 等价是独立对账项）。
 // 金标再生成：dotnet run tools/golden/caves-oracle.cs <seedInt> <evil> <out.json>
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { runResetAndTerrain } from '../src/world/gen/WorldGen';
 import { runDunesPass } from '../src/world/gen/vanilla/DunesPass';
@@ -25,10 +25,10 @@ import { runFloatingIslandsPass } from '../src/world/gen/vanilla/StructuresPass'
 import { runDirtToMudPass, runSiltPass } from '../src/world/gen/vanilla/DirtToMudPass';
 import { runShiniesPass } from '../src/world/gen/vanilla/ShiniesPass';
 import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
-import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
+import { runUnderworldPass, __uwEndPeek, __uwTreeInfo } from '../src/world/gen/vanilla/UnderworldPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
-import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
+import { runCorruptionPass, __crDump } from '../src/world/gen/vanilla/CorruptionPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -113,9 +113,12 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   // （位置正确），转录后将插在 lakes 前与 slush 后。
   runWebsPass(st, rng, gs); snap('webs');
   runUnderworldPass(st, rng, gs); snap('underworld');
+  writeFileSync('/tmp/js-uwpeek.txt', `${__uwEndPeek} ${__uwTreeInfo}\n`);
   // #29 Corruption（cs:13919，oracle 已转录；#32 Dungeon 未转录——其 JS 实现仍在
   // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
-  runCorruptionPass(st, rng, gs); snap('corruption');
+  runCorruptionPass(st, rng, gs);
+  writeFileSync('/tmp/js-crdump.txt', __crDump());
+  snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
   runMountainCavesPass(st, rng, gs); snap('mcopenings');

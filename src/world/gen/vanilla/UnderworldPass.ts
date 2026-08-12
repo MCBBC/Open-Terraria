@@ -15,6 +15,9 @@ const ASH = T.ASH;
 const HELLSTONE = TILE_BY_KEY['ore_hellstone']!;
 const ASH_GRASS = TILE_BY_KEY['v_633_ash_grass_block']!;
 
+export let __uwEndPeek = 0;
+export let __uwTreeInfo = '';
+let uwTreeCand = 0, uwTreeGrow = 0;
 export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   // ① 边界 + 灰烬带 + 界下清空
@@ -140,8 +143,11 @@ export function runUnderworldPass(st: TileStore, rng: RNG, gs: GenState): void {
       const i = st.idx(x, y);
       if (st.type[i] !== ASH_GRASS || !st.flags[i]) continue;
       if (y - 1 < 0 || st.flags[st.idx(x, y - 1)]) continue;
-      if (rng.int(0, 2) === 0) growAshTree(st, rng, x, y);
+      uwTreeCand++;
+      if (rng.int(0, 2) === 0) { uwTreeGrow++; growAshTree(st, rng, x, y); }
     }
   }
+  __uwEndPeek = rng.vanilla.peek();
+  __uwTreeInfo = `cand=${uwTreeCand} grow=${uwTreeGrow}`;
   void gs;
 }

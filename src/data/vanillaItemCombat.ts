@@ -148,8 +148,12 @@ export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
     // 原版锚在角色上伸缩(AI_013),归长矛前刺族近似;此前落入 shot 兜底=子弹射飞
     if (ai === AI_YOYO) return { kind: 'yoyo', shoot, ...base };
     if (c.summon) {
-      // 召唤武器（31 件）：按投射物 AI 分流哨兵（53/54/123 定点炮台）与随从（其余飞行/地面）
-      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 54 || ai === 123 || ai === 130 || ai === 134 || ai === 137 || ai === 138, // OOA 四塔(aiStyle 130/134/137/138)是哨兵——曾漏标走随从路径
+      // 召唤武器（31 件）：按投射物 AI 分流哨兵与随从。哨兵 aiStyle 集合 = 53（冰九头蛇
+      // 308/蜘蛛皇后 377/猎犬 966，:3724/:4342/:8860）/123（月门 641/彩虹水晶 643，:6638/:6651）
+      // /130/134/137/138（OOA 四塔）。**aiStyle 54 不是哨兵**——唯一使用者 317 乌鸦是
+      // minion（:3825-3836 minion=true/minionSlots=1，无 sentry 字段），此前误入哨兵
+      // 路径吃到"60t 一发"兜底
+      return { kind: 'summon', shoot, sentry: ai === 53 || ai === 123 || ai === 130 || ai === 134 || ai === 137 || ai === 138,
         ...base };
     }
     if (ai === AI_FLAIL) return { kind: 'flail', shoot, ...base };

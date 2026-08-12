@@ -4,6 +4,7 @@
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
 import { hitCritters, hitPlayer, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
+import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import type { Renderer } from '../render/Renderer';
@@ -195,19 +196,27 @@ export class Arrow extends Entity {
           return;
         }
         if (this.hitSet.has(e.id)) continue; // 穿透弹已命中过此敌
-        // 暴击：玩家远程基础 4%（原版 ranged 初始 4）。
         // ★鞭 tag（WhipTagEffect.CanRunHitEffects :73-84：MinionShot/SentryShot 弹幕吃
-        //   tag——随从/哨兵射出的箭 whipTagShot 置标时 +tagDmg，TagCrit 可暴击）
+        //   tag——随从/哨兵射出的箭 whipTagShot 置标时走 resolveWhipTagHit 统一结算：
+        //   ModifyTaggedHit tag 加伤+TagCrit 暴击（WhipTagEffect.cs:58-70）、OnTaggedHit
+        //   （黑收成 916）、proc 窗口首跳（TagEffectState.cs:216-243）。随从弹无基础
+        //   暴击（原版 summon 系 crit 仅来自 TagCrit）——4% 基础暴击只留给玩家远程弹）
         let dmg = this.damage;
-        let crit = Math.random() < 0.04;
+        let crit: boolean;
         if (this.whipTagShot) {
-          const en2 = e as unknown as { whipTagT?: number; whipTagDmg?: number; whipTagCrit?: number };
-          if (en2.whipTagT && en2.whipTagT > 0) {
-            dmg += (en2.whipTagDmg ?? 0);
-            if (Math.random() * 100 < (en2.whipTagCrit ?? 0)) crit = true;
-          }
+          const en2 = e as unknown as import('./WhipTag').WhipTagged;
+          // 黑收成 OnTaggedHit 直伤通道（916 等价：额外一跳落在被命中敌上）
+          en2.hurtFx = (d: number) => { e.hurt(d, Math.sign(this.vx) * 2, -2, game); };
+          const res = resolveWhipTagHit(en2, dmg, game,
+            (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
+            SUMMON_TAG_MUL[this.projId] ?? 1, e.x + e.w / 2, e.y + e.h / 2);
+          dmg = res.dmg;
+          crit = res.crit;
+        } else {
+          // 暴击：玩家远程基础 4%（原版 ranged 初始 4）
+          crit = Math.random() < 0.04;
+          if (crit) dmg *= 2;
         }
-        if (crit) dmg *= 2;
         if (this.ignite) {
           const en3 = e as unknown as { onFireT?: number };
           en3.onFireT = Math.max(en3.onFireT ?? 0, 5); // AddBuff(24,300)=5s

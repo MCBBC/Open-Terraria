@@ -4157,6 +4157,9 @@ export class Game implements GameHooks {
           Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
           whip.knockback, whip.useTime, whip.shootSpeed,
           () => (owner.dead ? null : owner),
+          // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
+          () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
+            inp.mouseX - this.renderer.canvas.width / 2),
         ), 'projectiles');
         // 鞭攻速（SetItemAnimation :4266：summonerWeaponSpeedBonus × whipUseTimeMultiplier，
         // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）

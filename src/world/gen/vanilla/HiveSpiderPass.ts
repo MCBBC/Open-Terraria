@@ -300,31 +300,14 @@ export function runBeehivePass(st: TileStore, rng: RNG, gs: GenState): void {
         dentForHoneyFall(st, x2, ey, dir);
       }
     }
-    // 幼虫托台(BOSS 房):链终点 3 宽清空+蜂巢地板
-    // （AddBeeLarva WorldGen.cs:32215-32236 逐行对应；原版末尾 PlaceTile(x,y,231) 放幼虫）
+    // 幼虫托台(BOSS 房):链终点只登记坐标（cs:16028 段的 AddBeeLarva 登记
+    // GenVars.larvaX/larvaY）——实际放置推迟到管线尾独立 pass（BeeLarvaInBeehives
+    // cs:21018，LongMoss 之后）：托台清空过早会被中途宝箱/装饰 pass 破坏，
+    // 且 AddBuriedChest 的幼虫回避在原版时序上看不到幼虫
     const lx = Math.floor(px), ly = Math.floor(py);
     if (st.inBounds(lx, ly + 1)) {
-      for (let dx = -1; dx <= 1; dx++) {
-        for (let dy = -2; dy <= 1; dy++) {
-          if (!st.inBounds(lx + dx, ly + dy)) continue;
-          const i = st.idx(lx + dx, ly + dy);
-          if (dy !== 1) {
-            st.type[i] = 0; st.flags[i] = 0;
-          } else {
-            st.type[i] = HIVE; st.flags[i] = 1;
-          }
-        }
-      }
-      // 幼虫 3×3（占 lx-1..lx+1 × ly-2..ly，底行贴蜂巢地板；顶行帧 (0,0)）
-      for (let dx = 0; dx < 3; dx++) {
-        for (let dy = 0; dy < 3; dy++) {
-          const tx = lx - 1 + dx, ty = ly - 2 + dy;
-          if (!st.inBounds(tx, ty)) continue;
-          const i = st.idx(tx, ty);
-          st.type[i] = LARVA; st.flags[i] = 1;
-          st.frameX[i] = dx * 18; st.frameY[i] = dy * 18;
-        }
-      }
+      gs.larvaX.push(lx);
+      gs.larvaY.push(ly);
     }
     // ★cs:16036-16053:主巢落成后是"蜂蜜斑"(HoneyPatchBiome)而非卫星巢——
     //   目标数 Next(5)、预算 10000、每次先掷半径 NextDouble*60+30 再掷角度
@@ -389,12 +372,15 @@ function countTiles(st: TileStore, x: number, y: number): { count: number; shroo
   return { count, shroom };
 }
 
-/** PlacePot（L?）1:1：2×2（y-1..y 行），随机 3 变体在 X 轴、style 在 Y 轴；占用格须空、脚下须实心 */
+/** PlacePot（cs:54099-54105）1:1：2×2（y-1..y 行），随机 3 变体在 X 轴、style 在 Y 轴；
+ *  占用格须空、脚下须 nactive && !halfBrick && slope==0 && tileSolid（原版四连门） */
 function placePot(st: TileStore, rng: RNG, x: number, y: number, style: number): boolean {
   for (let k = 0; k < 2; k++) {
     for (let l = -1; l < 1; l++) {
       if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
     }
+    const gi = st.idx(x + k, y + 1);
+    if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0) return false;
     if (!solidTile(st, x + k, y + 1)) return false;
   }
   const variant = rng.int(0, 2) * 36; // 原版仅在放置成功时消费 Next(3)
@@ -503,7 +489,7 @@ function spreadSpider(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, 
 }
 
 /** SpiderCaves pass（L17455）1:1：w*0.005 个巢；采样 x∈[200,w-200) y∈[(ws+rock)/2,h-230)；
- *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢） */
+ *  countTiles 门 500≤空腔<3500（重试上限 w/2，超限放弃该巢；重掷 y 域换 rockLevel+30） */
 export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const count = Math.floor(st.w * 0.005);
   const retryCap = Math.floor(st.w / 2);
@@ -515,8 +501,9 @@ export function runSpiderNestPass(st: TileStore, rng: RNG, gs: GenState, chests:
     let tries = 0;
     while ((c.count >= MAX_TILE_COUNT || c.count < 500) && tries < retryCap) {
       tries++;
+      // cs:17502-17504：重掷 x 仍 [200,w-200)，y 换 [rockLayer+30, h-230)
       x = rng.int(200, st.w - 201);
-      y = rng.int(yMin, st.h - 231);
+      y = rng.int(gs.rockLevel + 30, st.h - 231);
       c = countTiles(st, x, y);
       if (c.shroom > 1) c.count = 0;
     }
@@ -564,8 +551,7 @@ export function runWebsInSpiderCavesPass(st: TileStore, rng: RNG, gs: GenState):
 
 /** Webs pass（L13659）1:1：w*h*0.0006 次天花板蛛网 runner（前 numMCaves 次锚定山洞口）。
  *  TileRunner(51, addTile:true, ±1 横速, -1 升速, 4-10 半径, 2-3 步) */
-export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
-  const count = Math.floor(st.w * st.h * 0.0006);
+export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {  const count = Math.floor(st.w * st.h * 0.0006);
   const numMCaves = gs.numMCaves ?? 0;
   for (let i = 0; i < count; i++) {
     let j = rng.int(20, st.w - 21);
@@ -586,5 +572,37 @@ export function runWebsPass(st: TileStore, rng: RNG, gs: GenState): void {
       strength: rng.int(4, 10), steps: rng.int(2, 3), type: COBWEB,
       addTile: true, speedX: dir, speedY: -1,
     });
+  }
+}
+
+/** BeeLarvaInBeehives pass（cs:21018-21050）1:1：蜂巢 pass 只登记 larvaX/Y，
+ *  幼虫放置（3 宽 ×4 高清空、底行铺蜂巢 225 整砖 + PlaceTile(231)）挪到管线尾
+ *  （原版注册序 21018：LongMoss(20915) 之后、SettleLiquidsPart2(21051) 之前）。
+ *  零掷骰——不影响 RNG 流。 */
+export function runBeeLarvaPass(st: TileStore, gs: GenState): void {
+  for (let n = 0; n < gs.larvaX.length; n++) {
+    const x = gs.larvaX[n], y = gs.larvaY[n];
+    for (let j = x - 1; j <= x + 1; j++) {
+      for (let k = y - 2; k <= y + 1; k++) {
+        if (!st.inBounds(j, k)) continue;
+        const i = st.idx(j, k);
+        if (k !== y + 1) {
+          st.flags[i] = 0;                       // active(false)，type 留待幼虫覆写
+        } else {
+          st.type[i] = HIVE; st.flags[i] = 1;    // 底行 225：active + slope(0) + halfBrick(false)
+          st.slope[i] = 0; st.half[i] = 0;
+        }
+      }
+    }
+    // PlaceTile(x, y, 231)（本仓近似：3×3 幼虫块，占 x-1..x+1 × y-2..y）
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 0; dy < 3; dy++) {
+        const tx = x - 1 + dx, ty = y - 2 + dy;
+        if (!st.inBounds(tx, ty)) continue;
+        const i = st.idx(tx, ty);
+        st.type[i] = LARVA; st.flags[i] = 1;
+        st.frameX[i] = dx * 18; st.frameY[i] = dy * 18;
+      }
+    }
   }
 }

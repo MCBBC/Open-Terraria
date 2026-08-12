@@ -41,7 +41,14 @@ export interface DebugReportOptions {
   instanceCount?: number;
 }
 
-export interface RleAreaDump { x0: number; y0: number; w: number; h: number; rows: string[] }
+/** 区域转储。rows 每行 RLE,token = `sheet:fx:fy:wall:liquid`(空格带墙/液体时 sheet=-1,
+ *  纯空格压缩为 '0')——**第一字段是原版 sheet id 不是内部 type id**(贴图考古曾在此踩坑)。
+ *  auto 帧 tile 的 store fx/fy 恒 0(渲染时查表),勿据 0 判"帧未生效" */
+export interface RleAreaDump {
+  x0: number; y0: number; w: number; h: number; rows: string[];
+  /** 自描述编码说明(报告消费方免读源码) */
+  enc?: string;
+}
 
 /** Game.debugSnapshot() 返回形（字段全部可缺——测试桩可只给子集） */
 export interface GameDebugSnapshot {
@@ -128,7 +135,7 @@ export function dumpArea(
     for (let x = bx0; x <= bx1; x++) toks.push(cellToken(st, st.idx(x, y)));
     rows.push(encodeRle(toks));
   }
-  return { x0: bx0, y0: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1, rows };
+  return { x0: bx0, y0: by0, w: bx1 - bx0 + 1, h: by1 - by0 + 1, rows, enc: 'sheet:fx:fy:wall:liquid' };
 }
 
 function canvasShot(c: { toDataURL?: (t: string) => string } | null | undefined): { url: string | null; omitted: boolean } {
@@ -478,6 +485,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
   let histType: Array<[number, number]> = [];
   let histSheet: Array<[number, number]> = [];
   let areaCam: RleAreaDump | null = null;
+  let visibleTop: Array<{ sheet: number; key: string | null; count: number }> | null = null;
   let areaPlayer: RleAreaDump | null = null;
   if (st) {
     const byType = new Map<number, number>();
@@ -498,6 +506,21 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       areaCam = dumpArea(st,
         Math.floor((cam.x - halfW) / TILE), Math.floor((cam.y - halfH) / TILE),
         Math.floor((cam.x + halfW) / TILE), Math.floor((cam.y + halfH) / TILE));
+      // 屏内可见 tile 频次 top(贴图考古第一问"这一屏主要是什么"直接可答)
+      try {
+        const bySheet = new Map<number, number>();
+        for (let y = areaCam.y0; y < areaCam.y0 + areaCam.h; y++) {
+          for (let x = areaCam.x0; x < areaCam.x0 + areaCam.w; x++) {
+            const t = st.type[st.idx(x, y)];
+            if (t === 0) continue;
+            const sh = sheetOf(t);
+            bySheet.set(sh, (bySheet.get(sh) ?? 0) + 1);
+          }
+        }
+        visibleTop = [...bySheet.entries()]
+          .sort((a, b) => b[1] - a[1]).slice(0, 8)
+          .map(([sh, n]) => ({ sheet: sh, key: TILE_DEFS.find((t) => t.vanilla?.sheet === sh)?.key ?? null, count: n }));
+      } catch { visibleTop = null; }
     }
     if (g.player) {
       const ptx = Math.floor(g.player.cx / TILE);
@@ -519,6 +542,23 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       props: ents.props.length,
     }
     : null;
+  // 逐实体小转储(前 20):贴图问题现场可能是掉落物/NPC 而非 tile——此前只给计数查无此物
+  const entDump = (list: unknown[], keyOf?: (e: never) => string) =>
+    list.slice(0, 20).map((e) => {
+      const o = e as { id?: number; x?: number; y?: number; key?: string; itemId?: number; netPuppet?: boolean };
+      return {
+        id: o.id ?? null,
+        key: keyOf ? keyOf(e as never) : (o.key ?? (o.itemId !== undefined ? ITEM_DEFS[o.itemId]?.key ?? `item_${o.itemId}` : null)),
+        x: o.x !== undefined ? Math.round(o.x) : null,
+        y: o.y !== undefined ? Math.round(o.y) : null,
+        netPuppet: o.netPuppet ?? null,
+      };
+    });
+  const entityList = ents ? {
+    drops: entDump([...ents.drops]),
+    npcs: entDump([...ents.npcs]),
+    props: entDump([...ents.props]),
+  } : null;
 
   // ---- player ----
   let player: Record<string, unknown> | null = null;
@@ -568,7 +608,24 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       : null;
     const chain = (pos: [number, number] | null): FocusTileChain | null =>
       pos ? focusChain(st, atlas, enemies, pos[0], pos[1]) : null;
-    focusSection = { hover: chain(hoverPos), camera: chain(camPos), player: chain(pPos) };
+    // 邻域 5×5 全链转储(贴图问题现场常不在三个焦点上——实测三焦点全空而问题格在旁):
+    // 只保留非空格,键 `x,y`;hover 与玩家脚下各一份
+    const ring = (c: [number, number] | null): Record<string, FocusTileChain | null> | null => {
+      if (!c) return null;
+      const out: Record<string, FocusTileChain | null> = {};
+      for (let dy = -2; dy <= 2; dy++) {
+        for (let dx = -2; dx <= 2; dx++) {
+          if (dx === 0 && dy === 0) continue;
+          const ch = focusChain(st, atlas, enemies, c[0] + dx, c[1] + dy);
+          if (ch?.cell && ch.cell.type !== 0) out[`${c[0] + dx},${c[1] + dy}`] = ch;
+        }
+      }
+      return out;
+    };
+    focusSection = {
+      hover: chain(hoverPos), camera: chain(camPos), player: chain(pPos),
+      hoverRing: ring(hoverPos), playerRing: ring(pPos),
+    } as Record<string, FocusTileChain | null>;
   }
 
   const wiring = g.wiring;
@@ -638,13 +695,19 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
       histSheet,
       areaCamera: areaCam,
       areaPlayer,
+      visibleTop,
       focus: focusSection,
     } : null,
     render: {
       camera: cam ? {
+        // x/y = 视野**中心**(世界 px)——截图像素→世界: world = cam.xy + (screen - view/2)/zoom
         x: Math.round(cam.x), y: Math.round(cam.y),
         zoom: +cam.zoom.toFixed(3), zoomTarget: +cam.zoomTarget.toFixed(3),
         viewW: cam.viewW, viewH: cam.viewH,
+        corners: {
+          tl: [Math.floor((cam.x - (cam.viewW / 2) / cam.zoom) / TILE), Math.floor((cam.y - (cam.viewH / 2) / cam.zoom) / TILE)],
+          br: [Math.floor((cam.x + (cam.viewW / 2) / cam.zoom) / TILE), Math.floor((cam.y + (cam.viewH / 2) / cam.zoom) / TILE)],
+        },
       } : null,
       fullMapOpen: g.renderer?.fullMap?.open ? 1 : 0,
       debugMode: g.renderer?.debugMode ? 1 : 0,
@@ -679,6 +742,7 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
     } : null,
     entities: {
       counts: entityCounts,
+      list: entityList,
       enemies: enemies.map(enemyRecord),
     },
     player,

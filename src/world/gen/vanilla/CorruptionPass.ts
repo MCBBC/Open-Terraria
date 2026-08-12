@@ -58,6 +58,7 @@ export function __crDump(): string { return COLBUF.join('\n'); }
 
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
+  COLBUF.push(`crStartJS p=${rng.vanilla.peek()}`);
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁
   // 丛林/雪原横向范围(±10 回避, cs:13936-13952)
   let jMin = w, jMax = 0, sMin = w, sMax = 0;
@@ -81,8 +82,10 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
     let snowLo = sLo, snowHi = sHi, jungLo = jLo, jungHi = jHi;
     let cx = 0, zLo = 0, zHi = 0;
     let ok = false;
+    let att = 0;
     // 拒绝采样（cs:13979-14009）：地牢侧钳制 → 地牢 ±100 → 中央 ±200 → 沙漠 → 雪原 → 丛林
     while (!ok) {
+      att++;
       ok = true;
       cx = rng.int(500, w - 501);                              // Next(num8=500, w-500)(cs:13976/14012);曾误用 380 避滩值
       zLo = cx - rng.int(0, 199) - 100;                        // Next(200)
@@ -101,7 +104,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }   // cs:14006-14010（先雪后林）
       if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
     }
-    COLBUF.push(`g=${g} cx=${cx} zLo=${zLo} zHi=${zHi} p=${rng.vanilla.peek()}`);
+    COLBUF.push(`g=${g} att=${att} cx=${cx} zLo=${zLo} zHi=${zHi} p=${rng.vanilla.peek()}`);
     gs.evilZones.push({ x0: zLo, x1: zHi });
 
     if (gs.crimson) {

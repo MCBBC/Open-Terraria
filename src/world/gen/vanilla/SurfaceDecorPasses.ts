@@ -357,17 +357,18 @@ function stonePatch(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number)
   return true;
 }
 
-/** SurfaceOreAndStone pass（cs:18559）：先矿脉后石块，均带中心带回避 + 矿点登记 */
+/** SurfaceOreAndStone pass（cs:18559）：先矿脉后石块，均带中心带回避 + 矿点登记。
+ *  rng.int 闭区间 ≡ Next(a, b+1)——所有上界传原版第二参 -1。 */
 export function runSurfaceOreAndStonePass(st: TileStore, rng: RNG, gs: GenState): void {
   const w = st.w;
-  let num = rng.int(((w * 5) / 4200) | 0, ((w * 10) / 4200) | 0);       // Next(w*5/4200, w*10/4200)
+  let num = rng.int(((w * 5) / 4200) | 0, (((w * 10) / 4200) | 0) - 1); // Next(w*5/4200, w*10/4200)
   for (let i = 0; i < num; i++) {
     let tries = (w / 420) | 0;
     while (tries > 0) {
       tries--;
-      let x = rng.int(gs.beachDistance, w - gs.beachDistance);
-      while (x >= w * 0.48 && x <= w * 0.52) x = rng.int(gs.beachDistance, w - gs.beachDistance);
-      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface);           // Next((int)wsLow, (int)ws)
+      let x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);     // Next(bd, w-bd)
+      while (x >= w * 0.48 && x <= w * 0.52) x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
+      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface - 1);      // Next((int)wsLow, (int)ws)
       let near = false;
       for (let j = 0; j < gs.numOrePatch; j++) {
         if (Math.abs(x - gs.orePatchX[j]) < 200) near = true;
@@ -381,14 +382,14 @@ export function runSurfaceOreAndStonePass(st: TileStore, rng: RNG, gs: GenState)
       }
     }
   }
-  num = rng.int(1, ((w * 7) / 4200) | 0);                               // Next(1, w*7/4200)
+  num = rng.int(1, (((w * 7) / 4200) | 0) - 1);                         // Next(1, w*7/4200)
   for (let k = 0; k < num; k++) {
     let tries = (w / 420) | 0;
     while (tries > 0) {
       tries--;
-      let x = rng.int(gs.beachDistance, w - gs.beachDistance);
-      while (x >= w * 0.47 && x <= w * 0.53) x = rng.int(gs.beachDistance, w - gs.beachDistance);
-      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface);
+      let x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
+      while (x >= w * 0.47 && x <= w * 0.53) x = rng.int(gs.beachDistance, w - gs.beachDistance - 1);
+      const y = rng.int(gs.worldSurfaceLow, gs.worldSurface - 1);
       let near = false;
       for (let l = 0; l < gs.numOrePatch; l++) {
         if (Math.abs(x - gs.orePatchX[l]) < 100) near = true;
@@ -413,11 +414,11 @@ export function runFallenLogsPass(st: TileStore, rng: RNG, gs: GenState): void {
     const relaxAt = 5000;
     while (budget > 0) {
       budget--;
-      let x = rng.int(x0, w - x0);
-      let j = rng.int(10, gs.worldSurface);                             // Next(10, (int)worldSurface)
+      let x = rng.int(x0, w - x0 - 1);                                  // Next(x0, w-x0)
+      let j = rng.int(10, gs.worldSurface - 1);                         // Next(10, (int)worldSurface)
       const relaxed = budget < relaxAt;
       if (budget > relaxAt / 2) {
-        while (x > w * 0.4 && x < w * 0.6) x = rng.int(x0, w - x0);
+        while (x > w * 0.4 && x < w * 0.6) x = rng.int(x0, w - x0 - 1);
       }
       if (!activeAt(st, x, j) && st.inBounds(x, j) && st.wall[st.idx(x, j)] === 0) {
         let ok = true;
@@ -1618,6 +1619,175 @@ export function runLilypadsPass(st: TileStore, rng: RNG, gs: GenState): void {
         else if (s === 549) growCheckSeaweed(st, rng, i, y);
       }
       y--;
+    }
+  }
+}
+
+// ============================================================
+// 8. GrassPlants（cs:20209-20265）+ GlowingMushroomPlants（cs:20267-20308）
+// ============================================================
+
+const CORRUPT_THORNS = TILE_BY_KEY['v_32_corruption_thorns']!;
+const CRIMSON_THORNS = TILE_BY_KEY['v_352_crimtane_thorns']!;
+const JUNGLE_SHORT = TILE_BY_KEY['v_61_jungle_short_plants']!;
+const JUNGLE_SPORES = TILE_BY_KEY['v_69_jungle_thorns']!;
+const ASH_SHORT = TILE_BY_KEY['v_637_ash_short_plants']!;
+const GLOW_SHROOM = TILE_BY_KEY['v_71_mushroom_plant']!;
+/** PlaceTile(3) 蘑菇草基座帧表（cs:59546：21/24/27/30/33/36/39/42 抽中再 +Next(3)） */
+const MUSHROOM_FX_LIST = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 24, 27, 30, 33, 36, 39, 42];
+/** 帧表（花窗）——num==3/24 共用（cs:59571） */
+const FLOWER_FX_LIST = [6, 7, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+/** num==201 的花窗帧表（cs:59574） */
+const FLOWER_FX_LIST_201 = [6, 7, 8, 9, 10, 11, 12, 13, 14, 16, 17, 18, 19, 20, 21, 22];
+/** num==637 的花窗帧表（cs:59578） */
+const FLOWER_FX_LIST_637 = [6, 7, 8, 9, 10];
+
+/** IsFitToPlaceFlowerIn 的下方草族表（cs:58247）：num → 允许的下方 sheet 集 */
+const PLANT_FIT: Record<number, Set<number>> = {
+  3: new Set([2, 78, 380, 477, 579]),
+  24: new Set([23, 661]),
+  201: new Set([199, 662]),
+  637: new Set([633]),
+};
+const CORRUPT_PLANTS = TILE_BY_KEY['v_24_corruption_short_plants']!;
+const CRIMSON_PLANTS = TILE_BY_KEY['v_201_crimson_short_plants']!;
+const plantTileOf = (num: number): number =>
+  num === 24 ? CORRUPT_PLANTS : num === 201 ? CRIMSON_PLANTS : num === 637 ? ASH_SHORT : PLANT_SHORT;
+
+/** PlaceTile 的 num∈{3,24,201,637} 分支（cs:59533-59654）1:1。
+ *  门禁：液体拒绝（cs:59492）+ IsFitToPlaceFlowerIn（cs:58247：下方草族整砖）；
+ *  帧：1/13 荆棘化（24→32 / 201→352）→ 蘑菇草基座特殊帧表 → 墙门内
+ *  1/50 蘑菇帧(144/270) / 花窗 / Next(6) 草丛。返回是否放置。 */
+export function placePlantTile(st: TileStore, rng: RNG, x: number, y: number, num: number): boolean {
+  const i = st.idx(x, y);
+  if (st.liquid[i] > 0) return false;
+  const bi = st.idx(x, y + 1);
+  if (!st.flags[bi] || st.slope[bi] !== 0 || st.half[bi]) return false;
+  const below = SHEET[st.type[bi]];
+  const fit = PLANT_FIT[num];
+  if (!fit || !fit.has(below)) return false;
+  if (num === 24 && rng.int(0, 12) === 0) {                               // Next(13) → 荆棘 32
+    st.setTileSilent(x, y, CORRUPT_THORNS, 0, 0);                         // SquareTileFrame
+    return true;
+  }
+  if (num === 201 && rng.int(0, 12) === 0) {                              // Next(13) → 352
+    st.setTileSilent(x, y, CRIMSON_THORNS, 0, 0);
+    return true;
+  }
+  if (below === 78 || below === 380 || below === 579) {                   // 蘑菇草基座（cs:59546）
+    let fx = MUSHROOM_FX_LIST[rng.int(0, MUSHROOM_FX_LIST.length - 1)];
+    if (fx >= 21 && fx % 3 === 0) fx += rng.int(0, 2);                    // 21/24/27/…/42 抽中再 +Next(3)
+    st.setTileSilent(x, y, plantTileOf(num), fx * 18, 0);
+    return true;
+  }
+  if (WALL_ALLOWS_PLANTS.has(st.wall[i]) && WALL_ALLOWS_PLANTS.has(st.wall[bi])) {
+    let fx: number;
+    if (rng.int(0, 49) === 0 || ((num === 24 || num === 201) && rng.int(0, 39) === 0)) {
+      fx = num === 201 ? 270 : 144;                                       // 蘑菇/恶魔蘑菇帧
+    } else if (rng.int(0, 34) === 0 || (st.wall[i] >= 63 && st.wall[i] <= 70)) {
+      const list = num === 201 ? FLOWER_FX_LIST_201 : num === 637 ? FLOWER_FX_LIST_637 : FLOWER_FX_LIST;
+      fx = list[rng.int(0, list.length - 1)];
+    } else {
+      fx = rng.int(0, 5);                                                 // Next(6) 草丛
+    }
+    st.setTileSilent(x, y, plantTileOf(num), fx * 18, 0);
+    return true;
+  }
+  return false;                                                           // 墙不允许植物生长 → 不放
+}
+
+/** TooManyJunglePlantsNearby（cs:73216）：19×11 盒内 61/74 > 2 即过密 */
+function tooManyJunglePlants(st: TileStore, i: number, j: number): boolean {
+  const x0 = Math.max(10, Math.min(i - 9, st.w - 11));
+  const x1 = Math.max(10, Math.min(i + 9, st.w - 11));
+  const y0 = Math.max(10, Math.min(j - 5, st.h - 11));
+  const y1 = Math.max(10, Math.min(j + 5, st.h - 11));
+  let count = 0;
+  for (let k = x0; k <= x1; k++) {
+    for (let l = y0; l <= y1; l++) {
+      if (activeAt(st, k, l) && (SHEET[st.type[st.idx(k, l)]] === 61 || SHEET[st.type[st.idx(k, l)]] === 74)) {
+        count++;
+        if (count > 2) return true;
+      }
+    }
+  }
+  return false;
+}
+
+/** PlaceTile(61) 分支（cs:59603-59652）1:1：下方 60/226 整砖门 + 五段帧链 */
+function placeJunglePlant(st: TileStore, rng: RNG, gs: GenState, x: number, y: number): void {
+  const bi = st.idx(x, y + 1);
+  if (y + 1 >= st.h || !st.flags[bi] || st.slope[bi] !== 0 || st.half[bi]) return;
+  const below = SHEET[st.type[bi]];
+  if (below !== 60 && below !== 226) return;
+  const temple = below === 226;
+  const deep = y > gs.rockLevel;                                          // remix 恒 false
+  const deepOk = temple ? false : deep;
+  if (rng.int(0, 15) === 0 && y > gs.worldSurface && !temple) {           // Next(16) → 孢子 69
+    st.setTileSilent(x, y, JUNGLE_SPORES, 0, 0);
+    return;
+  }
+  let fx: number;
+  if (rng.int(0, 59) === 0 && deepOk) fx = 144;                           // Next(60)
+  else if (rng.int(0, 229) === 0 && deepOk) fx = 162;                     // Next(230)
+  else if (rng.int(0, 14) === 0 && !temple) {                             // Next(15)
+    fx = rng.int(0, 2) !== 0                                              // Next(3)
+      ? rng.int(0, 1) * 18 + 108
+      : rng.int(0, 12) * 18 + 180;                                        // Next(13)
+  } else {
+    fx = rng.int(0, 5);                                                   // Next(6)
+  }
+  st.setTileSilent(x, y, JUNGLE_SHORT, fx, 0);
+}
+
+/** GrassPlantsEvilPlantsAndPumpkinsOnSurface pass（cs:20232-20263）：
+ *  草族（2/23/199/633）→ 上方空格 PlaceTile(3/24/201/637)。原版不处理丛林草 60
+ *  （60 的植物在 GlowingMushroomPlants pass 的 61 分支），也没有 pass 级荆棘掷骰——
+ *  荆棘 32/352 是 PlaceTile(24/201) 内部的 1/13 转化。 */
+export function runGrassPlantsPass(st: TileStore, rng: RNG): void {
+  for (let x = 0; x < st.w; x++) {
+    for (let y = 1; y < st.h; y++) {
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      const s = SHEET[st.type[i]];
+      if (s === 2) {
+        if (!st.flags[st.idx(x, y - 1)]) placePlantTile(st, rng, x, y - 1, 3);
+      } else if (s === 23) {
+        if (!st.flags[st.idx(x, y - 1)]) placePlantTile(st, rng, x, y - 1, 24);
+      } else if (s === 199) {
+        if (!st.flags[st.idx(x, y - 1)]) placePlantTile(st, rng, x, y - 1, 201);
+      } else if (s === 633 && !st.flags[st.idx(x, y - 1)]) {
+        placePlantTile(st, rng, x, y - 1, 637);
+      }
+    }
+  }
+}
+
+/** GlowingMushroomPlantsUndergroundAndJunglePlants pass（cs:20278-20303）1:1。
+ *  蘑菇草 70（地下）：先 3 次 TryGrowingTreeByType(5) 巨型蘑菇树，全败才 PlaceTile(71)
+ *  （巨型蘑菇树未移植——见 C 组备案，此处尝试恒败零掷骰）；丛林草 60 → 61；
+ *  蜥蜴砖 226 → 1/5 且非过密 → 61。 */
+export function runGlowingMushroomPlantsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const ws = Math.floor(gs.worldSurface);
+  for (let i = 5; i < st.w - 5; i++) {
+    for (let j = 5; j < st.h - 5; j++) {
+      const i0 = st.idx(i, j);
+      if (!st.flags[i0]) continue;
+      const s = SHEET[st.type[i0]];
+      if (j >= ws && s === 70 && !st.flags[st.idx(i, j - 1)]) {
+        // TryGrowingTreeByType(5)×3（cs:20280-20286）——巨型蘑菇树（GrowTreeWithSettings
+        // Tree_Mushroom）未移植，恒败不消耗 RNG；备案见报告
+        if (!st.flags[st.idx(i, j - 1)]) {
+          st.setTileSilent(i, j - 1, GLOW_SHROOM, rng.int(0, 4) * 18, 0); // PlaceTile(71)：Next(5) 帧
+        }
+      }
+      if (!st.flags[st.idx(i, j - 1)]) {
+        if (s === 60) {
+          placeJunglePlant(st, rng, gs, i, j - 1);
+        } else if (s === 226 && rng.int(0, 4) === 0 && !tooManyJunglePlants(st, i, j - 1)) {
+          placeJunglePlant(st, rng, gs, i, j - 1);
+        }
+      }
     }
   }
 }

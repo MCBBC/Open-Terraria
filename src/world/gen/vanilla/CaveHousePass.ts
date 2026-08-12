@@ -626,22 +626,25 @@ function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, r
 }
 
 // ---------- pass 主体 ----------
-/** 地下小屋 pass(UndergroundHousesAndBuriedChests 的 CaveHouse 段,cs:17153-17178) */
+/** 地下小屋 pass(UndergroundHousesAndBuriedChests 的 CaveHouse 段,cs:17153-17178
+ *  + 沙漠追加段 cs:17193-17219) */
 export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
   const { w, h } = st;
   const count = Math.round(rng.int(35, 40) * (w * h) / 5040000);
+  // 第 4 个 WorldGenRange：AdditionalDesertHouseCount（2-2 × WorldArea，
+  // Configuration.json）——GetRandom 恒消费一次 Next（cs:17088）
+  const desertHouses = rng.int(2, 2);
   let bastCount = 0;        // GenVars.extraBastStatueCount(≤2)
   let extractCount = 0;     // HouseBuilderContext.ExtractinatorCount
   const extractMax = rng.int(2, 4);
   let sharpCount = 0;       // context.SharpenerCount
   const sharpMax = rng.int(2, 4);
 
-  for (let n = 0; n < count; n++) {
-    const ox = rng.int(80, w - 81);
-    const oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
-    if (ox < gs.beachDistance || ox > w - gs.beachDistance) continue; // oceanDepths 回避
+  /** 单座小屋放置（HouseBuilder.Place 原序），返回是否成功 */
+  const placeHouse = (ox: number, oy: number, oceanGate: boolean): boolean => {
+    if (oceanGate && (ox < gs.beachDistance || ox > w - gs.beachDistance)) return false; // oceanDepths 回避
     const rooms = createRooms(st, rng, ox, oy);
-    if (!rooms.length) continue;
+    if (!rooms.length) return false;
     // 位置合法(InWorld 10 边距 / 底部 < h-220)+ 房间互不重叠
     let ok = true;
     for (const r of rooms) {
@@ -653,10 +656,10 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
         if (A.x < B.x + B.w && B.x < A.x + A.w && A.y < B.y + B.h && B.y < A.y + A.h) ok = false;
       }
     }
-    if (!ok) continue;
+    if (!ok) return false;
     const theme = getHouseType(st, rooms);
     const def = THEMES[theme];
-    if (def.tile < 0 || def.beam < 0) continue;
+    if (def.tile < 0 || def.beam < 0) return false;
     // 岩浆回避(granite 主题豁免,HouseUtils.AreRoomsValid)
     if (theme !== 'granite') {
       for (const r of rooms) {
@@ -666,7 +669,7 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
           }
         }
       }
-      if (!ok) continue;
+      if (!ok) return false;
     }
 
     // ---- HouseBuilder.Place 原序 ----
@@ -712,6 +715,36 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
     if (theme === 'desert' && extractCount < extractMax) {
       const r = rooms[rooms.length - 1];
       if (placeFurniture(st, 'v_219_extractinator', r.x + 1 + rng.int(0, Math.max(1, r.w - 3)), r.y + r.h - 2)) extractCount++;
+    }
+    return true;
+  };
+
+  for (let n = 0; n < count; n++) {
+    const ox = rng.int(80, w - 81);
+    const oy = rng.int(Math.ceil(gs.worldSurfaceHigh + 20), h - 231);
+    placeHouse(ox, oy, true);
+  }
+
+  // ---- 沙漠追加小屋（cs:17193-17219）：UndergroundDesertHiveLocation 内追加
+  //  AdditionalDesertHouseCount 座（RandomRectanglePoint），失败预算 10000 重试同下标
+  const ud = gs.undergroundDesert;
+  if (ud && ud.x1 > ud.x0 && ud.y1 > ud.y0) {
+    let ry = ud.y0;
+    let rh = ud.y1 - ud.y0;
+    if (ry < gs.worldSurface + 26) {          // cs:17200-17205：上缘压到 worldSurface+26 下
+      const cut = Math.floor(gs.worldSurface) + 26 - ry;
+      ry += cut;
+      rh -= cut;
+    }
+    if (rh > 0) {
+      let budget = 10000;
+      for (let l = 0; l < desertHouses;) {
+        if (budget <= 0) break;
+        const hx = rng.int(ud.x0, ud.x1);      // RandomRectanglePoint: Next(X, X+Width)
+        const hy = rng.int(ry, ry + rh);
+        if (!placeHouse(hx, hy, false)) { budget--; continue; }
+        l++;
+      }
     }
   }
 }

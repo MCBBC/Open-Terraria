@@ -100,6 +100,9 @@ export interface GenState {
    *  Flowers(20592) 消费后置 -1 */
   logX: number;
   logY: number;
+  /** GenVars.larvaX/larvaY（蜂巢 pass 登记，BeeLarvaInBeehives cs:21018 消费） */
+  larvaX: number[];
+  larvaY: number[];
 }
 
 export function newGenState(w: number, h: number): GenState {
@@ -131,5 +134,6 @@ export function newGenState(w: number, h: number): GenState {
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
+    larvaX: [], larvaY: [],                                    // BeeLarva pass（cs:21018）消费
   };
 }

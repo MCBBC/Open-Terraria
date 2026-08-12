@@ -222,8 +222,9 @@ function shimmerOpening(st: TileStore, rng: RNG, dir: number, X: number, Y: numb
 /** PlaceTight（1456 cs:38329，spiders=false）1:1。
  *  门禁：!anyShimmer(x,y) && (!active(x,y) || type!=231 幼虫) → 掷 Next(2) preferSmall +
  *  Next(3) variation（门禁过即掷，放置成败都消费）。上方实心 → 垂挂钟乳石；否则下方实心
- *  且上方净空 → 地面石笋（spiders 路径在 HiveSpiderPass.placeTightWebs）。 */
-function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
+ *  且上方净空 → 地面石笋（spiders 路径在 HiveSpiderPass.placeTightWebs）。
+ *  导出给 SpeleothemsAndGemTrees pass（cs:22196，GemPasses 消费）复用。 */
+export function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
   const yi = st.idx(x, y);
   const liq = st.liquid[yi];
   if (liq > 0 && st.liquidType[yi] === LIQ_SHIMMER) return;

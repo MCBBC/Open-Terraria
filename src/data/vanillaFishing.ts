@@ -75,7 +75,7 @@ export function rollCatch(
   // RareDrops 传说族（:196-201，串行独立 roll 各自失败才落下一条）：
   //   血月 4382（须 !combatBookWasUsed）→ 血月 5240 → 2423/3225/2420
   if (ctx?.rarity) {
-    if (ctx.rarity.legendary && ctx.bloodMoon && !ctx.combatBook && Math.random() < 0.5) return 4382;
+    if (ctx.rarity.legendary && ctx.bloodMoon && !ctx.combatBook && Math.random() < 1 / 3) return 4382; // Next(3)==0（:19650-19654）
     if (ctx.rarity.legendary && ctx.bloodMoon && Math.random() < 0.5) return 5240;
     if (ctx.rarity.legendary && Math.random() < 0.2) return 2423;
     if (ctx.rarity.legendary && Math.random() < 0.2) return 3225;

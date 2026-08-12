@@ -206,9 +206,12 @@ import { runFloatingIslandsPass, runLifeCrystalsPass, runSurfaceDecorPass, runPy
 import {
   runSurfaceOreAndStonePass, runFallenLogsPass, runDyePlantsPass, runVinesPass,
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
+  runGrassPlantsPass, runGlowingMushroomPlantsPass,
 } from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
-import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass } from './vanilla/HiveSpiderPass';
+import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runBeeLarvaPass } from './vanilla/HiveSpiderPass';
+import { runPilesPass } from './vanilla/PilesPass';
+import { runRemoveSurfaceWaterAboveSandPass, runFragileIcePass } from './vanilla/WaterIcePasses';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
 import { runTemplePass } from './vanilla/TemplePass';

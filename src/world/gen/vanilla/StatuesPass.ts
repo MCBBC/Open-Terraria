@@ -76,9 +76,11 @@ export function runStatuesPass(st: TileStore, rng: RNG, gs: GenState): void {
     while (!done) {
       let x = rng.int(20, w - 21);
       let y = rng.int(yMin, h - 301);
-      // 海洋列回避(cs:16989 oceanDepths)
+      // 海洋回避(cs:16989 oceanDepths)——y > oceanLevel 直接 false 必须前置：
+      // 否则深层海滩列（y 超过海平面线）会被误拒重掷
+      const oceanTop = (gs.worldSurface + gs.rockLevel) / 2 + 40;
       let guard = 100;
-      while ((x < gs.beachDistance || x > w - gs.beachDistance) && guard-- > 0) {
+      while (y <= oceanTop && (x < gs.beachDistance || x > w - gs.beachDistance) && guard-- > 0) {
         x = rng.int(20, w - 21);
         y = rng.int(yMin, h - 301);
       }
