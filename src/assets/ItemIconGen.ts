@@ -211,9 +211,12 @@ function genItemIcon(key: string): HTMLCanvasElement {
       s(7, 8, MATS.gold.light); s(8, 8, MATS.gold.light);
     });
   }
-  // 工具
-  if (def.tool && ['pick', 'axe', 'sword'].includes(def.tool.type)) {
-    const tier = key.split('_')[0];
+  // 工具（锤补入分派数组——drawTool 已有锤头分支，此前被漏过滤到此后的兜底图）
+  if (def.tool && ['pick', 'axe', 'sword', 'hammer'].includes(def.tool.type)) {
+    // vi_<id>_ 前缀先剥离再找金属段（vi_3509_copper_pickaxe → copper；
+    // 此前 split('_')[0] 对 vi_* 键恒取 'vi' → 全部落到木色回退）
+    const segs = key.replace(/^vi_\d+_/, '').split('_');
+    const tier = segs.find((s) => metals[s]) ?? segs[0];
     const metal = metals[tier] ?? MATS.wood;
     return drawTool(def.tool.type as 'pick' | 'axe' | 'sword' | 'hammer', metal);
   }

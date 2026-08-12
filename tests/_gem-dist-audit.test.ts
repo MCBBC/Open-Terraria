@@ -66,6 +66,7 @@ function statsOf(
       console.log('(generateWorld 后段抛错，用宝石系统快照继续:', String(e).slice(0, 80), ')');
     }
     if (!st) throw new Error('未拿到宝石系统快照');
+    const stN = st; // 闭包内不可变别名（TS 收窄不进闭包）
     const ours = statsOf(st.w, st.h, (x, y) => {
       const i = st.idx(x, y);
       const d = (dx: number, dy: number) => {

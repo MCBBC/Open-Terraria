@@ -5,7 +5,7 @@ import { hash2 } from '../core/rng';
 import { drawVanillaCell, drawTreeCell } from './VanillaTiler';
 import { swayBakeSkip } from './WindSway';
 import { TILE_ANIM_RATE, tileAnim, animYOffset, campfireYOffset } from './TileAnim';
-import { VanillaWallTiler } from './VanillaWallTiler';
+import { VanillaWallTiler, wallAnimRate } from './VanillaWallTiler';
 import { shade } from '../assets/Palette';
 import type { TileSheetEntry } from '../assets/TileSheetGen';
 import type { AutoTiler } from './AutoTiler';
@@ -214,6 +214,13 @@ export class ChunkCache {
           const px = lx * TILE, py = ly * TILE;
           if (this.wallTiler.hasTexture(wallId)) {
             this.wallTiler.draw(ctx, st, x, y, wallId, this.truncatesWalls, px, py);
+            // 动画墙（DoUpdate_AnimateWalls 换带 + 星彩玻璃逐格错相）：登记进换带
+            // 重烘焙行列——墙无 sheet 概念，按 wallId 另建 map（tiles 侧同款机制）
+            if (wallAnimRate(wallId) !== 0) {
+              let wset = this.animChunksByWall.get(wallId);
+              if (!wset) { wset = new Set(); this.animChunksByWall.set(wallId, wset); }
+              wset.add(ChunkCache.key(cx, cy));
+            }
           } else {
             const wd = WALL_DEFS[wallId];
             if (wd) {
