@@ -14,6 +14,13 @@ const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SNOW = TILE_BY_KEY['snow']!;
 const ICE = TILE_BY_KEY['ice']!;
 const THIN_ICE = TILE_BY_KEY['thin_ice']!;
+// 邪恶草族/向日葵（SpreadGrass cs:75223/75266 门禁用）——必须按内部 ID 比较（曾误比 sheet 号）
+const CORRUPT_GRASS_ID = TILE_BY_KEY['v_23_corrupt_grass_block']!;
+const CRIMSON_GRASS_ID = TILE_BY_KEY['v_199_crimson_grass_block']!;
+const CORRUPT_JG_ID = TILE_BY_KEY['v_661_corrupt_jungle_grass_block']!;
+const CRIMSON_JG_ID = TILE_BY_KEY['v_662_crimson_jungle_grass_block']!;
+const HALLOW_GRASS_ID = TILE_BY_KEY['v_109_hallowed_grass_block']!;
+const SUNFLOWER = TILE_BY_KEY['v_27_sunflower']!;
 
 /** SpreadGrass（cs:75210，本 pass 以 repeat:false 调用）：零掷骰、单格转换。
  *  门禁序：InWorld(,10) → active&&type==dirt → 3×3 全实心(或触岩浆)拒绝 →
@@ -29,9 +36,15 @@ export function spreadGrassOnce(
   st: TileStore, i: number, j: number, dirt: number, grass: number, repeat = false,
 ): void {
   if (i < 10 || i >= st.w - 10 || j < 10 || j >= st.h - 10) return;   // InWorld(i,j,10)
-  if (dirt === 0 && j >= _wsRef()) return;                            // (j >= worldSurface && dirt==0)
   const ti = st.idx(i, j);
   if (!st.flags[ti] || st.type[ti] !== dirt) return;
+  // cs:75223-75234（生成期分支）：邪恶草族（199/23）另有专属门——中央 10%（(0.45w,0.55w]）
+  // 与滩带（beachDistance=380）内禁长；其余草走 (j>=worldSurface && dirt==0) 门。
+  if (grass === CRIMSON_GRASS_ID || grass === CORRUPT_GRASS_ID) {
+    if ((i > st.w * 0.45 && i <= st.w * 0.55) || i < 380 || i >= st.w - 380) return;
+  } else if (dirt === 0 && j >= _wsRef()) {
+    return;                                                            // growGrassUnderground=false
+  }
   let enclosed = true;
   for (let k = Math.max(0, i - 1); k < Math.min(st.w, i + 2); k++) {
     for (let l = Math.max(0, j - 1); l < Math.min(st.h, j + 2); l++) {
@@ -41,6 +54,10 @@ export function spreadGrassOnce(
     }
   }
   if (enclosed) return;
+  // cs:75266：向日葵 27 在头顶 → 邪恶草族（23/661/199/662/109）禁长（生成期无 27，零影响保门）
+  if ((grass === CORRUPT_GRASS_ID || grass === CORRUPT_JG_ID || grass === CRIMSON_GRASS_ID
+    || grass === CRIMSON_JG_ID || grass === HALLOW_GRASS_ID)
+    && j - 1 >= 0 && st.type[st.idx(i, j - 1)] === SUNFLOWER) return;
   // CanBeClearedDuringGeneration：与 TileRunner NOT_CLEAR 同源（dirt 族可清）
   const d = TILE_DEFS[st.type[ti]];
   if (d?.vanilla?.sheet != null && NOT_CLEARABLE.has(d.vanilla.sheet)) return;

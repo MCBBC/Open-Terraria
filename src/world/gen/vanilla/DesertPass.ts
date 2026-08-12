@@ -652,6 +652,14 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
           if (st.flags[i]) resetToType(px, py, shellType);
         }
       }
+      // flag2（DesertHive.cs:315 每格 true，仅末档 else 置 false）→ UpdateDesertHiveBounds
+      //（cs:395-397 + WorldGen.cs:11004）：蜂巢实际雕刻范围，供沙漠箱战利品分层消费
+      if (field > 0.25 || !isEdge) {
+        if (py < gs.desertHiveHigh) gs.desertHiveHigh = py;
+        if (py > gs.desertHiveLow) gs.desertHiveLow = py;
+        if (px < gs.desertHiveLeft) gs.desertHiveLeft = px;
+        if (px > gs.desertHiveRight) gs.desertHiveRight = px;
+      }
     }
   }
 
@@ -667,8 +675,26 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       if (st.type[i] === SAND && (!s1 || !s2)) st.type[i] = HARDSAND;
     }
   }
-  // 第二遍：396 顶部装饰（485/751/484/165/187）——放置两侧一致省略（PlaceTile
-  // 是巨型框架，装饰为 1x1 非实心物），掷骰照原序消耗保持流对齐
+  // 第二遍：396 顶部装饰（485/751/484/165/187，DesertHive.cs:466-496）——原版
+  // PlaceTile forced 放置，此前只消耗掷骰不落格（纯视觉缺失）。锚点/帧布局金标
+  // 实证（12345世界.wld）：2x2 物件底行贴 396 顶（485 fx=style*36、751/484 fx=0），
+  // 187 横排 style*54（fx 756/774/792 = style14 三列）；165 金标只见倒挂形
+  //（fy=0 在顶行，贴 396 下方），地面形帧分支原版有随机帧此处近似固定帧。
+  const T485 = TILE_BY_KEY['v_485_antlion_larva']!;
+  const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
+  const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
+  const T165 = TILE_BY_KEY['v_165_cave_decos']!;
+  const T187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
+  /** 底行锚、向上 fh 行的物件放置（forced 语义：flag 已保证锚区净空，直接落格） */
+  const placeDeco = (x: number, yBottom: number, tile: number, fw: number, fh: number, bx: number) => {
+    for (let dx = 0; dx < fw; dx++) {
+      for (let dy = 0; dy < fh; dy++) {
+        const ax = x + dx, ay = yBottom - dy;
+        if (!st.inBounds(ax, ay)) return;
+        st.setTileSilent(ax, ay, tile, bx + dx * 18, dy * 18);
+      }
+    }
+  };
   for (let wk = -20; wk < hiveW + 20; wk++) {
     for (let wl = -20; wl < hiveH + 20; wl++) {
       const px = desc.combX + wk, py = desc.hiveTop + wl;
@@ -686,11 +712,16 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         if (y < H && ((inW(px, y) && st.flags[st.idx(px, y)]) || (inW(px + 1, y) && st.flags[st.idx(px + 1, y)]))) { flag2 = false; break; }
       }
       if (flag && rng.int(0, 19) === 0) {      // Next(20)==0 → 485/751
-        rng.int(0, 3);                         // style = Next(4)
-        rng.int(0, 29);                        // Next(30)==0 → 751
+        const style = rng.int(0, 3);           // style = Next(4)
+        if (rng.int(0, 29) === 0) placeDeco(px, py - 1, T751, 2, 2, 0);        // Next(30)==0 → 751
+        else placeDeco(px, py - 1, T485, 2, 2, style * 36);
       } else if (flag && rng.int(0, 4) === 0) {          // 484
-      } else if ((flag !== flag2) && rng.int(0, 4) === 0) {  // 165
-      } else if (flag && rng.int(0, 4) === 0) {          // 187
+        placeDeco(px, py - 1, T484, 2, 2, 0);
+      } else if ((flag !== flag2) && rng.int(0, 4) === 0) {  // 165：flag 地面/!flag 倒挂
+        if (flag) placeDeco(px, py - 1, T165, 1, 2, 0);
+        else placeDeco(px, py + 2, T165, 1, 2, 0);       // 底行=py+2 → 顶行贴 396 下缘
+      } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)（此前漏掷）
+        placeDeco(px, py - 1, T187, 3, 2, (29 + rng.int(0, 5)) * 54);
       }
     }
   }

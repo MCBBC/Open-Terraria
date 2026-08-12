@@ -27,6 +27,9 @@ export class Input {
 
     onWin('keydown', ((e: KeyboardEvent) => {
       if (e.repeat) return;
+      // 输入框内打字不算操作键位（合成搜索框等）：游戏键全不放行、也不吞事件
+      const tgt = e.target as HTMLElement | null;
+      if (tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable)) return;
       this.keys.add(e.code);
       this.keydownHandlers.forEach((fn) => fn(e.code));
       if (['Space', 'ArrowUp', 'ArrowDown', 'Tab'].includes(e.code)) e.preventDefault();

@@ -151,8 +151,11 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     }
   }
 
-  // ---- 3. Campsites(cs:21915-21936,最多 1000 次尝试)----
-  const campCount = rng.int(Math.max(1, Math.trunc(areaScale * 6)), Math.max(1, Math.trunc(areaScale * 11)));
+  // ---- 3. Campsites(cs:21915-21936,最多 1000 次尝试;cs:21914 notTheBees 门)----
+  const campOk = !gs.seedFlags.notTheBees || gs.seedFlags.remix;
+  const campCount = campOk
+    ? rng.int(Math.max(1, Math.trunc(areaScale * 6)), Math.max(1, Math.trunc(areaScale * 11)))
+    : 0;
   let placed = 0, tries = 0;
   while (placed < campCount) {
     if (++tries > 1000) break;
@@ -161,9 +164,12 @@ export function runMicroBiomesPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (placeCampsite(st, rng, protectedRects, ox, oy)) placed++;
   }
 
-  // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试)----
-  let trapCount = rng.int(Math.max(1, Math.trunc(areaScale * 14)), Math.max(1, Math.trunc(areaScale * 29)));
-  if ((gs.seedFlags.getGoodWorld || gs.seedFlags.noTraps) && !gs.seedFlags.notTheBees) {
+  // ---- 4. Mining Explosives(cs:21951-21975,最多 3000 次尝试;cs:21956 notTheBees 门)----
+  const trapOk = campOk;
+  let trapCount = trapOk
+    ? rng.int(Math.max(1, Math.trunc(areaScale * 14)), Math.max(1, Math.trunc(areaScale * 29)))
+    : 0;
+  if (trapOk && (gs.seedFlags.getGoodWorld || gs.seedFlags.noTraps) && !gs.seedFlags.notTheBees) {
     trapCount = Math.trunc(trapCount * 1.5);       // cs:21958-21961
   }
   placed = 0; tries = 0;

@@ -1536,6 +1536,20 @@ if ((double)r.NextDouble() <= 0.5)
 }
 Checkpoint("desertentrance");
 
+// 沙漠装饰放置（AddTileVariance 第二遍；与 JS DesertPass.placeDeco 同锚：
+// 底行锚 yBottom、向上 fh 行；越界整组放弃——JS 侧 return 语义一致）
+void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
+{
+    for (int ddx = 0; ddx < dfw; ddx++)
+        for (int ddy = 0; ddy < dfh; ddy++)
+        {
+            int dax = dx0 + ddx, day = dyBot - ddy;
+            if (dax < 0 || day < 0 || dax >= W || day >= H) return;
+            act[day * W + dax] = 1;
+            typ[day * W + dax] = dtile;
+        }
+}
+
 // ================= Desert Sub-B Hive（DesertHive.cs 1:1）=================
 {
     // ---- ClusterGroup.Generate（椭圆散点→深度2 DFS→AttemptClaim→≥4 重组）----
@@ -1707,11 +1721,24 @@ Checkpoint("desertentrance");
             bool wFlag2 = true;
             for (int wm = 1; wm <= 3; wm++)
                 if (wy + wm < H && (act[(wy + wm) * W + wx] != 0 || act[(wy + wm) * W + wx + 1] != 0)) { wFlag2 = false; break; }
-            // 装饰（485/751/484/165/187）两侧一致省略放置，掷骰照原序消耗保持流对齐
-            if (wFlag && (int)r.Next(20) == 0) { int wStyle = (int)r.Next(4); if ((int)r.Next(30) == 0) wStyle = 0; }
-            else if (wFlag && (int)r.Next(5) == 0) { }
-            else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0) { }
-            else if (wFlag && (int)r.Next(5) == 0) { }
+            // 装饰放置（485/751/484/165/187，DesertHive.cs:466-496）——与 JS DesertPass
+            // placeDeco 同锚：2x2/3x2 底行贴 396 顶；165 的 flag 地面/!flag 倒挂。
+            // 哈希只看 type/act，帧不计。187 分支成功后补 Next(6)（原版 cs:494-496，
+            // 两侧曾一致漏掷——2026-08-12 与 JS 同步补齐）
+            if (wFlag && (int)r.Next(20) == 0)
+            {
+                int wStyle = (int)r.Next(4);
+                ushort dType = 485;
+                if ((int)r.Next(30) == 0) dType = 751;
+                PlaceDesertDeco(wx, wy - 1, dType, 2, 2);
+            }
+            else if (wFlag && (int)r.Next(5) == 0) { PlaceDesertDeco(wx, wy - 1, 484, 2, 2); }
+            else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0)
+            {
+                if (wFlag) PlaceDesertDeco(wx, wy - 1, 165, 1, 2);
+                else PlaceDesertDeco(wx, wy + 2, 165, 1, 2);
+            }
+            else if (wFlag && (int)r.Next(5) == 0) { int wS2 = (int)r.Next(6); PlaceDesertDeco(wx, wy - 1, 187, 3, 2); }
         }
     }
 }
@@ -1719,11 +1746,21 @@ Checkpoint("deserthive");
 Checkpoint("desertdone");   // CleanupArea 仅 SquareWallFrame/TileFrame——无哈希效应
 
 // ================= Pass 20 GlowingMushroomPatches（cs:12581-12709 + ShroomPatch cs:80540 + SpreadGrass cs:75210）=================
-void SpreadGrassGen(int gi, int gj, int gdirt, int ggrass)
+void SpreadGrassGen(int gi, int gj, int gdirt, int ggrass, bool grepeat = true)
 {
+    // SpreadGrass（cs:75210-75324）1:1。isGenerating=true、growGrassUnderground=false。
     if (gi < 10 || gi >= W - 10 || gj < 10 || gj >= H - 10) return;   // InWorld(i,j,10)
     int gi2 = gj * W + gi;
     if (act[gi2] == 0 || typ[gi2] != gdirt) return;
+    if (ggrass == 199 || ggrass == 23)
+    {
+        // cs:75223-75229：生成期邪恶草——中央 10%（(0.45X, 0.55X]）与滩带（beachDistance=380）内禁长
+        if (((double)gi > (double)W * 0.45 && (double)gi <= (double)W * 0.55) || gi < BEACH_DISTANCE || gi >= W - BEACH_DISTANCE) return;
+    }
+    else if (typ[gi2] != gdirt || act[gi2] == 0 || ((double)gj >= worldSurface && gdirt == 0))
+    {
+        return;   // growGrassUnderground=false → 直接 return
+    }
     int gx0 = Math.Max(0, gi - 1), gx1 = Math.Min(W, gi + 2);
     int gy0 = Math.Max(0, gj - 1), gy1 = Math.Min(H, gj + 2);
     bool gEnclosed = true;
@@ -1735,7 +1772,21 @@ void SpreadGrassGen(int gi, int gj, int gdirt, int ggrass)
             if (liqT[gti] == 1 && liq[gti] > 0) { gEnclosed = true; break; }   // lava
         }
     if (gEnclosed || NOT_CLEAR.Contains(typ[gi2])) return;    // CanBeClearedDuringGeneration
+    // cs:75266：向日葵 27 在头顶 → 邪恶草族（23/661/199/662/109）禁长（生成期无 27，零影响保门）
+    if ((ggrass == 23 || ggrass == 661 || ggrass == 199 || ggrass == 662 || ggrass == 109) && typ[(gj - 1) * W + gi] == 27) return;
     typ[gi2] = (ushort)ggrass;
+    if (!grepeat) return;
+    for (int gm = gx0; gm < gx1; gm++)
+        for (int gn = gy0; gn < gy1; gn++)
+        {
+            int gni = gn * W + gm;
+            if (act[gni] != 0 && typ[gni] == gdirt && grassSpread < 1000)
+            {
+                grassSpread++;
+                SpreadGrassGen(gm, gn, gdirt, ggrass, true);
+                grassSpread--;
+            }
+        }
 }
 void ShroomPatch(int si, int sj)
 {
@@ -1841,7 +1892,7 @@ void ShroomPatch(int si, int sj)
         {
             int sgti = sgy * W + sgx;
             if (sgx >= 50 && sgx < W - 50 && sgy >= 50 && sgy < H - 50 && act[sgti] != 0)
-                SpreadGrassGen(sgx, sgy, 59, 70);
+                SpreadGrassGen(sgx, sgy, 59, 70, grepeat: false);   // cs:12717 repeat:false
         }
     // 蘑菇草饰面第二循环（cs:12731-12769）：KillTile/PlaceTile(59)/Next(4) 散点
     for (int h2x = 0; h2x < W; h2x++)
@@ -2979,8 +3030,11 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
     double vy2 = (int)r.Next(11) * 0.2 + 0.5;
     int num3 = 5;
     double rad = (int)r.Next(5) + 7;
+    int crIt = 0;
     while (rad > 0.0)
     {
+        if (crIt < 150) Console.Error.WriteLine($"CI{crIt} n={sn} r={rad} px={vx} py={vy} p={(int)r.Peek()}");
+        crIt++;
         if (sn > 0.0)
         {
             rad += (int)r.Next(3);
@@ -2992,12 +3046,16 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
         else if (vy > wsN + 45.0) rad -= (int)r.Next(4);
         if (vy > rockLayer && sn > 0.0) sn = 0.0;
         sn -= 1.0;
+        if (crIt < 25) Console.Error.WriteLine($"CS{crIt} p={(int)r.Peek()}");
         if (!flag && vy > wsN + 20.0)
         {
             flag = true;
             ChasmRunnerSidewaysGen((int)vx, (int)vy, -1, (int)r.Next(20, 40));
+            if (crIt < 25) Console.Error.WriteLine($"CW- {crIt} p={(int)r.Peek()}");
             ChasmRunnerSidewaysGen((int)vx, (int)vy, 1, (int)r.Next(20, 40));
+            if (crIt < 25) Console.Error.WriteLine($"CW+ {crIt} p={(int)r.Peek()}");
         }
+        if (crIt < 25) Console.Error.WriteLine($"CC{crIt} p={(int)r.Peek()}");
         if (sn > (double)num3)
         {
             int x0 = Math.Max(0, (int)(vx - rad * 0.5)), x1 = Math.Min(W - 1, (int)(vx + rad * 0.5));
@@ -3043,8 +3101,10 @@ void ChasmRunnerGen(int i, int j, int steps, bool makeOrb)
                 }
             }
         }
+        if (crIt < 25) Console.Error.WriteLine($"CO{crIt} p={(int)r.Peek()}");
         vx += vx2; vy += vy2;
         vx2 += (int)r.Next(-10, 11) * 0.01;
+        if (crIt < 25) Console.Error.WriteLine($"CH{crIt} p={(int)r.Peek()}");
         if (vx2 > 0.3) vx2 = 0.3;
         if (vx2 < -0.3) vx2 = -0.3;
         int x0b = Math.Max(1, (int)(vx - rad * 1.1)), x1b = Math.Min(W - 1, (int)(vx + rad * 1.1));
@@ -3376,6 +3436,7 @@ void CrimPlaceHeartsGen()
         if (ox < BEACH_DISTANCE || ox > W - BEACH_DISTANCE) return true;
         return false;
     }
+    Console.Error.WriteLine($"CR0={(int)r.Peek()}");
     for (int g = 0; (double)g < groupCount; g++)
     {
         int snowLo = sMin, snowHi = sMax, jungLo = jMin, jungHi = jMax;
@@ -3405,6 +3466,7 @@ void CrimPlaceHeartsGen()
             if (zLo < snowHi && zHi > snowLo) { snowLo++; snowHi--; ok = false; }
             if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
         }
+        Console.Error.WriteLine($"CRg{g}={(int)r.Peek()} cx={cx} zLo={zLo} zHi={zHi}");
         if (crimson)
         {
             CrimStartGen(cx, (int)cNum - 10);
@@ -3425,6 +3487,7 @@ void CrimPlaceHeartsGen()
                     }
                 }
             }
+            Console.Error.WriteLine($"CRc{g}={(int)r.Peek()}");
             // 地表转换带（cs:14131-14199）
             double band = cNum2 + 40.0;
             for (int x = zLo; x < zHi; x++)
@@ -3444,7 +3507,7 @@ void CrimPlaceHeartsGen()
                     if (typ[ti] == 53 && x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 234;
                     if ((double)y < cNum2 - 1.0 && !first)
                     {
-                        if (typ[ti] == 0) { typ[ti] = 199; }         // SpreadGrass(0→199)：见下方扩展
+                        if (typ[ti] == 0) { grassSpread = 0; SpreadGrassGen(x, y, 0, 199); }   // SpreadGrass(0→199, repeat:true)
                         else if (typ[ti] == 59) { grassSpread = 0; SpreadGrassGen(x, y, 59, 662); }
                     }
                     first = true;
@@ -3461,6 +3524,7 @@ void CrimPlaceHeartsGen()
                     else if (typ[ti] == 397) typ[ti] = 399;
                 }
             }
+            Console.Error.WriteLine($"CRb{g}={(int)r.Peek()}");
             // 祭坛（cs:14201-14239）
             int altarCount = (int)r.Next(10, 15);
             for (int a = 0; a < altarCount; a++)
@@ -3513,17 +3577,23 @@ void CrimPlaceHeartsGen()
                             if (l == cx)
                             {
                                 cooldown = 20;
+                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} main y={n} cd={cooldown} p0={(int)r.Peek()}");
                                 ChasmRunnerGen(l, n, (int)r.Next(150) + 150, true);
+                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} mainDone p={(int)r.Peek()}");
                             }
                             else if ((int)r.Next(35) == 0 && cooldown == 0)
                             {
                                 cooldown = 30;
+                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} side y={n} cd={cooldown} p={(int)r.Peek()}");
                                 ChasmRunnerGen(l, n, (int)r.Next(50) + 50, true);
+                                if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} sideDone p={(int)r.Peek()}");
                             }
+                            else if (l >= 985 && l <= 998) Console.Error.WriteLine($"  T{l} skip y={n} cd={cooldown} p={(int)r.Peek()}");
                             break;
                         }
                     }
                 }
+                Console.Error.WriteLine($"x={l} p={(int)r.Peek()}");
                 // 丛林草→腐化丛林草（cs:14392-14404）
                 for (int n = (int)cNum; (double)n < cNum2 - 1.0; n++)
                 {
@@ -3539,6 +3609,7 @@ void CrimPlaceHeartsGen()
                     }
                 }
             }
+            Console.Error.WriteLine($"CRc{g}={(int)r.Peek()}");
             // 地表转换带（cs:14406-14484）
             double band = cNum2 + 40.0;
             for (int x = zLo; x < zHi; x++)
@@ -3557,7 +3628,7 @@ void CrimPlaceHeartsGen()
                     if (typ[ti] == 53 && x >= zLo + (int)r.Next(5) && x <= zHi - (int)r.Next(5)) typ[ti] = 112;
                     if ((double)y < cNum2 - 1.0 && !first)
                     {
-                        if (typ[ti] == 0) { typ[ti] = 23; }          // SpreadGrass(0→23)
+                        if (typ[ti] == 0) { grassSpread = 0; SpreadGrassGen(x, y, 0, 23); }    // SpreadGrass(0→23, repeat:true)
                         else if (typ[ti] == 59) { grassSpread = 0; SpreadGrassGen(x, y, 59, 661); }
                     }
                     first = true;
@@ -3574,6 +3645,7 @@ void CrimPlaceHeartsGen()
                     else if (typ[ti] == 397) typ[ti] = 398;
                 }
             }
+            Console.Error.WriteLine($"CRb{g}={(int)r.Peek()}");
             // 暗影球周黑檀石囊（cs:14546-14581，仅本组区间）
             for (int x = zLo; x < zHi; x++)
             {
@@ -3600,9 +3672,11 @@ void CrimPlaceHeartsGen()
                 }
             }
         }
+        Console.Error.WriteLine($"CRend{g}={(int)r.Peek()}");
     }
     if (crimson) CrimPlaceHeartsGen();   // cs:14331：全组结束后一次性放心（普通世界 !flipInfections）
 }
+    Console.Error.WriteLine($"CRend={(int)r.Peek()}");
 Checkpoint("corruption");
 
 

@@ -64,7 +64,8 @@ describe('Player 装备属性聚合', () => {
     expect(p.equipStats.moveMult).toBeCloseTo(2.01, 5);
     p.inv.armor[4] = { id: _iid(3992), stack: 1 }; // 狂战士手套 meleeSpeed +12%
     expect(p.equipStats.meleeSpeed).toBeCloseTo(0.12, 5);
-    expect(p.attackSpeedMult).toBeCloseTo(1.12, 5);
+    // attackSpeedMult = CapAttackSpeeds 倒数档（Player.cs:28555-28574）：1/1.12
+    expect(p.attackSpeedMult).toBeCloseTo(1 / 1.12, 5);
     p.inv.armor[5] = { id: _iid(49), stack: 1, prefix: 72 }; // Menacing +4% 全伤
     expect(p.damageMult('melee')).toBeCloseTo(1.04, 5);
     expect(p.damageMult('ranged')).toBeCloseTo(1.04, 5);

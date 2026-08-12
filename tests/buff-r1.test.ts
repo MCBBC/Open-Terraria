@@ -35,7 +35,9 @@ describe('R1 药水 Buff 数值', () => {
     expect(p.damageMult('melee')).toBeCloseTo(1.1, 5);
     expect(p.damageMult('ranged')).toBe(1);
     expect(p.critChance('melee')).toBe(2);
-    expect(p.attackSpeedMult).toBeCloseTo(1.1, 5);
+    // attackSpeedMult = CapAttackSpeeds 倒数档（Player.cs:28555-28574）：meleeSpeed 总和
+    // 1.1 封顶 3 后取倒数 = 1/1.1（时长乘数，越小越快）
+    expect(p.attackSpeedMult).toBeCloseTo(1 / 1.1, 5);
     expect(p.defense).toBe(-4);
   });
   it('拾心 105：红心拾取范围 +60；挖矿 104/建筑工 107 判定位', () => {

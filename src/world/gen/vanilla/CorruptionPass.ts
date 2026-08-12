@@ -56,9 +56,11 @@ const CRIMTANE = TILE_BY_KEY['ore_crimtane']!;  // tile 204 猩红矿（挖空�
 const COLBUF: string[] = [];
 export function __crDump(): string { return COLBUF.join('\n'); }
 
+const DBG = typeof process !== 'undefined' && !!process.env.CRDBG;
 export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   const { w, h } = st;
   COLBUF.push(`crStartJS p=${rng.vanilla.peek()}`);
+  if (DBG) console.log(`CR0=${rng.vanilla.peek()}`);
   setWorldSurfaceRef(() => gs.worldSurface);   // SpreadGrass 的 dirt==0 地表门禁
   // 丛林/雪原横向范围(±10 回避, cs:13936-13952)
   let jMin = w, jMax = 0, sMin = w, sMax = 0;
@@ -105,6 +107,7 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (zLo < jungHi && zHi > jungLo) { jungLo++; jungHi--; ok = false; }
     }
     COLBUF.push(`g=${g} att=${att} cx=${cx} zLo=${zLo} zHi=${zHi} p=${rng.vanilla.peek()}`);
+    if (DBG) console.log(`CRg${g}=${rng.vanilla.peek()} cx=${cx} zLo=${zLo} zHi=${zHi}`);
     gs.evilZones.push({ x0: zLo, x1: zHi });
 
     if (gs.crimson) {
@@ -123,7 +126,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
           break;
         }
       }
+      if (DBG) console.log(`CRc${g}=${rng.vanilla.peek()}`);
       convertSurface(st, rng, gs, zLo, zHi, true);
+      if (DBG) console.log(`CRb${g}=${rng.vanilla.peek()}`);
       placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
     } else {
       // 腐化裂隙（cs:14368-14390）+ 丛林草→腐化丛林草（cs:14392-14404）
@@ -136,16 +141,18 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
             if (st.flags[st.idx(x, y)] || st.wall[st.idx(x, y)] > 0) {
               sy = y;
               if (x >= 410 && x <= 416) COLBUF.push(`scanJS x=${x} y=${y} wall=${st.wall[st.idx(x, y)]} act=${st.flags[st.idx(x, y)]} pre=${rng.vanilla.peek()}`);
+              if (x >= 985 && x <= 998) COLBUF.push(`T${x} found y=${y} cd=${cooldown} pre=${rng.vanilla.peek()}`);
               if (x === cx) {
                 cooldown = 20;
-                if (x === 414) COLBUF.push(`trig414JS main y=${y} p=${rng.vanilla.peek()}`);
                 chasmRunner(st, rng, gs, x, y, rng.int(0, 149) + 150, true);
-                if (x === 414) COLBUF.push(`trig414JS mainDone p=${rng.vanilla.peek()}`);
+                if (x >= 985 && x <= 998) COLBUF.push(`T${x} mainDone p=${rng.vanilla.peek()}`);
               } else if (rng.int(0, 34) === 0) {
                 cooldown = 30;
-                if (x === 414) COLBUF.push(`trig414JS side roll p=${rng.vanilla.peek()}`);
+                if (x >= 985 && x <= 998) COLBUF.push(`T${x} side y=${y} p=${rng.vanilla.peek()}`);
                 chasmRunner(st, rng, gs, x, y, rng.int(0, 49) + 50, true);
-                if (x === 414) COLBUF.push(`trig414JS sideDone p=${rng.vanilla.peek()}`);
+                if (x >= 985 && x <= 998) COLBUF.push(`T${x} sideDone p=${rng.vanilla.peek()}`);
+              } else if (x >= 985 && x <= 998) {
+                COLBUF.push(`T${x} skip y=${y} p=${rng.vanilla.peek()}`);
               }
               break;
             }
@@ -166,13 +173,17 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       COLBUF.push(`chasmDone p=${rng.vanilla.peek()}`);
+      if (DBG) console.log(`CRc${g}=${rng.vanilla.peek()}`);
       convertSurface(st, rng, gs, zLo, zHi, false);
       COLBUF.push(`bandDone p=${rng.vanilla.peek()}`);
+      if (DBG) console.log(`CRb${g}=${rng.vanilla.peek()}`);
       // 暗影球周黑檀石囊（cs:14546-14581，★仅本组区间；第二条件仅清 active 保 type 幽灵）
       cleanOrbPockets(st, rng, zLo, zHi);
+      if (DBG) console.log(`CRend${g}=${rng.vanilla.peek()}`);
     }
   }
   // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
+  if (DBG) console.log(`CRend=${rng.vanilla.peek()}`);
   if (gs.crimson) crimPlaceHearts(st, rng, hearts);
   if (typeof process !== 'undefined' && process.env.CRDBG) {
     import('node:fs').then(m => m.writeFileSync('/tmp/js-cr.txt', COLBUF.join('\n'))).catch(() => {});
@@ -324,7 +335,10 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
   let vy = rng.int(0, 10) * 0.2 + 0.5;                         // Next(11)*0.2+0.5
   let radius = rng.int(0, 4) + 7;                              // Next(5)+7
   const num3 = 5;
+  let crIt = 0;
   while (radius > 0) {
+    if (DBG && crIt < 150) console.log(`CI${crIt} n=${num1} r=${radius} px=${px.toFixed(2)} py=${py.toFixed(2)} p=${rng.vanilla.peek()}`);
+    crIt++;
     if (num1 > 0) {
       radius += rng.int(0, 2) - rng.int(0, 2);                // Next(3) 两次
       if (radius < 7) radius = 7;
@@ -335,11 +349,15 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
     }
     if (py > gs.rockLevel && num1 > 0) num1 = 0;
     num1--;
+    if (DBG && crIt < 25) console.log(`CS${crIt} p=${rng.vanilla.peek()}`);
     if (!sideways && py > gs.worldSurface + 20) {
       sideways = true;
       chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), -1, rng.int(20, 39));  // Next(20,40)
+      if (DBG && crIt < 25) console.log(`CW- ${crIt} p=${rng.vanilla.peek()}`);
       chasmRunnerSideways(st, rng, gs, Math.floor(px), Math.floor(py), 1, rng.int(20, 39));
+      if (DBG && crIt < 25) console.log(`CW+ ${crIt} p=${rng.vanilla.peek()}`);
     }
+    if (DBG && crIt < 25) console.log(`CC${crIt} p=${rng.vanilla.peek()}`);
     // 挖空（cs:76110-76119：num2>5 才挖；CanEvilReplace+非坛/魔矿/猩红矿三门）
     if (num1 > 5) {
       const x0 = Math.max(0, Math.floor(px - radius * 0.5)), x1 = Math.min(st.w - 1, Math.floor(px + radius * 0.5));
@@ -361,7 +379,7 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         orbPlaced = true;
         addShadowOrb(st, Math.floor(px), Math.floor(py), false);
       } else if (!altarPlaced) {
-        altarPlaced = true;
+        altarPlaced = false;   // ★原版 quirk（cs:76203 flag3=false 恒假）：深段每次迭代都重进本块
         // cs:76210-76240：纯随机点 → y>worldSurface 才试；IsTileNearby(26,3)+Place3x2，
         // 失败重试 ≤10000；y≤worldSurface 直接放弃。★无落点吸附（吸附是猩红散布专属）
         let tries = 0, done = false;
@@ -378,9 +396,11 @@ function chasmRunner(st: TileStore, rng: RNG, gs: GenState, i: number, j: number
         }
       }
     }
+    if (DBG && crIt < 25) console.log(`CO${crIt} p=${rng.vanilla.peek()}`);
     px += vx; py += vy;
     vx += rng.int(-10, 10) * 0.01;
     vx = Math.max(-0.3, Math.min(0.3, vx));
+    if (DBG && crIt < 25) console.log(`CH${crIt} p=${rng.vanilla.peek()}`);
     // 壳1（cs:76282-76296）：CanEvilReplace + 激活/type=25
     const x0 = Math.max(1, Math.floor(px - radius * 1.1)), x1 = Math.min(st.w - 1, Math.floor(px + radius * 1.1));
     const y0 = Math.max(0, Math.floor(py - radius * 1.1)), y1 = Math.min(st.h, Math.floor(py + radius * 1.1));
@@ -485,7 +505,7 @@ function chasmRunnerSideways(st: TileStore, rng: RNG, gs: GenState, i: number, j
   if (rng.int(0, 2) === 0) {
     const x = Math.floor(px);
     let y = Math.floor(py);
-    while (y < st.h - 1 && !st.flags[st.idx(x, y)]) y++;
+    while (y < st.h && !st.flags[st.idx(x, y)]) y++;   // 原版 oy < maxTilesY（非 -1）
     tileRunner(st, rng, gs, x, y, {
       strength: rng.int(2, 5), steps: rng.int(3, 6), type: DEMONITE,
     });

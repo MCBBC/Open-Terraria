@@ -81,6 +81,14 @@ export interface GenState {
   /** 微光以太中心（Shimmer pass cs:15301 GenVars.shimmerPosition；-1 = 未生成） */
   shimmerX: number;
   shimmerY: number;
+  /** 沙漠蜂巢实际雕刻范围（GenVars.desertHiveHigh/Low/Left/Right，Reset 初始化
+   *  cs:11162-11165：High=maxTilesY Low=0 Left=maxTilesX Right=0；PlaceClustersArea
+   *  flag2 格逐点收缩 DesertHive.cs:395-397 → UpdateDesertHiveBounds cs:11004）。
+   *  消费方：地下沙漠宝箱战利品分层（cs:36084 的 3:4 分位点） */
+  desertHiveHigh: number;
+  desertHiveLow: number;
+  desertHiveLeft: number;
+  desertHiveRight: number;
   /** 丛林小屋样式（Reset 掷 cs:11182 Next(5)，原值 0-4；cs:11333-11352 映射
    *  0→119/1→120/2→158/3→175/4→45——JungleShrinePass 复用，不再重掷） */
   jungleHut: number;
@@ -137,6 +145,7 @@ export function newGenState(w: number, h: number): GenState {
     pyramidSpots: [],
     floatingIslands: [],
     shimmerX: -1, shimmerY: -1,
+    desertHiveHigh: h, desertHiveLow: 0, desertHiveLeft: w, desertHiveRight: 0,
     jungleHut: 0,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）

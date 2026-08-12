@@ -15,6 +15,7 @@ import { TILE_DEFS, TILE_BY_KEY } from '../../data/tiles';
 import { Enemy } from '../../entities/Enemy';
 import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
+import { TileStore } from '../TileStore';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -496,6 +497,29 @@ export class VanillaSpawner {
    *  PostCheckChosenSpawnTile L922-927：ZoneDungeon 时落脚点必须踩地牢砖且
    *  spawnWallType（=落脚格上方一格的墙，GetProperGroundSpawnTileTypeAndWallType L5792）非 0。
    *  查落脚格自身的墙会因地板砖 wall=0 恒拒 → 地牢几乎不刷怪 */
+  /** IsThisAGoodPlaceForAStatueMimic（NPC.cs:43751-43761 1:1）：落脚 x/x+1 两格
+   *  SolidTile2（活跃+实心+无坡+非半砖+非致动），上方 3 格两列全净空。
+   *  与附近是否存在雕像无关（函数名历史遗留）——纯落点预检 */
+  private isGoodPlaceForAStatueMimic(): boolean {
+    const st = this.world.store;
+    const x = this.spawnTileX, y = this.spawnTileY;
+    const solid2 = (tx: number, ty: number): boolean => {
+      if (!st.inBounds(tx, ty)) return false;
+      const i = st.idx(tx, ty);
+      if (!st.flags[i]) return false;                    // active()
+      if (st.wire[i] & TileStore.WIRE_ACTUATED) return false;   // inActive()（致动位）
+      if (st.half[i]) return false;                      // halfBrick()
+      if (st.slope[i] !== 0) return false;               // slope()==0
+      return !!TILE_DEFS[st.type[i]]?.solid;             // Main.tileSolid
+    };
+    if (!solid2(x, y) || !solid2(x + 1, y)) return false;
+    for (let dy = 1; dy <= 3; dy++) {
+      if (st.inBounds(x, y - dy) && st.flags[st.idx(x, y - dy)]) return false;
+      if (st.inBounds(x + 1, y - dy) && st.flags[st.idx(x + 1, y - dy)]) return false;
+    }
+    return true;
+  }
+
   private isDungeonTile(t: number): boolean {
     return t === T.DUNGEON_BLUE || t === T.DUNGEON_GREEN || t === T.DUNGEON_PINK;
   }
@@ -1654,8 +1678,15 @@ export class VanillaSpawner {
       // TileID.Sets.IcesSnow（TileID.cs:297：161/200/163/164/147）+ 162
       const iceTile = t === T.ICE || t === T.CRIMSON_ICE || t === T.CORRUPT_ICE
         || t === T.HOLLOW_ICE || t === T.SNOW || t === T.THIN_ICE;
-      // ---- 白昼（L4112-4415 链尾）----
-      if (this.dayTime) {
+      // ---- 墓地蛆/鼠（L4082-4091，surfaceSpawn 段首、昼池之前）----
+      //  ZoneGraveyard && !waterTile && 草族落脚（2/477）&& 1/10 → 50/50 蛆 606 / 鼠 610
+      if (this.ZoneGraveyard && !this.waterTile && (t === T.GRASS || t === 477) && N(10)) {
+        return D(N(2) ? 610 : 606);
+      }
+      // ---- 白昼（L4109-4435：!ZoneGraveyard && dayTime 大昼池）----
+      //  ★墓地白天整体跳过昼池（原版门即 !ZoneGraveyard && Main.dayTime）→ 白天也落入
+      //  夜间怪池（僵尸/眼球等）——"墓地白天刷夜怪"的本体语义；昼池兜底基础史莱姆同理不刷
+      if (this.dayTime && !this.ZoneGraveyard) {
         // num46 = |落脚 x - 世界出生点 x|（L4108）
         const num46 = Math.abs(this.spawnTileX - this.world.spawnX);
         // L4412：哥布林侦察兵 73——距出生点 >1/3 图宽，1/15
@@ -1683,15 +1714,23 @@ export class VanillaSpawner {
         if (!this.waterTile) return D(this.getBasicSlimeToSpawn(true, t, rng));
         return null;
       }
-      // ---- 夜晚（L4437-4716）----
-      // L4437：萤火虫——草族 tile + 无风 + 无雨 + 1/fireFlyChance（原版为每世界 roll
-      //  的随机值 setFireFlyChance L94555，此处取代表值 30）；成群附加只略
+      // ---- 夜晚（L4437-4716；墓地白天亦落入本池——见上方昼池的 !ZoneGraveyard 门）----
+      // L4409 `if (ZoneGraveyard) defaultTarget = target`（:4411→:5161 Target 兜底）——
+      //  显式把刷出怪的目标设为玩家；本仓敌怪走最近玩家索敌，单人语义等价，不另设
+      // L4410：萤火虫（原版带 !ZoneGraveyard 门 :4413）——草族 tile + 无风 + 无雨 +
+      //  1/fireFlyChance（原版为每世界 roll 的随机值 setFireFlyChance L94555，取代表值 30）
       const tooWindy = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
-      if (!tooWindy && !raining
+      if (!this.ZoneGraveyard && !tooWindy && !raining
         && (t === T.GRASS || t === 477 || t === T.HALLOW_GRASS)
         && N(30) && this.spawnTileY <= this.world.groundLevel) {
         return D(t === T.HALLOW_GRASS ? 358 : 355);
       }
+      // L4439：乌鸦 Raven 301——(万圣节 || 墓地) && 1/12（节日未接 → 墓地单门）
+      if (this.ZoneGraveyard && N(12)) return D(301);
+      // L4444：幽灵 Ghost 316——墓地专属 1/30
+      if (this.ZoneGraveyard && N(30)) return D(316);
+      // L4449：南瓜跳跳 Hoppin' Jack 304——(万圣节 || 墓地) && hardMode && 1/10
+      if (this.ZoneGraveyard && hardMode && N(10)) return D(304);
       // L4454：Next(6) 或 满月（moonPhase==4）1/2 门
       if (N(6) || (moonPhase === 4 && N(2))) {
         // L4456：hard 1/3 → Wandering Eye 133
@@ -1707,11 +1746,11 @@ export class VanillaSpawner {
       }
       // L4518：hard 1/50 血月 && 场上无小丑 109 → Clown
       if (hardMode && N(50) && clock.bloodMoon && !any(109)) return D(109);
-      // L4523/4529：血月/墓园 RollOnlyBadLuck(300) → The Groom 53 / The Bride 536。
+      // L4523/4529：(血月 || 墓地) && RollOnlyBadLuck(300) → The Groom 53 / The Bride 536。
       //  RollOnlyBadLuck 正运无加成（Luck.cs:31-38）→ luck≥0 时 N(300) 即精确；
       //  仅负运态有偏差（登记：负 luck 时应收窄为 [150,300)，见 src/stats/Luck.ts）
-      if (clock.bloodMoon && N(300)) return D(53);
-      if (clock.bloodMoon && N(300)) return D(536);
+      if ((clock.bloodMoon || this.ZoneGraveyard) && N(300)) return D(53);
+      if ((clock.bloodMoon || this.ZoneGraveyard) && N(300)) return D(536);
       // L4533：新月（moonPhase==0）hard 2/3 → Werewolf 104
       if (!this.dayTime && moonPhase === 0 && hardMode && !N(3)) return D(104);
       // L4538：hard 1/3 → Werewolf 140
@@ -1719,10 +1758,11 @@ export class VanillaSpawner {
       // L4543：血月 2/5 → Blood Zombie 489 / Drippler 490
       if (clock.bloodMoon && rng.int(0, 5) < 2) return D(N(2) ? 490 : 489);
       // L4555：冰系落脚 tile → hard 1/4 Ice Elemental 169 / hard 1/3 Wolf 155 / else Frozen Zombie 161
-      //  （spawnArmedZombies && expertMode → 431 未接专家模式，略）
+      //  （两支 hard 概率均带 !ZoneGraveyard 门 :4557/:4561——墓地里冰面上冰元素/狼不出，
+      //   兜底 Frozen Zombie 161 照刷；spawnArmedZombies && expertMode → 431 未接专家模式，略）
       if (iceTile) {
-        if (hardMode && N(4)) return D(169);
-        if (hardMode && N(3)) return D(155);
+        if (!this.ZoneGraveyard && hardMode && N(4)) return D(169);
+        if (!this.ZoneGraveyard && hardMode && N(3)) return D(155);
         return D(161);
       }
       // L4577：雨夜 1/2 → Raincoat Zombie 223（1/3 小变体 -54/-55）
@@ -1730,7 +1770,12 @@ export class VanillaSpawner {
         if (!N(3)) return D(223);
         return D(N(2) ? -55 : -54);
       }
-      // L4585：skyblock 火把僵尸段省略（skyblock 语义未接）
+      // L4585：skyblock 火把僵尸段省略（skyblock 语义未接；原文本支亦带 !ZoneGraveyard 门）
+      // L4612：苔藓僵尸 Moss Zombie 691——墓地专属 RollOnlyBadLuckExtreme(200)
+      if (this.ZoneGraveyard && N(200)) return D(691);
+      // L4617：蛆僵尸 Maggot Zombie 632——墓地专属 1/maggotZombieChance（GetZombieSettings
+      //  L5500 恒 20；skyblock/初始血量只调 torch 门，不改本值）
+      if (this.ZoneGraveyard && N(20)) return D(632);
       // L4622：火把僵尸 590/591——Next(torchZombieChance)。原版条件**仅此一个概率门**，
       //  与"点燃的火把/营火邻近"无关（590 贴图手持火把故俗名火把僵尸；
       //  GetZombieSettings L5495-5523 全文无火把/营火邻接扫描）。持械变体 591 需
@@ -1871,7 +1916,8 @@ export class VanillaSpawner {
         }
         return D(this.ZoneSnow ? 206 : 110);
       }
-      // L4961：halloween/墓园 蠕虫 316 略（节日/墓园系统未接）
+      // L4961：幽灵 Ghost 316——!noWorms && (万圣节 || 墓地) && 1/30（洞穴主池内）
+      if (!this.noWorms && this.ZoneGraveyard && N(30)) return D(316);
       // L4969：Undead Miner 44（1/20）
       if (N(20)) return D(44);
       // L4979：冰洞池——落脚 147/161/162：1/15 Snow Flinx 185 / else Undead Viking 167

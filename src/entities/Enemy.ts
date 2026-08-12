@@ -42,6 +42,7 @@ import {
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { openDoor } from '../world/Door';
+import { fighterMoveStep, chaosElementalStep, swampThingAmbushStep } from './fighterFamilies';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
@@ -63,8 +64,10 @@ const NATIVE_DROP_KEY: Record<number, string> = {
 const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
 /** DoesntDespawnToInactivity 名单（NPC.cs:78584-78641）中本批涉及的仪式/月总链类型——
  *  神秘石碑 437/忠实信徒 438/弓手 379,380（拜月仪式链条，离屏消失会断 439 召唤链）与
- *  月总游离眼 400（锚核心 398 生命周期，自身不参与离屏消散） */
-const NO_DESPAWN_IDS = new Set([379, 380, 400, 437, 438]);
+ *  月总游离眼 400（锚核心 398 生命周期，自身不参与离屏消散）。
+ *  690 雕像宝箱怪休眠态（CheckActive :78692 `type==690 && ai[0]==0` 豁免）——AI_126
+ *  未移植时 ai0 恒 0 = 永远休眠，离屏不消散与原版休眠态一致 */
+const NO_DESPAWN_IDS = new Set([379, 380, 400, 437, 438, 690]);
 /** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
 const STATUE_DROP_RARITY: Record<number, number> = {
   480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
@@ -1014,8 +1017,12 @@ export class Enemy extends Entity {
   private fighterAI(game: GameHooks, player: Player | null) {    const st = game.world.store;
     // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
-    // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除
-    const daySurface = game.world.clock.isDay && this.cy < game.world.groundLevel * TILE;
+    // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除。
+    // 墓地豁免（:60698 `!Main.player[npcInstance.target].ZoneGraveyard`）：目标玩家在
+    // 墓地时白天不驱散——墓地白天刷出的僵尸/蛆僵尸白天照常索敌（scene 为本地玩家
+    // 快照，单人下与"目标玩家所在区"等价）
+    const daySurface = game.world.clock.isDay && this.cy < game.world.groundLevel * TILE
+      && !game.world.scene?.zoneGraveyard;
     const dayActive = this.vanillaId != null
       && (FIGHTER_DAY_ACTIVE.has(this.vanillaId)
         || (game.world.invasionType === 4 && MARTIAN_DAY_ACTIVE.has(this.vanillaId)));
@@ -1045,10 +1052,13 @@ export class Enemy extends Entity {
     const fx = Math.floor((this.x + this.w / 2 + 15 * dir) / TILE);
     const fy = Math.floor((this.y + this.h - 15) / TILE);
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
-    // 加速度 + 限速（原版通用核）
-    this.vx += dir * 0.1;
-    if (this.vx > 1) this.vx = 1;
-    if (this.vx < -1) this.vx = -1;
+    // 沼泽怪 166 伏击（NPC.cs:56327-56360）：伏击态接管本 tick（原地减速，跳过行走）
+    if (swampThingAmbushStep(this, !!player && this.canSeePlayer(st, player))) return;
+    // 混沌元素 120（NPC.cs:57431-57460/:60679-60696）：ai[3] 卡死计数 + 传送
+    if (this.vanillaId === 120 && player) this.ai3 = chaosElementalStep(this, game, player);
+    // 横向移动逐族表（NPC.cs:57799-58800 else-if 链 1:1，fighterFamilies.ts）——
+    // 取代一期固定档（加速 0.1 / 限速 ±1）；射击族（:58719 排除表）链上无分支
+    fighterMoveStep(this, dir, player);
     // 原版跳跃判定用碰撞前的速度符号（NPC 碰撞在 AI 之后）——
     // 此处必须先捕获再碰撞，否则撞墙清零 vx 后 movingInto 恒假、战士永不跳墙
     const vxSign = this.vx > 0 ? 1 : this.vx < 0 ? -1 : 0;
@@ -2005,8 +2015,10 @@ export class Enemy extends Entity {
     const oldVx = this.vx, oldVy = this.vy;
     // ---- 白天地表驱散（cs:52707-52715 + IsDiscouraged :53152）：
     // 白天 && y≤worldSurface && 类型 ∈ 眼族昼散表 → EncourageDespawn(10) +
-    // 保持水平运动方向、directionY=-1 向上飞离（离屏后 CheckActive ~10t 清除）
-    const day = game.world.clock.isDay;
+    // 保持水平运动方向、directionY=-1 向上飞离（离屏后 CheckActive ~10t 清除）。
+    // 墓地豁免（:53154 `!Main.player[target].ZoneGraveyard` 首条件）：目标玩家在墓地时
+    // 恶魔眼白天不驱散（scene 为本地玩家快照，单人下等价）
+    const day = game.world.clock.isDay && !game.world.scene?.zoneGraveyard;
     const eyeDiscouraged = day && this.cy <= game.world.groundLevel * TILE
       && this.vanillaId != null && EYE_DAY_DESPAWN.has(this.vanillaId);
     let dirX: number, dirY: number, cx: number, cy: number;

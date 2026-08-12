@@ -11,6 +11,7 @@
 //   冰上/沙上下 1/5 → PlaceTight），同列随后宝石树段（RNG 序：树掷在钟乳石掷之前）
 import type { RNG } from '../../../core/rng';
 import type { TileStore } from '../../TileStore';
+import { LIQUID_TYPE } from '../../TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { idsByVanillaSheet } from './TileRunner';
@@ -139,9 +140,9 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
       if (seen.has(ii)) continue;
       seen.add(ii);
       if (st.wall[ii] === 244) return { air: 300, lava, ice, rock };
-      if (st.liquid[ii] > 0 && st.liquidType[ii] === 4) return { air: 300, lava, ice, rock };  // shimmer
+      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.SHIMMER) return { air: 300, lava, ice, rock };
       if (st.wall[ii] !== 0) return { air: 300, lava, ice, rock };                              // jungle=false
-      if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) { lava++; return { air: 300, lava, ice, rock }; }
+      if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.LAVA) { lava++; return { air: 300, lava, ice, rock }; }
       if (st.flags[ii]) { // 实心：只计数不扩散
         if (ICE_COUNT.has(st.type[ii])) ice++;
         else if (st.type[ii] === STONE) rock++;
@@ -241,18 +242,23 @@ export function runExposedGemsPass(st: TileStore, rng: RNG, gs: GenState): void 
     if (y < 0) continue;
     const ii = st.idx(x, y);
     if (st.flags[ii]) continue;
-    if (st.liquid[ii] > 0 && st.liquidType[ii] === 2) continue;
+    if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.LAVA) continue; // anyLava（+1 编码）
     const wl = st.wall[ii];
     if (wl === 27 || WALL_DUNGEON.has(wl)) continue;
     placeExposed(st, rng, x, y, randGemStyle(rng));
   }
-  // 琥珀（:20891-20913）：w 次，y∈[ws, h-300)，墙 187/216 → 不对称窗口（各 1-3）
-  // 的空气格放 style=6 晶簇
+  // 琥珀（:20891-20913）：w 次，y∈[ws, h-300)，目标须空气+无岩浆+墙 187/216 →
+  // 不对称窗口（各 1-3）的空气格放 style=6 晶簇。
+  // 目标的 !active+!anyLava 门（cs:20901）曾缺失——实心沙岩也带 187/216 墙，
+  // 命中率高一个数量级 → 琥珀簇 13× 金标（2026-08-12 用户标注）。
   for (let i = 0; i < st.w; i++) {
     const x = rng.nextIntRange(20, st.w - 20);
     const y = rng.nextIntRange(gs.worldSurface, st.h - 300);
     if (y < 0) continue;
-    const wl = st.wall[st.idx(x, y)];
+    const ii = st.idx(x, y);
+    if (st.flags[ii]) continue;
+    if (st.liquid[ii] > 0 && st.liquidType[ii] === LIQUID_TYPE.LAVA) continue; // anyLava（+1 编码，勿写 0）
+    const wl = st.wall[ii];
     if (wl !== 187 && wl !== 216) continue;
     const n14 = () => 1 + rng.nextInt(3);
     const al = n14(), ar = n14(), at = n14(), ab = n14();

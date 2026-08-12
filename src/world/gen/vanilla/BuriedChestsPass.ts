@@ -378,7 +378,9 @@ export function placeBuriedChest(
         tile = CHEST2;
         style = 10;
         flags.desert = true;
-        const deep = gy > (ud.y0 * 3 + ud.y1 * 4) / 7;
+        // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
+        // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
+        const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
         mainId = deep
           ? [4061, 4062, 4276][rng.int(0, 2)]
           : [4056, 4055, 4262, 4263][rng.int(0, 3)];

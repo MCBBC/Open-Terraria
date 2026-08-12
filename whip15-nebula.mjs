@@ -11,6 +11,8 @@ const out = await p.evaluate(async () => {
   const g = window.__swGame, pl = g.player;
   const { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } = await import('/src/data/items.ts');
   const { Enemy } = await import('/src/entities/Enemy.ts');
+  if (g.renderer.fullMap?.open) g.renderer.fullMap.open = false;
+  pl.baseMaxMana = 400; pl.mana = 400; // 扩魔保多轮命中
   const r = {};
   const wear = (vids) => vids.forEach((v, i) => { pl.inv.armor[i] = { id: ITEM_BY_KEY[VANILLA_ITEM_KEY_BY_ID[v]], stack: 1 }; });
   wear([2760, 2761, 2762]); // 星云套
@@ -39,6 +41,8 @@ const out = await p.evaluate(async () => {
   g.useCombatWorkerFix = null;
   g.useCombatWeapon = (cwIn, def) => { ucwCalls++; return ocw(cwIn, def); };
   const hold = setInterval(() => {
+    if (g.renderer.fullMap?.open) g.renderer.fullMap.open = false;
+    tgt.x = aim.x - tgt.w / 2; tgt.y = aim.y - tgt.h / 2; // 钉靶防坠落脱靶
     pl.useTime = 0;
     g.input.mouseX = g.renderer.canvas.width / 2 + 120; g.input.mouseY = g.renderer.canvas.height / 2;
     g.input.mouseDown = true;
@@ -51,7 +55,10 @@ const out = await p.evaluate(async () => {
   g.entities.add = oa;
   r.bolts = bolts; r.cd = pl.nebulaCD; r.ucw = ucwCalls; g.useCombatWeapon = ocw;
   r.gateDbg = JSON.parse(JSON.stringify(g._gateDbg ?? {}));
+  r.boostArr = (g.nebulaBoosters ?? []).length;
+  r.hpDrop = Math.round(1e9 - tgt.hp);
   r.annotate = g.annotateMode; r.minecart = !!g.minecart;
+  r.uiGate = { fullMap: g.renderer.fullMap.open, ucw2: (g._gateDbg ?? {}).n ?? 0 };
   r.annotate = g.annotateMode; r.mining = !!g.mining;
   r.heldSamples = [];
   for (let i = 0; i < 10; i++) { r.heldSamples.push(ITEM_DEFS[pl.inv.heldItem()?.id ?? -1]?.key ?? 'none'); await new Promise(s3 => setTimeout(s3, 100)); }

@@ -67,17 +67,19 @@ describe('敌怪远程攻击（对照原版发射点）', () => {
   });
 
   it('骷髅弓手 110：落地 + 视线 + <700px → 蓄力半程发射火焰箭（伤 35）', () => {
-    const { hooks, shots, player } = shooterWorld({ x: 44, y: 59 });
+    const { hooks, shots, player } = shooterWorld({ x: 44, y: 57 });
     player.useTime = 1; // cs:60036-60039 idle 门：目标待机（itemAnimation==0）不开瞄
-    const e = Enemy.fromVanilla(110, 40 * 16, 59 * 16)!;
+    // 出生行须留出 40px 身高：59 行生成会嵌进 60 行地板（原版弓手链上无横向移动分支
+    // NPC.cs:58719，无 vx 则不再靠跳判定脱出），改 57 行落地站定
+    const e = Enemy.fromVanilla(110, 40 * 16, 57 * 16)!;
     const t = runUntilShot(e, hooks, shots, 300);
     expect(t).toBeGreaterThan(0);
     expect(shots[0].damage).toBe(35);
   });
 
   it('骷髅弓手 110：目标全程待机 → 不开瞄不射（cs:60037 idle 门）', () => {
-    const { hooks, shots } = shooterWorld({ x: 44, y: 59 });
-    const e = Enemy.fromVanilla(110, 40 * 16, 59 * 16)!;
+    const { hooks, shots } = shooterWorld({ x: 44, y: 57 });
+    const e = Enemy.fromVanilla(110, 40 * 16, 57 * 16)!;
     const t = runUntilShot(e, hooks, shots, 400);
     expect(t).toBe(-1);
   });

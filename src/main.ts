@@ -101,6 +101,10 @@ function enterGameHooks() {
 window.addEventListener('keydown', (e) => {
   const game = flow.game;
   if (!inGame || !game) return;
+  // 输入框内打字不算操作键位（合成搜索框等）：除 Escape 外全部放行给输入框
+  const tgt = e.target as HTMLElement | null;
+  const typing = !!tgt && (tgt.tagName === 'INPUT' || tgt.tagName === 'TEXTAREA' || tgt.isContentEditable);
+  if (typing && e.code !== 'Escape') return;
   switch (e.code) {
     case 'KeyE':
     case 'Escape':

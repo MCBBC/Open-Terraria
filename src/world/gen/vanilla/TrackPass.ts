@@ -69,21 +69,44 @@ export class TrackGenerator {
   /** playerHeight 是实例字段(cs:66)——长短两段共用一个实例时跨 Place 残留,保持 1:1 */
   private playerHeight = 6;
   /** 全图已存在轨道格数(构造时扫一遍 + PlacePath 累加)。
-   *  为 0 时 IsTileNearby 恒 false 可跳过 61×61 扫描——语义等价的纯加速 */
-  private trackCount: number;
+   *  为 0 时 IsTileNearby 恒 false——语义等价的纯加速 */
+  private trackCount = 0;
+  /** 轨道格空间索引(64×64 桶):IsTileNearby 的 61×61 全扫替代。
+   *  findPath 期间地图只读,索引跨 Place 调用按 placePath 落块增量维护,结果恒等 */
+  private readonly trackBuckets = new Map<number, number[]>();
+  /** CalculateStateForLocation 结果缓存(单次 Place 内有效——findPath 期地图只读) */
+  private readonly stateCache = new Map<number, number>();
 
   constructor(st: TileStore, gs: GenState) {
     this.st = st;
     this.gs = gs;
-    let n = 0;
-    for (let i = 0; i < st.type.length; i++) {
-      if (st.flags[i] && st.type[i] === TRACK_TILE) n++;
+    for (let y = 0; y < st.h; y++) {
+      for (let x = 0; x < st.w; x++) {
+        const i = st.idx(x, y);
+        if (st.flags[i] && st.type[i] === TRACK_TILE) this.addTrackCell(x, y);
+      }
     }
-    this.trackCount = n;
+  }
+
+  private addTrackCell(x: number, y: number): void {
+    this.trackCount++;
+    const key = this.bucketKey(x, y);
+    const list = this.trackBuckets.get(key);
+    if (list) list.push(this.packCell(x, y));
+    else this.trackBuckets.set(key, [this.packCell(x, y)]);
+  }
+
+  private packCell(x: number, y: number): number {
+    return (x << 14) | y;   // y < 16384(世界高上限 2400)
+  }
+
+  private bucketKey(x: number, y: number): number {
+    return ((y >> 6) << 16) | (x >> 6);
   }
 
   /** TrackGenerator.Place(cs:68-81) */
   place(originX: number, originY: number, minLength: number, maxLength: number, rng: RNG): boolean {
+    this.stateCache.clear();   // 地图在上一 Place 的 placePath 中被写穿,缓存按次失效
     const origin = this.findSuitableOrigin(originX, originY);
     if (!origin) return false;
     this.createTrackStart(origin.x, origin.y);
@@ -283,13 +306,25 @@ export class TrackGenerator {
     // 全部铺完再按 k 升序逐列 FrameTrack 等价(帧只依赖邻格轨道存在性,左右邻均已就位)
     for (let k = 0; k < this.len; k++) {
       const th = this.hist[k];
-      if (st.inBounds(th.x, th.y)) frameTrack(st, th.x, th.y);
+      if (st.inBounds(th.x, th.y)) {
+        frameTrack(st, th.x, th.y);
+        this.addTrackCell(th.x, th.y);   // IsTileNearby 索引同步
+      }
     }
-    this.trackCount += this.len;   // IsTileNearby 快速路径计数同步
   }
 
-  /** CalculateStateForLocation(cs:397-425) */
+  /** CalculateStateForLocation(cs:397-425)。
+   *  带单次 Place 内的结果缓存(findPath 期地图只读,重写扫描高度重复) */
   private stateAt(x: number, y: number): number {
+    const key = (x << 14) | y;
+    const cached = this.stateCache.get(key);
+    if (cached !== undefined) return cached;
+    const state = this.calcState(x, y);
+    this.stateCache.set(key, state);
+    return state;
+  }
+
+  private calcState(x: number, y: number): number {
     for (let i = 0; i < 6; i++) {
       if (this.isLocationInvalid(x, y - i)) return INVALID;
     }
@@ -306,15 +341,22 @@ export class TrackGenerator {
     return AVAILABLE;
   }
 
-  /** WorldGen.IsTileNearby(x, y, 314, 30)(WorldGen.cs:8828) */
+  /** WorldGen.IsTileNearby(x, y, 314, 30)(WorldGen.cs:8828)。
+   *  61×61 全扫 → 64×64 桶索引(桶 ≥ 查询盒,最多 2×2 桶),布尔结果恒等 */
   private isTrackNearby(x: number, y: number, distance: number): boolean {
-    if (this.trackCount === 0) return false;   // 语义等价快速路径(见字段注)
-    const st = this.st;
-    for (let i = x - distance; i <= x + distance; i++) {
-      for (let j = y - distance; j <= y + distance; j++) {
-        if (!st.inBounds(i, j)) continue;
-        const idx = st.idx(i, j);
-        if (st.flags[idx] && st.type[idx] === TRACK_TILE) return true;
+    if (this.trackCount === 0) return false;
+    const x0 = x - distance, x1 = x + distance;
+    const y0 = y - distance, y1 = y + distance;
+    const gx0 = x0 >> 6, gx1 = x1 >> 6;
+    const gy0 = y0 >> 6, gy1 = y1 >> 6;
+    for (let gy = gy0; gy <= gy1; gy++) {
+      for (let gx = gx0; gx <= gx1; gx++) {
+        const list = this.trackBuckets.get((gy << 16) | gx);
+        if (!list) continue;
+        for (const cell of list) {
+          const cx = cell >> 14, cy = cell & 0x3fff;
+          if (cx >= x0 && cx <= x1 && cy >= y0 && cy <= y1) return true;
+        }
       }
     }
     return false;

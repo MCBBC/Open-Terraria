@@ -1292,9 +1292,10 @@ export class Game implements GameHooks {
     // 怪物专属声效随首次受击懒加载
     this.input = new Input(this.renderer.canvas);
     this.cb = cb;
-    // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）
+    // 快捷栏数字键：事件驱动（避免单帧内 down+up 被轮询漏掉）。
+    // 背包打开时不切栏（原版 inventory 开启时数字键归 UI 导航）
     this.input.keydownHandlers.push((code) => {
-      if (this.player && /^Digit[0-9]$/.test(code)) {
+      if (this.player && /^Digit[0-9]$/.test(code) && !this.input.uiBlocking) {
         this.player.inv.selected = code === 'Digit0' ? 9 : Number(code.slice(5)) - 1;
         this.cb.onInventoryChanged();
       }
@@ -8195,6 +8196,9 @@ export class Game implements GameHooks {
   /** 商店上架门（Chest.SetupShop if 门 → 本作状态映射；未实现事件门不上架） */
   private shopCondOk(cond: string | null): boolean {
     if (!cond) return true;
+    // 复合门（extract-shops.mjs parseGate：嵌套 if 的全部开门按 '&&' 连接，
+    // 如 `hardMode && ZoneGraveyard`——外层与内层同时成立才上架）
+    if (cond.includes('&&')) return cond.split('&&').every((c) => this.shopCondOk(c));
     const f = this.world.flags;
     switch (cond) {
       case 'hardMode': return !!f.hardMode;
@@ -9680,6 +9684,8 @@ export class Game implements GameHooks {
     if (!this.canCraft(r)) return;
     for (const [key, n] of r.inputs) this.player.inv.remove(ITEM_BY_KEY[key], n);
     this.player.inv.add(ITEM_BY_KEY[r.out], r.count);
+    // 原版合成音 = SoundID 7 物品抓取（成品上鼠标的 grab 声，ItemSlot 族 PlaySound(7)）
+    this.sfx.play('pickup');
     this.cb.onInventoryChanged();
   }
 
@@ -9744,7 +9750,7 @@ export class Game implements GameHooks {
     if (!outKey) return;
     const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack * times);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
-    this.sfx.play('tink');
+    this.sfx.play('pickup'); // SoundID 7 物品抓取（原版合成成品上鼠标的 grab 声）
     this.cb.onInventoryChanged();
   }
 
@@ -9754,7 +9760,7 @@ export class Game implements GameHooks {
     if (!outKey) return;
     const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left);
-    this.sfx.play('tink');
+    this.sfx.play('pickup'); // SoundID 7（同 vanillaCraft）
     this.cb.onInventoryChanged?.();
   }
 

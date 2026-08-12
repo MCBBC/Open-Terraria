@@ -38,27 +38,43 @@ const SHOP_SLOT = {
 function parseGate(text) {
   if (!text) return null;
   const has = (s) => text.includes(s);
-  // 复合门里的次要条件优先判（如 dayTime && IsItAHappyWindyDay = 起风日,未实现）
+  // 未实现的门直接整体跳过（如 dayTime && IsItAHappyWindyDay = 起风日限定商品）
   if (has('IsItAHappyWindyDay') || has('IsItAHappyRainyDay')) return 'skip';
-  if (has('hardMode')) return 'hardMode';
-  if (has('downedMechBossAny')) return 'downedMechBossAny';
-  if (has('downedBoss3')) return 'downedBoss3';
-  if (has('downedBoss2')) return 'downedBoss2';
-  if (has('downedBoss1')) return 'downedBoss1';
-  if (has('moonPhase')) return 'moonPhase';
-  if (/!Main\.dayTime|!\s*Main\.dayTime/.test(text)) return 'night';
-  if (has('dayTime')) return 'day';
-  if (has('ZoneSnow')) return 'zoneSnow';
-  if (has('ZoneJungle')) return 'zoneJungle';
-  if (has('ZoneGraveyard')) return 'zoneGraveyard';
-  if (has('ZoneMeteor')) return 'zoneMeteor';
-  if (has('UnderworldHeight')) return 'zoneUnderworld';
-  if (has('crimson')) return 'crimson';
-  if (has('xMas') || has('halloween')) return 'xMas';
-  if (has('bloodMoon')) return 'bloodMoon';
-  if (has('eclipse')) return 'eclipse';
-  if (has('PartyIsUp') || has('birthdayParty')) return 'party';
-  return 'skip';
+  // remix/纪念种世界分支：正向 Main.remixWorld 合取 → 普通世界恒假 → skip；
+  // !Main.remixWorld 合取 → 普通世界恒真 → 抹成 true 不贡献条件；
+  // 纪念种旗（tenthAnniversaryWorld/getGoodWorld/infectedSeed）→ 恒 false。
+  // 抹除后若整条只剩 true/false 字面量（如 `!remix || (纪念 && !getGood)`）
+  // → 普通世界恒真，返回 null（无门）；仍含其它未映射内容 → 维持 skip
+  if (/(^|[^!\w.])Main\.remixWorld/.test(text)) return 'skip';
+  let t = text
+    .replace(/!Main\.remixWorld/g, 'true')
+    .replace(/Main\.tenthAnniversaryWorld|Main\.getGoodWorld|Main\.infectedSeed/g, 'false');
+  const onlyLiterals = !t.replace(/true|false/g, '').replace(/[!|&()\s]/g, '');
+  if (onlyLiterals) return t.includes('true') ? null : 'skip';
+  // 复合门：收集全部可映射条件，按固定优先序去重后以 '&&' 连接（Chest.SetupShop 的
+  // 嵌套 if 语义 = 外层门 && 内层门同时成立才上架，如 hardMode && ZoneGraveyard）
+  const conds = [];
+  const push = (c) => { if (!conds.includes(c)) conds.push(c); };
+  if (has('hardMode')) push('hardMode');
+  if (has('downedMechBossAny')) push('downedMechBossAny');
+  if (has('downedBoss3')) push('downedBoss3');
+  if (has('downedBoss2')) push('downedBoss2');
+  if (has('downedBoss1')) push('downedBoss1');
+  if (has('moonPhase')) push('moonPhase');
+  if (/!Main\.dayTime|!\s*Main\.dayTime/.test(text)) push('night');
+  else if (has('dayTime')) push('day');
+  if (has('ZoneSnow')) push('zoneSnow');
+  if (has('ZoneJungle')) push('zoneJungle');
+  if (has('ZoneGraveyard')) push('zoneGraveyard');
+  if (has('ZoneMeteor')) push('zoneMeteor');
+  if (has('UnderworldHeight')) push('zoneUnderworld');
+  if (has('crimson')) push('crimson');
+  if (has('xMas') || has('halloween')) push('xMas');
+  if (has('bloodMoon')) push('bloodMoon');
+  if (has('eclipse')) push('eclipse');
+  if (has('PartyIsUp') || has('birthdayParty')) push('party');
+  if (has('LanternNight.LanternsUp')) push('lanternNight');
+  return conds.length ? conds.join('&&') : 'skip';
 }
 
 const shops = {};
@@ -96,8 +112,9 @@ const shops = {};
       if (ifM) gateStack.push({ cond: parseGate(ifM[1]), depth: d });
       const defM = line.match(/array\[num\+?\+?\]\.SetDefaults\((\d+)\)/);
       if (defM) {
+        // 全部未闭合门的条件 AND（原版嵌套 if 语义）：任一门 'skip' → 整条丢弃
         const open = gateStack.filter((g) => g.depth <= d).map((g) => g.cond).filter(Boolean);
-        stock.push({ id: Number(defM[1]), cond: open[open.length - 1] ?? null });
+        stock.push({ id: Number(defM[1]), cond: open.length ? open.join('&&') : null });
       }
       for (const ch of line) {
         if (ch === '{') d++;
@@ -111,7 +128,9 @@ const shops = {};
 // ---- 输出:按 NPC id 组织,附价格 ----
 const out = {};
 for (const [npcId, slot] of Object.entries(SHOP_SLOT)) {
-  const stock = (shops[slot] ?? []).filter((s) => s.cond !== 'skip');
+  // 任一开门含 'skip'（未映射条件，如 HasItem/随机掷骰）→ 整条丢弃（AND 语义）；
+  // cond=null（无开门）= 恒上架，保留
+  const stock = (shops[slot] ?? []).filter((s) => s.cond === null || !s.cond.split('&&').includes('skip'));
   out[npcId] = stock.map((s) => ({ id: s.id, price: values[s.id] ?? null, cond: s.cond }));
 }
 writeFileSync('src/data/vanilla-shopstock.json', JSON.stringify({ values, shops: out }));

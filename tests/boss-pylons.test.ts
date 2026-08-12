@@ -54,6 +54,7 @@ function makeHost(over: Partial<OldOnesArmyHost> = {}): HostSpy {
     arenaEnds: () => ({ left: { x: 50, y: 60 }, right: { x: 150, y: 60 } }),
     findGroundY: (_x, y) => y + 3,
     rand: () => 0,
+    activePlayersCount: () => 1,   // 单机（DD2Event.cs:1267/:1578 缩放循环零次）
     ...over,
   };
   return spy;

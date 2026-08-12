@@ -65,7 +65,8 @@ describe('WellFed 三档数值（Player.cs:11523-11570）', () => {
     expect(p.critChance('melee')).toBe(2);
     expect(p.critChance('magic')).toBe(2);
     expect(p.damageMult('ranged')).toBeCloseTo(1.05, 5);
-    expect(p.attackSpeedMult).toBeCloseTo(1.05, 5);
+    // attackSpeedMult = CapAttackSpeeds 倒数档（Player.cs:28555-28574）：1/1.05
+    expect(p.attackSpeedMult).toBeCloseTo(1 / 1.05, 5);
     expect(p.buffs.moveSpeedMult).toBeCloseTo(1.2, 5);
     expect(p.buffs.wellFedPickMult).toBeCloseTo(0.95, 5);
   });

@@ -544,12 +544,27 @@ export class SkyRenderer {
       ctx.fillStyle = `rgba(255,255,255,${Math.min(1, this.weatherRef.lightning * 0.85)})`;
       ctx.fillRect(0, 0, viewW, viewH);
     }
+    // 墓地天空压暗（Main.cs:62990-62996 SetBackColor GraveyardInfluence）：bgColor
+    // 三通道 ×(1 − 0.6×intensity)——晴空/夜空整体转灰暗；强度为 Game 平滑后的
+    // GraveyardVisualIntensity（weather.graveyardVisual），>0 即生效（remix 分支不适用）
+    const gyIntensity = this.weatherRef?.graveyardVisual ?? 0;
+    if (gyIntensity > 0) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'multiply';
+      const dv = Math.round(255 * (1 - 0.6 * Math.min(1, gyIntensity)));
+      ctx.fillStyle = `rgb(${dv},${dv},${dv})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+      ctx.restore();
+    }
 
     const isNight = t < 0.27 || t > 0.78;
     // 星星
     if (isNight) {
       const fade = Math.min(1, Math.max(0, (t < 0.5 ? (0.27 - t) / 0.05 : (t - 0.78) / 0.05)));
-      ctx.globalAlpha = 0.9 * fade;
+      // 墓地星光衰减（Main.cs:62469-62478 DrawStarsInBackground）：亮度 ×(1 − 1.4×intensity)，
+      // ≤0 直接跳过星群（intensity ≥ ~0.71 起星空完全被雾吞掉；太阳/月亮照画）
+      const starDim = Math.max(0, 1 - gyIntensity * 1.4);
+      ctx.globalAlpha = 0.9 * fade * starDim;
       ctx.fillStyle = '#E8ECFF';
       for (const s of this.stars) {
         const sx = ((s.x * viewW * 2 - camX * 0.1) % (viewW * 2) + viewW * 2) % (viewW * 2);

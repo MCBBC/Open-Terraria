@@ -122,7 +122,7 @@ export function scanMonolithScene(st: TileStore, r: TileRect): MonolithSceneStat
 export const PRIORITY_MEDIUM = 2;
 export const PRIORITY_VERYHIGH = 4;
 
-type FilterKind = 'miniTower' | 'moonLord' | 'bloodMoon' | 'sepia' | 'noir' | 'retro' | 'crt';
+type FilterKind = 'miniTower' | 'moonLord' | 'graveyard' | 'bloodMoon' | 'sepia' | 'noir' | 'retro' | 'crt';
 
 interface MonoFilterDef {
   key: string;            // Filters.Scene 键（ScreenEffectInitializer.cs）
@@ -142,6 +142,9 @@ export const MONOLITH_FILTER_DEFS: readonly MonoFilterDef[] = [
   { key: 'MonolithSolar', sceneKey: 'MonolithSolar', priority: PRIORITY_MEDIUM, kind: 'miniTower', color: [1, 0.7, 0], useOpacity: 0.3 },
   // 月总柱（SceneState.cs:115；MoonLordScreenShaderData :21-44 aimAtPlayer）
   { key: 'MonolithMoonLord', sceneKey: 'MonolithMoonLord', priority: PRIORITY_MEDIUM, kind: 'moonLord' },
+  // 墓地雾（SceneState.cs:124 `GraveyardVisualIntensity > 0`；ScreenEffectInitializer.cs:25
+  // 注册位于 MonolithMoonLord 之后、BloodMoon 之前——同 Medium 按此序合成）
+  { key: 'Graveyard', sceneKey: 'Graveyard', priority: PRIORITY_MEDIUM, kind: 'graveyard' },
   // 血月柱（SceneState.cs:116；BloodMoonScreenShaderData.UseColor(2,-0.8,-0.6) :27）
   { key: 'BloodMoon', sceneKey: 'BloodMoon', priority: PRIORITY_MEDIUM, kind: 'bloodMoon', color: [2, -0.8, -0.6] },
   // 收音机 → Sepia（SceneState.cs:125；SepiaScreenShaderData :28）
@@ -268,6 +271,9 @@ export interface MonolithEnv {
   onlyDontStarveWorld?: boolean;
   /** 玩家微光浸没（SceneState.cs:331 的 shimmering && UndergroundForShimmering 项） */
   zoneShimmer?: boolean;
+  /** Main.GraveyardVisualIntensity（SceneState.cs:415-418 平滑后的墓地视觉强度 0-1；
+   *  Game.updateWeather 每帧写入 world.weather.graveyardVisual，Renderer 注入） */
+  graveyardIntensity?: number;
 }
 
 interface FilterState { def: MonoFilterDef; active: boolean; opacity: number }
@@ -290,6 +296,9 @@ export class MonolithFilters {
   bloodMoonUseOpacity = 0;
   /** Sepia 本帧参数（SepiaScreenShaderData.Update） */
   sepia: SepiaParams = { progress: 0.3, intensity: 1.4, color: [0.191, -0.054, -0.221] };
+  /** 墓地雾 UseProgress（SceneState.cs:134：MathHelper.Lerp(0, 0.75, GraveyardVisualIntensity)；
+   *  UseIntensity(1.2) 固定，UseTargetPosition = SceneMetrics.Center ≈ 玩家屏幕位） */
+  graveyardProgress = 0;
 
   /** 天塔柱类型 → 滤镜激活（SceneState.cs:111-115） */
   miniTowerActive = -1;
@@ -308,6 +317,7 @@ export class MonolithFilters {
     m.set('MonolithStardust', !flag4 && scan.activeMonolithType === 2);  // :113
     m.set('MonolithSolar', !flag4 && scan.activeMonolithType === 3);     // :114
     m.set('MonolithMoonLord', !flag4 && scan.activeMonolithType === 4);  // :115
+    m.set('Graveyard', (env.graveyardIntensity ?? 0) > 0);               // :124
     m.set('BloodMoon', env.worldBloodMoon || scan.bloodMoonMonolith);    // :116
     // Sepia（:125）：onlyDontStarveWorld ^ (dontStarveShader || RadioThingMonolith)
     // —— dontStarveShader 是药水 buff（perspectivePlayer），引擎未接，恒 false
@@ -364,6 +374,9 @@ export class MonolithFilters {
       worldBloodMoon: env.worldBloodMoon, fullMoon: env.fullMoon,
       cloudAlpha: env.cloudAlpha, screenTileY: env.screenTileY, worldSurface: env.worldSurface,
     });
+
+    // 墓地雾参数（SceneState.cs:132-138）：progress = Lerp(0, 0.75, intensity)
+    this.graveyardProgress = 0.75 * Math.max(0, Math.min(1, env.graveyardIntensity ?? 0));
   }
 
   /** 滤镜查询（测试/调试用） */
@@ -430,6 +443,7 @@ export class MonolithFilters {
       switch (f.def.kind) {
         case 'miniTower': this.drawMiniTower(ctx, f, viewW, viewH); break;
         case 'moonLord': this.drawMoonLord(ctx, f, viewW, viewH, playerScreen); break;
+        case 'graveyard': this.drawGraveyard(ctx, f, viewW, viewH, playerScreen); break;
         case 'bloodMoon': this.drawBloodMoon(ctx, f, viewW, viewH); break;
         case 'sepia': this.drawSepia(ctx, canvas, f, viewW, viewH); break;
         case 'noir': this.drawNoir(ctx, canvas, f, viewW, viewH); break;
@@ -460,6 +474,34 @@ export class MonolithFilters {
     const grad = ctx.createRadialGradient(playerScreen.x, playerScreen.y, r * 0.2, playerScreen.x, playerScreen.y, r);
     grad.addColorStop(0, 'rgba(89,77,107,0)');
     grad.addColorStop(1, `rgba(89,77,107,${(0.35 * f.opacity).toFixed(3)})`);
+    ctx.save();
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+  }
+
+  /** FilterGraveyard（ScreenEffectInitializer.cs:25）：HLSL 二进制不在反编译源码，
+   *  仅源码内可见参数——UseProgress = Lerp(0,0.75,intensity)、UseIntensity(1.2)、
+   *  UseTargetPosition(SceneMetrics.Center)（SceneState.cs:132-138）。canvas 近似：
+   *  ① 全屏 multiply 冷灰去色（progress×intensity 缩放，蓝通道少压保墓地青灰调）；
+   *  ② 以目标位（玩家屏幕位）为心的雾霭径向渐变，远处更浓——观感对齐原版
+   *  "墓地灰蓝雾 + 中心略透"。星光/天空压暗另在 SkyRenderer（SetBackColor :62990） */
+  private drawGraveyard(ctx: CanvasRenderingContext2D, f: FilterState, w: number, h: number,
+    playerScreen: { x: number; y: number }): void {
+    const k = Math.min(1, this.graveyardProgress * 1.2) * f.opacity;   // progress × UseIntensity(1.2)
+    if (k <= 0) return;
+    ctx.save();
+    ctx.globalCompositeOperation = 'multiply';
+    const r = Math.round(255 * (1 - 0.30 * k));
+    const g = Math.round(255 * (1 - 0.30 * k));
+    const b = Math.round(255 * (1 - 0.24 * k));
+    ctx.fillStyle = `rgb(${r},${g},${b})`;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+    const rad = Math.hypot(w, h) * 0.55;
+    const grad = ctx.createRadialGradient(playerScreen.x, playerScreen.y, rad * 0.25, playerScreen.x, playerScreen.y, rad);
+    grad.addColorStop(0, 'rgba(150,160,170,0)');
+    grad.addColorStop(1, `rgba(150,160,170,${(0.34 * k).toFixed(3)})`);
     ctx.save();
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, w, h);

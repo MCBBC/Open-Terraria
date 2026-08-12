@@ -75,6 +75,13 @@ function foldBlock(lines, recipe) {
     else if (/^currentRecipe\.(needLava)\s*=\s*true;/.test(l)) recipe.lava = true;
     else if (/^currentRecipe\.needSnowBiome\s*=\s*true;/.test(l)) recipe.snow = true;
     else if (/^currentRecipe\.needGraveyardBiome\s*=\s*true;/.test(l)) recipe.graveyard = true;
+    // decraft 族(decraft 移植 2026-08-13):UpdateWhichItemsAreCrafted(:15110-15127)消费
+    else if (/^currentRecipe\.notDecraftable\s*=\s*true;/.test(l)) recipe.notDecraftable = true;
+    else if (/^currentRecipe\.crimson\s*=\s*true;/.test(l)) recipe.crimson = true;
+    else if (/^currentRecipe\.corruption\s*=\s*true;/.test(l)) recipe.corruption = true;
+    else if ((m = l.match(/^currentRecipe\.AddCustomShimmerResult\((\d+)(?:,\s*(\d+))?\);$/))) {
+      (recipe.shimmer ??= []).push([+m[1], +(m[2] ?? 1)]);
+    }
   }
 }
 
@@ -102,6 +109,10 @@ function parseLinear(body) {
         ...(recipe.graveyard ? { graveyard: true } : {}),
         // 炼金配方（AddRecipe 时 requiredTile==13 自动置位，Recipe.cs:16666-16669）
         ...((recipe.tile ?? -1) === 13 ? { alchemy: true } : {}),
+        ...(recipe.notDecraftable ? { notDecraftable: true } : {}),
+        ...(recipe.crimson ? { crimson: true } : {}),
+        ...(recipe.corruption ? { corruption: true } : {}),
+        ...(recipe.shimmer?.length ? { shimmer: recipe.shimmer } : {}),
       });
     }
     recipe = null; buf = [];

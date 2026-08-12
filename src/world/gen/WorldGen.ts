@@ -87,6 +87,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // SettleLiquids(16215) < 本 pass < Oasis(16327) < ShellPiles(16385)）：
     // 地表沙柱上方的悬空水清除——零掷骰纯扫描（2026-08-12 前整 pass 缺失）
     { name: '沙上清水', run: surfaceWaterAboveSandPass },
+    // 绿洲（原版 Oasis cs:16327，注册序 RemoveSurfaceWaterAboveSand(16295) < 本 pass
+    // < ShellPiles(16385)）：PlaceOasis 挖塘+岸线，登记 gs.oasisX/Y/W（pass 98 的
+    // 绿洲棕榈/燕麦/植物 530 消费段未实现，备案）
+    { name: '绿洲', run: oasisPass },
     // 海滩装饰（原版 ShellPiles cs:16393-16501）：贝壳堆。原版注册序
     // SettleLiquids(16215) < ShellPiles(16385) < SmoothWorld(16507)——必须在半砖平滑
     // 之前，否则堆出的散沙/孤立单格无人回收（2026-08-12 前排管线末尾=海里单体沙来源之一）
@@ -162,12 +166,29 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 本 pass < SettleLiquidsPart2(21051)）：蜂巢 pass 只登记坐标，托台清空+幼虫
     // 放置推迟到这里——过早放置会被中途宝箱/装饰 pass 破坏
     { name: '蜂巢幼虫', run: beeLarvaPass },
+    // 仙人掌/棕榈/珊瑚（原版 CactusPalmTreesAndCoral cs:21115-21325，注册序
+    // SettleLiquidsPart2(21051) < 本 pass < TileCleanup(21327)）：GrowCactus 全量
+    //（PlantCactus 150 次邻域成簇）+两端海滩珊瑚 81/贝壳 324+中段水盒棕榈
+    //（此前为 12% 直柱简化,2026-08-13 全量重写）
+    { name: '仙人掌珊瑚', run: cactusCoralPass },
+    // 瓦片清理（原版 TileCleanup cs:21327-21751 必补子项：全图清坡/坡接半砖修复/
+    // 液体中草本 KillTile/滴水石笋 373-375/墙 13·14·87 液体清零/祭坛下 232→226；
+    // 帧规范化族由放置端保证,备案）——注册序本 pass(21327) < MicroBiomes(21785)
+    { name: '瓦片清理', run: tileCleanupPass },
     // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
     // 水生植物（原版 LilypadsCattailsBambooAndSeaweed cs:22131）：睡莲/香蒲/竹/海藻
     // （注册序 Lilypads(22131) 在 ShellPiles(16385) 之后——贝壳堆已前移"水体沉降"后）
     { name: '水生植物', run: vanillaLilypads },
+    // 断线陷阱清理（原版 BrokenTrapCleanup cs:22283：电线 BFS 连通网无陷阱/触发器
+    // 对→整网拆除,含巨石回滚/孤儿陷阱击杀/矿轨压板复位）——注册序 Lilypads(22131)
+    // < 本 pass < FinalCleanup(22304)。零掷骰
+    { name: '断线陷阱清理', run: brokenTrapCleanupPass },
+    // 终清理（原版 FinalCleanup cs:22304-22670 必补子项：悬空落体柱生长+封底/
+    // 沙岩硬沙墙灌满岩浆/巨石重帧补支撑/液体中棕榈杀/地牢墙液体转水/矿轨清液/
+    // 金币堆补底/地表散水清除/画作继承邻墙；FillWallHoles 与彩蛋备案）。零掷骰
+    { name: '终清理', run: finalCleanupPass },
   ];
 
   for (let i = 0; i < passes.length; i++) {
@@ -207,6 +228,11 @@ import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
 import { runCaveWallsPass, runCaveWallVarietyPass } from './vanilla/CaveWallsPass';
+import { runOasisPass } from './vanilla/OasisPass';
+import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
+import { runTileCleanupPass } from './vanilla/TileCleanupPass';
+import { runBrokenTrapCleanupPass } from './vanilla/BrokenTrapCleanupPass';
+import { runFinalCleanupPass } from './vanilla/FinalCleanupPass';
 import { runMossAndMossCavesPass } from './vanilla/MossPass';
 import { runGrassWallPass } from './vanilla/GrassWallPass';
 import { runMountCavesPass, runMountainCavesPass } from './vanilla/MountCavesPass';
@@ -708,6 +734,37 @@ function caveWallsPass({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runCaveWallsPass(store, rng, gs);
+}
+
+// 遗留批接线包装（原版注册序：Oasis 16327 / CactusPalmTreesAndCoral 21115 /
+// TileCleanup 21327 / BrokenTrapCleanup 22283 / FinalCleanup 22304）
+function oasisPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runOasisPass(store, rng, gs);
+}
+
+function cactusCoralPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runCactusPalmTreesAndCoralPass(store, rng, gs);
+}
+
+function tileCleanupPass({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runTileCleanupPass(store, rng, gs);
+}
+
+function brokenTrapCleanupPass({ store, world }: GenCtx) {
+  // cs:22286 门：!noTraps || tenthAnniversary || notTheBees——普通世界恒跑
+  const f = world.seedFlags;
+  if (f?.noTraps && !f?.tenthAnniversary && !f?.notTheBees) return;
+  runBrokenTrapCleanupPass(store);
+}
+
+function finalCleanupPass({ store }: GenCtx) {
+  runFinalCleanupPass(store, ctxGs[0]!);
 }
 
 function caveWallVarietyPass({ store, rng }: GenCtx) {

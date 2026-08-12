@@ -114,4 +114,40 @@ describe('地狱背景(Main.cs DrawBackground 地下层)', () => {
     expect((magma2!.args as number[])[1]).toBe(0);               // mod 3 回 0
     void bg2;
   });
+
+  it('地狱多层远景背景(DrawUnderworldBackground :52082-52228):五层风格集+四帧行动画+层0黑补', () => {
+    const bg = new BiomeBackground();
+    stubImgs(bg);
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugAlpha = 1;
+    (bg as unknown as { ugAlpha: number; ugOld: number }).ugOld = bg.ugStyle;
+    // 地狱层贴图 stub(风格 0 集 = Underworld 0-4;1/6 带动画)
+    const hellMap = (bg as unknown as { hellImgs: Map<number, HTMLImageElement | null> }).hellImgs;
+    const HELL: Record<number, [number, number]> = {
+      0: [1024, 858], 1: [2048, 1900], 2: [1024, 630], 3: [1024, 630], 4: [48, 1300],
+    };
+    for (const [n, [w, hh]] of Object.entries(HELL)) {
+      hellMap.set(Number(n), { tex: 200 + Number(n), complete: true, naturalWidth: w, naturalHeight: hh } as unknown as HTMLImageElement);
+    }
+    const world = hellWorld();
+    world.underworldBG = 0;                    // 风格 0 → 集 [0,1,2,3,4]
+    const camY = (600 - 100) * 16;             // 深地狱(h-100),屏底远超 h-220 门
+    const { ctx, calls } = recorder();
+    (bg as unknown as { drawUnderground(c: CanvasRenderingContext2D, w: World, cm: { x: number; y: number }, t: number, vw: number, vh: number, dt: number): void })
+      .drawUnderground(ctx, world, { x: 3200, y: camY }, camY - 400, 1280, 800, 125);  // 125ms → frame=1
+    const hell = calls.filter(c => c.op === 'img' && (c.tex as number) >= 200);
+    expect(hell.length).toBeGreaterThan(0);                     // 地狱层有绘制
+    // 动画帧行:贴图1(frame=1)→ sx=(1>>1)*(2048>>1)=0, sy=(1%2)*(1900>>1)=950
+    const tex1 = hell.find(c => c.tex === 201);
+    expect(tex1).toBeTruthy();
+    expect((tex1!.args as number[])[0]).toBe(0);
+    expect((tex1!.args as number[])[1]).toBe(950);
+    // 层0(tex 200)之后应有黑补 rgb(11,3,7) 的 fillRect
+    const black = calls.find(c => c.op === 'rect');
+    expect(black).toBeTruthy();
+    // 五层全画(idx 4→0 → tex 204,203,202,201,200 都出现)
+    for (const t of [200, 201, 202, 203, 204]) {
+      expect(hell.some(c => c.tex === t)).toBe(true);
+    }
+  });
+
 });

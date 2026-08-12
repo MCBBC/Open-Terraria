@@ -173,5 +173,23 @@ describe('宝石分布对账(一次性)', () => {
       }
       return { a: st.flags[i], wall: st.wall[i], solidNb: nb };
     })));
+
+    // ---- 金标沙漠装饰(485蚁卵/751鼬/484仙人掌/165/187)锚点与帧实证 ----
+    const dump: Record<number, Array<{ x: number; y: number; fx: number; fy: number; below: number; above: number }>> = {};
+    for (const t of [485, 751, 484, 165, 187]) dump[t] = [];
+    for (let y = 2; y < gh - 2; y++) {
+      for (let x = 2; x < gw - 2; x++) {
+        const i = y * gw + x;
+        const t = g.tiles.type[i];
+        if (!(t in dump) || !g.tiles.active[i]) continue;
+        if (dump[t].length >= 6) continue;
+        const below = g.tiles.type[i + gw], above = g.tiles.type[i - gw];
+        if (t === 165 && below !== 396 && above !== 396) continue; // 165 只要贴沙岩的(沙漠场景)
+        dump[t].push({ x, y, fx: g.tiles.frameX[i], fy: g.tiles.frameY[i], below, above });
+      }
+    }
+    for (const t of Object.keys(dump)) {
+      if (dump[+t].length) console.log(`GOLDEN tile ${t}:`, JSON.stringify(dump[+t]));
+    }
   }, 600000);
 });

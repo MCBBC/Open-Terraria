@@ -735,6 +735,9 @@ export class Renderer {
       fullMoon: clock0?.moonPhase === 0,
       worldBloodMoon: !!clock0?.bloodMoon,
       cloudAlpha: world.weather?.cloudAlpha ?? 0,
+      // Main.GraveyardVisualIntensity（SceneState.cs:124 墓地雾激活门）：Game 侧
+      // updateWeather 每帧把平滑值写入 weather.graveyardVisual
+      graveyardIntensity: world.weather?.graveyardVisual ?? 0,
     });
     this._monoFrameMs = this._liquidNow;
 
