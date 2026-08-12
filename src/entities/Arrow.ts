@@ -86,6 +86,8 @@ export class Arrow extends Entity {
   hostile: boolean;
   /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
   whipTagShot = false;
+  /** 命中施加 OnFire 300t（1106 火舌 :11002-11004） */
+  ignite = false;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
@@ -204,6 +206,10 @@ export class Arrow extends Entity {
           }
         }
         if (crit) dmg *= 2;
+        if (this.ignite) {
+          const en3 = e as unknown as { onFireT?: number };
+          en3.onFireT = Math.max(en3.onFireT ?? 0, 5); // AddBuff(24,300)=5s
+        }
         playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');

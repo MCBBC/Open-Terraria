@@ -8,6 +8,10 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 
 const MUD = TILE_BY_KEY['mud']!;
+/** WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：墙→地形 tile，未映射默认 0 */
+const WALL_TO_TERRAIN = new Map<number, number>([
+  [40, 147], [71, 161], [15, 59], [86, 225], [3, 25], [83, 203], [178, 367], [180, 368],
+]);
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SAND = TILE_BY_KEY['sand']!;
 const CRIMSTONE = TILE_BY_KEY['v_203_crimstone_block'] ?? -1;
@@ -69,16 +73,21 @@ function sonOfLakinater(st: TileStore, rng: RNG, gs: GenState, i: number, j: num
           // 原版此处 SpreadGrass 邻格（59/60 转草）——草传播未移植，跳过（后续 pass 铺草）
           void wasGrass;
         } else if (y > j + 1 && dist < r && st.liquid[ti] === 0) {
-          // 腔壁泥土壳：窄处且有墙三面包围 → 填实
-          if (Math.abs(x - px) * 0.8 < r && st.wall[ti] > 0
+          // 腔壁壳（cs:80477-80484）：窄处 + ★非活性 + 自身/左/右/下有墙 →
+          //   type = WallTypeToTerrainTileType[wall]（WallID.cs:66：40→147、71→161、
+          //   15→59、86→225、3→25、83→203、178→367、180→368，未映射默认 0=泥土）再激活。
+          //   曾只置 flags=1（type 残留）→ 湖缘"type 残留+实心"幽灵格
+          if (Math.abs(x - px) * 0.8 < r && !st.flags[ti] && st.wall[ti] > 0
             && st.wall[st.idx(x - 1, y)] > 0 && st.wall[st.idx(x + 1, y)] > 0
             && st.wall[st.idx(x, y + 1)] > 0) {
+            st.type[ti] = WALL_TO_TERRAIN.get(st.wall[ti]) ?? 0;
             st.flags[ti] = 1;
           }
-        } else if (y < j && steps === stepsTotal - 1 && y > gs.worldSurfaceLow - 20) {
-          // 首步：向上漏斗入口（L48617-48638）
+        } else if (y < j && steps === stepsTotal - 1 && y > gs.worldSurfaceLow - 20 && st.flags[ti]) {
+          // 首步：向上漏斗入口（cs:80493-80506）——★原版有 active 前置（曾漏）；
+          //   云族跳过。内部非活性格（洞穴空腔）不参与漏斗挖掘
           const cloud = TILE_BY_KEY['v_189_cloud_block']!;
-          if (!(st.flags[ti] && (st.type[ti] === cloud || st.type[ti] === TILE_BY_KEY['v_196_rain_cloud_block']))) {
+          if (st.type[ti] !== cloud && st.type[ti] !== TILE_BY_KEY['v_196_rain_cloud_block']) {
             const fx = Math.abs(x - i) * 0.7;
             const fy = Math.abs(y - entranceY) * 1.35;
             const width = (1 - Math.abs(x - i) / Math.max(1, x1 - i)) * 2.3;

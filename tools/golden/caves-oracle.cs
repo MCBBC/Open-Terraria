@@ -2826,6 +2826,13 @@ Checkpoint("underworld");
 
 // ================= Pass 29 CorruptionAndCrimson（cs:13919-14613 + ChasmRunnerSideways cs:75323 + CanEvilReplace cs:75527 + CrimStart cs:75543 + CrimPlaceHearts cs:75854 + ChasmRunner cs:76066）=================
 // 普通世界：flipInfections/drunk/remix/tenthAnniversary 全 false；dungeonSide = dungeonRight ? 1 : -1
+// WallID.Sets.WallTypeToTerrainTileType（WallID.cs:66）：40→147、71→161、15→59、
+// 86→225、3→25、83→203、178→367、180→368，未映射默认 0
+ushort WallToTerrain(ushort w) => w switch
+{
+    40 => 147, 71 => 161, 15 => 59, 86 => 225, 3 => 25, 83 => 203,
+    178 => 367, 180 => 368, _ => 0
+};
 bool CanEvilReplace(int cx, int cy)
 {
     int t = act[cy * W + cx] != 0 ? typ[cy * W + cx] : -1;
@@ -3626,10 +3633,14 @@ void SonOfLakinater(int li, int lj)
                 }
                 else if (ll > lj + 1 && ldist < lnum4 && liq[lti] == 0)
                 {
-                    // 腔壁壳：JS 侧仅置 active（不动 type）——两侧一致
-                    if (Math.Abs((double)lk - lvx) * 0.8 < lnum4 && wal[lti] > 0
+                    // 腔壁壳（cs:80477-80484）：窄处+★非活性+四邻有墙 →
+                    //   type = WallTypeToTerrainTileType[wall] 再激活（漏斗门禁已含 active）
+                    if (Math.Abs((double)lk - lvx) * 0.8 < lnum4 && act[lti] == 0 && wal[lti] > 0
                         && wal[ll * W + lk - 1] > 0 && wal[ll * W + lk + 1] > 0 && wal[(ll + 1) * W + lk] > 0)
+                    {
+                        typ[lti] = WallToTerrain(wal[lti]);
                         act[lti] = 1;
+                    }
                 }
                 else
                 {

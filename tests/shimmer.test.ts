@@ -172,6 +172,34 @@ describe('玩家脱困落点（ShimmerHelper.FindSpotWithoutShimmer 近似）', 
     expect(spot!.x).toBeGreaterThanOrEqual(31);
     expect(spot!.y).toBeLessThan(40);
   });
+
+  it('封闭洞穴兜底（Player.cs:28442-28469 三层兜底）：玩家周围 60 圈无落点 → 出生点兜底必脱困', () => {
+    // 140×140 全实心世界：玩家腔在 (10,10)，出生点区在 (130,120)——切比雪夫距离 120 > 59，
+    // 第一层搜索（r<60）必空；出生点上方净空+实地 → 兜底层命中
+    const EW = 140, EH = 140;
+    const w = new World(EW, EH, 11, 'shimmer-enclosed');
+    const st = w.store;
+    for (let x = 0; x < EW; x++) for (let y = 0; y < EH; y++) st.setTile(x, y, 1);
+    // 封闭微光腔（玩家位 10,10；腔 3×3 微光 + 上方 3 格空气）
+    for (let x = 9; x <= 11; x++) {
+      st.setTile(x, 9, 0); st.setTile(x, 10, 0); st.setTile(x, 11, 0);
+      st.setLiquid(x, 10, 255, 4); st.setLiquid(x, 11, 255, 4);
+    }
+    // 出生点区：上方净空（3 格）+ 实地
+    for (let x = 127; x <= 133; x++) {
+      st.setTile(x, 121, 1);
+      st.setTile(x, 120, 0); st.setTile(x, 119, 0); st.setTile(x, 118, 0);
+    }
+    w.spawnX = 130; w.spawnY = 120;
+    w.lavaLine = 125;
+    // 玩家层（无兜底参数）→ 旧实现在这里返回 null = 每 20s 重试永远失败 = 永久卡死
+    expect(findShimmerFreeSpot(st, 10, 10)).toBeNull();
+    // 三层兜底：出生点周围必命中
+    const spot = findShimmerFreeSpot(st, 10, 10, w.spawnX, w.spawnY);
+    expect(spot).not.toBeNull();
+    expect(Math.abs(spot!.x - 130)).toBeLessThan(60);
+    expect(st.liquid[st.idx(spot!.x, spot!.y)] === 0 || st.liquidType[st.idx(spot!.x, spot!.y)] !== 4).toBe(true);
+  });
 });
 
 describe('玩家浸微光（buff 353 + 脱困传送，Player.cs:27420/11381/28377）', () => {

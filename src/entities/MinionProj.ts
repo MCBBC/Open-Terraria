@@ -138,6 +138,10 @@ export class MinionProj extends Entity {
   private spawned = false;
   /** 渲染旋转（龙链：段朝向 = 指向父段 +PI/2，同原版 rotation=velocity.ToRotation()+PI/2） */
   rot = 0;
+  /** Foxparks 5664 手持喷火通道（AI_026 ai[0]>=1000：每 4t 发 1106，Game 每帧置 true+瞄准） */
+  foxChannel = false;
+  foxAimX = 0; foxAimY = 0;
+  private foxT = 0;
   private pounceCd = 0;
 
   // ---- 旗舰家族分支（行号见各方法注释；均在通用运动前 return）----
@@ -193,6 +197,9 @@ export class MinionProj extends Entity {
     if (fd !== 0) this.facing = fd;
     this.contact(game, dmg0 * scale, 7);
   }
+
+  /** 喷火后攻击锁（Game 通道断开时调：localAI[0]=30 :56155） */
+  lockAfterFoxChannel(): void { this.shootCd = Math.max(this.shootCd, 30); }
 
   /** 再召唤延伸：尾(628)前插入 2 段（626+627）（Player.cs:47906-47963） */
   extendDragon(game: GameHooks): boolean {
@@ -643,6 +650,19 @@ export class MinionProj extends Entity {
     if (this.projId === 623) { this.guardianBody(game, p, dmg0); return; }
     // Cool Whip 雪花哨兵 917（buff 312 维持）与 Cobwhip 蜘蛛 1036（buff 365 维持）：
     // 独立索敌 400/环绕，伤害吃 summonDamageMult
+    // Foxparks 1094 喷火态（PR:56081-56159：ai[0] 1000-1003 每 4t 一发 1106；
+    // 伤 = dmg×0.75(:56133) ×命中 0.85(:12620)；OnFire 300t(:11002)；penetrate 4；
+    // 寿命 72t/54t 后不伤——Arrow 无 extraUpdates，速度×3/life÷3 等价换算）
+    if (this.projId === 1094 && this.foxChannel) {
+      if (++this.foxT % 4 === 1) {
+        const flame = new Arrow(this.cx - 3, this.cy - 3, this.foxAimX * 15, this.foxAimY * 15,
+          Math.max(1, Math.round(dmg0 * 0.75 * 0.85)), 0, 1106, null,
+          { grav: 0, life: 24, pierce: 4 });
+        flame.ignite = true; // 命中 OnFire 300t（PR:11002-11004）
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(flame, 'projectiles');
+      }
+      return; // 喷火态跳过常规索敌/移动（position 锚玩家由 Game/悬停链处理近似）
+    }
     if (this.projId === 917 || this.projId === 1036) {
       // 生命与玩家 buff 绑定（AI_177 :42468：coolWhipBuff/cobWhipBuff → timeLeft=2 续命）
       if (!p.whipBuffs[this.projId === 917 ? 312 : 365]) { this.dead = true; return; }

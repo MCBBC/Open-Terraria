@@ -2253,6 +2253,30 @@ export class Game implements GameHooks {
       }
     }
     this._prevRightDown = inp.rightDown;
+    // ⑤ Foxparks 5664 手持喷火通道（PC:42669-42690 TryUsingFoxsparksAbility：
+    // 按住期间已有 1094 进 ai[0]=1000 喷火态 + SetDummyItemTime(2) 锁 useTime）
+    {
+      const heldF = this.player.inv.heldItem();
+      const fDef = heldF ? ITEM_DEFS[heldF.id] : null;
+      const fVid = fDef ? (fDef.vid ?? viIdFromKey(fDef.key)) : -1;
+      const channeling = fVid === 5664 && inp.mouseDown && !inp.uiBlocking && !this.player.dead;
+      for (const e of this.entities.projectiles) {
+        const m = e as MinionProj;
+        if (!(m instanceof MinionProj) || m.dead || m.projId !== 1094) continue;
+        if (channeling) {
+          const [fwx, fwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+          const fdx = fwx - this.player.cx, fdy = fwy - this.player.cy;
+          const fl = Math.hypot(fdx, fdy) || 1;
+          m.foxChannel = true;
+          m.foxAimX = fdx / fl; m.foxAimY = fdy / fl;
+          m.x = this.player.cx - m.w / 2; m.y = this.player.cy - m.h / 2; // position=MountedCenter-Size/2(:56120)
+          this.player.useTime = Math.max(this.player.useTime, 2); // SetDummyItemTime(2)
+        } else if (m.foxChannel) {
+          m.foxChannel = false;
+          m.lockAfterFoxChannel(); // localAI[0]=30 喷火后攻击锁（:56155）
+        }
+      }
+    }
     // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
     // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
     // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。

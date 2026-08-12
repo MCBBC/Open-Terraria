@@ -98,8 +98,9 @@ const out = await page.evaluate(async () => {
   Math.random = realRand;
   const LanternNightProxy = null;
   res.eocDbg = { maxHp: g.player.maxHp, def: g.player.defense, town: g.entities.npcs.filter((n) => n instanceof TownNPC && !n.dead).length, tod: w.clock.timeOfDay, lastT: g._lastClockT, lanterns: LanternNightProxy };
-  res.eocRolled = g.spawnEyePending === true || g.spawnHardBossPending > 0;
+  res.eocRolled = g.spawnEyePending === true || g.spawnHardBossPending > 0 || (g.boss && g.boss.vanillaId === 4);
   g.spawnEyePending = false; g.spawnHardBossPending = 0;
+  if (g.boss) g.boss.dead = true; // 清场
   for (const n of [...g.entities.npcs]) if (n.npcKey === 'merchant') n.dead = true;
 
   // 3) 血月钓鱼 682（直调 reelBobber）与 618 偏移

@@ -28,6 +28,7 @@ import { runWebsPass } from '../src/world/gen/vanilla/WebsPass';
 import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
+import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -112,6 +113,9 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   // （位置正确），转录后将插在 lakes 前与 slush 后。
   runWebsPass(st, rng, gs); snap('webs');
   runUnderworldPass(st, rng, gs); snap('underworld');
+  // #29 Corruption（cs:13919，oracle 已转录；#32 Dungeon 未转录——其 JS 实现仍在
+  // vanillaBiomes 内位置正确，转录后插 lakes 前与 slush 后之间）
+  runCorruptionPass(st, rng, gs); snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
@@ -143,7 +147,7 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
         'desertentrance', 'deserthive', 'desertdone',
         'mushroom', 'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores',
-        'webs', 'underworld', 'lakes', 'slush', 'mcopenings', 'beaches'];
+        'webs', 'underworld', 'corruption', 'lakes', 'slush', 'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;
