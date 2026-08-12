@@ -41,4 +41,8 @@ export const VI_KEY = {
   COIN: { COPPER: VI(71), SILVER: VI(72), GOLD: VI(73), PLATINUM: VI(74) },
   // 饰品(退役本地 accessory 枚举的继任)
   LUCKY_HORSESHOE: VI(158), FERAL_CLAWS: VI(211),
+  // 预览盔甲(铁三件)
+  IRON_HELMET: VI(90), IRON_CHAINMAIL: VI(81), IRON_GREAVES: VI(77),
+  // 草种(蘑菇 194 等)
+  MUSHROOM_GRASS_SEEDS: VI(194),
 } as const;

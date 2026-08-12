@@ -1,6 +1,7 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
-import { Achievements, achVidOfInternalItem } from './Achievements';
+import { Achievements } from './Achievements';
 import { statOfInternal } from '../data/vanillaItemStats';
+import { vanillaIdOfItem } from '../stats/Shimmer';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -343,6 +344,55 @@ function slotVanillaId(itemId: number): number {
   return NATIVE_ITEM_VID[key] ?? -1;
 }
 
+/** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
+export function accessoryVanillaIds(p: Player): number[] {
+  const out: number[] = [];
+  for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+    const s = p.inv.armor[acc];
+    if (s) out.push(slotVanillaId(s.id));
+  }
+  return out;
+}
+
+/** 星光斗篷族反击态（Player.cs:37826-37863）：active = 装备任一族件
+ *  （starCloak 880 / starVeil 929 / beeCloak 1247 / manaCloak 982——accfx 仅 880/1247
+ *  带 starCloak 位，929/982 会漏检，故并入装备 id 扫描）；
+ *  projType 按 override 件优先级 manaCloak 723 > beeCloak 724 > starVeil 725 > 726 */
+export function starCloakStarInfo(accVids: number[], starCloakFlag: boolean): { active: boolean; projType: number } {
+  const veil = accVids.includes(929), bee = accVids.includes(1247), mana = accVids.includes(982);
+  return {
+    active: starCloakFlag || veil || bee || mana,
+    projType: mana ? 723 : bee ? 724 : veil ? 725 : 726,
+  };
+}
+
+/** 蜂巢族受击反击掷骰（Player.cs:37871-37907）：数量 num19 =
+ *  1 + (Next(3)==0) + (Next(3)==0) + (strongBees(HivePack 3333) && Next(3)==0)；
+ *  基伤 num20 = strongBees ? 18 : 13（专家 ×1.5/大师 ×2 由调用侧难度档处理） */
+export function beeRetaliateRoll(strongBees: boolean, rnd: () => number): { count: number; base: number } {
+  let count = 1;
+  if (Math.floor(rnd() * 3) === 0) count++;
+  if (Math.floor(rnd() * 3) === 0) count++;
+  if (strongBees && Math.floor(rnd() * 3) === 0) count++;
+  return { count, base: strongBees ? 18 : 13 };
+}
+
+/** 幸运币近战命中掉币掷骰（Player.cs:43892-43916）：币种 71 铜 / Next(10)==0 升 72 银 /
+ *  Next(100)==0 升 73 金（顺序覆盖）；stack = Next(1,11)（1-10）；
+ *  velocity.Y = Next(-20,1)*0.2、X = Next(10,31)*0.2*direction（玩家朝向）。
+ *  门（value>0 && hasLuckyCoin && Next(5)==0）由调用侧判定 */
+export function luckyCoinRoll(rnd: () => number, direction: number): { key: string; stack: number; vx: number; vy: number } {
+  let key = VI_KEY.COIN.COPPER;
+  if (Math.floor(rnd() * 10) === 0) key = VI_KEY.COIN.SILVER;
+  if (Math.floor(rnd() * 100) === 0) key = VI_KEY.COIN.GOLD;
+  return {
+    key,
+    stack: 1 + Math.floor(rnd() * 10),
+    vx: (10 + Math.floor(rnd() * 21)) * 0.2 * direction,
+    vy: (Math.floor(rnd() * 21) - 20) * 0.2,
+  };
+}
+
 /** 玩家储物族 tile key → bank 索引（原版 Player.cs:32598+：29→bank / 97→bank2 /
  *  463→bank3 / 491→bank4，chest 槽位约定 -2..-5） */
 const BANK_TILES: ReadonlyArray<readonly [string, number]> = [
@@ -390,8 +440,7 @@ export function dropInventoryOnDeath(
   inv.miscDyes.fill(null);
   for (const l of inv.loadouts) { l.armor.fill(null); l.dye.fill(null); }
   // 发还铜制起始三件套（原版 1:1 顺序：[0]短剑 3507 / [1]镐 3509 / [2]斧 3506）
-  const starter = [VANILLA_ITEM_KEY_BY_ID[3507] ?? 'copper_sword',
-    VANILLA_ITEM_KEY_BY_ID[3509] ?? 'copper_pickaxe', VANILLA_ITEM_KEY_BY_ID[3506] ?? 'copper_axe'];
+  const starter = [VI_KEY.STARTER.SHORTSWORD, VI_KEY.STARTER.PICK, VI_KEY.STARTER.AXE];
   starter.forEach((key, i) => {
     const id = ITEM_BY_KEY[key];
     if (id !== undefined) inv.slots[i] = { id, stack: 1 };
@@ -1089,7 +1138,7 @@ export class Game implements GameHooks {
   /** 物品 → 矿车贴图（矿车族召唤物；含内部占位 minecart_item = vanilla 2343） */
   private cartTextureOfItem(internalId: number): string | null {
     const key = ITEM_DEFS[internalId]?.key ?? '';
-    if (key === 'minecart_item') return DEFAULT_CART_TEXTURE;
+    if (viIdFromKey(key) === 2343) return DEFAULT_CART_TEXTURE;
     const vid = viIdFromKey(key);
     return vid >= 0 ? CART_TEXTURES[vid] ?? null : null;
   }
@@ -1326,7 +1375,7 @@ export class Game implements GameHooks {
       // R:五彩扳手/宏伟蓝图模式循环(红蓝绿黄→剪线→致动器→剪致动器)
       if (code === 'KeyR') {
         const held = this.player?.inv.heldItem();
-        if (held && ITEM_DEFS[held.id]?.wireTool && (ITEM_DEFS[held.id]?.key === 'multicolor_wrench' || ITEM_DEFS[held.id]?.key === 'grand_design')) {
+        if (held && ITEM_DEFS[held.id]?.wireTool && (viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 3625 || viIdFromKey(ITEM_DEFS[held.id]?.key ?? '') === 3611)) {
           const modes = [
             [TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
             [TOOL_CUTTER, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW],
@@ -1462,7 +1511,7 @@ export class Game implements GameHooks {
   private playerPreviewArmor(): Array<number | null> {
     // 与 afterWorldLoad 初始装备一致:铁三件(头/胸/腿)
     const ids: Array<number | null> = [null, null, null];
-    const order = ['iron_helmet', 'iron_chainmail', 'iron_greaves'];
+    const order = [VI_KEY.IRON_HELMET, VI_KEY.IRON_CHAINMAIL, VI_KEY.IRON_GREAVES];
     for (let k = 0; k < 3; k++) {
       const id = ITEM_BY_KEY[order[k]];
       ids[k] = id !== undefined ? id : null;
@@ -1649,11 +1698,11 @@ export class Game implements GameHooks {
     partyWorldClear(this.partyState);
     LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
-    // 初始装备 = 原版经典开局三件套（铜镐/铜斧/铜剑），其余一概不给——
+    // 初始装备 = 原版经典开局三件套（铜镐 3509/铜斧 3506/铜短剑 3507），其余一概不给——
     // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
-    this.player.inv.add(ITEM_BY_KEY['copper_pickaxe'], 1);
-    this.player.inv.add(ITEM_BY_KEY['copper_axe'], 1);
-    this.player.inv.add(ITEM_BY_KEY['copper_sword'], 1);
+    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.PICK], 1);
+    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.AXE], 1);
+    this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
     this.boss = null;
@@ -1702,6 +1751,12 @@ export class Game implements GameHooks {
     // 昼夜事件基线：季节旗标 + 时钟快照
     this.checkSeasonal();
     this._lastClockT = this.world.clock.timeOfDay;
+    // 成就：解锁 toast（原版走 Steam 弹窗，本作用 toast 反馈）+ 进世界基线
+    this.achievements.onUnlock = (name) => {
+      const disp = Lang.text(`Achievements.${name}_Name`);
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AchievementUnlocked', disp));
+    };
+    this.achOnWorldEnter();
     this.cb.onInventoryChanged();
   }
 
@@ -2281,7 +2336,11 @@ export class Game implements GameHooks {
     // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
     // 此处读到上一帧尾值，≤1 tick 偏差）
     player.itemAnimTicks = this.swing?.t ?? 0;
+    const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
+    // 成就：跑动里程（AchievementsHelper.HandleRunning → MARATHON_MEDALIST；
+    // 原版按玩家位移像素累计，锚点 x 差值同义）
+    this.achNotifyRunning(Math.abs(player.x - achPxBefore));
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -2564,7 +2623,7 @@ export class Game implements GameHooks {
     // ---- 敌人生成（F8 可关闭；频率语义见 trySpawnEnemy，每帧概率门） ----
     // 水蜡烛(Main.waterCandle 语义):手持或 32 格内有放置态 → 刷怪率修正（getSpawnRate 内）
     const held2 = this.player.inv.heldItem();
-    const heldWC = !!held2 && ITEM_DEFS[held2.id]?.key === 'water_candle';
+    const heldWC = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 148;
     this.heldWaterCandle = heldWC;
     let nearWC = false;
     if (this.tickCount % 30 === 0) {
@@ -2696,6 +2755,13 @@ export class Game implements GameHooks {
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
           w.flags[downedKey] = true;
+          // 成就：肉山击杀 → 困难模式开启（WorldGen.cs:31884 InitializeHardMode 尾
+          // event 9 → ITS_HARD；hardMode 世界变换接通后此事件应随其迁移）
+          if (this.boss.vanillaId === 113) this.achievements.notifyProgressionEvent(9);
+          // 成就：MechaMayhem 清场判定（Mech 离场后无 Mech 存活 → 重置三旗）
+          this.achievements.mechaMayhemClear(
+            (this.entities.enemies as Enemy[]).filter((e) => !e.dead && e.vanillaId != null)
+              .map((e) => e.vanillaId!));
           // 首胜灯笼夜预约（NPC.cs NPCLoot 各 case SetEventFlagCleared 实参 →
           // OnGameEventClearedForTheFirstTime default/10/16-18 翻转；4/21/22 排除）。
           // id 表：11 史王 8 蜂后 13 EoC 14 世吞|克脑 15 骷髅王 19 肉山 12 世纪之花
@@ -3003,7 +3069,7 @@ export class Game implements GameHooks {
     // 286=(0.7,0.8,1) / 3112=(1,0.6,0.85) / 3002=(1.05,0.95,0.55) / 4776=(0.9,0.35,1)
     // （附 4.5 格泛光近似省略）；5643 彩虹 = Disco 轮转
     if (heldDef) {
-      const gvid = heldDef.key === 'torch' ? -1 : viIdFromKey(heldDef.key);
+      const gvid = viIdFromKey(heldDef.key);
       const GLOWSTICK_LIGHT: Record<number, [number, number, number]> = {
         282: [0.7, 1, 0.8], 286: [0.7, 0.8, 1], 3112: [1, 0.6, 0.85],
         3002: [1.05, 0.95, 0.55], 4776: [0.9, 0.35, 1],
@@ -3018,7 +3084,7 @@ export class Game implements GameHooks {
     // 水炬三色（ItemID.Sets.WaterTorches = 523/1333/4384，ItemID.cs:1194）：
     // EmitHeldItemLight 的 (Torches && !wet) || WaterTorches——水炬水下也亮
     const WATER_TORCH_ITEMS = new Set([523, 1333, 4384]);
-    const heldVid0 = heldDef ? (heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key)) : -1;
+    const heldVid0 = heldDef ? viIdFromKey(heldDef.key) : -1;
     if (!heldRGB && heldDef && WATER_TORCH_ITEMS.has(heldVid0)) {
       const BIOME_TORCH_ITEM2: Record<number, number> = {
         523: 8, 974: 9, 1245: 10, 1333: 11, 2274: 12, 3004: 13, 3045: 14, 3114: 15,
@@ -3029,7 +3095,7 @@ export class Game implements GameHooks {
       heldRGB = c ? [...c] as [number, number, number] : [1, 0.95, 0.8];
     }
     if (!heldRGB && heldDef && !player.inWater) {
-      const vid = heldDef.key === 'torch' ? 8 : viIdFromKey(heldDef.key);
+      const vid = viIdFromKey(heldDef.key);
       if (Number.isFinite(vid)) {
         // 蜡烛（ItemCheck 尾段 type 105/713）：同火把基色
         if (vid === 105 || vid === 713) heldRGB = [1, 0.95, 0.8];
@@ -3579,7 +3645,7 @@ export class Game implements GameHooks {
           this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.SuperCartUnlocked'));
         }
         this.input.rightDown = false;
-      } else if (heldDef?.key === 'suspicious_eye') {
+      } else if (heldDef && viIdFromKey(heldDef.key) === 43) {
         if (!this.world.clock.isDay) {
           this.useSuspiciousEye();
           this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -3735,7 +3801,7 @@ export class Game implements GameHooks {
       && cw?.kind !== 'summon') {
       this.useSwing(heldDef);
       // 召唤道具（原版左键使用）
-      if (heldDef.key === 'suspicious_eye') {
+      if (viIdFromKey(heldDef.key) === 43) {
         if (!this.world.clock.isDay) {
           this.useSuspiciousEye();
           this.player.inv.removeAt(this.player.inv.selected, 1);
@@ -3774,7 +3840,7 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
         this.cb.onToast(`${heldDef.name}：${p.duration} 秒`);
       }
-    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && (heldDef.key === 'life_crystal' || heldDef.key === 'vi_29_LifeCrystal')) {
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && viIdFromKey(heldDef.key) === 29) {
       // 物品态生命水晶(Player.cs:29358:item 29,statLifeMax<400 → +20)
       if (this.player.baseMaxHp >= 400) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.LifeMaxReached'));
@@ -3971,17 +4037,18 @@ export class Game implements GameHooks {
       this.player.useTime = c?.useTime ?? 15;
       this.sfx.play('throw');
       this.cb.onInventoryChanged();
-    } else if (heldDef && (heldDef.key === 'worm_food' || heldDef.key === 'bloody_spine' || heldDef.key === 'slime_crown')
+    } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
-      // Boss 召唤物(原版 worm food/bloody spine/slime crown)
-      if (heldDef.key === 'worm_food') this.summonBoss('eater_of_worlds_head');
-      else if (heldDef.key === 'bloody_spine') this.summonBoss('brain_of_cthulhu');
+      // Boss 召唤物(原版 Worm Food 70/Bloody Spine 1331/Slime Crown 560)
+      const svid = viIdFromKey(heldDef.key);
+      if (svid === 70) this.summonBoss('eater_of_worlds_head');
+      else if (svid === 1331) this.summonBoss('brain_of_cthulhu');
       else this.summonBoss('king_slime');
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = 60;
       this.cb.onInventoryChanged();
       this.input.mouseDown = false;
-    } else if (heldDef && (heldDef.key === 'mechanical_worm' || heldDef.key === 'mechanical_eye' || heldDef.key === 'mechanical_skull')
+    } else if (heldDef && [556, 544, 557].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // 机械三王召唤物(原版 556/544/557:需困难模式+夜晚)
       if (!this.world.flags.hardMode) {
@@ -3989,8 +4056,9 @@ export class Game implements GameHooks {
       } else if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
-        if (heldDef.key === 'mechanical_worm') this.summonBoss('destroyer');
-        else if (heldDef.key === 'mechanical_eye') this.summonBoss('twins');
+        const mvid = viIdFromKey(heldDef.key);
+        if (mvid === 556) this.summonBoss('destroyer');
+        else if (mvid === 544) this.summonBoss('twins');
         else this.summonBoss('skeletron_prime');
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
@@ -4011,12 +4079,13 @@ export class Game implements GameHooks {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       }
       this.input.mouseDown = false;
-    } else if (heldDef && (heldDef.key === 'goblin_battle_standard' || heldDef.key === 'snow_globe' || heldDef.key === 'pirate_map')
+    } else if (heldDef && [361, 602, 1315].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
       // 入侵触发物品（Player.ItemCheck_UseEventItems，Player.cs:43243/43260/43277：
-      // 战旗 ignoreDelay，成功才消耗）
-      const type = heldDef.key === 'goblin_battle_standard' ? INVASION_GOBLIN
-        : heldDef.key === 'snow_globe' ? INVASION_SNOW_LEGION : INVASION_PIRATE;
+      // 战旗 ignoreDelay，成功才消耗；Goblin Battle Standard 361/Snow Globe 602/Pirate Map 1315）
+      const ivid = viIdFromKey(heldDef.key);
+      const type = ivid === 361 ? INVASION_GOBLIN
+        : ivid === 602 ? INVASION_SNOW_LEGION : INVASION_PIRATE;
       if (this.startInvasionAndAnnounce(type, true)) {
         this.player.inv.removeAt(this.player.inv.selected, 1);
         this.player.useTime = 60;
@@ -4466,6 +4535,8 @@ export class Game implements GameHooks {
       }
     }
     this.world.altarCount++;
+    // 成就：BEGONE_EVIL（WorldGen.cs:49111 event 6——每次砸祭坛都触发）
+    this.achievements.notifyProgressionEvent(6);
   }
 
   private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number) {
@@ -4540,7 +4611,7 @@ export class Game implements GameHooks {
       // 半砖分支拦截——实心块后的墙原版同样不可直接锤，语义一致）
       const wall = this.world.store.wall[this.world.store.idx(tx, ty)];
       if (type !== 0 && TILE_DEFS[type]?.decor) {
-        this.breakTile(tx, ty);
+        this.breakTile(tx, ty, true);
         this.sfx.play('chop');
         this.mining = null;
         return;
@@ -4569,7 +4640,7 @@ export class Game implements GameHooks {
     if (type === 0 || !this.toolCanBreak(type, power, toolType)) {
       // 装饰物（杂草等）任意工具/武器一下清掉并掉落
       if (type !== 0 && TILE_DEFS[type]?.decor && (toolType === 'pick' || toolType === 'axe')) {
-        this.breakTile(tx, ty);
+        this.breakTile(tx, ty, true);
         this.sfx.play('chop');
         this.mining = null;
         return;
@@ -4637,7 +4708,7 @@ export class Game implements GameHooks {
     this.spawnParticles(tx * TILE + 8, ty * TILE + 8, d.mapColor, 2, 1.2);
     if (total >= 100) {
       this.hitTiles.clear(tx, ty);
-      this.breakTile(tx, ty);
+      this.breakTile(tx, ty, true);
       this.mining = null;
       // 破坏完成音：按材质区分
       if (toolType === 'axe') this.sfx.play('chop');
@@ -4666,11 +4737,19 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 破坏 tile：处理树整体砍伐与 object 锚点 */
-  breakTile(x: number, y: number) {
+  /** 破坏 tile：处理树整体砍伐与 object 锚点。
+   *  byPlayer=true = 玩家工具直接破坏（原版 AchievementsHelper.CurrentlyMining 门）：
+   *  触发成就 tile 破坏通知（OOO_SHINY/EXTRA_SHINY/HEART_BREAKER/PHOTOSYNTHESIS）
+   *  + BULLDOZER 挖掘计数（HandleMining） */
+  breakTile(x: number, y: number, byPlayer = false) {
     const st = this.world.store;
     const type = st.get(x, y);
     if (type === 0) return;
+    if (byPlayer) {
+      const sheet = TILE_DEFS[type]?.vanilla?.sheet;
+      if (sheet != null) this.achievements.notifyTileDestroyed(sheet);
+      this.achievements.handleMining();
+    }
     const def = TILE_DEFS[type];
 
     // 树：砍树干 → 整棵树倒下（自有树 + 导入的原版树族）
@@ -4763,7 +4842,7 @@ export class Game implements GameHooks {
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
     const doorAnchor = clearDoorAt(st, x, y);
     if (doorAnchor) {
-      this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE, def.drop ?? 'door', 1);
+      this.spawnDrop(doorAnchor[0] * TILE + 8, doorAnchor[1] * TILE, typeof def.drop === 'number' ? VI(def.drop) : (def.drop ?? VI(25)), 1);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 8, 1.8);
       return;
     }
@@ -4819,7 +4898,9 @@ export class Game implements GameHooks {
       }
       // 掉落:drop:null = 显式无掉落(原版装饰类,如 165 冰凌/蛛网卵袋);仅 undefined
       // 才走 v_ 回收兜底(place_v_ 再放置)。曾用 ?? ——null 同样触发兜底,null 语义失效
-      let dropKey = def.drop === undefined ? (def.key.startsWith('v_') ? 'place_' + def.key : '') : def.drop;
+      let dropKey = def.drop === undefined
+        ? (def.key.startsWith('v_') ? 'place_' + def.key : '')
+        : (typeof def.drop === 'number' ? VI(def.drop) : def.drop);
       // 八音盒/喷泉按帧带掉对应唱片/喷泉（CheckMB :51288-51292 /
       // Check2xX :38199-38226——139 style=frameY/36、207 style=frameX/36；
       // KillTile_GetItemDrops 两 tile 均在无掉落表里，掉落全走帧检分支）
@@ -4898,7 +4979,7 @@ export class Game implements GameHooks {
     // 破坏树木正下方的支撑方块 → 整棵树倒下（掉木材）
     const treeOnTop = this.world.trees.find((t) => t.x === x && t.y + t.h === y);
     if (treeOnTop) this.fellTree(x, y - 1);
-    if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, def.drop, 1);
+    if (def.drop) this.spawnDrop(x * TILE + 8, y * TILE + 8, typeof def.drop === 'number' ? VI(def.drop) : def.drop, 1);
     else if (def.key.startsWith('v_')) this.spawnDrop(x * TILE + 8, y * TILE + 8, 'place_' + def.key, 1);
     this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
   }
@@ -5063,6 +5144,8 @@ export class Game implements GameHooks {
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
     this.sfx.play('tink');
     this.cb.onToast(isDemonHeart ? Lang.text('Mods.SandboxWorld.Toast.DemonHeartSmashed') : Lang.text('Mods.SandboxWorld.Toast.ShadowOrbSmashed'));
+    // 成就：SMASHING_POPPET（WorldGen.CheckOrb cs:54359 event 7——每次砸珠/心都触发）
+    this.achievements.notifyProgressionEvent(7);
     if (!this.world.flags.shadowOrbSmashed) {
       this.world.flags.shadowOrbSmashed = true;
     }
@@ -5898,6 +5981,10 @@ export class Game implements GameHooks {
       this.player.inv.removeAt(keySlot, 1);
       chest.locked = false;
       this.sfx.play('tink');
+      // 成就：DUNGEON_HEIST 的 prog(19)（Chest.cs:346 Unlock——金钥匙开锁金箱）。
+      // 原版另有暗影箱 event 20（Chest.cs:363/384/458 → BIG_BOOTY）；本仓锁定箱
+      // 模型统一走金钥匙（无暗影钥匙区分），event 20 暂不接线（偏差已记录）
+      this.achievements.notifyProgressionEvent(19);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestUnlocked'));
       this.cb.onInventoryChanged();
     }
@@ -5958,6 +6045,8 @@ export class Game implements GameHooks {
     if (!this.consumeVanillaItem(1293)) { this.input.rightDown = false; return; }
     this.sfx.playWav('roar');   // SoundID 15（:32328）
     this.spawnGolemFromAltar();
+    // 成就：TEMPLE_RAIDER（WorldGen.cs:37641 event 22——祭坛使用成功）
+    this.achievements.notifyProgressionEvent(22);
     this.input.rightDown = false;
   }
 
@@ -7264,13 +7353,9 @@ export class Game implements GameHooks {
       // velocity.Y = Next(-20,1)*0.2、X = Next(10,31)*0.2*direction（玩家朝向）
       const luckyNetId = e.vanillaNetId !== 0 ? e.vanillaNetId : (e.vanillaId ?? 0);
       if (!e.spawnedFromStatue && npcValueOf(luckyNetId) > 0
-        && this.player.equipStats.luckyCoin && Math.random() < 0.2) {
-        let coinKey = VI_KEY.COIN.COPPER;
-        if (Math.random() < 0.1) coinKey = VI_KEY.COIN.SILVER;
-        if (Math.random() < 0.01) coinKey = VI_KEY.COIN.GOLD;
-        const cvx = (10 + Math.floor(Math.random() * 21)) * 0.2 * this.player.facing;
-        const cvy = (Math.floor(Math.random() * 21) - 20) * 0.2;
-        this.spawnDrop(e.cx, e.y, coinKey, 1 + Math.floor(Math.random() * 10), cvx, cvy);
+        && this.player.equipStats.luckyCoin && Math.floor(Math.random() * 5) === 0) {
+        const coin = luckyCoinRoll(Math.random, this.player.facing);
+        this.spawnDrop(e.cx, e.y, coin.key, coin.stack, coin.vx, coin.vy);
       }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
@@ -8559,6 +8644,11 @@ export class Game implements GameHooks {
     return this.entities.enemies;
   }
 
+  /** 城镇 NPC 自卫弹入投射物桶(GameHooks.spawnTownShot) */
+  spawnTownShot(shot: import('../entities/TownShot').TownShot) {
+    this.entities.add(shot, 'projectiles');
+  }
+
   /** 小动物列表:弹幕命中用(GameHooks.critters) */
   critters() {
     return this.entities.critters;
@@ -8640,7 +8730,8 @@ export class Game implements GameHooks {
       // 弹型按装备 override 件取（manaCloak 723 > beeCloak 724 > starVeil 725 > starCloak 726），
       // 伤害 75（专家 ×2/大师 ×3，经典档 75）、击退 5。
       // ai1=position.Y（星光落点线）与 timeLeft 未建模——Arrow 无 ai 槽，登记依赖
-      const star = this.starCloakRetaliate();
+      const accVids = accessoryVanillaIds(p);
+      const star = starCloakStarInfo(accVids, p.equipStats.starCloak);
       if (star.active) {
         for (let k = 0; k < 3; k++) {
           const sx = p.x + (Math.floor(Math.random() * 800) - 400);
@@ -8662,12 +8753,10 @@ export class Game implements GameHooks {
       //   初速 = Next(-35,36)*0.02（aiStyle 36 追踪 AI 未建模，以下方瞄敌近似，登记）；
       //   反击后 AddBuff(48 Honey, 300t=5s)（:37906）；原版此处无声效（旧 beeSummon 已删）
       if (p.equipStats.bees) {
-        const strong = this.hasHivePack();
-        let num19 = 1;
-        if (Math.floor(Math.random() * 3) === 0) num19++;
-        if (Math.floor(Math.random() * 3) === 0) num19++;
-        if (strong && Math.floor(Math.random() * 3) === 0) num19++;
-        const num20 = strong ? 18 : 13;
+        const strong = accVids.includes(3333);
+        const roll = beeRetaliateRoll(strong, Math.random);
+        const num19 = roll.count;
+        const num20 = roll.base;
         for (let k = 0; k < num19; k++) {
           const makeStrong = strong && Math.floor(Math.random() * 2) === 0;
           const beeType = makeStrong ? 566 : 181;
@@ -8890,8 +8979,8 @@ export class Game implements GameHooks {
     const notifyAll = (arr: ReadonlyArray<{ id: number; stack: number } | null>) => {
       for (const s of arr) {
         if (!s) continue;
-        const vid = achVidOfInternalItem(s.id);
-        if (vid != null) this.achievements.notifyItemPickup(vid);
+        const vid = vanillaIdOfItem(s.id);
+        if (vid > 0) this.achievements.notifyItemPickup(vid);
       }
     };
     notifyAll(inv.slots); notifyAll(inv.armor); notifyAll(inv.dye);
@@ -8917,7 +9006,7 @@ export class Game implements GameHooks {
     let allDye = inv.dye.every((s) => !!s);
     if (allDye) allDye = inv.miscDyes.every((s) => !!s);
     if (allDye) a.completeFlag('DYE_HARD', 'Equip');
-    if (inv.slots.some((s) => s && achVidOfInternalItem(s.id) === 5043)) {
+    if (inv.slots.some((s) => s && vanillaIdOfItem(s.id) === 5043)) {
       a.completeFlag('GAIN_TORCH_GODS_FAVOR', 'Use');
     }
     // 生命/魔力双满 → TOPPED_OFF（:139-143）
@@ -8933,6 +9022,8 @@ export class Game implements GameHooks {
 
   /** StartVictoryScene（DD2Event.cs:481-507）：水晶 548 ai[1]=2 / 门 549 撤收 */
   private startDD2VictoryScene(): void {
+    // 成就：DD2 T3 胜利（DD2Event.cs:338 event 23 → DEFEAT_OLD_ONES_ARMY_TIER3）
+    this.achievements.notifyProgressionEvent(23);
     for (const e of this.entities.enemies as Enemy[]) {
       if (e.dead) continue;
       if (e.vanillaId === 548) { e.ai1 = 2; e.ai0 = 2; }
@@ -9790,6 +9881,11 @@ export class Game implements GameHooks {
     if (!this.canCraft(r)) return;
     for (const [key, n] of r.inputs) this.player.inv.remove(ITEM_BY_KEY[key], n);
     this.player.inv.add(ITEM_BY_KEY[r.out], r.count);
+    // 成就：合成通知（AchievementsHelper.NotifyItemCraft）
+    {
+      const vid = vanillaIdOfItem(ITEM_BY_KEY[r.out]);
+      if (vid != null) this.achievements.notifyItemCraft(vid);
+    }
     // 原版合成音 = SoundID 7 物品抓取（成品上鼠标的 grab 声，ItemSlot 族 PlaySound(7)）
     this.sfx.play('pickup');
     this.cb.onInventoryChanged();
@@ -9858,6 +9954,7 @@ export class Game implements GameHooks {
     if (!outKey) return;
     const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack * times);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left); // 背包装不下→掉落
+    this.achNotifyCraft(outKey);
     this.sfx.play('pickup'); // SoundID 7 物品抓取（原版合成成品上鼠标的 grab 声）
     this.cb.onInventoryChanged();
   }
@@ -9868,37 +9965,17 @@ export class Game implements GameHooks {
     if (!outKey) return;
     const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack);
     if (left > 0) this.spawnDrop(this.player.cx, this.player.y, outKey, left);
+    this.achNotifyCraft(outKey);
     this.sfx.play('pickup'); // SoundID 7（同 vanillaCraft）
     this.cb.onInventoryChanged?.();
   }
 
-  /** 星光斗篷族反击态（Player.cs:37826-37863）：active = 装备任一星光斗篷族件
-   *  （starCloak 880 / starVeil 929 / beeCloak 1247 / manaCloak 982）；
-   *  projType 按 override 件优先级 manaCloak 723 > beeCloak 724 > starVeil 725 > 726。
-   *  装备扫描读配饰槽 armor[3..9]（原版 :12543-12550），accfx 仅 880/1247 带 starCloak
-   *  位，929/982 无该位——equipStats.starCloak 会漏检，故此处直接扫原版 id */
-  private starCloakRetaliate(): { active: boolean; projType: number } {
-    let veil = false, bee = false, mana = false;
-    for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
-      const s = this.player.inv.armor[acc];
-      if (!s) continue;
-      const vid = viIdFromKey(ITEM_DEFS[s.id]?.key ?? '');
-      if (vid === 929) veil = true;
-      else if (vid === 1247) bee = true;
-      else if (vid === 982) mana = true;
-    }
-    const active = this.player.equipStats.starCloak || veil || bee || mana;
-    return { active, projType: mana ? 723 : bee ? 724 : veil ? 725 : 726 };
-  }
-
-  /** 蜂巢背心（Hive Pack 3333，Player.cs:14795-14798 strongBees=true）：强化蜂 566 与
-   *  数量/基伤加成（accfx 未收录该件，按原版 id 扫配饰槽） */
-  private hasHivePack(): boolean {
-    for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
-      const s = this.player.inv.armor[acc];
-      if (s && viIdFromKey(ITEM_DEFS[s.id]?.key ?? '') === 3333) return true;
-    }
-    return false;
+  /** 成就：合成通知（AchievementsHelper.NotifyItemCraft——内部 item key 版） */
+  private achNotifyCraft(outKey: string): void {
+    const id = ITEM_BY_KEY[outKey];
+    if (id === undefined) return;
+    const vid = vanillaIdOfItem(id);
+    if (vid != null) this.achievements.notifyItemCraft(vid);
   }
 
   // ---- 重铸（哥布林工匠，Main.cs:41024-41042 + ReforgeItemInReforgeSlot :41346） ----
@@ -10031,6 +10108,12 @@ export class Game implements GameHooks {
         if (vanillaId === 113) {
           // 血肉墙:地狱层落位(原版向导巫毒娃娃入熔岩;2 眼+11 饥饿者由 AI 首帧补)
           head.y = Math.min(st.h - 30, Math.floor(this.world.lavaLine || st.h - 200) + 5) * TILE;
+        }
+        // 成就：MechaMayhem 启动判定（Mech 入场时扫描场上三机械是否齐备）
+        if (vanillaId === 125 || vanillaId === 126 || vanillaId === 127 || vanillaId === 134) {
+          this.achievements.mechaMayhemStart(
+            (this.entities.enemies as Enemy[]).filter((e) => !e.dead && e.vanillaId != null)
+              .map((e) => e.vanillaId!));
         }
         // 召唤公告+音效（每 Boss 独立，见 bossSummonAnnounce/注释）
         this.announceBossSummon(vanillaId);

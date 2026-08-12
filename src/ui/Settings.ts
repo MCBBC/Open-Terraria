@@ -239,7 +239,7 @@ export class SettingsPanel {
         // 资源条样式（原版 PlayerResourceSetsManager2 五样式之两主样式：
         // 'New'=FancyClassic 金框分格（1.4.4+ 默认）/ 'Default'=Classic 朴素心星）
         this.modeRow(
-          Lang.text('LegacyInterface.49'),
+          Lang.text('UI.SelectHealthStyle').replace(/:.*/, ''),
           () => d.resourceBarStyle,
           () => d.resourceBarStyle === 'fancy' ? '华丽（金框）' : '经典（朴素）',
           () => void options.set('resourceBarStyle', d.resourceBarStyle === 'fancy' ? 'classic' : 'fancy'),

@@ -81,6 +81,12 @@ export class ItemDrop extends Entity {
         }
         const before = this.stack;
         const left = player.inv.add(this.itemId, this.stack);
+        // 成就：拾取通知（AchievementsHelper.NotifyItemPickup——仅入包部分；
+        //  WorldItem 拾取路径，合成/初始装备不经此）
+        if (left < before) {
+          const vid = vanillaIdOfItem(this.itemId);
+          if (vid > 0) game.achievements.notifyItemPickup(vid);
+        }
         if (left === 0) {
           this.dead = true;
           game.notifyInventoryChanged();

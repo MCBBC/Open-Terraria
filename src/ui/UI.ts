@@ -1725,14 +1725,18 @@ export class UI {
     this.root.appendChild(this.invPanel);
   }
 
-  /** Buff 状态栏（对齐原版 DrawInterface_Resources_Buffs，Main.cs:42618-42640）：
-   *  起点 (32,76)、每行 11 个（横距 38px）、行距 50px、裸 32×32 图标无背景板、
-   *  剩余时长文字在图标下方（ItemStack 字号 0.8 倍）、悬停高亮、右键取消
+  /** Buff 状态栏（对齐原版 DrawInterface_Resources_Buffs，Main.cs:42618-42640 +
+   *  DrawBuffIcon :42725）：
+   *  起点 (32,76)、**每行 11 个横排**（步距 38px = 32 图标 + 6 缝；行宽 418）、
+   *  行距 50px、裸 32×32 **原版 Buff_{vanillaBuff} 贴图**（TextureAssets.Buff 1:1
+   *  尺寸原大绘制，不用药水物品图标替代）、剩余时长文字在图标正下方（ItemStack
+   *  0.8 倍字号）、悬停提亮（原版 buffAlpha 0.4↔1.0 的 CSS 近似）、右键取消
    *  （TryRemovingBuff：非 debuff 播 SoundID 12=menuTick）、背包打开时隐藏 */
   private buildBuffBar() {
     this.buffBar = el('div');
-    // 32 + 10×38 宽容纳 11 个/行（wrap = 原版 num2=11 行卷绕，行距 50-32=18）
-    this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-wrap:wrap; width:412px; column-gap:6px; row-gap:18px;';
+    // 11×38=418 行宽 = 原版 num2=11 行卷绕，行距 50-32=18（纵排 bug 修复：此前
+    // 缺 flex-direction 显式声明且行宽 412 装不下第 11 个）
+    this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-direction:row; flex-wrap:wrap; width:418px; column-gap:6px; row-gap:18px; align-content:flex-start;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
     for (const t of [BuffType.Agility, BuffType.Ironskin, BuffType.Resistance, BuffType.Thorns, BuffType.Regen, BuffType.Honey,
@@ -1742,7 +1746,7 @@ export class UI {
       BuffType.Shimmered]) {
       const block = el('div', 'sw-buff');
       block.style.display = 'none';
-      block.style.cssText += 'width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer;';
+      block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
       const icon = el('img') as HTMLImageElement;
       icon.draggable = false;
       icon.style.cssText = 'width:32px; height:32px; image-rendering:pixelated; display:block;';

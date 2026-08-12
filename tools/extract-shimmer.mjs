@@ -9,6 +9,8 @@
 //       ShimmerTransformToItem   :4839 NPC → 物品后消散
 //       ShimmerTownTransform     :4841 城镇 NPC 微光变体（ai[0]=25）
 //       ShimmerTransformToNPC    :4843 NPC → NPC（Transform）
+//   - Item.cs SetDefaults：DefaultToCapturedCritter(npcId)（:47613-47626）→
+//       itemMakeNPC 玻璃瓶小动物物品 → 放生 NPC id（入微光 WorldItem.cs:1855-1876）
 // 注意 CreateIntSet(default, k, v, ...) 是奇偶键值对；CreateBoolSet(list) 是成员表。
 // ShimmerTransforms.GetTransformToItem 另有两个动态分支（音乐盒 createTile=139 按
 // placeStyle / 3461 月砖按月相）——运行时查表未命中时按动态分支处理（src/stats/Shimmer.ts）。
@@ -52,6 +54,36 @@ function boolSetList(src, name) {
 
 const itemid = read('Terarria1456/Terraria.ID/ItemID.cs');
 const npcid = read('Terarria1456/Terraria.ID/NPCID.cs');
+const itemcs = read('Terarria1456/Terraria/Item.cs');
+
+/** Item.cs SetDefaults 内 `case N:` → DefaultToCapturedCritter(X) 扫描。
+ *  只收 SetDefaults 顶层 case（2 个 tab 缩进）——内层 switch 的 case 更深，
+ *  避免多标签 fallthrough（如 1993/2001 共体）之外的内层标签污染。
+ *  多标签共享体（case A: case B: 同一 DefaultToCapturedCritter）逐标签登记 */
+function capturedCritterMap(src) {
+  const out = {};
+  const lines = src.split('\n');
+  let pending = [];
+  let sawSwitch = false;
+  for (const line of lines) {
+    if (/^	public void SetDefaults\(/.test(line) || /^	private void SetDefaults\(/.test(line)) sawSwitch = true;
+    if (/^\t\tcase (\d+):\s*$/.test(line)) {
+      pending.push(parseInt(RegExp.$1, 10));
+      continue;
+    }
+    const m = line.match(/^\t\t\tDefaultToCapturedCritter\((\d+)\);/);
+    if (m && pending.length) {
+      for (const id of pending) out[id] = parseInt(m[1], 10);
+      pending = [];
+      continue;
+    }
+    // 块结束（break/return/goto）清空待定标签
+    if (/^\t\t\t(break|return|goto )/.test(line)) pending = [];
+    // 深层标签（内层 switch 体）不记入 pending 但也不能穿透到外层——
+    // DefaultToCapturedCritter 只出现在 3 tab 深度，安全
+  }
+  return out;
+}
 
 const data = {
   itemTransformTo: intSetMap(itemid, 'ShimmerTransformToItem'),
@@ -59,6 +91,7 @@ const data = {
   itemCountsAsDecraft: intSetMap(itemid, 'ShimmerCountsAsItemForDecraft'),
   itemPostMoonlord: boolSetList(itemid, 'ShimmerPostMoonlord'),
   commonCoin: boolSetList(itemid, 'CommonCoin'),
+  itemMakeNPC: capturedCritterMap(itemcs),
   npcTransformTo: intSetMap(npcid, 'ShimmerTransformToNPC'),
   npcTransformToItem: intSetMap(npcid, 'ShimmerTransformToItem'),
   npcTownTransform: boolSetList(npcid, 'ShimmerTownTransform'),

@@ -7,6 +7,8 @@ export interface GameHooks {
   player: import('./Player').Player;
   /** 敌人列表(投射物命中判定用) */
   enemies(): unknown[];
+  /** 城镇 NPC 自卫弹入投射物桶(attackUpdate 消费) */
+  spawnTownShot?(shot: import('./TownShot').TownShot): void;
   /** 小动物列表(弹幕命中判定用;近战挥砍在 Game 内直接遍历桶) */
   critters(): unknown[];
   /** 在世界上生成掉落物（返回实体便于染色等后处理） */

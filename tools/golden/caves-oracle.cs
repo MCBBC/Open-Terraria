@@ -3696,8 +3696,8 @@ void CrimPlaceHeartsGen()
 Checkpoint("corruption");
 {
     var gsB = new StringBuilder();
-    for (int gx = 880; gx < 1300; gx++)
-        for (int gy = 240; gy < 660; gy++)
+    for (int gx = 800; gx < 1950; gx++)
+        for (int gy = 240; gy < 700; gy++)
         {
             int gi = gy * W + gx;
             if (typ[gi] != 0 || act[gi] != 0 || wal[gi] != 0) gsB.AppendLine($"{gx} {gy} {typ[gi]} {act[gi]} {wal[gi]}");

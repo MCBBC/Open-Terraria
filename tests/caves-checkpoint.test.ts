@@ -128,8 +128,8 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   writeFileSync('/tmp/js-crdump.txt', __crDump());
   {
     const lines: string[] = [];
-    for (let gx = 880; gx < 1300; gx++) {
-      for (let gy = 240; gy < 660; gy++) {
+    for (let gx = 800; gx < 1950; gx++) {
+      for (let gy = 240; gy < 700; gy++) {
         const gi = st.idx(gx, gy);
         const sheet = TILE_DEFS[st.type[gi]]?.vanilla?.sheet ?? 0;
         if (sheet !== 0 || st.flags[gi] || st.wall[gi] !== 0) lines.push(`${gx} ${gy} ${sheet} ${st.flags[gi]} ${st.wall[gi]}`);

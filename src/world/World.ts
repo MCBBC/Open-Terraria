@@ -2,6 +2,7 @@
 import { TileStore } from './TileStore';
 import { WeatherState, applyWeatherSave, weatherToSave, type WeatherSave } from './weather/Weather';
 import { T, TILE_DEFS } from '../data/tiles';
+import { VI } from '../data/itemKeys';
 import { newMoonEventState } from './MoonEvent';
 import { newOldOnesArmyState } from './OldOnesArmy';
 import { newLunarEventState } from './LunarEvent';
@@ -252,7 +253,9 @@ export class World {
     const d = TILE_DEFS[t];
     this.store.setTile(x, y, 0);
     // v_ 图块无显式 drop → 回退同名放置物品(阶段5 自动注册)。
-    // drop:null = 显式无掉落(原版装饰类)——?? 会把 null 也走兜底,必须显式判 undefined
+    // drop:null = 显式无掉落(原版装饰类)——?? 会把 null 也走兜底,必须显式判 undefined。
+    // 数字 drop = 原版 item id(本地物品退役后统一),经 VI() 落到 vi_ 键
+    if (typeof d.drop === 'number') return VI(d.drop);
     return d.drop === undefined ? (d.key.startsWith('v_') ? 'place_' + d.key : null) : d.drop;
   }
 

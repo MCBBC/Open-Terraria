@@ -28,6 +28,7 @@ const geo = await page.evaluate(async () => {
     g.player.buffs.apply(t, 120);
   }
   g.ui?.refreshBuffs?.();
+  g.cb?.onBuffsChanged?.();   // 强制走 Game→UI 回调
   // 等 Game 的秒级回调自然刷新（g.ui 不在 Game 上时手动找 .sw-buff 容器轮询）
   for (let w = 0; w < 12; w++) {
     await new Promise((r) => setTimeout(r, 1000));

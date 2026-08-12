@@ -13,7 +13,8 @@ export interface TileDef {
   pick: number;          // 所需镐力（-1 不可挖）
   axe: number;           // 所需斧力
   mapColor: string;      // 小地图颜色
-  drop?: string | null;   // 破坏掉落 item key（缺省掉同名 key；null = 显式无掉落,原版装饰类）
+  drop?: string | number | null;   // 破坏掉落:数字=原版 item id(2026-08 本地物品退役后统一);
+                                   // 字符串=place_v_ 派生等存量 key;null = 显式无掉落,原版装饰类
   rope?: boolean;        // 绳索类（攀爬判定）
   blend: boolean;        // 是否参与同类边缘融合
   attach?: 'ground' | 'wall'; // 装饰物附着需求
@@ -46,106 +47,106 @@ function def(d: Partial<TileDef> & { key: string }): number {
 }
 // 保证 id 与 T 常量一致（按顺序注册）
 def({ key: 'empty', name: '空气' });
-def({ key: 'dirt', name: '泥土', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 'dirt_block', vanilla: { sheet: 0, frame: 'blend' } });
-def({ key: 'stone', name: '石块', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 'stone_block', vanilla: { sheet: 1, frame: 'blend' } });
-def({ key: 'grass', name: '草块', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 'dirt_block', vanilla: { sheet: 2, frame: 'blend' } });
-def({ key: 'ore_copper', name: '铜矿', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: false, drop: 'copper_ore', vanilla: { sheet: 7, frame: 'auto' } });
-def({ key: 'ore_iron', name: '铁矿', solid: true, opacity: 1, pick: 0, mapColor: '#8C6550', blend: false, drop: 'iron_ore', vanilla: { sheet: 6, frame: 'auto' } });
-def({ key: 'ore_silver', name: '银矿', solid: true, opacity: 1, pick: 20, mapColor: '#B9C2C3', blend: false, drop: 'silver_ore', vanilla: { sheet: 9, frame: 'auto' } });
-def({ key: 'ore_gold', name: '金矿', solid: true, opacity: 1, pick: 40, mapColor: '#B9A417', blend: false, drop: 'gold_ore', vanilla: { sheet: 8, frame: 'auto' } });
-def({ key: 'tree', name: '树干', solid: false, framed: true, opacity: 0.1, axe: 0, mapColor: '#976B4B', drop: 'wood', vanilla: { sheet: 5, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'dirt', name: '泥土', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 2, vanilla: { sheet: 0, frame: 'blend' } });
+def({ key: 'stone', name: '石块', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 3, vanilla: { sheet: 1, frame: 'blend' } });
+def({ key: 'grass', name: '草块', solid: true, opacity: 1, pick: 0, mapColor: '#1CD85E', blend: true, drop: 2, vanilla: { sheet: 2, frame: 'blend' } });
+def({ key: 'ore_copper', name: '铜矿', solid: true, opacity: 1, pick: 0, mapColor: '#964316', blend: false, drop: 12, vanilla: { sheet: 7, frame: 'auto' } });
+def({ key: 'ore_iron', name: '铁矿', solid: true, opacity: 1, pick: 0, mapColor: '#8C6550', blend: false, drop: 11, vanilla: { sheet: 6, frame: 'auto' } });
+def({ key: 'ore_silver', name: '银矿', solid: true, opacity: 1, pick: 20, mapColor: '#B9C2C3', blend: false, drop: 14, vanilla: { sheet: 9, frame: 'auto' } });
+def({ key: 'ore_gold', name: '金矿', solid: true, opacity: 1, pick: 40, mapColor: '#B9A417', blend: false, drop: 13, vanilla: { sheet: 8, frame: 'auto' } });
+def({ key: 'tree', name: '树干', solid: false, framed: true, opacity: 0.1, axe: 0, mapColor: '#976B4B', drop: 9, vanilla: { sheet: 5, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'leaves', name: '树叶', decor: true, framed: true, opacity: 0.05, pick: 0, axe: 0, mapColor: '#2E8B3D', drop: null });
-def({ key: 'wood', name: '木材块', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 'wood', vanilla: { sheet: 30, frame: 'auto' } });
-def({ key: 'platform', name: '木平台', platform: true, opacity: 0.15, pick: 0, axe: 0, mapColor: '#BF8E6F', drop: 'platform', vanilla: { sheet: 19, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'torch', name: '火把', decor: true, framed: true, opacity: 0, pick: 0, light: [255, 225, 150], mapColor: '#FDDD03', drop: 'torch', vanilla: { sheet: 4, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'wood', name: '木材块', solid: true, opacity: 1, pick: 0, mapColor: '#976B4B', blend: true, drop: 9, vanilla: { sheet: 30, frame: 'auto' } });
+def({ key: 'platform', name: '木平台', platform: true, opacity: 0.15, pick: 0, axe: 0, mapColor: '#BF8E6F', drop: 94, vanilla: { sheet: 19, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'torch', name: '火把', decor: true, framed: true, opacity: 0, pick: 0, light: [255, 225, 150], mapColor: '#FDDD03', drop: 8, vanilla: { sheet: 4, frame: 'style', fw: 1, fh: 1 } });
 // 注：火把光值见下（更亮版本）
-def({ key: 'workbench', name: '工作台', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#BF8E6F', drop: 'workbench', vanilla: { sheet: 18, frame: 'style', fw: 2, fh: 1 } });
-def({ key: 'furnace', name: '熔炉', solid: false, /* 原版 tileSolid[17]=false：熔炉可通行 */ framed: true, opacity: 1, pick: 0, w: 3, h: 2, light: [255, 140, 70], mapColor: '#909490', drop: 'furnace', vanilla: { sheet: 17, frame: 'style', fw: 3, fh: 2 } });
-def({ key: 'anvil', name: '铁砧', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#8C8274', drop: 'anvil', vanilla: { sheet: 16, frame: 'style', fw: 2, fh: 1 } });
-def({ key: 'chest', name: '宝箱', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#AE815C', drop: 'chest', vanilla: { sheet: 21, frame: 'style', fw: 2, fh: 2 } });
-def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#77694F', drop: 'door', vanilla: { sheet: 10, frame: 'style', fw: 1, fh: 3 } });
-def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#77694F', drop: 'door', vanilla: { sheet: 11, frame: 'style', fw: 2, fh: 3 } });
-def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: 'mushroom_item', vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'workbench', name: '工作台', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#BF8E6F', drop: 36, vanilla: { sheet: 18, frame: 'style', fw: 2, fh: 1 } });
+def({ key: 'furnace', name: '熔炉', solid: false, /* 原版 tileSolid[17]=false：熔炉可通行 */ framed: true, opacity: 1, pick: 0, w: 3, h: 2, light: [255, 140, 70], mapColor: '#909490', drop: 33, vanilla: { sheet: 17, frame: 'style', fw: 3, fh: 2 } });
+def({ key: 'anvil', name: '铁砧', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 1, mapColor: '#8C8274', drop: 35, vanilla: { sheet: 16, frame: 'style', fw: 2, fh: 1 } });
+def({ key: 'chest', name: '宝箱', solid: false, framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#AE815C', drop: 48, vanilla: { sheet: 21, frame: 'style', fw: 2, fh: 2 } });
+def({ key: 'door_closed', name: '门', solid: true, framed: true, opacity: 0.05, pick: 0, w: 1, h: 3, mapColor: '#77694F', drop: 25, vanilla: { sheet: 10, frame: 'style', fw: 1, fh: 3 } });
+def({ key: 'door_open', name: '门(开)', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 3, mapColor: '#77694F', drop: 25, vanilla: { sheet: 11, frame: 'style', fw: 2, fh: 3 } });
+def({ key: 'mushroom', name: '蘑菇', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: 5, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'flower', name: '花', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#1AC454', drop: null, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: 'acorn', vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 'sand_block', vanilla: { sheet: 53, frame: 'blend' } });
-def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 'snow_block', vanilla: { sheet: 147, frame: 'blend' } });
-def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 'acorn', vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 1 } });
-def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 'stone_block', vanilla: { sheet: 57, frame: 'auto' } });
+def({ key: 'tallgrass', name: '草丛', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#1AC454', drop: 27, vanilla: { sheet: 3, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'sand', name: '沙块', solid: true, opacity: 1, pick: 0, mapColor: '#BAA854', blend: true, drop: 169, vanilla: { sheet: 53, frame: 'blend' } });
+def({ key: 'snow', name: '雪块', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 593, vanilla: { sheet: 147, frame: 'blend' } });
+def({ key: 'acorn_sapling', name: '树苗', decor: true, framed: true, opacity: 0, pick: 0, axe: 0, mapColor: '#A37451', drop: 27, vanilla: { sheet: 20, frame: 'style', fw: 1, fh: 1 } });
+def({ key: 'ash', name: '灰烬块', solid: true, opacity: 1, pick: 0, mapColor: '#44444C', blend: true, drop: 3, vanilla: { sheet: 57, frame: 'auto' } });
 
 // ===================== 原版素材图块（terraria-assets + TEdit 数据） =====================
 // 4a：矿石 / 宝石 / 冰雪 / 沙漠 / 基础方块（1x1 实心，frame:'auto' 8 向贴合）
 // mapColor/pick 取自 TEdit tiles.json；sheet = 原版 Tiles_N 表 id
 
 // ---- 矿石（含替代矿与困难模式矿，后者先只做美术） ----
-def({ key: 'ore_tin', name: '锡矿', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', drop: 'tin_ore', vanilla: { sheet: 166, frame: 'auto' } });
-def({ key: 'ore_lead', name: '铅矿', solid: true, opacity: 1, pick: 0, mapColor: '#3E5272', drop: 'lead_ore', vanilla: { sheet: 167, frame: 'auto' } });
-def({ key: 'ore_tungsten', name: '钨矿', solid: true, opacity: 1, pick: 20, mapColor: '#849D7F', drop: 'tungsten_ore', vanilla: { sheet: 168, frame: 'auto' } });
-def({ key: 'ore_platinum', name: '铂金矿', solid: true, opacity: 1, pick: 40, mapColor: '#98ABC6', drop: 'platinum_ore', vanilla: { sheet: 169, frame: 'auto' } });
-def({ key: 'ore_demonite', name: '魔矿', solid: true, opacity: 1, pick: 55, mapColor: '#625FA7', drop: 'demonite_ore', light: [255, 255, 153], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 22, frame: 'auto' } });
-def({ key: 'ore_meteorite', name: '陨石', solid: true, opacity: 1, pick: 50, mapColor: '#685654', drop: 'meteorite', light: [143, 110, 38], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 37, frame: 'auto' } });
-def({ key: 'ore_hellstone', name: '狱石', solid: true, opacity: 1, pick: 65, mapColor: '#8E4242', drop: 'hellstone', light: [255, 90, 40], vanilla: { sheet: 58, frame: 'auto' } });
-def({ key: 'ore_crimtane', name: '猩红矿', solid: true, opacity: 1, pick: 55, mapColor: '#7D3741', drop: 'crimtane_ore', light: [89, 0, 0], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 204, frame: 'auto' } });
-def({ key: 'ore_cobalt', name: '钴矿', solid: true, opacity: 1, pick: 100, mapColor: '#0B508F', drop: 'cobalt_ore', vanilla: { sheet: 107, frame: 'auto' } });
-def({ key: 'ore_mythril', name: '秘银矿', solid: true, opacity: 1, pick: 110, mapColor: '#5BA9A9', drop: 'mythril_ore', vanilla: { sheet: 108, frame: 'auto' } });
-def({ key: 'ore_adamantite', name: '精金矿', solid: true, opacity: 1, pick: 150, mapColor: '#801A34', drop: 'adamantite_ore', vanilla: { sheet: 111, frame: 'auto' } });
-def({ key: 'ore_palladium', name: '钯金矿', solid: true, opacity: 1, pick: 100, mapColor: '#EF5A32', drop: 'palladium_ore', vanilla: { sheet: 221, frame: 'auto' } });
-def({ key: 'ore_orichalcum', name: '山铜矿', solid: true, opacity: 1, pick: 110, mapColor: '#E760E4', drop: 'orichalcum_ore', vanilla: { sheet: 222, frame: 'auto' } });
-def({ key: 'ore_titanium', name: '钛矿', solid: true, opacity: 1, pick: 150, mapColor: '#395565', drop: 'titanium_ore', vanilla: { sheet: 223, frame: 'auto' } });
-def({ key: 'ore_chlorophyte', name: '叶绿矿', solid: true, opacity: 1, pick: 65, mapColor: '#BFE973', drop: 'chlorophyte_ore', vanilla: { sheet: 211, frame: 'auto' } });
+def({ key: 'ore_tin', name: '锡矿', solid: true, opacity: 1, pick: 0, mapColor: '#817D5D', drop: 699, vanilla: { sheet: 166, frame: 'auto' } });
+def({ key: 'ore_lead', name: '铅矿', solid: true, opacity: 1, pick: 0, mapColor: '#3E5272', drop: 700, vanilla: { sheet: 167, frame: 'auto' } });
+def({ key: 'ore_tungsten', name: '钨矿', solid: true, opacity: 1, pick: 20, mapColor: '#849D7F', drop: 701, vanilla: { sheet: 168, frame: 'auto' } });
+def({ key: 'ore_platinum', name: '铂金矿', solid: true, opacity: 1, pick: 40, mapColor: '#98ABC6', drop: 702, vanilla: { sheet: 169, frame: 'auto' } });
+def({ key: 'ore_demonite', name: '魔矿', solid: true, opacity: 1, pick: 55, mapColor: '#625FA7', drop: 56, light: [255, 255, 153], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 22, frame: 'auto' } });
+def({ key: 'ore_meteorite', name: '陨石', solid: true, opacity: 1, pick: 50, mapColor: '#685654', drop: 116, light: [143, 110, 38], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 37, frame: 'auto' } });
+def({ key: 'ore_hellstone', name: '狱石', solid: true, opacity: 1, pick: 65, mapColor: '#8E4242', drop: 174, light: [255, 90, 40], vanilla: { sheet: 58, frame: 'auto' } });
+def({ key: 'ore_crimtane', name: '猩红矿', solid: true, opacity: 1, pick: 55, mapColor: '#7D3741', drop: 880, light: [89, 0, 0], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 204, frame: 'auto' } });
+def({ key: 'ore_cobalt', name: '钴矿', solid: true, opacity: 1, pick: 100, mapColor: '#0B508F', drop: 364, vanilla: { sheet: 107, frame: 'auto' } });
+def({ key: 'ore_mythril', name: '秘银矿', solid: true, opacity: 1, pick: 110, mapColor: '#5BA9A9', drop: 365, vanilla: { sheet: 108, frame: 'auto' } });
+def({ key: 'ore_adamantite', name: '精金矿', solid: true, opacity: 1, pick: 150, mapColor: '#801A34', drop: 366, vanilla: { sheet: 111, frame: 'auto' } });
+def({ key: 'ore_palladium', name: '钯金矿', solid: true, opacity: 1, pick: 100, mapColor: '#EF5A32', drop: 1104, vanilla: { sheet: 221, frame: 'auto' } });
+def({ key: 'ore_orichalcum', name: '山铜矿', solid: true, opacity: 1, pick: 110, mapColor: '#E760E4', drop: 1105, vanilla: { sheet: 222, frame: 'auto' } });
+def({ key: 'ore_titanium', name: '钛矿', solid: true, opacity: 1, pick: 150, mapColor: '#395565', drop: 1106, vanilla: { sheet: 223, frame: 'auto' } });
+def({ key: 'ore_chlorophyte', name: '叶绿矿', solid: true, opacity: 1, pick: 65, mapColor: '#BFE973', drop: 947, vanilla: { sheet: 211, frame: 'auto' } });
 
 // ---- 宝石矿（掉对应宝石） ----
-def({ key: 'gem_sapphire', name: '蓝宝石矿', solid: true, opacity: 1, pick: 30, mapColor: '#6E8CB6', drop: 'sapphire', vanilla: { sheet: 63, frame: 'auto' } });
-def({ key: 'gem_ruby', name: '红宝石矿', solid: true, opacity: 1, pick: 30, mapColor: '#C46072', drop: 'ruby', vanilla: { sheet: 64, frame: 'auto' } });
-def({ key: 'gem_emerald', name: '翡翠矿', solid: true, opacity: 1, pick: 30, mapColor: '#389661', drop: 'emerald', vanilla: { sheet: 65, frame: 'auto' } });
-def({ key: 'gem_topaz', name: '黄玉矿', solid: true, opacity: 1, pick: 30, mapColor: '#A0763A', drop: 'topaz', vanilla: { sheet: 66, frame: 'auto' } });
-def({ key: 'gem_amethyst', name: '紫水晶矿', solid: true, opacity: 1, pick: 30, mapColor: '#8C3AA6', drop: 'amethyst', vanilla: { sheet: 67, frame: 'auto' } });
-def({ key: 'gem_diamond', name: '钻石矿', solid: true, opacity: 1, pick: 30, mapColor: '#7DBFC5', drop: 'diamond', vanilla: { sheet: 68, frame: 'auto' } });
+def({ key: 'gem_sapphire', name: '蓝宝石矿', solid: true, opacity: 1, pick: 30, mapColor: '#6E8CB6', drop: 177, vanilla: { sheet: 63, frame: 'auto' } });
+def({ key: 'gem_ruby', name: '红宝石矿', solid: true, opacity: 1, pick: 30, mapColor: '#C46072', drop: 178, vanilla: { sheet: 64, frame: 'auto' } });
+def({ key: 'gem_emerald', name: '翡翠矿', solid: true, opacity: 1, pick: 30, mapColor: '#389661', drop: 179, vanilla: { sheet: 65, frame: 'auto' } });
+def({ key: 'gem_topaz', name: '黄玉矿', solid: true, opacity: 1, pick: 30, mapColor: '#A0763A', drop: 180, vanilla: { sheet: 66, frame: 'auto' } });
+def({ key: 'gem_amethyst', name: '紫水晶矿', solid: true, opacity: 1, pick: 30, mapColor: '#8C3AA6', drop: 181, vanilla: { sheet: 67, frame: 'auto' } });
+def({ key: 'gem_diamond', name: '钻石矿', solid: true, opacity: 1, pick: 30, mapColor: '#7DBFC5', drop: 182, vanilla: { sheet: 68, frame: 'auto' } });
 
 // ---- 冰雪 ----
-def({ key: 'ice', name: '冰块', solid: true, opacity: 1, pick: 0, mapColor: '#90C3E8', blend: true, drop: 'ice_block', vanilla: { sheet: 161, frame: 'auto' } });
-def({ key: 'thin_ice', name: '薄冰', solid: true, opacity: 1, pick: 0, mapColor: '#B8DBF0', blend: true, drop: 'ice_block', vanilla: { sheet: 162, frame: 'auto' } });
-def({ key: 'ice_brick', name: '冰砖', solid: true, opacity: 1, pick: 0, mapColor: '#7CAFC9', blend: true, drop: 'ice_brick', vanilla: { sheet: 206, frame: 'auto' } });
-def({ key: 'snow_brick', name: '雪砖', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 'snow_brick', vanilla: { sheet: 148, frame: 'auto' } });
+def({ key: 'ice', name: '冰块', solid: true, opacity: 1, pick: 0, mapColor: '#90C3E8', blend: true, drop: 664, vanilla: { sheet: 161, frame: 'auto' } });
+def({ key: 'thin_ice', name: '薄冰', solid: true, opacity: 1, pick: 0, mapColor: '#B8DBF0', blend: true, drop: 664, vanilla: { sheet: 162, frame: 'auto' } });
+def({ key: 'ice_brick', name: '冰砖', solid: true, opacity: 1, pick: 0, mapColor: '#7CAFC9', blend: true, drop: 883, vanilla: { sheet: 206, frame: 'auto' } });
+def({ key: 'snow_brick', name: '雪砖', solid: true, opacity: 1, pick: 0, mapColor: '#D3ECF1', blend: true, drop: 594, vanilla: { sheet: 148, frame: 'auto' } });
 
 // ---- 沙漠 / 基础方块 ----
-def({ key: 'sandstone', name: '沙岩', solid: true, opacity: 1, pick: 0, mapColor: '#C67C4E', blend: true, drop: 'sandstone_block', vanilla: { sheet: 396, frame: 'auto' } });
-def({ key: 'hardened_sand', name: '硬化沙块', solid: true, opacity: 1, pick: 0, mapColor: '#D4C064', blend: true, drop: 'hardened_sand_block', vanilla: { sheet: 397, frame: 'auto' } });
-def({ key: 'desert_fossil', name: '沙漠化石', solid: true, opacity: 1, pick: 0, mapColor: '#D49458', blend: true, drop: 'desert_fossil', vanilla: { sheet: 404, frame: 'auto' } });
-def({ key: 'clay', name: '粘土块', solid: true, opacity: 1, pick: 0, mapColor: '#925144', blend: true, drop: 'clay_block', vanilla: { sheet: 40, frame: 'auto' } });
-def({ key: 'glass', name: '玻璃', solid: true, opacity: 0.15, pick: 0, mapColor: '#C8F6FE', drop: 'glass', vanilla: { sheet: 54, frame: 'auto' } });
-def({ key: 'obsidian', name: '黑曜石', solid: true, opacity: 1, pick: 55, mapColor: '#2B2854', blend: true, drop: 'obsidian', vanilla: { sheet: 56, frame: 'auto' } });
-def({ key: 'gray_brick', name: '灰砖', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 'gray_brick', vanilla: { sheet: 38, frame: 'auto' } });
-def({ key: 'red_brick', name: '红砖', solid: true, opacity: 1, pick: 0, mapColor: '#B53E3B', blend: true, drop: 'red_brick', vanilla: { sheet: 39, frame: 'auto' } });
-def({ key: 'mud', name: '泥块', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 'mud_block', vanilla: { sheet: 59, frame: 'blend' } });
-def({ key: 'silt', name: '淤泥块', solid: true, opacity: 1, pick: 0, mapColor: '#6A6B76', blend: true, drop: 'silt_block', vanilla: { sheet: 123, frame: 'auto' } });
+def({ key: 'sandstone', name: '沙岩', solid: true, opacity: 1, pick: 0, mapColor: '#C67C4E', blend: true, drop: 3271, vanilla: { sheet: 396, frame: 'auto' } });
+def({ key: 'hardened_sand', name: '硬化沙块', solid: true, opacity: 1, pick: 0, mapColor: '#D4C064', blend: true, drop: 3272, vanilla: { sheet: 397, frame: 'auto' } });
+def({ key: 'desert_fossil', name: '沙漠化石', solid: true, opacity: 1, pick: 0, mapColor: '#D49458', blend: true, drop: 3347, vanilla: { sheet: 404, frame: 'auto' } });
+def({ key: 'clay', name: '粘土块', solid: true, opacity: 1, pick: 0, mapColor: '#925144', blend: true, drop: 133, vanilla: { sheet: 40, frame: 'auto' } });
+def({ key: 'glass', name: '玻璃', solid: true, opacity: 0.15, pick: 0, mapColor: '#C8F6FE', drop: 170, vanilla: { sheet: 54, frame: 'auto' } });
+def({ key: 'obsidian', name: '黑曜石', solid: true, opacity: 1, pick: 55, mapColor: '#2B2854', blend: true, drop: 173, vanilla: { sheet: 56, frame: 'auto' } });
+def({ key: 'gray_brick', name: '灰砖', solid: true, opacity: 1, pick: 0, mapColor: '#808080', blend: true, drop: 129, vanilla: { sheet: 38, frame: 'auto' } });
+def({ key: 'red_brick', name: '红砖', solid: true, opacity: 1, pick: 0, mapColor: '#B53E3B', blend: true, drop: 131, vanilla: { sheet: 39, frame: 'auto' } });
+def({ key: 'mud', name: '泥块', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: 176, vanilla: { sheet: 59, frame: 'blend' } });
+def({ key: 'silt', name: '淤泥块', solid: true, opacity: 1, pick: 0, mapColor: '#6A6B76', blend: true, drop: 424, vanilla: { sheet: 123, frame: 'auto' } });
 
 // 4b：家具 / 装饰（多格 framed，frame:'style' 显式 18px 帧；w/h = TEdit frameSize）
 const VAN = (sheet: number, w: number, h: number) => ({ vanilla: { sheet, frame: 'style' as const, fw: w, fh: h } });
 
-def({ key: 'table', name: '木桌', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 'table', ...VAN(14, 3, 2) });
-def({ key: 'chair', name: '木椅', framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#BF8E6F', drop: 'chair', ...VAN(15, 1, 2) });
-def({ key: 'bed', name: '床', framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#BF8E6F', drop: 'bed', ...VAN(79, 4, 2) });
-def({ key: 'bookcase', name: '书架', framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#BF8E6F', drop: 'bookcase', ...VAN(101, 3, 4) });
-def({ key: 'grandfather_clock', name: '落地钟', framed: true, opacity: 0.05, pick: 0, w: 2, h: 5, mapColor: '#BF8E6F', drop: 'grandfather_clock', ...VAN(104, 2, 5) });
-def({ key: 'piano', name: '钢琴', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 'piano', ...VAN(87, 3, 2) });
-def({ key: 'dresser', name: '梳妆台', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 'dresser', ...VAN(88, 3, 2) });
-def({ key: 'bench', name: '长凳', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 'bench', ...VAN(89, 3, 2) });
-def({ key: 'bathtub', name: '浴缸', framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#909490', drop: 'bathtub', ...VAN(90, 4, 2) });
-def({ key: 'keg', name: '酒桶', framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 'keg', ...VAN(94, 2, 2) });
-def({ key: 'cooking_pot', name: '汤锅', framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 'cooking_pot', ...VAN(96, 2, 2) });
-def({ key: 'clay_pot', name: '陶盆', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#796E61', drop: 'clay_pot', ...VAN(78, 1, 1) });
-def({ key: 'tombstone_v', name: '墓碑', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#C0C0C0', drop: 'tombstone', ...VAN(85, 2, 2) });
-def({ key: 'crystal_heart', name: '水晶之心', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#AE1845', drop: 'life_crystal', light: [255, 60, 90], ...VAN(12, 2, 2) });
+def({ key: 'table', name: '木桌', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 32, ...VAN(14, 3, 2) });
+def({ key: 'chair', name: '木椅', framed: true, opacity: 0.05, pick: 0, w: 1, h: 2, mapColor: '#BF8E6F', drop: 34, ...VAN(15, 1, 2) });
+def({ key: 'bed', name: '床', framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#BF8E6F', drop: 224, ...VAN(79, 4, 2) });
+def({ key: 'bookcase', name: '书架', framed: true, opacity: 0.05, pick: 0, w: 3, h: 4, mapColor: '#BF8E6F', drop: 354, ...VAN(101, 3, 4) });
+def({ key: 'grandfather_clock', name: '落地钟', framed: true, opacity: 0.05, pick: 0, w: 2, h: 5, mapColor: '#BF8E6F', drop: 359, ...VAN(104, 2, 5) });
+def({ key: 'piano', name: '钢琴', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 333, ...VAN(87, 3, 2) });
+def({ key: 'dresser', name: '梳妆台', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 334, ...VAN(88, 3, 2) });
+def({ key: 'bench', name: '长凳', framed: true, opacity: 0.05, pick: 0, w: 3, h: 2, mapColor: '#BF8E6F', drop: 335, ...VAN(89, 3, 2) });
+def({ key: 'bathtub', name: '浴缸', framed: true, opacity: 0.05, pick: 0, w: 4, h: 2, mapColor: '#909490', drop: 336, ...VAN(90, 4, 2) });
+def({ key: 'keg', name: '酒桶', framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#BF8E6F', drop: 352, ...VAN(94, 2, 2) });
+def({ key: 'cooking_pot', name: '汤锅', framed: true, opacity: 0.05, pick: 0, w: 2, h: 2, mapColor: '#909490', drop: 345, ...VAN(96, 2, 2) });
+def({ key: 'clay_pot', name: '陶盆', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#796E61', drop: 222, ...VAN(78, 1, 1) });
+def({ key: 'tombstone_v', name: '墓碑', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#C0C0C0', drop: 321, ...VAN(85, 2, 2) });
+def({ key: 'crystal_heart', name: '水晶之心', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#AE1845', drop: 29, light: [255, 60, 90], ...VAN(12, 2, 2) });
 // 发光灯具
-def({ key: 'candle', name: '蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#FDDD03', drop: 'candle', light: [255, 185, 110], ...VAN(33, 1, 1) });
-def({ key: 'chandelier', name: '吊灯', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#EBA687', drop: 'chandelier', light: [255, 190, 120], ...VAN(34, 3, 3) });
-def({ key: 'lantern', name: '吊挂灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#FBEB7F', drop: 'lantern', ...VAN(42, 1, 2) });
+def({ key: 'candle', name: '蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#FDDD03', drop: 105, light: [255, 185, 110], ...VAN(33, 1, 1) });
+def({ key: 'chandelier', name: '吊灯', decor: true, framed: true, opacity: 0, pick: 0, w: 3, h: 3, mapColor: '#EBA687', drop: 106, light: [255, 190, 120], ...VAN(34, 3, 3) });
+def({ key: 'lantern', name: '吊挂灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 2, mapColor: '#FBEB7F', drop: 136, ...VAN(42, 1, 2) });
 // 灯笼发光 = TileLightScanner specialTileLight case 42(样式色表+灭档门控),不走 def.light 静态色
-def({ key: 'candelabra', name: '烛台', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: 'candelabra', light: [255, 185, 110], ...VAN(100, 2, 2) });
-def({ key: 'chinese_lantern', name: '中式灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FFA21F', drop: 'chinese_lantern', light: [255, 160, 70], ...VAN(95, 2, 2) });
-def({ key: 'skull_lantern', name: '骷髅灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: 'skull_lantern', light: [255, 160, 70], ...VAN(98, 2, 2) });
-def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#2B8FFF', drop: 'water_candle', light: [140, 180, 255], ...VAN(49, 1, 1) });
+def({ key: 'candelabra', name: '烛台', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: 349, light: [255, 185, 110], ...VAN(100, 2, 2) });
+def({ key: 'chinese_lantern', name: '中式灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FFA21F', drop: 344, light: [255, 160, 70], ...VAN(95, 2, 2) });
+def({ key: 'skull_lantern', name: '骷髅灯笼', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#FDDD03', drop: 347, light: [255, 160, 70], ...VAN(98, 2, 2) });
+def({ key: 'water_candle', name: '水蜡烛', decor: true, framed: true, opacity: 0, pick: 0, mapColor: '#2B8FFF', drop: 148, light: [140, 180, 255], ...VAN(49, 1, 1) });
 // 瓦罐（世界生成散布）：打破掉随机常用道具（breakTile 特判），不做放置物
 def({ key: 'pot', name: '瓦罐', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#974F50', drop: null, vanilla: { sheet: 28, frame: 'style', fw: 2, fh: 2 } });
 // ---- 玩家储物族（原版 Player.cs:32598 右键绑定：29→bank / 97→bank2 / 463→bank3 / 491→bank4）----

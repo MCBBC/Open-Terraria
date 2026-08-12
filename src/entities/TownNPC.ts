@@ -71,6 +71,8 @@ export class TownNPC extends Entity {
   /** 当前发射档 num46/55/65(连发升级链推进) */
   private atkNextShot = 0;
   private atkBurstIdx = 0;
+  /** world.flags.hardMode 缓存(attackUpdate 每 tick 刷新) */
+  private hardModeFlag = false;
 
   constructor(key: string, x: number, y: number) {
     super();
@@ -242,6 +244,7 @@ export class TownNPC extends Entity {
     if (this.atkCd > 0) this.atkCd--;
     const atkType = TOWN_ATTACK_TYPE[this.vanillaId];
     if (atkType === undefined) return false;
+    this.hardModeFlag = !!(world.flags as Record<string, boolean>).hardMode;
     if (this.atkState === 0) {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55621 flag31 + :55864 族掷骰)
       if (!this.onGround || this.atkCd > 0 || this.talking) return false;
@@ -296,11 +299,10 @@ export class TownNPC extends Entity {
     if (!table) return undefined;
     const base = table[this.vanillaId];
     if (!base) return undefined;
-    if (base.hardMode && this.hardModeRef) return { ...base, ...base.hardMode } as TownShotParams;
+    if (base.hardMode && this.hardModeFlag) return { ...base, ...base.hardMode } as TownShotParams;
     return base;
   }
-  /** hardMode 引用(构造后由 Game 注入;避免 TownNPC 持 world) */
-  hardModeRef = false;
+
 
   /** 挥击态(15):前方矩形近战判定(:55469-55494;原版逐 tick 弧形挥击,近似中段一击) */
   private swingUpdate(_world: import('../world/World').World, game: GameHooks): void {
@@ -334,14 +336,12 @@ export class TownNPC extends Entity {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean };
       if (e.dead) continue;
       const dx = e.cx - this.cx;
-      const dy = e.cy - this.cy;
-      const d = Math.hypot(dx, dy);
+      const d = Math.hypot(dx, e.cy - this.cy);
       if (d >= range) continue;
       if (!canHit(world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-      const slot = dx < 0
-        ? (!bestL || d < bestL.d ? { cx: e.cx, cy: e.cy, d } : bestL)
-        : (!bestR || d < bestR.d ? { cx: e.cx, cy: e.cy, d } : bestR);
-      if (dx < 0) bestL = slot; else bestR = slot;
+      const cand = { cx: e.cx, cy: e.cy, d };
+      if (dx < 0) { if (!bestL || d < bestL.d) bestL = cand; }
+      else { if (!bestR || d < bestR.d) bestR = cand; }
     }
     // num15 侧选择(:53960):两侧都有 → 距离近者;仅一侧 → 该侧
     if (bestL && bestR) return bestL.d <= bestR.d ? bestL : bestR;
@@ -351,7 +351,6 @@ export class TownNPC extends Entity {
   /** 发射(:54903/:55175/:55325 三族瞄准公式统一在此) */
   private shootAt(world: import('../world/World').World, game: GameHooks, params: TownShotParams, range: number): void {
     const st = world.store;
-    const hardMode = this.hardModeRef;
     let proj = params.proj;
     let dmg = params.dmg;
     let speed = params.speed;
@@ -374,7 +373,6 @@ export class TownNPC extends Entity {
       };
       [dmg, speed, kb, spread] = [m[pick][0], m[pick][1], m[pick][2], m[pick][3]];
     }
-    void hardMode;
     // 瞄准:弓 = 目标上抬 aimLift 取向;近战/魔法 = aimLiftScaled×(dist/range 归一)上抬
     let vx = this.facing, vy = 0;
     if (target) {
@@ -407,15 +405,15 @@ export class TownNPC extends Entity {
         const px = target.cx - 16 + Math.random() * 32;
         const py = target.cy - 16 + Math.random() * 32;
         if (!st.isSolid(Math.floor(px / TILE), Math.floor(py / TILE))) {
-          game.spawnEntity?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj, { noGravity: true }), 'projectiles');
+          game.spawnTownShot?.(new TownShot(px - 5, py - 5, 0, 0, dmgFinal, kb, proj, { noGravity: true }));
           return;
         }
       }
       return;
     }
-    game.spawnEntity?.(new TownShot(sx, sy, vx, vy, dmgFinal, kb, proj, {
+    game.spawnTownShot?.(new TownShot(sx, sy, vx, vy, dmgFinal, kb, proj, {
       life: this.vanillaId === 588 ? 480 : undefined,
-    }), 'projectiles');
+    }));
   }
 
   /** 城镇 NPC 开关门（原版 NPC.cs:54478-54500/54243-54252，含高门 389 族 ShiftTallGate） */
