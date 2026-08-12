@@ -241,6 +241,8 @@ export class Player extends Entity {
     // ---- 呼吸族（GrantArmorBenefits/ApplyEquipFunctional 行为型）----
     divingHelm: boolean;   // accDivingHelm（Player.cs:12829/14652）：breathCDMax ×6
     merman: boolean;       // accMerman（:15019/14587/14855）：水中不耗气
+    arcticDivingGear: boolean; // 1861（:14701）：专家雪原冷水 Chilled 免疫（:27692）
+    jellyfishGlow: boolean;    // 1860（:14682-14688）：浸水发光
   } {
     /** 当前套装匹配（armor[0-2] 的 hs/bs/ls 槽序号 → ARMOR_SET_BONUSES；通配 `${hs}|${bs}|*` 兜底） */
     function activeArmorSetBonus(self: Player) {
@@ -277,6 +279,7 @@ export class Player extends Entity {
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
     let divingHelm = false, merman = false;
+    let arcticDivingGear = false, jellyfishGlow = false;
     for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
@@ -354,6 +357,8 @@ export class Player extends Entity {
         if (fx.counterWeight) counterWeight = true;
         if (fx.divingHelm) divingHelm = true;   // 394/1860/1861 潜水装备族
         if (fx.merman) merman = true;           // 497/861/3110 贝壳族
+        if (fx.arcticDivingGear) arcticDivingGear = true; // 1861
+        if (fx.jellyfishGlow) jellyfishGlow = true;      // 1860
         for (const j of fx.jumpOpts ?? []) jumpSet.add(j);
       }
       // 词缀效益（GrantPrefixBenefits :13531：配饰前缀 62-80）
@@ -476,7 +481,7 @@ export class Player extends Entity {
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
       summonSet,
-      divingHelm, merman,
+      divingHelm, merman, arcticDivingGear, jellyfishGlow,
     };
   }
   get maxHp(): number {
@@ -818,6 +823,13 @@ export class Player extends Entity {
     }
     // 入水熄灭着火（Player.cs:27426：wet 且非岩浆 → DelBuff 24）
     if (this.inWater && !this.inLava) this.buffs.remove(BuffType.OnFire);
+    // 冷水（专家雪原）：wet 且非岩浆/蜂蜜 → Chilled(46) 150t（Player.cs:27692-27695）；
+    // arcticDivingGear（1861 极地潜水装备）免疫。environmentBuffImmunityTimer
+    // （十字盾族 :27692 第 6 门）本作未实装 → 恒 0 语义
+    if (world.isExpert && game.scene?.zoneSnow && this.inWater && !this.inLava && !this.inHoney
+      && !this.equipStats.arcticDivingGear) {
+      this.buffs.apply(BuffType.Chilled, 2.5); // AddBuff(46,150)=2.5s max 合并 = 浸着恒挂
+    }
     // 着火/燃烧粒子（dust6 火尘族,每 tick 0.8 概率一枚上浮）
     if (this.buffs.has(BuffType.OnFire) || this.buffs.has(BuffType.Burning)) {
       if (Math.random() < 0.8) {
@@ -857,10 +869,12 @@ export class Player extends Entity {
         }
       }
     }
-    // gills（:22946-22949）：flag = getGoodWorld && !flag——仅 ftw 种子翻转，本作不支持
-    if (this.buffs.gills) drown = false; // buff 4 直接免淹（普通种子语义）
+    // gills（:22946-22949）：普通世界免淹；ftw 种子（getGoodWorld）语义翻转——
+    // flag = getGoodWorld && !flag（鱼鳃在 ftw 下反而水下不淹、水上淹）
+    if (this.buffs.gills) drown = world.seedFlags.getGoodWorld ? !drown : false;
     if (this.shimmering) drown = false;  // :22950-22952 微光化不淹
-    // mount.Type==4 史莱姆鞍豁免（:22953）：本作无坐骑，省略
+    // mount.Type==4 史莱姆鞍豁免（:22953）：坐骑系统未实装（引擎级缺口），
+    // 实装后在此补 `if (this.mountType === 4) drown = false;`
     if (this.equipStats.merman) {        // :22957-22964 accMerman：水中不耗气并人鱼化
       if (drown) this.merman = true;
       drown = false;
@@ -884,6 +898,18 @@ export class Player extends Entity {
     } else {
       this.breath = Math.min(this.breathMax, this.breath + 3); // :22995-23000 每 tick +3
       this.breathCD = 0;
+    }
+    // 溺水口部气泡尘（CheckDrowning 尾段 :23003-23035）：drowning 且非岩浆/蜂蜜时
+    // 1/20 概率在口部出 dust 34（scale 1.2,盒 w-8×8）；芦苇管时移到管口上方 58px
+    // （mount 52/54 MouthPosition 分支本作无坐骑,省略）。本仓粒子为程序化圆,
+    // 浅蓝近似 dust 34 视觉(sprite 粒子系统未实装)
+    if (drown && !this.inLava && !this.inHoney && Math.random() < 1 / 20) {
+      const num4 = this.gravDir === -1 ? this.h - 12 : 0;
+      let mx = this.x + 12 * this.facing;
+      let my = this.y + num4 + 4 * this.gravDir;
+      if (this.hasBreathingReed) { mx += -2 * this.facing; my += -58 * this.gravDir; }
+      game.spawnParticles(mx + Math.random() * (this.w - 8), my + Math.random() * 8,
+        '#BFE3FF', 1, 0.2, { life: 30, grav: -0.03, size: 2 });
     }
 
     // 死亡等待重生（任何死法统一在此发声——溺水/岩浆/摔落/受击都经过这里）
@@ -1676,6 +1702,9 @@ export class Player extends Entity {
     const B = 640;                              // offLimitBorderTiles(40) × 16
     const wPx = world.store.w * TILE;           // Main.rightWorld
     const hPx = world.store.h * TILE;           // Main.bottomWorld（leftWorld/topWorld=0）
+    // 最小世界门:边框两侧各 40 格,世界任一边 ≤80 格时钳制无意义(会把整张图框死)。
+    // 原版最小世界 4200×1200 格,真实世界恒过此门;单测手搓小世界天然豁免
+    if (wPx <= 2 * B || hPx <= 2 * B) return;
     if (this.x < B) { this.x = B; this.vx = 0; }
     if (this.x > wPx - B - this.w) { this.x = wPx - B - this.w; this.vx = 0; }
     if (this.y < B) {
@@ -1684,7 +1713,10 @@ export class Player extends Entity {
       this.gravDir = 1;
     }
     if (this.y > hPx - B) {
-      this.damage(10000, this.cx, this.y - 10); // KillMe(ByOther 21, 10.0) 直死
+      // KillMe(ByOther 21, 10.0):直死——绕过防御/无敌帧(不走 damage()),
+      // hp 归零后由 fixedUpdate 尾部统一结算(死亡音/墓碑),最迟次 tick 生效
+      this.hp = 0;
+      this.lastDamageCause = { kind: 'default' }; // 死因 21 文案包暂以 Default 近似
       this.y = hPx - B;
       this.vy = 0;
     }

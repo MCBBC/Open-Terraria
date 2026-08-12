@@ -351,6 +351,16 @@ item({ key: 'vi_298_shine_potion', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_5007_dead_man_s_sweater', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_117_meteorite_bar', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_186_breathing_reed', name: '', maxStack: 999, value: 1 });
+// ---- 呼吸族（CheckDrowning 装备链，2026-08 补齐；stats/装备归属/图标全走 vanilla 数据自动接线）----
+item({ key: 'vi_250_fish_bowl', name: '', maxStack: 999, value: 1 });            // 鱼缸头盔：戴着恒淹（:22917）
+item({ key: 'vi_4275_gold_goldfish_bowl', name: '', maxStack: 999, value: 1 });  // 金金鱼缸：同上
+item({ key: 'vi_268_diving_helmet', name: '', maxStack: 999, value: 1 });        // accDivingHelm：breathCDMax ×6（:12829）
+item({ key: 'vi_394_diving_gear', name: '', maxStack: 999, value: 1 });          // 潜水装备：divingHelm+flipper（:14652）
+item({ key: 'vi_1860_jellyfish_diving_gear', name: '', maxStack: 999, value: 1 }); // :14689（浸水发光 :14686）
+item({ key: 'vi_1861_arctic_diving_gear', name: '', maxStack: 999, value: 1 });  // :14701（+arcticDivingGear 冰水免疫）
+item({ key: 'vi_497_neptune_s_shell', name: '', maxStack: 999, value: 1 });      // accMerman（:15019）
+item({ key: 'vi_861_moon_shell', name: '', maxStack: 999, value: 1 });           // accMerman+狼人夜变（:14587）
+item({ key: 'vi_3110_celestial_shell', name: '', maxStack: 999, value: 1 });     // accMerman+狼人夜变（:14855）
 item({ key: 'vi_329_shadow_key', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_974_ice_torch', name: '', maxStack: 999, value: 1 });
 item({ key: 'vi_2322_mining_potion', name: '', maxStack: 999, value: 1 });

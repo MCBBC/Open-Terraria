@@ -116,7 +116,7 @@ const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
 import { CRITTER_DEFS } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
-import { countsAsACritter, isNpcValidForBestiaryKillCredit } from '../data/Bestiary';
+import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
 
 // F10 瞬移落脚搜索参数(角色 20×42 ≈ 2 宽×3 高净空 + 脚下实心)
 const TELEPORT_FIT_W = 2, TELEPORT_FIT_H = 3, TELEPORT_RING_MAX = 60;
@@ -167,7 +167,7 @@ import { Boomerang, SpearProj, YoyoProj, GrenadeProj, GlowstickProj, TorchGodPro
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
-import { GolfBall, GOLF_CLUBS } from '../entities/GolfBall';
+import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHitLine } from '../physics/LineOfSight';
@@ -2331,6 +2331,101 @@ export class Game implements GameHooks {
         }
       }
     }
+    // ---- 高尔夫球杆蓄力（AI_150_GolfClubHelper :49498-49627 + GolfHelper）：
+    //      channel 语义（DefaultToGolfClub :48130）——按住=瞄准（力度=光标距球/300，
+    //      与时长无关），松开=击球（CalculateShotStrength 椭圆钳×32）；右键取消。
+    {
+      const heldG = this.player.inv.heldItem();
+      const gDef = heldG ? ITEM_DEFS[heldG.id] : null;
+      const gm2 = /^vi_(\d+)_/.exec(gDef?.key ?? '');
+      const gVid = gm2 ? +gm2[1] : 0;
+      const club = gVid > 0 ? GOLF_CLUBS[gVid] : undefined;
+      const myBall = (): GolfBall | null => {
+        for (const e of this.entities.projectiles) {
+          const b = e as GolfBall;
+          if (b instanceof GolfBall && !b.dead) return b;
+        }
+        return null;
+      };
+      if (club && !inp.uiBlocking && !this.player.dead && this.player.gravDir === 1) {
+        const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        if (!this.golfAim && inp.mouseDown && this.player.useTime === 0) {
+          // 开瞄：站位盒内有球（ValidateShot :444-448）；无球且 500px 内无球 →
+          // 自动摆球（TryPlacingAGolfBallNearANearbyTee :49512-49525：5×5 找球座 494）
+          let ball = myBall();
+          if (!ball || Math.hypot(ball.cx - this.player.cx, ball.cy - this.player.cy) > 500
+            || !golfBallInStance(ball, this.player)) {
+            const st = this.world.store;
+            const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor((this.player.y + this.player.h) / TILE);
+            let tee: [number, number] | null = null;
+            outer: for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+              const x = ptx + dx, y = pty + dy;
+              if (!st.inBounds(x, y)) continue;
+              if (TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet === 494) { tee = [x, y]; break outer; }
+            }
+            if (tee) {
+              if (ball) ball.dead = true;
+              // GetPreferredGolfBallToUse（:48919-48950）：手持→背包首个球族，默认 721
+              let projId = 721;
+              for (let i = 0; i < this.player.inv.slots.length; i++) {
+                const sl = this.player.inv.slots[i];
+                if (!sl) continue;
+                const km = /^vi_(\d+)_/.exec(ITEM_DEFS[sl.id].key);
+                const kv = km ? +km[1] : 0;
+                if (kv === 3989 || (kv >= 4242 && kv <= 4253)) {
+                  projId = kv === 3989 ? 721 : 739 + (kv - 4242);
+                  this.player.inv.removeAt(i, 1);
+                  break;
+                }
+              }
+              const own = this.player;
+              ball = new GolfBall(tee[0] * TILE + 3, (tee[1] + 1) * TILE - 10, projId, () => own);
+              this.entities.add(ball, 'projectiles');
+            }
+          }
+          if (ball && golfBallInStance(ball, this.player)) {
+            this.golfAim = true;
+            this.golfAimBall = ball;
+            this.player.facing = mwx >= this.player.cx ? 1 : -1; // ChangeDir（:49606-49616）
+          }
+        }
+        if (this.golfAim) {
+          const ball = this.golfAimBall && !this.golfAimBall.dead ? this.golfAimBall : null;
+          if (inp.rightDown) {
+            // 右键取消（:49592-49601）：不出手
+            this.golfAim = false; this.golfAimBall = null;
+            this.player.useTime = 0;
+          } else if (!ball) {
+            this.golfAim = false; this.golfAimBall = null;
+          } else if (inp.mouseDown) {
+            // 瞄准维持（SetDummyItemTime :49624-49627）
+            this.player.useTime = Math.max(this.player.useTime, 12);
+            const shot = golfShot(mwx, mwy, ball, club);
+            this.renderer.golfPower = { x: this.player.cx, y: this.player.y + this.player.h + 8, rel: shot.rel, ball };
+            this.useSwing(gDef, Math.atan2(mwy - this.player.cy, mwx - this.player.cx));
+          } else {
+            // 松开 → 击球（:49527-49560）：公式击出 + 地面阻尼（HitGolfBall :451-474）
+            const shot = golfShot(mwx, mwy, ball, club);
+            const st = this.world.store;
+            const btx = Math.floor((ball.x + ball.w / 2) / TILE);
+            const bty = Math.floor((ball.y + ball.h + 1) / TILE);
+            const solidBelow = st.inBounds(btx, bty) && st.isSolid(btx, bty);
+            ball.clubHit(shot.vx, shot.vy, club.rough, solidBelow);
+            this.sfx.play('tink', 0.8, ball.cx, ball.cy);
+            this.golfScoreTime = 0; // RecordSwing（一杆进洞折扣计时清零）
+            this.golfAim = false; this.golfAimBall = null;
+            this.renderer.golfPower = null;
+            this.player.useTime = 42; // useAnimation 12 + 后摇 30（:49561-49567）
+          }
+        }
+      } else if (this.golfAim) {
+        this.golfAim = false; this.golfAimBall = null;
+        this.renderer.golfPower = null;
+      }
+      if (!this.golfAim && this.renderer.golfPower && (!club || !inp.mouseDown)) {
+        this.renderer.golfPower = null;
+      }
+    }
     // ---- 召唤上限缩水驱逐（Projectile.cs:15370-15392：每帧按实体序登记，超限自裁——
     // 实际效果=最后召唤的先死）。召唤时腾位驱逐在 useCombatWeapon 内（最旧先死）。
     // noSlot 实体（虎/阿比盖尔本体、龙身、守护者）不参与。
@@ -3005,6 +3100,11 @@ export class Game implements GameHooks {
         const tx2 = Math.floor((at ? at.x : e2.cx) / TILE), ty2 = Math.floor((at ? at.y : e2.cy) / TILE);
         if (this.world.store.inBounds(tx2, ty2)) this.lighting.addLight(tx2, ty2, l[0], l[1], l[2]);
       }
+    }
+    // 水母潜水装备浸水发光（Player.cs:14682-14688：wet 时中心 AddLight 1.8/0.4/1.2）
+    if (this.player.inWater && this.player.equipStats.jellyfishGlow) {
+      this.lighting.addLight(
+        Math.floor(this.player.cx / TILE), Math.floor(this.player.cy / TILE), 1.8, 0.4, 1.2);
     }
     this.lighting.compute(w.clock.dayFactor);
 
@@ -3963,27 +4063,6 @@ export class Game implements GameHooks {
           this.sfx.play('dig', 0.7);
           this.cb.onInventoryChanged?.();
         }
-        this.input.mouseDown = false;
-      }
-      // ---- 球杆挥击（GOLF_CLUBS 杆型表：80px 内的球朝指针方向击出）
-      else if (bvid > 0 && GOLF_CLUBS[bvid]) {
-        const [speed, loft] = GOLF_CLUBS[bvid];
-        const aimX = inp.mouseX / this.camera.zoom + this.camera.x - this.renderer.canvas.width / this.camera.zoom / 2;
-        const aimY = inp.mouseY / this.camera.zoom + this.camera.y - this.renderer.canvas.height / this.camera.zoom / 2;
-        let hit = false;
-        for (const e of this.entities.projectiles) {
-          const ball = e as GolfBall;
-          if (!(ball instanceof GolfBall) || ball.dead) continue;
-          if (Math.hypot(ball.cx - this.player.cx, ball.cy - this.player.cy) > 80) continue;
-          ball.clubHit(aimX - ball.cx, aimY - ball.cy, speed, loft);
-          hit = true;
-        }
-        if (hit) {
-          this.sfx.play('tink', 0.8, this.player.cx, this.player.cy);
-          this.golfScoreTime = 0; // 挥杆重置一杆进洞折扣计时（GolfState.RecordSwing 语义）
-        }
-        this.useSwing(heldDef, Math.atan2(aimY - this.player.cy, aimX - this.player.cx));
-        this.player.useTime = 30;
         this.input.mouseDown = false;
       }
       // ---- 战斗书 4382/5336（Player.cs:44703-44730 ItemCheck_UseCombatBook）：
@@ -6225,6 +6304,9 @@ export class Game implements GameHooks {
   /** 高尔夫折扣计时（GolfState.golfScoreTime :30-47：每 tick+1，挥杆清零，
    *  进洞 SetScoreTime=3600；一杆进洞系数 = time/3600） */
   private golfScoreTime = 3600;
+  /** 高尔夫瞄准态（AI_150 channel 语义：按住瞄准/松开击球/右键取消） */
+  private golfAim = false;
+  private golfAimBall: import('../entities/GolfBall').GolfBall | null = null;
   private spawnHardBossPending = 0;
 
   /** 天气预设（小地图天气面板按钮；面板见 Renderer.drawMinimap 天气段）：
@@ -8025,11 +8107,38 @@ export class Game implements GameHooks {
             add([[2584], [854], [855], [905]][Math.floor(phase / 2)]);
           }
           break;
-        case 633: { // 动物学家（:3358-3380 配对耳尾 + :3249-3252 满月夜狼人画）
-          const pair = [[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)];
-          add(pair);
-          if (phase === 0 && !day) add([5253]);
-          if (this.player.golferScoreAccumulated >= 2000) add([4744]); // :1951 猎人斗篷
+        case 633: { // 动物学家 bestiary 进度门全表（Chest.cs:3241-3385：
+          // CompletionPercent 阈值 0.03/0.10/0.25/0.30/0.40/0.45/0.50/0.70/1.0 + 事件门）
+          const pct = this.world.bestiary.completion().percent;
+          const seen = (npcId: number) => this.world.bestiary.unlockState(
+            bestiaryEntries().find((e) => e.creditId === bestiaryCreditId(npcId))
+              ?? { creditId: '', kind: 'enemy', sources: [], goldGate: false }) > 0;
+          // 仙灵火把（:3244/:3524-3544：三仙灵 583/584/585 图鉴均 > NotKnown）
+          if (seen(583) && seen(584) && seen(585)) add([4776]);
+          add([4767]);                                                    // 勿伤小动物书 :3248
+          if (phase === 0 && !day) add([5253]);                           // 满月夜狼人画 :3249
+          if (pct >= 0.45) add([5635]);                                   // 辉夜姬画 :3253
+          if (pct >= 0.10) add([4759]);                                   // 松鼠钩 :3257
+          if (pct >= 0.03) add([4672]);                                   // 平淡鞭 :3261
+          add([4829]);                                                    // 猫执照 :3265
+          if (pct >= 0.25) add([4830]);                                   // 狗执照 :3266
+          if (pct >= 0.45) add([4910]);                                   // 兔执照 :3270
+          if (pct >= 0.30) add([4871, 4907]);                             // 樱花/黄柳种子 :3274/:3278
+          if (this.world.flags['downedTowerSolar']) add([4677]);          // 蹲爬虫风筝 :3282
+          if (pct >= 0.10) add([4676]);                                   // 锦鲤风筝 :3286
+          if (pct >= 0.30) add([4762, 4785, 4786, 4787]);                 // 洗发水+三马鞍 :3290/:3298-3308
+          if (pct >= 0.30 && this.world.flags.hardMode) add([4788]);      // 马上长枪 :3310
+          if (pct >= 0.25) add([4716, 4763]);                             // 软体哨/鼹鼠矿车 :3294/:3314
+          if (pct >= 0.40) add([4955]);                                   // 兔子指令 :3318
+          if (this.world.flags.hardMode && this.world.clock.bloodMoon) add([4736]); // 满月吱吱玩具 :3322
+          if (this.world.flags['downed_262']) add([4701]);                // 泥巴伙伴（世花后）:3326
+          if (pct >= 0.50) add([4765, 4766, 5285, 4777]);                 // 树/世界/月球仪+闪电胡萝卜 :3330-3344
+          if (pct >= 0.70) add([4735]);                                   // 导线球 :3346
+          if (pct >= 1.0) add([4951]);                                    // 图鉴 100% 胜利传送塔 :3350
+          if (partyIsUp(this.partyState)) add([5466]);                    // 派对蜂群雷 :3354
+          // 兽耳尾套装（:3358-3379 四相位对——原 switch 直取，无进度门）
+          add([[4768, 4769], [4770, 4771], [4772, 4773], [4560, 4775]][Math.floor(phase / 2)]);
+          if (this.player.golferScoreAccumulated >= 2000) add([4744]);    // :1951 猎人斗篷
           break;
         }
       }

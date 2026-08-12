@@ -183,6 +183,77 @@ describe('呼吸豁免（CheckDrowning 前置链）', () => {
     step(p, w, 70);
     expect(p.breath).toBe(200);
   });
+
+  it('ftw 种子（getGoodWorld）gills 语义翻转：水下不淹、水上淹（:22946-22949）', () => {
+    const w = mkWorld();
+    w.seedFlags.getGoodWorld = true;
+    const p = mkPlayer(w);
+    settle(p, w);
+    p.buffs.apply(BuffType.Gills, 60);
+    flood(w, p);
+    step(p, w, 70);
+    expect(p.breath).toBe(200); // ftw：水下(flag=true) → 翻转为不淹
+    // 水上（flag=false）→ 翻转为淹：擦掉 gills 先建立对照
+    p.buffs.remove(BuffType.Gills);
+    step(p, w, 70);
+    expect(p.breath).toBeLessThan(200);
+    const b0 = p.breath;
+    p.buffs.apply(BuffType.Gills, 60);
+    step(p, w, 70); // 出水区段内 breath 应继续下降（水上 flag=false → !flag=true 淹）
+    expect(p.breath).toBeLessThan(b0);
+  });
+});
+
+// ============ 6b 呼吸族装备（物品已入库 2026-08） ============
+describe('呼吸族装备（GrantArmorBenefits/ApplyEquipFunctional 行为链）', () => {
+  it('潜水头盔 268（armor[0]）→ breathCDMax=42；潜水装备 394/1860/1861（配饰）同；布尔不叠加', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    settle(p, w);
+    expect(p.breathCDMax).toBe(7);
+    p.inv.armor[0] = { id: _iid(268), stack: 1 };
+    expect(p.breathCDMax).toBe(42);
+    p.inv.armor[3] = { id: _iid(394), stack: 1 };
+    p.inv.armor[4] = { id: _iid(1860), stack: 1 };
+    p.inv.armor[5] = { id: _iid(1861), stack: 1 };
+    expect(p.breathCDMax).toBe(42); // 布尔语义,多件不叠（原版 accDivingHelm=true）
+    // 268/1861 额外效果：268 无 arcticDivingGear;1861 有
+    expect(p.equipStats.arcticDivingGear).toBe(true);
+    expect(p.equipStats.jellyfishGlow).toBe(true); // 1860
+  });
+
+  it('鱼缸头盔 250/4275：陆上也恒淹（:22917）', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    settle(p, w);
+    p.inv.armor[0] = { id: _iid(250), stack: 1 };
+    step(p, w, 70); // 地面无水
+    expect(p.breath).toBe(190);
+    p.inv.armor[0] = { id: _iid(4275), stack: 1 };
+    p.breath = 200;
+    step(p, w, 7);
+    expect(p.breath).toBe(199);
+  });
+
+  it('贝壳族 497/861/3110（accMerman）：水下不耗气并 merman 化；851 绿扳手无此效果（防 id 抄错）', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    settle(p, w);
+    flood(w, p);
+    for (const vid of [497, 861, 3110]) {
+      p.inv.armor[3] = { id: _iid(vid), stack: 1 };
+      p.breath = 100;
+      step(p, w, 70);
+      expect(p.breath).toBe(200); // 不淹 → 回补
+      expect(p.merman).toBe(true);
+      p.inv.armor[3] = null;
+    }
+    p.inv.armor[3] = { id: _iid(851), stack: 1 }; // Green Wrench——非人鱼饰品
+    p.breath = 100;
+    step(p, w, 70);
+    expect(p.breath).toBeLessThan(100);
+    expect(p.merman).toBe(false);
+  });
 });
 
 // ============ 7 显示布局纯函数（Main.cs:42858-42932） ============

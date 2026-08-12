@@ -27,9 +27,8 @@ const SNOW_OR_ICE = new Set([147, 161, 200, 163, 164]);
  *  x∈[400,w-400]，自 y=100 下扫到首个 active 格即停（break 在任何分支后），
  *  沙族 {53,396,397,404,407,151} → 向上清液体直到遇到 active。零掷骰。 */
 export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState): void {
-  void gs;
   for (let x = 400; x < st.w - 400; x++) {
-    for (let y = 100; y < st.h; y++) {
+    for (let y = 100; y < gs.worldSurface - 1; y++) {
       const i = st.idx(x, y);
       if (!st.flags[i]) continue;
       const s = SHEET[st.type[i]];

@@ -130,10 +130,18 @@ const out = await page.evaluate(async () => {
   // 3.6) 高尔夫：放球 → 挥杆 → 直调计分 → 分数门商店
   const { GolfBall } = await import('/src/entities/GolfBall.ts');
   const ball = new GolfBall(g.player.cx + 40, g.player.y - 20, 721, () => g.player);
-  ball.clubHit(1, 0, 12, -4); // 木杆 160px
+  ball.clubHit(12, -4, 0, false); // 击球（新签名：vx,vy,rough,solidBelow）
   ball.x += 160; // 模拟滚动位移
-  ball.clubHit(1, 0, 10, -3); // 第二杆
+  ball.clubHit(10, -3, 0, false); // 第二杆
   ball.swings = 2; ball.dist = 320;
+  // golfShot 公式抽测（推杆上限 0.25×32=8 / 铁杆 32 / 角度钳）
+  const { golfShot, GOLF_CLUBS } = await import('/src/entities/GolfBall.ts');
+  const gb = { cx: 0, cy: 0 };
+  res.golfShot = {
+    putterCap: Math.hypot(golfShot(3000, 0, gb, GOLF_CLUBS[4092]).vx, golfShot(3000, 0, gb, GOLF_CLUBS[4092]).vy),
+    ironCap: Math.hypot(golfShot(10000, 0, gb, GOLF_CLUBS[4039]).vx, golfShot(10000, 0, gb, GOLF_CLUBS[4039]).vy),
+    noDown: golfShot(100, 500, gb, GOLF_CLUBS[4039]).vy <= 0.0001,
+  };
   priv('golfBallScored', ball);
   res.golfScore = g.player.golferScoreAccumulated; // ⌊320/16⌋/(2+2)=5
   // 直接拉满 2000 验证商店门

@@ -816,6 +816,28 @@ export class Renderer {
       }
     }
 
+    // 2c''.4 高尔夫蓄力显示：预测弹道点（FancyGolfPredictionLine 近似：同物理步进）+
+    //   力度条（GolfSwingBarFill：宽 54×rel，玩家脚下）
+    if (this.golfPower) {
+      const gp = this.golfPower;
+      // 预测线：从球心按当前物理模拟 20 步（重力 0.3、实心即停）
+      let px = gp.ball.cx, py = gp.ball.cy;
+      const sim = { vx: gp.ball.vx, vy: gp.ball.vy };
+      ctx.fillStyle = 'rgba(255,255,255,0.55)';
+      for (let i = 0; i < 20; i++) {
+        sim.vy = Math.min(sim.vy + 0.3, 12);
+        px += sim.vx; py += sim.vy;
+        const stx = Math.floor(px / TILE), sty = Math.floor(py / TILE);
+        if (world.store.inBounds(stx, sty) && world.store.isSolid(stx, sty)) break;
+        if (i % 2 === 0) ctx.fillRect(px - 1, py - 1, 2, 2);
+      }
+      // 力度条（:42961：54×RelativeStrength）
+      const [sx0, sy0] = cam.worldToScreen(gp.x, gp.y);
+      ctx.fillStyle = 'rgba(0,0,0,0.5)';
+      ctx.fillRect(sx0 - 27, sy0, 54, 6);
+      ctx.fillStyle = '#7de08a';
+      ctx.fillRect(sx0 - 27, sy0, Math.round(54 * gp.rel), 6);
+    }
     // 2c''.5 风摆动图层（原版 TileDrawing 特殊绘制路径）：摆动图块已摘出烘焙，
     // 此处逐帧动态绘制（草/药草/藤蔓/吊挂植物/树冠树枝；世界变换内世界坐标，
     // 光照合成在后自动受光）——渲染共享态 renderEnv.wind 已在 render() 顶部注入
@@ -1243,6 +1265,8 @@ export class Renderer {
   }
   /** 远端玩家（Game.render 每帧注入；单机空数组零开销） */
   remotePlayers: Player[] = [];
+  /** 高尔夫蓄力显示（Game 注入：力度条 + 预测线；Main.cs:30690-30721/:42933-42966） */
+  golfPower: { x: number; y: number; rel: number; ball: import('../entities/GolfBall').GolfBall } | null = null;
   /** 光照合成 ImageData 复用(尺寸变化才重建) */
   private _lightImg: ImageData | null = null;
 

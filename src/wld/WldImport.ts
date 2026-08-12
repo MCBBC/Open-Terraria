@@ -475,6 +475,15 @@ export const ITEM_MAP: Record<number, string> = {
   5007: 'vi_5007_dead_man_s_sweater',  // Dead Man's Sweater
   117: 'vi_117_meteorite_bar',  // Meteorite Bar
   186: 'vi_186_breathing_reed',  // Breathing Reed
+  250: 'vi_250_fish_bowl',  // Fish Bowl（鱼缸头盔：CheckDrowning :22917 恒淹）
+  4275: 'vi_4275_gold_goldfish_bowl',  // Gold Goldfish Bowl（同上）
+  268: 'vi_268_diving_helmet',  // Diving Helmet（accDivingHelm :12829）
+  394: 'vi_394_diving_gear',  // Diving Gear（accFlipper+accDivingHelm :14652）
+  1860: 'vi_1860_jellyfish_diving_gear',  // Jellyfish Diving Gear（:14689）
+  1861: 'vi_1861_arctic_diving_gear',  // Arctic Diving Gear（:14701）
+  497: 'vi_497_neptune_s_shell',  // Neptune's Shell（accMerman :15019）
+  861: 'vi_861_moon_shell',  // Moon Shell（accMerman :14587）
+  3110: 'vi_3110_celestial_shell',  // Celestial Shell（accMerman :14855）
   329: 'vi_329_shadow_key',  // Shadow Key
   974: 'vi_974_ice_torch',  // Ice Torch
   2322: 'vi_2322_mining_potion',  // Mining Potion

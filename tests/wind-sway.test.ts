@@ -383,13 +383,16 @@ describe('种子旗标（血月 1/6 十周年 / drunkWorld 翻转）', () => {
 });
 
 // ============ 残留接入（八轮：战斗书/高尔夫计分/分数商店门） ============
-import { GOLF_CLUBS } from '../src/entities/GolfBall';
+import { GOLF_CLUBS, golfShot } from '../src/entities/GolfBall';
 
 describe('高尔夫计分链（GolfState.cs:151-160）', () => {
-  it('杆型表 12 支齐全且速度梯度 putter<driver', () => {
-    expect(Object.keys(GOLF_CLUBS)).toHaveLength(12);
-    expect(GOLF_CLUBS[4092][0]).toBeLessThan(GOLF_CLUBS[4094][0]); // 推杆 < 木杆
-    expect(GOLF_CLUBS[4598][0]).toBeGreaterThan(GOLF_CLUBS[4094][0]); // 叶绿木 > 普通木
+  it('杆型表 16 支（4 基础+12 材质镜像）且椭圆属性与 GetClubProperties 一致', () => {
+    expect(Object.keys(GOLF_CLUBS)).toHaveLength(16);
+    expect(GOLF_CLUBS[4092].maxX).toBe(0.25);         // 推杆上限 (0.25,0.25)
+    expect(GOLF_CLUBS[4094].maxX).toBe(1.5);          // 木杆 (1.5,0.65)
+    expect(GOLF_CLUBS[4094].maxY).toBe(0.65);
+    expect(GOLF_CLUBS[4093].rough).toBe(1);           // 挖起杆粗糙保留
+    expect(GOLF_CLUBS[4598].maxX).toBe(GOLF_CLUBS[4094].maxX); // 材质镜像
   });
   it('计分公式形状：⌊tile位移÷(杆数+2)⌋——杆数稀释', () => {
     // 模拟：160px(10 tile) 位移
@@ -397,5 +400,21 @@ describe('高尔夫计分链（GolfState.cs:151-160）', () => {
     expect(score(160, 1)).toBe(3);  // 10/3
     expect(score(160, 3)).toBe(2);  // 10/5
     expect(score(160, 8)).toBe(1);  // 10/10
+  });
+});
+
+describe('golfShot 击球公式（GolfHelper.cs:293-341）', () => {
+  const ball = { cx: 0, cy: 0 };
+  it('蓄力=光标距/300 椭圆钳后 ×32（推杆上限 0.25×32=8）', () => {
+    const far = golfShot(3000, -0, ball, GOLF_CLUBS[4092]); // 距离 3000 → L=10 远超上限
+    expect(Math.hypot(far.vx, far.vy)).toBeCloseTo(0.25 * 32, 5);
+  });
+  it('铁杆上限 1.0×32=32；下限 0.25×32=8（近距离钳到下限）', () => {
+    expect(Math.hypot(...((v) => [v.vx, v.vy])(golfShot(10000, 0, ball, GOLF_CLUBS[4039])))).toBeCloseTo(32, 5);
+    expect(Math.hypot(golfShot(10, 0, ball, GOLF_CLUBS[4039]).vx, golfShot(10, 0, ball, GOLF_CLUBS[4039]).vy)).toBeCloseTo(8, 5);
+  });
+  it('不能向下打（角度钳 [-87.12°, 0]）', () => {
+    const down = golfShot(100, 500, ball, GOLF_CLUBS[4039]);
+    expect(down.vy).toBeLessThanOrEqual(0.0001);
   });
 });

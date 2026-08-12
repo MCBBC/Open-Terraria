@@ -72,6 +72,8 @@ export interface AccFx {
   // ---- 呼吸族（行为型，见 BEHAVIOR_FX）----
   divingHelm?: number;  // accDivingHelm：breathCDMax ×6（潜水头盔/三件潜水装备）
   merman?: number;      // accMerman：水中不耗气并人鱼化（月亮/天界/海神贝壳）
+  arcticDivingGear?: number; // 1861 极地潜水装备：专家雪原冷水 Chilled 免疫（:27692）
+  jellyfishGlow?: number;    // 1860 水母潜水装备：浸水发光 1.8/0.4/1.2（:14682-14688）
 }
 
 const FX = fxJson as Record<string, AccFx>;
@@ -83,11 +85,11 @@ const FX = fxJson as Record<string, AccFx>;
 const BEHAVIOR_FX: Record<string, AccFx> = {
   '268': { divingHelm: 1 },
   '394': { divingHelm: 1 },
-  '1860': { divingHelm: 1 },
-  '1861': { divingHelm: 1 },
+  '1860': { divingHelm: 1, jellyfishGlow: 1 },   // 浸水 AddLight(1.8,0.4,1.2)（:14682-14688）
+  '1861': { divingHelm: 1, arcticDivingGear: 1 }, // +arcticDivingGear（:14701；iceSkate 移动系未实装）
   '497': { merman: 1 },
-  '861': { merman: 1 },
-  '3110': { merman: 1 },
+  '861': { merman: 1, nightWolf: 1 },   // Moon Shell：accMerman + wolfAcc（:14585-14591）
+  '3110': { merman: 1, nightWolf: 1 },  // Celestial Shell：同（:14853-14859；json 的 skyStone 保留）
 };
 
 const FX_BY_IID = (() => {

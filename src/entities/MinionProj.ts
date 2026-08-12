@@ -181,6 +181,8 @@ export class MinionProj extends Entity {
   private rA0 = 0;
   private rA1 = 0;
   ravenZone = 0;
+  /** AI_120 当前状态（ai[0]：0 跟随 / 2 冲刺拳击；诊断与回归用） */
+  get ai120State(): number { return this.gA0; }
   /** 家族一次性初始化（龙链生成） */
   private spawned = false;
   /** 渲染旋转（龙链：段朝向 = 指向父段 +PI/2，同原版 rotation=velocity.ToRotation()+PI/2） */

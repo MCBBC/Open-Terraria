@@ -14,8 +14,10 @@
 //                        → 显示火焰条而非气泡（lavaTime 宽限耗损指示）
 // 字段映射：breathMax→breathMax，breath→breath，lavaMax→equipStats.lavaMax，
 // lavaTime→lavaImmuneTicks，lavaWet→inLava，ghost→dead。
-// 偏差记录：gfxOffY 恒 0（本仓无坐骑/下蹲偏移）；ingameOptionsWindow/InGameUI
-// 分支未移植（本仓无该界面）；远端联机玩家不显示（原版走同步字段）。
+// 偏差记录：gfxOffY 恒 0（gfxOffY 非零仅来自坐骑绘制偏移——坐骑系统未实装，
+// 恒 0 与无坐骑的原版语义一致）；ingameOptionsWindow/InGameUI 分支未移植
+// （本仓无该界面）。远端联机玩家不画气泡条**不是偏差**——原版本函数只读
+// player[myPlayer]，呼吸计为本地玩家专属 UI（多人下每人只见自己的）。
 import type { Player } from '../entities/Player';
 import type { Camera } from './Camera';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
