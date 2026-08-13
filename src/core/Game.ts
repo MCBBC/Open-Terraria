@@ -223,6 +223,7 @@ import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFracta
 import { SolarEruptionWhip } from '../entities/SolarEruption';
 import { TideSlash } from '../entities/TideSlash';
 import { FirstFractalSlash } from '../entities/FirstFractal';
+import { ChainsawProj } from '../entities/ChainsawProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -2261,13 +2262,14 @@ export class Game implements GameHooks {
       lightAt: (tx, ty) => this.lighting ? this.lighting.lightAt(tx, ty) : [255, 255, 255],
       atmo: 1,
       snowRatio: 0,
+      snowTileCount: 0,
       bossDanger: false,
       sandstormVisuals: false,
       desertSandTiles: 0,
-      emitSand: (x, y, vx, vy, color) => {
+      emitSand: (x, y, vx, vy, color, size = 2) => {
         this.particles.push({
           x, y, vx, vy, life: 40 + Math.random() * 30, maxLife: 70,
-          color, size: 2, damp: 0.995, grav: 0,
+          color, size, damp: 0.995, grav: 0,
         });
       },
       sandColors: () => {
@@ -5435,6 +5437,23 @@ export class Game implements GameHooks {
             const px = this.player.facing * -Math.PI / 2;
             mxAdj = (ux * Math.cos(px) - uy * Math.sin(px)) * 24;
             myAdj = (ux * Math.sin(px) + uy * Math.cos(px)) * 24;
+          }
+          // 屠夫链锯 3098 → 509（AI_020 :23837-23949）：channel 持械——挂手+瞄准
+          // 向直写+松链即亡；2 帧旋转+Item189 节奏+尘 31 火花（同链锯族）
+          if (cwMelee.shoot === 509 && heldDef) {
+            const sawOwner = this.player;
+            const sawItemId = heldDef.key;
+            const saw = new ChainsawProj(this.player,
+              this.swing.dmg ?? cwMelee.damage, cwMelee.knockback,
+              () => this.input.mouseHeld && !this.input.uiBlocking
+                && sawOwner.inv.heldItem()?.id === ITEM_BY_KEY[sawItemId]
+                && !sawOwner.dead,
+              () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
+            saw.critChance = arcCrit;
+            saw.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+            this.entities.add(saw, 'projectiles');
+            this.mining = null;
+            return;
           }
           // 初代分形剑 4722 → 857（Player.cs:47400-47447）：目标=随机可追敌
           // （+速度×20 预测）或鼠标位钳 700；方向混入玩家速度；速度 12+rand×2；
@@ -10184,6 +10203,8 @@ case 2756: { // 性别转换药水(:42516-42542):Male 翻转
       // 雪区削减（Rain.cs NewRain :182-184）：clamp(SnowTileCount/SnowTileThreshold=1500,0,1)，
       // 平方在渲染端（spawnRain 的 snow = snowRatio²）
       hooks.snowRatio = Math.max(0, Math.min(1, this.scene.snowTileCount / 1500));
+      // 原始计数直供雪粒系统（Main.snowing Main.cs:12976 密度指数 count/6000）
+      hooks.snowTileCount = this.scene.snowTileCount;
       hooks.sandstormVisuals = weather.sandstorm.happening && this.scene.zoneDesert && pty < gl + 30;
       // 沙尘发射门（Sandstorm.EmitDust :147：<100 直接不发射；密度 2000/count 也按真值）
       hooks.desertSandTiles = this.scene.desertSandTileCount;

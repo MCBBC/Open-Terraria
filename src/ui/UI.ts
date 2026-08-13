@@ -161,6 +161,25 @@ function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: 
   return e;
 }
 
+/** 空槽类型幽灵帧表（ItemSlot.cs:2240-2310 context/slot → Extra[54] 帧号）：
+ *  帧格 3 列 × 7 行（列=帧%3 行=帧/3,格 34px 取 32px）。
+ *  context 对应：armor 0-2=8(头盔0/胸甲6/护腿12) 3-9=10(配饰11) 10-12=9(时装头盔3/
+ *  胸甲9/护腿15) 13-17=11(时装配饰2);dye/miscDye=12/33(染料1);
+ *  misc 0-4 = context 19/20/18/17/16(宠物10/光源17/矿车7/坐骑13/抓钩4)。
+ *  背包(0)/钱币(1)/弹药(2)/垃圾桶 无映射 → -1 */
+function slotGhostFrame(where: SlotWhere, i: number): number {
+  if (where === 'armor') {
+    if (i <= 2) return [0, 6, 12][i];
+    if (i <= 9) return 11;
+    if (i <= 12) return [3, 9, 15][i - 10];
+    if (i <= 17) return 2;
+    return -1;
+  }
+  if (where === 'dye' || where === 'miscDye') return 1;
+  if (where === 'misc') return [10, 17, 7, 13, 4][i] ?? -1;
+  return -1;
+}
+
 const CSS = `
 .sw-root { position:fixed; inset:0; pointer-events:none; font-family:inherit; z-index:10; }
 /* ---- 原版风格：深蓝面板 + 浅蓝描边 ---- */
@@ -729,6 +748,18 @@ export class UI {
     const s = el('div', 'sw-slot');
     s.dataset.idx = String(i);
     s.dataset.where = where;
+    // 空槽类型幽灵图（ItemSlot.cs:2240-2317）：TextureAssets.Extra[54] 3×7 图集,
+    // 槽空且 context 有映射时以 0.35 α 画对应帧（-2px 内缩）——头盔/胸甲/护腿/
+    // 配饰/时装三件/染料/宠物/光源/矿车/坐骑/抓钩各帧;背包/钱币/弹药槽原版无映射
+    const ghostFrame = slotGhostFrame(where, i);
+    if (ghostFrame >= 0) {
+      const g = el('div', 'sw-slot-ghost');
+      const col = ghostFrame % 3, row = Math.floor(ghostFrame / 3);
+      g.style.cssText = `position:absolute; inset:0; margin:auto; width:32px; height:32px;`
+        + `background:url(sprites/vanilla/Extra_54.png) ${-col * 34}px ${-row * 34}px;`
+        + `opacity:0.35; image-rendering:pixelated; pointer-events:none;`;
+      s.appendChild(g);
+    }
     s.addEventListener('mousedown', (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -1926,18 +1957,23 @@ export class UI {
     body.appendChild(right);
     this.invPanel.appendChild(body);
 
-    // 防御计数器（原版 DrawDefenseCounter Main.cs:41557-41623：Extra_58 盾 3×2 帧
-    // [普通/专家/大师 × 底/辉光] + 数值；悬停 = 「N 防御 + 伤害减免%(难度换算 0.5/0.75/1)」）
+    // 防御计数器（原版 DrawDefenseCounter Main.cs:41555-41623：Extra_58 盾 3×2 帧
+    // [普通/专家/大师 × 底/辉光] + 数值【居中叠在盾上】(:41598 vector-测量宽*0.5+2y);
+    // 悬停 = 「N 防御 + 伤害减免%(难度换算 0.5/0.75/1)」。位置=装备列下方（用户指定）
     const defRow = el('div');
-    defRow.style.cssText = 'display:flex; align-items:center; gap:6px; margin:6px 0 2px;';
+    defRow.style.cssText = 'display:flex; justify-content:center; margin:6px 0 2px; cursor:help;';
     defRow.dataset.role = 'defense';
+    const defWrap = el('div');
+    defWrap.style.cssText = 'position:relative; width:40px; height:36px;';
     const defShield = el('canvas');
     defShield.width = 52; defShield.height = 48;
-    defShield.style.cssText = 'width:26px; height:24px; image-rendering:pixelated;';
-    defRow.appendChild(defShield);
+    defShield.style.cssText = 'position:absolute; inset:0; margin:auto; width:39px; height:36px; image-rendering:pixelated;';
+    defWrap.appendChild(defShield);
     const defNum = el('span', '', '0');
-    defNum.style.cssText = 'font-size:15px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
-    defRow.appendChild(defNum);
+    defNum.style.cssText = 'position:absolute; inset:0; display:flex; align-items:center; justify-content:center;'
+      + 'padding-top:2px; font-size:13px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
+    defWrap.appendChild(defNum);
+    defRow.appendChild(defWrap);
     defRow.addEventListener('mouseenter', () => {
       if (!this.game) return;
       const p = this.game.player;
@@ -1951,7 +1987,7 @@ export class UI {
       this.tooltip.style.display = 'block';
     });
     defRow.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
-    this.invPanel.appendChild(defRow);
+    left.appendChild(defRow);   // 装备列下方（原版画在装备区左侧垂直居中,用户指定下方）
 
     // 合成区
     this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
@@ -2404,6 +2440,9 @@ export class UI {
     const oldCnt = slotEl.querySelector('.cnt');
     if (oldImg) oldImg.remove();
     if (oldCnt) oldCnt.remove();
+    // 类型幽灵图只在空槽显示（:2312 `item.type <= 0 || stack <= 0` 门）
+    const ghost = slotEl.querySelector('.sw-slot-ghost');
+    if (ghost) (ghost as HTMLElement).style.display = content ? 'none' : 'block';
     if (content) {
       const img = el('img') as HTMLImageElement;
       img.src = iconUrl(this.game, content.id);
@@ -2491,7 +2530,7 @@ export class UI {
     const game = this.game;
     if (!game || !this.craftListEl) return;
     const stations = game.stationsNearby();
-    const defEl = this.invPanel.querySelector('[data-role="defense"]') as HTMLElement | null;
+    const defEl = this.invPanel.querySelector('[data-role="defense"]') as HTMLElement | null; // left 仍在 invPanel 内
     if (defEl) {
       // 防御计数器刷新（DrawDefenseCounter :41557）：盾帧 = 难度列(0/1/2),
       // 专家/大师叠辉光行(静态 α0.45 近似原版脉动;大师红绿脉冲未做,偏差记录)

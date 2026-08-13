@@ -32,6 +32,13 @@ function buildTables(pack: Pack): LoadedPack {
   for (const [cat, entries] of Object.entries(pack)) {
     const list: string[] = [];
     for (const [key, value] of Object.entries(entries)) {
+      // 旧坏包自愈(NeedTempleKey 裸键事故):{"整键":{"":"文本"}} 假类别按类别名登记,
+      // 拿到对象值不丢文案(正确包恒 string,本分支恒不触发;构建期闸门另守)
+      if (value !== null && typeof value === 'object' && typeof (value as Record<string, unknown>)[''] === 'string') {
+        texts.set(cat, (value as Record<string, string>)['']);
+        list.push(cat);
+        continue;
+      }
       const fullKey = `${cat}.${key}`;
       // $ 变体键(如 ItemName.Chair$Gender)入变体表,不进正文(LanguageManager.cs:303-317)
       const dollar = key.indexOf('$');

@@ -596,6 +596,7 @@ item({ key: 'vi_3473_solar_eruption', name: '', value: 1 });
 item({ key: 'vi_2880_influx_waver', name: '', value: 1 });
 item({ key: 'vi_4722_first_fractal', name: '', value: 1 });
 item({ key: 'vi_3870_betsys_wrath', name: '', value: 1 });
+item({ key: 'vi_3098_butchers_chainsaw', name: '', value: 1 });
 // ---- 原版远程武器+弹药全量注册（useAmmo 族对账 2026-08-13：枪 24/弓弩 39/
 // 发射器 7/吹箭 4——此前仅 6 把，弹链数据驱动已备）----
 item({ key: 'vi_95_地牢砖墙', name: '', value: 1 });

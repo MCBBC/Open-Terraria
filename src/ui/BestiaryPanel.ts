@@ -799,6 +799,40 @@ export class BestiaryPanel {
     this.fillGrid();
     this.updateProgress();
     this.renderInfo();
+    this.scheduleBlankSweep();
+  }
+
+  /** 自愈补画扫描(2026-08-14,用户报"resize 后头像全消失"):
+   *  context 丢失可发生在 contextrestored 监听挂上之前的窗口期,内容丢了没人补。
+   *  每次 refresh 后 400ms 扫描可见画布,空白的按原参数重画(bstLoadSheet 缓存
+   *  命中=同步,开销可忽略)。兜住 resize 风暴/加载竞态一切丢失窗口 */
+  private sweepTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  /** renderInfo 的大头像参数(sweep 补画用) */
+  private infoDraw: { canvas: HTMLCanvasElement; npcId: number; st: number } | null = null;
+  private scheduleBlankSweep(): void {
+    if (this.sweepTimer) clearTimeout(this.sweepTimer);
+    this.sweepTimer = setTimeout(() => {
+      this.sweepTimer = 0;
+      if (!this.panel.isConnected) return;
+      const isBlank = (c: HTMLCanvasElement) => {
+        try {
+          const d = c.getContext('2d')!.getImageData(0, 0, c.width, c.height).data;
+          for (let i = 3; i < d.length; i += 16) { if (d[i] > 10) return false; }
+          return true;
+        } catch { return false; }
+      };
+      // 网格:cell.dataset.credit 反查行
+      for (const cell of this.gridEl.querySelectorAll('.sw-bst-cell')) {
+        const canvas = cell.querySelector('canvas');
+        if (!canvas || !isBlank(canvas)) continue;
+        const r = this.working.find((w) => w.entry.creditId === (cell as HTMLElement).dataset.credit);
+        if (r) this.drawPortrait(canvas as HTMLCanvasElement, r.npcId, 'grid', r.state > UnlockState.NotKnown);
+      }
+      // 大头像
+      if (this.infoDraw && isBlank(this.infoDraw.canvas)) {
+        this.drawPortrait(this.infoDraw.canvas, this.infoDraw.npcId, 'portrait', this.infoDraw.st > UnlockState.NotKnown);
+      }
+    }, 400) as unknown as ReturnType<typeof setTimeout>;
   }
 
   private page(dir: number) {
@@ -997,6 +1031,7 @@ export class BestiaryPanel {
     canvas.addEventListener('contextrestored', () => {
       this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
     });
+    this.infoDraw = { canvas, npcId: r.npcId, st };
     this.infoEl.appendChild(canvas);
     this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
     // 击杀数（NPCKillCounterInfoElement）

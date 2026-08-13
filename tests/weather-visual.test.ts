@@ -9,7 +9,7 @@ import {
   AMBIENT_FAMILY_PARAMS, AMBIENT_GROUP_SPEC,
   type AmbientSpawnInput, type RareCloudFlags,
 } from '../src/render/SkyRenderer';
-import { WeatherState, RIPPLE_LIFE, RIPPLE_CAP, type WeatherCtx, type WeatherLoopVolumes } from '../src/world/weather/Weather';
+import { WeatherState, type WeatherCtx, type WeatherLoopVolumes } from '../src/world/weather/Weather';
 import { Sfx, LOOP_BASE_VOL } from '../src/core/Sfx';
 
 // ---------- 工具：可控掷点序列（对齐 C# rand.Next 语义） ----------
@@ -334,29 +334,8 @@ describe('月总天空渐暗 moonLordSkyIntensity', () => {
   });
 });
 
-// ---------- 雨点落水涟漪池（Weather 纯逻辑侧） ----------
-describe('雨点涟漪池（Misc/Ripples 近似）', () => {
-  it('预算 = cloudAlpha×屏宽比例，无雨恒 0（上限 24）', () => {
-    const w = new WeatherState(101);
-    expect(w.rippleBudget(1920)).toBe(0);                    // 晴
-    w.startRain(true, 0.8);
-    expect(w.rippleBudget(1920)).toBe(Math.round(0.8 * 6));  // 5
-    expect(w.rippleBudget(3840)).toBe(Math.round(0.8 * 12)); // 10
-    w.cloudAlpha = 1;
-    expect(w.rippleBudget(3840)).toBe(12);                   // 满雨 3840 宽 = 12
-    expect(w.rippleBudget(7680)).toBe(24);                   // 超宽屏触顶 24
-  });
-  it('入池/推进/超龄回收（RIPPLE_LIFE）/容量封顶（RIPPLE_CAP）', () => {
-    const w = new WeatherState(103);
-    expect(w.pushRipple(100, 200)).toBe(true);
-    expect(w.ripples.length).toBe(1);
-    expect(w.ripples[0].life).toBe(RIPPLE_LIFE);
-    for (let i = 0; i < RIPPLE_LIFE + 1; i++) w.update(wctx());
-    expect(w.ripples.length).toBe(0);                        // 超龄回收
-    for (let i = 0; i < RIPPLE_CAP + 10; i++) w.pushRipple(i, 0);
-    expect(w.ripples.length).toBe(RIPPLE_CAP);               // 封顶丢弃
-  });
-});
+// （雨点涟漪池已随自创椭圆环系统退役 2026-08-14——原版雨落水只有 Rain.Update 的
+//  splash 尘(Rain.cs:120-133),WeatherRenderer 1:1;环状涟漪=自创近似+双画,已删）
 
 // ---------- 天气环境音循环（Weather 状态机 + SceneState.cs 双轨语义） ----------
 const wctx = (over: Partial<WeatherCtx> = {}): WeatherCtx => ({

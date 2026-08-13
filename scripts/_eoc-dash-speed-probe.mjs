@@ -19,7 +19,8 @@ await new Promise((r) => setTimeout(r, 1200));
 const r = await page.evaluate(() => {
   const g = window.__swGame;
   // 召唤一只克眼(夜间),取实体后直接置 P2 冲刺态量位移
-  g.world.clock.timeOfDay = 0.3;            // 夜间
+  // ★timeOfDay 0.3 是白天(DAWN=0.1875/DUSK=0.8125):白天 AI 走漂离分支 vx=0 不冲刺
+  g.world.clock.timeOfDay = 0.9;            // 夜间(>DUSK)
   g.summonBoss('eye_of_cthulhu');
   const e = g.entities.enemies.find((n) => n.vanillaId === 4);
   if (!e) return { err: '召唤失败/无克眼' };

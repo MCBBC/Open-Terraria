@@ -3,6 +3,7 @@
 // 同语义：点路径逐段下行 + 整段键兜底）。
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import { validateTable } from '../scripts/l10n-merge.mjs';
 
 /** 收集目录下全部 .ts 文件（递归） */
 function collectTs(dir, out = []) {
@@ -47,7 +48,13 @@ export function auditL10n(srcDir, packPath) {
   }
   const missing = [];
   for (const [key, locs] of [...used.entries()].sort()) {
-    if (resolvePackKey(pack, key) === undefined) missing.push({ key, locs: locs.slice(0, 2) });
+    // ★命中 = 解析到 **string** 值。NeedTempleKey 裸键事故:顶层点分键被 build
+    // 整键当类别 → 包里 {"整键":{"":"文本"}} 假类别,整段键兜底把假类别当命中
+    // 放行——值类型必须一并断言(2026-08-14)
+    const v = resolvePackKey(pack, key);
+    if (typeof v !== 'string') missing.push({ key, locs: locs.slice(0, 2) });
   }
-  return { used: used.size, missing };
+  // 形状全表扫描(类别含点/空条目键/非字符串值)
+  const shape = validateTable(pack);
+  return { used: used.size, missing, shape };
 }

@@ -10,7 +10,7 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseLenient, flattenDeep, mergePacks, expandCopyCommands, stripConditionMarkers } from './l10n-merge.mjs';
+import { parseLenient, flattenDeep, mergePacks, expandCopyCommands, stripConditionMarkers, validateTable } from './l10n-merge.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const TOOLS = join(here, '..', '..', 'tools');
@@ -91,6 +91,12 @@ for (const cult of selectedCultures) {
   const { unresolved } = expandCopyCommands(table);
   report.unresolved.push(...unresolved.map((u) => `[${cult.name}] ${u}`));
   report.stripped.push(...stripConditionMarkers(table).map((r) => `${cult.name}|${r}`));
+  // 形状闸门:类别含点/空键/非字符串值 = 裸键类 bug(顶层点分键曾被整键当类别),
+  // 构建期直接失败,不产出坏包
+  const shapeBad = validateTable(table);
+  if (shapeBad.length) {
+    throw new Error(`[l10n] ${cult.name} 产物形状违例 ${shapeBad.length} 条:\n  ${shapeBad.slice(0, 10).join('\n  ')}`);
+  }
 
   const text = JSON.stringify(table);
   writeFileSync(join(OUT_DIR, `${cult.name}.json`), text);

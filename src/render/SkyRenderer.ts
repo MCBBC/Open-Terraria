@@ -2253,73 +2253,17 @@ export class SkyRenderer {
     }
   }
 
-  // ================= 雨点落水涟漪（Misc/Ripples 近似） =================
-  // 原版 Ripples.png 是水体扭曲 shader 的形状掩码（WaterShaderData._rippleShapeTexture
-  // :108，上 64×64 方形/下 64×64 圆形，已像素解析确认），canvas 2D 无扭曲通道——
-  // 以水面扩散椭圆环近似（任务语义：雨天玩家附近水面出涟漪）。
-  // 涟漪池在 Weather.ts（纯逻辑侧）；此处只做水面采样 + 绘制。
+  // =================（雨点落水涟漪已退役 2026-08-14） =================
+  // 自创"水面扩散椭圆环"近似（随机列采样,与雨滴落点无关 = 涟漪位置漂移的根因）,
+  // 且与 WeatherRenderer 的原版 splash 尘(Rain.cs:120-133)双画。原版无环状涟漪
+  // 系统——Ripples.png 是水体扭曲 shader 掩码(WaterShaderData :108),canvas 2D
+  // 无扭曲通道不做。雨落水视觉 = splash 尘一处(WeatherRenderer.update)。
 
-  /** 每帧采样可见水面并按雨强入池（Weather.pushRipple） */
-  private updateRipples(): void {
-    const w = this.weatherRef;
-    const fc = this.frameCtx;
-    if (!w || !fc?.world || w.cloudAlpha <= 0) return;
-    const player = fc.player;
-    if (!player) return;
-    const viewW = fc.viewW;
-    const budget = w.rippleBudget(viewW);          // cloudAlpha × 屏宽比例
-    if (budget <= 0) return;
-    const store = fc.world.store;
-    const camL = fc.camX - viewW / 2;
-    const pty = Math.floor(player.cy / 16);
-    for (let i = 0; i < budget; i++) {
-      const x = camL + Math.random() * viewW;
-      const tx = Math.floor(x / 16);
-      // 自玩家上方 30 格向下扫 54 格，取首个液面（顶层水面）
-      const y0 = Math.max(2, pty - 30);
-      const y1 = Math.min(fc.world.h - 2, pty + 24);
-      let found = -1;
-      for (let ty = y0; ty <= y1; ty++) {
-        if (store.liquid[store.idx(tx, ty)] > 0) { found = ty; break; }
-      }
-      if (found < 0) continue;
-      w.pushRipple(tx * 16 + 8, found * 16);
-    }
-  }
-
-  /** 涟漪绘制（世界坐标，画在 tile/液体层之上——Renderer 世界变换段调用） */
-  private drawRipples(ctx: CanvasRenderingContext2D): void {
-    const w = this.weatherRef;
-    if (!w || w.cloudAlpha <= 0 || !w.ripples.length) return;
-    ctx.save();
-    ctx.imageSmoothingEnabled = false;
-    for (const rp of w.ripples) {
-      const k = Math.max(0, Math.min(1, rp.t / rp.life));
-      const r = 4 + 20 * k;                                   // 扩散半径 4→24px
-      const a = (1 - k) * 0.32 * Math.max(0.2, Math.min(1, w.cloudAlpha));
-      if (a <= 0.01) continue;
-      ctx.strokeStyle = `rgba(225,238,255,${a.toFixed(3)})`;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      ctx.ellipse(rp.x, rp.y, r, r * 0.42, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      if (k < 0.6) {                                          // 内环只在前段
-        ctx.strokeStyle = `rgba(225,238,255,${(a * 0.6).toFixed(3)})`;
-        ctx.beginPath();
-        ctx.ellipse(rp.x, rp.y, r * 0.5, r * 0.21, 0, 0, Math.PI * 2);
-        ctx.stroke();
-      }
-    }
-    ctx.restore();
-  }
-
-  /** 世界变换段绘制（Renderer.render 2d' 区一行调用）：涟漪（世界坐标）+
-   *  晨昏镜头光斑（恒等变换全屏）。月总死亡白闪已挪帧尾（见 drawMoonlordWhiteFlash） */
+  /** 世界变换段绘制（Renderer.render 2d' 区一行调用）：晨昏镜头光斑（恒等变换全屏）。
+   *  月总死亡白闪已挪帧尾（见 drawMoonlordWhiteFlash） */
   drawWorldFx(ctx: CanvasRenderingContext2D, camX: number, camY: number,
     z: number, viewW: number, viewH: number): void {
     if (!this.frameCtx) return;
-    this.updateRipples();
-    this.drawRipples(ctx);
     if (this.sunScreen) {
       // SunVisibilityPixel 采样（HorizonHelper.UpdateSunVisibility Main.cs:61769 帧末语义：
       // 本帧采样值下一帧生效——故先画后采，drawLensFlare 读的是上一帧值）

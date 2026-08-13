@@ -2875,13 +2875,13 @@ void GrowAshTree(int tx, int ty)
     bool flagL = false, flagR = false;
     for (int i = num - height; i < num; i++)
     {
-        int num6 = (int)r.Next(10);
+        int num5 = (int)r.Next(3);                              // ★cs:30595 先掷帧变体（与 GrowGemTreeFn 同步修正）
+        int num6 = (int)r.Next(10);                             // cs:30596 后掷枝型
         if (i == num - 1 || i == num - height) num6 = 0;
         while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) num6 = (int)r.Next(10);
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
-        int num5 = (int)r.Next(3);                              // 干身帧骰（帧值不入哈希）
         Put(tx, i);
         if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
         if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
@@ -6946,50 +6946,47 @@ var GEM_WALLS = new HashSet<ushort> { 0, 150, 138, 145, 107, 152, 140, 139, 141,
     2, 54, 55, 56, 57, 58, 59, 61, 185, 196, 197, 198, 199, 208, 209, 210, 211, 212, 213, 214, 215 };
 // IsTileTypeFitForTree（cs:29852）：基座 tuft 判定用草族全集
 var TREE_FIT = new HashSet<ushort> { 2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662 };
-// 返回码（SW_DEBUG_TREES=1 时逐采样打印）：0 成树 1 液体 2 非整砖 3 墙 4 基座 5 侧基 6 净空
-int GrowGemTreeFn(int tx, int ty, int treeTile)
+void GrowGemTreeFn(int tx, int ty, int treeTile)
 {
     // GrowTreeWithSettings（cs:30546-31004）宝石树分支：帧值不入哈希，只保掷骰序
+    // 门禁序：液体→nactive→墙→基座→侧基→高度掷→净空（cs:30551-30585）
     int num = ty;
     while (act[num * W + tx] != 0 && typ[num * W + tx] == 590) num++;   // 树苗 590（本链位无）
-    if (liq[(num - 1) * W + tx - 1] != 0 || liq[(num - 1) * W + tx] != 0 || liq[(num - 1) * W + tx + 1] != 0) return 1;
+    if (liq[(num - 1) * W + tx - 1] != 0 || liq[(num - 1) * W + tx] != 0 || liq[(num - 1) * W + tx + 1] != 0) return;
     int gi = num * W + tx;
-    if (act[gi] == 0) return 2;                                 // nactive（half/slope 此链位恒 0）
-    if (!GEM_WALLS.Contains(wal[(num - 1) * W + tx])) return 3;
-    if (!GEM_GROUND.Contains(typ[gi])) return 4;
+    if (act[gi] == 0) return;                                   // nactive（half/slope 此链位恒 0）
+    if (!GEM_WALLS.Contains(wal[(num - 1) * W + tx])) return;
+    if (!GEM_GROUND.Contains(typ[gi])) return;
     bool sideFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && GEM_GROUND.Contains(typ[num * W + tx + dx]);
-    if (!sideFit(-1) && !sideFit(1)) return 5;
-    if (Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1") Console.WriteLine($"  oragrow x={tx} num={num} pre={StreamHash():x8}");
+    if (!sideFit(-1) && !sideFit(1)) return;
     int height = (int)r.Next(7, 13);
     int num4 = height + 4;                                      // TreeTopPaddingNeeded = 4
-    if (tx - 2 < 0 || tx + 2 >= W || num - num4 < 0) return 6;
+    if (tx - 2 < 0 || tx + 2 >= W || num - num4 < 0) return;
     for (int ex = tx - 2; ex <= tx + 2; ex++)
         for (int ey = num - num4; ey <= num - 1; ey++)
         {
             int ei = ey * W + ex;
             if (act[ei] == 0) continue;
-            if (!EMPTY_ALLOW.Contains(typ[ei])) return 6;       // EmptyTileCheck ignoreID=20
+            if (!EMPTY_ALLOW.Contains(typ[ei])) return;         // EmptyTileCheck ignoreID=20
         }
     void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = (ushort)treeTile; act[ay * W + ax] = 1; } }
     bool flagL = false, flagR = false;
-    int dbgBrL = 0, dbgBrR = 0, dbgReroll = 0;
     for (int i = num - height; i < num; i++)
     {
-        int num6 = (int)r.Next(10);
-        int num5 = (int)r.Next(3);                              // 干身帧骰（帧值不入哈希）
+        int num5 = (int)r.Next(3);                              // ★cs:30595 先掷帧变体
+        int num6 = (int)r.Next(10);                             // cs:30596 后掷枝型（掷序即哈希语义）
         if (i == num - 1 || i == num - height) num6 = 0;
-        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) { num6 = (int)r.Next(10); dbgReroll++; }
+        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) { num6 = (int)r.Next(10); }
         flagL = false; flagR = false;
         if (num6 == 5 || num6 == 7) flagL = true;
         if (num6 == 6 || num6 == 7) flagR = true;
         Put(tx, i);
-        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); dbgBrL++; }   // 左枝 2 骰
-        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); dbgBrR++; }   // 右枝 2 骰
+        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
+        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
     }
     // 基座 tuft（cs:30846-30861）：两侧草族才置位 + 各 1/3 概率抹除（2 骰无条件）
     bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && TREE_FIT.Contains(typ[num * W + tx + dx]);
     bool tL = tuftFit(-1), tR = tuftFit(1);
-    if (Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1") Console.WriteLine($"  grow x={tx} num={num} h={height} tL={tL} tR={tR} brL={dbgBrL} brR={dbgBrR} reroll={dbgReroll}");  // pre-hash 在函数入口打印
     if ((int)r.Next(3) == 0) tL = false;
     if ((int)r.Next(3) == 0) tR = false;
     if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
@@ -6999,7 +6996,6 @@ int GrowGemTreeFn(int tx, int ty, int treeTile)
     int crownFx = (int)r.Next(13) != 0 ? 22 : 0;                // cs:30961 树冠骰
     int crownK = (int)r.Next(3);
     Put(tx, num - height);
-    return 0;
 }
 void ShimmerOpeningFn(int direction, int X, int Y, int caveOpeningSize)
 {
@@ -7121,20 +7117,13 @@ bool ShimmerMakeBiomeFn(int X, int Y)
     ShimmerOpeningFn(1, X + num5, Y, num8);
     Checkpoint("shimmeropen");
     StreamPt("shimmeropen");
-    bool dbgTrees = Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1";
     for (int num21 = 0; num21 < 500; num21++)
     {
         int num22 = (int)r.Next(X - 70, X + 70);
         int num23 = (int)r.Next(Y - 2, Y + 3);
         int num24 = (int)r.Next(7);
         int treeTileType = num24 switch { 0 => 583, 1 => 584, 2 => 585, 3 => 586, 4 => 587, 5 => 588, _ => 589 };
-        bool solidL = SolidTileGen(num22 - 1, num23), solidR = SolidTileGen(num22 + 1, num23);
-        if (solidL && solidR)
-        {
-            int rc = GrowGemTreeFn(num22, num23, treeTileType);
-            if (dbgTrees) Console.WriteLine($"tree[{num21}] x={num22} y={num23} t={num24} rc={rc}");
-        }
-        else if (dbgTrees) Console.WriteLine($"tree[{num21}] x={num22} y={num23} t={num24} rc=7(solid {solidL}/{solidR})");
+        if (SolidTileGen(num22 - 1, num23) && SolidTileGen(num22 + 1, num23)) GrowGemTreeFn(num22, num23, treeTileType);
     }
     Checkpoint("shimmer");
     StreamPt("shimmer");
@@ -7189,20 +7178,6 @@ if (Environment.GetEnvironmentVariable("SW_DUMP_SHIMMER") == "1")
     }
     shimmerXOut = num5;
     shimmerYOut = num4;
-}
-// Shimmer pass 之后的态（诊断用：与 <out>.shimstate 成对，逐格 diff 定位偏差；
-// 同为定长裸写：act[n] typ[2n] wal[2n] liq[n] liqT[n]）
-if (Environment.GetEnvironmentVariable("SW_DUMP_SHIMMER") == "1")
-{
-    using var fs2 = File.Create(outPath + ".shimstate.post");
-    using var bw2 = new BinaryWriter(fs2);
-    var typB2 = ToBytes(typ);
-    var walB2 = ToBytes(wal);
-    bw2.Write(act, 0, act.Length);
-    bw2.Write(typB2, 0, typB2.Length);
-    bw2.Write(walB2, 0, walB2.Length);
-    bw2.Write(liq, 0, liq.Length);
-    bw2.Write(liqT, 0, liqT.Length);
 }
 
 double TuneOceanDepth(int count, double depth, bool florida)

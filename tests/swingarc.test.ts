@@ -7,6 +7,7 @@ import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFracta
 import { SolarEruptionWhip, SolarFlare } from '../src/entities/SolarEruption';
 import { TideSlash } from '../src/entities/TideSlash';
 import { FirstFractalSlash } from '../src/entities/FirstFractal';
+import { ChainsawProj } from '../src/entities/ChainsawProj';
 import { Arrow } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -224,5 +225,34 @@ describe('初代分形剑 857（AI_168）+ 双足翼龙弹 711 模式', () => {
     expect(b.w).toBe(30); expect(b.h).toBe(30);
     expect(b.drawScale).toBeCloseTo(0.7, 3);
     expect(b.extraUpdates).toBe(1);
+  });
+});
+
+describe('屠夫链锯 509（AI_020 channel 持械）', () => {
+  it('挂手锚定 + 断链即亡 + 帧交替 + 持续命中 10t 冷却', () => {
+    const w = new World(160, 300, 30, 'open');
+    const list: unknown[] = [];
+    let dmgTaken = 0;
+    list.push({ id: 1, x: 50 * TILE, y: 89 * TILE, w: 40, h: 40,
+      dead: false, hp: 500,
+      hurt: (d: number) => { dmgTaken += d; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
+    const game = makeGame(w, list);
+    let ch = true;
+    const owner = { cx: 50 * TILE + 10, cy: 90 * TILE + 20, facing: 1, dead: false };
+    const saw = new ChainsawProj(owner as never, 120, 5.5,
+      () => ch, () => ({ x: 55 * TILE, y: 90 * TILE }));
+    saw.critChance = 0;                                   // 禁暴击（120 基伤断言确定性）
+    saw.fixedUpdate(1, game);
+    expect(saw.x + saw.w / 2).toBeCloseTo(owner.cx, 0);   // 挂手锚定
+    const f0 = saw['frame'];
+    saw.fixedUpdate(1, game); saw.fixedUpdate(1, game);
+    expect(saw['frame']).toBe(1 - f0);                     // 2t/帧交替
+    expect(dmgTaken).toBeGreaterThan(0);                   // 持续命中（40×40 覆盖弹盒）
+    const d0 = dmgTaken;
+    for (let t = 0; t < 5; t++) saw.fixedUpdate(1, game);
+    expect(dmgTaken).toBe(d0);                             // 10t 冷却内不重复（首击后 5t 仍在窗内）
+    ch = false;
+    saw.fixedUpdate(1, game);
+    expect(saw.dead).toBe(true);                           // 断链即亡
   });
 });

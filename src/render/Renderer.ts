@@ -1289,9 +1289,9 @@ export class Renderer {
     // 2d'. 挂物族存放物叠画（原版 TE*.Draw / 模特走 PlayerRenderer——本作画物品图标）
     this.drawFurnitureItems(world, cam, viewW, viewH, z);
 
-    // 2d'. 天气层（雨滴池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
+    // 2d'. 天气层（雨滴+雪粒池更新+绘制；沙尘粒子发射——Game 每帧已 attach 状态与 hooks）
     if (this.weatherFxActive) {
-      this.weatherFx.update(world, viewW, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
+      this.weatherFx.update(world, viewW, viewH, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
       this.weatherFx.draw(this, world);
     }
 
@@ -5737,7 +5737,9 @@ export class Renderer {
     if (!ho) return;
     const hm = n.hardMode && ho.hm !== undefined;
     const icon = this.atlas.vicon(hm ? ho.hm! : ho.pre);
-    if (!icon || !icon.img.complete || !icon.img.naturalWidth) return;
+    if (!icon) return;
+    const iconImg = icon.img as HTMLImageElement;   // vicon 恒 Image 背书（atlas 懒加载）
+    if (!iconImg.complete || !iconImg.naturalWidth) return;
     const aim = n.holdoutAim;
     const sd = n.facing;                                    // spriteDirection（+1 右 / −1 左）
     let ax = n.cx - (sd === 1 ? -14 : 14);                  // Bottom − OffsetsNPCOffhand[2]
@@ -5756,7 +5758,7 @@ export class Renderer {
     ctx.translate(Math.round(ax), Math.round(ay));
     ctx.rotate(aim * (Math.PI / 2) * sd);
     if (sd === -1) ctx.scale(-1, 1);
-    ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh,
+    ctx.drawImage(iconImg, icon.sx, icon.sy, icon.sw, icon.sh,
       num12, -icon.sh / 2, icon.sw * sc, icon.sh * sc);
     ctx.restore();
   }

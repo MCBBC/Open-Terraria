@@ -24,12 +24,36 @@ export function flattenDeep(obj, path = []) {
         out[cat] ??= {};
         Object.assign(out[cat], entries);
       }
+    } else if (path.length === 0 && k.includes('.')) {
+      // 顶层字面点分键(如 "Mods.SandboxWorld.Toast.X")按首段拆 = 类别 + 条目键。
+      // 曾把整键当类别、rest=[] → 产物 {"整键":{"":"文本"}} → 运行时按类别查不到,
+      // 页面直显裸键(NeedTempleKey Toast 根因,2026-08-14)。原版 84 分片顶层类别
+      // 均不含点,首段拆分安全。
+      const i = k.indexOf('.');
+      (out[k.slice(0, i)] ??= {})[k.slice(i + 1)] = v;
     } else {
       const [cat, ...rest] = [...path, k];
       (out[cat] ??= {})[rest.join('.')] = v;
     }
   }
   return out;
+}
+
+/**
+ * 产物形状校验(裸键类 bug 的闸门,build-l10n 与 vitest 审计共用):
+ * 类别名不得含 '.';条目键非空;条目值必须是 string。返回违例清单(空=通过)。
+ */
+export function validateTable(table) {
+  const bad = [];
+  for (const [cat, entries] of Object.entries(table)) {
+    if (cat.includes('.')) bad.push(`类别名含点: ${cat}`);
+    if (!entries || typeof entries !== 'object') { bad.push(`类别非对象: ${cat}`); continue; }
+    for (const [k, v] of Object.entries(entries)) {
+      if (k === '') bad.push(`空条目键 @ ${cat}`);
+      if (typeof v !== 'string') bad.push(`非字符串值 @ ${cat}.${k}: ${JSON.stringify(v).slice(0, 40)}`);
+    }
+  }
+  return bad;
 }
 
 /**
