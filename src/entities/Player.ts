@@ -1248,6 +1248,9 @@ export class Player extends Entity {
       }
     }
     const ix = this.inputX;
+    // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
+    // （动画窗代理 = itemAnimTicks>0 || useTime>0——非挥砍武器以 useTime 计窗）
+    const animBusy = this.itemAnimTicks > 0 || this.useTime > 0;
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
     if (this.dashDelay >= 0) {
@@ -1258,9 +1261,6 @@ export class Player extends Entity {
       // 翼飞行再 +0.2 一份（:19690）。无输入减速（:19771）:地面 runSlowdown=0.2
       // 空中 ×0.5,加法钳 0（旧乘法摩擦曲线高速段衰减过快）。慢速/燃烧门（:19675/
       // :19705 !slow&&!burned）。Chilled（:19485）压 accRun=maxRun 取消爬坡。
-      // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
-      // （动画窗代理 = itemAnimTicks>0 || useTime>0——非挥砍武器以 useTime 计窗）
-      const animBusy = this.itemAnimTicks > 0 || this.useTime > 0;
       const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
       const chilled = this.buffs.has(BuffType.Chilled);
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
@@ -1287,8 +1287,10 @@ export class Player extends Entity {
       const runAcc = mnt ? mnt.acceleration
         : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
       const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
-      if (ix !== 0 && (!animBusy || this.itemUseTurn)) {
-        this.facing = ix;
+      if (ix !== 0) {
+        // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
+        // useTurn 物品（工具族）豁免
+        if (!animBusy || this.itemUseTurn) this.facing = ix;
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
         const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
         // 全速段（|vx| 未到 maxRun → 加速;反向先 runSlowdown 制动 :19563-19568）

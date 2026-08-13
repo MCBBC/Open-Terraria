@@ -6,6 +6,8 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 const errors = [];
+const requests = [];
+page.on('request', (r) => { if (r.url().includes('Combat_')) requests.push(r.url()); });
 page.on('pageerror', (e) => errors.push(e.message));
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/?play=small&fontprobe=' + Date.now(), { waitUntil: 'domcontentloaded', timeout: 60000 });
 let inGame = false;
@@ -42,22 +44,24 @@ const pixels = await page.evaluate(() => {
   const ctx = canvas.getContext('2d');
   const [sx, sy] = g.camera.worldToScreen(g.player.cx, g.player.y - 30);
   const data = ctx.getImageData(Math.floor(sx) - 60, Math.floor(sy) - 30, 140, 60).data;
-  let lit = 0, colors = new Set();
+  let lit = 0, mid = 0, colors = new Set();
   for (let i = 0; i < data.length; i += 4) {
     if (data[i + 3] > 100 && (data[i] > 80 || data[i + 1] > 80 || data[i + 2] > 80)) {
       lit++;
+      if (data[i + 3] > 200) mid++;      // 近不透明像素占比(抗锯齿会产生大量中间 alpha)
       colors.add((data[i] >> 5) + ',' + (data[i + 1] >> 5) + ',' + (data[i + 2] >> 5));
     }
   }
-  return { lit, colors: colors.size };
+  return { lit, solid: mid / Math.max(1, lit), colors: colors.size };
 });
+// 位图字形:近不透明像素占比应 >0.9(整数缩放二值 alpha;monospace 抗锯齿仅 ~0.6)
 const A = [];
 const ok = (n, c, x) => A.push({ name: n, pass: !!c, ...x });
 ok('spawn-3', spawnRes === 3, { spawnRes });
-// 决定性:位图字体纹理被请求且加载(而非 monospace 回退)
-const fontLoaded = await page.evaluate(() =>
-  performance.getEntriesByType('resource').some((r) => r.name.includes('Combat_Text_p22.png')));
-ok('font-texture-loaded', fontLoaded, { fontLoaded });
+// 决定性:位图字体纹理被请求且加载(而非 monospace 回退)——CDP request 事件,
+// 勿用 Resource Timing(启动期资源已塞满其 250 条缓冲,新条目不记录=假阴性)
+const fontLoaded = requests.some((u) => u.includes('Combat_Text_p22.png'));
+ok('font-texture-loaded', fontLoaded, { fontLoaded, reqs: requests.length });
 ok('glyph-pixels', pixels.lit > 50, pixels);
 ok('glyph-colors', pixels.colors >= 3, pixels);   // 普通红/暴击橙/DoT 深红至少三色调
 const failed = A.filter((a) => !a.pass);

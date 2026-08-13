@@ -4079,7 +4079,7 @@ export class Game implements GameHooks {
     // 萤火虫族闪烁（NPC.cs:34395-34407，昼地表不亮）、发光蜗牛/熔岩蜗牛恒定（:34623-34630）、
     // 魔化夜 crawler 抖动（:34492）；敌怪/小动物/弹幕三桶 + 掉落物（微光化物品上浮
     // 白光 WorldItem.cs:511 (1-shimmerTime)*0.8 渐亮，ItemDrop.lightRGB getter）
-    for (const bucket of [this.entities.enemies, this.entities.critters, this.entities.projectiles, this.entities.drops]) {
+    for (const bucket of [this.entities.enemies, this.entities.critters, this.entities.projectiles, this.entities.drops, this.entities.npcs]) {
       for (const ent of bucket) {
         const l = (ent as Enemy).lightRGB;
         if (!l) continue;

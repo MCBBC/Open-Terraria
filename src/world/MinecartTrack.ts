@@ -291,12 +291,13 @@ function writeFrames(st: TileStore, i: number, j: number, front: number, back: n
 export function frameTrack(st: TileStore, i: number, j: number, pound = false, mute = false): boolean {
   if (!st.inBounds(i, j)) return false;
   const idx = st.idx(i, j);
-  // 仅认 tile 类型/active；frameX 可为 -1（PlaceTrack 初始态，Minecart.cs:959-962 mute 门）
-  if (!(TRACK_TILE >= 0 && !!(st.flags[idx] & 1) && st.type[idx] === TRACK_TILE)) {
-    if (mute) return false;
-    writeFrames(st, i, j, 0, -1);
-    return false;
-  }
+  // Minecart.cs:959-962 mute 门（仅 type 检查、不查 active）。原版 FrameTrack 对
+  // 非 314 格本身不设防——但全部调用点（WorldGen.cs:86033 case 314 / Player.cs:45444
+  // 锤击 / MessageBuffer.cs:1206 / MinecartDiggerHelper.cs:93）都只在 type==314 时进入，
+  // 非轨道格绝不会被写帧。这里对齐调用点语义：非 314 格直接返回，不写任何帧
+  //（曾在此处对非轨道邻格 writeFrames(0,-1)——frameTrackArea 六邻扫到实心邻块会
+  //  把家具/门/宝箱的 frameX/frameY 清成 0/0xFFFF 造成贴图损坏）。
+  if (TRACK_TILE < 0 || st.type[idx] !== TRACK_TILE) return false;
   const num = frontTrack(st, idx);          // 当前前轨（可为 -1：刚放置未定型）
   const num2 = backTrack(st, idx);          // 当前后轨
   // Minecart.cs:966：非法前轨按普通型（0）处理——放置首帧 -1 走默认分支

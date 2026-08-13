@@ -76,6 +76,7 @@ import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import { openAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
+import { openResearchPanel } from './ResearchUI';
 import { CharCreation } from './CharCreation';
 import type { Appearance } from '../player/Appearance';
 import type { ChestData } from '../world/World';
@@ -1704,6 +1705,17 @@ export class UI {
         openAchievementsPanel(this.game);
       });
       row.appendChild(bAch);
+      // Journey 研究献祭入口（原版仅旅程模式 UISacrificeDialog；Appearance.difficulty===3 门）
+      if (this.game.player.appearance?.difficulty === 3) {
+        const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112') !== 'LegacyInterface.112' ? Lang.text('LegacyInterface.112') : '研究');
+        bRes.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
+        bRes.addEventListener('mousedown', (e) => {
+          e.stopPropagation();
+          this.closeInventory();
+          openResearchPanel(this.game);
+        });
+        row.appendChild(bRes);
+      }
       this.invPanel.appendChild(row);
     }
 

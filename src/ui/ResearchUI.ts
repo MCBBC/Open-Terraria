@@ -7,7 +7,16 @@
 // ItemSacrificesUITab），此处为整包列表近似——献祭语义与计数 1:1，布局近似。
 import type { Game } from '../core/Game';
 import { Lang } from '../i18n/Lang';
-import { vanillaIdOfItem } from '../data/vanillaItemCombat';
+import { ITEM_DEFS } from '../data/items';
+
+/** 内部 item id → 原版 id（UI 侧轻量版 = Shimmer.vanillaIdOfItem 的 vid/键前缀链） */
+function vidOf(id: number): number {
+  const d = ITEM_DEFS[id];
+  if (!d) return -1;
+  if (d.vid != null) return d.vid;
+  const m = /^vi_(\d+)_/.exec(d.key);
+  return m ? +m[1] : -1;
+}
 
 const CSS = `
 .sw-res-panel { pointer-events:auto; position:fixed; left:50%; top:50%;
@@ -84,7 +93,7 @@ export function openResearchPanel(game: Game): void {
     const seen = new Map<number, number>();
     for (const s of inv.slots) {
       if (!s) continue;
-      const vid = vanillaIdOfItem(s.id);
+      const vid = vidOf(s.id);
       if (vid <= 0 || !r.tryGetSacrificeNumbers(vid)) continue;
       seen.set(vid, (seen.get(vid) ?? 0) + s.stack);
     }
@@ -105,11 +114,24 @@ export function openResearchPanel(game: Game): void {
       row.appendChild(bar);
       row.appendChild(el('div', 'num', doneItem ? '✓' : `${Math.min(info.have, info.need)}/${info.need}`));
       if (!doneItem) {
+        // 背包按原版 id 扣除（Player.ConsumeItem 顺序扫描语义的 UI 侧等价）：
+        // 从 slots 找到首个匹配 vid 的堆扣 1，返回是否成功
+        const consumeOne = (): boolean => {
+          for (let i = 0; i < inv.slots.length; i++) {
+            const s = inv.slots[i];
+            if (s && vidOf(s.id) === vid) {
+              s.stack--;
+              if (s.stack <= 0) inv.slots[i] = null;
+              return true;
+            }
+          }
+          return false;
+        };
         const b1 = el('button', '', Lang.text('Mods.SandboxWorld.Research.Sacrifice'));
         b1.addEventListener('mousedown', (e) => {
           e.stopPropagation();
-          // RegisterItemSacrifice：从背包扣 1 并计数（原版扣鼠标物/库存；此处背包首组）
-          if (inv.removeByVanilla(vid, 1) > 0 || inv.removeAtVanillaAny(vid, 1)) {
+          // RegisterItemSacrifice：扣 1 + 计数（幂等早退在内核侧）
+          if (consumeOne()) {
             r.sacrifice(vid, 1);
             game.cb.onInventoryChanged?.();
           }
@@ -118,11 +140,9 @@ export function openResearchPanel(game: Game): void {
         const bAll = el('button', '', Lang.text('Mods.SandboxWorld.Research.SacrificeAll'));
         bAll.addEventListener('mousedown', (e) => {
           e.stopPropagation();
-          let left = stack;
-          while (left > 0 && (inv.removeByVanilla(vid, 1) > 0 || inv.removeAtVanillaAny(vid, 1))) {
-            r.sacrifice(vid, 1); left--;
-          }
-          if (left < stack) game.cb.onInventoryChanged?.();
+          let n = 0;
+          while (n < stack && consumeOne()) { r.sacrifice(vid, 1); n++; }
+          if (n > 0) game.cb.onInventoryChanged?.();
           render();
         });
         row.appendChild(b1);

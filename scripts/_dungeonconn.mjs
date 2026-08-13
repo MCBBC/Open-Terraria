@@ -16,47 +16,39 @@ const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${n}${x
 
 for (const seed of SEEDS) {
   await page.goto(URL, { waitUntil: 'networkidle0' });
-  await page.waitForSelector('select', { timeout: 120000 });
-  await page.evaluate((s) => {
-    const inp = document.querySelector('input');
-    if (inp) inp.value = s;
-    document.querySelector('select').selectedIndex = 0;
-  }, seed);
-  await page.click('button');
+  await page.waitForFunction(() => window.__swFlow && window.__swFlow.newWorld, { timeout: 120000 });
+  await page.evaluate((s) => window.__swFlow.newWorld(s, 4200, 1200), seed);
   await page.waitForFunction(() => window.__swGame && window.__swGame.world, { timeout: 300000 });
   await new Promise((r) => setTimeout(r, 2500));
   const r = await page.evaluate(() => {
     const g = window.__swGame;
     const st = g.world.store;
     const dx = g.world.dungeonX, dy = g.world.dungeonY;
-    // 旧统计对照:dx±2 列窗口内从 dy-70 到 ground+40 的最长连续实心段
-    let run = 0, maxRun = 0, maxRunTop = 0;
-    for (let y = Math.max(2, dy - 70); y < Math.min(st.h - 1, g.world.groundLevel + 40); y++) {
-      let solid = 0;
-      for (let x = dx - 2; x <= dx + 2; x++) if (st.flags[st.idx(x, y)]) solid++;
-      if (solid >= 5) { run++; if (run > maxRun) { maxRun = run; maxRunTop = y - run + 1; } }
-      else run = 0;
-    }
-    // BFS 灌水
+    // BFS 灌水:门 tile(10 关/388/389 开)视为可通行(原版门可开,不是墙);
+    // 断言 = 最深"地牢墙开放格"(竖井/房厅挖空格自带地牢墙,天然洞穴没有)
+    const DOOR = new Set([10, 388, 389]);
+    const passable = (i) => !st.flags[i] || DOOR.has(st.type[i]);
     const startY = dy - 1;
     const startI = st.idx(dx, startY);
-    const startOpen = !st.flags[startI];
+    const startOpen = passable(startI);
     const seen = new Uint8Array(st.w * st.h);
     const stack = startOpen ? [dx, startY] : [];
     if (startOpen) seen[startI] = 1;
-    let maxDeep = startOpen ? startY : -1, count = 0;
-    const x0 = Math.max(2, dx - 220), x1 = Math.min(st.w - 3, dx + 220);
+    let maxDeep = startOpen ? startY : -1, maxDeepDW = -1, count = 0;
+    const x0 = Math.max(2, dx - 400), x1 = Math.min(st.w - 3, dx + 400);
     const y0 = Math.max(2, dy - 90), y1 = Math.min(st.h - 3, g.world.rockLevel + 320);
-    while (stack.length && count < 400000) {
+    const isDW = (x, y) => { const w = st.wall[st.idx(x, y)]; return w >= 7 && w <= 9 || w >= 94 && w <= 99; };
+    while (stack.length && count < 600000) {
       const y = stack.pop(), x = stack.pop();
       count++;
       if (y > maxDeep) maxDeep = y;
+      if (y > maxDeepDW && isDW(x, y)) maxDeepDW = y;
       const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
       for (let k = 0; k < 4; k++) {
         const nx = x + nb[k][0], ny = y + nb[k][1];
         if (nx < x0 || nx > x1 || ny < y0 || ny > y1) continue;
         const i = st.idx(nx, ny);
-        if (seen[i] || st.flags[i]) continue;
+        if (seen[i] || !passable(i)) continue;
         seen[i] = 1;
         stack.push(nx, ny);
       }
@@ -64,15 +56,13 @@ for (const seed of SEEDS) {
     return {
       seed: g.world.seedText ?? '', w: st.w, h: st.h,
       dx, dy, ground: g.world.groundLevel, rock: g.world.rockLevel,
-      startOpen, maxDeep, count, maxRun, maxRunTop,
-      conn: startOpen && maxDeep >= g.world.groundLevel + 60,
+      startOpen, maxDeep, maxDeepDW, count,
+      conn: startOpen && maxDeepDW >= g.world.rockLevel - 80,
     };
   });
   check(`种子 ${seed}: 老人位开放`, r.startOpen, `dungeon=(${r.dx},${r.dy})`);
-  check(`种子 ${seed}: 入口 BFS 接入地下地牢(深达 ground+60=${r.ground + 60})`,
-    r.conn, `maxDeep=${r.maxDeep} visited=${r.count} 列实心段≤${r.maxRun}(top=${r.maxRunTop})`);
-  // 对照断言:旧窗口实心段不应再有 50+ 行级堵塞(BFS 为准,此为辅助信号)
-  check(`种子 ${seed}: 老人位列窗无巨堵(实心段<40)`, r.maxRun < 40);
+  check(`种子 ${seed}: 入口经门接塔→竖井→地牢深处(最深地牢墙格≥rock-80=${r.rock - 80})`,
+    r.conn, `maxDeepDW=${r.maxDeepDW} maxDeep=${r.maxDeep} visited=${r.count}`);
 }
 check('无页面错误', errors.length === 0, errors.slice(0, 2).join('|').slice(0, 160));
 console.log(`\n${pass} PASS / ${fail} FAIL`);

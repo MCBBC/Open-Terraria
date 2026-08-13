@@ -246,24 +246,25 @@ describe('冲刺（DashMovement 1:1）', () => {
 
 // ============ 3 沙丘行者靴（Player.cs:26225-26231） ============
 describe('沙丘行者靴（runningOnSand ×1.75）', () => {
-  it('沙族地格检测 + 全参数 ×1.75：极速 5.2 → 9.1（原版乘区非 +0.25 定值）', () => {
+  it('沙族地格检测 + 全参数 ×1.75（慢爬坡上限:沙 5.25/泥 3.0;原版乘区非 +0.25 定值）', () => {
     const sand = TILE_BY_KEY['sand']!;
     const run = (floorTile: number): { p: Player; vx: number; onSand: boolean } => {
       const w = new World(60, 60, 42, 'dune');
-      for (let x = 12; x <= 40; x++) w.store.setTileSilent(x, 30, floorTile);
+      for (let x = 2; x <= 57; x++) w.store.setTileSilent(x, 30, floorTile);
       const p = new Player(20 * 16, 27 * 16, new Inventory());
       p.inv.armor[3] = { id: _iid(4055), stack: 1 };   // 沙丘行者靴 runSpeed 6 + desertBoots
       p.inputX = 1;
-      for (let i = 0; i < 30; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+      for (let i = 0; i < 400; i++) p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);  // 慢爬坡(×0.2)需长直道
       return { p, vx: p.vx, onSand: p.runningOnSand };
     };
     const onSand = run(sand);
     const onDirt = run(1 /* dirt */);
     expect(onSand.onSand).toBe(true);     // FloorVisuals :23457 沙族集合命中
     expect(onDirt.onSand).toBe(false);
-    // maxSpd = 2.6 × moveMult(=6/3×...=2) ×(沙上 1.75) = 9.1 / 泥土 5.2
-    expect(onSand.vx).toBeCloseTo(2.6 * 2 * 1.75, 5);
-    expect(onDirt.vx).toBeCloseTo(2.6 * 2, 5);
+    // runSpeed/3-1 折算已拆(2026-08-13,原版 accRunSpeed 不随 moveSpeed 缩放):
+    // maxRun = 3 × moveMult(=1) ×(沙上 1.75) = 5.25 / 泥土 3.0;靴族走【慢爬坡】到 6×1.75
+    expect(onSand.vx).toBeCloseTo(3 * 1.75, 5);
+    expect(onDirt.vx).toBeCloseTo(3, 5);
   });
 });
 

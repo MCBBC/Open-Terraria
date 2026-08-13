@@ -1,6 +1,7 @@
 // 入口：加载素材/字体/文案 → VUI 主菜单 → 生成/加载世界 → 进入游戏
 // 流程编排见 mainFlow.ts；本文件只做装配 + 游戏内键盘/开发者工具接线。
 import { Game } from './core/Game';
+import { showSplash } from './ui/Splash';
 import { UI } from './ui/UI';
 import { kvHas } from './save/KvStore';
 import { saveGame } from './save/SaveFile';
@@ -358,7 +359,12 @@ setInterval(() => {
 
 // ---- 启动 ----
 kvHas('sandboxworld.quicksave').then(async () => {
+  // 启动加载画面（Main.DrawSplash :51908：随机三件套+淡入淡出时序+LoadingSunflower）
+  const splashGate: { resolve: () => void } = { resolve: () => {} };
+  const splash = showSplash({ loading: new Promise<void>((r) => { splashGate.resolve = r; }) });
   await loadAssets();
+  splashGate.resolve();
+  splash.done();
   if (atlas) UITextures.setAtlas(atlas);
   // options 先行(语言设置在 options 里),Lang.init 按 options.data.lang 加载语言包;
   // mainFlow 内的 options.load() 幂等,此处已加载则直接返回
