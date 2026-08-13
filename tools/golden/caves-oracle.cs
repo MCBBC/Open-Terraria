@@ -510,7 +510,7 @@ void Mountinater(int i, int j)
 }
 
 // ================= Pass 1：Dunes（cs:11540-11602 + DunesBiome.cs + SurfaceMap.cs）=================
-r.Next(3); // DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）
+int dungeonTheme = (int)r.Next(3); // DungeonCrawler.SetupDungeonGenVarVariables（cs:11542 + DungeonCrawler.cs:56）——地牢砖主题 0/1/2=蓝/绿/粉
 // Count：WorldGenRange(1,2,ScaleWith:WorldWidth) → Next((int)(w/4200*1), (int)(w/4200*2)+1)
 int dunesCount = (int)r.Next((int)(W / 4200.0 * 1), (int)(W / 4200.0 * 2) + 1);
 var pyrX = new List<int>(); var pyrY = new List<int>();
@@ -3917,7 +3917,2416 @@ Checkpoint("lakes");
     }
 }
 Checkpoint("slush");
-Checkpoint("dungeon");   // #32 占位：DungeonCrawler 转录落地前=slush 同态快照（零掷骰占位，勿删）
+// ================= Pass 32 Dungeon（cs:14816 + DungeonCrawler.cs + Legacy* 全家 1:1）=================
+// 普通世界 = Legacy 路径：LegacyDungeonLayoutProvider(LegacyDungeonLayout) +
+// LegacyDungeonHall / LegacyEntranceDungeonHall / LegacyDungeonRoom / LegacyDungeonEntrance
+// + DungeonGlobal{Early/Spikes/Doors/WallVariants/Platforms/BiomeChests/Bookshelves/
+//   BasicChests/Lights/Traps/GroundFurniture/Paintings/Banners/Late} 特征管线。
+// ★掷骰位移说明：SetupDungeonGenVarVariables 的入口类型 2 掷 + entrance RandomSeed
+// 原版在 **Dunes pass 头**消耗（cs:11542，先于中间全部 pass）；本 oracle 与 JS 侧
+// 同步**延后到本 pass 头**（相对序保持 A→B→Seed→shelf→lantern→skewed）——
+// pre-dungeon 检查点哈希保持现状，两端口径一致。
+var dgUR = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+var dgSolidTop = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+int dgBrick = dungeonTheme == 0 ? 41 : dungeonTheme == 1 ? 43 : 44;          // SetupDungeonGenVarVariables（cs:63-93）
+int dgWall = dungeonTheme == 0 ? 7 : dungeonTheme == 1 ? 8 : 9;
+int dgCrack = dungeonTheme == 0 ? 481 : dungeonTheme == 1 ? 482 : 483;
+var dgWallVariants = new int[3];                                              // SetupDungeonDataVariables（cs:202-221）
+if (dgWall == 8) { dgWallVariants[0] = 8; dgWallVariants[1] = 98; dgWallVariants[2] = 99; }
+else if (dgWall == 9) { dgWallVariants[0] = 9; dgWallVariants[1] = 96; dgWallVariants[2] = 97; }
+else { dgWallVariants[0] = 7; dgWallVariants[1] = 94; dgWallVariants[2] = 95; }
+// outerPotentialDungeonBounds（CreatePotentialDungeonBounds，DungeonUtils.cs:2058-2077：
+// percentInMiddle=0.10/percentOnEdges=0.05；入口下延段的跳过带用）
+double dgPotTp = (worldSurface + 10.0) / (double)H;
+double dgPotBt = ((double)(H - 200) - 10.0) / (double)H;
+int dgPotL = dungeonRight ? (int)(W * (0.5 + 0.05000000074505806)) : (int)(W * 0.05000000074505806);
+int dgPotR = dungeonRight ? W - (int)(W * 0.05000000074505806) : (int)(W * (0.5 - 0.05000000074505806));
+int dgPotT = Math.Clamp((int)((double)H * dgPotTp), 10, H - 10);
+int dgPotB = Math.Clamp((int)((double)H * dgPotBt), 10, H - 10);
+dgPotL = Math.Clamp(dgPotL, 10, W - 10); dgPotR = Math.Clamp(dgPotR, 10, W - 10);
+int dgEntA = (int)r.Next(3);        // 入口类型掷①（普通世界 flag 即真只跑一轮；结果不消费照掷）
+int dgEntB = (int)r.Next(3);        // 入口类型掷②
+int dgEntSeed = (int)r.Next();      // preGenDungeonEntranceSettings.RandomSeed（Legacy 不预计算位置）
+var dgShelf = new int[3];           // cs:243-254 书架平台样式（三选不重复）
+dgShelf[0] = (int)r.Next(9, 13);
+do { dgShelf[1] = (int)r.Next(9, 13); } while (dgShelf[1] == dgShelf[0]);
+dgShelf[2] = (int)r.Next(9, 13);
+while (dgShelf[2] == dgShelf[0] || dgShelf[2] == dgShelf[1]) dgShelf[2] = (int)r.Next(9, 13);
+var dgLantern = new int[3];         // cs:255-266 灯笼样式
+dgLantern[0] = (int)r.Next(7);
+do { dgLantern[1] = (int)r.Next(7); } while (dgLantern[1] == dgLantern[0]);
+dgLantern[2] = (int)r.Next(7);
+while (dgLantern[2] == dgLantern[0] || dgLantern[2] == dgLantern[1]) dgLantern[2] = (int)r.Next(7);
+var dgBanner = new int[6] { 10, 11, 12, 13, 14, 15 };                          // cs:267-273
+bool dgSkewed = (int)r.Next(4) == 0;                                           // cs:274 useSkewedDungeonEntranceHalls
+int dgDoorStyle = dungeonTheme == 0 ? 16 : dungeonTheme == 1 ? 17 : 18;        // Item 1411/1412/1413 placeStyle（Item.cs:17460/17472/17484）
+// —— 深度锚点（cs:14828-14870）：(ws+rock)/2 ± Next(-200,200)；下方 10 格无实心则下扫
+// 到实心；起点即实心则上爬（上限 60）首个非实心再下压 60-num4 ——
+int dgX0 = dungeonLocation;
+int dgY0 = (int)((worldSurface + rockLayer) / 2.0) + (int)r.Next(-200, 200);
+{
+    int dgCap = (int)((worldSurface + rockLayer) / 2.0) + 200;
+    bool dgSol = false;
+    for (int k = 0; k < 10; k++) if (DgSolid(dgX0, dgY0 + k)) { dgSol = true; break; }
+    if (!dgSol) { while (dgY0 < dgCap && !DgSolid(dgX0, dgY0 + 10)) dgY0++; }
+    if (dgSol)
+    {
+        int n4 = 0;
+        while (DgSolid(dgX0, dgY0 - n4)) { n4++; if (n4 == 60) break; }
+        if (n4 < 60) dgY0 += 60 - n4;
+    }
+}
+// —— MakeDungeon（DungeonCrawler.cs:327-505）状态 ——
+var dgRooms = new List<DRoom>();
+var dgHalls = new List<DHall>();
+var dgDoors = new List<DDoor>();
+var dgPlats = new List<DPlat>();
+var dgPits = new List<DBnd>();      // 已落成 DungeonPitTrap 的 Bounds（CanGenerateFeatureAt 门）
+var dgBounds = new DBnd();          // data.dungeonBounds
+var dgEntBounds = new DBnd();       // dungeonEntrance.Bounds
+bool dgEntExists = false;
+bool dgEntOnSurface = false;        // createdDungeonEntranceOnSurface
+double dgLastHallX = 0.0, dgLastHallY = 0.0;   // lastDungeonHall（Vector2D）
+bool dgPitFlood = true;             // makeNextPitTrapFlooded（cs:345 初值 true）
+int dgLootStyle = 0;                // genVars.dungeonLootStyle
+int dgPosX, dgPosY, dgTopX;         // generatingDungeonPositionX/Y + generatingDungeonTopX
+int dgDungeonX = 0, dgDungeonY = 0; // Main.dungeonX/Y（老头锚；Early pit 陷阱 num44 下限用）
+double dgS1X = (int)r.Next(25, 30), dgS1Y = (int)r.Next(20, 25);   // cs:349-352
+double dgS2X = (int)r.Next(35, 50), dgS2Y = (int)r.Next(10, 15);
+int dgNum = W / 60; dgNum += (int)r.Next(0, dgNum / 3);             // cs:353-355（dungeonStepScalar=1）
+dgPosX = dgX0; dgPosY = dgY0;
+dgBounds.Set(dgX0, dgY0, dgX0, dgY0);
+DgLayout(dgNum);                                   // LegacyDungeonLayoutProvider.LegacyDungeonLayout
+// cs:374-396：默认地牢取**已生成房间中最高的 InnerBounds 顶部中心**回写 generatingDungeonPosition
+{
+    var ib = dgRooms[0].Inner;
+    float bx = (ib.L + ib.R) / 2f, by = ib.T;
+    for (int i = 1; i < dgRooms.Count; i++)
+    {
+        if (!dgRooms[i].Generated) continue;
+        var b2 = dgRooms[i].Inner;
+        float cx = (b2.L + b2.R) / 2f, cy = b2.T;
+        if (cy < by) { bx = cx; by = cy; }
+    }
+    dgPosX = (int)bx; dgPosY = (int)by; dgTopX = (int)bx;
+}
+Checkpoint("dungeonL");
+// —— 爬升入口大厅（cs:398-449）：上限 100 轮；roomDelay 归零后 1/5 且 y>ws+100 时
+// 插入 halls(forceX)+room 分支（位置还原）；legacy 无预计算 → 只走盲爬 ——
+dgEntOnSurface = false;
+{
+    int roomDelay = 5;
+    int guard = 100;
+    while (!dgEntOnSurface)
+    {
+        guard--;
+        if (guard <= 0) break;
+        if (roomDelay > 0) roomDelay--;
+        if (roomDelay == 0 && (int)r.Next(5) == 0 && (double)dgPosY > worldSurface + 100.0)
+        {
+            roomDelay = 10;
+            int sx = dgPosX, sy = dgPosY;
+            DgHall(new DHall { Seed = (int)r.Next(), ForceX = false });       // MakeDungeon_GetHallSettings(Legacy)
+            DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = false });
+            dgPosX = sx; dgPosY = sy;
+        }
+        DgEntHall((int)r.Next());                                             // GenerateNextEntranceHall_Legacy
+    }
+}
+DgEntrance((int)r.Next(), dgEntSeed);   // MakeDungeon_GetEntrance（含 GetEntranceSettings 的 1 颗废弃掷）
+Checkpoint("dungeonE");
+// —— 门/平台候选收集（cs:456-471：仅 Processed 即 generated 的房/廊）——
+for (int i = 0; i < dgRooms.Count; i++) if (dgRooms[i].Generated) DgRoomPlatformsDoors(dgRooms[i]);
+for (int i = 0; i < dgHalls.Count; i++) if (dgHalls[i].Generated) DgHallPlatformsDoors(dgHalls[i]);
+Checkpoint("dungeonPD");
+DgEarly(); Checkpoint("dungeonPi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
+DgSpikes(); Checkpoint("dungeonS");     // DungeonGlobalSpikes
+DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors
+DgWallVariants(); Checkpoint("dungeonW"); // DungeonGlobalWallVariants
+DgPlatforms(); Checkpoint("dungeonP");    // DungeonGlobalPlatforms
+DgBiomeChests(); Checkpoint("dungeonC");  // DungeonGlobalBiomeChests（5 个上锁生物群系箱）
+DgBookshelves(); Checkpoint("dungeonB");  // DungeonGlobalBookshelves
+DgBasicChests(); Checkpoint("dungeonG");  // DungeonGlobalBasicChests（房间金箱）
+dgBounds.Inflate(25);                     // cs:489-490
+DgLights(); Checkpoint("dungeonI");       // DungeonGlobalLights
+DgTraps(); Checkpoint("dungeonT");        // DungeonGlobalTraps
+DgFurniture(); Checkpoint("dungeonF");    // DungeonGlobalGroundFurniture
+DgPaintings(); Checkpoint("dungeonPa");   // DungeonGlobalPaintings
+DgBanners(); Checkpoint("dungeonBa");     // DungeonGlobalBanners
+// Late 双地牢特征（Default 无 BiomeDungeonRoom/BrickGrass → 纯空转）
+Checkpoint("dungeon");   // #32 转录落地（原 slush 同态占位已替换）
+// ---- Dungeon 局部函数（均在隐式 Main 作用域内，可前向引用）----
+// InAnyPotentialDungeonBounds（outer，fluff=0 → Rectangle.Contains 半开区间）
+bool DgPotContains(int x, int y) => x >= dgPotL && x < dgPotR && y >= dgPotT && y < dgPotB;
+bool DgSolid(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return false;
+    int i = y * W + x;
+    if (act[i] == 0) return false;
+    ushort t = typ[i];
+    if (!SOLID.Contains(t) || dgSolidTop.Contains(t)) return false;
+    if (t == 481 || t == 482 || t == 483) return false;   // SetCrackedBrickSolidity(false)（cs:344，pass 内恒非实心）
+    return true;
+}
+bool DgIsDW(int w) => w > 0 && WALL_DUNGEON.Contains((ushort)w);          // IsConsideredDungeonWall（DungeonUtils.cs:1904）
+bool DgIsDT(int t) => t > 0 && TILE_DUNGEON.Contains((ushort)t);          // IsConsideredDungeonTile（:1843）
+bool DgInWorld(int x, int y, int fluff) => x >= fluff && x < W - fluff && y >= fluff && y < H - fluff;
+// GetHighestProtectionTypeFromPoint（DungeonUtils.cs:1704）——Legacy 房 _innerShapeData 恒空 →
+// 基类实现：OuterBounds.Contains ? Walls : None
+int DgProt(int x, int y, List<DRoom> rooms)
+{
+    int prot = 0;   // 0=None 1=Tiles 2=Walls 3=TilesAndWalls
+    for (int k = 0; k < rooms.Count; k++)
+    {
+        int p = rooms[k].Outer.Contains(x, y) ? 2 : 0;
+        if (p == 1) prot = (prot == 2) ? 3 : 1;
+        else if (p == 2) prot = (prot == 1) ? 3 : 2;
+        else if (p == 3) prot = 3;
+        if (prot == 3) break;
+    }
+    return prot;
+}
+List<DRoom> DgRoomsInSpots(double sx, double sy, double ex, double ey, int fluff)
+{
+    // GetAllRoomsInSpots（DungeonUtils.cs:1773）：起点/中点/终点三取样，OuterBounds 含 fluff 缓冲
+    var list = new List<DRoom>();
+    double mx = sx + (ex - sx) / 2.0, my = sy + (ey - sy) / 2.0;
+    for (int i = 0; i < dgRooms.Count; i++)
+    {
+        var rm = dgRooms[i];
+        if (rm.Outer.ContainsF((int)sx, (int)sy, fluff) || rm.Outer.ContainsF((int)mx, (int)my, fluff) || rm.Outer.ContainsF((int)ex, (int)ey, fluff))
+            list.Add(rm);
+    }
+    return list;
+}
+void DgChTile(int i, ushort t, bool reset)
+{
+    if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
+    act[i] = 1; typ[i] = t;
+}
+void DgChWall(int i, ushort w, bool reset)
+{
+    if (reset) { typ[i] = 0; wal[i] = 0; liq[i] = 0; liqT[i] = 0; act[i] = 0; }
+    wal[i] = w;
+}
+// DungeonHall.CanPlaceTileAt（DungeonHall.cs:161）——普通世界：仅非地牢墙处置砖
+bool DgCanPlaceTileAt(int idx)
+{
+    if (DgIsDW(wal[idx]))
+    {
+        if (act[idx] != 0)
+        {
+            if (DgIsDT(typ[idx])) return false;          // IsHigherOrEqualTieredDungeonTile：tileDungeon 同档
+            return typ[idx] != dgCrack;
+        }
+        return false;
+    }
+    return true;
+}
+// LegacyDungeonLayoutProvider.LegacyDungeonLayout（:25-98）
+void DgLayout(int steps)
+{
+    int maxSteps = steps;
+    dgBounds = new DBnd();
+    dgBounds.Set(dgPosX, dgPosY, dgPosX, dgPosY);
+    int hallSeed = (int)r.Next();      // legacyDungeonHallSettings.RandomSeed（:37）
+    int roomSeed = (int)r.Next();      // legacyDungeonRoomSettings.RandomSeed（:42）
+    DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = true });   // 起始房（:44-50）
+    int roomDelay = 5;
+    while (steps > 0)
+    {
+        dgBounds.Upd(dgPosX, dgPosY);
+        steps--;
+        if (roomDelay > 0) roomDelay--;
+        if (roomDelay == 0 && (int)r.Next(3) == 0)
+        {
+            roomDelay = 5;
+            if ((int)r.Next(2) == 0)
+            {
+                int sx = dgPosX, sy = dgPosY;
+                DgHall(new DHall { Seed = (int)r.Next() });
+                if ((int)r.Next(2) == 0) DgHall(new DHall { Seed = (int)r.Next() });
+                DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = false });
+                dgPosX = sx; dgPosY = sy;
+            }
+            else
+            {
+                DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = false });
+            }
+        }
+        else
+        {
+            DgHall(new DHall { Seed = (int)r.Next() });
+        }
+    }
+    DgRoom(new DRoom { Seed = (int)r.Next(), X = dgPosX, Y = dgPosY, Start = false });   // 尾房（:94-96）
+}
+// LegacyDungeonRoom.LegacyRoom（Rooms/LegacyDungeonRoom.cs:104-304）
+void DgRoom(DRoom s)
+{
+    dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
+    double num = 1.0 * 1.0;                                   // roomStrengthScalar（StartingRoom→1）
+    double num2 = (int)(15.0 * num) + (int)rr.Next(15);
+    double vx = (int)rr.Next(-10, 11) * 0.1 * 1.0;            // roomSlantVariantScalar=1
+    double vy = (int)rr.Next(-10, 11) * 0.1 * 1.0;
+    if (vx == 0.0 && vy == 0.0)
+    {
+        if ((int)rr.Next(2) == 0) vx = ((int)rr.Next(2) != 0) ? 1 : -1;
+        else vy = ((int)rr.Next(2) != 0) ? 1 : -1;
+    }
+    double px = s.X, py = s.Y - num2 / 2.0;
+    double num3 = 1.0;                                        // roomStepScalar（StartingRoom→1）
+    int num4 = (int)(10.0 * num3) + (int)rr.Next(10);
+    double num5 = num2, num6 = 0.5;                           // roomInteriorToExteriorRatio
+    var rm = new DRoom { Seed = s.Seed, X = s.X, Y = s.Y, Start = s.Start, Generated = true };
+    rm.Inner.Set((int)px, (int)py, (int)px, (int)py);
+    rm.Outer.Set((int)px, (int)py, (int)px, (int)py);
+    dgRooms.Add(rm);
+    while (num4 > 0)
+    {
+        num4--;
+        int x0 = Math.Max(0, Math.Min(W - 1, (int)(px - num2 * 0.800000011920929 - 5.0)));
+        int x1 = Math.Max(0, Math.Min(W - 1, (int)(px + num2 * 0.800000011920929 + 5.0)));
+        int y0 = Math.Max(0, Math.Min(H - 1, (int)(py - num2 * 0.800000011920929 - 5.0)));
+        int y1 = Math.Max(0, Math.Min(H - 1, (int)(py + num2 * 0.800000011920929 + 5.0)));
+        dgBounds.Upd(x0, y0, x1 - 1, y1 - 1);
+        rm.Outer.Upd(x0, y0, x1 - 1, y1 - 1);
+        int ix0 = Math.Max(0, Math.Min(W - 1, (int)(px - num2 * num6)));
+        int ix1 = Math.Max(0, Math.Min(W - 1, (int)(px + num2 * num6)));
+        int iy0 = Math.Max(0, Math.Min(H - 1, (int)(py - num2 * num6)));
+        int iy1 = Math.Max(0, Math.Min(H - 1, (int)(py + num2 * num6)));
+        rm.Inner.Upd(ix0, iy0, ix1 - 1, iy1 - 1);
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                int i = y * W + x;
+                liq[i] = 0;
+                if (!DgIsDW(wal[i])) DgChTile(i, (ushort)dgBrick, true);   // IsHigherOrEqualTieredDungeonWall
+            }
+        for (int x = x0 + 1; x < x1 - 1; x++)
+            for (int y = y0 + 1; y < y1 - 1; y++)
+                DgChWall(y * W + x, (ushort)dgWall, false);
+        for (int x = ix0; x < ix1; x++)
+            for (int y = iy0; y < iy1; y++)
+                DgChWall(y * W + x, (ushort)dgWall, true);
+        px += vx; py += vy;
+        vx = Math.Max(-1.0, Math.Min(1.0, vx + (int)rr.Next(-10, 11) * 0.05 * 1.0));
+        vy = Math.Max(-1.0, Math.Min(1.0, vy + (int)rr.Next(-10, 11) * 0.05 * 1.0));
+    }
+    rm.SX = s.X; rm.SY = s.Y - num2 / 2.0; rm.EX = px; rm.EY = py; rm.Strength = (int)num5;
+    dgPosX = (int)px; dgPosY = (int)py;
+}
+// LegacyDungeonHall.LegacyHall（Halls/LegacyDungeonHall.cs:65-876）
+void DgHall(DHall s)
+{
+    dynamic rr = Activator.CreateInstance(dgUR, s.Seed)!;
+    double vx = 0, vy = 0;
+    int num = (int)(4.0 * 1.0) + (int)rr.Next(2);             // hallStrengthScalar=1
+    double px = s.X < 0 ? dgPosX : s.X, py = s.Y < 0 ? dgPosY : s.Y;
+    double sx = px, sy = py;
+    int num2 = 1;
+    double hallStepScalar = 1.0;
+    int num3 = (int)(35.0 * hallStepScalar) + (int)rr.Next(45);
+    bool dangerous = (double)rr.NextDouble() <= 0.166;        // CrackedBrickChance（DungeonHallSettings.cs:15）
+    if (s.ForceX) { num3 += (int)(20.0 * hallStepScalar); dgLastHallX = 0; dgLastHallY = 0; }
+    else if ((int)rr.Next(5) == 0) { num *= 2; num3 /= 2; }
+    int steps = num3;
+    int num4 = num;
+    double num5 = 0.5;                                        // hallInteriorToExteriorRatio
+    bool flag2 = false;                                       // Zigzag
+    int num6 = (H - 200) - (int)(100.0 * 1.0);                // UnderworldLayer-100*max(scalars)
+    bool first = true;
+    bool done = false;
+    double z2x = 0, z2y = 0;                                  // zero2
+    while (!done)
+    {
+        bool horiz = false;
+        if (first && !s.ForceX)
+        {
+            bool f7 = true, f8 = true, f9 = true, f10 = true, f11 = false;
+            int n7 = num3; bool f12 = false;
+            for (int y = (int)py; y > (int)py - n7; y--)
+            {
+                if (!DgInWorld((int)px, y, 50)) { f7 = false; break; }
+                if (DgIsDW(wal[y * W + (int)px])) { if (f12) { f7 = false; break; } }
+                else f12 = true;
+            }
+            f12 = false;
+            for (int y = (int)py; y < (int)py + n7; y++)
+            {
+                if (!DgInWorld((int)px, y, 50)) { f8 = false; break; }
+                if (y >= num6) { f11 = true; f8 = false; break; }
+                if (DgIsDW(wal[y * W + (int)px])) { if (f12) { f8 = false; break; } }
+                else f12 = true;
+            }
+            f12 = false;
+            for (int x = (int)px; x > (int)px - n7; x--)
+            {
+                if (!DgInWorld(x, (int)py, 50)) { f9 = false; break; }
+                if (DgIsDW(wal[(int)py * W + x])) { if (f12) { f9 = false; break; } }
+                else f12 = true;
+            }
+            f12 = false;
+            for (int x = (int)px; x < (int)px + n7; x++)
+            {
+                if (!DgInWorld(x, (int)py, 50)) { f10 = false; break; }
+                if (DgIsDW(wal[(int)py * W + x])) { if (f12) { f10 = false; break; } }
+                else f12 = true;
+            }
+            if (!f9 && !f10 && !f7 && !f8)
+            {
+                num2 = ((int)rr.Next(2) != 0) ? 1 : -1;
+                if ((int)rr.Next(2) == 0) horiz = true;
+                if (num2 == 1 && !horiz && f11)
+                {
+                    num2 = ((int)rr.Next(2) == 0) ? 1 : -1;
+                    horiz = true;
+                }
+            }
+            else
+            {
+                int n10 = 0, n11 = 100;
+                do
+                {
+                    n11--;
+                    if (n11 <= 0) { n10 = 0; break; }
+                    n10 = (int)rr.Next(4);
+                    if (n10 == 1 && f11) n10 = ((int)rr.Next(2) == 0) ? 2 : 3;
+                }
+                while (!(n10 == 0 && f7) && !(n10 == 1 && f8) && !(n10 == 2 && f9) && !(n10 == 3 && f10));
+                switch (n10)
+                {
+                    case 0: num2 = -1; break;
+                    case 1: num2 = 1; break;
+                    default: horiz = true; num2 = (n10 != 2) ? 1 : -1; break;
+                }
+            }
+        }
+        else
+        {
+            num2 = ((int)rr.Next(2) != 0) ? 1 : -1;
+            if ((int)rr.Next(2) == 0) horiz = true;
+            if (num2 == 1 && py + num3 >= num6)
+            {
+                num2 = ((int)rr.Next(2) != 0) ? 1 : -1;
+                horiz = true;
+            }
+        }
+        first = false;
+        if (s.ForceX) horiz = true;
+        if (horiz)
+        {
+            z2x = -num2; z2y = 0;
+            vy = 0; vx = num2;
+            if ((int)rr.Next(3) == 0)
+            {
+                if ((int)rr.Next(2) == 0) vy = -0.20000000298023224;
+                else vy = 0.20000000298023224;               // hallSlantVariantScalar=1
+            }
+        }
+        else
+        {
+            num++;
+            vy = num2; vx = 0;
+            z2x = 0; z2y = -num2;
+            if (0.66 > 0.0 && (double)rr.NextDouble() <= 0.66)   // ZigzagChance=0.66
+            {
+                flag2 = true;
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(10, 20) * 0.1;
+                else vx = (-(int)rr.Next(10, 20)) * 0.1;
+            }
+            else if ((int)rr.Next(2) == 0)
+            {
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 40) * 0.01;
+                else vx = (-(int)rr.Next(20, 40)) * 0.01;
+            }
+            else num3 /= 2;
+        }
+        if (dgLastHallX != z2x || dgLastHallY != z2y) done = true;
+    }
+    float n13 = W * 0.25f, n14 = W * 0.75f;
+    bool f13 = py < rockLayer + 100.0;
+    bool f14 = px < W / 2 && px > n13;
+    bool f15 = px > W / 2 && px < n14;
+    if (!s.ForceX)
+    {
+        if (px > W - 200)
+        {
+            num2 = -1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+            if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
+        }
+        else if (px < 200.0)
+        {
+            num2 = 1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+            if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
+        }
+        else if (py >= num6)
+        {
+            num2 = -1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            if ((int)rr.Next(2) == 0)
+            {
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
+                else vx = (-(int)rr.Next(20, 50)) * 0.01;
+            }
+        }
+        else if (py < 200.0)
+        {
+            num2 = 1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            if ((int)rr.Next(2) == 0)
+            {
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
+                else vx = (-(int)rr.Next(20, 50)) * 0.01;
+            }
+        }
+        else if (f13)
+        {
+            num2 = 1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            if (0.66 > 0.0 && (double)rr.NextDouble() <= 0.66)
+            {
+                flag2 = true;
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(10, 20) * 0.1;
+                else vx = (-(int)rr.Next(10, 20)) * 0.1;
+            }
+            else if ((int)rr.Next(2) == 0)
+            {
+                if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
+                else vx = (int)rr.Next(20, 50) * 0.01;        // ★反编译原样：else 分支同号（:628-633）
+            }
+        }
+        else if (f14)
+        {
+            num2 = -1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+            if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
+        }
+        else if (f15)
+        {
+            num2 = 1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+            if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
+        }
+    }
+    double sdX = -z2x, sdY = -z2y;                            // startDirection = zero = -zero2
+    dgLastHallX = -z2x; dgLastHallY = -z2y;                    // dungeonData.lastDungeonHall = zero
+    if (Math.Abs(vx) > Math.Abs(vy) && (int)rr.Next(3) != 0)
+        num = (int)((float)num4 * ((float)(int)rr.Next(110, 150) * 0.01f));
+    var hb = new DBnd();
+    hb.Set((int)px, (int)py, (int)px, (int)py);
+    var hall = new DHall { Seed = s.Seed, Generated = true, Bounds = hb };
+    dgHalls.Add(hall);
+    var roomsInArea = DgRoomsInSpots(px, py, px + vx * num3, py + vy * num3, num3 / 2 + num);
+    int cnt = 0;
+    while (num3 > 0)
+    {
+        cnt++;
+        if (sdX > 0 && px > W - 100) num3 = 0;
+        else if (sdX < 0 && px < 100) num3 = 0;
+        else if (sdY > 0 && py >= num6) num3 = 0;
+        else if (sdY < 0 && py < 100) num3 = 0;
+        else if (sdY < 0 && py < rockLayer + 50.0) num3 = 0;
+        num3--;
+        int x0 = Math.Max(0, Math.Min(W - 1, (int)(px - num - 4.0 - (int)rr.Next(6))));
+        int x1 = Math.Max(0, Math.Min(W - 1, (int)(px + num + 4.0 + (int)rr.Next(6))));
+        int y0 = Math.Max(0, Math.Min(H - 1, (int)(py - num - 4.0 - (int)rr.Next(6))));
+        int y1 = Math.Max(0, Math.Min(H - 1, (int)(py + num + 4.0 + (int)rr.Next(6))));
+        dgBounds.Upd(x0, y0, x1, y1);
+        hb.Upd(x0, y0, x1, y1);
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f16 = prot != 1;
+                liq[i] = 0;
+                if (f16 && y <= (H - 200) + 7 && DgCanPlaceTileAt(i)) DgChTile(i, (ushort)dgBrick, true);
+            }
+        for (int x = x0 + 1; x < x1 - 1; x++)
+            for (int y = y0 + 1; y < y1 - 1; y++)
+            {
+                if (y >= (H - 200) + 7) continue;
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f17 = true;
+                if (prot == 2 && DgIsDW(wal[i])) f17 = false;
+                if (f17) DgChWall(i, (ushort)dgWall, false);
+            }
+        int n21 = 0;
+        if (vy == 0.0 && (int)rr.Next(num + 1) == 0) n21 = (int)rr.Next(1, 3);
+        else if (vx == 0.0 && (int)rr.Next(num - 1) == 0) n21 = (int)rr.Next(1, 3);
+        else if ((int)rr.Next(num * 3) == 0) n21 = (int)rr.Next(1, 3);
+        int kx0 = Math.Max(0, Math.Min(W - 1, (int)(px - num * num5 - n21)));
+        int kx1 = Math.Max(0, Math.Min(W - 1, (int)(px + num * num5 + n21)));
+        int ky0 = Math.Max(0, Math.Min(H - 1, (int)(py - num * num5 - n21)));
+        int ky1 = Math.Max(0, Math.Min(H - 1, (int)(py + num * num5 + n21)));
+        for (int x = kx0; x < kx1; x++)
+            for (int y = ky0; y < ky1; y++)
+            {
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f18 = prot != 1;
+                bool f19 = true;
+                if (prot == 2 && DgIsDW(wal[i])) f19 = false;
+                if (dangerous)
+                {
+                    if ((act[i] != 0 || !DgIsDW(wal[i])) && y < H - 200)
+                    {
+                        act[i] = 0;                            // ClearTile（不清水不清墙——外圈已清）
+                        if (f18) DgChTile(i, (ushort)dgCrack, false);
+                    }
+                }
+                else act[i] = 0;
+                if (f19 && y < H - 200) DgChWall(i, (ushort)dgWall, false);
+            }
+        px += vx; py += vy;
+        if (flag2 && cnt > (int)rr.Next(10, 20)) { cnt = 0; vx *= -1.0; }
+    }
+    dgPosX = (int)px; dgPosY = (int)py;
+    dgLastHallX = sdX; dgLastHallY = sdY;
+    hall.SX = sx; hall.SY = sy; hall.EX = px; hall.EY = py;
+    hall.SDX = sdX; hall.SDY = sdY; hall.EDX = sdX; hall.EDY = sdY;
+}
+// LegacyEntranceDungeonHall.LegacyHall（Halls/LegacyEntranceDungeonHall.cs:23-380，UsePrecalculatedEntrance=false）
+void DgEntHall(int seed)
+{
+    dynamic rr = Activator.CreateInstance(dgUR, seed)!;
+    double px = dgPosX, py = dgPosY;
+    double sx = px, sy = py;
+    int num = (int)rr.Next(5, 9);
+    int dir = (px <= dgTopX) ? 1 : -1;
+    if (px > W - 400) dir = -1;
+    else if (px < 400) dir = 1;
+    double vx = dir, vy = -1.0;
+    if ((int)rr.Next(3) != 0) vx *= 1 + (int)rr.Next(0, 200) * 0.01;
+    else if ((int)rr.Next(3) == 0) vx *= (int)rr.Next(50, 76) * 0.01;
+    else if ((int)rr.Next(6) == 0) vy *= 2.0;
+    if (dgSkewed)
+    {
+        if (dgPosX < W / 2 && vx < 0.0 && vx < -0.5) vx = 0.5;
+        if (dgPosX > W / 2 && vx > 0.0 && vx > 0.5) vx = -0.5;
+    }
+    else
+    {
+        if (dgPosX < W / 2 && vx < -0.5) vx = -0.5;
+        if (dgPosX > W / 2 && vx > 0.5) vx = 0.5;
+    }
+    int steps = (int)rr.Next(10, 30);
+    double num5 = 0.5;
+    int n6 = 30, n7 = 10;
+    var hb = new DBnd();
+    hb.Set((int)px, (int)py, (int)px, (int)py);
+    var hall = new DHall { Seed = seed, Generated = true, Bounds = hb, IsEntrance = true };
+    dgHalls.Add(hall);
+    var roomsInArea = DgRoomsInSpots(px, py, px + vx * steps, py + vy * steps, steps / 2 + num);
+    int num4 = steps;
+    while (num4 > 0)
+    {
+        num4--;
+        if (!DgInWorld((int)px, (int)py, n6 + 5)) break;
+        int x0 = Math.Max(n6, Math.Min(W - n6 - 1, (int)(px - num - 4.0 - (int)rr.Next(6))));
+        int x1 = Math.Max(n6, Math.Min(W - n6 - 1, (int)(px + num + 4.0 + (int)rr.Next(6))));
+        int y0 = Math.Max(n6, Math.Min(H - n6 - 1, (int)(py - num - 4.0)));
+        int y1 = Math.Max(n6, Math.Min(H - n6 - 1, (int)(py + num + 4.0 + (int)rr.Next(6))));
+        dgBounds.Upd(x0, y0, x1, y1);
+        hb.Upd(x0, y0, x1, y1);
+        int n13 = px > W / 2 ? -1 : 1;
+        int n14 = (int)(px + dgS1X * 0.6 * n13 + dgS2X * n13);
+        int n15 = (int)(dgS2Y * 0.5);
+        if (py < worldSurface - 5.0)
+        {
+            int wy = (int)(py - num - 6.0 + n15);
+            bool open = DgInWorld(n14, wy, 0) && wal[wy * W + n14] == 0
+                && DgInWorld(n14, wy - 1, 0) && wal[(wy - 1) * W + n14] == 0
+                && DgInWorld(n14, wy - 2, 0) && wal[(wy - 2) * W + n14] == 0;
+            if (open)
+            {
+                dgEntOnSurface = true;
+                TileRunner(n14, wy, (int)rr.Next(25, 35), (int)rr.Next(10, 20), -1, false, 0.0, -1.0);
+            }
+        }
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f2 = prot != 1;
+                liq[i] = 0;
+                if (f2 && DgCanPlaceTileAt(i)) DgChTile(i, (ushort)dgBrick, true);
+            }
+        for (int x = x0 + 1; x < x1 - 1; x++)
+            for (int y = y0 + 1; y < y1 - 1; y++)
+            {
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f3 = true;
+                if (prot == 2 && DgIsDW(wal[i])) f3 = false;
+                if (f3) DgChWall(i, (ushort)dgWall, false);
+            }
+        int n16 = 0;
+        if ((int)rr.Next(num) == 0) n16 = (int)rr.Next(1, 3);
+        int kx0 = Math.Max(n6, Math.Min(W - n6 - 1, (int)(px - num * num5 - n16)));
+        int kx1 = Math.Max(n6, Math.Min(W - n6 - 1, (int)(px + num * num5 + n16)));
+        int ky0 = Math.Max(n6, Math.Min(H - n6 - 1, (int)(py - num * num5 - n16)));
+        int ky1 = Math.Max(n6, Math.Min(H - n6 - 1, (int)(py + num * num5 + n16)));
+        for (int x = kx0; x < kx1; x++)
+            for (int y = ky0; y < ky1; y++)
+            {
+                int i = y * W + x;
+                int prot = DgProt(x, y, roomsInArea);
+                if (prot == 3) continue;
+                bool f4 = true;
+                if (prot == 2 && DgIsDW(wal[i])) f4 = false;
+                act[i] = 0;                                    // ClearTile
+                if (f4) DgChWall(i, (ushort)dgWall, false);
+            }
+        if (dgEntOnSurface) num4 = 0;
+        px += vx; py += vy;
+        if (py < worldSurface) vy *= 0.9800000190734863;
+    }
+    dgPosX = (int)px; dgPosY = (int)py;
+    hall.SX = sx; hall.SY = sy; hall.EX = px; hall.EY = py;
+    hall.SDX = vx; hall.SDY = vy; hall.EDX = vx; hall.EDY = vy;
+}
+// LegacyDungeonEntrance.LegacyEntrance（Entrances/LegacyDungeonEntrance.cs:31-619）
+void DgEntrance(int seed, int preSeed)
+{
+    dynamic rr = Activator.CreateInstance(dgUR, preSeed)!;
+    int i = dgPosX, j = dgPosY;
+    for (int x = i - 60; x < i + 60; x++)
+        for (int y = j - 60; y < j + 60; y++)
+            if (DgInWorld(x, y, 0)) { int ti = y * W + x; liq[ti] = 0; liqT[ti] = 0; }
+    double cx = i, cy = j - dgS1Y / 2.0;
+    dgBounds.TopSet((int)cy);
+    int num2 = i > W / 2 ? -1 : 1;
+    var eb = new DBnd();
+    dgEntBounds = eb;
+    dgEntExists = true;
+    eb.Set((int)cx, (int)cy, (int)cx, (int)cy);
+    Action<int, int, int, int, bool> solidBox = (x0, y0, x1, y1, inner) =>
+    {
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0;
+                if (wal[ti] != dgWall)
+                {
+                    wal[ti] = 0;
+                    if (inner && x > x0 + 1 && x < x1 - 2 && y > y0 + 1 && y < y1 - 2) wal[ti] = (ushort)dgWall;
+                    DgChTile(ti, (ushort)dgBrick, false);
+                }
+            }
+    };
+    Action<int, int, int, int> fillIfNotDW = (x0, y0, x1, y1) =>
+    {
+        for (int x = x0; x < x1; x++)
+            for (int y = y0; y < y1; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0;
+                if (!DgIsDW(wal[ti])) DgChTile(ti, (ushort)dgBrick, false);
+            }
+    };
+    int n3 = Math.Max(0, Math.Min(W - 1, (int)(cx - dgS1X * 0.6000000238418579 - (int)rr.Next(2, 5))));
+    int n4 = Math.Max(0, Math.Min(W - 1, (int)(cx + dgS1X * 0.6000000238418579 + (int)rr.Next(2, 5))));
+    int n5 = Math.Max(0, Math.Min(H - 1, (int)(cy - dgS1Y * 0.6000000238418579 - (int)rr.Next(2, 5))));
+    int n6 = Math.Max(0, Math.Min(H - 1, (int)(cy + dgS1Y * 0.6000000238418579 + (int)rr.Next(8, 16))));
+    eb.Upd(n3, n5, n4, n6);
+    solidBox(n3, n5, n4, n6, true);
+    // 垛口（左/右）
+    {
+        int a0 = Math.Max(0, Math.Min(W - 1, n3));
+        int a1 = Math.Max(0, Math.Min(W - 1, n3 + 5 + (int)rr.Next(4)));
+        int b0 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
+        eb.Upd(a0, b0, a1, n5);
+        fillIfNotDW(a0, b0, a1, n5);
+        int c0 = Math.Max(0, Math.Min(W - 1, n4 - 5 - (int)rr.Next(4)));
+        int c1 = Math.Max(0, Math.Min(W - 1, n4));
+        int d0 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
+        eb.Upd(c0, d0, c1, n5);
+        fillIfNotDW(c0, d0, c1, n5);
+    }
+    // 顶齿（周期 num15 刷 num15 跳）
+    {
+        int n15 = 2 + (int)rr.Next(4);
+        int n16 = 1 + (int)rr.Next(2);
+        int n17 = 0;
+        int n18 = Math.Max(0, Math.Min(H - 1, n5 - n16));
+        dgBounds.Upd(n3, n18, n4, n5);
+        for (int x = n3; x < n4; x++)
+        {
+            for (int y = n18; y < n5; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0;
+                if (!DgIsDW(wal[ti])) DgChTile(ti, (ushort)dgBrick, false);
+            }
+            n17++;
+            if (n17 >= n15) { x += n15; n17 = 0; }
+        }
+    }
+    // 下延到 worldSurface（cs:215-251：StyleData.TileIsInStyle 判定 + 潜在带跳过）
+    for (int x = n3; x < n4; x++)
+        for (int y = n5; y < worldSurface; y++)
+        {
+            if (!DgInWorld(x, y, 0)) continue;
+            int ti = y * W + x;
+            liq[ti] = 0;
+            if (DgPotContains(x, y - 5)) continue;
+            bool f1 = act[ti] != 0 && typ[ti] != dgBrick && typ[ti] != dgCrack;
+            bool f2 = wal[ti] != dgWall;
+            bool f3 = DgIsDW(wal[ti]);
+            if ((act[ti] != 0 && f1) || !f3)
+            {
+                DgChTile(ti, (ushort)dgBrick, false);
+                if (x > n3 && x < n4 - 1) wal[ti] = (ushort)dgWall;
+            }
+            else if (f2 && x > n3 && x < n4 - 1) wal[ti] = (ushort)dgWall;
+        }
+    // 0.5 框塔内厅
+    {
+        int a0 = Math.Max(0, Math.Min(W - 1, (int)(cx - dgS1X * 0.5)));
+        int a1 = Math.Max(0, Math.Min(W - 1, (int)(cx + dgS1X * 0.5)));
+        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - dgS1Y * 0.5)));
+        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + dgS1Y * 0.5)));
+        eb.Upd(a0, b0, a1, b1);
+        for (int x = a0; x < a1; x++)
+            for (int y = b0; y < b1; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0; act[ti] = 0; wal[ti] = (ushort)dgWall;
+            }
+    }
+    // 门厅平台候选（:269-303：自塔心向两侧找 非实心+地牢墙 列）
+    {
+        int n26 = (int)cx, n27 = n6;
+        for (int k = 0; k < 20; k++)
+        {
+            n26 = (int)cx - k;
+            if (n26 <= 0) break;
+            if (act[n27 * W + n26] == 0 && DgIsDW(wal[n27 * W + n26])) { dgPlats.Add(new DPlat { X = n26, Y = n27, Hall = false }); break; }
+            n26 = (int)cx + k;
+            if (n26 >= W) break;
+            if (act[n27 * W + n26] == 0 && DgIsDW(wal[n27 * W + n26])) { dgPlats.Add(new DPlat { X = n26, Y = n27, Hall = false }); break; }
+        }
+    }
+    // —— 第二段（外门厅）——
+    cx += dgS1X * 0.6000000238418579 * num2;
+    cy += dgS1Y * 0.5;
+    double sX = dgS2X, sY = dgS2Y;
+    cx += sX * 0.550000011920929 * num2;
+    cy -= sY * 0.5;
+    n3 = Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.6000000238418579 - (int)rr.Next(1, 3))));
+    n4 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.6000000238418579 + (int)rr.Next(1, 3))));
+    n5 = Math.Max(0, Math.Min(H - 1, (int)(cy - sY * 0.6000000238418579 - (int)rr.Next(1, 3))));
+    n6 = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.6000000238418579 + (int)rr.Next(6, 16))));
+    eb.Upd(n3, n5, n4, n6);
+    for (int x = n3; x < n4; x++)
+        for (int y = n5; y < n6; y++)
+        {
+            if (!DgInWorld(x, y, 0)) continue;
+            int ti = y * W + x;
+            if (act[ti] != 0 && typ[ti] == dgBrick) continue;
+            liq[ti] = 0;
+            bool f4 = true;
+            if (num2 < 0) { if (x < cx - sX * 0.5) f4 = false; }
+            else if (x > cx + sX * 0.5 - 1.0) f4 = false;
+            if (f4) { wal[ti] = 0; DgChTile(ti, (ushort)dgBrick, false); }
+        }
+    eb.Upd(n3, n5, n4, worldSurface);
+    for (int x = n3; x < n4; x++)
+        for (int y = n6; y < worldSurface; y++)
+        {
+            if (!DgInWorld(x, y, 0)) continue;
+            int ti = y * W + x;
+            liq[ti] = 0;
+            if (DgPotContains(x, y - 5)) continue;
+            bool f5 = act[ti] != 0 && typ[ti] != dgBrick && typ[ti] != dgCrack;
+            bool f6 = wal[ti] != dgWall;
+            bool f7 = DgIsDW(wal[ti]);
+            if ((act[ti] != 0 && f5) || !f7)
+            {
+                DgChTile(ti, (ushort)dgBrick, false);
+                if (x > n3 && x < n4 - 1) wal[ti] = (ushort)dgWall;
+            }
+            else if (f6 && x > n3 && x < n4 - 1) wal[ti] = (ushort)dgWall;
+        }
+    // 第二段垛口+顶齿
+    int m7 = Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.5)));
+    int m8 = m7;
+    if (num2 < 0) m8 = Math.Max(0, Math.Min(W - 1, m8 + 1));
+    int e1 = Math.Max(0, Math.Min(W - 1, m8 + 5 + (int)rr.Next(4)));
+    int f1 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
+    eb.Upd(m8, f1, e1, n5);
+    fillIfNotDW(m8, f1, e1, n5);
+    int g0 = Math.Max(0, Math.Min(W - 1, Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5))) - 5 - (int)rr.Next(4)));
+    int g1 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5)));
+    int h0 = Math.Max(0, Math.Min(H - 1, n5 - 3 - (int)rr.Next(3)));
+    eb.Upd(g0, h0, g1, n5);
+    fillIfNotDW(g0, h0, g1, n5);
+    int n4b = g1;
+    if (num2 < 0) n4b++;
+    {
+        int n16b = 1 + (int)rr.Next(2);
+        int n15b = 2 + (int)rr.Next(4);
+        int n17 = 0;
+        for (int x = m7 + 1; x < n4b - 1; x++)
+        {
+            for (int y = Math.Max(0, Math.Min(H - 1, n5 - n16b)); y < n5; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0;
+                if (wal[ti] != dgWall) DgChTile(ti, (ushort)dgBrick, false);
+            }
+            n17++;
+            if (n17 >= n15b) { x += n15b; n17 = 0; }
+        }
+    }
+    // 0.6 框清墙（cs:465-483：normal 世界必跑）
+    {
+        int a0 = Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.6000000238418579)));
+        int a1 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.6000000238418579)));
+        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - sY * 0.6000000238418579)));
+        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.6000000238418579)));
+        eb.Upd(a0, b0, a1, b1);
+        for (int x = a0; x < a1; x++)
+            for (int y = b0; y < b1; y++)
+                if (DgInWorld(x, y, 0)) { int ti = y * W + x; liq[ti] = 0; wal[ti] = 0; }
+    }
+    // 0.5 框开放门厅（active=false + wall=0）+ 老头锚
+    {
+        int a0 = Math.Max(0, Math.Min(W - 1, (int)(cx - sX * 0.5)));
+        int a1 = Math.Max(0, Math.Min(W - 1, (int)(cx + sX * 0.5)));
+        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - sY * 0.5)));
+        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.5)));
+        eb.Upd(a0, b0, a1, b1);
+        for (int x = a0; x < a1; x++)
+            for (int y = b0; y < b1; y++)
+            {
+                if (!DgInWorld(x, y, 0)) continue;
+                int ti = y * W + x;
+                liq[ti] = 0; act[ti] = 0; wal[ti] = 0;
+            }
+        dgDungeonX = (int)cx; dgDungeonY = b1;    // SetOldManSpawnAndSpawnOldManIfDefaultDungeon
+    }
+    // 条纹窗墙（PlaceWall，墙==0 才写）
+    {
+        int n16c = 1 + (int)rr.Next(2);
+        int n15c = 2 + (int)rr.Next(4);
+        int n17 = 0;
+        int a0 = (int)(cx - sX * 0.5), a1 = (int)(cx + sX * 0.5);
+        int b0 = Math.Max(0, Math.Min(H - 1, (int)(cy - sY * 0.5)));
+        int b1 = Math.Max(0, Math.Min(H - 1, (int)(cy + sY * 0.5)));
+        a0 = Math.Max(0, Math.Min(W - 1, a0 + 2)); a1 = Math.Max(0, Math.Min(W - 1, a1 - 2));
+        for (int x = a0; x < a1; x++)
+        {
+            for (int y = b0; y < b1 + 1; y++)
+                if (x > 1 && y > 1 && x < W - 2 && y < H - 2 && wal[y * W + x] == 0) wal[y * W + x] = (ushort)dgWall;
+            n17++;
+            if (n17 >= n15c) { x += n15c * 2; n17 = 0; }
+        }
+    }
+    // 门洞：15×3 清空 + PlaceTile(10, style 13)
+    cx -= sX * 0.6000000238418579 * num2;
+    cy += sY * 0.5;
+    cy -= 1.5;
+    {
+        int dL = (int)(cx - 7.5), dR = (int)(cx + 7.5);
+        int dT = (int)(cy - 1.5), dB = (int)(cy + 1.5);
+        for (int x = dL; x < dR; x++)
+            for (int y = dT; y < dB; y++)
+                if (DgInWorld(x, y, 0)) act[y * W + x] = 0;
+        if (num2 < 0) cx -= 1.0;
+        int dx = (int)cx, dy = (int)cy + 1;                  // PlaceTile((int)val.X, (int)val.Y+1)（val.Y=cy+1）
+        DgPlaceDoor(dx, dy, 13);
+    }
+}
+// —— 门/平台候选 ——
+// CalculatePlatformsAndDoorsOnEdgesOfRoom（DungeonUtils.cs:91-224，doorFluff=platformFluff=3）
+void DgRoomPlatformsDoors(DRoom rm)
+{
+    int num = Math.Max(5, rm.Inner.L), num2 = Math.Min(W - 5, rm.Inner.R);
+    int num3 = Math.Max(5, rm.Inner.T), num4 = Math.Min(H - 5, rm.Inner.B);
+    bool f2 = false, f3 = false;
+    for (int x = num; x <= num2; x++)
+    {
+        if (!f2 && !DgInWorld(x, num3 - 1, 0) == false && act[(num3 - 1) * W + x] == 0)
+        { dgPlats.Add(new DPlat { X = x, Y = num3 - 1, Hall = false }); f2 = true; }
+        if (!f3 && DgInWorld(x, num4 + 1, 0) && act[(num4 + 1) * W + x] == 0)
+        { dgPlats.Add(new DPlat { X = x, Y = num4 + 1, Hall = false }); f3 = true; }
+        if (f2 && f3) break;
+    }
+    bool f4 = false, f5 = false;
+    for (int y = num3; y <= num4; y++)
+    {
+        if (!f4 && DgInWorld(num - 1, y, 0) && act[y * W + num - 1] == 0)
+        { dgDoors.Add(new DDoor { X = num - 1, Y = y, Dir = -1, Hall = false, Fluff = 3, Clear = true }); f4 = true; }
+        if (!f5 && DgInWorld(num2 + 1, y, 0) && act[y * W + num2 + 1] == 0)
+        { dgDoors.Add(new DDoor { X = num2 + 1, Y = y, Dir = 1, Hall = false, Fluff = 3, Clear = true }); f5 = true; }
+        if (f4 && f5) break;
+    }
+}
+// LegacyDungeonHall.CalculatePlatformsAndDoors（:26-34；LegacyEntrance 覆写为空）
+void DgHallPlatformsDoors(DHall h)
+{
+    if (h.IsEntrance) return;
+    if (Math.Abs(h.SDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.SX, Y = (int)h.SY, Dir = 0, Hall = true, Clear = true });
+    else dgPlats.Add(new DPlat { X = (int)h.SX, Y = (int)h.SY, Hall = true });
+    if (Math.Abs(h.EDY) <= 0.1) dgDoors.Add(new DDoor { X = (int)h.EX, Y = (int)h.EY, Dir = 0, Hall = true, Clear = true });
+    else dgPlats.Add(new DPlat { X = (int)h.EX, Y = (int)h.EY, Hall = true });
+}
+// —— DungeonGlobalEarlyDualDungeonFeatures（Default：仅尾部 pit 陷阱循环，cs:662-700）——
+void DgEarly()
+{
+    int cnt = (int)(W * 2.0 * 1.0);
+    for (int n = 0; n < cnt; n++)
+    {
+        int x3 = (int)r.Next(dgBounds.L, dgBounds.R);
+        int n44 = dgBounds.T;
+        if (n44 < dgDungeonY + 25) n44 = dgDungeonY + 25;
+        if (n44 < worldSurface) n44 = worldSurface;
+        int y2 = (int)r.Next(n44, dgBounds.B);
+        bool flooded = dgPitFlood || (int)r.Next(8) == 0;
+        int n45 = (int)r.Next(6, 10);
+        int wid = (int)r.Next(8, 19), hgt = (int)r.Next(19, 46), ew = (int)r.Next(6, 10);
+        if (DgPitTrap(x3, y2, wid, hgt, ew, n45, flooded))
+        {
+            if (flooded) dgPitFlood = false;
+            n += 1500;
+        }
+        else n++;
+    }
+}
+// DungeonPitTrap.PitTrap（Features/DungeonPitTrap.cs:42-390，Default：flag=false/裂砖 PitTrapTile）
+bool DgPitTrap(int i, int j, int width, int height, int edgeW, int topD, bool flooded)
+{
+    int num = j, num2 = j;
+    if (width < 1 || height < 1) return false;
+    int n6 = width + edgeW, n7 = height + topD;
+    if (!DgInWorld(i, num, Math.Max(n6, n7))) return false;
+    if (!DgIsDW(wal[num * W + i])) return false;
+    if (act[num * W + i] != 0) return false;
+    for (int k = num; k < H; k++)
+    {
+        if (k > H - 200) return false;
+        if (act[k * W + i] != 0 && DgSolid(i, k))
+        {
+            if (typ[k * W + i] == 48) return false;
+            num = k; num2 = k;
+            break;
+        }
+    }
+    if (!DgIsDW(wal[num * W + (i - width)]) || !DgIsDW(wal[num * W + (i + width)])) return false;
+    int n8 = 30;
+    bool found = false;
+    for (int n = num; n < num + n8; n++)
+    {
+        bool ok = true;
+        for (int x = i - width; x <= i + width; x++)
+            if (act[n * W + x] != 0 && DgIsDT(typ[n * W + x])) { ok = false; break; }
+        if (ok) { num = n; found = true; break; }
+    }
+    if (!found) { /* 30 行内未找到净空行 → num 保持原值（原版 flag5 恒真语义） */ }
+    if (num + n7 >= H - 200) return false;
+    for (int x = i - width; x <= i + width; x++)
+        for (int y = num; y <= num + height; y++)
+            if (act[y * W + x] != 0 && (DgIsDT(typ[y * W + x]) || typ[y * W + x] == dgCrack)) return false;
+    for (int x = i - width; x <= i + width; x++)
+        for (int y = num2; y <= num + height; y++)
+        {
+            int ti = y * W + x;
+            if (act[ti] != 0 && DgIsDT(typ[ti]))
+            {
+                DgChTile(ti, (ushort)dgCrack, true);
+                DgChWall(ti, (ushort)dgWall, false);
+            }
+        }
+    for (int x = i - n6; x <= i + n6; x++)
+        for (int y = num2; y <= num + n7; y++)
+        {
+            int ti = y * W + x;
+            liqT[ti] = 0; liq[ti] = 0;
+            if (DgIsDW(wal[ti])) continue;
+            if (x > i - n6 && x < i + n6 && y < num + n7)
+            {
+                int ow = wal[ti];
+                DgChTile(ti, (ushort)dgBrick, true);
+                if (!DgIsDW(ow)) DgChWall(ti, (ushort)dgWall, false);
+            }
+            else DgChTile(ti, (ushort)dgBrick, false);
+        }
+    for (int x = i - width; x <= i + width; x++)
+        for (int y = num2; y <= num + height; y++)
+        {
+            int ti = y * W + x;
+            bool f6 = typ[ti] != dgCrack;
+            if (!f6) continue;
+            if (flooded) { liqT[ti] = 0; liq[ti] = 255; }
+            else { liqT[ti] = 0; liq[ti] = 0; }
+            bool a = x == i - width && act[y * W + x - 1] != 0;
+            bool b = x == i + width && act[y * W + x + 1] != 0;
+            bool c = y == num + height && act[(y + 1) * W + x] != 0;
+            bool d = x == i - width + 1 && y % 2 == 0 && act[y * W + x - 1] != 0;
+            bool e = x == i + width - 1 && y % 2 == 0 && act[y * W + x + 1] != 0;
+            bool f = y == num + height - 1 && x % 2 == 0 && act[(y + 1) * W + x] != 0;
+            if (a || b || c || d || e || f) DgChTile(ti, 48, false);
+            else act[ti] = 0;
+        }
+    var pb = new DBnd();
+    pb.Set(i - n6, num2, i + n6, num + n7);
+    dgPits.Add(pb);
+    return true;
+}
+// —— DungeonGlobalSpikes（:900-1105）——
+bool DgCanSupportSpike(int x, int y)
+{
+    int ti = y * W + x;
+    if (act[ti] == 0) return false;
+    ushort t = typ[ti];
+    if (FRAMED_NOT_CUT.Contains(t)) return false;             // tileFrameImportant && !tileCut
+    if (t == 481 || t == 482 || t == 483) return false;        // IsConsideredCrackedDungeonTile
+    return true;
+}
+void DgSpikes()
+{
+    int num = dgWallVariants[0];
+    double num6 = Math.Max(1.0, 1.0 * 0.25);
+    int num7 = (int)(42f * (W / 4200f) * num6);
+    for (int round = 0; round < 2; round++)
+    {
+        int n3 = 0, n4 = 1000, n5 = 0;
+        while (n5 < num7)
+        {
+            n3++;
+            int x = (int)r.Next(dgBounds.L, dgBounds.R);
+            int y = (int)r.Next(worldSurface + 25, dgBounds.B);
+            if (wal[y * W + x] == num && act[y * W + x] == 0)
+            {
+                int d = 1;
+                if ((int)r.Next(2) == 0) d = -1;
+                int wx = x, wy = y;
+                while (DgInWorld(wx, wy, 0) && act[wy * W + wx] == 0)
+                {
+                    if (round == 0) wy += d; else wx += d;
+                }
+                bool hit = DgInWorld(wx, wy, 0);
+                bool okA, okB, okC, okD2, okE;
+                if (round == 0)
+                {
+                    okA = hit && DgInWorld(wx - 1, wy, 0) && act[wy * W + wx - 1] != 0;
+                    okB = hit && DgInWorld(wx + 1, wy, 0) && act[wy * W + wx + 1] != 0;
+                    okC = hit && DgInWorld(wx - 1, wy, 0) && DgCanSupportSpike(wx - 1, wy);
+                    okD2 = hit && DgInWorld(wx - 1, wy - d, 0) && act[(wy - d) * W + wx - 1] == 0;
+                    okE = hit && DgInWorld(wx + 1, wy - d, 0) && act[(wy - d) * W + wx + 1] == 0;
+                }
+                else
+                {
+                    okA = hit && DgInWorld(wx, wy - 1, 0) && act[(wy - 1) * W + wx] != 0;
+                    okB = hit && DgInWorld(wx, wy + 1, 0) && act[(wy + 1) * W + wx] != 0;
+                    okC = hit && DgInWorld(wx, wy - 1, 0) && DgCanSupportSpike(wx, wy - 1);
+                    okD2 = hit && DgInWorld(wx - d, wy - 1, 0) && act[(wy - 1) * W + wx - d] == 0;
+                    okE = hit && DgInWorld(wx - d, wy + 1, 0) && act[(wy + 1) * W + wx - d] == 0;
+                }
+                if (okA && okB && okC && okD2 && okE)
+                {
+                    n5++;
+                    // 第一段：沿主轴负向刻尖刺
+                    int n11 = (int)r.Next(5, 13);
+                    int cx = round == 0 ? wx - 1 : wx, cy = round == 0 ? wy : wy - 1;
+                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? -1 : 0, decY: round != 0);
+                    // 第二段：沿主轴正向刻尖刺
+                    n11 = (int)r.Next(5, 13);
+                    cx = round == 0 ? x + 1 : wx; cy = round == 0 ? wy : wy + 1;
+                    DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? 1 : 0, decY: round != 0);
+                }
+            }
+            if (n3 > n4) { n3 = 0; n5++; }
+        }
+    }
+}
+// 单段尖刺刻划（DungeonGlobalSpikes.cs:950-999 round0 / :1047-1096 round1）
+void DgSpikeRun(int round, ref int cx, ref int cy, int wx, int wy, int d, ref int n11, int step, bool decY)
+{
+    while (n11 > 0)
+    {
+        bool cond;
+        if (round == 0)
+        {
+            int nb = cx + step;
+            cond = DgInWorld(nb, wy, 0) && act[wy * W + nb] != 0 && DgCanSupportSpike(nb, wy)
+                && DgInWorld(cx, wy + d, 0) && act[(wy + d) * W + cx] != 0
+                && DgInWorld(cx, wy, 0) && act[wy * W + cx] != 0
+                && DgInWorld(cx, wy - d, 0) && act[(wy - d) * W + cx] == 0;
+        }
+        else
+        {
+            int nb = cy + step;
+            cond = DgInWorld(wx, nb, 0) && act[nb * W + wx] != 0 && DgCanSupportSpike(wx, nb)
+                && DgInWorld(wx + d, cy, 0) && act[cy * W + wx + d] != 0
+                && DgInWorld(wx, cy, 0) && act[cy * W + wx] != 0
+                && DgInWorld(wx - d, cy, 0) && act[cy * W + wx - d] == 0;
+        }
+        if (!cond) break;
+        int fx = round == 0 ? cx : wx, fy = round == 0 ? wy : cy;
+        if (!DgFeatureOK(fx, fy, 0) || !DgFeatureOK(fx, round == 0 ? wy - d : cy - d, 0))
+        {
+            if (round == 0) cx += step; else cy += step;
+            n11 = 0;
+            continue;
+        }
+        typ[fy * W + fx] = 48;
+        if (round == 0)
+        {
+            if (DgInWorld(cx - 1, wy - d, 0) && act[(wy - d) * W + cx - 1] == 0
+                && DgInWorld(cx + 1, wy - d, 0) && act[(wy - d) * W + cx + 1] == 0)
+            {
+                int t2 = (wy - d) * W + cx; typ[t2] = 48; act[t2] = 1;
+                int t3 = (wy - d * 2) * W + cx; typ[t3] = 48; act[t3] = 1;
+            }
+            cx += step;
+        }
+        else
+        {
+            if (DgInWorld(wx - d, cy - 1, 0) && act[(cy - 1) * W + wx - d] == 0
+                && DgInWorld(wx - d, cy + 1, 0) && act[(cy + 1) * W + wx - d] == 0)
+            {
+                int t2 = cy * W + wx - d; typ[t2] = 48; act[t2] = 1;
+                int t3 = cy * W + wx - d * 2; typ[t3] = 48; act[t3] = 1;
+            }
+            cy += step;
+        }
+        n11--;
+    }
+}
+// DungeonData.CanGenerateFeatureAt（DungeonData.cs:132-166；pit 陷阱仅放行 Paintings/WallVariants；
+// 入口 Bounds 仅拦 BiomeChests）。feat: 0=常规特征 1=BiomeChests 2=Paintings/WallVariants
+bool DgFeatureOK(int x, int y, int feat)
+{
+    if (!DgInWorld(x, y, 5)) return false;
+    if (wal[y * W + x] == 350) return false;
+    if (feat == 1 && dgEntExists && dgEntBounds.Contains(x, y)) return false;
+    if (feat != 2)
+        for (int i = 0; i < dgPits.Count; i++)
+            if (dgPits[i].Contains(x, y)) return false;
+    return true;
+}
+bool DgFeatureAt(int x, int y, bool allowPW) => DgFeatureOK(x, y, allowPW ? 2 : 0);
+// —— DungeonGlobalDoors（:24-294）——
+bool DgCanKill(int x, int y)
+{
+    if (!DgInWorld(x, y, 0)) return false;
+    int ti = y * W + x;
+    if (act[ti] == 0) return false;
+    if (wal[ti] == 350) return false;
+    ushort t = typ[ti];
+    if (t == 10) return false;                                 // IsLockedDoor(style13)=true
+    if (t == 21 || t == 467 || t == 88) return false;          // CanDestroyChest：生成期箱内有物
+    return true;
+}
+void DgDoorsF()
+{
+    ushort brickTile = (ushort)dgBrick;
+    ushort brickWall = (ushort)dgWall;
+    for (int i = 0; i < dgDoors.Count; i++)
+    {
+        var d = dgDoors[i];
+        if (!DgInWorld(d.X, d.Y, 30)) continue;
+        ushort bt = brickTile, bw = brickWall;
+        int style = 13;
+        if ((int)r.Next(3) == 0) style = dgDoorStyle;          // 1/3 换蓝/绿/粉门（无 OverrideStyle）
+        int num2 = 20, num4 = d.Fluff;
+        int n5 = Math.Max(25, Math.Min(W - 25, d.X - num4));
+        int n6 = Math.Max(25, Math.Min(W - 25, Math.Max(n5, d.X + num4 - 1)));
+        int n7 = 100, n8 = 0, n9 = 0, n10 = 0;
+        for (int x = n5; x <= n6; x++)
+        {
+            bool flag = true;
+            int y = d.Y;
+            while (y > 10 && act[y * W + x] == 0) y--;
+            if (!DgIsDT(typ[y * W + x])) flag = false;
+            n9 = y;
+            for (y = d.Y; act[y * W + x] == 0; y++) { if (!DgInWorld(x, y + 1, 0)) break; }
+            if (!DgIsDT(typ[y * W + x])) flag = false;
+            n10 = y;
+            if (n10 - n9 < 3) continue;
+            if (!d.SkipOther)
+            {
+                for (int a = x - 20; a < x + 20; a++)
+                    for (int b = n10 - 10; b < n10 + 10; b++)
+                        if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && typ[b * W + a] == 10) { flag = false; break; }
+            }
+            if (flag && !d.SkipSpace)
+                for (int m = n10 - 3; m < n10; m++)
+                    for (int n = x - 3; n <= x + 3; n++)
+                        if (DgInWorld(n, m, 0) && act[m * W + n] != 0) { flag = false; break; }
+            if (flag && n10 - n9 < num2)
+            {
+                bool f2 = false;
+                if (d.Dir == 0 && n10 - n9 < n7) f2 = true;
+                if (d.Dir == -1 && x > n8) f2 = true;
+                if (d.Dir == 1 && (x < n8 || n8 == 0)) f2 = true;
+                if (f2) { n8 = x; n7 = n10 - n9; }
+            }
+        }
+        if (n7 >= num2) continue;
+        int n16 = n8;
+        int n17 = d.Y, n18 = d.Y;
+        while (DgInWorld(n16, n17, 0) && act[n17 * W + n16] == 0) n17++;
+        while (n18 > 0 && act[n18 * W + n16] == 0) n18--;
+        n17--; n18++;
+        for (int y = n18; y < n17 - 2; y++)
+        {
+            int ti = y * W + n16;
+            DgChTile(ti, bt, false);
+            if (DgInWorld(n16 - 1, y, 0) && act[y * W + n16 - 1] != 0 && DgCanKill(n16 - 1, y))
+            { int k = y * W + n16 - 1; act[k] = 0; wal[k] = bw; }
+            if (DgInWorld(n16 - 2, y, 0) && act[y * W + n16 - 2] != 0 && DgCanKill(n16 - 2, y))
+            { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
+            if (DgInWorld(n16 + 1, y, 0) && act[y * W + n16 + 1] != 0 && DgCanKill(n16 + 1, y))
+            { int k = y * W + n16 + 1; act[k] = 0; wal[k] = bw; }
+            if (DgInWorld(n16 + 2, y, 0) && act[y * W + n16 + 2] != 0 && DgCanKill(n16 + 2, y))
+            { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
+        }
+        DgPlaceDoor(n16, n17, style);
+        n16--;
+        int n20 = n17 - 3;
+        while (n20 > 0 && act[n20 * W + n16] == 0) n20--;
+        bool f3 = n17 - n20 < n17 - n18 + 5 && DgIsDT(typ[n20 * W + n16]);
+        if (d.Clear || f3)
+        {
+            for (int y = n17 - 4 - (int)r.Next(3); y > n20; y--)
+            {
+                if (f3) DgChTile(y * W + n16, bt, false);
+                if (d.Clear || typ[y * W + n16 - 1] == bt) { int k = y * W + n16 - 1; act[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
+            }
+        }
+        n16 += 2;
+        n20 = n17 - 3;
+        while (n20 > 0 && act[n20 * W + n16] == 0) n20--;
+        f3 = n17 - n20 < n17 - n18 + 5 && DgIsDT(typ[n20 * W + n16]);
+        if (d.Clear || f3)
+        {
+            for (int y = n17 - 4 - (int)r.Next(3); y > n20; y--)
+            {
+                if (f3) DgChTile(y * W + n16, bt, false);
+                if (d.Clear || typ[y * W + n16 + 1] == bt) { int k = y * W + n16 + 1; act[k] = 0; wal[k] = bw; }
+                if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
+            }
+        }
+        n17++;
+        n16--;
+        for (int y = n17 - 8; y < n17; y++)
+        {
+            if (d.Clear || typ[y * W + n16 + 2] == bt) { int k = y * W + n16 + 2; act[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 + 3] == bt) { int k = y * W + n16 + 3; act[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 - 2] == bt) { int k = y * W + n16 - 2; act[k] = 0; wal[k] = bw; }
+            if (d.Clear || typ[y * W + n16 - 3] == bt) { int k = y * W + n16 - 3; act[k] = 0; wal[k] = bw; }
+        }
+        DgChTile(n17 * W + n16 - 1, bt, false);
+        DgChTile(n17 * W + n16 + 1, bt, false);
+    }
+}
+// PlaceTile(10)（WorldGen.cs:59868-52994 门分支）+ PlaceDoor（:31938）
+void DgPlaceDoor(int x, int y, int style)
+{
+    if (!DgInWorld(x, y, 1)) return;
+    if (DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] == 0 && DgInWorld(x, y - 2, 0) && act[(y - 2) * W + x] == 0
+        && DgInWorld(x, y - 3, 0) && act[(y - 3) * W + x] != 0 && SOLID.Contains(typ[(y - 3) * W + x]))
+        DgPlaceDoorAt(x, y - 1, style);
+    else if (DgInWorld(x, y + 1, 0) && act[(y + 1) * W + x] == 0 && DgInWorld(x, y + 2, 0) && act[(y + 2) * W + x] == 0
+        && DgInWorld(x, y + 3, 0) && act[(y + 3) * W + x] != 0 && SOLID.Contains(typ[(y + 3) * W + x]))
+        DgPlaceDoorAt(x, y + 1, style);
+}
+void DgPlaceDoorAt(int i2, int j2, int style)
+{
+    if (!DgInWorld(i2, j2 - 2, 0) || !DgInWorld(i2, j2 + 2, 0)) return;
+    if (!(act[(j2 - 2) * W + i2] != 0 && SOLID.Contains(typ[(j2 - 2) * W + i2]))) return;
+    if (!DgSolid(i2, j2 + 2)) return;
+    for (int k = -1; k <= 1; k++)
+    {
+        int ti = (j2 + k) * W + i2;
+        act[ti] = 1; typ[ti] = 10;
+        r.Next(3);                                            // frameX = Next(3)*18（PlaceDoor:31951 等）
+    }
+}
+// —— DungeonGlobalWallVariants（:1149-1252）——
+void DgWallVariants()
+{
+    for (int i = 0; i < 5; i++)
+        for (int j = 0; j < 3; j++)
+        {
+            int n2 = (int)r.Next(40, 240);
+            int n3 = (int)r.Next(dgBounds.L, dgBounds.R);
+            int n4 = (int)r.Next(dgBounds.T, dgBounds.B);
+            for (int x = n3 - n2; x < n3 + n2; x++)
+                for (int y = n4 - n2; y < n4 + n2; y++)
+                {
+                    if ((double)y <= worldSurface || !DgInWorld(x, y, 2)) continue;
+                    int dx = Math.Abs(n3 - x), dy = Math.Abs(n4 - y);
+                    if (Math.Sqrt(dx * dx + dy * dy) >= (double)(n2 * 0.4f)) continue;
+                    if (DgIsDW(wal[y * W + x])) DgSpreadWall(x, y, (ushort)dgWallVariants[j]);
+                }
+        }
+}
+void DgSpreadWall(int x, int y, ushort wallType)
+{
+    if (!DgInWorld(x, y, 0)) return;
+    var list2 = new List<(int, int)> { (x, y) };
+    var seen = new HashSet<(int, int)>();
+    while (list2.Count > 0)
+    {
+        var list = new List<(int, int)>(list2);
+        list2.Clear();
+        while (list.Count > 0)
+        {
+            var p = list[0];
+            list.RemoveAt(0);
+            if (!DgInWorld(p.Item1, p.Item2, 1)) continue;
+            seen.Add(p);
+            int ti = p.Item2 * W + p.Item1;
+            if (wal[ti] == 0 || wal[ti] == wallType || wal[ti] == 244 || wal[ti] == 62 || !DgFeatureAt(p.Item1, p.Item2, true)) continue;
+            if (dgEntExists && dgEntBounds.Contains(p.Item1, p.Item2))
+            {
+                if (wal[ti] != dgWall) continue;
+            }
+            else if (wal[ti] != dgWall) continue;
+            if (!DgSolid(p.Item1, p.Item2))
+            {
+                wal[ti] = wallType;
+                foreach (var q in new[] { (p.Item1 - 1, p.Item2), (p.Item1 + 1, p.Item2), (p.Item1, p.Item2 - 1), (p.Item1, p.Item2 + 1) })
+                    if (!seen.Contains(q)) list2.Add(q);
+            }
+            else if (act[ti] != 0) wal[ti] = wallType;
+        }
+    }
+}
+// —— DungeonGlobalPlatforms（:24-214）——
+void DgPlatforms()
+{
+    for (int i = 0; i < dgPlats.Count; i++)
+    {
+        var d = dgPlats[i];
+        if (!DgInWorld(d.X, d.Y, 30)) continue;
+        int style = -1;                                        // platformItemType 1384-1386 不消费（OverrideStyle=-1）
+        int x = d.X, y = d.Y;
+        int row = -1;
+        int n3 = 5, n4 = y < worldSurface + 50.0 ? 20 : 10;
+        double n5 = d.Hall ? 1.0 : 1.0;                        // HallSizeScalar=RoomSizeScalar=1
+        n4 = (int)(n4 * n5);
+        for (int j = y - n3; j <= y + n3; j++)
+        {
+            int n6 = x, n7 = x;
+            bool bad = false;
+            if (act[j * W + x] != 0) bad = true;
+            else
+            {
+                while (DgInWorld(n6, j, 0) && act[j * W + n6] == 0)
+                {
+                    n6--;
+                    if (!DgInWorld(n6, j, 0)) { break; }
+                    if (act[j * W + n6] != 0 && !DgIsDT(typ[j * W + n6])) { bad = true; break; }
+                    if (n6 <= 10) break;
+                }
+                while (DgInWorld(n7, j, 0) && act[j * W + n7] == 0)
+                {
+                    n7++;
+                    if (!DgInWorld(n7, j, 0)) { break; }
+                    if (act[j * W + n7] != 0 && !DgIsDT(typ[j * W + n7])) { bad = true; break; }
+                    if (n7 >= W - 10) break;
+                }
+            }
+            if (bad || n7 - n6 > n4) continue;
+            bool ok = true;
+            int a0 = Math.Max(0, x - n4 / 2 - 2), a1 = Math.Min(W - 1, x + n4 / 2 + 2);
+            int b0 = j - n3, b1 = j + n3;
+            for (int a = a0; a <= a1 && ok; a++)
+                for (int b = b0; b <= b1; b++)
+                    if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && typ[b * W + a] == 19) { ok = false; break; }
+            if (ok)
+                for (int b = j + 3; b >= j - 5; b--)
+                    if (DgInWorld(x, b, 0) && act[b * W + x] != 0) { ok = false; break; }
+            if (ok) { row = j; break; }
+        }
+        if (row <= y - n3 - 5 || row >= y + n3 + 5) continue;
+        int px = x, py = row, qx = x + 1;
+        while (DgInWorld(px, py, 0) && act[py * W + px] == 0)
+        {
+            int ti = py * W + px;
+            act[ti] = 1; typ[ti] = 19;
+            px--;
+            if (px <= 10) break;
+        }
+        while (DgInWorld(qx, py, 0) && act[py * W + qx] == 0)
+        {
+            int ti = py * W + qx;
+            act[ti] = 1; typ[ti] = 19;
+            qx++;
+            if (qx >= W - 10) break;
+        }
+        // 书架平台（PlaceBooksChance 等）Default 无 → IsAShelf=false
+    }
+}
+// —— Prefix(-1) 掷骰（Item.cs:486-560 + GetRollablePrefixes:1083 + PrefixLegacy.Prefixes）——
+static readonly int[] DgPreSwords = { 1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,81 };
+static readonly int[] DgPreSpears = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
+static readonly int[] DgPreGuns = { 16,17,18,19,20,21,22,23,24,25,58,36,37,38,53,54,55,39,40,56,41,57,42,44,45,46,47,48,49,50,51,59,60,61,82 };
+static readonly int[] DgPreMagic = { 26,27,28,29,30,31,32,33,34,35,52,36,37,38,53,54,55,39,40,56,41,57,42,43,44,45,46,47,48,49,50,51,59,60,61,83 };
+static readonly int[] DgPreSummon = { 85,86,87,88,89,90,91,92,93,94,95,96,97,55,38,54,53,57,40,56,41,39 };
+static readonly int[] DgPreBoom = { 36,37,38,53,54,55,39,40,56,41,57,59,60,61 };
+static readonly int[] DgPreAcc = { 62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80 };
+static readonly HashSet<int> DgPreReduced = new HashSet<int> { 7,8,9,10,11,22,23,24,29,30,31,39,40,56,41,47,48,49 };
+int[] DgPrefixClass(int item) => item switch
+{
+    155 => DgPreSwords, 156 => DgPreAcc, 157 => DgPreMagic, 163 => DgPreSpears, 113 => DgPreMagic,
+    3317 => DgPreBoom, 164 => DgPreGuns, 1156 => DgPreGuns, 1571 => DgPreBoom, 1569 => DgPreBoom,
+    1260 => DgPreMagic, 1572 => DgPreSummon, 4607 => DgPreSummon, 5465 => DgPreAcc, _ => null
+};
+void DgPrefixRolls(int item)
+{
+    var arr = DgPrefixClass(item);
+    if (arr == null) return;                                   // CanHavePrefixes=false（钥匙/药水/锭…）
+    if ((int)r.Next(4) != 0)
+    {
+        int rolled = arr[(int)r.Next(arr.Length)];
+        if (DgPreReduced.Contains(rolled)) r.Next(3);
+    }
+}
+bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune
+// AddBuriedChest（WorldGen.cs:35920-37600）——放置 + 战利品掷骰流（物品不入哈希，仅流对齐）
+bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
+{
+    for (int k = j; k < H - 10; k++)
+    {
+        if (act[k * W + i] != 0 && typ[k * W + i] == 231) return false;
+        bool boulder = false;
+        for (int a = i - 2; a <= i + 2 && !boulder; a++)
+            for (int b = k - 2; b <= k + 2; b++)
+            {
+                if (!DgInWorld(a, b, 100)) continue;
+                ushort t = typ[b * W + a];
+                if (act[b * W + a] != 0 && (t == 138 || t == 484 || t == 664 || t == 665 || (t >= 711 && t <= 716) || t == 26 || t == 237)) { boulder = true; break; }
+            }
+        if (boulder) return false;
+        if (!DgSolid(i, k)) continue;
+        int num7 = k;
+        int num9 = style, num10 = mainItem;
+        bool flag2 = false, flag3 = false, flag6 = false, flag7 = false, flag9 = false, flag10 = false, flag12 = false;
+        if (chestTile == 21 && num9 != 0 && num7 >= worldSurface && DgIsDW(wal[num7 * W + i])) flag9 = true;
+        if ((chestTile == 21 && (uint)(num9 - 23) <= 4u) || (chestTile == 467 && num9 == 13)) { flag9 = true; flag10 = true; }
+        // PlaceChest（:57828）：±2 无滚石 + 2×2 净空
+        int px = i - 1, py = num7 - 1;
+        if (!DgInWorld(px, py, 0) || !DgInWorld(px + 1, py + 1, 0)) continue;
+        if (typ[(py + 1) * W + px] == 138 || typ[(py + 1) * W + px + 1] == 138) continue;
+        bool free = true;
+        for (int a = 0; a < 2 && free; a++)
+            for (int b = 0; b < 2; b++)
+                if (act[(py + b) * W + px + a] != 0) { free = false; break; }
+        if (!free) continue;
+        for (int a = 0; a < 2; a++)
+            for (int b = 0; b < 2; b++)
+            {
+                int ti = (py + b) * W + px + a;
+                act[ti] = 1; typ[ti] = chestTile;              // PlaceChestDirect 语义
+            }
+        // —— 战利品掷骰（深/金/表三分支 + 尾段；与 JS rollChestLoot 同构 + Prefix(-1) 补齐）——
+        bool surf = num7 < worldSurface + 25 && false;          // flag/flag6 恒 false
+        bool gold = num7 < rockLayer;
+        if (surf)
+        {
+            if (num10 > 0) DgPrefixRolls(num10);
+            else r.Next(10);
+            if ((int)r.Next(6) == 0) r.Next(40, 76);           // 荧光棒 282
+            if ((int)r.Next(6) == 0) r.Next(150, 301);          // 飞刀 279
+            if ((int)r.Next(6) == 0) { int n = 1; if (r.Next(5) == 0) n += r.Next(2); if (r.Next(10) == 0) n += r.Next(3); }
+            if ((int)r.Next(6) == 0) { int n = 1; if (r.Next(5) == 0) n += r.Next(2); if (r.Next(10) == 0) n += r.Next(3); }
+            if (r.Next(3) == 0) r.Next(3, 6);                   // 手雷 168
+            if (r.Next(2) == 0) { r.Next(2); r.Next(8) + 3; }
+            if (r.Next(2) == 0) r.Next(50, 101);                // 绳 965
+            if (r.Next(3) != 0) { r.Next(2); r.Next(26) + 25; }
+            if (r.Next(2) == 0) r.Next(3) + 3;                  // 药水 28
+            if (r.Next(3) != 0) r.Next(3, 6);                   // 回城 2350
+            if (r.Next(3) > 0) { r.Next(6); r.Next(1, 3); }
+            if (r.Next(2) == 0) { r.Next(2); r.Next(11) + 10; }
+            if (r.Next(2) == 0) r.Next(10, 30);
+            if (r.Next(2) == 0) r.Next(50, 100);
+        }
+        else if (gold)
+        {
+            if (num10 > 0)
+            {
+                DgPrefixRolls(num10);
+                if (flag9 && !flag10)
+                {
+                    if (!dgShadowKey || r.Next(3) == 0) dgShadowKey = true;
+                    if (!dgRamRune || r.Next(8) == 0) { dgRamRune = true; DgPrefixRolls(5465); }
+                }
+            }
+            else
+            {
+                r.Next(6);
+                if (r.Next(20) == 0) { }
+                else if (r.Next(20) == 0) { r.Next(26) + 25; }
+            }
+            if (flag3) { if (r.Next(3) == 0) r.Next(10, 20); }
+            else if (r.Next(3) == 0) r.Next(10, 20);
+            if (r.Next(5) == 0) { }                             // 天使雕像 52
+            if (r.Next(3) == 0) r.Next(50, 101);
+            if (r.Next(2) == 0) { r.Next(2); r.Next(10) + 5; }
+            if (r.Next(2) == 0) { r.Next(2); r.Next(25) + 25; }
+            if (r.Next(2) == 0) r.Next(3) + 3;
+            if (r.Next(3) > 0) { r.Next(9); r.Next(1, 3); }
+            if (r.Next(3) != 0) r.Next(2, 5);
+            if (r.Next(2) == 0) r.Next(11) + 10;
+            if (r.Next(2) == 0) r.Next(50, 90);
+        }
+        else if (num7 < H - 250)
+        {
+            if (num10 > 0)
+            {
+                DgPrefixRolls(num10);
+                if (flag2 && r.Next(5) == 0) { }
+                if (flag3) { if (r.Next(7) == 0) { } if (r.Next(15) == 0) { } }
+                if (flag9 && !flag10)
+                {
+                    if (!dgShadowKey || r.Next(3) == 0) dgShadowKey = true;
+                    if (!dgRamRune || r.Next(8) == 0) { dgRamRune = true; DgPrefixRolls(5465); }
+                }
+            }
+            else
+            {
+                int num25 = (int)r.Next(7);
+                if ((int)r.Next(20) == 0 && num7 > lavaLine) { }
+                else if ((int)r.Next(15) == 0) { }
+                else if (num25 == 6) { r.Next(26) + 25; }
+            }
+            if (r.Next(5) == 0) { }                             // 可疑眼球 43
+            if (r.Next(3) == 0) { }                             // 炸药 167
+            if (r.Next(4) == 0) r.Next(25, 51);                 // 小丑箭 51
+            if (r.Next(2) == 0) { r.Next(2); r.Next(3, 11); }
+            if (r.Next(2) == 0) { r.Next(2); r.Next(25, 51); }
+            if (r.Next(2) == 0) r.Next(3, 6);                   // 药水 188
+            if (r.Next(3) > 0) { r.Next(6); r.Next(1, 3); }
+            if (r.Next(3) > 1) { r.Next(6); r.Next(1, 3); }
+            if (r.Next(2) == 0) r.Next(2, 5);                   // 回城 2350
+            if (r.Next(2) == 0) { r.Next(2); r.Next(15, 31); }
+            if (r.Next(2) == 0) r.Next(1, 3);                   // 金币 73
+        }
+        else
+        {
+            if (num10 > 0) DgPrefixRolls(num10);
+            else r.Next(4);
+            if (r.Next(3) == 0) { }                             // 炸药 167
+            if (r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }
+            if (r.Next(2) == 0) { r.Next(2); r.Next(50, 75); }
+            if (r.Next(2) == 0) r.Next(6) + 15;                 // 再生药水 227
+            if (r.Next(3) > 0) { r.Next(8); r.Next(1, 3); }
+            if (r.Next(3) > 1) { r.Next(8); r.Next(1, 3); }
+            { r.Next(1, 3); r.Next(2); }
+            if (r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }
+            if (r.Next(2) == 0) r.Next(2, 5);
+        }
+        // 尾段（cs:37361-37560）：地牢 flag9 1/8 砍刀 + 上锁箱 1/2 残片 + voice 门 1 掷
+        if (flag9 && !flag10) { if (r.Next(8) == 0) { } }
+        if (flag10) { if (r.Next(2) == 0) { } }
+        r.Next(12);
+        return true;
+    }
+    return false;
+}
+// —— DungeonGlobalBiomeChests.BiomeChests（:104-180，Default 分支）——
+void DgBiomeChests()
+{
+    int num = 5;
+    for (int i = 0; i < num; i++)
+    {
+        bool flag = false;
+        int n3 = 1000;
+        while (!flag)
+        {
+            n3--;
+            if (n3 <= 0) break;
+            int x = (int)r.Next(dgBounds.L, dgBounds.R);
+            int y = (int)r.Next(worldSurface, dgBounds.B);
+            if ((dgEntExists && dgEntBounds.Contains(x, y)) || !DgIsDW(wal[y * W + x]) || act[y * W + x] != 0) continue;
+            ushort chestTile = 21;
+            int mainItem = 0, chestStyle = 0;
+            switch (i % num)
+            {
+                case 0: chestStyle = 23; mainItem = 1156; break;
+                case 1: if (!crimson) { chestStyle = 24; mainItem = 1571; } else { chestStyle = 25; mainItem = 1569; } break;
+                case 2: chestStyle = 26; mainItem = 1260; break;
+                case 3: chestStyle = 27; mainItem = 1572; break;
+                case 4: chestTile = 467; chestStyle = 13; mainItem = 4607; break;
+            }
+            flag = DgAddBuriedChest(x, y, mainItem, chestStyle, chestTile);
+        }
+    }
+}
+// —— DungeonGlobalBasicChests（:21-34）+ GenerateDungeonRegularChest（DungeonUtils.cs:351-403）——
+void DgBasicChests()
+{
+    for (int i = 0; i < dgRooms.Count; i++)
+    {
+        var rm = dgRooms[i];
+        int half = (int)(rm.Strength * 0.4f);
+        for (int j = 0; j < 1000; j++)
+        {
+            int num = (int)System.Math.Lerp((double)(rm.Ex - half), rm.Ex + half, (double)r.NextDouble());
+            int num2 = (int)System.Math.Lerp((double)(rm.Ey - half), rm.Ey + half, (double)r.NextDouble());
+            if (!DgFeatAreaOK(num, num2, 1)) continue;          // CanGenerateFeatureInArea(feature, num, num2, 1)
+            int itemType, chestStyle = 2;
+            DgLootStyle(num2, out itemType, ref chestStyle);
+            if (DgAddBuriedChest(num, num2, itemType, chestStyle, 21)) { dgLootStyle++; break; }
+        }
+    }
+}
+bool DgFeatAreaOK(int x, int y, int fluff)
+{
+    for (int a = x - fluff; a <= x + fluff; a++)
+        for (int b = y - fluff; b <= y + fluff; b++)
+            if (!DgFeatureOK(a, b, 0)) return false;
+    return true;
+}
+// GetDungeonLootAndChestStyle（WorldGen.cs:35843-35891）
+void DgLootStyle(int y, out int itemType, ref int chestStyle)
+{
+    itemType = 0;
+    chestStyle = 2;
+    if (dgLootStyle >= 8) dgLootStyle = 0;
+    switch (dgLootStyle)
+    {
+        default: itemType = 155; break;
+        case 1: itemType = 156; break;
+        case 2: itemType = 157; break;
+        case 3: itemType = 163; break;
+        case 4: itemType = 113; break;
+        case 5: itemType = 3317; break;
+        case 6: itemType = 327; chestStyle = 0; break;
+        case 7: itemType = 164; break;
+    }
+    if ((double)y < worldSurface + 50.0) { itemType = 327; chestStyle = 0; }
+}
+// —— DungeonGlobalBookshelves（:23-208）——
+void DgBookshelves()
+{
+    int num = 0, num3 = 0;
+    while (num3 < W / 20)
+    {
+        num++;
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(dgBounds.T, dgBounds.B);
+        bool flag = true;
+        if (DgIsDW(wal[y * W + x]) && act[y * W + x] == 0)
+        {
+            int n7 = 1;
+            if ((int)r.Next(2) == 0) n7 = -1;
+            while (flag && DgInWorld(x, y, 0) && act[y * W + x] == 0)
+            {
+                x -= n7;
+                if (x < 5 || x > W - 5) flag = false;
+                else if (act[y * W + x] != 0 && !DgIsDT(typ[y * W + x])) flag = false;
+            }
+            if (flag && DgInWorld(x, y, 0) && act[y * W + x] != 0 && DgIsDT(typ[y * W + x])
+                && act[(y - 1) * W + x] != 0 && DgIsDT(typ[(y - 1) * W + x])
+                && act[(y + 1) * W + x] != 0 && DgIsDT(typ[(y + 1) * W + x]))
+            {
+                x += n7;
+                for (int a = x - 3; a <= x + 3 && flag; a++)
+                    for (int b = y - 3; b <= y + 3; b++)
+                        if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && typ[b * W + a] == 19) { flag = false; break; }
+                if (flag && DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] == 0
+                    && DgInWorld(x, y - 2, 0) && act[(y - 2) * W + x] == 0
+                    && DgInWorld(x, y - 3, 0) && act[(y - 3) * W + x] == 0)
+                {
+                    if (!DgFeatureOK(x, y, 0)) { flag = false; continue; }
+                    int k = x, num8 = x;
+                    while (k > dgBounds.L && k < dgBounds.R && act[y * W + k] == 0 && act[(y - 1) * W + k] == 0 && act[(y + 1) * W + k] == 0) k += n7;
+                    k = Math.Abs(x - k);
+                    bool flag3 = (int)r.Next(2) == 0;
+                    if (k > 5)
+                    {
+                        int n10 = (int)r.Next(1, 4);
+                        while (n10 > 0)
+                        {
+                            int ti = y * W + x;
+                            act[ti] = 1; typ[ti] = 19;          // frameY = 18*shelfStyle（不入哈希）
+                            if (flag3)
+                            {
+                                DgPlaceSimple(x, y - 1, 50);
+                                if ((int)r.Next(50) == 0 && (double)y > (worldSurface + rockLayer) / 2.0) { }
+                            }
+                            x += n7;
+                            n10--;
+                        }
+                        num = 0; num3++;
+                        if (!flag3 && (int)r.Next(2) == 0)
+                        {
+                            x = num8; y--;
+                            int n12 = (int)r.Next(4) == 0 ? 1 : 0;
+                            n12 = n12 == 0 ? 13 : 49;
+                            DgPlaceSimple(x, y, n12);
+                            if (DgInWorld(x, y, 0) && typ[y * W + x] == 13) r.Next(2);
+                        }
+                    }
+                }
+            }
+        }
+        if (num > 1000) { num = 0; num3++; }
+    }
+}
+// —— DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch ——
+void DgLights()
+{
+    int num5 = (int)(28f * (W / 4200f) * 1.0);
+    int num2 = 0, num4 = 0;
+    while (num4 < num5)
+    {
+        num2++;
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(dgBounds.T, dgBounds.B);
+        if (DgIsDW(wal[y * W + x]))
+        {
+            for (int cy = y; cy > dgBounds.T; cy--)
+            {
+                if (!(DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0 && DgIsDT(typ[(cy - 1) * W + x])
+                    && DgFeatureOK(x, cy, 0)
+                    && ((dgEntExists && dgEntBounds.Contains(x, cy)) || DgIsDW(wal[cy * W + x])))) continue;
+                bool near = false;
+                for (int a = x - 15; a < x + 15 && !near; a++)
+                    for (int b = cy - 15; b < cy + 15; b++)
+                        if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && (typ[b * W + a] == 42 || typ[b * W + a] == 34)) { near = true; break; }
+                if (DgInWorld(x - 1, cy, 0) && act[cy * W + x - 1] != 0
+                    || DgInWorld(x + 1, cy, 0) && act[cy * W + x + 1] != 0
+                    || DgInWorld(x - 1, cy + 1, 0) && act[(cy + 1) * W + x - 1] != 0
+                    || DgInWorld(x + 1, cy + 1, 0) && act[(cy + 1) * W + x + 1] != 0
+                    || DgInWorld(x, cy + 2, 0) && act[(cy + 2) * W + x] != 0) near = true;
+                if (near) break;
+                bool placed = false;
+                if ((int)r.Next(7) == 0)
+                {
+                    bool blocked = false;
+                    for (int k = 0; k < 15; k++) if (DgInWorld(x, cy + k, 0) && DgSolid(x, cy + k)) { blocked = true; break; }
+                    if (!blocked && DgPlaceChand(x, cy))
+                    {
+                        placed = true; num2 = 0; num4++;
+                        DgSwitch(x, cy);
+                    }
+                }
+                if (placed) break;
+                // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）
+                if (DgInWorld(x, cy - 1, 0) && act[(cy - 1) * W + x] != 0 && SOLID.Contains(typ[(cy - 1) * W + x]) && !dgSolidTop.Contains(typ[(cy - 1) * W + x])
+                    && DgInWorld(x, cy + 1, 0) && act[(cy + 1) * W + x] == 0)
+                {
+                    act[cy * W + x] = 1; typ[cy * W + x] = 42;
+                    act[(cy + 1) * W + x] = 1; typ[(cy + 1) * W + x] = 42;
+                    placed = true; num2 = 0; num4++;
+                    DgSwitch(x, cy);
+                }
+                break;                                          // 灯笼尝试后必 break（:131）
+            }
+        }
+        if (num2 > 1000) { num4++; num2 = 0; }
+    }
+}
+// PlaceChand（WorldGen.cs:52753）：3×3 净空 + 上方实心 → type 34
+bool DgPlaceChand(int x, int y)
+{
+    for (int a = x - 1; a < x + 2; a++)
+        for (int b = y; b < y + 3; b++)
+            if (!DgInWorld(a, b, 0) || act[b * W + a] != 0) return false;
+    if (!(DgInWorld(x, y - 1, 0) && act[(y - 1) * W + x] != 0 && SOLID.Contains(typ[(y - 1) * W + x]) && !dgSolidTop.Contains(typ[(y - 1) * W + x]))) return false;
+    for (int a = x - 1; a < x + 2; a++)
+        for (int b = y; b < y + 3; b++)
+        { int ti = b * W + a; act[ti] = 1; typ[ti] = 34; }
+    return true;
+}
+// Lights_GenerateSwitch（:144-193）：随机找开关位（Collision.CanHit 视线通）→ PlaceTile(136)
+void DgSwitch(int x, int y)
+{
+    for (int i = 0; i < 1000; i++)
+    {
+        int a = x + (int)r.Next(-12, 13);
+        int b = y + (int)r.Next(3, 21);
+        if (!DgInWorld(a, b, 0) || !DgInWorld(a, b + 1, 0)) continue;
+        if (act[b * W + a] != 0 || act[(b + 1) * W + a] != 0) continue;
+        if (!DgInWorld(a - 1, b, 0) || !DgIsDT(typ[b * W + a - 1])) continue;
+        if (!DgInWorld(a + 1, b, 0) || !DgIsDT(typ[b * W + a + 1])) continue;
+        if (!DgCanHit(a, b, x, y)) continue;
+        bool anchor = (DgSolid(a - 1, b) && typ[b * W + a - 1] != 10) || (DgSolid(a + 1, b) && typ[b * W + a + 1] != 10) || DgSolid(a, b + 1);
+        if (anchor && DgIsDW(wal[b * W + a]) && (DgIsDT(typ[b * W + a - 1]) || DgIsDT(typ[b * W + a + 1])))
+        {
+            if (act[b * W + a] == 0) { act[b * W + a] = 1; typ[b * W + a] = 136; }
+        }
+        if (act[b * W + a] == 0) continue;
+        if ((int)r.Next(3) > 0) { }                             // frameX=18（不入哈希）
+        break;
+    }
+}
+// Collision.CanHit（Collision.cs:388-460）——两点视线（仅实心非 solidTop 拦截）
+bool DgCanHit(int x1, int y1, int x2, int y2)
+{
+    int cx = Math.Clamp(x1, 1, W - 1), cy = Math.Clamp(y1, 1, H - 41);
+    int tx = Math.Clamp(x2, 1, W - 1), ty = Math.Clamp(y2, 1, H - 41);
+    while (true)
+    {
+        int dx = Math.Abs(cx - tx), dy = Math.Abs(cy - ty);
+        if (cx == tx && cy == ty) return true;
+        if (dx > dy)
+        {
+            cx += cx >= tx ? -1 : 1;
+            if (!DgInWorld(cx, cy - 1, 0) || !DgInWorld(cx, cy + 1, 0)) return false;
+            if (DgBlockPair(cx, cy - 1, cx, cy + 1)) return false;
+        }
+        else
+        {
+            cy += cy >= ty ? -1 : 1;
+            if (!DgInWorld(cx - 1, cy, 0) || !DgInWorld(cx + 1, cy, 0)) return false;
+            if (DgBlockPair(cx - 1, cy, cx + 1, cy)) return false;
+        }
+    }
+}
+bool DgBlockPair(int ax, int ay, int bx, int by)
+{
+    bool f(int x, int y)
+    {
+        if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
+        ushort t = typ[y * W + x];
+        return SOLID.Contains(t) && !dgSolidTop.Contains(t);
+    }
+    return f(ax, ay) && f(bx, by);
+}
+// —— DungeonGlobalTraps（:23-152，Default：placeTrap(x,y,0) 飞镖）——
+void DgTraps()
+{
+    int num5 = (int)(8.4f * (W / 4200f) * 1.0);
+    int num2 = 0, num4 = 0;
+    while (num4 < num5)
+    {
+        num2++;
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(worldSurface, dgBounds.B);
+        if (DgIsDW(wal[y * W + x]) && DgPlaceTrap0(x, y)) num2 = 1000;
+        if (num2 > 1000) { num4++; num2 = 0; }
+    }
+}
+// placeTrap type=0（WorldGen.cs:8875-9150 飞镖分支）
+bool DgPlaceTrap0(int x2, int y2)
+{
+    int num = y2;
+    while (!DgSolid(x2, num))
+    {
+        num++;
+        if (num > H - 10) return false;
+    }
+    num--;
+    if (!DgInWorld(x2, num, 3)) return false;
+    for (int a = x2 - 20; a <= x2 + 20; a++)
+        for (int b = num - 20; b <= num + 20; b++)
+            if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && typ[b * W + a] == 70) return false;
+    if (wal[num * W + x2] == 87 || wal[num * W + x2] == 350) return false;
+    bool lava = liq[num * W + x2] > 0 && liqT[num * W + x2] == 1;
+    if (lava) return false;
+    for (int a = 0; a <= 2; a++)
+        for (int b = -2; b <= 0; b++)
+        {
+            int xx = x2 + (a == 0 ? 0 : a == 1 ? -1 : 1);
+            int yy = num + b;
+            if (DgInWorld(xx, yy, 0) && act[yy * W + xx] != 0) return false;
+        }
+    if (DgInWorld(x2, num + 1, 0) && (typ[(num + 1) * W + x2] == 48 || typ[(num + 1) * W + x2] == 232)) return false;
+    if (!DgInWorld(x2, num + 1, 0) || !DgSolid(x2, num + 1)) return false;   // CanGeneratePressurePlateAt
+    {
+        ushort bt = typ[(num + 1) * W + x2];
+        if (bt == 138 || bt == 484 || bt == 664 || bt == 665 || (bt >= 711 && bt <= 716)) return false;
+        if (wal[(num + 1) * W + x2] == 350) return false;
+    }
+    int num27 = num - (int)r.Next(3);
+    int num28 = x2;
+    while (!(DgInWorld(num28, num27, 0) && DgSolid(num28, num27)) && !(DgInWorld(num28, num27, 0) && act[num27 * W + num28] != 0 && (typ[num27 * W + num28] == 481 || typ[num27 * W + num28] == 482 || typ[num27 * W + num28] == 483)))
+    {
+        num28--;
+        if (num28 < 0) return false;
+    }
+    int num29 = x2;
+    while (!(DgInWorld(num29, num27, 0) && DgSolid(num29, num27)) && !(DgInWorld(num29, num27, 0) && act[num27 * W + num29] != 0 && (typ[num27 * W + num29] == 481 || typ[num27 * W + num29] == 482 || typ[num27 * W + num29] == 483)))
+    {
+        num29++;
+        if (num29 > W) return false;
+    }
+    int n30 = x2 - num28, n31 = num29 - x2;
+    bool f5 = n30 > 5 && n30 < 50, f6 = n31 > 5 && n31 < 50;
+    if (f5 && !DgSolid(num28, num27 + 1)) f5 = false;
+    if (f6 && !DgSolid(num29, num27 + 1)) f6 = false;
+    if (f5 && ((DgInWorld(num28, num27, 0) && act[num27 * W + num28] != 0 && (typ[num27 * W + num28] == 10 || typ[num27 * W + num28] == 48))
+        || (DgInWorld(num28, num27 + 1, 0) && act[(num27 + 1) * W + num28] != 0 && (typ[(num27 + 1) * W + num28] == 10 || typ[(num27 + 1) * W + num28] == 48)))) f5 = false;
+    if (f6 && ((DgInWorld(num29, num27, 0) && act[num27 * W + num29] != 0 && (typ[num27 * W + num29] == 10 || typ[num27 * W + num29] == 48))
+        || (DgInWorld(num29, num27 + 1, 0) && act[(num27 + 1) * W + num29] != 0 && (typ[(num27 + 1) * W + num29] == 10 || typ[(num27 + 1) * W + num29] == 48)))) f6 = false;
+    int num26, num32;
+    if (f5 && f6) { num32 = 1; num26 = num28; if ((int)r.Next(2) == 0) { num26 = num29; num32 = -1; } }
+    else if (f6) { num26 = num29; num32 = -1; }
+    else { if (!f5) return false; num26 = num28; num32 = 1; }
+    if (typ[num27 * W + num26] == 190) return false;
+    if (wal[num27 * W + num26] == 350) return false;
+    if (wal[num * W + x2] > 0) { int ti = num * W + x2; act[ti] = 1; typ[ti] = 135; }
+    else { int ti = num * W + x2; act[ti] = 1; typ[ti] = 135; r.Next(2, 4); }
+    act[num27 * W + num26] = 0;                                // KillTile（生成期 noItem）
+    { int ti = num27 * W + num26; act[ti] = 1; typ[ti] = 137; }
+    return true;
+}
+// —— DungeonGlobalGroundFurniture.GroundFurniture（Default，:187-253）——
+void DgFurniture()
+{
+    int num2 = (int)(2000f * (W / 4200f) * 1.0);
+    int alch = 1 + (int)(W / 4200f), bew = 1 + (int)(W / 4200f);
+    int num3 = 2000;
+    for (int j = 0; j < num2; j++)
+    {
+        if (alch > 0 || bew > 0)
+        {
+            j--;
+            num3--;
+            if (num3 <= 0) break;
+        }
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(Math.Max(dgBounds.T, worldSurface + 10), dgBounds.B);
+        int n5 = 1000;
+        while (!DgIsDW(wal[y * W + x]) || act[y * W + x] != 0)
+        {
+            n5--;
+            if (n5 <= 0) break;
+            x = (int)r.Next(dgBounds.L, dgBounds.R);
+            y = (int)r.Next(Math.Max(dgBounds.T, worldSurface + 10), dgBounds.B);
+        }
+        if (DgIsDW(wal[y * W + x]) && act[y * W + x] == 0)
+        {
+            while (!DgSolid(x, y) && y < H - 200) y++;
+            y--;
+            DgFurnAt(x, y, ref alch, ref bew, j < num2 / 2);
+        }
+    }
+}
+// GroundFurniture_ActuallyGenerateFurniture（:255-861，Default/style0 路径）
+bool DgFurnAt(int i, int j, ref int alch, ref int bew, bool stricter)
+{
+    int num = i, k = i;
+    while (DgInWorld(num, j, 0) && act[j * W + num] == 0 && DgSolid(num, j + 1)) num--;
+    num++;
+    while (DgInWorld(k, j, 0) && act[j * W + k] == 0 && DgSolid(k, j + 1)) k++;
+    k--;
+    int num2 = k - num, num3 = (k + num) / 2;
+    if (!DgFeatureOK(num3, j, 0)) return false;
+    if (DgInWorld(num3, j, 0) && act[j * W + num3] == 0 && DgIsDW(wal[j * W + num3]) && DgSolid(num3, j + 1) && typ[(j + 1) * W + num3] != 48)
+    {
+        int[] it = dungeonTheme == 0
+            ? new[] { 1396, 1397, 1398, 1405, 1408, 1414, 1470, 2376, 2386, 2402, 2658, 2664, 2645, 3900 }
+            : dungeonTheme == 1
+                ? new[] { 1399, 1400, 1401, 1406, 1409, 1415, 1471, 2377, 2387, 2403, 2659, 2665, 2646, 3901 }
+                : new[] { 1402, 1403, 1404, 1407, 1410, 1416, 1472, 2378, 2388, 2404, 2660, 2666, 2647, 3902 };
+        int iChair = it[0], iTable = it[1], iWork = it[2], iCandle = it[3], iVase = it[4], iBook = it[5], iBed = it[6];
+        int iPiano = it[7], iDress = it[8], iSofa = it[9], iTub = it[10], iCand = it[11], iLamp = it[12], iClock = it[13];
+        int wv = wal[j * W + num3];
+        if (wv >= 94 && wv <= 105)
+        {
+            iChair = 1509; iTable = 1510; iWork = 1511; iCandle = 5743; iVase = -1; iBook = 1512; iBed = 5740;
+            iPiano = 5750; iDress = 5741; iSofa = 5753; iTub = 5739; iCand = 5742; iLamp = 5748; iClock = 5746;
+        }
+        int num18 = (int)r.Next(13);
+        if ((num18 == 10 || num18 == 11 || num18 == 12) && (int)r.Next(4) != 0) num18 = (int)r.Next(13);
+        while ((num18 == 2 && iVase == -1) || (num18 == 5 && iBed == -1) || (num18 == 6 && iPiano == -1) || (num18 == 7 && iDress == -1)
+            || (num18 == 8 && iSofa == -1) || (num18 == 9 && iTub == -1) || (num18 == 10 && iCand == -1) || (num18 == 11 && iLamp == -1) || (num18 == 12 && iClock == -1))
+            num18 = (int)r.Next(13);
+        int num19 = num18 switch { 0 => 5, 1 => 4, 2 => 3, 3 => 4, 4 => 3, 5 => 5, 6 => 5, 7 => 5, 8 => 5, 9 => 5, 10 => 2, 11 => 3, _ => 2 };
+        int num20 = num18 switch { 0 => 4, 1 => 3, 2 => 5, 3 => 6, 4 => 3, 5 => 3, 6 => 4, 7 => 4, 8 => 4, 9 => 3, 10 => 4, 11 => 3, _ => 5 };
+        bool flag3 = false, flag4 = false;
+        int num21 = (alch > 0 || bew > 0) ? 15 : 0;
+        for (int a = num3 - num19 - num21; a <= num3 + num19 + num21; a++)
+            for (int b = j - num20 - num21; b <= j + num21; b++)
+            {
+                if (!DgInWorld(a, b, 0)) continue;
+                if (a >= num3 - num19 && a <= num3 + num19 && b >= j - num20 && b <= j)
+                {
+                    if (!DgFeatureOK(a, b, 0)) { flag3 = true; break; }
+                    if (act[b * W + a] != 0) { num18 = -1; break; }
+                }
+                if (stricter && (alch > 0 || bew > 0) && act[b * W + a] != 0 && (typ[b * W + a] == 355 || typ[b * W + a] == 354)) flag4 = true;
+            }
+        if (flag3) return false;
+        if ((float)num2 < (float)num19 * 1.75f) num18 = -1;
+        if (!flag4 && (alch > 0 || bew > 0))
+        {
+            if (alch > 0)
+            {
+                if (DgPlaceSimple(num3, j, 355)) { alch--; return true; }
+            }
+            else if (DgPlaceSimple(num3, j, 354)) { bew--; return true; }
+        }
+        else if (num18 == 0)
+        {
+            if (DgPlaceSimple(num3, j, DgTileOf(iTable)))
+            {
+                if (iChair > -1)
+                {
+                    if (DgInWorld(num3 - 2, j, 0) && act[j * W + num3 - 2] == 0) DgPlaceSimple(num3 - 2, j, DgTileOf(iChair));
+                    if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgPlaceSimple(num3 + 2, j, DgTileOf(iChair));
+                }
+                for (int n = num3 - 1; n <= num3 + 1; n++)
+                {
+                    if ((int)r.Next(2) != 0 || !DgInWorld(n, j - 2, 0) || act[(j - 2) * W + n] != 0) continue;
+                    int n23 = (int)r.Next(5);
+                    if (iCandle > -1 && n23 <= 1) DgPlaceSimple(n, j - 2, DgTileOf(iCandle));
+                    else if (n23 == 2) DgPlaceSimple(n, j - 2, 49);
+                    else if (n23 == 3) DgPlaceSimple(n, j - 2, 50);
+                    else if (n23 == 4) DgPlaceSimple(n, j - 2, 103);
+                }
+                return true;
+            }
+        }
+        else if (num18 == 1)
+        {
+            if (DgPlaceSimple(num3, j, DgTileOf(iWork)))
+            {
+                if (iChair > -1)
+                {
+                    if ((int)r.Next(2) == 0)
+                    {
+                        if (DgInWorld(num3 - 1, j, 0) && act[j * W + num3 - 1] == 0) DgPlaceSimple(num3 - 1, j, DgTileOf(iChair));
+                    }
+                    else if (DgInWorld(num3 + 2, j, 0) && act[j * W + num3 + 2] == 0) DgPlaceSimple(num3 + 2, j, DgTileOf(iChair));
+                }
+                for (int n = num3; n <= num3 + 1; n++)
+                {
+                    if ((int)r.Next(2) != 0 || !DgInWorld(n, j - 1, 0) || act[(j - 1) * W + n] != 0) continue;
+                    int n26 = (int)r.Next(5);
+                    if (iCandle > -1 && n26 <= 1) DgPlaceSimple(n, j - 1, DgTileOf(iCandle));
+                    else if (n26 == 2) DgPlaceSimple(n, j - 1, 49);
+                    else if (n26 == 3) DgPlaceSimple(n, j - 1, 50);
+                    else if (n26 == 4) DgPlaceSimple(n, j - 1, 103);
+                }
+                return true;
+            }
+        }
+        else if (num18 == 2) { if (iVase > -1 && DgPlaceSimple(num3, j, DgTileOf(iVase))) return true; }
+        else if (num18 == 3) { if (iBook > -1) DgPlaceSimple(num3, j, DgTileOf(iBook)); }
+        else if (num18 == 4)
+        {
+            if (iChair > -1)
+            {
+                DgPlaceSimple(num3, j, DgTileOf(iChair));
+                if (DgInWorld(num3, j, 0) && act[j * W + num3] != 0 && typ[j * W + num3] == DgTileOf(iChair)) return true;
+            }
+        }
+        else if (num18 == 5) { if (iBed > -1 && DgPlace4x2(num3, j, DgTileOf(iBed))) return true; }
+        else if (num18 == 6) { if (iPiano > -1 && DgPlaceSimple(num3, j, DgTileOf(iPiano))) return true; }
+        else if (num18 == 7) { if (iDress > -1 && DgPlaceSimple(num3, j, DgTileOf(iDress))) return true; }
+        else if (num18 == 8) { if (iSofa > -1 && DgPlaceSimple(num3, j, DgTileOf(iSofa))) return true; }
+        else if (num18 == 9) { if (iTub > -1 && DgPlace4x2(num3, j, DgTileOf(iTub))) return true; }
+        else if (num18 == 10) { if (iLamp > -1 && DgPlaceSimple(num3, j, DgTileOf(iLamp))) return true; }
+        else if (num18 == 11) { if (iCand > -1 && DgPlaceSimple(num3, j, DgTileOf(iCand))) return true; }
+        else if (num18 == 12) { if (iClock > -1 && DgPlaceSimple(num3, j, DgTileOf(iClock))) return true; }
+    }
+    return false;
+}
+// 家具 item → tile 映射（Item.cs createTile：椅15 桌14 工作台18 蜡烛33 雕像105
+// 书架101 床79 钢琴87 梳妆台88 沙发89 浴缸90 烛台100 路灯93 钟104）
+int DgTileOf(int item) => item switch
+{
+    1396 or 1399 or 1402 or 1509 => 15,
+    1397 or 1400 or 1403 or 1510 => 14,
+    1398 or 1401 or 1404 or 1511 => 18,
+    1405 or 1406 or 1407 or 5743 => 33,
+    1408 or 1409 or 1410 => 105,
+    1414 or 1415 or 1416 or 1512 => 101,
+    1470 or 1471 or 1472 or 5740 => 79,
+    2376 or 2377 or 2378 or 5750 => 87,
+    2386 or 2387 or 2388 or 5741 => 88,
+    2402 or 2403 or 2404 or 5753 => 89,
+    2658 or 2659 or 2660 or 5739 => 90,
+    2664 or 2665 or 2666 or 5742 => 100,
+    2645 or 2646 or 2647 or 5748 => 93,
+    3900 or 3901 or 3902 or 5746 => 104,
+    _ => -1
+};
+// PlaceTile 近似：目标格净空 + 有墙/侧邻/底邻锚 → 单格放置（帧不入哈希）
+bool DgPlaceSimple(int x, int y, int type)
+{
+    if (type < 0 || !DgInWorld(x, y, 1) || act[y * W + x] != 0) return false;
+    bool anchor = wal[y * W + x] > 0
+        || (DgInWorld(x - 1, y, 0) && act[y * W + x - 1] != 0 && SOLID.Contains(typ[y * W + x - 1]) && !dgSolidTop.Contains(typ[y * W + x - 1]))
+        || (DgInWorld(x + 1, y, 0) && act[y * W + x + 1] != 0 && SOLID.Contains(typ[y * W + x + 1]) && !dgSolidTop.Contains(typ[y * W + x + 1]))
+        || (DgInWorld(x, y + 1, 0) && act[(y + 1) * W + x] != 0 && SOLID.Contains(typ[(y + 1) * W + x]) && !dgSolidTop.Contains(typ[(y + 1) * W + x]));
+    if (!anchor) return false;
+    act[y * W + x] = 1; typ[y * W + x] = (ushort)type;
+    return true;
+}
+// Place4x2（WorldGen.cs:50534）：4×2 净空 + 下方实心
+bool DgPlace4x2(int x, int y, int type)
+{
+    if (type < 0 || x < 5 || x > W - 5 || y < 5 || y > H - 5) return false;
+    for (int a = x - 1; a < x + 3; a++)
+    {
+        for (int b = y - 1; b < y + 1; b++)
+            if (!DgInWorld(a, b, 0) || act[b * W + a] != 0) return false;
+        if (!DgSolid2(a, y + 1)) return false;
+    }
+    for (int a = x - 1; a < x + 3; a++)
+        for (int b = y - 1; b < y + 1; b++)
+        { int ti = b * W + a; act[ti] = 1; typ[ti] = (ushort)type; }
+    return true;
+}
+bool DgSolid2(int x, int y)
+{
+    if (!DgInWorld(x, y, 0) || act[y * W + x] == 0) return false;
+    return SOLID.Contains(typ[y * W + x]);
+}
+// —— DungeonGlobalPaintings（:28-321）——
+int dgLihzPlaced = 0, dgLihzMax = 1;
+void DgPaintings()
+{
+    dgLihzPlaced = 0;
+    dgLihzMax = 1;                                             // 世界尺寸中档（GetWorldSize==1 → 2）★按 4200=large 取 2？——Configuration：4200=Large → case 2 → 2+Next(2)
+    dgLihzMax = 2 + (int)r.Next(2);
+    int num2v = dgWallVariants[0];
+    double num3v = Math.Max(1.0, 1.0 * 0.75);
+    int num4 = (int)(100f * (W / 4200f) * num3v);
+    int num5 = num4 * 3;
+    for (int i = 0; i < num4; i++)
+    {
+        num5--;
+        if (num5 <= 0) break;
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(worldSurface, dgBounds.B);
+        int n8 = 1000;
+        while (!DgIsDW(wal[y * W + x]) || act[y * W + x] != 0)
+        {
+            n8--;
+            if (n8 <= 0) break;
+            x = (int)r.Next(dgBounds.L, dgBounds.R);
+            y = (int)r.Next(worldSurface, dgBounds.B);
+        }
+        int n9 = x, n10 = x, n11 = y, n12 = y;
+        for (int t = 0; t < 2; t++)
+        {
+            n9 = x; n10 = x;
+            while (n9 > 20 && act[y * W + n9] == 0 && DgIsDW(wal[y * W + n9])) n9--;
+            n9++;
+            while (n10 < W - 20 && act[y * W + n10] == 0 && DgIsDW(wal[y * W + n10])) n10++;
+            n10--;
+            x = (n9 + n10) / 2;
+            n11 = y; n12 = y;
+            while (n11 > 20 && act[n11 * W + x] == 0 && DgIsDW(wal[n11 * W + x])) n11--;
+            n11++;
+            while (n12 < H - 20 && act[n12 * W + x] == 0 && DgIsDW(wal[n12 * W + x])) n12++;
+            n12--;
+            y = (n11 + n12) / 2;
+        }
+        n9 = x; n10 = x;
+        while (n9 > 20 && act[y * W + n9] == 0 && act[(y - 1) * W + n9] == 0 && act[(y + 1) * W + n9] == 0) n9--;
+        n9++;
+        while (n10 < W - 20 && act[y * W + n10] == 0 && act[(y - 1) * W + n10] == 0 && act[(y + 1) * W + n10] == 0) n10++;
+        n10--;
+        n11 = y; n12 = y;
+        while (n11 > 20 && act[n11 * W + x] == 0 && act[n11 * W + x - 1] == 0 && act[n11 * W + x + 1] == 0) n11--;
+        n11++;
+        while (n12 < H - 20 && act[n12 * W + x] == 0 && act[n12 * W + x - 1] == 0 && act[n12 * W + x + 1] == 0) n12++;
+        n12--;
+        x = (n9 + n10) / 2;
+        y = (n11 + n12) / 2;
+        int n13 = n10 - n9, n14 = n12 - n11;
+        if (n13 <= 7 || n14 <= 5) continue;
+        var arr = new bool[3] { true, false, false };
+        if (n13 > n14 * 3 && n13 > 21) arr[1] = true;
+        if (n14 > n13 * 3 && n14 > 21) arr[2] = true;
+        int n15 = (int)r.Next(3);
+        if (wal[y * W + x] == num2v) n15 = 0;
+        while (!arr[n15]) n15 = (int)r.Next(3);
+        if (DgNearPicture2(x, y)) n15 = -1;
+        if (n15 == 0)
+        {
+            if (DgFeatArea3(x, y, 2) && !DgNearPicture(x, y)) DgPaintingAt(x, y);
+        }
+        else if (n15 == 1)
+        {
+            if (!DgFeatArea3(x, y, 2)) continue;
+            if (act[y * W + x] == 0) DgPaintingAt(x, y);
+            if (act[y * W + x] != 0) continue;
+            int baseY = y;
+            for (int m = 0; m < 2; m++)
+            {
+                x += 7;
+                int a1 = baseY, a2 = baseY;
+                while (a1 > 0 && act[a1 * W + x] == 0 && act[a1 * W + x - 1] == 0 && act[a1 * W + x + 1] == 0) a1--;
+                a1++;
+                while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
+                a2--;
+                int ny = (a1 + a2) / 2;
+                if (DgFeatArea3(x, ny, 2))
+                {
+                    if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
+                    DgPaintingAt(x, ny);
+                }
+            }
+            for (int m = 0; m < 2; m++)
+            {
+                x -= 7;
+                int a1 = baseY, a2 = baseY;
+                while (a1 > 0 && act[a1 * W + x] == 0 && act[a1 * W + x - 1] == 0 && act[a1 * W + x + 1] == 0) a1--;
+                a1++;
+                while (a2 < H - 1 && act[a2 * W + x] == 0 && act[a2 * W + x - 1] == 0 && act[a2 * W + x + 1] == 0) a2++;
+                a2--;
+                int ny = (a1 + a2) / 2;
+                if (DgFeatArea3(x, ny, 2))
+                {
+                    if (Math.Abs(baseY - ny) >= 4 || DgNearPicture(x, ny)) break;
+                    DgPaintingAt(x, ny);
+                }
+            }
+        }
+        else if (n15 == 2)
+        {
+            if (!DgFeatArea3(x, y, 2)) continue;
+            if (act[y * W + x] == 0) DgPaintingAt(x, y);
+            if (act[y * W + x] != 0) continue;
+            int baseX = x;
+            for (int m = 0; m < 3; m++)
+            {
+                y += 7;
+                int a1 = baseX, a2 = baseX;
+                while (a1 > 0 && act[y * W + a1] == 0 && act[(y - 1) * W + a1] == 0 && act[(y + 1) * W + a1] == 0) a1--;
+                a1++;
+                while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
+                a2--;
+                int nx = (a1 + a2) / 2;
+                if (DgFeatArea3(nx, y, 2))
+                {
+                    if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
+                    DgPaintingAt(nx, y);
+                }
+            }
+            for (int m = 0; m < 3; m++)
+            {
+                y -= 7;
+                int a1 = baseX, a2 = baseX;
+                while (a1 > 0 && act[y * W + a1] == 0 && act[(y - 1) * W + a1] == 0 && act[(y + 1) * W + a1] == 0) a1--;
+                a1++;
+                while (a2 < W - 1 && act[y * W + a2] == 0 && act[(y - 1) * W + a2] == 0 && act[(y + 1) * W + a2] == 0) a2++;
+                a2--;
+                int nx = (a1 + a2) / 2;
+                if (DgFeatArea3(nx, y, 2))
+                {
+                    if (Math.Abs(baseX - nx) >= 4 || DgNearPicture(nx, y)) break;
+                    DgPaintingAt(nx, y);
+                }
+            }
+        }
+    }
+}
+bool DgFeatArea3(int x, int y, int fluff)
+{
+    for (int a = x - fluff; a <= x + fluff; a++)
+        for (int b = y - fluff; b <= y + fluff; b++)
+            if (!DgFeatureOK(a, b, 2)) return false;
+    return true;
+}
+// nearPicture/nearPicture2（WorldGen.cs:34704/34719）
+bool DgNearPicture(int x, int y)
+{
+    for (int a = x - 4; a <= x + 3; a++)
+        for (int b = y - 3; b <= y + 2; b++)
+            if (DgInWorld(a, b, 0) && act[b * W + a] != 0) return true;
+    return false;
+}
+bool DgNearPicture2(int x, int y)
+{
+    int rad1 = (wal[y * W + x] != 7 && wal[y * W + x] != 8 && wal[y * W + x] != 9) ? 8 : 15;
+    int rad2 = (wal[y * W + x] != 7 && wal[y * W + x] != 8 && wal[y * W + x] != 9) ? 5 : 10;
+    for (int a = x - rad1; a <= x + rad1; a++)
+        for (int b = y - rad2; b <= y + rad2; b++)
+            if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && (typ[b * W + a] == 240 || typ[b * W + a] == 241 || typ[b * W + a] == 242)) return true;
+    return false;
+}
+// Paintings_PlacePainting + Paintings_GetPaintingEntry（style0：主墙→RandomDungeonPainting，变体墙→RandomBonePainting）
+void DgPaintingAt(int x, int y)
+{
+    int tile = 240, style = 0;
+    if (wal[y * W + x] == dgWall)
+    {
+        int n = (int)r.Next(3);
+        if (n <= 1)
+        {
+            tile = 240;
+            int n2 = (int)r.Next(7);
+            if (n2 == 6) n2 = (int)r.Next(7);
+            style = n2 switch { 0 => 12, 1 => 13, 2 => 14, 3 => 15, 4 => 18, 5 => 19, _ => 23 };
+        }
+        else
+        {
+            tile = 242;
+            int n2 = (int)r.Next(17);
+            style = n2 switch { 14 => 15, 15 => 16, 16 => 30, _ => n2 };
+        }
+    }
+    else
+    {
+        int n = (int)r.Next(2);
+        if (n == 0) { tile = 240; style = (int)r.Next(2) == 0 ? 16 : 17; }
+        else { tile = 241; style = (int)r.Next(9); }
+    }
+    DgPlaceSimple(x, y, tile);
+    if (wal[y * W + x] == 87) dgLihzPlaced++;
+}
+// —— DungeonGlobalBanners（:24-104）——
+void DgBanners()
+{
+    double num2 = Math.Max(1.0, 1.0 * 0.75);
+    int num3 = (int)(200f * (W / 4200f) * num2);
+    for (int i = 0; i < num3; i++)
+    {
+        int x = (int)r.Next(dgBounds.L, dgBounds.R);
+        int y = (int)r.Next(dgBounds.T, dgBounds.B);
+        int n6 = 1000;
+        while (!DgIsDW(wal[y * W + x]) || act[y * W + x] != 0)
+        {
+            n6--;
+            if (n6 <= 0) break;
+            x = (int)r.Next(dgBounds.L, dgBounds.R);
+            y = (int)r.Next(dgBounds.T, dgBounds.B);
+        }
+        n6 = 1000;
+        while (!DgSolid(x, y) && y > 10)
+        {
+            n6--;
+            if (n6 <= 0) break;
+            y--;
+        }
+        y++;
+        if (!DgFeatureOK(x, y, 0) || !DgIsDW(wal[y * W + x])
+            || (DgInWorld(x, y - 1, 0) && typ[(y - 1) * W + x] == 48)
+            || act[y * W + x] != 0
+            || (DgInWorld(x, y + 1, 0) && act[(y + 1) * W + x] != 0)
+            || (DgInWorld(x, y + 2, 0) && act[(y + 2) * W + x] != 0)
+            || (DgInWorld(x, y + 3, 0) && act[(y + 3) * W + x] != 0)) continue;
+        bool near = false;
+        for (int a = x - 1; a <= x + 1; a++)
+            for (int b = y; b <= y + 3; b++)
+                if (DgInWorld(a, b, 0) && act[b * W + a] != 0 && (typ[b * W + a] == 10 || typ[b * W + a] == 11 || typ[b * W + a] == 91)) near = true;
+        if (near) continue;
+        int num8 = 0;
+        if (wal[y * W + x] == dgWallVariants[1]) num8 = 1;
+        if (wal[y * W + x] == dgWallVariants[2]) num8 = 2;
+        num8 *= 2;
+        num8 += (int)r.Next(2);
+        int style = dgBanner[num8];
+        DgPlaceSimple(x, y, 91);
+    }
+}
 // ★#29 Corruption（cs:13919）与 #32 Dungeon（cs:14816）尚未转录——转录后须插在
 
 // ================= Pass 33：MountainCaveOpenings（cs:14932-14947）+ Pass 34：Beaches（cs:14947-15087）=================
@@ -4407,4 +6816,52 @@ static class GW
             return PlotLineAct(x + p2x - psx, y + p2y - psy, x + p3x - psx, y + p3y - psy, plot, jump: false);
         }, jump: true);
     }
+}
+
+// ================= Pass 32 Dungeon 数据类型（DungeonBounds/DRoom/DHall/DDoor/DPlat）=================
+// DungeonBounds（DungeonBounds.cs：Left/Right 钳 [10,maxX-10]、Top/Bottom 钳 [10,maxY-10]；
+// CalculateHitbox 保证 R>L、B>T；Contains=Rectangle.Contains 半开区间）
+sealed class DBnd
+{
+    public int L = 10, R = 10, T = 10, B = 10;
+    public bool Has;
+    static int Cx(int v) => Math.Clamp(v, 10, 4200 - 10);
+    static int Cy(int v) => Math.Clamp(v, 10, 1200 - 10);
+    public void Set(int l, int t, int rr, int b) { L = Cx(l); R = Cx(rr); T = Cy(t); B = Cy(b); Calc(); }
+    public void Calc() { if (R <= L) R = L + 1; if (B <= T) B = T + 1; Has = true; }
+    public void Upd(int x, int y) { if (x < L) L = Cx(x); if (x > R) R = Cx(x); if (y < T) T = Cy(y); if (y > B) B = Cy(y); Has = true; }
+    public void Upd(int minX, int minY, int maxX, int maxY)
+    { if (minX < L) L = Cx(minX); if (maxX > R) R = Cx(maxX); if (minY < T) T = Cy(minY); if (maxY > B) B = Cy(maxY); Has = true; }
+    public void TopSet(int t) { T = Cy(t); Has = true; }
+    public void Inflate(int a) => Set(L - a, T - a, R + a, B + a);
+    public bool Contains(int x, int y) => Has && x >= L && x < R && y >= T && y < B;
+    public bool ContainsF(int x, int y, int fluff) => fluff == 0 ? Contains(x, y) : (Has && x >= L - fluff && x < R + fluff && y >= T - fluff && y < B + fluff);
+}
+sealed class DRoom
+{
+    public int Seed, X, Y;
+    public bool Start, Generated;
+    public DBnd Inner = new(), Outer = new();
+    public double SX, SY;          // StartPosition/EndPosition（LegacyRoom：val3/val2 终点）
+    public double EX, EY;          // EndPosition（金箱候选中心）
+    public int Strength;
+}
+sealed class DHall
+{
+    public int Seed;
+    public bool Generated, ForceX, IsEntrance;
+    public DBnd Bounds = new();
+    public double SX, SY, EX, EY;  // StartPosition/EndPosition
+    public double SDX, SDY, EDX, EDY;
+}
+sealed class DDoor
+{
+    public int X, Y, Dir;
+    public bool Hall, SkipOther, SkipSpace, Clear;
+    public int Fluff;
+}
+sealed class DPlat
+{
+    public int X, Y;
+    public bool Hall;
 }

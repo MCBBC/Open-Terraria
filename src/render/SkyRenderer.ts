@@ -32,8 +32,10 @@ function loadTex(name: string): HTMLImageElement {
   return im;
 }
 
-/** 原版云（Cloud.cs 语义）：贴图 Cloud_0..3、scale 0.70-1.31、风驱动 ±9*parallax px/帧、
- *  旋转微摆 ±0.02、按 scale 三层深度（远景压暗 R 通道）、AABB 拒绝重叠生成、淡入淡出。 */
+/** 原版云（Cloud.cs 语义）：贴图五族 Cloud_0-3 常态/4-8 高层薄云/9-13 远空灰云/
+ *  14-17 低空白云/18-21 雨云·风暴云（addCloud 选型链 Cloud.cs:114-138）、
+ *  scale 0.70-1.31、风驱动 ±9*parallax px/帧、旋转微摆 ±0.02、按 scale 三层深度
+ *  （远景压暗 R 通道）、AABB 拒绝重叠生成、淡入淡出。 */
 interface VanillaCloud {
   type: number;
   x: number; y: number;         // 像素（y 为屏幕上部带）
@@ -44,10 +46,141 @@ interface VanillaCloud {
   kill: boolean;
 }
 
+/** 云选型链结果（pickCloudType 返回） */
+export interface CloudTypePick {
+  type: number;
+  /** 风暴云（18-21）大块上移量：scale≥1.15 → 150、scale≥1 → 150，两档叠加（Cloud.cs:118-125） */
+  stormShift: number;
+}
+
+/** Utils.GetLerpValue（Utils.cs）钳位版本：from>to 时单调递减（淡出段用） */
+function lerpValueClamped(from: number, to: number, t: number): number {
+  if (from === to) return t < from ? 0 : 1;
+  return Math.max(0, Math.min(1, (t - from) / (to - from)));
+}
+
+/**
+ * 云贴图选型链（Cloud.cs addCloud :114-138 五族 1:1，纯函数供测试）：
+ *  ① 雨云/风暴云：cloudAlpha>0 且 3/4 概率，或阴天（cloudBGActive≥1）且 1/2 概率
+ *     → type 18-21（贴图 Cloud_18-21，530×218 级大块云，故整体上移腾位置）；
+ *  ② 远空灰云 9-13：晴天无雨、scale<1、高位、云量≤80 时；
+ *  ③ 高层薄云 4-8：高空或小 scale 高位，云量>70 或阴天；
+ *  ④ 低空白云 14-17：低位 + 1/2 概率 + 云量>20；
+ *  ⑤ 缺省 0-3 常态云。
+ *  注意 9-13 在下雨/阴天转为 kill（Cloud.cs Update :449-452）——它们是"晴天远空灰云"，
+ *  雨天出场的深色云是 18-21（任务描述里"Cloud_9-13 深雨云"系误记，以源码为准）。
+ *  稀有云 22-40（:139-146 RollRareCloud，1/150 掷 + 世界旗标门）未实装，登记不做。
+ */
+export function pickCloudType(i: {
+  scale: number; y: number; viewH: number;
+  numClouds: number; cloudAlpha: number; cloudBGActive: number;
+  rnd: () => number;
+}): CloudTypePick {
+  const r = i.rnd;
+  let type = Math.floor(r() * 4);                                    // :114 Next(4)
+  let stormShift = 0;
+  if ((i.cloudAlpha > 0 && Math.floor(r() * 4) !== 0) || (i.cloudBGActive >= 1 && Math.floor(r() * 2) === 0)) {
+    // :115-126 —— C# || 短路：第一支为真时第二支的 Next(2) 不掷（rnd 序列对齐）
+    type = 18 + Math.floor(r() * 4);                                 // :117 Next(18,22)
+    if (i.scale >= 1.15) stormShift += 150;                          // :118-120
+    if (i.scale >= 1) stormShift += 150;                             // :122-124
+  } else if (i.cloudBGActive <= 0 && i.cloudAlpha === 0 && i.scale < 1
+    && i.y < -i.viewH * 0.15 && i.numClouds <= 80) {
+    type = 9 + Math.floor(r() * 5);                                  // :129 Next(9,14)
+  } else if (((i.scale < 1.15 && i.y < -i.viewH * 0.3) || (i.scale < 0.85 && i.y < i.viewH * 0.15))
+    && (i.numClouds > 70 || i.cloudBGActive >= 1)) {
+    type = 4 + Math.floor(r() * 5);                                  // :133 Next(4,9)
+  } else if (i.y > -i.viewH * 0.15 && Math.floor(r() * 2) === 0 && i.numClouds > 20) {
+    type = 14 + Math.floor(r() * 4);                                 // :137 Next(14,18)
+  }
+  return { type, stormShift };
+}
+
+// ================= AmbientSky 天空实体（AmbientSky.cs FadingSkyEntity 家族精选） =================
+
+/** 已实装的天空装饰族（AmbienceServer.cs:60-84 十九族中选 2）：
+ *  birds = BirdsPackSkyEntity（AmbientSky.cs:444-487，V 形鸟群横穿）；
+ *  gastropod = GastropodGroupSkyEntity（:601-708，夜空腹足怪——水母状浮空怪，
+ *  自发光 Colors.AmbientNPCGastropodLight=(102,0,63)，Colors.cs:39）。 */
+export type AmbientFamily = 'birds' | 'gastropod';
+
+/** 选族判定输入（AmbienceServer 各判定 + 玩家高度带） */
+export interface AmbientSpawnInput {
+  dayTime: boolean;
+  /** Main.IsItRaining = cloudAlpha>0（Main.cs:2659） */
+  raining: boolean;
+  eclipse: boolean;
+  bloodMoon: boolean;
+  pumpkinMoon: boolean;
+  snowMoon: boolean;
+  /** 次级条件：腹足怪需 ZoneHallow（AmbienceServer.cs:80） */
+  zoneHallow: boolean;
+  /** 玩家在可见天空高度带（AmbienceServer.cs:190-193：position.Y ≤ worldSurface*16+1600） */
+  playerAtSkyHeight: boolean;
+  /** Main.rand.Next(5) 掷点 0-4（:119：<3 时走放宽列表 → 60% 概率忽略次级条件） */
+  roll5: number;
+  /** source2.ElementAt(Next(num)) 的均匀选点 0-1 */
+  pick: number;
+}
+
+/** 未实装族登记（AmbienceServer.cs:60-84 + AmbientSky.cs 各类，素材已全量入库）：
+ *  Wyvern(:1026 困难模式晴天)、Airship(:1082 风日)、AirBalloon(:1126 非风日晴天)、
+ *  Eyeball/EOC(:1226 夜)、Butterflies(:186 无风晴天)、LostKite(:231 风日)、
+ *  Vulture(:338 沙漠晴天)、PixiePosse(:389 神圣)、Seagulls(:488 海滩)、
+ *  SlimeBalloons(:708 风日)、Pegasus(:289 神圣晴天)、EaterOfSouls(:1202 腐化)、
+ *  Crimera(:1178 猩红)、Bats(:919 丛林黄昏/夜)、Hellbats(:807 地狱带)、
+ *  BoneSerpent(:1078 地狱层)、Meteor(:1316 已接 spawnSkyMeteor)。 */
+
+/**
+ * 天空装饰选族纯函数（AmbienceServer.Update :96-129 截取已实装两族）：
+ *  BirdsV 条件 = IsSunnyDay（:30-37：!雨 && 白天 && !日食，:60）；
+ *  Gastropods 条件 = IsCalmNight（:48-55：!雨 && 夜 && !血月/南瓜月/霜月，:72）；
+ *  次级条件列表（:117）非空且 roll5≥3（40%）→ 只在带次级条件的族里选，
+ *  否则放宽到全候选（:119-123）。注意任务里"地狱上空水母"系误记：腹足怪是
+ *  夜空/太空高度带实体（y∈[3200, surface*16-1600]，:692/:618），地狱带的族是
+ *  Hellbats/BoneSerpent（未实装）。
+ */
+export function pickAmbientFamily(i: AmbientSpawnInput): AmbientFamily | null {
+  if (!i.playerAtSkyHeight) return null;                            // :117/:190-193 高度门
+  const sunnyDay = !i.raining && i.dayTime && !i.eclipse;           // :30-37
+  const calmNight = !i.raining && !i.dayTime && !i.bloodMoon && !i.pumpkinMoon && !i.snowMoon; // :48-55
+  const eligible: AmbientFamily[] = [];
+  if (sunnyDay) eligible.push('birds');                             // :60
+  if (calmNight) eligible.push('gastropod');                        // :72
+  if (!eligible.length) return null;                                // :108-111
+  // :115-118 严格列表 = 有次级条件且满足的族（birds 无次级条件不参与严格列表）
+  const strict = eligible.filter((f) => (f === 'gastropod' ? i.zoneHallow : false));
+  const pool = strict.length > 0 && i.roll5 >= 3 ? strict : eligible;  // :119-123
+  return pool[Math.min(pool.length - 1, Math.floor(i.pick * pool.length))];
+}
+
+/** FadingSkyEntity（AmbientSky.cs:88-184）本仓表示 */
+class AmbientEnt {
+  opacity = 0;
+  vx = 0; vy = 0;
+  rotation = 0;
+  /** 腹足怪磁吸弹簧（GastropodGroupSkyEntity :631-636 的四元组偏移域） */
+  magAccX = 0; magAccY = 0; magTX = 0; magTY = 0;
+  magPX = 0; magPY = 0; magVX = 0; magVY = 0;
+  dead = false;
+  constructor(
+    readonly kind: AmbientFamily,
+    public x: number, public y: number,       // SkyEntity.Position（世界 px）
+    public depth: number,
+    public dir: 1 | -1,
+    public life: number,                      // LifeTime（tick）
+    public bornAt: number,                    // TimeEntitySpawnedIn
+    public fadeIn: number, public fadeOut: number,  // OpacityNormalizedTimeTo*
+    public frame: number, public rows: number,
+    public framingSpeed: number,
+  ) {}
+}
+
 export class SkyRenderer {
   private stars: Array<{ x: number; y: number; s: number }> = [];
-  /** 原版云贴图（Cloud_0..3，懒加载） */
-  private cloudTexs: Array<HTMLImageElement | null> = [null, null, null, null];
+  /** 原版云贴图五族（Cloud.cs:114-138）：0-3 常态/4-8 高层薄云/9-13 远空灰云/
+   *  14-17 低空白云/18-21 雨云·风暴云；22-40 稀有云未接（登记不做） */
+  private cloudTexs: Array<HTMLImageElement | null> = new Array(22).fill(null);
   private vclouds: VanillaCloud[] = [];
   /** 风——原版风场模型(Main.cs:10800/58222-58310):
    *  windSpeedTarget 随机游走 ±0.001 步、钳 ±0.35;windSpeedCurrent 以
@@ -61,7 +194,8 @@ export class SkyRenderer {
     for (let i = 0; i < 120; i++) {
       this.stars.push({ x: Math.random(), y: Math.random() * 0.7, s: Math.random() < 0.2 ? 2 : 1 });
     }
-    for (let i = 0; i < 4; i++) {
+    // 五族云贴图全量装载（Cloud_0-21；单张 ≤ 530×218，总量 ~0.5MB）
+    for (let i = 0; i < this.cloudTexs.length; i++) {
       const im = new Image();
       im.src = `sprites/vanilla/Cloud_${i}.png`;
       this.cloudTexs[i] = im;
@@ -127,24 +261,47 @@ export class SkyRenderer {
     return base * s * s;
   }
 
-  /** 原版 SpawnCloud（Cloud.cs:60-170）：scale/rotation/flip/位置/重叠拒绝 */
+  /** 原版 SpawnCloud（Cloud.cs:60-170 一比一）：scale/rotation/flip/位置/五族选型/重叠拒绝 */
   private spawnCloud(viewW: number, viewH: number, initial: boolean): VanillaCloud | null {
+    const r = Math.random;
+    // scale = Next(70,131)*0.01（:81）；rot = Next(-10,11)*0.01（:82）
     const c: VanillaCloud = {
-      type: Math.floor(Math.random() * 4),
+      type: 0,
       x: 0, y: 0,
-      scale: (70 + Math.random() * 61) / 100,
-      rot: (Math.random() * 21 - 10) / 100,
+      scale: Math.floor(70 + r() * 61) / 100,
+      rot: (Math.floor(r() * 21) - 10) / 100,
       rSpeed: 0,
       alpha: initial ? 1 : 0,
-      flip: Math.random() < 0.5,
+      flip: r() < 0.5,               // :87-90 50% 水平翻转
       kill: false,
     };
-    c.y = -viewH * 0.25 + Math.random() * viewH * 0.4;
-    // 顺风侧留出屏外缓冲（原版 num3/num4 ±200 + 300 随机带）
-    const margin = 300 + (this.wind > 0 ? 200 : 0);
-    const lo = this.wind > 0 ? -margin - 200 : -margin;
-    c.x = lo + Math.random() * (viewW + margin * 2 + (this.wind < 0 ? 200 : 0));
-    // AABB 重叠拒绝
+    // Y 带（:109-113）：[-0.25H, 0.15H)，1/3 概率再上抬 rand*0.1H
+    c.y = -viewH * 0.25 + r() * viewH * 0.4;
+    if (Math.floor(r() * 3) === 0) c.y -= r() * viewH * 0.1;
+    // 五族选型链（:114-138）：雨/阴天 → 18-21 风暴云（含大块上移量）
+    const wr = this.weatherRef;
+    const pick = pickCloudType({
+      scale: c.scale, y: c.y, viewH,
+      numClouds: wr ? wr.numClouds : 200,
+      cloudAlpha: wr ? wr.cloudAlpha : 0,
+      cloudBGActive: wr ? wr.cloudBGActive : 0,
+      rnd: r,
+    });
+    c.type = pick.type;
+    c.y -= pick.stormShift;          // :118-125 风暴云大块腾位
+    // scale>1.2 下移 100（:147-149）；scale 钳 0.7/1.3（:151-158）
+    if (c.scale > 1.2) c.y += 100;
+    if (c.scale > 1.3) c.scale = 1.3;
+    if (c.scale < 0.7) c.scale = 0.7;
+    // X：顺风侧留屏外缓冲（:96-107：风>0 → 左界 -500；风<0 → 右界 +500）
+    const num3 = this.wind > 0 ? -200 : 0;
+    const num4 = this.wind < 0 ? 200 : 0;
+    const lo = num3 - 300, hi = viewW + num4 + 300;
+    c.x = lo + r() * (hi - lo);      // :107 Next(num3-300, screenWidth+num4+300)
+    // 远端屏外直接全显（:161-168：x>屏+400 或 x+宽<-400 → Alpha=1）
+    const tw = (this.cloudTexs[c.type]?.naturalWidth ?? 200) * c.scale;
+    if (c.x > viewW + 400 || c.x + tw < -400) c.alpha = 1;
+    // AABB 重叠拒绝（:169-180）
     const tex = this.cloudTexs[c.type];
     const w = (tex?.naturalWidth ?? 200) * c.scale, h = (tex?.naturalHeight ?? 80) * c.scale;
     for (const o of this.vclouds) {
@@ -189,12 +346,20 @@ export class SkyRenderer {
     }
   }
 
-  /** 原版 Update（Cloud.cs:348-443）：风驱动位移 + 淡入淡出 + 旋转微摆 + 越界回收 */
+  /** 原版 Update（Cloud.cs:348-443）：风驱动位移 + 淡入淡出 + 旋转微摆 + 越界回收。
+   *  速度随雨增强由 Weather.updateWind 承担（Main.cs:58221-58237：
+   *  current 向 target×(1+5/9×maxRaining) 逼近——暴雨云速最高 +~56%） */
   private updateClouds(dtMs: number, viewW: number) {
     const frames = dtMs / (1000 / 60);
     this.updateWind(frames);
+    const wr = this.weatherRef;
     for (const c of this.vclouds) {
       c.x += this.wind * 9 * this.cloudParallax(c.scale) * frames;
+      // 远空灰云（9-13）在下雨/阴天转为 kill 淡出（Cloud.cs:449-452）——
+      // 它们是晴天专属；雨天出场的深色云是新刷出的 18-21 风暴云
+      if (c.type >= 9 && c.type <= 13 && wr && (wr.cloudAlpha > 0 || wr.cloudBGActive >= 1)) {
+        c.kill = true;
+      }
       if (!c.kill && c.alpha < 1) c.alpha = Math.min(1, c.alpha + 0.001 * frames);
       if (c.kill) {
         c.alpha -= 0.001 * frames;
@@ -213,7 +378,9 @@ export class SkyRenderer {
   }
 
   /** 维持云量（原版每帧尝试 SpawnCloud；初始铺满，之后顺风补充）。
-   *  天气联动：attachWeather 后目标云数由 numClouds 驱动（0-200 → 2-14 朵），雨/阴天加密 */
+   *  天气联动：attachWeather 后目标云数由 numClouds 驱动（0-200 → 2-14 朵）。
+   *  下雨加密在 Weather.updateCloudCounts（Main.cs:58381-58392：cloudAlpha>0 时
+   *  numClouds 强制爬升到 200×cloudAlpha）——此处只读 numClouds 即自动随雨加密 */
   private targetCloudCount(viewW: number): number {
     const base = Math.max(8, Math.round(viewW / 90));
     if (!this.weatherRef) return base;
@@ -246,7 +413,10 @@ export class SkyRenderer {
   }
 
   // ---- 器件驱动的天空效果（SceneMetrics 器件态；Renderer 每帧写入）----
-  fx: { monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number; moonEventKind: 0 | 1 | 2 } =
+  fx: {
+    monolith: number; party: boolean; surfaceY: number; worldW: number; worldH: number;
+    moonEventKind: 0 | 1 | 2;
+  } =
     { monolith: -1, party: false, surfaceY: 0, worldW: 0, worldH: 0, moonEventKind: 0 };
 
   /** 天塔柱全屏滤镜颜色/不透明度（ScreenEffectInitializer.cs:18-21 FilterMiniTower 1:1；
@@ -540,6 +710,212 @@ export class SkyRenderer {
     return c;
   }
 
+  // ================= AmbientSky 天空实体（渲染层：群系背景之上、实体之下） =================
+
+  /** 天空实体驱动输入（AmbienceServer 判定语义；Renderer 每帧注入到 fx.amb） */
+  amb: {
+    dayTime: boolean; raining: boolean; eclipse: boolean; bloodMoon: boolean;
+    moonEventKind: 0 | 1 | 2; zoneHallow: boolean;
+    playerX: number; playerY: number;
+  } = { dayTime: true, raining: false, eclipse: false, bloodMoon: false, moonEventKind: 0, zoneHallow: false, playerX: 0, playerY: 0 };
+
+  /** FadingSkyEntity（AmbientSky.cs:88-184）表示（模块级，见 AmbientEnt） */
+  private ambEntities: AmbientEnt[] = [];
+  /** AmbientSky._frameCounter（每 60Hz tick +1） */
+  private ambFrame = 0;
+  /** AmbienceServer._updatesUntilNextAttempt */
+  private ambNextAttempt = 0;
+  /** 绘制帧缓存（spawn 用相机/视口） */
+  private ambViewW = 1920;
+  private birdsTex: HTMLImageElement | null = null;
+  private gastropodTex: HTMLImageElement | null = null;
+  /** 最近天空色（GetColor 的 bgColor = Main.ColorOfTheSkies；sky.draw 每帧写入） */
+  private lastSkyTop = '#4A90E0';
+  private lastSkyBottom = '#B8DCF5';
+
+  /** 清空（退世界/换图时由 Game.destroy 调用，防跨世界残留） */
+  clearAmbience(): void {
+    this.ambEntities = [];
+    this.ambFrame = 0;
+    this.ambNextAttempt = 0;
+  }
+
+  /** SetPositionInWorldBasedOnScreenSpace（AmbientSky.cs:47-51）：
+   *  屏幕空间提议位 → 世界位（相对相机中心的偏移 × depth/3） */
+  private ambientWorldPos(sx: number, sy: number, depth: number, camX: number, camY: number): [number, number] {
+    return [camX + (sx - camX) * (depth / 3), camY + (sy - camY) * (depth / 3)];
+  }
+
+  private mkAmbient(kind: AmbientFamily, sx: number, sy: number, depth: number, dir: 1 | -1,
+    life: number, camX: number, camY: number): AmbientEnt {
+    const [x, y] = this.ambientWorldPos(sx, sy, depth, camX, camY);
+    // 族参数：fadeIn/fadeOut（BirdsPack :461-462 / Gastropod :627-628）、
+    // 帧 4 行 vs 1 行（:458 / :622）、FramingSpeed 5 vs int.MaxValue（:463 / :629）
+    const birds = kind === 'birds';
+    return new AmbientEnt(kind, x, y, depth, dir, life, this.ambFrame,
+      birds ? 0.15 : 0.1, birds ? 0.85 : 0.9, 0, birds ? 4 : 1, birds ? 5 : 0x7fffffff);
+  }
+
+  /** 生成一族（AmbientSky.Spawn :1409-1533 分发；此处仅 birds 单体 / gastropod 群体） */
+  private spawnAmbientFamily(kind: AmbientFamily, camX: number, camY: number): void {
+    const r = Math.random;
+    const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
+    const dir: 1 | -1 = wind > 0 ? 1 : -1;   // Effects（:449-450：WindForVisuals>0 → None 顺风飞）
+    // VirtualCamera（VirtualCamera.cs:9-13）= 玩家中心 ± Size/2；原版 Size=Main.maxScreen
+    // 4096（Main.cs:3754）——本仓以实际视口近似（登记：远端生成距离略近）
+    const px = this.amb.playerX, halfW = this.ambViewW / 2;
+    const edgeX = dir > 0 ? px - halfW - 100 : px + halfW + 100;   // :452-459
+    if (kind === 'birds') {
+      // BirdsPackSkyEntity :444-467
+      const depth = r() * 3 + 3;                                   // :456
+      const y = r() * (this.fx.surfaceY - 1600 - 2400) + 2400;     // :455 高度带 2400..surface-1600
+      const life = (60 + Math.floor(r() * 61)) * 60;               // :459 Next(60,121)*60
+      this.ambEntities.push(this.mkAmbient('birds', edgeX, y, depth, dir, life, camX, camY));
+      return;
+    }
+    // GastropodGroupSkyEntity.CreateGroup :677-707
+    const count = 3 + Math.floor(r() * 5);                         // :680 Next(3,8) → 3-7 只
+    const baseY = r() * (this.fx.surfaceY - 1600 - 3200) + 3200;   // :695 高度带 3200..surface-1600
+    const baseDepth = r() * 3 + 2;                                 // :693
+    const baseLife = (30 + Math.floor(r() * 31)) * 60;             // :694 Next(30,61)*60
+    const accX = r() * 0.1 + 0.1, accY = r() * 0.3 + 0.3;          // :696 磁吸加速度
+    const tX = (r() * 2 - 1) * 120, tY = (r() * 2 - 1) * 120;      // :697 磁吸目标 ±120
+    for (let i = 0; i < count; i++) {
+      const depth = baseDepth + r() * 0.5;                         // :700
+      const ox = (r() * 20 - 10) * 60, oy = r() * 3 * 60;          // :701 群内散布 ±600/180
+      const life = baseLife + Math.floor(r() * 301);               // :703
+      const e = this.mkAmbient('gastropod', edgeX + ox, baseY + oy, depth, dir, life, camX, camY);
+      const k = r() * 0.5;                                         // :704 加速度 ×rand*0.5×0.05
+      e.magAccX = accX * k * 0.05; e.magAccY = accY * k * 0.05;
+      e.magTX = tX; e.magTY = tY;
+      this.ambEntities.push(e);
+    }
+  }
+
+  /** StartFadingOut（AmbientSky.cs:170-176）：把出生点前推到"淡出已开始"的时刻 */
+  private ambientStartFadingOut(e: AmbientEnt, frame: number): void {
+    const n = Math.floor(e.life * e.fadeOut);
+    const t = frame - n;
+    if (t < e.bornAt) e.bornAt = t;
+  }
+
+  /** FadingSkyEntity.Update（AmbientSky.cs:103-121）+ 各族 UpdateVelocity/Update */
+  private stepAmbientEntity(e: AmbientEnt, frame: number, wind: number): void {
+    const age = frame - e.bornAt;
+    if (age >= e.life) { e.dead = true; return; }                  // IsMovementDone :128-140
+    // UpdateOpacity :151-165：淡出段（age≥life×fadeOut）反向 1→0
+    e.opacity = age >= e.life * e.fadeOut
+      ? lerpValueClamped(e.life, e.life * e.fadeOut, age)
+      : lerpValueClamped(0, e.life * e.fadeIn, age);
+    // 帧推进 :110-113（(frame+FrameOffset)%FramingSpeed==0 → 下一行）
+    if (e.framingSpeed < 0x7fffffff && (frame % e.framingSpeed) === 0) {
+      e.frame = (e.frame + 1) % e.rows;
+    }
+    if (e.kind === 'birds') {
+      // BirdsPack.UpdateVelocity :470-474：3+|wind|×0.8 px/tick 顺风
+      e.vx = (3 + Math.abs(wind) * 0.8) * e.dir;
+      e.vy = 0;
+    } else {
+      // Gastropod.UpdateVelocity :631-638：磁吸弹簧 + 基速 1.5+|wind|×0.2
+      e.magVX += e.magAccX * Math.sign(e.magTX - e.magPX);
+      e.magVY += e.magAccY * Math.sign(e.magTY - e.magPY);
+      e.magPX += e.magVX; e.magPY += e.magVY;
+      e.vx = (1.5 + Math.abs(wind) * 0.2) * e.dir + e.magVX;
+      e.vy = e.magVY;
+      e.rotation = e.vx * 0.1;
+    }
+    e.x += e.vx; e.y += e.vy;                                      // :115 Position += Velocity
+  }
+
+  /** 各族 Update 尾部的环境门（BirdsPack :479-483 / Gastropod :644-647） */
+  private ambientEnvGate(e: AmbientEnt, frame: number): void {
+    const a = this.amb;
+    const out = e.kind === 'birds'
+      ? (a.raining || !a.dayTime || a.eclipse)                       // :481
+      : (a.raining || a.dayTime || a.bloodMoon || a.moonEventKind === 2 || a.moonEventKind === 1); // :646
+    if (out) this.ambientStartFadingOut(e, frame);
+  }
+
+  /**
+   * 天空实体推进 + 绘制。由 Renderer 在群系背景（biomeBg）之后、世界实体变换之前调用
+   * （原版 SkyManager「Ambience」天空层叠在 DrawBG 之上、tile 之前）。
+   * 调度 1:1 AmbienceServer.Update :96-129：到期一次尝试（间隔 Next(600,7200)=10-120s），
+   * 选族走 pickAmbientFamily；Main.rand.Next(5)<3（60%）放宽次级条件。
+   */
+  drawAmbience(ctx: CanvasRenderingContext2D, viewW: number, viewH: number,
+    camX: number, camY: number, dtMs = 16.7): void {
+    if (this.fx.surfaceY <= 0) return;   // 未进世界（fx 未注入）
+    this.ambViewW = viewW;
+    const ticks = Math.max(1, Math.round(dtMs / (1000 / 60)));
+    const wind = this.weatherRef ? this.weatherRef.windSpeedCurrent : this.wind;
+    for (let f = 0; f < ticks; f++) {
+      this.ambFrame++;
+      if (this.ambNextAttempt > 0) {
+        this.ambNextAttempt -= 1;                                   // :100-104
+      } else {
+        this.ambNextAttempt = 600 + Math.floor(Math.random() * 6600);  // :133 Next(600,7200)
+        const a = this.amb;
+        const fam = pickAmbientFamily({
+          dayTime: a.dayTime, raining: a.raining, eclipse: a.eclipse, bloodMoon: a.bloodMoon,
+          pumpkinMoon: a.moonEventKind === 2, snowMoon: a.moonEventKind === 1,
+          zoneHallow: a.zoneHallow,
+          playerAtSkyHeight: a.playerY <= this.fx.surfaceY + 1600,   // :190-193
+          roll5: Math.floor(Math.random() * 5),
+          pick: Math.random(),
+        });
+        if (fam) this.spawnAmbientFamily(fam, camX, camY);
+      }
+      for (const e of this.ambEntities) {
+        this.stepAmbientEntity(e, this.ambFrame, wind);
+        this.ambientEnvGate(e, this.ambFrame);
+      }
+      this.ambEntities = this.ambEntities.filter((e) => !e.dead);
+    }
+    if (!this.ambEntities.length) return;
+    if (!this.birdsTex) this.birdsTex = loadTex('Ambience_BirdsVShape.png');
+    if (!this.gastropodTex) this.gastropodTex = loadTex('Ambience_Gastropod.png');
+    // atmo（Game.updateWeather 同公式，Main.cs:62622）——CommonDraw :76 color × atmo
+    const atmo = Math.max(0, Math.min(1,
+      (camY / 16 - (65 + 10 * (this.fx.worldW / 4200) ** 2)) / Math.max(1, this.fx.surfaceY / 16 / 5)));
+    // GetColor 的 bgColor = Main.ColorOfTheSkies；以本帧天空底色近似（登记）
+    const sky = this.lastSkyBottom;
+    const sv = parseInt(sky.slice(1), 16);
+    const sr = (sv >> 16) & 255, sg = (sv >> 8) & 255, sb = sv & 255;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    for (const e of this.ambEntities) {
+      const tex = e.kind === 'birds' ? this.birdsTex : this.gastropodTex;
+      if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
+      // GetDrawPositionByDepth :85-88：(Position-相机中心)×(1/depth, 0.9/depth)+相机中心
+      const wx = (e.x - camX) / e.depth + camX;
+      const wy = (e.y - camY) * 0.9 / e.depth + camY;
+      const sx = wx - camX + viewW / 2;
+      const sy = wy - camY + viewH / 2;
+      if (sx < -400 || sx > viewW + 400 || sy < -400 || sy > viewH + 400) continue;
+      const fw = tex.naturalWidth, fh = tex.naturalHeight / e.rows;
+      const scale = 2.9 / e.depth;   // CommonDraw :79 scale = depthScale/Depth，各族 Draw 传 3-0.1
+      // GetColor：birds Lerp(bg,白,0.2)（:169-171 + BrightnessLerper 0.2）；
+      // gastropod Lerp(bg,(102,0,63),0.75)（:658 + Colors.cs:39）
+      let cr: number, cg: number, cb: number;
+      if (e.kind === 'birds') {
+        cr = sr + (255 - sr) * 0.2; cg = sg + (255 - sg) * 0.2; cb = sb + (255 - sb) * 0.2;
+      } else {
+        cr = sr + (102 - sr) * 0.75; cg = sg - sg * 0.75; cb = sb + (63 - sb) * 0.75;
+      }
+      const alpha = Math.min(1, e.opacity * atmo);
+      if (alpha <= 0.01) continue;
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(sx, sy);
+      ctx.rotate(e.rotation);
+      if (e.dir < 0) ctx.scale(-1, 1);   // SpriteEffects.FlipHorizontally
+      ctx.drawImage(tex, 0, e.frame * fh, fw, fh, -fw * scale / 2, -fh * scale / 2, fw * scale, fh * scale);
+      ctx.restore();
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
   skyColors(t: number): [string, string] {
     for (let i = 0; i < SKY_KEYS.length - 1; i++) {
       const [t0, a0, b0] = SKY_KEYS[i];
@@ -563,6 +939,9 @@ export class SkyRenderer {
     }
     const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
+    // 天空实体 GetColor 的 bgColor（Main.ColorOfTheSkies）近似源——本帧色缓存
+    this.lastSkyTop = top;
+    this.lastSkyBottom = bottom;
     const grad = ctx.createLinearGradient(0, 0, 0, viewH);
     grad.addColorStop(0, top);
     grad.addColorStop(1, bottom);

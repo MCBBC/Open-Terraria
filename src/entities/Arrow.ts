@@ -96,6 +96,9 @@ export interface ArrowOpts {
   /** 泰拉刃光束 985（aiStyle 191）：减速 ×0.94(>8) / 近墙阻尼 / 25t 消亡 /
    *  全程淡出 / 绿光——AI_191_TrueNightsEdge 985 分支（Projectile.cs:39241+） */
   terra?: boolean;
+  /** 星怒剑 503（aiStyle 5 :22139-22157）：targetY=目标线（鼠标 Y 与玩家
+   *  cy−200 取小）；线上方穿墙/alpha 渐显钳 150，线下开始撞块 */
+  star?: { targetY: number };
 }
 
 /** SetDefaults 提取的 extraUpdates 表（Projectile.cs 各 type 段，0=缺省）：
@@ -161,6 +164,15 @@ export class Arrow extends Entity {
   age = 0;
   // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
   terra = false;
+  // ---- 星怒剑 503 专属态 ----
+  /** 目标线 Y（null=非星怒弹）；cy>targetY 后 tileCollide 生效（:22139-22143） */
+  starY: number | null = null;
+  /** alpha（255 起 −15/t；线上钳 150 / 线下钳 0——:22197-22206） */
+  starAlpha = 255;
+  /** 周期音（Item9 :22177-22180，20-60t 掷一次） */
+  private starSndT = 20;
+  /** tileCollide 已生效（越目标线后） */
+  private starCollide = false;
   /** localAI[0] 计时（25t 消亡 + 淡出分母） */
   terraT = 0;
   /** localAI[1] 近墙减速标记 */
@@ -211,6 +223,7 @@ export class Arrow extends Entity {
     this.tumble = opts?.tumble ?? false;
     this.tumblePoseLock = opts?.tumblePoseLock ?? false;
     this.terra = opts?.terra ?? false;
+    if (opts?.star) this.starY = opts.star.targetY;
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -252,6 +265,22 @@ export class Arrow extends Entity {
       layer(1, 0.6, Math.PI / 4 * 0.05 * spread, 3, false);        // 帧 3 白芯三层
       layer(0.8, 0.5, -0.05, 3, false);
       layer(0.6, 0.4, -0.1, 3, false);
+      return;
+    }
+    // 星怒剑 503 独占：rotation=vel−π/2（:22236-22239），origin (w/2, 70)
+    // （Main.cs:29898-29901——34×90 贴图锚点近底部，剑尖前伸 70px）；
+    // Opacity = 1−alpha/255 渐显
+    if (this.starY !== null) {
+      const img = projSprite(503);
+      if (!img || !img.complete || img.naturalWidth === 0) return;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.starAlpha / 255));
+      ctx.translate(this.cx, this.cy);
+      ctx.rotate(Math.atan2(this.vy, this.vx) - Math.PI / 2);
+      ctx.imageSmoothingEnabled = false;
+      ctx.drawImage(img, -img.naturalWidth / 2, -70, img.naturalWidth, img.naturalHeight);
+      ctx.restore();
+      ctx.globalAlpha = 1;
       return;
     }
     // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
@@ -368,6 +397,22 @@ export class Arrow extends Entity {
         if (this.terraWall) { this.vx *= 0.88; this.vy *= 0.88; }
       }
     }
+    // 星怒剑 503（aiStyle 5 :22139-22157 + 503 段 :22197-22266）：无重力恒速；
+    // 线上方穿墙（tileCollide=false）→ 越线后撞块；alpha 255−15/t 渐显（线上
+    // 钳 150 / 线下钳 0）；周期 Item9 星啸；尘 58 星尘尾；rotation=vel−π/2（draw 侧）
+    if (this.starY !== null) {
+      const above = this.cy < this.starY;
+      this.starCollide = !above;
+      const floorA = above ? 150 : 0;
+      this.starAlpha = Math.max(floorA, this.starAlpha - 15);
+      if (--this.starSndT <= 0) {
+        this.starSndT = 20 + Math.floor(Math.random() * 40);
+        game.playSfxFiles(['Item_9'], 0.5, this.cx, this.cy);
+      }
+      if (Math.random() < 0.3) {
+        game.spawnParticles(this.cx, this.cy, '#FFF8C8', 1, 0.9, { life: 20 });
+      }
+    }
     // 专家追踪（Projectile.cs:54330-54345 275/276 / :23307-23316 277：
     // v=(v*(weight-1)+dirToPlayer*speed)/weight；<floor 或 >cap 归一）
     if (this.homing) {
@@ -414,7 +459,8 @@ export class Arrow extends Entity {
     const ty = Math.floor((this.y + this.h / 2) / TILE);
     if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
     const tileType = world.store.get(tx, ty);
-    if (tileType !== 0) {
+    // 星怒剑线上方穿墙（:22139-22143 越线前 tileCollide=false）——整段跳过
+    if (tileType !== 0 && !(this.starY !== null && !this.starCollide)) {
       // 可砍物（杂草/瓦罐）：Projectile.CutTiles 语义——弹幕扫过即砍
       game.cutTile(tx, ty);
       // 阻挡判定只看【实心】(Main.tileSolid 语义):树干/火把/平台等非实心格

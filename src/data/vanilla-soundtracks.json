@@ -1,0 +1,658 @@
+{
+  "achievement_complete": [
+    "achievement_complete"
+  ],
+  "blizzard_inside_building_loop": [
+    "blizzard_inside_building_loop"
+  ],
+  "blizzard_strong_loop": [
+    "blizzard_strong_loop"
+  ],
+  "liquids_honey_water": [
+    "liquids_honey_water_0",
+    "liquids_honey_water_1",
+    "liquids_honey_water_2"
+  ],
+  "liquids_honey_lava": [
+    "liquids_honey_lava_0",
+    "liquids_honey_lava_1",
+    "liquids_honey_lava_2"
+  ],
+  "liquids_water_lava": [
+    "liquids_water_lava_0",
+    "liquids_water_lava_1",
+    "liquids_water_lava_2"
+  ],
+  "dd2_ballista_tower_shot": [
+    "dd2_ballista_tower_shot_0",
+    "dd2_ballista_tower_shot_1",
+    "dd2_ballista_tower_shot_2"
+  ],
+  "dd2_explosive_trap_explode": [
+    "dd2_explosive_trap_explode_0",
+    "dd2_explosive_trap_explode_1",
+    "dd2_explosive_trap_explode_2"
+  ],
+  "dd2_flameburst_tower_shot": [
+    "dd2_flameburst_tower_shot_0",
+    "dd2_flameburst_tower_shot_1",
+    "dd2_flameburst_tower_shot_2"
+  ],
+  "dd2_lightning_aura_zap": [
+    "dd2_lightning_aura_zap_0",
+    "dd2_lightning_aura_zap_1",
+    "dd2_lightning_aura_zap_2",
+    "dd2_lightning_aura_zap_3"
+  ],
+  "dd2_defense_tower_spawn": [
+    "dd2_defense_tower_spawn"
+  ],
+  "dd2_betsy_death": [
+    "dd2_betsy_death_0",
+    "dd2_betsy_death_1",
+    "dd2_betsy_death_2"
+  ],
+  "dd2_betsy_fireball_shot": [
+    "dd2_betsy_fireball_shot_0",
+    "dd2_betsy_fireball_shot_1",
+    "dd2_betsy_fireball_shot_2"
+  ],
+  "dd2_betsy_fireball_impact": [
+    "dd2_betsy_fireball_impact_0",
+    "dd2_betsy_fireball_impact_1",
+    "dd2_betsy_fireball_impact_2"
+  ],
+  "dd2_betsy_flame_breath": [
+    "dd2_betsy_flame_breath"
+  ],
+  "dd2_betsy_flying_circle_attack": [
+    "dd2_betsy_flying_circle_attack"
+  ],
+  "dd2_betsy_hurt": [
+    "dd2_betsy_hurt_0",
+    "dd2_betsy_hurt_1",
+    "dd2_betsy_hurt_2"
+  ],
+  "dd2_betsy_scream": [
+    "dd2_betsy_scream"
+  ],
+  "dd2_betsy_summon": [
+    "dd2_betsy_summon_0",
+    "dd2_betsy_summon_1",
+    "dd2_betsy_summon_2"
+  ],
+  "dd2_betsy_wind_attack": [
+    "dd2_betsy_wind_attack_0",
+    "dd2_betsy_wind_attack_1",
+    "dd2_betsy_wind_attack_2"
+  ],
+  "dd2_dark_mage_attack": [
+    "dd2_dark_mage_attack_0",
+    "dd2_dark_mage_attack_1",
+    "dd2_dark_mage_attack_2"
+  ],
+  "dd2_dark_mage_cast_heal": [
+    "dd2_dark_mage_cast_heal_0",
+    "dd2_dark_mage_cast_heal_1",
+    "dd2_dark_mage_cast_heal_2"
+  ],
+  "dd2_dark_mage_death": [
+    "dd2_dark_mage_death_0",
+    "dd2_dark_mage_death_1",
+    "dd2_dark_mage_death_2"
+  ],
+  "dd2_dark_mage_heal_impact": [
+    "dd2_dark_mage_heal_impact_0",
+    "dd2_dark_mage_heal_impact_1",
+    "dd2_dark_mage_heal_impact_2"
+  ],
+  "dd2_dark_mage_hurt": [
+    "dd2_dark_mage_hurt_0",
+    "dd2_dark_mage_hurt_1",
+    "dd2_dark_mage_hurt_2"
+  ],
+  "dd2_dark_mage_summon_skeleton": [
+    "dd2_dark_mage_summon_skeleton_0",
+    "dd2_dark_mage_summon_skeleton_1",
+    "dd2_dark_mage_summon_skeleton_2"
+  ],
+  "dd2_drakin_breath_in": [
+    "dd2_drakin_breath_in_0",
+    "dd2_drakin_breath_in_1",
+    "dd2_drakin_breath_in_2"
+  ],
+  "dd2_drakin_death": [
+    "dd2_drakin_death_0",
+    "dd2_drakin_death_1",
+    "dd2_drakin_death_2"
+  ],
+  "dd2_drakin_hurt": [
+    "dd2_drakin_hurt_0",
+    "dd2_drakin_hurt_1",
+    "dd2_drakin_hurt_2"
+  ],
+  "dd2_drakin_shot": [
+    "dd2_drakin_shot_0",
+    "dd2_drakin_shot_1",
+    "dd2_drakin_shot_2"
+  ],
+  "dd2_goblin_death": [
+    "dd2_goblin_death_0",
+    "dd2_goblin_death_1",
+    "dd2_goblin_death_2"
+  ],
+  "dd2_goblin_hurt": [
+    "dd2_goblin_hurt_0",
+    "dd2_goblin_hurt_1",
+    "dd2_goblin_hurt_2",
+    "dd2_goblin_hurt_3",
+    "dd2_goblin_hurt_4",
+    "dd2_goblin_hurt_5"
+  ],
+  "dd2_goblin_scream": [
+    "dd2_goblin_scream_0",
+    "dd2_goblin_scream_1",
+    "dd2_goblin_scream_2"
+  ],
+  "dd2_goblin_bomber_death": [
+    "dd2_goblin_bomber_death_0",
+    "dd2_goblin_bomber_death_1",
+    "dd2_goblin_bomber_death_2"
+  ],
+  "dd2_goblin_bomber_hurt": [
+    "dd2_goblin_bomber_hurt_0",
+    "dd2_goblin_bomber_hurt_1",
+    "dd2_goblin_bomber_hurt_2"
+  ],
+  "dd2_goblin_bomber_scream": [
+    "dd2_goblin_bomber_scream_0",
+    "dd2_goblin_bomber_scream_1",
+    "dd2_goblin_bomber_scream_2"
+  ],
+  "dd2_goblin_bomber_throw": [
+    "dd2_goblin_bomber_throw_0",
+    "dd2_goblin_bomber_throw_1",
+    "dd2_goblin_bomber_throw_2"
+  ],
+  "dd2_javelin_throwers_attack": [
+    "dd2_javelin_throwers_attack_0",
+    "dd2_javelin_throwers_attack_1",
+    "dd2_javelin_throwers_attack_2"
+  ],
+  "dd2_javelin_throwers_death": [
+    "dd2_javelin_throwers_death_0",
+    "dd2_javelin_throwers_death_1",
+    "dd2_javelin_throwers_death_2"
+  ],
+  "dd2_javelin_throwers_hurt": [
+    "dd2_javelin_throwers_hurt_0",
+    "dd2_javelin_throwers_hurt_1",
+    "dd2_javelin_throwers_hurt_2"
+  ],
+  "dd2_javelin_throwers_taunt": [
+    "dd2_javelin_throwers_taunt_0",
+    "dd2_javelin_throwers_taunt_1",
+    "dd2_javelin_throwers_taunt_2"
+  ],
+  "dd2_kobold_death": [
+    "dd2_kobold_death_0",
+    "dd2_kobold_death_1",
+    "dd2_kobold_death_2"
+  ],
+  "dd2_kobold_explosion": [
+    "dd2_kobold_explosion_0",
+    "dd2_kobold_explosion_1",
+    "dd2_kobold_explosion_2"
+  ],
+  "dd2_kobold_hurt": [
+    "dd2_kobold_hurt_0",
+    "dd2_kobold_hurt_1",
+    "dd2_kobold_hurt_2"
+  ],
+  "dd2_kobold_ignite": [
+    "dd2_kobold_ignite"
+  ],
+  "dd2_kobold_ignite_loop": [
+    "dd2_kobold_ignite_loop"
+  ],
+  "dd2_kobold_scream_charge_loop": [
+    "dd2_kobold_scream_charge_loop"
+  ],
+  "dd2_kobold_flyer_charge_scream": [
+    "dd2_kobold_flyer_charge_scream_0",
+    "dd2_kobold_flyer_charge_scream_1",
+    "dd2_kobold_flyer_charge_scream_2"
+  ],
+  "dd2_kobold_flyer_death": [
+    "dd2_kobold_flyer_death_0",
+    "dd2_kobold_flyer_death_1",
+    "dd2_kobold_flyer_death_2"
+  ],
+  "dd2_kobold_flyer_hurt": [
+    "dd2_kobold_flyer_hurt_0",
+    "dd2_kobold_flyer_hurt_1",
+    "dd2_kobold_flyer_hurt_2"
+  ],
+  "dd2_lightning_bug_death": [
+    "dd2_lightning_bug_death_0",
+    "dd2_lightning_bug_death_1",
+    "dd2_lightning_bug_death_2"
+  ],
+  "dd2_lightning_bug_hurt": [
+    "dd2_lightning_bug_hurt_0",
+    "dd2_lightning_bug_hurt_1",
+    "dd2_lightning_bug_hurt_2"
+  ],
+  "dd2_lightning_bug_zap": [
+    "dd2_lightning_bug_zap_0",
+    "dd2_lightning_bug_zap_1",
+    "dd2_lightning_bug_zap_2"
+  ],
+  "dd2_ogre_attack": [
+    "dd2_ogre_attack_0",
+    "dd2_ogre_attack_1",
+    "dd2_ogre_attack_2"
+  ],
+  "dd2_ogre_death": [
+    "dd2_ogre_death_0",
+    "dd2_ogre_death_1",
+    "dd2_ogre_death_2"
+  ],
+  "dd2_ogre_ground_pound": [
+    "dd2_ogre_ground_pound"
+  ],
+  "dd2_ogre_hurt": [
+    "dd2_ogre_hurt_0",
+    "dd2_ogre_hurt_1",
+    "dd2_ogre_hurt_2"
+  ],
+  "dd2_ogre_roar": [
+    "dd2_ogre_roar_0",
+    "dd2_ogre_roar_1",
+    "dd2_ogre_roar_2"
+  ],
+  "dd2_ogre_spit": [
+    "dd2_ogre_spit"
+  ],
+  "dd2_skeleton_death": [
+    "dd2_skeleton_death_0",
+    "dd2_skeleton_death_1",
+    "dd2_skeleton_death_2"
+  ],
+  "dd2_skeleton_hurt": [
+    "dd2_skeleton_hurt_0",
+    "dd2_skeleton_hurt_1",
+    "dd2_skeleton_hurt_2"
+  ],
+  "dd2_skeleton_summoned": [
+    "dd2_skeleton_summoned"
+  ],
+  "dd2_wither_beast_aura_pulse": [
+    "dd2_wither_beast_aura_pulse_0",
+    "dd2_wither_beast_aura_pulse_1"
+  ],
+  "dd2_wither_beast_crystal_impact": [
+    "dd2_wither_beast_crystal_impact_0",
+    "dd2_wither_beast_crystal_impact_1",
+    "dd2_wither_beast_crystal_impact_2"
+  ],
+  "dd2_wither_beast_death": [
+    "dd2_wither_beast_death_0",
+    "dd2_wither_beast_death_1",
+    "dd2_wither_beast_death_2"
+  ],
+  "dd2_wither_beast_hurt": [
+    "dd2_wither_beast_hurt_0",
+    "dd2_wither_beast_hurt_1",
+    "dd2_wither_beast_hurt_2"
+  ],
+  "dd2_wyvern_death": [
+    "dd2_wyvern_death_0",
+    "dd2_wyvern_death_1",
+    "dd2_wyvern_death_2"
+  ],
+  "dd2_wyvern_hurt": [
+    "dd2_wyvern_hurt_0",
+    "dd2_wyvern_hurt_1",
+    "dd2_wyvern_hurt_2"
+  ],
+  "dd2_wyvern_scream": [
+    "dd2_wyvern_scream_0",
+    "dd2_wyvern_scream_1",
+    "dd2_wyvern_scream_2"
+  ],
+  "dd2_wyvern_dive_down": [
+    "dd2_wyvern_dive_down_0",
+    "dd2_wyvern_dive_down_1",
+    "dd2_wyvern_dive_down_2"
+  ],
+  "dd2_etherian_portal_dryad_touch": [
+    "dd2_etherian_portal_dryad_touch"
+  ],
+  "dd2_etherian_portal_idle_loop": [
+    "dd2_etherian_portal_idle_loop"
+  ],
+  "dd2_etherian_portal_open": [
+    "dd2_etherian_portal_open"
+  ],
+  "dd2_etherian_portal_spawn_enemy": [
+    "dd2_etherian_portal_spawn_enemy_0",
+    "dd2_etherian_portal_spawn_enemy_1",
+    "dd2_etherian_portal_spawn_enemy_2"
+  ],
+  "dd2_crystal_cart_impact": [
+    "dd2_crystal_cart_impact_0",
+    "dd2_crystal_cart_impact_1",
+    "dd2_crystal_cart_impact_2"
+  ],
+  "dd2_defeat_scene": [
+    "dd2_defeat_scene"
+  ],
+  "dd2_win_scene": [
+    "dd2_win_scene"
+  ],
+  "dd2_book_staff_cast": [
+    "dd2_book_staff_cast_0",
+    "dd2_book_staff_cast_1",
+    "dd2_book_staff_cast_2"
+  ],
+  "dd2_book_staff_twister_loop": [
+    "dd2_book_staff_twister_loop"
+  ],
+  "dd2_ghastly_glaive_impact_ghost": [
+    "dd2_ghastly_glaive_impact_ghost_0",
+    "dd2_ghastly_glaive_impact_ghost_1",
+    "dd2_ghastly_glaive_impact_ghost_2"
+  ],
+  "dd2_ghastly_glaive_pierce": [
+    "dd2_ghastly_glaive_pierce_0",
+    "dd2_ghastly_glaive_pierce_1",
+    "dd2_ghastly_glaive_pierce_2"
+  ],
+  "dd2_monk_staff_ground_impact": [
+    "dd2_monk_staff_ground_impact_0",
+    "dd2_monk_staff_ground_impact_1",
+    "dd2_monk_staff_ground_impact_2"
+  ],
+  "dd2_monk_staff_ground_miss": [
+    "dd2_monk_staff_ground_miss_0",
+    "dd2_monk_staff_ground_miss_1",
+    "dd2_monk_staff_ground_miss_2"
+  ],
+  "dd2_monk_staff_swing": [
+    "dd2_monk_staff_swing_0",
+    "dd2_monk_staff_swing_1",
+    "dd2_monk_staff_swing_2",
+    "dd2_monk_staff_swing_3"
+  ],
+  "dd2_phantom_phoenix_shot": [
+    "dd2_phantom_phoenix_shot_0",
+    "dd2_phantom_phoenix_shot_1",
+    "dd2_phantom_phoenix_shot_2"
+  ],
+  "dd2_sonic_boom_blade_slash": [
+    "dd2_sonic_boom_blade_slash_0",
+    "dd2_sonic_boom_blade_slash_1",
+    "dd2_sonic_boom_blade_slash_2"
+  ],
+  "dd2_sky_dragons_fury_circle": [
+    "dd2_sky_dragons_fury_circle_0",
+    "dd2_sky_dragons_fury_circle_1",
+    "dd2_sky_dragons_fury_circle_2"
+  ],
+  "dd2_sky_dragons_fury_shot": [
+    "dd2_sky_dragons_fury_shot_0",
+    "dd2_sky_dragons_fury_shot_1",
+    "dd2_sky_dragons_fury_shot_2"
+  ],
+  "dd2_sky_dragons_fury_swing": [
+    "dd2_sky_dragons_fury_swing_0",
+    "dd2_sky_dragons_fury_swing_1",
+    "dd2_sky_dragons_fury_swing_2",
+    "dd2_sky_dragons_fury_swing_3"
+  ],
+  "lucyaxe_talk": [
+    "lucyaxe_talk_0",
+    "lucyaxe_talk_1",
+    "lucyaxe_talk_2",
+    "lucyaxe_talk_3",
+    "lucyaxe_talk_4"
+  ],
+  "deerclops_hit": [
+    "deerclops_hit_0",
+    "deerclops_hit_1",
+    "deerclops_hit_2"
+  ],
+  "deerclops_death": [
+    "deerclops_death"
+  ],
+  "deerclops_scream": [
+    "deerclops_scream_0",
+    "deerclops_scream_1",
+    "deerclops_scream_2"
+  ],
+  "deerclops_ice_attack": [
+    "deerclops_ice_attack_0",
+    "deerclops_ice_attack_1",
+    "deerclops_ice_attack_2"
+  ],
+  "deerclops_rubble_attack": [
+    "deerclops_rubble_attack"
+  ],
+  "deerclops_step": [
+    "deerclops_step"
+  ],
+  "chester_open": [
+    "chester_open_0",
+    "chester_open_1"
+  ],
+  "chester_close": [
+    "chester_close_0",
+    "chester_close_1"
+  ],
+  "abigail_summon": [
+    "abigail_summon"
+  ],
+  "abigail_cry": [
+    "abigail_cry_0",
+    "abigail_cry_1",
+    "abigail_cry_2"
+  ],
+  "abigail_attack": [
+    "abigail_attack"
+  ],
+  "abigail_upgrade": [
+    "abigail_upgrade_0",
+    "abigail_upgrade_1",
+    "abigail_upgrade_2"
+  ],
+  "glommer_bounce": [
+    "glommer_bounce_0",
+    "glommer_bounce_1"
+  ],
+  "dst_male_hit": [
+    "dst_male_hit_0",
+    "dst_male_hit_1",
+    "dst_male_hit_2"
+  ],
+  "dst_female_hit": [
+    "dst_female_hit_0",
+    "dst_female_hit_1",
+    "dst_female_hit_2"
+  ],
+  "Drone": [
+    "Drone"
+  ],
+  "rccar": [
+    "rccar"
+  ],
+  "sizzle": [
+    "sizzle"
+  ],
+  "rainbow_boulder": [
+    "rainbow_boulder"
+  ],
+  "menu_accept": [
+    "menu_accept"
+  ],
+  "hungry": [
+    "hungry"
+  ],
+  "pal_summon": [
+    "pal_summon"
+  ],
+  "pal_cattiva": [
+    "pal_cattiva"
+  ],
+  "pal_cattiva_pain": [
+    "pal_cattiva_pain"
+  ],
+  "pal_cattiva_joy": [
+    "pal_cattiva_joy"
+  ],
+  "pal_chillet": [
+    "pal_chillet"
+  ],
+  "pal_chillet_joy": [
+    "pal_chillet_joy"
+  ],
+  "pal_chillet_attack": [
+    "pal_chillet_attack"
+  ],
+  "pal_foxparks": [
+    "pal_foxparks"
+  ],
+  "pal_foxparks_pain": [
+    "pal_foxparks_pain"
+  ],
+  "pal_foxparks_joy": [
+    "pal_foxparks_joy"
+  ],
+  "pal_foxparks_attack": [
+    "pal_foxparks_attack"
+  ],
+  "pal_digtoise": [
+    "pal_digtoise"
+  ],
+  "pal_digtoise_joy": [
+    "pal_digtoise_joy"
+  ],
+  "deadcells_barrel_launcher_fire": [
+    "deadcells_barrel_launcher_fire"
+  ],
+  "deadcells_barrel_launcher_explode": [
+    "deadcells_barrel_launcher_explode"
+  ],
+  "deadcells_mushroom_summon": [
+    "deadcells_mushroom_summon"
+  ],
+  "deadcells_mushroom_land": [
+    "deadcells_mushroom_land"
+  ],
+  "deadcells_mushroom_jump": [
+    "deadcells_mushroom_jump"
+  ],
+  "deadcells_mushroom_explode": [
+    "deadcells_mushroom_explode"
+  ],
+  "deadcells_flint_charge": [
+    "deadcells_flint_charge"
+  ],
+  "deadcells_flint_release": [
+    "deadcells_flint_release"
+  ],
+  "deadcells_flint_wave": [
+    "deadcells_flint_wave"
+  ],
+  "meteor_shower": [
+    "meteor_shower_0",
+    "meteor_shower_1",
+    "meteor_shower_2",
+    "meteor_shower_3",
+    "meteor_shower_4",
+    "meteor_shower_5"
+  ],
+  "best_reforge": [
+    "best_reforge"
+  ],
+  "trash_item": [
+    "trash_item_0",
+    "trash_item_1"
+  ],
+  "instant_thunder": [
+    "instant_thunder_0",
+    "instant_thunder_1",
+    "instant_thunder_2"
+  ],
+  "sonar_potion": [
+    "sonar_potion"
+  ],
+  "statuemimic_scare": [
+    "statuemimic_scare"
+  ],
+  "statuemimic_jump": [
+    "statuemimic_jump"
+  ],
+  "statuemimic_laugh": [
+    "statuemimic_laugh_0",
+    "statuemimic_laugh_1",
+    "statuemimic_laugh_2"
+  ],
+  "player_hit_default": [
+    "player_hit_default"
+  ],
+  "player_hit_chicken": [
+    "player_hit_chicken"
+  ],
+  "player_hit_chicken_rare": [
+    "player_hit_chicken_rare"
+  ],
+  "player_hit_frog": [
+    "player_hit_frog"
+  ],
+  "player_hit_goat": [
+    "player_hit_goat"
+  ],
+  "player_hit_retro": [
+    "player_hit_retro"
+  ],
+  "player_death_retro": [
+    "player_death_retro"
+  ],
+  "player_hit_cat": [
+    "player_hit_cat"
+  ],
+  "player_hit_dog": [
+    "player_hit_dog"
+  ],
+  "player_hit_turkey": [
+    "player_hit_turkey"
+  ],
+  "player_hit_goblin": [
+    "player_hit_goblin"
+  ],
+  "player_hit_crow": [
+    "player_hit_crow"
+  ],
+  "player_hit_balloon": [
+    "player_hit_balloon"
+  ],
+  "player_hit_undead": [
+    "player_hit_undead"
+  ],
+  "player_hit_vampire": [
+    "player_hit_vampire"
+  ],
+  "player_hit_fairy": [
+    "player_hit_fairy"
+  ],
+  "fish_splash": [
+    "fish_splash"
+  ],
+  "eow_dig": [
+    "eow_dig"
+  ],
+  "fuse": [
+    "Fuse"
+  ]
+}

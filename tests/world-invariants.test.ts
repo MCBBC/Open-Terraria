@@ -173,7 +173,9 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       }
       expect(bx).toBeGreaterThanOrEqual(0);
       world.store.setTileSilent(bx, by, 0);
-      const rep2 = auditWorld(world.store);
+      // 注入复查用不截断审计——默认 maxPerRule=50 会把注入巨石违规截掉
+      // (2026-08-13 双种子跑实测:残片 125+ 条时注入断言被截断误伤)
+      const rep2 = auditWorld(world.store, { maxPerRule: 1_000_000 });
       expect(rep2.violations.some((v) => v.typeKey === 'v_138_boulder'),
         '注入缺角后 R1 必报巨石(白名单外类型)').toBe(true);
     }, 300_000);

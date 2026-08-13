@@ -403,18 +403,25 @@ export class SpriteAtlas {
   ensureVImage(file: string): HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
-    if (this._iconPending.has(file)) return null;
+    if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
     this._iconPending.add(file);
     const im = new Image();
     im.onload = () => {
       this.vimages.set(file, im);
       this._iconPending.delete(file);
+      this._vImageFailed.delete(file);
       this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
     };
-    im.onerror = () => { this._iconPending.delete(file); };
+    im.onerror = () => {
+      this._iconPending.delete(file);
+      this._vImageFailed.add(file);   // 永久失败:不再重复请求,供消费方分级告警
+    };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
   }
+  /** 表是否已确认加载失败(404 等)——与"加载中瞬态"区分 */
+  vImageFailed(file: string): boolean { return this._vImageFailed.has(file); }
+  private _vImageFailed = new Set<string>();
   /** 后台预取全部物品图标(保留兼容入口;预载流程请用 awaited 的 preloadIcons) */
   prefetchIcons(): void {
     void this.preloadIcons();

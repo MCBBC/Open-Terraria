@@ -103,6 +103,8 @@ export class Player extends Entity {
   anglerQuestsFinished = 0;
   /** PVE 死亡计数（Player.numberOfDeathsPVE，PL:53840；存档 player 段持久化） */
   deathsPve = 0;
+  /** PvP 死亡计数（Player.numberOfDeathsPVP，KillMe :38228 按 pvpDeath 分道计数） */
+  deathsPvp = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */
@@ -146,6 +148,13 @@ export class Player extends Entity {
   sinceHurt = 0;               // 距上次受击 tick（自然回血计时；渲染层读取做心心跳动效）
   /** 移动段当前速度上限探针（mounts.test 等消费;非原版字段） */
   _maxRunProbe = 0;
+  /** 日曜护盾层数 0-3（Player.solarShields,:16250）;受击每层该次伤 ×0.2（:37699-37720） */
+  solarShields = 0;
+  /** 护盾回充计时（Player.solarCounter,:16227 每 180t=3s 回 1 层） */
+  solarCounter = 0;
+  /** 日曜冲撞进行中（solarDashing,:20855）;命中已耗盾标记（solarDashConsumedFlare） */
+  solarDashing = false;
+  private solarDashConsumed = false;
   /** 自然回血爬坡计时（Player.lifeRegenTime：受击 :37784 / DoT :18781+ / 流血 :19000 清零，
    *  每 tick 基础 +1（:18930）、蜂蜜 +2（:18954）；本仓自然回血为恒 1HP/s 简化，爬坡只
    *  决定"出伤后多久开始回"（首档阈值 300t :19003）——蜂蜜 3 倍速抵达 */
@@ -570,6 +579,7 @@ export class Player extends Entity {
       if (sb.runSlowMul) setRunSlowMul = sb.runSlowMul;
       if (sb.endurance) setEndurance += sb.endurance;   // 日曜套 :16224
       if (sb.solar) solarSet = true;
+      if (sb.dashType) dash = Math.max(dash, sb.dashType);   // 日曜套 :16288-16294（dash 与 accfx 同聚合链）
       if (sb.fireWalk) fireWalk = true;
       if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.ammoCost80) ammoSave = true;
@@ -837,6 +847,15 @@ export class Player extends Entity {
     // 流血 Bleeding/遮挡 Obstructed 清 lifeRegenTime → 阻断(:18998/:11424);
     // DoT 同清（:18781+）——DoT 期间自然回血重启爬坡
     this.sinceHurt++;
+    // 日曜护盾回充（Player.cs:16227-16260:solarCounter≥180 且 shields<3 → +1 层,重置;
+    // 视觉 buff 170-172/粒子/盾位环绕登记未接）
+    if (this.equipStats.solarSet) {
+      this.solarCounter++;
+      if (this.solarCounter >= 180 && this.solarShields < 3) {
+        this.solarShields++;
+        this.solarCounter = 0;
+      }
+    } else { this.solarShields = 0; this.solarCounter = 0; }
     this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
       * (this.usedAegisCrystal ? 1.2 : 1);   // 蜂蜜×3 速(:18954)/神盾水晶 +0.2(:18931)
     if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
@@ -1276,6 +1295,10 @@ export class Player extends Entity {
     }
 
     // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
+    // 坐骑飞行 vy 独占标记（本 tick 悬停/飞行接管时置 true）——下方"松键截断上升"
+    // 手感段须让位：原版 Player 无此截断，且 Hover 接受 controlUp 单独爬升
+    //（Mount.cs:3396-3424），截断会把不按跳的爬升当场掐死
+    let mountFlight = false;
     const st = world.store;
     const ropeTx = Math.floor((this.x + this.w / 2) / TILE);
     const ropeTy = Math.floor((this.y + this.h / 2) / TILE);
@@ -1365,14 +1388,13 @@ export class Player extends Entity {
       const mnt2 = this.ridingMount ? this.mount : null;   // 本块作用域（mnt2 在水平块,2026-08-13 补声明）
       const mJumpSpd = mnt2 ? mnt2.jumpSpeed(this.vx) : PLAYER_JUMP_SPEED + this.equipStats.jumpSpd;
       const mJumpTicks = mnt2 ? mnt2.jumpHeight(this.vx) : PLAYER_JUMP_TICKS;
-      // 史莱姆鞍族 constantJump（Mount.AutoJump → Player.autoJump :18603）：地面移动中自动连跳
-      const autoJumpNow = !!mnt2?.autoJump;
       if (this.inputJump && this.onGround) {
         // 跳跃速度 = 基础 + jumpSpeedBoost（蛙腿族 +1.6，Player.jumpSpeedBoost :22427）；
         // 重力倒置时方向取反（gravDir，Player.cs:3207 全部 vy 乘 gravDir 语义）
-        this.vy = -mJumpSpd * gd;
-        this.jumpHold = mJumpTicks;
-      } else if (autoJumpNow && this.onGround && this.inputX !== 0 && this.vy === 0) {
+        // constantJump 族（3 史莱姆鞍/43 弹跳杆/50 山羊）的 autoJump 语义 = 免松键连跳
+        //（Player.cs:20406 (releaseJump || (autoJump && velocity.Y==0))，且整段在
+        // :20366 if(controlJump) 门内——不按跳绝不自动弹跳）；本仓常规跳跃本就按住即
+        // 落地重跳（无 releaseJump 门），autoJump 已被通用分支覆盖，无需特例分支。
         this.vy = -mJumpSpd * gd;
         this.jumpHold = mJumpTicks;
       }
@@ -1400,7 +1422,6 @@ export class Player extends Entity {
       //（flyTime→疲劳双池，疲劳满失升力）；非 hover 飞行坐骑（驯鹿/猪龙）→ 按住跳
       // 消耗 flyTime 爬升（0.1/tick、上限 -jumpSpeed×1.5），耗尽重力/3 缓降。
       // 两者独占 vy：下方翅膀/火箭靴段与重力段全部跳过（原版同链互斥）。
-      let mountFlight = false;
       if (mnt2) {
         if (mnt2.canHover(this)) {
           mnt2.hover(this);
@@ -1583,10 +1604,39 @@ export class Player extends Entity {
             // SolidOrSlopedTile → velocity.X /= 2
             if (this.dashWallAhead(dir)) this.vx /= 2;
             if (eq.dash === 2) { this.eocDash = 15; this.eocHitId = -1; } // :21170
+            if (eq.dash === 3) { this.solarDashing = true; this.solarDashConsumed = false; } // :21258-21260 SolarDashStart
           } else {
             this.dashT = dir * 15;        // :21316-21321 首击登记双击窗（dashTime ±15）
           }
         }
+      }
+      // 日曜冲撞命中（:20850-20900:solarDashing 窗口扫敌;每冲撞限一次——
+      // solarDashConsumedFlare 命中即耗一层盾 + 150×melee 直伤 kb9,不反弹不结束滑行）
+      if (this.solarDashing && this.dashDelay < 0) {
+        const bhx3 = this.x + this.vx * 0.5 - 4, bhy3 = this.y + this.vy * 0.5 - 4;
+        const bhw3 = this.w + 8, bhh3 = this.h + 8;
+        for (const e of game.enemies()) {
+          const en = e as { id?: number; x?: number; y?: number; w?: number; h?: number; cx?: number; cy?: number;
+            dead?: boolean; hurt?: (d: number, kx: number, ky: number, g: unknown) => boolean };
+          if (en.dead || !en.hurt || en.cx === undefined || en.cy === undefined) continue;
+          const ex3 = en.x ?? en.cx - 8, ey3 = en.y ?? en.cy - 8, ew3 = en.w ?? 16, eh3 = en.h ?? 16;
+          if (!(bhx3 < ex3 + ew3 && bhx3 + bhw3 > ex3 && bhy3 < ey3 + eh3 && bhy3 + bhh3 > ey3)) continue;
+          if (this.solarShields > 0 && !this.solarDashConsumed) {
+            this.solarDashConsumed = true;
+            this.solarShields--;          // ConsumeSolarFlare(:20868-20870)
+            this.solarCounter = 0;
+          }
+          const dir3 = this.vx < 0 ? -1 : this.vx > 0 ? 1 : this.facing;
+          const crit3 = Math.random() * 100 < this.critChance('melee');
+          const dmg3 = Math.max(1, Math.round(150 * this.damageMult('melee')) * (crit3 ? 2 : 1));  // :20871
+          const kb3 = 9 * (eq.kbGlove ? 2 : 1) * (this.buffs.has(BuffType.Titan) ? 1.5 : 1);        // :20873-20878
+          en.hurt(dmg3, dir3 * kb3, -4, game);
+          game.addDamageNumber(en.cx, en.cy, dmg3, crit3, crit3 ? '#FF8040' : '#FFD080');
+          this.solarDashing = false;      // 命中即止（后续帧不再结算）
+          break;
+        }
+      } else if (this.dashDelay >= 0) {
+        this.solarDashing = false;
       }
       // ---- 攀壁钉鞋（spikedBoots：攀爬爪/鞋钉/忍者大师装备——贴墙缓降+蹬墙跳）----
       this.wallCling = false;
@@ -1623,8 +1673,10 @@ export class Player extends Entity {
       // 倒置时天花板即地板（TileCollision.hitHead → onGround 近似）
       if (gd === -1) this.onGround = this.hitHead;
     }
-    // 松键截断上升（手感；倒置时镜像）
-    if (!this.inputJump && (this.gravDir === 1 ? this.vy < -2 : this.vy > 2)) this.vy = 2 * this.gravDir;
+    // 松键截断上升（手感；倒置时镜像）——坐骑飞行族（悬停/飞行）vy 独占 tick 让位
+    //（原版 Player 无此截断；Hover 单按 controlUp 爬升也会被掐死）
+    if (!this.inputJump && !mountFlight
+      && (this.gravDir === 1 ? this.vy < -2 : this.vy > 2)) this.vy = 2 * this.gravDir;
 
     // ---- 黏滞 tile（Collision.StickyTiles + Player.cs:22650-22740 1:1）----
     // 蛛网(51)：泡在网里 X/Y 双重阻尼、禁跳、不计摔伤、挣扎随机会撕破网（掉蛛丝）；
@@ -2500,13 +2552,22 @@ export class Player extends Entity {
    *  供调用方飘字使用，避免显示≠实扣（Main.cs:65646 CalculateDamagePlayersTake） */
   damagePreview(dmg: number): number {
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
-      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0);
+      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)
+      + (this.equipStats.enduranceEq ?? 0);   // 日曜套 0.12（与 damage 同口径,2026-08-13 同步）
+    // 日曜护盾层预览不模拟消耗（取决于 damage 实际扣减序）,登记
     const diff = scaleStatsWorld().difficulty;
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
     return Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance)));
   }
 
-  damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
+  /** pvp=true 走 Hurt 的 pvp 语义（Player.cs:37592 Hurt pvp 参）：减伤链与 PvE 完全
+   *  相同（CalculateDamagePlayersTake 难度防系数 + endurance + 日曜——原版 PvP 实际
+   *  扣血即此链；CalculateDamagePlayersTakeInPVP 的固定半防公式 Main.cs:65636 仅用于
+   *  Hurt 返回值=吸血/近战反馈消费 :37953，不参与扣血）；差异点：①无敌帧 8t
+   *  （:37769 num9 = pvp ? 8 : 40/80）——远短于 PvE，不同弹幕可高频命中（每弹另有
+   *  playerImmune 40t 独立冷却，Projectile.cs:214/:13618，弹侧维护）②击杀置
+   *  pvpDeath（KillMe :38208-38210）→ 不掉钱/300t 无敌满血复活/跳过 Boss 重生延迟 */
+  damage(dmg: number, srcX: number, srcY: number, knockback = true, pvp = false): boolean {
     // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 false=未受伤）
     if (this.debugGod) return false;
     // 微光化免伤（Player.cs:37591-37595 Hurt 前置：shimmering 且可闪避 → 直接返回 0；
@@ -2518,15 +2579,27 @@ export class Player extends Entity {
     if (eq.blackBelt && Math.random() < 0.1) return false;
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
-      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0); // 甲虫壳每球 15%（buffs 95-97）
+      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0)   // 甲虫壳每球 15%（buffs 95-97）
+      + (this.equipStats.enduranceEq ?? 0);                          // 日曜套 0.12（:16224,2026-08-13 接）
     // 玩家受伤防御难度系数（Main.cs:65646-65657 CalculateDamagePlayersTake：
     // 经典 0.5 / 专家 0.75 / 大师 1.0，Journey 同经典档；防御步先截断，endurance 后乘）
     const diff = scaleStatsWorld().difficulty;
     const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
-    const reduction = Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance)));
+    // 日曜护盾（:37699-37720:套装在场且有层 → 消耗 1 层,该次伤 ×0.2+solarCounter 清零;
+    // 反击 608 弹/冲撞命中消耗登记未接）
+    let solarConsumed = false;
+    if (this.equipStats.solarSet && this.solarShields > 0) {
+      solarConsumed = true;
+      this.solarShields--;
+      this.solarCounter = 0;
+    }
+    const solarMul = solarConsumed ? 0.2 : 1;
+    const reduction = Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance) * solarMul));
     this.hp -= reduction;
-    // 十字项链/星星面纱：无敌帧翻倍（longInvince）
-    this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
+    // 无敌帧（:37769）：PvP 恒 8t（连射可高频命中）；PvE 40t / 十字项链族 ×2
+    this.iframes = pvp ? 8 : PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
+    // PvP 击杀（KillMe :38208-38210 if(pvp) pvpDeath=true）——重生端消费
+    if (pvp && this.hp <= 0) this.lastPvpDeath = true;
     this.sinceHurt = 0; // 受击打断自然回血
     this.lifeRegenTime = 0; // 同源清零（Player.Hurt :37784 lifeRegenTime=0）
     // 甲虫攻击球受击掉一颗

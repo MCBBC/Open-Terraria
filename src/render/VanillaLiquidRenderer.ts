@@ -584,6 +584,36 @@ export function drawVanillaLiquids(
   ctx.globalAlpha = 1;
 }
 
+// ---- LiquidSlope 斜面贴合（TileDrawing.cs:4526-4553 DrawPartialLiquid）----
+// 语义勘定（2026-08-13 源码核）：LiquidSlope_N 不是"水面斜线"贴图——是
+// 【被锤成坡面的实心格内液体】的斜面形状表。原版 DrawPartialLiquid 在 tile.slope()
+// 1..4 时改用 TextureAssets.LiquidSlope[liquidType]（:4540-4552），源矩形 X 额外
+// += 18*(slope-1)（:4539，表 72×16 = 4 列×18px 间距、16px 单元，像素实测四列
+// 分别为 slope 1 右下斜/2 左下斜/3 右上斜/4 左上斜）。
+// 原版该绘制有两个调用层（TileDrawing.cs:462 背景 pass / :529 实心层 pass）：
+// 背景 pass 对普通块仍走平面 Liquid（flag = !BlocksWaterDrawingBehindSelf，
+// :4528-4531），仅玻璃族(54/541/328/459/470)与实心层 pass 走斜面表。本仓只有
+// 一个浸润 pass（无实心层液体带），采用实心层语义对所有坡面格生效——即还原
+// 玩家可见结果（液体贴合坡面斜边）。【简化登记】坡面格与玻璃族的双 pass 差异
+// 未拆分；LiquidSlope 的 Y 直接复用平面带算出的 ry/rh（原版同源 liquidSize）。
+/** LiquidSlope 源矩形选择（纯函数）：slope 1..4 → 斜面表列 X = rx + 18*(slope-1)；
+ *  slope 0 / 半砖 → null = 走平面 Liquid 表（:4531-4533 flag||num==0 直画分支）。 */
+export function liquidSlopeSource(
+  slope: number, rx: number, ry: number, rw: number, rh: number,
+): { sx: number; sy: number; sw: number; sh: number } | null {
+  if (slope < 1 || slope > 4) return null;
+  return { sx: rx + 18 * (slope - 1), sy: ry, sw: rw, sh: rh };
+}
+
+/** LiquidSlope 表文件（与上方浸润 pass 的 Liquid_N 同一套 liquidType→style 映射：
+ *  水=群系水色 0-13 / 岩浆=1 / 蜂蜜=11 / 微光=14，TextureAssets.LiquidSlope[15]） */
+export function liquidSlopeSheet(vt: number, waterStyle = 0): string {
+  if (vt === 1) return 'vanilla/LiquidSlope_1.png';   // 岩浆
+  if (vt === 2) return 'vanilla/LiquidSlope_11.png';  // 蜂蜜
+  if (vt === 3) return 'vanilla/LiquidSlope_14.png';  // 微光
+  return `vanilla/LiquidSlope_${Math.max(0, Math.min(14, waterStyle))}.png`;
+}
+
 /**
  * 浸润 pass:原版 TilesRenderer.DrawLiquidBehindTiles → DrawTile_LiquidBehindTile
  * (TileDrawing.cs:3859-4193)。对视区内每个实心方块格检查四邻液体,在方块格内画液体带。

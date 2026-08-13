@@ -3,7 +3,8 @@
 // 文案全部走 Lang（M8 语言系统）：原版键（LegacyMenu.*）+ 自有键（Mods.SandboxWorld.*）。
 // 语言切换：网格按钮（原版语义=用当前语言显示所有语言名，Language.* 类别），
 // 点击后 Lang.setLanguage → 本面板经 Lang.onChange 重建（保留当前分栏）。
-import { options } from '../core/Options';
+import { options, cycleMinimapFrame } from '../core/Options';
+import { TEAM_COLORS } from '../stats/Pvp';
 import { UIScale } from '../vui/draw/UIScale';
 import { UISfx } from '../vui/UISfx';
 import { Lang } from '../i18n/Lang';
@@ -244,16 +245,13 @@ export class SettingsPanel {
           () => d.resourceBarStyle === 'fancy' ? '华丽（金框）' : '经典（朴素）',
           () => void options.set('resourceBarStyle', d.resourceBarStyle === 'fancy' ? 'classic' : 'fancy'),
         ),
-        // 小地图边框皮肤（MinimapFrameManager 9 款；config.json "MinimapFrame" 字符串键）
+        // 小地图边框皮肤（MinimapFrameManager 9 款；config.json "MinimapFrame" 字符串键；
+        // 循环方向 = SelectionHolder.CycleSelection 倒序回绕，cycleMinimapFrame 纯函数）
         this.modeRow(
           Lang.text('UI.SelectMapBorder').replace(/:.*/, ''),
           () => d.minimapFrame,
           () => Lang.text(`UI.MinimapFrame_${d.minimapFrame}`),
-          () => {
-            const skins = ['Default', 'Golden', 'Remix', 'Sticks', 'StoneGold', 'TwigLeaf', 'Leaf', 'Retro', 'Valkyrie'] as const;
-            const next = skins[(skins.indexOf(d.minimapFrame) + 1) % skins.length];
-            void options.set('minimapFrame', next);
-          },
+          () => { void options.set('minimapFrame', cycleMinimapFrame(d.minimapFrame)); },
         ),
         this.langGrid(),
       );
@@ -285,7 +283,7 @@ export class SettingsPanel {
         // 单机常驻为调试便利,联机语义由协议同步压制）
         this.toggle(Lang.text('Mods.SandboxWorld.Settings.Pvp'), () => d.pvpEnabled, (v) => {
           void options.set('pvpEnabled', v);
-          const p = this.game?.player;
+          const p = (window as unknown as { __swGame?: { player: import('../entities/Player').Player } }).__swGame?.player;
           if (p) p.hostile = v;
         }),
         // 队伍 0-5（Player.team;点击循环切换,显示色块+序号）
@@ -296,15 +294,15 @@ export class SettingsPanel {
           span.textContent = Lang.text('Mods.SandboxWorld.Settings.PvpTeam');
           const btn = document.createElement('button');
           const render = () => {
-            const t = Math.max(0, Math.min(5, this.game?.player?.team ?? d.pvpTeam));
+            const t = Math.max(0, Math.min(5, (window as unknown as { __swGame?: { player: { team: number } } }).__swGame?.player.team ?? d.pvpTeam));
             btn.textContent = `${t} ▮`;
             btn.style.color = TEAM_COLORS[t] ? `rgb(${TEAM_COLORS[t][0]},${TEAM_COLORS[t][1]},${TEAM_COLORS[t][2]})` : '#fff';
           };
           btn.addEventListener('click', () => {
-            const p = this.game?.player;
-            const next = (((p?.team ?? d.pvpTeam) + 1) % 6);
+            const gp = (window as unknown as { __swGame?: { player: import('../entities/Player').Player } }).__swGame;
+            const next = (((gp?.player.team ?? d.pvpTeam) + 1) % 6);
             void options.set('pvpTeam', next);
-            if (p) p.team = next;
+            if (gp) gp.player.team = next;
             render();
           });
           render();

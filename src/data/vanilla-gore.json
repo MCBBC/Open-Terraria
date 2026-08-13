@@ -1,0 +1,5577 @@
+{
+ "1": [
+  {
+   "vx": 0,
+   "vy": -10,
+   "idMin": 276,
+   "idMax": 282,
+   "n": 7,
+   "line": 85626,
+   "ai": [
+    {
+     "slot": 1,
+     "value": 1345,
+     "not": false
+    }
+   ]
+  }
+ ],
+ "225": [
+  {
+   "scaleExpr": "scale",
+   "id": 314,
+   "line": 85932
+  }
+ ],
+ "243": [
+  {
+   "scaleExpr": "scale",
+   "id": 359,
+   "line": 85950
+  }
+ ],
+ "245": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 368,
+   "line": 85857
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 370,
+   "line": 85858
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 368,
+   "line": 85859
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 370,
+   "line": 85860
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 368,
+   "line": 85861
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 370,
+   "line": 85862
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 360,
+   "line": 85863
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 361,
+   "line": 85864
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 362,
+   "line": 85865
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 363,
+   "line": 85866
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 364,
+   "line": 85867
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 367,
+   "line": 85868
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 366,
+   "line": 85869
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 369,
+   "line": 85883
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 371,
+   "line": 85884
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 370,
+   "line": 85885
+  }
+ ],
+ "246": [
+  {
+   "scaleExpr": "scale",
+   "id": 369,
+   "line": 85883
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 371,
+   "line": 85884
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 370,
+   "line": 85885
+  }
+ ],
+ "247": [
+  {
+   "scaleExpr": "scale",
+   "id": 369,
+   "line": 85883
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 371,
+   "line": 85884
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 370,
+   "line": 85885
+  }
+ ],
+ "248": [
+  {
+   "scaleExpr": "scale",
+   "id": 369,
+   "line": 85883
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 371,
+   "line": 85884
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 370,
+   "line": 85885
+  }
+ ],
+ "249": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 368,
+   "line": 85873
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 370,
+   "line": 85874
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 368,
+   "line": 85875
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + (float)Main.rand.Next(width), position.Y + (float)Main.rand.Next(height))",
+   "id": 370,
+   "line": 85876
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 365,
+   "line": 85877
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 363,
+   "line": 85878
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 362,
+   "line": 85879
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 369,
+   "line": 85883
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 371,
+   "line": 85884
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 370,
+   "line": 85885
+  }
+ ],
+ "302": [
+  {
+   "scaleExpr": "scale",
+   "id": 440,
+   "line": 85830
+  }
+ ],
+ "305": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "306": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "307": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "308": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "309": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "310": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "311": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "312": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "313": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "314": [
+  {
+   "scaleExpr": "scale",
+   "id": 441,
+   "line": 85699
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 442,
+   "line": 85700
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 443,
+   "line": 85701
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 444,
+   "line": 85702
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 445,
+   "line": 85703
+  }
+ ],
+ "325": [
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "expr": "num346",
+   "line": 85744
+  }
+ ],
+ "327": [
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "expr": "num343",
+   "line": 85723
+  }
+ ],
+ "344": [
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "expr": "num349",
+   "line": 85773
+  },
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "expr": "num350",
+   "line": 85777
+  }
+ ],
+ "345": [
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 513,
+   "line": 85750
+  },
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 514,
+   "line": 85751
+  },
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 514,
+   "line": 85752
+  },
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 515,
+   "line": 85753
+  },
+  {
+   "velExpr": "velocity * 0f",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 516,
+   "line": 85754
+  }
+ ],
+ "370": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - Vector2.UnitX * 20f * direction",
+   "id": 576,
+   "line": 85158
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - Vector2.UnitY * 30f",
+   "id": 574,
+   "line": 85159
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center",
+   "id": 575,
+   "line": 85160
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center + Vector2.UnitX * 20f * direction",
+   "id": 573,
+   "line": 85161
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - Vector2.UnitY * 30f",
+   "id": 574,
+   "line": 85162
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center",
+   "id": 575,
+   "line": 85163
+  }
+ ],
+ "372": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 583,
+   "line": 85108
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 577,
+   "line": 85109
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 578,
+   "line": 85110
+  },
+  {
+   "posExpr": "base.Center",
+   "id": 579,
+   "line": 85111
+  }
+ ],
+ "373": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 583,
+   "line": 85108
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 577,
+   "line": 85109
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 578,
+   "line": 85110
+  },
+  {
+   "posExpr": "base.Center",
+   "id": 579,
+   "line": 85111
+  }
+ ],
+ "379": [
+  {
+   "scaleExpr": "scale",
+   "id": 900,
+   "line": 84998
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 84999
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 85000
+  }
+ ],
+ "381": [
+  {
+   "scaleExpr": "scale",
+   "id": 587,
+   "line": 85181
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 590,
+   "line": 85182
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 588,
+   "line": 85183
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 589,
+   "line": 85184
+  }
+ ],
+ "382": [
+  {
+   "scaleExpr": "scale",
+   "id": 591,
+   "line": 85202
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 592,
+   "line": 85203
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 593,
+   "line": 85204
+  }
+ ],
+ "383": [
+  {
+   "scaleExpr": "scale",
+   "id": 594,
+   "line": 85222
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 595,
+   "line": 85223
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 596,
+   "line": 85224
+  }
+ ],
+ "385": [
+  {
+   "scaleExpr": "scale",
+   "id": 597,
+   "line": 85262
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 598,
+   "line": 85263
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 599,
+   "line": 85264
+  }
+ ],
+ "386": [
+  {
+   "scaleExpr": "scale",
+   "id": 600,
+   "line": 85282
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 601,
+   "line": 85283
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 602,
+   "line": 85284
+  }
+ ],
+ "387": [
+  {
+   "scaleExpr": "scale",
+   "id": 603,
+   "line": 85305
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 603,
+   "line": 85306
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 604,
+   "line": 85307
+  }
+ ],
+ "388": [
+  {
+   "velExpr": "vector24",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - new Vector2(10f, 10f)",
+   "id": 605,
+   "line": 85383
+  },
+  {
+   "velExpr": "vector24",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - new Vector2(10f, 10f)",
+   "id": 606,
+   "line": 85384
+  }
+ ],
+ "389": [
+  {
+   "scaleExpr": "scale",
+   "id": 904,
+   "line": 85350
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 905,
+   "line": 85351
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 906,
+   "line": 85352
+  }
+ ],
+ "390": [
+  {
+   "scaleExpr": "scale",
+   "id": 591,
+   "line": 85202
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 592,
+   "line": 85203
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 593,
+   "line": 85204
+  }
+ ],
+ "391": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + Vector2.UnitX * width / 2f",
+   "id": 607,
+   "line": 85434
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + Vector2.UnitX * width / 2f",
+   "id": 608,
+   "line": 85435
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 609,
+   "line": 85436
+  }
+ ],
+ "393": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2",
+   "id": 616,
+   "line": 85469
+  }
+ ],
+ "394": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2",
+   "id": 617,
+   "line": 85473
+  }
+ ],
+ "395": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(-20f, -10f)",
+   "id": 610,
+   "line": 85460
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(20f, -10f)",
+   "id": 611,
+   "line": 85461
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(-50f, 0f)",
+   "id": 612,
+   "line": 85462
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(50f, 0f)",
+   "id": 613,
+   "line": 85463
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(-60f, 10f)",
+   "id": 614,
+   "line": 85464
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "center2 + new Vector2(0f, 30f)",
+   "id": 615,
+   "line": 85465
+  }
+ ],
+ "399": [
+  {
+   "velExpr": "vector25",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - new Vector2(10f, 10f)",
+   "id": 898,
+   "line": 85415
+  },
+  {
+   "velExpr": "vector25",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center - new Vector2(10f, 10f)",
+   "id": 899,
+   "line": 85416
+  }
+ ],
+ "407": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Top",
+   "id": 778,
+   "line": 84417
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Top",
+   "id": 779,
+   "line": 84418
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 780,
+   "line": 84419
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 781,
+   "line": 84420
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 780,
+   "line": 84421
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 781,
+   "line": 84422
+  }
+ ],
+ "409": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 775,
+   "line": 84359
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 776,
+   "line": 84360
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 777,
+   "line": 84361
+  }
+ ],
+ "411": [
+  {
+   "scaleExpr": "scale",
+   "id": 772,
+   "line": 84523
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 773,
+   "line": 84524
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 773,
+   "line": 84525
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 774,
+   "line": 84526
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 774,
+   "line": 84527
+  }
+ ],
+ "412": [
+  {
+   "expr": "type - 412 + 828",
+   "line": 83702
+  }
+ ],
+ "413": [
+  {
+   "expr": "type - 412 + 828",
+   "line": 83702
+  }
+ ],
+ "414": [
+  {
+   "expr": "type - 412 + 828",
+   "line": 83702
+  }
+ ],
+ "415": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 831,
+   "line": 83735
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 832,
+   "line": 83736
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 833,
+   "line": 83737
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 834,
+   "line": 83738
+  }
+ ],
+ "416": [
+  {
+   "scaleExpr": "scale",
+   "id": 844,
+   "line": 83635
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 845,
+   "line": 83636
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 847,
+   "line": 83637
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 835,
+   "line": 83638
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 836,
+   "line": 83639
+  }
+ ],
+ "417": [
+  {
+   "scaleExpr": "scale",
+   "id": 837,
+   "line": 83774
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 838,
+   "line": 83775
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 838,
+   "line": 83776
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 838,
+   "line": 83777
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 839,
+   "line": 83778
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 839,
+   "line": 83779
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 38f)",
+   "id": 840,
+   "line": 83780
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 38f)",
+   "id": 840,
+   "line": 83781
+  }
+ ],
+ "418": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 841,
+   "line": 83814
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 842,
+   "line": 83815
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 842,
+   "line": 83816
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 843,
+   "line": 83817
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 843,
+   "line": 83818
+  }
+ ],
+ "419": [
+  {
+   "scaleExpr": "scale",
+   "id": 844,
+   "line": 83675
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 845,
+   "line": 83676
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 846,
+   "line": 83677
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 846,
+   "line": 83678
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 847,
+   "line": 83679
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 847,
+   "line": 83680
+  }
+ ],
+ "420": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 782,
+   "line": 84260
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 783,
+   "line": 84261
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 784,
+   "line": 84262
+  }
+ ],
+ "421": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 785,
+   "line": 84225
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 786,
+   "line": 84226
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 787,
+   "line": 84227
+  }
+ ],
+ "423": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 790,
+   "line": 84190
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 791,
+   "line": 84191
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 792,
+   "line": 84192
+  }
+ ],
+ "424": [
+  {
+   "scaleExpr": "scale",
+   "id": 793,
+   "line": 84153
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 794,
+   "line": 84154
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 794,
+   "line": 84155
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 795,
+   "line": 84156
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 795,
+   "line": 84157
+  }
+ ],
+ "425": [
+  {
+   "scaleExpr": "scale",
+   "id": 796,
+   "line": 84084
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "base.Center",
+   "id": 797,
+   "line": 84085
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 798,
+   "line": 84086
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 809,
+   "line": 84087
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 809,
+   "line": 84088
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 810,
+   "line": 84089
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 810,
+   "line": 84090
+  }
+ ],
+ "426": [
+  {
+   "velExpr": "velocity * 0.7f",
+   "posExpr": "base.Top",
+   "id": 799,
+   "line": 83907
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 800,
+   "line": 83908
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 801,
+   "line": 83909
+  }
+ ],
+ "427": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 802,
+   "line": 83961
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 803,
+   "line": 83962
+  },
+  {
+   "velExpr": "velocity * 0.9f",
+   "posExpr": "base.Center",
+   "id": 804,
+   "line": 83963
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "posExpr": "base.Center",
+   "id": 805,
+   "line": 83964
+  }
+ ],
+ "428": [
+  {
+   "velExpr": "velocity * 0.8f",
+   "id": 806,
+   "line": 84116
+  },
+  {
+   "velExpr": "velocity * 0.8f",
+   "id": 807,
+   "line": 84117
+  }
+ ],
+ "429": [
+  {
+   "scaleExpr": "scale",
+   "id": 808,
+   "line": 84000
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 809,
+   "line": 84001
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 809,
+   "line": 84002
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 810,
+   "line": 84003
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 810,
+   "line": 84004
+  }
+ ],
+ "437": [
+  {
+   "velExpr": "Vector2.UnitY.RotatedByRandom(6.2831854820251465) * 5f",
+   "posExpr": "base.Center - new Vector2(10f)",
+   "expr": "728 + num97",
+   "line": 83491,
+   "gates": [
+    "dmg"
+   ]
+  }
+ ],
+ "438": [
+  {
+   "scaleExpr": "scale",
+   "id": 900,
+   "line": 84998
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 84999
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 85000
+  }
+ ],
+ "439": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85031
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 902,
+   "line": 85035
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 903,
+   "line": 85036
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 85037
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 901,
+   "line": 85038
+  }
+ ],
+ "440": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85055
+  }
+ ],
+ "454": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "455": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "456": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "457": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "458": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "459": [
+  {
+   "velExpr": "new Vector2(hitDirection, 0f)",
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + (float)(height / 2) - 10f)",
+   "idMin": 11,
+   "idMax": 13,
+   "n": 3,
+   "line": 85085
+  }
+ ],
+ "460": [
+  {
+   "scaleExpr": "scale",
+   "id": 643,
+   "line": 84780
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 645,
+   "line": 84781
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 644,
+   "line": 84782
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 646,
+   "line": 84783
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 646,
+   "line": 84784
+  }
+ ],
+ "461": [
+  {
+   "scaleExpr": "scale",
+   "id": 647,
+   "line": 84954
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 648,
+   "line": 84955
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 648,
+   "line": 84956
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 649,
+   "line": 84957
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 649,
+   "line": 84958
+  }
+ ],
+ "462": [
+  {
+   "scaleExpr": "scale",
+   "id": 650,
+   "line": 84976
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 651,
+   "line": 84977
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 651,
+   "line": 84978
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 652,
+   "line": 84979
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 652,
+   "line": 84980
+  }
+ ],
+ "463": [
+  {
+   "scaleExpr": "scale",
+   "id": 653,
+   "line": 84932
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 654,
+   "line": 84933
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 654,
+   "line": 84934
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 655,
+   "line": 84935
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 655,
+   "line": 84936
+  }
+ ],
+ "466": [
+  {
+   "scaleExpr": "scale",
+   "id": 656,
+   "line": 84866
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 657,
+   "line": 84867
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 659,
+   "line": 84868
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 658,
+   "line": 84869
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 658,
+   "line": 84870
+  }
+ ],
+ "468": [
+  {
+   "scaleExpr": "scale",
+   "id": 662,
+   "line": 84888
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 663,
+   "line": 84889
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 663,
+   "line": 84890
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 664,
+   "line": 84891
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 664,
+   "line": 84892
+  }
+ ],
+ "469": [
+  {
+   "scaleExpr": "scale",
+   "id": 665,
+   "line": 84910
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 666,
+   "line": 84911
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 666,
+   "line": 84912
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 667,
+   "line": 84913
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 667,
+   "line": 84914
+  }
+ ],
+ "477": [
+  {
+   "scaleExpr": "scale",
+   "id": 687,
+   "line": 84802
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 688,
+   "line": 84803
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 689,
+   "line": 84804
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 690,
+   "line": 84805
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 691,
+   "line": 84806
+  }
+ ],
+ "478": [
+  {
+   "scaleExpr": "scale",
+   "id": 684,
+   "line": 84845
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 685,
+   "line": 84846
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 686,
+   "line": 84847
+  },
+  {
+   "scaleExpr": "scale",
+   "idMin": 684,
+   "idMax": 686,
+   "n": 3,
+   "line": 84848
+  }
+ ],
+ "479": [
+  {
+   "scaleExpr": "scale",
+   "id": 681,
+   "line": 84824
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 682,
+   "line": 84825
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 683,
+   "line": 84826
+  }
+ ],
+ "482": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 718,
+   "line": 85494
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 719,
+   "line": 85495
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 720,
+   "line": 85496
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 40f)",
+   "id": 721,
+   "line": 85497
+  }
+ ],
+ "491": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * (width / 2)",
+   "id": 858,
+   "line": 84536
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * (width / 3)",
+   "id": 857,
+   "line": 84537
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (0.45f + (float)num189 * 0.1f))",
+   "id": 859,
+   "line": 84540
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (0.4f + (float)num189 * 0.1f))",
+   "id": 859,
+   "line": 84541
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (0.35f + (float)num189 * 0.1f))",
+   "id": 859,
+   "line": 84542
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * 0.35f) - new Vector2(0f, 200f) + Utils.RandomVector2(Main.rand, -40f, 40f)",
+   "ids": [
+    860,
+    892,
+    893
+   ],
+   "n": 3,
+   "line": 84546
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * 0.15f) - new Vector2(0f, 200f) + Utils.RandomVector2(Main.rand, -40f, 40f)",
+   "ids": [
+    860,
+    892,
+    893
+   ],
+   "n": 3,
+   "line": 84547
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * -0.35f) - new Vector2(0f, 200f) + Utils.RandomVector2(Main.rand, -40f, 40f)",
+   "ids": [
+    860,
+    892,
+    893
+   ],
+   "n": 3,
+   "line": 84548
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * -0.15f) - new Vector2(0f, 300f) + Utils.RandomVector2(Main.rand, -40f, 40f)",
+   "ids": [
+    860,
+    892,
+    893
+   ],
+   "n": 3,
+   "line": 84549
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * -0.15f) - new Vector2(0f, 300f) + Utils.RandomVector2(Main.rand, -40f, 40f)",
+   "ids": [
+    860,
+    892,
+    893
+   ],
+   "n": 3,
+   "line": 84550
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * 0.15f) - new Vector2(0f, 160 + 60 * num191)",
+   "id": 855,
+   "line": 84554
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * -0.15f) - new Vector2(0f, 160 + 60 * num191)",
+   "id": 855,
+   "line": 84555
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (0.25f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
+   "id": 854,
+   "line": 84559
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (-0.45f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
+   "id": 853,
+   "line": 84560
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector19 + vector20 * ((float)width * (0.05f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
+   "id": 856,
+   "line": 84561
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "posExpr": "base.Center - new Vector2(60f)",
+   "idMin": 861,
+   "idMax": 862,
+   "n": 2,
+   "line": 84566
+  }
+ ],
+ "492": [
+  {
+   "vx": 0,
+   "vy": 0,
+   "idMin": 61,
+   "idMax": 63,
+   "n": 3,
+   "line": 84606
+  }
+ ],
+ "510": [
+  {
+   "expr": "type - 510 + 819",
+   "line": 83579
+  }
+ ],
+ "511": [
+  {
+   "expr": "type - 510 + 819",
+   "line": 83579
+  }
+ ],
+ "512": [
+  {
+   "expr": "type - 510 + 819",
+   "line": 83579
+  }
+ ],
+ "513": [
+  {
+   "expr": "type - 513 + 822",
+   "line": 83560
+  }
+ ],
+ "514": [
+  {
+   "expr": "type - 513 + 822",
+   "line": 83560
+  }
+ ],
+ "515": [
+  {
+   "expr": "type - 513 + 822",
+   "line": 83560
+  }
+ ],
+ "518": [
+  {
+   "scaleExpr": "scale",
+   "id": 844,
+   "line": 83635
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 845,
+   "line": 83636
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 847,
+   "line": 83637
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 835,
+   "line": 83638
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 836,
+   "line": 83639
+  }
+ ],
+ "520": [
+  {
+   "scaleExpr": "scale",
+   "id": 851,
+   "line": 85328
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 852,
+   "line": 85329
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 80f)",
+   "id": 848,
+   "line": 85330
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 80f)",
+   "id": 849,
+   "line": 85331
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 80f)",
+   "id": 850,
+   "line": 85332
+  }
+ ],
+ "524": [
+  {
+   "scaleExpr": "scale",
+   "id": 879,
+   "line": 84663
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 880,
+   "line": 84664
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84665
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84666
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84667
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84668
+  }
+ ],
+ "525": [
+  {
+   "scaleExpr": "scale",
+   "id": 879,
+   "line": 84663
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 880,
+   "line": 84664
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84665
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84666
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84667
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84668
+  }
+ ],
+ "526": [
+  {
+   "scaleExpr": "scale",
+   "id": 879,
+   "line": 84663
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 880,
+   "line": 84664
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84665
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84666
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84667
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84668
+  }
+ ],
+ "527": [
+  {
+   "scaleExpr": "scale",
+   "id": 879,
+   "line": 84663
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 880,
+   "line": 84664
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84665
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 881,
+   "line": 84666
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84667
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 882,
+   "line": 84668
+  }
+ ],
+ "528": [
+  {
+   "scaleExpr": "scale",
+   "id": 876,
+   "line": 84692
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 877,
+   "line": 84693
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 877,
+   "line": 84694
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 878,
+   "line": 84695
+  }
+ ],
+ "529": [
+  {
+   "scaleExpr": "scale",
+   "id": 876,
+   "line": 84692
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 877,
+   "line": 84693
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 877,
+   "line": 84694
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 878,
+   "line": 84695
+  }
+ ],
+ "530": [
+  {
+   "id": 883,
+   "line": 84713
+  },
+  {
+   "id": 884,
+   "line": 84714
+  },
+  {
+   "id": 885,
+   "line": 84715
+  },
+  {
+   "id": 886,
+   "line": 84716
+  },
+  {
+   "id": 887,
+   "line": 84717
+  }
+ ],
+ "531": [
+  {
+   "id": 883,
+   "line": 84713
+  },
+  {
+   "id": 884,
+   "line": 84714
+  },
+  {
+   "id": 885,
+   "line": 84715
+  },
+  {
+   "id": 886,
+   "line": 84716
+  },
+  {
+   "id": 887,
+   "line": 84717
+  }
+ ],
+ "532": [
+  {
+   "id": 888,
+   "line": 84735
+  },
+  {
+   "id": 889,
+   "line": 84736
+  },
+  {
+   "id": 890,
+   "line": 84737
+  },
+  {
+   "id": 891,
+   "line": 84738
+  }
+ ],
+ "541": [
+  {
+   "scaleExpr": "scale",
+   "id": 960,
+   "line": 83410
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 961,
+   "line": 83411
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 963,
+   "line": 83412
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 40f)",
+   "id": 962,
+   "line": 83413
+  }
+ ],
+ "546": [
+  {
+   "scaleExpr": "scale",
+   "id": 964,
+   "line": 83465
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 965,
+   "line": 83466
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 966,
+   "line": 83467
+  }
+ ],
+ "551": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(0f, 54f)",
+   "id": 1079,
+   "line": 82993,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(72f, 90f)",
+   "id": 1080,
+   "line": 82994,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(102f, 94f)",
+   "id": 1080,
+   "line": 82995,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(178f, 0f)",
+   "id": 1081,
+   "line": 82996,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(136f, 12f)",
+   "id": 1082,
+   "line": 82997,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(82f, 18f)",
+   "id": 1083,
+   "line": 82998,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(100f, 26f)",
+   "id": 1084,
+   "line": 82999,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(170f, 16f)",
+   "id": 1085,
+   "line": 83000,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(190f, 10f)",
+   "id": 1085,
+   "line": 83001,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(100f, 36f)",
+   "id": 1086,
+   "line": 83002,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(176f, 54f)",
+   "id": 1079,
+   "line": 83006
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(158f, 90f)",
+   "id": 1080,
+   "line": 83007
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(128f, 94f)",
+   "id": 1080,
+   "line": 83008
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(0f, 0f)",
+   "id": 1081,
+   "line": 83009
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(60f, 12f)",
+   "id": 1082,
+   "line": 83010
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(88f, 18f)",
+   "id": 1083,
+   "line": 83011
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(86f, 26f)",
+   "id": 1084,
+   "line": 83012
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(40f, 16f)",
+   "id": 1085,
+   "line": 83013
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(20f, 10f)",
+   "id": 1085,
+   "line": 83014
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(142f, 36f)",
+   "id": 1086,
+   "line": 83015
+  }
+ ],
+ "552": [
+  {
+   "scaleExpr": "scale",
+   "id": 1071,
+   "line": 82901
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1074,
+   "line": 82902
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1073,
+   "line": 82903
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82904
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82905
+  }
+ ],
+ "553": [
+  {
+   "scaleExpr": "scale",
+   "id": 1071,
+   "line": 82901
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1074,
+   "line": 82902
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1073,
+   "line": 82903
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82904
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82905
+  }
+ ],
+ "554": [
+  {
+   "scaleExpr": "scale",
+   "id": 1071,
+   "line": 82901
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1074,
+   "line": 82902
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1073,
+   "line": 82903
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82904
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1072,
+   "line": 82905
+  }
+ ],
+ "555": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1037,
+   "line": 82965
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 20f)",
+   "id": 1038,
+   "line": 82966
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 30f)",
+   "id": 1039,
+   "line": 82967
+  }
+ ],
+ "556": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1037,
+   "line": 82965
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 20f)",
+   "id": 1038,
+   "line": 82966
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 30f)",
+   "id": 1039,
+   "line": 82967
+  }
+ ],
+ "557": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1037,
+   "line": 82965
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 20f)",
+   "id": 1038,
+   "line": 82966
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X + 10f, position.Y + 30f)",
+   "id": 1039,
+   "line": 82967
+  }
+ ],
+ "558": [
+  {
+   "scaleExpr": "scale",
+   "id": 1047,
+   "line": 83138
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83139
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83140
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1049,
+   "line": 83141
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1046,
+   "line": 83142
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83143
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83144
+  }
+ ],
+ "559": [
+  {
+   "scaleExpr": "scale",
+   "id": 1047,
+   "line": 83138
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83139
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83140
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1049,
+   "line": 83141
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1046,
+   "line": 83142
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83143
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83144
+  }
+ ],
+ "560": [
+  {
+   "scaleExpr": "scale",
+   "id": 1047,
+   "line": 83138
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83139
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1045,
+   "line": 83140
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1049,
+   "line": 83141
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1046,
+   "line": 83142
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83143
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 24f)",
+   "id": 1048,
+   "line": 83144
+  }
+ ],
+ "561": [
+  {
+   "scaleExpr": "scale",
+   "id": 1064,
+   "line": 82932
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1061,
+   "line": 82933
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1065,
+   "line": 82934
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1066,
+   "line": 82935
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1063,
+   "line": 82936
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82937
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82938
+  }
+ ],
+ "562": [
+  {
+   "scaleExpr": "scale",
+   "id": 1064,
+   "line": 82932
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1061,
+   "line": 82933
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1065,
+   "line": 82934
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1066,
+   "line": 82935
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1063,
+   "line": 82936
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82937
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82938
+  }
+ ],
+ "563": [
+  {
+   "scaleExpr": "scale",
+   "id": 1064,
+   "line": 82932
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1061,
+   "line": 82933
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1065,
+   "line": 82934
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1066,
+   "line": 82935
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1063,
+   "line": 82936
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82937
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1062,
+   "line": 82938
+  }
+ ],
+ "564": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1009,
+   "line": 83242
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1010,
+   "line": 83243
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1011,
+   "line": 83244
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1012,
+   "line": 83245
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X - 20f, position.Y + 35f)",
+   "id": 1013,
+   "line": 83246
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1014,
+   "line": 83247
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1015,
+   "line": 83248
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1019,
+   "line": 83249
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1016,
+   "line": 83250
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1017,
+   "line": 83251
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1018,
+   "line": 83252
+  }
+ ],
+ "565": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1009,
+   "line": 83242
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1010,
+   "line": 83243
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1011,
+   "line": 83244
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 15f)",
+   "id": 1012,
+   "line": 83245
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X - 20f, position.Y + 35f)",
+   "id": 1013,
+   "line": 83246
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1014,
+   "line": 83247
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1015,
+   "line": 83248
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 35f)",
+   "id": 1019,
+   "line": 83249
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1016,
+   "line": 83250
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1017,
+   "line": 83251
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 25f)",
+   "id": 1018,
+   "line": 83252
+  }
+ ],
+ "566": [
+  {
+   "scaleExpr": "scale",
+   "id": 970,
+   "line": 83162
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 972,
+   "line": 83165,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 972,
+   "line": 83169,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 973,
+   "line": 83173,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 973,
+   "line": 83177,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 971,
+   "line": 83181,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 971,
+   "line": 83185,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  }
+ ],
+ "567": [
+  {
+   "scaleExpr": "scale",
+   "id": 970,
+   "line": 83162
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 972,
+   "line": 83165,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 972,
+   "line": 83169,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 973,
+   "line": 83173,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 973,
+   "line": 83177,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 971,
+   "line": 83181,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 971,
+   "line": 83185,
+   "gates": [
+    "Main+rand+Next"
+   ]
+  }
+ ],
+ "568": [
+  {
+   "scaleExpr": "scale",
+   "id": 1020,
+   "line": 83107
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1021,
+   "line": 83108
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1023,
+   "line": 83109
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1022,
+   "line": 83110
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1022,
+   "line": 83111
+  }
+ ],
+ "569": [
+  {
+   "scaleExpr": "scale",
+   "id": 1020,
+   "line": 83107
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1021,
+   "line": 83108
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1023,
+   "line": 83109
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1022,
+   "line": 83110
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1022,
+   "line": 83111
+  }
+ ],
+ "570": [
+  {
+   "scaleExpr": "scale",
+   "expr": "num64",
+   "line": 83085
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 2",
+   "line": 83086
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 2",
+   "line": 83087
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 3",
+   "line": 83088
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "expr": "num64 + 1",
+   "line": 83089
+  }
+ ],
+ "571": [
+  {
+   "scaleExpr": "scale",
+   "expr": "num64",
+   "line": 83085
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 2",
+   "line": 83086
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 2",
+   "line": 83087
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "expr": "num64 + 3",
+   "line": 83088
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "expr": "num64 + 1",
+   "line": 83089
+  }
+ ],
+ "572": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector10",
+   "id": 993,
+   "line": 83037
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 20f)",
+   "id": 996,
+   "line": 83038
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 20f)",
+   "id": 995,
+   "line": 83039
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 34f)",
+   "id": 994,
+   "line": 83040
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 34f)",
+   "id": 994,
+   "line": 83041
+  }
+ ],
+ "573": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "vector10",
+   "id": 993,
+   "line": 83037
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 20f)",
+   "id": 996,
+   "line": 83038
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 20f)",
+   "id": 995,
+   "line": 83039
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 34f)",
+   "id": 994,
+   "line": 83040
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector10.X, vector10.Y + 34f)",
+   "id": 994,
+   "line": 83041
+  }
+ ],
+ "574": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 10f)",
+   "id": 1050,
+   "line": 83062
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 30f)",
+   "id": 1051,
+   "line": 83063
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 30f)",
+   "id": 1052,
+   "line": 83064
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 0f)",
+   "id": 1053,
+   "line": 83065
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 0f)",
+   "id": 1054,
+   "line": 83066
+  }
+ ],
+ "575": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 10f)",
+   "id": 1050,
+   "line": 83062
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 30f)",
+   "id": 1051,
+   "line": 83063
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 30f)",
+   "id": 1052,
+   "line": 83064
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 0f)",
+   "id": 1053,
+   "line": 83065
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(vector11.X, vector11.Y + 0f)",
+   "id": 1054,
+   "line": 83066
+  }
+ ],
+ "576": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(0f, 0f)",
+   "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+   "line": 83206,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(18f, 28f)",
+   "id": 1000,
+   "line": 83207,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(-40f, 70f)",
+   "id": 1001,
+   "line": 83208,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(4f, 28f)",
+   "id": 1002,
+   "line": 83210,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(36f, 90f)",
+   "id": 1003,
+   "line": 83212,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(32f, 90f)",
+   "id": 1004,
+   "line": 83213,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(48f, 0f)",
+   "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+   "line": 83217
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(22f, 28f)",
+   "id": 1000,
+   "line": 83218
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(48f, 70f)",
+   "id": 1001,
+   "line": 83219
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(4f, 28f)",
+   "id": 1002,
+   "line": 83220
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(36f, 90f)",
+   "id": 1003,
+   "line": 83221
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(32f, 90f)",
+   "id": 1004,
+   "line": 83222
+  }
+ ],
+ "577": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(0f, 0f)",
+   "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+   "line": 83206,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(18f, 28f)",
+   "id": 1000,
+   "line": 83207,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(-40f, 70f)",
+   "id": 1001,
+   "line": 83208,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(4f, 28f)",
+   "id": 1002,
+   "line": 83210,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(36f, 90f)",
+   "id": 1003,
+   "line": 83212,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(32f, 90f)",
+   "id": 1004,
+   "line": 83213,
+   "gates": [
+    "spriteDirection"
+   ]
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(48f, 0f)",
+   "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+   "line": 83217
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(22f, 28f)",
+   "id": 1000,
+   "line": 83218
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(48f, 70f)",
+   "id": 1001,
+   "line": 83219
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(4f, 28f)",
+   "id": 1002,
+   "line": 83220
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(36f, 90f)",
+   "id": 1003,
+   "line": 83221
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(32f, 90f)",
+   "id": 1004,
+   "line": 83222
+  }
+ ],
+ "578": [
+  {
+   "scaleExpr": "scale",
+   "id": 999,
+   "line": 83270
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 998,
+   "line": 83271
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 998,
+   "line": 83272
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 997,
+   "line": 83273
+  }
+ ],
+ "594": [
+  {
+   "velExpr": "Main.rand.NextVector2Circular(2f, 2f)",
+   "posExpr": "vector5",
+   "perfect": true,
+   "expr": "num5 + Main.rand.Next(3)",
+   "line": 82574
+  },
+  {
+   "velExpr": "Main.rand.NextVector2Circular(2f, 2f)",
+   "posExpr": "vector6",
+   "perfect": true,
+   "id": 1146,
+   "line": 82582
+  }
+ ],
+ "618": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(base.Right.X - 30f, position.Y)",
+   "id": 1172,
+   "line": 83354
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1172,
+   "line": 83355
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(base.Right.X - 30f, position.Y)",
+   "id": 1173,
+   "line": 83356
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1173,
+   "line": 83357
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1174,
+   "line": 83358
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1175,
+   "line": 83359
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1176,
+   "line": 83360
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1176,
+   "line": 83361
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1177,
+   "line": 83362
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1177,
+   "line": 83363
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1178,
+   "line": 83364
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1178,
+   "line": 83365
+  }
+ ],
+ "619": [
+  {
+   "scaleExpr": "scale",
+   "id": 1179,
+   "line": 83326
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1181,
+   "line": 83327
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1182,
+   "line": 83328
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1180,
+   "line": 83329
+  }
+ ],
+ "620": [
+  {
+   "scaleExpr": "scale",
+   "id": 1183,
+   "line": 83298
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1185,
+   "line": 83299
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1186,
+   "line": 83300
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 34f)",
+   "id": 1184,
+   "line": 83301
+  }
+ ],
+ "621": [
+  {
+   "expr": "type - 621 + 1187",
+   "line": 83598
+  }
+ ],
+ "622": [
+  {
+   "expr": "type - 621 + 1187",
+   "line": 83598
+  }
+ ],
+ "623": [
+  {
+   "expr": "type - 621 + 1187",
+   "line": 83598
+  }
+ ],
+ "631": [
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y)",
+   "id": 1210,
+   "line": 85516
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 10f)",
+   "id": 1211,
+   "line": 85517
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 20f)",
+   "id": 1212,
+   "line": 85518
+  },
+  {
+   "scaleExpr": "scale",
+   "posExpr": "new Vector2(position.X, position.Y + 40f)",
+   "id": 1213,
+   "line": 85519
+  }
+ ],
+ "636": [
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(10f, -20f)",
+   "id": 1262,
+   "line": 82731
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(10f, 40f)",
+   "id": 1263,
+   "line": 82732
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(50f, 20f)",
+   "id": 1264,
+   "line": 82733
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(-10f, -20f)",
+   "id": 1265,
+   "line": 82734
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "id": 1266,
+   "line": 82735
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(-20f, -20f)",
+   "id": 1267,
+   "line": 82736
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(-20f, 10f)",
+   "id": 1268,
+   "line": 82737
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(60f, -20f)",
+   "id": 1267,
+   "line": 82738
+  },
+  {
+   "velExpr": "vector9",
+   "scaleExpr": "scale",
+   "posExpr": "position + new Vector2(60f, 10f)",
+   "id": 1268,
+   "line": 82739
+  }
+ ],
+ "657": [
+  {
+   "scale": 0.8,
+   "id": 1259,
+   "line": 82746
+  },
+  {
+   "scale": 0.8,
+   "posExpr": "position + base.Size * 0.5f",
+   "id": 1259,
+   "line": 82747
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1258,
+   "line": 82748
+  }
+ ],
+ "660": [
+  {
+   "scaleExpr": "scale",
+   "id": 1260,
+   "line": 82808
+  },
+  {
+   "scaleExpr": "scale",
+   "id": 1260,
+   "line": 82809
+  }
+ ],
+ "667": [
+  {
+   "vx": 0,
+   "vy": 0,
+   "posExpr": "new Vector2(position.X, base.Center.Y - 10f)",
+   "id": 1218,
+   "line": 82833
+  },
+  {
+   "vx": 0,
+   "vy": 0,
+   "posExpr": "new Vector2(position.X, base.Center.Y - 10f)",
+   "id": 1218,
+   "line": 82841
+  }
+ ],
+ "668": [
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Bottom + new Vector2(-10f, 0f)",
+   "id": 1274,
+   "line": 82692
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Bottom + new Vector2(10f, 0f)",
+   "id": 1274,
+   "line": 82693
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center",
+   "id": 1272,
+   "line": 82694
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center + new Vector2(-10f, 0f)",
+   "id": 1273,
+   "line": 82695
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Center + new Vector2(10f, 0f)",
+   "id": 1273,
+   "line": 82696
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Top",
+   "id": 1270,
+   "line": 82697
+  },
+  {
+   "velExpr": "vector8",
+   "scaleExpr": "scale",
+   "posExpr": "base.Top",
+   "id": 1271,
+   "line": 82698
+  }
+ ],
+ "677": [
+  {
+   "id": 184,
+   "line": 90865
+  },
+  {
+   "id": 185,
+   "line": 90866
+  },
+  {
+   "id": 185,
+   "line": 90867
+  }
+ ],
+ "686": [
+  {
+   "velExpr": "Main.rand.NextVector2Circular(2f, 2f)",
+   "posExpr": "vector2",
+   "perfect": true,
+   "expr": "num4 + Main.rand.Next(3)",
+   "line": 82532
+  },
+  {
+   "velExpr": "Main.rand.NextVector2Circular(2f, 2f)",
+   "posExpr": "vector3",
+   "perfect": true,
+   "id": 1146,
+   "line": 82540
+  }
+ ],
+ "_meta": {
+  "source": "Terarria1456/Terraria/NPC.cs HitEffect (:82421-:90873)；物理=Terraria/Gore.cs",
+  "generatedBy": "tools/extract-gore.mjs",
+  "callsTotal": 1304,
+  "callsHitSkipped": 4,
+  "callsPartySkipped": 14,
+  "npcIds": 146,
+  "entryCount": 635,
+  "unresolvedCount": 32,
+  "defaultEntryCount": 0,
+  "unresolved": [
+   {
+    "line": 82532,
+    "expr": "num4 + Main.rand.Next(3)",
+    "types": "686"
+   },
+   {
+    "line": 82574,
+    "expr": "num5 + Main.rand.Next(3)",
+    "types": "594"
+   },
+   {
+    "line": 83085,
+    "expr": "num64",
+    "types": "570|571"
+   },
+   {
+    "line": 83086,
+    "expr": "num64 + 2",
+    "types": "570|571"
+   },
+   {
+    "line": 83087,
+    "expr": "num64 + 2",
+    "types": "570|571"
+   },
+   {
+    "line": 83088,
+    "expr": "num64 + 3",
+    "types": "570|571"
+   },
+   {
+    "line": 83089,
+    "expr": "num64 + 1",
+    "types": "570|571"
+   },
+   {
+    "line": 83206,
+    "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+    "types": "576|577"
+   },
+   {
+    "line": 83217,
+    "expr": "1005 + ((Main.rand.Next(5) == 0) ? 1 : 0)",
+    "types": "576|577"
+   },
+   {
+    "line": 83491,
+    "expr": "728 + num97",
+    "types": "437"
+   },
+   {
+    "line": 83560,
+    "expr": "type - 513 + 822",
+    "types": "513|514|515"
+   },
+   {
+    "line": 83579,
+    "expr": "type - 510 + 819",
+    "types": "510|511|512"
+   },
+   {
+    "line": 83598,
+    "expr": "type - 621 + 1187",
+    "types": "621|622|623"
+   },
+   {
+    "line": 83702,
+    "expr": "type - 412 + 828",
+    "types": "412|413|414"
+   },
+   {
+    "line": 85723,
+    "expr": "num343",
+    "types": "327"
+   },
+   {
+    "line": 85744,
+    "expr": "num346",
+    "types": "325"
+   },
+   {
+    "line": 85773,
+    "expr": "num349",
+    "types": "344"
+   },
+   {
+    "line": 85777,
+    "expr": "num350",
+    "types": "344"
+   },
+   {
+    "line": 86664,
+    "expr": "736 + num465",
+    "types": ""
+   },
+   {
+    "line": 86665,
+    "expr": "735 + num465",
+    "types": ""
+   },
+   {
+    "line": 86682,
+    "expr": "739 + num468",
+    "types": ""
+   },
+   {
+    "line": 86699,
+    "expr": "750 + num471",
+    "types": ""
+   },
+   {
+    "line": 86700,
+    "expr": "741 + num471",
+    "types": ""
+   },
+   {
+    "line": 86701,
+    "expr": "759 + num471",
+    "types": ""
+   },
+   {
+    "line": 86824,
+    "expr": "1234 + num483",
+    "types": ""
+   },
+   {
+    "line": 86825,
+    "expr": "1235 + num483",
+    "types": ""
+   },
+   {
+    "line": 86846,
+    "expr": "1227 + (type - 639)",
+    "types": ""
+   },
+   {
+    "line": 88369,
+    "expr": "134 + type - 117",
+    "types": ""
+   },
+   {
+    "line": 88489,
+    "expr": "type - 7 + 18",
+    "types": ""
+   },
+   {
+    "line": 88523,
+    "expr": "type - 7 + 18",
+    "types": ""
+   },
+   {
+    "line": 88539,
+    "expr": "type - 95 + 111",
+    "types": ""
+   },
+   {
+    "line": 90092,
+    "expr": "type - 39 + 67",
+    "types": ""
+   }
+  ],
+  "defaultEntries": [],
+  "notes": [
+   "life>0 守卫段(hit gore)与派对帽段(UsesPartyHat)已剔除；无 life 守卫的调用原版 hit/death 双段都执行 → 计为死亡 gore",
+   "idMin..idMax = 原版 X+Next(N)/Next(A,B) 区间，运行时均匀取值；ids = SelectRandom 候选",
+   "velocity 缺省=继承 NPC 当前速度；NewGore 附加随机扰动见 Gore.cs:1347-1348（运行时实现）",
+   "scaleExpr=\"scale\" = 取 NPC.scale；posExpr 为原版位置表达式（默认 position=左上角）",
+   "ai=[{slot,value}] = 原版 ai[N]==V 门（运行时按 NPC ai 槽位判定，不满足跳过该条）",
+   "perfect=true = Gore.NewGorePerfect：随机扰动后回写精确 pos/vel（运行时不抖动）",
+   "gates = 其余不可求值守卫（专家模式/变体等），仅登记不拦截",
+   "tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）"
+  ],
+  "tex": {
+   "11": {
+    "w": 34,
+    "h": 36
+   },
+   "12": {
+    "w": 36,
+    "h": 32
+   },
+   "13": {
+    "w": 38,
+    "h": 36
+   },
+   "61": {
+    "w": 34,
+    "h": 36
+   },
+   "62": {
+    "w": 36,
+    "h": 32
+   },
+   "63": {
+    "w": 38,
+    "h": 36
+   },
+   "184": {
+    "w": 26,
+    "h": 30
+   },
+   "185": {
+    "w": 44,
+    "h": 44
+   },
+   "276": {
+    "w": 8,
+    "h": 16
+   },
+   "277": {
+    "w": 8,
+    "h": 18
+   },
+   "278": {
+    "w": 6,
+    "h": 10
+   },
+   "279": {
+    "w": 24,
+    "h": 10
+   },
+   "280": {
+    "w": 16,
+    "h": 10
+   },
+   "281": {
+    "w": 20,
+    "h": 8
+   },
+   "282": {
+    "w": 12,
+    "h": 6
+   },
+   "314": {
+    "w": 46,
+    "h": 48
+   },
+   "359": {
+    "w": 30,
+    "h": 34
+   },
+   "360": {
+    "w": 30,
+    "h": 42
+   },
+   "361": {
+    "w": 34,
+    "h": 36
+   },
+   "362": {
+    "w": 24,
+    "h": 36
+   },
+   "363": {
+    "w": 32,
+    "h": 28
+   },
+   "364": {
+    "w": 36,
+    "h": 38
+   },
+   "365": {
+    "w": 52,
+    "h": 54
+   },
+   "366": {
+    "w": 40,
+    "h": 26
+   },
+   "367": {
+    "w": 62,
+    "h": 42
+   },
+   "368": {
+    "w": 14,
+    "h": 16
+   },
+   "369": {
+    "w": 34,
+    "h": 32
+   },
+   "370": {
+    "w": 18,
+    "h": 12
+   },
+   "371": {
+    "w": 20,
+    "h": 32
+   },
+   "440": {
+    "w": 22,
+    "h": 22
+   },
+   "441": {
+    "w": 24,
+    "h": 16
+   },
+   "442": {
+    "w": 22,
+    "h": 26
+   },
+   "443": {
+    "w": 14,
+    "h": 18
+   },
+   "444": {
+    "w": 16,
+    "h": 12
+   },
+   "445": {
+    "w": 12,
+    "h": 24
+   },
+   "513": {
+    "w": 54,
+    "h": 72
+   },
+   "514": {
+    "w": 92,
+    "h": 38
+   },
+   "515": {
+    "w": 58,
+    "h": 76
+   },
+   "516": {
+    "w": 46,
+    "h": 62
+   },
+   "573": {
+    "w": 76,
+    "h": 90
+   },
+   "574": {
+    "w": 106,
+    "h": 44
+   },
+   "575": {
+    "w": 78,
+    "h": 56
+   },
+   "576": {
+    "w": 126,
+    "h": 88
+   },
+   "577": {
+    "w": 28,
+    "h": 18
+   },
+   "578": {
+    "w": 34,
+    "h": 22
+   },
+   "579": {
+    "w": 40,
+    "h": 28
+   },
+   "583": {
+    "w": 58,
+    "h": 26
+   },
+   "587": {
+    "w": 22,
+    "h": 40
+   },
+   "588": {
+    "w": 12,
+    "h": 16
+   },
+   "589": {
+    "w": 8,
+    "h": 14
+   },
+   "590": {
+    "w": 30,
+    "h": 28
+   },
+   "591": {
+    "w": 22,
+    "h": 40
+   },
+   "592": {
+    "w": 12,
+    "h": 16
+   },
+   "593": {
+    "w": 8,
+    "h": 14
+   },
+   "594": {
+    "w": 22,
+    "h": 40
+   },
+   "595": {
+    "w": 12,
+    "h": 16
+   },
+   "596": {
+    "w": 8,
+    "h": 14
+   },
+   "597": {
+    "w": 20,
+    "h": 38
+   },
+   "598": {
+    "w": 12,
+    "h": 16
+   },
+   "599": {
+    "w": 8,
+    "h": 14
+   },
+   "600": {
+    "w": 22,
+    "h": 40
+   },
+   "601": {
+    "w": 12,
+    "h": 16
+   },
+   "602": {
+    "w": 8,
+    "h": 14
+   },
+   "603": {
+    "w": 14,
+    "h": 14
+   },
+   "604": {
+    "w": 30,
+    "h": 18
+   },
+   "605": {
+    "w": 22,
+    "h": 24
+   },
+   "606": {
+    "w": 26,
+    "h": 16
+   },
+   "607": {
+    "w": 26,
+    "h": 22
+   },
+   "608": {
+    "w": 28,
+    "h": 20
+   },
+   "609": {
+    "w": 44,
+    "h": 36
+   },
+   "610": {
+    "w": 58,
+    "h": 54
+   },
+   "611": {
+    "w": 68,
+    "h": 66
+   },
+   "612": {
+    "w": 76,
+    "h": 42
+   },
+   "613": {
+    "w": 78,
+    "h": 42
+   },
+   "614": {
+    "w": 76,
+    "h": 28
+   },
+   "615": {
+    "w": 42,
+    "h": 24
+   },
+   "616": {
+    "w": 22,
+    "h": 30
+   },
+   "617": {
+    "w": 18,
+    "h": 26
+   },
+   "643": {
+    "w": 22,
+    "h": 24
+   },
+   "644": {
+    "w": 30,
+    "h": 18
+   },
+   "645": {
+    "w": 14,
+    "h": 22
+   },
+   "646": {
+    "w": 14,
+    "h": 20
+   },
+   "647": {
+    "w": 22,
+    "h": 26
+   },
+   "648": {
+    "w": 14,
+    "h": 22
+   },
+   "649": {
+    "w": 14,
+    "h": 20
+   },
+   "650": {
+    "w": 24,
+    "h": 22
+   },
+   "651": {
+    "w": 12,
+    "h": 16
+   },
+   "652": {
+    "w": 16,
+    "h": 22
+   },
+   "653": {
+    "w": 22,
+    "h": 26
+   },
+   "654": {
+    "w": 16,
+    "h": 24
+   },
+   "655": {
+    "w": 16,
+    "h": 20
+   },
+   "656": {
+    "w": 18,
+    "h": 26
+   },
+   "657": {
+    "w": 10,
+    "h": 22
+   },
+   "658": {
+    "w": 14,
+    "h": 22
+   },
+   "659": {
+    "w": 22,
+    "h": 8
+   },
+   "662": {
+    "w": 26,
+    "h": 28
+   },
+   "663": {
+    "w": 14,
+    "h": 24
+   },
+   "664": {
+    "w": 20,
+    "h": 22
+   },
+   "665": {
+    "w": 28,
+    "h": 30
+   },
+   "666": {
+    "w": 16,
+    "h": 20
+   },
+   "667": {
+    "w": 18,
+    "h": 24
+   },
+   "681": {
+    "w": 28,
+    "h": 26
+   },
+   "682": {
+    "w": 34,
+    "h": 26
+   },
+   "683": {
+    "w": 38,
+    "h": 24
+   },
+   "684": {
+    "w": 28,
+    "h": 24
+   },
+   "685": {
+    "w": 26,
+    "h": 34
+   },
+   "686": {
+    "w": 26,
+    "h": 22
+   },
+   "687": {
+    "w": 44,
+    "h": 42
+   },
+   "688": {
+    "w": 46,
+    "h": 46
+   },
+   "689": {
+    "w": 58,
+    "h": 38
+   },
+   "690": {
+    "w": 34,
+    "h": 26
+   },
+   "691": {
+    "w": 78,
+    "h": 50
+   },
+   "718": {
+    "w": 24,
+    "h": 22
+   },
+   "719": {
+    "w": 28,
+    "h": 26
+   },
+   "720": {
+    "w": 14,
+    "h": 34
+   },
+   "721": {
+    "w": 18,
+    "h": 24
+   },
+   "772": {
+    "w": 32,
+    "h": 28
+   },
+   "773": {
+    "w": 16,
+    "h": 24
+   },
+   "774": {
+    "w": 18,
+    "h": 32
+   },
+   "775": {
+    "w": 18,
+    "h": 34
+   },
+   "776": {
+    "w": 18,
+    "h": 24
+   },
+   "777": {
+    "w": 12,
+    "h": 16
+   },
+   "778": {
+    "w": 22,
+    "h": 36
+   },
+   "779": {
+    "w": 18,
+    "h": 34
+   },
+   "780": {
+    "w": 24,
+    "h": 18
+   },
+   "781": {
+    "w": 16,
+    "h": 28
+   },
+   "782": {
+    "w": 26,
+    "h": 32
+   },
+   "783": {
+    "w": 28,
+    "h": 26
+   },
+   "784": {
+    "w": 18,
+    "h": 16
+   },
+   "785": {
+    "w": 28,
+    "h": 34
+   },
+   "786": {
+    "w": 24,
+    "h": 26
+   },
+   "787": {
+    "w": 20,
+    "h": 24
+   },
+   "790": {
+    "w": 28,
+    "h": 24
+   },
+   "791": {
+    "w": 42,
+    "h": 22
+   },
+   "792": {
+    "w": 20,
+    "h": 24
+   },
+   "793": {
+    "w": 28,
+    "h": 34
+   },
+   "794": {
+    "w": 16,
+    "h": 22
+   },
+   "795": {
+    "w": 20,
+    "h": 32
+   },
+   "796": {
+    "w": 30,
+    "h": 34
+   },
+   "797": {
+    "w": 16,
+    "h": 26
+   },
+   "798": {
+    "w": 42,
+    "h": 14
+   },
+   "799": {
+    "w": 40,
+    "h": 28
+   },
+   "800": {
+    "w": 32,
+    "h": 30
+   },
+   "801": {
+    "w": 34,
+    "h": 24
+   },
+   "802": {
+    "w": 24,
+    "h": 20
+   },
+   "803": {
+    "w": 36,
+    "h": 24
+   },
+   "804": {
+    "w": 24,
+    "h": 12
+   },
+   "805": {
+    "w": 16,
+    "h": 18
+   },
+   "806": {
+    "w": 26,
+    "h": 16
+   },
+   "807": {
+    "w": 32,
+    "h": 18
+   },
+   "808": {
+    "w": 28,
+    "h": 28
+   },
+   "809": {
+    "w": 26,
+    "h": 22
+   },
+   "810": {
+    "w": 18,
+    "h": 26
+   },
+   "831": {
+    "w": 40,
+    "h": 22
+   },
+   "832": {
+    "w": 28,
+    "h": 22
+   },
+   "833": {
+    "w": 34,
+    "h": 32
+   },
+   "834": {
+    "w": 22,
+    "h": 32
+   },
+   "835": {
+    "w": 30,
+    "h": 10
+   },
+   "836": {
+    "w": 60,
+    "h": 28
+   },
+   "837": {
+    "w": 28,
+    "h": 34
+   },
+   "838": {
+    "w": 20,
+    "h": 18
+   },
+   "839": {
+    "w": 22,
+    "h": 34
+   },
+   "840": {
+    "w": 20,
+    "h": 18
+   },
+   "841": {
+    "w": 42,
+    "h": 26
+   },
+   "842": {
+    "w": 26,
+    "h": 26
+   },
+   "843": {
+    "w": 24,
+    "h": 14
+   },
+   "844": {
+    "w": 30,
+    "h": 28
+   },
+   "845": {
+    "w": 20,
+    "h": 26
+   },
+   "846": {
+    "w": 28,
+    "h": 18
+   },
+   "847": {
+    "w": 22,
+    "h": 24
+   },
+   "848": {
+    "w": 22,
+    "h": 24
+   },
+   "849": {
+    "w": 22,
+    "h": 16
+   },
+   "850": {
+    "w": 18,
+    "h": 14
+   },
+   "851": {
+    "w": 48,
+    "h": 32
+   },
+   "852": {
+    "w": 16,
+    "h": 14
+   },
+   "853": {
+    "w": 64,
+    "h": 52
+   },
+   "854": {
+    "w": 68,
+    "h": 52
+   },
+   "855": {
+    "w": 22,
+    "h": 80
+   },
+   "856": {
+    "w": 56,
+    "h": 42
+   },
+   "857": {
+    "w": 50,
+    "h": 48
+   },
+   "858": {
+    "w": 48,
+    "h": 62
+   },
+   "859": {
+    "w": 34,
+    "h": 28
+   },
+   "860": {
+    "w": 62,
+    "h": 44
+   },
+   "861": {
+    "w": 74,
+    "h": 66
+   },
+   "862": {
+    "w": 72,
+    "h": 68
+   },
+   "876": {
+    "w": 28,
+    "h": 28
+   },
+   "877": {
+    "w": 12,
+    "h": 18
+   },
+   "878": {
+    "w": 32,
+    "h": 20
+   },
+   "879": {
+    "w": 28,
+    "h": 26
+   },
+   "880": {
+    "w": 16,
+    "h": 20
+   },
+   "881": {
+    "w": 14,
+    "h": 16
+   },
+   "882": {
+    "w": 10,
+    "h": 20
+   },
+   "883": {
+    "w": 22,
+    "h": 36
+   },
+   "884": {
+    "w": 26,
+    "h": 26
+   },
+   "885": {
+    "w": 28,
+    "h": 16
+   },
+   "886": {
+    "w": 12,
+    "h": 34
+   },
+   "887": {
+    "w": 24,
+    "h": 16
+   },
+   "888": {
+    "w": 34,
+    "h": 30
+   },
+   "889": {
+    "w": 24,
+    "h": 24
+   },
+   "890": {
+    "w": 20,
+    "h": 14
+   },
+   "891": {
+    "w": 24,
+    "h": 18
+   },
+   "892": {
+    "w": 58,
+    "h": 30
+   },
+   "893": {
+    "w": 46,
+    "h": 40
+   },
+   "898": {
+    "w": 24,
+    "h": 24
+   },
+   "899": {
+    "w": 26,
+    "h": 22
+   },
+   "900": {
+    "w": 30,
+    "h": 28
+   },
+   "901": {
+    "w": 16,
+    "h": 20
+   },
+   "902": {
+    "w": 42,
+    "h": 30
+   },
+   "903": {
+    "w": 40,
+    "h": 34
+   },
+   "904": {
+    "w": 22,
+    "h": 40
+   },
+   "905": {
+    "w": 12,
+    "h": 16
+   },
+   "906": {
+    "w": 8,
+    "h": 14
+   },
+   "960": {
+    "w": 50,
+    "h": 50
+   },
+   "961": {
+    "w": 38,
+    "h": 48
+   },
+   "962": {
+    "w": 28,
+    "h": 50
+   },
+   "963": {
+    "w": 40,
+    "h": 40
+   },
+   "964": {
+    "w": 24,
+    "h": 32
+   },
+   "965": {
+    "w": 26,
+    "h": 38
+   },
+   "966": {
+    "w": 28,
+    "h": 34
+   },
+   "970": {
+    "w": 22,
+    "h": 22
+   },
+   "971": {
+    "w": 12,
+    "h": 16
+   },
+   "972": {
+    "w": 20,
+    "h": 22
+   },
+   "973": {
+    "w": 18,
+    "h": 20
+   },
+   "993": {
+    "w": 28,
+    "h": 22
+   },
+   "994": {
+    "w": 14,
+    "h": 18
+   },
+   "995": {
+    "w": 22,
+    "h": 18
+   },
+   "996": {
+    "w": 24,
+    "h": 36
+   },
+   "997": {
+    "w": 22,
+    "h": 22
+   },
+   "998": {
+    "w": 12,
+    "h": 12
+   },
+   "999": {
+    "w": 22,
+    "h": 16
+   },
+   "1000": {
+    "w": 56,
+    "h": 74
+   },
+   "1001": {
+    "w": 90,
+    "h": 36
+   },
+   "1002": {
+    "w": 88,
+    "h": 38
+   },
+   "1003": {
+    "w": 34,
+    "h": 34
+   },
+   "1004": {
+    "w": 26,
+    "h": 40
+   },
+   "1009": {
+    "w": 40,
+    "h": 34
+   },
+   "1010": {
+    "w": 18,
+    "h": 12
+   },
+   "1011": {
+    "w": 18,
+    "h": 20
+   },
+   "1012": {
+    "w": 18,
+    "h": 14
+   },
+   "1013": {
+    "w": 71,
+    "h": 44
+   },
+   "1014": {
+    "w": 24,
+    "h": 34
+   },
+   "1015": {
+    "w": 24,
+    "h": 26
+   },
+   "1016": {
+    "w": 10,
+    "h": 10
+   },
+   "1017": {
+    "w": 18,
+    "h": 14
+   },
+   "1018": {
+    "w": 14,
+    "h": 16
+   },
+   "1019": {
+    "w": 18,
+    "h": 12
+   },
+   "1020": {
+    "w": 26,
+    "h": 28
+   },
+   "1021": {
+    "w": 24,
+    "h": 30
+   },
+   "1022": {
+    "w": 16,
+    "h": 22
+   },
+   "1023": {
+    "w": 44,
+    "h": 38
+   },
+   "1037": {
+    "w": 36,
+    "h": 38
+   },
+   "1038": {
+    "w": 20,
+    "h": 18
+   },
+   "1039": {
+    "w": 16,
+    "h": 16
+   },
+   "1045": {
+    "w": 36,
+    "h": 42
+   },
+   "1046": {
+    "w": 18,
+    "h": 24
+   },
+   "1047": {
+    "w": 28,
+    "h": 34
+   },
+   "1048": {
+    "w": 18,
+    "h": 24
+   },
+   "1049": {
+    "w": 28,
+    "h": 28
+   },
+   "1050": {
+    "w": 22,
+    "h": 28
+   },
+   "1051": {
+    "w": 22,
+    "h": 14
+   },
+   "1052": {
+    "w": 14,
+    "h": 22
+   },
+   "1053": {
+    "w": 46,
+    "h": 38
+   },
+   "1054": {
+    "w": 44,
+    "h": 22
+   },
+   "1061": {
+    "w": 30,
+    "h": 34
+   },
+   "1062": {
+    "w": 14,
+    "h": 14
+   },
+   "1063": {
+    "w": 24,
+    "h": 26
+   },
+   "1064": {
+    "w": 28,
+    "h": 28
+   },
+   "1065": {
+    "w": 14,
+    "h": 40
+   },
+   "1066": {
+    "w": 42,
+    "h": 42
+   },
+   "1071": {
+    "w": 28,
+    "h": 26
+   },
+   "1072": {
+    "w": 12,
+    "h": 20
+   },
+   "1073": {
+    "w": 22,
+    "h": 22
+   },
+   "1074": {
+    "w": 24,
+    "h": 32
+   },
+   "1079": {
+    "w": 100,
+    "h": 42
+   },
+   "1080": {
+    "w": 46,
+    "h": 56
+   },
+   "1081": {
+    "w": 98,
+    "h": 108
+   },
+   "1082": {
+    "w": 80,
+    "h": 68
+   },
+   "1083": {
+    "w": 106,
+    "h": 64
+   },
+   "1084": {
+    "w": 90,
+    "h": 40
+   },
+   "1085": {
+    "w": 66,
+    "h": 78
+   },
+   "1086": {
+    "w": 34,
+    "h": 28
+   },
+   "1146": {
+    "w": 22,
+    "h": 24
+   },
+   "1172": {
+    "w": 46,
+    "h": 58
+   },
+   "1173": {
+    "w": 44,
+    "h": 30
+   },
+   "1174": {
+    "w": 42,
+    "h": 36
+   },
+   "1175": {
+    "w": 70,
+    "h": 60
+   },
+   "1176": {
+    "w": 50,
+    "h": 20
+   },
+   "1177": {
+    "w": 40,
+    "h": 22
+   },
+   "1178": {
+    "w": 22,
+    "h": 20
+   },
+   "1179": {
+    "w": 28,
+    "h": 30
+   },
+   "1180": {
+    "w": 22,
+    "h": 30
+   },
+   "1181": {
+    "w": 22,
+    "h": 22
+   },
+   "1182": {
+    "w": 26,
+    "h": 16
+   },
+   "1183": {
+    "w": 50,
+    "h": 28
+   },
+   "1184": {
+    "w": 20,
+    "h": 28
+   },
+   "1185": {
+    "w": 22,
+    "h": 20
+   },
+   "1186": {
+    "w": 30,
+    "h": 22
+   },
+   "1210": {
+    "w": 20,
+    "h": 30
+   },
+   "1211": {
+    "w": 20,
+    "h": 24
+   },
+   "1212": {
+    "w": 18,
+    "h": 20
+   },
+   "1213": {
+    "w": 14,
+    "h": 20
+   },
+   "1218": {
+    "w": 12,
+    "h": 48
+   },
+   "1258": {
+    "w": 82,
+    "h": 56
+   },
+   "1259": {
+    "w": 94,
+    "h": 170
+   },
+   "1260": {
+    "w": 40,
+    "h": 24
+   },
+   "1262": {
+    "w": 50,
+    "h": 54
+   },
+   "1263": {
+    "w": 42,
+    "h": 52
+   },
+   "1264": {
+    "w": 26,
+    "h": 42
+   },
+   "1265": {
+    "w": 18,
+    "h": 40
+   },
+   "1266": {
+    "w": 30,
+    "h": 32
+   },
+   "1267": {
+    "w": 44,
+    "h": 52
+   },
+   "1268": {
+    "w": 44,
+    "h": 46
+   },
+   "1270": {
+    "w": 80,
+    "h": 102
+   },
+   "1271": {
+    "w": 44,
+    "h": 50
+   },
+   "1272": {
+    "w": 88,
+    "h": 100
+   },
+   "1273": {
+    "w": 50,
+    "h": 32
+   },
+   "1274": {
+    "w": 22,
+    "h": 50
+   }
+  }
+ }
+}

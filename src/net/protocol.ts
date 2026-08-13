@@ -12,8 +12,10 @@ export const PROTO_MAGIC = 'SW1';
  *      傀儡本地结算 Damage_EVP；服务器剥除非房主置位）
  *  v6：msg27 kind 5-8（锚定 Boss 的自包含弹体：DukeSharknadoBolt/龙卷/MLDeathray/LunarOrb，
  *      tag 打包锚参数，访客重建真类本地跑确定性 AI）+ msg28 弹幕消亡上报（消幽灵弹窗口）+
- *      msg201 SSC 角色档下发（--ssc）。server 与 game 同仓库同时发布，不做向后兼容 */
-export const PROTO_VER = 6;
+ *      msg201 SSC 角色档下发（--ssc）。server 与 game 同仓库同时发布，不做向后兼容
+ *  v7：PvP——msg13 flagBits[7]=hostile + 尾部 u8 team(0-5)；RoomPolicy 尾部 u8 pvpAllowed；
+ *      msg44 StrikePlayer（近战 PvP 命中意向，被打方本地结算 HP——客户端权威模型）*/
+export const PROTO_VER = 7;
 
 /** 消息 ID（v1 实现范围；编号对齐原版 MessageID.cs） */
 export const enum Msg {
@@ -141,6 +143,7 @@ export class NetReader {
     this.dv = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
   }
   u8(): number { return this.buf[this.p++]; }
+  get remaining(): number { return this.buf.length - this.p; }
   u16(): number { const v = this.dv.getUint16(this.p, true); this.p += 2; return v; }
   i16(): number { const v = this.dv.getInt16(this.p, true); this.p += 2; return v; }
   u32(): number { const v = this.dv.getUint32(this.p, true); this.p += 4; return v; }

@@ -9,7 +9,7 @@ import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
-import { vanillaNpc, vanillaSoundName, type VanillaNpc } from '../data/vanillaNpcs';
+import { vanillaNpc, vanillaSoundFiles, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
@@ -482,8 +482,8 @@ export class Enemy extends Entity {
     const e = new Enemy(`v_${id}`, x, y);
     e.vanillaId = id;
     e.vanilla = v;
-    const hit = vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1';
-    const kill = vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1';
+    const hit = vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'];
+    const kill = vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'];
     const flying = v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14;
     // ---- NPC.ScaleStats（NPC.cs:18081-18105，NewNPC→SetDefaults 后调用 :8322/:17791）----
     // 世界难度轴（Main.Difficulty → 生命/伤害/钱/击退倍率 + 逐类型系数 +
@@ -516,7 +516,8 @@ export class Enemy extends Entity {
       boss: VANILLA_BOSS_IDS.has(id),
       nightOnly: v.aiStyle === 2 || v.aiStyle === 5, underground: false,
       mapColor: '#9A8FA0', gore: ['#9A8FA0', '#5E5566', '#C4BACC'],
-      hitSound: [hit], killedSound: [kill], drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
+      hitSound: hit, killedSound: kill, drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
+      // hitSound/killedSound 为 wav 变体组（DD2_*/Deerclops* 多变体，playSfxFiles 组内随机）
       // ScaleStats 后的 npc.value（EnemyMoneyDropMultiplier 已乘，经典档=原值；
       // 弹体 NPC 不缩）——击杀掉钱消费位（Enemy.ts 掉落 ctx.value）
       value: ss.value,
@@ -1456,7 +1457,7 @@ export class Enemy extends Entity {
         this.ai2 += 1;
         if (this.ai2 === 0) this.ai2 = num22;
       }
-      this.lightRGB = [229, 191, 26];            // :56816/:56820 蓄力点光 (0.9,0.75,0.1)
+      this.lightRGB = [0.9, 0.75, 0.1];          // :56816/:56820 蓄力点光——曾误写 0-255 标度致 254× 过曝
       const rem = this.ai2 + num23 + num25;      // 起手辉光段计时（:56798 num26）
       if (rem === 1) game.playSfxFile?.('Item_17', 1, this.cx, this.cy); // SoundID 4-17(充能)
       if (rem < num25) {
@@ -1958,8 +1959,8 @@ export class Enemy extends Entity {
       width: nw, height: nh,
       flying: v.noGravity || v.aiStyle === 2 || v.aiStyle === 5 || v.aiStyle === 14,
       boss: VANILLA_BOSS_IDS.has(id),
-      hitSound: [vanillaSoundName(v.HitSound) ?? 'NPC_Hit_1'],
-      killedSound: [vanillaSoundName(v.DeathSound) ?? 'NPC_Killed_1'],
+      hitSound: vanillaSoundFiles(v.HitSound) ?? ['NPC_Hit_1'],
+      killedSound: vanillaSoundFiles(v.DeathSound) ?? ['NPC_Killed_1'],
       drops: [], // 掉落走 NpcDrops 规则树（击杀时求值，不再预展开）
     };
     this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;

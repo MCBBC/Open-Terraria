@@ -33,11 +33,11 @@ const vanillaImages = walk(join(ASSETS, 'Images')).filter((p) => p.endsWith('.pn
 const vanillaSounds = walk(join(ASSETS, 'Sounds')).filter((p) => p.endsWith('.wav'));
 
 // ---------- 2) 本仓清单 ----------
-const ourVanilla = new Set(walk(join(ROOT, 'public', 'sprites', 'vanilla')));
-const ourUiRaw = walk(join(ROOT, 'public', 'sprites', 'vanilla-ui'));
+const ourVanilla = new Set(walk(join(ROOT, 'public', 'sprites', 'vanilla')).map((p) => p.toLowerCase())); // 同上
+const ourUiRaw = walk(join(ROOT, 'public', 'sprites', 'vanilla-ui')).map((p) => p.toLowerCase());
 const ourUi = new Set(ourUiRaw);
 const ourUiFlat = new Set(ourUiRaw.map((p) => p.replace(/\//g, '_')));
-const ourSounds = new Set(walk(join(ROOT, 'public', 'sounds')));
+const ourSounds = new Set(walk(join(ROOT, 'public', 'sounds')).map((p) => p.toLowerCase())); // macOS FS 大小写不敏感，比对走小写
 const ourPortraits = new Set(walk(join(ROOT, 'public', 'sprites', 'portraits')));
 const ourL10n = new Set(walk(join(ROOT, 'public', 'l10n')));
 
@@ -140,11 +140,11 @@ const soundRules = [
 // ---------- 5) 判定 ----------
 function haveImage(rel) {
   const name = basename(rel);
-  if (ALIAS[rel]) return ourVanilla.has(ALIAS[rel]);
-  if (ourVanilla.has(rel) || ourVanilla.has(name)) return true;
+  if (ALIAS[rel]) return ourVanilla.has(ALIAS[rel].toLowerCase());
+  if (ourVanilla.has(rel.toLowerCase()) || ourVanilla.has(name.toLowerCase())) return true;
   const flat = rel.replace(/\//g, '_');
-  if (ourUiFlat.has(flat)) return true;
-  for (const c of aliasCandidates(rel)) if (ourVanilla.has(c)) return true;
+  if (ourUiFlat.has(flat.toLowerCase())) return true;
+  for (const c of aliasCandidates(rel)) if (ourVanilla.has(c.toLowerCase())) return true;
   // TownNPCs 头像走 portraits/
   if (rel.startsWith('TownNPCs/Portraits/') && ourPortraits.has(basename(rel))) return true;
   return false;
@@ -170,7 +170,7 @@ function scan(files, isSound) {
   for (const rel of files) {
     const rule = classify(rel, isSound);
     const have = rule.dataLevel ? true : (isSound
-      ? ourSounds.has(basename(rel)) || ourSounds.has(rel) || [...ourSounds].some((s) => basename(rel) === basename(s))
+      ? ourSounds.has(basename(rel).toLowerCase()) || ourSounds.has(rel.toLowerCase())
       : haveImage(rel));
     if (!groups.has(rule.cat)) {
       groups.set(rule.cat, { cat: rule.cat, reason: rule.reason, mechanism: rule.mechanism, total: 0, have: 0, missing: [] });

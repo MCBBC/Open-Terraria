@@ -92,8 +92,8 @@ export const enum UnlockState {
   DropsWithRates = 4,
 }
 
-/** 图鉴免门总开关（true=恒最高档；详见 BestiaryTracker.unlockState 注） */
-export const UNLOCK_ALL = true;
+/** 图鉴免门总开关（holder 便于单测注入；详见 BestiaryTracker.unlockState 注） */
+export const bestiaryGating = { unlockAll: true };
 
 type Source =
   | { t: 'kill'; credit: string; quick: boolean; full: number }
@@ -237,7 +237,7 @@ export class BestiaryTracker {
    *  .GetUnlockStateByKillCount,BestiaryEntryUnlockState）+金宠/目击/对话门;
    *  击杀计数与完成度条仍按真实 kills/sights 统计显示,仅不再遮挡内容。 */
   unlockState(entry: BestiaryEntryDef): UnlockState {
-    if (UNLOCK_ALL) return UnlockState.DropsWithRates;
+    if (bestiaryGating.unlockAll) return UnlockState.DropsWithRates;
     let state = UnlockState.NotKnown;
     for (const s of entry.sources) {
       const st = s.t === 'kill'

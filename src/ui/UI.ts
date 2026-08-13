@@ -1154,14 +1154,19 @@ export class UI {
     if (vsDef) html += `<br>防御 +${vsDef}`;
     if (def.heal) html += `<br>${Lang.text('CommonItemTooltip.RestoresLife', def.heal)}`;
     // 物品自带说明行（原版 item.ToolTip 渲染段 Main.cs:20783-20798 ← l10n ItemTooltip.*，
-    // 2664 键 zh 包内嵌；此前未消费——悬停只见数值不见"做什么用"）。vi_ 物品按原版名查键
+    // 2664 键 zh 包内嵌；此前未消费——悬停只见数值不见"做什么用"）。vi_ 物品按原版名查键。
+    // ★Lang.cs:536-549 语义:tooltip 缓存全量置 None 后按键填充,FromLanguageKey 对
+    //  缺失键**静默返回空**(铜剑/药水/钱币等老物品本无静态 tooltip)——故先 has() 再取,
+    //  勿直接 Lang.text(未命中会刷"缺失 key"警告)
     if (def.key.startsWith('vi_')) {
       const vid = parseInt(def.key.slice(3), 10);
       const nameKey = ITEM_NAME_BY_ID[vid];
       if (nameKey) {
         const path = `ItemTooltip.${nameKey}`;
-        const tip = Lang.text(path);
-        if (tip !== path && tip) html += tip.split('\n').map((ln) => `<br>${ln}`).join('');
+        if (Lang.has(path)) {
+          const tip = Lang.text(path);
+          if (tip) html += tip.split('\n').map((ln) => `<br>${ln}`).join('');
+        }
       }
     }
     if (def.desc) html += `<br><span style="color:#9a8ab8">${def.desc}</span>`;

@@ -19,6 +19,7 @@ import { MonolithFilters, emptyMonolithScene, visualScanRect, scanMonolithScene,
 import type { FlickerClock } from '../lighting/SkyColor';
 import { SMART_CURSOR_DIRECTION_LOCKS } from '../player/SmartCursor';
 import { mobileUiScale } from '../ui/MobileControls';
+import { TEAM_COLORS } from '../stats/Pvp';
 
 /** 鼠标目标格（智能光标激活时 smart=true 并附方向锁 arrow） */
 export interface HoverTarget {
@@ -48,6 +49,7 @@ function dollEquipFromInv(inv: Inventory, atlas: import('../assets/SpriteAtlas')
 import { WeatherRenderer } from './WeatherRenderer';
 import { drawVanillaLiquids } from './VanillaLiquidRenderer';
 import { renderEnv } from './VanillaTiler';
+import { drawTileFlames } from './TileFlames';
 import { drawWindSwayTiles, litNatureVisibility } from './WindSway';
 import { natureParticles } from './NatureParticles';
 import { WaterfallRenderer } from './WaterfallRenderer';
@@ -58,6 +60,8 @@ import { viIdFromKey } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
+import { InfoAccsLayer } from './InfoAccsLayer';
+import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
 
 /** 原版 holdStyle!=0 物品集（Item.cs SetDefaults holdStyle=1 实证 + TEdit 实名核对）：
  *  火把族（8/彩色 427-433/群系 523..5353）+ 荧光棒族 ItemID.Sets.Glowsticks(282,286,3112,3002,4776,5643)。
@@ -749,6 +753,12 @@ export class Renderer {
   minimap: Minimap | null = null;
   /** 原版瀑布贴图系统（WaterfallManager 移植）：液体倾泻的长条水流柱 */
   waterfalls = new WaterfallRenderer();
+  /** 信息饰品显示列(DrawInfoAccs 移植;数据组装在 Game,绘制在此) */
+  infoAccs = new InfoAccsLayer();
+  /** Game 每帧注入的信息行数据(InfoAccCtx;null=未注入不画) */
+  infoAccCtx: InfoAccCtx | null = null;
+  /** 信息列悬停行(-1 无;交互在 Game) */
+  infoAccHover = -1;
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
   /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
@@ -941,7 +951,8 @@ export class Renderer {
     this.updateWaterStyle(world, cam);
     this.easeFullMap();
 
-    // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线 / 世界尺寸）
+    // 1. 天空（器件态注入：天塔柱滤镜类型 / 派对气球门 / 地表线 / 世界尺寸 +
+    //    AmbientSky 天空实体判定输入）
     this.sky.fx = {
       monolith: this.monoScan.activeMonolithType,
       party: !!this.scene?.partyUp,
@@ -950,6 +961,17 @@ export class Renderer {
       worldH: world.h,
       // 事件月亮(Main.cs:62400-62408):0 无 / 1 霜月 / 2 南瓜月
       moonEventKind: (world.moonEvent?.kind ?? 0) as 0 | 1 | 2,
+    };
+    // AmbientSky 选族输入（AmbienceServer.cs:30-55/190-193：晴天→鸟群 / 平静夜+神圣→腹足怪）
+    this.sky.amb = {
+      dayTime: clock.isDay,
+      raining: (world.weather?.cloudAlpha ?? 0) > 0,   // Main.IsItRaining（Main.cs:2659）
+      eclipse: clock.eclipse,
+      bloodMoon: clock.bloodMoon,
+      moonEventKind: (world.moonEvent?.kind ?? 0) as 0 | 1 | 2,
+      zoneHallow: !!this.scene?.zoneHallow,
+      playerX: player.cx,
+      playerY: player.cy,
     };
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
@@ -968,6 +990,10 @@ export class Renderer {
       }
       this.biomeBg.draw(ctx, world, this.scene, cam, viewW, viewH, [tr, tg, tb], 16.7);
     }
+
+    // 1.55 AmbientSky 天空实体（SkyManager「Ambience」层：群系背景之上、世界实体之下；
+    //     鸟群/夜空腹足怪，调度 1:1 AmbienceServer——10-120s 一次尝试）
+    this.sky.drawAmbience(ctx, viewW, viewH, cam.x, cam.y, 16.7);
     // 1.6 天塔柱滤镜：原"天空层子集近似"已上移为全屏后处理（步骤 7d，
     //     SceneState → Filters.Scene["Monolith*"] 整屏合成语义 1:1）
 
@@ -1028,6 +1054,18 @@ export class Renderer {
         if (!chunkVisible(cx, cy)) continue;
         ctx.drawImage(chunks.get(cx, cy).tile, cx * CHUNK * ts, cy * CHUNK * ts, CHUNK * ts + over, CHUNK * ts + over);
       }
+    }
+
+    // 2c'.0 火苗叠画（原版 DrawSingleTile_Flames，TileDrawing.cs:1746 在本体绘制之后
+    //   调用）：火把/蜡烛/烛台/吊灯/篝火等 Flame_N 平行表逐帧种子化抖动——动态层
+    //   不能进 ChunkCache 静态烘焙（TileFrameSeed 每 5 帧推进，Main.cs:61156-61159）。
+    //   画在 tile 层后、前景水之前（原版火苗属 tile 批次，在前景水 pass 之下）。
+    if (this.atlas) {
+      const ftx0 = Math.max(2, Math.floor((cam.x - viewW / 2 / z) / ts));
+      const ftx1 = Math.min(world.w - 3, Math.ceil((cam.x + viewW / 2 / z) / ts));
+      const fty0 = Math.max(2, Math.floor((cam.y - viewH / 2 / z) / ts));
+      const fty1 = Math.min(world.h - 3, Math.ceil((cam.y + viewH / 2 / z) / ts));
+      drawTileFlames(ctx, this.atlas, world.store, ftx0, fty0, ftx1, fty1, flicker);
     }
 
     // 2c''.4 高尔夫蓄力显示：预测弹道点（FancyGolfPredictionLine 近似：同物理步进）+
@@ -1116,7 +1154,25 @@ export class Renderer {
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
     // 挥舞动画 = msg13 useItem 位派生的 swingNet（对齐本地 swing 参数形状））
-    for (const rp of this.remotePlayers) this.drawPlayer(rp, world, rp.swingNet);
+    for (const rp of this.remotePlayers) { this.drawPlayer(rp, world, rp.swingNet); }
+    // PvP 头顶血条（备案偏差：原版无玩家头顶名/血条——仅悬停提示与地图头像边框；
+    // 真联机 PvP 下"谁是可攻击目标"是核心信息，按计划以头顶条替代）。
+    // 仅 hostile 目标显示（同队/非 hostile 玩家无条），队伍色描边 + 原版血条同款
+    // 绿→黄→红渐变填充；受伤即显示（对齐 DrawHealthBar 的 life!=lifeMax 门）
+    for (const rp of this.remotePlayers) {
+      if (!rp.hostile || rp.hp >= rp.maxHp || rp.dead) continue;
+      const tc = TEAM_COLORS[Math.max(0, Math.min(5, rp.team))];
+      const x = rp.cx - 19, y = rp.y - 14;
+      const fill = Math.max(0, Math.min(1, rp.hp / rp.maxHp));
+      const r = Math.round(fill > 0.5 ? 255 * (1 - fill) * 2 : 255);
+      const g = Math.round(fill > 0.5 ? 255 : 255 * fill * 2);
+      ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ctx.fillRect(x - 1, y - 1, 40, 6);
+      ctx.fillStyle = `rgb(${tc[0]},${tc[1]},${tc[2]})`;
+      ctx.fillRect(x - 1, y - 1, 40, 2);
+      ctx.fillStyle = `rgb(${r},${g},0)`;
+      ctx.fillRect(x, y, 38 * fill, 4);
+    }
 
     // 4.5 液体前景 pass（原版 waterTarget 在玩家/掉落物之后合成，Main.cs:46720）：
     //     水 0.6 半透明盖在实体上——水中角色带水色
@@ -1242,6 +1298,16 @@ export class Renderer {
     this._lastPlayer = player;
     // 9. 小地图
     this.drawMinimap(ctx, cam, world, player, clock, entities);
+    // 9.45 信息饰品列(DrawInfoAccs;main 系列资源文本,原版右上 X=W-280)
+    if (this.infoAccCtx && this.infoAccs.canShow(
+      !!((player as unknown as { talking?: boolean }).talking),
+      !!((this as unknown as { chestOpen?: boolean }).chestOpen),
+      false,
+    )) {
+      this.infoAccs.draw(ctx, viewW, viewH, this.infoAccCtx, player.hideInfo,
+        this.playerInventory, !!this.fullMap.open && !!this.minimap,
+        this.infoAccHover, this._mouseX, this._mouseY);
+    }
     // 9.5 全屏地图
     if (this.fullMap.open && this.minimap) {
       this.drawFullMap(ctx, world, this._mouseX, this._mouseY, this._mouseDown, entities);
@@ -2354,10 +2420,25 @@ export class Renderer {
   // Glow_156（416 火龙怪骑士 :24531-24535 底心 +4px 锚 + vel4×0.5）、Glow_154（419 :25677-25696
   // + 拖尾）、Glow_146（421 吮脑怪 :25618-25621 A=128-α/2）。
   // Projectile glowMask（:34327-34378）与 Item glowMask（:38072-38213）不在本批。
+  //
+  // ---- 第三批（通用化，2026-08-13）：DrawNPCDirect 尾部 "switch(type) → GlowMask[N]
+  // 同帧整图叠加" 家族全量入库（Main.cs:25597-25787 月族/星族 + :25044-25545 散件）。
+  // ★命名陷阱：Glow_{id}.png 是 GlowMaskID 空间（TextureAssets.GlowMask[N]，
+  // AssetInitializer.cs:650-653，共 379 张），与 NPC id 无恒等关系（392→Glow_48、
+  // 493→Glow_132）——禁止按 vanillaId 猜文件名，一切以 Main.cs 绘制点反查为准。
+  //   mode 'frame4'  中心整图 + 四向偏移 4 份（月族 415/417/418/518/315/346 与 416）
+  //   a 字段         中心层 alpha 表达式：'255a'=(255-α)/255、'128a2'=(128-α/2)/255、
+  //                  'opacity'=NPC.Opacity、数字=常数（缺省走上方旧 id 链）
   private static readonly NPC_GLOW: Record<number, {
-    tex: string; mode: 'frame' | 'vel4' | 'trail';
+    tex: string; mode: 'frame' | 'frame4' | 'vel4' | 'trail';
     /** vel4 速度偏移倍率（四塔 4；416 骑手 :24538 为 0.5 + 光照项） */
     velMult?: number;
+    /** frame4 固定四向偏移（UnitX.RotatedBy(k*π/2)×n，:25736/:25746）替代速度偏移 */
+    fixed4?: number;
+    /** frame4 绘制原点 X 平移（518 halfSize+(-10,0) :25722 → 图像右移 10px） */
+    dx?: number;
+    /** 中心层 alpha 表达式（见上；缺省 = 旧 id 链） */
+    a?: number | '255a' | '128a2' | 'opacity';
     /** 399 探测器状态灯（:24571-24575）：Extra_20(ai0+1 行) 本体 + glow 罩，dy=+24px */
     lamp?: { tex: string; glow: string; dy: number };
   }> = {
@@ -2376,10 +2457,77 @@ export class Renderer {
     // ---- 第二批（底锚/拖尾族）----
     399: { tex: 'vanilla/Glow_100.png', mode: 'frame',   // 火星探测器：本体罩 A=127-α/2（:24564）
       lamp: { tex: 'vanilla/Extra_20.png', glow: 'vanilla/Glow_101.png', dy: 24 } },
-    416: { tex: 'vanilla/Glow_156.png', mode: 'vel4', velMult: 0.5 },  // 火龙怪骑士（:24531-24535）
+    416: { tex: 'vanilla/Glow_156.png', mode: 'frame4', velMult: 0.5, a: '255a' },  // 火龙怪骑士（:24531 中心 + :24533-24537 vel4×0.5）
     419: { tex: 'vanilla/Glow_154.png', mode: 'trail' }, // 火月怪（:25677-25696 + :24610-24645 拖尾）
     421: { tex: 'vanilla/Glow_146.png', mode: 'frame' }, // 吮脑怪：底锚 A=128-α/2（:25618-25621）
+    // ---- 第三批 A：DrawNPC 尾段散件（单帧整图叠加，Main.cs:25044-25545）----
+    24: { tex: 'vanilla/Glow_360.png', mode: 'frame', a: 'opacity' },    // 火焰小鬼（:25044-25047 GetAlpha(White)）
+    383: { tex: 'vanilla/Glow_11.png', mode: 'frame', a: 1 },            // 火星军官（:25258-25260）
+    386: { tex: 'vanilla/Glow_31.png', mode: 'frame', a: 1 },            // 火星工程师（:25445-25448）
+    387: { tex: 'vanilla/Glow_32.png', mode: 'frame', a: 0.75 },         // 特斯拉炮塔（:25451-25459 White×0.75；ai0>0 白化渐隐未接）
+    388: { tex: 'vanilla/Glow_33.png', mode: 'frame', a: 1 },            // 火星无人机（:25460-25463）
+    389: { tex: 'vanilla/Glow_34.png', mode: 'frame', a: 1 },            // 电圈僵尸（:25464-25467）
+    437: { tex: 'vanilla/Glow_109.png', mode: 'frame', a: 200 / 255 },   // 幽火（:25484-25488 white.A=200；Glow_108 整图罩未接）
+    472: { tex: 'vanilla/Glow_110.png', mode: 'frame', a: '255a' },      // 暗焰幻灵（:25542-25545）
+    520: { tex: 'vanilla/Glow_164.png', mode: 'frame', a: 1 },           // 火星行者（:25422-25424；Glow_165 旋转环未接）
+    653: { tex: 'vanilla/Glow_288.png', mode: 'frame', a: 1 },           // 地狱蝴蝶（:25195-25198，Y 基准 +3 未接）
+    654: { tex: 'vanilla/Glow_290.png', mode: 'frame', a: 1 },           // 熔岩萤火虫（:25191-25194）
+    160: { tex: 'vanilla/Glow_166.png', mode: 'frame', a: '128a2' },     // 松露人（:25766-25782；变体 Glow_352 未接）
+    209: { tex: 'vanilla/Glow_167.png', mode: 'frame', a: '128a2' },     // 电子人（:25780-25787；变体 Glow_350/351 未接）
+    // 城镇宝石小动物 639-645 → Glow_286、646-652 → Glow_287（:25048-25055 GetAlpha(White)）
+    639: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    640: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    641: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    642: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    643: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    644: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    645: { tex: 'vanilla/Glow_286.png', mode: 'frame', a: 'opacity' },
+    646: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    647: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    648: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    649: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    650: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    651: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    652: { tex: 'vanilla/Glow_287.png', mode: 'frame', a: 'opacity' },
+    // ---- 第三批 B：月柱事件族（Main.cs:25597-25637 的 case 逐条，底锚同帧整图）----
+    411: { tex: 'vanilla/Glow_136.png', mode: 'frame', a: '128a2' },     // 观星者（:25597-25598）
+    409: { tex: 'vanilla/Glow_138.png', mode: 'frame', a: '255a' },      // 闪耀喷射者（:25600-25601）
+    410: { tex: 'vanilla/Glow_137.png', mode: 'frame', a: '255a' },      // 银河织带尾（:25603-25604）
+    407: { tex: 'vanilla/Glow_139.png', mode: 'frame', a: '255a' },      // 流星入侵者（:25606-25607）
+    405: { tex: 'vanilla/Glow_141.png', mode: 'frame', a: '128a2' },     // 星细胞（:25609-25610）
+    406: { tex: 'vanilla/Glow_142.png', mode: 'frame', a: '128a2' },     // 小星细胞（:25612-25613）
+    424: { tex: 'vanilla/Glow_144.png', mode: 'frame', a: '128a2' },     // 预言者（:25615-25616）
+    423: { tex: 'vanilla/Glow_145.png', mode: 'frame', a: '128a2' },     // 进化兽（:25618-25619）
+    420: { tex: 'vanilla/Glow_147.png', mode: 'frame', a: '128a2' },     // 星云浮怪（:25624-25625）
+    425: { tex: 'vanilla/Glow_150.png', mode: 'frame', a: '128a2' },     // 风暴潜行者（:25627-25630；DrawPrettyStarSparkle 未接）
+    429: { tex: 'vanilla/Glow_151.png', mode: 'frame', a: '128a2' },     // 旋涡怪（:25636-25637）
+    412: { tex: 'vanilla/Glow_157.png', mode: 'frame', a: '255a' },      // 爬足虫头（:25645-25652；localAI[2] 红闪未接）
+    413: { tex: 'vanilla/Glow_158.png', mode: 'frame', a: '255a' },      // 爬足虫身
+    414: { tex: 'vanilla/Glow_159.png', mode: 'frame', a: '255a' },      // 爬足虫尾
+    525: { tex: 'vanilla/Glow_169.png', mode: 'frame', a: 200 / 255 },   // 邪恶食尸鬼（:25754-25755）
+    526: { tex: 'vanilla/Glow_170.png', mode: 'frame', a: 200 / 255 },   // 污染食尸鬼（:25757-25758）
+    527: { tex: 'vanilla/Glow_171.png', mode: 'frame', a: 200 / 255 },   // 梦游食尸鬼（:25760-25761）
+    533: { tex: 'vanilla/Glow_172.png', mode: 'frame', a: 1 },           // 沙漠之魂（:25763-25764 Color(255,255,255,100)）
+    426: { tex: 'vanilla/Glow_153.png', mode: 'frame', a: '128a2' },     // 外星蜂后（:26079-26081）
+    427: { tex: 'vanilla/Glow_152.png', mode: 'frame', a: '255a' },      // 外星黄蜂（:26076-26078）
+    // ---- 第三批 C：中心罩 + 四向偏移族（mode 'frame4'）----
+    418: { tex: 'vanilla/Glow_161.png', mode: 'frame4', velMult: 0.25, a: '255a' }, // 陨石火怪（:25639-25649）
+    415: { tex: 'vanilla/Glow_155.png', mode: 'frame4', velMult: 0.5, a: '255a' },  // 龙马（:25671-25681）
+    417: { tex: 'vanilla/Glow_160.png', mode: 'frame4', velMult: 0.25, a: '255a' }, // 滚球蜥（:25700-25710）
+    518: { tex: 'vanilla/Glow_163.png', mode: 'frame4', velMult: 0.5, dx: 10, a: '255a' }, // 太空入侵者飞行种（:25720-25731）
+    344: { tex: 'vanilla/Glow_253.png', mode: 'frame', a: 0.39 },       // 常绿尖叫树（:25731-25733 Color(200,200,200,100)*0.5）
+    346: { tex: 'vanilla/Glow_254.png', mode: 'frame4', fixed4: 4, a: 200 / 255 },  // 坐骑雪橇-NK1（:25734-25743）
+    315: { tex: 'vanilla/Glow_255.png', mode: 'frame4', fixed4: 2, a: 1 },          // 无头骑士（:25744-25753）
+    // 【未接登记】541 沙元素/568/569 枯萎兽的 Glow_216/224 环绕轨道副本（:26083-26131，
+    // Center + angle.ToRotationVector2()×(4*num300+2)）与 661 的自贴图轨道（:26103-26123）
+    // 未移植——中心罩先落表外（只画一半反而误导），待轨道原语一起接。
   };
+
+  /** NPC_GLOW 表全量条目（[npcId, 贴图路径]）——供 tests/visual-extras.test.ts
+   *  抽查素材存在性（表内每个 tex 都必须真实落在 public/sprites/vanilla/）。 */
+  static npcGlowEntries(): Array<[number, string]> {
+    return Object.entries(Renderer.NPC_GLOW).map(([id, g]) => [Number(id), g.tex]);
+  }
 
   /** GlowMask 叠画：与基础精灵同一变换（调用点在 drawEnemy 的 save 块内）。
    *  bx/by = 基础精灵在本变换内的目标左上（与本体严格同锚——地面型底锚/飞行型
@@ -2407,7 +2555,41 @@ export class Renderer {
     const sy = Math.min(img.height - gh, row * gh);
     ctx.save();
     ctx.globalCompositeOperation = 'lighter';
-    if (g.mode === 'frame') {
+    // 第三批通用 alpha 表达式（g.a）：数字=常数 / '255a'=(255-α)/255 / '128a2'=(128-α/2)/255
+    // / 'opacity'=GetAlpha(White)。缺省（旧两批）走下方 id 链。
+    const aExpr = g.a;
+    const resolveAlpha = (): number => {
+      if (aExpr === undefined) return -1; // 哨兵：走旧链
+      if (typeof aExpr === 'number') return aExpr;
+      if (aExpr === '255a') return (255 - alphaRaw) / 255;
+      if (aExpr === '128a2') return (128 - alphaRaw / 2) / 255;
+      return opacity;
+    };
+    if (g.mode === 'frame4') {
+      // frame4：中心整图（a 表达式）+ 四向偏移 4 份灰 A=64
+      //（Main.cs:25639-25649/25671-25681/25700-25710/25720-25731；速度偏移 num =
+      // k + 光照项（恒 k），或 UnitX.RotatedBy 固定 px :25736/:25746）
+      const offX = (g.dx ?? 0) / scale;   // 518 halfSize+(-10,0) → 图像右移 10 世界 px
+      ctx.globalAlpha = Math.max(0, Math.min(1, resolveAlpha()));
+      ctx.drawImage(img, 0, sy, img.width, gh, bx + offX, by, r.sw, r.sh);
+      ctx.globalAlpha = Math.max(0, Math.min(1, (64 / 255) * opacity));
+      // 416 骑手速度恒 0（AI_075 吸附零速）——原版取坐骑 415 的速度
+      // （Main.cs:24516 spinningpoint3 = npc[415].velocity；同 vel4 分支）
+      const svx = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vx : e.vx;
+      const svy = e.vanillaId === 416 && e.master && !e.master.dead ? e.master.vy : e.vy;
+      const fixed = g.fixed4;
+      const mult = g.velMult ?? 0.5;
+      for (let k = 0; k < 4; k++) {
+        const ang = k * Math.PI / 2;
+        const dx = (fixed !== undefined
+          ? Math.cos(ang) * fixed                       // UnitX.RotatedBy(k*π/2)×n
+          : (svx * Math.cos(ang) - svy * Math.sin(ang)) * mult) / scale;
+        const dy = (fixed !== undefined
+          ? Math.sin(ang) * fixed
+          : (svx * Math.sin(ang) + svy * Math.cos(ang)) * mult) / scale;
+        ctx.drawImage(img, 0, sy, img.width, gh, bx + offX + dx, by + dy, r.sw, r.sh);
+      }
+    } else if (g.mode === 'frame') {
       let alpha = 0.8;
       let flashPulse = 1;
       if (e.vanillaId === 551) { alpha = (66 / 255) * 1.3; }              // :23099 A=66 ×(0.7+0.3*lerp)
@@ -2420,6 +2602,8 @@ export class Renderer {
       } else if (e.vanillaId === 399) { alpha = (127 - alphaRaw / 2) / 255; }  // :24568 Color(127-α/2,…)
       else if (e.vanillaId === 421) { alpha = (128 - alphaRaw / 2) / 255; }    // :25622 Color(128-α/2,…)
       else alpha = 0.78;                                                  // Color(200,200,200,0)/白色系通用
+      const ga = resolveAlpha();
+      if (ga >= 0) alpha = ga;                                            // 第三批表项覆盖旧链
       ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
       ctx.drawImage(img, 0, sy, img.width, gh, bx, by, r.sw, r.sh);
       // 399 探测器状态灯（:24571-24575）：Extra_20 按 ai0+1 取行，画在本体下方 +24px，
@@ -3846,8 +4030,10 @@ export class Renderer {
    *  ——vnpc 懒加载会按 frames=1 把 62×624 整条画出，故此处显式帧数切片 */
 
   /** 派对变体贴图条 id 集（UpdateAltTexture NPC.cs:91250——441/453/633 永不 altTexture=1，
-   *  对应 TownNPCs/{Name}_Default_Party 表已在 public/sprites/vanilla/NPC_{id}_Alt_1.png） */
-  private static readonly PARTY_ALT_IDS = new Set([17, 18, 38, 54, 108, 124, 142, 178, 207, 209, 227, 229, 353, 368, 369, 588, 663, 682]);
+   *  对应 TownNPCs/{Name}_Default_Party 表已在 public/sprites/vanilla/NPC_{id}_Alt_1.png）
+   *  ——2026-08-13 退役：派对/微光/狼人切表统一走 n.townSheet（TownNPCs 档案表，
+   *  data/townNpcProfiles.ts），该表为 PARTY_ALT_IDS 严格超集（补 678-681/683/684
+   *  史莱姆派对贴图与微光档） */
 
   // ---- 派对帽（Main.cs:26814-27089 DrawNPCExtras Extra[72] 1:1）----
   // NPCFramingGroup（NPCID.cs:4875：默认 0；18/20/208/178/124/353→1；369→2；160→3；城镇史莱姆 670/678-684→7）
@@ -3939,16 +4125,20 @@ export class Renderer {
     // 曾导致全部城镇 NPC 显示为史莱姆
     if (this.atlas) {
       // bound 态：走专属捆绑姿态表（原版是独立 NPC 类型，见 BOUND_NPC_SHEET 注释）
-      // 派对变体（UpdateAltTexture NPC.cs:91250：PartyIsUp 且非 441/453/633 → altTexture=1，
-      // Profiles.cs GetTextureNPCShouldUse → {Name}_Default_Party 整条替换；帧布局与正条同构）
-      const partyImg = (this.scene?.partyUp && world && Renderer.PARTY_ALT_IDS.has(n.vanillaId))
-        ? this.atlas.ensureVImage(`vanilla/NPC_${n.vanillaId}_Alt_1.png`) : null;
+      // ---- TownNPCs 档案切表（DrawNPCCheckAlt Main.cs:22304-22309 → profile.
+      //      GetTextureNPCShouldUse）：n.townSheet 按微光档（townNpcVariationIndex，
+      //      = shimmered）+ altTexture（1 派对 / 2 狼人）选 {Name}_Default{,_Party,
+      //      _Transformed} / Shimmered_{Name}_…；无档案类型（637/638/656 宠物）返回
+      //      null → 落回 NPC_{id} 竖条 ----
+      const sheetPath = n.bound ? null : n.townSheet;
+      const profileImg = sheetPath ? this.atlas.ensureVImage(sheetPath) : null;
       let r: DrawRect | null;
-      if (partyImg) {
+      if (profileImg) {
+        // 帧步长 = 贴图高 / npcFrameCount（FindFrame NPC.cs:67301-67302 同式）
         const count = this.atlas.vnpcMeta(n.vanillaId)?.count ?? 1;
-        const fh = Math.floor(partyImg.height / count);
+        const fh = Math.floor(profileImg.height / count);
         const idx = Math.max(0, Math.min(count - 1, n.frame));
-        r = { img: partyImg, sx: 0, sy: idx * fh, sw: partyImg.width, sh: fh };
+        r = { img: profileImg, sx: 0, sy: idx * fh, sw: profileImg.width, sh: fh };
       } else {
         r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
       }
@@ -4977,22 +5167,24 @@ export class Renderer {
       y: uiS === 1 ? oy - 2 : (oy - 2) * uiS,
       w: (size + 4) * uiS, h: (size + 4) * uiS,
     };
-    // 时间显示
-    const hFloat = clock.hourFloat;
-    const hh = String(Math.floor(hFloat)).padStart(2, '0');
-    const mm2 = String(Math.floor((hFloat % 1) * 60)).padStart(2, '0');
+    // 时间/天气显示【门禁化 2026-08-13】:原版语义 = InfoAccs 列(DrawInfoAccs),
+    // 无表(accWatch)/无天气电台(accWeatherRadio)不显示——此前常显文本退役;
+    // 完整 12 行信息列由 render/InfoAccsLayer 在 minimap 之后绘制(右侧列)。
+    const gates = player.equipStats.infoAccs;
     ctx.font = 'bold 14px monospace';
     ctx.fillStyle = '#FFF';
     ctx.strokeStyle = '#000';
     ctx.lineWidth = 3;
     ctx.textAlign = 'center';
-    const timeText = `\u65f6\u95f4 ${hh}:${mm2}`;
-    ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
-    ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
-    // \u5929\u6c14\u6587\u672c\uff08\u539f\u7248 DrawInfoAccs 46236 \u516b\u6863\u94fe\uff1a\u5c0f\u5730\u56fe\u4e0b\u65b9 InfoAccs \u56fe\u6807\u5217\u65c1\u7684\u6587\u672c\uff0c
-    // GameUI.Storm/HeavyRain/.../Clear + \u98ce\u5411\uff08EastWind/WestWind = windSpeedCurrent\u00d750 \u53d6\u6574\uff09
-    // + \u6c99\u5c18\u66b4\u95ea\u70c1"Sandstorm +"\u3002\u5e03\u5c40\u5bf9\u9f50\uff1a\u65f6\u95f4\u884c\u4e0b\u65b9\u4e00\u884c\u5c45\u4e2d\uff08\u539f\u7248\u540c\u4e3a minimap \u4e0b\u533a\uff09
-    if (world.weather) {
+    if (gates.accWatch > 0) {
+      const hFloat = clock.hourFloat;
+      const hh = String(Math.floor(hFloat)).padStart(2, '0');
+      const mm2 = String(Math.floor((hFloat % 1) * 60)).padStart(2, '0');
+      const timeText = `时间 ${hh}:${mm2}`;
+      ctx.strokeText(timeText, ox + size / 2, oy + 253 + 14);
+      ctx.fillText(timeText, ox + size / 2, oy + 253 + 14);
+    }
+    if (world.weather && gates.accWeatherRadio) {
       const ZH: Record<string, string> = {
         SlimeRain: '\u53f2\u83b1\u59c6\u96e8', Storm: '\u98ce\u66b4', HeavyRain: '\u5927\u96e8', Rain: '\u96e8', LightRain: '\u5c0f\u96e8',
         Overcast: '\u9634\u5929', MostlyCloudy: '\u591a\u4e91', Cloudy: '\u5c11\u4e91', Clear: '\u6674\u6717', PartlyCloudy: '\u5c40\u90e8\u591a\u4e91',

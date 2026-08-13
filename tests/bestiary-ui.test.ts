@@ -4,7 +4,7 @@
 //   偏移钳制（FixBestiaryRange）/ 筛选排序（Filters/SortingSteps）/ 解锁档展示口径。
 // DOM 渲染类（BestiaryPanel）依赖浏览器，不在 Node 单测内；其全部决策
 // 逻辑抽为下列纯函数，渲染层只做消费。
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { languageManager } from '../src/i18n/LanguageManager';
 import { Lang } from '../src/i18n/Lang';
@@ -16,7 +16,7 @@ import {
   bestiaryPortraitBackground, bestiaryGridBackground, bestiaryBgPreferencePaths,
   DEFAULT_BESTIARY_FILTER, type BestiarySortKey,
 } from '../src/ui/BestiaryPanel';
-import { BestiaryTracker, UnlockState, bestiaryCreditId, bestiaryEntries } from '../src/data/Bestiary';
+import { BestiaryTracker, UnlockState, bestiaryCreditId, bestiaryEntries, bestiaryGating } from '../src/data/Bestiary';
 import { VANILLA_NPCS } from '../src/data/vanillaNpcs';
 
 // 真实 zh-Hans 包注入（条目名断言需要；同 tile-names.test.ts 先例）
@@ -58,6 +58,8 @@ describe('图鉴网格分页（UIBestiaryEntryGrid）', () => {
 });
 
 describe('条目行化与代表 NPC（bestiaryRows）', () => {
+  beforeEach(() => { bestiaryGating.unlockAll = false; });
+  afterEach(() => { bestiaryGating.unlockAll = true; });
   it('546 条全部映射到代表 NPC id（归并族取母体；缺 SetDefaults 的仅缺属性不缺条目）', () => {
     const rows = bestiaryRows(new BestiaryTracker());
     expect(rows).toHaveLength(546);
@@ -112,6 +114,8 @@ describe('条目行化与代表 NPC（bestiaryRows）', () => {
 });
 
 describe('筛选（Filters.BySearch/ByUnlockState/ByBoss + kind 维度）', () => {
+  beforeEach(() => { bestiaryGating.unlockAll = false; });
+  afterEach(() => { bestiaryGating.unlockAll = true; });
   const rows = () => bestiaryRows(new BestiaryTracker());
   const f = (over: Partial<typeof DEFAULT_BESTIARY_FILTER>) =>
     filterBestiaryRows(rows(), { ...DEFAULT_BESTIARY_FILTER, ...over });
@@ -146,6 +150,8 @@ describe('筛选（Filters.BySearch/ByUnlockState/ByBoss + kind 维度）', () =
 });
 
 describe('排序（SortingSteps 数据层等价）', () => {
+  beforeEach(() => { bestiaryGating.unlockAll = false; });
+  afterEach(() => { bestiaryGating.unlockAll = true; });
   const tracker = new BestiaryTracker();
   const sorted = (key: BestiarySortKey) => {
     const rs = bestiaryRows(tracker);

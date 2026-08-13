@@ -21,9 +21,10 @@ const PROBES = [
   { name: 'sunfury', file: 'scripts/_sunfury-probe.mjs', timeoutMs: 240_000 },
   { name: 'weapons-family', file: 'scripts/_weapons-family-probe.mjs', timeoutMs: 240_000 },
   { name: 'shortsword', file: 'scripts/_shortsword-probe.mjs', timeoutMs: 240_000 },
-  { name: 'usereach', file: 'scripts/_usereach-probe.mjs', timeoutMs: 240_000 },
+  { name: 'usereach', file: 'scripts/_usereach-probe.mjs', timeoutMs: 360_000 }, // 6 族×120帧+落地等待,负载下偶超 240s
   { name: 'invariants', file: 'scripts/_invariants-probe.mjs', timeoutMs: 300_000 },
   { name: 'pause-export', file: 'scripts/_pause-export-probe.mjs', timeoutMs: 240_000 },
+  { name: 'mounts', file: 'scripts/_mounts-probe.mjs', timeoutMs: 300_000 },
 ];
 
 const argv = process.argv.slice(2);

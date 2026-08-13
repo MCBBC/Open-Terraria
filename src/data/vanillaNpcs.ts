@@ -11,6 +11,7 @@
 // 未移植 AI 家族的 aiStyle 回退到最接近的已移植行为（注释标注）。
 import vanillaNpcsJson from '../../public/sprites/vanilla-npcs.json';
 import vanillaDataJson from '../../public/sprites/vanilla.json';
+import soundTracksJson from './vanilla-soundtracks.json';
 import { ITEM_BY_KEY } from './items';
 import { TILE_DEFS } from './tiles';
 
@@ -198,6 +199,52 @@ export function vanillaSoundName(soundIdName: string | undefined): string | null
   const m = soundIdName.match(/^(?:NPCHit|NPCKilled|NPCDeath)(\d+)$/);
   if (!m) return null;
   return soundIdName.startsWith('NPCHit') ? `NPC_Hit_${m[1]}` : `NPC_Killed_${m[1]}`;
+}
+
+// ---- 命名轨（SoundID CreateTrackable 族）→ wav 变体列表 ----
+// 数据源 src/data/vanilla-soundtracks.json：SoundID.cs 全部 160 条 CreateTrackable
+// 声轨（SoundID.cs:817-1153）× public/sounds 实际文件（变体数=声明数，逐条核对过）。
+// 消费点：Enemy per-NPC HitSound/DeathSound（DD2_*/Deerclops* 族）、itemUseSound 命名轨。
+const SOUND_TRACKS = soundTracksJson as unknown as Record<string, string[]>;
+
+/** 常量名与声轨名不一致的特例（SoundID.cs:971/973 别名 + 非 snake 惯例三件） */
+const SOUND_NAME_ALIASES: Record<string, string> = {
+  DD2_BetsysWrathShot: 'dd2_betsy_fireball_shot',        // = DD2_BetsyFireballShot.WithVolume(0.4)（:971）
+  DD2_BetsysWrathImpact: 'dd2_betsy_fireball_impact',    // = DD2_BetsyFireballImpact.WithVolume(0.4)（:973）
+  DeadCellsMushroomSummon: 'deadcells_mushroom_summon',
+  DeadCellsBarrelLauncherFire: 'deadcells_barrel_launcher_fire',
+  JimsDrone: 'Drone',
+  RCCar: 'rccar',
+  LeafBlower: '',   // LegacySoundStyle(2,34)=Item_34（:1075），由调用方按 Item 轨处理
+};
+
+/** SoundID 常量名 → 声轨名（DeerclopsHit → deerclops_hit；DD2_BetsyHurt → dd2_betsy_hurt） */
+export function soundTrackName(soundIdName: string): string | null {
+  if (SOUND_NAME_ALIASES.hasOwnProperty(soundIdName)) return SOUND_NAME_ALIASES[soundIdName] || null;
+  const track = soundIdName.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
+  return SOUND_TRACKS.hasOwnProperty(track) ? track : null;
+}
+
+/** SoundID 常量名 → wav 变体列表（多变体整组返回，playSfxFiles 内部随机取一；
+ *  单变体/未知名返回单元素数组或 null）。原版 LegacySoundStyle 播放时在变体组内
+ *  随机取一（SoundEngine.PlaySound → SoundStyle.PlayVariations），不是恒取 _0 */
+export function vanillaSoundFiles(soundIdName: string | undefined): string[] | null {
+  if (!soundIdName) return null;
+  const legacy = vanillaSoundName(soundIdName);
+  if (legacy) return [legacy];
+  // 已是文件名形（NPC_Hit_1/NPC_Killed_6——json 提取器混入的直接名）
+  if (/^NPC_(?:Hit|Killed)_\d+$/.test(soundIdName)) return [soundIdName];
+  const track = soundTrackName(soundIdName);
+  if (!track) return null;
+  const files = SOUND_TRACKS[track];
+  return files && files.length ? files : null;
+}
+
+/** 声轨名（snake 形，如 'dd2_betsy_wind_attack'）→ 变体组 wav。
+ *  AI 侧状态机播音用：playSfxFiles(soundTrackFiles(轨名), vol, x, y) */
+export function soundTrackFiles(track: string): string[] {
+  const files = SOUND_TRACKS[track];
+  return files && files.length ? files : [track];
 }
 
 // ================= 生成池（原版生成规则的分期近似，task #13 细化） =================

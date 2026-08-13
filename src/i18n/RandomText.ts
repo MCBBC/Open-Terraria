@@ -63,7 +63,8 @@ export function randomPlayerName(): string {
 
 /** 死因（PlayerDeathReason._sourceOtherIndex 全表，Lang.cs:1055-1128） */
 export type DeathCause =
-  | { kind: 'npc'; name: string }   // 凶手 NPC（proj/player 杀手未实现→归 npc）
+  | { kind: 'npc'; name: string }   // 凶手 NPC（proj 杀手未实现→归 npc）
+  | { kind: 'player'; name: string; weapon: string }  // PvP：凶手玩家+凶器（DeathSource.Player {2}）
   | { kind: 'fell' }                // other=0  Fell_1..9（:25085 摔落）
   | { kind: 'drowned' }             // other=1  Drowned_1..7（:22989）
   | { kind: 'lava' }                // other=2  Lava_1..5（:27392）
@@ -99,6 +100,10 @@ export function createDeathText(playerName: string, cause: DeathCause, worldName
   switch (cause.kind) {
     case 'npc':
       return Lang.text('DeathSource.NPC').replace('{0}', generic).replace('{1}', cause.name);
+    // DeathSource.Player（Lang.cs:1029）："…凶手是{1}的{2}。"——{1}=杀手名 {2}=凶器名
+    case 'player':
+      return Lang.text('DeathSource.Player').replace('{0}', generic)
+        .replace('{1}', cause.name).replace('{2}', cause.weapon);
     case 'fell': return one(`DeathText.Fell_${rand1(9)}`);
     case 'drowned': return one(`DeathText.Drowned_${rand1(7)}`);
     case 'lava': return one(`DeathText.Lava_${rand1(5)}`);

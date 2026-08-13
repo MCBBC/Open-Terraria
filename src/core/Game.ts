@@ -1282,8 +1282,14 @@ export class Game implements GameHooks {
     // 矿车族召唤物仍走轨道上车链（Minecart.ts 已接 MountID.Cart 路径，不回退）
     if (isCartMount(mountId)) { this.tryQuickMinecart(); return true; }
     if (p.ridingMount) {
-      // 已骑乘：同型下坐；异型换骑（SetMount :6194-6204 先 ClearBuff 再上）
-      if (p.mount.type === mountId) { this.tryDismountMount(); return true; }
+      // 已骑乘：同型下坐；异型换骑（SetMount :6194-6204 先 ClearBuff 再上）。
+      // 下坐路径同样吃 useAnimation 冷却——否则按住左键会在同一次按压里
+      // 下坐→再上坐来回翻转（ItemCheck 每帧重入）
+      if (p.mount.type === mountId) {
+        this.tryDismountMount();
+        p.useTime = 20;                               // useAnimation 20（Item.cs 鞍族）
+        return true;
+      }
     }
     if (p.ridingCart) return true;                    // 车上换坐骑需先下车（QuickMount 语义）
     if (!p.mount.setMount(mountId, p, this)) return false;
@@ -2168,11 +2174,12 @@ export class Game implements GameHooks {
     this.remotePlayerProxies = [];
     entityNet.reportStrike = null; // v3 实体钩子随生命周期摘除
     this.running = false;
-    // 天气：雨声层静音 + 渲染器 detach（防下个世界复用旧状态）
-    this.sfx.setRain(0);
+    // 天气：雨声层静音 + 环境循环轨停拆 + 渲染器 detach（防下个世界复用旧状态）
+    this.stopWeatherLoops();
     this.renderer.weatherFxActive = false;
     this.renderer.weatherFx.detach();
     this.renderer.sky.weatherRef = null;
+    this.renderer.sky.clearAmbience();
     natureParticles.clear(); // 落叶/滴水粒子不跨世界残留
     natureParticles.onDripSplash = null;
     // 月总震屏滤镜解除（倒计时中退世界 → 菜单不留红色脉冲）
@@ -2840,9 +2847,11 @@ export class Game implements GameHooks {
       // 重生计时
       player.respawnTimer++;
       // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准;专家 ×1.5=900;
-      // 场上有存活的 boss 时 +600。旧恒 180t=3s 惩罚感仅原版 1/3（2026-08-13 修）
+      // 场上有存活的 boss 时 +600（:38388 boss 扫描 `!pvp` 门——PvP 死亡不延迟）。
+      // 旧恒 180t=3s 惩罚感仅原版 1/3（2026-08-13 修）
       if (player.respawnTimer > 600 * (mainExpertMode(this.world) ? 1.5 : 1)
-        + (this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead) ? 600 : 0)) this.respawnPlayer();
+        + (player.lastPvpDeath ? 0
+          : this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead) ? 600 : 0)) this.respawnPlayer();
     } else {
       this._deathHandled = false;
     }
@@ -3736,9 +3745,34 @@ export class Game implements GameHooks {
     // 荧光棒族颜色表（cs:15060-15091，与手持光同色）：
     //   50=(0.7,1,0.8) 53=(0.7,0.8,1) 473=(1.05,0.95,0.55) 515=(1,0.6,0.85)
     //   870=(0.9,0.35,1) 1089=Disco 轮转
+    // ProjLight() 乘区全表（Projectile.cs:14808-15309 全量提取；第二路审计
+    // 曾仅 5 条致 91 型发光弹白光——燃烧箭暖橙/诅咒焰绿/七色浮漂全失色）
     const PROJ_LIGHT_RGB: Record<number, [number, number, number]> = {
-      50: [0.7, 1, 0.8], 53: [0.7, 0.8, 1], 473: [1.05, 0.95, 0.55],
-      515: [1, 0.6, 0.85], 870: [0.9, 0.35, 1],
+      2: [1, 0.75, 0.55], 4: [0.5, 0.1, 1], 5: [1, 1, 1], 6: [1, 1, 1],
+      12: [0.9, 0.8, 0.1], 14: [1, 0.7, 0.1], 15: [1, 0.4, 0.1], 16: [0.1, 0.4, 1],
+      18: [0.6, 0.1, 1], 19: [1, 0.5, 0.1], 20: [0.1, 1, 0.3], 34: [1, 0.1, 0.1],
+      36: [0.8, 0.2, 0.6], 41: [1, 0.8, 0.6], 44: [0.6, 0.1, 1], 45: [0.6, 0.1, 1],
+      50: [0.7, 1, 0.8], 53: [0.7, 0.8, 1], 72: [0.45, 0.75, 1], 73: [0.4, 0.6, 1],
+      74: [1, 0.4, 0.6], 76: [1, 0.3, 0.6], 77: [1, 0.3, 0.6], 78: [1, 0.3, 0.6],
+      80: [0, 0.8, 1], 83: [0.7, 0, 1], 84: [0.8, 0, 0.5], 86: [1, 0.45, 0.75],
+      87: [0.45, 1, 0.75], 88: [0.7, 0, 1], 89: [0.05, 0.2, 1], 90: [0.05, 0.2, 1],
+      93: [1, 1, 0.01], 94: [0.5, 0, 1], 95: [0.35, 1, 0], 96: [0.35, 1, 0],
+      100: [1, 0.5, 0], 103: [0.35, 1, 0], 104: [0.35, 1, 0], 106: [0, 0.5, 1],
+      110: [1, 0.7, 0.1], 113: [0.25, 0.75, 1], 114: [0.5, 0.05, 1], 115: [0.5, 0.05, 1],
+      116: [1, 1, 0.25], 131: [0.1, 0.4, 1], 132: [0.2, 1, 0.6], 156: [1, 0, 0.6],
+      157: [0.2, 1, 0.6], 172: [0.35, 0.55, 1], 173: [0.3, 0.4, 1], 180: [1, 0.7, 0.1],
+      182: [1, 1, 1], 207: [0.4, 1, 0.4], 209: [0.25, 1, 0.5], 211: [0.5, 0.9, 1],
+      226: [0.25, 1, 0.5], 229: [0.25, 1, 0.5], 242: [1, 0.7, 0.1], 253: [0, 0.4, 1],
+      254: [0.1, 1, 1], 257: [0.1, 0.9, 1], 263: [0.1, 0.7, 1], 274: [0.7, 0.1, 1],
+      278: [1, 1, 0], 279: [1, 1, 0], 283: [0.8, 0.1, 1], 284: [1, 0.1, 0.8],
+      285: [0.1, 0.5, 1], 286: [1, 0.5, 0.1], 287: [0.9, 1, 0.4], 302: [1, 0.7, 0.1],
+      304: [1, 0.2, 0.1], 308: [0.1, 0.7, 1], 329: [1, 0.9, 0.1], 332: [1, 0.6, 0.1],
+      389: [0.8, 0, 0.5], 446: [0, 1, 0.8], 451: [1, 1, 1], 473: [1.05, 0.95, 0.55],
+      488: [0.3, 0, 0.25], 493: [1, 0.3, 1], 494: [1, 0.3, 1], 515: [1, 0.6, 0.85],
+      866: [1, 1, 1], 870: [0.9, 0.35, 1], 876: [0.1, 0.7, 1], 955: [0.9, 0.8, 0.1],
+      981: [1, 0.7, 0.7], 987: [0.6, 0.5, 0.1], 988: [0.8, 0.35, 0], 989: [0, 0.65, 0],
+      990: [0, 0.35, 0.7], 991: [0.9, 0, 0.5], 992: [0.75, 0, 0.75], 1099: [1, 1, 1],
+      // Disco 型（79/251/993/1089）运行期动态色，见下方 rgb 分支
     };
     for (const p of this.entities.projectiles) {
       const pid = (p as { projId?: number }).projId;
@@ -3746,8 +3780,11 @@ export class Game implements GameHooks {
       const l = projectileData(pid)?.light;
       if (!l || l <= 0) continue;
       const pe = p as unknown as { x: number; y: number; w: number; h: number };
-      const rgb = pid === 1089
-        ? ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[Math.floor(this.tickCount / 10) % 6]
+      // Disco 型（79/251/993/1089）用真 FlickerClock.discoColor（原版 Disco/255 连续轮转；
+      // 曾 1089 六色跳变近似、其余 Disco 型完全缺）
+      const isDisco = pid === 79 || pid === 251 || pid === 993 || pid === 1089;
+      const rgb = isDisco
+        ? this.lighting.clock.discoColor()
         : PROJ_LIGHT_RGB[pid] ?? [1, 1, 1];
       this.lighting.addLight(
         Math.floor((pe.x + pe.w / 2) / TILE), Math.floor((pe.y + pe.h / 2) / TILE),
@@ -4404,6 +4441,30 @@ export class Game implements GameHooks {
           const meow = cwMelee.shoot === 502;
           // 985 泰拉刃光束（aiStyle 191）：25t 减速消亡 + 独占分层绘制（Arrow terra 模式）
           const terra = cwMelee.shoot === 985;
+          // 3065 星怒 → 503 天降三剑（Player.cs:47107-47136）：出生=玩家上方 600px
+          // 随机偏后 0-400px、每剑再高 100px；速度朝鼠标且强制向下 |dy|≥20、
+          // vy 抖动 ±0.4；目标线 = min(鼠标Y, 玩家cy−200)（线上穿墙越线撞块）
+          if (cwMelee.shoot === 503) {
+            const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            const targetY = Math.min(mwy, this.player.cy - 200);
+            const spd503 = cwMelee.shootSpeed / this.player.attackSpeedMult;
+            for (let i503 = 0; i503 < 3; i503++) {
+              const sx503 = this.player.cx - Math.random() * 401 * this.player.facing;
+              const sy503 = this.player.cy - 600 - 100 * i503;
+              let dx503 = mwx - sx503;
+              let dy503 = Math.abs(mwy - sy503);
+              if (dy503 < 20) dy503 = 20;
+              const dl503 = Math.hypot(dx503, dy503) || 1;
+              this.entities.add(new Arrow(sx503, sy503,
+                dx503 / dl503 * spd503,
+                dy503 / dl503 * spd503 + (Math.random() * 80 - 40) * 0.02,
+                this.swing.dmg ?? 1, this.swing.kb ?? 3, 503, null,
+                { grav: 0, life: 900, pierce: Math.max(1, pd?.penetrate ?? 2), star: { targetY } }),
+                'projectiles');
+            }
+            this.mining = null;   // 与分支尾段语义一致（提前 return 防漏）
+            return;  // 本击只出天降剑，不再走下方通用单发
+          }
           this.entities.add(new Arrow(
             this.player.cx + Math.cos(ang2) * 14, this.player.cy - 4 + Math.sin(ang2) * 14,
             // ⑨ melee 弹速 /meleeSpeed（P:46431-46434 speed/=meleeSpeed——审计 §1/§9）
@@ -7900,6 +7961,10 @@ export class Game implements GameHooks {
 
   /** 天气 hooks（afterWorldLoad 构造；字段每帧在 updateWeather 刷新） */
   private weatherHooks: import('../render/WeatherRenderer').WeatherFxHooks | null = null;
+  /** 天气环境音常驻循环轨（SceneState.cs 暴风雪双轨式：轨不拆、音量每帧跟随；
+   *  rain 走既有 setRain（MusicID 28 RainAmbience），其余走 Sfx.playLoop） */
+  private weatherLoops: Partial<Record<import('./Sfx').WeatherLoopName, import('./Sfx').SfxLoop>> = {};
+  private weatherLoopVol: Record<string, number> = {};
   /** 史莱姆雨延迟公告倒计时（Main.slimeWarningTime/Delay=420，UpdateSlimeRainWarning :64984） */
   private slimeWarningTime = 0;
   /** 本次死亡掉落钱数（LocalPlayer.lostCoins；死亡 UI"掉了{0}"用） */
@@ -8032,6 +8097,15 @@ export class Game implements GameHooks {
       // :58249 风场停掷）
       lanternsUp: LanternNight.lanternsUp,
       nextNightIsLanternNight: LanternNight.nextNightIsLanternNight,
+      // 天气环境音循环门（SceneState.cs:101/190-191）：雪原带 + 是否在背景墙后
+      zoneSnow: !!this.scene?.zoneSnow,
+      behindBackwall: !!this.scene && (() => {
+        // SceneMetrics.cs:671 BehindBackwall = 玩家所在格 wall>0
+        const st = w.store;
+        const ptx = Math.floor(this.player.cx / TILE);
+        return st.inBounds(ptx, pty) && st.wall[st.idx(ptx, pty)] !== 0;
+      })(),
+      onAmbience: (v) => this.applyWeatherLoops(v),
       onCoinRain: (x, y, type, stack) => {
         // 非实心 32×32 门（WorldGen.cs:71847）
         const st = w.store;
@@ -8084,8 +8158,8 @@ export class Game implements GameHooks {
       weather.coinRainPending = false;
       this.newText(Lang.gen(93), 50, 255, 130);
     }
-    // 雨声层（程序化棕噪近似 XACT 循环层）
-    this.sfx.setRain(weather.cloudAlpha * atmo);
+    // 天气环境音循环（SceneState.cs:235-297 暴风雪双轨 + MusicID 28 雨环境音）：
+    // 由 weather.update 的 onAmbience 回调每帧驱动 applyWeatherLoops（雨层/暴风雪/沙暴）
     weather.graveyardVisual = this.graveyardIntensity; // 渲染端 ProcessCloudAlpha 基准
     // 渲染 hooks 刷新（SceneMetrics 扫描窗计数直供，旧 zone 级近似已废弃）
     const hooks = this.weatherHooks;
@@ -8099,6 +8173,55 @@ export class Game implements GameHooks {
       // 沙尘发射门（Sandstorm.EmitDust :147：<100 直接不发射；密度 2000/count 也按真值）
       hooks.desertSandTiles = this.scene.desertSandTileCount;
     }
+  }
+
+  /**
+   * 天气环境音循环音量跟随（weather.update 的 onAmbience 每帧回调）：
+   *  rain → sfx.setRain（MusicID 28，audios/music/Music_28.mp3 循环层）；
+   *  blizzardStrong/blizzardInside → Sfx.playLoop 常驻轨（blizzard_strong_loop /
+   *  blizzard_inside_building_loop，SceneState.cs:247/:270 PlayTrackedSound）；
+   *  sandstorm → playLoop 恒 null（素材缺失登记，wav 入库后自动生效）。
+   *  轨懒建（首帧音量>0 时）且不拆——与原版 SlotId 常驻 + 每帧改 Volume 同构。
+   */
+  private applyWeatherLoops(v: import('../world/weather/Weather').WeatherLoopVolumes): void {
+    // 雨层（既有实现：Music_28 解码循环，音量 cloudAlpha×atmo×0.6）
+    this.sfx.setRain(v.rain);
+    const vols: Record<import('./Sfx').WeatherLoopName, number> = {
+      blizzardStrong: v.blizzardStrong,
+      blizzardInside: v.blizzardInside,
+      sandstormWind: v.sandstorm,
+    };
+    for (const name of ['blizzardStrong', 'blizzardInside', 'sandstormWind'] as const) {
+      const vol = Math.max(0, Math.min(1, vols[name]));
+      if (vol <= 0.001) {
+        this.weatherLoopVol[name] = vol;
+        // 静音保留轨（原版 _blizzardSoundVolume=0 时也只置 Volume=0 不拆，:284-294）
+        this.weatherLoops[name]?.setVolume(0);
+        continue;
+      }
+      let h: import('./Sfx').SfxLoop | null = this.weatherLoops[name] ?? null;
+      if (!h || !h.playing) {
+        h = this.sfx.playLoop(name, vol);
+        if (!h) { this.weatherLoopVol[name] = vol; continue; }  // sandstormWind 无素材 → null（登记）
+        this.weatherLoops[name] = h;
+        this.weatherLoopVol[name] = -1;   // 新轨：下一行必下发一次
+      }
+      // 音量变化超阈值才下发（setTargetAtTime 每帧调度会堆积自动化事件）
+      if (Math.abs(this.weatherLoopVol[name] - vol) > 0.01) {
+        h.setVolume(vol);
+        this.weatherLoopVol[name] = vol;
+      }
+    }
+  }
+
+  /** 停掉全部天气循环轨（退世界/切档时调用） */
+  private stopWeatherLoops(): void {
+    for (const k of Object.keys(this.weatherLoops) as Array<import('./Sfx').WeatherLoopName>) {
+      this.weatherLoops[k]?.stop();
+    }
+    this.weatherLoops = {};
+    this.weatherLoopVol = {};
+    this.sfx.setRain(0);
   }
 
   /** 全图扫描测重板/感应器/间歇泉登记(读档/生成后一次);增量维护见 onTileChanged */
@@ -10996,7 +11119,7 @@ export class Game implements GameHooks {
 
   /** contactOnly：伤害源是 NPC **接触**（Player.cs:30880-30970 的 Main.npc[i] 循环）——
    *  荆棘反伤/狼人虚弱只在该分支结算；弹幕命中只带 attacker 做死亡归因，不触发反伤 */
-  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy, contactOnly = false) {
+  damagePlayer(dmg: number, srcX: number, srcY: number, attacker?: Enemy, contactOnly = false, pvp = false) {
     const p = this.player;
     if (p.dead) return;
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
@@ -11004,7 +11127,15 @@ export class Game implements GameHooks {
     if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
       dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(this.world))));
     }
+    // 日曜护盾反击（:37706-37716 ConsumeSolarFlare 后 NewProjectile 608：
+    // 150×meleeDamage + kb15 朝攻击者——608 追踪弹未实装,直伤近似,登记）
+    const shieldsBefore = p.solarShields;
     const ok = p.damage(dmg, srcX, srcY);
+    if (ok && p.solarShields < shieldsBefore && attacker && !attacker.dead) {
+      const retaliation = Math.max(1, Math.round(150 * p.damageMult('melee')));
+      attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 10, -3, this);
+      this.addDamageNumber(attacker.cx, attacker.y, retaliation, false, '#FFC040');
+    }
     if (ok) {
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
       if (attacker?.vanillaId === 155) p.buffs.apply(BuffType.Weak, 30);
@@ -11100,16 +11231,20 @@ export class Game implements GameHooks {
       }
       if (p.hp <= 0) {
         p.dead = true;
-        p.deathsPve++;              // numberOfDeathsPVE（PL:53840,存档持久化）
+        // KillMe :38228-38235：pvpDeath 分道计数（numberOfDeathsPVP/PVE）
+        if (p.lastPvpDeath) p.deathsPvp++;
+        else p.deathsPve++;         // numberOfDeathsPVE（PL:53840,存档持久化）
         p.respawnTimer = 0;
         // 死亡文本/墓碑由 handlePlayerDeath 统一处理（此处不再 toast「你死了」）
         // ==== 死亡惩罚按【角色难度】（Player.difficulty：0 软核 1 中核 2 硬核 3 旅程）====
         // 世界难度不参与死亡惩罚（只管掉落/伤害倍率等），曾两轴混接
         const charDiff = p.appearance?.difficulty ?? 0;
+        // PvP 死亡不掉钱（KillMe :38318-38326：pvp → lostCoins=0 跳过 DropCoins）
+        const pvpDeathNoCoins = p.lastPvpDeath;
         // 先记死亡时身家（Player.cs:38247-38250 lostCoins=coinsOwned——死亡 UI「掉了{0}」；
         // 软核/旅程随后被 DropCoins 实际掉落额覆盖 :38318-38324，中核/硬核的钱随
         // 物品全掉 → 身家即损失额）
-        this.lostCoins = this.coinsOwned();
+        this.lostCoins = pvpDeathNoCoins ? 0 : this.coinsOwned();
         // 中核/硬核：掉落全部物品（Player.cs:38254 DropItems(gemsOnly=false)：软核/旅程
         // 才走 gemsOnly=true 只掉宝石——本仓无背包宝石，近似为不掉）
         if (dropsAllItemsOnDeath(charDiff)) {
@@ -11126,7 +11261,8 @@ export class Game implements GameHooks {
         }
         // 软核/旅程：掉钱（Player.cs:38318-38326 difficulty==0||3 才走 DropCoins；
         // DropCoins :53351-53390 掉钱档按**世界难度**：经典掉一半/专家 3/4/大师全掉）
-        if (dropsCoinsOnDeath(charDiff)) {
+        // PvP 死亡不掉（:38321-38322 pvp → lostCoins=0，无 DropCoins）
+        if (dropsCoinsOnDeath(charDiff) && !pvpDeathNoCoins) {
           const keep = deathCoinKeepFraction(this.world.difficulty);  // Main.GameMode（Main.cs:2677）
           let lost = 0;
           const face = [1, 100, 10000, 1000000];
@@ -13289,9 +13425,13 @@ export class Game implements GameHooks {
     // 硬核角色已消亡（Player.cs:16894 difficulty==2 死亡后 ghost=true 不再重生；
     // 本仓最小集 = hardcoreDead 标记 → 不允许重生，死亡画面停留）
     if (p.appearance?.hardcoreDead) return;
+    // Player.Spawn :37223-37235：pvpDeath → 满血 + immuneTime=300（5s）并清标记；
+    // 否则 ReviveFromDeath 180t（Player.cs:37229-37235;旧 90t/1.5s）
+    const wasPvpDeath = p.lastPvpDeath;
+    p.lastPvpDeath = false;
     p.hp = p.maxHp;
     p.dead = false;
-    p.iframes = 180; // ReviveFromDeath 重生无敌 180t=3s（Player.cs:37229-37235;旧 90t/1.5s）
+    p.iframes = wasPvpDeath ? 300 : 180;
     p.respawnTimer = 0;
     p.immuneAlpha = 0;
     this.lostCoins = 0;
@@ -13475,8 +13615,9 @@ export class Game implements GameHooks {
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
         onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
         onHp: (slot, hp, maxHp) => {
+          // ClientNet.msg16 已缓存进 RemotePlayerState；此处仅兜底（正常恒同步命中）
           const rp = net.players.get(slot);
-          if (rp) { (rp as unknown as { hp?: number }).hp = hp; (rp as unknown as { maxHp?: number }).maxHp = maxHp; }
+          if (rp) { rp.hp = hp; rp.maxHp = maxHp; }
         },
       });
       net.connect(url, hostToken);
@@ -13559,6 +13700,13 @@ export class Game implements GameHooks {
       proxy.inputUp = !stale && rp.up;
       proxy.facing = rp.facing;
       proxy.dead = rp.dead;
+      // PvP（v7）：hostile/team 拷入代理——命中链 InOpposingTeam 门禁与头顶血条消费；
+      // hp/maxHp 为 msg16 中继的权威值（proxy 无 buff 同步，baseMaxHp 直写即可令
+      // maxHp getter 吻合——头顶血条按 hp/maxHp 比例画）
+      proxy.hostile = rp.hostile;
+      proxy.team = rp.team;
+      proxy.hp = rp.hp;
+      proxy.baseMaxHp = Math.max(1, rp.maxHp);
       // R11'.外观合并：仅接受含 hair 的完整对象（空对象会令纸娃娃读 X.r 崩溃）。
       // review C10：仅在外观串变化时解析（msg4 才变）——60TPS×每玩家 JSON.parse 纯浪费
       {

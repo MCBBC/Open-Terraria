@@ -16,6 +16,7 @@ import { canHit } from '../physics/LineOfSight';
 import { Arrow, projFrameImg, projFrameCount } from './Arrow';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { applyProjStatus } from './projStatus';
+import { soundTrackFiles } from '../data/vanillaNpcs';
 
 /** 爆炸烈焰塔三档（3818/3819/3820 → proj 663/665/667，AI_130）：帧 0 待机、
  *  帧 1-6 开火动画、第 12t 出火球 668 */
@@ -89,6 +90,32 @@ const SENTRY53: Record<number, { shot: number; speed: number; cd: number }> = {
 const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; volley?: number }> = {
   641: { shot: 642, speed: 9, cd: 30 },
   643: { shot: 644, speed: 0, cd: 50, volley: 3 },
+};
+
+/** 随从/哨兵专属召唤音（生成后首帧起按 at 节拍各播一次）——原版来源：
+ *  · 970 阿比盖尔计数：物品 5114 UseSound=AbigailSummon（Item.cs:40946）
+ *  · 1022 蘑菇随从：物品 5456 UseSound=DeadCellsMushroomSummon（音量 0.35，:1081）
+ *  · 1093/1094 Pal 随从：弹幕 AI soundDelay -20/-1 双声（PalCattiva :46524 / PalFoxparks
+ *    :55201 叫一声，19t 后 PalSummon :46527/:55205——音量 0.15/:1047）
+ *  · OOA 十二哨兵 663-693：物品 3818-3834 UseSound=DD2_DefenseTowerSpawn（Item.cs:33794）
+ *  其余随从族原版统一 UseSound=Item44（Game 侧 summon 通道已播，此处不重复） */
+const MINION_SUMMON_SFX: Record<number, Array<{ track: string; vol: number; at: number }>> = {
+  970: [{ track: 'abigail_summon', vol: 0.9, at: 1 }],
+  1022: [{ track: 'deadcells_mushroom_summon', vol: 0.35, at: 1 }],
+  1093: [{ track: 'pal_cattiva', vol: 0.35, at: 1 }, { track: 'pal_summon', vol: 0.15, at: 20 }],
+  1094: [{ track: 'pal_foxparks', vol: 0.35, at: 1 }, { track: 'pal_summon', vol: 0.15, at: 20 }],
+  ...Object.fromEntries([663, 665, 667, 677, 678, 679, 688, 689, 690, 691, 692, 693]
+    .map((id) => [id, [{ track: 'dd2_defense_tower_spawn', vol: 0.7, at: 1 }]])),
+};
+
+/** 随从射弹出膛音（原版在弹幕 AI 首帧 localAI[0]==0 处 PlaySound，等效落射弹生成帧）：
+ *  374 毒刺 Item_17（:52670）/ 376 小鬼火球 Item_20（:52684）/ 378 蛛卵 Item_17（:23398）/
+ *  967 猎犬弹 Item_60（:24971）。408/433/614/195/389/642 原版无出膛音（AI 无 PlaySound） */
+const MINION_SHOT_SFX: Record<number, { track: string; vol: number }> = {
+  374: { track: 'Item_17', vol: 0.7 },
+  376: { track: 'Item_20', vol: 0.7 },
+  378: { track: 'Item_17', vol: 0.7 },
+  967: { track: 'Item_60', vol: 0.7 },
 };
 
 /** 敌人最小形状（鸭子类型，避免与 Enemy 循环依赖） */
@@ -187,6 +214,10 @@ export class MinionProj extends Entity {
   get ai120State(): number { return this.gA0; }
   /** 家族一次性初始化（龙链生成） */
   private spawned = false;
+  /** 阿比盖尔 970 升级音一次性门（Projectile.cs:43971 localAI[0]==0 语义） */
+  private abigailUpgChecked = false;
+  /** Foxparks 喷火弹 1106 出膛音三发一门（Projectile.cs:38956 whoAmI%3==0） */
+  private foxFlameN = 0;
   /** 渲染旋转（龙链：段朝向 = 指向父段 +PI/2，同原版 rotation=velocity.ToRotation()+PI/2） */
   rot = 0;
   /** Foxparks 5664 手持喷火通道（AI_026 ai[0]>=1000：每 4t 发 1106，Game 每帧置 true+瞄准） */
@@ -297,6 +328,13 @@ export class MinionProj extends Entity {
   private counterHover(game: GameHooks, p: Player, dmg0: number): void {
     void dmg0;
     const projs = (game as unknown as { entities: { projectiles: MinionProj[] } }).entities.projectiles;
+    // 升级音（:43974）：970 首帧且同类 >1 → AbigailUpgrade（音量 0.5，SoundID.cs:1027）
+    if (this.projId === 970 && !this.abigailUpgChecked) {
+      this.abigailUpgChecked = true;
+      if (this.peerCount(game, 970) > 1) {
+        game.playSfxFiles(soundTrackFiles('abigail_upgrade'), 0.5, this.cx, this.cy);
+      }
+    }
     if (this.projId === 831) {
       const gems = this.peerCount(game, 831);
       const want = gems <= 3 ? 833 : gems <= 6 ? 834 : 835; // GetDesiredStormTigerMinionRank
@@ -434,8 +472,16 @@ export class MinionProj extends Entity {
       const spd = d > 200 ? 7.4 : d > 50 ? 5.4 : 0; // 6+1.4n / 4+1.4n（n=1 档）
       this.vx = (tgt.cx - this.cx) / d * spd;
       this.vy = (tgt.cy - this.cy) / d * spd;
-      if (d < 50) this.attackFlash = 24;
+      if (d < 50) {
+        // 挥击起手音（:62549 ai[0]==2 一拍一声；attackFlash 0→24 边沿等价）+ 随机哭声
+        // （:62538 移动中 1/1500/t）——AbigailAttack 音量 0.35 / AbigailCry 0.4（SoundID.cs）
+        if (this.attackFlash === 0) game.playSfxFiles(['abigail_attack'], 0.35, this.cx, this.cy);
+        this.attackFlash = 24;
+      }
       this.facing = Math.sign(tgt.cx - this.cx) || this.facing;
+      if (Math.hypot(this.vx, this.vy) > 0.1 && Math.random() < 1 / 1500) {
+        game.playSfxFiles(soundTrackFiles('abigail_cry'), 0.4, this.cx, this.cy);
+      }
     } else {
       const hx = p.cx - p.facing * 40, hy = p.cy + 40;
       const dx = hx - this.cx, dy = hy - this.cy;
@@ -729,6 +775,13 @@ export class MinionProj extends Entity {
     void dt;
     this.age++;
     if (this.attackFlash > 0) this.attackFlash--;
+    // ---- 族专属召唤音（生成后首帧起按 at 节拍各一次，见 MINION_SUMMON_SFX 注） ----
+    const summonSfx = MINION_SUMMON_SFX[this.projId];
+    if (summonSfx) {
+      for (const st of summonSfx) {
+        if (st.at === this.age) game.playSfxFiles(soundTrackFiles(st.track), st.vol, this.cx, this.cy);
+      }
+    }
     if (this.projId === 653) { this.companionCubeStep(game); return; }
     if (this.sentry) {
       if (--this.life <= 0) { this.dead = true; return; }
@@ -753,7 +806,7 @@ export class MinionProj extends Entity {
         } else {
           if (this.sFireT === 12) {
             const tgt = this.nearestEnemy(game, 900);
-            game.playSfx('dd2Flameburst', 0.9, this.cx, this.cy); // AI_131 :65533（弹幕 localAI[0]==0）
+            game.playSfxFiles(soundTrackFiles('dd2_flameburst_tower_shot'), 0.9, this.cx, this.cy); // AI_131 :65536（弹幕首帧）
             const mx = this.cx + this.facing * 6, my = this.y + this.h - 46; // 炮口（:65316）
             let vx = this.facing * 9, vy = 0;
             if (tgt) {
@@ -779,7 +832,7 @@ export class MinionProj extends Entity {
         } else {
           if (this.sFireT === 12) {
             const tgt = this.nearestEnemy(game, 900);
-            game.playSfx('dd2Ballista', 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
+            game.playSfxFiles(soundTrackFiles('dd2_ballista_tower_shot'), 0.9, this.cx, this.cy); // AI_134 :65674（开火帧同弩箭）
             let vx = this.facing * 16, vy = 0;
             if (tgt) {
               const d = Math.hypot(tgt.cx - this.cx, tgt.cy - (this.y + 20)) || 1;
@@ -824,6 +877,7 @@ export class MinionProj extends Entity {
         }
         const side = this.auraSide;
         if (side > 0) {
+          let zapped = false;   // 电弧音（:65947 场内有敌 DD2_LightningAuraZap）按伤害节拍播
           for (const ent of game.enemies()) {
             const en = ent as EnemyLike & { dead: boolean } & import('./WhipTag').WhipTagged;
             if (en.dead) continue;
@@ -837,6 +891,7 @@ export class MinionProj extends Entity {
             // AI_137_CanHit（:67170-67195）：塔顶+20 到敌中心的视线（两次弧线绕行未实装）
             if (!canHit(game.world.store, this.cx, this.auraCy - 20, 0, 0, en.cx, en.cy, 0, 0)) continue;
             if (!this.hitCd.ready(en.id, 3)) continue; // localNPCHitCooldown=3（:7055）
+            zapped = true;
             // 命中 armorPenetrationPercent=1（100% 护穿，:12443——Enemy.hurt 无护穿参，
             // 登记未实装）；tag 伤 ×SummonTagDamageMultiplier 0.5（ProjectileID.cs:31）
             const res = resolveWhipTagHit(en, dmgOf(), game,
@@ -845,6 +900,9 @@ export class MinionProj extends Entity {
             en.hurt(res.dmg, 0, 0, game, 0, false, 1); // 哨兵射击=单发弹语义
             applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
+          // 原版是 tracked 循环声（每 tick 场内有敌即续播）——单次 wav 按命中节拍近似，
+          // 每 tick 至多一声
+          if (zapped) game.playSfxFiles(soundTrackFiles('dd2_lightning_aura_zap'), 0.5, this.cx, this.auraCy);
         }
         return;
       }
@@ -858,7 +916,7 @@ export class MinionProj extends Entity {
             !en.dead && Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2);
           if (hit) {
             this.sCool = 90;
-            game.playSfx('dd2Explosive', 0.9); // AI_138 :66104（无位置参数）
+            game.playSfxFiles(soundTrackFiles('dd2_explosive_trap_explode'), 0.9); // AI_138 :66104（无位置参数）
             let boom = 0;
             for (const ent of game.enemies()) {
               const en = ent as EnemyLike & { dead: boolean };
@@ -913,6 +971,8 @@ export class MinionProj extends Entity {
           }
           const mx = this.cx + ox, my = this.cy + oy;
           const d = Math.hypot(tgt.cx - mx, tgt.cy - my) || 1;
+          const shotSfx = MINION_SHOT_SFX[s53.shot];
+          if (shotSfx) game.playSfxFiles(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
             Object.assign(new Arrow(mx - 5, my - 5, ((tgt.cx - mx) / d) * s53.speed, ((tgt.cy - my) / d) * s53.speed,
               dmgOf(), this.knockback, s53.shot, null, { grav: 0 }), { whipTagShot: true }), // SentryShot 吃鞭 tag（ProjectileID.cs:199）
@@ -1001,6 +1061,11 @@ export class MinionProj extends Entity {
           Math.max(1, Math.round(dmg0 * 0.75 * 0.85)), 0, 1106, null,
           { grav: 0, life: 24, pierce: 4 });
         flame.ignite = true; // 命中 OnFire 300t（PR:11002-11004）
+        // 喷火嘶声（Projectile.cs:38958）：1106 弹 whoAmI%3==0 才播——三发一门近似；
+        // FoxparksFlame=Item_34 音量 0.15（SoundID.cs:1073）
+        if ((this.foxFlameN = (this.foxFlameN + 1) % 3) === 1) {
+          game.playSfxFiles(['Item_34'], 0.15, this.cx, this.cy);
+        }
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(flame, 'projectiles');
       }
       return; // 喷火态跳过常规索敌/移动（position 锚玩家由 Game/悬停链处理近似）
@@ -1094,6 +1159,8 @@ export class MinionProj extends Entity {
           const shot = new Arrow(this.cx - 5, this.cy - 5, (ax / al) * shooter.speed, (ay / al) * shooter.speed,
             dmg, this.knockback, shooter.shot, null, { grav: shooter.grav ?? 0, life: shooter.life ?? 1200 });
           shot.whipTagShot = true; // MinionShot 吃鞭 tag（WhipTagEffect.cs:73-84）
+          const shotSfx = MINION_SHOT_SFX[shooter.shot];
+          if (shotSfx) game.playSfxFiles(soundTrackFiles(shotSfx.track), shotSfx.vol, this.cx, this.cy);
           (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(shot, 'projectiles');
         }
       }

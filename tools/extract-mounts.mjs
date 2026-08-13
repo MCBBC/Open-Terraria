@@ -36,7 +36,7 @@ const mountCount = +(mountIdSrc.match(/public static int Count = (\d+);/)?.[1] ?
 // ---- MountID.cs Sets：CreateBoolSet(...) / CreateIntSet(...) 展开 ----
 //  bool 集：args 全部为置位索引；int 集：首参为缺省值、其后 (键, 值) 成对
 const sets = {};
-for (const m of mountIdSrc.matchAll(/^\tpublic static (bool|int)\[\] (\w+) = Factory\.Create(?:Bool|Int)Set\(([^;]*)\);$/gm)) {
+for (const m of mountIdSrc.matchAll(/^\t+public static (bool|int)\[\] (\w+) = Factory\.Create(?:Bool|Int)Set\(([^;]*)\);$/gm)) {
   const [, kind, setName, argsRaw] = m;
   const args = [...argsRaw.matchAll(/-?\d+/g)].map((a) => +a[0]);
   const arr = Array.from({ length: mountCount }, () => kind === 'bool' ? false : -1);

@@ -148,8 +148,8 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     bee.frameState = FRAME_IN_AIR;
     expect(bee.runSpeed()).toBeCloseTo(6);        // 2 + 4×(1-0)
     // 疲劳半池 → 加成减半
-    (bee as unknown as { fatigue: number }).fatigue = 160;
-    (bee as unknown as { fatigueMax: number }).fatigueMax = 320;
+    bee.fatigue = 160;
+    bee.fatigueMax = 320;
     expect(bee.runSpeed()).toBeCloseTo(4);
     const fish = new MountInstance();
     fish.setMount(12, view());
@@ -204,7 +204,7 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
     expect(n).toBe(240);
     expect(rud.flight()).toBe(false);
     // 疲劳恢复：每 tick -2 直至 0
-    const bee = new MountInstance() as unknown as { fatigue: number; fatigueMax: number } & MountInstance;
+    const bee = new MountInstance();
     bee.setMount(5, view());
     bee.fatigueMax = 320;
     bee.fatigue = 5;
@@ -217,7 +217,7 @@ describe('MountInstance 状态机（Mount.cs 行为）', () => {
   });
 
   it('悬停能量池（Hover :3310）：flyTime 先耗、尽后累积疲劳、满池失升力', () => {
-    const ufo = new MountInstance() as unknown as { flyTime: number; fatigue: number; fatigueMax: number } & MountInstance;
+    const ufo = new MountInstance();
     ufo.setMount(7, view());
     ufo.fatigueMax = 320;
     ufo.flyTime = 2;
@@ -311,18 +311,44 @@ describe('三模物理接管（Player.fixedUpdate 挂钩）', () => {
     expect(p.ridingMount).toBe(true);
   });
 
-  it('史莱姆鞍 constantJump：地面移动自动连跳（autoJump）', () => {
+  it('constantJump 族 autoJump 语义（Player.cs:20366/:20406）：免松键连跳、不按跳不弹', () => {
     const w = mkWorld();
     const p = mkPlayer(w);
     tick(p, w, 8);
-    p.mount.setMount(3, p);                       // constantJump = true
+    p.mount.setMount(3, p);                       // constantJump = true（Mount.cs:848）
     expect(p.mount.autoJump).toBe(true);
-    const restY = p.y;
+    const groundY = p.y;
+    // 不按跳仅移动：原版整条跳跃链在 if(controlJump) 门内（:20366），autoJump 只免
+    // releaseJump（:20406）——绝不无输入自动弹跳（曾误实现为"移动即弹跳"）
     p.inputX = 1;
     let minY = p.y;
-    for (let i = 0; i < 60; i++) { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); minY = Math.min(minY, p.y); }
-    // 自动连跳（无需按跳）应离地腾空：最低 y 显著高于站定高度
-    expect(minY).toBeLessThan(restY - 16);
+    for (let i = 0; i < 90; i++) { p.fixedUpdate(1 / 60, fakeHooks(w, p) as never); minY = Math.min(minY, p.y); }
+    expect(minY).toBe(groundY);                   // 始终贴地
+    // 按住跳不松手：autoJump 免 releaseJump 落地即重跳 → 持续弹跳
+    p.inputX = 0; p.vx = 0; p.inputJump = true;
+    minY = p.y;
+    let landings = 0; let wasAir = false;
+    for (let i = 0; i < 180; i++) {
+      p.fixedUpdate(1 / 60, fakeHooks(w, p) as never);
+      minY = Math.min(minY, p.y);
+      if (!p.onGround) wasAir = true;
+      else if (wasAir) { landings++; wasAir = false; }
+    }
+    expect(minY).toBeLessThan(groundY - 16);      // 离地腾空
+    expect(landings).toBeGreaterThanOrEqual(2);   // 多次落地重跳（无需松键）
+  });
+
+  it('悬停爬升接受单按上（Hover :3396-3424 controlUp）：松键截断段让位', () => {
+    const w = mkWorld();
+    const p = mkPlayer(w);
+    tick(p, w, 8);
+    p.mount.setMount(7, p);                       // UFO hover
+    p.inputUp = true;                             // 只按上、不按跳（原版合法爬升输入）
+    const y0 = p.y;
+    tick(p, w, 90);
+    // 曾被"松键截断上升"手感段反复掐回 vy=2，90t 只爬 35px
+    expect(p.y).toBeLessThan(y0 - 100);
+    expect(p.mount.frameState === FRAME_FLYING || p.mount.frameState === FRAME_IN_AIR).toBe(true);
   });
 
   it('飞行族 hover 接管：按上升键消耗 flyTime 且免摔', () => {

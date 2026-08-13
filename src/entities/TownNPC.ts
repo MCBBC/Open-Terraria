@@ -11,6 +11,7 @@ import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Do
 import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES } from '../data/tiles';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable } from '../stats/Shimmer';
+import { townNpcAltTexture, townNpcProfileSheet } from '../data/townNpcProfiles';
 import { newNpcName } from '../i18n/RandomText';
 import { canHit } from '../physics/LineOfSight';
 import {
@@ -52,8 +53,12 @@ export class TownNPC extends Entity {
   talking = false;
   talkCooldown = 0;
   /** 微光化变体（NPCID.Sets.ShimmerTownTransform 入微光 → NPC.cs:92560-92573
-   *  ai[0]=25 传送离场回归；本仓 = 标记 + 回家，变体贴图/对话差分登记 GAP） */
+   *  ai[0]=25 传送离场回归；本仓 = 标记 + 回家。变体贴图经 townSheet getter 切
+   *  TownNPCs/Shimmered 档（Profiles.StackedNPCProfile 档位 1），对话差分登记 GAP） */
   shimmered = false;
+  /** 当前 altTexture（UpdateAltTexture NPC.cs:91254-91273：1=派对 2=狼人；
+   *  fixedUpdate 每 tick 由 townNpcAltTexture 刷新——月相/血月/派对随时翻态） */
+  altTexture = 0;
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -143,7 +148,8 @@ export class TownNPC extends Entity {
     // 微光化城镇变体（NPC.GetShimmered :92560-92573：ShimmerTownTransform → ai[0]=25
     // 微光传送离场，回归后为微光变体 IsShimmerVariant）。本仓净效果：入微光即标记
     // 微光化并传送回家（原版 AI_007_TownEntities_Shimmer_TeleportToLandingSpot 的
-    // "离场→稍后回归"由入驻轮天然承担）。变体贴图/对话差分未接（GAP）
+    // "离场→稍后回归"由入驻轮天然承担）。变体贴图走 townSheet getter（已接），
+    // 对话差分未接（GAP）
     if (!this.shimmered && isNpcTownShimmerable(this.vanillaId)) {
       const si = world.store.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
       if (world.store.liquid[si] > 30 && world.store.liquidType[si] === 4) {
@@ -157,6 +163,15 @@ export class TownNPC extends Entity {
         }
       }
     }
+
+    // ---- altTexture 刷新（UpdateAltTexture NPC.cs:91254-91273，原版 UpdateNPC 每
+    //      tick 末尾调 :91358）：派对进行（441/453/633 除外）→ 1；633 狼人条件 → 2。
+    //      partyUp 取 world.scene（Game 每 15t 写入）；MakeTransitionEffectsForTextureChanges
+    //      的变身尘/烟粒子（:91277-91309）未接（登记） ----
+    this.altTexture = townNpcAltTexture(
+      this.vanillaId, !!world.scene?.partyUp,
+      world.clock.moonPhase, world.clock.bloodMoon, world.clock.isDay,
+    );
 
     // 被绑待救援：原地不动（仅重力落定），解救在 Game.talkToNearbyNpc / 净化粉
     // （原版 bound 类型同走 TargetClosest + spriteDirection，NPC.cs:19813-19816：
@@ -584,6 +599,15 @@ export class TownNPC extends Entity {
         return;
       }
     }
+  }
+
+  /** 当前应使用的贴图 sheet（= DrawNPCCheckAlt Main.cs:22304-22309 →
+   *  TownNPCProfiles.GetProfile + profile.GetTextureNPCShouldUse 净效果）。
+   *  微光态 → TownNPCs/Shimmered/{Name}_Default 档；派对/狼人 alt → 同档的
+   *  _Party / _Transformed 变体。无档案类型（637/638/656 宠物等）返回 null，
+   *  渲染端回落 NPC_{id} 竖条。Renderer.drawTownNPC 消费 */
+  get townSheet(): string | null {
+    return townNpcProfileSheet(this.vanillaId, this.shimmered ? 1 : 0, this.altTexture);
   }
 
   draw() { /* Renderer 统一绘制 */ }

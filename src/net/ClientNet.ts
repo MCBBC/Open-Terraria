@@ -26,6 +26,12 @@ export interface RemotePlayerState {
   active: boolean;
   /** 最近一次 msg13 到达时刻（P1.1 AOI 配套：超时未达 → Game 冻结代理输入防幽灵行走） */
   lastFresh: number;
+  /** PvP（v7）：hostile 旗 + 队伍 0-5（msg13 flagBits[7] + 尾部 u8 team） */
+  hostile: boolean;
+  team: number;
+  /** 权威 HP（msg16 镜像——Game 接线到 proxy.hp 供头顶血条/死亡表现） */
+  hp: number;
+  maxHp: number;
 }
 
 /** 房间策略（S→C RoomPolicy；客户端门禁依据——v3 房间制；v4 尾部 maxPlayers） */
@@ -37,6 +43,8 @@ export interface RoomPolicyState {
   protectItems: boolean;
   /** 单房人数上限（v4；UI 显示 online/max） */
   maxPlayers: number;
+  /** PvP 房（v7）：true 才透传玩家来源弹幕 hostile 位（room.ts 剥离墙的开关） */
+  pvpAllowed: boolean;
 }
 
 /** NPC 快照（msg23；房主权威） */
@@ -97,12 +105,12 @@ export class ClientNet {
   mySlot = -1;
   players = new Map<number, RemotePlayerState>();
   /** 房间策略（RoomPolicy 到达前 = 自由房默认） */
-  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255 };
+  policy: RoomPolicyState = { roomCode: '', roomName: '', isHost: false, protectTiles: false, protectItems: false, maxPlayers: 255, pvpAllowed: false };
 
   private ws: WebSocket | null = null;
   private parser = new FrameParser();
   private hooks: ClientNetHooks;
-  private game: { player: { appearance?: unknown; inv: { slots: Array<{ id: number; stack: number } | null> } } };
+  private game: { player: { appearance?: unknown; hostile: boolean; team: number; inv: { slots: Array<{ id: number; stack: number } | null> } } };
   private hostToken = '';
 
   /** 组装中的世界（收到 msg7 建骨架，strip 到齐后交给 onWorldReady） */
@@ -302,6 +310,7 @@ export class ClientNet {
               slot, name, appearance: '{}', x: 0, y: 0, vx: 0, vy: 0,
               up: false, down: false, left: false, right: false, jump: false, useItem: false,
               facing: 1, selectedItem: 0, dead: false, fresh: false, active: true, lastFresh: 0,
+              hostile: false, team: 0, hp: 100, maxHp: 100,
             };
             this.players.set(slot, p);
           }
@@ -334,6 +343,9 @@ export class ClientNet {
         const x = r.f32(), y = r.f32();
         let vx = 0, vy = 0;
         if (flag & 4) { vx = r.f32(); vy = r.f32(); } // flagBits[2] = hasVelocity
+        // v7 尾部：u8 team（hostile 在 flagBits[7]）
+        const team = r.remaining > 0 ? Math.max(0, Math.min(5, r.u8())) : 0;
+        const hostile = !!(flag & 128);
         let p = this.players.get(slot);
         if (!p) {
           p = {
@@ -342,6 +354,7 @@ export class ClientNet {
             up: false, down: false, left: false, right: false, jump: false, useItem: false,
             facing: ctrl & 64 ? 1 : -1, selectedItem: sel, dead: !!(flag & 64),
             fresh: true, active: true, lastFresh: performance.now(),
+            hostile, team, hp: 100, maxHp: 100,
           };
           this.players.set(slot, p);
         }
@@ -353,6 +366,7 @@ export class ClientNet {
         p.facing = ctrl & 64 ? 1 : -1;   // ctrlBits[6] = direction（原版）
         p.selectedItem = sel;
         p.dead = !!(flag & 64);           // flagBits[6] = ghost
+        p.hostile = hostile; p.team = team;
         p.fresh = true;                   // Game 侧注入 netOffset 后清零
         return;
       }
@@ -406,6 +420,7 @@ export class ClientNet {
           protectTiles: r.bool(),
           protectItems: r.bool(),
           maxPlayers: (() => { try { return r.u16(); } catch { return 255; } })(),
+          pvpAllowed: (() => { try { return !!r.u8(); } catch { return false; } })(),
         };
         this.hooks.onPolicy?.(this.policy);
         return;
@@ -485,6 +500,9 @@ export class ClientNet {
       case Msg.PlayerLifeMana: {
         const slot = r.u8();
         const hp = r.i16(), maxHp = r.i16();
+        // 缓存进状态表（proxy.hp 接线在 Game.simulateRemotePlayers 每帧读取）
+        const rp = this.players.get(slot);
+        if (rp) { rp.hp = hp; rp.maxHp = maxHp; }
         if (slot !== this.mySlot) this.hooks.onHp?.(slot, hp, maxHp);
         return;
       }
@@ -570,7 +588,7 @@ export class ClientNet {
     this.sendPlayerState();
   }
 
-  private sendPlayerState() {
+  private sendPlayerState(force = false) {
     // v2 布局（对齐原版 msg13）：控制位 + position(碰撞盒左上) + velocity。
     // 远端据此跑本地物理 → 有移动过程；位置差由接收端 netOffset 平滑（瞬移消失）
     const p = this.game.player as unknown as {
@@ -593,7 +611,8 @@ export class ClientNet {
     const ctrlChanged = ctrl !== this.lastSentCtrl || sel !== this.lastSentSel || p.dead !== this.lastSentDead;
     const now = performance.now();
     const moved = Math.abs(p.x - this.lastSentPos.x) > 1 || Math.abs(p.y - this.lastSentPos.y) > 1;
-    if (!ctrlChanged) {
+    const pvpChanged = this.lastSentHostile !== this.game.player.hostile || this.lastSentTeam !== this.game.player.team;
+    if (!force && !pvpChanged && !ctrlChanged) {
       if (!moved && now - this.lastStateSent < 1000) return; // 静止 1s 心跳（原版 %420 全量兜底的简化版）
       if (now - this.lastStateSent < 66) return;             // 位置驱动节流 ≥66ms（≈15Hz）
     }
@@ -602,20 +621,29 @@ export class ClientNet {
     this.lastSentCtrl = ctrl;
     this.lastSentSel = sel;
     this.lastSentDead = p.dead;
-    // flagBits: [2]hasVelocity [6]ghost
-    const flag = 4 | (p.dead ? 64 : 0);
+    this.lastSentHostile = this.game.player.hostile;
+    this.lastSentTeam = this.game.player.team;
+    // flagBits: [2]hasVelocity [6]ghost [7]hostile(v7)；v7 尾部追加 u8 team(0-5)
+    const gp = this.game.player as unknown as { hostile: boolean; team: number };
+    const flag = 4 | (p.dead ? 64 : 0) | (gp.hostile ? 128 : 0);
     this.send(new NetWriter(Msg.PlayerState)
       .u8(this.mySlot)
       .u8(ctrl).u8(flag)
       .u8(sel)
       .f32(p.x).f32(p.y)
       .f32(p.vx).f32(p.vy)
+      .u8(Math.max(0, Math.min(5, gp.team)))
       .finish());
   }
+
+  /** PvP 姿态变化即时上报（msg13 心跳之外快速通道：hostile/team 翻转立刻同步） */
+  sendPvpState() { this.sendPlayerState(true); }
 
   private lastSentCtrl = -1;
   private lastSentSel = -1;
   private lastSentDead = false;
+  private lastSentHostile = false;
+  private lastSentTeam = 0;
 
   // ================= 箱子同步（msg31/32，服务器权威） =================
 
@@ -784,7 +812,7 @@ export class ClientNet {
 
   /** 全量 dump（进房后立即 + 外部可请求） */
   private sendFullInventory() {
-    const p = this.game.player as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
     for (let c = 0; c < 3; c++) {
       const arr = c === 0 ? p.inv.slots : c === 1 ? p.inv.armor : p.inv.dye;
@@ -803,7 +831,7 @@ export class ClientNet {
     if (this.invDumpPending || !this.sentInv) { this.sendFullInventory(); return; }
     if (now - this.lastInvSync < 250) return;
     this.lastInvSync = now;
-    const p = this.game.player as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
+    const p = this.game.player as unknown as { inv: { slots: Array<{ id: number; stack: number } | null>; armor: Array<{ id: number; stack: number } | null>; dye: Array<{ id: number; stack: number } | null> } };
     const cur = [p.inv.slots, p.inv.armor, p.inv.dye];
     const entries: Array<ItemSyncEntry & { playerSlot: number }> = [];
     for (let c = 0; c < 3; c++) {

@@ -145,7 +145,8 @@ export class MountInstance {
   flyTime = 0;
   /** 飞行疲劳（hover 族用尽 flyTime 后累积，疲劳越高爬升越弱） */
   fatigue = 0;
-  private fatigueMax = 0;
+  /** 疲劳池上限（Mount._fatigueMax；公开供测试与 runSpeed 的疲劳比直读） */
+  fatigueMax = 0;
   abilityCharging = false;
   abilityCharge = 0;
   abilityCooldown = 0;

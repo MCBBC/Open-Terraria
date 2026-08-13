@@ -4,12 +4,12 @@
 //   完成度公式 Main.GetBestiaryProgressReport（:65003-65020）+ 动物学家入住门
 //   （Main.cs:65375 CompletionPercent >= 0.1f）
 //   持久化 WorldFile.cs:3399/3405（BestiaryUnlocksTracker 随世界文件）
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   bestiaryEntries, bestiaryCreditId, countsAsACritter, unlockStateByKillCount,
   BestiaryTracker, isNpcValidForBestiaryKillCredit, BESTIARY_TOWN_IDS,
   bestiaryRarityStars, bestiarySortingId, lowestBiomeGroupIndex, isBossForBestiary,
-  UnlockState,
+  UnlockState, bestiaryGating,
 } from '../src/data/Bestiary';
 import { BESTIARY_SORT_KEYS, sortLabel } from '../src/ui/BestiaryPanel';
 import { NPC_NAME_BY_ID } from '../src/i18n/idNames.generated';
@@ -19,6 +19,19 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 
 describe('图鉴数据层（Bestiary）', () => {
+  // 免门默认开（2026-08-13 用户拍板）：unlockState 恒最高档;以下原版门控数学
+  // 测试统一关闸注入后断言（unlockStateByKillCount 纯函数不受开关影响）
+  beforeEach(() => { bestiaryGating.unlockAll = false; });
+  afterEach(() => { bestiaryGating.unlockAll = true; });
+
+  it('免门默认开：零击杀条目 unlockState 恒最高档（参考书模式）', () => {
+    bestiaryGating.unlockAll = true;
+    const t = new BestiaryTracker();
+    const e = bestiaryEntries().find((x) => x.kind === 'enemy')!;
+    expect(t.unlockState(e)).toBe(UnlockState.DropsWithRates);
+    expect(t.isUnlocked(e)).toBe(true);
+  });
+
   it('杀数四档：1 杀头像 / full/5 属性 / full/2 掉落表 / full 掉落率（默认 50）', () => {
     const F = 50;
     expect(unlockStateByKillCount(0, false, F)).toBe(UnlockState.NotKnown);
@@ -193,6 +206,8 @@ describe('NpcBestiarySortingId 排序 + NpcBestiaryRarityStars 稀有度（2026-
 // ============ 收尾批：npcStats 投影 + GetLowestBiomeGroupIndex + 编号口径 ============
 
 describe('图鉴数据表收尾（2026-08-13 收尾批）', () => {
+  beforeEach(() => { bestiaryGating.unlockAll = false; });
+  afterEach(() => { bestiaryGating.unlockAll = true; });
   it('GetLowestBiomeGroupIndex（ContentSamples.cs:755-766）：公共过滤元素组号，尾向头首个命中', () => {
     // 1 蓝史莱姆 = Surface(0) + DayTime(1) → 取大者 1（同名"Lowest"实为最大组号）
     expect(lowestBiomeGroupIndex(1)).toBe(1);

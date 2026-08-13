@@ -24,6 +24,7 @@ import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import { VI_ID } from '../data/itemKeys';
 import type { World } from '../world/World';
 import { BuffType } from '../stats/Buffs';
+import { Lang } from '../i18n/Lang';
 
 type LiquidType = 'water' | 'lava' | 'honey';
 
@@ -398,6 +399,21 @@ export class Bobber extends Entity {
     ctx.fill();
     ctx.fillStyle = '#fff';
     ctx.fillRect(-1, dip - 6, 2, 4); // 竿线连杆近似
+    // 声呐药水（buff 122,Projectile.cs:19340-19346）：咬钩时浮标上方弹渔获名——
+    // 此前 sonarLabel 数据在而零消费（音效域 #19/钓鱼域 B19,2026-08-13 接）
+    const owner = this.ownerRef();
+    if (this.biteT > 0 && owner?.buffs.has(BuffType.Sonar)) {
+      const label = this.sonarLabel();
+      if (label) {
+        const m = /^vi_(\d+)_/.exec(label);
+        const vid = m ? +m[1] : 0;
+        const name = vid > 0 ? (Lang as unknown as { itemName?: (v: number) => string }).itemName?.(vid) : null;
+        ctx.fillStyle = '#9FD8FF';
+        ctx.font = '10px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText(name ?? label, 0, -12);
+      }
+    }
     ctx.restore();
   }
 }

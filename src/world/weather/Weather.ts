@@ -54,6 +54,15 @@ export interface WeatherCtx {
   onSandstormToggle?: (happening: boolean) => void;
   /** 史莱姆雨开始/结束公告 */
   onSlimeRainToggle?: (happening: boolean) => void;
+  /** 玩家在雪原带（SceneMetrics.ZoneSnow，SceneMetrics.cs:682）——暴风雪双轨门
+   *  （SceneState.cs:101 flag = ZoneRain && ZoneSnow）；缺省 false */
+  zoneSnow?: boolean;
+  /** 玩家在背景墙后（SceneMetrics.BehindBackwall，:671 wall>0）——室外强度
+   *  outsideWeatherEffectIntensity 门（:190-191 向 1.1/-0.1 以 0.005/tick 逼近）；
+   *  缺省 false（露天） */
+  behindBackwall?: boolean;
+  /** 天气环境音循环音量下发（每帧；Sfx 常驻轨 setVolume 跟随） */
+  onAmbience?: (v: WeatherLoopVolumes) => void;
 }
 
 /** 原版风/暴雨判定阈值（Main.cs:66137-66140 MainCSS 构造区） */
@@ -61,6 +70,23 @@ export const WIND_MIN = 0.34;
 export const WIND_MAX = 0.4;
 export const RAIN_MIN = 0.4;
 export const RAIN_MAX = 0.5;
+
+// ================= 天气环境音循环轨（纯逻辑，无 DOM） =================
+
+/** 各循环轨目标音量 0-1（原版语义：
+ *  暴风雪双轨 = SceneState.cs:235-297；雨环境音 = MusicID 28 RainAmbience，MusicID.cs:68）
+ *  sandstorm 轨原版无专属 wav（Sandstorm 只有视觉 shader + 风场 BGM）——音量照算，
+ *  素材侧 Sfx.playLoop('sandstormWind') 恒 null，登记待素材 */
+export interface WeatherLoopVolumes {
+  /** 雨环境音：cloudAlpha×atmo（cloudAlpha 向 maxRaining 缓动 Main.cs:17142-17168 → 随雨强） */
+  rain: number;
+  /** blizzard_strong_loop（室外强暴风雪轨）= min(1,cloudAlpha×2)×室外强度×blizzardSoundVolume（SceneState.cs:253） */
+  blizzardStrong: number;
+  /** blizzard_inside_building_loop（墙内掩蔽轨）= (1-上式)×blizzardSoundVolume（:276） */
+  blizzardInside: number;
+  /** 沙暴风轨（缺素材登记）：severity×室外强度（Sandstorm.Severity，Sandstorm.cs） */
+  sandstorm: number;
+}
 
 // ================= 存档持久化（纯数据，旧档缺省=晴） =================
 
@@ -156,6 +182,11 @@ export class WeatherState {
   ladyBugRainBoost = 0;
   /** 墓园视觉强度镜像（Game 每帧从 graveyardIntensity 下发；渲染端 ProcessCloudAlpha 用） */
   graveyardVisual = 0;
+  /** 暴风雪循环轨渐入渐出（SceneState.cs:252 _blizzardSoundVolume：MoveTowards(flag?1:0, 0.01)/帧） */
+  blizzardSoundVolume = 0;
+  /** 室外天气效果强度（SceneState.cs:190-191：BehindBackwall ? -0.1 : 1.1，
+   *  0.005/帧 逼近后钳 0-1 → outsideWeatherEffectIntensity） */
+  outsideWeatherEffect = 1;
   /** RNG（可注入固定种子做单测） */
   private rng: RNG;
 
@@ -250,6 +281,44 @@ export class WeatherState {
     this.sandstorm.update(ctx, this.rng, this.windSpeedCurrent);
     this.updateCoinRain(ctx);
     this.updateSlimeRain(ctx);
+    this.updateAmbienceLoops(ctx);
+  }
+
+  // ================= 天气环境音循环（SceneState.cs:190-191/235-297） =================
+
+  /** MoveTowards（SceneState 同名助手）：向 target 以 amount/tick 逼近 */
+  private static moveTowards(cur: number, target: number, amount: number): number {
+    return cur < target ? Math.min(target, cur + amount) : Math.max(target, cur - amount);
+  }
+
+  /** 每帧平滑 + 下发循环音量（update 尾段调用） */
+  private updateAmbienceLoops(ctx: WeatherCtx): void {
+    const dayRate = Math.max(1, ctx.dayRate);
+    // 室外强度（SceneState.cs:190-191）：露天 1.1 / 墙内 -0.1，0.005/tick 逼近后钳 0-1
+    this.outsideWeatherEffect = Math.max(0, Math.min(1,
+      WeatherState.moveTowards(this.outsideWeatherEffect, ctx.behindBackwall ? -0.1 : 1.1, 0.005 * dayRate)));
+    // 暴风雪轨渐入（SceneState.cs:252）：flag = ZoneRain && ZoneSnow（:101）→ ±0.01/tick
+    // ZoneRain = Main.raining && SurfaceAtmospherics（SceneMetrics.cs:700）——atmo≈1 的露天近似
+    const blizzard = this.raining && (ctx.zoneSnow ?? false);
+    this.blizzardSoundVolume = WeatherState.moveTowards(
+      this.blizzardSoundVolume, blizzard ? 1 : 0, 0.01 * dayRate);
+    ctx.onAmbience?.(this.loopVolumes(ctx.atmo));
+  }
+
+  /** 各循环轨目标音量（纯读状态；Sfx 侧常驻轨 setVolume 跟随） */
+  loopVolumes(atmo = 1): WeatherLoopVolumes {
+    // SceneState.cs:253 num13 = min(1, cloudAlpha×2) × outsideWeatherEffectIntensity
+    const num13 = Math.min(1, this.cloudAlpha * 2) * this.outsideWeatherEffect;
+    return {
+      // 雨环境音（MusicID 28）：随 cloudAlpha（→maxRaining 缓动）× 露天可见度
+      rain: Math.max(0, Math.min(1, this.cloudAlpha * Math.max(0, Math.min(1, atmo)))),
+      blizzardStrong: num13 * this.blizzardSoundVolume,
+      blizzardInside: (1 - num13) * this.blizzardSoundVolume,
+      // 沙暴：severity 0-1（Sandstorm.UpdateSeverity :115-130）×室外强度——素材侧缺 wav
+      sandstorm: this.sandstorm.happening
+        ? Math.max(0, Math.min(1, this.sandstorm.severity)) * this.outsideWeatherEffect
+        : 0,
+    };
   }
 
   /** 金币雨掉落（WorldGen.cs:71811-71858） */

@@ -127,3 +127,34 @@ describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
     expect(Math.hypot(beam.vx, beam.vy)).toBeLessThan(Math.hypot(open.vx, open.vy)); // 双阻尼
   });
 });
+
+describe('星怒 3065 → 弹 503（Arrow star 模式）', () => {
+  it('线上方穿墙、越线后撞块、alpha 渐显钳位', () => {
+    const w = new World(200, 200, 30, 'open');
+    for (let x = 0; x < 200; x++) w.store.setTileSilent(x, 80, 1, 0, 0);  // y=80 墙
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, [], projectiles);
+    // 目标线 y=120*16=1920（墙在 1280——属线上方穿墙区）
+    const sword = new Arrow(50 * TILE, 60 * TILE, 4, 8, 170, 6.5, 503, null,
+      { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
+    sword.fixedUpdate(1, game);
+    expect(sword.starAlpha).toBe(240);                    // 255−15 渐显
+    for (let t = 0; t < 40 && !sword.dead; t++) sword.fixedUpdate(1, game);
+    // 剑 y 从 960 向下 8/t × 40t → 已穿 80 行墙（1280px）
+    expect(sword.y).toBeGreaterThan(80 * TILE);
+    expect(sword.dead).toBe(false);                       // 线上方穿墙（tileCollide=false）
+    let guard = 0;
+    while (!sword.dead && guard++ < 300) sword.fixedUpdate(1, game);
+    expect(sword.dead).toBe(true);                        // 越线后撞 y=100 地面消亡
+    expect(sword.starAlpha).toBe(0);                      // 线下钳 0 全显
+  });
+
+  it('alpha 线上钳 150（半显上限）', () => {
+    const w = new World(200, 200, 30, 'open');
+    const game = makeGame(w, [], []);
+    const sword = new Arrow(50 * TILE, 60 * TILE, 0, 8, 170, 6.5, 503, null,
+      { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
+    for (let t = 0; t < 30; t++) sword.fixedUpdate(1, game);
+    expect(sword.starAlpha).toBe(150);                    // 线上方钳 150（:22197-22202）
+  });
+});

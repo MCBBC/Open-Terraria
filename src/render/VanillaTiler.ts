@@ -1007,12 +1007,16 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
     if (!r) r = atlas.vframeAt(sheet, 0, 0);
   }
   if (!r) {
-    // 取帧双落空:图片未载(瞬态,onVImageLoaded 会重烘焙)或 vmeta 缺失(永久)。
-    // warn-once 区分排查——永久缺失曾静默吞掉整类 tile
-    if (!SRC_OOB_WARNED.has(`n${sheet}`)) {
+    // 取帧双落空:img 加载中(瞬态,onVImageLoaded→重烘焙自愈,**不告警**)或
+    // 永久缺失(vmeta 无 / img 加载失败)→ warn-once。此前瞬态也 warn,启动期
+    // 懒加载未就绪刷一屏噪音(sheet 4/62/69/74 等常见块)
+    const vFile = `vanilla/Tiles_${sheet}.png`;
+    const transient = !atlas.vmeta(sheet) ? false
+      : !atlas.vImageFailed(vFile) && !atlas.ensureVImage(vFile);
+    if (!transient && !SRC_OOB_WARNED.has(`n${sheet}`)) {
       SRC_OOB_WARNED.add(`n${sheet}`);
-      console.warn(`[VanillaTiler] sheet ${sheet} 取帧失败(仅一次): 帧(${fx},${fy})` +
-        ` img=${atlas.ensureVImage(`vanilla/Tiles_${sheet}.png`) ? '已载' : '未载'} vmeta=${atlas.vmeta(sheet) ? '有' : '无'}`);
+      console.warn(`[VanillaTiler] sheet ${sheet} 取帧失败(永久): 帧(${fx},${fy})` +
+        ` img=${atlas.ensureVImage(vFile) ? '已载' : (atlas.vImageFailed(vFile) ? '加载失败' : '未载')} vmeta=${atlas.vmeta(sheet) ? '有' : '无'}`);
     }
     return;
   }
@@ -1200,6 +1204,17 @@ function tileTopCond(sheet: number, fx: number, fy: number): number | null {
     case 227: return fx === 238 ? -6 : -20;                                  // :5121-5131(染料植物/大仙人掌)
     default: return null;
   }
+}
+
+/** 火苗/叠画层的 tileTop 取值：与 drawVanillaCell 本体绘制同源（静态表 + 条件项 +
+ *  火把天花板 +4）。供 TileFlames 等动态叠画对齐本体——原版 DrawSingleTile_Flames
+ *  的目标位 = y*16 + drawData.tileTop（TileDrawing.cs:2718-2727），不重算会错位。 */
+export function flameTileTop(sheet: number, st: TileStore, x: number, y: number, fx: number, fy: number): number {
+  const cond = tileTopCond(sheet, fx, fy);
+  let off = cond !== null ? cond : (DRAW_Y_OFFSET[sheet] ?? 0);
+  // 火把（tile 4）：上方实心 = 天花板火把 tileTop=4 下移(:4727-4730)
+  if (sheet === 4 && st.inBounds(x, y - 1) && st.isSolid(x, y - 1)) off += 4;
+  return off;
 }
 
 /** C 类手动偏移(DrawSingleTile 第二段 switch,:1032-1186;blockType→slope 映射:bt2=slope1/bt3=slope2/bt4=slope3/bt5=slope4) */

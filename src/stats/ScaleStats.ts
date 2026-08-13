@@ -207,6 +207,25 @@ export function getAttackDamageScaledByDifficulty(normalDamage: number, difficul
   return Math.trunc(f32(normalDamage * sampleCurve(ENEMY_DAMAGE_MULTIPLIER, difficulty)));
 }
 
+/** Main.DamageVar（Main.cs:65597-65620）1:1：base ±15% ±luck 重掷。
+ *  luck>0：|luck| 概率重掷一次取较大；luck<0：|luck| 概率重掷取较小
+ *  （:65604-65620 两段对称）。rnd = [0,1) 均匀随机源。返回 int 截断（(int) 语义）。 */
+export function damageVar(base: number, luck: number, rnd: () => number = Math.random): number {
+  let num = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
+  if (luck > 0) {
+    if (rnd() < luck) {
+      const second = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
+      if (second > num) num = second;
+    }
+  } else if (luck < 0) {
+    if (rnd() < -luck) {
+      const second = base * (1 + (Math.floor(rnd() * 31) - 15) * 0.01);
+      if (second < num) num = second;
+    }
+  }
+  return Math.trunc(num);
+}
+
 /** GetAttackDamage_CappedAtMaster（:7020）：大师以上钳在 Master 档 */
 export function getAttackDamageCappedAtMaster(normalDamage: number, difficulty: number): number {
   const num = Math.min(difficulty, GDL.MASTER);

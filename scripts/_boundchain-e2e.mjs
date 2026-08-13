@@ -10,6 +10,7 @@ const browser = await puppeteer.launch({ executablePath: '/Applications/Google C
 const page = await browser.newPage();
 const errs = [];
 page.on('pageerror', (e) => errs.push(e.message));
+page.on('console', (m) => { const t = String(m.text()); if (t.includes('townArrival')) console.log('PICK:', t); });
 await page.goto(ORIGIN, { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await page.click('[data-act=sp]');
@@ -189,13 +190,26 @@ const res = await page.evaluate(async () => {
   ok('⑫ bestiary45 门 = (percent≥0.45)', g.shopCondOk('bestiary45') === (pct >= 0.45));
 
   // ---- ⑬ 宠物入驻链（boughtCat → 免房流浪生成）----
-  // 预置 painter 占位：优先链 painter 条目（在场≥8 无 allow 门）会抢先吃掉本轮
-  if (!g.entities.npcs.some(n2 => n2.npcKey === 'painter')) {
-    g.entities.add(new TownNPC('painter', g.player.cx, g.player.cy), 'npcs');
+  // 预置 painter/princess 占位：优先链 painter 条目（在场≥8 无 allow 门）与
+  // princess 条目（⑩ 已凑齐 24 人 allow 真）会抢先吃掉本轮
+  for (const ph of ['painter', 'princess', 'tavernkeep']) {
+    // tavernkeep：⑩ 为关公主门杀过酒保——savedBartender 真他会抢先重入驻（原版
+    // 语义正确），补占位让本轮轮到猫
+    if (!g.entities.npcs.some(n2 => n2.npcKey === ph && !n2.dead)) {
+      g.entities.add(new TownNPC(ph, g.player.cx, g.player.cy), 'npcs');
+    }
   }
-  const catsBefore = g.entities.npcs.filter(n2 => n2.npcKey === 'town_cat').length;
+  // 清残留（复用存档可能已有早前轮次入驻的宠物）
+  for (const pet of ['town_cat', 'town_dog', 'town_bunny']) {
+    for (const n2 of g.entities.npcs) if (n2.npcKey === pet) n2.dead = true;
+  }
+  const catsBefore = 0;
   g.world.flags.boughtCat = true;
+  const before0 = g.entities.npcs.length;
+  const keys0 = new Set(g.entities.npcs.map(n2 => n2.npcKey));
   g.updateTownNpcArrival();
+  out.newKeys = g.entities.npcs.filter(n2 => !keys0.has(n2.npcKey)).map(n2 => n2.npcKey);
+  out.countDelta = g.entities.npcs.length - before0;
   const catsAfter = g.entities.npcs.filter(n2 => !n2.dead && n2.npcKey === 'town_cat');
   ok('⑬ boughtCat → 猫咪入驻（免房）', catsBefore === 0 && catsAfter.length === 1 && !catsAfter[0].home);
   ok('⑬ 猫 TownNPC 渲染数据可达(json 条目)', catsAfter[0]?.vanillaId === 637);

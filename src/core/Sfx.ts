@@ -38,7 +38,33 @@ export type SfxName =
   | 'record'      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
   | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
   | 'bombFuse'    // SoundID.BombFuse = CreateTrackable("fuse")（SoundID.cs:1153，引信嘶声循环 0.2 音量）
-  | 'conch';      // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
+  | 'conch'       // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
+  // ---- 天气环境音循环轨（SceneState.cs:235-297 暴风雪双轨；SoundType.Ambient）----
+  | 'blizzardStrong'    // blizzard_strong_loop（SoundID.cs:821 BlizzardStrongLoop，WithVolume(0.5)）
+  | 'blizzardInside'    // blizzard_inside_building_loop（:819 BlizzardInsideBuildingLoop）
+  | 'sandstormWind';    // ★登记缺失：原版沙暴无专属 wav（Sandstorm 只有视觉 shader + 风场 BGM），
+                        //   全量 852 wav 中无 sandstorm/wind 条目——素材出现前 playLoop 恒 null
+
+/** 天气环境音循环轨名（Weather.update 状态机 ↔ Sfx 循环句柄的接口面） */
+export type WeatherLoopName = 'blizzardStrong' | 'blizzardInside' | 'sandstormWind';
+
+/** 循环轨基础音量（SoundID 定义侧的 WithVolume，SfxName 注释同源） */
+export const LOOP_BASE_VOL: Record<WeatherLoopName, number> = {
+  blizzardStrong: 0.5,    // SoundID.cs:821 WithVolume(0.5f)
+  blizzardInside: 1,      // :819 无 WithVolume → 1.0
+  sandstormWind: 1,       // 素材缺失，占位
+};
+
+/** 循环音句柄（SceneState.cs:235-297 暴风雪双轨的常驻轨管理面：
+ *  原版 PlayTrackedSound 拿 SlotId 后每帧改 Volume，轨不拆；此处同构） */
+export interface SfxLoop {
+  /** 停止并释放节点（幂等） */
+  stop(): void;
+  /** 目标音量 0-1（setTargetAtTime 平滑逼近 ~0.2s，防切换爆音） */
+  setVolume(v: number): void;
+  /** 节点是否仍在发声（stop 后 / 缓冲加载失败 → false） */
+  readonly playing: boolean;
+}
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -97,6 +123,10 @@ const WAV_MAP: Record<SfxName, string[]> = {
   mirror: ['Item_6'],
   bombFuse: ['Fuse'],   // Content/Sounds/Custom/fuse.xnb → Fuse.wav（自提取，1.42s 循环）
   conch: ['Item_64'],
+  // ---- 天气环境音循环（Sounds/Custom/ 提取拍平；SceneState.cs:235-297 双轨管理）----
+  blizzardStrong: ['blizzard_strong_loop'],
+  blizzardInside: ['blizzard_inside_building_loop'],
+  sandstormWind: [],    // ★无素材（见 SfxName 注释）——playWav/playLoop 均安全短路
   // 以下无原版素材，走合成
   drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
 };
@@ -106,6 +136,8 @@ export class Sfx {
   private buffers = new Map<string, AudioBuffer>();
   /** 在途解码中的文件（防重复 fetch） */
   private pending = new Set<string>();
+  /** 循环轨在途解码（Promise 去重，与 pending 互斥使用） */
+  private bufferPromises = new Map<string, Promise<AudioBuffer | null>>();
   /** 取回失败/不存在的文件（负缓存，防 404 每次重试） */
   private failed = new Set<string>();
   muted = false;
@@ -237,6 +269,92 @@ export class Sfx {
         g.gain.value = this.atten(vol, px, py) * this.master;
       },
     };
+  }
+
+  // ---- 环境循环轨（SoundEngine.PlayTrackedSound 语义：常驻节点 + 音量平滑跟随）----
+
+  /** 异步取缓冲（ensureBuffer 的 Promise 版，供循环轨"缓冲就绪后再起振"） */
+  private ensureBufferAsync(file: string, ctx: AudioContext): Promise<AudioBuffer | null> {
+    const hit = this.buffers.get(file);
+    if (hit) return Promise.resolve(hit);
+    if (this.failed.has(file)) return Promise.resolve(null);
+    const pending = this.bufferPromises.get(file);
+    if (pending) return pending;
+    const p = fetch(`sounds/${file}.wav`)
+      .then((r) => (r.ok ? r.arrayBuffer() : null))
+      .then((ab) => (ab ? ctx.decodeAudioData(ab) : null))
+      .then((decoded) => {
+        if (decoded) { this.buffers.set(file, decoded); return decoded; }
+        this.failed.add(file);
+        return null;
+      })
+      .catch(() => { this.failed.add(file); return null; })
+      .finally(() => { this.bufferPromises.delete(file); });
+    this.bufferPromises.set(file, p);
+    return p;
+  }
+
+  /** 循环轨底层（任意 wav 文件 + 外部基础音量）；缓冲未就位时句柄先行返回，
+   *  解码完成后自动起振——调用方无需重试 */
+  private startLoopFile(file: string, vol: number, base: number): SfxLoop | null {
+    const ctx = this.ensure();
+    if (!ctx) return null;
+    const gain = ctx.createGain();
+    gain.gain.value = 0;
+    gain.connect(ctx.destination);
+    const st = {
+      src: null as AudioBufferSourceNode | null,
+      vol: Math.max(0, Math.min(1, vol)),
+      base,
+      started: false,
+      stopped: false,
+    };
+    const apply = () => {
+      const target = Math.min(1, st.vol * st.base * this.master);
+      gain.gain.setTargetAtTime(target, ctx.currentTime, 0.2);
+    };
+    const handle: SfxLoop = {
+      stop: () => {
+        if (st.stopped) return;
+        st.stopped = true;
+        try { st.src?.stop(); } catch { /* 已停 */ }
+        st.src?.disconnect();
+        gain.disconnect();
+      },
+      setVolume: (v: number) => {
+        st.vol = Math.max(0, Math.min(1, v));
+        if (st.started && !st.stopped) apply();
+      },
+      get playing() { return st.started && !st.stopped; },
+    };
+    void this.ensureBufferAsync(file, ctx).then((buf) => {
+      if (st.stopped || !buf) return;
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = true;
+      src.connect(gain);
+      src.start();
+      st.src = src;
+      st.started = true;
+      apply();
+    });
+    return handle;
+  }
+
+  /**
+   * 环境循环轨播放（SoundEngine.PlayTrackedSound 语义）：返回常驻句柄，
+   * 音量经 setVolume 每帧跟随（天气状态机驱动）。默认音量 0.3（不吵）。
+   * 无素材轨（如 sandstormWind）返回 null——调用方跳过即可，无需重试。
+   */
+  playLoop(name: WeatherLoopName, vol = 0.3): SfxLoop | null {
+    const list = WAV_MAP[name];
+    if (!list || !list.length) return null;
+    return this.startLoopFile(list[0], vol, LOOP_BASE_VOL[name]);
+  }
+
+  /** 按文件名播放循环（沙暴等未来素材接入的备用口） */
+  playLoopFile(file: string, vol = 0.3, base = 1): SfxLoop | null {
+    return this.startLoopFile(file, vol, base);
   }
 
   /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底） */

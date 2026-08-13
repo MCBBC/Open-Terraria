@@ -434,23 +434,21 @@ if (existsSync(armorDir)) {
   const flatName = (rel) => rel.replace(/\//g, '_');
   const usedNames = new Set(readdirSync(OUT_DIR));
   const copySub = (sub, toUi) => {
-    const base = join(imgDir, sub);
     const outDir = toUi ? UI_OUT_DIR : OUT_DIR;
     const seen = new Set(readdirSync(outDir));
-    const walkD = (dir, rel) => {
+    const walkD = (dir, rel) => {   // rel 含子目录前缀（UI/… → 展平为 UI_…）
       for (const f of readdirSync(dir)) {
         const p = join(dir, f);
         if (statSync(p).isDirectory()) { walkD(p, `${rel}${f}/`); continue; }
         if (!f.endsWith('.png')) continue;
-        let key = flatName(rel + f);
-        if (seen.has(key) && !existsSync(join(base, rel) ? join(ASSETS, sub, rel, f) : p)) { /* noop */ }
+        const key = flatName(rel + f);
         if (seen.has(key)) continue;   // 已有同名（含白名单产物）不覆盖
         copyFileSync(p, join(outDir, key));
         seen.add(key); bulk++;
         if (toUi) uiOut.files[key] = `vanilla-ui/${key}`;
       }
     };
-    walkD(base, '');
+    walkD(join(imgDir, sub), `${sub}/`);
   };
   for (const sub of SUBDIRS_UI) copySub(sub, true);
   for (const sub of SUBDIRS_MISC) copySub(sub, false);

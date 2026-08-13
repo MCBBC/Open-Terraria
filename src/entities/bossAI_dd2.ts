@@ -85,6 +85,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
 import { TILE_DEFS } from '../data/tiles';
+import { soundTrackFiles } from '../data/vanillaNpcs';
 
 // 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
 // sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
@@ -183,10 +184,22 @@ function shootD(
   game: GameHooks, x: number, y: number, vx: number, vy: number,
   dmg: number, projId: number, life = 300, grav = 0, pierce = 1,
 ): void {
+  // 出膛音（原版在弹幕 AI 首帧 localAI[0]==0 处 PlaySound，此处等效落在生成帧）：
+  // 675 暗影矢 dd2_dark_mage_attack（:53602）/ 682 电弧 dd2_lightning_bug_zap（:52055）/
+  // 686 火球 dd2_betsy_fireball_shot（:53645）——多变体组内随机（playSfxFiles 语义）
+  const shot = PROJ_SHOT_SFX[projId];
+  if (shot) game.playSfxFiles(soundTrackFiles(shot), 0.8, x, y);
   (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(
     new Arrow(x, y, vx, vy, dmg, 0, projId, null, { grav, life, pierce, hostile: true }),
     'projectiles');
 }
+
+/** DD2 弹幕 → 声轨名（Projectile.cs 首帧 PlaySound 站点） */
+const PROJ_SHOT_SFX: Record<number, string> = {
+  675: 'dd2_dark_mage_attack',     // :53602 DD2_DarkMageAttack
+  682: 'dd2_lightning_bug_zap',    // :52055 DD2_LightningBugZap
+  686: 'dd2_betsy_fireball_shot',  // :53645 DD2_BetsyFireballShot（空袭火球出膛）
+};
 
 // ---------------------------------------------------------------------------
 // tile 辅助
@@ -934,7 +947,7 @@ export function lanePortalAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai1 === 0) {
     // ---- 开门出怪（:43071-43116） ----
     if (x[0] === 0) {
-      game.playSfx('portal', 0.5, e.cx, e.cy);    // DD2_EtherianPortalOpen（:43073）
+      game.playSfxFiles(['dd2_etherian_portal_open'], 0.7, e.cx, e.cy);  // DD2_EtherianPortalOpen（:43075）
     }
     if (!DD2_EVENT_HOOKS.enemySpawningOnHold()) e.ai0 += 1;
     const rate = DD2_EVENT_HOOKS.laneSpawnRate();
@@ -1006,7 +1019,7 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   // ---- 出生渐显（:66062-66092 flag5） ----
   if (p.fade) {
     if (x[0] === 0) e.spawnAlpha = 255;
-    if (x[0] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.4, e.cx, e.cy); // DD2_EtherianPortalSpawnEnemy（:64270 PlayTrackedSound）
+    if (x[0] === 30) game.playSfxFiles(soundTrackFiles('dd2_etherian_portal_spawn_enemy'), 0.4, e.cx, e.cy); // DD2_EtherianPortalSpawnEnemy（:64270 PlayTrackedSound）
     if (x[0] < 60) {
       x[0] += 1;
       e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
@@ -1072,8 +1085,15 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
     e.vy += p.grav;                                 // 小妖魔下沉点火（num16）
     e.ai1 += 1;
     if (e.ai1 === p.aimT) {
-      // 俯冲音（:66202-66222,DD2_WyvernDiveDown / KoboldFlyerChargeScream）
-      game.playSfx('roar', 0.25, e.cx, e.cy);
+      // 俯冲音（:66202-66222）：飞龙 558-560 DD2_WyvernDiveDown（1/5 追加 Scream）；
+      // 小妖魔滑翔怪 574/575 DD2_KoboldFlyerChargeScream + DD2_KoboldIgnite
+      if (e.vanillaId === 574 || e.vanillaId === 575) {
+        game.playSfxFiles(soundTrackFiles('dd2_kobold_flyer_charge_scream'), 0.7, e.cx, e.cy);
+        game.playSfxFiles(['dd2_kobold_ignite'], 0.6, e.cx, e.cy);
+      } else {
+        game.playSfxFiles(soundTrackFiles('dd2_wyvern_dive_down'), 0.7, e.cx, e.cy);
+        if (Math.random() < 0.2) game.playSfxFiles(soundTrackFiles('dd2_wyvern_scream'), 0.6, e.cx, e.cy);
+      }
     }
     if (e.ai1 >= p.aimT) {
       e.ai0 = 2;
@@ -1165,7 +1185,7 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
   const txc = tgt ? tgt.x : e.cx, tyc = tgt ? tgt.y : e.cy;
   // ---- 出生渐显（:66478-66508 localAI[3]） ----
   if (x[3] === 0) e.spawnAlpha = 255;
-  if (x[3] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.4, e.cx, e.cy);
+  if (x[3] === 30) game.playSfxFiles(soundTrackFiles('dd2_etherian_portal_spawn_enemy'), 0.4, e.cx, e.cy);
   if (x[3] < 60) {
     x[3] += 1;
     e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
@@ -1180,10 +1200,17 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai0 > 0) {
     castDamp = 0.9;                                 // num12=0.9 施法僵直（:66427）
     e.ai0 -= 1;                                     // 注：109 是递减（102 递增）
+    // 召骷髅施法音（:66445）：ai[0]==80 且 ai[1]==2 → DD2_DarkMageSummonSkeleton
+    if (e.ai1 === 2 && e.ai0 === 80) {
+      game.playSfxFiles(soundTrackFiles('dd2_dark_mage_summon_skeleton'), 0.7, e.cx, e.cy);
+    }
     // 召骷髅（:66431-66435）：ai[1]==2 且 ai[0]==64 → 673 阵眼 + RaiseGoblins
     if (e.ai1 === 2 && e.ai0 === 64) {
       DD2_EVENT_HOOKS.raiseGoblins?.(game, e.cx, e.cy);
       game.spawnParticles(e.cx + e.facing * 24, e.cy - 40, '#C060FF', 10, 2, { life: 40 });
+      // 673 阵眼在原版弹幕 ai[0]==70 帧播音（Projectile.cs:35516 DD2_SkeletonSummoned），
+      // 本仓 673 降级为粒子 → 等效落在阵眼生成帧
+      game.playSfxFiles(['dd2_skeleton_summoned'], 0.7, e.cx, e.cy);
     }
     // 暗影矢（:66437-66446）：ai[1]==0 且 ai[0]==32 → 675（14 速 40 伤）
     if (e.ai1 === 0 && e.ai0 === 32) {
@@ -1192,8 +1219,14 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.facing = d.x > 0 ? 1 : -1;
       shootD(game, ox, oy, d.x * 14, d.y * 14, 40, 675, 300);
     }
+    // 治疗施法音（:66461）：ai[0]==126 且 ai[1]==1 → DD2_DarkMageCastHeal（起手一拍）
+    if (e.ai1 === 1 && e.ai0 === 126) {
+      game.playSfxFiles(soundTrackFiles('dd2_dark_mage_cast_heal'), 0.7, e.cx, e.cy);
+    }
     // 治疗（:66453-66461）：ai[1]==1 且 ai[0]=40/48/56 → 674 落地脉动
     if (e.ai1 === 1 && (e.ai0 === 40 || e.ai0 === 48 || e.ai0 === 56)) {
+      // 674 脉动落地音（Projectile.cs:35546 首帧 DD2_DarkMageHealImpact，三连各一声）
+      game.playSfxFiles(soundTrackFiles('dd2_dark_mage_heal_impact'), 0.6, e.cx, e.cy);
       const gx = Math.floor((e.cx + e.facing * 240) / TILE);
       const gy = Math.floor(e.cy / TILE);
       const [, bottom] = expandVertically(game, gx, gy, 0, 50);
@@ -1313,7 +1346,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (e.ai0 === 2) {
     // ---- 风压冲（:62418-62427） ----
-    if (e.ai1 === 0) game.playSfx('roar', 0.3, e.cx, e.cy);   // DD2_BetsyWindAttack
+    if (e.ai1 === 0) game.playSfxFiles(soundTrackFiles('dd2_betsy_wind_attack'), 0.7, e.cx, e.cy); // DD2_BetsyWindAttack（:62415）
     e.ai1 += 1;
     if (e.ai1 >= WIND_T) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
   } else if (e.ai0 === 3) {
@@ -1340,7 +1373,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.vy = 0;
       e.facing = d3;
       shootD(game, e.cx, e.cy, e.vx, e.vy, DMG_BREATH, 687, 300, 0, 20);
-      game.playSfx('flames', 0.5, e.cx, e.cy);    // DD2_BetsyFlameBreath
+      game.playSfxFiles(['dd2_betsy_flame_breath'], 0.7, e.cx, e.cy);   // DD2_BetsyFlameBreath（:62462）
     }
     if (e.ai1 >= FLAME_T0) {
       timeScale = 1.5;
@@ -1401,7 +1434,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
     e.y += d.y * 10;
     e.visAngle -= SPIN_RATE * e.facing;
     timeScale *= 0.7;
-    if (e.ai1 === 1) game.playSfx('roar', 0.35, e.cx, e.cy);  // DD2_BetsyFlyingCircleAttack
+    if (e.ai1 === 1) game.playSfxFiles(['dd2_betsy_flying_circle_attack'], 0.7, e.cx, e.cy); // DD2_BetsyFlyingCircleAttack（:62547）
     e.ai1 += 1;
     if (e.ai1 >= SPIN_T) {
       e.ai0 = 1; e.ai1 = 0; e.ai2 = 0;
@@ -1417,7 +1450,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
       e.ai2 += 1;
       if (Math.hypot(txc - e.cx, tyc - e.cy) < 350 || e.ai2 >= 180) e.ai1 = 1;
     } else {
-      if (e.ai1 === 1) game.playSfx('roar', 0.5, e.cx, e.cy);  // DD2_BetsyScream
+      if (e.ai1 === 1) game.playSfxFiles(['dd2_betsy_scream'], 0.8, e.cx, e.cy);  // DD2_BetsyScream（:62577）
       if (e.ai1 < SUMMON_AT) { e.vx *= 0.95; e.vy *= 0.95; }
       else { e.vx *= 0.98; e.vy *= 0.98; }
       if (e.ai1 === SUMMON_AT) {
@@ -1445,7 +1478,7 @@ export function betsyAI(e: Enemy, game: GameHooks, player: Player | null) {
             const w = spawnPart(game, e, 560);
             if (w) { w.x = portal.cx - w.w / 2; w.y = portal.cy - w.h / 2; }
           }
-          game.playSfx('roar', 0.3, e.cx, e.cy);    // DD2_BetsySummon
+          game.playSfxFiles(soundTrackFiles('dd2_betsy_summon'), 0.7, e.cx, e.cy);  // DD2_BetsySummon（:62652/:62671 每召一只一声）
         }
       }
       e.ai1 += 1;
@@ -1501,7 +1534,7 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
   const SEP = 0.1;            // num13
   // ---- 出生渐显（:66846-66876 flag3） ----
   if (x[1] === 0) e.spawnAlpha = 255;
-  if (x[1] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.3, e.cx, e.cy);
+  if (x[1] === 30) game.playSfxFiles(soundTrackFiles('dd2_etherian_portal_spawn_enemy'), 0.3, e.cx, e.cy);
   if (x[1] < 60) {
     x[1] += 1;
     e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
