@@ -3770,6 +3770,17 @@ export class Game implements GameHooks {
       const c = t !== undefined ? TORCH_LIGHT[t] : undefined;
       heldRGB = c ? [...c] as [number, number, number] : [1, 0.95, 0.8];
     }
+    // 手持常亮三件套（Player.cs ItemCheck 点光段，num=1 恒定）：
+    //   148 水蜡烛 (0,0.5,1)（:49179-49214，仅 !pulley 门——水下手持也亮）；
+    //   5322 (0.2,0.3,0.32)（:49274-49285，!wet && !pulley）；
+    //   4952 (1,0.7,0.8)×1.3（:49430-49435，!pulley && !petting——无 wet 门）
+    //   （pulley=滑轨乘坐本仓未跟踪，petting 同；dust 172/萤火纯装饰从略）
+    if (!heldRGB && heldDef) {
+      const hv = viIdFromKey(heldDef.key);
+      if (hv === 148) heldRGB = [0, 0.5, 1];
+      else if (hv === 5322 && !player.inWater) heldRGB = [0.2, 0.3, 0.32];
+      else if (hv === 4952) heldRGB = [1.3, 0.91, 1.04];
+    }
     if (!heldRGB && heldDef && !player.inWater) {
       const vid = viIdFromKey(heldDef.key);
       if (Number.isFinite(vid)) {
@@ -3788,11 +3799,12 @@ export class Game implements GameHooks {
           if (torchId !== undefined) {
             const c = TORCH_LIGHT[torchId];
             if (c) heldRGB = c;
-            else if (torchId === 7) heldRGB = [1, 1.6, 0.5];      // 恶魔火把(动画光源近似)
-            else if (torchId === 14) {                             // 彩虹火把:Disco 轮转近似
-              const ph = Math.floor(this.tickCount / 10) % 6;
-              heldRGB = ([[1, 0.2, 0.2], [1, 1, 0.2], [0.2, 1, 0.2], [0.2, 1, 1], [0.2, 0.2, 1], [1, 0.2, 1]] as Array<[number, number, number]>)[ph];
-            } else if (torchId === 23) heldRGB = [0.4, 0.85, 1.4]; // 微光火把(Shimmer 近似)
+            // 三个动态火把档 = TorchID 同名 ITorchLightProvider 精确公式（TorchID.cs:
+            //  DemonTorchLight :45-51 / DiscoTorchLight :66-72 / ShimmerTorchLight :28-42），
+            // 与 TileLightScanner 火把 style 7/14/23 同源——曾为静态近似/六色跳变
+            else if (torchId === 7) heldRGB = this.lighting.clock.demonTorchColor();
+            else if (torchId === 14) heldRGB = this.lighting.clock.discoColor();
+            else if (torchId === 23) heldRGB = this.lighting.clock.shimmerTorchColor();
           }
         }
       }
@@ -4587,8 +4599,29 @@ export class Game implements GameHooks {
           // 502 喵刀猫（Projectile.cs:5460 AI_008）：前 20t 平飞后重力 0.2（:22656）、
           // timeLeft 默认 180、落地弹跳（Arrow.meowBounceOff）
           const meow = cwMelee.shoot === 502;
-          // 985 泰拉刃光束（aiStyle 191）：25t 减速消亡 + 独占分层绘制（Arrow terra 模式）
+          // 985 泰拉刃光束（Player.cs:48316-48317 出生注入）：初速=瞄准向×5
+          // 【非 shootSpeed】、ai[0]=朝向±1、ai[1]=18（寿命 43t）、ai[2]=物品 scale
+          // （×词缀 size）；同时伴生 984 旋斩弧（见下 TerraArc）
           const terra = cwMelee.shoot === 985;
+          if (terra) {
+            const [twx, twy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+            const tdx = twx - this.player.cx, tdy = twy - this.player.cy;
+            const tdl = Math.hypot(tdx, tdy) || 1;
+            this.entities.add(new Arrow(
+              this.player.cx, this.player.cy - 4,
+              tdx / tdl * 5, tdy / tdl * 5,          // :48316 (num4,num5)×5f
+              this.swing.dmg ?? 1, this.swing.kb ?? 3, 985, null,
+              { grav: 0, pierce: Math.max(1, pd?.penetrate ?? 3),
+                terra: { ai0: this.player.facing, ai1: 18, ai2: (ps?.size ?? 1) } }),
+              'projectiles');
+            // 984 旋斩弧（同链首行 NewProjectile 984：方向×重力、itemAnimationMax、
+            // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）
+            const arc = new TerraArc(this.player, cw.useTime,
+              Math.round((this.swing.dmg ?? 1)), this.player.facing, (ps?.size ?? 1));
+            this.entities.add(arc, 'projectiles');
+            this.mining = null;
+            return;
+          }
           // 3065 星怒 → 503 天降三剑（Player.cs:47107-47136）：出生=玩家上方 600px
           // 随机偏后 0-400px、每剑再高 100px；速度朝鼠标且强制向下 |dy|≥20、
           // vy 抖动 ±0.4；目标线 = min(鼠标Y, 玩家cy−200)（线上穿墙越线撞块）
@@ -7030,6 +7063,33 @@ export class Game implements GameHooks {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
+    // ---- 方块交换 Block Swap（1.4.4+,Player.cs:39182/:39260-39383;原版默认开
+    //  builderAccStatus[10]==0 → TileReplacementEnabled）。手持放置物对准【可替换
+    //  块】→ 先破坏旧块（完整掉落链）再走正常放置。门禁（:39275-39284 + 核心支线）:
+    //  放置物黑名单 DoesntPlace{2,60,70,109,199,23,661,662,633}(草/丛/蘑菇族);
+    //  目标黑名单 DoesntGetReplaced{58,225,171,127,481,482,483,423}(狱岩/晶簇等);
+    //  tileCut 族/家具(frameImportant)非平台不换;同型不换;旧块掉落物==放置物
+    //  不换(:39371-39377 防土换土无限);绳索目标仅换轨道/平台(:39354-39359 简化:
+    //  绳一律不换)。平台/火把/篝火/箱/柜 style 族分支(:39299-39349)登记未接。
+    if (itemDef.tile) {
+      const targetType = st.get(tx, ty);
+      if (targetType !== 0) {
+        const placeVid = viIdFromKey(itemDef.key);
+        const tdef = TILE_DEFS[targetType];
+        const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
+        const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
+        const tsheet = tdef?.vanilla?.sheet ?? -1;
+        const swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
+          && !(tdef?.decor ?? false) && !(tdef?.cut ?? false)
+          && !tdef?.framed && tdef?.solid !== false || (tdef?.vanilla?.sheet === 19);
+        if (swapOk) {
+          const tileIdHere = TILE_BY_KEY[itemDef.tile!];
+          if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
+            this.breakTile(tx, ty, true);   // 旧块完整掉落链(音效+成就同破坏)
+          }
+        }
+      }
+    }
     // 实例级 placeStyle 覆盖（旗 place_v_91:实例存 bannerId,2026-08-13——类级
     // itemDef.placeStyle 缺省 0 会把所有旗放成同一帧,旗 buff 解码失活）
     const heldInst = this.player.inv.heldItem();
@@ -9507,6 +9567,17 @@ export class Game implements GameHooks {
         lunar = { zone, counts: moonCounts };
       }
     }
+    // NPC.AnyHelpfulFairies（NPC.cs:90885）：跟随态仙女（583/584/585 且 ai[2]>1）
+    // 在场 → 地下仙女链关门。spawner 无实体桶访问，本侧每周期喂入
+    this.vanillaSpawner.fairyHelpfulActive = this.entities.enemies.some((n) => {
+      const en = n as Enemy;
+      return !en.dead && (en.vanillaId === 583 || en.vanillaId === 584 || en.vanillaId === 585)
+        && en.ai2 > 1;
+    }) || this.entities.critters.some((n) => {
+      const c = n as Critter;
+      const cn = CRITTER_BY_KEY[c.key]?.npc ?? 0;
+      return !c.dead && cn >= 583 && cn <= 585;
+    });
     // downedBoss3 双键（骷髅王击杀链写 downed_35，旧档/导入可能写 downedSkeletron——
     // 此前只传 downedSkeletron 恒 false，地牢守卫池永不切换、绑缚三人组 685 门不开）
     this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
@@ -9593,6 +9664,18 @@ export class Game implements GameHooks {
     const ptx = this.vanillaSpawner.currentSpawnX;
     const pty = this.vanillaSpawner.currentSpawnY;
     if (ptx < 2 || pty < 2 || ptx > st.w - 3 || pty > st.h - 3) return;
+    // 萤火虫成群附加消费（原版 :2327-2344/:4419-4433/:5767-5782 主只后四向
+    // SpawnNPC——spawner 单返回值 API 的侧信道队列；按原版像素坐标直放）
+    const extras = this.vanillaSpawner.pendingCritterExtras;
+    if (extras.length > 0) {
+      this.vanillaSpawner.pendingCritterExtras = [];
+      for (const ex of extras) {
+        const e2 = Enemy.fromVanilla(ex.npc, ptx * TILE + 8 + ex.dx, pty * TILE + ex.dy);
+        if (!e2) continue;
+        if (e2.vanilla?.critter) { e2.x -= e2.w / 2; this.entities.add(e2, 'critters'); }
+        else this.entities.add(e2, 'enemies');
+      }
+    }
     if (picked.vanilla?.aiStyle === 6) {
       // 蠕虫族：段链（AI_006 的 NewNPC 链）
       picked.x = ptx * TILE + 8 - picked.w / 2;

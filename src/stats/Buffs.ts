@@ -139,6 +139,16 @@ export enum BuffType {
   TheTongue = 80,   // 狂卷之舌(38)：tongued=true（:10589-10593 buffTime 钳 10）——
                     //   禁用道具/钩爪 + 专家 50 HP/s DoT（:18905-18910）+ 舌距 3000px/
                     //   墙抵边即死（:22036-22052）
+  // ---- PvP debuff 族（Projectile.StatusPvP / Player.StatusToPlayerPvP 授予；
+  //      全部在 Main.pvpBuff 白名单 Main.cs:8872-8887 内）----
+  Venom = 81,         // 毒液(70)：15 HP/s（lifeRegen-30 :18791；毒液浸剂/282/355 弹）
+  CursedInferno = 82, // 诅咒焰(39)：12 HP/s（lifeRegen-24 :18850 onFire2 段）
+  OnFire3 = 83,       // 地狱火(323)：4 HP/s（lifeRegen-8 :18824；熔岩石/地狱火链）
+  Frostburn = 84,     // 霜燃(44)：8 HP/s（lifeRegen-16 :18837；172/253 冰系弹）
+  Frostburn2 = 85,    // 霜燃2(324)：8 HP/s（lifeRegen-16 :18850；冰霜盔甲引擎）
+  Confused = 86,      // 困惑(31)：控制反转（:24683-24690 四键轮换,含原版 Up←Right 怪癖）
+  Ichor = 87,         // 灵液(69)：防御 -15（ResetEffects statDefense -= 15）
+  BrokenArmor = 88,   // 破甲(36)：防御减半（:25704 statDefense /= 2；301 类弹 PvP）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
@@ -235,6 +245,15 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // 血肉墙舌头两态（描述走原版 BuffDescription 现成键，同 Honey/MoonLeech 先例）
   [BuffType.Horrified]: { vanillaBuff: 37, descKey: 'BuffDescription.Horrified', fallbackName: '惊恐' },
   [BuffType.TheTongue]: { vanillaBuff: 38, descKey: 'BuffDescription.TheTongue', fallbackName: '狂卷之舌' },
+  // PvP debuff 族（描述全部走原版 BuffDescription 键）
+  [BuffType.Venom]: { vanillaBuff: 70, descKey: 'BuffDescription.Venom', fallbackName: '毒液' },
+  [BuffType.CursedInferno]: { vanillaBuff: 39, descKey: 'BuffDescription.CursedInferno', fallbackName: '诅咒焰' },
+  [BuffType.OnFire3]: { vanillaBuff: 323, descKey: 'BuffDescription.OnFire3', fallbackName: '地狱火' },
+  [BuffType.Frostburn]: { vanillaBuff: 44, descKey: 'BuffDescription.Frostburn', fallbackName: '霜燃' },
+  [BuffType.Frostburn2]: { vanillaBuff: 324, descKey: 'BuffDescription.Frostburn2', fallbackName: '霜燃II' },
+  [BuffType.Confused]: { vanillaBuff: 31, descKey: 'BuffDescription.Confused', fallbackName: '困惑' },
+  [BuffType.Ichor]: { vanillaBuff: 69, descKey: 'BuffDescription.Ichor', fallbackName: '灵液' },
+  [BuffType.BrokenArmor]: { vanillaBuff: 36, descKey: 'BuffDescription.BrokenArmor', fallbackName: '破甲' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -288,6 +307,13 @@ const ENV_DOTS: ReadonlyArray<readonly [BuffType, number]> = [
   [BuffType.Burning, -30],    // lifeRegen-60（:18862，另 moveSpeed×0.5 在 moveSpeedMult）
   [BuffType.Suffocation, -20], // lifeRegen-40（:18889）
   [BuffType.Poisoned, -2],    // lifeRegen-4 → 2 HP/s（Player.cs:18795 poisoned 分支）
+  // PvP debuff 族（NaturalLifeRegen 同段顺序：onFire3→onFrostBurn→onFrostBurn2→
+  // onFire2→…→venom 在 poisoned 之后:18791）
+  [BuffType.OnFire3, -4],     // lifeRegen-8（:18824）
+  [BuffType.Frostburn, -8],   // lifeRegen-16（:18837）
+  [BuffType.Frostburn2, -8],  // lifeRegen-16（:18850）
+  [BuffType.CursedInferno, -12], // lifeRegen-24（:18850 onFire2 段）
+  [BuffType.Venom, -15],      // lifeRegen-30（:18791）
 ];
 
 export class BuffState {
@@ -301,6 +327,9 @@ export class BuffState {
   static readonly DEBUFFS = new Set<BuffType>([
     BuffType.OnFire, BuffType.Burning, BuffType.Bleeding, BuffType.Suffocation,
     BuffType.Chilled, BuffType.Weak, BuffType.Slow, BuffType.ManaSickness, BuffType.Poisoned,
+    // PvP debuff 族（原版 Main.debuff 表成员,护士可清）
+    BuffType.Venom, BuffType.CursedInferno, BuffType.OnFire3, BuffType.Frostburn,
+    BuffType.Frostburn2, BuffType.Confused, BuffType.Ichor, BuffType.BrokenArmor,
   ]);
   /** 活跃 debuff 计数（Main.GetNurseHealCost :39466-39472 的 +100/个 段：
    *  buffTime>60 且 Main.debuff；NurseCannotRemoveDebuff 排除表未实装，登记） */
@@ -466,6 +495,7 @@ export class BuffState {
     if (this.active.has(BuffType.CatBast)) d += 5;          // 猫堡垒 statDefense += 5（:9778）
     if (this.active.has(BuffType.Tipsy)) d -= 4;            // 醉酒 statDefense -= 4（:11514）
     if (this.active.has(BuffType.Weak)) d -= 4;              // 虚弱 statDefense -= 4（:11509）
+    if (this.active.has(BuffType.Ichor)) d -= 15;           // 灵液 statDefense -= 15（ResetEffects）
     if (this.active.has(BuffType.Werewolf)) d += 3;         // 狼人 statDefense += 3（:11497）
     d += [0, 2, 3, 4][this.wellFedTier];                    // 食物 statDefense += 2/3/4（:11524+）
     return d;

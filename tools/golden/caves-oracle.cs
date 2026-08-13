@@ -3960,6 +3960,7 @@ while (dgLantern[2] == dgLantern[0] || dgLantern[2] == dgLantern[1]) dgLantern[2
 var dgBanner = new int[6] { 10, 11, 12, 13, 14, 15 };                          // cs:267-273
 bool dgSkewed = (int)r.Next(4) == 0;                                           // cs:274 useSkewedDungeonEntranceHalls
 int dgDoorStyle = dungeonTheme == 0 ? 16 : dungeonTheme == 1 ? 17 : 18;        // Item 1411/1412/1413 placeStyle（Item.cs:17460/17472/17484）
+bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune（AddBuriedChest 用）
 // —— 深度锚点（cs:14828-14870）：(ws+rock)/2 ± Next(-200,200)；下方 10 格无实心则下扫
 // 到实心；起点即实心则上爬（上限 60）首个非实心再下压 60-num4 ——
 int dgX0 = dungeonLocation;
@@ -5391,7 +5392,6 @@ void DgPrefixRolls(int item)
         if (DgPre.Reduced.Contains(rolled)) r.Next(3);
     }
 }
-bool dgShadowKey = false, dgRamRune = false;                   // GenVars.generatedShadowKey/RamRune
 // AddBuriedChest（WorldGen.cs:35920-37600）——放置 + 战利品掷骰流（物品不入哈希，仅流对齐）
 bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
 {
@@ -5443,7 +5443,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if (r.Next(2) == 0) { r.Next(2); var _dg = r.Next(8) + 3; }
             if (r.Next(2) == 0) r.Next(50, 101);                // 绳 965
             if (r.Next(3) != 0) { r.Next(2); var _dg2 = r.Next(26) + 25; }
-            if (r.Next(2) == 0) var _dg7 = r.Next(3) + 3;                  // 药水 28
+            if (r.Next(2) == 0) { var _dg7b = r.Next(3) + 3; }                  // 药水 28
             if (r.Next(3) != 0) r.Next(3, 6);                   // 回城 2350
             if (r.Next(3) > 0) { r.Next(6); r.Next(1, 3); }
             if (r.Next(2) == 0) { r.Next(2); var _dg5 = r.Next(11) + 10; }
@@ -5473,7 +5473,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if (r.Next(3) == 0) r.Next(50, 101);
             if (r.Next(2) == 0) { r.Next(2); var _dg3 = r.Next(10) + 5; }
             if (r.Next(2) == 0) { r.Next(2); var _dg4 = r.Next(25) + 25; }
-            if (r.Next(2) == 0) var _dg7 = r.Next(3) + 3;
+            if (r.Next(2) == 0) { var _dg7b = r.Next(3) + 3; }
             if (r.Next(3) > 0) { r.Next(9); r.Next(1, 3); }
             if (r.Next(3) != 0) r.Next(2, 5);
             if (r.Next(2) == 0) { var _dg5b = r.Next(11) + 10; }

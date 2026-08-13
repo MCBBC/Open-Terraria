@@ -3,7 +3,8 @@ import type { Game } from '../core/Game';
 import { ITEM_DEFS, ITEM_BY_KEY } from '../data/items';
 import { TILE_DEFS } from '../data/tiles';
 import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaTiler';
-import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, vanillaIdOfItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { petInfoOfVid } from '../data/vanillaPets';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
 
@@ -99,6 +100,13 @@ function prefixedDamage(def: (typeof ITEM_DEFS)[number], prefix?: number): numbe
   if (!def.tool?.damage || !prefix) return def.tool?.damage ?? 0;
   return Math.max(1, Math.round(def.tool.damage * prefixStat(prefix).dmg));
 }
+/** 内部 item id → 原版 item id（UI 层等价 Shimmer.vanillaIdOfItem：vid 直取 +
+ *  vi_ 前缀反解——避免 UI 模块图再挂 Shimmer 全链） */
+function vidOf(itemId: number): number {
+  const def = ITEM_DEFS[itemId];
+  return def ? (def.vid ?? vanillaIdOfItemKey(def.key)) : -1;
+}
+
 function iconUrl(game: Game, id: number): string {
   let url = iconCache.get(id);
   if (!url) {
@@ -1914,12 +1922,16 @@ export class UI {
     this.buffBar.style.cssText = 'pointer-events:auto; position:fixed; top:76px; left:32px; display:flex; flex-direction:row; flex-wrap:wrap; width:418px; column-gap:6px; row-gap:18px; align-content:flex-start;';
     this.root.appendChild(this.buffBar);
     this.buffBlocks.clear();
+    this.petBuffBlocks.clear();
     // 块按激活顺序动态创建（原版按 buff 槽序全量显示，无白名单——此前硬编码
     // 19 种，战斗/镇静/挖矿/糖分冲刺等 20+ 种永不显示）
   }
 
-  /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化） */
-  private makeBuffBlock(t: BuffType): { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement } {
+  /** 单个 buff 块（原版 DrawBuffIcon Main.cs:42725 的 DOM 化）。
+   *  t=null 时为宠物 buff 通道块（BuffType 无宠物成员，不进 BuffState.active）：
+   *  无倒计时（buffNoTimeDisplay）+ 右键 = 收宠（原版 TryRemovingBuff
+   *  Main.cs:42788 → CheckBuffHideMisc :42808：右键宠物 buff 图标即 hideMisc 翻转） */
+  private makeBuffBlock(t: BuffType | null, petSlot: 0 | 1 = 0): { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement } {
     const block = el('div', 'sw-buff');
     block.style.display = 'none';
     block.style.cssText += 'position:relative; width:32px; height:32px; background:none; border:none; border-radius:0; cursor:pointer; flex:0 0 auto;';
@@ -1935,12 +1947,16 @@ export class UI {
     // 悬停提亮（原版 buffAlpha 悬停 +0.1/t 至 1、离开 -0.05/t 至 0.4 的 CSS 近似）
     block.addEventListener('mouseenter', () => { icon.style.opacity = '1'; });
     block.addEventListener('mouseleave', () => { icon.style.opacity = '0.4'; });
-    // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12）
+    // 右键取消（TryRemovingBuff L42793+：非 debuff → DelBuff + SoundID 12；
+    //  宠物 buff 走 CheckBuffHideMisc 收宠，不走 buffs.remove——其不在 BuffState 里）
     block.addEventListener('contextmenu', (e) => {
       e.preventDefault();
       if (!this.game) return;
-      this.game.player.buffs.remove(t);
-      this.game.sfx.play('menuTick');
+      if (t === null) this.game.togglePetSlot(petSlot);
+      else {
+        this.game.player.buffs.remove(t);
+        this.game.sfx.play('menuTick');
+      }
       this.refreshBuffs();
     });
     return { block, icon, time };
@@ -1948,6 +1964,24 @@ export class UI {
 
   buffBar: HTMLElement | null = null;
   buffBlocks = new Map<BuffType, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
+  /** 宠物 buff 显示通道（key = 装备槽 0=宠物 / 1=光宠）。不进 buffBlocks：
+   *  BuffType 未扩 62 个宠物成员，宠物 buff 也不在 BuffState.active 里——
+   *  原版 UpdatePet/UpdatePetLight（Player.cs:17147-17187）装备槽 buffType 经
+   *  AddBuff(buff,3600) 恒刷新入 buff 槽即"宠物存在标志"，UI 直接由装备槽派生 */
+  petBuffBlocks = new Map<0 | 1, { block: HTMLElement; icon: HTMLImageElement; time: HTMLElement }>();
+
+  /** 槽位当前应显示的宠物 buff：装备在槽 + 跟随体存活（hideMisc/玩家死亡时
+   *  Game.updatePetSlot 即灭跟随体，等价原版 TogglePet 的 ClearBuff） */
+  private activePetBuff(slot: 0 | 1): { buff: number; proj: number } | null {
+    const g = this.game;
+    const item = g.player.inv.miscEquips[slot];
+    if (!item) return null;
+    const info = petInfoOfVid(vidOf(item.id));
+    if (!info) return null;
+    const f = slot === 0 ? g.petFollower : g.lightPetFollower;
+    if (!f || f.dead || f.projId !== info.proj) return null;
+    return { buff: info.buff, proj: info.proj };
+  }
 
   /** 每秒左右调用一次（由 Game 经 callbacks 驱动）。
    *  原版行为（Main.cs:42618-42640）：遍历 buff 槽按序显示全部激活 buff；
@@ -1991,6 +2025,45 @@ export class UI {
     }
     for (const [t, ui] of this.buffBlocks) {
       if (!seen.has(t)) ui.block.style.display = 'none';
+    }
+    // ---- 宠物/光宠 buff（独立通道；原版同栏追加在普通 buff 之后，无倒计时） ----
+    const petStates = ([0, 1] as const).map((slot) => {
+      const pb = this.activePetBuff(slot);
+      let ui = this.petBuffBlocks.get(slot);
+      if (pb && !ui) {
+        ui = this.makeBuffBlock(null, slot);
+        this.petBuffBlocks.set(slot, ui);
+      }
+      return { pb, ui };
+    });
+    for (const { pb, ui } of petStates) {
+      if (!ui) continue;
+      const u = ui; // const 别名（闭包内保留窄化）
+      if (!pb) {
+        u.block.style.display = 'none';
+        continue;
+      }
+      u.block.style.display = 'flex';
+      // 名/描述 = Lang.buffName/buffDesc（BuffName/BuffDescription.<Internal>，
+      //  62 款宠物 buff 全有内名；缺名回退投射物名）
+      const nm = Lang.buffName(pb.buff) ?? Lang.projectileName(pb.proj);
+      u.block.title = nm ? `${nm}：${Lang.buffDesc(pb.buff) ?? ''}` : '';
+      // buffNoTimeDisplay：宠物 buff 不显示剩余时长（原版 TryGetBuffTime 不出文字）
+      u.time.textContent = '';
+      const want = `/sprites/vanilla/Buff_${pb.buff}.png`;
+      if (!u.icon.src.endsWith(want)) {
+        u.icon.onerror = () => {
+          // 素材缺失兜底：退回宠物投射物贴图 Projectile_<proj>.png
+          u.icon.onerror = null;
+          u.icon.src = `/sprites/vanilla/Projectile_${pb.proj}.png`;
+        };
+        u.icon.src = want;
+      }
+    }
+    // 恒置普通 buff 之后（原版 AddBuff 找空槽追加）：末位不符才整序（免每秒 DOM 抖动）
+    const liveBlocks = petStates.filter((s) => s.pb && s.ui).map((s) => s.ui!.block);
+    if (liveBlocks.length && this.buffBar.lastElementChild !== liveBlocks[liveBlocks.length - 1]) {
+      for (const b of liveBlocks) this.buffBar.appendChild(b);
     }
   }
 

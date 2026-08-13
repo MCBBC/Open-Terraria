@@ -93,9 +93,11 @@ export interface ArrowOpts {
   tumble?: boolean;
   /** 平飞期姿态锁定（48/54/93/520/599 前 20t atan2 姿态） */
   tumblePoseLock?: boolean;
-  /** 泰拉刃光束 985（aiStyle 191）：减速 ×0.94(>8) / 近墙阻尼 / 25t 消亡 /
-   *  全程淡出 / 绿光——AI_191_TrueNightsEdge 985 分支（Projectile.cs:39241+） */
-  terra?: boolean;
+  /** 泰拉刃光束 985（aiStyle 191，Player.cs:48316 出生注入）：
+   *  ai[0]=朝向±1 / ai[1]=18（寿命=ai1+25=43t）/ ai[2]=物品 scale。
+   *  淡入 ai1×0.5=9t、末 12t 淡出；34t 后 damage=0（纯视觉尾段）；减速 >8 档
+   *  仅初速 >8 时激活（正牌出生速=瞄准向×5 恒不触发——973 甩剑才用） */
+  terra?: { ai0: number; ai1: number; ai2: number };
   /** 星怒剑 503（aiStyle 5 :22139-22157）：targetY=目标线（鼠标 Y 与玩家
    *  cy−200 取小）；线上方穿墙/alpha 渐显钳 150，线下开始撞块 */
   star?: { targetY: number };
@@ -173,8 +175,14 @@ export class Arrow extends Entity {
   private starSndT = 20;
   /** tileCollide 已生效（越目标线后） */
   private starCollide = false;
-  /** localAI[0] 计时（25t 消亡 + 淡出分母） */
+  /** localAI[0] 计时 */
   terraT = 0;
+  /** ai[0] 朝向（±1）/ ai[1] 生命基准 18 / ai[2] 物品 scale（出生注入） */
+  terraAi0 = 1;
+  terraAi1 = 18;
+  terraAi2 = 1;
+  /** 尾段清伤（t ≥ Lerp(ai1, ai1+25, 0.65) → damage=0，:39337-39340） */
+  terraNoHit = false;
   /** localAI[1] 近墙减速标记 */
   terraWall = false;
   /** 已反射（原版 Projectile.reflected：反射源命中后置位，防重复反射；
@@ -224,7 +232,12 @@ export class Arrow extends Entity {
     this.maxFall = opts?.maxFall ?? 16;
     this.tumble = opts?.tumble ?? false;
     this.tumblePoseLock = opts?.tumblePoseLock ?? false;
-    this.terra = opts?.terra ?? false;
+    this.terra = !!opts?.terra;
+    if (opts?.terra) {
+      this.terraAi0 = opts.terra.ai0;
+      this.terraAi1 = opts.terra.ai1;
+      this.terraAi2 = opts.terra.ai2;
+    }
     if (opts?.star) this.starY = opts.star.targetY;
   }
 
@@ -243,17 +256,26 @@ export class Arrow extends Entity {
       const img = projSprite(985);
       if (!img || !img.complete || img.naturalWidth === 0) return;
       const fw = img.naturalWidth, fh = img.naturalHeight / 4;
-      const fade = Math.max(0, 1 - this.terraT / 25);
-      const num = Math.min(1, this.terraT / 30);            // Remap(t,0,30,0,1)
+      // 淡入淡出（:39344 985 专属）：Remap(t,0,ai1/2,0,1)×Remap(t,ai1+13,ai1+25,1,0)
+      const aIn = Math.min(1, this.terraT / (this.terraAi1 * 0.5));
+      const aOut = this.terraT <= this.terraAi1 + 13 ? 1
+        : Math.max(0, (this.terraAi1 + 25 - this.terraT) / 12);
+      const fade = aIn * aOut;
+      // num6 双段（:39273 主段 Remap(t,ai1*0.4,ai1+25,0,1)——绘制张合的推进分母）
+      const num = Math.min(1, Math.max(0, (this.terraT - this.terraAi1 * 0.4) / (this.terraAi1 + 25 - this.terraAi1 * 0.4)));
       const spread = 1 - num;
+      // 绘制 scale（:39341）：Remap(1−(1−num6)²,0,1,1.5,1)×ai2
+      const fv = 1 - (1 - num) * (1 - num);
+      const terraScale = (1.5 - 0.5 * Math.min(1, Math.max(0, fv))) * this.terraAi2;
       const rot = Math.atan2(this.vy, this.vx);
       const layer = (sy: number, a: number, angOff: number, frame: number, flipV: boolean) => {
         ctx.save();
         ctx.globalAlpha = Math.max(0, Math.min(1, a * fade));
         ctx.translate(this.cx, this.cy);
-        ctx.rotate(rot + angOff);
+        ctx.rotate(rot + angOff * this.terraAi0);   // ±ai[0] 方向项（:27694 ai0=±1）
         if (flipV) ctx.scale(1, -1);
-        ctx.drawImage(img, 0, frame * fh, fw, fh, -fw / 2 * sy, -fh / 2 * sy, fw * sy, fh * sy);
+        const dw = fw * sy * terraScale;
+        ctx.drawImage(img, 0, frame * fh, fw, fh, -dw / 2, -fh * sy * terraScale / 2, dw, fh * sy * terraScale);
         ctx.restore();
         ctx.globalAlpha = 1;
       };
@@ -372,12 +394,18 @@ export class Arrow extends Entity {
     if (this.tumble) {
       this.tumbleRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx >= 0 ? 1 : -1);
     }
-    // 泰拉刃光束 985（AI_191 :39248-39263 + 985 减速段 :39340-39377）：
-    // 25t 消亡（ai[1]=0 → num4=25）；>8 速 ×0.94 减速；前方 110px 扇形探视线
-    // 失败 → localAI[1]=1（×0.8 仍 >8 时 / ×0.88 双阻尼）；淡出 + 绿光 + 尘
+    // 泰拉刃光束 985（AI_191 :39248-39266 + 985 专属尾段 :39333-39377）：
+    // 寿命 = ai[1]+25（出生 18 → 43t）；淡入 ai[1]/2=9t、末 12t 淡出（:39344）；
+    // t≥Lerp(ai1,ai1+25,0.65)≈34 清伤（纯视觉尾段）；>8 速才减速/探墙（正牌
+    // 出生速=瞄准向×5 恒不触发，973 甩剑共用段）
     if (this.terra) {
       this.terraT++;
-      if (this.terraT >= 25) { this.killNow(game); return; }
+      const terraLife = this.terraAi1 + 25;
+      if (this.terraT >= terraLife) { this.killNow(game); return; }
+      if (!this.terraNoHit && this.terraT >= Math.round(this.terraAi1 + 25 * 0.65)) {
+        this.terraNoHit = true;
+        this.damage = 0;                                  // :39337-39340 damage=0
+      }
       const stT = world.store;
       this.lightRGB = [0.25, 0.86, 0.38];    // Color(64,220,96)（:39382）
       // 光心 = 弹心 + 朝向 ×85×scale（:39382 Center+rotation.ToRotationVector2()*85*scale）

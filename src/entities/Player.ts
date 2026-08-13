@@ -309,6 +309,8 @@ export class Player extends Entity {
     for (const id of this.inv.equippedArmor()) {
       if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
     }
+    // 破甲(36)：终值减半（Player.cs:25704 statDefense /= 2——在全部来源加总之后）
+    if (this.buffs.has(BuffType.BrokenArmor)) d = Math.floor(d / 2);
     return d;
   }
 
@@ -1196,6 +1198,15 @@ export class Player extends Entity {
       // 石化(156)与冰冻同段清输入（:24942 control* 清零——石化还额外清 useItem/useTile,
       // 我们输入模型只有四键,同 frozen 处理）
       this.inputX = 0; this.inputJump = false; this.inputUp = false; this.inputDown = false;
+    } else if (this.buffs.has(BuffType.Confused)) {
+      // 困惑(31)：控制轮换（Player.cs:24683-24690 字面复刻,含原版 Up←交换后Right 的
+      // 怪癖——flag2=L,flag3=Up; L=R; R=flag2; **Up=R(新)**; Down=flag3）
+      const wasLeft = this.inputX < 0, wasRight = this.inputX > 0;
+      const wasUp = this.inputUp;
+      const newRight = wasLeft;
+      this.inputX = wasRight ? -1 : newRight ? 1 : 0;   // L←R / R←L
+      this.inputUp = newRight;                          // Up←R(新)（原版怪癖同款）
+      this.inputDown = wasUp;                           // Down←Up
     }
     // 石化变身瞬间（:24924-24931 stoned != lastStoned 过渡）： Hurt(20×敌伤倍率, ByOther(5))
     // + SoundID 0 + 20 尘——死因 = DeathText.Petrified_1..4（"X碎成渣了"）

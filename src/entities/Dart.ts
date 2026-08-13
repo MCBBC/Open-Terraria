@@ -947,6 +947,20 @@ const DART_STYLE: Record<number, DartStyle> = {
     trail: { color: '#B08050', count: 1 }, sfx: ['Item_8'], fallback: '#B08050' },
   // 909 岩石巨人岩(631 :56722):12×12,roll,重力 0.4@38+xDamp0.97(:21527),随机帧 1-6(:21534)
   909: { w: 12, h: 12, rot: 'roll', grav: 0.4, gravDelay: 38, xDamp: 0.97, frameRand: 6, fallback: '#9A8C72' },
+  // 83 死光 EyeLaser(Eyezor 251 :59373；EoC 雷眼 :26726 同弹):4×4,aiStyle1 直飞,
+  //    scale1.7,alpha255 渐入 −15(:52730/:52742),extraUpdates2,penetrate3,life600;
+  //    light 0.75×(0.7,0,1)(:15178);50t 后改自旋属 498 专属,本弹无
+  83: { w: 4, h: 4, rot: 'align90', scale: 1.7, alpha0: 255, fade: 15, updates: 2, life: 600,
+    light: [0.39, 0, 0.56], fallback: '#70E0FF' },
+  // 498 铁钉 Nail(Nailhead 463 散射 :57611):6×6,aiStyle1 直飞,penetrate -1,life180;
+  //    出生音 Item17(:54610);ai0≥50 起摩擦 vx×0.98 + 重力 0.15(:54615-54618),
+  //    同段 rotation 改自旋 ±0.5/更新（纯视觉,本表 rot 单模未接——登记）
+  498: { w: 6, h: 6, rot: 'align90', grav: 0.15, gravDelay: 49, xDamp: 0.98, life: 180,
+    sfx: ['Item_17'], fallback: '#D8D8E0' },
+  // 501 蝇瓶 DrManFlyFlask(Dr. Man Fly 468 :59863):14×14,aiStyle2 抛物,scale1.1;
+  //    ai0≥18 起摩擦 vx×0.995 + 重力 0.2(:21804-21811),之前直飞
+  501: { w: 14, h: 14, rot: 'align90', scale: 1.1, grav: 0.2, gravDelay: 18, xDamp: 0.995,
+    fallback: '#C8E060' },
   // ---- 史后三法师（NPC.cs:21146-21191,timeLeft 均覆写 300）----
   // 290 暗影束(死灵法师 283/284):4×4,aiStyle48 束弹——extraUpdates 100(束速 ~6×101≈606px/t
   //    全屋瞬达);life 300(NPC.cs:21191 对 281-286 射击统一覆写,覆盖 SetDefaults 的 100)

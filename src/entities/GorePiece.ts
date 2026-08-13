@@ -311,11 +311,21 @@ function entryPos(e: GoreSpawnEntry, s: GoreNpcSource): { x: number; y: number }
   };
 }
 
-/** 表项 → 初始速度（缺省继承 NPC 速度；编译字段线性组合） */
+/** 表项 → 初始速度。语义 = NewGore 的 Velocity 实参整体替换（不含 NewGore 自带的
+ *  随机扰动）：常量 > 均匀随机 > NPC 速度×k > 击退方向 > 继承 NPC 速度（缺省） */
+function axisVel(v: number | undefined, k: number | undefined, m: number | undefined,
+  a: number | undefined, hd: boolean, inherit: number, hitDir: number): number {
+  if (v != null) return v;
+  if (a != null) return uniform(m ?? 0, a);
+  if (k != null) return k * inherit;
+  if (hd) return hitDir;
+  return inherit;
+}
 function entryVel(e: GoreSpawnEntry, s: GoreNpcSource): { vx: number; vy: number } {
+  const hd = s.hitDir ?? 0;
   return {
-    vx: (e.vx ?? (e.kx ?? 1) * s.vx) + (e.ax != null ? uniform(e.mx ?? 0, e.ax) : 0) + (e.hd ? s.hitDir ?? 0 : 0),
-    vy: (e.vy ?? (e.ky ?? 1) * s.vy) + (e.ay != null ? uniform(e.my ?? 0, e.ay) : 0),
+    vx: axisVel(e.vx, e.kx, e.mx, e.ax, !!e.hd, s.vx, hd),
+    vy: axisVel(e.vy, e.ky, e.my, e.ay, false, s.vy, hd),
   };
 }
 

@@ -1763,9 +1763,17 @@ export class Enemy extends Entity {
       const R = Enemy.RANGED_TABLE[this.vanillaId];
       const fireAt = R.burst ? R.cooldown - 1 : R.cooldown >> 1; // 292 在 num163-1 连发（cs:59967）
       const spread = R.spread ?? 40;
+      // num168 下坠补偿（cs:60046）：定值或每发 [lo,hi] 区间随机（468 :59727-59730）
+      const dropOf = () => Array.isArray(R.drop)
+        ? R.drop[0] + Math.random() * (R.drop[1] - R.drop[0])
+        : (R.drop ?? 0.1);
+      // 解除瞄准门的"下坠补偿 > 0"判定（cs:60015 !flag17）——区间型取上界判定
+      const dropCanDrop = Array.isArray(R.drop) ? R.drop[1] > 0 : (R.drop ?? 0.1) > 0;
+      // :60020-60024 瞄准减速 vx×0.9——flag16=true 族跳过（468 非日食 :60026-60029）
+      const aimDecel = !(R.aimDecelOffEclipse && !game.world.clock.eclipse);
       if (this.ai3 > 0) {           // 瞄准中：减速 + 半程发射
         if (this.ai0 > 0) this.ai0--;
-        this.vx *= 0.9;
+        if (aimDecel) this.vx *= 0.9;
         this.facing = this.seekDirX(player);
         if (this.ai0 === fireAt && this.ai0 > 0) {
           const ox = this.cx, oy = this.cy + (R.oy ?? 0);
@@ -1774,14 +1782,14 @@ export class Enemy extends Entity {
             // 预判点（cs:59700-59790）：目标中心 + 下坠补偿（默认 |dx|×0.1，各 type 修正）
             // + 散布（默认 ±40，291 狙击 ±8）——弹体直飞（Dart 敌我对全敌对）
             let tx = player.cx - ox;
-            let ty = player.cy - oy - Math.abs(tx) * (R.drop ?? 0.1);
+            let ty = player.cy - oy - Math.abs(tx) * dropOf();
             tx += Math.random() * spread * 2 - spread;
             ty += Math.random() * spread * 2 - spread;
             this.shootDart(game, ox, oy, tx, ty, R.speed, R.dmg, R.proj);
           }
         }
         // 移动/冷却尽 → 解除瞄准（cs:60005-60009）
-        if ((this.vy !== 0 && (R.drop ?? 0.1) > 0) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
+        if ((this.vy !== 0 && dropCanDrop) || this.ai0 <= 0) { this.ai3 = 0; this.ai0 = 0; }
       } else if (this.vy === 0 && this.ai0 <= 0 && !player.dead && this.onGround) {
         // 开瞄（cs:60013-60095）：视线 + 距离 < 射程。
         // ★ cs:60036-60039 idle 门：目标玩家待机（原版 stealth==0 && itemAnimation==0，
@@ -1932,18 +1940,22 @@ export class Enemy extends Entity {
   /** AI_003 远程战士参数（NPC.cs:59464-60095 各 type 修正汇总）：
    *  cooldown=蓄力时长（num163，半程发射 num165）/ speed=弹速（num166）/
    *  dmg=弹伤（num171）/ range=开瞄距离（num181 默认 700）/
-   *  drop=下坠补偿系数（num168，默认 0.1；0=直射）/ spread=散布 ±px（num167 后修正）/
-   *  oy=枪口 Y 偏移 / burst=连发数（292 战术骷髅 ×4 各自重新瞄准，cs:59967） */
+   *  drop=下坠补偿系数（num168，默认 0.1；0=直射；[lo,hi] = 每发 rand(lo..hi)）/
+   *  spread=散布 ±px（num167 后修正）/ oy=枪口 Y 偏移 / burst=连发数（292 战术骷髅
+   *  ×4 各自重新瞄准，cs:59967）/ aimDecelOffEclipse=非日食不因瞄准减速（468
+   *  :60026-60029 flag16 门） */
   private static readonly RANGED_FIGHTERS = new Set([
     111, 214, 215, 216,                       // 入侵：哥布林弓手/海盗三件
     110, 206, 290, 291, 292, 293,             // 骷髅弓手/冰鱼人/圣骑士/神射/战术/爆破
     449, 450, 451, 452, 481,                  // 投骨骷髅×4/希腊骷髅
     498, 499, 500, 501, 502, 503, 504, 505, 506, // 蝾螈族
     379, 380,                                 // 拜月教弓手（cs:56575 仪式待机解除后射击，num163=80）
+    468,                                      // 蝇博士 Dr. Man Fly（日食，cs:59464 表内）
   ]);
   private static readonly RANGED_TABLE: Record<number, {
     cooldown: number; speed: number; dmg: number; range: number;
-    drop?: number; spread?: number; oy?: number; burst?: number;
+    drop?: number | [number, number]; spread?: number; oy?: number; burst?: number;
+    aimDecelOffEclipse?: boolean;
     /** 原版弹型（NPC.cs:59797 起各 num172：贴图/旋转/重力见 Dart.ts DART_STYLE） */
     proj: number;
   }> = {
@@ -1973,6 +1985,11 @@ export class Enemy extends Entity {
     504: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
     505: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
     506: { cooldown: 70, speed: 7, dmg: 14, range: 190, drop: 0.01, spread: 12, oy: -8, proj: 572 },
+    // 蝇博士 Dr. Man Fly（cs:59493 num163=70 默认 / :59662-59665 num166=7.5 /
+    // :59727-59730 num168=rand(10..49)×0.01 / :59815-59818 num171=50 /
+    // :59861-59864 num172=501 / :60072-60075 num181=400；:60026-60029 非日食不减速）
+    468: { cooldown: 70, speed: 7.5, dmg: 50, range: 400, drop: [0.1, 0.49], spread: 40,
+      proj: 501, aimDecelOffEclipse: true },
   };
 
   /** 蜘蛛家族地面↔爬墙形态对照（NPC.cs:59276-59289 地→墙 / :29994-30008 墙→地）：

@@ -103,6 +103,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
       usedAmbrosia: player.usedAmbrosia,
     },
     anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
+    hideInfo: player.hideInfo ?? undefined,     // PL:776 hideInfo[13](DrawInfoAccs 行开关)
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);
 }

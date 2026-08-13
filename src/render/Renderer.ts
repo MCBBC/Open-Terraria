@@ -113,7 +113,7 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
-import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
+import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { mountFallbackColor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
@@ -4186,8 +4186,13 @@ export class Renderer {
       const profileImg = sheetPath ? this.atlas.ensureVImage(sheetPath) : null;
       let r: DrawRect | null;
       if (profileImg) {
-        // 帧步长 = 贴图高 / npcFrameCount（FindFrame NPC.cs:67301-67302 同式）
-        const count = this.atlas.vnpcMeta(n.vanillaId)?.count ?? 1;
+        // 帧步长 = 贴图高 / npcFrameCount（FindFrame NPC.cs:67301-67302 同式）。
+        // ★count 回退 vanilla-npcs.json frames（2026-08-13 整条贴图走路根因）：
+        // atlas.vnpcMeta 只覆盖 vanilla.json npcs 的 20 条特殊条目,城镇 NPC
+        // （22 向导等）不在其中 → null→??1 → 帧高=整条 1456px=每帧画全表;
+        // 旧 vnpc() 路径有懒加载回退故无此病。档案表帧数与 npcFrameCount 同源
+        const count = this.atlas.vnpcMeta(n.vanillaId)?.count
+          ?? VANILLA_NPCS[String(n.vanillaId)]?.frames ?? 1;
         const fh = Math.floor(profileImg.height / count);
         const idx = Math.max(0, Math.min(count - 1, n.frame));
         r = { img: profileImg, sx: 0, sy: idx * fh, sw: profileImg.width, sh: fh };

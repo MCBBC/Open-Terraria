@@ -144,6 +144,8 @@ export interface SaveData {
     golferScoreAccumulated?: number;
     /** 渔夫任务完成数（Player.anglerQuestsFinished :1790;旧档缺省 0——奖励阶梯据此） */
     anglerQuestsFinished?: number;
+    /** 信息显示开关(Player.hideInfo[13] :776;按下标=图标序;旧档缺省全 false) */
+    hideInfo?: boolean[];
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
     /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
