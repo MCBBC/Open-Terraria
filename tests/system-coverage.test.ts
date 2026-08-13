@@ -122,10 +122,10 @@ describe('NPC 快乐度/商店价格（ShopHelper）', () => {
     const r = computeHappiness({ ...baseHappy });
     expect(r.priceMul).toBe(1);
   });
-  it('无家/离家>120/危险群系 → 1000（:111-122）', () => {
-    expect(computeHappiness({ ...baseHappy, homeless: true }).priceMul).toBe(1000);
-    expect(computeHappiness({ ...baseHappy, distFromHome: 121 }).priceMul).toBe(1000);
-    expect(computeHappiness({ ...baseHappy, playerInCorrupt: true }).priceMul).toBe(1000);
+  it('无家/离家>120/危险群系 → 置 1000 后 LimitAndRound 钳 1.5（:111-122 + :182-187）', () => {
+    expect(computeHappiness({ ...baseHappy, homeless: true }).priceMul).toBe(1.5);
+    expect(computeHappiness({ ...baseHappy, distFromHome: 121 }).priceMul).toBe(1.5);
+    expect(computeHappiness({ ...baseHappy, playerInCorrupt: true }).priceMul).toBe(1.5);
   });
   it('拥挤：同屋>3 每人 ×1.05（5 人=×1.10 圆整）；宽敞 ×0.95（:126-157）', () => {
     expect(computeHappiness({ ...baseHappy, npcsInHouse: 5 }).priceMul).toBe(1.1);
@@ -137,9 +137,9 @@ describe('NPC 快乐度/商店价格（ShopHelper）', () => {
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 142, zones: { ...baseHappy.zones, forest: false, snow: true } }).priceMul).toBe(0.88);
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 142, zones: { ...baseHappy.zones, desert: true } }).priceMul).toBe(1.12);
   });
-  it('公主在场全员 ×0.94；公主自己孤单<2 → 1000（:128-137/:37-40）', () => {
+  it('公主在场全员 ×0.94；公主自己孤单<2 → 钳 1.5（:128-137/:37-40）', () => {
     expect(computeHappiness({ ...baseHappy, nearby: [663] }).priceMul).toBe(0.94); // 同屋公主 :37-40
-    expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, npcsInVillage: 1 }).priceMul).toBe(1000);
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, npcsInVillage: 1 }).priceMul).toBe(1.5);
     // 公主开店：同屋池随机抽 3 各 Love（:15-36；rand 固定 → 确定性）
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, nearby: [17, 18, 19], npcsInHouse: 3, rand: () => 0 }).priceMul).toBe(0.75); // 0.88³ 钳 0.75
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, nearby: [17], npcsInHouse: 1, rand: () => 0 }).priceMul).toBe(0.88); // 不足 3 全 Love
@@ -158,5 +158,57 @@ describe('NPC 快乐度/商店价格（ShopHelper）', () => {
   it('旅行商/骷髅商/老人 → 1.0 恒定（:107-110）', () => {
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 368, homeless: true }).priceMul).toBe(1);
     expect(computeHappiness({ ...baseHappy, npcVanillaId: 453, homeless: true }).priceMul).toBe(1);
+  });
+  it('群系偏好只取好感最强一条（BiomePreferenceListTrait :40-55）：地下雪原的机械师 → 只 Like ×0.94', () => {
+    const zones = { ...baseHappy.zones, snow: true, underground: true };
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 124, zones }).priceMul).toBe(0.94);
+    // 双群系同时命中时报告也只发一行 LikeBiome
+    const r = computeHappiness({ ...baseHappy, npcVanillaId: 124, zones });
+    expect(r.report.filter((l) => l.key.endsWith('Biome'))).toHaveLength(1);
+    expect(r.report[0].key).toBe('TownNPCMood_Mechanic.LikeBiome');
+    expect(r.report[0].biomeNameKey).toBe('Snow');
+  });
+  it('报告键 = TownNPCMood_<Internal>.<子键>（AddHappinessReportText :194-203）', () => {
+    // 无家商人：NoHome 行 + 钳 1.5；恶群系 HateBiome 带 BiomeName 键
+    const r1 = computeHappiness({ ...baseHappy, homeless: true });
+    expect(r1.report.some((l) => l.key === 'TownNPCMood_Merchant.NoHome')).toBe(true);
+    const r2 = computeHappiness({ ...baseHappy, playerInDungeon: true });
+    expect(r2.report.some((l) => l.key === 'TownNPCMood_Merchant.HateBiome' && l.biomeNameKey === 'Dungeon')).toBe(true);
+    // 关系行带 NPCName 替换目标；公主动态 Love 用 LoveNPC_<目标内名>
+    const r3 = computeHappiness({ ...baseHappy, npcsInHouse: 1, nearby: [18] });
+    expect(r3.report.some((l) => l.key === 'TownNPCMood_Merchant.LikeNPC' && l.npcId === 18)).toBe(true);
+    const r4 = computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, nearby: [17], npcsInHouse: 1, rand: () => 0 });
+    expect(r4.report.some((l) => l.key === 'TownNPCMood_Princess.LoveNPC_Merchant' && l.npcId === 17)).toBe(true);
+    // 无修正 → Content 兜底行（非空报告 → 对话面板显示快乐度按钮）
+    const r5 = computeHappiness({ ...baseHappy });
+    expect(r5.report).toEqual([{ key: 'TownNPCMood_Merchant.Content' }]);
+    // 368/453/37 空报告（ReportHappiness.Condition 不显示按钮）
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 368 }).report).toHaveLength(0);
+  });
+});
+
+// ============ 梳妆台/人体模型注册对账（Main.OpenClothesWindow / TileID 128/269/470） ============
+import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
+import { ITEM_BY_KEY, ITEM_DEFS } from '../src/data/items';
+import { FURNITURE_TILE_KIND } from '../src/world/FurnitureItems';
+
+describe('梳妆台更衣窗 / 人体模型挂物族登记', () => {
+  it('梳妆台 tile 88 已注册（dresser）', () => {
+    expect(TILE_BY_KEY['dresser']).toBeDefined();
+  });
+  it('模特 498 放置 tile 470（Item.cs:7291-7302 createTile 二次赋值取 470）', () => {
+    const def = ITEM_DEFS[ITEM_BY_KEY['vi_498_mannequin']];
+    expect(def?.tile).toBe('v_470_mannequins');
+    expect(def?.placeStyle).toBe(0);
+  });
+  it('FURNITURE_TILE_KIND 覆盖 470/471/395/475/520/698，且不含 legacy 128/269', () => {
+    // 128/269 是 1.4 前遗留 tile（无 TileEntity）：仅剩 CheckMan 支撑检测
+    //（WorldGen.cs:46553-46590 失撑掉 498）+ KillTile 装备帧兑换（:63603-63650），
+    // 不是 display doll，不进挂物族表
+    expect(FURNITURE_TILE_KIND.get(TILE_BY_KEY['v_470_mannequins'])).toBe('display_doll');
+    expect(FURNITURE_TILE_KIND.has(TILE_BY_KEY['v_128_mannequin_legacy'])).toBe(false);
+    expect(FURNITURE_TILE_KIND.has(TILE_BY_KEY['v_269_womannequin_legacy'])).toBe(false);
+    expect(TILE_DEFS[TILE_BY_KEY['v_128_mannequin_legacy']]?.vanilla?.sheet).toBe(128);
+    expect(TILE_DEFS[TILE_BY_KEY['v_269_womannequin_legacy']]?.vanilla?.sheet).toBe(269);
   });
 });

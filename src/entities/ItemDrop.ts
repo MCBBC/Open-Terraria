@@ -41,6 +41,10 @@ export class ItemDrop extends Entity {
   /** 原版 Item.noGrabDelay：玩家主动抛出的物品 =100t（Player.cs:4990/:4996
    *  DropSelectedItem），期间抛出者拾不回；普通战利品 0（走全局 PICKUP_DELAY） */
   noGrabDelay = 0;
+  /** 实例级放置样式（旗 place_v_91:掉旗时注入 bannerId;拾取随实例流转——
+   *  ItemDef.placeStyle 是类级,多 style 单物品需实例位,2026-08-13） */
+  placeStyle?: number;
+  prefix?: number;   // 词缀（Item.prefix,随实例流转）
   // ---- 微光（WorldItem.cs:25-27/434/486-558/806-840/1781-1931）----
   /** 浸在微光中（Collision.shimmer 盒命中，:434/:944） */
   shimmerWet = false;
@@ -99,7 +103,7 @@ export class ItemDrop extends Entity {
           return;
         }
         const before = this.stack;
-        const left = player.inv.add(this.itemId, this.stack);
+        const left = player.inv.add(this.itemId, this.stack, this.prefix, this.placeStyle);
         // 成就：拾取通知（AchievementsHelper.NotifyItemPickup——仅入包部分；
         //  WorldItem 拾取路径，合成/初始装备不经此）
         if (left < before) {

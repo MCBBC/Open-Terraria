@@ -9,12 +9,17 @@
 //     FillNpcRarities（:1072-1083）对每个 id 实例化 NPC 后 SetDefaults(i, Classic)
 //     再读这些字段算星数；CreateBestiarySortingIds 的键 7/8（aiStyle/战力）同源
 //     （NpcsByNetId = SetDefaults(i)，Main.Difficulty=Classic 时 ScaleStats 乘数恒 1）。
-//     取值 = 1456 SetDefaults if/else-if type 链求值：
-//       · 链内嵌套 if（type == / num2 == 的逐 id 分支、switch (type) case）按精确 id 求值
-//         （Tim 45 / 沙漠食尸鬼 630 等的 !Main.hardMode 肉前段、金蝴蝶 601 rarity=3 等都在这里）
+//     取值 = 1456 SetDefaults type 链求值：
+//       · 链内嵌套 if（type == / num2 == 逐 id 分支、switch (type) case、else-if 链）
+//         按精确 id 求值（骷髅 305-314 逐档三围、史莱姆王护卫 525-527 += 增量、
+//         金蝴蝶 601/金蜻蜓 605/金龟 613/金鼠 627 rarity=3 都在这里）
 //       · 世界态旗标在 ContentSamples.Initialize 时全为默认：Main.hardMode/remixWorld/
 //         getGoodWorld/expertMode/masterMode/zenithWorld/tenthAnniversaryWorld/downedGolemBoss/
-//         downedMechBossAny = false（!Main.hardMode 反之为真，按此求值）
+//         downedMechBossAny = false（!Main.hardMode 反之为真——85 独角兽 / 629 冰冻傀儡
+//         的肉前三围 30/12/300 即由此段生效，与原版读数一致）
+//       · 负 netID 变体走 SetDefaultsFromNetId（:7633+）：damage/defense(/rarity) 按 case
+//         覆写，lifeMax/aiStyle/boss 取母体（NetIdMap :10445；case 内 `life =` 是当前
+//         生命值不改 lifeMax）
 //       · 5 个无独立链分支的 id（76/146/403/404/408）全部在 NPCBestiaryDrawOffset Hide 表
 //         中（不进图鉴），按零值登记不影响任何消费方
 //     注意：src/data/bestiaryStatics.generated.ts 头注亦署名本脚本，但其原始生成逻辑已

@@ -227,3 +227,49 @@ export class NpcShop {
 
   get isOpen(): boolean { return this.panel !== null; }
 }
+
+/** NPC 快乐度详情浮层（ReportHappiness.Interact：NPCInteractions.cs:303-313）。
+ *  原版点「快乐度」按钮后把 HappinessReport 整段写进 npcChatText + 头像弹跳；
+ *  DOM 对话框台词区定高，此处等价为独立浮层逐条列出，并附价格倍率
+ *  （Main.cs:41240 priceAdjustment.ToString("P0") 同口径）。 */
+export class NpcHappinessPanel {
+  private panel: HTMLElement | null = null;
+  private escHandler: ((e: KeyboardEvent) => void) | null = null;
+
+  constructor(private parent: HTMLElement, private onClose: () => void) {}
+
+  open(info: HappinessInfo) {
+    this.close();
+    const face = happinessFace(info.priceMul);
+    const panel = document.createElement('div');
+    panel.className = 'sw-happy-panel';
+    const rows = (info.lines.length ? info.lines : ['—'])
+      .map((t) => `<div class="sw-happy-line">${t}</div>`).join('');
+    panel.innerHTML = `
+      <div class="sw-happy-head">
+        <div class="sw-happy-title">${info.name}</div>
+        <span class="sw-happy-price ${face.cls}">${face.face} ${happinessPct(info.priceMul)}</span>
+      </div>
+      <div class="sw-happy-list">${rows}</div>
+      <div class="sw-happy-foot"><button class="sw-happy-close" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;
+    (panel.querySelector('.sw-happy-close') as HTMLElement).addEventListener('click', () => this.close());
+    this.parent.appendChild(panel);
+    this.panel = panel;
+    // 捕获阶段拦截 Esc：只关浮层，不连带关掉背后的对话框
+    this.escHandler = (e: KeyboardEvent) => {
+      if (e.code === 'Escape') { e.stopImmediatePropagation(); this.close(); }
+    };
+    window.addEventListener('keydown', this.escHandler, true);
+  }
+
+  close() {
+    const had = this.panel !== null;   // 重开（open 首行 close）不触发回调
+    if (this.escHandler) window.removeEventListener('keydown', this.escHandler, true);
+    this.escHandler = null;
+    this.panel?.remove();
+    this.panel = null;
+    if (had) this.onClose();
+  }
+
+  get isOpen(): boolean { return this.panel !== null; }
+}

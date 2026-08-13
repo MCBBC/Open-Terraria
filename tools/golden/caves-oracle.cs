@@ -1731,6 +1731,33 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             if (typ[vti] == 53 && (!vs1 || !vs2)) typ[vti] = 397;
         }
     }
+    // placeTight（ShimmerPass.ts:227）哈希镜像：两掷恒耗 + 钟乳石 1x1/1x2 放置
+    Action<int, int> PlaceTightMirror = (tx, ty) =>
+    {
+        int ti0 = ty * W + tx;
+        if (liq[ti0] > 0 && liqT[ti0] == 3) return;                 // shimmer（oracle 编码 3）
+        if (act[ti0] != 0 && typ[ti0] == 231) return;               // 幼虫
+        bool preferSmall = (int)r.Next(2) == 0;
+        int variation = (int)r.Next(3);
+        if (tx < 0 || tx >= W || ty < 0 || ty + 1 >= H) return;
+        Func<int, int, int> SheetOf = (sx, sy) => (sx < 0 || sx >= W || sy < 0 || sy >= H || act[sy * W + sx] == 0) ? -1 : typ[sy * W + sx];
+        Func<int, bool> BaseOk = a => a == 1 || a == 117 || a == 25 || a == 203 || a == 396 || a == 397 || a == 368 || a == 367 || a == 147 || a == 161 || a == 163 || a == 164 || a == 200;
+        Action<int, int> Put165 = (px2, py2) => { int pi = py2 * W + px2; typ[pi] = 165; act[pi] = 1; };
+        Func<int, int, bool> SolidAt = (sx, sy) => sx >= 0 && sx < W && sy >= 0 && sy < H && act[sy * W + sx] != 0 && SOLID.Contains(typ[sy * W + sx]);
+        // 垂挂：上方实心 + 本格/下格净空
+        if (SolidAt(tx, ty - 1) && act[ti0] == 0 && act[(ty + 1) * W + tx] == 0)
+        {
+            int above = SheetOf(tx, ty - 1);
+            if (BaseOk(above)) { Put165(tx, ty); if (!preferSmall) Put165(tx, ty + 1); }
+            if (above == 225) Put165(tx, ty);
+            return;
+        }
+        // 地面：下方实心 + 本格/上格净空
+        if (!SolidAt(tx, ty + 1) || act[ti0] != 0 || act[(ty - 1) * W + tx] != 0) return;
+        int below = SheetOf(tx, ty + 1);
+        if (BaseOk(below)) { if (preferSmall) Put165(tx, ty); else { Put165(tx, ty - 1); Put165(tx, ty); } }
+        if (below == 225) Put165(tx, ty);
+    };
     for (int wk = -20; wk < dW + 20; wk++)
     {
         for (int wl = -20; wl < dH + 20; wl++)
@@ -1759,8 +1786,10 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             else if (wFlag && (int)r.Next(5) == 0) { PlaceDesertDeco(wx, wy - 1, 484, 2, 2); }
             else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0)
             {
-                if (wFlag) PlaceDesertDeco(wx, wy - 1, 165, 1, 2);
-                else PlaceDesertDeco(wx, wy + 2, 165, 1, 2);
+                // ★2026-08-13：165 改走 placeTight 镜像（JS ShimmerPass.placeTight 1:1，
+                // DesertPass 13:21 版对齐）——锚=py+(flag?-1:+1)、shimmer/幼虫门、
+                // Next(2)+Next(3) 两掷恒耗、1x1/1x2 钟乳石格效应（哈希只看 type/act）
+                PlaceTightMirror(wx, wFlag ? wy - 1 : wy + 1);
             }
             else if (wFlag && (int)r.Next(5) == 0) { int wS2 = (int)r.Next(6); PlaceDesertDeco(wx, wy - 1, 187, 3, 2); }
         }

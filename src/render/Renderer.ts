@@ -2856,18 +2856,122 @@ export class Renderer {
     });
   }
 
-  /** 668 鹿角怪（Main.cs DrawNPCDirect_Deerclops :26211-26260 + FindFrame case 668 :67390-67501）：
-   *  NPC_668.png 1090×1200 = 5 列×5 行（218×240/格），Frame(5,5,idx/5,idx%5,2,2)——
-   *  2px padding（源格各缩 2）；锚 Bottom、origin(106 或 214-106, 236-4)、贴图朝右。
-   *  spriteDirection==1 特判即 origin.X=106（朝左取 214-106），并入 drawNpcGrid anchorPx。
-   *  未实装：localAI[3]>0 出生红雾/旋转、ai0∈{7,8} 紫电 tint+5 层重影（:26243-26260） */
+  /** 668 鹿角怪（Main.cs DrawNPCDirect_Deerclops :26211-26295 全层 + FindFrame case 668
+   *  :67390-67501）：NPC_668.png 1090×1200 = 5 列×5 行（218×240/格），
+   *  Frame(5,5,idx/5,idx%5,2,2) 2px padding；锚 Bottom、origin(106 或 214-106, 236-4)、
+   *  贴图朝右（spriteDirection==1 → origin.X=106）。
+   *  全层 1:1：①localAI[3]>0 出生红雾双环绕（半径 (lai3/36)²×20，角速 GT×10，
+   *  色值 (80,0,0)×0.5、alpha×(1-r²/2)，:26235-26253）②本体（紫电 tint：
+   *  Lerp(白,(50,0,160),Remap(lai3,0,20,0,1))，alpha×(1-r²)，:26255-26262）③ai0∈{7,8}
+   *  消散：num7=Remap(ai1,20,60,0,2) 三角波再 lerp 紫 ×(1-num7)，5 层重影（双轨道
+   *  80n² 与 80n²+30j·n²，角速 GT×6 / GT×3·j·0.5，色 ×0.5，:26263-26283）
+   *  ④Extra_245 前层红雾（(255,30,30,66)×Opacity×num12×0.25×(1-num7)，环绕半径
+   *  r²×4，:26285-26295）。GT=GlobalTimeWrappedHourly（进程秒%3600，Main.cs:16777） */
   private drawDeerclopsGrid(e: Enemy) {
     const img = this.atlas!.ensureVImage('vanilla/NPC_668.png');
     if (!img) return;
     const idx = deerclopsNextFrame(this.npcGridFrame(e), { ai0: e.ai0, vx: e.vx, vy: e.vy });
-    this.drawNpcGrid(e, img, 5, 5, idx, 218, 240, {
-      perRow: 5, padX: 2, padY: 2, anchorPx: 106, originYOff: 4, mirrorTexFaces: 'right',
-    });
+    const col = Math.floor(idx / 5), row = idx % 5;
+    const sx = col * 218 + 2, sy = row * 240 + 2, sw = 214, sh = 236;
+    const frame = { img, sx, sy, sw, sh };
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;   // NPC.Opacity
+    const facingRight = e.facing > 0;
+    const mirrored = !facingRight;                                        // 贴图朝右
+    const originX = facingRight ? 106 : sw - 106, originY = sh - 4;
+    const GT = (performance.now() / 1000) % 3600;
+    // ---- 状态量（:26227-26270）----
+    const lai3 = e.lai3;
+    const r = lai3 > 0 ? lai3 / 36 : 0;                 // num6（红雾进度）
+    const r2 = r * r;                                   // num3
+    const r1 = lai3 > 0 ? remap(lai3, 0, 20, 0, 1) : 0; // 紫电 Remap
+    let num7 = 0;
+    if (e.ai0 === 7 || e.ai0 === 8) {
+      // Remap(ai1,20,60,0,2)（:26265）区外钳制
+      num7 = e.ai1 <= 20 ? 0 : e.ai1 >= 60 ? 2 : ((e.ai1 - 20) / 40) * 2;
+      if (num7 > 1) num7 = 2 - num7;                    // 三角波 0→1→0
+    }
+    const bodyAlpha = opacity * (1 - r2) * (1 - num7);  // ①透明环 + ③消散衰减
+    const tPurple = r1 + num7 - r1 * num7;              // 两段 Lerp 链的合成系数
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.translate(e.cx, e.y + e.h);
+    ctx.scale(scale * (mirrored ? -1 : 1), scale);
+    const drawFrame = (c: HTMLCanvasElement, dx: number, dy: number, alpha: number) => {
+      ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+      ctx.drawImage(c, -originX + dx, -originY + dy, sw, sh);
+    };
+    // ① 出生红雾双环绕（:26245-26253）：num2=2 层,(0,1).Rot(i·π + GT·10) × r²·20
+    //    → 偏移 = (-sinθ, cosθ)·R；色 value2=(80,0,0)×0.5,alpha×(1-r²/2)
+    if (lai3 > 0) {
+      const red = this.lerpSprite('deer-red', frame, [40, 0, 0], 1);
+      const a = (128 / 255) * (1 - r2 * 0.5) * opacity;
+      for (let i = 0; i < 2; i++) {
+        const th = i * Math.PI + GT * 10;
+        const R = r2 * 20;
+        drawFrame(red, -Math.sin(th) * R, Math.cos(th) * R, a);
+      }
+    }
+    // ② 本体（紫电 tint 链）:26284
+    const body = this.lerpSprite('deer-body', frame, [50, 0, 160], tPurple);
+    drawFrame(body, 0, 0, bodyAlpha);
+    // ③ ai0∈{7,8} 五层重影（:26272-26282）：双轨道,角速 GT·6 / GT·3·(j·0.5)
+    if (e.ai0 === 7 || e.ai0 === 8) {
+      const n9 = num7 * num7;
+      for (let j = 0; j < 5; j++) {
+        const a1 = j * (Math.PI * 2) / 5 + GT * 6;
+        const a2 = j * (Math.PI * 2) / 5 + GT * 3 * (j * 0.5);
+        const R1 = 80 * n9, R2 = 80 * n9 + 30 * j * n9;
+        const dx = Math.cos(a1) * R1 + Math.cos(a2) * R2;
+        const dy = Math.sin(a1) * R1 + Math.sin(a2) * R2;
+        drawFrame(body, dx, dy, bodyAlpha * 0.5);       // color2 × 0.5
+      }
+    }
+    // ④ Extra_245 前层红雾（:26285-26295）：(255,30,30,66)×Opacity×num12×0.25×(1-num7),
+    //    num2 层环绕半径 r²×4——原版以【本体帧 rect】画 Extra_245 贴图（整图按帧矩形缩放）
+    if (lai3 > 0) {
+      const fog = this.atlas!.ensureVImage('vanilla/Extra_245.png');
+      if (fog) {
+        const num12 = Math.max(0, Math.min(1, lai3 / 20));   // Remap(lai3,0,20,0,1)
+        const fa = (66 / 255) * opacity * num12 * 0.25 * (1 - num7);
+        const fogT = this.lerpSprite('deer-fog', { img: fog, sx: 0, sy: 0, sw: fog.width, sh: fog.height }, [255, 30, 30], 1);
+        for (let k = 0; k < 2; k++) {
+          const th = k * Math.PI + GT * 10;
+          const R = r2 * 4;
+          drawFrame(fogT, -Math.sin(th) * R, Math.cos(th) * R, fa);
+        }
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+
+  /** 逐像素 Lerp 染色（DrawData Color.Lerp 语义）：白底向 targetRGB 按 t 偏移,
+   *  保留源 alpha。缓存键 t 量化 1/64 防连续值打爆。与 tintedSprite(乘法)分职 */
+  private lerpSprite(
+    key: string, frame: { img: CanvasImageSource; sx: number; sy: number; sw: number; sh: number },
+    target: [number, number, number], t: number,
+  ): HTMLCanvasElement {
+    const tq = Math.round(t * 64) / 64;
+    const k = `lerp|${key}|${frame.sx},${frame.sy}|${target.join(',')}|${tq}`;
+    let c = this.tintCache.get(k);
+    if (c) return c;
+    c = document.createElement('canvas');
+    c.width = Math.max(1, frame.sw); c.height = Math.max(1, frame.sh);
+    const cx = c.getContext('2d')!;
+    cx.drawImage(frame.img as CanvasImageSource, frame.sx, frame.sy, frame.sw, frame.sh, 0, 0, c.width, c.height);
+    const d = cx.getImageData(0, 0, c.width, c.height);
+    const px = d.data;
+    for (let i = 0; i < px.length; i += 4) {
+      if (px[i + 3] === 0) continue;
+      px[i] += (target[0] - px[i]) * tq;
+      px[i + 1] += (target[1] - px[i + 1]) * tq;
+      px[i + 2] += (target[2] - px[i + 2]) * tq;
+    }
+    cx.putImageData(d, 0, 0);
+    if (this.tintCache.size > 1024) this.tintCache.clear();
+    this.tintCache.set(k, c);
+    return c;
   }
 
   private drawMoonLordCore(e: Enemy, entities: unknown[]) {
@@ -3734,6 +3838,7 @@ export class Renderer {
    *  各表为单帧捆绑姿态（534 是 8 帧敌怪表、589 是 13 帧表），FindFrame 无专属 case → 恒帧 0 */
   private static readonly BOUND_NPC_SHEET: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354, golfer: 589, tax_collector: 534,
+    town_slime_old: 685, town_slime_clumsy: 686,   // 抖动的旧宝箱 / 笨笨气球史莱姆（绑缚态单帧）
   };
 
   /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）

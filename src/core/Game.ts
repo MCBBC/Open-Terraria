@@ -196,7 +196,7 @@ import { golferShopScoreGates } from '../world/golf/golferShop';
 import { MeteorChunk } from '../entities/MeteorChunk';
 import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
-import { computeHappiness, type BiomeZones } from '../data/vanillaHappiness';
+import { computeHappiness, npcMoodCategory, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine } from '../physics/LineOfSight';
@@ -480,7 +480,7 @@ export function dropInventoryOnDeath(
 }
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'close';
 
 export interface GameCallbacks {
   onWorldReady: () => void;
@@ -496,8 +496,11 @@ export interface GameCallbacks {
   onNpcDialogClose?: () => void;
   /** 哥布林重铸界面（Main.InReforgeMenu） */
   onReforgeOpen?: () => void;
-  /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币 */
-  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number) => void;
+  /** 商店面板(SetupShop):条目(图标由 UI 按原版 id 补)+ 当前铜币；
+   *  happinessMul = 快乐度价格乘子（Main.cs:41231-41243 标题旁表情/百分比显示用） */
+  onNpcShop?: (title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number, happinessMul?: number) => void;
+  /** NPC 快乐度详情浮层（ReportHappiness.Interact）：报告逐条文案 + 价格乘子 */
+  onNpcHappiness?: (info: { name: string; lines: string[]; priceMul: number }) => void;
   onBuffsChanged?: () => void;
   /** 读墓碑/告示牌（Sign 阅读界面） */
   onReadSign?: (text: string) => void;
@@ -509,6 +512,9 @@ export interface GameCallbacks {
   /** 硬核角色死亡消亡（Player.cs:38255 HardcoreDeathPenalty）：外观已标 hardcoreDead，
    *  由流程层回写 CharacterStore 持久化（原版 KillMeForGood :38173+ 直接删 .plr 档） */
   onHardcoreDeath?: (appearance: import('../player/Appearance').Appearance) => void;
+  /** 梳妆台右键更衣窗（Main.OpenClothesWindow Main.cs:43568）：1.4 起梳妆台不是
+   *  储物容器（Player.cs:32461-32479 直接开更衣界面），外观随角色存档持久化 */
+  onClothesWindow?: (appearance: import('../player/Appearance').Appearance) => void;
 }
 
 /** Main.time 口径（Main.cs 昼夜计时）：黎明 4:30（timeOfDay 0.25）归零，
@@ -1731,6 +1737,10 @@ export class Game implements GameHooks {
       get raining() { return !!w.weather?.raining; },
       get maxRaining() { return w.weather?.maxRaining ?? 0; },
       get windSpeedCurrent() { return w.weather?.windSpeedCurrent ?? 0; },
+      // Main.cs:6270-6294 UpdateTimeRate：快进中 desiredWorldTilesUpdateRate 恒 1（与
+      // dayRate=60 解耦）；否则 = dayRate（冻结 0 / TargetTimeRate × 全员熟睡 5）。
+      // 再走 GetWorldUpdateRate 封顶 24（WorldGen.cs:72056-72063）——睡觉 ×5 演化加速由此进链
+      get worldUpdateRate() { return Math.min(w.isFastForwardingTime() ? 1 : w.dayRate(), 24); },
       playerTile: () => ({ x: this.player.cx / TILE, y: this.player.cy / TILE }),
     });
     // Torch God 彩蛋事件（触发扫描/熄灭/弹幕 949/复燃/掉 5043）
@@ -1933,6 +1943,13 @@ export class Game implements GameHooks {
 
   /** 右键解救 bound NPC（原版 bound 类型右键 → 转正 + AI_007_UpdateSavedStates 置 saved 旗标） */
   private freeBoundNpc(npc: TownNPC): void {
+    // 685 抖箱保真门（Main.cs:42454 + TryFreeingElderSlime :42536-42553）：须消耗金钥匙 327
+    if (npc.npcKey === 'town_slime_old') {
+      if (!this.consumeVanillaItem(327)) {
+        this.cb.onToast?.(Lang.itemName(327) ? `需要${Lang.itemName(327)}！` : '需要金钥匙！');
+        return;
+      }
+    }
     npc.bound = false;
     const flagByKey: Record<string, string> = {
       goblin_tinkerer: 'savedGoblin', wizard: 'savedWizard', mechanic: 'savedMech',
@@ -4901,10 +4918,11 @@ export class Game implements GameHooks {
       this.input.mouseDown = false;
     } else if (heldDef && [556, 544, 557].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
-      // 机械三王召唤物(原版 556/544/557:需困难模式+夜晚)
-      if (!this.world.flags.hardMode) {
-        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MechNotAwake'));
-      } else if (this.world.clock.isDay) {
+      // 机械三王召唤物（原版 556/544/557，Player.cs:43117-43179 ItemCheck_：
+      //  门仅 !IsItDay()——**无 hardMode 门**，困难模式前的夜晚原版即可召唤
+      //  （系统语义如此,1:1 保留;此前多挂的 hardMode 合取已删）。
+      //  白天静默不可用（同原版不消耗））
+      if (this.world.clock.isDay) {
         this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightOnly'));
       } else {
         const mvid = viIdFromKey(heldDef.key);
@@ -5479,6 +5497,13 @@ export class Game implements GameHooks {
     return tx >= LX && tx <= HX && ty >= LY && ty <= HY;
   }
 
+  /** 祭坛矿脉 OreRunner 双掷（WorldGen.cs:49095 十周年 / :49099 常规）：
+   *  strength/steps 两参各独立取一次 genRand.Next(5,10)（[5,9] 闭区间）。
+   *  原版不是同一掷值同传两参——单 r 同传会把"脉粗细"与"生长步数"锁死相关。 */
+  static altarOreVeinRoll(rng: RNG): { strength: number; steps: number } {
+    return { strength: rng.int(5, 9), steps: rng.int(5, 9) };
+  }
+
   /** 砸祭坛 = 原版 KillTile case 26 → SmashAltar（WorldGen.cs:48949）1:1：
    *  altarCount%3 选矿档(0 钴/钯、1 秘银/山铜、2 精金/钛)，/3+1 为波次衰减；
    *  矿脉数 num3 = w/4200×310 − 85×档 ×0.85 ÷ 波次——钴档恒 ×1.05（:49008），
@@ -5486,7 +5511,8 @@ export class Game implements GameHooks {
    *  矿种按世界锁定（SavedOreTiers :48981-49030：每档首砸 roll 一次 genRand.Next(2)==0
    *  → 替代矿,此后全世界固定,随存档持久化 world.savedOreTiers——此前每砸重 roll
    *  会导致同世界混出钴+钯）；深度带按锁定矿种（:49033-49040：107/221=地表线、
-   *  108/222=岩层、111/223=(岩层×2+h)/3）；每脉 OreRunner Next(5,10) 恒定（:49045,
+   *  108/222=岩层、111/223=(岩层×2+h)/3）；每脉 OreRunner Next(5,10) 双掷恒定区间
+   *  （:49095 十周年/:49099 常规——strength/steps 各独立一掷，非同一值；
    *  旧实现的 5..9+w/4200 是误读）;最后生成 1-2 只幽灵(82)。祭坛 3×2 整体移除。
    *  计数存 world.altarCount（原版 WorldGen.altarCount 静态位，WorldFile.cs:1303/2100
    *  随存档持久化——跨会话保留；海盗入侵自然 roll 的 >0 门同源 Main.cs:64938） */
@@ -5535,8 +5561,10 @@ export class Game implements GameHooks {
     for (let k = 0; k < cap; k++) {
       const x = 100 + Math.floor(Math.random() * (st.w - 200));
       const y = Math.floor(band) + Math.floor(Math.random() * Math.max(1, st.h - 150 - Math.floor(band)));
-      const r = rng.int(5, 9);   // Next(5,10) 恒定区间(:49045)——旧 5..9+w/4200 系误读
-      tileRunner(st, rng, lastGenState() ?? { worldSurface: this.world.groundLevel, lavaLine: st.h - 200, waterLine: this.world.groundLevel } as never, x, y, { strength: r, steps: r, type: ore, addTile: true });
+      // 双掷（WorldGen.cs:49095 十周年 / :49099 常规）：OreRunner(i,j,strength,steps)
+      // 两参各独立取一次 genRand.Next(5,10)——单 r 同传两用会把脉粗细与长度锁死相关
+      const vein = Game.altarOreVeinRoll(rng);
+      tileRunner(st, rng, lastGenState() ?? { worldSurface: this.world.groundLevel, lavaLine: st.h - 200, waterLine: this.world.groundLevel } as never, x, y, { strength: vein.strength, steps: vein.steps, type: ore, addTile: true });
     }
     const wraiths = 1 + Math.floor(Math.random() * 2);
     for (let k = 0; k < wraiths; k++) {
@@ -6594,6 +6622,12 @@ export class Game implements GameHooks {
     if (!this.netCanEditTile()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectTiles')); return; }
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
+    // 实例级 placeStyle 覆盖（旗 place_v_91:实例存 bannerId,2026-08-13——类级
+    // itemDef.placeStyle 缺省 0 会把所有旗放成同一帧,旗 buff 解码失活）
+    const heldInst = this.player.inv.heldItem();
+    if (heldInst?.placeStyle !== undefined) {
+      itemDef = { ...itemDef, placeStyle: heldInst.placeStyle };
+    }
     // 距离
     const dx = tx - Math.floor(this.player.cx / TILE);
     const dy = ty - Math.floor(this.player.cy / TILE);
@@ -6700,7 +6734,16 @@ export class Game implements GameHooks {
         // 原版多格家具：帧用 18px 步长偏移（与 .wld 原生一致，渲染端直用）。
         // 原版帧语义（TileObject.Place L74-102）：frameY 从【顶行 = 0】向下递增；
         // ty 是顶部行（放置时鼠标指向顶部锚点）→ dy2=0 即顶行，frameY = dy2*18 正确
-        if (isVanillaStyle) {
+        if (def.vanilla?.sheet === 91) {
+          // 旗帜帧 = SceneMetrics 解码逆写（:420-443:frameX/18−21+行×111;贴图
+          // 1998×162=111 格宽/3 段。FurnitureStyle 表的 54 步制与解码不合——
+          // 放置旗解码失活的根因,2026-08-13 逆写修复）
+          const b = itemDef.placeStyle ?? 0;
+          let row = 0;
+          while (row < 3 && (b + 21 - 111 * row) * 18 >= 1998) row++;
+          const fx = Math.max(0, (b + 21 - 111 * row) * 18);
+          st.setTile(px, py, tileId, fx, row * 54 + dy2 * 18);
+        } else if (isVanillaStyle) {
           // placeStyle → 样式基偏移:权威布局表(FurnitureStyle.ts;竖排族写 Y,
           // 旧公式 style*fw*18 一刀切会把灯笼/蜡烛/吊灯等写成非法帧)
           const [bx2, by2] = furnitureStyleBase(def.vanilla?.sheet ?? -1, itemDef.placeStyle ?? 0, def.vanilla?.fw ?? 1);
@@ -6927,6 +6970,19 @@ export class Game implements GameHooks {
     //  world/FurnitureItems.ts）----
     if (FURNITURE_TILE_KIND.has(type)) {
       this.useFurnitureInteraction(tx, ty, FURNITURE_TILE_KIND.get(type)!);
+      return;
+    }
+    // ---- 梳妆台 tile 88（Player.cs:32409-32479 右键分支）----
+    // 1.4 起梳妆台不是储物容器：右键下半（frameY!=0）→ Main.OpenClothesWindow
+    //（Main.cs:43568 更衣界面：衣服样式+六色+音色，随角色档持久化）；上半（frameY==0）
+    // 仅是旧版残留的关箱路径（现代档在梳妆台位找不到 chest，无操作）。
+    if (type === TILE_BY_KEY['dresser']) {
+      const fy = st.frameY[st.idx(tx, ty)];
+      if (fy !== 0) {
+        this.closeNpcDialog();   // :32464 SetTalkNPC(-1) + 关牌/清聊天
+        if (this.player.appearance) this.cb.onClothesWindow?.(this.player.appearance);
+      }
+      this.input.rightDown = false;
       return;
     }
     // ---- 提取机（tile 219 普通版 / 642 叶绿版；Player.cs:41008-41049
@@ -8845,6 +8901,35 @@ export class Game implements GameHooks {
 
   // ================= 生成 =================
 
+  /** 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
+   *  近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685/686
+   *  json 缺条目，105/106/123/354 为真条目）。覆盖全部（2026-08-13 扩展：生成期
+   *  placeBoundRescueNpcs 移除后，123 机械师/354 造型师/589 高尔夫球手的链命中
+   *  也走本转换；534 税务员除外——原版是地狱敌怪 + 净化粉 Transform(441) 链）：
+   *    105 BoundGoblin(:1996) / 106 BoundWizard(:1999) / 685 BoundTownSlimeOld(:2002)
+   *    354 WebbedStylist(:1576) / 589 GolferRescue(:1600) / 123 BoundMechanic(:2563)
+   *  已在场则跳过——activeIds 的反查登记（BOUND_TOWN_NPC_ID）通常已在上游拦下，
+   *  此处双保险。返回 true = 已消费该 picked（调用方不再走通用放置） */
+  trySpawnBoundTownNpc(picked: Enemy): boolean {
+    const boundKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
+      : picked.vanillaId === 106 ? 'wizard'
+        : picked.vanillaId === 685 ? 'town_slime_old'
+          : picked.vanillaId === 686 ? 'town_slime_clumsy'
+          : picked.vanillaId === 354 ? 'stylist'
+            : picked.vanillaId === 589 ? 'golfer'
+              : picked.vanillaId === 123 ? 'mechanic' : null;
+    if (!boundKey) return false;
+    if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === boundKey)) return true;
+    // 落位：currentSpawnY = 落脚实心面（findSpawnTile 向下找的首个实心格，与
+    // placeBoundNpc 的"脚底上一格+1"同义）→ 脚底 = 该格顶。
+    // vanillaSpawner 在调用点（trySpawnEnemy 头部）必已初始化
+    const vs = this.vanillaSpawner!;
+    const tn = new TownNPC(boundKey, vs.currentSpawnX * TILE + 8, vs.currentSpawnY * TILE);
+    tn.bound = true;
+    this.entities.add(tn, 'npcs');
+    return true;
+  }
+
   private trySpawnEnemy() {
     // 联机模式：刷怪归房主权威（房主跑完整模拟，快照广播给访客；访客不本地刷怪）
     if (this.net && !this.net.policy.isHost) return;
@@ -8948,7 +9033,8 @@ export class Game implements GameHooks {
       p.buffs.has(BuffType.Calming), p.buffs.has(BuffType.Battle),
       townNPCs, w.clock.isDay,
       !!this.scene?.zoneCorrupt || !!this.scene?.zoneCrimson,
-      !!w.clock.bloodMoon);
+      !!w.clock.bloodMoon,
+      this.boss?.vanillaId === 113 && !this.boss.dead);   // wofNPCIndex>=0（:668 地狱压制门）
     if (nearby >= maxSpawns) return;
     // TrySpawnAnNPC L30：Main.rand.Next(spawnRate) != 0 拒绝（每帧 1/spawnRate 概率）
     if (Math.floor(Math.random() * spawnRate) !== 0) return;
@@ -8981,34 +9067,8 @@ export class Game implements GameHooks {
       this.entities.add(sm, 'npcs');
       return;
     }
-    // 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
-    // 近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685 json
-    // 缺条目，105/106/123/354 为真条目）。覆盖全部六只（2026-08-13 扩展：生成期
-    // placeBoundRescueNpcs 移除后，123 机械师/354 造型师/589 高尔夫球手的链命中
-    // 也走本转换；534 税务员除外——原版是地狱敌怪 + 净化粉 Transform(441) 链）：
-    //   105 BoundGoblin(:1996) / 106 BoundWizard(:1999) / 685 BoundTownSlimeOld(:2002)
-    //   354 WebbedStylist(:1576) / 589 GolferRescue(:1600) / 123 BoundMechanic(:2563)
-    // 已在场则跳过——activeIds 的反查登记（BOUND_TOWN_NPC_ID）通常已在上游拦下，
-    // 此处双保险
-    {
-      const boundKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
-        : picked.vanillaId === 106 ? 'wizard'
-          : picked.vanillaId === 685 ? 'town_slime_old'
-            : picked.vanillaId === 686 ? 'town_slime_clumsy'
-            : picked.vanillaId === 354 ? 'stylist'
-              : picked.vanillaId === 589 ? 'golfer'
-                : picked.vanillaId === 123 ? 'mechanic' : null;
-      if (boundKey) {
-        if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === boundKey)) return;
-        // 落位：currentSpawnY = 落脚实心面（findSpawnTile 向下找的首个实心格，与
-        // placeBoundNpc 的"脚底上一格+1"同义）→ 脚底 = 该格顶
-        const tn = new TownNPC(boundKey, this.vanillaSpawner.currentSpawnX * TILE + 8,
-          this.vanillaSpawner.currentSpawnY * TILE);
-        tn.bound = true;
-        this.entities.add(tn, 'npcs');
-        return;
-      }
-    }
+    // 绑缚救援族 → bound TownNPC（见 trySpawnBoundTownNpc；六+一只全表与门注释在那里）
+    if (this.trySpawnBoundTownNpc(picked)) return;
     // 放置：原版 SpawnNPC 直接落位；水生/蠕虫分支由链内返回的怪自带 AI 处理落脚
     const st = w.store;
     const ptx = this.vanillaSpawner.currentSpawnX;
@@ -9335,6 +9395,15 @@ export class Game implements GameHooks {
     // 图鉴聊天解锁（NPC.cs:45223 SetTalkNPC→RegisterChatStartWith：与城镇 NPC 对话即记）
     this.world.bestiary.registerChat(npc.vanillaId);
     this.achCheckBestiary();
+    // 快乐度快照（Player.SetTalkNPC Player.cs:4189-4193：GetShoppingSettings 一次算好，
+    // currentShoppingSettings 供商店价格/心情报告/成就共用）
+    this.dialogHappiness = this.computeShopHappiness(npc);
+    // 成就：与最大快乐度 NPC 对话（Player.cs:4195-4197 PriceAdjustment<=0.82 → event 20）
+    if (this.dialogHappiness.priceMul <= 0.82) {
+      this.achievements.handleSpecialEvent(20, {
+        statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana,
+      });
+    }
     npc.talking = true;  // 原版 AI_007:53721 对话中站定面向玩家
     npc.talkCooldown = 30;
     this.sfx.play('menuOpen'); // 对话面板打开音（原版 UI 面板开合语义 id 10/11）
@@ -9361,8 +9430,20 @@ export class Game implements GameHooks {
     }
     // 渔夫：任务交付（NPCInteractions.AnglerQuest.GetText = Lang.inter[64]）
     if (npc.vanillaId === 369) buttons.push({ id: 'quest', label: Lang.inter(64) });
+    // 快乐度（ReportHappiness，NPCInteractions.cs:289-314；注册序在全部商店/其它交互之后）：
+    // 无家 NPC 换成 RequestHome 不显示（NPC.CanShowHomelessText NPC.cs:96048-96060），
+    // 旅行商/骷髅商/老人 HappinessReport 为空也不显示
+    if (!this.canShowHomelessText(npc) && (this.dialogHappiness?.report.length ?? 0) > 0) {
+      buttons.push({ id: 'happiness', label: Lang.text('UI.NPCCheckHappiness') });
+    }
     buttons.push({ id: 'close', label: Lang.inter(52) });                                   // 关闭
     return buttons;
+  }
+
+  /** NPC.CanShowHomelessText（NPC.cs:96048-96060）：无家且非 37/368/453 → true
+   *  （此时 ReportHappiness 让位 RequestHome，快乐度按钮不显示） */
+  private canShowHomelessText(npc: TownNPC): boolean {
+    return !npc.home && npc.vanillaId !== 37 && npc.vanillaId !== 368 && npc.vanillaId !== 453;
   }
 
   /** 已开对话框的台词区重绘（交付结算后替换为 AnglerQuestChat 文案，不重开面板） */
@@ -9750,6 +9831,12 @@ export class Game implements GameHooks {
       return;
     }
     if (id === 'quest' && npc.vanillaId === 369) { this.anglerQuestTurnIn(); return; }
+    // 快乐度详情（ReportHappiness.Interact NPCInteractions.cs:303-313：音效 12 + 报告展示）
+    if (id === 'happiness') {
+      this.sfx.play('menuTick');
+      this.openNpcHappinessPanel();
+      return;
+    }
   }
 
   // ================= 渔夫任务链（Main.anglerQuest* + Player.GetAnglerReward）=================
@@ -9887,6 +9974,7 @@ export class Game implements GameHooks {
   closeNpcDialog(): void {
     if (this.dialogNpc) this.dialogNpc.talking = false;
     this.dialogNpc = null;
+    this.dialogHappiness = null;   // currentShoppingSettings = NotInShop（Player.cs:4189）
     this.sfx.play('menuClose');
     this.cb.onNpcDialogClose?.();
   }
@@ -10170,15 +10258,18 @@ export class Game implements GameHooks {
   private openNpcShop() {
     const npc = this.dialogNpc;
     if (!npc) return;
-    // 快乐度价格乘子（ShopHelper.GetShoppingSettings :48-60——开店瞬间快照）
-    this.shopHappinessMul = this.computeShopHappiness(npc).priceMul;
+    // 快乐度价格乘子：Player.SetTalkNPC（Player.cs:4189-4193）在开对话时快照
+    // currentShoppingSettings，开店/购买/心情报告共用同一份——本仓 openNpcDialog 缓存
+    const mul = this.dialogHappiness?.priceMul ?? 1;
+    this.shopHappinessMul = mul;
     const entries = this.shopStockFor(npc).map(([vid, price]) => ({
       key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
       vanillaId: vid,
       name: Lang.itemName(vid) ?? VANILLA_ITEM_KEY_BY_ID[vid] ?? String(vid),
-      price: Math.max(1, Math.round(price * this.shopHappinessMul)),
+      price: Math.max(1, Math.round(price * mul)),
     }));
-    this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned());
+    // 第 4 参 = 快乐度价格百分比（Main.cs:41231-41243 商店标题旁表情/价格显示）
+    this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned(), mul);
   }
 
   /** ShopHelper.ProcessMood 输入装配（:99-180——同屋/村扫描 + zone 快照 + 危险群系） */
@@ -10223,6 +10314,37 @@ export class Game implements GameHooks {
 
   /** 当前对话 NPC 的快乐度价格乘子（ShopHelper.GetShoppingSettings——缓存到开店时） */
   private shopHappinessMul = 1;
+
+  /** 对话 NPC 的快乐度快照（Player.currentShoppingSettings，SetTalkNPC 时计算；
+   *  价格乘子 + 心情报告行，商店/购买/心情浮层共用） */
+  private dialogHappiness: { priceMul: number; report: HappinessReportLine[] } | null = null;
+
+  /** 心情报告行 → l10n 文案（ShopHelper.AddHappinessReportText :194-203 的渲染侧）：
+   *  {BiomeName} ← TownNPCMoodBiomes.<nameKey>，{NPCName} ← NPC.GetFullnameByID（Lang.npcName） */
+  private happinessLineText(l: HappinessReportLine): string {
+    let s = Lang.text(l.key);
+    if (l.biomeNameKey !== undefined) {
+      s = s.replace('{BiomeName}', Lang.text(`TownNPCMoodBiomes.${l.biomeNameKey}`));
+    }
+    if (l.npcId !== undefined) {
+      s = s.replace('{NPCName}', Lang.npcName(l.npcId) ?? '');
+    }
+    return s;
+  }
+
+  /** 「快乐度」按钮（ReportHappiness.Interact，NPCInteractions.cs:289-313）：
+   *  打开详情浮层——报告逐条 + 价格倍率（原版把 HappinessReport 写进 npcChatText） */
+  private openNpcHappinessPanel(): void {
+    const npc = this.dialogNpc;
+    if (!npc || !this.dialogHappiness || this.dialogHappiness.report.length === 0) return;
+    const typeName = Lang.npcName(npc.vanillaId) ?? npc.npcKey;
+    const name = npc.givenName ? Lang.text('Game.NPCTitle', npc.givenName, typeName) : typeName;
+    this.cb.onNpcHappiness?.({
+      name,
+      lines: this.dialogHappiness.report.map((l) => this.happinessLineText(l)),
+      priceMul: this.dialogHappiness.priceMul,
+    });
+  }
 
   /** 商店购买:扣币 + 入包 + 刷新商店面板(可购态/余额) */
   npcShopBuy(vanillaId: number): void {
@@ -10550,10 +10672,11 @@ export class Game implements GameHooks {
     else if (TILE_CUT.has(t)) this.breakTile(x, y);
   }
 
-  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2): ItemDrop | null {
+  spawnDrop(x: number, y: number, itemKey: string, count = 1, vx = 0, vy = -2, placeStyle?: number): ItemDrop | null {
     const id = ITEM_BY_KEY[itemKey];
     if (id === undefined) return null;
     const drop = new ItemDrop(x - 6, y - 6, id, count, vx, vy);
+    if (placeStyle !== undefined) drop.placeStyle = placeStyle;
     this.entities.add(drop, 'drops');
     // 原版 Main.item 槽位上限 400,超出移除最旧掉落(Main.UpdateItems 空 slot 回收)——
     // 此前无上限:dev 模式一次 ~500 实体/雕像农场线性堆积(2026-08 审计 #10)
@@ -10860,7 +10983,7 @@ export class Game implements GameHooks {
         const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
         const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
         this.newText(`${name} 旗帜已就绪!`, 250, 250, 0);
-        this.spawnDrop(this.player.cx, this.player.cy, 'place_v_91_banners', 1, 0, -3);
+        this.spawnDrop(this.player.cx, this.player.cy, 'place_v_91_banners', 1, 0, -3, banner);
       }
     }
     // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
@@ -11296,6 +11419,10 @@ export class Game implements GameHooks {
         this.newText(Lang.misc(8), 50, 255, 130);
         return null;
       case 'eclipse':
+        // 日食是困难模式专属事件（自然黎明 roll 门 hardMode && mechAny,Main.cs:64898；
+        // 日耀碑牌亦困难模式物品）——调试触发同样过 hardMode 门,肉前强开会刷
+        // 吸血鬼/科学怪人（出怪分支本身无门,原版靠事件不可达保证隔离）
+        if (!w.flags.hardMode) return '日食是困难模式事件——需先击败血肉墙';
         if (!w.clock.isDay) return '现在是夜晚——日食黄昏即被自然清除,请白天触发';
         w.clock.eclipse = true;
         this.newText(Lang.misc(20), 50, 255, 130);
@@ -11682,6 +11809,13 @@ export class Game implements GameHooks {
    *  入 critters 桶：spawnCritter 的 spawnVanilla 同语义（原版小动物表全量走桶） */
   spawnNpcByVanilla(id: number, x: number, y: number): Enemy | null {
     if (this.net && !this.net.policy.isHost) return null;
+    // 城镇史莱姆族（670/678-684 townNPC=true）→ TownNPC 落 npcs 桶（WorldItem 681 微光链等）
+    const townKey = Object.entries(TOWN_NPC_IDS).find(([, v]) => v.id === id)?.[0];
+    if (townKey && id >= 670 && id <= 684) {
+      const tn = new TownNPC(townKey, x, y);
+      this.entities.add(tn, 'npcs');
+      return tn as unknown as Enemy;
+    }
     const e = Enemy.fromVanilla(id, x, y);
     if (!e) return null;
     e.id = this.entities.nextId++;

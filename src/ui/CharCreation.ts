@@ -14,14 +14,23 @@ export interface CharCreationCallbacks {
   onCancel(): void;
 }
 
-const COLOR_ROWS: Array<{ key: keyof Appearance; labelKey: string }> = [
-  { key: 'hairColor', labelKey: 'UI.PlayerCreateCategoryHairColor' },
-  { key: 'eyeColor', labelKey: 'UI.PlayerCreateCategoryEyeColor' },
-  { key: 'skinColor', labelKey: 'UI.PlayerCreateCategorySkinColor' },
-  { key: 'shirtColor', labelKey: 'UI.PlayerCreateCategoryShirtColor' },
-  { key: 'undershirtColor', labelKey: 'UI.PlayerCreateCategoryUndershirtColor' },
-  { key: 'pantsColor', labelKey: 'UI.PlayerCreateCategoryPantsColor' },
-  { key: 'shoeColor', labelKey: 'UI.PlayerCreateCategoryShoesColor' },
+/** 面板形态：
+ *  - 默认 = 角色创建（LegacyMenu.16 标题 + 信息/外观/发型/颜色四页签）；
+ *  - dresser = 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568——只改衣服样式与
+ *    六色，不含姓名/难度/发型；发型原版归造型师）。initial 必填（以现外观为底稿）。 */
+export interface CharCreationOptions {
+  initial?: Appearance;
+  dresser?: boolean;
+}
+
+const COLOR_ROWS: Array<{ key: keyof Appearance; labelKey: string; dresser?: boolean }> = [
+  { key: 'hairColor', labelKey: 'UI.PlayerCreateCategoryHairColor' },   // 发型颜色=造型师域，梳妆台不提供
+  { key: 'eyeColor', labelKey: 'UI.PlayerCreateCategoryEyeColor', dresser: true },
+  { key: 'skinColor', labelKey: 'UI.PlayerCreateCategorySkinColor', dresser: true },
+  { key: 'shirtColor', labelKey: 'UI.PlayerCreateCategoryShirtColor', dresser: true },
+  { key: 'undershirtColor', labelKey: 'UI.PlayerCreateCategoryUndershirtColor', dresser: true },
+  { key: 'pantsColor', labelKey: 'UI.PlayerCreateCategoryPantsColor', dresser: true },
+  { key: 'shoeColor', labelKey: 'UI.PlayerCreateCategoryShoesColor', dresser: true },
 ];
 
 const CSS = `
@@ -96,10 +105,14 @@ export class CharCreation {
   private time = 0;
   private content: HTMLElement;
   private tab = 'info';
+  private dresser = false;   // 梳妆台更衣窗形态（无信息/发型页签，确认=更改）
   private colorInputs = new Map<keyof Appearance, HTMLInputElement>();
 
-  constructor(private root: HTMLElement, private cb: CharCreationCallbacks) {
-    this.appearance = randomAppearance();
+  constructor(private root: HTMLElement, private cb: CharCreationCallbacks, opts: CharCreationOptions = {}) {
+    this.dresser = opts.dresser === true;
+    this.appearance = opts.initial
+      ? { ...structuredClone(opts.initial) }        // 更衣窗：现外观为底稿（确认才生效）
+      : randomAppearance();
 
     if (!document.getElementById('sw-char-style')) {
       const style = document.createElement('style');
@@ -110,8 +123,15 @@ export class CharCreation {
 
     this.panel = document.createElement('div');
     this.panel.className = 'sw-char-panel';
+    const tabs = this.dresser
+      ? `<button data-tab="look">${Lang.text('Mods.SandboxWorld.CharCreate.Appearance')}</button>`
+        + `<button data-tab="color">${Lang.text('Mods.SandboxWorld.CharCreate.Colors')}</button>`
+      : `<button data-tab="info">${Lang.text('UI.PlayerCreateCategoryInfo')}</button>`
+        + `<button data-tab="look">${Lang.text('Mods.SandboxWorld.CharCreate.Appearance')}</button>`
+        + `<button data-tab="hair">${Lang.text('UI.PlayerCreateCategoryHairStyle')}</button>`
+        + `<button data-tab="color">${Lang.text('Mods.SandboxWorld.CharCreate.Colors')}</button>`;
     this.panel.innerHTML = `
-      <div class="sw-char-title">${Lang.text('LegacyMenu.16')}</div>
+      <div class="sw-char-title">${this.dresser ? Lang.text('Mods.SandboxWorld.ClothesWindow.Title') : Lang.text('LegacyMenu.16')}</div>
       <div class="sw-char-body">
         <div class="sw-char-left">
           <canvas class="sw-char-preview" width="120" height="150"></canvas>
@@ -122,18 +142,13 @@ export class CharCreation {
           </div>
         </div>
         <div class="sw-char-right">
-          <div class="sw-char-tabs">
-            <button data-tab="info">${Lang.text('UI.PlayerCreateCategoryInfo')}</button>
-            <button data-tab="look">${Lang.text('Mods.SandboxWorld.CharCreate.Appearance')}</button>
-            <button data-tab="hair">${Lang.text('UI.PlayerCreateCategoryHairStyle')}</button>
-            <button data-tab="color">${Lang.text('Mods.SandboxWorld.CharCreate.Colors')}</button>
-          </div>
+          <div class="sw-char-tabs">${tabs}</div>
           <div class="sw-char-content"></div>
         </div>
       </div>
       <div class="sw-char-footer">
-        <button data-act="back">${Lang.text('UI.Back')}</button>
-        <button data-act="create" class="primary">${Lang.text('UI.Create')}</button>
+        <button data-act="back">${this.dresser ? Lang.text('GameUI.Cancel') : Lang.text('UI.Back')}</button>
+        <button data-act="create" class="primary">${this.dresser ? Lang.text('GameUI.Change') : Lang.text('UI.Create')}</button>
       </div>
     `;
     this.root.appendChild(this.panel);
@@ -141,6 +156,7 @@ export class CharCreation {
     this.previewCtx = this.previewCanvas.getContext('2d')!;
     this.previewCtx.imageSmoothingEnabled = false;
     this.content = this.panel.querySelector('.sw-char-content')!;
+    this.tab = this.dresser ? 'look' : 'info';
 
     // 事件
     this.panel.querySelectorAll('.sw-char-tabs button').forEach((b) => {
@@ -148,12 +164,31 @@ export class CharCreation {
     });
     this.panel.querySelector('[data-act=back]')!.addEventListener('click', () => this.close(this.cb.onCancel));
     this.panel.querySelector('[data-act=create]')!.addEventListener('click', () => {
-      this.appearance.name = (this.appearance.name || '').trim() || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
+      // 更衣窗不改姓名/难度/发型：以 initial 为底稿时保留这三项原值
+      if (this.dresser && opts.initial) {
+        this.appearance.name = opts.initial.name;
+        this.appearance.difficulty = opts.initial.difficulty;
+        this.appearance.hair = opts.initial.hair;
+      } else {
+        this.appearance.name = (this.appearance.name || '').trim() || Lang.text('Mods.SandboxWorld.CharCreate.Unnamed');
+      }
       const a = this.appearance;
       this.close(() => this.cb.onCreate(a));
     });
     this.panel.querySelector('[data-act=random]')!.addEventListener('click', () => {
-      this.appearance = randomAppearance(this.appearance.name);
+      if (this.dresser) {
+        // 更衣窗的🎲只掷衣服样式+六色（发型/难度保持不动——发型归造型师）
+        const r = randomAppearance(this.appearance.name);
+        this.appearance.skinVariant = r.skinVariant;
+        this.appearance.shirtColor = r.shirtColor;
+        this.appearance.undershirtColor = r.undershirtColor;
+        this.appearance.pantsColor = r.pantsColor;
+        this.appearance.shoeColor = r.shoeColor;
+        this.appearance.eyeColor = r.eyeColor;
+        this.appearance.skinColor = r.skinColor;
+      } else {
+        this.appearance = randomAppearance(this.appearance.name);
+      }
       this.buildContent();
     });
     this.panel.querySelector('[data-act=copy]')!.addEventListener('click', () => {
@@ -179,7 +214,8 @@ export class CharCreation {
 
   /** 语言切换:静态框架文案重取 + 内容区重建(保留 appearance 与页签) */
   private refreshTexts() {
-    (this.panel.querySelector('.sw-char-title') as HTMLElement).textContent = Lang.text('LegacyMenu.16');
+    (this.panel.querySelector('.sw-char-title') as HTMLElement).textContent =
+      this.dresser ? Lang.text('Mods.SandboxWorld.ClothesWindow.Title') : Lang.text('LegacyMenu.16');
     const tabText: Record<string, string> = {
       info: Lang.text('UI.PlayerCreateCategoryInfo'),
       look: Lang.text('Mods.SandboxWorld.CharCreate.Appearance'),
@@ -192,8 +228,10 @@ export class CharCreation {
     (this.panel.querySelector('[data-act=copy]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.CopyTemplate');
     (this.panel.querySelector('[data-act=paste]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.PasteTemplate');
     (this.panel.querySelector('[data-act=random]') as HTMLElement).title = Lang.text('Mods.SandboxWorld.CharCreate.Random');
-    (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent = Lang.text('UI.Back');
-    (this.panel.querySelector('[data-act=create]') as HTMLElement).textContent = Lang.text('UI.Create');
+    (this.panel.querySelector('[data-act=back]') as HTMLElement).textContent =
+      this.dresser ? Lang.text('GameUI.Cancel') : Lang.text('UI.Back');
+    (this.panel.querySelector('[data-act=create]') as HTMLElement).textContent =
+      this.dresser ? Lang.text('GameUI.Change') : Lang.text('UI.Create');
     this.buildContent();
   }
 
@@ -359,6 +397,7 @@ export class CharCreation {
     const box = document.createElement('div');
     box.className = 'sw-char-section';
     for (const row of COLOR_ROWS) {
+      if (this.dresser && !row.dresser) continue;   // 更衣窗六色（Main.cs:43579-43585 备份的六色）
       const el = document.createElement('label');
       el.className = 'sw-char-row';
       const span = document.createElement('span');

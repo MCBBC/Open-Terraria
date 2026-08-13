@@ -628,7 +628,10 @@ item({ key: 'vi_2340_minecart_track', name: '', value: 1 });
 // key 沿用全量注册的 vanilla.json 命名（vi_<id>_<key>），只补 tile/placeStyle
 item({ key: 'vi_2492_PressureTrack', name: '', value: 1, tile: 'v_314_minecart_track', placeStyle: 1 });
 item({ key: 'vi_2739_BoosterTrack', name: '', value: 1, tile: 'v_314_minecart_track', placeStyle: 2 });
-item({ key: 'vi_498_mannequin', name: '', value: 1 });
+// 模特（Mannequin 498）：Item.cs:7291-7302 case 498 体内 createTile 被赋值两次
+//（128 → 470，后者生效 = 1.4 DisplayDoll 改版）；extract-itemfunc 只抓到死代码的
+// 128，故此处按源码最终态补 createTile=470 / placeStyle=0（原先缺 tile 放置无效）
+item({ key: 'vi_498_mannequin', name: '', value: 1, tile: 'v_470_mannequins', placeStyle: 0 });
 item({ key: 'vi_4721_mushroom_beam', name: '', value: 1 });
 item({ key: 'vi_819_living_wood_door', name: '', value: 1 });
 item({ key: 'vi_1458_obsidian_door', name: '', value: 1 });

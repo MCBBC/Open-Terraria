@@ -15,8 +15,9 @@
 //   - Collision.CanHitLine（GrowMoreVines 的加权计数）→ 仅计数不判视线
 //   - PlayerLOS（球茎/蜂巢/蚁狮幼虫隐藏性）→ 玩家距离 >50 格视为不可见
 //   - 装饰变体帧（PlaceTile 后 TileFrame 随机化）→ 直接随机变体帧
-//   - 环境转换器 Convert 其余 case（5/6/7/10/12/13）不在演化路径，未移植；
-//     case 11 净化已由净化粉弹体链补齐（见 convert()，Projectile.cs:22494 消费方）
+//   - Convert case 0（纯净化墙链）与 case 14-21（1.4.4+ 反转换）无消费方未移植；
+//     case 5/6/7/10/12/13 已补全（环境转换器/还原链备将来接入）；火把转换
+//     （Convert_ActuallyConvertTorch）已随 case 1/2/3/4/11 等全链接入
 import type { TileStore } from '../TileStore';
 import { TILE_DEFS } from '../../data/tiles';
 import { NOT_CLEARABLE } from '../gen/vanilla/TileRunner';
@@ -58,12 +59,17 @@ const CONV_HARD_SAND = new Set([397, 398, 402, 399]);
 const CONV_SANDSTONE = new Set([396, 400, 403, 401]);
 const CONV_THORN = new Set([32, 352, 69, 655]);
 const CONV_SNOW = new Set([147]);
+// TileID.Sets.Conversion.Dirt（TileID.cs:23）= CreateBoolSet(default(int)) → 仅泥土 0
+const CONV_DIRT = new Set([0]);
 // WallID.Sets.Conversion.*（WallID.cs:11-33）
 const WALL_CONV_GRASS = new Set([63, 64, 65, 66, 67, 68, 69, 70, 81, 264, 265, 268]);
 const WALL_CONV_STONE = new Set([1, 61, 185, 3, 28, 83, 262, 274, 246, 248, 269, 349]);
 const WALL_CONV_HARD_SAND = new Set([216, 217, 219, 218, 304, 305, 307, 306]);
 // WallID.Sets.Conversion.Dirt（WallID.cs:15）——净化的墙分支（Convert case 11）专用
 const WALL_CONV_DIRT = new Set([2, 16]);
+// WallID.Sets.Conversion.Snow / Ice（WallID.cs:20-21）——case 5/6 沙化/雪化墙分支用
+const WALL_CONV_SNOW = new Set([40, 249]);
+const WALL_CONV_ICE = new Set([71, 266]);
 const WALL_CONV_SANDSTONE = new Set([187, 220, 222, 221, 275, 308, 310, 309]);
 const WALL_CONV_PURE_SAND = new Set([216, 187, 304, 275]);
 const WALL_CONV_NEW1 = new Set([188, 192, 200, 204, 212, 276, 280, 288, 292, 300]);
@@ -78,6 +84,14 @@ const WALL_SPREADS_HALLOW = new Set([70, 219, 222, 28]);
 const SNOW_FAMILY = new Set([147, 161, 163, 164, 200]);
 // 上面所有 sheet 集合 → 内部 id 集合（运行时比较用）
 const sheetOf = (id: number): number => TILE_DEFS[id]?.vanilla?.sheet ?? -1;
+/** TileID.Sets.Conversion.Torch（TileID.cs:42-74）：该 conversionType 下火把可否被转。
+ *  case 0 纯净化：仅邪恶/神圣火把(18/19/20)+蘑菇火把(22)；case 11 净化粉：18/19/20；
+ *  其余 case：常规(0)+群系（9 冰/16 沙漠/18-20 邪恶神圣/21 丛林/22 蘑菇）全收 */
+function torchConvertible(convType: number, style: number): boolean {
+  if (convType === 0) return (style >= 18 && style <= 20) || style === 22;
+  if (convType === 11) return style >= 18 && style <= 20;
+  return style === 0 || style === 9 || style === 16 || (style >= 18 && style <= 22);
+}
 // 保底球茎 forceBulb 计分黑名单（WorldGen.cs:74266-74281，sheet=原版 id）：
 // IsAContainer（BasicChest{21,88,467} 近似）+ 蜥蜴砖/祭坛/门/各结构块/轨道/巨石。
 // Paintings 近似取 242-244，Boulders 取 379（TileID.Sets 两集合的已知成员）
@@ -104,6 +118,10 @@ export interface EvolutionHost {
   windSpeedCurrent: number;
   /** 玩家 tile 坐标（LOS 近似用；null = 无玩家） */
   playerTile: () => { x: number; y: number } | null;
+  /** WorldGen.GetWorldUpdateRate（cs:72056-72063）= min(desiredWorldTilesUpdateRate, 24)、
+   *  FreezeTime 时 0。desiredWorldTilesUpdateRate 随 dayRate 走（Main.cs:6290——全员熟睡
+   *  ×5；快进中恒 1 与 dayRate=60 解耦）。缺省 1 = 无时间倍率系统（单测/离线宿主） */
+  worldUpdateRate?: number;
 }
 
 export class WorldEvolution {
@@ -118,7 +136,11 @@ export class WorldEvolution {
     const { w, h } = st;
     this.hardMode = !!this.host.flags.hardMode;
     this.allowedToSpread = true; // CreativePowers.StopBiomeSpread 无对应系统
-    const rate = 1; // desiredWorldTilesUpdateRate = dayRate = 1（Main.cs:6290；睡觉 ×5 未接）
+    // WorldGen.GetWorldUpdateRate（cs:71545/:72056-72063）：=0 时 UpdateWorld 整体跳过
+    // （采样数全零,演化停摆——FreezeTime 语义）；desiredWorldTilesUpdateRate 随 dayRate
+    // 走（Main.cs:6290：TargetTimeRate × 全员熟睡 5；快进中恒 1,与 dayRate=60 解耦）
+    const rate = this.host.worldUpdateRate ?? 1;
+    if (rate === 0) return;
     const wallDist = 3;
     // 地表采样（雨天 ×1.5，cs:71552-71557）
     let surfaceN = w * h * 3e-5 * rate;
@@ -811,7 +833,40 @@ export class WorldEvolution {
     this.setType(i, j, S(grass));
   }
 
-  // ================= Convert（cs:55113，演化路径用 case 1/2/3/4/8/9） =================
+  // ================= Convert（cs:55113）=================
+  //  演化路径用 case 1/2/3/4/8/9/11；case 5/6/7/10/12/13 为环境转换器/还原链补全
+  //  （当前演化路径未消费,备 Clentaminator/神庙致动还原等将来接入）。
+  //  未移植：case 0（纯净化墙链,蘑菇墙 80→15/64 深度带）与 case 14-21（1.4.4+
+  //  丛林/沙/雪/蘑菇反转换）——无消费方,登记
+
+  /** BlockBelowMakesSandConvertIntoHardenedSand（cs:87307-87327）：下方非 nactive
+   *  或非实心 → 沙转硬化沙（防塌；nactive=active&&!inActive,已致动格视为不支撑） */
+  private blockBelowHardensSand(i: number, j: number): boolean {
+    const st = this.host.store;
+    if (j >= st.h - 1) return false;
+    if (!st.inBounds(i, j + 1)) return false;
+    if (!st.isActive(i, j + 1)) return true;
+    const d = TILE_DEFS[st.type[st.idx(i, j + 1)]];
+    return !!d && !d.solid;
+  }
+
+  /** TileIsExposedToAir（cs:54810-54830）：3×3 内任一格非活动/非实心/平台 → 露天 */
+  private tileExposedToAir(i: number, j: number): boolean {
+    const st = this.host.store;
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+      const x = i + dx, y = j + dy;
+      if (!st.inBounds(x, y)) continue;
+      const k = st.idx(x, y);
+      const d = TILE_DEFS[st.type[k]];
+      if (!st.flags[k] || !d?.solid || d.platform) return true;
+    }
+    return false;
+  }
+
+  /** Main.tileFrameImportant[type]——多帧物（家具/火把/门等）不可被"满转"吞并 */
+  private frameImportant(sheet: number): boolean {
+    return !!TILE_DEFS[S(sheet)]?.framed;
+  }
 
   convert(i: number, j: number, conversionType: number, tiles = true, walls = true): void {
     const st = this.host.store;
@@ -823,6 +878,18 @@ export class WorldEvolution {
     const sheet = act ? sheetOf(st.type[ti]) : -1;
     const convWall = (to: number) => { if (wall !== 0 && wall !== to) st.setWall(i, j, to); };
     const convTile = (to: number) => { if (act && sheet !== to) this.setType(i, j, S(to)); };
+    // 火把现样式（frameY/22；仅 tile 4 有意义,其余 -1）
+    const torchStyle = act && sheet === 4 ? Math.floor(st.frameY[ti] / 22) : -1;
+    // Convert_ActuallyConvertTorch（cs:56296-56319）：只改 frameY=style×22,锚帧 frameX
+    // 原样保留（原版随后 SquareTileFrame 重锚,语义等价）。conversionType==0 时
+    // 蘑菇火把(22)目标改判丛林火把(21)——cs:56304 净化链专属特例
+    const convTorch = (newStyle: number) => {
+      if (torchStyle < 0) return;
+      const ns = conversionType === 0 && torchStyle === 22 ? 21 : newStyle;
+      if (torchStyle !== ns) st.setTile(i, j, st.type[ti], st.frameX[ti], ns * 22);
+    };
+    // 火把可转门（TileID.Sets.Conversion.Torch，TileID.cs:42-74）
+    const torchOk = torchStyle >= 0 && torchConvertible(conversionType, torchStyle);
     switch (conversionType) {
       case 4: // 猩红化
         if (walls) {
@@ -836,7 +903,8 @@ export class WorldEvolution {
           else if (WALL_CONV_NEW4.has(wall) && wall !== 195) convWall(195);
         }
         if (tiles) {
-          if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 203) convTile(203);
+          if (torchOk) convTorch(19);            // 猩红火把（cs:55167）
+          else if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 203) convTile(203);
           else if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 662) convTile(662);
           else if (CONV_GRASS.has(sheet) && sheet !== 199) convTile(199);
           else if (CONV_ICE.has(sheet) && sheet !== 200) convTile(200);
@@ -858,7 +926,8 @@ export class WorldEvolution {
           else if (WALL_CONV_NEW4.has(wall) && wall !== 203) convWall(203);
         }
         if (tiles) {
-          if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 117) convTile(117);
+          if (torchOk) convTorch(20);            // 神圣火把（cs:55245）
+          else if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 117) convTile(117);
           else if (CONV_GOLF_GRASS.has(sheet) && sheet !== 492) convTile(492);
           else if (CONV_GRASS.has(sheet) && sheet !== 109 && sheet !== 492) convTile(109);
           else if (CONV_ICE.has(sheet) && sheet !== 164) convTile(164);
@@ -886,7 +955,8 @@ export class WorldEvolution {
           else if (WALL_CONV_NEW4.has(wall) && wall !== 191) convWall(191);
         }
         if (tiles) {
-          if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 25) convTile(25);
+          if (torchOk) convTorch(18);            // 腐化火把（cs:55328）
+          else if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet)) && sheet !== 25) convTile(25);
           else if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 661) convTile(661);
           else if (CONV_GRASS.has(sheet) && sheet !== 23) convTile(23);
           else if (CONV_ICE.has(sheet) && sheet !== 163) convTile(163);
@@ -899,9 +969,67 @@ export class WorldEvolution {
       case 3: // 蘑菇化（环境转换器蘑菇）
         if (walls && (wall === 64 || wall === 67 || wall === 15 || wall === 247)) convWall(80);
         if (tiles) {
-          if (sheet === 60) convTile(70);
+          if (torchOk) convTorch(22);            // 蘑菇火把（cs:55374）
+          else if (sheet === 60) convTile(70);
           else if (CONV_THORN.has(sheet)) this.kill(i, j);
         }
+        break;
+      case 5: // 沙化（cs:55391-55436：沙墙 187/硬化沙墙 216 + 沙漠火把 16）
+        if (walls) {
+          if ((WALL_CONV_STONE.has(wall) || WALL_CONV_NEW1.has(wall) || WALL_CONV_NEW2.has(wall)
+            || WALL_CONV_NEW3.has(wall) || WALL_CONV_NEW4.has(wall) || WALL_CONV_ICE.has(wall)
+            || WALL_CONV_SANDSTONE.has(wall)) && wall !== 187) convWall(187);
+          else if ((WALL_CONV_HARD_SAND.has(wall) || WALL_CONV_DIRT.has(wall) || WALL_CONV_SNOW.has(wall))
+            && wall !== 216) convWall(216);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(16);
+        else if ((CONV_GRASS.has(sheet) || CONV_SAND.has(sheet) || CONV_SNOW.has(sheet) || CONV_DIRT.has(sheet))
+          && sheet !== 53) convTile(this.blockBelowHardensSand(i, j) ? 397 : 53);
+        else if (CONV_HARD_SAND.has(sheet) && sheet !== 397) convTile(397);
+        else if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet) || CONV_ICE.has(sheet) || CONV_SANDSTONE.has(sheet))
+          && sheet !== 396) convTile(396);
+        else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
+        break;
+      case 6: // 雪化（cs:55437-55473：冰雪墙 71/雪墙 40 + 冰火把 9）
+        if (walls) {
+          if ((WALL_CONV_STONE.has(wall) || WALL_CONV_NEW1.has(wall) || WALL_CONV_NEW2.has(wall)
+            || WALL_CONV_NEW3.has(wall) || WALL_CONV_NEW4.has(wall) || WALL_CONV_ICE.has(wall)
+            || WALL_CONV_SANDSTONE.has(wall)) && wall !== 71) convWall(71);
+          else if ((WALL_CONV_HARD_SAND.has(wall) || WALL_CONV_DIRT.has(wall) || WALL_CONV_SNOW.has(wall))
+            && wall !== 40) convWall(40);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(9);
+        else if ((CONV_GRASS.has(sheet) || CONV_SAND.has(sheet) || CONV_HARD_SAND.has(sheet)
+          || CONV_SNOW.has(sheet) || CONV_DIRT.has(sheet)) && sheet !== 147) convTile(147);
+        else if ((TILE_MOSS.has(sheet) || CONV_STONE.has(sheet) || CONV_ICE.has(sheet) || CONV_SANDSTONE.has(sheet))
+          && sheet !== 161) convTile(161);
+        else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
+        break;
+      case 7: // 纯净化（cs:55474-55554：石 1/草 2/泥土 0 + 火把归 0；与 case 11 净化粉
+        //  同族但墙分支带化石豁免、泥土分支露天判 Grass——环境转换器"纯净"路径）
+        if (walls) {
+          const fossilW = wall === 61 || wall === 185 || wall === 262 || wall === 274;
+          if ((WALL_CONV_STONE.has(wall) || WALL_CONV_ICE.has(wall) || WALL_CONV_SANDSTONE.has(wall))
+            && wall !== 349 && !fossilW) convWall(349);
+          else if (wall === 262) convWall(61);
+          else if (wall === 274) convWall(185);
+          else if ((WALL_CONV_HARD_SAND.has(wall) || WALL_CONV_SNOW.has(wall) || WALL_CONV_DIRT.has(wall))
+            && wall !== 2) convWall(2);
+          else if (WALL_CONV_NEW1.has(wall) && wall !== 212) convWall(212);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 213) convWall(213);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 214) convWall(214);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 215) convWall(215);
+        }
+        if (!tiles) break;
+        if (torchOk) convTorch(0);
+        else if ((CONV_STONE.has(sheet) || CONV_ICE.has(sheet) || CONV_SANDSTONE.has(sheet)) && sheet !== 1) convTile(1);
+        else if (CONV_GOLF_GRASS.has(sheet) && sheet !== 477) convTile(477);
+        else if (CONV_GRASS.has(sheet) && sheet !== 2 && sheet !== 477) convTile(2);
+        else if ((CONV_SAND.has(sheet) || CONV_HARD_SAND.has(sheet) || CONV_SNOW.has(sheet) || CONV_DIRT.has(sheet))
+          && sheet !== 0) convTile(this.tileExposedToAir(i, j) ? 2 : 0);
+        else if (CONV_THORN.has(sheet) && sheet !== 69) this.kill(i, j);
         break;
       case 8: // 叶绿生长（cs:55693-55700：泥/丛林草 → 叶绿矿 211）
         if (tiles && (sheet === 59 || sheet === 60)) this.setType(i, j, S(211));
@@ -933,10 +1061,11 @@ export class WorldEvolution {
           else if (WALL_CONV_HARD_SAND.has(wall) && wall !== 216) convWall(216);
           else if (WALL_CONV_SANDSTONE.has(wall) && wall !== 187) convWall(187);
         }
-        // 火把净化（type 4 → style 0，Convert_ActuallyConvertTorch）未接——
-        // 既有 case 1-4 同样不处理火把转换，保持一致（GAP）
+        // 火把净化（cs:55867：邪恶/神圣火把 → 普通 style 0——Convert_ActuallyConvertTorch；
+        //  case 1/2/3/4 的火把分支同链已在各 case 首支接入）
         if (!tiles) break;
-        if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 60) convTile(60);
+        if (torchOk) convTorch(0);
+        else if (CONV_JUNGLE_GRASS.has(sheet) && sheet !== 60) convTile(60);
         else if (CONV_GOLF_GRASS.has(sheet) && sheet !== 477) convTile(477);
         else if (CONV_GRASS.has(sheet) && sheet !== 2 && sheet !== 477) convTile(2);
         else if (CONV_STONE.has(sheet) && sheet !== 1) convTile(1);
@@ -946,6 +1075,45 @@ export class WorldEvolution {
         else if (CONV_SANDSTONE.has(sheet) && sheet !== 396) convTile(396);
         break;
       }
+      case 10: // 邪恶退化 tiles-only 版（cs:55749-55789：与 case 9 同表但走 Convert 链,
+        //  无墙分支——神庙砖致动等还原路径用）
+        if (!tiles) break;
+        if ([23, 199, 661, 662].includes(sheet)) convTile(60);
+        else if (sheet === 0) convTile(59);
+        else if (sheet === 25 || sheet === 203) convTile(1);
+        else if (sheet === 112 || sheet === 234) convTile(53);
+        else if (sheet === 398 || sheet === 399) convTile(397);
+        else if (sheet === 400 || sheet === 401) convTile(396);
+        else if ([24, 32, 201, 205, 352, 636].includes(sheet)) this.kill(i, j);
+        break;
+      case 12: // 腐化"满转"（cs:55892-55928：任意墙 → 腐化石墙 3,非重要帧块 → 黑檀石 25）
+        if (walls) {
+          if (WALL_CONV_NEW1.has(wall) && wall !== 188) convWall(188);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 189) convWall(189);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 190) convWall(190);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 191) convWall(191);
+          else if (wall !== 0 && wall !== 3) convWall(3);
+        }
+        if (tiles) {
+          if (torchOk) convTorch(18);
+          else if (CONV_THORN.has(sheet) && sheet !== 32) convTile(32);
+          else if (sheet !== 25 && !this.frameImportant(sheet)) convTile(25);
+        }
+        break;
+      case 13: // 猩红"满转"（cs:55932-55968：任意墙 → 猩红石墙 83,非重要帧块 → 猩红石 203）
+        if (walls) {
+          if (WALL_CONV_NEW1.has(wall) && wall !== 192) convWall(192);
+          else if (WALL_CONV_NEW2.has(wall) && wall !== 193) convWall(193);
+          else if (WALL_CONV_NEW3.has(wall) && wall !== 194) convWall(194);
+          else if (WALL_CONV_NEW4.has(wall) && wall !== 195) convWall(195);
+          else if (wall !== 0 && wall !== 83) convWall(83);
+        }
+        if (tiles) {
+          if (torchOk) convTorch(19);
+          else if (CONV_THORN.has(sheet) && sheet !== 352) convTile(352);
+          else if (sheet !== 203 && !this.frameImportant(sheet)) convTile(203);
+        }
+        break;
     }
   }
 

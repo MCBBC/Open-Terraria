@@ -199,6 +199,29 @@ const out = await page.evaluate(async () => {
     await new Promise(r => setTimeout(r, 1500));
     const latched = g.player.grappleProjs.some((gp) => !gp.dead && gp.ai0 === 2);
     ok('⑧ 跳键释放锚定钩', !latched);
+
+    // ⑩ 宠物系统：装备胡萝卜(603→兔子 proj111) → 跟随体生成；坐骑/宠物键
+    //    召回/再召（TogglePet hideMisc 翻转）
+    const carrotKey = Object.keys(window.__swItems).find(k => /^vi_603_/.test(k));
+    g.player.inv.miscEquips[0] = { id: window.__swItems[carrotKey], stack: 1 };
+    await new Promise(r => setTimeout(r, 400));
+    ok('⑩ 装备宠物→跟随体生成', !!g.petFollower && !g.petFollower.dead && g.petFollower.projId === 111,
+      `proj=${g.petFollower?.projId}`);
+    await new Promise(r => setTimeout(r, 500));
+    const following = g.petFollower && Math.hypot(g.petFollower.x - g.player.x, g.petFollower.y - g.player.y) < 120;
+    ok('⑩ 跟随玩家', !!following, `d=${g.petFollower ? Math.hypot(g.petFollower.x - g.player.x, g.petFollower.y - g.player.y).toFixed(0) : 'x'}`);
+    const rb2 = rect('.sw-mride');
+    fireBtn('.sw-mride', 'touchstart', rb2.x, rb2.y);
+    fireBtn('.sw-mride', 'touchend', rb2.x, rb2.y);
+    await new Promise(r => setTimeout(r, 300));
+    ok('⑩ 宠物键收回（hideMisc）', g.petHidden === true && (!g.petFollower || g.petFollower.dead));
+    fireBtn('.sw-mride', 'touchstart', rb2.x, rb2.y);
+    fireBtn('.sw-mride', 'touchend', rb2.x, rb2.y);
+    await new Promise(r => setTimeout(r, 300));
+    ok('⑩ 再按重新召唤', g.petHidden === false && !!g.petFollower && !g.petFollower.dead);
+    g.player.inv.miscEquips[0] = null;   // 卸装 → 消散
+    await new Promise(r => setTimeout(r, 300));
+    ok('⑩ 卸装消散', g.petFollower === null);
   }
   return res;
 });

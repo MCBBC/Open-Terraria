@@ -157,7 +157,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onNpcDialog: (name, chat, buttons, portrait) => ui.showNpcDialog(name, chat, buttons, portrait),
       onNpcDialogClose: () => ui.closeNpcDialog(),
       onReforgeOpen: () => ui.showReforge(),
-      onNpcShop: (title, items, copper) => ui.showNpcShop(title, items, copper),
+      onNpcShop: (title, items, copper, happinessMul) => ui.showNpcShop(title, items, copper, happinessMul),
+      // NPC 快乐度详情浮层（ReportHappiness.Interact）
+      onNpcHappiness: (info) => ui.showNpcHappiness(info),
       onReadSign: (text) => ui.showSign(text),
       onEditSign: (x, y, text) => ui.editSign(x, y, text),
       onDayNight: (isDay) => audio.setDayNight(isDay),
@@ -167,6 +169,17 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onHardcoreDeath: async (appearance) => {
         selectedAppearance = appearance;
         if (selectedCharId != null) await charStore.update(selectedCharId, appearance);
+      },
+      // 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568）：确认后回写角色档 +
+      // 在线外观（原版外观随 .plr 档，CancelClothesWindow 取消则回退六色快照）
+      onClothesWindow: (appearance) => {
+        ui.showClothesWindow(appearance, async (a) => {
+          selectedAppearance = a;
+          g.player.appearance = a;
+          g.net?.resendAppearance();
+          if (selectedCharId != null) await charStore.update(selectedCharId, a);
+          ui.toast(Lang.text('Mods.SandboxWorld.ClothesWindow.Changed'));
+        });
       },
     }, atlas);
     return g;

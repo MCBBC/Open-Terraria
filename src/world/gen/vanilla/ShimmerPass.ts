@@ -246,7 +246,7 @@ function stLarva(): number {
  *   冰雪族 147/161/163/164/200 → fx=var*18；石族 1/苔藓/117/25/203 → fx=54+var*18；
  *   蜂巢 225 → fx=162+var*18（恒小号）；沙岩 396/397 → 378+；花岗岩 368 → 432+；大理石 367 → 486+。
  *  preferSmall=单格 fy=72（垂挂）/90（地面）；否则双格 fy=0/18（垂挂）或 36/54（地面）。 */
-function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
+export function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSmall: boolean, variation: number): void {
   if (!st.inBounds(x, y) || !st.inBounds(x, y + 1)) return;
   const sheetOf = (xx: number, yy: number) => {
     if (!st.inBounds(xx, yy)) return -1;

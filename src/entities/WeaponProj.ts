@@ -18,9 +18,10 @@ import { canHit } from '../physics/LineOfSight';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false): void {
   // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
+  // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
   const img0 = projSprite(projId);
   const natural = drawSize < 0 && img0 && img0.complete && img0.naturalWidth > 0;
   const dw = natural ? img0!.naturalWidth : drawSize > 0 ? drawSize : e.w;
@@ -31,6 +32,7 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
   ctx.translate(e.x + e.w / 2, e.y + e.w / 2);
   ctx.rotate(ang);
+  if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
   if (img && img.complete && img.naturalWidth > 0) {
     ctx.drawImage(img, -dw / 2, -dw / 2, dw, dw * (img.naturalHeight / img.naturalWidth));
@@ -369,15 +371,22 @@ export class SpearProj extends Entity {
 
   draw(r: Renderer, cam: Camera): void {
     // AI_019（:43271-43276）:rotation = atan2+π/2+π/4,spriteDir==-1 再 -π/2;
-    // AI_161 细剑(:44990):rotation = atan2+π/2(无 π/4 修正),Opacity 淡入 0→7/淡出 16→12
+    // AI_161 细剑(:44990 rotation=atan2+π/2)：DrawProjDirect 938-945 专支(:32444)
+    //   再 num327 -= π/4×spriteDirection（贴图是 RT→LB 对角线剑，补偿 45°）+
+    //   dir 规则 spriteDirection==-1 → FlipHorizontally（:29827，左刺镜像）。
+    //   验算：右刺 θ=π/2−π/4=π/4 → 剑尖(贴图 RT)转 +45° 指正右；左刺 θ−π/4
+    //   +旋转系内镜像 → 剑尖指正左（曾漏两项 → 右刺剑尖扎向右下 45°）
     const isRap = RAPIER_PROJ.has(this.projId);
-    const base = Math.atan2(this.dy, this.dx) + Math.PI / 2
-      + (isRap ? 0 : Math.PI / 4);
+    const sd = this.dx >= 0 ? 1 : -1;   // :44997 spriteDirection = sign(dot(v, UnitX))
+    const base = isRap
+      ? Math.atan2(this.dy, this.dx) + Math.PI / 2 - Math.PI / 4 * sd
+      : Math.atan2(this.dy, this.dx) + Math.PI / 2 + Math.PI / 4;
     // Utils.GetLerpValue clamped:淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
     const aIn = Math.min(1, this.t / 7);
     const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
-    drawProj(r, cam, this, this.projId, this.dx < 0 && !isRap ? base - Math.PI / 2 : base,
-      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0); // 细剑贴图 32×32 原尺寸(碰撞盒 18 解耦)
+    drawProj(r, cam, this, this.projId,
+      isRap ? base : (this.dx < 0 ? base - Math.PI / 2 : base),
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0, isRap && sd === -1);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {

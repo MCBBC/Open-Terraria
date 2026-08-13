@@ -204,7 +204,7 @@ describe('图鉴数据表收尾（2026-08-13 收尾批）', () => {
   });
 
   it('排序键 6 生效：同档敌怪按群系组序（102 食人鱼 22 < 62 恶魔 24，aiStyle 反序仍让位）', () => {
-    // 键 7 aiStyle：62 恶魔=4 < 102 食人鱼=16——若键 6 缺失（旧常量 0）则 62 在前；
+    // 键 7 aiStyle：62 恶魔=14 < 102 食人鱼=16——若键 6 缺失（旧常量 0）则 62 在前；
     // 键 6 提取后群系组号先决，102 在前
     expect(bestiarySortingId(102)).toBeLessThan(bestiarySortingId(62));
     expect(bestiarySortingId(1)).toBeLessThan(bestiarySortingId(62)); // 地表 1 < 地狱 24

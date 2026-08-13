@@ -11,7 +11,8 @@ import { FastRandom } from '../../../core/rng';
 
 const MARBLE = TILE_BY_KEY['v_367_marble_block']!;
 const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
-const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!;
+import { placeTight, placeUncheckedStalactite as placeStalactiteWithRolls } from './ShimmerPass';
+const STALACTITE = TILE_BY_KEY['v_165_cave_decos']!; // 仅哈希/置型用；帧走 ShimmerPass
 const SNOW = TILE_BY_KEY['snow']!, ICE = TILE_BY_KEY['ice']!, THIN_ICE = TILE_BY_KEY['thin_ice']!;
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
 const MUSH_TREE = TILE_BY_KEY['v_72_mushroom_tree']!;
@@ -48,50 +49,6 @@ export function biomeTileCheck(st: TileStore, x: number, y: number): boolean {
 function solidTileAt(st: TileStore, x: number, y: number): boolean {
   return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0
     && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
-}
-
-/** PlaceUncheckedStalactite（cs:38353）哈希通道语义：按邻接块材质族放置 165（1 或 2 格）。
- *  preferSmall 单格；否则向下两格（y,y+1）/向上两格（y-1,y）。零掷骰（参数由调用方给）。 */
-function placeStalactite(
-  st: TileStore, x: number, y: number, preferSmall: boolean, variation: number,
-): void {
-  const put = (ax: number, ay: number) => {
-    if (st.inBounds(ax, ay)) { const i = st.idx(ax, ay); st.type[i] = STALACTITE; st.flags[i] = 1; }
-  };
-  const v = Math.min(2, Math.max(0, variation));
-  void v; // 变体只影响 frameX/Y——哈希无关
-  const inCol = (ay: number) => ay >= 0 && ay < st.h && st.flags[st.idx(x, ay)] === 0;
-  // ★族判定用原版 sheet id（内部 id ≠ 原版号——曾直比内部 id 致 95 处钟乳石只出 3 处）
-  const sheetAt = (ax: number, ay: number) =>
-    (ay >= 0 && ay < st.h && ax >= 0 && ax < st.w) ? TILE_DEFS[st.type[st.idx(ax, ay)]]?.vanilla?.sheet ?? 0 : 0;
-  if (solidTileAt(st, x, y - 1) && inCol(y) && inCol(y + 1)) {
-    const ab = sheetAt(x, y - 1);
-    const rockFam = ab === 1 || ab === 117 || ab === 25 || ab === 203;   // tileMoss 此阶段无
-    if (ab === 147 || ab === 161 || ab === 163 || ab === 164 || ab === 200) {
-      if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); }
-    }
-    if (rockFam) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
-    if (ab === 225) put(x, y);
-    if (ab === 396 || ab === 397) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
-    if (ab === 368) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
-    if (ab === 367) { if (preferSmall) put(x, y); else { put(x, y); put(x, y + 1); } }
-  } else if (solidTileAt(st, x, y + 1) && inCol(y) && y - 1 >= 0 && y - 1 < st.h && st.flags[st.idx(x, y - 1)] === 0) {
-    const bl = sheetAt(x, y + 1);
-    const rockFam = bl === 1 || bl === 117 || bl === 25 || bl === 203;
-    if (rockFam) { if (preferSmall) put(x, y); else { put(x, y - 1); put(x, y); } }
-    if (bl === 225) put(x, y);
-    if (bl === 396 || bl === 397) { if (preferSmall) put(x, y); else { put(x, y - 1); put(x, y); } }
-    if (bl === 368) { if (preferSmall) put(x, y); else { put(x, y - 1); put(x, y); } }
-    if (bl === 367) { if (preferSmall) put(x, y); else { put(x, y - 1); put(x, y); } }
-  }
-}
-
-/** PlaceTight（cs:38329）：生成期 shimmer 恒无 → 门禁只剩 type==231；掷 Next(2)/Next(3)。 */
-function placeTight(st: TileStore, rng: RNG, x: number, y: number): void {
-  if (!st.inBounds(x, y)) return;
-  const i = st.idx(x, y);
-  if (st.flags[i] && st.type[i] === TILE_BY_KEY['v_231_larva']) return;
-  placeStalactite(st, x, y, rng.int(0, 1) === 0, rng.int(0, 2));
 }
 
 /** TileID.Sets.Ore（TileID.cs:399，19 个）——大理石/花岗岩 ResetToType 的矿石保留判定。
@@ -367,10 +324,10 @@ function granitePlace(st: TileStore, gs: GenState, x0: number, y0: number): void
       const fr2 = fr.withModifierXY(tx, ty);
       if (fr2.nextMax(8) === 0 && st.flags[st.idx(tx, ty)]) {
         if (ty + 1 < st.h && !st.flags[st.idx(tx, ty + 1)]) {
-          placeStalactite(st, tx, ty + 1, fr2.nextMax(2) === 0, fr2.nextMax(3));
+          placeStalactiteWithRolls(st, tx, ty + 1, fr2.nextMax(2) === 0, fr2.nextMax(3));
         }
         if (ty - 1 >= 0 && !st.flags[st.idx(tx, ty - 1)]) {
-          placeStalactite(st, tx, ty - 1, fr2.nextMax(2) === 0, fr2.nextMax(3));
+          placeStalactiteWithRolls(st, tx, ty - 1, fr2.nextMax(2) === 0, fr2.nextMax(3));
         }
       }
       if (fr2.nextMax(2) === 0) { /* Tile.SmoothSlope —— 坡面哈希无关 */ }

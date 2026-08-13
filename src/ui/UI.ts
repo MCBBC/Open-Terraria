@@ -6,6 +6,53 @@ import { autoFrameAt, cactusFrameAt, cactusTextureFor } from '../render/VanillaT
 import { vanillaItemKey, ingredientKey, VANILLA_RECIPES, RECIPE_GROUP_ITEMS, invIndexOfVanilla, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import vanillaRareJson from '../data/vanilla-itemrare.json';
 const ITEM_RARE = vanillaRareJson as Record<string, number>;
+
+/** 原版像素面板底(IngameOptions.Draw + Utils.DrawInvBG 1:1):
+ *  Inventory_Back13(52×52)九宫——角 10×10、边/心拉伸(Utils.DrawInvBG :2681-2691 同式),
+ *  逐像素乘 IngameOptions 面板色 (33,15,91)×0.685(颜色乘法:XNA Color*float 同时乘 RGB 与 A)。
+ *  返回 dataURL;素材未载(首次打开竞态)返回 null,调用方保留兜底底色 */
+let invBgTinted: HTMLCanvasElement | null = null;
+function invBgDataUrl(w: number, h: number): string | null {
+  if (typeof Image === 'undefined') return null;
+  const img = new Image();
+  img.src = 'sprites/vanilla/Inventory_Back13.png';
+  if (!img.complete || img.naturalWidth === 0) return null;
+  if (!invBgTinted) {
+    const t = document.createElement('canvas');
+    t.width = img.naturalWidth; t.height = img.naturalHeight;
+    const tc = t.getContext('2d')!;
+    tc.imageSmoothingEnabled = false;
+    tc.drawImage(img, 0, 0);
+    const d = tc.getImageData(0, 0, t.width, t.height);
+    const tmul = [33 / 255, 15 / 255, 91 / 255, 0.685];
+    for (let i = 0; i < d.data.length; i += 4) {
+      d.data[i] = Math.round(d.data[i] * tmul[0]);
+      d.data[i + 1] = Math.round(d.data[i + 1] * tmul[1]);
+      d.data[i + 2] = Math.round(d.data[i + 2] * tmul[2]);
+      d.data[i + 3] = Math.round(d.data[i + 3] * tmul[3]);
+    }
+    tc.putImageData(d, 0, 0);
+    invBgTinted = t;
+  }
+  const t = invBgTinted, W = t.width, H = t.height;
+  const c = document.createElement('canvas');
+  c.width = Math.max(20, Math.round(w)); c.height = Math.max(20, Math.round(h));
+  const x = c.getContext('2d')!;
+  x.imageSmoothingEnabled = false;
+  // 四角(源 (0,0)/(W-10,0)/(0,H-10)/(W-10,H-10))
+  x.drawImage(t, 0, 0, 10, 10, 0, 0, 10, 10);
+  x.drawImage(t, W - 10, 0, 10, 10, c.width - 10, 0, 10, 10);
+  x.drawImage(t, 0, H - 10, 10, 10, 0, c.height - 10, 10, 10);
+  x.drawImage(t, W - 10, H - 10, 10, 10, c.width - 10, c.height - 10, 10, 10);
+  // 四边(源 (10,0)/(10,H-10)/(0,10)/(W-10,10) 各 10×10 拉伸)
+  x.drawImage(t, 10, 0, 10, 10, 10, 0, c.width - 20, 10);
+  x.drawImage(t, 10, H - 10, 10, 10, 10, c.height - 10, c.width - 20, 10);
+  x.drawImage(t, 0, 10, 10, 10, 0, 10, 10, c.height - 20);
+  x.drawImage(t, W - 10, 10, 10, 10, c.width - 10, 10, 10, c.height - 20);
+  // 中心 (10,10,10,10) 拉伸铺满
+  x.drawImage(t, 10, 10, 10, 10, 10, 10, c.width - 20, c.height - 20);
+  return c.toDataURL();
+}
 import { atlasIconForKey, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { VI } from '../data/itemKeys';
 import { prefixStat, prefixLines, prefixValueMul, PREFIX_NAMES } from '../data/vanillaPrefixes';
@@ -15,10 +62,12 @@ import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
 import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
-import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
+import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
 import { openAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
+import { CharCreation } from './CharCreation';
+import type { Appearance } from '../player/Appearance';
 import type { ChestData } from '../world/World';
 
 type SlotWhere = 'inv' | 'chest' | 'armor' | 'dye' | 'misc' | 'miscDye';
@@ -210,7 +259,7 @@ export class UI {
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
   achWrapEl: HTMLElement | null = null;
-  heldStack: { id: number; stack: number; prefix?: number } | null = null; // prefix 随实例流转（Item.prefix;旧类型丢词缀,2026-08-13 修）
+  heldStack: { id: number; stack: number; prefix?: number; placeStyle?: number } | null = null; // prefix/placeStyle 随实例流转
   heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
@@ -227,7 +276,7 @@ export class UI {
     (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
   }
 
-  private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean; prefix?: number } | null {
+  private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean; prefix?: number; placeStyle?: number } | null {
     if (where === 'inv') return this.game.player.inv.slots[i];
     if (where === 'armor') return this.game.player.inv.armor[i];
     if (where === 'dye') return this.game.player.inv.dye[i];
@@ -864,7 +913,7 @@ export class UI {
     else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
-    else this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix }; // 保留词缀（旧重建丢 prefix）
+    else this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; // 保留词缀+实例样式
     this.refreshAll();
   }
 
@@ -884,7 +933,7 @@ export class UI {
       cur.stack -= half;
       if (cur.stack <= 0) this.openChest.items[i] = null;
     }
-    this.heldStack = { id: cur.id, stack: half, prefix: cur.prefix }; // 拆半也带词缀（词缀物 maxStack1 不真拆,防御）
+    this.heldStack = { id: cur.id, stack: half, prefix: cur.prefix, ...(cur.placeStyle !== undefined ? { placeStyle: cur.placeStyle } : {}) }; // 拆半也带词缀+实例样式
     this.refreshAll();
   }
 
@@ -2513,24 +2562,64 @@ export class UI {
     setTimeout(kill, 5000); // 300t = 5s(InGamePopups.cs:54)
   }
 
-  // ============ 暂停菜单 ============
+  // ============ 暂停菜单（原版像素风：IngameOptions.Draw + Utils.DrawInvBG） ============
 
-  showPause(handlers: { onResume: () => void; onSave: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void }) {
-    const panel = el('div', 'sw-panel');
-    panel.style.cssText = 'pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); width:280px;';
-    panel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Paused')));
-    const bRes = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Resume'));
-    bRes.onclick = () => { panel.remove(); handlers.onResume(); };
-    const bSave = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.SaveGame'));
-    bSave.onclick = () => handlers.onSave();
-    const bSet = el('button', 'sw-btn', Lang.text('LegacyMenu.14'));
-    bSet.onclick = () => handlers.onSettings?.();
-    const bBst = el('button', 'sw-btn', '图鉴');
-    bBst.onclick = () => handlers.onBestiary?.();
-    const bQuit = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.BackToMenu'));
-    bQuit.onclick = () => { panel.remove(); handlers.onQuit(); };
-    panel.append(bRes, bSave, bSet, bBst, bQuit);
+  showPause(handlers: { onResume: () => void; onSave: () => void; onExport?: () => void; onQuit: () => void; onSettings?: () => void; onBestiary?: () => void }) {
+    if (!document.getElementById('sw-pause-style')) {
+      const style = document.createElement('style');
+      style.id = 'sw-pause-style';
+      style.textContent = `
+.sw-pause-panel {
+  pointer-events:auto; position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
+  width:360px; padding:30px 26px 18px; z-index:31; box-sizing:border-box;
+  background-repeat:no-repeat; background-size:100% 100%; image-rendering:pixelated;
+  font-family:"Fusion Pixel 12px","Microsoft YaHei",sans-serif; user-select:none;
+}
+.sw-pause-panel.fallback-bg { background:#2a1a63; } /* 素材未载时的兜底(IngameOptions 面板色系) */
+.sw-pause-title {
+  position:absolute; top:-15px; left:0; right:0; text-align:center;
+  font-size:20px; letter-spacing:3px; color:#fff; pointer-events:none;
+  text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000,2px 2px 0 #000;
+}
+.sw-pause-btn {
+  display:block; width:100%; background:none; border:none; cursor:pointer;
+  font-family:inherit; font-size:18px; letter-spacing:3px; color:#fff; padding:8px 0;
+  text-shadow:2px 0 0 #000,-2px 0 0 #000,0 2px 0 #000,0 -2px 0 #000;
+  transition:color .1s;
+}
+.sw-pause-btn:hover { color:#ffd76e; }
+`;
+      document.head.appendChild(style);
+    }
+    const panel = el('div', 'sw-pause-panel fallback-bg');
+    panel.appendChild(el('div', 'sw-pause-title', Lang.text('Mods.SandboxWorld.UI.Paused')));
+    const mkBtn = (label: string, fn: () => void) => {
+      const b = el('button', 'sw-pause-btn', label);
+      b.onclick = fn;
+      return b;
+    };
+    const bRes = mkBtn(Lang.text('Mods.SandboxWorld.UI.Resume'), () => { panel.remove(); handlers.onResume(); });
+    const bSave = mkBtn(Lang.text('Mods.SandboxWorld.UI.SaveGame'), () => handlers.onSave());
+    const bExp = handlers.onExport
+      ? mkBtn(Lang.text('Mods.SandboxWorld.UI.ExportSave'), () => handlers.onExport?.())
+      : null;
+    const bSet = mkBtn(Lang.text('LegacyMenu.14'), () => handlers.onSettings?.());
+    const bBst = mkBtn('图鉴', () => handlers.onBestiary?.());
+    const bQuit = mkBtn(Lang.text('Mods.SandboxWorld.UI.BackToMenu'), () => { panel.remove(); handlers.onQuit(); });
+    panel.append(bRes, bSave);
+    if (bExp) panel.appendChild(bExp);
+    panel.append(bSet, bBst, bQuit);
     this.root.appendChild(panel);
+    // 原版像素面板底:Inventory_Back13 九宫(Utils.DrawInvBG :2672+:2681,
+    // IngameOptions.Draw 面板色 (33,15,91)×0.685)逐像素乘色后按角 10px 合成;
+    // 素材懒加载竞态(首次打开未就绪)时保留兜底底色,下次打开生效
+    requestAnimationFrame(() => {
+      const url = invBgDataUrl(panel.offsetWidth, panel.offsetHeight);
+      if (url) {
+        panel.style.backgroundImage = `url(${url})`;
+        panel.classList.remove('fallback-bg');
+      }
+    });
     return panel;
   }
 
@@ -2622,9 +2711,10 @@ export class UI {
     this.npcDialog?.close();
     this.npcShop?.close();
     this.npcShop = null;
+    this.npcHappiness?.close();   // 心情浮层随对话框一并关闭
   }
 
-  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number): void {
+  showNpcShop(title: string, items: Array<{ key: string; vanillaId: number; name: string; price: number }>, copper: number, happinessPct?: number): void {
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
         (vid) => this.game?.npcShopBuy(vid),
@@ -2635,7 +2725,32 @@ export class UI {
       ...it,
       iconUrl: this.game ? iconUrl(this.game, it.vanillaId) || '' : '',
     }));
-    this.npcShop.open(title, entries, copper);
+    this.npcShop.open(title, entries, copper, happinessPct);
+  }
+
+  /** NPC 快乐度详情浮层（ReportHappiness.Interact） */
+  private npcHappiness: NpcHappinessPanel | null = null;
+
+  showNpcHappiness(info: HappinessInfo): void {
+    this.npcHappiness?.close();
+    this.npcHappiness = new NpcHappinessPanel(this.root, () => { this.npcHappiness = null; });
+    this.npcHappiness.open(info);
+  }
+
+  closeNpcHappiness(): void {
+    this.npcHappiness?.close();
+  }
+
+  /** 梳妆台更衣窗（Main.OpenClothesWindow Main.cs:43568）：复用角色创建面板的
+   *  外观/颜色页签，确认后回写角色档 */
+  private clothesPanel: CharCreation | null = null;
+
+  showClothesWindow(appearance: Appearance, onApply: (a: Appearance) => void): void {
+    this.clothesPanel = new CharCreation(this.root, {
+      // 更衣窗只改衣服样式+六色（确认=GameUI.Change，取消/Esc=回退不动外观）
+      onCreate: (a) => { this.clothesPanel = null; onApply(a); },
+      onCancel: () => { this.clothesPanel = null; },
+    }, { initial: appearance, dresser: true });
   }
 
   /** M5：背包/快捷栏已 Canvas 化，DOM 仅保留 Buff 栏 + Toast */

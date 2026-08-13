@@ -641,7 +641,8 @@ export class VanillaSpawner {
    *  UnderworldLayer = maxTilesY-200(Main.cs:2863 属性表达式,精确非近似) */
   getSpawnRate(playerYpx: number, nearbySlots: number, waterCandle: boolean, sHeightPx: number,
     playerXpx = this.pX * TILE, peaceCandle = false, sunflower = false, calmed = false, battle = false,
-    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false): { spawnRate: number; maxSpawns: number } {
+    townNPCs = 0, dayTime = true, zoneEvil = false, bloodMoon = false,
+    wofActive = false): { spawnRate: number; maxSpawns: number } {
     // ZoneWaterCandle 先落字段（SetSpawnFlags L308 语义）：同一值既改刷怪率（:637/:650）
     // 也供 SpawnAnNPC 的 399/87/86 水蜡烛加重支——Game 每帧先 getSpawnRate 后 spawn
     this.zoneWaterCandle = waterCandle;
@@ -668,6 +669,12 @@ export class VanillaSpawner {
     if (playerYpx > underworldY) {
       // L393-396：地狱 maxSpawns×2
       maxSpawns = Math.floor(maxSpawns * 2);
+      // L668-673：肉山战进行中（wofNPCIndex>=0）且玩家在地狱 → spawnRate×3 / max×0.3
+      // （WoF 期间地狱刷怪大幅压制,防止干扰战斗）——此前缺失
+      if (wofActive) {
+        spawnRate = Math.floor(spawnRate * 3);
+        maxSpawns = Math.max(1, Math.floor(maxSpawns * 0.3));
+      }
     } else if (playerYpx > w.rockLevel * 16 + sHeightPx) {
       // L402-407：洞穴层 spawnRate×0.4 / max×1.9
       spawnRate = Math.floor(spawnRate * 0.4);
@@ -792,6 +799,11 @@ export class VanillaSpawner {
       maxSpawns = Math.floor(maxSpawns * 0.7);
     }
     // L655-662：下限 spawnRate≥60，上限 maxSpawns≤15
+    // L654-656：getGoodWorld（FTW 种子）rate×0.8 / max×1.2——此前缺失
+    if (w.seedFlags?.getGoodWorld) {
+      spawnRate = Math.floor(spawnRate * 0.8);
+      maxSpawns = Math.floor(maxSpawns * 1.2);
+    }
     if (spawnRate < 60) spawnRate = 60;
     if (maxSpawns > 15) maxSpawns = 15;
     // L696：未杀骷髅王 rate=10（clamp 之后赋值，不受 ≥60 下限影响——守卫快速轮换）
@@ -2614,9 +2626,12 @@ export class VanillaSpawner {
     this.dayTime = this.world.clock.isDay;
     this.hardMode = !!this.world.flags.hardMode;
     this.expert = mainExpertMode(this.world);          // Main.expertMode（GetBasicSlimeToSpawn 绿/紫门用）
-    // SetSpawnFlags L321：noWorms = 玩家所站格带房屋墙（房屋内不出蠕虫）
-    this.noWorms = this.world.store.inBounds(this.pX, this.pY)
-      && WALL_HOUSE.has(this.world.store.wall[this.world.store.idx(this.pX, this.pY)]);
+    // SetSpawnFlags L321：noWorms = 玩家所站格带房屋墙（房屋内不出蠕虫）；
+    // ∪= getSpawnRate 城镇段闩锁的 townNoWorms（原版同一字段,分支只写真值 →
+    // OR 合并即原版终态;此前 townNoWorms 闩后从未被读 = 城镇旁蠕虫抑制失效）
+    this.noWorms = (this.world.store.inBounds(this.pX, this.pY)
+      && WALL_HOUSE.has(this.world.store.wall[this.world.store.idx(this.pX, this.pY)]))
+      || this.townNoWorms;
     this.skyMob = false;
     this.spawnSpider = false;
     // 邻近旗标每尝试复位(原版每次 TrySpawnAnNPC 全新置旗;

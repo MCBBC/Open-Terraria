@@ -287,13 +287,14 @@ export function serializeSave(
   // 物品 id → 稳定 id(全槽位统一;量小直接遍历)。保留 favorited/prefix。
   // v4 起 armor/dye/trash/miscEquips/miscDyes/loadouts 也走稳定 id(v3 曾裸透传内部
   // 下标——注册表一变即错位;本地物品退役时顺手根治)
-  const mapItem = (it: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) =>
+  const mapItem = (it: { id: number; stack: number; favorited?: boolean; prefix?: number; placeStyle?: number } | null) =>
     it
       ? {
         id: it.id === 0 ? 0 : ITEM_STABLE_OF_INTERNAL[it.id] ?? 0,
         stack: it.stack,
         favorited: it.favorited || undefined,
         prefix: it.prefix || undefined,
+        placeStyle: it.placeStyle ?? undefined,
       }
       : null;
   const data: SaveData = {
