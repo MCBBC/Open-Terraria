@@ -148,6 +148,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onInventoryChanged: () => ui.refreshAll(),
       onBuffsChanged: () => ui.refreshBuffs(),
       onToast: (m) => ui.toast(m),
+      onAchievementPopup: (name, title) => ui.achievementPopup(name, title),
       // 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor)；
       // width = NewTextMultiline WidthLimit（广播盒 460px 折行，-1 不限）
       onChat: (t, r, g, b, width) => ui.chatMessage(t, r, g, b, width),

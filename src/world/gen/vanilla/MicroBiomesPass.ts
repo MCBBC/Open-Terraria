@@ -920,9 +920,15 @@ export class DeadMansChestBiome {
         }
       }
     }
-    // PlaceTile(cx, cy, 138):巨石(cs:607)
+    // PlaceTile(cx, cy, 138):巨石(cs:607)——TileObjectData Style2x2 四格分片帧
+    // (Tiles_138 36×38 单变体;此前只写锚定格 = 渲染只剩 18×18 小片,同 TrapsPass
+    // "贴图不全"根因,2026-08-13)
     if (st.inBounds(cx, cy) && !st.flags[st.idx(cx, cy)]) {
-      st.setTileSilent(cx, cy, BOULDER, 0, 0);
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          if (st.inBounds(cx + dx, cy + dy)) st.setTileSilent(cx + dx, cy + dy, BOULDER, dx * 18, dy * 18);
+        }
+      }
     }
     this.placeWireLine({ x: b.x, y: b.y, dirX: 0, dirY: 1, steps: b.yPush });
   }

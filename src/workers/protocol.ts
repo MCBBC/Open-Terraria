@@ -36,7 +36,7 @@ export interface WorldPacket {
     fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
     butterfly: number; stinkBug: number;
   };
-  /** CultistRitual.delay（WF:114/163；旧包缺省 0） */
+  /** CultistRitual.delay（WF:1340/:2192；旧包缺省 86400 = delayStart） */
   cultistDelay?: number;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WF:1329-1335/2147-2161；
    *  旧包缺省=索引 0/空名单。anglerQuestFinished 运行时态不回传——读档重置 WF:628-629） */

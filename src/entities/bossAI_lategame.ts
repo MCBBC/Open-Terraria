@@ -808,13 +808,14 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     // ---- 10 半血变身(:47106-47135):90t 时传送玩家上 250 处并 ai3 0→1(进入二阶段) ----
     case 10: {
       if (e.ai1 >= 30 && e.ai1 <= 170) e.iframes = 2; // flag6 → dontTakeDamage(:47110)
+      if (e.ai1 === 0) game.playSfxFiles?.(['Item_161'], 1, e.cx, e.cy); // :47036 状态开始音（仅此一次）
       e.vx *= 0.95; e.vy *= 0.95;
       if (e.ai1 === 90) {
         if (e.ai3 === 0) e.ai3 = 1; // ai3==2(白天暴怒)分支不实现
         e.x = player.cx - e.w / 2;
         e.y = player.cy - 250 - e.h / 2;
-        game.spawnParticles(e.cx, e.cy, '#FFEE90', 24, 3);
-        game.playSfx('roar', 0.8);
+        // 原版此传送为纯 position 改写（:47039-47052）：无 dust 无传送音——
+        // 曾错加 roar+黄尘（已移除对齐）
       }
       e.ai1 += 1;
       if (e.ai1 >= 180 + (20 - (phase2 ? 15 : 0))) { e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; }
@@ -1006,7 +1007,8 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     // ---- 1 传送后显形(:45689-45720):30t;缩放动画(num3)为纯视觉,跳过 ----
     case 1: {
       e.spin = 0;
-      game.spawnParticles(e.cx, e.cy, '#7040A0', 2, 1.2);
+      // 到达每帧 10 尘 4（:45747-45754）：GetDustColor=粉蓝 lerp（近似两色抽样）
+      game.spawnParticles(e.cx, e.cy, Math.random() < 0.5 ? '#50A0FF' : '#E060E0', 10, 2.4, { life: 30 });
       e.ai1 += 1;
       if (e.ai1 >= 30) { e.ai0 = 0; e.ai1 = 0; }
       break;
@@ -1014,6 +1016,8 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     // ---- 2 传送消散(:45721-45758):60t 后落位到 la1/la2(底部对齐) ----
     case 2: {
       e.spin = 0;
+      // 离场每帧 10 尘 4 ×0.5（:45780-45787）
+      game.spawnParticles(e.cx, e.cy, Math.random() < 0.5 ? '#50A0FF' : '#E060E0', 10, 1.2, { life: 30 });
       e.ai1 += 1;
       if (e.ai1 >= 60 && la.la1 !== 0) {
         e.iframes = 2; // dontTakeDamage = hide(:46138)

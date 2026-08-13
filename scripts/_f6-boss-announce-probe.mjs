@@ -48,11 +48,22 @@ ok('eoc-boss-slot', boss1.b === 4, boss1);
 // 清怪再召下一个
 await page.evaluate(() => window.__swGame.debugClearEnemies());
 
-// 2) 鹿角怪(668):vanilla-npcs.json 提取自 1405(1.4.3 才有 668)→ 列表无匹配
-//    (如实记录缺口;数据+AI_123 同批落地后改回"已苏醒"断言)
+// 2) 鹿角怪(668):vanilla-npcs.json 668 补齐 + AI_123 落地 → 召唤 + "已苏醒"公告
 await summonById(668);
-const deerRow = await page.evaluate(() => document.querySelector('[data-role=list] > div')?.textContent ?? '');
-ok('deer-no-data-gap', deerRow.includes('无匹配'), { deerRow });
+lines = await chatLines();
+const deer = lines.filter((l) => l.t.includes('已苏醒'));
+ok('deer-awoken', deer.length >= 2, { deer: deer.at(-1) });
+const deerSlot = await page.evaluate(() => ({ b: window.__swGame.boss?.vanillaId }));
+ok('deer-boss-slot', deerSlot.b === 668, deerSlot);
+// AI 自然驱动(游戏主循环 36t):家 tile 初始化 + 不炸不即死
+await new Promise((r) => setTimeout(r, 700));
+const deerAi = await page.evaluate(() => {
+  const g = window.__swGame;
+  const e = [...g.entities.enemies].reverse().find((n) => n.vanillaId === 668);
+  if (!e) return { err: 'no deer' };
+  return { ai0: e.ai0, ai2: e.ai2, ai3: e.ai3, hp: e.hp, dead: e.dead };
+});
+ok('deer-ai-hometile', !deerAi.err && deerAi.ai2 > 0 && deerAi.ai3 > 0 && !deerAi.dead, deerAi);
 await page.evaluate(() => window.__swGame.debugClearEnemies());
 
 // 3) 血月事件 → misc[8]("血月正在升起…")绿字(summonById 结束后面板开着,勿再 toggle)

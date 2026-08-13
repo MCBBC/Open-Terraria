@@ -63,7 +63,7 @@ import {
 import { newPartyState, partyIsUp, toggleManualParty, partyCheckNight, partyWorldClear, partyNaturalAttempt, type PartyState } from '../world/wiring/party';
 import { LanternNight } from '../world/LanternNight';
 import {
-  setFireFlyChance, cultistRitualUpdateTime, cultistTabletDestroyed,
+  setFireFlyChance, cultistRitualUpdateTime, cultistTabletDestroyed, cultistWorldClear,
   mysticLogs, type CultistHost, type FairyHost,
 } from '../world/evolution/RuntimeEvents';
 import type { SaveData } from '../save/serialize';
@@ -96,6 +96,8 @@ import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { invIndexOfVanilla } from '../data/vanillaRecipes';
+import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
@@ -478,6 +480,8 @@ export interface GameCallbacks {
   onWorldReady: () => void;
   onInventoryChanged: () => void;
   onToast: (msg: string) => void;
+  /** 成就解锁弹窗(原版 InGamePopups 底部居中;UI 实现,缺省回退 onToast) */
+  onAchievementPopup?: (name: string, title: string) => void;
   /** 原版 Main.NewText 消息列(Main.cs:64095 → LegacyChatMonitor;RGB 0-255) */
   /** width = NewTextMultiline WidthLimit（-1 不限；广播盒 460） */
   onChat?: (text: string, r: number, g: number, b: number, width?: number) => void;
@@ -1778,6 +1782,7 @@ export class Game implements GameHooks {
     partyWorldClear(this.partyState);
     LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
     mysticLogs.worldClear();        // MysticLogFairiesEvent.WorldClear（WorldGen.cs:6958）：仙女事件态复位
+    cultistWorldClear();            // CultistRitual.recheck 运行时位复位（delay 走存档）
     this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备 = 原版经典开局三件套（铜镐 3509/铜斧 3506/铜短剑 3507），其余一概不给——
@@ -1839,10 +1844,13 @@ export class Game implements GameHooks {
     // 扫一次倒木桩（StartNight 会重扫，此为入夜前的首扫）
     mysticLogs.startWorld(this.fairyCtx());
     this._lastClockT = this.world.clock.timeOfDay;
-    // 成就：解锁 toast（原版走 Steam 弹窗，本作用 toast 反馈）+ 进世界基线
+    // 成就：解锁弹窗（原版 InGamePopups.AchievementUnlockedPopup,InGameNotificationsTracker
+    // 底部居中锚 screenHeight-40、300t 寿命——非 Steam 专属;UI 无 popup 钩子时回退 toast）
+    // + 进世界基线
     this.achievements.onUnlock = (name) => {
       const disp = Lang.text(`Achievements.${name}_Name`);
-      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AchievementUnlocked', disp));
+      if (this.cb.onAchievementPopup) this.cb.onAchievementPopup(name, disp);
+      else this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.AchievementUnlocked', disp));
       // 背包内提示牌即时换下一目标（原版每帧重绘的等价触发）
       this.cb.onInventoryChanged?.();
     };
@@ -2921,7 +2929,8 @@ export class Game implements GameHooks {
     //      · CultistRitual.UpdateTime（:64427 / CultistRitual.cs:20-47）——已接：
     //        地牢拜月教石碑 437 自然重生计时（hardMode && downedGolemBoss && downedBoss3，
     //        delay/recheck 每帧按 dayRate 递减，双零掷 TrySpawning(dungeonX/Y)）；
-    //        delay 随存档（WF:114/163 → World.cultistDelay），TabletDestroyed 账在下方
+    //        delay 随存档（WF:1340/:2192 → World.cultistDelay，缺省 86400=delayStart），
+//        TabletDestroyed 账在下方
     //        石碑 ai0==-1 边沿捕获（NPC.cs:38881）
     //      · MysticLogFairiesEvent.UpdateTime（:64433）——已接：倒木桩夜放仙女
     //        （StartNight 开闸 + 扫桩在 DUSK 块）
@@ -4838,36 +4847,25 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
-    } else if (heldDef && viIdFromKey(heldDef.key) === 3328
+    } else if (heldDef && BOSS_BAG_IDS.has(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
-      // 世纪之花宝藏袋开包（Player.OpenBossBag case 3328，Player.cs:7077-7135）：
-      // 面具 1/7 + 神庙钥匙恒 + 孢子囊 3336 恒 + 苗苗 1/15 + 斧头 1/20 +
-      // 俾格米法杖 1/2 + 荆棘钩 1/10 + rand(8) 八选一（0 榴弹发射器+火箭×50-150）。
-      // TryGettingDevArmor（开发者套装小概率）未实装，登记
+      // 宝藏袋开包（Player.OpenBossBag :6828-7520 全 19 袋,数据驱动引擎
+      // data/vanillaBossBags.ts:概率门/大师门/武器 switch/猩红三元/去重双随机/
+      // 月总十选二 + 共享尾段按 boss value 附赠钱币——旧仅世花 3328 手写一例,
+      // 专家袋整层不可开,2026-08-13 修）
       {
         const px = this.player.cx, py = this.player.cy;
-        const give = (vid: number, n = 1): void => {
-          const k = VANILLA_ITEM_KEY_BY_ID[vid];
-          if (k) this.spawnDrop(px, py, k, n, 0, -2);
-        };
-        if (Math.random() < 1 / 7) give(2109);
-        give(1141);
-        give(3336);
-        if (Math.random() < 1 / 15) give(1182);
-        if (Math.random() < 1 / 20) give(1305);
-        if (Math.random() < 1 / 2) give(1157);
-        if (Math.random() < 1 / 10) give(3021);
-        const w8 = Math.floor(Math.random() * 8);
-        if (w8 === 0) { give(758); give(771, 50 + Math.floor(Math.random() * 101)); }
-        else if (w8 === 1) give(1255);
-        else if (w8 === 2) give(788);
-        else if (w8 === 3) give(1178);
-        else if (w8 === 4) give(1259);
-        else if (w8 === 5) give(1155);
-        else if (w8 === 6) give(3018);
-        else give(5477);
+        openBossBag(viIdFromKey(heldDef.key), (id, n) => {
+          const k = VANILLA_ITEM_KEY_BY_ID[id];
+          if (k) this.spawnDrop(px, py, k, n ?? 1, 0, -2);
+        }, {
+          masterMode: mainMasterMode(this.world),
+          crimson: this.world.crimson,
+          extraAccessory: this.player.inv.extraAccessory,
+          hasItem: (id) => { const iid = invIndexOfVanilla(id); return iid >= 0 && this.player.inv.countOf(iid) > 0; },
+        });
         this.player.inv.removeAt(this.player.inv.selected, 1);
-        this.player.useTime = 30;
+        this.player.useTime = 60;
         this.cb.onInventoryChanged();
       }
       this.input.mouseDown = false;
@@ -8566,7 +8564,11 @@ export class Game implements GameHooks {
         lunar = { zone, counts: moonCounts };
       }
     }
-    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon, !!w.flags.downedSkeletron, invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck);
+    // downedBoss3 双键（骷髅王击杀链写 downed_35，旧档/导入可能写 downedSkeletron——
+    // 此前只传 downedSkeletron 恒 false，地牢守卫池永不切换、绑缚三人组 685 门不开）
+    this.vanillaSpawner.setPlayerFlags(!!this.scene?.zoneDungeon,
+      !!(w.flags.downedSkeletron || w.flags['downed_35']),
+      invaders, activeIds, moonCtx, lunar, this.player.maxHp, this.player.luck);
     // 天气注入（雪原雨刷怪率修正 + 沙尘暴怪池门）
     this.vanillaSpawner.setWeather(
       w.weather.cloudAlpha,
@@ -8626,8 +8628,10 @@ export class Game implements GameHooks {
           : picked.vanillaId === 685 ? 'town_slime_old' : null;
       if (trioKey) {
         if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === trioKey)) return;
+        // 落位：currentSpawnY = 落脚实心面（findSpawnTile 向下找的首个实心格，与
+        // placeBoundNpc 的"脚底上一格+1"同义）→ 脚底 = 该格顶
         const tn = new TownNPC(trioKey, this.vanillaSpawner.currentSpawnX * TILE + 8,
-          (this.vanillaSpawner.currentSpawnY + 1) * TILE);
+          this.vanillaSpawner.currentSpawnY * TILE);
         tn.bound = true;
         this.entities.add(tn, 'npcs');
         return;
@@ -9055,7 +9059,8 @@ export class Game implements GameHooks {
       this.freeCake = false;
       const cake = VI(3750);
       if (cake && ITEM_BY_KEY[cake] !== undefined) this.player.inv.add(ITEM_BY_KEY[cake], 1);
-      return Lang.specialText('PartyGirlSpecialText.Cake') ?? Lang.text('LegacyDialog.140');
+      return Lang.specialText('PartyGirlSpecialText.Cake')
+        ?? Lang.text('PartyGirlSpecialText.Cake1');
     }
     if (npc.vanillaId === 17) {
       // 商人(NPC.cs:95077-95105)

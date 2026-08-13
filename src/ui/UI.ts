@@ -13,6 +13,7 @@ import { equipKindOfInternal, MISC_KINDS } from '../data/vanillaEquip';
 import { armorSlotIndexOfInternal, statOfInternal } from '../data/vanillaItemStats';
 import { BuffType, BUFF_DEFS, buffName, buffDesc } from '../stats/Buffs';
 import { Lang } from '../i18n/Lang';
+import { ACH_ICON_INDEX, achIconFrame } from '../data/vanillaAchievements';
 import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, type NpcButtonId, type ShopEntry } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
@@ -154,6 +155,24 @@ const CSS = `
 .sw-toast { position:fixed; left:50%; top:64px; transform:translateX(-50%);
   background:rgba(20,16,28,0.9); color:#ffe8a0; padding:8px 18px; border-radius:6px;
   border:1px solid #6a5a8a; font-size:14px; transition:opacity 0.4s; pointer-events:none; }
+/** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup + Tracker :38-52):
+ *  底部居中、距底 40px、多条向上堆叠;库存蓝底 (64,109,164)×0.5(hover ×0.75);
+ *  64px 成就图标(Achievements.png 8/行 66px 栅格)+ Achievement_Borders 边框;
+ *  标题右对齐于图标左;300t 寿命(0.5s 淡入/末 0.25s 淡出) */
+.sw-ach-wrap { position:fixed; left:0; right:0; bottom:40px; display:flex;
+  flex-direction:column; align-items:center; gap:6px; pointer-events:none; z-index:60; }
+.sw-ach { pointer-events:auto; display:flex; align-items:center; gap:10px; direction:rtl;
+  background:rgba(64,109,164,0.5); border:1px solid #1a1a2e; border-radius:4px;
+  padding:6px 10px; cursor:pointer; transition:opacity 0.25s, transform 0.5s;
+  animation:sw-ach-in 0.5s ease-out; }
+.sw-ach:hover { background:rgba(64,109,164,0.75); }
+.sw-ach.out { opacity:0 !important; transform:translateY(8px); }
+.sw-ach .ttl { direction:ltr; color:#ffe8a0; font-size:14px; text-shadow:1px 1px 0 #000;
+  white-space:nowrap; }
+.sw-ach .icn { width:64px; height:64px; position:relative; flex:0 0 auto; direction:ltr; }
+.sw-ach .icn img { width:64px; height:64px; image-rendering:pixelated; position:absolute;
+  left:0; top:0; }
+@keyframes sw-ach-in { from { opacity:0; transform:translateY(12px) scale(0.9); } }
 .sw-tooltip { position:fixed; background:rgba(10,8,16,0.95); border:1px solid #6a5a8a; border-radius:4px;
   padding:6px 10px; color:#e8e4f0; font-size:13px; pointer-events:none; z-index:100; max-width:260px; }
 .sw-buff { pointer-events:auto; position:relative; width:30px; height:30px; background:rgba(40,32,60,0.9);
@@ -186,6 +205,7 @@ export class UI {
   craftListEl!: HTMLElement;
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
+  achWrapEl: HTMLElement | null = null;
   heldStack: { id: number; stack: number; prefix?: number } | null = null; // prefix 随实例流转（Item.prefix;旧类型丢词缀,2026-08-13 修）
   heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
@@ -203,7 +223,7 @@ export class UI {
     (window as unknown as { __swUI?: UI }).__swUI = this; // 调试句柄
   }
 
-  private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean } | null {
+  private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean; prefix?: number } | null {
     if (where === 'inv') return this.game.player.inv.slots[i];
     if (where === 'armor') return this.game.player.inv.armor[i];
     if (where === 'dye') return this.game.player.inv.dye[i];
@@ -1734,6 +1754,33 @@ export class UI {
     body.appendChild(right);
     this.invPanel.appendChild(body);
 
+    // 防御计数器（原版 DrawDefenseCounter Main.cs:41557-41623：Extra_58 盾 3×2 帧
+    // [普通/专家/大师 × 底/辉光] + 数值；悬停 = 「N 防御 + 伤害减免%(难度换算 0.5/0.75/1)」）
+    const defRow = el('div');
+    defRow.style.cssText = 'display:flex; align-items:center; gap:6px; margin:6px 0 2px;';
+    defRow.dataset.role = 'defense';
+    const defShield = el('canvas');
+    defShield.width = 52; defShield.height = 48;
+    defShield.style.cssText = 'width:26px; height:24px; image-rendering:pixelated;';
+    defRow.appendChild(defShield);
+    const defNum = el('span', '', '0');
+    defNum.style.cssText = 'font-size:15px; font-weight:bold; color:#fff; text-shadow:1px 1px 0 #000;';
+    defRow.appendChild(defNum);
+    defRow.addEventListener('mouseenter', () => {
+      if (!this.game) return;
+      const p = this.game.player;
+      const st = p.defense;
+      const w = this.game.world;
+      // 伤害减免换算（:41567-41572）：大师 ×1.0 / 专家 ×0.75 / 普通 ×0.5
+      const mul = w.isMaster ? 1.0 : w.isExpert ? 0.75 : 0.5;
+      const reduce = Math.ceil(st * mul);
+      const diff = w.isMaster ? '大师' : w.isExpert ? '专家' : '普通';
+      this.tooltip.innerHTML = `<b>${st} 防御</b><br><span style="color:#9a8ab8">伤害减免 ${reduce}%（${diff}）</span>`;
+      this.tooltip.style.display = 'block';
+    });
+    defRow.addEventListener('mouseleave', () => (this.tooltip.style.display = 'none'));
+    this.invPanel.appendChild(defRow);
+
     // 合成区
     this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Crafting')));
     const stations = el('div', '', '');
@@ -2115,7 +2162,7 @@ export class UI {
     this.hotbarNameEl.textContent = name || Lang.inter(37);
   }
 
-  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean } | null) {
+  private paintSlot(slotEl: HTMLElement, content: { id: number; stack: number; favorited?: boolean; prefix?: number } | null) {
     const oldImg = slotEl.querySelector('img');
     const oldCnt = slotEl.querySelector('.cnt');
     if (oldImg) oldImg.remove();
@@ -2194,6 +2241,27 @@ export class UI {
     const game = this.game;
     if (!game || !this.craftListEl) return;
     const stations = game.stationsNearby();
+    const defEl = this.invPanel.querySelector('[data-role="defense"]') as HTMLElement | null;
+    if (defEl) {
+      // 防御计数器刷新（DrawDefenseCounter :41557）：盾帧 = 难度列(0/1/2),
+      // 专家/大师叠辉光行(静态 α0.45 近似原版脉动;大师红绿脉冲未做,偏差记录)
+      const p = this.game.player;
+      const w = this.game.world;
+      const col = w.isMaster ? 2 : w.isExpert ? 1 : 0;
+      const cv = defEl.querySelector('canvas') as HTMLCanvasElement;
+      const dctx = cv.getContext('2d')!;
+      dctx.clearRect(0, 0, cv.width, cv.height);
+      const shield = this.game.atlas?.vmisc('vanilla/Extra_58.png');
+      if (shield) {
+        dctx.drawImage(shield.img, shield.sx + col * 52, shield.sy, 52, 48, 0, 0, 52, 48);
+        if (col > 0 && p.defense > 0) {
+          dctx.globalAlpha = 0.45;
+          dctx.drawImage(shield.img, shield.sx + col * 52, shield.sy + 48, 52, 48, 0, 0, 52, 48);
+          dctx.globalAlpha = 1;
+        }
+      }
+      defEl.querySelector('span')!.textContent = String(p.defense);
+    }
     const stationsEl = this.invPanel.querySelector('[data-role="stations"]') as HTMLElement;
     if (stationsEl) {
       const stName: Record<string, string> = { hand: Lang.text('Mods.SandboxWorld.UI.StationHand'), workbench: '🛠 ' + Lang.text('ItemName.WorkBench'), furnace: '🔥 ' + Lang.text('ItemName.Furnace'), anvil: '⚒ ' + Lang.text('ItemName.IronAnvil') };
@@ -2403,6 +2471,43 @@ export class UI {
       t.style.opacity = '0';
       setTimeout(() => t.remove(), 500);
     }, 2500);
+  }
+
+  /** 成就解锁弹窗(原版 AchievementUnlockedPopup:底部居中 40px/5s/蓝底图标条)。
+   *  name → ACH_ICON_INDEX 取图标栅格位;点击关闭(原版跳成就页,成就 UI 未接 GAP) */
+  achievementPopup(name: string, title: string) {
+    if (!this.achWrapEl) {
+      this.achWrapEl = el('div', 'sw-ach-wrap');
+      this.root.appendChild(this.achWrapEl);
+    }
+    const card = el('div', 'sw-ach');
+    card.title = title;
+    const ttl = el('span', 'ttl', title);
+    const icn = el('div', 'icn');
+    const idx = ACH_ICON_INDEX[name] ?? 0;
+    const f = achIconFrame(idx);
+    const img = el('img') as HTMLImageElement;
+    img.src = 'sprites/vanilla/Achievements.png';
+    img.style.objectPosition = `-${f.x}px -${f.y}px`;
+    img.style.objectFit = 'none';
+    img.style.width = 'auto'; img.style.height = 'auto';
+    // 栅格偏移:用内层 canvas 式裁切——object-position 需元素与源同尺寸,改用 clip-path 兜底
+    img.style.clipPath = `inset(${f.y}px 0 0 ${f.x}px)`;
+    img.style.transform = `translate(${-f.x}px, ${-f.y}px)`;
+    const bdr = el('img') as HTMLImageElement;
+    bdr.src = 'sprites/vanilla/Achievement_Borders.png';
+    bdr.style.width = '72px'; bdr.style.height = '72px';
+    bdr.style.position = 'absolute'; bdr.style.left = '-4px'; bdr.style.top = '-4px';
+    bdr.style.zIndex = '1';
+    icn.appendChild(img); icn.appendChild(bdr);
+    card.appendChild(ttl); card.appendChild(icn);
+    const kill = () => {
+      card.classList.add('out');
+      setTimeout(() => card.remove(), 300);
+    };
+    card.onclick = kill; // 原版点击开成就页并移除;成就页 UI 未接,先关闭(GAP)
+    this.achWrapEl.appendChild(card);
+    setTimeout(kill, 5000); // 300t = 5s(InGamePopups.cs:54)
   }
 
   // ============ 暂停菜单 ============

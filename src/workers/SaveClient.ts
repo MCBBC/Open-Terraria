@@ -61,7 +61,7 @@ export class SaveClient {
       // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚重掷）
       critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
         fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
-      cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
+      cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340/:2192）
       angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
       savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
       shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）

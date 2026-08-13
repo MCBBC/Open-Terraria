@@ -20,19 +20,21 @@ for (let i = 0; i < marks.length; i++) {
   // 逐行词法
   for (const lineRaw of seg.split('\n')) {
     const line = lineRaw.trim();
-    if (!line || line.startsWith('case ') || line === 'break;' || line === '{' || line === '}') {
-      if (line === 'break;') toks.push({ t: 'end' });
-      continue;
-    }
+    if (!line) continue;
+    { const cm = line.match(/^case (\d+):$/); if (cm) { toks.push({ t: 'branch', i: +cm[1] }); continue; } }
+    if (line.startsWith('case ')) continue;
+    if (line === 'break;') { toks.push({ t: 'end' }); continue; }
+    if (line === '{') { toks.push({ t: 'blockOpen' }); continue; }
+    if (line === '}') { toks.push({ t: 'blockClose' }); continue; }
     if (line.includes('TryGettingDevArmor')) { toks.push({ t: 'devArmor' }); continue; }
     let mm;
     if ((mm = line.match(/^if \(Main\.rand\.Next\((\d+)\) == 0\)$/))) { toks.push({ t: 'if', n: +mm[1] }); continue; }
     if (line.startsWith('else')) { toks.push({ t: 'else' }); continue; }
     if ((mm = line.match(/^switch \(Main\.rand\.Next\((\d+)\)\)$/))) { toks.push({ t: 'switch', n: +mm[1] }); continue; }
     if ((mm = line.match(/^case (\d+):$/)) && toks.at(-1)?.t === 'switch') { toks.push({ t: 'branch', i: +mm[1] }); continue; }
-    if (line.startsWith('if (Main.masterMode)')) { toks.push({ t: 'master' }); continue; }
+    if (line.startsWith('if (masterMode)') || line.startsWith('if (Main.masterMode)')) { toks.push({ t: 'master' }); continue; }
     // int numN = rand.Next(a,b); 变量声明(去重 for 或普通)
-    if ((mm = line.match(/^int num\d+ = Main\.rand\.Next\((\d+), (\d+)\);$/))) {
+    if ((mm = line.match(/^int num\d* = Main\.rand\.Next\((\d+), (\d+)\);$/))) {
       toks.push({ t: 'randVar', a: +mm[1], b: +mm[2] }); continue;
     }
     if (line.includes('for (num')) { toks.push({ t: 'dedup' }); continue; }
@@ -50,11 +52,39 @@ for (let i = 0; i < marks.length; i++) {
     // 数量叠加 num7 = rand.Next(a)+b 之类
     if ((mm = line.match(/^int num\d+ = Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { toks.push({ t: 'varAdd', roll: +mm[1], base: +mm[2] }); continue; }
     if ((mm = line.match(/^num\d+ \+= Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { toks.push({ t: 'varAddMore', roll: +mm[1], base: +mm[2] }); continue; }
+    if ((mm = line.match(/^num\d+ = Main\.rand\.Next\((\d+), (\d+)\);$/))) { toks.push({ t: 'randVar', a: +mm[1], b: +mm[2] }); continue; }
+    if ((mm = line.match(/^int num\d+ = Main\.rand\.Next\((\d+)\);$/))) { toks.push({ t: 'randVar', a: 0, b: +mm[1] }); continue; }
+    if ((mm = line.match(/^num\d+ = Main\.rand\.Next\((\d+)\) \+ (\d+);$/))) { toks.push({ t: 'varAdd', roll: +mm[1], base: +mm[2] }); continue; }
+    if ((mm = line.match(/^item = \(short\)\(WorldGen\.crimson \? (\d+) : (\d+)\);$/))) { toks.push({ t: 'crimItem', evil: +mm[1], good: +mm[2] }); continue; }
+    if (line === 'default:') { toks.push({ t: 'branch', i: -1 }); continue; }
+    if (line === 'if (!extraAccessory)') { toks.push({ t: 'noExtraAcc' }); continue; }
+    if (line === 'int num9;') continue;
+    if ((mm = line.match(/^switch \(num\d+\)$/))) { toks.push({ t: 'switchVar' }); continue; }
+    if ((mm = line.match(/^num\d+ = (\d+);$/))) { toks.push({ t: 'varId', id: +mm[1] }); continue; }
+    if (line.startsWith('if (Main.remixWorld)')) { toks.push({ t: 'remix' }); continue; }
+    if (/^num\d+ = \(\(num\d+ != 3\) \? \(489 \+ num\d+\) : 2998\);$/.test(line)) { toks.push({ t: 'idMap', map: { 0: 489, 1: 490, 2: 491, 3: 2998 } }); continue; }
+    if (/^List<int> list = new List<int> \{/.test(line)) { toks.push({ t: 'pick2', ids: [...line.matchAll(/\d+/g)].map(Number) }); continue; }
+    if (/^for \(int i = 0; i < 2; i\+\+\)/.test(line)) continue;   // pick2 循环体(已折叠)
+    if (/^(int index = |int item2 = |QuickSpawnItem\(itemSource_OpenItem, item2\);|list\.RemoveAt)/.test(line)) continue;
+    if (/^int num10 = -1;/.test(line)) { toks.push({ t: 'TAIL' }); break; }  // 共享尾段从此截断
+    if (/^if \(type == \d+\)|^\t*num10 = \d+;/.test(line)) continue;
+    if (/^if \(!HasItem\(\d+\)\)/.test(line)) { toks.push({ t: 'noItem', id: Number(line.match(/\((\d+)\)/)[1]) }); continue; }
+    if ((mm = line.match(/^QuickSpawnItem\(itemSource_OpenItem, (\d+), (\d+)\);$/))) { toks.push({ t: 'spawn', id: +mm[1], stack: +mm[2] }); continue; }
+    if (/^while \(num2 == num\)/.test(line)) { toks.push({ t: 'dedup' }); continue; }
+    if (/^num = Main\.rand\.Next\(4982, 4985\);$/.test(line)) continue;   // 去重复掷
+    if (/^QuickSpawnItem\(itemSource_OpenItem, num\);$/.test(line)) { toks.push({ t: 'spawn', useVar: true }); continue; }
+    if (line === 'switch (type)') { toks.push({ t: 'TAIL' }); break; }
     toks.push({ t: 'unparsed', src: line.slice(0, 100) });
   }
   out[marks[i].id] = toks;
 }
-writeFileSync('src/data/vanilla-bossbags.json', JSON.stringify(out, null, 1));
+// 共享尾段:type→boss npc id(开袋按 boss value 附赠钱币,:7418-7472)
+const coinMap = {};
+const tail = src.slice(start, start + 40000);
+const tailRe = /if \(type == (\d+)\)\s*\n\s*\{\s*\n\s*num10 = (\d+);/g;
+let tm;
+while ((tm = tailRe.exec(tail))) coinMap[+tm[1]] = +tm[2];
+writeFileSync('src/data/vanilla-bossbags.json', JSON.stringify({ bags: out, coinMap }, null, 1));
 const unparsed = [];
 for (const [id, toks] of Object.entries(out)) for (const t of toks) if (t.t === 'unparsed') unparsed.push(`${id}: ${t.src}`);
 console.log('cases:', marks.length, '| unparsed:', unparsed.length);

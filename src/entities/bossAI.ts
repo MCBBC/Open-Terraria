@@ -190,6 +190,37 @@ export function skeletronHandAI(e: Enemy, game: GameHooks, player: Player | null
 
 /** AI_015 史莱姆王(NPC.cs SetDefaults case 50 / AI_015):大跳朝玩家 + 受击攒怒 +
  *  落地砸出小史莱姆(30% 概率)。经典模式无传送(专家专属),暂不移植传送。 */
+/** 史莱姆王传送目的地（Bottom 锚像素，= vanilla localAI[1]/[2]；despawn 支=世界角 :43485） */
+const kingTpDest = new WeakMap<Enemy, { x: number; y: number }>();
+/** localAI[0] anti-cheese 计数（:43504-43510 ≥360 或距玩家 >2000px → 落玩家脚底） */
+const kingAntiCheese = new WeakMap<Enemy, number>();
+
+/** AI_015_KingSlime_FindTeleportSpot（:43402-43434 收敛）：外环 ±10/内环 ±7 收
+ *  "上格净空的实心格、非岩浆、对玩家有视线"的落点随机取一；失败退 (±6,±2)；
+ *  再失败落玩家脚底。返回 Bottom 锚像素。 */
+function kingFindTeleportSpot(e: Enemy, game: GameHooks, player: Player): { x: number; y: number } {
+  const st = game.world.store;
+  const px = Math.floor(player.cx / TILE), py = Math.floor((player.y + player.h) / TILE);
+  const cand: Array<{ x: number; y: number }> = [];
+  for (const [rx, ry] of [[10, 10], [6, 2]] as const) {
+    cand.length = 0;
+    for (let x = px - rx; x <= px + rx; x++) {
+      for (let y = py - ry; y <= py + ry; y++) {
+        if (!st.inBounds(x, y) || !st.isSolid(x, y)) continue;
+        if (st.isSolid(x, y - 1)) continue;                       // 顶上净空
+        if (st.liquid[st.idx(x, y - 1)] > 0 && st.liquidType[st.idx(x, y - 1)] === 2) continue; // 岩浆
+        if (!canHit(st, x * TILE + 8, (y - 1) * TILE + 8, 1, 1, player.x, player.y, player.w, player.h)) continue;
+        // 外环 ±10/内环 ±7：|dx|>7 || |dy|>7 的环带才收（内 7×7 排除近身）
+        if (rx === 10 && Math.abs(x - px) <= 7 && Math.abs(y - py) <= 7) continue;
+        cand.push({ x, y });
+      }
+    }
+    if (cand.length) break;
+  }
+  const pick = cand.length ? cand[Math.floor(Math.random() * cand.length)] : { x: px, y: py };
+  return { x: pick.x * TILE + TILE / 2, y: (pick.y + 1) * TILE };   // Bottom 锚
+}
+
 export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   // Enemy.ai0 默认 -1120(史莱姆族约定);原版 AI_015 的 ai[0] 从 0 起步 → 首帧复位
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; }
@@ -199,17 +230,25 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!player || ksd > 3000) {
     e.encourageDespawn(10);
     if (player) e.facing = player.cx < e.cx ? 1 : -1; // 转身背对(:43479-43485)
-    if (e.ai1 !== 5 && e.ai1 !== 6) { e.ai1 = 5; e.ai3 = 0; }
+    if (e.ai1 !== 5 && e.ai1 !== 6) {
+      e.ai1 = 5; e.ai3 = 0;
+      kingTpDest.set(e, { x: game.world.w * TILE, y: game.world.h * TILE }); // :43485-43488 世界角
+    }
   }
   if (e.ai1 === 5) {
-    // 离场态(:43537-43575)：缩身 60 tick 后传送到世界右下角，转 6 号淡入
+    // 离场/传送缩身态（:43537-43575）：60 tick 缩身 → Gore734 → Bottom 锚落位 → 6 号淡入
     e.ai3++;
     e.squash = Math.max(0, 1 - e.ai3 / 60) * 0.6; // 缩身近似（scale 收缩）
+    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 1.2, { life: 30 }); // 每帧 10 尘 4 蓝 ×0.5（:43564-43570）
     e.vy += 0.3;
     e.x += e.vx; e.y += e.vy;
+    if (e.ai3 === 60) {
+      game.spawnParticles(e.cx, e.cy - e.h / 2, '#FFD060', 6, 2, { life: 40 }); // Gore 734 王冠（:43552）
+    }
     if (e.ai3 >= 60) {
-      e.x = (game.world.w - 3) * 16;
-      e.y = (game.world.h - 3) * 16;
+      const dest = kingTpDest.get(e) ?? { x: game.world.w * TILE, y: game.world.h * TILE };
+      e.x = dest.x - e.w / 2;
+      e.y = dest.y - e.h;                          // base.Bottom = (localAI[1], localAI[2])（:43554）
       e.ai1 = 6; e.ai3 = 0;
       e.squash = 0;
       e.spawnAlpha = 255; e.alphaFade = true; // 淡入（6 号态）
@@ -219,11 +258,30 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (e.ai1 === 6) {
     // 淡入回归（约 30 tick spawnAlpha 归零后回战斗）
     e.ai3++;
+    game.spawnParticles(e.cx, e.cy, '#4E88FF', 10, 2.4, { life: 30 }); // 到达尘 ×2（:43584-43590）
     e.ai0 = 0;
     if (e.ai3 >= 30) { e.ai1 = 0; e.ai3 = 0; }
     return;
   }
   if (!player) return;
+  // ---- 常规周期传送（:43507-43530）：ai2 在 无视线||高差>160 时累计，≥300 且落地 →
+  //  传送循环；antiCheese（localAI[0]≥360 或距玩家>2000px）直接落玩家脚底（:43504-43510）----
+  if (e.ai1 < 5 && e.onGround) {
+    const los = canHit(game.world.store, e.x, e.y, e.w, e.h, player.x, player.y, player.w, player.h);
+    const heightGap = Math.abs(e.y - (player.y + player.h));
+    if (!los || heightGap > 160) e.ai2 += 1;
+    else if (e.ai2 > 0) e.ai2 -= 1;
+    const ac = (kingAntiCheese.get(e) ?? 0) + 1;
+    kingAntiCheese.set(e, ac);
+    const kdist = Math.hypot(player.cx - e.cx, player.cy - e.cy);
+    if (e.ai2 >= 300) {
+      e.ai2 = 0; e.ai0 = 0;
+      kingTpDest.set(e, ac >= 360 || kdist > 2000
+        ? { x: player.cx, y: player.y + player.h }   // antiCheese 玩家脚底
+        : kingFindTeleportSpot(e, game, player));
+      e.ai1 = 5; e.ai3 = 0;
+    }
+  }
   e.ai0 += 1;
   if (!e.onGround) {
     e.vy += 0.35; // 重力(原版大跳重力)

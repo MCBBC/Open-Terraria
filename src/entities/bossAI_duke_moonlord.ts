@@ -12,7 +12,9 @@
 //   鲨鱼龙卷 384/386 aiStyle 64    :28287-28398(逐段向上生长,周期 NewNPC 372/373 出鲨)
 //   死亡之光 455 aiStyle 84        :30291-30549(锚源 NPC 眼部,±2π/540 每 t 扫射,180t 寿命,
 //                                  Colliding 线段判定 :14673-14682,命中伤害 = NewProjectile 伤 ×2 :13781)
-// 经典模式主链 1:1;expert/getGoodWorld 分支保留注释;netcode 跳过。
+// 经典模式主链 1:1;getGoodWorld 分支已实装(月总头死亡之光收束尾 30 连射 1021,
+// :37940-37950;猪鲨 AI_069 与月总手/核心 1456 无 g 分支);expert 分支保留注释;
+// netcode 跳过。
 // 无敌语义:dontTakeDamage 用 e.iframes=2 每 tick 刷新近似(同 bossAI.ts 克脑一阶段)。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
@@ -1570,7 +1572,25 @@ export function moonLordHeadAI(e: Enemy, game: GameHooks, player: Player | null)
       x.l1 = Math.min(1, x.l1 + 0.05);
     } else {
       f3T = 3;
-      x.l1 = Math.max(0, x.l1 - 0.07);
+      // :37927-37950 收束段:l1 −0.07/t;跌破 0 的 tick 在 FTW 下于头部中心连射
+      // 30 发 1021 弹(伤 70;±15.99 / [−15.99,0) 随机速;逐发门 = 中心格非实心)。
+      // 原文先钳 0 再掷,状态尾段仅 ~15t 且 l1 自 1 收束,实际近似每轮死亡之光一发;
+      // 逐句照抄(钳后若状态仍延续会连发——原版语义)
+      x.l1 -= 0.07;
+      if (x.l1 < 0) {
+        x.l1 = 0;
+        if (game.world.seedFlags?.getGoodWorld) {
+          const st = game.world.store;
+          const tx = Math.floor(e.cx / TILE), ty = Math.floor(e.cy / TILE);
+          if (st.inBounds(tx, ty) && !st.isSolid(tx, ty)) {
+            for (let num1281 = 0; num1281 < 30; num1281++) {
+              shoot(game, e.cx, e.cy,
+                (Math.floor(Math.random() * 3199) - 1599) * 0.01,
+                (Math.floor(Math.random() * 1600) - 1599) * 0.01, 70, 1021);
+            }
+          }
+        }
+      }
     }
   } else if (e.ai0 === 2) { // 月噬(:37953-37990)
     f2T = 2;

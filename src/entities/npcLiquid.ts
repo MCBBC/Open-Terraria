@@ -77,6 +77,28 @@ export function wetCollision(
   return { wet: false, honey, shimmer };
 }
 
+/** Collision.GetWaterLine（Collision.cs:1501-1547）1:1：给定锚格 (X,Y)，向上找最近液面。
+ *  规则（liquid/16 是 C# byte÷int 整除——液面取被截断值）：
+ *   - 越界（InWorld margin 10）或 (X,Y-2) 有液体（已在深处）→ false；
+ *   - (Y-1)/(Y)/(Y+1) 任一行有液体 → 线 = 行号×16 − trunc(liquid/16)。
+ *  消费：龟/蛙钉水面（NPC.cs:55586 flag12&&wet）、游鸭/鸥 aiStyle 68
+ *  （:34922-34971 内联同公式，num1069 再 −6）。 */
+export function getWaterLine(
+  st: TileStore, tx: number, ty: number,
+): { found: boolean; line: number } {
+  if (!st.inBounds(tx, ty) || tx < 10 || ty < 10 || tx >= st.w - 10 || ty >= st.h - 10) {
+    return { found: false, line: 0 };
+  }
+  const liq = (x: number, y: number) => (st.inBounds(x, y) ? st.liquid[st.idx(x, y)] : 0);
+  if (liq(tx, ty - 2) > 0) return { found: false, line: 0 };
+  for (const dy of [-1, 0, 1]) {
+    const l = liq(tx, ty + dy);
+    // 三档同式：线 = (液体所在行 + 1)×16 − trunc(liquid/16)（:1524/:1530/:1536）
+    if (l > 0) return { found: true, line: (ty + dy + 1) * TILE - Math.trunc(l / 16) };
+  }
+  return { found: false, line: 0 };
+}
+
 /** DD2 族液体全速表（LazySetLiquidMovementDD2 调用点反查 SetDefaults：31 处） */
 const DD2_FULL_SPEED = new Set<number>([
   548, 549, 620, ...Array.from({ length: 578 - 551 + 1 }, (_, k) => 551 + k),

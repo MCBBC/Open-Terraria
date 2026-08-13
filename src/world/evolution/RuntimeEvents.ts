@@ -126,6 +126,12 @@ export function cultistTabletDestroyed(world: World): void {
   world.cultistDelay = CULTIST_RESPAWN_DELAY;
 }
 
+/** 读图/切世界复位运行时 recheck（原版 recheck 为静态位无显式重置；此处随
+ *  MysticLogFairiesEvent.WorldClear 同位调用，保持事件态与世界生命周期一致） */
+export function cultistWorldClear(): void {
+  cultistRecheck.v = 0;
+}
+
 /** CultistRitual.UpdateTime（:20-47 1:1，Main.cs:64427 每帧）。
  *  delay/recheck 均按 dayRate 递减（钳 0）；双零时 recheck=600（AnyDanger 则 ×6）
  *  并掷 TrySpawning(dungeonX, dungeonY)。 */
@@ -220,40 +226,55 @@ interface StumpCoord { x: number; y: number; }
 /** DELAY_BETWEEN_ATTEMPTS（:22） */
 const FAIRY_DELAY_BETWEEN_ATTEMPTS = 60;
 
-/** 单例事件态（原版为 WorldGen.mysticLogsEvent 实例；运行时态不落盘，
- *  WorldClear 于读图重置——WorldGen.cs:6958） */
-export const mysticLogs = {
+/** MysticLogFairiesEvent 事件态（原版为 WorldGen.mysticLogsEvent 实例） */
+export interface MysticLogState {
+  _canSpawnFairies: boolean;
+  _delayUntilNextAttempt: number;
+  _stumpCoords: StumpCoord[];
+  /** WorldClear（:24-32） */
+  worldClear(): void;
+  /** StartWorld（:34-39，WorldGen.cs:3303 OnWorldLoad）：读图/新世界扫一次倒木 */
+  startWorld(host: FairyHost): void;
+  /** StartNight（:41-48，Main.cs:64710）：开闸 + 重扫倒木 */
+  startNight(host: FairyHost): void;
+  /** FallenLogDestroyed（:152-159，WorldGen.cs:49866 KillTile type 488）：重扫 */
+  fallenLogDestroyed(host: FairyHost): void;
+  /** UpdateTime（:50-62，Main.cs:64433 每帧） */
+  updateTime(world: World, dayRate: number, host: FairyHost): void;
+  /** TrySpawningFairies（:64-119 1:1） */
+  trySpawningFairies(world: World, dayRate: number, host: FairyHost): void;
+  /** ScanWholeOverworldForLogs（:161-189 1:1，非 remix） */
+  scanWholeOverworldForLogs(st: TileStore, worldSurface: number): void;
+}
+
+/** 单例事件态（运行时态不落盘，WorldClear 于读图重置——WorldGen.cs:6958） */
+export const mysticLogs: MysticLogState = {
   _canSpawnFairies: false,
   _delayUntilNextAttempt: 0,
-  _stumpCoords: [] as StumpCoord[],
+  _stumpCoords: [],
 
-  /** WorldClear（:24-32） */
-  worldClear(this: typeof mysticLogs): void {
+  worldClear(): void {
     this._canSpawnFairies = false;
     this._delayUntilNextAttempt = 0;
     this._stumpCoords.length = 0;
   },
 
-  /** StartWorld（:34-39，WorldGen.cs:3303 OnWorldLoad）：读图/新世界扫一次倒木 */
-  startWorld(this: typeof mysticLogs, host: FairyHost): void {
+  startWorld(host: FairyHost): void {
     this.scanWholeOverworldForLogs(host.world.store, host.world.groundLevel);
   },
 
-  /** StartNight（:41-48，Main.cs:64710）：开闸 + 重扫倒木 */
-  startNight(this: typeof mysticLogs, host: FairyHost): void {
+  startNight(host: FairyHost): void {
     this._canSpawnFairies = true;
     this._delayUntilNextAttempt = 0;
     this.scanWholeOverworldForLogs(host.world.store, host.world.groundLevel);
   },
 
-  /** FallenLogDestroyed（:152-159，WorldGen.cs:49866 KillTile type 488）：重扫 */
-  fallenLogDestroyed(this: typeof mysticLogs, host: FairyHost): void {
+  fallenLogDestroyed(host: FairyHost): void {
     this.scanWholeOverworldForLogs(host.world.store, host.world.groundLevel);
   },
 
-  /** UpdateTime（:50-62，Main.cs:64433 每帧）：夜窗内按 dayRate 递减尝试倒计时，
-   *  到 0 掷一次 TrySpawningFairies 并重置 60 */
-  updateTime(this: typeof mysticLogs, world: World, dayRate: number, host: FairyHost): void {
+  /** 夜窗内按 dayRate 递减尝试倒计时，到 0 掷一次 TrySpawningFairies 并重置 60 */
+  updateTime(world: World, dayRate: number, host: FairyHost): void {
     if (!this._canSpawnFairies || !isAGoodTime(world)) return;
     this._delayUntilNextAttempt = Math.max(0, this._delayUntilNextAttempt - dayRate);
     if (this._delayUntilNextAttempt === 0) {
@@ -262,8 +283,7 @@ export const mysticLogs = {
     }
   },
 
-  /** TrySpawningFairies（:64-119 1:1） */
-  trySpawningFairies(this: typeof mysticLogs, world: World, dayRate: number, host: FairyHost): void {
+  trySpawningFairies(world: World, dayRate: number, host: FairyHost): void {
     // :66-69 压制门：雨/血月/月总倒计时/霜月/南瓜月/入侵/无倒木
     if (host.maxRaining > 0 || host.bloodMoon || host.moonLordCountdown > 0
       || host.snowMoon || host.pumpkinMoon || host.invasionType > 0
@@ -296,10 +316,9 @@ export const mysticLogs = {
     this._canSpawnFairies = false;
   },
 
-  /** ScanWholeOverworldForLogs（:161-189 1:1，非 remix）：
-   *  x∈[100, maxTilesX-100) 步 3、y 自 worldSurface-10 降到 100 步 2，
+  /** x∈[100, maxTilesX-100) 步 3、y 自 worldSurface-10 降到 100 步 2，
    *  活跃 tile 488 且无液体 → 计入（帧偏移折算整件左上角） */
-  scanWholeOverworldForLogs(this: typeof mysticLogs, st: TileStore, worldSurface: number): void {
+  scanWholeOverworldForLogs(st: TileStore, worldSurface: number): void {
     this._stumpCoords.length = 0;
     if (!FALLEN_LOG) return;   // tile 表缺登记（理论不可达，防御）
     const yTop = Math.floor(worldSurface) - 10;

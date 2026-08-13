@@ -29,6 +29,25 @@ export const Lang = {
     return languageManager.getTextValue(path, ...args);
   },
 
+  /** Main.ValueToCoins（Main.cs:54649-54689 1:1）：铜币总值 →
+   *  "N 铂金 N 金 N 银 N 铜"（非零档空格拼接，Currency.* 文案 toLowerCase，
+   *  去尾空格；0 → 空串）。死亡掉钱行（Game.DroppedCoins {0}）与价格显示用 */
+  valueToCoins(value: number): string {
+    let rest = Math.max(0, Math.floor(value));
+    let plat = 0, gold = 0, silver = 0;
+    while (rest >= 1000000) { rest -= 1000000; plat++; }
+    while (rest >= 10000) { rest -= 10000; gold++; }
+    while (rest >= 100) { rest -= 100; silver++; }
+    const copper = rest;
+    let text = '';
+    if (plat > 0) text += `${plat} ${Lang.text('Currency.Platinum').toLowerCase()} `;
+    if (gold > 0) text += `${gold} ${Lang.text('Currency.Gold').toLowerCase()} `;
+    if (silver > 0) text += `${silver} ${Lang.text('Currency.Silver').toLowerCase()} `;
+    if (copper > 0) text += `${copper} ${Lang.text('Currency.Copper').toLowerCase()} `;
+    if (text.length > 0) text = text.slice(0, -1);
+    return text;
+  },
+
   has(path: string): boolean { return languageManager.exists(path); },
 
   /** 聊天池随机一条（XxxChatter 类目；原版 Language.SelectRandom(Lang.CreateDialogFilter)） */

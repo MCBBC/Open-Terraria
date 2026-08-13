@@ -37,6 +37,9 @@ export async function settleWorldLiquids(
   const MAX_ROUNDS = mode === 'gen' ? 10 : 1; // 读档无外层循环（WorldFile.cs:746-762）
   let iter = 0;
   let lastYield = performance.now();
+  // 原版收敛比例(:755-762 与生成期 :16274-16277 同式):num5=初始活量(活量回升则抬升),
+  // p=(num5-当前)/num5 单调不减——生成期 progress.Set(num6/3+0.33)、读档 50%+num7*50%
+  let num5 = sim.numLiquid + sim.bufferLen;
   for (let round = 0; round < MAX_ROUNDS; round++) {
     const MAX_ITER = mode === 'gen' ? Math.max(1000, (sim.numLiquid + sim.bufferLen) * 5) : 100000;
     let roundIter = 0;
@@ -44,7 +47,9 @@ export async function settleWorldLiquids(
       sim.updateLiquid();
       iter++; roundIter++;
       if (roundIter % 2000 === 0) {
-        onProgress?.(0.35 + Math.min(0.6, iter / 20000));
+        const cur = sim.numLiquid + sim.bufferLen;
+        if (cur > num5) num5 = cur;
+        onProgress?.(num5 > 0 ? (num5 - cur) / num5 : 0);
         if (performance.now() - lastYield >= 32) {
           await new Promise((r) => setTimeout(r, 0));
           lastYield = performance.now();

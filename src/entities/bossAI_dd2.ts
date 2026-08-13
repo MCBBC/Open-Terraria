@@ -675,10 +675,15 @@ export function sandElementalAI(e: Enemy, game: GameHooks, player: Player | null
 
 // ---------------------------------------------------------------------------
 // 沙鲨碰撞（Collision.AdvancedTileCollision + ForSandshark,cs:93808-93814）：
-// 沙族 tile 无视碰撞,其余照撞;撞轴清零该轴速度并置 collideX/collideY 旗标
+// 沙族 tile 无视碰撞,其余照撞;撞轴清零该轴速度并置 collideX/collideY 旗标。
+// 湿身另按 UpdateCollision 的 Collision_MoveWhileWet 缩位移（:93762 waterMovementSpeed
+// =0.5,542-545 不在 DD2/612/613 全速豁免表）——视水为可穿沙介质但移动仍半速
 // ---------------------------------------------------------------------------
 function moveSandShark(e: Enemy, game: GameHooks, vx: number, vy: number): void {
   const st = game.world.store;
+  // NPC.Collision_MoveWhileWet（:93986）：velocity 不变,只缩位移
+  const lf = e.liqFactor;
+  if (lf !== undefined && lf !== 1) { vx *= lf; vy *= lf; }
   const passable = (tx: number, ty: number): boolean => {
     if (!st.inBounds(tx, ty)) return false;
     return st.isSolid(tx, ty) && !SANDSHARK_PASS.has(st.type[st.idx(tx, ty)]);
@@ -726,10 +731,14 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 1; e.ai1 = 0; e.ai2 = 0; e.dirY = 1; }
   const x = dd2LocalAI(e);
   if (e.facing === 0) e.facing = player ? e.seekDirX(player) : -1;   // :42625-42627
-  // ---- 在沙判定（:42629-42634）：中心格是沙族 tile 或湿 ----
+  // ---- 在沙判定（:42629-42634）：中心格是沙族 tile（须 nactive）或湿 ----
+  // flag119 |= wet：沙鲨视水为沙——水中同样进入巡游/扑咬态（水豁免,原版 :42634）
   const ctx = Math.floor(e.cx / TILE), cty = Math.floor(e.cy / TILE);
-  const ct = tileTypeAt(game, ctx, cty);
-  const isSandTile = CONV_SAND.has(ct) || CONV_SANDSTONE.has(ct) || CONV_HARDENED.has(ct);
+  const st0 = game.world.store;
+  const sandMedium = (t: number, tx: number, ty: number): boolean =>
+    (CONV_SAND.has(t) || CONV_SANDSTONE.has(t) || CONV_HARDENED.has(t))
+    && st0.inBounds(tx, ty) && st0.isActive(tx, ty);    // 原文 tileSafely7.nactive()
+  const isSandTile = sandMedium(tileTypeAt(game, ctx, cty), ctx, cty);
   const inSand = isSandTile || e.inWater;
   // ---- 扑咬门（:42637-42642 flag120）：玩家在上方（vy 不上升）且距 >150px ----
   const tgt = player && !player.dead ? { x: player.cx, y: player.cy } : null;
@@ -752,7 +761,8 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
       const ax = e.cx + (vv > 0 ? e.vx / vv : 0) * Math.hypot(e.w, e.h) / 2 + e.vx;
       const ay = e.cy + (vv > 0 ? e.vy / vv : 0) * Math.hypot(e.w, e.h) / 2 + e.vy;
       const at = tileTypeAt(game, Math.floor(ax / TILE), Math.floor(ay / TILE));
-      let aheadSand = CONV_SAND.has(at) || CONV_SANDSTONE.has(at) || CONV_HARDENED.has(at);
+      let aheadSand = sandMedium(at, Math.floor(ax / TILE), Math.floor(ay / TILE));
+      // 水豁免（:42696-42699）：前方非沙且自身湿 → 前方有液体即视为仍在介质中
       if (!aheadSand && e.inWater) aheadSand = liquidAt(game, Math.floor(ax / TILE), Math.floor(ay / TILE)) > 0;
       const range = 400;
       if (!aheadSand && sign(e.vx) === e.facing
@@ -774,9 +784,11 @@ export function sandSharkAI(e: Enemy, game: GameHooks, player: Player | null) {
       }
       e.vx += e.facing * 0.1;
       if (e.vx < -6 || e.vx > 6) e.vx *= 0.95;
-      // 下方 24px 处是否贴沙底（flag121,:42655-42659）
-      const bt = tileTypeAt(game, ctx, cty + 1);
-      const floorNear = CONV_SAND.has(bt) || CONV_SANDSTONE.has(bt) || CONV_HARDENED.has(bt);
+      // 贴沙探测（flag121,:42655-42659）：采样 = (Center+(0,24)).ToTileCoordinates().Y − 2
+      // ——即中心行或其上一行（反编译表达式原样,非"下方 24px"）;水中巡游时该处非沙 →
+      // ai[0]=1 下潜回沙
+      const bt = tileTypeAt(game, ctx, Math.floor((e.cy + 24) / TILE) - 2);
+      const floorNear = sandMedium(bt, ctx, Math.floor((e.cy + 24) / TILE) - 2);
       e.ai0 = floorNear ? -1 : 1;
       const osc = 0.06, step = 0.01;
       if (e.ai0 === -1) {

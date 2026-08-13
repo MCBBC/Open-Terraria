@@ -13,7 +13,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
-import { wetCollision, liquidMoveFactor, skipsWet } from '../src/entities/npcLiquid';
+import { wetCollision, liquidMoveFactor, skipsWet, getWaterLine } from '../src/entities/npcLiquid';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import type { GameHooks } from '../src/entities/types';
 
@@ -267,5 +267,207 @@ describe('水栖离水分支（aiStyle 16 :24019-24034）与史莱姆 wet 段（
     dry.vy = 9.5;
     dry.fixedUpdate(1 / 60, hooks(w, p) as never);
     expect(dry.vy).toBeGreaterThan(7);
+  });
+});
+
+// ===========================================================================
+// 水体交互遗留批（461/586/620 游泳化 / 沙鲨视水为沙 / 水母 lurk / 龟蛙鸥钉水面）
+// ===========================================================================
+describe('游泳化三族（AI_003 cs:56361/:56486 + AI_107 flag27 cs:64300）', () => {
+  it('461 深海水怪：wet 缩盒 34×24 + kbResist=0 + ai[3] 哨兵；dry 复原 18×40', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const h = hooks(w, p);
+    const e = Enemy.fromVanilla(461, 20 * TILE, 36 * TILE)!;
+    for (let i = 0; i < 5; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(e.wet).toBe(true);
+    expect(e.w).toBe(34);
+    expect(e.h).toBe(24);
+    expect(e.kbResistOverride).toBe(0);                       // knockBackResist = 0f
+    expect(e.ai3).toBeCloseTo(-0.10101, 5);                   // 出水冲量哨兵
+    // 出水复原：陆地上跑 30t
+    const dry = Enemy.fromVanilla(461, 40 * TILE, 38 * TILE)!;
+    for (let i = 0; i < 30; i++) dry.fixedUpdate(1 / 60, h as never);
+    expect(dry.wet).toBe(false);
+    expect(dry.w).toBe(18);
+    expect(dry.h).toBe(40);
+    expect(dry.kbResistOverride).toBeGreaterThan(0);          // 0.4 难度曲线（dry :56412）
+    expect(dry.ai3).toBe(0);                                  // 哨兵已消费
+  });
+  it('586 僵尸人鱼：wet 不缩盒 + kbResist=0 + 水平收敛玩家', () => {
+    const w = liquidWorld();
+    const p = new Player(24 * TILE, 37 * TILE, new Inventory());
+    const e = Enemy.fromVanilla(586, 20 * TILE, 36 * TILE)!;
+    const h = hooks(w, p);
+    for (let i = 0; i < 20; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(e.wet).toBe(true);
+    expect(e.w).toBe(18);                                     // 586 原文无 resize
+    expect(e.kbResistOverride).toBe(0);
+    const d0 = Math.abs(p.cx - e.cx);
+    for (let i = 0; i < 60; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(Math.abs(p.cx - e.cx)).toBeLessThan(d0);           // Lerp 向玩家收敛
+  });
+  it('620 地精鲨：wet 接管 walker（DD2 全速 liqFactor=1，水下收敛玩家）', () => {
+    const w = liquidWorld();
+    const p = new Player(24 * TILE, 37 * TILE, new Inventory());
+    const e = Enemy.fromVanilla(620, 20 * TILE, 37 * TILE)!;
+    const h = hooks(w, p);
+    let wetSeen = false;
+    for (let i = 0; i < 8; i++) { e.fixedUpdate(1 / 60, h as never); if (e.wet) wetSeen = true; }
+    expect(wetSeen).toBe(true);
+    expect(e.liqFactor).toBe(1);                              // LazySetLiquidMovementDD2 全速
+    const d0 = Math.hypot(p.cx - e.cx, p.cy - e.cy);
+    for (let i = 0; i < 60; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(Math.hypot(p.cx - e.cx, p.cy - e.cy)).toBeLessThan(d0);
+  });
+});
+
+describe('沙鲨视水为沙（AI_103 cs:42634 flag119|=wet + :42696 flag122 液体）', () => {
+  it('纯水无沙世界：恒 wet 且按原版 0.5 液体减速（非 DD2 豁免）', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const e = Enemy.fromVanilla(543, 20 * TILE, 36 * TILE)!;  // 腐化沙鲨
+    const h = hooks(w, p);
+    for (let i = 0; i < 40; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(e.wet).toBe(true);
+    expect(e.liqFactor).toBeCloseTo(0.5, 5);                  // waterMovementSpeed 默认档
+  });
+  it('水中保持巡游介质态：不落入离沙自由落体（vy 不饱和到 10）', () => {
+    const w = liquidWorld();
+    const p = new Player(12 * TILE, 36 * TILE, new Inventory());   // 池内玩家
+    const e = Enemy.fromVanilla(544, 20 * TILE, 36 * TILE)!;  // 血腥沙鲨
+    const h = hooks(w, p);
+    let maxVy = 0, moved = false;
+    const y0 = e.y;
+    for (let i = 0; i < 120; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      maxVy = Math.max(maxVy, e.vy);
+      if (Math.abs(e.y - y0) > 4) moved = true;
+    }
+    expect(e.wet).toBe(true);                                 // 视水为沙：全程在介质内
+    expect(moved).toBe(true);                                 // 照常巡游（非冻结）
+    expect(maxVy).toBeLessThan(4);                            // 无离沙分支的重力下落（0.3/t→10）
+  });
+});
+
+describe('水母 lurk（aiStyle 18 cs:24215-24269，专家 63/64/103/242）', () => {
+  it('专家：湿身近距 420/2≈210t 后入潜伏（ai[1]=1 + dontTakeDamage）', () => {
+    const w = liquidWorld();
+    w.difficulty = 1;                                         // 专家档
+    const p = new Player(22 * TILE, 37 * TILE, new Inventory());
+    p.inWater = true;                                         // 玩家湿身（探针直置）
+    const e = Enemy.fromVanilla(63, 20 * TILE, 37 * TILE)!;   // 蓝水母
+    const h = hooks(w, p);
+    let lurked = false;
+    for (let i = 0; i < 320; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      if (e.ai1 === 1 && e.dontTakeDamage) { lurked = true; break; }
+    }
+    expect(lurked).toBe(true);
+    expect(e.hurt(10, 0, 0, h as never)).toBe(false);         // 潜伏不可击（StrikeNPC 早退）
+  });
+  it('普通档：永不潜伏（ai[1] 恒 0，可正常受击）', () => {
+    const w = liquidWorld();                                  // difficulty=0
+    const p = new Player(22 * TILE, 37 * TILE, new Inventory());
+    p.inWater = true;
+    const e = Enemy.fromVanilla(63, 20 * TILE, 37 * TILE)!;
+    const h = hooks(w, p);
+    for (let i = 0; i < 500; i++) e.fixedUpdate(1 / 60, h as never);
+    expect(e.ai1).toBe(0);
+    expect(e.dontTakeDamage).toBe(false);
+  });
+  it('专家潜伏循环：ai[2]≥120 出潜伏恢复可击（ai[1]=0）', () => {
+    const w = liquidWorld();
+    w.difficulty = 1;
+    const p = new Player(22 * TILE, 37 * TILE, new Inventory());
+    p.inWater = true;
+    const e = Enemy.fromVanilla(103, 20 * TILE, 37 * TILE)!;  // 绿水母
+    const h = hooks(w, p);
+    let wasLurk = false, exited = false;
+    for (let i = 0; i < 1200 && !exited; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      if (e.ai1 === 1) wasLurk = true;
+      else if (wasLurk) { exited = true; break; }             // 1→0 跳变 = 出潜伏
+    }
+    e.fixedUpdate(1 / 60, h as never);                        // 下一 tick else 分支清 dontTakeDamage
+    expect(wasLurk).toBe(true);
+    expect(exited).toBe(true);
+    expect(e.dontTakeDamage).toBe(false);                    // 出潜伏即恢复可击
+  });
+  it('发光（cs:24272-24290）：63 蓝 (0.05,0.15,0.4)、103 绿 (0.05,0.45,0.1)、221/242 无', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const h = hooks(w, p);
+    const b = Enemy.fromVanilla(63, 20 * TILE, 36 * TILE)!;
+    b.fixedUpdate(1 / 60, h as never);
+    expect(b.lightRGB).toEqual([0.05, 0.15, 0.4]);
+    const g = Enemy.fromVanilla(103, 20 * TILE, 36 * TILE)!;
+    g.fixedUpdate(1 / 60, h as never);
+    expect(g.lightRGB).toEqual([0.05, 0.45, 0.1]);
+    const pk = Enemy.fromVanilla(64, 20 * TILE, 36 * TILE)!;  // 粉水母 → else 档
+    pk.fixedUpdate(1 / 60, h as never);
+    expect(pk.lightRGB).toEqual([0.35, 0.05, 0.2]);
+    const f = Enemy.fromVanilla(221, 20 * TILE, 36 * TILE)!;  // 真菌球 → 不发光
+    f.fixedUpdate(1 / 60, h as never);
+    expect(f.lightRGB).toBeNull();
+  });
+});
+
+describe('龟/蛙/游鸭鸥钉水面（AI_007 cs:55586 flag12 / AI_068 cs:34934）', () => {
+  it('龟 616：Center 钉 GetWaterLine 液面（33 行满水 → line=513），全程不沉底', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const e = Enemy.fromVanilla(616, 20 * TILE, 34 * TILE)!;  // 中心行 34（液面下一行）
+    const h = hooks(w, p);
+    let minCy = Infinity, maxCy = -Infinity;
+    for (let i = 0; i < 200; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      minCy = Math.min(minCy, e.cy); maxCy = Math.max(maxCy, e.cy);
+    }
+    expect(e.wet).toBe(true);
+    expect(minCy).toBeLessThan(33 * TILE + 8);                // 已上浮钉到液面（513 附近）
+    expect(maxCy).toBeLessThan(36 * TILE);                    // 未沉底（池底 40 行）
+  });
+  it('蛙 361：同钉水面且走计时砍到 50（cs:55589 flag9）', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());
+    const e = Enemy.fromVanilla(361, 20 * TILE, 34 * TILE)!;
+    const h = hooks(w, p);
+    let saw50 = false, maxCy = -Infinity;
+    for (let i = 0; i < 200; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      if (e.ai1 <= 50) saw50 = true;
+      maxCy = Math.max(maxCy, e.cy);
+    }
+    expect(e.wet).toBe(true);
+    expect(saw50).toBe(true);
+    expect(maxCy).toBeLessThan(36 * TILE);                    // 浮在水面不沉底
+  });
+  it('游鸭飞形 363：wet 钉水面−6 吃水线（内联探测,深水同效），不沉底不惊飞', () => {
+    const w = liquidWorld();
+    const p = new Player(45 * TILE, 30 * TILE, new Inventory());   // 远离（>100px 盒）
+    const e = Enemy.fromVanilla(363, 20 * TILE, 35 * TILE)!;
+    e.ai0 = 0;                                                // 水面模式
+    const h = hooks(w, p);
+    let maxCy = -Infinity;
+    for (let i = 0; i < 180; i++) {
+      e.fixedUpdate(1 / 60, h as never);
+      maxCy = Math.max(maxCy, e.cy);
+    }
+    expect(e.wet).toBe(true);
+    expect(e.ai0).toBe(0);                                    // 无惊扰不起飞
+    expect(maxCy).toBeLessThan(35 * TILE + 8);                // 钉在液面附近（≈507-523）
+  });
+  it('GetWaterLine（Collision.cs:1501）：整除液面/深水 false/越界 false', () => {
+    const w = liquidWorld();
+    const st = w.store;
+    // 锚在 34 行：33 行有液（Y-1 档）→ line = 34×16 − 15 = 529
+    expect(getWaterLine(st, 20, 34)).toEqual({ found: true, line: 529 });
+    // 锚在 33 行（液面行本体）：Y 档 → line = (33+1)×16 − 15 = 529... 实取 34×16−15
+    expect(getWaterLine(st, 20, 33).line).toBe(529);
+    // 锚在 35 行：上 2 行（33）有液 → 深水 false
+    expect(getWaterLine(st, 20, 35).found).toBe(false);
+    // 越界（InWorld margin 10）→ false
+    expect(getWaterLine(st, 3, 34).found).toBe(false);
   });
 });

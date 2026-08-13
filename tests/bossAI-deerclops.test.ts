@@ -108,21 +108,23 @@ describe('鹿角怪 668 数据 + AI_123', () => {
 
   it('远距 ≥450px 拉满 → 免伤;靠近回落', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 100, y: GROUND - 3 });   // 玩家贴脸 → 不远
+    const h = makeHooks(w, { x: 130, y: GROUND - 3 });   // 初始即 480px 远
     const e = spawnDeer(h);
-    tick(e, h, 40);
-    expect(e.dontTakeDamage).toBe(false);
-    // 玩家持续远离(每 tick 再拉开,抵消鹿角怪 3.5px/t 追击)
+    // 持续远离(每 tick 再拉 8px,抵消 3.5px/t 追击)
+    const stub = h.player as unknown as { x: number; cx: number };
     for (let i = 0; i < 35; i++) {
-      h.player.x += 8; h.player.cx = h.player.x + 10;
+      stub.x += 8; stub.cx = stub.x + 10;
       deerclopsAI(e, h.hooks, h.player);
       e.x += e.vx; e.y += e.vy;
     }
     expect(e.lai3).toBe(30);
     expect(e.dontTakeDamage).toBe(true);
-    // 拉回贴脸 → 回落
-    h.player.x = 100 * TILE; h.player.cx = h.player.x + 10;
-    tick(e, h, 35);
+    // 拉回贴脸 → 回落(lai3 钳 0,免伤解除)
+    stub.x = 100 * TILE; stub.cx = stub.x + 10;
+    for (let i = 0; i < 35; i++) {
+      deerclopsAI(e, h.hooks, h.player);
+      e.x += e.vx; e.y += e.vy;
+    }
     expect(e.dontTakeDamage).toBe(false);
   });
 

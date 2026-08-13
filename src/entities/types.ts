@@ -36,6 +36,9 @@ export interface GameHooks {
   onEnemyKilled(key: string, enemy?: import('../entities/Enemy').Enemy): void;
   /** 成就系统（拾取通知等；仅 Game 本体注入） */
   achievements?: import('../core/Achievements').Achievements;
+  /** 成就解锁弹窗(原版 InGamePopups.AchievementUnlockedPopup:底部居中 40px、
+   *  5s、库存蓝底 64px 图标+边框+成就名;UI 实现,缺省回退 onToast) */
+  onAchievementPopup?(name: string, title: string): void;
   /** 出生敌人 */
   spawnEnemy(key: string, x: number, y: number): void;
   /** 按原版 NPC id 出生（Enemy.fromVanilla；小动物入微光 Transform / makeNPC 放生用。

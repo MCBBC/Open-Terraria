@@ -933,7 +933,7 @@ export class Renderer {
     }
 
     // 2b'. behindTiles 族实体（Main.cs:56457 DrawNPCs(behindTiles:true)：原版在
-    //      非实心 tile(:56434) 之后、实心 tile(:56474) 之前绘制——钻地蠕虫族
+    //      非实心 tile(:56437/:56441) 之后、实心 tile(:56462/:56466) 之前绘制——钻地蠕虫族
     //      （aiStyle6 世吞 13-15/掘地虫 39-41/挖掘怪 95-100/水蛭 117-119/
     //      沙虫 510-515 等，数据源 vanilla-npcs.json behindTiles）被前景 tile 盖住。
     //      本仓 tile 是单一烘焙层（不拆 solid/non-solid）→ 等价画在 tile 层之前、
@@ -1254,7 +1254,8 @@ export class Renderer {
     const lost = this.deathLostCoins;
     if (lost > 0) {
       ctx.font = '16px "Fusion Pixel 12px zh_hans", monospace';
-      const coins = Lang.text('Game.DroppedCoins', String(lost));
+      // {0} = ValueToCoins 格式化（Main.cs:44777 传 lostCoinString=ValueToCoins(lostCoins)）
+      const coins = Lang.text('Game.DroppedCoins', Lang.valueToCoins(lost));
       ctx.strokeText(coins, cx, viewH / 2 - 10);
       ctx.fillText(coins, cx, viewH / 2 - 10);
     }
@@ -2015,6 +2016,7 @@ export class Renderer {
         else if (stR === 93) ctx.rotate(e.visAngle);   // AI_093 荷兰飞盗船:rotation=vx*0.025(cs:41011);spriteDirection=-sign(vx) 仍镜像
         else if (stR === 102 || stR === 109) ctx.rotate(e.visAngle); // AI_102/109 沙尘精/黑暗魔法师:rotation=vx*0.04(cs:42249/:66415)
         else if (stR === 103) ctx.rotate(e.visAngle);  // AI_103 沙鲨族:rotation=vy*dir*0.1 钳±0.2(cs:42765)
+        else if (stR === 18) ctx.rotate(e.visAngle);   // AI_018 水母族:漂移形 rotation=vx*0.4 / 攻击形 atan2(v)+π/2 / 离水 vx*0.1(cs:24371/24422/24459)
         else if (stR === 108 || stR === 110) ctx.rotate(e.visAngle); // AI_108 俯冲飞行族(cs:66120 速度角±π折叠)/AI_110 Betsy(cs:62714 AngleTowards):均保留 spriteDirection 镜像
         else if (stR === 117) ctx.rotate(e.visAngle);  // AI_117 恐惧鹦鹉螺:rotation 状态机(AngleTowards/AngleLerp,cs:47615);spriteDirection 仍镜像
         else if (rotId) ctx.rotate(e.spin);

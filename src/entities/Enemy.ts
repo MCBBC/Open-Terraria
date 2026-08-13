@@ -4,7 +4,7 @@ import { Entity } from './Entity';
 import { entityNet } from '../net/entitySyncHooks';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
 import { liquidCollision } from '../stats/TouchDamage';
-import { updateNpcLiquid } from './npcLiquid';
+import { updateNpcLiquid, getWaterLine } from './npcLiquid';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
@@ -55,6 +55,7 @@ import { isNpcShimmerImmune, npcShimmerTransformTo, npcShimmerTransformToItem } 
 import {
   scaleStats, getAttackDamageForProjectiles, type ScalingStats,
   GDL, remap, mainDifficulty, mainExpertMode, getAttackDamageCappedAtMaster,
+  getKnockbackMultiplierScaledByDifficulty,
 } from '../stats/ScaleStats';
 import { BuffType } from '../stats/Buffs';
 
@@ -660,6 +661,9 @@ export class Enemy extends Entity {
   /** 原版 NPC.dontTakeDamage（SetDefaults 静态置位，如 266 克脑 :12372 一阶段
    *  不可击；AI 段自行清除）。与 iframes 不同：持续态而非帧计数 */
   dontTakeDamage = false;
+  /** 击退抗性运行时覆写（游泳族专用）：461 wet→0 / dry→0.4（难度曲线，
+   *  NPC.cs:56366/:56412 GetKnockbackMultiplier_ScaledByDifficulty）；null=用 def 值 */
+  kbResistOverride: number | null = null;
   /** 原版 justHit 语义（本 tick 内受过击） */
   get justHit(): boolean { return this.justHitT > 0; }
   /** 原版 netID 变种（负数 SetDefaultsFromNetId）：scale/颜色/属性覆盖 */
@@ -1366,7 +1370,93 @@ export class Enemy extends Entity {
     }
   }
 
+  /** 游泳化三族 wet 分支 1:1 —— 461 深海水怪 / 586 僵尸人鱼（AI_003 cs:56361/:56486）
+   *  与 620 地精鲨（AI_107 flag27 cs:64300-64336，参数 num28/29/30=5/3/8、
+   *  amount/2/3=0.05/0.04/0.1 与 461 同表）。共用结构：
+   *   wet：kbResist=0、ai[3]=-0.10101（出水加速哨兵）、noGravity（本仓=跳过重力）、
+   *     461 另缩盒 18×40→34×24（Center 保持）；collideX → vx=-oldVx；direction 跟 vx
+   *     （620 原文是 `direction=Math.Sign(direction)` 无操作怪癖 → 保持）；
+   *     有视线 → Lerp 向玩家（461/620 速 5 系数 1/20；586 速 clamp(1+|dy|/40,5,20)、
+   *     vy>0 系数 1/30 否则 1/5）；无视线 → 巡航 (dir,−1) 归一 ×(5|3|8)，
+   *     3 档（下坠）Lerp 1/25、5/8 档 Lerp 1/10。
+   *   dry：461 复原 kbResist=0.4（难度曲线）+缩盒复原；461/586 在 ai[3]==哨兵时
+   *     出水冲量：|v|×2 钳 10（586 钳 15）沿原方向。
+   *  移动：本仓各 AI 自带积分——wet 时经 moveAndCollide 走 liqFactor（461/586 水 0.5；
+   *  620 DD2 全速 1），与原版 UpdateCollision 语义一致。
+   *  @returns true = 本 tick 已接管（调用方跳过行走/重力） */
+  private wetSwimStep(game: GameHooks, player: Player | null, mode: 461 | 586 | 620): boolean {
+    if (!this.wet) {
+      // ---- 出水复原（461 :56409-56440 / 586 :56536-56558）----
+      if (mode === 461) {
+        this.kbResistOverride = getKnockbackMultiplierScaledByDifficulty(0.4, this.difficulty);
+        const cx = this.cx, cy = this.cy;
+        this.w = 18; this.h = 40;
+        this.x = cx - this.w / 2; this.y = cy - this.h / 2;
+      } else {
+        this.kbResistOverride = null;
+      }
+      if (this.ai3 === -0.10101) {
+        this.ai3 = 0;
+        let spd = Math.hypot(this.vx, this.vy) * 2;
+        if (spd > (mode === 586 ? 15 : 10)) spd = mode === 586 ? 15 : 10;
+        const l = Math.hypot(this.vx, this.vy);
+        if (l > 0) { this.vx = (this.vx / l) * spd; this.vy = (this.vy / l) * spd; }
+        if (this.vx < 0) this.facing = -1;
+        if (this.vx > 0) this.facing = 1;
+      }
+      return false;
+    }
+    // ---- 入水游泳 ----
+    this.kbResistOverride = 0;                                 // knockBackResist = 0f
+    this.ai3 = -0.10101;                                       // 出水冲量哨兵
+    if (mode === 461) {
+      // 缩盒 34×24（Center 保持，:56369-56373）
+      const cx = this.cx, cy = this.cy;
+      this.w = 34; this.h = 24;
+      this.x = cx - this.w / 2; this.y = cy - this.h / 2;
+    }
+    if (player && !player.dead) this.facing = this.seekDirX(player);  // TargetClosest
+    if (this.hitWall) this.vx = -this.vx;                      // collideX → -oldVelocity.X
+    if (mode !== 620) {                                        // 620 保持 direction（原文怪癖）
+      if (this.vx < 0) this.facing = -1;
+      if (this.vx > 0) this.facing = 1;
+    }
+    const sees = !!player && !player.dead && this.canSeePlayer(game.world.store, player);
+    if (sees) {
+      const dx = player!.cx - this.cx, dy = player!.cy - this.cy;
+      const d = Math.hypot(dx, dy) || 1;
+      let spd = 5;
+      let k = 1 / 20;                                          // 461/620 amount=0.05
+      if (mode === 586) {
+        spd = 1 + Math.abs(this.cy - player!.cy) / 40;         // num8（:56503-56506）
+        spd = Math.max(5, Math.min(20, spd));
+        k = this.vy > 0 ? 1 / 30 : 1 / 5;                      // :56511-56516
+      }
+      const tx = (dx / d) * spd, ty = (dy / d) * spd;
+      this.vx += (tx - this.vx) * k;
+      this.vy += (ty - this.vy) * k;
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return true;
+    }
+    // 无视线：斜上巡航（:56388-56405 / :56519-56536 / :64321-64336）
+    let cruise = 5;
+    if (this.vy > 0) cruise = 3;
+    if (this.vy < 0) cruise = 8;
+    const k2 = cruise < 5 ? 1 / 25 : 1 / 10;
+    const l = Math.hypot(this.facing, -1) || 1;
+    const tx2 = (this.facing / l) * cruise, ty2 = (-1 / l) * cruise;
+    this.vx += (tx2 - this.vx) * k2;
+    this.vy += (ty2 - this.vy) * k2;
+    moveAndCollide(this, game.world, this.vx, this.vy);
+    return true;
+  }
+
   private fighterAI(game: GameHooks, player: Player | null) {    const st = game.world.store;
+    // 游泳化双族 461/586（AI_003_Fighters cs:56361/:56486）：块在通用行走与白天驱散
+    // （cs:57732，位于其后）之前，wet 时整段接管本 tick——故 hook 在函数最前
+    if (this.vanillaId === 461 || this.vanillaId === 586) {
+      if (this.wetSwimStep(game, player, this.vanillaId as 461 | 586)) return;
+    }
     // ---- 白天地表驱散（cs:57732-57775 + NotDiscouraged :60694）：
     // 白天 && y<worldSurface && 类型不在昼行豁免表 → 停止索敌 + EncourageDespawn(10)，
     // 沿原方向游荡（站定 2t 转向），离屏后由 CheckActive ~10t 清除。
@@ -2868,6 +2958,9 @@ export class Enemy extends Entity {
    *  前方探测含 (w/2+2)×dir + 5×vx 提前量 L26226-26227） */
   private chargerAI(game: GameHooks, player: Player | null, maxSpd = 6) {
     const st = game.world.store;
+    // 游泳化 620 地精鲨（AI_107_ImprovedWalkers flag27=wet，cs:64122/:64300-64336）：
+    // 游泳块在 walker 逻辑之前且 return 接管本 tick——wet 时跳过冲锋/跳跃
+    if (this.vanillaId === 620 && this.wetSwimStep(game, player, 620)) return;
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
     // 方向：卡墙 ≥30 tick 折返；玩家 200px 内重置计数并朝玩家冲
     if (this.stuckT >= 30) { this.facing *= -1; this.stuckT = 0; }
@@ -3082,33 +3175,119 @@ export class Enemy extends Entity {
     }
   }
 
-  /** AI_018 水母族（NPC.145.cs:24210+）：阻尼漂移 + 周期性脉冲游向目标
-   *  速度 *=0.98 阻尼（L24349）；静止阈值内（num277 0.2-3）触发脉冲，脉冲速度 7-9（L24374+）。
-   *  离水（cs:24459-24474）：rotation+=vx×0.1、vy==0 时 vx ×0.98 阻尼、重力 0.2 钳 10
+  /** AI_018 水母族 1:1（cs:24212-24474）：潜伏（专家）+ 水中追击脉冲 + 上下漂移。
+   *  潜伏 lurk（cs:24215-24269，仅专家且 63/64/103/242）：
+   *   - ai[1]=1 潜伏中 → dontTakeDamage（不可击）且 AI 提前 return（原地悬浮）；
+   *   - 玩家湿身+视线+150px 内：非潜伏 ai[2]+2（提前触发）/潜伏中 ai[2]−0.25（延长）；
+   *   - 非潜伏 ai[2]≥420 → 入潜伏（ai[1]=1, ai[2]=0）；潜伏 ai[2]≥120 → 出潜伏；
+   *   - 离水 → ai[1]=ai[2]=0（潜伏态清零）。发光 ×1.5（num274）。
+   *  水中（cs:24330-24457）：撞轴反弹（collideX/collideY 原文 ± 反转）；玩家湿身+视线
+   *   → 攻击形：阻尼（0.98 + 逐族再乘）+ 静止阈值 num277（63/64=0.2、103=0.6、221=1、
+   *   242=3）内重定向脉冲 num278（7/103 9）；否则漂移形：vx+=dir×0.02 钳 ±1、
+   *   rotation=vx×0.4、ai[0] 上下振荡（0.01 步进 ±1 阈值）+ 液深探测（上格液>128 且
+   *   下 1-2 格有实心 → 转向上）。
+   *  离水（cs:24459-24474）：rotation+=vx×0.1、vy==0 时 vx 阻尼归零、重力 0.2 钳 10
    *  ——水母离水只坠不蹦（与 aiStyle16 鱼的拍打挣扎不同） */
   private jellyfishAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const vid = this.vanillaId ?? 63;
     const inWater = this.wet;
-    if (inWater) {
-      this.vx *= 0.98; this.vy *= 0.98;
-      if (++this.aiT % 90 === 0 && player) {
-        const dx = player.cx - this.cx, dy = player.cy - this.cy;
-        const d = Math.hypot(dx, dy) || 1;
-        this.vx = (dx / d) * 7;       // 脉冲速度 7（大体型 9）
-        this.vy = (dy / d) * 7;
-      } else if (!player) {
-        this.vy -= 0.02;              // 缓慢下沉漂移
+    // ---- 潜伏态（专家 + 63/64/103/242，cs:24215）----
+    const lurkCapable = mainExpertMode(game.world) && (vid === 63 || vid === 64 || vid === 103 || vid === 242);
+    let lurking = false;
+    if (inWater && this.ai1 === 1) lurking = true;
+    else this.dontTakeDamage = false;                     // :24224 else 分支
+    const playerWet = !!player && !player.dead && player.inWater;
+    const near = !!player && !player.dead && playerWet
+      && this.canSeePlayer(st, player)
+      && Math.hypot(player.cx - this.cx, player.cy - this.cy) < 150;  // :24229-24236
+    if (lurkCapable) {
+      if (inWater) {
+        if (near) {
+          if (this.ai1 === 0) this.ai2 += 2;              // 非潜伏：提前触发
+          else this.ai2 -= 0.25;                          // 潜伏中：延长
+        }
+        if (lurking) {
+          this.dontTakeDamage = true;                     // :24247
+          this.ai2 += 1;
+          if (this.ai2 >= 120) this.ai1 = 0;              // :24252 出潜伏
+        } else {
+          this.ai2 += 1;
+          if (this.ai2 >= 420) { this.ai1 = 1; this.ai2 = 0; }  // :24257 入潜伏
+        }
+      } else {
+        this.ai1 = 0; this.ai2 = 0;                       // :24262 离水清零
       }
-    } else {
-      // 离水（cs:24459-24474）：vy==0 时 vx ×0.98 阻尼归零；重力 0.2 钳 10
-      if (this.vy === 0) {
-        this.vx *= 0.98;
-        if (Math.abs(this.vx) < 0.01) this.vx = 0;
-      }
-      this.vy = Math.min(this.vy + 0.2, 10);
+      lurking = inWater && this.ai1 === 1;
     }
+    // ---- 发光（cs:24272-24290，num274 = 1 + 潜伏 0.5）----
+    const lum = lurking ? 1.5 : 1;
+    if (vid === 63) this.lightRGB = [0.05 * lum, 0.15 * lum, 0.4 * lum];
+    else if (vid === 103) this.lightRGB = [0.05 * lum, 0.45 * lum, 0.1 * lum];
+    else if (vid !== 221 && vid !== 242) this.lightRGB = [0.35 * lum, 0.05 * lum, 0.2 * lum];
+    // ---- 潜伏中：原地悬浮（AI 提前 return，velocity 保持 → 缓漂）----
+    if (lurking) return;
+    if (inWater) {
+      // 撞轴反弹（cs:24333-24363：collideX/collideY 原速反转；坡面翻转由
+      // moveAndCollide 的 slopeCollide 承担，方向翻转近似）
+      if (this.hitWall) { this.vx *= -1; this.facing *= -1; }
+      if (this.onGround) { if (this.vy > 0) { this.vy = -Math.abs(this.vy); this.ai0 = -1; } }
+      else if (this.hitHead) { if (this.vy < 0) { this.vy = Math.abs(this.vy); this.ai0 = 1; } }
+      // 玩家湿身 + 视线 → 攻击形（cs:24366-24420 flag24）
+      if (playerWet && player && this.canSeePlayer(st, player)) {
+        let damp = 0.98;
+        let still = 0.2;                                   // num277：静止阈值
+        if (vid === 103) { damp *= 0.98; still = 0.6; }
+        if (vid === 221) { damp *= 0.99; still = 1; }
+        if (vid === 242) { damp *= 0.995; still = 3; }
+        this.visAngle = Math.atan2(this.vy, this.vx) + Math.PI / 2;
+        this.vx *= damp; this.vy *= damp;
+        if (Math.abs(this.vx) < still && Math.abs(this.vy) < still) {
+          if (player) {
+            this.facing = this.seekDirX(player);          // TargetClosest
+            const spd = vid === 103 ? 9 : 7;              // num278
+            const dx = player.cx - this.cx, dy = player.cy - this.cy;
+            const d = Math.hypot(dx, dy) || 1;
+            this.vx = (dx / d) * spd;
+            this.vy = (dy / d) * spd;
+          }
+        }
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        return;
+      }
+      // 漂移形（cs:24421-24457）
+      this.vx += this.facing * 0.02;
+      this.visAngle = this.vx * 0.4;
+      if (this.vx < -1 || this.vx > 1) this.vx *= 0.95;
+      if (this.ai0 === -1) {
+        this.vy -= 0.01;
+        if (this.vy < -1) this.ai0 = 1;
+      } else {
+        this.vy += 0.01;
+        if (this.vy > 1) this.ai0 = -1;
+      }
+      // 液深探测（cs:24440-24455）：中心上格液>128 且下 1-2 格实心 → 转向上
+      const cx = Math.floor(this.cx / TILE), cy = Math.floor(this.cy / TILE);
+      if (st.inBounds(cx, cy) && st.liquid[st.idx(cx, cy - 1)] > 128) {
+        if ((st.inBounds(cx, cy + 1) && st.isActive(cx, cy + 1))
+          || (st.inBounds(cx, cy + 2) && st.isActive(cx, cy + 2))) this.ai0 = -1;
+      } else {
+        this.ai0 = 1;
+      }
+      if (this.vy > 1.2 || this.vy < -1.2) this.vy *= 0.99;
+      if (this.facing === 0) this.facing = player && player.cx > this.cx ? 1 : -1;
+      moveAndCollide(this, game.world, this.vx, this.vy);
+      return;
+    }
+    // ---- 离水（cs:24459-24474）----
+    this.visAngle += this.vx * 0.1;
+    if (this.vy === 0) {
+      this.vx *= 0.98;
+      if (Math.abs(this.vx) < 0.01) this.vx = 0;
+    }
+    this.vy = Math.min(this.vy + 0.2, 10);
+    this.ai0 = 1;
     moveAndCollide(this, game.world, this.vx, this.vy);
-    if (this.hitWall) this.vx *= -0.8;
-    if (this.onGround && inWater) this.vy = -Math.abs(this.vy) - 0.5;
   }
 
   /** AI_022 幽灵族（NPC.145.cs:24726+）：穿墙缓速追击
@@ -3327,7 +3506,8 @@ export class Enemy extends Entity {
   /** AI_007 小动物行走（NPC.cs:53366+ 的 TownCritter 分支）：站/走循环 + 台阶跳 + 危险逃离。
    *  速度表（cs:54280-54326）：默认 1/0.07；松鼠族(299/538/539/639-645) 1.5；
    *  龟(616/617/625) 陆 0.5、水中 2（625 2.5）；鼠类(300/447/610) 2/1 不跳改转身；
-   *  青蛙(361/445/687) 水中低速 vx += maxX*10*dir（cs:54333-54342）。
+   *  青蛙(361/445/687) 水中 |v|<0.05 时 vx += maxX*10*dir 否则 ×0.9（cs:54333-54342）。
+   *  钉水面（cs:55586-55620 flag12&&wet）：龟/蛙 Center 钉 GetWaterLine 液面（蛙走计时→50）。
    *  节奏（cs:54030）：站→走 200+rand300+rand(200,400)、走→站 300+rand300-rand100。
    *  跳跃（cs:54315-54417）：前方 1 格实心+净空 → vy=-5、2 格 → -6、半砖 → -4.4，
    *  否则危险中 ai0=8 僵立 240t / 平时掉头；上升 ×1.2（非鼠类）。
@@ -3378,8 +3558,11 @@ export class Enemy extends Entity {
     } else {
       this.vx += this.facing * acc;
       this.vx = Math.max(-maxX, Math.min(maxX, this.vx));
-      // 青蛙水中窜游
-      if (frog && inWater && Math.abs(this.vx) < maxX * 0.5) this.vx += maxX * 10 * this.facing;
+      // 青蛙水中窜游（cs:54333-54342 flag9&&wet：|vx| 且 |vy| 均 <0.05 才补一窜，否则 ×0.9）
+      if (frog && inWater) {
+        if (Math.abs(this.vx) < 0.05 && Math.abs(this.vy) < 0.05) this.vx += maxX * 10 * this.facing;
+        else this.vx *= 0.9;
+      }
       if (this.ai1 <= 0) { // 走→站
         this.ai0 = 0;
         this.ai1 = 200 + Math.random() * 300 + 200 + Math.random() * 200;
@@ -3403,7 +3586,36 @@ export class Enemy extends Entity {
         this.facing *= -1; // 跳不过去：掉头
       }
     }
-    this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+    // ---- 龟/蛙钉水面（cs:55586-55620 flag12&&wet，AI_007 顶层非状态分支）----
+    // flag12 = 龟族(616/617/625) ∪ 蛙族(361/445/687)。湿身时 Center 钉在 GetWaterLine
+    // 线上（Collision.cs:1501，液面 = 行×16 − liquid/16 整除）：线下 → 上浮 0.8 钳 −4
+    // 且不过线（num95=Center+1）；线上 → 只允许落到线。蛙另把走计时砍到 50（连窜）。
+    // 撞墙/贴图边 → 掉头 ×−0.25。无液面可钉（中心上 2 行仍有液=深处/越界）→ vy−0.2。
+    // 重力走原版湿侧（UpdateNPC_UpdateGravity :91936：0.2/落速帽 7）——干侧 0.4 会让
+    // 钉面失衡下沉（0.4−0.2=净沉），此为 GRAVITY 偏差登记的定点补偿
+    const pinSurface = (turtle || frog) && this.wet;
+    this.vy = Math.min(this.vy + (pinSurface ? 0.2 : GRAVITY), pinSurface ? 7 : MAX_FALL_SPEED);
+    if (pinSurface) {
+      if (frog) this.ai1 = 50;
+      const ctx = Math.floor(this.cx / TILE);
+      if (this.hitWall || (ctx < 5 && this.facing === -1) || (ctx > st.w - 5 && this.facing === 1)) {
+        this.facing *= -1;
+        this.vx *= -0.25;
+      }
+      const { found, line } = getWaterLine(st, ctx, Math.floor(this.cy / TILE));
+      if (found) {
+        const anchor = this.cy + 1;                       // num95
+        if (this.cy > line) {
+          this.vy -= 0.8;
+          if (this.vy < -4) this.vy = -4;
+          if (anchor + this.vy < line) this.vy = line - anchor;
+        } else {
+          this.vy = Math.min(this.vy, line - anchor);
+        }
+      } else {
+        this.vy -= 0.2;                                   // 与湿侧重力 0.2 抵消 → 深水中性悬浮
+      }
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround) this.vx *= 0.85;
     if (this.hitWall && !rat) this.facing *= -1;
@@ -3566,8 +3778,51 @@ export class Enemy extends Entity {
     if (this.ai1 < 0) this.ai1 = 0;
     const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
     if (this.ai0 === 0) {
-      // 游泳/陆行
-      if (!inWater) this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      // ---- 水面模式（cs:34886-34983 wet 分支）----
+      // wet：vx Lerp 到 direction×2（1/20）；前方 (体半宽+8)×dir 处实心/无水/贴图边 →
+      // 掉头；下沉 vy×0.5；钉水面——内联 GetWaterLine（:34934-34971）再 −6，
+      // Center 在线下 → vy−0.1 钳 −8 且不过线，线上 → vy 直接=线差。
+      // !wet（完全离水）→ 立即起飞翻向（cs:34975-34980，不等落地）；
+      // 玩家 100px 盒或残血 → 起飞 vy−6 翻向（cs:34981-34988）
+      if (this.wet) {
+        this.vx = (this.vx * 19 + 2 * this.facing) / 20;
+        const aheadX = Math.floor((this.cx + (this.w / 2 + 8) * this.facing) / TILE);
+        const midY = Math.floor(this.cy / TILE);
+        const topY = Math.floor(this.y / TILE), botY = Math.floor((this.y + this.h) / TILE);
+        if (aheadX < 5 || aheadX > st.w - 5
+          || st.isSolid(aheadX, midY) || st.isSolid(aheadX, topY) || st.isSolid(aheadX, botY)
+          || !(st.inBounds(aheadX, botY) && st.liquid[st.idx(aheadX, botY)] > 0)) {
+          this.facing *= -1;
+        }
+        if (this.vy > 0) this.vy *= 0.5;
+        // 内联液面探测（cs:34934-34958）——★非 GetWaterLine：无"上 2 行有液→false"
+        // 早退，深水同样给出最近液面（行×16 − liquid/16 整除），三行皆无液才退盒底−6
+        const ccx = Math.floor(this.cx / TILE);
+        const liqRow = (ty: number) => (st.inBounds(ccx, ty) ? st.liquid[st.idx(ccx, ty)] : 0);
+        const upL = liqRow(midY - 1), midL = liqRow(midY), dnL = liqRow(midY + 1);
+        let surface = this.y + this.h;
+        if (upL > 0) surface = midY * TILE - Math.trunc(upL / 16);
+        else if (midL > 0) surface = (midY + 1) * TILE - Math.trunc(midL / 16);
+        else if (dnL > 0) surface = (midY + 2) * TILE - Math.trunc(dnL / 16);
+        surface -= 6;                                       // num1069 −6（吃水线）
+        if (this.cy > surface) {
+          this.vy -= 0.1;
+          if (this.vy < -8) this.vy = -8;
+          if (this.cy + this.vy < surface) this.vy = surface - this.cy;
+        } else {
+          this.vy = surface - this.cy;
+        }
+        const scared = !!player && !player.dead
+          && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
+          && Math.abs(player.cy - this.cy) < 100 + (this.h + player.h) / 2;
+        if (scared || this.hp < this.maxHp) {
+          this.ai0 = 1; this.vy -= 6; this.facing *= -1;
+        }
+        moveAndCollide(this, game.world, this.vx, this.vy);
+        return;
+      }
+      // 离水（cs:34887 noGravity=false → 有重力）：陆行待起飞
+      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
       if (Math.abs(this.vx) < 2) this.vx += this.facing * 0.1;
       if (player && !player.dead
         && Math.abs(player.cx - this.cx) < 100 + (this.w + player.w) / 2
@@ -3575,7 +3830,7 @@ export class Enemy extends Entity {
         this.ai0 = 1; this.vy -= 6; this.facing *= -1;
       }
       moveAndCollide(this, game.world, this.vx, this.vy);
-      if (this.onGround && !inWater) { // 陆上：起飞回飞形
+      if (this.onGround && !this.wet) { // 陆上：起飞回飞形
         this.ai0 = 1; this.vy -= 6;
       }
       return;
@@ -5384,7 +5639,7 @@ export class Enemy extends Entity {
     // 同向不足才推、反向 ×2 步、钳目标值）+ Y=-num3×0.75×resist（:82231 二次乘）；
     // TODO 轻路（num8>lifeMax 大伤害打小怪）：减法收敛 + 185 特例 + Y 加法钳。
     // kby!==0 = 爆炸/光环等非武器冲量 → 加法（登记）
-    const resist = this.def.knockbackResist;
+    const resist = this.kbResistOverride ?? this.def.knockbackResist;
     if (resist > 0) {
       if (kby === 0) {
         const dir0 = Math.sign(kbx) || 1;

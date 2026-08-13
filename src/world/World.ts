@@ -9,7 +9,7 @@ import { newLunarEventState } from './LunarEvent';
 import type { FurnitureItemRecord } from './FurnitureItems';
 import { BestiaryTracker, type BestiarySave } from '../data/Bestiary';
 
-export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean; }
+export interface ChestData { x: number; y: number; items: Array<{ id: number; stack: number; prefix?: number } | null>; locked?: boolean; }
 
 /** 死亡掉钱保留比例（返回值 = 留在身上的份额；Player.DropCoins :53351-53390）：
  *  经典/旅程世界掉一半 / 专家掉 3/4 / 大师全掉——按**世界难度** Main.GameMode
@@ -87,11 +87,12 @@ export class World {
   fireFlyMultiple = 15;
   butterflyChance = 10;
   stinkBugChance = 999999;
-  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:114/163 随存档）：
+  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:1340 写/:2192 读 随存档）：
    *  地牢拜月教石碑 437 自然重生延迟。石碑召出 439 时置 43200（TabletDestroyed，
    *  NPC.cs:38881），按 dayRate 递减；双零掷 TrySpawning(dungeonX/Y)（Main.cs:64427
-   *  每帧 UpdateTime）。recheck 为运行时静态位不落盘（RuntimeEvents.ts） */
-  cultistDelay = 0;
+   *  每帧 UpdateTime）。缺省 86400 = delayStart（新世界 ResetTempsToDayTime WF:1018 /
+   *  v108 前旧档 WF:2188 同值）。recheck 为运行时静态位不落盘（RuntimeEvents.ts） */
+  cultistDelay = 86400;
   /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
    *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */
   journeyTimeRate = 1;

@@ -93,7 +93,8 @@ export interface SaveData {
     fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
     butterfly: number; stinkBug: number;
   };
-  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:114/163；旧档缺省 0） */
+  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:1340 写/:2192 读；
+   *  旧档缺省 86400 = delayStart，v108 前原版旧档同值 WF:2188） */
   cultistDelay?: number;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WorldFile.cs:1329-1335/
    *  2147-2161；anglerQuestFinished 运行时态不存——读档 loadTempInfo 重置 WF:628-629） */
@@ -212,7 +213,7 @@ export interface SaveMeta {
     fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
     butterfly: number; stinkBug: number;
   };
-  /** CultistRitual.delay（WF:114/163；旧档缺省 0） */
+  /** CultistRitual.delay（WF:1340/:2192；缺省 86400 = delayStart） */
   cultistDelay?: number;
   /** 渔夫任务链世界段（SaveData.angler 同形；旧档缺省=索引 0/空名单） */
   angler?: { quest: number; whoFinishedToday: string[] };
@@ -317,7 +318,7 @@ export function serializeSave(
     altarCount: meta.altarCount ?? 0,
     meteorShowerCount: meta.meteorShowerCount ?? 0,
     critterChances: meta.critterChances ?? { fireFly: 30, fireFlyFriendly: 5, fireFlyMultiple: 15, butterfly: 10, stinkBug: 999999 },
-    cultistDelay: meta.cultistDelay ?? 0,
+    cultistDelay: meta.cultistDelay ?? 86400,   // 缺省 = delayStart（新世界 WF:1018 / v108 前旧档 WF:2188）
     angler: meta.angler ?? { quest: 0, whoFinishedToday: [] },   // WF:1329-1335（旧档缺省）
     savedOreTiers: meta.savedOreTiers ?? { cobalt: -1, mythril: -1, adamantite: -1 },
     shadowOrbCount: meta.shadowOrbCount ?? 0,

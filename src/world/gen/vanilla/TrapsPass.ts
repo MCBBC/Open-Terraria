@@ -99,8 +99,18 @@ export function placeTrap(st: TileStore, rng: RNG, gs: GenState, x2: number, y2:
     }
     // 压板 style 7（cs:9252）——style 在 frameY（真实世界 wld 实测：135 fx 恒 0）
     st.setTileSilent(px, py, PLATE, 0, 126);
-    // 巨石（cs:9307 PlaceTile(colX+1, top+1, 138)）
-    st.setTileSilent(colX + 1, top + 1, BOULDER138, 0, 0);
+    // 巨石（cs:9307 PlaceTile(colX+1, top+1, 138)）——PlaceTile 按 TileObjectData
+    // Style2x2 展开【四格分片帧】(CoordinateHeights{16,18};Tiles_138 36×38 单变体,
+    // 帧即 0/18×0/18):此前只写锚定格一格 = style 帧引擎拼不出 2×2,渲染只剩
+    // 18×18 左上小片悬在井中("石块装饰物贴图不全/悬空"根因,2026-08-13)
+    {
+      const bx = colX + 1, by = top + 1;
+      for (let dy = 0; dy < 2; dy++) {
+        for (let dx = 0; dx < 2; dx++) {
+          st.setTileSilent(bx + dx, by + dy, BOULDER138, dx * 18, dy * 18);
+        }
+      }
+    }
     bouldersPlaced.push(colX);
     // 2×3 致动石栅（cs:9312-9322：石头+红线+致动器；触发时失活巨石落下）
     top += 2;

@@ -67,7 +67,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚重掷）
     critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
       fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
-    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
+    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340 写/:2192 读）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
@@ -137,7 +137,7 @@ export function saveWorldOnly(world: World): string {
     // 夜间小动物概率五件套（setFireFlyChance；服务器档随世界下发）
     critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
       fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
-    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
+    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:1340 写/:2192 读）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
@@ -157,7 +157,7 @@ export function saveWorldOnly(world: World): string {
 
 /** 直接从内存 SaveData 构建(导入 .wld 路径用——跳过 stringify→parse 双拷贝,
  *  2026-08 审计 #3:该往返单次 20~50MB×2) */
-export function loadSaveData(data: SaveData): { world: World; player: SaveData['player']; data: SaveData } {
+export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => void): { world: World; player: SaveData['player']; data: SaveData } {
   // 物品 id 还原(箱子/背包/储物就地重写):v3+ 走稳定 id;v2 旧档直读(接受破损政策)。
   // v4 起 armor/dye/trash/misc/loadouts 也是稳定 id;v3 恰为裸内部下标——用迁移锚
   // 快照(LEGACY_KEY_OF_INTERNAL_V3)反查 key 再转 vi_/原定义(本地物品退役兼容层)
@@ -254,7 +254,8 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     world.butterflyChance = data.critterChances.butterfly;
     world.stinkBugChance = data.critterChances.stinkBug;
   }
-  if (data.cultistDelay != null) world.cultistDelay = data.cultistDelay; // WF:114/163 旧档缺省 0
+  // 缺省走构造器 86400（= delayStart，v108 前旧档同值 WF:2188）
+  if (data.cultistDelay != null) world.cultistDelay = data.cultistDelay;
   // 渔夫任务链（WorldFile.cs:2147-2161）：当日任务鱼索引 + 今日已交付名单；
   // anglerQuestFinished 不回填——原版读档 loadTempInfo 重置 false（WF:628-629）
   if (data.angler) {
@@ -291,6 +292,7 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     const v3 = (data.version ?? 1) >= 3;
     const u8 = b64ToBytes(data.tiles);
     let p = 0, i = 0;
+    let nextMilestone = onTilesProgress ? nAll / 100 : Infinity;
     while (i < nAll && p < u8.length) {
       let run = 0, s = 0;
       for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
@@ -309,6 +311,12 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
       for (; i < end; i++) {
         tyT[i] = t; tyF[i] = flag;
         tyFX[i] = fx; tyFY[i] = fy;
+      }
+      // 原版 LoadWorldTiles 逐列 statusText(:2514-2518)——RLE 游程按目标索引
+      // 累进等效列进度;每 ~1% 回调一次防 postMessage 风暴
+      if (onTilesProgress && i >= nextMilestone) {
+        onTilesProgress(i / nAll);
+        nextMilestone += nAll / 100;
       }
     }
   }
