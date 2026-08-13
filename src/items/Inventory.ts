@@ -250,9 +250,9 @@ export class Inventory {
       return false;                                // 社交配饰槽：功能/社交都收
     }
     // ---- 唯一性（CanEquipAccessoryInSlot）----
-    const sameSeg = i < VANITY_ARMOR_START
+    const sameSeg: [number, number] = i < VANITY_ARMOR_START
       ? [ACC_ARMOR_START, ARMOR_SLOTS] : [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS];
-    const otherSeg = i < VANITY_ARMOR_START
+    const otherSeg: [number, number] = i < VANITY_ARMOR_START
       ? [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS] : [ACC_ARMOR_START, ARMOR_SLOTS];
     const isWing = st?.wing != null;
     const clash = (lo: number, hi: number) => {
@@ -265,12 +265,13 @@ export class Inventory {
       }
       return false;
     };
-    if (clash(...sameSeg)) return false;
+    if (clash(sameSeg[0], sameSeg[1])) return false;
     for (let k = otherSeg[0]; k < otherSeg[1]; k++) {   // 对段同 type（含自身位）:1313/:1322
       if (this.armor[k]?.id === id) return false;
     }
     return true;
   }
+
 
   /** dye 槽能否接收（ItemSlot context 12/25/27/33：checkItem.dye > 0——染料物品白名单） */
   dyeAccepts(id: number): boolean {

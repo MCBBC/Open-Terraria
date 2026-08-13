@@ -115,7 +115,7 @@ export class GrappleProj extends Entity {
     const p = this.playerRef();
     // :49649-49657 玩家 dead/stoned/webbed/frozen → Kill。
     // 等价边界：本仓 Buff 系无 Stoned(156)/Webbed(149)——该两门恒 false（原版无此 buff 时同）
-    if (!p || p.dead || p.buffs.has(BuffType.Frozen)) { this.kill(); return; }
+    if (!p || p.dead || p.buffs.has(BuffType.Frozen) || p.buffs.has(BuffType.Stoned)) { this.kill(); return; }
     const mountedCx = p.cx;
     const mountedCy = p.cy;                              // MountedCenter（:49659）
     const dx = mountedCx - this.cx;

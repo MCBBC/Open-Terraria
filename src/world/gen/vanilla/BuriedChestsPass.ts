@@ -158,14 +158,8 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
       }
-      if (flags.ivy) {
-        if (!gs.gennedMahoganyWands || rng.int(0, 4) === 0) {
-          gs.gennedMahoganyWands = true;
-          push(3360); push(3361); // 活桃花心木法杖/叶法杖
-        }
-        if (rng.int(0, 9) === 0) push(4426);
-        if (rng.int(0, 9) === 0) push(5525);
-      }
+      // ★ivy(3360/3361/4426/5525) 附赠原版只在洞穴分支（cs:36864-36880）——
+      // 金箱分支无 flag4 段（cs:36545-36703），曾误带致常春藤箱落金箱深度多整套附赠
     } else {
       push(pick([49, 50, 53, 54, 5011, 975]));
       if (rng.int(0, 19) === 0) push(997);                    // 1/20 提炼机
@@ -180,7 +174,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 1) === 0) push(28, rng.int(3, 5));
     if (rng.int(0, 2) > 0) push(pick([289, 298, 299, 290, 303, 291, 304, 2322, 2329]), rng.int(1, 2));
     if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
-    if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 19)); // 冰火把/火把
+    if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 20)); // 冰火把/火把 cs:36820 Next(11)+10=[10,20]（曾 10,19 漏 20）
     if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
   } else if (gy <= ctx.worldH - 205) {
     // ===== 洞穴箱(rockLevel ≤ gy ≤ h-205,cs:36789-37163)=====
@@ -244,7 +238,7 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
       const silverIsTungsten = (TILE_DEFS[gs.oreTiers.silver]?.key ?? '').includes('tungsten');
       push(rng.int(0, 1) === 0 ? 265 : (silverIsTungsten ? 4915 : 278), rng.int(50, 74));
     }
-    if (rng.int(0, 1) === 0) push(227, rng.int(15, 29));      // 再生药水
+    if (rng.int(0, 1) === 0) push(227, rng.int(15, 20));      // 再生药水 cs:37290 Next(6)+15=[15,20]（曾 15,29）
     if (rng.int(0, 3) > 0) push(pick([296, 295, 293, 288, 294, 297, 304, 2323]), rng.int(1, 2));
     if (rng.int(0, 2) > 1) push(pick([305, 301, 302, 288, 300, 2351, 2348, 2345]), rng.int(1, 2));
     if (rng.int(0, 2) === 0) push(rng.int(0, 1) === 0 ? 2350 : 4870, rng.int(1, 2)); // 回城/回归药水

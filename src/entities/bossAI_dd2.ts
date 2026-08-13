@@ -93,6 +93,9 @@ import { TILE_DEFS } from '../data/tiles';
 // 同按整条绘制。
 /** 原版 localAI[0..3]（Enemy 只有 ai0-ai3 对应 ai[],localAI 独立 → WeakMap 落盘） */
 const localAI = new WeakMap<Enemy, number[]>();
+/** 491 渲染帧源（localAI[3] 0..63 循环，:40971-40974）——渲染侧只读访问 */
+export const dutchmanAnim = (e: Enemy): number => localAI.get(e)?.[3] ?? 0;
+
 export const dd2LocalAI = (e: Enemy): number[] => {
   let a = localAI.get(e);
   if (!a) { a = [0, 0, 0, 0]; localAI.set(e, a); }

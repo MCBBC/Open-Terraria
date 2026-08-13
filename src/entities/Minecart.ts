@@ -8,6 +8,7 @@
 //   升级套件（5289 解锁 UsingSuperCart）：20 / 20 / 0.1 / 15 / 5.15
 import { Entity } from './Entity';
 import type { GameHooks } from './types';
+import { PLAYER_WALK_MAX } from '../core/constants';
 import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import {

@@ -2,7 +2,14 @@ import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
-await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+let ok2 = null;
+for (let att = 0; att < 8 && !ok2; att++) {
+  try {
+    await page.goto('http://localhost:5199/?play=small', { waitUntil: 'domcontentloaded', timeout: 60000 });
+    ok2 = 'yes';
+  } catch { await new Promise(r => setTimeout(r, 2500)); }
+}
+if (!ok2) { console.log('GAVE UP'); await browser.close(); process.exit(1); }
 const ok = await page.evaluate(async () => {
   const t0 = Date.now();
   while (!window.__swGame?.player && Date.now() - t0 < 60000) { await new Promise(r => setTimeout(r, 500)); }
@@ -15,7 +22,9 @@ const ok = await page.evaluate(async () => {
 });
 console.log('trigger:', ok);
 await new Promise(r => setTimeout(r, 1200));
-const px = await page.evaluate(async () => {
+let px = null;
+  try {
+  px = await page.evaluate(async () => {
   const c = document.querySelector('.sw-ach');
   const r = c.getBoundingClientRect();
   // 卡片裁剪截图 → 页内 canvas 直方图
@@ -30,7 +39,8 @@ const px = await page.evaluate(async () => {
     sheetW: sheet.style.width, sheetL: sheet.style.left, sheetT: sheet.style.top,
     ttlAlign: getComputedStyle(c.querySelector('.ttl')).textAlign,
   };
-});
+  });
+  } catch (e) { console.log('eval retry:', e.message.slice(0, 60)); }
 console.log('style:', JSON.stringify(px));
 await page.screenshot({ path: '/tmp/ach-1.png', clip: { x: 574, y: 727, width: 132, height: 33 } });
 const geo = await page.evaluate(() => {

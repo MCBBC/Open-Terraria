@@ -4143,6 +4143,9 @@ export class Game implements GameHooks {
     const inp = this.input;
     // 舌头禁道具（Player.cs:22032 controlUseItem=false——狂卷之舌期间不得使用物品）
     if (this.player.buffs.has(BuffType.TheTongue)) return;
+    // 石化/冰冻禁道具（:24942-24950 controlUseItem/UseTile 清零段——stoned 与
+    // frozen||webbed 同段;此前 Frozen 只封移动不封使用,本次按原版一并补上）
+    if (this.player.buffs.has(BuffType.Stoned) || this.player.buffs.has(BuffType.Frozen)) return;
     // ---- 传送族引导 tick(先于 uiBlocking 早退:引导中开背包不中断,原版同语义) ----
     if (this.recallChannel && this.player.useTime <= this.recallChannel.triggerAt) {
       const c = this.recallChannel;

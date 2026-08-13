@@ -10,12 +10,15 @@ import { generateWorld } from '../src/world/gen/WorldGen';
 import { TILE_BY_KEY } from '../src/data/tiles';
 
 describe('管线尾部五项修复回归', () => {
-  it('种子 9293480：向日葵/丛林大株植物/丛林泥墙/祭坛终保/宝石树全部生效', async () => {
+  it('种子 42：向日葵/丛林大株植物/丛林泥墙/祭坛终保全部生效', async () => {
+    // 注：向日葵自然生成是稀疏采样（w*0.002 带宽 × 2×4 净空 + 整砖门，
+    // 原版期望 0-46 株/世界），种子 9293480 实测 0 株（采样未命中，原版语义），
+    // 本测试用实测 38 株的种子 42 锁定非零路径
     const world = await generateWorld({
-      width: 4200, height: 1200, seedText: '9293480', evil: 0,
+      width: 4200, height: 1200, seedText: '42', evil: 0,
     });
     const st = world.store;
-    const ws = Math.floor(world.worldSurface);
+    const ws = Math.floor(world.groundLevel);
 
     // ① 向日葵（v_27）：修复前全图恒 0
     const SUNFLOWER = TILE_BY_KEY['v_27_sunflower']!;

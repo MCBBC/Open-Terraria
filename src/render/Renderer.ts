@@ -122,6 +122,7 @@ import { TownNPC } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
+import { dutchmanAnim } from '../entities/bossAI_dd2';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -1271,6 +1272,18 @@ export class Renderer {
     // 与 boss 命中盒相交才跟踪显示——远离重生点时不应残留血条）
     if (boss && Math.abs(boss.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(boss.cy - cam.y) < viewH / 2 / z + 5000) {
       this.drawBossBar(ctx, viewW, viewH, boss, entities);
+    } else if (!boss) {
+      // 491 荷兰飞盗船聚合血条（PirateShipBigProgressBar：总 = SetDefaults(492).lifeMax×4
+      // = 8000 恒定；当前 = 4 炮 life 之和；BigProgressBarSystem 字典 {491,492} 驱动）
+      const ship = (entities as Enemy[]).find((n) => n instanceof Enemy && !n.dead && n.vanillaId === 491);
+      if (ship && Math.abs(ship.cx - cam.x) < viewW / 2 / z + 5000 && Math.abs(ship.cy - cam.y) < viewH / 2 / z + 5000) {
+        const cannons = (entities as Enemy[]).filter((n) => n instanceof Enemy && !n.dead
+          && n.vanillaId === 492 && n.ai0 === ship.id);
+        const hp = cannons.reduce((sum, n) => sum + Math.max(0, n.hp), 0);
+        this.drawBossBar(ctx, viewW, viewH, {
+          name: Lang.npcName(491) ?? '荷兰飞盗船', hp, maxHp: 8000, cx: ship.cx, cy: ship.cy,
+        }, entities);
+      }
     }
     // 入侵进度条（DrawInvasionProgress Main.cs:47071 语义；布局与 Boss 条并列居中，
     // 原版右下角黄条——偏差记录）
@@ -2026,6 +2039,13 @@ export class Renderer {
       if (e.vanillaId === 402) { this.drawStardustWorm(e); return; }
       // 266 克苏鲁之脑（Main.cs:24799-24843 专家/FTW 四镜像 + :22949-22951 Y 偏移）
       if (e.vanillaId === 266) { this.drawBrainOfCthulhu(e, world); return; }
+      // 491 荷兰飞盗船（Main.cs:24263-24324 case 491 独占）：船体 OriginFlip(208,460) 锚 +
+      //  旗/桨/帆附加件叠绘 + 4 炮代画；492 炮 hide=true 由船代画（船在世时跳过独立绘制）
+      if (e.vanillaId === 491) { this.drawDutchman(e, entities); return; }
+      if (e.vanillaId === 492
+        && (entities as Enemy[]).some((n) => n instanceof Enemy && !n.dead && n.vanillaId === 491)) {
+        return;
+      }
       const frames = Math.max(1, e.vanilla?.frames ?? 1);
       const frameIdx = vanillaFrameIdx(e, frames);
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
@@ -2992,6 +3012,67 @@ export class Renderer {
    *  + 椭圆瞳孔 Extra_19）→ 头帧（NPC_396 为 3×3 网格、scale 2）→ 破体阶段覆层
    *  Extra_29（+(0,4)）/Extra_25（+(0,214) 旋转）。帧索引以 animT 循环近似（AI 侧
    *  未映射 frameCounter）；破体帧行缺 localAI[2]/[3]，取行 0（登记） */
+  /** 491 荷兰飞盗船（Main.cs:24263-24324 case 491 独占 1:1）：
+   *  船体 590×534 锚 OriginFlip(208,460)（翻转取 590-208）；vector37.X 随
+   *  spriteDirection（vx<0→facing=-1→Flip）；附加件全部随 rotation 旋转：
+   *  旗 Extra40 4f@(102,-384) 底中锚 / 桨 Extra41 8f×5@(-96+34i,40) /
+   *  帆1 Extra42 4f×2@(158-106i,-302) / 帆2 Extra43 4f×2@(42-178i,-444) /
+   *  帆3 Extra44 4f@(-134,-302) / 帆4 Extra45 4f(相位差 2+num112)@(-60,-330) /
+   *  炮 NPC_492 九帧（行=ai2 瞄准帧）×4@(-122+68i,-20)。 */
+  private drawDutchman(e: Enemy, entities: unknown[]) {
+    if (!this.atlas) return;
+    const hull = this.atlas.ensureVImage('vanilla/NPC_491.png');
+    if (!hull || !hull.width) return;
+    const vimg = (p: string) => this.atlas!.ensureVImage(p);
+    const ex40 = vimg('vanilla/Extra_40.png'), ex41 = vimg('vanilla/Extra_41.png');
+    const ex42 = vimg('vanilla/Extra_42.png'), ex43 = vimg('vanilla/Extra_43.png');
+    const ex44 = vimg('vanilla/Extra_44.png'), ex45 = vimg('vanilla/Extra_45.png');
+    const canSheet = vimg('vanilla/NPC_492.png');
+    const ctx = this.ctx;
+    const num112 = Math.floor(dutchmanAnim(e) / 8);          // :24272 localAI[3]/8
+    const flip = e.facing === -1;                            // spriteDirection==1→Flip（vx<0）
+    const alpha = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255;
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(e.cx, e.cy);
+    ctx.rotate(e.visAngle);                                  // rotation = vx*0.025
+    if (flip) ctx.scale(-1, 1);
+    // 船体（:24265-24271）
+    ctx.drawImage(hull, -208, -460, hull.width, hull.height);
+    // 旗（:24272-24276）：4 帧 56×44，底中锚 (28,176)
+    if (ex40?.width) {
+      const f = num112 % 4;
+      ctx.drawImage(ex40, f * 56, 0, 56, 176, 102 - 28, -384 - 176, 56, 176);
+    }
+    // 桨（:24277-24283）：8 帧 60×88，循环 5 次
+    if (ex41?.width) {
+      const f = num112 % 8;
+      for (let i = 0; i < 5; i++) {
+        ctx.drawImage(ex41, f * 60, 0, 60, 88, -96 + 34 * i, 40, 60, 88);
+      }
+    }
+    // 帆1/2（:24284-24297）×2；帆3（:24298-24301）；帆4（:24302-24305，相位差帧）
+    const sail = (img: HTMLImageElement | null, fw: number, fh: number, dx: number, dy: number, frame: number) => {
+      if (!img?.width) return;
+      ctx.drawImage(img, (frame % 4) * fw, 0, fw, fh, dx, dy, fw, fh);
+    };
+    for (let i = 0; i < 2; i++) sail(ex42, 72, 160, 158 - 106 * i, -302, num112 % 4);
+    for (let i = 0; i < 2; i++) sail(ex43, 48, 90, 42 - 178 * i, -444, num112 % 4);
+    sail(ex44, 52, 112, -134, -302, num112 % 4);
+    sail(ex45, 142, 152, -60, -330, 2 + num112);
+    // 炮代画（:24306-24322）：船 ai[0..3]=炮实体 id；NPC_492 Frame(1,9)=48×48/帧
+    if (canSheet?.width) {
+      for (let i = 0; i < 4; i++) {
+        const cid = [e.ai0, e.ai1, e.ai2, e.ai3][i];
+        const c = (entities as Enemy[]).find((n) => n instanceof Enemy && n.id === cid && !n.dead);
+        if (!c) continue;
+        const row = Math.max(0, Math.min(8, Math.round(c.ai2)));
+        ctx.drawImage(canSheet, 0, row * 48, 48, 48, -122 + 68 * i - 24, -20 - 10, 48, 48);
+      }
+    }
+    ctx.restore();
+  }
+
   private drawMoonLordHead(e: Enemy) {
     if (!this.atlas) return;
     const ex18 = this.atlas.vmisc('vanilla/Extra_18.png');

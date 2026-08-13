@@ -88,14 +88,15 @@ const VANILLA_MAX_STACK: Record<number, number> = {
 };
 const vanillaMaxStackOf = (key: string): number | undefined => {
   const m = /^vi_(\d+)_/.exec(key);
-  return m ? VANILLA_MAX_STACK[Number(m[1])] : undefined;
+  if (!m) return undefined;                 // 非 vi_:legacy 手写值管辖
+  return VANILLA_MAX_STACK[Number(m[1])] ?? 9999;
 };
 
 function item(d: Partial<ItemDef> & { key: string; name: string }) {
   byKey[d.key] = ITEM_DEFS.length;
-  // vi_ 物品:原版堆叠表权威(默认 9999);legacy 物品维持手写值(缺省 999)
-  const vs = vanillaMaxStackOf(d.key);
-  const base = vs !== undefined ? vs : d.maxStack ?? 999;
+  // vi_ 物品:原版堆叠表权威（覆盖表 ?? 9999,手写 maxStack 一律忽略——1.4.4 改制
+  // 后逐物品值已废弃,仅 11 处例外）;legacy/place_ 物品维持手写值(缺省 999)
+  const base = vanillaMaxStackOf(d.key) ?? (d.maxStack ?? 999);
   ITEM_DEFS.push({ ...d, maxStack: base } as ItemDef);
 }
 
@@ -747,7 +748,7 @@ for (const [idStr, m] of Object.entries(_vim)) {
   const ik = 'vi_' + idStr + '_' + m.key.replace(/[^A-Za-z0-9]/g, '');
   VANILLA_ITEM_KEY_BY_ID[Number(idStr)] = ik; // 已注册的同样入表（wld 导入按 id 反查）
   if (byKey[ik] !== undefined) continue;
-  item({ key: ik, name: '', maxStack: 999, value: 1 });
+  item({ key: ik, name: '', value: 1 });
 }
 
 // ---- 音乐盒唱片全量 101 曲（Item.cs DefaultToMusicBox：createTile=139、

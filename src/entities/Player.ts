@@ -439,12 +439,18 @@ export class Player extends Entity {
       const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
       const fx = vid >= 0 ? SUMMON_GEAR[vid] : undefined;
       if (!fx) return;
+      if (fx.dd2) {
+        // dd2Accessory 布尔（Player.cs:12571-12575）：四件全戴只计一次 +1哨兵/+10%召唤伤
+        if (!seenDd2) { seenDd2 = true; sentrySlots += 1; minionDmg += 0.10; }
+        return;
+      }
       if (fx.slot) minionSlots += fx.slot;
       if (fx.sentry) sentrySlots += fx.sentry;
       if (fx.dmg) minionDmg += fx.dmg;
       if (fx.kb) minionKB += fx.kb;
       if (fx.whipRange) whipRange += fx.whipRange;
     };
+    let seenDd2 = false;
     for (let i = 0; i < 3; i++) sumFx(this.inv.armor[i]);
     // GrantArmorBenefits 盔甲三件扫描（Player.cs:12826-12831）：armor 268 潜水头盔 → accDivingHelm
     for (let i = 0; i < 3; i++) {

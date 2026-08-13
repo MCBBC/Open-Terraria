@@ -15,6 +15,8 @@ export interface WldTileData {
   wire: Uint8Array;       // 电路位 bit0红 bit1蓝 bit2绿 bit3黄 bit4致动器 bit5已致动（红蓝绿=header2 0x02-0x08,其余=header3）
   half: Uint8Array;       // 半砖(WorldFile.cs:1519 header2>>4 & 0x7 == 1)
   slope: Uint8Array;      // 坡面 1-4(== 2-5;Tile.cs sTileHeader bits 12-14 编码)
+  paint: Uint8Array;      // 方块油漆 0-31（WorldFile.cs:2571-2574 header3 0x08 位后随 1 字节）
+  paintWall: Uint8Array;  // 墙油漆 0-31（WorldFile.cs:2583-2586 header3 0x10 位后随 1 字节）
 }
 
 export interface WldChest { x: number; y: number; name: string; items: Array<{ id: number; stack: number } | null>; }
@@ -323,6 +325,8 @@ function decodeTiles(
   const wire = new Uint8Array(n);
   const half = new Uint8Array(n);
   const slope = new Uint8Array(n);
+  const paint = new Uint8Array(n);
+  const paintWall = new Uint8Array(n);
   const halfBits = half, slopeBits = slope; // 半砖/坡面解码目标
 
   let idx = 0; // y * w + x，列优先推进
@@ -337,6 +341,7 @@ function decodeTiles(
 
       let tileType = 0;
       let fx = 0, fy = 0;
+      let tilePaint = 0;
       if (header1 & 0x02) {
         // active
         if (header1 & 0x20) {
@@ -349,12 +354,13 @@ function decodeTiles(
           fx = r.u16();
           fy = r.u16();
         }
-        if (header3 & 0x08) r.u8(); // tile color
+        if (header3 & 0x08) tilePaint = r.u8(); // tile color（WorldFile.cs:2571-2574）
       }
       let wl = 0;
+      let wallPaint = 0;
       if (header1 & 0x04) {
         wl = r.u8();
-        if (header3 & 0x10) r.u8(); // wall color
+        if (header3 & 0x10) wallPaint = r.u8(); // wall color（WorldFile.cs:2583-2586）
         if (version >= 222 && header3 & 0x40) {
           wl |= r.u8() << 8;
         }
@@ -395,10 +401,12 @@ function decodeTiles(
         wire[i] = wireBits;
         half[i] = blockHalf;
         slope[i] = blockSlope;
+        paint[i] = tilePaint;
+        paintWall[i] = wallPaint;
       }
       y += rle;
     }
   }
   void idx;
-  return { active, type, frameX, frameY, wall, liquid, liquidType, wire, half, slope };
+  return { active, type, frameX, frameY, wall, liquid, liquidType, wire, half, slope, paint, paintWall };
 }

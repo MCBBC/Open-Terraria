@@ -912,11 +912,14 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
   }
 
   // ---- 3. 特殊宝箱(cs L18599-18657):5 个上锁箱(含生物群系箱) ----
+  // ★生物群系箱映射（DungeonGenerationStyles.cs :306/:346 实证）：Corruption 块 =
+  // Scourge(1571)+箱 style24；Crimson 块 = VampireKnives(1569)+style25——
+  // 此前三元写反（crimson 拿了腐化灾兵+腐化箱）
   const specChests: Array<{ tile: number; style: number; item: string }> = [
     { tile: CHEST, style: 23, item: 'vi_1156_piranha_gun' },
     gs.crimson
-      ? { tile: CHEST, style: 24, item: 'vi_1571_scourge_of_the_corruptor' }
-      : { tile: CHEST, style: 25, item: 'vi_1569_vampire_knives' },
+      ? { tile: CHEST, style: 25, item: 'vi_1569_vampire_knives' }
+      : { tile: CHEST, style: 24, item: 'vi_1571_scourge_of_the_corruptor' },
     { tile: CHEST, style: 26, item: 'vi_1260_rainbow_gun' },
     { tile: CHEST, style: 27, item: 'vi_1572_staff_of_the_frost_hydra' },
     { tile: CHEST2, style: 13, item: 'vi_4607_desert_tiger_staff' },
@@ -993,7 +996,11 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
 
   // ---- 5. 房间金箱(cs L18765-18820):战利品序 155/156/157/163/113/3317/327/164 ----
   {
-    let seq = 1;
+    // GetDungeonLootAndChestStyle（WorldGen.cs:35843-35891）+ 递增门
+    // （DungeonUtils.cs:399：AddBuriedChest 成功才 dungeonLootStyle++）：
+    // style ≥8 → 先回 0 再取件 → 155…164 循环、每档恰一件。
+    // ★旧 seq 逻辑在 style=7(164) 成功后下一轮先落回 164 再回 155——每循环多一件手枪
+    let lootStyle = 0;
     const lootSeq: Array<{ item: string; style: number }> = [
       { item: 'vi_155_muramasa', style: 2 },
       { item: 'vi_156_cobalt_shield', style: 2 },
@@ -1009,13 +1016,11 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
       for (let tries = 0; tries < 1000; tries++) {
         const x = Math.floor((room.l + room.r) / 2) + rng.int(-half, half);
         const y = Math.floor((room.t + room.b) / 2) + rng.int(-half, half);
-        if (seq === 1) seq = 2;
-        let loot = lootSeq[Math.min(seq - 2, lootSeq.length - 1)];
-        if (seq > lootSeq.length + 1) seq = 0;
-        if (seq === 0) loot = lootSeq[lootSeq.length - 1];
+        if (lootStyle >= 8) lootStyle = 0; // :35847 回卷在取件前
+        let loot = lootSeq[lootStyle];
         if (y < gs.worldSurface + 50) loot = { item: 'vi_327_golden_key', style: 0 };
         if (addChest(st, chests, x, y, CHEST, loot.style, ITEM_BY_KEY[loot.item], false)) {
-          seq++;
+          lootStyle++; // 成功才递增（DungeonUtils.cs:399）
           break;
         }
       }
