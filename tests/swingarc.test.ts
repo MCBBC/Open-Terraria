@@ -4,6 +4,7 @@
 //   · NightsEdgeFly（273 飞斩）：10t 起前漂 + ai1=30 消亡 + 旋进
 import { describe, it, expect } from 'vitest';
 import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile, FRACTAL_KEYS, LightsBaneSlash, GrassSlash } from '../src/entities/SwingArc';
+import { SolarEruptionWhip, SolarFlare } from '../src/entities/SolarEruption';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import type { GameHooks } from '../src/entities/types';
@@ -145,5 +146,38 @@ describe('草剑飞叶 976（AI_152 976 分支）', () => {
     gs.x = 12 * TILE; gs.y = 55 * TILE;
     gs.fixedUpdate(1, game);
     expect(gs.dead).toBe(true);
+  });
+});
+
+describe('日耀喷发 611 链鞭（AI_075 :63918-63956）', () => {
+  it('30t 消亡 + 旋进加速 + 命中出 612 爆焰（4t 节流）', () => {
+    const w = new World(160, 300, 30, 'open');
+    const list: unknown[] = [];
+    let dmgTaken = 0;
+    // 40×40 大盒贴路（链鞭旋进 vy 抖动 ±18/t 会快速偏移小盒）
+    list.push({ id: 1, x: 52 * TILE, y: 89 * TILE, w: 40, h: 40, cx: 52 * TILE + 20, cy: 89 * TILE + 20,
+      dead: false, hp: 500,
+      hurt: (d: number) => { dmgTaken += d; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, list, projectiles);
+    const whip = new SolarEruptionWhip(16, 0, 105);
+    projectiles.push(whip);
+    whip.x = 50 * TILE; whip.y = 90 * TILE;
+    whip.fixedUpdate(1, game);
+    const sp0 = Math.hypot(whip.vx, whip.vy);
+    expect(sp0).toBeGreaterThan(16);                  // +48×spin 首帧加速
+    for (let t = 0; t < 40 && !whip.dead; t++) whip.fixedUpdate(1, game);
+    expect(whip.dead).toBe(true);                     // ai0≥30 消亡
+    expect(projectiles.some((q) => q instanceof SolarFlare)).toBe(true);  // 612 已出
+    expect(dmgTaken).toBeGreaterThan(0);
+  });
+
+  it('612 爆焰：15t 消亡 + scale 增长', () => {
+    const game = makeGame(new World(160, 300, 30, 'open'));
+    const flare = new SolarFlare(60 * TILE, 60 * TILE, 105, 1.0);
+    flare.fixedUpdate(1, game);
+    expect(flare['ai0']).toBe(1);
+    for (let t = 0; t < 14 && !flare.dead; t++) flare.fixedUpdate(1, game);
+    expect(flare.dead).toBe(true);                    // 3×5=15t
   });
 });

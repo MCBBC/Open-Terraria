@@ -2660,7 +2660,9 @@ export class VanillaSpawner {
   private spawnFrog(rng: RNG): Enemy | null {
     const x = this.spawnTileX * TILE + 8;
     const y = this.spawnTileY * TILE;
-    if (!this.world.flags.unlockedSlimeYellowSpawn && rollLuck(this.playerLuck, 30, rng.next) === 0
+    // rollLuck 第三参是**函数**——裸传 rng.next 会与实例分离(this.ur undefined 崩溃,
+    // 进丛林必炸);全文件其余三处均为 () => rng.next(),此处笔误(2026-08-13 用户报告)
+    if (!this.world.flags.unlockedSlimeYellowSpawn && rollLuck(this.playerLuck, 30, () => rng.next()) === 0
       && !this.activeIds.has(687)) {
       this.pendingCritterKey = 'mystic_frog';
       return null;

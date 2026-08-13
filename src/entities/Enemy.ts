@@ -25,6 +25,7 @@ import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
 import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
+import { daybreakStacks } from './WeaponProj';
 import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, destroyerSegmentLight, spawnPart, addEnemy, shoot, losClear } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
@@ -741,9 +742,9 @@ export class Enemy extends Entity {
   shadowFlameT = 0;  shadowFlameDoT = 0;
   oiledT = 0;        oiledDoT = 0;
   /** BrokenArmor(36)=受击无视 20 防 / BetsysCurse(203)=无视 40 防
-   *  (NPC.cs:81919-81924 armorPenetration += 20/40);Daybreak(189) 单层近似
-   *  (原版层数模型:场上 636 太阳耀斑数 num8,DoT=num8×200 lifeRegen=100HP/s/层,
-   *  repo 无 636 实体,取单层 num8=1——层数叠加登记 GAP) */
+   *  (NPC.cs:81919-81924 armorPenetration += 20/40);Daybreak(189) 层数模型
+   *  已接(原版:场上附着 636 太阳耀斑数 num8,lifeRegen -= num8×2×100 = 100HP/s/层,
+   *  零层兜底 1——NPC.cs:92807-92830;636 实体 = WeaponProj.DaybreakFlare) */
   brokenArmorT = 0;
   betsysCurseT = 0;
   daybreakT = 0;  daybreakDoT = 0;
@@ -1266,7 +1267,12 @@ export class Enemy extends Entity {
     if (this.oiledT > 0) this.oiledT -= dt;
     if (this.brokenArmorT > 0) this.brokenArmorT -= dt;
     if (this.betsysCurseT > 0) this.betsysCurseT -= dt;
-    if (this.daybreakT > 0) { this.daybreakT -= dt; this.daybreakDoT += 100 * dt; } // 单层 100HP/s
+    // 层数模型（NPC.cs:92807-92830）：num8 = 场上附着 636 太阳耀斑数（WeaponProj
+    // .daybreakStacks），零层兜底 1（:92822-92825）→ num8×100 HP/s（:92826）
+    if (this.daybreakT > 0) {
+      this.daybreakT -= dt;
+      this.daybreakDoT += 100 * Math.max(1, daybreakStacks(this.id)) * dt;
+    }
     if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * dt; }
     if (this.hemorrhageT > 0) { this.hemorrhageT -= dt; this.hemorrhageDoT += 100 * dt; }
     if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * dt; }

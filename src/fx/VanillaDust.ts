@@ -3,10 +3,18 @@
 // :2773-2817）——翅膀视觉批引入，拴绳小动物批扩表。
 //
 // 范围说明：本引擎按"消费方已用到的 type"精植（翅膀尘埃 13 型：6/31/43/55/58/76/
-// 86/182/217/229/240/261/264；拴绳批 5 型：43/15/267/278/6——见各 case 行号），
-// 逐型带源码行号；NewDust 初始化链与通用老化链（fadeIn=生长目标语义 :2148-2171：
-// 0<fadeIn<100 时 scale += 0.03/t 至超 fadeIn 转衰落；否则 scale -= 0.01/t）
-// 全量 1:1。后续其它系统接入新 type 时按同法扩表。
+// 86/182/217/229/240/261/264；拴绳批 5 型：43/15/267/278/6；钻头坐骑 230——
+// 见各 case 行号），逐型带源码行号；NewDust 初始化链与通用老化链
+// （fadeIn=生长目标语义 :2148-2171：0<fadeIn<100 时 scale += 0.03/t 至超 fadeIn
+// 转衰落；否则 scale -= 0.01/t）全量 1:1。后续其它系统接入新 type 时按同法扩表。
+//
+// 结构澄清（1456 Dust.cs 两处易混的 else-if 链，扩表时勿再合并）：
+//  ① 883 起的独占链（…235/烟雾族 890/…31 组 1336/…55 组 1759/76@1810/…重力 1884）：
+//     命中任一链接即跳过其余链接与 :1884 重力——本引擎 chainLink=true 对应；
+//  ② 2080 起的另一条独占链（41@2080/44@2108/兜底 2136 vx×0.99）：与 ① 平行，
+//     **全体尘都会评估**（含 ① 已命中者）。本引擎沿用既有近似——链 A 命中者不乘
+//     0.99（效应每 tick ×0.99，翅膀尘场景不可辨），独立段型（230/217/240）按源码
+//     显式乘。230/644、240/592、263/625 等独立 if 段不属于任何链，逐段全执行。
 //
 // UpdateDust 结构（照源码三分段，勿合并）：
 //  ① 链 A 独占 else-if 链（:423-2139）：一尘至多命中一链接，命中者跳过 :1884
@@ -152,11 +160,14 @@ export class VanillaDust {
   /** UpdateDust（:423-2450，消费型精植）。playerDelta = 主角本 tick 位移
    *  （oldPosition 差——customData=Player 跟随用）。
    *  lightAt = Lighting.GetColor(tx,ty) 采样器（43 型照度门 :1475-1484；缺省全亮）；
-   *  solidTileAt = WorldGen.SolidTile 探针（278 型入实心格收缩 :2264-2268；缺省恒假） */
+   *  solidTileAt = WorldGen.SolidTile 探针（278 型入实心格收缩 :2264-2268；缺省恒假）；
+   *  player = 主角探针（230 型钻头尘吸向玩家中心 :655-663 / 76 型雪尘随玩家下坠
+   *  :1814-1822 读 Main.player[myPlayer] 速度；缺省 = 两效应关闭） */
   update(screenX: number, screenY: number, screenW: number, screenH: number,
     playerDx = 0, playerDy = 0,
     lightAt: ((tx: number, ty: number) => [number, number, number]) | null = null,
-    solidTileAt: ((tx: number, ty: number) => boolean) | null = null): void {
+    solidTileAt: ((tx: number, ty: number) => boolean) | null = null,
+    player: { cx: number; cy: number; vy: number } | null = null): void {
     this.lights.length = 0;
     for (const d of this.pool) {
       if (!d.active) continue;
@@ -164,9 +175,30 @@ export class VanillaDust {
       if (d.scale > 10) { d.active = false; continue; }
       // :469 position += velocity
       d.x += d.vx; d.y += d.vy;
-      // ---- 链 A 独占段（:423-2139：命中即跳过 :1884 重力与 :2136 兜底阻尼）----
+      // ---- 链 A 独占段（:883-1894 独占链：命中者跳过其余链接与 :1884 重力）----
+      //  230/217/240 是独立段/无档型（非 883 链链接）：chainLink 不置位，重力门
+      //  照常评估，:2136 vx×0.99 显式乘（链 A 命中型的 0.99 沿用既有近似不乘，
+      //  见文件头结构澄清 ②）。
       let chainLink = false;
       switch (d.type) {
+        case 230: { // :644-663 钻头坐骑尘（独立 if 段，非链 A 链接）
+          const k = d.scale * 0.6;                        // :646（自增前取值）
+          // :654 无 noLight 门恒发光——光源 = (scale·0.6)²×(0.5,0.9,1)
+          this.lights.push({ x: d.x, y: d.y, r: k * k * 0.5, g: k * k * 0.9, b: k * k });
+          d.scale += 0.02;                                // :653
+          if (d.followPlayer && player) {                 // :655-663 customData=Player 吸引
+            const rx = d.x - player.cx, ry = d.y - player.cy;
+            const len = Math.hypot(rx, ry);
+            if (len > 0) {                                // len==0 原版 0/0=NaN，防御跳过
+              d.scale = Math.min(d.scale, len / 24 - 1);  // :661
+              const pull = 100 / Math.max(50, len);       // :662
+              d.vx -= (rx / len) * pull;
+              d.vy -= (ry / len) * pull;
+            }
+          }
+          d.vx *= 0.99;                                   // :2136-2139 兜底（230≠304 恒命中）
+          break;
+        }
         case 264:   // :625-641：光 + 一次性主角跟随
           if (!d.noLight) {
             this.lights.push({ x: d.x, y: d.y, r: (d.color?.r ?? 0) / 255 * d.scale * 0.4,
@@ -201,15 +233,65 @@ export class VanillaDust {
           d.scale -= 0.0025;
           if (d.followPlayer) { d.x += playerDx; d.y += playerDy; }
           break;
-        case 6: {   // :890-1092 烟雾族链接（拴绳批地狱蝶）：轻重力 + 灰橙光
+        case 6: case 229: {  // :890-1092 烟雾族链接：轻重力 + 光（229 = 星璇潜行尘）
           if (!d.noGravity) d.vy += 0.05;                 // :892-895（非通用 0.1）
-          if (!d.noLight && !d.noLightEmittance) {        // :918 尾档 else :1083-1090
-            const k = Math.min(d.scale * 1.4, 0.6);
-            this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.65, b: k * 0.4 });
+          if (d.type === 229 && d.followPlayer) {         // :896-917（_NPC/_Vector2 两档
+            d.x += playerDx; d.y += playerDy;             //  本仓无消费方——备案不建）
+          }
+          if (!d.noLight && !d.noLightEmittance) {        // :918
+            if (d.type === 229) {                          // :976-983 蓝 青 光
+              const k = Math.min(d.scale * 1.4, 1);
+              this.lights.push({ x: d.x, y: d.y, r: k * 0.3, g: k * 0.65, b: k * 0.7 });
+            } else {                                       // :1083-1090 尾档（6 型灰橙）
+              const k = Math.min(d.scale * 1.4, 0.6);
+              this.lights.push({ x: d.x, y: d.y, r: k, g: k * 0.65, b: k * 0.4 });
+            }
           }
           chainLink = true;
           break;
         }
+        case 31: {  // :1336-1394（链 A 326-328/14/16/31/46/124/186/188/303 组链接）
+          d.vy *= 0.98; d.vx *= 0.98;                     // :1338-1339
+          if (d.noGravity) {                              // :1367-1377（customData=float/_NPC
+            d.vx *= 1.02; d.vy *= 1.02;                   //  两档本仓无消费方——备案不建）
+            d.scale += 0.02;
+            d.alpha += 4;
+            if (d.alpha > 255) { d.scale = 0.0001; d.alpha = 255; }
+          }
+          chainLink = true;
+          break;
+        }
+        case 55: {  // :1759-1799（链 A 55/56/73/74 组链接）
+          d.vx *= 0.98; d.vy *= 0.98;                     // :1761
+          if (!d.noLightEmittance) {                      // :1762
+            const k = Math.min(d.scale * 0.8, 1);         // :1764-1771 白 黄 光
+            this.lights.push({ x: d.x, y: d.y, r: k, g: k, b: k * 0.6 });
+          }
+          chainLink = true;
+          break;
+        }
+        case 76: {  // :1810-1828 雪尘专档（链 A 单型链接）
+          d.scale += 0.009;                               // :1813
+          const pvy = player?.vy ?? 0;                    // :1814 Main.player[myPlayer].velocity.Y
+          if (pvy > 0 && d.fadeIn === 0 && d.vy < pvy) {  // :1815-1818
+            d.vy += (pvy - d.vy) * 0.04;                  // Lerp(vy, y, 0.04)
+          }
+          if (!d.noLight && pvy > 0) d.y += pvy * 0.2;    // :1819-1822
+          if (d.fadeIn === 0 && solidTileAt               // :1823-1827（Collision.SolidCollision
+            && solidTileAt(Math.floor(d.x / 16), Math.floor(d.y / 16))) {  //  10×10 盒≈本格，备案）
+            d.scale *= 0.9;
+            d.vx *= 0.25; d.vy *= 0.25;
+          }
+          // :1812 Main.snowDust++ 是全屏雪密度计数（无本仓等价物）——备案不建
+          chainLink = true;
+          break;
+        }
+        case 217:  // 1456 Dust.cs 全文无 217 分支——无链 A 专档，仅兜底
+          d.vx *= 0.99;                                   // :2136-2139
+          break;   // chainLink 不置位 → 重力门照常（翅膀 26 尘 noGravity 不加重力）
+        case 240:  // :592-599 独立段仅 customData=Projectile 跟随（本仓消费方
+          d.vx *= 0.99;   // 均不设——备案）；其余同 217 走兜底
+          break;
         case 43: {  // :1472-1518 金尘：旋转 + 照度门 + 两段缩放 + 持续玩家跟随
           d.rotation += 0.1 * d.scale;                    // :1474
           const lc = lightAt
@@ -314,8 +396,10 @@ export class VanillaDust {
         }
         case 6: case 15: case 43: case 57:
         case 58: case 267: case 274: case 292:
+        case 229: case 230: case 31: case 55:
+        case 76: case 217: case 240:
           // :2379-2386 链 B 兜底（type!=304 && noGravity 才有效应——拴绳批诸型
-          // 多为 noGravity=false 不命中；267 恒命中：无此档则生长段后只增不减）
+          // 多为 noGravity=false 不命中；267/229/230/31/76/217/240 恒命中）
           if (d.noGravity) {
             d.vx *= 0.92; d.vy *= 0.92;
             if (d.fadeIn === 0) d.scale -= 0.04;
@@ -349,6 +433,9 @@ export class VanillaDust {
       case 267: return { rgb: 1, a: 0 };                                        // :2743-2746 Color(color.RGB,0)——色走 color pass
       case 278: return { rgb: 1, a: 25 / 255 };                                 // :2632-2637 newColor×color, A=25
       case 58: return { rgb: 1, a: 0 };                                         // :2721-2724 Color(255,255,255,0)
+      case 230: return { rgb: 1, a: 0 };   // :2616-2619 Color(255,255,255,0)——钻头尘本体透明，纯光源
+      case 229: return { rgb: 1, a: 25 / 255 };   // :2659-2663（Lerp(lighting,White,0.6) 近似为全亮基底，备案）
+      case 55: return { rgb: (num + 3) / 4, a: num };   // :2725-2727（num+3)/4 光乘区折减族
       // 15/57/274 亮色族走默认档：本体 A=255−alpha（:2756-2759），(num+3)/4 的
       // 光乘区折减由"画在合成后强制 White"（DrawDust :38406）等价表达
       case 264: {                                                               // :2508

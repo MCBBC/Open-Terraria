@@ -258,6 +258,13 @@ export class TownNPC extends Entity {
    *  坐姿 ai[0]==5 由 sitting 布尔建模（渲染侧 n.sitting?5:attackState 还原 ai0）；
    *  二者互斥：坐姿不满足攻击触发门 flag31 的 ai[0]<2（:55621），攻击态中不入座 */
   get attackState(): number { return this.atkState; }
+  /** ai[2] 持械瞄准值（DrawNPCExtras :27121 消费 = 武器旋转 ai[2]×90°×朝向；
+   *  :55191-55197 发射档取目标方向 Y 钳 ±0.5，态尽归零）——弓族攻击态持械绘制用 */
+  get holdoutAim(): number { return this.holdAim; }
+  /** world.flags.hardMode 缓存（攻击Update 每 tick 刷新）——持械表 pre/hm 选档用 */
+  get hardMode(): boolean { return this.hardModeFlag; }
+  /** ai[2]：弓族发射档写入，其余恒 0 */
+  private holdAim = 0;
   /** ai[1]:态倒计时(AttackTime) */
   private atkTimer = 0;
   /** localAI[1]:触发冷却(flag31 门) */
@@ -820,6 +827,7 @@ export class TownNPC extends Entity {
       const params = this.atkParams(atkType);
       if (!params && atkType !== 3) return false;
       this.atkState = atkType === 0 ? 10 : atkType === 1 ? 12 : atkType === 2 ? 14 : 15;
+      this.holdAim = 0;                       // ai[2] 入态清零(:54931 族)
       this.atkTimer = TOWN_ATTACK_TIME[this.vanillaId] ?? 30;
       this.atkTick = 0;
       this.atkBurstIdx = 0;
@@ -849,6 +857,7 @@ export class TownNPC extends Entity {
       const cdBase = (p as TownShotParams | undefined)?.cdBase ?? 10;
       const cdRand = (p as TownShotParams | undefined)?.cdRand ?? 1;
       this.atkState = 0;
+      this.holdAim = 0;                       // ai[2] 态尽归零(:55203 族)
       this.atkCd = Math.floor(cdBase / 2) + Math.floor(Math.random() * Math.max(1, cdRand));
     }
     return true;
@@ -943,6 +952,13 @@ export class TownNPC extends Entity {
     // 瞄准:弓 = 目标上抬 aimLift 取向;近战/魔法 = aimLiftScaled×(dist/range 归一)上抬
     let vx = this.facing, vy = 0;
     if (target) {
+      // ai[2] 持械瞄准值(:55191-55197):弓族发射档取【目标中心】方向 Y 钳 ±0.5
+      // (原版另有 flag28 LOS 门——触发门已验 LOS,此处近似直存;aimLift 不参与)
+      if (this.atkState === 12) {
+        const pdx = target.cx - this.cx, pdy = target.cy - this.cy;
+        const pdl = Math.hypot(pdx, pdy) || 1;
+        this.holdAim = Math.max(-0.5, Math.min(0.5, pdy / pdl));
+      }
       let lift = params.aimLift ?? 0;
       if (this.atkState === 10 || this.atkState === 14) {
         const dist = Math.hypot(target.cx - this.cx, target.cy - this.cy);

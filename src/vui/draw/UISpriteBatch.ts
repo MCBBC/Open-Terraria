@@ -81,11 +81,18 @@ export class UISpriteBatch {
     this.clipStack.pop();
   }
 
-  /** tint 缓存：multiply 铺色 + destination-in 用原 alpha 裁回 */
+  /** tint 缓存：multiply 铺色 + destination-in 用原 alpha 裁回。
+   *  ★容量闸(2026-08-13 泄露 review):键含色值(含 alpha 档),连续色/alpha
+   *  动画下无闸只增不减——对齐渲染层 tintCache 的 1024 满清空惯例 */
+  private static readonly TINT_MAX = 1024;
   private tinted(rect: DrawRect, color: Color): HTMLCanvasElement {
     const key = `${(rect.img as CanvasImageSource & { src?: string }).src ?? '?'}|${rect.sx},${rect.sy},${rect.sw},${rect.sh}|${color.r},${color.g},${color.b},${color.a}`;
     let c = this.tintCache.get(key);
     if (c) return c;
+    if (this.tintCache.size >= UISpriteBatch.TINT_MAX) {
+      for (const old of this.tintCache.values()) { old.width = 0; old.height = 0; }
+      this.tintCache.clear();
+    }
     c = document.createElement('canvas');
     c.width = rect.sw; c.height = rect.sh;
     const cx = c.getContext('2d')!;

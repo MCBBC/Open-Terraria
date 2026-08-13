@@ -56,6 +56,23 @@ const DISAPPEAR_ALPHA: Record<number, number> = { 1007: 3, 1008: 10, 1024: 7, 10
 const vanishSpeed = (t: number) => DISAPPEAR_SPEED[t] ?? 1;
 const vanishAlpha = (t: number) => DISAPPEAR_ALPHA[t] ?? 1;
 
+/** 气泡族判定（Gore.cs:856/:1427 的 411-430 专属块——泡泡棒 1450 喷出的
+ *  411-415 经 NewGore 尾段 type += rand(4)*5 可落入全部四族） */
+const isBubble = (t: number) => t >= 411 && t <= 430;
+/** 气泡族贴图尺寸（terraria-assets/Images/Gore_411-430.png 实测 10/20/32/48/64；
+ *  TEX 表（_meta.tex）只含 HitEffect 提取面，该族不在其中——NewGore 尾段定位 /
+ *  Update 爆裂尘计数 / 玩家与实心碰撞矩形都以贴图原尺寸为准，故独立登记） */
+const BUBBLE_TEX: Record<number, number> = {
+  411: 10, 412: 20, 413: 32, 414: 48, 415: 64,
+  416: 10, 417: 20, 418: 32, 419: 48, 420: 64,
+  421: 10, 422: 20, 423: 32, 424: 48, 425: 64,
+  426: 10, 427: 20, 428: 32, 429: 48, 430: 64,
+};
+/** 气泡族爆裂尘 type（Gore.cs:908-921：411-415→176 / 416-420→177 / 421-425→178 /
+ *  426-430→179） */
+const bubbleDustType = (t: number): number =>
+  t >= 426 ? 179 : t >= 421 ? 178 : t >= 416 ? 177 : 176;
+
 /** ChildSafety.SafeGore（ChildSafety.cs：开启童模时危险 gore → 11-13 落叶替代） */
 const SAFE_GORE = new Set([
   11, 12, 13, 16, 17, 42, 44, 51, 52, 53, 54, 55, 56, 57, 61, 62, 63, 67, 68, 69, 99, 106,
@@ -309,8 +326,9 @@ export class GorePiece extends Entity {
     this.goreId = type;
     this.scale = scale;
     const tex = TEX[type];
-    this.texW = tex?.w ?? FALLBACK_TEX;
-    this.texH = tex?.h ?? FALLBACK_TEX;
+    // 气泡族（411-430）不在 _meta.tex 提取面内——BUBBLE_TEX 独立登记（见其注释）
+    this.texW = tex?.w ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
+    this.texH = tex?.h ?? BUBBLE_TEX[type] ?? FALLBACK_TEX;
     this.x = x;
     this.y = y;
     this.resizeBox();
@@ -395,6 +413,18 @@ export class GorePiece extends Entity {
       g.vx = (Math.random() - 0.5) * 3;
       g.vy = Math.random() * Math.PI * 2;
     }
+    // :1427-1435 气泡族尾段（411-430）：定位改贴图底心锚、初速两轴缩放、
+    // type += rand(4)*5（四族 {411-415,416-420,421-425,426-430} 同尺寸档随机——
+    // 泡泡棒 1450 按 411-415 档掷出后在此扩散）、timeLeft = rand(300,1200)
+    // （goreTime/2 .. goreTime*2）。来源顺序在帆降块之后、907-909 行块之前
+    if (isBubble(t)) {
+      g.x -= (g.texW / 2) * g.scale;
+      g.y -= g.texH * g.scale;
+      g.vy *= irand2(90, 151) * 0.01;
+      g.vx *= irand2(40, 91) * 0.01;
+      g.goreIdCompat(t + irand(4) * 5);
+      g.timeLeft = irand2(300, 1201);
+    }
     // :1442-1449（907-909 随机起始帧；本表未出现，保留语义）
     if (t >= 907 && t <= 909) g.row = irand(3);
     livePool.add(g);
@@ -437,6 +467,11 @@ export class GorePiece extends Entity {
     }
 
     if (SAIL_TYPES.has(t)) { this.updateSail(game); return; }
+
+    // 气泡族（411-430，Gore.cs:856-931 独占块）：整块替换物理链与碰撞/时档尾段
+    // （源码中该尾段是本块的 else 分支，气泡不进 TileCollision/时档渐隐），
+    // 末段 position += velocity（:1070-1077）与本块内爆裂尘归 updateBubble
+    if (isBubble(t)) { this.updateBubble(game); return; }
 
     // ---- 位移前物理（:352-769 链）----
     if (isDampRibbon(t)) {
@@ -518,6 +553,58 @@ export class GorePiece extends Entity {
     if (this.timeLeft > 0) this.timeLeft -= vanishSpeed(t);
     else this.alpha += vanishAlpha(t);
     if (this.alpha >= 255) this.kill();
+  }
+
+  /**
+   * 气泡族 411-430 专属 AI（Gore.Update :856-931 的 `if (type >= 411 && type <= 430)`
+   * 整块）：恒 alpha=50 半透明上浮（vy 逼近 -0.25 + 噪声、vx 逼近视觉风 ×2 + 噪声，
+   * 均 1/51 低通）、rotation = vx×0.3；触碰玩家或实心块即爆（timeLeft=0）；
+   * 存活期随机衰减（1/2 减 1、1/50 减 5、1/100 减 10）；timeLeft≤0 → alpha=255
+   * （隐身）+ 爆裂尘（type 176-179 按族，数量 = texW×scale×0.8，noGravity、
+   * alpha=100、scale=gore scale）→ 尾段 alpha≥255 判死。来源中该块独占，
+   * 滴水/粘滞/时档尾段（:931 else 分支）与位移物理链（:352-769）均不进入。
+   */
+  private updateBubble(game: GameHooks): void {
+    const t = this.goreId;
+    const wind = game.world.weather?.windSpeedCurrent ?? 0;  // Main.WindForVisuals
+    this.alpha = 50;                                         // :858
+    this.vx = (this.vx * 50 + wind * 2 + irand2(-10, 11) * 0.1) / 51;   // :859
+    this.vy = (this.vy * 50 - 0.25 + irand2(-10, 11) * 0.2) / 51;       // :860
+    this.rotation = this.vx * 0.3;                           // :861
+    const bw = this.texW * this.scale, bh = this.texH * this.scale;
+    // :864-880 玩家矩形相交 → 爆（联机远端玩家不在 GameHooks 面，仅主角，备案）
+    const pl = game.player;
+    if (!pl.dead
+      && this.x < pl.x + pl.w && this.x + bw > pl.x
+      && this.y < pl.y + pl.h && this.y + bh > pl.y) {
+      this.timeLeft = 0;
+    }
+    // :882-887 Collision.SolidCollision（矩形任一格实心）→ 爆
+    const st = game.world.store;
+    outer: for (let ty = Math.floor(this.y / 16); ty <= Math.floor((this.y + bh - 1) / 16); ty++) {
+      for (let tx = Math.floor(this.x / 16); tx <= Math.floor((this.x + bw - 1) / 16); tx++) {
+        if (!st.inBounds(tx, ty)) continue;
+        if (st.isSolid(tx, ty)) { this.timeLeft = 0; break outer; }
+      }
+    }
+    if (this.timeLeft > 0) {
+      if (irand(2) === 0) this.timeLeft--;                    // :894-896
+      if (irand(50) === 0) this.timeLeft -= 5;                // :897-899
+      if (irand(100) === 0) this.timeLeft -= 10;              // :900-902
+    } else {
+      this.alpha = 255;                                       // :905
+      // :907-928 爆裂尘：数量 = texW×scale×0.8（10px 小泡 8 颗 .. 64px 大泡 51 颗），
+      // 每颗在矩形内随机落点（VanillaDust.spawn 内建 w/h 抖动）、noGravity、
+      // alpha=100、scale=gore scale；钩子缺省（单测 mock）静默跳过
+      const n = Math.floor(this.texW * this.scale * 0.8);
+      for (let i = 0; i < n; i++) {
+        game.spawnDust?.(this.x, this.y, Math.floor(bw), Math.floor(bh),
+          bubbleDustType(t), 0, 0, 100, null, this.scale, true);
+      }
+    }
+    this.x += this.vx;                                       // :1070-1077 尾段位移
+    this.y += this.vy;
+    if (this.alpha >= 255) this.kill();                      // :1079-1081
   }
 
   private kill(): void {

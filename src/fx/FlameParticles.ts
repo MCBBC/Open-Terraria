@@ -22,8 +22,11 @@
 // 绘制（FlameParticle.Draw :53-68）在 Renderer.drawFlameParticles：
 //   色 = Color(120,120,120,60) × GetLerpValue(1, 0.3, t/TTL)；
 //   4 份 ±2px×Scale 种子化抖动副本；origin = (frame.Width/2, frame.Height−2)。
-//   装甲 shader（SetTypeInfo 第三参 = player.cMount 坐骑染料索引）本仓未建模
-//   （无坐骑染料系统）——登记；色 (120,120,120,60) 是无染料时的本色。
+//   坐骑染料（SetTypeInfo 第三参 = player.cMount，ParticleOrchestrator.cs:3271；
+//   cMount = miscDyes[3].dye，Player.cs:9300——坐骑染料槽下标 3）已建模：
+//   Renderer 调用点从 player.inv.miscDyes[3] 解析染料 vid → dyeApplyOf 基底烘焙
+//   （与 cWings 翅膀染料同款 SM2 路径），DrawData 基色 (120,120,120,60) 照常相乘
+//   （染料只变换贴图像素，不替换基色——见 flamePassAlphas）。
 //
 // 入池 = ParticlePool（ParticlePool.cs:37-52，无空位时扩容）；此处按 VanillaDust
 // 先例取定长池 + 满池静默丢弃（山羊火焰满并发 ~150/玩家，512 上限永不触发）。
@@ -60,6 +63,21 @@ export function flameFadeOutFactor(t01: number, fadeOut = FLAME_FADE_OUT): numbe
 /** ScaleAcceleration（:3288 num3 × (−1/60)/num）：每 tick² 的收缩加速度 */
 export function flameScaleAcceleration(scale0: number, ttl = FLAME_TTL): number {
   return scale0 * (-1 / 60) / ttl;
+}
+
+/** Draw :55 的 DrawData 基色 rgb 分量（Color(120,120,120,60)——XNA 预乘混合下
+ *  rgb:A = 2:1，Renderer 以 覆盖+加性 两 pass 等价）。染料无关常量 */
+export const FLAME_DRAW_RGB = 120 / 255;
+/** Draw :55 的 DrawData 基色 alpha 分量（60/255） */
+export const FLAME_DRAW_ALPHA = 60 / 255;
+
+/** 绘制两 pass 的 alpha（Renderer.drawFlameParticles 消费）：
+ *  ① 覆盖 pass = (60/255)×lerp（原贴图/染料基底）；② 加性 pass = lerp（×(60,60,60)
+ *  预染副本）——两 pass rgb 合计 = 基底×(120/255)×lerp。**染料路径共用同一基色
+ *  乘法**（FlameParticle.cs:62-64：shader 只变换贴图像素，DrawData.color 照常乘），
+ *  即染料不替换/不叠加基色通道——供测试锁定 */
+export function flamePassAlphas(lerp: number): { cover: number; add: number } {
+  return { cover: FLAME_DRAW_ALPHA * lerp, add: lerp };
 }
 
 /** k 次 update 后的 scale（ABasicParticle 递推 scale += Σ accel 的闭式，

@@ -328,10 +328,14 @@ export function growTreeWithSettings(st: TileStore, rng: RNG, x: number, y: numb
   if (rng.int(0, 2) === 0) tR = false;
   if (tR) st.setTileSilent(x + 1, num - 1, p.treeTile, 22, 132 + rng.int(0, 2) * 22);
   if (tL) st.setTileSilent(x - 1, num - 1, p.treeTile, 44, 132 + rng.int(0, 2) * 22);
-  if (tL || tR) {
-    const baseFx = tL && tR ? 88 : tL ? 0 : 66;        // 基座干身帧（cs:30901-30930）
-    st.setTileSilent(x, num - 1, p.treeTile, baseFx, 132 + rng.int(0, 2) * 22);
-  }
+  // ★cs:30906 `num5 = genRand.Next(3)` 是**无条件掷**（基座干身帧骰，帧写才受
+  //   flag4/flag5 门控 cs:30907-30959）。旧实现内嵌 `if (tL || tR)`——两侧 tuft 全
+  //   false 时（以太腔石地恒如此）每棵成树少掷 1 骰，500 采样流整体漂移
+  //   （shimmer 金标 2026-08-13 暴露：CS oracle 状态恢复对账 tree[41] 后分叉）
+  const baseK = rng.int(0, 2);
+  if (tL && tR) st.setTileSilent(x, num - 1, p.treeTile, 88, 132 + baseK * 22);  // cs:30907-30923
+  else if (tL) st.setTileSilent(x, num - 1, p.treeTile, 0, 132 + baseK * 22);    // cs:30925-30941
+  else if (tR) st.setTileSilent(x, num - 1, p.treeTile, 66, 132 + baseK * 22);   // cs:30943-30959
   // 树冠标记帧（cs:30932-30967）：12/13 fx=22 否则 fx=0；fy=198+22*k
   const crownFx = rng.int(0, 12) !== 0 ? 22 : 0;
   st.setTileSilent(x, num - height, p.treeTile, crownFx, 198 + rng.int(0, 2) * 22);

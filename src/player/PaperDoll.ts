@@ -98,7 +98,14 @@ export function headArmorImage(headIdx: number): HTMLImageElement | null {
 }
 
 const cache = new Map<string, HTMLCanvasElement>();
+/** 调色缓存上限(2026-08-13 泄露 review):键=贴图×外观色(用户可控,键空间近无限),
+ *  值=整图尺寸 canvas——无闸时长会话/选人界面拖色条无界增长(同文件 cache 有
+ *  LRU 64 而此表漏配)。超限整体清空(值小,重建廉价) */
+const TINT_CACHE_MAX = 256;
 const tintCache = new Map<string, HTMLCanvasElement>();
+/** WeakMap(2026-08-13):外层原为强引用 Map——会把已被 cache LRU 淘汰的合成
+ *  canvas 钉住永不释放;改弱引用后源 canvas 回收时条目随之消失 */
+const stealthTintCache = new WeakMap<HTMLCanvasElement, Map<string, HTMLCanvasElement>>();
 
 /** 清空全部合成/调色缓存。
  *  缓存 canvas 在 GPU contextlost 后内容归零且不会自动重画——不失效就
@@ -119,6 +126,10 @@ function tint(img: HTMLImageElement, color: { r: number; g: number; b: number })
   const key = (img.src as string) + '|' + colorKey(color);
   let c = tintCache.get(key);
   if (c) return c;
+  if (tintCache.size >= TINT_CACHE_MAX) {  // 满即清(防无界)
+    for (const old of tintCache.values()) { old.width = 0; old.height = 0; }
+    tintCache.clear();
+  }
   c = document.createElement('canvas');
   c.width = img.width; c.height = img.height;
   const ctx = c.getContext('2d')!;
@@ -149,14 +160,19 @@ function sheetRect(variant: number, sheet: number): HTMLImageElement | null {
 
 /** 合成完整帧表（含发型+装备）。equip 为原版物品 id（Armor_Head_/Armor_Legs_/Armor_Armor_ 贴图索引）。
  *  opts.skipHair = 发色剂激活时拆层：头发与头甲都不进烘焙（调用方 hairFrameTinted/
- *  headArmorImage 按 后发→本体→前发→头甲 层序叠画——动态染料逐帧变色，烘焙缓存无法承载） */
+ *  headArmorImage 按 后发→本体→前发→头甲 层序叠画——动态染料逐帧变色，烘焙缓存无法承载）
+ *  opts.layer = stealth 视觉分层（PlayerDrawSet.cs:1523-1660）：'skin' = 皮肤/发/衣着
+ *   （×s'² 消费）；'armor' = 三件甲贴图（×s' 消费，3106/蘑菇矿 B 分量 ×settled；
+ *   'armorNoHead' 发色剂激活时头甲归叠层路径）。原版腿甲/身甲整体替代对应皮肤衣着
+ *   （DrawPlayer_02/13 else-if 链）→ skin 层在有甲的槽位同样留空（甲覆盖语义一致） */
+export type DollLayer = 'skin' | 'armor' | 'armorNoHead';
 export function compositePaperDoll(
   a: Appearance,
   equip?: { head?: number | null; body?: number | null; legs?: number | null },
-  opts?: { skipHair?: boolean },
+  opts?: { skipHair?: boolean; layer?: DollLayer },
 ): HTMLCanvasElement | null {
   const key = appearanceKey(a) + (equip ? `|e${equip.head ?? 0},${equip.body ?? 0},${equip.legs ?? 0}` : '')
-    + (opts?.skipHair ? '|nohair' : '');
+    + (opts?.skipHair ? '|nohair' : '') + (opts?.layer ? `|L${opts.layer}` : '');
   const hit = cache.get(key);
   if (hit) return hit;
 
@@ -187,8 +203,10 @@ export function compositePaperDoll(
   const hasBackHair = hairMode !== 'none' && backHairDraw(a.hair);
   const hairRect = hairMode !== 'none' ? UITextures.get(hairSrc) : null;
   const hairTinted = hairRect ? tint(hairRect.img as HTMLImageElement, a.hairColor) : null;
+  const onlyArmor = opts?.layer === 'armor' || opts?.layer === 'armorNoHead';
+  const noArmor = opts?.layer === 'skin';
   // 后发层（1.4.4+ PlayerDrawLayers:206-212：backHairDraw 时画在身体之后，即先画）
-  if (hairTinted && hasBackHair) {
+  if (!onlyArmor && hairTinted && hasBackHair) {
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
       ctx.drawImage(hairTinted, 0, hr * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
@@ -197,8 +215,8 @@ export function compositePaperDoll(
 
   // ---- 竖条通道（腿/裤/鞋/头/眼：20 帧直排） ----
   const legsArmor = equip?.legs ? UITextures.get(`Armor_Legs_${equip.legs}.png`) : null;
-  for (const ch of VERTICAL_CHANNELS) {
-    if (legsArmor && (ch.sheet === 11 || ch.sheet === 12)) continue; // 腿甲替代裤+鞋
+  for (const ch of onlyArmor ? [] : VERTICAL_CHANNELS) {
+    if (legsArmor && (ch.sheet === 10 || ch.sheet === 11 || ch.sheet === 12)) continue; // 腿甲整体替代腿皮肤/裤/鞋（DrawPlayer_02 else-if）
     const img = sheetRect(a.skinVariant, ch.sheet);
     if (!img) continue;
     const color = ch.color === 'white' ? { r: 255, g: 255, b: 255 } : (a[ch.color] as { r: number; g: number; b: number });
@@ -208,7 +226,7 @@ export function compositePaperDoll(
     }
   }
   // 腿甲（竖条 20 帧，Armor_Legs_{id} 替代 pants+shoes）
-  if (legsArmor) {
+  if (legsArmor && !noArmor) {
     for (let row = 0; row < BODY_FRAMES; row++) {
       ctx.drawImage(legsArmor.img, 0, row * FRAME_H, FRAME_W, FRAME_H, 0, row * FRAME_H, FRAME_W, FRAME_H);
     }
@@ -225,6 +243,8 @@ export function compositePaperDoll(
     return { sheet, x, y, color };
   };
   for (let row = 0; row < BODY_FRAMES; row++) {
+    if (onlyArmor && !bodyArmorImg) continue;    // armor 层无身甲槽则该层为空
+    if (noArmor && bodyArmorImg) continue;       // skin 层身甲槽留空（甲覆盖语义）
     const torsoX = row === 5 ? 1 : 0;
     const arm = ARM_FRAME[row];
     const drawTinted = (img: HTMLImageElement, x: number, y: number, color: { r: number; g: number; b: number }) => {
@@ -275,7 +295,7 @@ export function compositePaperDoll(
   }
 
   // 前发层（1.4.4+ PlayerDrawSet:1751-1753：backHairDraw 时裁 26px 高，与后发层分离）
-  if (hairTinted) {
+  if (!onlyArmor && hairTinted) {
     const frontH = hasBackHair ? 26 : FRAME_H;
     for (let row = 0; row < BODY_FRAMES; row++) {
       const hr = Math.max(0, Math.min(HAIR_FRAMES - 1, row - 6));
@@ -285,7 +305,7 @@ export function compositePaperDoll(
 
   // 头甲（Armor_Head_{id} 竖条 20 帧，画在头发之后——头盔覆盖发型）。
   // skipHair 时一并让出（发色剂叠层路径由调用方在发层之后补画，保层序）
-  if (equip?.head && !opts?.skipHair) {
+  if (equip?.head && !opts?.skipHair && !noArmor && opts?.layer !== 'armorNoHead') {
     const headArmor = UITextures.get(`Armor_Head_${equip.head}.png`);
     if (headArmor) {
       for (let row = 0; row < BODY_FRAMES; row++) {
@@ -319,3 +339,31 @@ export function walkFrame(timeSec: number): number {
 
 /** 站立帧 */
 export const IDLE_FRAME = 0;
+
+/** 逐通道 RGB 缩调（stealth 分层消费：armor ×s'/B×settled、星璇 Lerp 通道）。
+ *  multiply 铺 rgb(255·m) 逐通道乘 + destination-in 保原 alpha；mul 量化 1/128 防缓存爆 */
+export function tintRGBA(src: HTMLCanvasElement, mul: [number, number, number]): HTMLCanvasElement {
+  const q = mul.map((m) => Math.round(m * 128) / 128);
+  const key = `${q[0]},${q[1]},${q[2]}`;
+  let inner = stealthTintCache.get(src);
+  if (!inner) { inner = new Map(); stealthTintCache.set(src, inner); }
+  const hit = inner.get(key);
+  if (hit) return hit;
+  const c = document.createElement('canvas');
+  c.width = src.width; c.height = src.height;
+  const ctx = c.getContext('2d')!;
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(src, 0, 0);
+  ctx.globalCompositeOperation = 'multiply';
+  ctx.fillStyle = `rgb(${Math.round(q[0] * 255)},${Math.round(q[1] * 255)},${Math.round(q[2] * 255)})`;
+  ctx.fillRect(0, 0, c.width, c.height);
+  ctx.globalCompositeOperation = 'destination-in';
+  ctx.drawImage(src, 0, 0);
+  ctx.globalCompositeOperation = 'source-over';
+  inner.set(key, c);
+  if (inner.size > 48) {   // 量化档 ≤129；stealth 连续变化时留中段档位
+    let i = 0;
+    for (const k of inner.keys()) { if (i++ > 24) break; inner.delete(k); }
+  }
+  return c;
+}

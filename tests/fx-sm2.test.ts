@@ -134,3 +134,50 @@ describe('染料表 × pass 覆盖', () => {
     expect(a.needsImage1).toBe(true);
   });
 });
+
+describe('t0 子矩形映射（SpriteBatch UV 语义）', () => {
+  it('ArmorColoredGradient：子矩形烘焙与整图烘焙等价（t0×uImageSize0−uSourceRect.xy）', () => {
+    const pass = getPass('ArmorColoredGradient')!;
+    const texels: Array<[number, number, number, number]> = [
+      [1, 1, 1, 1], [0.6, 0.5, 0.4, 1], [0.3, 0.3, 0.3, 1], [0, 0, 0, 1],
+    ];
+    const mk = () => strip(texels);
+    const uBase = defaultUniforms();
+    uBase.uColor = [1, 0, 0];
+    uBase.uSecondaryColor = [0, 0, 1];
+    uBase.uSaturation = 1.2;
+    // A：整图（uImageSize0=4×1、uSourceRect=0,0,4,1、t0=局部）
+    const a = mk();
+    const uA = { ...uBase, uImageSize0: [4, 1] as [number, number], uSourceRect: [0, 0, 4, 1] as [number, number, number, number] };
+    runPassOnImageData(pass, a.data, a.w, a.h, uA);
+    // B：同一 4px 切片在大表 x=2 处（uImageSize0=6×1、uSourceRect=2,0,4,1、t0=全表）
+    const b = mk();
+    const uB = { ...uBase, uImageSize0: [6, 1] as [number, number], uSourceRect: [2, 0, 4, 1] as [number, number, number, number] };
+    runPassOnImageData(pass, b.data, b.w, b.h, uB, [], { sx: 2, sy: 0, sheetW: 6, sheetH: 1 });
+    for (let i = 0; i < a.data.length; i++) {
+      expect(Math.abs(a.data[i] - b.data[i])).toBeLessThanOrEqual(2);   // 仅 Uint8 量化差
+    }
+  });
+
+  it('缺 t0Rect 的旧路径在子矩形下错锚（回归守卫：两输出必须不同）', () => {
+    const pass = getPass('ArmorColoredGradient')!;
+    const texels: Array<[number, number, number, number]> = [
+      [1, 1, 1, 1], [0.6, 0.5, 0.4, 1], [0.3, 0.3, 0.3, 1], [0, 0, 0, 1],
+    ];
+    const uBase = defaultUniforms();
+    uBase.uColor = [1, 0, 0];
+    uBase.uSecondaryColor = [0, 0, 1];
+    uBase.uSaturation = 1.2;
+    const b = strip(texels);
+    const uB = { ...uBase, uImageSize0: [6, 1] as [number, number], uSourceRect: [2, 0, 4, 1] as [number, number, number, number] };
+    const withRect = strip(texels);
+    runPassOnImageData(pass, withRect.data, withRect.w, withRect.h, uB, [], { sx: 2, sy: 0, sheetW: 6, sheetH: 1 });
+    runPassOnImageData(pass, b.data, b.w, b.h, uB);                     // 无 t0Rect（切片局部 t0）
+    let diff = 0;
+    for (let i = 0; i < b.data.length; i += 4) {
+      if (Math.abs(b.data[i] - withRect.data[i]) > 8
+        || Math.abs(b.data[i + 1] - withRect.data[i + 1]) > 8) diff++;
+    }
+    expect(diff).toBeGreaterThan(0);   // 证明位置依赖 pass 对 t0 映射敏感（映射真实生效）
+  });
+});

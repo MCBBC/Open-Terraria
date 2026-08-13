@@ -13,6 +13,7 @@ import {
   heldProjSample, applyHeldProjPointing, type HeldProjSwing,
 } from '../src/render/heldProj';
 import { Renderer } from '../src/render/Renderer';
+import { ITEM_BY_KEY } from '../src/data/items';
 
 const TAU = Math.PI * 2;
 /** 角等价(模 2π) */
@@ -23,8 +24,8 @@ function angEq(a: number, b: number): boolean {
   return Math.abs(d) < 1e-9;
 }
 
-// 食人鱼枪本仓物品 id(vi_ 单空间,ITEM_KEY_TO_ID['vi_1156_piranha_gun']=1156)
-const PIRANHA_GUN_ID = 1156;
+// 食人鱼枪本仓物品 id(vi_ 单空间,数组索引=id ≠ 原版 id 1156——必须走 ITEM_BY_KEY)
+const PIRANHA_GUN_ID: number = ITEM_BY_KEY['vi_1156_piranha_gun'];
 
 function playerAt(cx: number, cy: number, heldId: number | null = PIRANHA_GUN_ID) {
   return { cx, cy, inv: { heldItem: () => (heldId === null ? null : { id: heldId }) } };
@@ -42,13 +43,15 @@ describe('heldProjItemRotation(AI_Adjust :21161-21191 逐字)', () => {
   it('gfxOffY 只进 y 项(:21178 MountedCenter.Y + gfxOffY − Center.Y)', () => {
     const base = heldProjItemRotation(100, 100, 130, 120)!;
     const off = heldProjItemRotation(100, 100, 130, 120, { gfxOffY: 5 })!;
-    expect(angEq(off, Math.atan2(20 + 5, 30))).toBe(true);
+    // y = 100 + 5 − 120 = −15 → 未翻转 atan2(−y,−x) = atan2(15,30)
+    expect(angEq(off, Math.atan2(20 - 5, 30))).toBe(true);
     expect(angEq(base, off)).toBe(false);
   });
-  it('minSpeed 门:|x|+|y|<=minSpeed 不更新,恰好大于则更新(:21183)', () => {
-    // |x|+|y| = 30+20 = 50
+  it('minSpeed 门:|x|+|y|<=minSpeed 不更新(:21183)', () => {
+    // |x|+|y| = 30+20 = 50;门取 <= → 恰好相等也拦
     expect(heldProjItemRotation(100, 100, 130, 120, { minSpeed: 50 })).toBeNull();
-    expect(heldProjItemRotation(100, 100, 130, 120, { minSpeed: 50.0001 })).not.toBeNull();
+    expect(heldProjItemRotation(100, 100, 130, 120, { minSpeed: 50.0001 })).toBeNull();
+    expect(heldProjItemRotation(100, 100, 130, 120, { minSpeed: 49.9999 })).not.toBeNull();
     expect(heldProjItemRotation(100, 100, 130, 120, { minSpeed: 0 })).not.toBeNull();
   });
 });
@@ -183,14 +186,19 @@ describe('绘制调用采样(drawUseItem 消费指向角)', () => {
     expect(rots.length).toBeGreaterThan(0);
     expect(angEq(rots[0], Math.PI - swing.aim!)).toBe(true);   // facing=−1:π−aim
   });
-  it('合成 swing 走 bodyFrame 行 3(useStyle 5 默认行,Player.cs:35986-36005)', () => {
-    const { Renderer } = require('../src/render/Renderer');
-    noteHeldProjEntity({ projId: 190, x: 40, y: 120, w: 22, h: 22, pAlpha: 0, dead: false });
-    const synth = applyHeldProjPointing(playerAt(100, 100), null)!;
-    const p = { facing: 1 } as never;
-    const row = (Renderer.prototype as unknown as {
+  it('合成 swing 的 bodyFrame 行随指向角走 useStyle 5 档(Player.cs:35986-36005)', () => {
+    const proto = Renderer.prototype as unknown as {
       useStyleBodyRow(s: HeldProjSwing, pl: unknown): number;
-    }).useStyleBodyRow.call(Object.create(Renderer.prototype), synth, p);
-    expect(row).toBe(3);
+    };
+    const p = { facing: 1 } as never;
+    // 右侧平指:itemRotation*dir ∈ (−0.75, 0.6) → 行 3
+    noteHeldProjEntity({ projId: 190, x: 200, y: 90, w: 22, h: 22, pAlpha: 0, dead: false });
+    const flat = applyHeldProjPointing(playerAt(100, 100), null)!;
+    expect(proto.useStyleBodyRow.call(Object.create(Renderer.prototype), flat, p)).toBe(3);
+    heldProjFrameBegin();
+    // 左上陡指:itemRotation*dir > 0.6 → 行 4(举臂)
+    noteHeldProjEntity({ projId: 190, x: 40, y: 120, w: 22, h: 22, pAlpha: 0, dead: false });
+    const steep = applyHeldProjPointing(playerAt(100, 100), null)!;
+    expect(proto.useStyleBodyRow.call(Object.create(Renderer.prototype), steep, p)).toBe(4);
   });
 });

@@ -90,13 +90,19 @@ export class OptionsStore {
     this.emit();
   }
 
-  /** 改值并持久化（局部更新） */
+  /** 改值并持久化（局部更新）。
+   *  ★持久化防抖(2026-08-13 泄露 review):Settings 滑杆 input 事件每像素
+   *  一次 set——此前每次 JSON.stringify 全量 + IndexedDB 写,拖动即 IO 风暴。
+   *  内存值与 emit 仍即时(所见即所得),落盘合并到停手后 400ms */
+  private saveTimer: ReturnType<typeof setTimeout> | 0 = 0;
   async set<K extends keyof OptionsData>(key: K, value: OptionsData[K]) {
     this.data[key] = value;
     this.emit();
-    try {
-      await kvSet(KEY, JSON.stringify(this.data));
-    } catch { /* 存储不可用则仅内存生效 */ }
+    if (this.saveTimer) clearTimeout(this.saveTimer);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = 0;
+      kvSet(KEY, JSON.stringify(this.data)).catch(() => { /* 存储不可用则仅内存生效 */ });
+    }, 400) as unknown as ReturnType<typeof setTimeout>;
   }
 
   private emit() {

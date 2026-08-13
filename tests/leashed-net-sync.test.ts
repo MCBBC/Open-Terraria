@@ -517,3 +517,130 @@ describe('信封防御（NetModule.Deserialize :22-41 default 分支）', () => 
     expect(KITE_ITEM_PROJ[4610]).toBe(822);
   });
 });
+
+// ----------------------------------------------------------------------------
+// 锚桩存物取回（sub4 RetrieveRequest → 房主权威落账 → msg21 掉物）——访客端
+// 无 furnitureItems 记录，取回必须经房主；= msg31/32 箱子请求同款信任模型。
+// 标杆：TELeashedEntityAnchorWithItem.cs:20-30（DropItemForTileBreak）/ :36-38
+//（InsertItem）+ TELeashedEntityAnchor.cs:16-21（OnRemoved → DespawnLeashedEntity）。
+// 注意：原版锚桩无 OnPlayerInteraction，右键取回是本仓扩展交互（备案）。
+// ----------------------------------------------------------------------------
+import {
+  writeLeashedRetrieveRequest, applyLeashedRetrieve, type LeashedRetrieveHost,
+} from '../src/net/leashedSync';
+import {
+  LEASHED_SUB_RETRIEVE_REQUEST,
+} from '../src/entities/LeashedCritter';
+import {
+  leashedAnchorPlace, type FurnitureItemRecord,
+} from '../src/world/FurnitureItems';
+
+/** 房主世界绑定 mock：记录表 + 实体表 + 掉物/广播采集（零 Game 依赖） */
+function mkHost(records: FurnitureItemRecord[], entityIds: number[]) {
+  const drops: Array<{ x: number; y: number; key: string; stack: number }> = [];
+  const removes: number[] = [];
+  const alive = new Set(entityIds);
+  const host: LeashedRetrieveHost = {
+    records,
+    netIdsAt: (x, y) => (x === 60 && y === 39 ? entityIds : []),
+    removeAt: () => { for (const id of entityIds) alive.delete(id); return entityIds.length > 0; },
+    dropItem: (x, y, key, stack) => drops.push({ x, y, key, stack }),
+    broadcastRemove: (id) => removes.push(id),
+    keyOf: (id) => `vi_${id}_bunny`,
+  };
+  return { host, drops, removes, alive };
+}
+
+describe('RetrieveRequest 信封（sub4：锚格 + kind）', () => {
+  it('帧头/字段往返', () => {
+    const frame = writeLeashedRetrieveRequest(60, 39, LEASHED_KIND_CRITTER);
+    expectFrameHeader(frame);
+    const msg = deliver(frame)!;
+    expect(msg.sub).toBe(LEASHED_SUB_RETRIEVE_REQUEST);
+    expect(msg.ax).toBe(60); expect(msg.ay).toBe(39);
+    expect(msg.kind).toBe(LEASHED_KIND_CRITTER);
+    // kite 档
+    const m2 = deliver(writeLeashedRetrieveRequest(61, 40, LEASHED_KIND_KITE))!;
+    expect(m2.kind).toBe(LEASHED_KIND_KITE);
+  });
+  it('脏包防御：越界锚点 / 非法 kind → null', () => {
+    expect(deliver(new NetWriter(Msg.NetModules).u16(NetModule.LeashedEntity)
+      .u8(LEASHED_SUB_RETRIEVE_REQUEST).i32(-1).i32(3).u8(0).finish())).toBeNull();
+    expect(deliver(new NetWriter(Msg.NetModules).u16(NetModule.LeashedEntity)
+      .u8(LEASHED_SUB_RETRIEVE_REQUEST).i32(5).i32(-2).u8(1).finish())).toBeNull();
+    expect(deliver(new NetWriter(Msg.NetModules).u16(NetModule.LeashedEntity)
+      .u8(LEASHED_SUB_RETRIEVE_REQUEST).i32(5).i32(3).u8(7).finish())).toBeNull();
+  });
+});
+
+describe('取回落账（applyLeashedRetrieve：校验 → 弹存物 → 消散实体 → 掉物 → 广播）', () => {
+  it('全链：记录存在 → 存物掉落(msg21 载荷形态) + 记录/实体清除 + sub0 广播', () => {
+    const records: FurnitureItemRecord[] = [];
+    leashedAnchorPlace(records, 'critter_anchor', 60, 39, { id: 4321, stack: 1 });
+    const { host, drops, removes, alive } = mkHost(records, [77]);
+    expect(applyLeashedRetrieve(host, 60, 39, LEASHED_KIND_CRITTER)).toBe(true);
+    // 存物掉落：锚格像素位（×16+8, ×16）与破坏掉物同位——msg21 spawn 载荷
+    expect(drops).toHaveLength(1);
+    expect(drops[0].x).toBe(60 * 16 + 8);
+    expect(drops[0].y).toBe(39 * 16);
+    expect(drops[0].key).toBe('vi_4321_bunny');
+    expect(drops[0].stack).toBe(1);
+    // 记录清除 + 实体消散 + Remove 广播
+    expect(records.find((r) => r.x === 60 && r.y === 39)).toBeUndefined();
+    expect(alive.size).toBe(0);
+    expect(removes).toEqual([77]);
+  });
+
+  it('host 权威边界：无记录 / 空桩 / kind 不匹配 → 零副作用拒绝', () => {
+    // 无记录
+    const empty = mkHost([], []);
+    expect(applyLeashedRetrieve(empty.host, 60, 39, LEASHED_KIND_CRITTER)).toBe(false);
+    expect(empty.drops).toHaveLength(0);
+    expect(empty.removes).toHaveLength(0);
+    // 空桩（记录在、存物槽空）
+    const blank: FurnitureItemRecord[] = [];
+    leashedAnchorPlace(blank, 'critter_anchor', 60, 39, { id: 4321, stack: 1 });
+    blank[0].slots[0] = null;
+    const b = mkHost(blank, []);
+    expect(applyLeashedRetrieve(b.host, 60, 39, LEASHED_KIND_CRITTER)).toBe(false);
+    expect(b.drops).toHaveLength(0);
+    // kind 不匹配：critter 记录用 kite kind 请求
+    const mixed: FurnitureItemRecord[] = [];
+    leashedAnchorPlace(mixed, 'critter_anchor', 60, 39, { id: 4321, stack: 1 });
+    const m = mkHost(mixed, [5]);
+    expect(applyLeashedRetrieve(m.host, 60, 39, LEASHED_KIND_KITE)).toBe(false);
+    expect(m.drops).toHaveLength(0);
+    expect(m.removes).toHaveLength(0);
+    expect(m.alive.size).toBe(1);        // 实体保留
+    // 非法 kind
+    expect(applyLeashedRetrieve(m.host, 60, 39, 9)).toBe(false);
+  });
+
+  it('访客→房主全链（mock 传输）：请求帧 → 房主落账 → 掉物/Remove 到访客侧', () => {
+    // 1. 房主世界：记录 + 实体（spawnCritter 真产线）
+    const st = groundWorld();
+    const hostMgr = new LeashedEntityManager();
+    hostMgr.attach({ store: st });
+    const env = mkEnv({ playerCx: 60 * 16, playerCy: 39 * 16 });
+    const e = hostMgr.spawnCritter(60, 39, 2019)!;
+    const records: FurnitureItemRecord[] = [];
+    leashedAnchorPlace(records, 'critter_anchor', 60, 39, { id: 4321, stack: 1 });
+    // 2. 访客右键 → sub4 请求帧（服务器定向转发 = 字节直连 mock）
+    const req = deliver(writeLeashedRetrieveRequest(60, 39, LEASHED_KIND_CRITTER))!;
+    expect(req.sub).toBe(LEASHED_SUB_RETRIEVE_REQUEST);
+    // 3. 房主落账（Game.netApplyLeashed sub4 分支 → retrieveLeashedAnchor 的纯约简）
+    const { host, drops, removes } = mkHost(records, hostMgr.netIdsAt(60, 39));
+    host.removeAt = (x, y) => hostMgr.removeAt(x, y);
+    expect(applyLeashedRetrieve(host, req.ax, req.ay, req.kind)).toBe(true);
+    expect(hostMgr.critters).toHaveLength(0);         // 实体消散（OnRemoved 等价）
+    // 4. 掉物 = msg21 spawn 载荷 → 访客收包拾取；Remove → 访客实体移除
+    expect(drops[0].key).toBe('vi_4321_bunny');
+    expect(removes).toEqual([e.netId]);
+    const guest = new LeashedEntityManager();
+    guest.attach({ store: groundWorld() });
+    guest.netApplyFull(deliver(writeLeashedFullSync(e))!, env);
+    expect(guest.critters).toHaveLength(1);
+    for (const id of removes) guest.netRemove(deliver(writeLeashedRemove(id))!.netId);
+    expect(guest.critters).toHaveLength(0);
+  });
+});

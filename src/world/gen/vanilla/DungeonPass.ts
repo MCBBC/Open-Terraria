@@ -85,8 +85,13 @@ const DG_PRE_CLASS: Record<number, string> = {
   164: 'guns', 1156: 'guns', 1571: 'boom', 1569: 'boom', 1260: 'magic', 1572: 'summon',
   4607: 'summon', 5465: 'acc',
 };
-// 家具 item → tile（Item.cs createTile）
-const DG_ITEM_TILE: Record<number, number> = {
+// 家具 item → 原版 tile id（Item.cs createTile；sheet 空间）
+// ★2026-08-13 id 空间碰撞修复：曾直存 sheet id 给 placeSimple 裸写 st.type——
+// 落地钟 sheet104 命中内部 #104=活木（"地牢诡异装饰物"真身！）、蜡烛 33=猩红矿、
+// 灯 93=氙苔、椅 15=铁砧、烛台 100=石板、书架 101=熔岩苔、床 79=中式灯笼、
+// 工作台 18=开门图块…（陶罐案同款）。现统一换算成内部 id（placeSimple/place4x2/
+// :2101 比较三消费点同源）。
+const DG_ITEM_SHEET: Record<number, number> = {
   1396: 15, 1399: 15, 1402: 15, 1509: 15,
   1397: 14, 1400: 14, 1403: 14, 1510: 14,
   1398: 18, 1401: 18, 1404: 18, 1511: 18,
@@ -102,6 +107,10 @@ const DG_ITEM_TILE: Record<number, number> = {
   2645: 93, 2646: 93, 2647: 93, 5748: 93,
   3900: 104, 3901: 104, 3902: 104, 5746: 104,
 };
+const DG_ITEM_TILE: Record<number, number> = {};
+for (const k of Object.keys(DG_ITEM_SHEET)) {
+  DG_ITEM_TILE[Number(k)] = TILE_INTERNAL_BY_SHEET.get(DG_ITEM_SHEET[+k]) ?? -1;
+}
 
 // DungeonBounds（DungeonBounds.cs）：Left/Right 钳 [10,w-10]、Top/Bottom 钳 [10,h-10]；
 // CalculateHitbox 保证 R>L、B>T；Contains=Rectangle.Contains 半开区间。
@@ -520,7 +529,9 @@ export function runDungeonPass(
     const sdX = -z2x, sdY = -z2y;
     lastHallX = sdX; lastHallY = sdY;
     if (Math.abs(vx) > Math.abs(vy) && hrn(3) !== 0) {
-      nnum = Math.trunc(num4 * (hri(110, 149) * 0.01));
+      // ★原版是 **float32** 算术(LegacyDungeonHall.cs:680 `(float)num4 * ((float)Next(110,150)*0.01f)`)
+      //  ——float 截断偶发翻 trunc 边界;Math.fround 逐因子复刻(oracle :4549 同款)
+      nnum = Math.trunc(Math.fround(num4) * Math.fround(hri(110, 149) * 0.01));
     }
     const hb = new DBnd(w, h);
     hb.set(Math.trunc(px), Math.trunc(py), Math.trunc(px), Math.trunc(py));
@@ -2119,7 +2130,7 @@ export function runDungeonPass(
       }
     }
   }
-  const dgTileOfSheet = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;
+  const dgTileOfSheet = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;  // （DG_ITEM_TILE 已源头换算后无内部消费者,留作家具重构期过渡）
   // Place4x2（WorldGen.cs:50534）：4×2 净空 + 下方实心
   function place4x2(x: number, y: number, type: number): boolean {
     if (type === undefined || type < 0 || x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
@@ -2134,7 +2145,7 @@ export function runDungeonPass(
       if (!solid2(a, y + 1)) return false;
     }
     for (let a = x - 1; a < x + 3; a++) {
-      for (let b = y - 1; b < y + 1; b++) chTile(st.idx(a, b), dgTileOfSheet(type), false);
+      for (let b = y - 1; b < y + 1; b++) chTile(st.idx(a, b), type, false);  // DG_ITEM_TILE 已是内部 id（2026-08-13 碰撞修复）
     }
     return true;
   }

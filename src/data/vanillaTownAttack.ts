@@ -122,3 +122,21 @@ export function townNpcDamageMult(difficulty: number): number {
     default: return 1;    // Classic / Journey(原版 Journey=2,此处 0 视经典)
   }
 }
+
+/** AttackType1(弓/枪族)持械表(DrawNPCExtras Main.cs:27121-27195)。
+ *  攻击态 ai[0]==12 全程手持武器图标,旋转 = ai[2]×90°×spriteDirection
+ *  (ai[2]=发射档时目标方向 Y 分量钳 ±0.5,:55191-55197)。
+ *  228/229/209 原版提前 return 无持械(:27124-27126)——不列。
+ *  grip=num11 握位(默认 4);scale=num10;hm=肉后替换武器。 */
+export interface TownHoldout {
+  pre: number; hm?: number; grip?: number; scale?: number;
+  /** 肉前档:aim<-0.1 时换握位(368 高尔夫杆上抬位,:27157-27160) */
+  preGripAimDown?: number; preScale?: number;
+}
+export const TOWN_HOLDOUT: Record<number, TownHoldout> = {
+  19: { pre: 95, hm: 98 },                       // 爆破专家:火枪→肉后霰弹枪;HM 锚 X-10*dir/Y+4(:27127-27131)
+  22: { pre: 39, grip: 18 },                     // 向导:木弓;aim>-0.1 锚 Y+4(:27107)
+  178: { pre: 434 },                             // 巫医
+  227: { pre: 3350, grip: 16, scale: 0.85 },     // 酒馆老板
+  368: { pre: 2269, hm: 2223, preGripAimDown: 28, preScale: 0.75 }, // 高尔夫球手
+};

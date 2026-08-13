@@ -1,7 +1,14 @@
 // DX9 D3DX effect 二进制(.cso)反汇编器 —— Terraria PixelShader/ScreenShader/TileShader.cso。
 // 容器格式 = XNA4 编译产物（MojoShader mojoshader_effects.c 1:1 解析,行号对照见注释）；
 // shader 段 = DX9 SM2 字节码（d3d9types.h opcode 表 + CTAB 常量表结构）。
-// 用法：node tools/disasm-fx.mjs <file.cso> [out.txt] [--only <Technique,...>]
+// 用法：node tools/disasm-fx.mjs <file.cso> [out.txt] [--only <Pass,...>]
+//   [--json <out.json>]（导出 src/data/fxPixelShader.json——SM2Effect 解释器消费；
+//    原料 terraria-assets/PixelShader.cso（XNA4 D3DX effect 二进制，1.4.5.6））
+//   [--dump-obj N[,M]] 调试：导出 pass 字节码 blob 到 /tmp/fx-objN.bin
+// 解码要点（踩坑实录见 memory/wing-visual-port.md 四轮）：
+//   comment size 字段=数据 DWORD 数（不含自身）；CTAB 偏移基准=Size 字段、CINFO=20B；
+//   preshader 子块四字符在 comment+4、dst=末位 operand、PRSI tokens[7] 以 fourcc 为 [0]；
+//   texld=opcode 0x42、CMP=0x58、SAMPLER=regtype 10、writemask 位序 1=.x…8=.w。
 import { readFileSync, writeFileSync } from 'node:fs';
 
 const file = process.argv[2] ?? '../terraria-assets/PixelShader.cso';

@@ -19,12 +19,12 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 
 describe('图鉴数据层（Bestiary）', () => {
-  // 免门默认开（2026-08-13 用户拍板）：unlockState 恒最高档;以下原版门控数学
-  // 测试统一关闸注入后断言（unlockStateByKillCount 纯函数不受开关影响）
+  // 免门为显式注入（默认已回归原版门控 2026-08-13）;以下原版门控数学
+  // 测试统一关闸后断言（unlockStateByKillCount 纯函数不受开关影响）
   beforeEach(() => { bestiaryGating.unlockAll = false; });
-  afterEach(() => { bestiaryGating.unlockAll = true; });
+  afterEach(() => { bestiaryGating.unlockAll = false; }); // 默认已回归原版门控
 
-  it('免门默认开：零击杀条目 unlockState 恒最高档;完成度口径走真实门控（免门副作用回归）', () => {
+  it('免门注入开：零击杀条目 unlockState 恒最高档;完成度口径走真实门控（免门副作用回归）', () => {
     bestiaryGating.unlockAll = true;
     const t = new BestiaryTracker();
     const e = bestiaryEntries().find((x) => x.kind === 'enemy')!;
@@ -208,7 +208,7 @@ describe('NpcBestiarySortingId 排序 + NpcBestiaryRarityStars 稀有度（2026-
 
 describe('图鉴数据表收尾（2026-08-13 收尾批）', () => {
   beforeEach(() => { bestiaryGating.unlockAll = false; });
-  afterEach(() => { bestiaryGating.unlockAll = true; });
+  afterEach(() => { bestiaryGating.unlockAll = false; }); // 默认已回归原版门控
   it('GetLowestBiomeGroupIndex（ContentSamples.cs:755-766）：公共过滤元素组号，尾向头首个命中', () => {
     // 1 蓝史莱姆 = Surface(0) + DayTime(1) → 取大者 1（同名"Lowest"实为最大组号）
     expect(lowestBiomeGroupIndex(1)).toBe(1);

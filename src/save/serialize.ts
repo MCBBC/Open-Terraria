@@ -116,6 +116,9 @@ export interface SaveData {
   paint?: string;
   /** 背景墙油漆（原版 Tile.cs:365-373 bTileHeader&0x1F；WF:1486-1491 存档位） */
   paintWall?: string;
+  /** 战争迷雾 0/1 位图（World.explored；原版 .twld MapHelper 段的等价物）。
+   *  base64 RLE 同构通道——0/1 游程压到几个字节；旧档缺段 = 全 0 未探索（旧行为，不迁移） */
+  explored?: string;
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
   player: {
     hp: number; x: number; y: number;
@@ -197,6 +200,8 @@ export interface SaveStoreView {
   half: Uint8Array; slope: Uint8Array;
   /** 油漆双通道（0-31；原版 Tile.color()/wallColor() 5bit 域） */
   paint: Uint8Array; paintWall: Uint8Array;
+  /** 战争迷雾 0/1 位图（World.explored，与 store 同长；缺省=不写该段=旧行为全 0） */
+  explored?: Uint8Array;
 }
 /** 序列化所需的世界元数据(全部可结构化克隆) */
 export interface SaveMeta {
@@ -348,6 +353,9 @@ export function serializeSave(
     // 油漆双通道（原版 WF:1474-1491 独立字节位；本仓独立 RLE 通道，旧档缺=全 0）
     paint: bytesToB64(rlePairs(st.paint)),
     paintWall: bytesToB64(rlePairs(st.paintWall)),
+    // 战争迷雾（0/1 位图 RLE：全 0/全 1 各 1 游程 = ~7 字节；undefined 不落段 →
+    // JSON.stringify 丢弃该键，旧读档端无害忽略）
+    explored: st.explored ? bytesToB64(rlePairs(st.explored)) : undefined,
     chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, items: c.items.map(mapItem) })),
     // v4:armor/dye/trash/miscEquips/miscDyes/loadouts 逐槽稳定 id(v3 是裸内部下标)
     player: {

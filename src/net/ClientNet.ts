@@ -9,6 +9,7 @@ import {
 } from './protocol';
 import {
   writeLeashedFullSync, writeLeashedPartialSync, writeLeashedRemove, writeLeashedPlaceRequest,
+  writeLeashedRetrieveRequest,
   readLeashedMessage, type LeashedEntityLike,
 } from './leashedSync';
 import type { LeashedNetMsg } from '../entities/LeashedCritter';
@@ -858,6 +859,13 @@ export class ClientNet {
   /** 访客放置锚桩请求（sub3，服务器定向转发房主校验——唯一允许访客上行的 sub） */
   sendLeashedPlaceRequest(ax: number, ay: number, itemVid: number) {
     this.send(writeLeashedPlaceRequest(ax, ay, itemVid));
+  }
+
+  /** 访客取回锚桩存物请求（sub4，服务器定向转发房主——房主校验 furniture 记录后
+   *  权威取回：弹存物 + 消散实体 + 掉物走既有 msg21，访客收包拾取。锚桩 tile
+   *  不动（破坏仍走 msg17 TileBatch 链）） */
+  sendLeashedRetrieveRequest(ax: number, ay: number, kind: number) {
+    this.send(writeLeashedRetrieveRequest(ax, ay, kind));
   }
 
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */

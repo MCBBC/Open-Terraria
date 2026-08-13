@@ -349,7 +349,9 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
     expect(d.fadeIn).toBe(0);                        // scale > 2 后转衰
     const s0 = d.scale;
     vd.update(0, 0, 1920, 1080);
-    expect(d.scale).toBeCloseTo(s0 - 0.01, 5);       // 衰减档
+    // 衰减档 = 老化 −0.01（:2194）+ 链 B 兜底 −0.04（:2384——217 无链 A 专档且
+    // noGravity，恒命中；扩展批接入后本型行为对齐原版，旧断言只算了老化项）
+    expect(d.scale).toBeCloseTo(s0 - 0.01 - 0.04, 5);
   });
   it('261 型专属段（:705-727）：noGravity 阻尼 0.93+0.97/0.99 + 缩小 0.0025 + 持续玩家跟随 + 光收集', () => {
     const vd = new VanillaDust();
@@ -373,13 +375,15 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
   });
   it('重力族 vy+0.1（:1889-1897）；缩没 0.1 失活（:2432-2436）；屏底清除（:2387）', () => {
     const vd = new VanillaDust();
-    const d = vd.spawn(100, 100, 5, 5, 55)!;         // 落体尘
+    // 217（无链 A 专档）才落 :1884 重力链接——55 已入 :1759 链接（扩展批接入后
+    // 无重力，源码同款；旧测试误把 55 当落体尘）
+    const d = vd.spawn(100, 100, 5, 5, 217)!;
     d.vy = 0; d.scale = 0.5;
     vd.update(0, 0, 1920, 1080);
     expect(d.vy).toBeGreaterThan(0.09);              // 重力
     d.scale = 0.05;
     vd.update(0, 0, 1920, 1080);
-    expect(d.active).toBe(false);                    // 缩没
+    expect(d.active).toBe(false);                    // 缩没（217 衰减档 −0.01，链 B 不命中 noGravity=false）
     const d2 = vd.spawn(100, 2000, 5, 5, 55)!;
     vd.update(0, 0, 1920, 1080);                     // 屏底 y>1080
     expect(d2.active).toBe(false);
@@ -727,5 +731,171 @@ describe('Player.wingDyeVid 染料槽派生', () => {
     p.inv.armor[13] = { id: wingId, stack: 1 } as never;
     p.inv.dye[3] = { id: blueDye, stack: 1 } as never;
     expect(p.wingDyeVid()).toBe(1015);
+  });
+});
+
+// ===================== 逐型扩展批（230 钻头尘 / 翅膀族 31·55·76·217·229·240） =====================
+// 标杆 = Terarria1456/Terraria/Dust.cs UpdateDust / GetAlpha 逐分支：
+//   230 独立段 :644-663（非链 A：重力门照常 + :2136 兜底）+ GetAlpha :2616-2619
+//   229 烟雾族链接 :890-1092（轻重力 :892 / customData 跟随 :896-917 / 光 :976-983）
+//   31  组链接 :1336-1394（0.98 阻尼 + noGravity 加速涨 alpha :1367-1377）
+//   55  组链接 :1759-1799（0.98 阻尼 + 白黄光 :1764-1771）+ GetAlpha (num+3)/4 :2725
+//   76  专档 :1810-1828（雪尘：scale+0.009 / 玩家下坠 Lerp / 实心收缩）
+//   217 无专档（全文无分支）→ 仅 :2136 兜底 + 链 B :2379
+//   240 仅 customData=Projectile 跟随 :592-599（本仓消费方不设）→ 兜底 + 链 B
+//   链 B 兜底 :2379-2386（type!=304 && noGravity → velocity×0.92 + fadeIn==0 时 scale−0.04）
+describe('VanillaDust：逐型扩展批（230/229/31/55/76/217/240）', () => {
+  /** 抖动归零：公式断言用（spawn 的 ±20% 抖动覆写掉） */
+  const steady = (d: NonNullable<ReturnType<VanillaDust['spawn']>>, vx = 0, vy = 0, scale = 1) => {
+    d.x = 500; d.y = 500; d.vx = vx; d.vy = vy; d.scale = scale; d.alpha = 0;
+    return d;
+  };
+
+  it('230 型（:644-663）：光 (scale·0.6)²×(0.5,0.9,1) 无 noLight 门 + scale+0.02 + 玩家吸引', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 230)!, 3, -4, 2);
+    d.noGravity = true; d.followPlayer = true;
+    // 玩家在尘右侧 100px（含 X）——吸引方向 = 尘→玩家（velocity += 单位向量×负号）
+    vd.update(0, 0, 1920, 1080, 0, 0, null, null, { cx: 600, cy: 500, vy: 0 });
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo((2 * 0.6) * (2 * 0.6) * 0.5, 5);
+    expect(vd.lights[0].g).toBeCloseTo((2 * 0.6) * (2 * 0.6) * 0.9, 5);
+    expect(vd.lights[0].b).toBeCloseTo((2 * 0.6) * (2 * 0.6) * 1.0, 5);
+    expect(d.scale).toBeCloseTo(2 + 0.02 - 0.01 - 0.04, 5);   // :653 +0.02 / 老化 −0.01 / 链 B −0.04
+    // 吸引向量取自位移后位置（:480 先 position += velocity）——精确公式断言
+    const rx = (500 + 3) - 600, ry = (500 - 4) - 500;
+    const len = Math.hypot(rx, ry), pull = 100 / Math.max(50, len);
+    expect(d.vx).toBeCloseTo((3 - (rx / len) * pull) * 0.99 * 0.92, 5);   // :662 后 :2136 ×0.99 再链 B
+    expect(d.vy).toBeCloseTo((-4 - (ry / len) * pull) * 0.92, 5);         // :2136 只作用 vx
+    // 无玩家探针：吸引关闭，速度只剩兜底 × 链 B
+    const vd2 = new VanillaDust();
+    const d2 = steady(vd2.spawn(0, 0, 5, 5, 230)!, 3, -4, 2);
+    d2.noGravity = true; d2.followPlayer = true;
+    vd2.update(0, 0, 1920, 1080);
+    expect(d2.vx).toBeCloseTo(3 * 0.99 * 0.92, 5);
+    expect(d2.vy).toBeCloseTo(-4 * 0.92, 5);
+  });
+
+  it('230 型 scale 钳 len/24−1（:661）：贴近玩家时尘面收缩', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 230)!, 0, 0, 2);
+    d.noGravity = true; d.followPlayer = true;
+    vd.update(0, 0, 1920, 1080, 0, 0, null, null, { cx: 524, cy: 500, vy: 0 });  // len=24
+    expect(d.scale).toBeCloseTo(Math.min(2 + 0.02, 24 / 24 - 1) - 0.01 - 0.04, 5);  // 钳到 0 后老化
+    expect(d.active).toBe(false);                    // scale<0.1 缩没清除（:2432）
+  });
+
+  it('230 型 noGravity=false 时重力门照常（独立段非链 A 链接）', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 230)!, 0, 0, 1);
+    d.followPlayer = false;                          // noGravity 缺省 false
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vy).toBeCloseTo(0.1, 5);                // :1892 +0.1（链 B 需 noGravity 不命中）
+  });
+
+  it('229 型（:890-1092 烟雾族）：轻重力 0.05 + 蓝 青光 (0.3,0.65,0.7) + 持续跟随', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 229)!, 0, 0, 0.5);
+    d.followPlayer = true;
+    const x0 = d.x, y0 = d.y;
+    vd.update(0, 0, 1920, 1080, 6, -2);
+    expect(d.vy).toBeCloseTo(0.05, 5);               // :894 轻重力（链 B 需 noGravity 不命中）
+    expect(d.vx).toBeCloseTo(0, 5);
+    expect(d.x).toBeCloseTo(x0 + 6, 5);              // :903-907 customData=Player 跟随
+    expect(d.y).toBeCloseTo(y0 - 2, 5);
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(0.5 * 1.4 * 0.3, 5);   // :976-983（scale·1.4 钳 1）
+    expect(vd.lights[0].g).toBeCloseTo(0.5 * 1.4 * 0.65, 5);
+    expect(vd.lights[0].b).toBeCloseTo(0.5 * 1.4 * 0.7, 5);
+    // GetAlpha :2659-2663：A=25 常量（Lerp(White,0.6) 以全亮基底近似）
+    expect(VanillaDust.alphaOf(d).a).toBeCloseTo(25 / 255, 5);
+  });
+
+  it('31 型（:1336-1394）：双轴 0.98 阻尼 + noGravity ×1.02 加速 + alpha+4 触顶塌缩', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 31)!, 2, 2, 1);
+    d.noGravity = true; d.alpha = 100;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vx).toBeCloseTo(2 * 0.98 * 1.02 * 0.92, 4);      // :1339/:1369 + 链 B
+    expect(d.scale).toBeCloseTo(1 + 0.02 - 0.01 - 0.04, 5);   // :1370 + 老化 −0.01 + 链 B −0.04
+    expect(d.alpha).toBe(104);                                // :1371
+    d.alpha = 254;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.alpha).toBe(255);                                // :1372-1376 触顶
+    expect(d.scale).toBeLessThan(0.1);                        // :1374 塌缩 → 缩没
+    expect(d.active).toBe(false);
+  });
+
+  it('55 型（:1759-1799）：双轴 0.98 阻尼 + 白黄光 (1,1,0.6)×min(scale·0.8,1)', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 55)!, 1, 1, 1.5);
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vx).toBeCloseTo(0.98, 5);
+    expect(d.vy).toBeCloseTo(0.98, 5);                 // 链 A 命中 → 无通用重力 +0.1
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].r).toBeCloseTo(1, 5);          // :1764-1770 1.5×0.8=1.2 钳 1
+    expect(vd.lights[0].b).toBeCloseTo(0.6, 5);
+    // GetAlpha :2725：(num+3)/4 光乘区折减族（alpha=0 → num=1 → 1.0）
+    expect(VanillaDust.alphaOf(d).rgb).toBeCloseTo(1, 5);
+    d.alpha = 200;
+    const num = 55 / 255;
+    expect(VanillaDust.alphaOf(d).rgb).toBeCloseTo((num + 3) / 4, 5);
+    expect(VanillaDust.alphaOf(d).a).toBeCloseTo(num, 5);
+  });
+
+  it('76 型（:1810-1828）：scale+0.009 + 玩家下坠 Lerp 0.04 + noLight 门', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 76)!, 0, 0, 1);
+    d.noGravity = true; d.fadeIn = 1.1; d.noLight = true;   // 翅膀 10 出生形态（:30288-30292）
+    vd.update(0, 0, 1920, 1080, 0, 0, null, null, { cx: 500, cy: 500, vy: 8 });
+    expect(d.scale).toBeCloseTo(1 + 0.009 + 0.03, 5);  // :1813 + fadeIn 生长段 :2179
+    expect(d.vy).toBeCloseTo(0, 5);                    // fadeIn≠0 → 下坠门不开（:1815）
+    // fadeIn 归零后（生长完成）：vy 向玩家下坠速度 Lerp，noLight 不做 0.2 位移
+    const y0 = d.y;
+    d.fadeIn = 0;
+    vd.update(0, 0, 1920, 1080, 0, 0, null, null, { cx: 500, cy: 500, vy: 8 });
+    expect(d.vy).toBeCloseTo(8 * 0.04 * 0.92, 5);      // :1817 Lerp + 链 B ×0.92
+    expect(d.y).toBeCloseTo(y0, 5);                    // noLight=true → 无 +vy·0.2
+    d.noLight = false;
+    const y1 = d.y;
+    vd.update(0, 0, 1920, 1080, 0, 0, null, null, { cx: 500, cy: 500, vy: 8 });
+    expect(d.y).toBeGreaterThan(y1 + 8 * 0.2 - 0.01);  // :1821 位移 + 链 B 收缩 −0.04
+  });
+
+  it('76 型入实心格收缩（:1823-1827）：scale×0.9 + 速度×0.25', () => {
+    const vd = new VanillaDust();
+    const d = steady(vd.spawn(0, 0, 5, 5, 76)!, 2, 3, 1);
+    d.noGravity = true; d.fadeIn = 0;
+    vd.update(0, 0, 1920, 1080, 0, 0, null, () => true);
+    expect(d.vx).toBeCloseTo(2 * 0.25 * 0.92, 5);
+    expect(d.vy).toBeCloseTo(3 * 0.25 * 0.92, 5);      // ×0.25 ×链 B（无玩家 → 无 Lerp）
+    expect(d.scale).toBeCloseTo((1 + 0.009) * 0.9 - 0.01 - 0.04, 5);
+  });
+
+  it('217/240 型：无链 A 专档——仅 :2136 兜底 vx×0.99 + 链 B（noGravity ×0.92/−0.04）', () => {
+    for (const type of [217, 240]) {
+      const vd = new VanillaDust();
+      const d = steady(vd.spawn(0, 0, 5, 5, type)!, 2, 2, 1.4);
+      d.noGravity = true;
+      vd.update(0, 0, 1920, 1080);
+      expect(d.vx).toBeCloseTo(2 * 0.99 * 0.92, 5);
+      expect(d.vy).toBeCloseTo(2 * 0.92, 5);
+      expect(d.scale).toBeCloseTo(1.4 - 0.01 - 0.04, 5);   // 老化 −0.01 + 链 B −0.04
+      // GetAlpha 默认档（无 217/240 专档）
+      expect(VanillaDust.alphaOf(d).rgb).toBeCloseTo(1, 5);
+    }
+  });
+
+  it('翅膀出生形态回归：31(noGravity+alpha100) / 55(alpha200 落体) / 217(noGravity+noLight)', () => {
+    // wings 37 → dust 31（:30416-30421）/ wings 6 → dust 55（:30359-30362）/
+    // wings 26 → dust 217（:30383-30388）——出生旗标组合与源码逐项对齐
+    const vd = new VanillaDust();
+    const d31 = vd.spawn(0, 0, 24, 40, 31, 0, 0, 100)!;
+    expect(d31.alpha).toBe(100);
+    const d55 = vd.spawn(0, 0, 30, 30, 55, 0, 0, 200)!;
+    expect(d55.alpha).toBe(200);
+    expect(d55.noGravity).toBe(false);            // 55 型出生不设 noGravity（落体尘）
+    const d217 = vd.spawn(0, 0, 18, 40, 217, 0, 0, 100, null, 1.4)!;
+    expect(d217.noGravity).toBe(false);           // noGravity 由消费方置位（spawn 后）
   });
 });

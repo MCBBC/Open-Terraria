@@ -222,6 +222,13 @@ export class Arrow extends Entity {
   tumbleRot = 0;
   /** 已存活 tick（延迟重力/追踪门用） */
   age = 0;
+  // ---- 大地法杖巨石 261（AI_014 type 段 :18235/:12745）专属态 ----
+  /** 慢速死亡门：|v|<1.5 消亡 */
+  boulder = false;
+  // ---- 飞龙剑气 684（AI_001 type 段 :52086-52098）专属态 ----
+  /** SetDefaults alpha=255（:7021）→ AI 每帧 −40 渐显 */
+  dragonFade = false;
+  dragonAlpha = 255;
   // ---- 泰拉刃光束 985（aiStyle 191）专属态 ----
   terra = false;
   // ---- 星怒剑 503 专属态 ----
@@ -318,6 +325,8 @@ export class Arrow extends Entity {
     this.tumble = opts?.tumble ?? false;
     this.tumblePoseLock = opts?.tumblePoseLock ?? false;
     this.terra = !!opts?.terra;
+    if (projId === 684) { this.dragonFade = true; this.dragonAlpha = 255; }
+    if (projId === 261) this.boulder = true;
     if (opts?.terra) {
       this.terraAi0 = opts.terra.ai0;
       this.terraAi1 = opts.terra.ai1;
@@ -512,6 +521,23 @@ export class Arrow extends Entity {
     if (this.tumble) {
       this.tumbleRot += (Math.abs(this.vx) + Math.abs(this.vy)) * 0.03 * (this.vx >= 0 ? 1 : -1);
     }
+    // 大地巨石 261：慢速消亡（|v|<1.5）+ 墙撞爆岩视觉（:18235-18244）
+    if (this.boulder) {
+      const spd261 = Math.hypot(this.vx, this.vy);
+      if (spd261 < 1.5) { this.killNow(game); return; }
+      if (this.hitWall && spd261 > 3) {
+        game.playSfx('dig', 1, this.cx, this.cy);
+        game.spawnParticles(this.cx, this.cy, '#8C6A4A', 10, 3, { life: 30 });
+      }
+    }
+    // 飞龙剑气 684（AI_001 type 段 :52086-52098）：alpha 255−40/t 渐显 + 尘 60 拖尾
+    if (this.dragonFade) {
+      this.dragonAlpha = Math.max(0, this.dragonAlpha - 40);
+      if (Math.random() < 0.5) {
+        game.spawnParticles(this.cx + (Math.random() - 0.5) * 20, this.cy + (Math.random() - 0.5) * 80,
+          '#C0E8FF', 1, 0.8, { life: 16 });
+      }
+    }
     // 泰拉刃光束 985（AI_191 :39248-39266 + 985 专属尾段 :39333-39377）：
     // 寿命 = ai[1]+25（出生 18 → 43t）；淡入 ai[1]/2=9t、末 12t 淡出（:39344）；
     // t≥Lerp(ai1,ai1+25,0.65)≈34 清伤（纯视觉尾段）；>8 速才减速/探墙（正牌
@@ -647,10 +673,25 @@ export class Arrow extends Entity {
     // 小动物:一击致死并消耗弹体(原版小动物是 NPC;近战挥砍同语义)
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
+    // 飞龙剑气 684 命中盒 = 垂直线 ±40px 厚 16（CanHitWithOwnBody :14693-14701，
+    // 非通用 16×16 盒——巨剑气横扫判定）
+    const dragonLine = this.projId === 684;
+    const dSpd = Math.hypot(this.vx, this.vy) || 1;
+    const dPerpX = dragonLine ? -this.vy / dSpd : 0;
+    const dPerpY = dragonLine ? this.vx / dSpd : 0;
     for (const ent of game.enemies()) {
       const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
-      if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+      const hitBox = !dragonLine
+        ? (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)
+        : (() => {
+          for (let k2 = -40; k2 <= 40; k2 += 16) {
+            const bx = this.cx + dPerpX * k2 - 8, by = this.cy + dPerpY * k2 - 8;
+            if (bx < e.x + e.w && bx + 16 > e.x && by < e.y + e.h && by + 16 > e.y) return true;
+          }
+          return false;
+        })();
+      if (hitBox) {
         // 反射源（419 旋刃冲刺等 reflectsProjectiles 置标）：命中前先走反射
         // （原版 Projectile.cs:12050-12060，反射即终止本帧命中迭代 keepIterating=false）
         if (tryReflectProjectile(this, this.projId, e, game)) {

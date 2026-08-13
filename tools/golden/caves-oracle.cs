@@ -2893,7 +2893,8 @@ void GrowAshTree(int tx, int ty)
     if ((int)r.Next(3) == 0) tR = false;
     if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
     if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1); }
-    if (tL || tR) { int k = (int)r.Next(3); Put(tx, num - 1); }
+    int baseK = (int)r.Next(3);                                 // ★cs:30906 无条件掷（与 JS TreePass 同步修正）
+    if (tL || tR) Put(tx, num - 1);
     int crownFx = (int)r.Next(13) != 0 ? 22 : 0;               // 帧值不入哈希，仅保骰
     int crownK = (int)r.Next(3);
     Put(tx, num - height);
@@ -6636,8 +6637,561 @@ Checkpoint("mcopenings");
 Checkpoint("beaches");
 //   本行与 mcopenings 块之间（原版真实位 29/32）。
 
+// ================= RNG 流位置指纹（UnifiedRandom 内部态哈希）=================
+// 对账用探针：与逐 pass 网格哈希正交——若本指纹一致而网格哈希分叉，分歧是
+// 「写格内容」而非「掷骰数」；两者皆分叉则是流已分叉（上游 pass 掷骰数不同）。
+// JS 侧对应 tests/shimmer-checkpoint.test.ts 的 streamHash()（同字节序同算法）。
+var streamPts = new List<string>();
+uint StreamHash()
+{
+    var t = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    var sa = (int[])t.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    var ix = (uint)t.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    uint h = 0x811c9dc5;
+    foreach (var v in sa) { for (int b = 0; b < 4; b++) h = (h ^ (uint)((v >> (8 * b)) & 0xff)) * 16777619u; }
+    for (int b = 0; b < 4; b++) h = (h ^ (uint)((ix >> (8 * b)) & 0xff)) * 16777619u;
+    return h;
+}
+void StreamPt(string n) => streamPts.Add($"{n}|{StreamHash():x8}");
+StreamPt("beaches");
 
+// ================= Pass 35 Gems（cs:15109-15196 普通世界分支）=================
+// 头句 `Main.tileSolid[484] = false`（cs:15114）是对 cs:12537 DesertBiome 头的
+// 冗余重放——本 oracle :1284 已删 484，此处不再重复（HashSet.Remove 幂等，语义同）。
+{
+    for (int gi = 63; gi <= 68; gi++)
+    {
+        double gnum = gi switch { 67 => (double)W * 0.5, 66 => (double)W * 0.45, 63 => (double)W * 0.3, 65 => (double)W * 0.25, 64 => (double)W * 0.1, _ => (double)W * 0.05 };
+        gnum *= 0.2;
+        for (int j = 0; (double)j < gnum; j++)          // ★裸 double 比较，不取整（cs:15142）
+        {
+            int num2 = 3, num3, num4;
+            do
+            {
+                num3 = (int)r.Next(0, W);
+                num4 = (int)r.Next(worldSurface, H);
+            }
+            while ((act[num4 * W + num3] == 0 || typ[num4 * W + num3] != 1) && --num2 > 0);
+            if (num2 != 0) TileRunner(num3, num4, (int)r.Next(2, 6), (int)r.Next(3, 7), gi);
+        }
+    }
+    // 浮沙拱形化（cs:15159-15195）：地下沙漠列跳过（Left/Right 严格界外才处理）
+    var TILE_SAND = new HashSet<ushort> { 53, 112, 116, 234 };   // Main.tileSand（Main.cs:7177-7180）
+    for (int k = 0; k < 2; k++)
+    {
+        int gemStep = 1, gemFrom = 5, gemTo = W - 5;
+        if (k == 1) { gemStep = -1; gemFrom = W - 5; gemTo = 5; }
+        for (int l = gemFrom; l != gemTo; l += gemStep)
+        {
+            if (l <= dsX || l >= dsR)                    // cs:15172 GenVars.UndergroundDesertLocation
+            {
+                for (int m = 10; m < H - 10; m++)
+                {
+                    if (act[m * W + l] != 0 && act[(m + 1) * W + l] != 0 && TILE_SAND.Contains(typ[m * W + l]) && TILE_SAND.Contains(typ[(m + 1) * W + l]))
+                    {
+                        ushort type = typ[m * W + l];
+                        int gemSide = l + gemStep, n = m + 1;
+                        if (act[m * W + gemSide] == 0 && act[n * W + gemSide] == 0)
+                        {
+                            for (; act[n * W + gemSide] == 0 && gemSide >= 10 && gemSide < W - 10 && n >= 10 && n < H - 10; n++) { }
+                            n--;
+                            act[m * W + l] = 0;          // active(false)：type 保留（幽灵语义）
+                            act[n * W + gemSide] = 1;
+                            typ[n * W + gemSide] = type;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+Checkpoint("gems");
+StreamPt("gems");
 
+// ================= Pass 36 GravitatingSandCleanup（cs:15198-15226）=================
+// 零掷骰纯扫描。SolidOrSlopedTile（cs:70064）= active && tileSolid && !tileSolidTop
+// （half/slope 此链位恒 0，SolidTileGen 即等价）；TileID.Sets.Falling（TileID.cs:391）。
+{
+    var FALLING = new HashSet<ushort> { 53, 234, 112, 116, 224, 123, 330, 331, 332, 333, 495 };
+    for (int i = 0; i < W; i++)
+    {
+        bool flag = false;
+        int num = 0;
+        for (int num2 = H - 1; num2 > 0; num2--)
+        {
+            if (SolidTileGen(i, num2))
+            {
+                ushort type = typ[num2 * W + i];
+                if (flag && num2 < worldSurface && num2 != num - 1 && FALLING.Contains(type))
+                {
+                    for (int j = num2; j < num; j++)
+                    {
+                        // Tile.ResetToType（Tile.cs:279-289）：换 type+active 位+液体清零，wall 不动
+                        typ[j * W + i] = type;
+                        act[j * W + i] = 1;
+                        liq[j * W + i] = 0;
+                        liqT[j * W + i] = 0;
+                    }
+                }
+                flag = true;
+                num = num2;
+            }
+        }
+    }
+}
+Checkpoint("gravitatingsand");
+StreamPt("gravitatingsand");
+
+// ================= Pass 37 OceanCaves（cs:15228-15254 + oceanCave :76686-76990）=================
+bool BadOceanCaveTiles(int x, int y)
+{
+    if (x < 0 || x >= W || y < 0 || y >= H) return true;   // JS inBounds 防御同口径
+    int ti = y * W + x;
+    return wal[ti] == 83 || wal[ti] == 3 || WALL_DUNGEON.Contains(wal[ti])
+        || typ[ti] == 203 || typ[ti] == 25 || TILE_DUNGEON.Contains(typ[ti]) || typ[ti] == 26 || typ[ti] == 31;
+}
+void OceanCaveFn(int i, int j)
+{
+    // GenVars.numOceanCaveTreasure 复位/宝藏点登记：无掷骰无写格，哈希通道省略
+    double vx = i, vy = j;
+    double dirX = i < W / 2 ? 0.25 + r.NextDouble() * 0.25 : -0.35 - r.NextDouble() * 0.5;
+    double dirY = 0.4 + r.NextDouble() * 0.25;
+    ushort cavity = 264, sand = 53, hardsand = 397;
+    double num4 = (int)r.Next(17, 25);
+    double num5 = (int)r.Next(600, 800);
+    double num6 = 4.0;
+    bool flag = true;     // 初期陡降
+    bool flag2 = false;   // dualDungeons（普通世界恒 false）
+    while (num4 > num6 && num5 > 0.0)
+    {
+        bool flag3 = true, flag4 = true, flag5 = true;
+        if (flag2 || (vx > (double)(BEACH_DISTANCE - 50) && vx < (double)(W - BEACH_DISTANCE + 50)))
+        {
+            num4 *= 0.96;
+            num5 *= 0.96;
+        }
+        if (num4 < num6 + 2.0 || num5 < 20.0) flag5 = false;
+        if (flag) { num4 -= 0.01 + r.NextDouble() * 0.01; num5 -= 0.5; }
+        else { num4 -= 0.02 + r.NextDouble() * 0.02; num5 -= 1.0; }
+        int num7 = (int)(vx - num4 * 3.0);
+        int num8 = (int)(vx + num4 * 3.0);
+        int num9 = (int)(vy - num4 * 3.0);
+        int num10 = (int)(vy + num4 * 3.0);
+        if (num7 < 1) num7 = 1;
+        if (num8 > W - 1) num8 = W - 1;
+        if (num9 < 1) num9 = 1;
+        if (num10 > H - 1) num10 = H - 1;
+        for (int k = num7; k < num8; k++)
+        {
+            for (int l = num9; l < num10; l++)
+            {
+                if (BadOceanCaveTiles(k, l)) continue;
+                double num11 = Math.Sqrt(Math.Abs((double)k - vx) * Math.Abs((double)k - vx) + Math.Abs((double)l - vy) * Math.Abs((double)l - vy)); // Vector2D.Length()
+                int ti = l * W + k;
+                if (flag5 && num11 < num4 * 0.5 + 1.0)
+                {
+                    typ[ti] = cavity;
+                    act[ti] = 0;
+                }
+                else if (num11 < num4 * 1.5 + 1.0 && typ[ti] != cavity)
+                {
+                    if ((double)l < vy)
+                    {
+                        if ((dirX < 0.0 && (double)k < vx) || (dirX > 0.0 && (double)k > vx))
+                        {
+                            if (num11 < num4 * 1.1 + 1.0)
+                            {
+                                typ[ti] = hardsand;
+                                if (liq[ti] == 255) wal[ti] = 0;
+                            }
+                            else if (typ[ti] != hardsand)
+                            {
+                                typ[ti] = sand;
+                            }
+                        }
+                    }
+                    else if ((dirX < 0.0 && k < i) || (dirX > 0.0 && k > i))
+                    {
+                        if (liq[ti] == 255) wal[ti] = 0;
+                        typ[ti] = sand;
+                        act[ti] = 1;
+                        if (k == (int)vx && flag3)
+                        {
+                            flag3 = false;
+                            int num12 = 50 + (int)r.Next(3);
+                            int num13 = 43 + (int)r.Next(3);
+                            int num14 = 20 + (int)r.Next(3);
+                            int num15 = k, num16 = k + num14;
+                            if (dirX < 0.0) { num15 = k - num14; num16 = k; }
+                            if (num5 < 100.0)
+                            {
+                                num12 = (int)((double)num12 * (num5 / 100.0));
+                                num13 = (int)((double)num13 * (num5 / 100.0));
+                                num14 = (int)((double)num14 * (num5 / 100.0));
+                            }
+                            if (num4 < num6 + 5.0)
+                            {
+                                double num17 = (num4 - num6) / 5.0;
+                                num12 = (int)((double)num12 * num17);
+                                num13 = (int)((double)num13 * num17);
+                                num14 = (int)((double)num14 * num17);
+                            }
+                            for (int m = num15; m <= num16; m++)
+                            {
+                                for (int n = l; n < l + num12 && !BadOceanCaveTiles(m, n); n++)
+                                {
+                                    if (n > l + num13)
+                                    {
+                                        if (SolidTileGen(m, n) && typ[n * W + m] != sand) break;
+                                        typ[n * W + m] = hardsand;
+                                    }
+                                    else
+                                    {
+                                        typ[n * W + m] = sand;
+                                    }
+                                    act[n * W + m] = 1;
+                                    if ((int)r.Next(3) == 0) { typ[n * W + m - 1] = sand; act[n * W + m - 1] = 1; }
+                                    if ((int)r.Next(3) == 0) { typ[n * W + m + 1] = sand; act[n * W + m + 1] = 1; }
+                                }
+                            }
+                        }
+                    }
+                }
+                if (num11 < num4 * 1.3 + 1.0 && l > j - 10)
+                {
+                    liq[ti] = 255;
+                    liqT[ti] = 0;    // liquidType(0)=水
+                }
+                if (!flag4 || k != (int)vx || !((double)l > vy)) continue;
+                flag4 = false;
+                for (int num20 = k - 2; num20 <= k + 2; num20++)
+                {
+                    for (int num21 = l; num21 < l + 100; num21++)
+                    {
+                        if (!BadOceanCaveTiles(num20, num21))
+                        {
+                            liq[num21 * W + num20] = 255;
+                            liqT[num21 * W + num20] = 0;
+                        }
+                    }
+                }
+            }
+        }
+        vx += dirX;
+        vy += dirY;
+        dirX += r.NextDouble() * 0.1 - 0.05;
+        dirY += r.NextDouble() * 0.1 - 0.05;
+        if (flag)
+        {
+            if (vy > (worldSurface * 2.0 + rockLayer) / 3.0 && vy > (double)(j + 30)) flag = false;
+            dirY = Math.Clamp(dirY, 0.35, 1.0);
+        }
+        else
+        {
+            if (vx < (double)(W / 2)) { if (dirX < 0.5) dirX += 0.02; }
+            else if (dirX > -0.5) dirX -= 0.02;
+            if (!flag5)
+            {
+                if (dirY < 0.0) dirY *= 0.95;
+                dirY += 0.04;
+            }
+            else if (vy < (worldSurface * 4.0 + rockLayer) / 5.0)
+            {
+                if (dirY < 0.0) dirY *= 0.97;
+                dirY += 0.02;
+            }
+            else if (dirY > -0.1)
+            {
+                dirY *= 0.99;
+                dirY -= 0.01;
+            }
+            dirY = Math.Clamp(dirY, -1.0, 1.0);
+        }
+        if (vx < (double)(W / 2)) dirX = Math.Clamp(dirX, 0.1, 1.0);
+        else dirX = Math.Clamp(dirX, -1.0, -0.1);
+    }
+}
+{
+    for (int i = 0; i < 2; i++)
+    {
+        // i==0 需 dungeonSide<Right（非右=左）；i==1 需 dungeonSide>Left（右）
+        if ((i != 0 || !dungeonRight) && (i != 1 || dungeonRight) && (int)r.Next(3) == 0)
+        {
+            int num = (int)r.Next(55, 95);
+            if (i == 1) num = (int)r.Next(W - 95, W - 55);
+            int j;
+            for (j = 0; act[j * W + num] == 0; j++) { }
+            OceanCaveFn(num, j);
+        }
+    }
+}
+Checkpoint("oceancaves");
+StreamPt("oceancaves");
+
+// ================= Pass 38 Shimmer（cs:15256-15308 + ShimmerMakeBiome :34889-35093）=================
+// GemTreeGroundTest（cs:30461）= Conversion.Stone{1,25,117,203} ∪ Conversion.Moss
+// （Moss 表见 TileID.Sets.cs:37；本链位无苔藓格，保留全集备哈希）
+var GEM_GROUND = new HashSet<ushort> { 1, 25, 117, 203, 182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627 };
+// GemTreeWallTest（cs:30426-30458）= DefaultTreeWallTest ∪ 宝石墙补充表
+var GEM_WALLS = new HashSet<ushort> { 0, 150, 138, 145, 107, 152, 140, 139, 141, 106, 245, 315, 317, 63, 64, 65, 66, 67, 68, 69, 81, 70, 264, 268, 265, 74, 80,
+    2, 54, 55, 56, 57, 58, 59, 61, 185, 196, 197, 198, 199, 208, 209, 210, 211, 212, 213, 214, 215 };
+// IsTileTypeFitForTree（cs:29852）：基座 tuft 判定用草族全集
+var TREE_FIT = new HashSet<ushort> { 2, 23, 60, 70, 109, 147, 199, 477, 492, 633, 661, 662 };
+// 返回码（SW_DEBUG_TREES=1 时逐采样打印）：0 成树 1 液体 2 非整砖 3 墙 4 基座 5 侧基 6 净空
+int GrowGemTreeFn(int tx, int ty, int treeTile)
+{
+    // GrowTreeWithSettings（cs:30546-31004）宝石树分支：帧值不入哈希，只保掷骰序
+    int num = ty;
+    while (act[num * W + tx] != 0 && typ[num * W + tx] == 590) num++;   // 树苗 590（本链位无）
+    if (liq[(num - 1) * W + tx - 1] != 0 || liq[(num - 1) * W + tx] != 0 || liq[(num - 1) * W + tx + 1] != 0) return 1;
+    int gi = num * W + tx;
+    if (act[gi] == 0) return 2;                                 // nactive（half/slope 此链位恒 0）
+    if (!GEM_WALLS.Contains(wal[(num - 1) * W + tx])) return 3;
+    if (!GEM_GROUND.Contains(typ[gi])) return 4;
+    bool sideFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && GEM_GROUND.Contains(typ[num * W + tx + dx]);
+    if (!sideFit(-1) && !sideFit(1)) return 5;
+    int height = (int)r.Next(7, 13);
+    int num4 = height + 4;                                      // TreeTopPaddingNeeded = 4
+    if (tx - 2 < 0 || tx + 2 >= W || num - num4 < 0) return 6;
+    for (int ex = tx - 2; ex <= tx + 2; ex++)
+        for (int ey = num - num4; ey <= num - 1; ey++)
+        {
+            int ei = ey * W + ex;
+            if (act[ei] == 0) continue;
+            if (!EMPTY_ALLOW.Contains(typ[ei])) return 6;       // EmptyTileCheck ignoreID=20
+        }
+    void Put(int ax, int ay) { if (ax >= 0 && ax < W && ay >= 0 && ay < H) { typ[ay * W + ax] = (ushort)treeTile; act[ay * W + ax] = 1; } }
+    bool flagL = false, flagR = false;
+    for (int i = num - height; i < num; i++)
+    {
+        int num6 = (int)r.Next(10);
+        int num5 = (int)r.Next(3);                              // 干身帧骰（帧值不入哈希）
+        if (i == num - 1 || i == num - height) num6 = 0;
+        while (((num6 == 5 || num6 == 7) && flagL) || ((num6 == 6 || num6 == 7) && flagR)) num6 = (int)r.Next(10);
+        flagL = false; flagR = false;
+        if (num6 == 5 || num6 == 7) flagL = true;
+        if (num6 == 6 || num6 == 7) flagR = true;
+        Put(tx, i);
+        if (num6 == 5 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx - 1, i); }   // 左枝 2 骰
+        if (num6 == 6 || num6 == 7) { int k = (int)r.Next(3); int f = (int)r.Next(3); Put(tx + 1, i); }   // 右枝 2 骰
+    }
+    // 基座 tuft（cs:30846-30861）：两侧草族才置位 + 各 1/3 概率抹除（2 骰无条件）
+    bool tuftFit(int dx) => tx + dx >= 0 && tx + dx < W && act[num * W + tx + dx] != 0 && TREE_FIT.Contains(typ[num * W + tx + dx]);
+    bool tL = tuftFit(-1), tR = tuftFit(1);
+    if ((int)r.Next(3) == 0) tL = false;
+    if ((int)r.Next(3) == 0) tR = false;
+    if (tR) { int k = (int)r.Next(3); Put(tx + 1, num - 1); }
+    if (tL) { int k = (int)r.Next(3); Put(tx - 1, num - 1); }
+    int baseK = (int)r.Next(3);                                 // ★cs:30906 无条件掷（基座干身帧骰）
+    if (tL || tR) Put(tx, num - 1);
+    int crownFx = (int)r.Next(13) != 0 ? 22 : 0;                // cs:30961 树冠骰
+    int crownK = (int)r.Next(3);
+    Put(tx, num - height);
+    return 0;
+}
+void ShimmerOpeningFn(int direction, int X, int Y, int caveOpeningSize)
+{
+    int num = X;
+    caveOpeningSize--;
+    bool flag;
+    do
+    {
+        num += direction;
+        flag = true;
+        for (int i = Y - caveOpeningSize + 1; i < Y - 1; i++)
+        {
+            if (SolidTileGen(num, i)) flag = false;
+            if (SolidTileGen(num + direction, i)) flag = false;
+            if (SolidTileGen(num + direction * 2, i)) flag = false;
+            if (num >= 0 && num < W && i >= 0 && i < H) act[i * W + num] = 0;
+        }
+        for (int j = Y - caveOpeningSize; j < Y; j++)
+        {
+            if (num - direction >= 0 && num - direction < W && j >= 0 && j < H) act[j * W + (num - direction)] = 0;
+        }
+        if (SolidTileGen(num - direction, Y - caveOpeningSize - 1)) wal[(Y - caveOpeningSize - 1) * W + (num - direction)] = 0;
+        if (SolidTileGen(num - direction, Y)) wal[Y * W + (num - direction)] = 0;
+        if ((int)r.Next(2) == 0) Y += (int)r.Next(-1, 2);
+    }
+    while (!flag && num >= 50 && num <= W - 50 && Math.Abs(num - X) <= 100);
+}
+bool ShimmerMakeBiomeFn(int X, int Y)
+{
+    int num = (int)r.Next(2);                                   // cs:34891 双 variant
+    double num2 = 0.6, num3 = 1.3, num4 = 0.3;
+    if (num == 0) { num2 = 0.55; num3 = 2.0; }
+    num2 *= 1.05 - r.NextDouble() * 0.1;
+    num3 *= 1.05 - r.NextDouble() * 0.1;
+    num4 *= 1.0 - r.NextDouble() * 0.1;
+    int num5 = (int)r.Next(105, 125);
+    int num6 = (int)((double)num5 * num4);
+    int num7 = (int)((double)num5 * num2);
+    int num8 = (int)r.Next(9, 13);
+    int num9 = X - num5, num10 = X + num5, num11 = Y - num5, num12 = Y + num5;
+    for (int i = num11; i <= num12; i++)
+    {
+        for (int j = num9; j <= num10; j++)
+        {
+            if (!(j >= 50 && i >= 50 && j < W - 50 && i < H - 50)) return false;   // InWorld(j,i,50)
+            if (typ[i * W + j] == 203 || typ[i * W + j] == 25) return false;
+        }
+    }
+    int num13 = Y;
+    if ((int)r.Next(4) == 0) num13 = Y - (int)r.Next(2);
+    int num14 = Y - num8;
+    if ((int)r.Next(4) == 0) num14 = Y - num8 - (int)r.Next(2);
+    for (int k = num11; k <= num12; k++)
+    {
+        for (int l = num9; l <= num10; l++)
+        {
+            int ti = k * W + l;
+            liq[ti] = 0;
+            if ((int)r.Next(4) == 0) num13 = Y - (int)r.Next(2);
+            if ((int)r.Next(4) == 0) num14 = Y - num8 + (int)r.Next(2);
+            int num15 = (k <= Y)
+                ? (int)Math.Sqrt(Math.Pow((double)Math.Abs(l - X) * (1.0 + r.NextDouble() * 0.02), 2.0) + Math.Pow((double)Math.Abs(k - Y) * 1.4 * (1.0 + r.NextDouble() * 0.02), 2.0))
+                : (int)Math.Sqrt(Math.Pow((double)Math.Abs(l - X) * (1.0 + r.NextDouble() * 0.02), 2.0) + Math.Pow((double)Math.Abs(k - Y) * 1.2 * (1.0 + r.NextDouble() * 0.02), 2.0));
+            if (num15 < num5)
+            {
+                typ[ti] = 1;
+                if (l > num9 + 5 + (int)r.Next(2) && l < num10 - 5 - (int)r.Next(2)) act[ti] = 1;
+                if ((double)num15 < (double)num5 * 0.9) wal[ti] = 0;
+            }
+            num15 = (int)Math.Sqrt(Math.Pow((double)Math.Abs(l - X) * (1.0 + r.NextDouble() * 0.02), 2.0) + Math.Pow((double)Math.Abs(k - Y) * num3 * (1.0 + r.NextDouble() * 0.02), 2.0));
+            if (k > num14 && k < num13) act[ti] = 0;
+            if (k < num13 && num15 < (int)((double)num7 * (1.0 + r.NextDouble() * 0.02))) act[ti] = 0;
+            num15 = (int)Math.Sqrt(Math.Pow((double)Math.Abs(l - X) * (1.0 + r.NextDouble() * 0.02), 2.0) + Math.Pow((double)(Math.Abs(k - Y) * 2) * (1.0 + r.NextDouble() * 0.02), 2.0));
+            if (k < Y - 1 || num15 >= (int)((double)num6 * (1.0 + r.NextDouble() * 0.025))) continue;
+            if (k <= Y + 2 || num15 != num6 - 1 || (int)r.Next(2) != 0) act[ti] = 0;
+            if (k >= Y)
+            {
+                liq[ti] = (byte)(k == Y ? 127 : 255);
+                liqT[ti] = 3;                                   // shimmer(true)
+            }
+        }
+    }
+    Checkpoint("shimmershell");
+    StreamPt("shimmershell");
+    if (num == 0)
+    {
+        num9 = (int)((double)X - (double)num5 * num4) - (int)r.Next(-15, 1) - 5;
+        num10 = (int)((double)X + (double)num5 * num4) + (int)r.Next(0, 16);
+        int m = num9;
+        int num16 = 0;
+        for (; m < num10; m += (int)r.Next(9, 14))
+        {
+            int num17 = Y - 3;
+            while (num17 >= 0 && act[num17 * W + m] == 0) num17--;
+            num17 -= 4;
+            int num18 = (int)r.Next(5, 10);
+            int num19 = (int)r.Next(15, 21);
+            int n = m - num18;
+            while (num18 > 0)
+            {
+                for (n = m - num18; n < m + num18; n++) { if (n >= 0 && n < W) { act[num17 * W + n] = 1; typ[num17 * W + n] = 1; } }
+                num16++;
+                if ((int)r.Next(3) < num16) { num16 = 0; num18--; m += (int)r.Next(-1, 2); }
+                if (num19 <= 0) num18--;
+                num19--;
+                num17++;
+            }
+            n -= (int)r.Next(1, 3);
+            act[(num17 - 2) * W + n] = 1; typ[(num17 - 2) * W + n] = 1;
+            act[(num17 - 1) * W + n] = 1; typ[(num17 - 1) * W + n] = 1;
+            act[num17 * W + n] = 1; typ[num17 * W + n] = 1;
+            if ((int)r.Next(2) == 0) { act[(num17 + 1) * W + n] = 1; typ[(num17 + 1) * W + n] = 1; PlaceTightGen(n, num17 + 2); }
+            else PlaceTightGen(n, num17 + 1);
+        }
+    }
+    Checkpoint("shimmerpillars");
+    StreamPt("shimmerpillars");
+    ShimmerOpeningFn(-1, X - num5, Y, num8);
+    ShimmerOpeningFn(1, X + num5, Y, num8);
+    Checkpoint("shimmeropen");
+    StreamPt("shimmeropen");
+    bool dbgTrees = Environment.GetEnvironmentVariable("SW_DEBUG_TREES") == "1";
+    for (int num21 = 0; num21 < 500; num21++)
+    {
+        int num22 = (int)r.Next(X - 70, X + 70);
+        int num23 = (int)r.Next(Y - 2, Y + 3);
+        int num24 = (int)r.Next(7);
+        int treeTileType = num24 switch { 0 => 583, 1 => 584, 2 => 585, 3 => 586, 4 => 587, 5 => 588, _ => 589 };
+        bool solidL = SolidTileGen(num22 - 1, num23), solidR = SolidTileGen(num22 + 1, num23);
+        if (solidL && solidR)
+        {
+            int rc = GrowGemTreeFn(num22, num23, treeTileType);
+            if (dbgTrees) Console.WriteLine($"tree[{num21}] x={num22} y={num23} t={num24} rc={rc}");
+        }
+        else if (dbgTrees) Console.WriteLine($"tree[{num21}] x={num22} y={num23} t={num24} rc=7(solid {solidL}/{solidR})");
+    }
+    Checkpoint("shimmer");
+    StreamPt("shimmer");
+    return true;
+}
+int shimmerXOut = 0, shimmerYOut = 0;
+// ===== 微光 pass 输入态 dump（SW_DUMP_SHIMMER=1 → <out>.shimstate）=====
+// 独立裁决通道：上游 pass（地牢等）多代理并发修改期，全链流可能临时分叉——
+// 把「Shimmer pass 之前」的完整网格 + UnifiedRandom 内部态落盘，JS 侧
+// （tests/shimmer-checkpoint.test.ts 的状态恢复用例）直接在此态上跑
+// runShimmerPass 对账，裁决力与全链等价且不受上游 WIP 影响。
+if (Environment.GetEnvironmentVariable("SW_DUMP_SHIMMER") == "1")
+{
+    using var fs = File.Create(outPath + ".shimstate");
+    using var bw = new BinaryWriter(fs);
+    var urt = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
+    var usa = (int[])urt.GetField("SeedArray", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    var uix = (uint)urt.GetField("inext", BindingFlags.NonPublic | BindingFlags.Instance)!.GetValue(r)!;
+    bw.Write(W); bw.Write(H);
+    bw.Write(uix);
+    for (int q = 0; q < 56; q++) bw.Write(usa[q]);
+    // 固定长度裸写（Write(byte[],0,len) 无长度前缀；JS 侧按 n/2n/2n/n/n 定长读）
+    var typB = ToBytes(typ);
+    var walB = ToBytes(wal);
+    bw.Write(act, 0, act.Length);
+    bw.Write(typB, 0, typB.Length);
+    bw.Write(walB, 0, walB.Length);
+    bw.Write(liq, 0, liq.Length);
+    bw.Write(liqT, 0, liqT.Length);
+}
+{
+    int num2 = (int)(worldSurface + rockLayer) / 2 + 50;
+    int num3 = (int)((H - 250) * 2 + rockLayer) / 3;
+    if (num3 > H - 330 - 100 - 30) num3 = H - 330 - 100 - 30;
+    if (num3 <= num2) num3 = num2 + 50;
+    int num4 = (int)r.Next(num2, num3);
+    int num5 = !dungeonRight ? (int)r.Next((int)(W * 0.89), W - 200) : (int)r.Next(200, (int)(W * 0.11));
+    int num8 = 0;
+    while (!ShimmerMakeBiomeFn(num5, num4))
+    {
+        num8++;
+        if (num8 > 20000)
+        {
+            num4 = (int)r.Next(worldSurface + 100 + 20, num3);
+            num5 = !dungeonRight ? (int)r.Next((int)(W * 0.8), W - 200) : (int)r.Next(200, (int)(W * 0.2));
+        }
+        else
+        {
+            num4 = (int)r.Next((int)(worldSurface + rockLayer) / 2 + 20, num3);
+            num5 = !dungeonRight ? (int)r.Next((int)(W * 0.89), W - 200) : (int)r.Next(200, (int)(W * 0.11));
+        }
+    }
+    shimmerXOut = num5;
+    shimmerYOut = num4;
+}
+// Shimmer pass 之后的态（诊断用：与 <out>.shimstate 成对，逐格 diff 定位偏差；
+// 同为定长裸写：act[n] typ[2n] wal[2n] liq[n] liqT[n]）
+if (Environment.GetEnvironmentVariable("SW_DUMP_SHIMMER") == "1")
+{
+    using var fs2 = File.Create(outPath + ".shimstate.post");
+    using var bw2 = new BinaryWriter(fs2);
+    var typB2 = ToBytes(typ);
+    var walB2 = ToBytes(wal);
+    bw2.Write(act, 0, act.Length);
+    bw2.Write(typB2, 0, typB2.Length);
+    bw2.Write(walB2, 0, walB2.Length);
+    bw2.Write(liq, 0, liq.Length);
+    bw2.Write(liqT, 0, liqT.Length);
+}
 
 double TuneOceanDepth(int count, double depth, bool florida)
 {
@@ -6686,9 +7240,14 @@ var sb = new StringBuilder();
 sb.AppendLine("{");
 sb.AppendLine($"  \"seed\": {seed}, \"evil\": {evil},");
 sb.AppendLine($"  \"worldSurface\": {worldSurface}, \"rockLayer\": {rockLayer}, \"waterLine\": {waterLine}, \"lavaLine\": {lavaLine},");
+sb.AppendLine($"  \"shimmerX\": {shimmerXOut}, \"shimmerY\": {shimmerYOut}, \"dungeonRight\": {(dungeonRight ? 1 : 0)},");
 sb.AppendLine("  \"checkpoints\": [");
 for (int i = 0; i < checkpoints.Count; i++)
     sb.AppendLine($"    \"{checkpoints[i]}\"{(i < checkpoints.Count - 1 ? "," : "")}");
+sb.AppendLine("  ],");
+sb.AppendLine("  \"stream\": [");
+for (int i = 0; i < streamPts.Count; i++)
+    sb.AppendLine($"    \"{streamPts[i]}\"{(i < streamPts.Count - 1 ? "," : "")}");
 sb.AppendLine("  ]");
 sb.AppendLine("}");
 File.WriteAllText(outPath, sb.ToString());

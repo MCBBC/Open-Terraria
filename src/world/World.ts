@@ -284,7 +284,7 @@ export class World {
   }
 
   /** 从 worker 数据包重建（buffer 已 transfer 移交，零拷贝包装）。
-   *  explored 未包含在包内（saveGame 不持久化、新生成/读档均全零）时按全零分配 */
+   *  explored 未包含在包内（旧包）时按全零分配；读档路径包内即存档的 explored */
   static fromPacket(p: import('../workers/protocol').WorldPacket): World {
     // ★免丢弃分配(2026-08-13 读档优化):构造器先建完整默认 TileStore(15B/tile,
     // 75-173MB)随即被转移 buffer 版替换丢弃。skipStore 跳过默认分配,其余字段照常初始化

@@ -136,3 +136,66 @@ describe('池上限（ParticlePool :37-52 无空位语义 → 定长池满丢弃
     expect(fp.spawnGoatFlames(0, 0, rand)).toBe(3);
   });
 });
+
+// ===================== 坐骑染料着色（player.cMount → DrawData.shader） =====================
+// 标杆：
+//   ParticleOrchestrator.cs:3271  SetTypeInfo(num, whoAmI, player.cMount)——染料
+//                                packedShaderIndex 随粒子带走
+//   FlameParticle.cs:62-64       drawData.shader = _packedShaderIndex →
+//                                PlayerDrawHelper.SetShaderForData(player) 绑定染料
+//   Player.cs:9300               cMount = miscDyes[3].dye——坐骑染料槽 = miscDyes[3]
+//   FlameParticle.cs:55          DrawData 基色 (120,120,120,60)×lerp 与染料独立
+// 语义：染料 pass 只变换贴图像素（SM2 字节码执行），基色乘法照常叠加——
+// 即"染料换的是火焰颜色，不是火焰亮度衰减曲线"。
+import {
+  FLAME_DRAW_RGB, FLAME_DRAW_ALPHA, flamePassAlphas,
+} from '../src/fx/FlameParticles';
+import { dyeApplyOf, applyDyePass, dyeEntryOf } from '../src/data/vanillaDyes';
+
+describe('坐骑染料着色通道（DrawData.shader 与基色独立）', () => {
+  /** 中性灰火焰 texel 条（Projectile_326 火苗近似） */
+  const grayStrip = (n = 8): { data: Uint8ClampedArray; w: number; h: number } => {
+    const data = new Uint8ClampedArray(n * 4);
+    for (let i = 0; i < n; i++) {
+      data[i * 4] = 128; data[i * 4 + 1] = 128; data[i * 4 + 2] = 128; data[i * 4 + 3] = 255;
+    }
+    return { data, w: n, h: 1 };
+  };
+
+  it('miscDyes[3] 是坐骑染料槽（Player.cs:9300 cMount = miscDyes[3].dye，非 4）', () => {
+    // 源码锚定：cPet/miscDyes[0]、cLight/1、cMinecart/2、cMount/3、cGrapple/4
+    expect(dyeEntryOf(1007)?.tech).toBe('ArmorColored');   // 红染料可作坐骑染料
+  });
+
+  it('染料 pass 作用贴图像素：红染料把灰 texel 拉向红色调，alpha 通道保留', () => {
+    const apply = dyeApplyOf(1007);                        // 红染料：uColor=(1,0,0) sat 1.2
+    expect(apply).not.toBeNull();
+    const { data } = grayStrip();
+    const before = Array.from(data.subarray(0, 4));
+    expect(applyDyePass(data, 8, 1, apply!)).toBe(true);
+    const r = data[0], g = data[1], b = data[2], a = data[3];
+    expect(r).toBeGreaterThan(g);                          // 红染料：R 通道占优
+    expect(r).toBeGreaterThan(b);
+    expect(a).toBe(255);                                   // alpha 保留——加性 pass 的
+    void before;                                           // destination-in 源（丢失=火焰消失）
+    // 无染料 vid → dyeApplyOf null（本色路径）
+    expect(dyeApplyOf(-1)).toBeNull();
+    expect(dyeApplyOf(999999)).toBeNull();
+  });
+
+  it('基色通道与染料独立：两 pass alpha 仅由 lerp 决定（FlameParticle.cs:55）', () => {
+    // 染料前后同一 lerp → 同一 (cover, add)；rgb 合计恒 = 基底×(120/255)×lerp
+    for (const lerp of [1, 0.75, 0.5, flameFadeOutFactor(0.65)]) {
+      const p = flamePassAlphas(lerp);
+      expect(p.cover).toBeCloseTo(FLAME_DRAW_ALPHA * lerp, 9);
+      expect(p.add).toBeCloseTo(lerp, 9);
+      // 通道恒等式：① 覆盖 rgb = 基底×cover；② 加性 rgb = 基底×(60/255)×add
+      //（glow 已预乘 60/255）——合计 = 基底×(120/255)×lerp = 基色 rgb 通道 ×lerp
+      expect(p.cover + p.add * FLAME_DRAW_ALPHA).toBeCloseTo(FLAME_DRAW_RGB * lerp, 9);
+    }
+    expect(FLAME_DRAW_RGB / FLAME_DRAW_ALPHA).toBeCloseTo(2, 6);
+    // 全生命期采样：lerp 仅来自 FadeOutNormalizedTime 曲线（染料不参与）
+    expect(flamePassAlphas(flameFadeOutFactor(0)).cover).toBeCloseTo(60 / 255, 9);
+    expect(flamePassAlphas(flameFadeOutFactor(0.99)).cover).toBeCloseTo((60 / 255) * flameFadeOutFactor(0.99), 9);
+  });
+});

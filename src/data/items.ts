@@ -591,6 +591,8 @@ item({ key: 'vi_5659_英雄翅膀', name: '', value: 1 });
 item({ key: 'vi_5686_卡兹默德斯之翼', name: '', value: 1 });
 item({ key: 'vi_6140_露娜的符文妖精翅膀', name: '', value: 1 });
 item({ key: 'vi_5669_true_copper_shortsword', name: '', value: 1 });
+item({ key: 'vi_1296_earth_staff', name: '', value: 1 });
+item({ key: 'vi_3473_solar_eruption', name: '', value: 1 });
 // ---- 原版远程武器+弹药全量注册（useAmmo 族对账 2026-08-13：枪 24/弓弩 39/
 // 发射器 7/吹箭 4——此前仅 6 把，弹链数据驱动已备）----
 item({ key: 'vi_95_地牢砖墙', name: '', value: 1 });
@@ -1005,9 +1007,11 @@ void 0;
 //  单值提取面内）→ def.tile 未回填 = 放置静默无效。5 件以 TEdit 数据为权威
 //  （vanilla.json createTile 逐件核对一致），tile def 均已存在：
 //  3576 星尘碎片块(418) / 3637 白队块(434) / 3738 呆头绿气球块(448) /
-//  2755 活性超亮火块(344) / 2262 蓝王朝瓦(313) ----
+//  2755 活性超亮火块(344) / 2262 蓝王朝瓦(313)。
+//  +5464 Mitey-Titey(693,Item.cs:43085-43093 DefaultToPlaceableTile(693,0) 后
+//   consumable=false 覆写——放置不消耗,消耗门见 Game.tryPlace) ----
 const BLOCK_TILE_BACKFILL: ReadonlyArray<readonly [number, number]> = [
-  [3576, 418], [3637, 434], [3738, 448], [2755, 344], [2262, 313],
+  [3576, 418], [3637, 434], [3738, 448], [2755, 344], [2262, 313], [5464, 693],
 ];
 for (const [vid, sheet] of BLOCK_TILE_BACKFILL) {
   const k = VANILLA_ITEM_KEY_BY_ID[vid];

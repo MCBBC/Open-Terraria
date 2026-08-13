@@ -242,6 +242,69 @@ const out = await page.evaluate(async () => {
     const redPlain = countRed();
     ok('⑪ 染料生效（红主导像素增量 > 200）', redDyed - redPlain > 200, `dyed=${redDyed} plain=${redPlain}`);
   }
+  // ⑫ stealth 分层（PlayerDrawSet.cs:1523-1651）：蘑菇矿套(1546/1549/1550) +
+  //     p.stealth=0.5 → doll 按 皮肤×s'² / 甲×s'(B×settled) 两层绘制——
+  //     与 stealth=0 同位截图有像素差且无 pageerror
+  const mkKey = (n) => Object.keys(window.__swItems).find(k => k.startsWith('vi_' + n + '_'));
+  const [kH, kB, kL] = [mkKey(1546), mkKey(1549), mkKey(1550)];
+  ok('⑫ 蘑菇矿三件条目存在', !!(kH && kB && kL), kH && kB && kL);
+  if (kH && kB && kL) {
+    p.inv.armor[0] = { id: window.__swItems[kH], stack: 1 };
+    p.inv.armor[1] = { id: window.__swItems[kB], stack: 1 };
+    p.inv.armor[2] = { id: window.__swItems[kL], stack: 1 };
+    p.stealth = 0;
+    await new Promise(r => setTimeout(r, 400));
+    const shotS0 = g.renderer.canvas.toDataURL();
+    p.stealth = 0.5;
+    await new Promise(r => setTimeout(r, 400));
+    const shotS5 = g.renderer.canvas.toDataURL();
+    p.stealth = 0;
+    const load4 = (url) => new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.src = url; });
+    const [i12a, i12b] = await Promise.all([load4(shotS0), load4(shotS5)]);
+    const diffC = (ia, ib) => {
+      const ca = document.createElement('canvas'); ca.width = ia.width; ca.height = ia.height;
+      ca.getContext('2d').drawImage(ia, 0, 0);
+      const da = ca.getContext('2d').getImageData(0, 0, ca.width, ca.height).data;
+      const cb = document.createElement('canvas'); cb.width = ib.width; cb.height = ib.height;
+      cb.getContext('2d').drawImage(ib, 0, 0);
+      const dbb = cb.getContext('2d').getImageData(0, 0, cb.width, cb.height).data;
+      let d = 0;
+      for (let i = 0; i < da.length; i += 8) {
+        if (Math.abs(da[i] - dbb[i]) > 24 || Math.abs(da[i + 3] - dbb[i + 3]) > 24) d++;
+      }
+      return d;
+    };
+    const diff12 = diffC(i12a, i12b);
+    ok('⑫ stealth 分层生效（差 > 300px）', diff12 > 300, `diff=${diff12}`);
+  }
+  // ⑬ 渐变染料（ArmorColoredGradient——位置依赖 pass，端到端验证 t0/s0 表空间映射）：
+  //     红-黄渐变 vi_1031 上翼 → 与无染料同位对比有像素差（修正前错锚仍会有差，
+  //     此断言保链路无回归；映射正确性由 fx-sm2.test.ts 等价金标把关）
+  const keyG = Object.keys(window.__swItems).find(k => k.startsWith('vi_1031_'));
+  ok('⑬ 红黄渐变染料条目存在', !!keyG, keyG);
+  if (keyG) {
+    p.inv.armor[3] = { id: wingId, stack: 1 };
+    p.inv.dye[3] = { id: window.__swItems[keyG], stack: 1 };
+    await waitUntil(() => p.onGround && p.wingFrame === 0);
+    await new Promise(r => setTimeout(r, 400));
+    const shotG = g.renderer.canvas.toDataURL();
+    p.inv.dye[3] = null;
+    await new Promise(r => setTimeout(r, 400));
+    const shotG2 = g.renderer.canvas.toDataURL();
+    const loadG = (url) => new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.src = url; });
+    const [iGa, iGb] = await Promise.all([loadG(shotG), loadG(shotG2)]);
+    const cGa = document.createElement('canvas'); cGa.width = iGa.width; cGa.height = iGa.height;
+    cGa.getContext('2d').drawImage(iGa, 0, 0);
+    const dGa = cGa.getContext('2d').getImageData(0, 0, cGa.width, cGa.height).data;
+    const cGb = document.createElement('canvas'); cGb.width = iGb.width; cGb.height = iGb.height;
+    cGb.getContext('2d').drawImage(iGb, 0, 0);
+    const dGb = cGb.getContext('2d').getImageData(0, 0, cGb.width, cGb.height).data;
+    let diffG = 0;
+    for (let i = 0; i < dGa.length; i += 8) {
+      if (Math.abs(dGa[i] - dGb[i]) > 24 || Math.abs(dGa[i + 3] - dGb[i + 3]) > 24) diffG++;
+    }
+    ok('⑬ 渐变染料生效（差 > 400px）', diffG > 400, `diff=${diffG}`);
+  }
   p.inv.armor[3] = { id: wingId, stack: 1 };
   return res;
 });

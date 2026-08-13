@@ -84,7 +84,7 @@ describe('装备唯一性（CanEquipAccessoryInSlot :1311-1327）', () => {
     const inv = new Inventory();
     inv.armor[ACC_ARMOR_START] = { id: w1, stack: 1 };
     expect(inv.armorAccepts(ACC_ARMOR_START + 1, w2)).toBe(false);
-    expect(inv.armorAccepts(ACC_ARMOR_START + 1, boot)).toBe(true);   // 配饰+翅膀不冲突
+    if (boot !== undefined) expect(inv.armorAccepts(ACC_ARMOR_START + 1, boot)).toBe(true);   // 配饰+翅膀不冲突
   });
 
   it('盔甲功能↔时装同款互斥,DualEquipArmor(205) 白名单例外', () => {

@@ -20,6 +20,10 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     wire: st.wire.buffer as ArrayBuffer,
     paint: st.paint.buffer as ArrayBuffer,
     paintWall: st.paintWall.buffer as ArrayBuffer,
+    // 战争迷雾（读档路径：loadSaveData 解码出的 explored 随包回传主线程——
+    // 曾只传 exploredVersion 转移标志 → 重进存档全图迷雾）。transfer 列表取
+    // Object.values(buf)，本 buffer 随附移交；生成路径为全零分配，语义不变
+    explored: world.explored.buffer as ArrayBuffer,
   };
   const packet: WorldPacket = {
     w: st.w, h: st.h, seed: world.seed, name: world.name,

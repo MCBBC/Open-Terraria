@@ -404,22 +404,41 @@ export const passNames = (): string[] => [...PASS_MAP.keys()];
  */
 export function runPassOnImageData(pass: SM2Pass, data: Uint8ClampedArray,
   w: number, h: number, uniforms: SM2Uniforms,
-  extraSamplers: Array<SM2Sampler | undefined> = []): void {
+  extraSamplers: Array<SM2Sampler | undefined> = [],
+  t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): void {
   const u = { ...uniforms };
-  if (!u.uImageSize0[0] && !u.uImageSize0[1]) u.uImageSize0 = [w, h];
-  if (!u.uSourceRect[2] && !u.uSourceRect[3]) u.uSourceRect = [0, 0, w, h];
+  if (t0Rect) {
+    // t0Rect 在场时三值必须同源（表尺寸/子矩形/UV 映射），强制对齐防调用方漂移
+    u.uImageSize0 = [t0Rect.sheetW, t0Rect.sheetH];
+    u.uSourceRect = [t0Rect.sx, t0Rect.sy, w, h];
+  } else {
+    if (!u.uImageSize0[0] && !u.uImageSize0[1]) u.uImageSize0 = [w, h];
+    if (!u.uSourceRect[2] && !u.uSourceRect[3]) u.uSourceRect = [0, 0, w, h];
+  }
   const c = pass.setupConstants(u);
   const regs = new Float64Array(32 * 4);
   const tex = new Float64Array(8 * 4);
-  const v0 = Float64Array.of(1, 1, 1, 1);
+  const v0 = new Float64Array(8);                  // v0/v1（v1 空闲）
+  v0[0] = v0[1] = v0[2] = v0[3] = 1;
   const o = new Float64Array(4);
   const srcData = new Uint8ClampedArray(data);           // s0 采样源（防读写交叠）
-  const s0: SM2Sampler = (uu, vv) => sampleImageData(srcData, w, h, uu, vv, false);
+  // s0 = 被染贴图。vanilla 中它是【整表纹理】、t0 是全表 UV；本仓烘焙图只有切片
+  // → 采样前做表空间→切片空间反变换（派生坐标的偏移采样同样落在正确语义上）
+  const s0: SM2Sampler = t0Rect
+    ? (uu, vv) => sampleImageData(srcData, w, h,
+      (uu * t0Rect.sheetW - t0Rect.sx) / w, (vv * t0Rect.sheetH - t0Rect.sy) / h, false)
+    : (uu, vv) => sampleImageData(srcData, w, h, uu, vv, false);
   const samplers = [s0, ...extraSamplers];
+  // t0 = 全表 UV（SpriteBatch 子矩形语义：(rect.X + u·rect.W)/texW）——
+  // 渐变族按 t0×uImageSize0−uSourceRect.xy 取像素位，切片局部 UV 会错锚
+  const t0of = (x: number, y: number): [number, number] => t0Rect
+    ? [(t0Rect.sx + x + 0.5) / t0Rect.sheetW, (t0Rect.sy + y + 0.5) / t0Rect.sheetH]
+    : [(x + 0.5) / w, (y + 0.5) / h];
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 4;
-      const res = pass.execPixel(c, regs, tex, v0, o, (x + 0.5) / w, (y + 0.5) / h, samplers);
+      const [t0x, t0y] = t0of(x, y);
+      const res = pass.execPixel(c, regs, tex, v0, o, t0x, t0y, samplers);
       if (!res) { data[i] = data[i + 1] = data[i + 2] = data[i + 3] = 0; continue; }
       data[i] = res[0] * 255; data[i + 1] = res[1] * 255;
       data[i + 2] = res[2] * 255; data[i + 3] = res[3] * 255;

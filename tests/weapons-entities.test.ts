@@ -1,10 +1,11 @@
 // 数据驱动武器实体行为模拟测试（Boomerang/SpearProj/GrenadeProj/YoyoProj）
 // 用最小 mock GameHooks 直接跑 fixedUpdate，验证 aiStyle 家族行为主干
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike, spearDrawAngle, YOYO_RANGE, YOYO_LIFE } from '../src/entities/WeaponProj';
+import { Enemy } from '../src/entities/Enemy';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike, spearDrawAngle, YOYO_RANGE, YOYO_LIFE, DaybreakFlare, daybreakStacks } from '../src/entities/WeaponProj';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -653,5 +654,95 @@ describe('弗莱龙刺 405(aiStyle 70 全语义)', () => {
     const sp = new FlaironSpike(player.cx, player.cy, 2, 0, 60, 4);
     run(sp, hooks, 130);
     expect(sp.dead).toBe(true);
+  });
+});
+
+describe('太阳耀斑 636（aiStyle 113，AI_113_TargetSticker :38138-38477）', () => {
+  const made: DaybreakFlare[] = [];
+  afterEach(() => { for (const f of made.splice(0)) f.destroy(); });
+
+  /** 生成即与敌重叠的耀斑（出生点 = 敌左上内缩 npx 处） */
+  function flareOn(ex: number, ey: number, inset = 4): DaybreakFlare {
+    const f = new DaybreakFlare(ex + inset, ey + inset, 3, 0, 150, 5);
+    made.push(f);
+    return f;
+  }
+
+  it('首击即附着：伤害 + AddBuff(189,300)=daybreakT 5s + 层数 1（:12421-12428/:10691-10693）', () => {
+    const { hooks, enemies } = makeHooks();
+    addEnemy(enemies, 5, 40 * 16, 40 * 16);
+    const en = enemies[0] as { hp: number; daybreakT?: number };
+    const hp0 = en.hp as number;
+    const f = flareOn(40 * 16, 40 * 16);
+    f.critChance = 0;                       // 关暴击，断言定值
+    run(f, hooks, 1);
+    expect(en.hp).toBe(hp0 - 150);          // 武器伤害全量（3543 dmg150）
+    expect(en.daybreakT).toBeCloseTo(5, 5); // 300t / 60
+    expect(f['ai0']).toBe(1);               // 附着
+    expect(daybreakStacks(5)).toBe(1);
+  });
+
+  it('大型目标命中盒各边内缩 1/8：外壳穿过不附着、内圈命中才附着（:14520-14523）', () => {
+    const { hooks, enemies } = makeHooks();
+    enemies.push({ id: 6, x: 40 * 16, y: 40 * 16, w: 200, h: 200, dead: false, hp: 9999, hurt: () => true } as never);
+    // 内缩 25px → 内圈 [x+25, x+175]；外壳弹（右缘 18 < 25）不命中
+    const shell = flareOn(40 * 16, 40 * 16, 2);
+    run(shell, hooks, 1);
+    expect(shell['ai0']).toBe(0);
+    expect(daybreakStacks(6)).toBe(0);
+    const inner = flareOn(40 * 16, 40 * 16, 100);
+    run(inner, hooks, 1);
+    expect(inner['ai0']).toBe(1);
+    expect(daybreakStacks(6)).toBe(1);
+  });
+
+  it('附着寿命 60×num11=600 AI 次（num11=5×MaxUpdates=10）= 300t，期满摘层（:38249-38253/:38329-38332）', () => {
+    const { hooks, enemies } = makeHooks();
+    addEnemy(enemies, 7, 40 * 16, 40 * 16);
+    const f = flareOn(40 * 16, 40 * 16);
+    run(f, hooks, 1);
+    expect(daybreakStacks(7)).toBe(1);
+    run(f, hooks, 298);                     // 累计 299t
+    expect(f.dead).toBe(false);
+    expect(daybreakStacks(7)).toBe(1);
+    run(f, hooks, 2);                       // 第 300t 的第 2 个 AI 次到 600
+    expect(f.dead).toBe(true);
+    expect(daybreakStacks(7)).toBe(0);      // 消亡回写摘层
+  });
+
+  it('上限 8/敌：第 9 枚附着即淘汰 timeLeft 最老者（KillOldestJavelin :13019-13030/:13995-14020）', () => {
+    const { hooks, enemies } = makeHooks();
+    addEnemy(enemies, 8, 40 * 16, 40 * 16);
+    const flares: DaybreakFlare[] = [];
+    for (let i = 0; i < 8; i++) {
+      const f = flareOn(40 * 16, 40 * 16);
+      flares.push(f);
+      run(f, hooks, 1);                     // 逐枚错开 timeLeft，最老 = 首枚
+      expect(daybreakStacks(8)).toBe(i + 1);
+    }
+    const ninth = flareOn(40 * 16, 40 * 16);
+    run(ninth, hooks, 1);
+    expect(daybreakStacks(8)).toBe(8);      // 仍 8，不多叠
+    expect(flares[0].dead).toBe(true);      // 最老者被淘汰
+    expect(ninth.dead).toBe(false);
+  });
+
+  it('Daybreak(189) DoT = max(1, 层数)×100 HP/s（NPC.cs:92807-92830，零层兜底 :92822-92825）', () => {
+    const { hooks, enemies } = makeHooks();
+    // 零层兜底：buff 在身但耀斑已灭/未附着 → 单层 100
+    const solo = new Enemy('zombie', 20 * 16, 10 * 16);
+    solo.id = 71; solo.hp = 100000; solo.iframes = 0; solo.hpBarT = 0;
+    solo.daybreakT = 1;
+    solo.fixedUpdate(1, hooks);
+    expect(100000 - solo.hp).toBe(100);
+    // 两枚附着 → 200 HP/s
+    addEnemy(enemies, 72, 40 * 16, 40 * 16);
+    const stacked = new Enemy('zombie', 60 * 16, 10 * 16);
+    stacked.id = 72; stacked.hp = 100000; stacked.iframes = 0; stacked.hpBarT = 0;
+    for (let i = 0; i < 2; i++) run(flareOn(40 * 16, 40 * 16), hooks, 1);
+    expect(daybreakStacks(72)).toBe(2);
+    stacked.daybreakT = 1;
+    stacked.fixedUpdate(1, hooks);
+    expect(100000 - stacked.hp).toBe(200);
   });
 });

@@ -714,9 +714,11 @@ export function growLivingTree(
       while (n33 > 0) {
         n33--;
         n42 += n39;
-        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
+        // 原版两次主步写均带 !wallDungeon 门（cs:28505/28511 区域）——地牢墙格
+        // 永不吃活木。★此前漏门=树根穿透地牢砖墙留 191 残留（2026-08-13 探针实锤）
+        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD && !isDungeonWall(wallAt(st, n42, n34))) setLivingWood(st, n42, n34);
         n34 += 1;
-        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD) setLivingWood(st, n42, n34);
+        if (wallAt(st, n42, n34) !== WALL_LIVING_WOOD && !isDungeonWall(wallAt(st, n42, n34))) setLivingWood(st, n42, n34);
         if (!activeAt(st, n42, n34 + 1)) { n39 = 0; n40 = 1; }   // cs:28547 悬空改竖直下扎
         if (rng.int(0, 2) === 0) {
           n39 = n41 < 0 ? (n39 === 0 ? -1 : 0) : (n41 <= 0 ? rng.int(-1, 1) : (n39 === 0 ? 1 : 0));

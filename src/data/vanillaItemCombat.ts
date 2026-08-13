@@ -61,6 +61,21 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '3507': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
   '3513': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
   '3519': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  // ---- 湿/干/土制炸弹族（Item.cs:39461-39473 / :39787-39799 共享 case 段算式
+  //   `shoot = 903 + (type - 4824)` / `shoot = 910 + (type - 4908)` 提取器不解析字面量
+  //   → 缺 shoot 整族死路径。此处按源码算式逐件回填（4824-4827→903-906，
+  //   4908/4909→910/911）。★noMelee 非 1456 SetDefaults 字面（该两段未置），
+  //   此处作 combatWeapon `consumable && noMelee` 爆炸物门的派发等价门：
+  //   原版族 damage 缺省 0 + noUseGraphic=true，近战面 0 伤，语义相同 ----
+  '4824': { shoot: 903, noMelee: true },
+  '4825': { shoot: 904, noMelee: true },
+  '4826': { shoot: 905, noMelee: true },
+  '4827': { shoot: 906, noMelee: true },
+  '4908': { shoot: 910, noMelee: true },
+  '4909': { shoot: 911, noMelee: true },
+  // 5334 奥库瑞姆剃刀（Item.cs:42276-42287）：consumable/useStyle4/useTime 45 在
+  //   `Variant == EnabledVariant` 条件块内——提取器不解析条件块，整条缺失
+  '5334': { consumable: true, useTime: 45, useAnimation: 45 },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };

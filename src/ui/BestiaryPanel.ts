@@ -495,6 +495,49 @@ export function bestiaryGridBackground(npcId: number, crimson = false): string |
 
 // ============ DOM 面板 ============
 
+/** 图鉴贴图缓存(2026-08-13,用户报"滚动翻页崩溃"的核心修复):
+ *  此前每个格子每次 refresh 都 new Image() 自取 NPC 表/背景图且【结果不回写】
+ *  ——trackpad 滚轮风暴下同一张多帧行大表被反复解码,渲染进程压崩。本缓存:
+ *  ①命中直回 ②atlas.vimages 已有的直接借 ③在途去重(并发 refresh 共享一次
+ *  fetch+decode) ④onerror 负终结(404 也回调,防等待队列无限堆积) ⑤容量上限
+ *  LRU 淘汰(引用即成本)。 */
+const bstSheetCache = new Map<string, HTMLImageElement>();
+const bstSheetPending = new Map<string, Array<(img: HTMLImageElement | null) => void>>();
+/** 404 负缓存(2026-08-13 泄露 review):缺表时此前每次 refresh 都重新 fetch+
+ * 解码(pending 去重只挡并发不挡串行)——登记终态,不再重发 */
+const bstSheetFailed = new Set<string>();
+const BST_SHEET_CACHE_MAX = 160;
+
+function bstLoadSheet(atlas: SpriteAtlas | null, file: string, cb: (img: HTMLImageElement | null) => void): void {
+  const hit = bstSheetCache.get(file);
+  if (hit) { cb(hit); return; }
+  const atlasHit = atlas?.vimages.get(file) ?? null;
+  if (atlasHit) {
+    if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
+    bstSheetCache.set(file, atlasHit);
+    cb(atlasHit);
+    return;
+  }
+  if (bstSheetFailed.has(file)) { cb(null); return; }  // 已知 404:不重发
+  let q = bstSheetPending.get(file);
+  if (q) { q.push(cb); return; }  // 在途去重:同一张表并发只取一次
+  q = [cb];
+  bstSheetPending.set(file, q);
+  const im = new Image();
+  im.onload = () => {
+    bstSheetPending.delete(file);
+    if (bstSheetCache.size >= BST_SHEET_CACHE_MAX) bstSheetCache.delete(bstSheetCache.keys().next().value as string);
+    bstSheetCache.set(file, im);
+    for (const c of q!) c(im);
+  };
+  im.onerror = () => {
+    bstSheetPending.delete(file);
+    bstSheetFailed.add(file);
+    for (const c of q!) c(null);   // 负终结:失败也回调(画底色),队列不积压
+  };
+  im.src = `sprites/${file}`;
+}
+
 const CSS = `
 .sw-bst { position:fixed; left:50%; top:50%; transform:translate(-50%,-50%);
   width:min(1040px,96vw); height:min(740px,92vh); z-index:30; cursor:auto;
@@ -589,11 +632,18 @@ export class BestiaryPanel {
   private selected: BestiaryRow | null = null;
   private sortSel: HTMLSelectElement | null = null;
   /** 滚轮换页（UIBestiaryEntryGrid 同款交互）：下滚下一页/上滚上一页。
-   *  passive:false + preventDefault——面板打开时吞掉滚轮防页面背后滚动 */
+   *  passive:false + preventDefault——面板打开时吞掉滚轮防页面背后滚动。
+   *  ★阈值门(2026-08-13,用户报"滚动翻两页就崩"):trackpad 惯性一滚=几十个
+   *  wheel 事件,每个全量 refresh 曾致贴图解码风暴;≥40 才翻页+refresh 已 rAF 合并 */
+  private wheelAcc = 0;
   private wheelHandler = (e: WheelEvent) => {
     if (e.deltaY === 0) return;
     e.preventDefault();
-    this.page(e.deltaY > 0 ? 1 : -1);
+    this.wheelAcc += e.deltaY;
+    if (Math.abs(this.wheelAcc) < 40) return;
+    const dir = this.wheelAcc > 0 ? 1 : -1;
+    this.wheelAcc = 0;
+    this.page(dir);
   };
 
   constructor(private parent: HTMLElement, private flow: BestiaryPanelFlow) {
@@ -706,8 +756,20 @@ export class BestiaryPanel {
       }));
   }
 
-  /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度） */
+  /** OnOpenPage → UpdateBestiaryContents（FilterEntries → SortEntries → Fill + 进度）。
+   *  ★rAF 合并(2026-08-13):滚轮/RO/点击风暴每帧至多重建一次——此前每个 wheel
+   *  tick 一次全量重建×每格自取解码 = 渲染进程崩溃(用户报"滚动翻两页就崩") */
+  private refreshQueued = false;
   refresh() {
+    if (this.refreshQueued) return;
+    this.refreshQueued = true;
+    requestAnimationFrame(() => {
+      this.refreshQueued = false;
+      this.refreshNow();
+    });
+  }
+
+  private refreshNow() {
     const rows = bestiaryRows(this.flow.getTracker());
     sortBestiaryRows(rows, this.sortKey);
     this.working = filterBestiaryRows(rows, this.filter);
@@ -723,7 +785,9 @@ export class BestiaryPanel {
   }
 
   private page(dir: number) {
-    this.offset = clampBestiaryOffset(this.offset, dir * this.perPage, this.working.length, this.perPage);
+    const next = clampBestiaryOffset(this.offset, dir * this.perPage, this.working.length, this.perPage);
+    if (next === this.offset) return;  // 边界空滚:offset 不变不重建(防滚轮风暴)
+    this.offset = next;
     this.refresh();
   }
 
@@ -776,6 +840,7 @@ export class BestiaryPanel {
       : { image: null as string | null, color: [255, 255, 255, 255] };
     const size = canvas.width;
     const paint = (img: HTMLImageElement) => {
+      if (!canvas.isConnected) return;  // 上代 refresh 已销毁的画布不画(解码风暴浪费源)
       const frames = VANILLA_NPCS[String(npcId)]?.frames ?? 1;
       const fh = Math.max(1, Math.floor(img.height / frames));
       const cx = canvas.getContext('2d');
@@ -787,13 +852,8 @@ export class BestiaryPanel {
       cx.drawImage(img, 0, 0, img.width, fh, (size - w) / 2, (size - h) / 2, w, h);
     };
     const atlas = this.flow.atlas ?? null;
-    const loadBg = (name: string, cb: (bgi: HTMLImageElement) => void) => {
-      const cached = atlas ? atlas.vimages.get(`vanilla/${name}.png`) ?? null : null;
-      if (cached) { cb(cached); return; }
-      const bgi = new Image();
-      bgi.onload = () => cb(bgi);
-      bgi.src = `sprites/vanilla/${name}.png`;
-    };
+    // 统一走 bstLoadSheet 缓存(同表并发只取一次/结果回写/失败负终结;
+    // 此前 loadBg 每格每次 refresh new Image 且不回写=滚轮风暴解码源)
     const paintWithBg = (bgImg: HTMLImageElement | null) => {
       const cx = canvas.getContext('2d');
       if (!cx) return;
@@ -814,22 +874,20 @@ export class BestiaryPanel {
       }
     };
     if (bg.image) {
-      loadBg(bg.image, (bgImg) => {
+      bstLoadSheet(atlas, `vanilla/${bg.image}.png`, (bgImg) => {
+        if (!canvas.isConnected || !bgImg) return;
         paintWithBg(bgImg);
-        // NPC 表到位后叠画（贴图晚到时重绘底图再叠）
-        const cached = atlas ? atlas.vimages.get(`vanilla/NPC_${sheetId}.png`) ?? null : null;
-        if (cached) { paint(cached); return; }
-        const img = new Image();
-        img.onload = () => { paintWithBg(bgImg); paint(img); };
-        img.src = `sprites/vanilla/NPC_${sheetId}.png`;
+        // NPC 表到位后叠画（晚到重绘底图再叠;统一走缓存=同表并发只解码一次）
+        bstLoadSheet(atlas, `vanilla/NPC_${sheetId}.png`, (img) => {
+          if (!img || !canvas.isConnected) return;
+          paintWithBg(bgImg); paint(img);
+        });
       });
       return;
     }
-    const cached = atlas ? atlas.vimages.get(`vanilla/NPC_${sheetId}.png`) ?? null : null;
-    if (cached) { paint(cached); return; }
-    const img = new Image();
-    img.onload = () => paint(img);
-    img.src = `sprites/vanilla/NPC_${sheetId}.png`;
+    bstLoadSheet(atlas, `vanilla/NPC_${sheetId}.png`, (img) => {
+      if (img) paint(img);
+    });
   }
 
   /** 掉落行物品小图标（atlas.vicon 懒载未就绪时仅文字） */

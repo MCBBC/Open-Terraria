@@ -40,7 +40,15 @@ const GEM_TREES = [
   TILE_BY_KEY['v_589_amber_tree']!,
 ];
 
-export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
+/**
+ * 段落检查点回调（tests/shimmer-checkpoint.test.ts 消费；C# oracle 的
+ * Checkpoint("shimmershell"/…) 同名落点）。失败重掷的 ShimmerMakeBiome 调用在
+ * 越界/邪化石门即 return false——先于一切写格段，故回调只在成功尝试内触发，
+ * 与 oracle 单次成功尝试内的检查点一一对应。
+ */
+export type ShimmerStageCallback = (name: 'shimmershell' | 'shimmerpillars' | 'shimmeropen' | 'shimmer') => void;
+
+export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState, onStage?: ShimmerStageCallback): void {
   const w = st.w, h = st.h;
   const ws = Math.floor(gs.worldSurface), rl = Math.floor(gs.rockLevel);
   // cs:15259-15268:深度带
@@ -56,7 +64,7 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
   let y = rng.int(yLoBase, yHi - 1);
   let x = pickX(false);
   let tries = 0;
-  while (!shimmerMakeBiome(st, rng, gs, x, y)) {
+  while (!shimmerMakeBiome(st, rng, gs, x, y, onStage)) {
     tries++;
     if (tries > 20000) {
       // cs:15292-15295:放宽 x 带(0.8w/w-200 或 200/0.2w),y 下限 ws+100+20
@@ -77,7 +85,7 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 /** cs:34889-35056 ShimmerMakeBiome 主体 */
-function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number): boolean {
+function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: number, onStage?: ShimmerStageCallback): boolean {
   void gs;
   const variant = rng.int(0, 1); // genRand.Next(2)
   let n2 = 0.6, n3 = 1.3, n4 = 0.3;
@@ -139,6 +147,8 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
       }
     }
   }
+  // 检查点：主体塑形环完（cs:34996 环出口 = oracle Checkpoint("shimmershell")）
+  onStage?.('shimmershell');
   // cs:35020-35046:variant==0 的地表石柱列(两侧聚拢的土丘+石笋)
   if (variant === 0) {
     x0 = Math.trunc(X - n5 * n4) - rng.int(-15, 0) - 5;
@@ -178,9 +188,13 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
       }
     }
   }
+  // 检查点：石柱列完（variant≠0 时同态跳过 = oracle Checkpoint("shimmerpillars")）
+  onStage?.('shimmerpillars');
   // cs:35054-35055:两侧隧道开口
   shimmerOpening(st, rng, -1, X - n5, Y, n8);
   shimmerOpening(st, rng, 1, X + n5, Y, n8);
+  // 检查点：两侧隧道开口完（cs:35055 后 = oracle Checkpoint("shimmeropen")）
+  onStage?.('shimmeropen');
   // cs:35057-35083:aether 宝石树——500 次 X±70/Y±2 采样,两侧 SolidTile 才种。
   // ★tileSolid 走 GenSolid：659 以太石块自 Reset（cs:11500）起生成期恒非实心——
   //   原版 cs:35091 `SolidTile(num22±1, num23)` 读可变数组,**不会**把树种在以太
@@ -199,6 +213,8 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
     if (!solidTile(tx - 1, ty) || !solidTile(tx + 1, ty)) continue;
     growGemTree(st, rng, tx, ty, treeType);
   }
+  // 检查点：aether 宝石树种完（cs:35091 循环出口 = oracle Checkpoint("shimmer")）
+  onStage?.('shimmer');
   return true;
 }
 

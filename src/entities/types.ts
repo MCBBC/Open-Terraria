@@ -101,4 +101,12 @@ export interface GameHooks {
   /** 环境判定（Game.scene，SceneMetrics 每 15t 以玩家为中心刷新；Boss 暴怒度/石巨人
    *  脱庙加成读 zoneJungle/zoneTemple——原版 Main.player[target].ZoneJungle/ZoneLihzhardTemple） */
   scene?: import('../world/SceneMetrics').SceneFlags;
+  /** 原版 Dust 池直入（fx/VanillaDust.spawn——Dust.NewDust 签名对齐）。
+   *  Gore 411-430 气泡族爆裂尘（Gore.cs:905-928，type 176-179）用；缺省静默丢弃 */
+  spawnDust?(
+    x: number, y: number, w: number, h: number, type: number,
+    speedX?: number, speedY?: number, alpha?: number,
+    color?: { r: number; g: number; b: number; a: number } | null, scale?: number,
+    noGravity?: boolean,
+  ): void;
 }

@@ -55,6 +55,9 @@ export const TILE_ANIM_RATE: Record<number, number> = {
   31: 8,   // 魔金球（4 帧，pitch 36；Main.cs:18429-18437 counter>=8）
   739: 11, // 水母砖（4 帧，pitch 90；Main.cs:18389-18397 counter>10）
   748: 8,  // 水砖（8 帧，pitch 90；Main.cs:18399-18407 counter>7）
+  171: 17, // 圣诞树串灯（Main.cs:18609-18618 counter>16 → 每 17 tick；4 帧回卷。
+           //   ★只管重烘焙节奏：帧行偏移由 VanillaTiler.drawXmasTreeCell 按
+           //   Xmas_4 的 130px 行距自取（不走本表 pitch 语义）
 };
 
 /** pitch 特例表（其余走默认 38，TileDrawing GetTileDrawData switch 实证）。
@@ -71,6 +74,7 @@ const TILE_ANIM_PITCH: Record<number, number> = {
 /** 回卷上限显式覆盖（默认 floor(素材高/pitch)；素材含未用行时以原版回卷为准） */
 const TILE_ANIM_FRAMES: Record<number, number> = {
   12: 10, 639: 10,   // 表 396px=11 带，AnimateTiles 回卷 10（Main.cs:18375/18385）
+  171: 4,            // 圣诞树串灯：Xmas_4 四帧行（Main.cs:18614-18616 >3 回卷）
 };
 
 /** 篝火族（TileDrawing.cs:6124-6133 Campfires 覆盖）：pitch=36（非默认 38！素材帧块

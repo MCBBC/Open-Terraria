@@ -76,8 +76,8 @@ import { ChatMonitor } from './ChatMonitor';
 import { NpcDialog, NpcShop, NpcHappinessPanel, type NpcButtonId, type ShopEntry, type HappinessInfo } from './NpcDialog';
 import { UISfx } from '../vui/UISfx';
 import { COIN_START, AMMO_START, INV_SIZE, coinIndexOf } from '../items/Inventory';
-import { openAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
-import { openResearchPanel } from './ResearchUI';
+import { openAchievementsPanel, closeAchievementsPanel, createAchievementAdvisor } from './AchievementsUI';
+import { openResearchPanel, closeResearchPanel } from './ResearchUI';
 import { CharCreation } from './CharCreation';
 import type { Appearance } from '../player/Appearance';
 import type { ChestData } from '../world/World';
@@ -123,11 +123,19 @@ function iconUrl(game: Game, id: number): string {
         if (vm) ar = sliceItemAnimFrame(Number(vm[1]), ar, 0);
       }
       if (ar) {
+        const imgOk = !(ar.img instanceof HTMLImageElement)
+          || (ar.img.complete && ar.img.naturalWidth > 0);
+        if (!imgOk) ar = null;   // 破图（素材热切换瞬态）走兜底路径
+      }
+      if (ar) {
         const c = document.createElement('canvas');
         c.width = 32; c.height = 32;
         const cx = c.getContext('2d')!;
         cx.imageSmoothingEnabled = false;
-        const s = Math.min(32 / ar.sw, 32 / ar.sh);
+        // 原版背包图标 = 贴图原始尺寸渲染（ItemSlot.Draw scale=1,只缩不放）：
+        // 钱币 12px 圆点就该小,大翅膀才被压回 32。曾 min(32/sw,32/sh) 一律拉满
+        // → 钱币/弹药/小物件视觉虚胖（2026-08-13 用户抓到"钱币没这么大"）
+        const s = Math.min(1, 32 / ar.sw, 32 / ar.sh);
         const w = ar.sw * s, h = ar.sh * s;
         cx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, (32 - w) / 2, (32 - h) / 2, w, h);
         url = c.toDataURL();
@@ -269,7 +277,7 @@ export interface CompatReport {
 export class UI {
   devMode = false; // 开发者模式：进世界时全道具入包 + 出生点展示区
   root: HTMLElement;
-  game!: Game;
+  game!: Game;  // 生命周期由 enterGame 置入;quitToMenu 经 detachGame() 摘引用(2026-08-13 泄露 review)
   hotbarEl!: HTMLElement;
   hotbarNameEl!: HTMLElement;
   invPanel!: HTMLElement;
@@ -296,11 +304,11 @@ export class UI {
   }
 
   private slotContent(where: SlotWhere, i: number): { id: number; stack: number; favorited?: boolean; prefix?: number; placeStyle?: number } | null {
-    if (where === 'inv') return this.game.player.inv.slots[i];
-    if (where === 'armor') return this.game.player.inv.armor[i];
-    if (where === 'dye') return this.game.player.inv.dye[i];
-    if (where === 'misc') return this.game.player.inv.miscEquips[i];
-    if (where === 'miscDye') return this.game.player.inv.miscDyes[i];
+    if (where === 'inv') return this.game!.player.inv.slots[i];
+    if (where === 'armor') return this.game!.player.inv.armor[i];
+    if (where === 'dye') return this.game!.player.inv.dye[i];
+    if (where === 'misc') return this.game!.player.inv.miscEquips[i];
+    if (where === 'miscDye') return this.game!.player.inv.miscDyes[i];
     return this.openChest?.items[i] ?? null;
   }
 
@@ -787,6 +795,10 @@ export class UI {
     const d = ITEM_DEFS[cur.id];
     const src = where === 'inv' ? inv.slots[i] : where === 'armor' ? inv.armor[i] : inv.dye[i];
     if (!src) return;
+    // ★原版右键装备门（ItemSlot.RightClick :1537）：`inv[slot].stack == 1` 才触发
+    // SwapEquip——堆叠>1（1.4.4+ 装备可堆 9999）一律不装（落入下方取半逻辑）。
+    // 曾整堆塞进装备槽：99 个翅膀一键全上身=偏差（2026-08-13 用户抓到）
+    if (src.stack !== 1) return;
     let target = -1;
     let targetWhere: SlotWhere = 'armor';
     if (d.armor) {
@@ -1284,7 +1296,7 @@ export class UI {
     panel.style.cssText = 'width:560px; max-height:70vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
     const titleRow = el('div');
     titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
-    titleRow.appendChild(el('div', 'sw-lbl', '🔍 道具搜索（点击加入背包）'));
+    titleRow.appendChild(el('div', 'sw-lbl', '道具搜索（点击加入背包）'));
     const closeBtn = el('button', 'sw-btn');
     closeBtn.textContent = Lang.text('Mods.SandboxWorld.UI.Close');
     closeBtn.style.cssText = 'cursor:pointer;';
@@ -1517,7 +1529,7 @@ export class UI {
     panel.style.cssText = 'width:620px; max-height:76vh; background:#2a2a35; border:2px solid #6b6b8a; border-radius:6px; padding:10px; display:flex; flex-direction:column; gap:8px;';
     const titleRow = el('div');
     titleRow.style.cssText = 'display:flex; justify-content:space-between; align-items:center;';
-    titleRow.appendChild(el('div', 'sw-lbl', '📖 ' + Lang.inter(21)));
+    titleRow.appendChild(el('div', 'sw-lbl', Lang.inter(21)));
     const closeBtn = el('button', 'sw-btn', Lang.text('Mods.SandboxWorld.UI.Close'));
     closeBtn.style.cssText = 'cursor:pointer; width:auto; margin:0;';
     closeBtn.addEventListener('click', () => this.closeGuideSearch());
@@ -1684,7 +1696,7 @@ export class UI {
   private buildInventoryPanel() {
     this.invPanel = el('div', 'sw-panel');
     this.invPanel.style.cssText = 'position:fixed; left:50%; top:50%; transform:translate(-50%,-50%); display:none; max-height:88vh; overflow:auto;';
-    this.invPanel.appendChild(el('div', 'sw-title', Lang.text('Mods.SandboxWorld.UI.Inventory')));
+    // 原版背包无标题栏（DrawInventory 直接铺槽位）——标题行已摘（2026-08-13）
 
     // ---- 顶部：三套 Loadout 切换（DrawLoadoutButtons Main.cs:41386+：当前套高亮） ----
     {
@@ -1746,16 +1758,10 @@ export class UI {
         this.onBestiary?.();
       });
       row.appendChild(bBst);
-      // 成就入口（原版设置菜单 Lang.menu[131] + AchievementAdvisor 卡片点击
-      // IngameFancyUI.OpenAchievements——本作在背包顶栏直接给按钮）
-      const bAch = el('button', 'sw-btn', Lang.text('UI.Achievements'));
-      bAch.style.cssText = 'margin:0; padding:4px 10px; font-size:12px;';
-      bAch.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        this.closeInventory();
-        openAchievementsPanel(this.game);
-      });
-      row.appendChild(bAch);
+      // 成就入口 = 背包内 AchievementAdvisor 卡（AchievementsUI.createAchievementAdvisor，
+      // 原版同款：背包左侧未完成成就小卡点击开成就页）。背包顶栏成就按钮已摘
+      // （2026-08-13 用户要求：双入口只留原版位；原版设置菜单 Lang.menu[131] 入口
+      // 如需再补应落在 Settings 而非背包顶栏）
       // Journey 研究献祭入口（原版仅旅程模式 UISacrificeDialog；Appearance.difficulty===3 门）
       if (this.game.player.appearance?.difficulty === 3) {
         const bRes = el('button', 'sw-btn', Lang.text('LegacyInterface.112') !== 'LegacyInterface.112' ? Lang.text('LegacyInterface.112') : '研究');
@@ -1899,13 +1905,13 @@ export class UI {
       lblRow.appendChild(el('div', 'sw-lbl', Lang.text('Mods.SandboxWorld.UI.InvLabel')));
       const searchBtn = el('button', 'sw-btn');
       // 调试专用按钮：不入 l10n 包（生成产物 12 语言），标签硬编码
-      searchBtn.textContent = '🔍 道具搜索';
+      searchBtn.textContent = '道具搜索';
       searchBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
       searchBtn.addEventListener('click', () => this.openItemSearch());
       lblRow.appendChild(searchBtn);
       // 向导配方反查（guideItem 槽 → CollectGuideRecipes；LegacyInterface.21 标题）
       const guideBtn = el('button', 'sw-btn');
-      guideBtn.textContent = '📖 ' + Lang.text('LegacyInterface.21').replace('：', '');
+      guideBtn.textContent = Lang.text('LegacyInterface.21').replace('：', '');
       guideBtn.style.cssText = 'font-size:12px; padding:2px 8px; cursor:pointer;';
       guideBtn.addEventListener('click', () => this.openGuideSearch());
       lblRow.appendChild(guideBtn);
@@ -2415,7 +2421,20 @@ export class UI {
     slotEl.title = content?.favorited ? '已收藏（Alt+左键取消；禁止快速转移）' : '';
   }
 
+  /** rAF 合并版 refreshAll(2026-08-13 泄露 review):滚轮/拾取/背包变化等
+   *  事件风暴下每帧至多全量重建一次(此前合成列表滚轮每事件直调=与
+   *  BestiaryPanel 滚轮崩溃同根因)。31 处调用点零改动透传 */
+  private _refreshAllQueued = false;
   refreshAll() {
+    if (this._refreshAllQueued) return;
+    this._refreshAllQueued = true;
+    requestAnimationFrame(() => {
+      this._refreshAllQueued = false;
+      this.refreshAllNow();
+    });
+  }
+
+  private refreshAllNow() {
     if (!this.game) return;
     this.moveGhost();
     this.paintTrash();
@@ -2516,6 +2535,9 @@ export class UI {
   private refreshVanillaCrafting(): void {
     const game = this.game;
     if (!game || !this.craftListEl) return;
+    // ★先清后填(2026-08-13 泄露 review):此前只 append 从不清空——合成搜索
+    // 每键直调本方法,连续打字时 61 节点/键无上界累积(清空原本只在 refreshCrafting)
+    this.craftListEl.replaceChildren();
     let avail = game.vanillaAvailableRecipes();
     if (!avail.length) return;
     // 搜索过滤（Modern 网格搜索栏：按成品名过滤）
@@ -2562,20 +2584,25 @@ export class UI {
       });
       this.craftListEl.appendChild(row);
     }
-    // 滚轮：焦点 ±1（原版 ScrollCraftingList；±6.5/帧的平滑由 transition 兜）
-    if (!this._craftWheelBound) {
-      this._craftWheelBound = true;
-      this.craftListEl.addEventListener('wheel', (ev) => {
-        ev.preventDefault();
-        ev.stopPropagation();
-        this.craftFocus = Math.max(0, this.craftFocus + (ev.deltaY > 0 ? 1 : -1));
-        this.refreshAll();
-      }, { passive: false });
+    // 滚轮：焦点 ±1（原版 ScrollCraftingList；±6.5/帧的平滑由 transition 兜）。
+    // ★2026-08-13 泄露 review 两修:①绑定标记挂元素(craftListEl 每次进游戏
+    // 重建,旧类字段置真后永不复位=第二次进游戏滚轮永久失效);②refreshAll
+    // 改走 rAF 合并(滚轮风暴每事件一次全量重建=BestiaryPanel 同根因)
+    {
+      const cl = this.craftListEl as HTMLElement & { __swCraftWheel?: boolean };
+      if (!cl.__swCraftWheel) {
+        cl.__swCraftWheel = true;
+        cl.addEventListener('wheel', (ev) => {
+          ev.preventDefault();
+          ev.stopPropagation();
+          this.craftFocus = Math.max(0, this.craftFocus + (ev.deltaY > 0 ? 1 : -1));
+          this.refreshAll();
+        }, { passive: false });
+      }
     }
     // Modern 合成网格材料格（焦点配方）
     this.refreshCraftGrid(avail);
   }
-  private _craftWheelBound = false;
 
   /** 材料格覆盖计数：req（含组假 id）当前格内存量 */
   private gridCovered(reqId: number): number {
@@ -2811,12 +2838,30 @@ export class UI {
     this.heldStack = null;
     this.openChest = null;
     this.reforgeItem = null;
+    this.detachGame();
     this.reforgeEl?.remove();
     this.reforgeEl = null;
     this.guideEl?.remove();
     this.guideEl = null;
     this.itemSearchEl?.remove();
     this.itemSearchEl = null;
+    // ---- 生命周期外挂清理(2026-08-13 泄露 review,审计三高危之一)----
+    // 此前只清 DOM 不关逻辑面板:clothesPanel 孤儿(rAF/keydown/Lang 永转)、
+    // npc 对话/商店/心情浮层留 stale window keydown、成就/研究模块单例滞留
+    // uiBlocking=true、achWrapEl 陈旧引用(退菜单后成就弹窗永久不可见)
+    this.clothesPanel?.close();
+    this.clothesPanel = null;
+    this.closeNpcDialog();
+    closeAchievementsPanel();
+    closeResearchPanel();
+    this.achWrapEl = null;
+  }
+
+  /** 摘除 Game 引用(quitToMenu→closeAll 调用):防旧 Game 整图(世界 store
+   *  数十 MB typed array)被 UI 挂到下次进世界才释放(2026-08-13 泄露 review)。
+   *  字段保持非空类型(definite assignment)避免 87 处消费点连锁改判空 */
+  detachGame(): void {
+    this.game = null as unknown as Game;
   }
 
   /** 初始化 HUD 相关面板（进入游戏后调用一次） */
@@ -2952,6 +2997,9 @@ export class UI {
   private clothesPanel: CharCreation | null = null;
 
   showClothesWindow(appearance: Appearance, onApply: (a: Appearance) => void): void {
+    // 已开守卫(2026-08-13 泄露 review):此前直接覆盖引用——前一个 CharCreation
+    // 的 rAF+window keydown+Lang 订阅永久无人清理(孤儿 rAF 永转)
+    this.clothesPanel?.close();
     this.clothesPanel = new CharCreation(this.root, {
       // 更衣窗只改衣服样式+六色（确认=GameUI.Change，取消/Esc=回退不动外观）
       onCreate: (a) => { this.clothesPanel = null; onApply(a); },

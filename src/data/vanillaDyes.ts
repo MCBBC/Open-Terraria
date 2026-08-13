@@ -56,9 +56,10 @@ export function dyeCount(): number {
  * 返回是否实际染色（false = pass 缺失/数据异常 → 原样）。
  */
 export function applyDyePass(data: Uint8ClampedArray, w: number, h: number,
-  apply: DyeApply, extraSamplers: Array<SM2Sampler | undefined> = []): boolean {
+  apply: DyeApply, extraSamplers: Array<SM2Sampler | undefined> = [],
+  t0Rect?: { sx: number; sy: number; sheetW: number; sheetH: number }): boolean {
   const pass = getPass(apply.tech);
   if (!pass) return false;
-  runPassOnImageData(pass, data, w, h, apply.uniforms, extraSamplers);
+  runPassOnImageData(pass, data, w, h, apply.uniforms, extraSamplers, t0Rect);
   return true;
 }

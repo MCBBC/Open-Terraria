@@ -1622,16 +1622,24 @@ export class FlaironSpike extends Entity {
 // ================= 手雷/炸弹/炸药（aiStyle 16，AI_016 引信爆炸） =================
 
 /** AI_016 全族分类表（Projectile.cs 权威行号） */
-/** 粘性族（SetDefaults tileCollide=false + AI_016 :44325 贴附扫描） */
-const STICKY_PROJ = new Set([37, 397, 470]);
+/** 粘性族（SetDefaults tileCollide=false + AI_016 :44325 贴附扫描）。
+ *  911 黏性土制炸弹同族（:8371-8379 tileCollide=false + :44325 列表） */
+const STICKY_PROJ = new Set([37, 397, 470, 911]);
+/** 液体炸弹族（903 水/904 岩浆/905 蜂蜜/906 干燥）：入液即爆
+ *  （AI_016 :44267 wet && 族列表 → timeLeft=1 次帧爆） */
+const LIQUID_BOMB_PROJ = new Set([903, 904, 905, 906]);
 /** 炸药棍族（Kill :74943 视觉/PrepareBombToBlow 250×250/半径 7/反弹 ×0.8/摩擦追加 ×0.99） */
 const DYN_PROJ = new Set([29, 470, 637]);
 /** 炸弹族（Kill :74881 视觉/PrepareBombToBlow 128×128 dmg100/半径 4） */
 const BOMB_PROJ = new Set([28, 37, 516]);
 /** 手雷族（不破坏地形；PrepareBombToBlow 128×128 用物品伤害） */
 const NADE_PROJ = new Set([30, 397, 517]);
-/** IsABombWithFuse（ProjectileID.cs:183——引信嘶声循环族；手雷族不在内！） */
-const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637]);
+/** IsABombWithFuse（ProjectileID.cs:183——引信嘶声循环族；手雷族不在内！）。
+ *  原版全集含 519/75/102/681/773/1077/1086/1087——它们在本仓走各自专属实体
+ *  （681 DD2GoblinBomb=bossAI_dd2 等），不经过 GrenadeProj,故表内只收
+ *  本实体承接的成员 + 湿/干/土制弹族 903-906/910/911（§7 销核批落地，
+ *  2026-08-13 主会话补入嘶声资格） */
+const FUSE_SOUND_PROJ = new Set([28, 37, 516, 29, 470, 637, 903, 904, 905, 906, 910, 911]);
 
 export class GrenadeProj extends Entity {
   // 碰撞盒 1:1（Projectile.SetDefaults :846-869/:938/:4508/:5173/:5584/:5592/:6571）：
@@ -1649,6 +1657,8 @@ export class GrenadeProj extends Entity {
   dead = false;
   /** 引信嘶声循环句柄（AI_016 :44276-44281 PlayTrackedLoopedSound；Kill :67373 Stop） */
   private fuseSnd: { stop(): void; setPos(px: number, py: number): void } | null | undefined;
+  /** 911 首贴标记（原版 localAI[0]，:44364/:44372） */
+  private stuckOnce = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number, fuse: number,
     projId: number, onExplode: (x: number, y: number, damage: number) => void) {
@@ -1659,7 +1669,9 @@ export class GrenadeProj extends Entity {
     this.fuse = fuse;
     this.projId = projId;
     this.onExplode = onExplode;
-    const hb = BOMB_PROJ.has(projId) ? 22 : DYN_PROJ.has(projId) ? 10 : 14;
+    // 液体炸弹/土制炸弹族碰撞盒 22×22（SetDefaults :8325-8332/:8363-8379 同炸弹族）
+    const hb = BOMB_PROJ.has(projId) || LIQUID_BOMB_PROJ.has(projId) || projId === 910 || projId === 911
+      ? 22 : DYN_PROJ.has(projId) ? 10 : 14;
     this.w = hb; this.h = hb;
   }
 
@@ -1677,6 +1689,17 @@ export class GrenadeProj extends Entity {
 
   fixedUpdate(_dt: number, game: GameHooks) {
     const st = game.world.store;
+    // ---- 液体炸弹入液即爆（AI_016 :44267：wet && {903..906} 族 → timeLeft=1 次帧爆；
+    //      wet = Collision.WetCollision 投射物盒与任一液体格重叠 :10248）----
+    if (LIQUID_BOMB_PROJ.has(this.projId)) {
+      const tx0 = Math.floor(this.x / TILE), tx1 = Math.floor((this.x + this.w - 1) / TILE);
+      const ty0 = Math.floor(this.y / TILE), ty1 = Math.floor((this.y + this.h - 1) / TILE);
+      wetScan: for (let wx = tx0; wx <= tx1; wx++) {
+        for (let wy = ty0; wy <= ty1; wy++) {
+          if (st.inBounds(wx, wy) && st.liquid[st.idx(wx, wy)] > 0) { this.fuse = 1; break wetScan; }
+        }
+      }
+    }
     // ---- 引信嘶声循环（AI_016 :44276：IsABombWithFuse 且 timeLeft>1；0.2 音量跟踪弹体）----
     if (FUSE_SOUND_PROJ.has(this.projId) && this.fuse > 1) {
       // 首播可能缓冲未就绪返回 null → 每 tick 重试直至挂上（原版同帧不保证）
@@ -1722,11 +1745,44 @@ export class GrenadeProj extends Entity {
         for (let j = y0; j < y1 && !stuck; j++) {
           if (!st.inBounds(i, j) || !st.isActive(i, j) || !st.isSolid(i, j) || st.isPlatform(i, j)) continue;
           if (this.x + this.w - 4 > i * TILE && this.x + 4 < i * TILE + TILE
-            && this.y + this.h - 4 > j * TILE && this.y + 4 < j * TILE + TILE) stuck = true;
+            && this.y + this.h - 4 > j * TILE && this.y + 4 < j * TILE + TILE) {
+            stuck = true;
+            // 911 首贴回退（:44364-44374）：与块中心距离 <12px → 沿速度反方向退 4px，
+            // 随后 localAI[0]=1 不再触发（防止反复推挤穿墙）
+            if (this.projId === 911 && !this.stuckOnce) {
+              const tcx = i * TILE + 8, tcy = j * TILE + 8;
+              if (Math.hypot(this.cx - tcx, this.cy - tcy) < 12) {
+                const vl = Math.hypot(this.vx, this.vy);
+                if (vl > 0) {
+                  this.x -= (this.vx / vl) * 4;
+                  this.y -= (this.vy / vl) * 4;
+                }
+              }
+              this.stuckOnce = true;
+            }
+          }
         }
       }
-      if (stuck) { this.vx = 0; this.vy = -0.2; }  // 贴附：抵消重力悬停（:44376-44377）
-      else this.vy = Math.min(this.vy + 0.2, 16);   // 未贴住时照常重力
+      if (stuck) {
+        this.vx = 0; this.vy = -0.2;                  // 贴附：抵消重力悬停（:44376-44377）
+        // 911 推出（:44385-44393）：弹心所在格实心 → 沿（块心−弹心）反向退 4px，
+        // 让炸弹停在墙面外侧而非嵌进砖里（SolidOrSlopedTile ≈ isSolid）
+        if (this.projId === 911) {
+          const ptx = Math.floor(this.cx / TILE), pty = Math.floor(this.cy / TILE);
+          if (st.inBounds(ptx, pty) && st.isSolid(ptx, pty)) {
+            const dx = ptx * TILE + 8 - this.cx, dy = pty * TILE + 8 - this.cy;
+            const dl = Math.hypot(dx, dy);
+            if (dl > 0) {
+              this.x -= (dx / dl) * 4;
+              this.y -= (dy / dl) * 4;
+            }
+          }
+        }
+      } else {
+        // 未贴住时照常重力；911 速度钳 ±8（:44898-44902 专属分支）
+        this.vy = Math.min(this.vy + 0.2, this.projId === 911 ? 8 : 16);
+        if (this.projId === 911) this.vx = Math.max(-8, Math.min(8, this.vx));
+      }
       this.x += this.vx;
       this.y += this.vy;
       if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) { this.dead = true; this.destroy(); }
@@ -1998,5 +2054,197 @@ export class TorchGodProj extends Entity {
       return;
     }
     this.x = nx; this.y = ny;
+  }
+}
+
+// ================= 太阳耀斑 636（aiStyle 113，AI_113_TargetSticker :38138-38477） =================
+
+/**
+ * proj 636（SetDefaults :6559-6570：16×16 aiStyle113 friendly melee penetrate−1
+ * alpha255 MaxUpdates=2）——Daybreak 长矛 3543 直射（Item.cs:31847-31860 shoot=636）。
+ * 标枪族双相：飞行（ai[0]==0，:38166-38248：45 AI 次后缓坠 636 档 vx×0.995/vy+0.15，
+ * rotation=atan2+π/2）→ 命中即附着（:12421-12428 ai[0]=1、ai[1]=victim、
+ * velocity=(敌心−弹心)×0.75 冻结为悬挂偏移）→ 附着段（:38242-38367：Center=
+ * 敌心−velocity×2 跟随，60×num11=600 AI 次（num11=5×MaxUpdates=10,:38249-38253）
+ * = 300t/5s 后消亡，目标失效同灭）。Daybreak(189) 层数 = 场上附着数（NPC.cs
+ * :92807-92830 num8×100 HP/s，零层兜底 1），上限 8/敌（KillOldestJavelin
+ * :13019-13030/:13995-14020，_javelinsMax8）。
+ */
+const STUCK_FLARES = new Map<number, DaybreakFlare[]>();
+
+/** Daybreak(189) 层数查询（NPC.cs:92813-92825 的 active&&type==636&&ai[0]==1&&
+ *  ai[1]==whoAmI 扫描等价）。键 = Enemy.id（EntityManager 槽位，与 hitCd 同空间）；
+ *  零层兜底 num8==0→1（:92822-92825）由消费方 max(1,·) 承担 */
+export function daybreakStacks(enemyId: number): number {
+  const arr = STUCK_FLARES.get(enemyId);
+  if (!arr) return 0;
+  // 惰性清尸：EntityManager.clear()（world unload）不走 destroy()，死弹残条目
+  // 不计层——防跨世界 id 复用时的幽灵层数
+  let n = 0;
+  for (let i = arr.length - 1; i >= 0; i--) {
+    if (arr[i].dead) arr.splice(i, 1);
+    else n++;
+  }
+  if (!arr.length) STUCK_FLARES.delete(enemyId);
+  return n;
+}
+
+export class DaybreakFlare extends Entity {
+  readonly projId = 636;
+  damage: number;
+  knockback: number;
+  /** 暴击总概率（Game 侧注入，同挥砍弧口径） */
+  critChance = 0.04;
+  /** 护甲穿透（Game 注入，命中传 hurt 减防） */
+  armorPen = 0;
+  /** 近战系标记（SetDefaults melee=true :6565；浸剂链未接，登记偏差） */
+  meleeProj = true;
+  dead = false;
+  w = 16; h = 16;                        // :6561-6562
+  /** 弹体点光（:38472-38474 恒亮 0.8/0.7/0.4，飞行/附着两相都加） */
+  lightRGB: [number, number, number] | null = [0.8, 0.7, 0.4];
+  /** MaxUpdates=2（:6569 → extraUpdates=1，属性定义 :338-348）= 每 tick AI+移动 2 次。
+   *  vanilla-projectiles.json 未提取该字段，按源码常量 */
+  private static readonly RUNS = 2;
+  /** ai[0]：0 飞行 / 1 附着（:38242 分相 / :12423 置 1） */
+  private ai0 = 0;
+  /** ai[1]：飞行 = AI 次计数（:38170）/ 附着 = 目标 Enemy.id（:12424/:38287） */
+  private ai1 = 0;
+  /** localAI[0]：附着段 AI 次计数（:38278） */
+  private localT = 0;
+  /** alpha 淡入（:38139-38146，636 档 25/AI 次 → 约 5t 全显） */
+  private alphaI = 255;
+  private rot = 0;
+  /** timeLeft（SetDefaults 缺省 3600，:526；KillOldestJavelin 的"最老"序据） */
+  private timeLeft = 3600;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
+    super();
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.damage = damage; this.knockback = knockback;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    // extraUpdates=1：AI+移动每 tick 跑 2 次（Update :15336-15339 while 语义同 Boomerang）
+    for (let i = 0; i < DaybreakFlare.RUNS && !this.dead; i++) this.step(game);
+  }
+
+  /** 单次 AI 迭代（AI_113_TargetSticker 一次） */
+  private step(game: GameHooks): void {
+    if (--this.timeLeft <= 0) { this.killNow(game); return; }
+    if (this.alphaI > 0) this.alphaI = Math.max(0, this.alphaI - 25);   // :38139-38146
+    if (this.ai0 === 0) {
+      // ---- 飞行相（:38166-38248）----
+      this.ai1 += 1;                       // :38170
+      if (this.ai1 >= 45) {                // :38173-38174 起 45 AI 次门
+        this.vx *= 0.995;                  // :38196-38202（636 档 0.995/0.15）
+        this.vy += 0.15;
+      }
+      this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;            // :38244-38248
+    } else {
+      // ---- 附着相（:38242-38367）----
+      this.localT += 1;                    // :38278
+      if (this.localT >= 600) { this.killNow(game); return; }  // :38329-38332（60×num11）
+      const t = this.findTarget(game);     // :38287 num12 = (int)ai[1]
+      if (!t) { this.killNow(game); return; }  // :38333-38336/:38346-38349 目标失效
+      this.x = (t as { cx: number }).cx - this.vx * 2 - this.w / 2;     // :38338-38339
+      this.y = (t as { cy: number }).cy - this.vy * 2 - this.h / 2;
+      if (this.localT % 30 === 0) {        // :38279-38282/:38341-38344 HitEffect 近似
+        game.spawnParticles(this.cx, this.cy, '#FFB040', 2, 1.2, { life: 14 });
+      }
+      return;                              // tileCollide=false（:38248）且不再位移/命中
+    }
+    this.moveStep(game);
+    if (this.dead) return;
+    this.hitStep(game);                    // 附着后 Damage_CanDealDamage=false（:11782）
+  }
+
+  /** 飞行位移 + 撞块即毁（标枪族无反弹分支，Arrow 同口径） */
+  private moveStep(game: GameHooks): void {
+    this.x += this.vx; this.y += this.vy;
+    const st = game.world.store;
+    const tx = Math.floor((this.x + this.w / 2) / TILE);
+    const ty = Math.floor((this.y + this.h / 2) / TILE);
+    if (!st.inBounds(tx, ty)) { this.killNow(game); return; }
+    game.cutTile(tx, ty);
+    if (st.get(tx, ty) !== 0 && st.isSolid(tx, ty)) this.killNow(game);
+  }
+
+  /** 首击结算：伤害 + AddBuff(189,300) + 附着 + 上限 8 淘汰（单目标即止） */
+  private hitStep(game: GameHooks): void {
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; cx?: number; cy?: number; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean };
+      if (e.dead) continue;
+      // :14520-14523 大型目标命中盒各边内缩 1/8（636 专属——大 Boss 须命中内圈才附着）
+      const sx = e.w > 8 && e.h > 8 ? Math.floor(e.w / 8) : 0;
+      const sy = e.w > 8 && e.h > 8 ? Math.floor(e.h / 8) : 0;
+      const rx = e.x + sx, rw = e.w - sx * 2, ry = e.y + sy, rh = e.h - sy * 2;
+      if (!(this.x < rx + rw && this.x + this.w > rx && this.y < ry + rh && this.y + this.h > ry)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      playEnemyHitSound(game, e as never);
+      e.hurt(dmg, (Math.sign(this.vx) || 1) * this.knockback, 0, game, this.armorPen, crit);
+      applyProjStatus(this.projId, e as unknown as Record<string, number>);   // :10691-10693
+      game.addDamageNumber(this.x + this.w / 2, this.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      // ---- 附着（:12421-12428）----
+      this.ai0 = 1;
+      this.ai1 = e.id;
+      const ecx = e.cx ?? e.x + e.w / 2, ecy = e.cy ?? e.y + e.h / 2;
+      this.vx = (ecx - this.cx) * 0.75;    // 冻结为悬挂偏移（附着段 Center=敌心−v×2）
+      this.vy = (ecy - this.cy) * 0.75;
+      const arr = STUCK_FLARES.get(e.id);
+      if (arr) arr.push(this); else STUCK_FLARES.set(e.id, [this]);
+      this.killOldest(game);               // :13019-13030（上限 8,_javelinsMax8 :272）
+      return;
+    }
+  }
+
+  private findTarget(game: GameHooks): unknown | null {
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { id: number; dead: boolean };
+      if (!e.dead && e.id === this.ai1) return ent;
+    }
+    return null;
+  }
+
+  /** KillOldestJavelin（:13995-14020）：除自己外凑满 8 枚附着 → 灭 timeLeft 最老者 */
+  private killOldest(game: GameHooks): void {
+    const arr = STUCK_FLARES.get(this.ai1);
+    if (!arr) return;
+    let oldest: DaybreakFlare | null = null;
+    let n = 0;
+    for (const f of arr) {
+      if (f === this || f.dead) continue;
+      n++;
+      if (!oldest || f.timeLeft < oldest.timeLeft) oldest = f;
+    }
+    if (n >= 8 && oldest) oldest.killNow(game);
+  }
+
+  private killNow(game: GameHooks): void {
+    if (this.dead) return;
+    this.detach();
+    this.dead = true;
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+    // Kill 尘爆近似（:68886-68897）；伴生 953 DaybreakExplosion 未实装——登记偏差
+    game.spawnParticles(this.cx, this.cy, '#FFB040', 4, 1.6, { life: 16 });
+  }
+
+  /** EntityManager 剔除兜底（world unload/测试直弃时摘层数） */
+  destroy(): void { this.detach(); }
+
+  private detach(): void {
+    if (this.ai0 !== 1) return;
+    const arr = STUCK_FLARES.get(this.ai1);
+    if (!arr) return;
+    const i = arr.indexOf(this);
+    if (i >= 0) arr.splice(i, 1);
+    if (!arr.length) STUCK_FLARES.delete(this.ai1);
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    // alpha 淡入（:38139-38146，SetDefaults alpha=255 起步）
+    drawProj(r, cam, this, 636, this.rot, '#FFB040', 1 - this.alphaI / 255);
   }
 }

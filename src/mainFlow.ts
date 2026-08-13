@@ -624,6 +624,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
 
   /** 设置面板（主菜单含数据栏；游戏内不显示数据栏） */
   function openSettings(inGame: boolean) {
+    // 已开守卫(2026-08-13 泄露 review):无守卫时暂停菜单里重复点"设置"
+    // 叠面板,每层多 1 个 window Esc + 1 个 Lang 订阅
+    if (document.querySelector('.sw-set-panel')) return;
     new SettingsPanel(root, {
       ...(inGame ? {} : {
         onQuickLoad: () => void quickLoad(),
@@ -652,6 +655,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
    *  打开期间暂停世界并阻断输入；Esc/E 关闭后恢复先前的暂停/阻断态
    *  （从暂停菜单进入时其面板仍叠在下层，关闭即回暂停菜单）。 */
   function openBestiary() {
+    if (document.querySelector('.sw-bst')) return;  // 已开守卫(2026-08-13 泄露 review:叠层累积 Esc 捕获)
     const g = game;
     if (!g) return;
     const wasPaused = g.paused;
@@ -718,6 +722,10 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     mobile = null;
     game?.destroy();
     game = null;
+    // 外部持有者同步摘引用(2026-08-13 泄露 review):__swGame 不清=旧 Game(整个
+    // 世界 store 数十 MB typed array)被 window 挂到下次进游戏才释放;ui.game
+    // 由 closeAll→detachGame 摘
+    (window as unknown as { __swGame?: Game | null }).__swGame = null;
     currentWorld = null;
     ui.closeAll();
     showTitle();

@@ -14,6 +14,8 @@ import {
   DECOR_LEFT_DOWN, DECOR_RIGHT_DOWN, DECOR_BOUNCY_BUMPER, DECOR_REGULAR_BUMPER,
 } from '../world/MinecartTrack';
 import { cageFamilyOf, drawCageCell } from './CritterCage';
+import { xmasCell, xmasDecorStyle, XMAS_LIGHT_FRAMES } from '../world/XmasTree';
+import { animFrameIdx } from './TileAnim';
 
 type Frame = [number, number];
 
@@ -772,6 +774,44 @@ export function drawCactusCell(
   }
 }
 
+/** 圣诞树单格绘制（TileDrawing.DrawXmasTree :3699-3799 逐格切片等价）。
+ *  本体 = Tiles_171（≡ Xmas_0，16px 紧排 4×8 网格）；装饰层按锚点 frameY
+ *  位段解码，变体在装饰贴图内 66px 步长、串灯 130px×帧号（4 帧循环，
+ *  Main.cs:18609-18618 counter>16 推进）。*/
+function drawXmasTreeCell(
+  ctx: CanvasRenderingContext2D, atlas: SpriteAtlas,
+  st: TileStore, x: number, y: number, px: number, py: number,
+): void {
+  const cell = xmasCell(st, x, y);
+  if (!cell) return;
+  const { ax, ay, col, row } = cell;
+  const body = atlas.ensureVImage('vanilla/Tiles_171.png');
+  if (body && body.complete && body.naturalWidth > 0
+    && col * 16 + 16 <= body.naturalWidth && row * 16 + 16 <= body.naturalHeight) {
+    ctx.drawImage(body, col * 16, row * 16, 16, 16, px, py, TILE, TILE);
+  }
+  // 装饰层（:3774-3797：topper=slot0 Xmas_3 / garland=slot1 Xmas_1 /
+  // bulbs=slot2 Xmas_2 / lights=slot3 Xmas_4；变体号-1 取 0 基）
+  const slots: Array<[number, string]> = [
+    [0, 'vanilla/Xmas_3.png'],
+    [1, 'vanilla/Xmas_1.png'],
+    [2, 'vanilla/Xmas_2.png'],
+    [3, 'vanilla/Xmas_4.png'],
+  ];
+  for (const [obj, tex] of slots) {
+    const style = xmasDecorStyle(st, ax, ay, obj);
+    if (style <= 0) continue;
+    const img = atlas.ensureVImage(tex);
+    if (!img || !img.complete || img.naturalWidth === 0) continue;
+    const vx = (style - 1) * 66 + col * 16;
+    let vy = row * 16;
+    if (obj === 3) vy += animFrameIdx(171, XMAS_LIGHT_FRAMES * 130) * 130;   // 串灯帧行
+    if (vx + 16 <= img.naturalWidth && vy + 16 <= img.naturalHeight) {
+      ctx.drawImage(img, vx, vy, 16, 16, px, py, TILE, TILE);
+    }
+  }
+}
+
 /** 矿车轨道格绘制（TileDrawing.DrawTile_MinecartTrack :3823-3857 1:1）。
  *  frameX = 前轨连接 ID、frameY = 后轨连接 ID（0xFFFF = -1 无后轨）。
  *  层序：后轨 → 前轨 → 下行装饰(36/37, 画在下一格) → 挡板(39 普通 / 38 弹性, 画在上一格)。
@@ -831,6 +871,15 @@ export function drawVanillaCell(  ctx: CanvasRenderingContext2D, atlas: SpriteAt
   // 仙人掌（tile 80）：wld 无帧，按邻接现场分帧 + 生物群系变体
   if (sheet === 80 && frame === 'style') {
     drawCactusCell(ctx, atlas, st, x, y, type, px, py);
+    return;
+  }
+  // 圣诞树（tile 171）：整树 64×128 = 16px 紧排网格（Tiles_171 ≡ Xmas_0 逐字节相同），
+  // 不是常规 18px 步长——通用 style 采样会逐列漂 2px。装饰层按锚点 frameY 位段
+  // 解码（TileDrawing.DrawXmasTree :3699-3799）：Xmas_3 树顶饰 / Xmas_1 花环 /
+  // Xmas_2 彩球 / Xmas_4 串灯（变体 66px 步长、串灯行 130×帧号动画）。
+  // 逐格画本格切片（col/row 由 xmasCell 归一），无跨 chunk 裁剪问题
+  if (sheet === 171 && frame === 'style') {
+    drawXmasTreeCell(ctx, atlas, st, x, y, px, py);
     return;
   }
   // blend 类（泥土/石族/草族/沙/泥/雪）：TEdit BlendRules 移植

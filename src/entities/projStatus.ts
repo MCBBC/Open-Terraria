@@ -36,7 +36,8 @@ const SUPPORTED: Record<number, string> = {
   204: 'oiledT',       // Oiled:六火系在身时再叠 -50 = +25 HP/s(:92728-92737)
   36: 'brokenArmorT',  // BrokenArmor:受击无视 20 防(:81919-81921)
   203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922-81924)
-  189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数=场上 636 计数,:92807-92841;GAP)
+  189: 'daybreakT',    // Daybreak:层数模型已接(:92807-92830 层数×100HP/s,零层兜底 1;
+  //   层数 = WeaponProj.daybreakStacks 场上附着 636 计数,Enemy 侧消费)
   30: 'bleedT',        // Bleeding(:92592-92601;-24 = 12 HP/s)
   137: 'slimedT',      // Slimed(drippingSlime):六火系 DoT 翻倍(:92623 等 6 处)
   375: 'hemorrhageT',  // Hemorrhage(:92604-92611;-200 = 100 HP/s)

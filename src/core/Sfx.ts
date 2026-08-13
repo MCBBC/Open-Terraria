@@ -421,8 +421,11 @@ export class Sfx {
 
   /** 按文件名直播（缓冲未就位时触发后台加载，本播返回 false 走合成兜底）。
    *  vol 语义 = 原版 volumeScale（调用方传 1 = 原版默认）；原版各 case 的专属
-   *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数 */
-  playWavFile(file: string, vol = 1, x?: number, y?: number): boolean {
+   *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数。
+   *  pitch = XNA SoundEffectInstance.Pitch（-1..1，频率倍率 2^pitch）——乐器族
+   *  （Player.cs:45928 Main.musicPitch 直传 PlaySound 第 4 参）需要逐音符变调，
+   *  传该参时跳过默认 ±0.08 抖动（音符音高是语义本体，不容扰动） */
+  playWavFile(file: string, vol = 1, x?: number, y?: number, pitch?: number): boolean {
     if (this.suppress) return false;         // 载入期静音门（见字段注释）
     const ctx = this.ensure();
     if (!ctx) return false;
@@ -433,7 +436,7 @@ export class Sfx {
     if (!buf) return false;
     const src = ctx.createBufferSource();
     src.buffer = buf;
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    src.playbackRate.value = pitch != null ? 2 ** pitch : 0.92 + Math.random() * 0.16;
     const g = ctx.createGain();
     g.gain.value = Math.min(1, vol * this.master);
     src.connect(g).connect(ctx.destination);

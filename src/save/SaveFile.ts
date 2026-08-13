@@ -43,6 +43,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
     paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
+    explored: world.explored,                   // 战争迷雾（原版 .twld MapHelper 段等价）
   };
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
@@ -124,6 +125,7 @@ export function saveWorldOnly(world: World): string {
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
     paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
+    explored: world.explored,                   // 战争迷雾（服务器档随世界下发）
   };
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
@@ -412,6 +414,22 @@ export function loadSaveData(data: SaveData, onTilesProgress?: (p: number) => vo
       for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       const end = Math.min(i + run + 1, nAll);
       for (; i < end; i++) tyPw[i] = v & 31;
+    }
+  }
+  // 战争迷雾（0/1 位图；旧档缺段 → 全 0 未探索 = 旧行为，不迁移不报错。
+  // explored 已由构造器按 w*h 全零分配，RLE 游程未覆盖的尾部保持 0——同 wire 缺段容忍）
+  {
+    const ex = world.explored;
+    const u8 = b64ToBytes(data.explored ?? '');
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      const on = v ? 1 : 0;   // 钳位 0/1 域：非零脏数据按"已探索"归 1
+      for (; i < end; i++) ex[i] = on;
     }
   }
   // liquid

@@ -9,7 +9,7 @@ import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import type { DrawRect } from '../assets/SpriteAtlas';
 import { atlasIconForKey, VANILLA_ITEM_ICON_MAP, sliceItemAnimFrame } from '../assets/SpriteAtlas';
 import { TOOL_CUTTER } from '../world/Wiring';
-import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, FRAME_W, FRAME_H } from '../player/PaperDoll';
+import { compositePaperDoll, dollFrame, dollHairLayer, hairFrameTinted, headArmorImage, tintRGBA, FRAME_W, FRAME_H } from '../player/PaperDoll';
 import { hairDyeColor } from '../player/HairDyeColor';
 import type { Inventory } from '../items/Inventory';
 import { options } from '../core/Options';
@@ -1344,8 +1344,20 @@ export class Renderer {
     }
     // 3.85 FlameParticle 层（Main.ParticleSystem_World_BehindPlayers，Main.cs:61692-61693：
     //     投射物之后、玩家之前——山羊坐骑 47 地面冲刺火焰本体；dust 6 段在
-    //     Player.goatFlames 回调，编排器 Spawn_WallOfFleshGoatMountFlames :3259-3306）
-    this.drawFlameParticles();
+    //     Player.goatFlames 回调，编排器 Spawn_WallOfFleshGoatMountFlames :3259-3306）。
+    //     坐骑染料 = miscDyes[3]（Player.cs:9300 cMount = miscDyes[3].dye → 编排器
+    //     :3271 SetTypeInfo 第三参 → FlameParticle.Draw :62 drawData.shader）
+    {
+      const mDye = player.inv.miscDyes[3];
+      const flameDye = mDye ? dyeApplyOf(viIdFromKey(ITEM_DEFS[mDye.id]?.key ?? '')) : null;
+      if (flameDye) {
+        flameDye.uniforms.uDirection = player.facing;   // ArmorShaderData.Apply 尾段 entity.direction
+        if (flameDye.tech === 'ArmorReflective' || flameDye.tech === 'ArmorReflectiveColor') {
+          flameDye.uniforms.uLightSource = this.reflectiveLightSource(player);
+        }
+      }
+      this.drawFlameParticles(flameDye);
+    }
     this.drawPlayer(player, world, swing, flicker);
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致）
     // 远端玩家（联机；走同一 drawPlayer——纸娃娃/动画帧由位置派生，与本地一致；
@@ -1391,10 +1403,7 @@ export class Renderer {
     this.stepWoFDeathFx();
     ctx.globalAlpha = 1;
 
-    // 5c. 原版 Dust lit pass（DrawDust :38266——DrawGore 之后；乘光族画在
-    //     合成前，全屏 compositeLight 逐像素乘光 ≈ 原版逐尘 Lighting.GetColor）
-    this.drawVanillaDustPass(false, cam);
-
+    // 5c.（已移至世界变换块外/光照合成前——见 restore 后 5c 注释）
     // 6. 挖掘/放置光标：挖掘中黄色填充随进度加深（半透明黄 → 破坏完成时最深）
     if (hover) {
       ctx.strokeStyle = 'rgba(255,255,255,0.7)';
@@ -1414,6 +1423,13 @@ export class Renderer {
     this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts, entities);
 
     ctx.restore();
+
+    // 5c. 原版 Dust lit pass（DrawDust :38266——DrawGore 之后；乘光族画在
+    //     合成前，全屏 compositeLight 逐像素乘光 ≈ 原版逐尘 Lighting.GetColor）。
+    //     ★必须在世界变换块【外】（restore 之后）调用——本 pass 以
+    //     cam.worldToScreen 屏幕坐标直画，块内调用会被世界变换二次平移+缩放
+    //     （尘埃错位+放大；与 :1446 全亮孪生 pass 同坐标系）
+    this.drawVanillaDustPass(false, cam);
 
     // 6c. LitNature 晨昏光晕（NextNatureRenderer :105-170：原版像素着色器，此处
     //     可见性公式 1:1 + 太阳位暖色加性光晕近似；vis=0 时零开销）
@@ -2005,8 +2021,9 @@ export class Renderer {
   }
 
   // ===================== FlameParticle（山羊坐骑 47 火焰本体层）=====================
-  /** Projectile_326/327/328 ×(60/255) 预染缓存（DrawData 色 rgb 分量差的加性 pass 用） */
-  private flameTintCache = new Map<number, HTMLCanvasElement>();
+  /** Projectile_326/327/328 染料基底 + ×(60/255) 预染双缓存。
+   *  key = `${tex}:${vid}`（vid = 坐骑染料 vid，−1 = 无染料档——染料更换/卸下各一档） */
+  private flameDyeCache = new Map<string, { base: HTMLImageElement | HTMLCanvasElement; glow: HTMLCanvasElement | null }>();
 
   /** FlameParticle.Draw（FlameParticle.cs:53-68）1:1——世界变换内直画（世界坐标，
    *  原版 ParticleSystem 的 AnchorPosition=−screenPosition 平移即此意）。
@@ -2014,12 +2031,17 @@ export class Renderer {
    *  TileFrameSeed ^ (x<<32|y) :57），origin = (w/2, h−2)（SetBasicInfo :33），
    *  rotation 恒 0（FetchFromPool 复位、编排器不写）。
    *  色 (120,120,120,60)（:55）在 XNA 预乘混合下 rgb:alpha = 2:1（源比覆盖亮一倍）
-   *  → canvas 两 pass 精确等价：① source-over 原贴图 α=(60/255)×lerp；
-   *  ② 'lighter' ×(60/255) 预染 α=lerp——两 pass rgb 合计 = 贴图×(120/255)×lerp，
+   *  → canvas 两 pass 精确等价：① source-over 基底 α=(60/255)×lerp；
+   *  ② 'lighter' ×(60/255) 预染 α=lerp——两 pass rgb 合计 = 基底×(120/255)×lerp，
    *  覆盖衰减只走 ①（TileFlames 的 A=0 纯加色推导同族）。
-   *  坐骑染料 shader（player.cMount，PlayerDrawHelper.SetShaderForData :64）未建模
-   *  ——登记（本仓无坐骑染料系统，画本色）。 */
-  private drawFlameParticles(): void {
+   *  坐骑染料（:62 drawData.shader = _packedShaderIndex → :64 SetShaderForData(player)
+   *  绑定 GameShaders.Armor 染料；packedShaderIndex = player.cMount，编排器
+   *  ParticleOrchestrator.cs:3271 SetTypeInfo 第三参传入）——染料只变换**贴图像素**，
+   *  DrawData 基色 (120,120,120,60)×lerp 照常相乘，故本仓 = 基底烘焙（dye 非空时
+   *  applyDyeToImageData 预染缓存，与 cWings 翅膀染料 wingTexSource 同款路径） +
+   *  原两 pass 不变。dye 由调用点从 player.inv.miscDyes[3] 取（Player.cs:9300
+   *  cMount = miscDyes[3].dye——坐骑染料槽下标 3，非 4）。 */
+  private drawFlameParticles(dye: DyeApply | null): void {
     const atlas = this.atlas;
     if (!atlas) return;
     let any = false;
@@ -2027,23 +2049,46 @@ export class Renderer {
     if (!any) return;
     const ctx = this.ctx;
     const seedBase = currentTileFrameSeed();
-    const tinted = (tex: number, img: HTMLImageElement): HTMLCanvasElement | null => {
-      const hit = this.flameTintCache.get(tex);
+    const vidKey = dye ? dye.vid : -1;
+    /** 染料基底（无染料 = 原图）+ ×(60,60,60) 预染 glow，按 (tex, vid) 缓存 */
+    const source = (tex: number, img: HTMLImageElement) => {
+      const key = `${tex}:${vidKey}`;
+      const hit = this.flameDyeCache.get(key);
       if (hit) return hit;
-      if (typeof document === 'undefined') return null;
-      const c = document.createElement('canvas');
-      c.width = img.naturalWidth; c.height = img.naturalHeight;
-      const cc = c.getContext('2d');
-      if (!cc) return null;
-      cc.imageSmoothingEnabled = false;
-      cc.drawImage(img, 0, 0);
-      cc.globalCompositeOperation = 'multiply';
-      cc.fillStyle = `rgb(60,60,60)`;
-      cc.fillRect(0, 0, c.width, c.height);
-      cc.globalCompositeOperation = 'destination-in';
-      cc.drawImage(img, 0, 0);
-      this.flameTintCache.set(tex, c);
-      return c;
+      let base: HTMLImageElement | HTMLCanvasElement = img;
+      let glow: HTMLCanvasElement | null = null;
+      if (typeof document !== 'undefined') {
+        if (dye) {   // 染料烘焙（DrawData.shader → ArmorShaderData.Apply 等价）
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth; c.height = img.naturalHeight;
+          const cc = c.getContext('2d', { willReadFrequently: true });
+          if (cc) {
+            cc.imageSmoothingEnabled = false;
+            cc.drawImage(img, 0, 0);
+            const id = cc.getImageData(0, 0, c.width, c.height);
+            this.applyDyeToImageData(id.data, c.width, c.height, dye);
+            cc.putImageData(id, 0, 0);
+            base = c;
+          }
+        }
+        const g = document.createElement('canvas');
+        g.width = img.naturalWidth; g.height = img.naturalHeight;
+        const gc = g.getContext('2d');
+        if (gc) {
+          gc.imageSmoothingEnabled = false;
+          gc.drawImage(base, 0, 0);
+          gc.globalCompositeOperation = 'multiply';
+          gc.fillStyle = `rgb(60,60,60)`;
+          gc.fillRect(0, 0, g.width, g.height);
+          gc.globalCompositeOperation = 'destination-in';
+          gc.drawImage(base, 0, 0);
+          glow = g;
+        }
+      }
+      const entry = { base, glow };
+      if (this.flameDyeCache.size > 32) this.flameDyeCache.clear();   // 3 贴图 × 染料档，容量闸防膨胀
+      this.flameDyeCache.set(key, entry);
+      return entry;
     };
     ctx.save();
     ctx.imageSmoothingEnabled = false;
@@ -2052,7 +2097,7 @@ export class Renderer {
       if (!img || !img.complete || img.naturalWidth === 0) continue;
       const lerp = flameFadeOutFactor(f.timeSinceSpawn / f.timeToLive, f.fadeOut);
       if (lerp <= 0) continue;
-      const glow = tinted(f.tex, img);
+      const { base, glow } = source(f.tex, img);
       // :57 种子 = TileFrameSeed ^ ((ulong)X << 32 | (uint)Y)——与 tile 火苗同源同节拍
       const seed = seedBase
         ^ ((BigInt.asUintN(64, BigInt(Math.trunc(f.x))) << 32n)
@@ -2067,7 +2112,7 @@ export class Renderer {
         ctx.translate(f.x + dx, f.y + dy);
         if (f.scale !== 1) ctx.scale(f.scale, f.scale);
         ctx.globalAlpha = alphaBase;                                  // ① 覆盖 pass
-        ctx.drawImage(img, -ox, -oy);
+        ctx.drawImage(base, -ox, -oy);
         if (glow) {
           ctx.globalCompositeOperation = 'lighter';
           ctx.globalAlpha = lerp;                                     // ② 加性 pass
@@ -2348,7 +2393,9 @@ export class Renderer {
     const lm = Math.max(0.2, Math.max(light[0], light[1], light[2]) / 255);
     const flip = k.spriteDirection !== 1;              // SpriteEffects.FlipHorizontally
     // ---- 主绳（:36828-36946）----
-    const center = { x: k.cx, y: k.cy };
+    // 风筝本体叠加 netOffset（联机半包平滑，LeashedKite.cs:110-112 每帧向 0 收敛 2px；
+    // 本地恒 0）——绳自锚点到偏移后本体，与原版 Draw 消费 _dummy.position + netOffset 同源
+    const center = { x: k.cx + k.netOffsetX, y: k.cy + k.netOffsetY };
     const anchor = { x: k.anchorX, y: k.anchorY };
     const lineWidth = lineTex.sw, lineHeight = lineTex.sh;
     let vx = center.x - anchor.x, vy = center.y - anchor.y;
@@ -2592,21 +2639,22 @@ export class Renderer {
 
   private drawDrop(d: ItemDrop) {
     const bob = Math.sin((d.age + d.bobPhase * 60) * 0.1) * 1.5;
-    // 优先 Maples 图标
+    // 优先 Maples 图标。绘制尺寸 = 贴图单帧原尺寸（原版 Main.DrawItem 掉落物
+    // 按 texture.Frame 原大画,星星 Item_75 单帧 22×26 比方块还大;曾统一压
+    // 14px 宽 → 星星等大贴图物品视觉偏小）。atlasIcon 已含动画条切片
     const ar = this.atlasIcon(d.itemId);
     if (ar) {
       const ctx = this.ctx;
-      const drawH = 14 * ar.sh / ar.sw;
-      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, drawH);
+      ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, ar.sw, ar.sh);
       // 原版 Item.color（彩色凝胶）：同贴图逐像素乘 color，XNA 预乘两步（同 NPC color pass）
       if (d.color && d.color[3] > 0) {
         const tinted = this.tintedSprite(`item${d.itemId}`, ar, d.color);
         ctx.globalCompositeOperation = 'destination-out';
         ctx.globalAlpha = d.color[3] / 255;
-        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, 14, drawH);
+        ctx.drawImage(ar.img, ar.sx, ar.sy, ar.sw, ar.sh, d.x, d.y + bob, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'lighter';
         ctx.globalAlpha = 1;
-        ctx.drawImage(tinted, d.x, d.y + bob, 14, drawH);
+        ctx.drawImage(tinted, d.x, d.y + bob, ar.sw, ar.sh);
         ctx.globalCompositeOperation = 'source-over';
       }
       return;
@@ -5902,7 +5950,7 @@ export class Renderer {
     u.uSourceRect = rect ? [rect.sx, rect.sy, w, h] : [0, 0, w, h];
     u.uImageSize0 = rect ? [rect.sheetW, rect.sheetH] : [w, h];
     const extra = dye.needsImage1 ? [this.hallowRampSampler() ?? undefined] : [];
-    applyDyePass(data, w, h, dye, extra);
+    applyDyePass(data, w, h, dye, extra, rect);
   }
 
   /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
@@ -6370,17 +6418,17 @@ export class Renderer {
       bodyAlpha *= p.shimmerTransparency >= 0.8 ? 0 : (1 - p.shimmerTransparency) ** 3;
     }
     // ---- stealth 潜行视觉管线（PlayerDrawSet :1523-1660 三分支）----
-    // 3106 变态刀/蘑菇矿套：settled=(1+s'·10)/11、armor RGBA×s'、皮肤衣物×s'²；
-    // 星璇套：settled=s'、armor×secondColor=Lerp(White→(0,0.12,0.16,0),1−s')（A=s'）、
-    // 皮肤衣物×s'²。s' = max(stealth, 0.03)。doll 为皮肤+衣物烘焙单层 → 整体取 s'²
-    // （armor 段 ×s' 与皮肤段 ×s'² 的分层区别在烘焙架构下不可分，登记）。
+    // 3106 变态刀/蘑菇矿套（PlayerDrawSet.cs:1525-1563）：settled=(1+s'·10)/11、
+    //   armor R/G/A×s' 且 **B×settled**、皮肤/发/眼/衣着 RGBA×s'²；
+    // 星璇（:1610-1651）：settled=s'、armor RGB×Lerp(White→(0,0.12,0.16,0),1−s')
+    //   （A×s'）、皮肤/衣着 ×s'²。s' = max(stealth, 0.03)。
+    // doll 按此分两层绘制（compositePaperDoll layer:'skin'/'armor'，tintRGBA 逐通道）
     const stEq = p.equipStats;
     const stF = stealthFactors(p.stealth, p.heldPsychoKnife, stEq.shroomiteSet, stEq.vortexSet);
     const stealthSettled = stF.settled;         // drawinfo.stealth（叠画消费值）
     const stealthClamp = stF.clamp;             // s'（armor 主纹理 alpha 档）
     const vortexTint = stF.vortexTint;
-    if (stealthClamp < 1) bodyAlpha *= stF.skinMul;   // 皮肤衣物 ×s'²
-    if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
+    if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;   // 免疫闪烁等基底 alpha（stealth 分层在各层内乘）
     // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
     // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
     const cart = p.ridingCart ? p.cart : null;
@@ -6506,8 +6554,42 @@ export class Renderer {
         // 与 legacy 路径(:1301)/小动物同一 spriteBottomPad 补偿
         const pad = this.spriteBottomPad(f, `doll:${row}`);
         if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, true);
-        ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
-        if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
+        if (stealthClamp >= 1) {
+          ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, -f.sw / 2, -f.sh + pad, f.sw, f.sh);
+          if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
+        } else {
+          // stealth 分层（PlayerDrawSet.cs:1523-1651 1:1）：皮肤/发/衣着 RGBA×s'²
+          // 先画，甲层（RGB×armorMul / A×s'）后画——甲覆盖像素走甲公式、裸露像素
+          // 走皮肤公式，与原版逐 DrawData color 一致
+          const s2 = stF.skinMul;                      // s'²
+          const skinDoll = compositePaperDoll(p.appearance, dollEquip,
+            { skipHair: !!dyeColor, layer: 'skin' });
+          if (skinDoll) {
+            const fs = dollFrame(tintRGBA(skinDoll, [s2, s2, s2]), row);
+            const ga = ctx.globalAlpha;
+            ctx.globalAlpha = ga * s2;
+            ctx.drawImage(fs.img, fs.sx, fs.sy, fs.sw, fs.sh, -fs.sw / 2, -fs.sh + pad, fs.sw, fs.sh);
+            ctx.globalAlpha = ga;
+          }
+          // 甲层（身/腿）画在 前发+头甲 叠层之前（原版层序：躯干甲→前发→头甲）；
+          // 发色剂激活时头甲归 overlay(false) 路径（armorNoHead）。
+          // ★overlay(false) 内的头甲/发色发层尚未消费 stealth 乘数（发×s'²、头甲
+          //   ×armorMul——原版 colorHair×s'² / colorArmorHead×s'）：发色剂+潜行同开
+          //   时该叠层不衰减，集成点在 drawDollHairOverlays（发色剂会话在途）
+          const armorDoll = compositePaperDoll(p.appearance, dollEquip,
+            { layer: dyeColor ? 'armorNoHead' : 'armor' });
+          if (armorDoll) {
+            const armorMul: [number, number, number] = stEq.vortexSet
+              ? [vortexTint![0], vortexTint![1], vortexTint![2]]   // Lerp 通道（:1641-1644）
+              : [stealthClamp, stealthClamp, stealthSettled];      // B×settled（:1539-1541）
+            const fa = dollFrame(tintRGBA(armorDoll, armorMul), row);
+            const ga2 = ctx.globalAlpha;
+            ctx.globalAlpha = ga2 * stealthClamp;                  // A×s'
+            ctx.drawImage(fa.img, fa.sx, fa.sy, fa.sw, fa.sh, -fa.sw / 2, -fa.sh + pad, fa.sw, fa.sh);
+            ctx.globalAlpha = ga2;
+          }
+          if (dyeColor) this.drawDollHairOverlays(p, dollEquip, row, pad, dyeColor, false);
+        }
         drawn = true;
       }
     }

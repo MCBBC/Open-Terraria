@@ -49,6 +49,11 @@ export const LEASHED_SUB_PARTIAL = 2;
  *  SendTileObject 内联在 msg17 内由服务器重放，本仓 tile 层是客户端权威直通，
  *  实体层须显式请求。见 net/leashedSync.ts） */
 export const LEASHED_SUB_PLACE_REQUEST = 3;
+/** 本仓新增：访客右键取回锚桩存物的请求（guest→host 定向转发；原版锚桩无
+ *  OnPlayerInteraction（TELeashedEntityAnchorWithItem 只有破坏掉物一路），右键
+ *  取回是本仓扩展交互——访客端无 furnitureItems 记录，取回必须走房主权威。
+ *  见 net/leashedSync.ts applyLeashedRetrieve） */
+export const LEASHED_SUB_RETRIEVE_REQUEST = 4;
 export const LEASHED_KIND_CRITTER = 0;
 export const LEASHED_KIND_KITE = 1;
 

@@ -249,8 +249,8 @@ export interface MountEffectsCtx {
    *  且落脚格 SolidTileAllowBottomSlope+无液时）。入参 = PositionInWorld
    *  (tx×16+8, ty×16+16)；编排器模式 = 3 束 FlameParticle（x 偏移 ±5.33px）+
    *  每束 1/8 概率 dust 6（alpha100、velocity×0.6 后 vy-1.2、y-4、noLight）
-   *  ——FlameParticle 贴图层（弹 326/327/328）为本仓未建模的独立粒子系统，
-   *  由消费方以 vanillaDust 近似承载视觉，登记 */
+   *  ——FlameParticle 层已由 src/fx/FlameParticles.ts 实装（TTL50/收缩/淡出
+   *  0.3/canvas 预乘两 pass），dust 段原样；消费方 = Player.ts goatFlames 回调 */
   goatFlames?(x: number, y: number): void;
   fishron: FishronView;
 }

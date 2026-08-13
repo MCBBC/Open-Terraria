@@ -254,12 +254,14 @@ export class CharCreation {
     ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 20, 150 - 112, 80, 112);
   }
 
-  private close(fn: () => void) {
+  /** fn 可选(public):外部生命周期清理(UI.closeAll/showClothesWindow 守卫,
+   *  2026-08-13 泄露 review——孤儿 rAF/keydown/Lang 订阅即源于无法外部关) */
+  close(fn?: () => void) {
     cancelAnimationFrame(this.raf);
     if (this.escHandler) window.removeEventListener('keydown', this.escHandler);
     this.unsubLang?.();
     this.panel.remove();
-    fn();
+    fn?.();
   }
 
   // ================= 内容区 =================

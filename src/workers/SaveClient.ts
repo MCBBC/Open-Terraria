@@ -95,6 +95,7 @@ export class SaveClient {
       liquidType: st.liquidType.buffer, wire: st.wire.buffer,
       half: st.half.buffer, slope: st.slope.buffer,
       paint: st.paint.buffer, paintWall: st.paintWall.buffer,   // 油漆双通道（WF:1474-1491）
+      explored: world.explored.buffer,   // 战争迷雾（0/1 位图；结构化克隆快照，不 transfer）
     };
     const promise = new Promise<string>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });

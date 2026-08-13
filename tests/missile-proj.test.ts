@@ -3,7 +3,7 @@
 // :22130-22247）行为回归——操控转向 / 松手语义 / 旋转角 / 穿透 / 持按连发。
 import { describe, it, expect, afterEach } from 'vitest';
 import { World } from '../src/world/World';
-import { MagicMissileProj, StarfuryStar } from '../src/entities/MissileProj';
+import { MagicMissileProj, StarfuryStar, FlyingKnifeProj } from '../src/entities/MissileProj';
 
 /** 本文件构造的导弹登记表——afterEach 统一出链（清模块级 ALIVE） */
 const made: MagicMissileProj[] = [];
@@ -83,7 +83,7 @@ function mkMissile(
   return m;
 }
 
-function fly(m: MagicMissileProj | StarfuryStar, hooks: never, n: number) {
+function fly(m: { fixedUpdate: (dt: number, g: never) => void; dead?: boolean }, hooks: never, n: number) {
   for (let i = 0; i < n && !m.dead; i++) m.fixedUpdate(1 / 60, hooks);
 }
 
@@ -370,5 +370,140 @@ describe('StarfuryStar（proj 9，aiStyle 5 :22130-22247）', () => {
     const y0 = s.y;
     fly(s, hooks, 5);
     expect(s.y - y0).toBeCloseTo(4 * 5, 5);     // 恒速无重力
+  });
+});
+
+describe('FlyingKnifeProj 491（AI_009_MagicMissiles_Old :40753-40910，入口 :40520-40524）', () => {
+  /** 本文件构造的飞刀登记——afterEach 统一销毁 */
+  const knives: FlyingKnifeProj[] = [];
+
+  function mkKnife(hooks: never, opts: {
+    x?: number; y?: number; vx?: number; vy?: number;
+    channel?: () => boolean; aim?: () => { x: number; y: number };
+  } = {}) {
+    const k = new FlyingKnifeProj(
+      opts.x ?? 40 * 16, opts.y ?? 40 * 16, opts.vx ?? 0, opts.vy ?? 0,
+      40, 4.5,
+      { channelCb: opts.channel ?? (() => true), aimCb: opts.aim ?? (() => ({ x: 80 * 16, y: 40 * 16 })) });
+    knives.push(k);
+    return k;
+  }
+
+  afterEach(() => { knives.length = 0; });   // 飞刀无模块级登记表，纯对象弃置即可
+
+  it('远距操控：速度 4:1 朝光标方向收敛、上限 20（:40794-40817 num=20 :40764）', () => {
+    const { hooks } = makeHooks();
+    const k = mkKnife(hooks, { x: 20 * 16, y: 40 * 16, vx: 0, vy: 0 });
+    fly(k, hooks, 1);
+    // 中心 (333,653)→光标 (1280,640)：d≈947>100 → 方向支，v=(0×4+dir×20)/5
+    expect(Math.hypot(k.vx, k.vy)).toBeCloseTo(4.0, 3);
+    expect(k.vx).toBeGreaterThan(0);
+    fly(k, hooks, 4);   // 再 4 拍 → v=(4v+20)/5 迭代至 ≈13.45
+    expect(Math.hypot(k.vx, k.vy)).toBeCloseTo(13.4464, 2);
+    // 长直线未进 <100 档：单调爬到 20 上限（:40783-40787 钳位）
+    const far = mkKnife(hooks, { x: 10 * 16, y: 40 * 16, vx: 0, vy: 0 });
+    fly(far, hooks, 40);   // ≈760px 进度，距光标仍 >300 → 恒处方向支
+    expect(Math.hypot(far.vx, far.vy)).toBeGreaterThan(19.9);
+    expect(far.vx).toBeGreaterThan(0);
+    // 近距悬停轨道：转向混叠会让瞬时速率回落，但钳位与轨道半径必须成立
+    fly(k, hooks, 60);
+    expect(Math.hypot(k.vx, k.vy)).toBeLessThanOrEqual(20.001);
+    expect(Math.hypot(k.cx - 80 * 16, k.cy - 40 * 16)).toBeLessThan(300);
+  });
+
+  it('近距 <100px：只沿当前方向 ×1.1 加速并自锁 ai[0]=−10（:40778-40793）', () => {
+    const { hooks } = makeHooks();
+    const k = mkKnife(hooks, {
+      x: 40 * 16, y: 40 * 16, vx: 5, vy: 0,
+      aim: () => ({ x: 40 * 16 + 16 + 50, y: 40 * 16 + 16 }),   // 距中心 50px
+    });
+    expect(k['ai0']).toBe(0);
+    fly(k, hooks, 1);
+    expect(Math.hypot(k.vx, k.vy)).toBeCloseTo(5.5, 5);   // ×1.1 未过 20 上限
+    expect(k['ai0']).toBe(-10);                            // 自锁计数
+    fly(k, hooks, 1);
+    // 源码序：先 ai[0]+=1（:40774-40777）再判 ==0 重锁（:40789-40792）——锯齿
+    // −10→−9→…→0→−10，只在恰好回 0 的那拍重锁
+    expect(k['ai0']).toBe(-9);
+  });
+
+  it('松手：ai[0]=1 回收（491 不重瞄鼠标），15t 后穿墙回手、近手 20px 消失（:40832-40880）', () => {
+    const { hooks } = makeHooks();
+    let held = true;
+    const k = mkKnife(hooks, {
+      x: 30 * 16, y: 40 * 16, vx: 8, vy: 0,
+      channel: () => held,
+      aim: () => ({ x: 44 * 16, y: 40 * 16 }),
+    });
+    fly(k, hooks, 3);
+    held = false;
+    fly(k, hooks, 1);
+    expect(k['ai0']).toBe(1);            // :40862 松手即回收
+    expect(k['passTiles']).toBe(false);  // localAI[0]≤15 仍碰块（:40869 门）
+    fly(k, hooks, 20);
+    expect(k['passTiles']).toBe(true);   // :40871 回收段穿墙
+    fly(k, hooks, 400);
+    expect(k.dead).toBe(true);           // 回手 20px 内消失（:40873-40876）
+  });
+
+  it('撞块：命中轴 lastVelocity 取反 + 操控态自锁 ai[0]=−10（:17053-17066）', () => {
+    const { hooks, st } = makeHooks();
+    for (let y = 39; y <= 41; y++) st.setTileSilent(60, y, 1);   // 60 列三格墙
+    const k = mkKnife(hooks, { x: 55 * 16, y: 40 * 16, vx: 6, vy: 0 });
+    // 逐拍捕捉首次反弹：vx 由正翻负的那拍（原版 AI 先行改写速度、碰撞用改写后的
+    // lastVelocity 取反——量级保持，非衰减反弹）
+    let flipped = false, locked = false, bounceVx = 0;
+    for (let t = 0; t < 40 && !(flipped && locked); t++) {
+      const lvx = k.vx;
+      k.fixedUpdate(1 / 60, hooks);
+      if (!flipped && lvx > 0 && k.vx < 0) {
+        flipped = true;
+        bounceVx = k.vx;
+        // steer 当拍把速度朝 20 推（lvx→≈lvx×1.12 上限 20），反弹 = 该值取反
+        expect(Math.abs(k.vx)).toBeGreaterThan(lvx);
+        expect(Math.abs(k.vx)).toBeLessThanOrEqual(20.001);
+        expect(k['ai0']).toBe(-10);                   // 操控态撞墙自锁
+      }
+      if (k['ai0'] === -10) locked = true;
+    }
+    expect(flipped).toBe(true);
+    expect(bounceVx).toBeLessThan(0);
+    expect(k.dead).toBe(false);          // 491 撞块反弹不灭
+  });
+
+  it('穿透 −1：同敌 10t 冷却后可再中（immune[owner]=10 :13189-13192）', () => {
+    // 大体积敌 + 光标钉在敌心：飞刀近距档只加速不转向，长时间滞留敌体内
+    const big = {
+      id: 1, x: 40 * 16, y: 40 * 16, w: 200, h: 200, maxHp: 5000, dead: false, hits: 0,
+      get cx() { return this.x + this.w / 2; },
+      get cy() { return this.y + this.h / 2; },
+      hurt() { this.hits++; return true; },
+    };
+    const { hooks } = makeHooks({ enemies: [big] });
+    const k = mkKnife(hooks, {
+      x: 40 * 16 + 2, y: 40 * 16 + 5, vx: 2, vy: 0,
+      aim: () => ({ x: big.cx, y: big.cy }),
+    });
+    fly(k, hooks, 1);
+    expect(big.hits).toBe(1);
+    fly(k, hooks, 9);
+    expect(big.hits).toBe(1);            // 冷却窗内不再结算
+    fly(k, hooks, 2);
+    expect(big.hits).toBe(2);            // 10t 后再中（穿透 −1 不消耗）
+    expect(k.dead).toBe(false);
+  });
+
+  it('距玩家 >2000px 消失（:40894-40897）', () => {
+    const { hooks } = makeHooks();
+    const k = mkKnife(hooks, { x: 4 * 16, y: 4 * 16, vx: 0, vy: 0 });  // 距玩家(50,80)≈1178px
+    fly(k, hooks, 1);
+    expect(k.dead).toBe(false);
+    const k2 = mkKnife(hooks, { x: 2 * 16, y: 2 * 16, vx: 0, vy: 0 }); // ≈1245px 仍内
+    fly(k2, hooks, 1);
+    expect(k2.dead).toBe(false);
+    // 直接置到 2100px 外验证门（世界外弹体不跑碰撞，只验门本身）
+    const k3 = mkKnife(hooks, { x: 50 * 16 - 2100, y: 80 * 16, vx: 0, vy: 0 });
+    fly(k3, hooks, 1);
+    expect(k3.dead).toBe(true);
   });
 });

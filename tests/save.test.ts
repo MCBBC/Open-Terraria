@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { saveGame, loadSave } from '../src/save/SaveFile';
+import { serializeSave } from '../src/save/serialize';
+import type { SaveData, SaveMeta, SaveStoreView } from '../src/save/serialize';
 import { World } from '../src/world/World';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
@@ -170,6 +172,78 @@ describe('自有存档格式', () => {
     expect(w2.altarCount).toBe(3);
     expect(w2.pendingTownNpcs).toHaveLength(1);
     expect(w2.pendingTownNpcs![0].bound).toBe(true);
+  });
+
+  it('战争迷雾（explored）往返:散点+大片 1 逐格一致,0/1 位图 RLE 高压缩', () => {
+    const world = new World(64, 32, 42, '迷雾');
+    world.markExplored(32, 16, 3);   // 散点圆
+    for (let x = 0; x < 64; x++) for (let y = 0; y < 10; y++) world.explored[y * 64 + x] = 1;  // 大片 1
+    const before = world.explored.slice();
+
+    const data = JSON.parse(saveGame(world, new Player(0, 0, new Inventory()), 0));
+    expect(typeof data.explored).toBe('string');
+    // 0/1 位图 RLE：2048 格只有几条游程 → base64 几十字节（曾缺段=重进存档全图迷雾）
+    expect(data.explored.length).toBeLessThan(200);
+
+    const back = loadSave(JSON.stringify(data));
+    expect([...back.world.explored]).toEqual([...before]);
+  });
+
+  it('全图已探索的 explored 落盘仅几条游程(大世界全 1 段)', () => {
+    const world = new World(2000, 600, 1, '大世界');  // 1.2M 格
+    world.explored.fill(1);
+    const data = JSON.parse(saveGame(world, new Player(0, 0, new Inventory()), 0));
+    expect(data.explored.length).toBeLessThan(100);   // 1 条游程 = ~7 字节 + base64 膨胀
+    const back = loadSave(JSON.stringify(data));
+    expect(back.world.explored.every((v) => v === 1)).toBe(true);
+  });
+
+  it('旧档缺 explored 段 → 全 0 未探索（旧行为),不报错不迁移', () => {
+    const world = new World(16, 8, 1, '旧档');
+    world.explored.fill(1);   // 即便存前全探索
+    const data = JSON.parse(saveGame(world, new Player(0, 0, new Inventory()), 0));
+    delete data.explored;     // 抹成 v4 旧档形状
+    const back = loadSave(JSON.stringify(data));
+    expect(back.world.explored).toHaveLength(16 * 8);
+    expect(back.world.explored.every((v) => v === 0)).toBe(true);
+  });
+
+  it('serializeSave:SaveStoreView.explored 缺省（save.worker 旧客户端 buf）不落段', () => {
+    const n = 16;   // w=4 × h=4——视图长度须与 meta 尺寸一致
+    const mkView = (explored?: Uint8Array): SaveStoreView => ({
+      type: new Uint16Array(n), flags: new Uint8Array(n),
+      frameX: new Uint16Array(n), frameY: new Uint16Array(n),
+      wall: new Uint16Array(n), liquid: new Uint8Array(n), liquidType: new Uint8Array(n),
+      wire: new Uint8Array(n), half: new Uint8Array(n), slope: new Uint8Array(n),
+      paint: new Uint8Array(n), paintWall: new Uint8Array(n),
+      explored,
+    });
+    const meta: SaveMeta = {
+      name: 'w', seed: 1, w: 4, h: 4, spawnX: 1, spawnY: 1,
+      groundLevel: 1, rockLevel: 2, timeOfDay: 0, dayCount: 1,
+      chests: [], flags: {},
+    };
+    const player: SaveData['player'] = { hp: 100, x: 0, y: 0, inventory: [], selected: 0 };
+    // 旧客户端缺 explored buffer → 键被丢弃（读档端按全 0 旧行为）
+    expect('explored' in JSON.parse(serializeSave(mkView(), meta, player, 0))).toBe(false);
+    // 有 buffer → RLE 落段且读档还原
+    const ex = new Uint8Array(n);
+    ex[0] = 1; ex[15] = 1;
+    const data = JSON.parse(serializeSave(mkView(ex), meta, player, 0));
+    expect(data.explored).toBeTypeOf('string');
+    const back = loadSave(JSON.stringify(data));
+    expect([...back.world.explored]).toEqual([...ex]);
+  });
+
+  it('worker 读档包往返:packWorld 回传 explored（worldPacket 曾只传 exploredVersion → 全图迷雾）', () => {
+    const world = new World(64, 32, 42, 'packet-explored');
+    world.markExplored(5, 5, 4);
+    world.markExplored(40, 20, 6);
+    const before = world.explored.slice();
+    const { packet } = packWorld(world);
+    expect(packet.buf.explored).toBeInstanceOf(ArrayBuffer);
+    const w2 = World.fromPacket(packet);
+    expect([...w2.explored]).toEqual([...before]);
   });
 
 });

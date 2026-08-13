@@ -5,7 +5,7 @@
 //     命中 = 穿透 -1 + 【全段共享】静态 10t 冷却（usesIDStaticNPCImmunity）
 import { describe, it, expect } from 'vitest';
 import { RainbowBolt, RainbowSegment, _setRainbowClock } from '../src/entities/RainbowProj';
-import { PrismProj, PrismProng } from '../src/entities/PrismProj';
+import { PrismProj, PrismProng, ChargedBlaster } from '../src/entities/PrismProj';
 import { Arrow } from '../src/entities/Arrow';
 import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
@@ -228,5 +228,46 @@ describe('最后的棱镜 3541 → 633/632（PrismProj 充能聚束）', () => {
     const spread = Math.max(...prongs.filter((q) => !q.dead)
       .map((q) => Math.abs(Math.atan2(q.vy, q.vx))));
     expect(spread).toBeLessThan(0.5);               // 满充收敛（spread=1.75）
+  });
+});
+
+describe('充能爆破炮 2882 → 460/461（AI_075 460 分支）', () => {
+  it('蓄力节奏：459 小弹 → 180t 满蓄发 461 光束(×1.5) → 断链全灭', () => {
+    const projectiles: unknown[] = [];
+    const game = makeGame(new World(200, 200, 30, 'open'), [], projectiles);
+    let ch = true, pays = 0;
+    const bl = new ChargedBlaster(1, 0, 100, 2,
+      () => ch, () => ({ x: 180 * TILE, y: 90 * TILE }), () => { pays++; return true; });
+    projectiles.push(bl);
+    (game as unknown as { player: unknown }).player = { cx: 90 * TILE, cy: 90 * TILE };
+    bl.fixedUpdate(1, game);
+    expect(projectiles.filter((q) => (q as { projId?: number }).projId === 459).length).toBe(1);  // ai0==1 首发小弹
+    // 蓄到满（180）
+    for (let t = 0; t < 179 && !bl.dead; t++) bl.fixedUpdate(1, game);
+    expect(bl['charge']).toBe(180);
+    expect(bl.beam).toBeTruthy();                                  // 461 光束已发
+    expect(bl.beam!.damage).toBe(150);                             // ×1.5
+    // 光束锚定随晶体
+    bl.beam!.fixedUpdate(1, game);
+    expect(Math.abs(bl.beam!.cx - (bl.cx + bl.dirX * 16))).toBeLessThan(1);
+    // 断链 → 全链消亡
+    ch = false;
+    bl.fixedUpdate(1, game);
+    expect(bl.dead).toBe(true);
+    expect(bl.beam!.dead).toBe(true);
+    expect(pays).toBeGreaterThan(1);                               // 每次发射扣魔
+  });
+
+  it('光束灭即晶体亡（:63580-63587）', () => {
+    const projectiles: unknown[] = [];
+    const game = makeGame(new World(200, 200, 30, 'open'), [], projectiles);
+    const bl = new ChargedBlaster(1, 0, 100, 2, () => true, () => ({ x: 1, y: 0 }), () => true);
+    projectiles.push(bl);
+    (game as unknown as { player: unknown }).player = { cx: 90 * TILE, cy: 90 * TILE };
+    for (let t = 0; t < 180 && !bl.dead; t++) bl.fixedUpdate(1, game);
+    expect(bl.beam).toBeTruthy();
+    bl.beam!.dead = true;                                          // 模拟光束消亡
+    bl.fixedUpdate(1, game);
+    expect(bl.dead).toBe(true);
   });
 });

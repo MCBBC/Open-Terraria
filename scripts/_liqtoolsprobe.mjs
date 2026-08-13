@@ -1,8 +1,10 @@
 // 液体工具族六件端到端（docs/implementation-gap-list-2026-08-13.md §1）：
 // 4820/5302/5364 无底桶恒量倾倒不消耗；4872/5303/5304 海绵吸液不消耗。
 // 行为基准 Player.ItemCheck_UseBuckets Player.cs:45704-45890
-// 探针防自伤:倾倒/异类门测试把目标格砌成"石底+四壁"封闭腔(液体不流走不蒸发);
-// 异类液体用蜂蜜/岩浆(不蒸发)。205 射程 tb=0,目标取脚上 2 格(±3 盒边缘勿用)。
+// 探针防自伤:目标格 8 邻全砌实心封闭腔(墙 id 取脚下方地表 tile,先例 _cube-e2e
+// setTileSilent 砌法),液体既不流走也不蒸发——此前只清液不砌墙,倾倒后 220ms 读数
+// 前已被 LiquidSim 流干 = 4 条假 FAIL。异类液体用蜂蜜/岩浆(不蒸发)。
+// 205 射程 tb=0,目标取脚上 2 格(±3 盒边缘勿用)。
 import puppeteer from 'puppeteer-core';
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const URL = (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '/';
@@ -20,18 +22,26 @@ let pass = 0, fail = 0;
 const check = (n, ok, x = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${n}${x ? '  ' + x : ''}`); ok ? pass++ : fail++; };
 
 // mode: pour=封闭腔空气 / soak=封闭腔内 255 指定液体(3×3 邻先干) / alien=封闭腔内指定液体
-const runUse = (itemRe, mode, liquidType, dtx = 2, dty = -2, alienAmt = 150) => page.evaluate(async (itemReSrc, modeSrc, lt, dtx, dty, alienAmt) => {
+// holdMs:按住时长。205 舀取链必须短按——舀起后手中已是满桶(207),useTime 走完
+// 会在同一按住窗口内把液体倒回原格(autoReuse 持按连倒是原版语义,useBucket 门注)。
+const runUse = (itemRe, mode, liquidType, dtx = 2, dty = -2, alienAmt = 150, holdMs = 220) =>
+  page.evaluate(async (itemReSrc, modeSrc, lt, dtx, dty, alienAmt, holdMs) => {
   const g = window.__swGame; const p = g.player;
   const key = Object.keys(window.__swItems).find((k) => new RegExp(itemReSrc).test(k));
   if (!key) return { key: null };
   const tx = Math.floor(p.cx / 16) + dtx, ty = Math.floor((p.y + p.h) / 16) + dty;
   const st = g.world.store;
-  const stone = Object.keys(window.__swTiles ?? {}).length ? null : null; // tiles 表不经 window 暴露,用 store 现取
-  const dirtLike = st.type[st.idx(tx, ty + 1)] || 0;
-  // 封闭腔:目标格空气,下方+四壁砌实心(复用任意现存实心 id,失败则跳过砌墙仅清液)
+  // 墙 id = 脚下地表 tile（实体站立位正下方一格实心；悬空兜底 dirt=1，
+  // 本仓 tile id 1 = dirt，见 memory"id-space 内部id1=dirt非stone"）
+  const feetTy = Math.floor((p.y + p.h) / 16) + 1;
+  const wallId = st.type[st.idx(Math.floor(p.cx / 16), feetTy)] || 1;
+  // 封闭腔：目标格保空气+清液，8 邻全砌实心墙并清液（防 220ms 窗口内流走/蒸发）。
+  // 目标格先清 tile：上一轮腔墙可能因玩家位移压到本轮目标位
+  st.setTileSilent(tx, ty, 0, 0, 0);
   st.setLiquid(tx, ty, 0, 0);
   for (let ox = -1; ox <= 1; ox++) for (let oy = -1; oy <= 1; oy++) {
     if (ox === 0 && oy === 0) continue;
+    st.setTileSilent(tx + ox, ty + oy, wallId, 0, 0);
     st.setLiquid(tx + ox, ty + oy, 0, 0);
   }
   if (modeSrc === 'soak' || modeSrc === 'alien') st.setLiquid(tx, ty, modeSrc === 'soak' ? 255 : alienAmt, lt);
@@ -41,7 +51,7 @@ const runUse = (itemRe, mode, liquidType, dtx = 2, dty = -2, alienAmt = 150) => 
   g.input.mouseX = (tx * 16 + 8 - cam.x) * cam.zoom + cam.viewW / 2;
   g.input.mouseY = (ty * 16 + 8 - cam.y) * cam.zoom + cam.viewH / 2;
   g.input.mouseDown = true;
-  await new Promise((r) => setTimeout(r, 220));
+  await new Promise((r) => setTimeout(r, holdMs));
   g.input.mouseDown = false;
   const i = st.idx(tx, ty);
   return {
@@ -49,7 +59,7 @@ const runUse = (itemRe, mode, liquidType, dtx = 2, dty = -2, alienAmt = 150) => 
     stack: p.inv.slots[0]?.stack ?? 0,
     heldKey: p.inv.slots[0] ? Object.keys(window.__swItems).find((k) => window.__swItems[k] === p.inv.slots[0].id) ?? null : null,
   };
-}, itemRe, mode, liquidType, dtx, dty, alienAmt);
+}, itemRe, mode, liquidType, dtx, dty, alienAmt, holdMs);
 
 // ---- 倾倒三件：空格 → 255 对应液体,不消耗（岩浆/蜂蜜/微光流动慢,读数稳） ----
 const lavaB = await runUse('^vi_4820_', 'pour');
@@ -78,7 +88,7 @@ const ultraOnAir = await runUse('^vi_5304_', 'pour', 0, 4);
 check('5304 不进倾倒支:空格不倒液体', ultraOnAir.liquid === 0, JSON.stringify(ultraOnAir));
 
 // ---- 空桶换桶链（:45738-45759）与微光拒绝（:45719）----
-const scoopLava = await runUse('^vi_205_', 'soak', 2, 2, -2);
+const scoopLava = await runUse('^vi_205_', 'soak', 2, 2, -2, 150, 80);  // 短按:舀起即松,防满桶回倒
 check('205 空桶舀岩浆→岩浆桶207且目标吸干', scoopLava.liquid === 0 && /vi_207_/.test(scoopLava.heldKey ?? ''), JSON.stringify(scoopLava));
 const scoopShim = await runUse('^vi_205_', 'soak', 4, 3, -2);
 check('205 空桶:微光不可舀(:45719 !shimmer)', scoopShim.type === 4 && scoopShim.liquid >= 250 && /vi_205_/.test(scoopShim.heldKey ?? ''), JSON.stringify(scoopShim));

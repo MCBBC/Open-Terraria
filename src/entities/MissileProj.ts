@@ -548,6 +548,201 @@ export class MagicMissileProj extends Entity {
   }
 }
 
+// ===================== 飞刀 491（aiStyle 9 的 Old 分支，AI_009_MagicMissiles_Old） =====================
+
+/**
+ * proj 491（SetDefaults :5131-5139：26×26 aiStyle9 friendly melee penetrate−1）——
+ * item 3030 飞刀（Item.cs:28029-28045：channel、useStyle1、shootSpeed17、dmg40、
+ * noMelee）。AI_009 入口 :40520-40524 把 type==491 整体转投 Old 分支（:40753-40910），
+ * 与本文件新导弹（光标点对齐 + 松手索敌/直飞）语义完全不同：
+ *   · channel 期间（:40757-40830）：距光标 ≥100px → 速度朝光标方向 4:1 收敛
+ *     （上限 20px/t，:40794-40817）；<100px → 只沿当前方向 ×1.1 加速并自锁
+ *     ai[0]=−10 计数（:40778-40793）——近距是"悬停绕圈"不是贴脸瞬移；
+ *   · 松手（:40832-40863）：491 不重瞄鼠标，ai[0]=1 直接回收；
+ *   · 回收（:40869-40880）：localAI[0]>15 后穿墙，速度朝玩家 5:1 收敛到 25px/t，
+ *     距玩家 <20px 消失；
+ *   · 撞块（:17053-17066）：双轴反弹（lastVelocity 取反），操控态自锁 ai[0]=−10；
+ *   · 距玩家 >2000px 消失（:40894-40897）；穿透 −1（同敌 10t 冷却后可再中）。
+ */
+export interface FlyingKnifeCtor {
+  /** channel 电平（:40757 player.channel && HeldItem.shoot==491——Game 侧
+   *  mouseHeld+持物 id+未死 的既有口径） */
+  channelCb: () => boolean;
+  /** 光标世界坐标（Main.MouseWorld :40769）。LimitPointToPlayerReachableArea
+   *  （:40770）未建模——仅影响 <100px 近距档的进入判定，登记偏差 */
+  aimCb: () => { x: number; y: number };
+}
+
+export class FlyingKnifeProj extends Entity {
+  readonly projId = 491;
+  damage: number;
+  knockback: number;
+  /** 暴击总概率（spawn 侧注入，同 mArrow 口径） */
+  critChance = 0.04;
+  /** 护甲穿透（spawn 注入，命中传 hurt 减防） */
+  armorPen = 0;
+  dead = false;
+  w = 26; h = 26;                        // :5132-5133
+  /** ai[0]：≤0 操控（−10..−1 自锁计数，:40791）/ 1 松手回收（:40862） */
+  private ai0 = 0;
+  /** localAI[0]（:40868——回收延迟计数） */
+  private localT = 0;
+  /** rotation（:40882-40893：ai0<0/零速 自旋 0.3、ai0>0 按 direction 自旋、否则 atan2+π/2） */
+  private rot = 0;
+  /** projectile.direction（原版 Update 按 velocity.X 符号刷新的近似） */
+  private dir = 1;
+  /** timeLeft（SetDefaults 缺省 3600，:526） */
+  private timeLeft = 3600;
+  /** 回收段 tileCollide=false（:40871） */
+  private passTiles = false;
+  /** 同敌冷却（NPC.immune[owner]=10——:13189-13192 penetrate≠1 缺省档） */
+  private hitCd = new Map<number, number>();
+  private channelCb: () => boolean;
+  private aimCb: () => { x: number; y: number };
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
+    o: FlyingKnifeCtor) {
+    super();
+    this.x = x; this.y = y; this.vx = vx; this.vy = vy;
+    this.damage = damage; this.knockback = knockback;
+    this.channelCb = o.channelCb; this.aimCb = o.aimCb;
+    if (vx !== 0) this.dir = vx > 0 ? 1 : -1;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    if (--this.timeLeft <= 0) { this.killNow(game); return; }
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    this.steer(game);                      // :40753-40909（操控/回收/姿态/2000px 门）
+    if (this.dead) return;
+    this.moveStep(game);                   // 撞块反弹 :17053-17066 / 回收穿墙 :40871
+    if (this.dead) return;
+    this.hitStep(game);                    // 穿透 −1：10t 冷却后同敌可再中
+  }
+
+  /** AI_009_MagicMissiles_Old（:40753-40910） */
+  private steer(game: GameHooks): void {
+    const p = game.player;
+    // ---- 操控/松手分流（:40755-40863）----
+    if (this.ai0 <= 0) {
+      if (this.channelCb()) {
+        const num = 20;                    // :40764-40767（491 专属上限）
+        const aim = this.aimCb();
+        const dx = aim.x - this.cx, dy = aim.y - this.cy;
+        const d = Math.hypot(dx, dy);      // :40773
+        if (this.ai0 < 0) this.ai0 += 1;   // :40774-40777（自锁计数回卷）
+        if (d < 100) {                     // :40778-40793 近距：只加速 + 自锁 −10
+          if (Math.hypot(this.vx, this.vy) < num) {
+            this.vx *= 1.1; this.vy *= 1.1;
+            const sp = Math.hypot(this.vx, this.vy);
+            if (sp > num) { this.vx = this.vx / sp * num; this.vy = this.vy / sp * num; }
+          }
+          if (this.ai0 === 0) this.ai0 = -10;
+        } else if (d > num) {              // :40794-40817（491 在 d≥100 时恒真）
+          this.vx = (this.vx * 4 + dx / d * num) / 5;   // :40807-40811
+          this.vy = (this.vy * 4 + dy / d * num) / 5;
+        } else {                           // :40818-40830（d∈(20,100) 被 <100 支截，不可达）
+          this.vx = dx; this.vy = dy;
+        }
+      } else if (this.ai0 <= 0) {
+        this.ai0 = 1;                      // :40832-40863（491 不重瞄鼠标）
+      }
+    }
+    // ---- 回收/姿态/射程/尘（:40866-40909，两相恒跑）----
+    this.localT += 1;                      // :40868
+    if (this.ai0 > 0 && this.localT > 15) {
+      this.passTiles = true;               // :40871
+      const dx = p.cx - this.cx, dy = p.cy - this.cy;
+      const d = Math.hypot(dx, dy);
+      if (d < 20) { this.killNow(game); return; }       // :40873-40876
+      const ux = d > 0 ? dx / d : 0, uy = d > 0 ? dy / d : 0;
+      this.vx = (this.vx * 5 + ux * 25) / 6;            // :40877-40879
+      this.vy = (this.vy * 5 + uy * 25) / 6;
+    }
+    if (this.ai0 < 0 || (this.vx === 0 && this.vy === 0)) this.rot += 0.3;      // :40882-40885
+    else if (this.ai0 > 0) this.rot += 0.3 * this.dir;                          // :40886-40889
+    else this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 2;                 // :40890-40893
+    if (this.vx !== 0) this.dir = this.vx > 0 ? 1 : -1;
+    if (Math.hypot(this.cx - p.cx, this.cy - p.cy) > 2000) { this.killNow(game); return; } // :40894-40897
+    // 尘（:40898-40909：1/2 概率，15/57/58 三色随机、初速 = 速度×0.25 后再 ×0.25）
+    if (Math.random() < 0.5) {
+      const c = ['#9CD8FF', '#FFD080', '#FFA050'][Math.floor(Math.random() * 3)];
+      game.spawnParticles((this.cx + this.x) / 2, (this.cy + this.y) / 2, c, 1, 0.7, { life: 18 });
+    }
+  }
+
+  /** 移动 + 撞块反弹（:17053-17066 双轴 lastVelocity 取反 + 操控态自锁 −10） */
+  private moveStep(game: GameHooks): void {
+    if (this.passTiles) { this.x += this.vx; this.y += this.vy; return; }
+    const st = game.world.store;
+    const solidBox = (x: number, y: number): boolean => {
+      const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
+      const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
+      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      }
+      return false;
+    };
+    const lvx = this.vx, lvy = this.vy;
+    let hitX = false, hitY = false;
+    const nx = this.x + this.vx;
+    if (solidBox(nx, this.y)) hitX = true; else this.x = nx;
+    const ny = this.y + this.vy;
+    if (solidBox(this.x, ny)) hitY = true; else this.y = ny;
+    if (!hitX && !hitY) return;
+    game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+    game.playSfx('dig', 1, this.cx, this.cy);
+    if (this.ai0 <= 0) this.ai0 = -10;     // :17055-17058
+    if (hitX && lvx !== 0) this.vx = -lvx; // :17059-17062
+    if (hitY && lvy !== 0) this.vy = -lvy; // :17063-17066
+  }
+
+  /** 命中结算（穿透 −1：10t 冷却；StatusNPC 表驱动；直飞 Arrow 同口径） */
+  private hitStep(game: GameHooks): void {
+    const world = game.world;
+    const tx = Math.floor((this.x + this.w / 2) / TILE);
+    const ty = Math.floor((this.y + this.h / 2) / TILE);
+    if (!world.store.inBounds(tx, ty)) { this.killNow(game); return; }
+    game.cutTile(tx, ty);                  // CutTiles（挥砍草/陶罐同链）
+    if (hitCritters(this, game)) return;
+    if (hitTownNpcs(this, game, this.damage, Math.sign(this.vx) * 2)) return;
+    for (const ent of game.enemies()) {
+      const e = ent as MissileEnemyView;
+      if (e.dead) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const cd = this.hitCd.get(e.id) ?? 0;
+      if (cd > 0) continue;
+      this.hitCd.set(e.id, 10);
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      applyProjStatus(this.projId, e as unknown as Record<string, number>);
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, 0, true);
+      game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
+    }
+  }
+
+  private killNow(game: GameHooks): void {
+    this.dead = true;
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+  }
+
+  draw(r: { canvas: HTMLCanvasElement }): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = projSprite(this.projId);
+    if (!img || !img.complete || img.naturalWidth === 0) return;
+    ctx.save();
+    ctx.imageSmoothingEnabled = false;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot);                  // GetAlpha 恒白（:76286-76291），无淡入
+    ctx.drawImage(img, -this.w / 2, -this.h / 2, this.w, this.w * img.naturalHeight / img.naturalWidth);
+    ctx.restore();
+  }
+}
+
 // ===================== 老星怒落星（proj 9，aiStyle 5） =====================
 
 /**

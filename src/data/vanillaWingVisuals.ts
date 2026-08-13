@@ -22,18 +22,23 @@
 //   controlJump && vy>0 && !downDash 时按款覆盖帧（默认 2；30/34/39 恒循环；
 //   48→3、40→0、44→2、26→2、37→2、43→1、12→3；22/28/45/51/47/49/50/24 除外不覆盖）。
 //
-// ===== 偏差登记（2026-08-13 二轮 /goal 清零批后残留——全部为源头不可得/引擎级）=====
-// ① 44 HallowBoss 像素着色器 HLSL 不在反编译源（编译期 effect 二进制）→ Extra_171
-//   静态直画（与女皇 Extra_157 先例同法）；44/45 残影 (70,70,70,0)·f 与 38 影子环
-//   的 A=0 是原版死画（XNA A=0 不出像素）→ 跳过即 1:1；
-// ② extra38 暗环境 tint 取满档、49 光照门 z 恒 1——两处需读侧光照采样 API
-//   （本仓 LightingEngine 只写不读），亮环境 1:1、暗环境略偏亮；
-// ③ stealth（潜行）与 cWings 染色（dye）系统全局未建模（引擎级，非翅膀层）；
-// ④ tryKeepingHoveringUp/Down 锁存 = HoverControl Click 模式专属（Player.cs:361
-//   默认 Hold → :24985 恒清零）——默认设置下 controlUp/Down 即原版语义；
-//   Click 设置项本身未移植（设置系统级）；
-// ⑤ isPerformingJump_DownDash（5465 手持下冲跳 :13978）跳跃变体未移植（跳跃系统级）
-//   → downDash 恒 false 与现状一致。
+// ===== 偏差登记（2026-08-13 四轮 FX 二进制真值批后——①②③ 全部清零）=====
+// 已清零（四轮，字节码级真值）：
+//   ① 44 HallowBoss —— PixelShader.cso 反汇编（tools/disasm-fx.mjs）取得 MISC
+//     "HallowBoss" pass 精确公式：ramp[fold(灰度+uTime), 0.5]×A（Extra_171 全图烘焙
+//     缓存，PlayerRainbowWingsTextureContent.cs 1:1）；染料 4778 走 ArmorHallowBoss
+//     pass（ramp[fold(SUM/2+t/2), 0.5]×0.8 + 原色×0.2，SM2Effect 解释器执行）；
+//     44/45 残影 (70,70,70,0)·f 与 38 影子环 A=0 是原版死画 → 跳过即 1:1；
+//   ② extra38 暗环境 tint / 49 光照门 z —— 读侧光照已接（LightingEngine.lightAt，
+//     三轮）；stealth 视觉分层已接（四轮：PlayerDrawSet.cs:1523-1651 逐层乘数，
+//     doll skin×s'² / armor×s'(B×settled) / 星璇 Lerp 通道，tintRGBA 逐通道）；
+//   ③ stealth 与 cWings 染色 —— 全染料技术走 SM2 字节码执行（src/fx/SM2Effect.ts +
+//     src/data/fxPixelShader.json，63 pass 全量），无近似公式；
+// 剩余（设置/跳跃系统级，默认态恒 false 与原版一致）：
+//   ④ tryKeepingHoveringUp/Down 锁存 = HoverControl Click 模式专属（Player.cs:361
+//      默认 Hold → :24985 恒清零）；Click 设置项未移植（设置系统级）；
+//   ⑤ isPerformingJump_DownDash（5465 手持下冲跳 :13978）未移植（跳跃系统级）
+//      → downDash 恒 false 与现状一致。
 export interface WingDraw {
   /** 绘制切帧数（num14 / Frame(1,N) 的 N；28 用 miscCounter 动画帧率恒 4） */
   frames: number;

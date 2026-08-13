@@ -605,6 +605,10 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
     blocks: bytesToB64(rlePairs(combineHalfSlope(halfArr, slopeArr))),
     paint: bytesToB64(rlePairs(paintArr)),         // 油漆（WF:2571-2574）
     paintWall: bytesToB64(rlePairs(paintWallArr)), // 墙漆（WF:2583-2586）
+    // ★explored 故意不写段（= 全 0 迷雾）：原版地图探索数据存在 .wld 伴档 .twld
+    // （MapHelper.SaveMap），.wld 本体不含——WldParser 只读 .wld，无从回填，
+    // 导入后从头探索（与旧存档行为一致）
+    explored: undefined,
     chests,
     player: {
       hp: 100,
