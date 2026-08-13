@@ -10,7 +10,9 @@ const chestSrc = readFileSync(`${SRC}/Chest.cs`, 'utf8');
 const values = {};
 {
   const body = itemSrc.slice(itemSrc.indexOf('public void SetDefaults1'), itemSrc.indexOf('public void SetDefaults(int Type'));
-  const caseRe = /\t\tcase (\d+):\n/g;
+  // \t+case:SetDefaults1-3 段双 tab、4/5 段单 tab（旧 `\t\tcase` 漏扫 4/5 段
+  // 致 90 条 price:null——2026-08-13 修）
+  const caseRe = /\t+case (\d+):\n/g;
   const marks = [];
   let m;
   while ((m = caseRe.exec(body))) marks.push({ id: Number(m[1]), at: m.index });
@@ -24,6 +26,30 @@ const values = {};
     if (bp) {
       const args = bp[1].split(',').map((s) => Number(s.trim()));
       values[marks[i].id] = args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length);
+      continue;
+    }
+    // 1.4.4+ 新形态 SetShopValues(rarity, buyPrice(...)/sellPrice(...)) → value=第 2 参
+    // (Item.cs:48198-48202;sellPrice=buyPrice 同式×5 :49019-49022)
+    // 旧提取器只认 `value =` 前缀 → 158 条 price:null 兜底 100 铜甩卖(2026-08-13 修)
+    const sv = seg.match(/SetShopValues\([^,]+, (buyPrice|sellPrice)\(([\d\s,]*)\)\)/);
+    if (sv) {
+      const args = sv[2] ? sv[2].split(',').map((x) => Number(x.trim())) : [];
+      let val = args.length ? args.reduce((a, x) => a * 100 + x, 0) * 100 ** (4 - args.length) : 0;
+      if (sv[1] === 'sellPrice') val *= 5;
+      values[marks[i].id] = val;
+    }
+    // helper 内部统一 value（DefaultToTorch → value=60,Item.cs:48094）
+    if (values[marks[i].id] === undefined && /DefaultToTorch\(/.test(seg)) {
+      values[marks[i].id] = 60;
+    }
+  }
+  // fall-through case 组（`case 4041: case 4042: … 共用一体`）：纯空块（seg 仅
+  // case 行）倒序继承下一块的值（C# 语义;旧提取器只给组尾赋值,2026-08-13 修）
+  for (let i = marks.length - 2; i >= 0; i--) {
+    if (values[marks[i].id] !== undefined) continue;
+    const seg = body.slice(marks[i].at, marks[i + 1].at);
+    if (/^\t+case \d+:\s*$/.test(seg)) {
+      values[marks[i].id] = values[marks[i + 1].id];
     }
   }
 }
@@ -34,6 +60,7 @@ const SHOP_SLOT = {
   17: 1, 19: 2, 20: 3, 38: 4, 54: 5, 107: 6, 108: 7, 124: 8, 142: 9, 160: 10,
   178: 11, 207: 12, 208: 13, 209: 14, 227: 15, 228: 16, 229: 17, 353: 18,
   453: 20, 588: 22, 633: 23, 663: 24,
+  550: 21, // 酒馆老板（OOA 双货币店,Chest.cs case 21——旧提取器漏收致永远无商店按钮）
 };
 function parseGate(text) {
   if (!text) return null;

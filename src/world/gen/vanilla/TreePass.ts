@@ -145,7 +145,8 @@ function growEpicTree(st: TileStore, rng: RNG, gs: GenState, i: number, y: numbe
 }
 
 /** GrowPalmTree（L11785）：沙滩棕榈，干身倾斜帧 fy=num4（±2 步进趋向 num3） */
-function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
+/** 1456 GrowPalmTree(cs:27270-27340)1:1;导出供 StructuresPass 绿洲消费段复用(2026-08-13 去重) */
+export function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   if (!st.inBounds(i, y)) return false;
   let index1 = y;
   while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PLANTS.has(st.type[st.idx(i, index1)])) index1++;
@@ -155,7 +156,8 @@ function growPalmTree(st: TileStore, rng: RNG, i: number, y: number): boolean {
   if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !PALM_GROUND.has(st.type[gi])) return false;
   if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
   if (!emptyTileCheck(st, i, i, index1 - 2, index1 - 1)) return false;
-  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 30, index1 - 3)) return false;
+  // 1456 终态(cs:27302):侧净空 num-num2 = index1-20(1405 :11800 是 index1-30,已换)
+  if (!emptyTileCheck(st, i - 1, i + 1, index1 - 20, index1 - 3)) return false;
   const height = rng.int(10, 20);                 // Next(10,21)
   const target = rng.int(-8, 8) * 2;              // Next(-8,9)*2
   let tilt = 0;

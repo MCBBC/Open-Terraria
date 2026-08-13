@@ -44,7 +44,8 @@ describe('敌弹命中玩家（Damage_EVP）', () => {
       { grav: 0, life: 300, pierce: 1, hostile: true });
     for (let i = 0; i < 6; i++) arrow.fixedUpdate(1 / 60, game);
     expect(log.dmg.length).toBe(1);
-    expect(log.dmg[0]).toBe(25);
+    // Damage_EVP（Projectile.cs:13776-13778）：难度缩放（经典 1）后全局 ×2 → 25×2=50
+    expect(log.dmg[0]).toBe(50);
     expect(p.hp).toBeLessThan(hp0);
     expect(arrow.dead).toBe(false); // 命中不销毁弹体
     expect(p.iframes).toBeGreaterThan(0);

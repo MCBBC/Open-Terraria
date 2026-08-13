@@ -230,6 +230,25 @@ export function availableRecipes(inv: Inventory, ctx: VanillaCraftCtx): Array<{ 
 
 /** 执行合成（CraftingRequests.CraftLocally 主干）：扣材料→返成品 key（放置进背包由调用方） */
 export function consumeMaterials(inv: Inventory, r: VanillaRecipe, times = 1, alchemyTable = false): boolean {
+  // ---- 第一阶段：可用性校验（不扣）——CraftingRequests.cs:86-102 每次迭代重查、
+  // 永不过扣。旧实现"边扣边查、不足 return false 不回滚"=材料部分销毁零产出
+  // （shift ×10 合成时整批蒸发,2026-08-13 修）----
+  for (const req of r.items) {
+    let need = req.stack * times;
+    const gid = groupOf(r, req.id);
+    if (gid >= 0) {
+      for (const g of (RECIPE_GROUP_ITEMS[String(gid)] ?? [])) {
+        if (need <= 0) break;
+        const iid = invIndexOfVanilla(g);
+        if (iid >= 0) need -= Math.min(inv.countOf(iid), need);
+      }
+      if (need > 0) return false;
+    } else {
+      const iid = invIndexOfVanilla(req.id);
+      if (iid < 0 || inv.countOf(iid) < need) return false;
+    }
+  }
+  // ---- 第二阶段：执行扣除（校验已过,理论不触不足;保持原折扣/组扣语义）----
   for (const req of r.items) {
     let need = req.stack * times;
     // 炼金折扣（GetIngredientCraftingDiscount Recipe.cs:213-227：alchemy 配方且 alchemyTable
@@ -242,27 +261,19 @@ export function consumeMaterials(inv: Inventory, r: VanillaRecipe, times = 1, al
     }
     // 组材料（groupOf:占位 id/哨兵 id 统一判定,ConsumeFromInventory :451 语义——
     // 组槽可扣组内任一成员,依序补足）
-    const gid = groupOf(r, req.id);
-    if (gid >= 0) {
-      const items = RECIPE_GROUP_ITEMS[String(gid)] ?? [];
-      for (const gid of items) {
+    const gid2 = groupOf(r, req.id);
+    if (gid2 >= 0) {
+      for (const g of (RECIPE_GROUP_ITEMS[String(gid2)] ?? [])) {
         if (need <= 0) break;
-        const key = VID_TO_KEY.get(gid);
-        if (!key) continue;
-        const internal = (Object as unknown as { _k?: never });
-        void internal;
-        // 直接经 ITEM_DEFS 反查内部 id 再 inv.remove
-        const iid = invIndexOfVanilla(gid);
+        const iid = invIndexOfVanilla(g);
         if (iid < 0) continue;
-        const have = inv.countOf(iid);
-        const take = Math.min(have, need);
+        const take = Math.min(inv.countOf(iid), need);
         if (take > 0) { inv.remove(iid, take); need -= take; }
       }
-      if (need > 0) return false;
+      if (need > 0) return true; // 阶段一已过,残余只可能来自折扣外并发,放行不吞
     } else {
       const iid = invIndexOfVanilla(req.id);
-      if (iid < 0 || inv.countOf(iid) < need) return false;
-      inv.remove(iid, need);
+      if (iid >= 0) inv.remove(iid, Math.min(inv.countOf(iid), need));
     }
   }
   return true;

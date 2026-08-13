@@ -637,7 +637,7 @@ export function sandElementalAI(e: Enemy, game: GameHooks, player: Player | null
   const ratio = e.hp / e.maxHp;
   p.maxH += (1 - ratio) * 2;
   p.accelH += (1 - ratio) * 0.02;
-  e.def.knockbackResist = ratio < 0.5 ? 1 : e.def.knockbackResist;
+  e.def.knockbackResist = ratio < 0.5 ? 0 : e.def.knockbackResist; // def 存承受比例：0=免疫
   // ---- 攻击循环（:42263-42389） ----
   let castDamp = 0;
   if (e.ai0 < 0) e.ai0 = Math.min(e.ai0 + 1, 0);   // 冷却回摆（:42267-42269）

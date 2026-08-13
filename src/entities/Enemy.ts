@@ -111,6 +111,10 @@ const MARTIAN_DAY_ACTIVE = new Set([381, 382, 383, 385, 386, 389, 391, 520]);
 // 白天 && y≤worldSurface → EncourageDespawn(10) + 保持水平方向向上飞离
 const EYE_DAY_DESPAWN = new Set([2, 133, 190, 191, 192, 193, 194, 317, 318]);
 
+// AI_014 wet 浮力表（cs:23232 蝙蝠/恶魔/巨狐蝠/孢子蝠 + cs:23380 哈比 48）：
+// 入水上浮弹出水面（vy>0 ×0.95、恒 -0.5、钳 -4 + TargetClosest）；表外 aiStyle14 无此段
+const AI014_SWIM_UP = new Set([48, 49, 51, 60, 62, 66, 93, 137, 150, 151, 152, 634]);
+
 /** 原版路径 key（v_*）的占位 def，fromVanilla 会整体覆写 */
 const PLACEHOLDER_DEF: EnemyDef = {
   key: 'v_placeholder', name: '?', hp: 1, damage: 0, knockbackResist: 0.5,
@@ -486,14 +490,14 @@ export class Enemy extends Entity {
     scaleStats(ss);
     e.difficulty = ss.difficulty;          // npc.difficulty（AI 段 GetAttackDamage_* 消费）
     e.baseDamage = rawDamage;              // defDamage 快照的【未缩放】基线（弹幕出膛用）
-    const kbr = Math.max(0, Math.min(0.89, 1 - ss.knockBackResist));  // 缩放后再转本仓"抗性"语义
+    // def.knockBackResist 直存原版"承受比例"语义（ScaleStats :307 缩放后仍是比例；
+    // hurt() 无条件 kbx*resist——0=免疫、1=全额）。旧"1-比例"换算+0.89 钳已废（2026-08-13）
+    const kbr = ss.knockBackResist;
     e.def = {
       ...e.def,
       // friendly（被缚 NPC 等城镇系）与 critter 一样零接触伤害——原版 friendly 旗
       name: v.name, hp: ss.lifeMax, damage: rawDamage !== 0 ? ss.damage : 0, defense: ss.defense,
-      // 原版 knockBackResist 是"承受击退的比例"（0.5=吃一半）；本仓库语义是
-      // "抗性"（hurt(): resist<0.9 才生效，kbx*(1-resist)）→ 换算 1-比例
-      // （缩放在上面 ScaleStats 内按原版语义完成，这里只做语义换算）
+      // 原版 knockBackResist="承受击退的比例"（0=免疫 Boss、0.5=吃一半、1=全额）
       knockbackResist: kbr,
       width: Math.round(v.width * (v.scale ?? 1)), height: Math.round(v.height * (v.scale ?? 1)), flying,
       boss: VANILLA_BOSS_IDS.has(id),
@@ -527,6 +531,9 @@ export class Enemy extends Entity {
     // 263 世纪之花钩蔓 SetDefaults :12331-12332 dontTakeDamage=true——恒不可击
     // （AI_052 本体消失时自伤 9999 走直改 hp 通道,不受此门禁阻塞）
     if (id === 263) e.dontTakeDamage = true;
+    // 690 雕像宝箱怪 SetDefaults :17615-17627 immortal+dontTakeDamage=true——伪装态
+    // 不可击；AI_126 唤醒段 :43873 解除（ai[0] 0→1）
+    if (id === 690) e.dontTakeDamage = true;
     e.x = x - e.w / 2;
     e.y = y - e.h / 2;
     return e;
@@ -570,6 +577,8 @@ export class Enemy extends Entity {
   wetCount = 0;
   honeyWet = false;
   shimmerWet = false;
+  /** AI_001 wet 段的 ai[3] 语义位（cs:61889：vy>0 时记 position.X，上浮中 X 未动 → 掉头） */
+  slimeWetX = 0;
   /** 微光浸入进度（≈shimmerTransparency ×100，NPC.cs:92468-92483：+0.01/t，
    *  90t 到 0.9 阈值触发 NPC.GetShimmered；离池 -0.01/t） */
   shimmerT = 0;
@@ -891,6 +900,7 @@ export class Enemy extends Entity {
         case 111: dd2LightningBugAI(this, game, p); break;                // AI_111 埃特尼亚荧光虫 578（cs:66799 悬停蓄电 682 电弧）
         case 113: this.windyBalloonAI(game, p); break;                    // AI_113 风气球 594（cs:48253 挂史莱姆 ai[0]=-999）
         case 119: this.dandelionAI(game, p); break;                      // AI_119 蒲公英 628（cs:43254 下风喷籽；非critter勿只登 critterWanderAI）
+        case 126: this.statueMimicAI(game, p); break;                    // AI_126 雕像宝箱怪 690（cs:43760 伪装/唤醒/跳跃穿墙）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
       }
     } else switch (this.key) {
@@ -1056,26 +1066,9 @@ export class Enemy extends Entity {
       .add(dart, 'projectiles');
   }
 
-  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1, buoyant = false) {
-    // 浮力生物（史莱姆）：水中上浮 + 阻尼，漂在水面而不是沉底
-    if (buoyant) {
-      const st = game.world.store;
-      const li = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))];
-      if (li > 80) {
-        if (this.state === 1) {
-          // 跳跃中：弱重力助其跃出水面（浮力阻尼会把起跳速度吃掉导致困在水里）
-          this.vy = Math.min(this.vy + GRAVITY * 0.3, MAX_FALL_SPEED);
-          moveAndCollide(this, game.world, this.vx, this.vy);
-          this.vx *= 0.98;
-          return;
-        }
-        this.vy -= 0.32;
-        this.vy *= 0.92;
-        this.vx *= 0.95;
-        moveAndCollide(this, game.world, this.vx, this.vy);
-        return;
-      }
-    }
+  private groundPhysics(game: GameHooks, jumpV = 0, accel = 0.12, maxSpd = 1) {
+    // 注：水中行为不在本方法——wet 减速由 npcLiquid→liqFactor 统一承担（原版
+    // Collision_MoveWhileWet），浮力族（史莱姆）的弹跳漂浮在各自 AI 的 wet 段（cs:61877）
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx + accel * Math.sign(this.vx || 1) * 0));
     if (jumpV && this.onGround) this.vy = -jumpV;
@@ -1116,7 +1109,7 @@ export class Enemy extends Entity {
     if (grasshopper && !flag3) {
       this.vx += this.facing * 0.02;
       this.vx = Math.max(-0.2, Math.min(0.2, this.vx));
-      this.groundPhysics(game, 0, 0.12, 1, true);
+      this.groundPhysics(game, 0, 0.12, 1);
       return;
     }
     const dir = this.facing;
@@ -1199,8 +1192,32 @@ export class Enemy extends Entity {
         this.ai3 = this.vanillaId === 658 ? 50 : 40;             // :61735/:61770
       }
     }
-    // 重力+碰撞（原版经由 NPC 碰撞；水中浮力为原版 wet 行为）
-    this.groundPhysics(game, 0, 0.12, 1, true);
+    // ---- wet 浮力段（cs:61877-61935 1:1，替换旧 groundPhysics buoyant 近似）----
+    // 纵向碰撞(上帧 collideY) → vy=-2 上弹；上浮中 X 原地未动 → 掉头 + ai[2]=200 冷却；
+    // vy>2 ×0.9、恒 -0.5 上浮、钳 -4（59 岩浆史莱姆钳 -10 且 directionY<0 追加 -0.8）
+    // ——史莱姆在水中以弹跳方式漂浮，贴面上下起落（collideY 读的是上一 tick 碰撞，
+    // 与原版 AI 先于 UpdateCollision 的时序一致）
+    if (this.wet) {
+      if (this.onGround || this.hitHead) this.vy = -2;
+      if (this.vy < 0 && this.slimeWetX === this.x) {
+        this.facing *= -1;
+        this.ai2 = 200;
+      }
+      if (this.vy > 0) this.slimeWetX = this.x;
+      if (this.vanillaId === 59) {
+        if (this.vy > 2) this.vy *= 0.9;
+        else if (this.dirY < 0) this.vy -= 0.8;
+        this.vy -= 0.5;
+        if (this.vy < -10) this.vy = -10;
+      } else {
+        if (this.vy > 2) this.vy *= 0.9;
+        this.vy -= 0.5;
+        if (this.vy < -4) this.vy = -4;
+      }
+      if (this.ai2 === 1 && flag3 && player) this.facing = this.seekDirX(player);
+    }
+    // 重力+碰撞（原版经由 NPC 碰撞；水中位移减速由 wet→liqFactor 统一承担）
+    this.groundPhysics(game, 0, 0.12, 1);
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
@@ -1852,19 +1869,24 @@ export class Enemy extends Entity {
   }
 
   /** AI_000 被缚 NPC（NPC.cs:19774-19893）：105/106/123/354 静态站立（面朝玩家+摩擦，
-   *  无任何移动）；376 睡渔夫/579 醉酒酒保水上漂流（wet → vy=-0.4 上浮 + 缓漂）。
+   *  无任何移动）；376 睡渔夫/579 醉酒酒保水上漂流（vy=-0.4 上浮 + 缓漂）。
+   *  376/579 在永不沾水表（:94252）→ wet 恒 false，原版用水线判定：wet || 头顶上方格
+   *  ((position.Y-4)/16) 有液体（:19818-19820）——睡在水面上恒漂不沉。
    *  解救（对话 Transform 成对应城镇 NPC）在 TownNPC 侧；Enemy 侧仅防御性兜底 */
   private boundNPCAI(game: GameHooks, player: Player | null) {
     if (player && !player.dead) this.facing = this.seekDirX(player);
     this.vx *= 0.93;
     if (Math.abs(this.vx) < 0.1) this.vx = 0;
     const st = game.world.store;
-    const inW = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 0;
-    if ((this.vanillaId === 376 || this.vanillaId === 579) && inW) {
-      this.vy = -0.4;                       // 水面漂流（cs:19818-19883）
-      this.vx *= 0.99;
-      this.x += this.vx; this.y += this.vy;
-      return;
+    if (this.vanillaId === 376 || this.vanillaId === 579) {
+      const headTile = st.liquid[st.idx(
+        Math.floor(this.cx / TILE), Math.floor((this.y - 4) / TILE))] > 0;
+      if (headTile) {
+        this.vy = -0.4;                     // 水面漂流（cs:19821-19883）
+        this.vx *= 0.99;
+        this.x += this.vx; this.y += this.vy;
+        return;
+      }
     }
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
@@ -2185,6 +2207,20 @@ export class Enemy extends Entity {
     const derpling = this.vanillaId === 177;
     if (player && !player.dead) this.facing = this.seekDirX(player);
     const dist = player ? Math.hypot(player.cx - this.cx, player.cy - this.cy) : Infinity;
+    // ---- wet 段（cs:30105-30120，177 Derpling 除外）：撞墙翻向；纵向碰撞 → 重新索敌 +
+    // 上撞 vy=5 / 落水 vy-=2；随后 vy>0 ×0.95、恒 -0.3 上浮钳 -4——赫柏林入水上浮。
+    // collideX/Y 读上一 tick 碰撞（原版 AI 先于 UpdateCollision）
+    if (this.wet && !derpling) {
+      if (this.hitWall) this.facing *= -1;
+      if (this.onGround || this.hitHead) {
+        if (player) this.facing = this.seekDirX(player);
+        if (this.vy < 0) this.vy = 5;
+        else this.vy -= 2;
+      }
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.3;
+      if (this.vy < -4) this.vy = -4;
+    }
     this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.onGround && this.vy === 0) {
@@ -2274,6 +2310,12 @@ export class Enemy extends Entity {
     }
     this.vy = Math.max(-T.my, Math.min(T.my, this.vy));
     if (this.vx > 0.1) this.facing = 1; else if (this.vx < -0.1) this.facing = -1;
+    // wet 浮力（cs:31256-31266，587 飞鱼眼除外）：vy>0 ×0.95、恒 -0.5 上浮钳 -4
+    if (this.wet && this.vanillaId !== 587) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
+    }
     const oldVy = this.vy;
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) {
@@ -2372,6 +2414,15 @@ export class Enemy extends Entity {
       this.vy = -oldVy * 0.5;
       if (this.vy > 0 && this.vy < 1) this.vy = 1;
       if (this.vy < 0 && this.vy > -1) this.vy = -1;
+    }
+    // wet 浮力尾段（cs:53117-53127）：wet 且非 170/171/180（猪龙三色变种，照常潜行）→
+    // vy>0 ×0.95 阻下落、恒 -0.5 上浮、下限 -4 并重新索敌——飘浮眼入水弹出水面
+    // 而非照常追击；此前缺失（"怪物下水照常攻击"主诉的飞行侧成因）
+    if (this.wet && this.vanillaId !== 170 && this.vanillaId !== 171 && this.vanillaId !== 180) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
+      if (player) this.facing = this.seekDirX(player);   // TargetClosest
     }
   }
 
@@ -2858,6 +2909,15 @@ export class Enemy extends Entity {
       if (this.vy < -cy) this.vy += 0.05; else if (this.vy < 0) this.vy -= 0.03;
       if (this.vy > cy) this.vy = cy;
     }
+    // ---- wet 浮力（cs:23232-23243 蝙蝠/恶魔/巨狐蝠/孢子蝠族 + cs:23380-23392 哈比 48）：
+    // 入水 vy>0 ×0.95、恒 -0.5 上浮、钳 -4 并重新索敌——飞行族扎水后弹出水面而非
+    // 照常追击。表外 aiStyle14（158 吸血蝙蝠等）原版无此段
+    if (this.wet && this.vanillaId !== null && AI014_SWIM_UP.has(this.vanillaId)) {
+      if (this.vy > 0) this.vy *= 0.95;
+      this.vy -= 0.5;
+      if (this.vy < -4) this.vy = -4;
+      if (player) this.facing = this.seekDirX(player);   // TargetClosest
+    }
     moveAndCollide(this, game.world, this.vx, this.vy);
     // 撞墙/撞地反弹（L22899-22923：collideX/Y → oldVelocity*-0.5 + 最小弹速）
     if (this.hitWall) {
@@ -2915,7 +2975,9 @@ export class Enemy extends Entity {
    *  撞墙掉头；离水缓慢上浮。螺旋转向/专家模式特化略 */
   private swimAI(game: GameHooks, player: Player | null) {
     const st = game.world.store;
-    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
+    // wet = 原版 Collision.WetCollision（npcLiquid 每 tick 写；中心小盒判水线，
+    // 浅水/贴面与中心格 liquid>80 近似有别——水面行为以此为准）
+    const inWater = this.wet;
     if (player) this.facing = this.seekDirX(player);
     const dirX = player ? this.facing : (this.vx >= 0 ? 1 : -1);
     const dirY = player ? (player.cy > this.cy ? 1 : -1) : 0;
@@ -2962,25 +3024,30 @@ export class Enemy extends Entity {
       moveAndCollide(this, game.world, this.vx, this.vy);
       if (this.hitWall) { this.facing *= -1; this.vx = -this.vx * 0.8; } // 撞墙掉头
     } else {
-      // 离水：重力下坠 + 落地拍打挣扎（原版鱼离水不会飞——之前误写成持续上浮导致飞天）
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
-      moveAndCollide(this, game.world, this.vx, this.vy);
-      this.vx *= 0.9;
-      if (this.onGround && this.aiT % 30 === 0) {   // 拍打：小跳 + 随机方向
-        this.vy = -2.5;
-        this.vx = (Math.random() - 0.5) * 3;
+      // 离水（cs:24019-24034）：vy==0 → 拍打挣扎 vy=rand(-5,-2)/vx=rand(-2,2)
+      // （65 食人鱼/692 貌鱼例外：只 ×0.94 阻尼不蹦）；重力 0.3 钳 10
+      if (this.vy === 0) {
+        if (this.vanillaId === 65 || this.vanillaId === 692) {
+          this.vx *= 0.94;
+          if (Math.abs(this.vx) < 0.2) this.vx = 0;
+        } else {
+          this.vy = -5 + Math.random() * 3;   // rand(-50,-20) × 0.1
+          this.vx = -2 + Math.random() * 4;   // rand(-20,20) × 0.1
+        }
       }
+      this.vy = Math.min(this.vy + 0.3, 10);
+      moveAndCollide(this, game.world, this.vx, this.vy);
     }
   }
 
   /** AI_018 水母族（NPC.145.cs:24210+）：阻尼漂移 + 周期性脉冲游向目标
    *  速度 *=0.98 阻尼（L24349）；静止阈值内（num277 0.2-3）触发脉冲，脉冲速度 7-9（L24374+）。
-   *  离水：重力下坠拍打（脉冲只在水中生效——否则水母会飞） */
+   *  离水（cs:24459-24474）：rotation+=vx×0.1、vy==0 时 vx ×0.98 阻尼、重力 0.2 钳 10
+   *  ——水母离水只坠不蹦（与 aiStyle16 鱼的拍打挣扎不同） */
   private jellyfishAI(game: GameHooks, player: Player | null) {
-    const st = game.world.store;
-    const inWater = st.liquid[st.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))] > 80;
-    this.vx *= 0.98; this.vy *= 0.98;
+    const inWater = this.wet;
     if (inWater) {
+      this.vx *= 0.98; this.vy *= 0.98;
       if (++this.aiT % 90 === 0 && player) {
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
         const d = Math.hypot(dx, dy) || 1;
@@ -2990,8 +3057,12 @@ export class Enemy extends Entity {
         this.vy -= 0.02;              // 缓慢下沉漂移
       }
     } else {
-      this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED); // 离水受重力
-      if (this.onGround && this.aiT % 30 === 0) this.vy = -2.5; // 拍打
+      // 离水（cs:24459-24474）：vy==0 时 vx ×0.98 阻尼归零；重力 0.2 钳 10
+      if (this.vy === 0) {
+        this.vx *= 0.98;
+        if (Math.abs(this.vx) < 0.01) this.vx = 0;
+      }
+      this.vy = Math.min(this.vy + 0.2, 10);
     }
     moveAndCollide(this, game.world, this.vx, this.vy);
     if (this.hitWall) this.vx *= -0.8;
@@ -3547,10 +3618,9 @@ export class Enemy extends Entity {
       if (slave) {
         // 变体覆盖（SetDefaults case -3/:7658、-4/:7668、-7/:7699：
         // SetDefaults_ForNetId(scale) + 属性/颜色/kbResist 覆写）。
-        // kbResist 乘子（:7665/:7675/:7705）作用在原版"承受比例"上——本仓 def 存
-        // 抗性=1-比例，先反解再乘回来：kbr = clamp(1-(1-def.kb)*m, 0, 0.89)
+        // kbResist 乘子（:7665/:7675/:7705）直乘"承受比例"（def 已存原版语义）
         const kbMul = (m: number) => {
-          slave.def.knockbackResist = Math.max(0, Math.min(0.89, 1 - (1 - slave.def.knockbackResist) * m));
+          slave.def.knockbackResist = Math.max(0, slave.def.knockbackResist * m);
         };
         const r = Math.random();
         if (r < 1 / 180) { // 金史莱姆 -4：scale 0.6/dmg 5/def 5/hp 150/kb×1.4
@@ -3686,6 +3756,419 @@ export class Enemy extends Entity {
           ents.add(seedDart, 'projectiles');
         }
       }
+    }
+  }
+
+  /** AI_126 雕像宝箱怪 690（NPC.cs:43760-44010）：SetDefaults immortal+dontTakeDamage
+   *  （:17615，fromVanilla 侧已置 dontTakeDamage）。伪装态 ai[0]=0：timeLeft=60 恒续命、
+   *  direction 冻结、玩家 96px+CanHit 唤醒；每 10t 屏外向玩家屏带内更近落点传送
+   *  （候选=双格实心底+净空3+不可见，SolidTile2 下扫 ≤10）。激活态：Scare 惊吓音 →
+   *  地面 ai[2] 倒数 20 节奏跳（vy=-9.01-高差/40 钳10、vx=(4+|dx|/50 钳12)×dir）；
+   *  跳跃/上升/玩家正上 noTileCollide 穿墙（直接位移）；玩家正下俯冲 vy=16；
+   *  玩家死 Laugh+300t 强制俯冲。绘制侧恒为雕像形态（Tiles_105 切片，见 Renderer）。 */
+  private statueMimicAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    if (this.ai0 < 0) this.ai0 = 0;                       // 类默认 -1120 → 伪装态 0（ai0 初值坑）
+    if (!this.aiInit) {
+      // 首帧：ai[1] = 随机雕像样式（localAI[1] 分支 :43771-43775 ←
+      // WorldGen.GetRandomStatueStyleForStatueMimics :37934 Next(83) 拒绝 43-49）
+      this.aiInit = true;
+      let s = Math.floor(Math.random() * 83);
+      while (s >= 43 && s <= 49) s = Math.floor(Math.random() * 83);
+      this.ai1 = s;
+    }
+    // 位置参考 = 真身（含尸体——原版 Main.player[target] 不因死亡失位；主 switch 传参
+    // 玩家死亡即 null，故走 game.player 兜底，与 case 4 EoC 例外同型）
+    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+    const alive = !!pp && !pp.dead;
+    const tgt = alive ? pp : null;
+    if (this.ai0 === 0) {
+      // 伪装态：不消散（原版 timeLeft=60 每帧续命 :43765）
+      this.despawnTimer = 750;
+      this.despawnEncouraged = false;
+      if (tgt && Math.hypot(tgt.cx - this.cx, tgt.cy - this.cy) < 96 && this.canSeePlayer(st, tgt)) {
+        this.ai0 = 1;                                     // 唤醒（:43780-43788）
+        this.dontTakeDamage = false;                      // immortal=false（:43873）
+        game.playSfx('statueMimicScare', 0.8, this.cx, this.cy);
+        return;
+      }
+      // 屏外传送（每 10t 一掷；本体不可见才动 :43789-43877）。可见门近似 = 与
+      // despawn 同款固定屏盒（62×35 格）；band = 玩家 ±960/±600px（sWidth/sHeight 静态）
+      if (++this.lai0 < 10) return;
+      this.lai0 = 0;
+      if (!tgt) return;
+      const vis = (wx: number, wy: number) =>
+        Math.abs(wx - tgt.cx) < TILE * 62 && Math.abs(wy - tgt.cy) < TILE * 35;
+      if (vis(this.cx, this.cy)) return;
+      const halfW = 1920 / 2, halfH = 1200 / 2;
+      let x2: number, x3: number;
+      if (Math.abs(tgt.cx - this.cx) < halfW) { x2 = (tgt.cx - halfW) / TILE; x3 = (tgt.cx + halfW) / TILE; }
+      else if (tgt.cx < this.cx) { x2 = (tgt.cx + halfW) / TILE; x3 = this.cx / TILE; }
+      else { x2 = this.cx / TILE; x3 = (tgt.cx - halfW) / TILE; }
+      let y4: number, y5: number;
+      if (Math.abs(tgt.cy - this.cy) < halfH) { y4 = (tgt.cy - halfH) / TILE; y5 = (tgt.cy + halfH) / TILE; }
+      else if (tgt.cy < this.cy) { y4 = (tgt.cy + halfH) / TILE; y5 = this.cy / TILE; }
+      else { y4 = this.cy / TILE; y5 = (tgt.cy - halfH) / TILE; }
+      const solid2 = (tx: number, ty: number): boolean =>
+        st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0 && !!TILE_DEFS[st.type[st.idx(tx, ty)]]?.solid;
+      const clearAbove = (tx: number, ty: number): boolean => {   // IsThisAGoodPlaceForAStatueMimic（:43751）
+        for (let dy = 1; dy <= 3; dy++) {
+          if (!st.inBounds(tx, ty - dy)) continue;
+          if (st.flags[st.idx(tx, ty - dy)] !== 0) return false;
+        }
+        return true;
+      };
+      for (let attempt = 10; attempt > 0; attempt--) {
+        const cx0 = Math.floor(x2 + Math.random() * (x3 - x2));
+        let cy0 = Math.floor(y4 + Math.random() * (y5 - y4));
+        let ground = -1;
+        for (let i = 0; i < 10; i++) {                     // 下扫找双格实心底
+          if (solid2(cx0, cy0) && solid2(cx0 + 1, cy0)) { ground = cy0; break; }
+          cy0++;
+        }
+        if (ground < 0 || !clearAbove(cx0, ground) || !clearAbove(cx0 + 1, ground)) continue;
+        if (vis((cx0 + 1) * TILE, ground * TILE)) continue;   // CanAnyPlayerSeeThisTile 近似
+        const nx = cx0 * TILE + TILE - this.w / 2, ny = ground * TILE - this.h;
+        const dNew = Math.hypot(nx + this.w / 2 - tgt.cx, ny + this.h / 2 - tgt.cy);
+        const dOld = Math.hypot(this.cx - tgt.cx, this.cy - tgt.cy);
+        if (dNew < dOld) {
+          if (nx < this.x) this.facing = -1;               // direction 朝来向（:43872-43876）
+          else if (nx > this.x) this.facing = 1;
+          this.x = nx; this.y = ny; this.vx = 0; this.vy = 0;
+          return;
+        }
+      }
+      return;
+    }
+    // ---- 激活态（:43872-44010）----
+    let jump = false;
+    if (tgt && this.vy > 0 && this.y > tgt.y + tgt.h) {
+      // 下落中且已落到玩家脚下（Top>玩家 Bottom）且身体陷实心 → 立即再跳
+      const bx0 = Math.floor(this.x / TILE), bx1 = Math.floor((this.x + this.w - 0.01) / TILE);
+      const by0 = Math.floor(this.y / TILE), by1 = Math.floor((this.y + this.h - 0.01) / TILE);
+      let inSolid = false;
+      outer: for (let tx = bx0; tx <= bx1; tx++) for (let ty = by0; ty <= by1; ty++) {
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { inSolid = true; break outer; }
+      }
+      if (inSolid) {
+        jump = true;
+        game.playSfx('statueMimicJump', 0.3, this.cx, this.cy);
+      }
+    } else if (this.vy === 0) {
+      // 地面节奏：ai[2]==20 预告音 → 递减 → ≤0 重置 20 并跳（首落地 ai2=0 立即跳）
+      if (this.ai2 === 20) game.playSfx('statueMimicJump', 0.3, this.cx, this.cy);
+      this.vx = 0;
+      if (--this.ai2 <= 0) { this.ai2 = 20; jump = true; }
+    }
+    // flag3：与玩家水平重叠（:43912-43925，尸体照算）；本体底在玩家顶上方时削弱横/升速
+    let overX = false;
+    if (pp && this.x + this.w >= pp.x && this.x <= pp.x + pp.w) {
+      if (this.y + this.h < pp.y) {
+        this.vx *= 0.75;
+        if (this.vy < 0) this.vy *= 0.75;
+      }
+      overX = true;
+    }
+    if (!alive) {
+      // 玩家死亡：Laugh（ai[3]==0 播一次）+ >200t 强制 flag3 俯冲撤离（:43926-43938）
+      if (this.ai3 === 0) { game.playSfx('statueMimicLaugh', 0.8, this.cx, this.cy); this.ai3 = 300; }
+      if (this.ai3 > 200) { overX = true; this.ai3 -= 1; }
+    } else if (this.ai3 > 0) this.ai3 -= 1;
+    if (jump) {
+      // 跳跃（:43940-43955）：noTileCollide 穿墙直接位移；
+      // vy = -9.01 - (Bottom差/40 钳 0..10，死亡取 0)；vx = (4+|dx|/50 钳 12)×direction
+      let dir = this.facing;
+      if (pp) dir = Math.sign(pp.cx - this.cx) || 1;
+      this.facing = dir;
+      let lift = 0;
+      if (pp && alive) lift = Math.max(0, Math.min(10, (this.y + this.h - (pp.y + pp.h)) / 40));
+      this.vy = -9.01 - lift;
+      const drive = pp ? Math.min(12, Math.abs(this.cx - pp.cx) / 50) : 12;
+      this.vx = (4 + drive) * dir;
+      this.x += this.vx;
+      this.y += this.vy;
+      return;
+    }
+    // 非跳跃帧（:43958-44008）：vy==0 立返；玩家正下俯冲 vy=16；
+    // 否则下落加重力 + 朝向越顶衰减 ×0.96（活玩家才衰减）
+    if (this.vy === 0) return;
+    let phase: boolean | null = null;                      // 本帧 noTileCollide 目标态
+    if (!alive && overX && pp && this.y + this.h < pp.y + pp.h) {
+      this.vy = 16;                                        // 死亡撤离俯冲（Bottom < 尸体 Bottom）
+      phase = true;
+    } else if (overX && pp && this.y + this.h < pp.y) {
+      this.vy = 16;                                        // 玩家正下俯冲
+      phase = true;
+    } else {
+      if (this.vy > 0) this.vy = Math.min(this.vy + GRAVITY, MAX_FALL_SPEED);
+      if (alive && pp) {
+        if (this.facing > 0 && this.cx > pp.cx) { this.vx *= 0.96; this.vy *= 0.96; }
+        if (this.facing < 0 && this.cx < pp.cx) { this.vx *= 0.96; this.vy *= 0.96; }
+      }
+      // noTileCollide：上升 或 (水平重叠且在玩家上方) → 穿墙；身体离实心 → 复原
+      if (this.vy < 0 || (overX && pp && this.y + this.h < pp.y)) phase = true;
+    }
+    if (phase === null) {
+      const bx0 = Math.floor(this.x / TILE), bx1 = Math.floor((this.x + this.w - 0.01) / TILE);
+      const by0 = Math.floor(this.y / TILE), by1 = Math.floor((this.y + this.h - 0.01) / TILE);
+      let inSolid = false;
+      outer2: for (let tx = bx0; tx <= bx1; tx++) for (let ty = by0; ty <= by1; ty++) {
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) { inSolid = true; break outer2; }
+      }
+      // 原版仅在 !SolidCollision 时清 noTileCollide（陷实心维持穿墙态防卡墙）
+      phase = !inSolid;
+    }
+    if (phase) { this.x += this.vx; this.y += this.vy; }   // 穿墙直接位移
+    else moveAndCollide(this, game.world, this.vx, this.vy);
+  }
+
+  /** AI_117 恐惧鹦鹉螺 618（NPC.cs:47488-47835）：血月钓鱼小 Boss。
+   *  常量（:47490-47499）：加速 0.15 / 巡航 7.5 / 悬停 60 / 冲刺蓄力 90+180 /
+   *  血弹蓄力 90+90（3 脉冲）/ 召唤 180。出场 ai[0]=-1：升空 vy=-2.5+渐显
+   *  （-10/t，陷实心回补 +15 钳 150）50t。悬停 0：绕目标侧后方（-ai[2]×300,-200）
+   *  SimpleFly；60t 后按 ai[3] 轮换：/7==3→召唤 3；偶→血弹 2；奇→冲刺 1（均 Item170）。
+   *  冲刺 1：蓄力 90t 反向旋进（reflectsProjectiles=true 反弹玩家弹幕）+Item172；
+   *  后 180t mouth 反向 -16 冲撞（嘴=rotation+0.4712×spriteDir，spriteDir=-1 再 +π）。
+   *  血弹 2：蓄力 90t 吸尘；后每 30t 一脉冲（后坐 -8 + 5-10 发弹 814，
+   *  mouthDir×10±6，伤 GetAttackDamage_ForProjectiles(30,25)）。召唤 3：定身发光
+   *  （light 1,0.5,0.5 脉冲）+10/20/30t CallForHelp（≤3 只 619，落点搜索 ±20 格）。
+   *  白天/非血月目标失效（悬停漂移）；noTileCollide 直接位移。 */
+  private bloodNautilusAI(game: GameHooks, player: Player | null) {
+    const st = game.world.store;
+    const HOVER_T = 60, CHARGE_WIND = 90, CHARGE_T = 180, BLOOD_WIND = 90, BLOOD_T = 90;
+    const SUMMON_T = 180, FLY_SPD = 7.5, FLY_ACC = 0.15;
+    if (!this.aiInit) {                       // localAI[0]==0（:47502-47509）
+      this.aiInit = true;
+      this.ai0 = -1;
+      this.spawnAlpha = 255;                  // alpha=255 出场渐显
+    }
+    // 位置参考 = 真身（含尸体——同 690 处理；Main.player[target] 不因死亡失位）
+    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
+    const alive = !!pp && !pp.dead;
+    // 目标失效（:47526-47530）：白天或非血月 → 无目标悬停
+    const w = game.world;
+    const bloodNight = !w.clock.isDay && w.clock.bloodMoon;
+    const hasT = alive && bloodNight;
+    const tx = hasT ? pp!.cx : 0, ty = hasT ? pp!.cy : 0;
+    // 嘴部（NPC.cs:67025-67034）：mouthAngle = rotation+0.4712×spriteDirection
+    // （spriteDirection==-1 再 +π）；mouthPos = Center+mouthDir×50。
+    // spriteDirection ↔ 本仓 facing（1=贴图水平翻转=朝右）
+    const mouthAngle = () => this.visAngle + 0.47123894 * this.facing + (this.facing === -1 ? Math.PI : 0);
+    let reflect = false;
+    let next = -1;
+    // 圆周角工具：AngleTowards（步长钳）/ AngleLerp（圆周插值）
+    const angTowards = (a: number, b: number, max: number) => {
+      let d = b - a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return a + Math.max(-max, Math.min(max, d));
+    };
+    const angLerp = (a: number, b: number, t: number) => {
+      let d = b - a;
+      while (d > Math.PI) d -= Math.PI * 2;
+      while (d < -Math.PI) d += Math.PI * 2;
+      return a + d * t;
+    };
+    switch (this.ai0) {
+      case -1: {
+        // 出场（:47534-47575）：减速 + 朝向目标（spriteDirection=-direction）
+        this.vx *= 0.98; this.vy *= 0.98;
+        if (hasT) {
+          const d = Math.sign(tx - this.cx) || 1;
+          this.facing = -d;                   // spriteDirection = -direction
+        }
+        if (this.ai2 > 5) {
+          this.vy = -2.5;
+          this.spawnAlpha -= 10;
+          // 陷实心回补（:47560-47566 Collision.SolidCollision）
+          const bx0 = Math.floor(this.x / TILE), bx1 = Math.floor((this.x + this.w - 0.01) / TILE);
+          const by0 = Math.floor(this.y / TILE), by1 = Math.floor((this.y + this.h - 0.01) / TILE);
+          let inSolid = false;
+          outerN: for (let xx = bx0; xx <= bx1; xx++) for (let yy = by0; yy <= by1; yy++) {
+            if (st.inBounds(xx, yy) && st.isSolid(xx, yy)) { inSolid = true; break outerN; }
+          }
+          if (inSolid) this.spawnAlpha = Math.min(150, this.spawnAlpha + 15);
+          if (this.spawnAlpha < 0) this.spawnAlpha = 0;
+        }
+        this.ai2 += 1;
+        if (this.ai2 >= 50) { this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0; }
+        break;
+      }
+      case 0: {
+        // 悬停伺机（:47601-47633）：目标侧后方 (-ai[2]×300,-200) 巡航
+        if (hasT) {
+          const destX = tx - this.ai2 * 300, destY = ty - 200;
+          if (Math.hypot(destX - this.cx, destY - this.cy) > 50) {
+            // SimpleFlyMovement（:78100 逐轴 ±moveSpeed，过零双步）
+            const dx = destX - this.cx, dy = destY - this.cy;
+            const dl = Math.hypot(dx, dy) || 1;
+            const wantVx = (dx / dl) * FLY_SPD, wantVy = (dy / dl) * FLY_SPD;
+            if (this.vx < wantVx) { this.vx += FLY_ACC; if (this.vx < 0 && wantVx > 0) this.vx += FLY_ACC; }
+            else if (this.vx > wantVx) { this.vx -= FLY_ACC; if (this.vx > 0 && wantVx < 0) this.vx -= FLY_ACC; }
+            if (this.vy < wantVy) { this.vy += FLY_ACC; if (this.vy < 0 && wantVy > 0) this.vy += FLY_ACC; }
+            else if (this.vy > wantVy) { this.vy -= FLY_ACC; if (this.vy > 0 && wantVy < 0) this.vy -= FLY_ACC; }
+          }
+          const dir = this.cx < tx ? 1 : -1;
+          let want = Math.atan2(ty - this.cy, tx - this.cx) - 0.47123894 * this.facing;
+          if (this.facing === -1) want += Math.PI;
+          if (this.facing !== dir) { this.facing = dir; this.visAngle = -this.visAngle; want = -want; }
+          this.visAngle = angTowards(this.visAngle, want, 0.02);
+        }
+        this.ai1 += 1;
+        if (this.ai1 > HOVER_T) {
+          const n3 = this.ai3 | 0;
+          if (n3 % 7 === 3) next = 3;
+          else {
+            game.playSfxFile?.('Item_170', 1, this.cx, this.cy);
+            next = n3 % 2 === 0 ? 2 : 1;
+          }
+        }
+        break;
+      }
+      case 1: {
+        // 冲刺（:47636-47700）：direction=背向目标；蓄力期朝反向旋进（反弹弹幕）
+        const dir = !(this.cx < tx) ? 1 : -1;   // 注意：与悬停态相反（背向）
+        let want = Math.atan2(this.cy - ty, this.cx - tx) - 0.47123894 * this.facing;
+        if (this.facing === -1) want += Math.PI;
+        const windup = this.ai1 < CHARGE_WIND;
+        if (this.facing !== dir && windup) { this.facing = dir; this.visAngle = -this.visAngle; want = -want; }
+        if (windup) {
+          if (this.ai1 === CHARGE_WIND - 1) game.playSfxFile?.('Item_172', 1, this.cx, this.cy);
+          reflect = true;                       // reflectsProjectiles（:47834）
+          this.vx *= 0.95; this.vy *= 0.95;
+          this.visAngle = angLerp(this.visAngle, want, 0.02);
+          if (Math.random() < 0.4) {            // 吸入尘近似（mouth 前方红色尘）
+            const ma = mouthAngle();
+            game.spawnParticles(this.cx + Math.cos(ma) * 80, this.cy + Math.sin(ma) * 80,
+              '#C83848', 1, 1.2, { life: 20 });
+          }
+        } else if (this.ai1 < CHARGE_WIND + CHARGE_T) {
+          this.visAngle = angLerp(this.visAngle, want, 0.05);
+          if (hasT && Math.hypot(tx - this.cx, ty - this.cy) > 150) {
+            // 反嘴冲刺：v = -mouthDir×16 + 朝目标×1.5（:47679-47682）
+            const ma = mouthAngle();
+            this.vx = -Math.cos(ma) * 16 + Math.sign(tx - this.cx) * 1.5;
+            this.vy = -Math.sin(ma) * 16 + Math.sign(ty - this.cy) * 1.5;
+          }
+          if (Math.random() < 0.6) {            // 喷尾尘
+            const ma = mouthAngle();
+            game.spawnParticles(this.cx + Math.cos(ma) * 100, this.cy + Math.sin(ma) * 100,
+              '#A82838', 1, 1.6, { life: 18 });
+          }
+        }
+        this.ai1 += 1;
+        if (this.ai1 >= CHARGE_WIND + CHARGE_T) next = 0;
+        break;
+      }
+      case 2: {
+        // 血弹齐射（:47703-47766）：蓄力 90t 吸尘 → 90t 内每 30t 一脉冲
+        if (hasT) {
+          const dir = this.cx < tx ? 1 : -1;
+          let want = Math.atan2(ty - this.cy, tx - this.cx) - 0.47123894 * this.facing;
+          if (this.facing === -1) want += Math.PI;
+          if (this.facing !== dir) { this.facing = dir; this.visAngle = -this.visAngle; want = -want; }
+          this.visAngle = angLerp(this.visAngle, want, 0.2);
+        }
+        if (this.ai1 < BLOOD_WIND) {
+          this.vx *= 0.95; this.vy *= 0.95;
+          if (Math.random() < 0.5) {
+            const ma = mouthAngle();
+            game.spawnParticles(this.cx + Math.cos(ma) * 80, this.cy + Math.sin(ma) * 80,
+              '#C83848', 1, 1.2, { life: 20 });
+          }
+        } else if (this.ai1 < BLOOD_WIND + BLOOD_T) {
+          this.vx *= 0.9; this.vy *= 0.9;
+          const pulse = (this.ai1 - BLOOD_WIND) % (BLOOD_T / 3);
+          if (pulse === 0) {
+            const ma = mouthAngle();
+            const mx = this.cx + Math.cos(ma) * 50, my = this.cy + Math.sin(ma) * 50;
+            // 后坐（:47742 velocity += mouthDir×-8）
+            this.vx += -Math.cos(ma) * 8; this.vy += -Math.sin(ma) * 8;
+            const n = 5 + Math.floor(Math.random() * 6);   // Next(5,11)
+            const dmg = getAttackDamageForProjectiles(30, 25, this.difficulty);
+            const ents = (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities;
+            for (let k = 0; k < n; k++) {
+              const vx = Math.cos(ma) * 10 + (Math.random() * 12 - 6);
+              const vy = Math.sin(ma) * 10 + (Math.random() * 12 - 6);
+              const dart = new Dart(mx - Math.cos(ma) * 5, my - Math.sin(ma) * 5, vx, vy, dmg, 814);
+              dart.hostile = true;             // 敌怪弹（v5 bit7）
+              ents.add(dart, 'projectiles');
+            }
+            for (let k = 0; k < 4; k++) game.spawnParticles(mx, my, '#B03040', 1, 2, { life: 22 });
+          }
+        }
+        this.ai1 += 1;
+        if (this.ai1 >= BLOOD_WIND + BLOOD_T) next = 0;
+        break;
+      }
+      case 3: {
+        // 召唤（:47769-47808）：定身 + 旋转归零 + 红光脉冲；10/20/30t CallForHelp
+        if (hasT) this.facing = this.cx < tx ? 1 : -1;
+        if (this.ai1 < SUMMON_T) {
+          this.vx = 0; this.vy = 0;
+          this.visAngle = angLerp(this.visAngle, 0, 0.02);
+          const t01 = Math.min(1, this.ai1 / SUMMON_T);
+          const pulse = Math.max(0, 1 - Math.abs(t01 - 0.5) * 2);  // GetLerpValue(0,.5,t)×(.5→1 反向)
+          this.lightRGB = [1 * pulse, 0.5 * pulse, 0.5 * pulse];   // Lighting.AddLight（:47792）
+          if (Math.random() < 0.6) {
+            game.spawnParticles(this.cx + this.facing * 12, this.cy + 12, '#C83848', 1, 0.6, { life: 20 });
+          }
+        }
+        if (this.ai1 === 10 || this.ai1 === 20 || this.ai1 === 30) this.bloodNautilusCallForHelp(game);
+        this.ai1 += 1;
+        if (this.ai1 >= SUMMON_T) next = 0;
+        break;
+      }
+      default: this.ai0 = 0; break;
+    }
+    if (next !== -1) {                          // 状态迁移（:47810-47822）
+      this.ai0 = next;
+      this.ai1 = 0;
+      this.ai2 = 0;
+      if (next === 0) this.ai2 = this.facing;   // ai[2] = direction（悬停侧向记忆）
+      else this.ai3 += 1;
+    }
+    this.reflectsProjectiles = reflect;         // :47834
+    // noTileCollide（json）：直接位移
+    this.x += this.vx;
+    this.y += this.vy;
+  }
+
+  /** AI_117 CallForHelp（NPC.cs:47841-47879）：≤3 只 619 在场才召；落点 =
+   *  本体 ±20 格、离本体/玩家各 >8/>3 格、非实心非岩浆、±2 格无实心、对玩家有
+   *  视线；掷弹 813（血云 90t 后出鱿鱼）。100 次尝试。 */
+  private bloodNautilusCallForHelp(game: GameHooks) {
+    const st = game.world.store;
+    const pp: Player | null = (game as unknown as { player: Player | null }).player ?? null;
+    if (!pp || pp.dead) return;
+    if (Math.hypot(pp.cx - this.cx, pp.cy - this.cy) > 2000) return;
+    const squids = (game.enemies() as Enemy[]).filter((n) => !n.dead && n.vanillaId === 619).length;
+    if (squids >= 3) return;
+    const cxT = Math.floor(this.cx / TILE), cyT = Math.floor(this.cy / TILE);
+    const pxT = Math.floor(pp.cx / TILE), pyT = Math.floor(pp.cy / TILE);
+    const solid2 = (tx: number, ty: number) =>
+      st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0 && !!TILE_DEFS[st.type[st.idx(tx, ty)]]?.solid;
+    const active = (tx: number, ty: number) => st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] !== 0;
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const x = cxT + Math.floor(Math.random() * 41) - 20;
+      const y = cyT + Math.floor(Math.random() * 41) - 20;
+      // 双排除环（:47855-47857）：离本体 ±8 / 离玩家 ±3 之外
+      if (Math.abs(y - cyT) <= 8 && Math.abs(x - cxT) <= 8) continue;
+      if (Math.abs(y - pyT) <= 3 && Math.abs(x - pxT) <= 3) continue;
+      if (active(x, y)) continue;               // nactive() = active&&!inActive 近似
+      if (st.inBounds(x, y) && st.liquid[st.idx(x, y)] === 2) continue;   // lava
+      let clear = true;                         // Collision.SolidTiles ±2
+      for (let xx = x - 2; xx <= x + 2 && clear; xx++) {
+        for (let yy = y - 2; yy <= y + 2; yy++) {
+          if (solid2(xx, yy)) { clear = false; break; }
+        }
+      }
+      if (!clear) continue;
+      // 视线（CanHitLine 本体→玩家）
+      if (!canHit(st, this.cx, this.cy, pp.cx, pp.cy)) continue;
+      const cloud = new SquidCloud(x * TILE + 8, y * TILE + 8);
+      (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(cloud, 'projectiles');
+      return;
     }
   }
 
@@ -4752,14 +5235,17 @@ export class Enemy extends Entity {
       const f = imp / Math.hypot(kbx, kby);
       kbx *= f; kby *= f;
     }
-    // 应用（N:82204-82236）：kby===0 = 武器路径 → 原版 X 朝 ±num3 收敛设置
-    // （:82204-82216 同向不足才推、反向 ×2 步、钳目标值）+ Y=-num3×0.75×resist
-    // （:82231 抗性二次乘原版怪癖）；kby!==0 = 爆炸/光环等非武器冲量 → 加法（登记）
+    // 应用（N:82142-82239）：门 knockBackResist>0（0=免疫 Boss 整块跳过）；
+    // num3=kb×resist 一次乘 + 五段封顶 + crit×1.4。kby===0 = 武器路径 →
+    // 重路（num8=(int)伤×10(专家15)≤lifeMax 时）：X 收敛到 ±num3（:82204-82216
+    // 同向不足才推、反向 ×2 步、钳目标值）+ Y=-num3×0.75×resist（:82231 二次乘）；
+    // TODO 轻路（num8>lifeMax 大伤害打小怪）：减法收敛 + 185 特例 + Y 加法钳。
+    // kby!==0 = 爆炸/光环等非武器冲量 → 加法（登记）
     const resist = this.def.knockbackResist;
-    if (resist < 0.9) {
+    if (resist > 0) {
       if (kby === 0) {
         const dir0 = Math.sign(kbx) || 1;
-        const t0 = kbx; // 已含五段封顶/crit 缩放
+        const t0 = kbx * resist; // num3：imp 已含五段封顶/crit 缩放，此处乘 resist
         if (dir0 > 0 ? this.vx < t0 : this.vx > t0) {
           this.vx += t0 * (dir0 > 0 ? (this.vx < 0 ? 2 : 1) : (this.vx > 0 ? 2 : 1));
           if (dir0 > 0 ? this.vx > t0 : this.vx < t0) this.vx = t0;

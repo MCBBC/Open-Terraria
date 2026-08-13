@@ -427,6 +427,57 @@ describe('A4-7 风气球 AI_113（NPC.cs:48253-48430）', () => {
     const cy = balloon.y + balloon.h - 8 + 56 * (balloon.vanillaScale ?? 1);
     expect(slave!.y + slave!.h / 2).toBeCloseTo(cy, 1);
   });
+
+  it('路由回归：aiStyle 119 蒲公英 628 也必须走主 switch（同 594 双门坑），喷籽产生 836 弹', () => {
+    const w = emptyWorld();
+    const list: unknown[] = [];
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, list, projectiles);
+    (game.world as unknown as {
+      weather: { windSpeedTarget: number; windSpeedCurrent: number; shouldUseWindyDayMusic: boolean };
+    }).weather = { windSpeedTarget: 0.8, windSpeedCurrent: 0.8, shouldUseWindyDayMusic: true };
+    const dande = Enemy.fromVanilla(628, 100 * TILE, 60 * TILE)!;
+    expect(dande.vanilla?.critter).toBeFalsy();
+    list.push(dande);
+    const p = fakePlayer(110 * TILE, 60 * TILE);          // 玩家在下风右侧 160px 内
+    (game as unknown as { player: Player }).player = p;
+    dande.fixedUpdate(1, game);
+    expect(dande.ai0).toBe(1);                            // 喷籽态（zombieAI 路由则恒 -1120）
+    for (let t = 0; t < 40; t++) dande.fixedUpdate(1, game); // ai1==40 出籽（:43291-43308）
+    expect(projectiles.length).toBeGreaterThanOrEqual(1); // Dart 836 蒲公英籽
+    expect((projectiles[0] as { vanillaProj?: number }).vanillaProj ?? 836).toBeTruthy();
+  });
+
+  it('AI_126 雕像宝箱怪 690：伪装不可击+样式随机 → 96px 唤醒解除 → 地面立即跳', () => {
+    const w = emptyWorld();
+    const list: unknown[] = [];
+    const game = makeGame(w, list);
+    const mimic = Enemy.fromVanilla(690, 100 * TILE, 60 * TILE)!;
+    expect(mimic.dontTakeDamage).toBe(true);              // SetDefaults :17615 immortal+dontTakeDamage
+    list.push(mimic);
+    // 玩家远：伪装态恒续命、样式随机 [0,82]\[43,49]
+    (game as unknown as { player: Player }).player = fakePlayer(160 * TILE, 60 * TILE);
+    mimic.fixedUpdate(1, game);
+    expect(mimic.ai0).toBe(0);
+    expect(mimic.ai1).toBeGreaterThanOrEqual(0);
+    expect(mimic.ai1).toBeLessThanOrEqual(82);
+    expect(mimic.dontTakeDamage).toBe(true);
+    expect(mimic.despawnTimer).toBe(750);                 // timeLeft=60 续命等价
+    // 玩家近 96px 内有视线：唤醒 + Scare + 解除不可击（:43780-43788/:43873）
+    (game as unknown as { player: Player }).player = fakePlayer(100.5 * TILE, 60 * TILE);
+    mimic.fixedUpdate(1, game);
+    expect(mimic.ai0).toBe(1);
+    expect(mimic.dontTakeDamage).toBe(false);
+    // 激活态首落地立即跳（ai2=0 → --<=0 → jump；vy=-9.01-lift，
+    // lift=(本体Bottom-玩家Bottom)/40 钳 0..10——需本体低于玩家脚底才 >0）
+    mimic.vy = 0; mimic.y = 63 * TILE;                    // 底(1046) 低于玩家底(981) → lift≈1.6
+    const y0 = mimic.y;
+    mimic.fixedUpdate(1, game);
+    expect(mimic.vy).toBeLessThan(-9.01);                 // 起跳且带 lift 加成
+    expect(mimic.y).toBeLessThan(y0);                     // 穿墙直接位移（noTileCollide）
+    // 节奏：ai2 重置 20，后续落地计数到 0 前不再跳
+    expect(mimic.ai2).toBe(20);
+  });
 });
 
 // ===========================================================================

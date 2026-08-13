@@ -69,7 +69,8 @@ export const VANILLA_MISC = [
   'vanilla/Chain4.png', 'vanilla/Chain5.png', 'vanilla/Chain14.png',
   'vanilla/Chain24.png', 'vanilla/Chain25.png',  // AI_013 藤蔓段（Main.cs:22433-22514 食人怪族茎蔓叠画）
   'vanilla/Chain10.png', 'vanilla/Chain11.png',  // 邪恶触手 101 茎蔓（Main.cs:22391-22432 交替段）
-  'vanilla/Chain12.png',                         // 双子互连链（Main.cs:22177-22224）
+  'vanilla/Chain12.png',                         // 双子互连链（Main.cs:22177-22224）+WoF 肌腱/舌头链（:37879+）
+  'vanilla/WallOfFlesh.png',                     // 血肉墙墙身平铺（DrawWOFBody :37827,190×420=3 帧×140）
   'vanilla/Chain21.png',                         // 石巨人拳链（Main.cs:22593-22632）
   'vanilla/Chain26.png', 'vanilla/Chain27.png',  // 世花钩蔓/触须（Main.cs:22225-22285）
   'vanilla/Arm_Bone_2.png',                      // Prime 部件臂骨（Main.cs:22633-22675）

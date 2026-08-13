@@ -168,6 +168,9 @@ export interface SmartCursorEnv {
   occupants: Array<{ x: number; y: number; w: number; h: number }>;
   /** 是否正在按住使用键（controlUseItem）——锁清理与 Hold 模式语义用 */
   controlUseItem: boolean;
+  /** 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：player.grappling 表
+   *  各锚 Center 的 tile 坐标）。Step_Pickaxe_MineSolids 射线终点/免挖集用；缺省空集 */
+  grappleAnchors?: Pt[];
   /** WorldGen.IsAlchemyPlantHarvestable（WorldGen.cs:66198-66225）所需世界态。
    *  仅 Step_AlchemySeeds 的"成熟药草可覆盖"判定用；缺省按"未到收获期"处理
    *  （等价语义 = 仅 type 84 直接可收）。time 为原版 Main.time 口径：
@@ -665,10 +668,10 @@ export class SmartCursor {
         }
       }
     }
-    // :2466-2488 逐对射线。钩爪锚点集合（SmartCursorHelper.cs:61-165 顶部 _grappleTargets，
-    // 由 SmartCursorLookup :73-80 从 player 现役钩爪弹幕收集）依赖钩爪系统未实装——
-    // 等价语义 = 空集（原版无钩爪时同样为空，行为一致；实装后补收集即可）。
-    const grappleTargets: Pt[] = [];
+    // :2466-2488 逐对射线。钩爪锚点集合（SmartCursorHelper.cs:106-115：清表后遍历
+    // player.grappling，各锚 Center 取 tile 坐标入 _grappleTargets）——AI_007 实装后
+    // 由 Game 侧 env.grappleAnchors 收集；无锚时空集（与原版无钩爪态一致）。
+    const grappleTargets: Pt[] = env.grappleAnchors ?? [];
     const targets: Pt[] = [];
     let pi = 0;
     while (pi < points.length && endpoints.length > 0) {

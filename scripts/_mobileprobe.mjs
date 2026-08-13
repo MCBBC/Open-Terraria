@@ -53,6 +53,11 @@ const out = await page.evaluate(async () => {
   const g = window.__swGame;
   const res = { steps: [] };
   const ok = (name, cond, extra) => { res.steps.push({ name, pass: !!cond, extra }); return !!cond; };
+    const waitUntil = async (fn, ms = 1000) => {
+      const t0 = performance.now();
+      while (!fn() && performance.now() - t0 < ms) await new Promise(r => setTimeout(r, 30));
+      return fn();
+    };
   const rect = (sel) => {
     const el = document.querySelector(sel);
     if (!el) return null;
@@ -62,6 +67,14 @@ const out = await page.evaluate(async () => {
 
   // ① 控件层
   ok('① 触屏设备控件层渲染', !!document.querySelector('.sw-mobile'));
+  // ⑨ 视觉缩放：小地图 0.7（240→≈171）+ 控件缩小（摇杆 118/攻击 72）
+  await new Promise(r => setTimeout(r, 300));
+  ok('⑨ 小地图缩小 0.7', g.renderer.minimapRect.w < 200 && g.renderer.minimapRect.w > 150,
+    `w=${g.renderer.minimapRect.w.toFixed(0)}`);
+  const joyW = document.querySelector('.sw-mjoy').getBoundingClientRect().width;
+  const atkW = document.querySelector('.sw-matk').getBoundingClientRect().width;
+  ok('⑨ 摇杆 118px', Math.abs(joyW - 118) <= 3, joyW);
+  ok('⑨ 攻击键 72px', Math.abs(atkW - 72) <= 3, atkW);
   ok('① 摇杆/跳跃/攻击/光标/全屏 存在',
     !!document.querySelector('.sw-mjoy') && !!document.querySelector('.sw-mjump')
     && !!document.querySelector('.sw-matk') && !!document.querySelector('.sw-msmart')
@@ -107,16 +120,12 @@ const out = await page.evaluate(async () => {
     // ⑤ 智能光标（Toggle 模式：一次点击边沿翻转 wanted）
     const sb = rect('.sw-msmart');
     fireBtn('.sw-msmart', 'touchstart', sb.x, sb.y);
-    await new Promise(r => setTimeout(r, 120));   // 真机按压时距：给 tick 留窗口
-    fireBtn('.sw-msmart', 'touchend', sb.x, sb.y);
-    await new Promise(r => setTimeout(r, 150));
-    const dbg1 = { wanted: g.smartCursor.wanted, prev: g.smartCursor.prevSmart, tk: [...g.input.touchKeys], mode: (window.__swOpts ?? null) };
+    fireBtn('.sw-msmart', 'touchend', sb.x, sb.y);   // 同步脉冲：不依赖 tick 窗口
     const wantedAfterTap = g.smartCursor.wanted;
-    res.steps.push({ name: '⑤ 调试', pass: true, extra: JSON.stringify(dbg1) });
+    await waitUntil(() => !g.smartCursor.prevSmart);
     fireBtn('.sw-msmart', 'touchstart', sb.x, sb.y);
-    await new Promise(r => setTimeout(r, 120));
     fireBtn('.sw-msmart', 'touchend', sb.x, sb.y);
-    await new Promise(r => setTimeout(r, 150));
+    await waitUntil(() => !g.smartCursor.prevSmart);
     ok('⑤ 智能光标 Toggle 翻转', wantedAfterTap === !g.smartCursor.wanted, `${wantedAfterTap}→${g.smartCursor.wanted}`);
 
     // ⑥ 世界触摸：canvas touchstart → mouseDown + 光标；长按 → rightDown
@@ -140,7 +149,9 @@ const out = await page.evaluate(async () => {
     const potBtn = document.querySelector('.sw-mpot');
     const hiddenBefore = potBtn.style.display === 'none';
     const potKey = Object.keys(window.__swItems).find(k => k === 'vi_188_healing_potion');
-    g.player.inv.slots[20] = { id: window.__swItems[potKey], stack: 3 };
+    const potId = window.__swItems[potKey];
+    g.player.inv.slots[20] = { id: potId, stack: 3 };
+    res.steps.push({ name: '⑦ 装入调试', pass: true, extra: `key=${potKey} id=${potId} set=${g.player.inv.slots[20]?.id}` });
     await new Promise(r => setTimeout(r, 1200));
     const shownAfter = document.querySelector('.sw-mpot').style.display !== 'none';
     ok('⑦ 无药水隐藏', hiddenBefore);
@@ -160,8 +171,10 @@ const out = await page.evaluate(async () => {
       res.steps.push({ name: '⑦ 调试', pass: true, extra: pots.join(' ') });
     }
 
-    // ⑧ 钩爪键：装备钩爪 → 显示 → 发射 → 再点收回
-    const hookKey = Object.keys(window.__swItems).find(k => k === 'vi_118_hook' || k.startsWith('vi_84_'));
+    // ⑧ 钩爪键：装备钩爪 → 显示 → 发射 → 再按（原版单钩族 quickMax=1：
+    //    在飞拒发/已锚换发，存活恒 ≤1）→ 跳键释放（原版 GrappleMovement :22463-22480）
+    const hookKey = Object.keys(window.__swItems).find(k => k.startsWith('vi_84_'))
+      ?? Object.keys(window.__swItems).find(k => /_84_grappling/.test(k));
     g.player.inv.miscEquips[4] = { id: window.__swItems[hookKey], stack: 1 };
     await new Promise(r => setTimeout(r, 1200));
     const grapShown = document.querySelector('.sw-mgrap').style.display !== 'none';
@@ -170,13 +183,22 @@ const out = await page.evaluate(async () => {
     fireBtn('.sw-mgrap', 'touchstart', gb.x, gb.y);
     fireBtn('.sw-mgrap', 'touchend', gb.x, gb.y);
     await new Promise(r => setTimeout(r, 100));
-    const fired = !!g.activeGrapple && !g.activeGrapple.dead;
+    // 飞行中的钩不进 grappleProjs（登记在挂墙时）——查弹桶
+    const fired = g.entities.projectiles.some((e) => e.constructor.name === 'GrappleProj' && !e.dead);
     ok('⑧ 点击发射钩爪', fired);
+    await new Promise(r => setTimeout(r, 500));          // 飞行/挂墙窗口
     fireBtn('.sw-mgrap', 'touchstart', gb.x, gb.y);
     fireBtn('.sw-mgrap', 'touchend', gb.x, gb.y);
-    await new Promise(r => setTimeout(r, 100));
-    const recalled = g.activeGrapple === null && g.player.grappleTarget === null;
-    ok('⑧ 再点收回', recalled);
+    await new Promise(r => setTimeout(r, 150));
+    const liveCount = g.entities.projectiles.filter((e) => e.constructor.name === 'GrappleProj' && !e.dead).length; // 弹桶为准（挂墙钩同时在两表，勿相加）
+    ok('⑧ 再按存活 ≤1（quickMax=1 门）', liveCount <= 1, `live=${liveCount}`);
+    // 跳键释放（原版语义——无收回键）
+    g.input.touchKeys.add('Space');
+    await new Promise(r => setTimeout(r, 150));
+    g.input.touchKeys.delete('Space');
+    await new Promise(r => setTimeout(r, 1500));
+    const latched = g.player.grappleProjs.some((gp) => !gp.dead && gp.ai0 === 2);
+    ok('⑧ 跳键释放锚定钩', !latched);
   }
   return res;
 });

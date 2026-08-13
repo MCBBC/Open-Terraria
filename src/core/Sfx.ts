@@ -26,6 +26,10 @@ export type SfxName =
   | 'liquidHoneyWater'  // 水蜂蜜
   | 'liquidHoneyLava'   // 岩浆蜂蜜
   | 'shimmerSplash'     // 微光×3：原版即 PlaySound(19,…,4) = Splash_4（音量 ×0.75）
+  // ---- 雕像宝箱怪三轨（SoundID.cs:1105/1107/1109 CreateTrackable，Sounds/Custom/）----
+  | 'statueMimicScare'  // 唤醒惊吓（AI_126 :43878，音量 0.8）
+  | 'statueMimicJump'   // 跳跃（:43892/:43900，音量 0.3）
+  | 'statueMimicLaugh'  // 玩家死亡嘲笑 ×3 变体（:43928，音量 0.8）
   // ---- 枪族 UseSound（Item.cs：其余枪械通用 Item_11，此前已在库内）----
   | 'gunShot'      // SoundID.Item11 枪械通用
   | 'gunShotgun'   // SoundID.Item36 霰弹枪族 534/964/3788/4703
@@ -60,10 +64,12 @@ const WAV_MAP: Record<SfxName, string[]> = {
   menuTick: ['Menu_Tick'],
   throw: ['Item_1'],
   explosion: ['Item_14'],
-  dd2Flameburst: ['Custom/dd2_flameburst_tower_shot_0', 'Custom/dd2_flameburst_tower_shot_1', 'Custom/dd2_flameburst_tower_shot_2'],
-  dd2Ballista: ['Custom/dd2_ballista_tower_shot_0', 'Custom/dd2_ballista_tower_shot_1', 'Custom/dd2_ballista_tower_shot_2'],
-  dd2Explosive: ['Custom/dd2_explosive_trap_explode_0', 'Custom/dd2_explosive_trap_explode_1', 'Custom/dd2_explosive_trap_explode_2'],
-  dd2Zap: ['Custom/dd2_lightning_aura_zap_0', 'Custom/dd2_lightning_aura_zap_1', 'Custom/dd2_lightning_aura_zap_2', 'Custom/dd2_lightning_aura_zap_3'],
+  // 2026-08-13 修正：素材提取管线把 Sounds/Custom/ 拍平进 public/sounds/ 根目录，
+  // 此前带 'Custom/' 前缀的 fetch 恒 404（failed 静默无声）——改用平铺名
+  dd2Flameburst: ['dd2_flameburst_tower_shot_0', 'dd2_flameburst_tower_shot_1', 'dd2_flameburst_tower_shot_2'],
+  dd2Ballista: ['dd2_ballista_tower_shot_0', 'dd2_ballista_tower_shot_1', 'dd2_ballista_tower_shot_2'],
+  dd2Explosive: ['dd2_explosive_trap_explode_0', 'dd2_explosive_trap_explode_1', 'dd2_explosive_trap_explode_2'],
+  dd2Zap: ['dd2_lightning_aura_zap_0', 'dd2_lightning_aura_zap_1', 'dd2_lightning_aura_zap_2', 'dd2_lightning_aura_zap_3'],
   whipCrack: ['Item_152'],
   summon: ['Item_44'],
   beeSummon: ['Item_173'],
@@ -76,6 +82,10 @@ const WAV_MAP: Record<SfxName, string[]> = {
   liquidHoneyWater: ['liquids_honey_water_0', 'liquids_honey_water_1', 'liquids_honey_water_2'],
   liquidHoneyLava: ['liquids_honey_lava_0', 'liquids_honey_lava_1', 'liquids_honey_lava_2'],
   shimmerSplash: ['Splash_4'],  // PlaySound(19,…,4)：微光配对固定 style 4（LegacySoundPlayer.cs:885 音量 ×0.75）
+  // 雕像宝箱怪（Sounds/Custom/ 提取拍平；SoundID.cs:1105/1107/1109）
+  statueMimicScare: ['statuemimic_scare'],
+  statueMimicJump: ['statuemimic_jump'],
+  statueMimicLaugh: ['statuemimic_laugh_0', 'statuemimic_laugh_1', 'statuemimic_laugh_2'],
   // 枪族（Item.cs UseSound；弓 Item_5 见 bowShoot）
   gunShot: ['Item_11'],
   gunShotgun: ['Item_36'],

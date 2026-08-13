@@ -263,24 +263,35 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   );
 
   const st = world.store;
+  // ★热循环局部化(2026-08-13 零风险优化:5M 格×4 写=decode 主体):typed array 引用
+  // 提局部 + 盒装 pos 对象改内联游标(逐字节等价)
+  const tyT = st.type, tyF = st.flags, tyFX = st.frameX, tyFY = st.frameY;
+  const tyW = st.wall, tyWr = st.wire, tyH = st.half, tySl = st.slope;
+  const tyLt = st.liquidType, tyLq = st.liquid;
+  const nAll = tyT.length;
   // tiles(v3:RLE 里的 type 是稳定 id,查 INTERNAL_OF_STABLE 还原;v2 旧档=内部下标直读)
   {
     const v3 = (data.version ?? 1) >= 3;
     const u8 = b64ToBytes(data.tiles);
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.type.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const tRaw = readVarint(u8, pos);
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let tRaw = 0; s = 0;
+      for (;;) { const b = u8[p++]; tRaw |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       const t = v3 ? (tRaw === 0 ? 0 : TILE_INTERNAL_OF_STABLE[tRaw]) : tRaw;
       let fx = 0, fy = 0;
       if (t !== 0) {
-        fx = readVarint(u8, pos);
-        fy = readVarint(u8, pos);
+        s = 0;
+        for (;;) { const b = u8[p++]; fx |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+        s = 0;
+        for (;;) { const b = u8[p++]; fy |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
       }
-      for (let k = 0; k < run && i < st.type.length; k++, i++) {
-        st.type[i] = t; st.flags[i] = t !== 0 ? 1 : 0;
-        st.frameX[i] = fx; st.frameY[i] = fy;
+      const flag = t !== 0 ? 1 : 0;
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) {
+        tyT[i] = t; tyF[i] = flag;
+        tyFX[i] = fx; tyFY[i] = fy;
       }
     }
   }
@@ -289,59 +300,72 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
     const legacy = (data.version ?? 1) < 2;
     const migrate = (v: number) => (legacy ? (v === 1 ? 2 : v === 2 ? 1 : v === 3 ? 4 : v) : v);
     const u8 = b64ToBytes(data.walls);
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.wall.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const v = migrate(readVarint(u8, pos));
-      for (let k = 0; k < run && i < st.wall.length; k++, i++) st.wall[i] = v;
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let vr = 0; s = 0;
+      for (;;) { const b = u8[p++]; vr |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const v = migrate(vr);
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyW[i] = v;
     }
   }
   // wire 电路位（旧存档缺此字段 → 全 0 = 无导线，缺字段容忍同 liquidType）
   {
     const u8 = b64ToBytes(data.wire ?? '');
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.wire.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const v = readVarint(u8, pos);
-      for (let k = 0; k < run && i < st.wire.length; k++, i++) st.wire[i] = v;
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyWr[i] = v;
     }
   }
   // half/slope(旧存档缺 → 全整砖;v3+ 语义)
   {
     const u8 = b64ToBytes(data.blocks ?? '');
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.half.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const v = readVarint(u8, pos);
-      for (let k = 0; k < run && i < st.half.length; k++, i++) {
-        st.half[i] = v === 1 ? 1 : 0;
-        st.slope[i] = v >= 2 && v <= 5 ? v - 1 : 0;
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const hv = v === 1 ? 1 : 0;
+      const sv = v >= 2 && v <= 5 ? v - 1 : 0;
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) {
+        tyH[i] = hv;
+        tySl[i] = sv;
       }
     }
   }
   // liquid type（旧存档缺此字段 → 全 0，由液体模拟按 1=水 补全）
   {
     const u8 = b64ToBytes(data.liquidType ?? '');
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.liquidType.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const v = readVarint(u8, pos);
-      for (let k = 0; k < run && i < st.liquidType.length; k++, i++) st.liquidType[i] = v;
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyLt[i] = v;
     }
   }
   // liquid
   {
     const u8 = b64ToBytes(data.liquid);
-    const pos = { i: 0 };
-    let i = 0;
-    while (i < st.liquid.length && pos.i < u8.length) {
-      const run = readVarint(u8, pos) + 1;
-      const v = readVarint(u8, pos);
-      for (let k = 0; k < run && i < st.liquid.length; k++, i++) st.liquid[i] = v;
+    let p = 0, i = 0;
+    while (i < nAll && p < u8.length) {
+      let run = 0, s = 0;
+      for (;;) { const b = u8[p++]; run |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      let v = 0; s = 0;
+      for (;;) { const b = u8[p++]; v |= (b & 0x7f) << s; if (!(b & 0x80)) break; s += 7; }
+      const end = Math.min(i + run + 1, nAll);
+      for (; i < end; i++) tyLq[i] = v;
     }
   }
   return { world, player: data.player, data };

@@ -523,9 +523,9 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
   } else {
     // :32897-32900 未受击保持直飞（经典档无追踪）
     if (!e.justHit) { e.x += e.vx; e.y += e.vy; return; }
-    // :32901-32912 knockBackResist==0（本仓 = 抗性 1.0）→ 计数 ai[1]>5 回环绕；
+    // :32901-32912 knockBackResist==0（def 存承受比例：0=免疫）→ 计数 ai[1]>5 回环绕；
     //   否则一击即回（267 原值 0.8 走此支）
-    if ((e.def.knockbackResist ?? 0) >= 1) {
+    if ((e.def.knockbackResist ?? 1) <= 0.01) {
       e.ai1 += 1;
       if (e.ai1 > 5) e.ai0 = 0;
     } else {

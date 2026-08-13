@@ -43,6 +43,7 @@ export const TOUCH_DESTROY = setOf([32, 69, 352, 655]);
  */
 export function canTileHurt(t: number, fireWalk: boolean): boolean {
   if (t === tid(230)) return false; // 仅 For-the-Worthy 种子,本作不支持
+  if (t === tid(80)) return false;   // 仙人掌仅 The Constant 种子造成接触伤害(Collision.cs:3226-3228);旧"恒判可伤 6 点"与头注矛盾
   if (TOUCH_IMMEDIATE.has(t) || TOUCH_BLEEDING.has(t) || SUFFOCATE.has(t)) return true;
   if (TOUCH_HOT.has(t) && !fireWalk) return true;
   return false;

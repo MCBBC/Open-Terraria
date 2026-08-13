@@ -1,4 +1,7 @@
-// 铜镐/铜斧挖掘链路复现探针:持铜镐点击泥土,逐帧追踪 tool 解析/swing/useTime/tryMine
+// 挖掘链路回归探针(2026-08-13"铜镐无法挖掘"双根因修复):
+//   1) 剑分支 cwMelee 未豁免工具 → tryMine 永不被调(修复:tool 真值走工具分支)
+//   2) HitTile 自创衰减 > 积累速率 → 永远凑不满 100(修复:对齐原版无周期衰减)
+// 断言:落地稳定后持铜镐 400 帧,鼠标下方石块被挖掉(tile→0)
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -36,9 +39,21 @@ const out = await page.evaluate(() => {
   const trace = [];
   let hitTileCalls = 0;
   const origTryMine = g.tryMine.bind(g);
-  g.tryMine = (tx, ty, power, type, spd, useT) => { hitTileCalls++; return origTryMine(tx, ty, power, type, spd, useT); };
+  const mineInfo = [];
+  g.tryMine = (tx, ty, power, type, spd, useT) => {
+    hitTileCalls++;
+    const t = g.world.store.get(tx, ty);
+    const before = mineInfo.length < 400;
+    const r = origTryMine(tx, ty, power, type, spd, useT);
+    if (before) mineInfo.push({ tx, ty, power, type, tile: t, canBreak: g.toolCanBreak(t, power, type),
+      miningAfter: g.mining ? { x: g.mining.x, y: g.mining.y, progress: g.mining.progress } : null });
+    return r;
+  };
+  // 先等玩家落地稳定(排除出生下落+相机跟随导致的鼠标世界格漂移)
+  for (let i = 0; i < 180; i++) g.fixedUpdate(1 / 60);
   g.input.mouseDown = true; g.input.mouseHeld = true;
   for (let i = 0; i < 400; i++) {
+    g.smartCursor.showing = false;
     g.fixedUpdate(1 / 60);
     if (i < 8 || i % 15 === 0) {
       trace.push({ i, useTime: g.player.useTime, swingT: g.swing ? g.swing.t : null,
@@ -48,9 +63,25 @@ const out = await page.evaluate(() => {
   g.tryMine = origTryMine;
   res.trace = trace;
   res.tryMineCalls = hitTileCalls;
-  res.tileAfter = st.get(targetTx, targetTy);
+  if (mineInfo.length) {
+    res.hitDamage = g.hitTiles.getDamage(mineInfo[0].tx, mineInfo[0].ty);
+    res.atkMult = g.player.attackSpeedMult;
+    res.miningBuff = g.player.buffs.has(2); // Mining buff id 近似
+  }
+  res.mineInfo = mineInfo;
+  res.mouseTile = g.camera.tileUnder(g.input.mouseX, g.input.mouseY);
+  res.targetTile = [targetTx, targetTy];
+  const lastM = mineInfo[mineInfo.length - 1];
+  res.tileAfter = lastM ? st.get(lastM.tx, lastM.ty) : st.get(targetTx, targetTy);
+  res.minedAt = lastM ? [lastM.tx, lastM.ty] : null;
+  res.lastProgress = lastM ? lastM.progress : null;
+  res.progressSeries = mineInfo.filter((_, i) => i % 25 === 0).map((m) => m.progress);
   res.pageErrors = (window.__swProbeErrors || []);
   return res;
 });
-console.log(JSON.stringify(out, null, 1));
-process.exit(0);
+let pass = 0, fail = 0;
+const check = (name, ok, extra = '') => { console.log(`${ok ? 'PASS' : 'FAIL'}: ${name}${extra ? '  ' + extra : ''}`); ok ? pass++ : fail++; };
+check('挖掘链被调(tryMine>0)', out.tryMineCalls > 100, `calls=${out.tryMineCalls}`);
+check('目标格被挖掉(tile→0)', out.tileAfter === 0, `tile=${out.tileAfter}`);
+console.log(`\n${pass} pass / ${fail} fail`);
+process.exit(fail ? 1 : 0);

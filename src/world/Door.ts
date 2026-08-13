@@ -138,6 +138,6 @@ export function shiftTallGate(
     if (!st.inBounds(x, anchorY + dy) || st.type[ii] !== from) return null; // ValidateTileSquare
   }
   for (let dy = 0; dy < 5; dy++) st.setTile(x, anchorY + dy, to, st.frameX[i0], st.frameY[st.idx(x, anchorY + dy)]);
-  sfx?.('door'); // SoundID 8
+  sfx?.('door_open'); // 高门恒播 SoundID 8 不分开关(WorldGen.cs:51786);旧'door'非法名经 as 断言静默失效
   return [x, anchorY];
 }

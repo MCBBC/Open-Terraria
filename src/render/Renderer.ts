@@ -119,6 +119,7 @@ import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { Critter } from '../entities/Critter';
+import { wofDrawArea } from '../entities/bossAI_wof';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -1642,7 +1643,7 @@ export class Renderer {
     const head = (entities as Enemy[]).find((e) => !e.dead && e.vanillaId === 113 && e.hp > 0) ?? null;
     if (head) {
       this.wofHeadSeen = head;
-      const { top, bottom } = this.wofDrawAreaOf(head, entities as Enemy[]);
+      const { top, bottom } = this.wofDrawAreaOf(head);
       // :37818-37823 狂卷之舌（tongued 玩家）
       if (!player.dead && player.buffs.has(BuffType.TheTongue)) this.drawWoFTongue(head, player);
       // :37825-37829 肌腱链（所有 aiStyle 29 饥饿者）
@@ -1661,26 +1662,12 @@ export class Renderer {
     }
   }
 
-  /** Main.wofDrawAreaTop/Bottom 近似：bossAI_wof 模块内私有未导出（结构性差异，
-   *  精确化需在该文件加 getter——受会话改域限制，此处渲染侧反解）。
-   *  空腔中点可精确取得：wallOfFleshAI :25955-25956 y=(top+bottom)/2-h/2 →
-   *  mid = head.cy 分毫不差。未知量只剩跨度：wofEyeAI 锚定式(:26161-26167)
-   *  上眼 cy=(mid+top)/2、下眼 cy=(mid+bottom)/2 → span = 2×(下眼−上眼)。
-   *  用【双眼间距】而非单眼位置反解 top/bottom：双眼共享同一滞后（生成锚点差
-   *  h/2 + ±1 步进追靶），差分相消，只剩微分滞后——空腔稳定时双眼收敛即精确；
-   *  眼缺失/间距异常时回退最小跨度 160(:25940-25946) 对称展开 */
-  private wofDrawAreaOf(head: Enemy, entities: Enemy[]): { top: number; bottom: number } {
-    let eyeTop: Enemy | null = null;
-    let eyeBot: Enemy | null = null;
-    for (const e of entities) {
-      if (e.dead || e.vanillaId !== 114) continue;
-      if (e.ai0 > 0) eyeTop = e; else eyeBot = e;
-    }
-    if (eyeTop && eyeBot) {
-      let span = 2 * (eyeBot.cy - eyeTop.cy);
-      if (!(span >= 160)) span = 160;                    // :25940-25946 跨度保底
-      return { top: head.cy - span / 2, bottom: head.cy + span / 2 };
-    }
+  /** Main.wofDrawAreaTop/Bottom 权威值（bossAI_wof.wofDrawArea() 导出,AI 每 tick
+   *  维护;2026-08-13 前靠"双眼间距"反解属近似,已消）。-1(墙未初始化/已消散)
+   *  时回退头位 ±80 最小跨度(:25940-25946) */
+  private wofDrawAreaOf(head: Enemy): { top: number; bottom: number } {
+    const area = wofDrawArea();
+    if (area.top >= 0 && area.bottom >= 0) return area;
     return { top: head.cy - 80, bottom: head.cy + 80 };
   }
 
@@ -1900,6 +1887,10 @@ export class Renderer {
       // （气球壳随史莱姆染色）。通用竖切路径(json frames=1)会把整条横排 8 个气球
       // 全画出来——"完整逐帧贴图"(用户标注)
       if (e.vanillaId === 594) { this.drawWindyBalloon(e, entities); return; }
+      // 雕像宝箱怪 690（Main.cs:23103-23134 独占）：恒以雕像形态显示——不画
+      // NPC_690 贴图，而是按 ai[1] 样式从 Tiles_105 切 2×3 片 16×16 拼装
+      // （direction==1 行 +3 镜像）；通用竖切路径会画错（json frames=1 单帧 28×38）
+      if (e.vanillaId === 690) { this.drawStatueMimic(e); return; }
       // ---- 2D 网格贴图 NPC（原版 Main.cs DrawNPC 专属 case + FindFrame 专属 case）----
       // 这些表的动画帧是【cols×rows 网格】（Frame(cols,rows,fx,fy)），通用竖切路径
       // 会把整行/整条画出来——全部走 drawNpcGrid 切格 + 各自 FindFrame 帧状态机
@@ -2505,6 +2496,35 @@ export class Renderer {
     }
     // 头本体 + Glow_135×num291（:23884-23887）
     drawSeg(head, glowH, e.cx, e.cy, e.visAngle, 1, fade);
+  }
+
+  /** 690 雕像宝箱怪（Main.cs:23103-23134 case 690 独占）：本体贴图弃用，改按
+   *  ai[1] 雕像样式从 Tiles_105 表切 2 列×3 行 16×16 片拼装——样式的表内步距
+   *  36/54px（2×3 格 × 18px 含 1px 缝），direction==1 时行 +3（水平镜像区）；
+   *  锚点 = Center+(0,-3)，逐片 origin (1-col, 1.5-row)×16（片内再内缩 1px 取整格） */
+  private drawStatueMimic(e: Enemy) {
+    const ctx = this.ctx;
+    if (!this.atlas) return;
+    const img = this.atlas.ensureVImage('vanilla/Tiles_105.png');
+    if (!img || !img.width) return;
+    const style = Math.max(0, Math.round(e.ai1));
+    const colBase = style % 55;
+    const rowBase = Math.floor(style / 55) + (e.facing > 0 ? 3 : 0);   // num77/num78（:23121-23125）
+    const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
+    ctx.save();
+    ctx.translate(e.cx, e.cy - 3);
+    if (e.visAngle) ctx.rotate(e.visAngle);
+    ctx.globalAlpha = opacity;
+    for (let c = 0; c < 2; c++) {
+      for (let r = 0; r < 3; r++) {
+        const sx = Math.min(img.width - 17, colBase * 36 + c * 18 + 1);   // 内缩 1px（Frame 语义）
+        const sy = Math.min(img.height - 17, rowBase * 54 + r * 18 + 1);
+        const ox = (c - 1) * 16, oy = (r - 1.5) * 16;                    // dest = anchor - origin
+        ctx.drawImage(img, sx, sy, 16, 16, ox, oy, 16, 16);
+      }
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   private drawWindyBalloon(e: Enemy, entities: unknown[]) {

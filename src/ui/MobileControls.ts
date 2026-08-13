@@ -248,10 +248,11 @@ export class MobileControls {
     const b = document.createElement('div');
     b.className = 'sw-mbtn sw-msmart';
     b.textContent = '◎光标';
-    // 注入 ControlLeft 电平：Toggle 模式 = 每次点击边沿翻转；Hold 模式 = 按住启用
+    // 注入 ControlLeft 电平 + 同步脉冲（Toggle=点击翻转 / Hold=按住启用；
+    //  脉冲直调 updateWanted 不依赖 tick 窗口——见 Game.pulseSmartCursor）
     this.bindButton(b,
-      () => this.game.input.touchKeys.add('ControlLeft'),
-      () => this.game.input.touchKeys.delete('ControlLeft'));
+      () => { this.game.input.touchKeys.add('ControlLeft'); this.game.pulseSmartCursor(true); },
+      () => { this.game.input.touchKeys.delete('ControlLeft'); this.game.pulseSmartCursor(false); });
     this.smartBtn = b;
     this.root.appendChild(b);
   }

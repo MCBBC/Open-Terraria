@@ -101,14 +101,17 @@ export function hitPlayer(
   if (p.iframes > 0) return false; // 原版 :13732 player.immune 门禁（General 槽）
   if (!projOverlap(self.x, self.y, self.w, self.h, p)) return false;
   const ifr = p.iframes;
-  // ★ 玩家受伤难度乘区（Projectile.cs:13770，Damage_EVP 段）：
+  // ★ 玩家受伤难度乘区 + 全局 ×2（Projectile.cs:13770-13778，Damage_EVP 段）：
   //   `if (!reflected) num3 = (int)(num3 * hostileDamageScaling.Sample(Main.Difficulty));`
+  //   随后 `int num4 = 2; num3 *= num4;`——敌弹对玩家恒 ×2（对所有难度，含经典）。
   //   hostileDamageScaling = GameDifficultyData.HostileProjectileDamageMultiplier
   //   （Projectile.cs:264/544：旅程 0.5 / 经典 1 / 专家 2 / 大师 3）。
   //   NPC 接触伤害不走这里——其难度缩放在生成时由 NPC.ScaleStats 完成
-  //   （Enemy.def.damage 已是缩放值），在此再乘会双重缩放。
+  //   （Enemy.def.damage 已是缩放值），在此再乘会双重缩放；
+  //   但接触伤害同样吃这 ×2？否——×2 只在 Projectile.Damage_EVP（弹幕侧），
+  //   接触侧是 Player.Hurt 直入（Enemy.def.damage 已是 ScaleStats 终值）。
   //   （本函数调用方均为 hostile 弹幕，无 reflected 路径——反射弹转 friendly 打怪）
-  game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)), self.x + self.w / 2, self.y + self.h / 2);
+  game.damagePlayer(hostileProjectileDamage(dmg, mainDifficulty(game.world)) * 2, self.x + self.w / 2, self.y + self.h / 2);
   // 成就：陷阱弹致死（Projectile.cs:13804-13808 trap→trapDebuffSource，死则
   // HandleSpecialEvent(4) WATCH_YOUR_STEP；仅 trap 类、非反射弹）
   if (trap && (p.dead || p.hp <= 0)) {

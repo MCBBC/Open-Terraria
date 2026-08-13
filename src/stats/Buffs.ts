@@ -478,8 +478,10 @@ export class BuffState {
   get pickSpeedMult(): number {
     return this.wellFedPickMult * (this.active.has(BuffType.KiteBuff) ? 0.85 : 1);
   }
+  /** 原版 buff 21（PotionSickness）无任何属性——只禁治疗（healBlocked）。
+   *  旧实现 +80 maxHp 非原版（2026-08-13 对齐移除，喝药回血走 healLife 数据驱动） */
   get healthBonus(): number {
-    return this.active.has(BuffType.Resistance) ? 80 : 0;
+    return 0;
   }
   get hasThorns(): boolean {
     return this.active.has(BuffType.Thorns);

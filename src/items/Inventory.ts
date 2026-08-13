@@ -227,7 +227,7 @@ export class Inventory {
    *  ① 钱币先进 50-53；② 弹药进 54-57（先合并已有再空格）；
    *  ③ 合并 0-49 已有堆（先于空槽）；④ 空槽【降序】从背包末尾填（原版非收藏物降序）
    *  ⑤ 钱币满 100 自动合大（DoCoins :38573-38589） */
-  add(id: number, count: number): number {
+  add(id: number, count: number, prefix?: number): number { // prefix 随新放置槽写入（Item.prefix;合并已有堆保留现有）
     const max = ITEM_DEFS[id].maxStack;
     // ① 钱币（合并→空格→DoCoins）
     const ci = coinIndexOf(id);
@@ -246,7 +246,7 @@ export class Inventory {
     for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
       if (!this.slots[i]) {
         const put = Math.min(max, count);
-        this.slots[i] = { id, stack: put };
+        this.slots[i] = { id, stack: put, ...(prefix ? { prefix } : {}) };
         count -= put;
       }
     }

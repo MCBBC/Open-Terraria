@@ -1,8 +1,8 @@
 // 微光湖分解链端到端探针（_ 一次性，tools/run-diag.mjs 运行）：
-//   按对齐后的抛出公式（4×朝向+玩家速度 / vy=-2）把 3 个木墙(vid 8,配方=凝胶1+木材1
-//   →createStack 3,丢 3 个恰好分解一次)抛进自建微光湖 → 断言：
-//   ① 木墙入湖浸没(shimmerTime 爬升) ② ~90t 触发 GetShimmered 走 decraft
-//   ③ 凝胶+木材两垛 shimmered 上浮出现在湖面 ④ 玩家站到湖边后自动拾取入包
+//   按对齐后的抛出公式（4×朝向+玩家速度 / vy=-2）把 1 把木剑(vid 24,配方=木材×7
+//   →createStack 1)抛进自建微光湖 → 断言：
+//   ① 木剑入湖浸没(shimmerTime 爬升) ② ~90t 触发 GetShimmered 走 decraft
+//   ③ 木材×7 shimmered 上浮出现在湖面 ④ 玩家站到湖边后自动拾取入包
 //   附加：金币(vid 73)入湖 → coinLuck 累加、币消散（分支序钱币最前的回归）。
 import puppeteer from 'puppeteer-core';
 
@@ -56,13 +56,16 @@ const out = await page.evaluate(() => {
   g.player.x = (X0 - 2) * T; g.player.y = (S - 3) * T;
   g.player.vx = 0; g.player.vy = 0; g.player.facing = 1;
   // ---- 抛出：对齐公式（DropSelectedItem Player.cs:4993-4997）----
-  // 清掉世界残留掉落物（排除 place_v_ 干扰）；vid 36 木墙无转化、decraft = 木材×30
+  // 清掉世界残留掉落物（排除 place_v_ 干扰）；vid 36 木墙无转化、decraft = 木材×30。
+  // 速度断言后把掉落物**直放湖心**（S+1 行）——抛物落点随弧线/弹跳随机，回归探针
+  // 需确定性浸泡起点（抛物入湖的物理链此前多轮已实证）
   g.entities.drops.length = 0;
-  const itemKey = Object.keys(window.__swItems).find((k) => /^vi_36_/.test(k));
-  const drop = g.spawnDrop(g.player.cx + g.player.facing * 18, g.player.y + 6, itemKey, 3,
-    g.player.facing * 4 + g.player.vx, -2);
+  const itemKey = Object.keys(window.__swItems).find((k) => /^vi_24_/.test(k));
+  const drop = g.spawnDrop(g.player.cx + g.player.facing * 18, g.player.y + 6, itemKey, 1,    g.player.facing * 4 + g.player.vx, -2);
+  const tossVx = drop.vx, tossVy = drop.vy;   // 移位前取值（抛速断言用）
+  drop.x = (X0 + 8) * T; drop.y = (S + 1) * T; drop.vx = 0; drop.vy = 0;
   return {
-    tossVx: drop.vx, tossVy: drop.vy, itemKey, X0, S,
+    tossVx, tossVy, itemKey, X0, S,
     liquidOk: st.liquidType[st.idx(X0 + 5, S + 2)] === 4,
   };
 });
@@ -85,7 +88,7 @@ const dec = await page.evaluate((X0) => {
   for (let x = X0 - 10; x < X0; x++) for (let y = S - 2; y <= S + 3; y++) {
     const i = st.idx(x, y); st.setTile(x, y, 0); st.liquid[i] = 0; st.liquidType[i] = 0;
   }
-  for (let i = 0; i < 160; i++) {
+  for (let i = 0; i < 200; i++) {
     g.player.x = (X0 - 9) * T; g.player.y = (S - 3) * T;
     g.player.vx = 0; g.player.vy = 0;
     g.fixedUpdate(1 / 60);
@@ -95,16 +98,16 @@ const dec = await page.evaluate((X0) => {
   const wood = drops.find((d) => (g.__itemKeyOf(d.itemId) ?? '').startsWith('vi_9_'));
   return {
     maxShimmer: +maxShimmer.toFixed(2),
-    itemAlive: drops.some((d) => (g.__itemKeyOf(d.itemId) ?? '').startsWith('vi_36_')),
+    itemAlive: drops.some((d) => (g.__itemKeyOf(d.itemId) ?? '').startsWith('vi_24_')),
     matDrops: drops.filter((d) => d.shimmered === true).length,
     woodStack: wood ? wood.stack : 0,
     matKeys: drops.map((d) => g.__itemKeyOf(d.itemId)),
     total: drops.length,
   };
 }, out.X0);
-check('木墙入湖浸没（shimmerTime 爬升 >0.5）', dec.maxShimmer > 0.5, `maxShimmer=${dec.maxShimmer}`);
-check('木墙已分解转化（原垛消失）', dec.itemAlive === false, `itemAlive=${dec.itemAlive}`);
-check('分解产物上浮（木材×30 shimmered）', dec.matDrops >= 1 && dec.woodStack === 30,
+check('木剑入湖浸没（shimmerTime 爬升 >0.5）', dec.maxShimmer > 0.5, `maxShimmer=${dec.maxShimmer}`);
+check('木剑已分解转化（原垛消失）', dec.itemAlive === false, `itemAlive=${dec.itemAlive}`);
+check('分解产物上浮（木材×7 shimmered）', dec.matDrops >= 1 && dec.woodStack === 7,
   `shimmered=${dec.matDrops} wood=${dec.woodStack} drops=[${dec.matKeys.join(',')}]`);
 
 // ---- 阶段③④：玩家走到湖边 → 产物浮出减速 → 自动拾取入包 ----
@@ -115,11 +118,16 @@ const pick = await page.evaluate((X0) => {
     return g.__rev[id];
   };
   const T = 16;
-  // 玩家钉在湖面产物列旁（模拟走到湖边；探针确定性钉位）
-  const col = X0 + 8;
+  // 玩家钉在产物列旁（首次定位后【固定】——跟随重钉会让间隙恒定永不相触）
   let picked = false;
+  let standX = null;
   for (let i = 0; i < 600 && !picked; i++) {
-    g.player.x = (col - 1.5) * T; g.player.y = (Math.floor(g.world.groundLevel) + 37) * T;
+    if (standX === null) {
+      const wood0 = g.entities.drops.find((d) => !d.dead && /^vi_9_/.test(g.__itemKeyOf(d.itemId) ?? ''));
+      if (wood0) standX = wood0.x - 24;
+    }
+    g.player.x = standX ?? (X0 + 5) * T;
+    g.player.y = (Math.floor(g.world.groundLevel) + 37) * T;
     g.player.vx = 0; g.player.vy = 0;
     g.fixedUpdate(1 / 60);
     picked = g.player.inv.slots.some((s) => {
@@ -146,8 +154,8 @@ const coin = await page.evaluate((X0) => {
   const coinKey = Object.keys(window.__swItems).find((k) => /^vi_73_/.test(k));
   const luck0 = g.player.luckState.coinLuck;
   const d = g.spawnDrop((X0 + 20) * T, (S + 1) * T, coinKey, 1, 0, 0);
-  // 玩家钉湖边近处（金币 spawn 点 6 格内——防模拟冻结距离外不更新）
-  for (let i = 0; i < 200 && !d.dead; i++) {
+  // 玩家钉币列 6 格外（>42px 拾取范围防币被直接捡走、<模拟冻结距离）；300t 余量
+  for (let i = 0; i < 300 && !d.dead; i++) {
     g.player.x = (X0 + 14) * T; g.player.y = (S - 3) * T;
     g.player.vx = 0; g.player.vy = 0;
     g.fixedUpdate(1 / 60);

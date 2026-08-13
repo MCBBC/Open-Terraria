@@ -37,6 +37,20 @@ const FILES = [
   'Unlock',
   // 蜂后专属吼（NPC.cs:30488 PlaySound(29,…,125)——"Zombie"族实为逐 NPC 语音槽位）
   'Zombie_125',
+  // 雕像宝箱怪三轨（SoundID.cs:1105/1107/1109 Sounds/Custom/statuemimic_*）
+  // 蜘蛛女王反射（NPC.ReflectProjectile SoundID.Item150）+ 恐惧鹦鹉螺
+  // （AI_117 :47619 Item170 招式衔接 / :47666 Item172 冲刺起手 / 弹 814 出生
+  //  Item171 :53562）——2026-08-13 补入
+  'Item_150', 'Item_170', 'Item_171', 'Item_172',
+];
+
+// ---- Sounds/Custom/ 追加（展平名进 CUSTOM2，防与上方 FILES 混淆） ----
+const CUSTOM_FILES = [
+  'Custom/statuemimic_scare',
+  'Custom/statuemimic_jump',
+  'Custom/statuemimic_laugh_0',
+  'Custom/statuemimic_laugh_1',
+  'Custom/statuemimic_laugh_2',
 ];
 
 // 原版 Sounds/Custom/ 子目录（XACT Trackable 族：液体六配对专属轨，各 3 变体；
@@ -49,10 +63,10 @@ const CUSTOM = [
 ];
 
 let n = 0;
-for (const f of [...FILES, ...CUSTOM]) {
+for (const f of [...FILES, ...CUSTOM, ...CUSTOM_FILES]) {
   const src = join(SRC, f + '.wav');
   if (!existsSync(src)) { console.warn('缺失:', f); continue; }
   copyFileSync(src, join(DST, f.replace('Custom/', '') + '.wav'));
   n++;
 }
-console.log(`copy-sfx: ${n}/${FILES.length + CUSTOM.length}`);
+console.log(`copy-sfx: ${n}/${FILES.length + CUSTOM.length + CUSTOM_FILES.length}`);

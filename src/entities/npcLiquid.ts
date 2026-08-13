@@ -152,6 +152,7 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
       b.lavaCd = 30;                                      // immune[255] = 30（:94527）
       b.onFireT = Math.max(b.onFireT, 7);                 // AddBuff(24, 420)
       b.hurt(50, 0, 0, game);                             // StrikeNPCNoInteraction(50)
+      game.spawnParticles(b.cx, b.cy, '#FF9A3C', 10, 1.6, { life: 30, grav: -0.05 });
     }
   }
 
@@ -202,4 +203,12 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   b.inWater = b.wet;                                      // 兼容旧字段
   // ---- 5. 移动积分因子（:93748-93762 优先级链）----
   b.liqFactor = liquidMoveFactor(b);
+  // ---- 6. wet 落速帽（UpdateNPC_UpdateGravity :91936-91944）----
+  // 原版 wet 时重力 0.3→0.2 且 maxFallSpeed 10→7（蜂蜜 0.1/4、微光 0.15/5.5；
+  // 岩浆走水档 else 分支）。本仓各 AI 内联 GRAVITY=0.4（全仓既有偏差，不逐点改），
+  // 这里补落速帽——配合 liqFactor ×0.5 位移后有效下沉 ≤3.5px/t，与原版同档
+  if (b.wet) {
+    const cap = b.shimmerWet ? 5.5 : b.honeyWet ? 4 : 7;
+    if (b.vy > cap) b.vy = cap;
+  }
 }

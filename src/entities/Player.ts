@@ -21,8 +21,10 @@ import { SUMMON_GEAR, SUMMON_SET, type SummonSetFx } from '../data/vanillaSummon
 import { TILE_DEFS, TILE_BY_KEY } from '../data/tiles';
 import { hurtTiles, liquidCollision, drownCollision, TOUCH_IMMEDIATE, TOUCH_HOT, TOUCH_BLEEDING, SUFFOCATE, TOUCH_DESTROY, type HurtTile } from '../stats/TouchDamage';
 import { findShimmerFreeSpot, shimmerTeleportPos } from '../stats/Shimmer';
-import { mainExpertMode, getAttackDamageScaledByDifficulty } from '../stats/ScaleStats';
+import { mainExpertMode, getAttackDamageScaledByDifficulty, scaleStatsWorld, GDL } from '../stats/ScaleStats';
 import type { Enemy } from './Enemy';
+import { GrappleProj, GRAPPLE_LATCH } from './GrappleProj';
+import { TRACK_SHEET } from '../data/grappleHooks';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
 
@@ -890,7 +892,7 @@ export class Player extends Entity {
         if (this.damage(80, this.cx, this.y - 10, false)) {
           this.buffs.apply(BuffType.OnFire, 7);
           game.playSfx('hurt');
-          game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(80 - this.defense * 0.5)), false, '#FF6020');
+          game.addDamageNumber(this.cx, this.y, this.damagePreview(80), false, '#FF6020');
           game.spawnParticles(this.cx, this.y + this.h / 2, '#FF9A3C', 12, 1.6, { life: 32, grav: -0.05 });
         }
       }
@@ -1459,19 +1461,8 @@ export class Player extends Entity {
 
     this.dropThrough = !!this.inputDown;
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
-    // 钩爪牵引（最小实现）：朝锚点恒速覆盖速度——在 moveAndCollide 前生效；
-    // 抵达锚点 20px 内 / 按跳跃即释放（原版 GrappleMovement 相邻判定近似）
-    if (this.grappleTarget) {
-      const gdx = this.grappleTarget.x - this.cx;
-      const gdy = this.grappleTarget.y - this.cy;
-      const gd = Math.hypot(gdx, gdy);
-      if (gd < 20 || this.inputJump) {
-        this.grappleTarget = null;
-      } else {
-        this.vx = (gdx / gd) * 13.5;
-        this.vy = (gdy / gd) * 13.5;
-      }
-    }
+    // 钩爪牵引（GrappleMovement 1:1，Player.cs:22338-22483）——moveAndCollide 前覆写速度
+    this.grappleMovement(game);
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
@@ -1664,6 +1655,257 @@ export class Player extends Entity {
     this.prevInputX = this.inputX; // 冲刺双击检测（DoCommonDashHandle release 语义）
     // 血肉墙舌头（Player.WOFTongue :21993-22056，Update 内 myPlayer 段调用）
     this.wofTongue(game, world, dt);
+    // 钩爪锚点表重建（Player.cs:27991-27992 Update 尾清表）：锚由 GrappleProj
+    // 每帧自登记（挂墙 :49797-49801 / 锚定段 :49954-49957），下 tick 消费前重建
+    this.grappling[0] = null;
+    this.grapCount = 0;
+  }
+
+  // ==================== 钩爪（Grappling Hooks 1:1）====================
+  // 原版锚点表登记（Projectile.cs:49797-49801 挂墙 / :49954-49957 锚定段每帧重登记；
+  // grapCount < 10 上限）
+  registerGrapple(g: GrappleProj): void {
+    if (this.grapCount < 10) {
+      this.grappling[this.grapCount] = g;
+      this.grapCount++;
+    }
+  }
+
+  /** 发射时登记在役钩（= 原版扫 Main.projectile[owner] aiStyle==7，Player.cs:5984） */
+  registerGrappleProj(g: GrappleProj): void {
+    if (!this.grappleProjs.includes(g)) this.grappleProjs.push(g);
+  }
+
+  /** Kill 反注册（GrappleProj.kill） */
+  unregisterGrapple(g: GrappleProj): void {
+    const i = this.grappleProjs.indexOf(g);
+    if (i >= 0) this.grappleProjs.splice(i, 1);
+  }
+
+  /** 现役锚定格集合（SmartCursorHelper.cs:106-115 _grappleTargets：
+   *  锚点表各锚 Center 的 tile 坐标——智能光标镐线终点/免挖集） */
+  grappleAnchorTiles(): Array<{ x: number; y: number }> {
+    const out: Array<{ x: number; y: number }> = [];
+    for (let i = 0; i < this.grapCount; i++) {
+      const g = this.grappling[i];
+      if (g) out.push({ x: Math.floor(g.cx / TILE), y: Math.floor(g.cy / TILE) });
+    }
+    return out;
+  }
+
+  /** Player.RemoveAllGrapplingHooks（Player.cs:33106-33116）：清黑名单 + 清锚点表 +
+   *  杀全部自有 aiStyle7 弹体 */
+  removeAllGrapplingHooks(): void {
+    this.clearGrapplingBlacklist();
+    this.grappling[0] = null;
+    this.grapCount = 0;
+    for (const g of this.grappleProjs) g.kill();
+    this.grappleProjs.length = 0;
+    this.goingDownWithGrapple = false;
+  }
+
+  /** Player.ClearGrapplingBlacklist（:5880-5882） */
+  clearGrapplingBlacklist(): void {
+    this.grappleBlacklist.clear();
+  }
+
+  /** Player.IsBlacklistedForGrappling（:5885-5887） */
+  isBlacklistedForGrappling(x: number, y: number): boolean {
+    return this.grappleBlacklist.has(x * 100000 + y);
+  }
+
+  /** Player.UpdateBlacklistedTilesForGrappling（:5890-5927）：
+   *  每个已锚钩的 3×3 邻域中【非实心】格入黑名单（防同点叠锚——实心格本就可挂，
+   *  此名单实际只拦截平台/轨道等非实心可挂格）+ 轨道/平台锚的 5×5 同族格网。
+   *  store 缺省取 lastStore（fixedUpdate 每帧刷新）；GrappleProj 挂墙回调显式传入 */
+  updateBlacklistedTilesForGrappling(store?: import('../world/TileStore').TileStore): void {
+    this.clearGrapplingBlacklist();
+    const st = store ?? this.lastStore ?? null;
+    if (!st) return;
+    for (const g of this.grappleProjs) {
+      if (!g.latched) continue;                            // :5893-5895 ai[0]!=2 跳过
+      const px = Math.floor(g.cx / TILE);
+      const py = Math.floor(g.cy / TILE);
+      for (let j = -1; j <= 1; j++) {                      // :5897-5905 3×3 非实心
+        for (let k = -1; k <= 1; k++) {
+          if (!st.inBounds(px + j, py + k)) continue;
+          if (!st.isSolid(px + j, py + k)) {
+            this.grappleBlacklist.add((px + j) * 100000 + (py + k));
+          }
+        }
+      }
+      const sheet = TILE_DEFS[st.get(px, py)]?.vanilla?.sheet ?? -1;
+      if (sheet !== TRACK_SHEET && !TILE_DEFS[st.get(px, py)]?.platform) continue; // :5907-5909
+      for (let l = -2; l <= 2; l++) {                      // :5911-5925 5×5 同族格网
+        for (let m = -2; m <= 2; m++) {
+          if (!st.inBounds(px + l, py + m)) continue;
+          const s2 = TILE_DEFS[st.get(px + l, py + m)]?.vanilla?.sheet ?? -1;
+          if (s2 === TRACK_SHEET || TILE_DEFS[st.get(px + l, py + m)]?.platform) {
+            this.grappleBlacklist.add((px + l) * 100000 + (py + m));
+          }
+        }
+      }
+    }
+  }
+
+  /** Player.GrappleMovement（Player.cs:22338-22483）1:1。
+   *  在移动积分（moveAndCollide）前调用——覆写 vx/vy 为锚点牵引速度；
+   *  跳键沿释放全部钩爪（:22463-22478）；无锚（grappling[0] 空）整段早退（:22340-22342） */
+  grappleMovement(game: GameHooks): void {
+    if (!this.grappling[0]) {                              // :22340-22342
+      this.goingDownWithGrapple = false;
+      if (!this.inputJump) this.grappleReleaseJump = true; // :22479-22482 releaseJump 维护
+      return;
+    }
+    // :22347-22347 坐骑挂不得（MountID.Sets.CanUseHooks）——本仓矿车无钩门，骑乘即否
+    // :22351-22362 滑翔帧位（wingFrame/canCarpet/rocketFrame 复位 + RefreshMovementAbilities）
+    if (this.equipStats.wing) this.wingTime = this.equipStats.wing.time;  // wingTime = wingTimeMax
+    if (this.onGround) this.extraJumps = [...this.equipStats.jumpOpts];   // RefreshDoubleJumps
+    this.canCarpet = true;
+    this.fallStartY = null;                                // fallStart = position.Y/16 → 免摔伤
+    // :22367-22373 轨道钩 403 贴轨上车（Minecart.GetOnTrack）——403 仅由右键轨道
+    //   发射路径产生，物品族不产出，本仓等价空集（见 grappleHooks.ts 403 条注释）
+    // :22353-22356 释放跳跃门（覆写速度【前】的原速度判定——顺序敏感）：
+    //   flag = velocity.Length() < 2；flag2 = wet && |vy|<0.02（水面静止）
+    const slow = Math.hypot(this.vx, this.vy) < 2;         // :22353-22354
+    const wetStill = this.inWater && Math.abs(this.vy) < 0.02; // :22355-22356 flag2
+    const [pvx, pvy, dir] = this.getGrapplingForces();
+    if (pvy > 0) this.goingDownWithGrapple = true;         // :22381-22383
+    else this.goingDownWithGrapple = false;
+    const pullingDown = pvy > 0 && this.vy === 0;          // :22385 flag3
+    this.vx = pvx;                                         // :22386-22387
+    this.vy = pvy;
+    // :22394-22434 轨道钩上车段（type 403）——同上空集
+    // :22436-22445 ChangeDir（itemAnimation==0 时按牵引方向转身）
+    if (this.itemAnimTicks <= 0) {                         // itemAnimation == 0
+      if (this.vx === 0 && dir !== 0) this.facing = dir;   // :22438-22441 preferredDirection
+      if (this.vx > 0) this.facing = 1;                    // :22442-22445
+      if (this.vx < 0) this.facing = -1;
+    }
+    // :22447-22482 跳键沿 → 释放全部钩爪；速度低（<2）/水面静止/非下拉时附带跳跃
+    if (this.inputJump) {
+      if (this.grappleReleaseJump) {
+        let canJump = wetStill || slow;                    // :22465 flag4 = flag2 || flag
+        if (this.inputDown) canJump = false;               // :22467-22469 controlDown 否决
+        if (pullingDown && !this.inputUp) canJump = false; // :22470-22472 下拉贴地且未按上
+        if (canJump) {
+          this.vy = -PLAYER_JUMP_SPEED * this.gravDir;     // :22474 velocity.Y = -jumpSpeed
+          this.jumpHold = PLAYER_JUMP_TICKS;               // :22475 jump = jumpHeight
+          this.grappleReleaseJump = false;
+        } else {
+          this.vy += 0.01;                                 // :22478 velocity.Y += 0.01
+          this.grappleReleaseJump = false;
+        }
+        if (this.onGround) this.extraJumps = [...this.equipStats.jumpOpts]; // RefreshDoubleJumps
+        this.removeAllGrapplingHooks();                    // :22480
+      }
+    } else {
+      this.grappleReleaseJump = true;                      // :22481-22482
+    }
+    void game;
+  }
+
+  /** Player.GetGrapplingForces（Player.cs:22484-22577）1:1：
+   *  返回 [速度X, 速度Y, 期望朝向(0=无)]。锚点质心 - 玩家中心 → 距离缩放到牵引上限 */
+  private getGrapplingForces(): [number, number, number] {
+    let sumX = 0;
+    let sumY = 0;
+    let preferredDir = 0;
+    let n = 0;
+    const gravDir = this.gravDir;
+    for (let i = 0; i < this.grapCount; i++) {             // :22490
+      const g = this.grappling[i]!;
+      if (g.ai0 !== GRAPPLE_LATCH) continue;               // :22493 ai[0] != 2 跳过
+      if (!Number.isFinite(g.x) || !Number.isFinite(g.y)) continue; // :22494 HasNaNs
+      sumX += g.cx;                                        // :22496-22497 锚点中心累加
+      sumY += g.cy;
+      n++;
+      if (g.projType === 446) {
+        // :22500-22512 反重力钩：目标 = 锚点 + normalize(玩家中心 - 锚点 + 输入×100) × 200
+        let vx = (this.inputX || 0), vy = ((this.inputDown ? 1 : 0) - (this.inputUp ? 1 : 0)) * gravDir;
+        const vl = Math.hypot(vx, vy);
+        if (vl > 0) { vx /= vl; vy /= vl; }                // :22505-22507 归一
+        vx *= 100; vy *= 100;
+        let dx = this.cx - g.cx + vx, dy = this.cy - g.cy + vy;
+        const dl = Math.hypot(dx, dy);
+        dx = dl > 0 ? dx / dl : 0; dy = dl > 0 ? dy / dl : 0;
+        if (dx === 0 && dy === 0) { dx = 0; dy = -1; }     // :22509-22511 NaN → -UnitY
+        sumX += dx * 200;                                  // :22513-22515 num4 = 200
+        sumY += dy * 200;
+      } else if (g.projType === 652) {
+        // :22517-22536 静态钩：目标 = 玩家中心 + 绳向×输入投影×6（不拉，只沿绳自由位移）
+        let ix = (this.inputX || 0), iy = ((this.inputDown ? 1 : 0) - (this.inputUp ? 1 : 0)) * gravDir;
+        const il = Math.hypot(ix, iy);
+        if (il > 0) { ix /= il; iy /= il; }                // :22518 SafeNormalize
+        const ax = g.cx - this.cx, ay = g.cy - this.cy;    // :22519 vector3 = 锚 - 玩家
+        const al = Math.hypot(ax, ay);
+        const ux = al > 0 ? ax / al : 0, uy = al > 0 ? ay / al : 0; // :22520 vector4
+        let projX = 0, projY = 0;
+        if (il > 0) {                                      // :22523-22525 value = vector4 × Dot(vector4, 输入)
+          const d = ux * ix + uy * iy;
+          projX = ux * d; projY = uy * d;
+        }
+        let mult = 6;                                      // :22527 num5 = 6
+        if ((projX * ax + projY * ay) < 0 && al >= 600) mult = 0; // :22529-22531 背离且绳尽 → 0
+        sumX += -ax + projX * mult;                        // :22533-22534
+        sumY += -ay + projY * mult;
+      } else if (g.projType === 865) {
+        // :22538-22546 松鼠钩：目标 = 锚点 - 绳向×28（垂吊在锚下 28px，绳向按 90° 吸附）
+        const a = g.rot - Math.PI / 2;
+        let ux = Math.cos(a), uy = Math.sin(a);            // :22538 ToRotationVector2
+        const ul = Math.hypot(ux, uy) || 1;
+        ux /= ul; uy /= ul;
+        sumX += -ux * 28;                                  // :22540-22541 vector6 = -vector5 × 28
+        sumY += -uy * 28;
+        if (ux !== 0) preferredDir = ux > 0 ? 1 : -1;      // :22543-22545 preferredPlayerDirection
+      }
+    }
+    if (n === 0) return [this.vx, this.vy, 0];             // :22548-22552 num3==0 → 保留原速度
+    const tx = sumX / n;                                   // :22554-22555 质心
+    const ty = sumY / n;
+    let pvx = tx - this.cx;                                // :22558-22560 vector7 = fromPosition
+    let pvy = ty - this.cy;
+    const len = Math.hypot(pvx, pvy);                      // :22561-22562 num8
+    let maxSpeed = 11;                                     // :22564 num9 = 11
+    const first = this.grappling[0]!;
+    if (first.projType === 315) maxSpeed = 14;             // :22565-22566 蝙蝠钩
+    if (first.projType === 487) maxSpeed = 12;             // :22567-22568 荆棘钩
+    if (first.projType >= 646 && first.projType <= 649) maxSpeed = 16; // :22569-22570 月亮钩
+    const k = len > maxSpeed ? maxSpeed / len : 1;         // :22572-22574 num10
+    pvx *= k;
+    pvy *= k;
+    return [pvx, pvy, preferredDir];
+  }
+
+  /** Player.DoQueenSlimeHookTeleport（Player.cs:22486-22506）1:1：
+   *  150 步 × 12px 朝目标步进（TileCollision 碰撞贴墙停），落点即传送。
+   *  AI_007 挂墙回调（Projectile.cs:49876-49878 type==935） */
+  doQueenSlimeHookTeleport(targetX: number, targetY: number, game: GameHooks): void {
+    const steps = 150;                                     // :22488 num = 150
+    let px = this.x;
+    let py = this.y;
+    let sx = 0;
+    let sy = 0;
+    const body = {
+      x: px, y: py, w: this.w, h: this.h, vx: 0, vy: 0,
+      onGround: false, hitWall: false, hitHead: false,
+    };
+    for (let i = 0; i < steps; i++) {
+      const dx = targetX - (px + this.w / 2);
+      const dy = targetY - (py + this.h / 2);
+      const dl = Math.hypot(dx, dy) || 1;
+      sx = (dx / dl) * 12;                                 // :22494 DirectionTo × 12
+      sy = (dy / dl) * 12;
+      body.x = px; body.y = py; body.vx = sx; body.vy = sy;
+      moveAndCollide(body, game.world, sx, sy);            // :22496 TileCollision
+      px = body.x;
+      py = body.y;
+    }
+    this.x = px;
+    this.y = py;
+    this.vx = 0;
+    this.vy = 0;
+    game.spawnBurst?.(this.cx, this.cy, '#58B8E8', 14, 3, -Math.PI / 2, Math.PI, { life: 24 });
   }
 
   /** 狂卷之舌 DoT 分块累加器（专家 50 HP/s，:18905-18910 lifeRegen-100；
@@ -1697,7 +1939,7 @@ export class Player extends Entity {
       this.lastDamageCause = { kind: 'npc', name: 'Wall of Flesh' };
       if (this.damage(dmg, wall.cx, wall.cy)) {
         game.playSfx('hurt');
-        game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(dmg - this.defense * 0.5)), false, '#FF5050');
+        game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, '#FF5050');
         // :22005 noKnockback=false——舌击无视钴盾族免击退，沿墙推进方向弹开
         this.vx = (wall.facing >= 0 ? 1 : -1) * 3.4;
         this.vy = -3;
@@ -1769,9 +2011,22 @@ export class Player extends Entity {
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
-  /** 钩爪锚点（GrappleProj 锚定段写入；移动积分前朝锚点恒速 13.5 牵引——
-   *  最小实现，全量 AI_007 移植后替换；null = 无牵引） */
-  grappleTarget: { x: number; y: number } | null = null;
+  // ---- 钩爪（AI_007 + GrappleMovement 1:1）----
+  /** 本 tick 锚点表（原版 player.grappling[10] + grapCount，Player.cs:2608/:2828）：
+   *  GrappleProj 挂墙/锚定段每帧登记（Projectile.cs:49797-49801/:49954-49957），
+   *  grappleMovement 消费后于本 tick 尾重建（原版 Player.cs:27991-27992 清表） */
+  grappling: (GrappleProj | null)[] = new Array(10).fill(null);
+  grapCount = 0;
+  /** 本玩家全部在役钩爪弹体（= 原版扫 Main.projectile[owner].aiStyle==7，
+   *  Player.cs:5984/:33113；发射登记 / Kill 反注册） */
+  grappleProjs: GrappleProj[] = [];
+  /** 跳键沿（原版 releaseJump，GrappleMovement :22463-22477 消费）——松跳置 true */
+  grappleReleaseJump = true;
+  /** 钩爪下垂中（原版 GoingDownWithGrapple :22381-22383，fall damage 门 :27778） */
+  goingDownWithGrapple = false;
+  /** 钩爪锚格黑名单（UpdateBlacklistedTilesForGrappling，Player.cs:2896-2926）：
+   *  packed = x * 100000 + y */
+  private grappleBlacklist = new Set<number>();
   /** 多段跳剩余段（原版 RefreshDoubleJumps：落地时重置为 equipStats.jumpOpts 拷贝） */
   extraJumps: string[] = [];
   extraJumpCd = 0;
@@ -1984,6 +2239,16 @@ export class Player extends Entity {
 
   /** 受击：防御减伤公式 max(1, dmg - defense*0.5)（移植自 Maples Player.OnAttacked）。
    *  knockback=false 用于窒息等环境伤害（只掉血不击退） */
+  /** 受伤预览（与 damage() 同口径：难度防御系数 0.5/0.75/1.0 + endurance）——
+   *  供调用方飘字使用，避免显示≠实扣（Main.cs:65646 CalculateDamagePlayersTake） */
+  damagePreview(dmg: number): number {
+    const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
+      + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0);
+    const diff = scaleStatsWorld().difficulty;
+    const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
+    return Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance)));
+  }
+
   damage(dmg: number, srcX: number, srcY: number, knockback = true): boolean {
     // 调试无敌（F2）：完全免伤——不扣血/不进无敌帧/不触发受击饰品（返回 false=未受伤）
     if (this.debugGod) return false;
@@ -1997,7 +2262,11 @@ export class Player extends Entity {
     // 耐久药水(114)：endurance+0.1 → 受伤 ×0.9（Player.endurance 在 Hurt 结算）
     const endurance = (this.buffs.has(BuffType.Endurance) ? 0.1 : 0)
       + (this.equipStats.beetleDef ? 0.15 * this.beetleOrbs : 0); // 甲虫壳每球 15%（buffs 95-97）
-    const reduction = Math.max(1, Math.round((dmg - this.defense * 0.5) * (1 - endurance)));
+    // 玩家受伤防御难度系数（Main.cs:65646-65657 CalculateDamagePlayersTake：
+    // 经典 0.5 / 专家 0.75 / 大师 1.0，Journey 同经典档；防御步先截断，endurance 后乘）
+    const diff = scaleStatsWorld().difficulty;
+    const defF = diff >= GDL.MASTER ? 1 : diff >= GDL.EXPERT ? 0.75 : 0.5;
+    const reduction = Math.max(1, Math.round((dmg - this.defense * defF) * (1 - endurance)));
     this.hp -= reduction;
     // 十字项链/星星面纱：无敌帧翻倍（longInvince）
     this.iframes = PLAYER_IFRAME_TICKS * (eq.longInvince ? 2 : 1);
@@ -2059,7 +2328,7 @@ export class Player extends Entity {
         blocked = true;
       } else {
         game.playSfx('hurt');
-        game.addDamageNumber(this.cx, this.y, Math.max(1, Math.round(dmg - this.defense * 0.5)), false, '#FF5050');
+        game.addDamageNumber(this.cx, this.y, this.damagePreview(dmg), false, '#FF5050');
       }
     }
     if (!blocked) {

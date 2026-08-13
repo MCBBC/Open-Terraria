@@ -409,6 +409,75 @@ export class SpearProj extends Entity {
   }
 }
 
+// ================= 配重球（aiStyle 99 type 556-561/1079，AI_099_1 :64472-64610） =================
+// 环绕玩家：半径 num=250×0.5=125（yoyoString +25%+10，:64487）；rotation+0.5/t；
+// 超径钳回轨道（:64544-64550）+ 切向增速 vector2=(vy,vx) 翻转带象限符号（:64552-64610）；
+// 生存绑 yoyo 存活（timeLeft=6 刷新语义：alive() false 即消亡）
+export class CounterweightProj extends Entity {
+  w = 18; h = 18;
+  damage: number;
+  knockback: number;
+  projId: number;
+  critChance = 0.04;
+  armorPen = 0;
+  meleeProj = true;
+  private orbitR: number;
+  private rot = 0;
+  private alive: () => boolean;
+  private ownerRef: () => { cx: number; cy: number } | null;
+  private hitCd = new HitCooldown();
+  dead = false;
+
+  constructor(x: number, y: number, damage: number, knockback: number, projId: number,
+    owner: () => { cx: number; cy: number } | null, alive: () => boolean, yoyoString: boolean) {
+    super();
+    this.x = x; this.y = y;
+    this.damage = damage; this.knockback = knockback; this.projId = projId;
+    this.ownerRef = owner; this.alive = alive;
+    this.orbitR = 125; // 250×0.5（:64477/:64482）
+    if (yoyoString) this.orbitR += this.orbitR * 0.25 + 10; // :64487
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks) {
+    const p = this.ownerRef();
+    if (!p || !this.alive()) { this.dead = true; return; } // timeLeft=6/宿主消亡
+    this.rot += 0.5; // :64489
+    // 超径钳回（:64540-64550）：钳到轨道 + 速度径向衰减（去超出的 num6）
+    let dx = p.cx - this.cx, dy = p.cy - this.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    if (d > this.orbitR) {
+      const over = d - this.orbitR;
+      dx /= d; dy /= d;
+      this.x = p.cx - dx * this.orbitR - this.w / 2;
+      this.y = p.cy - dy * this.orbitR - this.h / 2;
+      const sp = Math.hypot(this.vx, this.vy);
+      const cut = Math.min(over, Math.max(0, sp - 1)); // num6 钳（:64556）
+      if (sp > 0) { this.vx *= (sp - cut) / sp; this.vy *= (sp - cut) / sp; }
+    }
+    // 切向增速（:64552-64610）：vector2=(vy,vx) 按象限定号后并入速度方向
+    {
+      const sp0 = Math.hypot(this.vx, this.vy);
+      if (sp0 > 0.5) {
+        let tx = this.vy, ty = this.vx; // vector2 翻转
+        if (this.cy < p.cy) ty = Math.abs(ty); else if (this.cy > p.cy) ty = -Math.abs(ty);
+        if (this.cx < p.cx) tx = Math.abs(tx); else if (this.cx > p.cx) tx = -Math.abs(tx);
+        let nvx = this.vx + tx, nvy = this.vy + ty;
+        const nl = Math.hypot(nvx, nvy) || 1;
+        nvx = nvx / nl * sp0; nvy = nvy / nl * sp0; // 保速转朝
+        if (Math.abs(tx) < 0.1 || Math.abs(ty) < 0.1) { this.vx = nvx; this.vy = nvy; }
+        else { this.vx = (nvx + this.vx * 2) / 3; this.vy = (nvy + this.vy * 2) / 3; } // :64588
+      }
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1, this.armorPen);
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, this.projId, this.rot + Math.PI / 2, '#B09060');
+  }
+}
+
 // ================= 悠悠球 / 连枷（aiStyle 99 / 15，channel 语义） =================
 
 /** 悠悠球型号三表（ProjectileID.cs:185/187/189 全量 1:1；键=projId，缺省=表默认） */
@@ -803,7 +872,7 @@ export class FlailProj extends Entity {
       }
       case 1: { // 掷出态（:41243-41273）：直线无重力;超时/超程 → 回拉;再按 → 垂地
         this.stT++;
-        if (held) { this.st = 6; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; }
+        if (held) { this.st = 3; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; } // 再按→垂链(:41288)
         if (this.stT >= this.prm.flightTicks || distHand() >= maxRange) {
           this.st = 2; this.stT = 0; this.vx *= 0.3; this.vy *= 0.3;
         }
@@ -816,6 +885,27 @@ export class FlailProj extends Entity {
         this.vx *= 0.98; this.vy *= 0.98;
         this.moveTowardsHand(p, retractKill, pullAccel);
         cd = this.prm.thrownHitCd;
+        break;
+      }
+      case 3: { // 垂链态（:41288-41330 1:1）：持按悬垂摆动;松手 → 回收;
+        //  超链长段 ×0.98 朝手 MoveTowards(num9=14, num8=1)；链内近停段 X×0.96/Y+0.2
+        //  （玩家静止再 X×0.96）；tileCollide 按是否超 num17 切换；玩家朝向背对球
+        if (!held) { this.st = 4; this.stT = 0; break; }
+        {
+          const dHand3 = Math.hypot(p.cx - this.cx, this.cy - p.cy);
+          if (dHand3 > num17) {
+            this.vx *= 0.98; this.vy *= 0.98;
+            this.moveTowardsHand(p, 14, 1); // velocity ×0.98 后朝手 MoveTowards(14, 1)（num9/num8）
+          } else {
+            if (Math.hypot(this.vx, this.vy) < 6) {
+              this.vx *= 0.96;
+              this.vy += 0.2;
+            }
+            if (p.vx === 0) this.vx *= 0.96;
+          }
+          // ChangeDir 背对球（:41327）：玩家中心在球左侧 → 朝右（本仓玩家朝向由输入驱动,此处仅注释语义）
+          cd = this.prm.thrownHitCd;
+        }
         break;
       }
       case 5: { // 坠落态（:41346-41362,撞墙入口见下方 tile 碰撞）：重力坠地

@@ -59,16 +59,15 @@ export class HitTile {
     this.data.clear();
   }
 
-  /** 每帧衰减（原版 HitTile.Prune 分档） */
+  /** 周期维护：仅 TTL 到期清条目（停止攻击 ~2×TTL tick 后清进度）。
+   *  ★原版 HitTile 无周期衰减（HitTile.cs 无 Update 方法;damage 挖到一半永久保留,
+   *  Prune 仅在 Clear 时调用）——此前"分档衰减 damage"是自创近似还错误归因为原版
+   *  语义,衰减速率（每 2 tick 一档）超过铜镐 15t 冷却的积累速率 = 永远凑不满
+   *  100 = 镐斧全体无法挖掘（2026-08-13 铜镐实锤） */
   update() {
     for (const [key, e] of [...this.data]) {
       e.ttl--;
-      if (e.ttl <= 1) { this.data.delete(key); continue; }
-      if (e.ttl < 12) e.damage -= 10;
-      else if (e.ttl < 24) e.damage -= 7;
-      else if (e.ttl < 36) e.damage -= 5;
-      else if (e.ttl < 48) e.damage -= 2;
-      if (e.damage < 0) this.data.delete(key);
+      if (e.ttl <= 1) this.data.delete(key);
     }
   }
 }

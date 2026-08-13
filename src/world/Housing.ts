@@ -196,7 +196,7 @@ export function scoreRoom(
       else if (sh === SUNFLOWER_SHEET) sunflower++;
     }
   }
-  const evilNet = -(hallow - (corrupt + crimson + 5 * sunflower)); // -TotalGoodEvil
+  const evilNet = corrupt + crimson - 5 * sunflower - hallow; // WorldGen.cs:5774-5794 TotalGoodEvil=腐+猩−圣−5×向日葵格(每株−40);旧符号反致种向日葵反把好房推向 corrupted
   let base = 50;
   let roomEvil = false;
   const evil = evilNet < 50 ? 0 : evilNet;

@@ -186,7 +186,7 @@ export class UI {
   craftListEl!: HTMLElement;
   tooltip!: HTMLElement;
   toastEl: HTMLElement | null = null;
-  heldStack: { id: number; stack: number } | null = null;
+  heldStack: { id: number; stack: number; prefix?: number } | null = null; // prefix 随实例流转（Item.prefix;旧类型丢词缀,2026-08-13 修）
   heldFrom: SlotWhere = 'inv';
   openChest: ChestData | null = null;
   private toastTimer: number | null = null;
@@ -839,7 +839,7 @@ export class UI {
     else if (where === 'miscDye') this.game.player.inv.miscDyes[i] = null;
     else if (this.openChest) this.openChest.items[i] = null;
     if (this.heldStack) this.heldStack.stack += cur.stack;
-    else this.heldStack = { id: cur.id, stack: cur.stack };
+    else this.heldStack = { id: cur.id, stack: cur.stack, prefix: cur.prefix }; // 保留词缀（旧重建丢 prefix）
     this.refreshAll();
   }
 
@@ -859,7 +859,7 @@ export class UI {
       cur.stack -= half;
       if (cur.stack <= 0) this.openChest.items[i] = null;
     }
-    this.heldStack = { id: cur.id, stack: half };
+    this.heldStack = { id: cur.id, stack: half, prefix: cur.prefix }; // 拆半也带词缀（词缀物 maxStack1 不真拆,防御）
     this.refreshAll();
   }
 
@@ -1232,7 +1232,7 @@ export class UI {
         // 放入 1 件（ItemSlot :757-764：reforgeItem = item.Clone() stack=1）
         if (this.reforgeItem) return;
         if (!this.game.canReforge(this.heldStack)) { this.toast('该物品无法重铸'); return; }
-        this.reforgeItem = { id: this.heldStack.id, stack: 1 };
+        this.reforgeItem = { id: this.heldStack.id, stack: 1, prefix: this.heldStack.prefix }; // 保留词缀
         this.heldStack.stack -= 1;
         if (this.heldStack.stack <= 0) this.heldStack = null;
       } else if (this.reforgeItem) {
@@ -1334,7 +1334,7 @@ export class UI {
   closeReforge(): void {
     // 归还重铸槽物品（Player.cs:4912：GetOrDropItem）
     if (this.reforgeItem) {
-      this.game.player.inv.add(this.reforgeItem.id, this.reforgeItem.stack);
+      this.game.player.inv.add(this.reforgeItem.id, this.reforgeItem.stack, this.reforgeItem.prefix); // 归还保留词缀（旧 inv.add 丢 prefix=白重铸）
       this.reforgeItem = null;
     }
     if (this.reforgeEl) {

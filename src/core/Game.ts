@@ -1,6 +1,8 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
 import { GrappleProj } from '../entities/GrappleProj';
+import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
+import { GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
@@ -171,7 +173,7 @@ import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
@@ -2478,11 +2480,6 @@ export class Game implements GameHooks {
     }
     // 成就：定期落盘（原版退出时存 achievements.dat；10s 节流防丢中途进度）
     if (this.tickCount % 600 === 0) this.achievements.flush();
-    // 钩爪弹回收尾：dead → 清牵引目标（GrappleProj 自释放路径之外的兜底）
-    if (this.activeGrapple?.dead) {
-      this.player.grappleTarget = null;
-      this.activeGrapple = null;
-    }
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -3920,6 +3917,9 @@ export class Game implements GameHooks {
       wireToolMode: this.wireToolMode,
       occupants,
       controlUseItem: !!inp.mouseDown,
+      // 钩爪锚点集（SmartCursorHelper.cs:106-115 _grappleTargets：现役锚点 Center 的
+      // tile 坐标——镐链射线终点/免挖集；AI_007 实装后由玩家锚点表收集）
+      grappleAnchors: p.grappleAnchorTiles(),
       // Step_AlchemySeeds 成熟药草判定（WorldGen.cs:66198-66225 IsAlchemyPlantHarvestable）
       // 所需世界态；Main.time 口径 = 白天 (t-0.25)*54000 / 夜晚 (t-0.75 / t+0.25)*32400
       alchemy: {
@@ -4267,6 +4267,20 @@ export class Game implements GameHooks {
       return;
     }
 
+    // 钩爪物品族（HOOK_ITEMS 全 26 件）：左键 = QuickGrapple 发射（Player.cs:27165-27169
+    // controlHook → QuickGrapple；物品族 noUseGraphic=true 无挥舞动画，useStyle 5 静持）。
+    // 方向 = 鼠标世界位 - 玩家中心（QuickGrapple :6094-6113）；冷却 = useTime（20/骷髅手 25）。
+    // 上限门/双钩交替/月亮轮换见 fireGrapple（num7/num8/73↔74/646-649 1:1）
+    {
+      const hookVid = heldDef ? viIdFromKey(heldDef.key) : -1;
+      if (hookVid >= 0 && hookItemOf(hookVid) && inp.mouseDown && !inp.rightDown
+        && this.player.useTime === 0) {
+        const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
+        this.fireGrapple(hookVid, Math.cos(ang), Math.sin(ang));
+        return;
+      }
+    }
+
     // 其它物品（药水/食物/镜子/召唤物等）：左键使用，useStyle 分族姿势
     // （Player.ItemCheck：itemAnimationMax = useAnimation，ApplyUseStyle 按 useStyle
     //  路由——4 举过头（镜子/机械三王召唤）/5 朝鼠标静持（火把族非放置路径）/
@@ -4589,7 +4603,11 @@ export class Game implements GameHooks {
           }
         }
         // 弹药节约（ammoCost80：20% 概率不耗弹——蘑菇矿胸甲族，Player.PickAmmo 语义）
-        if (!(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
+        // 无尽袋(3103 箭袋/3104 弹药袋) consumable=false 恒不耗(Item.cs:8232;
+        // 旧实现无条件 removeAt 致无尽袋被逐发吞尽,2026-08-13 修)
+        const ammoVid = viIdFromKey(ammoDef.key);
+        if (ammoVid !== 3103 && ammoVid !== 3104
+          && !(((this.player.equipStats.ammoSave || this.player.buffs.has(BuffType.AmmoReservation)) && Math.random() < 0.2))) {
           this.player.inv.removeAt(ammoSlot, 1);
         }
         this.player.useTime = bowC?.useTime ?? rg?.speed ?? 30;
@@ -5169,8 +5187,14 @@ export class Game implements GameHooks {
         if (this.player.equipStats.counterWeight) {
           (yoyo as unknown as { spawnWeight?: (x: number, y: number, dmg: number) => void }).spawnWeight =
             (wx, wy, wdmg) => {
-              this.entities.add(new Arrow(wx, wy, (Math.random() - 0.5) * 2, -1.5,
-                wdmg, 2, 556 + Math.floor(Math.random() * 6), null), 'projectiles');
+              // 配重球 = 环绕实体（AI_099_1 :64472-64610 1:1——曾直线坠落 Arrow 近似）
+              const cwOwn = () => (this.player.dead ? null : this.player);
+              const cwAlive = () => !yoyo.dead && (yoyo as unknown as { dead: boolean }).dead === false;
+              const cwE = new CounterweightProj(wx, wy, wdmg, this.player.equipStats.kbGlove ? 4 : 2,
+                556 + Math.floor(Math.random() * 6), cwOwn, cwAlive, this.player.equipStats.yoyoString);
+              cwE.critChance = critTotal;
+              cwE.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(cwE, 'projectiles');
             };
         }
         this.entities.add(yoyo, 'projectiles');
@@ -5442,14 +5466,15 @@ export class Game implements GameHooks {
     }
     // ---- 原版 HitTile 制 1:1（Player.cs:45032-45120 ItemCheck_UseMiningTools_ActuallyUseMiningTool
     //      + :52981 GetPickaxeDamage）：每击积累、阈值 100 破坏；冷却 = useTime
-    //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
-    //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
-    const tileSpeedMult = ((this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1)
+    //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation——meleeSpeed
+    //      不作用于 useTime（:4216），故不除 attackSpeedMult）。
+    //      tileSpeed（砌砖刀/建筑背包）原版只作用【放置】（:39485），不进挖掘冷却----
+    const mineMult = (this.player.buffs.has(BuffType.Mining) ? 0.75 : 1)  // 挖掘药水 -25%（:9818）
       * (this.player.usedAmbrosia ? 0.95 : 1);   // 仙馔蜜酒 pickSpeed-0.05(:12455-12459)
     // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）× 风筝 −15%（:9616）→
     // 冷却按原版 useTime/pickSpeed 缩短
     const pickMult = this.player.buffs.pickSpeedMult;
-    const cooldown = Math.max(8, Math.round((useTime ?? speed) / this.player.attackSpeedMult) * tileSpeedMult / pickMult);
+    const cooldown = Math.max(8, Math.round(useTime ?? speed) * mineMult / pickMult);
     if (this.tickCount - this.lastMineHitTick < cooldown) {
       // 节流窗内：只刷新裂缝显示，不积累
       this.hardnessCache = 100;
@@ -5474,9 +5499,9 @@ export class Game implements GameHooks {
     } else if (toolType === 'pick') {
       // 镐族：伤害 = 镐力，分档除数（GetPickaxeDamage:52981-53015）
       dmg = power;
-      if (sheet === 107 || sheet === 221) dmg = Math.floor(power / 2);        // 钴/钯金矿
-      else if (sheet === 108 || sheet === 222) dmg = Math.floor(power / 3);    // 秘银/山铜矿
-      else if (sheet === 111 || sheet === 223) dmg = Math.floor(power / 4);    // 精金/钛金矿
+      if (sheet === 107 || sheet === 221) dmg = Math.floor(power / 2);        // 钴/山铜矿(:52994)
+      else if (sheet === 108 || sheet === 222) dmg = Math.floor(power / 3);    // 钯/精金矿(:52993)
+      else if (sheet === 111 || sheet === 223) dmg = Math.floor(power / 4);    // 秘银/钛金矿(:52992)
       else if (sheet === 211) dmg = Math.floor(power / 5);                     // 绿藻矿
       else if (sheet === 226 || sheet === 237) dmg = Math.floor(power / 4);    // 蜥蜴砖
       else if (sheet === 25 || sheet === 203 || sheet === 117 || sheet === 58
@@ -5485,6 +5510,9 @@ export class Game implements GameHooks {
       // 门槛归零（GetPickaxeDamage:53017-53075 gate 段——镐力不足=无伤害）
       const underSurf = ty > this.world.groundLevel;
       if (sheet === 211 && power < 200) dmg = 0;                              // 绿藻 200
+      else if ((sheet === 107 || sheet === 221) && power < 100) dmg = 0;     // 钴/山铜 100（:53040）
+      else if ((sheet === 108 || sheet === 222) && power < 110) dmg = 0;     // 钯/精金 110（:53044）
+      else if ((sheet === 111 || sheet === 223) && power < 150) dmg = 0;     // 秘银/钛 150（:53048）
       else if ((sheet === 25 || sheet === 203) && power < (underSurf ? 55 : 65)) dmg = 0;
       else if (sheet === 117 && power < 65) dmg = 0;
       else if (sheet === 37 && power < 50) dmg = 0;                            // 陨石 50
@@ -10259,29 +10287,89 @@ export class Game implements GameHooks {
 
   // ================= 移动端虚拟控件快捷动作 =================
 
-  /** 活跃钩爪弹体（useEquippedGrapple 管理；dead 时清 player.grappleTarget） */
-  activeGrapple: GrappleProj | null = null;
+  /** 智能光标键同步脉冲（移动端按钮 down/up 直调 updateWanted——不依赖 tick
+   *  窗口消化电平，极速点按也可靠翻转；tick 内的常规调用见到 prev 已更新，
+   *  edge=false 不会双翻） */
+  pulseSmartCursor(level: boolean): void {
+    this.smartCursor.updateWanted(level, !!this.input.mouseDown, this.smartSettings());
+  }
 
-  /** 装备钩爪发射/收回（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
-   *  最小单钩实现——全量 AI_007 移植后替换（见 GrappleProj 头注） */
+  /** 装备钩爪发射（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
+   *  Player.QuickGrapple_GetItemToUse（Player.cs:6118-6132）：装备槽优先，否则
+   *  背包首个钩爪物品。发射走 fireGrapple（QuickGrapple 上限门/交替轮换 1:1）；
+   *  原版无"全部收回"动作——释放统一走跳键（GrappleMovement :22463-22480） */
   useEquippedGrapple(dirX: number | null, dirY: number | null): void {
-    if (this.activeGrapple && !this.activeGrapple.dead) {
-      this.activeGrapple.dead = true;                 // 再按 = 收回
-      this.player.grappleTarget = null;
-      this.activeGrapple = null;
-      return;
-    }
-    const hook = this.player.inv.miscEquips[4];
-    if (!hook) return;
     const p = this.player;
+    let vid = 0;
+    const equipped = p.inv.miscEquips[4];
+    if (equipped) {
+      const hi = hookItemOf(vanillaIdOfItem(equipped.id));
+      if (hi) vid = vanillaIdOfItem(equipped.id);
+    }
+    if (!vid) {
+      for (const s of p.inv.slots) {
+        if (!s) continue;
+        const v = vanillaIdOfItem(s.id);
+        if (hookItemOf(v)) { vid = v; break; }
+      }
+    }
+    if (!vid) return;
     const dx = dirX ?? p.facing;
-    const dy = dirY ?? -0.35;                         // 默认略朝上（原版发射角近似）
+    const dy = dirY ?? -0.35;                          // 摇杆无纵轴时略朝上（移动端近似）
     const d = Math.hypot(dx, dy) || 1;
-    const proj = new GrappleProj(p.cx - 4, p.y + 8, (dx / d) * 13.5, (dy / d) * 13.5,
-      () => (this.player.dead ? null : this.player));
+    this.fireGrapple(vid, dx / d, dy / d);
+  }
+
+  /** Player.QuickGrapple 发射段（Player.cs:5971-6116）1:1：
+   *  ① 统计在役钩（在飞 num5 / 已锚 num6）与最旧（timeLeft 最小 num3/num4 :5976-5987）
+   *  ② 上限门：num7 = max(1, quickMax - 已锚数)，在飞数 ≥ num7 → 拒发（:5989-6015）
+   *  ③ 总数门：已锚+在飞 ≥ quickTotal → 先杀最旧（:6041-6044）
+   *  ④ 双钩 73：场上有蓝钩 → 发红钩 74（:6057-6065）
+   *  ⑤ 月亮钩 3572：取 timeLeft 最大（最旧）的 646-649 依次轮换（:6067-6092）
+   *  ⑥ 速度 = 方向 × item.shootSpeed（:6110-6113） */
+  fireGrapple(itemVid: number, dirX: number, dirY: number): boolean {
+    const p = this.player;
+    const hi = hookItemOf(itemVid);
+    if (!hi) return false;
+    const stats = HOOK_PROJ_STATS[hi.shoot];
+    let oldest: GrappleProj | null = null;
+    let oldestTL = 100000;
+    let inflight = 0;                                  // num5
+    let latched = 0;                                   // num6
+    for (const g of p.grappleProjs) {                  // :5976-5987
+      if (g.ai0 === GRAPPLE_LATCH) latched++;
+      else inflight++;
+      if (g.timeLeft < oldestTL) { oldest = g; oldestTL = g.timeLeft; }
+    }
+    let shootType = hi.shoot;                          // num2
+    // :6012 num7 = Math.Max(1, num7 - num6)
+    const maxInflight = Math.max(1, stats.quickMax - latched);
+    if (inflight >= maxInflight) return false;         // :6013-6015
+    p.updateBlacklistedTilesForGrappling();            // :6018
+    this.sfx.play('throw', 0.9);                       // :6019 item.UseSound = Item1
+    // :6041-6044 总数门 → 杀最旧
+    if (oldest && latched + inflight >= stats.quickTotal) oldest.kill();
+    // :6057-6065 双钩交替
+    if (shootType === 73 && p.grappleProjs.some((g) => g.projType === 73)) shootType = 74;
+    // :6067-6092 月亮钩轮换（最旧 646-649 的下一色）
+    if (itemVid === 3572) {
+      let cur = -1;
+      let curTL = -1;
+      for (const g of p.grappleProjs) {
+        if (g.projType >= 646 && g.projType <= 649 && (curTL === -1 || curTL < g.timeLeft)) {
+          cur = g.projType;
+          curTL = g.timeLeft;
+        }
+      }
+      shootType = cur === 646 ? 647 : cur === 647 ? 648 : cur === 648 ? 649 : 646;
+    }
+    const proj = new GrappleProj(
+      p.cx - 8, p.y + 8, dirX * hi.shootSpeed, dirY * hi.shootSpeed,
+      shootType, () => (p.dead ? null : p));           // :6115 NewProjectile
     this.entities.add(proj, 'projectiles');
-    this.activeGrapple = proj;
-    this.sfx.play('throw', 0.9);
+    p.registerGrappleProj(proj);
+    p.useTime = hi.useTime;                            // ItemCheck_TryStartUse 冷却
+    return true;
   }
 
   /** 快捷药水（移动端药水键）：背包首瓶匹配药水直饮。效果链 = updateUse 的
@@ -11350,6 +11438,9 @@ export class Game implements GameHooks {
 
   /** 附近站点集合（内部 tile id）+ 液体/群系 → VanillaCraftCtx（每帧缓存由 UI 调用侧刷新） */
   vanillaNearbyStations(): Set<number> {
+    // Player.cs:35218 AdjTiles() 每帧先清 alchemyTable=false 再扫描——否则靠近过
+    // 一次后永久享受 1/3 材料折扣（旧"只置位不清零"粘滞 bug,2026-08-13 修）
+    this._alchemyTable = false;
     const st = this.world.store;
     const out = new Set<number>();
     const px = Math.floor(this.player.cx / TILE), py = Math.floor(this.player.cy / TILE);

@@ -676,7 +676,7 @@ export class SkyRenderer {
         const x = ft * (viewW + mw * 2) - mw;
         const y = dip * 250 + 180;
         const scale = 1.2 - dip * 0.4;
-        const phase = Math.max(0, Math.min(7, clock.dayCount % 8));
+        const phase = Math.max(0, Math.min(7, clock.moonPhase)); // MoonPhase.cs:3-13(0=满…4=空;旧 dayCount%8 致首夜亏凸月+导入脱钩)
         ctx.save();
         ctx.translate(x, y);
         ctx.rotate(ft * 2 - 7.3);

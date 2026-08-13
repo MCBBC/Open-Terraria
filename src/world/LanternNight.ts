@@ -28,7 +28,8 @@ export interface LanternCtx {
   invasionType: number;
   /** NPC.MoonLordCountdown（0 = 无月总倒计时） */
   moonLordCountdown: number;
-  /** WorldGen.spawnMeteor——本仓陨石系统未移植，恒 false（登记：spawnMeteor 位） */
+  /** WorldGen.spawnMeteor（Game.lanternCtx 传 meteorPending；陨石落地链已 1:1：
+   *  Game.HandleMeteorFall dropMeteor + EoW/BoC 击杀置位双路） */
   spawnMeteor: boolean;
   downedMoonlord: boolean;
   /** 场上是否存在 Boss（LanternNight.BossIsActive：boss 或 13-15 充能球） */

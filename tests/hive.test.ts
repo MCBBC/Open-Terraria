@@ -110,10 +110,16 @@ describe('蜜蜂 AI（AI_005 210/211 分支）', () => {
       playSfx: () => {}, damagePlayer: () => {}, spawnParticles: () => {},
     } as never;
     const bee = Enemy.fromVanilla(210, 20 * TILE, 60 * TILE)!;
+    // 原版暖机语义（NPC.cs:50768-50793，1:1）：accel=0.1×num3、num3=(ai1-60)/60
+    // **无下界钳**——前 60t 蜜蜂加速为负先飞离，约 120t 后 ramp 转 1 才全速追击。
+    // 2026-08-13 该块按原版移植后,200t 内净位移仍为负（飞离阶段主导）——
+    // 旧断言写的是移植前的"恒正向追击"近似，已按原版行为重写
     for (let k = 0; k < 200; k++) bee.fixedUpdate(1 / 60, game);
-    // 靠近了 + 全程逐轴 ≤6（暖机钳）/ 稳态 ≤5
+    expect(bee.cx).toBeLessThan(20 * TILE);           // 暖机期净飞离（负加速语义锁定）
+    // 追击阶段（ai1>120 后 accel 满 0.1）再跑 400t 必接近玩家
+    for (let k = 0; k < 400; k++) bee.fixedUpdate(1 / 60, game);
     expect(bee.cx).toBeGreaterThan(20 * TILE);
-    expect(Math.hypot(bee.vx, bee.vy)).toBeLessThanOrEqual(5.2);
+    expect(Math.hypot(bee.vx, bee.vy)).toBeLessThanOrEqual(5.2);  // 稳态 ≤5
     // 环绕摆动计数在推进（flag3 无条件摆动）
     expect(bee.ai0).not.toBe(-1120);
   });

@@ -67,6 +67,10 @@ export class ItemDrop extends Entity {
     const player = (game as unknown as { player: Player }).player;
     let beingGrabbed = false;
     if (player && !player.dead && this.age > PICKUP_DELAY && this.age > this.noGrabDelay) {
+      // 顶部速度门（GrabItems Player.cs:34466）：shimmered 且速度 ≥0.2 → **拾取与
+      // 拉取整体跳过**（此前只拦拾取不拦拉动 → 拉动加速反而把物品锁死在 ≥0.2 永不可拾）
+      const grabbable = !(this.shimmered && Math.hypot(this.vx, this.vy) >= 0.2);
+      if (grabbable) {
       // 原版 GrabItems(Player.cs:34461-34524):hitbox 相交=直接拾取;
       // 否则玩家盒 ±42px(defaultItemGrabRange :2406)扩展盒相交=拉取；
       // 宝藏磁石(+94)/金戒指族(+12)扩展范围（Player.grabRangeBonus 聚合）
@@ -81,9 +85,7 @@ export class ItemDrop extends Entity {
       const inGrabRange =
         this.x < player.x + player.w + GRAB_RANGE && this.x + this.w > player.x - GRAB_RANGE &&
         this.y < player.y + player.h + GRAB_RANGE && this.y + this.h > player.y - GRAB_RANGE;
-      // 微光化物品上浮中不可拾（GrabItems Player.cs:34466：shimmered 且速度 ≥0.2 跳过）
-      const grabbable = !(this.shimmered && Math.hypot(this.vx, this.vy) >= 0.2);
-      if (touching && grabbable) {
+      if (touching) {
         if (this.pickup) {
           if (this.pickup === 'heart') {
             player.hp = Math.min(player.maxHp, player.hp + 20);
@@ -119,7 +121,10 @@ export class ItemDrop extends Entity {
       } else if (inGrabRange) {
         // PullItem_Common(:34533-34584):每轴 0.45 步进、钳 4(水平含 player.vx),
         // 速度反向时附加 ×0.75 反拉——被拉取帧跳过瓦片碰撞(WorldItem.cs:587-597
-        // else 分支仅 position+=velocity),物品穿墙飞向玩家
+        // else 分支仅 position+=velocity),物品穿墙飞向玩家。
+        // ★CanPullItem 分支先清 shimmered（Player.cs:34498）——拉动一旦开始,
+        // 微光速度门解除,后续按普通物品吸走拾取（此前不清 → 拉动中恒 ≥0.2 死锁）
+        this.shimmered = false;
         beingGrabbed = true;
         const SPEED = 0.45, MAXV = 4, BACK = 0.75;
         if (player.cx > this.cx) {
@@ -137,6 +142,7 @@ export class ItemDrop extends Entity {
           if (this.vy > 0) this.vy -= SPEED * BACK;
         }
       }
+      }   // /if (grabbable) —— 顶部速度门（Player.cs:34466）
     }
 
     if (beingGrabbed) {
@@ -150,9 +156,26 @@ export class ItemDrop extends Entity {
       const wetType = st0.liquid[ci] > 30 ? st0.liquidType[ci] : 0;
       this.shimmerWet = wetType === 4;
       if (this.shimmered) {
-        // 已微光化：无重力上浮（:486-511 gravity=0，vy -0.05/t 钳 -4）
-        this.vy = Math.max(this.vy - 0.05, -4);
-        this.vx *= 0.95;
+        // 已微光化：无重力（:487 gravity=0）。上浮/悬停三分支（:515-536）：
+        //  ① shimmerWet（身在微光中）→ vy-0.05/t 钳 -4 继续上浮；
+        //  ② 干态但**下方 2 格内仍有微光**（还悬在微光柱上方）→ 同①继续上浮；
+        //  ③ 干态且下方无微光 → vy×0.9 衰减悬停——速度降到 <0.2 才可被拾取
+        //    （此前漏了②③：恒加速上浮 → 撞顶也不减速 → 永远 ≥0.2 永不可拾）
+        let rising: boolean;
+        if (this.shimmerWet) {
+          rising = true;
+        } else {
+          rising = false;
+          const bx = Math.floor(this.cx / TILE), by = Math.floor(this.cy / TILE);
+          for (let j = by; j < by + 2; j++) {
+            if (st0.inBounds(bx, j)) {
+              const bi = st0.idx(bx, j);
+              if (st0.liquid[bi] > 0 && st0.liquidType[bi] === 4) { rising = true; break; }
+            }
+          }
+        }
+        if (rising) { if (this.vy > -4) this.vy -= 0.05; }
+        else this.vy *= 0.9;
         // 上浮白光尘（WorldItem.cs:488-497）：1/30t 一枚 dust 309，盒内随机点 +
         // 抖动 X∈[-8,5) Y∈[-8,5)，四色表 1/1/1/3 权重（255,255,210 / 190,245,255 /
         // 255,150,255 / 190,175,255），scale×1.1、velocity×0.3 近似静态

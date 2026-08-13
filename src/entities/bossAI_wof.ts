@@ -23,6 +23,12 @@ import { Lang } from '../i18n/Lang';
 let wofDrawAreaTop = -1;
 let wofDrawAreaBottom = -1;
 
+/** Main.wofDrawAreaTop/Bottom 只读访问(渲染层墙身平铺用;2026-08-13 前渲染层
+ *  靠"双眼间距"反解,现直接取 AI 维护的权威值——消一处近似) */
+export function wofDrawArea(): { top: number; bottom: number } {
+  return { top: wofDrawAreaTop, bottom: wofDrawAreaBottom };
+}
+
 // ---- 每实体辅助槽(原版 localAI[1..3],Enemy 只有 ai0-ai3 且 ai1/ai2 被 AI 主链占用) ----
 interface WallLocals { despawnT: number; roarT: number }        // localAI[1] / localAI[3]
 interface EyeLocals { charge: number; burst: number; lastHeadHp: number } // localAI[1]/[2] + 血量同步基线

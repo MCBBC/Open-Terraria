@@ -9,7 +9,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
 import { placeBuriedChest } from './BuriedChestsPass';
-import { waterBoxPalmCheck } from './TreePass';
+import { waterBoxPalmCheck, growPalmTree} from './TreePass';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as _solidTileHB } from './HalfBrickPass';
 
@@ -496,12 +496,14 @@ export function runSurfaceDecorPass(st: TileStore, rng: RNG, gs: GenState): void
       // ---- 仙人掌已由本文件 runCactusPalmTreesAndCoralPass 替换（原版 pass 96
       //      CactusPalmTreesAndCoral：GrowCactus 成簇语义；旧「12% 直柱 2-5 格」简化已删）----
       // ---- 杂草/花/蘑菇 ----(藤蔓在下方统一扫描)
-      // ---- 杂草/花/蘑菇 ----
-      if (!st.flags[st.idx(x, sy - 1)] && (ground === T.GRASS || ground === JUNGLE_GRASS || ground === T.SNOW)) {
+      // 门禁对齐原版 GrassPlantsEvilPlantsAndPumpkinsOnSurface(WorldGen.cs:20209-20260):
+      // 草 2→杂草 3 / 腐化草 23→24 / 猩红草 199→201——【雪 147 不长任何植物】
+      // (雪原只有针叶树;SNOW 曾混入门内 = 用户报"杂草花长在冰雪环境"根因)
+      if (!st.flags[st.idx(x, sy - 1)] && (ground === T.GRASS || ground === JUNGLE_GRASS)) {
         const r = rng.next();
         if (r < 0.3) st.setTileSilent(x, sy - 1, T.TALLGRASS, [0, 18, 36, 54, 72, 90][rng.int(0, 5)], 0);
         else if (r < 0.42) st.setTileSilent(x, sy - 1, T.FLOWER, [108, 126, 162, 180, 216, 252, 342, 540, 594][rng.int(0, 8)], 0);
-        else if (r < 0.45 && ground !== T.SNOW) st.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
+        else if (r < 0.45) st.setTileSilent(x, sy - 1, T.MUSHROOM, 144, 0);
       }
     }
     x++;
@@ -1152,41 +1154,10 @@ function palmEmptyCheck(st: TileStore, x0: number, x1: number, y0: number, y1: n
  *  侧净空注意：1456:27302 用 num-num2（num2=20+treeHeightAddon=20 → num-20）；
  *  1405:11800 是 index1-30——TreePass 移植仍携 1405 值 -30，此处按项目铁律取
  *  1456 终态 -20。 */
+/** cs:21151-21152 棕榈种植代理——复用 TreePass.growPalmTree(1456 :27270-27340 终态;
+ * 2026-08-13 前是同源复制的 growPalmTreeAt,已去重) */
 function growPalmTreeAt(st: TileStore, rng: RNG, i: number, y: number): boolean {
-  if (!st.inBounds(i, y)) return false;
-  let index1 = y;
-  while (st.inBounds(i, index1) && st.flags[st.idx(i, index1)] && PALM_SAPLING.has(st.type[st.idx(i, index1)])) index1++;
-  if (!st.inBounds(i, index1) || index1 < 1) return false;
-  const gi = st.idx(i, index1);
-  // 基座整砖检查（cs:27280-27285 active && !halfBrick && slope==0）
-  if (!st.flags[gi] || st.half[gi] || st.slope[gi] !== 0 || !PALM_GROUND.has(st.type[gi])) return false;
-  if (st.wall[st.idx(i, index1 - 1)] !== 0 || st.liquid[st.idx(i, index1 - 1)] > 0) return false;
-  if (!palmEmptyCheck(st, i, i, index1 - 2, index1 - 1)) return false;
-  if (!palmEmptyCheck(st, i - 1, i + 1, index1 - 20, index1 - 3)) return false;   // cs:27302（1456 终态）
-  const height = rng.int(10, 20);                 // Next(10,21)
-  const target = rng.int(-8, 8) * 2;              // Next(-8,9)*2
-  let tilt = 0;
-  for (let k = 0; k < height; k++) {
-    if (k === 0) {
-      st.setTileSilent(i, index1 - 1, PALM, 66, 0);
-      continue;
-    }
-    if (k === height - 1) {
-      st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(4, 6), tilt); // 顶段 fx=22*Next(4,7)
-      continue;
-    }
-    if (tilt !== target) {
-      const prog = k / height;                    // 倾斜步进阈值（cs:27323-27335）
-      // 原版 || true 恒真但前段掷骰照走（Next(13)/Next(9)/Next(5)），短路次序已对齐
-      if (prog >= 0.25 && ((prog < 0.5 && rng.int(0, 12) === 0)
-        || (prog < 0.7 && rng.int(0, 8) === 0)
-        || (prog < 0.95 && rng.int(0, 4) === 0) || true)) {
-        tilt += Math.sign(target) * 2;
-      }
-    }
-    st.setTileSilent(i, index1 - 1 - k, PALM, 22 * rng.int(0, 2), tilt); // fx=22*Next(0,3)
-  }
-  return true;
+  return growPalmTree(st, rng, i, y);
 }
 
 /** SolidTileAllowBottomSlope（cs:70211）：active && (tileSolid||tileSolidTop) &&
