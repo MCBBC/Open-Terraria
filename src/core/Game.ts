@@ -10501,13 +10501,15 @@ export class Game implements GameHooks {
       .map((n) => ({ x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
     const st = this.world.store;
     // 入驻锚点（SpawnHomelessNPC :5014-5033）：已安家 townNPC 的 home 随机取一——
-    // 原版房表口径 townNPC && type!=37 && !homeless（含宠物：宠物 townNPC=true，
-    // NPC.cs:17145；本仓 homes 即"有 home 的 TownNPC"，old_man 不入驻无 home 同口径）；
-    // 冷启（世界无任何已安家 NPC）回退出生点（原版静态 LastFoundHouse(0,0) 必失败后
-    // 走 randomNext homes，无家可取时 :5041 直接 return——本仓出生点兜底保证第一间
-    // 出生点旁的房可被发现，见 findFreeHouse ±10 窗注释）
+    // 原版房表口径 townNPC && type!=37 && !homeless（:5019）：宠物算锚（宠物
+    // townNPC=true，NPC.cs:17145）；old_man(type 37) 虽有地牢驻点 home 也不可作锚
+    // （否则全图锚点被地牢劫持，出生点旁的房永不可见）。
+    // 冷启（无任何可作锚的已安家 NPC）回退出生点（原版静态 LastFoundHouse(0,0) 必
+    // 失败后走 randomNext homes，无家可取时 :5041 直接 return——本仓出生点兜底保证
+    // 第一间出生点旁的房可被发现，见 findFreeHouse ±10 窗注释）
+    const anchorPool = homes.filter((h) => h.npcId !== 37);   // 37 = Old Man（:5019 排除）
     const pickAnchor = (): { x: number; y: number } =>
-      homes.length > 0 ? homes[Math.floor(Math.random() * homes.length)]
+      anchorPool.length > 0 ? anchorPool[Math.floor(Math.random() * anchorPool.length)]
         : { x: this.world.spawnX, y: this.world.spawnY };
 
     // ①' 被绑巫师【不补放】（2026-08-13 对齐原版）：106 BoundWizard 唯一来源 =
