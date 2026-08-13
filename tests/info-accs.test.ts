@@ -12,7 +12,7 @@ const gates = (...vids: number[]) => infoAccGatesOf(vids);
 // 单测环境无语言包:打桩 Lang.text 直接回传参数(键名即断言语义)
 beforeAll(() => {
   (Lang as unknown as { text: (p: string, ...a: unknown[]) => string }).text = ((p: string, ...a: unknown[]) =>
-    (a.length ? p.replace(/\{\d\}/g, () => String(a.shift())) : p)) as never;
+    a.length ? p + ' ' + a.join(' ') : p) as never;
 });
 
 describe('refreshInfoAccsFromItemType 22×12 矩阵(Player.cs:12319-12400)', () => {

@@ -74,11 +74,12 @@ export class MeteorChunk extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement> } | null }): void {
+  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement>; ensureVImage?: (f: string) => HTMLImageElement | null } | null }): void {
     // Projectile_1078.png 16×54 = 3 帧 16×18
     const ctx = r.canvas.getContext('2d');
     if (!ctx || !r.atlas) return;
-    const img = r.atlas.vimages.get('vanilla/Projectile_1078.png');
+    // ensureVImage 触发懒加载(此前直取且无人预载该表 = 永久隐形,2026-08-13 排雷)
+    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_1078.png') : r.atlas.vimages.get('vanilla/Projectile_1078.png');
     if (!img || !img.width) return;
     const fw = 16, fh = 18;
     ctx.save();

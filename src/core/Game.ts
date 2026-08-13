@@ -3,6 +3,7 @@ import { Achievements } from './Achievements';
 import { GrappleProj } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
 import { GRAPPLE_LATCH } from '../entities/GrappleProj';
+import { Research } from '../stats/Research';
 import { PetFollower } from '../entities/PetFollower';
 import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
@@ -553,6 +554,8 @@ export class Game implements GameHooks {
   evolution!: WorldEvolution;
   /** Torch God 彩蛋事件（Player.cs:17585-17770）：>100 根点燃火把地下触发 */
   torchGod!: TorchGodEvent;
+  /** Journey 研究内核（Research：need 表 6089 条 + 覆盖 12 对 + event 45 半数门） */
+  research = new Research();
   /** 成就系统（AchievementManager + AchievementsHelper 移植；跨世界 localStorage 持久化） */
   achievements = new Achievements(
     typeof localStorage !== 'undefined'
@@ -1763,7 +1766,7 @@ export class Game implements GameHooks {
     // Player_ 全量 545 张(77MB 解码)收窄为【当前外观所需】:纸娃娃 14 通道 × 变体
     // (女性变体缺通道回退男体,故男体常备) + 发型正/帽发各 1 张 ≈ 30 张;
     // 换装/更衣走 vui 懒加载 + PaperDoll 就绪预检自愈(2026-08-13)
-    const app = this.preloadAppearance ?? this.player.appearance;
+    const app = this.preloadAppearance; // ★此时 player 尚未创建(见 playerPreviewArmor 注释),勿读 this.player
     const variant = app?.skinVariant ?? 0;
     const hair = app?.hair ?? 0;
     const playerFiles = new Set<string>();
@@ -2119,7 +2122,12 @@ export class Game implements GameHooks {
       // 背包内提示牌即时换下一目标（原版每帧重绘的等价触发）
       this.cb.onInventoryChanged?.();
     };
+    // Journey 研究（Research 内核，子代理 E 移植）：成就桥 + 进世界 forced 检查
+    // （Player.cs:318 OnEnterWorld forced:true）
+    this.research.onProgressionEvent = (ev) => this.achievements.notifyProgressionEvent(ev);
+    this.research.checkResearchAchievement(true);
     this.achOnWorldEnter();
+    (window as unknown as { __swResearch?: unknown }).__swResearch = this.research;
     this.cb.onInventoryChanged();
   }
 
@@ -2746,6 +2754,9 @@ export class Game implements GameHooks {
     // itemAnimation 等效注入（CheckDrowning 芦苇管门禁用；swing 在 postUpdate 递减，
     // 此处读到上一帧尾值，≤1 tick 偏差）
     player.itemAnimTicks = this.swing?.t ?? 0;
+    // 手持物品 useTurn 注入（Player :19546 移动改向门的豁免旗——工具镐/斧 true，
+    // 武器 false；vanilla-itemcombat.json 2026-08-13 提取 1141 件）
+    player.itemUseTurn = !!itemCombat(player.inv.heldItem()?.id ?? -1)?.useTurn;
     const achPxBefore = player.x;
     player.fixedUpdate(dt, this);
     // 成就：跑动里程（HandleRunning Player.cs:27925：flag32 && velocity.Y==0——
@@ -4693,6 +4704,8 @@ export class Game implements GameHooks {
         // 弹体走通用 Arrow（贴图/穿透/寿命取投射物表），伤害与本体挥击同源
         if (cwMelee?.shoot && cwMelee.shootSpeed != null) {
           const ang2 = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+          // 发射型武器面向鼠标（同 useCombatWeapon——ItemCheck_Shoot :46578 语义）
+          this.player.facing = Math.cos(ang2) > 0 ? 1 : -1;
           const pd = projectileData(cwMelee.shoot);
           // 穿透取投射物表原值（2026-08-13：去 min-3 钳——喵刀 502 penetrate=5 被
           // 钳成 3 违背原版；-1（无限）沿用 3 近似）
@@ -4719,7 +4732,7 @@ export class Game implements GameHooks {
               'projectiles');
             // 984 旋斩弧（同链首行 NewProjectile 984：方向×重力、itemAnimationMax、
             // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）
-            const arc = new TerraArc(this.player, cw.useTime,
+            const arc = new TerraArc(this.player, cwMelee.useTime,
               Math.round((this.swing.dmg ?? 1)), this.player.facing, (ps?.size ?? 1));
             this.entities.add(arc, 'projectiles');
             this.mining = null;
@@ -4756,8 +4769,7 @@ export class Game implements GameHooks {
             Math.sin(ang2) * cwMelee.shootSpeed / this.player.attackSpeedMult,
             this.swing.dmg ?? 1, this.swing.kb ?? 3, cwMelee.shoot, null,
             { grav: meow ? 0.2 : projGravity(cwMelee.shoot), gravDelay: meow ? 19 : -1,
-              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen,
-              ...(terra ? { grav: 0, terra: true } : {}) }), 'projectiles');
+              life: meow ? 180 : (pd?.timeLeft ?? 600), pierce: pen }), 'projectiles');
         }
       }
       this.mining = null;
@@ -5232,6 +5244,8 @@ export class Game implements GameHooks {
         const projId = ammoC?.shoot ?? bowC?.shoot ?? 1; // PickAmmo：projToShoot = 弹药 shoot
         if (isArrowKind && this.player.equipStats.moltenQuiver && projId === 1) damage += 2; // 熔箭袋木箭→火矢+2（:52700，火矢 proj 换体从略）
         const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+        // 弓/枪面向鼠标（shoot>0 发射型同款 :46578）
+        this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
         const ax = this.player.cx + Math.cos(ang) * 14;
         const ay = this.player.cy - 4 + Math.sin(ang) * 14;
         // 回收掉落：仅木箭（原版燃烧箭 Kill 不掉；子弹/飞镖不可回收）
@@ -5296,6 +5310,8 @@ export class Game implements GameHooks {
       const vid = heldDef.vid ?? viIdFromKey(heldDef.key);
       const c = itemCombat(vid);
       const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
+      // 投掷（shuriken 等 shoot>0）面向鼠标同款 :46578
+      this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
       const px = this.player.cx + Math.cos(ang) * 14;
       const py = this.player.cy - 4 + Math.sin(ang) * 14;
       // 粉末族（净化粉 66 / 邪恶粉 67 / 猩红粉 2886）：proj 10/11/463 是 aiStyle 6
@@ -5684,6 +5700,10 @@ export class Game implements GameHooks {
     const ang = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
     const px = this.player.cx + Math.cos(ang) * 14;
     const py = this.player.cy - 4 + Math.sin(ang) * 14;
+    // 发射型武器使用期间面向鼠标（ItemCheck_Shoot :46578-46590：num=Dot(朝向轴,瞄准向)
+    // >0→1 否则 −1；全 itemAnimation 每 useTime tick 重评。723/3611 豁免（:46563））。
+    // ★纯近战阔剑不在此列——挥砍期间方向锁定（:19546-19556 useTurn 门）
+    this.player.facing = Math.cos(ang) > 0 ? 1 : -1;
     const consume = () => {
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.cb.onInventoryChanged();
@@ -5876,6 +5896,14 @@ export class Game implements GameHooks {
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         flailP.critChance = critTotal;
+        // AI_015 特例子弹生成回调(247/757/1058;entities.add 不在 GameHooks)
+        flailP.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
+          // ★sDmg 源自 FlailProj.damage=cw.damage(已含词缀乘区)——再乘 ps?.dmg
+          //  = 双乘前缀(review 实锤,2026-08-13);原版 248/928/405 伤=出手时武器伤
+          this.entities.add(new Arrow(sx, sy, svx, svy,
+            Math.max(1, Math.round(sDmg)), sKb, sProj, null,
+            { grav: 0, life: 300, pierce: 2 }), 'projectiles');
+        };
         flailP.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
         this.player.useTime = cw.useTime;
@@ -8588,7 +8616,9 @@ export class Game implements GameHooks {
         continue;
       }
       let h: import('./Sfx').SfxLoop | null = this.weatherLoops[name] ?? null;
-      if (!h || !h.playing) {
+      // 仅终态（stop/加载失败）重建——解码在途(!playing && !dead)保留句柄，
+      // 否则每帧新建 GainNode 泄漏
+      if (!h || h.dead) {
         h = this.sfx.playLoop(name, vol);
         if (!h) { this.weatherLoopVol[name] = vol; continue; }  // sandstormWind 无素材 → null（登记）
         this.weatherLoops[name] = h;
@@ -10653,6 +10683,17 @@ export class Game implements GameHooks {
       // 树妖世界状态（NPCInteractions.cs:124-129 Actions.GetDryadWorldStatus：
       // GetDryadWorldStatusDialog → 纯净世界触发 HandleSpecialEvent(27)）
       this.sfx.play('menuTick');
+      // 星露谷彩蛋（DryadText_WorldPurityOrStardewValleyBit Main.cs:39697-39700：
+      // 手持 Joja Cola 5275（CanDryadPlayStardewAnimation :39885-39894：held==5275
+      // && npc.type==20）→ 消耗可乐 + event 46 INTERDIMENSIONAL_RECYCLING——优先于纯净门）
+      const heldNow = this.player.inv.heldItem();
+      if (heldNow && vanillaIdOfItem(heldNow.id) === 5275) {
+        this.player.inv.removeAt(this.player.inv.selected, 1);
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.JojaCola'));
+        this.achievements.notifyProgressionEvent(46);
+        this.cb.onInventoryChanged?.();
+        return;
+      }
       const pcts = alignmentPcts(this.world.store, Math.floor(this.world.groundLevel));
       const { text, pure } = dryadWorldStatus(pcts, this.world.name);
       this.cb.onNpcDialog?.(Lang.npcName(20) ?? '树妖', text,
@@ -12083,6 +12124,11 @@ export class Game implements GameHooks {
   /** 进世界成就基线（AchievementsHelper.OnPlayerEnteredWorld :100-192）：
    *  背包/装备/染料/杂项全量"拾取"通知 + 装备态检查（含进包即满足的旗标成就） */
   achOnWorldEnter(): void {
+    // GOING_OLDSCHOOL B1（子代理 E 集成点）：成就实例挂窗口——标题屏日月拖拽
+    //（TitleMenu.classicTitleAchievement 优先读 __swAchievements）进过世界后可达
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __swAchievements?: unknown }).__swAchievements = this.achievements;
+    }
     const inv = this.player.inv;
     const notifyAll = (arr: ReadonlyArray<{ id: number; stack: number } | null>) => {
       for (const s of arr) {

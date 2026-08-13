@@ -632,6 +632,16 @@ export class Enemy extends Entity {
   brokenArmorT = 0;
   betsysCurseT = 0;
   daybreakT = 0;  daybreakDoT = 0;
+  /** R2 余量批(NPC.cs UpdateNPC_BuffDOT 逐条):Bleeding(30)=-24=12HP/s(:92598)/
+   *  Hemorrhage(375)=-200=100HP/s(:92610)。骨标(169)/触手刺(337)/血腥屠夫(344)
+   *  =层数模型(附着弹 598/971/975 每 6/6/8 lifeRegen,:92740/:92761/:92788)——
+   *  repo 无附着弹计数,取单层 3/3/4 HP/s 近似,层数叠加登记 GAP(同 Daybreak)。
+   *  137 Slimed(摩擦)/151 SoulDrain(吸血源判定)/183 StardustBleed(鞭 tag)非 DoT 不设 */
+  bleedT = 0;      bleedDoT = 0;
+  hemorrhageT = 0; hemorrhageDoT = 0;
+  javelinT = 0;    javelinDoT = 0;
+  spikeT = 0;      spikeDoT = 0;
+  butcherT = 0;    butcherDoT = 0;
   poisonDoT = 0;
   venomDoT = 0;
   cursedDoT = 0;
@@ -1033,10 +1043,16 @@ export class Enemy extends Entity {
     if (this.brokenArmorT > 0) this.brokenArmorT -= dt;
     if (this.betsysCurseT > 0) this.betsysCurseT -= dt;
     if (this.daybreakT > 0) { this.daybreakT -= dt; this.daybreakDoT += 100 * dt; } // 单层 100HP/s
+    if (this.bleedT > 0) { this.bleedT -= dt; this.bleedDoT += 12 * dt; }
+    if (this.hemorrhageT > 0) { this.hemorrhageT -= dt; this.hemorrhageDoT += 100 * dt; }
+    if (this.javelinT > 0) { this.javelinT -= dt; this.javelinDoT += 3 * dt; }
+    if (this.spikeT > 0) { this.spikeT -= dt; this.spikeDoT += 3 * dt; }
+    if (this.butcherT > 0) { this.butcherT -= dt; this.butcherDoT += 4 * dt; }
     for (const [tKey, dKey] of [['poisonT', 'poisonDoT'], ['venomT', 'venomDoT'], ['cursedT', 'cursedDoT'],
       ['frostburnT', 'frostburnDoT'], ['frostburn2T', 'frostburn2DoT'],
       ['onFire3T', 'onFire3DoT'], ['shadowFlameT', 'shadowFlameDoT'],
-      ['daybreakT', 'daybreakDoT']] as const) {
+      ['daybreakT', 'daybreakDoT'], ['bleedT', 'bleedDoT'], ['hemorrhageT', 'hemorrhageDoT'],
+      ['javelinT', 'javelinDoT'], ['spikeT', 'spikeDoT'], ['butcherT', 'butcherDoT']] as const) {
       const acc = this[dKey];
       if (acc >= 1) {
         const n = Math.floor(acc);

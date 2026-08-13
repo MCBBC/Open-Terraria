@@ -8,11 +8,12 @@ export const { WebSocket } = require('ws');
 export const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 
 export const PROTO_MAGIC = 'SW1';
-export const PROTO_VER = 6;
+export const PROTO_VER = 7;  // v7：msg13 尾部 team + msg44 StrikePlayer + RoomPolicy.pvpAllowed
 export const Msg = {
   Hello: 1, Kick: 2, PlayerSlot: 3, SyncPlayer: 4, SyncPlayerItem: 5, RequestWorldData: 6,
   WorldData: 7, SpawnTileData: 8, StatusText: 9, TileSection: 10, PlayerSpawn: 12, PlayerState: 13,
-  PlayerLifeMana: 16, SyncNPC: 23, SyncProjectile: 27, ProjDespawn: 28, Ping: 154, SscSync: 201,
+  PlayerLifeMana: 16, SyncNPC: 23, SyncProjectile: 27, ProjDespawn: 28, StrikePlayer: 44,
+  Ping: 154, RoomPolicy: 200, SscSync: 201,
 };
 
 export class Writer {

@@ -247,10 +247,12 @@ export class SpriteAtlas {
 
   /** 原版杂项单图（呼吸气泡等） */
   /** 杂项单图(旗帜头像/链条/Boss 部件/Glow 叠画等,全为每帧活画)——
-   *  走 ensureVImage 触发懒加载:未就绪返回 null,消费方下帧自愈
+   *  miss 走 ensureVImage 触发懒加载:未就绪返回 null,消费方下帧自愈
    *  (2026-08-13 前 vimages.get 直取——脱离 VANILLA_MISC 预载即永不出现) */
   vmisc(path: string): DrawRect | null {
-    if (typeof Image === 'undefined') return null; // node 测试环境:无 Image,静默 null
+    const hit = this.vimages.get(path); // 命中直接返回(node 测试环境的已注入项同样有效)
+    if (hit) return { img: hit, sx: 0, sy: 0, sw: hit.width, sh: hit.height };
+    if (typeof Image === 'undefined') return null; // node 测试环境:无 Image,不触发加载
     const img = this.ensureVImage(path);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };

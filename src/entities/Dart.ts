@@ -165,15 +165,18 @@ export class TrapShot extends Entity {
    *  弹体转 hostile 伤玩家、不再入敌怪判定（原版 Damage NPC 需 friendly 门禁） */
   reflected = false;
 
-  /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕 */
+  /** 全透明贴图缓存(xnb 解包异常的 187/654 等):检出一次后走色块回退,避免隐形弹幕。
+   *  ★未加载(懒加载 pending)不得判 blank——否则 null 会被永久缓存,贴图晚到也不恢复
+   *  (VANILLA_MISC 瘦身转懒后这是必踩坑,2026-08-13) */
   private static blankTex = new Set<string>();
   private static okTex = new Set<string>();
   private static isBlank(r: Renderer, path: string): boolean {
     if (TrapShot.blankTex.has(path)) return true;
     if (TrapShot.okTex.has(path)) return false;
     const img = r.atlas?.vimages.get(path);
+    if (!img) return false; // 贴图未就绪:不判也不缓存,由 draw 的 ensureVImage 触发加载
     let blank = true;
-    if (img) {
+    {
       const c = document.createElement('canvas');
       c.width = img.width; c.height = img.height;
       const cx = c.getContext('2d')!;
@@ -207,9 +210,10 @@ export class TrapShot extends Entity {
     if (!ctx) return;
     const st = TRAP_SHOT_STYLE[this.kind];
     if (st.invisible) return; // 733 alpha=255：隐形纯发射器（SetDefaults :7440）
-    // 烟花族按 form 选色变体贴图；单贴图 kind 走 proj
+    // 烟花族按 form 选色变体贴图；单贴图 kind 走 proj。
+    // ★ensureVImage 触发懒加载(VANILLA_MISC 瘦身后弹幕表不再预载,直取会永久色块)
     const tex = st.projs?.[this.form] ?? st.proj;
-    const img = tex && r.atlas ? r.atlas.vimages.get(tex) : null;
+    const img = tex && r.atlas ? r.atlas.ensureVImage(tex) : null;
     if (img && st.fw && st.fh && !TrapShot.isBlank(r, tex!)) {
       // 原版弹幕贴图(整帧):飞行类贴图默认朝上(镖尖/火苗向上),对齐速度方向需 +90°;
       // 尖刺球/巨石不随速度旋转,按位移滚转

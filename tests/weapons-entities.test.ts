@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj } from '../src/entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj } from '../src/entities/WeaponProj';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -143,6 +143,15 @@ describe('细剑族（aiStyle 161）', () => {
     expect(s.dead).toBe(true); // 16t Kill
   });
 
+  it('戳击沿途 CutTiles（Projectile.cs:14151-14155：Center 起 10px 线扫草/瓦罐）', () => {
+    const { hooks } = makeHooks();
+    let cutCalls = 0;
+    (hooks as unknown as { cutTile: () => void }).cutTile = () => { cutCalls++; };
+    const s = new SpearProj(1, 0, 2.1, 13, 5, 4, 938);
+    run(s, hooks, 16);
+    expect(cutCalls).toBe(15);   // 第 1-15t 每帧一次（16t 先判死 return，当帧不再扫）
+  });
+
   it('左刺镜像锚定（AI_161 :44997 spriteDirection=-1；绘制角 Main.cs:32444 −π/4×sd）', () => {
     const { hooks, player } = makeHooks();
     const s = new SpearProj(-1, 0, 2.1, 13, 5, 4, 938);
@@ -183,5 +192,32 @@ describe('悠悠球（aiStyle 99）', () => {
     ch = false; // 松手
     run(y, hooks, 300);
     expect(y.dead).toBe(true); // 回收
+  });
+});
+
+
+describe('链球特例子子弹(AI_015 尾段)', () => {
+  it('247 Flairon:飞行中周期自机弹 248(20t 节奏,600px 内最近敌)', () => {
+    const { hooks, player, enemies } = makeHooks();
+    addEnemy(enemies, 60, player.cx + 100, player.cy);
+    const spawned: Array<{ id: number; d: number }> = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 65, 4, 247,
+      () => true, () => ({ x: player.cx + 300, y: player.cy })); // channel=按住(旋转态)
+    f.spawnProj = (_x, _y, _vx, _vy, projId, dmg) => spawned.push({ id: projId, d: dmg });
+    run(f, hooks, 45);
+    expect(spawned.length).toBeGreaterThanOrEqual(2); // 20t+40t 两轮
+    expect(spawned[0].id).toBe(248);
+    expect(spawned[0].d).toBe(Math.round(65 / 1.5));
+  });
+
+  it('1058:旋转态周期轨道刺 405(朝玩家反向)', () => {
+    const { hooks, player } = makeHooks();
+    const spawned: number[] = [];
+    const f = new FlailProj(player.cx, player.cy - 4, 66, 4, 1058,
+      () => true, () => ({ x: player.cx + 300, y: player.cy }));
+    f.spawnProj = (_x, _y, _vx, _vy, projId) => spawned.push(projId);
+    run(f, hooks, 20);
+    expect(spawned.length).toBeGreaterThanOrEqual(3); // 3-6t 节奏
+    for (const id of spawned) expect(id).toBe(405);
   });
 });

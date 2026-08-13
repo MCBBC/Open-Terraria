@@ -53,11 +53,12 @@ export class SquidCloud extends Entity {
     }
   }
 
-  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement> } | null }): void {
+  draw(r: { canvas: HTMLCanvasElement; atlas?: { vimages: Map<string, HTMLImageElement>; ensureVImage?: (f: string) => HTMLImageElement | null } | null }): void {
     if (this.t <= 50 || !r.atlas) return;   // 前 50t 隐形（alpha 255）
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    const img = r.atlas.vimages.get('vanilla/Projectile_813.png');
+    // ensureVImage 触发懒加载(此前直取且无人预载该表 = 永久隐形,2026-08-13 排雷)
+    const img = r.atlas.ensureVImage ? r.atlas.ensureVImage('vanilla/Projectile_813.png') : r.atlas.vimages.get('vanilla/Projectile_813.png');
     if (!img || !img.width) return;
     // 旋转 -= π/60（:32725）；scale/alpha 在 51-120 显形段固定 1/0
     ctx.save();

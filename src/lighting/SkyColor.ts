@@ -115,9 +115,26 @@ export class FlickerClock {
   /** Disco RGB:6 相循环,每通道步进 7/帧(0-255) */
   discoR = 255; discoG = 0; discoB = 0;
   private discoStyle = 0;
+  /** Main.timeForVisualEffects（Main.cs:17110 每帧 +1，钳 216000）——微光波形/瓶中物动画时钟 */
+  timeForVisualEffects = 0;
+  /** 水母笼动画态（Main.cs:16470-16530 jellyfishCageMode[3,25]：0 静息/1 起跳/2 高亮/3 落回
+   *  ——光照只读 mode==2；转换率逐槽独立掷 Main.rand，此处 Math.random 等价） */
+  private jellyMode = new Uint8Array(3 * 25);
+  private jellyCounter = new Uint16Array(3 * 25);
+  private jellyFrame = new Uint8Array(3 * 25);
 
   /** cursorScale(Main.cs:51905):= cursorAlpha*0.3 + 0.8,资源条 flag 心/星缩放脉冲源 */
   get cursorScale(): number { return this.cursorAlpha * 0.3 + 0.8; }
+
+  /** Main.GlobalTimeWrappedHourly（Main.cs:16777 TotalGameTime 秒数 % 3600——真实运行秒） */
+  get globalTimeWrappedHourly(): number {
+    return typeof performance !== 'undefined' ? (performance.now() / 1000) % 3600 : 0;
+  }
+
+  /** 水母笼 mode 读口（TileLightScanner case 316-318：mode==2 = 高亮档） */
+  jellyfishCageMode(type: 0 | 1 | 2, slot: number): number {
+    return this.jellyMode[type * 25 + (slot % 25)];
+  }
 
   tick(): void {
     this.cursorAlpha += this.cursorDir * 0.015;
@@ -142,6 +159,60 @@ export class FlickerClock {
       case 4: this.discoR += STEP; if (this.discoR >= 255) { this.discoR = 255; this.discoStyle = 5; } break;
       case 5: this.discoB -= STEP; if (this.discoB <= 0) { this.discoB = 0; this.discoStyle = 0; } break;
     }
+
+    // timeForVisualEffects（:17110-17112）
+    if (++this.timeForVisualEffects >= 216000) this.timeForVisualEffects = 0;
+
+    // 水母笼 3×25 槽态机（Main.cs:16470-16530 逐帧推进）
+    for (let s = 0; s < 3 * 25; s++) {
+      const m = this.jellyMode[s];
+      this.jellyCounter[s]++;
+      if (m === 0 && Math.random() < 1 / 1800) this.jellyMode[s] = 1;
+      if (m === 2 && Math.random() < 1 / 60) this.jellyMode[s] = 3;
+      // 帧步进速率（:16483-16494）——只影响绘制帧；光照仅看 mode
+      let rate = 1;
+      if (m === 0) rate = 10 + Math.floor(Math.random() * 10);       // Next(10,20)
+      else if (m === 1) rate = 15 + Math.floor(Math.random() * 10);  // Next(15,25)
+      else if (m === 2) rate = 4 + Math.floor(Math.random() * 5);    // Next(4,9)
+      else rate = 15 + Math.floor(Math.random() * 10);               // Next(15,25)
+      const f = this.jellyFrame[s];
+      const gate = (m === 0 && f <= 3) || (m === 1 && f <= 7) || (m === 2 && f <= 9) || (m === 3 && f <= 10);
+      if (gate && this.jellyCounter[s] >= rate) {
+        this.jellyCounter[s] = 0;
+        this.jellyFrame[s]++;
+        if (m === 0 && this.jellyFrame[s] >= 4) this.jellyFrame[s] = 0;
+        if (m === 1 && this.jellyFrame[s] >= 7) { this.jellyFrame[s] = 7; this.jellyMode[s] = 2; }
+        if (m === 2 && this.jellyFrame[s] >= 9) this.jellyFrame[s] = 7;
+        if (m === 3 && this.jellyFrame[s] >= 10) this.jellyFrame[s] = 3;
+      }
+    }
+  }
+
+  /** Main.hslToRgb（Main.cs:47266-47296 HSL→RGB，byte 取整）——彩虹蜡烛/熔岩灯光色用 */
+  hslToRgb(h: number, s: number, l: number): [number, number, number] {
+    const hue2rgb = (p: number, q: number, t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    if (s === 0) return [l, l, l];
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const toB = (v: number) => Math.round(hue2rgb(p, q, v) * 255) / 255;
+    return [toB(h + 1 / 3), toB(h), toB(h - 1 / 3)];
+  }
+
+  /** LiquidRenderer.GetShimmerBaseColor（:803-807 + GetShimmerWave :761-764）：
+   *  wave=sin(((x+y/6)/10 − timeForVisualEffects/360)×2π)，
+   *  lerp(A=(0.647,0.510,0.933), B=(0.804,0.804,1), 0.1+wave×0.4) */
+  shimmerBaseColor(x: number, y: number): [number, number, number] {
+    const wave = Math.sin(((x + y / 6) / 10 - this.timeForVisualEffects / 360) * Math.PI * 2);
+    const t = 0.1 + wave * 0.4;
+    const L = (a: number, b: number) => a + (b - a) * t;
+    return [L(0.64705884, 41 / 51), L(26 / 51, 41 / 51), L(14 / 15, 1)];
   }
 
   /** 恶魔火把色插值(TorchID DemonTorchLight:37-45) */

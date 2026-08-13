@@ -62,8 +62,11 @@ export interface SfxLoop {
   stop(): void;
   /** 目标音量 0-1（setTargetAtTime 平滑逼近 ~0.2s，防切换爆音） */
   setVolume(v: number): void;
-  /** 节点是否仍在发声（stop 后 / 缓冲加载失败 → false） */
+  /** 节点是否仍在发声（含缓冲解码完成后起振；pending 期为 false） */
   readonly playing: boolean;
+  /** 终态（stop() 或缓冲加载失败）——调用方可丢弃重建；
+   *  非 dead 且 !playing = 解码在途，勿重建（否则每帧泄漏 GainNode） */
+  readonly dead: boolean;
 }
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
@@ -308,6 +311,7 @@ export class Sfx {
       base,
       started: false,
       stopped: false,
+      failed: false,
     };
     const apply = () => {
       const target = Math.min(1, st.vol * st.base * this.master);
@@ -326,9 +330,11 @@ export class Sfx {
         if (st.started && !st.stopped) apply();
       },
       get playing() { return st.started && !st.stopped; },
+      get dead() { return st.stopped || st.failed; },
     };
     void this.ensureBufferAsync(file, ctx).then((buf) => {
-      if (st.stopped || !buf) return;
+      if (st.stopped) return;
+      if (!buf) { st.failed = true; gain.disconnect(); return; }
       const src = ctx.createBufferSource();
       src.buffer = buf;
       src.loop = true;

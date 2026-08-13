@@ -32,6 +32,7 @@ import { UIScale } from './vui/draw/UIScale';
 import { Lang } from './i18n/Lang';
 import { UISfx } from './vui/UISfx';
 import type { Appearance } from './player/Appearance';
+import { ITEM_DEFS } from './data/items';
 
 const QUICK_SAVE_KEY = 'sandboxworld.quicksave';
 /** 脚本兼容垫片：旧 puppeteer 脚本点 select+button 建世界（M7 清理） */
@@ -97,6 +98,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
     (window as unknown as { __swUI: UI }).__swUI = ui; // 探针/控制台直调(成就弹窗预览等)
+    (window as unknown as { __swITEMS?: typeof ITEM_DEFS }).__swITEMS = ITEM_DEFS; // 信息饰品探针:vi_ key → 内部 id
     // 移动端：虚拟控件层（触屏设备启用；桌面零渲染零影响）——在世界触摸的
     // 用户手势内尝试全屏+横屏锁定（ⓞ 进世界点击即手势；失败静默，⛶ 按钮兜底）
     if (isTouchDevice()) {
@@ -665,6 +667,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       onQuit: () => ui.toast(Lang.text('Mods.SandboxWorld.Toast.QuitUnsupported')),
       onCredits: () => ui.toast(Lang.text('Mods.SandboxWorld.CreditsLine')),
       onMultiplayer: () => showMultiplayerSelect(),
+      // GOING_OLDSCHOOL B2：日月拖拽 → 菜单时钟跟手（Main.cs:62434-62446 反算 t01）
+      onSunMoonGrab: (info) => menuBg?.setClockT(info.time01),
     });
     installLegacyShim();
   }

@@ -639,10 +639,11 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
   runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
-  // 地牢 pass 预计算会重掷 dungeonLocation(锚点 ±300 拒绝采样后迁移)——必须在此后
-  // 回写最终位置,否则 world.dungeonX 停留在 Reset 期的旧值(与实际地牢偏差可达数百格)。
-  // 优先取入口门厅可站立点(原版 dungeonX/Y 语义 cs L72510-72527:入口结构上可站处,
-  // 守卫老人出生/游走锚)——塔心锚点会把老人漏进塔内
+  // 地牢 pass 预计算(legacy 入口)不迁移 dungeonLocation——但入口塔列仍可能与
+  // Reset 期锚点偏差数百格,必须在此回写最终位置。优先取入口门厅可站立点:
+  // 生成期 Main.dungeonX/Y 的唯一写入端 = SetOldManSpawnAndSpawnOldManIfDefault
+  // Dungeon(DungeonUtils.cs:1665,守卫老人出生/游走锚 = 外前厅 0.5 框底部;
+  // WorldGen.cs:72510 那处是运行时兜底 setter,非生成期语义)——塔心锚点会把老人漏进塔内
   world.dungeonX = gs.dungeonEntX || gs.dungeonLocation;
   world.dungeonY = gs.dungeonEntY || gs.dungeonY || 0;
   // 33 MountainCaveOpenings + 34 Beaches（原紧跟 SurfaceCaves——注册序修正移到 Dungeon 后）

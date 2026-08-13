@@ -139,6 +139,9 @@ export class Player extends Entity {
   private lavaAccum = 0;
   animTime = 0;          // 走路动画计时
   useTime = 0;           // 通用动作冷却
+  /** 手持物品 useTurn（Item.cs SetDefaults；Game 每帧注入）——itemAnimation 窗内
+   *  允许移动改朝向的唯一豁免（:19546-19556） */
+  itemUseTurn = false;
   dead = false;
   respawnTimer = 0;
   /** 死亡画面淡入（Player.cs:16873：dead 时 +2/tick 钳 255；GetDeathAlpha :53284 消费） */
@@ -1255,6 +1258,9 @@ export class Player extends Entity {
       // 翼飞行再 +0.2 一份（:19690）。无输入减速（:19771）:地面 runSlowdown=0.2
       // 空中 ×0.5,加法钳 0（旧乘法摩擦曲线高速段衰减过快）。慢速/燃烧门（:19675/
       // :19705 !slow&&!burned）。Chilled（:19485）压 accRun=maxRun 取消爬坡。
+      // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
+      // （动画窗代理 = itemAnimTicks>0 || useTime>0——非挥砍武器以 useTime 计窗）
+      const animBusy = this.itemAnimTicks > 0 || this.useTime > 0;
       const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
       const chilled = this.buffs.has(BuffType.Chilled);
       const mnt = this.ridingMount ? this.mount : null;   // 坐骑参数接管（Player.cs:26310-26334）
@@ -1281,7 +1287,7 @@ export class Player extends Entity {
       const runAcc = mnt ? mnt.acceleration
         : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
       const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
-      if (ix !== 0) {
+      if (ix !== 0 && (!animBusy || this.itemUseTurn)) {
         this.facing = ix;
         const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
         const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
@@ -1305,7 +1311,7 @@ export class Player extends Entity {
         else this.vx = 0;
       }
     } else if (ix !== 0) {
-      this.facing = ix; // 滑行中朝向仍随输入（ChangeDir 独立于 Run）
+      if (!animBusy || this.itemUseTurn) this.facing = ix; // 滑行中朝向仍随输入（同 :19546 门）
     }
 
     // 绳索攀爬(原版:身体中心格为绳(213/353/950-9)时无重力,上/下键攀爬,左右离绳)
@@ -2106,7 +2112,7 @@ export class Player extends Entity {
     this.vy = pvy;
     // :22394-22434 轨道钩上车段（type 403）——同上空集
     // :22436-22445 ChangeDir（itemAnimation==0 时按牵引方向转身）
-    if (this.itemAnimTicks <= 0) {                         // itemAnimation == 0
+    if (this.itemAnimTicks <= 0 && this.useTime <= 0) {    // itemAnimation == 0（窗代理含 useTime）
       if (this.vx === 0 && dir !== 0) this.facing = dir;   // :22438-22441 preferredDirection
       if (this.vx > 0) this.facing = 1;                    // :22442-22445
       if (this.vx < 0) this.facing = -1;

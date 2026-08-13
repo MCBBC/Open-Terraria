@@ -16,8 +16,9 @@ page.on('pageerror', (e) => pageErrors.push(e.message.slice(0, 200)));
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded', timeout: 240000 });
 await new Promise((r) => setTimeout(r, 3000));
 
-// ① 开小世界（1200×400，等待 world 挂载）
-await page.evaluate(async () => { await (window as any).__swFlow.newWorld('weather-visual-probe', 840, 300); });
+// ① 开小世界（840×300，fire-and-forget + 轮询——生成在页面主线程跑，
+//    await 会把 evaluate 挂到生成结束，高负载下超 protocolTimeout）
+await page.evaluate(() => { void (window as any).__swFlow.newWorld('weather-visual-probe', 840, 300); });
 let ready = false;
 for (let i = 0; i < 240 && !ready; i++) {
   await new Promise((r) => setTimeout(r, 1000));

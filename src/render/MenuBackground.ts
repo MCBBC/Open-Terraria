@@ -33,6 +33,12 @@ export class MenuBackground {
   private sky = new SkyRenderer();
   /** 菜单时钟：一圈 2.5 分钟（原版 30min 太慢，日月升降肉眼不可见） */
   private clock = new Clock(24 * 60 * 1000); // 与世界同周期 24min（1:1）
+
+  /** 标题屏日月拖拽写时间（GOING_OLDSCHOOL B2，Main.cs:62434-62446 反算值）：
+   *  供 mainFlow.flow.onSunMoonGrab → setClockT(t01) 接线，日月跟手 */
+  setClockT(time01: number): void {
+    this.clock.timeOfDay = ((time01 % 1) + 1) % 1;
+  }
   private camX = 0;
   private imgs = new Map<number, HTMLImageElement>();
   private variantIdx = Math.floor(Math.random() * FOREST_VARIANTS.length);

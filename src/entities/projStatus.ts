@@ -31,6 +31,11 @@ const SUPPORTED: Record<number, string> = {
   36: 'brokenArmorT',  // BrokenArmor:受击无视 20 防(:81919)
   203: 'betsysCurseT', // BetsysCurse:受击无视 40 防(:81922)
   189: 'daybreakT',    // Daybreak:单层 100 HP/s(层数模型登记 GAP)
+  30: 'bleedT',        // Bleeding:-24 = 12 HP/s(:92598)
+  375: 'hemorrhageT',  // Hemorrhage:-200 = 100 HP/s(:92610)
+  169: 'javelinT',     // BoneJavelin:单层 3 HP/s(层数模型 GAP)
+  337: 'spikeT',       // TentacleSpike:单层 3 HP/s(层数模型 GAP)
+  344: 'butcherT',     // BloodButcherer:单层 4 HP/s(层数模型 GAP)
 };
 
 type StatusEnemy = { [field: string]: number | undefined };

@@ -58,10 +58,11 @@ describe('Player 装备属性聚合', () => {
 
   it('移速/近战速度/全系伤害/暴击聚合', () => {
     const p = mkPlayer();
-    p.inv.armor[3] = { id: _iid(54), stack: 1 }; // 赫尔墨斯靴 runSpeed 6 → ×2
-    expect(p.equipStats.moveMult).toBeCloseTo(2, 5);
+    p.inv.armor[3] = { id: _iid(54), stack: 1 }; // 赫尔墨斯靴 accRunSpeed=6(冲刺上限;不再折算进移速,2026-08-13)
+    expect(p.equipStats.moveMult).toBeCloseTo(1, 5);
+    expect(p.equipStats.accRunSpeed).toBe(6);
     p.inv.armor[4] = { id: _iid(49), stack: 1, prefix: 73 }; // Brisk +1% 移速
-    expect(p.equipStats.moveMult).toBeCloseTo(2.01, 5);
+    expect(p.equipStats.moveMult).toBeCloseTo(1.01, 5);  // runSpeed/3-1 折算已拆(2026-08-13)
     p.inv.armor[4] = { id: _iid(3992), stack: 1 }; // 狂战士手套 meleeSpeed +12%
     expect(p.equipStats.meleeSpeed).toBeCloseTo(0.12, 5);
     // attackSpeedMult = CapAttackSpeeds 倒数档（Player.cs:28555-28574）：1/1.12
@@ -107,14 +108,14 @@ describe('Player 装备属性聚合', () => {
     expect(p.equipStats.armorPen).toBe(5);
   });
 
-  it('恐慌项链：damage 触发 panicTime=300 → 移速聚合 +0.5', () => {
+  it('恐慌项链：damage 触发 panicTime=300 → 移速聚合 +1.0', () => {
     const p = mkPlayer();
     p.hp = 100;
     p.inv.armor[3] = { id: _iid(1290), stack: 1 }; // 恐慌项链
     expect(p.equipStats.moveMult).toBe(1);
     p.damage(10, 0, 0);
     expect(p.panicTime).toBe(300);
-    expect(p.equipStats.moveMult).toBeCloseTo(1.5, 5);
+    expect(p.equipStats.moveMult).toBeCloseTo(2, 5);   // +1.0(:25034 满档,旧 +0.5 是 1.4.0 值)
   });
 
   it('钴护盾：damage 不再施加击退', () => {

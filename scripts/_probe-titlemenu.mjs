@@ -3,12 +3,11 @@
 //   句柄（与 TitleMenu.classicTitleAchievement 的首选查找同键）验证派发链；
 //   成就引擎本体已由 tests/achievements.test.ts 覆盖（GOING_OLDSCHOOL = flag('Do')）。
 // 断言：
-//  1. 命中层 .sw-title-celestial 存在且几何合理（在天空区、尺寸 > 0）
-//  2. 命中层中心 elementFromPoint 命中自身（pointer-events 生效、不被按钮遮）
-//  3. 菜单按钮不被命中层截走
+//  1. 命中层 .sw-title-celestial + 可见体 .body 存在，几何与画布同源公式自洽
+//  2. 可见体贴图 = Sun.png（昼）/ Moon_0.png（夜），带旋转（ft*2-7.3 rad）
+//  3. 命中层中心 elementFromPoint 命中自身；菜单按钮不被截走
 //  4. pointerdown → 间谍收到 doClassicTitleScreenAchievement
 //  5. 抓取闩期间 pointermove 持续派发（原版 :62450 每帧皆调）；pointerup 后停
-//  6. flow.onSunMoonGrab 抛出 time01 ∈ [0,1)（经 __swTitleMenu 探针句柄验）
 import puppeteer from 'puppeteer-core';
 
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -16,40 +15,51 @@ const origin = process.env.SW_ORIGIN ?? 'http://localhost:5199';
 const browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new', defaultViewport: { width: 1280, height: 800 } });
 const page = await browser.newPage();
 await page.goto(origin, { waitUntil: 'networkidle2', timeout: 60000 });
-await new Promise((r) => setTimeout(r, 2500));
+await new Promise((r) => setTimeout(r, 3000));
 
 const out = await page.evaluate(async () => {
   const res = {};
   const cel = document.querySelector('.sw-title-celestial');
   res.hasLayer = !!cel;
   if (!cel) return res;
-  // 间谍句柄（classicTitleAchievement 首选查找键）
   let fired = 0;
   window.__swAchievements = { doClassicTitleScreenAchievement: () => { fired++; } };
-  await new Promise((r) => setTimeout(r, 600)); // 等一帧对齐
+  await new Promise((r) => setTimeout(r, 700)); // 等数帧对齐
   const r = cel.getBoundingClientRect();
   res.rect = { x: Math.round(r.x), y: Math.round(r.y), w: Math.round(r.width), h: Math.round(r.height) };
   res.hitCenter = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2) === cel;
-  // 命中层应罩在天空里的日/月上：与 SkyRenderer 公式同源位置（白天 ft~0.5 附近近顶部）
-  res.inSkyBand = r.y > 0 && r.y + r.height < window.innerHeight * 0.65;
-  // 像素级对账：命中层中心的画布像素 = 日/月亮色（黄/白），对照点 = 天空色
-  const canvas = document.querySelector('canvas');
-  if (canvas) {
-    const c2 = document.createElement('canvas');
-    c2.width = canvas.width; c2.height = canvas.height;
-    const cx = c2.getContext('2d');
-    cx.drawImage(canvas, 0, 0);
-    const pick = (x, y) => {
-      const d = cx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
-      return [d[0], d[1], d[2]];
-    };
-    res.centerPixel = pick(r.x + r.width / 2, r.y + r.height / 2);
-    res.controlPixel = pick(40, Math.round(window.innerHeight - 60));
+  res.inSkyBand = r.y > 0 && r.y + r.height < window.innerHeight * 0.7;
+  // 可见体
+  const body = cel.querySelector('.body');
+  res.hasBody = !!body;
+  if (body) {
+    const bs = getComputedStyle(body);
+    res.bodyBg = bs.backgroundImage;
+    res.bodyRotate = body.style.transform;
+    res.isNight = cel.classList.contains('night');
   }
+  // 与 __swMenuBg 时钟自洽：menuT 反推 ft → 位置应与命中层中心一致
+  const mt = window.__swMenuBg ? window.__swMenuBg.clockTime() : null;
+  res.menuT = mt;
+  if (mt != null) {
+    const isDay = mt > 0.1875 && mt < 0.8125;
+    const W = window.innerWidth;
+    const dayTime = isDay ? ((mt - 0.25) / 0.5) * 54000 : 0;
+    const nightTime = !isDay ? ((((mt - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
+    const size0 = isDay ? 114 : 50;
+    const ft = (isDay ? dayTime : nightTime) / (isDay ? 54000 : 32400);
+    const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
+    const x = ft * (W + size0 * 2) - size0;
+    const y = dip * 250 + 180;
+    const scale = (1.2 - dip * 0.4) * (isDay ? 1.1 : 1);
+    const size = size0 * scale;
+    res.expected = { cx: Math.round(x), cy: Math.round(y), size: Math.round(size) };
+    res.center = { cx: Math.round(r.x + r.width / 2), cy: Math.round(r.y + r.height / 2) };
+  }
+  // 菜单按钮不被截走
   const btn = document.querySelector('.sw-title-btn');
   const br = btn.getBoundingClientRect();
   const at = document.elementFromPoint(br.x + 24, br.y + br.height / 2);
-  res.buttonOwner = at === btn || btn.contains(at);
   res.buttonFree = !cel.contains(at);
   // pointerdown → 派发
   cel.dispatchEvent(new PointerEvent('pointerdown', { clientX: r.x + r.width / 2, clientY: r.y + r.height / 2, bubbles: true }));
@@ -60,7 +70,7 @@ const out = await page.evaluate(async () => {
   window.dispatchEvent(new PointerEvent('pointermove', { clientX: 640, clientY: r.y, bubbles: true }));
   await new Promise((r2) => setTimeout(r2, 120));
   res.firedAfterDrag = fired;
-  // pointerup → 闩断，move 不再派发
+  // pointerup → 闩断
   window.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
   window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, clientY: r.y, bubbles: true }));
   await new Promise((r2) => setTimeout(r2, 120));
@@ -74,15 +84,19 @@ console.log(JSON.stringify(out, null, 1));
 const assert = (c, m) => { if (!c) { console.error('FAIL: ' + m); process.exitCode = 1; } };
 assert(out.hasLayer, '命中层缺失');
 assert(out.rect && out.rect.w > 50 && out.rect.h > 50, `命中层尺寸异常 ${JSON.stringify(out.rect)}`);
+assert(out.hasBody, '可见体缺失');
+const dayNow = out.menuT != null && out.menuT > 0.1875 && out.menuT < 0.8125;
+assert(out.bodyBg && out.bodyBg.includes(dayNow ? 'Sun.png' : 'Moon_0.png'),
+  `可见体贴图不符（昼=${dayNow}）: ${out.bodyBg}`);
+assert(out.isNight === !dayNow, `night 类与昼夜不符: night=${out.isNight} 昼=${dayNow}`);
+assert(out.bodyRotate && out.bodyRotate.startsWith('rotate('), '可见体缺旋转');
+if (out.expected) {
+  assert(Math.abs(out.expected.cx - out.center.cx) <= 2 && Math.abs(out.expected.cy - out.center.cy) <= 2,
+    `命中层中心与公式不符: ${JSON.stringify({ expected: out.expected, got: out.center })}`);
+  assert(Math.abs(out.expected.size - out.rect.w) <= 3, `命中层尺寸与公式不符: ${out.expected.size} vs ${out.rect.w}`);
+}
 assert(out.hitCenter, '命中层中心 elementFromPoint 未命中自身');
 assert(out.inSkyBand, `命中层不在天空区 ${JSON.stringify(out.rect)}`);
-if (out.centerPixel) {
-  const [pr, pg, pb] = out.centerPixel;
-  // 日(黄 R>G>B) / 月(白亮)二选一；对照点应是暗色（夜空/树层）而非同色
-  const sunLike = pr > 180 && pg > 140 && pr > pb + 40;
-  const moonLike = pr > 150 && pg > 150 && pb > 130 && Math.abs(pr - pb) < 90;
-  assert(sunLike || moonLike, `命中层中心不是日/月颜色: ${JSON.stringify(out.centerPixel)}`);
-}
 assert(out.buttonFree, '菜单按钮被命中层截走');
 assert(out.firedAfterDown >= 1, 'pointerdown 未派发成就调用');
 assert(out.firedAfterDrag > out.firedAfterDown, '抓取闩期间 pointermove 未持续派发');

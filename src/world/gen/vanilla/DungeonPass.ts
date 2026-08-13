@@ -68,8 +68,10 @@ class DungeonCtx {
   // SetupDungeonDataVariables 掷出的书架/灯笼样式（pass 头照原版序消费，陈设期取用）
   shelfStyles: number[] = [0, 0, 0];
   lanternStyles: number[] = [0, 0, 0];
-  // 原版 L18045-18048:入口塔尺寸强度(竖井出口探测偏移用)
+  // 原版 L18045-18048:入口塔尺寸强度(竖井出口探测偏移**与入口塔尺寸同源共用**)
   dxS1 = 0; dyS1 = 0; dxS2 = 0; dyS2 = 0;
+  // SetupDungeonDataVariables(:274):1/4 世界楼梯漂移用 skew 钳制分支
+  useSkewed = false;
   // 门候选(cs L18158-18179 房左右墙 + L20500 水平走廊端点):pos 0=取最窄,-1=取最右,+1=取最左
   dDoors: Array<{ x: number; y: number; pos: number }> = [];
   // 房口平台候选(cs L18141-18156):房顶/房底首个开口列
@@ -105,7 +107,8 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   const lanternStyles = [rng.int(0, 6), 0, 0];
   do { lanternStyles[1] = rng.int(0, 6); } while (lanternStyles[1] === lanternStyles[0]);
   do { lanternStyles[2] = rng.int(0, 6); } while (lanternStyles[2] === lanternStyles[0] || lanternStyles[2] === lanternStyles[1]);
-  rng.nextInt(4);
+  // SetupDungeonDataVariables(:274):Next(4)==0 → 1/4 世界走 skew 钳制(楼梯横向漂移分支)
+  const useSkewed = rng.nextInt(4) === 0;
   // ---- 入口位置预计算(DungeonCrawler.cs:275-318 + :818-849):仅 Dome/Tower 入口
   // 设 PrecalculateEntrancePosition=true;Legacy(普通世界默认)为 false →
   // SetupDungeonDataVariables 在 useSkewed 掷后**直接 return,整段 ±300 拒绝采样
@@ -143,6 +146,7 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   const dc = new DungeonCtx(brick, wallId, x0, y0);
   dc.shelfStyles = shelfStyles;
   dc.lanternStyles = lanternStyles;
+  dc.useSkewed = useSkewed;
   // 原版 L18045-18048:入口塔尺寸强度(DungeonEnt 与竖井出口探测共用)
   dc.dxS1 = rng.int(25, 29); dc.dyS1 = rng.int(20, 24);
   dc.dxS2 = rng.int(35, 49); dc.dyS2 = rng.int(10, 14);
@@ -183,10 +187,12 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
   gs.generatingDungeonPositionX = dc.entranceX;
   dx = best.cx; dy = best.cy;
   {
-    // legacy 盲爬(1405 结构 + 1456 的 100 上限):外壳探测到开放天空即停
+    // legacy 盲爬(1456 DungeonCrawler.cs:415-449):num3=100 先减后断 → 最多 99 段;
+    // num8(roomDelay)到 0 后每轮 1/5 概率 halls(forceX)+room 分支(位置存恢复)
     let reached = false;
     let delay = 5, guard = 0;
-    while (!reached && guard++ < 100) {
+    while (!reached) {
+      if (++guard > 99) break;
       if (delay > 0) delay--;
       if (delay === 0 && rng.next() < 0.2 && dy > gs.worldSurface + 100) {
         delay = 10;
@@ -199,34 +205,16 @@ export function runDungeonPass(st: TileStore, rng: RNG, gs: GenState, chests: Ar
       dx = res[0]; dy = res[1];
       reached = res[2];
     }
-    // 兜底:楼梯没到地表则从当前位置直挖竖井到地表(垂直,保证衔接)
-    if (dy > gs.worldSurface - 5) {
-      let sx2 = dx, sy2 = dy;
-      let guard2 = 0;
-      while (sy2 > gs.worldSurface - 5 && guard2++ < 800) {
-        for (let ax = -3; ax <= 3; ax++) {
-          for (let ay = -3; ay <= 3; ay++) {
-            if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
-            const i = st.idx(sx2 + ax, sy2 + ay);
-            st.flags[i] = 0; st.wall[i] = dc.wall;
-          }
-        }
-        for (let ax = -4; ax <= 4; ax++) {
-          for (let ay = -4; ay <= 4; ay++) {
-            if (!st.inBounds(sx2 + ax, sy2 + ay)) continue;
-            const i = st.idx(sx2 + ax, sy2 + ay);
-            if (!dc.isDungeonWall(st, sx2 + ax, sy2 + ay)) { st.type[i] = dc.brick; st.flags[i] = 1; }
-          }
-        }
-        sy2--;
-      }
-      dx = sx2; dy = sy2;
-    }
-    // 找楼梯出口列的真实地表,塔吸附其上
-    let gY = 0;
-    while (gY < st.h - 2 && !st.flags[st.idx(dx, gY)]) gY++;
-    dungeonEnt(st, rng, gs, dc, dx, gY);
-    gs.dungeonY = gY;          // 入口地表 Y（刷怪门槛 CheckToSpawnDungeonEnemies）
+    // ★塔位 = hall 出口位置(DungeonCrawler.cs:450 GenerateEntrance(x,y) 直取 hall
+    // 末尾写的 generatingDungeonPosition)。塔底(num6 ≈ j + dy1*0.1 + 8..15)天然
+    // 压住最后一段挖空框(val ± num2*0.5,竖向重叠 ≥3 行)→ 塔内厅与竖井连通是
+    // 构造保证,不依赖地形。曾在此做"首实心列扫描吸附地表 + 扫不到则 7×7 直挖
+    // 竖井"的自制兜底:山丘地形下塔吸到山顶而楼梯口还在山下,塔体下延(b1→
+    // worldSurface 整段刷砖)把塔底与竖井口之间的天然岩层全部灌死 → 塔内厅到
+    // 地牢被 50+ 行实心地牢砖封死(2026-08-13 堵塔根因;1456 无任何兜底,埋塔
+    // 也照搬原样)。原版可见入口由 hall 的 TileRunner(probeX 偏移列)自行挖开
+    dungeonEnt(st, rng, gs, dc, dx, dy);
+    gs.dungeonY = dy;          // 回退锚;world.dungeonY 优先取老人位 dungeonEntY(WorldGen.ts 装配)
   }
   if (dc.entStand) {
     gs.dungeonEntX = dc.entStand[0];
@@ -410,16 +398,24 @@ function dungeonStairs(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, ix
     if (rng.next() < 2 / 3) vx *= 1 + rng.int(0, 199) * 0.01;
     else if (rng.next() < 1 / 3) vx *= rng.int(50, 75) * 0.01;
     else if (rng.next() < 1 / 6) vy = -2;
-    if (ix < st.w / 2 && vx < 0 && vx > -0.5) vx = -0.5;
-    if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
-    // dungeonX 回拉:漂移超 ±60 强制折返(原版中线回拉的加强,入口落在地牢标记附近)
-    const loc = gs.dungeonLocation;
-    if (ix > loc + 60) vx = -Math.abs(vx || 0.5);
-    if (ix < loc - 60) vx = Math.abs(vx || 0.5);
+    // 1456 LegacyEntranceDungeonHall.cs:160-186 中线钳制(1405 同处为冗余反编译
+    // 条件,以 1456 最终态为准):非 skew——左半 vx<-0.5 钳 -0.5、右半 vx>0.5 翻
+    // -0.5;skew——左半 vx<-0.5 反向拉 +0.5、右半同非 skew。曾在此追加自制
+    // "dungeonLocation ±60 强制折返"(1456 无此逻辑,已删——回拉把爬升路线拽离
+    // 自然出口,加剧塔位/竖井口错位)
+    if (dc.useSkewed) {
+      if (ix < st.w / 2 && vx < -0.5) vx = 0.5;
+      if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
+    } else {
+      if (ix < st.w / 2 && vx < -0.5) vx = -0.5;
+      if (ix > st.w / 2 && vx > 0.5) vx = -0.5;
+    }
   }
   let px = ix + 0.0, py = iy + 0.0;
   let reached = false;
   for (let k = 0; k < steps && !reached; k++) {
+    // 原版每步先查 InWorld(余量 num6+5=35,:237-240)再动工
+    if (px < 35 || px > st.w - 36 || py < 35 || py > st.h - 36) break;
     // ---- 出口探测(cs L19900-19910,仅 legacy):探测点偏移 X+(dxS1*0.6+dxS2) 朝中心 ----
     if (!precalc) {
       const toCenter = px > st.w / 2 ? -1 : 1;
@@ -489,7 +485,10 @@ function dungeonEnt(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, i: nu
       st.liquid[st.idx(x, y)] = 0;
     }
   }
-  const dx1 = rng.int(25, 29) + 0.0, dy1 = rng.int(20, 24) + 0.0;
+  // ★强度复用 dc.dxS1/dyS1/dxS2/dyS2(LegacyDungeonEntrance.cs:104-107 读 data.
+  // dungeonEntranceStrengthX/Y——与爬升 hall 探测偏移同一组值,MakeDungeon 只掷一次;
+  // 曾在此重新掷骰,既错开原版共享语义又多耗流)
+  const dx1 = dc.dxS1 + 0.0, dy1 = dc.dyS1 + 0.0;
   let cx = i + 0.0, cy = j - dy1 / 2; // 塔中心(vanilla vector2)
   dc.minYY = Math.floor(cy);
   const dir = i > st.w / 2 ? -1 : 1; // num2:背向地图中心
@@ -536,9 +535,11 @@ function dungeonEnt(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, i: nu
     for (let y = t1 - th1; y < t1; y++) fillB(x, y, false);
     if (++cnt >= tp1) { x += tp1; cnt = 0; }
   }
-  // 下延到 worldSurface(num6 → worldSurface):填砖,内列刷墙
+  // 下延(LegacyDungeonEntrance.cs:217-251):塔顶 num5 → worldSurface 整段刷砖,
+  // 内列刷墙;地牢墙(isDungeonWall)格跳过——竖井口天然豁免。曾误从塔底 b1 起
+  // 刷(与原版起点差整个塔身,语义偏差);塔身段与主填重复、幂等
   for (let x = l1; x < r1; x++) {
-    for (let y = b1; y < Math.min(st.h, Math.floor(gs.worldSurface)); y++) {
+    for (let y = t1; y < Math.min(st.h, Math.floor(gs.worldSurface)); y++) {
       extFill(x, y, false, x > l1 && x < r1 - 1);
     }
   }
@@ -560,19 +561,13 @@ function dungeonEnt(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, i: nu
       st.liquid[ti] = 0; st.flags[ti] = 0; st.wall[ti] = dc.wall;
     }
   }
-  // 塔底井口(连通楼梯竖井,原版由 DungeonStairs 自带)
-  for (let x = -1; x <= 1; x++) {
-    for (let y = Math.floor(cy + dy1 * 0.5); y < Math.floor(cy + dy1 * 0.5) + 4; y++) {
-      if (st.inBounds(Math.floor(cx) + x, y)) {
-        const ti = st.idx(Math.floor(cx) + x, y);
-        st.flags[ti] = 0; st.wall[ti] = dc.wall;
-      }
-    }
-  }
+  // (1456 无塔底井口刻槽:连通由"塔位=hall 出口、塔底压住末段挖空框"构造保证,
+  //  曾自加 3×4 井口补救堵塔——根因修复后删除,见 dungeonEnt 调用处注记)
   // ---- 外门厅段 ----
   cx += dx1 * 0.6 * dir;
   cy += dy1 * 0.5;
-  const dx2 = rng.int(35, 49) + 0.0, dy2 = rng.int(10, 14) + 0.0;
+  // 同主塔:外门厅尺寸 = dungeonEntranceStrengthX2/Y2(LegacyDungeonEntrance.cs:306-309)
+  const dx2 = dc.dxS2 + 0.0, dy2 = dc.dyS2 + 0.0;
   cx += dx2 * 0.55 * dir;
   cy -= dy2 * 0.5;
   const l2 = Math.floor(cx - dx2 * 0.6 - rng.int(1, 2));

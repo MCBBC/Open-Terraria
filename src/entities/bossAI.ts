@@ -758,7 +758,16 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
     e.ai2 += 1;
     if (e.ai2 >= (spaz ? 400 : 300)) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
     e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
-    if (e.aiT % (spaz ? 8 : 180) === 0 && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
+    // 弹幕节奏 = 血量阶梯累积器（雷眼 :26971-26990 / 魔眼 :27598-27612 同表）：
+    // 每 tick +1，<75%/<50%/<25% 各再 +1、<10% 再 +2（满血 1×、濒死 6×），
+    // 蓄满（雷眼 180 / 魔眼 8）且视线可达 → 清零发射——曾写死固定节拍无低血加速
+    e.ai3 += 1;
+    if (e.hp < e.maxHp * 0.75) e.ai3 += 1;
+    if (e.hp < e.maxHp * 0.5) e.ai3 += 1;
+    if (e.hp < e.maxHp * 0.25) e.ai3 += 1;
+    if (e.hp < e.maxHp * 0.1) e.ai3 += 2;
+    if (e.ai3 > (spaz ? 8 : 180) && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
+      e.ai3 = 0;
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
       const spdP = spaz ? 6 : 8.5;
@@ -768,6 +777,9 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       shoot(game, e.cx + dx / d * lead, e.cy + dy / d * lead,
         dx / d * spdP + (Math.random() - 0.5) * 0.8, dy / d * spdP + (Math.random() - 0.5) * 0.8, dmgP, pid);
     }
+    // 魔眼火焰音（:27593-27603 localAI[2]：视线可达时每 22t Item34——视线在
+    // 下方发射门里判过，此处同帧条件内不重复掷）
+    if (spaz && e.ai3 === 0) game.playSfxFiles(['Item_34'], 0.6, e.cx, e.cy);
   } else if (e.ai1 === 1) {
     // 冲撞:雷眼 侧 340 8/0.2 / 180t 循环;魔眼 直冲 14 速(50/80t 减速,连 6)
     if (spaz) {

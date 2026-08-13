@@ -399,6 +399,9 @@ export class SpearProj extends Entity {
       if (this.t >= 16) { this.dead = true; return; }
       this.x = p.cx - this.w / 2 + this.dx * this.spd * (this.t - 1);
       this.y = p.cy - this.h / 2 + this.dy * this.spd * (this.t - 1);
+      // CutTiles（Projectile.cs:14151-14155：Center 起 10px×scale 线段扫杂草/瓦罐
+      // ——细剑戳击可清障的机制本体，曾整段漏接 2026-08-13 报障修复）
+      game.cutTile(Math.floor((this.cx + this.dx * 10) / 16), Math.floor((this.cy + this.dy * 10) / 16));
       hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen);
       return;
     }
@@ -795,10 +798,6 @@ export class FlailProj extends Entity {
    *  AI_015 特例:247 Flairon 飞行中自机弹 248 / 757 Drippler 掷出回收气泡 928 /
    *  1058 轨道刺 405 */
   spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
-  /** 子弹生成回调(Game 侧注入 entities.add——GameHooks 不暴露实体桶)。
-   *  AI_015 特例:247 Flairon 飞行中自机弹 248 / 757 Drippler 掷出回收气泡 928 /
-   *  1058 轨道刺 405 */
-  spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
   /** 247/1058 周期计数(localAI[2]/localAI[0]) */
   private subT = 0;
   /** 757 过渡点缓存:[vx,vy] 待下帧掷气泡(掷出态 ×0.3 / 按住转垂地 ×0.2) */
@@ -964,10 +963,14 @@ export class FlailProj extends Entity {
       }
       case 1: { // 掷出态（:41243-41273）：直线无重力;超时/超程 → 回拉;再按 → 垂地
         this.stT++;
-        // 757 掷出态过渡气泡初速缓存(:41251-41258 ×0.3 / 按住转垂地 ×0.2 段另计)
-        if (this.projId === 757) this.trans757 = [this.vx * 0.3, this.vy * 0.3];
-        if (held) { this.st = 3; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; } // 再按→垂链(:41288)
+        // ★757 气泡只在两过渡点掷(:41251-41258)——此前每帧缓存=掷出态每帧一泡
+        // (review 实锤,2026-08-13);按住转垂地 ×0.2 / 超时超程回收 ×0.3
+        if (held) {
+          if (this.projId === 757) this.trans757 = [this.vx * 0.2, this.vy * 0.2];
+          this.st = 3; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; // 再按→垂链(:41288)
+        }
         if (this.stT >= this.prm.flightTicks || distHand() >= maxRange) {
+          if (this.projId === 757) this.trans757 = [this.vx * 0.3, this.vy * 0.3];
           this.st = 2; this.stT = 0; this.vx *= 0.3; this.vy *= 0.3;
         }
         cd = this.prm.thrownHitCd;
@@ -1098,7 +1101,9 @@ export class FlailProj extends Entity {
         // 轨道刺(:41406-41475):旋转态每 3-6t/其余态每 6t,朝【玩家反向】掷 405
         // (:41449-41463 v=(ball-player)norm×(4.5-6.5)±π/4);damage 满额/旋转态 kb×0.5
         this.subT++;
-        const need = this.st === 0 ? 3 + Math.floor(Math.random() * 3) : 6;
+        // :41417-41423 num28:默认 4;垂链/悬荡态(vanilla 6/3)→ 6;旋转态 Next(3,6)=3-5
+        const need = this.st === 0 ? 3 + Math.floor(Math.random() * 3)
+          : this.st === 3 || this.st === 6 ? 6 : 4;
         if (this.subT >= need) {
           this.subT = 0;
           const dxp = this.x + this.w / 2 - p.cx, dyp = this.y + this.h / 2 - p.cy;

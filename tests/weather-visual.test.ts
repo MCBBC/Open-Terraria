@@ -246,6 +246,7 @@ describe('Sfx.playLoop 循环轨 API', () => {
     // 等 fetch → arrayBuffer → decodeAudioData 微任务链
     await new Promise((r) => setTimeout(r, 20));
     expect(h!.playing).toBe(true);
+    expect(h!.dead).toBe(false);   // 解码在途/已起振都非终态——调用方勿重建
     const fake = FakeCtx.instances[FakeCtx.instances.length - 1];
     const gain = fake.createGain.mock.results[0].value as FakeGain;
     const src = fake.createBufferSource.mock.results[0].value as FakeSrc;
@@ -257,10 +258,22 @@ describe('Sfx.playLoop 循环轨 API', () => {
     expect(gain.gain.setTargetAtTime).toHaveBeenLastCalledWith(LOOP_BASE_VOL.blizzardStrong, 0, 0.2);
     h!.stop();
     expect(h!.playing).toBe(false);
+    expect(h!.dead).toBe(true);    // 终态——可丢弃重建
     expect(src.stop).toHaveBeenCalled();
     // 幂等 stop
     h!.stop();
     expect(src.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it('缓冲加载失败 → dead=true（可重建，不泄漏）', async () => {
+    (globalThis as { fetch?: unknown }).fetch = vi.fn(async () =>
+      ({ ok: false }) as unknown as Response);
+    const sfx = new Sfx();
+    const h = sfx.playLoop('blizzardInside', 0.5);
+    expect(h).not.toBeNull();
+    await new Promise((r) => setTimeout(r, 20));
+    expect(h!.playing).toBe(false);
+    expect(h!.dead).toBe(true);
   });
 
   it('playWav 对缺素材轨安全短路（空映射）', () => {

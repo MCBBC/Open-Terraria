@@ -26,10 +26,14 @@ describe('tile 动态发光特例（specialTileLight）', () => {
     expect(specialTileLight(429, 144, 0, f)).toEqual([0.2, 0.2, 0]);
   });
 
-  it('传送门炮 209：仅传送门帧发光', () => {
+  it('传送门炮 209：仅传送门帧发光（PortalHelper.GetPortalColor 单人档：portal0=橙/portal1=青）', () => {
     expect(specialTileLight(209, 0, 0, f)).toBeNull();
-    expect(specialTileLight(209, 234, 0, f)![2]).toBeGreaterThan(0.5); // 紫
-    expect(specialTileLight(209, 306, 0, f)![0]).toBeGreaterThan(0.5); // 橙
+    // hslToRgb(0.12,1,0.5)=(1,0.72,0) ×0.65 → R 主导（PortalHelper.cs:387）
+    expect(specialTileLight(209, 234, 0, f)![0]).toBeGreaterThan(0.5); // 橙 portal0
+    expect(specialTileLight(209, 252, 0, f)![0]).toBeGreaterThan(0.5);
+    // hslToRgb(0.52,1,0.6)=(0.2,0.9,1) ×0.65 → B 主导
+    expect(specialTileLight(209, 306, 0, f)![2]).toBeGreaterThan(0.5); // 青 portal1
+    expect(specialTileLight(209, 324, 0, f)![2]).toBeGreaterThan(0.5);
   });
 
   it('开花药草 84：style 2/5/6 三色，其余不发光', () => {

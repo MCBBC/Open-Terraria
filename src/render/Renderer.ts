@@ -60,6 +60,7 @@ import { viIdFromKey } from '../data/vanillaItemCombat';
 import { VANILLA_IS_FOOD, type FurnitureKind } from '../world/FurnitureItems';
 import { itemFuncOfVid } from '../data/vanillaItemFunc';
 import { drawEmotes } from './EmoteBubble';
+import { combatFontReady, drawCombatText } from './CombatTextFont';
 import { InfoAccsLayer } from './InfoAccsLayer';
 import { buildInfoAccRows, type InfoAccCtx } from '../stats/InfoAccs';
 
@@ -113,7 +114,7 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
-import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
+import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { mountFallbackColor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
@@ -140,13 +141,13 @@ const _lightTap = new Uint8Array(12);
 
 // ============ 原版 FindFrame 分族帧引擎（1.4.5.6 Terarria1456/Terraria/NPC.cs:67295+） ============
 
-/** TownNPCs 档案贴图条帧数推导：高/56 四舍五入（标准帧 40×56）。档案表帧数
- *  与 npcFrameCount/vanilla-npcs.json 不同源（护士档案 23 帧 vs npcFrameCount 35=2;
- *  Guide 1456/56=26 恰同表值）——档案表渲染是本仓自选路径（原版该分支 if(false)
- *  死代码 NPC.cs:69299）,帧数只能从贴图自身反推;非整除表（Angler 1334 等）
- *  ±1px/帧,界内安全视觉无差 */
-export function townSheetFrameCount(sheetHeight: number): number {
-  return Math.max(1, Math.round(sheetHeight / 56));
+/** TownNPCs 档案贴图条帧数取值口径（2026-08-13 两轮修正教训）：
+ *  帧高逐表可变（人形族 54-64px、城镇史莱姆 670/678-684 仅 34-44px）→ 高/56 反推
+ *  对史莱姆必错；唯一权威 = vanilla-npcs.json frames（=Main.npcFrameCount）。
+ *  atlas.vnpcMeta 只覆盖 vanilla.json npcs 的 20 条特殊条目（46/49/67/74/299…,
+ *  城镇 NPC 均不在其中）→ 必须回退 json frames,勿再 ??1（整条贴图走路根因） */
+export function townSheetFrameCount(npcId: number): number {
+  return VANILLA_NPCS[String(npcId)]?.frames ?? 1;
 }
 // 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
@@ -771,9 +772,12 @@ export class Renderer {
   infoAccHover = -1;
   /** 原版群系/地下背景（DrawBG/DrawBackground 移植）；场景数据由 Game 每帧注入 */
   biomeBg = new BiomeBackground();
-  /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植） */
-  resourceBars = new VanillaResourceBars();
-  fancyBars = new FancyResourceBars();
+  /** 原版生命/魔力资源条（ClassicPlayerResourcesDisplaySet 移植）——按当前样式
+   *  懒构造二选一(此前两个实例同时构造 = 15 张 UI 贴图急载,另一套样式永远不用) */
+  private _resourceBars: VanillaResourceBars | null = null;
+  private _fancyBars: FancyResourceBars | null = null;
+  get resourceBars(): VanillaResourceBars { return this._resourceBars ?? (this._resourceBars = new VanillaResourceBars()); }
+  get fancyBars(): FancyResourceBars { return this._fancyBars ?? (this._fancyBars = new FancyResourceBars()); }
   /** 原版呼吸计（DrawInterface_Resources_Breath 移植：玩家头顶 10 气泡/火焰条） */
   breathMeter = new VanillaBreathMeter();
   /** 背包是否打开（Main.playerInventory 语义——Game.render 经 __swUI 注入） */
@@ -1272,8 +1276,10 @@ export class Renderer {
       });
     }
 
-    // 8. 飘字（受光照影响后画）。数字类样式 1:1 CombatText:scale 从 0 长到 1
-    //    （dot 封顶 0.8 → 字号偏小）、alpha 0.6~1 闪烁、暴击 0.12rad 旋转漂移
+    // 8. 飘字（受光照影响后画）。数字类 = 原版位图字体（Combat_Text/Combat_Crit
+    //    xnb 提取,见 render/CombatTextFont）:5 层绘制（±targetScale 四向暗化影 +
+    //    本体,影 = 本色调暗 ×0.3 而非黑——Main.cs:61805-61841）、锚点文字盒中心、
+    //    crit 旋转漂移；字体未就绪(懒加载窗口)回退 monospace
     ctx.save();
     ctx.font = 'bold 14px monospace';
     ctx.textAlign = 'center';
@@ -1290,6 +1296,17 @@ export class Renderer {
         ctx.fillText(d.label, sx, sy);
         continue;
       }
+      const text = String(d.value);
+      if (combatFontReady(d.crit)) {
+        // 原版位图字体:颜色 #RRGGBB → rgb 三元组,锚点 (sx, sy)=文字盒中心
+        const hex = d.color.replace('#', '');
+        const rgb: [number, number, number] = [
+          parseInt(hex.slice(0, 2), 16), parseInt(hex.slice(2, 4), 16), parseInt(hex.slice(4, 6), 16),
+        ];
+        drawCombatText(ctx, text, sx, sy, rgb, d.alpha ?? 1, d.scale ?? 1, d.rotation ?? 0, d.crit);
+        continue;
+      }
+      // 回退:monospace（字体纹理加载中,本帧少量帧窗）
       const scale = d.scale ?? 1;
       ctx.globalAlpha = d.alpha ?? 1;
       ctx.fillStyle = d.color;
@@ -1301,12 +1318,12 @@ export class Renderer {
         ctx.save();
         ctx.translate(sx, sy);
         ctx.rotate(rot);
-        ctx.strokeText(String(d.value), 0, 0);
-        ctx.fillText(String(d.value), 0, 0);
+        ctx.strokeText(text, 0, 0);
+        ctx.fillText(text, 0, 0);
         ctx.restore();
       } else {
-        ctx.strokeText(String(d.value), sx, sy);
-        ctx.fillText(String(d.value), sx, sy);
+        ctx.strokeText(text, sx, sy);
+        ctx.fillText(text, sx, sy);
       }
     }
     ctx.restore();
@@ -4195,12 +4212,9 @@ export class Renderer {
       const profileImg = sheetPath ? this.atlas.ensureVImage(sheetPath) : null;
       let r: DrawRect | null;
       if (profileImg) {
-        // 帧数从【贴图自身】推导（townSheetFrameCount）——档案表帧数与 npcFrameCount
-        // 不同源（2026-08-13 整条贴图走路根因）：vanilla 走 TextureAssets.Npc[type]
-        // NPC_{id} 竖条 + npcFrameCount（Nurse 档案表 23 帧 vs npcFrameCount 35=2）,
-        // profile 贴图路径在原版是 `if(false&&)` 死代码（NPC.cs:69299）,本仓自选
-        // 档案表渲染 → 帧数只能按 56px 标准帧高从高度反推（Guide 1456→26 ✓）
-        const count = townSheetFrameCount(profileImg.height);
+        // 帧数 = vanilla-npcs.json frames（见 townSheetFrameCount 口径注）;
+        // idx 钳位保证任何数据出入都界内
+        const count = townSheetFrameCount(n.vanillaId);
         const fh = Math.floor(profileImg.height / count);
         const idx = Math.max(0, Math.min(count - 1, n.frame));
         r = { img: profileImg, sx: 0, sy: idx * fh, sw: profileImg.width, sh: fh };

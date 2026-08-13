@@ -4040,6 +4040,9 @@ Checkpoint("dungeonE");
 for (int i = 0; i < dgRooms.Count; i++) if (dgRooms[i].Generated) DgRoomPlatformsDoors(dgRooms[i]);
 for (int i = 0; i < dgHalls.Count; i++) if (dgHalls[i].Generated) DgHallPlatformsDoors(dgHalls[i]);
 Checkpoint("dungeonPD");
+int dbgMinT = 9999, dbgMaxB = 0;
+    foreach (var rmv in dgRooms) { dbgMinT = Math.Min(dbgMinT, rmv.Inner.T); dbgMaxB = Math.Max(dbgMaxB, rmv.Inner.B); }
+    Console.WriteLine($"DBG dungeon: y0={dgY0} bounds=({dgBounds.L},{dgBounds.T},{dgBounds.R},{dgBounds.B}) roomT={dbgMinT} roomB={dbgMaxB} posY={dgPosY} dungeonY={dgDungeonY} rooms={dgRooms.Count} halls={dgHalls.Count}");
 DgEarly(); Checkpoint("dungeonPi");     // DungeonGlobalEarlyDualDungeonFeatures（Default → 仅 pit 陷阱循环）
 DgSpikes(); Checkpoint("dungeonS");     // DungeonGlobalSpikes
 DgDoorsF(); Checkpoint("dungeonD");     // DungeonGlobalDoors
@@ -4363,7 +4366,7 @@ void DgHall(DHall s)
         }
         else if (py >= num6)
         {
-            num2 = -1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            num2 = -1; num++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
             if ((int)rr.Next(2) == 0)
             {
                 if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
@@ -4372,7 +4375,7 @@ void DgHall(DHall s)
         }
         else if (py < 200.0)
         {
-            num2 = 1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            num2 = 1; num++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
             if ((int)rr.Next(2) == 0)
             {
                 if ((int)rr.Next(2) == 0) vx = (int)rr.Next(20, 50) * 0.01;
@@ -4381,7 +4384,7 @@ void DgHall(DHall s)
         }
         else if (f13)
         {
-            num2 = 1; num++; z2x = 0; z2y = num2; vx = 0; vy = num2;
+            num2 = 1; num++; z2x = 0; z2y = -num2; vx = 0; vy = num2;
             if (0.66 > 0.0 && (double)rr.NextDouble() <= 0.66)
             {
                 flag2 = true;
@@ -5417,13 +5420,14 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
         int px = i - 1, py = num7 - 1;
         if (!DgInWorld(px, py, 0) || !DgInWorld(px + 1, py + 1, 0)) continue;
         if (typ[(py + 1) * W + px] == 138 || typ[(py + 1) * W + px + 1] == 138) continue;
+        // 宝箱 TileObjectData Origin=(0,1)：2×2 占 (px,py-1)..(px+1,py)——首实心行上一格起
         bool free = true;
         for (int a = 0; a < 2 && free; a++)
-            for (int b = 0; b < 2; b++)
+            for (int b = -1; b <= 0; b++)
                 if (act[(py + b) * W + px + a] != 0) { free = false; break; }
         if (!free) continue;
         for (int a = 0; a < 2; a++)
-            for (int b = 0; b < 2; b++)
+            for (int b = -1; b <= 0; b++)
             {
                 int ti = (py + b) * W + px + a;
                 act[ti] = 1; typ[ti] = chestTile;              // PlaceChestDirect 语义

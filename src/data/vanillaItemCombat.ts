@@ -21,6 +21,8 @@ export interface ItemCombat {
   ranged?: boolean;
   magic?: boolean;
   summon?: boolean;
+  /** Item.cs useTurn=true（1141 件，工具族；武器 false）——itemAnimation 窗内移动改向豁免（:19546） */
+  useTurn?: boolean;
 }
 
 const RAW = combatJson as unknown as Record<string, ItemCombat>;

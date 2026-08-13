@@ -24,8 +24,15 @@ import { menuTimeInfo } from '../render/MenuBackground';
 /** Sun.png 114×114 / Moon_N.png 50×400（8 相位帧，帧宽 50）——SkyRenderer.ts:27-28 */
 const SUN_SIZE = 114;
 const MOON_FRAME_W = 50;
-/** 时刻边界（本仓 Clock 0.25/0.75 ↔ 原版 day 0-54000 / night 0-32400） */
-const DAWN_T = 0.25, DUSK_T = 0.75;
+/** 昼夜判定边界 = Clock.DAWN/DUSK（0.1875/0.8125）；下面行程映射沿用
+ *  SkyRenderer.ts:1024-1028 自身的 0.25/0.75 约定（含晨昏边缘 dayTime 为负的
+ *  既有行为）——本文件与之逐式对齐，不另立口径 */
+const DAY_T0 = 0.1875, DAY_T1 = 0.8125;
+/** 菜单月相：Clock.moonPhase 初始 0 且菜单侧无推进（Game 黎明推进不在菜单跑）
+ *  → 恒满月帧 0，与画布 SkyRenderer 读同一 Clock 的结果一致 */
+const MENU_MOON_PHASE = 0;
+const SUN_SPRITE = 'sprites/vanilla/Sun.png';
+const MOON_SPRITE = 'sprites/vanilla/Moon_0.png';
 
 export interface TitleMenuFlow {
   onSinglePlayer(): void;
@@ -78,14 +85,24 @@ const CSS = `
   text-shadow: 1px 0 0 #000, -1px 0 0 #000, 0 1px 0 #000, 0 -1px 0 #000;
   pointer-events: none;
 }
-/* 日/月命中层：全透明，罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
+/* 日/月命中层 + 可见体：罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
    z-index:-1 = 根 stacking context 内垫底——必在天空画布(0)之上、logo/按钮之下，
-   不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势 */
+   不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势。
+   可见体说明：天空画布自身也画日/月（SkyRenderer），但 MenuBackground 把
+   sky.draw 排在森林山层之前（原版同序，Main.cs:61531 天空 pass → :61546 DrawBG），
+   日/月大部分被山层遮住——DOM 体即"原版标题屏里肉眼可见的那颗"，贴图/位置/
+   缩放/旋转全部与画布同一公式同一素材（见 celestialState），不另造语义 */
 .sw-title-celestial {
   position: fixed; pointer-events: auto; cursor: grab; z-index: -1;
   touch-action: none;
 }
 .sw-title-celestial.grabbing { cursor: grabbing; }
+.sw-title-celestial .body {
+  position: absolute; inset: 0; pointer-events: none;
+  image-rendering: pixelated; background-repeat: no-repeat;
+  background-size: 100% 100%;
+}
+.sw-title-celestial.night .body { background-size: 100% 800%; } /* 月相竖条 8 帧 */
 `;
 
 export class TitleMenu {
@@ -93,10 +110,16 @@ export class TitleMenu {
   private logoDay!: HTMLImageElement;
   private logoNight!: HTMLImageElement;
   private celestial!: HTMLDivElement;
+  private celestialBody!: HTMLDivElement;
+  /** 昼/夜贴图态（避免每帧重设 background-image） */
+  private bodyDayTime: boolean | null = null;
   private rafId = 0;
   private unsubLang: (() => void) | null = null;
   /** alreadyGrabbingSunOrMoon（Main.cs:62428/:62451-62454 抓取闩） */
   private grabbing = false;
+  /** sunModY/moonModY（:1244/:1246，绘制与命中盒的垂直抓取偏移——拖动中 = mouseY-基准，
+   *  松手后每帧 ×0.999 缓回 0；基准 y 见 celestialState 的 dip 公式） */
+  private modY = 0;
 
   constructor(parent: HTMLElement, private flow: TitleMenuFlow) {
     if (!document.getElementById('sw-title-style')) {
@@ -127,9 +150,11 @@ export class TitleMenu {
     `;
     this.logoDay = this.root.querySelector('.logo-day')!;
     this.logoNight = this.root.querySelector('.logo-night')!;
-    // 日/月命中层（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
+    // 日/月命中层 + 可见体（GOING_OLDSCHOOL）——置于按钮之下、天空画布之上
     this.celestial = document.createElement('div');
     this.celestial.className = 'sw-title-celestial';
+    this.celestial.innerHTML = '<div class="body"></div>';
+    this.celestialBody = this.celestial.querySelector('.body')!;
     this.root.appendChild(this.celestial);
     this.celestial.addEventListener('pointerdown', (e) => {
       // mouseLeft && 命中矩形（Main.cs:62436-62451）→ 抓取闩 + 成就（每帧皆调，
@@ -155,33 +180,62 @@ export class TitleMenu {
 
   // ---- 日/月抓取（GOING_OLDSCHOOL，Main.cs:62420-62453 1:1）----
 
-  /** SkyRenderer.ts:1024-1067 同源公式 → 日/月绘制矩形（原点为中心，:62420 value4） */
-  private celestialRect(): { x: number; y: number; size: number } {
+  /**
+   * 日/月绘制态，与 SkyRenderer.ts:1024-1067 逐式同源（画布画的那颗同款）：
+   * x = ft*(屏宽+图宽*2)-图宽（横穿）、y = dip*250+180（正午/子夜最高）、
+   * scale = (1.2-dip*0.4)×(日 1.1 / 夜 1)、rotation = ft*2-7.3。
+   */
+  private celestialState(): { x: number; y: number; size: number; rot: number; dayTime: boolean } {
     const t = menuTimeInfo.timeOfDay;
     const W = window.innerWidth;
-    const isDay = t > DAWN_T && t < DUSK_T;
+    const isDay = t > DAY_T0 && t < DAY_T1;                       // Clock.DAWN/DUSK
+    const dayTime = isDay ? ((t - 0.25) / 0.5) * 54000 : 0;
+    const nightTime = !isDay ? ((((t - 0.75) + 1) % 1) / 0.5) * 32400 : 0;
     const size0 = isDay ? SUN_SIZE : MOON_FRAME_W;
-    // 昼夜各自的归一化行程（day 0-54000 / night 0-32400 → 0..1）
-    const ft = isDay ? (t - DAWN_T) / (DUSK_T - DAWN_T) : ((((t - DUSK_T) + 1) % 1) / (1 - (DUSK_T - DAWN_T)));
+    const ft = (isDay ? dayTime : nightTime) / (isDay ? 54000 : 32400);
     const dip = Math.pow(Math.abs(ft * 2 - 1), 2);
-    const x = ft * (W + size0 * 2) - size0;          // 横穿全屏 + 两侧贴图宽缓冲
-    const y = dip * 250 + 180;                        // 正午/子夜最高
+    const x = ft * (W + size0 * 2) - size0;
+    const y = dip * 250 + 180;
     const scale = (1.2 - dip * 0.4) * (isDay ? 1.1 : 1);
-    return { x: x - size0 * scale / 2, y: y - size0 * scale / 2, size: size0 * scale };
+    return { x, y, size: size0 * scale, rot: ft * 2 - 7.3, dayTime: isDay };
   }
 
-  /** 拖动中的每帧：反算菜单时间（Main.cs:62434-62446）+ 触发成就（:62450） */
-  private handleGrab(mouseX: number): void {
-    const t = menuTimeInfo.timeOfDay;
-    const isDay = t > DAWN_T && t < DUSK_T;
+  /** 每帧把命中层与可见体对到画布日/月上（含昼/夜贴图翻转与旋转） */
+  private syncCelestial(): void {
+    const s = this.celestialState();
+    this.celestial.style.left = `${Math.round(s.x - s.size / 2)}px`;
+    this.celestial.style.top = `${Math.round(s.y - s.size / 2 + this.modY)}px`; // modY 绘制偏移（:62376/:62395）
+    this.celestial.style.width = `${Math.round(s.size)}px`;
+    this.celestial.style.height = `${Math.round(s.size)}px`;
+    this.celestialBody.style.transform = `rotate(${s.rot}rad)`;
+    if (this.bodyDayTime !== s.dayTime) {
+      this.bodyDayTime = s.dayTime;
+      // 月相竖条 8 帧：background-size 100% 800% + 纵向偏移 -phase/8（菜单恒满月帧 0）
+      this.celestial.classList.toggle('night', !s.dayTime);
+      this.celestialBody.style.backgroundImage
+        = `url(${s.dayTime ? SUN_SPRITE : MOON_SPRITE})`;
+      this.celestialBody.style.backgroundPosition = s.dayTime
+        ? '0 0' : `0 -${MENU_MOON_PHASE * 12.5}%`;
+    }
+  }
+
+  /** 拖动中的每帧：反算菜单时间（Main.cs:62434-62446）+ modY 垂直跟手（:62430/:62440）+ 触发成就（:62450） */
+  private handleGrab(mouseX: number, mouseY?: number): void {
+    const isDay = menuTimeInfo.timeOfDay > DAY_T0 && menuTimeInfo.timeOfDay < DAY_T1;
     const W = window.innerWidth;
     const size0 = isDay ? SUN_SIZE : MOON_FRAME_W;
     const span = isDay ? 54000 : 32400;
     // time = span * (mouseX + 图宽) / (屏宽 + 图宽*2)，钳 [10, span-10]（原版 :62434-62446）
     const time = Math.max(10, Math.min(span - 10, span * (mouseX + size0) / (W + size0 * 2)));
     const t01 = isDay
-      ? DAWN_T + (time / 54000) * (DUSK_T - DAWN_T)
-      : (DUSK_T + (time / 32400) * (1 - (DUSK_T - DAWN_T))) % 1;
+      ? 0.25 + (time / 54000) * 0.5
+      : (0.75 + (time / 32400) * 0.5) % 1;
+    // sunModY/moonModY = mouseY - 基准y（:62430/:62440；基准 = celestialState 的
+    // dip 公式 y——拖动中垂直跟手，松手后 ×0.999 缓回）
+    if (mouseY !== undefined) {
+      const s = this.celestialState();
+      this.modY = mouseY - s.y;
+    }
     // DoClassicTitleScreenAchievement（AchievementsHelper.cs:382-385 → GOING_OLDSCHOOL 'Do'）
     this.classicTitleAchievement();
     this.flow.onSunMoonGrab?.({ dayTime: isDay, time01: t01 });
@@ -207,7 +261,7 @@ export class TitleMenu {
 
   private onPointerMove = (e: PointerEvent) => {
     if (!this.grabbing) return;                       // 仅抓取闩开着时跟手（:62438 || alreadyGrabbing）
-    this.handleGrab(e.clientX);
+    this.handleGrab(e.clientX, e.clientY);
   };
 
   private onPointerUp = () => {
@@ -246,11 +300,11 @@ export class TitleMenu {
       this.logoDay.style.opacity = String(logoA / 255);
       this.logoNight.style.opacity = String((255 - logoA) / 255);
       // 日/月命中层每帧对齐天空画布（时钟在走，日/月横穿屏幕）
-      const cel = this.celestialRect();
-      this.celestial.style.left = `${Math.round(cel.x)}px`;
-      this.celestial.style.top = `${Math.round(cel.y)}px`;
-      this.celestial.style.width = `${Math.round(cel.size)}px`;
-      this.celestial.style.height = `${Math.round(cel.size)}px`;
+      // modY 松手衰减 ×0.999/帧（Main.cs:62415-62416——short 截断在视觉上不可辨，省略）
+      if (!this.grabbing && this.modY !== 0) {
+        this.modY = Math.abs(this.modY) < 0.5 ? 0 : this.modY * 0.999;
+      }
+      this.syncCelestial();
       this.rafId = requestAnimationFrame(step);
     };
     this.rafId = requestAnimationFrame(step);

@@ -154,12 +154,6 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       }
       const reswept = [...byType.keys()].filter((k) => SWEPT.has(k));
       expect(reswept, '清扫类型重新出现=清扫 pass 回归').toEqual([]);
-      const warnsAll = rep.violations.filter((v) => v.severity === 'warn');
-      if (warnsAll.length) {
-        const byType2 = new Map<string, number>();
-        for (const v of warnsAll) byType2.set(v.typeKey, (byType2.get(v.typeKey) ?? 0) + 1);
-        console.error('R2 按类型:', [...byType2.entries()].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}=${n}`).join(' '));
-      }
 
       if (errs.length) console.error(formatViolations({ ...rep, violations: errs }));
       // R2 warn 不阻塞(帧重复语义待逐型核对,sheet 187 多带布局表在案);仅打印观察
