@@ -151,17 +151,22 @@ export const RULE_R2_FRAME_OFFSET: AuditRule = {
         for (let x = x0; x + m.w - 1 <= x1; x++) {
           if (!rectIntact(st, m.type, x, y, m.w, m.h, x0, y0, x1, y1)) continue;
           const seen = new Set<string>();
-          let dup = false;
+          let dup = false, allZero = true, allExplicit = true;
           for (let dy = 0; dy < m.h; dy++) {
             for (let dx = 0; dx < m.w; dx++) {
               const i = st.idx(x + dx, y + dy);
+              if (st.frameX[i] !== 0 || st.frameY[i] !== 0) allZero = false;
+              else allExplicit = false;
               const k = `${st.frameX[i]},${st.frameY[i]}`;
-              if (seen.has(k)) { dup = true; break; }
+              if (seen.has(k)) { dup = true; }
               seen.add(k);
             }
-            if (dup) break;
           }
-          if (!dup) continue;
+          // ★零帧参与=渲染扫描路径接管(VanillaTiler:808 向左/上连续延伸重算,
+          //   全 0 或"0+分片混合"形态均由此重建,重复判定不可靠)——仅当矩形内
+          //   【全非零且重复】才是确定的重复画锚点帧(2026-08-13 R2 悬案裁决:
+          //   31 处误报=全 0 物体;2 处真浮出=仙人掌/织布机混合零帧,均扫描可重建)
+          if (!dup || allZero || !allExplicit) continue;
           hits++;
           violations.push({
             rule: 'R2', severity: 'warn', type: m.type, typeKey: m.key, sheet: m.sheet,

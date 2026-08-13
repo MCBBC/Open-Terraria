@@ -141,14 +141,14 @@ export enum BuffType {
                     //   墙抵边即死（:22036-22052）
   // ---- PvP debuff 族（Projectile.StatusPvP / Player.StatusToPlayerPvP 授予；
   //      全部在 Main.pvpBuff 白名单 Main.cs:8872-8887 内）----
-  Venom = 81,         // 毒液(70)：15 HP/s（lifeRegen-30 :18791；毒液浸剂/282/355 弹）
-  CursedInferno = 82, // 诅咒焰(39)：12 HP/s（lifeRegen-24 :18850 onFire2 段）
-  OnFire3 = 83,       // 地狱火(323)：4 HP/s（lifeRegen-8 :18824；熔岩石/地狱火链）
-  Frostburn = 84,     // 霜燃(44)：8 HP/s（lifeRegen-16 :18837；172/253 冰系弹）
-  Frostburn2 = 85,    // 霜燃2(324)：8 HP/s（lifeRegen-16 :18850；冰霜盔甲引擎）
-  Confused = 86,      // 困惑(31)：控制反转（:24683-24690 四键轮换,含原版 Up←Right 怪癖）
-  Ichor = 87,         // 灵液(69)：防御 -15（ResetEffects statDefense -= 15）
-  BrokenArmor = 88,   // 破甲(36)：防御减半（:25704 statDefense /= 2；301 类弹 PvP）
+  Venom = 85,         // 毒液(70)：15 HP/s（lifeRegen-30 :18791；毒液浸剂/282/355 弹）
+  CursedInferno = 86, // 诅咒焰(39)：12 HP/s（lifeRegen-24 :18850 onFire2 段）
+  OnFire3 = 87,       // 地狱火(323)：4 HP/s（lifeRegen-8 :18824；熔岩石/地狱火链）
+  Frostburn = 88,     // 霜燃(44)：8 HP/s（lifeRegen-16 :18837；172/253 冰系弹）
+  Frostburn2 = 89,    // 霜燃2(324)：8 HP/s（lifeRegen-16 :18850；冰霜盔甲引擎）
+  Confused = 90,      // 困惑(31)：控制反转（:24683-24690 四键轮换,含原版 Up←Right 怪癖）
+  Ichor = 91,         // 灵液(69)：防御 -15（ResetEffects statDefense -= 15）
+  BrokenArmor = 92,   // 破甲(36)：防御减半（:25704 statDefense /= 2；301 类弹 PvP）
 }
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {

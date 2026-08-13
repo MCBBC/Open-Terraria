@@ -72,17 +72,27 @@ describe('不变量扫描器·合成用例', () => {
 
   it('R2:帧分片类型同矩形帧值重复 → warn;帧全 0 不报', () => {
     const st = new TileStore(8, 8);
-    // 全 0 形态:R2 不报(引擎可重算)
+    // 全 0 形态:R2 不报(引擎可重算)——★且"他处有非零帧"时也必须不报
+    // (hasNonZero 门开启后全 0 矩形曾被误报,2026-08-13 真实世界 31 处实锤)
     seedRect(st, BOULDER, 2, 2, 2, 2, 0, 0);
+    st.setTileSilent(6, 6, BOULDER, 36, 36); // 他处非零帧 → 开启该类型的 R2
     expect(auditWorld(st).violations.filter((v) => v.rule === 'R2')).toHaveLength(0);
+    st.setTileSilent(6, 6, 0);
     // 分片帧正确(0/18)→ 不报
     const st2 = new TileStore(8, 8);
     for (let dy = 0; dy < 2; dy++) for (let dx = 0; dx < 2; dx++) st2.setTileSilent(2 + dx, 2 + dy, BOULDER, dx * 18, dy * 18);
     expect(auditWorld(st2).violations.filter((v) => v.rule === 'R2')).toHaveLength(0);
-    // 帧重复(全部 36,36)→ warn
+    // 帧重复(全部 36,36,全显式无零帧)→ warn
     const st3 = new TileStore(8, 8);
     seedRect(st3, BOULDER, 2, 2, 2, 2, 36, 36);
     expect(auditWorld(st3).violations.filter((v) => v.rule === 'R2').length).toBeGreaterThan(0);
+    // 混合零帧(0,0 与 18,0 并存)→ 不报(渲染扫描路径接管,2026-08-13 仙人掌/织布机裁决)
+    const st4 = new TileStore(8, 8);
+    st4.setTileSilent(2, 2, BOULDER, 0, 0);
+    st4.setTileSilent(3, 2, BOULDER, 18, 0);
+    st4.setTileSilent(2, 3, BOULDER, 0, 0);
+    st4.setTileSilent(3, 3, BOULDER, 18, 0);
+    expect(auditWorld(st4).violations.filter((v) => v.rule === 'R2')).toHaveLength(0);
   });
 
   it('maxPerRule 截断与 summary 保留全量命中数', () => {

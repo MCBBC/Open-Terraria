@@ -122,7 +122,8 @@ describe('② GorePiece 物理（Gore.cs 1:1）', () => {
     resetGorePool();
     const w = makeWorld();
     const game = makeGame(w);
-    const p = new GorePiece(4, 10 * TILE, FLOOR * TILE - p_box(p) - 2, 1);
+    const box = new GorePiece(4, 0, 0, 1).h;
+    const p = new GorePiece(4, 10 * TILE, FLOOR * TILE - box - 2, 1);
     p.vx = 2; p.vy = 3;
     const rot0 = 0.1;
     p.rotation = rot0;
@@ -165,10 +166,11 @@ describe('② GorePiece 物理（Gore.cs 1:1）', () => {
     expect(p.scale).toBeCloseTo(1 - 0.007, 6);
     expect(p.alpha).toBe(2);                                // 2×DisappearSpeedAlpha
     // 收缩到底：scale 钳 0.1 + alpha=255 即刻消亡（:540-544）
+    // alpha 先于 scale 收到底（255/2≈128 帧 vs 0.9/0.007≈129 帧）→ 消亡时 scale≈0.104
     let ticks = 1;
     while (!p.dead && ticks++ < 400) p.fixedUpdate(1, game);
     expect(p.dead).toBe(true);
-    expect(p.scale).toBeCloseTo(0.1, 6);
+    expect(p.scale).toBeLessThanOrEqual(0.104 + 1e-9);
     resetGorePool();
   });
 
@@ -178,6 +180,12 @@ describe('② GorePiece 物理（Gore.cs 1:1）', () => {
     const game = makeGame(w);
     const p = GorePiece.newGore(860, 10 * TILE, 5 * TILE, 0.5, 0, 1)!;
     expect(p.sticky).toBe(true);
+    // SpecialAI 1 初速覆写（:1423-1425）：vx ∈ [-1.5,1.5]、vy ∈ [0,2π)
+    expect(p.vx).toBeGreaterThanOrEqual(-1.5);
+    expect(p.vx).toBeLessThanOrEqual(1.5);
+    expect(p.vy).toBeGreaterThanOrEqual(0);
+    expect(p.vy).toBeLessThan(Math.PI * 2);
+    p.vy = 0.5;                                            // 固定相位走下落支
     const y0 = p.y;
     p.fixedUpdate(1, game);
     expect(p.y).toBeGreaterThan(y0);                        // 下落支位移
@@ -264,15 +272,19 @@ describe('③ 表驱动死亡钩', () => {
     resetGorePool();
   });
 
-  it('EoC（4）：均匀随机速度 ±6 且不叠加 NPC 速度（Next(-30,31)*0.2）', () => {
-    resetGorePool();
-    for (let i = 0; i < 100; i++) {
+  it('EoC（4）：for(<2) 循环体 4 调用 = 8 块（loop 字段），速度为均匀随机 ±6', () => {
+    for (let i = 0; i < 50; i++) {
+      resetGorePool();                                    // 600 槽池：循环内复位防满池截断
       const got: GorePiece[] = [];
       spawnDeathGore(src({ vanillaId: 4, vx: 9 }), (p) => got.push(p));
-      expect(got.length).toBeGreaterThanOrEqual(4);
+      expect(got.length).toBe(8);                         // NPC.cs:88200-88210（2 次迭代 × 4 调用）
+      expect(new Set(got.map((p) => p.goreId))).toEqual(new Set([2, 7, 9, 10]));
       for (const p of got) {
-        // 基速 ∈ [-6,6]（不含 NewGore 扰动前的表速无法直读，扰动后 vy 上限 6-1=5 内粗验）
+        // 表速 = Next(-30,31)*0.2 ∈ [-6,6]（替换而非叠加 NPC 速度 9）
+        expect(p.vy).toBeGreaterThanOrEqual(-9);          // 含 NewGore 扰动 -1..-3
         expect(p.vy).toBeLessThanOrEqual(6);
+        expect(p.vx).toBeGreaterThanOrEqual(-8);          // ±6 再叠加扰动 ±2
+        expect(p.vx).toBeLessThanOrEqual(8);
       }
     }
     resetGorePool();
@@ -293,16 +305,11 @@ describe('③ 表驱动死亡钩', () => {
 
   it('deathGoreFor 与表一致；Boss 钉死锚（克眼 4 / 世吞 13 / 蜂后 222 / 花苞 262）', () => {
     expect(deathGoreFor(3).length).toBe(npcEntries(3).length);
-    expect(npcEntries(4).length).toBeGreaterThanOrEqual(4);
+    expect(npcEntries(4).length).toBe(4);
+    expect(npcEntries(4).every((e) => e.loop === 2)).toBe(true);
     expect(npcEntries(13).map((e) => e.id)).toEqual([24, 25, 28, 29]);
     expect(npcEntries(222).slice(0, 3).map((e) => e.id)).toEqual([303, 304, 305]);
     expect(npcEntries(262).length).toBeGreaterThanOrEqual(9);
     expect(npcEntries(113).slice(0, 4).map((e) => e.id)).toEqual([137, 138, 138, 137]);
   });
 });
-
-/** 测试内取碰撞盒尺寸（构造前不可得，用同型新实例代读） */
-function p_box(_p: GorePiece): number {
-  const probe = new GorePiece(4, 0, 0, 1);
-  return probe.h;
-}

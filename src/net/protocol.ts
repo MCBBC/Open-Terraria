@@ -71,9 +71,12 @@ export const enum Msg {
                        //   （原版 42=Unknown42：旧 StrikeNPC 槽位；注释曾误写 crit/kbDir/srcX/srcY——
                        //    实际线格式自 v3 起即为 dmg+击退两分量，2026-08 校正）
   StrikePlayer = 44,   // C→S→定向转发（v7 PvP）：C→S {u8 targetSlot, i16 rawDmg, i16 kbx, i16 kby,
-                       //   u16 weaponId, u8 flags(bit0=crit)}；S→C 追加尾部 u8 fromSlot
+                       //   u16 weaponId, u8 flags}；S→C 追加尾部 u8 fromSlot
                        //   （服务器回填发送方槽位——被打端 InOpposingTeam 门禁需要攻击者身份，
-                       //   不信任客户端自报）。近战 PvP 命中意向广播。
+                       //   不信任客户端自报）。PvP 命中意向广播。
+                       //   flags：bit0=crit / bits1-4=武器浸剂 meleeEnchant / bit5=圣骑士盾转移
+                       //   （rawDmg=转移额,被击端独立冷却槽,死因 teamTank）/
+                       //   bit6=狱火光环（rawDmg=20,被击端 per-owner 60t 冷却,死因 inferno）
                        //   权威模型=被打方本地结算（与 msg16 客户端权威 HP 同构）：
                        //   攻击端只报意向，被打端过 InOpposingTeam 门禁后自行结算扣血，
                        //   伪造包最多影响显示、无法强制扣血。武器 id 供死因文案（DeathSource.Player）

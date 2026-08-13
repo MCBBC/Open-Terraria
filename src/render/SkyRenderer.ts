@@ -194,27 +194,45 @@ export class SkyRenderer {
     for (let i = 0; i < 120; i++) {
       this.stars.push({ x: Math.random(), y: Math.random() * 0.7, s: Math.random() < 0.2 ? 2 : 1 });
     }
-    // 五族云贴图全量装载（Cloud_0-21；单张 ≤ 530×218，总量 ~0.5MB）
-    for (let i = 0; i < this.cloudTexs.length; i++) {
-      const im = new Image();
-      im.src = `sprites/vanilla/Cloud_${i}.png`;
-      this.cloudTexs[i] = im;
-    }
+    // 云贴图五族(Cloud_0-21)首用懒加载:绘制/选型路径经 cloudTex(i) 触发,未就绪
+    // 跳帧自愈(云淡入本身 >1s,无可见差异)。此前构造器全量装载 22 张——雨云/
+    // 风暴云(18-21)无雨天气永不出现,白载;且 SkyRenderer 在菜单+进图各构造一次,
+    // 急载翻倍
     this.sunTex = loadTex('Sun.png');
     for (let i = 0; i <= 8; i++) this.moonTexs[i] = loadTex(`Moon_${i}.png`);
-    // 事件月亮(Main.cs:62400-62408):南瓜月 kind=2 / 霜月 kind=1,同为 50×400 相位竖条
-    this.pumpkinMoonTex = loadTex('Moon_Pumpkin.png');
-    this.snowMoonTex = loadTex('Moon_Snow.png');
+    // 事件月亮(Main.cs:62400-62408):南瓜月 kind=2 / 霜月 kind=1,50×400 相位竖条
+    // ——只在对应月亮事件进行时才画,改首用懒加载(月亮绘制分支内 ensure)
     // 风场初值(Main.cs:10800):current = ±0.8 随机,计数 7200-28800 帧
     this.wind = (Math.floor(Math.random() * 1601) - 800) * 0.001;
     this.windCounter = 7200 + Math.floor(Math.random() * 21601);
   }
 
+  /** 云贴图首用懒加载(in-flight 去重:占位即标记;未就绪时调用方以 complete 守卫跳帧) */
+  private cloudTex(i: number): HTMLImageElement | null {
+    let t = this.cloudTexs[i];
+    if (!t) {
+      t = new Image();
+      t.src = `sprites/vanilla/Cloud_${i}.png`;
+      this.cloudTexs[i] = t;
+    }
+    return t;
+  }
+
   sunTex: HTMLImageElement;
   moonTexs: Array<HTMLImageElement | null> = [null, null, null, null, null, null, null, null, null];
-  /** 事件月亮（kind 1=霜月 Snow / 2=南瓜月 Pumpkin,Main.cs:62400-62408） */
-  pumpkinMoonTex: HTMLImageElement;
-  snowMoonTex: HTMLImageElement;
+  /** 事件月亮（kind 1=霜月 Snow / 2=南瓜月 Pumpkin,Main.cs:62400-62408）——
+   *  事件进行时才需要,首用懒加载(绘制分支 ensureEventMoonTex) */
+  private eventMoonTexs: Array<HTMLImageElement | null> = [null, null]; // [1]=Snow [2]=Pumpkin
+  /** 事件月亮贴图(首用懒加载,未就绪调用方跳帧) */
+  private ensureEventMoonTex(kind: 1 | 2): HTMLImageElement | null {
+    let t = this.eventMoonTexs[kind];
+    if (!t) {
+      t = new Image();
+      t.src = `sprites/vanilla/Moon_${kind === 2 ? 'Pumpkin' : 'Snow'}.png`;
+      this.eventMoonTexs[kind] = t;
+    }
+    return t;
+  }
   /** 世界月亮样式(原版 header moonType 0-8;默认 0 标准月) */
   moonType = 0;
   // ---- 天幕流星(AmbientSky.MeteorSkyEntity :1316-1341;spawnMeteor 期间夜 15000-16200
@@ -299,13 +317,13 @@ export class SkyRenderer {
     const lo = num3 - 300, hi = viewW + num4 + 300;
     c.x = lo + r() * (hi - lo);      // :107 Next(num3-300, screenWidth+num4+300)
     // 远端屏外直接全显（:161-168：x>屏+400 或 x+宽<-400 → Alpha=1）
-    const tw = (this.cloudTexs[c.type]?.naturalWidth ?? 200) * c.scale;
+    const tw = (this.cloudTex(c.type)?.naturalWidth ?? 200) * c.scale;
     if (c.x > viewW + 400 || c.x + tw < -400) c.alpha = 1;
     // AABB 重叠拒绝（:169-180）
-    const tex = this.cloudTexs[c.type];
+    const tex = this.cloudTex(c.type);
     const w = (tex?.naturalWidth ?? 200) * c.scale, h = (tex?.naturalHeight ?? 80) * c.scale;
     for (const o of this.vclouds) {
-      const ot = this.cloudTexs[o.type];
+      const ot = this.cloudTex(o.type);
       const ow = (ot?.naturalWidth ?? 200) * o.scale, oh = (ot?.naturalHeight ?? 80) * o.scale;
       if (c.x < o.x + ow && c.x + w > o.x && c.y < o.y + oh && c.y + h > o.y) return null;
     }
@@ -371,7 +389,7 @@ export class SkyRenderer {
     }
     const off = 600;
     this.vclouds = this.vclouds.filter((c) => {
-      const tex = this.cloudTexs[c.type];
+      const tex = this.cloudTex(c.type);
       const w = (tex?.naturalWidth ?? 200) * c.scale;
       return c.alpha > 0 && c.x + w > -off && c.x < viewW + off;
     });
@@ -653,7 +671,7 @@ export class SkyRenderer {
     ctx.save();
     ctx.imageSmoothingEnabled = true; // 原版云为软边贴图，平滑缩放
     for (const c of sorted) {
-      const tex = this.cloudTexs[c.type];
+      const tex = this.cloudTex(c.type);
       if (!tex || !tex.complete || tex.naturalWidth === 0) continue;
       const w = tex.naturalWidth * c.scale, h = tex.naturalHeight * c.scale;
       const dim = c.scale < 1 ? c.scale * 0.8 : 1; // 原版远景压暗（OriginalColorsForCloud pass1）
@@ -1045,8 +1063,8 @@ export class SkyRenderer {
         ctx.restore();
       }
     } else {
-      const tex = this.fx.moonEventKind === 2 ? this.pumpkinMoonTex
-        : this.fx.moonEventKind === 1 ? this.snowMoonTex
+      const tex = this.fx.moonEventKind === 2 ? this.ensureEventMoonTex(2)
+        : this.fx.moonEventKind === 1 ? this.ensureEventMoonTex(1)
           : this.moonTexs[Math.max(0, Math.min(8, this.moonType))];
       if (tex && tex.complete && tex.naturalWidth > 0) {
         const mw = tex.width; // 相位帧宽(50)

@@ -185,6 +185,9 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
         });
       },
     }, atlas);
+    // 纸娃娃贴图预载按当前角色外观收窄(545 张全量 → ~30 张);外观本体在
+    // onWorldReady 的 applyAppearance 才落位,预载期间读这里
+    g.preloadAppearance = selectedAppearance;
     return g;
   }
 

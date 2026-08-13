@@ -113,7 +113,7 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
-import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
+import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { mountFallbackColor } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
@@ -139,6 +139,15 @@ const PIXEL_ART_TILE = TILE_BY_KEY['pixel_block'] ?? -1; // 自研像素方块�
 const _lightTap = new Uint8Array(12);
 
 // ============ 原版 FindFrame 分族帧引擎（1.4.5.6 Terarria1456/Terraria/NPC.cs:67295+） ============
+
+/** TownNPCs 档案贴图条帧数推导：高/56 四舍五入（标准帧 40×56）。档案表帧数
+ *  与 npcFrameCount/vanilla-npcs.json 不同源（护士档案 23 帧 vs npcFrameCount 35=2;
+ *  Guide 1456/56=26 恰同表值）——档案表渲染是本仓自选路径（原版该分支 if(false)
+ *  死代码 NPC.cs:69299）,帧数只能从贴图自身反推;非整除表（Angler 1334 等）
+ *  ±1px/帧,界内安全视觉无差 */
+export function townSheetFrameCount(sheetHeight: number): number {
+  return Math.max(1, Math.round(sheetHeight / 56));
+}
 // 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
@@ -2516,7 +2525,7 @@ export class Renderer {
     24: { tex: 'vanilla/Glow_360.png', mode: 'frame', a: 'opacity' },    // 火焰小鬼（:25044-25047 GetAlpha(White)）
     383: { tex: 'vanilla/Glow_11.png', mode: 'frame', a: 1 },            // 火星军官（:25258-25260）
     386: { tex: 'vanilla/Glow_31.png', mode: 'frame', a: 1 },            // 火星工程师（:25445-25448）
-    387: { tex: 'vanilla/Glow_32.png', mode: 'frame', a: 0.75 },         // 特斯拉炮塔（:25451-25459 White×0.75；ai0>0 白化渐隐未接）
+    387: { tex: 'vanilla/Glow_32.png', mode: 'frame', a: 0.75 },         // 特斯拉炮塔（:25451-25459 White×0.75 再 ×(255-α)/255——α 恒 0 故 0.75 即终值；ai0>0 白化渐隐未接）
     388: { tex: 'vanilla/Glow_33.png', mode: 'frame', a: 1 },            // 火星无人机（:25460-25463）
     389: { tex: 'vanilla/Glow_34.png', mode: 'frame', a: 1 },            // 电圈僵尸（:25464-25467）
     437: { tex: 'vanilla/Glow_109.png', mode: 'frame', a: 200 / 255 },   // 幽火（:25484-25488 white.A=200；Glow_108 整图罩未接）
@@ -4186,13 +4195,12 @@ export class Renderer {
       const profileImg = sheetPath ? this.atlas.ensureVImage(sheetPath) : null;
       let r: DrawRect | null;
       if (profileImg) {
-        // 帧步长 = 贴图高 / npcFrameCount（FindFrame NPC.cs:67301-67302 同式）。
-        // ★count 回退 vanilla-npcs.json frames（2026-08-13 整条贴图走路根因）：
-        // atlas.vnpcMeta 只覆盖 vanilla.json npcs 的 20 条特殊条目,城镇 NPC
-        // （22 向导等）不在其中 → null→??1 → 帧高=整条 1456px=每帧画全表;
-        // 旧 vnpc() 路径有懒加载回退故无此病。档案表帧数与 npcFrameCount 同源
-        const count = this.atlas.vnpcMeta(n.vanillaId)?.count
-          ?? VANILLA_NPCS[String(n.vanillaId)]?.frames ?? 1;
+        // 帧数从【贴图自身】推导（townSheetFrameCount）——档案表帧数与 npcFrameCount
+        // 不同源（2026-08-13 整条贴图走路根因）：vanilla 走 TextureAssets.Npc[type]
+        // NPC_{id} 竖条 + npcFrameCount（Nurse 档案表 23 帧 vs npcFrameCount 35=2）,
+        // profile 贴图路径在原版是 `if(false&&)` 死代码（NPC.cs:69299）,本仓自选
+        // 档案表渲染 → 帧数只能按 56px 标准帧高从高度反推（Guide 1456→26 ✓）
+        const count = townSheetFrameCount(profileImg.height);
         const fh = Math.floor(profileImg.height / count);
         const idx = Math.max(0, Math.min(count - 1, n.frame));
         r = { img: profileImg, sx: 0, sy: idx * fh, sw: profileImg.width, sh: fh };

@@ -130,22 +130,23 @@ function tintedFlameCell(
 function flameTint(
   sheet: number, frameX: number, frameY: number, flicker: FlickerClock | null,
 ): [number, number, number] | null {
+  // Disco 动态色按 16 档量化进染色缓存（FlickerClock.discoColor 每帧 7/255 步进，
+  // 量化后全周期仅 ~40 档命中——缓存不随帧数膨胀）
+  const discoTint = (): [number, number, number] => {
+    const [r, g, b] = flicker!.discoColor();                            // :2738-2740 / :3466-3468
+    const q = (v: number) => Math.round(v * 255 / 16) * 16;
+    return [q(r), q(g), q(b)];
+  };
   if (sheet === CAMPFIRE_FLAME.sheet) {
     const style = Math.floor(frameX / CAMPFIRE_FLAME.frameYPitch);   // :2736
-    if (style === 5 && flicker) {
-      const [r, g, b] = flicker.discoColor();                          // :2738-2740
-      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-    }
+    if (style === 5 && flicker) return discoTint();
     if (style === 14) return [50, 50, 100];                            // :2741-2743
     if (style === 15) return null;                                     // (255,255,255,200)
     return null;                                                       // (255,255,255,0)
   }
   if (sheet === 4) {
     const style = Math.floor(frameY / 22);                             // :3464
-    if (style === 14 && flicker) {
-      const [r, g, b] = flicker.discoColor();                          // :3466-3468
-      return [Math.round(r * 255), Math.round(g * 255), Math.round(b * 255)];
-    }
+    if (style === 14 && flicker) return discoTint();
     if (style === 22) return [50, 50, 100];                            // :3469-3471
     if (style === 23) return null;                                     // (255,255,255,200)
     return [100, 100, 100];                                            // :3482 default

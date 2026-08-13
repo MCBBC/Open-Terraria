@@ -6,7 +6,7 @@
 import bagsJson from './vanilla-bossbags.json';
 import { npcValueOf } from '../drops/NpcDrops';
 
-interface Cond { t: string; n?: number; id?: number; k?: number; branch?: number; elseOf?: number }
+interface Cond { t: string; n?: number; id?: number; k?: number; branch?: number; elseOf?: number; pair?: number }
 interface Spawn {
   id?: number; stack?: number; lo?: number; hi?: number;
   idFrom?: [number, number]; dedup2?: boolean;

@@ -67,6 +67,8 @@ export interface GoreSpawnEntry {
   gates?: string[];
   /** Gore.NewGorePerfect：精确 pos/vel（随机扰动后回写，:1293-1299） */
   perfect?: boolean;
+  /** 原版常量次数 for 循环体（如 EoC `for(<2)` 4 调用 = 8 块）；id 区间已编码迭代序列时为 1 */
+  loop?: number;
   line?: number;
 }
 
@@ -167,6 +169,12 @@ export class GorePiece extends Entity {
     }
     // :1391-1398 多帧族（Frame=SpriteFrame(1,rows)，行 0 起；1218 首帧随机行在 Update 内）
     if (FRAME_ROWS[type]) g.row = 0;
+    // :1423-1425 SpecialAI==1（帆降）：初速整体覆写为 ((rand-0.5)*3, rand*2π)——
+    // vy 兼作相位累加器，Gore_UpdateSail 据此走圆弧下落
+    if (SAIL_TYPES.has(type)) {
+      g.vx = (Math.random() - 0.5) * 3;
+      g.vy = Math.random() * Math.PI * 2;
+    }
     // :1442-1449（907-909 随机起始帧；本表未出现，保留语义）
     if (type >= 907 && type <= 909) g.row = irand(3);
     livePool.add(g);
@@ -345,13 +353,16 @@ export function spawnDeathGore(s: GoreNpcSource, add: (p: GorePiece) => void): n
   let n = 0;
   for (const e of list) {
     if (!aiGateOk(e, s)) continue;
-    const type = entryId(e);
-    if (type == null || type < 0) continue; // expr 留档条目（提取器不可静态求值）
-    const pos = entryPos(e, s);
-    const vel = entryVel(e, s);
-    const scale = e.scale ?? (e.scaleExpr === 'scale' ? s.vanillaScale : 1);
-    const g = GorePiece.newGore(type, pos.x, pos.y, vel.vx, vel.vy, scale, !!e.perfect);
-    if (g) { add(g); n++; }
+    const times = e.loop ?? 1;
+    for (let k = 0; k < times; k++) {
+      const type = entryId(e);
+      if (type == null || type < 0) continue; // expr 留档条目（提取器不可静态求值）
+      const pos = entryPos(e, s);
+      const vel = entryVel(e, s);
+      const scale = e.scale ?? (e.scaleExpr === 'scale' ? s.vanillaScale : 1);
+      const g = GorePiece.newGore(type, pos.x, pos.y, vel.vx, vel.vy, scale, !!e.perfect);
+      if (g) { add(g); n++; }
+    }
   }
   return n;
 }

@@ -574,9 +574,9 @@ export function possessedStep(e: Enemy, game: GameHooks, p: Player | null): bool
 }
 
 /** Fritz 462 跳扑（NPC.cs:57678-57710）。落地 + 目标 <150px + |vx|>3 + 朝目标
- *  横向逼近 → vx×1.75、vy−4.5；目标在下方按落差 ≥20/40/80/100px 追加
- *  −0.5/−1/−1.5/−1.5；|vx| 钳 7。段内 flag=true（放行空中跳跃段），
- *  不 return——继续走本 tick 通用行走。 */
+ *  横向逼近 → vx×1.75、vy−4.5；目标在【上方】时按自身中心低于目标的落差
+ *  （Center.Y 差）≥20/40/80/100px 逐档追加 −0.5/−1/−1.5/−1.5（越高跳得越高）；
+ *  |vx| 钳 7。段内 flag=true（放行空中跳跃段），不 return——继续走本 tick 通用行走。 */
 export function fritzPounceStep(e: Enemy, p: Player | null): void {
   if (e.vanillaId !== 462 || e.vy !== 0 || !p) return;
   if (Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 150) return;            // :57678 <150px
@@ -585,7 +585,7 @@ export function fritzPounceStep(e: Enemy, p: Player | null): void {
   if (!((e.vx < 0 && e.cx > p.cx) || (e.vx > 0 && e.cx < p.cx))) return;
   e.vx *= 1.75;                                                       // :57681
   e.vy -= 4.5;                                                        // :57682
-  const drop = e.cy - p.cy;                                           // :57683 Center.Y 差
+  const drop = e.cy - p.cy;                                           // :57683 自身中心 − 目标中心
   if (drop > 20) e.vy -= 0.5;                                         // :57683-57684
   if (drop > 40) e.vy -= 1;                                           // :57687-57688
   if (drop > 80) e.vy -= 1.5;                                         // :57691-57692

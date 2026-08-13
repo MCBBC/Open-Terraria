@@ -38,7 +38,7 @@ describe('原版随机文本体系', () => {
     expect(createDeathText(name, { kind: 'fell' })).toContain(name);
     expect(createDeathText(name, { kind: 'drowned' })).toContain(name);
     expect(createDeathText(name, { kind: 'lava' })).toContain(name);
-    expect(createDeathText(name, { kind: 'default' })).toContain(name);
+    expect(createDeathText(name, { kind: 'defaultWrap' })).toContain(name);  // 旧称 'default' 已更名
   });
 
   it('死亡文本池可命中（多次抽样至少出现两种不同措辞）', () => {

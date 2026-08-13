@@ -240,6 +240,7 @@ function pushCtx(guard) {
     types: guard?.types ?? null, exclude: guard?.exclude ?? null,
     bounds: guard?.bounds ?? null, life: guard?.life ?? null,
     gate: guard?.gate ?? null, ai: guard?.ai ?? null,
+    loopN: guard?.loopN ?? null, loopVar: guard?.loopVar ?? null,
   });
 }
 /** 调用点守卫链解析 */
@@ -266,7 +267,13 @@ function resolveChain(extraCase) {
   }
   let life = null;
   for (let i = chain.length - 1; i >= 0; i--) if (chain[i]?.life) { life = chain[i].life; break; }
-  return { types: include, exclude, life, gates, ai, typeCtxId };
+  let loopN = 1;
+  const loopVars = [];
+  for (const c of chain) {
+    if (c?.loopN) loopN *= c.loopN;
+    if (c?.loopVar) loopVars.push(c.loopVar);
+  }
+  return { types: include, exclude, life, gates, ai, typeCtxId, loopN, loopVars };
 }
 
 function recordLocalAssign(name, valExpr, line, typeCtxId, loopRange) {
@@ -589,11 +596,12 @@ function compileVel(expr) {
   return out;
 }
 
-function emitEntry(npcId, fields, line, gates, ai) {
+function emitEntry(npcId, fields, line, gates, ai, loopN) {
   if (!entries.has(npcId)) entries.set(npcId, []);
   const f = { ...fields, line };
   if (gates.length) f.gates = gates;
   if (ai.length) f.ai = ai;
+  if (loopN && loopN > 1) f.loop = loopN;
   entries.get(npcId).push(f);
 }
 
@@ -660,15 +668,26 @@ for (const { text, line: lineNo } of logical) {
       caseAt.set(depth, null);
       i += m[0].length;
     } else if ((m = rest.match(/^(for|foreach|while|do|try)\b/))) {
-      guard = LOOP_GUARD;
-      // for 头部整数循环变量 → 记区间（id 表达式引用循环变量时还原成区间）
-      const fh = rest.match(/^for\s*\(\s*(?:int|float|double|var)\s+([A-Za-z_]\w*)\s*=\s*(-?\d+)\s*;\s*\1\s*(<=|<)\s*(\d+)\s*;/);
+      // for 头部：整数循环变量区间（id 表达式引用时还原）+ 常量次数（表项 loop 字段，
+      // 运行时按次重复生成——EoC `for(num579<2)` 内 4 调用 = 8 块）
+      const fh = rest.match(/^for\s*\(\s*(?:int|float|double|var)?\s*([A-Za-z_]\w*)\s*=\s*(-?\d+)\s*;\s*\1\s*(<=|<)\s*(\d+)\s*;/);
+      let loopN = 1;
       if (fh) {
         const lo = +fh[2], hi = +fh[4];
         const rg = [lo, fh[3] === '<=' ? hi : hi - 1];
         recordLocalAssign(fh[1], `${rg[0]}`, lineNo, resolveChain(null).typeCtxId, rg);
+        const n = (fh[3] === '<=' ? hi - lo + 1 : hi - lo);
+        if (n > 0 && n <= 64) loopN = n;
+        guard = { ...LOOP_GUARD, loopN, loopVar: fh[1] };
       }
-      i += m[0].length;
+      // 头部条件括号整体跳过（否则会被当成语句段消费掉守卫）
+      const op = rest.indexOf('(');
+      if (op >= 0) {
+        const hd = parenBody(rest, op);
+        i += op + hd.length + 2;
+      } else {
+        i += m[0].length;
+      }
     } else {
       handled = false;
     }
@@ -685,6 +704,7 @@ for (const { text, line: lineNo } of logical) {
       j++;
     }
     const seg = text.slice(segStart, j);
+    const segLoopN = guard && guard.kind === 'loop' ? (guard.loopN ?? 1) : 1;
     let from = 0;
     for (;;) {
       const at = seg.indexOf('Gore.NewGore', from);
@@ -694,9 +714,9 @@ for (const { text, line: lineNo } of logical) {
       if (p < 0) continue;
       const callee = seg.slice(at, p);
       if (!/^Gore\.NewGore(Perfect|Direct)?$/.test(callee)) continue;
-      handleGoreCall(callee, splitArgs(parenBody(seg, p)), lineNo);
+      handleGoreCall(callee, splitArgs(parenBody(seg, p)), lineNo, segLoopN);
     }
-    guard = null;
+    if (guard && guard.kind === 'loop') guard = null; // 无括号体 = 单语句，守卫就此消费
     i = j;
   }
   // 行尾仍未消费的守卫头（与 `{` 分行）挂到下一逻辑行
@@ -704,7 +724,7 @@ for (const { text, line: lineNo } of logical) {
 }
 
 /** 单个 Gore.NewGore* 调用 → 表项 */
-function handleGoreCall(callee, args, lineNo) {
+function handleGoreCall(callee, args, lineNo, segLoopN = 1) {
   callsTotal++;
   const a = namedArgs(args);
   if (a.Position === undefined || a.Type === undefined) return;
@@ -712,7 +732,8 @@ function handleGoreCall(callee, args, lineNo) {
   if (process.env.GORE_DBG_LINE && lineNo === +process.env.GORE_DBG_LINE) {
     console.error('[dbg] line', lineNo, 'depth', depth, 'stack', JSON.stringify(stack.map((c2) => c2?.cond)), 'case', cc?.label ?? null);
   }
-  const r = resolveChain(cc ? { id: 0, kind: 'case', cond: `case ${cc.label}`, types: cc.types, exclude: null, bounds: null, life: null, gate: null, ai: null } : null);
+  const r = resolveChain(cc ? { id: 0, kind: 'case', cond: `case ${cc.label}`, types: cc.types, exclude: null, bounds: null, life: null, gate: null, ai: null, loopN: null, loopVar: null } : null);
+  r.loopN *= segLoopN;
 
   if (r.gates.some((g) => g.includes('UsesPartyHat'))) { callsPartySkipped++; return; } // 派对帽专属
   if (r.life === 'alive') { callsHitSkipped++; return; }                               // hit 段
@@ -739,6 +760,10 @@ function handleGoreCall(callee, args, lineNo) {
   const perfect = callee === 'Gore.NewGorePerfect' ? { perfect: true } : {};
   const base = { ...velFields, ...scaleFields, ...posFields, ...perfect };
 
+  // id 表达式直接引用外层循环变量（如 `num343`）= 每次迭代取一个具体 id，
+  // 区间/候选已编码迭代序列 → loop 归 1，防运行时重复随机取样
+  if (r.loopN > 1 && r.loopVars.some((v) => new RegExp(`\\b${v}\\b`).test(String(a.Type)))) r.loopN = 1;
+
   let e = null;
   let perType = null;
   let fields = null;
@@ -748,6 +773,9 @@ function handleGoreCall(callee, args, lineNo) {
     const res = resolveIdPerType(String(a.Type), target, lineNo, r.typeCtxId);
     if (res?.fields) fields = res.fields;
     else if (res?.perType) perType = res.perType;
+    // 区间/候选尺寸 == 循环次数 = 序列已被区间编码（469-475×7 等）→ loop 归 1
+    const span = fields ? (fields.ids ? fields.ids.length : fields.idMin != null ? (fields.idMax - fields.idMin + 1) : 0) : 0;
+    if (span > 1 && span === r.loopN) r.loopN = 1;
   }
 
   if (!r.types) {
@@ -758,15 +786,15 @@ function handleGoreCall(callee, args, lineNo) {
 
   if (perType) {
     for (const t of target) {
-      emitEntry(t, { ...base, ...perType.get(t) }, lineNo, r.gates, r.ai);
+      emitEntry(t, { ...base, ...perType.get(t) }, lineNo, r.gates, r.ai, r.loopN);
     }
     return;
   }
   if (fields) {
-    for (const t of target) emitEntry(t, { ...base, ...fields }, lineNo, r.gates, r.ai);
+    for (const t of target) emitEntry(t, { ...base, ...fields }, lineNo, r.gates, r.ai, r.loopN);
     return;
   }
-  for (const t of target) emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gates, r.ai);
+  for (const t of target) emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gates, r.ai, r.loopN);
   unresolved.push({
     line: lineNo, expr: String(a.Type),
     types: target.length > 6 ? `${target[0]}..${target[target.length - 1]}(${target.length})` : target.join('|'),
@@ -825,6 +853,7 @@ const out = {
       'scaleExpr="scale" = 取 NPC.scale；posExpr 为原版位置表达式（默认 position=左上角）',
       'ai=[{slot,value}] = 原版 ai[N]==V 门（运行时按 NPC ai 槽位判定，不满足跳过该条）',
       'perfect=true = Gore.NewGorePerfect：随机扰动后回写精确 pos/vel（运行时不抖动）',
+      'loop=N = 原版常量次数 for 循环体内（运行时重复生成 N 次，如 EoC <2 循环 = 8 块）',
       'gates = 其余不可求值守卫（专家模式/变体等），仅登记不拦截',
       'tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）',
     ],

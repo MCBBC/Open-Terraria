@@ -4,6 +4,7 @@ import { GrappleProj } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
 import { GRAPPLE_LATCH } from '../entities/GrappleProj';
 import { PetFollower } from '../entities/PetFollower';
+import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
@@ -104,6 +105,7 @@ import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spaw
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
+import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
@@ -126,7 +128,7 @@ import { growGemTree } from '../world/gen/vanilla/TreePass';
 import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
-import { inOpposingTeam } from '../stats/Pvp';
+import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } from '../stats/Pvp';
 import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
@@ -192,6 +194,7 @@ import { spawnWOF } from '../entities/bossAI_wof';
 import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj } from '../entities/PrismProj';
+import { TerraArc } from '../entities/TerraArc';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -490,7 +493,7 @@ export function dropInventoryOnDeath(
 }
 
 /** NPC 对话框按钮 id（与 ui/NpcDialog.ts NpcButtonId 同形；quest = 渔夫任务交付） */
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'status' | 'close';
 
 export interface GameCallbacks {
   onWorldReady: () => void;
@@ -571,6 +574,8 @@ export class Game implements GameHooks {
   private frameDts: number[] = [];
   /** 上一 tick 的 clock.timeOfDay（昼夜跨越检测） */
   private _lastClockT = 0.3;
+  /** 信息列图标点击边沿(防按住连切) */
+  private _infoAccClickLatch = false;
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
@@ -654,6 +659,9 @@ export class Game implements GameHooks {
   boss: Enemy | null = null;
   /** 本局世界是否新生成(NPC 入驻公告只在新世界播) */
   private freshlyCreated = false;
+  /** 进图预载用的角色外观(纸娃娃贴图按当前外观收窄用;mainFlow.makeGame 注入,
+   *  外观应用 onWorldReady 才发生——预载时取 player.appearance 拿到的是默认值) */
+  preloadAppearance: import('../player/Appearance').Appearance | null = null;
   /** 原版 Spawner 移植实例（VanillaSpawner.ts） */
   vanillaSpawner: VanillaSpawner | null = null;
   /** 世界生成 worker 客户端（懒建；不可用时 newWorld 走主线程 fallback） */
@@ -735,7 +743,7 @@ export class Game implements GameHooks {
 
   private netNpcPuppets = new Map<number, { e: Enemy; seen: number }>();
   private netDropPuppets = new Map<number, { d: ItemDrop; seen: number }>();
-  private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number }>();
+  private netProjPuppets = new Map<number, { p: Entity; seen: number; pvp?: boolean; ownerSlot?: number; pvpImmuneT?: number; kind7?: number; enchant?: number }>();
   private netNpcLast = new Map<number, { x: number; y: number; hp: number; t: number }>();
   private netProjLast = new Map<number, { x: number; y: number; t: number }>();
   private netDropSeen = new Map<number, ItemDrop>();
@@ -808,7 +816,10 @@ export class Game implements GameHooks {
         kind = 0; tag = String(p.projId ?? 1);
         // v5：敌对弹带 bit7（原版 Projectile.hostile）——访客端据此本地结算 Damage_EVP
         if (p.hostile) kind |= 0x80;
-        else if (pvpOn) kind |= 0x40;   // v7：玩家 PvP 弹（友方 Arrow = 玩家射出）
+        else {
+          if (pvpOn) kind |= 0x40;   // v7：玩家 PvP 弹（友方 Arrow = 玩家射出）
+          aux = meleeEnchantOf(this.player.buffs);  // StatusPvP 浸剂通道（aux 低 4 位）
+        }
       }
       else if (p instanceof Dart) {
         kind = 2; tag = String(p.projId ?? 0);
@@ -817,6 +828,7 @@ export class Game implements GameHooks {
       else if (p.projId !== undefined) {
         kind = 1; tag = String(p.projId);
         if (pvpOn) kind |= 0x40;   // v7：武器族弹幕（回旋镖/剑气等，恒玩家来源）
+        aux = meleeEnchantOf(this.player.buffs);    // melee 族：浸剂/冰霜/熔岩石均生效
       }
       else if (p instanceof TrapShot) {
         kind = 3; tag = p.kind ?? 'dart';
@@ -944,11 +956,14 @@ export class Game implements GameHooks {
         p.netPuppet = true;
         p.netId = s.netId;
         this.entities.add(p, 'projectiles');
-        // v7：PvP 弹 meta（kind bit6 + netId 高 8 位归属）——netPuppetProjContact 消费
+        // v7：PvP 弹 meta（kind bit6 + netId 高 8 位归属 + aux 低 4 位浸剂）——
+        // netPuppetProjContact 消费
         pup = {
           p, seen: this.tickCount,
           pvp: (s.kind & 0x40) !== 0,
           ownerSlot: s.netId >>> 24,
+          kind7: s.kind & 0x7f,
+          enchant: s.aux & 15,
         };
         this.netProjPuppets.set(s.netId, pup);
       } else {
@@ -1029,19 +1044,83 @@ export class Game implements GameHooks {
    *  InOpposingTeam（Player.cs:4287 全服唯一 PvP 关系判定）：任一门不过即丢弃——
    *  伪造意向包最多触发一次受击表现，扣血与否完全由本地决定（victim-settles）。
    *  伤害走 damagePlayer(pvp)（8t 无敌帧 + pvpDeath 标记），死因 = DeathSource.Player */
-  private netApplyStrikePlayer(fromSlot: number, dmg: number, weaponId: number) {
+  private netApplyStrikePlayer(fromSlot: number, dmg: number, weaponId: number, flags: number) {
     if (!this.net || !this.net.policy.pvpAllowed) return;
     const p = this.player;
     if (p.dead) return;
     const rp = this.net.players.get(fromSlot);
     if (!rp || !rp.active) return;
+    // ---- bit5 圣骑士盾转移（Player.cs:37727-37763 受击侧镜像：同队盾持有者承担 25%）----
+    // 转移 hurt 为 pvp:false 的独立冷却槽（ImmunityCooldownID.PaladinsShield）——
+    // 不吃常规无敌帧；死因 ByOther(20) teamTank。冷却/减伤以独立字段近似（计划备案）
+    if (flags & 0x20) {
+      if (p.team === 0 || rp.team !== p.team) return;    // CanDefendWithPaladinsShield(team)
+      if (!this.hasPaladinShield(p) || p.paladinShieldCd > 0) return;
+      p.paladinShieldCd = 40;
+      p.lastDamageCause = { kind: 'teamTank' };
+      const d = Math.max(1, Math.round(dmg - p.defense * 0.5)); // CalculateDamagePlayersTake 近似（难度防系数未乘,备案）
+      p.hp = Math.max(0, p.hp - d);
+      this.addDamageNumber(p.cx, p.y, d, false, '#FF7060');
+      return;
+    }
     // InOpposingTeam（Player.cs:4287）：双方 hostile 且（对方无队或异队）——单调用
     // 完成原版 MessageBuffer.cs:3864 双向 hostile 校验的等价判定
     if (!inOpposingTeam(p, rp)) return;
+    // ---- bit6 狱火光环（Player.cs:9931-9946：200px 内敌对玩家 60t 一跳 20 + 323 2s）----
+    // 死因 ByOther(16) inferno；per-owner 冷却防伪造刷屏（原版按持有者 infernoCounter 节拍）
+    if (flags & 0x40) {
+      const cd = this.pvpAuraCd.get(fromSlot) ?? 0;
+      if (cd > 0) return;
+      this.pvpAuraCd.set(fromSlot, 60);
+      p.buffs.apply(BuffType.OnFire3, 2);
+      p.lastDamageCause = { kind: 'inferno' };
+      this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
+      return;
+    }
+    // ---- 近战命中（ItemCheck_MeleeHitPVP）----
     // 死因：凶手名 + 凶器名（DeathSource.Player "{0}，凶手是{1}的{2}。"）
     p.lastDamageCause = { kind: 'player', name: rp.name, weapon: Lang.itemName(weaponId) ?? '?' };
+    // StatusToPlayerPvP（Player.cs:6251-6349：相交即授予,在 Hurt 之前 :43414）——
+    // 浸剂从 flags bits1-4 还原；frost/magma 从攻击者代理装备还原（msg5 已同步 armor）
+    const ownerCtx = this.netPvpOwnerCtx(fromSlot);
+    statusPvPMelee(p.buffs, ITEM_DEFS[weaponId]?.vid ?? -1, {
+      meleeEnchant: (flags >> 1) & 15,
+      frostBurn: ownerCtx.frostBurn,
+      magmaStone: ownerCtx.magmaStone,
+    });
     this.damagePlayer(dmg, rp.x, rp.y, undefined, false, true);
     this.playSfx('hit', 1, rp.x, rp.y);
+  }
+
+  /** 圣骑士盾 938 装备检测（Player.defendedByPaladin——配饰槽 vid 扫描） */
+  private hasPaladinShield(pl: { inv: { armor: Array<{ id: number } | null> } }): boolean {
+    for (let i = 3; i < pl.inv.armor.length; i++) {
+      const s = pl.inv.armor[i];
+      if (!s) continue;
+      const d = ITEM_DEFS[s.id];
+      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      if (vid === 938) return true;
+    }
+    return false;
+  }
+
+  /** 狱火光环 PvP 意向的 per-owner 冷却（tick） */
+  private pvpAuraCd = new Map<number, number>();
+
+  /** PvP 攻击者侧装备态还原（frostBurn 套装引擎/熔岩石 903——msg5 已同步 armor,
+   *  代理 equipStats 现成；熔岩石 accfx 未登记,直接扫配饰槽 vid） */
+  private netPvpOwnerCtx(slot: number): { frostBurn: boolean; magmaStone: boolean } {
+    const proxy = this.remotePlayerProxies.find((pr) => (pr as unknown as { __netSlot?: number }).__netSlot === slot);
+    if (!proxy) return { frostBurn: false, magmaStone: false };
+    let magmaStone = false;
+    for (let i = 3; i < proxy.inv.armor.length; i++) {
+      const s = proxy.inv.armor[i];
+      if (!s) continue;
+      const d = ITEM_DEFS[s.id];
+      const vid = d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      if (vid === 903) { magmaStone = true; break; }
+    }
+    return { frostBurn: proxy.equipStats.frostBurn, magmaStone };
   }
 
   /** msg28 回包：弹幕消亡即时移除傀儡（v6——替代纯超时清扫的补刀路径） */
@@ -1152,6 +1231,16 @@ export class Game implements GameHooks {
           kind: 'player', name: owner.name,
           weapon: Lang.projectileName(pr.projId ?? 0) ?? '?',
         };
+        // StatusPvP（Projectile.cs:11092：Hurt 前授予,immune 时跳过 :13561）——
+        // 弹幕性质按 kind 还原（0=箭 ranged / 1=武器族 melee / 其余 neither）
+        if (this.player.iframes <= 0) {
+          const ownerCtx = this.netPvpOwnerCtx(pup.ownerSlot ?? -1);
+          statusPvPProjectile(this.player.buffs, pr.projId ?? 0, {
+            melee: pup.kind7 === 1, ranged: pup.kind7 === 0,
+            meleeEnchant: pup.enchant ?? 0,
+            frostBurn: ownerCtx.frostBurn, magmaStone: ownerCtx.magmaStone,
+          });
+        }
         if (hitPlayer(pr, this, rolled, false, true)) {
           pup.pvpImmuneT = 40;   // :13618 每弹×每玩家独立冷却
           this.playSfx('hit', 1, pr.cx, pr.cy);
@@ -1671,8 +1760,21 @@ export class Game implements GameHooks {
     // 补齐完成后触发一次背包刷新，把兜底图标原地替换为原版图标
     void a.preloadIcons().then(() => this.cb.onInventoryChanged?.());
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadCharTex'), 0.7);
-    // Player_ 全量(纸娃娃全部身体通道) + 仅当前装备的 Armor 表;
-    // 换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
+    // Player_ 全量 545 张(77MB 解码)收窄为【当前外观所需】:纸娃娃 14 通道 × 变体
+    // (女性变体缺通道回退男体,故男体常备) + 发型正/帽发各 1 张 ≈ 30 张;
+    // 换装/更衣走 vui 懒加载 + PaperDoll 就绪预检自愈(2026-08-13)
+    const app = this.preloadAppearance ?? this.player.appearance;
+    const variant = app?.skinVariant ?? 0;
+    const hair = app?.hair ?? 0;
+    const playerFiles = new Set<string>();
+    for (const s of [0, 1, 2, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13]) {
+      playerFiles.add(`vanilla-ui/Player_${variant}_${s}.png`);
+      if (variant !== 0) playerFiles.add(`vanilla-ui/Player_0_${s}.png`); // 女体缺通道男体回退
+    }
+    playerFiles.add(`vanilla-ui/Player_Hair_${hair + 1}.png`);
+    playerFiles.add(`vanilla-ui/Player_HairAlt_${hair + 1}.png`); // 帽子发型头盔(小图,直接备上)
+    await a.preloadUiFiles(playerFiles);
+    // 仅当前装备的 Armor 表;换装时 vui 懒加载 + PaperDoll 就绪预检自动兜住
     const armorFiles = new Set<string>();
     for (const id of this.playerPreviewArmor()) {
       if (id == null) continue;
@@ -1681,11 +1783,12 @@ export class Game implements GameHooks {
       const vid = VANILLA_ITEM_ICON_MAP[def.key] ?? (def.key.startsWith('vi_') ? parseInt(def.key.slice(3), 10) : NaN);
       const entry = Number.isFinite(vid) ? a.vanilla.armorIndex?.[String(vid)] : null;
       if (!entry) continue;
-      if (entry.head) armorFiles.add(`Armor_Head_${entry.head}.png`);
-      if (entry.body) armorFiles.add(`Armor_Armor_${entry.body}.png`);
-      if (entry.legs) armorFiles.add(`Armor_Legs_${entry.legs}.png`);
+      if (entry.head) armorFiles.add(`vanilla-ui/Armor_Head_${entry.head}.png`);
+      if (entry.body) armorFiles.add(`vanilla-ui/Armor_Armor_${entry.body}.png`);
+      if (entry.legs) armorFiles.add(`vanilla-ui/Armor_Legs_${entry.legs}.png`);
     }
-    await a.preloadUiPrefix(['Player_']);
+    // ★此前 armorFiles 用的是键形态(无 vanilla-ui/ 前缀),preloadUiFiles 按路径
+    // 直取 → 初始护甲预载一直在静默 404(靠 PaperDoll 懒加载兜底才没暴露)
     await a.preloadUiFiles(armorFiles);
     onProgress?.(Lang.text('Mods.SandboxWorld.Progress.LoadBg'), 0.9);
     await this.renderer.biomeBg.preloadInitial(this.world);
@@ -7079,9 +7182,11 @@ export class Game implements GameHooks {
         const NO_SWAP_PLACE = new Set([2, 60, 70, 109, 199, 23, 661, 662, 633]);
         const NO_SWAP_TARGET = new Set([58, 225, 171, 127, 481, 482, 483, 423]);
         const tsheet = tdef?.vanilla?.sheet ?? -1;
+        // tileCut 族(草类)由 decor 近似覆盖;framed 家具不换;solid!==false 排除非实心
+        // (|| 平台 19 族可换——优先级括号已显式)
+        const solidish = tdef ? (tdef.solid || tdef.vanilla?.sheet === 19) : false;
         const swapOk = !NO_SWAP_PLACE.has(placeVid) && !NO_SWAP_TARGET.has(tsheet)
-          && !(tdef?.decor ?? false) && !(tdef?.cut ?? false)
-          && !tdef?.framed && tdef?.solid !== false || (tdef?.vanilla?.sheet === 19);
+          && !(tdef?.decor ?? false) && !tdef?.framed && solidish;
         if (swapOk) {
           const tileIdHere = TILE_BY_KEY[itemDef.tile!];
           if (tileIdHere !== targetType && tdef?.drop !== itemDef.key) {
@@ -8423,6 +8528,18 @@ export class Game implements GameHooks {
         en.cursedT = Math.max(en.cursedT, 2); // AddBuff(323,120) 灼烧 2s
         if (hitTick) en.hurt(Math.max(1, Math.round(20 * this.player.damageMult('melee'))), 0, 0, this);
       }
+      // PvP 半边（Player.cs:9931-9946）：hostile 时 200px 内敌对玩家 60t 一跳 20 直伤
+      // （死因 16 inferno）+ 地狱火 323 2s——经 msg44 bit6 广播意向、被击端本地结算
+      // （光环为 buff 驱动不随弹幕同步,故走独立意向位；被击端 per-owner 60t 冷却）
+      if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && hitTick) {
+        for (const rp of this.remotePlayerProxies) {
+          const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
+          if (slot === undefined || rp.dead) continue;
+          if (!inOpposingTeam(this.player, rp)) continue;
+          if (Math.hypot(rp.cx - this.player.cx, rp.cy - this.player.cy) > 200) continue;
+          this.net.sendStrikePlayer(slot, 20, 0, 0, -1, 0x40);
+        }
+      }
     }
     // 金币雨公告（StartRain 1/25；原版 ChatHelper Lang.gen[93]→消息列）
     if (weather.coinRainPending) {
@@ -9448,27 +9565,29 @@ export class Game implements GameHooks {
       }
       if (killed && e.def.boss) { /* boss 死亡处理在 fixedUpdate */ }
     }
-    // ---- 近战 PvP：远端玩家命中（原版 ItemCheck_MeleeHitPVP Player.cs:49994-43000 段）----
+    // ---- 近战 PvP：远端玩家命中（原版 ItemCheck_MeleeHitPVP Player.cs:43401-43415）----
     // 权威=被打方本地结算（victim-settles）：本端只检测相交并广播 msg44 意向，
     // 不对 proxy 扣血（proxy.hp 由被击端 msg16 回报刷新）。门禁：pvpAllowed 房 +
     // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
-    // 同构（原版 :13510 同队门 team!=0&&equal）
+    // 同构（原版 :43409 同队门 team!=0&&equal）
     if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && !isNet) {
       for (const rpEnt of this.remotePlayerProxies) {
-        const rp = rpEnt as Player & { __netSlot?: number };
+        const rp = rpEnt as Player;
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
         if (slot === undefined || rp.dead) continue;
         if (this.swingHitSet.has(rp.id)) continue;             // 同一挥击只中一次
         if (!inOpposingTeam(this.player, rp)) continue;         // :4287（含双方 hostile 门）
         if (!hitRect(rp.x, rp.y, rp.w, rp.h)) continue;
         this.swingHitSet.add(rp.id);
-        // 命中意向：裸伤（对方端自行结算防御/endurance/无敌帧）+ 击退方向 + 凶器 id
-        const crit = Math.random() < this.player.critChance('melee') / 100
-          + (itemCombat(this.swing ? (ITEM_DEFS[this.swing.item]?.vid ?? viIdFromKey(ITEM_DEFS[this.swing.item]?.key ?? '')) : -1)?.crit ?? 0) / 100;
+        // 命中意向：裸伤（对方端自行结算防御/endurance/无敌帧）+ 击退方向 + 凶器 id。
+        // ★原版近战 PvP 暴击 = 恒 10%（:43410 Next(1,101)<=10,不吃 meleeCrit 装备链）
+        const crit = Math.random() * 100 < 10;
         const rawDmg = Math.max(1, Math.round((meleeDmg || Math.max(1, Math.ceil((tool?.power ?? 10) / 16)))
           * this.player.damageMult('melee') * (crit ? 2 : 1) * (1 + (Math.random() * 30 - 15) / 100)));
         const kdir = Math.sign(rp.cx - p.cx) || this.player.facing;
-        this.net.sendStrikePlayer(slot, rawDmg, kdir, 0, this.swing?.item ?? -1, crit);
+        // flags: bit0=crit / bits1-4=武器浸剂 meleeEnchant（被击端 StatusPvP 消费）
+        this.net.sendStrikePlayer(slot, rawDmg, kdir, 0, this.swing?.item ?? -1,
+          (meleeEnchantOf(this.player.buffs) << 1) | (crit ? 1 : 0));
         // 本端反馈：受击音 + InPVP 公式预览飘字（Main.cs:65636：dmg−def×0.5 下限 1，
         // 与 Hurt 返回值同源——实扣以被击端为准）
         this.sfx.play('hit', 1, rp.cx, rp.cy);
@@ -10111,6 +10230,8 @@ export class Game implements GameHooks {
     // 商店按钮(NPCInteractions.cs:489-513 Shop 注册表覆盖的全部 NPC)
     if (Game.SHOPSTOCK[String(npc.vanillaId)]) buttons.push({ id: 'shop', label: Lang.inter(28) });
     if (npc.npcKey === 'nurse') buttons.push({ id: 'heal', label: Lang.inter(54) });       // 治疗
+    // 树妖：世界状态（NPCInteractions.cs:124-129 Register Status——注册序在商店后）
+    if (npc.npcKey === 'dryad') buttons.push({ id: 'status', label: '世界状态' });
     if (npc.npcKey === 'tax_collector') buttons.push({ id: 'collect', label: Lang.inter(89) }); // 收集税款
     // 哥布林工匠：重铸（NPCChatText_TinkererReforge Main.cs:39431）
     if (npc.npcKey === 'goblin_tinkerer') buttons.push({ id: 'reforge', label: Lang.inter(19) });
@@ -10528,6 +10649,20 @@ export class Game implements GameHooks {
       this.openNpcHappinessPanel();
       return;
     }
+    if (id === 'status') {
+      // 树妖世界状态（NPCInteractions.cs:124-129 Actions.GetDryadWorldStatus：
+      // GetDryadWorldStatusDialog → 纯净世界触发 HandleSpecialEvent(27)）
+      this.sfx.play('menuTick');
+      const pcts = alignmentPcts(this.world.store, Math.floor(this.world.groundLevel));
+      const { text, pure } = dryadWorldStatus(pcts, this.world.name);
+      this.cb.onNpcDialog?.(Lang.npcName(20) ?? '树妖', text,
+        this.npcDialogButtons(this.dialogNpc!), portraitUrl(this.dialogNpc!.vanillaId));
+      if (pure) {
+        this.achievements.handleSpecialEvent(27,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+      }
+      return;
+    }
   }
 
   // ================= 渔夫任务链（Main.anglerQuest* + Player.GetAnglerReward）=================
@@ -10702,8 +10837,25 @@ export class Game implements GameHooks {
       (vid) => vid != null ? Lang.npcName(vid as number) : null,
       (vx, vy) => Math.hypot(vx, vy),
     );
-    // 悬停行(背包内点图标切换 P2 接)
+    // 悬停行;背包内点图标切换 hideInfo(Main.cs:46547-46573:Sound 12 + 翻转;
+    // num==8 已在 buildInfoAccRows 归并 7)
     r.infoAccHover = r.infoAccs.hitTest(this.input.mouseX, this.input.mouseY);
+    const hovering = r.infoAccHover >= 0 && r.infoAccs.state.inventoryOpen;
+    if (hovering) {
+      // 吞挖掘/放置点击(与 timeUiHover 同语义)
+      this.renderer.timeUiHover = true;
+      if (this.input.mouseDown && !this._infoAccClickLatch) {
+        const row = r.infoAccs.state.rows[r.infoAccHover];
+        if (row) {
+          p.hideInfo[row.hideIndex] = !p.hideInfo[row.hideIndex];
+          this.sfx.play('menuTick', 0.8);
+        }
+        this._infoAccClickLatch = true;
+      }
+      if (!this.input.mouseDown) this._infoAccClickLatch = false;
+    } else {
+      this._infoAccClickLatch = false;
+    }
   }
 
   private tickNpcEmotes(): void {
@@ -11539,6 +11691,30 @@ export class Game implements GameHooks {
     // 150×meleeDamage + kb15 朝攻击者——608 追踪弹未实装,直伤近似,登记）
     const shieldsBefore = p.solarShields;
     const ok = p.damage(dmg, srcX, srcY, true, pvp);
+    // 圣骑士盾 25% 转移（Player.cs:37727-37763）：本人装 938 + 有队友（同队 team≠0）
+    // 800px 内也装 938 → 该次伤 25% 改由队友承担（死因 teamTank 20）。
+    // 本地先全额结算再退还 25%（等价于原版 num2×0.75 前置）；转移额经 msg44 bit5
+    // 发给队友、由其本地结算（victim-settles）。门：实际伤害 ≥4 且非 9999 级直死
+    if (ok && dmg < 9999 && p.team !== 0 && this.hasPaladinShield(p) && this.net?.active) {
+      const dealt = p.damagePreview(dmg);
+      if (dealt >= 4) {
+        const holder = this.remotePlayerProxies.find((pr) => {
+          const s = (pr as unknown as { __netSlot?: number }).__netSlot;
+          return s !== undefined && pr.team === p.team && !pr.dead
+            && Math.hypot(pr.cx - p.cx, pr.cy - p.cy) <= 800
+            && this.hasPaladinShield(pr);
+        });
+        if (holder) {
+          const transfer = Math.floor(dealt * 0.25);
+          if (transfer > 0) {
+            p.hp = Math.min(p.maxHp, p.hp + transfer);   // 退还 25%（原版前置 ×0.75 等价）
+            this.net.sendStrikePlayer(
+              (holder as unknown as { __netSlot: number }).__netSlot,
+              transfer, 0, 0, -1, 0x20);
+          }
+        }
+      }
+    }
     if (ok && p.solarShields < shieldsBefore && attacker && !attacker.dead) {
       const retaliation = Math.max(1, Math.round(150 * p.damageMult('melee')));
       attacker.hurt(retaliation, Math.sign(attacker.cx - p.cx) * 10, -3, this);
@@ -14044,8 +14220,8 @@ export class Game implements GameHooks {
         onProjDespawn: (ids) => this.netRemoveProjPuppets(ids),
         // onSSC 不再即用——msg201 改暂存（net.pendingSSC），loadWorld 完成后应用（终审 H1 竞态）
         onStrike: (netId, dmg, kbx, kby) => this.netApplyStrike(netId, dmg, kbx, kby),
-        onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, _crit) =>
-          this.netApplyStrikePlayer(fromSlot, dmg, weaponId),
+        onStrikePlayer: (fromSlot, _targetSlot, dmg, _kbx, _kby, weaponId, flags) =>
+          this.netApplyStrikePlayer(fromSlot, dmg, weaponId, flags),
         onHp: (slot, hp, maxHp) => {
           // ClientNet.msg16 已缓存进 RemotePlayerState；此处仅兜底（正常恒同步命中）
           const rp = net.players.get(slot);
@@ -14092,6 +14268,12 @@ export class Game implements GameHooks {
       }
       if (this.tickCount % 30 === 0) this.netSweepPuppets();
       if (!this.net.policy.isHost) { this.netPuppetContact(); this.netPuppetProjContact(); }
+      // PvP 冷却递减（圣骑士盾独立槽近似 + 狱火光环 per-owner）
+      if (this.player.paladinShieldCd > 0) this.player.paladinShieldCd--;
+      for (const [k, v] of this.pvpAuraCd) {
+        if (v <= 1) this.pvpAuraCd.delete(k);
+        else this.pvpAuraCd.set(k, v - 1);
+      }
     }
   }
 

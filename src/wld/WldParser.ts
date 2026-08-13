@@ -62,6 +62,8 @@ export interface WldWorld {
   /** 日晷/月晷快进四件套（WF:2120/2203/2449-2450；v<113 无 sundial 位=0、
    *  v<264 无月晷位=0/false——与 WorldFile 缺省分支一致） */
   sundialCooldown: number;
+  /** 拜月教石碑重生倒计时（WF:2185-2192 int32，v108+；缺省 86400=CultistRitual.delayStart） */
+  cultistDelay: number;
   fastForwardTimeToDawn: boolean;
   fastForwardTimeToDusk: boolean;
   moondialCooldown: number;
@@ -198,7 +200,8 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 140) r.boolean(); // tax collector
   if (version >= 201) r.boolean(); // golfer
   if (version >= 107) r.i32(); // invasionSizeStart
-  if (version >= 108) r.i32(); // cultistDelay
+  const cultistDelay = version >= 108 ? r.i32() : 86400; // WF:2185-2192（缺省=delayStart，同 CultistRitual.cs:7）
+
   // banners
   {
     const n = r.i16();
@@ -318,7 +321,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,
     shadowOrbCount, altarCount, savedOreTiers,
-    sundialCooldown, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
+    sundialCooldown, cultistDelay, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,
     weather: { raining, rainTime, maxRaining, cloudBGActive, numClouds, windSpeedTarget, slimeRainTime },

@@ -62,7 +62,8 @@
    "my": 0,
    "ay": 6,
    "id": 2,
-   "line": 88203
+   "line": 88203,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -70,7 +71,8 @@
    "my": 0,
    "ay": 6,
    "id": 7,
-   "line": 88204
+   "line": 88204,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -78,7 +80,8 @@
    "my": 0,
    "ay": 6,
    "id": 9,
-   "line": 88205
+   "line": 88205,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -86,7 +89,8 @@
    "my": 0,
    "ay": 6,
    "id": 10,
-   "line": 88208
+   "line": 88208,
+   "loop": 2
   }
  ],
  "5": [
@@ -2250,7 +2254,8 @@
    "my": 0,
    "ay": 6,
    "id": 2,
-   "line": 88203
+   "line": 88203,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2258,7 +2263,8 @@
    "my": 0,
    "ay": 6,
    "id": 7,
-   "line": 88204
+   "line": 88204,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2266,7 +2272,8 @@
    "my": 0,
    "ay": 6,
    "id": 9,
-   "line": 88205
+   "line": 88205,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2274,7 +2281,8 @@
    "my": 0,
    "ay": 6,
    "id": 146,
-   "line": 88213
+   "line": 88213,
+   "loop": 2
   },
   {
    "vx": 0,
@@ -2316,7 +2324,8 @@
    "my": 0,
    "ay": 6,
    "id": 2,
-   "line": 88203
+   "line": 88203,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2324,7 +2333,8 @@
    "my": 0,
    "ay": 6,
    "id": 7,
-   "line": 88204
+   "line": 88204,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2332,7 +2342,8 @@
    "my": 0,
    "ay": 6,
    "id": 9,
-   "line": 88205
+   "line": 88205,
+   "loop": 2
   },
   {
    "mx": 0,
@@ -2340,7 +2351,8 @@
    "my": 0,
    "ay": 6,
    "id": 145,
-   "line": 88217
+   "line": 88217,
+   "loop": 2
   },
   {
    "vx": 0,
@@ -3351,7 +3363,8 @@
    "oy": -10,
    "fy": 0.5,
    "id": 99,
-   "line": 89799
+   "line": 89799,
+   "loop": 4
   }
  ],
  "171": [
@@ -3364,7 +3377,8 @@
    "idMin": 11,
    "idMax": 13,
    "n": 3,
-   "line": 89831
+   "line": 89831,
+   "loop": 4
   }
  ],
  "173": [
@@ -3504,7 +3518,8 @@
    "oy": -10,
    "fy": 0.5,
    "id": 99,
-   "line": 89799
+   "line": 89799,
+   "loop": 4
   }
  ],
  "181": [
@@ -10461,19 +10476,22 @@
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (0.45f + (float)num189 * 0.1f))",
    "id": 859,
-   "line": 84540
+   "line": 84540,
+   "loop": 3
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (0.4f + (float)num189 * 0.1f))",
    "id": 859,
-   "line": 84541
+   "line": 84541,
+   "loop": 3
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (0.35f + (float)num189 * 0.1f))",
    "id": 859,
-   "line": 84542
+   "line": 84542,
+   "loop": 3
   },
   {
    "scaleExpr": "scale",
@@ -10534,31 +10552,36 @@
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * 0.15f) - new Vector2(0f, 160 + 60 * num191)",
    "id": 855,
-   "line": 84554
+   "line": 84554,
+   "loop": 2
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * -0.15f) - new Vector2(0f, 160 + 60 * num191)",
    "id": 855,
-   "line": 84555
+   "line": 84555,
+   "loop": 2
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (0.25f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
    "id": 854,
-   "line": 84559
+   "line": 84559,
+   "loop": 3
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (-0.45f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
    "id": 853,
-   "line": 84560
+   "line": 84560,
+   "loop": 3
   },
   {
    "scaleExpr": "scale",
    "posExpr": "vector19 + vector20 * ((float)width * (0.05f + (float)num192 * 0.1f)) - new Vector2(0f, 20 + 40 * num192)",
    "id": 856,
-   "line": 84561
+   "line": 84561,
+   "loop": 3
   },
   {
    "vx": 0,
@@ -10567,7 +10590,8 @@
    "idMin": 861,
    "idMax": 862,
    "n": 2,
-   "line": 84566
+   "line": 84566,
+   "loop": 30
   }
  ],
  "492": [
@@ -10577,7 +10601,8 @@
    "idMin": 61,
    "idMax": 63,
    "n": 3,
-   "line": 84606
+   "line": 84606,
+   "loop": 10
   }
  ],
  "494": [
@@ -13830,7 +13855,8 @@
    "oy": -10,
    "fy": 0.5,
    "id": 1218,
-   "line": 82833
+   "line": 82833,
+   "loop": 8
   },
   {
    "vx": 0,
@@ -13838,7 +13864,8 @@
    "oy": -10,
    "fy": 0.5,
    "id": 1218,
-   "line": 82841
+   "line": 82841,
+   "loop": 3
   }
  ],
  "668": [
@@ -14199,7 +14226,8 @@
    "scaleExpr": "scale",
    "posExpr": "vector30",
    "id": 1008,
-   "line": 89580
+   "line": 89580,
+   "loop": 5
   },
   {
    "scaleExpr": "scale",
@@ -14208,7 +14236,8 @@
    "line": 89584,
    "gates": [
     "num"
-   ]
+   ],
+   "loop": 5
   }
  ],
  "695": [
@@ -14370,6 +14399,7 @@
    "scaleExpr=\"scale\" = 取 NPC.scale；posExpr 为原版位置表达式（默认 position=左上角）",
    "ai=[{slot,value}] = 原版 ai[N]==V 门（运行时按 NPC ai 槽位判定，不满足跳过该条）",
    "perfect=true = Gore.NewGorePerfect：随机扰动后回写精确 pos/vel（运行时不抖动）",
+   "loop=N = 原版常量次数 for 循环体内（运行时重复生成 N 次，如 EoC <2 循环 = 8 块）",
    "gates = 其余不可求值守卫（专家模式/变体等），仅登记不拦截",
    "tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）"
   ],

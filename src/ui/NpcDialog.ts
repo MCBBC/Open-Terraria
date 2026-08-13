@@ -4,7 +4,7 @@
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'status' | 'close';
 
 /** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
 export interface HappinessInfo {

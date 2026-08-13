@@ -94,7 +94,9 @@ export class RainbowSegment extends Entity {
     if (a <= 0.01) return;
     ctx.save();
     ctx.globalAlpha = a;
-    ctx.translate(this.cx, this.cy);
+    // 绘制锚（Main.cs:29886 num143=18/num144=−10：贴图中心 = 盒中心 + (−10,−18)
+    // ——段贴图骑在弹道上方而非盒心，2026-08-13 复查修正）
+    ctx.translate(this.cx - 10, this.cy - 18);
     ctx.rotate(this.rot);
     ctx.imageSmoothingEnabled = false;
     // scale 1.25（SetDefaults）——32×32 贴图 → 40×40

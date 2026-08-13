@@ -436,8 +436,9 @@ export class Arrow extends Entity {
     // 线上方穿墙（tileCollide=false）→ 越线后撞块；alpha 255−15/t 渐显（线上
     // 钳 150 / 线下钳 0）；周期 Item9 星啸；尘 58 星尘尾；rotation=vel−π/2（draw 侧）
     if (this.starY !== null) {
+      // :22139-22143 tileCollide=true 仅当 Center.Y > ai[1]（严格大于——边界对齐）
+      this.starCollide = this.cy > this.starY;
       const above = this.cy < this.starY;
-      this.starCollide = !above;
       const floorA = above ? 150 : 0;
       this.starAlpha = Math.max(floorA, this.starAlpha - 15);
       if (--this.starSndT <= 0) {

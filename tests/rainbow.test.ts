@@ -98,17 +98,17 @@ describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
     const projectiles: unknown[] = [];
     const game = makeGame(w, [], projectiles);
     const beam = new Arrow(50 * TILE, 80 * TILE, 12, 0, 85, 6.5, 985, null,
-      { grav: 0, life: 90, pierce: 3, terra: true });
+      { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     const sp0 = Math.hypot(beam.vx, beam.vy);
     beam.fixedUpdate(1, game);
     const sp1 = Math.hypot(beam.vx, beam.vy);
-    expect(sp1).toBeLessThan(sp0);                       // >8 → ×0.94
+    expect(sp1).toBeLessThan(sp0);                       // >8 → ×0.94（本用例高速构造；正牌出生速×5 不触发）
     expect(beam.lightRGB).toEqual([0.25, 0.86, 0.38]);   // Color(64,220,96)
-    for (let t = 0; t < 23 && !beam.dead; t++) beam.fixedUpdate(1, game);
+    for (let t = 0; t < 41 && !beam.dead; t++) beam.fixedUpdate(1, game);
     expect(beam.dead).toBe(false);
     beam.fixedUpdate(1, game);
-    expect(beam.dead).toBe(true);                        // 第 25t 消亡（非 timeLeft 90）
-    expect(beam.terraT).toBe(25);
+    expect(beam.dead).toBe(true);                        // 第 43t 消亡（ai1+25，非 timeLeft 90）
+    expect(beam.terraT).toBe(43);
   });
 
   it('近墙扇形探测失败 → 双阻尼额外减速', () => {
@@ -116,12 +116,12 @@ describe('泰拉刃光束 985（aiStyle 191，terra 模式）', () => {
     for (let y = 0; y < 200; y++) w.store.setTileSilent(57, y, 1, 0, 0);   // 正前方墙列（x=57=912px）
     const game = makeGame(w, [], []);
     const beam = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
-      { grav: 0, life: 90, pierce: 3, terra: true });
+      { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     // 探测窗 110px 沿速度方向（水平）：cx 804+110=914 → 越过 912px 墙列
     for (let t = 0; t < 3 && !beam.terraWall; t++) beam.fixedUpdate(1, game);
     expect(beam.terraWall).toBe(true);                   // 视线探测命中墙 → localAI[1]=1
     const open = new Arrow(50 * TILE, 74 * TILE, 12, 0, 85, 6.5, 985, null,
-      { grav: 0, life: 90, pierce: 3, terra: true });
+      { grav: 0, life: 90, pierce: 3, terra: { ai0: 1, ai1: 18, ai2: 1 } });
     const game2 = makeGame(new World(200, 200, 30, 'open'), [], []);
     for (let t = 0; t < 4; t++) open.fixedUpdate(1, game2);
     expect(open.terraWall).toBe(false);                  // 空世界无墙

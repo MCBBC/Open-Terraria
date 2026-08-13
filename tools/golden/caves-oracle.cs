@@ -5518,7 +5518,7 @@ bool DgAddBuriedChest(int i, int j, int mainItem, int style, ushort chestTile)
             if (r.Next(3) == 0) { }                             // 炸药 167
             if (r.Next(2) == 0) { r.Next(2); r.Next(15, 30); }
             if (r.Next(2) == 0) { r.Next(2); r.Next(50, 75); }
-            if (r.Next(2) == 0) var _dg6 = r.Next(6) + 15;                 // 再生药水 227
+            if (r.Next(2) == 0) { var _dg6b = r.Next(6) + 15; }                 // 再生药水 227
             if (r.Next(3) > 0) { r.Next(8); r.Next(1, 3); }
             if (r.Next(3) > 1) { r.Next(8); r.Next(1, 3); }
             { r.Next(1, 3); r.Next(2); }

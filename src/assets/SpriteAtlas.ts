@@ -44,76 +44,28 @@ export interface DrawRect { img: HTMLImageElement | HTMLCanvasElement; sx: numbe
 
 // ---- 原版素材命名空间（vanilla.json，TEdit 数据驱动） ----
 
-// 杂项单图素材（非表驱动，直接整图使用）
-// 树木专用：Tree_Tops/Branches（树冠树枝，TEdit style 0-10）+ Tiles_5_N（生物群系树干）
+// 进图必预载的杂项单图(2026-08-13 大瘦身 304→88):
+// 保留两类——①chunk 静态烘焙消费(树冠/树枝/树干/仙人掌/蘑菇顶):晚到要等
+// invalidateAll 重烘焙,fallback 会烤进 chunk,必须预载;②液体渲染首帧可见
+// (水/岩浆/蜂蜜/微光的基础四张+瀑布三张):首帧闪素色不可接受。
+// 其余全部移除转懒加载:NPC_Head 旗帜头像(vmisc)/链条与 Boss 部件叠画(vmisc)/
+// Glow 叠画(ensureVImage)/机关弹幕(弹幕渲染懒加载)/导线图集(ensureVImage)/
+// 月总手与光之女皇部件(vmisc)/Misc_Perlin——消费方全部每帧活画,ensureVImage
+// 未就绪跳帧、下帧自愈。注意 NPC_Head 此前 121 张盲扫 id 0-120,其中 81-120
+// 磁盘上不存在(真文件 0-80 + 独立命名的 NPC_Head_Boss_N)= 每次进图 40 个 404。
 export const VANILLA_MISC = [
-  'vanilla/Bubble.png',
-  'vanilla/Flame.png',     // 岩浆宽限火焰条（Main.cs:42900）
-  'vanilla/Ninja.png',      // 史莱姆王体内忍者（Main.cs:22817 叠画）
-  'vanilla/Extra_39.png',   // 史莱姆王头顶金冠
-  'vanilla/Extra_58.png',   // 背包防御盾(DrawDefenseCounter :41557,3×2 帧 52×48)（Main.cs:25571-25595 叠画；Extra_39.png 82×56）
-  'vanilla/Gore_734.png',   // 史莱姆王王冠 Gore（专家模式传送时抛出，NPC.cs:43550）
-  'vanilla/House_Banner_1.png',  // 入驻旗帜布（Main.cs:40152 DrawNPCHousesInWorld，2×2 帧 16×20）
-  ...Array.from({ length: 121 }, (_, i) => `vanilla/NPC_Head_${i}.png`),  // 城镇 NPC 头像（旗帜上叠画）
+  // ① chunk 烘焙族
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Tops_${i}.png`),
   ...Array.from({ length: 32 }, (_, i) => `vanilla/Tree_Branches_${i}.png`),
   ...Array.from({ length: 7 }, (_, i) => `vanilla/Tiles_5_${i}.png`),
   'vanilla/Tiles_323.png', 'vanilla/Tiles_72.png',  // 棕榈/发光蘑菇树干(群系专属但极小,常驻防传送闪失)
   'vanilla/Evil_Cactus.png', 'vanilla/Good_Cactus.png', 'vanilla/Crimson_Cactus.png',
-  ...Array.from({ length: 14 }, (_, i) => `vanilla/Liquid_${i}.png`),
-  'vanilla/Liquid_14.png',
-  ...Array.from({ length: 11 }, (_, i) => `vanilla/Misc_water_${i}.png`),
-  'vanilla/Misc_water_12.png', 'vanilla/Misc_water_13.png', 'vanilla/Misc_water_14.png',
-  'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
   'vanilla/Shroom_Tops.png',
-  // 电路渲染(Main.cs:43543 DrawWires):导线图集 + 致动器覆盖
-  'vanilla/Chain4.png', 'vanilla/Chain5.png', 'vanilla/Chain14.png',
-  'vanilla/Chain24.png', 'vanilla/Chain25.png',  // AI_013 藤蔓段（Main.cs:22433-22514 食人怪族茎蔓叠画）
-  'vanilla/Chain10.png', 'vanilla/Chain11.png',  // 邪恶触手 101 茎蔓（Main.cs:22391-22432 交替段）
-  'vanilla/Chain12.png',                         // 双子互连链（Main.cs:22177-22224）+WoF 肌腱/舌头链（:37879+）
-  'vanilla/WallOfFlesh.png',                     // 血肉墙墙身平铺（DrawWOFBody :37827,190×420=3 帧×140）
-  'vanilla/Chain21.png',                         // 石巨人拳链（Main.cs:22593-22632）
-  'vanilla/Chain26.png', 'vanilla/Chain27.png',  // 世花钩蔓/触须（Main.cs:22225-22285）
-  'vanilla/Arm_Bone_2.png',                      // Prime 部件臂骨（Main.cs:22633-22675）
-  'vanilla/WiresNew.png', 'vanilla/Actuator.png',
-  // 电路陷阱弹幕贴图(Wiring.cs:1495-1743 的 projectile id;帧尺寸取 Projectile.cs SetDefaults)
-  'vanilla/Projectile_98.png',   // 毒镖 10×10
-  'vanilla/Projectile_99.png',   // 巨石 32×32
-  'vanilla/Projectile_184.png',  // 火焰陷阱 10×10
-  'vanilla/Projectile_185.png',  // 尖刺球 14×14
-  'vanilla/Projectile_186.png',  // 长矛机关 10×16
-  'vanilla/Projectile_187.png',  // 超级飞镖 6×6
-  'vanilla/Projectile_654.png',  // 热喷泉 16×16
-  // 炮弹族（Wiring.cs case 209/212 → WorldGen.ShootFromCannon）：
-  // 162 炮弹 18×18 / 166 雪球 14×14 / 281 爆炸兔兔 28×28（整图单帧）
-  'vanilla/Projectile_162.png',
-  'vanilla/Projectile_166.png',
-  'vanilla/Projectile_281.png',
-  // 烟花三件套（Wiring.cs:1492-1553 → WorldGen.LaunchRocket/LaunchRocketSmall/NewProjectile）：
-  // 167-170 烟花火箭 14×28（2 帧 14×14）/ 415-418 烟花盒火箭 / 419-422 喷泉火花 8×8；
-  // 733 马桶水花为 alpha=255 隐形纯发射器（SetDefaults Projectile.cs:7440），无需贴图
-  'vanilla/Projectile_167.png', 'vanilla/Projectile_168.png',
-  'vanilla/Projectile_169.png', 'vanilla/Projectile_170.png',
-  'vanilla/Projectile_415.png', 'vanilla/Projectile_416.png',
-  'vanilla/Projectile_417.png', 'vanilla/Projectile_418.png',
-  'vanilla/Projectile_419.png', 'vanilla/Projectile_420.png',
-  'vanilla/Projectile_421.png', 'vanilla/Projectile_422.png',
-  // ---- NPC GlowMask（Main.cs DrawNPC 硬编码发光叠画；Render 侧 drawNpcGlow 消费）----
-  'vanilla/Glow_48.png', 'vanilla/Glow_49.png', 'vanilla/Glow_50.png',     // 火星飞碟族 392/395/394（:24218-24226）
-  'vanilla/Glow_132.png', 'vanilla/Glow_143.png', 'vanilla/Glow_149.png', 'vanilla/Glow_162.png',  // 四塔（:23746-23776）
-  'vanilla/Glow_133.png', 'vanilla/Glow_134.png', 'vanilla/Glow_135.png',  // 银河织带 402-404（:23878-23886）
-  'vanilla/Glow_225.png', 'vanilla/Glow_226.png',                          // 暗黑魔法师 564/565（:23480）+ Betsy 551（:23099）
-  'vanilla/Glow_239.png',                                                  // 永恒水晶 548（:23594）
-  // ---- 月总手-躯干连接（Main.cs:24325-24540 case 396/397/398）----
-  'vanilla/Extra_13.png', 'vanilla/Extra_14.png', 'vanilla/Extra_15.png',
-  'vanilla/Extra_16.png', 'vanilla/Extra_17.png', 'vanilla/Extra_18.png',
-  'vanilla/Extra_19.png', 'vanilla/Extra_25.png', 'vanilla/Extra_26.png',
-  'vanilla/Extra_29.png',
-  // ---- 光之女皇 636（DrawNPCDirect_HallowBoss Main.cs:26364-26554）----
-  'vanilla/Extra_157.png', 'vanilla/Extra_158.png', 'vanilla/Extra_159.png',
-  'vanilla/Extra_160.png', 'vanilla/Extra_187.png', 'vanilla/Extra_188.png',
-  // 塔护盾 ForceField 着色器载体（Main.cs:23806 Misc/Perlin 600×600 采样源）
-  'vanilla/Misc_Perlin.png',
+  // ② 液体首帧必需(其余 waterStyle 变体由 VanillaLiquidRenderer/WaterfallRenderer
+  //    的 ensureVImage 活画路径按当前样式自取)
+  'vanilla/Liquid_0.png', 'vanilla/Liquid_1.png', 'vanilla/Liquid_11.png', 'vanilla/Liquid_14.png',
+  'vanilla/Misc_water_0.png', 'vanilla/Misc_water_1.png', 'vanilla/Misc_water_11.png', 'vanilla/Misc_water_14.png',
+  'vanilla/Waterfall_0.png', 'vanilla/Waterfall_1.png', 'vanilla/Waterfall_14.png',
 ];
 export interface VanillaTileMeta {
   name: string; key: string; sheet: string;
@@ -179,7 +131,9 @@ export class SpriteAtlas {
   annotations: Record<string, Record<string, string>> = {};
 
   async load(onProgress?: (p: number) => void): Promise<void> {
-    const files = Object.keys(this.data.files);
+    // 封面/Splash_*:Maples 源包的 1920×1080 启动插画(每张 ~17MB 解码 + hardAlpha
+    // canvas 拷贝),全仓无消费方(菜单用 vanilla-ui/Logo)——启动即死重,跳过
+    const files = Object.keys(this.data.files).filter((f) => !/封面\/Splash_/.test(f));
     // 原版 vanilla 素材与 vanilla-ui 贴图全部不在启动预载(8550 请求/主菜单 2GB 根因):
     // 图块/墙/NPC 表 → Game.newWorld/loadWorld 里 preloadVanillaWorld() 预载
     // (onWorldReady 之前完成,首帧 chunk 烘焙无回退);物品图标 → vicon 按需
@@ -292,8 +246,12 @@ export class SpriteAtlas {
   }
 
   /** 原版杂项单图（呼吸气泡等） */
+  /** 杂项单图(旗帜头像/链条/Boss 部件/Glow 叠画等,全为每帧活画)——
+   *  走 ensureVImage 触发懒加载:未就绪返回 null,消费方下帧自愈
+   *  (2026-08-13 前 vimages.get 直取——脱离 VANILLA_MISC 预载即永不出现) */
   vmisc(path: string): DrawRect | null {
-    const img = this.vimages.get(path);
+    if (typeof Image === 'undefined') return null; // node 测试环境:无 Image,静默 null
+    const img = this.ensureVImage(path);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }
@@ -445,10 +403,13 @@ export class SpriteAtlas {
     return this._iconsPromise;
   }
 
-  /** 预载 UI 贴图按 key 前缀(如 ['Player_'] = 纸娃娃身体/发型,545 张)。 */
-  async preloadUiPrefix(prefixes: string[], onProgress?: (p: number) => void): Promise<void> {
+  /** 预载 UI 贴图按 key 前缀(如 ['Player_'] = 纸娃娃身体/发型,545 张)。
+   *  exclude:子族前缀排除表(如 'UI_Bestiary')——面板专属子族只在面板打开时
+   *  由 vui 懒加载自愈,不进启动/进图预载(2026-08-13 UI_ 397 键收窄用)。 */
+  async preloadUiPrefix(prefixes: string[], onProgress?: (p: number) => void, exclude?: string[]): Promise<void> {
     const files = Object.entries(this.uiFiles)
-      .filter(([k]) => prefixes.some((p) => k.startsWith(p)))
+      .filter(([k]) => prefixes.some((p) => k.startsWith(p))
+        && !(exclude ?? []).some((e) => k.startsWith(e)))
       .map(([, f]) => f);
     return this.preloadUiFiles(files, onProgress);
   }

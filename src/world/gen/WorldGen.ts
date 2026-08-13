@@ -1009,7 +1009,19 @@ function isTileNearby(store: TileStore, x: number, y: number, sheet: number, dis
   return false;
 }
 
-function spawnGraveyardBiome(
+/** 墓园 pass 触发门（cs:18110-18120 原文条件）：
+ *  `!Skyblock.denySomeGeneration && ((dontStarve && (drunk || getGood) && !tenthAnniversary)
+ *   || SecretSeed.graveyardBloodmoonStart.Enabled)`
+ *  注：1.4.5.6 "getfixedboi"（Everything）同时开 DontStarve/Drunk/FTW **与** Anniversary
+ *  （WorldSeedOption_Everything.cs:24-31 全依赖表）→ 被最后的 !tenthAnniversary 否决，
+ *  与本表（getfixedboi 不置 theConstant/tenthAnniversary）殊途同归：均不触发。 */
+export function graveyardSeedGate(sf: import('./SeedEasterEggs').SeedFlags): boolean {
+  if (sf.skyblock) return false;                                    // :18110 Skyblock.denySomeGeneration
+  return (sf.theConstant && (sf.drunkWorld || sf.getGoodWorld) && !sf.tenthAnniversary)
+    || !!sf.graveyardBloodmoonStart;                                 // :18117-18120
+}
+
+export function spawnGraveyardBiome(
   store: TileStore, rng: RNG, world: World, X: number, Y: number,
 ): void {
   const TOMB = TILE_BY_KEY['tombstone_v'];
@@ -1052,7 +1064,7 @@ function spawnGraveyardBiome(
         break;
       }
     }
-    num4--;                        // cs:25147：墓碑底行上移一格（2×2 顶行）
+    num4--;                        // cs:25147：锚格定在首实心上一格
     // cs:25148-25151 放置门禁：右邻非空 / 3 格内有墓碑 / 落点有液体 /
     // 下方双列非实心支撑 → 全部 continue
     if (!store.inBounds(num3, num4) || !store.inBounds(num3 + 1, num4 + 1)) continue;
@@ -1071,21 +1083,31 @@ function spawnGraveyardBiome(
       store.slope[gi] = 0;
       store.half[gi] = 0;
     }
-    // PlaceTile(num3, num4, 85, style=Next(6))（cs:25156）：2×2，帧语义同 Tombstone.ts
+    // PlaceTile(num3, num4, 85, style=Next(6))（cs:25156）。tile 85 的 TileObject 锚 =
+    // 【底行左格】（同 Projectile aiStyle17 的落点语义——Tombstone.ts 注释 :23689）：
+    // 对象占 num4-1..num4 两行，支撑在 num4+1。净空不足（CanPlace false）则跳过且不立碑
+    let clear = true;
+    for (let dy = -1; dy <= 0 && clear; dy++) {
+      for (let dx = 0; dx <= 1; dx++) {
+        if (store.flags[store.idx(num3 + dx, num4 + dy)]) { clear = false; break; }
+      }
+    }
+    if (!clear) continue;
     const style = rng.int(0, 5);
     for (let dy = 0; dy < 2; dy++) {
       for (let dx = 0; dx < 2; dx++) {
-        store.setTileSilent(num3 + dx, num4 + dy, TOMB, style * 36 + dx * 18, dy * 18);
+        store.setTileSilent(num3 + dx, num4 - 1 + dy, TOMB, style * 36 + dx * 18, dy * 18);
       }
     }
-    // Sign.ReadSign/TextSign（cs:25158-25162）：墓碑锚格立碑并写随机墓志铭
-    if (!world.signs.some((s) => s.x === num3 && s.y === num4)) {
-      world.signs.push({ x: num3, y: num4, text: randomEpitaph() });
+    // Sign.ReadSign/TextSign（cs:25158-25162）：ReadSign 按 frameX/Y 归一到对象【左上】格
+    // （Sign.cs:26-30 num%=2 / num2%=2 回退），Tombstone.ts 的 {x, y=top} 同口径
+    if (!world.signs.some((s) => s.x === num3 && s.y === num4 - 1)) {
+      world.signs.push({ x: num3, y: num4 - 1, text: randomEpitaph() });
     }
   }
 }
 
-function spawnGraveyardBiomesEverywhere(
+export function spawnGraveyardBiomesEverywhere(
   store: TileStore, rng: RNG, world: World, gs: GenState,
 ): void {
   const num = Math.floor(store.w / 4200);    // cs:25076 C# int/int 截断（小/中 1，大 2）
@@ -1129,13 +1151,9 @@ function potPass({ store, rng, world }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   // ---- 墓园群系（cs:18110-18120：本 pass 首段，先于瓦罐消耗 RNG 流）----
-  // 门 = !Skyblock.denySomeGeneration（skyblock 种子跳过）&&
-  //      (dontStarve && (drunk || getGood) && !tenthAnniversary) || graveyardBloodmoonStart
-  const sf = gs.seedFlags;
-  if (!sf.skyblock) {
-    const gySeed = (sf.theConstant && (sf.drunkWorld || sf.getGoodWorld) && !sf.tenthAnniversary)
-      || !!sf.graveyardBloodmoonStart;
-    if (gySeed) spawnGraveyardBiomesEverywhere(store, rng, world, gs);
+  // 门见 graveyardSeedGate（秘密种子专属；普通世界零墓碑=原版常态）
+  if (graveyardSeedGate(gs.seedFlags)) {
+    spawnGraveyardBiomesEverywhere(store, rng, world, gs);
   }
   const { w, h } = store;
   const POT = TILE_BY_KEY['pot']!;

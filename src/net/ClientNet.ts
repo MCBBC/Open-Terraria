@@ -95,8 +95,9 @@ export interface ClientNetHooks {
   /** 打击到达（msg42；房主权威结算） */
   onStrike?: (netId: number, rawDmg: number, kbx: number, kby: number) => void;
   /** PvP 近战命中意向到达（v7 msg44；被打方本地结算——Game 过 InOpposingTeam 门禁后走
-   *  damagePlayer(pvp)）。fromSlot=攻击者槽位（服务器回填） */
-  onStrikePlayer?: (fromSlot: number, targetSlot: number, dmg: number, kbx: number, kby: number, weaponId: number, crit: boolean) => void;
+   *  damagePlayer(pvp)）。fromSlot=攻击者槽位（服务器回填）；flags bit0=crit
+   *  bits1-4=武器浸剂 meleeEnchant（StatusPvP 消费） */
+  onStrikePlayer?: (fromSlot: number, targetSlot: number, dmg: number, kbx: number, kby: number, weaponId: number, flags: number) => void;
   /** 远端玩家 HP（msg16 中继） */
   onHp?: (slot: number, hp: number, maxHp: number) => void;
   /** 房间策略到达（进场时；门禁/提示用） */
@@ -500,7 +501,7 @@ export class ClientNet {
         const weaponId = r.u16();
         const flags = r.u8();
         const fromSlot = r.remaining > 0 ? r.u8() : 0;
-        this.hooks.onStrikePlayer?.(fromSlot, targetSlot, dmg, kbx, kby, weaponId, !!(flags & 1));
+        this.hooks.onStrikePlayer?.(fromSlot, targetSlot, dmg, kbx, kby, weaponId, flags);
         return;
       }
       case Msg.ProjDespawn: {
@@ -800,10 +801,11 @@ export class ClientNet {
   }
 
   /** PvP 近战命中意向上报（v7 msg44，C→S→定向转发被击者；权威=被打方本地结算）。
-   *  weaponId 为凶器内部物品 id（死因文案 DeathSource.Player {2} 用）；flags bit0=crit */
-  sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, crit: boolean) {
+   *  weaponId 为凶器内部物品 id（死因文案 DeathSource.Player {2} 用）；
+   *  flags bit0=crit / bits1-4=武器浸剂 meleeEnchant（被击端 StatusPvP 消费） */
+  sendStrikePlayer(targetSlot: number, rawDmg: number, kbx: number, kby: number, weaponId: number, flags: number) {
     this.send(new NetWriter(Msg.StrikePlayer).u8(targetSlot).i16(rawDmg)
-      .i16(kbx).i16(kby).u16(weaponId).u8(crit ? 1 : 0).finish());
+      .i16(kbx).i16(kby).u16(weaponId).u8(flags & 0xff).finish());
   }
 
   /** HP 上报（msg16，变化驱动 + 200ms 节流；原版客户端权威） */

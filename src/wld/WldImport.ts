@@ -575,6 +575,9 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       fastForwardTimeToDawn: wld.fastForwardTimeToDawn,
       fastForwardTimeToDusk: wld.fastForwardTimeToDusk,
     },
+    // 拜月教石碑重生倒计时（WF:2185-2192，SaveData 顶层字段）——2026-08-13 前
+    // 导入路直接丢弃（回退 86400 缺省）
+    cultistDelay: wld.cultistDelay,
     clock: { timeOfDay, dayCount: 1,
       // 原版 header _temp 三件套（WF:1276-1278）+ moonType（WF:1252）
       bloodMoon: wld.bloodMoon, eclipse: wld.eclipse, moonPhase: wld.moonPhase },

@@ -80,9 +80,19 @@ async function loadAssets() {
   atlas = new SpriteAtlas();
   try {
     await atlas.load();
-    // 菜单首帧所需的 UI 贴图(面板/按钮/光标/logo,~100 张几 MB)在显示主菜单前
-    // 就位——否则 vui 懒加载下首帧控件用兜底样式闪一帧
-    await atlas.preloadUiPrefix(['UI_', 'Inventory_', 'logo', 'Logo']);
+    // 菜单首帧所需的 UI 贴图(面板/按钮/光标/logo)在显示主菜单前就位——
+    // 否则 vui 懒加载下首帧控件用兜底样式闪一帧。
+    // ★UI_ 全量族按子族排除(2026-08-13):素材全量入库后 UI_ 76→397 键,
+    //   面板专属子族(图鉴/小地图/世界创建/角色创建/创意/工坊/成就…)只在各自
+    //   面板打开时才需要,vui 消费方每帧重查 ensureUiImage 缺图自愈——
+    //   收窄到菜单/加载页 chrome,请求 426→~170,零闪烁风险
+    await atlas.preloadUiPrefix(
+      ['UI_', 'Inventory_', 'logo', 'Logo'], undefined,
+      ['UI_Bestiary', 'UI_Minimap', 'UI_WorldCreation', 'UI_CharCreation',
+       'UI_PlayerResourceSets', 'UI_Workshop', 'UI_Creative', 'UI_Wires',
+       'UI_DisplaySlots', 'UI_Achievement', 'UI_Craft', 'UI_InfoIcon',
+       'UI_Settings', 'UI_Camera'],
+    );
   } catch {
     atlas = null; // 素材缺失时回退程序化生成
   }

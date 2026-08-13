@@ -105,6 +105,9 @@ export class Player extends Entity {
   deathsPve = 0;
   /** PvP 死亡计数（Player.numberOfDeathsPVP，KillMe :38228 按 pvpDeath 分道计数） */
   deathsPvp = 0;
+  /** 圣骑士盾转移冷却（hurtCooldowns[ImmunityCooldownID.PaladinsShield] 槽近似,
+   *  Player.cs:37756-37763——独立于常规无敌帧;Game.fixedUpdate 递减） */
+  paladinShieldCd = 0;
   /** 收税计时（Player.cs:793 taxTimer；taxRate=3600 即每游戏小时一结） */
   taxTimer = 0;
   /** 蜂蜜浸入（原版 honeyWet，Player.cs:27436-27438）：授予 Honey buff(48,1800t) 的来源 */

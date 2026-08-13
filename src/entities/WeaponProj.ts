@@ -791,6 +791,18 @@ export class FlailProj extends Entity {
   /** 鼠标世界坐标 getter（松手掷出方向） */
   private target: () => { x: number; y: number };
   private prm: FlailParams;
+  /** 子弹生成回调(Game 侧注入 entities.add——GameHooks 不暴露实体桶)。
+   *  AI_015 特例:247 Flairon 飞行中自机弹 248 / 757 Drippler 掷出回收气泡 928 /
+   *  1058 轨道刺 405 */
+  spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
+  /** 子弹生成回调(Game 侧注入 entities.add——GameHooks 不暴露实体桶)。
+   *  AI_015 特例:247 Flairon 飞行中自机弹 248 / 757 Drippler 掷出回收气泡 928 /
+   *  1058 轨道刺 405 */
+  spawnProj: ((x: number, y: number, vx: number, vy: number, projId: number, dmg: number, kb: number) => void) | null = null;
+  /** 247/1058 周期计数(localAI[2]/localAI[0]) */
+  private subT = 0;
+  /** 757 过渡点缓存:[vx,vy] 待下帧掷气泡(掷出态 ×0.3 / 按住转垂地 ×0.2) */
+  private trans757: [number, number] | null = null;
   /** ai[0] 状态：0 旋转 / 1 掷出 / 2 回拉 / 5 坠落 / 6 垂地悬荡 / 4 回收 */
   private st = 0;
   /** ai[1] 状态内计数 */
@@ -952,6 +964,8 @@ export class FlailProj extends Entity {
       }
       case 1: { // 掷出态（:41243-41273）：直线无重力;超时/超程 → 回拉;再按 → 垂地
         this.stT++;
+        // 757 掷出态过渡气泡初速缓存(:41251-41258 ×0.3 / 按住转垂地 ×0.2 段另计)
+        if (this.projId === 757) this.trans757 = [this.vx * 0.3, this.vy * 0.3];
         if (held) { this.st = 3; this.stT = 0; this.vx *= 0.2; this.vy *= 0.2; break; } // 再按→垂链(:41288)
         if (this.stT >= this.prm.flightTicks || distHand() >= maxRange) {
           this.st = 2; this.stT = 0; this.vx *= 0.3; this.vy *= 0.3;
@@ -1056,6 +1070,56 @@ export class FlailProj extends Entity {
     const spd = Math.hypot(this.vx, this.vy);
     if (spd > 1) this.rotation = Math.atan2(this.vy, this.vx) + this.vx * 0.1;
     else this.rotation += this.vx * 0.1;
+    // ---- AI_015 特例子弹(:41352-41475 switch(type) 尾段) ----
+    if (this.spawnProj && this.st !== 4) {
+      if (this.projId === 247) {
+        // Flairon:每 20t(脱靶续 17)600px 内最近敌(距离+CanHit)→ 自机弹 248
+        // (:41369-41400)damage/1.5、kb/2、速 14
+        this.subT++;
+        if (this.subT >= 20) {
+          this.subT = 17;
+          const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+          let best = 600, bx = 0, by = 0, found = false;
+          for (const ent of game.enemies()) {
+            const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+            if (e.dead) continue;
+            if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+            const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
+            if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
+          }
+          if (found) {
+            this.subT = 0;
+            const dd = Math.hypot(bx - cx0, by - cy0) || 1;
+            this.spawnProj(cx0, cy0, ((bx - cx0) / dd) * 14, ((by - cy0) / dd) * 14,
+              248, Math.round(this.damage / 1.5), this.knockback / 2);
+          }
+        }
+      } else if (this.projId === 1058) {
+        // 轨道刺(:41406-41475):旋转态每 3-6t/其余态每 6t,朝【玩家反向】掷 405
+        // (:41449-41463 v=(ball-player)norm×(4.5-6.5)±π/4);damage 满额/旋转态 kb×0.5
+        this.subT++;
+        const need = this.st === 0 ? 3 + Math.floor(Math.random() * 3) : 6;
+        if (this.subT >= need) {
+          this.subT = 0;
+          const dxp = this.x + this.w / 2 - p.cx, dyp = this.y + this.h / 2 - p.cy;
+          const dp = Math.hypot(dxp, dyp) || 1;
+          const base = Math.atan2(dyp / dp, dxp / dp);
+          const ang = base + (Math.random() - 0.5) * Math.PI / 2;
+          const spd = (4.5 + Math.random() * 2);
+          this.spawnProj(this.x + this.w / 2, this.y + this.h / 2,
+            Math.cos(ang) * spd, Math.sin(ang) * spd, 405, this.damage,
+            this.st === 0 ? this.knockback * 0.5 : this.knockback);
+        }
+      }
+    }
+    // 757 Drippler:掷出态回收(→2)与按住转垂地(→6)两过渡点各掷气泡 928
+    // (:41243-41273)velocity×0.3/0.2 后 ×1.3;damage/knockBack 满额
+    if (this.projId === 757 && this.spawnProj && this.trans757) {
+      const [vx0, vy0] = this.trans757;
+      this.trans757 = null;
+      this.spawnProj(this.x + this.w / 2, this.y + this.h / 2, vx0 * 1.3, vy0 * 1.3,
+        928, this.damage, this.knockback);
+    }
     // 火尘（AI_015_Flails_Dust :41778-41785:type 35 每帧 1 颗火尘 noGravity）
     if (this.projId === 35 || this.projId === 948) {
       game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#FF8830', 1, 0.5,

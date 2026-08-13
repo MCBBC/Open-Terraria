@@ -524,7 +524,10 @@ export class MountInstance {
   // ---- 上下坐骑 ----
 
   /** 上坐骑（Mount.cs SetMount :6184-6296）：同型/无效 id/蜜蜂浸水 拒绝；
-   *  换骑先清旧 buff；授予坐骑 buff 3600t + 出生尘 */
+   *  换骑先复位旧实例。坐骑 buff（AddBuff(buff,3600)）不入 BuffState——原版该 buff
+   *  是 TimeLeftDoesNotDecrease 的占位（每 tick 刷回 10t，掉 buff 即下坐），本仓以
+   *  mount.active 单一真源表达，buff 附带效果（131/168/265 的 ignoreWater 等）由
+   *  swimFree/免淹门直接消费；出生尘（DoSpawnDust :6363）经 game 回调 */
   setMount(m: number, p: MountedPlayerView & { buffs?: { remove(t: unknown): void } }, game?: {
     spawnParticles?(x: number, y: number, color: string, n: number, spd?: number): void;
   }): boolean {
