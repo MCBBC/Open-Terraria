@@ -15,11 +15,16 @@ export const OPENABLE_BAG_VIDS: ReadonlySet<number> = new Set<number>([
   4878, 5003, 3093, 4345, 4410, 1774, 6142, 3085, 4879, 1869, 599, 600, 601,
 ]);
 
-/** Main.rand.Next 语义（UnifiedRandom.Next：[0,n) / [a,b)）——测试可注入定序源 */
+/** Main.rand.Next 语义（UnifiedRandom.Next 重载：next(n)=[0,n) / next(a,b)=[a,b)）
+ *  ——测试可注入定序源（脚本值直接作为返回值） */
 export interface BagRand {
-  next(n: number): number;
+  next(a: number, b?: number): number;
 }
-const defaultRand: BagRand = { next: (n) => Math.floor(Math.random() * n) };
+const defaultRand: BagRand = {
+  next: (a, b) => (b === undefined
+    ? Math.floor(Math.random() * a)
+    : a + Math.floor(Math.random() * (b - a))),
+};
 
 /** QuickSpawnItem 出口：give(原版 item id, stack)。调用方负责入包/落地 */
 export type BagGive = (id: number, stack?: number) => void;

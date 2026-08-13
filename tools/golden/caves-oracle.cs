@@ -1737,6 +1737,10 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
         }
     }
     // placeTight（ShimmerPass.ts:227）哈希镜像：两掷恒耗 + 钟乳石 1x1/1x2 放置
+    Func<int, int, bool> SolidAt = (sx, sy) => sx >= 0 && sx < W && sy >= 0 && sy < H && act[sy * W + sx] != 0 && SOLID.Contains(typ[sy * W + sx]);
+    Func<int, int, bool> FreeAt = (fx, fy) => fx >= 0 && fx < W && fy >= 0 && fy < H && act[fy * W + fx] == 0;
+    // Boulders（TileID.cs:195）——187 底禁滚石/巨石（InvalidTileForPilesOrSpeleothems :39005）
+    var BOULDERS = new HashSet<ushort> { 138, 484, 664, 665, 711, 712, 713, 714, 715, 716 };
     Action<int, int> PlaceTightMirror = (tx, ty) =>
     {
         int ti0 = ty * W + tx;
@@ -1748,7 +1752,6 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
         Func<int, int, int> SheetOf = (sx, sy) => (sx < 0 || sx >= W || sy < 0 || sy >= H || act[sy * W + sx] == 0) ? -1 : typ[sy * W + sx];
         Func<int, bool> BaseOk = a => a == 1 || a == 117 || a == 25 || a == 203 || a == 396 || a == 397 || a == 368 || a == 367 || a == 147 || a == 161 || a == 163 || a == 164 || a == 200;
         Action<int, int> Put165 = (px2, py2) => { int pi = py2 * W + px2; typ[pi] = 165; act[pi] = 1; };
-        Func<int, int, bool> SolidAt = (sx, sy) => sx >= 0 && sx < W && sy >= 0 && sy < H && act[sy * W + sx] != 0 && SOLID.Contains(typ[sy * W + sx]);
         // 垂挂：上方实心 + 本格/下格净空
         if (SolidAt(tx, ty - 1) && act[ti0] == 0 && act[(ty + 1) * W + tx] == 0)
         {
@@ -1762,6 +1765,45 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
         int below = SheetOf(tx, ty + 1);
         if (BaseOk(below)) { if (preferSmall) Put165(tx, ty); else { Put165(tx, ty - 1); Put165(tx, ty); } }
         if (below == 225) Put165(tx, ty);
+    };
+    // Place2x2（WorldGen.cs:51352）门禁镜像：2x2 区全空 + 双底列 nactive&&(solid||tileTable)
+    //（区内无 table 类；SolidTile2 的 slope==0 以坡度不建模近似）。过门才落格（原版 return）。
+    Func<int, int, bool> P2Gate = (ax, ay) =>
+    {
+        if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return false;
+        for (int k = 0; k < 2; k++)
+        {
+            if (!FreeAt(ax - 1 + k, ay - 1) || !FreeAt(ax - 1 + k, ay)) return false;
+            if (!SolidAt(ax - 1 + k, ay + 1)) return false;
+        }
+        return true;
+    };
+    // Place3x2（WorldGen.cs:52097）flag2 门禁镜像：3x2 区全空 + 三列底 SolidTile2 +
+    // 187 专属底 Boulders 禁——任一失败整组不放
+    Func<int, int, bool> P3Gate = (ax, ay) =>
+    {
+        if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return false;
+        for (int k = -1; k <= 1; k++)
+        {
+            if (!FreeAt(ax + k, ay - 1) || !FreeAt(ax + k, ay)) return false;
+            int bi = (ay + 1) * W + (ax + k);
+            if (act[bi] != 0 && BOULDERS.Contains(typ[bi])) return false;
+            if (!SolidAt(ax + k, ay + 1)) return false;
+        }
+        return true;
+    };
+    // PlaceObject→TileObjectData[485]（TileObjectData.cs:3511）门禁镜像：CanPlace 先掷
+    // 1×Next(4)（RandomStyleRange=4，genRand≡Main.rand :4391，成败都掷）；门禁=4 格全空
+    // 且无液体（LavaPlacement 默认 NotAllowed :1768）+ 双底锚 active&&solid
+    Func<int, int, bool> P485Gate = (ax, ay) =>
+    {
+        if (ax < 5 || ax + 2 > W - 5 || ay - 1 < 5 || ay + 1 > H - 5) return false;
+        for (int k = 0; k < 2; k++)
+        {
+            if (!FreeAt(ax + k, ay - 1) || !FreeAt(ax + k, ay)) return false;
+            if (liq[(ay - 1) * W + ax + k] > 0 || liq[ay * W + ax + k] > 0) return false;
+        }
+        return SolidAt(ax, ay + 1) && SolidAt(ax + 1, ay + 1);
     };
     for (int wk = -20; wk < dW + 20; wk++)
     {
@@ -1777,26 +1819,27 @@ void PlaceDesertDeco(int dx0, int dyBot, ushort dtile, int dfw, int dfh)
             bool wFlag2 = true;
             for (int wm = 1; wm <= 3; wm++)
                 if (wy + wm < H && (act[(wy + wm) * W + wx] != 0 || act[(wy + wm) * W + wx + 1] != 0)) { wFlag2 = false; break; }
-            // 装饰放置（485/751/484/165/187，DesertHive.cs:466-496）——与 JS DesertPass
-            // placeDeco 同锚：2x2/3x2 底行贴 396 顶；165 的 flag 地面/!flag 倒挂。
-            // 哈希只看 type/act，帧不计。187 分支成功后补 Next(6)（原版 cs:494-496，
-            // 两侧曾一致漏掷——2026-08-12 与 JS 同步补齐）
+            // 装饰放置（485/751/484/165/187，DesertHive.cs:466-496）。★2026-08-13：
+            // forced 只放行 PlaceTile 入口门，各放置函数自有门禁与锚点几何逐项对齐
+            // 1456（PlaceTile :59366 派发）——两侧曾一致无条件落格且锚点列偏 1，
+            // 新骰值下对拍 13988 格分叉：
+            //   485 → PlaceObject（Origin(0,1)）占 (wx..wx+1)，先掷 Next(4) 再门禁；
+            //   751/484 → Place2x2（先 x--/y--）占 (wx-1..wx)，P2Gate；
+            //   187 → Place3x2 占 (wx-1..wx+1)，P3Gate；
+            //   165 → PlaceTightMirror（锚=py+(flag?-1:+1)，Next(2)+Next(3) 恒掷）。
+            // 哈希只看 type/act，帧不计。187 分支成功后补 Next(6)（原版 cs:494-496）
             if (wFlag && (int)r.Next(20) == 0)
             {
                 int wStyle = (int)r.Next(4);
-                ushort dType = 485;
-                if ((int)r.Next(30) == 0) dType = 751;
-                PlaceDesertDeco(wx, wy - 1, dType, 2, 2);
+                if ((int)r.Next(30) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 751, 2, 2); }
+                else { int _ = (int)r.Next(4); if (P485Gate(wx, wy - 1)) PlaceDesertDeco(wx, wy - 1, 485, 2, 2); }
             }
-            else if (wFlag && (int)r.Next(5) == 0) { PlaceDesertDeco(wx, wy - 1, 484, 2, 2); }
+            else if (wFlag && (int)r.Next(5) == 0) { if (P2Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 484, 2, 2); }
             else if ((wFlag ^ wFlag2) && (int)r.Next(5) == 0)
             {
-                // ★2026-08-13：165 改走 placeTight 镜像（JS ShimmerPass.placeTight 1:1，
-                // DesertPass 13:21 版对齐）——锚=py+(flag?-1:+1)、shimmer/幼虫门、
-                // Next(2)+Next(3) 两掷恒耗、1x1/1x2 钟乳石格效应（哈希只看 type/act）
                 PlaceTightMirror(wx, wFlag ? wy - 1 : wy + 1);
             }
-            else if (wFlag && (int)r.Next(5) == 0) { int wS2 = (int)r.Next(6); PlaceDesertDeco(wx, wy - 1, 187, 3, 2); }
+            else if (wFlag && (int)r.Next(5) == 0) { int wS2 = (int)r.Next(6); if (P3Gate(wx, wy - 1)) PlaceDesertDeco(wx - 1, wy - 1, 187, 3, 2); }
         }
     }
 }

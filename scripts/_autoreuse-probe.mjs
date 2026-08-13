@@ -77,8 +77,8 @@ await page.evaluate(() => {
   };
 });
 
-// ---- ① autoReuse 武器(vi_190 草剑 melee+autoReuse=true)按住 180t → ≥3 击 ----
-await equip(190);
+// ---- ① autoReuse 武器(vi_7 银阔剑 melee+autoReuse=true)按住 180t → ≥3 击 ----
+await equip(7);
 let r1 = await page.evaluate(() => {
   const g = window.__swGame;
   g.input.mouseX = g.player.cx + 300; g.input.mouseY = g.player.cy;

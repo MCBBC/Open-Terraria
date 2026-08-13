@@ -112,9 +112,11 @@ describe('661 帝皇蝶 ai2 离神圣渐隐（cs:45235-45291）', () => {
     for (let i = 0; i < 60; i++) ai2 = lacewingFadeStep(ai2, true, 50).ai2;
     expect(ai2).toBe(50);                             // 常态上限 num4=50（cs:45242）
     expect(lacewingFadeStep(ai2, true, 50).despawn).toBe(false);  // 到不了 60 → 不消散
-    // GetLerpValue(60, 25, ai2)（cs:45263）：≤25 全显、60→0 线性
-    expect(lacewingFadeStep(24, true, 50).opacity).toBe(1);
-    expect(lacewingFadeStep(25, true, 50).opacity).toBe(1);
+    // GetLerpValue(60, 25, ai2)（cs:45263）——原版先 Clamp 后取 Opacity：opacity 读
+    // 自增后的值，故入参 24（自增得 25）仍是全显，入参 25（自增得 26）已开始衰减。
+    expect(lacewingFadeStep(24, true, 50)).toMatchObject({ ai2: 25, opacity: 1 });
+    expect(lacewingFadeStep(25, true, 50)).toMatchObject({ ai2: 26, opacity: 34 / 35 });
+    expect(lacewingFadeStep(49, true, 50)).toMatchObject({ ai2: 50, opacity: 10 / 35 });
     expect(lacewingFadeStep(50, true, 50).opacity).toBeCloseTo(10 / 35, 5);
     expect(lacewingFadeStep(60, true, 60).opacity).toBe(0);
   });

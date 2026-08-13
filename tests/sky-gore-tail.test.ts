@@ -8,7 +8,7 @@ import { World } from '../src/world/World';
 import { TILE } from '../src/core/constants';
 import { UnifiedRandom } from '../src/core/rng';
 import { parseSeed } from '../src/world/gen/SeedEasterEggs';
-import { moonlordThrowSeq, SkyRenderer } from '../src/render/SkyRenderer';
+import { moonlordThrowSeq, SkyRenderer, type SkyFrameCtx } from '../src/render/SkyRenderer';
 import {
   spawnDeathGore, resetGorePool, setGoreScreen, goreScreenValue,
   type GoreNpcSource,
@@ -132,6 +132,49 @@ describe('② moonlordThrowSeq = UnifiedRandom(DramaSeed) 位级对拍', () => {
       expect(s.rotV).toBeGreaterThanOrEqual(-0.05);
       expect(s.rotV).toBeLessThan(0.05);
     }
+  });
+});
+
+// ---------- ②' SunVisibilityPixel 遮挡采样（HorizonHelper.cs:46-80） ----------
+
+describe("②' SunVisibilityPixel 采样域（实心 tile 覆盖率代位）", () => {
+  const sunSkyWorld = (solidCenter: boolean) => {
+    const w = new World(1000, 100, 7, 'sunvis');
+    // 采样域 = 太阳世界位 (800,50)tile ±64px（z=1）→ tile 796..804 × 46..54（9×9）；
+    // 中心 4×4 实心 = 覆盖率 16/81
+    if (solidCenter) {
+      for (let y = 50; y < 54; y++) for (let x = 800; x < 804; x++) w.store.setTile(x, y, 1);
+    }
+    return w;
+  };
+  const ctxFor = (w: World, z = 1): SkyFrameCtx => ({
+    entities: [], world: w, scene: null, player: { cx: 800 * TILE, cy: 50 * TILE },
+    clock: { dayCount: 1, timeOfDay: 0.5, isDay: true },
+    camX: 800 * TILE, camY: 50 * TILE, z, viewW: 1920, viewH: 1080,
+  });
+
+  /** drawWorldFx（lastDayTimeTicks 正午 → 光斑早退，只跑采样；ctx 无需真实画布） */
+  const sample = (sky: SkyRenderer, fc: SkyFrameCtx) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sky as any).frameCtx = fc;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sky as any).sunScreen = { x: fc.viewW / 2, y: fc.viewH / 2 };   // 太阳 = 屏中心 → 世界 (camX, camY)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (sky as any).lastDayTimeTicks = 27000;                            // 正午 → num/num2=0 不触绘制
+    sky.drawWorldFx({} as CanvasRenderingContext2D, fc.camX, fc.camY, fc.z, fc.viewW, fc.viewH);
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return { vis: (sky as any).sunVisibility as number, ready: (sky as any).sunVisSampled as boolean };
+  };
+
+  it('开空域 → 可见度 1；实心覆盖 → 按覆盖率衰减；首帧前未采样（SunVisibilityEnabled 门）', () => {
+    const sky = makeSky();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect((sky as any).sunVisSampled).toBe(false);   // _targetUpToDate 初值 false → 首帧不画光斑
+    const open = sample(sky, ctxFor(sunSkyWorld(false)));
+    expect(open.ready).toBe(true);
+    expect(open.vis).toBeCloseTo(1, 6);
+    const covered = sample(sky, ctxFor(sunSkyWorld(true)));
+    expect(covered.vis).toBeCloseTo(1 - 16 / 81, 6);  // 中心 4×4 实心 / 9×9 采样域
   });
 });
 

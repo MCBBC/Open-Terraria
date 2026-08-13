@@ -4,10 +4,11 @@
 // 7/6（原版 generic=4）三连 bug，翅膀画到屏幕外/永不翻转/错切片——"背后没翅膀"。
 import { describe, it, expect } from 'vitest';
 import {
-  wingDrawOf, stepWingFrame, wingDrawFrame,
+  wingDrawOf, stepWingFrame, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS,
   FLAP_HOVER_SET, VISUAL_HOVER_SET,
   type WingFrameState, type WingFrameInput,
 } from '../src/data/vanillaWingVisuals';
+import { VanillaDust } from '../src/fx/VanillaDust';
 
 function st(frame = 0, counter = 0): WingFrameState { return { frame, counter }; }
 
@@ -59,6 +60,46 @@ describe('wingDrawOf 绘制表（DrawPlayer_09_Wings）', () => {
     expect(VISUAL_HOVER_SET.has(29) || VISUAL_HOVER_SET.has(32)).toBe(false);
     expect(VISUAL_HOVER_SET.has(31) && VISUAL_HOVER_SET.has(44)).toBe(true);
     expect(FLAP_HOVER_SET.has(31) || FLAP_HOVER_SET.has(44)).toBe(false);
+  });
+  it('叠画表（第二 pass 全亮族）：27/30 Glow 127、23 Flame_8 200、43 Glow_272×2、47 Glow_366 180、38 Arkhalis、22 火焰簇、28 Extra_38、50 免疫双画、40 Betsy、45 拖尾', () => {
+    expect(wingDrawOf(27).overlay).toMatchObject({ kind: 'plain', file: 'Glow_92.png', alpha: 127 });
+    expect(wingDrawOf(30).overlay).toMatchObject({ kind: 'plain', file: 'Glow_181.png', alpha: 127 });   // :1038
+    expect(wingDrawOf(23).overlay).toMatchObject({ kind: 'plain', file: 'Flame_8.png', tint: 200, alpha: 200 });
+    expect(wingDrawOf(43).overlay).toMatchObject({ kind: 'jitter2', file: 'Glow_272.png', tint: 230, alpha: 60 });
+    expect(wingDrawOf(47).overlay).toMatchObject({ kind: 'plain', file: 'Glow_366.png', alpha: 180 });
+    expect(wingDrawOf(38).overlay).toMatchObject({ kind: 'arkhalis', file: 'Glow_251.png' });            // :1044
+    expect(wingDrawOf(22).overlay).toMatchObject({ kind: 'flames7' });
+    expect(wingDrawOf(28).overlay).toMatchObject({ kind: 'extra38' });
+    expect(wingDrawOf(50).overlay).toMatchObject({ kind: 'immune' });
+    expect(wingDrawOf(40).overlay).toMatchObject({ kind: 'betsy' });
+    expect(wingDrawOf(45).overlay).toMatchObject({ kind: 'trail45' });
+    // 无叠画款
+    for (const s of [1, 2, 3, 5, 9, 12, 34, 39, 48, 49, 51]) {
+      expect(wingDrawOf(s).overlay, `slot ${s}`).toBeUndefined();
+    }
+  });
+  it('全亮主纹理族 mainGlow：28/44/45=white、34=c250a100、51=luna；其余 lit（合成前）', () => {
+    expect(wingDrawOf(28).mainGlow).toBe('white');   // :714 Lerp t=1
+    expect(wingDrawOf(44).mainGlow).toBe('white');   // :1032 RT 层
+    expect(wingDrawOf(45).mainGlow).toBe('white');   // :729
+    expect(wingDrawOf(34).mainGlow).toBe('c250a100'); // :766
+    expect(wingDrawOf(51).mainGlow).toBe('luna');     // :781 GetLunaGlowColor
+    expect(wingDrawOf(44).rainbowLayer).toBe(true);
+    for (const s of [1, 2, 3, 22, 23, 27, 30, 38, 39, 40, 43, 47, 48, 49, 50]) {
+      if (s === 40) continue;   // 40 走 betsy 叠画
+      expect(wingDrawOf(s).mainGlow, `slot ${s}`).toBeUndefined();
+    }
+  });
+  it('47/49 headgearRow 锚点：行 ∈{7,8,9,14,15,16} → Y=−22，其余 → −20', () => {
+    const d47 = wingDrawOf(47);
+    expect(d47.headgearRow).toBe(true);
+    expect(wingAnchorForRow(d47, 0)).toEqual([-3, -20]);
+    expect(wingAnchorForRow(d47, 7)).toEqual([-3, -22]);   // OffsetsPlayerHeadgear 行 7 = 0
+    expect(wingAnchorForRow(d47, 14)).toEqual([-3, -22]);
+    expect(wingAnchorForRow(d47, 19)).toEqual([-3, -20]);
+    // 非 47/49 款行修正直通
+    expect(wingAnchorForRow(wingDrawOf(1), 7)).toEqual([-9, -19]);
+    expect([...HEADGEAR_ZERO_ROWS]).toEqual([7, 8, 9, 14, 15, 16]);
   });
 });
 
@@ -257,5 +298,127 @@ describe('wingDrawFrame 绘制帧派生', () => {
   it('wingFrame 越界钳回合法区间（generic 4 帧）', () => {
     expect(wingDrawFrame(1, st(9, 0), 0)).toBe(0);     // clampFrame 越界归 0
     expect(wingDrawFrame(1, st(2, 0), 0)).toBe(2);
+  });
+});
+
+// ===================== VanillaDust 引擎（Dust.cs/Main.DrawDust） =====================
+describe('VanillaDust：NewDust 初始化（:75-285）', () => {
+  it('帧映射公式（:176-191）：type<100 → X=10·type；≥100 每 100 减 1000 加 Y+30', () => {
+    const vd = new VanillaDust();
+    const d6 = vd.spawn(0, 0, 10, 10, 6);
+    expect(d6).not.toBeNull();
+    expect(d6!.fx).toBe(60);
+    expect([0, 10, 20]).toContain(d6!.fy);
+    const d261 = vd.spawn(0, 0, 10, 10, 261);
+    expect(d261!.fx).toBe(610);   // 2610 − 2000
+    expect([60, 70, 80]).toContain(d261!.fy);   // 60 + 10·rand(3)
+    const d217 = vd.spawn(0, 0, 10, 10, 217);
+    expect(d217!.fx).toBe(170);
+    expect([60, 70, 80]).toContain(d217!.fy);
+  });
+  it('位置/速度/缩放抖动与 type-6 烟雾初速特例（:165-172/:221-226）', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(100, 100, 30, 30, 76, 1, 2, 50, null, 1);
+    expect(d!.x).toBeGreaterThanOrEqual(104);        // Position + rand(w−4) + 4
+    expect(d!.x).toBeLessThan(130);
+    expect(d!.y).toBeGreaterThanOrEqual(104);
+    expect(d!.vx).toBeGreaterThanOrEqual(1 - 2);     // rand(-20,21)×0.1 + SpeedX
+    expect(d!.vx).toBeLessThanOrEqual(1 + 2.1);
+    expect(d!.alpha).toBe(50);
+    expect(d!.scale).toBeGreaterThan(0.8);           // (1 + rand(-0.2,0.2)) × 1
+    expect(d!.scale).toBeLessThan(1.21);
+    // type 6 特例：vy ∈ [-1, 0.5)、vx×0.3、scale×0.7
+    const s6 = vd.spawn(0, 0, 30, 30, 6, 0, 5);
+    expect(s6!.vy).toBeGreaterThanOrEqual(-1);
+    expect(s6!.vy).toBeLessThan(0.5 + 5);            // +SpeedY
+    expect(s6!.scale).toBeLessThanOrEqual(0.7 * 1.21);
+  });
+});
+
+describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
+  it('fadeIn 生长目标语义（:2148-2171）：0<f<100 → +0.03/t 至超 fadeIn 转 0，随后 −0.01/t', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 217, 0, 1.5)!;   // 无特例型
+    d.fadeIn = 2; d.noGravity = true; d.scale = 1.5;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.scale).toBeCloseTo(1.53, 5);           // 生长中
+    expect(d.fadeIn).toBe(2);
+    for (let i = 0; i < 20; i++) vd.update(0, 0, 1920, 1080);
+    expect(d.fadeIn).toBe(0);                        // scale > 2 后转衰
+    const s0 = d.scale;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.scale).toBeCloseTo(s0 - 0.01, 5);       // 衰减档
+  });
+  it('261 型专属段（:705-727）：noGravity 阻尼 0.93+0.97/0.99 + 缩小 0.0025 + 持续玩家跟随 + 光收集', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(500, 500, 10, 10, 261)!;
+    d.noGravity = true; d.scale = 2; d.fadeIn = 0;
+    d.followPlayer = true;
+    vd.update(0, 0, 1920, 1080, 3, -2);
+    expect(d.x).toBeGreaterThan(500);                // 跟随 3px 且未清（261 持续）
+    expect(d.followPlayer).toBe(true);
+    expect(d.scale).toBeCloseTo(2 - 0.01, 5);        // 专属段 ±0.0025 相抵 + 通用衰落 −0.01
+    expect(vd.lights.length).toBe(1);
+    expect(vd.lights[0].g).toBeGreaterThan(vd.lights[0].r);   // (0.4,0.6,0.7) 比例
+  });
+  it('264 型（:625-641）：一次性玩家跟随 + 光按尘色比例', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(500, 500, 10, 10, 264, 0, 0, 0, { r: 50, g: 120, b: 255, a: 200 })!;
+    d.noGravity = true; d.followPlayer = true; d.followOnce = true;
+    vd.update(0, 0, 1920, 1080, 4, 0);
+    expect(d.followPlayer).toBe(false);              // 一次性后清
+    expect(vd.lights[0].b).toBeGreaterThan(vd.lights[0].g);
+  });
+  it('重力族 vy+0.1（:1889-1897）；缩没 0.1 失活（:2432-2436）；屏底清除（:2387）', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(100, 100, 5, 5, 55)!;         // 落体尘
+    d.vy = 0; d.scale = 0.5;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.vy).toBeGreaterThan(0.09);              // 重力
+    d.scale = 0.05;
+    vd.update(0, 0, 1920, 1080);
+    expect(d.active).toBe(false);                    // 缩没
+    const d2 = vd.spawn(100, 2000, 5, 5, 55)!;
+    vd.update(0, 0, 1920, 1080);                     // 屏底 y>1080
+    expect(d2.active).toBe(false);
+  });
+  it('GetAlpha 消费表（:2469-2772）：261=(230,115)/6=(255,25)/182 透明/默认=(255−alpha)/255', () => {
+    const vd = new VanillaDust();
+    const a261 = vd.spawn(0, 0, 5, 5, 261)!; a261.alpha = 100;
+    expect(VanillaDust.alphaOf(a261)).toEqual({ rgb: 230 / 255, a: 115 / 255 });
+    const a6 = vd.spawn(0, 0, 5, 5, 6)!; a6.alpha = 100;
+    expect(VanillaDust.alphaOf(a6)).toEqual({ rgb: 1, a: 25 / 255 });
+    const a182 = vd.spawn(0, 0, 5, 5, 182)!;
+    expect(VanillaDust.alphaOf(a182)).toEqual({ rgb: 1, a: 0 });
+    const dft = vd.spawn(0, 0, 5, 5, 76, 0, 0, 50)!;
+    expect(VanillaDust.alphaOf(dft)).toEqual({ rgb: 205 / 255, a: 205 / 255 });
+    // 86 noLight=false → A=0；noLight=true → 默认档
+    const a86 = vd.spawn(0, 0, 5, 5, 86, 0, 0, 100)!;
+    expect(VanillaDust.alphaOf(a86).a).toBe(0);
+    a86.noLight = true;
+    expect(VanillaDust.alphaOf(a86).a).toBeCloseTo(155 / 255, 5);
+  });
+  it('GetColor 加性钳位（:2773-2817）：color − (255 − base)', () => {
+    const vd = new VanillaDust();
+    const d = vd.spawn(0, 0, 5, 5, 264, 0, 0, 0, { r: 50, g: 200, b: 255, a: 255 })!;
+    const cp = VanillaDust.colorPass(d, 0.5, 0.5)!;
+    expect(cp.r).toBe(0);                            // 50 − 127.5 → 钳 0
+    expect(cp.g).toBeCloseTo(72 / 255, 5);           // 200 − 127.5 → C# int 截断 72
+    expect(cp.b).toBeCloseTo(127 / 255, 5);          // 255 − 127.5 → 127
+    expect(cp.a).toBeCloseTo(127 / 255, 5);
+    // 无自定义色 → null
+    const d2 = vd.spawn(0, 0, 5, 5, 6)!;
+    expect(VanillaDust.colorPass(d2, 1, 1)).toBeNull();
+  });
+  it('each(fullbright) 分族（:38406：6/15/59-64 强制 White）', () => {
+    const vd = new VanillaDust();
+    vd.spawn(0, 0, 5, 5, 6);
+    vd.spawn(0, 0, 5, 5, 62);
+    vd.spawn(0, 0, 5, 5, 261);
+    vd.spawn(0, 0, 5, 5, 55);
+    const fb = [...vd.each(true)].map((d) => d.type).sort((a, b) => a - b);
+    const lit = [...vd.each(false)].map((d) => d.type).sort((a, b) => a - b);
+    expect(fb).toEqual([6, 62]);
+    expect(lit).toEqual([55, 261]);
   });
 });

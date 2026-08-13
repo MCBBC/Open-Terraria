@@ -12,6 +12,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
+import { flipGenSolid } from './GenSolid';
 
 const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
 
@@ -793,6 +794,12 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
 }
 
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:12537 `Main.tileSolid[484] = false`）：滚动仙人掌
+  //   (484)自 DesertBiome 起生成期恒非实心（此后 Gems cs:15114 / Altars cs:15831 /
+  //   SettleLiquids cs:16292 / Piles cs:18916 / FinalCleanup cs:22306 均为冗余重放，
+  //   生成期再无 =true）——本仓 DesertPass 会放置 484（见 T484），消费端经
+  //   GenSolid.isGenSolid 查询才能见到该态。
+  flipGenSolid([484], false);
   const desc = runDesertMoundOnly(st, rng, gs);
   runDesertEntrancesAndHive(st, rng, gs, desc);
   // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）

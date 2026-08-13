@@ -261,10 +261,11 @@ export function tryReflectProjectile(
 /** AST 条件原子：{r:[K,cmp,阈值?]} = Main.rand.Next(K) 与阈值比较(eq/ne/ge)；
  *  {expert:1} = Main.expertMode；{hostile:0} = !hostile；{frozen:0} = !player.frozen */
 interface SPCond { r?: [number, 'eq' | 'ne' | 'ge', number?]; expert?: 1; hostile?: 0; frozen?: 0 }
-/** AST 门/链节点：g=外层门(全 atom 成立进 t/i,否则进 e) / i=else-if 链(首全成 arm,
- *  全落空进 e) / a=顺序全执行 */
+/** AST 门/链节点：g=外层门(全 atom 成立进 t/i,否则进 e) / t=then 体 / i=else-if 链
+ *  (首全成 arm,全落空进 e) / a=顺序全执行 */
 interface SPNode {
   g?: SPCond[];
+  t?: SPElem;
   i?: Array<{ g?: SPCond[]; t: SPElem }>;
   a?: SPElem[];
   e?: SPElem;
@@ -335,7 +336,10 @@ function spEval(node: SPElem, ctx: SPCtx, buffs: BuffState): void {
   }
   if (node.a) {
     for (const child of node.a) spEval(child, ctx, buffs);
+    return;
   }
+  // 纯 then 节点（{g, t[, e]}）：门已过/无门 → 执行 t
+  if (node.t) spEval(node.t, ctx, buffs);
 }
 
 /** 敌弹命中玩家 → debuff 结算（Projectile.StatusPlayer :11450-11722 全量,表驱动）。

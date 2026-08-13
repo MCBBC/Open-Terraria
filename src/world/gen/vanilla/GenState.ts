@@ -132,6 +132,45 @@ export interface GenState {
   oasisY: number[];
   oasisW: number[];
   numOasis: number;
+
+  // ---- GenVars.structures（StructureMap.cs）全局结构互斥 ----
+  /** 世界宽高（StructureMap.CanPlace 的越界判定用，cs:28）。 */
+  genW: number;
+  genH: number;
+  /** 已保护结构矩形（StructureMap._protectedStructures，cs:15）。**存扩张后的矩形**
+   *  （AddProtectedStructure 先 Inflate(pad) 再入列，cs:85-87），pad 字段仅存档原参。
+   *  坐标系：x0/y0 含、x1/y1 **不含**（对齐 C# Rectangle 的 X/Y/Width/Height 语义，
+   *  Rectangle.Right = X+Width 为开区间,Intersects 亦按此比较）。 */
+  protectedRects: Array<{ x0: number; y0: number; x1: number; y1: number; pad: number }>;
+}
+
+/** StructureMap.CanPlace（StructureMap.cs:19-56）的互斥判定移植：
+ *  ① 越界拒绝（cs:28：area 超出 [0,w-1]×[0,h-1] 即 false）；
+ *  ② 与全部既有保护矩形（各自已含 pad 扩张）按候选 pad 扩张后不相交（cs:32-39）。
+ *  ★原版还有第 ③ 步 validTiles 内容扫描（cs:40-53：扩张域内所有 active tile 须在
+ *  TileID.Sets.GeneralPlacementTiles 白名单内）——本仓各 pass 已有本地 tile 内容
+ *  判定（蜂巢丛林草占比/小屋岩浆回避/神龛坏块扫描等），该扫描暂不移植（备案），
+ *  以免双重收紧改变既有行为。 */
+export function canPlaceStructure(
+  gs: GenState, rect: { x0: number; y0: number; x1: number; y1: number }, pad: number,
+): boolean {
+  if (rect.x0 < 0 || rect.y0 < 0 || rect.x1 > gs.genW - 1 || rect.y1 > gs.genH - 1) return false;
+  const px0 = rect.x0 - pad, py0 = rect.y0 - pad, px1 = rect.x1 + pad, py1 = rect.y1 + pad;
+  for (const r of gs.protectedRects) {
+    if (px0 < r.x1 && r.x0 < px1 && py0 < r.y1 && r.y0 < py1) return false;
+  }
+  return true;
+}
+
+/** StructureMap.AddProtectedStructure（StructureMap.cs:81-89）：Inflate(pad) 后入列。 */
+export function addProtectedStructure(
+  gs: GenState, rect: { x0: number; y0: number; x1: number; y1: number }, pad: number,
+): void {
+  gs.protectedRects.push({
+    x0: rect.x0 - pad, y0: rect.y0 - pad,
+    x1: rect.x1 + pad, y1: rect.y1 + pad,
+    pad,
+  });
 }
 
 export function newGenState(w: number, h: number): GenState {
@@ -168,5 +207,7 @@ export function newGenState(w: number, h: number): GenState {
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
     larvaX: [], larvaY: [],                                    // BeeLarva pass（cs:21018）消费
     oasisX: [], oasisY: [], oasisW: [], numOasis: 0,           // Oasis pass（cs:16327）登记
+    genW: w, genH: h,                                           // StructureMap 越界判定（StructureMap.cs:28）
+    protectedRects: [],                                         // GenVars.structures._protectedStructures
   };
 }

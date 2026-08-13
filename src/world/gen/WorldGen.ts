@@ -263,6 +263,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
+import { flipGenSolid, isGenSolid } from './vanilla/GenSolid';
 import { parseSeed } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
@@ -504,6 +505,11 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
   world.groundLevel = gs.worldSurface;
   world.rockLevel = gs.rockLevel;
   world.lavaLine = gs.lavaLine;
+  // ===== 生成期 tileSolid 初值（generateWorld 尾 cs:11500 `Main.tileSolid[659]=false`）=====
+  // 659 以太石块：Main.cs:9538 初值 true,生成期恒非实心（生成全程无还原点）——
+  // 本仓 TILE_DEFS 仍 solid:true,须运行时翻转。清零保证多次 generateWorld 不残留。
+  resetGenSolid();
+  flipGenSolid([659], false);
 }
 
 // 原版 pass "Dunes"(cs:11540):沙丘塑造 + 金字塔候选(gs.pyramidSpots)
@@ -641,6 +647,13 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   runCorruptionPass(store, rng, gs); // 29 Corruption/Crimson
   runLakesPass(store, rng, gs); // 30 Lakes（cs:14613——原"液体"槽在结构段后，注册序修正）
   runSlushPass(store, gs); // 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756，紧随 Lakes）
+  // ★生成期 tileSolid 翻转（DungeonCrawler.cs:344 MakeDungeon 头
+  //   `WorldGen.SetCrackedBrickSolidity(solid: false)` → 481/482/483 非实心）。
+  //   本仓 TILE_DEFS 已把 481-483 预翻为 solid:false（数据不可动），此处接线仅为
+  //   时间线存档——DungeonPass 内部消费端清单见 GenSolid.ts 头注（禁改该文件）。
+  //   还原点 = SmoothWorld 头 cs:16510 翻 true（本仓数据无法表达该窗口,备案）→
+  //   SmoothWorld 尾 cs:16695 翻回 false（HalfBrickPass 接线）。
+  flipGenSolid([481, 482, 483], false);
   runDungeonPass(store, rng, gs, world.chests); // 32 Dungeon(蓝/粉砖主题+走廊房间+宝箱)
   // 地牢 pass 预计算(legacy 入口)不迁移 dungeonLocation——但入口塔列仍可能与
   // Reset 期锚点偏差数百格,必须在此回写最终位置。优先取入口门厅可站立点:
@@ -1475,6 +1488,10 @@ function finalize({ store, world }: GenCtx) {
 // 2026-08-13 前内嵌 finalize 尾（全部 pass 之后执行）——现按注册序归位为独立槽
 // （「地表装饰」之后、「草墙」之前）。
 function spawnPointPass({ store, rng, world }: GenCtx) {
+  // ★pass 头 tileSolid 翻转（cs:19628 `Main.tileSolid[379] = false`）：出生点采样
+  //   期间泡泡块(379)视为非实心——非 skyblock 分支。尾 cs:19731 还原 true（见函数尾）。
+  //   本仓生成期从不放置 379，翻转仅存档时间线。
+  flipGenSolid([379], false);
   let range = 5;
   let sx = Math.floor(store.w / 2), sy = 0;
   for (;;) {
@@ -1515,7 +1532,9 @@ function spawnPointPass({ store, rng, world }: GenCtx) {
     const x = rng.int(Math.floor(store.w / 2) - widen, Math.floor(store.w / 2) + widen);
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
-      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
+      // 生成期实心查询（cs:19628 期间 379 已翻非实心,GenSolid 接线后 isGenSolid
+      // 天然覆盖,显式 TILE_379 排除保留为原版 cs:19683 `type != 379` 的直比语义）
+      if (isGenSolid(store, x, y) && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
     }
     widen++;
   }
@@ -1546,4 +1565,6 @@ function spawnPointPass({ store, rng, world }: GenCtx) {
       clearSpawnCell(sx + dx, sy - dy, true);
     }
   }
+  // ★pass 尾还原（cs:19731 `Main.tileSolid[379] = true`）
+  flipGenSolid([379], true);
 }

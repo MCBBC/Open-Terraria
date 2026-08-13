@@ -313,9 +313,11 @@
 "flipper": 1
 },
 "1861": {
-"flipper": 1
+"flipper": 1,
+"iceSkate": 1
 },
 "1862": {
+"iceSkate": 1,
 "move": 0.08,
 "rocketBoots": 3,
 "runSpeed": 6.75
@@ -814,6 +816,7 @@
 },
 "5000": {
 "fireWalk": 1,
+"iceSkate": 1,
 "lavaMax": 420,
 "move": 0.08,
 "rocketBoots": 4,
@@ -976,6 +979,9 @@
 "dmgMelee": 0.12,
 "kbGlove": 1,
 "meleeSpd": 0.12
+},
+"950": {
+"iceSkate": 1
 },
 "956": {
 "critMagic": 5,

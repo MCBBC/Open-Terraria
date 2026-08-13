@@ -68,10 +68,14 @@ describe('① 568/569 死亡紫魂环（Main.cs:26130-26155）', () => {
     const q = Renderer.npcSoulRingParams(30)!;
     expect(q.scale).toBeCloseTo(1 - 0.5 * (1 - 0.25), 9);   // 0.625
     expect(q.radius).toBeCloseTo(400 * 0.625, 6);
+    expect(q.fade).toBeCloseTo(0.5, 9);
+    // fade 双侧进：A = alpha15×0.75×fade/255（XNA SourceBlend.One：RGB 与 A 各自含 fade）；
+    // lai0=30 恰在脉动谷（cos(π)→alpha15=0）→ A=0
+    expect(q.alpha).toBe(0);
     const r = Renderer.npcSoulRingParams(0.5)!;
     expect(r.scale).toBeCloseTo(1 - 0.5 * (1 - (0.5 / 60) ** 2), 9);
-    // alpha15=trunc((cos(0.5·2π/60)·0.5+0.5)×32)=31 → ×0.75/255 再 ×lerp(0,60,0.5)
-    expect(r.alpha).toBeCloseTo((31 * 0.75) / 255 * (0.5 / 60), 9);
+    // alpha15=trunc((cos(0.5·2π/60)·0.5+0.5)×32)=31 → ×0.75×fade/255
+    expect(r.alpha).toBeCloseTo((31 * 0.75 * (0.5 / 60)) / 255, 9);
   });
   it('灵气态期间恒在环：localAI[0] 任意正数（AI_107 :63882 每 tick +1）都不关环', () => {
     for (const t of [1, 7, 59, 61, 120, 999]) {

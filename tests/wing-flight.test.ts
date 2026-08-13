@@ -46,9 +46,20 @@ describe('翅膀爬升', () => {
       minY = Math.min(minY, p.y);
     }
     const riseTiles = (y0 - minY) / TILE;
-    // 跳跃本体 ~6 格；翅膀 100t 应 ~30-45 格
+    // 跳跃本体 ~6 格；翅膀 100t 应 ~30-45 格（曾 6.2 格：重力未让位根因）
     console.log(`爬升 ${riseTiles.toFixed(1)} 格（wingTime 余 ${p.wingTime.toFixed(0)}/${p.equipStats.wing?.time}）`);
     expect(riseTiles).toBeGreaterThan(25);
+    expect(p.wingTime).toBe(0);                     // 全额耗尽（曾 300t 只耗 2）
+  });
+
+  it('断翅滑翔：wingTime 耗尽后按住跳 = 重力/3 + 终端 maxFall/3（:27015-27027）', () => {
+    const { p, hooks } = makePlayer();
+    for (let i = 0; i < 60; i++) p.fixedUpdate(1 / 60, hooks);
+    p.wingTime = 0;                                  // 直接入滑翔态
+    p.inputJump = true;
+    for (let t = 0; t < 200; t++) p.fixedUpdate(1 / 60, hooks);
+    // 终端速度 = MAX_FALL_SPEED/3 ≈ 16/3 ≈ 5.3
+    expect(Math.abs(p.vy)).toBeLessThan(6.5);
   });
 });
 

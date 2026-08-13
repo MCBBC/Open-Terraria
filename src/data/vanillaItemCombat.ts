@@ -123,6 +123,12 @@ export interface CombatWeaponItemLike {
 export function combatWeapon(def: CombatWeaponItemLike): CombatWeapon | null {
   const vid = def.vid ?? viIdFromKey(def.key);
   if (vid < 0) return null;
+  // 传送门枪 3384（Item.cs:30926-30942）：shoot=600 是 aiStyle75 手持光束投射物
+  // （本身不落门，其首帧 AI 在 Projectile.cs:63883-63911 发出真正的 601 落门弹）。
+  // 直射兜底（kind 'shot'）会把 600 发成一发无落门逻辑的 Arrow——显式退出通用分流，
+  // 物品链由 entities/PortalGunBolt.ts firePortalGun 承载（Game.updateUse 专属分支）。
+  // 另两消费点（右键集火门/remoteSwingDur）对 null 与 'shot' 行为一致，无回归。
+  if (vid === 3384) return null;
   // 鞭（DefaultToWhip，Item.cs:47439——提取器漏提，独立表 src/data/vanilla-whips.json 全 18 把）
   const whip = WHIPS[String(vid)];
   if (whip) {

@@ -1378,6 +1378,10 @@ export class Player extends Entity {
         const ii = st0.idx(xx, fy0);
         if (st0.flags[ii] && st0.isSolid(xx, fy0)) { ft = st0.type[ii]; break; }
       }
+      // 坡面门（FloorCheck :23466-23471：脚下三格任一有 slope → num3=-1，slippy 等地板旗全灭）
+      if (ft >= 0 && (st0.slope[st0.idx(fx0 - 1, fy0)] !== 0 || st0.slope[st0.idx(fx0, fy0)] !== 0
+        || st0.slope[st0.idx(fx0 + 1, fy0)] !== 0)) ft = -1;
+      this.floorTileT = ft;
       this.runningOnSand = ft >= 0 && SAND_FLOOR_IDS.has(ft);
     }
     // 沙丘行者靴 1:1（Player.cs:26225-26231）：runningOnSand && desertBoots →
@@ -1487,6 +1491,25 @@ export class Player extends Entity {
       if (duneBoost && !mnt) { maxRun *= 1.75; accRun *= 1.75; }
       let runAcc = mnt ? mnt.acceleration
         : RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
+      // 冰面滑移（Player.cs:26234-26255，与沙丘靴同链 else-if 语义）：
+      //   slippy=IceSkateSlippery 集 {161,162,127,163,164,200,659}、slippy2=197 冻结
+      //   史莱姆块（FloorCheck :23454，floorTileT 已带坡面门 :23466）。slippy2：
+      //   acc×0.6+slowdown=0；slippy：acc×0.7；有冰刀：acc 再×3.5+maxRun×1.25；
+      //   无冰刀 slippy 档 slowdown×0.1（打滑）
+      if (!mnt && this.floorTileT >= 0) {
+        const iceSkate = !!eqEarly.iceSkate;
+        if (this.floorTileT === 197) {                     // slippy2（:26234-26240）
+          runAcc *= 0.6;
+          runSlow = 0;
+          if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
+        } else if (this.floorTileT === 161 || this.floorTileT === 162 || this.floorTileT === 127
+          || this.floorTileT === 163 || this.floorTileT === 164 || this.floorTileT === 200
+          || this.floorTileT === 659) {                    // slippy（:26244-26255）
+          runAcc *= 0.7;
+          if (iceSkate) { runAcc *= 3.5; maxRun *= 1.25; }
+          else runSlow *= 0.1;
+        }
+      }
       // 猪鲨崽非增益态减半（Player.cs:26333-26337：mount.Type==12 && !MountFishronSpecial
       //  → runAcceleration/=2、maxRunSpeed/=2——干爽满血且无雨才减，湿身/雨中/半血以下全额）
       if (mnt && mnt.type === 12 && !mnt.fishronBoost) { runAcc /= 2; maxRun /= 2; }
@@ -1926,6 +1949,15 @@ export class Player extends Entity {
       // 坐骑飞行族已独占 vy（上方 Hover/Flight 段）——重力段整体让位（原版 :26637
       // else-if 链互斥语义）；悬停免摔（Hover :3450 fallStart 每帧重置）
       if (mountFlight) {
+        grav = 0;
+        this.fallStartY = null;
+      }
+      // 翅膀扇动中（flag19）：原版重力走 :26545 火箭靴 if 的【else-if 链】
+      // （!flag19 → 滑翔 → 飞毯 → 常规重力 :27033）——flag19 时整链跳过 = 飞行期
+      // 不加重力（WingMovement 的 0.1/0.5 档独立驱动 vy）。曾无条件 +GRAVITY，
+      // 扇动 −0.1 被重力 +0.3 盖成净 +0.2/tick → 爬升被掐死在跳跃高度附近
+      // （2026-08-13"翅膀飞不高"报障根因）
+      if (flying) {
         grav = 0;
         this.fallStartY = null;
       }
@@ -3036,6 +3068,9 @@ export class Player extends Entity {
   /** 脚下是沙族地格（runningOnSand，FloorVisuals :23457——沙丘行者靴消费）。
    *  原版只在 vy==0 时刷新、离地不清零（ResetFloorFlags 仅重生/传送） */
   runningOnSand = false;
+  /** 脚下地板 tile type（FloorCheck num3 :23450-23471，含坡面门；-1=无/坡面/空中）——
+   *  slippy 冰面滑移消费（:26234-26255） */
+  floorTileT = -1;
   /** 上一 tick 的世界 store 引用（fixedUpdate 缓存；dashWallAhead 探测用） */
   private lastStore: import('../world/TileStore').TileStore | null = null;
   /** 坐骑探测用世界（MountedPlayerView.store：fixedUpdate 帧首刷新） */

@@ -48,6 +48,7 @@ export interface AccFx {
   longInvince?: number;  // 无敌帧翻倍（十字项链/星星面纱）
   treasureMagnet?: number; // 宝藏磁石：拾取范围 +
   magmaStone?: number;     // 岩浆石 1322/火焰护手 1343：近战命中点燃（:14764/:14787-14790）
+  iceSkate?: number;       // 冰刀族 950/1861/1862/5000：冰面不滑+加速 ×3.25/上限 ×1.25（:26237-26255）
   goldRing?: number;     // 金戒指族：钱币拾取范围
   luckyCoin?: number;    // 幸运币：近战命中掉钱
   discount?: number;     // 折扣卡：商店/重铸 8 折
@@ -99,7 +100,7 @@ const BEHAVIOR_FX: Record<string, AccFx> = {
   '268': { divingHelm: 1 },
   '394': { divingHelm: 1 },
   '1860': { divingHelm: 1, jellyfishGlow: 1 },   // 浸水 AddLight(1.8,0.4,1.2)（:14682-14688）
-  '1861': { divingHelm: 1, arcticDivingGear: 1 }, // +arcticDivingGear（:14701；iceSkate 移动系未实装）
+  '1861': { divingHelm: 1, arcticDivingGear: 1, iceSkate: 1 }, // +arcticDivingGear（:14701）+iceSkate（:14703）
   '497': { merman: 1 },
   '861': { merman: 1, nightWolf: 1 },   // Moon Shell：accMerman + wolfAcc（:14585-14591）
   '3110': { merman: 1, nightWolf: 1 },  // Celestial Shell：同（:14853-14859；json 的 skyStone 保留）

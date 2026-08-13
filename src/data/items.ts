@@ -715,6 +715,16 @@ item({ key: 'vi_5451_kwad_racer_drone', name: '', value: 1 });
 item({ key: 'vi_5359_shellphone_spawn', name: '', value: 1 });
 item({ key: 'vi_3032_super_absorbant_sponge', name: '', value: 1 });
 item({ key: 'vi_3031_bottomless_water_bucket', name: '', value: 1 });
+// 桶/海绵族第二批（Player.ItemCheck_UseBuckets Player.cs:45704-45890 族表 :45706；
+// 行为见 core/Game.ts useBucket——无底桶倾倒不消耗/海绵吸液不消耗无饱和变体）：
+// 4820 无底岩浆桶（Item.cs:39442）/4872 岩浆海绵（:39637）/5302 无底蜂蜜桶（:42032）/
+// 5303 蜂蜜海绵（:42044）/5304 终极海绵（:42056,useTime 3）/5364 无底微光桶（:42524）
+item({ key: 'vi_4820_bottomless_lava_bucket', name: '', value: 1 });
+item({ key: 'vi_4872_lava_absorbant_sponge', name: '', value: 1 });
+item({ key: 'vi_5302_bottomless_honey_bucket', name: '', value: 1 });
+item({ key: 'vi_5303_honey_absorbant_sponge', name: '', value: 1 });
+item({ key: 'vi_5304_ultra_absorbant_sponge', name: '', value: 1 });
+item({ key: 'vi_5364_bottomless_shimmer_bucket', name: '', value: 1 });
 item({ key: 'vi_509_red_wrench', name: '', value: 1 });
 item({ key: 'vi_4741_butcher_s_bloodstained_apron', name: '', value: 1 });
 item({ key: 'vi_3065_star_wrath', name: '', value: 1 });

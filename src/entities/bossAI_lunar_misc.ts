@@ -1656,7 +1656,7 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
   const st = game.world.store;
   // ---- 段完整性与 414 红闪（原版各段独立自查，头循环代行）----
   if (!e.wormNext || e.wormNext.dead) { e.die(game); return; }        // :51850-51861 头下段失效自灭
-  for (let s = e.wormNext; s; s = s.wormNext) {
+  for (let s = e.wormNext; s; s = s.wormNext!) {
     if (s.dead) continue;
     const prevDead = !s.wormFollow || s.wormFollow.dead;              // :51807-51818（413/414）
     const nextDead = s.vanillaId === 413 && (!s.wormNext || s.wormNext.dead); // :51850-51861（413）
@@ -1765,7 +1765,7 @@ export function crawltipedeAI(e: Enemy, game: GameHooks, player: Player | null):
   // ---- 位移（noTileCollide 直积分）----
   e.x += e.vx; e.y += e.vy;
   // ---- 段链收缩跟随（:52266-52330，num64 = width+6）----
-  for (let s = e.wormNext; s && !s.dead; s = s.wormNext) {
+  for (let s = e.wormNext; s && !s.dead; s = s.wormNext!) {
     const fx = s.wormFollow!;
     const dxC = fx.cx - s.cx, dyC = fx.cy - s.cy;
     const d = Math.hypot(dxC, dyC);

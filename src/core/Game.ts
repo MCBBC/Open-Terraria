@@ -60,7 +60,7 @@ import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
 import travelshopJson from '../data/vanilla-travelshop.json';
-import { TileStore } from '../world/TileStore';
+import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { paintTile, paintWall, paintDustColor, type PaintDustHook } from '../world/Paint';
 import { Wiring, TOOL_RED, TOOL_GREEN, TOOL_BLUE, TOOL_YELLOW, TOOL_ACTUATOR, TOOL_CUTTER } from '../world/Wiring';
 import {
@@ -5912,7 +5912,11 @@ export class Game implements GameHooks {
         this.sfx.play(kind === 'spawn' ? 'mirror' : 'conch');
       }
       this.input.mouseDown = false;
-    } else if (heldDef && [205, 206, 207, 1128, 3031, 3032].includes(viIdFromKey(heldDef.key))) {
+    } else if (heldDef && [205, 206, 207, 1128, 3031, 3032, 4820, 4872, 5302, 5303, 5304, 5364]
+      .includes(viIdFromKey(heldDef.key)) && inp.mouseDown && this.player.useTime === 0) {
+      // 桶/海绵族入口门（Player.cs:45706 族表 + :45715 ItemTimeIsZero && controlUseItem）：
+      // 原分支无 mouseDown/useTime 门——持桶悬停即每帧倾倒;本次补齐(autoReuse 族
+      // 按住连倒是原版语义,门由 useTime 节流)
       this.useBucket(viIdFromKey(heldDef.key), tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
       // ---- 高尔夫球投掷（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
@@ -9532,90 +9536,123 @@ export class Game implements GameHooks {
     }
   }
 
-  /** 桶三态（Player.ItemCheck_UseBuckets，Player.cs:45704-45870 1:1）：
-   *  空桶舀取（:45726-45802）：目标格有液体且 3×3 同类液体合计 >100 才可舀；
-   *    舀空目标格后向四邻同类回吸至满 255（差额随桶带走）；舀蜂蜜→蜂蜜桶/岩浆→岩浆桶
-   *  满桶倾倒（:45805-45838）：目标格已有液体 ≥200 拒绝（不覆盖半格液体）；
-   *    已有异类液体拒绝；active 且实心且非 solidTop（tile 546 除外）拒绝；倾 255 */
+  /** 桶/海绵族 12 件（Player.ItemCheck_UseBuckets，Player.cs:45704-45890 1:1）：
+   *  族表（:45706）：205 空桶 / 206 水 / 207 岩浆 / 1128 蜂蜜 / 3031 无底水桶 /
+   *    3032 超吸海绵 / 4820 无底岩浆桶 / 4872 岩浆海绵 / 5302 无底蜂蜜桶 /
+   *    5303 蜂蜜海绵 / 5304 终极海绵 / 5364 无底微光桶
+   *  舀取支入口（:45719）：205 且非微光 / 3032 水|微光 / 4872 岩浆 / 5303 蜂蜜 /
+   *    5304 任意液体；合计门（:45733）海绵族豁免；仅 205 换桶（:45738 消耗块
+   *    显式排除 3032/4872/5303/5304——海绵族不消耗、无饱和变体）
+   *  倾倒支（:45811-45888）：≥200 或 active 实心非 solidTop（546 例外）拒绝（:45813）；
+   *    空格或同类才倒（:45819/:45839/:45859/:45877）；无底族不换桶；
+   *    5364 = 倒微光 255 不消耗,无额外交互（实体转化走液体侧 ShimmerCheck） */
   private useBucket(bucketVid: number, tx: number, ty: number): void {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
-    // 3031 无限水桶(:45805 族):倒 255 水且【不换桶】(item 不消耗);
-    // 3032 超吸海绵(:45778 族):吸干目标及 3×3 邻域液体,同不消耗
-    if (bucketVid === 3031) {
-      const i = st.idx(tx, ty);
-      if (st.liquid[i] >= 200 || (st.flags[i] && st.isActive(tx, ty) && st.isSolid(tx, ty)
-        && TILE_DEFS[st.type[i]]?.vanilla?.sheet !== 546)) return;
-      st.setLiquid(tx, ty, 255, 1);
-      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8);
-      this.player.useTime = 30;
-      this.input.rightDown = false;
-      return;
+    // 射程门（:45706 IsInTileInteractionRange Simple 档 + tileBoost）：无底桶/海绵族
+    // tileBoost+=2（Item.cs:28052/:39452/:39648/:42042/:42053/:42534）、5304 +=3（:42062）
+    const tb = bucketVid === 5304 ? 3
+      : (bucketVid === 3031 || bucketVid === 3032 || bucketVid === 4820
+        || bucketVid === 4872 || bucketVid === 5302 || bucketVid === 5303 || bucketVid === 5364) ? 2 : 0;
+    if (!this.inTileRange(tx, ty, tb)) return;
+    const i = st.idx(tx, ty);
+    // 原版 liquidType()==0 ≡ 水（LiquidID.cs:5）；本仓 +1 编码下 0 视同水
+    const tHere = st.liquidType[i] || LIQUID_TYPE.WATER;
+    // 3×3 同类合计（:45723-45731）
+    let sum3x3 = 0;
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        if (!st.inBounds(tx + ox, ty + oy)) continue;
+        const j = st.idx(tx + ox, ty + oy);
+        if ((st.liquidType[j] || LIQUID_TYPE.WATER) === tHere) sum3x3 += st.liquid[j];
+      }
     }
-    if (bucketVid === 3032) {
-      for (let ox = -1; ox <= 1; ox++) {
-        for (let oy = -1; oy <= 1; oy++) {
-          if (st.inBounds(tx + ox, ty + oy) && st.liquid[st.idx(tx + ox, ty + oy)] > 0) {
-            st.setLiquid(tx + ox, ty + oy, 0, 0);
-          }
-        }
-      }
-      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8);
-      this.player.useTime = 30;
-      this.input.rightDown = false;
-      return;
-    }
-    const liqTypeMap: Record<number, number> = { 206: 1, 207: 2, 1128: 3 };
-    const swap = (toVid: number) => {
-      // 原版语义:桶在手中原格替换(不跳格)
-      this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[VI(toVid)], stack: 1 };
-      this.cb.onInventoryChanged();
-      this.player.useTime = 30;
-      this.input.rightDown = false;
-    };
-    if (bucketVid === 205) {
-      const i = st.idx(tx, ty);
-      if (st.liquid[i] <= 0) return;
-      const t = st.liquidType[i] || 1;
-      if (t === 4) return; // 微光不可舀（:45726：type 205 且 tile.shimmer() → 直接返回）
-      // 3×3 同类合计门（:45733-45741：合计 ≤100 的浅洼舀不起）
-      let sum = 0;
-      for (let ox = -1; ox <= 1; ox++) {
-        for (let oy = -1; oy <= 1; oy++) {
-          if (!st.inBounds(tx + ox, ty + oy)) continue;
-          const j = st.idx(tx + ox, ty + oy);
-          if ((st.liquidType[j] || 1) === t) sum += st.liquid[j];
-        }
-      }
-      if (sum <= 100) return;
-      const scooped = st.liquid[i];
-      st.setLiquid(tx, ty, 0, 0);
-      // 邻居回吸（:45777-45802）：目标格不足 255 时从 3×3 同类补足，余量进桶消失
-      let need = 255 - scooped;
-      for (let ox = -1; ox <= 1 && need > 0; ox++) {
-        for (let oy = -1; oy <= 1 && need > 0; oy++) {
-          if ((ox === 0 && oy === 0) || !st.inBounds(tx + ox, ty + oy)) continue;
-          const j = st.idx(tx + ox, ty + oy);
-          if (st.liquid[j] <= 0 || (st.liquidType[j] || 1) !== t) continue;
-          const take = Math.min(st.liquid[j], need);
-          st.setLiquid(tx + ox, ty + oy, st.liquid[j] - take, t);
-          need -= take;
-        }
-      }
-      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45774）
-      swap(t === 2 ? 207 : t === 3 ? 1128 : 206);
+    // 倾倒实心门（:45813 nactive && tileSolid && !tileSolidTop && type!=546 的仓库近似）
+    const td = st.type[i] !== 0 ? TILE_DEFS[st.type[i]] : undefined;
+    const solidBlocked = !!st.flags[i] && !!td && !!td.solid && !td.platform
+      && td.vanilla?.sheet !== 546;
+    const op = Game.bucketUse(bucketVid, st.liquid[i], tHere, sum3x3, solidBlocked);
+    if (op.kind === 'none') return;
+    if (op.kind === 'pour') {
+      st.setLiquid(tx, ty, 255, op.liquidType!);            // :45823/:45843/:45863/:45881
     } else {
-      const i = st.idx(tx, ty);
-      const lt = liqTypeMap[bucketVid];
-      // 倾倒门（:45805-45808）：液体 ≥200 / 异类液体 / 实心块（546 陆地块例外）拒绝
-      if (st.liquid[i] >= 200) return;
-      if (st.liquid[i] > 0 && (st.liquidType[i] || 1) !== lt) return;
-      const td = st.type[i] !== 0 ? TILE_DEFS[st.type[i]] : undefined;
-      if (st.flags[i] && td && td.solid && !td.platform && td.vanilla?.sheet !== 546) return;
-      st.setLiquid(tx, ty, 255, lt);
-      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45816/45833）
-      swap(205);
+      Game.bucketScoopDrain(st, tx, ty, tHere);             // :45762-45809
     }
+    this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45760/:45821/:45841/:45861/:45879）
+    if (op.swapTo !== undefined) {
+      // 原版 sItem.stack-- + PutItemInInventoryFromItemUsage：手中原格替换（不跳格）
+      this.player.inv.slots[this.player.inv.selected] = { id: ITEM_BY_KEY[VI(op.swapTo)], stack: 1 };
+      this.cb.onInventoryChanged();
+    }
+    this.player.useTime = op.useTime;                       // ApplyItemTime（:45761/:45830 族）
+  }
+
+  /** 桶/海绵族决策纯函数（Player.cs:45719-45888）——输入目标格状态,输出动作。
+   *  liquidType 用仓库 +1 编码（1 水/2 岩浆/3 蜂蜜/4 微光,0≡水,LiquidID.cs:5-11 +1）。
+   *  kind: none=门拦下 / pour=倾倒 255 / scoop=舀取（含四邻回吸）;useTime=ApplyItemTime 值 */
+  static bucketUse(vid: number, liquid: number, liquidType: number, sum3x3: number,
+    solidBlocked: boolean): { kind: 'none' | 'pour' | 'scoop'; liquidType?: number; swapTo?: number; useTime: number } {
+    const t = liquidType || LIQUID_TYPE.WATER;
+    const isSponge = vid === 3032 || vid === 4872 || vid === 5303 || vid === 5304;
+    // ---- 舀取支入口（:45719）----
+    const scoop = (vid === 205 && t !== LIQUID_TYPE.SHIMMER)
+      || (vid === 3032 && (t === LIQUID_TYPE.WATER || t === LIQUID_TYPE.SHIMMER))
+      || (vid === 4872 && t === LIQUID_TYPE.LAVA)
+      || (vid === 5303 && t === LIQUID_TYPE.HONEY)
+      || vid === 5304;                                      // 终极海绵任意液体（:45719 末项恒真）
+    if (scoop) {
+      // 门（:45733）：无液体拒绝;3×3 同类合计 ≤100 且非海绵拒绝（海绵可吸浅洼）
+      if (liquid <= 0 || (sum3x3 <= 100 && !isSponge)) return { kind: 'none', useTime: 0 };
+      // 换桶链（:45738-45759）：仅 205——蜜→1128/岩浆→207/水→206（微光已被入口拦）;
+      // 海绵族不消耗（消耗块显式排除 3032/4872/5303/5304）
+      return {
+        kind: 'scoop',
+        swapTo: vid === 205
+          ? (t === LIQUID_TYPE.HONEY ? 1128 : t === LIQUID_TYPE.LAVA ? 207 : 206) : undefined,
+        useTime: itemCombat(vid)?.useTime ?? 10,            // ApplyItemTime（:45761）
+      };
+    }
+    // ---- 倾倒支（:45811-45888）----
+    if (liquid >= 200 || solidBlocked) return { kind: 'none', useTime: 0 };  // :45813
+    const pourType: Record<number, number> = {
+      207: LIQUID_TYPE.LAVA, 4820: LIQUID_TYPE.LAVA,       // :45817-45835
+      206: LIQUID_TYPE.WATER, 3031: LIQUID_TYPE.WATER,     // :45837-45855
+      1128: LIQUID_TYPE.HONEY, 5302: LIQUID_TYPE.HONEY,    // :45857-45875
+      5364: LIQUID_TYPE.SHIMMER,                           // :45877-45888
+    };
+    const lt = pourType[vid];
+    if (lt === undefined) return { kind: 'none', useTime: 0 }; // 205 在微光上/海绵族不进此支
+    if (liquid > 0 && t !== lt) return { kind: 'none', useTime: 0 };  // 空格或同类才倒
+    // 满桶族回空桶（:45827/:45847/:45867）;无底族 3031/4820/5302/5364 不消耗
+    const bottomless = vid === 3031 || vid === 4820 || vid === 5302 || vid === 5364;
+    return {
+      kind: 'pour',
+      liquidType: lt,
+      swapTo: bottomless ? undefined : 205,
+      useTime: itemCombat(vid)?.useTime ?? 10,              // ApplyItemTime（:45830/:45850/:45870/:45883）
+    };
+  }
+
+  /** 舀取执行（:45762-45809）：清目标格;不足 255 时从 3×3 同类邻居回吸补足,余液
+   *  留在地里。海绵与空桶共用同一舀取体——同样只吸到 255 为止（非清空 3×3）。
+   *  返回舀走总量。 */
+  static bucketScoopDrain(st: TileStore, tx: number, ty: number, tHere: number): number {
+    const i = st.idx(tx, ty);
+    let got = st.liquid[i];
+    st.setLiquid(tx, ty, 0, 0);
+    if (got >= 255) return got;                             // :45775 目标已满则不回吸
+    for (let ox = -1; ox <= 1; ox++) {
+      for (let oy = -1; oy <= 1; oy++) {
+        if ((ox === 0 && oy === 0) || !st.inBounds(tx + ox, ty + oy)) continue;
+        const j = st.idx(tx + ox, ty + oy);
+        if (st.liquid[j] <= 0 || (st.liquidType[j] || LIQUID_TYPE.WATER) !== tHere) continue;
+        const take = Math.min(st.liquid[j], 255 - got);     // :45785-45788
+        if (take <= 0) continue;                            // 已吸满 255,余格不动（:45786 归零）
+        got += take;
+        st.setLiquid(tx + ox, ty + oy, st.liquid[j] - take, tHere);
+      }
+    }
+    return got;
   }
 
   /** 传送族青尘（回忆药水 Cyan / 魔镜族白尘 dust 15，:42299/:42434 近似） */

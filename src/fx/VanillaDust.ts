@@ -185,8 +185,7 @@ export class VanillaDust {
   *each(fullbright: boolean): Generator<VDust> {
     for (const d of this.pool) {
       if (!d.active) continue;
-      const fb = d.type === 6 || d.type === 15 || (d.type >= 59 && d.type <= 64);
-      if (fb === fullbrightnessWanted(fullbright, d)) yield d;
+      if (fullbrightnessWanted(fullbright, d)) yield d;
     }
   }
 

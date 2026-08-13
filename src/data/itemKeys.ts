@@ -45,4 +45,6 @@ export const VI_KEY = {
   IRON_HELMET: VI(90), IRON_CHAINMAIL: VI(81), IRON_GREAVES: VI(77),
   // 草种(蘑菇 194 等)
   MUSHROOM_GRASS_SEEDS: VI(194),
+  // 特殊工具:传送门枪 3384(Item.cs:30926-30942;月总宝藏袋 3332 授予 :7363-7366)
+  PORTAL_GUN: VI(3384),
 } as const;

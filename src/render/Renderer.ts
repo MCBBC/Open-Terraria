@@ -131,7 +131,7 @@ import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
-import { wingDrawOf, wingDrawFrame } from '../data/vanillaWingVisuals';
+import { wingDrawOf, wingDrawFrame, wingAnchorForRow } from '../data/vanillaWingVisuals';
 import { VanillaDust } from '../fx/VanillaDust';
 import type { Entity } from '../entities/Entity';
 
@@ -925,6 +925,7 @@ export class Renderer {
     invasion: { name: string; pct: number; label?: string } | null = null,
   ) {
     this.animTick++;
+    this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
     this._mouseX = mouseX;
     this.remotePlayers = remotePlayers;
     this.mainPlayer = player;   // 克脑镜像（Main.cs:24799-24843 以玩家中心镜像）等取用
@@ -2839,20 +2840,24 @@ export class Renderer {
    *  color47 = Color(180,90,255,alpha15)×0.75 → RGB(135,67,191)、A=alpha15×0.75；
    *  lai0<60 段再 ×GetLerpValue(0,60) 且 num323=Lerp(1,0.5,1−lerp²)（环由 0.5 膨到 1）。
    *  num324 = lai0×0.0041887905（=π/750）慢旋；每份极角 = num324+2π·i/16，旋转再 +π。
-   *  逐份画在 Extra_89 中心锚（origin=size/2），SpriteEffects.None。 */
+   *  逐份画在 Extra_89 中心锚（origin=size/2），SpriteEffects.None。
+   *  XNA AlphaBlend（SourceBlend.One）语义：src 项 = texel×RGB×fade、dst 项按 A×fade
+   *  衰减——fade 同时进两侧 → 调用方须把它乘进染色（tint 量化防 tintCache 爆）与 alpha。 */
   static npcSoulRingParams(lai0: number): {
-    count: number; radius: number; angle0: number; scale: number; alpha: number;
+    count: number; radius: number; angle0: number; scale: number; alpha: number; fade: number;
   } | null {
     if (lai0 <= 0) return null;
     const alpha15 = Math.trunc((Math.cos(lai0 * (Math.PI * 2) / 60) * 0.5 + 0.5) * 32);
-    let a = (alpha15 * 0.75) / 255;
+    let fade = 1;
     let scale = 1;
     if (lai0 < 60) {
-      const lerp3 = Renderer.glowLerpValue(0, 60, lai0);
-      a *= lerp3;
-      scale = 1 - 0.5 * (1 - lerp3 * lerp3);   // MathHelper.Lerp(1, 0.5, 1−lerp²)
+      fade = Renderer.glowLerpValue(0, 60, lai0);
+      scale = 1 - 0.5 * (1 - fade * fade);   // MathHelper.Lerp(1, 0.5, 1−lerp²)
     }
-    return { count: 16, radius: 400 * scale, angle0: lai0 * 0.0041887905, scale, alpha: a };
+    return {
+      count: 16, radius: 400 * scale, angle0: lai0 * 0.0041887905, scale,
+      alpha: (alpha15 * 0.75 * fade) / 255, fade,
+    };
   }
 
   /** 轨道族逐帧参数（Main.cs:25826-25829 num299/num300/num302 初值 + 各 case 覆写 +
@@ -4236,9 +4241,11 @@ export class Renderer {
     const img = this.atlas.ensureVImage('vanilla/Extra_89.png');
     if (!img || !img.complete || img.naturalWidth === 0) return;
     const ctx = this.ctx;
-    const soul = this.tintedSprite('extra89soul', {
+    // fade 量化 1/32 进染色键（连续值会打爆 tintCache；33 档上界有界）
+    const q = Math.round(prm.fade * 32) / 32;
+    const soul = this.tintedSprite(`extra89soul|q${q}`, {
       img, sx: 0, sy: 0, sw: img.naturalWidth, sh: img.naturalHeight,
-    }, [135, 67, 191]);   // (180,90,255)×0.75 截整
+    }, [135 * q, 67 * q, 191 * q]);   // (180,90,255)×0.75 截整，再 ×fade（XNA src 项）
     ctx.save();
     ctx.imageSmoothingEnabled = false;
     for (let i = 0; i < prm.count; i++) {
