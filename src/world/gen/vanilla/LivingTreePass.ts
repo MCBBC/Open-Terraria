@@ -19,6 +19,7 @@ import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeDoorClosed } from '../../Door';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const LIVING_WOOD = TILE_BY_KEY['v_191_living_wood_block']!;
 const LEAF = TILE_BY_KEY['v_192_living_leaf_block']!;
@@ -56,7 +57,9 @@ function wallAt(st: TileStore, x: number, y: number): number {
 function solidAt(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
-  return st.flags[i] !== 0 && !!TILE_DEFS[st.type[i]]?.solid;
+  // 生成期实心查询（GenSolid）：GrowLivingTree 体内 48 尖刺已翻非实心（cs:28257），
+  // 裸 TILE_DEFS.solid 会把尖刺当实心挡树（见 growLivingTree 内翻转注释）
+  return st.flags[i] !== 0 && genSolidType(st.type[i]);
 }
 function isDungeonWall(w: number): boolean { return DUNGEON_WALLS.has(w); }
 function inWorld(st: TileStore, x: number, y: number, slack: number): boolean {
@@ -559,6 +562,10 @@ export function growLivingTree(
       }
     }
   }
+  // ★cs:28257 `Main.tileSolid[48] = false`：净空检查之后、主干生长之前翻 48 尖刺为
+  //   非实心——根系下扎/竖井探测（solidAt）不再被尖刺挡住。函数尾 cs:28757 还原
+  //   true（28257-28757 之间无 return 路径,已核实,作用域闭合无泄漏）。
+  flipGenSolid([48], false);
   let num9 = num3, num10 = num4;
   let minl = num3, minr = num4;
   let num11 = j;
@@ -787,6 +794,8 @@ export function growLivingTree(
       minl = refs.minl; minr = refs.minr;
     }
   }
+  // ★cs:28757 `Main.tileSolid[48] = true`：函数尾还原（对应头部的 cs:28257 翻转）
+  flipGenSolid([48], true);
   return true;
 }
 
@@ -877,6 +886,12 @@ export function runLivingTreesPass(
       }
     }
   }
+  // ★pass 尾 tileSolid 翻转（cs:15789 `Main.tileSolid[192] = false`）：活树叶自此
+  //   生成期恒非实心（中途 cs:16324 沙上清水翻 true → cs:16694 SmoothWorld 尾翻回
+  //   false → cs:19592 Piles 尾翻 true,各接线点见 GenSolid.ts 头注）。
+  //   本仓 TILE_DEFS 已把 192 预翻为 solid:false（数据不可动）——此翻转在数据基线上
+  //   为 no-op,接线仅为时间线存档。
+  flipGenSolid([192], false);
 }
 
 // ---------- LivingTreeWalls pass（cs:15792-15824，零掷骰） ----------

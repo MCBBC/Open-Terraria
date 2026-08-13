@@ -9,6 +9,8 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { placeBuriedChest, nextJungleItem, type ChestSink } from './BuriedChestsPass';
+import { addProtectedStructure, canPlaceStructure } from './GenState';
+import { flipGenSolid } from './GenSolid';
 
 function sheetTile(sheet: number): number {
   for (let id = 0; id < TILE_DEFS.length; id++) {
@@ -76,6 +78,15 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
         }
       }
       if (bad) continue;
+      // ★cs:16077 保护矩形 + cs:16101 structures.CanPlace(area, 1)：
+      //   area = Rectangle(num-num5-1, num2-num6-1, num5+1, num6+1)——半开区间即
+      //   [x-halfW-1, x) × [y-halfH-1, y),宽高各 halfW+1/halfH+1（原版数值如此,壳体
+      //   实际为 (halfW+1)*2+1 宽——area 只覆盖左上角,系原版本来的窄登记,照抄勿"修"）。
+      //   pad=1：与既有保护结构（蜂巢主巢±50 pad5/蜂蜜斑 16×16 pad0/微光 200×200 pad0
+      //   等）互斥,失败则继续重试。原版还有 validTiles 内容扫描（StructureMap.cs:40-53）,
+      //   上面的 ±30 坏块扫描已是本地等价判定,不重复收紧。
+      const area = { x0: x - halfW - 1, y0: y - halfH - 1, x1: x, y1: y };
+      if (!canPlaceStructure(gs, area, 1)) continue;
       // 实体壳(cs:16116-16127)
       for (let lx = x - halfW - 1; lx <= x + halfW + 1; lx++) {
         for (let ly = y - halfH - 1; ly <= y + halfH + 1; ly++) {
@@ -130,11 +141,18 @@ export function runJungleShrinePass(st: TileStore, rng: RNG, gs: GenState): Arra
         ty--;
       }
       spots.push({ x, y });
+      // ★cs:16200 structures.AddProtectedStructure(area)（pad 默认 0）：登记保护矩形,
+      //   后续蜂巢蜂蜜斑（本 pass 已过,原版时序蜂巢在前）/地下小屋/剑冢等结构互斥。
+      addProtectedStructure(gs, area, 0);
       retries = 0;
       placed = true;
     }
     if (abandoned) i++;   // ★J2:原版 i++ 使放弃额外消耗一个名额(cs:16205)
   }
+  // ★pass 尾 tileSolid 翻转（cs:16212 `Main.tileSolid[137] = false`）：飞镖陷阱自此
+  //   非实心,SmoothWorld 尾（cs:16692）还原 true（HalfBrickPass 接线）。本仓神龛
+  //   未放置 137（原版神龛内含飞镖陷阱,缺件备案）,此翻转当前无消费面,仅存档时间线。
+  flipGenSolid([137], false);
   return spots;
 }
 

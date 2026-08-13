@@ -12,6 +12,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet, NOT_CLEARABLE } from './TileRunner';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 /** 各排除表按原版 vanilla tile id 构建（经 idsByVanillaSheet 转内部 id） */
 const T = { // 排除表用的原版 id 集
@@ -37,7 +38,10 @@ function fullOrEmpty(st: TileStore, x: number, y: number): boolean {
 
 /** WorldGen.SolidTile(i, j, false) 等价（WorldGen.cs:42370）：
  *  active && tileSolid && !tileSolidTop && !halfBrick && slope==0 —— 半砖/坡面格不算实心。
- *  这对 PoundTile（toggle 语义）至关重要：已砸的半砖不会被后续 pass 再"砸回"整砖 */
+ *  这对 PoundTile（toggle 语义）至关重要：已砸的半砖不会被后续 pass 再"砸回"整砖。
+ *  ★tileSolid 走 GenSolid（生成期 Main.tileSolid 翻转表）：SmoothWorld 期间 137
+ *  陷阱（cs:16212 起非实心）/190 荧光菇块（cs:16693 起非实心）/484 滚动仙人掌
+ *  （cs:12537 起非实心）等不再被当实心地面——与原版 SolidTile 读可变数组一致 */
 export function solidTile(st: TileStore, x: number, y: number): boolean {
   if (x < 0 || y < 0 || x >= st.w || y >= st.h) return false;
   const i = st.idx(x, y);
@@ -47,7 +51,7 @@ export function solidTile(st: TileStore, x: number, y: number): boolean {
   const t = st.type[i];
   if (t === 0) return false;
   const d = TILE_DEFS[t];
-  return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+  return genSolidType(t) && !!d && !d.platform && !st.half[i] && st.slope[i] === 0;
 }
 
 /** 可砸判定（1456 WorldGen.cs:81434 CanPoundTile 1:1 表）：
@@ -81,7 +85,8 @@ export function canPoundTile(st: TileStore, x: number, y: number): boolean {
   }
   const d = TILE_DEFS[t];
   // !framed ≈ CanKillTile 的框架物拦截（箱/罐/雕像等不可砸半砖）——CanKillTile 整体仍近似
-  return !!d && d.solid && !d.platform && !d.framed;
+  // tileSolid 走 GenSolid（同 solidTile：生成期翻转表）
+  return genSolidType(t) && !!d && !d.platform && !d.framed;
 }
 
 /** 坡面(WorldGen.cs:81507 SlopeTile 的生成期路径):清 half、写 slope(0-4)。
@@ -100,13 +105,14 @@ function tileEmpty(st: TileStore, x: number, y: number): boolean {
   return !st.flags[st.idx(x, y)];
 }
 
-/** WorldGen.SolidOrSlopedTile（70046）：active && tileSolid && !tileSolidTop（坡面算实心） */
+/** WorldGen.SolidOrSlopedTile（70046）：active && tileSolid && !tileSolidTop（坡面算实心）。
+ *  tileSolid 走 GenSolid（生成期翻转表,同 solidTile） */
 export function solidOrSlopedTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[st.type[i]];
-  return !!d && d.solid && !d.platform;
+  return genSolidType(st.type[i]) && !!d && !d.platform;
 }
 
 /** Tile.SmoothSlope（1456 Tile.cs:822-880, applyToNeighbors=false 生成期路径,sync 段为联机略）：
@@ -144,6 +150,11 @@ export function poundTile(st: TileStore, x: number, y: number): boolean {
 
 /** 原版 pass "Smooth World"（1456 WorldGen.cs:16507-16687）：地表凸起 → 坡面/半砖/削除 */
 export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:16510 `SetCrackedBrickSolidity(solid: true)` →
+  //   481/482/483 短暂回实心）：本仓 TILE_DEFS 已把 481-483 预翻为 solid:false
+  //   （数据不可动）,GenSolid 可表达该 true 窗口——SmoothWorld 期间裂纹砖按实心处理,
+  //   尾部 cs:16695 翻回 false（见函数尾）。
+  flipGenSolid([481, 482, 483], true);
   const { w, h } = st;
   // —— 第一遍：主凸起模式（16511-16652）——
   for (let i = 20; i < w - 20; i++) {
@@ -276,19 +287,27 @@ export function runSmoothWorldPass(st: TileStore, rng: RNG, _gs: GenState): void
       }
     }
   }
+  // ★pass 尾 tileSolid 翻转族（cs:16692-16695,逐条 1:1）：
+  //   137=true   还原 JungleShrines 尾（cs:16212）的翻非实心
+  //   190=false  荧光菇块自此非实心（Piles 尾 cs:19591 还原）
+  //   192=false  活树叶翻回非实心（沙上清水 cs:16324 曾短暂翻 true）
+  //   481/482/483=false  裂纹砖翻回非实心（本 pass 头 cs:16510 曾翻 true）
+  flipGenSolid([137], true);
+  flipGenSolid([190, 192], false);
+  flipGenSolid([481, 482, 483], false);
 }
 
 /** 原版 pass "Waterfalls"（WorldGen.cs:7697-7743）：水边唇缘砸半砖（瀑布触发的来源） */
 export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:16702 `Main.tileSolid[191] = false`）——活木非实心,
+  //   pass 尾 cs:16753 还原 true（见函数尾）。
+  flipGenSolid([191], false);
   const { w, h } = st;
-  // ★cs:16702 `Main.tileSolid[191] = false`：本 pass 期间活木(191)视为非实心——
-  //   本仓该 pass 走静态 TILE_DEFS，做 pass 内局部覆写（191 仍 solid:true），
-  //   不动全局表（BuriedChests 等导入的 solidTile 语义不受影响）
-  const NON_SOLID = idsByVanillaSheet(191);
-  const solidWF = (x: number, y: number): boolean => {
-    if (!solidTile(st, x, y)) return false;
-    return !NON_SOLID.has(st.type[st.idx(x, y)]);
-  };
+  // ★cs:16702 `Main.tileSolid[191] = false`：本 pass 期间活木(191)视为非实心（否则
+  //   活木会被当实心水边唇缘砸半砖）——原为 pass 内局部 NON_SOLID 表,已迁移到
+  //   GenSolid 统一翻转（pass 尾 cs:16753 还原 true）。solidTile 本身已读 GenSolid,
+  //   此处直接用 solidWF = solidTile。
+  const solidWF = (x: number, y: number): boolean => solidTile(st, x, y);
   // cs:16723-16726 特判素材：75=黑曜石砖 / 76=狱石砖——旁水唇缘砸半砖前 1/10 才放行
   const OBSIDIAN_HELL = idsByVanillaSheet(75, 76);
   // —— 第一遍（L7701-7723）：实心顶格、左右空、侧旁有水 → 砸半砖 ——
@@ -328,4 +347,6 @@ export function runWaterfallLipPass(st: TileStore, rng: RNG, _gs: GenState): voi
       }
     }
   }
+  // ★pass 尾还原（cs:16753 `Main.tileSolid[191] = true`）
+  flipGenSolid([191], true);
 }

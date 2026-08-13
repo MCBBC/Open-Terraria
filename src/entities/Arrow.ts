@@ -112,6 +112,42 @@ export interface ArrowOpts {
   /** 星怒剑 503（aiStyle 5 :22139-22157）：targetY=目标线（鼠标 Y 与玩家
    *  cy−200 取小）；线上方穿墙/alpha 渐显钳 150，线下开始撞块 */
   star?: { targetY: number };
+  /** 食人鱼 190（aiStyle 39，1156 食人鱼枪，GAP G3 行为层）：非空 = 走
+   *  piranhaStep 独占状态机（直飞咬敌 → 咬住周期撕咬 → 松手返回回收），
+   *  通用 subStep 的重力/撞块消亡/穿透递减语义不适用 */
+  piranha?: PiranhaCtl;
+}
+
+/** 食人鱼控制面（Game 注入，同 PrismProj channelCb/aimCb 模式） */
+export interface PiranhaCtl {
+  /** Player.channel 电平（按住=持续咬；松手 → ai[0]=1 返回 + ai[1]=−1 禁再咬，
+   *  Projectile.cs:26093-26096）。附带 heldItem/死亡门（同 FlailProj 回调先例） */
+  channel: () => boolean;
+  /** 当前瞄准点（世界坐标）——回收补弹的出生方向（ItemCheck_Shoot num4/num5） */
+  aim: () => { x: number; y: number };
+}
+
+/** 食人鱼常量（SetDefaults Projectile.cs:2509-2520：22×22 aiStyle 39 /
+ *  penetrate −1 / ranged / timeLeft 走通用默认 3600 :526 /
+ *  usesLocalNPCImmunity + localNPCHitCooldown = 14 :2520-2521） */
+export const PIRANHA_PROJ = 190;
+export const PIRANHA_LIFE = 3600;
+export const PIRANHA_HIT_CD = 14;
+
+/** 食人鱼咬住/搜敌目标最小面（Enemy 满足） */
+interface PiranhaTarget {
+  x: number; y: number; w: number; h: number;
+  cx: number; cy: number;
+  vx: number; vy: number;
+  id: number;
+  hp: number;
+  dead: boolean;
+  dontTakeDamage?: boolean;
+  iframes?: number;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks,
+    pen?: number, crit?: boolean, pierce?: number, fromPlayer?: boolean, penPercent?: number) => boolean;
+  def?: { hitSound?: string[] };
+  hemorrhageT?: number;
 }
 
 /** extraUpdates：已并入 vanilla-projectiles.json（tools/extract-projectiles.mjs
@@ -229,6 +265,28 @@ export class Arrow extends Entity {
   lightRGB: [number, number, number] | null = null;
   /** 点光源像素覆盖（缺省=实体中心；985 泰拉刃 :39382 光心=弹心+朝向 85×scale） */
   lightRGBAt: { x: number; y: number } | null = null;
+  // ---- 食人鱼 190（aiStyle 39，Projectile.cs:26065-26315）专属态 ----
+  /** 非空 = 食人鱼状态机激活（fixedUpdate 直入 piranhaStep） */
+  piranha: PiranhaCtl | null = null;
+  /** alpha（SetDefaults :2517 = 255；AI :26067 每 tick −50，6t 淡入归零） */
+  pAlpha = 255;
+  /** ai[0]：0=直飞（:26245 分支）/ 1=返回玩家（:26266 分支） */
+  pAi0 = 0;
+  /** ai[1]：0=未咬（命中即咬 :12447）/ >0=咬住目标 / −1=松手禁再咬（:26095） */
+  pAi1 = 0;
+  /** 咬住目标（vanilla 存 npc index+1，此处直接持引用 + 每 tick 校验存活） */
+  pTarget: PiranhaTarget | null = null;
+  /** localNPCImmunity 同敌冷却表（SetDefaults :2521 = 14t，:13157 命中写入） */
+  private pHitCd = new Map<number, number>();
+  /** 帧推进计数 / 当前帧（:26301-26310：4t/帧 4 帧循环——draw 侧消费） */
+  pFrameCounter = 0;
+  pFrame = 0;
+  /** 姿态角（未镜像系 atan2(vy,vx)）与翻转位（spriteDirection<0）——咬住时
+   *  velocity 已清零，atan2(0,0) 会把鱼掰回 0°，故由 AI 侧在清速前记录（:26119-26143） */
+  pRot = 0;
+  pFlip = false;
+  /** 出生弹速（ItemCheck_Shoot num4/num5 模长 = item.shootSpeed 14）——补弹复用 */
+  pShootSpeed = 0;
   dead = false;
 
   constructor(x: number, y: number, vx: number, vy: number, damage: number,
@@ -266,6 +324,10 @@ export class Arrow extends Entity {
       this.terraAi2 = opts.terra.ai2;
     }
     if (opts?.star) this.starY = opts.star.targetY;
+    if (opts?.piranha) {
+      this.piranha = opts.piranha;
+      this.pShootSpeed = Math.hypot(vx, vy);   // Game 侧可覆写为精确 shootSpeed
+    }
   }
 
   draw(r: Renderer, _cam: Camera): void {
@@ -336,7 +398,10 @@ export class Arrow extends Entity {
     }
     // 翻滚态用累积角（aiStyle 2）；48/54/93/520/599 平飞期姿态锁定 atan2
     const tumbling = this.tumble && !(this.tumblePoseLock && this.age <= this.gravDelay);
-    const ang = tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx);
+    // 食人鱼姿态由 AI 侧维护（pRot/pFlip）：咬住时 velocity 清零（:26126-26129），
+    // 现算 atan2(0,0)=0 会把鱼掰回正右——原版 rotation 在清速前取目标向（:26119-26143）
+    const ang = this.piranha ? this.pRot
+      : (tumbling ? this.tumbleRot : Math.atan2(this.vy, this.vx));
     const img = projSprite(this.projId);
     // 喵刀弹 502 彩虹拖尾（Main.cs:32495-32513）：Projectile_250.png（14×32）沿
     // oldPos 逐段——旋转=段向-π/2、纵向拉伸=段长/32、alpha=127/255×(1-i/N)，
@@ -369,7 +434,8 @@ export class Arrow extends Entity {
     // 朝右贴图族（PROJ_ROT_RIGHT）：rotation=atan2(vy,vx)（vanilla :26122-26140 模式），
     // 向左运动水平镜像（spriteDirection 语义）；其余默认朝上 atan2+π/2（AI_001 L54877）
     const rightArt = PROJ_ROT_RIGHT.has(this.projId);
-    if (rightArt && this.vx < 0) {
+    const flipLeft = this.piranha ? this.pFlip : this.vx < 0;
+    if (rightArt && flipLeft) {
       ctx.scale(-1, 1);              // 先镜像再旋转（R(π−ang)∘M ≡ 原版 flip+atan2(−vy,−vx)）
       ctx.rotate(Math.PI - ang);
     } else {
@@ -378,9 +444,14 @@ export class Arrow extends Entity {
     // 502 朝向（:22659-22665）：spriteDirection=sign(vx)——贴图在旋转坐标系内水平镜像
     if (this.projId === 502 && this.vx < 0) ctx.scale(-1, 1);
     ctx.imageSmoothingEnabled = false;
-    // 多帧行（190 食人鱼 4 帧/837 3 帧）按帧行切片防胶片压扁；单帧走整图
+    // 食人鱼淡入（aiStyle 39 :26067-26071：alpha 255 起 −50/t，6t 归零）
+    if (this.piranha) ctx.globalAlpha = Math.max(0, Math.min(1, 1 - this.pAlpha / 255));
+    // 多帧行（190 食人鱼 4 帧/837 3 帧）按帧行切片防胶片压扁；单帧走整图。
+    // 食人鱼帧号由 AI 推进（:26301-26310 frameCounter≥4 推帧 4 帧循环），
+    // 其余型号沿用 age/5 档
     const frames = projFrameCount(this.projId);
-    const frameImg = frames > 1 ? projFrameImg(this.projId, Math.floor(this.age / 5) % frames) : null;
+    const fIdx = this.piranha ? this.pFrame : Math.floor(this.age / 5) % frames;
+    const frameImg = frames > 1 ? projFrameImg(this.projId, fIdx) : null;
     const drawImg = frameImg ?? img;
     if (drawImg && (drawImg as HTMLImageElement).complete !== false
       && (drawImg.width > 0 || (drawImg as HTMLImageElement).naturalWidth > 0)) {
@@ -412,6 +483,8 @@ export class Arrow extends Entity {
   fixedUpdate(_dt: number, game: GameHooks) {
     // 联机傀儡（远端弹幕快照驱动）：对敌判定归拥有者客户端；对玩家（hostile）由访客本地结算 Damage_EVP（netPuppetProjContact）
     if (this.netPuppet) { this.netPuppetStep(); return; }
+    // 食人鱼 190 独占状态机（aiStyle 39）——重力/穿透递减/撞块消亡等通用语义不适用
+    if (this.piranha) { this.piranhaStep(game); return; }
     // extraUpdates 子步循环（Projectile.cs:15331-15336）：numUpdates = extraUpdates，
     // while(numUpdates>=0) 跑完整 AI/位移/命中体——timeLeft 也在循环内逐子步消耗
     //（:15861），故弹体寿命同步缩短为 1/(N+1)。
@@ -722,5 +795,206 @@ export class Arrow extends Entity {
       this.vy = -this.vy;
     }
     return true;
+  }
+
+  // ================= 食人鱼 190（aiStyle 39，Projectile.cs:26065-26315）=================
+  // 状态机 1:1：ai[0]=0 直飞咬敌（:26245）/ 1 返回玩家（:26266）；ai[1]=0 未咬可咬 /
+  // >0 咬住（Damage_PVE :12447 首咬写入 index+1）/ −1 松手禁再咬（:26095）。
+  // 咬住伤害 = 普通 hitbox 接触走 Damage_PVE（:11868-11871 localNPCImmunity 门 +
+  // :11905 全局 immune 门），localNPCHitCooldown=14t 同敌周期撕咬（:13157）。
+
+  /** 姿态记录（:26119-26125/:26139-26143/:26252-26287 三处 rotation 赋值：
+   *  vx<0 → spriteDirection=−1 + rotation=atan2(−vy,−vx)，等效 draw 的
+   *  scale(−1)+rotate(π−ang) 变换——此处只存未镜像角 + 翻转位） */
+  private pFace(vx: number, vy: number): void {
+    this.pRot = Math.atan2(vy, vx);
+    this.pFlip = vx < 0;
+  }
+
+  /** 统一消亡出口 + 回收补弹（Kill 语义；在场数 <3 且仍按住 → 补满 3，
+   *  Player.cs:42856-42868 ItemCheck num∈(0,3) 置 flag4 → :47768-47786 生成 3−num 条） */
+  private piranhaKill(game: GameHooks): void {
+    this.dead = true;
+    game.onProjectileDeath?.(this.projId, this.x, this.y, this.w, this.h);
+    if (this.piranha?.channel()) this.pTopUp(game);
+  }
+
+  /** 回收补弹（ItemCheck_Shoot 1156 专支 Player.cs:47768-47786：生成
+   *  3−在场数 条；速度分量各 +Next(−40,41)×0.05 扰动；出生点=玩家枪口。
+   *  无重播 UseSound——原版 channel 期 itemTime 恒被 SetDummyItemTime(5) 顶住，
+   *  无第二次 use 起手声） */
+  private pTopUp(game: GameHooks): void {
+    const p = game.player as { cx: number; cy: number } | null;
+    const ents = (game as unknown as {
+      entities?: { projectiles?: unknown[]; add?: (e: unknown, b: string) => void };
+    }).entities;
+    if (!p || !ents?.add) return;
+    const alive = (ents.projectiles ?? []).filter(
+      (o) => (o as { projId?: number }).projId === PIRANHA_PROJ && !(o as { dead?: boolean }).dead).length;
+    const aim = this.piranha!.aim();
+    const a = Math.atan2(aim.y - p.cy, aim.x - p.cx);
+    for (let i = 0; i < 3 - alive; i++) {
+      const np = new Arrow(p.cx + Math.cos(a) * 14, p.cy - 4 + Math.sin(a) * 14,
+        Math.cos(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
+        Math.sin(a) * this.pShootSpeed + (Math.floor(Math.random() * 81) - 40) * 0.05,
+        this.damage, this.knockback, PIRANHA_PROJ, null,
+        { grav: 0, life: PIRANHA_LIFE, piranha: this.piranha! });
+      np.critChance = this.critChance;
+      np.critBonus = this.critBonus;
+      np.armorPen = this.armorPen;
+      np.frostEligible = this.frostEligible;
+      np.pShootSpeed = this.pShootSpeed;
+      ents.add(np, 'projectiles');
+    }
+  }
+
+  private piranhaStep(game: GameHooks): void {
+    // Update :15329 DecrementLocalImmuneTimeCounters——localNPCImmunity 逐帧递减
+    for (const [k, v] of this.pHitCd) {
+      if (v <= 1) this.pHitCd.delete(k); else this.pHitCd.set(k, v - 1);
+    }
+    if (--this.life <= 0) { this.piranhaKill(game); return; }
+    this.age++;
+    // 淡入（:26067-26071）
+    this.pAlpha = Math.max(0, this.pAlpha - 50);
+    const p = game.player as { cx: number; cy: number; vx?: number; vy?: number; dead?: boolean; facing?: number } | null;
+    // :26072-26077 玩家失活/死亡/离主 >2000 → Kill
+    if (!p || p.dead) { this.piranhaKill(game); return; }
+    const dxp = p.cx - this.cx, dyp = p.cy - this.cy;
+    const dp = Math.hypot(dxp, dyp);
+    if (dp > 2000) { this.piranhaKill(game); return; }
+    // :26078-26087 淡入完成后每帧面向食人鱼（SetDummyItemTime 持物锁未接，登记 GAP）
+    if (this.pAlpha === 0 && p.facing !== undefined) p.facing = this.cx > p.cx ? 1 : -1;
+    // :26093-26096 松手（淡入完成后才生效）：返回 + ai[1]=−1 禁再咬
+    if (this.pAlpha === 0 && !this.piranha!.channel()) {
+      this.pAi0 = 1; this.pAi1 = -1; this.pTarget = null;
+    }
+    // :26098-26102 咬住超距（离主 >1500）脱咬转返回（ai[1]=0 仍可再咬）
+    if (this.pAi1 > 0 && dp > 1500) { this.pAi1 = 0; this.pAi0 = 1; this.pTarget = null; }
+    let tileCollide = true;
+    if (this.pAi1 > 0) {
+      tileCollide = false;                                   // :26105
+      const t = this.pTarget;
+      if (t && !t.dead && t.hp > 0) {                        // :26107 目标存活
+        const speed = 16;                                    // :26109 num313 咬敌速
+        const dx = t.cx - this.cx, dy = t.cy - this.cy;
+        const d = Math.hypot(dx, dy);
+        if (d < speed) {
+          this.vx = dx; this.vy = dy;                        // :26116-26117 残差直抵
+          if (d > speed / 3) {
+            this.pFace(this.vx, this.vy);                    // :26119-26125 朝目标
+            this.vx = 0; this.vy = 0;                        // :26126-26129 type 190 咬定
+          }
+        } else {
+          const dd = d === 0 ? 0.0001 : d;                   // :26132-26136
+          this.vx = dx / dd * speed; this.vy = dy / dd * speed;
+          this.pFace(this.vx, this.vy);                      // :26138-26143
+        }
+        this.x += t.vx; this.y += t.vy;                      // :26159-26161 跟随目标速度
+        // :26162-26178 同主多弹排斥（<8px 逐轴 ∓4——多鱼咬同一大体型怪时散开）
+        const sibs = (game as unknown as {
+          entities?: { projectiles?: Array<{ projId?: number; dead?: boolean; x?: number; y?: number; cx?: number; cy?: number }> };
+        }).entities?.projectiles;
+        if (sibs) {
+          for (const o of sibs) {
+            if (o === this || o.projId !== PIRANHA_PROJ || o.dead) continue;
+            if (Math.hypot((o.cx ?? 0) - this.cx, (o.cy ?? 0) - this.cy) >= 8) continue;
+            if (this.x < (o.x ?? 0)) this.vx -= 4; else this.vx += 4;
+            if (this.y < (o.y ?? 0)) this.vy -= 4; else this.vy += 4;
+          }
+        }
+        this.pAi0 = 1;                                       // :26184-26188 咬住期恒置 1
+      } else {
+        // :26190-26196 目标死亡 → 清咬
+        this.pAi1 = 0; this.pTarget = null;
+        // :26197-26223 半径 3000 内视线可达最近敌（CanBeChasedBy :91070 近似 =
+        //  存活/未无敌/可受伤；Manhattan 度量 num322）
+        let best: PiranhaTarget | null = null;
+        let bestScore = 3000;                                // :26205 num319
+        let bx = 0, by = 0;
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as PiranhaTarget;
+          if (e.dead || e.hp <= 0 || e.dontTakeDamage) continue;
+          const score = Math.abs(this.cx - e.cx) + Math.abs(this.cy - e.cy);
+          if (score >= bestScore) continue;
+          if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          bestScore = score; best = e; bx = e.cx; by = e.cy;
+        }
+        if (best) {
+          // :26223-26241 转咬新目标（立即入咬住态，速度 16 直指）
+          const dd = Math.hypot(bx - this.cx, by - this.cy) || 0.0001;
+          this.vx = (bx - this.cx) / dd * 16;
+          this.vy = (by - this.cy) / dd * 16;
+          this.pFace(this.vx, this.vy);
+          this.pAi0 = 0; this.pAi1 = 1; this.pTarget = best;
+        }
+        // 未找到新目标 → pAi0 已被 :26188 段置 1 → 返回（即便仍按住）
+      }
+    } else if (this.pAi0 === 0) {
+      // :26245-26261 直飞：无追踪（首咬靠接触），离主 >700 → 返回
+      if (dp > 700) this.pAi0 = 1;                           // :26247-26251
+      this.pFace(this.vx, this.vy);                          // :26252-26261
+    } else {
+      // :26266-26299 返回：穿墙、速度 20 直指玩家、<70px 回收
+      tileCollide = false;
+      this.pFace(this.vx, this.vy);                          // :26267-26287（保留来向姿态）
+      if (dp < 70) { this.piranhaKill(game); return; }       // :26276-26279
+      const dd = dp === 0 ? 0.0001 : dp;                     // :26273 num324=20
+      this.vx = dxp / dd * 20;
+      this.vy = dyp / dd * 20;
+      this.x += p.vx ?? 0; this.y += p.vy ?? 0;              // :26296-26299 type 190
+    }
+    // :26301-26310 帧推进（4t/帧 4 帧循环；AI 侧真源，draw 消费 pFrame）
+    if (++this.pFrameCounter >= 4) {
+      this.pFrameCounter = 0;
+      this.pFrame = (this.pFrame + 1) % 4;
+    }
+    // 位移积分（Update 运动段在 AI 后）
+    this.x += this.vx;
+    this.y += this.vy;
+    const tx = Math.floor((this.x + this.w / 2) / TILE);
+    const ty = Math.floor((this.y + this.h / 2) / TILE);
+    if (!game.world.store.inBounds(tx, ty)) { this.piranhaKill(game); return; }
+    // 撞块（HandleMovement :17940-17964 aiStyle 39 档：HitTiles 尘 + dig 声 +
+    //  ai[0]=1 返回，弹体不消亡；咬住/返回期 tileCollide=false 整段跳过）
+    const tileType = game.world.store.get(tx, ty);
+    if (tileCollide && tileType !== 0) {
+      game.cutTile(tx, ty);
+      if (game.world.store.isSolid(tx, ty)) {
+        this.x -= this.vx; this.y -= this.vy;                // 碰撞回退（停在墙前）
+        this.vx = 0; this.vy = 0;
+        this.pAi0 = 1;                                       // :17958 返回
+        game.spawnParticles(this.cx, this.cy, '#B0A080', 4, 1.5, { life: 18 });
+        game.playSfx('dig', 1, this.cx, this.cy);            // :17962 SoundID.Dig(0)
+      }
+    }
+    // 小动物接触（Damage_PVE 对 NPC 通用：小动物 friendly=false 亦受击；
+    //  penetrate=−1 弹体不消耗；非 CanBeChasedBy 目标不会成为咬住对象）
+    hitCritters(this, game);
+    // 命中结算（Damage_PVE :11850 迭代 + Damage_PVE_Inner :11888）
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as PiranhaTarget;
+      if (e.dead) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x
+        && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      if (this.pHitCd.has(e.id)) continue;                   // :11869 localNPCImmunity 门
+      if ((e.iframes ?? 0) > 0) continue;                    // :11905 npc.immune[owner] 门
+      // StrikeNPC :12811（暴击链同通用弹：基 4% + spawn 注入系暴击）
+      const crit = Math.random() < (this.critChance || (4 + this.critBonus) / 100);
+      const dmg = crit ? this.damage * 2 : this.damage;
+      // StatusNPC :10622-10625：命中必挂 Hemorrhage(375) 240-360t（表驱动）
+      applyProjStatus(PIRANHA_PROJ, e as unknown as Record<string, number>);
+      if (this.frostEligible) {
+        applyFrostBurn((game.player as unknown as { equipStats?: { frostBurn?: boolean } })
+          .equipStats?.frostBurn ?? false, e as unknown as Record<string, number>);
+      }
+      playEnemyHitSound(game, e);
+      // pierce=1 档：命中不设敌方免疫帧（:13154-13158 immune[owner]=0 语义），
+      // fromPlayer=true 走 DPS/掉落门链
+      e.hurt(dmg, Math.sign(e.cx - this.cx) * this.knockback, 0, game, this.armorPen, crit, 1, true);
+      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
+      this.pHitCd.set(e.id, PIRANHA_HIT_CD);                 // :13157 localNPCHitCooldown=14
+      if (this.pAi1 === 0) { this.pAi1 = 1; this.pTarget = e; }   // :12447-12450 首咬 latch
+    }
   }
 }

@@ -8,6 +8,7 @@
 import type { TileStore } from '../../TileStore';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { flipGenSolid } from './GenSolid';
 
 const SAND = TILE_BY_KEY['sand']!;                 // 53
 const SAND_HARD = TILE_BY_KEY['hardened_sand']!;   // 397
@@ -43,6 +44,11 @@ export function runRemoveSurfaceWaterAboveSandPass(st: TileStore, gs: GenState):
       break;   // cs:16321：首格判定后无论命中与否都结束该列
     }
   }
+  // ★pass 尾 tileSolid 翻转（cs:16324 `Main.tileSolid[192] = true`）：活树叶自
+  //   LivingTrees 尾（cs:15789）的非实心态短暂回实心——SmoothWorld 尾（cs:16694,
+  //   HalfBrickPass 接线）再翻回 false。本仓 TILE_DEFS 已预翻 192 为 solid:false,
+  //   GenSolid 在此窗口内表达 true（本 pass 判定不查 solid,存档时间线）。
+  flipGenSolid([192], true);
   void SAND; void SAND_HARD; void SANDSTONE;
 }
 
@@ -96,6 +102,11 @@ function makeWateryIceThing(st: TileStore, i: number, j: number): void {
 /** FragileIce pass（cs:16756-16785）：y∈[(int)worldSurface, h-100) 的液体格（岩浆跳过）
  *  → MakeWateryIceThing。零掷骰。 */
 export function runFragileIcePass(st: TileStore, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:16782-16783）：226 蜥蜴砖 / 162 薄冰自此非实心——
+  //   UndergroundHouses 头（cs:17076-79）短暂回实心、尾（cs:17220-23）再翻 false,
+  //   226 到 CaveWalls 头（cs:17822）回 true,162 到 BeeLarva 尾（cs:21048）回 true。
+  //   生成期无还原本句之后到上述各点之间,相关消费端经 GenSolid 可见非实心态。
+  flipGenSolid([226, 162], false);
   const y0 = Math.floor(gs.worldSurface);
   const y1 = st.h - 100;
   for (let x = 10; x < st.w - 10; x++) {

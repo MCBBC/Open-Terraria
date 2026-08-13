@@ -1273,6 +1273,11 @@ Checkpoint("mudcaves");
 
 // ================= Desert Sub-A（DesertBiome pass cs:12532 + DesertDescription + SandMound）=================
 // Sub-B（DesertHive）与 Sub-C（入口 4 形状）转录至 Checkpoint("desertdone")。
+// ★cs:12537 pass 首句 `Main.tileSolid[484] = false`：滚动仙人掌自本 pass 起生成期
+// 恒非实心（此后 cs:15114/15831/16292 均为冗余重放，无 =true）——AddTileVariance
+// 装饰门禁的 SolidTile2/SolidTile 查询读的就是这个翻转态，SOLID 必须同步摘除，
+// 否则已放置的 484 会被当实心底座（原版拒放 484/485/187）。
+SOLID.Remove((ushort)484);
 // DesertDescription 字段（DesertDescription.cs:73-83；普通世界 num7=0）
 int dBC = 0, dBR = 0, dX = 0, dTop = 0, dW = 0, dH = 0, dHiveTop = 0;
 int[] SurfFromArea(int startX, int width)

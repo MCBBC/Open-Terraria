@@ -46,6 +46,8 @@ export class PortalGunBolt extends Entity {
   private life = BOLT_LIFE;
   private static frameCache = new Map<string, HTMLCanvasElement>();
 
+  /** x/y = 弹心（600.Center，Projectile.cs:63905-63911）；内部存左上锚（碰撞盒 10×10，
+   *  placePortal 消费的正是左上 + 5 的中心语义，同 TrapShot） */
   constructor(x: number, y: number, vx: number, vy: number, form: 0 | 1) {
     super();
     this.x = x - BOLT_W / 2;

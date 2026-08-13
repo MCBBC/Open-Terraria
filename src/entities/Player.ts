@@ -416,6 +416,7 @@ export class Player extends Entity {
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
     frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
     anglerSetSpawnReduction: boolean;   // 渔夫套：生成环 ×1.3/×0.7（NPC.cs:627-630）
+    iceSkate: boolean;   // 冰刀族 950/1861/1862/5000：冰面不滑+加速（:26237-26255）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
     wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
@@ -501,6 +502,7 @@ export class Player extends Entity {
     let treasureMagnet = false, goldRing = false, luckyCoin = false, discount = false;
     let ammoSave = false, kbGlove = false, yoyoString = false, autoReuseGlove = false;
     let magmaStone = false;   // Player.magmaStone（:1850）：近战命中点燃（1322/1343）
+    let iceSkate = false;      // Player.iceSkate（:1077 族）：冰面移动修正
     let tileSpeed = false, wallSpeed = false, tileRange = false, skyStone = false, pStone = false, counterWeight = false;
     let manaMagnet = false, magicCuffs = false, manaFlower = false;
     let manaCostMul = 1;
@@ -590,6 +592,7 @@ export class Player extends Entity {
         if (fx.autoReuseGlove) autoReuseGlove = true;   // 力量手套族：近战自动连挥
         if (fx.yoyoString) yoyoString = true;
         if (fx.magmaStone) magmaStone = true;   // 岩浆石 1322/火焰护手 1343（:14764/:14787-14790）
+        if (fx.iceSkate) iceSkate = true;       // 冰刀族（:14542/:14703/:14843/:14846）
         if (fx.tileSpeed) tileSpeed = true;
         if (fx.wallSpeed) wallSpeed = true;
         if (fx.tileRange) tileRange = true;
@@ -755,6 +758,7 @@ export class Player extends Entity {
       killGuide, killClothier,   // 巫毒娃娃(城镇 NPC 玩家伤害门)
       infoAccs,                 // 信息饰品 12 门禁(DrawInfoAccs)
       arrowDmg, ammoSave, kbGlove, autoReuseGlove, yoyoString, magmaStone,
+      iceSkate,
     quiver: equipHasQuiver,
     moltenQuiver, // 箭袋族：箭速/击退 ×1.1（Player.cs:52711-52715）
       arrowStack: arrowDmg, shroomiteType, shroomiteSet, vortexSet, nebulaSet, beetleOff,

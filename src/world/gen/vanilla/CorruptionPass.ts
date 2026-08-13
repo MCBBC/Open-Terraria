@@ -8,6 +8,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef } from './MushroomPass';
+import { flipGenSolid } from './GenSolid';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
@@ -181,6 +182,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
  *  原版 pass 头部 Main.tileSolid[484]=false(:15830) 对本 pass 无影响：place3x2 的
  *  BOULDERS 门（含 484 滚仙人掌）已等价拒绝该类底座。 */
 export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:15831 `Main.tileSolid[484] = false`）——DesertBiome
+  //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
+  flipGenSolid([484], false);
   const count = Math.trunc(st.w * st.h * 3.3e-06);   // remixWorldGen×3 / dualDungeons÷2 秘种子门不适用
   const style = gs.crimson ? 1 : 0;
   const yLo = Math.trunc(gs.worldSurface * 2 + gs.rockLevel) / 3 | 0;   // (int)(ws*2+rock)/3

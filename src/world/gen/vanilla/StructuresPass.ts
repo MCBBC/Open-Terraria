@@ -12,6 +12,7 @@ import { placeBuriedChest } from './BuriedChestsPass';
 import { waterBoxPalmCheck, growPalmTree} from './TreePass';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as _solidTileHB } from './HalfBrickPass';
+import { flipGenSolid } from './GenSolid';
 
 const CLOUD = TILE_BY_KEY['v_189_cloud_block']!;
 /** 雨云 196：CloudIsland/CloudLake 的雨云凸包（1/4）与岛上方 puff（1/2）专用；
@@ -434,6 +435,11 @@ export function runLifeCrystalsPass(st: TileStore, rng: RNG, gs: GenState): void
       done = addLifeCrystal(st, x, y);
     }
   }
+  // ★pass 尾 tileSolid 翻转（cs:16944 `Main.tileSolid[225] = false`）：蜂巢块自此
+  //   非实心——UndergroundHouses 头（cs:17078）短暂回实心、尾（cs:17222）再翻 false,
+  //   Piles 尾（cs:19599）最终还原 true。蜂巢在此前已生成（Hives pass cs:16005）,
+  //   下游小屋/宝箱锚定不应踩在蜂巢上（消费端走 GenSolid 可见）。
+  flipGenSolid([225], false);
 }
 
 /** AddLifeCrystal(cs:32077-32144)1:1:自 j 向下扫列 i 首个实心活性格,

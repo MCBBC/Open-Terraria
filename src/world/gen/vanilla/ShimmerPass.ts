@@ -14,6 +14,7 @@
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
+import { addProtectedStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile } from './HalfBrickPass';
@@ -68,6 +69,10 @@ export function runShimmerPass(st: TileStore, rng: RNG, gs: GenState): void {
   }
   gs.shimmerX = x;
   gs.shimmerY = y;
+  // ★cs:15307 structures.AddProtectedStructure(Rectangle(num5-100, num4-100, 200, 200))
+  //   （pad 默认 0）：微光以太 200×200 登记为保护区——蜂巢主巢/蜂蜜斑/神龛/地下小屋
+  //   等后续结构的 CanPlace 与之互斥（num5=X/num4=Y,矩形中心即落点）。
+  addProtectedStructure(gs, { x0: x - 100, y0: y - 100, x1: x + 100, y1: y + 100 }, 0);
 }
 
 /** cs:34889-35056 ShimmerMakeBiome 主体 */

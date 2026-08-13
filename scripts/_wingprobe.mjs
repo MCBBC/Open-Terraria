@@ -13,7 +13,7 @@ const browser = await puppeteer.launch({
 });
 const page = await browser.newPage();
 const errs = [];
-page.on('pageerror', (e) => errs.push('pageerror: ' + e.message));
+page.on('pageerror', (e) => errs.push('pageerror: ' + e.message + '\n' + (e.stack ?? '')));
 await page.goto('' + (process.env.SW_ORIGIN ?? 'http://localhost:5199') + '', { waitUntil: 'domcontentloaded' });
 await page.waitForSelector('.sw-title-menu', { timeout: 120000 });
 await new Promise(r => setTimeout(r, 400));
@@ -130,6 +130,66 @@ const out = await page.evaluate(async () => {
     p.inv.armor[3] = { id: window.__swItems[key665], stack: 1 };
     ok('⑥ 叶翅 logic===3', p.equipStats.wing?.logic === 3, `logic=${p.equipStats.wing?.logic}`);
   } else ok('⑥ 叶翅条目缺失（登记）', false);
+  p.inv.armor[3] = { id: wingId, stack: 1 };
+
+  // ⑦ 尘埃引擎：装 34（vi_3582 星云斗篷）空中飞行 → 原版 Dust 池活跃尘 > 0
+  const key34 = Object.keys(window.__swItems).find(k => k.startsWith('vi_3582_'));
+  ok('⑦ 星云斗篷条目存在', !!key34, key34);
+  if (key34) {
+    p.inv.armor[3] = { id: window.__swItems[key34], stack: 1 };
+    p.y -= 500; p.vy = 0; p.fallStartY = null;
+    g.input.touchKeys.add('Space');
+    let maxDust = 0;
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 16));
+      const lit = [...g.vanillaDust.each(false)].length + [...g.vanillaDust.each(true)].length;
+      maxDust = Math.max(maxDust, lit);
+    }
+    g.input.touchKeys.delete('Space');
+    ok('⑦ 飞行喷尘（34 型 261 尘 > 0）', maxDust > 0, `maxDust=${maxDust}`);
+    await waitUntil(() => p.onGround, 5000);
+    await new Promise(r => setTimeout(r, 200));
+  }
+
+  // ⑧ 45 拖尾历史环：装 4954（星璇悬浮板）地面跑动 → advancedShadows 填充
+  const key45 = Object.keys(window.__swItems).find(k => k.startsWith('vi_4954_'));
+  ok('⑧ 星璇悬浮板条目存在', !!key45, key45);
+  if (key45) {
+    p.inv.armor[3] = { id: window.__swItems[key45], stack: 1 };
+    g.input.touchKeys.add('KeyD');
+    for (let i = 0; i < 50; i++) await new Promise(r => setTimeout(r, 16));
+    g.input.touchKeys.delete('KeyD');
+    ok('⑧ advancedShadows 历史环填充（≥8）', p.advancedShadows.length >= 8, `len=${p.advancedShadows.length}`);
+    await new Promise(r => setTimeout(r, 300));
+  }
+
+  // ⑨ 叠画队列消费：装 47（vi_5586）站立 → 渲染帧尾队列已 flush（长度归 0）且
+  //    Glow_366 叠画产生像素（同位对比卸翼）
+  const key47 = Object.keys(window.__swItems).find(k => k.startsWith('vi_5586_'));
+  ok('⑨ ChickenWings 条目存在', !!key47, key47);
+  if (key47) {
+    p.inv.armor[3] = { id: window.__swItems[key47], stack: 1 };
+    await waitUntil(() => p.onGround && p.wingFrame === 0);
+    await new Promise(r => setTimeout(r, 400));
+    const shot47 = g.renderer.canvas.toDataURL();
+    const qLen = g.renderer.wingGlowQueue ? g.renderer.wingGlowQueue.length : -1;
+    p.inv.armor[3] = null;
+    await new Promise(r => setTimeout(r, 350));
+    const shot47b = g.renderer.canvas.toDataURL();
+    const load2 = (url) => new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.src = url; });
+    const [i47a, i47b] = await Promise.all([load2(shot47), load2(shot47b)]);
+    const c47a = document.createElement('canvas'); c47a.width = i47a.width; c47a.height = i47a.height;
+    c47a.getContext('2d').drawImage(i47a, 0, 0);
+    const c47b = document.createElement('canvas'); c47b.width = i47b.width; c47b.height = i47b.height;
+    c47b.getContext('2d').drawImage(i47b, 0, 0);
+    const d47a = c47a.getContext('2d').getImageData(0, 0, c47a.width, c47a.height).data;
+    const d47b = c47b.getContext('2d').getImageData(0, 0, c47b.width, c47b.height).data;
+    let diff47 = 0;
+    for (let i = 0; i < d47a.length; i += 8) {
+      if (Math.abs(d47a[i] - d47b[i]) > 24 || Math.abs(d47a[i + 3] - d47b[i + 3]) > 24) diff47++;
+    }
+    ok('⑨ 叠画像素可见（47 主翼+Glow 叠画差 > 400）', diff47 > 400, `diff=${diff47} queue=${qLen}`);
+  }
   p.inv.armor[3] = { id: wingId, stack: 1 };
   return res;
 });

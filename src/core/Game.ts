@@ -105,7 +105,7 @@ for (const [bt, d] of Object.entries(BUFF_DEFS)) BUFF_BY_VANILLA.set(d.vanillaBu
 import { projectileData } from '../data/vanillaProjectiles';
 import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spawn/VanillaSpawner';
 import { ENEMY_DEFS } from '../data/enemies';
-import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
+import { availableRecipes, consumeMaterials, craftSourcesFor, vanillaItemKey as recipeItemKey, type CraftItemSource, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
@@ -4058,7 +4058,9 @@ export class Game implements GameHooks {
     this.lighting.ensureRegion(player.cx, player.cy, viewTW, viewTH);
     // 光衰减每帧覆盖（LightingEngine.UpdateLightDecay :137-187）：群系水色 RGB 衰减表
     // + 夜枭 nightVision（air/solid ×1.03）——水下/洞穴视野随药水与群系变化
-    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl), this.blackout);
+    updateLightDecay(this.renderer.waterStyle, player.buffs.has(BuffType.NightOwl),
+      this.blackout || player.buffs.has(BuffType.Blackout),   // buff 80 双源（:190-194）
+      player.buffs.has(BuffType.Darkness));                   // buff 22 blind（:185-189 + GlobalBrightness 1.0）
     // 手持光源（原版 ItemCheck_EmitHeldItemLight Player.cs:48990）：
     // (Torches[type] && !wet) || WaterTorches[type] 才发光——入水熄灭；
     // 颜色 = TorchID.TorchColor(torchId)（TorchID.cs _lights 全表：
@@ -6173,10 +6175,12 @@ export class Game implements GameHooks {
         break;
       }
       case 'boomerang': {
-        // AI_003：飞出减速→返回主角（非消耗，回手即消失）
+        // AI_003 1:1：出程无摩擦直线/命中·撞墙·计数三门回收/返回段目标速度制/回手消失
+        // （AI_003_Boomerang :36623-37352;第 8 参 = 掷出瞬间玩家 facing → 原版 direction,
+        //   自旋符号 :37294 起以此为准,勿改回 sign(vx)）
         const bom = new Boomerang(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          cw.damage, cw.knockback, cw.shoot);
+          cw.damage, cw.knockback, cw.shoot, this.player.facing);
         bom.critChance = critTotal;
         bom.armorPen = this.player.equipStats.armorPen; // ⑥
         // 301 Bouncing Shield 按 20t/100t 双门需 channel（其余族不用,空挂无害）
@@ -14196,18 +14200,45 @@ export class Game implements GameHooks {
 
   /** 可用原版配方列表（Recipe.UpdateRecipeList 主干；供 UI 列表渲染） */
   private _alchemyTable = false;
+  /** 附近合成材料源（Recipe._recipeChests，craftSourcesFor 1:1：开箱→虚空袋→附近 bank→600px 箱） */
+  private _craftCache: { tick: number; src: CraftItemSource[] } | null = null;
+  /** 每 tick 缓存（箱/bank 内容为活引用，扣料直写可见；列表位置只随移动/开箱变） */
+  private _craftSourcesCache(): CraftItemSource[] {
+    if (this._craftCache && this._craftCache.tick === this.tickCount) return this._craftCache.src;
+    const src = this.craftSources();
+    this._craftCache = { tick: this.tickCount, src };
+    return src;
+  }
+  private craftSources() {
+    const p = this.player;
+    const heldVids = new Set(p.inv.slots.filter(Boolean).map((s) => {
+      const d = ITEM_DEFS[(s as { id: number }).id];
+      return d?.vid ?? (d?.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+    }));
+    const open = this.openChestRef?.() ?? null;
+    return craftSourcesFor(this.world.chests, p.x, p.y, {
+      openChest: open,
+      banks: p.banks,
+      voidBagHeld: heldVids.has(4131),
+      voidVaultHeld: heldVids.has(5325),
+      openIsBank4: false,   // 本仓开 bank 走 openChest({x:-2-bi}) 而非 chest 槽——虚空袋重复计入门不适用
+      store: this.world.store,
+      centerTileX: Math.floor(p.cx / TILE),
+      centerTileY: Math.floor(p.cy / TILE),
+    });
+  }
   vanillaAvailableRecipes() {
     return availableRecipes(this.player.inv, {
       nearbyInternal: this.vanillaNearbyStations(),
       nearWater: this._nearLiquid.water, nearHoney: this._nearLiquid.honey, nearLava: this._nearLiquid.lava,
       zoneSnow: this.scene.zoneSnow,
       zoneGraveyard: this.scene.zoneGraveyard,
-    });
+    }, this._craftSourcesCache());
   }
 
   /** 执行原版配方合成（CraftingRequests.CraftLocally 主干）：扣材料→成品入背包 */
   vanillaCraft(r: VanillaRecipeLike, times = 1) {
-    if (!consumeMaterials(this.player.inv, r, times, this._alchemyTable)) return;
+    if (!consumeMaterials(this.player.inv, r, times, this._alchemyTable, this._craftSourcesCache())) return;
     const outKey = recipeItemKey(r.create);
     if (!outKey) return;
     const left = this.player.inv.add(ITEM_BY_KEY[outKey], r.createStack * times);

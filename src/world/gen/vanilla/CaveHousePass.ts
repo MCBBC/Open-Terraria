@@ -15,6 +15,8 @@ import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { placeDoorClosed } from '../../Door';
 import { STATUE_LIST, STATUES_WITH_TRAPS, placeStatueTrap } from './StatuesPass';
 import { furnitureStyleBase } from '../../FurnitureStyle';
+import { addProtectedStructure, canPlaceStructure } from './GenState';
+import { flipGenSolid } from './GenSolid';
 
 type Rect = { x: number; y: number; w: number; h: number };
 
@@ -772,6 +774,10 @@ export function rollHouseChestCounts(st: TileStore, rng: RNG, gs: GenState): voi
 }
 
 export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink): void {
+  // ★pass 头 tileSolid 翻转（cs:17076-17079）：226 蜥蜴砖/162 薄冰/225 蜂巢块/
+  //   190 荧光菇块短暂回**实心**——本 pass 的房间寻找/锚定（findRoom 的 solidAt /
+  //   HouseUtils.AreRoomsValid）把它们当可建地面。pass 尾（cs:17220-23）翻回 false。
+  flipGenSolid([226, 162, 225, 190], true);
   const { w, h } = st;
   // CaveHouseCount 35-40 × WorldArea/5040000(Configuration.json)。WorldGenRange.
   // GetRandom(WorldGenRange.cs:34-40)= Next(ScaledMinimum, ScaledMaximum+1),
@@ -836,6 +842,14 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
       }
       if (!ok) return false;
     }
+    // ★HouseUtils.AreRoomsValid 的结构图半边（HouseUtils.cs:280/285
+    //   `structures.CanPlace(room, BlacklistedTiles, 5)`——notTheBees 用 BeelistedTiles）：
+    //   每个房间 pad5 与既有保护结构（蜂巢主巢/蜂蜜斑/神龛/微光/剑冢等）互斥。
+    //   原版还有 BlacklistedTiles 内容扫描（StructureMap.cs:40-53 的 validTiles 半边）,
+    //   此处以本地主题/岩浆/红线/宝箱判定近似,不重复收紧（备案）。
+    for (const r of rooms) {
+      if (!canPlaceStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 5)) return false;
+    }
 
     // ---- HouseBuilder.Place 原序 ----
     // 1) PlaceEmptyRooms:外壳 + 内腔墙
@@ -853,6 +867,12 @@ export function runCaveHousesPass(st: TileStore, rng: RNG, gs: GenState, chests:
           st.setWallSilent(x, y, def.wall);
         }
       }
+    }
+    // ★HouseBuilder.cs:393-397 `foreach room: structures.AddProtectedStructure(room, 8)`：
+    //   PlaceEmptyRooms 之后、楼梯/门/平台之前逐房登记（pad 8）——后续神龛常春藤箱/
+    //   剑冢/野营地/矿爆点等结构与整屋互斥。
+    for (const r of rooms) {
+      addProtectedStructure(gs, { x0: r.x, y0: r.y, x1: r.x + r.w, y1: r.y + r.h }, 8);
     }
     // 2-4) 楼梯 / 门 / 平台
     placeStairs(st, rooms, def);

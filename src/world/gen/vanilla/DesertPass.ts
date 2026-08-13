@@ -12,7 +12,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
 import { placeTight } from './ShimmerPass';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
 
@@ -139,6 +139,13 @@ const FOSSIL = TILE_BY_KEY['desert_fossil']!;
 
 /** 放置循环 + Description + SandMound（Sub-A；Hive/入口在 runDesertPass 续） */
 export function runDesertMoundOnly(st: TileStore, rng: RNG, gs: GenState): DesertDesc {
+  // ★pass 头 tileSolid 翻转（cs:12537 `Main.tileSolid[484] = false`，位于本 pass
+  //   首句、mound 循环之前）：滚动仙人掌 (484) 自 DesertBiome 起生成期恒非实心
+  //   （此后 Gems cs:15114 / Altars cs:15831 / SettleLiquids cs:16292 均为冗余重放，
+  //   生成期再无 =true）——AddTileVariance 装饰门禁的实心查询走 genSolidType 才能见到
+  //   该态。放在 runDesertMoundOnly（而非 runDesertPass 包装）以覆盖 caves-checkpoint
+  //   拆分调用路径。
+  flipGenSolid([484], false);
   const { w } = st;
   const half = Math.floor(w / 2);
   // DesertBiome pass 放置循环（cs:12538-12562 1:1）：失败重掷**永不早退**，
@@ -700,13 +707,18 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   const BOULDERS = idsByVanillaSheet(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
   const freeAt = (x: number, y: number) => inW(x, y) && st.flags[st.idx(x, y)] === 0;
   const dryAt = (x: number, y: number) => inW(x, y) && st.liquid[st.idx(x, y)] === 0;
+  // ★实心查询走 genSolidType（cs:12537 起生成期 tileSolid[484]=false）：本遍已放置
+  // 的滚动仙人掌不可当实心底座，裸 TILE_DEFS.solid（484=true）会让原版该拒放的
+  // 484/485/187 混进来。入口段的 solidAt 此时图内尚无 484，两写法等价、不动。
+  const solidGenAt = (x: number, y: number) => inW(x, y) && st.flags[st.idx(x, y)] !== 0
+    && genSolidType(st.type[st.idx(x, y)]);
   /** Place2x2（WorldGen.cs:51352-51445）1:1：锚=右下格，先 x--/y-- 再写，
    *  占 (ax-1..ax)×(ay-1..ay)；门禁=2x2 区全空+双底列 nactive&&(solid||tileTable) */
   const place2x2 = (ax: number, ay: number, tile: number, style: number) => {
     if (ax < 5 || ax > W - 5 || ay < 5 || ay > H - 5) return;   // 原版 x<5||x>max-5
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) if (!freeAt(ax - 1 + k, ay - 1 + l)) return;
-      if (!solidAt(ax - 1 + k, ay + 1)) return;                 // 底列逐列核
+      if (!solidGenAt(ax - 1 + k, ay + 1)) return;              // 底列逐列核
     }
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
@@ -722,7 +734,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
       if (!freeAt(ax + k, ay - 1) || !freeAt(ax + k, ay)) return;
       const bi = st.idx(ax + k, ay + 1);
       if (st.flags[bi] && BOULDERS.has(st.type[bi]!)) return;    // InvalidTileForPiles
-      if (!solidAt(ax + k, ay + 1)) return;
+      if (!solidGenAt(ax + k, ay + 1)) return;
     }
     for (let k = 0; k < 3; k++) {
       for (let l = 0; l < 2; l++) {
@@ -741,7 +753,7 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         if (!freeAt(ax + k, ay - 1 + l) || !dryAt(ax + k, ay - 1 + l)) return;
       }
     }
-    if (!solidAt(ax, ay + 1) || !solidAt(ax + 1, ay + 1)) return;
+    if (!solidGenAt(ax, ay + 1) || !solidGenAt(ax + 1, ay + 1)) return;
     for (let k = 0; k < 2; k++) {
       for (let l = 0; l < 2; l++) {
         st.setTileSilent(ax + k, ay - 1 + l, T485, k * 18, style * 36 + l * 18);
@@ -794,12 +806,8 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
 }
 
 export function runDesertPass(st: TileStore, rng: RNG, gs: GenState): void {
-  // ★pass 头 tileSolid 翻转（cs:12537 `Main.tileSolid[484] = false`）：滚动仙人掌
-  //   (484)自 DesertBiome 起生成期恒非实心（此后 Gems cs:15114 / Altars cs:15831 /
-  //   SettleLiquids cs:16292 / Piles cs:18916 / FinalCleanup cs:22306 均为冗余重放，
-  //   生成期再无 =true）——本仓 DesertPass 会放置 484（见 T484），消费端经
-  //   GenSolid.isGenSolid 查询才能见到该态。
-  flipGenSolid([484], false);
+  // ★cs:12537 `Main.tileSolid[484] = false` 翻转已移入 runDesertMoundOnly 首句
+  //   （caves-checkpoint 拆分调用路径同样需要，且 pass 头语义本就在 mound 循环前）。
   const desc = runDesertMoundOnly(st, rng, gs);
   runDesertEntrancesAndHive(st, rng, gs, desc);
   // gs.undergroundDesert 已随 runDesertEntrancesAndHive 落盘（见其尾部）

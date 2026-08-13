@@ -29,9 +29,11 @@ const defaultRand: BagRand = {
 /** QuickSpawnItem 出口：give(原版 item id, stack)。调用方负责入包/落地 */
 export type BagGive = (id: number, stack?: number) => void;
 
-/** OpenPresent（Player.cs:6651-6770）：圣诞礼盒 1869 十九支 else-if 链。
- *  ★链式判定：每支独立掷 Next(n)，前支命中即 return——顺序与概率逐字，
- *  不得改写为独立 if（否则后支概率被前支吞掉）。 */
+/** OpenPresent（Player.cs:6651-6770）：圣诞礼盒 1869——十六道门 + 兜底的
+ *  else-if 链（十三支单品 + 套装/食物双 switch + 蛋奶酒/八角 + 建材兜底）。
+ *  ★链式判定：每支独立掷 Next(n)，前支命中即止——顺序与概率逐字，
+ *  不得改写为独立 if（否则后支概率被前支吞掉）。兜底支占比 =
+ *  ∏(1-1/n) ≈ 0.470（tests/open-bags.test.ts 分布抽查锚定）。 */
 function openPresent(give: BagGive, hardMode: boolean, rnd: BagRand): void {
   if (rnd.next(15) === 0 && hardMode) {                       // :6654 Snow Globe 602（硬模式门）
     give(602);

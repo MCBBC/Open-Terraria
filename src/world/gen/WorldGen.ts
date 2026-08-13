@@ -263,7 +263,7 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
 
 // ---------- 原版管线 pass(阶段 1-2 移植) ----------
 import { newGenState, type GenState } from './vanilla/GenState';
-import { flipGenSolid, isGenSolid } from './vanilla/GenSolid';
+import { flipGenSolid, isGenSolid, resetGenSolid } from './vanilla/GenSolid';
 import { parseSeed } from './SeedEasterEggs';
 import { runTerrainPass } from './vanilla/TerrainPass';
 import { runRocksAndClayPass, runCavesPass } from './vanilla/CavesPass';
@@ -330,6 +330,9 @@ import vanillaJson from '../../../public/sprites/vanilla.json';
 // 原版 pass 49 SettleLiquids：中途沉降（见 passes 数组注释）
 async function liquidSettlePass({ world }: GenCtx) {
   await settleWorldLiquids(world, 'gen');
+  // ★pass 尾 tileSolid 翻转（cs:16292 `Main.tileSolid[484] = false`）——DesertBiome
+  //   头（cs:12537）已翻过,原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
+  flipGenSolid([484], false);
 }
 
 /** 种子等价对账钩子（terrain oracle）：只跑 Reset 掷骰 + Terrain pass，

@@ -218,7 +218,9 @@ export const CANDELABRA_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTabl
 ]);
 
 /** 吊灯族 num9=3（34），style = frameY/54 + frameX≥108 时 +37*(frameX/108)
- *  （:3122-3240 + 数据表 :2238-2391） */
+ *  （:3122-3240 + 数据表 :2238-2391）。
+ *  ★style 9 两版分歧以 Draw 内联为权威：Draw :3146-3147 = (-10,11)×0.05/0.15，
+ *  数据表 :2257-2265 = (-1,1)×2.0——数据表仅 style≥51 段可达，9 < 51 恒不可达 */
 export const CHANDELIER_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTable([
   [8, S(7, [-10, 11], [-10, 11], 0.075, 0.075, [50, 50, 50])],               // :3136-3137
   [9, S(3, [-10, 11], [-10, 11], 0.05, 0.15, [50, 50, 50])],                 // :3146-3147
@@ -238,7 +240,9 @@ export const CHANDELIER_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTabl
   [70, stillDyn('boulder')],                                                 // :2366-2371
 ]);
 
-/** 壁灯族 num9=4（93），style = frameY/54（:3242-3363 + 数据表 :2393-2550） */
+/** 壁灯族 num9=4（93），style = frameY/54（:3242-3363 + 数据表 :2393-2550）。
+ *  ★style 13 两版分歧以 Draw 内联为权威：Draw :3303-3304 = (75,75,75,0)，
+ *  数据表 :2447-2455 = (50,50,50,0)——数据表仅 style≥45 段可达，13 < 45 恒不可达 */
 export const LAMP_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTable([
   [1, S(3, [-10, 11], [-10, 11], 0.15, 0.15, [50, 50, 50])],                 // :3252-3253
   [[2, 4], S(7, [-10, 11], [-10, 11], 0.075, 0.075, [50, 50, 50])],          // :3263-3264
@@ -260,7 +264,9 @@ export const LAMP_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTable([
 ]);
 
 /** 吊挂灯笼族 num9=13（42），style = frameY/36（:3365-3457 + 数据表 :2551-2688）。
- *  未命中 = 不画（两层 default 都是 0 份——与蜡烛族回 default 7 份不同！） */
+ *  未命中 = 不画（两层 default 都是 0 份——与蜡烛族回 default 7 份不同！）。
+ *  ★:3407-3415 的嵌套 case 29（7 份 ×0.15/0.15 (25)）是死代码——29 已在外层第一组
+ *  （:3378）命中先 break，C# switch 首匹配语义下永不执行（数据表亦无 29） */
 export const LANTERN_FLAME_STYLES: Record<number, FlameStyleSpec> = styleTable([
   // :3371-3390（外层第一组，default 7 份 (100,100,100)）+ 数据表补 :2566-2571 的
   // 53/57/60/62/66/69（≥51 段经数据表 default 前的显式组到达，同为 7 份）

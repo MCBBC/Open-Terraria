@@ -87,7 +87,7 @@ export function furnitureSlotCount(kind: FurnitureKind): number {
   switch (kind) {
     case 'display_doll': return 19; // equip[9] + misc[1] + dye[9]（TEDisplayDoll.cs:156-278）
     case 'hat_rack': return 4;      // hat[2] + dye[2]（TEHatRack.cs:62-86）
-    default: return 1;              // 框/武器架/食物盘/展示罐 单槽
+    default: return 1;              // 框/武器架/食物盘/展示罐/锚桩 单槽
   }
 }
 
@@ -368,6 +368,14 @@ export function furnitureTryBreak(
   switch (kind) {
     case 'display_doll': case 'hat_rack':
       return { result: 'blocked', item: null };
+    // 锚桩不走两段式：存物随破同击掉落（WorldGen.cs:63739-63744 DropItemForTileBreak），
+    // 调用方继续碎块——正常链路经 Game.breakTile 的 724 专用分支（本表无此 tile，
+    // 此 case 仅为防未来误入 furnitureTryBreak 时语义不错）
+    case 'critter_anchor': {
+      const item = rec.slots[0];
+      rec.slots[0] = null;
+      return { result: 'break', item };
+    }
     default: {
       const item = rec.slots[0];
       rec.slots[0] = null;

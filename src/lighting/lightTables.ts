@@ -32,20 +32,23 @@ const WATER_DECAY_BY_STYLE: Array<[number, number, number]> = [
   [0.9, 1.0, 1.02],     // 13 地狱
 ];
 /** Game 每帧调用:按当前群系水色 + 夜枭更新衰减表(:137-187 主干) */
-export function updateLightDecay(waterStyle: number, nightVisionOn: boolean, blackoutOn = false): void {
+export function updateLightDecay(waterStyle: number, nightVisionOn: boolean, blackoutOn = false, blindOn = false): void {
   nightVision = nightVisionOn;
   const base = WATER_DECAY_BY_STYLE[Math.max(0, Math.min(13, waterStyle))];
   DECAY_WATER = [base[0] * 0.91, base[1] * 0.91, base[2] * 0.91];
-  // blackout（buff 80，Torch God 事件每 tick 刷新）×0.85（UpdateLightDecay :181-183）
+  // blackout（buff 80，Torch God/敌弹双源）×0.85（LightingEngine.cs:190-194）；
+  // blind（buff 22 黑暗）×0.95（:185-189）——headcovered ×0.85 头埋方块未跟踪，登记
   const blk = blackoutOn ? 0.85 : 1;
-  DECAY_AIR = 0.91 * (nightVision ? NIGHT_VISION_MUL : 1) * blk;
-  DECAY_SOLID = 0.56 * (nightVision ? NIGHT_VISION_MUL : 1) * blk;
-  // 原版另有 blind ×0.95 / headcovered ×0.85 与 SceneState 调制——对应系统未实装,跳过
+  const bld = blindOn ? 0.95 : 1;
+  DECAY_AIR = 0.91 * (nightVision ? NIGHT_VISION_MUL : 1) * blk * bld;
+  DECAY_SOLID = 0.56 * (nightVision ? NIGHT_VISION_MUL : 1) * blk * bld;
+  // GlobalBrightness（Lighting.cs:109-116：base 1.2，blind → 1.0）
+  globalBrightness = blindOn ? 1.0 : 1.2;
 }
 /** 通道熄灭阈值(LightMap.cs:132/148/164) */
 export const DEAD_THRESHOLD = 0.0185;
-/** 全局亮度(Lighting.cs:12-14) */
-export const GLOBAL_BRIGHTNESS = 1.2;
+/** 全局亮度(Lighting.cs:109-116：base 1.2，blind→1.0；updateLightDecay 每帧刷新) */
+export let globalBrightness = 1.2;
 /** 区域外扩(LightingEngine.cs:28)与不可见边距(:30) */
 export const AREA_PADDING = 28;
 export const NON_VISIBLE_PADDING = 18;

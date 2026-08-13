@@ -8,6 +8,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { tileRunner } from './TileRunner';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
+import { flipGenSolid } from './GenSolid';
 
 /** 单深度带放矿：count 次尝试，y∈[yMin,yMax)，strength/steps 各自区间 */
 function band(
@@ -53,9 +54,11 @@ export function runShiniesPass(st: TileStore, rng: RNG, gs: GenState): void {
 }
 
 /** 宝石 pass 36（cs:6754-6814）：六宝石独立数量（w×[0.3,0.1,0.25,0.45,0.5,0.05]×0.2），
- *  拒绝采样到石头上再 TileRunner；type 63-68 = 紫晶/黄玉/蓝宝/绿宝/红宝/钻石。
- *  （原版开头 Main.tileSolid[484]=false 是滚动仙人掌临时非固体——我们不生成 484，跳过） */
+ *  拒绝采样到石头上再 TileRunner；type 63-68 = 紫晶/黄玉/蓝宝/绿宝/红宝/钻石。 */
 export function runGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  // ★pass 头 tileSolid 翻转（cs:15114 `Main.tileSolid[484] = false`）——DesertBiome
+  //   头（cs:12537）已翻过,此处为原版冗余重放,接线仅为时间线存档（484 生成期恒非实心）。
+  flipGenSolid([484], false);
   const gems: Array<[string, number]> = [
     ['gem_sapphire', 0.3],   // 63
     ['gem_ruby', 0.1],       // 64

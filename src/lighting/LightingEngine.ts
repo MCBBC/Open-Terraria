@@ -5,7 +5,7 @@
 // 替换原 BFS 引擎(备份见 docs/backup/LightingEngine.legacy.bak.ts)。
 import { TILE } from '../core/constants';
 import { TileStore } from '../world/TileStore';
-import { AREA_PADDING, GLOBAL_BRIGHTNESS, NON_VISIBLE_PADDING } from './lightTables';
+import { AREA_PADDING, globalBrightness, NON_VISIBLE_PADDING } from './lightTables';
 import { FlickerClock } from './SkyColor';
 import { LightMap } from './LightMap';
 import { PerFrameLight, ScannerWorld, TileLightScanner } from './TileLightScanner';
@@ -145,7 +145,7 @@ export class LightingEngine {
     this.work = tmp;
     const outR = this.r, outG = this.g, outB = this.b;
     const ar = this.active.r, ag = this.active.g, ab = this.active.b;
-    const scale = GLOBAL_BRIGHTNESS * 255;
+    const scale = globalBrightness * 255;
     for (let i = 0; i < outR.length; i++) {
       outR[i] = Math.min(255, Math.round(ar[i] * scale));
       outG[i] = Math.min(255, Math.round(ag[i] * scale));

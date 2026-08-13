@@ -112,14 +112,30 @@ describe('回旋镖特例族（AI_003 分支）', () => {
     run(b, hooks, 3);
     expect(b.vy).toBeGreaterThan(0.5); // 10t 后垂落
   });
-  it('301 Bouncing Shield:按住 20t 回收', () => {
+  it('301 Bouncing Shield:按住 ≥20 AI 次回收+速度归零;松手 ≥100 AI 次', () => {
+    // ★源码修正(SetDefaults extraUpdates=2,Projectile.cs:3651):AI 每 tick 跑 3 次,
+    //   ai[1] 按 AI 次计数——按住门 20 次=7t、松手门 100 次=34t(旧断言 22t 未死是
+    //   无 extraUpdates 近似下的错标)
     const { hooks, player } = makeHooks();
     const b = new Boomerang(player.cx, player.cy - 4, 14, 0, 100, 4, 301);
     b.channel = () => true; // 按住
-    run(b, hooks, 22);
-    expect(b.dead).toBe(false); // 掷出段(回收态不等于 dead)
+    let gateTick = -1;
+    for (let i = 0; i < 12 && gateTick < 0; i++) {
+      b.fixedUpdate(1 / 60, hooks);
+      if (b.returning) gateTick = i;
+    }
+    expect(gateTick).toBe(6); // 第 7 tick = 21 AI 次 ≥ 20（:37062-37070）
+    // 回收瞬间速度归零（:37070）——同 tick 剩余返回步进最多再加一档 acc=3
+    expect(Math.hypot(b.vx, b.vy)).toBeLessThan(5);
     run(b, hooks, 300);
     expect(b.dead).toBe(true); // 回收后回手消失
+    // 松手门 100 AI 次 = 34t（:37074-37080）
+    const b2 = new Boomerang(player.cx, player.cy - 4, 14, 0, 100, 4, 301);
+    b2.channel = () => false;
+    run(b2, hooks, 33);
+    expect(b2.returning).toBe(false); // 33t = 99 次 < 100
+    run(b2, hooks, 2);
+    expect(b2.returning).toBe(true); // 35t = 105 次 ≥ 100
   });
   it('光刃族(1059):前 30t 直线,之后垂落', () => {
     const { hooks, player } = makeHooks();

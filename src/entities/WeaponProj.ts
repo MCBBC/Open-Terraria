@@ -83,6 +83,8 @@ function hitEnemies(
   cooldown: number,
   dirX: number,
   pen = 0,
+  /** 每次命中敌结算后的回调（Boomerang 的 Projectile.Damage 回收门 :12278-12291 用） */
+  onHit?: () => void,
 ): void {
   // 小动物:一击致死(原版小动物是 NPC;近战挥砍同语义)。回旋镖/悠悠球等穿透型
   // 命中小动物不消耗穿透语义——hurt 自带 iframes 防同帧连击
@@ -108,6 +110,7 @@ function hitEnemies(
     const kdir = Math.sign((e.x + e.w / 2) - (self.x + self.w / 2)) || dirX;
     playEnemyHitSound(game, e);
     e.hurt(dmg, kdir * self.knockback, 0, game, pen, crit, 0, true); // 裸 kb（0.65 自造已摘）——hurt 内原版管线
+    onHit?.(); // Damage 内回收门/穿透自减在此语义点求值（Projectile.cs:12278-12291）
     // 命中 debuff(StatusNPC:10555——阳炎之怒 50% OnFire 300t / 粉恒星之锤 OnFire 等,按型号查表)
     applyProjStatus(me.projId, e as unknown as Record<string, number>);
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
@@ -130,22 +133,66 @@ function hitEnemies(
   }
 }
 
-// ================= 回旋镖（aiStyle 3，AI_003_Boomerang，Projectile.cs:36623） =================
+// ================= 回旋镖（aiStyle 3，AI_003_Boomerang，Projectile.cs:36623-37352） =================
+// 原版四段（Update 的 numUpdates 循环内【先 AI(:15434) 后移动/碰撞(:15674)】——step() 同序）：
+//   ① 出程 ai[0]==0（:36783-37087）：无摩擦直线——AI 内无任何通用摩擦/减速项,
+//      速度只被特例族（下垂/追踪/双门）改写;
+//   ② 回收门（三处独立）：
+//      命中敌 → Projectile.Damage :12278-12291（出程速度反转 + ai[0]=1;
+//              豁免 301/866/902/光刃族）;
+//      撞墙  → HandleMovement :18103-18161（33/106/866 分轴反弹不回收;光刃转悬停
+//              ai[0]=2(:17975-17990);其余 ai[0]=1 + 速度=-lastVelocity,383 豁免取反）;
+//      计数门 → per-type 见下表;
+//   ③ 返回段 ai[0]==1（:37111-37288）：tileCollide=false 穿墙（:37145）;目标速度制
+//      逼近（朝玩家 num28 px/t,每轴步进 num29,异号加倍 :37249-37282;383 专属
+//      沿差向量加速 :37237-37247）;距玩家 >3000px Kill（301 6000,:37223-37232）;
+//   ④ 回收：与玩家 AABB 相交即 Kill（:37272-37288）。
+//
+// ★特例族计数门/出程行为小表（ai[1] 每 AI 次自增 :36790-36793;866 计数在 localAI[0]
+//   :36985/:36999;extraUpdates 型号（182/866/301,SetDefaults）按 AI 次计数,
+//   折合实际 tick = 计数 ÷ (1+extraUpdates)）：
+//   6/19/52/113/272/333/867/902/1000/1052 → ai[1]≥30 回收（:37082-37086）
+//   106 光碟     → ai[1]≥45 回收（:36794-36799）;撞墙反弹不回收（:18142-18151）
+//   320 冰回旋镖 → ai[1]≥10 起下垂 vy+0.5/vx×0.95（:36868-36886）
+//   383 附魔飞刀 → 同 320（上升再+0.35）;距玩家>800 回收（:36868-36888）
+//   182 圣骑士锤 → 追踪窗 ai[1]∈(10,360) 取 800px 最近敌（CanHit 视线门）,
+//                  无目标且 ≥30 回收（:36889-36973;目标速度 12/轴步进 0.25 :36937-36973）
+//   866 飞刀     → localAI[0] 同窗（FindTargetWithLineOfSight 缺省 800 :42972）;
+//                  无目标 ≥30 回收（:36980-37057）
+//   301 弹跳盾   → 按住 ≥20/松手 ≥100 双门,回收时速度归零（:37062-37080）
+//   光刃族 19 型 → ai[1]≥30 起垂落 vy+1/vx×0.96（:36800-36832）;撞墙转悬停 ai[0]=2
+//                  （vy<0 减半/rotation=2.335/vx=0/vy+1,:37089-37109）
 
-/** 返回段型号参数（AI_003 返回分支 :532-582）：num28=目标速率 / num29=加速度，
- *  缺省 9/0.4。特例族（Phaseblade 40/3、866/182/106 16/1.2 等）按型号覆写 */
+/** 返回段型号参数表（:37146-37206）：[num28 目标速率, num29 轴步进加速度]。
+ *  未列型号 = 缺省 9/0.4（:37146-37147）;光刃族整族 40/3（:37148-37151） */
 const BOOMERANG_RETURN: Record<number, [number, number]> = {
   19: [20, 1.5], 33: [18, 1.2], 106: [16, 1.2], 182: [16, 1.2],
   272: [20, 1.5], 866: [16, 1.2], 333: [12, 0.6], 301: [15, 3],
   320: [15, 3], 383: [16, 4], 1000: [9.5, 0.4],
 };
 
-/** Phaseblade 族（ProjectileID.Sets.IsAPhaseblade :27——1059-1072/1074-1076/1101/1102）：
- *  出程 30t 后垂落,回收 40/3 高速穿墙归位（:190-258/:527-531） */
+/** Phaseblade 族（ProjectileID.cs:27 IsAPhaseblade,19 型）：
+ *  出程 30t 后垂落;返回 40/3 高速穿墙归位 + extraUpdates 随距离增长（:37211-37221） */
 const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
 
-/** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 20 型提取：type→size） */
+/** 撞墙反弹族（:18142-18151）：33 荆棘轮/106 光碟/866 飞刀——撞墙不回收,
+ *  命中轴速度取反（lastVelocity 语义）续飞 */
+const WALL_BOUNCE_PROJ = new Set([33, 106, 866]);
+
+/** 命中敌不触回收的型号（Damage :12278 豁免列;902 另走"返回段命中 direction 翻转"
+ *  :12292-12297,301/383 命中时 direction 朝敌改写 :12249-12263） */
+const NO_HIT_RETURN_PROJ = new Set([301, 866, 902]);
+
+/** 出程尘近似表（AI_003 头段 :36652-36738 per-type Dust——颜色/概率近似,
+ *  粒型/noGravity/光源不建模;未列型号原版本就无尘） */
+const BOOMERANG_DUST: Record<number, [string, number]> = {
+  19: ['#FFA040', 1], 33: ['#B0E080', 0.6], 6: ['#FFE0A0', 0.25],
+  113: ['#B0C0FF', 1], 320: ['#C0E8FF', 0.4], 383: ['#D0A0FF', 0.3],
+  867: ['#FF6060', 0.4], 1000: ['#FFD080', 0.3], 182: ['#FFD080', 0.5],
+};
+
+/** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 36 型提取：type→size） */
 const BOOMERANG_SIZE: Record<number, number> = {
   6: 22, 19: 22, 33: 38, 52: 22, 106: 32, 113: 22, 182: 30, 272: 32,
   301: 38, 320: 34, 333: 38, 383: 34, 866: 30, 867: 22, 902: 20, 1000: 22,
@@ -163,27 +210,45 @@ export class Boomerang extends Entity {
   armorPen = 0;
   /** 近战系（吃武器浸剂） */
   meleeProj = true;
-  /** channel 电平（301 Bouncing Shield 按 20t/100t 双门用；其余族不用） */
+  /** channel 电平（301 Bouncing Shield 双门用；Game 仅 301 注入,其余族空挂无害） */
   channel: (() => boolean) | null = null;
-  /** rotation（出程=飞行向+π/4 定角,返回段自旋 0.4/t——AI_003 尾段 :675-706） */
-  private rot = 0;
-  /** ai[0]：0 飞出 / 1 返回 */
-  private returning = false;
-  /** ai[1]：飞出段计数（普通族 ≥30t 自动回收,:434-438） */
+  /** ★ai[0]（:36783 起）：0 飞出 / 1 返回 / 2 光刃撞墙悬停（:17975-17990 置 2） */
+  ai0 = 0;
+  /** 探针 _weapons-family-probe 读 returning——ai[0]==1 即返回段（保留旧名兼容） */
+  get returning(): boolean { return this.ai0 === 1; }
+  /** direction：掷出瞬间玩家 facing（NewProjectile 语义;旋转自旋符号 :37294 起） */
+  private dir: number;
+  /** ai[1]：飞出段计数（866 占用为目标索引,计数走 localT） */
   private outT = 0;
-  /** localAI[0]（866 飞刀目标搜索计时,:291-300） */
+  /** localAI[0]：866 目标窗计数（:36985/:36999）;1074 悬停后置 -1 供返回音选择（:37102） */
   private localT = 0;
+  /** localAI[1]：光刃悬停音一次性门（:37098-37109） */
+  private hoverSfxDone = false;
+  /** rotation（尾段 per-type :37294-37352 + 光刃出程/悬停/返回专属段） */
+  private rot = 0;
+  /** soundDelay（掷出呼啸 8t/301 10t,:36626-36651;每 tick 自减 :15427-15429） */
+  private soundDelay = 0;
+  /** SetDefaults penetrate（命中自减 :13175-13182;==0 Kill :15866-15868;866 特例 :13124-13137） */
+  private penetrate: number;
+  /** SetDefaults extraUpdates（AI 每 tick 跑 1+extra 次,Update :15336-15339 while 循环） */
+  private extra: number;
   private hitCd = new HitCooldown();
-  life = 900;
+  /** timeLeft 缺省 3600（SetDefaults :526,aiStyle 3 族无型号覆写——旧值 900 是自造） */
+  life = 3600;
   dead = false;
 
-  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number, projId: number) {
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
+    projId: number, dir = 1) {
     super();
     this.x = x; this.y = y;
     this.vx = vx; this.vy = vy;
     this.damage = damage;
     this.knockback = knockback;
     this.projId = projId;
+    this.dir = dir >= 0 ? 1 : -1;
+    const def = projectileData(projId);
+    this.penetrate = def?.penetrate ?? -1;
+    this.extra = def?.extraUpdates ?? 0;
     const sz = BOOMERANG_SIZE[projId]; // ⑬-2 命中盒按型号（曾统一 22×22）
     if (sz) { this.w = sz; this.h = sz; }
   }
@@ -192,8 +257,8 @@ export class Boomerang extends Entity {
     drawProj(r, cam, this, this.projId, this.rot, '#C0A060');
   }
 
-  /** 轴向目标速度逼近（AI_003 追踪/返回共用式 :331-360/:586-660）：
-   *  每轴朝目标速度步进 acc,异号再加倍 */
+  /** 轴向目标速度逼近（AI_003 追踪/返回共用式 :36937-36973/:37249-37282）：
+   *  每轴朝目标速度步进 acc,当前速度与目标异号再加倍 */
   private steerTo(tvx: number, tvy: number, acc: number): void {
     if (this.vx < tvx) { this.vx += acc; if (this.vx < 0 && tvx > 0) this.vx += acc; }
     else if (this.vx > tvx) { this.vx -= acc; if (this.vx > 0 && tvx < 0) this.vx -= acc; }
@@ -205,115 +270,268 @@ export class Boomerang extends Entity {
     // 联机傀儡（远端弹幕快照驱动）：纯位移外推，不跑命中/碰撞（伤害归拥有者客户端结算）
     if (this.netPuppet) { this.netPuppetStep(); return; }
     if (--this.life <= 0) { this.dead = true; return; }
-    const p = game.player;
+    if (this.soundDelay > 0) this.soundDelay--; // :15427-15429 每 tick 一次（AI 循环外）
     this.hitCd.tick();
-    const solidAt = (x: number, y: number): boolean => {
-      const tx = Math.floor((x + this.w / 2) / TILE), ty = Math.floor((y + this.h / 2) / TILE);
-      return game.world.store.inBounds(tx, ty) && game.world.store.isSolid(tx, ty);
-    };
-    const outOfWorld = (): boolean => this.x < TILE * 10 || this.y < TILE * 10
-      || this.x > (game.world.store.w - 10) * TILE || this.y > (game.world.store.h - 10) * TILE;
-    const startReturn = (zeroV: boolean): void => {
-      this.returning = true;
-      this.outT = 0;
-      this.hitCd.clear(); // 返程可再次命中（原版去而复返二次伤害语义）
-      if (zeroV) { this.vx = 0; this.vy = 0; } // 301 回收时速度归零（:443-447）
-      else if (solidAt(this.x, this.y)) { this.x -= this.vx; this.y -= this.vy; } // 弹出防嵌墙
-    };
-    if (!this.returning) {
-      this.outT++;
-      const isPhase = PHASEBLADE_PROJ.has(this.projId);
-      // ---- 特例族出程行为 ----
-      if (this.projId === 182 || this.projId === 866) {
-        // 圣骑士锤 182 / 飞刀 866：追踪最近敌（:264-330/:291-360）——800px 内最近敌,
-        // 目标速度=(敌-球)norm×12,轴步进 0.25;无目标且 ≥30t(866:30t) → 回收。
-        // 视线门 Collision.CanHit（:285-288/:305-308）——canHit 1:1
-        this.localT++;
-        let tvx = this.vx, tvy = this.vy, found = false;
-        if (this.outT > 10 && this.outT < 360) {
-          const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
-          let best = 800, bx = 0, by = 0;
-          for (const ent of game.enemies()) {
-            const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
-            if (e.dead) continue;
-            if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
-            const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
-            if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
-          }
-          if (found) {
-            const dd = Math.hypot(bx - cx0, by - cy0) || 1;
-            tvx = ((bx - cx0) / dd) * 12; tvy = ((by - cy0) / dd) * 12;
-          }
-        }
-        if (!found && this.outT >= 30) { this.x += this.vx; this.y += this.vy; startReturn(false); }
-        else { this.steerTo(tvx, tvy, 0.25); this.x += this.vx; this.y += this.vy; }
-      } else if (this.projId === 301) {
-        // Bouncing Shield 1513：按住 ≥20t / 松手 ≥100t 回收（:437-452）
-        const held = this.channel ? this.channel() : false;
-        if ((held && this.outT >= 20) || (!held && this.outT >= 100)) {
-          this.x += this.vx; this.y += this.vy; startReturn(true);
-        } else { this.x += this.vx; this.y += this.vy; }
-      } else if (this.projId === 383) {
-        // 附魔飞刀 2424：10t 后下垂 vy+=0.5(上升再+0.35)/vx×0.95（:263-277）;>800px 回收
-        if (this.outT >= 10) {
-          this.vy += 0.5;
-          if (this.vy < 0) this.vy += 0.35;
-          this.vx *= 0.95;
-          this.vy = Math.min(this.vy, 16);
-        }
-        this.x += this.vx; this.y += this.vy;
-        if (Math.hypot(this.x + this.w / 2 - p.cx, this.y + this.h / 2 - p.cy) > 800) startReturn(false);
-      } else if (this.projId === 320) {
-        // 冰回旋镖 1825：10t 后下垂 vy+=0.5/vx×0.95（:263-268）
-        if (this.outT >= 10) { this.vy += 0.5; this.vx *= 0.95; this.vy = Math.min(this.vy, 16); }
-        this.x += this.vx; this.y += this.vy;
-      } else if (isPhase) {
-        // 光刃族：前 30t 自旋 0.4×direction,之后垂落 vy+=1/vx×0.96（:190-232）
-        if (this.outT >= 30) {
-          this.vy += 1;
-          this.vx *= 0.96;
-          this.vy = Math.min(this.vy, 16);
-          this.rot += 0.4 * Math.sign(this.vx || 1);
-        } else {
-          this.rot += 0.4 * Math.sign(this.vx || 1);
-        }
-        this.x += this.vx; this.y += this.vy;
-      } else {
-        // 普通族：无摩擦直线;106 光碟 45t 回收（:180-186）,其余 30t（:434-438）
-        this.x += this.vx;
-        this.y += this.vy;
-        // 出程旋转 = 飞行向 + π/4（:675-677,不自旋）;106 光碟 0.3×dir（:670-672）
-        this.rot = this.projId === 106
-          ? this.rot + 0.3 * Math.sign(this.vx || 1)
-          : Math.atan2(this.vy, this.vx) + Math.PI / 4;
-        if (Math.random() < 0.5) {
-          game.spawnParticles(this.x + this.w / 2, this.y + this.h / 2, '#D0E8FF', 1, 0.4, { life: 18, grav: 0, size: 2 });
-        }
-        if (this.outT >= (this.projId === 106 ? 45 : 30)) startReturn(false);
+    // extraUpdates（Update :15336-15339）：AI+移动每 tick 跑 1+extra 次;
+    // 光刃返回段动态加速 = dist/3000（+1(1074),上限 20,:37211-37221）
+    let runs = this.extra + 1;
+    if (PHASEBLADE_PROJ.has(this.projId) && this.ai0 === 1) {
+      const p0 = game.player;
+      runs = Math.min(20, Math.floor(Math.hypot(p0.cx - this.cx, p0.cy - this.cy) / 3000)
+        + (this.projId === 1074 ? 1 : 0)) + 1;
+    }
+    for (let i = 0; i < runs && !this.dead; i++) this.step(game);
+  }
+
+  /** 单次 AI 迭代（等价原版 numUpdates 循环体一次：AI → 移动/碰撞 → 尾段 → 命中） */
+  private step(game: GameHooks): void {
+    const p = game.player;
+    const isPhase = PHASEBLADE_PROJ.has(this.projId);
+    // ---- AI 段 ----
+    // 掷出呼啸（:36626-36651;383/光刃族豁免;301 延时 10 其余 8,均 ×(extra+1)）。
+    // 301 的 -0.33 变调未建模（playSfxFiles 无 pitch 参数）
+    if (this.projId !== 383 && !isPhase && this.soundDelay === 0) {
+      this.soundDelay = (this.projId === 301 ? 10 : 8) * (this.extra + 1);
+      game.playSfxFiles(['Item_7'], 1, this.cx, this.cy);
+    }
+    if (isPhase) {
+      // :36745-36748 中心出界（InWorld 外扩 10 格）→ 直接进返回
+      const st = game.world.store;
+      const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
+      if (tx < 10 || ty < 10 || tx >= st.w - 10 || ty >= st.h - 10) this.ai0 = 1;
+      // :36750-36756 timeLeft<5 且玩家存活 → 续命 5t 并回收（悬停/垂落态的唯一出路）
+      else if (this.life < 5 && !(p as { dead?: boolean }).dead) {
+        this.life = 5;
+        if (this.ai0 !== 1) this.ai0 = 1;
       }
-      // 通用撞墙/出界回收门（:123-133,全部族）
-      if (!this.returning && (solidAt(this.x, this.y) || outOfWorld())) startReturn(false);
-    } else {
-      // 返回段：tileCollide=false 穿墙（:496）;目标速度制——朝玩家 num28 px/t,
-      // 每轴逼近 num29/t,目标异号再 ×2（:586-660）;>3000px Kill（:606-610;
-      // 301 是 6000px,:603-605）
-      const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
-      let dx = p.cx - cx, dy = p.cy - cy;
-      const d = Math.hypot(dx, dy) || 1;
-      if (d > (this.projId === 301 ? 6000 : 3000)) { this.dead = true; return; }
-      const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? (PHASEBLADE_PROJ.has(this.projId) ? [40, 3] : [9, 0.4]);
-      dx = (dx / d) * spd; dy = (dy / d) * spd;
-      this.steerTo(dx, dy, acc);
-      this.x += this.vx;
-      this.y += this.vy;
-      // 返回段自旋 0.4/t × direction（:704-706）
-      this.rot += 0.4 * Math.sign(this.vx || 1);
-      // 收手 = 与玩家 AABB 相交即 Kill（:663-673）
-      if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
-        this.dead = true; return;
+      // :36758-36764 再掷召回门（持光刃按 use 即回收）——需 Player controlUseItem/
+      //   releaseUseItem 输入语义,本引擎未建模（GAP,登记 docs/weapon-proj-audit）
+    }
+    if (this.ai0 === 0) this.aiOut(game, isPhase);
+    else if (isPhase && this.ai0 === 2) this.aiHover(game); // 光刃撞墙悬停
+    else this.aiReturn(game, isPhase);
+    // ---- 移动段（HandleMovement;ai[0]==1 时 tileCollide=false 穿墙 :37145） ----
+    this.moveStep(game, isPhase);
+    // ---- 尾段 rotation/尘（:37294-37352,全部状态运行） ----
+    this.aiVisual(game, isPhase);
+    // ---- 命中结算（同敌冷却 10t = NPC immune[owner]=10,:13172-13174） ----
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || this.dir, this.armorPen,
+      () => this.onHitEnemy());
+  }
+
+  /** ① 出程段（ai[0]==0,:36783-37087）——分支序与源码一致 */
+  private aiOut(game: GameHooks, isPhase: boolean): void {
+    const p = game.player;
+    if (this.projId !== 866) this.outT++; // :36786-36793（866 不计 ai[1],计数在 localT）
+    if (this.projId === 106 && this.outT >= 45) { this.ai0 = 1; this.outT = 0; return; } // :36794-36799
+    if (isPhase) {
+      // 光刃族（:36800-36866）：前 30 AI 次自旋,之后 vy+1/vx×0.96 垂落（vy 钳 16）
+      if (this.outT >= 30) {
+        this.vy += 1;
+        this.vx *= 0.96;
+        if (this.vy > 16) this.vy = 16;
+        if (this.vy > 0) {
+          // :36811-36832 垂落姿态:rotation 逼近 dir>0→2.335 / dir<0→-3.948（差值绕 2π 取近路）
+          const tgt = this.dir > 0 ? 2.335 : -3.948;
+          this.rot = this.dir > 0
+            ? (this.rot <= tgt ? (this.rot * 4 + tgt) / 5 : (this.rot * 9 + tgt + Math.PI * 2) / 10)
+            : (this.rot >= tgt ? (this.rot * 4 + tgt) / 5 : (this.rot * 9 + tgt - Math.PI * 2) / 10);
+        } else {
+          this.rot += 0.4 * this.dir; // :36834-36844（音门 1074 9t/其余 14t）
+          if (this.soundDelay === 0) {
+            game.playSfxFiles([this.projId === 1074 ? 'Item_7' : 'Item_15'], 1, this.cx, this.cy);
+            this.soundDelay = this.projId === 1074 ? 9 : 14;
+          }
+        }
+      } else {
+        this.rot += 0.4 * this.dir; // :36836-36847（1074 11t/其余 14t;-0.3 变调略）
+        if (this.soundDelay === 0) {
+          game.playSfxFiles([this.projId === 1074 ? 'Item_7' : 'Item_15'], 1, this.cx, this.cy);
+          this.soundDelay = this.projId === 1074 ? 11 : 14;
+        }
+      }
+      return;
+    }
+    if (this.projId === 320 || this.projId === 383) {
+      // 320 冰回旋镖 / 383 附魔飞刀（:36868-36888）：≥10 起下垂 vy+0.5（383 上升再+0.35）/
+      // vx×0.95/vy 钳 16;383 距玩家>800 回收
+      if (this.outT >= 10) {
+        this.vy += 0.5;
+        if (this.projId === 383 && this.vy < 0) this.vy += 0.35;
+        this.vx *= 0.95;
+        if (this.vy > 16) this.vy = 16;
+        if (this.projId === 383 && Math.hypot(p.cx - this.cx, p.cy - this.cy) > 800) {
+          this.ai0 = 1; this.outT = 0;
+        }
+      }
+      return;
+    }
+    if (this.projId === 182 || this.projId === 866) {
+      // 182 圣骑士锤（:36889-36973）/ 866 飞刀（:36980-37057）:800px 内最近敌追踪
+      // （CanHit 视线门）,目标速度=(目标-球心)norm×12,轴步进 0.25;无目标 ≥30 回收。
+      // 计数源不同（182=ai[1] / 866=localAI[0]）但数值门一致,统一用 outT
+      if (this.projId === 866) this.localT++; // :36999
+      let tx = this.cx + this.vx * 100, ty = this.cy + this.vy * 100; // :36944-36946 无目标前瞻点
+      let found = false;
+      if (this.outT > 10 && this.outT < 360) { // :36909-36938 / :36985-36997
+        let best = 800; // :36907 / FindTargetWithLineOfSight 缺省 800 :42972
+        for (const ent of game.enemies()) {
+          const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+          if (e.dead) continue;
+          if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+          const d = Math.hypot(e.x + e.w / 2 - this.cx, e.y + e.h / 2 - this.cy);
+          if (d < best) { best = d; tx = e.x + e.w / 2; ty = e.y + e.h / 2; found = true; }
+        }
+      }
+      if (!found && this.outT >= 30) { this.ai0 = 1; this.outT = 0; return; } // :36932-36938 / :37009-37017
+      const dd = Math.hypot(tx - this.cx, ty - this.cy) || 1;
+      this.steerTo(((tx - this.cx) / dd) * 12, ((ty - this.cy) / dd) * 12, 0.25); // :36937-36973
+      return;
+    }
+    if (this.projId === 301) {
+      // 301 Bouncing Shield（:37062-37080）：按住 ≥20/松手 ≥100 双门,回收时速度归零
+      const held = this.channel ? this.channel() : false;
+      if ((held && this.outT >= 20) || (!held && this.outT >= 100)) {
+        this.ai0 = 1; this.outT = 0; this.vx = 0; this.vy = 0;
+      }
+      return;
+    }
+    // 缺省族（:37082-37086）：无摩擦直线,ai[1]≥30 回收
+    if (this.outT >= 30) { this.ai0 = 1; this.outT = 0; }
+  }
+
+  /** 光刃撞墙悬停态（ai[0]==2,:37089-37109;由撞墙分支 :17975-17990 进入） */
+  private aiHover(game: GameHooks): void {
+    if (this.vy < 0) this.vy *= 0.5; // :37091-37093
+    this.rot = 2.335;                // :37095
+    this.vx = 0;                     // :37096
+    this.vy += 1;                    // :37097
+    if (!this.hoverSfxDone) {        // localAI[1] 一次性门 :37098-37109
+      if (this.projId === 1074) { this.localT = -1; game.playSfxFiles(['Item_182'], 1, this.cx, this.cy); }
+      else game.playSfxFiles(['Item_15'], 1, this.cx, this.cy);
+      this.hoverSfxDone = true;
+    }
+  }
+
+  /** ③ 返回段（ai[0]==1,:37111-37288） */
+  private aiReturn(game: GameHooks, isPhase: boolean): void {
+    const p = game.player;
+    if (isPhase) {
+      // :37114-37124 direction 朝玩家侧;rotation = 飞行向 - 2.335
+      this.dir = this.cx < p.cx ? -1 : 1;
+      this.rot = Math.atan2(this.vy, this.vx) - 2.335;
+      if (this.localT <= 0) { // :37125-37144 localAI[0] 门（悬停过=Item_182,否则 Item_7）
+        game.playSfxFiles([this.projId === 1074 ? (this.localT < 0 ? 'Item_182' : 'Item_7') : 'Item_15'],
+          1, this.cx, this.cy);
+        this.localT = 1;
       }
     }
-    hitEnemies(this, game, this.hitCd, 20, Math.sign(this.vx), this.armorPen);
+    // tileCollide=false（:37145）——moveStep 直接积分
+    const [spd, acc] = BOOMERANG_RETURN[this.projId] ?? (isPhase ? [40, 3] : [9, 0.4]); // :37146-37206
+    let dx = p.cx - this.cx, dy = p.cy - this.cy;
+    const d = Math.hypot(dx, dy) || 1;
+    // :37223-37232 距离 Kill 门（301 6000/其余 3000）
+    if (d > (this.projId === 301 ? 6000 : 3000)) { this.dead = true; return; }
+    dx = (dx / d) * spd; dy = (dy / d) * spd; // :37234-37236 目标速度 = 朝向 × num28
+    if (this.projId === 383) {
+      // :37237-37247 383 专属:沿 (目标速度-当前速度) 方向加速 min(num29, 差距长)
+      const ddx = dx - this.vx, ddy = dy - this.vy;
+      const dl = Math.hypot(ddx, ddy);
+      if (dl > 0) {
+        const s = Math.min(acc, dl);
+        this.vx += (ddx / dl) * s; this.vy += (ddy / dl) * s;
+      }
+    } else {
+      this.steerTo(dx, dy, acc); // :37249-37282 轴步进,异号加倍
+    }
+    // ④ 回收:与玩家 AABB 相交即 Kill（:37272-37288,仅本机投射物）
+    if (this.x < p.x + p.w && this.x + this.w > p.x && this.y < p.y + p.h && this.y + this.h > p.y) {
+      this.dead = true;
+    }
+  }
+
+  /** 移动/撞墙段（HandleMovement 撞墙分支 :18103-18161;分轴探测 = lastVelocity 语义） */
+  private moveStep(game: GameHooks, isPhase: boolean): void {
+    if (this.ai0 === 1) { this.x += this.vx; this.y += this.vy; return; } // 穿墙（:37145）
+    const st = game.world.store;
+    const solidBox = (x: number, y: number): boolean => {
+      const x0 = Math.floor(x / TILE), y0 = Math.floor(y / TILE);
+      const x1 = Math.floor((x + this.w - 1) / TILE), y1 = Math.floor((y + this.h - 1) / TILE);
+      for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty)) return true;
+      }
+      return false;
+    };
+    const lvx = this.vx, lvy = this.vy;
+    let hitX = false, hitY = false;
+    const nx = this.x + this.vx;
+    if (solidBox(nx, this.y)) hitX = true; else this.x = nx;
+    const ny = this.y + this.vy;
+    if (solidBox(this.x, ny)) hitY = true; else this.y = ny;
+    if (!hitX && !hitY) return;
+    // 撞墙尘 + 挖掘音（默认族 Collision.HitTiles :18139-18140 + SoundID 0 :18161）
+    game.spawnParticles(this.cx, this.cy, '#A09080', 3, 1.5, { life: 14, size: 2 });
+    game.playSfx('dig', 1, this.cx, this.cy);
+    if (WALL_BOUNCE_PROJ.has(this.projId)) {
+      // :18142-18151 33/106/866 命中轴反弹,不回收（106 LightDisc_Bounce 溅射视觉略）
+      if (hitX) this.vx = -lvx;
+      if (hitY) this.vy = -lvy;
+    } else if (isPhase) {
+      this.ai0 = 2; this.outT = 0; // :17975-17990 光刃撞墙 → 悬停态
+    } else {
+      // :18152-18160 其余:ai[0]=1 回收 + 速度=-lastVelocity（383 豁免取反 :18156）。
+      // 383 ≥10 的 HitTilesInACircle(300)+Item14 / 301 冲击波粒（:18115-18138）未建模
+      this.ai0 = 1; this.outT = 0;
+      if (this.projId !== 383) { this.vx = -lvx; this.vy = -lvy; }
+    }
+  }
+
+  /** 尾段 rotation/尘（:37294-37352,出程/悬停/返回全状态运行;光刃走专属段不进此链） */
+  private aiVisual(game: GameHooks, isPhase: boolean): void {
+    const p = game.player;
+    if (this.projId === 106) {
+      this.rot += 0.3 * this.dir; // :37294-37296 光碟两段自旋 0.3
+    } else if (this.projId === 866) {
+      this.rot = Math.atan2(this.vy, this.vx); // :37298-37308 飞刀贴图对准飞行向
+    } else if (this.projId === 383) {
+      // :37310-37325 出程对准飞行向 / 返回段对准 (球心-玩家) 向量,+π/2
+      this.rot = (this.ai0 === 0
+        ? Math.atan2(this.vy, this.vx)
+        : Math.atan2(this.cy - p.cy, this.cx - p.cx)) + Math.PI / 2;
+    } else if (this.projId === 301) {
+      // :37326-37350 出程对准飞行向+π/4（尘略）/ 返回段自旋 0.4×direction
+      if (this.ai0 === 0) this.rot = Math.atan2(this.vy, this.vx) + Math.PI / 4;
+      else this.rot += 0.4 * this.dir;
+    } else if (!isPhase) {
+      this.rot += 0.4 * this.dir; // :37351-37352 缺省族两段自旋 0.4（非定角!）
+    }
+    // per-type 尘近似（:36652-36738,色/率近似）
+    const dust = BOOMERANG_DUST[this.projId];
+    if (dust && Math.random() < dust[1]) {
+      game.spawnParticles(this.cx, this.cy, dust[0], 1, 0.4, { life: 18, grav: 0, size: 2 });
+    }
+  }
+
+  /** 命中敌回调 = Projectile.Damage 回收门 + 穿透自减（:12278-12299/:13124-13182） */
+  private onHitEnemy(): void {
+    // :12278-12291 出程命中敌 → 速度反转 + ai[0]=1（豁免 301/866/902/光刃族;
+    // 106 的 LightDisc_Bounce 溅射 :12282-12284 视觉略）
+    if (this.ai0 === 0 && !NO_HIT_RETURN_PROJ.has(this.projId)
+      && !PHASEBLADE_PROJ.has(this.projId)) {
+      this.vx = -this.vx; this.vy = -this.vy;
+      this.ai0 = 1; this.outT = 0;
+    }
+    // :12292-12297 902 返回段命中 direction 翻转
+    if (this.projId === 902 && this.ai0 !== 0) this.dir *= -1;
+    // penetrate 自减（:13175-13182）;==0 → Kill（:15866-15868）;
+    // 866 特例（:13124-13137):五击后 penetrate 复位 1、伤害归零不消失
+    if (this.penetrate > 0) {
+      this.penetrate--;
+      if (this.penetrate === 0) {
+        if (this.projId === 866) { this.penetrate = 1; this.damage = 0; }
+        else this.dead = true;
+      }
+    }
   }
 }
 
