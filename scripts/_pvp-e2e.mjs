@@ -65,10 +65,8 @@ check('pvp 房创建', !!room.ok, room.error ?? '');
 
 const pageA = await mkPage();
 const pageB = await mkPage();
-// 房主先本地建世界再进房（joinNetGame 房主链需要已加载 world——_roomprobe 同款流程;
-// 直接裸 join 房主页 tickCount=0 游戏循环不跑,实踩）
-await pageA.evaluate(() => window.__swFlow.newWorld('', 4200, 1200));
-await pageA.waitForFunction(() => !!window.__swGame && !!window.__swGame.world, { timeout: 300000 }).catch(() => {});
+// 直接裸 join（房主 token 在 URL）：不依赖本地世界生成（并行会话 worldgen worker
+// 改造期会炸）；早前"房主页 tickCount=0"实为 headless 后台页 rAF 节流——pump 已解
 const hostUrl = `ws://127.0.0.1:${PORT}/${room.code}?token=${encodeURIComponent(room.hostToken)}`;
 const guestUrl = `ws://127.0.0.1:${PORT}/${room.code}`;
 const joinA = await pageA.evaluate(async (u) => {
@@ -163,7 +161,23 @@ const swing = await pageA.evaluate(() => {
   const held = g.player.inv.heldItem();
   if (!held) return { err: 'no held' };
   g.swing = { item: held.id, dmg: 25, kb: 4, t: 16, dur: 16, useStyle: 1 };
-  for (let i = 0; i < 14; i++) g.updateSwingHits(); // 相位扫描（真实挥击扫过全程）
+  const sent44 = [];
+  const origSend = g.net.sendStrikePlayer.bind(g.net);
+  g.net.sendStrikePlayer = (...a) => { sent44.push(a); return origSend(...a); };
+  try {
+    for (let i = 0; i < 14; i++) g.updateSwingHits(); // 相位扫描（真实挥击扫过全程）
+  } finally { g.net.sendStrikePlayer = origSend; }
+  const rp0 = g.remotePlayerProxies[0];
+  return {
+    sent44: sent44.length, first: sent44[0] ?? null,
+    gates: {
+      net: g.net?.active, pvpRoom: g.net?.policy?.pvpAllowed, hostile: g.player.hostile,
+      proxies: g.remotePlayerProxies.length, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null,
+      rpHostile: rp0?.hostile, rpTeam: rp0?.team, myTeam: g.player.team,
+      swingSet: g.swingHitSet.size,
+    },
+    bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
+  };
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
   return {
     sent, bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,

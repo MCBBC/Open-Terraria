@@ -308,7 +308,7 @@ export class Inventory {
       count = this.fillRange(AMMO_START, AMMO_SLOTS, id, count, max);
     }
     // ③ 合并 0-49 已有堆
-    count = this.fillRange(0, BAG_SIZE, id, count, max);
+    count = this.fillRange(0, BAG_SIZE, id, count, max, placeStyle);
     // ④ 空槽降序（原版非 favorited 降序从背包尾填，:38711-38730）
     for (let i = BAG_SIZE - 1; i >= 0 && count > 0; i--) {
       if (!this.slots[i]) {
@@ -321,10 +321,13 @@ export class Inventory {
   }
 
   /** 范围内先合并后空格填充 */
-  private fillRange(start: number, len: number, id: number, count: number, max: number): number {
+  private fillRange(start: number, len: number, id: number, count: number, max: number, placeStyle?: number): number {
     for (let i = start; i < start + len && count > 0; i++) {
       const s = this.slots[i];
-      if (s && s.id === id && s.stack < max) {
+      // placeStyle 匹配门(2026-08-13):不同敌旗(bannerId)不并入已有堆——
+      // 原版每旗独立 item id 天然隔离,本仓单物品+实例 style 需此门防混堆
+      if (s && s.id === id && s.stack < max
+        && (placeStyle === undefined || s.placeStyle === undefined || s.placeStyle === placeStyle)) {
         const put = Math.min(max - s.stack, count);
         s.stack += put;
         count -= put;

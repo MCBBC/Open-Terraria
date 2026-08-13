@@ -1230,7 +1230,7 @@ export class Renderer {
 
     // 6b. 洞穴探险/危险感/狩猎/群系视觉高亮（Main.cs:49500 段 Spelunker/Dangersense 溢色近似：
     //     全屏 tile 扫描 + 呼吸 alpha；狩猎对小动物画框）
-    this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts);
+    this.drawBuffHighlights(ctx, world, player, cam, viewW, viewH, z, ts, entities);
 
     ctx.restore();
 
@@ -5573,6 +5573,7 @@ export class Renderer {
   private drawBuffHighlights(
     ctx: CanvasRenderingContext2D, world: World, player: Player,
     cam: Camera, viewW: number, viewH: number, z: number, ts: number,
+    entities: Entity[] = [],
   ) {
     const buffs = player.buffs;
     const spel = buffs.has(BuffType.Spelunker);
@@ -5612,12 +5613,7 @@ export class Renderer {
       ctx.strokeStyle = '#FF6060';
       ctx.lineWidth = 1.5;
       const camLeft = cam.x - viewW / 2 / z, camTop = cam.y - viewH / 2 / z;
-      for (const ent of this.game.entities.critters) {
-        if ((ent as { dead?: boolean }).dead) continue;
-        const e = ent as { x: number; y: number; w: number; h: number };
-        ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);
-      }
-      for (const ent of this.game.entities.enemies) {
+      for (const ent of entities) {
         if ((ent as { dead?: boolean }).dead) continue;
         const e = ent as { x: number; y: number; w: number; h: number };
         ctx.strokeRect((e.x - camLeft) * z, (e.y - camTop) * z, e.w * z, e.h * z);

@@ -289,7 +289,9 @@ function applyChain(st: TileStore, rng: RNG, steps: ChainStep[], i: number, x: n
       return s.types.includes(t) && applyChain(st, rng, steps, i + 1, x, y);
     }
     case 'onlyWalls':
-      return s.types.includes(st.wall[st.idx(x, y)]) && applyChain(st, rng, steps, i + 1, x, y);
+      // Blotches 扇出可外溢房外 1 格,读前兜底(房间本体 InWorld 10 边距本已安全)
+      return st.inBounds(x, y) && s.types.includes(st.wall[st.idx(x, y)])
+        && applyChain(st, rng, steps, i + 1, x, y);
     case 'skipTiles': {
       if (!activeAt(st, x, y)) return applyChain(st, rng, steps, i + 1, x, y); // !active 放行(:399)
       return !s.types.includes(st.type[st.idx(x, y)]) && applyChain(st, rng, steps, i + 1, x, y);

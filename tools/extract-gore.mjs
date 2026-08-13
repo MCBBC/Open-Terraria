@@ -1041,7 +1041,6 @@ function compileVel(expr, callLine) {
       }
       return false;
     };
-    void comp;
     if (!comp(comps[0], 'x') || !comp(comps[1], 'y')) return null;
     return out;
   }
@@ -1059,7 +1058,6 @@ function compileVel(expr, callLine) {
 // ============ 实例后处理（NewGore 之后对同一 gore 实例的赋值/缩放） ============
 const goreIdx = new Map();     // 索引变量名 → 该 NewGore 发射的表项对象数组
 const goreAlias = new Map();   // `Gore g = Main.gore[n]`/`Gore g = g2` 别名 → 索引变量名
-let activeGoreEntries = [];    // 最近一次 NewGore 的表项（供 `Gore g = NewGore(...)` 直取）
 
 /** 主扫描里解析一行中的后处理语句（返回是否产生 post） */
 function handlePostLine(plain, lineNo) {
@@ -1201,7 +1199,6 @@ for (const { text, line: lineNo } of logical) {
   // 局部变量赋值流（声明与重赋值；供 `num + K` id 还原 + Vector2 局部 IR）
   {
     let m;
-    const isVecDecl = /^(?:int|float|double|byte|short|long|uint|var|bool|Vector2)\s+([A-Za-z_]\w*)\s*=\s*(.+?);$/.test(plain);
     if ((m = plain.match(/^(?:int|float|double|byte|short|long|uint|var|bool|Vector2)\s+([A-Za-z_]\w*)\s*=\s*(.+?);$/))
       || (m = plain.match(/^([A-Za-z_]\w*)\s*=(?![=>])\s*(.+?);$/))) {
       if (!/^(if|for|while|switch|return|else|do|try)$/.test(m[1])) {
@@ -1234,7 +1231,6 @@ for (const { text, line: lineNo } of logical) {
         recordVec(m[1], 'vel', { rv: [k, flip + 1] }, lineNo);   // flip 次数累积（奇数次取反）
       }
     }
-    void isVecDecl;
   }
 
   while (i < text.length) {
@@ -1554,11 +1550,14 @@ const out = {
       'ai=[{slot,value}] = 原版 ai[N]==V 门（运行时按 NPC ai 槽位判定，不满足跳过该条）',
       'gates = 结构化守卫门（运行时求值，不满足跳过该条）：alt=altTexture / sdir=spriteDirection /',
       '  dmg=HitEffect dmg 实参 / shim=IsShimmerVariant / net=Main.netMode / rnd=Main.rand.Next(N)==V /',
-      '  redhat=RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67282）。OR 型守卫 `A || type == N` 中',
-      '  N 型免门（freeTypes），其余型带 A 门；`NPCID.Sets.IsTownPet[type]` 静态展开进 npcId 集',
+      '  redhat=RedHatSkeletronAdjustmentsEnabled()（NPC.cs:67282；not=true 为 else 支取反——',
+      '  `if (spriteDirection != -1) {A} else {B}` 的 B 段自动带 `== -1` 门，551 镜像分支即此）。',
+      '  OR 型守卫 `A || type == N` 中 N 型免门（freeTypes，仅豁免同层门），其余型带 A 门；',
+      '  `NPCID.Sets.IsTownPet[type]`（NPCID.cs:4444）静态展开进 npcId 集',
       'perfect=true = Gore.NewGorePerfect：随机扰动后回写精确 pos/vel（运行时不抖动）',
       'loop=N = 原版常量次数 for 循环体内（运行时重复生成 N 次，如 EoC <2 循环 = 8 块）；',
-      '  pos/vel 引用循环变量时已按循环域逐值展开（每变体 loop=1）',
+      '  pos/vel/id 引用循环变量时已按循环域逐值展开（每变体 loop=1，如 EoL 437 `728+num97` →',
+      '  6 条固定 id）；`<循环变量> < K` 守卫（num709<3）静态折算成 loop 次数不进 gates',
       'post = NewGore 之后对同一实例的有序操作（vm=velocity*=K / va=轴+=域 / vs=velocity 覆写 /',
       '  ss/sm=scale 设定/乘域 / al=alpha 设定(npc=来源 alpha) / ro=rotation 设定 / ps=position 覆写）',
       'pos 新字段：ox/oy=常量偏移；fx/fy=[w,h] 分数；rwx/rwy=[a,b] 随机尺寸分数域；jx/jy=[a,b] 像素抖动域；',
@@ -1566,6 +1565,9 @@ const out = {
       '  (spriteDirection!=1?1:-1)）；dc=[rx,ry] 椭圆盘随机偏移（Utils.cs:1269）',
       'vel 新字段：dc=[rx,ry] 椭圆盘速度；de=均匀随机方向定速；rv=[k,flip]=rotation.ToRotationVector2()',
       '  ×k（flip 奇数次=spriteDirection==1 时 X 取反）；hdm=[lo,hi]=随机幅值×击退方向',
+      '残留 posExpr（2 条，npc 113/114）：肉山屏幕级尘幕 `new Vector2(num593, num594)`——',
+      '  num594 依赖 Main.screenPosition 行扫（NPC.cs:88308-88326），非 NPC 相对坐标不可编译，',
+      '  运行时回退左上角；见 _meta.unresolved 系列（均 0 = 全部可求值）',
       'tex = gore 贴图 {w,h}（IHDR 直读）；缺图 id 运行时回退 32px 碰撞盒（Gore.cs:999）',
     ],
     tex,

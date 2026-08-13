@@ -65,13 +65,9 @@ function randGemStyle(rng: RNG): number {
 // 4763 vs 金标 816（5.8×）、悬空 774 vs 0（2026-08-12 用户标注"四处散布的宝石"）。
 /** TileID.Sets.Boulders + type==10 门（:60324：巨石/门不可作锚） */
 const ANCHOR_BANNED = idsByVanillaSheet(10, 138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
-/** type==380 特例（SolidTileAllowTopSlope :60411） */
+/** type==380 特例（SolidTileAllowTopSlope cs:70325 的 type==380 旁路） */
 const TYPE_380 = idsByVanillaSheet(380);
 
-/** ValidAnchorForMultiDirectionalTile（:60321）：dir 0=上锚 1=下锚 2=左锚 3=右锚。
- *  生成期无 inActive；slope 原版编码（Tile.cs:320-350）：topSlope()=1|2、
- *  bottomSlope()=3|4——旧注释"1/2=底坡 3/4=顶坡"整体写反（代码同病，已一并纠正）；
- *  leftSlope()=2|4、rightSlope()=1|3（仓库原本即对）。 */
 /** PlatformProperTopFrame（cs:70197-70209）：平台 frameX/PlatformFrameWidth()
  *  ∈[0,7]∪[12,16]∪[25,26] 视为"顶帧"。PlatformFrameWidth()=_data[19].
  *  CoordinateFullWidth（TileObjectData.cs:5112）=(16+2)×1=18——Tiles_19.png
@@ -80,6 +76,11 @@ function platformProperTopFrame(frameX: number): boolean {
   const n = Math.floor(frameX / 18);
   return (n >= 0 && n <= 7) || (n >= 12 && n <= 16) || (n >= 25 && n <= 26);
 }
+
+/** ValidAnchorForMultiDirectionalTile（:60321）：dir 0=上锚 1=下锚 2=左锚 3=右锚。
+ *  生成期无 inActive；slope 原版编码（Tile.cs:320-350）：topSlope()=1|2、
+ *  bottomSlope()=3|4——旧注释"1/2=底坡 3/4=顶坡"整体写反（代码同病，已一并纠正）；
+ *  leftSlope()=2|4、rightSlope()=1|3（仓库原本即对）。 */
 function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): boolean {
   if (!st.inBounds(x, y)) return true; // Main.tile 索引器 null 防御 → true（随后 tileSolid 门拦截）
   const i = st.idx(x, y);

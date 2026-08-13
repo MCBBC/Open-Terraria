@@ -24,6 +24,7 @@ import {
   getAttackDamageScaledByDifficulty, getAttackDamageForProjectiles,
   hostileProjectileDamage, scaleStats, bindScaleStatsWorld,
   scaleStatsWorldOf, CLASSIC_SCALE_WORLD, type ScalingStats,
+  applySeedAdjustments, type SeedAdjustStats,
 } from '../src/stats/ScaleStats';
 
 // ---------------------------------------------------------------------------
@@ -34,10 +35,16 @@ beforeEach(() => { bindScaleStatsWorld(scaleStatsWorldOf(new World(100, 100, 7, 
 afterEach(() => { bindScaleStatsWorld(null); });
 
 /** 造一个指定难度的世界并绑定（seedFlags/flags 可覆盖） */
-function worldOf(difficulty: number, opts?: { getGoodWorld?: boolean; hardMode?: boolean; downedPlantBoss?: boolean }): World {
+function worldOf(difficulty: number, opts?: {
+  getGoodWorld?: boolean; tenthAnniversary?: boolean; remix?: boolean; everything?: boolean;
+  hardMode?: boolean; downedPlantBoss?: boolean;
+}): World {
   const w = new World(100, 100, 7, 't');
   w.difficulty = difficulty;
   if (opts?.getGoodWorld) w.seedFlags = { ...w.seedFlags, getGoodWorld: true };
+  if (opts?.tenthAnniversary) w.seedFlags = { ...w.seedFlags, tenthAnniversary: true };
+  if (opts?.remix) w.seedFlags = { ...w.seedFlags, remix: true };
+  if (opts?.everything) w.seedFlags = { ...w.seedFlags, everything: true };
   if (opts?.hardMode) w.flags.hardMode = true;
   if (opts?.downedPlantBoss) w.flags['downed_262'] = true;
   bindScaleStatsWorld(scaleStatsWorldOf(w, () => false));
@@ -545,5 +552,84 @@ describe('受击反击件难度倍率门（Main.cs:2760/2762）', () => {
     const w = worldOf(1);
     expect(75 * (mainMasterMode(w) ? 3 : mainExpertMode(w) ? 2 : 1)).toBe(150);
     expect(Math.trunc(13 * (mainMasterMode(w) ? 2 : mainExpertMode(w) ? 1.5 : 1))).toBe(19);
+  });
+});
+
+// ===========================================================================
+// 12. SetDefaults 尾段种子档调整族（NPC.cs:17774-17885 + 三私有方法）
+//     FTW=getGoodAdjustments / celebrationmk10=getTenthAnniversaryAdjustments /
+//     getfixedboi=getZenithSeedAdjustmentsBeforeEverything（先于 getGood）
+//     ★扩盒语义：与专家档 Tweaks"只缩贴图不扩盒"相反——命中分支连碰撞盒一起改，
+//     两级 (int) 截断（:17745 基扩盒后再 ×scaleNew :18025-18026/:17861-17862）
+//     数值全部按原版公式手算（ftw 经典世界 = Main.Difficulty 2 专家档）
+// ===========================================================================
+describe('getGoodAdjustments 整族（NPC.cs:17874-18027）', () => {
+  it('245 石巨人拳 FTW：scale×0.5 → 盒 140→70 / hp (9000×2)×0.75=13500 / dmg (72×2)×0.8=115', () => {
+    worldOf(0, { getGoodWorld: true });
+    const e = Enemy.fromVanilla(245, 0, 0)!;
+    expect(e.w).toBe(70); expect(e.h).toBe(70);
+    expect(e.vanillaScale).toBeCloseTo(0.5, 6);       // 渲染乘区 = 总scale/基scale
+    expect(e.maxHp).toBe(13500);
+    expect(e.def.damage).toBe(115);
+    expect(e.def.defense).toBe(26);                   // getGood 对 245 无防改
+  });
+  it('266 克脑 FTW：防 (int)(14×1.5)=21 / 伤基线 (int)(30×1.2)=36 → 缩放 (36×2)×0.9=65', () => {
+    worldOf(0, { getGoodWorld: true });
+    const e = Enemy.fromVanilla(266, 0, 0)!;
+    expect(e.baseDamage).toBe(30);                    // defDamage 快照(:17749)在 getGood 之前
+    expect(e.def.defense).toBe(21);
+    expect(e.def.damage).toBe(65);
+    expect(e.w).toBe(176); expect(e.h).toBe(121);     // 160/110 ×1.1 两级截断
+    expect(e.vanillaScale).toBeCloseTo(1.1, 6);
+    expect(e.maxHp).toBe(2125);                       // (1250×2)×0.85
+  });
+  it('113 血肉墙 FTW：s0=1.2 族二次乘盒 120×0.78=93 / hp (12000×2)×0.7=16800', () => {
+    worldOf(0, { getGoodWorld: true });
+    const e = Enemy.fromVanilla(113, 0, 0)!;
+    expect(e.w).toBe(93); expect(e.h).toBe(93);
+    expect(e.vanillaScale).toBeCloseTo(0.65, 5);      // (1.2×0.65)/1.2
+    expect(e.maxHp).toBe(16800);                      // (8000×1.5=12000)×2×0.7
+    expect(e.def.defense).toBe(21);                   // 12+3(getGood)+6(Tweaks :18293)
+  });
+  it('39-41 族 FTW+remix：scale=1.1f 赋值×1.2 → 盒 22×1.32=29 / hp (250+150)×2=800', () => {
+    worldOf(0, { getGoodWorld: true, remix: true });
+    const e = Enemy.fromVanilla(39, 0, 0)!;
+    expect(e.w).toBe(29); expect(e.h).toBe(29);
+    expect(e.vanillaScale).toBeCloseTo(1.32, 5);
+    expect(e.maxHp).toBe(800);
+    expect(e.def.damage).toBe(68);                    // (30+4)×2，无 Tweaks 分支
+    expect(e.def.defense).toBe(16);                   // 10+2+4(remix)
+    worldOf(0, { getGoodWorld: true });               // 无 remix：1.1 赋值 → 盒 24
+    expect(Enemy.fromVanilla(39, 0, 0)!.w).toBe(24);
+  });
+  it('zenith(getfixedboi) hp×0.8 先于 getGood（:17774-17777）', () => {
+    const s: SeedAdjustStats = { type: 127, scale: 1, lifeMax: 28000, defense: 24, damage: 47 };
+    const m = applySeedAdjustments(s, {
+      zenithWorld: true, getGoodWorld: true, tenthAnniversaryWorld: false, remixWorld: false,
+    });
+    expect(m).toBe(true);
+    expect(s.lifeMax).toBe(22400);                    // trunc(28000×0.8)，先于 getGood 乘区
+    expect(s.scale).toBeCloseTo(1.1, 6);              // 127-131 ×1.1
+    // zenith 单独（无 getGood）：非 125-131/139 族不命中
+    const s2: SeedAdjustStats = { type: 3, scale: 1, lifeMax: 45, defense: 6, damage: 14 };
+    expect(applySeedAdjustments(s2, {
+      zenithWorld: true, getGoodWorld: false, tenthAnniversaryWorld: false, remixWorld: false,
+    })).toBe(false);
+    expect(s2.lifeMax).toBe(45);
+  });
+  it('tenthAnniversary 与 getGood else-if 互斥 + 未列族二次乘盒（史莱姆王 50：122×1.25=152）', () => {
+    worldOf(0, { getGoodWorld: true, tenthAnniversary: true });   // getGood 胜出
+    expect(Enemy.fromVanilla(13, 0, 0)!.w).toBe(51);              // FTW ×1.35（非十周年 ×0.5=19）
+    worldOf(0, { tenthAnniversary: true });
+    expect(Enemy.fromVanilla(13, 0, 0)!.w).toBe(19);              // 十周年 ×0.5
+    expect(Enemy.fromVanilla(13, 0, 0)!.vanillaScale).toBeCloseTo(0.5, 6);
+    expect(Enemy.fromVanilla(50, 0, 0)!.w).toBe(152);             // 未列族 s=1.25 二次乘盒（原版怪癖）
+    expect(Enemy.fromVanilla(50, 0, 0)!.vanillaScale).toBe(1);    // 贴图不变（scale 未改）
+  });
+  it('非种子世界：普通经典 245 盒 140 / 266 盒 160（既有 round 路径不变）', () => {
+    worldOf(0);
+    expect(Enemy.fromVanilla(245, 0, 0)!.w).toBe(140);
+    expect(Enemy.fromVanilla(266, 0, 0)!.w).toBe(160);
+    expect(Enemy.fromVanilla(245, 0, 0)!.vanillaScale).toBe(1);
   });
 });

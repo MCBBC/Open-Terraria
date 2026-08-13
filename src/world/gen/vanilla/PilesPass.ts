@@ -7,6 +7,8 @@
 // 采样域 [25,w-25]；tile 187 装饰组链（多数群系走 187，186 仅默认/地牢/冰/蘑菇草）；
 // 全部群系样式链逐 if 抄（非互斥、后命中覆盖、命中才掷）；小堆 scatter 掷骰
 // Next(1,5)×Next(-10,11)×Next(5)×Next(12,36)。
+// pass 头 tileSolid 覆写（cs:18906-18916）：379/229/190/196/189/717-719/202/460/484
+// 期间置非实心（PASS_NON_SOLID，pass 内局部生效，不动全局 TILE_DEFS）。
 import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
@@ -31,6 +33,12 @@ const TILE_DUNGEON = new Set([41, 43, 44, 677, 678, 679]);
 const TILE_MOSS = new Set([182, 180, 179, 381, 183, 181, 534, 536, 539, 625, 627]);
 /** TileID.Sets.Boulders（TileID.cs:195）——PlaceSmallPile 的 InvalidTile 门 */
 const BOULDERS = new Set([138, 484, 664, 665, 711, 712, 713, 714, 715, 716]);
+/** ★pass 头 tileSolid 覆写（cs:18906-18916）：Piles 期间 379/229/190/196/189/
+ *  717-719/202/460/484 全部置非实心。此前缺整块——仓库数据 v_189/v_196 等仍
+ *  solid:true，placePile3x2 会把 3×2 堆锚在浮空岛云块(189)/荧光菇块(196)等
+ *  装饰块上（原版这些格在 pass 期间不参与锚定）。按 sheet id 存放，pass 内
+ *  局部判定，不动全局 TILE_DEFS */
+const PASS_NON_SOLID = new Set([379, 229, 190, 196, 189, 717, 718, 719, 202, 460, 484]);
 
 const activeAt = (st: TileStore, x: number, y: number): boolean =>
   st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0;
@@ -41,13 +49,30 @@ const sheetAt = (st: TileStore, x: number, y: number): number => {
   return st.flags[i] ? SHEET[st.type[i]] : -1;
 };
 
-/** SolidTile2（cs:46862）：active && tileSolid && slope==0 && !halfBrick && !inActive */
+/** SolidTile2（cs:46862）：active && tileSolid && slope==0 && !halfBrick && !inActive，
+ *  叠加 pass 头非实心覆写（cs:18906-18916 期间这些 tile 已被置 tileSolid=false） */
 const solidTile2 = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
+  if (PASS_NON_SOLID.has(SHEET[st.type[i]])) return false;
   const d = TILE_DEFS[st.type[i]];
   return !!d && !!d.solid && st.slope[i] === 0 && !st.half[i];
+};
+
+/** SolidTileAllowBottomSlope（cs:70211-70235）：active && (tileSolid||tileSolidTop)
+ *  && !halfBrick && !顶坡（slope1/2 拒、底坡 3/4 放行），叠加 pass 头覆写。
+ *  PlaceTile 的 186/187 锚定门（cs:49284/49300）——placePile3x2 的地面判定 */
+const solidTileAllowBottomSlope = (st: TileStore, x: number, y: number): boolean => {
+  if (!st.inBounds(x, y)) return false;
+  const i = st.idx(x, y);
+  if (!st.flags[i]) return false;
+  if (PASS_NON_SOLID.has(SHEET[st.type[i]])) return false;
+  const d = TILE_DEFS[st.type[i]];
+  if (!d || !(d.solid || d.platform)) return false;
+  if (st.half[i]) return false;
+  const sl = st.slope[i];
+  return !(sl >= 1 && sl <= 2);
 };
 
 /** PlaceSmallPile（cs:46831）1:1：size0=1×1（fx=style*18, fy=0）；size1=2×1（fx=style*36, fy=18）。
@@ -77,8 +102,10 @@ function placePile3x2(st: TileStore, x: number, y: number, type: number, style: 
     for (let l = -1; l <= 0; l++) {
       if (!st.inBounds(x + k, y + l) || st.flags[st.idx(x + k, y + l)]) return false;
     }
-    const gi = st.idx(x + k, y + 1);
-    if (!st.flags[gi] || !TILE_DEFS[st.type[gi]]?.solid) return false;
+    // ★锚定门补齐：原版走 PlaceTile → SolidTileAllowBottomSlope（cs:49284/49300 →
+    //   cs:70211）——active && (solid||platform) && !half && !顶坡。曾只查
+    //   TILE_DEFS?.solid：半砖/顶坡格上照放（3×2 悬脚），且漏 pass 头非实心覆写
+    if (!solidTileAllowBottomSlope(st, x + k, y + 1)) return false;
   }
   for (let k = 0; k < 3; k++) {
     for (let l = -1; l <= 0; l++) {

@@ -49,6 +49,8 @@ const GRANITE = TILE_BY_KEY['v_368_granite_block']!;
 const HARDSAND_TILE = TILE_BY_KEY['hardened_sand']!; // 原版 SetTile(397)
 const COIN_PILE = TILE_BY_KEY['v_332_gold_coin_pile']!;
 const LARGE_PILES = TILE_BY_KEY['v_186_decos_3x2']!;
+/** tile 187(Decos 3x2 Group 2)——剑冢真剑 style17(EnchantedSwordBiome.cs:92) */
+const DECOS_GROUP2 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
 const CAMPFIRE = TILE_BY_KEY['v_215_campfires']!;
 const EXPLOSIVES = TILE_BY_KEY['v_141_explosives']!;
 const DETONATOR = TILE_BY_KEY['v_411_detonator']!;
@@ -71,6 +73,19 @@ const DIRT = TILE_BY_KEY['dirt']!;
 const MUD = TILE_BY_KEY['mud']!;
 const SNOW_BLOCK = TILE_BY_KEY['snow']!;                   // 147
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
+// ---- 剑冢(EnchantedSwordBiome)专用 tile ----
+const GRASS = TILE_BY_KEY['grass']!;                       // 2(InnerOutline 铺草)
+const SHORT_PLANTS = TILE_BY_KEY['v_3_forest_short_plants']!;   // ActionGrass SelectRandom{3,73}
+const TALL_PLANTS = TILE_BY_KEY['v_73_forest_tall_plants']!;
+const FLOWER_VINES = TILE_BY_KEY['v_382_flower_vines']!;   // ActionVines(3,5,382)
+/** Modifiers.SkipTiles(191,192):竖井挖穿活木/活木叶(EnchantedSwordBiome.cs:90) */
+const SHAFT_SKIP = idsByVanillaSheet(191, 192);
+/** TileID.Sets.GeneralPlacementTiles(TileID.cs:311)黑名单——CreateBoolSet(true, …)
+ *  = 默认全 true、列出的 id 置 false;剑冢克隆后再剔 21/467(cs:63-64,本就在黑名单) */
+const PLACEMENT_FORBID = idsByVanillaSheet(
+  225, 41, 481, 43, 482, 44, 483, 226, 203, 112, 25, 70, 151, 21, 31, 696, 467,
+  12, 665, 639, 138, 664, 711, 712, 713, 714, 715, 716,
+);
 /** ThinIceBiome.OnlyTiles(147,161,224,0,1):雪/冰/细雪/泥/石 → 162 */
 const ICE_SRC = idsByVanillaSheet(147, 161, 224, 0, 1);
 /** ThinIceBiome.SkipTiles(21,467,226,237) */
@@ -1079,6 +1094,282 @@ function setThinIce(st: TileStore, idx: number): void {
   st.liquidType[idx] = 0;
   st.half[idx] = 0;
   st.slope[idx] = 0;
+}
+
+// ============================================================
+// 2.5 EnchantedSwordBiome(Terraria.GameContent.Biomes/EnchantedSwordBiome.cs:19-111)
+// ============================================================
+
+/** Configuration.json「Biomes.EnchantedSwordBiome」(:33-38):
+ *  ChanceOfEntrance 0.3333333(竖井 1/3)、ChanceOfRealSword 1.0。
+ *  ★ChanceOfRealSword=1.0 为 1456 默认值(1405 交叉参照一致)——`NextDouble()<=1.0`
+ *    恒真,假剑分支(tile 186 style15)默认配置下为死代码;按原版配置照抄,勿"修正" */
+const SWORD_CHANCE_ENTRANCE = 0.3333333;
+const SWORD_CHANCE_REAL = 1.0;
+
+/** 相对坐标点集(≈Terraria.WorldBuilding/ShapeData)。原版 HashSet<Point16> 枚举序
+ *  不可移植,此处 JS Set 保插入序 = 形状行主序——藤蔓/铺草两步(ACTION 消耗掷骰)
+ *  逐格结果可能分叉,掷骰总数一致,已在文件头备案 */
+class ShrineShape {
+  private readonly s = new Set<number>();
+  private static key(dx: number, dy: number): number { return (dy + 256) * 1024 + (dx + 256); }
+  add(dx: number, dy: number): void { this.s.add(ShrineShape.key(dx, dy)); }
+  has(dx: number, dy: number): boolean { return this.s.has(ShrineShape.key(dx, dy)); }
+  remove(dx: number, dy: number): void { this.s.delete(ShrineShape.key(dx, dy)); }
+  each(fn: (dx: number, dy: number) => void): void {
+    for (const k of this.s) fn((k % 1024) - 256, Math.trunc(k / 1024) - 256);
+  }
+}
+
+/** Modifiers.Blotches.Apply(Modifiers.cs:123-142):先掷 1 次 NextDouble 丢弃,再判
+ *  chance;命中四连掷 blotch 矩形 x[1-minX,0]..[0,maxX-1] × y[1-minY,0]..[0,maxY-1],
+ *  未命中退化为单格。输出绝对坐标点列 */
+function shrineBlotches(
+  rng: RNG, x: number, y: number,
+  minX: number, maxX: number, minY: number, maxY: number, chance: number,
+  out: Array<[number, number]>,
+): void {
+  rng.next();                                    // Blotches.Apply 首掷丢弃
+  out.length = 0;
+  if (rng.next() < chance) {
+    const x0 = rng.int(1 - minX, 0);             // Next(1-_minX, 1)
+    const x1 = rng.int(0, maxX - 1);             // Next(0, _maxX)
+    const y0 = rng.int(1 - minY, 0);             // Next(1-_minY, 1)
+    const y1 = rng.int(0, maxY - 1);             // Next(0, _maxY)
+    for (let i = x0; i <= x1; i++) {
+      for (let j = y0; j <= y1; j++) out.push([x + i, y + j]);
+    }
+  } else {
+    out.push([x, y]);
+  }
+}
+
+/** StructureMap.CanPlace(StructureMap.cs:22-53):区域在界内(留 1 格边距) +
+ *  padding 扩张后不撞已保护结构 + 扩张区内活性 tile 全在白名单。
+ *  无全局 StructureMap——已保护结构以本 pass 的 protectedRects 近似(文件头已备案) */
+function shrineCanPlace(st: TileStore, protectedRects: Rect[], area: Rect, padding: number): boolean {
+  if (area.x0 < 0 || area.y0 < 0 || area.x1 > st.w - 1 || area.y1 > st.h - 1) return false;
+  const r: Rect = { x0: area.x0 - padding, y0: area.y0 - padding, x1: area.x1 + padding, y1: area.y1 + padding };
+  for (const p of protectedRects) {
+    if (overlaps(r, p)) return false;
+  }
+  for (let x = r.x0; x < r.x1; x++) {
+    for (let y = r.y0; y < r.y1; y++) {
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      if (st.flags[i] && PLACEMENT_FORBID.has(st.type[i])) return false;
+    }
+  }
+  return true;
+}
+
+/** EnchantedSwordBiome.Place(cs:19-111)1:1:水潭洞穴 + 中央土丘 + 内缘草 + 花墙藤蔓 +
+ *  1/3 竖井 + 土丘剑。洞穴中心 = 种子点**下方** 20 格(cs:58)——旧实现放上方 10-20,
+ *  整体形状上下颠倒(根因) */
+function placeEnchantedSwordShrine(
+  st: TileStore, rng: RNG, protectedRects: Rect[], ox: number, oy: number,
+): boolean {
+  // ① 50×50 泥+石计数门(cs:24-30):TileScanner(0,1) 之和 < 1250 → 拒(errorWorld 625 不建模)
+  let dirtStone = 0;
+  for (let dx = 0; dx < 50; dx++) {
+    for (let dy = 0; dy < 50; dy++) {
+      const x = ox - 25 + dx, y = oy - 25 + dy;
+      if (!st.inBounds(x, y)) continue;
+      const i = st.idx(x, y);
+      if (!st.flags[i]) continue;
+      if (st.type[i] === DIRT || st.type[i] === STONE) dirtStone++;
+    }
+  }
+  if (dirtStone < 1250) return false;
+  // ② origin.Y > 55(cs:34-36)
+  const num2 = 55;
+  if (oy <= num2) return false;
+  // ③ Up(num3) 搜索(cs:38-49):IsSolid().AreaOr(1,num4).Not() = 首个
+  //   "1×num4 竖条内无实心"的行(向上数);未命中或 result.Y <= 55 → 拒
+  const num3 = oy - num2;
+  const num4 = Math.min(50, num3);
+  let resultY = -1;
+  for (let i = 0; i < num3; i++) {
+    let solid = false;
+    for (let j = 0; j < num4; j++) {
+      if (solidAt(st, ox, oy - i + j)) { solid = true; break; }
+    }
+    if (!solid) { resultY = oy - i; break; }
+  }
+  if (resultY < 0 || resultY <= num2) return false;
+  // ④ 沙列检查(cs:51-53):origin 向上 origin.Y-result.Y 行内列上有沙 53 → 拒(避开沙漠)
+  for (let i = 0; i < oy - resultY; i++) {
+    const y = oy - i;
+    if (!st.inBounds(ox, y)) continue;
+    const ii = st.idx(ox, y);
+    if (st.flags[ii] && st.type[ii] === SAND) return false;
+  }
+  resultY += 50;   // cs:55(竖井底锚下移 50)
+  // ⑤ 洞穴/土丘中心(cs:58-59):均在种子点下方
+  const pointX = ox, pointY = oy + 20;
+  const point2X = ox, point2Y = oy + 30;
+  // ⑥ num5 = 0.8 + NextDouble()*0.5(cs:65)——在 canPlace 之前掷
+  const num5 = 0.8 + rng.next() * 0.5;
+  // ⑦ structures.CanPlace ×2(cs:66-73):洞穴盒(pad 0)+ 竖井盒(pad 2)
+  const rect1: Rect = {
+    x0: pointX - Math.trunc(20 * num5), y0: pointY - 20,
+    x1: pointX - Math.trunc(20 * num5) + Math.trunc(40 * num5), y1: pointY + 20,
+  };
+  if (!shrineCanPlace(st, protectedRects, rect1, 0)) return false;
+  const rect2: Rect = { x0: ox, y0: resultY + 10, x1: ox + 1, y1: resultY + 10 + (oy - resultY - 9) };
+  if (!shrineCanPlace(st, protectedRects, rect2, 2)) return false;
+
+  const blot: Array<[number, number]> = [];
+  // ⑧ 洞穴(cs:75):Slime(20, num5, 1.0) + Blotches(2, 0.4) + ClearTile → shapeData
+  //   ClearTile(Tile.cs:153-158)= 清坡/半砖 + active(false),**不清液体与墙**
+  const cave = new ShrineShape();
+  const slimeRows: Array<[number, number]> = [];
+  for (let dy = -20; dy <= 0; dy++) {          // Shapes.Slime 上半(Shapes.cs:137-152)
+    slimeRows.push([dy, Math.trunc(Math.min(20 * num5, num5 * Math.sqrt(441 - dy * dy)))]);
+  }
+  for (let k = 1; k <= Math.trunc(20 * 0.5) - 1; k++) {   // 下半(:153-165,yScale=1)
+    const d2 = k * 2;
+    slimeRows.push([k, Math.trunc(Math.min(20 * num5, num5 * Math.sqrt(441 - d2 * d2)))]);
+  }
+  for (const [dy, half] of slimeRows) {
+    for (let dx = -half; dx <= half; dx++) {
+      shrineBlotches(rng, pointX + dx, pointY + dy, 2, 2, 2, 2, 0.4, blot);
+      for (const [px, py] of blot) {
+        if (!st.inBounds(px, py)) continue;
+        const i = st.idx(px, py);
+        st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;   // ClearTile
+        cave.add(px - pointX, py - pointY);                 // Output(shapeData)
+      }
+    }
+  }
+  // ⑨ 土丘(cs:76):Mound(14,14) + Blotches(2,1,0.8) + SetTile(0) → shapeData2
+  //   SetTile(Actions.cs:221-231)= Clear(~(Wiring|Actuator))(连墙带液全清)+ type + active
+  const mound = new ShrineShape();
+  for (let i = -14; i <= 14; i++) {
+    // Shapes.Mound(Shapes.cs:331-350):num2 = min(14, (int)(-(15/196)*(i+14)*(i-14)))
+    const col = Math.min(14, Math.trunc((0 - 15 / 196) * (i + 14) * (i - 14)));
+    for (let j = 0; j < col; j++) {
+      shrineBlotches(rng, point2X + i, point2Y - j, 2, 2, 1, 1, 0.8, blot);
+      for (const [px, py] of blot) {
+        if (!st.inBounds(px, py)) continue;
+        const i2 = st.idx(px, py);
+        st.type[i2] = DIRT; st.flags[i2] = 1;               // SetTile(0)
+        st.wall[i2] = 0; st.liquid[i2] = 0; st.liquidType[i2] = 0;
+        st.frameX[i2] = 0; st.frameY[i2] = 0; st.slope[i2] = 0; st.half[i2] = 0;
+        mound.add(px - point2X, py - point2Y);
+      }
+    }
+  }
+  // ⑩ shapeData.Subtract(shapeData2, point, point2)(cs:77)——土丘格从洞穴形状剔除
+  mound.each((dx, dy) => cave.remove(dx + (point2X - pointX), dy + (point2Y - pointY)));
+  // ⑪ InnerOutline 铺草(cs:78):8 邻域任一不在形状内 → 草(ModShapes.cs:88-117)
+  const outline: Array<[number, number]> = [];
+  cave.each((dx, dy) => {
+    const around = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
+    for (const [ax, ay] of around) {
+      if (!cave.has(dx + ax, dy + ay)) { outline.push([dx, dy]); return; }
+    }
+  });
+  for (const [dx, dy] of outline) {
+    const px = pointX + dx, py = pointY + dy;
+    if (!st.inBounds(px, py)) continue;
+    const i = st.idx(px, py);
+    st.type[i] = GRASS; st.flags[i] = 1;                    // SetTile(2)
+    st.frameX[i] = 0; st.frameY[i] = 0; st.slope[i] = 0; st.half[i] = 0;
+  }
+  // ⑫ 灌水(cs:79):RectangleMask(-40,40,0,40) + IsEmpty + SetLiquid()(默认 水/满)
+  //   ——SetLiquid(Actions.cs:int type=0, byte value=255)= 全水。旧实现以为"排水",
+  //     实为灌满水潭(Parameters 默认值坑)
+  cave.each((dx, dy) => {
+    if (dx < -40 || dx > 40 || dy < 0 || dy > 40) return;   // RectangleMask(含端点)
+    const px = pointX + dx, py = pointY + dy;
+    if (!st.inBounds(px, py)) return;
+    const i = st.idx(px, py);
+    if (st.flags[i]) return;                                // IsEmpty
+    st.liquid[i] = 255; st.liquidType[i] = LIQUID_TYPE.WATER;   // +1 编码:水=1
+  });
+  // ⑬ 花墙 68 + 藤蔓(cs:80):全形状格铺墙,其后 OnlyTiles(2)→Offset(0,1)→藤蔓
+  cave.each((dx, dy) => {
+    const px = pointX + dx, py = pointY + dy;
+    if (!st.inBounds(px, py)) return;
+    st.wall[st.idx(px, py)] = 68;                           // PlaceWall(68, Flower Wall)
+  });
+  cave.each((dx, dy) => {
+    const px = pointX + dx, py = pointY + dy;
+    if (!st.inBounds(px, py)) return;
+    const i = st.idx(px, py);
+    if (!st.flags[i] || st.type[i] !== GRASS) return;       // OnlyTiles(2)
+    const vx = px, vy = py + 1;                             // Offset(0, 1)
+    if (!st.inBounds(vx, vy)) return;
+    // ActionVines(3,5,382):Next(3,6) 长度,向下逐格铺到活性格为止
+    const len = rng.int(3, 5);
+    for (let k = 0; k < len; k++) {
+      if (!st.inBounds(vx, vy + k) || st.flags[st.idx(vx, vy + k)]) break;
+      const vi = st.idx(vx, vy + k);
+      st.type[vi] = FLOWER_VINES; st.flags[vi] = 1;
+    }
+  });
+  // ⑭ 入口竖井(cs:82-87):ChanceOfEntrance 1/3;Rectangle(1,h)+Blotches(2,0.2)+
+  //    SkipTiles(191,192)+ClearTile → Expand(1)+OnlyTiles(53)+SetTile(397)(沙硬化壳)
+  if (rng.next() <= SWORD_CHANCE_ENTRANCE) {
+    const shaft = new ShrineShape();
+    const sy0 = resultY + 10;
+    const syH = oy - resultY - 9;
+    for (let j = 0; j < syH; j++) {                          // Shapes.Rectangle(1, h)
+      shrineBlotches(rng, ox, sy0 + j, 2, 2, 2, 2, 0.2, blot);
+      for (const [px, py] of blot) {
+        if (!st.inBounds(px, py)) continue;
+        const i = st.idx(px, py);
+        if (st.flags[i] && SHAFT_SKIP.has(st.type[i])) continue;   // SkipTiles(191,192)
+        st.flags[i] = 0; st.slope[i] = 0; st.half[i] = 0;          // ClearTile
+        shaft.add(px - ox, py - sy0);
+      }
+    }
+    // Expand(1)+OnlyTiles(53)+SetTile(397):±1 邻域的沙 → 硬化沙(Modifiers.cs 各 Apply)
+    shaft.each((dx, dy) => {
+      for (let i = -1; i <= 1; i++) {
+        for (let j = -1; j <= 1; j++) {
+          const px = ox + dx + i, py = sy0 + dy + j;
+          if (!st.inBounds(px, py)) continue;
+          const i2 = st.idx(px, py);
+          if (!st.flags[i2] || st.type[i2] !== SAND) continue;     // OnlyTiles(53)
+          st.type[i2] = HARDSAND_TILE;                             // SetTile(397)
+          st.frameX[i2] = 0; st.frameY[i2] = 0;
+        }
+      }
+    });
+  }
+  // ⑮ 土丘剑(cs:89-94):ChanceOfRealSword 门(默认 1.0 恒真→187 style17;
+  //    否则 186 style15)。PlaceTile 锚 = (point2.X, point2.Y-15) 3×2 底行左锚
+  const realSword = rng.next() <= SWORD_CHANCE_REAL;
+  {
+    const swordTile = realSword ? DECOS_GROUP2 : LARGE_PILES;
+    const swordStyle = realSword ? 17 : 15;
+    const sx = point2X, sy = point2Y - 15;
+    for (let dx = 0; dx < 3; dx++) {
+      for (let dy = 0; dy < 2; dy++) {
+        if (!st.inBounds(sx + dx, sy - 1 + dy)) continue;
+        st.setTileSilent(sx + dx, sy - 1 + dy, swordTile, swordStyle * 54 + dx * 18, dy * 18);
+      }
+    }
+  }
+  // ⑯ 土丘表面草(cs:96):Offset(0,-1)→OnlyTiles(2)→Offset(0,-1)→ActionGrass
+  //    (ActionGrass.cs:14-22):目标格与上格皆空 → PlaceTile(SelectRandom{3,73})
+  mound.each((dx, dy) => {
+    const gx = point2X + dx, gy = point2Y + dy - 1;          // 第一层 Offset(0,-1)
+    if (!st.inBounds(gx, gy)) return;
+    const gi = st.idx(gx, gy);
+    if (!st.flags[gi] || st.type[gi] !== GRASS) return;      // OnlyTiles(2)
+    const px = gx, py = gy - 1;                              // 第二层 Offset(0,-1)
+    if (!st.inBounds(px, py) || !st.inBounds(px, py - 1)) return;
+    if (st.flags[st.idx(px, py)] || st.flags[st.idx(px, py - 1)]) return;
+    st.setTileSilent(px, py, rng.int(0, 1) === 0 ? SHORT_PLANTS : TALL_PLANTS, 0, 0);
+  });
+  // ⑰ structures.AddProtectedStructure(rectangle, 10)(cs:98)——pad 10 入保护图
+  protectedRects.push({
+    x0: rect1.x0 - 10, y0: rect1.y0 - 10, x1: rect1.x1 + 10, y1: rect1.y1 + 10,
+  });
+  return true;
 }
 
 // ============================================================

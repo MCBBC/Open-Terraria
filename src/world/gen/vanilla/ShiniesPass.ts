@@ -85,35 +85,52 @@ export function runGemsPass(st: TileStore, rng: RNG, gs: GenState): void {
       }
     }
   }
-  sandArch(st);
+  sandArch(st, gs);
 }
 
-/** 浮沙拱形化（cs:6815-6830，Gems pass 尾段）：悬空沙柱顶格平移到侧下方贴地——
- *  消除生成期浮沙，避免进游戏后大范围流沙塌落 */
-function sandArch(st: TileStore) {
+/** 浮沙拱形化（cs:15166-15191，Gems pass 尾段）：悬空沙柱顶格平移到侧下方贴地——
+ *  消除生成期浮沙，避免进游戏后大范围流沙塌落。
+ *  ★S1：地下沙漠按**整列**跳过——cs:15172 `l<=UD.Left||l>=UD.Right` 才处理该列；
+ *  GenVars.UndergroundDesertLocation 默认 Rectangle.Empty（GenVars.cs:138，
+ *  Left=Right=0）→ 条件恒真、全列处理，ud=null 同义。旧版用蜂窝墙 187/216/217
+ *  逐格代理，列内任一格无该墙即漏跳。
+ *  ★S3：反向扫描列域 = [6,w-5]（cs:15168-15170：num6=w-5、num7=5，`l!=5` 停），
+ *  旧版 [5,w-6] 错位 1 列（顺向 [5,w-6] 本就正确，勿动）。
+ *  ★S4：源格 cs:15181 只 active(false) 保留 type（幽灵语义），旧版清成 0 号方块。 */
+function sandArch(st: TileStore, gs: GenState) {
+  // Main.tileSand（Main.cs:7177-7180）：53/112/116/234——旧漏 116 珍珠沙（S2）
   const SANDS = new Set<number>(
-    ['sand', 'v_112_ebonsand_block', 'v_234_crimsand_block']
+    ['sand', 'v_112_ebonsand_block', 'v_116_pearlsand_block', 'v_234_crimsand_block']
       .map((k) => TILE_BY_KEY[k])
       .filter((v): v is number => v != null),
   );
+  const ud = gs.undergroundDesert;
   for (let dir = 0; dir < 2; dir++) {
     const step = dir === 0 ? 1 : -1;
-    const x0 = dir === 0 ? 5 : st.w - 6;
-    const x1 = dir === 0 ? st.w - 5 : 4;
+    const x0 = dir === 0 ? 5 : st.w - 5;
+    const x1 = dir === 0 ? st.w - 5 : 5;
     for (let x = x0; x !== x1; x += step) {
+      if (ud && x > ud.x0 && x < ud.x1) continue;   // cs:15172 列级跳过（严格不等=界列仍处理）
       for (let y = 10; y < st.h - 10; y++) {
         const i = st.idx(x, y);
-        // 原版按 UndergroundDesertLocation x 区间跳过地下沙漠列（未记录 x；用蜂窝墙 187/216/217 近似）
-        if (st.wall[i] === 187 || st.wall[i] === 216 || st.wall[i] === 217) continue;
         if (!st.flags[i] || !st.flags[st.idx(x, y + 1)]) continue;
         if (!SANDS.has(st.type[i]) || !SANDS.has(st.type[st.idx(x, y + 1)])) continue;
         const nx = x + step;
         if (st.flags[st.idx(nx, y)] || st.flags[st.idx(nx, y + 1)]) continue;
+        // cs:15178-15180：自 m+1 起下落，终止于首个 active 或出界（InWorld padding 10），
+        // n-- 后放置（旧版下界 h-1，与原版 padding 10 分叉）
         let ny = y + 1;
-        while (ny < st.h - 1 && !st.flags[st.idx(nx, ny + 1)]) ny++;
-        const sandType = st.type[i]; // 先取后清
-        st.setTileSilent(x, y, 0);
-        st.setTileSilent(nx, ny, sandType);
+        for (;;) {
+          if (!(nx >= 10 && nx < st.w - 10 && ny >= 10 && ny < st.h - 10)) break;
+          if (st.flags[st.idx(nx, ny)]) break;
+          ny++;
+        }
+        ny--;
+        const sandType = st.type[i];                // 先取
+        st.flags[i] = 0;                            // cs:15181 active(false)：保留 type/frame/坡
+        const di = st.idx(nx, ny);                  // cs:15183-15184 active(true)+type——
+        st.type[di] = sandType;                     // 字面同原版，不触碰目的格 frame
+        st.flags[di] = 1;
       }
     }
   }

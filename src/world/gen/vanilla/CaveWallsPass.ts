@@ -168,12 +168,16 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
   let remaining = num2;
   let budget = 100000;
   while (remaining > 0 && budget > 0) {
-    // RandomWorldPoint(worldSurface, 2, 190, 2)：x∈[2,w-3]、y∈[ws,h-191]
+    // RandomWorldPoint((int)GenVars.worldSurface, 2, 190, 2)（cs:16799）：x∈[2,w-3]、
+    // y∈[ws,h-191]。★CW1：下界是 **GenVars.worldSurface**（Terrain 游走终值 double，
+    // = gs.genWorldSurface），非 Main.worldSurface（= worldSurfaceHigh+25≈gs.worldSurface），
+    // 曾误用 gs.worldSurface → 选点深度带整体偏移
+    const wsGen = Math.trunc(gs.genWorldSurface);          // (int) 截断
     let px = rng.int(2, st.w - 3);
-    let py = rng.int(gs.worldSurface, st.h - 191);
+    let py = rng.int(wsGen, st.h - 191);
     while (gs.shimmerX >= 0 && Math.hypot(px - gs.shimmerX, py - gs.shimmerY) < SHIMMER_SAFETY) {
       px = rng.int(2, st.w - 3);
-      py = rng.int(gs.worldSurface, st.h - 191);
+      py = rng.int(wsGen, st.h - 191);
     }
     const ii = st.idx(px, py);
     if (!st.flags[ii]) continue;
@@ -184,7 +188,10 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
     if (isJungle) {
       wallType = 204 + rng.nextInt(4);
     } else if (t === STONE && st.wall[above] === 0) {
-      if (py < gs.rockLevel) wallType = 196 + rng.nextInt(4);       // 泥墙变体
+      // ★CW2（cs:16805 非 remix 分支）：深度分档用 **GenVars.rockLayer**
+      // （Terrain 游走终值 double = gs.genRockLayer），非 Main.rockLayer（gs.rockLevel），
+      // 曾误用 gs.rockLevel → 泥/石墙变体分界偏移；lavaLine 两版同值（gs.lavaLine）
+      if (py < gs.genRockLayer) wallType = 196 + rng.nextInt(4);    // 泥墙变体
       else if (py >= gs.lavaLine) wallType = 208 + rng.nextInt(4);  // 深层石墙
       else wallType = 212 + rng.nextInt(4);
     }

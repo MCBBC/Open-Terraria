@@ -315,7 +315,6 @@ import { runDungeonPass } from './vanilla/DungeonPass';
 import { runTemplePass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
-import { runSwordShrinePass } from './vanilla/SwordShrinePass';
 import { runBuriedChestsPass, runUnderworldChestsPass, runSurfaceChestsPass, runWaterChestsPass } from './vanilla/BuriedChestsPass';
 import { runStatuesPass } from './vanilla/StatuesPass';
 import { runJungleShrinePass, runJungleChestsPass } from './vanilla/JungleShrinePass';
@@ -719,7 +718,9 @@ function vanillaStructures({ store, rng, world }: GenCtx) {
   // WebsInSpiderCavesAndHoney(cs:20140)曾内嵌于此（提前约 40 槽）——2026-08-13
   // 按注册序(DyePlants 20126 < 本 pass < GrassPlants 20232)拆出独立槽归位（Batch D）
   runIslandHousePass(store, rng, gs, world.chests); // 浮空岛日光板房屋(Skyware 门+箱+桌椅)
-  runSwordShrinePass(store, rng, gs);          // 附魔剑圣地(竖井+水潭洞+土丘剑)
+  // 附魔剑圣地已归位到 MicroBiomes pass 内(ThinIce 与 Campsite 之间,原版 cs:21858-21908)
+  // ——SwordShrinePass 曾在此槽近似执行(管线错位+洞穴中心方向颠倒),2026-08-13 移除;
+  //   逻辑重写落在 MicroBiomesPass.placeEnchantedSwordShrine
 }
 
 // 原版 pass 37 Clean Up Dirt:表层墙清理 + 连通小块(<20)清除
@@ -1188,7 +1189,11 @@ function potPass({ store, rng, world }: GenCtx) {
         if (!foundSolid) {
           const liq = store.liquid[store.idx(x, y - 1)];
           const ltype = store.liquidType[store.idx(x, y - 1)];
-          if (t !== 0 && TILE_DEFS[t]?.solid && !(liq > 0 && ltype === 2) && !(liq > 0 && ltype === 4)) foundSolid = true;
+          // ★cs:18220 `active() && tileSolid[type]`:必须查激活位——TileStore.get 返回
+          //   裸 type,TileRunner 幽灵格(有 type 无 flags)会提前触发候选模式,
+          //   把瓦罐 pass 的首实心锚点整体上移(根因)
+          if (store.flags[store.idx(x, y)] !== 0 && TILE_DEFS[t]?.solid
+            && !(liq > 0 && ltype === 2) && !(liq > 0 && ltype === 4)) foundSolid = true;
           continue;
         }
         // cs:18216 门禁:y < Main.worldSurface(平均地表线)时必须有墙——
@@ -1471,9 +1476,10 @@ function spawnPointPass({ store, rng, world }: GenCtx) {
     const x = Math.floor(store.w / 2) + rng.int(-range, range); // Next(-num2, num2+1)
     for (let y = 0; y < store.h; y++) {
       const i = store.idx(x, y);
-      // 首个实心格（原版 cs:19683 仅 active && type!=379——379 是非实心装饰格，
-      // 实心判据天然跳过；solid 判据防树干致浮空出生，保留）
-      if (store.flags[i] && !!TILE_DEFS[store.type[i]]?.solid && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
+      // 首个活性格(原版 cs:19683 仅 `active() && type != 379`——无 solid 判据。
+      // 曾自制 TILE_DEFS?.solid 门"防树干浮空出生",与原版语义相悖:树干/平台上出生
+      // 是原版行为,出生点本身不做地形修正,删门归位)
+      if (store.flags[i] && store.type[i] !== TILE_379) { sx = x; sy = y; break; }
     }
     let bad = false;
     range++;

@@ -84,8 +84,10 @@ export function runTemplePass(
   let runLen = rng.int(1, 2);             // num8:行程阈值,每次换向后 +1
   let runStep = 0;                        // num9
   let cx = sx, cy = sy;                   // num6/num7:上一间中心
-  let overlap = -10;                      // num13
   for (let n = 0; n < roomCount; n++) {
+    // ★cs:33636 `int num19 = -10;` 声明在 for-i **体内**——每房重置;曾跨房累积,
+    //  房距越滚越宽+掷骰漂移(F2 代理附带发现)
+    let overlap = -10;                    // num13
     runStep++;
     const last = n === roomCount - 1;
     let rect: Room = { x: cx, y: cy, w: 0, h: 0 };
@@ -131,7 +133,8 @@ export function runTemplePass(
     dir = newDir as 1 | -1;
     cx = rx; cy = ry;
   }
-  if (rooms.length < 3) return;
+  // (原版无 rooms.length<3 闸——曾自制;T4 地狱截断后深种子世界可能截到 1-2 房,
+  //  该闸会把整座神庙连同祭坛一起吞掉=花后进度断链,已删。下游仅相对下标,安全)
   // ---- 全房对实心砖连线(L17240-17278):四角组合插值走,每步铺整列砖 ----
   for (let a = 0; a < rooms.length; a++) {
     for (let b = 0; b < rooms.length; b++) {

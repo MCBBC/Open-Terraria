@@ -1,41 +1,58 @@
-// 原版 WorldGen.SpreadGrass 移植(WorldGen.cs:45236)——生成期草皮传播。
-// 泥/石完全被包住(3×3 全实心)不转;岩浆邻接不转;向日葵上方不转腐化/猩红/神圣草。
+// 原版 WorldGen.SpreadGrass 移植（WorldGen.cs:75210）——生成期草皮传播。
+// 泥/石完全被包住（3×3 全实心）不转；岩浆邻格把 enclosed 拉回 true 但只断内层列循环
+// （后续列仍可再拉回 false）；CanBeClearedDuringGeneration=false 不转。
 import type { TileStore } from '../../TileStore';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { NOT_CLEARABLE } from './TileRunner';
+// 与 MushroomPass.spreadGrassOnce 共用同一洪水计数器（原版 grassSpread 是单一静态字段，
+// cs:75305-75316——限的是整场洪水总量，非单链深度）
+import { grassSpreadState } from './MushroomPass';
 
-/** 把 (x,y) 及相邻同源 tile 转 grass 类型;repeat=true 时 BFS 式向四周扩散 */
-export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true, depth = 0): void {
-  if (depth > 400) return;
-  if (!st.inBounds(x, y)) return;
+/** 把 (x,y) 及相邻同源 tile 转 grass 类型；repeat=true 时 3×3 邻格递归扩散。
+ *  ★M3（2026-08-13）：旧实现是陈旧分叉，对齐 MushroomPass.spreadGrassOnce 同款：
+ *  ① 补 !active 门（cs:75218）——本仓 inactive 格保留残留 type（幽灵语义），
+ *    只比 type 不比 active 会误转已挖除格；
+ *  ② InWorld(i,j,10) padding（cs:75218），旧版只查 inBounds；
+ *  ③ 岩浆邻格 = `flag=true; break` 只断内层（cs:75260-75264），旧版硬 return
+ *    且外层循环一并断——双重偏离；
+ *  ④ 递归上限换全局计数器 grassSpread<1000（cs:75305-75316），旧版 depth>400
+ *    是自创近似。
+ *  enclosed 判定（cs:75251）只查 active && tileSolid（无 half/slope/solidTop），
+ *  与 SolidTile 不同族，勿"顺手统一"。
+ *  cs:75223-75244 邪恶草族滩带门 / dirt==0 地表门：本入口调用方（MossPass 苔藓、
+ *  GrassWallPass/WorldGen 草皮）dirt 恒非 0、grass 恒非邪恶草族（邪恶草走
+ *  MushroomPass.spreadGrassOnce，含该门），零影响故不复制。 */
+export function spreadGrass(st: TileStore, x: number, y: number, dirt: number, grass: number, repeat = true): void {
+  // InWorld(i,j,10)（cs:75218）
+  if (x < 10 || x >= st.w - 10 || y < 10 || y >= st.h - 10) return;
   const i = st.idx(x, y);
-  if (st.type[i] !== dirt) return;
-  // 完全封闭(3×3 全实心)不转;岩浆邻接恒不转(cs L45269-45273:flag 强制 true)
+  if (!st.flags[i] || st.type[i] !== dirt) return;   // active && type==dirt（cs:75218）
+  // 3×3 窗口 clamp 到世界界（cs:75240-75247）
+  const x0 = Math.max(0, x - 1), x1 = Math.min(st.w, x + 2);
+  const y0 = Math.max(0, y - 1), y1 = Math.min(st.h, y + 2);
   let enclosed = true;
-  let lavaNear = false;
-  for (let dx = -1; dx <= 1 && !lavaNear; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      const nx = x + dx, ny = y + dy;
-      if (!st.inBounds(nx, ny)) continue;
-      const j = st.idx(nx, ny);
-      if (st.liquidType[j] === 2 && st.liquid[j] > 0) { lavaNear = true; break; }
-      if (dx === 0 && dy === 0) continue;
-      if ((!st.flags[j] || !TILE_DEFS[st.type[j]]?.solid)) enclosed = false;
+  for (let k = x0; k < x1; k++) {
+    for (let l = y0; l < y1; l++) {
+      const wi = st.idx(k, l);
+      if (!st.flags[wi] || !TILE_DEFS[st.type[wi]]?.solid) enclosed = false;
+      // ★岩浆只 break 内层（cs:75260-75264）——后续列可再把 enclosed 拉回 false
+      if (st.liquidType[wi] === 2 && st.liquid[wi] > 0) { enclosed = true; break; }
     }
   }
-  if (lavaNear) return;
   if (enclosed) return;
-  // 原版:CanBeClearedDuringGeneration 为 false 的泥(沙漠沙岩族等)不转
+  // CanBeClearedDuringGeneration=false 的泥（沙漠沙岩族等）不转（cs:75265）
   if (NOT_CLEARABLE.has(st.type[i])) return;
   st.type[i] = grass;
   if (!repeat) return;
-  for (let dx = -1; dx <= 1; dx++) {
-    for (let dy = -1; dy <= 1; dy++) {
-      if (dx === 0 && dy === 0) continue;
-      const nx = x + dx, ny = y + dy;
-      if (!st.inBounds(nx, ny)) continue;
-      const ni = st.idx(nx, ny);
-      if (st.type[ni] === dirt) spreadGrass(st, nx, ny, dirt, grass, true, depth + 1);
+  // cs:75305-75316：邻格 active && 同 dirt，grassSpread<1000 才递归
+  for (let m = x0; m < x1; m++) {
+    for (let n = y0; n < y1; n++) {
+      const ni = st.idx(m, n);
+      if (st.flags[ni] && st.type[ni] === dirt && grassSpreadState.n < 1000) {
+        grassSpreadState.n++;
+        spreadGrass(st, m, n, dirt, grass, true);
+        grassSpreadState.n--;
+      }
     }
   }
 }

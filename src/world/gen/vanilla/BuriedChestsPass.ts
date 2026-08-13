@@ -85,6 +85,22 @@ function nextHellItem(gs: GenState): number {
   return items[gs.hellChestIdx % items.length]; // 自增移到放置成功后（cs:36257-36264）
 }
 
+/** Chest.NearOtherChests（Terraria/Chest.cs:524-538）1:1：[x-25,x+25) × [y-8,y+8)
+ *  内已有 BasicChest{21,467} → true。本仓"已有箱"按 chest/dresser 键族近似
+ *  （与 MicroBiomesPass isContainer/TileID.Sets.IsAContainer 同口径，含 467/88） */
+function nearOtherChests(st: TileStore, x: number, y: number): boolean {
+  for (let i = x - 25; i < x + 25; i++) {
+    for (let j = y - 8; j < y + 8; j++) {
+      if (!st.inBounds(i, j)) continue;   // Framing.GetTileSafely 界外 = 空格
+      const k = st.idx(i, j);
+      if (!st.flags[k]) continue;
+      const key = TILE_DEFS[st.type[k]]?.key ?? '';
+      if (key.includes('chest') || key.includes('dresser')) return true;
+    }
+  }
+  return false;
+}
+
 /** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换) */
 export function nextJungleItem(gs: GenState, rng: RNG): number {
   let result = [211, 212, 213, 964][gs.jungleItemIdx % 4];
@@ -352,19 +368,8 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
  *  样式/战利品解析与 2×2 放置沿用本仓库 rollChestLoot 管线。 */
 export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,
-  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean } = {},
+  i: number, j: number, opts: { style?: number; tile?: number; loot?: number | string; flags?: ChestFlags; trySlope?: boolean; notNearOtherChests?: boolean } = {},
 ): boolean {
-  // ±2 内不得有滚石/祭坛（cs:35957-35966：InWorld(n,num6,100) && Boulders || 26 || 237）
-  for (let dx = -2; dx <= 2; dx++) {
-    for (let dy = -2; dy <= 2; dy++) {
-      const xx = i + dx, yy = j + dy;
-      if (xx < 100 || yy < 100 || xx >= st.w - 100 || yy >= st.h - 100) continue;
-      const k = st.idx(xx, yy);
-      if (!st.flags[k]) continue;
-      const t = st.type[k];
-      if (BOULDER_TILES.has(t) || t === ALTAR || t === TALTAR) return false;
-    }
-  }
   // 下落到地面（cs:35931 `for k=j; k<maxTilesY-10; k++`）
   let gy = j;
   let slopeL = -1, slopeR = -1;   // trySlope 压平的坡度（失败时回填，cs:37567-37575）
@@ -372,6 +377,19 @@ export function placeBuriedChest(
     const k = st.idx(i, gy);
     if (st.liquid[k] > 0 && st.liquidType[k] === 4) return false;              // anyShimmer → 整体失败
     if (st.flags[k] && st.type[k] === LARVA) return false;                      // 幼虫 231 → 整体失败
+    // ★±2 巨石/祭坛拒绝在扫描循环内**逐行**执行（cs:35992-36002，锚=当前行 k：
+    //   InWorld(n,num6,100) && Boulders{138,484,664,665,711-716} || 26 || 237）。
+    //   曾在进循环前以起始行 j 只查一次——起始行下方 2 格内的滚石/祭坛全部漏检
+    for (let dx = -2; dx <= 2; dx++) {
+      for (let dy = -2; dy <= 2; dy++) {
+        const xx = i + dx, yy = gy + dy;
+        if (xx < 100 || yy < 100 || xx >= st.w - 100 || yy >= st.h - 100) continue;
+        const kk = st.idx(xx, yy);
+        if (!st.flags[kk]) continue;
+        const tt = st.type[kk];
+        if (BOULDER_TILES.has(tt) || tt === ALTAR || tt === TALTAR) return false;
+      }
+    }
     if (solidTileHB(st, i, gy)) {
       // trySlope 门（cs:35951-35968）：style 17 时 ±30 盒内不得有箱/越界；
       // 压平 (i-1,gy)/(i,gy) 的顶坡供放置（失败时回填）
@@ -459,6 +477,13 @@ export function placeBuriedChest(
         : [4056, 4055, 4262, 4263][rng.int(0, 3)];
     }
   }
+
+  // ---- notNearOtherChests 通道（cs:36253 透传 → PlaceChest cs:57838-57840）：
+  // 原版 `notNearOtherChests && Chest.NearOtherChests(x-1, y-1)` → 拒。PlaceChest 收到
+  // (i-1, num7-1)（num7=落定行 gy），故 NearOtherChests 实扫锚 = (i-2, gy-2)。
+  // 本仓消费点：蜘蛛巢/神庙宝箱应传 true（HiveSpiderPass/TemplePass 两处调用点
+  // 由并行代理接线，此处先开通道；缺省 false = 与原版 notNearOtherChests:false 同义）
+  if (opts.notNearOtherChests && nearOtherChests(st, i - 2, gy - 2)) { restoreSlopes(); return false; }
 
   // 2×2 放置:顶行 frameY=0、frameX = style*36 + dx*18(PlaceChestDirect 语义)
   const topY = gy - 2;
