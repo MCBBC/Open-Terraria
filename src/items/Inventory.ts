@@ -215,21 +215,61 @@ export class Inventory {
     return [0, 1, 2].map((k) => this.armor[VANITY_ARMOR_START + k]?.id ?? this.armor[k]?.id ?? null);
   }
 
-  /** armor[20] 下标能否接收物品（ItemSlot.PickItemMovementAction :1363-1494）：
-   *  0-2/10-12 部位校验（head/body/leg slot）；3-9 功能配饰（vanity 排除）/13-19 配饰（含社交）；
-   *  染料走 dye 数组。vi_ 批次物品的部位/配饰归属查 vanilla-itemstats.json（注册期无字段） */
+  /** ItemID.Sets.DualEquipArmor（ItemID.cs:54）：功能/时装可同穿的盔甲白名单 */
+  static readonly DUAL_EQUIP_ARMOR_VIDS = new Set([205, 5004, 4955]);
+
+  /** armor[20] 下标能否接收物品（ItemSlot.PickItemMovementAction :1363-1494 +
+   *  同款唯一性 CanEquipAccessoryInSlot :1311-1327/:3238-3245 + HasSameItemInSlot :3222）：
+   *  0-2/10-12 部位校验（head/body/leg slot）+ 功能/时装段同款互斥（DualEquipArmor 例外,
+   *  LeftClick block :1251/:1260）;3-9 功能配饰（vanity 排除）/13-19 社交配饰——
+   *  段内同 type 唯一（自身槽放行 = 换回原位）+ 双翅膀互斥（CanEquipBothAccessories
+   *  :3196-3205）+ 对段（功能↔社交）同 type 互斥（:1313/:1322）。
+   *  vi_ 批次物品的部位/配饰归属查 vanilla-itemstats.json（注册期无字段） */
   armorAccepts(i: number, id: number): boolean {
     if (i < 0 || i >= ARMOR_TOTAL) return false;
     const d = ITEM_DEFS[id];
     if (!d) return false;
     const part = i % VANITY_ARMOR_START; // 0-2=部位 3-9=配饰（与 10-19 镜像同判）
     if (part <= 2) {
-      if (d.armor) return d.armor.slot === (part as ArmorSlot);
-      return armorSlotIndexOfInternal(id) === part;
+      const ok = d.armor ? d.armor.slot === (part as ArmorSlot) : armorSlotIndexOfInternal(id) === part;
+      if (!ok) return false;
+      // 功能↔时装同款互斥（HasSameItemInSlot 对段扫描;DualEquipArmor 例外 :1251/:1260）
+      const vid = d.vid ?? (d.key.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      if (!Inventory.DUAL_EQUIP_ARMOR_VIDS.has(vid)) {
+        const other = i < VANITY_ARMOR_START ? i + VANITY_ARMOR_START : i - VANITY_ARMOR_START;
+        if (this.armor[other]?.id === id) return false;
+      }
+      return true;
     }
-    if (d.accessory) return i < VANITY_ARMOR_START; // legacy 配饰（社交槽放宽）
-    if (i < VANITY_ARMOR_START) return statOfInternal(id)?.acc === 1; // 功能配饰槽：vanity 排除
-    return statOfInternal(id)?.acc !== undefined; // 社交配饰槽：功能/社交都收
+    const st = statOfInternal(id);
+    if (d.accessory) {
+      if (i >= VANITY_ARMOR_START) return false;   // legacy 配饰仅进功能段
+    } else if (i < VANITY_ARMOR_START) {
+      if (st?.acc !== 1) return false;             // 功能配饰槽：vanity 排除
+    } else if (st?.acc === undefined) {
+      return false;                                // 社交配饰槽：功能/社交都收
+    }
+    // ---- 唯一性（CanEquipAccessoryInSlot）----
+    const sameSeg = i < VANITY_ARMOR_START
+      ? [ACC_ARMOR_START, ARMOR_SLOTS] : [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS];
+    const otherSeg = i < VANITY_ARMOR_START
+      ? [VANITY_ARMOR_START + ACC_ARMOR_START, VANITY_ARMOR_START + ARMOR_SLOTS] : [ACC_ARMOR_START, ARMOR_SLOTS];
+    const isWing = st?.wing != null;
+    const clash = (lo: number, hi: number) => {
+      for (let k = lo; k < hi; k++) {
+        if (k === i) continue;                      // 冲突槽=自身槽放行（:3242 slot == collisionSlot）
+        const t = this.armor[k]?.id;
+        if (t === undefined) continue;
+        if (t === id) return true;                  // 段内同 type（:3201）
+        if (isWing && statOfInternal(t)?.wing != null) return true;  // 双翅膀（:3202）
+      }
+      return false;
+    };
+    if (clash(...sameSeg)) return false;
+    for (let k = otherSeg[0]; k < otherSeg[1]; k++) {   // 对段同 type（含自身位）:1313/:1322
+      if (this.armor[k]?.id === id) return false;
+    }
+    return true;
   }
 
   /** dye 槽能否接收（ItemSlot context 12/25/27/33：checkItem.dye > 0——染料物品白名单） */

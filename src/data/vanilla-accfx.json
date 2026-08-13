@@ -2,7 +2,8 @@
   "53": {
     "jumpOpts": [
       "Cloud"
-    ]
+    ],
+    "runSpeed": 6
   },
   "54": {
     "runSpeed": 6

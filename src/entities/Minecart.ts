@@ -222,6 +222,53 @@ export class Minecart extends Entity {
     p.onGround = this.onTrackNow;
     p.fallStartY = null;   // 车上不计摔伤（原版 mount fallStart 语义）
 
+    // ---- 矿车撞怪（Player.cs:27225-27296）：速度>4 扩盒命中敌怪 ----
+    //  盒 = 玩家盒 + 速度扩张（vx<-1 x-15 / vx>1 w+15 / |vx|>10 再 ±10 /
+    //  vy<-1 y-10 / vy>1 h+10）；敌怪 only（friendly 城镇 NPC 不伤，:27258）；
+    //  伤害 = DamageVar(25+55×速比)（SuperCart 50+100×速比 :28801-28804；
+    //  hardMode ×1.5 :28806-28808）；击退 = 10+40×速比；
+    //  暴击 = max(近/远/魔) 掷骰（:27261-27270）；immune 30t（:27287）；
+    //  击杀 → HandleSpecialEvent(9) VEHICULAR_MANSLAUGHTER（:27289-27292）
+    {
+      const spd = Math.hypot(this.vx, this.vy);
+      if (spd > 4) {
+        const ratio = spd / PLAYER_WALK_MAX;   // velocity.Length()/maxRunSpeed
+        let rx = this.x, ry = this.y, rw = p.w, rh = p.h;
+        if (this.vx < -1) rx -= 15;
+        if (this.vx > 1) rw += 15;
+        if (this.vx < -10) rx -= 10;
+        if (this.vx > 10) rw += 10;
+        if (this.vy < -1) ry -= 10;
+        if (this.vy > 1) rh += 10;
+        const dir = this.vx < 0 ? -1 : 1;
+        const kb = 10 + 40 * ratio;
+        let base = 25 + 55 * ratio;
+        if (this.superCart) base = 50 + 100 * ratio;
+        let dmg = Math.max(1, Math.round(base * (1 + (Math.random() * 30 - 15) / 100))); // DamageVar ±15%
+        if (game.world.flags?.hardMode) dmg = Math.round(dmg * 1.5);
+        const crit = Math.random() * 100
+          < Math.max(p.critChance('melee'), p.critChance('ranged'), p.critChance('magic'));
+        if (crit) dmg = Math.round(dmg * 2);
+        for (const ent of game.enemies()) {
+          const e = ent as unknown as {
+            x: number; y: number; w: number; h: number; dead: boolean;
+            iframes: number; dontTakeDamage?: boolean; vanillaId?: number;
+            hurt: (d: number, kx: number, ky: number, g: GameHooks, ap: number, c: boolean, p: number) => boolean;
+          };
+          if (e.dead || e.dontTakeDamage) continue;
+          if (!(rx < e.x + e.w && rx + rw > e.x && ry < e.y + e.h && ry + rh > e.y)) continue;
+          // 命中：pierce=0 走 hurt 自带免疫门；命中后覆写 30t（原版 immune[i]=30）
+          if (e.hurt(dmg, dir * kb, 0, game, 0, crit, 0)) {
+            e.iframes = 30;
+            if (e.dead) {
+              game.achievements?.handleSpecialEvent(9,
+                { statLifeMax: p.maxHp, statManaMax: p.maxMana });
+            }
+          }
+        }
+      }
+    }
+
     // 完全脱轨且离轨远处（误用兜底）：无轨重力自然下落由 TileCollision 缺失 → 消亡防穿地
     if (!this.onTrackNow && this.vy > 0 && !onTrack(st, this.x, this.y, this.w, this.h)
       && this.y > game.world.store.h * 16 - 64) {

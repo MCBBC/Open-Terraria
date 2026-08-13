@@ -1366,8 +1366,22 @@ export class VanillaSpawner {
         return D(144);
       }
       if (it === 3) {
-        // 海盗（L1377-1401；491 飞船为多部件飞行体暂缺，跳过其分支）：
+        // 海盗（L1377-1401）：
+        // 491 荷兰飞盗船（L1379-1382）：进度>50%（size<start/2）&& 1/20 && 场上无 491 &&
+        //   净空（spawnTileX±20 × spawnTileY-40..-10 无实心，越界即实心）→
+        //   落点 (spawnTileX*16+8, (spawnTileY-10)*16)（Bottom 锚，比地面怪高 10 格）
         // 船长(1/30,唯一)→弩手→鹦鹉→神枪手→海盗→兜底 甲板水手
+        if (this.world.invasionSize < this.world.invasionSizeStart / 2 && N(20) && !any(491)) {
+          let clear = true;
+          for (let cx0 = this.spawnTileX - 20; cx0 <= this.spawnTileX + 20 && clear; cx0++) {
+            for (let cy0 = this.spawnTileY - 40; cy0 <= this.spawnTileY - 10; cy0++) {
+              if (cx0 < 0 || cx0 >= st.w || cy0 < 0 || cy0 >= st.h - 40 || st.isSolid(cx0, cy0)) {
+                clear = false; break;
+              }
+            }
+          }
+          if (clear) return this.spawnNPC(x, (this.spawnTileY - 10) * TILE, 491, rng);
+        }
         if (N(30) && !any(216)) return D(216);
         if (N(11)) return D(215);
         if (N(9)) return D(252);

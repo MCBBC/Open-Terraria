@@ -94,6 +94,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function enterGame(g: Game) {
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
+    (window as unknown as { __swUI: UI }).__swUI = ui; // 探针/控制台直调(成就弹窗预览等)
     // 移动端：虚拟控件层（触屏设备启用；桌面零渲染零影响）——在世界触摸的
     // 用户手势内尝试全屏+横屏锁定（ⓞ 进世界点击即手势；失败静默，⛶ 按钮兜底）
     if (isTouchDevice()) {
@@ -254,6 +255,19 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   /** 旧档无 header.difficulty（本次修复前创建的专家/大师世界）→ 以槽位
    *  WorldMeta.difficulty 回填 world.difficulty；新档以 header 为权威跳过 */
   let difficultyFallback: number | null = null;
+  /** 原版 loadWorld 进度文案(WorldFile.cs):tiles=gen[51] "正在加载世界数据: X%"
+   *  按列(:2514-2518);settle=gen[27] "正在安置液体 X%" 收敛比例 50-100%(:762);
+   *  其余阶段保持自定义 LoadingSave */
+  function loadProgressLabel(phase: string, p: number): string {
+    if (phase === 'tiles') {
+      return Lang.text('LegacyWorldGen.51') + ' ' + Math.min(100, Math.floor(p * 100) + 1) + '%';
+    }
+    if (phase === 'settle') {
+      return Lang.text('LegacyWorldGen.27') + ' ' + Math.min(100, Math.floor(50 + p * 50)) + '%';
+    }
+    return Lang.text('Mods.SandboxWorld.Progress.LoadingSave');
+  }
+
   function applyDifficultyFallback(world: import('./world/World').World, save?: { header?: { difficulty?: number } }) {
     if (difficultyFallback == null || save?.header?.difficulty !== undefined) return;
     world.difficulty = difficultyFallback;
@@ -270,7 +284,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (await client.probe()) {
         try {
           const { world, player, save } = await client.loadSave({ key }, {
-            onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
+            onProgress: (phase, p) => ui.showProgress(loadProgressLabel(phase, p), p),
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
@@ -301,7 +315,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       if (await client.probe()) {
         try {
           const { world, player, save } = await client.loadSave({ json: text }, {
-            onProgress: (phase, p) => ui.showProgress(phase === 'settle' ? Lang.text('Mods.SandboxWorld.Progress.SettleLiquids') : Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), p),
+            onProgress: (phase, p) => ui.showProgress(loadProgressLabel(phase, p), p),
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);

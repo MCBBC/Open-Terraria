@@ -148,6 +148,9 @@ const MISC = [
   'Extra_259.png',
   // 派对帽总表（Main.cs:26822 Extra[72]：20 列 × 40×36；色格 0 蓝/16 粉/17 青/18 紫/19 白）
   'Extra_72.png',
+  // 荷兰飞盗船附加件（Main.cs:24272-24305）：40 旗 56×176(4f)/41 桨 60×704(8f)/
+  // 42-45 帆1..4（72×640/48×360/52×448/142×608，各 4 帧）
+  'Extra_40.png', 'Extra_41.png', 'Extra_42.png', 'Extra_43.png', 'Extra_44.png', 'Extra_45.png',
   // 金币旋转帧（CoinSlot.DrawItemCoin：Coin_N 8 帧竖条，背包金币跳字动画）
   'Coin_0.png', 'Coin_1.png', 'Coin_2.png', 'Coin_3.png',
   // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）

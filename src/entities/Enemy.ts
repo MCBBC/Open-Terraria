@@ -1447,17 +1447,18 @@ export class Enemy extends Entity {
         this.ai2 += 1;
         if (this.ai2 === 0) this.ai2 = num22;
       }
+      this.lightRGB = [229, 191, 26];            // :56816/:56820 蓄力点光 (0.9,0.75,0.1)
       const rem = this.ai2 + num23 + num25;      // 起手辉光段计时（:56798 num26）
       if (rem === 1) game.playSfxFile?.('Item_17', 1, this.cx, this.cy); // SoundID 4-17(充能)
-      if (rem < num25 && rem > 0) {
-        // 充能尘（:56801-56813 尘 228 头顶环）+ 头顶光照
+      if (rem < num25) {
+        // 充能尘（:56801-56813 尘 228 头顶环;num26<num25 含首 tick 0）
         const hx = this.cx + this.facing * 6, hy = this.y + 6;
         game.spawnParticles(hx, hy, '#E8A040', 2, 1.6);
       }
       if (this.ai2 >= -num23) {
         // 发石化窗（:56835-56888）：尘 + 直击判定
         const n29 = this.ai2 + num23;
-        if (n29 < 180 && n29 > 0 && (Math.random() < 1 / 3 || this.ai2 % 3 === 0)) {
+        if (n29 < 180 && (Math.random() < 1 / 3 || this.ai2 % 3 === 0)) { // :56844 num29<180 含 0
           const hx = this.cx + this.facing * 10, hy = this.y + 10;
           game.spawnParticles(hx, hy, '#E8A040', 1, 2.4);
         }
@@ -4853,6 +4854,7 @@ export class Enemy extends Entity {
 
   /** Caster 族单发弹幕（:21139-21240 volley）：蓄力 30t 倒数至 25/10 时发射 + Item8（172 无声） */
   private fireCasterVolley(game: GameHooks, player: Player) {
+      const vid = this.vanillaId ?? -1;
       // 弹跳球系法师（NPC.cs:21136/:21199-21206）：火妖 24→25 焰球 / 哥布林术士
       // 29→30 混沌球 / 水球术士 32→33 水球 / 黑暗法师 45→665 混沌球(Tim 变体)——
       // 原版每轮 volley 只 NewNPC 一球（AI_009 自带出膛定速），其余法师走 Dart 三连
@@ -4887,6 +4889,48 @@ export class Enemy extends Entity {
         const dart = new Dart(this.cx, this.y, (dx / d) * spd, (dy / d) * spd, dmg, proj);
         dart.hostile = true; // 史后三法师直构弹——敌怪弹（v5 bit7）
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
+      } else if (vid === 533) {
+        // 沙漠精灵（:21104-21135）：落点采样=玩家 ±6 格（排除玩家/自身 6×6 邻域 + 非激活格
+        //  + 非岩浆 + ±2 无实心），50 次，>2000px 放行 → 在落点原位放追踪弹 596（零初速）
+        const st = game.world.store;
+        const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
+        const mtx = Math.floor(this.cx / TILE), mty = Math.floor(this.cy / TILE);
+        const far = Math.abs(this.cx - player.cx) + Math.abs(this.cy - player.cy) > 2000; // :21100
+        for (let att = 0; att < 50 && !far; att++) {
+          const sx = ptx + Math.floor(Math.random() * 13) - 6;
+          const sy = pty + Math.floor(Math.random() * 13) - 6;
+          if (Math.abs(sy - pty) <= 6 && Math.abs(sx - ptx) <= 6) continue;   // 玩家邻域排
+          if (Math.abs(sy - mty) <= 6 && Math.abs(sx - mtx) <= 6) continue;   // 自身邻域排
+          if (!st.inBounds(sx, sy) || st.get(sx, sy) !== 0) continue;
+          if (st.liquid[st.idx(sx, sy)] > 0 && st.liquidType[st.idx(sx, sy)] === 2) continue;
+          let ok = true;
+          for (let dx2 = -2; dx2 <= 2 && ok; dx2++) {
+            for (let dy2 = -2; dy2 <= 2; dy2++) {
+              if (st.inBounds(sx + dx2, sy + dy2) && st.isSolid(sx + dx2, sy + dy2)) { ok = false; break; }
+            }
+          }
+          if (!ok) continue;
+          const curse = new Dart(sx * TILE + 8, sy * TILE + 8, 0, 0, this.baseDamage, 596);
+          curse.hostile = true;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(curse, 'projectiles');
+          break;
+        }
+        if (far) {
+          const curse = new Dart(this.cx, this.cy, 0, 0, this.baseDamage, 596);
+          curse.hostile = true;
+          (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(curse, 'projectiles');
+        }
+      } else if (vid === 172) {
+        // 符文法师（:21228-21240）：单发符文爆弹 129——速 10、伤 40、瞄准 ±10 抖动、
+        //  timeLeft 300；发射音 21196 例外门已在外层跳过（172 无声）
+        let dx = player.cx - this.cx + (Math.random() * 20 - 10);
+        let dy = player.cy - this.cy + (Math.random() * 20 - 10);
+        const d = Math.hypot(dx, dy) || 1;
+        dx = (dx / d) * 10; dy = (dy / d) * 10;
+        const dmg172 = getAttackDamageForProjectiles(40, 32, this.difficulty);
+        const blast = new Dart(this.cx, this.cy, dx, dy, dmg172, 129);
+        blast.hostile = true;
+        (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(blast, 'projectiles');
       } else {
         const dx = player.cx - this.cx, dy = player.cy - this.cy;
         const d = Math.hypot(dx, dy) || 1;

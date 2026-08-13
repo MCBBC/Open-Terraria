@@ -67,6 +67,8 @@ export class Bobber extends Entity {
   get biteT(): number { return this.ai1 < 0 ? Math.ceil(-this.ai1) : 0; }
   /** 咬钩时的渔获（声呐药水预掷展示） */
   catchId = 0;
+  /** 松露虫咬钩标记（localAI[1]=1 语义，Projectile.cs:19219）——收竿召 Duke */
+  truffleBite = false;
   /** 血月咬钩敌怪（FishingCheck_RollEnemySpawns）——收竿由 Game 侧生成 */
   catchEnemy = 0;
   /** 渔获原版 id → 钓起时落物用 */
@@ -167,6 +169,7 @@ export class Bobber extends Entity {
         this.lAI1 = 0;       // :50931（渔获作废）
         this.catchId = 0;
         this.catchEnemy = 0;
+        this.truffleBite = false;
       }
       return;
     }
@@ -194,6 +197,17 @@ export class Bobber extends Entity {
     const tx = Math.floor(this.cx / TILE), ty = Math.floor(this.cy / TILE);
     const pond = getFishingPondState(game, tx, ty);   // GetFishingPondState :20170-20201
     if (pond.waterTilesCount < 75) return;            // :19206-19210 NotEnoughWater
+    // 松露虫（:19212-19224）：永不出鱼；两侧海洋带（X<380||>w-380，浮标格）且池液>1000
+    // 且场上无 Duke → 开咬钩窗（-280..-160，localAI[1]=1 "有咬"）
+    if (this.baitVid === 2673) {
+      if ((tx < 380 || tx > st.w - 380) && pond.waterTilesCount > 1000
+        && !(game.enemies() as Array<{ vanillaId?: number }>)
+          .some((e) => !((e as { dead?: boolean }).dead) && e.vanillaId === 370)) {
+        this.ai1 = nextInt(-180, -60) - 100;
+        this.truffleBite = true;
+      }
+      return;   // :19223 松露虫钓鱼恒不出鱼
+    }
     let level = this.fishingPower(p, game);           // :19225 FinalFishingLevel
     if (level === 0) return;                          // :19226-19229
     const canFishInLava = CAN_FISH_IN_LAVA_POLES.has(this.poleVid)   // :19230 三源
@@ -319,11 +333,18 @@ export class Bobber extends Entity {
 
   /** 收竿（窗口内）：返回渔获原版 id（0=没咬/没饵/血月敌怪——后者查 catchEnemy）；消耗鱼饵 */
   reel(game: GameHooks): number {
-    if (this.biteT <= 0 || (!this.catchId && !this.catchEnemy)) return 0;
+    if (this.biteT <= 0 || (!this.catchId && !this.catchEnemy && !this.truffleBite)) return 0;
     const p = this.ownerRef();
     if (!p) return 0;
     // 声呐药水（buff 122）：咬钩时已掷——由 Game 侧显示（本实体的 catchId 预存）
     this.consumeBait(p);
+    if (this.truffleBite) {
+      // 松露虫咬钩（PullBobber :51563-51576）：必耗饵 + 召 Duke——-1 哨兵交 Game 侧
+      this.truffleBite = false;
+      this.dead = true;
+      void game;
+      return -1;
+    }
     const caught = this.catchId;
     this.catchId = 0;
     this.dead = true;
@@ -335,6 +356,10 @@ export class Bobber extends Entity {
   private consumeBait(p: Player): boolean {
     const slot = p.inv.slots[this.baitSlot];
     if (!slot) return false;
+    if (this.baitVid === 2673) {           // :51671-51674 松露虫必耗
+      p.inv.removeAt(this.baitSlot, 1);
+      return true;
+    }
     const chance = 1 / (1 + this.baitPower / 6 + (this.tackleBox(p) ? 1 : 0));
     if (Math.random() < chance) p.inv.removeAt(this.baitSlot, 1);
     return true;

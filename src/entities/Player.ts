@@ -4,7 +4,7 @@ import type { GameHooks } from './types';
 import {
   GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX,
   PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS,
-  PLAYER_IFRAME_TICKS, TILE,
+  PLAYER_IFRAME_TICKS, TILE, RUN_ACCELERATION, RUN_SLOWDOWN,
 } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Inventory, ACC_ARMOR_START } from '../items/Inventory';
@@ -58,7 +58,6 @@ export class Player extends Entity {
   /** 仙馔蜜酒 5342(:44796)→ pickSpeed/tileSpeed/wallSpeed ±0.05(:12455) */
   usedAmbrosia = false;
   /** 混乱之杖冷却(ChaosState debuff 88 近似——buff 本体未实装,:44865 门) */
-  chaosStateT = 0;
   /** 魔力蓄能（Player.manaRegenCount :1824，UpdateManaRegen :19274 累积 ≥120 +1 魔） */
   manaRegenCount = 0;
   /** 用魔惩罚期（Player.manaRegenDelay :1826，float）：>0 时每帧产额 0（:19270-19271） */
@@ -145,6 +144,7 @@ export class Player extends Entity {
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
+  stepDownGate = 'gravity' as const;  // StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）
   /** 高尔夫累计分（Player.cs:1792 AccumulateGolfingScore——Golfer 商店门槛/月相画门） */
   golferScoreAccumulated = 0;
   /** 鞭命中授予的玩家 buff（WhipTagEffect.PlayerBuffId → 剩余 tick；
@@ -421,9 +421,11 @@ export class Player extends Entity {
       }
     }
     // 恐慌项链受击加速窗口（PanicSpeedBoost :25034：panicTime 300 tick 内 moveSpeed +0.5）
-    if (this.panicTime > 0) move += 0.5;
-    // runSpeed：accRunSpeed=6 vs 基础 maxRunSpeed=3 → 移速倍率贡献（取最高不叠）
-    const moveMult = 1 + move + (runSpeed > 0 ? runSpeed / 3 - 1 : 0);
+    if (this.panicTime > 0) move += 1.0;   // PanicSpeedBoost（:25034 满档 +1.0=+100%;旧 +0.5 是 1.4.0 旧值,2026-08-13 修）
+    // moveMult 只含 moveSpeed 加成（原版 accRunSpeed 不随 moveSpeed 缩放——靴族
+    // 冲刺走【慢爬坡段】到 6/6.75,旧折算 runSpeed/3-1 把 sprint 当移速乘区致
+    // Flurry 装备即 +1.0 移速上限,2026-08-13 拆除;accRunSpeed 单独经 equipStats）
+    const moveMult = 1 + move;
     // 多段跳按原版优先序排列（JumpMovement 消费序）
     const JUMP_ORDER = ['Cloud', 'Sail', 'Sandstorm', 'Blizzard', 'Fart', 'Tsunami', 'Unicorn', 'Basilisk', 'WallOfFleshGoat', 'Santank'];
     const jumpOpts = JUMP_ORDER.filter((j) => jumpSet.has(j));
@@ -688,7 +690,6 @@ export class Player extends Entity {
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
-    if (this.chaosStateT > 0) this.chaosStateT--;
 
     // 调试无敌（F2）：每 tick 血蓝回满——兜住 DoT/溺水/摔落等直改 hp 的路径
     // （战斗伤害已由 damage() 早退拦截）；同时保证不会走到下方 hp<=0 死亡结算
@@ -1097,29 +1098,52 @@ export class Player extends Entity {
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
     if (this.dashDelay >= 0) {
-      let accel = PLAYER_WALK_ACCEL;
+      // ---- 原版两段加速模型（Player.cs:19559-19800 HorizontalMovement Run 段）----
+      // maxRunSpeed=3×moveSpeed（常规上限）;accRunSpeed=6（靴族 6/6.75,冲刺爬坡上限）
+      // 全速段（:19559:|vx|<maxRun）runAcceleration=0.08 全力;慢爬坡段（:19675:
+      // maxRun≤|vx|<accRun）仅 ×0.2 且需 onGround(vy==0)或翼飞行——空中爬坡无效;
+      // 翼飞行再 +0.2 一份（:19690）。无输入减速（:19771）:地面 runSlowdown=0.2
+      // 空中 ×0.5,加法钳 0（旧乘法摩擦曲线高速段衰减过快）。慢速/燃烧门（:19675/
+      // :19705 !slow&&!burned）。Chilled（:19485）压 accRun=maxRun 取消爬坡。
+      const slowDebuff = this.buffs.has(BuffType.Slow) || this.buffs.has(BuffType.Burning);
+      const chilled = this.buffs.has(BuffType.Chilled);
+      let maxRun = PLAYER_WALK_MAX * speedMult * (this.inWater ? 0.55 : 1);
+      let accRun = this.equipStats.accRunSpeed || 6;   // accRunSpeed 定值不随 moveSpeed(:25695 只乘 maxRunSpeed——旧误乘 speedMult,2026-08-13 修)
+      if (chilled) accRun = maxRun;                       // :19485
       if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
         const ws = wingStatOf(this.equipStats.wing.logic);
         const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
-        accel *= hoverDownMove && ws.hover ? ws.hoverAccelMult : ws.accelMult;
+        maxRun = Math.max(maxRun, hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed);
+        accRun = maxRun;                                  // 翼空中横移上限覆盖(原 WingAirLogicTweaks)
       }
+      // 暗影套 runAcceleration×1.75/maxRun×1.15（:26195-26201）待套装引擎批接,登记
+      let runSlow = RUN_SLOWDOWN;
+      // 沙丘行者靴:四参数全 ×1.75（Player.cs:26226-26232——maxRun/accRun/acc/slowdown）
+      if (duneBoost) { maxRun *= 1.75; accRun *= 1.75; }
+      const runAcc = RUN_ACCELERATION * (this.inWater ? 0.6 : 1) * (duneBoost ? 1.75 : 1);
+      const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0;
       if (ix !== 0) {
-        this.vx += ix * accel * (this.inWater ? 0.6 : 1) * speedMult;
         this.facing = ix;
+        const canRamp = this.vy === 0 || wingAir;          // 爬坡门（地面或翼飞行）
+        const toward = ix * Math.max(maxRun, wingAir ? accRun : 0);
+        // 全速段（|vx| 未到 maxRun → 加速;反向先 runSlowdown 制动 :19563-19568）
+        if (ix > 0 ? this.vx < maxRun : this.vx > -maxRun) {
+          if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
+          this.vx += ix * runAcc;
+        } else if (!slowDebuff && canRamp && (ix > 0 ? this.vx < accRun : this.vx > -accRun)) {
+          // 慢爬坡段（:19675-19690:×0.2,翼飞行双份）
+          if (ix > 0 ? this.vx < -runSlow : this.vx > runSlow) this.vx += ix * runSlow;
+          this.vx += ix * runAcc * 0.2;
+          if (wingAir) this.vx += ix * runAcc * 0.2;
+        }
+        this.vx = ix > 0 ? Math.min(this.vx, Math.max(accRun, toward)) : Math.max(this.vx, -Math.max(accRun, toward));
       } else {
-        this.vx *= this.onGround ? PLAYER_FRICTION ** (duneBoost ? 1.75 : 1) : PLAYER_AIR_FRICTION;
-        if (Math.abs(this.vx) < 0.05) this.vx = 0;
+        // 无输入减速（:19771-19800:地面 0.2 / 空中 0.1 加法钳 0）
+        const fr = this.onGround ? runSlow : runSlow * 0.5;
+        if (this.vx > fr) this.vx -= fr;
+        else if (this.vx < -fr) this.vx += fr;
+        else this.vx = 0;
       }
-      let maxSpd = PLAYER_WALK_MAX * (this.inWater ? 0.55 : 1) * speedMult;
-      // 翅膀空中横移上限覆盖（WingAirLogicTweaks cs:28843-48：AccRunSpeedOverride；
-      // hover 下落态改用 DownHoverSpeedOverride 档）
-      if (!this.onGround && this.equipStats.wing && this.vy !== 0) {
-        const ws = wingStatOf(this.equipStats.wing.logic);
-        const hoverDownMove = this.inputDown && this.inputJump && ws.hover && this.wingTime > 0;
-        const spd = hoverDownMove && ws.hoverSpeed > 0 ? ws.hoverSpeed : ws.accSpeed;
-        if (spd > maxSpd) maxSpd = spd;
-      }
-      this.vx = Math.max(-maxSpd, Math.min(maxSpd, this.vx));
     } else if (ix !== 0) {
       this.facing = ix; // 滑行中朝向仍随输入（ChangeDir 独立于 Run）
     }
@@ -1682,6 +1706,12 @@ export class Player extends Entity {
         this.damage(dmg, this.cx, this.y - 10);
         game.playSfx('hurt');
         game.addDamageNumber(this.cx, this.y, dmg, false, '#FF5050');
+        // 成就：摔落幸存（Player.cs:25085-25090：!dead && hp≤maxHp/10 → event 8
+        // LUCKY_BREAK；stoned 摔伤分支 :25071-25076 同门——stoned 态本仓未实装）
+        if (!this.dead && this.hp > 0 && this.hp <= this.maxHp / 10) {
+          game.achievements?.handleSpecialEvent(8,
+            { statLifeMax: this.maxHp, statManaMax: this.maxMana });
+        }
       }
     }
 

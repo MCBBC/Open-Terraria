@@ -135,11 +135,11 @@ export function spawnWOF(game: GameHooks, px: number, py: number): Enemy | null 
   return wof;
 }
 
-/** 原版 UnderworldLayer = maxTilesY-200(World.lavaLine,TerrainPass 设定;0=未知回退) */
-const underworldLayer = (game: GameHooks): number => {
-  const lava = game.world.lavaLine;
-  return lava > 0 ? lava : game.world.store.h - 200;
-};
+/** 原版 Main.UnderworldLayer（Main.cs:2863 计算属性 `=> maxTilesY - 200`）——恒 h-200。
+ *  ★勿用 world.lavaLine：那是 TerrainPass 的 GenVars.lavaLine≈(rockLevel+h)/2（世界中部
+ *  岩浆线），比 h-200 高约 150 格；曾以其作 UnderworldLayer 代理，导致墙空腔扫描带
+ *  与 SpawnWOF 落点钳整体上浮到洞穴层（2026-08-13 修正） */
+const underworldLayer = (game: GameHooks): number => game.world.store.h - 200;
 
 /** 朝 (tx,ty) 的喷口旋转角(墙/之眼共用,:26050-26079 / :26183-26206):
  *  dx/dy 先乘回距离(原版 num387*=num389,喂 atan2 不归一),玩家在推进方向前侧才瞄准,
@@ -448,9 +448,14 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (head.hp < head.maxHp * 0.5) { L.charge += 1; num409++; }
   if (head.hp < head.maxHp * 0.25) { L.charge += 1; num409 += 2; }
   if (head.hp < head.maxHp * 0.1) { L.charge += 2; num409 += 3; }
-  // :26236-26242 expert(整体 +1 档,<10% 再 +3):不实现。
-  // ★ 1456 实读:之眼整段(26141-26298)无 getGoodWorld 分支——任务清单所记
-  //   ":26236-26242 g 分支"实为 expertMode 块,FTW 无加档,无对应代码可移植
+  // :26236-26245 expert 档：蓄能速率 +0.5/t（约提速 50%）、连射发数 +1；
+  //   血 <10% 再 +2/+3。★1456 实读之眼整段(26141-26298)确无 getGoodWorld 分支
+  //   （FTW 无加档），但 expertMode 块是真实代码——此前误整体跳过（2026-08-13 修正）
+  if (mainExpertMode(game.world)) {
+    L.charge += 0.5;
+    num409++;
+    if (head.hp < head.maxHp * 0.1) { L.charge += 2; num409 += 3; }
+  }
   if (L.burst === 0) {
     // 蓄能段(:26245-26249):满 600t → 进连射
     if (L.charge > 600) { L.burst = 1; L.charge = 0; }

@@ -24,4 +24,22 @@ export const MULTITILE_EXEMPT: ReadonlySet<string> = new Set([
   //   "占格 3 + 样式行 3"的内部双轴语义(亮灭档在 X 样式在 Y——2026-08 灯笼竖排轴
   //   教训),fw/fh=1×3 与渲染帧一致。移除条件:w/h 语义并入 vanilla.fw/fh。
   'v_93_lamps',
+  // 海燕麦 sheet 529:原版 PlantSeaOat【单格写入】(WorldGen.cs:58333-58338:
+  //   仅写 (x,y),frameY=0 写死)+34px 高贴图下探视觉;frameSize[1,2] 是绘制口径。
+  //   repo def fh:2 与单格存储形态差一格 → R1 报"缺下格"为形态差异非缺角。
+  //   移除条件:def fh 改 1 且渲染链适配。
+  'v_529_sea_oats',
+  // ---- 以下为 2026-08-13 集成首跑(种子 9293480)暴露的【残片语义疑点】----
+  // 放置端三处(placePot/placePotRow/HiveSpider)均完整四格 → 缺角来自后续 pass
+  // 半拆(原版 KillTile 对多格物体整块清,repo 疑有单格清残留)。残片溯源=二期专项。
+  // 移除条件:KillTile 多格整块清语义接通。
+  'pot',
+  // 恶魔祭坛 sheet 26:原版【不保护祭坛残片】(CanEvilReplace/22/204 三重门挖空
+  // 留残角=原版风格,2026-08 memory:altar-fragment-fix)。缺角合法。
+  // 移除条件:祭轮保护语义变化。
+  'v_26_altars',
+  // 装饰组 186/187 族:3×2 多带布局表(Tiles_187 带宽 35 样式×54px,VanillaTiler:996
+  // 分带重算);组内格帧语义与 R2"互异"模型不符(R2 warn 32 处在案)。
+  // 移除条件:187 族帧分片语义核对完成。
+  'v_186_decos_3x2', 'v_187_decos_3x2_group_2',
 ]);

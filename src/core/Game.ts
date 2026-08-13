@@ -87,6 +87,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { itemUseSoundWav } from '../data/itemUseSound';
 import { applyFrostBurn } from '../entities/projStatus';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath, FEMALE_VARIANTS } from '../player/Appearance';
@@ -120,6 +121,7 @@ import { lastGenState } from '../world/gen/WorldGen';
 import { spawnEmote, tickEmotes } from '../render/EmoteBubble';
 import { createDeathText } from '../i18n/RandomText';
 import { Critter } from '../entities/Critter';
+import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
 /** 血月腐化变换表（AttemptToConvertNPCToEvil :93122-93149：[腐化, 猩红]）——
  *  兔 46/企鹅 303/海鸥 337/蚱蜢? 443/鼠 540 → 47/464；金鱼族 55/230/592/593 → 57/465；
@@ -129,7 +131,7 @@ const BLOOD_MOON_EVIL = new Map<number, readonly [number, number]>([
   [55, [57, 465]], [230, [57, 465]], [592, [57, 465]], [593, [57, 465]],
   [148, [168, 470]], [149, [168, 470]],
 ]);
-import { CRITTER_DEFS } from '../data/critters';
+import { CRITTER_DEFS, CRITTER_BY_KEY, CRITTER_CATCH_BY_NPC, CRITTER_RELEASE_BY_ITEM, CRITTER_KEY_BY_NPC } from '../data/critters';
 import { EntityManager, Entity } from '../entities/Entity';
 import { Camera } from '../render/Camera';
 import { countsAsACritter, isNpcValidForBestiaryKillCredit, bestiaryEntries, bestiaryCreditId } from '../data/Bestiary';
@@ -1605,10 +1607,14 @@ export class Game implements GameHooks {
     this.freshlyCreated = false;
     this.world = world;
     if (!opts?.settled) {
-      onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), 0.5);
+      // 读档沉降文案=原版 gen[27] 收敛比例 50-100%(WorldFile.cs:762;主线程 fallback
+      // 路径与 worker 路径同款——mainFlow.loadProgressLabel)
+      const loadSettleLabel = (p: number) =>
+        Lang.text('LegacyWorldGen.27') + ' ' + Math.min(100, Math.floor(50 + p * 50)) + '%';
+      onProgress?.(loadSettleLabel(0), 0.5);
       // 读档模式：原版 WorldFile 单轮语义（存档水体已静止，QuickWater+WaterCheck 后
       // 活水极少，单轮快速收敛；残留交给运行时——不再跑生成期的 10 轮全沉降）
-      await this.settleLiquids((p) => onProgress?.(Lang.text('Mods.SandboxWorld.Progress.SettleLiquids'), p * 0.8), 'load');
+      await this.settleLiquids((p) => onProgress?.(loadSettleLabel(p), p * 0.8), 'load');
     }
     await this.preloadSceneAssets((label, p) => onProgress?.(label, 0.8 + p * 0.2));
     this.afterWorldLoad();
@@ -4432,6 +4438,25 @@ export class Game implements GameHooks {
       && cw?.kind !== 'flail' && cw?.kind !== 'boomerang'
       && !(cw?.kind === 'spear' && projectileData(cw.shoot)?.aiStyle === 19)) {
       // aim 朝鼠标角——useStyle 13(短剑突刺持位)/5 静持需方向化(Renderer case 13)
+      // 捕获小动物释放（ItemCheck_ReleaseCritter :43377-43396 + NPC.ReleaseNPC
+      //  :80900-80964）：鼠标世界格非实心 → 原地放出 + 消耗 1（consumable）
+      {
+        const relNpc = CRITTER_RELEASE_BY_ITEM[viIdFromKey(heldDef.key) ?? -1];
+        if (relNpc) {
+          const relKey = CRITTER_KEY_BY_NPC[relNpc];
+          const mtx = Math.floor((this.camera.x + (inp.mouseX - vw2 / 2)) / TILE);
+          const mty = Math.floor((this.camera.y + (inp.mouseY - vh2 / 2)) / TILE);
+          const st = this.world.store;
+          if (relKey && st.inBounds(mtx, mty) && !st.isSolid(mtx, mty)) {
+            this.entities.add(new Critter(relKey, mtx * TILE + 8 - 10, mty * TILE + 16 - 10), 'critters');
+            this.player.inv.removeAt(this.player.inv.selected, 1);
+            this.cb.onInventoryChanged();
+            this.player.useTime = 15;                 // useAnimation 15（:47616）
+            return;
+          }
+          return;                                     // 目标格实心：不消耗不放出
+        }
+      }
       this.useSwing(heldDef, Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2));
       // 召唤道具（原版左键使用）
       if (viIdFromKey(heldDef.key) === 43) {
@@ -4583,38 +4608,30 @@ export class Game implements GameHooks {
           consume(); p.useTime = 30; this.sfx.play('drink');
           break;
         }
-        case 1326: // 混乱之杖(:44861-44900):传送鼠标点+混乱 debuff+扣血
-        case 5335: { // 和谐之杖(:44902+):传送鼠标点无代价
-          // ChaosState(debuff 88) 400t 本地冷却近似。原版语义（:44865-44913）:
-          // 首次传送扣 max/6(:44889);混沌期内**允许再传送**但扣 max/7 且可致死
-          // （:44904-44913 statLife-=max/7;<=0 → KillMe(ByOther(13) 或性别 14/15)）
-          // ——此前实现为"混沌期拒绝传送",2026-08-13 按 /goal 对齐(补传送死链)
-          if (pvid === 1326) {
-            const inChaos = p.chaosStateT > 0;
-            p.chaosStateT = 400;
-            this.teleportToMouse();
-            if (inChaos) {
-              const cost = Math.floor(p.maxHp / 7);
-              p.lastDamageCause = { kind: 'teleportFail' };
-              p.hp -= cost; // 无下限——可致死（原版 KillMe 语义）
-              this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
-              if (p.hp <= 0) {
-                // :44906-44908 Next(2)==0 → 13（Teleport_1）;否则 Male?14:15（Teleport_2）
-                if (Math.random() < 0.5) {
-                  const fem = FEMALE_VARIANTS.includes(p.appearance?.skinVariant ?? 0);
-                  p.lastDamageCause = { kind: fem ? 'teleportFailFemale' : 'teleportFailMale' };
-                }
-                p.hp = 0;
-              }
-            } else {
-              const cost = Math.max(1, Math.floor(p.maxHp / 6)); // :44889 首传代价
-              p.hp = Math.max(1, p.hp - cost);
-              this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
-            }
-            p.useTime = 20;
-            break;
-          }
+        case 1326: // 混乱之杖（Player.cs:44861-44913）
+        case 5335: { // 和谐之杖（:44902+,type!=1326 直接 return=免费传送）
+          // 1:1：首次传送**无任何代价**；ChaosState(88) 360t 每次使用刷新（:44913）；
+          // buff 期内再传送 → statLife-=max/7 可致死（:44904-44912,死因 13 或 50%
+          // 性别 14/15）+ lifeRegenCount/Time 清零（:44914-44915）。此前两处偏差已修：
+          // 自造"首用扣 max/6"（原版无此代价）；混沌期"拒绝传送"（原版允许且扣血）。
+          // 未移植注：LimitPointToPlayerReachable/AnyWallOfTypeOnLine(350)/丛林蜥蜴墙 87
+          // 门（:44878-44892）——teleportToMouse 用就近落点 BFS（既有近似,传送药水等共用）
           this.teleportToMouse();
+          if (pvid === 1326) {
+            if (p.buffs.has(BuffType.ChaosState)) {
+              const cost = Math.floor(p.maxHp / 7);           // :44904 C# 整除截断
+              p.lastDamageCause = { kind: 'teleportFail' };    // :44905 ByOther(13) 默认
+              if (Math.random() < 0.5) {                       // :44906-44908 Next(2)==0 → 性别支
+                const fem = FEMALE_VARIANTS.includes(p.appearance?.skinVariant ?? 0);
+                p.lastDamageCause = { kind: fem ? 'teleportFailFemale' : 'teleportFailMale' };
+              }
+              p.hp -= cost;                                    // 无下限——可致死（KillMe 语义）
+              this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
+              p.lifeRegenTime = 0;                             // :44914-44915 再生清零
+              if (p.hp <= 0) p.hp = 0;
+            }
+            p.buffs.apply(BuffType.ChaosState, 360 / 60);      // :44913 AddBuff(88,360)
+          }
           p.useTime = 20;
           break;
         }
@@ -4769,7 +4786,9 @@ export class Game implements GameHooks {
         // 发射音（原版 Item.cs UseSound）：弓（useAmmo 40）=Item_5；枪械通用=Item_11；
         // 霰弹枪族 534/964/3788/4703=Item_36；手枪族 164/219/1255/1929/2269/2270=Item_41
         // （Item_36/41 此前登记"素材未提取"，现已落位 public/sounds/——销核）
-        this.sfx.play(useAmmo === AMMO_ARROW ? 'bowShoot'
+        const usBow = itemUseSoundWav(bowVid);
+        if (usBow) this.playSfxFile(usBow);   // UseSound 覆盖（弩 Item_98 等）
+        else this.sfx.play(useAmmo === AMMO_ARROW ? 'bowShoot'
           : GUN_SHOTGUN_VIDS.has(bowVid) ? 'gunShotgun'
           : GUN_HANDGUN_VIDS.has(bowVid) ? 'gunHandgun' : 'gunShot');
         this.cb.onInventoryChanged();
@@ -4830,7 +4849,7 @@ export class Game implements GameHooks {
           this.entities.add(mol, 'projectiles');
           this.player.inv.removeAt(this.player.inv.selected, 1);
           this.player.useTime = c?.useTime ?? 15;
-          this.sfx.play('throw');
+          this.playUseSound(vid, 'throw');
           this.cb.onInventoryChanged();
           this.input.mouseDown = false;
           return;
@@ -4846,7 +4865,7 @@ export class Game implements GameHooks {
       }
       this.player.inv.removeAt(this.player.inv.selected, 1);
       this.player.useTime = c?.useTime ?? 15;
-      this.sfx.play('throw');
+      this.playUseSound(vid, 'throw');
       this.cb.onInventoryChanged();
     } else if (heldDef && [70, 1331, 560].includes(viIdFromKey(heldDef.key))
       && inp.mouseDown && this.player.useTime === 0) {
@@ -5403,7 +5422,7 @@ export class Game implements GameHooks {
         this.entities.add(mArrow, 'projectiles');
         this.player.useTime = cw.useTime;
         this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
-        this.sfx.play('tink');
+        this.playUseSound(critVid, 'tink'); // UseSound 数据驱动（Item8/12/20/43/92…各杖专属）
         this.input.mouseDown = false;
         break;
       }
@@ -5420,7 +5439,7 @@ export class Game implements GameHooks {
           + (itemCombat(critVid)?.crit ?? 0);
         this.entities.add(shotArrow, 'projectiles');
         this.player.useTime = cw.useTime;
-        this.sfx.play('bowShoot');
+        this.playUseSound(critVid, 'bowShoot');
         this.input.mouseDown = false;
         break;
       }
@@ -8529,6 +8548,40 @@ export class Game implements GameHooks {
     drop(73, Math.max(1, Math.round(coins)));
   }
 
+  /** 捕虫网捕捉（NPC.CatchNPC :80684-80721）：catchItem>0 才可捕（螃蟹无 = 无效）；
+   *  捕获物掉在【玩家中心】可秒拾（noGrabDelay）；687 神秘青蛙永远传送逃走
+   *  （TryTeleportingCaughtMysticFrog :80657-80682：±15 格采样 telefrag 8，
+   *   Teleport style 13 = 每侧 Item8 + 21 尘 27；失败 PoofOfSmoke 消散）。 */
+  private netCatchCritter(c: Critter): void {
+    const def = CRITTER_BY_KEY[c.key];
+    const npcId = def?.npc ?? -1;
+    if (npcId === 687) {
+      const spot = attemptToFindTeleportSpot(
+        c as unknown as Enemy, this as unknown as GameHooks,
+        Math.floor(c.cx / TILE), Math.floor(c.cy / TILE), 15, 8);
+      if (spot) {
+        const tpFx = () => {
+          this.playSfxFiles(['Item_8'], 1, c.cx, c.cy);
+          this.spawnParticles(c.cx, c.cy, '#7A5AC8', 21, 1.75, { life: 30 });
+        };
+        tpFx();                                       // 旧位置（TeleportEffect case 13）
+        c.x = spot.x * TILE - c.w / 2;
+        c.y = spot.y * TILE - c.h;
+        tpFx();                                       // 新位置
+      } else {
+        this.spawnParticles(c.cx - 20, c.cy - 20, '#B0B0A0', 10, 1, { life: 24 }); // PoofOfSmoke
+        c.dead = true;
+      }
+      return;
+    }
+    const catchItemId = def ? CRITTER_CATCH_BY_NPC[npcId] : undefined;
+    if (!catchItemId) return;                          // :44084 catchItem<=0 跳过（不伤不死）
+    const key = VANILLA_ITEM_KEY_BY_ID[catchItemId];
+    if (key) this.spawnDrop(this.player.cx - 8, this.player.cy - 8, key, 1, 0, -1);
+    this.spawnParticles(c.cx, c.cy, '#D8D8C8', 8, 1.5, { life: 20 });
+    c.dead = true;                                     // :80719 active=false（非 Kill 不掉落）
+  }
+
   private updateSwingHits() {
     if (!this.swing) return;
     this.swing.t--;
@@ -8545,7 +8598,8 @@ export class Game implements GameHooks {
     const swingCombat = swingVid >= 0 ? itemCombat(swingVid) : null;
     const meleeDmg = this.swing.dmg ?? tool?.damage ?? swingCombat?.damage ?? 0;
     const noMelee = heldDef.magic || swingCombat?.noMelee;
-    if (noMelee || meleeDmg <= 0) return;
+    const isNet = swingVid === 1991 || swingVid === 3183 || swingVid === 4821;  // :42962 网特判
+    if (!isNet && (noMelee || meleeDmg <= 0)) return;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
     // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
     // （cs:44489 new Rectangle(itemLocation.X, itemLocation.Y, 32, 32) ×adjustedItemScale≈1，
@@ -8631,15 +8685,17 @@ export class Game implements GameHooks {
     // GetMeleeHitbox 都不进，cs:42964；此前的 magic 后置 return 只挡实体不挡砍草）
     const hitRect = (ex: number, ey: number, ew: number, eh: number) =>
       ex < bx + bw && ex + ew > bx && ey < by + bh && ey + eh > by;
-    // 小动物：任何挥击一击致死
+    // 小动物：网 → 捕捉（ItemCheck_CatchCritters :44079-44112）；其余挥击一击致死
     for (const cent of this.entities.critters) {
       const c = cent as Critter;
       if (this.swingHitSet.has(c.id)) continue;
       if (hitRect(c.x, c.y, c.w, c.h)) {
         this.swingHitSet.add(c.id);
-        c.hurt(this);
+        if (isNet) this.netCatchCritter(c);
+        else c.hurt(this);
       }
     }
+    if (isNet) return;   // 网不砍草不打怪（金/防火网的 cutExtraTiles 登记近似省略）
     // 城镇 NPC:巫毒窄门(原版 ApplyItemToNPC/Damage_PVE_Inner :11970-11972——
     // 向导 22 需装备向导巫毒娃娃 267、裁缝师 54 需裁缝娃 1307,其余免疫玩家近战);
     // 同一挥击只中一次(swingHitSet 按 Entity.id 去重)
@@ -9727,6 +9783,12 @@ export class Game implements GameHooks {
     // extract-shops.mjs 未捕获该 if 门——与 moonPhase 同类缺口，此处直接补）。
     // 原版 SetDefaults(4702) 无价格覆盖 → 按 item value 100 铜出售
     if (npc.vanillaId === 208 && LanternNight.lanternsUp) out.push([4702, 100] as [number, number]);
+    // 油漆师基础 12 色（Chest.cs:2424-2428 `for (int j = 1073; j <= 1084; j++)` 循环上架——
+    // extract-shops.mjs 不展开 for 循环，vanilla-shopstock.json 缺 1073-1084，
+    // 与 4702/moonPhase 同类提取缺口，此处按原版循环直补；价格 25 = Item.value（Item.cs:13374））
+    if (npc.vanillaId === 227) {
+      for (let j = 1073; j <= 1084; j++) out.push([j, 25] as [number, number]);
+    }
     // ---- 月相分档专柜（extract-shops.mjs 只记 cond:'moonPhase' 未捕获 case 值——
     //      剔除恒真条目，按 Chest.cs switch 实表补 8 相位档）----
     const phase = this.world.clock.moonPhase;
@@ -10276,6 +10338,9 @@ export class Game implements GameHooks {
     this.sfx.play('drink');
     this.cb.onInventoryChanged();
     this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NurseHealed'));
+    // 成就：护士付费累计（AchievementsHelper.HandleNurseService → FREQUENT_FLYER
+    // 10000 铜；NurseChat 治疗结算点）
+    this.achievements.handleNurseService(cost);
   }
 
   /** 扣铜币:全背包四档币换算清点,整额清空后按面额找零(vanilla BuyItem 语义;vi_71-74 单轨) */
@@ -11591,6 +11656,15 @@ export class Game implements GameHooks {
     this.sfx.playWavFile(file, vol ?? 1, x, y);
   }
 
+  /** 武器使用音（2026-08-13 特效音效审计）：Item.cs SetDefaults 显式 UseSound
+   *  优先（vanilla-itemusesound.json 582 件全量提取，含 Item_2 镰刀/Item_8 恶魔镰
+   *  Item_12 激光枪/Item_43 魔镜反弹/Item_92 水矢 等），无显式回落各路径原通道音 */
+  playUseSound(vid: number, fallback: string, vol?: number): void {
+    const wav = itemUseSoundWav(vid);
+    if (wav) this.playSfxFile(wav, vol);
+    else this.sfx.play(fallback as 'throw', vol);
+  }
+
   /** 矿车碾过压板轨道（Minecart.HitTrackSwitch → Wiring.HitSwitch，Minecart.cs:1287-1294）：
    *  路由到 Wiring.hitSwitch——压板/轨道族直接 TripWire（Wiring.cs:167-171） */
   hitTrackSwitch(i: number, j: number): void {
@@ -12172,7 +12246,20 @@ export class Game implements GameHooks {
    *  血月敌怪（浮标处；618 +64px）/ 682 红城镇史莱姆一次性入镇 */
   private reelBobber(bobber: Bobber): void {
     const caught = bobber.reel(this);
-    if (caught > 0) {
+    if (caught === -1) {
+      // 松露虫咬钩收竿（PullBobber :51563-51576 → SpawnOnPlayer case 370 :81335-81353）：
+      // Duke 落在浮标 Center 下方 100px + HasAwoken 公告
+      const duke = Enemy.fromVanilla(370, bobber.cx, bobber.cy + 100);
+      if (duke) {
+        duke.x = bobber.cx - duke.w / 2;
+        duke.y = bobber.cy + 100 - duke.h / 2;
+        duke.despawnTimer = 15000;
+        this.entities.add(duke, 'enemies');
+        this.boss = duke;
+        this.announceBossSummon(370);
+      }
+      this.cb.onInventoryChanged?.();
+    } else if (caught > 0) {
       const key = VANILLA_ITEM_KEY_BY_ID[caught];
       if (key) this.spawnDrop(bobber.cx, bobber.cy - 8, key, 1, 0, -2);
       this.cb.onInventoryChanged?.();

@@ -78,9 +78,25 @@ export const ITEM_DEFS: ItemDef[] = [];
 const byKey: Record<string, number> = {};
 export const ITEM_BY_KEY: Record<string, number> = byKey;
 
+/** 1.4.5.6 堆叠上限（Item.cs:66 CommonMaxStack=9999 默认 + SetDefaults 全链仅 11 处覆盖；
+ *  1405 有 1844 处逐物品赋值,1.4.4 改制统一为 9999）。vi_ 物品一律按此表,
+ *  手写 maxStack 对 vi_ 键不生效——反编译源为准 */
+const VANILLA_MAX_STACK: Record<number, number> = {
+  71: 100, 72: 100, 73: 100,            // 铜银金币（白金 74 无覆盖=9999,DoCoins 只对 71-73 :38570）
+  58: 1, 184: 1,                        // 早期特殊件
+  1734: 1, 1735: 1, 1867: 1, 1868: 1, 1922: 1, 3388: 1,  // 任务/钥匙族
+};
+const vanillaMaxStackOf = (key: string): number | undefined => {
+  const m = /^vi_(\d+)_/.exec(key);
+  return m ? VANILLA_MAX_STACK[Number(m[1])] : undefined;
+};
+
 function item(d: Partial<ItemDef> & { key: string; name: string }) {
   byKey[d.key] = ITEM_DEFS.length;
-  ITEM_DEFS.push({ maxStack: 999, ...d } as ItemDef);
+  // vi_ 物品:原版堆叠表权威(默认 9999);legacy 物品维持手写值(缺省 999)
+  const vs = vanillaMaxStackOf(d.key);
+  const base = vs !== undefined ? vs : d.maxStack ?? 999;
+  ITEM_DEFS.push({ ...d, maxStack: base } as ItemDef);
 }
 
 // ---- 基础方块 ----
@@ -229,8 +245,8 @@ function item(d: Partial<ItemDef> & { key: string; name: string }) {
 
 
 // 上限扩容三件套（Player.cs:44655-44700 ItemCheck_Use*；vi_ 前缀自动映射原版图标）
-item({ key: 'vi_109_mana_crystal', name: '魔力水晶', maxStack: 99, desc: '使用：魔力上限 +20（上限 200）' });
-item({ key: 'vi_1291_life_fruit', name: '生命果', maxStack: 99, desc: '生命上限 ≥400 时使用：+5（上限 500）' });
+item({ key: 'vi_109_mana_crystal', name: '魔力水晶', desc: '使用：魔力上限 +20（上限 200）' });
+item({ key: 'vi_1291_life_fruit', name: '生命果', desc: '生命上限 ≥400 时使用：+5（上限 500）' });
 
 
 
@@ -251,409 +267,409 @@ export function mkStack(key: string, stack = 1): ItemStack | null {
 
 // ===================== wld 导入补全物品（compat-report 驱动） =====================
 // 这些物品目前只做图标与存档保留（占位），后续按需实装功能
-item({ key: 'vi_2350_recall_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_188_healing_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_282_glowstick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_41_flaming_arrow', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_167_dynamite', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_279_throwing_knife', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_51_jester_s_arrow', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_19_gold_bar', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_302_water_walking_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_305_gravitation_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_43_suspicious_looking_eye', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_296_spelunker_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_299_night_owl_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_965_rope', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_303_archery_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_304_hunter_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_50_magic_mirror', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_42_shuriken', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_295_featherfall_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_53_cloud_in_a_bottle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2329_dangersense_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_40_wooden_arrow', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_975_shoe_spikes', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_54_hermes_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_301_thorns_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_49_band_of_regeneration', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2326_titan_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_297_invisibility_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_166_bomb', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5011_mace', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4425_shark_bait', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2351_teleportation_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4460_sandcastle_bucket', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_168_grenade', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_227_restoration_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_930_flare_gun', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_931_flare', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_997_extractinator', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_52_angel_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_265_hellfire_arrow', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_298_shine_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5007_dead_man_s_sweater', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_117_meteorite_bar', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_186_breathing_reed', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_2350_recall_potion', name: '', value: 1 });
+item({ key: 'vi_188_healing_potion', name: '', value: 1 });
+item({ key: 'vi_282_glowstick', name: '', value: 1 });
+item({ key: 'vi_41_flaming_arrow', name: '', value: 1 });
+item({ key: 'vi_167_dynamite', name: '', value: 1 });
+item({ key: 'vi_279_throwing_knife', name: '', value: 1 });
+item({ key: 'vi_51_jester_s_arrow', name: '', value: 1 });
+item({ key: 'vi_19_gold_bar', name: '', value: 1 });
+item({ key: 'vi_302_water_walking_potion', name: '', value: 1 });
+item({ key: 'vi_305_gravitation_potion', name: '', value: 1 });
+item({ key: 'vi_43_suspicious_looking_eye', name: '', value: 1 });
+item({ key: 'vi_296_spelunker_potion', name: '', value: 1 });
+item({ key: 'vi_299_night_owl_potion', name: '', value: 1 });
+item({ key: 'vi_965_rope', name: '', value: 1 });
+item({ key: 'vi_303_archery_potion', name: '', value: 1 });
+item({ key: 'vi_304_hunter_potion', name: '', value: 1 });
+item({ key: 'vi_50_magic_mirror', name: '', value: 1 });
+item({ key: 'vi_42_shuriken', name: '', value: 1 });
+item({ key: 'vi_295_featherfall_potion', name: '', value: 1 });
+item({ key: 'vi_53_cloud_in_a_bottle', name: '', value: 1 });
+item({ key: 'vi_2329_dangersense_potion', name: '', value: 1 });
+item({ key: 'vi_40_wooden_arrow', name: '', value: 1 });
+item({ key: 'vi_975_shoe_spikes', name: '', value: 1 });
+item({ key: 'vi_54_hermes_boots', name: '', value: 1 });
+item({ key: 'vi_301_thorns_potion', name: '', value: 1 });
+item({ key: 'vi_49_band_of_regeneration', name: '', value: 1 });
+item({ key: 'vi_2326_titan_potion', name: '', value: 1 });
+item({ key: 'vi_297_invisibility_potion', name: '', value: 1 });
+item({ key: 'vi_166_bomb', name: '', value: 1 });
+item({ key: 'vi_5011_mace', name: '', value: 1 });
+item({ key: 'vi_4425_shark_bait', name: '', value: 1 });
+item({ key: 'vi_2351_teleportation_potion', name: '', value: 1 });
+item({ key: 'vi_4460_sandcastle_bucket', name: '', value: 1 });
+item({ key: 'vi_168_grenade', name: '', value: 1 });
+item({ key: 'vi_227_restoration_potion', name: '', value: 1 });
+item({ key: 'vi_930_flare_gun', name: '', value: 1 });
+item({ key: 'vi_931_flare', name: '', value: 1 });
+item({ key: 'vi_997_extractinator', name: '', value: 1 });
+item({ key: 'vi_52_angel_statue', name: '', value: 1 });
+item({ key: 'vi_265_hellfire_arrow', name: '', value: 1 });
+item({ key: 'vi_298_shine_potion', name: '', value: 1 });
+item({ key: 'vi_5007_dead_man_s_sweater', name: '', value: 1 });
+item({ key: 'vi_117_meteorite_bar', name: '', value: 1 });
+item({ key: 'vi_186_breathing_reed', name: '', value: 1 });
 // ---- 呼吸族（CheckDrowning 装备链，2026-08 补齐；stats/装备归属/图标全走 vanilla 数据自动接线）----
-item({ key: 'vi_250_fish_bowl', name: '', maxStack: 999, value: 1 });            // 鱼缸头盔：戴着恒淹（:22917）
-item({ key: 'vi_4275_gold_goldfish_bowl', name: '', maxStack: 999, value: 1 });  // 金金鱼缸：同上
-item({ key: 'vi_268_diving_helmet', name: '', maxStack: 999, value: 1 });        // accDivingHelm：breathCDMax ×6（:12829）
-item({ key: 'vi_394_diving_gear', name: '', maxStack: 999, value: 1 });          // 潜水装备：divingHelm+flipper（:14652）
-item({ key: 'vi_1860_jellyfish_diving_gear', name: '', maxStack: 999, value: 1 }); // :14689（浸水发光 :14686）
-item({ key: 'vi_1861_arctic_diving_gear', name: '', maxStack: 999, value: 1 });  // :14701（+arcticDivingGear 冰水免疫）
-item({ key: 'vi_497_neptune_s_shell', name: '', maxStack: 999, value: 1 });      // accMerman（:15019）
-item({ key: 'vi_861_moon_shell', name: '', maxStack: 999, value: 1 });           // accMerman+狼人夜变（:14587）
-item({ key: 'vi_3110_celestial_shell', name: '', maxStack: 999, value: 1 });     // accMerman+狼人夜变（:14855）
-item({ key: 'vi_329_shadow_key', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_974_ice_torch', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2322_mining_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4915_tungsten_bullet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_946_umbrella', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_939_web_slinger', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4870_potion_of_return', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_288_obsidian_skin_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_31_bottle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_211_feral_claws', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4404_inner_tube', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_187_flipper', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2198_ice_machine', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_274_dark_lance', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_285_aglet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_213_staff_of_regrowth', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_964_boomstick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1293_lihzahrd_power_cell', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_250_fish_bowl', name: '', value: 1 });            // 鱼缸头盔：戴着恒淹（:22917）
+item({ key: 'vi_4275_gold_goldfish_bowl', name: '', value: 1 });  // 金金鱼缸：同上
+item({ key: 'vi_268_diving_helmet', name: '', value: 1 });        // accDivingHelm：breathCDMax ×6（:12829）
+item({ key: 'vi_394_diving_gear', name: '', value: 1 });          // 潜水装备：divingHelm+flipper（:14652）
+item({ key: 'vi_1860_jellyfish_diving_gear', name: '', value: 1 }); // :14689（浸水发光 :14686）
+item({ key: 'vi_1861_arctic_diving_gear', name: '', value: 1 });  // :14701（+arcticDivingGear 冰水免疫）
+item({ key: 'vi_497_neptune_s_shell', name: '', value: 1 });      // accMerman（:15019）
+item({ key: 'vi_861_moon_shell', name: '', value: 1 });           // accMerman+狼人夜变（:14587）
+item({ key: 'vi_3110_celestial_shell', name: '', value: 1 });     // accMerman+狼人夜变（:14855）
+item({ key: 'vi_329_shadow_key', name: '', value: 1 });
+item({ key: 'vi_974_ice_torch', name: '', value: 1 });
+item({ key: 'vi_2322_mining_potion', name: '', value: 1 });
+item({ key: 'vi_4915_tungsten_bullet', name: '', value: 1 });
+item({ key: 'vi_946_umbrella', name: '', value: 1 });
+item({ key: 'vi_939_web_slinger', name: '', value: 1 });
+item({ key: 'vi_4870_potion_of_return', name: '', value: 1 });
+item({ key: 'vi_288_obsidian_skin_potion', name: '', value: 1 });
+item({ key: 'vi_31_bottle', name: '', value: 1 });
+item({ key: 'vi_211_feral_claws', name: '', value: 1 });
+item({ key: 'vi_4404_inner_tube', name: '', value: 1 });
+item({ key: 'vi_187_flipper', name: '', value: 1 });
+item({ key: 'vi_2198_ice_machine', name: '', value: 1 });
+item({ key: 'vi_274_dark_lance', name: '', value: 1 });
+item({ key: 'vi_285_aglet', name: '', value: 1 });
+item({ key: 'vi_213_staff_of_regrowth', name: '', value: 1 });
+item({ key: 'vi_964_boomstick', name: '', value: 1 });
+item({ key: 'vi_1293_lihzahrd_power_cell', name: '', value: 1 });
 // 旧日军团三件（ItemID.cs：3817 奖牌 / 3822 埃特尼亚魔力 / 3828 永恒水晶）无需手工
 // 注册——下方 vanilla.json 自动注册循环已建 vi_<id>_<PascalKey> 条目；
 // Game 侧按原版 id 寻物（slotVanillaId），见 useLihzahrdAltar/useEterniaStand。
-item({ key: 'vi_2195_lihzahrd_furnace', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2766_solar_tablet_fragment', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_300_battle_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2348_inferno_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_218_flamelash', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3019_hellwing_bow', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_112_flower_of_fire', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_220_sunfury', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4345_can_of_worms', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_953_climbing_claws', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3069_wand_of_sparking', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_212_anklet_of_the_wind', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2204_honey_dispenser', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_277_trident', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_863_water_walking_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_751_cloud', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_155_muramasa', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_289_regeneration_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_906_lava_charm', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4055_dunerider_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_724_ice_blade', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_670_ice_boomerang', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4061_storm_spear', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_987_blizzard_in_a_bottle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4551_slice_of_hell_cake', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5010_treasure_magnet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2323_heartreach_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2345_lifeforce_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_290_swiftness_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_291_gills_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_280_spear', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2325_builder_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_284_wooden_boomerang', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2192_bone_welder', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5234_remnants_of_devotion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_156_cobalt_shield', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_157_aqua_scepter', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_163_blue_moon', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_113_magic_missile', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3317_valor', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_327_golden_key', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_164_handgun', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_294_magic_power_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4263_magic_conch', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4062_thunder_zapper', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1579_flurry_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4056_ancient_chisel', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4346_encumbering_stone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1319_snowball_cannon', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3199_ice_mirror', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_950_ice_skates', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4443_demonic_hellcart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4737_ornate_shadow_key', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4276_bast_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4262_snake_charmer_s_flute', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3093_herb_bag', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_292_ironskin_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3084_radar', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4341_step_stool', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4978_fledgling_wings', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2197_sky_mill', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_158_lucky_horseshoe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5254_blessing_from_the_heavens', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1156_piranha_gun', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1571_scourge_of_the_corruptor', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1260_rainbow_gun', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1572_staff_of_the_frost_hydra', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4607_desert_tiger_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_933_leaf_wand', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_832_living_wood_wand', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4066_desert_minecart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4450_shroom_minecart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4423_scarab_bomb', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_159_shiny_red_balloon', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5258_see_the_world_for_what_it_is', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_65_starfury', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5388_eye_of_the_sun', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2219_celestial_magnet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5255_love_is_in_the_trash_slot', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4426_bee_minecart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3017_flower_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3360_living_mahogany_wand', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3361_rich_mahogany_leaf_wand', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1309_slime_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1845_necromantic_scroll', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1864_papyrus_scarab', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1158_pygmy_necklace', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3034_coin_ring', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_308_moonglow_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 1 });
-item({ key: 'vi_312_fireblossom_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 5 });
-item({ key: 'vi_310_deathweed_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 4 });
-item({ key: 'vi_307_daybloom_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 0 });
-item({ key: 'vi_309_blinkroot_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 2 });
-item({ key: 'vi_2357_shiverthorn_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 6 });
-item({ key: 'vi_311_waterleaf_seeds', name: '', maxStack: 999, value: 1, tile: 'v_83_herbs_mature', placeStyle: 3 });
-item({ key: 'vi_1828_pumpkin_seed', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_126_bottled_water', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1134_bottled_honey', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3068_guide_to_plant_fiber_cordage', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4779_mushroom_hat', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4780_mushroom_vest', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4781_mushroom_pants', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_2195_lihzahrd_furnace', name: '', value: 1 });
+item({ key: 'vi_2766_solar_tablet_fragment', name: '', value: 1 });
+item({ key: 'vi_300_battle_potion', name: '', value: 1 });
+item({ key: 'vi_2348_inferno_potion', name: '', value: 1 });
+item({ key: 'vi_218_flamelash', name: '', value: 1 });
+item({ key: 'vi_3019_hellwing_bow', name: '', value: 1 });
+item({ key: 'vi_112_flower_of_fire', name: '', value: 1 });
+item({ key: 'vi_220_sunfury', name: '', value: 1 });
+item({ key: 'vi_4345_can_of_worms', name: '', value: 1 });
+item({ key: 'vi_953_climbing_claws', name: '', value: 1 });
+item({ key: 'vi_3069_wand_of_sparking', name: '', value: 1 });
+item({ key: 'vi_212_anklet_of_the_wind', name: '', value: 1 });
+item({ key: 'vi_2204_honey_dispenser', name: '', value: 1 });
+item({ key: 'vi_277_trident', name: '', value: 1 });
+item({ key: 'vi_863_water_walking_boots', name: '', value: 1 });
+item({ key: 'vi_751_cloud', name: '', value: 1 });
+item({ key: 'vi_155_muramasa', name: '', value: 1 });
+item({ key: 'vi_289_regeneration_potion', name: '', value: 1 });
+item({ key: 'vi_906_lava_charm', name: '', value: 1 });
+item({ key: 'vi_4055_dunerider_boots', name: '', value: 1 });
+item({ key: 'vi_724_ice_blade', name: '', value: 1 });
+item({ key: 'vi_670_ice_boomerang', name: '', value: 1 });
+item({ key: 'vi_4061_storm_spear', name: '', value: 1 });
+item({ key: 'vi_987_blizzard_in_a_bottle', name: '', value: 1 });
+item({ key: 'vi_4551_slice_of_hell_cake', name: '', value: 1 });
+item({ key: 'vi_5010_treasure_magnet', name: '', value: 1 });
+item({ key: 'vi_2323_heartreach_potion', name: '', value: 1 });
+item({ key: 'vi_2345_lifeforce_potion', name: '', value: 1 });
+item({ key: 'vi_290_swiftness_potion', name: '', value: 1 });
+item({ key: 'vi_291_gills_potion', name: '', value: 1 });
+item({ key: 'vi_280_spear', name: '', value: 1 });
+item({ key: 'vi_2325_builder_potion', name: '', value: 1 });
+item({ key: 'vi_284_wooden_boomerang', name: '', value: 1 });
+item({ key: 'vi_2192_bone_welder', name: '', value: 1 });
+item({ key: 'vi_5234_remnants_of_devotion', name: '', value: 1 });
+item({ key: 'vi_156_cobalt_shield', name: '', value: 1 });
+item({ key: 'vi_157_aqua_scepter', name: '', value: 1 });
+item({ key: 'vi_163_blue_moon', name: '', value: 1 });
+item({ key: 'vi_113_magic_missile', name: '', value: 1 });
+item({ key: 'vi_3317_valor', name: '', value: 1 });
+item({ key: 'vi_327_golden_key', name: '', value: 1 });
+item({ key: 'vi_164_handgun', name: '', value: 1 });
+item({ key: 'vi_294_magic_power_potion', name: '', value: 1 });
+item({ key: 'vi_4263_magic_conch', name: '', value: 1 });
+item({ key: 'vi_4062_thunder_zapper', name: '', value: 1 });
+item({ key: 'vi_1579_flurry_boots', name: '', value: 1 });
+item({ key: 'vi_4056_ancient_chisel', name: '', value: 1 });
+item({ key: 'vi_4346_encumbering_stone', name: '', value: 1 });
+item({ key: 'vi_1319_snowball_cannon', name: '', value: 1 });
+item({ key: 'vi_3199_ice_mirror', name: '', value: 1 });
+item({ key: 'vi_950_ice_skates', name: '', value: 1 });
+item({ key: 'vi_4443_demonic_hellcart', name: '', value: 1 });
+item({ key: 'vi_4737_ornate_shadow_key', name: '', value: 1 });
+item({ key: 'vi_4276_bast_statue', name: '', value: 1 });
+item({ key: 'vi_4262_snake_charmer_s_flute', name: '', value: 1 });
+item({ key: 'vi_3093_herb_bag', name: '', value: 1 });
+item({ key: 'vi_292_ironskin_potion', name: '', value: 1 });
+item({ key: 'vi_3084_radar', name: '', value: 1 });
+item({ key: 'vi_4341_step_stool', name: '', value: 1 });
+item({ key: 'vi_4978_fledgling_wings', name: '', value: 1 });
+item({ key: 'vi_2197_sky_mill', name: '', value: 1 });
+item({ key: 'vi_158_lucky_horseshoe', name: '', value: 1 });
+item({ key: 'vi_5254_blessing_from_the_heavens', name: '', value: 1 });
+item({ key: 'vi_1156_piranha_gun', name: '', value: 1 });
+item({ key: 'vi_1571_scourge_of_the_corruptor', name: '', value: 1 });
+item({ key: 'vi_1260_rainbow_gun', name: '', value: 1 });
+item({ key: 'vi_1572_staff_of_the_frost_hydra', name: '', value: 1 });
+item({ key: 'vi_4607_desert_tiger_staff', name: '', value: 1 });
+item({ key: 'vi_933_leaf_wand', name: '', value: 1 });
+item({ key: 'vi_832_living_wood_wand', name: '', value: 1 });
+item({ key: 'vi_4066_desert_minecart', name: '', value: 1 });
+item({ key: 'vi_4450_shroom_minecart', name: '', value: 1 });
+item({ key: 'vi_4423_scarab_bomb', name: '', value: 1 });
+item({ key: 'vi_159_shiny_red_balloon', name: '', value: 1 });
+item({ key: 'vi_5258_see_the_world_for_what_it_is', name: '', value: 1 });
+item({ key: 'vi_65_starfury', name: '', value: 1 });
+item({ key: 'vi_5388_eye_of_the_sun', name: '', value: 1 });
+item({ key: 'vi_2219_celestial_magnet', name: '', value: 1 });
+item({ key: 'vi_5255_love_is_in_the_trash_slot', name: '', value: 1 });
+item({ key: 'vi_4426_bee_minecart', name: '', value: 1 });
+item({ key: 'vi_3017_flower_boots', name: '', value: 1 });
+item({ key: 'vi_3360_living_mahogany_wand', name: '', value: 1 });
+item({ key: 'vi_3361_rich_mahogany_leaf_wand', name: '', value: 1 });
+item({ key: 'vi_1309_slime_staff', name: '', value: 1 });
+item({ key: 'vi_1845_necromantic_scroll', name: '', value: 1 });
+item({ key: 'vi_1864_papyrus_scarab', name: '', value: 1 });
+item({ key: 'vi_1158_pygmy_necklace', name: '', value: 1 });
+item({ key: 'vi_3034_coin_ring', name: '', value: 1 });
+item({ key: 'vi_308_moonglow_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 1 });
+item({ key: 'vi_312_fireblossom_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 5 });
+item({ key: 'vi_310_deathweed_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 4 });
+item({ key: 'vi_307_daybloom_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 0 });
+item({ key: 'vi_309_blinkroot_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 2 });
+item({ key: 'vi_2357_shiverthorn_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 6 });
+item({ key: 'vi_311_waterleaf_seeds', name: '', value: 1, tile: 'v_83_herbs_mature', placeStyle: 3 });
+item({ key: 'vi_1828_pumpkin_seed', name: '', value: 1 });
+item({ key: 'vi_126_bottled_water', name: '', value: 1 });
+item({ key: 'vi_1134_bottled_honey', name: '', value: 1 });
+item({ key: 'vi_3068_guide_to_plant_fiber_cordage', name: '', value: 1 });
+item({ key: 'vi_4779_mushroom_hat', name: '', value: 1 });
+item({ key: 'vi_4780_mushroom_vest', name: '', value: 1 });
+item({ key: 'vi_4781_mushroom_pants', name: '', value: 1 });
 
 // ===================== FTW_V2 补全物品（占位收集品） =====================
-item({ key: 'vi_678_red_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_281_blowpipe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_293_mana_regeneration_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2767_solar_tablet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3213_money_trough', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2757_vortex_helmet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4989_soaring_insignia', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3383_stardust_leggings', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4914_kaleidoscope', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1991_bug_net', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4828_superheated_blood', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3509_copper_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3507_copper_shortsword', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4755_grox_the_great_s_horned_cowl', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4756_grox_the_great_s_chestplate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4757_grox_the_great_s_greaves', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5000_terraspark_boots', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5339_arcane_crystal', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_678_red_potion', name: '', value: 1 });
+item({ key: 'vi_281_blowpipe', name: '', value: 1 });
+item({ key: 'vi_293_mana_regeneration_potion', name: '', value: 1 });
+item({ key: 'vi_2767_solar_tablet', name: '', value: 1 });
+item({ key: 'vi_3213_money_trough', name: '', value: 1 });
+item({ key: 'vi_2757_vortex_helmet', name: '', value: 1 });
+item({ key: 'vi_4989_soaring_insignia', name: '', value: 1 });
+item({ key: 'vi_3383_stardust_leggings', name: '', value: 1 });
+item({ key: 'vi_4914_kaleidoscope', name: '', value: 1 });
+item({ key: 'vi_1991_bug_net', name: '', value: 1 });
+item({ key: 'vi_4828_superheated_blood', name: '', value: 1 });
+item({ key: 'vi_3509_copper_pickaxe', name: '', value: 1 });
+item({ key: 'vi_3507_copper_shortsword', name: '', value: 1 });
+item({ key: 'vi_4755_grox_the_great_s_horned_cowl', name: '', value: 1 });
+item({ key: 'vi_4756_grox_the_great_s_chestplate', name: '', value: 1 });
+item({ key: 'vi_4757_grox_the_great_s_greaves', name: '', value: 1 });
+item({ key: 'vi_5000_terraspark_boots', name: '', value: 1 });
+item({ key: 'vi_5339_arcane_crystal', name: '', value: 1 });
 // 永久幸运消耗品（Player.cs:44786-44789：一次性 usedGalaxyPearl → luck +0.03 :28676-28678）
-item({ key: 'vi_5340_galaxy_pearl', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_5340_galaxy_pearl', name: '', value: 1 });
 // 漂亮镜子（Item 5577：投掷消耗品，shoot 1085；碎裂近身 150px → brokenMirrorBadLuckTime
 // 25200，Projectile.cs:67554-67574）——投掷走 thrownCombat 通用管线
-item({ key: 'vi_5577_pretty_mirror', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5391_uncumbering_stone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2585_slime_hook', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_313_daybloom', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_267_guide_voodoo_doll', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2649_steampunk_candle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_286_sticky_glowstick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3002_spelunker_glowstick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4819_demon_conch', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1802_raven_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3382_stardust_plate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3270_item_frame', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3771_ancient_horn', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4281_finch_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5407_star_royale_brick', name: '', maxStack: 999, value: 1, tile: 'v_675_star_royale_brick' });
-item({ key: 'vi_5401_lunar_rust_brick', name: '', maxStack: 999, value: 1, tile: 'v_669_lunar_rust_brick' });
+item({ key: 'vi_5577_pretty_mirror', name: '', value: 1 });
+item({ key: 'vi_5391_uncumbering_stone', name: '', value: 1 });
+item({ key: 'vi_2585_slime_hook', name: '', value: 1 });
+item({ key: 'vi_313_daybloom', name: '', value: 1 });
+item({ key: 'vi_267_guide_voodoo_doll', name: '', value: 1 });
+item({ key: 'vi_2649_steampunk_candle', name: '', value: 1 });
+item({ key: 'vi_286_sticky_glowstick', name: '', value: 1 });
+item({ key: 'vi_3002_spelunker_glowstick', name: '', value: 1 });
+item({ key: 'vi_4819_demon_conch', name: '', value: 1 });
+item({ key: 'vi_1802_raven_staff', name: '', value: 1 });
+item({ key: 'vi_3382_stardust_plate', name: '', value: 1 });
+item({ key: 'vi_3270_item_frame', name: '', value: 1 });
+item({ key: 'vi_3771_ancient_horn', name: '', value: 1 });
+item({ key: 'vi_4281_finch_staff', name: '', value: 1 });
+item({ key: 'vi_5407_star_royale_brick', name: '', value: 1, tile: 'v_675_star_royale_brick' });
+item({ key: 'vi_5401_lunar_rust_brick', name: '', value: 1, tile: 'v_669_lunar_rust_brick' });
 // 月相砖族补全（3461 微光转化目标，ItemID.cs:5401-5408;★曾缺 5402/5406/5408 →
 // 转化到这三相静默丢物;tile 744-751? 见 vanilla sheet 注册——砖块放置链按需接）
-item({ key: 'vi_5402_dark_celestial_brick', name: '', maxStack: 999, value: 1, tile: 'v_670_dark_celestial_brick' });
-item({ key: 'vi_5406_mercury_brick', name: '', maxStack: 999, value: 1, tile: 'v_674_mercury_brick' });
-item({ key: 'vi_5408_heavenforge_brick', name: '', maxStack: 999, value: 1, tile: 'v_676_heavenforge_brick' });
-item({ key: 'vi_4716_mollusk_whistle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3540_phantasm', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2176_shroomite_digging_claw', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2349_wrath_potion', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4679_morning_star', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1169_bone_key', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3863_betsy_mask', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3124_cell_phone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3506_copper_axe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4680_dark_harvest', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_543_brown_pressure_plate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_171_sign', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1723_living_wood_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4754_grox_the_great_s_wings', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3353_mechanical_cart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2287_winter_cape', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1179_chlorophyte_bullet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4766_world_globe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4954_celestial_starboard', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4730_ghostar_s_infinity_eight', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4758_blade_staff', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4765_tree_globe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5342_ambrosia', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5328_chest_lock', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5343_peddler_s_satchel', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5285_moon_globe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5289_minecart_upgrade_kit', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5336_advanced_combat_techniques_volume_two', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5451_kwad_racer_drone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5359_shellphone_spawn', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3032_super_absorbant_sponge', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3031_bottomless_water_bucket', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_509_red_wrench', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4741_butcher_s_bloodstained_apron', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3065_star_wrath', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3063_meowmere', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3372_lunatic_cultist_mask', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1504_spectre_robe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2769_cosmic_car_key', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_216_shackle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4415_stone_door', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1681_skeleton_banner', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_283_seed', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1173_grave_marker', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4379_wyvern_kite', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4378_xenon_moss', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4377_krypton_moss', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4376_rat_cage', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4375_rat', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4484_1_2_second_timer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4824_wet_bomb', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4485_1_4_second_timer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5378_cursed_flare', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5354_reflective_shades', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5387_raynbro_s_pants', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5386_raynbro_s_hoodie', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5390_raynbro_s_hood', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5338_aegis_fruit', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5404_cosmic_ember_brick', name: '', maxStack: 999, value: 1, tile: 'v_672_cosmic_ember_brick' });
-item({ key: 'vi_5405_cryocore_brick', name: '', maxStack: 999, value: 1, tile: 'v_673_cryocore_brick' });
-item({ key: 'vi_5403_astra_brick', name: '', maxStack: 999, value: 1, tile: 'v_671_astra_brick' });
-item({ key: 'vi_346_safe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4829_cat_license', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3335_demon_heart', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4750_foodbarbarian_s_tattered_dragon_wings', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3042_phase_dye', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3024_skiphs_blood', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3054_shadowflame_knife', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5275_joja_cola', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5278_pomegranate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5277_spicy_pepper', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5437_shellphone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1507_spectre_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2250_steampunk_chest', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_392_glass_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2699_weapon_rack', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3552_blue_flame_and_silver_dye', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5005_terraprisma', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4604_exotic_chew_toy', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4611_world_feeder_kite', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4649_blue_jellyfish_kite', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4796_dark_mage_s_tome', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4553_plasma_lamp', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4365_celestial_wand', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_331_jungle_spores', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2430_slimy_saddle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4956_zenith', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2798_laser_drill', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2814_martian_chest', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_210_vine', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4371_yellow_kite', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4291_lemon', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2493_king_slime_mask', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1919_sugar_cookie', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1912_eggnog', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4023_grapes', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4792_the_black_spot', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3066_smooth_marble_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1103_slush_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2119_stone_slab', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_593_snow_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3081_marble_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1111_blue_berries', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1115_red_husk', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_217_molten_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_122_molten_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1827_bladed_glove', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2263_white_dynasty_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_330_obsidian_brick_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2433_stone_slab_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_452_hornet_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_453_bomb_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_360_armor_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3711_wraith_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_438_star_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_446_skeleton_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_458_cross_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3655_scorpion_statue', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_328_shadow_chest', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2196_living_loom', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_916_shadewood_work_bench', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_35_iron_anvil', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_36_work_bench', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3240_tall_gate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_337_red_banner', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3381_stardust_helmet', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1765_vampire_pants', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2859_lunar_cultist_robe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2857_lunar_cultist_hood', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2998_summoner_emblem', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1175_headstone', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_25_wooden_door', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_46_light_s_bane', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2340_minecart_track', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_5402_dark_celestial_brick', name: '', value: 1, tile: 'v_670_dark_celestial_brick' });
+item({ key: 'vi_5406_mercury_brick', name: '', value: 1, tile: 'v_674_mercury_brick' });
+item({ key: 'vi_5408_heavenforge_brick', name: '', value: 1, tile: 'v_676_heavenforge_brick' });
+item({ key: 'vi_4716_mollusk_whistle', name: '', value: 1 });
+item({ key: 'vi_3540_phantasm', name: '', value: 1 });
+item({ key: 'vi_2176_shroomite_digging_claw', name: '', value: 1 });
+item({ key: 'vi_2349_wrath_potion', name: '', value: 1 });
+item({ key: 'vi_4679_morning_star', name: '', value: 1 });
+item({ key: 'vi_1169_bone_key', name: '', value: 1 });
+item({ key: 'vi_3863_betsy_mask', name: '', value: 1 });
+item({ key: 'vi_3124_cell_phone', name: '', value: 1 });
+item({ key: 'vi_3506_copper_axe', name: '', value: 1 });
+item({ key: 'vi_4680_dark_harvest', name: '', value: 1 });
+item({ key: 'vi_543_brown_pressure_plate', name: '', value: 1 });
+item({ key: 'vi_171_sign', name: '', value: 1 });
+item({ key: 'vi_1723_living_wood_wall', name: '', value: 1 });
+item({ key: 'vi_4754_grox_the_great_s_wings', name: '', value: 1 });
+item({ key: 'vi_3353_mechanical_cart', name: '', value: 1 });
+item({ key: 'vi_2287_winter_cape', name: '', value: 1 });
+item({ key: 'vi_1179_chlorophyte_bullet', name: '', value: 1 });
+item({ key: 'vi_4766_world_globe', name: '', value: 1 });
+item({ key: 'vi_4954_celestial_starboard', name: '', value: 1 });
+item({ key: 'vi_4730_ghostar_s_infinity_eight', name: '', value: 1 });
+item({ key: 'vi_4758_blade_staff', name: '', value: 1 });
+item({ key: 'vi_4765_tree_globe', name: '', value: 1 });
+item({ key: 'vi_5342_ambrosia', name: '', value: 1 });
+item({ key: 'vi_5328_chest_lock', name: '', value: 1 });
+item({ key: 'vi_5343_peddler_s_satchel', name: '', value: 1 });
+item({ key: 'vi_5285_moon_globe', name: '', value: 1 });
+item({ key: 'vi_5289_minecart_upgrade_kit', name: '', value: 1 });
+item({ key: 'vi_5336_advanced_combat_techniques_volume_two', name: '', value: 1 });
+item({ key: 'vi_5451_kwad_racer_drone', name: '', value: 1 });
+item({ key: 'vi_5359_shellphone_spawn', name: '', value: 1 });
+item({ key: 'vi_3032_super_absorbant_sponge', name: '', value: 1 });
+item({ key: 'vi_3031_bottomless_water_bucket', name: '', value: 1 });
+item({ key: 'vi_509_red_wrench', name: '', value: 1 });
+item({ key: 'vi_4741_butcher_s_bloodstained_apron', name: '', value: 1 });
+item({ key: 'vi_3065_star_wrath', name: '', value: 1 });
+item({ key: 'vi_3063_meowmere', name: '', value: 1 });
+item({ key: 'vi_3372_lunatic_cultist_mask', name: '', value: 1 });
+item({ key: 'vi_1504_spectre_robe', name: '', value: 1 });
+item({ key: 'vi_2769_cosmic_car_key', name: '', value: 1 });
+item({ key: 'vi_216_shackle', name: '', value: 1 });
+item({ key: 'vi_4415_stone_door', name: '', value: 1 });
+item({ key: 'vi_1681_skeleton_banner', name: '', value: 1 });
+item({ key: 'vi_283_seed', name: '', value: 1 });
+item({ key: 'vi_1173_grave_marker', name: '', value: 1 });
+item({ key: 'vi_4379_wyvern_kite', name: '', value: 1 });
+item({ key: 'vi_4378_xenon_moss', name: '', value: 1 });
+item({ key: 'vi_4377_krypton_moss', name: '', value: 1 });
+item({ key: 'vi_4376_rat_cage', name: '', value: 1 });
+item({ key: 'vi_4375_rat', name: '', value: 1 });
+item({ key: 'vi_4484_1_2_second_timer', name: '', value: 1 });
+item({ key: 'vi_4824_wet_bomb', name: '', value: 1 });
+item({ key: 'vi_4485_1_4_second_timer', name: '', value: 1 });
+item({ key: 'vi_5378_cursed_flare', name: '', value: 1 });
+item({ key: 'vi_5354_reflective_shades', name: '', value: 1 });
+item({ key: 'vi_5387_raynbro_s_pants', name: '', value: 1 });
+item({ key: 'vi_5386_raynbro_s_hoodie', name: '', value: 1 });
+item({ key: 'vi_5390_raynbro_s_hood', name: '', value: 1 });
+item({ key: 'vi_5338_aegis_fruit', name: '', value: 1 });
+item({ key: 'vi_5404_cosmic_ember_brick', name: '', value: 1, tile: 'v_672_cosmic_ember_brick' });
+item({ key: 'vi_5405_cryocore_brick', name: '', value: 1, tile: 'v_673_cryocore_brick' });
+item({ key: 'vi_5403_astra_brick', name: '', value: 1, tile: 'v_671_astra_brick' });
+item({ key: 'vi_346_safe', name: '', value: 1 });
+item({ key: 'vi_4829_cat_license', name: '', value: 1 });
+item({ key: 'vi_3335_demon_heart', name: '', value: 1 });
+item({ key: 'vi_4750_foodbarbarian_s_tattered_dragon_wings', name: '', value: 1 });
+item({ key: 'vi_3042_phase_dye', name: '', value: 1 });
+item({ key: 'vi_3024_skiphs_blood', name: '', value: 1 });
+item({ key: 'vi_3054_shadowflame_knife', name: '', value: 1 });
+item({ key: 'vi_5275_joja_cola', name: '', value: 1 });
+item({ key: 'vi_5278_pomegranate', name: '', value: 1 });
+item({ key: 'vi_5277_spicy_pepper', name: '', value: 1 });
+item({ key: 'vi_5437_shellphone', name: '', value: 1 });
+item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1 });
+item({ key: 'vi_2250_steampunk_chest', name: '', value: 1 });
+item({ key: 'vi_392_glass_wall', name: '', value: 1 });
+item({ key: 'vi_2699_weapon_rack', name: '', value: 1 });
+item({ key: 'vi_3552_blue_flame_and_silver_dye', name: '', value: 1 });
+item({ key: 'vi_5005_terraprisma', name: '', value: 1 });
+item({ key: 'vi_4604_exotic_chew_toy', name: '', value: 1 });
+item({ key: 'vi_4611_world_feeder_kite', name: '', value: 1 });
+item({ key: 'vi_4649_blue_jellyfish_kite', name: '', value: 1 });
+item({ key: 'vi_4796_dark_mage_s_tome', name: '', value: 1 });
+item({ key: 'vi_4553_plasma_lamp', name: '', value: 1 });
+item({ key: 'vi_4365_celestial_wand', name: '', value: 1 });
+item({ key: 'vi_331_jungle_spores', name: '', value: 1 });
+item({ key: 'vi_2430_slimy_saddle', name: '', value: 1 });
+item({ key: 'vi_4956_zenith', name: '', value: 1 });
+item({ key: 'vi_2798_laser_drill', name: '', value: 1 });
+item({ key: 'vi_2814_martian_chest', name: '', value: 1 });
+item({ key: 'vi_210_vine', name: '', value: 1 });
+item({ key: 'vi_4371_yellow_kite', name: '', value: 1 });
+item({ key: 'vi_4291_lemon', name: '', value: 1 });
+item({ key: 'vi_2493_king_slime_mask', name: '', value: 1 });
+item({ key: 'vi_1919_sugar_cookie', name: '', value: 1 });
+item({ key: 'vi_1912_eggnog', name: '', value: 1 });
+item({ key: 'vi_4023_grapes', name: '', value: 1 });
+item({ key: 'vi_4792_the_black_spot', name: '', value: 1 });
+item({ key: 'vi_3066_smooth_marble_block', name: '', value: 1 });
+item({ key: 'vi_1103_slush_block', name: '', value: 1 });
+item({ key: 'vi_2119_stone_slab', name: '', value: 1 });
+item({ key: 'vi_593_snow_block', name: '', value: 1 });
+item({ key: 'vi_3081_marble_block', name: '', value: 1 });
+item({ key: 'vi_1111_blue_berries', name: '', value: 1 });
+item({ key: 'vi_1115_red_husk', name: '', value: 1 });
+item({ key: 'vi_217_molten_hamaxe', name: '', value: 1 });
+item({ key: 'vi_122_molten_pickaxe', name: '', value: 1 });
+item({ key: 'vi_1827_bladed_glove', name: '', value: 1 });
+item({ key: 'vi_2263_white_dynasty_wall', name: '', value: 1 });
+item({ key: 'vi_330_obsidian_brick_wall', name: '', value: 1 });
+item({ key: 'vi_2433_stone_slab_wall', name: '', value: 1 });
+item({ key: 'vi_452_hornet_statue', name: '', value: 1 });
+item({ key: 'vi_453_bomb_statue', name: '', value: 1 });
+item({ key: 'vi_360_armor_statue', name: '', value: 1 });
+item({ key: 'vi_3711_wraith_statue', name: '', value: 1 });
+item({ key: 'vi_438_star_statue', name: '', value: 1 });
+item({ key: 'vi_446_skeleton_statue', name: '', value: 1 });
+item({ key: 'vi_458_cross_statue', name: '', value: 1 });
+item({ key: 'vi_3655_scorpion_statue', name: '', value: 1 });
+item({ key: 'vi_328_shadow_chest', name: '', value: 1 });
+item({ key: 'vi_2196_living_loom', name: '', value: 1 });
+item({ key: 'vi_916_shadewood_work_bench', name: '', value: 1 });
+item({ key: 'vi_35_iron_anvil', name: '', value: 1 });
+item({ key: 'vi_36_work_bench', name: '', value: 1 });
+item({ key: 'vi_3240_tall_gate', name: '', value: 1 });
+item({ key: 'vi_337_red_banner', name: '', value: 1 });
+item({ key: 'vi_3381_stardust_helmet', name: '', value: 1 });
+item({ key: 'vi_1765_vampire_pants', name: '', value: 1 });
+item({ key: 'vi_2859_lunar_cultist_robe', name: '', value: 1 });
+item({ key: 'vi_2857_lunar_cultist_hood', name: '', value: 1 });
+item({ key: 'vi_2998_summoner_emblem', name: '', value: 1 });
+item({ key: 'vi_1175_headstone', name: '', value: 1 });
+item({ key: 'vi_25_wooden_door', name: '', value: 1 });
+item({ key: 'vi_46_light_s_bane', name: '', value: 1 });
+item({ key: 'vi_2340_minecart_track', name: '', value: 1 });
 // 轨道族放置物（Minecart.PlaceTrack style：0 普通 / 1 压板(2492) / 2 左加速(2739)）。
 // key 沿用全量注册的 vanilla.json 命名（vi_<id>_<key>），只补 tile/placeStyle
-item({ key: 'vi_2492_PressureTrack', name: '', maxStack: 999, value: 1, tile: 'v_314_minecart_track', placeStyle: 1 });
-item({ key: 'vi_2739_BoosterTrack', name: '', maxStack: 999, value: 1, tile: 'v_314_minecart_track', placeStyle: 2 });
-item({ key: 'vi_498_mannequin', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4721_mushroom_beam', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_819_living_wood_door', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1458_obsidian_door', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3763_0x33_s_aviators', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_176_mud_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1569_vampire_knives', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_857_sandstorm_in_a_bottle', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_2292_fiberglass_fishing_pole', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5238_constellation', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_753_seaweed', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_2492_PressureTrack', name: '', value: 1, tile: 'v_314_minecart_track', placeStyle: 1 });
+item({ key: 'vi_2739_BoosterTrack', name: '', value: 1, tile: 'v_314_minecart_track', placeStyle: 2 });
+item({ key: 'vi_498_mannequin', name: '', value: 1 });
+item({ key: 'vi_4721_mushroom_beam', name: '', value: 1 });
+item({ key: 'vi_819_living_wood_door', name: '', value: 1 });
+item({ key: 'vi_1458_obsidian_door', name: '', value: 1 });
+item({ key: 'vi_3763_0x33_s_aviators', name: '', value: 1 });
+item({ key: 'vi_176_mud_block', name: '', value: 1 });
+item({ key: 'vi_1569_vampire_knives', name: '', value: 1 });
+item({ key: 'vi_857_sandstorm_in_a_bottle', name: '', value: 1 });
+item({ key: 'vi_2292_fiberglass_fishing_pole', name: '', value: 1 });
+item({ key: 'vi_5238_constellation', name: '', value: 1 });
+item({ key: 'vi_753_seaweed', name: '', value: 1 });
 // FTW_V2 物品补全（第二轮）
-item({ key: 'vi_3_stone_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_94_wood_platform', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_75_fallen_star', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_26_stone_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_214_hellstone_brick', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_93_wood_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_172_ash_block', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_118_hook', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_529_red_pressure_plate', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_183_glowing_mushroom', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_130_gray_brick_wall', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_352_keg', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_3_stone_block', name: '', value: 1 });
+item({ key: 'vi_94_wood_platform', name: '', value: 1 });
+item({ key: 'vi_75_fallen_star', name: '', value: 1 });
+item({ key: 'vi_26_stone_wall', name: '', value: 1 });
+item({ key: 'vi_214_hellstone_brick', name: '', value: 1 });
+item({ key: 'vi_93_wood_wall', name: '', value: 1 });
+item({ key: 'vi_172_ash_block', name: '', value: 1 });
+item({ key: 'vi_118_hook', name: '', value: 1 });
+item({ key: 'vi_529_red_pressure_plate', name: '', value: 1 });
+item({ key: 'vi_183_glowing_mushroom', name: '', value: 1 });
+item({ key: 'vi_130_gray_brick_wall', name: '', value: 1 });
+item({ key: 'vi_352_keg', name: '', value: 1 });
 
 // 不负责任的女妖啤酒厂 补全物品（占位收集品）
-item({ key: 'vi_5120_deer_thing', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5508_grim_old_barb', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5465_ram_rune', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5500_goat_s_tuft', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5499_froggy_neckband', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5507_balloony_beads', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5485_chicken_charm', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5502_cat_chime', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5504_turkey_wattle_necklace', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5506_crow_s_beak', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5503_dog_collar', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5534_fairy_choker', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5484_cow_bell', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5501_old_companion_locket', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5509_vampire_pendant', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5505_mean_goblin_s_spikes', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_5525_cursed_piper_flute', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_5120_deer_thing', name: '', value: 1 });
+item({ key: 'vi_5508_grim_old_barb', name: '', value: 1 });
+item({ key: 'vi_5465_ram_rune', name: '', value: 1 });
+item({ key: 'vi_5500_goat_s_tuft', name: '', value: 1 });
+item({ key: 'vi_5499_froggy_neckband', name: '', value: 1 });
+item({ key: 'vi_5507_balloony_beads', name: '', value: 1 });
+item({ key: 'vi_5485_chicken_charm', name: '', value: 1 });
+item({ key: 'vi_5502_cat_chime', name: '', value: 1 });
+item({ key: 'vi_5504_turkey_wattle_necklace', name: '', value: 1 });
+item({ key: 'vi_5506_crow_s_beak', name: '', value: 1 });
+item({ key: 'vi_5503_dog_collar', name: '', value: 1 });
+item({ key: 'vi_5534_fairy_choker', name: '', value: 1 });
+item({ key: 'vi_5484_cow_bell', name: '', value: 1 });
+item({ key: 'vi_5501_old_companion_locket', name: '', value: 1 });
+item({ key: 'vi_5509_vampire_pendant', name: '', value: 1 });
+item({ key: 'vi_5505_mean_goblin_s_spikes', name: '', value: 1 });
+item({ key: 'vi_5525_cursed_piper_flute', name: '', value: 1 });
 
 
 // ---- 阶段 5:v_ 图块放置物品自动注册 + 掉落连线 ----
@@ -682,47 +698,47 @@ import vanillaItemMeta from '../../public/sprites/vanilla.json';
 import { MUSIC_BOX_ITEM_BY_STYLE } from '../world/wiring/devices';
 /** 原版物品 id → 注册 key（wld 导入兜底映射：ITEM_MAP 之外的 id 不再跳过） */
 // ===================== 原版工具力道具补齐（锤/镐梯度,Item.cs 提取） =====================
-item({ key: 'vi_103_nightmare_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_104_the_breaker', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_122_molten_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_204_meteor_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_217_molten_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_367_pwnhammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_579_drax', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_654_ebonwood_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_657_rich_mahogany_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_660_pearlwood_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_776_cobalt_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_777_mythril_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_778_adamantite_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_787_hammush', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_797_flesh_grinder', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_798_deathbringer_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_922_shadewood_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_990_pickaxe_axe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1188_palladium_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1195_orichalcum_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1202_titanium_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1234_chlorophyte_warhammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1305_the_axe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1506_spectre_pickaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_1507_spectre_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3481_platinum_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3487_tungsten_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3493_lead_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3499_tin_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3505_copper_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3511_silver_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3517_gold_hammer', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_3525_stardust_hamaxe', name: '', maxStack: 999, value: 1 });
-item({ key: 'vi_4317_haemorrhaxe', name: '', maxStack: 999, value: 1 });
+item({ key: 'vi_103_nightmare_pickaxe', name: '', value: 1 });
+item({ key: 'vi_104_the_breaker', name: '', value: 1 });
+item({ key: 'vi_122_molten_pickaxe', name: '', value: 1 });
+item({ key: 'vi_204_meteor_hamaxe', name: '', value: 1 });
+item({ key: 'vi_217_molten_hamaxe', name: '', value: 1 });
+item({ key: 'vi_367_pwnhammer', name: '', value: 1 });
+item({ key: 'vi_579_drax', name: '', value: 1 });
+item({ key: 'vi_654_ebonwood_hammer', name: '', value: 1 });
+item({ key: 'vi_657_rich_mahogany_hammer', name: '', value: 1 });
+item({ key: 'vi_660_pearlwood_hammer', name: '', value: 1 });
+item({ key: 'vi_776_cobalt_pickaxe', name: '', value: 1 });
+item({ key: 'vi_777_mythril_pickaxe', name: '', value: 1 });
+item({ key: 'vi_778_adamantite_pickaxe', name: '', value: 1 });
+item({ key: 'vi_787_hammush', name: '', value: 1 });
+item({ key: 'vi_797_flesh_grinder', name: '', value: 1 });
+item({ key: 'vi_798_deathbringer_pickaxe', name: '', value: 1 });
+item({ key: 'vi_922_shadewood_hammer', name: '', value: 1 });
+item({ key: 'vi_990_pickaxe_axe', name: '', value: 1 });
+item({ key: 'vi_1188_palladium_pickaxe', name: '', value: 1 });
+item({ key: 'vi_1195_orichalcum_pickaxe', name: '', value: 1 });
+item({ key: 'vi_1202_titanium_pickaxe', name: '', value: 1 });
+item({ key: 'vi_1234_chlorophyte_warhammer', name: '', value: 1 });
+item({ key: 'vi_1262_chlorophyte_jackhammer', name: '', value: 1 });
+item({ key: 'vi_1305_the_axe', name: '', value: 1 });
+item({ key: 'vi_1506_spectre_pickaxe', name: '', value: 1 });
+item({ key: 'vi_1507_spectre_hamaxe', name: '', value: 1 });
+item({ key: 'vi_3481_platinum_hammer', name: '', value: 1 });
+item({ key: 'vi_3487_tungsten_hammer', name: '', value: 1 });
+item({ key: 'vi_3493_lead_hammer', name: '', value: 1 });
+item({ key: 'vi_3499_tin_hammer', name: '', value: 1 });
+item({ key: 'vi_3505_copper_hammer', name: '', value: 1 });
+item({ key: 'vi_3511_silver_hammer', name: '', value: 1 });
+item({ key: 'vi_3517_gold_hammer', name: '', value: 1 });
+item({ key: 'vi_3525_stardust_hamaxe', name: '', value: 1 });
+item({ key: 'vi_4317_haemorrhaxe', name: '', value: 1 });
 
 // 月事件触发物品（Player.cs:43294/43361：夜晚 && 无进行中月事件；Main.startPumpkinMoon/
 // startSnowMoon :10903-10940）。键用 vanilla.json 权威驼峰键（下方自动注册循环按此键
 // 跳过，避免同 vid 双注册）；原版 maxStack 20 / useTime 45（Item.cs:20377-21128）
-item({ key: 'vi_1844_PumpkinMoonMedallion', name: '', vid: 1844, maxStack: 20, value: 1, desc: '夜晚使用:召唤南瓜月' });
-item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, maxStack: 20, value: 1, desc: '夜晚使用:召唤霜月' });
+item({ key: 'vi_1844_PumpkinMoonMedallion', name: '', vid: 1844, value: 1, desc: '夜晚使用:召唤南瓜月' });
+item({ key: 'vi_1958_NaughtyPresent', name: '', vid: 1958, value: 1, desc: '夜晚使用:召唤霜月' });
 
 export const VANILLA_ITEM_KEY_BY_ID: Record<number, string> = {};
 const _vim = (vanillaItemMeta as unknown as { items: Record<string, { name: string; key: string }> }).items ?? {};
@@ -743,7 +759,7 @@ const MB_NO_SPRITE: Record<number, number> = { 6145: 99, 6146: 100 };
 for (const [mbVid, mbStyle] of Object.entries(MB_NO_SPRITE)) {
   const mbKey = `vi_${mbVid}_MusicBox${Number(mbVid) === 6146 ? 'Silence' : 'RainbowBoulder'}`;
   VANILLA_ITEM_KEY_BY_ID[Number(mbVid)] = mbKey; // 掉落/录音链按 vid 反查
-  item({ key: mbKey, name: '', maxStack: 1, value: 100000, tile: 'v_139_musicboxes', placeStyle: mbStyle });
+  item({ key: mbKey, name: '', value: 100000, tile: 'v_139_musicboxes', placeStyle: mbStyle });
 }
 for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
   const mbKey = VANILLA_ITEM_KEY_BY_ID[MUSIC_BOX_ITEM_BY_STYLE[mbStyle]];
@@ -752,7 +768,7 @@ for (let mbStyle = 0; mbStyle < 100; mbStyle++) {
   if (!mbDef) continue;
   mbDef.tile = 'v_139_musicboxes';
   mbDef.placeStyle = mbStyle;
-  mbDef.maxStack = 1;   // 原版唱片 maxStack 1（DefaultToMusicBox 非 stackable）
+  // maxStack 不覆写：DefaultToMusicBox（:48250-48267）不设 maxStack → 1456 默认 9999
   mbDef.value = 100000; // DefaultToMusicBox value = 10 金
 }
 
@@ -770,7 +786,7 @@ for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
   if (!fnDef) continue;
   fnDef.tile = 'v_207_water_fountains';
   fnDef.placeStyle = fnStyle;
-  fnDef.maxStack = 99;
+  // maxStack 不覆写：喷泉 case 无 maxStack 赋值 → 1456 默认 9999
 }
 void 0;
 
@@ -802,13 +818,13 @@ for (const [vid, t] of PAINT_TOOL_TABLE) {
 
 // ---- 宝石系统：gemcorn 4851-4857（Item.cs createTile=590 宝石树苗，style=宝石序号；
 // 种在石/苔上必须地下长成宝石树，见 growSaplings）----
-item({ key: 'vi_4851_GemTreeTopazSeed', name: '黄玉宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 0 });
-item({ key: 'vi_4852_GemTreeAmethystSeed', name: '紫水晶宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 1 });
-item({ key: 'vi_4853_GemTreeSapphireSeed', name: '蓝宝石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 2 });
-item({ key: 'vi_4854_GemTreeEmeraldSeed', name: '翡翠宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 3 });
-item({ key: 'vi_4855_GemTreeRubySeed', name: '红宝石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 4 });
-item({ key: 'vi_4856_GemTreeDiamondSeed', name: '钻石宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 5 });
-item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', maxStack: 999, value: 100, tile: 'v_590_gem_saplings', placeStyle: 6 });
+item({ key: 'vi_4851_GemTreeTopazSeed', name: '黄玉宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 0 });
+item({ key: 'vi_4852_GemTreeAmethystSeed', name: '紫水晶宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 1 });
+item({ key: 'vi_4853_GemTreeSapphireSeed', name: '蓝宝石宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 2 });
+item({ key: 'vi_4854_GemTreeEmeraldSeed', name: '翡翠宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 3 });
+item({ key: 'vi_4855_GemTreeRubySeed', name: '红宝石宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 4 });
+item({ key: 'vi_4856_GemTreeDiamondSeed', name: '钻石宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 5 });
+item({ key: 'vi_4857_GemTreeAmberSeed', name: '琥珀宝石橡实', value: 100, tile: 'v_590_gem_saplings', placeStyle: 6 });
 
 // ---- 阶段 6:功能道具(桶三态/绳圈) ----
 
@@ -1068,10 +1084,7 @@ import { TILE_KEY_BY_SHEET } from './tiles';
       d.placeStyle = f.placeStyle;
     }
   }
-  // 钱币 maxStack=100(原版;Inventory 100 进位依赖)
-  for (const vid of [71, 72, 73, 74]) {
-    const k = VANILLA_ITEM_KEY_BY_ID[vid];
-    if (k !== undefined && ITEM_BY_KEY[k] !== undefined) ITEM_DEFS[ITEM_BY_KEY[k]].maxStack = 100;
-  }
+  // 钱币 71-73 maxStack=100 已由 item() 的 VANILLA_MAX_STACK 表覆盖;
+  // 铂 74 无覆盖 = 9999（DoCoins :38570 只对 71-73 在恰 100 进位,铂币可堆至 9999）
   void filled;
 }

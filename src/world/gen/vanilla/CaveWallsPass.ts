@@ -250,3 +250,45 @@ export function runCaveWallVarietyPass(st: TileStore, rng: RNG, gs: GenState): v
     }
   }
 }
+
+/** DirtWallsIntoMudWallsInJungleAndJungleMinMax（cs:20963-21017）1:1：
+ *  ① 表层带（y < worldSurface+20）扫首/末个丛林草 60 列 → 丛林水平界
+ *    （原版存 GenVars.jungleMinX/MaxX——下游唯一读点 cs:18421 在更早的
+ *    SpreadingGrass 内、届时恒 -1，bug-for-bug 已在 WorldGen.ts 保留，故不入 GenState）；
+ *  ② 界内表层带的泥土墙 2 / 泥墙 59 → 丛林泥墙 15，边缘 2/3 列按 Next(2)/Next(3)
+ *    抖动放行（&& 短路求值序照原文）。注册序：LongMoss(20915) → 本 pass →
+ *    BeeLarva(21018)。2026-08-13 前整 pass 缺失 = 丛林地表背景墙全是泥土墙。
+ *  零结构写，只改 wall 数组（直接原版墙 id）。 */
+export function runJungleMudWallsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const bandY = Math.floor(gs.worldSurface) + 20;   // j < worldSurface+20.0
+  let minX = 0, maxX = 0;
+  let flag = false;
+  for (let i = 5; i < st.w - 5; i++) {
+    for (let j = 0; j < bandY; j++) {
+      if (st.flags[st.idx(i, j)] && st.type[st.idx(i, j)] === JUNGLE_GRASS) {
+        minX = i; flag = true; break;
+      }
+    }
+    if (flag) break;
+  }
+  flag = false;
+  for (let i = st.w - 5; i > 5; i--) {
+    for (let j = 0; j < bandY; j++) {
+      if (st.flags[st.idx(i, j)] && st.type[st.idx(i, j)] === JUNGLE_GRASS) {
+        maxX = i; flag = true; break;
+      }
+    }
+    if (flag) break;
+  }
+  for (let l = minX; l <= maxX; l++) {
+    for (let m = 0; m < bandY; m++) {
+      const wi = st.idx(l, m);
+      // 边缘带逐格掷骰（&& 左求值：内带 0 掷）
+      if (((l >= minX + 2 && l <= maxX - 2) || rng.nextInt(2) !== 0)
+        && ((l >= minX + 3 && l <= maxX - 3) || rng.nextInt(3) !== 0)
+        && (st.wall[wi] === 2 || st.wall[wi] === 59)) {
+        st.wall[wi] = 15;
+      }
+    }
+  }
+}

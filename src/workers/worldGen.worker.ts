@@ -53,9 +53,13 @@ ctx.onmessage = async (e) => {
         : JSON.parse(req.json ?? (await kvGetIdb(req.key ?? '')) ?? 'null') as import('../save/SaveFile').SaveData | null;
       if (!data) throw new Error('存档数据缺失');
       ctx.postMessage({ id: req.id, type: 'progress', phase: 'parse', p: 0.3 });
-      const { world, player } = loadSaveData(data);
+      // 原版 loadWorld 进度序列(WorldFile.cs):LoadWorldTiles gen[51] 按列(:2514)→
+      // 沉降 gen[27] 收敛比例 50-100%(:762)。p 现为收敛比例 0..1(settle.ts),
+      // 百分比区间在 mainFlow 端拼(:762 同款 50+p*50)
+      const { world, player } = loadSaveData(data,
+        (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'tiles', p }));
       await settleWorldLiquids(world, 'load',
-        (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p: 0.3 + p * 0.5 }));
+        (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p }));
       const { packet, transfer } = packWorld(world);
       // ★收窄:主线程只消费 difficulty/events(mainFlow.ts:275/278),整档 SaveData
       // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化)

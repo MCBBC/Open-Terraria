@@ -52,3 +52,29 @@ export const CRITTER_DEFS: CritterDef[] = [
 
 export const CRITTER_BY_KEY: Record<string, CritterDef> = {};
 for (const c of CRITTER_DEFS) CRITTER_BY_KEY[c.key] = c;
+
+/** NPC cs → 捕获物品 id（NPC.cs SetDefaults catchItem 赋值段：9268/9692/12806/
+ *  12819/13461/13475/13517/13543/13555/13754/14190-14261/16681）。螃蟹 67 原版
+ *  无 catchItem = 不可捕（net 对其无效）。 */
+export const CRITTER_CATCH_BY_NPC: Record<number, number> = {
+  46: 2019,   // 兔兔
+  74: 2015,   // 小鸟
+  299: 2018,  // 松鼠
+  300: 2003,  // 老鼠
+  355: 1992,  // 萤火虫（bait 20）
+  356: 1994,  // 蝴蝶（bait 5）
+  359: 2006,  // 蜗牛（bait 10）
+  361: 2121,  // 青蛙
+  362: 2122,  // 野鸭
+  377: 2740,  // 蚱蜢（bait 10）
+  602: 4359,  // 海鸥
+  442: 2889, 443: 2890, 444: 2891, 445: 2892, 446: 2893, 447: 2894,  // 金系六件
+};
+/** 捕获物品 → 释放的 NPC cs（Item.DefaultToCapturedCritter makeNPC，:47613-47626） */
+export const CRITTER_RELEASE_BY_ITEM: Record<number, number> = {};
+for (const [npcId, itemId] of Object.entries(CRITTER_CATCH_BY_NPC)) {
+  CRITTER_RELEASE_BY_ITEM[itemId] = Number(npcId);
+}
+/** NPC cs → 小动物 key（释放时反查；687 神秘青蛙不在小动物表——释放门走物品表查不到） */
+export const CRITTER_KEY_BY_NPC: Record<number, string> = {};
+for (const c of CRITTER_DEFS) CRITTER_KEY_BY_NPC[c.npc] = c.key;

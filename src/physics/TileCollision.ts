@@ -1,5 +1,5 @@
 // 分轴扫描 tile AABB 碰撞
-import { TILE } from '../core/constants';
+import { TILE, GRAVITY } from '../core/constants';
 import type { World } from '../world/World';
 
 export interface Body {
@@ -14,6 +14,13 @@ export interface Body {
   /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
    *  掉落物/弹幕/墓碑等不参与（原版它们不调 StepUp） */
   stepUp?: boolean;
+  /** StepDown 触发门。原版两处均为 == 精确等值（NPC.cs:54374 velocity.Y==0、
+   *  Player.cs:23252 velocity.Y==gravity）——语义 = 仅"贴地行走"吸附,空中实体不吸附。
+   *  本仓 NPC 族重力在碰撞【前】累加（贴地时 vy=GRAVITY≠0）,故 NPC 门取语义等价的
+   *  onGround；玩家取原版字面 vy===GRAVITY（'gravity'）。
+   *  ★曾用 vy>=0 宽门：低空飞行小动物（萤火虫/蝴蝶平飞 vy≥0）脚下 7~17px 有落面
+   *  即被瞬移按压 → "怪力按地+闪现"周期循环（飞行 AI 抬升后再次触发） */
+  stepDownGate?: 'grounded' | 'gravity';
   /** 液体位移减速因子（原版 waterMovementSpeed 族，NPC.cs:5946：水/岩浆 .5、蜂蜜 .25、
    *  微光 .375；dry=1）。Entity 基类缺省 1，Enemy 侧由 npcLiquid.updateNpcLiquid 写入 */
   liqFactor?: number;
@@ -320,9 +327,13 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   b.hitWall = false;
   b.hitHead = false;
   // 原版 StepUp/StepDown 在 TileCollision 之前用未受阻的意图速度探测
-  // （Player.cs:23252-23263 / NPC.cs:54377-54382）
+  // （Player.cs:23252-23263 / NPC.cs:54377-54382）。StepDown 门：玩家 vy===GRAVITY
+  // （原版字面 :23252）、NPC 族 onGround（原版 :54374 vy==0 在该时点=贴地语义；
+  // 本仓重力先加,==0 恒假,取等价门）——宽门 vy>=0 会把低空飞行小动物周期性
+  // 瞬移按压到地面（萤火虫/蝴蝶"怪力按地+闪现"根因）
   if (b.stepUp) {
-    if (b.vy >= 0) applyStepDown(b, world);
+    const gate = b.stepDownGate ?? 'grounded';
+    if (gate === 'gravity' ? b.vy === GRAVITY : b.onGround) applyStepDown(b, world);
     applyStepUp(b, world);
   }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)

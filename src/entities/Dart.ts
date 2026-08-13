@@ -870,6 +870,13 @@ interface DartStyle {
 const DART_STYLE: Record<number, DartStyle> = {
   // 38 哈比羽毛(NPC.cs:23483 弹型 38):14×14 aiStyle1 直飞,timeLeft 300(NPC 侧覆写)
   38: { w: 14, h: 14, rot: 'align90', life: 300, fallback: '#E8E0D0' },
+  // 129 符文爆弹（172 符文法师 :21228-21240）：14×14 穿墙直飞 timeLeft 300，
+  //  aiStyle 28（tileCollide false / penetrate -1）——穿墙不消
+  129: { w: 14, h: 14, rot: 'align90', life: 300, trail: { color: '#E8C85A', count: 1 }, fallback: '#F0D060' },
+  // 596 沙漠幽焰（533 沙漠精灵 :21104-21135）：8×8 aiStyle 107 慢速追踪、timeLeft 180、
+  //  ignoreWater；出生零速由 homing 拉向玩家（AI_107 收敛近似）
+  596: { w: 8, h: 8, rot: 'align90', life: 180, home: { range: 2400, spd: 5, lerp: 40 },
+    trail: { color: '#8A5AE8', count: 2 }, light: [0.6, 0.3, 0.9], fallback: '#9A6AF0' },
   // 55 黄蜂毒刺(NPC.cs:51185):10×10 直飞 timeLeft 300;尘 18 拖尾(:52612)
   55: { w: 10, h: 10, rot: 'align90', life: 300, trail: { color: '#B8A070', count: 1 }, fallback: '#D8C890' },
   // 81/82 木箭/燃烧箭(战士族 num172 :59797/:59821):10×10,重力 0.07@20(:54009);发射音 Item5

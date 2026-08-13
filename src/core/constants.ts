@@ -20,7 +20,9 @@ export const GRAVITY = 0.4; // px/tick^2
 export const MAX_FALL_SPEED = 10;
 export const PLAYER_WALK_ACCEL = 0.32;
 export const PLAYER_WALK_MAX = 3; // px/tick（15 mph）
-export const PLAYER_FRICTION = 0.72; // 地面摩擦系数（乘法）
+export const PLAYER_FRICTION = 0.72; // 地面摩擦系数（乘法）——旧模型遗留,两段模型用 RUN_*
+export const RUN_ACCELERATION = 0.08; // runAcceleration（Player.cs:2388,两段模型全速段）
+export const RUN_SLOWDOWN = 0.2;      // runSlowdown（:2390,制动/无输入减速加法基准）
 export const PLAYER_AIR_FRICTION = 0.94;
 // 掉落物独立物理（WorldItem.cs:418-450：空气 0.1/7、水 0.08/5、蜂蜜 0.05/3）——勿与玩家 GRAVITY 耦合
 export const ITEM_GRAVITY = 0.1;

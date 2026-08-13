@@ -65,7 +65,13 @@ function parseStatementTree(text) {
   for (const raw of lines) {
     const s = raw.trim();
     if (!s) continue;
-    if (s === '}') { if (stack.length > 1) stack.pop(); continue; }
+    if (s === '}') {
+      // switch 收尾：最后一个 case 无显式闭合，`}` 先终结 case 再关 switch
+      const top = stack[stack.length - 1];
+      if (top?.kind === 'case') stack.pop();
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
     if (s === '{') {
       const top = stack[stack.length - 1];
       if (top && (top.kind === 'if' || top.kind === 'switch' || top.kind === 'case') && !top.opened) {

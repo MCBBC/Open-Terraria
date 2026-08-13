@@ -156,6 +156,12 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // SpawnPoint 19605 < 本 pass < DyePlants 20126）：地表泥土墙洞 → 草墙 63/花墙 65——
     // Vines pass 花藤 382 的上游（藤头墙 ∈ {63,65,66,68} 才出花藤）
     { name: '草墙', run: vanillaGrassWall },
+    // 向日葵（原版 SunflowersPart2 cs:20043-20084）：w*0.002 次带状扫描，草 2 上方
+    // 空气处放 2×4 向日葵——普通种子向日葵唯一生成来源（SpreadingGrass 名义上的
+    // Sunflowers 段实为 remix 专属 18460-18559）。注册序：GrassWalls(19734) →
+    // SpawnStarterNPCs(19830，十周年专属→普通种子 no-op，备案跳过) → 本 pass →
+    // Trees(20085)。2026-08-13 前整 pass 缺失
+    { name: '向日葵', run: sunflowersSlot },
     // 栽树（原版 Planting Trees cs:20085，注册序 GrassWall(19734) < 本 pass <
     // AlchemyHerbs(20109)）——曾内嵌"表面"槽（地表矿石/倒木/陷阱/矿骨堆/草墙之前）,
     // 2026-08-13 归位（Batch D）
@@ -171,6 +177,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 地表植物（原版 GrassPlants cs:20232 + GlowingMushroomPlants cs:20278，注册序
     // Webs(20140) < 两者 < Vines(20338)）——曾内嵌"表面"槽,归位
     { name: '地表植物', run: grassPlantsSlot },
+    // 丛林植物P2（原版 JunglePlantsPart2 cs:20310-20337）：w*100 次尝试在丛林侧
+    // 地表丛林草上放大株植物 233（3×2 款式 Next(8)，失败回退 2×2 款式 Next(12)）。
+    // 注册序：GlowingMushroomPlants…(20267) → 本 pass → Vines(20338)。
+    // 2026-08-13 前整段缺失 = 丛林地表无大株植物
+    { name: '丛林植物P2', run: junglePlantsSlot },
     // 藤蔓（原版 Vines cs:20338）：六类藤蔓逐列生长 + 丛林蜂巢凹龛
     { name: '藤蔓', run: vanillaVines },
     // 地表花（原版 Flowers cs:20592）：花圃重帧，消费 gs.logX/logY
@@ -182,6 +193,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     { name: '宝石系统', run: vanillaGems },
     // 长苔藓（原版 LongMoss cs:20915）：苔藓块四向冒芽，位于 ExposedGems 之后
     { name: '长苔藓', run: vanillaLongMoss },
+    // 丛林墙（原版 DirtWallsIntoMudWallsInJungleAndJungleMinMax cs:20963-21017）：
+    // 丛林水平界扫描 + 界内表层带泥土墙 2/泥墙 59 → 丛林泥墙 15（边缘 Next(2)/
+    // Next(3) 抖动）。注册序：LongMoss(20915) → 本 pass → BeeLarva(21018)。
+    // 2026-08-13 前整 pass 缺失 = 丛林地表背景墙全是泥土墙
+    { name: '丛林墙', run: jungleMudWallsSlot },
     // 蜂巢幼虫（原版 BeeLarvaInBeehives cs:21018-21050，注册序 LongMoss(20915) <
     // 本 pass < SettleLiquidsPart2(21051)）：蜂巢 pass 只登记坐标，托台清空+幼虫
     // 放置推迟到这里——过早放置会被中途宝箱/装饰 pass 破坏
@@ -195,12 +211,24 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 液体中草本 KillTile/滴水石笋 373-375/墙 13·14·87 液体清零/祭坛下 232→226；
     // 帧规范化族由放置端保证,备案）——注册序本 pass(21327) < MicroBiomes(21785)
     { name: '瓦片清理', run: tileCleanupPass },
+    // 蜥蜴祭坛终保（原版 LihzahrdAltar cs:21753-21791）：重放祭坛 6 格+底行 226
+    // ——注册序 TileCleanup(21327) → 本 pass → MicroBiomes(21785)，对中途
+    // Pots/Traps/TileCleanup 的祭坛扰动做最终回滚（2026-08-13 前内嵌 TemplePass
+    // 末尾=执行位≈15911，Pots/Traps/TileCleanup 的扰动无人回滚，已外提归位）
+    { name: '蜥蜴祭坛', run: lihzahrdAltarSlot },
     // 原版 Micro Biomes(cs:21785:Campsites 21915 + MiningExplosives 21951),
     // 位于 Traps/Piles/Trees 之后、Lilypads/海藻(22131,=海滩装饰)之前
     { name: '微群系', run: vanillaMicroBiomes },
     // 水生植物（原版 LilypadsCattailsBambooAndSeaweed cs:22131）：睡莲/香蒲/竹/海藻
     // （注册序 Lilypads(22131) 在 ShellPiles(16385) 之后——贝壳堆已前移"水体沉降"后）
     { name: '水生植物', run: vanillaLilypads },
+    // 钟乳石宝石树（原版 SpeleothemsAndGemTrees cs:22196-22282）：先钟乳石扫描
+    // （蓝绿宝石洞 147/161 天花板）后宝石树（TryGrowingTreeByType 583-589）。
+    // 注册序 Lilypads(22131) → 本 pass → BrokenTrapCleanup(22283)——2026-08-13
+    // 前捆绑在"宝石系统"槽（≈20842 位执行）= 顺序偏差：早于 LongMoss(20915)/
+    // TileCleanup(21327)/MicroBiomes(21785)，错失长苔藓后的苔藓基座且受后置
+    // 清理 pass 扰动，已外提归位
+    { name: '钟乳石宝石树', run: speleothemSlot },
     // 断线陷阱清理（原版 BrokenTrapCleanup cs:22283：电线 BFS 连通网无陷阱/触发器
     // 对→整网拆除,含巨石回滚/孤儿陷阱击杀/矿轨压板复位）——注册序 Lilypads(22131)
     // < 本 pass < FinalCleanup(22304)。零掷骰
@@ -248,7 +276,7 @@ import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
-import { runCaveWallsPass, runCaveWallVarietyPass } from './vanilla/CaveWallsPass';
+import { runCaveWallsPass, runCaveWallVarietyPass, runJungleMudWallsPass } from './vanilla/CaveWallsPass';
 import { runOasisPass } from './vanilla/OasisPass';
 import { runCactusPalmTreesAndCoralPass } from './vanilla/StructuresPass';
 import { runTileCleanupPass } from './vanilla/TileCleanupPass';
@@ -266,6 +294,7 @@ import {
   runSurfaceOreAndStonePass, runFallenLogsPass, runDyePlantsPass, runVinesPass,
   runFlowersPass, runMushroomsPass, runLongMossPass, runLilypadsPass,
   runGrassPlantsPass, runGlowingMushroomPlantsPass,
+  runSunflowersPart2Pass, runJunglePlantsPart2Pass,
 } from './vanilla/SurfaceDecorPasses';
 import { runLivingTreesPass, runLivingTreeWallsPass } from './vanilla/LivingTreePass';
 import { runBeehivePass, runSpiderNestPass, runWebsInSpiderCavesPass, runBeeLarvaPass } from './vanilla/HiveSpiderPass';
@@ -273,7 +302,7 @@ import { runPilesPass } from './vanilla/PilesPass';
 import { runRemoveSurfaceWaterAboveSandPass, runFragileIcePass } from './vanilla/WaterIcePasses';
 import { tileRunner } from './vanilla/TileRunner';
 import { runDungeonPass } from './vanilla/DungeonPass';
-import { runTemplePass } from './vanilla/TemplePass';
+import { runTemplePass, runLihzahrdAltarPass } from './vanilla/TemplePass';
 import { runIslandHousePass } from './vanilla/IslandHousePass';
 import { runHellFortPass } from './vanilla/HellFortPass';
 import { runSwordShrinePass } from './vanilla/SwordShrinePass';
@@ -778,7 +807,42 @@ function vanillaGems({ store, rng }: GenCtx) {
   const gs = ctxGs[0];
   if (!gs) return;
   runExposedGemsPass(store, rng, gs);
+}
+
+/** SpeleothemsAndGemTrees（cs:22196-22282）——独立槽（清零批 2026-08-13
+ *  前捆绑在 vanillaGems 内 ≈20842 位执行，顺序偏差已归位，见"钟乳石宝石树"槽注释） */
+function speleothemSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
   runGemTreesPass(store, rng, gs);
+}
+
+/** SunflowersPart2（cs:20043-20084）——普通种子向日葵唯一生成来源 */
+function sunflowersSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runSunflowersPart2Pass(store, rng, gs);
+}
+
+/** JunglePlantsPart2（cs:20310-20337）——地表丛林大株植物 233 */
+function junglePlantsSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runJunglePlantsPart2Pass(store, rng, gs);
+}
+
+/** DirtWallsIntoMudWallsInJungle（cs:20963-21017）——丛林表层泥墙→丛林泥墙 15 */
+function jungleMudWallsSlot({ store, rng }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runJungleMudWallsPass(store, rng, gs);
+}
+
+/** LihzahrdAltar 终保 pass（cs:21753-21791）——TileCleanup 后重放祭坛 */
+function lihzahrdAltarSlot({ store }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  runLihzahrdAltarPass(store, gs);
 }
 
 // 洞穴墙（CaveWallsInEnclosedSpaces cs:17819）+ 墙变体（CaveWallVariety cs:16786）

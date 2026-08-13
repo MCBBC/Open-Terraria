@@ -113,6 +113,8 @@ export enum BuffType {
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
   Slow = 81,        // 缓慢(32)：moveSpeed ÷2（:25653-25655）——鹿角怪咆哮 800px 内
   Stoned = 82,      // 石化(156,美杜莎 480 蓄力直击 NPC.cs:56885-56888)：封全部输入
+  ChaosState = 83,  // 混沌状态(88,混乱之杖 1326 :44913 AddBuff(88,360) 每次使用刷新)：
+                    //   buff 期内再传送 → statLife-=max/7 可致死(:44904-44913,死因 13/14/15)
                     //   （:24942 control* 清零,frozen 同段）+ 变身瞬间 Hurt(20×难度,ByOther(5))
                     //   （:24924-24931,死因=DeathText.Petrified 碎成渣）
                     //   AddBuff(32,720t) 授予（NPC.cs:44609-44616）
@@ -212,6 +214,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Chilled]: { vanillaBuff: 46, descKey: 'BuffDescription.Chilled', fallbackName: '冰寒' },
   [BuffType.Frozen]: { vanillaBuff: 47, descKey: 'BuffDescription.Frozen', fallbackName: '冰冻' },
   [BuffType.Stoned]: { vanillaBuff: 156, descKey: 'BuffDescription.Stoned', fallbackName: '石化' },
+  [BuffType.ChaosState]: { vanillaBuff: 88, descKey: 'BuffDescription.ChaosState', fallbackName: '混沌状态' },
   // 食物三档：描述用原版 BuffDescription.WellFed*（"全面提升属性"语义一致，12 语言现成）
   [BuffType.WellFed]: { vanillaBuff: 26, descKey: 'BuffDescription.WellFed', fallbackName: '饱腹' },
   [BuffType.WellFed2]: { vanillaBuff: 206, descKey: 'BuffDescription.WellFed2', fallbackName: '很饱' },
