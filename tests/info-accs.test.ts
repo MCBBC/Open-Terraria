@@ -146,12 +146,18 @@ describe('换算器(Main.cs 字面)', () => {
     expect(u).toContain('LayerUnderground');
   });
 
-  it('mphOf:基准换算 + 液体修正(蜜/4 微光×0.375 水/2 merman 豁免)', () => {
+  it('mphOf:基准换算 + 液体修正(蜜/4 微光×0.375 水/2;门=!merman&&!ignoreWater;trident 免水)', () => {
     // avg × 216000/42240 ≈ ×5.1136
-    expect(mphOf(1, { honey: false, shimmer: false, water: false, merman: false })).toBeCloseTo(5.1136, 3);
-    expect(mphOf(1, { honey: true, shimmer: false, water: false, merman: false })).toBeCloseTo(5.1136 / 4, 3);
-    expect(mphOf(1, { honey: false, shimmer: true, water: false, merman: false })).toBeCloseTo(5.1136 * 0.375, 3);
-    expect(mphOf(1, { honey: false, shimmer: false, water: true, merman: false })).toBeCloseTo(5.1136 / 2, 3);
-    expect(mphOf(1, { honey: false, shimmer: false, water: true, merman: true })).toBeCloseTo(5.1136, 3);
+    const w = (over: Partial<Parameters<typeof mphOf>[1]>) => ({ honey: false, shimmer: false, water: false, merman: false, ignoreWater: false, trident: false, ...over });
+    expect(mphOf(1, w({}))).toBeCloseTo(5.1136, 3);
+    expect(mphOf(1, w({ honey: true }))).toBeCloseTo(5.1136 / 4, 3);
+    expect(mphOf(1, w({ shimmer: true }))).toBeCloseTo(5.1136 * 0.375, 3);
+    expect(mphOf(1, w({ water: true }))).toBeCloseTo(5.1136 / 2, 3);
+    expect(mphOf(1, w({ water: true, merman: true }))).toBeCloseTo(5.1136, 3);
+    // ignoreWater(水上行走)整块豁免:蜜也不减速(:46484)
+    expect(mphOf(1, w({ honey: true, ignoreWater: true }))).toBeCloseTo(5.1136, 3);
+    // trident(手持三叉戟 277)只免水分支,蜜仍减速(:46494)
+    expect(mphOf(1, w({ water: true, trident: true }))).toBeCloseTo(5.1136, 3);
+    expect(mphOf(1, w({ honey: true, trident: true }))).toBeCloseTo(5.1136 / 4, 3);
   });
 });

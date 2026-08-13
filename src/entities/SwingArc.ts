@@ -175,11 +175,9 @@ export class TrueNightsEdgeSlash extends Entity {
   /** 近墙阻尼标记 */
   private wallBlocked = false;
   private owner: ArcOwner;
-  private vx: number; private vy: number;
   private hitCd = new Map<number, number>();
   critChance = 0.04;
   armorPen = 0;
-  dead = false;
   /** oldPos 残影环（3 档 + 当前） */
   private hist: Array<{ x: number; y: number; rot: number }> = [];
 
@@ -397,5 +395,169 @@ export class NightsEdgeFly extends Entity {
     layer(this.cx, this.cy, this.rot, [80, 30, 160], op * 0.3, 0.8);
     layer(this.cx, this.cy, this.rot, [80, 40, 180], op * 0.7);
     layer(this.cx, this.cy, this.rot + this.ai0 * 0.01, [255, 255, 255], op * 0.3);
+  }
+}
+
+/** Zenith 933（AI_182_FinalFractal :40434-40515 + 绘制 :28040/:30174-30185/:30841）：
+ *  出生（Player.cs:48078-48121）：vel=(目标−MountedCenter)/2（非归一！轨道半径=|vel|）；
+ *  ai[0]=rand(−100,101) 轨道椭圆高；ai[1]=剑档案（首击 4956，后续档案表随机，
+ *  GetRandomProfileIndex 重掷 4956）。
+ *  AI：首帧 Item169；counter += Lerp(0.7,2, GetLerpValue(900,0,|vel|×2))（慢则快计）；
+ *  ≥120 消亡；锚点 = MountedCenter + vel（随玩家移动）；椭圆轨道
+ *  num8=|vel|+Late(0.5..1)×40（下限 60）绕锚点旋转 num7=π+sign(vx)×phase×2π
+ *  （phase=GetLerpValue(0,1,counter/60)）；rotation=num7+vel角+π/2（ai0<0 反旋）；
+ *  Opacity 淡入 0-5/淡出 115-120。
+ *  绘制：本体 = 【ai[1] 物品贴图】（:30181 LoadItem(ai[1])，基角 −π/4×spriteDir）
+ *  + 彩带拖尾（VertexStrip→canvas polyline，trailColor 见档案表）。
+ *  档案表（FinalFractalHelper.cs:81-168：剑物品 id → 全刃长/拖尾色）。 */
+const FRACTAL_PROFILES: Record<number, { len: number; color: [number, number, number] }> = {
+  65: { len: 48, color: [236, 62, 192] }, 1123: { len: 48, color: [138, 78, 229] },   // 1123=OurFavoriteColor 近似紫
+  46: { len: 48, color: [122, 66, 191] }, 121: { len: 76, color: [254, 158, 35] },
+  190: { len: 70, color: [107, 203, 0] }, 368: { len: 70, color: [236, 200, 19] },
+  674: { len: 70, color: [236, 200, 19] }, 273: { len: 70, color: [179, 54, 201] },
+  675: { len: 70, color: [179, 54, 201] }, 2880: { len: 70, color: [84, 234, 245] },
+  989: { len: 48, color: [91, 158, 232] }, 1826: { len: 76, color: [252, 95, 4] },
+  3063: { len: 76, color: [254, 194, 250] }, 3065: { len: 70, color: [237, 63, 133] },
+  757: { len: 70, color: [80, 222, 122] }, 155: { len: 70, color: [56, 78, 210] },
+  795: { len: 70, color: [237, 28, 36] }, 3018: { len: 80, color: [143, 215, 29] },
+  4144: { len: 45, color: [178, 255, 180] }, 3507: { len: 45, color: [235, 166, 135] },
+  4956: { len: 86, color: [178, 255, 180] },
+};
+
+/** GetRandomProfileIndex（:170-180）：档案表随机，命中 4956 重掷一次 */
+export function randomFractalProfile(excludeZenith = true): number {
+  const keys = Object.keys(FRACTAL_PROFILES).map(Number);
+  let id = keys[Math.floor(Math.random() * keys.length)];
+  if (excludeZenith && id === 4956) id = keys[Math.floor(Math.random() * keys.length)];
+  return id;
+}
+
+export class ZenithSword extends Entity {
+  w = 32; h = 32;
+  damage: number;
+  /** ai[0] 轨道椭圆高（−100..100） */
+  ai0: number;
+  /** ai[1] 剑档案（物品 id） */
+  ai1: number;
+  private counter = 0;
+  private opacity = 0;
+  private rot = 0;
+  private spriteDir = 1;
+  private owner: ArcOwner;
+  private hitCd = new Map<number, number>();
+  /** oldPos 拖尾环（彩带） */
+  private trail: number[] = [];
+  critChance = 0.04;
+  armorPen = 0;
+  dead = false;
+  lightRGB: [number, number, number] | null = null;
+
+  constructor(owner: ArcOwner, tx: number, ty: number, damage: number, profile: number) {
+    super();
+    this.owner = owner;
+    this.vx = (tx - owner.cx) / 2;   // :48116 vector44 = vector45/2（非归一——轨道半径）
+    this.vy = (ty - owner.cy) / 2;
+    this.damage = damage;
+    this.ai0 = Math.floor(Math.random() * 201) - 100;
+    this.ai1 = profile;
+  }
+
+  /** GetLerpValue(from,to,t,clamped) 语义 */
+  private static lerpV(a: number, b: number, t: number): number {
+    if (t <= Math.min(a, b)) return 0;
+    if (t >= Math.max(a, b)) return 1;
+    if (a > b) return (t - a) / (b - a);   // 递减区间
+    return (t - a) / (b - a);
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (this.netPuppet) { this.netPuppetStep(); return; }
+    if (this.counter === 0) game.playSfxFiles(['Item_169'], 1, this.cx, this.cy);   // :40439
+    const spd = Math.hypot(this.vx, this.vy);
+    const lv = ZenithSword.lerpV(900, 0, spd * 2);      // GetLerpValue(900,0,|vel|×2)
+    this.counter += 0.7 + (2 - 0.7) * lv;               // Lerp(0.7,2,lv)
+    if (this.counter >= 120) { this.dead = true; return; }
+    const phase = ZenithSword.lerpV(0, 1, this.counter / 60);
+    const va = Math.atan2(this.vy, this.vx);
+    const num6 = this.vx > 0 ? 1 : -1;
+    const num7 = Math.PI + num6 * phase * Math.PI * 2;
+    let num8 = spd + ZenithSword.lerpV(0.5, 1, phase) * 40;
+    if (num8 < 60) num8 = 60;
+    // 锚点 = MountedCenter + vel（随玩家移动——:40466）
+    const ax = this.owner.cx + this.vx, ay = this.owner.cy + this.vy;
+    // 椭圆轨道（:40474-40478）+ 起始回拉（vector3 :40479-40480）
+    const spinX = Math.cos(num7) * num8;
+    const spinY = Math.sin(num7) * this.ai0 * (2 + (1 - 2) * lv);
+    const ca = Math.cos(va), sa = Math.sin(va);
+    const pull = (1 - ZenithSword.lerpV(0, 0.5, phase));
+    const pullX = pull * num6 * -num8 * 0.1;
+    const pullY = pull * -this.ai0 * 0.3;
+    this.x = ax + (ca * spinX - sa * spinY) + pullX - this.w / 2;
+    this.y = ay + (sa * spinX + ca * spinY) + pullY - this.h / 2;
+    this.rot = num7 + va + Math.PI / 2;
+    this.spriteDir = this.vx > 0 ? 1 : -1;
+    if (this.ai0 < 0) {
+      this.rot = Math.PI + num6 * phase * (-Math.PI * 2) + va + Math.PI / 2;   // 反旋（:40488-40494）
+      this.spriteDir = this.vx > 0 ? -1 : 1;
+    }
+    this.trail.push(this.cx, this.cy);
+    if (this.trail.length > 20) this.trail.splice(0, this.trail.length - 20);
+    this.opacity = ZenithSword.lerpV(0, 5, this.counter) * ZenithSword.lerpV(120, 115, this.counter);
+    const prof = FRACTAL_PROFILES[this.ai1] ?? { len: 50, color: [255, 255, 255] as [number, number, number] };
+    this.lightRGB = [prof.color[0] / 255 * 0.5 * this.opacity, prof.color[1] / 255 * 0.5 * this.opacity, prof.color[2] / 255 * 0.5 * this.opacity];
+    // 拖尾尘（profile.dustMethod → StripDust 1/9×1-3 粒——降采样近似）
+    if (phase < 1 && Math.random() < 0.35) {
+      game.spawnParticles(this.cx, this.cy, `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`,
+        1, 1.2, { life: 20 });
+    }
+    // 命中（穿透 -1 + 10t 免疫）
+    for (const [k, v] of this.hitCd) {
+      if (v <= 1) this.hitCd.delete(k); else this.hitCd.set(k, v - 1);
+    }
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] } };
+      if (e.dead || (this.hitCd.get(e.id) ?? 0) > 0) continue;
+      if (!(this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y)) continue;
+      const crit = Math.random() < this.critChance;
+      const dmg = crit ? this.damage * 2 : this.damage;
+      playEnemyHitSound(game, e);
+      e.hurt(dmg, this.spriteDir * 6.5, 0, game, this.armorPen, crit);
+      game.addDamageNumber(this.cx, this.cy, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
+      this.hitCd.set(e.id, 10);
+    }
+  }
+
+  draw(r: { canvas: HTMLCanvasElement; atlas?: unknown }): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx || this.opacity <= 0.01) return;
+    const prof = FRACTAL_PROFILES[this.ai1] ?? { len: 50, color: [255, 255, 255] as [number, number, number] };
+    // 彩带拖尾（VertexStrip→polyline，lighter）
+    if (this.trail.length >= 4) {
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.strokeStyle = `rgba(${prof.color[0]},${prof.color[1]},${prof.color[2]},${0.5 * this.opacity})`;
+      ctx.lineWidth = prof.len / 2;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      ctx.beginPath();
+      ctx.moveTo(this.trail[0], this.trail[1]);
+      for (let i = 2; i < this.trail.length; i += 2) ctx.lineTo(this.trail[i], this.trail[i + 1]);
+      ctx.stroke();
+      ctx.restore();
+    }
+    // 本体 = ai[1] 物品贴图（:30181-30186：LoadItem(ai[1])，基角 −π/4×spriteDir）
+    const icon = (r.atlas as unknown as { vicon?: (id: number) => { img: HTMLImageElement; sx: number; sy: number; sw: number; sh: number } | null } | undefined)?.vicon?.(this.ai1);
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot - Math.PI / 4 * this.spriteDir * -1);
+    if (icon) {
+      ctx.drawImage(icon.img, icon.sx, icon.sy, icon.sw, icon.sh, -icon.sw / 2, -icon.sh / 2, icon.sw, icon.sh);
+    } else {
+      ctx.fillStyle = `rgb(${prof.color[0]},${prof.color[1]},${prof.color[2]})`;
+      ctx.fillRect(-16, -16, 32, 32);
+    }
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 }

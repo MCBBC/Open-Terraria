@@ -130,19 +130,26 @@ describe('轨道帧连接与邻接防护', () => {
     expect(st.frameX[st.idx(12, 10)]).toBe(3);   // 新右端
   });
 
-  it('锤击（pound）斜坡中段：双侧全连接同型项间循环（Minecart.cs:1079-1112）', () => {
+  it('锤击（pound）分叉成形：先补后轨、再换前轨（Minecart.cs:1079-1112 原版锤分叉语义）', () => {
     const st = new TileStore(30, 20);
-    // 左邻高一格 + 右邻低一格 → 中格可取 8（左 TOP 右 BOTTOM）或 9（镜像）
+    // 四个对角邻格都有轨道 → mask = 1|4|8|32 = 45，同时容纳
+    // frame 8（左 TOP 右 BOTTOM，conn 33）与 frame 9（左 BOTTOM 右 TOP，conn 12）
     line(st, 10, 9, 1);
-    line(st, 11, 10, 1);
+    line(st, 10, 11, 1);
+    line(st, 12, 9, 1);
     line(st, 12, 11, 1);
-    // 邻接为斜向（左上/右下）：mask = 1|32 = 33 → 候选 8/9
-    const before = st.frameX[st.idx(11, 10)];
-    expect(before === 8 || before === 9).toBe(true);
+    line(st, 11, 10, 1);
+    const mid = st.idx(11, 10);
+    expect(st.frameX[mid]).toBe(8);
+    expect(st.frameY[mid]).toBe(0xFFFF);        // 无后轨
+    // 第一锤：后轨循环先命中 → 补出后轨 9（前轨保持 8）→ 分叉成形
     expect(frameTrack(st, 11, 10, true)).toBe(true);
-    const after = st.frameX[st.idx(11, 10)];
-    expect(after === 8 || after === 9).toBe(true);
-    expect(after).not.toBe(before);   // 循环切换到另一同型全连接项
+    expect(st.frameX[mid]).toBe(8);
+    expect(st.frameY[mid]).toBe(9);
+    // 第二锤：后轨循环到头（num5 越界回 -1）→ 前轨切到 9、后轨撤销
+    expect(frameTrack(st, 11, 10, true)).toBe(true);
+    expect(st.frameX[mid]).toBe(9);
+    expect(st.frameY[mid]).toBe(0xFFFF);
   });
 
   it('FlipSwitchTrack 加速轨：左右向循环（Minecart.cs:1320-1324 pound 路径）', () => {
@@ -214,33 +221,33 @@ describe('矿车坐骑族数据面', () => {
 // ---------------------------------------------------------------------------
 describe('矿车物理算例', () => {
   it('贴轨加速 0.04/tick，上限 maxRunSpeed 13（mounts[6]）', () => {
-    const st = new TileStore(80, 30);
-    line(st, 8, 12, 40);
+    const st = new TileStore(220, 30);
+    line(st, 8, 12, 200);
     const { cart, p, game } = mountedCart(st, 9, 12);
     p.inputX = 1;
-    for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
+    for (let t = 0; t < 350; t++) cart.fixedUpdate(1 / 60, game);
     expect(cart.vx).toBe(13);
     expect(cart.onTrackNow).toBe(true);
   });
 
   it('SuperCart 档：上限 20 / 加速 0.1（Mount.cs:371-379 + _shouldSuperCart）', () => {
-    const st = new TileStore(80, 30);
-    line(st, 8, 12, 40);
+    const st = new TileStore(280, 30);
+    line(st, 8, 12, 260);
     const { cart, p, game } = mountedCart(st, 9, 12);
     cart.superCart = true;
     p.inputX = 1;
-    for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
+    for (let t = 0; t < 250; t++) cart.fixedUpdate(1 / 60, game);
     expect(cart.runSpeed).toBe(20);
     expect(cart.vx).toBe(20);
   });
 
   it('木质车 13：加速 0.03/tick、上限 10', () => {
-    const st = new TileStore(80, 30);
-    line(st, 8, 12, 40);
+    const st = new TileStore(280, 30);
+    line(st, 8, 12, 260);
     const { cart, p, game } = mountedCart(st, 9, 12, 13);
     p.inputX = 1;
-    for (let t = 0; t < 2; t++) cart.fixedUpdate(1 / 60, game);
-    expect(cart.vx).toBeCloseTo(0.03, 5);
+    cart.fixedUpdate(1 / 60, game);
+    expect(cart.vx).toBeCloseTo(0.03, 5);   // 首帧净加速 = acceleration
     for (let t = 0; t < 400; t++) cart.fixedUpdate(1 / 60, game);
     expect(cart.vx).toBe(10);
   });
@@ -310,49 +317,63 @@ describe('矿车物理算例', () => {
     expect(cart.cartRampTime).toBe(rampAtLaunch - 1);
   });
 
-  it('水中减速：湿态 TrackCollision 速度 ×0.5（:27802-27806 num108）', () => {
-    const run = (wet: boolean): number => {
-      const st = new TileStore(80, 30);
-      line(st, 8, 12, 40);
-      const { cart, p, game } = mountedCart(st, 9, 12);
-      cart.vx = 6;
-      p.inWater = wet;
-      const x0 = cart.x;
-      for (let t = 0; t < 20; t++) cart.fixedUpdate(1 / 60, game);
-      return cart.x - x0;
-    };
-    const dry = run(false), wet = run(true);
-    expect(dry).toBeGreaterThan(0);
-    expect(wet).toBeGreaterThan(0);
-    expect(wet).toBeLessThan(dry * 0.75);   // 轨上位移约减半
-  });
+  it('液体缩放结构：湿/蜂蜜/微光只缩放 TrackCollision 采样速度，净位移还原（:27802-27811 num108）',
+    () => {
+      // 原版 velocity *= num108 → TrackCollision → velocity /= num108：位置积分用还原后的
+      // 速度——平轨上湿车不降速（液体只影响轨内子段采样状态机）
+      const run = (liq: 'dry' | 'water' | 'honey' | 'shimmer'): number => {
+        const st = new TileStore(80, 30);
+        line(st, 8, 12, 40);
+        const { cart, p, game } = mountedCart(st, 9, 12);
+        cart.vx = 6;
+        if (liq === 'water') p.inWater = true;
+        if (liq === 'honey') p.inHoney = true;
+        if (liq === 'shimmer') p.inShimmer = true;
+        const x0 = cart.x;
+        for (let t = 0; t < 20; t++) cart.fixedUpdate(1 / 60, game);
+        return cart.x - x0;
+      };
+      const dry = run('dry');
+      expect(dry).toBeGreaterThan(0);
+      expect(run('water')).toBeCloseTo(dry, 5);
+      expect(run('honey')).toBeCloseTo(dry, 5);
+      expect(run('shimmer')).toBeCloseTo(dry, 5);
+    });
 });
 
 // ---------------------------------------------------------------------------
 // D. 脱轨链（Player.cs:26344-26360 onWrongGround + DryCollision + 摔伤）
 // ---------------------------------------------------------------------------
 describe('脱轨：落地面 / 刹车 / 下车 / 摔伤', () => {
-  /** 开放端轨道（8,12)-(10,12) + y=20 石板地面 */
+  /** 开放端轨道（8,12)-(10,12) + 石板地面（宽地面防滑出边缘） */
   function derailWorld(floorY = 20): { st: TileStore; world: World } {
-    const world = new World(40, floorY + 8, 42, 'cart-derail');
+    const world = new World(70, floorY + 8, 42, 'cart-derail');
     const st = world.store;
     line(st, 8, 12, 2);
     seg(st, 10, 12, 14);   // 右开放端（L=-1,R=1）
     frameTrack(st, 9, 12, false);
-    for (let x = 4; x < 24; x++) st.setTile(x, floorY, STONE);
+    for (let x = 4; x < 66; x++) st.setTile(x, floorY, STONE);
     return { st, world };
+  }
+
+  /** 推进到稳定落地（脱轨 + vy 归零 + 已离开轨道高度层），再补一 tick 让 onWrongGround 就位 */
+  function runToGround(cart: Minecart, game: GameHooks, floorY: number, maxT = 600): boolean {
+    let landed = false;
+    for (let t = 0; t < maxT && !landed; t++) {
+      cart.fixedUpdate(1 / 60, game);
+      // 需排除开放端抛出瞬间"离轨但仍在轨高"的瞬态（该帧 vy 尚未积累）
+      landed = !cart.onTrackNow && cart.vy === 0 && cart.y > (12 + 2) * TILE;
+    }
+    if (!landed) return false;
+    cart.fixedUpdate(1 / 60, game);   // 下一 tick 开头结算 onWrongGround
+    return cart.onWrongGround;
   }
 
   it('开放端脱轨：抛出后落石板地面停住（不穿地、vy 归零）', () => {
     const { st } = derailWorld(20);
     const { cart, game } = mountedCart(st, 8, 12);
     cart.vx = 8;
-    let landed = false;
-    for (let t = 0; t < 400 && !landed; t++) {
-      cart.fixedUpdate(1 / 60, game);
-      landed = !cart.onTrackNow && cart.vy === 0 && cart.onWrongGround;
-    }
-    expect(landed).toBe(true);
+    expect(runToGround(cart, game, 20)).toBe(true);
     expect(cart.mounted).toBe(true);
     expect(cart.y).toBeGreaterThan(15 * TILE);          // 已落到 y=20 附近
     expect(cart.y).toBeLessThan(20 * TILE);             // 未穿入石板
@@ -363,12 +384,7 @@ describe('脱轨：落地面 / 刹车 / 下车 / 摔伤', () => {
     const { st } = derailWorld(20);
     const { cart, p, game } = mountedCart(st, 8, 12);
     cart.vx = 8;
-    let grounded = false;
-    for (let t = 0; t < 400 && !grounded; t++) {
-      cart.fixedUpdate(1 / 60, game);
-      grounded = cart.onWrongGround;
-    }
-    expect(grounded).toBe(true);
+    expect(runToGround(cart, game, 20)).toBe(true);
     const cartX = cart.x;
     p.inputX = 1;                       // 方向键按下边沿
     cart.fixedUpdate(1 / 60, game);
@@ -383,12 +399,7 @@ describe('脱轨：落地面 / 刹车 / 下车 / 摔伤', () => {
     const { st } = derailWorld(20);
     const { cart, game } = mountedCart(st, 8, 12);
     cart.vx = 8;
-    let grounded = false;
-    for (let t = 0; t < 400 && !grounded; t++) {
-      cart.fixedUpdate(1 / 60, game);
-      grounded = cart.onWrongGround;
-    }
-    expect(grounded).toBe(true);
+    expect(runToGround(cart, game, 20)).toBe(true);
     const v0 = cart.vx;
     expect(v0).toBeGreaterThanOrEqual(1);
     cart.fixedUpdate(1 / 60, game);
@@ -398,25 +409,20 @@ describe('脱轨：落地面 / 刹车 / 下车 / 摔伤', () => {
   });
 
   it('脱轨高空落地摔伤：num10>25 → (num10-25)×10（:25005-25091）；矮落无伤', () => {
-    // 高落：轨道 y=12，石板 y=40 → 落点 tileY≈36，fallStart≈9 → num10≈27
+    // 高落：轨道 y=12（fallStart=trunc(146/16)=9），石板 y=40 → 落点 y=588 → tileY=36
+    // → num10 = 36-9 = 27 > 25 → 摔伤 (27-25)×10 = 20
     const { st, world } = derailWorld(40);
     expect(world.store.h).toBeGreaterThanOrEqual(44);
     const { cart, p, game } = mountedCart(st, 8, 12);
     cart.vx = 8;
-    let grounded = false;
-    for (let t = 0; t < 600 && !grounded; t++) {
-      cart.fixedUpdate(1 / 60, game);
-      grounded = cart.onWrongGround;
-    }
-    expect(grounded).toBe(true);
-    const num10 = Math.trunc(cart.y / 16) - 12;
+    expect(runToGround(cart, game, 40, 800)).toBe(true);
+    const num10 = Math.trunc(cart.y / 16) - 9;          // fallStart = 9（轨面几何）
     expect(num10).toBeGreaterThan(25);
     expect(p.lastDamageCause?.kind).toBe('fell');
-    const dmg = (num10 - 25) * 10;
     expect(p.hp).toBeLessThan(p.maxHp);
-    expect(p.maxHp - p.hp).toBe(dmg);
+    expect(p.maxHp - p.hp).toBe((num10 - 25) * 10);
 
-    // 矮落对照（y=20 石板 → num10≈7 < 25）：无摔伤
+    // 矮落对照（y=20 石板 → num10=7 < 25）：无摔伤
     const low = derailWorld(20);
     const { cart: c2, p: p2, game: g2 } = mountedCart(low.st, 8, 12);
     c2.vx = 8;
@@ -486,19 +492,20 @@ describe('矿车撞敌伤害', () => {
     fixedRand();
     const { calls, run } = cartWithEnemy(13, 10, { ex: 9 * 16, ey: 12 * 16 });
     run();
-    // base = 15+30×(10/10) = 45 → +15% = trunc(51.75) = 51
-    expect(calls[0].dmg).toBe(51);
+    // base = 15+30×(10/10) = 45 → DamageVar +15% = round(51.75) = 52
+    expect(calls[0].dmg).toBe(52);
   });
 
-  it('SuperCart 伤害档 50+100×速比（:28814-28817）', () => {
+  it('SuperCart 伤害档 50+100×速比（:28814-28817；速比分母 = RunSpeed 20）', () => {
     fixedRand();
     const { calls, run } = cartWithEnemy(6, 13, { superCart: true, ex: 9 * 16, ey: 12 * 16 });
     run();
-    // base = 50+100×1 = 150 → +15% = trunc(172.5) = 172
-    expect(calls[0].dmg).toBe(172);
+    // 速比 = 13/20 = 0.65（分母是 SuperCart 的 RunSpeed 20，Mount.cs:480-486）
+    // base = 50+100×0.65 = 115 → +15% = round(132.25) = 132
+    expect(calls[0].dmg).toBe(132);
   });
 
-  it('hardMode ×1.5 且 expertMode ×1.5（:28818-28822）', () => {
+  it('hardMode ×1.5 且 expertMode ×1.5（:28818-28822，(int) 截断）', () => {
     fixedRand();
     const both = cartWithEnemy(6, 13, { hardMode: true, expert: true, ex: 9 * 16, ey: 12 * 16 });
     both.run();
@@ -506,14 +513,17 @@ describe('矿车撞敌伤害', () => {
     expect(both.calls[0].dmg).toBe(207);
   });
 
-  it('命中盒按速度扩张：vx>1 右扩 15px、|vx|>10 再扩 10px（:27229-27244）', () => {
+  it('命中盒按速度扩张：vx>1 右扩 15px、vx>10 再扩 10px（:27229-27244）', () => {
     fixedRand();
-    // 敌怪在车左侧 18px（车盒外、扩张盒内）：vx=13 时命中
-    const fast = cartWithEnemy(6, 13, { ex: 9 * 16 + 2 - 25, ey: 12 * 16 });
-    const cartX = 9 * 16 + 2 - 10;   // 车左缘
-    void cartX;
+    // 敌怪在车盒右侧紧贴（车盒 x∈[144,164)，敌盒 x∈[164,184)）：
+    // 不扩张则两盒相切不命中；vx=13 → 扩张 +25px 后命中
+    const fast = cartWithEnemy(6, 13, { ex: 164, ey: 12 * 16 + 4 });
     fast.run();
     expect(fast.calls.length).toBe(1);
+    // 速度不足门（spd≤4）：无扩张也不命中
+    const slow = cartWithEnemy(6, 0.5, { ex: 164, ey: 12 * 16 + 4 });
+    slow.run();
+    expect(slow.calls.length).toBe(0);
   });
 });
 

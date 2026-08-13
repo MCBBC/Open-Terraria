@@ -2856,6 +2856,25 @@ export class UI {
       iconUrl: this.game ? iconUrl(this.game, it.vanillaId) || '' : '',
     }));
     this.npcShop.open(title, entries, copper, happinessPct);
+    // 懒加载晚到升级(2026-08-13 枚举 review):开店瞬间 iconUrl miss(空串/程序化
+    // 兜底)此前会冻结到关店——refreshAll 不触 npcShop。有界轮询就绪后原地补图,
+    // 关店/超时即停(iconCache 只缓存命中,iconUrl 天然可升级)
+    const g = this.game;
+    if (g) {
+      const initial = new Map(entries.map((e) => [e.vanillaId, e.iconUrl]));
+      let tries = 0;
+      const timer = setInterval(() => {
+        const shop = this.npcShop;
+        if (!shop || !shop.isOpen || ++tries > 15) { clearInterval(timer); return; }
+        for (const e of entries) {
+          const url = iconUrl(g, e.vanillaId);
+          if (url && url !== initial.get(e.vanillaId)) {
+            initial.set(e.vanillaId, url);
+            shop.setRowIcon(e.vanillaId, url);
+          }
+        }
+      }, 600);
+    }
   }
 
   /** NPC 快乐度详情浮层（ReportHappiness.Interact） */

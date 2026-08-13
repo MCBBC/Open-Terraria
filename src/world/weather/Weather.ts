@@ -321,6 +321,7 @@ export class WeatherState {
     this.updateCoinRain(ctx);
     this.updateSlimeRain(ctx);
     this.updateAmbienceLoops(ctx);
+    this.updateRipples(Math.max(1, ctx.dayRate));
   }
 
   // ================= 天气环境音循环（SceneState.cs:190-191/235-297） =================

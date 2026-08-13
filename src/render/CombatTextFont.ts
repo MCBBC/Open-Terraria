@@ -37,6 +37,32 @@ export function combatFontReady(crit: boolean): boolean {
   return READY[crit ? 1 : 0];
 }
 
+/**
+ * 染色字形缓存:XNA DrawString 的 color 乘进纹理(SpriteFont 白字 × tint);
+ * Canvas 的 drawImage 不受 fillStyle 影响——必须离屏预染(source-atop 只铺
+ * 到字形不透明像素上,位图字形 alpha 近二值=纯染色)。键 = 字体|字形|颜色,
+ * 影层暗化色(×0.3)作独立键。上限清空防膨胀(色种有限,实测极小)
+ */
+const tintCache = new Map<string, HTMLCanvasElement>();
+function tintedGlyph(fi: number, gi: number, fill: string): HTMLCanvasElement {
+  const key = `${fi}|${gi}|${fill}`;
+  const hit = tintCache.get(key);
+  if (hit) return hit;
+  const f = fi === 1 ? FONTS.Combat_Crit : FONTS.Combat_Text;
+  const img = TEX[fi]!;
+  const g = f.glyphs[gi];
+  const c = document.createElement('canvas');
+  c.width = g.width; c.height = g.height;
+  const cx = c.getContext('2d')!;
+  cx.drawImage(img, g.x, g.y, g.width, g.height, 0, 0, g.width, g.height);
+  cx.globalCompositeOperation = 'source-atop';
+  cx.fillStyle = fill;
+  cx.fillRect(0, 0, g.width, g.height);
+  if (tintCache.size > 512) tintCache.clear();
+  tintCache.set(key, c);
+  return c;
+}
+
 /** MeasureString（单行数字,XNA 语义:每字符 advance 后 +spacing,含尾字符）;
  *  高 = lineSpacing */
 export function combatMeasure(text: string, crit: boolean): { w: number; h: number } {
@@ -78,19 +104,19 @@ export function drawCombatText(
     const dx = layer === 0 ? -targetScale : layer === 1 ? targetScale : 0;
     const dy = layer === 2 ? -targetScale : layer === 3 ? targetScale : 0;
     // 颜色（:61800-61828):影层 RGB×num15×alpha×0.3(本色调暗);本体 RGB×num15×alpha。
-    // ★alpha 两层都不再乘额外系数(影层 A=num15×alpha,曾误乘 0.3)
+    // alpha 用 globalAlpha 施加;RGB 经 tintedGlyph 染进字形缓存
     const k = isShadow ? 0.3 : 1;
     ctx.globalAlpha = alpha * num15;
-    ctx.fillStyle = `rgba(${Math.round(rgb[0] * k)},${Math.round(rgb[1] * k)},${Math.round(rgb[2] * k)},1)`;
     let x = -m.w / 2 + dx;
     const y0 = -m.h / 2 + dy;
+    const fill = `rgb(${Math.round(rgb[0] * k)},${Math.round(rgb[1] * k)},${Math.round(rgb[2] * k)})`;
     for (let i = 0; i < text.length; i++) {
       const gi = CHAR_INDEX[fi].get(text.charCodeAt(i));
       if (gi === undefined) { x += 8; continue; }
       const [l, wd, r] = f.kerning[gi];
       x += l;
       const g = f.glyphs[gi];
-      ctx.drawImage(img, g.x, g.y, g.width, g.height, Math.round(x), Math.round(y0), g.width, g.height);
+      ctx.drawImage(tintedGlyph(fi, gi, fill), Math.round(x), Math.round(y0));
       x += wd + r + f.spacing;
     }
   }

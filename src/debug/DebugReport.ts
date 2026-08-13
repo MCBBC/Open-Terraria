@@ -720,6 +720,15 @@ export function collectDebugReport(game: Game, opts: DebugReportOptions = {}): R
         lastFlushCount: g.chunks.lastFlushCount,
       } : null,
       minimapDirtyChunks: g.renderer?.minimap?.dirtyChunks?.size ?? 0,
+      // 资产健康(2026-08-13 运行期防线):失败的 vanilla/UI 贴图(404 终态)与
+      // vui 键失配一目了然——此前 NPC_Head 40 个 404/全屏地图键失配这类 bug
+      // 只能靠翻网络面板发现
+      assetHealth: g.atlas ? {
+        failedVImages: g.atlas.failedVImages().length,
+        failedVImagesSample: g.atlas.failedVImages().slice(0, 10),
+        failedUiImages: g.atlas.failedUiImages().length,
+        vuiMissKeys: g.atlas.vuiMissKeys().slice(0, 10),
+      } : null,
       subsystems: {
         waterfall: optionalDebugState(g.renderer?.waterfalls ?? null),
         liquids: liquidDebugState(),

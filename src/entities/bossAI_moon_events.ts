@@ -134,8 +134,10 @@ export function mourningWoodAI(e: Enemy, game: GameHooks, player: Player | null)
   let num891 = 2;                                   // 巡航速(:32940)
   if (e.hp < e.maxHp * 0.75) num891 = 3;
   if (e.hp < e.maxHp * 0.5) num891 = 4;
-  // 点光(:32958-32965)：底部 -30px
+  // 点光(:32958-32965)：底部 -30px——344 常世吼 (0.3,0.16,0.125) / 325 哀木
+  // (0.3,0.125,0.06)；光源位 = Bottom+(0,-30)（曾漏 lightRGBAt 落在中心格）
   e.lightRGB = ever ? [0.3, 0.16, 0.125] : [0.3, 0.125, 0.06];
+  e.lightRGBAt = { x: e.cx, y: e.y + e.h - 30 };
   // TargetClosest 仅夜间(:32943-32946)——白天保留上一朝向
   if (!isDay && player && !player.dead) e.facing = e.seekDirX(player);
   let flag56 = false;

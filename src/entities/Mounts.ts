@@ -560,8 +560,10 @@ export class MountInstance {
   }
 
   /** 猪鲨崽计数器维护（UpdateEffects case 12 :4996-5003）：
-   *  半血以下 → 60；湿身或雨中露天 → 420（离开后逐 tick 衰减，Player.cs:25340） */
+   *  先衰减（Player.cs:25340 UpdateBuffs 段）再判增益；
+   *  半血以下 → 60；湿身或雨中露天 → 420（离开后的余效时长） */
   updateFishron(p: FishronView): boolean {
+    if (this.fishronCounter > 0) this.fishronCounter -= 1;
     this.fishronBoost = this.fishronSpecial(p);
     const half = Math.floor(p.maxHp / 2);
     if (p.hp <= half) this.fishronCounter = FISHRON_COUNTER_LOW_HP;
@@ -821,8 +823,6 @@ export class MountInstance {
    *  在 mount.upkeep 之后调用——hover() 消费的 fishronBoost 在本 tick 内即新鲜 */
   updateMountEffects(p: MountedPlayerView, ctx: MountEffectsCtx): void {
     if (!this.active || this.isCart) return;
-    // 计数器先衰减（Player.cs:25340 UpdateBuffs 段）再由 updateFishron 重置
-    if (this.fishronCounter > 0) this.fishronCounter -= 1;
     if (this.type === 12) {
       this.updateFishron(ctx.fishron);
     } else {

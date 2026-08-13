@@ -136,7 +136,9 @@ describe('AI_102 沙尘精 541', () => {
     expect(e.ai0).toBe(-290);                                        // 冷却期每 tick +1 回摆
     e.hp = e.maxHp * 0.3;
     tick(h, 2, [e]);
-    expect(e.def.knockbackResist).toBe(1);                           // 血 <50% 免击退
+    // knockBackResist 语义 = 原版"承受比例"（0=免疫/1=全额,SetDefaults 541=0.05）:
+    // 血 <50% 免击退 → 0（2026-08-13 语义翻转后断言同步;旧"1-比例"档此处误写 1）
+    expect(e.def.knockbackResist).toBe(0);
   });
 });
 

@@ -1012,8 +1012,9 @@ export class TowerBolt extends Entity {
   draw(r: Renderer, _cam: Camera): void {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
-    // 世界坐标绘制：红色发光点（原版贴图 Projectile_629 未解包时以粒子红点代）
-    const img = r.atlas ? r.atlas.vimages.get('vanilla/Projectile_629.png') : null;
+    // 世界坐标绘制:原版贴图 Projectile_629(已解包入库);ensureVImage 触发懒加载
+    // (2026-08-13 枚举 review:此前直取+无人预载=永久红点兜底)
+    const img = r.atlas ? r.atlas.ensureVImage('vanilla/Projectile_629.png') : null;
     if (img) {
       ctx.drawImage(img, this.x + this.w / 2 - img.width / 2, this.y + this.h / 2 - img.height / 2);
       return;

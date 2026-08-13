@@ -279,7 +279,7 @@ export const AMBIENT_FAMILY_PARAMS: Record<AmbientFamily, AmbientFamilyParams> =
   lostkite:      { rows: 42, framingSpeed: 6, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 1.2, speedB: 3, frameRandom: true },    // LostKite :231-287（风暴 FramingSpeed 4 / 速度×1.5）
   vulture:       { rows: 10, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.2, life: [60, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8 },                      // Vulture :338-387
   bats:          { rows: 10, framingSpeed: 4, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [30, 61], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 3, speedB: 0.8, frameOffset: true, frameRandom: true }, // Bats :919-1024
-  pixieposse:    { rows: 25, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.6, life: [60, 121], depthMin: 2, depthSpan: 3, yOff: 4000, ySub: 4000, speedA: 0.12, speedB: 0.08, depthScaleAdj: -0.1 }, // PixiePosse :389-442
+  pixieposse:    { rows: 25, framingSpeed: 5, fadeIn: 0.15, fadeOut: 0.85, brightness: 0.6, life: [60, 121], depthMin: 2, depthSpan: 3, yOff: 4000, ySub: 0, speedA: 0.12, speedB: 0.08, depthScaleAdj: -0.1 }, // PixiePosse :389-442（y 带 :406 = 4000..surface*16）
   seagulls:      { rows: 9, framingSpeed: 4, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.2, life: [30, 61], depthMin: 1, depthSpan: 2, yOff: 2400, ySub: 1600, speedA: 4, speedB: 0, depthScaleAdj: -1.5, frameOffset: true, frameRandom: true }, // Seagulls :488-599
   slimeBalloons: { rows: 7, framingSpeed: 0, fadeIn: 0.025, fadeOut: 0.975, brightness: 0.2, life: [80, 121], depthMin: 3, depthSpan: 3, yOff: 2400, ySub: 1600, speedA: 1, speedB: 1, vy: -0.01, frameRandom: true }, // SlimeBalloons :708-805
   gastropod:     { rows: 1, framingSpeed: 0, fadeIn: 0.1, fadeOut: 0.9, brightness: 0.75, life: [60, 121], depthMin: 2, depthSpan: 3, yOff: 3200, ySub: 1600, speedA: 1.5, speedB: 0.2, depthScaleAdj: -0.1 },  // Gastropod :601-708（BrightnessLerper .75 → 色 (102,0,63)）
@@ -669,7 +669,7 @@ class DramaPiece {
     public x: number, public y: number,
     public vx: number, public vy: number,
     readonly ox: number, readonly oy: number,   // 贴图 origin（:235-241 显式值）
-    readonly rotV: number,
+    public rotV: number,
   ) {}
   update(maxTilesX: number, maxTilesY: number): void {
     this.vy += 0.3;                              // :50
@@ -746,10 +746,11 @@ function tintedFlareSprite(tex: HTMLImageElement, r: number, g: number, b: numbe
  *  消费：月塔天空近距门 / 月总死亡戏剧 / 稀有云世界旗标 / AmbientSky zone 门 /
  *  涟漪水面采样。null = 未注入（菜单等），各子系统自静默。 */
 export interface SkyFrameCtx {
-  /** 场上实体（月塔 493/422/507/517 与月总 398 扫描用） */
+  /** 场上实体（月塔 493/422/507/517 与月总 398 扫描用；vanillaId/ai0/ai1 为 Enemy
+   *  侧字段——可选以兼容 Entity 基类条目，消费侧以 !== 严格比对自然跳过缺省值） */
   entities: ReadonlyArray<{
-    vanillaId: number | null; cx: number; cy: number;
-    ai0: number; ai1: number; dead: boolean;
+    vanillaId?: number | null; cx: number; cy: number;
+    ai0?: number; ai1?: number; dead: boolean;
   }>;
   world: {
     w: number; h: number;
@@ -1789,8 +1790,8 @@ export class SkyRenderer {
     { vortex: 422, nebula: 507, stardust: 493, solar: 517 };
 
   private towerSky: Record<TowerFamily, TowerSkyState> = {
-    vortex: new TowerSkyState('vortex'), nebula: new TowerSkyState('nebula'),
-    stardust: new TowerSkyState('stardust'), solar: new TowerSkyState('solar'),
+    vortex: new TowerSkyState(), nebula: new TowerSkyState(),
+    stardust: new TowerSkyState(), solar: new TowerSkyState(),
   };
 
   clearTowerSky(): void {
@@ -1882,7 +1883,7 @@ export class SkyRenderer {
     if (fc) {
       for (const e of fc.entities) {
         if (e.vanillaId !== 398 || e.dead) continue;
-        core = { cx: e.cx, cy: e.cy, ai0: e.ai0, ai1: e.ai1 };
+        core = { cx: e.cx, cy: e.cy, ai0: e.ai0 ?? 0, ai1: e.ai1 ?? 0 };
         break;
       }
     }

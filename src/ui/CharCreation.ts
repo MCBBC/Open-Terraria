@@ -277,6 +277,21 @@ export class CharCreation {
     else this.buildColor();
   }
 
+  /** 缩略图懒加载补画(2026-08-13 枚举 review):buildContent 一次成型,纸娃娃贴图
+   *  晚到会留空白缩略图直到交互——miss 时有界重试 buildContent;面板已关/用户
+   *  切走页签即停(compositePaperDoll miss 不缓存,重试天然会升级) */
+  private thumbRetry = 0;
+  private thumbTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private scheduleThumbRetry(missed: boolean) {
+    if (!missed || ++this.thumbRetry > 6 || this.thumbTimer) return;
+    this.thumbTimer = setTimeout(() => {
+      this.thumbTimer = 0;
+      if (!this.content.isConnected) return;                   // 面板已关
+      if (this.tab !== 'look' && this.tab !== 'hair') return;  // 用户已切走
+      this.buildContent();
+    }, 700);
+  }
+
   private buildInfo() {
     const box = document.createElement('div');
     box.className = 'sw-char-section';
@@ -348,6 +363,7 @@ export class CharCreation {
   private buildLook() {
     const box = document.createElement('div');
     box.className = 'sw-char-styles';
+    let missed = false;
     VALID_CLOTH_STYLES.forEach((styleId) => {
       const b = document.createElement('button');
       b.className = 'sw-char-stylebtn';
@@ -361,17 +377,19 @@ export class CharCreation {
       if (doll) {
         const f = dollFrame(doll, IDLE_FRAME);
         ctx.drawImage(f.img, f.sx, f.sy, f.sw, f.sh, 0, 0, 40, 56);
-      }
+      } else missed = true;
       b.appendChild(c);
       b.addEventListener('click', () => { this.appearance.skinVariant = styleId; this.buildContent(); });
       box.appendChild(b);
     });
     this.content.appendChild(box);
+    this.scheduleThumbRetry(missed);
   }
 
   private buildHair() {
     const wrap = document.createElement('div');
     wrap.className = 'sw-char-hairs';
+    let missed = false;
     for (const hairId of CHAR_CREATION_HAIRS) {
       const b = document.createElement('button');
       b.className = 'sw-char-hairbtn';
@@ -385,12 +403,13 @@ export class CharCreation {
       if (doll) {
         // 头部区域（帧上部 44px，长发也能展示）
         ctx.drawImage(doll, 0, 0, 40, 44, 0, 0, 40, 44);
-      }
+      } else missed = true;
       b.appendChild(c);
       b.addEventListener('click', () => { this.appearance.hair = hairId; this.buildContent(); });
       wrap.appendChild(b);
     }
     this.content.appendChild(wrap);
+    this.scheduleThumbRetry(missed);
   }
 
   private buildColor() {

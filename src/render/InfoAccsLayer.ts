@@ -29,7 +29,7 @@ export class InfoAccsLayer {
   tick(player: {
     accThirdEyeCounter: number;
     accCritterGuideCounter: number;
-    accThirdEyeNumber: number; accCritterGuideText: string | null;
+    accThirdEyeNumber: number; accCritterGuideText: string | null; accCritterGuideVid: number | null;
     speedSlice: Float32Array; vx: number; vy: number;
   }, enemies: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; vanillaId: number | null }>,
     critters: Array<{ x: number; y: number; w: number; h: number; cx: number; cy: number; dead: boolean; def?: { npc?: number } }>,
@@ -59,7 +59,7 @@ export class InfoAccsLayer {
     if (gates.accCritterGuide) {
       if (player.accCritterGuideCounter <= 0) {
         player.accCritterGuideCounter = 15;
-        let best: { name: string; rarity: number } | null = null;
+        let best: { name: string; rarity: number; vid: number } | null = null;
         const pool: Array<{ dead: boolean; cx: number; cy: number; vanillaId: number | null }> = [
           ...enemies.map((e) => ({ dead: e.dead, cx: e.cx, cy: e.cy, vanillaId: e.vanillaId })),
           ...critters.map((c) => ({ dead: c.dead, cx: c.cx, cy: c.cy, vanillaId: c.def?.npc ?? null })),
@@ -71,9 +71,10 @@ export class InfoAccsLayer {
           if (Math.hypot(c.cx - pcx, c.cy - pcy) >= 1300) continue;
           const nm = nameOf(c.vanillaId);
           if (!nm) continue;
-          if (!best || r > best.rarity) best = { name: nm, rarity: r };
+          if (!best || r > best.rarity) best = { name: nm, rarity: r, vid: c.vanillaId ?? -1 };
         }
         player.accCritterGuideText = best ? best.name : null;
+        player.accCritterGuideVid = best ? best.vid : null;
       } else {
         player.accCritterGuideCounter--;
       }
@@ -159,7 +160,7 @@ export class InfoAccsLayer {
             ctx.fillStyle = '#000';
             ctx.fillText(r.text, ox, oy);
           }
-          ctx.fillStyle = r.grayed ? '#646464' : '#e8e4f0';
+          ctx.fillStyle = r.gold ? '#FFE745' : r.grayed ? '#646464' : '#e8e4f0';
           ctx.fillText(r.text, 0, 0);
           ctx.restore();
         }

@@ -226,6 +226,19 @@ export class NpcShop {
   }
 
   get isOpen(): boolean { return this.panel !== null; }
+
+  /** 原地升级某商品行图标(开店时 iconUrl 一次成型的 miss 冻结问题,2026-08-13
+   *  枚举 review):懒加载晚到由 UI 侧轮询驱动补图。无该行/已关店静默 */
+  setRowIcon(vanillaId: number, url: string): void {
+    const row = this.panel?.querySelector(`.sw-shop-item[data-id="${vanillaId}"]`);
+    if (!row) return;
+    const img = row.querySelector('img');
+    if (img) { if (img.getAttribute('src') !== url) img.src = url; return; }
+    const ph = row.querySelector('span');
+    const el = document.createElement('img');
+    el.src = url;
+    if (ph && ph.tagName === 'SPAN') ph.replaceWith(el); else row.insertBefore(el, row.firstChild);
+  }
 }
 
 /** NPC 快乐度详情浮层（ReportHappiness.Interact：NPCInteractions.cs:303-313）。

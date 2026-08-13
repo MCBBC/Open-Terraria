@@ -86,6 +86,8 @@ export interface InfoAccCtx {
   weather: {
     storming: boolean; maxRaining: number; cloudBGActive: number; numClouds: number;
     windSpeedCurrent: number; sandstorm: boolean;
+    /** 真实墙钟秒(原版 GlobalTimeWrappedHourly = TotalGameTime%3600,Main.cs:16777)——沙尘暴文字 5s 闪烁驱动 */
+    globalTimeSec: number;
   };
   moonPhase: number; bloodMoon: boolean; eclipse: boolean;
   /** 渔情(bobber 在水时给缓存值;否则现算):null=未持有数据 */
@@ -94,6 +96,8 @@ export interface InfoAccCtx {
   oreText: string | null;
   /** 生命体分析仪:最近稀有生物名;null=附近无 */
   rareText: string | null;
+  /** 稀有生物的原版 npc id(金色生物行染 OurFavoriteColor 判定用);null=无 */
+  rareVid: number | null;
   /** 雷达:敌怪数;-1=无数据 */
   enemyCount: number;
   /** 击杀计数:"{名}: {n}";null=无数据 */
@@ -121,6 +125,8 @@ export interface InfoAccRow {
   label: string;
   /** "附近无 X"行:原版整行文字降灰 Color(100,100,100)(:46328/:46388/:46414/:46426/:46451) */
   grayed?: boolean;
+  /** 金色生物行:文字染 OurFavoriteColor(255,231,69)(:46661-46672) */
+  gold?: boolean;
 }
 
 const inter = (n: number) => Lang.inter(n);
@@ -143,7 +149,7 @@ export function formatWatchText(mainTime: number, dayTime: boolean, watchLevel: 
   return `${h}:${ms} ${Lang.text(pm ? 'GameUI.TimePastMorning' : 'GameUI.TimeAtMorning')}`;
 }
 
-/** Weather 行(Main.cs:46238-46260):九档链 + 风 mph + 沙尘暴 */
+/** Weather 行(Main.cs:46238-46260):九档链 + 风 mph + 沙尘暴(文字 5s 闪烁) */
 export function formatWeatherText(w: InfoAccCtx['weather']): string {
   let s: string;
   if (w.storming) s = Lang.text('GameUI.Storm');
@@ -157,7 +163,11 @@ export function formatWeatherText(w: InfoAccCtx['weather']): string {
   else s = Lang.text('GameUI.PartlyCloudy');
   const mph = Math.round(w.windSpeedCurrent * 50);   // :46252(1 mph = 0.02)
   if (mph !== 0) s += ` (${Math.abs(mph)} mph ${mph < 0 ? 'E' : 'W'})`; // :46255-46258
-  if (w.sandstorm) s += Lang.text('GameUI.Sandstorm') + ' +';
+  if (w.sandstorm) {
+    // :46247-46251:沙尘暴中文字按真实墙钟 %10 ≥5 才显示(5s 亮 5s 灭)," +" 恒附
+    if ((w.globalTimeSec % 3600) % 10 >= 5) s = Lang.text('GameUI.Sandstorm') + ' +';
+    else s += ' +';
+  }
   return s;
 }
 
@@ -196,14 +206,22 @@ export function formatDepthText(
   return `${d} ${layer}`;
 }
 
-/** 秒表 mph(Main.cs:46449-46499):avg px/tick × 216000/42240 + 液体修正 */
-export function mphOf(avgPxPerTick: number, wet: { honey: boolean; shimmer: boolean; water: boolean; merman: boolean }): number {
+/** 秒表 mph(Main.cs:46482-46497):avg px/tick × 216000/42240 + 液体修正;
+ *  整块修正门 = !merman && !ignoreWater(:46484,水上行走态不视作游泳);
+ *  水分支另有 !trident(手持三叉戟 277 免水中减速,Player.cs:12488-12491) */
+export function mphOf(avgPxPerTick: number, wet: { honey: boolean; shimmer: boolean; water: boolean; merman: boolean; ignoreWater: boolean; trident: boolean }): number {
   let v = avgPxPerTick;
-  if (wet.honey) v /= 4;
-  else if (wet.shimmer) v *= 0.375;
-  else if (wet.water && !wet.merman) v /= 2;
+  if (!wet.merman && !wet.ignoreWater) {
+    if (wet.honey) v /= 4;
+    else if (wet.shimmer) v *= 0.375;
+    else if (wet.water && !wet.trident) v /= 2;
+  }
   return v * 216000 / 42240;
 }
+
+/** NPCID.Sets.GoldCrittersCollection(Terraria.ID/NPCID.cs:4450-4454):稀有行
+ *  命中金色生物时文字染 OurFavoriteColor(255,231,69) */
+const GOLD_CRITTERS = new Set([443, 442, 592, 593, 444, 601, 445, 446, 605, 447, 627, 613, 448, 539]);
 
 /**
  * 12 行构造(分支序 1:1)。hidden=hideInfo[13];inventoryOpen 时隐藏行也产图标行
@@ -212,10 +230,10 @@ export function mphOf(avgPxPerTick: number, wet: { honey: boolean; shimmer: bool
 export function buildInfoAccRows(ctx: InfoAccCtx, hidden: boolean[], inventoryOpen: boolean): InfoAccRow[] {
   const g = ctx.gates;
   const rows: InfoAccRow[] = [];
-  const push = (icon: number, text: string, labelN: number, grayed?: boolean) => {
+  const push = (icon: number, text: string, labelN: number, grayed?: boolean, gold?: boolean) => {
     const hideIndex = icon === 8 ? 7 : icon;
     if (!inventoryOpen && hidden[hideIndex]) return;
-    rows.push({ row: rows.length, icon, hideIndex, text, label: inter(labelN), grayed });
+    rows.push({ row: rows.length, icon, hideIndex, text, label: inter(labelN), grayed, gold });
   };
   if (g.accWatch > 0) push(0, formatWatchText(ctx.mainTime, ctx.dayTime, g.accWatch), 95);
   if (g.accWeatherRadio) push(1, formatWeatherText(ctx.weather), 96);
@@ -230,7 +248,9 @@ export function buildInfoAccRows(ctx: InfoAccCtx, hidden: boolean[], inventoryOp
       : Lang.text('GameUI.NoTreasureNearby'), 104, ctx.oreText === null);
   }
   if (g.accCritterGuide) {
-    push(11, ctx.rareText !== null ? ctx.rareText : Lang.text('GameUI.NoRareCreatures'), 105, ctx.rareText === null);
+    // 金色生物(NPCID.Sets.GoldCrittersCollection)→ 行文字染金色(:46661-46672)
+    push(11, ctx.rareText !== null ? ctx.rareText : Lang.text('GameUI.NoRareCreatures'), 105,
+      ctx.rareText === null, ctx.rareVid !== null && GOLD_CRITTERS.has(ctx.rareVid));
   }
   if (g.accThirdEye) {
     push(5, ctx.enemyCount > 1

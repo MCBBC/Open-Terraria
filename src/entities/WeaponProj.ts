@@ -1074,7 +1074,9 @@ export class FlailProj extends Entity {
     if (spd > 1) this.rotation = Math.atan2(this.vy, this.vx) + this.vx * 0.1;
     else this.rotation += this.vx * 0.1;
     // ---- AI_015 特例子弹(:41352-41475 switch(type) 尾段) ----
-    if (this.spawnProj && this.st !== 4) {
+    // ★原版该 switch(type) 特例段在【全部状态】运行(:41434-41480,无 ai[0] 门)——
+    // 此前 st!==4 把回收态排除,1:1 对齐移除(2026-08-13)
+    if (this.spawnProj) {
       if (this.projId === 247) {
         // Flairon:每 20t(脱靶续 17)600px 内最近敌(距离+CanHit)→ 自机弹 248
         // (:41369-41400)damage/1.5、kb/2、速 14
@@ -1151,6 +1153,109 @@ export class FlailProj extends Entity {
   private hitTileFx(game: GameHooks, hx: number, hy: number): void {
     game.spawnParticles(hx + this.w / 2, hy + this.h / 2, '#A09080', 3, 1.5, { life: 14, size: 2 });
     game.playSfx('dig', 0.5, hx + this.w / 2, hy + this.h / 2);
+  }
+}
+
+// ================= 弗莱龙刺（proj 405，aiStyle 70 全语义 1:1，:29188-29239） =================
+
+/** 1058 掷出的轨道刺 405（AI_015 :41427-41433 传 ai0=-10）：
+ *  -10→0 漂入段(:29224-29231)：每 tick ai0++、α-25(下限 50)、vel×0.95;
+ *  ai0==0 首寻(:29191-29215)：650px 内最近敌(CanHit 视线门)→ ai0=idx+1 并
+ *  初次转向 (v×20+dir×Next(35,75)/30)/21；无目标 → ai0=-15(再漂 15t);
+ *  ai0>0 追踪段(:29217-29219)：(v×40+dir×12)/41;
+ *  撞块(:16905-16921)：前 2 次接触反弹、第 3 次 Kill;Kill 爆 20 颗火尘(:69686)。
+ *  scale=ai1=Next(80,121)/100(:29233-29239);timeLeft 120/penetrate 1(SetDefaults :4584) */
+export class FlaironSpike extends Entity {
+  w = 14; h = 14;
+  damage: number;
+  knockback: number;
+  projId = 405;
+  critChance = 0.04;
+  meleeProj = true;
+  private ai0: number;   // -10 起步(1058 传参语义)
+  private ai1: number;   // scale
+  private alpha = 255;
+  private bounces = 0;
+  private hitCd = new HitCooldown();
+  life = 120;
+  dead = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;
+    this.knockback = knockback;
+    this.ai0 = -10;
+    this.ai1 = (80 + Math.random() * 41) / 100; // Next(80,121)/100
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    // α:255→50 漂入段递减,globalAlpha 近似;scale=ai1
+    drawProj(r, cam, { ...this, w: Math.round(14 * this.ai1) }, this.projId,
+      Math.atan2(this.vy, this.vx) + Math.PI / 2, '#FFB060', Math.max(0.2, this.alpha / 255));
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }
+    this.hitCd.tick();
+    const cx0 = this.x + this.w / 2, cy0 = this.y + this.h / 2;
+    if (this.ai0 === 0) {
+      // 首寻:650px 内最近敌(距离+CanHit)
+      let best = 650, bx = 0, by = 0, found = false;
+      for (const ent of game.enemies()) {
+        const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+        if (e.dead) continue;
+        if (!canHit(game.world.store, this.x, this.y, this.w, this.h, e.x, e.y, e.w, e.h)) continue;
+        const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
+        if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
+      }
+      this.ai0 = found ? 1 : -15; // repo 无 NPC 索引,命中即锚定首敌(ai0=1)
+      if (found) {
+        const num605 = (35 + Math.random() * 40) / 30; // Next(35,75)/30
+        const jx = bx - cx0 + (Math.random() * 200 - 100);
+        const jy = by - cy0 + (Math.random() * 200 - 100);
+        const jd = Math.hypot(jx, jy) || 1;
+        this.vx = (this.vx * 20 + (jx / jd) * num605) / 21;
+        this.vy = (this.vy * 20 + (jy / jd) * num605) / 21;
+      }
+    } else if (this.ai0 > 0) {
+      // 追踪:(v×40+dir×12)/41——repo 无索引锚,朝当前最近敌(650 内)
+      let best = 650, bx = 0, by = 0, found = false;
+      for (const ent of game.enemies()) {
+        const e = ent as { x: number; y: number; w: number; h: number; dead: boolean };
+        if (e.dead) continue;
+        const d = Math.hypot(e.x + e.w / 2 - cx0, e.y + e.h / 2 - cy0);
+        if (d < best) { best = d; bx = e.x + e.w / 2; by = e.y + e.h / 2; found = true; }
+      }
+      if (found) {
+        const dd = Math.hypot(bx - cx0, by - cy0) || 1;
+        this.vx = (this.vx * 40 + ((bx - cx0) / dd) * 12) / 41;
+        this.vy = (this.vy * 40 + ((by - cy0) / dd) * 12) / 41;
+      }
+    } else {
+      // 漂入/无目标:ai0++、α-25(下限 50)、vel×0.95
+      this.ai0++;
+      this.alpha = Math.max(50, this.alpha - 25);
+      this.vx *= 0.95; this.vy *= 0.95;
+    }
+    this.x += this.vx;
+    this.y += this.vy;
+    // 撞块:前 2 次反弹、第 3 次 Kill(:16905-16921)
+    const tx = Math.floor((this.x + this.w / 2) / TILE), ty = Math.floor((this.y + this.h / 2) / TILE);
+    if (game.world.store.inBounds(tx, ty) && game.world.store.isSolid(tx, ty)) {
+      this.bounces++;
+      if (this.bounces < 3) {
+        this.x -= this.vx; this.y -= this.vy;
+        this.vx = -this.vx; this.vy = -this.vy;
+      } else {
+        this.dead = true;
+        // Kill 爆尘(:69686-69700):20 颗火尘向外喷(音效 Item54 未提取,登记 GAP)
+        game.spawnParticles(cx0, cy0, '#FF9A3C', 20, 2.5, { life: 30, grav: -0.05 });
+        return;
+      }
+    }
+    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx) || 1);
   }
 }
 

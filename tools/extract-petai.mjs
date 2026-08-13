@@ -165,6 +165,13 @@ const g = {};
   const head = firstIn(AI026.text, AI026.loc, /int num = 85;/, 'idleRange 默认');
   g.idleRange = 85; L.idleRange = head.line;
   const idleOv = {};
+  // 960 ChesterPet：`else if (type == 960 && !flag11) { num = 10; }`（:56039-56041
+  // 后缀条件正则盲区——曾漏提回退默认 85）
+  {
+    const m = /else if \(type == (\d+) && !flag11\)\s*\{\s*num = (\d+);/.exec(AI026.text);
+    if (!m) throw new Error('AI_026 idleRange 后缀组（960）未找到');
+    petOv[+m[1]] = { ...(petOv[+m[1]] || {}), idleRange: +m[2] };
+  }
   for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num = (\d+);/g)) {
     idleOv[+value[1]] = +value[2];
   }
@@ -235,6 +242,13 @@ const g = {};
   }
   for (const { value } of allIn(AI026.text, AI026.loc, /if \(type == (\d+)\)\s*\{\s*num101 = (\d+);/g)) {
     flyOv[+value[1]] = { ...(flyOv[+value[1]] || {}), landRange: +value[2] };
+  }
+  // 875 VoltBunny：num100/num101 连写（:57461-57465 `num100 = 2f; num101 = 100`——
+  // 曾因正则只认 num101 首句漏提，运行时回退默认 200）
+  {
+    const m = /if \(type == (\d+)\)\s*\{\s*num100 = ([\d.]+)f;\s*num101 = (\d+);/.exec(AI026.text);
+    if (!m) throw new Error('AI_026 landRange 连写组（875）未找到');
+    flyOv[+m[1]] = { ...(flyOv[+m[1]] || {}), landRange: +m[3] };
   }
   g.flyOverrides = flyOv;
   // 跳跃梯（前方挡墙时按头顶净空取档；AI_026 地面段 :59299-59315）

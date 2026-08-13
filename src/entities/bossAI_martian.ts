@@ -660,12 +660,14 @@ export function teslaTurretAI(e: Enemy, game: GameHooks, player: Player | null) 
       game.spawnParticles(e.cx, e.cy, '#6FD7FF', 1, 0.6, { life: 20 });
     }
     e.lightRGB = [0.1 * (e.ai1 / 60), 0.5 * (e.ai1 / 60), 0.7 * (e.ai1 / 60)];
+    e.lightRGBAt = { x: e.cx, y: e.cy - 10 };   // :35404 光源 = Center.Y−10
     e.vy = Math.min(e.vy + GRAVITY, MAX_FALL_SPEED);
     moveAndCollide(e, game.world, e.vx, e.vy);
     return;
   }
   if (e.ai1 === 120) e.ai1 += 1;         // :35403-35406 单帧过门
   e.lightRGB = [0.1, 0.5, 0.7];
+  e.lightRGBAt = { x: e.cx, y: e.cy - 10 };   // :35411 光源 = Center.Y−10
 
   // ---- 电击循环（:35409-35450）----
   if (e.ai0 < 60) e.ai0 += 1;

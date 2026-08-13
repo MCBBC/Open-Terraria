@@ -100,6 +100,15 @@ export interface VanillaData {
   armorIndex?: Record<string, { head: number; body: number; legs: number }>;
 }
 
+/** vui 键失配登记(运行期防线,2026-08-13):每键 warn 一次进 F5 报告 warn 环,
+ *  miss 键集合供 DebugReport assetHealth 段展示 */
+const _vuiKeyMisses = new Set<string>();
+function vuiKeyMiss(name: string): void {
+  if (_vuiKeyMisses.has(name)) return;
+  _vuiKeyMisses.add(name);
+  console.warn(`[SpriteAtlas] vui 键不存在: '${name}'(uiFiles 键须带 .png 后缀,裸键恒 null)`);
+}
+
 /** 整图硬 alpha：alpha ≥128 → 255，<128 → 0（并清零 RGB），消除提取 PNG 的半透明镶边 */
 function hardAlpha(img: HTMLImageElement): HTMLCanvasElement {
   const c = document.createElement('canvas');
@@ -217,13 +226,8 @@ export class SpriteAtlas {
       m = this.lazyNpcMeta.get(key);
       if (!m) {
         const sheet = `vanilla/NPC_${npcId}.png`;
-        const img = this.vimages.get(sheet);
-        if (!img) {
-          const im = new Image();
-          im.onload = () => this.vimages.set(sheet, im);
-          im.src = `sprites/${sheet}`;
-          return null;
-        }
+        const img = this.ensureVImage(sheet); // 懒加载+去重+失败负缓存(2026-08-13 前手动 new Image 无 onerror:404 时每次调用重发请求)
+        if (!img) return null;
         const frames = (vanillaNpcFrames as Record<string, number>)[key] ?? 1;
         const fh = Math.max(1, Math.floor(img.height / frames));
         const meta: VanillaNpcMeta = { sheet, frameW: img.width, frameH: fh, count: frames };
@@ -231,7 +235,9 @@ export class SpriteAtlas {
         m = meta;
       }
     }
-    const img = this.vimages.get(m.sheet);
+    // 已注册路径同样走 ensureVImage(2026-08-13 前直取):预载失败(onerror 静默)时
+    // NPC 永不显示——现在 miss 会触发重载,每帧活画自愈
+    const img = this.ensureVImage(m.sheet);
     if (!img) return null;
     const idx = Math.max(0, Math.min(m.count - 1, frameIdx));
     return { img, sx: 0, sy: idx * m.frameH, sw: m.frameW, sh: m.frameH };
@@ -259,24 +265,33 @@ export class SpriteAtlas {
   }
 
   /** UI 贴图（vanilla-ui/ 命名空间）。name 为白名单键，如 'UI_PanelBackground'。
-   *  按需懒加载(消费方每帧重查,未就绪返回 null 自兜底) */
+   *  按需懒加载(消费方每帧重查,未就绪返回 null 自兜底)。
+   *  ★键必须带 .png 后缀(uiFiles 键全部带)——裸键恒 null 且连请求都不发;
+   *  每键 warn 一次(F5 报告 warn 环自动留痕;全屏地图 MapBG/Map 键失配由此类
+   *  bug 实锤,2026-08-13) */
   vui(name: string): DrawRect | null {
     const path = this.uiFiles[name];
-    if (!path) return null;
+    if (!path) {
+      vuiKeyMiss(name);
+      return null;
+    }
     const img = this.ensureUiImage(path);
     if (!img) return null;
     return { img, sx: 0, sy: 0, sw: img.width, sh: img.height };
   }
 
   private _uiPending = new Set<string>();
+  /** UI 贴图失败负缓存(与 ensureVImage._vImageFailed 对称,2026-08-13 补):
+   *  清单内但 404 的键若不加终态标记,每帧重查的消费方会每帧重发请求 */
+  private _uiFailed = new Set<string>();
   private ensureUiImage(file: string): HTMLImageElement | null {
     const hit = this.uiimages.get(file);
     if (hit) return hit;
-    if (this._uiPending.has(file)) return null;
+    if (this._uiPending.has(file) || this._uiFailed.has(file)) return null;
     this._uiPending.add(file);
     const im = new Image();
-    im.onload = () => { this.uiimages.set(file, im); this._uiPending.delete(file); };
-    im.onerror = () => { this._uiPending.delete(file); };
+    im.onload = () => { this.uiimages.set(file, im); this._uiPending.delete(file); this._uiFailed.delete(file); };
+    im.onerror = () => { this._uiPending.delete(file); this._uiFailed.add(file); };
     im.src = `sprites/${encodeURI(file)}`;
     return null;
   }
@@ -359,17 +374,23 @@ export class SpriteAtlas {
   }
   /** 按需加载 vanilla 单图(去重;失败静默)。命中返回元素,否则 null。
    *  渲染路径一律用此入口(经 vimg 别名)——直接 vimages.get 会绕过懒加载与
-   *  onVImageLoaded 重烘焙钩子(棕榈树干传送消失的根因) */
+   *  onVImageLoaded 重烘焙钩子(棕榈树干传送消失的根因)。
+   *  烘焙追踪(bakeTracker,2026-08-13):ChunkCache 烘焙期间置 _baking,此处
+   *  miss 发起加载时 note、onload 到达时 onLoaded——烘焙消费的任何懒取贴图
+   *  晚到自动触发重烘焙,不再依赖 Game.ts 的前缀白名单(白名单保留作纵深) */
+  bakeTracker: { _baking?: boolean; note(file: string): void; onLoaded(file: string): void } | null = null;
   ensureVImage(file: string): HTMLImageElement | null {
     const hit = this.vimages.get(file);
     if (hit) return hit;
     if (this._iconPending.has(file) || this._vImageFailed.has(file)) return null;
+    if (this.bakeTracker?._baking) this.bakeTracker.note(file);
     this._iconPending.add(file);
     const im = new Image();
     im.onload = () => {
       this.vimages.set(file, im);
       this._iconPending.delete(file);
       this._vImageFailed.delete(file);
+      if (this.bakeTracker) this.bakeTracker.onLoaded(file);
       this.onVImageLoaded?.(file);  // 晚到的表 → ChunkCache 重烘焙
     };
     im.onerror = () => {
@@ -382,6 +403,11 @@ export class SpriteAtlas {
   /** 表是否已确认加载失败(404 等)——与"加载中瞬态"区分 */
   vImageFailed(file: string): boolean { return this._vImageFailed.has(file); }
   private _vImageFailed = new Set<string>();
+
+  // ---- 资产健康只读视图(F5 调试报告 assetHealth 段;运行期防线,2026-08-13) ----
+  failedVImages(): string[] { return [...this._vImageFailed]; }
+  failedUiImages(): string[] { return [...this._uiFailed]; }
+  vuiMissKeys(): string[] { return [..._vuiKeyMisses]; }
   /** 后台预取全部物品图标(保留兼容入口;预载流程请用 awaited 的 preloadIcons) */
   prefetchIcons(): void {
     void this.preloadIcons();

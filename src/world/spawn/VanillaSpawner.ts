@@ -1442,6 +1442,19 @@ export class VanillaSpawner {
       }
     }
 
+    // ---- 墓地雕像宝箱怪（NPC.cs:1478，原版链位在入侵段之后、水池段之前）----
+    //  downedBoss3 && ZoneGraveyard && !noWorms && RollBadLuckExtreme(25)==0 && 场上无 690
+    //  && IsThisAGoodPlaceForAStatueMimic（:43751 = 落脚 2 格实心 + 上方 3 格净空，与
+    //  邻近是否有雕像无关——名字只是历史）。该支不受 spawnFriendly 门（同链更早的
+    //  兄弟分支），友好轮也可命中。690 immortal+aiStyle126（伪装雕像待敌靠近）。
+    //  RollBadLuckExtreme = Luck.RollBadLuckExtreme(player.luck, 25)（NPC.cs:5271-5273，
+    //  Luck.cs:40-51）：正运改掷 Next(250)（命中 1/250）、负运改掷 Next(25/10=2)（命中
+    //  1/2）、否则 Next(25)（1/25）——曾裸 N(25) 无幸运度调制
+    if (this.downedBoss3 && this.ZoneGraveyard && !this.noWorms
+      && rollBadLuckExtreme(this.playerLuck, 25, () => rng.next()) === 0 && !any(690)
+      && this.isGoodPlaceForAStatueMimic()) {
+      return D(690);
+    }
     // ---- 酒保（L1565-1568）：!savedBartender && DD2Event.ReadyToFindBartender
     //      （= NPC.downedBoss2，DD2Event.cs:87——世吞/克脑已败）&& !AnyNPCs(579) &&
     //      1/80 && !waterTile → 579 BartenderUnconscious（触碰 → Transform 550，
@@ -1588,19 +1601,6 @@ export class VanillaSpawner {
       if (N(18)) return D(221);   // 鱿鱼（L1822-1825）
       if (N(3)) return D(67);     // 螃蟹（L1826-1829）
       return D(64);               // 粉水母兜底（L1830-1833）
-    }
-    // ---- 墓地雕像宝箱怪（NPC.cs:1478，原版链位在入侵段之后、水池段之前）----
-    //  downedBoss3 && ZoneGraveyard && !noWorms && RollBadLuckExtreme(25)==0 && 场上无 690
-    //  && IsThisAGoodPlaceForAStatueMimic（:43751 = 落脚 2 格实心 + 上方 3 格净空，与
-    //  邻近是否有雕像无关——名字只是历史）。该支不受 spawnFriendly 门（同链更早的
-    //  兄弟分支），友好轮也可命中。690 immortal+aiStyle126（伪装雕像待敌靠近）。
-    //  RollBadLuckExtreme = Luck.RollBadLuckExtreme(player.luck, 25)（NPC.cs:5271-5273，
-    //  Luck.cs:40-51）：正运改掷 Next(250)（命中 1/250）、负运改掷 Next(25/10=2)（命中
-    //  1/2）、否则 Next(25)（1/25）——曾裸 N(25) 无幸运度调制
-    if (this.downedBoss3 && this.ZoneGraveyard && !this.noWorms
-      && rollBadLuckExtreme(this.playerLuck, 25, () => rng.next()) === 0 && !any(690)
-      && this.isGoodPlaceForAStatueMimic()) {
-      return D(690);
     }
     // ---- 水池段（L1839-1905）----
     //  两支 else-if（原版 L1839 / L1895,均带 !spawnFriendly 门）;友好轮落 SpawnAnNPC

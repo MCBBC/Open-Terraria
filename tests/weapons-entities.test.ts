@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj } from '../src/entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike } from '../src/entities/WeaponProj';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -219,5 +219,32 @@ describe('链球特例子子弹(AI_015 尾段)', () => {
     run(f, hooks, 20);
     expect(spawned.length).toBeGreaterThanOrEqual(3); // 3-6t 节奏
     for (const id of spawned) expect(id).toBe(405);
+  });
+});
+
+
+describe('弗莱龙刺 405(aiStyle 70 全语义)', () => {
+  it('ai0=-10 漂入段:10t 内减速+α衰减,不追踪', () => {
+    const { hooks, player } = makeHooks();
+    const sp = new FlaironSpike(player.cx + 50, player.cy, 8, 0, 60, 4);
+    const v0 = Math.hypot(sp.vx, sp.vy);
+    run(sp, hooks, 10);
+    expect(Math.hypot(sp.vx, sp.vy)).toBeLessThan(v0);   // vel×0.95/t 减速
+    expect(sp.dead).toBe(false);
+  });
+
+  it('漂入结束(ai0 到 0)→ 650 内寻敌并转向', () => {
+    const { hooks, player, enemies } = makeHooks();
+    addEnemy(enemies, 70, player.cx + 200, player.cy);
+    const sp = new FlaironSpike(player.cx, player.cy, 0, -5, 60, 4);
+    run(sp, hooks, 12); // 10t 漂入 + 2t(第 11 tick ai0==0 寻敌)
+    expect(sp.vx).toBeGreaterThan(0);                    // 朝敌转向(vx<0 起步被拉正)
+  });
+
+  it('timeLeft 120 到期消失;无目标不爆尘存活至漂尽', () => {
+    const { hooks, player } = makeHooks();
+    const sp = new FlaironSpike(player.cx, player.cy, 2, 0, 60, 4);
+    run(sp, hooks, 130);
+    expect(sp.dead).toBe(true);
   });
 });

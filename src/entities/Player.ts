@@ -201,8 +201,9 @@ export class Player extends Entity {
   accThirdEyeNumber = 0;
   /** 稀有生物行缓存。原版 accCritterGuideNumber(:2474)缓存的是 npc[] 槽位索引,
    *  消费点 npc[num13].GivenOrTypeName(:46366/:46371)——本仓实体无 npc 槽位数组,
-   *  索引不可移植,直接缓存消费产出(生物名)等效 */
+   *  索引不可移植,直接缓存消费产出(生物名)+ id(金色生物行染色判定)等效 */
   accCritterGuideText: string | null = null;
+  accCritterGuideVid: number | null = null;
   // ---- DPS 计(Player.cs:2488-2496 字段 + :53290-53353 addDPS/checkDPSTime/getDPS) ----
   /** dpsDamage/dpsStart/dpsEnd/dpsLastHit/dpsStarted;墙钟 3 秒窗口,停手自动归 N/A */
   private dpsDamage = 0;
@@ -1304,6 +1305,9 @@ export class Player extends Entity {
     // :19546-19556 门：itemAnimation 窗内仅 useTurn 物品允许移动改朝向
     // （动画窗代理 = itemAnimTicks>0 || useTime>0——非挥砍武器以 useTime 计窗）
     const animBusy = this.itemAnimTicks > 0 || this.useTime > 0;
+    // Scutlix/Santank 瞄准中锁朝向（Player.cs:19549 flag3 的 AllowDirectionChange 门；
+    // 声明在冲刺分支外——滑行段的改向门同样消费）
+    const mountAllowDir = !this.ridingMount || this.mount.allowDirectionChange;
     // 冲刺滑行期（dashDelay<0）常规加速/摩擦/限速整体跳过——Run 各分支 dashDelay>=0 门
     // （Player.cs:19559/:19575/:19675/:19705），速度由 DashMovement 阻尼段独占
     if (this.dashDelay >= 0) {
@@ -1346,8 +1350,6 @@ export class Player extends Entity {
       // 山羊/蜥蜴 → runAcceleration×3、maxRunSpeed×1.5——蜥蜴/山羊两版源码均无复位，骑乘期内常驻）
       if (mnt && mnt.mountJumpPerforming) { runAcc *= 3; maxRun *= 1.5; }
       const wingAir = !this.onGround && this.equipStats.wing && this.wingTime > 0 && !mnt;
-      // Scutlix/Santank 瞄准中锁朝向（Player.cs:19549 flag3 的 AllowDirectionChange 门）
-      const mountAllowDir = !mnt || mnt.allowDirectionChange;
       if (ix !== 0) {
         // :19546-19556：itemAnimation 窗内仅锁【朝向】不锁移动（挥砍中可跑）——
         // useTurn 物品（工具族）豁免

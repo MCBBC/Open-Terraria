@@ -20,6 +20,7 @@ import {
   type TownShotParams, townNpcDamageMult,
 } from '../data/vanillaTownAttack';
 import { TownShot } from './TownShot';
+import { visEffectFrames, mouseTextColorApprox } from './Enemy';
 
 export interface NpcHome { x: number; y: number; }
 
@@ -134,6 +135,39 @@ export class TownNPC extends Entity {
   }
 
   private cbApplied = false;
+
+  /** 本 tick 点光（NPC.cs 城镇 NPC 侧三处恒亮）：
+   *  - 160 松露（UpdateNPC_CastLights :93544-93566）：num3=Next(28,42)×0.005+
+   *    (270−mouseTextColor)/500，基色 (0.1,0.3+num3/2,0.6+num3)×0.35；变体 1
+   *    （townNpcVariationIndex==1）R/B 互换——本仓不跟踪变体档，取默认档
+   *  - 209 电子人（:93590-93599）：同式抖动 ×0.35、B 基 0.4（ai[0]==12 的
+   *    Top 追加光 (0.3,0.1,0.1) 未接——音乐盒状态未移植，登记 GAP）
+   *  - 681 彩虹城镇史莱姆（AI_007 尾段 :55963-55974）= TorchColor(23)×0.35
+   *  - 683 黄城镇史莱姆（:55974-55979）= (0.25,0.25,0.1)×WrappedLerp(0.75,1,t%120/120)
+   *  条件态三处（:53637 微光上升 / :55395·:55547 魔法光环）依赖未移植状态机，跳过 */
+  get lightRGB(): [number, number, number] | null {
+    if (this.vanillaId === 160) {
+      const n3 = (28 + Math.random() * 14) * 0.005 + (270 - mouseTextColorApprox()) / 500;
+      return [0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.6 + n3) * 0.35];
+    }
+    if (this.vanillaId === 209) {
+      const n3 = (28 + Math.random() * 14) * 0.005 + (270 - mouseTextColorApprox()) / 500;
+      return [0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.4 + n3 / 2) * 0.35];
+    }
+    if (this.vanillaId === 681) {
+      const num = Math.min(1, Math.max(0, 0.9 + (270 - mouseTextColorApprox()) / 900));
+      return [num * 0.9 * 0.35, 0.55 * 0.35, num * 1.2 * 0.35];   // TorchColor(23)×0.35
+    }
+    if (this.vanillaId === 683) {
+      const p = (visEffectFrames() % 120) / 120;
+      const tri = p * 2 > 1 ? 2 - p * 2 : p * 2;                   // Utils.WrappedLerp
+      const l = 0.75 + 0.25 * tri;
+      return [0.25 * l, 0.25 * l, 0.1 * l];
+    }
+    return null;
+  }
+  lightRGBAt: { x: number; y: number } | null = null;
+
   fixedUpdate(dt: number, game: GameHooks) {
     this.animT++;
     if (this.iframes > 0) this.iframes--;

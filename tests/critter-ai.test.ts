@@ -234,7 +234,9 @@ describe('小动物 AI 家族', () => {
     const e = Enemy.fromVanilla(484, 40 * 16, 59 * 16)!;
     e.fixedUpdate(1 / 60, hooks);
     expect(e.lightRGB).not.toBeNull();
-    expect(e.lightRGB![0]).toBeGreaterThan(e.lightRGB![1]); // 紫光 r>b 通道关系
-    expect(e.lightRGB![0]).toBeLessThanOrEqual(0.3 * 1.11 * 0.5 + 1e-9);
+    expect(e.lightRGB![0]).toBeGreaterThan(e.lightRGB![1]); // 紫光 r>g 通道关系
+    // num1047 = Next(90,111)×0.01 × (essScale+0.5)/2——essScale 三角波 0.7↔1.0
+    // （Main.cs:61703-61713），系数上限 0.75（曾误用恒 0.5 近似钉死过小上界）
+    expect(e.lightRGB![0]).toBeLessThanOrEqual(0.3 * 1.11 * 0.75 + 1e-9);
   });
 });

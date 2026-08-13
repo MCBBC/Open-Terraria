@@ -199,7 +199,8 @@ export class WorldCreationPanel {
       ['UI_WorldCreation_PreviewSizeSmall', 'UI_WorldCreation_PreviewSizeMedium', 'UI_WorldCreation_PreviewSizeLarge'][this.sel.size],
       // 此前误写 UI_WWorldCreation_*(双 W)→ 四个难度层 404,预览缺难度层像"错位"
       ['UI_WorldCreation_PreviewDifficultyNormal2', 'UI_WorldCreation_PreviewDifficultyExpert2', 'UI_WorldCreation_PreviewDifficultyMaster2', 'UI_WorldCreation_PreviewDifficultyCreative2'][this.sel.diff],
-      ['UI_WWorldCreation_PreviewEvilRandom', 'UI_WWorldCreation_PreviewEvilCorruption', 'UI_WWorldCreation_PreviewEvilCrimson'][this.sel.evil],
+      // 同 :200 双 W typo 漏修分支(2026-08-13 枚举 review 实锤)——邪恶层曾 404
+      ['UI_WorldCreation_PreviewEvilRandom', 'UI_WorldCreation_PreviewEvilCorruption', 'UI_WorldCreation_PreviewEvilCrimson'][this.sel.evil],
     ];
     const border = 'UI_WorldCreation_PreviewBorder';
     // 贴图缓存 + 全层重画（onload 乱序到达也不串层）

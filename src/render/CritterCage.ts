@@ -1282,7 +1282,12 @@ export function drawCageCell(
   const rows = Math.max(1, Math.floor(sheetH / fam.step));
   // 槽位哈希用【存储帧】（物体锚还原，TileDrawing.cs:6646-6652 同式）
   const slot = cageSlot(fam.slot, x, y, fx, fy);
-  const frame = cageFrameOf(fam, slot, tileAnim.tick, rows);
+  // 横带族（710）帧域 = 单帧行数 × 横带列数（帧 41-70 在第 2/3 列），
+  // 钳制须按总帧数——按 rows 钳会把充气段压平到末行
+  const frameCap = fam.xband
+    ? rows * Math.max(1, Math.floor(r.img.width / fam.xband.stride))
+    : rows;
+  const frame = cageFrameOf(fam, slot, tileAnim.tick, frameCap);
   // 710 河豚横带（TileDrawing.cs:5840-5843）
   const band = cageBandOffset(fam, frame);
   const asx = r.sx + band.dx;

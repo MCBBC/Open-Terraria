@@ -41,7 +41,8 @@ const mkPage = async () => {
   await page.bringToFront();
   page.on('pageerror', (e) => console.log('PAGEERROR:', e.message));
   await page.goto(GAME, { waitUntil: 'domcontentloaded', timeout: 60000 });
-  await page.waitForFunction(() => !!window.__swFlow && !!window.__swGame, { timeout: 60000 });
+  // 主菜单即有 __swFlow；__swGame 须等 joinRoom 载入服务器世界后才存在
+  await page.waitForFunction(() => !!window.__swFlow, { timeout: 60000 });
   return page;
 };
 
@@ -60,41 +61,74 @@ const joinA = await pageA.evaluate(async (u) => {
   try { await window.__swFlow.joinRoom(u, ''); } catch (e) { return String(e); }
   return window.__swGame?.net?.active ? 'ok' : 'net inactive';
 }, hostUrl).catch((e) => String(e));
+await pageA.waitForFunction(() => !!window.__swGame && !!window.__swGame.net?.active, { timeout: 60000 }).catch(() => {});
 const joinB = await pageB.evaluate(async (u) => {
   try { await window.__swFlow.joinRoom(u, ''); } catch (e) { return String(e); }
   return window.__swGame?.net?.active ? 'ok' : 'net inactive';
 }, guestUrl).catch((e) => String(e));
+await pageB.waitForFunction(() => !!window.__swGame && !!window.__swGame.net?.active, { timeout: 60000 }).catch(() => {});
 check('A(房主) 进房', joinA === 'ok', joinA);
 check('B(访客) 进房', joinB === 'ok', joinB);
+
+// ---- 铺平台落位（tiny 存档出生点悬空会坠亡 underground——先兜底） ----
+const platform = async (page, who) => page.evaluate((w) => {
+  const g = window.__swGame;
+  if (g.player.dead) g.respawnPlayer();
+  const st = g.world.store;
+  // ★底部击杀线 = (h-40) 格(bordersMovement)——平台必须在其上
+  const tx = Math.floor(g.world.w / 2), ty = g.world.h - 60;
+  for (let dx = -14; dx <= 14; dx++) st.setTileSilent(tx + dx, ty, 1, 0, 0);
+  g.player.x = (tx + (w === 'B' ? 2 : -2)) * 16;
+  g.player.y = (ty - 3) * 16;
+  g.player.vx = 0; g.player.vy = 0;
+  g.player.fallStartY = null;
+  return { x: g.player.x, y: g.player.y, dead: g.player.dead };
+}, who);
+const platB = await platform(pageB, 'B');
+const platA = await platform(pageA, 'A');
+check('双方平台落位存活', !platA.dead && !platB.dead, JSON.stringify({ platA, platB }));
+await sleep(700); // msg13 双向同步
 
 // ---- 场景准备：双 hostile 异队 + 贴身站位 ----
 const setupA = await pageA.evaluate(async () => {
   const g = window.__swGame;
-  const { ITEM_DEFS } = await import('/src/data/items.ts');
-  const swordId = ITEM_DEFS.findIndex((d) => d && d.vid === 4); // 铜短剑（melee）
-  g.player.hostile = true; g.player.team = 1;
-  if (swordId >= 0) { g.player.inv.slots[0] = { id: swordId, stack: 1 }; g.player.inv.selected = 0; }
+  const { ITEM_BY_KEY } = await import('/src/data/items.ts');
+  // 近战手持物：铜短剑 vi_ 键反查，退化 torch（swing.dmg 显式给值,任意非 magic 即可）
+  let heldId = ITEM_BY_KEY['vi_3507_copper_shortsword'] ?? -1;
+  if (heldId < 0) heldId = ITEM_BY_KEY['torch'] ?? -1;
+  g.player.hostile = true; g.player.team = 1; g.player.facing = 1;
+  if (heldId >= 0) { g.player.inv.slots[0] = { id: heldId, stack: 1 }; g.player.inv.selected = 0; }
   g.net.sendPvpState();
-  return { swordId: swordId >= 0, slot: g.net.mySlot };
+  return { heldId, slot: g.net.mySlot };
 });
 const setupB = await pageB.evaluate(() => {
   const g = window.__swGame;
   g.player.hostile = true; g.player.team = 2;
   g.net.sendPvpState();
-  return { slot: g.net.mySlot, x: g.player.cx, y: g.player.y };
+  return { slot: g.net.mySlot, x: g.player.x, y: g.player.y };
 });
-check('A 拿到铜短剑', setupA.swordId);
+check('A 拿到近战手持物', setupA.heldId >= 0, `heldId=${setupA.heldId}`);
 await sleep(600); // msg13 双向同步
 
-// B 不动；A 传送到 B 身边
+// A 贴到 B 左侧 14px（B 的 msg13 权威位）
 const teleA = await pageA.evaluate((bpos) => {
   const g = window.__swGame;
-  g.player.x = bpos.x - 14; g.player.y = bpos.y; // A 在 B 左侧 14px（同顶）
+  g.player.x = bpos.x - 14; g.player.y = bpos.y;
   g.player.vx = 0; g.player.vy = 0;
-  return { a: g.player.cx, b: g.remotePlayerProxies[0]?.cx ?? -1, proxies: g.remotePlayerProxies.length };
+  return {
+    proxies: g.remotePlayerProxies.length, bProxyX: g.remotePlayerProxies[0]?.x ?? -1,
+    playersSize: g.net.players.size, mySlot: g.net.mySlot, isHost: g.net.policy.isHost,
+    playerKeys: [...g.net.players.keys()],
+  };
 }, setupB).catch((e) => ({ err: String(e) }));
-check('A 侧 B 代理存在', teleA.proxies >= 1, JSON.stringify(teleA));
+check('A 侧 B 代理存在', (teleA.proxies ?? 0) >= 1, JSON.stringify(teleA));
 await sleep(600);
+const diagB = await pageB.evaluate(() => ({
+  playersSize: window.__swGame.net.players.size, mySlot: window.__swGame.net.mySlot,
+  playerKeys: [...window.__swGame.net.keys?.() ?? []],
+  proxiesOnB: window.__swGame.remotePlayerProxies.length,
+}));
+console.log('diag:', JSON.stringify({ teleA, diagB }));
 
 // ① 近战全链：A 挥击 → B 掉血
 const bHp0 = await pageB.evaluate(() => window.__swGame.player.hp);

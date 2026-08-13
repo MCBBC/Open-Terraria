@@ -192,10 +192,10 @@ import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, FlaironSpike, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { RainbowBolt } from '../entities/RainbowProj';
 import { PrismProj } from '../entities/PrismProj';
-import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly } from '../entities/SwingArc';
+import { SwingArc, TrueNightsEdgeSlash, NightsEdgeFly, ZenithSword, randomFractalProfile } from '../entities/SwingArc';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber, bobberProjIdFor } from '../entities/Bobber';
@@ -210,7 +210,7 @@ import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
-import { mountOfItem, isCartMount } from '../entities/Mounts';
+import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME } from '../entities/Mounts';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
@@ -1500,6 +1500,26 @@ export class Game implements GameHooks {
 
   /** 坐骑召唤（Player.cs:42095：item.mountType != -1 且 flag2 → mount.SetMount）。
    *  召唤物不消耗；再召同型 = 下坐（Player.cs:5768 TryToDismount 链） */
+  /** Player.QuickMount（Player.cs:5728-5783）召唤段：QuickMount_GetItemToUse
+   * （:5859-5878）miscEquips[3] 坐骑装备槽优先 → 背包顺序扫非矿车坐骑物品。
+   * 禁用门（:5757 frozen/tongued/webbed/stoned/死亡）经 setMount 内部 canMount 空间
+   * 门+此处 dead 门近似。返回是否找到并上坐（false → 调用方落 QuickMinecart） */
+  private quickMount(): boolean {
+    const p = this.player;
+    const eq = p.inv.miscEquips[3];
+    if (eq) {
+      const vid = vanillaIdOfItem(eq.id);
+      if (mountOfItem(vid) >= 0 && !isCartMount(mountOfItem(vid))) return this.useMountItem(vid);
+    }
+    for (const s2 of p.inv.slots) {
+      if (!s2) continue;
+      const vid = vanillaIdOfItem(s2.id);
+      const mid = mountOfItem(vid);
+      if (mid >= 0 && !isCartMount(mid)) return this.useMountItem(vid);
+    }
+    return false;
+  }
+
   private useMountItem(vanillaItemId: number): boolean {
     const mountId = mountOfItem(vanillaItemId);
     if (mountId < 0) return false;
@@ -1528,12 +1548,54 @@ export class Game implements GameHooks {
   }
 
   /** 下坐（Mount.TryDismount :6124：空间不足失败 → DoFailedDismountDust 尘 10） */
+  /** FailedNoSpace 计数（QuickMount 三连败门，Player.cs:5738-5753） */
+  private mountNoSpaceCount = 0;
+
   private tryDismountMount(): void {
     const p = this.player;
     if (!p.ridingMount) return;
-    if (!p.mount.tryDismount(p)) {
-      this.spawnParticles(p.cx, p.cy, '#C8C8C8', 10, 1.2);
+    if (p.mount.tryDismount(p)) {
+      this.mountNoSpaceCount = 0;
+      return;
+    }
+    // QuickMount（Player.cs:5738-5753）：失败 1/2 次 = Sound 0 + 尘(计数×20)；第 3 次
+    // 强制下坐 + PlayerNoSpaceTeleport（就近可容盒传送）——曾只弹 toast
+    this.mountNoSpaceCount++;
+    if (this.mountNoSpaceCount < 3) {
+      this.sfx.play('dig', 0.7, p.cx, p.cy);
+      this.spawnParticles(p.cx, p.cy, '#C8C8C8', 10 + this.mountNoSpaceCount * 20, 1.2);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.MountDismountBlocked'));
+      return;
+    }
+    this.mountNoSpaceCount = 0;
+    p.mount.dismount(p);
+    this.playerNoSpaceTeleport();
+  }
+
+  /** PlayerNoSpaceTeleport（Player.cs:5685-5726）：以当前格向上逐行扫可容纳
+   *  42px 玩家盒的非实心 3×3 区，找到即传送（原版扫 20 行内 fallback 站立位） */
+  private playerNoSpaceTeleport(): void {
+    const st = this.world.store;
+    const p = this.player;
+    const tx = Math.floor(p.cx / TILE);
+    const ty = Math.floor(p.y / TILE);
+    const fits = (cx: number, cy: number): boolean => {
+      for (let dx = 0; dx < 2; dx++) {
+        for (let dy = 0; dy < 3; dy++) {
+          if (!st.inBounds(cx + dx, cy + dy) || st.isSolid(cx + dx, cy + dy)) return false;
+        }
+      }
+      return true;
+    };
+    for (let dy = 0; dy >= -20; dy--) {
+      for (let dx = -4; dx <= 4; dx++) {
+        if (fits(tx + dx, ty + dy)) {
+          p.x = (tx + dx) * TILE;
+          p.y = (ty + dy) * TILE;
+          p.vx = 0; p.vy = 0;
+          return;
+        }
+      }
     }
   }
 
@@ -1982,7 +2044,8 @@ export class Game implements GameHooks {
     this.renderer.weatherPreset = (name) => this.applyWeatherPreset(name);
     // 原版墙渲染器（TEdit WallFraming 移植；墙 id 直用 wld id，贴图 Wall_N.png）
     const wallTiler = this.atlas ? new VanillaWallTiler(this.atlas) : null;
-    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler);
+    // atlas 传入 = 烘焙懒取自注册(晚到自动重烘,见 ChunkCache 构造器注释)
+    this.chunks = new ChunkCache(w, this.assets.tileSheets, this.autotiler, wallTiler, this.atlas);
     // 懒加载晚到的【图块/墙表】→ 全量标脏重烘焙:出生点子集预载后,远行遇到
     // 新类型时 vframe 先返回 null(fallback 烤进 chunk),表到位后此回调修正。
     // 必须按文件名过滤——图标/NPC/弹幕贴图不进 chunk，此前任何 vimage 晚到都
@@ -4706,11 +4769,12 @@ export class Game implements GameHooks {
       this.cartKeyLatch = true;
       this.tryDismountMount();
     }
-    // R（坐骑键）：未骑乘 + 附近有轨道 → QuickMinecart 上车（Player.cs:5796-5827：
-    // 射程内取最近轨道格 + CanHitLine 视线门）
-    if (inp.down('KeyR') && !this.cartKeyLatch && this.trackTile !== 0) {
+    // R（坐骑键）：未骑乘 → QuickMount（Player.cs:5728-5783）：QuickMount_GetItemToUse
+    // （:5859-5878）装备槽 miscEquips[3] 优先 → 背包 58 格扫【非矿车】坐骑物品 → SetMount；
+    // ★无坐骑物品才落 QuickMinecart（原版同序；曾缺此支——背包有鞍按 R 不上车）
+    if (inp.down('KeyR') && !this.cartKeyLatch) {
       this.cartKeyLatch = true;
-      this.tryQuickMinecart();
+      if (!this.quickMount()) this.tryQuickMinecart();
     }
     if (!inp.down('KeyR')) this.cartKeyLatch = false;
     // 全屏地图打开时鼠标交给地图（拖动/缩放/传送），不触发挖掘/放置/攻击/使用。
@@ -4852,14 +4916,17 @@ export class Game implements GameHooks {
         this.swingTileCutSet.clear();
         // ★ 真刃系旋斩弧五剑（Player.cs:48265-48317 各专属出生链——先于下方通用
         // shoot 门：368/1826 无 shootSpeed 会被饿死；弧弹自带命中，不再走 Arrow）
-        if (cwMelee && [972, 973, 982, 983, 997].includes(cwMelee.shoot)) {
+        if (cwMelee && [972, 973, 982, 983, 997, 933].includes(cwMelee.shoot)) {
           const angT = Math.atan2(inp.mouseY - this.renderer.canvas.height / 2, inp.mouseX - this.renderer.canvas.width / 2);
           this.player.facing = Math.cos(angT) > 0 ? 1 : -1;   // 发射型面向鼠标（:46578）
           const animT = cwMelee.useAnimation ?? cwMelee.useTime ?? 20;
           const scaleT = ps?.size ?? 1;
+          const arcVid = heldDef?.vid ?? viIdFromKey(heldDef?.key ?? '');
+          const arcCrit = 0.04 + (itemCombat(arcVid)?.crit ?? 0) / 100
+            + this.player.critChance('melee') / 100 + (ps?.crt ?? 0) / 100;
           const mkArc = (projId: number, dmg: number) => {
             const arc = new SwingArc(this.player, projId, animT, Math.round(dmg), this.player.facing, scaleT);
-            arc.critChance = critTotal;
+            arc.critChance = arcCrit;
             arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
           };
@@ -4867,9 +4934,9 @@ export class Game implements GameHooks {
             case 972: {   // 永夜刃 273（:48265-48274）：972 锚弧 + 972 飞斩（aim 向、ai1=30）
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const fly = new NightsEdgeFly(this.player.cx, this.player.cy - 4,
-                Math.cos(angT) * cwMelee.shootSpeed, Math.sin(angT) * cwMelee.shootSpeed,
+                Math.cos(angT) * (cwMelee.shootSpeed ?? 5), Math.sin(angT) * (cwMelee.shootSpeed ?? 5),
                 this.swing.dmg ?? cwMelee.damage, this.player.facing, 30, scaleT);
-              fly.critChance = critTotal;
+              fly.critChance = arcCrit;
               fly.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
               this.entities.add(fly, 'projectiles');
               break;
@@ -4877,11 +4944,39 @@ export class Game implements GameHooks {
             case 973: {   // 真永夜刃 675（:48294-48301）：972 锚弧 + 973 伸长斩（aim 向、半伤、ai1=32）
               mkArc(972, this.swing.dmg ?? cwMelee.damage);
               const slash = new TrueNightsEdgeSlash(this.player,
-                Math.cos(angT) * cwMelee.shootSpeed, Math.sin(angT) * cwMelee.shootSpeed,
+                Math.cos(angT) * (cwMelee.shootSpeed ?? 14), Math.sin(angT) * (cwMelee.shootSpeed ?? 14),
                 (this.swing.dmg ?? cwMelee.damage) / 2, this.player.facing, 32, scaleT);
-              slash.critChance = critTotal;
+              slash.critChance = arcCrit;
               slash.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
               this.entities.add(slash, 'projectiles');
+              break;
+            }
+            case 933: {   // Zenith 4956（Player.cs:48078-48121）：useAnimation 30/useTime 10
+              // → 每挥 3 剑（cycle=floor(swing.t/useTime)）；首剑档案 4956 后续表随机；
+              // 目标=鼠标世界位（limit-to-reach 省略备案），cycle 1-2 在鼠标 400px 内
+              // 重定向最近敌 + 无目标(cycle1)/cycle2 加 ±150px 圆散布
+              const [zwx, zwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+              const cycle = Math.floor((this.swing?.t ?? 0) / (cwMelee.useTime ?? 10));
+              let tzx = zwx, tzy = zwy;
+              if (cycle >= 1) {
+                let best: { cx: number; cy: number } | null = null, bd = 400;
+                for (const ent of this.entities.enemies) {
+                  const e = ent as unknown as { cx: number; cy: number; dead: boolean; vanillaId?: number | null; hp: number };
+                  if (e.dead) continue;
+                  const d = Math.hypot(e.cx - zwx, e.cy - zwy);
+                  if (d < bd) { bd = d; best = { cx: e.cx, cy: e.cy }; }
+                }
+                if (best) { tzx = best.cx; tzy = best.cy; }
+                if (cycle >= 2 || !best) {
+                  const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * 150;
+                  tzx += Math.cos(a) * r; tzy += Math.sin(a) * r;
+                }
+              }
+              const zsword = new ZenithSword(this.player, tzx, tzy,
+                this.swing.dmg ?? cwMelee.damage, cycle === 0 ? 4956 : randomFractalProfile());
+              zsword.critChance = arcCrit;
+              zsword.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
+              this.entities.add(zsword, 'projectiles');
               break;
             }
             case 982: mkArc(982, this.swing.dmg ?? cwMelee.damage); break;          // 圣剑 368（:48280）
@@ -4924,7 +5019,7 @@ export class Game implements GameHooks {
             // 调整 scale——Player 相对锚定的挥砍视觉，TerraArcProj 随 985 同生同灭）
             const arc = new SwingArc(this.player, 984, cwMelee.useTime,
               Math.round((this.swing.dmg ?? 1)), this.player.facing, (ps?.size ?? 1));
-            arc.critChance = critTotal;
+            arc.critChance = arcCrit;
             arc.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen;
             this.entities.add(arc, 'projectiles');
             this.mining = null;
@@ -6088,13 +6183,28 @@ export class Game implements GameHooks {
           () => this.input.mouseHeld && !this.input.uiBlocking && this.player.inv.heldItem()?.id === itemId,
           () => { const [wx, wy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY); return { x: wx, y: wy }; });
         flailP.critChance = critTotal;
-        // AI_015 特例子弹生成回调(247/757/1058;entities.add 不在 GameHooks)
+        // AI_015 特例子弹生成回调(247/757/1058;entities.add 不在 GameHooks)。
+        // ★sDmg 源自 FlailProj.damage=cw.damage(已含词缀乘区)——再乘 ps?.dmg
+        //  = 双乘前缀(review 实锤,2026-08-13);原版 248/928/405 伤=出手时武器伤。
+        // 弹型按原版 AI 形态分流(SetDefaults):
+        //   248 aiStyle1 箭物理(grav 0.3,射出音 Item17 未提取 GAP);
+        //   928 aiStyle14 弹跳球(34×34/grav 0.3/life 250/穿透 2,:8509);
+        //   405 aiStyle70 追踪刺(ai0=-10 漂入→650 寻敌→追踪,专属 FlaironSpike)
         flailP.spawnProj = (sx, sy, svx, svy, sProj, sDmg, sKb) => {
-          // ★sDmg 源自 FlailProj.damage=cw.damage(已含词缀乘区)——再乘 ps?.dmg
-          //  = 双乘前缀(review 实锤,2026-08-13);原版 248/928/405 伤=出手时武器伤
-          this.entities.add(new Arrow(sx, sy, svx, svy,
-            Math.max(1, Math.round(sDmg)), sKb, sProj, null,
-            { grav: 0, life: 300, pierce: 2 }), 'projectiles');
+          const dmg = Math.max(1, Math.round(sDmg));
+          if (sProj === 405) {
+            this.entities.add(new FlaironSpike(sx, sy, svx, svy, dmg, sKb), 'projectiles');
+            return;
+          }
+          if (sProj === 928) {
+            const bub = new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
+              { grav: 0.3, life: 250, pierce: 2, bounce: true });
+            bub.w = 34; bub.h = 34; // SetDefaults width/height=34(:8509)
+            this.entities.add(bub, 'projectiles');
+            return;
+          }
+          this.entities.add(new Arrow(sx, sy, svx, svy, dmg, sKb, sProj, null,
+            { grav: 0.3, life: 1200 }), 'projectiles'); // 248:aiStyle1 箭物理
         };
         flailP.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥
         this.entities.add(flailP, 'projectiles');
@@ -6340,6 +6450,53 @@ export class Game implements GameHooks {
     this.world.altarCount++;
     // 成就：BEGONE_EVIL（WorldGen.cs:49111 event 6——每次砸祭坛都触发）
     this.achievements.notifyProgressionEvent(6);
+  }
+
+  /** 钻头坐骑（mount 8）每 tick 能力驱动（Mount.cs UseDrill/UseAbility/AimAbility +
+   *  Player.cs ItemCheck_HandleMount :52066-52081 合并）：
+   *  - 按压边沿（上 tick 双松 + 本 tick 任一按下）→ 开激光（原版伴生光标投射物 453，
+   *    本仓以 mount.abilityActive 单一真源表达）；双松 → 关。
+   *  - 激活期间每 tick AimAbility（二极管朝鼠标）+ UseDrill（左键挖块/右键拆墙，
+   *    每束每 tick 一击，最多 2 束齐射）。
+   *  挖块走 tryMine(drill)（HitTile 积累 + 镐力门槛表 1:1），拆墙走 drillPickWall。 */
+  private updateDrillMountUse(): void {
+    const p = this.player;
+    const mnt = p.mount;
+    const useItem = p.inputUseItem, useTile = p.inputUseTile;
+    const pressEdge = (useItem || useTile) && !p.prevUseItem && !p.prevUseTile;
+    p.prevUseItem = useItem;
+    p.prevUseTile = useTile;
+    if (pressEdge) mnt.setDrillActive(true);
+    else if (!useItem && !useTile) mnt.setDrillActive(false);
+    mnt.updateDrill();
+    if (mnt.abilityActive) mnt.aimDrill(p.cx, p.cy, p.aimWX, p.aimWY);
+    mnt.useDrill(p, {
+      useItem,
+      useTile,
+      pickTile: (tx, ty) => this.tryMine(tx, ty, DRILL_PICK_POWER, 'pick', DRILL_PICK_TIME, DRILL_PICK_TIME, { drill: true }),
+      pickWall: (tx, ty) => this.drillPickWall(tx, ty),
+      dust: (x, y, n) => this.spawnParticles(x, y, '#9FD8FF', n, 1.4, { life: 26, grav: 0 }),
+      // Tile.SmoothSlope(point, applyToNeighbors=true)（:3094）——本仓无运行期坡面平滑器，登记
+    });
+    this.mining = null;
+  }
+
+  /** 钻头坐骑拆墙（Player.PickWall :45328 1:1：damage 210 直接积累，≥100 即毁墙）。
+   *  与锤墙路径（HitTile type-2 / 8t 冷却）不同——钻头无冷却、无 holdPound 语义 */
+  private drillPickWall(tx: number, ty: number): void {
+    if (!this.netCanEditTile()) return;
+    const st = this.world.store;
+    if (!st.inBounds(tx, ty)) return;
+    const wall = st.wall[st.idx(tx, ty)];
+    if (wall <= 0 || wall === 350) return;    // 350 = 不可拆墙（CanPlayerSmashWall :45305）
+    const total = this.hitTiles.addDamage(tx, ty, DRILL_PICK_POWER, 2);
+    this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 2, 1.2);
+    if (total >= 100) {
+      this.hitTiles.clear(tx, ty, 2);
+      st.setWall(tx, ty, 0);
+      this.spawnParticles(tx * TILE + 8, ty * TILE + 8, '#5C4436', 8, 1.8);
+      this.sfx.play('chop');
+    }
   }
 
   private tryMine(tx: number, ty: number, power: number, toolType: 'pick' | 'axe' | 'hammer', speed: number, useTime?: number,
@@ -8393,6 +8550,11 @@ export class Game implements GameHooks {
       spawnNpc: (id, x, y) => {
         const e = Enemy.fromVanilla(id, x, y);
         if (!e) return;
+        // 原版 NPC.NewNPC 的 Y 是 Bottom 锚（SpawnMonsterFromGate(base.Bottom)
+        // NPC.cs:43103 / SummonCrystalDirect :589-597 / RaiseGoblins :766 同语义）;
+        // fromVanilla 是中心锚 → 上移半身高,否则食人魔(124px)等高怪出生即半埋,
+        // LOS 断链触发 AI_107 flag2 穿墙相位(永远飞不回地面)。
+        e.y -= e.h / 2;
         e.id = this.entities.nextId++;
         this.entities.add(e, 'enemies');
       },
@@ -11158,15 +11320,19 @@ export class Game implements GameHooks {
         numClouds: w.weather?.numClouds ?? 200,
         windSpeedCurrent: w.weather?.windSpeedCurrent ?? 0,
         sandstorm: !!w.weather?.sandstorm.happening,
+        globalTimeSec: performance.now() / 1000,   // GlobalTimeWrappedHourly(:16777)
       },
       moonPhase: clock.moonPhase, bloodMoon: !!clock.bloodMoon, eclipse: !!clock.eclipse,
       fishingText, oreText,
       rareText: p.accCritterGuideText,
+      rareVid: p.accCritterGuideVid,
       enemyCount: p.accThirdEyeNumber,
       killText,
       dps: p.getDPS(),
       mph: gates.accStopwatch ? mphOf(r.infoAccs ? r.infoAccs.speedAvg : 0, {
         honey: p.inHoney, shimmer: p.inShimmer, water: p.inWater, merman: p.merman,
+        ignoreWater: p.equipStats.waterWalk || p.buffs.has(BuffType.WaterWalking),  // :46484 整块门
+        trident: /^vi_277_/.test(p.inv.heldDef()?.key ?? ''),                        // :46494 手持三叉戟
       }) : NaN,
       centerX: p.cx, bottomY: p.y + p.h,
       worldSurface: w.groundLevel, rockLevel: w.rockLevel,
@@ -11492,10 +11658,16 @@ export class Game implements GameHooks {
             || vid === 399 || vid === 13 || vid === 14 || vid === 15;
         }),
       // WorldGen.PlayerLOS 近似（WorldEvolution.playerLOS 同款：50 格内视为可见）
+      // WorldGen.PlayerLOS（:69500-69515）真义 = 点 16×16 矩形 ∩ 以玩家为中心
+      // sWidth*1.2 × sHeight*1.2 屏幕矩形（非视线）——曾 ±50×±40 格硬编码盒，
+      // 宽屏少挡/小窗多挡，现按相机视口 ×1.2 精确对齐
       playerLOS: (x, y) => {
         const p = this.player;
-        return !p.dead && Math.abs(Math.floor(p.cx / TILE) - x) < 50
-          && Math.abs(Math.floor(p.cy / TILE) - y) < 40;
+        if (p.dead) return false;
+        const hx = this.camera.viewW / (this.camera.zoom || 1) * 0.6 + 8;
+        const hy = this.camera.viewH / (this.camera.zoom || 1) * 0.6 + 8;
+        return Math.abs(x * TILE + TILE / 2 - p.cx) < hx
+          && Math.abs(y * TILE + TILE / 2 - p.cy) < hy;
       },
       // NPC.NewNPC(new EntitySource_WorldEvent(), x, y, 437)——底部锚点已由
       // RuntimeEvents 换算（(y-4)*16-8），此处只落位
@@ -11519,10 +11691,16 @@ export class Game implements GameHooks {
       snowMoon: w.moonEvent.kind === MOON_KIND_FROST,
       pumpkinMoon: w.moonEvent.kind === MOON_KIND_PUMPKIN,
       invasionType: w.invasionType,
+      // WorldGen.PlayerLOS（:69500-69515）真义 = 点 16×16 矩形 ∩ 以玩家为中心
+      // sWidth*1.2 × sHeight*1.2 屏幕矩形（非视线）——曾 ±50×±40 格硬编码盒，
+      // 宽屏少挡/小窗多挡，现按相机视口 ×1.2 精确对齐
       playerLOS: (x, y) => {
         const p = this.player;
-        return !p.dead && Math.abs(Math.floor(p.cx / TILE) - x) < 50
-          && Math.abs(Math.floor(p.cy / TILE) - y) < 40;
+        if (p.dead) return false;
+        const hx = this.camera.viewW / (this.camera.zoom || 1) * 0.6 + 8;
+        const hy = this.camera.viewH / (this.camera.zoom || 1) * 0.6 + 8;
+        return Math.abs(x * TILE + TILE / 2 - p.cx) < hx
+          && Math.abs(y * TILE + TILE / 2 - p.cy) < hy;
       },
       spawnFairy: (id, x, y) => {
         const e = Enemy.fromVanilla(id, x, y);

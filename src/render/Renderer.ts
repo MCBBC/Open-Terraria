@@ -987,6 +987,8 @@ export class Renderer {
       playerX: player.cx,
       playerY: player.cy,
     };
+    // 天空深化批帧数据挂点（月塔近距门/月总死亡戏剧/稀有云旗标/环境族 zone 门/涟漪采样）
+    this.sky.frameCtx = { entities, world, scene: this.scene, player, clock, camX: cam.x, camY: cam.y, z, viewW, viewH };
     this.sky.draw(ctx, clock, viewW, viewH, cam.x, 16.7, cam.y);
 
     // 1.5 世界背景图（原版 DrawBG：地表群系视差层 + 地下分层；天空之后、tile 之前）
@@ -1133,6 +1135,9 @@ export class Renderer {
       this.weatherFx.update(world, viewW, cam.x - viewW / 2, cam.y - viewH / 2, player.vx, player.vy);
       this.weatherFx.draw(this, world);
     }
+
+    // 2d''.7 天空深化批世界内绘制：雨点落水涟漪（世界坐标）+ 月总死亡白闪/晨昏镜头光斑（全屏）
+    this.sky.drawWorldFx(ctx, cam.x, cam.y, z, viewW, viewH);
 
     // 3.5 入驻旗帜（Main.cs:40152 DrawNPCHousesInWorld：有家 NPC 在家坐标上方
     // 挂 House_Banner 旗布 + 叠画 NPC 头像；实体层之前画，让 NPC 从旗前走过）
@@ -4829,11 +4834,20 @@ export class Renderer {
     void world;
   }
 
-  /** 坐骑贴图叠画（Mount.Draw :5500-5560 主体 1:1）。
+  /** 坐骑贴图叠画（Mount.Draw :5500-6075 主体 1:1）。
    *  锚点 = 玩家底心 + (XOffset×dir, -(42+heightBoost)/2 + YOffset + PlayerOffset)
    *  （原版 Position + (width/2 + XOffset, height/2 + YOffset + PlayerOffset)，height 为
    *  mounted 盒 42+heightBoost、bottom 锚定——本仓玩家盒恒 42，按底心换算）；
    *  源矩形 = (0, 帧高×frame, 全宽, 帧高)，origin = (宽/2, 帧高/2)，朝向翻转随 facing。
+   *  能力族特例：
+   *   - 钻头 8（:5793-5796/:5831-5837/:6027-6063）：背层外环随 outerRingRotation 旋转；
+   *     前层（座舱）面右水平翻转；眼前层（二极管）随 diodeRotation 旋转并射出两束
+   *     挖掘激光（CornflowerBlue/LightGreen，宽 2px）至光束锁定格。
+   *   - Scutlix 9（:5571-5576/:5729-5735）：前层/眼前层取 frameExtra（瞄准帧 6-10）；
+   *     眼辉层按充能比渐显（charge==0 不画）。
+   *   - 史后坐骑 50（:5838-5857/:5924-5948）：Extra_207（后翼）→ 主贴图 → Extra_205
+   *     （前身）→ Extra_206（眼翼）四层；主贴图原版经 RenderTarget 叠 QueenSlime 着色器
+   *     （PlayerQueenSlimeMountTextureContent——纯装饰，静态近似，登记）。
    *  贴图不可得坐骑（MOUNT_TEXTURE_OK=false：马匹/滚轴鞋/Chillet 等 Extra 表缺）→
    *  色块近似（胶囊体）并保留能力生效——登记于 vanilla-mounts.json textureOk */
   private drawMountLayer(ctx: CanvasRenderingContext2D, p: Player,
@@ -4847,24 +4861,108 @@ export class Renderer {
         const d = mnt.data!;
         const frames = Math.max(1, d.totalFrames ?? 1);
         const fh = Math.floor(img.height / frames);
-        const fr = Math.min(frames - 1, Math.max(0, mnt.frame));
+        // 帧索引（Mount.Draw :5565-5630）：Scutlix 前层取 frameExtra（瞄准帧），
+        // 其余取主帧
+        let fr = Math.min(frames - 1, Math.max(0, mnt.frame));
+        if (mnt.type === 9 && layer === 'front') fr = Math.min(frames - 1, Math.max(0, mnt.frameExtra));
         const xOff = (d.xOffset ?? 0) * (p.facing < 0 ? -1 : 1);
         const anchorX = p.x + p.w / 2 + xOff;
         const anchorY = p.y + p.h - (42 + (d.heightBoost ?? 0)) / 2 + (d.yOffset ?? 0) + mnt.playerOffset;
         ctx.save();
         ctx.translate(anchorX, anchorY);
-        if (p.facing < 0) ctx.scale(-1, 1);
+        // 朝向翻转（Mount.Draw :5831-5837）：type 8 仅前层（座舱）面右翻——环/二极管
+        // 不翻（二极管靠 diodeRotation 覆盖全向）；其余坐骑面左翻
+        const flip = mnt.type === 8
+          ? (layer === 'front' ? p.facing > 0 : false)
+          : p.facing < 0;
+        if (flip) ctx.scale(-1, 1);
+        // 层旋转（Mount.Draw :5793-5796）：钻头背层 = 外环角 / 钻头眼前层 = 二极管角
+        if (mnt.type === 8) {
+          ctx.rotate(layer === 'back' ? mnt.outerRingRotation : 0);
+        }
+        // ---- 史后坐骑（50）四层（:5838-5857/:5924-5948，均在背层） ----
+        if (mnt.type === 50 && layer === 'back' && this.atlas) {
+          const layerImg = (name: string) => this.atlas!.ensureVImage(`vanilla/${name}`);
+          const drawLayer = (name: string, row: number, dy: number) => {
+            const li = layerImg(name);
+            if (!li) return;
+            // 各 Extra 层行高与主贴图一致（70×576/8 与 70×288/4 均 72px），行数各异
+            const rows = Math.max(1, Math.floor(li.height / fh));
+            const r = Math.min(rows - 1, Math.max(0, row));
+            ctx.drawImage(li, 0, r * fh, li.width, fh, -li.width / 2, dy - fh / 2, li.width, fh);
+          };
+          const dy = 8 - mnt.playerOffset + 20;          // 原版 (0, 8-PlayerOffset+20) 偏移
+          drawLayer('Extra_207.png', mnt.frameExtra, dy); // 后翼（frameExtra 行）
+          ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+          drawLayer('Extra_205.png', mnt.frame, 0);       // 前身（主帧行）
+          drawLayer('Extra_206.png', mnt.frameExtra, dy); // 眼翼（frameExtra 行）
+          ctx.restore();
+          return;
+        }
         ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
-        // 副层（蜜蜂翅膀 Mount_BeeWings / Scutlix 眼族）：同锚错位 1px 叠画
+        // 副层（蜜蜂翅膀 Mount_BeeWings / Scutlix 眼族 / 钻头二极管）：
+        //  - Scutlix 眼辉：充能比渐显，charge==0 整层跳过（:5729-5735）
+        //  - 钻头二极管：diodeRotation 旋转（:5796）+ 两束激光（:6027-6063）
         if (extra) {
           const ex = this.atlas.ensureVImage(extra);
           if (ex) {
             const efh = Math.floor(ex.height / frames);
             const efr = layer === 'front' ? fr : Math.min(frames - 1, Math.max(0, mnt.frameExtra));
-            ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+            if (mnt.type === 9 && layer === 'front') {
+              const chargeMax = d.abilityChargeMax ?? 0;
+              if (mnt.abilityCharge <= 0) { /* 眼辉未充能：不画 */ }
+              else {
+                ctx.save();
+                ctx.globalAlpha *= Math.min(1, mnt.abilityCharge / Math.max(1, chargeMax));
+                ctx.drawImage(ex, 0, Math.min(frames - 1, Math.max(0, mnt.frameExtra)) * efh,
+                  ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+                ctx.restore();
+              }
+            } else if (mnt.type === 8 && layer === 'front') {
+              // 二极管层（frontExtra）：不随 facing 翻（上面 flip 只对 front 主层）——
+              // 此处在已翻转的坐标系里先翻回来，再按 diodeRotation 旋转
+              ctx.save();
+              if (flip) ctx.scale(-1, 1);
+              ctx.rotate(mnt.diodeRotation);
+              ctx.drawImage(ex, 0, 0, ex.width, ex.height, -ex.width / 2, -ex.height / 2, ex.width, ex.height);
+              // 两束激光：二极管点 → 光束锁定格中心（MagicPixel scale(2, len) 近似）
+              const rot = (v: { x: number; y: number }) => ({
+                x: v.x * Math.cos(mnt.diodeRotation) - v.y * Math.sin(mnt.diodeRotation),
+                y: v.x * Math.sin(mnt.diodeRotation) + v.y * Math.cos(mnt.diodeRotation),
+              });
+              const p1 = rot({ x: 36, y: -6 }), p2 = rot({ x: 36, y: 8 });
+              for (let i = 0; i < mnt.beams.length; i++) {
+                const b = mnt.beams[i];
+                if (b.tx < 0) continue;
+                const txp = b.tx * 16 + 8 - anchorX, typ = b.ty * 16 + 8 - anchorY;
+                const origins = [p1, p2];
+                const o = origins[i % 2];
+                const dx = txp - o.x, dyL = typ - o.y;
+                const len = Math.hypot(dx, dyL);
+                if (len <= 0) continue;
+                ctx.save();
+                ctx.translate(o.x, o.y);
+                ctx.rotate(Math.atan2(dyL, dx));
+                ctx.globalAlpha *= 0.25;    // color.A=128 后 ×0.5（:6045-6047）
+                ctx.fillStyle = i % 2 === 0 ? '#6495ED' : '#90EE90';  // CornflowerBlue/LightGreen
+                ctx.fillRect(-1, 0, 2, len);
+                ctx.restore();
+              }
+              ctx.restore();
+            } else {
+              ctx.drawImage(ex, 0, efr * efh, ex.width, efh, -ex.width / 2 - 1, -efh / 2 - 1, ex.width, efh);
+            }
           }
         }
         ctx.restore();
+        // 钻头激活时的光标十字（原版 = 投射物 453 贴图随鼠标；本仓无投射物，
+        // 激活期直接叠画十字贴图于瞄准点）
+        if (mnt.type === 8 && layer === 'front' && mnt.abilityActive && this.atlas) {
+          const cross = this.atlas.ensureVImage('vanilla/Projectile_453.png');
+          if (cross) {
+            ctx.drawImage(cross, mnt.crosshairX - cross.width / 2, mnt.crosshairY - cross.height / 2);
+          }
+        }
         return;
       }
     }
@@ -5119,10 +5217,13 @@ export class Renderer {
 
   /** Extra_48 表情总表（272×1092）懒加载——原版 TextureAssets.Extra[48] */
   private emoteSheetImg: HTMLImageElement | null = null;
+  private emoteSheetFailed = false;
   private emoteSheet(): HTMLImageElement | null {
+    if (this.emoteSheetFailed) return null; // 404 终态:不重发(2026-08-13 前无 onerror=坏图滞留永久)
     if (!this.emoteSheetImg) {
       const im = new Image();
       im.onload = () => { /* 就绪 */ };
+      im.onerror = () => { this.emoteSheetFailed = true; this.emoteSheetImg = null; };
       im.src = 'sprites/vanilla/Extra_48.png';
       this.emoteSheetImg = im;
     }
@@ -5911,8 +6012,9 @@ export class Renderer {
     const cy0 = viewH / 2 - mapH / 2 + fm.panY;
     // 背景：原版 DrawMapFullscreenBackground（Main.cs:55804）——全屏群系 MapBG 贴图
     // （TextureAssets.MapBGs[i] = MapBG{i+1}.png，AssetInitializer :641），按视区深度
-    // 与玩家 zone 选表；贴图 vui() 懒加载首帧 null → 次帧补上（兜底深色）
-    const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}`) : null;
+    // 与玩家 zone 选表。★vui 键必须带 .png 后缀(2026-08-13 枚举 review 实锤:
+    // 此前裸 'MapBG{n}'/'Map' 恒 null——键失配不是懒加载瞬态,背景/卷轴从未画过)
+    const bgTex = this.atlas ? this.atlas.vui(`MapBG${this.fullMapBgIndex(world) + 1}.png`) : null;
     if (bgTex) {
       ctx.drawImage(bgTex.img, bgTex.sx, bgTex.sy, bgTex.sw, bgTex.sh, 0, 0, viewW, viewH);
     } else {
@@ -5922,7 +6024,7 @@ export class Renderer {
     // 卷轴底图（原版 Images/Map.png 928×248 羊皮纸，Main.cs:54923：地图内容【之下】
     // 整幅绘制——destRect 与地图区同位同缩放，羊皮纸边缘饰纹在地图缩放留边处露出；
     // 地图探索未达区域在卷轴上呈现纸张色而非纯蓝）
-    const scroll = this.atlas ? this.atlas.vui('Map') : null;
+    const scroll = this.atlas ? this.atlas.vui('Map.png') : null;
     if (scroll && scroll.img instanceof HTMLImageElement && scroll.img.complete && scroll.img.naturalWidth > 0) {
       ctx.imageSmoothingEnabled = true; // 卷轴是美术图，平滑缩放防像素锯齿
       ctx.drawImage(scroll.img, scroll.sx, scroll.sy, scroll.sw, scroll.sh, cx0, cy0, mapW, mapH);

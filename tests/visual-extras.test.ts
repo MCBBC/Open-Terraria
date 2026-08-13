@@ -162,3 +162,146 @@ describe('③ LiquidSlope 斜面贴合（TileDrawing.cs:4526-4553 DrawPartialLiq
     expect(liquidSlopeSheet(0, 99)).toBe('vanilla/LiquidSlope_14.png'); // 钳 0-14
   });
 });
+
+describe('④ Glow 环绕轨道族 + 特殊分支（第四批，Main.cs:25805-26204/:26086-26128 等）', () => {
+  const near = (a: number, b: number, eps = 1e-6) => Math.abs(a - b) < eps;
+
+  it('轨道参数表：541 沙元素 4 份/周期 2.4s/半径 4·num300+2（:25910-25914/:26091）', () => {
+    // t=0：num300=cos(0)/2+0.5=1 → 半径 6；t=1.2（半周期）：num300=0 → 半径 2
+    const p0 = Renderer.npcGlowOrbitParams(541, 0, 0)!;
+    expect(p0.count).toBe(4);
+    expect(near(p0.num300, 1)).toBe(true);
+    expect(near(p0.radius, 6)).toBe(true);
+    expect(near(p0.phase, 0)).toBe(true);
+    const p1 = Renderer.npcGlowOrbitParams(541, 1.2, 0)!;
+    expect(near(p1.num300, 0)).toBe(true);
+    expect(near(p1.radius, 2)).toBe(true);
+    // ai2 不参与 541（无 ai2 门）——任意值同结果
+    expect(Renderer.npcGlowOrbitParams(541, 0, 50)!.radius).toBeCloseTo(6, 6);
+  });
+
+  it('轨道参数表：568/569 枯萎兽出生门 lai3>=60（:26116）+ 1.5s HotPink 包络（:25892-25898）', () => {
+    expect(Renderer.npcGlowOrbitParams(568, 0, 0, 59)).toBeNull();   // 出生中不画
+    expect(Renderer.npcGlowOrbitParams(569, 0, 0, 30)).toBeNull();
+    const p = Renderer.npcGlowOrbitParams(568, 0, 0, 60)!;           // 出生完成态
+    expect(p.count).toBe(4);
+    expect(near(p.num300, 1 / 6 + 0.75, 1e-9)).toBe(true);           // cos(0)/6+0.75
+    expect(near(p.radius, 4 * (1 / 6 + 0.75) + 2, 1e-9)).toBe(true);
+    // 1.5s 周期呼吸：半周期处 cos(π)/6+0.75 = 7/12
+    expect(near(Renderer.npcGlowOrbitParams(568, 0.75, 0, 60)!.num300, -1 / 6 + 0.75, 1e-9)).toBe(true);
+  });
+
+  it('轨道参数表：661 帝皇蝶 6 份、ai2 驱动半径/相位并钳 0..50（:25917-25922/:26100/:26106 + NPC.cs:45253）', () => {
+    // ai2=0（神圣内常态）：无 ai2 增益，t=0 → num300=1 → 半径 2×1+2=4、相位 0
+    const p0 = Renderer.npcGlowOrbitParams(661, 0, 0)!;
+    expect(p0.count).toBe(6);
+    expect(near(p0.radius, 4)).toBe(true);
+    expect(near(p0.phase, 0)).toBe(true);
+    // ai2=50（离神圣渐隐满档）：t=1.2 半周期（cos 项=0）→ num300 取下限 50/60、
+    // 相位 3×50/60=2.5、半径 (2+50)·num300+2
+    const p50 = Renderer.npcGlowOrbitParams(661, 1.2, 50)!;
+    expect(near(p50.num300, 50 / 60, 1e-9)).toBe(true);
+    expect(near(p50.phase, 2.5, 1e-9)).toBe(true);
+    expect(near(p50.radius, 52 * (50 / 60) + 2, 1e-9)).toBe(true);
+    // ai2 增益只抬下限：t=0（cos 项=1）时 num300 仍为 1
+    expect(Renderer.npcGlowOrbitParams(661, 0, 50)!.num300).toBeCloseTo(1, 9);
+    // 越界 ai2 按原版 Clamp(0,50) 归一
+    expect(Renderer.npcGlowOrbitParams(661, 0, 999)!.phase).toBeCloseTo(2.5, 9);
+    expect(Renderer.npcGlowOrbitParams(661, 0, -5)!.phase).toBe(0);
+    // 未知 id 不入轨道族
+    expect(Renderer.npcGlowOrbitParams(999, 0, 0)).toBeNull();
+  });
+
+  it('轨道染色：Gold/HotPink 常量 + 661 逐份 HSL 彩虹（:26087/:25895/:26105）', () => {
+    expect(Renderer.npcGlowOrbitTint(541, 0, 0)).toEqual([255, 215, 0]);
+    expect(Renderer.npcGlowOrbitTint(568, 3, 1.5)).toEqual([255, 105, 180]);
+    // 661 hue = (GT + i/6)%1：t=0 时 i=0 → hue 0 = 纯红；i=3 → hue 0.5 = 纯蓝
+    //（Main.cs:47282-47290 通道映射 R=hue+1/3 / G=hue / B=hue-1/3，非标准 HSL 的青）
+    expect(Renderer.npcGlowOrbitTint(661, 0, 0)).toEqual([255, 0, 0]);
+    expect(Renderer.npcGlowOrbitTint(661, 3, 0)).toEqual([0, 0, 255]);
+    // hue 随时间旋转（GlobalTimeWrappedHourly 漂移）
+    expect(Renderer.npcGlowOrbitTint(661, 0, 0.5)).not.toEqual([255, 0, 0]);
+  });
+
+  it('414 爬足虫尾受击红闪（:25656-25663）：RGB=(255-n,n,n)、A=255-n、负段 128+lai2', () => {
+    expect(Renderer.npcGlowCrawltipedeFlash(0)).toBeNull();          // 无闪
+    expect(Renderer.npcGlowCrawltipedeFlash(128)).toEqual({ rgb: [127, 128, 128], a: 127 });
+    expect(Renderer.npcGlowCrawltipedeFlash(64)).toEqual({ rgb: [191, 64, 64], a: 191 });
+    expect(Renderer.npcGlowCrawltipedeFlash(-128)).toEqual({ rgb: [255, 0, 0], a: 255 });
+    expect(Renderer.npcGlowCrawltipedeFlash(-16)).toEqual({ rgb: [143, 112, 112], a: 143 });
+  });
+
+  it('387 特斯拉炮塔充能白化（:25451-25459）：静止 0.75/0.75 → 满充亮度→1、A→0', () => {
+    const idle = Renderer.npcGlowTeslaFade(0, 0);
+    expect(idle.bright).toBeCloseTo(191 / 255, 9);
+    expect(idle.fadeA).toBeCloseTo(191 / 255, 9);
+    const half = Renderer.npcGlowTeslaFade(29, 0);                   // amount7=(29+1)/60=0.5
+    expect(half.bright).toBeCloseTo((191 + 32) / 255, 9);
+    expect(half.fadeA).toBeCloseTo((191 * 0.5) / 255, 9);
+    const full = Renderer.npcGlowTeslaFade(60, 0);                   // amount7=61/60 外推（原版不钳）
+    expect(full.bright).toBeGreaterThan(1);
+    expect(full.fadeA).toBeCloseTo(0, 9);
+    // spawnAlpha 整体 ×Opacity
+    expect(Renderer.npcGlowTeslaFade(0, 128).bright).toBeCloseTo((191 / 255) * (127 / 255), 9);
+  });
+
+  it('425 枪口星芒包络（:25631 + :34741-34745）：0→15 渐亮、30 满蓄、30→40 渐灭、冷却恒 0', () => {
+    expect(Renderer.npcGlowSparkleEnvelope(0)).toEqual({ opacity: 0, num: 0 });
+    expect(Renderer.npcGlowSparkleEnvelope(-150)).toEqual({ opacity: 0, num: 0 }); // 放射后冷却
+    expect(Renderer.npcGlowSparkleEnvelope(15).opacity).toBeCloseTo(1, 9);
+    expect(Renderer.npcGlowSparkleEnvelope(15).num).toBeCloseTo(0.5, 9);
+    expect(Renderer.npcGlowSparkleEnvelope(30)).toEqual({ opacity: 1, num: 1 });   // 满蓄开火帧
+    expect(Renderer.npcGlowSparkleEnvelope(33).num).toBeCloseTo(0.5, 9);
+    expect(Renderer.npcGlowSparkleEnvelope(40).num).toBe(0);
+  });
+
+  it('160/209 微光/派对变体贴图档（:25769/:25783）', () => {
+    expect(Renderer.npcGlowVariantTex(160, false, 0)).toBe('vanilla/Glow_166.png');
+    expect(Renderer.npcGlowVariantTex(160, true, 0)).toBe('vanilla/Glow_352.png');
+    expect(Renderer.npcGlowVariantTex(209, false, 1)).toBe('vanilla/Glow_167.png');
+    expect(Renderer.npcGlowVariantTex(209, true, 0)).toBe('vanilla/Glow_350.png');
+    expect(Renderer.npcGlowVariantTex(209, true, 1)).toBe('vanilla/Glow_351.png');
+    expect(Renderer.npcGlowVariantTex(108, false, 0)).toBeNull();
+  });
+
+  it('表触发位：orbit 族 / 437 整图罩+fadeA / 425 星芒 / 520 指示灯 / 653 锚差', () => {
+    expect(Renderer.npcGlowConfig(541)!.mode).toBe('orbit');
+    expect(Renderer.npcGlowConfig(568)!.mode).toBe('orbit');
+    expect(Renderer.npcGlowConfig(569)!.mode).toBe('orbit');
+    expect(Renderer.npcGlowConfig(661)!.mode).toBe('orbit');
+    expect(Renderer.npcGlowConfig(437)!.full).toBe('vanilla/Glow_108.png');
+    expect(Renderer.npcGlowConfig(437)!.fadeA).toBeCloseTo(200 / 255, 9);
+    expect(Renderer.npcGlowConfig(437)!.a).toBe(1);                  // RGB=白 → 加色满亮（A 只削底）
+    expect(Renderer.npcGlowConfig(425)!.sparkle).toEqual({ tex: 'vanilla/Extra_98.png', dx: 27 });
+    expect(Renderer.npcGlowConfig(520)!.spinner)
+      .toEqual({ tex: 'vanilla/Extra_56.png', glow: 'vanilla/Glow_165.png', dy: 20 });
+    expect(Renderer.npcGlowConfig(653)!.dy).toBe(-1);                // +3 vs 族内 +4（:25198/:25194）
+    // 414/387 走运行时链（无表 fadeA——A 由 npcGlowCrawltipedeFlash/npcGlowTeslaFade 给出）
+    expect(Renderer.npcGlowConfig(414)!.fadeA).toBeUndefined();
+    expect(Renderer.npcGlowConfig(387)!.fadeA).toBeUndefined();
+    expect(Renderer.npcGlowConfig(387)!.a).toBeUndefined();
+  });
+
+  it('第四批引用素材全在盘（Glow_216/224/108/165/350/351/352、NPC_661、Extra_56/98）', () => {
+    const need = [
+      'Glow_216.png', 'Glow_224.png', 'Glow_108.png', 'Glow_109.png',
+      'Glow_165.png', 'Glow_164.png', 'Glow_350.png', 'Glow_351.png', 'Glow_352.png',
+      'Glow_166.png', 'Glow_167.png', 'Glow_150.png', 'Glow_159.png', 'Glow_32.png',
+      'Glow_288.png', 'NPC_661.png', 'Extra_56.png', 'Extra_98.png',
+    ];
+    for (const f of need) expect(existsSync(vanillaFile(f)), `${f} 缺素材`).toBe(true);
+  });
+
+  it('Color.A 背景衰减审计：仅 387/414/437 非零显著，轨道族恒 A=0（源色 A 通道乘 0）', () => {
+    // 541/568/569/661 轨道族源色 Color(127-α,…,0)·MultiplyRGBA(tint) → A 恒 0（:26087/
+    // :26117/:26105 的 .A=0 或乘 0），661 拷贝显式 newColor6.A=0（:26106）→ 纯加色无削底
+    for (const id of [541, 568, 569, 661]) {
+      const c = Renderer.npcGlowConfig(id)!;
+      expect(c.fadeA, `npc ${id} 轨道族不应有背景衰减`).toBeUndefined();
+    }
+    // 425 星芒 drawColor/shineColor 均 A=0（:25633）→ 表内无 fadeA
+    expect(Renderer.npcGlowConfig(425)!.fadeA).toBeUndefined();
+    // 显著 A 三分支：437 表常数 200；387/414 运行时（上方纯函数断言已覆盖数值）
+    expect(Renderer.npcGlowConfig(437)!.fadeA).toBeCloseTo(200 / 255, 9);
+  });
+});

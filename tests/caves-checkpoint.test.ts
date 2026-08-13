@@ -29,6 +29,7 @@ import { runUnderworldPass } from '../src/world/gen/vanilla/UnderworldPass';
 import { runLakesPass } from '../src/world/gen/vanilla/LakesPass';
 import { runSlushPass } from '../src/world/gen/vanilla/IceBiomePass';
 import { runCorruptionPass } from '../src/world/gen/vanilla/CorruptionPass';
+import { runDungeonPass } from '../src/world/gen/vanilla/DungeonPass';
 import { TILE_BY_KEY } from '../src/data/tiles';
 import { TILE_DEFS } from '../src/data/tiles';
 import { fnv1a } from './pass-hash.test';
@@ -119,7 +120,8 @@ function chainCheckpoints(seedText: string, evil: 0 | 1) {
   snap('corruption');
   runLakesPass(st, rng, gs); snap('lakes');
   runSlushPass(st, gs); snap('slush');   // #31 零掷骰（签名无 rng）
-  snap('dungeon');                        // #32 占位（oracle 同步占位，转录后替换为 runDungeonPass）
+  // #32 Dungeon（1456 Legacy 路径全量转录）：snap 回调逐段落检查点
+  runDungeonPass(st, rng, gs, world.chests, (name) => snap(name));
   runMountainCavesPass(st, rng, gs); snap('mcopenings');
   runBeachesPass(st, rng, gs); snap('beaches');
   return { grids: out, walls: outWall };
@@ -149,7 +151,11 @@ describe('洞穴链逐 pass 对账（vs C# caves-oracle）', () => {
         'icebiome', 'grass', 'jungle', 'mudcaves', 'desertmound',
         'desertentrance', 'deserthive', 'desertdone',
         'mushroom', 'marble', 'granite', 'islands', 'dirttomud', 'silt', 'ores',
-        'webs', 'underworld', 'corruption', 'lakes', 'slush', 'dungeon', 'mcopenings', 'beaches'];
+        'webs', 'underworld', 'corruption', 'lakes', 'slush',
+        'dungeonL', 'dungeonE', 'dungeonPD', 'dungeonPi', 'dungeonS', 'dungeonD',
+        'dungeonW', 'dungeonP', 'dungeonC', 'dungeonB', 'dungeonG', 'dungeonI',
+        'dungeonT', 'dungeonF', 'dungeonPa', 'dungeonBa', 'dungeon',
+        'mcopenings', 'beaches'];
       let firstBad = '';
       for (const n of names) {
         if (ours.get(n) !== gold.get(n) && !firstBad) firstBad = n;

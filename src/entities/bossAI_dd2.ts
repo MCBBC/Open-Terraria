@@ -88,6 +88,7 @@ import { spawnPart, losClear } from './bossAI';
 import { Arrow } from './Arrow';
 import { TILE_DEFS } from '../data/tiles';
 import { soundTrackFiles } from '../data/vanillaNpcs';
+import { GDL } from '../stats/ScaleStats';
 
 // 弹幕贴图:Projectile_{240,675,682,686,687}.png 已自 terraria-assets/Images 入
 // sprites/vanilla 管线(scripts/vanilla-atlas.mjs MISC 表),Arrow 按 projId 懒加载真图——
@@ -1617,9 +1618,10 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
 // ---------------------------------------------------------------------------
 
 /** GetAttackDamage_ForProjectiles（NPC.cs:7031-7034）：npc.difficulty 在
- *  Classic(0)→Expert(1) 区间的 Utils.Remap（不钳界,Master=2 外推照录） */
+ *  Classic(1)→Expert(2) 区间的 Utils.Remap（GameDifficultyLevel.cs:7-9;不钳界,
+ *  Master=3 外推照录）。Enemy.difficulty 即原版 npc.difficulty（ScaleStats 投影）。 */
 function projDmgOf(e: Enemy, normal: number, expert: number): number {
-  const t = e.difficulty;
+  const t = e.difficulty - GDL.CLASSIC;   // 区间归零:Classic 0 / Expert 1 / Master 2
   return Math.round(normal + (expert - normal) * t);
 }
 

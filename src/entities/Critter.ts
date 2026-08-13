@@ -8,6 +8,7 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { avoidWater } from './waterAvoid';
 import { isNpcShimmerImmune, npcShimmerTransformTo } from '../stats/Shimmer';
+import { visEffectFrames } from './Enemy';
 
 /** aiStyle 67 小动物（NPC.cs SetDefaults :13505/:13519/:17215）：直通微光分支成员 */
 const CRITTER_AISTYLE_67 = new Set([359, 360, 655]);
@@ -38,6 +39,19 @@ export class Critter extends Entity {  stepUp = true; // 原版 NPC 全体走 Co
   // 鸟类巡航：持久航向，偶尔小角度转向（直线巡航不像原地打转）
   heading = (Math.random() - 0.5) * Math.PI * 2;
   headingT = 120 + Math.floor(Math.random() * 200);
+
+  /** 本 tick 点光（NPC.cs:55974-55979：`type==683||type==687` 的
+   *  (0.25,0.25,0.1)×WrappedLerp(0.75,1,timeForVisualEffects%120/120)）。
+   *  687 神秘青蛙本仓无 Enemy 数据条目走 Critter 兜底（Game.spawnFrog），
+   *  由本 getter 自报；683 黄城镇史莱姆归 TownNPC 桶不在此 */
+  get lightRGB(): [number, number, number] | null {
+    if (this.def.npc !== 687) return null;
+    const p = (visEffectFrames() % 120) / 120;
+    const tri = p * 2 > 1 ? 2 - p * 2 : p * 2;        // Utils.WrappedLerp（Utils.cs:273）
+    const l = 0.75 + 0.25 * tri;
+    return [0.25 * l, 0.25 * l, 0.1 * l];
+  }
+  lightRGBAt: { x: number; y: number } | null = null;
 
   constructor(public key: string, x: number, y: number) {
     super();

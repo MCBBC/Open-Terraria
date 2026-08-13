@@ -9,10 +9,9 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import { UnifiedRandom } from '../../../core/rng';
 import type { GenState } from './GenState';
-import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
+import { TILE_BY_KEY, TILE_DEFS, TILE_INTERNAL_BY_SHEET } from '../../../data/tiles';
 import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { tileRunner } from './TileRunner';
-import { placeDoorClosed } from '../../Door';
 import { furnitureStyleBase } from '../../FurnitureStyle';
 
 const BLUE = TILE_BY_KEY['v_41_blue_brick']!;
@@ -235,6 +234,16 @@ export function runDungeonPass(
   let num = Math.trunc(w / 60); num += rn(Math.trunc(num / 3));          // cs:353-355 num += Next(0, num/3)
   posX = x0; posY = y0;
   bounds.set(x0, y0, x0, y0);
+  const isDW = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);   // 墙 id 即原版 id
+  const isDT = (t: number): boolean => {
+    const sh = TILE_DEFS[t]?.vanilla?.sheet ?? -1;
+    return sh > 0 && DG_DUNGEON_TILES.has(sh);
+  };
+  const inW = (x: number, y: number, fluff: number): boolean =>
+    x >= fluff && x < w - fluff && y >= fluff && y < h - fluff;
+  const wallAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
+  const actAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
+  const typAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
   dgLayout(num);
   // cs:374-396：最高已生成房 InnerBounds 顶部中心回写
   {
@@ -302,21 +311,14 @@ export function runDungeonPass(
     if (sheet === 481 || sheet === 482 || sheet === 483) return false;   // SetCrackedBrickSolidity(false)
     return true;
   }
-  const isDW = (v: number): boolean => v > 0 && DG_DUNGEON_WALLS.has(v);
-  const isDT = (t: number): boolean => t > 0 && DG_DUNGEON_TILES.has(t);
-  const inW = (x: number, y: number, fluff: number): boolean =>
-    x >= fluff && x < w - fluff && y >= fluff && y < h - fluff;
-  const wallAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0);
-  const actAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.flags[st.idx(x, y)] : 0);
-  const typAt = (x: number, y: number): number => (st.inBounds(x, y) ? st.type[st.idx(x, y)] : 0);
+
   // GetHighestProtectionTypeFromPoint（:1704）——Legacy 房形状数据恒空 → 基类 Walls/None
   function prot(x: number, y: number, list: DRoom[]): number {
     let p = 0;
     for (const rm of list) {
-      const q = rm.outer.contains(x, y) ? 2 : 0;
+      const q: number = rm.outer.contains(x, y) ? 2 : 0;
       if (q === 1) p = p === 2 ? 3 : 1;
       else if (q === 2) p = p === 1 ? 3 : 2;
-      else if (q === 3) p = 3;
       if (p === 3) break;
     }
     return p;
@@ -380,7 +382,8 @@ export function runDungeonPass(
     dgRoom({ seed: raw(), x: posX, y: posY, start: false, generated: true, inner: new DBnd(w, h), outer: new DBnd(w, h), ex: 0, ey: 0, strength: 0 });
   }
   // ================= LegacyDungeonRoom.LegacyRoom（:104-304）=================
-  function dgRoom(s: { seed: number; x: number; y: number; start: boolean }): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  function dgRoom(s: any): void {
     const hr = dgUR(s.seed);
     const hri = (a: number, b: number): number => hr.nextIntRange(a, b + 1);
     const hrn = (n: number): number => hr.nextInt(n);
@@ -988,7 +991,7 @@ export function runDungeonPass(
         }
       }
       if (num2 < 0) cx -= 1.0;
-      placeDoorClosed(st, Math.trunc(cx), Math.trunc(cy) + 1, 13);
+      dgPlaceDoor(Math.trunc(cx), Math.trunc(cy) + 1, 13);
     }
   }
 
@@ -1205,6 +1208,7 @@ export function runDungeonPass(
         const y = ri(ws + 25, bounds.B - 1);
         if (wallAt(x, y) === num && actAt(x, y) === 0) {
           const d = rn(2) === 0 ? -1 : 1;
+          const oy = y;                                   // num13：原始采样点（第二段起点基准）
           let wx = x, wy = y;
           while (inW(wx, wy, 0) && actAt(wx, wy) === 0) {
             if (round === 0) wy += d; else wx += d;
@@ -1228,9 +1232,9 @@ export function runDungeonPass(
             n5++;
             let n11 = ri(5, 12);
             const c1x = round === 0 ? wx - 1 : wx, c1y = round === 0 ? wy : wy - 1;
-            spikeRun(round, c1x, c1y, wx, wy, d, n11, round === 0 ? -1 : -1);
+            spikeRun(round, c1x, c1y, wx, wy, d, n11, -1);
             n11 = ri(5, 12);
-            const c2x = round === 0 ? x + 1 : wx, c2y = round === 0 ? wy : wy + 1;
+            const c2x = round === 0 ? x + 1 : wx, c2y = round === 0 ? wy : oy + 1;
             spikeRun(round, c2x, c2y, wx, wy, d, n11, 1);
           }
         }
@@ -1375,3 +1379,1093 @@ export function runDungeonPass(
       rn(3);                                    // frameX = Next(3)*18
     }
   }
+
+  // ============ DungeonGlobalWallVariants（:1149-1252）============
+  function dgWallVariants(): void {
+    for (let i = 0; i < 5; i++) {
+      for (let j = 0; j < 3; j++) {
+        const n2 = ri(40, 239);
+        const n3 = ri(bounds.L, bounds.R - 1);
+        const n4 = ri(bounds.T, bounds.B - 1);
+        for (let x = n3 - n2; x < n3 + n2; x++) {
+          for (let y = n4 - n2; y < n4 + n2; y++) {
+            if (y <= ws || !inW(x, y, 2)) continue;
+            const dx = Math.abs(n3 - x), dy = Math.abs(n4 - y);
+            if (Math.sqrt(dx * dx + dy * dy) >= n2 * 0.4) continue;
+            if (isDW(wallAt(x, y))) dgSpreadWall(x, y, wallVariants[j]);
+          }
+        }
+      }
+    }
+  }
+  function dgSpreadWall(x: number, y: number, wallType: number): void {
+    if (!inW(x, y, 0)) return;
+    let list2: Array<[number, number]> = [[x, y]];
+    const seen = new Set<string>();
+    const key = (a: number, b: number): string => a + ',' + b;
+    while (list2.length > 0) {
+      const list = list2;
+      list2 = [];
+      while (list.length > 0) {
+        const p = list.shift()!;
+        if (!inW(p[0], p[1], 1)) continue;
+        seen.add(key(p[0], p[1]));
+        const ti = st.idx(p[0], p[1]);
+        if (st.wall[ti] === 0 || st.wall[ti] === wallType || st.wall[ti] === 244 || st.wall[ti] === 62
+          || !featOK(p[0], p[1], 2)) continue;
+        if (entExists && entBounds.contains(p[0], p[1])) {
+          if (st.wall[ti] !== wall) continue;
+        } else if (st.wall[ti] !== wall) continue;
+        if (!dgSolid(p[0], p[1])) {
+          st.wall[ti] = wallType;
+          for (const q of [[p[0] - 1, p[1]], [p[0] + 1, p[1]], [p[0], p[1] - 1], [p[0], p[1] + 1]] as Array<[number, number]>) {
+            if (!seen.has(key(q[0], q[1]))) list2.push(q);
+          }
+        } else if (st.flags[ti] !== 0) st.wall[ti] = wallType;
+      }
+    }
+  }
+  // ============ DungeonGlobalPlatforms（:24-214）============
+  function dgPlatforms(): void {
+    for (const d of platData) {
+      if (!inW(d.x, d.y, 30)) continue;
+      const x = d.x, y = d.y;
+      let row = -1;
+      const n3 = 5;
+      let n4 = y < ws + 50.0 ? 20 : 10;
+      n4 = Math.trunc(n4 * 1.0);
+      for (let j = y - n3; j <= y + n3; j++) {
+        let n6 = x, n7 = x;
+        let bad = false;
+        if (actAt(x, j) !== 0) bad = true;
+        else {
+          while (inW(n6, j, 0) && actAt(n6, j) === 0) {
+            n6--;
+            if (!inW(n6, j, 0)) break;
+            if (actAt(n6, j) !== 0 && !isDT(typAt(n6, j))) { bad = true; break; }
+            if (n6 <= 10) break;
+          }
+          while (inW(n7, j, 0) && actAt(n7, j) === 0) {
+            n7++;
+            if (!inW(n7, j, 0)) break;
+            if (actAt(n7, j) !== 0 && !isDT(typAt(n7, j))) { bad = true; break; }
+            if (n7 >= w - 10) break;
+          }
+        }
+        if (bad || n7 - n6 > n4) continue;
+        let ok = true;
+        const a0 = Math.max(0, x - Math.trunc(n4 / 2) - 2), a1 = Math.min(w - 1, x + Math.trunc(n4 / 2) + 2);
+        const b0 = j - n3, b1 = j + n3;
+        outer3:
+        for (let a = a0; a <= a1; a++) {
+          for (let b = b0; b <= b1; b++) {
+            if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === PLATFORM) { ok = false; break outer3; }
+          }
+        }
+        if (ok) {
+          for (let b = j + 3; b >= j - 5; b--) {
+            if (inW(x, b, 0) && actAt(x, b) !== 0) { ok = false; break; }
+          }
+        }
+        if (ok) { row = j; break; }
+      }
+      if (row <= y - n3 - 5 || row >= y + n3 + 5) continue;
+      let px = x;
+      const py = row;
+      let qx = x + 1;
+      while (inW(px, py, 0) && actAt(px, py) === 0) {
+        chTile(st.idx(px, py), PLATFORM, false);
+        px--;
+        if (px <= 10) break;
+      }
+      while (inW(qx, py, 0) && actAt(qx, py) === 0) {
+        chTile(st.idx(qx, py), PLATFORM, false);
+        qx++;
+        if (qx >= w - 10) break;
+      }
+      // 书架平台（PlaceBooksChance 等）Default 无 → IsAShelf=false
+    }
+  }
+  // ============ 宝箱：BiomeChests/BasicChests + AddBuriedChest（战利品掷骰流对齐）============
+  function prefixRolls(item: number): void {
+    const cls = DG_PRE_CLASS[item];
+    if (!cls) return;
+    if (rn(4) !== 0) {
+      const arr = DG_PRE[cls];
+      const rolled = arr[rn(arr.length)];
+      if (DG_PRE_REDUCED.has(rolled)) rn(3);
+    }
+  }
+  function dgAddBuriedChest(ix: number, jy: number, mainItem: number, style: number, chestTile: number): boolean {
+    for (let k = jy; k < h - 10; k++) {
+      if (actAt(ix, k) !== 0 && typAt(ix, k) === TILE_BY_KEY['v_231_larva']) return false;
+      let boulder = false;
+      for (let a = ix - 2; a <= ix + 2 && !boulder; a++) {
+        for (let b = k - 2; b <= k + 2; b++) {
+          if (!inW(a, b, 100)) continue;
+          const sheet = TILE_DEFS[typAt(a, b)]?.vanilla?.sheet ?? -1;
+          if (actAt(a, b) !== 0 && (sheet === 138 || sheet === 484 || sheet === 664 || sheet === 665
+            || (sheet >= 711 && sheet <= 716) || typAt(a, b) === TILE_BY_KEY['v_26_altars'] || typAt(a, b) === TILE_BY_KEY['v_237_lihzahrd_altar'])) {
+            boulder = true; break;
+          }
+        }
+      }
+      if (boulder) return false;
+      if (!dgSolid(ix, k)) continue;
+      const num7 = k;
+      const num9 = style, num10 = mainItem;
+      let flag9 = false, flag10 = false;
+      if (chestTile === TILE_BY_KEY['chest'] && num9 !== 0 && num7 >= ws && isDW(wallAt(ix, num7))) flag9 = true;
+      if ((chestTile === TILE_BY_KEY['chest'] && num9 >= 23 && num9 <= 27) || (chestTile === CHEST2 && num9 === 13)) {
+        flag9 = true; flag10 = true;
+      }
+      // PlaceChest（:57828）：±2 无滚石 + 2×2 净空（Origin=(0,1)：首实心行上一格起）
+      const px = ix - 1, py = num7 - 1;
+      if (!inW(px, py - 1, 0) || !inW(px + 1, py, 0)) continue;
+      const sheetB = TILE_DEFS[typAt(px, k)]?.vanilla?.sheet ?? -1;
+      const sheetB2 = TILE_DEFS[typAt(px + 1, k)]?.vanilla?.sheet ?? -1;
+      if (sheetB === 138 || sheetB2 === 138) continue;
+      let free = true;
+      for (let a = 0; a < 2 && free; a++) {
+        for (let b = -1; b <= 0; b++) {
+          if (actAt(px + a, py + b) !== 0) { free = false; break; }
+        }
+      }
+      if (!free) continue;
+      for (let a = 0; a < 2; a++) {
+        for (let b = -1; b <= 0; b++) chTile(st.idx(px + a, py + b), chestTile, false);
+      }
+      dgChestLoot(num7, num10, flag9, flag10);
+      chests.push({ x: px, y: py - 1, locked: flag10, items: dgLootItems(num10) });
+      return true;
+    }
+    return false;
+  }
+  // 战利品掷骰流（AddBuriedChest 深三分支 + 尾段；与 oracle DgAddBuriedChest 同构）
+  function dgChestLoot(num7: number, num10: number, flag9: boolean, flag10: boolean): void {
+    dgLoot.length = 0;
+    if (num10 > 0) dgLoot.push(num10);
+    const surf = num7 < ws + 25 && false;
+    const gold = num7 < rock;
+    if (surf) {
+      if (num10 > 0) prefixRolls(num10);
+      else rn(10);
+      if (rn(6) === 0) rn(1);                        // 282 荧光棒（弃值掷）
+      if (rn(6) === 0) rn(1);                        // 279 飞刀
+      if (rn(6) === 0) { if (rn(5) === 0) rn(2); if (rn(10) === 0) rn(3); }
+      if (rn(6) === 0) { if (rn(5) === 0) rn(2); if (rn(10) === 0) rn(3); }
+      if (rn(3) === 0) rn(6);
+      if (rn(2) === 0) { rn(2); rn(8); }
+      if (rn(2) === 0) rn(51);
+      if (rn(3) !== 0) { rn(2); rn(26); }
+      if (rn(2) === 0) rn(3);
+      if (rn(3) !== 0) rn(6);
+      if (rn(3) > 0) { rn(6); rn(3); }
+      if (rn(2) === 0) { rn(2); rn(11); }
+      if (rn(2) === 0) rn(30);
+      if (rn(2) === 0) rn(100);
+    } else if (gold) {
+      if (num10 > 0) {
+        prefixRolls(num10);
+        if (flag9 && !flag10) {
+          if (!shadowKey || rn(3) === 0) shadowKey = true;
+          if (!ramRune || rn(8) === 0) { ramRune = true; prefixRolls(5465); dgLoot.push(5465); }
+        }
+      } else {
+        rn(6);
+        if (rn(20) === 0) { /* 997 类 */ }
+        else if (rn(20) === 0) rn(26);
+      }
+      if (rn(3) === 0) rn(20);
+      if (rn(5) === 0) { /* 52 */ }
+      if (rn(3) === 0) rn(51);
+      if (rn(2) === 0) { rn(2); rn(10); }
+      if (rn(2) === 0) { rn(2); rn(25); }
+      if (rn(2) === 0) rn(3);
+      if (rn(3) > 0) { rn(9); rn(3); }
+      if (rn(3) !== 0) rn(5);
+      if (rn(2) === 0) rn(11);
+      if (rn(2) === 0) rn(40);
+    } else if (num7 < h - 250) {
+      if (num10 > 0) {
+        prefixRolls(num10);
+        // flag2（冰）/flag3（沙）地牢箱恒 false → 两段掷骰不触发（cs:36846-36858）
+        if (flag9 && !flag10) {
+          if (!shadowKey || rn(3) === 0) { shadowKey = true; dgLoot.push(329); }
+          if (!ramRune || rn(8) === 0) { ramRune = true; prefixRolls(5465); dgLoot.push(5465); }
+        }
+      } else {
+        rn(7);
+        if (rn(20) === 0 && num7 > gs.lavaLine) { /* 906 */ }
+        else if (rn(15) === 0) { /* 997 */ }
+        else if (false) rn(26);
+      }
+      if (rn(5) === 0) { /* 43 */ }
+      if (rn(3) === 0) { /* 167 */ }
+      if (rn(4) === 0) rn(26);
+      if (rn(2) === 0) { rn(2); rn(8); }
+      if (rn(2) === 0) { rn(2); rn(26); }
+      if (rn(2) === 0) rn(3);
+      if (rn(3) > 0) { rn(6); rn(3); }
+      if (rn(3) > 1) { rn(6); rn(3); }
+      if (rn(2) === 0) rn(3);
+      if (rn(2) === 0) { rn(2); rn(16); }
+      if (rn(2) === 0) rn(3);
+    } else {
+      if (num10 > 0) prefixRolls(num10);
+      else rn(4);
+      if (rn(3) === 0) { /* 167 */ }
+      if (rn(2) === 0) { rn(2); rn(15); }
+      if (rn(2) === 0) { rn(2); rn(25); }
+      if (rn(2) === 0) rn(6);
+      if (rn(3) > 0) { rn(8); rn(3); }
+      if (rn(3) > 1) { rn(8); rn(3); }
+      rn(3); rn(2);
+      if (rn(2) === 0) { rn(2); rn(15); }
+      if (rn(2) === 0) rn(3);
+    }
+    // 尾段（cs:37361-37560）
+    if (flag9 && !flag10) { if (rn(8) === 0) { /* 2192 */ } }
+    if (flag10) { if (rn(2) === 0) { /* 5234 */ } }
+    rn(12);
+  }
+  const dgLoot: number[] = [];
+  const dgLootItems = (mainVid: number): Array<{ id: number; stack: number } | null> => {
+    const out: Array<{ id: number; stack: number } | null> = [];
+    for (const vid of dgLoot) {
+      const key = VANILLA_ITEM_KEY_BY_ID[vid];
+      const id = key !== undefined ? ITEM_BY_KEY[key] : undefined;
+      if (id !== undefined) out.push({ id, stack: 1 });
+    }
+    void mainVid;
+    return out;
+  };
+  function dgBiomeChests(): void {
+    for (let i = 0; i < 5; i++) {
+      let flag = false;
+      let n3 = 1000;
+      while (!flag) {
+        n3--;
+        if (n3 <= 0) break;
+        const x = ri(bounds.L, bounds.R - 1);
+        const y = ri(Math.trunc(ws), bounds.B - 1);
+        if ((entExists && entBounds.contains(x, y)) || !isDW(wallAt(x, y)) || actAt(x, y) !== 0) continue;
+        let chestTile = CHEST, mainItem = 0, chestStyle = 0;
+        switch (i) {
+          case 0: chestStyle = 23; mainItem = 1156; break;
+          case 1:
+            if (!gs.crimson) { chestStyle = 24; mainItem = 1571; } else { chestStyle = 25; mainItem = 1569; }
+            break;
+          case 2: chestStyle = 26; mainItem = 1260; break;
+          case 3: chestStyle = 27; mainItem = 1572; break;
+          case 4: chestTile = CHEST2; chestStyle = 13; mainItem = 4607; break;
+        }
+        flag = dgAddBuriedChest(x, y, mainItem, chestStyle, chestTile);
+      }
+    }
+  }
+  function dgBasicChests(): void {
+    for (const rm of rooms) {
+      const half = Math.trunc(rm.strength * 0.4);
+      for (let j = 0; j < 1000; j++) {
+        const lo = rm.ex - half, hi = rm.ex + half;
+        const num = Math.trunc(lo + (hi - lo) * rd());
+        const num2 = Math.trunc((rm.ey - half) + ((rm.ey + half) - (rm.ey - half)) * rd());
+        if (!featAreaOK(num, num2, 1)) continue;
+        let itemType = 0, chestStyle = 2;
+        if (lootStyle >= 8) lootStyle = 0;
+        switch (lootStyle) {
+          case 0: itemType = 155; break;
+          case 1: itemType = 156; break;
+          case 2: itemType = 157; break;
+          case 3: itemType = 163; break;
+          case 4: itemType = 113; break;
+          case 5: itemType = 3317; break;
+          case 6: itemType = 327; chestStyle = 0; break;
+          default: itemType = 164; break;
+        }
+        if (num2 < ws + 50) { itemType = 327; chestStyle = 0; }
+        if (dgAddBuriedChest(num, num2, itemType, chestStyle, CHEST)) { lootStyle++; break; }
+      }
+    }
+  }
+
+  // ============ DungeonGlobalBookshelves（:23-208）============
+  function dgBookshelves(): void {
+    let ncount = 0, num3 = 0;
+    while (num3 < Math.trunc(w / 20)) {
+      ncount++;
+      let x = ri(bounds.L, bounds.R - 1);
+      let y = ri(bounds.T, bounds.B - 1);
+      let flag = true;
+      if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
+        const n7 = rn(2) === 0 ? -1 : 1;
+        while (flag && inW(x, y, 0) && actAt(x, y) === 0) {
+          x -= n7;
+          if (x < 5 || x > w - 5) flag = false;
+          else if (actAt(x, y) !== 0 && !isDT(typAt(x, y))) flag = false;
+        }
+        if (flag && inW(x, y, 0) && actAt(x, y) !== 0 && isDT(typAt(x, y))
+          && actAt(x, y - 1) !== 0 && isDT(typAt(x, y - 1))
+          && actAt(x, y + 1) !== 0 && isDT(typAt(x, y + 1))) {
+          x += n7;
+          outer4:
+          for (let a = x - 3; a <= x + 3; a++) {
+            for (let b = y - 3; b <= y + 3; b++) {
+              if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === PLATFORM) { flag = false; break outer4; }
+            }
+          }
+          if (flag && inW(x, y - 1, 0) && actAt(x, y - 1) === 0
+            && inW(x, y - 2, 0) && actAt(x, y - 2) === 0
+            && inW(x, y - 3, 0) && actAt(x, y - 3) === 0) {
+            if (!featOK(x, y, 0)) { flag = false; continue; }
+            let k = x;
+            const num8 = x;
+            while (k > bounds.L && k < bounds.R && actAt(k, y) === 0 && actAt(k, y - 1) === 0 && actAt(k, y + 1) === 0) k += n7;
+            k = Math.abs(x - k);
+            const flag3 = rn(2) === 0;
+            if (k > 5) {
+              let n10 = ri(1, 3);
+              while (n10 > 0) {
+                chTile(st.idx(x, y), PLATFORM, false);         // frameY=18*shelfStyle（不入哈希）
+                if (flag3) {
+                  placeSimple(x, y - 1, BOOKS);
+                  if (rn(50) === 0 && y > (ws + rock) / 2.0) { /* waterbolt 帧 */ }
+                }
+                x += n7;
+                n10--;
+              }
+              ncount = 0; num3++;
+              if (!flag3 && rn(2) === 0) {
+                x = num8; y--;
+                const n12v = rn(4) === 0 ? 49 : 13;
+                placeSimple(x, y, n12v === 49 ? WATER_CANDLE : TILE_BY_KEY['v_13_bottles']);
+                if (inW(x, y, 0) && typAt(x, y) === TILE_BY_KEY['v_13_bottles']) rn(2);
+              }
+            }
+          }
+        }
+      }
+      if (ncount > 1000) { ncount = 0; num3++; }
+    }
+  }
+  // PlaceTile 近似：目标格净空 + 有墙/侧邻/底邻锚 → 单格放置（帧不入哈希）
+  function placeSimple(x: number, y: number, tile: number): boolean {
+    if (!st.inBounds(x, y) || tile < 0) return false;
+    const ti = st.idx(x, y);
+    if (st.flags[ti] !== 0) return false;
+    const solidNb = (xx: number, yy: number): boolean => {
+      if (!st.inBounds(xx, yy) || st.flags[st.idx(xx, yy)] === 0) return false;
+      const d = TILE_DEFS[st.type[st.idx(xx, yy)]];
+      return !!d?.solid && !DG_SOLID_TOP.has(d.vanilla?.sheet ?? -1);
+    };
+    const anchor = st.wall[ti] > 0 || solidNb(x - 1, y) || solidNb(x + 1, y) || solidNb(x, y + 1);
+    if (!anchor) return false;
+    st.flags[ti] = 1; st.type[ti] = tile;
+    return true;
+  }
+  // ============ DungeonGlobalLights（:24-141）+ Lights_GenerateSwitch（:144-193）============
+  function dgLights(): void {
+    const num5 = Math.trunc(28 * (w / 4200) * 1.0);
+    let ncount = 0, num4 = 0;
+    while (num4 < num5) {
+      ncount++;
+      const x = ri(bounds.L, bounds.R - 1);
+      const y = ri(bounds.T, bounds.B - 1);
+      if (isDW(wallAt(x, y))) {
+        for (let cy = y; cy > bounds.T; cy--) {
+          if (!(inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && isDT(typAt(x, cy - 1))
+            && featOK(x, cy, 0)
+            && ((entExists && entBounds.contains(x, cy)) || isDW(wallAt(x, cy))))) continue;
+          let near = false;
+          outer5:
+          for (let a = x - 15; a < x + 15; a++) {
+            for (let b = cy - 15; b < cy + 15; b++) {
+              if (inW(a, b, 0) && actAt(a, b) !== 0 && (typAt(a, b) === LANTERN || typAt(a, b) === CHANDELIER)) {
+                near = true; break outer5;
+              }
+            }
+          }
+          if ((inW(x - 1, cy, 0) && actAt(x - 1, cy) !== 0)
+            || (inW(x + 1, cy, 0) && actAt(x + 1, cy) !== 0)
+            || (inW(x - 1, cy + 1, 0) && actAt(x - 1, cy + 1) !== 0)
+            || (inW(x + 1, cy + 1, 0) && actAt(x + 1, cy + 1) !== 0)
+            || (inW(x, cy + 2, 0) && actAt(x, cy + 2) !== 0)) near = true;
+          if (near) break;
+          let placed = false;
+          if (rn(7) === 0) {
+            let blocked = false;
+            for (let k = 0; k < 15; k++) {
+              if (inW(x, cy + k, 0) && dgSolid(x, cy + k)) { blocked = true; break; }
+            }
+            if (!blocked && placeChand(x, cy)) {
+              placed = true; ncount = 0; num4++;
+              dgSwitch(x, cy);
+            }
+          }
+          if (placed) break;
+          // 灯笼（Place1x2Top：上方实心且下方净空 → 42 两格）
+          const aboveSheet = TILE_DEFS[typAt(x, cy - 1)]?.vanilla?.sheet ?? -1;
+          const aboveSolid = TILE_DEFS[typAt(x, cy - 1)]?.solid ?? false;
+          if (inW(x, cy - 1, 0) && actAt(x, cy - 1) !== 0 && aboveSolid && !DG_SOLID_TOP.has(aboveSheet)
+            && inW(x, cy + 1, 0) && actAt(x, cy + 1) === 0) {
+            chTile(st.idx(x, cy), LANTERN, false);
+            chTile(st.idx(x, cy + 1), LANTERN, false);
+            placed = true; ncount = 0; num4++;
+            dgSwitch(x, cy);
+          }
+          break;                                              // 灯笼尝试后必 break（:131）
+        }
+      }
+      if (ncount > 1000) { num4++; ncount = 0; }
+    }
+  }
+  function placeChand(x: number, y: number): boolean {
+    for (let a = x - 1; a < x + 2; a++) {
+      for (let b = y; b < y + 3; b++) {
+        if (!inW(a, b, 0) || actAt(a, b) !== 0) return false;
+      }
+    }
+    const sheet = TILE_DEFS[typAt(x, y - 1)]?.vanilla?.sheet ?? -1;
+    if (!(inW(x, y - 1, 0) && actAt(x, y - 1) !== 0 && TILE_DEFS[typAt(x, y - 1)]?.solid && !DG_SOLID_TOP.has(sheet))) return false;
+    for (let a = x - 1; a < x + 2; a++) {
+      for (let b = y; b < y + 3; b++) chTile(st.idx(a, b), CHANDELIER, false);
+    }
+    return true;
+  }
+  function dgSwitch(x: number, y: number): void {
+    for (let i = 0; i < 1000; i++) {
+      const a = x + ri(-12, 12);
+      const b = y + ri(3, 20);
+      if (!inW(a, b, 0) || !inW(a, b + 1, 0)) continue;
+      if (actAt(a, b) !== 0 || actAt(a, b + 1) !== 0) continue;
+      if (!inW(a - 1, b, 0) || !isDT(typAt(a - 1, b))) continue;
+      if (!inW(a + 1, b, 0) || !isDT(typAt(a + 1, b))) continue;
+      if (!canHitLocal(a, b, x, y)) continue;
+      const anchor = (dgSolid(a - 1, b) && typAt(a - 1, b) !== DOOR)
+        || (dgSolid(a + 1, b) && typAt(a + 1, b) !== DOOR) || dgSolid(a, b + 1);
+      if (anchor && isDW(wallAt(a, b)) && (isDT(typAt(a - 1, b)) || isDT(typAt(a + 1, b)))) {
+        if (actAt(a, b) === 0) { st.flags[st.idx(a, b)] = 1; st.type[st.idx(a, b)] = DSWITCH; }
+      }
+      if (actAt(a, b) === 0) continue;
+      rn(3);                                                   // frameX=18（不入哈希）
+      break;
+    }
+  }
+  // Collision.CanHit（Collision.cs:388-460）——两点视线（实心非 solidTop 成对拦截）
+  function canHitLocal(x1: number, y1: number, x2: number, y2: number): boolean {
+    let cx = Math.max(1, Math.min(w - 1, x1)), cy = Math.max(1, Math.min(h - 41, y1));
+    const tx = Math.max(1, Math.min(w - 1, x2)), ty = Math.max(1, Math.min(h - 41, y2));
+    const blk = (x: number, y: number): boolean => {
+      if (!inW(x, y, 0) || actAt(x, y) === 0) return false;
+      const d = TILE_DEFS[typAt(x, y)];
+      return !!d?.solid && !DG_SOLID_TOP.has(d.vanilla?.sheet ?? -1);
+    };
+    for (;;) {
+      const dx = Math.abs(cx - tx), dy = Math.abs(cy - ty);
+      if (cx === tx && cy === ty) return true;
+      if (dx > dy) {
+        cx += cx >= tx ? -1 : 1;
+        if (!inW(cx, cy - 1, 0) || !inW(cx, cy + 1, 0)) return false;
+        if (blk(cx, cy - 1) && blk(cx, cy + 1)) return false;
+      } else {
+        cy += cy >= ty ? -1 : 1;
+        if (!inW(cx - 1, cy, 0) || !inW(cx + 1, cy, 0)) return false;
+        if (blk(cx - 1, cy) && blk(cx + 1, cy)) return false;
+      }
+    }
+  }
+
+  // ============ DungeonGlobalTraps（:23-152，Default：placeTrap(x,y,0) 飞镖）============
+  function dgTraps(): void {
+    const num5 = Math.trunc(8.4 * (w / 4200) * 1.0);
+    let ncount = 0, num4 = 0;
+    while (num4 < num5) {
+      ncount++;
+      const x = ri(bounds.L, bounds.R - 1);
+      const y = ri(Math.trunc(ws), bounds.B - 1);
+      if (isDW(wallAt(x, y)) && placeTrap0(x, y)) ncount = 1000;
+      if (ncount > 1000) { num4++; ncount = 0; }
+    }
+  }
+  // placeTrap type=0（WorldGen.cs:8875-9150 飞镖分支）
+  function placeTrap0(x2: number, y2: number): boolean {
+    let num = y2;
+    while (!dgSolid(x2, num)) {
+      num++;
+      if (num > h - 10) return false;
+    }
+    num--;
+    if (!inW(x2, num, 3)) return false;
+    for (let a = x2 - 20; a <= x2 + 20; a++) {
+      for (let b = num - 20; b <= num + 20; b++) {
+        if (inW(a, b, 0) && actAt(a, b) !== 0 && typAt(a, b) === TILE_BY_KEY['v_70_mushroom_grass_block']) return false;
+      }
+    }
+    if (wallAt(x2, num) === 87 || wallAt(x2, num) === 350) return false;
+    const lava = st.liquid[st.idx(x2, num)] > 0 && st.liquidType[st.idx(x2, num)] === 2;
+    if (lava) return false;
+    const offs: Array<[number, number]> = [[0, 0], [-1, 0], [1, 0], [0, -1], [-1, -1], [1, -1], [0, -2], [-1, -2], [1, -2]];
+    for (const [ax, ay] of offs) {
+      if (inW(x2 + ax, num + ay, 0) && actAt(x2 + ax, num + ay) !== 0) return false;
+    }
+    if (inW(x2, num + 1, 0) && (typAt(x2, num + 1) === SPIKE || typAt(x2, num + 1) === TILE_BY_KEY['v_232_wooden_spike'])) return false;
+    if (!inW(x2, num + 1, 0) || !dgSolid(x2, num + 1)) return false;   // CanGeneratePressurePlateAt
+    {
+      const bt = typAt(x2, num + 1);
+      const sheet = TILE_DEFS[bt]?.vanilla?.sheet ?? -1;
+      if (sheet === 138 || sheet === 484 || sheet === 664 || sheet === 665 || (sheet >= 711 && sheet <= 716)) return false;
+      if (wallAt(x2, num + 1) === 350) return false;
+    }
+    const num27 = num - ri(0, 2);
+    const anchorOK = (xx: number, yy: number): boolean =>
+      dgSolid(xx, yy) || (inW(xx, yy, 0) && actAt(xx, yy) !== 0 && (typAt(xx, yy) === TILE_BY_KEY['v_481_cracked_blue_brick']
+        || typAt(xx, yy) === TILE_BY_KEY['v_482_cracked_green_brick'] || typAt(xx, yy) === TILE_BY_KEY['v_483_cracked_pink_brick']));
+    let num28 = x2;
+    while (!anchorOK(num28, num27)) {
+      num28--;
+      if (num28 < 0) return false;
+    }
+    let num29 = x2;
+    while (!anchorOK(num29, num27)) {
+      num29++;
+      if (num29 > w) return false;
+    }
+    const n30 = x2 - num28, n31 = num29 - x2;
+    let f5 = n30 > 5 && n30 < 50, f6 = n31 > 5 && n31 < 50;
+    if (f5 && !dgSolid(num28, num27 + 1)) f5 = false;
+    if (f6 && !dgSolid(num29, num27 + 1)) f6 = false;
+    const badAnchor = (xx: number, yy: number): boolean => typAt(xx, yy) === DOOR || typAt(xx, yy) === SPIKE;
+    if (f5 && ((inW(num28, num27, 0) && actAt(num28, num27) !== 0 && badAnchor(num28, num27))
+      || (inW(num28, num27 + 1, 0) && actAt(num28, num27 + 1) !== 0 && badAnchor(num28, num27 + 1)))) f5 = false;
+    if (f6 && ((inW(num29, num27, 0) && actAt(num29, num27) !== 0 && badAnchor(num29, num27))
+      || (inW(num29, num27 + 1, 0) && actAt(num29, num27 + 1) !== 0 && badAnchor(num29, num27 + 1)))) f6 = false;
+    let num26: number;
+    if (f5 && f6) {
+      num26 = num28;
+      if (rn(2) === 0) num26 = num29;
+    } else if (f6) num26 = num29;
+    else {
+      if (!f5) return false;
+      num26 = num28;
+    }
+    if (typAt(num26, num27) === TILE_BY_KEY['v_190_glowing_mushroom_block']) return false;
+    if (wallAt(num26, num27) === 350) return false;
+    chTile(st.idx(x2, num), TILE_BY_KEY['v_135_pressure_plates'], false);
+    st.flags[st.idx(num26, num27)] = 0;                         // KillTile（生成期 noItem）
+    chTile(st.idx(num26, num27), TILE_BY_KEY['v_137_traps'], false);
+    return true;
+  }
+  // ============ DungeonGlobalGroundFurniture（Default，:187-253 + :255-861）============
+  function dgFurniture(): void {
+    const num2 = Math.trunc(2000 * (w / 4200) * 1.0);
+    let alch = 1 + Math.trunc(w / 4200), bew = 1 + Math.trunc(w / 4200);
+    let num3 = 2000;
+    for (let j = 0; j < num2; j++) {
+      if (alch > 0 || bew > 0) {
+        j--;
+        num3--;
+        if (num3 <= 0) break;
+      }
+      let x = ri(bounds.L, bounds.R - 1);
+      let y = ri(Math.max(bounds.T, Math.trunc(ws) + 10), bounds.B - 1);
+      let n5 = 1000;
+      while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
+        n5--;
+        if (n5 <= 0) break;
+        x = ri(bounds.L, bounds.R - 1);
+        y = ri(Math.max(bounds.T, Math.trunc(ws) + 10), bounds.B - 1);
+      }
+      if (isDW(wallAt(x, y)) && actAt(x, y) === 0) {
+        while (!dgSolid(x, y) && y < h - 200) y++;
+        y--;
+        dgFurnAt(x, y, alch, bew, j < num2 / 2);
+        const res = dgFurnResult as string;
+        if (res === 'alch') alch--;
+        else if (res === 'bew') bew--;
+      }
+    }
+  }
+  let dgFurnResult: '' | 'alch' | 'bew' | 'ok' = '';
+  function dgFurnAt(i: number, j: number, alch: number, bew: number, stricter: boolean): void {
+    dgFurnResult = '';
+    let num = i, k = i;
+    while (inW(num, j, 0) && actAt(num, j) === 0 && dgSolid(num, j + 1)) num--;
+    num++;
+    while (inW(k, j, 0) && actAt(k, j) === 0 && dgSolid(k, j + 1)) k++;
+    k--;
+    const num2 = k - num, num3 = Math.trunc((k + num) / 2);
+    if (!featOK(num3, j, 0)) return;
+    if (inW(num3, j, 0) && actAt(num3, j) === 0 && isDW(wallAt(num3, j)) && dgSolid(num3, j + 1) && typAt(num3, j + 1) !== SPIKE) {
+      const base = theme === 0
+        ? [1396, 1397, 1398, 1405, 1408, 1414, 1470, 2376, 2386, 2402, 2658, 2664, 2645, 3900]
+        : theme === 1
+          ? [1399, 1400, 1401, 1406, 1409, 1415, 1471, 2377, 2387, 2403, 2659, 2665, 2646, 3901]
+          : [1402, 1403, 1404, 1407, 1410, 1416, 1472, 2378, 2388, 2404, 2660, 2666, 2647, 3902];
+      let iChair = base[0], iTable = base[1], iWork = base[2], iCandle = base[3], iVase = base[4];
+      let iBook = base[5], iBed = base[6], iPiano = base[7], iDress = base[8], iSofa = base[9];
+      let iTub = base[10], iCand = base[11], iLamp = base[12], iClock = base[13];
+      const wv = wallAt(num3, j);
+      if (wv >= 94 && wv <= 105) {
+        iChair = 1509; iTable = 1510; iWork = 1511; iCandle = 5743; iVase = -1; iBook = 1512; iBed = 5740;
+        iPiano = 5750; iDress = 5741; iSofa = 5753; iTub = 5739; iCand = 5742; iLamp = 5748; iClock = 5746;
+      }
+      let num18 = rn(13);
+      if ((num18 === 10 || num18 === 11 || num18 === 12) && rn(4) !== 0) num18 = rn(13);
+      while ((num18 === 2 && iVase === -1) || (num18 === 5 && iBed === -1) || (num18 === 6 && iPiano === -1)
+        || (num18 === 7 && iDress === -1) || (num18 === 8 && iSofa === -1) || (num18 === 9 && iTub === -1)
+        || (num18 === 10 && iCand === -1) || (num18 === 11 && iLamp === -1) || (num18 === 12 && iClock === -1)) {
+        num18 = rn(13);
+      }
+      const num19 = [5, 4, 3, 4, 3, 5, 5, 5, 5, 5, 2, 3, 2][num18];
+      const num20 = [4, 3, 5, 6, 3, 3, 4, 4, 4, 3, 4, 3, 5][num18];
+      let flag3 = false, flag4 = false;
+      const num21 = (alch > 0 || bew > 0) ? 15 : 0;
+      outer6:
+      for (let a = num3 - num19 - num21; a <= num3 + num19 + num21; a++) {
+        for (let b = j - num20 - num21; b <= j + num21; b++) {
+          if (!inW(a, b, 0)) continue;
+          if (a >= num3 - num19 && a <= num3 + num19 && b >= j - num20 && b <= j) {
+            if (!featOK(a, b, 0)) { flag3 = true; break outer6; }
+            if (actAt(a, b) !== 0) { num18 = -1; break outer6; }
+          }
+          if (stricter && (alch > 0 || bew > 0) && actAt(a, b) !== 0 && (typAt(a, b) === ALCHEMY || typAt(a, b) === BEWITCH)) flag4 = true;
+        }
+      }
+      if (flag3) return;
+      if (num2 < num19 * 1.75) num18 = -1;
+      if (!flag4 && (alch > 0 || bew > 0)) {
+        if (alch > 0) {
+          if (placeSimple(num3, j, ALCHEMY)) { dgFurnResult = 'alch'; return; }
+        } else if (placeSimple(num3, j, BEWITCH)) { dgFurnResult = 'bew'; return; }
+      } else if (num18 === 0) {
+        if (placeSimple(num3, j, DG_ITEM_TILE[iTable])) {
+          if (iChair > -1) {
+            if (inW(num3 - 2, j, 0) && actAt(num3 - 2, j) === 0) placeSimple(num3 - 2, j, DG_ITEM_TILE[iChair]);
+            if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) placeSimple(num3 + 2, j, DG_ITEM_TILE[iChair]);
+          }
+          for (let n = num3 - 1; n <= num3 + 1; n++) {
+            if (rn(2) !== 0 || !inW(n, j - 2, 0) || actAt(n, j - 2) !== 0) continue;
+            const n23 = rn(5);
+            if (iCandle > -1 && n23 <= 1) placeSimple(n, j - 2, DG_ITEM_TILE[iCandle]);
+            else if (n23 === 2) placeSimple(n, j - 2, WATER_CANDLE);
+            else if (n23 === 3) placeSimple(n, j - 2, BOOKS);
+            else if (n23 === 4) placeSimple(n, j - 2, TILE_BY_KEY['v_103_bowls']);
+          }
+          dgFurnResult = 'ok';
+          return;
+        }
+      } else if (num18 === 1) {
+        if (placeSimple(num3, j, DG_ITEM_TILE[iWork])) {
+          if (iChair > -1) {
+            if (rn(2) === 0) {
+              if (inW(num3 - 1, j, 0) && actAt(num3 - 1, j) === 0) placeSimple(num3 - 1, j, DG_ITEM_TILE[iChair]);
+            } else if (inW(num3 + 2, j, 0) && actAt(num3 + 2, j) === 0) placeSimple(num3 + 2, j, DG_ITEM_TILE[iChair]);
+          }
+          for (let n = num3; n <= num3 + 1; n++) {
+            if (rn(2) !== 0 || !inW(n, j - 1, 0) || actAt(n, j - 1) !== 0) continue;
+            const n26 = rn(5);
+            if (iCandle > -1 && n26 <= 1) placeSimple(n, j - 1, DG_ITEM_TILE[iCandle]);
+            else if (n26 === 2) placeSimple(n, j - 1, WATER_CANDLE);
+            else if (n26 === 3) placeSimple(n, j - 1, BOOKS);
+            else if (n26 === 4) placeSimple(n, j - 1, TILE_BY_KEY['v_103_bowls']);
+          }
+          dgFurnResult = 'ok';
+          return;
+        }
+      } else if (num18 === 2) {
+        if (iVase > -1 && placeSimple(num3, j, DG_ITEM_TILE[iVase])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 3) {
+        if (iBook > -1) placeSimple(num3, j, DG_ITEM_TILE[iBook]);
+      } else if (num18 === 4) {
+        if (iChair > -1) {
+          placeSimple(num3, j, DG_ITEM_TILE[iChair]);
+          if (inW(num3, j, 0) && actAt(num3, j) !== 0 && st.type[st.idx(num3, j)] === DG_ITEM_TILE[iChair]) {
+            dgFurnResult = 'ok'; return;
+          }
+        }
+      } else if (num18 === 5) {
+        if (iBed > -1 && place4x2(num3, j, DG_ITEM_TILE[iBed])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 6) {
+        if (iPiano > -1 && placeSimple(num3, j, DG_ITEM_TILE[iPiano])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 7) {
+        if (iDress > -1 && placeSimple(num3, j, DG_ITEM_TILE[iDress])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 8) {
+        if (iSofa > -1 && placeSimple(num3, j, DG_ITEM_TILE[iSofa])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 9) {
+        if (iTub > -1 && place4x2(num3, j, DG_ITEM_TILE[iTub])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 10) {
+        if (iLamp > -1 && placeSimple(num3, j, DG_ITEM_TILE[iLamp])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 11) {
+        if (iCand > -1 && placeSimple(num3, j, DG_ITEM_TILE[iCand])) { dgFurnResult = 'ok'; return; }
+      } else if (num18 === 12) {
+        if (iClock > -1 && placeSimple(num3, j, DG_ITEM_TILE[iClock])) { dgFurnResult = 'ok'; return; }
+      }
+    }
+  }
+  const dgTileOfSheet = (sheet: number): number => TILE_INTERNAL_BY_SHEET.get(sheet) ?? -1;
+  // Place4x2（WorldGen.cs:50534）：4×2 净空 + 下方实心
+  function place4x2(x: number, y: number, type: number): boolean {
+    if (type === undefined || type < 0 || x < 5 || x > w - 5 || y < 5 || y > h - 5) return false;
+    const solid2 = (xx: number, yy: number): boolean => {
+      if (!inW(xx, yy, 0) || actAt(xx, yy) === 0) return false;
+      return !!TILE_DEFS[typAt(xx, yy)]?.solid;
+    };
+    for (let a = x - 1; a < x + 3; a++) {
+      for (let b = y - 1; b < y + 1; b++) {
+        if (!inW(a, b, 0) || actAt(a, b) !== 0) return false;
+      }
+      if (!solid2(a, y + 1)) return false;
+    }
+    for (let a = x - 1; a < x + 3; a++) {
+      for (let b = y - 1; b < y + 1; b++) chTile(st.idx(a, b), dgTileOfSheet(type), false);
+    }
+    return true;
+  }
+
+  // ============ DungeonGlobalPaintings（:28-321）============
+  function dgPaintings(): void {
+    const num2v = wallVariants[0];
+    const num4 = Math.trunc(100 * (w / 4200) * Math.max(1, 0.75));
+    let num5 = num4 * 3;
+    for (let i = 0; i < num4; i++) {
+      num5--;
+      if (num5 <= 0) break;
+      let x = ri(bounds.L, bounds.R - 1);
+      let y = ri(Math.trunc(ws), bounds.B - 1);
+      let n8 = 1000;
+      while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
+        n8--;
+        if (n8 <= 0) break;
+        x = ri(bounds.L, bounds.R - 1);
+        y = ri(Math.trunc(ws), bounds.B - 1);
+      }
+      for (let t = 0; t < 2; t++) {
+        let n9 = x, n10 = x;
+        while (n9 > 20 && actAt(n9, y) === 0 && isDW(wallAt(n9, y))) n9--;
+        n9++;
+        while (n10 < w - 20 && actAt(n10, y) === 0 && isDW(wallAt(n10, y))) n10++;
+        n10--;
+        x = Math.trunc((n9 + n10) / 2);
+        let n11 = y, n12 = y;
+        while (n11 > 20 && actAt(n11, x) === 0 && isDW(wallAt(x, n11))) n11--;
+        n11++;
+        while (n12 < h - 20 && actAt(n12, x) === 0 && isDW(wallAt(x, n12))) n12++;
+        n12--;
+        y = Math.trunc((n11 + n12) / 2);
+      }
+      let n9 = x, n10 = x;
+      while (n9 > 20 && actAt(n9, y) === 0 && actAt(n9, y - 1) === 0 && actAt(n9, y + 1) === 0) n9--;
+      n9++;
+      while (n10 < w - 20 && actAt(n10, y) === 0 && actAt(n10, y - 1) === 0 && actAt(n10, y + 1) === 0) n10++;
+      n10--;
+      let n11 = y, n12 = y;
+      while (n11 > 20 && actAt(n11, x) === 0 && actAt(n11, x - 1) === 0 && actAt(n11, x + 1) === 0) n11--;
+      n11++;
+      while (n12 < h - 20 && actAt(n12, x) === 0 && actAt(n12, x - 1) === 0 && actAt(n12, x + 1) === 0) n12++;
+      n12--;
+      x = Math.trunc((n9 + n10) / 2);
+      y = Math.trunc((n11 + n12) / 2);
+      const n13 = n10 - n9, n14 = n12 - n11;
+      if (n13 <= 7 || n14 <= 5) continue;
+      const arr = [true, false, false];
+      if (n13 > n14 * 3 && n13 > 21) arr[1] = true;
+      if (n14 > n13 * 3 && n14 > 21) arr[2] = true;
+      let n15 = rn(3);
+      if (wallAt(x, y) === num2v) n15 = 0;
+      while (!arr[n15]) n15 = rn(3);
+      if (nearPicture2(st, x, y, wall)) n15 = -1;
+      if (n15 === 0) {
+        if (featArea3(x, y, 2) && !nearPicture(st, x, y)) paintingAt(x, y);
+      } else if (n15 === 1) {
+        if (!featArea3(x, y, 2)) continue;
+        if (actAt(x, y) === 0) paintingAt(x, y);
+        if (actAt(x, y) !== 0) continue;
+        const baseY = y;
+        for (let m = 0; m < 2; m++) {
+          x += 7;
+          let a1 = baseY, a2 = baseY;
+          while (a1 > 0 && actAt(x, a1) === 0 && actAt(x - 1, a1) === 0 && actAt(x + 1, a1) === 0) a1--;
+          a1++;
+          while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
+          a2--;
+          const ny = Math.trunc((a1 + a2) / 2);
+          if (featArea3(x, ny, 2)) {
+            if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
+            paintingAt(x, ny);
+          }
+        }
+        for (let m = 0; m < 2; m++) {
+          x -= 7;
+          let a1 = baseY, a2 = baseY;
+          while (a1 > 0 && actAt(x, a1) === 0 && actAt(x - 1, a1) === 0 && actAt(x + 1, a1) === 0) a1--;
+          a1++;
+          while (a2 < h - 1 && actAt(x, a2) === 0 && actAt(x - 1, a2) === 0 && actAt(x + 1, a2) === 0) a2++;
+          a2--;
+          const ny = Math.trunc((a1 + a2) / 2);
+          if (featArea3(x, ny, 2)) {
+            if (Math.abs(baseY - ny) >= 4 || nearPicture(st, x, ny)) break;
+            paintingAt(x, ny);
+          }
+        }
+      } else if (n15 === 2) {
+        if (!featArea3(x, y, 2)) continue;
+        if (actAt(x, y) === 0) paintingAt(x, y);
+        if (actAt(x, y) !== 0) continue;
+        const baseX = x;
+        for (let m = 0; m < 3; m++) {
+          y += 7;
+          let a1 = baseX, a2 = baseX;
+          while (a1 > 0 && actAt(y, a1) === 0 && actAt(y - 1, a1) === 0 && actAt(y + 1, a1) === 0) a1--;
+          a1++;
+          while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
+          a2--;
+          const nx = Math.trunc((a1 + a2) / 2);
+          if (featArea3(nx, y, 2)) {
+            if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
+            paintingAt(nx, y);
+          }
+        }
+        for (let m = 0; m < 3; m++) {
+          y -= 7;
+          let a1 = baseX, a2 = baseX;
+          while (a1 > 0 && actAt(y, a1) === 0 && actAt(y - 1, a1) === 0 && actAt(y + 1, a1) === 0) a1--;
+          a1++;
+          while (a2 < w - 1 && actAt(y, a2) === 0 && actAt(y - 1, a2) === 0 && actAt(y + 1, a2) === 0) a2++;
+          a2--;
+          const nx = Math.trunc((a1 + a2) / 2);
+          if (featArea3(nx, y, 2)) {
+            if (Math.abs(baseX - nx) >= 4 || nearPicture(st, nx, y)) break;
+            paintingAt(nx, y);
+          }
+        }
+      }
+    }
+  }
+  const featArea3 = (x: number, y: number, fluff: number): boolean => {
+    for (let a = x - fluff; a <= x + fluff; a++) {
+      for (let b = y - fluff; b <= y + fluff; b++) {
+        if (!featOK(a, b, 2)) return false;
+      }
+    }
+    return true;
+  };
+  function paintingAt(x: number, y: number): void {
+    let tile = HANGING, style = 0;
+    if (wallAt(x, y) === wall) {
+      const n = rn(3);
+      if (n <= 1) {
+        let n2 = rn(7);
+        if (n2 === 6) n2 = rn(7);
+        style = [12, 13, 14, 15, 18, 19, 23][n2] ?? 12;
+      } else {
+        tile = PAINTING;
+        const n2 = rn(17);
+        style = n2 === 14 ? 15 : n2 === 15 ? 16 : n2 === 16 ? 30 : n2;
+      }
+    } else {
+      const n = rn(2);
+      if (n === 0) { tile = HANGING; style = rn(2) === 0 ? 16 : 17; }
+      else { tile = CATACOMB; style = rn(9); }
+    }
+    placeSimple(x, y, tile);
+  }
+  // ============ DungeonGlobalBanners（:24-104）============
+  function dgBanners(): void {
+    const num3 = Math.trunc(200 * (w / 4200) * Math.max(1, 0.75));
+    for (let i = 0; i < num3; i++) {
+      let x = ri(bounds.L, bounds.R - 1);
+      let y = ri(bounds.T, bounds.B - 1);
+      let n6 = 1000;
+      while (!isDW(wallAt(x, y)) || actAt(x, y) !== 0) {
+        n6--;
+        if (n6 <= 0) break;
+        x = ri(bounds.L, bounds.R - 1);
+        y = ri(bounds.T, bounds.B - 1);
+      }
+      n6 = 1000;
+      while (!dgSolid(x, y) && y > 10) {
+        n6--;
+        if (n6 <= 0) break;
+        y--;
+      }
+      y++;
+      if (!featOK(x, y, 0) || !isDW(wallAt(x, y))
+        || typAt(x, y - 1) === SPIKE
+        || actAt(x, y) !== 0
+        || actAt(x, y + 1) !== 0
+        || actAt(x, y + 2) !== 0
+        || actAt(x, y + 3) !== 0) continue;
+      let near = false;
+      for (let a = x - 1; a <= x + 1; a++) {
+        for (let b = y; b <= y + 3; b++) {
+          if (inW(a, b, 0) && actAt(a, b) !== 0
+            && (typAt(a, b) === DOOR || typAt(a, b) === TILE_BY_KEY['door_open'] || typAt(a, b) === TILE_BY_KEY['banner'])) near = true;
+        }
+      }
+      if (near) continue;
+      let num8 = 0;
+      if (wallAt(x, y) === wallVariants[1]) num8 = 1;
+      if (wallAt(x, y) === wallVariants[2]) num8 = 2;
+      num8 = num8 * 2 + rn(2);
+      placeSimple(x, y, TILE_BY_KEY['banner']);
+    }
+  }
+}
+export function placeFurn(st: TileStore, cx: number, anchorY: number, tile: number, style: number, anchor: 'bottom' | 'top' = 'bottom', flip = 1, support = true, styleRowH?: number, styleColW?: number): boolean {
+  const def = TILE_DEFS[tile];
+  if (!def) return false;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const x0 = cx - Math.floor(fw / 2);
+  const yTop = anchor === 'bottom' ? anchorY - fh + 1 : anchorY;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, yTop + dy) || st.flags[st.idx(x0 + dx, yTop + dy)]) return false;
+    }
+  }
+  if (anchor === 'bottom' && support) {
+    for (let dx = 0; dx < fw; dx++) {
+      if (!st.inBounds(x0 + dx, yTop + fh) || !st.flags[st.idx(x0 + dx, yTop + fh)]
+        || !TILE_DEFS[st.type[st.idx(x0 + dx, yTop + fh)]]?.solid) return false;
+    }
+  }
+  const sheet = TILE_DEFS[tile]?.vanilla?.sheet ?? -1;
+  // 权威布局表(FurnitureStyle.ts,TileObjectData+贴图实测):表内 sheet 直接用,
+  // 表外尊重调用参数(竖排 styleRowH / 横排列步 styleColW),最终回退通用横排。
+  // 15/139/187 曾漏登记→椅子全落通用横排回退而实为竖排(神庙木椅 2026-08-12),
+  // 已补全与 FurnitureStyle.ts 覆盖面同步
+  const inTable = [42, 33, 49, 34, 100, 93, 91, 240, 241, 242, 245, 246, 15, 139, 187, 79, 90].includes(sheet);
+  let bx: number, by: number;
+  if (inTable) [bx, by] = furnitureStyleBase(sheet, style, fw);
+  else if (styleRowH !== undefined) { bx = 0; by = style * styleRowH; }
+  else { bx = style * (styleColW ?? fw * 18); by = 0; }
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      const fx = flip < 0 ? fw - 1 - dx : dx;
+      st.setTileSilent(x0 + dx, yTop + dy, tile, bx + fx * 18, by + dy * 18);
+    }
+  }
+  return true;
+}
+
+/** 家具水平镜像(帧 X 翻转:桌椅等 1-3 宽物件整体 +18*fw) */
+export function flipFurn(st: TileStore, cx: number, floorY: number, tile: number): void {
+  const def = TILE_DEFS[tile];
+  if (!def) return;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const x0 = cx - Math.floor(fw / 2);
+  const yTop = floorY - fh + 1;
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, yTop + dy)) continue;
+      const i = st.idx(x0 + dx, yTop + dy);
+      if (st.type[i] === tile) st.frameX[i] += fw * 18;
+    }
+  }
+}
+
+/** 墙饰(画/骨/挂毯):顶行=topY,锚点左上;须净空 */
+function placeWallArt(st: TileStore, x: number, y: number, tile: number, style: number): void {
+  const def = TILE_DEFS[tile];
+  if (!def) return;
+  const fw = def.vanilla?.fw ?? def.w ?? 1;
+  const fh = def.vanilla?.fh ?? def.h ?? 1;
+  const sheet = def.vanilla?.sheet ?? -1;
+  const x0 = x - Math.floor(fw / 2);
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      if (!st.inBounds(x0 + dx, y + dy) || st.flags[st.idx(x0 + dx, y + dy)]) return;
+    }
+  }
+  // 样式基偏移(TileObjectData + Tiles_N.png 尺寸实测):
+  //  240(1944×162):横排 36 列×54,wrap36 → 超 36 换下行 54
+  //  241(4×3):竖排行 54(wrap0 单列)
+  //  242(324×1944):竖排 27 行×72,wrap27 → 超 27 换右列 108
+  let bx: number, by: number;
+  if (sheet === 240) { bx = (style % 36) * 54; by = Math.floor(style / 36) * 54; }
+  else if (sheet === 241) { bx = 0; by = style * 54; }
+  else if (sheet === 242) { bx = Math.floor(style / 27) * 108; by = (style % 27) * 72; }
+  else { bx = style * fw * 18; by = 0; }
+  for (let dx = 0; dx < fw; dx++) {
+    for (let dy = 0; dy < fh; dy++) {
+      st.setTileSilent(x0 + dx, y + dy, tile, bx + dx * 18, by + dy * 18);
+    }
+  }
+}
+
+/** nearPicture(cs L17966):±4×±3 有任意实心 */
+function nearPicture(st: TileStore, x: number, y: number): boolean {
+  for (let dx = -4; dx <= 3; dx++) {
+    for (let dy = -3; dy <= 2; dy++) {
+      if (st.inBounds(x + dx, y + dy) && st.flags[st.idx(x + dx, y + dy)]) return true;
+    }
+  }
+  return false;
+}
+
+/** nearPicture2(cs L17979):±15/±10(主墙)或 ±8/±5(变体墙)内已有墙饰 */
+function nearPicture2(st: TileStore, x: number, y: number, mainWall: number): boolean {
+  const wall = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;
+  const rx = wall === mainWall ? 15 : 8;
+  const ry = wall === mainWall ? 10 : 5;
+  for (let dx = -rx; dx <= rx; dx++) {
+    for (let dy = -ry; dy <= ry; dy++) {
+      if (!st.inBounds(x + dx, y + dy) || !st.flags[st.idx(x + dx, y + dy)]) continue;
+      const t = st.type[st.idx(x + dx, y + dy)];
+      if (t === HANGING || t === CATACOMB || t === PAINTING) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * 灯具→墙上开关 + 红线布线(cs L18942-18975/18990-19023):
+ * 在灯具 ±12/+3..20 内找两侧皆砖的嵌墙位放开关(136),沿曼哈顿路径铺红线。
+ * chandelier=true 时开关位禁邻尖刺(原版两分支条件差异)。
+function canHit(st: TileStore, x1: number, y1: number, x2: number, y2: number): boolean {
+  const w = st.w, h = st.h;
+  let num = x1, num2 = y1;
+  const num3 = Math.max(1, Math.min(w - 1, x2));
+  const num4 = Math.max(1, Math.min(h - 40, y2));
+  num = Math.max(1, Math.min(w - 1, num));
+  num2 = Math.max(1, Math.min(h - 40, num2));
+  const fullBrick = (x: number, y: number): boolean => {
+    if (!st.inBounds(x, y)) return false;
+    const k = st.idx(x, y);
+    if (!st.flags[k]) return false;
+    const d = TILE_DEFS[st.type[k]];
+    return !!d?.solid && !d.platform && st.slope[k] === 0 && !st.half[k];
+  };
+  for (;;) {
+    if (num === num3 && num2 === num4) return true;
+    const dAbs = Math.abs(num - num3), dOrd = Math.abs(num2 - num4);
+    if (dAbs > dOrd) {
+      num += num >= num3 ? -1 : 1;
+      if (fullBrick(num, num2 - 1) && fullBrick(num, num2 + 1)) return false;
+    } else {
+      num2 += num2 >= num4 ? -1 : 1;
+      if (fullBrick(num - 1, num2) && fullBrick(num + 1, num2)) return false;
+    }
+    // do-while 条件：落点格"非活性 / 非实心 / 平台"才继续步进；实心非平台 → 穿墙阻挡
+    const k = st.idx(num, num2);
+    const d = TILE_DEFS[st.type[k]];
+    const passable = !st.flags[k] || !d?.solid || !!d.platform;
+    if (!passable) return false;
+    if (num < 1 || num >= w - 1 || num2 < 1 || num2 >= h - 40) return false;
+  }
+}
+
+/** AddBuriedChest（1456 cs:35920）下落段 1:1：自 y 向下扫至 h-10，
+ *  首个 SolidTile（半砖/坡面不算）落定；±2 邻域有 Boulders/26/237 → 失败。
+ *  样式/主件由调用方显式给定（地牢战利品序），2×2 箱落其上后推入 chests */
+/** 内部物品 id → 原版 id（ITEM_DEFS 反查 vid 字段；非 vi_ 返回 0） */
+function vidOfInternal(internalId: number): number {
+  const d = ITEM_DEFS[internalId];
+  if (!d) return 0;
+  if (d.vid != null) return d.vid;
+  const m = /^vi_(\d+)_/.exec(d.key);
+  return m ? parseInt(m[1], 10) : 0;
+}
+

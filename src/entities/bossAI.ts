@@ -1196,6 +1196,12 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   }
 
+  // 点光(:50299-50306)：!flag2（未嵌实心/液体）且非 135 段 ai[2]==1 →
+  // Center (0.3,0.1,0.05)（钻地段不发光）
+  if (!buried && !(e.vanillaId === 135 && e.ai2 === 1)) {
+    e.lightRGB = [0.3, 0.1, 0.05];
+  }
+
   // 白天/玩家死(:50337-50356):vy+1,地表下再+1 且空中钳提到 32(num18);过岩石层
   // 整链消散——★原版不 return:flag2 置 false 强制空中分支照常跑(钳速+向玩家横漂),
   // 曾提前 return 丢 num18=32 钳与横漂,vy 无界坠穿

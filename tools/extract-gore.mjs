@@ -113,7 +113,7 @@ function splitTop(s, sep) {
   return out;
 }
 
-/** 顶层 ± 项切分 → [{t, sign}]（一元负号并入首项/括号项） */
+/** 顶层 ± 项切分 → [{t, sign}]（操作数后的 ± 视为一元符号不切，如 `40 * -1`） */
 function splitTerms(s) {
   const out = [];
   let d = 0, cur = '', sign = 1;
@@ -121,7 +121,8 @@ function splitTerms(s) {
     const c = s[i];
     if (c === '(' || c === '[') d++;
     else if (c === ')' || c === ']') d--;
-    if (d === 0 && (c === '+' || c === '-') && cur.trim() !== '') {
+    if (d === 0 && (c === '+' || c === '-')
+      && /[)\w.'\]]$/.test(cur.trimEnd())) {
       out.push({ t: cur.trim(), sign });
       cur = ''; sign = c === '+' ? 1 : -1;
       continue;
@@ -197,6 +198,7 @@ function classifyClause(cl, loopNames) {
   const t = cl.trim();
   let m;
   if (/^type\b/.test(t) || /^life\b/.test(t)) return { typePred: true };
+  if (/^ai\[\d\]\s*(==|!=)/.test(t)) return { typePred: true };   // 已由 parseAiGates 结构化
   if (t === 'NPCID.Sets.IsTownPet[type]') return { staticTypes: new Set(IS_TOWN_PET) };
   if ((m = t.match(/^!IsShimmerVariant$/))) return { gate: { k: 'shim', not: true } };
   if ((m = t.match(/^IsShimmerVariant$/))) return { gate: { k: 'shim', not: false } };
@@ -289,6 +291,9 @@ function evalIdExpr(expr) {
 }
 
 // ============ 主流程 ============
+// 开发调试：`node tools/extract-gore.mjs --pos "<expr>"` / `--vel "<expr>"` 只跑表达式编译器
+const DBG_POS = process.argv.includes('--pos');
+const DBG_VEL = process.argv.includes('--vel');
 const src = readFileSync(NPC_CS, 'utf8').split('\n');
 const headIdx = src.findIndex((l) => l.includes('public void HitEffect(int hitDirection'));
 if (headIdx < 0) { console.error('HitEffect not found in NPC.cs'); process.exit(1); }
@@ -322,6 +327,19 @@ let depth = 0;
 let ctxSeq = 0;
 let pendingGuard = null;
 const caseAt = new Map(); // depth → { label, types:Set|null }
+const lastCtxAt = new Map(); // depth → 该层最近弹出的守卫上下文（else 取反用）
+
+/** else 分支门取反（`if (spriteDirection != -1) … else …` → else 段带 `== -1` 门） */
+const NEG_OP = { '==': '!=', '!=': '==', '<': '>=', '<=': '>', '>': '<', '>=': '<=' };
+function negateGates(gates) {
+  const out = [];
+  for (const g of gates) {
+    if (g.op) out.push({ ...g, op: NEG_OP[g.op] ?? g.op });
+    else if (g.k === 'shim') out.push({ k: 'shim', not: !g.not });
+    else out.push({ k: 'skip', reason: `!${g.k}` });   // 不可取反 → 运行时恒假（登记用）
+  }
+  return out;
+}
 const locals = new Map(); // name → [{ line, valExpr, typeCtxId }]（id 还原用）
 const vecHist = new Map(); // Vector2 局部 → [{ line, kind:'pos'|'vel', ir }]（pos/vel 编译用）
 const entries = new Map();
@@ -370,7 +388,7 @@ function resolveChain(extraCase) {
   if (extraCase) chain.push(extraCase);
   let include = null, typeCtxId = null;
   const exclude = new Set(), gates = [], ai = [];
-  const gateFree = new Set(), loopGates = [], gateUnknown = [];
+  const gateFree = new Set(), gateLayers = [], loopGates = [], gateUnknown = [];
   let party = false;
   for (const c of chain) {
     if (!c) continue;
@@ -379,12 +397,16 @@ function resolveChain(extraCase) {
       typeCtxId = typeCtxId ?? c.id;
     }
     if (c.staticTypes) {
-      include = include ? new Set([...include].union ? [...include, ...c.staticTypes] : [...include].filter((t) => c.staticTypes.has(t))) : new Set(c.staticTypes);
+      // `NPCID.Sets.IsTownPet[type]` 是 OR 项（NPCID.cs:4444 静态集）→ 与本层 type 谓词并集
+      include = include ? new Set([...include, ...c.staticTypes]) : new Set(c.staticTypes);
       typeCtxId = typeCtxId ?? c.id;
     }
     if (c.exclude) for (const t of c.exclude) exclude.add(t);
-    for (const g of c.gates ?? []) gates.push(g);
-    if (c.gateFree) for (const t of c.gateFree) gateFree.add(t);
+    if ((c.gates?.length ?? 0) > 0) {
+      gates.push(...c.gates);
+      gateLayers.push({ gates: c.gates, free: c.gateFree });
+      if (c.gateFree) for (const t of c.gateFree) gateFree.add(t);
+    }
     for (const g of c.loopGates ?? []) loopGates.push(g);
     for (const u of c.gateUnknown ?? []) gateUnknown.push(u);
     if (c.party) party = true;
@@ -404,7 +426,7 @@ function resolveChain(extraCase) {
     if (c?.loopN) loopN *= c.loopN;
     if (c?.loopVar) loopMap.set(c.loopVar, c.loopN ?? 1);
   }
-  return { types: include, exclude, life, gates, gateFree, loopGates, gateUnknown, party, ai, typeCtxId, loopN, loopMap };
+  return { types: include, exclude, life, gates, gateFree, gateLayers, loopGates, gateUnknown, party, ai, typeCtxId, loopN, loopMap };
 }
 
 /** `ai[N] == V` / `ai[N] != V` → 结构化门 */
@@ -617,44 +639,66 @@ function coeffOf(kexpr) {
   return v == null ? null : { k: v, dim };
 }
 
-/** 单个轴项 → { off, f, r:[a,b] } | null（f=尺寸分数；r=随机尺寸分数域） */
+/** 单个轴项 → { off, f, r:[a,b] } | null（dim ∈ 'w'|'h'；f=尺寸分数；r=随机尺寸分数域） */
 function axisTerm(t, dim) {
-  const term = t.trim();
+  let term = t.trim();
+  // 首项一元符号（splitTerms 只拆后续分隔符）
+  let sgn = 1;
+  if (/^[+-]/.test(term)) { sgn = term[0] === '-' ? -1 : 1; term = term.slice(1).trim(); }
+  const dimName = dim === 'w' ? 'width' : 'height';
   let m;
-  if ((m = term.match(/^-?\d+\.?\d*[fFdD]?$/))) return { off: parseFloat(term.replace(/[fFdD]$/, '')) };
-  // `(<和式>) * 常数` → 递归缩放（vector30 的 (float)(-w + (int)(w*u))*0.5 等）
-  if ((m = term.match(/^\((.+)\)\s*\*\s*(.+)$/)) && !term.includes('NextFloat()')) {
+  const scale = (r) => (r == null ? null : {
+    ...(r.off != null ? { off: r.off * sgn } : {}),
+    ...(r.f != null ? { f: r.f * sgn } : {}),
+    ...(r.r != null ? { r: sgn > 0 ? r.r : [sgn * r.r[1], sgn * r.r[0]] } : {}),
+  });
+  if ((m = term.match(/^-?\d+\.?\d*[fFdD]?$/))) return { off: parseFloat(term.replace(/[fFdD]$/, '')) * sgn };
+  // `(<和式>) * 常数` → 递归缩放（vector30 的 (float)(-w + (int)(w*u))*0.5 等；子串严格变短防环）
+  if ((m = term.match(/^\((.+)\)\s*\*\s*(.+)$/))) {
     const inner = axisExpr(m[1], dim);
     const c = coeffOf(m[2]);
     if (!inner || !c || c.dim != null) return null;
     if (inner.off == null && inner.f == null && inner.r == null) return null;
-    return {
+    return scale({
       ...(inner.off != null ? { off: inner.off * c.k } : {}),
       ...(inner.f != null ? { f: inner.f * c.k } : {}),
       ...(inner.r != null ? { r: [inner.r[0] * c.k, inner.r[1] * c.k] } : {}),
-    };
+    });
   }
   // 尺寸线性项
   const c = coeffOf(term);
   if (c) {
-    if (c.dim === dim) return { f: c.k };
-    if (c.dim == null) return { off: c.k };
+    if (c.dim === dim) return scale({ f: c.k });
+    if (c.dim == null) return scale({ off: c.k });
     return null;
   }
   // `<尺寸式> * Main.rand.NextFloat()` → 随机分数域
   if ((m = term.match(/^(.+?)\s*\*\s*Main\.rand\.NextFloat\(\)$/))) {
     const cc = coeffOf(m[1]);
     if (!cc || cc.dim !== dim) return null;
-    return { r: [0, cc.k] };
+    return scale({ r: [0, cc.k] });
   }
   // `(int)((float)width * Main.rand.NextFloat())` → 随机分数域 [0,1]（截断粒度 ≤1px，近似）
   if ((m = stripCasts(term).match(/^\(\s*(width|height)\s*\*\s*Main\.rand\.NextFloat\(\)\s*\)$/))) {
-    if (m[1] !== dim) return null;
-    return { r: [0, 1] };
+    if (m[1] !== dimName) return null;
+    return scale({ r: [0, 1] });
   }
   if ((m = term.match(/^Main\.rand\.Next\(\s*(width|height)\s*\)$/))) {
-    if (m[1] !== dim) return null;
-    return { r: [0, 1] };
+    if (m[1] !== dimName) return null;
+    return scale({ r: [0, 1] });
+  }
+  // `<Vector2 局部>.X|.Y` 分量引用（vector10.X 等）——rot/dc/direction 项不可拆轴
+  if ((m = term.match(/^([A-Za-z_]\w*)\.[XY]$/))) {
+    const ir = localIR(m[1], 'pos', 999999, new Set());
+    if (!ir || ir.rot || ir.dc || (m[0].endsWith('.X') ? ir.dx != null : ir.dy != null)) return null;
+    const isX = m[0].endsWith('.X');
+    const f = isX ? ir.fx : ir.fy;
+    const off = isX ? ir.ox : ir.oy;
+    if (f == null && off == null) return {};
+    return scale({
+      ...(f != null ? { f } : {}),
+      ...(off != null ? { off } : {}),
+    });
   }
   return null;
 }
@@ -740,6 +784,13 @@ function posTermIR(term, callLine, seen) {
   if (t === 'base.Center') return { fx: 0.5, fy: 0.5 };
   if (t === 'base.Top') return { fx: 0.5 };
   if (t === 'base.Bottom') return { fx: 0.5, fy: 1 };
+  // 荷兰人 vector20：`new Vector2((spriteDirection != 1) ? 1 : (-1), 0f).RotatedBy(rotation)`
+  //   —— 须先于通用 new Vector2 分支（否则尾缀 .RotatedBy 被吞）
+  if (/^new Vector2\(\s*\(spriteDirection != 1\)\s*\?\s*1\s*:\s*\(-1\)\s*,\s*0f?\s*\)\s*\.RotatedBy\(rotation\)$/.test(t)) {
+    return { rot: [{ a: 'x', s: 'sd', k: 1, dim: null }] };
+  }
+  // `base.Size * K` = (width, height) × K
+  if ((m = t.match(/^base\.Size\s*\*\s*([\d.]+)[fF]?$/))) return { fx: +m[1], fy: +m[1] };
   if (t.startsWith('new Vector2(')) {
     const comps = splitArgs(parenBody(t, t.indexOf('(')));
     if (comps.length === 1) {
@@ -748,7 +799,7 @@ function posTermIR(term, callLine, seen) {
     }
     if (comps.length !== 2) return null;
     const out = {};
-    for (const [axis, dim, comp] of [['x', 'width', comps[0]], ['y', 'height', comps[1]]]) {
+    for (const [axis, dim, comp] of [['x', 'w', comps[0]], ['y', 'h', comps[1]]]) {
       let body = comp.trim();
       const anchorRe = new RegExp(`position\\.${axis.toUpperCase()}\\b`);
       if (anchorRe.test(body)) body = body.replace(anchorRe, '');
@@ -786,10 +837,6 @@ function posTermIR(term, callLine, seen) {
     const sign = m[1] === '-' ? -1 : 1;
     return { rot: [{ a: m[2].toLowerCase(), s: sign, k: +m[3], dim: null }] };
   }
-  // 荷兰人 vector20：`new Vector2((spriteDirection != 1) ? 1 : (-1), 0f).RotatedBy(rotation)`
-  if (/^new Vector2\(\s*\(spriteDirection != 1\)\s*\?\s*1\s*:\s*\(-1\)\s*,\s*0f?\s*\)\s*\.RotatedBy\(rotation\)$/.test(t)) {
-    return { rot: [{ a: 'x', s: 'sd', k: 1, dim: null }] };
-  }
   // `Utils.RandomVector2(Main.rand, A, B)` → 均匀方形像素抖动
   if ((m = t.match(/^Utils\.RandomVector2\(\s*Main\.rand\s*,\s*(-?[\d.]+)[fF]?\s*,\s*(-?[\d.]+)[fF]?\s*\)$/))) {
     return { jx: [+m[1], +m[2]], jy: [+m[1], +m[2]] };
@@ -814,7 +861,17 @@ function posTermIR(term, callLine, seen) {
 
 /** Position 实参 → pos IR | null（不可编译时调用方保留 posExpr 原文） */
 function compilePos(expr, callLine) {
-  const terms = splitTerms(String(expr).trim());
+  // 实体参照归一（base.Center.X = position.X + width/2 等）
+  let s = String(expr).trim()
+    .replace(/base\.Center\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Center\.Y/g, 'position.Y + (float)(height / 2)')
+    .replace(/base\.Top\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Top\.Y/g, 'position.Y')
+    .replace(/base\.Bottom\.X/g, 'position.X + (float)(width / 2)')
+    .replace(/base\.Bottom\.Y/g, 'position.Y + (float)height')
+    .replace(/base\.Right\.X/g, 'position.X + (float)width')
+    .replace(/base\.Left\.X/g, 'position.X');
+  const terms = splitTerms(s);
   if (!terms.length) return null;
   const seen = new Set();
   let out = {};
@@ -825,7 +882,8 @@ function compilePos(expr, callLine) {
     if (!scaled) return null;
     out = addIR(out, scaled);
   }
-  // 空对象 = 纯 position 锚点 → 调用方输出 {}
+  // 归零字段剔除（紧凑产物）
+  for (const k of ['ox', 'oy', 'fx', 'fy', 'dx', 'dy']) if (out[k] === 0) delete out[k];
   return out;
 }
 
@@ -887,11 +945,12 @@ function compileVel(expr, callLine) {
         return true;
       }
       // `0f - (3f + Next(4)*0.3f)` 之类复合 → 项式代数
-      const ax = axisExpr(t, axis === 'x' ? 'width' : 'height');
+      const ax = axisExpr(t, axis === 'x' ? 'w' : 'h');
       if (!ax || ax.f != null || ax.r != null) return false;
       if (ax.off != null) { out[`v${axis}`] = ax.off; return true; }
       return false;
     };
+    void comp;
     if (!comp(comps[0], 'x') || !comp(comps[1], 'y')) return null;
     return out;
   }
@@ -929,20 +988,20 @@ function handlePostLine(plain, lineNo) {
     return;
   }
   // 索引变量复用：`n = Main.gore[n]` 不存在；`n = Gore.NewGore(...)` 在 handleGoreCall 内重绑
-  // 目标解析：`Main.gore[n].field` / `alias.field`
+  // 目标解析：`Main.gore[n].field[.sub]` / `alias.field[.sub]`
   const targetOf = (s) => {
-    let mm = s.match(/^Main\.gore\[([A-Za-z_]\w*)\]\.(\w+)$/);
+    let mm = s.match(/^Main\.gore\[([A-Za-z_]\w*)\]\.(\w+(?:\.\w+)?)$/);
     if (mm) return { idx: mm[1], field: mm[2] };
-    mm = s.match(/^([A-Za-z_]\w*)\.(\w+)$/);
+    mm = s.match(/^([A-Za-z_]\w*)\.(\w+(?:\.\w+)?)$/);
     if (mm && goreAlias.has(mm[1])) return { idx: goreAlias.get(mm[1]), field: mm[2] };
     return null;
   };
   const stmts = plain.split(';').map((x) => x.trim()).filter(Boolean);
   for (const st of stmts) {
-    // `<lhs> <op> <rhs>` 单语句
-    let mm = st.match(/^([A-Za-z_]\w*(?:\[[A-Za-z_]\w*\])?\.[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)?)\s*(=|\*=|\+=|-=)\s*(.+)$/);
-    if (!mm) continue;
-    const tgt = targetOf(mm[1].replace(/\[(\w+)\]/, '[$1]'));
+    // `<lhs> <op> <rhs>` 单语句（lhs 形如 Main.gore[n].velocity.X / alias.scale）
+    let mm = st.match(/^([\w.\[\]]+?)\s*(\*=|\+=|-=|=)\s*(.+)$/);
+    if (!mm || !mm[1].includes('.')) continue;
+    const tgt = targetOf(mm[1]);
     if (!tgt) continue;
     const list = goreIdx.get(tgt.idx);
     if (!list) continue;
@@ -1027,6 +1086,11 @@ function emitEntry(npcId, fields, line, gates, ai, loopN) {
 }
 
 // ---------- 逻辑行扫描（词法括号走查：对象初始化器 `{`/尾随 `}` 也计 depth） ----------
+if (DBG_POS || DBG_VEL) {
+  const e = process.argv[process.argv.indexOf(DBG_POS ? '--pos' : '--vel') + 1] ?? '';
+  console.log(JSON.stringify(DBG_POS ? compilePos(e, 999999) : compileVel(e, 999999)));
+  process.exit(0);
+}
 const LOOP_GUARD = {
   kind: 'loop', cond: null, types: null, exclude: null, bounds: null, life: null,
   gates: [], gateFree: null, staticTypes: null, loopGates: [], party: false, gateUnknown: [],
@@ -1092,6 +1156,8 @@ for (const { text, line: lineNo } of logical) {
       continue;
     }
     if (c === '}') {
+      // 记到弹出后的深度（else 与 `}` 后同级，键=depth-1）
+      if (stack.length) lastCtxAt.set(depth - 1, stack[stack.length - 1]);
       if (stack.length) stack.pop();
       depth--;
       for (const k of [...caseAt.keys()]) if (k > depth) caseAt.delete(k);
@@ -1110,7 +1176,14 @@ for (const { text, line: lineNo } of logical) {
       guard = makeGuard(m[1].replace(/\s+/g, ''), cond);
       i += m[0].length + cond.length + 1;
     } else if ((m = rest.match(/^else\b/))) {
-      guard = makeGuard('else', 'else');
+      const g = makeGuard('else', 'else');
+      // 兄弟 if 分支的门取反（`if (spriteDirection != -1) {A} else {B}` → B 带 `== -1`）
+      const prev = lastCtxAt.get(depth);
+      if (prev?.gates?.length) {
+        g.gates = negateGates(prev.gates);
+        g.gateFree = prev.gateFree ?? null;
+      }
+      guard = g;
       i += m[0].length;
     } else if ((m = rest.match(/^switch\s*\(/))) {
       const cond = parenBody(rest, m[0].length - 1);
@@ -1301,18 +1374,20 @@ function emitCallEntry(callee, a, lineNo, r, lhs) {
   }
   const target = [...r.types].filter((t) => !r.exclude.has(t));
   const emitted = [];
+  /** 逐型门：OR 守卫的 freeTypes 只豁免【同层】的门（`altTexture==0 || type==106`） */
+  const gatesFor = (t) => r.gateLayers.flatMap((l) => (l.free?.has(t) ? [] : l.gates));
 
   if (perType) {
     for (const t of target) {
-      emitted.push(emitEntry(t, { ...base, ...perType.get(t) }, lineNo, r.gateFree.has(t) ? [] : r.gates, r.ai, r.loopN));
+      emitted.push(emitEntry(t, { ...base, ...perType.get(t) }, lineNo, gatesFor(t), r.ai, r.loopN));
     }
   } else if (fields) {
     for (const t of target) {
-      emitted.push(emitEntry(t, { ...base, ...fields }, lineNo, r.gateFree.has(t) ? [] : r.gates, r.ai, r.loopN));
+      emitted.push(emitEntry(t, { ...base, ...fields }, lineNo, gatesFor(t), r.ai, r.loopN));
     }
   } else {
     for (const t of target) {
-      emitted.push(emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, r.gateFree.has(t) ? [] : r.gates, r.ai, r.loopN));
+      emitted.push(emitEntry(t, { ...base, expr: String(a.Type) }, lineNo, gatesFor(t), r.ai, r.loopN));
     }
     unresolved.push({
       line: lineNo, expr: String(a.Type),

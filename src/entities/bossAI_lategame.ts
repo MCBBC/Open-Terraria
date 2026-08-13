@@ -838,6 +838,11 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
   // :47292 alpha 渐隐回落(0/13 态各自管控 spawnAlpha,不参与)
   if (e.ai0 !== 0 && e.ai0 !== 13) e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
   flyIntegrate(e);
+
+  // 点光(:47298-47302 AI_120 尾段)：白光 × Opacity（=1−alpha/255；本仓
+  // spawnAlpha 254=全隐 → 0=全显，故 Opacity≈1−spawnAlpha/254）
+  const o = 1 - e.spawnAlpha / 254;
+  e.lightRGB = [o, o, o];
 }
 
 // ===================== AI_121 史莱姆皇后 657(NPC.cs:45543-46177) =====================
@@ -924,6 +929,8 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
     la.la0 = e.maxHp;
   }
   const phase2 = e.hp <= e.maxHp / 2; // flag2 :45552
+  // 点光(:45557-45558 AI_121 头段,恒亮无门)：Center (1,0.7,0.9) 粉光
+  e.lightRGB = [1, 0.7, 0.9];
   // 掉血阈值撒仆从(:46147-46177):localAI[0] 记上次标记血量,差值超 2%(二阶段 1.5%)即撒
   if (la.la0 >= e.maxHp / 2 && e.hp < e.maxHp / 2) {
     la.la0 = e.hp;            // :46142-46148 进二阶段复位状态

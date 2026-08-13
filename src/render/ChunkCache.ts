@@ -101,9 +101,11 @@ export class ChunkCache {
     this.dirtySet.clear();
     this.animChunksBySheet.clear();
     this.animChunksByWall.clear();
+    if (this.bakeArriveTimer) { clearTimeout(this.bakeArriveTimer); this.bakeArriveTimer = 0; }
+    if (this.atlasRef?.bakeTracker) this.atlasRef.bakeTracker = null; // 解绑,防跨世界回调
   }
 
-  constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null) {
+  constructor(world: World, sheets: Map<number, TileSheetEntry>, autotiler: AutoTiler | null = null, wallTiler: VanillaWallTiler | null = null, atlas?: import('../assets/SpriteAtlas').SpriteAtlas | null) {
     this.world = world;
     this.sheets = sheets;
     this.autotiler = autotiler;
@@ -113,6 +115,31 @@ export class ChunkCache {
       .map((k) => TILE_BY_KEY[k] ?? -1)
       .filter((id) => id >= 0);
     world.store.onTileChanged((x, y) => this.markDirtyAround(x, y));
+    // 烘焙懒取自注册(2026-08-13 结构自愈):renderChunk 置 _baking 期间 ensureVImage
+    // 的 miss 触发加载、晚到回调 onLoaded → 500ms 去抖 invalidateAll 自动重烘。
+    // 此后烘焙路径新接任何懒取贴图(CageTop/Glow_316·317 类)无需登记 Game.ts
+    // 白名单(白名单保留作纵深防御)
+    if (atlas) {
+      this.atlasRef = atlas;
+      atlas.bakeTracker = {
+        _baking: false,
+        note: () => { /* miss 本身已触发加载,晚到必然回调 onLoaded,记录非必需 */ },
+        onLoaded: () => this.scheduleBakeArriveInvalidate(),
+      };
+    }
+  }
+
+  private atlasRef: import('../assets/SpriteAtlas').SpriteAtlas | null = null;
+
+  /** 烘焙期懒取贴图晚到 → 去抖合批全量标脏(与 Game.ts 侧 invalidateAll 双路径
+   *  无害重叠,dirtySet 去重) */
+  private bakeArriveTimer: ReturnType<typeof setTimeout> | 0 = 0;
+  private scheduleBakeArriveInvalidate(): void {
+    if (this.bakeArriveTimer) return;
+    this.bakeArriveTimer = setTimeout(() => {
+      this.bakeArriveTimer = 0;
+      this.invalidateAll();
+    }, 500);
   }
 
   static key(cx: number, cy: number): number {
@@ -244,6 +271,17 @@ export class ChunkCache {
   }
 
   private renderChunk(cx: number, cy: number): ChunkPair {
+    // 烘焙期标志:此块内 ensureVImage 的 miss/晚到走 bakeTracker 自注册重烘链
+    const tracker = this.atlasRef?.bakeTracker;
+    if (tracker) tracker._baking = true;
+    try {
+      return this.renderChunkInner(cx, cy);
+    } finally {
+      if (tracker) tracker._baking = false;
+    }
+  }
+
+  private renderChunkInner(cx: number, cy: number): ChunkPair {
     // 双层画布：墙层 / tile 层分离 —— 水渲染在两层之间（墙之上、图块之下）
     const wall = document.createElement('canvas');
     wall.width = CHUNK * TILE; wall.height = CHUNK * TILE;

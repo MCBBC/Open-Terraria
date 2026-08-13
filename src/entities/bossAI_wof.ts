@@ -611,4 +611,7 @@ export function hungryAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 移动自行积分(原版 :26465 后由碰撞段积分;Hungry noTileCollide 穿墙)
   e.x += e.vx;
   e.y += e.vy;
+
+  // 点光(:26495 AI_029 尾段)：Center (0.3,0.2,0.1) 恒亮（血肉墙嘴部微光）
+  e.lightRGB = [0.3, 0.2, 0.1];
 }

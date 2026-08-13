@@ -3158,11 +3158,13 @@ export class Enemy extends Entity {
       game.spawnParticles(this.cx, this.y + this.h * 0.5,
         vid === 173 ? '#8A3030' : '#7A4FA8', 1, 0.3, { life: 30, damp: 0.9, grav: 0 });
     }
-    // ---- 点光（cs:51006-51017）：中心格在世界内且非实心 → Center (0.3,0.1,0.05)
-    //  （噬魂怪族 AI_005 全体——飞行体不嵌墙时的环境微光）
-    const ltx = Math.floor(this.cx / TILE), lty = Math.floor(this.cy / TILE);
-    if (st.inBounds(ltx, lty) && !st.isSolid(ltx, lty)) {
-      this.lightRGB = [0.3, 0.1, 0.05];
+    // ---- 点光（cs:51006-51017）：**139 探针专属**（AI_005 内 type==139 段——
+    //  非全族！）：中心格在世界内且非实心 → Center (0.3,0.1,0.05)
+    if (vid === 139) {
+      const ltx = Math.floor(this.cx / TILE), lty = Math.floor(this.cy / TILE);
+      if (st.inBounds(ltx, lty) && !st.isSolid(ltx, lty)) {
+        this.lightRGB = [0.3, 0.1, 0.05];
+      }
     }
   }
 
@@ -3327,6 +3329,9 @@ export class Enemy extends Entity {
     // 游泳化 620 地精鲨（AI_107_ImprovedWalkers flag27=wet，cs:64122/:64300-64336）：
     // 游泳块在 walker 逻辑之前且 return 接管本 tick——wet 时跳过冲锋/跳跃
     if (this.vanillaId === 620 && this.wetSwimStep(game, player, 620)) return;
+    // ---- 点光（cs:62852-62865）：type==315 无头骑士骑手段——Center (0.4,0.36,0.2)
+    //  恒亮（南瓜灯头；在 type==315 块内、于 1001 骑手弹幕计时之后）
+    if (this.vanillaId === 315) this.lightRGB = [0.4, 0.36, 0.2];
     const solidAt = (x: number, y: number) => x >= 0 && y >= 0 && x < st.w && y < st.h && st.isSolid(x, y);
     // 方向：卡墙 ≥30 tick 折返；玩家 200px 内重置计数并朝玩家冲
     if (this.stuckT >= 30) { this.facing *= -1; this.stuckT = 0; }

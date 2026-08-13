@@ -76,6 +76,10 @@ type Harness = ReturnType<typeof makeHooks>;
 
 function spawn(h: Harness, id: number, tx: number, ty: number): Enemy {
   const e = Enemy.fromVanilla(id, tx * TILE, ty * TILE)!;
+  // 落地摆放:fromVanilla 是中心锚,高怪(食人魔 124px)中心在地面行会半埋 →
+  // LOS 断链触发 AI_107 flag2 穿墙相位。统一底边贴 FLOOR(等价 dd2Host 的
+  // NewNPC Bottom 锚换算)。
+  e.y = FLOOR * TILE - e.h;
   e.id = h.em.nextId++;
   h.enemies.push(e);
   return e;
@@ -229,6 +233,8 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     expect(e.ai1).toBe(18);                       // 出手帧（减数后 == num9）
     const bomb = h.projectiles.find((p) => p instanceof DD2GoblinBomb) as DD2GoblinBomb;
     expect(bomb.damage).toBe(20);                 // GetAttackDamage_ForProjectiles(20,15) Classic
+    // 投掷音在出手帧的后一拍（case 读减数前 ai[1]==num9,:64036-64039）
+    tick(h, 2, [e]);
     expect(sfxPlayed(h, 'dd2_goblin_bomber_throw')).toBe(true);
     expect(sfxPlayed(h, 'dd2_etherian_portal_spawn_enemy')).toBe(true);  // 出生 30t 音
     // 循环:收招后再次起手（ai[1] 回到 42）
@@ -251,6 +257,7 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     expect(arrow.projId).toBe(662);
     expect(arrow.damage).toBe(15);                // (15,10) Classic
     expect(arrow.grav).toBe(0.3);                 // aiStyle 1 抛物线（SetDefaults :6843）
+    tick(h, 2, [e]);                              // 攻击音在出手帧后一拍（:63942-63947）
     expect(sfxPlayed(h, 'dd2_javelin_throwers_attack')).toBe(true);
   });
 
@@ -277,10 +284,10 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     for (let i = 0; i < 200; i++) {
       tick(h, 1, [e]);
       if (e.ai0 > maxWindup) maxWindup = e.ai0;
-      if (prev === 0 && e.ai0 === 30) cycles++;
+      if (prev <= 0 && e.ai0 === 29) cycles++;    // 起手帧 = num5(30) 同拍减 1（:64365+64379）
       prev = e.ai0;
     }
-    expect(maxWindup).toBe(30);                   // num5=30 前摇
+    expect(maxWindup).toBe(29);                   // 起手 30 后同拍递减（原版同序）
     expect(cycles).toBeGreaterThanOrEqual(2);     // 循环前摇
     expect(h.projectiles.length).toBe(0);
     expect(sfxPlayed(h, 'dd2_goblin_scream')).toBe(false);  // 1/1000 概率,短窗内几乎必静
@@ -299,42 +306,54 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     expect(h.projectiles.length).toBe(0);         // 自爆非弹幕
   });
 
-  it('食人魔 577 远距(>160px)选招吐息:ai[1]=1,前摇倒数 ai[0]==35 涎 676 + 吐息音（:63587-63600）', () => {
+  it('食人魔 577 远距(>430px)选招吐息:ai[1]=1,前摇倒数 ai[0]==35 涎 676 + 吐息音（:63587-63600）', () => {
     const w = makeWorld();
-    const h = makeHooks(w, { x: 137, y: 118 });
-    const e = spawn(h, 577, 100, 118);            // ~592px > 160 → 吐息
-    tick(h, 300, [e]);
-    expect(e.ai1).toBe(1);
+    const h = makeHooks(w, { x: 150, y: 118 });
+    const e = spawn(h, 577, 100, 118);            // ~800px > 430 → 吐息
+    let sawSpit = false;
+    for (let i = 0; i < 300 && !sawSpit; i++) {
+      tick(h, 1, [e]);
+      if (h.projectiles.some((p) =>
+        (p as unknown as { projId: number }).projId === 676)) sawSpit = true;
+    }
+    expect(sawSpit).toBe(true);
     const spit = h.projectiles.find((p) =>
-      (p as unknown as { projId: number }).projId === 676);
-    expect(spit).toBeTruthy();
+      (p as unknown as { projId: number }).projId === 676)!;
     expect((spit as unknown as { damage: number }).damage).toBe(40);   // (40,30) Classic
     expect(sfxPlayed(h, 'dd2_ogre_spit')).toBe(true);
-    expect(sfxPlayed(h, 'dd2_ogre_roar')).toBe(true);                  // 1/700 嘶叫登记
+    // 注:DD2_OgreRoar 是 1/700 每拍随机嘶叫（:63516 num22=700）,不作确定性断言
   });
 
-  it('食人魔 577 贴身(<130px)选招近挥:ai[1]=0,前摇 44t 无弹幕,ai[0]==40 挥击音（:63562-63568）', () => {
+  it('食人魔 577 贴身:先跺地(≤430px 冷却完),冷却窗内转近挥 ai[1]=0 + 挥击音（:63528-63600）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 106, y: 118 });
-    const e = spawn(h, 577, 100, 118);            // ~96px < 130 → 近挥
-    tick(h, 260, [e]);
-    expect(e.ai1).toBe(0);
-    expect(sfxPlayed(h, 'dd2_ogre_attack')).toBe(true);
-    expect(h.projectiles.length).toBe(0);
+    const e = spawn(h, 577, 100, 118);            // ~96px ≤ 430 → 冷却完先跺地
+    let sawPound = false, sawMelee = false;
+    for (let i = 0; i < 500 && !(sawPound && sawMelee); i++) {
+      tick(h, 1, [e]);
+      if (e.ai1 === 2) sawPound = true;
+      // 跺地后 localAI[0]=300 冷却（:63556-63559）:窗内贴身 → ai[1]=0 近挥
+      if (sawPound && e.ai1 === 0) sawMelee = true;
+    }
+    expect(sawPound).toBe(true);
+    expect(sawMelee).toBe(true);
+    expect(sfxPlayed(h, 'dd2_ogre_attack')).toBe(true);                // 近挥 ai[0]==40（:63566）
+    expect(sfxPlayed(h, 'dd2_ogre_ground_pound')).toBe(true);
   });
 
   it('食人魔 577 中距(≤430px 且跺地冷却完)选招跺地:ai[1]=2,ai[0]==36 放 683 波 + 跺地音/起跳（:63569-63586）', () => {
     const w = makeWorld();
     const h = makeHooks(w, { x: 118, y: 118 });
     const e = spawn(h, 577, 100, 118);            // ~288px ≤ 430 → 跺地
-    let jumped = false;
+    let jumped = false, sawPound = false, smashed = false;
     for (let i = 0; i < 400; i++) {
       tick(h, 1, [e]);
+      if (e.ai1 === 2) sawPound = true;
       if (e.vy < 0) jumped = true;
-      if (h.projectiles.some((p) => p instanceof DD2OgreSmash)) break;
+      if (h.projectiles.some((p) => p instanceof DD2OgreSmash)) { smashed = true; break; }
     }
-    expect(e.ai1).toBe(2);
-    expect(h.projectiles.some((p) => p instanceof DD2OgreSmash)).toBe(true);
+    expect(sawPound).toBe(true);
+    expect(smashed).toBe(true);
     expect(sfxPlayed(h, 'dd2_ogre_ground_pound')).toBe(true);
     expect(jumped).toBe(true);                    // flag4:ai[0]==56 → vy=-13
   });

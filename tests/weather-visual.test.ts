@@ -1,9 +1,15 @@
-// 天气视觉三件测试：雨云/风暴云选型链 + AmbientSky 选族纯函数 + 天气环境音循环
-// 标杆 Terarria1456：Cloud.cs addCloud :114-138 / AmbientSky.cs FadingSkyEntity 家族 /
-// AmbienceServer.cs :30-133 / SceneState.cs :190-291 暴风雪双轨。
+// 天气视觉测试：雨云/风暴云选型链 + 稀有云 22-40 + AmbientSky 选族纯函数（全 17 族）+
+// 月塔天空激活门 + 雨点涟漪池 + 天气环境音循环。
+// 标杆 Terarria1456：Cloud.cs addCloud :114-146/RollRareCloud :183-227 /
+// AmbientSky.cs FadingSkyEntity 家族 / AmbienceServer.cs :30-133 /
+// SceneState.cs :105-115（月塔门）/ SceneMetrics.cs :276-282/921-928（WithinRangeOfNPC）。
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { pickCloudType, pickAmbientFamily, type AmbientSpawnInput } from '../src/render/SkyRenderer';
-import { WeatherState, type WeatherCtx, type WeatherLoopVolumes } from '../src/world/weather/Weather';
+import {
+  pickCloudType, rollRareCloud, pickAmbientFamily, towerSkyActive,
+  AMBIENT_FAMILY_PARAMS, AMBIENT_GROUP_SPEC,
+  type AmbientSpawnInput, type RareCloudFlags,
+} from '../src/render/SkyRenderer';
+import { WeatherState, RIPPLE_LIFE, RIPPLE_CAP, type WeatherCtx, type WeatherLoopVolumes } from '../src/world/weather/Weather';
 import { Sfx, LOOP_BASE_VOL } from '../src/core/Sfx';
 
 // ---------- 工具：可控掷点序列（对齐 C# rand.Next 语义） ----------
@@ -86,37 +92,259 @@ describe('云选型链（Cloud.cs:114-138 五族）', () => {
   });
 });
 
-describe('AmbientSky 选族纯函数（AmbienceServer.cs:30-133）', () => {
+describe('AmbientSky 选族纯函数（AmbienceServer.cs:30-133，全 17 族表）', () => {
   const base: AmbientSpawnInput = {
     dayTime: true, raining: false, eclipse: false,
     bloodMoon: false, pumpkinMoon: false, snowMoon: false,
     zoneHallow: false, playerAtSkyHeight: true,
     roll5: 4, pick: 0,
   };
-  it('晴天白天 → 鸟群（IsSunnyDay :30-37/:60）', () => {
+  it('晴天白天 → 族序首个 = 鸟群（注册序 :60 BirdsV 在最前）', () => {
     expect(pickAmbientFamily(base)).toBe('birds');
   });
-  it('平静夜 + 神圣带 + roll5≥3 → 腹足怪（严格列表 :115-118）', () => {
-    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: true, roll5: 3 })).toBe('gastropod');
+  it('平静夜 + 神圣带 + roll5≥3 → 严格列表 [小精灵, 腹足怪]，pick 0 取小精灵（:69/:78 在 :72/:80 前）', () => {
+    // 全族表下 PixiePosse（IsCalmNight||IsSunnyDay + ZoneHallow 次级）先于 Gastropods 注册
+    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: true, roll5: 3 })).toBe('pixieposse');
+    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: true, roll5: 3, pick: 0.999 })).toBe('gastropod');
   });
-  it('平静夜 + 非神圣 + roll5<3 → 放宽列表仍可选腹足怪（:119-123 60% 忽略次级条件）', () => {
-    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: false, roll5: 2 })).toBe('gastropod');
+  it('平静夜 + 非神圣 + roll5<3 → 放宽列表首项 = 眼球（Eyeball :64 仅需 !dayTime）', () => {
+    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: false, roll5: 2 })).toBe('eyeball');
   });
-  it('平静夜 + 非神圣 + roll5≥3 → 严格列表空 → 回落放宽列表', () => {
-    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: false, roll5: 4 })).toBe('gastropod');
+  it('平静夜 + 非神圣 + roll5≥3 → 严格列表空 → 回落放宽列表（:119）', () => {
+    expect(pickAmbientFamily({ ...base, dayTime: false, zoneHallow: false, roll5: 4 })).toBe('eyeball');
   });
-  it('雨天 / 夜晚(鸟群) / 日食 → 各族失格', () => {
-    expect(pickAmbientFamily({ ...base, raining: true })).toBeNull();
-    expect(pickAmbientFamily({ ...base, dayTime: false })).toBe('gastropod'); // 夜只剩腹足怪候选
+  it('雨天 / 夜晚(鸟群) / 日食 → 各日间族失格', () => {
+    expect(pickAmbientFamily({ ...base, raining: true })).toBeNull();       // 地狱门也关 → 无候选
+    expect(pickAmbientFamily({ ...base, dayTime: false })).toBe('eyeball'); // 夜仍有眼球族
     expect(pickAmbientFamily({ ...base, eclipse: true })).toBeNull();
   });
-  it('血月/南瓜月/霜月 → 平静夜不成立 → null', () => {
-    expect(pickAmbientFamily({ ...base, dayTime: false, bloodMoon: true, zoneHallow: true, roll5: 4 })).toBeNull();
-    expect(pickAmbientFamily({ ...base, dayTime: false, pumpkinMoon: true, zoneHallow: true, roll5: 4 })).toBeNull();
-    expect(pickAmbientFamily({ ...base, dayTime: false, snowMoon: true, zoneHallow: true, roll5: 4 })).toBeNull();
+  it('血月/南瓜月/霜月 → 平静夜不成立，夜空只剩 Eyeball（条件仅 !dayTime :64）', () => {
+    expect(pickAmbientFamily({ ...base, dayTime: false, bloodMoon: true, zoneHallow: true, roll5: 4 })).toBe('eyeball');
+    expect(pickAmbientFamily({ ...base, dayTime: false, pumpkinMoon: true, roll5: 4 })).toBe('eyeball');
+    expect(pickAmbientFamily({ ...base, dayTime: false, snowMoon: true, roll5: 4 })).toBe('eyeball');
   });
-  it('玩家低于天空高度带（surface*16+1600）→ 不出天空装饰（:190-193）', () => {
+  it('玩家低于天空高度带（surface*16+1600）→ 不出天空装饰（:190-193）；地狱高度带例外', () => {
     expect(pickAmbientFamily({ ...base, playerAtSkyHeight: false })).toBeNull();
+    // 地狱高度带：天空门关但地狱门开 → 仅 Hellbats（:76 条件恒真 + :89-91 高度分流）
+    expect(pickAmbientFamily({ ...base, playerAtSkyHeight: false, playerAtHellHeight: true })).toBe('hellbats');
+  });
+  it('月总在场 → 全族禁出（AnActiveSkyConflictsWithAmbience :1362-1369/:1383）', () => {
+    expect(pickAmbientFamily({ ...base, moonLordActive: true })).toBeNull();
+  });
+
+  // ---- 全族门（新增批：每族主条件 1:1） ----
+  it('Wyvern 需晴天+困难模式（:61）；困难前不出', () => {
+    const sunny = { ...base, hardMode: false, pick: 0 };
+    // 晴天放宽列表首个仍是 birds——用沙漠次级条件把 wyvern 排到严格列表单选验证
+    expect(pickAmbientFamily({ ...sunny, zoneDesert: true, zoneHallow: true })).toBe('vulture');
+    // hardMode 打开后 wyvern 仍在候选（不报错），且空中单选集包含它
+    const pool = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const f = pickAmbientFamily({ ...base, hardMode: true, roll5: 2, pick: i / 200 });
+      if (f) pool.add(f);
+    }
+    expect(pool.has('wyvern')).toBe(true);
+    const poolNoHm = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const f = pickAmbientFamily({ ...base, hardMode: false, roll5: 2, pick: i / 200 });
+      if (f) poolNoHm.add(f);
+    }
+    expect(poolNoHm.has('wyvern')).toBe(false);
+  });
+  it('风日门：Airship/LostKite/SlimeBalloons 要风、AirBalloon/Butterflies 要无风（:62-66/:71）', () => {
+    const pool = (o: Partial<AmbientSpawnInput>) => {
+      const s = new Set<string>();
+      for (let i = 0; i < 300; i++) {
+        const f = pickAmbientFamily({ ...base, ...o, roll5: 2, pick: i / 300 });
+        if (f) s.add(f);
+      }
+      return s;
+    };
+    const windy = pool({ windyDay: true });
+    const calm = pool({ windyDay: false });
+    expect(windy.has('airship') && windy.has('lostkite') && windy.has('slimeBalloons')).toBe(true);
+    expect(windy.has('airballoon')).toBe(false);
+    expect(calm.has('airballoon')).toBe(true);
+    expect(calm.has('airship') && calm.has('lostkite')).toBe(false);
+    // Butterflies 还需 butterflyChanceLow（NPC.cs:94583-94599 默认关）
+    expect(calm.has('butterflies')).toBe(false);
+    expect(pool({ windyDay: false, butterflyChanceLow: true }).has('butterflies')).toBe(true);
+    // TooWindyForButterflies（|windTarget|≥0.4）压制蝶群
+    expect(pool({ windyDay: false, butterflyChanceLow: true, tooWindyForButterflies: true }).has('butterflies')).toBe(false);
+  });
+  it('Bats：黄昏支需 IsSunset（:39-46/:68）+ 丛林次级门（:84）', () => {
+    // 白天非黄昏 + 无风 + 丛林：bats 不在候选（sunset=false 时仅 calmNight 支，白天不成立）
+    const dayPool = new Set<string>();
+    for (let i = 0; i < 200; i++) {
+      const f = pickAmbientFamily({ ...base, windyDay: false, zoneJungle: true, roll5: 2, pick: i / 200 });
+      if (f) dayPool.add(f);
+    }
+    expect(dayPool.has('bats')).toBe(false);
+    // 黄昏 + 丛林：严格列表单选 = bats
+    expect(pickAmbientFamily({ ...base, sunset: true, zoneJungle: true, roll5: 4 })).toBe('bats');
+    // 平静夜 + 丛林：严格列表单选 = bats
+    expect(pickAmbientFamily({ ...base, dayTime: false, zoneJungle: true, roll5: 4 })).toBe('bats');
+  });
+  it('沙漠/海滩/腐化/猩红次级门：Vulture/Seagulls/EOS/Crimera 严格单选（:77-83）', () => {
+    expect(pickAmbientFamily({ ...base, zoneDesert: true, roll5: 4 })).toBe('vulture');
+    expect(pickAmbientFamily({ ...base, zoneBeach: true, roll5: 4 })).toBe('seagulls');
+    expect(pickAmbientFamily({ ...base, zoneCorrupt: true, roll5: 4 })).toBe('eos');
+    expect(pickAmbientFamily({ ...base, zoneCrimson: true, roll5: 4 })).toBe('crimera');
+  });
+  it('Hellbats 恒候选（:76）但走地狱高度门（:87-93）', () => {
+    expect(pickAmbientFamily({ ...base, playerAtSkyHeight: true, playerAtHellHeight: false, roll5: 2, pick: 0.999 })).not.toBe('hellbats');
+    const hell = new Set<string>();
+    for (let i = 0; i < 100; i++) {
+      const f = pickAmbientFamily({ ...base, playerAtHellHeight: true, roll5: 2, pick: i / 100 });
+      if (f) hell.add(f);
+    }
+    expect(hell.has('hellbats')).toBe(true);
+  });
+
+  // ---- 族参数表对账（AMBIENT_FAMILY_PARAMS/AMBIENT_GROUP_SPEC 关键数值） ----
+  it('族参数：鸟群 4 帧 FramingSpeed 5；腹足怪 1 帧 int.Max；风筝 42 帧风暴提速 4', () => {
+    expect(AMBIENT_FAMILY_PARAMS.birds.rows).toBe(4);
+    expect(AMBIENT_FAMILY_PARAMS.birds.framingSpeed).toBe(5);
+    expect(AMBIENT_FAMILY_PARAMS.birds.life).toEqual([60, 121]);
+    expect(AMBIENT_FAMILY_PARAMS.birds.speedA).toBeCloseTo(3, 5);
+    expect(AMBIENT_FAMILY_PARAMS.birds.speedB).toBeCloseTo(0.8, 5);
+    expect(AMBIENT_FAMILY_PARAMS.gastropod.rows).toBe(1);
+    expect(AMBIENT_FAMILY_PARAMS.gastropod.framingSpeed).toBe(0);       // 0 = int.MaxValue
+    expect(AMBIENT_FAMILY_PARAMS.gastropod.brightness).toBeCloseTo(0.75, 5);  // Colors.cs:39 自发光
+    expect(AMBIENT_FAMILY_PARAMS.lostkite.rows).toBe(42);
+    expect(AMBIENT_FAMILY_PARAMS.lostkite.framingSpeed).toBe(6);
+    // EOCSkyEntity 族：深度 4.5-7.5（:1243）→ EOS/Crimera 贴图三档分界 >6/≤6/≤5
+    expect(AMBIENT_FAMILY_PARAMS.eyeball.depthMin).toBeCloseTo(4.5, 5);
+    expect(AMBIENT_FAMILY_PARAMS.eyeball.eoc).toBe(true);
+    expect(AMBIENT_FAMILY_PARAMS.crimera.eoc).toBe(true);
+    // PixiePosse/Seagulls 的 depthScale 偏移（:440/:561）
+    expect(AMBIENT_FAMILY_PARAMS.pixieposse.depthScaleAdj).toBeCloseTo(-0.1, 5);
+    expect(AMBIENT_FAMILY_PARAMS.seagulls.depthScaleAdj).toBeCloseTo(-1.5, 5);
+    // SlimeBalloons 固定纵速（:751）
+    expect(AMBIENT_FAMILY_PARAMS.slimeBalloons.vy).toBeCloseTo(-0.01, 5);
+    // Airship/AirBalloon spriteDir 与风无关（:1087/:1134）
+    expect(AMBIENT_FAMILY_PARAMS.airship.randomDir).toBe(true);
+    expect(AMBIENT_FAMILY_PARAMS.airballoon.randomDir).toBe(true);
+  });
+  it('群体族参数：数量/磁吸目标/散布（CreateGroup 各族 1:1）', () => {
+    expect(AMBIENT_GROUP_SPEC.seagulls?.count).toEqual([5, 9]);
+    expect(AMBIENT_GROUP_SPEC.gastropod?.count).toEqual([3, 8]);
+    expect(AMBIENT_GROUP_SPEC.slimeBalloons?.count).toEqual([5, 10]);
+    expect(AMBIENT_GROUP_SPEC.bats?.count).toEqual([20, 40]);
+    expect(AMBIENT_GROUP_SPEC.hellbats?.count).toEqual([20, 40]);
+    expect(AMBIENT_GROUP_SPEC.gastropod?.target).toBe(120);        // :692
+    expect(AMBIENT_GROUP_SPEC.slimeBalloons?.target).toBe(150);    // :791
+    expect(AMBIENT_GROUP_SPEC.seagulls?.spread).toBe(50);          // :590
+    expect(AMBIENT_GROUP_SPEC.gastropod?.spread).toBe(60);         // :697
+    expect(AMBIENT_GROUP_SPEC.slimeBalloons?.spread).toBe(80);     // :796
+    // 群族基础寿命 = Next(30,61)*60（:583/:690/:1008）——SlimeBalloons 例外 80-120（:789）
+    expect(AMBIENT_GROUP_SPEC.bats?.baseLife).toEqual([30, 61]);
+    expect(AMBIENT_GROUP_SPEC.hellbats?.baseLife).toEqual([30, 61]);
+    expect(AMBIENT_GROUP_SPEC.slimeBalloons?.baseLife).toEqual([80, 121]);
+    // 单体族不在群体表
+    expect(AMBIENT_GROUP_SPEC.birds).toBeUndefined();
+    expect(AMBIENT_GROUP_SPEC.wyvern).toBeUndefined();
+  });
+});
+
+// ---------- 稀有云 22-40（Cloud.cs RollRareCloud :183-227） ----------
+const rareFlags = (over: Partial<RareCloudFlags> = {}): RareCloudFlags => ({
+  downedBoss1: false, downedBoss2: false, downedBoss3: false,
+  hardMode: false, crimson: false, dontStarveWorld: false, tenthAnniversaryWorld: false,
+  ...over,
+});
+
+describe('稀有云 RollRareCloud（Cloud.cs:183-227）', () => {
+  it('无门类型 22-24/27/29/32-34 恒可出（default 直通）', () => {
+    // 固定掷点：22+floor(0.00*19)=22（default 接受）
+    expect(rollRareCloud(rareFlags(), () => 0)).toBe(22);
+    expect(rollRareCloud(rareFlags(), () => 0.999)).toBe(40);   // 37-40：需饥荒世界或 1/10 → 掷 0 不中 → 重掷
+  });
+  it('克眼云 25/26 需 downedBoss1（:201-204）；未杀时重掷到无门类型', () => {
+    let call = 0;
+    const alt = () => (call++ % 2 === 0 ? 3 / 19 : 0.55);   // 25（门未过）→ 重掷 32（default 直通）
+    expect(rollRareCloud(rareFlags({ downedBoss1: false }), alt)).toBe(32);
+    expect(rollRareCloud(rareFlags({ downedBoss1: true }), () => 3 / 19)).toBe(25);
+  });
+  it('骷髅云 31 需 downedBoss3（:195-197）', () => {
+    const r = () => 9 / 19;   // 22+9=31
+    expect(rollRareCloud(rareFlags({ downedBoss3: false }), r)).toBe(31);   // 守卫退出返回末值
+    expect(rollRareCloud(rareFlags({ downedBoss3: true }), r)).toBe(31);
+  });
+  it('克脑云 36 需 downedBoss2 且猩红世界（:198-200）', () => {
+    const r = () => 14 / 19;  // 22+14=36
+    expect(rollRareCloud(rareFlags({ downedBoss2: true, crimson: false }), r)).toBe(36);
+    expect(rollRareCloud(rareFlags({ downedBoss2: true, crimson: true }), r)).toBe(36);
+  });
+  it('困难模式云 30/35 需 hardMode（:205-208）', () => {
+    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 8 / 19)).toBe(30);   // 22+8=30
+    expect(rollRareCloud(rareFlags({ hardMode: true }), () => 13 / 19)).toBe(35); // 22+13=35
+  });
+  it('Redigit 云 28 1/10（:209-214）；饥荒云 37-40 需饥荒世界或 1/10（:215-223）', () => {
+    // 28：掷 r=6/19 → 28；第二掷（1/10 门）0.0 → 命中
+    let c = 0;
+    const seq = () => (c++ === 0 ? 6 / 19 : 0);
+    expect(rollRareCloud(rareFlags(), seq)).toBe(28);
+    c = 0;
+    const seqMiss = () => (c++ === 0 ? 6 / 19 : 0.5);   // 1/10 门未中 → 重掷
+    expect(rollRareCloud(rareFlags(), seqMiss)).toBe(31);  // 重掷 22+floor(0.5*19)=31（需 downedBoss3）→ 再掷…
+    expect(rollRareCloud(rareFlags({ dontStarveWorld: true }), () => 0.999)).toBe(40);  // 饥荒直通
+  });
+  it('十周年世界：范围收窄 22-36（:189 Next(22,37)）——37-40 不可达', () => {
+    const out = new Set<number>();
+    for (let i = 0; i < 2000; i++) out.add(rollRareCloud(rareFlags({ tenthAnniversaryWorld: true }), Math.random));
+    expect(Math.max(...out)).toBeLessThanOrEqual(36);
+    expect(Math.min(...out)).toBeGreaterThanOrEqual(22);
+  });
+  it('旗标全开后全类型 22-40 可达（分布抽样）', () => {
+    const out = new Set<number>();
+    const f = rareFlags({ downedBoss1: true, downedBoss2: true, downedBoss3: true, hardMode: true, crimson: true });
+    for (let i = 0; i < 20000; i++) out.add(rollRareCloud(f, Math.random));
+    expect(out.size).toBe(19);   // 22..40 全覆盖
+  });
+});
+
+// ---------- 月塔天空激活门（SceneState.cs:105-115 + SceneMetrics.cs:921-928） ----------
+describe('月塔天空激活门 towerSkyActive', () => {
+  it('塔近距门：距离²≤4000² 即激活（NPCEventZoneRadius）', () => {
+    expect(towerSkyActive(true, -1, 1, true)).toBe(true);    // 近塔
+    expect(towerSkyActive(false, -1, 1, false)).toBe(false); // 远离且无器件
+  });
+  it('器件门：无任何塔近距且 ActiveMonolithType 对应 → 激活（:111-115 !flag4）', () => {
+    expect(towerSkyActive(false, 1, 1, false)).toBe(true);   // 星云柱 type 1
+    expect(towerSkyActive(false, 3, 1, false)).toBe(false);  // 耀斑柱 type 3 ≠ 星云
+    expect(towerSkyActive(false, 1, 1, true)).toBe(false);   // 任一塔近距（flag4）→ 器件门关闭
+  });
+  it('MonolithType 映射：0 星璇/1 星云/2 星尘/3 耀斑（SceneState.cs:111-115）；4=月总柱不配对任何族', () => {
+    expect(towerSkyActive(false, 0, 0, false)).toBe(true);
+    expect(towerSkyActive(false, 2, 2, false)).toBe(true);
+    expect(towerSkyActive(false, 3, 3, false)).toBe(true);
+    // familyIndex 只有 0-3（渲染侧只对四族求值）——月总柱 type 4 与任何族都不相等
+    for (let idx = 0; idx < 4; idx++) expect(towerSkyActive(false, 4, idx, false)).toBe(false);
+  });
+});
+
+// ---------- 雨点落水涟漪池（Weather 纯逻辑侧） ----------
+describe('雨点涟漪池（Misc/Ripples 近似）', () => {
+  it('预算 = cloudAlpha×屏宽比例，无雨恒 0（上限 24）', () => {
+    const w = new WeatherState(101);
+    expect(w.rippleBudget(1920)).toBe(0);                    // 晴
+    w.startRain(true, 0.8);
+    expect(w.rippleBudget(1920)).toBe(Math.round(0.8 * 6));  // 5
+    expect(w.rippleBudget(3840)).toBe(Math.round(0.8 * 12)); // 10
+    w.cloudAlpha = 1;
+    expect(w.rippleBudget(3840)).toBe(12);                   // 满雨 3840 宽 = 12
+    expect(w.rippleBudget(7680)).toBe(24);                   // 超宽屏触顶 24
+  });
+  it('入池/推进/超龄回收（RIPPLE_LIFE）/容量封顶（RIPPLE_CAP）', () => {
+    const w = new WeatherState(103);
+    expect(w.pushRipple(100, 200)).toBe(true);
+    expect(w.ripples.length).toBe(1);
+    expect(w.ripples[0].life).toBe(RIPPLE_LIFE);
+    for (let i = 0; i < RIPPLE_LIFE + 1; i++) w.update(wctx());
+    expect(w.ripples.length).toBe(0);                        // 超龄回收
+    for (let i = 0; i < RIPPLE_CAP + 10; i++) w.pushRipple(i, 0);
+    expect(w.ripples.length).toBe(RIPPLE_CAP);               // 封顶丢弃
   });
 });
 
