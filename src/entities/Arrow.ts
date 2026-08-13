@@ -114,6 +114,8 @@ export class Arrow extends Entity {
   grav: number;
   life: number;
   pierce: number;
+  /** 发射时 maxPenetrate（穿透判定用——剩 1 的穿透弹仍是穿透语义,Projectile.cs:11904） */
+  pierceInit: number;
   /** 敌对弹（原版 Projectile.hostile）：命中玩家结算（Damage_EVP 语义） */
   hostile: boolean;
   /** 随从/哨兵射出的弹（ProjectileID.Sets.MinionShot/SentryShot 语义：吃鞭 tag） */
@@ -172,6 +174,7 @@ export class Arrow extends Entity {
     this.grav = opts?.grav ?? 0.3;
     this.life = opts?.life ?? 1200;
     this.pierce = opts?.pierce ?? 1;
+    this.pierceInit = this.pierce;
     this.hostile = opts?.hostile ?? false;
     this.bounce = opts?.bounce ?? false;
     this.thornBounce = opts?.thornBounce ?? false;
@@ -307,13 +310,14 @@ export class Arrow extends Entity {
     if (hitCritters(this, game)) { this.killNow(game); return; }
     // 命中敌人（原版 penetrate：箭 1 射中即停；手里剑 4 穿 4 敌，同敌免疫防连击）
     for (const ent of game.enemies()) {
-      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         // 反射源（419 旋刃冲刺等 reflectsProjectiles 置标）：命中前先走反射
         // （原版 Projectile.cs:12050-12060，反射即终止本帧命中迭代 keepIterating=false）
         if (tryReflectProjectile(this, this.projId, e, game)) {
           this.pierce = 1;            // 原版 penetrate=1（NPC.cs:67058）
+          this.pierceInit = 1;        // 反射后按单发弹语义（命中不设敌方帧）
           this.hitSet.clear();        // 转敌对后命中表作废
           return;
         }
@@ -352,7 +356,7 @@ export class Arrow extends Entity {
         }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
-        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit);
+        e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----

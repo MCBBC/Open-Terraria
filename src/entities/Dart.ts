@@ -955,6 +955,12 @@ const DART_STYLE: Record<number, DartStyle> = {
     trail: { color: '#C8C0FF', count: 2 }, sfx: ['Item_8'], fallback: '#D8D0FF' },
   // 836 蒲公英籽(628):4×4,tilt 旋转,4 帧行 6 更新步进(帧动画由 frame 自增,此处用出生随机帧近似起步)
   836: { w: 4, h: 4, rot: 'tilt', frameRand: 4, animEvery: 6, hFrames: 4, windSeed: true, fallback: '#E8E8D0' },
+  // 814 血弹(恐惧鹦鹉螺 AI_117 :47751):10×10 aiStyle1,alpha255 渐入 -20/t(:53573),
+  //    tileCollide=false 穿墙,penetrate=-1;红光 (0.3,0.05,0.05)(:53558);尘 5 尾;
+  //    出生音 Item171(:53562)
+  814: { w: 10, h: 10, rot: 'align90', alpha0: 255, fade: 20, noTile: true, life: 180,
+    light: [0.3, 0.05, 0.05], trail: { color: '#C83848', count: 1 },
+    sfx: ['Item_171'], fallback: '#B03040' },
 };
 
 /**

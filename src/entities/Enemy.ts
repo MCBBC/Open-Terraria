@@ -13,10 +13,12 @@ import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
+import { SquidCloud } from './SquidCloud';
 import { avoidWater } from './waterAvoid';
 import { bindEnemyCtor, skeletronBossAI, skeletronHandAI, kingSlimeAI, brainOfCthulhuAI, creeperAI, twinsAI, skeletronPrimeAI, primePartAI, destroyerAI, spawnPart, addEnemy, shoot } from './bossAI';
 import { wallOfFleshAI, wofEyeAI, hungryAI } from './bossAI_wof';
 import { lunaticCultistAI, empressOfLightAI, queenSlimeAI, ancientLightAI, ancientDoomAI } from './bossAI_lategame';
+import { deerclopsAI } from './bossAI_deerclops';
 import { queenBeeAI, planteraHookAI, planteraAI, planteraTentacleAI, planteraTentacle2AI } from './bossAI_queenbee_plantera';
 import { dukeFishronAI, dukeBubbleAI, sharkronAI, moonLordCoreAI, moonLordHandAI, moonLordHeadAI } from './bossAI_duke_moonlord';
 import { golemAI, golemHeadAI, golemFistAI } from './bossAI_golem';
@@ -42,7 +44,7 @@ import {
 import { RNG } from '../core/rng';
 import { TOWER_KEY } from '../world/LunarEvent';
 import { openDoor } from '../world/Door';
-import { fighterMoveStep, chaosElementalStep, swampThingAmbushStep } from './fighterFamilies';
+import { fighterMoveStep, chaosElementalStep, swampThingAmbushStep, attemptToFindTeleportSpot } from './fighterFamilies';
 import { VANILLA_ITEM_KEY_BY_ID } from '../data/items';
 import type { ItemDrop } from './ItemDrop';
 import {
@@ -521,9 +523,14 @@ export class Enemy extends Entity {
     e.w = Math.round(v.width * vScale);
     e.h = Math.round(v.height * vScale);
     e.spawnAlpha = v.alpha ?? 0; // 原版 SetDefaults alpha（静态不透明度，NPC.Opacity=1-alpha/255）
-    // EoW 族 alpha=255 = 出生全透明渐显标记（其余 alpha 为静态不透明度,勿动）：
-    // 钳到 254 并置 alphaFade,由 fixedUpdate 逐 tick 减回 0（原版 AI_006 渐显）
-    if (e.spawnAlpha >= 255) { e.spawnAlpha = 254; e.alphaFade = true; }
+    // alpha=255 = 出生全透明渐显标记（13-15 世吞 / 134-136 毁灭者；其余 alpha 为
+    // 静态不透明度,勿动）：置 alphaFade 交渐显路径逐 tick 减回 0。EoW 族保持原版
+    // 初值 255（AI_006 尾段 :52650-52670 移动门 -42/t，见 fixedUpdate 渐显段）；
+    // 其余 alpha=255 族沿用 254 起步走 -1/t 近似
+    if (e.spawnAlpha >= 255) {
+      e.alphaFade = true;
+      e.spawnAlpha = (id >= 13 && id <= 15) ? 255 : 254;
+    }
     e.colorRGBA = v.color ? [v.color[0], v.color[1], v.color[2], v.color[3] ?? 255] : null; // 原版 color 字段
     // 266 克脑 SetDefaults :12372 dontTakeDamage=true——一阶段（爬行者存活）不可击，
     // AI_054 二阶段入场段 :32589 自行解除（存档载入即二阶段也由该段下一 tick 清除）
@@ -732,8 +739,9 @@ export class Enemy extends Entity {
     this.animT++;
     this.walkCycleT += Math.abs(this.vx); // 原版 zombie/fighter 行走帧按 |vx| 累加（L77072/L70216）
 
-    // EoW 族出生渐显（每 tick alpha-1;原版 AI_006）——静态半透明不受影响
-    if (this.alphaFade) {
+    // 出生渐显（alphaFade 族，AI 分发【前】的近似段）——静态半透明不受影响。
+    // EoW 族（13-15）除外：走下方 AI 分发后的 1:1 段（移动门 -42/t，NPC.cs:52650-52670）
+    if (this.alphaFade && !(this.vanillaId !== null && this.vanillaId >= 13 && this.vanillaId <= 15)) {
       this.spawnAlpha = Math.max(0, this.spawnAlpha - 1);
       if (this.spawnAlpha === 0) this.alphaFade = false;
     }
@@ -821,6 +829,7 @@ export class Enemy extends Entity {
         case 91: graniteElementalAI(this, game, p); break;                 // AI_091 花岗岩元素 483（cs:40686 五态寻路）
         case 120: empressOfLightAI(this, game, p); break;                 // AI_120 光之女皇(连段选招/半血变身)
         case 121: queenSlimeAI(this, game, p); break;                     // AI_121 史莱姆皇后(走路四连跳→飞行二阶段)
+        case 123: deerclopsAI(this, game, p); break;                      // AI_123 鹿角怪(尖刺/碎石/影手/回家)
         case 100: ancientLightAI(this, game, p); break;                  // AI_100 远古之光 522(直飞投射物型)
         case 101: ancientDoomAI(this, game, p); break;                  // AI_101 远古末日 523(锚邪教徒蓄能自爆)
         case 43: queenBeeAI(this, game, p); break;                        // AI_043 蜂后(悬浮俯冲/蜜蜂机枪/毒刺)
@@ -899,6 +908,7 @@ export class Enemy extends Entity {
         case 110: betsyAI(this, game, p); break;                          // AI_110 双足翼龙 551（cs:62266 八槽攻表+rotation 收敛）
         case 111: dd2LightningBugAI(this, game, p); break;                // AI_111 埃特尼亚荧光虫 578（cs:66799 悬停蓄电 682 电弧）
         case 113: this.windyBalloonAI(game, p); break;                    // AI_113 风气球 594（cs:48253 挂史莱姆 ai[0]=-999）
+        case 117: this.bloodNautilusAI(game, p); break;                  // AI_117 恐惧鹦鹉螺 618（cs:47488 血月钓鱼 Boss）
         case 119: this.dandelionAI(game, p); break;                      // AI_119 蒲公英 628（cs:43254 下风喷籽；非critter勿只登 critterWanderAI）
         case 126: this.statueMimicAI(game, p); break;                    // AI_126 雕像宝箱怪 690（cs:43760 伪装/唤醒/跳跃穿墙）
         default: this.zombieAI(game, p); break;                        // 其余家族待逐个移植
@@ -911,6 +921,31 @@ export class Enemy extends Entity {
       case 'cave_bat': this.flyAI(game, hasPlayer ? player : null, 0.09); break;
       case 'servant_of_cthulhu': this.flyAI(game, hasPlayer ? player : null, 0.22); break;
       case 'eye_of_cthulhu': this.eocAI(game, player ?? null); break;
+    }
+
+    // ---- EoW 出生渐显（AI_006 尾段 1:1，NPC.cs:52650-52670；须在 AI 分发后跑——
+    //      原版位移门 `(position - oldPosition).Length() > 2` 量的是本 tick 位移，
+    //      fixedUpdate 头部 prevX/prevY 在 AI 前采样）----
+    // 门（:52650 原文为反写 return 表达式）：13 头恒过；14/15 身/尾须前段
+    //   spawnAlpha < 85 才启动——渐显沿链向尾传播（头先现、段逐级跟上）。
+    //   prev 链断（晋升中瞬时态）按头段放行，防残段卡全透明。
+    // alpha>0 且存活（:52656-52664）：每 tick 2 颗 14 号腐化尘（noGravity/noLight、
+    //   scale 2、尘 alpha 100——spawnParticles 紫尘近似，DustID.Corruption）。
+    // 位移 >2px（:52666-52670）：spawnAlpha -42 钳 0——255→0 共 7 tick 现身。
+    if (this.vanillaId !== null && this.vanillaId >= 13 && this.vanillaId <= 15 && this.alphaFade) {
+      const prev = this.wormFollow;
+      if (this.vanillaId === 13 || !prev || prev.spawnAlpha < 85) {
+        if (this.spawnAlpha > 0 && this.hp > 0) {
+          game.spawnParticles(
+            this.x + Math.random() * this.w, this.y + Math.random() * this.h,
+            '#8A62C0', 2, 0, { life: 40, size: 2 },
+          );
+        }
+        if (Math.hypot(this.x - this.prevX, this.y - this.prevY) > 2) {
+          this.spawnAlpha = Math.max(0, this.spawnAlpha - 42);
+          if (this.spawnAlpha === 0) this.alphaFade = false;
+        }
+      }
     }
 
     // ---- 液体态 1:1（NPC.cs UpdateCollision :93712-93805，全量细节在 npcLiquid.ts）----
@@ -2528,7 +2563,9 @@ export class Enemy extends Entity {
     // 暖机期（num3<1）逐轴速度钳 ±6；速度档 5 / 加速 0.1×num3
     const isBee = this.vanillaId === 210 || this.vanillaId === 211;
     let maxSpd = isEater ? 4 : this.vanillaId === 94 ? 4.2 : this.vanillaId === 5 ? 5 : 6;
-    let accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03 : 0.05;
+    // 619 血鱿鱼（:50702-50705）：num=6 / num2=0.1（默认档 6/0.05 → 加速翻倍）
+    let accel = isEater ? 0.02 : this.vanillaId === 94 ? 0.022 : this.vanillaId === 5 ? 0.03
+      : this.vanillaId === 619 ? 0.1 : 0.05;
     if (isBee) {
       this.ai1 += 1;
       let ramp = (this.ai1 - 60) / 60;
@@ -3937,11 +3974,6 @@ export class Enemy extends Entity {
     const st = game.world.store;
     const HOVER_T = 60, CHARGE_WIND = 90, CHARGE_T = 180, BLOOD_WIND = 90, BLOOD_T = 90;
     const SUMMON_T = 180, FLY_SPD = 7.5, FLY_ACC = 0.15;
-    if (!this.aiInit) {                       // localAI[0]==0（:47502-47509）
-      this.aiInit = true;
-      this.ai0 = -1;
-      this.spawnAlpha = 255;                  // alpha=255 出场渐显
-    }
     // 位置参考 = 真身（含尸体——同 690 处理；Main.player[target] 不因死亡失位）
     const pp: Player | null = (game as unknown as { player: Player | null }).player ?? player ?? null;
     const alive = !!pp && !pp.dead;
@@ -3950,6 +3982,13 @@ export class Enemy extends Entity {
     const bloodNight = !w.clock.isDay && w.clock.bloodMoon;
     const hasT = alive && bloodNight;
     const tx = hasT ? pp!.cx : 0, ty = hasT ? pp!.cy : 0;
+    if (!this.aiInit) {                       // localAI[0]==0（:47502-47509）
+      this.aiInit = true;
+      this.ai0 = -1;
+      this.spawnAlpha = 255;                  // alpha=255 出场渐显
+      // 首帧 target==255 分支（:47521-47524）在 case -1 计数起步前补 ai[2]=direction
+      this.ai2 = hasT ? (Math.sign(pp!.cx - this.cx) || 1) : 1;
+    }
     // 嘴部（NPC.cs:67025-67034）：mouthAngle = rotation+0.4712×spriteDirection
     // （spriteDirection==-1 再 +π）；mouthPos = Center+mouthDir×50。
     // spriteDirection ↔ 本仓 facing（1=贴图水平翻转=朝右）
@@ -3991,7 +4030,11 @@ export class Enemy extends Entity {
           if (this.spawnAlpha < 0) this.spawnAlpha = 0;
         }
         this.ai2 += 1;
-        if (this.ai2 >= 50) { this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0; }
+        if (this.ai2 >= 50) {
+          // 出场结束四槽清零（:47572-47577）——ai[2]=direction 由悬停态迁出时
+          // （next==0 分支）重新赋值，此处保持 0
+          this.ai0 = 0; this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
+        }
         break;
       }
       case 0: {
@@ -4357,43 +4400,94 @@ export class Enemy extends Entity {
     if (this.onGround || this.hitHead) { this.vy *= -1; this.ai0 = -this.ai0; }
   }
 
+  /** Caster 族传送双端爆发（:20818-20867 旧位 / :20901-20967 新位）：
+   *  Item8 + 50 尘，尘 id→近似色按族映射。 */
+  private static readonly CASTER_TP_DUST: Record<number, string> = {
+    29: '#7A5AC8', 45: '#7A5AC8',      // dust 27 阴影焰（scale 1-2）
+    32: '#9AC8E8',                     // dust 172
+    693: '#F0F0F0',                    // dust 269 白（noLight）
+    283: '#5AC86A', 284: '#5AC86A',    // dust 173（速度 ×2）
+    285: '#E8705A', 286: '#E8705A',    // dust 174
+    281: '#8AE8C8', 282: '#8AE8C8',    // dust 175
+    172: '#E8C85A',                    // dust 106（scale 2.5）
+    533: '#7A5AC8',                    // dust 27（scale 2.5）
+  };
+  private casterTeleportBurst(game: GameHooks) {
+    const color = Enemy.CASTER_TP_DUST[this.vanillaId ?? -1] ?? '#FFA040'; // 默认 dust 6 火把焰
+    game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);   // :20818/:20901 双端各一次
+    game.spawnParticles(this.cx, this.cy, color, 50, 3, { life: 30 });    // :20819-20885 ×50
+  }
+
   private casterAI(game: GameHooks, player: Player | null) {
+    const vid = this.vanillaId ?? -1;
+    if (!this.aiInit) {
+      this.aiInit = true;
+      this.ai0 = 500;                        // :20799-20801 初始 500
+      this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
+    }
+    // 172 符文法师淡入（:20797-20809：alpha 每帧 +1；受击归零——近似为受击清 iframes 内的透明度不可达，仅记）
+    // ---- ① 传送执行（:20811-20968）：目的地待执行 → 双端 FX + 改写 ----
+    if (this.ai2 !== 0 && this.ai3 !== 0) {
+      this.casterTeleportBurst(game);
+      this.x = this.ai2 * TILE - this.w / 2 + 8;   // :20888-20889（+8 为贴图格内偏移）
+      this.y = this.ai3 * TILE - this.h;
+      this.vx = 0; this.vy = 0;
+      this.ai2 = 0; this.ai3 = 0;
+      this.casterTeleportBurst(game);
+    }
+    this.ai0 += 1;                                 // :20971 每帧计时
     this.vx *= 0.9; this.vy *= 0.9;
-    this.x += this.vx; this.y += this.vy; // noGravity 悬浮直移
+    this.x += this.vx; this.y += this.vy;          // noGravity 悬浮直移
     if (!player) return;
     this.facing = this.seekDirX(player);
-    // 传送计时（原版阈值 ~200 tick；用 aiT 累计）
-    if (this.aiT > 200) {
-      const st = game.world.store;
-      const ptx = Math.floor(player.cx / TILE), pty = Math.floor(player.cy / TILE);
-      for (let tries = 0; tries < 100; tries++) {
-        const tx = ptx + (Math.random() < 0.5 ? -1 : 1) * (4 + ((Math.random() * 13) | 0));
-        const ty = pty + (((Math.random() * 21) | 0) - 10);
-        if (tx < 3 || ty < 3 || tx > st.w - 4 || ty > st.h - 4) continue;
-        if (!st.isSolid(tx, ty + 1) || st.isSolid(tx, ty) || st.isSolid(tx, ty - 1)) continue;
-        if (Math.hypot(tx - ptx, ty - pty) < 4) continue;
-        this.x = tx * TILE + (TILE - this.w) / 2;
-        this.y = ty * TILE + TILE - this.h;
-        this.aiT = 0;
-        this.chargesLeft = 3; // 三连弹幕
-        break;
+    // ---- ② 攻击蓄力点（:20984-21054）→ ai1=30（下帧起倒数，==25 发射）----
+    const at = (pts: number[]) => { if (pts.includes(this.ai0)) this.ai1 = 30; };
+    if (vid === 283 || vid === 284) at([100, 150, 200, 250, 300]);
+    else if (vid === 172) at([75, 150, 225, 300, 375, 450]);
+    else if (vid === 281 || vid === 282) at([100, 120, 140, 200, 220, 240, 300, 320, 340]);
+    else if (vid === 533) { if (this.ai0 === 180) this.ai1 = 181; }   // :21006 特殊循环支
+    else at([100, 200, 300]);                       // :21042 默认（24/29/32/45/285-286/693）
+    // ---- ③ 提前传送上限（族内阈值 → 直拉 650/700 档）----
+    if ((vid === 283 || vid === 284) && this.ai0 >= 450) this.ai0 = 700;    // :20991
+    else if ((vid === 281 || vid === 282) && this.ai0 >= 540) this.ai0 = 700; // :21019
+    else if ((vid === 285 || vid === 286) && this.ai0 > 400) this.ai0 = 650;  // :21048
+    else if (vid === 533 && this.ai0 >= 360) this.ai0 = 650;                  // :21052
+    // ---- ④ 传送触发（:21056-21078）：≥650 → ai0=1 + 采样落点（失败=整轮重来）----
+    if (this.ai0 >= 650) {
+      this.ai0 = 1;
+      const spot = attemptToFindTeleportSpot(this, game,
+        Math.floor(player.cx / TILE), Math.floor(player.cy / TILE),
+        20, 5, { dungeonWallGate: vid === 32 || (vid >= 281 && vid <= 286) });  // :21070 caster 参数 telefrag=5
+      if (spot) {
+        this.ai1 = vid === 24 ? 5 : 20;            // :21062-21066（Imp 短冷却 → 跳过 ==25 发射门）
+        this.ai2 = spot.x; this.ai3 = spot.y;
       }
-      if (this.chargesLeft === 0) this.aiT = 160; // 没找到点：缩短重试间隔
     }
-    // 三连弹幕：传送后第 15/40/65 tick 各一发（原版 volley 间隔）
-    if (this.chargesLeft > 0 && (this.aiT === 15 || this.aiT === 40 || this.aiT === 65)) {
+    // ---- ⑤ 弹幕（:21080-21240）：ai1>0 递减；533 每 30t 循环支；Imp ==10 专属；其余 ==25 ----
+    if (this.ai1 > 0) {
+      this.ai1 -= 1;
+      if (vid === 533) {
+        if (this.ai1 % 30 === 0 && this.ai1 / 30 < 5) this.fireCasterVolley(game, player);
+      } else if (vid === 24) {
+        if (this.ai1 === 10) this.fireCasterVolley(game, player);   // :21131-21136
+      } else if (this.ai1 === 25) {
+        this.fireCasterVolley(game, player);                         // :21139
+      }
+    }
+  }
+
+  /** Caster 族单发弹幕（:21139-21240 volley）：蓄力 30t 倒数至 25/10 时发射 + Item8（172 无声） */
+  private fireCasterVolley(game: GameHooks, player: Player) {
       // 弹跳球系法师（NPC.cs:21136/:21199-21206）：火妖 24→25 焰球 / 哥布林术士
       // 29→30 混沌球 / 水球术士 32→33 水球 / 黑暗法师 45→665 混沌球(Tim 变体)——
       // 原版每轮 volley 只 NewNPC 一球（AI_009 自带出膛定速），其余法师走 Dart 三连
       const ballByCaster: Record<number, number> = { 24: 25, 29: 30, 32: 33, 45: 665 };
       const ballId = ballByCaster[this.vanillaId ?? -1];
       if (ballId) {
-        if (this.aiT === 15) {
-          const ball = Enemy.fromVanilla(ballId,
-            this.cx + (ballId === 25 ? this.facing * 8 : 0),
-            this.cy + (ballId === 25 ? 20 : -8));
-          if (ball) addEnemy(game, ball);
-        }
+        const ball = Enemy.fromVanilla(ballId,
+          this.cx + (ballId === 25 ? this.facing * 8 : 0),
+          this.cy + (ballId === 25 ? 20 : -8));
+        if (ball) addEnemy(game, ball);
       } else if (this.vanillaId != null && this.vanillaId >= 281 && this.vanillaId <= 286) {
         // 史后三法师（NPC.cs:21146-21191 num100/104/105）：布道者 281/282 迷失之魂 293
         // （速 4、伤 40、timeLeft 300）;死灵法师 283/284 暗影束 290（速 6、伤 30,散布 ±30
@@ -4429,7 +4523,8 @@ export class Enemy extends Entity {
         const dart = new Dart(this.cx, this.cy, (dx / d) * spd, (dy / d) * spd, this.baseDamage);
         (game as unknown as { entities: { add: (e: unknown, b: string) => void } }).entities.add(dart, 'projectiles');
       }
-      this.chargesLeft--;
+    if (this.vanillaId !== 172) {
+      game.playSfxFiles(['Item_8'], 1, this.cx, this.cy);   // :21196 发射音（172 例外）
     }
   }
 
@@ -4495,8 +4590,8 @@ export class Enemy extends Entity {
   }
 
   /**
-   * AI_004 克苏鲁之眼 1:1（1456 NPC.cs:19909-20757；经典+专家双档。getGoodWorld
-   * 分支按仓内 bossAI 惯例保留注释不实现；netcode 跳过）。
+   * AI_004 克苏鲁之眼 1:1（1456 NPC.cs:19909-20757；经典+专家双档，getGoodWorld
+   * （for the worthy）分支全量实装；netcode 跳过）。
    *  ai 槽位映射：ai0=ai[0]（0 P1 / 1 变身段一 / 2 段二 / 3 P2）、state=ai[1]（态号，
    *  变身期闲置）、ai2=ai[2]（态内计时，本函数内自增——不用自动预增的 aiT，保证与
    *  原版"先判后增"逐 tick 对齐）、spinSpeed=变身段 ai[2]（自旋角速度）、
@@ -4576,6 +4671,8 @@ export class Enemy extends Entity {
     // Main.Difficulty / Main.expertMode（:19903 起；getGoodWorld 抬档同义）
     const diff = mainDifficulty(game.world);
     const expert = mainExpertMode(game.world);
+    // Main.getGoodWorld（for the worthy 种子）——11 处抬档分支（:20037-20691）
+    const ftw = !!game.world.seedFlags?.getGoodWorld;
     // flag2/flag3（:19906-19915，专家档专用）：hp<12% / hp<4%
     const flag2 = expert && this.hp < this.maxHp * 0.12;
     const flag3 = expert && this.hp < this.maxHp * 0.04;
@@ -4599,6 +4696,10 @@ export class Enemy extends Entity {
     if (flag3 && expert) rotRate = 0;
     this.applyEocRotation(face, rotRate);
 
+    // reflectsProjectiles 每 tick 复位（:20029）——变身段 getGoodWorld 下置 true
+    // （:20258-20261）反弹玩家弹幕；出变身段后由本行自然清回
+    this.reflectsProjectiles = false;
+
     // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（:20020-20025） ----
     // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续
     if (game.world.clock.isDay || player.dead) {
@@ -4612,10 +4713,11 @@ export class Enemy extends Entity {
     if (this.ai0 === 0) {
       // ================= P1（ai[0]==0，:20026-20236） =================
       if (this.state === 0) {
-        // ---- 悬浮伺服（:20030-20081）：5/0.04；专家 7/0.15（getGoodWorld +1/+0.05 不实现） ----
+        // ---- 悬浮伺服（:20030-20081）：5/0.04；专家 7/0.15；FTW +1/+0.05（:20037-20041） ----
         this.dashing = false;
         let num10 = 5, num11 = 0.04;
         if (expert) { num11 = 0.15; num10 = 7; }
+        if (ftw) { num11 += 0.05; num10 += 1; }
         this.servoTo(player.cx, player.cy - 200, num10, num11);
         this.facing = dx > 0 ? 1 : -1;
         this.ai2 += 1;
@@ -4626,10 +4728,11 @@ export class Enemy extends Entity {
           this.state = 1; this.ai2 = 0; this.chargesLeft = 0; this.servantT = 0;
         } else if ((this.y + this.h < player.y && dist < 500) || (expert && dist < 500)) {
           // 仆从累计（:20096-20111）：NPC 在玩家上方且 <500px（专家仅距离门），
-          // 110t（专家 ×0.4 = 44）召一只，速度 5 / 专家 6
+          // 110t（专家 ×0.4；FTW 再 ×0.8 = 35.2t）召一只，速度 5 / 专家 6
           if (!player.dead) this.servantT += 1;
           let num17 = 110;
           if (expert) num17 *= 0.4;
+          if (ftw) num17 *= 0.8;                    // :20107-20110
           if (this.servantT >= num17) {
             this.servantT = 0;
             const num18 = expert ? 6 : 5;
@@ -4645,9 +4748,10 @@ export class Enemy extends Entity {
           }
         }
       } else if (this.state === 1) {
-        // ---- 冲刺预备（:20148-20169）：锁脸即发，速 6 / 专家 7 ----
+        // ---- 冲刺预备（:20148-20169）：锁脸即发，速 6 / 专家 7 / FTW +1 ----
         this.visAngle = face;
-        const num23 = expert ? 7 : 6;
+        let num23 = expert ? 7 : 6;
+        if (ftw) num23 += 1;                        // :20156-20159
         this.vx = (dx / dist) * num23;
         this.vy = (dy / dist) * num23;
         this.state = 2; this.ai2 = 0;
@@ -4662,13 +4766,15 @@ export class Enemy extends Entity {
         if (this.ai2 >= 40) {
           this.vx *= 0.98; this.vy *= 0.98;
           if (expert) { this.vx *= 0.985; this.vy *= 0.985; }
+          if (ftw) { this.vx *= 0.99; this.vy *= 0.99; }   // :20180-20183
           if (this.vx > -0.1 && this.vx < 0.1) this.vx = 0;
           if (this.vy > -0.1 && this.vy < 0.1) this.vy = 0;
         } else {
           // 冲刺前 40t 旋转锁移动方向（:20195）
           this.visAngle = Math.atan2(this.vy, this.vx) - Math.PI * 0.5;
         }
-        const num27 = expert ? 100 : 150;
+        let num27 = expert ? 100 : 150;
+        if (ftw) num27 -= 15;                       // :20202-20205 冲程 −15
         if (this.ai2 >= num27) {
           this.chargesLeft += 1;
           this.ai2 = 0;
@@ -4694,19 +4800,24 @@ export class Enemy extends Entity {
       }
     } else if (this.ai0 === 1 || this.ai0 === 2) {
       // ================= 变身两段（ai[0]==1/2，:20238-20344） =================
-      // 段一（ai0==1）加速：ai[2] +=0.005 钳 0.5；段二（ai0==2）减速：-0.005 钳 0
-      // （getGoodWorld 再循环 ai[3]==1 走加速支，不实现）
+      // 段一（ai0==1）加速：ai[2] +=0.005 钳 0.5；段二（ai0==2）减速：-0.005 钳 0。
+      // getGoodWorld 再循环旗标 ai[3]==1（本仓 chargesLeft）走加速支（:20241-20250）
       this.dashing = false;
-      if (this.ai0 === 1) {
+      // FTW 变身段反射玩家弹幕（:20258-20261）——每 tick 先在旋转段后复位
+      if (ftw) this.reflectsProjectiles = true;
+      if (this.ai0 === 1 || this.chargesLeft === 1) {
         this.spinSpeed = Math.min(0.5, this.spinSpeed + 0.005);
       } else {
         this.spinSpeed = Math.max(0, this.spinSpeed - 0.005);
       }
       this.visAngle += this.spinSpeed;
       this.ai2 += 1;                    // 原 ai[1]：段内计时
-      // 专家自旋期每 20t 甩一只仆从（:20262-20300）：随机向 ±200 归一到速 5、落点 +10
-      if (expert && this.ai2 % 20 === 0) {
-        const rx = Math.random() * 400 - 200, ry = Math.random() * 400 - 200;
+      // 专家自旋期每 num29t 甩一只仆从（:20262-20300）：随机向 ±200（FTW ×3）归一到速
+      // 5、落点 +10；num29 = 20，FTW 且 hp<1/3 时 10（:20263-20266）
+      const num29 = ftw && this.hp < this.maxHp / 3 ? 10 : 20;
+      if (expert && this.ai2 % num29 === 0) {
+        let rx = Math.random() * 400 - 200, ry = Math.random() * 400 - 200;
+        if (ftw) { rx *= 3; ry *= 3; }   // :20273-20277 散布 ±600
         const rl = Math.hypot(rx, ry) || 1;
         const s = Enemy.fromVanilla(5, this.cx + (rx / rl) * 10, this.cy + (ry / rl) * 10);
         if (s) {
@@ -4717,17 +4828,23 @@ export class Enemy extends Entity {
         }
       }
       if (this.ai2 >= 100) {
-        this.ai0 += 1;
-        this.ai2 = 0;
-        if (this.ai0 === 3) {
-          // 段二满 100t → P2（:20312-20315）：ai[2] 清零收住残余自旋
-          this.spinSpeed = 0;
+        if (this.chargesLeft === 1) {
+          // 再自旋一轮满 100t（:20305-20310）：旗标与计时归零，留在段二减速收尾
+          this.chargesLeft = 0;
+          this.ai2 = 0;
         } else {
-          // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 20 + Roar(15)
-          game.playSfxFiles(['NPC_Hit_1'], 1, this.cx, this.cy);
-          game.playSfx('roar');
-          game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 8/7/6 ×2 份
-          game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
+          this.ai0 += 1;
+          this.ai2 = 0;
+          if (this.ai0 === 3) {
+            // 段二满 100t → P2（:20312-20315）：ai[2] 清零收住残余自旋
+            this.spinSpeed = 0;
+          } else {
+            // 段一满 100t（:20316-20330）：NPCHit(3) + gore 8/7/6 ×2 + 尘 20 + Roar(15)
+            game.playSfxFiles(['NPC_Hit_1'], 1, this.cx, this.cy);
+            game.playSfx('roar');
+            game.spawnParticles(this.cx, this.cy, '#8A1A1A', 12, 3);   // gore 8/7/6 ×2 份
+            game.spawnParticles(this.cx, this.cy, '#FF3030', 20, 2.5); // 尘 20
+          }
         }
       }
       // 速度 0.98/t 阻尼 + 小值清零（:20333-20343）
@@ -4755,7 +4872,8 @@ export class Enemy extends Entity {
       if (this.state === 0 && flag2) this.state = 5;
 
       if (this.state === 0) {
-        // ---- 悬浮（:20367-20430）：6/0.07；专家按 400/600/800px 距离爬坡 +1/+0.05 ----
+        // ---- 悬浮（:20367-20430）：6/0.07；专家按 400/600/800px 距离爬坡 +1/+0.05；
+        //      FTW +1/+0.1（:20390-20394） ----
         this.dashing = false;
         let num39 = 6, num40 = 0.07;
         if (dist > 400 && expert) {
@@ -4765,6 +4883,7 @@ export class Enemy extends Entity {
             if (dist > 800) { num39 += 1; num40 += 0.05; }
           }
         }
+        if (ftw) { num39 += 1; num40 += 0.1; }
         this.servoTo(player.cx, player.cy - 120, num39, num40);
         this.facing = dx > 0 ? 1 : -1;
         this.ai2 += 1;
@@ -4777,12 +4896,14 @@ export class Enemy extends Entity {
           this.state = 3; this.ai2 = 0; this.chargesLeft -= 1000;
         }
       } else if (this.state === 1) {
-        // ---- 冲刺预备（:20452-20478）：ForceRoar(36)；6.8（专家第 2/3 冲 ×1.15/×1.30） ----
+        // ---- 冲刺预备（:20452-20478）：ForceRoar(36)；6.8（专家第 2/3 冲 ×1.15/×1.30；
+        //      FTW ×1.2 :20465-20468） ----
         game.playSfx('roar', 0.7);
         this.visAngle = face;
         let num44 = 6.8;
         if (expert && this.chargesLeft === 1) num44 *= 1.15;
         if (expert && this.chargesLeft === 2) num44 *= 1.3;
+        if (ftw) num44 *= 1.2;
         this.vx = (dx / dist) * num44;
         this.vy = (dy / dist) * num44;
         this.state = 2; this.ai2 = 0;
@@ -4908,9 +5029,19 @@ export class Enemy extends Entity {
           this.chargesLeft += 1;
           this.ai2 = 0;
           if (this.chargesLeft >= 5) {
-            this.state = 0; this.chargesLeft = 0;   // 5 连结束回悬浮（:20679-20682）
+            // 5 连结束（:20679-20682）回悬浮；FTW 且与玩家有视线 → Roar 后重启
+            // 变身段二自旋（:20683-20691：ai[0]=2 / ai[1]=0 / ai[2]=0 / ai[3]=1，
+            // 再循环旗标落在本仓 chargesLeft，变身段加速支复跑一轮）。CanHit 玩家
+            // 矩形传 boss 自身 w/h（原版即如此，:20686）
+            if (ftw && canHit(game.world.store, this.x, this.y, this.w, this.h,
+              player.x, player.y, this.w, this.h)) {
+              game.playSfx('roar');
+              this.ai0 = 2; this.state = 0; this.ai2 = 0;
+              this.spinSpeed = 0; this.chargesLeft = 1;
+            } else {
+              this.state = 0; this.chargesLeft = 0;
+            }
             this.dashing = false;
-            // getGoodWorld 视线内再自旋循环（:20683-20691）不实现
           } else {
             this.state = 3;                          // 继续连冲
           }
@@ -5169,7 +5300,14 @@ export class Enemy extends Entity {
   }
 
   /** 受击。返回是否死亡 */
-  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false): boolean {
+  hurt(dmg: number, kbx: number, kby: number, game: GameHooks, armorPen = 0, crit = false, pierce = 0): boolean {
+    // pierce 语义（Projectile.cs:11903-11907/13152-13155 Damage_PVE）：
+    //   0   = 近战/荆棘等非弹幕 → 命中设免疫 10t（原版 immune[owner] 默认档）；
+    //   1   = 单发弹（maxPenetrate==1，flag3）→ **无视免疫且命中后不设帧**
+    //         ——同 tick 多发（霰弹/多随从）全部生效,不再互挡（旧全局 iframes=8
+    //         致 8 发四管霰弹只吃 1 发,DPS≈1/8,2026-08-13 修）；
+    //   >1  = 穿透弹 → 设 10t;同弹重复命中由弹侧 hitSet 拦（原版 per-owner 槽单人
+    //         近似;弹型覆写 1-8 表 :13032 未接,登记）
     // Critter 兼容：critters 桶的调用方按 Critter.hurt(game) 单参调用；
     // 原版小动物是 Enemy 进该桶，这里把 Game 对象重映射回 game 参、伤害取固定 5
     if (typeof dmg === 'object' && dmg !== null) {
@@ -5177,7 +5315,7 @@ export class Enemy extends Entity {
       dmg = 5; kbx = 0; kby = 0;
     }
     const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
-    if (this.iframes > 0) return false;
+    if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
     if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
     // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，
@@ -5217,7 +5355,7 @@ export class Enemy extends Entity {
     // （419 旋刃怪冲刺中 ×3，cs:57172）
     if (this.takenDamageMultiplier > 1) dmg = Math.max(1, Math.round(dmg * this.takenDamageMultiplier));
     this.hp -= dmg;
-    this.iframes = 8;
+    this.iframes = pierce === 1 ? 0 : 10; // 通用档 10t（:13152 默认;单发弹不设帧 flag3;旧恒 8）
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
     // 击退管线（N:82144-82236 1:1）：五段软封顶 8/10/12/14/16（超出段 ×0.9/0.8/
     // 0.7/0.6/钳 16）+ 地狱火(onFire2,onFireT 代)×1.1 + 暴击×1.4 + 小丑 185×1.5。

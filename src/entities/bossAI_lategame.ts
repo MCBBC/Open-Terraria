@@ -4,7 +4,8 @@
 //   aiStyle 121 史莱姆皇后   657  AI_121_QueenSlime()           NPC.cs:45543-46177(+FlyMovement :45467)
 // 由 Enemy.fixedUpdate 的 aiStyle 分发调用(接线见文件尾「接线清单」);本文件不改动任何已有文件。
 // 弹幕统一走 bossAI.shoot(Arrow 直飞桶);原版「定点预告→延时冲刺」类投射物(465/919/923)
-// 收敛为带初速直飞(见各处注释)。expert/getGoodWorld/大师分支一律只注释不实现;netcode 跳过。
+// 收敛为带初速直飞(见各处注释)。getGoodWorld 分支已实装(女皇招式间隔折半/史后空中
+// 横移+砸地蓄力+凝胶环抬档);expert/大师分支只注释不实现;netcode 跳过。
 import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
@@ -246,6 +247,9 @@ function ritualCenterOf(isReal: boolean, la: { la2: unknown }, parent: Enemy | n
 
 export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | null): void {
   const la = laOf(e);
+  // getGoodWorld 弹幕节奏抬档(:64932-64958):冰 num120−30 / 火 18×3→10×5 /
+  // 闪电 num80−20(expert 基线未实装,g 照原文在经典值上调整)
+  const ftw = !!game.world.seedFlags?.getGoodWorld;
   const isReal = e.vanillaId !== 440; // flag2 = type==439(:64971);440 = 克隆体
   let parent: Enemy | null = null;
   // ---- 克隆体镜像段(:64998-65015):真身失效 → 消散;ai0/ai1 逐 tick 镜像;
@@ -375,24 +379,29 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
   }
 
   // ---- ai0 == 2 冰雾 464(:65362-65429):4t 时克隆体各补 1 发 468 + 真身 1 发 464(35 伤);
-  //      持续 4+120 ----
+  //      持续 4+num(num=120,FTW −30 :64932-64936) ----
   if (e.ai0 === 2) {
-    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 120 === 0) {
+    const numIce = ftw ? 90 : 120;
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numIce === 0) {
       cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65375-65397
       const aim = aimLead(e, player, e.facing);
       shoot(game, e.cx + e.facing * 30, e.cy + 12, aim.x * 4, aim.y * 4, 35, 464); // :65411-65421
       game.playSfx('roar', 0.35);
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 120) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + numIce) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
-  // ---- ai0 == 3 火球 467(:65430-65530):每 18t 一发×3,30 伤,(6+rand4) 速 ±0.52rad 散布;
-  //      第三拍克隆体各补 1 发 468(:65462-65499);持续 4+18*3 ----
+  // ---- ai0 == 3 火球 467(:65430-65530):每 num2t 一发×num3,30 伤,(6+rand4) 速
+  //      ±0.52rad 散布(18×3,FTW 10×5 :64941-64949);第三拍克隆体各补 1 发
+  //      468(:65462-65499);持续 4+num2*num3 ----
   if (e.ai0 === 3) {
-    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % 18 === 0) {
-      if ((e.ai1 - 4) / 18 === 2) {
+    const numFire = ftw ? 10 : 18;
+    const fireCount = ftw ? 5 : 3;
+    if (isReal && e.ai1 >= 4 && (e.ai1 - 4) % numFire === 0) {
+      // 原版硬编码第 3 拍(:65442 /num2==2)——FTW 5 拍下仍在第 3 拍补射,1:1 保留
+      if ((e.ai1 - 4) / numFire === 2) {
         cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622); // :65448-65462
       }
       const aim = aimLead(e, player, e.facing);
@@ -401,14 +410,16 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       shoot(game, e.cx + e.facing * 30, e.cy + 12, dvx, dvy, 30, 467); // :65505-65517
     }
     e.ai1 += 1;
-    if (e.ai1 >= 4 + 18 * 3) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 4 + numFire * fireCount) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
   // ---- ai0 == 4 闪电 465(:65531-65622):ai1==20 时克隆体各补 1 发 468(:65531-65562),
-  //      之后每逢 (ai1-20)%80==0 在头顶 100px 撒 465(45 伤);持续 20+80 ----
+  //      之后每逢 (ai1-20)%num4==0 在头顶 100px 撒 465(45 伤)(num4=80,FTW −20
+  //      :64952-64958);持续 20+num4 ----
   if (e.ai0 === 4) {
-    if (isReal && e.ai1 >= 20 && (e.ai1 - 20) % 80 === 0) {
+    const numBolt = ftw ? 60 : 80;
+    if (isReal && e.ai1 >= 20 && (e.ai1 - 20) % numBolt === 0) {
       if (e.ai1 === 20) {
         cloneSupplement(game, cultistClones(game, e), player, 1, 0.5235987901687622);
         game.playSfx('roar', 0.5);
@@ -419,7 +430,7 @@ export function lunaticCultistAI(e: Enemy, game: GameHooks, player: Player | nul
       shoot(game, e.cx, e.cy - 100, dx / d * 6, dy / d * 6, 45, 465); // :65563-65566
     }
     e.ai1 += 1;
-    if (e.ai1 >= 20 + 80) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
+    if (e.ai1 >= 20 + numBolt) { e.ai0 = 0; e.ai1 = 0; if (isReal) e.ai3 += 1; e.vx = 0; e.vy = 0; }
     return;
   }
 
@@ -651,7 +662,9 @@ export function empressOfLightAI(e: Enemy, game: GameHooks, player: Player | nul
     }
     // ---- 1 悬浮蓄力枢纽(:46418-46511):前 10t DashTo 冲近,之后阻尼;到时按表选招 ----
     case 1: {
-      const dur = phase2 ? 20 : 45; // num34 :46419(expert/getGoodWorld 折半分支不实现)
+      // num34 :46422(flag=二阶段 20/一阶段 45);getGoodWorld 折半(:46425-46428)
+      let dur = phase2 ? 20 : 45;
+      if (game.world.seedFlags?.getGoodWorld) dur /= 2;
       if (e.ai1 <= 10) empressDashTo(e, player.cx, player.cy);
       if (Math.hypot(e.vx, e.vy) > 16 && e.ai1 > 10) { e.vx /= 2; e.vy /= 2; }
       e.vx *= 0.92; e.vy *= 0.92;
@@ -1040,8 +1053,9 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           e.onGround = false;
         }
       } else {
-        // 空中横移(:45819-45844):朝玩家 0.2/t,上限 3(反向时 0.93 阻尼)
-        const cap = 3;
+        // 空中横移(:45819-45844):朝玩家 0.2/t,上限 3(FTW 7,:45853-45857;
+        // 反向时 0.93 阻尼)
+        const cap = game.world.seedFlags?.getGoodWorld ? 7 : 3;
         if ((dirToPlayer === 1 && e.vx < cap) || (dirToPlayer === -1 && e.vx > -cap)) {
           if ((dirToPlayer === -1 && e.vx < 0.1) || (dirToPlayer === 1 && e.vx > -0.1)) {
             e.vx += 0.2 * dirToPlayer;
@@ -1053,11 +1067,12 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
       break;
     }
     // ---- 4 升空砸地(:45845-46006):ai2=0 飞向玩家上 384(60t) → ai2=1 重力坠(蓄力 30/10t,
-    //      vy+1/t 钳 14);落地撒 922 冲击波(40 伤)+ 尘暴,回待机 ----
+    //      FTW 0=无蓄力直接坠,:45885-45889;vy+1/t 钳 14,FTW 双倍加速钳 15.99,
+    //      :45944-45953);落地撒 922 冲击波(40 伤)+ 尘暴,回待机 ----
     case 4: {
       e.spin *= 0.9;
       if (e.ai2 === 1) {
-        const num13 = phase2 ? 10 : 30; // :45856-45860
+        const num13 = game.world.seedFlags?.getGoodWorld ? 0 : phase2 ? 10 : 30; // :45856-45860
         e.vx *= 0.8;
         if (!e.onGround) {
           const prev = e.ai1;
@@ -1065,8 +1080,15 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
           if (e.ai1 >= num13) {
             if (prev < num13) game.playSfx('roar', 0.5);
             e.vy += 1;
-            if (e.vy === 0) e.vy = 0.01;
-            if (e.vy >= 14) e.vy = 14; // num17 = 14(经典;getGoodWorld 15.99 不实现)
+            // FTW(:45947-45952):额外 +1/t、钳 15.99
+            if (game.world.seedFlags?.getGoodWorld) {
+              e.vy += 1;
+              if (e.vy === 0) e.vy = 0.01;
+              if (e.vy >= 15.99) e.vy = 15.99;
+            } else {
+              if (e.vy === 0) e.vy = 0.01;
+              if (e.vy >= 14) e.vy = 14; // num17 = 14(经典)
+            }
           } else {
             e.vy *= 0.8;
           }
@@ -1105,15 +1127,17 @@ export function queenSlimeAI(e: Enemy, game: GameHooks, player: Player | null): 
       break;
     }
     // ---- 5 凝胶环(:46007-46121):ai2=0 蓄 50t(二阶段兼飞)→ ai2=1 第 10t 撒 926 环
-    //      (6 发(二阶段 10 发),30 伤,9 速,-i*2π/N) ----
+    //      (num6=10(FTW 15,:46026-46029)分度,num7 = 二阶段 num6 / 一阶段 6 发,
+    //      30 伤,9 速,-i*2π/num6) ----
     case 5: {
       e.spin *= 0.9;
       if (e.ai2 === 1) {
         e.ai1 += 1;
         if (e.ai1 >= 10) {
-          const count = phase2 ? 10 : 6; // num6/num7 :46024-46031
+          const num6 = game.world.seedFlags?.getGoodWorld ? 15 : 10;
+          const count = phase2 ? num6 : 6;
           for (let i = 0; i < count; i++) {
-            const a = -i * (Math.PI * 2) / 10;
+            const a = (-i * Math.PI * 2) / num6;
             shoot(game, e.cx, e.cy, Math.cos(a) * 9, Math.sin(a) * 9, 30, 926);
           }
           game.playSfx('roar', 0.5);

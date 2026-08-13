@@ -426,6 +426,17 @@ export class VanillaSpawner {
     return e;
   }
 
+  /** 绑缚三人组占位造怪（NPC.cs:1994-2005）：105/106/685 在本仓的产出是 bound
+   *  TownNPC——Game.trySpawnEnemy 只读 vanillaId 做转换，占位体随即弃置。
+   *  不走 spawnNPC/fromVanilla：vanilla-npcs.json 缺 685 条目（fromVanilla null 静默
+   *  丢弃，同 686 先例），三 id 统一走 PLACEHOLDER_DEF 保证链路可达 */
+  private spawnBound(id: number): Enemy {
+    const e = new Enemy(`v_${id}`, this.spawnTileX * TILE + 8, this.spawnTileY * TILE);
+    e.vanillaId = id;
+    e.id = this.world.store.w; // 占位，Game 侧会重编
+    return e;
+  }
+
   // ---- SetSpawnFlagsForChosenTile（L950-1185） ----
   private setFlagsForChosenTile(spawnTileX: number, spawnTileY: number, spawnTileType: number, rng: RNG): void {
     const st = this.world.store;
@@ -1604,6 +1615,32 @@ export class VanillaSpawner {
       if (N(400)) return D(592);
       return D(55);
     }
+    // ---- 绑缚三人组（NPC.cs:1994-2005：水池第三支之后、spawnFriendly 段之前的三支
+    //      else-if；友好轮同样可命中——原版无 spawnFriendly 门）----
+    //  公共门：RollLuck(20)==0 && !waterTile && deeperThanRockLayer &&
+    //  spawnTileY < maxTilesY-210 && 前置旗 && !savedXxx && 场上唯一（AnyNPCs）。
+    //  ★&& 求值序与原版一致（前置旗在 RollLuck 之前短路）——RNG 消费流不变。
+    //  产出为占位 Enemy（spawnBound——vanilla-npcs.json 缺 685 条目，fromVanilla 会
+    //  null；Game.trySpawnEnemy 按 vanillaId 转 bound TownNPC，占位体随即弃置）：
+    //    105 BoundGoblin  ← downedGoblins && !savedGoblin
+    //    106 BoundWizard  ← hardMode && !savedWizard
+    //    685 BoundTownSlimeOld ← downedBoss3 && !unlockedSlimeOldSpawn
+    //    （解救记账见 Game.freeBoundNpc；685 解救置 flags.unlockedSlimeOldSpawn）
+    {
+      const f = this.world.flags;
+      if (f['downedGoblins'] && N(20) && !this.waterTile && this.deeperThanRockLayer
+        && this.spawnTileY < st.h - 210 && !f['savedGoblin'] && !any(105)) {
+        return this.spawnBound(105);
+      }
+      if (hardMode && N(20) && !this.waterTile && this.deeperThanRockLayer
+        && this.spawnTileY < st.h - 210 && !f['savedWizard'] && !any(106)) {
+        return this.spawnBound(106);
+      }
+      if (this.downedBoss3 && N(20) && !this.waterTile && this.deeperThanRockLayer
+        && this.spawnTileY < st.h - 210 && !f['unlockedSlimeOldSpawn'] && !any(685)) {
+        return this.spawnBound(685);
+      }
+    }
     // ---- 墓地友好轮（SpawnAnNPC :2008-2014，spawnFriendly 段首支）----
     //  ZoneGraveyard 时友好轮恒走本支：非水域 50/50 蛆 606 / 鼠 610，水域直接空过——
     //  不受昼夜门限制（原版本支无 dayTime 条件），也不落后续小动物链
@@ -1629,6 +1666,22 @@ export class VanillaSpawner {
     //  日食白天小动物段整体关闭（L709 门，friendlyBlocked）
     if (this.spawnFriendlyCycle && this.dayTime && !this.waterTile && this.surfaceSpawn && !friendlyBlocked &&
       (t === T.GRASS || t === T.DIRT || t === T.SNOW || t === T.SNOW_BRICK || t === T.MOWED_GRASS)) {
+      // ---- 椿象/蝴蝶（cs:2381-2410，在 N(15) 近似的鸟兽链**之前**的两支 else-if）----
+      //  门：白昼草族 tile（case 2/109/477/492）+ !TooWindyForButterflies（|windSpeedTarget|
+      //  ≥0.4，NPC.cs:6801）+ 无雨 + Next(每夜概率)==0。概率源 = setFireFlyChance
+      //  （NPC.cs:94557-94610，每夜 StartNight 掷：4/5 的夜该族为 999999 绝迹哨兵；
+      //  世界字段随存档，旧档缺省=代表值 10/绝迹）——原版另有 1/4 概率左右 ±16px
+      //  附加只，单返回值 API 只交付 1 只（蜻蜓段同先例）
+      if (t === T.GRASS || t === T.MOWED_GRASS || t === T.HALLOW_GRASS || t === T.HALLOW_MOWED_GRASS) {
+        const tooWindyFB = Math.abs(this.world.weather.windSpeedTarget) >= 0.4;
+        const dryDay = !this.world.weather.raining;
+        // 椿象 669（cs:2381-2392）
+        if (!tooWindyFB && dryDay && N(Math.max(1, this.world.stinkBugChance))) return D(669);
+        // 蝴蝶 356 / 金蝴蝶 444（cs:2394-2410，金 = RollLuck(goldCritterChance)=1/400）
+        if (!tooWindyFB && dryDay && N(Math.max(1, this.world.butterflyChance))) {
+          return D(N(400) ? 444 : 356);
+        }
+      }
       if (N(15)) {
         if (t === T.SNOW || t === T.SNOW_BRICK) {
           // 雪原小动物（L148→148|149 Next(2)）

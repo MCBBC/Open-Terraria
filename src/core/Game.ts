@@ -102,7 +102,7 @@ import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
 import { scanLuckScene, rollLuck } from '../stats/Luck';
 import { bindScaleStatsWorld, scaleStatsWorldOf, mainExpertMode, mainMasterMode } from '../stats/ScaleStats';
-import { pickMusic, newMusicState, bossMusicFor, MUSIC, type MusicState } from '../data/Music';
+import { pickMusic, newMusicState, bossMusicFor, BOSS_MUSIC, MUSIC, type MusicState } from '../data/Music';
 import { Tombstone } from '../entities/Tombstone';
 import { Lang } from '../i18n/Lang';
 import { clearPaperDollCache } from '../player/PaperDoll';
@@ -173,7 +173,7 @@ import { hitPlayer, statusPlayer } from '../entities/projTargets';
 import { DukeSharknadoBolt, DukeSharknadoTornado, MLDeathray } from '../entities/bossAI_duke_moonlord';
 import { LunarOrb } from '../entities/bossAI_lunar_misc';
 import { spawnWOF } from '../entities/bossAI_wof';
-import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj } from '../entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, FlailProj, GrenadeProj, GlowstickProj, TorchGodProj, PowderProj, YOYO_RANGE, YOYO_TOP, YOYO_LIFE, CounterweightProj, MolotovProj } from '../entities/WeaponProj';
 import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
@@ -544,6 +544,19 @@ export class Game implements GameHooks {
   /** 上一 tick 的夜内时间（0-32400t；鹿角怪 16200t 午夜跨越检测，Main.cs:64602-64603） */
   private _lastNightTicks = 0;
   private _prevRightDown = false;
+  private _scopeZoomed = false;
+  private _scopePrevZoom = 1;
+  /** 狙击镜 1858 / 侦察镜 4005 */
+  private hasScopeAcc(): boolean {
+    for (let i = 3; i < 10; i++) {
+      const s = this.player.inv.armor[i];
+      if (!s) continue;
+      const d = ITEM_DEFS[s.id];
+      const vid = d?.vid ?? (d?.key?.startsWith('vi_') ? parseInt(d.key.slice(3), 10) : -1);
+      if (vid === 1858 || vid === 4005) return true;
+    }
+    return false;
+  }
   private _prevMouseDown = false;
   /** 入侵周期公告倒计时（原版 Main.invasionWarn，3600 帧一轮；不存档） */
   private invasionWarn = 0;
@@ -2220,18 +2233,26 @@ export class Game implements GameHooks {
       // (否则跨群系旅行首帧背景闪空;仅 fire-and-forget,不阻塞主循环)
       this.renderer.biomeBg.warm(this.scene);
       // Boss 专属 BGM（Main.cs:12155-12312：屏盒内 Boss 的专属曲，盒半径默认 5000；
-      // 异教徒仪式态两族例外用 1600——CultistDevote 438 ai[1]==1（:12212-12217）与
-      // CultistArcher 379 ai[3]>=0（:12220-12225）→ num3=20 → 音乐 94（与 439 本体同曲）。
+      // 触发面是【type 表】不是 boss 标记——switch(type) 命中即得专属曲（:12162-12280），
+      // 世吞 13/14/15 任一段、骷髅王手 36、血肉墙之眼 114、毁灭者 135/136、世花钩蔓
+      // 263/264 等非 boss 段同样触发（= BOSS_MUSIC 表内 id 全量）；表外无 boss 标记
+      // 的 NPC num3=0 → continue（:12283-12287）。异教徒仪式态两族例外用 1600——
+      // CultistDevote 438 ai[1]==1（:12212-12217）与 CultistArcher 379 ai[3]>=0
+      // （:12220-12225）→ num3=20 → 音乐 94（与 439 本体同曲）。
       // 仪式态由异教徒仪式 AI 置位（未移植——当前不可达，公式先 1:1 在位）
       let bossMusic = 0;
       for (const e of this.entities.enemies) {
-        const en = e as unknown as { x: number; y: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number };
+        const en = e as unknown as { x: number; y: number; cx: number; cy: number; def?: { boss?: boolean }; vanillaId?: number | null; ai1?: number; ai3?: number };
         // 仪式态判定（438 ai[1]==1 / 379 ai[3]>=0）——两族无 boss 标记，显式并入
         const ceremony = (en.vanillaId === 438 && en.ai1 === 1) || (en.vanillaId === 379 && (en.ai3 ?? 0) >= 0);
-        if (!en.def?.boss && !ceremony) continue;
-        // 盒半径（Main.cs:12155 默认 5000；仪式态 :12215/:12222 收窄 1600）
+        // type 表命中（表内 id 即原版 switch 命中者；438/379 表内但需仪式态门）
+        const typeHit = en.vanillaId != null && en.vanillaId !== 438 && en.vanillaId !== 379
+          && BOSS_MUSIC[en.vanillaId] !== undefined;
+        if (!en.def?.boss && !ceremony && !typeHit) continue;
+        // 盒半径（Main.cs:12155 默认 5000；仪式态 :12215/:12222 收窄 1600）；
+        // 原版以 NPC 中心对屏盒求交（:12297-12302）——用 cx/cy 对玩家中心近似
         const box = ceremony ? 1600 : 5000;
-        if (Math.abs(en.x - this.player.cx) < box && Math.abs(en.y - this.player.cy) < box) {
+        if (Math.abs(en.cx - this.player.cx) < box && Math.abs(en.cy - this.player.cy) < box) {
           bossMusic = bossMusicFor(en.vanillaId ?? 0);
           break;
         }
@@ -2709,7 +2730,10 @@ export class Game implements GameHooks {
       if (player.immuneAlpha < 255) player.immuneAlpha = Math.min(255, player.immuneAlpha + 2);
       // 重生计时
       player.respawnTimer++;
-      if (player.respawnTimer > 180) this.respawnPlayer();
+      // GetRespawnTime（Player.cs:38384-38422）：600t=10s 基准;专家 ×1.5=900;
+      // 场上有存活的 boss 时 +600。旧恒 180t=3s 惩罚感仅原版 1/3（2026-08-13 修）
+      if (player.respawnTimer > 600 * (mainExpertMode(this.world) ? 1.5 : 1)
+        + (this.entities.enemies.some((en) => (en as unknown as { def?: { boss?: boolean } }).def?.boss && !en.dead) ? 600 : 0)) this.respawnPlayer();
     } else {
       this._deathHandled = false;
     }
@@ -4275,8 +4299,15 @@ export class Game implements GameHooks {
       const hookVid = heldDef ? viIdFromKey(heldDef.key) : -1;
       if (hookVid >= 0 && hookItemOf(hookVid) && inp.mouseDown && !inp.rightDown
         && this.player.useTime === 0) {
-        const ang = Math.atan2(inp.mouseY - vh2 / 2, inp.mouseX - vw2 / 2);
-        this.fireGrapple(hookVid, Math.cos(ang), Math.sin(ang));
+        // 方向 = 鼠标世界位 - 玩家中心（QuickGrapple :6094-6105）；零向量回退
+        // 朝向（:6106-6108 num11=direction, num12=0）
+        const mdx = inp.mouseX - vw2 / 2, mdy = inp.mouseY - vh2 / 2;
+        if (mdx === 0 && mdy === 0) {
+          this.fireGrapple(hookVid, this.player.facing, 0);
+        } else {
+          const d = Math.hypot(mdx, mdy);
+          this.fireGrapple(hookVid, mdx / d, mdy / d);
+        }
         return;
       }
     }
@@ -4660,6 +4691,28 @@ export class Game implements GameHooks {
         // （48/54/93/520/599）平飞期姿态锁定 atan2（:21971-21972）。此前误用
         // 箭矢档（出生即 0.3 重力/无阻力/终端 16）→ 投掷距离偏短
         const THROWN_POSE_LOCK = new Set([48, 54, 93, 520, 599]);
+        // 燃烧瓶 2590→399：aiStyle 68 弹跳瓶体，死亡裂开 6 朵火云（:70889-70928）。
+        //  火云 = Arrow(bounce 弹跳、穿透 3、360t、grav 0.1) + 命中 OnFire（:10850-10852）
+        if (tc.shoot === 399) {
+          const mol = new MolotovProj(px, py,
+            Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9), dmgT,
+            (fx, fy, fdmg, fvx, fvy) => {
+              const fire = new Arrow(fx - 7, fy - 7, fvx, fvy, fdmg, 0,
+                400 + Math.floor(Math.random() * 3), null,
+                { grav: 0.1, life: 360, pierce: 3, bounce: true });
+              fire.ignite = true; // 命中 OnFire rand(3,7)s（:10850——Arrow.ignite 5s 档）
+              fire.critBonus = this.player.critChance('ranged') + (psT?.crt ?? 0);
+              fire.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0);
+              this.entities.add(fire, 'projectiles');
+            });
+          this.entities.add(mol, 'projectiles');
+          this.player.inv.removeAt(this.player.inv.selected, 1);
+          this.player.useTime = c?.useTime ?? 15;
+          this.sfx.play('throw');
+          this.cb.onInventoryChanged();
+          this.input.mouseDown = false;
+          return;
+        }
         const thrownArrow = new Arrow(px, py,
           Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
           dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key,
@@ -5025,9 +5078,10 @@ export class Game implements GameHooks {
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
         const er = Game.EXPLODE_RADIUS[cw.shoot] ?? 0;
-        // 实体伤害盒(Projectile.Kill :74885/:74951):炸弹 28/手雷 30 = 22×22 盒半宽 11;
-        // 炸药棍 29 = 200×200 盒半宽 100——与地形破坏半径【无关】
-        const hurtBox = cw.shoot === 29 ? 100 : 11;
+        // 实体伤害盒(PrepareBombToBlow Projectile.cs:44125-44220,非 Kill 还原图):
+        // 炸弹族 128×128 盒半宽 64 / 炸药棍族 250×250 半宽 125 / 手雷 22×22 半宽 11
+        // ——与地形破坏半径【无关】;旧值 11/100 致炸弹 AoE 几乎炸不到实体(2026-08-13 修)
+        const hurtBox = cw.shoot === 29 ? 125 : cw.shoot === 28 ? 64 : 11;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0))), 'projectiles'); // ⑥+⑧
@@ -9752,6 +9806,12 @@ export class Game implements GameHooks {
     return this.startInvasionAndAnnounce(type, ignoreDelay);
   }
 
+  /** PunchCameraModifier 近似（GameHooks.punchCamera）：鹿角怪震屏源——
+   *  Camera.addPunch,渲染帧统一衰减(强度向量叠加,同 CameraModifiers 列表) */
+  punchCamera(dirX: number, dirY: number, frames = 30, strength = 20): void {
+    this.camera.addPunch(dirX, dirY, strength, frames);
+  }
+
   /** 季节旗标（checkXMas Main.cs:13054-13073 / checkHalloween :13093-13110：
    *  现实日期 ∪ 月事件胜利当日位 ∪ 永久季种子位 三路或——Forever 随存档 flags 持久化） */
   private checkSeasonal() {
@@ -10363,9 +10423,14 @@ export class Game implements GameHooks {
       }
       shootType = cur === 646 ? 647 : cur === 647 ? 648 : cur === 648 ? 649 : 646;
     }
+    // 弹体尺寸（Projectile.SetDefaults；vanilla-projectiles.json 全量提取）——出生点
+    // = 玩家 MountedCenter（QuickGrapple :6110 vector = position + Size×0.5）
+    const sz = projectileData(shootType);
+    const projW = sz?.width ?? 18;
+    const projH = sz?.height ?? 18;
     const proj = new GrappleProj(
-      p.cx - 8, p.y + 8, dirX * hi.shootSpeed, dirY * hi.shootSpeed,
-      shootType, () => (p.dead ? null : p));           // :6115 NewProjectile
+      p.cx - projW / 2, p.cy - projH / 2, dirX * hi.shootSpeed, dirY * hi.shootSpeed,
+      shootType, () => (p.dead ? null : p));           // :6110-6115 NewProjectile（玩家中心）
     this.entities.add(proj, 'projectiles');
     p.registerGrappleProj(proj);
     p.useTime = hi.useTime;                            // ItemCheck_TryStartUse 冷却
@@ -12066,7 +12131,7 @@ export class Game implements GameHooks {
     if (p.appearance?.hardcoreDead) return;
     p.hp = p.maxHp;
     p.dead = false;
-    p.iframes = 90;
+    p.iframes = 180; // ReviveFromDeath 重生无敌 180t=3s（Player.cs:37229-37235;旧 90t/1.5s）
     p.respawnTimer = 0;
     p.immuneAlpha = 0;
     this.lostCoins = 0;

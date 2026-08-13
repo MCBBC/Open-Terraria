@@ -31,6 +31,13 @@ export interface WorldPacket {
   invasion?: { type: number; size: number; sizeStart: number; x: number; delay: number };
   /** 已砸祭坛数（读档路径回传;旧包缺省 0） */
   altarCount?: number;
+  /** 夜间小动物概率五件套（NPC.setFireFlyChance；旧包缺省=代表值，当晚重掷） */
+  critterChances?: {
+    fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
+    butterfly: number; stinkBug: number;
+  };
+  /** CultistRitual.delay（WF:114/163；旧包缺省 0） */
+  cultistDelay?: number;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WF:1329-1335/2147-2161；
    *  旧包缺省=索引 0/空名单。anglerQuestFinished 运行时态不回传——读档重置 WF:628-629） */
   angler?: { quest: number; whoFinishedToday: string[] };

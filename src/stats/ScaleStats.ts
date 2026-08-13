@@ -157,6 +157,27 @@ export const OLD_ONES_ARMY = new Set([552, 553, 554, 561, 562, 563, 555, 556, 55
 export const COMMON_MASTER_BOSS_LIFE_REDUCTION = 0.85;
 
 // ---------------------------------------------------------------------------
+// 专家档体型放大系数（Tweaks 内 4 处 `scale *=`，NPC.cs:18187/18198/18300/18309）：
+//   13-15 世吞三段 ×1.2；266/267 克脑+爬行者、134-136 毁灭者三段、139 探针 ×1.05。
+//   门 difficulty >= Expert（getGoodWorld 抬档后的"经典 FTW"同样命中）。
+//   单一数据源：Tweaks 与渲染侧 expertRenderScale 共用本表。
+//   ★只改 npc.scale 不回写宽高——原版 NewNPC 的 width/height×scale 在 ScaleStats
+//     之前（NPC.cs:17744-17747），故专家档"贴图变大、碰撞盒不变"是原版语义。
+// ---------------------------------------------------------------------------
+export function expertScaleMul(type: number): number {
+  if (type >= 13 && type <= 15) return 1.2;
+  if (type === 266 || type === 267 || (type >= 134 && type <= 136) || type === 139) return 1.05;
+  return 1;
+}
+
+/** 渲染侧专家体型系数（Renderer drawEnemy scale 乘区；碰撞盒不动）。
+ *  世界难度经绑定上下文取（bindScaleStatsWorld，未绑定=经典档恒 1）。 */
+export function expertRenderScale(type: number, ctx: ScaleStatsWorld | null = null): number {
+  if ((ctx ?? scaleStatsWorld()).difficulty < GDL.EXPERT) return 1;
+  return expertScaleMul(type);
+}
+
+// ---------------------------------------------------------------------------
 // NPC.GetNPCInvasionGroup（NPC.cs:79095-79212）：
 //   1 哥布林 / 2 雪人军团 / 3 海盗 / 4 火星 / -1 南瓜月 / -2 霜月 / -3 旧日军团 / 0 其他
 // ---------------------------------------------------------------------------
@@ -358,12 +379,12 @@ function scaleStatsByDifficultyTweaks(s: ScalingStats, ctx: ScaleStatsWorld): vo
     if (type === 13) num *= 1.1;      // 头
     if (type === 14) num *= 0.8;      // 身
     if (type === 15) num *= 0.8;      // 尾
-    if (s.difficulty >= GDL.EXPERT) { s.scale *= 1.2; s.defense += 2; }
+    if (s.difficulty >= GDL.EXPERT) { s.scale *= expertScaleMul(type); s.defense += 2; }
   } else if (type === 266 || type === 267) {  // 克脑 + 爬行者
     num2 = 0.85;
     num3 *= COMMON_MASTER_BOSS_LIFE_REDUCTION;
     num *= 0.9;
-    if (s.difficulty >= GDL.EXPERT) s.scale *= 1.05;
+    if (s.difficulty >= GDL.EXPERT) s.scale *= expertScaleMul(type);
   } else if (type === 50) {           // 50 骷髅王
     num2 = 0.7;
     num3 *= COMMON_MASTER_BOSS_LIFE_REDUCTION;
@@ -415,11 +436,11 @@ function scaleStatsByDifficultyTweaks(s: ScalingStats, ctx: ScaleStatsWorld): vo
     if (type === 134) num *= 2.0;     // 头
     if (type === 135) num *= 0.85;    // 身
     if (type === 136) num *= 0.85;    // 尾
-    if (s.difficulty >= GDL.EXPERT) s.scale *= 1.05;
+    if (s.difficulty >= GDL.EXPERT) s.scale *= expertScaleMul(type);
   } else if (type === 139) {          // 139 毁灭者探针
     num2 = 0.75;
     num = 0.8;
-    if (s.difficulty >= GDL.EXPERT) s.scale *= 1.05;
+    if (s.difficulty >= GDL.EXPERT) s.scale *= expertScaleMul(type);
   } else if (type >= 127 && type <= 131) {  // 机械骷髅王 + 部件
     num2 = 0.75;
     num3 *= COMMON_MASTER_BOSS_LIFE_REDUCTION;

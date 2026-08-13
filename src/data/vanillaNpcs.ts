@@ -63,6 +63,12 @@ export interface VanillaNpc {
   scale: number;
   /** SetDefaults alpha：每类型静态不透明度基线（渲染 1-alpha/255，NPC.Opacity；无通用渐隐） */
   alpha?: number;
+  /** SetDefaults behindTiles：绘制在 tile 层之下（钻地族被前景方块遮挡，
+   *  Main.cs:56457 DrawNPCs(behindTiles:true) 在实心 tile 之前绘制）。
+   *  全表 46 id 取自 1456 SetDefaults（7-15/39-41/69/72/95-101/113-115/117-119/
+   *  134-136/375/398/510-515/542-545/549/621-623）——飞龙 87/88 同为 aiStyle6 但
+   *  非钻地不在表内 */
+  behindTiles?: boolean;
   /** SetDefaults color：非 default 时 Main.DrawNPC 二次绘制同贴图（GetColor 逐像素乘法贴轮廓） */
   color?: number[];  // [r, g, b, a]
   critter?: boolean;  // NPCID.Sets.CountsAsCritter 小动物（tools/extract-critters.mjs 提取）

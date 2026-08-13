@@ -23,6 +23,9 @@ export interface GameHooks {
   /** 入侵开启 + 逼近公告（Game.startInvasionAndAnnounce 实体侧通道——火星探测器
    *  逃逸触发用;缺省回退方自行静默 startInvasion） */
   startInvasionWithAnnounce?(type: number, ignoreDelay?: boolean): boolean;
+  /** PunchCameraModifier 近似（Main.instance.CameraModifiers）：dirX/dirY 方向
+   *  单位向量 + strength(缺省 20) + frames(缺省 30)——鹿角怪震屏源 */
+  punchCamera?(dirX: number, dirY: number, frames?: number, strength?: number): void;
   /** 弹幕砍 tileCut 物（Projectile.CutTiles 语义：箭扫过杂草/瓦罐 → Game 内部分流） */
   cutTile(x: number, y: number): void;
   /** 传送门弹 601 落门（PortalHelper.TryPlacingPortal + AddPortal；Game 实现入 props 桶） */

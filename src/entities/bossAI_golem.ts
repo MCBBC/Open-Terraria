@@ -4,7 +4,8 @@
 //   拳 247/248 aiStyle 47  AI_047_GolemFist    NPC.cs:19171-19446(肩锚归位→蓄力→直线冲拳→回位)
 //   自由头 249 aiStyle 48  GolemHeadFree       NPC.cs:31500-31741(自主悬浮+火焰弹/眼激光)
 //   SetDefaults:NPC.cs:12095-12149(245-249 属性)、17943-17960(245-249 scale *= 0.5)。
-// 经典模式主链 1:1;expert/getGoodWorld 分支保留注释;netcode/纯视觉尘(Gore/netOffset)跳过。
+// 经典模式主链 1:1;getGoodWorld 分支已实装(balance +2/+3/蓄力 +100/本体+拳落体砸
+// 火把/FTW 断臂尘由砸火把取代);expert 分支保留注释;netcode/纯视觉尘(Gore/netOffset)跳过。
 //
 // 死亡链(任务约定,原版 checkDead 语义的对齐版):
 //   · 挂载头在场时本体无敌(NPC.cs:19513 dontTakeDamage = flag)——一阶段打头/拳;
@@ -17,6 +18,7 @@ import type { Enemy } from './Enemy';
 import type { GameHooks } from './types';
 import type { Player } from './Player';
 import { TILE } from '../core/constants';
+import { TILE_DEFS } from '../data/tiles';
 import { vanillaNpc } from '../data/vanillaNpcs';
 import { spawnPart, shoot, accelTo, losClear } from './bossAI';
 
@@ -67,17 +69,36 @@ const findBody = (game: GameHooks): Enemy | null =>
 const findHead = (game: GameHooks): Enemy | null =>
   (game.enemies() as Enemy[]).find((n) => !n.dead && (n.vanillaId === 246 || n.vanillaId === 249)) ?? null;
 
-/** GetMyBalance + 脱离神庙/丛林加成(NPC.cs:19450-19457 / :19173-19180 / :31274-31282 / :31506-31512):
- *  经典单人 = 1;getGoodWorld +2/+3(expert,略);
- *  (!ZoneLihzhardTemple && !ZoneJungle) || 玩家 Center.Y < worldSurface*16 → ×2。
+/** GetMyBalance + getGoodWorld/脱离神庙/丛林加成(NPC.cs:19450-19457 / :19173-19180 /
+ *  :31274-31282 / :31506-31512):
+ *  经典单人 = 1;getGoodWorld 本体 +2、拳/挂载头/自由头 +3(先加再乘);
+ *  (!ZoneLihzhardTemple && !ZoneJungle) || 玩家 Center.Y < worldSurface*16 → ×2(expert 档略)。
  *  Zone 判定接 Game.scene(SceneMetrics):zoneTemple = 中心格墙 87(SceneMetrics.cs:688,
  *  神庙砖 226 不构成独立 Zone,只计入 JungleTileCount——SceneMetrics.cs:613,阈值 140)。 */
-const balanceNum = (game: GameHooks, player: Player | null): number => {
+const balanceNum = (game: GameHooks, player: Player | null, ftwBonus = 0): number => {
   let num = 1;
+  if (ftwBonus > 0 && game.world.seedFlags?.getGoodWorld) num += ftwBonus;
   const s = game.scene;
   const inTempleOrJungle = !!s?.zoneTemple || !!s?.zoneJungle;
   if (!inTempleOrJungle || (player != null && player.cy < game.world.groundLevel * TILE)) num *= 2;
   return num;
+};
+
+/** getGoodWorld 落体砸火把(TileID.Sets.Torches = tile 4;NPC.cs:19510-19532 本体 /
+ *  :19335-19366 拳冲拳段):像素带内激活的火把格直接置非激活(无掉落/无音效)。
+ *  火把判定同 TorchGod:sheet===4(仓内 tile id 空间非原版号)。
+ *  ★ 调用方照原版传带界——本体 Y 上界用 width(非 height)是原版笔误,1:1 保留 */
+const smashTorches = (
+  st: GameHooks['world']['store'],
+  x0: number, x1: number, y0: number, y1: number,
+): void => {
+  for (let j = Math.floor(x0 / TILE); j < x1 / TILE; j++) {
+    for (let k = Math.floor(y0 / TILE); k < y1 / TILE; k++) {
+      if (!st.inBounds(j, k)) continue;
+      const i = st.idx(j, k);
+      if (st.flags[i] && TILE_DEFS[st.type[i]]?.vanilla?.sheet === 4) st.setTile(j, k, 0);
+    }
+  }
 };
 
 /** 出生渐显(SetDefaults alpha=255;AI 内 alpha -= 10/2t,NPC.cs:19477-19485 / :31310-31317 / :19187-19194)。
@@ -271,7 +292,7 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
 
-  const num = balanceNum(game, player);
+  const num = balanceNum(game, player, 2);   // 本体 getGoodWorld +2(:19451-19454)
 
   // ---- 部件存活扫描(NPC.cs:19487-19512):flag=头/flag2=左拳/flag3=右拳 ----
   //  注意头原体变身自由态后(ai3=1)视为"挂载头已失"——本体解除无敌且蓄力提速,
@@ -285,11 +306,18 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
   }
   // dontTakeDamage = 挂载头在场(NPC.cs:19513):一阶段本体无敌,先打头/拳
   if (hasHead) e.iframes = 2;
-  // getGoodWorld 落体砸火把(:19514-19534,expert 略)
+  // getGoodWorld 落体砸火把(:19510-19532):下落中(vy>0)扫过 AABB 的火把全部熄灭。
+  // Y 上界用 width 是原版笔误,1:1 照抄
+  if (game.world.seedFlags?.getGoodWorld && e.vy > 0) {
+    smashTorches(game.world.store, e.x, e.x + e.w, e.y, e.y + e.w);
+  }
 
-  // ---- 断臂尘(NPC.cs:19536-19595):原版每 tick 双簇 Dust+Gore,此处每 10t 一簇粒子近似 ----
-  if (!hasL && e.aiT % 10 === 0) game.spawnParticles(e.cx - 80 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
-  if (!hasR && e.aiT % 10 === 0) game.spawnParticles(e.cx + 62 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+  // ---- 断臂尘(NPC.cs:19529-19595):原版整块被 !getGoodWorld 包住(FTW 下由砸火把
+  //      取代,无断臂尘);此处每 10t 一簇粒子近似 ----
+  if (!game.world.seedFlags?.getGoodWorld) {
+    if (!hasL && e.aiT % 10 === 0) game.spawnParticles(e.cx - 80 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+    if (!hasR && e.aiT % 10 === 0) game.spawnParticles(e.cx + 62 * SCALE, e.cy - 9, '#9A8FA0', 3, 1.2, { life: 40 });
+  }
 
   // ---- 跳跃穿墙解除(NPC.cs:19569-19578):下落低于玩家顶 / 有视线且自身不在块内 ----
   if (x.noTC && player && !player.dead) {
@@ -315,7 +343,7 @@ export function golemAI(e: Enemy, game: GameHooks, player: Player | null) {
         if (e.hp < e.maxHp / 2) num4 += 4;
         if (e.hp < e.maxHp / 3) num4 += 8;
         num4 *= num;
-        // getGoodWorld:num4 += 100(:19613-19616,expert 略)
+        if (game.world.seedFlags?.getGoodWorld) num4 += 100;   // :19613-19616(乘后再加)
       }
       e.ai1 += num4;
       if (e.ai1 >= 300) e.ai1 = -20;
@@ -413,7 +441,7 @@ export function golemHeadAI(e: Enemy, game: GameHooks, player: Player | null) {
   const body = findBody(game);
   if (!x.free && (!body || body.ai3 === 1 || body.hp <= 0)) golemHeadGoFree(e, game);
 
-  const num = balanceNum(game, player);
+  const num = balanceNum(game, player, 3);   // 挂载/自由头 getGoodWorld +3(:31277-31280/:31505-31508)
 
   if (!x.free && body) {
     // ================= 挂载态 aiStyle 46(NPC.cs:31273-31499) =================
@@ -540,7 +568,7 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!anchor) { e.dead = true; return; }
   e.master = anchor; // 拳链渲染用（Renderer.drawGolemFistChain，Main.cs:22593-22632）
 
-  const num = balanceNum(game, player);
+  const num = balanceNum(game, player, 3);   // 拳 getGoodWorld +3(:19173-19176)
   // 渐显(:19187-19194):期间 ai[1]=0
   if (fadeAlpha(e, x) > 0) e.ai1 = 0;
 
@@ -612,6 +640,11 @@ export function golemFistAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   } else if (x.state === 2) {
     // ---- 冲拳飞行(:19333-19393) ----
+    // getGoodWorld 冲拳沿途砸火把(:19335-19362):AABB 外扩 1 格扫过即熄
+    // (Y 上界同样用 width,原版笔误 1:1)
+    if (game.world.seedFlags?.getGoodWorld) {
+      smashTorches(game.world.store, e.x - TILE, e.x + e.w + TILE, e.y - TILE, e.y + e.w + TILE);
+    }
     e.ai1 += 1;
     if (e.ai1 === 1) game.playSfx('roar', 0.4);   // SoundID.Item14(:19344-19346)
     if (e.aiT % 2 === 0) {                        // :19348-19356 焰尾尘(粒子近似)

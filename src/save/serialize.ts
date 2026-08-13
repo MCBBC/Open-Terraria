@@ -87,6 +87,14 @@ export interface SaveData {
   altarCount?: number;
   /** 流星雨剩余计数（WorldGen.meteorShowerCount，WorldFile.cs:1069/:177；旧档缺省 0） */
   meteorShowerCount?: number;
+  /** 夜间小动物概率五件套（NPC.setFireFlyChance，NPC.cs:94557-94610；每夜重掷，
+   *  原版为 NPC 静态位不落盘——本仓按运行时审计台账要求随存档；旧档缺省=代表值） */
+  critterChances?: {
+    fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
+    butterfly: number; stinkBug: number;
+  };
+  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:114/163；旧档缺省 0） */
+  cultistDelay?: number;
   /** 渔夫任务链世界段（Main.anglerQuest + anglerWhoFinishedToday，WorldFile.cs:1329-1335/
    *  2147-2161；anglerQuestFinished 运行时态不存——读档 loadTempInfo 重置 WF:628-629） */
   angler?: { quest: number; whoFinishedToday: string[] };
@@ -199,6 +207,13 @@ export interface SaveMeta {
   altarCount?: number;
   /** 流星雨剩余计数（WorldGen.meteorShowerCount，WorldFile.cs:1069/:177；旧档缺省 0） */
   meteorShowerCount?: number;
+  /** 夜间小动物概率五件套（setFireFlyChance；SaveData.critterChances 同形） */
+  critterChances?: {
+    fireFly: number; fireFlyFriendly: number; fireFlyMultiple: number;
+    butterfly: number; stinkBug: number;
+  };
+  /** CultistRitual.delay（WF:114/163；旧档缺省 0） */
+  cultistDelay?: number;
   /** 渔夫任务链世界段（SaveData.angler 同形；旧档缺省=索引 0/空名单） */
   angler?: { quest: number; whoFinishedToday: string[] };
   /** 困难矿世界锁定选种（WorldGen.SavedOreTiers，WF:1305-1307；旧档缺省 -1 = 未砸过） */
@@ -301,6 +316,8 @@ export function serializeSave(
     invasion: meta.invasion ?? { type: 0, size: 0, sizeStart: 0, x: 0, delay: 0 },
     altarCount: meta.altarCount ?? 0,
     meteorShowerCount: meta.meteorShowerCount ?? 0,
+    critterChances: meta.critterChances ?? { fireFly: 30, fireFlyFriendly: 5, fireFlyMultiple: 15, butterfly: 10, stinkBug: 999999 },
+    cultistDelay: meta.cultistDelay ?? 0,
     angler: meta.angler ?? { quest: 0, whoFinishedToday: [] },   // WF:1329-1335（旧档缺省）
     savedOreTiers: meta.savedOreTiers ?? { cobalt: -1, mythril: -1, adamantite: -1 },
     shadowOrbCount: meta.shadowOrbCount ?? 0,

@@ -1033,5 +1033,10 @@
   },
   "3223": {
     "brainOfConfusion": 1
+  },
+  "3878": {
+    "dmgRanged": 0.25,
+    "minionDmg2508": 1,
+    "ammoSave": 1
   }
 }

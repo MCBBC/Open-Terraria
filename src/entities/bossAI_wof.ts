@@ -170,7 +170,24 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   const L = wallLocalOf(e);
   // :25726-25731 localAI[0]==0 → 初始化,draw 区域复位 -1
   if (e.ai3 === 0) { e.ai3 = 1; wofDrawAreaBottom = -1; wofDrawAreaTop = -1; }
-  // :25733-25790 getGoodWorld 随机刷 Hoplite(24):FTW 专属,不实现
+  // ---- :25731-25790 FTW(for the worthy)随机刷 Hoplite(24):每 tick 1/180 掷骰且
+  //      在场 <4 只;落点 = 玩家中心格 ±50 格随机,沿 Y 向下坠到首个实心格、退一格
+  //      (该格非实心才收,1000 次兜底);NewNPC 为 Bottom 锚点(x*16+8, y*16) ----
+  if (game.world.seedFlags?.getGoodWorld && Math.floor(Math.random() * 180) === 0
+    && countType(game, 24) < 4) {
+    const baseX = player ? player.cx : e.cx, baseY = player ? player.cy : e.cy;
+    for (let num365 = 0; num365 < 1000; num365++) {
+      const num366 = Math.floor(baseX / TILE) + Math.floor(Math.random() * 101) - 50;
+      let num367 = Math.floor(baseY / TILE) + Math.floor(Math.random() * 101) - 50;
+      while (num367 < st.h - 10 && !st.isSolid(num366, num367)) num367++;
+      num367--;
+      if (!st.isSolid(num366, num367)) {
+        const hoplite = spawnVanillaEnemy(game, 24, num366 * TILE + 8, num367 * TILE);
+        if (hoplite) { hoplite.x -= hoplite.w / 2; hoplite.y -= hoplite.h; }
+        break;
+      }
+    }
+  }
 
   // ---- Leech 计时(:25792-25800):ai1 每 tick +1;ai2==0 时低血额外 +1(<50%)/+1(<20%);
   //      满 2700 → ai2=1(进入放虫轮) ----
@@ -261,14 +278,27 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   const num381 = (wofDrawAreaBottom + wofDrawAreaTop) / 2 - e.h / 2;
   e.y = num381;
 
-  // ---- 推进速度(:25979-25994 经典档):1.5 起,血量阈值逐档加成 ----
+  // ---- 推进速度(:25944-26011):1.5 起,血量阈值逐档加成 ----
   let num382 = 1.5;
   if (e.hp < e.maxHp * 0.75) num382 += 0.25;
   if (e.hp < e.maxHp * 0.5) num382 += 0.4;
   if (e.hp < e.maxHp * 0.25) num382 += 0.5;
   if (e.hp < e.maxHp * 0.1) num382 += 0.6;
-  // :25995-26011 expert(<66%+0.3/<33%+0.3/<5%+0.6/<3.5%+0.6,整体 ×1.35+0.35)与
-  //        getGoodWorld(×1.1+0.2)分支:不实现
+  // :25956-26011 expert(<66%+0.3/<33%+0.3/<5%/3.5%/2.5% 各 +0.6,整体 ×1.35+0.35)
+  // 与 getGoodWorld(×1.1+0.2)——顺序照原文:expert 先乘加,g 再乘加其结果
+  if (mainExpertMode(game.world)) {
+    if (e.hp < e.maxHp * 0.66) num382 += 0.3;
+    if (e.hp < e.maxHp * 0.33) num382 += 0.3;
+    if (e.hp < e.maxHp * 0.05) num382 += 0.6;
+    if (e.hp < e.maxHp * 0.035) num382 += 0.6;
+    if (e.hp < e.maxHp * 0.025) num382 += 0.6;
+    num382 *= 1.35;
+    num382 += 0.35;
+  }
+  if (game.world.seedFlags?.getGoodWorld) {
+    num382 *= 1.1;
+    num382 += 0.2;
+  }
 
   // ---- 推进方向(:26013-26029):vx==0(首帧)按玩家侧定向;此后恒沿 direction 定速 ----
   if (e.vx === 0) {
@@ -418,7 +448,9 @@ export function wofEyeAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (head.hp < head.maxHp * 0.5) { L.charge += 1; num409++; }
   if (head.hp < head.maxHp * 0.25) { L.charge += 1; num409 += 2; }
   if (head.hp < head.maxHp * 0.1) { L.charge += 2; num409 += 3; }
-  // :26236-26242 expert(整体 +1 档,<10% 再 +3):不实现
+  // :26236-26242 expert(整体 +1 档,<10% 再 +3):不实现。
+  // ★ 1456 实读:之眼整段(26141-26298)无 getGoodWorld 分支——任务清单所记
+  //   ":26236-26242 g 分支"实为 expertMode 块,FTW 无加档,无对应代码可移植
   if (L.burst === 0) {
     // 蓄能段(:26245-26249):满 600t → 进连射
     if (L.charge > 600) { L.burst = 1; L.charge = 0; }

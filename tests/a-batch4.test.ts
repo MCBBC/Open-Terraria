@@ -478,6 +478,43 @@ describe('A4-7 风气球 AI_113（NPC.cs:48253-48430）', () => {
     // 节奏：ai2 重置 20，后续落地计数到 0 前不再跳
     expect(mimic.ai2).toBe(20);
   });
+
+  it('AI_117 恐惧鹦鹉螺 618：出场渐显 50t → 悬停 60t → 血弹齐射(814)→ 回悬停 ai3+1', () => {
+    const w = emptyWorld();
+    w.clock.timeOfDay = 0;                                 // 深夜
+    w.clock.bloodMoon = true;                              // 血月（目标有效门）
+    const list: unknown[] = [];
+    const projectiles: unknown[] = [];
+    const game = makeGame(w, list, projectiles);
+    const boss = Enemy.fromVanilla(618, 100 * TILE, 60 * TILE)!;
+    list.push(boss);
+    (game as unknown as { player: Player }).player = fakePlayer(120 * TILE, 60 * TILE);
+    // 出场（:47502-47509）：ai0=-1 + spawnAlpha=255 + 首帧 ai2=direction（朝玩家=+1）
+    boss.fixedUpdate(1, game);
+    expect(boss.ai0).toBe(-1);
+    expect(boss.spawnAlpha).toBe(255);
+    expect(boss.ai2).toBe(2);                             // direction(+1) + 首帧自增
+    // ai2 ≥ 50 退出：首帧后 ai2=2，第 49 tick 到 50 → 总计 49 tick
+    for (let t = 0; t < 47; t++) boss.fixedUpdate(1, game);
+    expect(boss.ai0).toBe(-1);
+    boss.fixedUpdate(1, game);
+    expect(boss.ai0).toBe(0);                             // 悬停态
+    expect(boss.spawnAlpha).toBe(0);                      // 渐显结束
+    // 悬停 60t（ai1>60）→ ai3=0 偶数 → 血弹齐射态 2（:47624-47633）
+    for (let t = 0; t < 62; t++) boss.fixedUpdate(1, game);
+    expect(boss.ai0).toBe(2);
+    expect(boss.ai3).toBe(1);                             // 非 0 态迁移 ai3+1
+    // 蓄力 90t 无弹（ai1 0→89）→ 第 90t（ai1==90）首脉冲出 814 血弹 5-10 发
+    for (let t = 0; t < 89; t++) boss.fixedUpdate(1, game);
+    expect(projectiles.length).toBe(0);
+    boss.fixedUpdate(1, game);
+    expect(projectiles.length).toBeGreaterThanOrEqual(5);
+    expect(projectiles.length).toBeLessThanOrEqual(10);
+    expect((projectiles[0] as { projId: number }).projId).toBe(814);
+    // 齐射段 ai1 到 180 回悬停（90t 后 ai3=2 → 下轮 %2==0 仍齐射、%7==3 时召唤）
+    for (let t = 0; t < 90; t++) boss.fixedUpdate(1, game);
+    expect(boss.ai0).toBe(0);
+  });
 });
 
 // ===========================================================================

@@ -90,7 +90,7 @@ function hitEnemies(
   // 反射后的弹体 friendly 已翻——不再入敌怪判定（原版 Damage NPC 需 friendly 门禁）
   if (me.reflected) return;
   for (const ent of game.enemies()) {
-    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
+    const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean; hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean; def?: { hitSound?: string[] }; reflectsProjectiles?: boolean };
     if (e.dead) continue;
     if (!(self.x < e.x + e.w && self.x + self.w > e.x && self.y < e.y + e.h && self.y + self.h > e.y)) continue;
     // 反射源命中（Projectile.cs:12050-12060）：按 projId 查 CanBeReflected 白名单——
@@ -406,6 +406,75 @@ export class SpearProj extends Entity {
     this.x = p.cx - this.w / 2 + this.dx * offset * this.spd;
     this.y = p.cy - this.h / 2 + this.dy * offset * this.spd;
     hitEnemies(this, game, this.hitCd, 9999, this.dx > 0 ? 1 : -1, this.armorPen); // 一次突刺每敌只结算一次
+  }
+}
+
+// ================= 燃烧瓶（proj 399 aiStyle 68；Molotov 2590→399，Kill 链 :70889-70928） =================
+// 弹跳物理（ai[0]>=15 起重力 0.2/t，AI_068 :29048-29100）；死亡（撞块/命中/超时）→
+// 6 朵火云 400+rand3（:70918-70927：散布 ±8/上抛，伤 ×0.5，火云=aiStyle 14 弹跳穿透 3、
+// 360t、命中 OnFire 3-6s :10850-10852）
+export class MolotovProj extends Entity {
+  w = 14; h = 14;
+  vx: number;
+  vy: number;
+  damage: number;
+  critChance = 0.04;
+  armorPen = 0;
+  private t = 0;
+  private hitSet = new Set<number>();
+  dead = false;
+  /** 火云生成回调（Game 注入——避免实体循环依赖） */
+  spawnFires: (x: number, y: number, dmg: number, vx: number, vy: number) => void;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number,
+    spawnFires: (x: number, y: number, dmg: number, vx: number, vy: number) => void) {
+    super();
+    this.x = x; this.y = y;
+    this.vx = vx; this.vy = vy;
+    this.damage = damage;
+    this.spawnFires = spawnFires;
+  }
+
+  private breakOpen(game: GameHooks): void {
+    this.dead = true;
+    // :70918-70927 六朵火云：x 散布 -vx×rand(20,50)%±8、y -|vy|×rand(30,50)%-8..+2
+    for (let i = 0; i < 6; i++) {
+      const fx = -this.vx * (20 + Math.floor(Math.random() * 30)) * 0.01 + (Math.random() * 40 - 20) * 0.4;
+      const fy = -Math.abs(this.vy) * (30 + Math.floor(Math.random() * 20)) * 0.01 + (Math.random() * 24 - 20) * 0.4;
+      this.spawnFires(this.cx + fx, this.cy + fy, Math.max(1, Math.round(this.damage * 0.5)), fx, fy);
+    }
+    game.spawnParticles(this.cx, this.cy, '#FF9A3C', 20, 5, { life: 30, grav: -0.06, damp: 0.94 });
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks) {
+    if (++this.t >= 3) { /* alpha 淡入（:29054）视觉从略 */ }
+    if (this.t >= 15) this.vy = Math.min(this.vy + 0.2, 16); // :29063
+    else this.vy = Math.min(this.vy + 0.1, 16);
+    this.vx *= 0.99;
+    let nx = this.x + this.vx, ny = this.y + this.vy;
+    const st = game.world.store;
+    const solidAt = (px: number, py: number) => {
+      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
+      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
+    };
+    if (solidAt(nx + this.w / 2, this.y + this.h / 2)) { this.breakOpen(game); return; } // 撞块即裂
+    if (solidAt(this.x + this.w / 2, ny + this.h - 1)) { this.breakOpen(game); return; }
+    this.x = nx; this.y = ny;
+    if (this.t > 600) { this.dead = true; return; }
+    // 命中敌即裂（penetrate 1）
+    for (const ent of game.enemies()) {
+      const e = ent as unknown as { x: number; y: number; w: number; h: number; id: number; dead: boolean };
+      if (e.dead || this.hitSet.has(e.id)) continue;
+      if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
+        this.hitSet.add(e.id);
+        this.breakOpen(game);
+        return;
+      }
+    }
+  }
+
+  draw(r: Renderer, cam: Camera): void {
+    drawProj(r, cam, this, 399, Math.atan2(this.vy, this.vx) + Math.PI / 2, '#804020');
   }
 }
 

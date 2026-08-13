@@ -35,8 +35,26 @@ export class Camera {
     if (this.worldH * TILE < halfH * 2) this.y = this.worldH * TILE / 2;
   }
 
+  /** PunchCameraModifier（Main.cs）近似：冲击向量随帧衰减,worldToScreen 统一叠加 */
+  punchX = 0; punchY = 0;
+  private punchFrames = 0;
+  private punchVecX = 0; private punchVecY = 0;
+  addPunch(dirX: number, dirY: number, strength = 20, frames = 30): void {
+    const d = Math.hypot(dirX, dirY) || 1;
+    this.punchVecX += (dirX / d) * strength;
+    this.punchVecY += (dirY / d) * strength;
+    this.punchFrames = Math.max(this.punchFrames, frames);
+  }
+  /** 每帧渲染前调用：衰减位移（线性归零 + 向量残留 ×0.92） */
+  tickPunch(): void {
+    if (this.punchFrames <= 0) { this.punchX = this.punchY = 0; this.punchVecX = this.punchVecY = 0; return; }
+    this.punchFrames--;
+    this.punchX = this.punchVecX * (this.punchFrames / 30);
+    this.punchY = this.punchVecY * (this.punchFrames / 30);
+    this.punchVecX *= 0.92; this.punchVecY *= 0.92;
+  }
   worldToScreen(wx: number, wy: number): [number, number] {
-    return [(wx - this.x) * this.zoom + this.viewW / 2, (wy - this.y) * this.zoom + this.viewH / 2];
+    return [(wx - this.x + this.punchX) * this.zoom + this.viewW / 2, (wy - this.y + this.punchY) * this.zoom + this.viewH / 2];
   }
   screenToWorld(sx: number, sy: number): [number, number] {
     return [(sx - this.viewW / 2) / this.zoom + this.x, (sy - this.viewH / 2) / this.zoom + this.y];

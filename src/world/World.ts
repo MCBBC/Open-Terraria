@@ -62,7 +62,7 @@ export class Clock {
 }
 
 export class World {
-  store: TileStore;
+  store!: TileStore;   // definite assignment(读档 skipStore 路径由 fromPacket 注入)
   /** 本帧 SceneMetrics 快照（Game 每帧写；Enemy 判 zoneGraveyard 等只读用） */
   scene: import('./SceneMetrics').SceneFlags | null = null;
   /** 世界难度 = 原版 Main.GameMode（Main.cs:2677，ActiveWorldFileData.GameMode）：
@@ -75,6 +75,23 @@ export class World {
    *  消耗:UpdateWorld :71771-71810 每 tick 1/4 掷一颗 1078 伤害碎块,计数-1;
    *  晷快进直接清零(:71774-71777) */
   meteorShowerCount = 0;
+  // ---- 夜间小动物概率五件套（NPC.setFireFlyChance，NPC.cs:94557-94610）----
+  // 每夜 StartNight 重掷（Main.cs:64706）；原版为 NPC 静态位不落盘，本仓按运行时
+  // 审计台账要求随存档（旧档缺省=代表值 30/5/15/10/绝迹）。消费端：
+  //  fireFlyChance → VanillaSpawner 夜萤火虫门（NPC.cs:4413 Next(fireFlyChance)）；
+  //  fireFlyFriendly/fireFlyMultiple → spawnFriendly 夜萤火虫群（NPC.cs:2321/:2329）；
+  //  butterflyChance/stinkBugChance → 白昼蝴蝶/椿象（NPC.cs:2394/:2381）。
+  // 999999 = 当夜该族绝迹（原版哨兵值）
+  fireFlyChance = 30;
+  fireFlyFriendly = 5;
+  fireFlyMultiple = 15;
+  butterflyChance = 10;
+  stinkBugChance = 999999;
+  /** CultistRitual.delay（CultistRitual.cs:32，WorldFile.cs:114/163 随存档）：
+   *  地牢拜月教石碑 437 自然重生延迟。石碑召出 439 时置 43200（TabletDestroyed，
+   *  NPC.cs:38881），按 dayRate 递减；双零掷 TrySpawning(dungeonX/Y)（Main.cs:64427
+   *  每帧 UpdateTime）。recheck 为运行时静态位不落盘（RuntimeEvents.ts） */
+  cultistDelay = 0;
   /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
    *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */
   journeyTimeRate = 1;
@@ -169,8 +186,8 @@ export class World {
   }
   // 树登记：砍树干时找到整棵树（roots → 范围）
   trees: Array<{ x: number; y: number; h: number }> = [];
-  /** 战争迷雾：1 = 已探索。按 tile 粒度。 */
-  explored: Uint8Array;
+  /** 战争迷雾：1 = 已探索。按 tile 粒度。（读档 skipStore 路径由 fromPacket 注入） */
+  explored!: Uint8Array;
   /** 原版树样式数据（header treeX/treeStyle）：横向 4 区森林树冠样式 */
   treeX: number[] = [];
   treeStyle: number[] = [0, 0, 0, 0];
@@ -245,9 +262,13 @@ export class World {
     if (changed) this.exploredVersion++;
   }
 
-  constructor(w: number, h: number, seed: number, name = '新世界') {
-    this.store = new TileStore(w, h);
-    this.explored = new Uint8Array(w * h);
+  constructor(w: number, h: number, seed: number, name = '新世界', skipStore = false) {
+    // skipStore(读档 fromPacket 专用):调用方立即以转移 buffer 版 TileStore+explored
+    // 注入——跳过默认分配免 15B/tile 丢弃式浪费(75-173MB);其余字段照常初始化
+    if (!skipStore) {
+      this.store = new TileStore(w, h);
+      this.explored = new Uint8Array(w * h);
+    }
     this.seed = seed;
     this.name = name;
     // 1 游戏日 = 30 现实分钟（24→40 后折中）
@@ -257,7 +278,9 @@ export class World {
   /** 从 worker 数据包重建（buffer 已 transfer 移交，零拷贝包装）。
    *  explored 未包含在包内（saveGame 不持久化、新生成/读档均全零）时按全零分配 */
   static fromPacket(p: import('../workers/protocol').WorldPacket): World {
-    const w = new World(p.w, p.h, p.seed, p.name);
+    // ★免丢弃分配(2026-08-13 读档优化):构造器先建完整默认 TileStore(15B/tile,
+    // 75-173MB)随即被转移 buffer 版替换丢弃。skipStore 跳过默认分配,其余字段照常初始化
+    const w = new World(p.w, p.h, p.seed, p.name, true);
     w.store = new TileStore(p.w, p.h, p.buf);
     w.explored = p.buf.explored ? new Uint8Array(p.buf.explored) : new Uint8Array(p.w * p.h);
     w.spawnX = p.spawnX; w.spawnY = p.spawnY;
@@ -290,6 +313,16 @@ export class World {
       w.fastForwardTimeToDawn = p.fastForwardTimeToDawn ?? false;
       w.fastForwardTimeToDusk = p.fastForwardTimeToDusk ?? false;
     }
+    // 夜间小动物概率五件套（setFireFlyChance；旧包缺省=代表值，当晚 StartNight 重掷）
+    if (p.critterChances !== undefined) {
+      w.fireFlyChance = p.critterChances.fireFly;
+      w.fireFlyFriendly = p.critterChances.fireFlyFriendly;
+      w.fireFlyMultiple = p.critterChances.fireFlyMultiple;
+      w.butterflyChance = p.critterChances.butterfly;
+      w.stinkBugChance = p.critterChances.stinkBug;
+    }
+    // CultistRitual.delay（WF:114/163；旧包缺省 0 = 首次直接可掷 TrySpawning）
+    if (p.cultistDelay !== undefined) w.cultistDelay = p.cultistDelay;
     if (p.weather) w.applyWeather(p.weather);
     if (p.bestiary) w.applyBestiary(p.bestiary);
     w.pendingTownNpcs = p.pendingTownNpcs;

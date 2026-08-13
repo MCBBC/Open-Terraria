@@ -204,6 +204,82 @@ describe('钩爪 AI_007（Projectile.cs:49647-49980）', () => {
     p.inputUp = false;
   });
 
+  it('反重力钩 446 自由悬浮（:22500-22515）：目标=锚+normalize(玩家-锚+输入×100)×200', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);
+    const g = fire(p, 446, 0, -1, 14);
+    for (let t = 0; t < 120 && g.ai0 !== GRAPPLE_LATCH; t++) g.fixedUpdate(1 / 60, hooks);
+    expect(g.ai0).toBe(GRAPPLE_LATCH);
+    const pcx = p.cx, pcy = p.cy;
+    p.vx = 0; p.vy = 0;
+    p.inputX = 1; p.inputDown = false; p.inputUp = false;   // 向右输入 → vec 偏右
+    p.fixedUpdate(1 / 60, hooks);
+    // vec = normalize((pcx,pcy) - 锚 + (100,0))；目标 = 锚 + vec×200
+    let vx = pcx - g.cx + 100, vy = pcy - g.cy + 0;
+    const vl = Math.hypot(vx, vy);
+    vx /= vl; vy /= vl;
+    const tx = (g.cx + vx * 200 - pcx);
+    const ty = (g.cy + vy * 200 - pcy);
+    const tl = Math.hypot(tx, ty);
+    const k = Math.min(1, 11 / tl);
+    expect(p.vx).toBeCloseTo(tx * k, 2);
+    expect(p.vy).toBeCloseTo(ty * k, 2);
+    p.inputX = 0;
+  });
+
+  it('松鼠钩 865 垂吊锚下 28px（:22538-22546 vector6 = -vector5×28，绳向 90° 吸附）', () => {
+    const { st, p, hooks } = makeWorld();
+    for (let x = 26; x <= 34; x++) st.setTileSilent(x, 24, DIRT);   // 锚在正上方 → 绳向=(0,-1)
+    const g = fire(p, 865, 0, -1, 11.5);
+    for (let t = 0; t < 120 && g.ai0 !== GRAPPLE_LATCH; t++) g.fixedUpdate(1 / 60, hooks);
+    expect(g.ai0).toBe(GRAPPLE_LATCH);
+    g.fixedUpdate(1 / 60, hooks);                  // 锚定 tick 起 rotation 吸附 90°（:49660-49665）
+    expect(Math.abs(g.rot % (Math.PI / 2))).toBeLessThan(1e-6);
+    const pcx = p.cx, pcy = p.cy;
+    p.vx = 0; p.vy = 0;
+    p.fixedUpdate(1 / 60, hooks);
+    // vector5 = (rot - PI/2) 的单位向量 = 玩家→锚方向；目标 = 锚 - vector5×28（垂吊点）
+    const a = g.rot - Math.PI / 2;
+    const ux = Math.cos(a), uy = Math.sin(a);
+    const tx = g.cx - ux * 28 - pcx;
+    const ty = g.cy - uy * 28 - pcy;
+    const tl = Math.hypot(tx, ty);
+    const k = Math.min(1, 11 / tl);
+    expect(p.vx).toBeCloseTo(tx * k, 2);
+    expect(p.vy).toBeCloseTo(ty * k, 2);
+    expect(uy).toBeLessThan(0);                    // 绳向朝上（锚在上方）
+    // 垂吊点 = 锚 - 绳向×28：绳向朝上 → 垂吊点在锚【下方】28px（玩家侧对侧）
+    expect(g.cy - uy * 28).toBeCloseTo(g.cy + 28, 5);
+    expect(Math.sign(ty)).toBe(Math.sign(uy));      // 牵引沿绳向越过锚到达垂吊点
+  });
+
+  it('多锚质心牵引（GetGrapplingForces :22490-22557）：两锚取平均', () => {
+    const { st, p, hooks } = makeWorld();
+    // 常春藤鞭（32，3 锚上限）：左上/右上两块砖
+    st.setTileSilent(22, 24, DIRT);
+    st.setTileSilent(38, 24, DIRT);
+    // 瞄准两块砖的格心（弹体出生 = 玩家中心偏移后 cx=491/cy=657）
+    const g1 = fire(p, 32, 22 * TILE + 8 - 491, 24 * TILE + 8 - 657, 13);
+    for (let t = 0; t < 200 && g1.ai0 !== GRAPPLE_LATCH; t++) g1.fixedUpdate(1 / 60, hooks);
+    expect(g1.ai0).toBe(GRAPPLE_LATCH);
+    const a1 = { x: g1.cx, y: g1.cy };
+    const g2 = fire(p, 32, 38 * TILE + 8 - 491, 24 * TILE + 8 - 657, 13);
+    for (let t = 0; t < 200 && g2.ai0 !== GRAPPLE_LATCH; t++) g2.fixedUpdate(1 / 60, hooks);
+    expect(g2.ai0).toBe(GRAPPLE_LATCH);
+    const a2 = { x: g2.cx, y: g2.cy };
+    expect(g2.latchX).toBeGreaterThan(g1.latchX); // 第二锚在右侧
+    const pcx = p.cx, pcy = p.cy;
+    p.vx = 0; p.vy = 0;
+    p.fixedUpdate(1 / 60, hooks);
+    // 质心 = (a1+a2)/2 → 速度 = (质心 - 玩家) 钳 15（32 号回收速度…牵引上限默认 11）
+    const tx = (a1.x + a2.x) / 2 - pcx;
+    const ty = (a1.y + a2.y) / 2 - pcy;
+    const tl = Math.hypot(tx, ty);
+    const k = Math.min(1, 11 / tl);
+    expect(p.vx).toBeCloseTo(tx * k, 2);
+    expect(p.vy).toBeCloseTo(ty * k, 2);
+  });
+
   it('超程回收（:49706-49747 / :49881-49927）：普通钩 300px 转 ai[0]=1', () => {
     const { st, p, hooks } = makeWorld();
     // 只放一块远砖（>300px 之外）——钩先超程转回收，永不挂上

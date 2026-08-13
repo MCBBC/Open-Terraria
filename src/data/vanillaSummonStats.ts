@@ -20,6 +20,7 @@ export const SUMMON_GEAR: Record<number, SummonFx> = {
   1845: { slot: 1, dmg: 0.10 },         // 死灵卷轴
   1864: { slot: 1, dmg: 0.15, kb: 2 },  // 纸莎草圣甲虫
   3809: { sentry: 1, dmg: 0.10 },       // 学徒围巾（OOA 配饰四件同款）
+  3878: { dmg: 0.25 },                   // 忍者大师装备（:12799 minionDamage+25%+ammoCost80）
   3810: { sentry: 1, dmg: 0.10 },       // 侍从盾
   3811: { sentry: 1, dmg: 0.10 },       // 女猎手扣盾
   3812: { sentry: 1, dmg: 0.10 },       // 武僧腰带

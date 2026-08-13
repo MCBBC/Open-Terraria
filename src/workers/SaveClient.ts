@@ -58,6 +58,10 @@ export class SaveClient {
       invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
         x: world.invasionX, delay: world.invasionDelay },
       altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
+      // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚重掷）
+      critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
+        fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
+      cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
       angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
       savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
       shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）

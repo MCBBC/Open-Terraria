@@ -51,7 +51,9 @@ export async function settleWorldLiquids(
         }
       }
     }
-    sim.waterCheck();
+    // ★load 模式跳过轮尾扫描(原版 WorldFile.cs:738-770 只有一次终态 WaterCheck;
+    // 轮尾扫描是生成期 pass 49 十轮结构 :16286 的,load 单轮下与终态背靠背白跑一次全图)
+    if (mode === 'gen') sim.waterCheck();
     if (sim.numLiquid === 0) break; // 收敛即止
   }
   sim.quickSettle = false;

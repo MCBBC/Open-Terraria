@@ -52,9 +52,9 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
   // pass 顺序对齐原版 AddGenerationPass 注册序（WorldGen.cs:11525-22660，
   // 权威对照表见 docs/worldgen/vanilla-pass-alignment.md）：
   //   地形1 洞穴(3/7-14e) 海滩(33/34) 生物群系(15-64) 矿石(27) 液体(31)
-  //   清理(37) 生命水晶(55) 半砖平滑(57) 瀑布(58) 地狱(31) 地狱屋(76 前段)
+  //   清理(37) 结构(15426+ 结构尾) 生命水晶(55) 半砖平滑(57) 瀑布(58) 地狱(31) 地狱屋(76 前段)
   //   地狱箱(63 地狱段) 小屋+散箱(63) 瓦罐(75) 矿骨堆(81) 表面(77/86/90)
-  //   地表装饰(76 traps/85) 海滩装饰(56) 结构
+  //   地表装饰(76 traps/85) 出生点(19605) 海滩装饰(56)
   const passes: Pass[] = [
     { name: '原版地形', run: vanillaTerrain },
     // 原版注册序 Dunes(cs:11540) < Ocean Sand(cs:11603):沙丘先于海洋沙/海滩塑造,
@@ -77,6 +77,11 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 微光以太在此挖洞灌液，清理/沉降在其后（Slush 31 已随 Lakes 入"液体"槽）
     { name: '微光', run: vanillaShimmer },
     { name: '清理', run: vanillaCleanup },
+    // 结构段（原版注册序 DirtWallCleanup(15310) < Pyramids(15426) < DirtRockWallRunner(15536)
+    // < LivingTrees(15551) < ... < SwordShrine，含 DirtWallCleanup 与 Shimmer 之间的全部
+    // 结构尾）——2026-08-13 前结构尾内嵌 vanillaBiomes（微光/清理之前执行）= 顺序偏差，
+    // 拆出为独立槽插在「清理」之后；DirtRockWallRunner 同批补缺。清单见 vanillaStructures
+    { name: '结构', run: vanillaStructures },
     // 原版 SettleLiquids（cs:16215）：Lakes 之后、SmoothWorld/Waterfalls 之前的中途
     // 沉降——瀑布唇缘/半砖平滑直接读 st.liquid 判定，必须在静止水面数据上跑
     // （此前沉降只在管线末尾 → 唇缘基于未沉降水体漂移）。
@@ -143,6 +148,10 @@ export async function generateWorld(cfg: GenConfig, onProgress?: (label: string,
     // 给 Flowers(20592) 消费
     { name: '倒木水景', run: vanillaFallenLogs },
     { name: '地表装饰', run: vanillaSurfaceDecor },
+    // 出生点（原版 SpawnPoint cs:19605，实现 cs:19605-19724）：中心随机扩张采样自然
+    // 地表 + 上空清理盒——注册序 Piles(18900) 之后的本 pass < 草墙(19734)。曾内嵌
+    // finalize 尾（全部 pass 之后执行）,2026-08-13 归位（清零批）
+    { name: '出生点', run: spawnPointPass },
     // 草墙（原版 SurfaceDirtWallsToGrassWalls cs:19734，注册序 Piles 18900 之后的
     // SpawnPoint 19605 < 本 pass < DyePlants 20126）：地表泥土墙洞 → 草墙 63/花墙 65——
     // Vines pass 花藤 382 的上游（藤头墙 ∈ {63,65,66,68} 才出花藤）
@@ -235,6 +244,7 @@ import { runShimmerPass } from './vanilla/ShimmerPass';
 import { runMicroBiomesPass } from './vanilla/MicroBiomesPass';
 import { runDirtToMudAndSiltPass } from './vanilla/DirtToMudPass';
 import { runCleanupPass } from './vanilla/CleanupPass';
+import { runDirtRockWallRunnerPass } from './vanilla/DirtRockWallRunnerPass';
 import { runSmoothWorldPass, runWaterfallLipPass } from './vanilla/HalfBrickPass';
 import { runShiniesPass, runGemsPass } from './vanilla/ShiniesPass';
 import { runGemCavesPass, runExposedGemsPass, runGemTreesPass } from './vanilla/GemPasses';
@@ -618,8 +628,30 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   //   FloatingIslandHouses(17971) < MicroBiomes(21785)
   // 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
   // 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
-  const oceanTreasures = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录
+  ctxOceanTreasures[0] = runOceanCavesPass(store, rng, gs); // 海洋洞窟蠕虫+宝藏点记录(→结构槽 UnderwaterChests 消费)
+  // 结构尾（Pyramids 15426 起 → SwordShrine）已拆出独立「结构」槽（「清理」之后执行，
+  // 原版序 DirtWallCleanup 15310 < Pyramids 15426）——见 vanillaStructures；
+  // 此前内嵌于此（微光/清理之前执行）= 结构先于清理，偏差（2026-08-13 清零批）
+}
+
+// 结构段 pass 群（原版注册序 DirtWallCleanup(15310) < Pyramids(15426) <
+// DirtRockWallRunner(15536) < LivingTrees(15551) < LivingTreeWalls(15792) <
+// DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887) < Temple(15911) <
+// Beehives(16005) < JungleShrines(16059) < Statues(16947) < BuriedChests+
+// UndergroundHouses(17066) < SurfaceChests(17226) < ChestsInJungleShrines(17308) <
+// UnderwaterChests(17343) < WaterChests < SpiderCaves(17455) < FloatingIslandHouses(17971)
+// < SwordShrine）——2026-08-13 前结构尾内嵌 vanillaBiomes（微光/清理之前执行）= 顺序偏差，
+// 拆出为独立槽插在「清理」之后（清零批）；DirtRockWallRunner 同批补缺。
+// 神庙/灌水提前到宝箱系之前（原版语义:大结构先占位,箱/雕像后放才不会塞进
+// 神庙体内或被灌水淹没;此前神庙在蜘蛛洞后 → 占地区内已塞雕像/箱,放置互相破坏）。
+function vanillaStructures({ store, rng, world }: GenCtx) {
+  const gs = ctxGs[0];
+  if (!gs) return;
+  const oceanTreasures = ctxOceanTreasures[0]; // OceanCaves(生物群系槽)登记的宝藏点
   runPyramidPass(store, rng, gs, world.chests); // Pyramids(沙岩砖金字塔+宝箱)
+  // Dirt Rock Wall Runner(15536,近地表泥土自然墙 2 → 石墙 59 游走斑)——注册序夹在
+  // 金字塔与世界树之间；2026-08-13 前整 pass 缺失
+  runDirtRockWallRunnerPass(store, rng, gs);
   // 原版注册序 Pyramids(15426) < LivingTrees(15551) < LivingTreeWalls(15792) <
   // DemonAndCrimsonAltars(15825) < SurfaceWaterInJungle(15887)——世界树插在金字塔后、
   // 丛林灌水前（方案 A 原版位置）；全图祭坛独立 pass 卡在活木墙与灌水之间。
@@ -848,6 +880,8 @@ function gravitatingSandPass({ store }: GenCtx) {
 
 // 原版 pass 与旧 pass 的桥接存储(单次生成生命周期)
 const ctxGs: [GenState | null] = [null];
+/** OceanCaves(生物群系槽 15228) → UnderwaterChests(结构槽 17343) 的宝藏点跨槽传递 */
+const ctxOceanTreasures: [Array<{ x: number; y: number }>] = [[]];
 /** 探针/测试用：最近一次生成的 GenState（山丘坐标等） */
 export function lastGenState(): GenState | null { return ctxGs[0]; }
 
@@ -1126,7 +1160,7 @@ const V_SHEET_DIM: Record<number, [number, number]> = (() => {
   }
   return out;
 })();
-function finalize({ store, surface, world, cfg, rng }: GenCtx) {
+function finalize({ store, world }: GenCtx) {
   // 幽灵净化:生成期 TileRunner 会在空气格写残留 type(原版语义,渲染不可见),
   // 但我们的存档格式无 active 位——进入存档前归零(防重读激活成浮空块)
   for (let i = 0; i < store.type.length; i++) {
@@ -1162,8 +1196,37 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
       }
     }
   }
-  // ---- 原版 Spawn Point（1456 注册 cs:19605，实现 19605-19724）：中心随机扩张采样，自然地表，不改地形 ----
-  // 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符
+  // ---- 出生点（原版 SpawnPoint cs:19605-19724）已归位为独立管线槽「出生点」
+  //      （地表装饰之后、草墙之前——注册序 Piles(18900) < SpawnPoint(19605) <
+  //      GrassWall(19734)）——见 spawnPointPass；曾内嵌本函数尾（全部 pass 之后
+  //      执行）,2026-08-13 清零批归位。finalize 仅保留幽灵/帧净化与常量同步
+
+  // 原版管线的地表/岩石线来自 TerrainPass 输出,旧 fbm 常数仅作回退
+  const gs = ctxGs[0];
+  if (gs) {
+    world.groundLevel = gs.worldSurface;
+    world.rockLevel = gs.rockLevel;
+  } else {
+    world.groundLevel = Math.floor(store.h * 0.28);
+    world.rockLevel = Math.floor(store.h * 0.33);
+  }
+  // 原版树样式（RandomizeTreeStyle 掷出：边界 + 互异样式）
+  if (gs) {
+    world.treeX = gs.treeX;
+    world.treeStyle = gs.treeStyle;
+    world.trees = gs.genTrees; // 砍伐整棵判定（Player/Game 消费）
+  }
+  // 树登记保留:树干不再被清理盒删除,world.trees 与实际树一一对应
+  // (原 |t.x-sx|<=5 过滤是配合"清掉树干防幽灵树"的,已不适用;
+  //  上空清理盒(3×3+5×5)已随出生点段迁往 spawnPointPass)
+}
+
+// ---------- 出生点（原版 SpawnPoint pass，注册 cs:19605 / 实现 cs:19605-19724） ----------
+// 中心随机扩张采样自然地表（不改地形），叠加我们的上空净空清理盒。
+// 旧实现为"找最平坦窗口+人工整平平台"——出生点是一块突兀平台，与原版自然地表不符。
+// 2026-08-13 前内嵌 finalize 尾（全部 pass 之后执行）——现按注册序归位为独立槽
+// （「地表装饰」之后、「草墙」之前）。
+function spawnPointPass({ store, rng, world }: GenCtx) {
   let range = 5;
   let sx = Math.floor(store.w / 2), sy = 0;
   for (;;) {
@@ -1228,28 +1291,10 @@ function finalize({ store, surface, world, cfg, rng }: GenCtx) {
       clearSpawnCell(sx + dx, sy - dy, false);
     }
   }
-
-  // 原版管线的地表/岩石线来自 TerrainPass 输出,旧 fbm 常数仅作回退
-  const gs = ctxGs[0];
-  if (gs) {
-    world.groundLevel = gs.worldSurface;
-    world.rockLevel = gs.rockLevel;
-  } else {
-    world.groundLevel = Math.floor(store.h * 0.28);
-    world.rockLevel = Math.floor(store.h * 0.33);
-  }
-  // 原版树样式（RandomizeTreeStyle 掷出：边界 + 互异样式）
-  if (gs) {
-    world.treeX = gs.treeX;
-    world.treeStyle = gs.treeStyle;
-    world.trees = gs.genTrees; // 砍伐整棵判定（Player/Game 消费）
-  }
   // 出生点上空净空（宽区:5×5,豁免草面/树干——草面保持地表,树干保持完整见上注）
   for (let dx = -2; dx <= 2; dx++) {
     for (let dy = 1; dy <= 5; dy++) {
       clearSpawnCell(sx + dx, sy - dy, true);
     }
   }
-  // 树登记保留:树干不再被清理盒删除,world.trees 与实际树一一对应
-  // (原 |t.x-sx|<=5 过滤是配合"清掉树干防幽灵树"的,已不适用)
 }

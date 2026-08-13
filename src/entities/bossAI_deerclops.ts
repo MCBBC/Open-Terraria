@@ -1,0 +1,582 @@
+// 鹿角怪 668 全链（NPC.cs AI_123_Deerclops :44338-44752 + 尖刺/碎石助手 :44754-44955
+// + Movement :44957-45042 + 弹幕 961/962/965）1:1 移植。
+//   状态机 ai0：-1 入场走位 / 0 追击选招 / 1 前向尖刺 / 2 碎石喷发 / 3 咆哮减速 /
+//   4 双侧尖刺 / 5 影手六连 / 6 回家 / 7 回家落地传送 / 8 离场消散。
+//   ai1=段内计数；ai2/ai3=家 tile（首帧落点）；lai0=空中标志（Movement 用）；
+//   lai2=专家影手被动计数；lai3=远距免伤爬升（≥450px 每 t+1,满 30 免伤；
+//   近距 -1）+出生红雾源。
+//   近似：Boss_CanShootExtraAt（多人）→ 单人 1200px 距离门；dust 109 → 粒子。
+import { Entity } from './Entity';
+import type { Enemy } from './Enemy';
+import type { GameHooks } from './types';
+import type { Player } from './Player';
+import { BuffType } from '../stats/Buffs';
+import { TILE } from '../core/constants';
+
+const SCREAM = ['deerclops_scream_0', 'deerclops_scream_1', 'deerclops_scream_2'];
+const ICE = ['deerclops_ice_attack_0', 'deerclops_ice_attack_1', 'deerclops_ice_attack_2'];
+
+/** WorldGen.SolidTile 语义（active+solid） */
+function solidAt(game: GameHooks, x: number, y: number): boolean {
+  const st = game.world.store;
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0 && !!st.isSolid(x, y);
+}
+
+/** WorldGen.ActiveAndWalkableTile：active 且非 solidTop 平台族（本仓 isPlatform 近似） */
+function walkableAt(game: GameHooks, x: number, y: number): boolean {
+  const st = game.world.store;
+  return st.inBounds(x, y) && st.flags[st.idx(x, y)] !== 0 && !st.isPlatform(x, y);
+}
+
+/** Collision.SolidCollision（px 盒内有实心块；acceptTopSurfaces=false 时半砖/上坡不算） */
+function solidCollisionPx(game: GameHooks, x: number, y: number, w: number, h: number): boolean {
+  const st = game.world.store;
+  const i0 = Math.floor(x / TILE), j0 = Math.floor(y / TILE);
+  const i1 = Math.floor((x + w - 0.01) / TILE), j1 = Math.floor((y + h - 0.01) / TILE);
+  for (let i = i0; i <= i1; i++) {
+    for (let j = j0; j <= j1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const idx = st.idx(i, j);
+      if (st.flags[idx] !== 0 && st.isSolid(i, j)) return true;
+    }
+  }
+  return false;
+}
+
+/** ShouldRunAway（NPC.cs:44716-44738）：死/出雪原（或离家 480px 外）且非追击态/
+ *  离玩家 2400px → 撤。isChasing=false 时"非雪原"即撤（回家态） */
+function shouldRunAway(e: Enemy, p: Player | null, isChasing: boolean, homeX: number, homeY: number): boolean {
+  if (!p || p.dead) return true;
+  const zoneSnow = !!game_sceneSnow(e, p) || Math.hypot(p.cx - homeX * TILE, p.cy - homeY * TILE) <= 480;
+  if (!isChasing && !zoneSnow) return true;
+  return Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 2400;
+}
+
+/** SceneMetrics.zoneSnow 由 Game 经 enemy.zoneSnow 缓存（无则 false） */
+function game_sceneSnow(e: Enemy, p: Player): boolean {
+  void e;
+  return !!(p as unknown as { zoneSnow?: boolean }).zoneSnow;
+}
+
+/** AI_123 主状态机（NPC.cs:44338-44752） */
+export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
+  const DMG_HANDS = 15;   // 主线影手/咆哮段伤害（外层 num）
+  const far = p != null && !p.dead && Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 450;
+  // :44346-44347 lai3 远距爬升 + 免伤（下界 -10 供入场段清零语义）
+  e.lai3 = Math.max(-10, Math.min(30, e.lai3 + (far ? 1 : -1)));
+  e.dontTakeDamage = e.lai3 >= 30;
+  if (e.lai3 > 0) {
+    // :44352-44360 红雾（dust 109）密度随 lai3/30
+    const k = e.lai3 / 30;
+    let n = Math.random() * k * 3;
+    while (n > 0) { n -= 1; game.spawnParticles(e.cx, e.cy, '#A03030', 1, 1.4, { life: 30, grav: -0.04 }); }
+  }
+  // :44362-44374 家 tile 初始化（首帧落点 → ai2/ai3）+ 离场计时
+  if (e.ai2 === 0 && e.ai3 === 0) {
+    e.ai2 = Math.floor(e.cx / TILE);
+    e.ai3 = Math.floor((e.y + e.h) / TILE);
+    e.despawnTimer = 86400;
+  }
+  if (e.despawnTimer > 0) e.despawnTimer--;
+  const homeX = e.ai2, homeY = e.ai3;
+  // :44378-44382 专家被动影手（SpawnPassiveShadowHands :44723-44752：
+  //   间隔随血量 80→40t,连发 3 只后重置;单人近似 Boss_CanShootExtraAt=1200px 门）
+  if (game.world.isExpert && p && !p.dead) {
+    const lifePct = e.hp / e.maxHp;
+    const interval = Math.round(80 + (0 - (1 - lifePct)) * 40 || 40);
+    e.lai2 += 1;
+    const idx = e.lai2 / interval;
+    if (e.lai2 % interval === 0 && idx < 3
+      && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 1200) {
+      addProj(game, new InsanityShadowProj(p, 10, Math.floor(idx) % 3));
+    }
+    if (idx >= 3) e.lai2 = 0;
+  } else {
+    e.lai2 = 0;
+  }
+
+  let halt = false, goHome = false;
+  switch (e.ai0) {
+    case -1: e.lai3 = -10; break;                    // :44386-44387
+    case 6: {                                        // 回家态 :44389-44439
+      if (p && !p.dead && !shouldRunAway(e, p, false, homeX, homeY)) {
+        e.ai0 = 0; e.ai1 = 0; e.lai1 = 0; break;
+      }
+      if (e.despawnTimer <= 0) { e.ai0 = 8; e.ai1 = 0; e.lai1 = 0; break; }
+      goHome = true;
+      e.ai1 += 1;
+      const homePx = { x: homeX * TILE, y: homeY * TILE };
+      const deepBelow = e.y < homePx.y + 1600;       // base.Top.Y > other.Y+1600（Top 更小=更高 → 取反）
+      const nearHome = Math.hypot(homePx.x - e.cx, homePx.y - e.cy) < 1020;
+      if (nearHome && e.ai1 % 600 < 420) halt = true;
+      if ((deepBelow === false && e.ai1 >= 300) || (!nearHome && e.ai1 >= 1500)) {
+        // 深于家 1600px 且 >300t,或远离超 1500t → 落地传送段
+        e.ai0 = 7; e.ai1 = 0; e.lai1 = 0;
+      }
+      break;
+    }
+    case 0: {                                        // 追击选招 :44441-44526
+      if (!p || p.dead || shouldRunAway(e, p, true, homeX, homeY)) {
+        e.ai0 = 6; e.ai1 = 0; e.lai1 = 0; break;
+      }
+      e.ai1 += 1;
+      // 玩家脚底参考点（base.Bottom-32 → 目标盒最近点）
+      const vx = e.cx, vy = e.y + e.h - 32;
+      const tx = Math.max(p.x, Math.min(vx, p.x + p.w));
+      const ty = Math.max(p.y, Math.min(vy, p.y + p.h));
+      const dx = tx - vx, dy = ty - vy;
+      const facingX = Math.abs(dx) >= Math.abs(dy) * 0.6 || Math.hypot(dx, dy) < 48;
+      const nearVert = dy <= 100 + p.h && dy >= -200;
+      if (Math.abs(dx) < 120 && nearVert && e.vy === 0 && e.lai1 >= 2) {
+        e.vx = 0; e.ai0 = 4; e.ai1 = 0; e.lai1 = 0; break;   // 双侧尖刺
+      }
+      if (Math.abs(dx) < 120 && nearVert && e.vy === 0 && facingX) {
+        e.vx = 0; e.ai0 = 1; e.ai1 = 0; e.lai1 += 1; break;  // 前向尖刺
+      }
+      if (e.vy === 0 && e.vx !== 0 && e.ai1 >= 240) {
+        e.vx = 0; e.ai0 = 2; e.ai1 = 0; e.lai1 = 0; break;   // 碎石
+      }
+      if (e.vy === 0 && e.vx === 0 && e.ai1 >= 90) {
+        e.vx = 0; e.ai0 = 5; e.ai1 = 0; e.lai1 = 0; break;   // 影手
+      }
+      if (e.vy === 0 && e.ai1 >= 120 && Math.abs(dx) > 100 && !p.buffs.has(BuffType.Slow)) {
+        e.vx = 0; e.ai0 = 3; e.ai1 = 0; e.lai1 = 0;          // 咆哮减速
+      }
+      break;
+    }
+    case 1:                                          // 前向尖刺 :44528-44538
+      e.ai1 += 1; halt = true;
+      makeSpikesForward(game, e, p, 1);
+      if (e.ai1 >= 80) { e.ai0 = 0; e.ai1 = 0; }
+      break;
+    case 4:                                          // 双侧尖刺 :44530-44543
+      e.ai1 += 1; halt = true;
+      makeSpikesBothSides(game, e, p, 1);
+      if (e.ai1 >= 90) { e.ai0 = 0; e.ai1 = 0; }
+      break;
+    case 2: {                                        // 碎石喷发 :44545-44588
+      const START = 32;                              // num8=4 → num9=8×4=32
+      e.ai1 += 1;
+      if (e.ai1 === START - 20) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
+      if (e.ai1 === START) game.playSfxFile?.('deerclops_rubble_attack', 1, e.cx, e.cy);
+      halt = true;
+      if (e.ai1 >= START) {
+        const srcX = Math.floor(e.cx / TILE) + e.facing * 3;
+        const srcY = Math.floor(e.y / TILE) - 10;
+        const since = e.ai1 - START;
+        if (since === 0) punch(game, e.cx, e.cy, 0, -1, 30);
+        // 每 t 一颗（num12=1）,共 20 颗
+        shootRubbleUp(game, e, p, srcX, srcY, 20, 1, 200, since);
+      }
+      if (e.ai1 >= 60) { e.ai0 = 0; e.ai1 = 0; }     // :44587
+      break;
+    }
+    case 3:                                          // 咆哮减速 :44589-44623
+      if (e.ai1 === 30) { game.playSfxFiles(SCREAM, 1, e.cx, e.cy); e.facing = p && p.cx > e.cx ? 1 : -1; }
+      e.ai1 += 1; halt = true;
+      if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
+        punch(game, e.cx, e.cy, Math.cos(Math.random() * Math.PI * 2), Math.sin(Math.random() * Math.PI * 2), 20);
+        // :44609-44616 800px 内玩家无 Slow(buff32) → AddBuff(32, 720t)
+        if (p && !p.dead && Math.hypot(p.cx - e.cx, p.cy - e.cy) < 800 && !p.buffs.has(BuffType.Slow)) {
+          p.buffs.apply(BuffType.Slow, 720 / 60);
+        }
+      }
+      if (e.ai1 >= 60) { e.ai0 = 0; e.ai1 = 0; }
+      break;
+    case 7:                                          // 回家落地 :44624-44646
+      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
+      e.ai1 += 1; halt = true;
+      if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
+        punch(game, e.cx, e.cy, Math.cos(Math.random() * Math.PI * 2), Math.sin(Math.random() * Math.PI * 2), 20);
+      }
+      if (e.ai1 === 40) {                            // :44637-44641 传送回家（Bottom 落点）
+        if (p && !p.dead) e.facing = p.cx > e.cx ? 1 : -1;
+        e.x = homeX * TILE - e.w / 2;
+        e.y = homeY * TILE - e.h;
+      }
+      if (e.ai1 >= 60) { e.ai0 = 0; e.ai1 = 0; }
+      break;
+    case 8:                                          // 离场消散 :44647-44670
+      if (e.ai1 === 30) game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
+      e.ai1 += 1; halt = true;
+      if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
+        punch(game, e.cx, e.cy, Math.cos(Math.random() * Math.PI * 2), Math.sin(Math.random() * Math.PI * 2), 20);
+      }
+      if (e.ai1 >= 40) {
+        // :44667-44670 life=-1 → 无掉落消散（直置 dead 绕过 hurt 死亡链即无掉落/公告）
+        e.hp = -1; e.dead = true;
+        return;
+      }
+      break;
+    case 5:                                          // 影手六连 :44671-44707
+      if (e.ai1 === 30) {
+        game.playSfxFiles(SCREAM, 1, e.cx, e.cy);
+        if (p && !p.dead) e.facing = p.cx > e.cx ? 1 : -1;
+        for (let i = 0; i < 6; i++) addProj(game, new InsanityShadowProj(p, DMG_HANDS, i % 3));
+      }
+      e.ai1 += 1; halt = true;
+      if (e.ai1 % 4 === 0 && e.ai1 >= 28) {
+        punch(game, e.cx, e.cy, Math.cos(Math.random() * Math.PI * 2), Math.sin(Math.random() * Math.PI * 2), 20);
+      }
+      if (e.ai1 >= 60) { e.ai0 = 0; e.ai1 = 0; }
+      break;
+  }
+  deerclopsMovement(e, game, p, halt, goHome, homeX, homeY);
+}
+
+/** PunchCameraModifier 近似（Main.instance.CameraModifiers） */
+function punch(game: GameHooks, x: number, y: number, dirX: number, dirY: number, frames: number): void {
+  void x; void y;
+  game.punchCamera?.(dirX, dirY, frames);
+}
+
+/** AI_123_Deerclops_MakeSpikesForward（:44776-44810）:ai1≥36 起每 4t 一根,前向 20 根 */
+function makeSpikesForward(game: GameHooks, e: Enemy, p: Player | null, slot: number): void {
+  const LEAD = 36;
+  const ai1 = slot === 1 ? e.ai1 : e.lai1;
+  if (ai1 < LEAD) return;
+  const srcX = Math.floor((e.x + e.w / 2) / TILE) + e.facing * 3;
+  const srcY = Math.floor((e.y + e.h) / TILE);
+  const since = ai1 - LEAD;
+  if (since === 0) punch(game, e.cx, e.cy, 0, 1, 30);
+  const step = Math.floor(since / 4) * 4;
+  const hi = since % 4 === 0 ? step + 4 : step;
+  for (let i = step; i < hi && i < 20; i++) {
+    tryMakingSpike(game, e, p, srcX, srcY, e.facing, 20, i, i);
+  }
+}
+
+/** AI_123_Deerclops_MakeSpikesBothSides（:44812-44842）:ai1≥56 起每 2t,双侧各 15 根 */
+function makeSpikesBothSides(game: GameHooks, e: Enemy, p: Player | null, slot: number): void {
+  const LEAD = 56;
+  const ai1 = slot === 1 ? e.ai1 : e.lai1;
+  if (ai1 < LEAD) return;
+  const srcX = Math.floor((e.x + e.w / 2) / TILE) + e.facing * 3;
+  const srcY = Math.floor((e.y + e.h) / TILE);
+  const since = ai1 - LEAD;
+  if (since === 0) punch(game, e.cx, e.cy, 0, 1, 30);
+  const step = Math.floor(since / 2) * 2;
+  const hi = since % 2 === 0 ? step + 2 : step;
+  for (let i = step; i >= 0 && i < hi && i < 15; i++) {
+    tryMakingSpike(game, e, p, srcX, srcY, e.facing, 15, -i, i);
+    tryMakingSpike(game, e, p, srcX, srcY, -e.facing, 15, -i, i);
+  }
+}
+
+/** AI_123_Deerclops_TryMakingSpike（:44887-44908）：落点 BestY + 961 弹（伤害 13,
+ *  ai1 = 0.1+rand0.1+xOffset*1.1/howMany 尺度相位） */
+function tryMakingSpike(
+  game: GameHooks, e: Enemy, p: Player | null,
+  srcX: number, srcY: number, dir: number, howMany: number, whichOne: number, xOffset: number,
+): void {
+  const DMG = 13;
+  const x = srcX + xOffset * dir;
+  const y = findBestSpikeY(game, e, p, srcY, x);
+  if (!walkableAt(game, x, y)) return;
+  const px = x * TILE + 8, py = y * TILE - 8;
+  const ang = -Math.PI / 2 + whichOne * dir * 0.7 * (Math.PI / 4 / howMany);
+  addProj(game, new DeerclopsSpikeProj(px, py, ang, DMG,
+    0.1 + Math.random() * 0.1 + (xOffset * 1.1) / howMany));
+}
+
+/** AI_123_Deerclops_TryMakingSpike_FindBestY（:44900-44955）：目标侧向找最近可行走面,
+ *  再上拔 20 格出实心、下探 20 格落到可行走 */
+function findBestSpikeY(game: GameHooks, e: Enemy, p: Player | null, srcY: number, x: number): number {
+  void e;
+  let y = srcY;
+  if (p && !p.dead) {
+    const tBottom = Math.floor((p.y + p.h) / TILE);
+    const sgn = Math.sign(tBottom - srcY) || 1;
+    const end = tBottom + sgn * 15;
+    let best: number | null = null, bestD = Infinity;
+    for (let i = srcY; i !== end; i += sgn) {
+      if (!game.world.store.inBounds(x, i)) continue;
+      if (walkableAt(game, x, i)) {
+        const d = Math.abs(i * TILE + 8 - (p.y + p.h));
+        if (best === null || d < bestD) { best = i; bestD = d; }
+      }
+    }
+    if (best !== null) y = best;
+  }
+  for (let k = 0; k < 20; k++) {                 // 上拔出实心
+    if (y < 10 || !solidAt(game, x, y)) break;
+    y--;
+  }
+  for (let k = 0; k < 20; k++) {                 // 下探到可行走
+    if (y > game.world.store.h - 10 || walkableAt(game, x, y)) break;
+    y++;
+  }
+  return y;
+}
+
+/** AI_123_Deerclops_ShootRubbleUp（:44754-44781）：从实心块顶喷 962 碎石（伤害 18,
+ *  速度 = (0,-1) 旋 (whichOne*dir)*0.7*π/4/howMany × (8+rand8)） */
+function shootRubbleUp(
+  game: GameHooks, e: Enemy, p: Player | null,
+  srcX: number, srcY: number, howMany: number, dist: number, upBias: number, whichOne: number,
+): void {
+  void p;
+  const DMG = 18;
+  const offset = whichOne * dist;
+  for (let i = 0; i < 35; i++) {
+    const x = srcX + offset * e.facing, y = srcY + i;
+    if (!solidAt(game, x, y)) continue;
+    const ang = -Math.PI / 2 + whichOne * e.facing * 0.7 * (Math.PI / 4 / howMany);
+    const spd = 8 + Math.random() * 8;
+    addProj(game, new DeerclopsRubbleProj(x * TILE + 8, y * TILE - 8,
+      Math.cos(ang) * spd, Math.sin(ang) * spd, DMG, 6 + Math.floor(Math.random() * 6)));
+    break;
+  }
+}
+
+/** AI_123_Deerclops_Movement（:44957-45042）：自定义重力/跳跃（noTileCollide 下自管垂直） */
+function deerclopsMovement(
+  e: Enemy, game: GameHooks, p: Player | null,
+  halt: boolean, goHome: boolean, homeX: number, homeY: number,
+): void {
+  const rage = 1 - e.hp / e.maxHp;
+  const speed = 3.5 + rage;                    // :44959 num3 = 3.5 + 1×(1-lifeFrac)
+  let tx: number, ty: number, tw: number, th: number;
+  if (goHome) {
+    tx = homeX * TILE; ty = homeY * TILE; tw = 16; th = 16;
+    if (Math.hypot(tx - e.cx, ty - e.cy) < 240) { tx = e.cx + 160 * e.facing; }
+  } else if (p && !p.dead) {
+    tx = p.x; ty = p.y; tw = p.w; th = p.h;
+  } else {
+    tx = e.cx + 100 * e.facing; ty = e.y; tw = 16; th = 16;
+  }
+  const dx = (tx + tw / 2) - e.cx;
+  const adx = Math.abs(dx);
+  if (goHome && dx !== 0) e.facing = Math.sign(dx);
+  const nearX = adx < 80;
+  let stop = nearX || halt;
+  let spd = speed;
+  let dir = dx;
+  if (e.ai0 === -1) { dir = 5; spd = 5.35; stop = false; }   // :44985-44988 入场
+  if (stop) {
+    e.vx *= 0.9;
+    if (Math.abs(e.vx) < 0.1) e.vx = 0;
+  } else {
+    e.vx += (Math.sign(dir) * spd - e.vx) / 4;                // Lerp(v, target, 1/4)
+  }
+  // :44998-45018 底部碰撞探针（40×20）+ 前方净空（16×80）
+  const bx = e.cx - 20, by = e.y + e.h - 20;
+  const straddle = bx < tx && bx + e.w > tx + tw;             // num13：横跨目标
+  const targetAbove = by + 20 < ty + th - 16;                 // flag3
+  const teleporting = e.ai0 === 7;
+  const ground = solidCollisionPx(game, bx, by, 40, 20);
+  const groundHigh = solidCollisionPx(game, bx, by, 40, 16);
+  const openAhead = !solidCollisionPx(game, bx + 40 * e.facing, by, 16, 80);
+  if (ground || groundHigh) e.lai0 = 0;
+  if (teleporting) e.vy = -0.1;
+  if ((straddle || nearX) && targetAbove) {
+    e.vy = Math.min(Math.max(e.vy + 0.8, 0.001), 16);         // 落到目标层
+  } else if (ground && !groundHigh) {
+    e.vy = 0;                                                 // 半砖缘站定
+  } else if (ground) {
+    e.vy = Math.max(Math.min(e.vy - 0.4, 0), -8);             // 贴地
+  } else if (e.vy === 0 && openAhead) {
+    e.vy = -8; e.lai0 = 1;                                    // 起跳
+  } else {
+    e.vy = Math.min(Math.max(e.vy + 0.4, -8), 16);            // 重力
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 弹幕 961 冰尖刺（AI_157_SharpTears :48432-48567 type==961 段）
+// ---------------------------------------------------------------------------
+export class DeerclopsSpikeProj extends Entity {
+  w = 32; h = 32;
+  dead = false;
+  private ai0 = 0;
+  private readonly ai1: number;
+  private opacity = 0;      // Opacity（0-1 语义）
+  private readonly rot: number;
+  life = 20;                // num9=20 出世
+  constructor(x: number, y: number, angle: number, private dmg: number, ai1: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+    this.rot = angle;
+    this.ai1 = ai1;
+  }
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    const was = this.ai0;
+    this.ai0 += 1;
+    if (--this.life <= 0) { this.dead = true; game.onProjectileDeath?.(961, this.x, this.y); return; }
+    if (was === 0) {
+      // :48498-48526 首帧：尘爆 + 冰攻音
+      game.spawnParticles(this.cx, this.cy, '#BFE8FF', 5, 2.2, { life: 24 });
+      game.playSfxFiles(ICE, 1, this.cx, this.cy);
+    }
+    if (was < 10) {          // :48536-48539 生长期 [0,10)：Opacity+0.1,scale=Opacity*ai1
+      this.opacity = Math.min(1, this.opacity + 0.1);
+    } else {                 // :48548-48551 收缩期 [10,20)：Opacity-0.2
+      this.opacity = Math.max(0, this.opacity - 0.2);
+    }
+    // 接触伤害（hostile 全窗有效；iframes 由 damagePlayer 节流）
+    const p = game.player;
+    if (p && !p.dead && this.opacity > 0.05
+      && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
+      game.damagePlayer(this.dmg, this.cx, this.cy);
+    }
+    void game.world;
+  }
+  scale(): number { return this.opacity * this.ai1; }
+  draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = r.atlas?.ensureVImage('vanilla/Projectile_961.png');
+    const s = this.scale();
+    ctx.save();
+    ctx.globalAlpha = this.opacity;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rot + Math.PI / 2);
+    ctx.imageSmoothingEnabled = false;
+    if (img) ctx.drawImage(img, -16 * s, -16 * s, 32 * s, 32 * s);
+    else { ctx.fillStyle = '#9FD8F0'; ctx.fillRect(-16 * s, -16 * s, 32 * s, 32 * s); }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 弹幕 962 碎石（aiStyle 1 抛物线 + ai1 帧变体 6-11;timeLeft 220）
+// ---------------------------------------------------------------------------
+export class DeerclopsRubbleProj extends Entity {
+  w = 32; h = 32;
+  dead = false;
+  life = 220;
+  constructor(x: number, y: number, public vx: number, public vy: number,
+    private dmg: number, private frame: number) {
+    super();
+    this.x = x - this.w / 2; this.y = y - this.h / 2;
+  }
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; game.onProjectileDeath?.(962, this.x, this.y); return; }
+    this.vy = Math.min(this.vy + 0.3, 16);                    // aiStyle 1 重力
+    this.x += this.vx; this.y += this.vy;                     // tileCollide=false 穿落
+    const p = game.player;
+    if (p && !p.dead
+      && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
+      game.damagePlayer(this.dmg, this.cx, this.cy);
+    }
+  }
+  draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = r.atlas?.ensureVImage('vanilla/Projectile_962.png');
+    ctx.save();
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(Math.atan2(this.vy, this.vx));
+    ctx.imageSmoothingEnabled = false;
+    if (img) {
+      // 12 变体 = 4 列×3 行（Main.projFrames[962]=3）;ai1 ∈ 6..11 → 行 floor(/4)
+      const fw = img.naturalWidth / 4, fh = img.naturalHeight / 3;
+      const f = Math.max(0, Math.min(11, this.frame));
+      ctx.drawImage(img, (f % 4) * fw, Math.floor(f / 4) * fh, fw, fh, -16, -16, 32, 32);
+    } else { ctx.fillStyle = '#887860'; ctx.fillRect(-16, -16, 32, 32); }
+    ctx.restore();
+  }
+}
+
+// ---------------------------------------------------------------------------
+// 弹幕 965 敌对影手（AI_187_ShadowHand :39798-39940 + RandomizeInsanityShadowFor
+// :39703-39796）。ai0 初值 0/180/300/390 直接选定变体段,到段尾即灭（总寿 480t 封顶）
+// ---------------------------------------------------------------------------
+export class InsanityShadowProj extends Entity {
+  w = 40; h = 40;
+  dead = false;
+  life = 480;
+  alpha = 255;              // 255=全透明（SetDefaults）→ 淡入至 50
+  private ai0: number;
+  private readonly ai1: number;
+  private rotation = 0;
+  constructor(target: { cx: number; cy: number; vx: number } | null, private dmg: number, hint: number) {
+    super();
+    // RandomizeInsanityShadowFor 单人近似：玩家环上随机点 + 段直选
+    const c = target ?? { cx: 0, cy: 0, vx: 0 };
+    const a = Math.random() * Math.PI * 2;
+    this.x = c.cx - Math.cos(a) * 200 - this.w / 2;
+    this.y = c.cy - Math.sin(a) * 200 - this.h / 2;
+    this.vx = Math.cos(a) * 4;
+    this.vy = Math.sin(a) * 4;
+    this.ai0 = [0, 180, 300, 390][hint % 4];
+    this.ai1 = a;
+  }
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    this.ai0 += 1;
+    // 变体段（:39903-39940）
+    let variation = 0, start = 0, len = 180;
+    if (this.ai0 >= 390) { variation = 3; start = 390; len = 90; }
+    else if (this.ai0 >= 300) { variation = 2; start = 300; len = 90; }
+    else if (this.ai0 >= 180) { variation = 1; start = 180; len = 120; }
+    const fc = this.ai0 - start;
+    // :39825-39841 alpha：段尾 15t 淡出至 255,否则淡入至 50
+    if (fc > len - 15) this.alpha = Math.min(255, this.alpha + 25);
+    else this.alpha = Math.max(50, this.alpha - 25);
+    if (fc >= len - 1 || --this.life <= 0) {
+      this.dead = true;
+      game.onProjectileDeath?.(965, this.x, this.y);
+      return;
+    }
+    if (variation === 0) {                       // :39847-39856 减速滑行
+      this.vx *= 0.98; this.vy *= 0.98;
+      this.rotation = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+    } else if (variation === 1) {                // :39857-39874 绕轴摆荡
+      const t = fc / len;
+      if (Math.hypot(this.vx, this.vy) > 0.1) { this.vx *= 0.95; this.vy *= 0.95; }
+      const pivotD = 70 * (this.vx >= 0 ? 1 : -1);
+      const a1 = remap(t, 0.3, 0.5, 0, 1) * remap(t, 0.45, 0.5, 1, 0);
+      const a2 = remap(t, 0.5, 0.55, 0, 1) * remap(t, 0.5, 1, 1, 0);
+      this.rotation += (a1 * (Math.PI / 60) + a2 * (-Math.PI * 8 / 60)) * -(this.vx >= 0 ? 1 : -1);
+      const px = this.cx - Math.cos(this.rotation) * pivotD;
+      const py = this.cy - Math.sin(this.rotation) * pivotD;
+      this.x = px + Math.cos(this.rotation) * pivotD - this.w / 2;
+      this.y = py + Math.sin(this.rotation) * pivotD - this.h / 2;
+    } else if (variation === 2) {                // :39875-39888 俯冲（0.4 处峰值速）
+      const t = fc / len;
+      const v1 = remap(t, 0, 0.4, 1, 0);
+      const v2 = remap(t, 0.3, 0.4, 0, 1) * remap(t, 0.4, 1, 1, 0);
+      const spd = v1 * 2 + v2 * 8 + 0.01;
+      this.vx = Math.cos(this.ai1) * spd;
+      this.vy = Math.sin(this.ai1) * spd;
+      this.rotation = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+    } else {                                     // :39889-39899 旋进
+      const w = this.ai1;
+      const cos = Math.cos(w), sin = Math.sin(w);
+      const nvx = this.vx * cos - this.vy * sin;
+      const nvy = this.vx * sin + this.vy * cos;
+      this.vx = nvx; this.vy = nvy;
+      this.rotation = Math.atan2(this.vy, this.vx) + (this.vx < 0 ? Math.PI : 0);
+    }
+    const p = game.player;
+    if (p && !p.dead && this.alpha < 250
+      && p.x < this.x + this.w && p.x + p.w > this.x && p.y < this.y + this.h && p.y + p.h > this.y) {
+      game.damagePlayer(this.dmg, this.cx, this.cy);
+    }
+  }
+  draw(r: import('../render/Renderer').Renderer, _cam: import('../render/Camera').Camera): void {
+    const ctx = r.canvas.getContext('2d');
+    if (!ctx) return;
+    const img = r.atlas?.ensureVImage('vanilla/Projectile_965.png');
+    ctx.save();
+    ctx.globalAlpha = 1 - this.alpha / 255;
+    ctx.translate(this.cx, this.cy);
+    ctx.rotate(this.rotation);
+    ctx.imageSmoothingEnabled = false;
+    if (img) ctx.drawImage(img, -20, -20, 40, 40);
+    else { ctx.fillStyle = '#6020B0'; ctx.beginPath(); ctx.arc(0, 0, 18, 0, Math.PI * 2); ctx.fill(); }
+    ctx.restore();
+  }
+}
+
+function remap(x: number, a: number, b: number, c: number, d: number): number {
+  if (x < a) return c;
+  if (x > b) return d;
+  return c + (d - c) * ((x - a) / (b - a));
+}
+
+/** 弹幕入桶（与 duke 系同款：hostile 类自管运动,dead 由桶清理） */
+function addProj(game: GameHooks, p: Entity): void {
+  (game as unknown as { entities: { add(e: Entity, bucket: string): void } })
+    .entities.add(p, 'projectiles');
+}

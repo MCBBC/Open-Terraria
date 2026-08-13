@@ -64,6 +64,10 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,   // WorldGen.altarCount（WorldFile.cs:1303/2100）
     meteorShowerCount: world.meteorShowerCount,   // WorldGen.meteorShowerCount（WorldFile.cs:1069/:177）
+    // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚重掷）
+    critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
+      fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
+    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
@@ -130,6 +134,10 @@ export function saveWorldOnly(world: World): string {
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
     meteorShowerCount: world.meteorShowerCount,
+    // 夜间小动物概率五件套（setFireFlyChance；服务器档随世界下发）
+    critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
+      fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
+    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },  // WorldGen.SavedOreTiers（WF:1305-1307）
     shadowOrbCount: world.shadowOrbCount,          // WorldGen.shadowOrbCount（WF:1302/2099）
@@ -238,6 +246,15 @@ export function loadSaveData(data: SaveData): { world: World; player: SaveData['
   }
   if (data.altarCount != null) world.altarCount = data.altarCount; // 旧档缺省 0
   if (data.meteorShowerCount != null) world.meteorShowerCount = data.meteorShowerCount; // 旧档缺省 0
+  // 夜间小动物概率五件套（setFireFlyChance；旧档缺省=代表值，当晚 StartNight 重掷）
+  if (data.critterChances) {
+    world.fireFlyChance = data.critterChances.fireFly;
+    world.fireFlyFriendly = data.critterChances.fireFlyFriendly;
+    world.fireFlyMultiple = data.critterChances.fireFlyMultiple;
+    world.butterflyChance = data.critterChances.butterfly;
+    world.stinkBugChance = data.critterChances.stinkBug;
+  }
+  if (data.cultistDelay != null) world.cultistDelay = data.cultistDelay; // WF:114/163 旧档缺省 0
   // 渔夫任务链（WorldFile.cs:2147-2161）：当日任务鱼索引 + 今日已交付名单；
   // anglerQuestFinished 不回填——原版读档 loadTempInfo 重置 false（WF:628-629）
   if (data.angler) {

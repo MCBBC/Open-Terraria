@@ -3,7 +3,7 @@ import { it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseWld } from '../src/wld/WldParser';
 
-const SEEDS = ['2222', '33333', '444444', '5555555', '777', '9293480'];
+const SEEDS = ['111', '2222', '33333', '444444', '5555555', '777', '9293480'];
 
 it('distribution compare', () => {
   // oracle 结果（/tmp/oracle_batch.txt + 9293480 已知值）
@@ -17,7 +17,7 @@ it('distribution compare', () => {
     '9293480': 'ws=337 rl=475 id=733020316 moon=5',
   };
   for (const s of SEEDS) {
-    const path = s === '9293480' ? '/tmp/vserver/s9293480.wld' : `/tmp/vserver/s${s}.wld`;
+    const path = `/tmp/vserver/s${s}.wld`;
     const w = parseWld(new Uint8Array(readFileSync(path)));
     const o = oracle[s];
     const [ows, orl] = o.match(/ws=(\d+) rl=(\d+)/)!.slice(1, 3).map(Number);

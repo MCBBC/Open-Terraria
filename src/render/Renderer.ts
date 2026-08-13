@@ -112,6 +112,7 @@ import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { BuffType } from '../stats/Buffs';
+import { expertRenderScale } from '../stats/ScaleStats';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
 import { Enemy } from '../entities/Enemy';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
@@ -830,6 +831,7 @@ export class Renderer {
     const ctx = this.ctx;
     const viewW = this.canvas.width, viewH = this.canvas.height;
     cam.viewW = viewW; cam.viewH = viewH;
+    cam.tickPunch();   // PunchCameraModifier 冲击位移衰减（鹿角怪等震屏源）
     const z = cam.zoom;
 
     // 0. 天塔柱族：视区扫描（Main.cs:61983-61990 GetAreaToLight+Inflate(28) →
@@ -930,6 +932,20 @@ export class Renderer {
       }
     }
 
+    // 2b'. behindTiles 族实体（Main.cs:56457 DrawNPCs(behindTiles:true)：原版在
+    //      非实心 tile(:56434) 之后、实心 tile(:56474) 之前绘制——钻地蠕虫族
+    //      （aiStyle6 世吞 13-15/掘地虫 39-41/挖掘怪 95-100/水蛭 117-119/
+    //      沙虫 510-515 等，数据源 vanilla-npcs.json behindTiles）被前景 tile 盖住。
+    //      本仓 tile 是单一烘焙层（不拆 solid/non-solid）→ 等价画在 tile 层之前、
+    //      墙/背景水之后。血条不随后移（原版血条独立 pass 恒在最上层，
+    //      见 4. 段实体层）。血肉墙嘴/眼/饥饿者（113/114/115）虽同为 behindTiles=true，
+    //      但墙身(3.7 DrawWoF)本仓画在 tile 之上，若随族前移会被墙身盖掉
+    //      （原版墙身在 tile 之下无此冲突）→ 留在实体层，见 isBehindTilesEnemy
+    const sorted = [...entities].sort((a, b) => a.y - b.y);
+    for (const e of sorted) {
+      if (e instanceof Enemy && this.isBehindTilesEnemy(e)) this.drawEnemy(e, world, entities);
+    }
+
     // 2c. 前景 tile/物体层(同款保险重叠)
     for (let cy = y0; cy <= y1; cy++) {
       for (let cx = x0; cx <= x1; cx++) {
@@ -999,10 +1015,13 @@ export class Renderer {
     //     精灵之下，本仓在实体层之前画等价；墙死透时的全屏血尘崩落近似也在此触发）
     this.drawWoF(player, entities, world, camRY, viewW, viewH, z);
 
-    // 4. 实体（按 y 排序）
-    const sorted = [...entities].sort((a, b) => a.y - b.y);
+    // 4. 实体（按 y 排序；behindTiles 族已在 2b' 画过，此处只补血条——
+    //    原版 DrawNPCHealthBars 独立 pass 恒在最上层，钻地中血条仍可见）
     for (const e of sorted) {
-      if (e instanceof Enemy) { this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert); }
+      if (e instanceof Enemy) {
+        if (this.isBehindTilesEnemy(e)) { this.drawHealthBar(e, world.isExpert); continue; }
+        this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert);
+      }
       else if (e instanceof ItemDrop) this.drawDrop(e);
       else if (e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
@@ -1858,6 +1877,17 @@ export class Renderer {
     }
   }
 
+  /** NPC.behindTiles 判定（SetDefaults 直读，Main.cs:22174 `npc[num].behindTiles == behindTiles`）：
+   *  命中的实体画在 tile 层之下（钻地蠕虫族被前景方块遮挡）。血肉墙嘴/眼/饥饿者
+   *  （113/114/115）SetDefaults 同为 behindTiles=true，但本仓墙身(3.7)画在 tile 之上，
+   *  随族前移会被墙身盖掉——留在实体层保住"墙身垫底、精灵压上"的原版相对序
+   *  （它们被前景 tile 遮挡的语义是单 tile 层下的既知折损，见 2b' 注释） */
+  private isBehindTilesEnemy(e: Enemy): boolean {
+    const id = e.vanillaId;
+    if (id === 113 || id === 114 || id === 115) return false;
+    return !!e.vanilla?.behindTiles;
+  }
+
   private drawEnemy(e: Enemy, world: World, entities: unknown[] = []) {
     const ctx = this.ctx;
     const spr = this.assets.enemySprites.get(e.key);
@@ -1922,8 +1952,13 @@ export class Renderer {
       const r = this.atlas.vnpc(e.vanillaId, frameIdx);
       if (r) {
         const flying = !!e.vanilla?.noGravity; void flying; // 中心锚后地面/飞行统一,仅保留语义注释
-        // 原版 NPC.scale（SetDefaults base × netID scale）——作用于碰撞盒与渲染
-        const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+        // 原版 NPC.scale（SetDefaults base × netID scale × 专家档体型系数）——作用于渲染。
+        // 专家系数（Tweaks :18187/:18198/:18300/:18309：世吞 13-15 ×1.2、克脑 266/
+        // 爬行者 267/毁灭者 134-136/探针 139 ×1.05）只乘 npc.scale 不回写宽高
+        // （NewNPC 的 width/height×scale 在 ScaleStats 之前，NPC.cs:17744-17747）——
+        // 碰撞盒保持 base 盒（本仓 e.w/e.h 已按 base 乘，勿在此扩盒）
+        const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale
+          * expertRenderScale(e.vanillaId ?? 0);
         ctx.save();
         // 锚点:飞行型=帧中心(原版默认分支 Main.cs:23635 语义);地面型=底锚+逐帧
         // 实测底部透明行数补偿(spriteBottomPad)——NPC 帧底普遍 ~2px 透明边距,
@@ -2399,7 +2434,8 @@ export class Renderer {
     const r = this.atlas.vnpc(266, frameIdx);
     if (!r) return;
     const ctx = this.ctx;
-    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale;
+    // 专家档 ×1.05（Tweaks :18198；266 克脑专属曲径，通用路径不经过这里）
+    const scale = (e.vanilla?.scale ?? 1) * e.vanillaScale * expertRenderScale(266);
     const yOff = 50 * scale;   // Main.cs:22950 num47 += 50*rCurrentNPC.scale
     const opacity = 1 - Math.min(255, Math.max(e.spawnAlpha, 0)) / 255; // NPC.Opacity
     const mirrored = e.facing > 0;   // 同通用路径朝向镜像（贴图默认朝左）

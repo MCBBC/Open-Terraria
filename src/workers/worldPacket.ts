@@ -32,6 +32,10 @@ export function packWorld(world: World): { packet: WorldPacket; transfer: ArrayB
     invasion: { type: world.invasionType, size: world.invasionSize, sizeStart: world.invasionSizeStart,
       x: world.invasionX, delay: world.invasionDelay },
     altarCount: world.altarCount,
+    // 夜间小动物概率五件套（setFireFlyChance；旧包缺省=代表值，当晚 StartNight 重掷）
+    critterChances: { fireFly: world.fireFlyChance, fireFlyFriendly: world.fireFlyFriendly,
+      fireFlyMultiple: world.fireFlyMultiple, butterfly: world.butterflyChance, stinkBug: world.stinkBugChance },
+    cultistDelay: world.cultistDelay,   // CultistRitual.delay（WF:114/163）
     angler: { quest: world.anglerQuest, whoFinishedToday: [...world.anglerWhoFinishedToday] },  // WF:1329-1335
     savedOreTiers: { ...world.savedOreTiers },
     shadowOrbCount: world.shadowOrbCount,

@@ -306,10 +306,13 @@ export function chaosElementalStep(
   return ai3;
 }
 
-/** AI_AttemptToFindTeleportSpot（NPC.cs:18876-18946）1:1。返回落点 tile 坐标。 */
+/** AI_AttemptToFindTeleportSpot（NPC.cs:18876-18946）1:1。返回落点 tile 坐标。
+ *  opts：centered=净空改 i±fluff 矩形（星云脑 :41650）；inAir=免脚下实心（星云脑）；
+ *  dungeonWallGate=地牢法师族门（:18899-18904：type 32/281-286 要求上一格地牢砖墙）。 */
 export function attemptToFindTeleportSpot(
   e: Enemy, game: GameHooks, targetTileX: number, targetTileY: number,
   rangeFromTargetTile: number, telefragPreventionDistanceInTiles: number,
+  opts: { centered?: boolean; inAir?: boolean; dungeonWallGate?: boolean } = {},
 ): { x: number; y: number } | null {
   const st = game.world.store;
   const cx = Math.floor(e.cx / TILE), cy = Math.floor(e.cy / TILE);    // :18878-18879
@@ -329,13 +332,18 @@ export function attemptToFindTeleportSpot(
       // :18896-18899 自身 3×3 邻域跳过 + 非激活格跳过（teleportInAir=false）
       if ((i >= cy - 1 && i <= cy + 1 && num5 >= cx - 1 && num5 <= cx + 1)
         || !st.inBounds(num5, i) || st.get(num5, i) === 0) continue;
-      // :18907-18909 头顶格岩浆面跳过（lava()；地牢墙门 32/281-286 分支与本调用无关）
+      // :18899-18904 地牢法师门：上一格须地牢砖墙（wallDungeon 集）
+      if (opts.dungeonWallGate
+        && !(st.wall[st.idx(num5, i - 1)] >= 7 && st.wall[st.idx(num5, i - 1)] <= 9
+          || (st.wall[st.idx(num5, i - 1)] >= 94 && st.wall[st.idx(num5, i - 1)] <= 99))) continue;
+      // :18907-18909 头顶格岩浆面跳过（lava()）
       if (!st.inBounds(num5, i - 1) || st.liquidType[st.idx(num5, i - 1)] === 2) continue;
-      // :18915 脚下须实心（!tileSolid 跳过；teleportInAir=false）
-      if (!st.isSolid(num5, i)) continue;
-      // :18920-18924 身位净空：fluff=1 → 两列(i-1..i+1) × 三行(i-4..i-2) 非实心
+      // :18910 脚下须实心（!tileSolid 跳过；teleportInAir 跳过本门）
+      if (!opts.inAir && !st.isSolid(num5, i)) continue;
+      // :18915 身位净空（fluff=1）：!centered → (i±1)×(i-4..i-2) 三行；centered → i±1 矩形
       let clear = true;
-      for (let dy = -4; dy <= -2; dy++) {
+      const yLo = opts.centered ? -1 : -4, yHi = opts.centered ? 1 : -2;
+      for (let dy = yLo; dy <= yHi && clear; dy++) {
         for (let dx = -1; dx <= 1; dx++) {
           if (st.inBounds(num5 + dx, i + dy) && st.isSolid(num5 + dx, i + dy)) clear = false;
         }

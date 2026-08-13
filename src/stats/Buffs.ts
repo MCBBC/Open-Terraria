@@ -111,6 +111,8 @@ export enum BuffType {
   Werewolf = 71,     // 狼人(28,月亮符 485 夜间)：melee +5.1%伤/+2暴/+5.1%速（:11488-11498）
   BrainOfConfusionBuff = 72,
   Weak = 73,         // 虚弱(33,狼人 155 命中施加)：近战-5.1%伤/速、防-4、移速-10%（:11506-11511） // 混乱之脑触发(321,受击1/6 4s)：三系+10暴 + 召唤+10%伤（:9639）
+  Slow = 81,        // 缓慢(32)：moveSpeed ÷2（:25653-25655）——鹿角怪咆哮 800px 内
+                    //   AddBuff(32,720t) 授予（NPC.cs:44609-44616）
   Shimmered = 77,   // 微光化(353,浸微光每 tick 刷新)：frozen 封输入+免伤+穿墙下坠——
                     //   语义由 Player.shimmering 字段承载（:11381-11419），本条目仅作
                     //   BuffState 登记（左上角图标/名称/持续时间显示）
@@ -217,6 +219,7 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   // ★120 在 BUFF_NO_SAVE 名单内（环境类，不落盘）
   [BuffType.KiteBuff]: { vanillaBuff: 383, descKey: 'BuffDescription.Kite', fallbackName: '腾灵' },
   [BuffType.Stinky]: { vanillaBuff: 120, descKey: 'BuffDescription.Stinky', fallbackName: '恶臭' },
+  [BuffType.Slow]: { vanillaBuff: 32, descKey: 'BuffDescription.Slow', fallbackName: '缓慢' },
   // 世纪之花批：毒种子 276 命中授予（Projectile.cs:11527-11535），描述用原版键
   [BuffType.Poisoned]: { vanillaBuff: 20, descKey: 'BuffDescription.Poisoned', fallbackName: '中毒' },
   // 血肉墙舌头两态（描述走原版 BuffDescription 现成键，同 Honey/MoonLeech 先例）
@@ -414,6 +417,7 @@ export class BuffState {
   get moveSpeedMult(): number {
     let m = this.active.has(BuffType.Agility) ? 1.25 : 1;   // Swiftness moveSpeed += 0.25
     if (this.active.has(BuffType.Burning)) m *= 0.5;         // Burning moveSpeed *= 0.5（:18886）
+    if (this.active.has(BuffType.Slow)) m *= 0.5;            // Slow moveSpeed /= 2（:25653-25655）
     if (this.active.has(BuffType.Chilled)) m *= 0.75;        // Chilled moveSpeed *= 0.75（:25659-25661）
     if (this.active.has(BuffType.Sunflower)) m *= 1.21;      // 向日葵 +0.1 再 ×1.1 两步复合（:10598）
     if (this.active.has(BuffType.Weak)) m *= 0.9;            // 虚弱 moveSpeed -= 0.1（:11510）

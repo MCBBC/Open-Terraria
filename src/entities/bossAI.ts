@@ -253,7 +253,7 @@ export function kingSlimeAI(e: Enemy, game: GameHooks, player: Player | null) {
 /** AI_054 克苏鲁之脑 266（NPC.cs:32537-32827 全核 1:1）：
  *  SetDefaults :12370-12386 dontTakeDamage=true（fromVanilla 已置位）→ 一阶段不可击；
  *  爬行者清零 → ai[0]=-1 进二阶段（入场演出一次性 + 解除无敌）。
- *  一阶段 ai[0]：0 缓追玩家（1 速 :32703-32723）+ 瞬移计时 localAI[1] 达
+ *  一阶段 ai[0]：0 缓追玩家（1 速 :32703-32723；FTW ×3）+ 瞬移计时 localAI[1] 达
  *  120+Next(300) 选点(:32744-32785，12..40 格偏移、目标速度向投影 +16×speed、
  *  101 次后无条件 / 非实心且(>75 次或 CanHit) 才收)→ 1 渐隐(+5/t 到 255)→
  *  落点瞬移(:32788-32799)→ 2 渐显(-5/t 到 0)→ 回 0。
@@ -351,10 +351,11 @@ export function brainOfCthulhuAI(e: Enemy, game: GameHooks, player: Player | nul
     }
   } else {
     // ---- 一阶段（:32701-32808）----
-    // :32703-32723 缓追玩家：1 速（getGoodWorld ×3 不建模），<1px 直达
+    // :32703-32723 缓追玩家：1 速（getGoodWorld ×3 :32708-32710），<1px 直达
     if (player) {
       let dx = player.cx - e.cx, dy = player.cy - e.cy;
-      const num870 = 1;
+      let num870 = 1;
+      if (game.world.seedFlags?.getGoodWorld) num870 *= 3;
       const d = Math.hypot(dx, dy);
       if (d < num870) {
         e.vx = dx; e.vy = dy;
@@ -538,7 +539,9 @@ export function creeperAI(e: Enemy, game: GameHooks, _player: Player | null) {
 }
 
 // ================= 机械三王(NPC.cs AI_030-037,1.4.5.6 行号见各核注释) =================
-// 经典模式参数 1:1;专家/大师/FTW 分支仅注释保留。
+// 经典模式参数 1:1;getGoodWorld(FTW)分支已全量实装(克脑/双子/毁灭者/爬行者);
+// 专家/大师分支仅注释保留。史莱姆王 AI_015 的 FTW 分支(:43440/:43662)依赖的
+// 基线行为(空中横移 num7=3、跳跃 num2 缩放)本仓未建模,无可挂载点,登记跳过。
 
 /** 原版速度逼近(L26539-26670 雏形):朝目标速度单轴步进,符号翻转时双倍步进 */
 export function accelTo(v: number, target: number, a: number): number {
@@ -570,9 +573,13 @@ export function shoot(game: GameHooks, x: number, y: number, vx: number, vy: num
 /** AI_030/031 双子(NPC.cs:26497-27735):雷神之眼 125 / 魔神之眼 126。
  *  旋转持续瞄准玩家(0.1/0.15 步进+绕圈处理);白天/玩家死 → 上飞离场;
  *  一阶段(血>40%):侧向悬浮(300/400)→4-10 连冲(12/13 速);二阶段变身自旋;
- *  三阶段:雷眼 激光 83→100(伤害×1.5 防+10),魔眼 火焰喷射 101(伤害×1.5 防+18)。 */
+ *  三阶段:雷眼 激光 83→100(伤害×1.5 防+10),魔眼 火焰喷射 101(伤害×1.5 防+18)。
+ *  getGoodWorld(FTW)分支全量实装:悬浮/冲刺/弹幕计数抬档(:26599/26709/26745/
+ *  26883/27020 雷眼,:27218/27313/27373/27539 魔眼)。 */
 export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: boolean) {
   if (!e.bInit) { e.bInit = true; e.ai0 = 0; e.ai1 = 0; e.ai2 = 0; e.ai3 = 0; }
+  // Main.getGoodWorld(for the worthy)
+  const ftw = !!game.world.seedFlags?.getGoodWorld;
   // 白天/玩家死:上飞离场(原版 :26585/:27208 vy-=0.04 + EncourageDespawn(10))——
   // 玩家死亡派发为 null,一并进离场（此前 null 仅漂移不消散）
   if (game.world.clock.isDay || !player || player.dead) {
@@ -595,8 +602,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   // ---- 一阶段(ai0=0) ----
   if (e.ai0 === 0) {
     if (e.ai1 === 0) {
-      // 侧向悬浮:雷眼 玩家侧 300/上方 300 速 7/0.1;魔眼 侧 400 速 12/0.4
-      const spd = spaz ? 12 : 7, acc = spaz ? 0.4 : 0.1;
+      // 侧向悬浮:雷眼 玩家侧 300/上方 300 速 7/0.1;魔眼 侧 400 速 12/0.4;
+      // FTW ×1.15(:26599-26603 雷眼 / :27218-27222 魔眼)
+      let spd = spaz ? 12 : 7, acc = spaz ? 0.4 : 0.1;
+      if (ftw) { spd *= 1.15; acc *= 1.15; }
       const side = e.cx < player.x + player.w ? -1 : 1;
       const offX = spaz ? 400 : 300, offY = spaz ? 0 : 300;
       const tx = player.cx + side * offX, ty = player.cy - offY;
@@ -606,7 +615,7 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       if (e.ai2 >= 600) { e.ai1 = 1; e.ai2 = 0; e.ai3 = 0; }
       // 悬浮期弹幕:魔眼 每 60t 诅咒焰 96(25 伤 12 速);雷眼 位于玩家上方且距悬浮点<400 时绿激光 83(20 伤 9 速)
       if (spaz) {
-        e.ai3 += 1;
+        e.ai3 += 1 + (ftw ? 0.4 : 0);   // :27313-27316 FTW 诅咒焰计数 +0.4/t
         if (e.ai3 >= 60) {
           e.ai3 = 0;
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
@@ -615,7 +624,7 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
             dx / d * 12 + (Math.random() - 0.5) * 4, dy / d * 12 + (Math.random() - 0.5) * 4, 25, 96);
         }
       } else if (e.y + e.h < player.y && hoverDist < 400) {
-        e.ai3 += 1;
+        e.ai3 += 1 + (ftw ? 0.5 : 0);   // :26709-26711 FTW 激光计数 +0.5/t
         if (e.ai3 >= 60) {
           e.ai3 = 0;
           const dx = player.cx - e.cx, dy = player.cy - e.cy;
@@ -625,11 +634,13 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
         }
       }
     } else if (e.ai1 === 1) {
-      // 冲撞:一次性朝玩家定速(雷眼 12/魔眼 13)
+      // 冲撞:一次性朝玩家定速(雷眼 12/魔眼 13;FTW 雷眼 +2(:26750-26752)、
+      // 魔眼 ×1.2(:27373-27376))
       e.spin = target;
       const dx = player.cx - e.cx, dy = player.cy - e.cy;
       const d = Math.hypot(dx, dy) || 1;
-      const spd = spaz ? 13 : 12;
+      let spd = spaz ? 13 : 12;
+      if (ftw) spd = spaz ? spd * 1.2 : spd + 2;
       e.vx = dx / d * spd; e.vy = dy / d * spd;
       e.ai1 = 2;
     } else if (e.ai1 === 2) {
@@ -679,8 +690,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
   e.def.damage = Math.round(b.dmg * 1.5);
   e.def.defense = b.def + (spaz ? 18 : 10);
   if (e.ai1 === 0) {
-    // 上方悬浮:雷眼 玩家正上 300(8/0.15,300t→冲);魔眼 侧 180 同高(4/0.1,400t→冲)+ 火焰喷射 101
-    const spd = spaz ? 4 : 8, acc = spaz ? 0.1 : 0.15;
+    // 上方悬浮:雷眼 玩家正上 300(8/0.15,300t→冲);魔眼 侧 180 同高(4/0.1,400t→冲)
+    // + 火焰喷射 101;FTW ×1.15(:26883-26887 雷眼 / :27539-27544 魔眼)
+    let spd = spaz ? 4 : 8, acc = spaz ? 0.1 : 0.15;
+    if (ftw) { spd *= 1.15; acc *= 1.15; }
     const offX = spaz ? 180 : 0, offY = spaz ? 0 : 300;
     const side = e.cx < player.x + player.w ? -1 : 1;
     seek(e, player.cx + side * offX, player.cy - offY, spd, acc);
@@ -707,7 +720,10 @@ export function twinsAI(e: Enemy, game: GameHooks, player: Player | null, spaz: 
       e.ai1 = 2;
     } else {
       const side = e.cx < player.x + player.w ? -1 : 1;
-      seek(e, player.cx + side * 340, player.cy, 8, 0.2);
+      // FTW ×1.15(:27015-27025)
+      let spd2 = 8, acc2 = 0.2;
+      if (ftw) { spd2 *= 1.15; acc2 *= 1.15; }
+      seek(e, player.cx + side * 340, player.cy, spd2, acc2);
       e.spin = Math.atan2(player.cy - e.cy, player.cx - e.cx) - Math.PI / 2;
       if (e.aiT % 60 === 0 && losClear(game, e.cx, e.cy, player.cx, player.cy)) {
         const dx = player.cx - e.cx, dy = player.cy - e.cy;
@@ -1084,7 +1100,8 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
 }
 
 /** AI_037 毁灭者 134-136(NPC.cs:50129-50624):头穿地飞行——
- *  空中:下坠 0.15/钳 16 并横漂向玩家;地下(实心/液体):全向舵向玩家(0.1/0.15 双档);
+ *  空中:下坠 0.15/钳 16 并横漂向玩家;地下(实心/液体):全向舵向玩家(0.1/0.15 双档,
+ *  FTW ×1.2 :50359-50363);
  *  白天/玩家死:加速下坠,过岩石层整链消散;体节 135 探针随机激光 100。
  *  段链 80 段(原版 GetDestroyerSegmentsCount;链距 44px)由头驱动收缩跟随。 */
 export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
@@ -1123,7 +1140,10 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     return;
   }
 
-  const spd = 16, acc = 0.1, acc2 = 0.15;
+  // num19=0.1 / num20=0.15 地下双档步进(:50357-50358);FTW ×1.2(:50359-50363)
+  const spd = 16;
+  let acc = 0.1, acc2 = 0.15;
+  if (game.world.seedFlags?.getGoodWorld) { acc *= 1.2; acc2 *= 1.2; }
   if (!buried) {
     // 空中(:50416-50458):下坠 0.15 钳 16;慢速时横漂,满速下坠时向玩家 X 修正
     e.vy += 0.15;

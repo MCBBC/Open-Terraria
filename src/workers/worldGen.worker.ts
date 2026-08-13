@@ -57,7 +57,12 @@ ctx.onmessage = async (e) => {
       await settleWorldLiquids(world, 'load',
         (p) => ctx.postMessage({ id: req.id, type: 'progress', phase: 'settle', label: '水体沉降', p: 0.3 + p * 0.5 }));
       const { packet, transfer } = packWorld(world);
-      ctx.postMessage({ id: req.id, type: 'result', world: packet, player, save: data }, transfer);
+      // ★收窄:主线程只消费 difficulty/events(mainFlow.ts:275/278),整档 SaveData
+      // 回传=4.7MB 结构化克隆白费(2026-08-13 读档优化)
+      ctx.postMessage({
+        id: req.id, type: 'result', world: packet, player,
+        save: { header: { difficulty: data.header?.difficulty }, events: data.events } as typeof data,
+      }, transfer);
       return;
     }
   } catch (err) {

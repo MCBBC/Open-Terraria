@@ -41,13 +41,16 @@ function l10nAuditAuto(): Plugin {
       if (missing.length) {
         console.warn(`[l10n-audit] 警告: ${missing.length}/${used} 键缺失（dev 不阻塞，build 会失败）:`);
         for (const m of missing) console.warn(`  MISSING ${m.key} ← ${m.locs.join(', ')}`);
+        console.warn('[l10n-audit] 可直接粘贴进仓库根 tools/l10n-custom/{zh-Hans,en-US}.json 后 node scripts/build-l10n.mjs:');
+        for (const m of missing) console.warn(`  "${m.key}": "",`);
       }
     },
     async buildStart() {
       const { used, missing } = await audit();
       if (missing.length) {
         const lines = missing.map((m) => `  MISSING ${m.key}  ←  ${m.locs.join(', ')}`).join('\n');
-        throw new Error(`[l10n-audit] Lang 键缺失 ${missing.length}/${used} 条——请在 tools/l10n-custom/{en-US,zh-Hans}.json 补键后重试:\n${lines}`);
+        const stubs = missing.map((m) => `  "${m.key}": "",`).join('\n');
+        throw new Error(`[l10n-audit] Lang 键缺失 ${missing.length}/${used} 条——请在 tools/l10n-custom/{en-US,zh-Hans}.json 补键后重试:\n${lines}\n\n可粘贴的补键桩(两份文件同键,zh 填译名):\n${stubs}`);
       }
       console.log(`[l10n-audit] ${used} 键全部命中 ✓`);
     },

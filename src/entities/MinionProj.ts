@@ -94,7 +94,7 @@ const SENTRY_SHOOT: Record<number, { shot: number; speed: number; cd: number; vo
 interface EnemyLike {
   cx: number; cy: number; x: number; y: number; w: number; h: number; id: number;
   dead: boolean;
-  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number) => boolean;
+  hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean, pierce?: number) => boolean;
 }
 
 /** Utils.Remap（AI_120 :42222 用；value 截断映射 [from1..to1] → [from2..to2]） */
@@ -575,7 +575,7 @@ export class MinionProj extends Entity {
           if (en.x + en.w <= bx || en.x >= bx + 80 || en.y + en.h <= by || en.y >= by + 40) continue;
           if (!this.hitCd.ready(en.id, 5)) continue; // localNPCHitCooldown=5（:6433）
           const res = resolveWhipTagHit(en, dmg0, game, add, SUMMON_TAG_MUL[623] ?? 1, en.cx, en.cy);
-          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game);
+          en.hurt(res.dmg, Math.sign(en.cx - this.cx) * this.knockback, -1, game, 0, false, 1); // 随从=单发弹语义(不设敌方帧)
           applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           this.attackFlash = 24;
         }
@@ -833,7 +833,7 @@ export class MinionProj extends Entity {
             const res = resolveWhipTagHit(en, dmgOf(), game,
               (el) => (game as unknown as { entities: { add: (x: unknown, b: string) => void } }).entities.add(el, 'projectiles'),
               SUMMON_TAG_MUL[this.projId] ?? 1, en.cx, en.cy);
-            en.hurt(res.dmg, 0, 0, game);
+            en.hurt(res.dmg, 0, 0, game, 0, false, 1); // 哨兵射击=单发弹语义
             applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
           }
         }
@@ -855,7 +855,7 @@ export class MinionProj extends Entity {
               const en = ent as EnemyLike & { dead: boolean };
               if (en.dead) continue;
               if (Math.abs(en.cx - ecx) < 72 + en.w / 2 && Math.abs(en.cy - ecy) < 72 + en.h / 2) {
-                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game);
+                en.hurt(dmgOf(), Math.sign(en.cx - this.cx) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
                 applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
                 boom++;
               }
@@ -934,7 +934,7 @@ export class MinionProj extends Entity {
                 const en = ent as EnemyLike & { dead: boolean };
                 if (en.dead) continue;
                 if (Math.abs(en.cx - px) < 14 + en.w / 2 && Math.abs(en.cy - py) < 14 + en.h / 2) {
-                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game);
+                  en.hurt(dmgOf(), Math.sign(en.cx - px) * this.knockback, -2, game, 0, false, 1); // 单发弹语义
                   applyProjStatus(this.projId, en as unknown as Record<string, number>); // StatusNPC(:10555)
                 }
               }
