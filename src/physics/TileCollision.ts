@@ -1,5 +1,6 @@
 // 分轴扫描 tile AABB 碰撞
 import { TILE, GRAVITY } from '../core/constants';
+import { TILE_DEFS } from '../data/tiles';
 import type { World } from '../world/World';
 
 export interface Body {
@@ -14,6 +15,13 @@ export interface Body {
   /** 启用原版自动上台阶（Collision.StepUp）：行走实体（玩家/敌人/小动物/城镇NPC）置 true；
    *  掉落物/弹幕/墓碑等不参与（原版它们不调 StepUp） */
   stepUp?: boolean;
+  /** StepUp holdsMatching（Collision.StepUp 第 8 参）：true 时允许把站台面
+   *  （tileSolidTop 顶行：平台/桌子/铁砧/笼子…）当落脚格抬升——玩家传 controlUp
+   *  （Player.cs:23258/:27753），NPC 恒 true（NPC.cs:54382 flag22，飞行态除外）。
+   *  specialChecksMode==1 的 IgnoredByNpcStepUp 排除集（14/469/18/16/134）由
+   *  stepUpNpc=true 启用 */
+  stepUpHolds?: boolean;
+  stepUpNpc?: boolean;
   /** StepDown 触发门。原版两处均为 == 精确等值（NPC.cs:54374 velocity.Y==0、
    *  Player.cs:23252 velocity.Y==gravity）——语义 = 仅"贴地行走"吸附,空中实体不吸附。
    *  本仓 NPC 族重力在碰撞【前】累加（贴地时 vy=GRAVITY≠0）,故 NPC 门取语义等价的
@@ -32,7 +40,7 @@ export interface Body {
  *  （NPC.cs:54382，先于 TileCollision 用未受阻的速度调用）共用——
  *  此前只有玩家有自研版上台阶，敌人/小动物/城镇 NPC 全部卡死在半砖/台阶。
  *  gfxOffY 视觉缓动无对应渲染通道，位置直接抬升（原版 NPC 同样瞬间抬）。 */
-function applyStepUp(b: Body, world: World): void {
+function applyStepUp(b: Body, world: World, holds: boolean, npcMode: boolean): void {
   const vx = b.vx;
   if (vx === 0) return;
   const dir = Math.sign(vx);
@@ -48,6 +56,14 @@ function applyStepUp(b: Body, world: World): void {
     st.inBounds(x, y) && !!st.half[st.idx(x, y)];
   const slopeAt = (x: number, y: number): number =>
     st.inBounds(x, y) ? st.slope[st.idx(x, y)] : 0;
+  // 站台面（tileSolidTop && frameY==0；isPlatform 已含 nactive/致动门）
+  const platAt = (x: number, y: number): boolean => st.inBounds(x, y) && st.isPlatform(x, y);
+  // IgnoredByNpcStepUp（TileID.cs:209：14 篝火桌?/469 Tables2/18 工作台/16 铁砧/134 秘银砧——NPC 不踏）
+  const NPC_STEPUP_IGNORE = new Set([14, 469, 18, 16, 134]);
+  const sheetAt = (x: number, y: number): number => {
+    const d = st.inBounds(x, y) ? TILE_DEFS[st.type[st.idx(x, y)]] : undefined;
+    return (d as unknown as { vanilla?: { sheet?: number } })?.vanilla?.sheet ?? -1;
+  };
   // flag（:3700-3708）：身体放入探柱（j=2..num4 上方行全净空）
   for (let j = 2; j <= num4; j++) if (solidAt(num2, num3 - j)) return;
   // flag2（:3710-3714）：后上方对角净空
@@ -62,7 +78,9 @@ function applyStepUp(b: Body, world: World): void {
       || (halfAt(num2, num3 - 1) && !solidAt(num2, num3 - num4 - 1));
     if (!ok) return;
   }
-  // flag4（:3730-3737）：落脚格实心（面朝坡且身体沉入）/ 或脚上一格是半砖
+  // flag4（:3713-3721）：落脚格实心（面朝坡且身体沉入）/ 或脚上一格是半砖 /
+  //   holdsMatching 站台面落脚（(solidTop&&frameY==0)||Platforms||type==380，
+  //   上一格非实心且非站台（flag4 &= !solidTop[type]||!solidTop[tile2]），NPC 排除集）
   {
     const fs = slopeAt(num2, num3);
     const topSlope = fs === 1 || fs === 2;
@@ -70,7 +88,11 @@ function applyStepUp(b: Body, world: World): void {
       && (!topSlope || (fs === 1 && centerX < num2 * TILE) || (fs === 2 && centerX > num2 * TILE + TILE))
       && (!topSlope || b.y + b.h > num3 * TILE);
     const bb = halfAt(num2, num3 - 1) && solidAt(num2, num3 - 1);
-    if (!(a || bb)) return;
+    const cc = holds && platAt(num2, num3)
+      && !solidAt(num2, num3 - 1)
+      && !platAt(num2, num3 - 1)
+      && (!npcMode || !NPC_STEPUP_IGNORE.has(sheetAt(num2, num3)));
+    if (!(a || bb || cc)) return;
   }
   // X 重叠门（:3745-3748）：探柱与移动后身体横向相交
   if (!(num2 * TILE < probeX + b.w && num2 * TILE + TILE > probeX)) return;
@@ -335,7 +357,7 @@ export function moveAndCollide(b: Body, world: World, dx: number, dy: number) {
   if (b.stepUp) {
     const gate = b.stepDownGate ?? 'grounded';
     if (gate === 'gravity' ? b.vy === GRAVITY : wasGround) applyStepDown(b, world);
-    applyStepUp(b, world);
+    applyStepUp(b, world, !!b.stepUpHolds, b.stepUpNpc === true);
   }
   // 速度辅助（Collision.cs:1773-1790）：脚底中心所在格(原版为整行落地候选格的近似)
   // 是 slope1/2、水平速度朝低侧、脚已沉到对角线 → dy += |dx|

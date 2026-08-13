@@ -21,11 +21,15 @@ describe('living wood 残留验尸②(一次性)', () => {
     console.log(`残留锚点=(${sx},${sy}) dungeon=(${dX},${world.dungeonY})`);
     // ±60 范围内所有 191/活木墙244 的分布(按列聚合输出)
     let lwCount = 0, wallCount = 0;
-    const lwCols = new Map<number, string[]>();
+    const lwCols = new Map<number, number[]>();
     for (let x = sx - 60; x <= sx + 60; x++) {
       for (let y = sy - 60; y <= sy + 60; y++) {
         const i = st.idx(x, y);
-        if (st.type[i] === LW && st.flags[i]) { lwCount++; (lwCols.get(x) ?? lwCols.set(x, []).get(x)!).push(y); }
+        if (st.type[i] === LW && st.flags[i]) {
+          lwCount++;
+          const arr = lwCols.get(x);
+          if (arr) arr.push(y); else lwCols.set(x, [y]);
+        }
         if (st.wall[i] === 244) wallCount++;
       }
     }

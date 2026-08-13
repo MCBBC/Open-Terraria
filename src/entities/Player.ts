@@ -228,6 +228,8 @@ export class Player extends Entity {
   private regenAccum = 0;
   stepRenderY = 0;             // 跨台阶的渲染高度补偿（缓动到 0，消除瞬移顿挫）
   stepUp = true;               // Collision.StepUp 自动上台阶（moveAndCollide 内消费）
+  stepUpHolds = false;         // holdsMatching（Player.cs:23258 第 8 参 = controlUp，fixedUpdate 灌入）
+  stepUpNpc = false;
   stepDownGate = 'gravity' as const;  // StepDown 门 = vy===GRAVITY（Player.cs:23252 字面）
   /** 高尔夫累计分（Player.cs:1792 AccumulateGolfingScore——Golfer 商店门槛/月相画门） */
   golferScoreAccumulated = 0;
@@ -2173,6 +2175,7 @@ export class Player extends Entity {
 
     this.dropThrough = !!this.inputDown;
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
+    this.stepUpHolds = this.inputUp;   // holdsMatching=controlUp：按住↑行走可踏上站台面（桌子/平台/铁砧…）
     // 钩爪牵引（GrappleMovement 1:1，Player.cs:22338-22483）——moveAndCollide 前覆写速度
     this.grappleMovement(game);
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；

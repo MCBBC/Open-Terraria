@@ -5734,7 +5734,7 @@ export class Renderer {
    *  微光 alpha 与本体同档（GetShimmerColor 经 npcColor 通道）。 */
   private drawTownHoldout(ctx: CanvasRenderingContext2D, n: TownNPC): void {
     const ho = TOWN_HOLDOUT[n.vanillaId];
-    if (!ho) return;
+    if (!ho || !this.atlas) return;
     const hm = n.hardMode && ho.hm !== undefined;
     const icon = this.atlas.vicon(hm ? ho.hm! : ho.pre);
     if (!icon) return;

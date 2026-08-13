@@ -237,6 +237,7 @@ export class Enemy extends Entity {
   whipProcItem = 0;
   /** 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382） */
   stepUp = true;
+  stepUpHolds = true; stepUpNpc = true;   // holdsMatching + IgnoredByNpcStepUp（NPC.cs:54382 flag22 恒 true（飞行 AI 不走地面段））
   // ---- 蠕虫多段体（AI_006，NPC.cs:18046）：头 aiStyle 6，编号约定 头+1=身 头+2=尾 ----
   /** 链上紧随本段的一段（头 → 身×n → 尾） */
   wormNext: Enemy | null = null;
@@ -5837,13 +5838,11 @@ export class Enemy extends Entity {
     this.reflectsProjectiles = false;
 
     // ---- 白天/玩家死亡：向上漂离 + EncourageDespawn(10)（:20020-20025） ----
-    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续。
-    // ★位移交给通用物理段 noTileCollide 分支——此处再积分即双倍速（曾致白天
-    // 漂离双速,更早连 P2 冲刺也是双倍:6.8→13.6/连冲 20→40 像瞬移,2026-08-13
-    // 用户报"二阶段冲刺速度差距大"实锤后一并归一）
+    // 原版在旋转段之后 return：状态机与 ai[2] 全部冻结，复活后从冻结处继续
     if (game.world.clock.isDay || player.dead) {
       this.vy -= 0.04;
       this.encourageDespawn(10);
+      this.x += this.vx; this.y += this.vy;
       if (dist > T * 120) this.dead = true;   // 漂远后兜底消失
       return;
     }
@@ -6205,9 +6204,9 @@ export class Enemy extends Entity {
       if (flag3 && this.state === 5) this.state = 3;
     }
 
-    // 移动交给通用物理段 noTileCollide 分支（x+=vx 每 tick 一次）——此处曾再积分
-    // 一次 = 全程双倍速（P2 连冲 20→40px/t 像瞬移,2026-08-13 实锤）。世界边界
-    // 钳制保留（原版 noTileCollide 也有 InWorld 钳;通用段无此钳）
+    // 移动：EoC 全程 noTileCollide——AI 内自积分（:5717 的 noTileCollide 分支属
+    // flyAI,非通用物理;此处是唯一积分点,曾误删致 EoC 定格）+ 世界边界钳制
+    this.x += this.vx; this.y += this.vy;
     this.onGround = false; this.hitWall = false; this.hitHead = false;
     const maxX = game.world.w * T - this.w, maxY = game.world.h * T - this.h;
     this.x = Math.max(0, Math.min(maxX, this.x));

@@ -184,6 +184,7 @@ export function flyAccelOf(projId: number, d: number, fallback: number): number 
 export class PetFollower extends Entity {
   /** 原版宠物全体走 Collision.StepUp（AI_026 :59280 / AI_067 :47756） */
   stepUp = true;
+  stepUpHolds = true; stepUpNpc = true;   // holdsMatching + IgnoredByNpcStepUp（NPC.cs:54382 flag22 恒 true）
   w = 16;
   h = 16;
   dead = false;

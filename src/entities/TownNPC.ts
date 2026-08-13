@@ -182,7 +182,8 @@ export function isItStormingNext(cloudAlpha: number, windSpeedTarget: number, pr
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
-  stepUp = true; // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
+  stepUp = true;
+  stepUpHolds = true; stepUpNpc = true;   // holdsMatching + IgnoredByNpcStepUp（NPC.cs:54382 flag22 恒 true） // 原版 NPC 全体走 Collision.StepUp（NPC.cs:54382）
   npcKey: string; // 'guide'
   /** 原版 NPCID（TOWN_NPC_IDS；Renderer 经 atlas.vnpc 取 NPC_{id}.png 贴图条） */
   vanillaId: number;

@@ -832,17 +832,23 @@ export class UI {
     if (src.stack !== 1) return;
     let target = -1;
     let targetWhere: SlotWhere = 'armor';
+    // ★vanity 路由（ArmorSwap :3289 `num = item.vanity ? 10 : 0`）：时装类右键进
+    // 社交段（盔甲 10-12 / 配饰 13+）——曾恒进功能段:纯社交配饰(acc=0)被功能槽
+    // armorAccepts 门拒 = "时装穿不上"根因（2026-08-14 用户实抓）
+    const van = statOfInternal(cur.id)?.van === 1;
     if (d.armor) {
-      target = d.armor.slot;
+      target = d.armor.slot + (van ? 10 : 0);
     } else if (armorSlotIndexOfInternal(cur.id) >= 0) {
-      target = armorSlotIndexOfInternal(cur.id); // vi_ 盔甲（vanilla-itemstats 部位）
+      target = armorSlotIndexOfInternal(cur.id) + (van ? 10 : 0); // vi_ 盔甲（vanilla-itemstats 部位）
     } else if (d.accessory || statOfInternal(cur.id)?.acc !== undefined) {
       // vi_ 配饰走 itemstats acc 判定(legacy accessory 字段已随退役消失——曾只认
       // legacy 字段导致 vi_ 配饰右键一键装备静默失效)
-      for (let k = 3; k < inv.accSlotMax; k++) {
+      const accBase = van ? 13 : 3;   // 社交配饰段 13+（ArmorSwap :3315 3+num）
+      const accMax = van ? 13 + (inv.accSlotMax - 3) : inv.accSlotMax;
+      for (let k = accBase; k < accMax; k++) {
         if (!inv.armor[k]) { target = k; break; }
       }
-      if (target < 0) target = 3; // 全满→交换第 3 槽
+      if (target < 0) target = accBase; // 全满→交换段首槽
     } else {
       const kind = equipKindOfInternal(cur.id);
       if (kind === 'dye') {

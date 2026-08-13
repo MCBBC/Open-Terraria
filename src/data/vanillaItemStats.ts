@@ -10,6 +10,8 @@ export interface VanillaItemStat {
   s?: 'h' | 'b' | 'l';
   def?: number;
   acc?: 0 | 1;
+  van?: 1;         // Item.vanity=true（tools/patch-vanity-stats.mjs 从 Item.cs 提取 390 件;
+                   // SwapEquip 社交槽路由依据 ArmorSwap :3289）
   life?: number;   // 生命回复（Item.lifeRegen，再生手环族）
   wing?: number;   // 翅膀槽（Item.wingSlot>0 即翅膀；飞行属性查 vanilla-wingstats）
   hs?: number; bs?: number; ls?: number; // 盔甲绘制槽序号（套装匹配键，Player.cs UpdateArmorSets）

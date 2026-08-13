@@ -115,10 +115,18 @@ export class TileStore {
     return !!d && d.solid;
   }
 
+  /** 站顶单向面（原版 tileSolidTop 消费语义 = Collision.TileCollision :2165/:2331：
+   *  `tileSolidTop[type] && tile.frameY == 0`——多格家具仅【顶行】可站；nactive 门
+   *  （:2064）→ 已致动(inActive)的平台/家具顶不可站）。平台/铁砧/桌子/钢琴/笼子/
+   *  金属条/种植箱等 84 类（vanilla-tilecollision.json 全表）。
+   *  注：SolidCollision(acceptTopSurfaces) :2771 对 Platforms 集合改用
+   *  PlatformProperTopFrame(frameX)——该查询路径本仓无消费者，不移植（登记）。 */
   isPlatform(x: number, y: number): boolean {
     if (!this.inBounds(x, y)) return false;
-    const d = TILE_DEFS[this.type[this.idx(x, y)]];
-    return !!d && d.platform;
+    const i = this.idx(x, y);
+    if (this.wire[i] & TileStore.WIRE_ACTUATED) return false;   // nactive()（致动=不可站）
+    const d = TILE_DEFS[this.type[i]];
+    return !!d && d.platform && this.frameY[i] === 0;
   }
 
   onTileChanged(fn: (x: number, y: number) => void) {
