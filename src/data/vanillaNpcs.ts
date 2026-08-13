@@ -147,6 +147,25 @@ export const TOWN_NPC_HEAD_INDEX: Record<number, number> = {
   682: 51, 683: 52, 684: 53,
 };
 
+/** Boss 头像贴图索引(NPCID.Sets.BossHeadTextures,NPCID.cs:4861;默认 -1 = 无地图头像)。
+ *  地图绘制(Main.cs DrawNPCMapIcons3/2)+ 顶部 Boss 血条(BigProgressBar)共用;
+ *  NPC_Head_Boss_{idx}.png。GetBossHeadTextureIndex 特判(Plantera 266 隐藏/世吞 4 二段/
+ *  石巨人 262 半血换头)未接,取基础表 */
+export const BOSS_HEAD_INDEX: Record<number, number> = {
+  4: 0, 13: 2, 344: 3, 370: 4, 246: 5, 249: 5, 345: 6, 50: 7, 396: 8, 395: 9,
+  325: 10, 262: 11, 327: 13, 222: 14, 125: 15, 126: 20, 346: 17, 127: 18, 35: 19,
+  68: 19, 113: 22, 266: 23, 439: 24, 440: 24, 134: 25, 491: 26, 517: 27, 422: 28,
+  507: 29, 493: 30, 549: 35, 564: 32, 565: 32, 576: 33, 577: 33, 551: 34, 548: 36,
+  636: 37, 657: 38, 668: 39,
+};
+
+/** Boss 头像旋转(NPC.GetBossHeadRotation :7586-7608):68/262 → npc.rotation;
+ *  35/127 仅 ai[1]∈{1,2} / 345 仅 ai[0]==2 取 rotation;其余 0 */
+export function bossHeadRotation(id: number, rotation: number): number {
+  if (id === 68 || id === 262) return rotation;
+  return 0; // 35/127/345 的 ai 门(冲刺态)未接,取 0
+}
+
 /** NPC id → ExtraFramesCount（TOWN_NPC_IDS 反查；未登记的默认 2） */
 export function townExtraFrames(id: number): number {
   return TOWN_EXTRA_BY_ID.get(id) ?? 2;

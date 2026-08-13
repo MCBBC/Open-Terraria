@@ -146,6 +146,8 @@ const MISC = [
   'Inventory_Back21.png',
   // Loadout 按钮图集（Main.cs:41395 Extra[259] 3×3：列=常态/选中/悬停，行=loadout 配色）
   'Extra_259.png',
+  // 派对帽总表（Main.cs:26822 Extra[72]：20 列 × 40×36；色格 0 蓝/16 粉/17 青/18 紫/19 白）
+  'Extra_72.png',
   // 金币旋转帧（CoinSlot.DrawItemCoin：Coin_N 8 帧竖条，背包金币跳字动画）
   'Coin_0.png', 'Coin_1.png', 'Coin_2.png', 'Coin_3.png',
   // 自然层 glowmask（634 树 315/316/317、592 吊挂 294、656/701 摆动草 329）
@@ -314,6 +316,23 @@ for (const id of whitelist.npcs ?? []) {
     frameW: w, frameH,
     count: Math.max(1, Math.floor(h / frameH)),
   };
+}
+
+// 城镇 NPC 派对变体贴图条（altTexture=1 → TownNPCs/{Name}_Default_Party 整条替换，
+// Profiles.cs GetTextureNPCShouldUse）。消费门在 Renderer（UpdateAltTexture NPC.cs:91250：
+// 441/453/633 永不 alt=1——这里仍拷贝全量保持与素材库一致，渲染层负责排除）
+const TOWN_PARTY_ALT = [
+  [17, 'Merchant'], [18, 'Nurse'], [38, 'Demolitionist'], [54, 'Clothier'],
+  [108, 'Wizard'], [124, 'Mechanic'], [142, 'Santa'], [178, 'Steampunker'],
+  [207, 'DyeTrader'], [209, 'Cyborg'], [227, 'Painter'], [229, 'Pirate'],
+  [353, 'Stylist'], [368, 'TravelingMerchant'], [369, 'Angler'], [441, 'TaxCollector'],
+  [453, 'SkeletonMerchant'], [588, 'Golfer'], [633, 'BestiaryGirl'], [663, 'Princess'],
+  [682, 'SlimeRed'],
+];
+for (const [id, name] of TOWN_PARTY_ALT) {
+  const src = join(ASSETS, 'TownNPCs', `${name}_Default_Party.png`);
+  if (!existsSync(src)) { missing.push(`TownNPCs/${name}_Default_Party`); continue; }
+  copyFileSync(src, join(OUT_DIR, `NPC_${id}_Alt_1.png`)); copied++;
 }
 
 // 全量 tile/item 名称表（仅 id→name，约 30KB——兼容报告显示用，不拷 PNG）

@@ -45,6 +45,7 @@ console.log(`顶层条件块: ${blocks.length}`);
 // ---- 逐块解析 ----
 const table = {};
 const skipped = [];
+let mutSeq = 0;
 
 /** 时长表达式 → {durMin, durMax}(tick);不识别返回 null */
 function parseDur(dExpr) {
@@ -102,10 +103,13 @@ for (const b of blocks) {
   if (twoBranch && adds.length === 2) {
     const k = +twoBranch[1];
     const pairs = [[twoBranch[2], twoBranch[3], chanceOuter / k], [twoBranch[4], twoBranch[5], chanceOuter * (k - 1) / k]];
+    // ★互斥组(2026-08-13 语义修正):原版 if/else 是"单掷骰二选一必中其一",
+    //   两条独立掷骰会让双落空/双中——同型两条标同一 mut id,运行时单掷按累积概率选
+    const mutId = ++mutSeq;
     for (const [buffS, dExprRaw, chance] of pairs) {
       const dur = parseDur(dExprRaw.trim());
       if (!dur) { skipped.push([cond, `时长表达式不识别: AddBuff(${buffS}, ${dExprRaw})`]); continue; }
-      for (const t of typeIds) (table[t] ??= []).push({ buff: +buffS, chance, ...dur });
+      for (const t of typeIds) (table[t] ??= []).push({ buff: +buffS, chance, mut: mutId, ...dur });
     }
     continue;
   }

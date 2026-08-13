@@ -16,6 +16,7 @@ export interface ArmorSetBonus {
   critMagic?: number;
   noKnockback?: boolean;
   fireWalk?: boolean;
+  frostBurn?: boolean;     // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
   ammoCost80?: boolean;
   manaCostMul?: number;      // manaCost -=（折扣）
   ghostHeal?: boolean;       // 幽灵治疗头（Spectre Hood :15850-15855，魔法命中吸血 engine）
@@ -60,8 +61,9 @@ export const ARMOR_SET_BONUSES: Record<string, ArmorSetBonus> = {
   '8|8|45': { manaCostMul: 0.84, name: 'Jungle' },
   // 熔岩 9：近战伤 +10% + fireWalk
   '9|9|9': { dmgMelee: 0.1, fireWalk: true, name: 'Molten' },
-  // 霜寒 46：近远程伤 +10%（frostBurn engine）
-  '46|27|26': { dmgMelee: 0.1, dmgRanged: 0.1, name: 'Frost' },
+  // 霜寒 46：近远程伤 +10% + frostBurn engine（StatusNPC :93712-93716：
+  //   melee||ranged 命中 → Frostburn2(324) 60×Next(5,15)t = 5-14s）
+  '46|27|26': { dmgMelee: 0.1, dmgRanged: 0.1, frostBurn: true, name: 'Frost' },
   // 幽灵套（Spectre Robe 66 / Pants 55；Player.cs:15850-15860）：
   // 头 101 兜帽 → ghostHeal（魔法命中回血，魔法伤 −40%）；
   // 头 156 面具 → ghostHurt（伤害强化 engine 未接，登记）

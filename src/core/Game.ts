@@ -1,5 +1,6 @@
 // 游戏主控制器：状态、主循环、挖掘/放置/战斗/生成/存档的总装
 import { Achievements } from './Achievements';
+import { GrappleProj } from '../entities/GrappleProj';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
@@ -79,6 +80,7 @@ import { VI, VI_ID, VI_KEY } from '../data/itemKeys';
 import { vanillaNpc, TOWN_NPC_IDS, getGemSquirrelToSpawn, getGemBunnyToSpawn } from '../data/vanillaNpcs';
 import { DebugSummonPanel } from './DebugSummonPanel';
 import { itemCombat, AMMO_ARROW, combatWeapon, thrownCombat, viIdFromKey, projGravity, rangedAmmoWeapon, type CombatWeapon } from '../data/vanillaItemCombat';
+import { applyFrostBurn } from '../entities/projStatus';
 import { itemFuncOfVid, itemFuncOfInternal } from '../data/vanillaItemFunc';
 import { dropsAllItemsOnDeath, dropsCoinsOnDeath } from '../player/Appearance';
 /** 原版 buff id → BuffType 反查（vi_ 药水桥接用；BUFF_DEFS.vanillaBuff 与原版编号一致） */
@@ -174,12 +176,16 @@ import { MinionProj } from '../entities/MinionProj';
 import { WhipProj } from '../entities/WhipProj';
 import { Bobber } from '../entities/Bobber';
 import { GolfBall, GOLF_CLUBS, golfShot, golfBallInStance } from '../entities/GolfBall';
+import { GolfState } from '../world/golf/GolfState';
+import { golfVanillaTileId } from '../world/golf/golfPhysics';
+import { golferShopScoreGates } from '../world/golf/golferShop';
 import { MeteorChunk } from '../entities/MeteorChunk';
 import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
+import { computeHappiness, type BiomeZones } from '../data/vanillaHappiness';
 import { Minecart, CART_TEXTURES, DEFAULT_CART_TEXTURE } from '../entities/Minecart';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
-import { canHitLine } from '../physics/LineOfSight';
+import { canHit, canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
 import { MagicProj } from '../entities/MagicProj';
 import type { DropExtras } from '../drops/NpcDrops';
@@ -337,6 +343,16 @@ const NPC_MECH_GROUPS: ReadonlyArray<readonly number[]> = [
   [602, 603], [608, 609], [616, 617],
 ];
 // (NATIVE_ITEM_VID 本地键表已随本地物品退役移除:vi_ 前缀解析全覆盖)
+/** 传送族物品（Player.cs:42297-42516）：魔镜 50/手机 3124/冰镜 3199/贝壳手机 5358/
+ *  回忆药水 2350/传送药水 2351/魔海螺 4263/恶魔海螺 4819/贝壳手机·出生点 5359/
+ *  贝壳手机·海洋 5360/贝壳手机·地狱 5361 */
+const TELEPORT_ITEM_VIDS = new Set([50, 3124, 3199, 5358, 2350, 2351, 4263, 4819, 5359, 5360, 5361]);
+/** 传送目的地分类 */
+type RecallKind = 'spawn' | 'ocean' | 'hell';
+/** 永久升级/特殊消耗品使用集(UpdatePermanentBoosters 族+特殊单品) */
+const PERMANENT_USE_VIDS = new Set([
+  3335, 5337, 5338, 5339, 5341, 5342, 5043, 2756, 4870, 678, 1326, 5335, 1133, 4988, 3601,
+]);
 function dropVanillaId(d: ItemDrop): number {
   return slotVanillaId(d.itemId);
 }
@@ -349,7 +365,7 @@ function slotVanillaId(itemId: number): number {
 /** 配饰槽（armor[3..9]，原版 ApplyEquipFunctional :12543-12550）→ 原版 item id 列表 */
 export function accessoryVanillaIds(p: Player): number[] {
   const out: number[] = [];
-  for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+  for (let acc = ACC_ARMOR_START; acc < p.inv.accSlotMax; acc++) {
     const s = p.inv.armor[acc];
     if (s) out.push(slotVanillaId(s.id));
   }
@@ -1277,6 +1293,8 @@ export class Game implements GameHooks {
   triggerTiles423 = new Set<number>();
   /** 实体踩板去重键(实体id|格):小动物触发压板 + 巨石触发压板/弹幕垫板 */
   private entityPlateLatch = new Set<string>();
+  /** 传送族引导态（Player.cs:42297-42516）：useTime 倒数到 triggerAt 时触发传送 */
+  private recallChannel: { vid: number; kind: RecallKind; triggerAt: number; consume: boolean } | null = null;
   /** F7 强制显示导线 */
   forceShowWires = false;
   // 贴图纠错子模式：点击方块弹出该图块的完整原版贴图表供选帧
@@ -1347,6 +1365,13 @@ export class Game implements GameHooks {
 
   constructor(root: HTMLElement, cb: GameCallbacks, atlas?: SpriteAtlas | null) {
     this.assets = buildAssets();
+    // 高尔夫宿主注入（GolfBall.host：球体 AI ↔ LocalGolfState/进洞结算链）。
+    // playerRef 取函数——换世界会重建 Player 实例，须动态解析
+    GolfBall.host = {
+      state: this.golfState,
+      playerRef: () => this.player,
+      onCupCapture: (ball, tx, ty) => this.golfCupCapture(ball, tx, ty),
+    };
     if (atlas) {
       this.atlas = atlas;
       this.autotiler = new AutoTiler(atlas);
@@ -1717,6 +1742,7 @@ export class Game implements GameHooks {
     clearPortals();                 // 传送门为世界内实体，切世界/重载一并清（BirthdayParty.WorldClear 同位）
     partyWorldClear(this.partyState);
     LanternNight.worldClear();      // LanternNight.WorldClear（Main.cs:51656）：运行时态不进存档
+    this.golfState.worldClear();    // GolfState.WorldClear（GolfState.cs:69-76）：轨迹记录/跟踪态不进存档
     this.player = new Player(w.spawnX * TILE + 8, (w.spawnY - 3) * TILE, new Inventory()); // 主角 3 格高，抬高出生点
     // 初始装备 = 原版经典开局三件套（铜镐 3509/铜斧 3506/铜短剑 3507），其余一概不给——
     // 调试用道具经背包面板的"搜索添加"按钮获取（UI.ts 道具搜索器）
@@ -2149,12 +2175,13 @@ export class Game implements GameHooks {
     this.sfx.setListener(this.camera.x, this.camera.y);
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
-      // 城镇 NPC 计数为"距离盒"语义（SceneMetrics.cs:755-757/:18：CenteredRectangle(Center,
-      // AssumedConstantScreenSize×2)=±1920×±1080px 内的 townNPC）——全图存活数会让
-      // 46/47 城镇曲盖住一切群系 BGM
+      // 城镇 NPC 计数为"距离盒"语义（SceneMetrics.cs:755-757/:12/:18：
+      // AssumedConstantScreenSize=1920×**1200**,CenteredRectangle(Center,×2)=
+      // ±1920×±1200px 内的 townNPC——曾误用 1080(高偏窄,2026-08-13 对齐)）——
+      // 全图存活数会让 46/47 城镇曲盖住一切群系 BGM
       const townNPCCount = this.entities.npcs.filter((n) => {
         const tn = n as TownNPC;
-        return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1080;
+        return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
       w.scene = this.scene; // Enemy 等只读消费（zoneGraveyard 攻门门等）
@@ -2278,7 +2305,7 @@ export class Game implements GameHooks {
     // 原版先播 Item166 再走变身 if-chain（无映射曲只响声不变身），此处同序；
     // 变身目标 = musicBoxRecordItem（curMusic→style→vid，WorldGen :43138 逆表） ----
     if (this.lastMusic > 0 && this.lastMusic <= 105) {
-      for (let acc = ACC_ARMOR_START; acc < ACC_ARMOR_START + 7; acc++) {
+      for (let acc = ACC_ARMOR_START; acc < player.inv.accSlotMax; acc++) {
         const slot = player.inv.armor[acc];
         if (!slot) continue;
         const heldDef = ITEM_DEFS[slot.id];
@@ -2448,6 +2475,11 @@ export class Game implements GameHooks {
     }
     // 成就：定期落盘（原版退出时存 achievements.dat；10s 节流防丢中途进度）
     if (this.tickCount % 600 === 0) this.achievements.flush();
+    // 钩爪弹回收尾：dead → 清牵引目标（GrappleProj 自释放路径之外的兜底）
+    if (this.activeGrapple?.dead) {
+      this.player.grappleTarget = null;
+      this.activeGrapple = null;
+    }
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -2535,38 +2567,17 @@ export class Game implements GameHooks {
       if (club && !inp.uiBlocking && !this.player.dead && this.player.gravDir === 1) {
         const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
         if (!this.golfAim && inp.mouseDown && this.player.useTime === 0) {
-          // 开瞄：站位盒内有球（ValidateShot :444-448）；无球且 500px 内无球 →
-          // 自动摆球（TryPlacingAGolfBallNearANearbyTee :49512-49525：5×5 找球座 494）
+          // 开瞄（AI_150 :49507-49525）：500×500 盒（玩家中心）内无自有球 → 自动摆球
+          const ball500 = this.entities.projectiles.some((e) => {
+            const b = e as GolfBall;
+            return b instanceof GolfBall && !b.dead && b.isMine
+              && Math.abs(b.cx - this.player.cx) <= 250 && Math.abs(b.cy - this.player.cy) <= 250;
+          });
           let ball = myBall();
-          if (!ball || Math.hypot(ball.cx - this.player.cx, ball.cy - this.player.cy) > 500
-            || !golfBallInStance(ball, this.player)) {
-            const st = this.world.store;
-            const ptx = Math.floor(this.player.cx / TILE), pty = Math.floor((this.player.y + this.player.h) / TILE);
-            let tee: [number, number] | null = null;
-            outer: for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
-              const x = ptx + dx, y = pty + dy;
-              if (!st.inBounds(x, y)) continue;
-              if (TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet === 494) { tee = [x, y]; break outer; }
-            }
-            if (tee) {
-              if (ball) ball.dead = true;
-              // GetPreferredGolfBallToUse（:48919-48950）：手持→背包首个球族，默认 721
-              let projId = 721;
-              for (let i = 0; i < this.player.inv.slots.length; i++) {
-                const sl = this.player.inv.slots[i];
-                if (!sl) continue;
-                const km = /^vi_(\d+)_/.exec(ITEM_DEFS[sl.id].key);
-                const kv = km ? +km[1] : 0;
-                if (kv === 3989 || (kv >= 4242 && kv <= 4253)) {
-                  projId = kv === 3989 ? 721 : 739 + (kv - 4242);
-                  this.player.inv.removeAt(i, 1);
-                  break;
-                }
-              }
-              const own = this.player;
-              ball = new GolfBall(tee[0] * TILE + 3, (tee[1] + 1) * TILE - 10, projId, () => own);
-              this.entities.add(ball, 'projectiles');
-            }
+          if (!ball500) {
+            // TryPlacingAGolfBallNearANearbyTee（Player.cs:48857-48917，placePosition=玩家中心）
+            this.tryPlacingGolfBallNearTee(this.player.cx, this.player.cy, mwx, mwy);
+            ball = myBall();
           }
           if (ball && golfBallInStance(ball, this.player)) {
             this.golfAim = true;
@@ -2589,15 +2600,24 @@ export class Game implements GameHooks {
             this.renderer.golfPower = { x: this.player.cx, y: this.player.y + this.player.h + 8, rel: shot.rel, ball };
             this.useSwing(gDef, Math.atan2(mwy - this.player.cy, mwx - this.player.cx));
           } else {
-            // 松开 → 击球（:49527-49560）：公式击出 + 地面阻尼（HitGolfBall :451-474）
-            const shot = golfShot(mwx, mwy, ball, club);
+            // 松开 → 击球（:49527-49560）：公式击出 + 地面阻尼（HitGolfBall :451-474）。
+            // 原版遍历全部自有球逐个 ValidateShot 后击出（:49530-49556）——单人等价 =
+            // 站位盒内全部击出
             const st = this.world.store;
-            const btx = Math.floor((ball.x + ball.w / 2) / TILE);
-            const bty = Math.floor((ball.y + ball.h + 1) / TILE);
-            const solidBelow = st.inBounds(btx, bty) && st.isSolid(btx, bty);
-            ball.clubHit(shot.vx, shot.vy, club.rough, solidBelow);
-            this.sfx.play('tink', 0.8, ball.cx, ball.cy);
-            this.golfScoreTime = 0; // RecordSwing（一杆进洞折扣计时清零）
+            for (const e of this.entities.projectiles) {
+              const b = e as GolfBall;
+              if (!(b instanceof GolfBall) || b.dead || !b.isMine || !golfBallInStance(b, this.player)) continue;
+              const shot = golfShot(mwx, mwy, b, club);
+              // HitGolfBall 材质阻尼查球底+1px 格（GolfHelper.cs:453-459：
+              // Bottom=(x+w/2,y+h) 再 +1 → 中心X/底+1 取格）
+              const btx = Math.floor((b.x + b.w / 2) / TILE);
+              const bty = Math.floor((b.y + b.h + 1) / TILE);
+              const below = st.inBounds(btx, bty) && st.flags[st.idx(btx, bty)] !== 0
+                ? golfVanillaTileId(st, btx, bty) : null;   // 原版 id（材质表键）
+              b.clubHit(shot.vx, shot.vy, club.rough, below);
+              this.sfx.play('tink', 0.8, b.cx, b.cy);   // Item126 击球音（:49550）
+            }
+            this.sfx.play('throw', 0.7, this.player.cx, this.player.cy); // Item1 挥杆音（:49528）
             this.golfAim = false; this.golfAimBall = null;
             this.renderer.golfPower = null;
             this.player.useTime = 42; // useAnimation 12 + 后摇 30（:49561-49567）
@@ -2884,6 +2904,9 @@ export class Game implements GameHooks {
           // NPC.cs:79833 BroadcastChatMessage("Announcement.HasBeenDefeated_Single", ChatColors.BossOrEvent)
           this.newText(Lang.text('Announcement.HasBeenDefeated_Single', bname), 175, 75, 255);
           const downedKey = `downed_${this.boss.vanillaId ?? 0}`;
+          // SetEventFlagCleared(NPC.cs:79557) 首次语义:downed 旗标翻转(false→true)
+          // 才触发灯笼夜——此前每次击杀都预约(2026-08-13 对齐;肉山 19 在下方链内单独投递)
+          const wasDowned = !!w.flags[downedKey];
           w.flags[downedKey] = true;
           // NPC.downedPlantBoss → Wiring 死门接活（Wiring.cs:3216 蜥蜴砖致动 / :1554
           // 神庙传送器捕获：世纪之花前两处 return 拒绝）
@@ -2905,7 +2928,7 @@ export class Game implements GameHooks {
           // 6 石头人 7 猪鲨 9 邪教徒 10 月总 24 史后 23 光女 25 鹿角怪 16/17/18 三王
           if (this.boss.vanillaId != null) {
             const ev = BOSS_GAME_EVENT_BY_NPC[this.boss.vanillaId];
-            if (ev !== undefined) LanternNight.onGameEventCleared(ev);
+            if (ev !== undefined && !wasDowned) LanternNight.onGameEventCleared(ev);
             // 三王全灭 → 保底世花球茎（NPC.cs:79578-79585 case 16/17/18 →
             // WorldGen.GeneratePlanteraBulbOnAllMechsDefeated：netMode!=1 &&
             // hardMode && 三旗齐 → 丛林侧搜索框生成恰好一个灯泡）
@@ -3251,8 +3274,16 @@ export class Game implements GameHooks {
         }
       }
     }
-    // ---- 高尔夫计时推进（GolfState.cs:30-36 每帧+1，封顶 3600）----
-    if (this.golfScoreTime < 3600) this.golfScoreTime++;
+    // ---- 高尔夫状态推进（GolfState.Update :111-134：计时每帧+1 封顶 3600 + 跟踪维护）----
+    {
+      const heldKey = ITEM_DEFS[this.player.inv.heldItem()?.id ?? -1]?.key ?? '';
+      const hm = /^vi_(\d+)_/.exec(heldKey);
+      const hv = hm ? +hm[1] : 0;
+      // IsAGolfingItem（Item.cs:47566-47577）：球族物品或球杆族（4039/4092-4095/4587-4598）
+      const golfing = hv === 3989 || (hv >= 4092 && hv <= 4095) || hv === 4039
+        || (hv >= 4242 && hv <= 4253) || (hv >= 4587 && hv <= 4598);
+      this.golfState.update(golfing, false);   // 3611 高尔夫球车坐骑未实装（等价边界）
+    }
     // ---- 自然 Boss 夜间生成（UpdateTime :64542-64621：整段门 !IsFastForwardingTime() &&
     //      !stopEvents；夜间 time>4860 后每 tick；玩家条件 = active && !dead &&
     //      y<worldSurface*16(或出生点在地下) && 4500px 内无月总(CanSpawnEnemiesNear :255)；
@@ -3940,6 +3971,19 @@ export class Game implements GameHooks {
 
   private updateUse(_dt: number) {
     const inp = this.input;
+    // 舌头禁道具（Player.cs:22032 controlUseItem=false——狂卷之舌期间不得使用物品）
+    if (this.player.buffs.has(BuffType.TheTongue)) return;
+    // ---- 传送族引导 tick(先于 uiBlocking 早退:引导中开背包不中断,原版同语义) ----
+    if (this.recallChannel && this.player.useTime <= this.recallChannel.triggerAt) {
+      const c = this.recallChannel;
+      this.recallChannel = null;
+      this.fireRecallTeleport(c);
+    }
+    // ---- 高尔夫哨引导 tick（Player.cs:42921-42924：itemAnimation==2 → ResetGolfBall）----
+    if (this.golfWhistleAt !== null && this.player.useTime <= this.golfWhistleAt) {
+      this.golfWhistleAt = null;
+      this.useGolfWhistle();
+    }
     // ---- 矿车坐骑（Mount 6 + Minecart.cs 轨道运动学；物理在 Minecart.fixedUpdate）----
     if (this.minecart) {
       const cart = this.minecart;
@@ -4282,6 +4326,97 @@ export class Game implements GameHooks {
         this.cb.onInventoryChanged();
       }
       this.player.useTime = 45;   // Item 5340 useTime（Item.cs:42342）
+    } else if (heldDef && inp.mouseDown && this.player.useTime === 0
+      && PERMANENT_USE_VIDS.has(viIdFromKey(heldDef.key))) {
+      // ---- 永久升级/特殊消耗品（Player.cs:44575-44802/:42462/:42516/:42205/:44861/:44609）----
+      const pvid = viIdFromKey(heldDef.key);
+      const p = this.player;
+      const consume = () => { p.inv.removeAt(p.inv.selected, 1); this.cb.onInventoryChanged(); };
+      const flagOnce = (setter: () => void) => { setter(); consume(); };
+      switch (pvid) {
+        case 3335: // 恶魔之心(:44575-44583):解锁第六配饰槽(专家)
+          if (this.world.isExpert || this.world.isMaster) flagOnce(() => { p.inv.extraAccessory = true; });
+          p.useTime = 30;
+          this.sfx.play('pickup');
+          break;
+        case 5337: if (!p.usedAegisCrystal) flagOnce(() => { p.usedAegisCrystal = true; }); p.useTime = 45; break;
+        case 5338: if (!p.usedAegisFruit) flagOnce(() => { p.usedAegisFruit = true; }); p.useTime = 45; break;
+        case 5339: if (!p.usedArcaneCrystal) flagOnce(() => { p.usedArcaneCrystal = true; }); p.useTime = 45; break;
+        case 5341: if (!p.usedGummyWorm) flagOnce(() => { p.usedGummyWorm = true; }); p.useTime = 45; break;
+        case 5342: if (!p.usedAmbrosia) flagOnce(() => { p.usedAmbrosia = true; }); p.useTime = 45; break;
+        case 5043: // 火把之神眷顾(:44609-44634):解锁群系火把
+          flagOnce(() => { this.world.flags.unlockedBiomeTorches = true; });
+          p.useTime = 30; this.sfx.play('pickup');
+          break;
+        case 2756: { // 性别转换药水(:42516-42542):Male 翻转
+          // 未设置变体(缺省)视作 0(男);特殊套装 2-9 不动只消耗
+          if (p.appearance) {
+            const v = p.appearance.skinVariant ?? 0;
+            if (v === 0 || v === 1) p.appearance.skinVariant = v === 0 ? 1 : 0;
+          }
+          consume(); p.useTime = 30; this.sfx.play('drink');
+          break;
+        }
+        case 4870: // 回归药水(:42462):传送出生点(床/回归点 stash 未实装→出生点近似,偏差记录)
+          this.sfx.play('drink');
+          p.x = this.world.spawnX * TILE + 8;
+          p.y = (this.world.spawnY - 3) * TILE;
+          p.vx = 0; p.vy = 0;
+          this.camera.x = p.cx; this.camera.y = p.cy;
+          this.recallDust(p, 70, true);
+          consume(); p.useTime = 30;
+          break;
+        case 678: { // 红药水(:42205-42227):普通世界固定 buff 组(20-30/33/68 各 3600s)
+          const RED_BUFFS = [20, 21, 22, 23, 24, 25, 26, 27, 28, 29, 30, 33, 68];
+          for (const vb of RED_BUFFS) {
+            const bt = BUFF_BY_VANILLA.get(vb);
+            if (bt !== undefined) p.buffs.apply(bt, 3600);
+          }
+          consume(); p.useTime = 30; this.sfx.play('drink');
+          break;
+        }
+        case 1326: // 混乱之杖(:44861-44900):传送鼠标点+混乱 debuff+扣血
+        case 5335: { // 和谐之杖(:44902+):传送鼠标点无代价
+          // ChaosState(debuff 88):混乱之杖冷却门——本仓无 buff 88,以 400t 本地
+          // 冷却近似(:44865 debuffTime 内拒绝再次传送)
+          if (pvid === 1326) {
+            if (p.chaosStateT > 0) break;
+            p.chaosStateT = 400;
+          }
+          this.teleportToMouse();
+          if (pvid === 1326) {
+            const cost = Math.max(1, Math.floor(p.maxHp / 6)); // :44889 生命代价
+            p.hp = Math.max(1, p.hp - cost);
+            this.addDamageNumber(p.cx, p.y, cost, false, '#B040FF');
+          }
+          p.useTime = 20;
+          break;
+        }
+        case 1133: // 蜜蜂分泌物(:43181-43191):召唤蜂王(无门)
+          this.summonBoss('queen_bee');
+          consume(); p.useTime = 30;
+          break;
+        case 4988: // 史莱姆皇后水晶(:43210-43224):神圣区+夜晚
+          if (!this.world.flags.hardMode || this.world.clock.isDay
+            || !(this.scene?.zoneHallow)) {
+            this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NightHallowOnly') || '需困难模式神圣区夜晚');
+          } else {
+            this.summonBoss('queen_slime');
+            consume();
+          }
+          p.useTime = 30;
+          break;
+        case 3601: { // 天界印记(:43348-43360)→WorldGen.StartImpendingDoom(720):月总倒计时
+          const s = this.world.lunarEvent;
+          s.moonLordCountdownMax = 720;
+          s.moonLordCountdown = 720;
+          this.newText('月亮末日即将来临……', 50, 255, 130);   // Lang.misc[52] BroadcastText
+          consume(); p.useTime = 30;
+          break;
+        }
+        default:
+          break;
+      }
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0 && this.consumableFuncGate(heldDef)) {
       // vi_ 药水/食物桥接（vanilla-itemfunc：healLife/healMana/buffType → 治疗/回魔/Buff）。
       // 纯消耗品门（consumable 且无放置/射击/工具语义——宠物坐骑等 buffType 物品不在此列）
@@ -4371,6 +4506,7 @@ export class Game implements GameHooks {
         const dropKey = projId === 1 ? ammoDef.key : null;
         const bowArrow = new Arrow(ax, ay, Math.cos(ang) * speed, Math.sin(ang) * speed,
           damage, knockback, projId, dropKey);
+        bowArrow.frostEligible = true; // 冰霜盔甲引擎(ranged 门)
         // 暴击链（审计 §6）：rangedCrit(装备/套装/词缀67-68配饰/buff) + 武器&弹药 item.crit
         const bowVid2 = bowVid ?? (heldDef?.vid ?? -1);
         bowArrow.critBonus = this.player.critChance('ranged')
@@ -4445,6 +4581,7 @@ export class Game implements GameHooks {
         const thrownArrow = new Arrow(px, py,
           Math.cos(ang) * (c?.shootSpeed ?? 9), Math.sin(ang) * (c?.shootSpeed ?? 9),
           dmgT, (c?.knockBack ?? 0) * (psT?.kb ?? 1), tc.shoot, heldDef.key, { pierce: pen });
+        thrownArrow.frostEligible = true; // 投掷并入 melee(:93712 门含 melee)
         thrownArrow.critBonus = this.player.critChance('ranged') + (c?.crit ?? 0) + (psT?.crt ?? 0); // 审计 §6 + ⑧ crt；投掷=ranged 族（§5）
         thrownArrow.armorPen = this.player.equipStats.armorPen + (psT?.arpen ?? 0); // ⑥+⑧
         this.entities.add(thrownArrow, 'projectiles');
@@ -4599,33 +4736,68 @@ export class Game implements GameHooks {
         this.sfx.play('tink');
         this.input.mouseDown = false;
       }
-    } else if (heldDef && [205, 206, 207, 1128].includes(viIdFromKey(heldDef.key))) {
+    } else if (heldDef && TELEPORT_ITEM_VIDS.has(viIdFromKey(heldDef.key))
+      && inp.mouseDown && this.player.useTime === 0) {
+      // ---- 传送族使用（Player.cs:42297-42516 汇总）----
+      // 魔镜族 {50,3124,3199,5358}/贝壳手机出生点 5359：引导 useTime 90,半程 Spawn(RecallFromItem);
+      // 回忆药水 2350:起始 SoundID.Item3 饮用音+青尘,itemTime==20 时 UseSound+双 70 尘+保留无敌帧+消耗;
+      // 传送药水 2351:itemTime==2 随机传送+消耗;海螺族 4263/5360 海洋、4819/5361 地狱:螺旋水尘+半程传送
+      const tvid = viIdFromKey(heldDef.key);
+      const useTime = itemCombat(tvid)?.useTime ?? 90;
+      const kind: RecallKind = tvid === 4263 || tvid === 5360 ? 'ocean'
+        : tvid === 4819 || tvid === 5361 ? 'hell' : 'spawn';
+      const triggerAt = tvid === 2350 ? 20 : tvid === 2351 ? 2 : Math.floor(useTime / 2);
+      this.player.useTime = useTime;                    // ApplyItemTime
+      this.player.itemAnimTicks = useTime;              // 引导姿势(useStyle 4/6/9 holdup)
+      this.recallChannel = { vid: tvid, kind, triggerAt, consume: tvid === 2350 || tvid === 2351 };
+      if (tvid === 2350) {
+        this.sfx.play('drink');                         // SoundID.Item3(:42432)
+        this.recallDust(this.player, 10);               // 10 青尘(:42434)
+      } else {
+        // 标准使用音:魔镜族/贝壳手机 Item6、海螺族 Item64(Item.cs UseSound)
+        this.sfx.play(kind === 'spawn' ? 'mirror' : 'conch');
+      }
+      this.input.mouseDown = false;
+    } else if (heldDef && [205, 206, 207, 1128, 3031, 3032].includes(viIdFromKey(heldDef.key))) {
       this.useBucket(viIdFromKey(heldDef.key), tx, ty);
     } else if (heldDef && inp.mouseDown && this.player.useTime === 0) {
-      // ---- 高尔夫球放置（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
-      //      指针格净空且下方实心 → 落球（每玩家同时一球：旧球回收）
+      // ---- 高尔夫球投掷（物品 3989/染色彩蛋 4242-4253 → proj 721/739+）：
+      //      Player.cs:46884-46906 三分支——|光标-中心|<100px → 球座自动摆球；
+      //      >100px 或无视线 → 以 shootSpeed 12 射向光标；否则原地落球。
+      //      不消耗（DefaultToGolfBall :35420-35436 无 consumable；球为可复用弹体）
       const bm = /^vi_(\d+)_/.exec(heldDef.key);
       const bvid = bm ? +bm[1] : 0;
       if (bvid === 3989 || (bvid >= 4242 && bvid <= 4253)) {
-        const st = this.world.store;
-        const gx = Math.floor(inp.mouseX / this.camera.zoom + this.camera.x - this.renderer.canvas.width / this.camera.zoom / 2);
-        const gy = Math.floor(inp.mouseY / this.camera.zoom + this.camera.y - this.renderer.canvas.height / this.camera.zoom / 2);
-        const btx = Math.floor(gx / TILE), bty = Math.floor(gy / TILE);
-        const air = st.inBounds(btx, bty) && !st.flags[st.idx(btx, bty)];
-        const floorOk = st.inBounds(btx, bty + 1) && st.isSolid(btx, bty + 1);
-        if (air && floorOk) {
-          for (const e of this.entities.projectiles) {
-            if (e instanceof GolfBall && !e.dead) e.dead = true;
-          }
-          const ownerRef = this.player;
-          const projId = bvid === 3989 ? 721 : 739 + (bvid - 4242);
-          this.entities.add(new GolfBall(btx * TILE + 3, (bty + 1) * TILE - 10, projId,
-            () => ownerRef), 'projectiles');
-          this.player.useTime = 15;
-          this.player.inv.removeAt(this.player.inv.selected, 1);
-          this.sfx.play('dig', 0.7);
-          this.cb.onInventoryChanged?.();
+        const projId = bvid === 3989 ? 721 : 739 + (bvid - 4242);
+        const [mwx, mwy] = this.camera.screenToWorld(inp.mouseX, inp.mouseY);
+        const dx = mwx - this.player.cx, dy = mwy - this.player.cy;
+        const dist = Math.hypot(dx, dy);
+        let placed = false;
+        if (dist < 100) {                                   // :46893-46894
+          placed = this.tryPlacingGolfBallNearTee(mwx, mwy, mwx, mwy);
         }
+        if (!placed) {                                      // :46896
+          if (dist > 100 || !canHit(this.world.store, this.player.cx, this.player.cy, 1, 1,
+            mwx, mwy, 1, 1)) {                              // :46901 Collision.CanHit
+            // 射向光标：normalize(d)×shootSpeed 12（DefaultToGolfBall :35423）
+            const n = dist || 1;
+            this.spawnGolfBall(this.player.cx, this.player.cy, projId, false,
+              (dx / n) * 12, (dy / n) * 12);                // :46902-46903
+          } else {
+            this.spawnGolfBall(mwx, mwy, projId, false, 0, 0);  // :46905-46906 原地落球
+          }
+        }
+        this.player.useTime = 15;   // useTime/useAnimation 15（:35427-35428）
+        this.sfx.play('throw', 0.6, this.player.cx, this.player.cy); // UseSound Item1（:35426）
+        this.input.mouseDown = false;
+      }
+      // ---- 高尔夫哨 4095（Item.cs:35739-35749：useStyle 4/useTime 10/UseSound Item128；
+      //      Player.cs:42921-42924 itemAnimation==2 → ResetGolfBall：球回退上一击点+1 杆）
+      else if (bvid === 4095) {
+        this.player.useTime = 10;                 // useTime=useAnimation=10（:35743-35744）
+        this.player.itemAnimTicks = 10;           // useStyle 4 举持姿势
+        this.golfWhistleAt = 8;                   // itemAnimation==2（10-2）
+        this.sfx.play('tink', 0.7, this.player.cx, this.player.cy); // UseSound Item128
         this.input.mouseDown = false;
       }
       // ---- 战斗书 4382/5336（Player.cs:44703-44730 ItemCheck_UseCombatBook）：
@@ -4811,7 +4983,7 @@ export class Game implements GameHooks {
       }
       case 'spear': {
         // AI_019：随角色前刺——伸缩包络按型号参数表(AI_019_Spears_GetSpearOffset),位移=offset×shootSpeed
-        const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed, cw.useTime,
+        const spear = new SpearProj(Math.cos(ang), Math.sin(ang), cw.shootSpeed * (ps?.size ?? 1), cw.useTime, // P:46431 num13=shootSpeed×scale(词缀 size)
           cw.damage, cw.knockback, cw.shoot);
         spear.critChance = critTotal;
         spear.armorPen = this.player.equipStats.armorPen + this.player.meleeArmorPen; // ⑥ 近战含磨刀
@@ -4829,7 +5001,7 @@ export class Game implements GameHooks {
         // summonDamageMult 会双乘；armorPen 同理由命中侧加）
         const whip = cw as Extract<typeof cw, { kind: 'whip' }>;
         const owner = this.player;
-        this.entities.add(new WhipProj(
+        const whipObj = new WhipProj(
           owner.cx, owner.cy, ang, whip.shoot, whip.itemId,
           Math.max(1, Math.round(cwIn.damage * (ps?.dmg ?? 1))),
           whip.knockback, whip.useTime, whip.shootSpeed,
@@ -4837,13 +5009,15 @@ export class Game implements GameHooks {
           // 月主鞭补鞭实时瞄准（Projectile.cs:45045-45046 朝鼠标方向重掷）
           () => Math.atan2(inp.mouseY - this.renderer.canvas.height / 2,
             inp.mouseX - this.renderer.canvas.width / 2),
-        ), 'projectiles');
+        );
+        this.entities.add(whipObj, 'projectiles');
         // 鞭攻速（SetItemAnimation :4266：summonerWeaponSpeedBonus × whipUseTimeMultiplier，
         // 封顶 3×——summonerWeaponSpeedBonus 来自鞭 buff 311/308/314，黑曜套给 wutm）
         const swb = (owner.whipBuffs[311] ? 0.35 : 0) + (owner.whipBuffs[308] ? 0.25 : 0)
           + (owner.whipBuffs[314] ? 0.12 : 0);
         const whipAtk = Math.min(3, 1 + swb * owner.equipStats.whipSpd);
         this.player.useTime = Math.max(1, Math.round(whip.useTime / whipAtk));
+        whipObj.bonusTagDmg = ps?.tagdmg ?? 0; // I:567 bonusTagDamage
         this.sfx.playWav('whipCrack', 0.9, owner.cx, owner.cy); // DefaultToWhip UseSound=Item152（鞭响）
         this.input.mouseDown = false;
         break;
@@ -4983,6 +5157,7 @@ export class Game implements GameHooks {
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
           cw.damage, cw.knockback, cw.shoot, null,
           { grav: projGravity(cw.shoot), life: pd?.timeLeft ?? 600, pierce: 1 });
+        shotArrow.frostEligible = dmgKind !== 'magic'; // melee/ranged 兜底弹吃冰霜引擎
         // 暴击链:装备 critChance(dmgKind) + 武器 item.crit(GetWeaponCrit)
         shotArrow.critBonus = this.player.critChance(dmgKind === 'magic' ? 'magic' : dmgKind === 'ranged' ? 'ranged' : 'melee')
           + (itemCombat(critVid)?.crit ?? 0);
@@ -5204,7 +5379,8 @@ export class Game implements GameHooks {
     //      + :52981 GetPickaxeDamage）：每击积累、阈值 100 破坏；冷却 = useTime
     //      （原版 toolTime=ApplyItemTime(useTime)，非 useAnimation）。
     //      采矿加速（TileSpeedAcc 砌砖刀/建筑师背包族：冷却 -25%）----
-    const tileSpeedMult = (this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1;
+    const tileSpeedMult = ((this.player.equipStats.tileSpeed || this.player.buffs.has(BuffType.Mining)) ? 0.75 : 1)
+      * (this.player.usedAmbrosia ? 0.95 : 1);   // 仙馔蜜酒 pickSpeed-0.05(:12455-12459)
     // 食物 pickSpeed -= 5/10/15%（Player.cs:11534+）× 风筝 −15%（:9616）→
     // 冷却按原版 useTime/pickSpeed 缩短
     const pickMult = this.player.buffs.pickSpeedMult;
@@ -6400,6 +6576,16 @@ export class Game implements GameHooks {
         this.sfx.play('drink'); // SoundID.Item4
       }
       this.input.rightDown = false;
+    } else if (type === TILE_BY_KEY['v_494_golf_tee']) {
+      // 高尔夫球座（Player.cs:31871-31882 右键分支）：杀全部自有球 →
+      // GetPreferredGolfBallToUse → 在座上重摆（ai[1]=-1 待发态，出手前不走物理）
+      for (const e of this.entities.projectiles) {                     // :31874-31880
+        const b = e as GolfBall;
+        if (b instanceof GolfBall && !b.dead && b.isMine) b.dead = true;
+      }
+      const projId = this.preferredGolfBallProjId();
+      this.spawnGolfBall(tx * 16 + 8.5, ty * 16 + 6, projId, true, 0, 0);  // :31881
+      this.input.rightDown = false;
     } else if (type === TILE_BY_KEY['v_125_crystal_ball'] || type === TILE_BY_KEY['v_354_bewitching_table']
       || type === TILE_BY_KEY['v_377_sharpening_station'] || type === TILE_BY_KEY['v_287_ammo_box']
       || type === TILE_BY_KEY['v_464_war_table'] || type === TILE_BY_KEY['v_621_slice_of_cake']) {
@@ -7051,9 +7237,11 @@ export class Game implements GameHooks {
   private get meteorPending(): boolean { return !!this.world?.flags.spawnMeteor; }
   private set meteorPending(v: boolean) { if (this.world) this.world.flags.spawnMeteor = v; }
   private spawnEyePending = false;
-  /** 高尔夫折扣计时（GolfState.golfScoreTime :30-47：每 tick+1，挥杆清零，
-   *  进洞 SetScoreTime=3600；一杆进洞系数 = time/3600） */
-  private golfScoreTime = 3600;
+  /** 本地玩家高尔夫状态（Main.LocalGolfState，GolfState.cs 1:1：折扣计时/轨迹分） */
+  private readonly golfState = new GolfState();
+  /** 高尔夫哨 4095 引导触发点（useAnimation 10 → itemAnimation==2 即 useTime<=8；
+   *  Player.cs:42921-42924） */
+  private golfWhistleAt: number | null = null;
   /** TEMP-DBG（ucw gate 打点，updateUse 内 ⑯帧计数——调试会话遗留，勿删待其收尾） */
   private _gateDbg?: { n: number; held: number; useT: number; cwOk: number; cwKinds: Record<string, number> };
   /** 高尔夫瞄准态（AI_150 channel 语义：按住瞄准/松开击球/右键取消） */
@@ -7576,6 +7764,31 @@ export class Game implements GameHooks {
   private useBucket(bucketVid: number, tx: number, ty: number): void {
     const st = this.world.store;
     if (!st.inBounds(tx, ty)) return;
+    // 3031 无限水桶(:45805 族):倒 255 水且【不换桶】(item 不消耗);
+    // 3032 超吸海绵(:45778 族):吸干目标及 3×3 邻域液体,同不消耗
+    if (bucketVid === 3031) {
+      const i = st.idx(tx, ty);
+      if (st.liquid[i] >= 200 || (st.flags[i] && st.isActive(tx, ty) && st.isSolid(tx, ty)
+        && TILE_DEFS[st.type[i]]?.vanilla?.sheet !== 546)) return;
+      st.setLiquid(tx, ty, 255, 1);
+      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8);
+      this.player.useTime = 30;
+      this.input.rightDown = false;
+      return;
+    }
+    if (bucketVid === 3032) {
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oy = -1; oy <= 1; oy++) {
+          if (st.inBounds(tx + ox, ty + oy) && st.liquid[st.idx(tx + ox, ty + oy)] > 0) {
+            st.setLiquid(tx + ox, ty + oy, 0, 0);
+          }
+        }
+      }
+      this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8);
+      this.player.useTime = 30;
+      this.input.rightDown = false;
+      return;
+    }
     const liqTypeMap: Record<number, number> = { 206: 1, 207: 2, 1128: 3 };
     const swap = (toVid: number) => {
       // 原版语义:桶在手中原格替换(不跳格)
@@ -7627,6 +7840,74 @@ export class Game implements GameHooks {
       this.sfx.play('splash', 1, tx * TILE + 8, ty * TILE + 8); // SoundID 19（:45816/45833）
       swap(205);
     }
+  }
+
+  /** 传送族青尘（回忆药水 Cyan / 魔镜族白尘 dust 15，:42299/:42434 近似） */
+  private recallDust(p: import('../entities/Player').Player, n: number, cyan = false): void {
+    for (let i = 0; i < n; i++) {
+      this.spawnParticles(
+        p.x + Math.random() * p.w, p.y + Math.random() * p.h,
+        cyan ? '#60E8E8' : '#D8E8FF', 1, 1.2,
+        { life: 26 + Math.random() * 14, grav: -0.02, damp: 0.94 },
+      );
+    }
+  }
+
+  /** 传送落点检查（Utils.CheckForGoodTeleportationSpot :55250-55320 的最小移植）：
+   *  玩家盒(20×42→2×3 格)全空 + 底部实心 + 无岩浆/无伤害块。失败返回 null */
+  private findTeleportSpot(x0: number, x1: number, y0: number, y1: number): { x: number; y: number } | null {
+    const st = this.world.store;
+    for (let attempt = 0; attempt < 1000; attempt++) {
+      const tx = x0 + Math.floor(Math.random() * Math.max(1, x1 - x0));
+      const ty = y0 + Math.floor(Math.random() * Math.max(1, y1 - y0));
+      let ok = true;
+      for (let dx = 0; dx < 2 && ok; dx++) {
+        for (let dy = 0; dy < 3 && ok; dy++) {
+          const i = st.idx(tx + dx, ty + dy);
+          if (st.flags[i] && st.isSolid(tx + dx, ty + dy)) ok = false;
+          if (st.liquid[i] > 0 && st.liquidType[i] === 2) ok = false; // avoidLava
+        }
+      }
+      if (!ok || !st.isSolid(tx, ty + 3)) continue; // mostlySolidFloor
+      return { x: tx * TILE + 6, y: ty * TILE };
+    }
+    return null;
+  }
+
+  /** 传送族触发（引导到期）：音效+尘+落点+消耗。语义对标 Player.cs:42297-42516 */
+  private fireRecallTeleport(c: { vid: number; kind: RecallKind; triggerAt: number; consume: boolean }): void {
+    const p = this.player;
+    const st = this.world.store;
+    let dest: { x: number; y: number } | null = null;
+    if (c.kind === 'spawn') {
+      // Spawn(RecallFromItem)：出生点上方 3 格（respawnPlayer 同式）
+      dest = { x: this.world.spawnX * TILE + 8, y: (this.world.spawnY - 3) * TILE };
+    } else if (c.kind === 'ocean') {
+      // MagicConch：对侧海滩带（beachDistance-100；近似取世界两缘 380 格带内找地表落点）
+      const right = p.x / TILE < st.w / 2;
+      const bx0 = right ? st.w - 380 : 60, bx1 = right ? st.w - 60 : 380;
+      dest = this.findTeleportSpot(bx0, bx1, 30, Math.floor(this.world.rockLevel));
+    } else {
+      // DemonConch：中心 ±50，[UnderworldLayer+20, +100]，实心底/避液
+      const cx = Math.floor(st.w / 2);
+      const y0 = Math.floor((this.world.lavaLine || st.h - 200)) + 20;
+      dest = this.findTeleportSpot(cx - 50, cx + 50, y0, y0 + 80);
+    }
+    if (!dest) {
+      // 原版找点失败保持原地（canSpawn=false 分支）；消耗品不消耗
+      this.recallChannel = null;
+      return;
+    }
+    if (c.vid === 2350) this.sfx.play('mirror');      // HeldItem.UseSound（:42444）
+    else if (c.kind !== 'spawn') this.sfx.play('conch'); // 海螺族传送瞬间（MagicConch 内 Teleport 音）
+    this.recallDust(p, 70, c.vid === 2350);            // 传送前 70 尘
+    const keepIframes = p.iframes;                     // 回忆药水保留无敌帧（:42449-42451）
+    p.x = dest.x; p.y = dest.y; p.vx = 0; p.vy = 0;
+    if (c.vid === 2350) p.iframes = keepIframes;
+    this.recallDust(p, 70, c.vid === 2350);            // 传送后 70 尘
+    if (c.consume) p.inv.removeAt(p.inv.selected, 1);
+    this.camera.x = p.cx; this.camera.y = p.cy;        // 相机直跟（无缓动瞬移）
+    this.cb.onInventoryChanged?.();
   }
 
   /** 门交互：开门按玩家朝向、失败换反向（原版 Player.cs L20965-20974）；
@@ -7980,6 +8261,8 @@ export class Game implements GameHooks {
       if (this.player.buffs.has(BuffType.ImbueIchor)) e.ichorT = Math.max(e.ichorT, 10 + Math.random() * 10);
       if (this.player.buffs.has(BuffType.ImbueNano)) e.confusedT = Math.max(e.confusedT, 1 + Math.random() * 3);
       if (this.player.buffs.has(BuffType.ImbuePoison)) e.poisonT = Math.max(e.poisonT, 5 + Math.random() * 5);
+      // 冰霜盔甲引擎(melee 挥砍门,StatusNPC :93712-93716 → Frostburn2 5-14s)
+      applyFrostBurn(this.player.equipStats.frostBurn, e);
       if (this.player.buffs.has(BuffType.ImbueParty)) {
         this.spawnParticles(e.cx, e.cy, ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 });
       }
@@ -8717,9 +9000,15 @@ export class Game implements GameHooks {
       return dialog(364 + rN(7));
     }
     if (npc.vanillaId === 588) {
-      // 高尔夫球手(cs:95996-96004):1/3 任务分数档闲聊(分数系统未实现 → 初学者档),
+      // 高尔夫球手(cs:95996-96004):1/3 任务分数档闲聊——档位按累计分
+      // （NPC.cs:96008：>=2000 大师 / >=1000 老手 / <500 初学 / 其余 学徒），
       // 其余 GolferChatter 池
-      if (r3() === 0) return Lang.chatter('GolferQuestsChatterBeginner') ?? Lang.chatter('GolferChatter') ?? '……';
+      if (r3() === 0) {
+        const gs = this.player.golferScoreAccumulated;                 // :96008
+        const tier = gs >= 2000 ? 'Master' : gs >= 1000 ? 'Journeyman'
+          : gs < 500 ? 'Beginner' : 'Apprentice';
+        return Lang.chatter('GolferQuestsChatter' + tier) ?? Lang.chatter('GolferChatter') ?? '……';
+      }
       return Lang.chatter('GolferChatter') ?? '……';
     }
     if (npc.vanillaId === 633) {
@@ -8994,17 +9283,11 @@ export class Game implements GameHooks {
           break;
         case 207: if (phase === 0) add([2871, 2872]); break; // 染料商满月暗影/负片染料（:2233-2237）
         case 353: if ((phase % 2 === 0) === day) add([1981]); break; // 造型师时光染料（:2720-2724）
-        case 588: { // 高尔夫球手（Chest.cs:3147-3238 分数门槛 + :3216 月相画）
-          const gs = this.player.golferScoreAccumulated;
-          if (gs > 500) add([4092, 4093, 4094, 4039, 4265, 4599]);
-          if (gs > 1000) add([4591, 4592, 4593, 4594, 4600]);
-          if (gs >= 2000) {
-            add([4595, 4596, 4597, 4598, 4601]);
-            if (this.world.flags.downedSkeletron) add([4264]); // :3188 && downedBoss3 → 高尔夫球车
-            add([[4658], [4659], [4660], [4661]][Math.floor(phase / 2)]); // 月相四画
-          }
+        case 588: // 高尔夫球手（Chest.cs:3135-3245 case 22 分数门槛 + 月相画）——
+          // 门槛表提纯到 world/golf/golferShop.ts（含 >500/>1000/>2000/>=1000/>=2000 五档）
+          add(golferShopScoreGates(this.player.golferScoreAccumulated, phase,
+            !!(this.world.flags['downed_35'] || this.world.flags.downedSkeletron)));
           break;
-        }
         case 663: // 公主（Chest.cs:3427-3445：十周年+hardMode+击败海盗 → 相位对海盗四件）
           if (this.world.seedFlags?.tenthAnniversary && this.world.flags.hardMode && this.world.flags['downedPirates']
             && ![2584, 854, 855, 905].some((id) => out.some((e) => e[0] === id))) {
@@ -9126,22 +9409,67 @@ export class Game implements GameHooks {
   private openNpcShop() {
     const npc = this.dialogNpc;
     if (!npc) return;
+    // 快乐度价格乘子（ShopHelper.GetShoppingSettings :48-60——开店瞬间快照）
+    this.shopHappinessMul = this.computeShopHappiness(npc).priceMul;
     const entries = this.shopStockFor(npc).map(([vid, price]) => ({
       key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
       vanillaId: vid,
       name: Lang.itemName(vid) ?? VANILLA_ITEM_KEY_BY_ID[vid] ?? String(vid),
-      price,
+      price: Math.max(1, Math.round(price * this.shopHappinessMul)),
     }));
     this.cb.onNpcShop?.(Lang.inter(28), entries, this.coinsOwned());
   }
+
+  /** ShopHelper.ProcessMood 输入装配（:99-180——同屋/村扫描 + zone 快照 + 危险群系） */
+  private computeShopHappiness(npc: TownNPC) {
+    const w = this.world;
+    const home = npc.home;
+    const cx = Math.floor(npc.cx / TILE), cy = Math.floor(npc.cy / TILE);
+    // 同屋（<25）/村（25-120）计数 + 同屋目标列表（:295-332：以 home 为锚；
+    // 过滤不可计价 NPC 37 老人/368 旅行商/453 骷髅商 :312）
+    let inHouse = 0, inVillage = 0;
+    const nearby: number[] = [];
+    for (const n of this.entities.npcs) {
+      const tn = n as TownNPC;
+      if (!(tn instanceof TownNPC) || tn === npc || tn.dead) continue;
+      if (tn.vanillaId === 37 || tn.vanillaId === 368 || tn.vanillaId === 453) continue;
+      const anchor = home ?? { x: cx, y: cy };
+      const tnAnchor = tn.home ?? { x: Math.floor(tn.cx / TILE), y: Math.floor(tn.cy / TILE) };
+      const d = Math.hypot(tnAnchor.x - anchor.x, tnAnchor.y - anchor.y);
+      if (d < 25) { inHouse++; nearby.push(tn.vanillaId); }
+      else if (d < 120) inVillage++;
+    }
+    const sc = this.scene;
+    const zones: BiomeZones = {
+      forest: !!(sc && !sc.zoneCorrupt && !sc.zoneCrimson && !sc.zoneHallow && !sc.zoneSnow
+        && !sc.zoneJungle && !sc.zoneDesert && !sc.zoneGlowshroom && !sc.zoneBeach
+        && !sc.zoneDungeon && !sc.zoneRockLayerHeight),
+      ocean: !!sc?.zoneBeach, snow: !!sc?.zoneSnow, desert: !!sc?.zoneDesert,
+      jungle: !!sc?.zoneJungle, underground: !!sc?.zoneDirtLayerHeight || !!sc?.zoneRockLayerHeight,
+      hallow: !!sc?.zoneHallow, mushroom: !!sc?.zoneGlowshroom,
+    };
+    return computeHappiness({
+      npcVanillaId: npc.vanillaId,
+      homeless: !home,
+      distFromHome: home ? Math.hypot(cx - home.x, cy - home.y) : 0,
+      playerInCorrupt: !!sc?.zoneCorrupt, playerInCrimson: !!sc?.zoneCrimson, playerInDungeon: !!sc?.zoneDungeon,
+      zones,
+      npcsInHouse: inHouse, npcsInVillage: inVillage,
+      nearby, isPrincess: npc.vanillaId === 663,
+      rand: Math.random,
+    });
+  }
+
+  /** 当前对话 NPC 的快乐度价格乘子（ShopHelper.GetShoppingSettings——缓存到开店时） */
+  private shopHappinessMul = 1;
 
   /** 商店购买:扣币 + 入包 + 刷新商店面板(可购态/余额) */
   npcShopBuy(vanillaId: number): void {
     const list = this.dialogNpc ? this.shopStockFor(this.dialogNpc) : [];
     const entry = list.find(([id]) => id === vanillaId);
     if (!entry) return;
-    // 折扣卡（discountAvailable：PriceAdjustment 0.8，Main.cs:41028 同源）
-    const price = Math.max(1, Math.round(entry[1] * (this.player.equipStats.discount ? 0.8 : 1)));
+    // 折扣卡（discountAvailable：PriceAdjustment 0.8，Main.cs:41028 同源）× 快乐度乘子
+    const price = Math.max(1, Math.round(entry[1] * (this.player.equipStats.discount ? 0.8 : 1) * this.shopHappinessMul));
     if (this.coinsOwned() < price || !this.spendCopper(price)) {
       this.cb.onToast(Lang.text('Mods.SandboxWorld.NPC.NotEnoughCoins'));
       this.openNpcShop();
@@ -9850,6 +10178,77 @@ export class Game implements GameHooks {
     if (this.world.bestiary.completion().percent >= 1) {
       this.achievements.notifyProgressionEvent(29);
     }
+  }
+
+  // ================= 移动端虚拟控件快捷动作 =================
+
+  /** 活跃钩爪弹体（useEquippedGrapple 管理；dead 时清 player.grappleTarget） */
+  activeGrapple: GrappleProj | null = null;
+
+  /** 装备钩爪发射/收回（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
+   *  最小单钩实现——全量 AI_007 移植后替换（见 GrappleProj 头注） */
+  useEquippedGrapple(dirX: number | null, dirY: number | null): void {
+    if (this.activeGrapple && !this.activeGrapple.dead) {
+      this.activeGrapple.dead = true;                 // 再按 = 收回
+      this.player.grappleTarget = null;
+      this.activeGrapple = null;
+      return;
+    }
+    const hook = this.player.inv.miscEquips[4];
+    if (!hook) return;
+    const p = this.player;
+    const dx = dirX ?? p.facing;
+    const dy = dirY ?? -0.35;                         // 默认略朝上（原版发射角近似）
+    const d = Math.hypot(dx, dy) || 1;
+    const proj = new GrappleProj(p.cx - 4, p.y + 8, (dx / d) * 13.5, (dy / d) * 13.5,
+      () => (this.player.dead ? null : this.player));
+    this.entities.add(proj, 'projectiles');
+    this.activeGrapple = proj;
+    this.sfx.play('throw', 0.9);
+  }
+
+  /** 快捷药水（移动端药水键）：背包首瓶匹配药水直饮。效果链 = updateUse 的
+   *  vi_ 消耗品桥接段（vanilla-itemfunc healLife/healMana/buffType）同构镜像 */
+  quickDrinkPotion(kind: 'heal' | 'mana'): void {
+    const p = this.player;
+    if (p.useTime > 0) return;
+    let slot = -1;
+    for (let i = 0; i < p.inv.slots.length; i++) {
+      const s = p.inv.slots[i];
+      if (!s) continue;
+      const ff = itemFuncOfVid(vanillaIdOfItem(s.id));
+      if (!ff?.consumable || ff.createTile || ff.shoot || ff.pick || ff.axe || ff.hammer) continue;
+      if (kind === 'heal' ? !ff.healLife : !ff.healMana) continue;
+      slot = i;
+      break;
+    }
+    if (slot < 0) return;
+    if (kind === 'heal' && p.buffs.healBlocked) {
+      this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.HealBlock'));
+      p.useTime = 30;
+      return;
+    }
+    const s = p.inv.slots[slot]!;
+    const ff = itemFuncOfVid(vanillaIdOfItem(s.id))!;
+    if (ff.buffType && ff.buffType > 0) {
+      const bt = BUFF_BY_VANILLA.get(ff.buffType);
+      if (bt !== undefined && bt !== BuffType.Resistance) {
+        p.buffs.apply(bt, Math.round((ff.buffTime ?? 7200) / 60));
+      }
+    }
+    if (ff.healLife) {
+      p.hp = Math.min(p.maxHp, p.hp + ff.healLife);
+      this.addDamageNumber(p.cx, p.y, ff.healLife, false, '#40E080');
+      p.buffs.apply(BuffType.Resistance, 60);         // 药水病
+    }
+    if (ff.healMana) {
+      p.mana = Math.min(p.maxMana, p.mana + ff.healMana);
+      p.buffs.apply(BuffType.ManaSickness, 5);
+    }
+    p.inv.removeAt(slot, 1);
+    p.useTime = 60;
+    this.sfx.play('drink');
+    this.cb.onInventoryChanged();
   }
 
 
@@ -10932,20 +11331,120 @@ export class Game implements GameHooks {
   // ================= 召唤 Boss =================
 
   /** 通用 Boss 召唤:vanilla 数据路径(NPC 13=世吞头带体节链 / 50=史莱姆王 / 266=克脑) */
-  /** 进洞计分（GolfHelper.PutBallInCup :85-121 + GolfState.cs:151-160）：
-   *  score = ⌊位移tile ÷ (杆数+2)⌋ × 系数（2 杆以上 SetScoreTime→1.0；一杆进洞
-   *  golfScoreTime/3600）；>0 才累计；聊天广播 + 计时重置 */
-  golfBallScored(ball: GolfBall): void {
-    const distTiles = Math.floor(ball.dist / TILE);
-    const denom = ball.swings + 2; // hitsMade+2（GolfBallTrackRecord.cs:13-19）
-    const factor = ball.swings > 1 ? 1 : this.golfScoreTime / 3600;
-    const score = Math.floor(distTiles / denom) * (ball.swings > 1 ? 1 : factor);
-    this.golfScoreTime = 0; // ResetScoreTime
-    if (ball.swings > 0 && score > 0) {
-      this.player.golferScoreAccumulated = Math.min(1e9, this.player.golferScoreAccumulated + Math.floor(score));
-      this.newText(Lang.text('Game.BallBounceResultGolf_' + (ball.swings > 1 ? 'Plural' : 'Single'),
-        ball.swings, Math.floor(score)), 50, 255, 130);
+  /** 进洞计分（GolfHelper.PutBallInCup :86-115 + GolfState.cs:151-160）：
+   *  门 = 本地玩家球 && ShouldScoreHole（golfScoreTime>=90，GolfState.cs:32）；
+   *  >1 杆 → SetScoreTime=3600（折扣系数 1.0）；RecordBallInfo→LandBall 记终点 →
+   *  GetGolfBallScore（⌊轨迹分 × time/3600⌋）→ >0 杆才 AccumulateGolfingScore（上限 1e9，
+   *  Player.cs:4723-4731）→ 公告 → ResetScoreTime → Wiring.HitSwitch（球洞=电路开关，
+   *  Wiring.cs:167-171）。杀球由 GolfBall.fixedUpdate 承担（proj.Kill :114） */
+  private golfCupCapture(ball: GolfBall, tileX: number, tileY: number): void {
+    if (!ball.isMine || !this.golfState.shouldScoreHole) return;   // :88
+    const swings = ball.swings;                                    // num = ai[1]（:92）
+    if (swings > 1) this.golfState.setScoreTime();                 // :95-97
+    this.golfState.recordBallInfo(ball);                           // :98
+    this.golfState.landBall(ball);                                 // :99
+    const score = this.golfState.getGolfBallScore(ball);           // :100
+    if (swings > 0) {                                              // :101-104
+      // AccumulateGolfingScore（Player.cs:4723-4731）：溢出截断到 1e9
+      const room = 1_000_000_000 - this.player.golferScoreAccumulated;
+      this.player.golferScoreAccumulated += Math.min(score, Math.max(0, room));
     }
+    // PutBallInCup_TextAndEffects（:117-135）：>0 杆才有公告；单/复数键切换
+    if (swings !== 0) {
+      this.sfx.play('tink', 0.9, ball.cx, ball.cy);                // Item129 进洞音（:168）
+      this.newText(Lang.text(
+        swings === 1 ? 'Game.BallBounceResultGolf_Single' : 'Game.BallBounceResultGolf_Plural',
+        ball.swings, score), 255, 240, 20);
+    }
+    this.golfState.resetScoreTime();                               // :106
+    this.wiring?.hitSwitch(tileX, tileY);                          // :107（msg59 单机无对端）
+  }
+
+  /** TryPlacingAGolfBallNearANearbyTee（Player.cs:48857-48917）：placePosition 5×5 找全部
+   *  球座 494 → 取离光标最近者 → 玩家触及范围内才摆球（旧自有球全杀 + ai[1]=-1 待发）。
+   *  placeX/placeY = 摆位中心（球杆=玩家中心 :49525 / 投掷=光标 :46894） */
+  private tryPlacingGolfBallNearTee(
+    placeX: number, placeY: number, mouseX: number, mouseY: number,
+  ): boolean {
+    const st = this.world.store;
+    const ptx = Math.floor(placeX / TILE), pty = Math.floor(placeY / TILE);   // :48872
+    const tees: Array<[number, number]> = [];
+    for (let j = -2; j <= 2; j++) {                                           // :48878-48890
+      for (let i = -2; i <= 2; i++) {
+        const x = ptx + i, y = pty + j;
+        if (x >= 1 && y >= 1 && x < st.w - 1 && y < st.h - 1                  // InWorld(num,num2,1)
+          && st.flags[st.idx(x, y)] !== 0
+          && TILE_DEFS[st.type[st.idx(x, y)]]?.vanilla?.sheet === 494) {
+          tees.push([x, y]);
+          break;                                                              // :48887（行内首个即止）
+        }
+      }
+    }
+    if (tees.length === 0) return false;                                      // :48892
+    // 取离光标最近的球座（:48896-48906）
+    let best = tees[0], bestD = -1;
+    for (const t of tees) {
+      const d = Math.hypot(t[0] * 16 + 8 - mouseX, t[1] * 16 + 8 - mouseY);
+      if (bestD === -1 || d < bestD) { bestD = d; best = t; }
+    }
+    // 玩家触及范围门（Collision.InTileBounds :49008——TileReachCheckSettings.Simple 5 格）
+    if (!this.inTileRange(best[0], best[1], 0)) return false;                 // :49009
+    for (const e of this.entities.projectiles) {                              // :49010-49015
+      const b = e as GolfBall;
+      if (b instanceof GolfBall && !b.dead && b.isMine) b.dead = true;        // Kill 自有球
+    }
+    const projId = this.preferredGolfBallProjId();                            // GetPreferredGolfBallToUse
+    // NewProjectile((tx*16)+8.5, ty*16+6, ai0=0, ai1=-1)（:49016）
+    this.spawnGolfBall(best[0] * 16 + 8.5, best[1] * 16 + 6, projId, true, 0, 0);
+    return true;
+  }
+
+  /** GetPreferredGolfBallToUse（Player.cs:48919-48950）：手持 → 盔甲槽(19→0 逆序) →
+   *  背包(0→49)。球族 = shoot 为高尔夫球弹体的物品（3989→721 / 4242-4253→739+） */
+  private preferredGolfBallProjId(): number {
+    const held = this.player.inv.heldItem();                                  // :48923
+    if (held) {
+      const m = /^vi_(\d+)_/.exec(ITEM_DEFS[held.id]?.key ?? '');
+      const v = m ? +m[1] : 0;
+      if (v === 3989) return 721;                                             // :48925-48928
+      if (v >= 4242 && v <= 4253) return 739 + (v - 4242);
+    }
+    for (let i = 0; i < this.player.inv.slots.length; i++) {                  // :48942-48949
+      const sl = this.player.inv.slots[i];
+      if (!sl) continue;
+      const m = /^vi_(\d+)_/.exec(ITEM_DEFS[sl.id]?.key ?? '');
+      const v = m ? +m[1] : 0;
+      if (v === 3989) return 721;
+      if (v >= 4242 && v <= 4253) return 739 + (v - 4242);
+    }
+    return 721;                                                               // :48921 缺省泥球
+  }
+
+  /** 生成高尔夫球（Projectile.NewProjectile 721/739-752 族）：中心入参；
+   *  同时执行 Projectile.cs:10313-10330 的自有球 >10 驱逐（timeLeft 最小者先杀） */
+  private spawnGolfBall(cx: number, cy: number, projId: number, onTee: boolean,
+    vx: number, vy: number): GolfBall {
+    const balls: GolfBall[] = [];
+    for (const e of this.entities.projectiles) {
+      const b = e as GolfBall;
+      if (b instanceof GolfBall && !b.dead && b.isMine) balls.push(b);
+    }
+    if (balls.length > 10) {                                                  // :10322-10330
+      let oldest = balls[0];
+      for (const b of balls) if (b.id < oldest.id) oldest = b;                // timeLeft 最小≈最早
+      oldest.dead = true;
+    }
+    const own = this.player;
+    const ball = new GolfBall(cx, cy, projId, () => own, onTee);
+    ball.vx = vx; ball.vy = vy;
+    this.entities.add(ball, 'projectiles');
+    return ball;
+  }
+
+  /** 高尔夫哨 4095（Player.cs:42921-42924：itemAnimation==2 时 ResetGolfBall——
+   *  球已离手则回退上一击点并 +1 杆罚；未动则无操作） */
+  private useGolfWhistle(): void {
+    this.golfState.resetGolfBall();                                           // GolfState.cs:162-173
   }
 
   /** 收竿结算（Player.cs:51530-51598 ItemCheck_CheckFishingBobber）：物品掉落 /

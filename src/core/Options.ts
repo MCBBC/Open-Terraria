@@ -16,6 +16,8 @@ export interface OptionsData {
   backgrounds: boolean;                // Main.BackgroundEnabled（Main.cs:790，config.json 持久化；默认 true）
   swayInWind: boolean;                 // Main.SettingsEnabled_TilesSwayInWind（图块在风中摆动；默认 true）
   resourceBarStyle: 'classic' | 'fancy'; // 资源条样式（PlayerResourceSetsManager2：'New' Fancy 金框为原版 1.4.4+ 默认 / 'Default' Classic 朴素）
+  /** 小地图边框皮肤（MinimapFrameManager：config.json "MinimapFrame" 字符串键，默认 Default） */
+  minimapFrame: 'Default' | 'Golden' | 'Remix' | 'Sticks' | 'StoneGold' | 'TwigLeaf' | 'Leaf' | 'Retro' | 'Valkyrie';
 }
 
 const KEY = 'sandboxworld.options';
@@ -34,6 +36,7 @@ export class OptionsStore {
     backgrounds: true,
     swayInWind: true,
     resourceBarStyle: 'fancy',
+    minimapFrame: 'Default',
   };
   loaded = false;
   private listeners: Array<(d: OptionsData) => void> = [];

@@ -207,7 +207,10 @@ function applyRec(id, lines) {
   if (!Object.keys(rec).length) return;
   const dl = lines.find((l) => /^SetDefaults\d?\(\d+\);/.test(l));
   if (dl) {
-    delegates.push({ id, targetId: parseInt(dl.match(/\d+/)[0], 10), rec });
+    // ★targetId 取括号内模板号（`/\d+/` 会先抓到 SetDefaultsN 的方法号 N——
+    //   七金属短剑 SetDefaults1(6) 曾全部继承成 item 1(铁镐)的基底,
+    //   autoReuse:true/shootSpeed 缺即此坑,2026-08-13"铜剑变投掷"根因链）
+    delegates.push({ id, targetId: parseInt(dl.match(/\((\d+)\)/)[1], 10), rec });
     return;
   }
   // 同 id 多处赋值（分段 switch/嵌套覆盖可能重复）：合并（后者覆盖）

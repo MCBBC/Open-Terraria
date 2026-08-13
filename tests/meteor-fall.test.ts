@@ -8,7 +8,6 @@ import { describe, it, expect } from 'vitest';
 import { dropMeteor, type MeteorHost } from '../src/world/MeteorFall';
 import { TileStore } from '../src/world/TileStore';
 import { TILE_BY_KEY, TILE_DEFS } from '../src/data/tiles';
-import type { RNG } from '../src/core/rng';
 
 function makeHost(over: Partial<MeteorHost> & { seedW?: number; seedH?: number } = {}): MeteorHost {
   const W = over.seedW ?? 420, H = over.seedH ?? 200;
@@ -21,7 +20,7 @@ function makeHost(over: Partial<MeteorHost> & { seedW?: number; seedH?: number }
   const rngLike = {
     rand: () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff,
     int: (a: number, b: number) => a + Math.floor((s = (s * 1103515245 + 12345) & 0x7fffffff) % (b - a + 1)),
-  } as Pick<RNG, 'rand' | 'int'>;
+  } as Pick<MeteorHost, 'rand' | 'int'>;
   return {
     w: W, h: H, spawnX: Math.floor(W / 2), groundLevel: 85, rockLevel: 140, store: st,
     players: [{ x: 10 * 16, y: 80 * 16, w: 20, h: 42 }],   // 左上远离多数落点

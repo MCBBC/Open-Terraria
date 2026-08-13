@@ -56,6 +56,8 @@ export class WhipProj extends Entity {
   itemId: number;
   damage: number;
   knockback: number;
+  /** 词缀 bonusTagDamage（I:567——Game 侧注入，命中并进 whipTagDmg） */
+  bonusTagDmg = 0;
   /** useAnimation（鞭 JSON anim；SetItemAnimation 攻速 buff 后的有效值） */
   anim: number;
   /** shootSpeed（=velocity.Length()，曲线长度基数 :45643） */
@@ -253,7 +255,7 @@ export class WhipProj extends Entity {
         this.dmgNow = Math.max(1, Math.round(this.dmgNow * (WHIP_FALLOFF[this.projId] ?? 1)));
         // tag（TagEffectState.TryApplyTagToNPC :12758-12760 → ApplyTagToNPC :178-186）
         e.whipTagT = 240; // WhipTagEffect TagDuration（WhipTagEffect.cs:15-18）
-        e.whipTagDmg = WHIP_TAG[this.itemId] ?? 0;
+        e.whipTagDmg = (WHIP_TAG[this.itemId] ?? 0) + (this.bonusTagDmg ?? 0); // +词缀 tagdmg(I:567 bonusTagDamage)
         e.whipTagCrit = WHIP_TAG_CRIT[this.itemId] ?? 0;
         e.whipTagItem = this.itemId;
         // proc 启用（TryDoingOnHitEffects :12936-12940 case 913/1031/1032 首命中门；

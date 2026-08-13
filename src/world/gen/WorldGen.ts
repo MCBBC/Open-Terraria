@@ -273,7 +273,7 @@ import { runJungleShrinePass, runJungleChestsPass } from './vanilla/JungleShrine
 import { runCaveHousesPass } from './vanilla/CaveHousePass';
 import { runOceanCavesPass, runUnderwaterChestsPass } from './vanilla/OceanCavesPass';
 import { runHellforgesPass } from './vanilla/HellforgesPass';
-import { runCorruptionPass } from './vanilla/CorruptionPass';
+import { runCorruptionPass, runAltarsPass } from './vanilla/CorruptionPass';
 import { runSandPatchesPass, runTunnelsPass, runDirtWallBgPass, runSmallHolesPass } from './vanilla/MissingCavesPass';
 import { settleWorldLiquids } from '../liquid/settle';
 import vanillaJson from '../../../public/sprites/vanilla.json';
@@ -391,6 +391,9 @@ function vanillaTerrain({ store, rng, world, surface, cfg }: GenCtx) {
     }
     rng.nextInt(7);                                        // setBG(2, jungle)
     const snowBG = rng.nextInt(9);
+    // ★真 exe（ilspycmd 2026-08-13）：命中时共消费**两个** Next(2)——外层判定 1 +
+    // 内层 21/22（31/32、41/42）选择 1。曾只补一掷 → 每次命中少吞 1 掷（最多 3、
+    // 是否命中随种子）→ Reset 尾部流错位 → dungeonLocation/terrain 全漂移
     if (snowBG === 2 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
     if (snowBG === 3 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
     if (snowBG === 4 && rng.nextIntRange(0, 2) === 0) rng.nextIntRange(0, 2);
@@ -623,6 +626,10 @@ function vanillaBiomes({ store, rng, world, surface }: GenCtx) {
   // 全图 type==191 连通核补墙 244（零掷骰）。
   runLivingTreesPass(store, rng, gs, world.chests);  // Living Trees(世界树)
   runLivingTreeWallsPass(store, gs);                 // Living Tree Walls(活木墙)
+  // Demon And Crimson Altars(15825,全图随机撒 16 坛)——注册序 LivingTreeWalls(15792) <
+  // 本 pass < SurfaceWaterInJungle(15887)。★与 Corruption pass 内猩红逐组祭坛(cs:14241)
+  // 是原版两处放置,勿合并(见 CorruptionPass.runAltarsPass 头注);2026-08-13 前整 pass 缺失。
+  runAltarsPass(store, rng, gs);                      // Demon And Crimson Altars(全图祭坛)
   runWetJunglePass(store, rng, gs);             // SurfaceWaterInJungle(1456 cs:15887 逐列灌水,零 RNG)
   runTemplePass(store, rng, gs, world.chests);  // Jungle Temple(之字形房间链+走廊+门+宝箱)
   runBeehivePass(store, rng, gs);               // Hives(丛林蜂巢:蜂巢壳+蜂蜜+腔)

@@ -244,6 +244,17 @@ export class SettingsPanel {
           () => d.resourceBarStyle === 'fancy' ? '华丽（金框）' : '经典（朴素）',
           () => void options.set('resourceBarStyle', d.resourceBarStyle === 'fancy' ? 'classic' : 'fancy'),
         ),
+        // 小地图边框皮肤（MinimapFrameManager 9 款；config.json "MinimapFrame" 字符串键）
+        this.modeRow(
+          Lang.text('UI.SelectMapBorder').replace(/:.*/, ''),
+          () => d.minimapFrame,
+          () => Lang.text(`UI.MinimapFrame_${d.minimapFrame}`),
+          () => {
+            const skins = ['Default', 'Golden', 'Remix', 'Sticks', 'StoneGold', 'TwigLeaf', 'Leaf', 'Retro', 'Valkyrie'] as const;
+            const next = skins[(skins.indexOf(d.minimapFrame) + 1) % skins.length];
+            void options.set('minimapFrame', next);
+          },
+        ),
         this.langGrid(),
       );
       const hint = document.createElement('div');

@@ -6,7 +6,9 @@
 import tableJson from '../data/vanilla-projstatus.json';
 import { BuffType } from '../stats/Buffs';
 
-interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number }
+/** mut=互斥组 id(StatusNPC if/else 双分支:单掷骰二选一必中其一,
+ *  组内按累积 chance 扫描——两条独立掷骰会让双落空/双中,2026-08-13 修正) */
+interface StatusEntry { buff: number; chance: number; durMin: number; durMax: number; mut?: number }
 const TABLE = tableJson as unknown as Record<string, StatusEntry[]>;
 
 /** Enemy 侧已实装的 buff 字段(秒)。GAP:30 Bleeding/36 BrokenArmor/137 Slimed/
@@ -31,13 +33,30 @@ const SUPPORTED: Record<number, string> = {
 type StatusEnemy = { [field: string]: number | undefined };
 
 /** 命中结算侧调用:按投射物型号掷骰并施加 debuff(AddBuff max 合并语义)。
- *  duration 掷骰 Next(durMin, durMax+1) tick → 秒(/60) */
+ *  duration 掷骰 Next(durMin, durMax+1) tick → 秒(/60)。
+ *  同 mut 组 = 互斥分支(单掷骰按累积概率选一,必中其一或全落空) */
 export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy): void {
   if (projId === undefined || projId < 0) return;
   const entries = TABLE[String(projId)];
   if (!entries) return;
+  let pendingMut: { id: number; roll: number } | null = null;
   for (const en of entries) {
-    if (Math.random() >= en.chance) continue;
+    let hit: boolean;
+    if (en.mut !== undefined) {
+      // 互斥组:同组共用一次掷骰,按累积 chance 区间判定本条是否被选中
+      if (!pendingMut || pendingMut.id !== en.mut) pendingMut = { id: en.mut, roll: Math.random() };
+      let lo = 0;
+      hit = false;
+      for (const g of entries) {
+        if (g.mut !== en.mut) continue;
+        const hi = lo + g.chance;
+        if (g === en) { hit = pendingMut.roll >= lo && pendingMut.roll < hi; break; }
+        lo = hi;
+      }
+    } else {
+      hit = Math.random() < en.chance;
+    }
+    if (!hit) continue;
     const field = SUPPORTED[en.buff];
     if (!field) continue; // 未实装 buff,登记见上
     const ticks = en.durMin + Math.floor(Math.random() * (en.durMax - en.durMin + 1));
@@ -51,6 +70,15 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy):
  *  (melee||whip) && meleeEnchant>0 → 按药剂施加。近战挥砍侧同表在
  *  Game.ts 挥击结算内,此函数供 WeaponProj 四族(链球/悠悠球/长矛/回旋镖)共用)。
  *  时长 = Player.cs:6141-6171 Next(a,b) 秒,max 合并 */
+/** 冰霜盔甲引擎(StatusNPC :93712-93716):(melee||ranged) 命中且套装在身 →
+ *  AddBuff(324 Frostburn2, 60×Next(5,15) tick=5-14s,max 合并)。
+ *  魔法/召唤弹不吃。三挂点:挥砍(Game)/WeaponProj 近战四族/远程箭 */
+export function applyFrostBurn(frostBurn: boolean, enemy: StatusEnemy): void {
+  if (!frostBurn) return;
+  const sec = 5 + Math.floor(Math.random() * 11); // 60×Next(5,15)t
+  if (sec > (enemy.frostburn2T ?? 0)) enemy.frostburn2T = sec;
+}
+
 export function applyMeleeImbue(
   buffs: { has: (b: never) => boolean },
   enemy: StatusEnemy,

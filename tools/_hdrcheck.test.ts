@@ -21,7 +21,7 @@ it('wld header surface/rock vs ours', () => {
     const w = parseWld(new Uint8Array(readFileSync(`tests/golden/wld/${c.f}`)));
     const { gs } = runResetAndTerrain({ width: 4200, height: 1200, seedText: c.seedText, evil: c.evil });
     console.log(
-      `${c.seedText}: wld ground=${w.groundLevel.toFixed(1)} rock=${w.rockLevel.toFixed(1)} | ` +
+      `${c.seedText}: wld worldId=${w.worldId} moon=${w.moonType} tree=${w.treeStyle.join('/')} cave=${(w.caveBackStyle ?? []).join('/')} ice=${w.iceBackStyle} jun=${w.jungleBackStyle} hell=${w.hellBackStyle} dungeon=(${w.dungeonX},${w.dungeonY}) spawn=(${w.spawnX},${w.spawnY}) ground=${w.groundLevel.toFixed(1)} rock=${w.rockLevel.toFixed(1)} | ` +
       `ours ws=${gs.worldSurface} rl=${gs.rockLevel} wsl=${gs.worldSurfaceLow} wsh=${gs.worldSurfaceHigh} rll=${gs.rockLevelLow.toFixed(0)} rlh=${gs.rockLevelHigh.toFixed(0)} water=${gs.waterLine} lava=${gs.lavaLine}`,
     );
   }

@@ -130,6 +130,15 @@ export interface SaveData {
     anglerQuestsFinished?: number;
     /** PVE 死亡计数（Player.numberOfDeathsPVE,PL:53840;旧档缺省 0） */
     deathsPve?: number;
+    /** 永久升级族(Player.cs:44575-44802;旧档缺省全 false) */
+    permanentUpgrades?: {
+      extraAccessory?: boolean;
+      usedAegisCrystal?: boolean;
+      usedAegisFruit?: boolean;
+      usedArcaneCrystal?: boolean;
+      usedGummyWorm?: boolean;
+      usedAmbrosia?: boolean;
+    };
   };
   npcs: Array<{ key: string; x: number; y: number; home: [number, number] | null; bound?: boolean; givenName?: string }>;
   signs?: Array<{ x: number; y: number; text: string }>; // 墓碑碑文（旧档缺省无）

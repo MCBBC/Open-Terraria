@@ -246,6 +246,7 @@ export class VanillaSpawner {
   private pX = 0; private pY = 0;
   private dayTime = true;
   private hardMode = false;
+  private expert = false;
   private waterTile = false;
   private noWorms = false;         // 原版 wallHouse（房屋内不出蠕虫）
   private skyMob = false;
@@ -2340,19 +2341,26 @@ export class VanillaSpawner {
   }
 
   /** GetBasicSlimeToSpawn（L5537-5580） */
+  /** GetBasicSlimeToSpawn（NPC.cs:5537-5580）1:1。spawnDist = |spawnTileX − 世界出生点X|
+   *  （:4111/:4602），地下恒 -1。万圣/圣诞史莱姆门（节日系统未移植,备案） */
   private getBasicSlimeToSpawn(surface: boolean, tileType: number, rng: RNG): number {
     if (!surface) {
       // 地下：Next(5)==0→-9（黄），否则 Next(2)==0→1（蓝）/-8（红）
-      if (rng.next() < 0.2) return -9;
-      return rng.next() < 0.5 ? 1 : -8;
+      if (rng.nextInt(5) === 0) return -9;
+      return rng.nextInt(2) === 0 ? 1 : -8;
     }
     switch (tileType) {
-      case T.MUD: return -10;     // 丛林
-      case T.SNOW: case T.SNOW_BRICK: return 147;  // 冰
-      default:
-        if (rng.next() < 1 / 3) return -3;         // 绿
-        if (rng.next() < 0.1) return -7;           // 紫
-        return 1;                                   // 蓝
+      // case 60 = 丛林【草】(原版 :5550)——曾误绑 T.MUD(59 泥,2026-08-13 对齐)
+      case T.JUNGLE_GRASS: return -10;
+      // case 147/161 = 雪块/【冰块】(:5552-5554)——曾误绑雪砖(148)
+      case T.SNOW: case T.ICE: return 147;
+      default: {
+        // spawnDist 语义:远离出生点(>400)才出紫史莱姆、近出生点(<200)经典档易出绿(:5564-5572)
+        const spawnDist = Math.abs(this.spawnTileX - this.world.spawnX);
+        if (rng.nextInt(3) === 0 || (spawnDist < 200 && !this.expert)) return -3;
+        if (rng.nextInt(10) === 0 && (spawnDist > 400 || this.expert)) return -7;
+        return 1;
+      }
     }
   }
 
@@ -2362,6 +2370,7 @@ export class VanillaSpawner {
     this.pY = Math.floor(playerY / TILE);
     this.dayTime = this.world.clock.isDay;
     this.hardMode = !!this.world.flags.hardMode;
+    this.expert = mainExpertMode(this.world);          // Main.expertMode（GetBasicSlimeToSpawn 绿/紫门用）
     // SetSpawnFlags L321：noWorms = 玩家所站格带房屋墙（房屋内不出蠕虫）
     this.noWorms = this.world.store.inBounds(this.pX, this.pY)
       && WALL_HOUSE.has(this.world.store.wall[this.world.store.idx(this.pX, this.pY)]);

@@ -107,7 +107,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     r.u64(); // worldGenVersion
   }
   if (version >= 181) r.bytes(16); // guid
-  r.i32(); // worldId
+  const worldId = r.i32(); // worldId
   r.i32(); r.i32(); r.i32(); r.i32(); // bounds
   const tilesHigh = r.i32();
   const tilesWide = r.i32();
@@ -140,7 +140,10 @@ export function parseWld(buf: Uint8Array): WldWorld {
   let treeTops: number[] = [];                    // TreeTops 13 区域变体（v≥211 优先于 header treeStyle）
   const treeStyle = [r.i32(), r.i32(), r.i32(), r.i32()]; // 各区森林树样式
   for (let i = 0; i < 3; i++) r.i32(); // caveBackX
-  for (let i = 0; i < 4; i++) r.i32(); // caveBackStyle
+  const caveBackStyle = [r.i32(), r.i32(), r.i32(), r.i32()];
+  const iceBackStyle = r.i32();
+  const jungleBackStyle = r.i32();
+  const hellBackStyle = r.i32();
   r.i32(); r.i32(); r.i32(); // ice/jungle/hell back style
   const spawnX = r.i32();
   const spawnY = r.i32();
@@ -294,6 +297,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
   }
 
   return {
+    worldId, caveBackStyle, iceBackStyle, jungleBackStyle, hellBackStyle,
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,

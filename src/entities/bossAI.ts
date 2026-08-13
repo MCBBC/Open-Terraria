@@ -1090,8 +1090,8 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
 export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) {
     e.bInit = true;
-    // 原版 ai[0]==0 时头生成 80 段链(body 135×79 + tail 136;链距 44*scale)
-    const segs = enemySpawnChain(e, 80);
+    // 原版头生成 80 身段(135) + 1 尾(136)(2026-08-13 对齐:曾 79+1 差一;链距 44*scale)
+    const segs = enemySpawnChain(e, 81);
     for (const s of segs) addEnemy(game, s);
   }
   const st = game.world.store;

@@ -685,8 +685,10 @@ export class UI {
       target = d.armor.slot;
     } else if (armorSlotIndexOfInternal(cur.id) >= 0) {
       target = armorSlotIndexOfInternal(cur.id); // vi_ 盔甲（vanilla-itemstats 部位）
-    } else if (d.accessory) {
-      for (let k = 3; k < 10; k++) {
+    } else if (d.accessory || statOfInternal(cur.id)?.acc !== undefined) {
+      // vi_ 配饰走 itemstats acc 判定(legacy accessory 字段已随退役消失——曾只认
+      // legacy 字段导致 vi_ 配饰右键一键装备静默失效)
+      for (let k = 3; k < inv.accSlotMax; k++) {
         if (!inv.armor[k]) { target = k; break; }
       }
       if (target < 0) target = 3; // 全满→交换第 3 槽

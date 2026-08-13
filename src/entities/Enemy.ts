@@ -4691,7 +4691,10 @@ export class Enemy extends Entity {
     // 伤害上约 2 倍过强；ichor 灵液仍走 +7 直伤通道（:81920 既有特例）
     const pen = this.ichorT > 0 ? 7 : 0;
     const effDef0 = def > dmg * 2 ? dmg * 2 : def;
-    const effDef = Math.max(0, effDef0 - Math.min(armorPen, effDef0));
+    // 负防御(EoC P2 专家 -15/-30、诸 Boss 狂暴态)按原版直算式应为【增伤】;
+    // 此前 Math.max(0,…) 把负值钳成 0 吞掉加伤(2026-08-13 对齐)。armorPen 只削
+    // 非负防御(min 内侧钳 0),不与负防御交互
+    const effDef = effDef0 - Math.min(armorPen, Math.max(0, effDef0));
     dmg = Math.max(1, Math.round(dmg - effDef * 0.5 + pen));
     // takenDamageMultiplier（NPC.StrikeNPC cs:81997-82000）：防御结算后 >1 时 ×N
     // （419 旋刃怪冲刺中 ×3，cs:57172）
@@ -4699,10 +4702,12 @@ export class Enemy extends Entity {
     this.hp -= dmg;
     this.iframes = 8;
     this.hpBarT = 240; // 受击后血条持续显示 4 秒
+    // 击退抗性方向修正（N:82144-82239 vx=num3×dir×resist——resist 是"接受的击退
+    // 比例"而非"抵抗比例"：0=免疫（Boss）1=全额。曾 (1-resist) 反向——Boss 被推飞）
     const resist = this.def.knockbackResist;
     if (resist < 0.9) {
-      this.vx += kbx * (1 - resist);
-      this.vy += kby * (1 - resist);
+      this.vx += kbx * resist;
+      this.vy += kby * resist;
     }
     // 联机傀儡受击：上报房主权威结算（本地视觉反馈已生效：扣血/飘字/击退）
     if (this.netPuppet) entityNet.reportStrike?.(this.netId, rawDmg, kbx, kby);

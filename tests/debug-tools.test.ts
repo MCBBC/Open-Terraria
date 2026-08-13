@@ -13,6 +13,7 @@ describe('F2 无敌 + 无限魔力', () => {
     expect(p.hp).toBe(p.maxHp);
     expect(p.damage(50, p.cx - 40, p.y)).toBe(true);
     expect(p.hp).toBe(p.maxHp - 50);
+    p.iframes = 0;                     // 清受击无敌帧（damage 内设置）
     p.debugGod = true;
     expect(p.damage(9999, p.cx - 40, p.y)).toBe(false);
     expect(p.hp).toBe(p.maxHp - 50);   // 未变

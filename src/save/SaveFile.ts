@@ -88,6 +88,14 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     taxMoney: player.taxMoney ?? 0,         // PL:53839
     golferScoreAccumulated: player.golferScoreAccumulated ?? 0, // PL:1792
     deathsPve: player.deathsPve ?? 0,       // PL:53840
+    permanentUpgrades: {
+      extraAccessory: player.inv.extraAccessory,
+      usedAegisCrystal: player.usedAegisCrystal,
+      usedAegisFruit: player.usedAegisFruit,
+      usedArcaneCrystal: player.usedArcaneCrystal,
+      usedGummyWorm: player.usedGummyWorm,
+      usedAmbrosia: player.usedAmbrosia,
+    },
     anglerQuestsFinished: player.anglerQuestsFinished ?? 0,     // PL:1790（渔夫奖励阶梯）
   };
   return serializeSave(view, meta, playerData, playTimeMs, townNpcs, events);

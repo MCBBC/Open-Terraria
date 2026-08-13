@@ -86,14 +86,17 @@ export class FancyResourceBars {
         ctx.drawImage(img, Math.round(ax + ox), Math.round(ayy + oy));
         ax += img.naturalWidth; // OffsetPerDrawByTexturePercentile = UnitX
       }
-      // 填充层（HeartFillingDrawer :255-270）：锚点 +(15,15)、推进 2+22、缩放从中心
+      // 填充层（HeartFillingDrawer :255-270）：锚点 +(15,15)、推进 2+22、缩放从中心。
+      // ★ResourceDrawSettings.Draw（:26-55）：OffsetSpriteAnchorByTexturePercentile=(0.5,0.5)
+      //  → 精灵**中心**=锚点（spriteBatch origin 语义）——曾把锚点当格子左上再 +11/+12，
+      //  填充整体偏右偏下 ~11px = 用户标注"心与边框错位"（2026-08-13 修复）
       let fx = vx + 15, fy = vy + ay + 15;
       for (let idx = first; idx <= last; idx++) {
         const img = idx < fruit ? this.t.heartFillHoney : this.t.heartFill;
         let scale = lerpValue(lifePerSegment * idx, lifePerSegment * (idx + 1), p.hp);
         if (idx === lastHeartFilling && scale > 0) scale += cursorScale - 1;
         const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-        ctx.drawImage(img, fx + 11 - w / 2, fy + 11 - h / 2, w, h);
+        ctx.drawImage(img, fx - w / 2, fy - h / 2, w, h);
         fx += 2 + 22;
       }
     };
@@ -113,14 +116,15 @@ export class FancyResourceBars {
         ctx.drawImage(img, Math.round(px), Math.round(py));
         py += img.naturalHeight;
       }
-      // 填充层（StarFillingDrawer :282-290）：锚点 +(15,16)、推进 -2+24、中心缩放
+      // 填充层（StarFillingDrawer :282-290）：锚点 +(15,16)、推进 -2+24、中心缩放。
+      // 同心条：精灵中心=锚点（origin 0.5,0.5），不再 +11/+12（2026-08-13 错位修复）
       let fx = sx + 15, fy = sy + 16;
       for (let i = 0; i < starCount; i++) {
         const img = this.t.starFill;
         let scale = lerpValue(manaPerStar * i, manaPerStar * (i + 1), p.mana);
         if (i === lastStarFilling && scale > 0) scale += cursorScale - 1;
         const w = img.naturalWidth * scale, h = img.naturalHeight * scale;
-        ctx.drawImage(img, fx + 11 - w / 2, fy + 12 - h / 2, w, h);
+        ctx.drawImage(img, fx - w / 2, fy - h / 2, w, h);
         fy += -2 + 24;
       }
     }

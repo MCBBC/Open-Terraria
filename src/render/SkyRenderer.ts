@@ -89,6 +89,7 @@ export class SkyRenderer {
   /** 活动实体:null = 无;spawn() 后按 vanilla 参数运动 */
   private meteor: {
     x: number; y: number; vx: number; vy: number; rot: number; t: number; life: number; flip: boolean;
+    depth: number;
   } | null = null;
   /** 贴图 62×384 = 4 帧竖排(FramingSpeed 5 → 每 5 帧进一格) */
   private static readonly METEOR_FW = 62;
@@ -106,8 +107,6 @@ export class SkyRenderer {
     // :1326-1333:速度 = 使行进 worldSurface*16 距离恰 1200 帧;出生 = 玩家中心 ±100
     //  减去 velocity*1200*0.5(前半程从屏外来)
     const spd = worldSurfacePx / vy / 1200;
-    const speed = 1 / Math.max(1e-6, spd);
-    void speed;
     this.meteor = {
       vx: vx * spd, vy: vy * spd,
       x: playerCx + (Math.floor(Math.random() * 201) - 100) - vx * spd * 600,
@@ -115,6 +114,7 @@ export class SkyRenderer {
       rot: ang + Math.PI / 2,   // :1340 rotation = Velocity.ToRotation()+π/2
       t: 0, life: 1200,         // :1327/1334 LifeTime=1200
       flip: Math.random() >= 0.5,
+      depth: 3 + Math.random() * 3,  // :1322 Depth = rand*3+3 ∈[3,6)
     };
   }
 
@@ -553,30 +553,13 @@ export class SkyRenderer {
   }
 
   draw(ctx: CanvasRenderingContext2D, clock: Clock, viewW: number, viewH: number, camX: number, dtMs = 16.7, camY = 0) {
-    // ---- 天幕流星推进+绘制(最远背景层;__swSkyMeteor 由 Game 触发) ----
+    // ---- 天幕流星推进(绘制在天空底色之后,见 drawSkyMeteor;原版 SkyManager 天空层序) ----
     if (this.meteor) {
       const m = this.meteor;
       m.t++;
       m.x += m.vx; m.y += m.vy;
-      const frames = 60 * dtMs / 1000;   // 按帧推进近似的 dt 归一
-      void frames;
-      if (m.t >= m.life) { this.meteor = null; }
-      else if (this.meteorTex && this.meteorTex.width) {
-        // 透明度(:1335-1337):t/life ∈[0,0.05]淡入/[0.95,1]淡出,BrightnessLerper 0.5
-        const k = m.t / m.life;
-        const alpha = k < 0.05 ? k / 0.05 : k > 0.95 ? Math.max(0, (1 - k) / 0.05) : 1;
-        const frame = Math.floor(m.t / 5) % 4;   // FramingSpeed 5
-        ctx.save();
-        ctx.globalAlpha = alpha * 0.75;
-        ctx.translate(m.x - camX * 0.2, m.y);    // 视差 0.2(天幕远层)
-        ctx.rotate(m.rot);
-        if (m.flip) ctx.scale(-1, 1);
-        ctx.drawImage(this.meteorTex, 0, frame * SkyRenderer.METEOR_FH,
-          SkyRenderer.METEOR_FW, SkyRenderer.METEOR_FH,
-          -SkyRenderer.METEOR_FW / 2, -SkyRenderer.METEOR_FH / 2,
-          SkyRenderer.METEOR_FW, SkyRenderer.METEOR_FH);
-        ctx.restore();
-      }
+      if (m.t >= m.life) this.meteor = null;
+      void dtMs;
     }
     const t = clock.timeOfDay;
     const [top, bottom] = this.skyColors(t);
@@ -613,6 +596,32 @@ export class SkyRenderer {
       const dv = Math.round(255 * (1 - 0.6 * Math.min(1, gyIntensity)));
       ctx.fillStyle = `rgb(${dv},${dv},${dv})`;
       ctx.fillRect(0, 0, viewW, viewH);
+      ctx.restore();
+    }
+
+    // ---- 天幕流星绘制（AmbientSky 天空实体层：画在天空底色之后=原版 SkyManager 层序；
+    //      曾画在 fillRect 之前被底色整个盖掉不可见）----
+    if (this.meteor && this.meteorTex && this.meteorTex.width) {
+      const m = this.meteor;
+      // SkyEntity.CommonDraw GetDrawPositionByDepth :71-74：水平视差 1/Depth、垂直 0.9/Depth
+      // （camX/camY = 相机中心；depthScale=3 → 缩放 3/Depth）
+      const px = (m.x - camX) / m.depth + camX - (camX - viewW / 2);
+      const py = (m.y - camY) * 0.9 / m.depth + camY - (camY - viewH / 2);
+      const sc = 3 / m.depth;
+      // FadingSkyEntity 淡入淡出（前/后 5% = 60 tick）+ BrightnessLerper=0.5
+      // （GetColor :165-168 = Lerp(天空色,白,0.5)——深夜天空近黑 ≈ 半亮，此处以 alpha×0.5 近似）
+      const k = m.t / m.life;
+      const alpha = (k < 0.05 ? k / 0.05 : k > 0.95 ? Math.max(0, (1 - k) / 0.05) : 1) * 0.5;
+      const frame = Math.floor(m.t / 5) % 4;   // FramingSpeed 5（:1339）
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      ctx.translate(px, py);
+      ctx.rotate(m.rot);
+      if (m.flip) ctx.scale(-1, 1);             // :1321 FlipHorizontally 50%
+      ctx.imageSmoothingEnabled = false;
+      const dw = SkyRenderer.METEOR_FW * sc, dh = SkyRenderer.METEOR_FH * sc;
+      ctx.drawImage(this.meteorTex, 0, frame * SkyRenderer.METEOR_FH,
+        SkyRenderer.METEOR_FW, SkyRenderer.METEOR_FH, -dw / 2, -dh / 2, dw, dh);
       ctx.restore();
     }
 

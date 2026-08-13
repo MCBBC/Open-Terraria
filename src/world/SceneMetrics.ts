@@ -149,9 +149,10 @@ export function scanScene(
   const tileX = Math.floor(centerX / 16);
   const tileY = Math.floor(centerY / 16);
 
-  // 169×124 采样窗口（SceneMetrics.ZoneScanSize）
+  // 169×124 采样窗口（SceneMetrics.ZoneScanSize；CenteredRectangle 半高 62 →
+  // Top=Y-62, Bottom=Y+62 排他 = -62..+61——曾 -61..+62 整体偏 +1,2026-08-13 对齐）
   const sx0 = Math.max(0, tileX - 84), sx1 = Math.min(w - 1, tileX + 84);
-  const sy0 = Math.max(0, tileY - 61), sy1 = Math.min(h - 1, tileY + 62);
+  const sy0 = Math.max(0, tileY - 62), sy1 = Math.min(h - 1, tileY + 61);
   const counts = new Map<number, number>();
   let sunflower = 0;
   let oceanSand = 0;
@@ -224,8 +225,10 @@ export function scanScene(
   return {
     tileX, tileY,
     belowSurface,
-    zoneSkyHeight: tileY <= worldSurface * 0.35,
-    zoneOverworldHeight: tileY <= worldSurface && tileY > worldSurface * 0.35,
+    // 0.3499999940395355 = C# 0.35f 的 float32 表示(:672-673 原文)——JS 双精度
+    // 0.35 会在 worldSurface*0.35 恰为整数时把该行判错档(Math.fround 复原)
+    zoneSkyHeight: tileY <= worldSurface * Math.fround(0.35),
+    zoneOverworldHeight: tileY <= worldSurface && tileY > worldSurface * Math.fround(0.35),
     zoneDirtLayerHeight: tileY <= rockLevel && tileY > worldSurface,
     zoneRockLayerHeight: tileY <= underworldLayer && tileY > rockLevel,
     zoneUnderworldHeight,

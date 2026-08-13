@@ -29,6 +29,8 @@ const MUD = TILE_BY_KEY['mud']!;
 const JUNGLE_GRASS = TILE_BY_KEY['v_60_jungle_grass_block']!;
 const SNOW = TILE_BY_KEY['snow']!;
 const ALTAR = TILE_BY_KEY['v_26_altars']!;
+/** shimmerSafetyDistance（WorldGen.cs:4104 = 150）：15825 祭坛 pass 的微光避让半径 */
+const SHIMMER_SAFETY = 150;
 /** TileID.Sets.Boulders（TileID.cs:195）——Place3x2 type=26 的底座巨石门 */
 const BOULDERS = new Set<number>([
   'v_138_boulder', 'v_484_rolling_cactus', 'v_664_bouncy_boulder', 'v_665_life_crystal_boulder',
@@ -117,6 +119,9 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
         }
       }
       convertSurface(st, rng, gs, zLo, zHi, true);
+      // 猩红**逐组**祭坛（cs:14241，本 pass 猩红分支内）——原版就在 Corruption pass 里，
+      // 与独立 pass "Demon And Crimson Altars"(cs:15825，全图随机撒) 是两处放置，
+      // 勿把这里挪到 15825 位（会同时丢流序与逐组锚定，见 runAltarsPass 头注）。
       placeAltars(st, rng, gs, zLo, zHi, 1, CRIMSTONE);
     } else {
       // 腐化裂隙（cs:14368-14390）+ 丛林草→腐化丛林草（cs:14392-14404）
@@ -160,6 +165,42 @@ export function runCorruptionPass(st: TileStore, rng: RNG, gs: GenState): void {
   // CrimPlaceHearts（cs:14331）：全组结束后一次性（曾逐组内联 → 流序错位）
   if (gs.crimson) {
     crimPlaceHearts(st, rng, hearts);
+  }
+}
+
+/** ★独立 pass "Demon And Crimson Altars"（cs:15825-15885，注册序 LivingTreeWalls(15792)
+ *  < 本 pass < SurfaceWaterInJungle(15887)）——与上方 runCorruptionPass 内的 placeAltars
+ *  （cs:14241，Corruption pass 猩红分支**逐组**祭坛）是原版两处不同的放置，勿再合并：
+ *  本 pass 为全图随机撒 (int)(w*h*3.3E-06) 个（4200×1200 → 16），不读 evilZones，
+ *  style = crimson?1:0；x∈[281, w-283) 避开中央 45%-55% 带，y∈[⌊ws*2+rock⌋/3,
+ *  ⌊rock+(h-350)*2⌋/3)（两界均先 cast 再整除 3）；落点拒绝采样 = oceanDepths(:10978)
+ *  ∨ 距微光心 < 150(shimmerSafetyDistance :4104) ∨ dualDungeons 界内（秘种子门，
+ *  普通世界恒 false）。每坛重试 ≤10000，IsTileNearby(26,3) 无邻坛才 Place3x2，成坛即停。
+ *  微光避让门：本管线微光 pass(cs:15256) 仍整体排在 vanillaBiomes 之后（顺序偏差另案），
+ *  此处 gs.shimmerX<0 时按"未生成"跳过该门——微光 pass 归位后此门自动生效。
+ *  原版 pass 头部 Main.tileSolid[484]=false(:15830) 对本 pass 无影响：place3x2 的
+ *  BOULDERS 门（含 484 滚仙人掌）已等价拒绝该类底座。 */
+export function runAltarsPass(st: TileStore, rng: RNG, gs: GenState): void {
+  const count = Math.trunc(st.w * st.h * 3.3e-06);   // remixWorldGen×3 / dualDungeons÷2 秘种子门不适用
+  const style = gs.crimson ? 1 : 0;
+  const yLo = Math.trunc(gs.worldSurface * 2 + gs.rockLevel) / 3 | 0;   // (int)(ws*2+rock)/3
+  const yHi = Math.trunc(gs.rockLevel + (st.h - 350) * 2) / 3 | 0;      // (int)(rock+(h-350)*2)/3
+  const midLo = st.w * 0.45, midHi = st.w * 0.55;
+  for (let i = 0; i < count; i++) {
+    for (let j = 0; j < 10000; j++) {
+      let x = rng.int(281, st.w - 284);                              // Next(281, w-3-280)
+      while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);    // 避中央带（重掷仅 x）
+      let y = rng.int(yLo, yHi - 1);                                 // Next(yLo, yHi)
+      // 拒绝采样（cs:15847-15865）：两点全重掷（x 先过中央带门再掷 y）
+      while (oceanDepths(st, gs, x, y)
+        || (gs.shimmerX >= 0 && Math.hypot(x - gs.shimmerX, y - gs.shimmerY) < SHIMMER_SAFETY)) {
+        x = rng.int(281, st.w - 284);
+        while (x > midLo && x < midHi) x = rng.int(281, st.w - 284);
+        y = rng.int(yLo, yHi - 1);
+      }
+      if (!isTileNearby(st, x, y, ALTAR, 3)) place3x2(st, x, y, ALTAR, style);
+      if (st.type[st.idx(x, y)] === ALTAR) break;                    // 成坛即停（:15877）
+    }
   }
 }
 

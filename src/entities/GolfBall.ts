@@ -1,105 +1,159 @@
-// 高尔夫球实体 + 击球公式 1:1（GolfHelper.cs）：
-//   CalculateShotStrength :293-302/:318-341 —— 蓄力 = (光标-球心)/300 的长度，
-//   按【杆型椭圆】上下限钳制（FindVectorOnOval :276-291），速度 = L×32；
-//   ValidateShot :423-449 —— 角度钳 [-87.12°, 0°]（不能向下打）+ 站位盒
-//   （球在玩家脚盒 X∈[-16,32] Y∈[-16,16]，面向翻转）；
-//   HitGolfBall :451-474 —— 地面材质阻尼（TileMaterials xnb 未提取，取代表值
-//   ClubImpactDampening=0.96 / Efficiency=0.5——粗糙保留系数只对 Wedge rough=1 生效）。
+// ============================================================================
+// 高尔夫球实体 1:1 —— Projectile.cs AI_149_GolfBall(:18924-18970) +
+// GolfHelper.cs 全量公式 + Terraria.Physics/BallCollision.cs 步进（world/golf/golfPhysics.ts）。
+// 行号注释对准 /Users/vinlic/Project/GLM/SandboxWorld/Terarria1456/
+//   SetDefaults 721/739-752  :7344-7352  7×7、aiStyle 149、tileCollide=false、penetrate -1
+//   AI_149_GolfBall           :18924-18970
+//     · timeLeft<10 → 10（球永不消失）      :18926-18929
+//     · ai[1]==-1（球座待发）→ 脚下非 494 转 0 :18931-18941
+//     · StepGolfBall + Resting 伤害清零      :18943-18952
+//     · 旋转 = 角速度 + 空中滚动补偿        :18956-18960
+//   GolfHelper:
+//     · ClubProperties/ShotStrength  :14-30
+//     · PointsNeededForLevel1-3      :267-271（Golfer 商店/台词门槛常量）
+//     · PhysicsProperties(0.3,0.99)  :273
+//     · StepGolfBall                 :279-282
+//     · FindVectorOnOval             :284-291
+//     · CalculateShotStrength        :293-302 / :318-341（蓄力=(光标-球心)/300）
+//     · IsPlayerHoldingClub          :304-316
+//     · GetClubProperties            :348-371
+//     · IsGolfBallResting            :400-407
+//     · ValidateShot                 :423-449（角度钳 [-87.12°,0°] + 站位盒）
+//     · HitGolfBall                  :451-474（材质阻尼 + ai[1] + RecordSwing）
+//   GetGolfTrailColor                :10533-10550（球色表）
+// ============================================================================
 import { Entity } from './Entity';
 import { TILE } from '../core/constants';
 import type { GameHooks } from './types';
 import { TILE_DEFS } from '../data/tiles';
+import {
+  BallState, stepGolfBall, clubDampenVelocity, golfMapFromStore,
+  type GolfTileMap,
+} from '../world/golf/golfPhysics';
+import type { GolfState } from '../world/golf/GolfState';
+
+/** 高尔夫宿主（Game 注入：LocalGolfState + 进洞结算回调 = GolfHelper.PutBallInCup） */
+export interface GolfHost {
+  /** Main.LocalGolfState（GolfState.cs 1:1） */
+  state: GolfState;
+  /** 本地玩家解析（proj.owner == Main.myPlayer 判定，PutBallInCup :88）。
+   *  取函数：换世界会重建 Player 实例，须动态解析 */
+  playerRef(): unknown;
+  /** 进洞结算（GolfHelper.PutBallInCup :86-115：计分/公告/电路/杀球） */
+  onCupCapture(ball: GolfBall, tileX: number, tileY: number): void;
+}
 
 export class GolfBall extends Entity {
-  w = 10; h = 10;
-  dead = false;
-  /** 球色变体（投射物 id：721 泥球 / 739+ 染色） */
+  /** Game 启动时注入（球体 AI 经此读写 GolfState 与结算链） */
+  static host: GolfHost | null = null;
+
+  /** SetDefaults :7350-7351（width=height=7） */
+  override w = 7; override h = 7;
+  /** 球色变体（投射物 id：721 泥球 / 739-752 染色球） */
   projId: number;
-  /** 已击杆数（ai[1]；进洞计分分母 = 杆数+2） */
+  /** ai[1]：击杆数；-1 = 球座待发态（NewProjectile 末参，Player.cs:31881/48916） */
   swings = 0;
-  /** 累计位移 px（RecordSwing 相邻击点距离和） */
-  dist = 0;
-  private lastX = 0; private lastY = 0;
-  private rolling = false;
+  /** localAI[0]：角速度 */
+  angular = 0;
+  /** localAI[1]：BallState（Resting=0/Moving=1）——GolfState.getLastHitBall 的跟踪门 */
+  ballState: BallState = BallState.Resting;
+  /** 渲染旋转累加（Projectile.rotation，AI_149 :18956-18960） */
+  rotation = 0;
   owner: () => unknown;
 
-  constructor(x: number, y: number, projId: number, owner: () => unknown) {
+  constructor(cx: number, cy: number, projId: number, owner: () => unknown, onTee = false) {
     super();
-    this.x = x; this.y = y;
+    // NewProjectProject 语义：入参为中心 → position = center - size/2（Projectile.cs:15162 一带）
+    this.x = cx - this.w / 2; this.y = cy - this.h / 2;
     this.projId = projId;
     this.owner = owner;
-    this.lastX = x; this.lastY = y;
+    this.swings = onTee ? -1 : 0;      // ai[1] 初值（球座放置传 -1）
   }
 
-  /** 击球（HitGolfBall :451-474）：速度向量 × 地面阻尼 + RecordSwing 记点 */
-  clubHit(vx: number, vy: number, rough: number, solidBelow: boolean): void {
-    if (solidBelow) {
-      // velocity = Lerp(v×0.96, v, 0.5×rough)（TileMaterials.GolfPhysics 代表值）
-      const k = 0.5 * rough;
-      vx = (vx * 0.96) * (1 - k) + vx * k;
-      vy = (vy * 0.96) * (1 - k) + vy * k;
-    }
-    this.vx = vx; this.vy = vy;
-    this.swings++;
-    this.dist += Math.hypot(this.x - this.lastX, this.y - this.lastY);
-    this.lastX = this.x; this.lastY = this.y;
-    this.rolling = false;
+  /** 本地玩家的球（proj.owner == Main.myPlayer，PutBallInCup :88 计分门） */
+  get isMine(): boolean {
+    const host = GolfBall.host;
+    return !!host && this.owner() === host.playerRef();
   }
 
-  /** 停球判定（瞄准/预测线用：IsGolfBallResting） */
+  /** IsGolfBallResting（GolfHelper.cs:400-407）：原版对 Moving 态另比对 oldPos 位移 <1px，
+   *  本作 localAI[1] 直接存 BallState 枚举，Resting 即等价停球 */
   get atRest(): boolean {
-    return this.rolling && Math.abs(this.vx) < 0.05 && this.vy === 0;
+    return this.ballState === BallState.Resting;
+  }
+
+  get moving(): boolean { return this.ballState !== BallState.Resting; }
+
+  /** HitGolfBall（GolfHelper.cs:451-474）：材质阻尼 + ai[1] 累加 + RecordSwing。
+   *  belowTileType：球底+1px 所在格的 tile id（null = 空气，不阻尼） */
+  clubHit(vx: number, vy: number, rough: number, belowTileType: number | null): void {
+    const d = clubDampenVelocity(vx, vy, rough, belowTileType);   // :453-461
+    this.vx = d.vx; this.vy = d.vy;                                // :462
+    // timeLeft = 18000（:465）——本作球体不自然消亡，语义恒成立
+    if (this.swings < 0) this.swings = 0;                          // :466-469
+    this.swings += 1;                                              // :470
+    this.ballState = BallState.Moving;                             // localAI[1] = 1（:471）
+    GolfBall.host?.state.recordSwing(this);                        // :472
   }
 
   fixedUpdate(_dt: number, game: GameHooks): void {
     const st = game.world.store;
-    const solidAt = (px: number, py: number) => {
-      const tx = Math.floor(px / TILE), ty = Math.floor(py / TILE);
-      return st.inBounds(tx, ty) && st.isSolid(tx, ty);
-    };
-    // 洞杯判定（GolfHelper.cs:62-69：tile 476、自上而下、速度≤100px/tick）
-    const cx = this.x + this.w / 2, cy = this.y + this.h / 2;
-    const htx = Math.floor(cx / TILE), hty = Math.floor(cy / TILE);
-    if (st.inBounds(htx, hty) && st.flags[st.idx(htx, hty)]
-      && TILE_DEFS[st.type[st.idx(htx, hty)]]?.vanilla?.sheet === 476
-      && this.vy > 0 && Math.hypot(this.vx, this.vy) <= 100) {
-      const hook = (game as unknown as { golfBallScored?: (b: GolfBall) => void }).golfBallScored;
-      if (hook) { hook(this); this.dead = true; return; }
+    // ---- ai[1] == -1：球座待发（AI_149 :18931-18941）----
+    if (this.swings === -1) {
+      // Framing.GetTileSafely(base.Bottom.ToTileCoordinates())（:18933）——
+      // Entity.Bottom = (x+w/2, y+h)（Entity.cs:122-131）→ 中心X/底边Y 取格
+      const btx = Math.floor((this.x + this.w / 2) / TILE);
+      const bty = Math.floor((this.y + this.h) / TILE);
+      const active = st.inBounds(btx, bty) && st.flags[st.idx(btx, bty)] !== 0;
+      const isTee = active && TILE_DEFS[st.type[st.idx(btx, bty)]]?.vanilla?.sheet === 494;
+      if (!isTee) this.swings = 0;              // !tile.active() || type != 494（:18936-18938）
+      return;                                   // :18941（本帧不做物理）
     }
-    // 物理：重力 + 弹跳（着地 vy 反弹 0.5 / 水平 0.9）+ 滚动摩擦
-    if (!this.rolling || this.vy !== 0) {
-      this.vy = Math.min(this.vy + 0.3, 12);
+    // ---- 物理步进（AI_149 :18943 + BallCollision.Step）----
+    // 原版 PutBallInCup 内 proj.Kill()（:114）使后续子步重入变为无害空操作
+    //（ShouldScoreHole 已被 ResetScoreTime 关闭）；这里以 capturedOnce 防止重复回调
+    let capturedOnce = false;
+    const hooks = GolfBall.host
+      ? {
+        onCupCapture: (tx: number, ty: number) => {
+          if (capturedOnce) return;
+          capturedOnce = true;
+          // PutBallInCup（GolfHelper.cs:86-115）：计分门在宿主内，杀球在此
+          GolfBall.host!.onCupCapture(this, tx, ty);
+          this.dead = true;                     // proj.Kill()（:114）
+        },
+      }
+      : undefined;
+    const map: GolfTileMap = golfMapFromStore(st);
+    const state = stepGolfBall(this, map, hooks);
+    if (state === BallState.OutOfBounds) { this.dead = true; return; }  // 出界杀球
+    this.ballState = state;                     // localAI[1] = State（:18951）
+    // 旋转（:18956-18960）：rotation += 角速度；空中（vy!=0 且 Moving）再补 vx/vy×0.1
+    this.rotation += this.angular;
+    if (this.vy !== 0 && state === BallState.Moving) {
+      this.rotation += this.vx * 0.1 + this.vy * 0.1;
     }
-    let nx = this.x + this.vx;
-    let ny = this.y + this.vy;
-    if (this.vx !== 0 && (solidAt(nx + (this.vx > 0 ? this.w : 0), this.y + 1) || solidAt(nx + (this.vx > 0 ? this.w : 0), this.y + this.h - 1))) {
-      this.vx *= -0.6; nx = this.x;
-    }
-    if (this.vy !== 0 && solidAt(nx + this.w / 2, ny + this.h)) {
-      if (this.vy > 1.2) { this.vy = -this.vy * 0.5; } else { this.vy = 0; }
-      this.vx *= 0.9;
-      ny = this.y;
-      if (this.vy === 0) this.rolling = true;
-    }
-    this.x = nx; this.y = ny;
-    if (this.rolling) {
-      this.vx *= 0.985;
-      if (Math.abs(this.vx) < 0.05) this.vx = 0;
-    }
-    if (!st.inBounds(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE))) this.dead = true;
   }
 
   draw(r: import('../render/Renderer').Renderer): void {
     const ctx = r.canvas.getContext('2d');
     if (!ctx) return;
+    // GetGolfTrailColor（Projectile.cs:10533-10550）—— 球色按投射物 id
+    const colors: Record<number, [number, number, number]> = {
+      739: [50, 50, 50], 740: [30, 50, 255], 741: [150, 90, 60], 742: [30, 255, 170],
+      743: [30, 255, 30], 744: [190, 255, 30], 745: [255, 130, 30], 746: [255, 50, 110],
+      747: [130, 10, 200], 748: [255, 30, 50], 749: [100, 180, 255], 750: [50, 240, 160],
+      751: [220, 80, 220], 752: [255, 180, 50],
+    };
+    const c = colors[this.projId] ?? [160, 160, 255];   // 721 默认（:1049）
     ctx.save();
     ctx.translate(this.cx, this.cy);
-    const hue = this.projId === 721 ? 30 : (this.projId - 739) * 24;
-    ctx.fillStyle = `hsl(${hue} 60% 92%)`;
+    ctx.rotate(this.rotation);
+    ctx.fillStyle = `rgb(${c[0]} ${c[1]} ${c[2]})`;
     ctx.strokeStyle = 'rgba(0,0,0,0.4)';
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.arc(0, 0, 5, 0, Math.PI * 2);
+    ctx.arc(0, 0, this.w / 2, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
     ctx.restore();

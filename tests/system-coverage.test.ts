@@ -106,3 +106,57 @@ describe('生日自然派对（NaturalAttempt :62-143）', () => {
     expect(partyIsUp(s)).toBe(false);
   });
 });
+
+// ============ NPC 快乐度（ShopHelper.ProcessMood :99-180） ============
+import { computeHappiness } from '../src/data/vanillaHappiness';
+
+const baseHappy = {
+  npcVanillaId: 17, homeless: false, distFromHome: 0,
+  playerInCorrupt: false, playerInCrimson: false, playerInDungeon: false,
+  zones: { forest: false, ocean: false, snow: false, desert: false, jungle: false, underground: false, hallow: false, mushroom: false },
+  npcsInHouse: 0, npcsInVillage: 4, nearby: [], isPrincess: false, // village=4 压掉 LoveSpace
+};
+
+describe('NPC 快乐度/商店价格（ShopHelper）', () => {
+  it('基准：森林 Merchant 有家无拥挤 → 1.0', () => {
+    const r = computeHappiness({ ...baseHappy });
+    expect(r.priceMul).toBe(1);
+  });
+  it('无家/离家>120/危险群系 → 1000（:111-122）', () => {
+    expect(computeHappiness({ ...baseHappy, homeless: true }).priceMul).toBe(1000);
+    expect(computeHappiness({ ...baseHappy, distFromHome: 121 }).priceMul).toBe(1000);
+    expect(computeHappiness({ ...baseHappy, playerInCorrupt: true }).priceMul).toBe(1000);
+  });
+  it('拥挤：同屋>3 每人 ×1.05（5 人=×1.10 圆整）；宽敞 ×0.95（:126-157）', () => {
+    expect(computeHappiness({ ...baseHappy, npcsInHouse: 5 }).priceMul).toBe(1.1);
+    expect(computeHappiness({ ...baseHappy, npcsInHouse: 1, npcsInVillage: 2 }).priceMul).toBe(0.95); // LoveSpace
+  });
+  it('群系偏好：Merchant 喜欢 forest ×0.94 / dislike desert ×1.06；Santa Love/Hate ×0.88/×1.12', () => {
+    expect(computeHappiness({ ...baseHappy, zones: { ...baseHappy.zones, forest: true } }).priceMul).toBe(0.94);
+    expect(computeHappiness({ ...baseHappy, zones: { ...baseHappy.zones, forest: false, desert: true } }).priceMul).toBe(1.06);
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 142, zones: { ...baseHappy.zones, forest: false, snow: true } }).priceMul).toBe(0.88);
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 142, zones: { ...baseHappy.zones, desert: true } }).priceMul).toBe(1.12);
+  });
+  it('公主在场全员 ×0.94；公主自己孤单<2 → 1000（:128-137/:37-40）', () => {
+    expect(computeHappiness({ ...baseHappy, nearby: [663] }).priceMul).toBe(0.94); // 同屋公主 :37-40
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, npcsInVillage: 1 }).priceMul).toBe(1000);
+    // 公主开店：同屋池随机抽 3 各 Love（:15-36；rand 固定 → 确定性）
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, nearby: [17, 18, 19], npcsInHouse: 3, rand: () => 0 }).priceMul).toBe(0.75); // 0.88³ 钳 0.75
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 663, isPrincess: true, nearby: [17], npcsInHouse: 1, rand: () => 0 }).priceMul).toBe(0.88); // 不足 3 全 Love
+  });
+  it('互相关系（:12-506 全量表）：Merchant 同屋护士 ×0.94 / 同屋渔夫 ×1.12 / 连乘 1.05', () => {
+    expect(computeHappiness({ ...baseHappy, npcsInHouse: 1, nearby: [18] }).priceMul).toBe(0.94);
+    expect(computeHappiness({ ...baseHappy, npcsInHouse: 1, nearby: [369] }).priceMul).toBe(1.12);
+    expect(computeHappiness({ ...baseHappy, npcsInHouse: 2, nearby: [18, 369] }).priceMul).toBe(1.05); // 0.94×1.12=1.0528
+    // 村范围不触发：渔夫在 25-120 → 只计数不出关系
+    expect(computeHappiness({ ...baseHappy, npcsInVillage: 5, nearby: [] }).priceMul).toBe(1);
+  });
+  it('组合钳制 [0.75,1.5]（LimitAndRound :182-187）：Merchant 拥挤5+dislike → 1.15', () => {
+    const r = computeHappiness({ ...baseHappy, npcsInHouse: 5, zones: { ...baseHappy.zones, forest: false, desert: true } });
+    expect(r.priceMul).toBe(1.17); // 1.05²×1.06=1.169→1.17
+  });
+  it('旅行商/骷髅商/老人 → 1.0 恒定（:107-110）', () => {
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 368, homeless: true }).priceMul).toBe(1);
+    expect(computeHappiness({ ...baseHappy, npcVanillaId: 453, homeless: true }).priceMul).toBe(1);
+  });
+});

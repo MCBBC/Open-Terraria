@@ -1,6 +1,10 @@
 // 键盘/鼠标输入。UI 打开时屏蔽游戏输入。
 export class Input {
   keys = new Set<string>();
+  /** 虚拟按键（移动端控件注入——MobileControls 持有）。down() 与物理键盘同权：
+   *  摇杆=KeyA/KeyD/KeyW/KeyS、跳跃=Space、智能光标=ControlLeft。uiBlocking 门
+   *  对两者一致生效（背包打开时虚拟摇杆同样不驱动角色） */
+  touchKeys = new Set<string>();
   mouseX = 0; mouseY = 0;
   mouseDown = false;
   /** 左键物理按住态(mousedown→true/mouseup→false,不随点击消费清零)。
@@ -42,7 +46,7 @@ export class Input {
       if (e.code === 'F2' || e.code === 'F1') e.preventDefault();
     }) as EventListener);
     onWin('keyup', ((e: KeyboardEvent) => { this.keys.delete(e.code); }) as EventListener);
-    onWin('blur', (() => { this.keys.clear(); this.mouseHeld = false; }) as EventListener);
+    onWin('blur', (() => { this.keys.clear(); this.touchKeys.clear(); this.mouseHeld = false; }) as EventListener);
     onEl('mousemove', ((e: MouseEvent) => {
       const r = this.el.getBoundingClientRect();
       this.mouseX = e.clientX - r.left;
@@ -64,6 +68,63 @@ export class Input {
       this.wheelDelta += Math.sign(e.deltaY);
       e.preventDefault();
     }) as EventListener, { passive: false });
+
+    // ---- 触摸合成（移动端世界交互）：虚拟控件与 UI 面板各自消费事件（控件层
+    // stopPropagation+preventDefault；DOM 面板走原生 click），到达这里的只有
+    // "世界区域"触摸 → 合成鼠标语义（点击=左键使用/挖掘/攻击，拖动=瞄准，
+    // 长按 ≥400ms 且位移 <12px = 右键交互脉冲：开箱/对话/开门）。
+    // ★ 不改桌面路径：桌面无 touch 事件，本段零影响
+    const isUiTarget = (t: EventTarget | null): boolean =>
+      !!t && (t as HTMLElement)?.closest?.('.sw-panel, .sw-slot, .sw-recipe, .sw-btn, .sw-mobile, .sw-hotbar, .sw-tooltip, .sw-ach-panel, .sw-drag-ghost') != null;
+    let worldTouchId: number | null = null;
+    let touchStartX = 0, touchStartY = 0, touchStartT = 0;
+    let longPressTimer: ReturnType<typeof setTimeout> | null = null;
+    const clearLongPress = () => { if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; } };
+    const setCursor = (t: Touch) => {
+      const r = this.el.getBoundingClientRect();
+      this.mouseX = t.clientX - r.left;
+      this.mouseY = t.clientY - r.top;
+    };
+    onEl('touchstart', ((e: TouchEvent) => {
+      if (isUiTarget(e.target)) return;             // UI/控件原生处理
+      if (worldTouchId !== null) return;            // 首指驱动光标，次指忽略
+      const t = e.changedTouches[0];
+      worldTouchId = t.identifier;
+      e.preventDefault();                           // 阻浏览器合成鼠标/滚动
+      setCursor(t);
+      this.mouseDown = true; this.mouseHeld = true;
+      touchStartX = t.clientX; touchStartY = t.clientY; touchStartT = performance.now();
+      clearLongPress();
+      longPressTimer = setTimeout(() => {           // 长按 → 右键交互脉冲
+        this.rightDown = true;
+      }, 400);
+    }) as EventListener, { passive: false });
+    onEl('touchmove', ((e: TouchEvent) => {
+      if (worldTouchId === null) return;
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== worldTouchId) continue;
+        e.preventDefault();
+        setCursor(t);
+        // 显著移动取消长按（拖动=瞄准/持续挖掘）
+        if (Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY) > 12) {
+          clearLongPress();
+          this.rightDown = false;
+        }
+      }
+    }) as EventListener, { passive: false });
+    const endWorldTouch = (e: TouchEvent) => {
+      if (worldTouchId === null) return;
+      for (const t of Array.from(e.changedTouches)) {
+        if (t.identifier !== worldTouchId) continue;
+        e.preventDefault();
+        worldTouchId = null;
+        clearLongPress();
+        this.mouseDown = false; this.mouseHeld = false;
+        this.rightDown = false;
+      }
+    };
+    onEl('touchend', endWorldTouch as EventListener, { passive: false });
+    onEl('touchcancel', endWorldTouch as EventListener, { passive: false });
   }
 
   /** 移除全部监听(退出世界时 Game.destroy 调用) */
@@ -75,7 +136,7 @@ export class Input {
   }
 
   down(code: string): boolean {
-    return !this.uiBlocking && this.keys.has(code);
+    return !this.uiBlocking && (this.keys.has(code) || this.touchKeys.has(code));
   }
 
   /** 每帧末调用，处理一次性输入（滚轮切换快捷栏） */

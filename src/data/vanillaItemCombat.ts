@@ -49,6 +49,16 @@ const EXTRACT_PATCH: Record<string, Partial<ItemCombat>> = {
   '4789': { shoot: 878, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 130, knockBack: 14, noMelee: true, melee: true },
   '4790': { shoot: 879, useTime: 24, useAnimation: 24, shootSpeed: 3.5, damage: 90, knockBack: 13, noMelee: true, melee: true },
   '5629': { shoot: 1088, useAmmo: 27, useTime: 20, useAnimation: 20, shootSpeed: 10, noMelee: true, autoReuse: true },
+  // ---- 七金属短剑 SetDefaults1(6) 模板漏提(Item.cs:1377-1392;2026-08-13
+  //   "铜剑变投掷"根因:shootSpeed 缺→默认 8→位移 120px 像丢剑;autoReuse 应 false;
+  //   noMelee 应 true。铁短剑 item 6 自带全量(不走模板)不受影响) ----
+  '3483': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3489': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3495': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3501': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3507': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3513': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
+  '3519': { shootSpeed: 2.1, noMelee: true, autoReuse: false },
 };
 
 const TABLE: Record<string, ItemCombat> = { ...RAW };

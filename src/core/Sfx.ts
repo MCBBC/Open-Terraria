@@ -30,7 +30,9 @@ export type SfxName =
   | 'gunShot'      // SoundID.Item11 枪械通用
   | 'gunShotgun'   // SoundID.Item36 霰弹枪族 534/964/3788/4703
   | 'gunHandgun'   // SoundID.Item41 手枪族 164/219/1255/1929/2269/2270
-  | 'record';      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
+  | 'record'      // SoundID.Item166（八音盒录音完成，Player.cs:15054）
+  | 'mirror'      // SoundID.Item6（魔镜族 UseSound：Magic/Ice Mirror/Cell Phone/Shellphone :42297 族）
+  | 'conch';      // SoundID.Item64（海螺族 UseSound：Magic/Demon Conch/Shellphone 海洋地狱款）
 
 // 逻辑名 → 原版 wav 文件（多文件随机选 + 音高扰动）
 const WAV_MAP: Record<SfxName, string[]> = {
@@ -79,8 +81,10 @@ const WAV_MAP: Record<SfxName, string[]> = {
   gunShotgun: ['Item_36'],
   gunHandgun: ['Item_41'],
   record: ['Item_166'],
+  mirror: ['Item_6'],
+  conch: ['Item_64'],
   // 以下无原版素材，走合成
-  drink: [],
+  drink: ['Item_3'],  // SoundID.Item3(药水饮用/回忆药水起始音;素材曾缺走合成兜底)
 };
 
 export class Sfx {
@@ -296,6 +300,8 @@ export class Sfx {
       case 'door_close': osc('triangle', 320, 160, 0.1, 0.1); break;
       case 'shatter': osc('square', 1400, 300, 0.15, 0.1); break;
       case 'drown': osc('sine', 400, 90, 0.4, 0.1); break;
+      case 'mirror': osc('sine', 700, 1900, 0.3, 0.06); osc('sine', 1400, 2800, 0.25, 0.04, 0.1); break;   // 魔镜闪烁上行
+      case 'conch': osc('sine', 220, 330, 0.25, 0.08); osc('sine', 330, 440, 0.3, 0.06, 0.2); break;        // 海螺低鸣
     }
   }
 }

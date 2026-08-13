@@ -108,7 +108,7 @@ const HEADGEAR_OFFSET_Y = [2, 2, 2, 2, 2, 2, 2, 0, 0, 0, 2, 2, 2, 2, 0, 0, 0, 2,
 import { Lang } from '../i18n/Lang';
 import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
-import { townExtraFrames, TOWN_NPC_HEAD_INDEX } from '../data/vanillaNpcs';
+import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
 import { BuffType } from '../stats/Buffs';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
@@ -955,7 +955,7 @@ export class Renderer {
     for (const e of sorted) {
       if (e instanceof Enemy) { this.drawEnemy(e, world, entities); this.drawHealthBar(e, world.isExpert); }
       else if (e instanceof ItemDrop) this.drawDrop(e);
-      else if (e instanceof TownNPC) { this.drawTownNPC(e); this.drawHealthBar(e); }
+      else if (e instanceof TownNPC) { this.drawTownNPC(e, world); this.drawHealthBar(e); }
       else if (e instanceof Tombstone) this.drawTombstone(e);
       else if (e instanceof Critter) this.drawCritter(e);
       else if (typeof (e as { draw?: unknown }).draw === 'function') {
@@ -1842,7 +1842,6 @@ export class Renderer {
         }
         ctx.restore();
         ctx.filter = 'none';
-        this.drawEnemyHpBar(e);
         return;
       }
     }
@@ -1880,7 +1879,6 @@ export class Renderer {
       ctx.restore();
       ctx.filter = 'none';
     }
-    this.drawEnemyHpBar(e);
     void world;
   }
 
@@ -3041,30 +3039,6 @@ export class Renderer {
    * 颜色公式 :21771-21810（ratio-0.1 → >0.5 绿 r=255*(1-n)*2 / 否则红 g=255*n*2，b=0，
    * ×0.95 alpha；前景/背景同色 tint 靠明度区分）
    */
-  private drawEnemyHpBar(e: { hp: number; maxHp: number; cx: number; y: number; h: number }) {
-    if (e.hp <= 0 || e.hp >= e.maxHp) return;
-    const ctx = this.ctx;
-    let r = e.hp / e.maxHp;
-    if (r > 1) r = 1;
-    const fill = Math.min(36, Math.max(3, Math.floor(36 * r)));  // num2：填充宽（min 3）
-    const x = Math.round(e.cx - 18);                             // num3 = X - 18*scale
-    const y = Math.round(e.y + e.h);                             // 实体脚下（经典锚点）
-    const n = r - 0.1;                                           // ratio 偏移（:21771）
-    const cr = n > 0.5 ? Math.round(255 * (1 - n) * 2) : 255;
-    const cg = n > 0.5 ? 255 : Math.round(255 * n * 2);
-    const rgb = (mul: number) => `rgb(${Math.min(255, Math.round(cr * mul))},${Math.min(255, Math.round(cg * mul))},0)`;
-    ctx.globalAlpha = 0.95;                                      // alpha×0.95（光照亮度并入常量）
-    // 背景空槽（Hb2 等价：暗框+同色调暗填充）
-    ctx.fillStyle = 'rgba(0,0,0,0.55)';
-    ctx.fillRect(x - 1, y - 1, 38, 5);
-    ctx.fillStyle = rgb(0.45);
-    ctx.fillRect(x, y, 36, 3);
-    // 前景填充（Hb1 等价：全亮同色 tint）
-    ctx.fillStyle = rgb(1);
-    ctx.fillRect(x, y, fill, 3);
-    ctx.globalAlpha = 1;
-  }
-
   /**
    * 挂物族存放物叠画（原版 TE*.Draw：物品框/武器架/食物盘/展示罐把存放物图标画在
    * 框体上；模特/帽架走 PlayerRenderer 画穿戴件——本作无纸娃娃渲染链，等价为在
@@ -3217,6 +3191,79 @@ export class Renderer {
 
   /** bound NPC 姿态帧（各表帧 0）。589 在 vanilla-npcs.json 缺登记（json 缺口族，同 588/633/663）
    *  ——vnpc 懒加载会按 frames=1 把 62×624 整条画出，故此处显式帧数切片 */
+
+  /** 派对变体贴图条 id 集（UpdateAltTexture NPC.cs:91250——441/453/633 永不 altTexture=1，
+   *  对应 TownNPCs/{Name}_Default_Party 表已在 public/sprites/vanilla/NPC_{id}_Alt_1.png） */
+  private static readonly PARTY_ALT_IDS = new Set([17, 18, 38, 54, 108, 124, 142, 178, 207, 209, 227, 229, 353, 368, 369, 588, 663, 682]);
+
+  // ---- 派对帽（Main.cs:26814-27089 DrawNPCExtras Extra[72] 1:1）----
+  // NPCFramingGroup（NPCID.cs:4875：默认 0；18/20/208/178/124/353→1；369→2；160→3；城镇史莱姆 670/678-684→7）
+  private static readonly HAT_FRAMING_GROUP: Record<number, number> = { 18: 1, 20: 1, 208: 1, 178: 1, 124: 1, 353: 1, 369: 2, 160: 3, 670: 7, 678: 7, 679: 7, 680: 7, 681: 7, 682: 7, 683: 7, 684: 7 };
+  /** TownNPCsFramingGroups（NPCID.cs:4879-4928：8 组，值域 −6..+6——按帧行号的帽 Y 微调） */
+  private static readonly HAT_FRAME_GROUPS: number[][] = [
+    [0, 0, 0, -2, -2, -2, 0, 0, 0, 0, -2, -2, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],          // 0（26）
+    [0, 0, 0, -2, -2, -2, 0, 0, 0, -2, -2, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],             // 1（25）
+    [0, 0, 0, -2, -2, -2, 0, 0, -2, -2, -2, -2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],            // 2（25）
+    [0, 0, -2, 0, 0, 0, 0, -2, -2, -2, 0, 0, 0, 0, -2, -2, 0, 0, 0, 0, 0, 0],                       // 3（22）
+    [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 2, 4, 6, 4, 2, 2, -2, -4, -6, -4, -2, -4, -4, -6, -6, -6, -4],// 4（28）
+    [0, 0, 0, 0, 0, 0, 0, 0, -2, -2, -2, 0, 0, -2, -2, 0, 0, 4, 6, 6, 6, 6, 4, 4, 4, 4, 4, 4],      // 5（28）
+    [0, 0, -2, -4, -4, -2, 0, -2, 0, 0, 2, 4, 6, 4, 2, 0, -2, -4, -6, -6, -6, -6, -6, -6, -4, -2],  // 6（26）
+    [0, -2, 0, -2, -4, -6, -4, -2, 0, 0, 2, 2, 4, 2],                                               // 7（14，城镇史莱姆）
+  ];
+  /** HatOffsetY（NPCID.cs:4827：默认 0 的例外表） */
+  private static readonly HAT_OFFSET_Y: Record<number, number> = {
+    227: 4, 107: 2, 108: 2, 229: 4, 17: 2, 38: 8, 160: -10, 208: 2, 142: 2, 124: 2,
+    453: 2, 37: 4, 54: 4, 209: 4, 369: 6, 441: 6, 353: -2, 633: -2, 550: -2, 588: 2, 663: 2, 656: 4,
+  };
+  /** num7 逐 type 水平微调（Main.cs:27010-27062；default 0） */
+  private static hatXOffset(id: number): number {
+    if (id === 550) return -4;
+    if (id === 588) return 0;
+    if (id === 227) return -4;
+    if (id === 228 || id === 678 || id === 681 || id === 682) return -2;
+    if ([17, 18, 19, 20, 22, 124, 229, 353, 633, 637, 638, 656, 670, 679, 680, 683, 684].includes(id)) return -1;
+    if ([37, 38, 54, 107, 108, 160, 207, 209].includes(id)) return -3;
+    if (id === 178 || id === 208 || id === 369) return 1;
+    return 0;
+  }
+  /** GetPartyHatColor（NPC.cs:67246-67269：name+whoAmI+moonPhase → 5 色格）；
+   *  色格映射 Main.cs:26824-26838（1→0 蓝/2→16 粉/3→17 青/4→18 紫/5→19 白） */
+  private static partyHatCell(name: string, whoAmI: number, moonPhase: number, isDay: boolean): number {
+    if (!name) return 0;
+    let num = name.length + name.charCodeAt(0);
+    const m = isDay ? moonPhase - 1 : moonPhase;
+    num += whoAmI;
+    num += m * (whoAmI % 2 === 0 ? 1 : -1);
+    if (num < 0) num += 5;
+    num %= 5;
+    if (num === 0) num++;
+    return num === 1 ? 0 : num + 14; // 2→16 / 3→17 / 4→18 / 5→19
+  }
+
+  /** 派对帽叠画（UsesPartyHat NPC.cs:67221-67244：441/37/633 恒不戴；
+   *  帽锚=脚底中心同体绘制块（bottom+vector，origin=帽底 12px），随 facing 镜像） */
+  private drawPartyHat(ctx: CanvasRenderingContext2D, n: TownNPC, world: World) {
+    // UsesPartyHat 排除（67223-67226）
+    if (n.vanillaId === 441 || n.vanillaId === 37 || n.vanillaId === 633) return;
+    const sheet = this.atlas ? this.atlas.ensureVImage('vanilla/Extra_72.png') : null;
+    if (!sheet) return;
+    const num = n.frame; // frame.Y / frame.Height
+    const group = Renderer.HAT_FRAME_GROUPS[Renderer.HAT_FRAMING_GROUP[n.vanillaId] ?? 0]
+      ?? Renderer.HAT_FRAME_GROUPS[0];
+    const num3 = n.vanillaId === 663 ? 1 : 0; // 公主头部前伸（Main.cs:26845-26848）
+    let num5 = n.facing; // spriteDirection（facing>0=朝右=镜像同体块）
+    let num4 = 0;
+    let hatNum3 = num3;
+    if (n.vanillaId === 682) { num5 = -num5; hatNum3 = -1; num4 = 2; } // IsTownSlime（:26901-26928，仅 682 在库）
+    const cell = Renderer.partyHatCell(n.givenName, n.id, world.clock.moonPhase ?? 0, world.clock.isDay);
+    const W = 38, H = 34; // Extra_72 格 40×36 −2 边缘（:26840-26841）
+    // vector 装配（:26961-27065）：-(0,h)+(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY → +num7*num5 → +4*num5
+    const vx = -2 * num5 + hatNum3 * num5 + Renderer.hatXOffset(n.vanillaId) * num5 + 4 * num5;
+    const vy = -(n.h) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0);
+    // origin = (W/2, H-12)（:27009）→ drawImage 左上 = (vx − W/2, vy − (H−12))
+    ctx.drawImage(sheet, cell * 40, 0, 40, 36, vx - W / 2, vy - (H - 12), W, H);
+  }
+
   private boundNpcSheet(n: TownNPC): DrawRect | null {
     const id = Renderer.BOUND_NPC_SHEET[n.npcKey];
     if (!id || !this.atlas) return null;
@@ -3227,11 +3274,10 @@ export class Renderer {
     return { img, sx: 0, sy: 0, sw: img.width, sh: Math.min(fh, img.height) };
   }
 
-  private drawTownNPC(n: TownNPC) {
+  private drawTownNPC(n: TownNPC, world?: World) {
     const ctx = this.ctx;
-    // 血条与怪物同规（原版 DrawInterface_14 对 friendly NPC 同函数绘制：
-    // life != lifeMax 即常驻显示——城镇 NPC 受伤掉血后可见；贴图条加载未就绪也照画）
-    this.drawEnemyHpBar(n);
+    // 血条统一走实体循环的 drawHealthBar(原版 HealthBar1/2 贴图版,Main.cs:21721+;
+    // 此前这里另画早期程序化矩形条 = 双血条,已移除)
     // ---- 表情气泡（EmoteBubble.Draw :201-224：Extra[48] 8 列网格 34px/格；
     //      边框帧 = (!pop) ? (1,0) : (0,0)——稳定期用满框 (1,0),首尾 6t 弹出/收起
     //      用尾帧 (0,0)(原版 `(!flag)?1:0`,终审曾反着写);图标 (emote*2%8+anim, 1+emote/4)。
@@ -3258,7 +3304,19 @@ export class Renderer {
     // 曾导致全部城镇 NPC 显示为史莱姆
     if (this.atlas) {
       // bound 态：走专属捆绑姿态表（原版是独立 NPC 类型，见 BOUND_NPC_SHEET 注释）
-      const r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
+      // 派对变体（UpdateAltTexture NPC.cs:91250：PartyIsUp 且非 441/453/633 → altTexture=1，
+      // Profiles.cs GetTextureNPCShouldUse → {Name}_Default_Party 整条替换；帧布局与正条同构）
+      const partyImg = (this.scene?.partyUp && world && Renderer.PARTY_ALT_IDS.has(n.vanillaId))
+        ? this.atlas.ensureVImage(`vanilla/NPC_${n.vanillaId}_Alt_1.png`) : null;
+      let r: DrawRect | null;
+      if (partyImg) {
+        const count = this.atlas.vnpcMeta(n.vanillaId)?.count ?? 1;
+        const fh = Math.floor(partyImg.height / count);
+        const idx = Math.max(0, Math.min(count - 1, n.frame));
+        r = { img: partyImg, sx: 0, sy: idx * fh, sw: partyImg.width, sh: fh };
+      } else {
+        r = n.bound ? this.boundNpcSheet(n) : this.atlas.vnpc(n.vanillaId, n.frame);
+      }
       if (r) {
         ctx.save();
         // 底锚 + 逐帧实测底部透明行数补偿(spriteBottomPad):帧底 ~2px 透明边距
@@ -3269,6 +3327,7 @@ export class Renderer {
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
+        if (this.scene?.partyUp && world) this.drawPartyHat(ctx, n, world);
         ctx.filter = 'none';
         ctx.restore();
         return;
@@ -4031,13 +4090,39 @@ export class Renderer {
     ctx.globalCompositeOperation = 'source-over';
   }
 
-  // ---- 原版小地图框（MinimapFrame/MinimapFrameManager 1:1，Default 皮肤） ----
-  // DrawBackground: MinimapPosition-6 处 244×244 黑底；DrawForeground: 框贴图(256×264)
-  // 画在 MinimapPosition+frameOffset(-8,-15)；按钮(18×18)仅悬停时显示（IsHighlighted）
-  private minimapFrameTex = this.loadUiTex('UI_Minimap_Default_MinimapFrame');
-  private minimapBtnReset = this.loadUiTex('UI_Minimap_Default_MinimapButton_Reset');
-  private minimapBtnZoomIn = this.loadUiTex('UI_Minimap_Default_MinimapButton_ZoomIn');
-  private minimapBtnZoomOut = this.loadUiTex('UI_Minimap_Default_MinimapButton_ZoomOut');
+  // ---- 原版小地图框（MinimapFrame/MinimapFrameManager 1:1，9 皮肤） ----
+  // DrawBackground: MinimapPosition-6 处 244×244 黑底（不随皮肤变）；DrawForeground: 整张
+  // 框贴图（尺寸随皮肤 252×256..272×270）画在 MinimapPosition+frameOffset；按钮(18×18)
+  // 仅悬停时显示（IsHighlighted）。皮肤=客户端选项 config.json "MinimapFrame"（:11-19），
+  // 9 款皮肤零代码分支差异，只有 frameOffset + 按钮位（MinimapFrameManager.cs:32-42）。
+  /** 皮肤元数据（frameOffset=框贴图左上相对 MinimapPosition 偏移；按钮位相对 FramePosition） */
+  private static readonly MINIMAP_SKINS: Record<string, { fo: readonly [number, number]; reset: readonly [number, number]; zoomIn: readonly [number, number]; zoomOut: readonly [number, number] }> = {
+    Default:  { fo: [-8, -15],  reset: [150, 240], zoomIn: [202, 240], zoomOut: [176, 240] },
+    Golden:   { fo: [-10, -10], reset: [136, 248], zoomIn: [96, 248],  zoomOut: [116, 248] },
+    Remix:    { fo: [-10, -10], reset: [200, 234], zoomIn: [148, 234], zoomOut: [174, 234] },
+    Sticks:   { fo: [-10, -10], reset: [148, 234], zoomIn: [200, 234], zoomOut: [174, 234] },
+    StoneGold:{ fo: [-15, -15], reset: [220, 244], zoomIn: [244, 188], zoomOut: [244, 216] },
+    TwigLeaf: { fo: [-20, -20], reset: [206, 242], zoomIn: [162, 242], zoomOut: [184, 242] },
+    Leaf:     { fo: [-20, -20], reset: [212, 244], zoomIn: [168, 246], zoomOut: [190, 246] },
+    Retro:    { fo: [-10, -10], reset: [150, 236], zoomIn: [202, 236], zoomOut: [176, 236] },
+    Valkyrie: { fo: [-10, -10], reset: [154, 242], zoomIn: [206, 240], zoomOut: [180, 244] },
+  };
+  /** 选中皮肤的 4 张贴图（懒加载缓存，切皮肤自动换批） */
+  private minimapSkinTex = new Map<string, { frame: HTMLImageElement; reset: HTMLImageElement; zoomIn: HTMLImageElement; zoomOut: HTMLImageElement }>();
+  private minimapSkinAssets(): { skin: typeof Renderer.MINIMAP_SKINS[string]; tex: { frame: HTMLImageElement; reset: HTMLImageElement; zoomIn: HTMLImageElement; zoomOut: HTMLImageElement } } {
+    const name = Renderer.MINIMAP_SKINS[options.data.minimapFrame] ? options.data.minimapFrame : 'Default';
+    let tex = this.minimapSkinTex.get(name);
+    if (!tex) {
+      tex = {
+        frame: this.loadUiTex(`UI_Minimap_${name}_MinimapFrame`),
+        reset: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_Reset`),
+        zoomIn: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_ZoomIn`),
+        zoomOut: this.loadUiTex(`UI_Minimap_${name}_MinimapButton_ZoomOut`),
+      };
+      this.minimapSkinTex.set(name, tex);
+    }
+    return { skin: Renderer.MINIMAP_SKINS[name], tex };
+  }
   /** 小地图缩放（原版 mapMinimapScale，默认 1.05；钳 0.2..3，Main.cs:54953-54959） */
   minimapZoom = 1.05;
   /** 本帧鼠标悬停在小地图框按钮上（Game 据此拦下"点地图开全屏"）——原版 mouseInterface 语义 */
@@ -4059,11 +4144,6 @@ export class Renderer {
     img.src = `sprites/vanilla-ui/${name}.png`;
     return img;
   }
-
-  /** Default 皮肤按钮位（MinimapFrameManager.CreateAndAdd "Default"：+num 2/6 修正） */
-  private static readonly MINIMAP_BTN_POS = {
-    reset: [150, 240], zoomIn: [202, 240], zoomOut: [176, 240],
-  } as const;
 
   /** 洞穴探险/危险感/狩猎/群系视觉 tile 高亮集（TILE_DEFS key 启发式，模块级缓存） */
   private static HIGHLIGHT_SETS = (() => {
@@ -4142,15 +4222,16 @@ export class Renderer {
     // 玩家图标
     this.drawPlayerMarker(ctx,
       ox + (px - sx) / viewTiles * size, oy + (py - sy) / viewTiles * size, 10);
-    // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset(-8,-15)）
-    const fx = ox + 4 - 8, fy = oy + 4 - 15;
-    if (this.minimapFrameTex.complete) ctx.drawImage(this.minimapFrameTex, fx, fy);
+    // 框前景（MinimapFrame.DrawForeground：FramePosition = MinimapPosition + frameOffset——随皮肤）
+    const { skin, tex } = this.minimapSkinAssets();
+    const fx = ox + 4 + skin.fo[0], fy = oy + 4 + skin.fo[1];
+    if (tex.frame.complete) ctx.drawImage(tex.frame, fx, fy);
     // 按钮：悬停高亮 + 按住生效（MinimapFrame.Update/Click：mouseLeft 持续，×1.025/0.975 步进）
     this.minimapUiHover = false;
     const btns: Array<[HTMLImageElement, readonly [number, number], 'in' | 'out' | 'reset']> = [
-      [this.minimapBtnZoomIn, Renderer.MINIMAP_BTN_POS.zoomIn, 'in'],
-      [this.minimapBtnZoomOut, Renderer.MINIMAP_BTN_POS.zoomOut, 'out'],
-      [this.minimapBtnReset, Renderer.MINIMAP_BTN_POS.reset, 'reset'],
+      [tex.zoomIn, skin.zoomIn, 'in'],
+      [tex.zoomOut, skin.zoomOut, 'out'],
+      [tex.reset, skin.reset, 'reset'],
     ];
     for (const [tex, [bx, by], kind] of btns) {
       const cx = fx + bx + 9, cy = fy + by + 9; // 中心；命中盒 22×22（IsTouchingPoint 取 max(size,22)）
@@ -4402,6 +4483,71 @@ export class Renderer {
     const aspect = fw / fh;
     const h = size, w = size * aspect;
     ctx.drawImage(img, 0, 0, fw, fh, x - w / 2, y - h / 2, w, h);
+  }
+
+  /** 地图头像层(原版 Main.DrawMap 的 DrawNPCMapIcons3/2 :55546+/:55602+ +
+   *  MapPlayerRenderer.DrawPlayerHead :55158+):小地图与全屏地图共用。
+   *  - 玩家头:纸娃娃 0 帧顶部裁头(原版画的是角色头层含发型/头盔,MapPlayerRenderer)
+   *  - 城镇 NPC 头:NPC_Head_{TOWN_NPC_HEAD_INDEX},恒显(CanBeSeen_Townie=true :55756),
+   *    朝向翻转(direction>0 → FlipHorizontally :55555)
+   *  - Boss 头:NPC_Head_Boss_{BOSS_HEAD_INDEX},68/262 带 rotation(GetBossHeadRotation);
+   *    世吞 134 的多段质心平均(:55575-55589)未接,画头段位置
+   *  headScale:原版 = min(1,(scale×0.2×2+1)/3)(小地图 :55059)/ min(1,(scale×0.5+1)/3)
+   *  (全屏 :55140) ×UIScale;头贴图原生 24×22。mapX/mapY = 世界 px → 本图 px。
+   *  alpha 恒 1(原版 b=mapMinimapAlpha=255);迷雾不遮头像(townie 门恒真)。 */
+  private drawMapHeads(
+    ctx: CanvasRenderingContext2D, player: Player,
+    headScale: number,
+    mapX: (wx: number) => number, mapY: (wy: number) => number,
+    npcs: TownNPC[], enemies: Enemy[],
+  ) {
+    if (!this.atlas) return;
+    const drawHead = (img: CanvasImageSource | null, wx: number, wy: number,
+      flip: boolean, rotation = 0, extra = 0) => {
+      if (!img) return;
+      const x = mapX(wx), y = mapY(wy);
+      ctx.save();
+      ctx.translate(x, y);
+      if (rotation) ctx.rotate(rotation);
+      ctx.scale(headScale, headScale);
+      if (flip) ctx.scale(-1, 1);
+      ctx.imageSmoothingEnabled = false;
+      // 黑描边(原版 OutlinedTextureRenderer 近似:四向偏移暗影)
+      if (extra) {
+        ctx.globalAlpha = 0.35;
+        for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+          ctx.drawImage(img as CanvasImageSource, 0, 0, 24, 22, -12 + dx, -11 + dy, 24, 22);
+        }
+        ctx.globalAlpha = 1;
+      }
+      ctx.drawImage(img as CanvasImageSource, 0, 0, 24, 22, -12, -11, 24, 22);
+      ctx.restore();
+    };
+    // 玩家头(纸娃娃帧 0 顶部 24px 裁头;无外观回退头贴图 0)
+    if (player.appearance) {
+      const doll = compositePaperDoll(player.appearance, dollEquipFromInv(player.inv, this.atlas) as never);
+      if (doll) drawHead(doll as unknown as HTMLCanvasElement, player.cx, player.cy, player.facing < 0, 0, 1);
+      else return; // 纸娃娃未就绪:头像层整体等下一帧(原版头层贴图驱动同理)
+    } else {
+      drawHead(this.atlas.ensureVImage('vanilla/NPC_Head_0.png'), player.cx, player.cy, false, 0, 1);
+    }
+    // 城镇 NPC 头(恒显,不含 bound 态)
+    for (const n of npcs) {
+      if (n.dead || n.bound) continue;
+      const headIdx = TOWN_NPC_HEAD_INDEX[n.vanillaId];
+      if (headIdx === undefined) continue;
+      drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_${headIdx}.png`), n.cx, n.cy, n.facing > 0);
+    }
+    // Boss 头
+    for (const e of enemies) {
+      if (e.dead) continue;
+      const vid = e.vanillaId;
+      if (vid == null) continue;
+      const idx = BOSS_HEAD_INDEX[vid];
+      if (idx === undefined) continue;
+      const rot = bossHeadRotation(vid, (e as unknown as { rotation?: number }).rotation ?? 0);
+      drawHead(this.atlas.ensureVImage(`vanilla/NPC_Head_Boss_${idx}.png`), e.cx, e.cy, false, rot);
+    }
   }
 
   /** 全屏地图：半透明背景 + 完整世界图 + 边框 + 操作提示；支持拖动/缩放 */

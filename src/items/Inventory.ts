@@ -124,6 +124,10 @@ export class Inventory {
   loadouts: Array<{ armor: Array<InvItem | null>; dye: Array<InvItem | null> }>;
   /** 当前 Loadout 序号（0-2） */
   currentLoadout = 0;
+  /** 恶魔之心 3335(Player.cs:44575-44583)解锁第六配饰槽(armor[8];基座 5=3-7) */
+  extraAccessory = false;
+  /** 功能配饰槽上界(不含):基座 5,恶魔之心 6(UpdateEquipAccessories 语义) */
+  get accSlotMax(): number { return ACC_ARMOR_START + 5 + (this.extraAccessory ? 1 : 0); }
   /** 垃圾桶持久槽（Player.trashItem :1380——关背包保留、死亡清空 :53394） */
   trash: InvItem | null = null;
   selected = 0; // 快捷栏选中格
@@ -168,7 +172,7 @@ export class Inventory {
   /** 已装备的配饰列表（armor[3-9]，原版 Player.cs:36326 循环范围） */
   equippedAccessories(): number[] {
     const out: number[] = [];
-    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
+    for (let i = ACC_ARMOR_START; i < this.accSlotMax; i++) {
       const s = this.armor[i];
       if (s && ITEM_DEFS[s.id]?.accessory) out.push(s.id);
     }

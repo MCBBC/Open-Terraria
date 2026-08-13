@@ -15,29 +15,29 @@ const enum Feature { Plateau, Hill, Dale, Mountain, Valley }
 // GenerateWorldSurfaceOffset（1456 cs:293-401，普通模式 else 分支：
 // 条件 drunk/getGood/remix 为 false 时不掷判定骰）
 function genSurfaceOffset(rng: RNG, f: Feature): number {
-  // ★1456 概率表（TerrainPass.cs GenerateWorldSurfaceOffset 普通世界分支，2026-08-13
-  // 对 wld 审计修正——曾照 1405 抄成 7/4/2 分母且 Mountain/Valley 续走写反成 ==0）：
-  // Plateau Next(0,6)==0 续走 1/6；Hill/Dale Next(0,3)==0 续走 1/3；
-  // Mountain/Valley Next(0,3)!=0 续走 2/3（长爬升/长下切的幅度来源）
+  // ★ilspycmd 对真 exe 的权威反汇编（2026-08-13）：本函数有两个分支——
+  // drunk/getGood/remix 世界（且 Next(2)==0）才是 6/3/!=0 长爬升表；
+  // 普通世界走 else：Plateau Next(0,7)、Hill/Dale Next(0,4)、Mountain/Valley
+  // Next(0,2)==0（短爬升）。曾误把特殊分支当普通世界表"修复"过，已回滚。
   let n = 0;
   switch (f) {
     case Feature.Plateau:
-      while (rng.next() * 6 < 1) n += rng.int(-1, 1);
+      while (rng.next() * 7 < 1) n += rng.int(-1, 1);
       break;
     case Feature.Hill:
-      while (rng.next() * 3 < 1) n--;
+      while (rng.next() * 4 < 1) n--;
       while (rng.next() * 10 < 1) n++;
       break;
     case Feature.Dale:
-      while (rng.next() * 3 < 1) n++;
+      while (rng.next() * 4 < 1) n++;
       while (rng.next() * 10 < 1) n--;
       break;
     case Feature.Mountain:
-      while (rng.next() * 3 >= 1) n--;
+      while (rng.next() * 2 < 1) n--;
       while (rng.next() * 6 < 1) n++;
       break;
     case Feature.Valley:
-      while (rng.next() * 3 >= 1) n++;
+      while (rng.next() * 2 < 1) n++;
       while (rng.next() * 5 < 1) n--;
       break;
   }

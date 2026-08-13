@@ -8,6 +8,8 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 
 export class MagicProj extends Entity {
+  /** GetWeaponCrit 合并值（Game 注入；缺省 4% 基础） */
+  critChance = 0.04;
   w = 6; h = 6;
   vx: number;
   vy: number;
@@ -52,7 +54,8 @@ export class MagicProj extends Entity {
       if (e.dead) continue;
       if (this.x < e.x + e.w && this.x + this.w > e.x && this.y < e.y + e.h && this.y + this.h > e.y) {
         playEnemyHitSound(game, e);
-        e.hurt(this.damage, Math.sign(this.vx) * 2, 0, game);
+        const crit = Math.random() < this.critChance; // 暴击链（P:52512——曾恒 false）
+        e.hurt(crit ? this.damage * 2 : this.damage, Math.sign(this.vx) * 2, 0, game);
         game.addDamageNumber(this.x, this.y, this.damage, false, '#C080FF');
         this.dead = true;
         return;

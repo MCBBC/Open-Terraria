@@ -2,6 +2,7 @@
 // main.ts 只做启动装配；本模块持有 Game 生命周期与 VUI/背景的 rAF 驱动。
 import { Game } from './core/Game';
 import { UI } from './ui/UI';
+import { MobileControls, isTouchDevice, tryFullscreenLandscape } from './ui/MobileControls';
 import { AudioSystem } from './core/Audio';
 import type { SpriteAtlas } from './assets/SpriteAtlas';
 import { loadSave, loadSaveData } from './save/SaveFile';
@@ -51,6 +52,7 @@ export interface FlowHandle {
 
 export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI, audio: AudioSystem): FlowHandle {
   let game: Game | null = null;
+  let mobile: MobileControls | null = null;
   (window as unknown as { __swAudio?: AudioSystem }).__swAudio = audio; // 探针调试桥
   let playStart = 0;
   let menuBg: MenuBackground | null = null;
@@ -92,6 +94,13 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   function enterGame(g: Game) {
     game = g;
     (window as unknown as { __swGame: Game }).__swGame = g;
+    // 移动端：虚拟控件层（触屏设备启用；桌面零渲染零影响）——在世界触摸的
+    // 用户手势内尝试全屏+横屏锁定（ⓞ 进世界点击即手势；失败静默，⛶ 按钮兜底）
+    if (isTouchDevice()) {
+      mobile?.destroy();
+      mobile = new MobileControls(g, ui.root);
+      void tryFullscreenLandscape();
+    }
     // HMR 双实例检测（F5 调试报告 instance 段）：每次挂载计数 +1，>1 即模块分叉
     (window as unknown as { __swInstanceCount?: number }).__swInstanceCount =
       ((window as unknown as { __swInstanceCount?: number }).__swInstanceCount ?? 0) + 1;
@@ -189,6 +198,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     g.player.x = player.x;
     g.player.y = player.y;
     // 上限扩容进度（水晶之心/生命果/魔力水晶；旧档缺省 100/20/20）
+    // 永久升级族（旧档缺省全 false）
+    const pu = player.permanentUpgrades;
+    if (pu) {
+      if (pu.extraAccessory !== undefined) g.player.inv.extraAccessory = pu.extraAccessory;
+      if (pu.usedAegisCrystal !== undefined) g.player.usedAegisCrystal = pu.usedAegisCrystal;
+      if (pu.usedAegisFruit !== undefined) g.player.usedAegisFruit = pu.usedAegisFruit;
+      if (pu.usedArcaneCrystal !== undefined) g.player.usedArcaneCrystal = pu.usedArcaneCrystal;
+      if (pu.usedGummyWorm !== undefined) g.player.usedGummyWorm = pu.usedGummyWorm;
+      if (pu.usedAmbrosia !== undefined) g.player.usedAmbrosia = pu.usedAmbrosia;
+    }
     if (player.baseMaxHp !== undefined) g.player.baseMaxHp = player.baseMaxHp;
     if (player.baseMaxMana !== undefined) g.player.baseMaxMana = player.baseMaxMana;
     if (player.mana !== undefined) g.player.mana = player.mana;
@@ -624,6 +643,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   }
 
   function quitToMenu() {
+    mobile?.destroy();
+    mobile = null;
     game?.destroy();
     game = null;
     currentWorld = null;

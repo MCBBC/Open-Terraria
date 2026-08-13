@@ -50,6 +50,16 @@ export class Player extends Entity {
   /** 奥术水晶（item 5339 使用后永久旗标，Player.cs:44780-44783）——本仓 5339 尚无使用
    *  链路，恒 false；接使用系统后置 true 即自动进回复模型（:19242/:19259） */
   usedArcaneCrystal = false;
+  /** 神盾果 5338(:44776)→ statDefense += 4(UpdatePermanentBoosters :12447) */
+  usedAegisFruit = false;
+  /** 神盾水晶 5337(:44769)→ lifeRegenTime +0.2/tick 爬坡加速(:18931) */
+  usedAegisCrystal = false;
+  /** 软糖虫 5341(:44790)→ fishingSkill += 3(:12451) */
+  usedGummyWorm = false;
+  /** 仙馔蜜酒 5342(:44796)→ pickSpeed/tileSpeed/wallSpeed ±0.05(:12455) */
+  usedAmbrosia = false;
+  /** 混乱之杖冷却(ChaosState debuff 88 近似——buff 本体未实装,:44865 门) */
+  chaosStateT = 0;
   /** 魔力蓄能（Player.manaRegenCount :1824，UpdateManaRegen :19274 累积 ≥120 +1 魔） */
   manaRegenCount = 0;
   /** 用魔惩罚期（Player.manaRegenDelay :1826，float）：>0 时每帧产额 0（:19270-19271） */
@@ -199,7 +209,7 @@ export class Player extends Entity {
   /** Lucky Horseshoe 158（本地 accessory 枚举退役,vid 判定） */
   get hasHorseshoe(): boolean {
     const want = VI_ID(158);
-    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) { // armor[3-9] 配饰槽（原版 Player.cs:36326）
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) { // armor[3-7 基座+恶魔之心 8(原版 Player.cs:36326)
       const s = this.inv.armor[i];
       if (s && s.id === want) return true;
     }
@@ -208,7 +218,7 @@ export class Player extends Entity {
   /** Feral Claws 211 */
   get hasFeralClaws(): boolean {
     const want = VI_ID(211);
-    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
       const s = this.inv.armor[i];
       if (s && s.id === want) return true;
     }
@@ -217,6 +227,7 @@ export class Player extends Entity {
   /** 防御 = 基础(0) + 盔甲/配饰（含 vi_ 表防御+accfx def+词缀 62-65）+ 铁皮 Buff(+6)（时装不计） */
   get defense(): number {
     let d = this.buffs.defenseBonus + this.equipStats.def;
+    if (this.usedAegisFruit) d += 4;   // UpdatePermanentBoosters :12447-12449
     for (const id of this.inv.equippedArmor()) {
       if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
     }
@@ -236,6 +247,7 @@ export class Player extends Entity {
     extraFall: number; lavaMax: number; armorPen: number;
     rocketBoots: number; autoJump: boolean; fireWalk: boolean;
     noKnockback: boolean; noFallDmg: boolean; desertBoots: boolean;
+    frostBurn: boolean;   // 冰霜盔甲引擎（StatusNPC :93712:近/远程命中 → Frostburn2）
     waterWalk: boolean; jumpBoost: boolean; panic: boolean; starCloak: boolean;
     jumpOpts: string[];
     wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null;
@@ -287,6 +299,7 @@ export class Player extends Entity {
     let manaRegenBonus = 0, manaRegenDelayBonus = 0;
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
     let autoJump = false, fireWalk = false, noKnockback = false, noFallDmg = false;
+    let frostBurn = false; // 冰霜盔甲 46 套装引擎
     let desertBoots = false, waterWalk = false, jumpBoost = false, panic = false, starCloak = false;
     const jumpSet = new Set<string>();
     let wing: { logic: number; time: number; accSpeed: number; accelMult: number; hover: boolean } | null = null;
@@ -307,7 +320,7 @@ export class Player extends Entity {
     let manaCostMul = 1;
     let divingHelm = false, merman = false;
     let arcticDivingGear = false, jellyfishGlow = false;
-    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) {
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) {
       const s = this.inv.armor[i];
       if (!s) continue;
       const fx = accFxOfInternal(s.id);
@@ -449,7 +462,7 @@ export class Player extends Entity {
     nebulaSet = hVid === 2760 && bVid === 2761 && lVid === 2762;
     beetleOff = hVid === 2199 && bVid === 2200 && lVid === 2202; // 进攻甲
     beetleDef = hVid === 2199 && bVid === 2201 && lVid === 2202; // 防御甲（壳：beetleEndurance 15%/球）
-    for (let i = ACC_ARMOR_START; i < ACC_ARMOR_START + 7; i++) sumFx(this.inv.armor[i]);
+    for (let i = ACC_ARMOR_START; i < this.inv.accSlotMax; i++) sumFx(this.inv.armor[i]);
     // 盔甲套装加成（vanillaArmorSets.ts：槽序号三键匹配）
     const sb = activeArmorSetBonus(this);
     if (sb) {
@@ -465,6 +478,7 @@ export class Player extends Entity {
       if (sb.critMagic) critMagic += sb.critMagic;
       if (sb.noKnockback) noKnockback = true;
       if (sb.fireWalk) fireWalk = true;
+      if (sb.frostBurn) frostBurn = true; // 冰霜套引擎(:93712)
       if (sb.ammoCost80) ammoSave = true;
       if (sb.manaCostMul !== undefined) manaCostMul = sb.manaCostMul;
     }
@@ -496,6 +510,7 @@ export class Player extends Entity {
       accRunSpeed: runSpeed,   // 靴族 accRunSpeed（裸 0=未装备 → 消费侧取基准 3）
       extraFall, lavaMax, armorPen, rocketBoots,
       autoJump, fireWalk, noKnockback, noFallDmg, desertBoots,
+      frostBurn,
       waterWalk, jumpBoost, panic, starCloak,
       jumpOpts,
       wing, dash, blackBelt, bees, carpet,
@@ -672,6 +687,7 @@ export class Player extends Entity {
     this.lastStore = world.store;   // dashWallAhead 探测缓存（本 tick 内有效）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
+    if (this.chaosStateT > 0) this.chaosStateT--;
 
     // 调试无敌（F2）：每 tick 血蓝回满——兜住 DoT/溺水/摔落等直改 hp 的路径
     // （战斗伤害已由 damage() 早退拦截）；同时保证不会走到下方 hp<=0 死亡结算
@@ -709,7 +725,8 @@ export class Player extends Entity {
     // 爬坡计时 lifeRegenTime：基础 +1/tick（:18930）、蜂蜜 +2（:18954）→ 蜂蜜态 3 倍速
     // 触达首档阈值；DoT/流血同样清零（:18781+/:19000）——DoT 期间自然回血重启爬坡
     this.sinceHurt++;
-    this.lifeRegenTime += 1 + (this.buffs.has(BuffType.Honey) ? 2 : 0);
+    this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
+      * (this.usedAegisCrystal ? 1.2 : 1);   // usedAegisCrystal 爬坡 +0.2/tick(:18931)近似
     if (buffHeal < 0 || this.buffs.has(BuffType.Bleeding) || this.buffs.obstructed) this.lifeRegenTime = 0;
     if (this.lifeRegenTime >= 300 && this.hp > 0 && this.hp < this.maxHp
       && !this.buffs.has(BuffType.Bleeding) && !this.buffs.obstructed) {
@@ -1431,6 +1448,19 @@ export class Player extends Entity {
 
     this.dropThrough = !!this.inputDown;
     this.stepUp = true; // 原版玩家走 Collision.StepUp（Player.cs:23258/:27753）
+    // 钩爪牵引（最小实现）：朝锚点恒速覆盖速度——在 moveAndCollide 前生效；
+    // 抵达锚点 20px 内 / 按跳跃即释放（原版 GrappleMovement 相邻判定近似）
+    if (this.grappleTarget) {
+      const gdx = this.grappleTarget.x - this.cx;
+      const gdy = this.grappleTarget.y - this.cy;
+      const gd = Math.hypot(gdx, gdy);
+      if (gd < 20 || this.inputJump) {
+        this.grappleTarget = null;
+      } else {
+        this.vx = (gdx / gd) * 13.5;
+        this.vy = (gdy / gd) * 13.5;
+      }
+    }
     // 落地冲击速度留存（原版 TryLandingOnDetonator Player.cs:34368 的 velocity.Y>=3 门；
     // 碰撞前捕获——碰撞会清零 vy。Game 侧消费：落在起爆器 411 上触发电路）
     const impactVy = this.vy;
@@ -1729,6 +1759,9 @@ export class Player extends Entity {
   // 输入状态由 Game 每帧写入
   inputX = 0;
   inputJump = false;
+  /** 钩爪锚点（GrappleProj 锚定段写入；移动积分前朝锚点恒速 13.5 牵引——
+   *  最小实现，全量 AI_007 移植后替换；null = 无牵引） */
+  grappleTarget: { x: number; y: number } | null = null;
   /** 多段跳剩余段（原版 RefreshDoubleJumps：落地时重置为 equipStats.jumpOpts 拷贝） */
   extraJumps: string[] = [];
   extraJumpCd = 0;

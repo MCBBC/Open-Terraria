@@ -3,7 +3,7 @@
 // 原版贴图 Projectile_N.png；命中敌人伤害/击退/暴击（穿透>1 时同敌免疫防连击）；
 // 命中 tileCut 砍草/碎罐（Projectile.CutTiles）；命中实心块 1/3 概率回收掉落。
 import { Entity } from './Entity';
-import { applyProjStatus } from './projStatus';
+import { applyProjStatus, applyFrostBurn } from './projStatus';
 import { hitCritters, hitPlayer, hitTownNpcs, playEnemyHitSound, statusPlayer, tryReflectProjectile } from './projTargets';
 import { resolveWhipTagHit, SUMMON_TAG_MUL } from './WhipTag';
 import { TILE } from '../core/constants';
@@ -122,6 +122,8 @@ export class Arrow extends Entity {
   nebulaCb: (() => void) | null = null;
   /** aiStyle 14 弹跳：撞块反弹不消亡 */
   bounce: boolean;
+  /** 冰霜盔甲引擎资格（ranged 弹 true;魔法/召唤弹 false——原版 melee||ranged 门） */
+  frostEligible = false;
   /** aiStyle 14 荆棘球档（277）：撞块按 Projectile.cs:18306-18314 反弹 */
   thornBounce: boolean;
   /** 延迟重力（275/276）：age 超过此值才施加 grav；-1=不延迟 */
@@ -310,6 +312,11 @@ export class Arrow extends Entity {
         }
         // 命中 debuff（StatusNPC:10555 表驱动——火枪弹 2 33% OnFire 180t 等,按型号掷骰）
         applyProjStatus(this.projId, e as unknown as Record<string, number>);
+        // 冰霜盔甲引擎(ranged 门,:93712;魔法/召唤弹 frostEligible=false)
+        if (this.frostEligible) {
+          applyFrostBurn((game.player as unknown as { equipStats: { frostBurn: boolean } }).equipStats.frostBurn,
+            e as unknown as Record<string, number>);
+        }
         if (this.nebulaCb) this.nebulaCb(); // 星云 booster（:12892-12905，伤害>0 门已过）
         playEnemyHitSound(game, e);
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen);

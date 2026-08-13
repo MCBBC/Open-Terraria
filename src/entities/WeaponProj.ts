@@ -12,7 +12,7 @@ import type { Renderer } from '../render/Renderer';
 import type { Camera } from '../render/Camera';
 import { projSprite } from './Arrow';
 import { hitCritters, hitTownNpcs, playEnemyHitSound, tryReflectProjectile } from './projTargets';
-import { applyProjStatus, applyMeleeImbue } from './projStatus';
+import { applyProjStatus, applyMeleeImbue, applyFrostBurn } from './projStatus';
 import { projectileData } from '../data/vanillaProjectiles';
 import { canHit } from '../physics/LineOfSight';
 
@@ -106,10 +106,12 @@ function hitEnemies(
     // 武器浸剂（StatusNPC:10559 门 (melee||whip)&&meleeEnchant>0——近战四族命中施加,
     // 时长 Player.cs:6141-6171;挥砍侧同表在 Game 挥击结算）
     if (me.meleeProj) {
-      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean } };
+      const pl = game.player as unknown as { buffs: { has: (b: never) => boolean }; equipStats: { frostBurn: boolean } };
       applyMeleeImbue(pl.buffs, e as unknown as Record<string, number>,
         () => game.spawnParticles(e.x + e.w / 2, e.y + e.h / 2,
           ['#FF6090', '#60FF90', '#6090FF', '#FFD040'][Math.floor(Math.random() * 4)], 6, 2.4, { life: 40, damp: 0.96 }));
+      // 冰霜盔甲引擎(melee 门,:93712)
+      applyFrostBurn(pl.equipStats.frostBurn, e as unknown as Record<string, number>);
     }
     game.addDamageNumber(self.x + self.w / 2, self.y, Math.round(dmg), crit, crit ? '#FFD040' : '#FF7060');
     // 配重球（counterWeight 装备时悠悠球命中落配重：YoyoBag 语义近似——
@@ -134,8 +136,15 @@ const BOOMERANG_RETURN: Record<number, [number, number]> = {
 const PHASEBLADE_PROJ = new Set([1059, 1060, 1061, 1062, 1063, 1064, 1065, 1066, 1067,
   1068, 1069, 1070, 1071, 1072, 1074, 1075, 1076, 1101, 1102]);
 
+/** 回旋镖命中盒型号表（SetDefaults aiStyle=3 全 20 型提取：type→size） */
+const BOOMERANG_SIZE: Record<number, number> = {
+  6: 22, 19: 22, 33: 38, 52: 22, 106: 32, 113: 22, 182: 30, 272: 32,
+  301: 38, 320: 34, 333: 38, 383: 34, 866: 30, 867: 22, 902: 20, 1000: 22,
+  1052: 22, 1101: 38, 1102: 46, 1074: 46,
+};
+
 export class Boomerang extends Entity {
-  w = 22; h = 22; // 原版 SetDefaults（type 6：22×22）
+  w = 22; h = 22; // 默认（型号表覆盖）
   damage: number;
   knockback: number;
   projId: number;
@@ -166,6 +175,8 @@ export class Boomerang extends Entity {
     this.damage = damage;
     this.knockback = knockback;
     this.projId = projId;
+    const sz = BOOMERANG_SIZE[projId]; // ⑬-2 命中盒按型号（曾统一 22×22）
+    if (sz) { this.w = sz; this.h = sz; }
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -343,7 +354,7 @@ export class SpearProj extends Entity {
     const n = Math.hypot(dirX, dirY) || 1;
     this.dx = dirX / n;
     this.dy = dirY / n;
-    this.spd = spd;
+    this.spd = spd || 2.4; // 兜底:提取表 shootSpeed 缺失(七金属短剑模板坑)时按短剑族 2.1-2.4 档
     this.dur = dur;
     this.damage = damage;
     this.knockback = knockback;
