@@ -16,6 +16,8 @@ import { emptyInfoAccGates, refreshInfoAccsFromItemType, type InfoAccGates } fro
 import { VI_ID } from '../data/itemKeys';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { wingStatOf } from '../data/vanillaWingStats';
+import { stepWingFrame, FLAP_HOVER_SET } from '../data/vanillaWingVisuals';
+import type { WingFrameState } from '../data/vanillaWingVisuals';
 import { accFxOfInternal } from '../data/vanillaAccFx';
 import { ARMOR_SET_BONUSES } from '../data/vanillaArmorSets';
 import { DD2_PIECE_FX } from '../data/vanillaArmorSets';
@@ -901,6 +903,7 @@ export class Player extends Entity {
     this.prevInputJump = this.inputJump;   // 坐骑 releaseJump 边沿（Mount.tryStartHover 消费）
     if (this.iframes > 0) this.iframes--;
     if (this.useTime > 0) this.useTime--;
+    this.miscCounter++;
 
     // 调试无敌（F2）：每 tick 血蓝回满——兜住 DoT/溺水/摔落等直改 hp 的路径
     // （战斗伤害已由 damage() 早退拦截）；同时保证不会走到下方 hp<=0 死亡结算
@@ -948,6 +951,7 @@ export class Player extends Entity {
       if (this.solarCounter >= 180 && this.solarShields < 3) {
         this.solarShields++;
         this.solarCounter = 0;
+        this.buffs.apply(170 + this.solarShields - 1 as never, 5);  // buff 170-172 层视觉(:16240)
       }
     } else { this.solarShields = 0; this.solarCounter = 0; }
     this.lifeRegenTime += (1 + (this.buffs.has(BuffType.Honey) ? 2 : 0))
@@ -1583,11 +1587,13 @@ export class Player extends Entity {
       // 坐骑禁翼禁靴（Player.cs:26316-26322：mount.Active → rocketBoots=0、
       // CanUseWings 假族 wings=0——本仓坐骑恒属禁翼族）
       const wings = eq.wing && !mnt2 ? eq.wing.logic : 0;   // wingsLogic = armor.wingSlot（:12584）
+      const wingsLogic = eq.wing?.logic ?? 0;  // 不随坐骑清零（flag19 hover 档 :26477 用 wingsLogic）
       const hoverDown = this.inputDown;            // TryingToHoverDown（保持态近似省略）
       const JS = PLAYER_JUMP_SPEED;                // jumpSpeed 基准（原版 5.301 系按本地尺度）
       // 落地重置（原版 :26169 地面块 + :26490 vy==0&&releaseJump 语义并入）
       // 松跳重触发（原版 :20765 松跳段独立于地面状态——rocketRelease/wingRelease）
       if (!this.inputJump) { this.rocketRelease = true; this.wingRelease = true; }
+      let flying = false;   // flag19（空中段赋值；地面恒 false）
       if (this.onGround) {
         this.wingTime = eq.wing ? eq.wing.time : 0;   // :26169 = wingTimeMax（FlyTime）
         this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;  // :2612 + :26436（无靴恒 0）
@@ -1601,26 +1607,15 @@ export class Player extends Entity {
         if (this.vy > -JS && this.vy !== 0) this.canRocket = true;
         // vy==0 恢复 rocketTime（:26540：velocity.Y==0 即回满，含撞顶悬停等非落地场景）
         if (this.vy === 0) this.rocketTime = eq.rocketBoots > 0 ? 7 : 0;
-        // flag19 = 翅膀飞行中（:26500-26510：wings>0 && controlJump && wingTime>0 &&
-        //   jump==0 && vy≠0；hover 族 + ↓+跳 也算 :26505）
-        const flying =
+        // flag19 = 翅膀飞行中（:26469-26483：wings>0 && controlJump && wingTime>0 &&
+        //   jump==0 && vy≠0；hover 档固定集 {22,28,30,32,29,33,35,37,45} + ↓+跳 :26477）
+        flying =
           (wings > 0 && this.inputJump && this.wingTime > 0 && this.jumpHold === 0 && this.vy !== 0)
-          || (eq.wing !== null && eq.wing.hover && this.inputJump && hoverDown && this.wingTime > 0);
+          || (FLAP_HOVER_SET.has(wingsLogic) && this.inputJump && hoverDown && this.wingTime > 0);
         if (flying) {
           this.wingMovement(wings, hoverDown, JS);
-          // WingFrame 通用 flap（:29425+ 各族主干）：6t/帧循环 1→2→3→2
-          this.wingFrameCounter++;
-          const beat = 6;
-          const phase = Math.floor(this.wingFrameCounter / beat) % 4;
-          this.wingFrame = [1, 2, 3, 2][phase];
-        } else if (this.vy !== 0 && this.inputJump) {
-          this.wingFrame = 2;      // 滑翔固定帧（各族主干 else-if 段）
-          this.wingFrameCounter = 0;
-        } else if (this.vy !== 0) {
-          this.wingFrame = 2;      // 空中下落张翼
-        } else {
-          this.wingFrame = 0;      // 地面收起
-          this.wingFrameCounter = 0;
+          // ★ WingFrame 帧状态机已移至 if/else 之后每 tick 执行（原版 :26498
+          //   无条件调 WingFrame(flag19)——33/38 落地不归零等语义依赖此执行位）
         }
         // 翅膀+火箭靴动态合并（:26523-26531）：空中且 rocketTime 有余 →
         // 剩余脉冲×6 并入 wingTime（上限 = wingTimeMax + 本次转换量），rocketTime 清零
@@ -1669,6 +1664,32 @@ export class Player extends Entity {
           this.vy *= wings === 45 ? 0.8 : 0.9;
           if (this.vy > -2 && this.vy < 1) this.vy = 1e-5;
         }
+      }
+      // ---- 翅膀帧状态机（Player.cs:26497-26501 每 tick 调 WingFrame(flag19) +
+      //      :26874-27010 滑翔帧覆盖，两段顺序执行；地面也跑——33/38 落地保持
+      //      帧 2、generic 地面归 0 均在此位生效）----
+      if (wingsLogic > 0) {
+        const glide = !flying && this.inputJump && this.vy > 0;   // :26718（downDash 未建模恒 false）
+        this.wingFrameScratch.frame = this.wingFrame;
+        this.wingFrameScratch.counter = this.wingFrameCounter;
+        stepWingFrame(wingsLogic, this.wingFrameScratch, {
+          flap: flying,
+          jump: this.jumpHold > 0,
+          vy: this.vy,
+          controlJump: this.inputJump,
+          controlLR: this.inputX !== 0,
+          hoverDown, hoverUp: this.inputUp,
+          wingTime: this.wingTime,
+          glide,
+          downDash: false,          // isPerformingJump_DownDash 未建模
+          waterFloat: this.inWater && !!eq.flipper,   // ShouldFloatInWater && wet
+          // ShouldDrawWingsThatAreAlwaysAnimated :30271（坐骑恒禁翼 → !ridingMount）
+          shouldDraw: this.vy !== 0 && !this.ridingMount
+            && !this.grappleProjs.some((g) => g.latched)
+            && !(this.inWater && !!eq.flipper),
+        });
+        this.wingFrame = this.wingFrameScratch.frame;
+        this.wingFrameCounter = this.wingFrameScratch.counter;
       }
       // ---- 冲刺 1:1（DashMovement :20769-21265 + DoCommonDashHandle :21267-21323）----
       // 1=忍者足具/水晶刺客（纯位移） 2=克苏鲁护盾（冲撞 30+反弹）。
@@ -2559,9 +2580,13 @@ export class Player extends Entity {
   wingRelease = true;
   /** 飞毯触发门（CarpetMovement :21575：起跳后置 true，触发一次即 false） */
   canCarpet = true;
-  /** 翅膀动画帧（WingFrame :29002：0 收起 / flap 循环 1→2→3→2 / 滑翔 2）+ 拍速计数 */
+  /** 翅膀动画帧（WingFrame :29002-30045 逐款状态机；值域随款 0-13）+ 拍速计数 */
   wingFrame = 0;
   private wingFrameCounter = 0;
+  /** 帧状态机 scratch（stepWingFrame 纯函数传参用，避免每 tick 分配） */
+  private wingFrameScratch: WingFrameState = { frame: 0, counter: 0 };
+  /** Main.miscCounter 近似（每 tick +1；翅膀 28 绘制帧 miscCounter/5%4 消费） */
+  miscCounter = 0;
 
   /** 飞毯滑翔剩余 tick（CarpetMovement carpetTime=300） */
   carpetTime = 0;

@@ -1263,10 +1263,10 @@ function placeEnchantedSwordShrine(
   // ⑩ shapeData.Subtract(shapeData2, point, point2)(cs:77)——土丘格从洞穴形状剔除
   mound.each((dx, dy) => cave.remove(dx + (point2X - pointX), dy + (point2Y - pointY)));
   // ⑪ InnerOutline 铺草(cs:78):8 邻域任一不在形状内 → 草(ModShapes.cs:88-117)
+  const OUTLINE_OFFSETS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]] as const;
   const outline: Array<[number, number]> = [];
   cave.each((dx, dy) => {
-    const around = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
-    for (const [ax, ay] of around) {
+    for (const [ax, ay] of OUTLINE_OFFSETS) {
       if (!cave.has(dx + ax, dy + ay)) { outline.push([dx, dy]); return; }
     }
   });

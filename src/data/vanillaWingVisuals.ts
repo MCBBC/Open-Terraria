@@ -1,0 +1,381 @@
+// 翅膀视觉层 1:1（PlayerDrawLayers.cs DrawPlayer_09_Wings :655-1040 + Player.cs
+// WingFrame :29002-30045 + 滑翔帧段 Player.cs:26874-27010）。
+//
+// ===== 绘制（DrawPlayer_09_Wings）=====
+// 基础锚 vector(:662-664) = Position + (width/2, height − bodyFrame.Height/2) + (0,7)
+//   —— bodyFrame.Height 恒 56 → 相对脚底中心局部 Y = −21（与碰撞盒高无关）。
+// generic 尾段(:935-1000) num14=4 帧切分；偏移 vector18 = vector + (num13−9, num12+2)·directions
+//   —— directions=(direction, gravDir)，本仓镜像空间里 X 偏移局部值 = (num13−9)、
+//   Y 偏移 = (num12+2)，故锚点局部坐标 = (num13−9, num12−19)。
+// 逐款特殊分支：22(:671)/28(:705)/45(:726)/34(:752)/51(:779)/47(:802)/49(:826)/
+//   48(:841)/40(:854)/39(:898)/50(:923) 各自锚点与帧数。
+// ShouldDrawWingsThatAreAlwaysAnimated 门（Player.cs:30271：vy≠0 && 未钩爪 &&
+//   非水中漂浮 && mount.CanUseWings）——22/28/34/39/44/45/48 绘制受此门
+//   （仅空中出现）；generic 与 4/12/24/30/51/47/49/50/40/43/44 无门（地面也画收拢帧）。
+//
+// ===== 帧状态机（WingFrame(wingFlap)）=====
+// wingFlap=flag19（Player.cs:26469-26483）：wings>0 && controlJump && wingTime>0 &&
+//   jump==0 && vy≠0；或 hover 集合 {22,28,30,32,29,33,35,37,45} && controlJump &&
+//   TryingToHoverDown && wingTime>0；下冲(flag20)强制关。downDash 时关。
+// 逐款分支见 stepWingFrame 内 switch（源码行号逐段标）。
+// 滑翔帧段（Player.cs:26874-27010，WingFrame 之后执行）：!flag19 && wingsLogic>0 &&
+//   controlJump && vy>0 && !downDash 时按款覆盖帧（默认 2；30/34/39 恒循环；
+//   48→3、40→0、44→2、26→2、37→2、43→1、12→3；22/28/45/51/47/49/50/24 除外不覆盖）。
+//
+// ===== 偏差登记 =====
+// ① 47/49 锚点的 OffsetsPlayerHeadgear[bodyFrameRow] 按站立行 0 取值（(0,2)→
+//   局部 −20），逐行 ±2px 偏差未建模（Main.cs:504 表仅 0/2 两值）；
+// ② 发光叠画未移植：22 火焰(ItemFlame[1866]×7)/23 Flames[8]/27 GlowMask[92]/
+//   43 GlowMask[272]×2/44 彩虹 RenderTarget/47 GlowMask[366]/50 免疫帧双画/
+//   28 Extra[38] 叠画/40 的 14 帧程序化摆动（Betsy 翼特殊绘制，按 generic 单帧近似）；
+// ③ 逐款翅膀尘（WingAirVisuals/33/38/26/37 尘）未接（无视觉实体外的粒子语义差异）；
+// ④ tryKeepingHoveringUp/Down 锁存未建模（TryingToHover 用 controlUp/Down 近似，
+//   与既有 wingMovement 的 hoverDown 近似一致）。
+export interface WingDraw {
+  /** 绘制切帧数（num14 / Frame(1,N) 的 N；28 用 miscCounter 动画帧率恒 4） */
+  frames: number;
+  /** 局部锚点（脚底中心原点、镜像空间；X 已含 (num13−9)，Y = num12−19 基底 −21） */
+  anchor: [number, number];
+  /** ShouldDrawWingsThatAreAlwaysAnimated 门（仅空中绘制） */
+  alwaysAir?: boolean;
+  /** 帧来源：wingFrame（默认）／miscCounter/5%4（28 独立动画） */
+  drawFrameFrom?: 'miscCounter';
+}
+
+const GENERIC_ANCHOR: [number, number] = [-9, -19];
+
+/** 绘制表（slot → 配置）。未列款 = generic 4 帧 + 默认锚点。 */
+const DRAW_TABLE: Record<number, WingDraw> = {
+  // generic 偏移微调（PlayerDrawLayers.cs:935-957）
+  5:  { frames: 4, anchor: [-5, -23] },   // num13=4, num12=-4
+  12: { frames: 4, anchor: [-10, -20] },  // num13=-1, num12=-1
+  27: { frames: 4, anchor: [-6, -19] },   // num13=3
+  41: { frames: 4, anchor: [-10, -19] },  // num13=-1
+  43: { frames: 7, anchor: [-14, -26] },  // num13=-5, num12=-7, num14=7
+  44: { frames: 7, anchor: GENERIC_ANCHOR }, // num14=7（偏移默认）
+  // 特殊绘制分支
+  22: { frames: 7, anchor: [-9, 5],   alwaysAir: true },   // vector3=(−9,+26)（:674）
+  28: { frames: 4, anchor: [0, -2],   alwaysAir: true, drawFrameFrom: 'miscCounter' }, // (0,+19)（:710）
+  34: { frames: 6, anchor: [-4, -21], alwaysAir: true },   // Size/2−4·dir（:757）
+  39: { frames: 6, anchor: [-6, -28], alwaysAir: true },   // (−6,−7)（:901）
+  45: { frames: 6, anchor: [0, 1],    alwaysAir: true },   // (0,+22)（:732）
+  48: { frames: 8, anchor: [0, -21],  alwaysAir: true },   // Size/2+(4,0)−4·dir（:845）
+  51: { frames: 8, anchor: [0, -15] },                     // (0,+6)（:786）
+  47: { frames: 11, anchor: [-3, -20] },                   // headgear 站立行近似（:810）
+  49: { frames: 11, anchor: [-3, -20] },                   // 同 47（:831）
+  50: { frames: 11, anchor: [-4, -19] },                   // vector−4·dir（:926）
+  40: { frames: 14, anchor: [-4, -21] },                   // (−4,0)（:866）程序化绘制偏差→单帧
+};
+
+export function wingDrawOf(slot: number): WingDraw {
+  return DRAW_TABLE[slot] ?? { frames: 4, anchor: GENERIC_ANCHOR };
+}
+
+// ===================== 帧状态机（Player.cs WingFrame :29002-30045） =====================
+/** 可变帧状态（Player.wingFrame / wingFrameCounter） */
+export interface WingFrameState {
+  frame: number;
+  counter: number;
+}
+
+/** 帧推进输入（Player 侧逐字段对齐原版同名字段） */
+export interface WingFrameInput {
+  /** flag19（翅膀飞行推进中） */
+  flap: boolean;
+  /** jump > 0（多段跳余量，与 flap 同触发动画） */
+  jump: boolean;
+  vy: number;
+  controlJump: boolean;
+  /** controlLeft || controlRight（22/47/49/50 分支用） */
+  controlLR: boolean;
+  /** TryingToHoverDown 近似（controlDown） */
+  hoverDown: boolean;
+  /** TryingToHoverUp 近似（controlUp） */
+  hoverUp: boolean;
+  wingTime: number;
+  /** 滑翔帧段条件（!flap && wings>0 && controlJump && vy>0 && !downDash） */
+  glide: boolean;
+  /** isPerformingJump_DownDash */
+  downDash: boolean;
+  /** ShouldFloatInWater && wet（脚蹼水中漂浮；43/49 归零门 + 绘制门） */
+  waterFloat: boolean;
+  /** ShouldDrawWingsThatAreAlwaysAnimated（Player.cs:30271：vy≠0 && 未钩爪 &&
+   *  !waterFloat && mount.CanUseWings）——28/34/39/44/45 分支门，false 落 generic 尾段 */
+  shouldDraw: boolean;
+}
+
+/** GetWingsFunctionalityForVisuals（Player.cs:28994-28999）的 canHover 固定集 */
+export const VISUAL_HOVER_SET = new Set([22, 30, 31, 28, 33, 35, 44, 45]);
+/** flag19 的 hover 档集合（Player.cs:26477：与 canHover 集 *不同*，勿混用） */
+export const FLAP_HOVER_SET = new Set([22, 28, 30, 32, 29, 33, 35, 37, 45]);
+
+const clampFrame = (f: number, max: number) => (f >= 0 && f < max ? f : 0);
+
+/**
+ * 每帧推进翅膀帧（先 WingFrame(flap) 再滑翔覆盖——与原版两段执行序一致）。
+ * 纯函数：状态经 state 引用修改。
+ */
+export function stepWingFrame(slot: number, st: WingFrameState, i: WingFrameInput): void {
+  // ---- WingFrame 主干（:29002+）----
+  switch (slot) {
+    case 4: {
+      // :29014-29086：flap 循环 0→1→2（5t/帧，counter>4 推进）；否则帧 3（张翼）
+      if (i.flap || i.jump) {
+        st.counter++;
+        if (st.counter > 4) {
+          st.frame = st.frame >= 2 ? 0 : st.frame + 1;
+          st.counter = 0;
+        }
+      } else if (!i.controlJump || i.vy === 0) {
+        st.frame = 3;
+      }
+      break;
+    }
+    case 28: {
+      // :29066-29087：门内仅发光（未接）后 return——帧交由绘制端 miscCounter 独立
+      // 动画，状态机不动；门外语 generic 尾段（ShouldDraw 假族回退）
+      if (i.shouldDraw) break;
+      genericTail(st, i, 4, 4, 0, 0, 1, false);
+      break;
+    }
+    case 22: {
+      // :29088-29190：!controlJump→0；hoverDown 横移 [1,2,3,2]@2t／竖停 [4,5,4]@6t；
+      //   常态 [4,5,6,5]@2t；无时 [4,5,4]@6t
+      if (!i.controlJump) { st.frame = 0; st.counter = 0; }
+      else if (i.wingTime > 0) {
+        if (i.hoverDown) {
+          if (i.controlLR) {          // num4=2 档（:29100-29118）
+            st.counter++;
+            st.frame = st.counter < 2 ? 1 : st.counter < 4 ? 2 : st.counter < 6 ? 3 : 2;
+            if (st.counter >= 7) { st.frame = 2; st.counter = 0; }
+          } else {                     // num5=6 档（:29120-29137）
+            st.counter++;
+            st.frame = st.counter < 6 ? 4 : st.counter < 12 ? 5 : 4;
+            if (st.counter >= 17) { st.frame = 4; st.counter = 0; }
+          }
+        } else {                       // num6=2 档（:29139-29158）
+          st.counter++;
+          st.frame = st.counter < 2 ? 4 : st.counter < 4 ? 5 : st.counter < 6 ? 6 : 5;
+          if (st.counter >= 7) { st.frame = 5; st.counter = 0; }
+        }
+      } else {                         // num7=6 档（:29160-29177）
+        st.counter++;
+        st.frame = st.counter < 6 ? 4 : st.counter < 12 ? 5 : 4;
+        if (st.counter >= 17) { st.frame = 4; st.counter = 0; }
+      }
+      break;
+    }
+    case 12: {
+      // :29198-29228：flap [1,2,3,2]@5t；vy≠0→2；地面→0
+      if (i.flap || i.jump) {
+        st.counter++;
+        st.frame = st.counter < 5 ? 1 : st.counter < 10 ? 2 : st.counter < 15 ? 3 : 2;
+        if (st.counter >= 19) { st.frame = 2; st.counter = 0; }
+      } else if (i.vy !== 0) st.frame = 2;
+      else { st.frame = 0; st.counter = 0; }
+      break;
+    }
+    case 24: {
+      // :29230-29282：flap [1,2,3]@1t 尾 2；下落按跳 [1,2,3]@3t／无时 0／余 1；地面 0
+      if (i.flap || i.jump) {
+        st.counter++;
+        st.frame = st.counter < 1 ? 1 : st.counter < 2 ? 2 : st.counter < 3 ? 3 : 2;
+        if (st.counter >= 3) st.counter = 0;
+      } else if (i.vy !== 0) {
+        if (i.controlJump) {           // num10=3 档（:29246-29262）
+          st.counter++;
+          st.frame = st.counter < 3 ? 1 : st.counter < 6 ? 2 : st.counter < 9 ? 3 : 2;
+          if (st.counter >= 11) st.counter = 0;
+        } else if (i.wingTime === 0) st.frame = 0;
+        else st.frame = 1;
+      } else { st.frame = 0; st.counter = 0; }
+      break;
+    }
+    case 30: {
+      // :29284-29329：flap/按跳 1+counter/2（回绕 6）；其余恒 0
+      if (i.flap || i.jump || (i.vy !== 0 && i.controlJump)) {
+        st.counter++;
+        if (st.counter >= 6) st.counter = 0;
+        st.frame = 1 + Math.floor(st.counter / 2);
+      } else st.frame = 0;
+      break;
+    }
+    case 34: {
+      // :29424-29459（ShouldDraw 门内）：flap rate4／按跳 rate9／else rate6，恒循环
+      // 6 帧（回绕 24/54/36）；门外语 generic 尾段
+      if (!i.shouldDraw) { genericTail(st, i, 4, 4, 0, 0, 1, false); break; }
+      st.counter++;
+      const rate = i.flap || i.jump ? 4 : i.controlJump ? 9 : 6;
+      if (st.counter >= rate * 6) st.counter = 0;
+      st.frame = Math.floor(st.counter / rate);
+      break;
+    }
+    case 51: {
+      // :29462-29489：flap rate4（回绕 32→8）；按跳 rate6（48→12）；else rate8（64→16）
+      // 帧 2-7；地面归 0
+      if (i.vy === 0 && !i.flap && !i.jump) { st.frame = 0; st.counter = 0; break; }
+      st.counter++;
+      const rate = i.flap || i.jump ? 4 : i.controlJump ? 6 : 8;
+      if (st.counter >= rate * 8) st.counter = rate * 2;
+      st.frame = Math.floor(st.counter / rate);
+      break;
+    }
+    case 47:
+    case 49:
+    case 50: {
+      // :29493-29702（三款同构 11 帧，差异已参数化）：推进档 rate=vy>0?2:
+      //   (boost&&hoverUp?3:(!canHover||!hoverDown?4:(canHoverBoost&&LR?4:6)))；
+      //   下落档 6（50=5）；vy>0 时按跳档 3 且帧 1 钉住、否则帧 2 钉住；
+      //   转移 47/49：1→10、3(flag3)→1、回绕 >10→2；50：1→3、2(flag3)→1、>9→2
+      const canHover = VISUAL_HOVER_SET.has(slot);
+      // canBoost（GetWingsFunctionalityForVisuals :28998 = wingsLogic∈{44,45}）：本分支
+      // slot≡wingsLogic∈{47,49,50} → 恒 false（原版同款死条件，保留形状）
+      const canBoost = false;
+      const canHoverBoost = [22, 37, 30, 31, 45].includes(slot); // hoverSpeed≠-1（WingStats 表）
+      const flag3 = i.controlJump && !i.downDash;    // vy>0 下落按跳档（:29507）
+      let rate = 0;
+      let hold = false;
+      if (i.flap) {
+        rate = i.vy > 0 ? 2
+          : canBoost && i.hoverUp ? 3
+          : !canHover || !i.hoverDown ? 4
+          : !canHoverBoost || !i.controlLR ? 6 : 4;
+      } else if (i.vy !== 0) {
+        rate = slot === 50 ? 5 : 6;
+        if (i.vy > 0) {
+          if (flag3) {
+            rate = 3;
+            if (st.frame === 1) hold = true;
+          } else if (st.frame === 2) hold = true;
+        }
+      } else {
+        hold = true;
+        st.frame = 0;
+      }
+      if (hold) { st.counter = 0; break; }
+      if (st.frame === 0) st.frame = 2;
+      st.counter++;
+      if (st.counter >= rate) {
+        st.counter = 0;
+        if (slot === 50) {
+          if (st.frame === 1) st.frame = 3;
+          else if (st.frame === 2 && flag3) st.frame = 1;
+          else if (++st.frame > 9) st.frame = 2;
+        } else {
+          if (st.frame === 1) st.frame = 10;
+          else if (st.frame === 3 && flag3 && i.vy > 0) st.frame = 1;
+          else if (++st.frame > 10) st.frame = 2;
+        }
+      }
+      break;
+    }
+    case 45: {
+      // :29707-29740（ShouldDraw 门内）：vy==0→0；else counter/3（无时 5）回绕 18
+      if (!i.shouldDraw) { genericTail(st, i, 4, 4, 0, 0, 1, false); break; }
+      if (i.vy === 0) { st.frame = 0; st.counter = 0; break; }
+      st.counter++;
+      const rate = i.wingTime === 0 ? 5 : 3;
+      if (st.counter >= rate * 6) st.counter = 0;
+      st.frame = Math.floor(st.counter / rate);
+      break;
+    }
+    case 44: {
+      // :29744-29778（ShouldDraw 门内）：flap/地面 1+counter/5 回绕 30（帧 1-6）；
+      //   下落按跳 2／水上 0／else 3；门外语 generic 尾段
+      if (!i.shouldDraw) { genericTail(st, i, 4, 4, 0, 0, 1, false); break; }
+      if (i.flap || i.jump || i.vy === 0) {
+        st.counter++;
+        if (st.counter >= 30) st.counter = 0;
+        st.frame = 1 + Math.floor(st.counter / 5);
+      } else if (i.controlJump) st.frame = 2;
+      else if (i.waterFloat) st.frame = 0;
+      else st.frame = 3;
+      break;
+    }
+    case 39: {
+      // :29779-29813（ShouldDraw 门内）：同 34（rate4/9/6 回绕 24/54/36）
+      if (!i.shouldDraw) { genericTail(st, i, 4, 4, 0, 0, 1, false); break; }
+      st.counter++;
+      const rate = i.flap || i.jump ? 4 : i.controlJump ? 9 : 6;
+      if (st.counter >= rate * 6) st.counter = 0;
+      st.frame = Math.floor(st.counter / rate);
+      break;
+    }
+    case 33:
+    case 38: {
+      // :29820-29844 / :29904-29960：仅喷尘（未接）后 return——状态机不动；
+      //   帧只由下方滑翔覆盖驱动（原版语义：首滑翔后停在 2，落地不归零）
+      break;
+    }
+    default: {
+      // generic 尾段（:29975-30045）：rate=4（43→3、48→2、32→3）；max=4（43→7、
+      //   48→8）；reset=0（43→1）；下落帧 1（32→3；43→2 水上→0；49→1 水上→0）
+      if (slot === 43) genericTail(st, i, 3, 7, 1, 0, 2, true);
+      else if (slot === 48) genericTail(st, i, 2, 8, 0, 0, 1, false);
+      else if (slot === 32) genericTail(st, i, 3, 4, 0, 0, 3, false);
+      else if (slot === 49) genericTail(st, i, 4, 4, 0, 0, 1, true);
+      else genericTail(st, i, 4, 4, 0, 0, 1, false);
+      break;
+    }
+  }
+
+  // ---- 滑翔帧覆盖（Player.cs:26874-27010，WingFrame 之后执行）----
+  if (!i.flap && i.glide) glideOverride(slot, st, i);
+}
+
+/** generic 尾段（:29975-30045）。waterFallZero 仅 43/49（:30012-30024） */
+function genericTail(st: WingFrameState, i: WingFrameInput,
+  rate: number, max: number, reset: number, idle: number, fall: number,
+  waterFallZero: boolean): void {
+  if (i.flap || i.jump) {
+    st.counter++;
+    if (st.counter > rate) {
+      st.frame++;
+      st.counter = 0;
+      if (st.frame >= max) st.frame = reset;
+    }
+  } else if (i.vy !== 0) {
+    st.frame = waterFallZero && i.waterFloat ? 0 : fall;
+  } else {
+    st.frame = idle;
+    st.counter = 0;
+  }
+}
+
+/** 滑翔帧覆盖（:26874-27010）：30/34/39 恒循环；48→3、40→0、44→2、26→2、
+ *  37→2、43→1、12→3；22/28/45/51/47/49/50/24 除外；默认 2 */
+function glideOverride(slot: number, st: WingFrameState, i: WingFrameInput): void {
+  switch (slot) {
+    case 22: case 28: case 45: case 51: case 47: case 49: case 50: case 24:
+      return;                            // 排除款（原版链不进 default）
+    case 30:                              // :26877-26884：1+counter/5 回绕 15
+      st.counter++;
+      if (st.counter >= 15) st.counter = 0;
+      st.frame = 1 + Math.floor(st.counter / 5);
+      return;
+    case 34:                              // :26885-26892：counter/7 回绕 42
+      st.counter++;
+      if (st.counter >= 42) st.counter = 0;
+      st.frame = Math.floor(st.counter / 7);
+      return;
+    case 39:                              // :26928-26936：counter/12 回绕 72
+      st.counter++;
+      if (st.counter >= 72) st.counter = 0;
+      st.frame = Math.floor(st.counter / 12);
+      return;
+    case 48: st.frame = 3; return;        // :26896
+    case 40: st.frame = 0; return;        // :26901
+    case 44: st.frame = 2; return;        // :26906
+    case 43: st.frame = 1; return;        // :26976
+    case 12: st.frame = 3; return;        // :26981
+    case 26: case 37: st.frame = 2; return; // :26916 / :26965
+    default: st.frame = 2; return;        // :26990（含 33/38）
+  }
+}
+
+/** 绘制帧（wingFrame 或 miscCounter 独立动画）——clamp 到合法区间 */
+export function wingDrawFrame(slot: number, st: WingFrameState, miscCounter: number): number {
+  const d = wingDrawOf(slot);
+  if (d.drawFrameFrom === 'miscCounter') return clampFrame(Math.floor(miscCounter / 5) % 4, 4);
+  return clampFrame(st.frame, d.frames);
+}

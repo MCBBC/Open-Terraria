@@ -285,7 +285,10 @@ export function runGemCavesPass(st: TileStore, rng: RNG, gs: GenState): void {
           }
         } else {
           st.wall[ii] = GEM_WALL_BASE + randGem();
-          if (rng.nextInt(2) === 0) placeExposed(st, rng, x, y, randGem());
+          // cs:3604：放置前另有 !tile.active() 门（&& 左求值，active 时不掷骰）——
+          // 分支谓词改 SolidTile 后，半砖/坡/平台等 active 非实心格也会落到本分支，
+          // 此门不可省（否则会覆盖活性格）
+          if (!st.flags[ii] && rng.nextInt(2) === 0) placeExposed(st, rng, x, y, randGem());
           for (const [dx, dy] of [[-1, 0], [1, 0], [0, -1], [0, 1]] as const) {
             const ni = st.idx(x + dx, y + dy);
             if (!seen.has(ni)) next.push([x + dx, y + dy]);

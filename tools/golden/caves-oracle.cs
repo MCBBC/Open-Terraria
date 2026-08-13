@@ -1111,7 +1111,12 @@ Checkpoint("grass");
             num2 = 0;
             // 原版 num4=-2; if(Next(2)==0) num4=2（JunglePass.cs:178-182）——Next(2)==0 → +2
             int side = (int)r.Next(2) == 0 ? 2 : -2;
+            // ★mudWall=true（JunglePass.cs:54 置位、:59 才复位）——分支洞穴也在
+            // mudWall 期内：每格 l>worldSurface && wall(k,l-1)!=2 耗 Next(3)、
+            // 过阈再耗 Next(-10,11) 铺丛林墙 15/64（JS JunglePass 17:2x 修复镜像）
+            mudWallFlag = true;
             TileRunner((int)px, (int)py, (int)r.Next(3, 20), (int)r.Next(10, 100), -1, false, side);
+            mudWallFlag = false;
         }
         px += vx; py += vy;
         vy += (int)r.Next(-10, 11) * 0.01;

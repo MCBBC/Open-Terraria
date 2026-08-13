@@ -37,3 +37,4 @@ describe('原版翅膀全量', () => {
     for (const s of [29, 30, 31, 32]) expect(slots.has(s)).toBe(false);
   });
 });
+

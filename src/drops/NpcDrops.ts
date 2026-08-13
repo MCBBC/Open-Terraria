@@ -79,6 +79,9 @@ export interface NpcDropCtx {
   moonEvent?: { kind: 1 | 2; wave: number };
   /** NPC ai[3]（Enemy 注入；RedHatSkeletron / 光之女皇暴怒条件数据源） */
   ai3?: number;
+  /** NPC ai[1]（Enemy 注入；史莱姆体内物品 id——SlimeBodyItemDropRule 数据源，
+   *  NPC.cs:60750 主掷段首帧掷定：-1=掷过为空 / >0=物品 id / 0=未掷） */
+  ai1?: number;
   /** NPC localAI[3]（引擎未承载，恒 undefined → 依赖它的分支恒 false） */
   localAi3?: number;
   /** NPC.HasPlayerTarget（NPC.cs:6603 = target∈[0,255)；TargetClosest 的 TryTrackingTarget
@@ -434,9 +437,21 @@ function evalRule(rule: Rule, ctx: NpcDropCtx, out: NpcDropOutcome): State {
       state = 'failedRoll';
       break;
     }
-    case 'slimeBody': case 'statueMimic': {
-      // SlimeBodyItemDropRule/StatueMimicItemDropRule：依赖 npc.ai[1]（雕像携带物品）
-      // 我们无雕像产怪 → 恒不触发
+    case 'slimeBody': {
+      // SlimeBodyItemDropRule.cs:14-18 CanDrop = SlimeCanContainItems[type] && ai[1]>0
+      //   && ai[1]<ItemID.Count(=6147)；TryDroppingItem(:26-30) = GetDropInfo 档位掷
+      //   Next(min, max+1)。规则注册为 global（ItemDropDatabase.cs:684），类型门由
+      //   数据侧 ai1 语义承担（Enemy.slimeRollContainedItem 只给 {1,59,147,184,537} 掷骰）
+      // （曾恒 failedCond——当时 ai[1] 掷骰未实装；史莱姆雕像产怪 value=0 同样不掷）
+      const itemId = Math.floor(ctx.ai1 ?? 0);
+      if (itemId <= 0 || itemId >= 6147) { state = 'failedCond'; break; }
+      const [mn, mx] = SLIME_BODY[String(itemId)] ?? [1, 1];
+      pushDrop(out, itemId, ctx.rng.int(mn, mx));      // Next(mn, mx+1) ≡ rng.int 闭区间 [mn,mx]
+      state = 'success';
+      break;
+    }
+    case 'statueMimic': {
+      // StatueMimicItemDropRule：依赖雕像产怪携带物——我们无雕像产怪 → 恒不触发
       state = 'failedCond';
       break;
     }

@@ -139,9 +139,9 @@ describe('星怒 3065 → 弹 503（Arrow star 模式）', () => {
     const sword = new Arrow(50 * TILE, 60 * TILE, 4, 8, 170, 6.5, 503, null,
       { grav: 0, life: 900, pierce: 2, star: { targetY: 120 * TILE } });
     sword.fixedUpdate(1, game);
-    expect(sword.starAlpha).toBe(240);                    // 255−15 渐显
+    expect(sword.starAlpha).toBe(225);                    // 255−15×2（503 extraUpdates=1 → 2 子步/帧,SetDefaults）
     for (let t = 0; t < 40 && !sword.dead; t++) sword.fixedUpdate(1, game);
-    // 剑 y 从 960 向下 8/t × 40t → 已穿 80 行墙（1280px）
+    // 剑 y 从 960 向下 8/子步 × 2 × 40t → 已穿 80 行墙（1280px）
     expect(sword.y).toBeGreaterThan(80 * TILE);
     expect(sword.dead).toBe(false);                       // 线上方穿墙（tileCollide=false）
     let guard = 0;

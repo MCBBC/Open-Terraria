@@ -647,7 +647,12 @@ const values = {};
 {
   // SetDefaults 方法体（8361 起 → 下一个 public/private 方法前），链式 else if (type == N)
   const start = npcCs.indexOf('public void SetDefaults(int Type');
-  const body = npcCs.slice(start);
+  // ★ 扫描必须限定在 SetDefaults 方法体内：旧版 slice(start) 扫到文件尾，SetDefaults
+  //   之后的无关方法里同形 `if (type == N)` 会反向 clobber（1=25/134=120000/398=1000000
+  //   曾被覆盖成 0 → 蓝史莱姆不掉钱、肉山后 Boss 掉钱丢失）
+  const bodyRest = npcCs.slice(start + 10);
+  const methodEnd = bodyRest.search(/\n\t(public|private|protected|internal) [A-Za-z]/);
+  const body = npcCs.slice(start, start + 10 + (methodEnd < 0 ? bodyRest.length : methodEnd));
   const re = /\b(?:else )?if \(type == (\d+)\)/g;
   const marks = [];
   let m;

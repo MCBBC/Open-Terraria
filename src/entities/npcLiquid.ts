@@ -193,9 +193,7 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
   if (flag && !wasWet && b.wetCount === 0) {
     b.wetCount = 10;                                      // 入水去抖（:94290）
     if (player && !player.dead && splashSoundAllowed(b, true)) {
-      const d = Math.hypot(player.cx - b.cx, player.cy - b.cy);
-      const vol = Math.max(0.12, Math.min(1, 1 - d / (TILE * 45))) * (b.def.boss ? 1.2 : 0.9);
-      game.playSfx('splash', vol);
+      game.playSfx('splash', b.def.boss ? 1.2 : 0.9, b.cx, b.cy);   // Sfx.atten 统一 2500px 衰减
     }
   } else if (!flag && wasWet) {
     b.vx *= 0.5;                                          // 出水横向衰减（:94381）
@@ -203,9 +201,7 @@ export function updateNpcLiquid(b: NpcLiquidHost, game: GameHooks, st: TileStore
     if (b.wetCount === 0) {
       b.wetCount = 10;                                    // 出水去抖（:94388）
       if (player && !player.dead && splashSoundAllowed(b, false)) {
-        const d = Math.hypot(player.cx - b.cx, player.cy - b.cy);
-        const vol = Math.max(0.12, Math.min(1, 1 - d / (TILE * 45))) * (b.def.boss ? 1.2 : 0.9);
-        game.playSfx('splash', vol);
+        game.playSfx('splash', b.def.boss ? 1.2 : 0.9, b.cx, b.cy); // 出水同款统一衰减
       }
     }
   }

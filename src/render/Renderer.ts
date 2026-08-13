@@ -130,6 +130,7 @@ import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim } from '../entities/bossAI_dd2';
+import { wingDrawOf, wingDrawFrame } from '../data/vanillaWingVisuals';
 import type { Entity } from '../entities/Entity';
 
 export interface Particle { x: number; y: number; vx: number; vy: number; life: number; maxLife: number; color: string; size: number; damp?: number; grav?: number; }
@@ -4685,25 +4686,35 @@ export class Renderer {
     ctx.translate(p.cx - p.facing * 2.5 + p.netOffX, p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff); // 脚底中心（精灵后移2.5px = 碰撞盒微前移）
     ctx.scale(p.facing, 1);
 
-    // ---- 翅膀层（PlayerDrawLayers.cs:695/738：身后，先于身体绘制）----
-    // 源矩形 = 全宽 × 高/帧数×wingFrame（7 帧族；hover 族 22/28/30/31/33/35/37/45 = 6 帧）；
-    // origin = (宽/2, 帧高/2)；身体中心锚 + 朝向镜像；光照逐格取色（简化：整翅乘中心格光）
+    // ---- 翅膀层（DrawPlayer_09_Wings :655：身后，先于身体绘制）----
+    // 表驱动（src/data/vanillaWingVisuals.ts）：逐款切帧数 num14（generic=4，曾误写 7/6）
+    // + 局部锚点（基底 = Position+(w/2, h−bodyFrame.Height/2)+(0,7) → 脚底局部 (0,−21)，
+    // 逐款 offset (num13−9, num12+2)·directions；镜像空间 X 局部值 = num13−9）。
+    // 翻转 = 外层 scale(facing,1)（曾内层再镜像一次 → facing=-1 时抵消永不翻转）；
+    // 朝向偏移在镜像空间直接取表值，勿再乘世界坐标（曾把 p.cx 叠进局部空间 → 翅膀画到
+    // 2× 世界坐标处屏幕外，此为"背后没翅膀"的根因）。
     {
-      const wingSlot = p.equipStats.wing?.logic ?? 0;
+      // wings（绘制侧）随坐骑清零（Player.cs:26316-26322：禁翼族 wings=wingsLogic=0）
+      const wingSlot = p.equipStats.wing && !mnt ? p.equipStats.wing.logic : 0;
       if (wingSlot > 0 && this.atlas) {
-        const wt = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
-        if (wt) {
-          const HOVER6 = new Set([22, 28, 30, 31, 33, 35, 37, 45]);
-          const frames = HOVER6.has(wingSlot) ? 6 : 7;
-          const fh = Math.floor(wt.naturalHeight / frames);
-          const fr = Math.min(frames - 1, Math.max(0, p.wingFrame));
-          // （光照染色待接：compositeLight 全屏 multiply 已覆盖翅膀——无独立 tint 需要）
-          ctx.save();
-          ctx.translate(p.cx, p.y + p.h * 0.45);   // 身体中心（PlayerDrawLayers 锚）
-          ctx.scale(p.facing >= 0 ? 1 : -1, 1);
-          ctx.drawImage(wt, 0, fr * fh, wt.naturalWidth, fh,
-            -wt.naturalWidth / 2, -fh / 2, wt.naturalWidth, fh);
-          ctx.restore();
+        const d = wingDrawOf(wingSlot);
+        // ShouldDrawWingsThatAreAlwaysAnimated 门（:30271）：vy≠0 && 未锚定钩爪 &&
+        // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
+        const alwaysOk = !d.alwaysAir
+          || (p.vy !== 0 && !p.grappleProjs.some((g) => g.latched)
+            && !(p.inWater && !!p.equipStats.flipper));
+        if (alwaysOk) {
+          const wt = this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
+          if (wt) {
+            const fh = Math.floor(wt.naturalHeight / d.frames);
+            const fr = wingDrawFrame(wingSlot, { frame: p.wingFrame, counter: 0 }, p.miscCounter);
+            // （光照染色待接：compositeLight 全屏 multiply 已覆盖翅膀——无独立 tint 需要）
+            ctx.save();
+            ctx.translate(d.anchor[0], d.anchor[1]);
+            ctx.drawImage(wt, 0, fr * fh, wt.naturalWidth, fh,
+              -wt.naturalWidth / 2, -fh / 2, wt.naturalWidth, fh);
+            ctx.restore();
+          }
         }
       }
     }

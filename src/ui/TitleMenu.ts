@@ -88,10 +88,11 @@ const CSS = `
 /* 日/月命中层 + 可见体：罩住天空画布里的太阳/月亮（Main.cs:62420 value4）。
    z-index:-1 = 根 stacking context 内垫底——必在天空画布(0)之上、logo/按钮之下，
    不会截走菜单按钮的点击；touch-action:none 防触摸拖动触发页面手势。
-   可见体说明：天空画布自身也画日/月（SkyRenderer），但 MenuBackground 把
-   sky.draw 排在森林山层之前（原版同序，Main.cs:61531 天空 pass → :61546 DrawBG），
-   日/月大部分被山层遮住——DOM 体即"原版标题屏里肉眼可见的那颗"，贴图/位置/
-   缩放/旋转全部与画布同一公式同一素材（见 celestialState），不另造语义 */
+   ★可见体常态隐藏(2026-08-13,用户报"太阳跑到前景层前面"):DOM 层结构性垫在
+   整块画布之上=盖住山/树前景,而原版日/月画在山层之后被遮挡(Main.cs:61531
+   天空 pass → :61546 DrawBG)——常态可见的日/月=画布那颗(含被山遮挡语义)。
+   DOM 体仅【拖拽抓取中】显示:跟手游标下的可见反馈(原版拖的就是真太阳,
+   画布侧经 onSunMoonGrab→setClockT 同步横移,DOM 体补垂直跟手) */
 .sw-title-celestial {
   position: fixed; pointer-events: auto; cursor: grab; z-index: -1;
   touch-action: none;
@@ -101,7 +102,10 @@ const CSS = `
   position: absolute; inset: 0; pointer-events: none;
   image-rendering: pixelated; background-repeat: no-repeat;
   background-size: 100% 100%;
+  opacity: 0;                    /* 常态隐藏:让位给画布日/月(正确的遮挡语义) */
+  transition: opacity .15s;
 }
+.sw-title-celestial.grabbing .body { opacity: 1; }  /* 抓取中:跟手可见反馈 */
 .sw-title-celestial.night .body { background-size: 100% 800%; } /* 月相竖条 8 帧 */
 `;
 

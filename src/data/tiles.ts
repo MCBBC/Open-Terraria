@@ -181,7 +181,7 @@ def({ key: 'v_189_cloud_block', name: '', solid: true, opacity: 1, pick: 0, mapC
 def({ key: 'v_183_purple_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#793186', blend: true, drop: null, vanilla: { sheet: 183, frame: 'auto' } });
 def({ key: 'v_536_xenon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#00C5D0', blend: true, drop: null, light: [0, 41, 87], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 536, frame: 'auto' } });
 def({ key: 'v_225_hive_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#E37D16', blend: true, drop: null, vanilla: { sheet: 225, frame: 'auto' } });
-def({ key: 'v_483_cracked_pink_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 483, frame: 'auto' } });
+def({ key: 'v_483_cracked_pink_brick', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#6B4463', blend: true, drop: null, vanilla: { sheet: 483, frame: 'auto' } });
 def({ key: 'v_224_slush_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B848B', blend: true, drop: null, vanilla: { sheet: 224, frame: 'auto' } });
 def({ key: 'v_383_living_mahogany_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#DD8890', blend: true, drop: null, vanilla: { sheet: 383, frame: 'auto' } });
 def({ key: 'v_179_green_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#318672', blend: true, drop: null, vanilla: { sheet: 179, frame: 'auto' } });
@@ -391,7 +391,7 @@ def({ key: 'v_132_lever', name: '', solid: false, framed: true, opacity: 0.05, p
 
 // ===================== 不负责任的女妖啤酒厂 兼容补全 =====================
 def({ key: 'v_539_argon_moss_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D0007E', blend: true, drop: null, light: [77, 0, 43], /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 539, frame: 'auto' } });
-def({ key: 'v_481_cracked_blue_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 481, frame: 'auto' } });
+def({ key: 'v_481_cracked_blue_brick', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#42546D', blend: true, drop: null, vanilla: { sheet: 481, frame: 'auto' } });
 def({ key: 'v_119_iridescent_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#6B5C6C', blend: true, drop: null, vanilla: { sheet: 119, frame: 'auto' } });
 def({ key: 'v_120_mudstone_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#5C4449', blend: true, drop: null, vanilla: { sheet: 120, frame: 'auto' } });
 def({ key: 'v_714_spider_boulder', name: '', solid: true, framed: true, opacity: 1, pick: 0, w: 2, h: 2, mapColor: '#808080', drop: null, vanilla: { sheet: 714, frame: 'style', fw: 2, fh: 2 } });
@@ -502,7 +502,7 @@ def({ key: 'v_565_fogmachine', name: '', decor: true, framed: true, opacity: 0, 
 def({ key: 'v_593_volcanosmall', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 1, h: 1, mapColor: '#77694F', drop: null, light: undefined /* 动态光 → specialTileLight case 593：小火山 frameX<18 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 593, frame: 'style', fw: 1, fh: 1 } });
 def({ key: 'v_594_volcanolarge', name: '', decor: true, framed: true, opacity: 0, pick: 0, w: 2, h: 2, mapColor: '#77694F', drop: null, light: undefined /* 动态光 → specialTileLight case 594：大火山 frameX<36 门 */, /* 原版 tileLighted 发光色（TileLightScanner ApplyTileLight 提取） */ vanilla: { sheet: 594, frame: 'style', fw: 2, fh: 2 } });
 
-def({ key: 'v_482_cracked_green_brick', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 482, frame: 'auto' } });
+def({ key: 'v_482_cracked_green_brick', name: '', solid: false, opacity: 1, pick: 0, mapColor: '#54643F', blend: true, drop: null, vanilla: { sheet: 482, frame: 'auto' } });
 def({ key: 'v_163_purple_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#AE91D6', blend: true, drop: null, vanilla: { sheet: 163, frame: 'auto' } });
 def({ key: 'v_200_red_ice_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#D89890', blend: true, drop: null, vanilla: { sheet: 200, frame: 'auto' } });
 def({ key: 'v_116_pearlsand_block', name: '', solid: true, opacity: 1, pick: 0, mapColor: '#EEE1DA', blend: true, drop: null, vanilla: { sheet: 116, frame: 'auto' } });

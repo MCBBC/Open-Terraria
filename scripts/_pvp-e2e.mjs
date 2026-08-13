@@ -156,11 +156,12 @@ console.log('diag:', JSON.stringify({ teleA, diagB }));
 
 // ① 近战全链：A 挥击 → B 掉血
 const bHp0 = await pageB.evaluate(() => window.__swGame.player.hp);
-const swing = await pageA.evaluate(() => {
+const swing = await pageA.evaluate(async () => {
   const g = window.__swGame;
   const held = g.player.inv.heldItem();
   if (!held) return { err: 'no held' };
   g.swing = { item: held.id, dmg: 25, kb: 4, t: 16, dur: 16, useStyle: 1 };
+  g.player.facing = 1;   // 朝向代理侧（facing=-1 时盒子全朝左打不中）
   const sent44 = [];
   const origSend = g.net.sendStrikePlayer.bind(g.net);
   g.net.sendStrikePlayer = (...a) => { sent44.push(a); return origSend(...a); };
@@ -168,6 +169,32 @@ const swing = await pageA.evaluate(() => {
     for (let i = 0; i < 14; i++) g.updateSwingHits(); // 相位扫描（真实挥击扫过全程）
   } finally { g.net.sendStrikePlayer = origSend; }
   const rp0 = g.remotePlayerProxies[0];
+  // 复刻 updateSwingHits 盒公式验算（真实图集尺寸）
+  let boxDebug = null;
+  try {
+    const { atlasIconForKey } = await import('/src/assets/SpriteAtlas.ts');
+    const { ITEM_DEFS } = await import('/src/data/items.ts');
+    const ar = g.renderer?.atlas ? atlasIconForKey(g.renderer.atlas, ITEM_DEFS[held.id].key) : null;
+    const sprW = ar?.sw ?? 16, sprH = ar?.sh ?? 16;
+    const xT = (w, ph) => ph === 0 ? (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 14 : 10)
+      : ph === 1 ? (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w > 32 ? 18 : 10)
+        : (w >= 92 ? 38 : w >= 64 ? 28 : w >= 52 ? 24 : w >= 48 ? 18 : w > 32 ? 14 : 6);
+    const yT = (h, ph) => ph === 0 ? 24 : h > 64 ? 14 : h > 52 ? 12 : ph === 1 && h > 32 ? 8 : 10;
+    const boxes = [];
+    for (const pAnim of [0.94, 0.75, 0.5, 0.25]) {
+      const tier = pAnim <= 1 / 3 ? 0 : pAnim < 2 / 3 ? 1 : 2;
+      const offX = tier === 0 ? sprW * 0.5 - xT(sprW, 0) : tier === 1 ? sprW * 0.5 - xT(sprW, 1) : -(sprW * 0.5 - xT(sprW, 2));
+      const offY = yT(sprH, tier);
+      let bx = g.player.cx + g.player.facing * offX, by = g.player.y + offY, bw = 32, bh = 32;
+      if (g.player.facing === -1) bx -= bw;
+      by -= bh;
+      const phase = pAnim > 2 / 3 ? 0 : pAnim > 1 / 3 ? 1 : 2;
+      if (phase === 0) { if (g.player.facing === 1) bx -= Math.floor(bw * 1.2); bw *= 2; by -= Math.floor(bh * 1.4 - bh); bh = Math.floor(bh * 1.4); }
+      else if (phase === 2) { if (g.player.facing === -1) bx -= Math.floor(bw * 1.4 - bw); bw = Math.floor(bw * 1.4); by += Math.floor(bh * 0.5); bh = Math.floor(bh * 1.1); }
+      boxes.push({ pAnim, box: [Math.round(bx), Math.round(by), bw, bh] });
+    }
+    boxDebug = { sprW, sprH, boxes, rpBox: rp0 ? [rp0.x, rp0.y, rp0.w, rp0.h] : null, facing: g.player.facing };
+  } catch (e) { boxDebug = { err: String(e) }; }
   return {
     sent44: sent44.length, first: sent44[0] ?? null,
     gates: {
@@ -176,7 +203,9 @@ const swing = await pageA.evaluate(() => {
       rpHostile: rp0?.hostile, rpTeam: rp0?.team, myTeam: g.player.team,
       swingSet: g.swingHitSet.size,
     },
+    boxDebug,
     bProxyX: g.remotePlayerProxies[0]?.x ?? -1, aX: g.player.x, aY: g.player.y,
+    stageSw: window.__pvpSw ?? null,
   };
   const sent = g.swing ? 'swing-alive' : 'swing-consumed';
   return {
@@ -185,6 +214,12 @@ const swing = await pageA.evaluate(() => {
   };
 }).catch((e) => ({ err: String(e) }));
 check('① A 挥击执行', !swing.err, JSON.stringify(swing));
+const aliveB = await pageB.evaluate(() => ({
+  net: window.__swGame?.net?.active ?? false,
+  slot: window.__swGame?.net?.mySlot ?? -1,
+  players: window.__swGame?.net?.players?.size ?? -1,
+})).catch((e) => ({ err: String(e) }));
+console.log('B-alive@①:', JSON.stringify(aliveB), 'serverTail:', serverLog.slice(-3).join('|').slice(-260));
 await pump2(10);
 await sleep(400); // WS 往返
 const bHit = await pageB.evaluate(() => {

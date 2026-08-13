@@ -136,35 +136,71 @@ export class TownNPC extends Entity {
 
   private cbApplied = false;
 
+  /** GetMagicAuraColor（NPC.cs:53317-53332）1:1：NPCID.Sets.MagicAuraColor
+   *  （NPCID.cs:4853）五人恰好 = AttackType-2 魔法攻击族（54 裁缝/108 巫师/
+   *  160 松露/20 树妖/663 公主；五人 TownNPCProfiles 全走 LegacyWithSimpleShimmer
+   *  二档 StackedNPCProfile → variationIndex∈{0,1}，==1 ⟺ 微光变体）。
+   *  townNpcVariationIndex==1（= 本仓 shimmered，IsShimmerVariant NPC.cs:6646-6650）
+   *  → 160 R/B 互换、20 固定 (90,20,210)、663 固定 (255,0,77)。Color.ToVector3()
+   *  丢弃 alpha → 三通道 0-1 归一（663 基色 = Main.hslToRgb(0.92,1,0.78) = 255,143,197）*/
+  private magicAuraColor(): [number, number, number] {
+    switch (this.vanillaId) {
+      case 54: return [100 / 255, 4 / 255, 227 / 255];
+      case 108: return [1, 80 / 255, 60 / 255];
+      case 160: return this.shimmered ? [1, 80 / 255, 40 / 255] : [40 / 255, 80 / 255, 1];
+      case 20: return this.shimmered ? [90 / 255, 20 / 255, 210 / 255] : [40 / 255, 1, 80 / 255];
+      case 663: return this.shimmered ? [1, 0, 77 / 255] : [1, 143 / 255, 197 / 255];
+      default: return [1, 1, 1];        // 集合缺省 Color.White（ToVector3 丢 alpha）
+    }
+  }
+
   /** 本 tick 点光（NPC.cs 城镇 NPC 侧三处恒亮）：
    *  - 160 松露（UpdateNPC_CastLights :93544-93566）：num3=Next(28,42)×0.005+
    *    (270−mouseTextColor)/500，基色 (0.1,0.3+num3/2,0.6+num3)×0.35；变体 1
-   *    （townNpcVariationIndex==1）R/B 互换——本仓不跟踪变体档，取默认档
-   *  - 209 电子人（:93590-93599）：同式抖动 ×0.35、B 基 0.4（ai[0]==12 的
-   *    Top 追加光 (0.3,0.1,0.1) 未接——音乐盒状态未移植，登记 GAP）
+   *    （townNpcVariationIndex==1）R/B 互换——以 shimmered 承接（:93563-93567）
+   *  - 209 电子人（:93590-93599）：同式抖动 ×0.35、B 基 0.4；ai[0]==12（火箭射击
+   *    态，AttackType[209]=1 → ai0=12，NPC.cs:55902/:54936）追加 Top (0.3,0.1,0.1)
+   *    （:93594-93596）——单槽逐通道 max 合并（Enemy.mergeLightRGB 同款近似）
    *  - 681 彩虹城镇史莱姆（AI_007 尾段 :55963-55974）= TorchColor(23)×0.35
    *  - 683 黄城镇史莱姆（:55974-55979）= (0.25,0.25,0.1)×WrappedLerp(0.75,1,t%120/120)
-   *  条件态三处（:53637 微光上升 / :55395·:55547 魔法光环）依赖未移植状态机，跳过 */
+   *  条件态：魔法光环 ai[0]==14（:55394，num69=1 恒满档，atkState===14 承接）
+   *  ×GetMagicAuraColor；跳过两处——:53637 微光上升光（ai[1] 30→90 上升态计时
+   *  机未移植，本仓入微光即刻标记+传送回家，无上升过程）；:55546 ai[0]==24
+   *  （树妖 Stardew 演出 HaveDryadDoStardewAnimation :19123，公主礼物彩蛋无载体） */
   get lightRGB(): [number, number, number] | null {
+    let rgb: [number, number, number] | null = null;
+    // 逐通道 max 合并（原版同帧多 AddLight，单槽近似视觉并集；不挪光源位）
+    const merge = (c: [number, number, number]) => {
+      rgb = rgb ? [Math.max(rgb[0], c[0]), Math.max(rgb[1], c[1]), Math.max(rgb[2], c[2])] : c;
+    };
     if (this.vanillaId === 160) {
       const n3 = (28 + Math.random() * 14) * 0.005 + (270 - mouseTextColorApprox()) / 500;
-      return [0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.6 + n3) * 0.35];
+      const base: [number, number, number] = [0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.6 + n3) * 0.35];
+      // :93563-93567 变体 1（shimmered）→ R/B 互换（num7 交换 num4/num6）
+      merge(this.shimmered ? [base[2], base[1], base[0]] : base);
     }
     if (this.vanillaId === 209) {
       const n3 = (28 + Math.random() * 14) * 0.005 + (270 - mouseTextColorApprox()) / 500;
-      return [0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.4 + n3 / 2) * 0.35];
+      merge([0.1 * 0.35, (0.3 + n3 / 2) * 0.35, (0.4 + n3 / 2) * 0.35]);
+      if (this.atkState === 12) merge([0.3, 0.1, 0.1]);   // :93594 火箭射击态 Top 追加光
     }
     if (this.vanillaId === 681) {
       const num = Math.min(1, Math.max(0, 0.9 + (270 - mouseTextColorApprox()) / 900));
-      return [num * 0.9 * 0.35, 0.55 * 0.35, num * 1.2 * 0.35];   // TorchColor(23)×0.35
+      merge([num * 0.9 * 0.35, 0.55 * 0.35, num * 1.2 * 0.35]);   // TorchColor(23)×0.35
     }
     if (this.vanillaId === 683) {
       const p = (visEffectFrames() % 120) / 120;
       const tri = p * 2 > 1 ? 2 - p * 2 : p * 2;                   // Utils.WrappedLerp
       const l = 0.75 + 0.25 * tri;
-      return [0.25 * l, 0.25 * l, 0.1 * l];
+      merge([0.25 * l, 0.25 * l, 0.1 * l]);
     }
-    return null;
+    // 魔法光环（:55390-55396）：ai[0]==14 魔法攻击态内 num69=1 恒满档 → GetMagicAuraColor
+    if (this.atkState === 14
+      && (this.vanillaId === 54 || this.vanillaId === 108 || this.vanillaId === 160
+        || this.vanillaId === 20 || this.vanillaId === 663)) {
+      merge(this.magicAuraColor());
+    }
+    return rgb;
   }
   lightRGBAt: { x: number; y: number } | null = null;
 

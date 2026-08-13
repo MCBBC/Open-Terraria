@@ -13,7 +13,7 @@ import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
 import { Enemy } from '../src/entities/Enemy';
 import { TILE } from '../src/core/constants';
-import { wetCollision, liquidMoveFactor, skipsWet, getWaterLine } from '../src/entities/npcLiquid';
+import { wetCollision, liquidMoveFactor, skipsWet, getWaterLine, updateNpcLiquid } from '../src/entities/npcLiquid';
 import { moveAndCollide } from '../src/physics/TileCollision';
 import type { GameHooks } from '../src/entities/types';
 
@@ -410,6 +410,55 @@ describe('水母 lurk（aiStyle 18 cs:24215-24269，专家 63/64/103/242）', ()
     const f = Enemy.fromVanilla(221, 20 * TILE, 36 * TILE)!;  // 真菌球 → 不发光
     f.fixedUpdate(1 / 60, h as never);
     expect(f.lightRGB).toBeNull();
+  });
+});
+
+describe('溅落声统一衰减（2026-08-13 修复批：删手写 45 格/0.12 门 → Sfx.atten 2500px）', () => {
+  it('入水 splash 传实体中心坐标且 vol=0.9（非 boss）；玩家再远也无 0.12 下限残留', () => {
+    const w = liquidWorld();
+    const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
+    const fake = {
+      player: { cx: 45 * TILE, cy: 30 * TILE, dead: false },   // 远离水池（>720px 旧音量门）
+      playSfx: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
+      spawnParticles: () => {},
+    } as unknown as GameHooks;
+    const b = host({
+      x: 20 * TILE, y: 36 * TILE, w: 18, h: 40, vx: 1, vy: 0,
+      cx: 20 * TILE + 9, cy: 36 * TILE + 20,
+      vanillaId: 3, vanilla: { aiStyle: 3 }, wet: false, wetCount: 0,
+      lavaCd: 0, onFireT: 0, onFire3T: 0, inWater: false, liqFactor: 1,
+      def: { boss: false }, hurt: () => {},
+    });
+    updateNpcLiquid(b, fake, w.store);
+    expect(b.wet).toBe(true);
+    expect(rec).toHaveLength(1);
+    expect(rec[0].n).toBe('splash');
+    expect(rec[0].v).toBe(0.9);                     // 旧实现远距会塌到 0.9×0.12≈0.108
+    expect(rec[0].x).toBe(b.cx);                    // 坐标交 Sfx.atten 统一 2500px 衰减
+    expect(rec[0].y).toBe(b.cy);
+    updateNpcLiquid(b, fake, w.store);              // 第二 tick 已湿：去抖不重播
+    expect(rec).toHaveLength(1);
+  });
+  it('boss 档 vol=1.2 且带坐标', () => {
+    const w = liquidWorld();
+    const rec: Array<{ n: string; v?: number; x?: number; y?: number }> = [];
+    const fake = {
+      player: { cx: 12 * TILE, cy: 36 * TILE, dead: false },
+      playSfx: (n: string, v?: number, x?: number, y?: number) => { rec.push({ n, v, x, y }); },
+      spawnParticles: () => {},
+    } as unknown as GameHooks;
+    const b = host({
+      x: 20 * TILE, y: 36 * TILE, w: 40, h: 40, vx: 0, vy: 0,
+      cx: 20 * TILE + 20, cy: 36 * TILE + 20,
+      vanillaId: 50, vanilla: { aiStyle: 4 }, wet: false, wetCount: 0,
+      lavaCd: 0, onFireT: 0, onFire3T: 0, inWater: false, liqFactor: 1,
+      def: { boss: true }, hurt: () => {},
+    });
+    updateNpcLiquid(b, fake, w.store);
+    expect(rec).toHaveLength(1);
+    expect(rec[0].v).toBe(1.2);
+    expect(rec[0].x).toBe(b.cx);
+    expect(rec[0].y).toBe(b.cy);
   });
 });
 

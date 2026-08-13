@@ -400,8 +400,12 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     const got: GorePiece[] = [];
     spawnDeathGore(src({ vanillaId: 437 }), (p) => got.push(p));
     expect(got.length).toBe(6);
-    // 速度 = 均匀随机方向 × 5（UnitY.RotatedByRandom(2π)*5f），叠 NewGore 扰动后模长 ∈ [2,8]
-    for (const p of got) expect(Math.hypot(p.vx, p.vy)).toBeGreaterThanOrEqual(2);
+    // 速度 = 均匀随机方向 × 5（UnitY.RotatedByRandom(2π)*5f），叠 NewGore 扰动
+    // （vx ±2 / vy -3..-1，最大模 √13≈3.606）→ 模长 ∈ [5-3.606, 5+3.606]
+    for (const p of got) {
+      expect(Math.hypot(p.vx, p.vy)).toBeGreaterThanOrEqual(1.3);
+      expect(Math.hypot(p.vx, p.vy)).toBeLessThanOrEqual(8.7);
+    }
     // 显式 dmg=10（普通打击路径）→ 门不满足，0 块
     expect(spawnDeathGore(src({ vanillaId: 437, dmg: 10 }), () => {})).toBe(0);
     resetGorePool();
@@ -425,16 +429,16 @@ describe('④ 结构化 gates（真/假两路，1:1 HitEffect 守卫语义）', 
     expect(gated.length).toBe(4);
     expect(gated.every((e) => e.gates![0].k === 'rnd' && e.gates![0].n === 2)).toBe(true);
     let min = Infinity, max = -Infinity, saw156 = false;
-    for (let i = 0; i < 60; i++) {
+    for (let i = 0; i < 200; i++) {           // 4 门全过/全不过各需 ≥1 样本：(1/16)^k 收敛
+      resetGorePool();                        // 600 槽池：循环内复位防满池截断
       const got: GorePiece[] = [];
       spawnDeathGore(src({ vanillaId: 134 }), (p) => got.push(p));
       min = Math.min(min, got.length);
       max = Math.max(max, got.length);
       if (got.some((p) => p.goreId === 156)) saw156 = true;
     }
-    expect(min).toBe(1);                                // 1 常驻 + 0..4 概率块
-    expect(max).toBeLessThanOrEqual(5);
-    expect(max).toBeGreaterThan(1);                     // 概率门确有通过样本
+    expect(min).toBe(1);                                // 1 常驻 + 0..4 概率块（全不过样本）
+    expect(max).toBe(5);                                // 4 门全过样本
     expect(saw156).toBe(true);
     resetGorePool();
   });

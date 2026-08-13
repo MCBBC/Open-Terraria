@@ -611,7 +611,8 @@ export function goreGatesOk(e: GoreSpawnEntry, s: GoreNpcSource): boolean {
 
 /** NewGore 之后的实例后处理（有序应用，提取自 HitEffect 同 type 块内的赋值流） */
 function applyPost(g: GorePiece, e: GoreSpawnEntry, s: GoreNpcSource): void {
-  for (const op of e.post ?? []) {
+  if (!e.post?.length) return;
+  for (const op of e.post) {
     switch (op[0]) {
       case 'vm': g.vx *= op[1]; g.vy *= op[1]; break;
       case 'va': {

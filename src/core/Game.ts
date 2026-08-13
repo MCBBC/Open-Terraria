@@ -2154,7 +2154,11 @@ export class Game implements GameHooks {
     // public/sounds/——登记销核）；Shimmer×3{微光,水/岩浆/蜜} 原版即 PlaySound(19,…,4)
     // = Splash_4（LegacySoundPlayer.cs:885 音量 ×0.75）。
     // 本仓库液体编码 1水/2岩浆/3蜂蜜/4微光，配对任意序
+    let lcTick = -1, lcCount = 0;   // 液体合并音每 tick 节流：读档单轮 settle 残留活水
+                                    // 交运行时收敛时，前几秒合并事件集中爆发，不限流会连成轰鸣
     this.liquid.liquidChangeSound = (x, y, a, b) => {
+      if (lcTick !== this.tickCount) { lcTick = this.tickCount; lcCount = 0; }
+      if (++lcCount > 2) return;    // 每 tick 最多 2 声（载入窗另有 suppress 门，此处管运行期）
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (lo < 1 || hi > 4 || lo === hi) return; // 同类/越界不发声
       const px = x * TILE + 8, py = y * TILE + 8;   // :4582 x*16+count*8（count 取 1）
@@ -2163,6 +2167,11 @@ export class Game implements GameHooks {
         : lo === 1 && hi === 3 ? 'liquidHoneyWater' : 'liquidHoneyLava';
       this.sfx.play(name, 1, px, py);
     };
+    // 载入窗静音门：waterCheck 全图收敛的 killTile/合并音一律静默（此时玩家/相机未就位，
+    // listener=(0,0) 会满响——"进世界音效爆发"根因）；相机就位后解除。
+    // 临时 listener 用出生点兜底：万一有漏网发声点，按出生点衰减也远好于 (0,0)。
+    this.sfx.suppress = true;
+    this.sfx.setListener(w.spawnX * TILE, w.spawnY * TILE);
     this.liquid.waterCheck(); // 原版读档末尾的 WaterCheck：把沉降后仍可流动的少量格子交给运行时收敛
     this.camera = new Camera(w.w, w.h);
     this.renderer.minimap = new Minimap(w);
@@ -2197,6 +2206,8 @@ export class Game implements GameHooks {
     this.player.inv.add(ITEM_BY_KEY[VI_KEY.STARTER.SHORTSWORD], 1);
     this.camera.x = this.player.cx;
     this.camera.y = this.player.cy;
+    this.sfx.suppress = false;                            // 解除载入静音门
+    this.sfx.setListener(this.player.cx, this.player.cy); // 相机/玩家就位即校正 listener（fixedUpdate 每帧兜底）
     this.boss = null;
     // ---- 历史存档索引帧修复 ----
     // 旧版生成代码曾把多格家具的格内偏移写成【格索引】(0/1)而非【像素】(0/18)，
@@ -2626,6 +2637,7 @@ export class Game implements GameHooks {
       }
     }
     // 世界声监听器（原版 Main.Camera.Center）：世界坐标声按此衰减（2500px，LegacySoundPlayer）
+    this.sfx.suppress = false;   // 安全网：afterWorldLoad 中段抛异常导致门未解除时，首 tick 自动恢复有声
     this.sfx.setListener(this.camera.x, this.camera.y);
     // ---- 原版环境采样 + BGM 选曲（SceneMetrics/UpdateAudio_DecideOnNewMusic；15 tick 刷新） ----
     if (this.tickCount % 15 === 0) {
@@ -6849,7 +6861,7 @@ export class Game implements GameHooks {
       frameTrackArea(st, x, y);
       this.spawnDrop(x * TILE + 8, y * TILE + 8, dropKey, 1);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, '#B5A47D', 6, 1.5);
-      this.sfx.play('dig');
+      this.sfx.play('dig', 1, x * TILE + 8, y * TILE + 8);
       return;
     }
     // 门：竖排帧布局（Door.ts），通用锚点算法不适用，整扇移除
@@ -7165,7 +7177,7 @@ export class Game implements GameHooks {
       if (gelKey) this.spawnDrop(ax * TILE + 8, ay * TILE + 8, gelKey, 100, (Math.random() - 0.5) * 3, -3);
     }
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, isDemonHeart ? '#FF4060' : '#9A6AE0', 16, 2.5);
-    this.sfx.play('tink');
+    this.sfx.play('tink', 1, ax * TILE + 16, ay * TILE + 16);
     this.cb.onToast(isDemonHeart ? Lang.text('Mods.SandboxWorld.Toast.DemonHeartSmashed') : Lang.text('Mods.SandboxWorld.Toast.ShadowOrbSmashed'));
     // 成就：SMASHING_POPPET（:54359 event 7——每次砸珠/心都触发）
     this.achievements.notifyProgressionEvent(7);
@@ -9671,7 +9683,7 @@ export class Game implements GameHooks {
     // 瓦罐 frameY=0 在底行，与家具顶行相反）。瓦罐不掉自身（原版 SpawnThingsFromPot 只掉内容物）
     for (const [cx, cy] of cells) st.setTile(cx, cy, 0);
     // CheckPot 音效（普通瓦罐 SoundID 13 = Shatter.wav）+ 陶瓷碎片粒子
-    this.sfx.play('shatter');
+    this.sfx.play('shatter', 1, ax * TILE + 16, ay * TILE + 16);
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#9A6A5A', 10, 2.6, { life: 200, damp: 0.985, grav: 0.09 });
     this.spawnParticles(ax * TILE + 16, ay * TILE + 16, '#C4A48C', 6, 2.0, { life: 180, damp: 0.985, grav: 0.09 });
     this.potLoot(ax, ay, style);
@@ -9819,6 +9831,10 @@ export class Game implements GameHooks {
   }
 
   private updateSwingHits() {
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __pvpSw?: number[] };
+      (w.__pvpSw ??= [0, 0, 0, 0])[0]++;
+    }
     if (!this.swing) return;
     this.swing.t--;
     if (this.swing.t <= 0) { this.swing = null; return; }
@@ -9835,6 +9851,10 @@ export class Game implements GameHooks {
     const meleeDmg = this.swing.dmg ?? tool?.damage ?? swingCombat?.damage ?? 0;
     const noMelee = heldDef.magic || swingCombat?.noMelee;
     const isNet = swingVid === 1991 || swingVid === 3183 || swingVid === 4821;  // :42962 网特判
+    if (typeof window !== 'undefined') {
+      const w = window as unknown as { __pvpSw?: number[] };
+      (w.__pvpSw ??= [0, 0, 0, 0])[1]++;
+    }
     if (!isNet && (noMelee || meleeDmg <= 0)) return;
     // ---- 原版 ItemCheck_GetMeleeHitbox（Player.cs:44480）1:1：矩形判定非圆形 ----
     // 基础矩形 = ApplyUseStyle 三段 itemLocation（手部位置，公式同 drawUseItem）+ **恒 32×32**
@@ -10006,6 +10026,10 @@ export class Game implements GameHooks {
     // 自己 hostile + 对方 hostile/异队（InOpposingTeam）——与 Damage_PVP :13506-13510
     // 同构（原版 :43409 同队门 team!=0&&equal）
     if (this.net?.active && this.net.policy.pvpAllowed && this.player.hostile && !isNet) {
+      if (typeof window !== 'undefined') {
+        const w = window as unknown as { __pvpSw?: number[] };
+        (w.__pvpSw ??= [0, 0, 0, 0])[2]++;
+      }
       for (const rpEnt of this.remotePlayerProxies) {
         const rp = rpEnt as Player;
         const slot = (rp as unknown as { __netSlot?: number }).__netSlot;
@@ -13870,7 +13894,7 @@ export class Game implements GameHooks {
       if (torchStillAnchored(st, tx, ty, st.frameX[i])) continue;
       st.setTile(tx, ty, 0);
       this.spawnDrop(tx * TILE + 8, ty * TILE, VI_KEY.TORCH, 1);
-      this.sfx.play('dig');
+      this.sfx.play('dig', 1, tx * TILE + 8, ty * TILE + 8);
     }
   }
 

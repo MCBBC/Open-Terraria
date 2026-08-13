@@ -364,7 +364,9 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
 /** AddBuriedChest（1456 cs:35920）下落/门禁段 1:1：
  *  自 j 向下扫至 k < maxTilesY-10，逐行检查 anyShimmer / 幼虫 231 → 整体失败；
  *  首个 SolidTile（半砖/坡面不算，WorldGen.SolidTile）落定。
- *  ±2 邻域（InWorld 100 边距）有 Boulders{138,484,664,665,711-716}/祭坛 26/蜥蜴祭坛 237 → 失败。
+ *  ±2 邻域（InWorld 100 边距）有 Boulders{138,484,664,665,711-716}/祭坛 26/蜥蜴祭坛 237 → 失败
+ *  ——该检查在扫描循环内**逐行**执行（锚=当前行 k，cs:35992-36002），非仅起始行。
+ *  notNearOtherChests:true 时经 Chest.NearOtherChests（±25×±8 已有箱）拒绝（cs:36253 透传）。
  *  样式/战利品解析与 2×2 放置沿用本仓库 rollChestLoot 管线。 */
 export function placeBuriedChest(
   st: TileStore, rng: RNG, gs: GenState, chests: ChestSink,

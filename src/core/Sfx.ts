@@ -188,6 +188,11 @@ export class Sfx {
   muted = false;
   /** 主音量 0..1（M6 设置页） */
   master = 1;
+  /** 载入期静音门（Game 侧置位/解除）：afterWorldLoad 的 waterCheck 全图收敛期间，
+   *  killTile/breakTile/合并音会以 listener=(0,0) 满响（"进世界音效爆发"根因）。
+   *  只盖一次性播放入口（play/playWavFile/startTrackedLoop——playWav/playFiles
+   *  漏斗进 playWavFile 已被盖）；循环轨（天气/BGM/雨声）不经此门 */
+  suppress = false;
 
   /** 按需取缓冲：未命中时后台 fetch+decode，同步返回已就位缓冲或 null */
   private ensureBuffer(file: string): AudioBuffer | null {
@@ -294,6 +299,7 @@ export class Sfx {
    *  返回句柄 {stop, setPos}——setPos 按距离衰减刷新音量（ProjectileAudioTracker
    *  跟随弹体）。缓冲未就绪返回 null（调用方下 tick 重试即可）。 */
   startTrackedLoop(name: SfxName, vol: number, x: number, y: number): { stop(): void; setPos(px: number, py: number): void } | null {
+    if (this.suppress) return null;          // 载入期静音门（见字段注释）
     const list = WAV_MAP[name];
     if (!list || !list.length) return null;
     const ctx = this.ensure();
@@ -409,6 +415,7 @@ export class Sfx {
    *  vol 语义 = 原版 volumeScale（调用方传 1 = 原版默认）；原版各 case 的专属
    *  音量修正（FILE_CASE_VOL）在此单点统一乘，调用方无需手传修正系数 */
   playWavFile(file: string, vol = 1, x?: number, y?: number): boolean {
+    if (this.suppress) return false;         // 载入期静音门（见字段注释）
     const ctx = this.ensure();
     if (!ctx) return false;
     const v = this.atten(vol, x, y);
@@ -427,6 +434,7 @@ export class Sfx {
   }
 
   play(name: SfxName, vol = 1, x?: number, y?: number) {
+    if (this.suppress) return;               // 载入期静音门（见字段注释）
     // 优先原版素材，失败回退合成（master 在 playWavFile/osc 各自生效一次）。
     // 带坐标时衰减（atten），≤0 直接不播——合成回退也不触发
     if (x != null && y != null && this.atten(vol, x, y) <= 0) return;

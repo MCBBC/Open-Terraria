@@ -98,7 +98,21 @@ const STATUE_NO_EARLYMODE_LOOT = new Set([480, 82, 86, 170, 180, 171]);
  *  113 墙/114 之眼/115 饥饿者/118+119 水蛭体节在列——离屏永不因闲置消散；
  *  ★116 饿魂与 117 水蛭头【不在】名单（照原文，任务单曾列 117 系笔误）——水蛭头
  *  消散时其体节链经下方 despawn 链杀级联（原版 :51832-51841 段自查前段失效自灭） */
-const NO_DESPAWN_IDS = new Set([379, 380, 400, 437, 438, 690, 113, 114, 115, 118, 119]);
+/** DoesntDespawnToInactivity（NPC.cs:78584-78679）全量 + 690（CheckActive 头部
+ *  type==690&&ai0==0 门）。★14/15（EoW 体节/尾）必在——它们 SetDefaults boss=false
+ * （仅头 13 是 boss）又不在此前名单,离屏 750t 消散会触发链级联整链同灭 →
+ * "EoW 打两下自动战败"根因。139(Betsy 依赖 134 在场)/552-578(依赖 548 永恒
+ * 水晶在场)为条件项,单独判定 */
+const NO_DESPAWN_IDS = new Set([
+  8, 9, 11, 12, 14, 15, 36, 40, 41, 88, 89, 90, 91, 92, 96, 97, 99, 100,
+  113, 114, 115, 118, 119, 128, 129, 130, 131, 134, 135, 136, 246, 247, 248, 249,
+  263, 267, 328, 379, 380, 392, 393, 394, 396, 397, 398, 400, 422, 437, 438, 439, 440,
+  488, 492, 493, 507, 517, 548, 549, 551, 564, 565, 690,
+]);
+/** CheckActive flag2 强真名单（NPC.cs:78735-78758:boss 之外 type∈{7,10,13,35,36,
+ *  39,87,127-131,392-394,491,492} 恒视屏内）。13=EoW 头（即便 boss 位被换锚到
+ *  体节后,原头残段也不消散） */
+const ALWAYS_ACTIVE_IDS = new Set([7, 10, 13, 35, 36, 39, 87, 127, 128, 129, 130, 131, 392, 393, 394, 491, 492]);
 /** StatueSpawnedDropRarity（NPCID.cs:4795）：-1=不受限；≥0=按该概率整单出战利品 */
 const STATUE_DROP_RARITY: Record<number, number> = {
   480: 0.05, 82: 0.05, 86: 0.05, 48: 0.05, 490: 0.05, 489: 0.05,
@@ -118,7 +132,16 @@ const STATUE_DROP_RARITY: Record<number, number> = {
  *  月事件 Boss 只有波次进度与掉落（占 Boss 槽会误播"已被击败"/误写 downed/误
  *  发 Boss 药水），地牢守卫击杀原版完全静默。396/397(月总头/手,:14029 有 boss 位)
  *  与 664(:17333 语义存疑)暂不补入——月总以 398 锚定单槽，补入需先审击杀流。 */
-export const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657, 668]);
+/** 原版 SetDefaults boss=true 全量对账（NPC.cs 提取,2026-08-13）:
+ *  4/35/50/113/125/126/127/134/222/245/262/266/370/395/`396/397`/398/439/578/
+ *  636/657/`664`/668。★曾缺 396/397（月总头/手）与 664（附魔日晷族 Boss?——
+ *  实为 Plantera 二阶段前的腐化宝箱怪?以源码为准保留）+578(帝寒骏马?):
+ *  缺失会令部件离屏消散（EoW 14/15 同款 bug 隐患）
+ *  （注：块注释体内勿出现 `星斜` 序列，强调记号用反引号） */
+export const VANILLA_BOSS_IDS = new Set([
+  4, 13, 35, 50, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 396, 397, 398,
+  439, 578, 636, 657, 664, 668,
+]);
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -187,7 +210,10 @@ export class Enemy extends Entity {
   /** 本段跟随的前一段（非空 = 本段是身体段，跳过 AI 只做跟随） */
   wormFollow: Enemy | null = null;
   /** 上一 tick 位置（段跟随用：段复制前一段的旧位置 = 经典贪吃蛇链） */
-  prevX = 0; prevY = 0;
+  prevX = 0;
+  /** 存活 tick 计数(侏儒石化等用) */
+  gnomeAge = 0;
+  prevY = 0;
   /** EoW 掘地音效间隔（:52375-52395 soundDelay，距离/40 钳 10..20） */
   digSndDelay = 0;
   /** 击杀时生效的 npc.boss 位（DropEoWLoot :79212-79228：场上再无 13/14/15 才置位；
@@ -789,6 +815,30 @@ export class Enemy extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.prevX = this.x; this.prevY = this.y;
+    this.gnomeAge++;
+    // 侏儒 624 日光石化（NPC.cs:56252-56280 + :56232 ShouldTurnToStone——白天且
+    // 头上无实心遮挡 → 脚下实心 → PlaceTile(567 花园侏儒 style rand(5)) +
+    // bestiary RegisterKill + Achievement 24,2026-08-13）
+    if (this.vanillaId === 624 && !this.dead && this.gnomeAge > 60) {
+      const w = game.world as import('../world/World').World;
+      if (w?.clock?.isDay && w?.store) {
+        const st = w.store;
+        const tx = Math.floor(this.cx / 16), ty = Math.floor((this.y + this.h) / 16);
+        if (st.inBounds(tx, ty) && st.isSolid(tx, ty) && !st.isActive(tx, ty - 1)) {
+          let sheltered = false;
+          for (let dy = 1; dy <= 5; dy++) {
+            if (st.inBounds(tx, ty - dy) && st.isSolid(tx, ty - dy)) { sheltered = true; break; }
+          }
+          if (!sheltered) {
+            const style = Math.floor(Math.random() * 5);
+            st.setTile(tx, ty - 1, TILE_BY_KEY['v_567_garden_gnome'] ?? 0, style * 36, 0);
+            game.spawnParticles(this.cx, this.cy, '#E0E0E0', 5, 1, { life: 30 });
+            this.dead = true; this.hp = 0;
+            return;
+          }
+        }
+      }
+    }
     // 联机傀儡（房主权威快照驱动）：无本地 AI——P3.2 插值/外推推进 + 动画计时，
     // 打击/拾取等交互经 entityNet 上报房主结算
     if (this.netPuppet) {
@@ -1134,8 +1184,13 @@ export class Enemy extends Entity {
     // 僵尸/眼球白天游荡或上飞，一离屏就消失（原版天亮清夜怪的实际语义）。
     // Boss 默认豁免，但 despawnEncouraged（骷髅王离场/原版通用 EncourageDespawn）后
     // 同样倒数——且玩家死亡（player=null）时视为离屏（原版 CheckActive 不依赖玩家存活）
-    if (this.vanillaId === 488 || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
-      || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))) {
+    if (this.vanillaId === 488
+      || (this.vanillaId != null && this.vanillaId in TOWER_KEY)
+      || (this.vanillaId != null && NO_DESPAWN_IDS.has(this.vanillaId))
+      // 条件豁免（NPC.cs:78645-78679）：139 Betsy 需 134 在场；552-578 OOA 怪需 548
+      // 永恒水晶在场（事件怪不应离屏自灭）
+      || (this.vanillaId === 139 && this.anyNpcAlive(game, 134))
+      || (this.vanillaId != null && this.vanillaId >= 552 && this.vanillaId <= 578 && this.anyNpcAlive(game, 548))) {
       // 训练假人不参与 despawn（原版 netAlways + TileEntity 生命周期由锚 tile 管理）；
       // 四塔同样豁免（DoesntDespawnToInactivity 名单 NPC.cs:78634-78635 含 422/493/507/517
       // ——事件建筑离屏消失会让 UpdateLunarApocalypse 永远等不到塔死）
@@ -1146,7 +1201,9 @@ export class Enemy extends Entity {
       const dxp = pp ? Math.abs(pp.cx - this.cx) : Infinity;
       const dyp = pp ? Math.abs(pp.cy - this.cy) : Infinity;
       // 屏内矩形（原版 rectangle2：sWidth/sHeight+2w 固定 1920×1080 → 半轴约 62×35 格）
-      if (dxp < TILE * 62 && dyp < TILE * 35) {
+      if (dxp < TILE * 62 && dyp < TILE * 35
+        // flag2 强真名单（:78735-78758）:EoW 头 13/毁灭者头 134 族等恒视屏内
+        || (this.vanillaId != null && ALWAYS_ACTIVE_IDS.has(this.vanillaId))) {
         this.despawnTimer = 750;
         this.despawnEncouraged = false;
       } else {
@@ -1171,6 +1228,12 @@ export class Enemy extends Entity {
       }
     }
     this.pushHistory();   // 原版 npc.oldPos/oldRot（DrawNPC 拖尾族 419/125-131 读）
+  }
+
+  /** NPC.AnyNPCs（NPC.cs:6611-6630 子集）：场上是否存在指定 vanilla id 的存活段
+   *  ——DoesntDespawnToInactivity 条件豁免（139 依赖 134 / 552-578 依赖 548）用 */
+  private anyNpcAlive(game: GameHooks, id: number): boolean {
+    return (game.enemies() as Enemy[]).some((e) => !e.dead && e.vanillaId === id);
   }
 
   /** 原版 EncourageDespawn(despawnTime)（NPC.cs:7228-7235）：timeLeft 封顶 + 置鼓励旗 */
@@ -1209,6 +1272,139 @@ export class Enemy extends Entity {
     this.vx *= this.onGround ? 0.8 : 0.98;
   }
 
+  /** NPCID.Sets.SlimeCanContainItems（NPCID.cs:4791）：可携带体内物品的史莱姆族 */
+  private static readonly SLIME_CAN_CONTAIN_ITEMS = new Set([1, 59, 147, 184, 537]);
+
+  /** AI_001_Slimes_GenerateItemInsideBody（NPC.cs:62150-62258）1:1：num=Next(4) 四桶；
+   *  isBallooned（风气球 ai[0]==-999，:62154）→ 13 桶风筝/纸飞机。
+   *  WorldGen.Skyblock.lowTiles 三处修正（:62156-62164 / :62199-62207 / :62230-62237）
+   *  依赖天空盒世界——本仓无天空盒世界（NpcDrops evalCond 'SkyblockIsUp' 同判恒
+   *  false）→ 跳过。case 0 default 的 netMode!=0 分支（多人 2997 虫洞药水）单人不可达 */
+  private slimeGenItemInsideBody(isBallooned: boolean): number {
+    const roll = (n: number) => Math.floor(Math.random() * n);              // Next(n)
+    const rollR = (a: number, b: number) => a + Math.floor(Math.random() * (b - a)); // Next(a,b) 含a不含b
+    let num = roll(4);
+    if (isBallooned) {
+      switch (roll(13)) {                                                     // :62166-62191 风筝桶
+        case 1: return 4368; case 2: return 4369; case 3: return 4370; case 4: return 4371;
+        case 5: return 4612; case 6: return 4674;
+        case 7: case 8: case 9: return 4343;
+        case 10: case 11: case 12: return 4344;
+        default: return 4367;
+      }
+    }
+    switch (num) {
+      case 0:                                                                // 药水桶 :62193
+        switch (roll(7)) {
+          case 0: return 290;            // 迅捷
+          case 1: return 292;            // 铁皮
+          case 2: return 296;            // 光标
+          case 3: return 2322;           // 挖矿
+          default: return 2350;          // 回忆（2997 虫洞仅多人，:62200-62203）
+        }
+      case 1:                                                                // 火把/炸弹桶 :62196
+        num = roll(4);
+        return num === 0 ? 8 : num === 1 ? 965 : num === 2 ? 166 : 58;        // 火把/荧光棒/炸弹/红心
+      case 2: {                                                              // 矿物桶 :62222
+        if (roll(2) === 0) return rollR(11, 15);   // 11-14 铜/铁/银/金矿
+        return rollR(699, 703);                    // 699-702 同序锭
+      }
+      default:                                                                // 钱币桶 :62239
+        num = roll(3);
+        return num === 0 ? 71 : num === 1 ? 72 : 73;   // 铜/银/金币（堆叠档在掉落侧）
+    }
+  }
+
+  /** AI_001_Slimes 体内物品主掷段（NPC.cs:60750-60960）：首 AI 帧 ai[1]==0 且 value>0
+   *  时掷内容物——先置 -1（空）再最多 num2 次机会，任一分支赋正值后即停（:60777-60781）。
+   *  netID -5/-4（地牢/丛林彩装变种）整体不掷（:60815 continue），-6 额外 +4 次
+   *  （:60769），-10（蜜蜂丛林变种）走 1124/1125/314/5395 特例（:60840），史莱姆雨
+   *  +2 次（:60773）。跳过分支（登记）：
+   *  - WorldGen.Skyblock.{lowTiles,noHellstone,noFossils,noLifeCrystals} 六处（:60757/
+   *    :60806/:60813/:60822/:60827/:60859/:60892）——天空盒世界未实装恒 false
+   *  - Item.GetRandomVoiceItem（:60828-60830，天空盒子分支内）——连带跳过
+   *  - Main.vampireSeed（:60920-60923 地下 1/13 → 9 木头）——1.4.5 vampirism 哈希
+   *    秘密种子无文本映射（SeedFlags 无位，参照 infectedSeed 预留位惯例） */
+  private slimeRollContainedItem(game: GameHooks): void {
+    const vid = this.vanillaId;
+    if (vid === null || !Enemy.SLIME_CAN_CONTAIN_ITEMS.has(vid)) return;
+    if (this.ai1 !== 0) return;                    // 已掷过：-1=空 / >0=物品（只掷一次）
+    const netId = this.vanillaNetId !== 0 ? this.vanillaNetId : vid;
+    const value = this.spawnedFromStatue ? 0                       // 与死亡掉落链同式（:6258 侧）
+      : (netId === vid ? (this.def.value ?? npcValueOf(netId)) : npcValueOf(netId));
+    if (value <= 0) return;                        // :60750 value>0 门
+    const w = game.world;
+    const sf = w.seedFlags;
+    this.ai1 = -1;                                 // :60752 先置空
+    const roll = (n: number) => Math.floor(Math.random() * n);
+    let maxValue = 20;                             // :60753 主桶分母
+    let maxValue2 = 40;                            // :60754 副桶分母
+    let num2 = 1;                                  // :60755 掷骰次数
+    // WorldGen.Skyblock.lowTiles（:60757-60768：maxValue2=20/num2+4/maxValue=15，-6 再+5）
+    // ——天空盒世界未实装，跳过
+    if (netId === -6) num2 += 4;                   // :60769-60772
+    if (w.weather.slimeRain) num2 += 2;            // :60773-60775 Main.slimeRain
+    const surfaceY = w.groundLevel;                // Main.worldSurface（tile）
+    const yTile = this.y / TILE;
+    const rockLayer = (y: number): boolean => (sf.remix   // WorldGen.isThisInTheRockLayer :26916
+      ? (y > surfaceY && y <= w.rockLevel) : y > w.rockLevel);
+    for (let i = 0; i < num2; i++) {
+      if (this.ai1 !== -1) break;                  // :60777-60781 已中即停
+      if (vid === 59) {                            // :60784 岩浆史莱姆
+        if (sf.remix && roll(maxValue) === 0) {    // Main.remixWorld
+          this.ai1 = this.slimeGenItemInsideBody(this.ai0 === -999);
+        }
+        // else if Skyblock.noHellstone && downedBoss3 && Next(15)==0 → 174 地狱石（:60789-60793）
+        //   ——天空盒未实装跳过
+      } else if (yTile > surfaceY && (vid === 147 || vid === 184)) {  // :60796 地下棘刺史莱姆
+        // 两 lowTiles 子分支（:60800-60811）与普通分支同体 → 合并
+        if (roll(maxValue2) === 0) this.ai1 = roll(2) === 0 ? 1103 : 593;  // 淤泥/雪块
+      } else if (vid === 537) {                    // :60812 沙漠史莱姆
+        // Skyblock.noFossils && Next(5)==0 → 3347 沙漠化石（:60813-60816）：天空盒未实装跳过
+      } else {
+        if (vid !== 1 || netId === -5 || netId === -4) continue;   // :60815 仅蓝史莱姆族
+        let num4 = 500;                            // :60817 史莱姆法杖分母
+        if (sf.noTraps) num4 = 20;                 // Main.noTrapsWorld
+        else if (sf.getGoodWorld) num4 = 100;      // Main.getGoodWorld
+        else if (this.cy < surfaceY * TILE) num4 = -1;             // 地表蓝史莱姆不掷法杖
+        // isThisInTheRockLayer && (noLifeCrystals||lowTiles) && !AnyLifeCrystalSlimes() &&
+        //   Next(200)==0 → 29 生命水晶（:60822-60826）：天空盒未实装跳过
+        // Skyblock.lowTiles && 地下 && Next(1000)==0 → 语音物品（:60827-60830）：同上连带跳过
+        const genuineParty = !!(game as unknown as { partyState?: { genuineParty?: boolean } })
+          .partyState?.genuineParty;               // BirthdayParty.GenuineParty（真派对）
+        if (genuineParty && this.cy < surfaceY * TILE) {            // :60831-60839 地表真派对
+          this.ai1 = roll(2) === 0 ? 3736 + roll(3) : 1345;         // Next(3736,3739) 气球/彩纸
+        } else if (netId === -10 && roll(20) === 0) {               // :60840-60849 蜜蜂丛林变种
+          const num5 = sf.notTheBees ? roll(4) : roll(3);           // notTheBeesWorld 扩到 314/5395
+          this.ai1 = num5 === 1 ? 1125 : num5 === 2 ? 314 : num5 === 3 ? 5395 : 1124;
+        } else if (roll(maxValue) === 0) {                          // :60850-60854 主桶
+          this.ai1 = this.slimeGenItemInsideBody(this.ai0 === -999);
+        } else if (roll(maxValue2) === 0) {                         // :60855 副桶
+          if (yTile <= surfaceY) {
+            // Skyblock.lowTiles 表层分支（:60859-60876：194/195/62/27）：天空盒未实装跳过
+            this.ai1 = 751;                        // 云块
+          } else if (!rockLayer(yTile)) {                            // :60882-60887 浅地下
+            const num7 = roll(3);
+            this.ai1 = num7 === 1 ? 3 : num7 === 2 ? 9 : 2;         // 石/木/土
+          } else if (roll(10) === 0) {
+            this.ai1 = 3609;                        // :60888-60890 传送带
+          } else {
+            // Skyblock.lowTiles && hardMode 矿桶（:60892-60902）：天空盒未实装跳过
+            const num9 = roll(4);                   // :60904-60910 深层
+            this.ai1 = num9 === 1 ? 150 : num9 === 2 ? 3086 : num9 === 3 ? 3081 : 3; // 蛛网/花岗岩/大理石/石
+          }
+        } else if (num4 > 0 && roll(num4) === 0) {
+          this.ai1 = 539;                           // :60911-60913 史莱姆法杖
+        } else if (sf.getGoodWorld && yTile > surfaceY && roll(num4) === 0) {
+          this.ai1 = 147;                           // :60914-60916 ftw 地下 → 棘刺丛林史莱姆物
+        } else if (i === 0 && sf.remix && this.ai0 !== -999 && roll(3) === 0) {
+          this.ai1 = 75;                            // :60917-60919 首掷 remix → 生命水晶星史莱姆
+        }
+        // Main.vampireSeed（:60920-60923）：哈希秘密种子无载体，跳过
+      }
+    }
+  }
+
   /** AI_001_Slimes 原版核（1.4.5.6 NPC.cs:60735+）：
    *  站定 vx*=0.8；ai[0] 每 tick +1（激愤 +1 额外）；
    *  阶段判定（num54=-1000）：ai0>=0 → 小跳（vy=-6, vx+=2*dir, ai0=-1120）；
@@ -1220,8 +1416,10 @@ export class Enemy extends Entity {
   private slimeAI(game: GameHooks, player: Player | null) {
     // ai[0]==-999：风气球挂载冻结（NPC.cs:61441 帧0不行动，位置由气球驱动）
     if (this.ai0 === -999) return;
+    // ---- 体内物品掷骰（NPC.cs:60750 主掷段，只掷一次）----
+    // 置于光位前：首帧即得 ai[1]（原版此段在 :60737 星史莱姆光之后，晚一帧显色）
+    this.slimeRollContainedItem(game);
     // ---- 史莱姆族点光（cs:61445-61456 / :61508-61515 / :61527-61531 / :61866-61870）----
-    // （:60737/:61152/:61289 三处 ai[1] 物品变体光依赖 SlimeCanContainItems 未移植，登记跳过）
     if (this.vanillaId === 244) {
       // :61444-61456 彩虹史莱姆 = Main.Disco 三色（6 相状态机 ≈ hsl 时间色，s=1 l=0.5）
       const [dr, dg, db] = hslToRgb((visEffectFrames() / 222) % 1, 1, 0.5);
@@ -1370,6 +1568,23 @@ export class Enemy extends Entity {
     // AI_001 尾部颜色渐变（NPC.cs:60971 起为 slime(type 1) 专属段；
     // 此前误挂在 zombieAI——守卫 vanillaId!==1 使其全程空转，移回 slimeAI）
     this.slimeColorTick(game);
+    // ---- SlimeCanContainItems 三处 ai[1] 物品变体光（NPC.cs:60737/:61152/:61289）----
+    // 放染色后与原版同序（:61152 读渐变后的 this.color）。:60740 同段 dust 228 星尘
+    // （1/12 帧闪烁上飘）未接——repo 粒子桶无 dust 228 语义，登记
+    if (this.ai1 === 75 && this.vanillaId === 1) {
+      // :60737-60740 type1 携 29 生命水晶：num=0.3 → (0.24,0.21,0.03) @ 中心格
+      this.mergeLightRGB([0.8 * 0.3, 0.7 * 0.3, 0.1 * 0.3]);
+    } else if (this.ai1 === 364 || this.ai1 === 1104 || this.ai1 === 365
+      || this.ai1 === 1105 || this.ai1 === 366 || this.ai1 === 1106) {
+      // :61152 金属矿史莱姆（钴/钯金/秘银/山铜/精金/钛金）：this.color 各通道/500
+      // @ position（顶左格，非中心）——lavaImmune/防御+30/伤害×3/悬浮重力等行为段
+      // （:61095-61155）属 AI_001 行为侧，本批只接光位
+      const c = this.colorRGBA ?? [0, 0, 0, 0];
+      this.mergeLightRGB([c[0] / 500, c[1] / 500, c[2] / 500], { x: this.x, y: this.y });
+    } else if (this.ai1 === 314) {
+      // :61289 草药史莱姆 (0.4,0.9,1) @ 中心格（尘 41 每帧闪烁 :61285 未接，登记）
+      this.mergeLightRGB([0.4, 0.9, 1]);
+    }
   }
 
   private zombieAI(game: GameHooks, player: Player | null) {
@@ -6287,6 +6502,8 @@ export class Enemy extends Entity {
           luck: p.luck,
           moonEvent: game.moonEventCtx?.() ?? undefined,
           ai3: this.ai3, // NPC ai[3]：RedHatSkeletron / 光之女皇暴怒掉落条件
+          ai1: this.ai1, // NPC ai[1]：史莱姆体内物品 id（SlimeBodyItemDropRule 数据源，
+          //  Enemy.slimeRollContainedItem 首帧掷定；-1=掷过为空，0=未掷）
           // NPC.HasPlayerTarget（NPC.cs:6603）：TryTrackingTarget 无距离门，
           // 单人 = 玩家存活非 ghost——悠悠球五条件（Conditions.cs:1136-1244）数据源
           hasPlayerTarget: !!p && !p.dead,

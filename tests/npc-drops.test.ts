@@ -67,7 +67,8 @@ describe('掉落提取表（静态）', () => {
   it('NPC.value 表：普通怪 + 史莱姆负 id 变体（SetDefaultsFromNetId）', () => {
     expect(npcValueOf(3)).toBe(60);        // 僵尸
     expect(npcValueOf(4)).toBe(30000);     // EoC
-    expect(npcValueOf(1)).toBe(0);         // 蓝史莱姆本体
+    expect(npcValueOf(1)).toBe(25);        // 蓝史莱姆本体（SetDefaults :8521 value=25f；
+    //  曾被提取器全文误匹配 clobber 成 0 → 不掉钱 + 体内物品 value>0 门永假）
     expect(npcValueOf(-1)).toBe(100);      // 大史莱姆变体
     expect(npcValueOf(-4)).toBe(10000);    // 金史莱姆
     expect(npcValueOf(-5)).toBe(10);       // 小史莱姆（母史莱姆分裂）
@@ -288,5 +289,58 @@ describe('提取器三盲区 + 求值器门（2026-08-13 审计修复）', () =>
     const base = mean(0), good = mean(1), bad = mean(-1);
     expect(good).toBeGreaterThan(base * 1.03);   // luck>0 取两轮较大
     expect(bad).toBeLessThan(base * 0.97);       // luck<0 取两轮较小
+  });
+});
+
+describe('史莱姆体内物品（SlimeBodyItemDropRule）', () => {
+  it('ai1<=0 不触发（CanDrop :14-18）；>0 掉出对应物品且堆叠在档位内', () => {
+    // 未掷（0）/掷空（-1）→ DoesntFillConditions：体内物（火把 8）绝不出——
+    // 凝胶/钱币等其他规则照常掉，故按"目标物品缺席"断言而非零掉落
+    expect(sample(1, 60, { ai1: 0 }).perKill.every((k) => !k.includes(8))).toBe(true);
+    expect(sample(1, 60, { ai1: -1 }).perKill.every((k) => !k.includes(8))).toBe(true);
+    // 全档位表逐物品核：必出 + 堆叠闭区间 [min,max]（GetDropInfo :36-112）
+    const table = (dropData as { slimeBody: Record<string, [number, number]> }).slimeBody;
+    for (const [id, [mn, mx]] of Object.entries(table)) {
+      const n = Number(id);
+      for (let i = 0; i < 40; i++) {
+        const res = resolveDrops(mkCtx({ rng: new RNG(i * 31 + n), netId: 1, type: 1, ai1: n }));
+        const hit = res.drops.find((d) => d.id === n);
+        expect(hit, `item ${id} 未掉出`).toBeTruthy();
+        expect(hit!.n, `item ${id} 堆叠 ${hit!.n} 越界 [${mn},${mx}]`).toBeGreaterThanOrEqual(mn);
+        expect(hit!.n).toBeLessThanOrEqual(mx);
+      }
+    }
+  });
+
+  it('整合：Enemy 首帧掷定 ai1（type 1 value=25>0 过门），物品 id 全在掷骰表内', async () => {
+    const { Enemy } = await import('../src/entities/Enemy');
+    const { World } = await import('../src/world/World');
+    const w = new World(80, 80, 42, 'open');
+    w.groundLevel = 42; w.rockLevel = 60;
+    const hooks = {
+      world: w, player: null,
+      playSfx: () => {}, addDamageNumber: () => {}, spawnParticles: () => {},
+      spawnDrop: () => null, damagePlayer: () => {},
+      entities: { add: () => {} }, enemies: () => [] as unknown[],
+    } as never;
+    const ALLOWED = new Set([-1, 2, 3, 8, 9, 11, 12, 13, 14, 29, 58, 71, 72, 73, 75, 147,
+      150, 166, 290, 292, 296, 314, 539, 699, 700, 701, 702, 751, 965, 1103, 1104, 1105,
+      1106, 1124, 1125, 1345, 2322, 2350, 3081, 3086, 3609, 364, 365, 366, 3736, 3737, 3738,
+      4343, 4344, 4367, 4368, 4369, 4370, 4371, 4612, 4674]);   // 含 genItem 矿石桶 11-14
+    const rolled = new Set<number>();
+    for (let i = 0; i < 400; i++) {
+      const e = Enemy.fromVanilla(1, 50 * 16, 50 * 16)!;
+      e.fixedUpdate(1 / 60, hooks);
+      expect(e.ai1).not.toBe(0);              // 首帧必掷（-1 或物品 id）
+      expect(ALLOWED.has(e.ai1), `掷出表外物品 ${e.ai1}`).toBe(true);
+      if (e.ai1 > 0) rolled.add(e.ai1);
+    }
+    expect(rolled.size).toBeGreaterThan(3);   // 采样确实掷出多种物品
+    // 只掷一次：第二帧不再变化
+    const e2 = Enemy.fromVanilla(1, 50 * 16, 50 * 16)!;
+    e2.fixedUpdate(1 / 60, hooks);
+    const first = e2.ai1;
+    e2.fixedUpdate(1 / 60, hooks);
+    expect(e2.ai1).toBe(first);
   });
 });

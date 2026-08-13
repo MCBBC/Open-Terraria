@@ -6,7 +6,7 @@
 //  C. MinionProj.ts：族召唤音（首帧）+ 阿比盖尔挥击 + 射弹出膛（376 小鬼火球 Item_20）+
 //     OOA 哨兵放置/开火音
 // 全部断言走 mock 的 game.playSfxFiles 录音（不触真实音频）。
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { Enemy } from '../src/entities/Enemy';
 import { MinionProj } from '../src/entities/MinionProj';
 import { Player } from '../src/entities/Player';
@@ -15,6 +15,7 @@ import { World } from '../src/world/World';
 import { TileStore } from '../src/world/TileStore';
 import { TILE } from '../src/core/constants';
 import { vanillaSoundFiles } from '../src/data/vanillaNpcs';
+import { Sfx } from '../src/core/Sfx';
 import type { GameHooks } from '../src/entities/types';
 
 // ---------- DD2 侧 mock（bossAI-dd2.test.ts 同款 + playSfxFiles 录音） ----------
@@ -282,5 +283,59 @@ describe('C. MinionProj.ts 族专属音', () => {
     expect(played(sfx, 'pal_foxparks')).toHaveLength(1);
     for (let k = 0; k < 19; k++) m.fixedUpdate(1, hooks);
     expect(played(sfx, 'pal_summon')).toHaveLength(1);
+  });
+});
+
+// ===========================================================================
+// D. 载入期静音门（suppress，2026-08-13"进世界音效爆发"修复批）：
+//    afterWorldLoad 的 waterCheck 全图收敛期间 Game 置位，三个一次性播放入口直接
+//    短路（不触 ensure = 不建 AudioContext / 不起后加载）。node 环境桩 window。
+// ===========================================================================
+const windowBackup = (globalThis as { window?: unknown }).window;
+
+describe('D. 载入期静音门（Sfx.suppress 三入口短路）', () => {
+  beforeEach(() => {
+    (globalThis as { window?: unknown }).window = {};  // AudioContext 缺失 → ensure 理应返回 null
+  });
+  afterEach(() => {
+    (globalThis as { window?: unknown }).window = windowBackup;
+  });
+
+  /** spy ensure：返回 null（模拟无 AudioContext），记录触达次数 */
+  function spyEnsure(s: Sfx) {
+    const p = s as unknown as { ensure: (silent?: boolean) => unknown; calls: number[] };
+    p.calls = [];
+    p.ensure = (silent?: boolean) => { p.calls.push(silent ? 1 : 0); return null; };
+    return p;
+  }
+
+  it('suppress=true：play/playWavFile/startTrackedLoop 一律不触 ensure', () => {
+    const s = new Sfx();
+    const spy = spyEnsure(s);
+    s.suppress = true;
+    s.play('dig', 1, 100, 100);
+    expect(s.playWavFile('Dig_0', 1, 100, 100)).toBe(false);
+    expect(s.startTrackedLoop('dig', 1, 100, 100)).toBeNull();
+    expect(spy.calls).toHaveLength(0);          // 连 AudioContext 都不建
+  });
+
+  it('suppress=false（默认）：正常路径 ensure 被触达', () => {
+    const s = new Sfx();
+    const spy = spyEnsure(s);
+    expect(s.suppress).toBe(false);             // 默认关——门只由 Game 载入窗临时开
+    s.play('dig', 1, 100, 100);                 // playWav 失败回退合成也要先 ensure
+    expect(spy.calls.length).toBeGreaterThan(0);
+    expect(s.playWavFile('Dig_0', 1, 100, 100)).toBe(false);  // ensure 返回 null → false
+  });
+
+  it('清除后恢复播放（门不粘滞）', () => {
+    const s = new Sfx();
+    const spy = spyEnsure(s);
+    s.suppress = true;
+    s.play('chop', 1, 100, 100);
+    expect(spy.calls).toHaveLength(0);
+    s.suppress = false;
+    s.play('chop', 1, 100, 100);
+    expect(spy.calls.length).toBeGreaterThan(0);
   });
 });
