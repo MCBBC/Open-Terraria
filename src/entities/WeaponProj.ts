@@ -19,12 +19,14 @@ import { canHit } from '../physics/LineOfSight';
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
 function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0): void {
-  // drawSize=绘制尺寸(缺省取碰撞盒 w)——细剑族贴图 32×32 原尺寸,碰撞盒 18 独立
-  // (原版投射物绘制=贴图原生尺寸,与 width/height 碰撞盒解耦)
-  const dw = drawSize > 0 ? drawSize : e.w;
+  // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
+  // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
+  const img0 = projSprite(projId);
+  const natural = drawSize < 0 && img0 && img0.complete && img0.naturalWidth > 0;
+  const dw = natural ? img0!.naturalWidth : drawSize > 0 ? drawSize : e.w;
   const ctx = r.canvas.getContext('2d');
   if (!ctx) return;
-  const img = projSprite(projId);
+  const img = img0;
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
   ctx.translate(e.x + e.w / 2, e.y + e.w / 2);
@@ -1077,14 +1079,17 @@ export class FlailProj extends Entity {
 // ================= 手雷/炸弹/炸药（aiStyle 16，AI_016 引信爆炸） =================
 
 export class GrenadeProj extends Entity {
+  // 碰撞盒 1:1（Projectile.SetDefaults :846-869）：炸弹 28=22×22 / 炸药棍 29=10×10 /
+  // 手雷 30=14×14——此前统一 14×14（雷管判定盒虚大 2 倍）
   w = 14; h = 14;
   vx: number;
   vy: number;
   damage: number;
   projId: number;
-  /** 引信（原版 timeLeft：手雷 180 / 炸弹 150 / 炸药 135） */
+  /** 引信 timeLeft 1:1（SetDefaults :10348-10372）：炸弹 28=180 / 炸药棍 29=300 /
+   *  手雷 30=180——此前误写 150/135/180（引信时长不对的根源） */
   fuse: number;
-  onExplode: (x: number, y: number, damage: number) => void;
+  onExplode!: (x: number, y: number, damage: number) => void;
   private rot = 0;
   dead = false;
 
@@ -1097,22 +1102,28 @@ export class GrenadeProj extends Entity {
     this.fuse = fuse;
     this.projId = projId;
     this.onExplode = onExplode;
+    const hb = projId === 28 ? 22 : projId === 29 ? 10 : 14;
+    this.w = hb; this.h = hb;
   }
 
   draw(r: Renderer, cam: Camera): void {
-    drawProj(r, cam, this, this.projId, this.rot, '#408040');
+    // 原版投射物绘制 = 贴图原生尺寸 × scale 1（与碰撞盒解耦）——雷管 29 贴图 10×32
+    // 此前按碰撞盒宽 14 拉方成 14×44.8（"雷管贴图这么大个"根因）
+    drawProj(r, cam, this, this.projId, this.rot, '#408040', 1, -1);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
-    this.rot += Math.hypot(this.vx, this.vy) * 0.03;
+    // 旋转 = 滚动（AI_016 :44913 rotation += velocity.X × 0.1；28/29/30 不在排除表）——
+    // 此前自造 speed×0.03 全程自旋，与原版"落地滚、空中缓摆"不符
+    this.rot += this.vx * 0.1;
     if (--this.fuse <= 0) {
       this.dead = true;
       this.onExplode(this.x + this.w / 2, this.y + this.h / 2, this.damage);
       return;
     }
-    // AI_016：重力 + 弹跳（碰墙法向反弹，保部分动能）。
-    // 碰撞探测用「底边中点」而非中心——中心探测会让 14px 弹体在地面沉降 ~4px 嵌入
-    this.vy = Math.min(this.vy + 0.3, 16);
+    // AI_016：重力 0.2/tick（:44897 velocity.Y += 0.2f；曾误用 0.3）+ 弹跳。
+    // 碰撞探测用「底边中点」而非中心——中心探测会让弹体在地面沉降 ~4px 嵌入
+    this.vy = Math.min(this.vy + 0.2, 16);
     let nx = this.x + this.vx;
     let ny = this.y + this.vy;
     const st = game.world.store;
@@ -1126,7 +1137,8 @@ export class GrenadeProj extends Entity {
     }
     if (solidAt(nx + this.w / 2, ny + this.h - 1)) {
       if (this.vy > 1) { this.vy = -this.vy * 0.5; } else { this.vy = 0; }
-      this.vx *= 0.92;
+      // 着地滚动摩擦（:44888 velocity.X × 0.97；雷管 29 追加 ×0.99）；曾 0.92 停太急
+      this.vx *= this.projId === 29 ? 0.96 : 0.97;
       ny = this.y;
     }
     this.x = nx;

@@ -85,16 +85,17 @@ const STATUE_DROP_RARITY: Record<number, number> = {
 };
 
 /** 原版 Boss 头/主体 id（部件不标记:击杀部件不应出 Boss 退场流程）。
- *  EoC4/世吞13-15(头13 为 Boss,身14尾15 不标)/骷髅王35+手36/地牢守卫68/史莱姆王50/
- *  血肉墙113/双子125,126/骷髅Prime127/毁灭者134/蜂后222/石巨人245/世纪之花262/克脑266/
- *  猪鲨370/火星飞碟395(SetDefaults boss=true,:13993)/月总核心398/异教徒439/光皇636/
- *  史莱姆皇后657 */
-export const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657,
-  // 月事件 Boss（原版 NPCID.boss 族,SetDefaults boss=true）：哀木 325 / 南瓜王 327 /
-  // 常绿尖叫怪 344 之外的三王——冰女王 345 / 圣诞坦克 346（血条/咆哮/击败记账）
-  325, 327, 345, 346,
-  // 鹿角怪 668（SetDefaults boss=true——曾漏登记：F6 召唤不进 Boss 槽/无公告/击杀无 defeated 记账）
-  668]);
+ *  与 1456 SetDefaults boss=true 全集逐块对齐（2026-08-13 整体 review 复核）：
+ *  4 EoC / 35 骷髅王 / 50 史莱姆王 / 113 血肉墙 / 125,126 双子 / 127 Prime /
+ *  134 毁灭者 / 222 蜂后 / 245 石巨人 / 262 世纪之花 / 266 克脑 / 370 猪鲨 /
+ *  395 火星飞碟(:13993) / 398 月总核心 / 439 异教徒 / 636 光皇 / 657 史莱姆皇后 /
+ *  668 鹿角怪 / 13-15 世吞三段（原版 :79225 动态置位）。
+ *  ★曾在集合里的 68 地牢守卫(:9584 无 boss 位)、325 哀木/327 南瓜王(:13047)、
+ *  345 冰女王/346 圣诞坦克(:13301)——SetDefaults 均无 boss=true，已移除：
+ *  月事件 Boss 只有波次进度与掉落（占 Boss 槽会误播"已被击败"/误写 downed/误
+ *  发 Boss 药水），地牢守卫击杀原版完全静默。396/397(月总头/手,:14029 有 boss 位)
+ *  与 664(:17333 语义存疑)暂不补入——月总以 398 锚定单槽，补入需先审击杀流。 */
+export const VANILLA_BOSS_IDS = new Set([4, 13, 35, 50, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657, 668]);
 /** 训练假人 tile 378（v_378_target_dummy；dummyAI 锚定判定用） */
 const DUMMY_TILE_ID = TILE_BY_KEY['v_378_target_dummy'] ?? -1;
 
@@ -325,7 +326,10 @@ export class Enemy extends Entity {
       const dxC = fx.cx - this.cx, dyC = fx.cy - this.cy;
       const dist = Math.hypot(dxC, dyC);
       if (dist > 0.01) {
-        const shrink = (dist - this.w) / dist;
+        // :52300-52302 getGoodWorld 且 type∈13-15 → num64=62（段间距拉宽）；其余蠕虫族不覆写
+        const vid = this.vanillaId ?? 0;
+        const gap = (w.seedFlags?.getGoodWorld && vid >= 13 && vid <= 15) ? 62 : this.w;
+        const shrink = (dist - gap) / dist;
         this.x += dxC * shrink;
         this.y += dyC * shrink;
         this.visAngle = Math.atan2(dyC, dxC) + Math.PI / 2;
@@ -410,7 +414,9 @@ export class Enemy extends Entity {
       // 全向舵（:52511-52597，与毁灭者地下核同构）
       const sameX = (this.vx > 0 && tvx > 0) || (this.vx < 0 && tvx < 0);
       const sameY = (this.vy > 0 && tvy > 0) || (this.vy < 0 && tvy < 0);
-      if (sameX && sameY) {
+      // :52513 首分支 = 四条件【跨轴 OR】(sameX || sameY)——单轴同向即走温和支；
+      // 曾抄成 &&（毁灭者 :50481/:50500 才是 &&/|| 双块结构，勿混）
+      if (sameX || sameY) {
         if (this.vx < tvx) this.vx += acc; else if (this.vx > tvx) this.vx -= acc;
         if (this.vy < tvy) this.vy += acc; else if (this.vy > tvy) this.vy -= acc;
         if (Math.abs(tvy) < maxSpd * 0.2 && ((this.vx > 0 && tvx < 0) || (this.vx < 0 && tvx > 0))) {
@@ -4800,8 +4806,13 @@ export class Enemy extends Entity {
       this.aiInit = true;
       this.ai0 = 500;                        // :20799-20801 初始 500
       this.ai1 = 0; this.ai2 = 0; this.ai3 = 0;
+      if (vid === 172) this.spawnAlpha = 255;  // :20797-20804 alpha 0 起步（spawnAlpha=255 对应不可见）
     }
-    // 172 符文法师淡入（:20797-20809：alpha 每帧 +1；受击归零——近似为受击清 iframes 内的透明度不可达，仅记）
+    // 172 符文法师淡入（:20797-20809：alpha 每帧 +1 ≈ spawnAlpha -1/t；受击归零重淡）
+    if (vid === 172) {
+      if (this.justHit) this.spawnAlpha = 255;
+      if (this.spawnAlpha > 0) this.spawnAlpha = Math.max(0, this.spawnAlpha - 1);
+    }
     // ---- ① 传送执行（:20811-20968）：目的地待执行 → 双端 FX + 改写 ----
     if (this.ai2 !== 0 && this.ai3 !== 0) {
       this.casterTeleportBurst(game);
@@ -5140,13 +5151,16 @@ export class Enemy extends Entity {
         this.servoTo(player.cx, player.cy - 200, num10, num11);
         this.facing = dx > 0 ? 1 : -1;
         this.ai2 += 1;
+        // num15（:20046-20047）= 到悬浮目标点(玩家中心−200y)的距离——仆从门专用
+        const hoverDist = Math.hypot(player.cx - this.cx, player.cy - 200 - this.cy);
         // 悬浮计时 600t 出冲（:20083-20095；专家 ×0.35 = 210）
         let num16 = 600;
         if (expert) num16 *= 0.35;
         if (this.ai2 >= num16) {
           this.state = 1; this.ai2 = 0; this.chargesLeft = 0; this.servantT = 0;
-        } else if ((this.y + this.h < player.y && dist < 500) || (expert && dist < 500)) {
-          // 仆从累计（:20096-20111）：NPC 在玩家上方且 <500px（专家仅距离门），
+        } else if ((this.y + this.h < player.y && hoverDist < 500) || (expert && hoverDist < 500)) {
+          // 仆从累计（:20096-20111）：NPC 在玩家上方且 num15<500（专家仅距离门）——
+          // num15 = 到【悬浮目标点】(玩家中心−200y)的距离（:20046-20047），非到玩家中心；
           // 110t（专家 ×0.4；FTW 再 ×0.8 = 35.2t）召一只，速度 5 / 专家 6
           if (!player.dead) this.servantT += 1;
           let num17 = 110;
@@ -5735,6 +5749,12 @@ export class Enemy extends Entity {
     }
     const rawDmg = dmg; // 傀儡上报用原始值（下方 def 凘认算只做一次，双端一致）
     if (pierce !== 1 && this.iframes > 0) return false; // 单发弹豁免免疫检查（flag3）
+    // 旗 buff 加伤（Main.GetBannerBuffEffect → StrikeNPC 乘区,ItemID.cs:11-44 普通族:
+    // 经典 ×1.5/专家 ×2;DD2 0.2 族不区分,登记）——统一入口=StrikeNPC 全通道语义
+    if (this.vanillaId != null && (game as { bannerNpcActive?: (n: number) => boolean }).bannerNpcActive?.(this.vanillaId)) {
+      const g = game as { world?: { flags?: Record<string, boolean> } };
+      dmg = Math.max(1, Math.round(dmg * (g.world?.flags?.hardMode ? 2 : 1.5)));
+    }
     if (this.dontTakeDamage) return false; // 原版 NPC.dontTakeDamage（StrikeNPC 早退）
     this.justHitT = 2; // 原版 justHit 单帧旗标（AI_023 飞行武器/陆龟受击回态消费）
     // 训练假人（NPC 488，cs:83498 localAI 赋值）：immortal 永不死，

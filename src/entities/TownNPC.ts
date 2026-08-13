@@ -73,11 +73,8 @@ export class TownNPC extends Entity {
   private atkBurstIdx = 0;
   /** world.flags.hardMode 缓存(attackUpdate 每 tick 刷新) */
   private hardModeFlag = false;
-  // ---- 表情气泡(EmoteBubble 近见;原版情境驱动多处 NewBubble,此处取空闲随机冒泡)----
-  /** 当前表情 id(≥0 显示;-1 无) */
-  emote = -1;
-  emoteLife = 0;
-  emoteTotal = 0;
+  // 表情气泡:字段/掷骰已退役——统一走 render/EmoteBubble 模块(spawnEmote,
+  // 并行会话 1:1 版);空闲随机冒泡由 Game.tickNpcEmotes 窗口喂(双画修复 2026-08-13)
   // ---- 环境与互殴受击(NPC.cs :91538 族调用点的三件套)----
   /** 岩浆专属冷却(原版 immune[255]=30,Collision_LavaCollision :94522) */
   private lavaCd = 0;
@@ -244,12 +241,6 @@ export class TownNPC extends Entity {
     //      GetHurtByOtherNPCs;岩浆走 Collision_LavaCollision :94511-94530)----
     this.envHurtUpdate(world, game);
 
-    // ---- 表情气泡(空闲随机冒泡;原版各情境 NewBubble 的可见子集)----
-    if (this.emoteLife > 0) this.emoteLife--;
-    else if (this.onGround && !this.talking && this.atkState === 0 && Math.random() < 1 / 3600) {
-      this.emote = Math.floor(Math.random() * 121);   // EmoteID.Count≈121(图标总表 8×32 格内)
-      this.emoteTotal = this.emoteLife = 240;
-    }
 
     this.vx += wantDir * 0.06;
     this.vx = Math.max(-0.8, Math.min(0.8, this.vx));

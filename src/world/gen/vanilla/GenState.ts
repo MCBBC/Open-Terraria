@@ -103,6 +103,8 @@ export interface GenState {
   hellChestIdx: number;            // 地狱箱主件序游标（成功一只 +1,循环）
   jungleItemIdx: number;           // 常春藤箱主件序游标（JungleItemCount）
   gennedMahoganyWands: boolean;    // 活桃花心木法杖对已给过标记（GenVars.gennedLivingMahoganyWands）
+  generatedShadowKey: boolean;     // GenVars.generatedShadowKey（cs:36598：首只必给后 1/3）
+  generatedRamRune: boolean;       // GenVars.generatedRamRune（cs:36604：首只必给后 1/8）
 
   // 表面装饰 pass 共享态（GenVars）
   /** GenVars.orePatchX/numOrePatch/maxOrePatch=50（GenVars.cs:238-242；ResetGenerator 清零 cs:8289）：
@@ -153,6 +155,7 @@ export function newGenState(w: number, h: number): GenState {
     desertHiveHigh: h, desertHiveLow: 0, desertHiveLeft: w, desertHiveRight: 0,
     jungleHut: 0,
     hellChestItems: null, hellChestIdx: 0, jungleItemIdx: 0, gennedMahoganyWands: false,
+    generatedShadowKey: false, generatedRamRune: false,
     orePatchX: new Int32Array(50), numOrePatch: 0,            // ResetGenerator 清零（cs:8289）
     logX: 0, logY: 0,                                          // 进程级静态默认 0（GenVars.cs:250）
     larvaX: [], larvaY: [],                                    // BeeLarva pass（cs:21018）消费

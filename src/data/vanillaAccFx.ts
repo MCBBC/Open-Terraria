@@ -9,6 +9,7 @@ export interface AccFx {
   mana?: number;      // statManaMax2 += N
   def?: number;       // statDefense += N
   move?: number;      // moveSpeed += X
+  fish?: number;      // fishingSkill += X（钓具族 :12549-12556/:14115-14140）
   meleeSpd?: number;  // meleeSpeed += X
   runSpeed?: number;  // accRunSpeed = X（基础 maxRunSpeed=3）
   dmgMelee?: number;

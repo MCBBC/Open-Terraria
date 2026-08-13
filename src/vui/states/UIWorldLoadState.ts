@@ -43,7 +43,8 @@ export class UIWorldLoadState extends UIState {
   }
 
   /** 进度回调（WorldGen/Game 的 (label, p)） */
-  setProgress(label: string, p: number) {
+  setProgress(label: string, rawP: number) {
+    const p = Number.isFinite(rawP) ? rawP : 0;   // NaN 防御(旧缓存/瞬断事件)
     this.pct = p;
     this.bar.totalProgress = p;
     // 段内进度：10% 窗口的局部比例（长 pass 内也有可见移动）

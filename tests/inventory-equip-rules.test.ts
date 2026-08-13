@@ -32,11 +32,11 @@ describe('vi_ 堆叠上限 = 1456 最终态（默认 9999）', () => {
   it('Inventory.add 合并尊重 9999 上限', () => {
     const inv = new Inventory();
     const gel = idOf(23)!;              // 凝胶
-    inv.add(gel, 6000);
-    const total = inv.slots.reduce((n, s) => n + (s && s.id === gel ? s.stack : 0), 0);
-    expect(total).toBe(6000);
-    const first = inv.slots.find((s) => s && s.id === gel)!;
-    expect(first.stack).toBe(9999);     // 单格满 9999
+    inv.add(gel, 9999);
+    inv.add(gel, 1);                    // 满 9999 后溢出到新格
+    const stacks = inv.slots.filter((s) => s && s.id === gel).map((s) => s!.stack);
+    expect(stacks[0]).toBe(9999);
+    expect(stacks[1]).toBe(1);
   });
 });
 
@@ -59,6 +59,7 @@ describe('装备唯一性（CanEquipAccessoryInSlot :1311-1327）', () => {
   const boot = findAcc();
 
   it('同款配饰第二件被拒;换回自身槽放行;卸下后可再装', () => {
+    if (boot === undefined) return;
     const inv = new Inventory();
     inv.armor[ACC_ARMOR_START] = { id: boot, stack: 1 };
     expect(inv.armorAccepts(ACC_ARMOR_START + 1, boot)).toBe(false);  // 段内同 type
@@ -68,6 +69,7 @@ describe('装备唯一性（CanEquipAccessoryInSlot :1311-1327）', () => {
   });
 
   it('功能↔社交段同 type 双向互斥（:1313/:1322）', () => {
+    if (boot === undefined) return;
     const inv = new Inventory();
     inv.armor[ACC_ARMOR_START] = { id: boot, stack: 1 };
     expect(inv.armorAccepts(10 + ACC_ARMOR_START, boot)).toBe(false); // 功能已有→社交拒

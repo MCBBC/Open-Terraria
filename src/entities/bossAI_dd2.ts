@@ -1006,7 +1006,7 @@ export function divingFlyerAI(e: Enemy, game: GameHooks, player: Player | null) 
   // ---- 出生渐显（:66062-66092 flag5） ----
   if (p.fade) {
     if (x[0] === 0) e.spawnAlpha = 255;
-    if (x[0] === 30) game.playSfx('spawn', 0.4, e.cx, e.cy); // DD2_EtherianPortalSpawnEnemy
+    if (x[0] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.4, e.cx, e.cy); // DD2_EtherianPortalSpawnEnemy（:64270 PlayTrackedSound）
     if (x[0] < 60) {
       x[0] += 1;
       e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
@@ -1165,7 +1165,7 @@ export function darkMageAI(e: Enemy, game: GameHooks, player: Player | null) {
   const txc = tgt ? tgt.x : e.cx, tyc = tgt ? tgt.y : e.cy;
   // ---- 出生渐显（:66478-66508 localAI[3]） ----
   if (x[3] === 0) e.spawnAlpha = 255;
-  if (x[3] === 30) game.playSfx('spawn', 0.4, e.cx, e.cy);
+  if (x[3] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.4, e.cx, e.cy);
   if (x[3] < 60) {
     x[3] += 1;
     e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);
@@ -1501,7 +1501,7 @@ export function dd2LightningBugAI(e: Enemy, game: GameHooks, player: Player | nu
   const SEP = 0.1;            // num13
   // ---- 出生渐显（:66846-66876 flag3） ----
   if (x[1] === 0) e.spawnAlpha = 255;
-  if (x[1] === 30) game.playSfx('spawn', 0.3, e.cx, e.cy);
+  if (x[1] === 30) game.playSfxFiles(['dd2_etherian_portal_spawn_enemy_' + Math.floor(Math.random() * 3)], 0.3, e.cx, e.cy);
   if (x[1] < 60) {
     x[1] += 1;
     e.spawnAlpha = Math.max(0, e.spawnAlpha - 5);

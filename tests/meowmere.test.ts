@@ -54,7 +54,7 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
     expect(cat.dead).toBe(true);
   });
 
-  it('命中喵叫+同敌 10t 冷却，第 5 命中消亡（Damage_EVP :16794）', () => {
+  it('命中无喵叫/无计数（唯一 PlaySound(37) 在撞块链）+同敌 10t 冷却不消亡', () => {
     const w = emptyWorld();
     const list: unknown[] = [];
     const game = makeGame(w, list);
@@ -65,17 +65,21 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
     list.push(enemy);
     const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
       { grav: 0, life: 180, pierce: 5 });
-    // 命中 1：喵叫计数 1，不消亡（穿透预算 5）
+    // 命中：伤害结算但 ai[0] 不动（计数属撞块链 HandleMovement :16796，
+    // 全库唯一 PlaySound(37) :16797——2026-08-13 实测复核修正）
     cat.fixedUpdate(1, game);
-    expect(cat.meowCount).toBe(1);
+    expect(cat.meowCount).toBe(0);
     expect(cat.dead).toBe(false);
-    // 冷却期内（10t）同敌不再咬
+    // 冷却期内（10t）同敌不再咬，冷却后可再咬（穿透预算逐次消耗，非计数消亡）
     for (let t = 0; t < 9; t++) cat.fixedUpdate(1, game);
-    expect(cat.meowCount).toBe(1);
-    // 冷却结束再咬，直到第 5 命中消亡
-    for (let t = 0; t < 200 && !cat.dead; t++) cat.fixedUpdate(1, game);
-    expect(cat.meowCount).toBe(5);
-    expect(cat.dead).toBe(true);
+    expect(cat.meowCount).toBe(0);
+    let hits = 0;
+    const orig = (enemy as { hurt: () => boolean }).hurt;
+    (enemy as { hurt: () => boolean }).hurt = () => { hits++; return orig(); };
+    for (let t = 0; t < 120; t++) cat.fixedUpdate(1, game);
+    // 首咬已耗 1 穿透 → 冷却环再咬至穿透 5 耗尽（约 4 次）
+    expect(hits).toBeGreaterThanOrEqual(3);
+    expect(cat.meowCount).toBe(0);               // 命中永不计数
   });
 
   it('迪斯科点光 + 彩虹拖尾采样每 tick 推进', () => {
@@ -93,30 +97,25 @@ describe('喵刀弹 502（Meowmere Cat）', () => {
   });
 
   it('melee-shoot 穿透数据驱动：502 penetrate=5 不再被 min-3 钳', () => {
-    // 间接断言：Arrow 构造传 pierce=5 后命中 5 敌各一次不因穿透提前消亡
+    // 5 敌逐个咬：穿透预算 5 全部消耗才消亡（min-3 钳下第 4 咬就会消失）
     const w = emptyWorld();
     const list: unknown[] = [];
     const game = makeGame(w, list);
-    for (let i = 0; i < 5; i++) {
-      list.push({ id: 10 + i, x: 50 * TILE + i * 32, y: 80 * TILE, w: 24, h: 18,
-        dead: false, hurt: () => true, def: { hitSound: ['NPC_Hit_1'] } });
-    }
-    const cat = new Arrow(50 * TILE, 80 * TILE, 8, 0, 100, 6.5, 502, null,
-      { grav: 0, life: 180, pierce: 5 });
     let hits = 0;
-    const origHurt = (e: { hurt: () => boolean }) => { hits++; return e.hurt(); };
-    for (const e of list as { hurt: () => boolean }[]) {
-      // 借用 fixedUpdate 的命中路径：重定位弹体逐敌咬
+    for (let i = 0; i < 5; i++) {
+      list.push({ id: 10 + i, x: 50 * TILE + i * 64, y: 80 * TILE, w: 24, h: 18,
+        dead: false, hurt: () => { hits++; return true; }, def: { hitSound: ['NPC_Hit_1'] } });
     }
-    // 直接驱动：每 11t（冷却后）位移到下一敌——喵叫计数上限 5 同时杀弹
-    void origHurt;
-    for (let t = 0; t < 300 && !cat.dead; t++) {
-      const idx = Math.min(4, Math.floor(t / 11));
-      cat.x = (50 * TILE + idx * 32) - 4;
+    const cat = new Arrow(50 * TILE, 80 * TILE, 0, 0, 100, 6.5, 502, null,
+      { grav: 0, life: 180, pierce: 5 });
+    // 逐敌重定位咬（不同敌无冷却门，每 tick 咬一只）
+    for (let i = 0; i < 5 && !cat.dead; i++) {
+      cat.x = 50 * TILE + i * 64 - 4;
       cat.y = 80 * TILE;
       cat.fixedUpdate(1, game);
     }
-    expect(cat.meowCount).toBe(5);
-    expect(hits).toBe(0);                          // 上面仅探测桩，真实命中在 fixedUpdate 内
+    expect(hits).toBe(5);                            // 5 咬全命中
+    expect(cat.dead).toBe(true);                     // 第 5 咬穿透耗尽消亡
+    expect(cat.meowCount).toBe(0);                   // 命中链不碰计数
   });
 });

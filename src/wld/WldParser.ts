@@ -43,6 +43,20 @@ export interface WldWorld {
   eclipse: boolean;
   isCrimson: boolean;
   hardMode: boolean;
+  /** 原版 worldId（WF header；对话月相池等消费） */
+  worldId: number;
+  /** 原版洞穴背景四区样式（WF:1262-1268 caveBackStyle[4]） */
+  caveBackStyle: number[];
+  /** 冰雪/丛林/地狱背景样式（WF:1269-1271） */
+  iceBackStyle: number;
+  jungleBackStyle: number;
+  hellBackStyle: number;
+  /** 已砸暗影珠数（WF:1302 byte）——满 3 召 EoW/BoC 计数,随导入回填 */
+  shadowOrbCount: number;
+  /** 已砸祭坛数（WF:1303 int32）——新三矿轮换波次源/海盗入侵门 */
+  altarCount: number;
+  /** 困难矿世界锁定选种（WF:1315-1317 int32×3;-1 = 未砸过该档） */
+  savedOreTiers: { cobalt: number; mythril: number; adamantite: number };
   /** 原版 gameMode（0 经典 1 专家 2 大师 3 旅程；v<209 无此字段=0） */
   gameMode: number;
   /** 日晷/月晷快进四件套（WF:2120/2203/2449-2450；v<113 无 sundial 位=0、
@@ -161,15 +175,16 @@ export function parseWld(buf: Uint8Array): WldWorld {
   if (version >= 118) r.boolean(); // slime king
   for (let i = 0; i < 7; i++) r.boolean(); // saved goblin etc
   r.boolean(); r.boolean(); // orb smashed / spawn meteor
-  r.u8(); // orb count
-  r.i32(); // altar count
+  const shadowOrbCount = r.u8(); // WF:1302 shadowOrbCount(byte)
+  const altarCount = r.i32(); // WF:1303 altarCount(int32)
   const hardMode = r.boolean();
   if (version >= 257) r.boolean(); // party of doom
   r.i32(); r.i32(); r.i32(); r.f64(); // invasion
   const slimeRainTime = version >= 118 ? r.f64() : 0; // slime rain（Main.slimeRainTime：>0 进行中 <0 冷却）
   if (version >= 113) sundialCooldown = r.u8(); // WF:2120 Main.sundialCooldown
   const raining = r.boolean(); const rainTime = r.i32(); const maxRaining = r.f32(); // rain
-  r.i32(); r.i32(); r.i32(); // ore tiers
+  // WF:1315-1317 SavedOreTiers 三档锁定选种（int32×3）——原版 .wld 权威导入
+  const savedOreTiers = { cobalt: r.i32(), mythril: r.i32(), adamantite: r.i32() };
   for (let i = 0; i < 8; i++) r.u8(); // bg styles
   const cloudBGActive = r.i32(); const numClouds = r.i16(); const windSpeedTarget = r.f32(); // clouds/wind
   // angler
@@ -302,6 +317,7 @@ export function parseWld(buf: Uint8Array): WldWorld {
     version, title, seed, tilesWide, tilesHigh, spawnX, spawnY, dungeonX, dungeonY,
     groundLevel, rockLevel, time, dayTime, moonType, moonPhase, bloodMoon, eclipse,
     isCrimson, hardMode, gameMode,
+    shadowOrbCount, altarCount, savedOreTiers,
     sundialCooldown, fastForwardTimeToDawn, fastForwardTimeToDusk, moondialCooldown,
     treeX, treeStyle, treeTops,
     tiles, chests, npcs,

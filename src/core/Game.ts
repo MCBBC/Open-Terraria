@@ -3,6 +3,8 @@ import { Achievements } from './Achievements';
 import { GrappleProj } from '../entities/GrappleProj';
 import { hookItemOf, HOOK_PROJ_STATS } from '../data/grappleHooks';
 import { GRAPPLE_LATCH } from '../entities/GrappleProj';
+import { PetFollower } from '../entities/PetFollower';
+import { petInfoOfVid } from '../data/vanillaPets';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
@@ -99,6 +101,7 @@ import { VanillaSpawner, MOON_BOSS_IDS, type LunarSpawnCtx } from '../world/spaw
 import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
+import { recordBannerKill, bannerOfNpc, bannerItemId, scanBannerNpcs, bannerDamageMult, bannerReceivedMult } from '../world/Banners';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
@@ -1160,6 +1163,8 @@ export class Game implements GameHooks {
   private lastWasDay: boolean | null = null;
   /** 环境采样结果（SceneMetrics；BGM/群系背景共用），每 15 tick 刷新 */
   scene: SceneFlags = { ...EMPTY_SCENE };
+  /** 屏内旗激活的 npcId 集（旗 buff 乘区消费） */
+  private _bannerNpcs = new Set<number>();
   private musicState: MusicState = newMusicState();
   /** 派对态（BirthdayParty 精简核：ManualParty；派对纪念碑 455 驱动） */
   private partyState: PartyState = newPartyState();
@@ -1176,6 +1181,10 @@ export class Game implements GameHooks {
   /** 已记 TabletDestroyed 账的石碑（CultistRitual.TabletDestroyed，NPC.cs:38881——
    *  石碑 ai0==-1 边沿去重；实体死亡随 WeakSet 自动回收） */
   private _cultistTabletDone = new WeakSet<Enemy>();
+  /** 倒木重扫延迟旗：breakTile 头部置位，下一 tick updateTime 前消费——
+   *  原版 FallenLogDestroyed 在 KillTile【尾部】（tile 清掉之后）才重扫
+   *  （WorldGen.cs:49863-49869），曾挂在 breakTile 头部=已毁倒木当夜仍在桩表 */
+  private _fallenLogRescan = false;
   private lastMusic = -1;
   private _mapClickLatch = false;
   private _mapClickLatch2 = false;
@@ -1476,7 +1485,9 @@ export class Game implements GameHooks {
 
   async newWorld(seedText: string, width: number, height: number, onProgress?: (label: string, p: number) => void, opts?: { name?: string; evil?: -1 | 0 | 1; /** 世界难度 = Main.GameMode（Main.cs:2677：0 经典 1 专家 2 大师 3 旅程） */ difficulty?: number; onWorldPartial?: (world: import('../world/World').World, passIndex: number, passName: string) => void; /** worker 路径的降采样预览帧回调（位图模式） */ onPreview?: (f: import('../workers/WorldGenClient').PreviewFrame) => void }) {
     this.freshlyCreated = true; // NPC 入驻公告只在新生成的世界播(WorldGen 语义)
-    const settleLabel = () => Lang.text('Mods.SandboxWorld.Progress.SettleLiquids');
+    // 原版 gen[27]"正在安置液体"(SettleLiquids :16219;UIWorldLoadState 经
+    // worldgenText('水体沉降') 同键转换,双路一致)
+    const settleLabel = () => Lang.text('LegacyWorldGen.27');
     // 世界难度（Main.GameMode，Main.cs:2677）：worker/主线程两路生成完成后统一灌入——
     // worker GenConfig 不带此字段，fromPacket 回 0，此处覆盖（创建 UI 已选档）
     const applyDifficulty = () => { if (opts?.difficulty !== undefined) this.world.difficulty = opts.difficulty; };
@@ -1838,9 +1849,15 @@ export class Game implements GameHooks {
       if (this.world.dungeonX > 0 && !this.world.flags.downedSkeletron) {
         this.maybeRespawnOldMan();
       }
-      // 救援 NPC（bound）：世界生成期放置（原版 WorldGen 放置 BoundGoblin/BoundMechanic/
-      // WebbedStylist/Golfer，TaxCollector 为地狱酷刑者——此处近似为直接 bound 解救）
-      this.placeBoundRescueNpcs();
+      // ★bound 救援 NPC 生成期【不放置】（2026-08-13 对齐原版，实证链）：
+      //   ① WorldGen SpawnStarterNPCs（cs:19830-20041）普通种子分支只 NewNPC(22)
+      //     向导（最终 else :20037-20041），无任何 bound NPC；
+      //   ② bound NPC（105/106/123/354/589/534/685）唯一来源 = NPC.Spawner 链
+      //     （三人组 :1994-2008 / 造型师 :1576 / 高尔夫 :1600 / 机械师 :2563 /
+      //     税务员 :4777），各带前置门+概率+!saved+!AnyNPCs；
+      //   ③ Spawner.SpawnNPC(X,Y,Type)（:5146）= 普通 NewNPC，bound 形态即类型本体。
+      //  此前 placeBoundRescueNpcs 在生成期直接放五只 bound（开局即可无门救出全部），
+      //  已移除——由 VanillaSpawner 各链 1:1 供给（589/685 走 spawnBound 占位）。
       // 渔夫任务链首掷（WorldGen.cs:22655 → Main.AnglerQuestSwap）+ 沙滩睡渔夫放置
       this.anglerQuestSwap();
       this.placeSleepingAngler();
@@ -1850,6 +1867,9 @@ export class Game implements GameHooks {
     // MysticLogFairiesEvent.StartWorld（WorldGen.cs:3303 OnWorldLoad）：读图/新世界
     // 扫一次倒木桩（StartNight 会重扫，此为入夜前的首扫）
     mysticLogs.startWorld(this.fairyCtx());
+    // setFireFlyChance 读档重掷（WorldFile.cs:770 加载回调末尾 = 液体沉降后；
+    // 五静态位不落盘、初值全 0——原版每次读档都重掷，白昼存读当夜值随之刷新）
+    setFireFlyChance(this.world);
     this._lastClockT = this.world.clock.timeOfDay;
     // 成就：解锁弹窗（原版 InGamePopups.AchievementUnlockedPopup,InGameNotificationsTracker
     // 底部居中锚 screenHeight-40、300t 寿命——非 Steam 专属;UI 无 popup 钩子时回退 toast）
@@ -1863,57 +1883,6 @@ export class Game implements GameHooks {
     };
     this.achOnWorldEnter();
     this.cb.onInventoryChanged();
-  }
-
-  /** 救援 NPC 放置（原版世界生成放置 bound NPC：哥布林/巫师=洞穴层、机械师=地牢内部、
-   *  造型师=蜘蛛巢(墙62)、高尔夫球手=地下沙漠(墙216/217/187)、税务员=地狱；
-   *  巫师仅困难模式。
-   *  近似与原版差异（依赖登记）：
-   *  ① 原版为独立 NPC 类型 105 BoundGoblin / 106 BoundWizard / 123 BoundMechanic /
-   *    354 WebbedStylist / 589 GolferRescue，本作以 TownNPC.bound 统一近似——
-   *    渲染已按真帧走五张捆绑姿态表 + 税务官 534 酷刑者表（Renderer.BOUND_NPC_SHEET）；
-   *  ② 税务官原版是地狱 DemonTaxCollector(534) 被净化粉（弹体 10，PowderProj）命中 →
-   *    NPC.Transform(441)（Projectile.cs:13650-13657）——链已实装（Game.applyPowder）；
-   *    右键对话解救保留为便捷兜底（原版 534 是敌怪不可对话，差异登记）；
-   *  ③ 净化粉本身树妖商店未进货（vanilla-shopstock.json 无 66/67/2886），获取链缺（登记） */
-  private placeBoundRescueNpcs() {
-    const st = this.world.store;
-    // 机械师：地牢入口向下找地牢墙内空气落脚
-    if (this.world.dungeonX > 0) {
-      const DUNG_WALLS = new Set([7, 8, 9, 94, 95, 96, 97, 98, 99]);
-      const dx = this.world.dungeonX;
-      const y0 = (this.world.dungeonY || Math.floor(this.world.groundLevel)) + 60;
-      for (let y = y0; y < Math.min(st.h - 60, y0 + 300); y++) {
-        if (st.isSolid(dx, y) || !DUNG_WALLS.has(st.wall[st.idx(dx, y)])) continue;
-        if (st.isSolid(dx, y - 1) || st.isSolid(dx, y - 2)) continue;
-        if (this.placeBoundNpc('mechanic', 'savedMech', dx, y - 1)) break;
-      }
-    }
-    // 按墙类型扫描落脚（蜘蛛巢 62 / 地下沙漠 216/217/187）
-    const findByWall = (walls: Set<number>, key: string, flag: string): boolean => {
-      for (let x = 20; x < st.w - 20; x += 7) {
-        for (let y = Math.floor(this.world.rockLevel) + 20; y < st.h - 260; y += 3) {
-          if (st.isSolid(x, y) || !walls.has(st.wall[st.idx(x, y)])) continue;
-          if (st.isSolid(x, y - 1) || st.isSolid(x, y - 2) || !st.isSolid(x, y + 1)) continue;
-          if (this.placeBoundNpc(key, flag, x, y - 1)) return true;
-        }
-      }
-      return false;
-    };
-    findByWall(new Set([62]), 'stylist', 'savedStylist');
-    findByWall(new Set([216, 217, 187]), 'golfer', 'savedGolfer');
-    // 哥布林：洞穴层（岩石层下 60..h-350）随机列扫落脚
-    const g = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
-    if (g) this.placeBoundNpc('goblin_tinkerer', 'savedGoblin', g[0], g[1]);
-    // 税务员：地狱层（h-170..h-60；原版为 DemonTaxCollector 534 + 净化粉弹体 10 命中
-    // Transform(441)——见函数头登记的近似差异②）
-    const t = this.findBoundSpotByDepth(st.h - 170, st.h - 60);
-    if (t) this.placeBoundNpc('tax_collector', 'savedTaxCollector', t[0], t[1]);
-    // 巫师：仅困难模式（入驻轮里 hardMode 开启后补放）
-    if (this.world.flags.hardMode) {
-      const wz = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
-      if (wz) this.placeBoundNpc('wizard', 'savedWizard', wz[0], wz[1]);
-    }
   }
 
   /** 沙滩睡渔夫（NPC 376）放置。原版由 SpawnNPC 海洋段掷出（NPC.cs:1705-1728 海洋
@@ -1949,19 +1918,6 @@ export class Game implements GameHooks {
   }
 
   /** 深度带内找 bound 落脚点（空气×2 + 下方实心），返回 [x, 脚底上一格y] */
-  private findBoundSpotByDepth(yTop: number, yBot: number): [number, number] | null {
-    const st = this.world.store;
-    const x0 = Math.floor(st.w * 0.15), x1 = Math.floor(st.w * 0.85);
-    for (let x = x0; x < x1; x += 5) {
-      for (let y = yTop; y < yBot; y += 3) {
-        if (st.isSolid(x, y) || st.isSolid(x, y - 1) || st.isSolid(x, y - 2)) continue;
-        if (!st.isSolid(x, y + 1)) continue;
-        return [x, y - 1];
-      }
-    }
-    return null;
-  }
-
   /** 放置一名 bound 救援 NPC（已解救/已在场/落点无效时跳过）。x,y = 脚底上一格 */
   private placeBoundNpc(key: string, savedFlag: string, x: number, y: number): boolean {
     const st = this.world.store;
@@ -1986,6 +1942,7 @@ export class Game implements GameHooks {
       // unlockedSlimeOldSpawn=true，WF:1410 随存档）——走 flags 即自动持久化，
       // SpawnAnNPC 三人组链的 !unlockedSlimeOldSpawn 门随之关闭
       town_slime_old: 'unlockedSlimeOldSpawn',
+      town_slime_clumsy: 'unlockedSlimePurpleSpawn',  // 686 气球绑缚解救（:1347 门旗）
     };
     const flag = flagByKey[npc.npcKey];
     if (flag) this.world.flags[flag] = true;
@@ -2019,12 +1976,50 @@ export class Game implements GameHooks {
       }
     }
     if (projId !== 10) return;
+    // :13677-13684 净化粉命中神秘青蛙 687 → Poof + Transform(683) 神秘史莱姆 +
+    //  unlockedSlimeYellowSpawn 置位（世界级一次性，WorldFile :1414/:2434 持久化）
+    for (const cent of this.entities.critters) {
+      const c = cent as Critter;
+      if (c.dead || CRITTER_BY_KEY[c.key]?.npc !== 687) continue;
+      if (x < c.x + c.w && x + w > c.x && y < c.y + c.h && y + h > c.y) {
+        c.dead = true;
+        this.spawnParticles(c.cx, c.cy, '#DCE8E2', 10, 1.5, { life: 24 });
+        this.world.flags.unlockedSlimeYellowSpawn = true;
+        const ms = new TownNPC('town_slime_yellow', c.x, c.y);
+        this.entities.add(ms, 'npcs');
+        this.cb.onToast?.(Lang.npcName(683) ?? '神秘史莱姆加入了小镇！');
+        break;
+      }
+    }
     for (const n of this.entities.npcs) {
       const npc = n as TownNPC;
       if (!(npc instanceof TownNPC) || npc.dead || !npc.bound) continue;
       if (npc.npcKey !== 'tax_collector') continue; // 原版 534 是唯一受净化粉转化的 NPC
       if (x < npc.x + npc.w && x + w > npc.x && y < npc.y + npc.h && y + h > npc.y) {
         this.freeBoundNpc(npc);
+      }
+    }
+    // :13649-13657 净化粉命中【敌怪 534】→ NPC.Transform(441)（:81850：SetDefaults
+    // 换型 + 保血量比例 + withReposition 底边对齐 + homeless + 地面 home；441 城镇
+    // NPC active 后 AI_007_UpdateSavedStates 写 savedTaxCollector 关链门）。
+    // ★生成期 bound TownNPC 放置移除（2026-08-13）后，534 由 Spawner 地狱链以
+    // 敌怪掷出（NPC.cs:4777）——本段不扫敌怪桶则税务员转化链【断】（弹粉命中的
+    // 是 Enemy 而非 bound TownNPC）；上方 npcs 桶扫描保留兜底旧存档的 bound 残留
+    for (const n of this.entities.enemies) {
+      const en = n as Enemy;
+      if (!(en instanceof Enemy) || en.dead || en.vanillaId !== 534) continue;
+      if (x < en.x + en.w && x + w > en.x && y < en.y + en.h && y + h > en.y) {
+        en.dead = true;                                  // 原 NPC 同槽换型 → 本仓死+新生成等价
+        this.world.flags['savedTaxCollector'] = true;    // UpdateSavedStates 链门
+        const tc = new TownNPC('tax_collector', en.cx, en.y + en.h);
+        tc.x = en.cx - tc.w / 2;
+        tc.y = en.y + en.h - tc.h;                       // withReposition 底边对齐
+        this.entities.add(tc, 'npcs');
+        // TransformVisuals(534, 441)（:81739）：换型尘雾 + 音效
+        this.spawnParticles(en.cx, en.cy, '#B79A6B', 20, 2);
+        this.playSfxFiles(['NPC_Killed_1'], 0.7);
+        this.newText(Lang.text('Mods.SandboxWorld.NPC.Rescued', Lang.npcName(441) ?? 'Tax Collector'), 50, 125, 255);
+        break;
       }
     }
   }
@@ -2242,6 +2237,9 @@ export class Game implements GameHooks {
         return !tn.dead && Math.abs(tn.cx - this.player.cx) <= 1920 && Math.abs(tn.cy - this.player.cy) <= 1200;
       }).length;
       this.scene = scanScene(w, this.player.cx, this.player.cy, townNPCCount, partyIsUp(this.partyState));
+      // 屏内旗扫描（SceneMetrics.cs:420-443）——每 20tick 随 scene 刷新,旗 buff npc 集
+      const bpx = Math.floor(this.player.cx / TILE), bpy = Math.floor(this.player.cy / TILE);
+      this._bannerNpcs = scanBannerNpcs(w.store, bpx - 100, bpy - 70, bpx + 100, bpy + 70);
       w.scene = this.scene; // Enemy 等只读消费（zoneGraveyard 攻门门等）
       this.player.zoneDesert = this.scene.zoneDesert; // 沙漠区旗标（沙丘行者靴已改消费 runningOnSand，:26225-26231）
       // ---- 幸运度环境扫描（Player.TryRecalculatingTorchLuck :17580-17939 净效果版）----
@@ -2541,6 +2539,9 @@ export class Game implements GameHooks {
     }
     // 成就：定期落盘（原版退出时存 achievements.dat；10s 节流防丢中途进度）
     if (this.tickCount % 600 === 0) this.achievements.flush();
+    // 宠物/光宠存续（Player.UpdatePet/UpdatePetLight :17147-17187 每帧语义）：
+    // 装备槽 [0]/[1] 有宠物物品且未隐藏 → 确保跟随体；卸装/隐藏/死亡 → 消散
+    this.updatePets();
     // 图鉴遇数（Main.cs:17747 BestiaryTracker.Sights.ScanWorldForFinds，每 tick）：
     // 仅小动物（CountsAsACritter）命中盒与玩家判定盒相交即首遇记账——判定盒取原版
     // Player.HitboxForBestiaryNearbyCheck（Player.cs:3165：玩家盒外扩 300×200）
@@ -2822,6 +2823,7 @@ export class Game implements GameHooks {
     const held2 = this.player.inv.heldItem();
     const heldWC = !!held2 && viIdFromKey(ITEM_DEFS[held2.id]?.key ?? '') === 148;
     this.heldWaterCandle = heldWC;
+    if (this.tickCount % 15 === 0) this.boundTouchCheck();   // 绑缚触碰解救（AI_007 接触语义）
     let nearWC = false;
     if (this.tickCount % 30 === 0) {
       nearWC = false;
@@ -2968,6 +2970,10 @@ export class Game implements GameHooks {
         console.info(`[cultist] 神秘石碑 437 自然重生 @ dungeon (${w.dungeonX}, ${w.dungeonY}), delay=${w.cultistDelay}`);
       }
       // MysticLogFairiesEvent.UpdateTime（Main.cs:64433 每帧位）
+      if (this._fallenLogRescan) {
+        this._fallenLogRescan = false;
+        mysticLogs.fallenLogDestroyed(this.fairyCtx());   // breakTile 延迟消费（清格后重扫）
+      }
       mysticLogs.updateTime(w, w.dayRate(), this.fairyCtx());
     }
 
@@ -5205,11 +5211,11 @@ export class Game implements GameHooks {
     }
     switch (cw.kind) {
       case 'grenade': {
-        // AI_016：引信 timeLeft（Projectile.SetDefaults：炸弹28=150/炸药棍29=135/手雷30=180）
-        // ——此前 29/30 映射对调（炸药棍拿了炸弹的 150、手雷拿了炸药棍的 135）
-        const fuse = cw.shoot === 28 ? 150 : cw.shoot === 29 ? 135 : 180;
-        // 爆炸伤害（Projectile.SetDefaults）：炸弹28=100/炸药棍29=250/手雷30=60；
-        // 此前手雷误取 250
+        // AI_016 引信 timeLeft 1:1（SetDefaults :10348-10372）：炸弹 28=180 / 炸药棍
+        // 29=300 / 手雷 30=180——曾误写 150/135（引信时长与原版不符的根源）
+        const fuse = cw.shoot === 29 ? 300 : 180;
+        // 爆炸伤害（PrepareBombToBlow :44134-44145）：炸弹28=100/炸药棍29=250；
+        // 手雷 30 用物品伤害（不低于 60）
         const dmg = cw.shoot === 28 ? 100 : cw.shoot === 29 ? 250 : Math.max(cw.damage, 60);
         // 地形破坏半径（Projectile.cs:75262 表）：炸弹族28/37/516/519=4、炸药棍族
         // 29/470/637=7；**手雷族(30 等)不在 ExplodeTiles 判定表内=不破坏地形**
@@ -5220,7 +5226,7 @@ export class Game implements GameHooks {
         const hurtBox = cw.shoot === 29 ? 125 : cw.shoot === 28 ? 64 : 11;
         this.entities.add(new GrenadeProj(px, py,
           Math.cos(ang) * cw.shootSpeed, Math.sin(ang) * cw.shootSpeed,
-          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0))), 'projectiles'); // ⑥+⑧
+          dmg, fuse, cw.shoot, (ex, ey, edmg) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), edmg, er, er > 0, hurtBox, this.player.equipStats.armorPen + (ps?.arpen ?? 0), cw.shoot)), 'projectiles'); // ⑥+⑧
         consume();
         this.player.useTime = cw.useTime;
         this.sfx.play('throw');
@@ -5767,9 +5773,10 @@ export class Game implements GameHooks {
     const def = TILE_DEFS[type];
 
     // 倒木（KillTile type 488 → mysticLogsEvent.FallenLogDestroyed，WorldGen.cs:49866）：
-    // 仙女事件桩表重扫（桩被拆当夜不再出仙女；StartNight 亦会重扫）
+    // 仙女事件桩表重扫。原版调用点在 KillTile 尾部（tile 已清）——这里 breakTile
+    // 尚未清格，先置延迟旗、下一 tick updateTime 前消费（见 _fallenLogRescan）
     if (type === TILE_BY_KEY['v_488_fallen_log']) {
-      mysticLogs.fallenLogDestroyed(this.fairyCtx());
+      this._fallenLogRescan = true;
     }
 
     // 树：砍树干 → 整棵树倒下（自有树 + 导入的原版树族）
@@ -7188,23 +7195,63 @@ export class Game implements GameHooks {
   private tryOpenChest(chest: { locked?: boolean }): void {
     // 物品保护（v3 房间制）：非房主禁开宝箱（v1 无箱子内容同步，取放全在本地——门禁开箱即拦截）
     if (!this.netCanChestInteract()) { this.netDeny(Lang.text('Mods.SandboxWorld.Toast.RoomProtectItems')); return; }
-    if (chest.locked) {
-      const keyId = ITEM_BY_KEY['vi_327_golden_key'];
-      let keySlot = -1;
-      for (let i = 0; i < this.player.inv.slots.length; i++) {
-        const sl = this.player.inv.slots[i];
-        if (sl && sl.id === keyId && sl.stack > 0) { keySlot = i; break; }
+    // ---- 锁定箱开锁（Player.cs:32684-32724 钥匙解析 + Chest.Unlock :335-407 样式表 1:1）----
+    // 锁定 = 样式属性（Chest.IsLocked :282-297，帧区间集）：tile21 style
+    // 2(72-106)=金钥匙327 / 4(144-178)=暗影钥匙329 / 23-27(828-1006)=群系钥匙
+    // 1533+style-23 / 36/38/40=金钥匙；tile467 style13=4714（群系钥匙需 downed 世花）
+    // 解锁 = 四格 frameX - 偏移（36 / 180）+ Sound 22 + 成就（2→19；23-27/467-13→20）
+    const cxy0 = chest as { x?: number; y?: number };
+    if (cxy0.x !== undefined && cxy0.y !== undefined) {
+      const st = this.world.store;
+      const sheet = TILE_DEFS[st.get(cxy0.x, cxy0.y)]?.vanilla?.sheet ?? -1;
+      const fx = st.frameX[st.idx(cxy0.x, cxy0.y)];
+      const style = Math.floor(fx / 36);
+      // 样式锁定集（Chest.IsLocked :288-295）——地狱暗影箱(style 4)无数据旗标也走锁
+      const styleLocked = sheet === 21
+        ? (fx >= 72 && fx <= 106) || (fx >= 144 && fx <= 178) || (fx >= 828 && fx <= 1006)
+          || (fx >= 1296 && fx <= 1330) || (fx >= 1368 && fx <= 1402) || (fx >= 1440 && fx <= 1474)
+        : sheet === 467 && style === 13;
+      if (chest.locked || styleLocked) {
+      let keyVid = 327;              // 默认金钥匙（num78 初值，:32688）
+      let frameDelta = 36;           // 解锁帧回退
+      let event = 0;                 // 成就事件（0=无）
+      let plantGate = false;
+      if (sheet === 21) {
+        if (fx >= 144 && fx <= 178) { keyVid = 329; frameDelta = 36; }            // 锁暗影箱→暗影钥匙
+        else if (fx >= 828 && fx <= 1006) {
+          keyVid = 1533 + (style - 23); frameDelta = 180; plantGate = true;        // 群系锁箱
+        } else if (style === 2) { keyVid = 327; frameDelta = 36; event = 19; }     // 锁金箱（36/38/40 无事件）
+      } else if (sheet === 467) {
+        keyVid = 4714; frameDelta = 36; plantGate = true;                          // 沙漠锁箱
       }
-      if (keySlot < 0) { this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestLocked')); this.input.rightDown = false; return; }
-      this.player.inv.removeAt(keySlot, 1);
+      if (sheet === 467 || (fx >= 828 && fx <= 1006)) event = 20;                  // BIG_BOOTY（:363/:384/:458）
+      // 世花门（:357-360/:378-381：未击败拒绝，钥匙不耗）
+      if (plantGate && !this.world.flags['downed_262']) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.NeedDownedPlant'));
+        this.input.rightDown = false;
+        return;
+      }
+      if (!this.consumeVanillaItem(keyVid)) {
+        this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestLocked'));
+        this.input.rightDown = false;
+        return;
+      }
       chest.locked = false;
-      this.sfx.play('tink');
-      // 成就：DUNGEON_HEIST 的 prog(19)（Chest.cs:346 Unlock——金钥匙开锁金箱）。
-      // 原版另有暗影箱 event 20（Chest.cs:363/384/458 → BIG_BOOTY）；本仓锁定箱
-      // 模型统一走金钥匙（无暗影钥匙区分），event 20 暂不接线（偏差已记录）
-      this.achievements.notifyProgressionEvent(19);
+      this.sfx.play('tink');   // Sound 22（:389）
+      // 四格 frameX 回退（:390-404）——2×2 各格同偏移；直写帧后手动标脏
+      for (let dx = 0; dx <= 1; dx++) {
+        for (let dy = 0; dy <= 1; dy++) {
+          const tx = cxy0.x + dx, ty = cxy0.y + dy;
+          if (!st.inBounds(tx, ty)) continue;
+          const ti = st.idx(tx, ty);
+          st.frameX[ti] = Math.max(0, st.frameX[ti] - frameDelta);
+        }
+      }
+      this.chunks.markDirtyArea(cxy0.x - 1, cxy0.y - 1, cxy0.x + 2, cxy0.y + 2);
+      if (event > 0) this.achievements.notifyProgressionEvent(event);
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestUnlocked'));
       this.cb.onInventoryChanged();
+      }
     }
     // 陷阱箱 441/468(Player.cs:21303 语义):开启即触发电路 + 向玩家八方射镖
     const cxy = chest as { x?: number; y?: number };
@@ -7218,6 +7265,17 @@ export class Game implements GameHooks {
       }
       this.sfx.play('tink');
       this.cb.onToast(Lang.text('Mods.SandboxWorld.Toast.ChestTrapped'));
+    }
+    // 成就：打开金箱（Player.cs:32782-32790：sheet21 frameX∈[36,72) = 金箱 style1
+    // 开箱 → event 16 I_AM_LOOT「在地下找到一个金宝箱并看看里面」）
+    if (cxy.x !== undefined && cxy.y !== undefined) {
+      const stI = this.world.store;
+      const sheetI = TILE_DEFS[stI.get(cxy.x, cxy.y)]?.vanilla?.sheet ?? -1;
+      const fxI = stI.frameX[stI.idx(cxy.x, cxy.y)];
+      if (sheetI === 21 && fxI >= 36 && fxI < 72) {
+        this.achievements.handleSpecialEvent(16,
+          { statLifeMax: this.player.maxHp, statManaMax: this.player.maxMana });
+      }
     }
     this.openChest?.(chest as never);
     this.input.rightDown = false;
@@ -8106,7 +8164,7 @@ export class Game implements GameHooks {
   /** hurtBox:实体伤害盒半宽(Projectile.Kill 各族 Resize 盒的半边)。
    *  原版与地形破坏半径【无关】:炸弹/手雷族(:74885)Resize(22,22)=11px;
    *  炸药棍 29(:74951)200×200=100px;缺省按地形半径兜底(放置炸药 108/器件爆) */
-  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0) {
+  private explodeAt(tx: number, ty: number, damage: number, radius = 3, destroyTiles = true, hurtBox?: number, pen = 0, projId = 0) {
     const st = this.world.store;
     const R = radius;
     const hardMode = !!this.world.flags.hardMode;
@@ -8164,14 +8222,29 @@ export class Game implements GameHooks {
     const p = this.player;
     const hb = hurtBox ?? R * TILE;
     if (Math.abs(p.cx - cx) < hb + p.w / 2 && Math.abs(p.cy - cy) < hb + p.h / 2) p.damage(damage, cx, cy);
-    // 视觉 1:1(Projectile.Kill 炸弹族 :74886-74916):烟 31×20 慢散 +
-    // 火 6×10 对(noGravity 快速) + gore 61-63 四向 4 块(近似灰色块)
-    this.spawnParticles(cx, cy, '#9A9A9A', 20, 2, { life: 40, damp: 0.96 });       // 烟(×1.4 慢)
-    this.spawnParticles(cx, cy, '#FF9A3C', 20, 5, { life: 30, grav: -0.06, damp: 0.94 }); // 火对(×5/×3 无重力)
-    for (let gi = 0; gi < 4; gi++) {
-      const a = gi * Math.PI / 2 + Math.PI / 4;
-      this.spawnParticles(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, '#D8D8D0', 1, 3,
-        { life: 50, damp: 0.98, size: 3 });
+    // 视觉 1:1（Projectile.Kill 按类型分档）:
+    //   炸弹 28/手雷 30(:74881-74916):烟 31×20(scale1.5 vel×1.4) + 火 6×10 对
+    //     (scale2.5 noGrav vel×5 + scale1.5 vel×3) + gore 61-64×4(vel×0.4 对角±1)
+    //   炸药棍 29(:74943-75010):200×200 场——烟 50(scale2 vel×1.4) + 火 80 对
+    //     (scale3 noGrav vel×5 + scale2 vel×3) + gore 61-64×8(scale1.5 vel±1.5)
+    //   此前所有类型共用一套弱视觉且火粒子无重力缺失(用户报"没火焰粒子")。
+    //   dust 31=烟(灰) / dust 6=火把焰(黄橙闪烁) / gore 61-64=烟团碎片
+    const big = projId === 29;
+    const nSmoke = big ? 50 : 20;
+    const nFire = big ? 40 : 10;
+    this.spawnParticles(cx, cy, '#9A9A9A', nSmoke, 1.4,
+      { life: big ? 60 : 45, damp: 0.95, size: big ? 4 : 3 });                    // 烟(×1.4 慢散)
+    // 火对：noGravity ≈ grav 0 + 高阻尼直飞；色取 torch 焰双档(#FFD24A 亮黄/#FF9A3C 橙)
+    this.spawnParticles(cx, cy, '#FFD24A', nFire, 5,
+      { life: 30, grav: 0, damp: 0.9, size: big ? 6 : 5 });                       // 快火(vel×5 scale2.5/3)
+    this.spawnParticles(cx, cy, '#FF9A3C', nFire, 3,
+      { life: 38, grav: 0, damp: 0.92, size: big ? 5 : 4 });                       // 慢火(vel×3 scale1.5/2)
+    const nGore = big ? 8 : 4;
+    for (let gi = 0; gi < nGore; gi++) {
+      const a = gi * (Math.PI * 2 / nGore) + Math.PI / 4;
+      const gv = big ? 1.5 : 1;
+      this.spawnParticles(cx + Math.cos(a) * 6, cy + Math.sin(a) * 6, '#D8D8D0', 1, gv,
+        { life: 70, damp: 0.98, size: big ? 5 : 3 });
     }
     // 原版爆炸声 SoundID.Item14(Projectile.cs 手雷/炸弹/炸药等 20+ 处)——
     // 曾误用 roar(Boss 咆哮);首播静音已由 Sfx 合成分支+预热兜底
@@ -8667,8 +8740,9 @@ export class Game implements GameHooks {
       by += Math.floor(bh * 0.5);
       bh = Math.floor(bh * 1.1);
     }
-    // 原版 ItemCheck_CutTiles（Player.cs:44002）：挥击矩形内所有 tileCut/KillTile
-    for (let ty = Math.floor(by / TILE); ty <= Math.floor((by + bh - 1) / TILE); ty++) {
+    // 原版 ItemCheck_CutTiles（Player.cs:44002 + :42972-42976：仅金/防火网调
+    //  CutTiles(cutExtraTiles)，普通虫网 1991 不砍草）
+    if (swingVid !== 1991) for (let ty = Math.floor(by / TILE); ty <= Math.floor((by + bh - 1) / TILE); ty++) {
       for (let tx = Math.floor(bx / TILE); tx <= Math.floor((bx + bw - 1) / TILE); tx++) {
         const tk = tx * 100000 + ty;
         if (this.swingTileCutSet.has(tk)) continue;
@@ -8882,7 +8956,24 @@ export class Game implements GameHooks {
     const viewHalfH = Math.ceil(this.camera.viewH / (this.camera.zoom || 1) / 2 / TILE);
     const rng = new RNG((Math.random() * 1e9) | 0);
     const picked = this.vanillaSpawner.spawn(p.cx, p.cy, rng, viewHalfW, viewHalfH);
-    if (!picked) return;
+    if (!picked) {
+      // SpawnFrog 687 交付（:5521-5535）：无 Enemy 数据条目 → 转 Critter；
+      // AnyNPCs(687) 去重的 Critter 侧补判（activeIds 不含小动物桶）
+      const ck = this.vanillaSpawner.pendingCritterKey;
+      if (ck) {
+        this.vanillaSpawner.pendingCritterKey = null;
+        const dupe = this.entities.critters.some((n) => {
+          const c = n as Critter;
+          return !c.dead && CRITTER_BY_KEY[c.key]?.npc === 687;
+        });
+        if (!dupe) {
+          this.entities.add(new Critter(ck,
+            this.vanillaSpawner.currentSpawnX * TILE + 8,
+            this.vanillaSpawner.currentSpawnY * TILE), 'critters');
+        }
+      }
+      return;
+    }
     // 骷髅商（NPC.cs:4906-4910）：转 TownNPC 进 npcs 桶；场上已有则跳过（CountNPCS(453)==0）
     if (picked.vanillaId === 453) {
       if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === 'skeleton_merchant')) return;
@@ -8890,20 +8981,28 @@ export class Game implements GameHooks {
       this.entities.add(sm, 'npcs');
       return;
     }
-    // 绑缚三人组（NPC.cs:1994-2005）：105 BoundGoblin / 106 BoundWizard /
-    // 685 BoundTownSlimeOld——原版为独立被缚 NPC 类型，本仓以 bound TownNPC 近似
-    // （同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体）。已在场（含生成期
-    // placeBoundRescueNpcs 放置的 bound 态）则跳过——activeIds 的反查登记通常已在上游
-    // 拦下，此处双保险
+    // 绑缚救援族 → bound TownNPC（原版为独立被缚 NPC 类型，本仓以 TownNPC.bound
+    // 近似；同 453 模式转桶；VanillaSpawner.spawnBound 只交付占位体——589/685 json
+    // 缺条目，105/106/123/354 为真条目）。覆盖全部六只（2026-08-13 扩展：生成期
+    // placeBoundRescueNpcs 移除后，123 机械师/354 造型师/589 高尔夫球手的链命中
+    // 也走本转换；534 税务员除外——原版是地狱敌怪 + 净化粉 Transform(441) 链）：
+    //   105 BoundGoblin(:1996) / 106 BoundWizard(:1999) / 685 BoundTownSlimeOld(:2002)
+    //   354 WebbedStylist(:1576) / 589 GolferRescue(:1600) / 123 BoundMechanic(:2563)
+    // 已在场则跳过——activeIds 的反查登记（BOUND_TOWN_NPC_ID）通常已在上游拦下，
+    // 此处双保险
     {
-      const trioKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
+      const boundKey = picked.vanillaId === 105 ? 'goblin_tinkerer'
         : picked.vanillaId === 106 ? 'wizard'
-          : picked.vanillaId === 685 ? 'town_slime_old' : null;
-      if (trioKey) {
-        if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === trioKey)) return;
+          : picked.vanillaId === 685 ? 'town_slime_old'
+            : picked.vanillaId === 686 ? 'town_slime_clumsy'
+            : picked.vanillaId === 354 ? 'stylist'
+              : picked.vanillaId === 589 ? 'golfer'
+                : picked.vanillaId === 123 ? 'mechanic' : null;
+      if (boundKey) {
+        if (this.entities.npcs.some((n) => n instanceof TownNPC && !n.dead && n.npcKey === boundKey)) return;
         // 落位：currentSpawnY = 落脚实心面（findSpawnTile 向下找的首个实心格，与
         // placeBoundNpc 的"脚底上一格+1"同义）→ 脚底 = 该格顶
-        const tn = new TownNPC(trioKey, this.vanillaSpawner.currentSpawnX * TILE + 8,
+        const tn = new TownNPC(boundKey, this.vanillaSpawner.currentSpawnX * TILE + 8,
           this.vanillaSpawner.currentSpawnY * TILE);
         tn.bound = true;
         this.entities.add(tn, 'npcs');
@@ -9100,11 +9199,10 @@ export class Game implements GameHooks {
       .map((n) => ({ x: n.home!.x, y: n.home!.y, npcId: n.vanillaId }));
     const st = this.world.store;
 
-    // ①' 困难模式开启后补放被绑巫师（原版仅困难世界放置）
-    if (this.world.flags.hardMode) {
-      const s = this.findBoundSpotByDepth(Math.floor(this.world.rockLevel) + 60, st.h - 350);
-      if (s) this.placeBoundNpc('wizard', 'savedWizard', s[0], s[1]);
-    }
+    // ①' 被绑巫师【不补放】（2026-08-13 对齐原版）：106 BoundWizard 唯一来源 =
+    // SpawnAnNPC 三人组链（NPC.cs:1999-2002，hardMode && 1/20 && 洞穴层深处门），
+    // VanillaSpawner 已 1:1——困难模式开启后由链自然掷出，入驻轮直接补放非原版
+    // （生成期 placeBoundRescueNpcs 同批移除，实证见 onWorldReady 注释）
     // ①'' 睡渔夫补放（原版 SpawnNPC 海洋/沙滩分支每轮掷——补放近似其"未解救则持续在场"）
     this.placeSleepingAngler();
 
@@ -9182,6 +9280,21 @@ export class Game implements GameHooks {
       const npc = new TownNPC(pick, ax * TILE + 8, (ay + 1) * TILE);
       this.entities.add(npc, 'npcs');
       this.newText(Lang.text(`Announcement.HomelessArrived_${Math.floor(Math.random() * 6)}`, name), 50, 125, 255);
+    }
+  }
+
+  /** 绑缚 NPC 触碰解救（原版 AI_007 玩家接触 bound → 转正；右键解救保留为便捷兜底）：
+   *  玩家 AABB 与 bound TownNPC 相交即 freeBoundNpc（534 税务官例外——需净化粉）。 */
+  private boundTouchCheck(): void {
+    const p = this.player;
+    if (p.dead) return;
+    for (const n of this.entities.npcs) {
+      const npc = n as TownNPC;
+      if (!(npc instanceof TownNPC) || npc.dead || !npc.bound) continue;
+      if (npc.npcKey === 'tax_collector') continue;   // 原版 534 只吃净化粉
+      if (p.x < npc.x + npc.w && p.x + p.w > npc.x && p.y < npc.y + npc.h && p.y + p.h > npc.y) {
+        this.freeBoundNpc(npc);
+      }
     }
   }
 
@@ -9278,7 +9391,7 @@ export class Game implements GameHooks {
    *  使 SpawnAnNPC 各被缚支的 !AnyNPCs(id) 场上唯一门成立 */
   private static readonly BOUND_TOWN_NPC_ID: Record<string, number> = {
     goblin_tinkerer: 105, wizard: 106, mechanic: 123, stylist: 354,
-    golfer: 589, tax_collector: 534, town_slime_old: 685,
+    golfer: 589, tax_collector: 534, town_slime_old: 685, town_slime_clumsy: 686,
   };
 
   /** NPC.HasSpecialEventText（NPC.cs:96081-96105 1:1）：五环境态按原版顺序各 1/3
@@ -9317,23 +9430,26 @@ export class Game implements GameHooks {
     const boss1 = !!(w.flags['downed_4'] || w.flags.downedEyeOfCthulhu);
     const boss2 = !!(w.flags['downed_13'] || w.flags['downed_266']);
     const boss3 = !!(w.flags['downed_35'] || w.flags.downedSkeletron);
-    // HasSpecialEventText（cs:96081-96105，各类型分支首位）：哥布林/巫师/机械师
-    // 的流浪态优先于事件文案（cs:95286/95336/95429 homeless 先行），其余类型事件优先
-    const HOMELESS_FIRST = new Set([107, 108, 124]);
-    if (!(HOMELESS_FIRST.has(npc.vanillaId) && !npc.home)) {
-      const special = this.npcSpecialEventText(npc);
-      if (special) return special;
-    }
-    // FreeCakeDialogue（ConditionalDialogue.cs:42-61，GetChat 头部 nextDialogue 先行，
-    // 仅注册于派对女孩 208 :115）：生日派对开张（NPC.freeCake=true，BirthdayParty.cs:106）
-    // 后首次对话 → 蛋糕台词（PartyGirlSpecialText.Cake1-3）+ 直接入包切片蛋糕 3750
-    // （EntitySource_Gift / QuickSpawnItem）+ 清旗（联机 msg51 广播位不适用单机）
+    // FreeCakeDialogue（ConditionalDialogue.cs:42-61）：原版 GetChat 第一句即
+    // nextDialogue 先行（NPC.cs:94974-94978，nextDialogue 每帧刷新于 :91579）——
+    // 蛋糕台词压过包括事件文案在内的一切分支。仅注册于派对女孩 208（:115）：
+    // 生日派对开张（NPC.freeCake=true，BirthdayParty.cs:106）后首次对话 →
+    // PartyGirlSpecialText.Cake1-3 + 直接入包切片蛋糕 3750（QuickSpawnItem
+    // EntitySource_Gift）+ 清旗（联机 msg51 广播位不适用单机）。
+    // 曾排在 npcSpecialEventText 之后=优先级反了（派对+血月同存时先出血月文案）
     if (npc.vanillaId === 208 && this.freeCake) {
       this.freeCake = false;
       const cake = VI(3750);
       if (cake && ITEM_BY_KEY[cake] !== undefined) this.player.inv.add(ITEM_BY_KEY[cake], 1);
       return Lang.specialText('PartyGirlSpecialText.Cake')
         ?? Lang.text('PartyGirlSpecialText.Cake1');
+    }
+    // HasSpecialEventText（cs:96081-96105，各类型分支首位）：哥布林/巫师/机械师
+    // 的流浪态优先于事件文案（cs:95286/95336/95429 homeless 先行），其余类型事件优先
+    const HOMELESS_FIRST = new Set([107, 108, 124]);
+    if (!(HOMELESS_FIRST.has(npc.vanillaId) && !npc.home)) {
+      const special = this.npcSpecialEventText(npc);
+      if (special) return special;
     }
     if (npc.vanillaId === 17) {
       // 商人(NPC.cs:95077-95105)
@@ -9759,6 +9875,12 @@ export class Game implements GameHooks {
           }
         }
       }
+      // 空闲随机冒泡(原版散落情境 NewBubble 的可见子集;emote 均匀 0..120,
+      // 240t)——单 NPC 也冒泡,喂同一 EmoteBubble 模块(TownNPC 内联版已退役)
+      if (npcs.length >= 1 && Math.random() < 0.5) {
+        const n = npcs[Math.floor(Math.random() * npcs.length)];
+        spawnEmote(n, Math.floor(Math.random() * 121), 240);
+      }
     }
   }
 
@@ -9990,9 +10112,20 @@ export class Game implements GameHooks {
       }),
       // NPC.AnyDanger（NPC.cs:81040+）：月总倒计时/入侵/月事件/旧军/活跃 Boss。
       // DangerThatPreventsOtherDangers 小集合未跟踪（近似面，登记 RuntimeEvents.ts）
+      // AnyDanger（NPC.cs:81040-81084）：月总倒计时/入侵/月事件/旧军/boss 外，
+      // 还认 DangerThatPreventsOtherDangers（NPCID.cs:4869）={四天界柱 517/422/
+      // 507/493, 月总核心 399, 世吞体 13/14/15}——天启四柱阶段/lunarEvent 未开
+      // 倒计时时该集合是唯一危险源（此前缺它→石碑 recheck 只有 600 而非 ×6）
       anyDanger: () => w.lunarEvent.moonLordCountdown > 0 || w.invasionType > 0
         || w.moonEvent.kind !== 0 || w.oldOnesArmy.ongoing
-        || this.entities.enemies.some((n) => !((n as Enemy).dead) && (n as Enemy).def.boss),
+        || this.entities.enemies.some((n) => {
+          const en = n as Enemy;
+          if (en.dead) return false;
+          if (en.def.boss) return true;
+          const vid = en.vanillaId ?? -1;
+          return vid === 517 || vid === 422 || vid === 507 || vid === 493
+            || vid === 399 || vid === 13 || vid === 14 || vid === 15;
+        }),
       // WorldGen.PlayerLOS 近似（WorldEvolution.playerLOS 同款：50 格内视为可见）
       playerLOS: (x, y) => {
         const p = this.player;
@@ -10004,8 +10137,7 @@ export class Game implements GameHooks {
       spawnTablet: (x, y) => {
         const e = Enemy.fromVanilla(437, x, y);
         if (!e) return false;
-        e.id = this.entities.nextId++;
-        this.entities.add(e, 'enemies');
+        this.entities.add(e, 'enemies');   // add 内自派 id（手写 nextId++ 是双派死码）
         return true;
       },
     };
@@ -10030,8 +10162,7 @@ export class Game implements GameHooks {
       spawnFairy: (id, x, y) => {
         const e = Enemy.fromVanilla(id, x, y);
         if (!e) return;
-        e.id = this.entities.nextId++;
-        this.entities.add(e, 'critters');   // 仙女族（583-585）= 小动物桶，不计怪上限
+        this.entities.add(e, 'critters');   // 仙女族（583-585）= 小动物桶，不计怪上限；add 内自派 id
       },
     };
   }
@@ -10479,6 +10610,10 @@ export class Game implements GameHooks {
     const p = this.player;
     if (p.dead) return;
     if (attacker) p.lastDamageCause = { kind: 'npc', name: (attacker.vanillaId != null ? Lang.npcName(attacker.vanillaId) : null) ?? attacker.def.name };
+    // 旗 buff 接触减伤（Player.cs:30930-30933 GetBannerBuffEffect:经典 ×0.75/专家 ×0.5）
+    if (attacker && attacker.vanillaId != null && contactOnly && this.bannerNpcActive(attacker.vanillaId)) {
+      dmg = Math.max(1, Math.round(dmg * bannerReceivedMult(mainExpertMode(this.world))));
+    }
     const ok = p.damage(dmg, srcX, srcY);
     if (ok) {
       // 狼人(155)命中施加虚弱 33（1800t=30s：近战-5.1%伤/速、防-4、移-10%）
@@ -10556,11 +10691,22 @@ export class Game implements GameHooks {
       // 传的是 def.damage 原值（未浮动），此处补同式 DamageVar 与原版对齐；
       // 击退 = ApplyDamageToNPC(knockback=10, -num3)（:30930/:30944）：纯水平方向
       // （num3=怪在玩家左则 +1，反推 -1）× 10（×0.65 速度系数同武器击退链），不上抛
-      if (p.thornsActive && attacker && contactOnly && !attacker.dead) {
+      // 反伤两段（Player.cs:30940-30958 两个【独立 if】,海龟+仙人掌可叠加）:
+      //  ① thorns 链:反=实际受伤×num2(荆棘药水 1/海龟套 2)钳 1000
+      //  ② cactusThorns:仙人掌套定值 15/专家 30/大师 45（不乘伤害）
+      if (attacker && contactOnly && !attacker.dead) {
         const num3 = attacker.cx + attacker.w / 2 < p.cx + p.w / 2 ? 1 : -1; // :30928-30932
-        const reflect = Math.min(1000, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100)));
-        attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);
-        this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
+        if (p.thornsActive) {
+          const num2 = (p.buffs.hasThorns ? 1 : 0) + (p.turtleSet ? 1 : 0);   // :30911-30916
+          const reflect = Math.min(1000, Math.round(dmg * (1 + (Math.random() * 30 - 15) / 100) * num2));
+          attacker.hurt(reflect, -num3 * 10 * 0.65, 0, this);
+          this.addDamageNumber(attacker.cx, attacker.y, reflect, false, '#80FF80');
+        }
+        if (p.cactusSet) {
+          const cactus = mainMasterMode(this.world) ? 45 : mainExpertMode(this.world) ? 30 : 15;
+          attacker.hurt(cactus, -num3 * 10 * 0.65, 0, this);
+          this.addDamageNumber(attacker.cx, attacker.y, cactus, false, '#A0FF60');
+        }
       }
       if (p.hp <= 0) {
         p.dead = true;
@@ -10706,6 +10852,17 @@ export class Game implements GameHooks {
         ? enemy.vanillaNetId : enemy.vanillaId);
       this.achCheckBestiary();
     }
+    // 旗帜击杀记账（BannerSystem.AddNPCKillBy :193-216——达标公告+掉一面旗;原版
+    // claimable+对话领取,本仓自动授予近似,登记）
+    if (enemy && enemy.vanillaId != null) {
+      const grant = recordBannerKill(this.world.bannerKills, enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+      if (grant) {
+        const banner = bannerOfNpc(enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId);
+        const name = Lang.npcName(bannerItemId(banner) ? (enemy.vanillaNetId !== 0 ? enemy.vanillaNetId : enemy.vanillaId) : enemy.vanillaId);
+        this.newText(`${name} 旗帜已就绪!`, 250, 250, 0);
+        this.spawnDrop(this.player.cx, this.player.cy, 'place_v_91_banners', 1, 0, -3);
+      }
+    }
     // 史莱姆雨击杀推进（NPC.cs:79883-79898：slimeRainNPC 击杀 → killCount≥150 且场上无王 → 召王）
     if (enemy && enemy.vanillaId != null && this.world.weather.slimeRain) {
       if (this.world.weather.advanceSlimeRainKill(enemy.vanillaId) && !this.boss) {
@@ -10720,6 +10877,24 @@ export class Game implements GameHooks {
       // 专家/大师判定读世界难度（Main.expertMode/masterMode，Main.cs:2775/:2779）
       const ann = addMoonEventKill(this.world, enemy.vanillaId, this.world.isExpert, this.world.isMaster);
       if (ann) this.newText(invasionWaveText(ann), 175, 75, 255);
+      // SetEventFlagCleared（NPC.cs:80011-80033，各 case 带月别门）：南瓜月
+      // 327→event 5 / 325→4；霜月 344→21 / 345→20 / 346→22——首杀置 downed_* 旗
+      // 并投递灯笼夜预约（4/21/22 在排除集不预约，仅置旗；此前缺本段 = 南瓜王/
+      // 冰女王首杀后次夜灯笼夜不触发，2026-08-13 review 补）
+      const meFlag: Record<number, { ev: number; pumpkin: boolean }> = {
+        327: { ev: 5, pumpkin: true }, 325: { ev: 4, pumpkin: true },
+        344: { ev: 21, pumpkin: false }, 345: { ev: 20, pumpkin: false },
+        346: { ev: 22, pumpkin: false },
+      };
+      const mf = meFlag[enemy.vanillaId];
+      const meKind = this.world.moonEvent.kind;
+      if (mf && (mf.pumpkin ? meKind === MOON_KIND_PUMPKIN : meKind === MOON_KIND_FROST)) {
+        const key = `downed_${enemy.vanillaId}`;
+        if (!this.world.flags[key]) {
+          this.world.flags[key] = true;
+          LanternNight.onGameEventCleared(mf.ev);
+        }
+      }
       // 成就：月事件 15 波（NPC.cs:79369 霜月 event 14 / :79503 南瓜月 event 15——
       // 进波公告非 Empty 且 waveNumber==15 时触发）
       if (this.world.moonEvent.waveNumber >= 15) {
@@ -10839,6 +11014,53 @@ export class Game implements GameHooks {
    *  edge=false 不会双翻） */
   pulseSmartCursor(level: boolean): void {
     this.smartCursor.updateWanted(level, !!this.input.mouseDown, this.smartSettings());
+  }
+
+  // ================= 宠物系统（vanity/light pet） =================
+
+  /** 宠物跟随体（槽 0）/ 光宠跟随体（槽 1）——updatePets 每帧维护 */
+  petFollower: PetFollower | null = null;
+  lightPetFollower: PetFollower | null = null;
+  /** 隐藏旗（原版 Player.hideMisc[0]/[1]，TogglePet/ToggleLight :17191-17208 翻转） */
+  petHidden = false;
+  lightPetHidden = false;
+
+  /** 每帧宠物存续维护（UpdatePet :17147-17162 / UpdatePetLight :17164-17187） */
+  private updatePets(): void {
+    const p = this.player;
+    this.petFollower = this.updatePetSlot(0, !this.petHidden, this.petFollower);
+    this.lightPetFollower = this.updatePetSlot(1, !this.lightPetHidden, this.lightPetFollower);
+    void p;
+  }
+
+  private updatePetSlot(slot: 0 | 1, visible: boolean, cur: PetFollower | null): PetFollower | null {
+    const item = this.player.inv.miscEquips[slot];
+    const info = item ? petInfoOfVid(vanillaIdOfItem(item.id)) : null;
+    const want = info && visible && !this.player.dead;
+    if (!want) {
+      if (cur && !cur.dead) cur.dead = true;
+      return null;
+    }
+    // 已在役且同款 → 保留；换款/首次 → 重生
+    if (cur && !cur.dead && cur.projId === info.proj) return cur;
+    if (cur && !cur.dead) cur.dead = true;
+    const f = new PetFollower(this.player.cx, this.player.y - 30, info.proj,
+      () => (this.player.dead ? null : this.player));
+    this.entities.add(f, 'npcs');
+    return f;
+  }
+
+  /** 宠物召唤/收回（Player.TogglePet :17191-17196 + ToggleLight :17199-17208
+   *  的 hideMisc 翻转语义；移动端坐骑/宠物键入口。坐骑引擎未实装——槽 3 装备
+   *  时仅提示） */
+  togglePets(): void {
+    if (this.player.inv.miscEquips[0]) {
+      this.petHidden = !this.petHidden;
+      this.sfx.play('menuTick', 0.6);   // UI 点击 Sound 12（Main.cs:40688）
+    } else if (this.player.inv.miscEquips[1]) {
+      this.lightPetHidden = !this.lightPetHidden;
+      this.sfx.play('menuTick', 0.6);
+    }
   }
 
   /** 装备钩爪发射（miscEquips[4]，移动端虚拟键）。方向 = 摇杆轴或角色朝向。
@@ -12633,6 +12855,9 @@ export class Game implements GameHooks {
   playerName(): string {
     return this.player.appearance?.name?.trim() || Lang.text('Mods.SandboxWorld.DefaultPlayerName');
   }
+
+  /** 旗 buff：该 npc 是否被屏内旗覆盖（ItemID.Sets.BannerStrength 普通族） */
+  bannerNpcActive(npcId: number): boolean { return this._bannerNpcs.has(npcId); }
 
   respawnPlayer() {
     const p = this.player;

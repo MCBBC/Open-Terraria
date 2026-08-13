@@ -267,10 +267,11 @@ export function wallOfFleshAI(e: Enemy, game: GameHooks, player: Player | null) 
   }
   yScan -= 4;
   wofDrawAreaTop = approachPx(wofDrawAreaTop, yScan * TILE); // :25918-25929
-  // :25930-25939 钳到允许带 [num372, num373]
+  // :25916-25917 钳到允许带 [num372, num373]
   wofDrawAreaTop = Math.round(clamp(wofDrawAreaTop, num372 * TILE, num373 * TILE));
   wofDrawAreaBottom = Math.round(clamp(wofDrawAreaBottom, num372 * TILE, num373 * TILE));
-  // :25940-25946 上下沿间距保底 160px
+  // :25918-25925 上下沿间距保底 160px（if + else-if 两条件，:25940-25946 实为
+  // FindFrame case 546/542-545 帧数表——旧注释行号曾误指）
   if (wofDrawAreaTop > wofDrawAreaBottom - 160) wofDrawAreaTop = wofDrawAreaBottom - 160;
   else if (wofDrawAreaBottom < wofDrawAreaTop + 160) wofDrawAreaBottom = wofDrawAreaTop + 160;
 

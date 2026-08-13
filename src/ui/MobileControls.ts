@@ -285,8 +285,13 @@ export class MobileControls {
     b.className = 'sw-mbtn sw-mride';
     b.textContent = '🐴';
     this.bindButton(b, () => {
-      // 坐骑/宠物引擎未实装（矿车除外）——占位反馈，引擎接通后改为召唤/收回
-      this.game.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.MobileRideTodo'));
+      // 宠物/光宠：召唤·收回（Player.TogglePet/ToggleLight hideMisc 翻转）；
+      // 坐骑（槽 3）引擎未实装（矿车除外）——仅提示
+      if (this.game.player.inv.miscEquips[0] || this.game.player.inv.miscEquips[1]) {
+        this.game.togglePets();
+      } else {
+        this.game.cb.onToast?.(Lang.text('Mods.SandboxWorld.Toast.MobileRideTodo'));
+      }
     });
     this.rideBtn = b;
     this.root.appendChild(b);

@@ -38,6 +38,11 @@ export interface ChestFlags {
   sky?: boolean;    // flag6 天空箱(style 12)
   hell?: boolean;   // flag8 地狱箱(style 4)
   wooden?: boolean; // flag 木箱(style 0)——地表战利品分支门禁
+  mushroom?: boolean; // flag7 蘑菇箱(style 32,cs:36201)
+  dungeon?: boolean;  // flag9 地牢箱（位置 IsDungeon 或上锁生物群系箱,cs:36211/:36219）
+  skyTheme?: boolean; // flag12 天空主题箱（style 13 或主件 159/65/158/2219,cs:36227）
+  temple?: boolean;   // flag13 神庙箱（style 16,cs:36206）
+  lockedBiome?: boolean; // flag10 上锁生物群系箱（IsLockedDungeonBiomeChest,cs:36219）
 }
 
 /** Main.wallDungeon（Main.cs:10507-10513）：7/8/9 + 94-99（不含神庙墙 87——
@@ -77,9 +82,7 @@ function barIds(gs: GenState): { copper: number; iron: number; silver: number; g
  *  cs:11262-11274——种子等价要求该洗牌发生在 pass 循环前，此处只轮换取用） */
 function nextHellItem(gs: GenState): number {
   const items = gs.hellChestItems ?? [274, 220, 112, 218, 3019]; // 兜底（探针直调）
-  const item = items[gs.hellChestIdx % items.length];
-  gs.hellChestIdx++;
-  return item;
+  return items[gs.hellChestIdx % items.length]; // 自增移到放置成功后（cs:36257-36264）
 }
 
 /** 常春藤箱主件序(GetNextJungleChestItem cs:10130:循环 211/212/213/964 + 稀有替换) */
@@ -118,6 +121,8 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     // ===== 地表木箱/天空箱(cs:36283-36468)=====
     if (mainVanillaId > 0) {
       push(mainVanillaId);
+      if (mainVanillaId === 832) push(933); // cs:36287-36291 世界树主件后插叶法杖
+      if (mainVanillaId === 848) push(866); // cs:36283-36286 金字塔主件附赠法老袍
       if (flags.sky) {
         if (rng.int(0, 2) === 0) push(5629);
         if (rng.int(0, 5) === 0) push(rng.int(0, 1) === 0 ? 4429 : 4427);
@@ -152,11 +157,33 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 1) === 0) push(9, rng.int(50, 99));     // 木材
   } else if (isGold) {
     // ===== 地下金箱(ws+25 ≤ gy < rockLevel,cs:36563-36789)=====
+    // flag12 派生（cs:36227）：主件 159 气球/65 抓钩/158 瓶中云/2219 星磁铁 或 style13
+    const flag12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
+      || mainVanillaId === 158 || mainVanillaId === 2219;
     if (mainVanillaId > 0) {
+      if (mainVanillaId === 832) push(933); // cs:36549-36553 主件前插叶法杖
       push(mainVanillaId);
       if (flags.water) {
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
+      }
+      if (flag12 && rng.int(0, 39) === 0) push(4978); // cs:36568 1/40 幼翼
+      // 蘑菇箱 flag7（cs:36689-36702）：1/2 蘑菇矿车；1/3 三件套
+      if (flags.mushroom) {
+        if (rng.int(0, 1) === 0) push(4450);
+        if (rng.int(0, 2) === 0) { push(4779); push(4780); push(4781); }
+      }
+      // 地牢箱 flag9 门（cs:36597-36611，flag10 上锁箱不给钥匙）：
+      // 首只暗影钥匙必给（无则 1/3）、Ram Rune 1/8
+      if (flags.dungeon && !flags.lockedBiome) {
+        if (!gs.generatedShadowKey || rng.int(0, 2) === 0) {
+          gs.generatedShadowKey = true;
+          push(329);
+        }
+        if (!gs.generatedRamRune || rng.int(0, 7) === 0) {
+          gs.generatedRamRune = true;
+          push(5465);
+        }
       }
       // ★ivy(3360/3361/4426/5525) 附赠原版只在洞穴分支（cs:36864-36880）——
       // 金箱分支无 flag4 段（cs:36545-36703），曾误带致常春藤箱落金箱深度多整套附赠
@@ -176,10 +203,11 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 2) !== 0) push(2350, rng.int(2, 4));
     if (rng.int(0, 1) === 0) push(flags.ice ? 974 : 8, rng.int(10, 20)); // 冰火把/火把 cs:36820 Next(11)+10=[10,20]（曾 10,19 漏 20）
     if (rng.int(0, 1) === 0) push(72, rng.int(50, 89));
-  } else if (gy <= ctx.worldH - 205) {
-    // ===== 洞穴箱(rockLevel ≤ gy ≤ h-205,cs:36789-37163)=====
-    // ★门对齐原版：战利品 flag8 与样式 num9=4 共用 y > h-205 一道门（cs:36162-36164）
-    // ——此前自造 h-250 分界 = h-250..h-205 带出"地狱战利品装金箱"(地狱上缘可见)
+  } else if (gy <= ctx.worldH - 250) {
+    // ===== 洞穴箱(rockLevel ≤ gy ≤ h-250,cs:36789-37163)=====
+    // ★门勘误：洞穴/地狱【战利品】分界是 h-250（cs:36839）；h-205 是【样式】门
+    // （cs:36162 style4）。[h-250,h-205) 带 = 金箱样式 + 地狱战利品（原版如此）——
+    // 曾误并一道门带出地狱战利品装洞穴箱
     if (mainVanillaId > 0) {
       push(mainVanillaId);
       if (flags.ice && rng.int(0, 4) === 0) push(3199);       // 1/5 冰镜
@@ -199,14 +227,30 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
         if (rng.int(0, 1) === 0) push(4425);
         if (rng.int(0, 1) === 0) push(4460);
       }
+      // 蘑菇箱 flag7（cs:37007-37021：1/2 矿车 否则三件套）
+      if (flags.mushroom) {
+        if (rng.int(0, 1) === 0) push(4450);
+        else { push(4779); push(4780); push(4781); }
+      }
+      // 地牢箱 flag9 门（cs:36892-36906，flag10 上锁箱不给钥匙）
+      if (flags.dungeon && !flags.lockedBiome) {
+        if (!gs.generatedShadowKey || rng.int(0, 2) === 0) {
+          gs.generatedShadowKey = true;
+          push(329);
+        }
+        if (!gs.generatedRamRune || rng.int(0, 7) === 0) {
+          gs.generatedRamRune = true;
+          push(5465);
+        }
+      }
     } else {
-      // 主件(cs:36913-36975):岩浆线以下 1/20 熔岩符 / 1/15 提炼机 / 默认池(含信号枪项)
+      // 主件(cs:36911-36975)：num25=Next(7) 先掷恒消耗（种子对齐），再掷 906/997 门
+      const num25 = rng.int(0, 6);
       if (rng.int(0, 19) === 0 && gy > gs.lavaLine) push(906);
       else if (rng.int(0, 14) === 0) push(997);
       else {
-        const m = rng.int(0, 6);
-        if (m === 6) { push(930); push(931, rng.int(25, 50)); }
-        else push([49, 50, 53, 54, 5011, 975][m]);
+        if (num25 === 6) { push(930); push(931, rng.int(25, 50)); }
+        else push([49, 50, 53, 54, 5011, 975][num25]);
       }
     }
     if (rng.int(0, 4) === 0) push(flags.ice ? 5120 : 43);     // 1/5(冰箱特殊项/可疑眼球)
@@ -241,7 +285,10 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
     if (rng.int(0, 1) === 0) push(227, rng.int(15, 20));      // 再生药水 cs:37290 Next(6)+15=[15,20]（曾 15,29）
     if (rng.int(0, 3) > 0) push(pick([296, 295, 293, 288, 294, 297, 304, 2323]), rng.int(1, 2));
     if (rng.int(0, 2) > 1) push(pick([305, 301, 302, 288, 300, 2351, 2348, 2345]), rng.int(1, 2));
-    if (rng.int(0, 2) === 0) push(rng.int(0, 1) === 0 ? 2350 : 4870, rng.int(1, 2)); // 回城/回归药水
+    { // cs:37375-37376：先掷 stack27=Next(1,3) 再 Next(2) 选物（顺序对齐种子流）
+      const stack27 = rng.int(1, 2);
+      push(rng.int(0, 1) === 0 ? 2350 : 4870, stack27); // 回城/回归药水
+    }
     if (rng.int(0, 1) === 0) push(rng.int(0, 1) === 0 ? 8 : 282, rng.int(15, 29));    // 火把/荧光棒
     if (rng.int(0, 1) === 0) push(73, rng.int(2, 4));         // 金币
   }
@@ -256,6 +303,28 @@ export function rollChestLoot(ctx: LootCtx, mainVanillaId: number): Array<{ id: 
   if (flags.ice && rng.int(0, 6) === 0) {
     const id = vid(2198);
     if (id >= 0 && items.length < 40) items.push({ id, stack: 1 });
+  }
+  // flag12 天空主题（cs:37424-37474）：1/3 天空磨坊；Next(6) 五选一装饰画；
+  // 751 云 [50,100]（cs:37469）
+  {
+    const f12 = !!flags.skyTheme || mainVanillaId === 159 || mainVanillaId === 65
+      || mainVanillaId === 158 || mainVanillaId === 2219;
+    if (f12 && rng.int(0, 2) === 0) push(2197);
+    if (flags.temple) push(2195); // flag13（cs:37428）：蜥蜴炉恒给
+    if (flags.dungeon && rng.int(0, 7) === 0) push(2192); // flag9（cs:37432）1/8 血腥砍刀
+    if (f12) {
+      const n38 = rng.int(0, 5);
+      push([5258, 5226, 5254, 5238, 5255, 5388][n38]); // cs:37440-37468
+      push(751, rng.int(50, 100));
+    }
+    // 上锁生物群系箱 1/2 → 5234 虔诚残片（cs:37494-37498）
+    if (flags.lockedBiome && rng.int(0, 1) === 0) push(5234);
+    if (flags.temple) { // flag13 尾（cs:37479-37491）：1/5 日耀碑 否则碎片 [3,7]
+      if (rng.int(0, 4) === 0) push(2767);
+      else push(2766, rng.int(3, 7));
+    }
+    // voice 门（cs:37557：恒消耗 1 掷）——1/12 命中由调用方后处理（此处保流对齐）
+    rng.int(0, 11);
   }
   // 键主件(如金字塔/蛛网/世界树的特殊掉落直接给 key)置首。
   // 同一原版物品可能有两个注册键:调用方显式键(如 vi_832_living_wood_wand)与
@@ -357,28 +426,37 @@ export function placeBuriedChest(
     } else {
       style = gy >= gs.worldSurface + 25 ? 1 : 0;
       if (style === 0) flags.wooden = true;
-      const tBelow = st.type[st.idx(i, gy)];
-      // 冰箱门禁(cs:36126:num7 ≥ ws+25 且 ≤ h-205)
-      if (!mainId && gy >= gs.worldSurface + 25 && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE)) {
-        style = 11;
-        flags.ice = true;
-        mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
-        if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
-        if (rng.int(0, 49) === 0) mainId = 669; // 1/50 鱼
-      }
-      const ud = gs.undergroundDesert;
-      if (!mainId && ud && i >= ud.x0 && i <= ud.x1 && gy >= ud.y0 && gy <= ud.y1
-        && gy >= gs.worldSurface + 25 && gy <= st.h - 205) {
-        tile = CHEST2;
-        style = 10;
-        flags.desert = true;
-        // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
-        // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
-        const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
-        mainId = deep
-          ? [4061, 4062, 4276][rng.int(0, 2)]
-          : [4056, 4055, 4262, 4263][rng.int(0, 3)];
-      }
+    }
+  }
+  // ---- 冰箱门（cs:36107-36130 1:1）：三析取——(tile21&&style11) ||
+  // (tile467&&style24) || (无主件 && 位置 && 脚下冰系)。★原版显式传 style 11
+  // 也进本池（HouseBuilder 冰屋正是此路径）——旧实现 style===undefined 单门漏此
+  const tBelow = st.type[st.idx(i, gy)];
+  if ((tile === CHEST && style === 11) || (tile === CHEST2 && style === 24)
+    || (!mainId && gy >= gs.worldSurface + 25 && gy <= st.h - 205
+      && (tBelow === SNOW || tBelow === ICE || tBelow === THIN_ICE))) {
+    flags.ice = true;
+    if (!mainId) {
+      mainId = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)]; // cs:36121-36125
+      if (rng.int(0, 19) === 0) mainId = 997; // 1/20 提炼机
+      if (rng.int(0, 49) === 0) mainId = 669; // 1/50 鱼
+    }
+  }
+  // ---- 沙漠箱门（cs:36066-36091 1:1）：三析取——(tile467&&style10) ||
+  // (tile21&&style42&&flag16) || (无主件 && ≤h-205 && IsUndergroundDesert)
+  const ud = gs.undergroundDesert;
+  const inUd = !mainId && ud && i >= ud.x0 && i <= ud.x1 && gy >= ud.y0 && gy <= ud.y1 && gy <= st.h - 205;
+  if ((tile === CHEST2 && style === 10) || inUd) {
+    tile = CHEST2;
+    style = 10;
+    flags.desert = true;
+    // cs:36084：分位点用蜂巢**实际雕刻范围**（desertHiveHigh/Low，PlaceClustersArea
+    // 逐点收缩），非静态矩形 ±10（曾用 ud.y0/y1 → 分层界偏移）
+    const deep = gy > (gs.desertHiveHigh * 3 + gs.desertHiveLow * 4) / 7;
+    if (!mainId) {
+      mainId = deep
+        ? [4061, 4062, 4276][rng.int(0, 2)]
+        : [4056, 4055, 4262, 4263][rng.int(0, 3)];
     }
   }
 
@@ -390,6 +468,10 @@ export function placeBuriedChest(
       if (!st.inBounds(i + dx, topY + dy) || st.flags[st.idx(i + dx, topY + dy)]) { restoreSlopes(); return false; }
     }
   }
+  // 样式派生 flag 族（cs:36201-36229）：32 蘑菇 / 16 神庙 / 13 天空主题
+  if (style === 32) flags.mushroom = true;
+  if (style === 16) flags.temple = true;
+  if (style === 13) flags.skyTheme = true;
   if (!st.inBounds(i + 1, gy) || !st.flags[st.idx(i + 1, gy)]
     || !TILE_DEFS[st.type[st.idx(i + 1, gy)]]?.solid) { restoreSlopes(); return false; }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
@@ -401,6 +483,7 @@ export function placeBuriedChest(
   // 战利品:四深度分支完整表(此前仅主件+火把/药水,体感稀缺主因之一)
   const items = rollChestLoot({ rng, gs, gy, flags, mainKey, worldH: st.h }, mainId);
   chests.push({ x: i, y: topY, items });
+  if (flags.hell) gs.hellChestIdx++; // cs:36257-36264 放置成功才前进（失败重试取同一件）
   return true;
 }
 

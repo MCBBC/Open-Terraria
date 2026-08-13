@@ -1089,3 +1089,40 @@ import { TILE_KEY_BY_SHEET } from './tiles';
   // 铂 74 无覆盖 = 9999（DoCoins :38570 只对 71-73 在恰 100 进位,铂币可堆至 9999）
   void filled;
 }
+
+// ---- 钓鱼链物品补齐(2026-08-13:饵/竿/药水/渔获——此前正常玩法无法抛竿,B26 断链) ----
+item({ key: 'vi_1992_f1992', name: '', maxStack: 999, value: 1 }); // 饵(黑蜻蜓)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2001_f2001', name: '', maxStack: 999, value: 1 }); // 饵(紫蜻蜓)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2002_f2002', name: '', maxStack: 999, value: 1 }); // 饵(红蜻蜓?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2004_f2004', name: '', maxStack: 999, value: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2006_f2006', name: '', maxStack: 999, value: 1 }); // 饵(蜻蜓)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2007_f2007', name: '', maxStack: 999, value: 1 }); // 饵(瓢虫?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2156_f2156', name: '', maxStack: 999, value: 1 }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2157_f2157', name: '', maxStack: 999, value: 1 }); // 饵(萤火虫)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2289_f2289', name: '', maxStack: 999, value: 1 }); // 竿(木质钓竿)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2291_f2291', name: '', maxStack: 999, value: 1 }); // 竿(强化钓竿?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2293_f2293', name: '', maxStack: 999, value: 1 }); // 竿(渔夫钓竿?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2294_f2294', name: '', maxStack: 999, value: 1 }); // 竿(灵魂钓手?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2295_f2295', name: '', maxStack: 999, value: 1 }); // 竿(玻璃钢钓竿?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2296_f2296', name: '', maxStack: 999, value: 1 }); // 竿(机械师钓竿?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2354_f2354', name: '', maxStack: 999, value: 1 }); // 药水(钓鱼药水)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2355_f2355', name: '', maxStack: 999, value: 1 }); // 药水(声呐药水)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2356_f2356', name: '', maxStack: 999, value: 1 }); // 药水(宝匣药水)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2438_f2438', name: '', maxStack: 999, value: 1 }); // 饵(蜗牛?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2613_f2613', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2673_f2673', name: '', maxStack: 999, value: 1 }); // 饵(松露虫)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2674_f2674', name: '', maxStack: 999, value: 1 }); // 饵(学徒饵)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2675_f2675', name: '', maxStack: 999, value: 1 }); // 饵(行家饵)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2676_f2676', name: '', maxStack: 999, value: 1 }); // 饵(大师饵)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2740_f2740', name: '', maxStack: 999, value: 1 }); // 饵(幼虫?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_2895_f2895', name: '', maxStack: 999, value: 1 }); // 饵(蠕虫?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3191_f3191', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3192_f3192', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3193_f3193', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3194_f3194', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3392_f3392', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_3393_f3393', name: '', maxStack: 999, value: 1 }); // 渔获/杂(??)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_4325_f4325', name: '', maxStack: 999, value: 1 }); // 竿(血肉捕手)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_4339_f4339', name: '', maxStack: 999, value: 1 }); // 饵(熔岩萤火虫?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_4340_f4340', name: '', maxStack: 999, value: 1 }); // 饵(地狱蝴蝶?)——数值/名走 itemfunc+l10n 链
+item({ key: 'vi_4442_f4442', name: '', maxStack: 999, value: 1 }); // 竿(深渊钓竿?)——数值/名走 itemfunc+l10n 链

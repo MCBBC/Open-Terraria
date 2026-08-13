@@ -589,6 +589,11 @@ export function parseWldToSave(buf: Uint8Array): ImportResult {
       slimeRainTime: wld.weather.slimeRainTime ?? 0,
       slimeRain: (wld.weather.slimeRainTime ?? 0) > 0,
     } : undefined,
+    // 祭坛/暗影珠计数 + 困难矿锁定选种（WF:1302-1303/1315-1317）——wld 侧曾读了就扔,
+    // 与自有存档 SaveData 顶层同位（save/serialize.ts altarCount/savedOreTiers 槽）
+    altarCount: wld.altarCount,
+    shadowOrbCount: wld.shadowOrbCount,
+    savedOreTiers: wld.savedOreTiers,
     tiles: bytesToB64(rleTiles({ type, frameX, frameY })),
     walls: bytesToB64(rlePairs(wall)),
     liquid: bytesToB64(rlePairs(liquidArr)),

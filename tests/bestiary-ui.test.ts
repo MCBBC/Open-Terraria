@@ -13,6 +13,7 @@ import {
   bestiaryPageCount, bestiaryRows, filterBestiaryRows, sortBestiaryRows,
   bestiaryRepNpcId, isBossCredit, flattenDropsForNpc, dropRateText,
   bestiarySpawnConditions, bestiaryFlavorText, SPAWN_BY_NPC,
+  bestiaryPortraitBackground, bestiaryGridBackground, bestiaryBgPreferencePaths,
   DEFAULT_BESTIARY_FILTER, type BestiarySortKey,
 } from '../src/ui/BestiaryPanel';
 import { BestiaryTracker, UnlockState, bestiaryCreditId, bestiaryEntries } from '../src/data/Bestiary';
@@ -115,10 +116,10 @@ describe('筛选（Filters.BySearch/ByUnlockState/ByBoss + kind 维度）', () =
   const f = (over: Partial<typeof DEFAULT_BESTIARY_FILTER>) =>
     filterBestiaryRows(rows(), { ...DEFAULT_BESTIARY_FILTER, ...over });
 
-  it('kind 维度：敌怪 419 / 城镇 40 / 小动物 87', () => {
-    expect(f({ kind: 'enemy' })).toHaveLength(419);
+  it('kind 维度：敌怪 418 / 城镇 40 / 小动物 88（614 爆炸兔补档入小动物）', () => {
+    expect(f({ kind: 'enemy' })).toHaveLength(418);
     expect(f({ kind: 'town' })).toHaveLength(40);
-    expect(f({ kind: 'critter' })).toHaveLength(87);
+    expect(f({ kind: 'critter' })).toHaveLength(88);
     expect(f({})).toHaveLength(546);
   });
 
@@ -250,5 +251,56 @@ describe('出没环境与风味文本', () => {
     for (const p of Object.keys(SPAWN_BY_NPC)) n += SPAWN_BY_NPC[p].length;
     expect(Object.keys(SPAWN_BY_NPC)).toHaveLength(681);
     expect(n).toBe(839);
+  });
+});
+
+// ============ 头像背景（IBestiaryBackgroundImagePathAndColorProvider，2026-08-13 收尾批） ============
+// 数据 = vanilla-bestiary-spawn.json 新增 bg/bgColor/bgPreference/moonLordBg
+// （populator :14-302 条件声明 + :515-551 偏好/月总）；语义 =
+//   NPCPortraitInfoElement.cs:38-81（详情大头像）与 UIBestiaryEntryButton.cs:105-127（网格）
+describe('头像背景（MapBG 按出没环境推导）', () => {
+  it('无偏好：详情取注册序最后一个带图条件；网格取首个', () => {
+    // 8 吞噬怪身 = 腐化(6) + 地下腐化(23)，无 AddTags 偏好 → 详情取末个 MapBG23，
+    // 网格取首个 MapBG6；着色取带色条件（腐化 200,200,200）
+    expect(bestiaryPortraitBackground(8)).toEqual({ image: 'MapBG23', color: [200, 200, 200, 255] });
+    expect(bestiaryGridBackground(8)).toBe('MapBG6');
+    // 102 食人鱼有 Caverns 偏好（populator :534）→ 两路均锁定 MapBG32
+    expect(bestiaryPortraitBackground(102).image).toBe('MapBG32');
+    expect(bestiaryGridBackground(102)).toBe('MapBG32');
+    // 1 蓝史莱姆 = 地表(MapBG1)+白天(无图)：两路同取 MapBG1，无着色
+    expect(bestiaryPortraitBackground(1)).toEqual({ image: 'MapBG1', color: [255, 255, 255, 255] });
+    expect(bestiaryGridBackground(1)).toBe('MapBG1');
+    // 3 僵尸 = 仅夜间 → MapBG1 + 夜色调（35,40,40）
+    expect(bestiaryPortraitBackground(3)).toEqual({ image: 'MapBG1', color: [35, 40, 40, 255] });
+  });
+
+  it('AddTags 偏好绝对优先（populator :515-548）', () => {
+    // 7 吞噬怪头 = 腐化(6) + 地下腐化(23)，偏好腐化 → MapBG6；着色取带色条件（腐化 200,200,200）
+    expect(bestiaryPortraitBackground(7)).toEqual({ image: 'MapBG6', color: [200, 200, 200, 255] });
+    expect(bestiaryGridBackground(7)).toBe('MapBG6');
+    // 258 松露人 = 地表蘑菇(20) + 地下蘑菇(21)，偏好地表蘑菇 → MapBG20
+    expect(bestiaryPortraitBackground(258).image).toBe('MapBG20');
+  });
+
+  it('世界恶双路（BasedOnWorldEvil：WorldGen.crimson 二选一）', () => {
+    // 533 沙漠盔甲怪 = 地下沙漠/腐化地下沙漠/猩红地下沙漠，双路偏好
+    expect(bestiaryPortraitBackground(533, false).image).toBe('MapBG40');  // 腐化世界
+    expect(bestiaryPortraitBackground(533, true).image).toBe('MapBG41');   // 猩红世界
+    expect(bestiaryGridBackground(533, true)).toBe('MapBG41');
+    // 偏好路径解析（bestiaryFlavorText 回退同源，populator :685-714 首个偏好优先）
+    expect(bestiaryBgPreferencePaths(533, false)).toEqual(['Biomes.CorruptUndergroundDesert']);
+    expect(bestiaryBgPreferencePaths(533, true)).toEqual(['Biomes.CrimsonUndergroundDesert']);
+    expect(bestiaryBgPreferencePaths(7)).toEqual(['Biomes.TheCorruption']);
+    expect(bestiaryBgPreferencePaths(3)).toEqual([]);   // 无偏好条目
+  });
+
+  it('月总 398 = MapBG1 + 纯黑（MoonLordPortraitBackgroundProvider，populator :550-551）', () => {
+    expect(bestiaryPortraitBackground(398)).toEqual({ image: 'MapBG1', color: [0, 0, 0, 255] });
+    expect(bestiaryGridBackground(398)).toBe('MapBG1');
+  });
+
+  it('无出没环境条目不铺底图（未知 id 兜底）', () => {
+    expect(bestiaryPortraitBackground(999999).image).toBeNull();
+    expect(bestiaryGridBackground(999999)).toBeNull();
   });
 });

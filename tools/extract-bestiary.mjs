@@ -97,7 +97,8 @@ function parseStatementTree(text) {
       const [, kw, condRaw] = hm;
       const node = { kind: 'if', cond: condRaw ?? null, children: [], opened: s.endsWith('{') };
       if (kw === 'else if' || kw === 'else') {
-        const owner = [...stack].reverse().find((n) => n.kind === 'block' || n.kind === 'case');
+        // 归属 = 当前栈顶节点的最后一个孩子（嵌套 if 的 else-if 链与顶层链同构）
+        const owner = stack[stack.length - 1];
         const last = owner?.children[owner.children.length - 1];
         if (last?.kind === 'if') {
           if (kw === 'else if') { last.elif = last.elif ?? []; last.elif.push(node); }
@@ -118,14 +119,27 @@ function parseStatementTree(text) {
   return root;
 }
 
-/** 条件静态求值：type/numN → id；世界态旗标 → 初始 false；未知标识 → 抛错（显式登记） */
+/** 条件静态求值：type/Type/numN → id；其余标识（世界态旗标/参数/纹理探测/数组长度）在
+ *  ContentSamples.Initialize 语境下一律取 0（布尔假）——全部登记进 COND_ZEROS 供审计，
+ *  构建时人工核对无"门控目标字段赋值"的漏判 */
+const COND_ZEROS = new Map(); // 标识 → 出现次数
 function evalCond(cond, id) {
   if (cond === null) return true;
   let expr = cond;
-  expr = expr.replace(/\b(type|num\d+)\b/g, String(id));
   expr = expr.replace(/\bNPCID\.Count\b/g, '697');
-  expr = expr.replace(/\b(Main\.hardMode|Main\.remixWorld|Main\.getGoodWorld|Main\.expertMode|Main\.masterMode|Main\.zenithWorld|Main\.tenthAnniversaryWorld|Main\.dedServ|downedGolemBoss|downedMechBossAny|IsABestiaryIconDummy|friendly|townNPC|noGravity|Main\.npcCatchable\[\d+\])\b/g, 'false');
-  if (!/^[\s\d!=&|()<>!]+$/.test(expr)) throw new Error(`unresolvable condition: ${cond}`);
+  expr = expr.replace(/\b(type|Type|num\d+)\b/g, String(id));
+  expr = expr.replace(/\[[^\]]*\]/g, '');                  // 下标表达式整段抹除
+  // 方法调用（TryGetValue/HasValue/Width 等）连实参表一并抹为 0（循环处理嵌套）
+  for (let k = 0; k < 4; k++) {
+    expr = expr.replace(/\b[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*\s*\((?:[^()]*)\)/g, '0');
+  }
+  expr = expr.replace(/\b(?:Main|spawnparams|TextureAssets|NPCID|GameDifficultyData|WorldGen)\.[\w.]*/g, '0');
+  expr = expr.replace(/\b(null|true|false|out|var)\b/g, '0');
+  expr = expr.replace(/\b[A-Za-z_]\w*(?:\.\w+)*\b/g, (m) => {
+    COND_ZEROS.set(m, (COND_ZEROS.get(m) ?? 0) + 1);
+    return '0';
+  });
+  if (!/^[\s\d!=&|()<>!,]+$/.test(expr)) throw new Error(`unresolvable condition: ${cond}`);
   // eslint-disable-next-line no-new-func
   return Function(`"use strict";return (${expr});`)();
 }
@@ -174,7 +188,7 @@ function evalForId(root, id) {
   return { state, exprAssigns };
 }
 
-function buildNpcStats(npccsSrc) {
+function buildNpcStats(npccsSrc, npcidSrc) {
   const start = npccsSrc.indexOf('public void SetDefaults(int Type');
   if (start < 0) throw new Error('SetDefaults not found');
   const openIdx = npccsSrc.indexOf('{', start);
@@ -193,6 +207,55 @@ function buildNpcStats(npccsSrc) {
     for (const e of exprAssigns) exprTotal.set(e, (exprTotal.get(e) ?? 0) + 1);
   }
   if (exprTotal.size) console.error('非字面量目标字段赋值（按 0/前值计）:', [...exprTotal].map(([k, n]) => `${n}× ${k}`));
+  console.error('条件求值取 0 的标识（审计）:', [...COND_ZEROS.entries()].map(([k, n]) => `${n}× ${k}`).join(', '));
+
+  // ---- 负 netID 变体（SetDefaultsFromNetId :7633+）----
+  // 流程 = SetDefaults(0) → SetDefaults_ForNetId(母体) → case 体覆写 damage/defense(/rarity)。
+  // lifeMax/aiStyle/boss 取母体（case 里的 `life = N` 是当前生命值字段，不改 lifeMax）。
+  // 母体映射 = NetIdMap[-id-1]（NPCID.cs:10445，65 项）。
+  const netIdMap = [...npcidSrc.match(/NetIdMap = new int\[65\]\s*\{([\s\S]*?)\n\t\};/)[1].matchAll(/\d+/g)]
+    .map((x) => parseInt(x[0], 10));
+  if (netIdMap.length !== 65) throw new Error(`NetIdMap 长度异常: ${netIdMap.length}`);
+  const sdniStart = npccsSrc.indexOf('private void SetDefaultsFromNetId');
+  const sdniOpen = npccsSrc.indexOf('{', sdniStart);
+  depth = 0; end = -1;
+  for (let i = sdniOpen; i < npccsSrc.length; i++) {
+    if (npccsSrc[i] === '{') depth++;
+    else if (npccsSrc[i] === '}') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  const sdniTree = parseStatementTree(npccsSrc.slice(sdniOpen + 1, end));
+  const overrides = {};   // id(-N) → { damage?, defense?, rarity? }
+  const collectCases = (nodes) => {
+    for (const n of nodes) {
+      if (typeof n === 'string') continue;
+      if (n.kind === 'switch') {
+        for (const c of n.cases) {
+          const ids = [...c.label.matchAll(/case\s+(-\d+)\s*:/g)].map((x) => parseInt(x[1], 10));
+          for (const cid of ids) {
+            const ov = {};
+            for (const st of c.children) {
+              const m2 = String(st).match(/^(damage|defense|rarity)\s*=\s*(-?\d+);$/);
+              if (m2) ov[m2[1]] = parseInt(m2[2], 10);
+            }
+            overrides[cid] = ov;
+          }
+        }
+      }
+      if (n.children) collectCases(n.children);
+      if (n.elif) collectCases(n.elif);
+      if (n.els?.children) collectCases(n.els.children);
+    }
+  };
+  collectCases(sdniTree.children);
+  let nNeg = 0;
+  for (let id = -65; id <= -1; id++) {
+    const base = out[netIdMap[-id - 1]];
+    if (!base) throw new Error(`netId ${id} 母体缺失`);
+    const ov = overrides[id] ?? {};
+    out[id] = [ov.rarity ?? base[0], base[1], ov.damage ?? base[2], ov.defense ?? base[3], base[4], base[5]];
+    nNeg++;
+  }
+  console.error(`负 netID 变体: ${nNeg} 条（case 覆写 ${Object.keys(overrides).length} 条）`);
   return out;
 }
 
@@ -201,7 +264,7 @@ const data = {
   normalGoldCritterBestiaryPriority: intList(npcid, 'NormalGoldCritterBestiaryPriority'),
   bossBestiaryPriority: intList(npcid, 'BossBestiaryPriority'),
   rarityStarOverrides: rarityStarOverrides(samples),
-  npcStats: buildNpcStats(npccs),
+  npcStats: buildNpcStats(npccs, npcid),
 };
 
 writeFileSync(`${ROOT}/game/src/data/vanilla-bestiary.json`, JSON.stringify(data));

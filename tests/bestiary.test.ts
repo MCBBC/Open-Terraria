@@ -8,7 +8,7 @@ import { describe, it, expect } from 'vitest';
 import {
   bestiaryEntries, bestiaryCreditId, countsAsACritter, unlockStateByKillCount,
   BestiaryTracker, isNpcValidForBestiaryKillCredit, BESTIARY_TOWN_IDS,
-  bestiaryRarityStars, bestiarySortingId,
+  bestiaryRarityStars, bestiarySortingId, lowestBiomeGroupIndex, isBossForBestiary,
   UnlockState,
 } from '../src/data/Bestiary';
 import { BESTIARY_SORT_KEYS, sortLabel } from '../src/ui/BestiaryPanel';
@@ -187,5 +187,89 @@ describe('NpcBestiarySortingId 排序 + NpcBestiaryRarityStars 稀有度（2026-
       ['unlocks', 'id', 'bestiaryId', 'alpha', 'rarity', 'attack', 'defense', 'coins', 'hp']);
     expect(sortLabel('bestiaryId')).toBeTruthy();
     expect(sortLabel('rarity')).toBeTruthy();
+  });
+});
+
+// ============ 收尾批：npcStats 投影 + GetLowestBiomeGroupIndex + 编号口径 ============
+
+describe('图鉴数据表收尾（2026-08-13 收尾批）', () => {
+  it('GetLowestBiomeGroupIndex（ContentSamples.cs:755-766）：公共过滤元素组号，尾向头首个命中', () => {
+    // 1 蓝史莱姆 = Surface(0) + DayTime(1) → 取大者 1（同名"Lowest"实为最大组号）
+    expect(lowestBiomeGroupIndex(1)).toBe(1);
+    // 62 恶魔 = 仅 TheUnderworld(24)；3 僵尸 = 仅 NightTime(5)
+    expect(lowestBiomeGroupIndex(62)).toBe(24);
+    expect(lowestBiomeGroupIndex(3)).toBe(5);
+    // 无出没环境注册 = int.MaxValue（未知 id 兜底；全量 681 NPC 均有命中）
+    expect(lowestBiomeGroupIndex(999999)).toBe(Number.MAX_SAFE_INTEGER);
+  });
+
+  it('排序键 6 生效：同档敌怪按群系组序（102 食人鱼 22 < 62 恶魔 24，aiStyle 反序仍让位）', () => {
+    // 键 7 aiStyle：62 恶魔=4 < 102 食人鱼=16——若键 6 缺失（旧常量 0）则 62 在前；
+    // 键 6 提取后群系组号先决，102 在前
+    expect(bestiarySortingId(102)).toBeLessThan(bestiarySortingId(62));
+    expect(bestiarySortingId(1)).toBeLessThan(bestiarySortingId(62)); // 地表 1 < 地狱 24
+  });
+
+  it('编号口径：Hide 条目不占号（CreateBestiarySortingIds 遍历 RemoveAll 后的表）', () => {
+    const MAX = Number.MAX_SAFE_INTEGER;
+    expect(bestiarySortingId(0)).toBe(MAX);          // None（Hide）
+    expect(bestiarySortingId(-65)).toBe(MAX);        // Boss 部位（Hide）
+    expect(bestiarySortingId(430)).toBe(MAX);        // 僵尸变体（Hide）
+    const seen = new Set<number>();
+    for (const key of Object.keys(NPC_NAME_BY_ID)) {
+      const id = Number(key);
+      if (!Number.isInteger(id)) continue;
+      const r = bestiarySortingId(id);
+      if (r === MAX) continue;
+      expect(r).toBeGreaterThanOrEqual(1);
+      expect(r).toBeLessThanOrEqual(546);
+      seen.add(r);
+    }
+    expect(seen.size).toBe(546);   // 1..546 无空洞无重复
+  });
+
+  it('稀有度星修正：npcStats 补齐旧缺表 33 条（630 血腥木乃伊战力档 +1 → 2 星）', () => {
+    // 630 BloodMummy：rarity0 / dmg60 / def18 / hp180 → 战力 123 > 50 → 1+0+1 = 2
+    //（旧 stats 缺表按 0 计会得 1 星）
+    expect(bestiaryRarityStars(630)).toBe(2);
+    // 255 ZombieMushroomHat：战力 38+16+55=109 > 50 → 2 星
+    expect(bestiaryRarityStars(255)).toBe(2);
+    // 85 独角兽：rarity4 + 肉前段战力 117 → 1+4+2.5+1 钳 5
+    expect(bestiaryRarityStars(85)).toBe(5);
+    // Boss 覆盖段：4 EoC=2 / 668 鹿角怪=3
+    expect(bestiaryRarityStars(4)).toBe(2);
+    expect(bestiaryRarityStars(668)).toBe(3);
+  });
+
+  it('boss 判定 1:1（BestiaryEntry.Enemy :37：npc.boss ∨ ShouldBeCountedAsBossForBestiary）', () => {
+    expect(isBossForBestiary(4)).toBe(true);    // EoC（SetDefaults boss=true）
+    expect(isBossForBestiary(395)).toBe(true);  // 火星飞碟核心（1456 boss=true）
+    expect(isBossForBestiary(668)).toBe(true);  // 鹿角怪（1456 boss=true）
+    expect(isBossForBestiary(13)).toBe(true);   // 世吞头（Sets 表补充）
+    expect(isBossForBestiary(664)).toBe(true);  // 火把神（双源）
+    expect(isBossForBestiary(68)).toBe(false);  // 地牢守卫（boss=false，AI 运行期才置）
+    expect(isBossForBestiary(325)).toBe(false); // 万圣节南瓜王（事件 Boss 同理不在表）
+    expect(isBossForBestiary(3)).toBe(false);
+  });
+
+  it('quickUnlock 口径同步：boss 族 1 杀满档；事件 Boss（325）与非 boss 走杀数档', () => {
+    const byCredit = new Map(bestiaryEntries().map((e) => [e.creditId, e]));
+    const state = (id: number, kills: number) => {
+      const t = new BestiaryTracker();
+      for (let i = 0; i < kills; i++) t.registerKill(id);
+      return t.unlockState(byCredit.get(bestiaryCreditId(id))!);
+    };
+    expect(state(668, 1)).toBe(UnlockState.DropsWithRates);   // 鹿角怪 boss → quick
+    expect(state(68, 1)).toBe(UnlockState.DropsWithRates);    // 地牢守卫：populator :588 显式 quick
+    expect(state(325, 1)).toBe(UnlockState.PortraitOnly);     // 南瓜王：1 杀仅头像（原版语义）
+    expect(state(325, 10)).toBe(UnlockState.Stats);           // 10 杀（50/5）出属性
+  });
+
+  it('小动物判定补档：614 爆炸兔（hp5/dmg0）入小动物族', () => {
+    expect(countsAsACritter(614)).toBe(true);
+    const byCredit = new Map(bestiaryEntries().map((e) => [e.creditId, e]));
+    expect(byCredit.get(bestiaryCreditId(614))!.kind).toBe('critter');
+    // 负 netID 史莱姆变体：母体 hp25 → 敌怪（旧 stats 缺表曾误判小动物）
+    expect(countsAsACritter(-3)).toBe(false);
   });
 });

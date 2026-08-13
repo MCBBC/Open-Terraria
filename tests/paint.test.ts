@@ -495,3 +495,36 @@ describe('油漆师商店链（Chest.SetupShop case 15 :2416-2455 → 我方 van
     expect(TILE_DEFS[STONE]?.vanilla?.sheet).toBeDefined();
   });
 });
+
+describe('.wld 导入油漆链（WorldFile.cs:2571-2586 → SaveData.paint/paintWall）', () => {
+  const WLD = require('node:path').join(__dirname, '..', 'Starter_World Master.wld');
+  it.skipIf(!require('node:fs').existsSync(WLD))(
+    '真实地图：解析出的油漆域 ∈ [0,31] 且导入链落盘字段存在',
+    async () => {
+      const { readFileSync } = await import('node:fs');
+      const { parseWld } = await import('../src/wld/WldParser');
+      const { parseWldToSave } = await import('../src/wld/WldImport');
+      const buf = new Uint8Array(readFileSync(WLD));
+      const wld = parseWld(buf);
+      // 域完整性：5bit 油漆域不可能越界（越界 = header 位错读，会连锁错位后续字节）
+      for (let i = 0; i < wld.tiles.paint.length; i += 997) {
+        expect(wld.tiles.paint[i]).toBeLessThanOrEqual(31);
+        expect(wld.tiles.paintWall[i]).toBeLessThanOrEqual(31);
+      }
+      // 导入链落盘字段就位（rlePairs 通道）
+      const { save } = parseWldToSave(buf);
+      expect(typeof save.paint).toBe('string');
+      expect(typeof save.paintWall).toBe('string');
+      // 往返：loadSave 后油漆域一致（抽样比对 parser 原值）
+      const { world } = loadSave(JSON.stringify(save));
+      const st = world.store;
+      for (let i = 0; i < wld.tiles.paint.length; i += 4099) {
+        const x = i % st.w, y = Math.floor(i / st.w);
+        if (!st.inBounds(x, y)) continue;
+        const j = st.idx(x, y);
+        expect(st.paint[j]).toBe(wld.tiles.paint[i] & 31);
+        expect(st.paintWall[j]).toBe(wld.tiles.paintWall[i] & 31);
+      }
+    },
+  );
+});

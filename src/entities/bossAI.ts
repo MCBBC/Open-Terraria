@@ -1165,8 +1165,9 @@ export function seekSteer2(e: Enemy, tx0: number, ty0: number, spd: number, accX
 export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   if (!e.bInit) {
     e.bInit = true;
-    // 原版头生成 80 身段(135) + 1 尾(136)(2026-08-13 对齐:曾 79+1 差一;链距 44*scale)
-    const segs = enemySpawnChain(e, 81);
+    // 原版头生成 GetDestroyerSegmentsCount(:51339-51346: getGoodWorld?100:80) 身段
+    // (135) + 1 尾(136)(2026-08-13 对齐:曾 79+1 差一;FTW 100 段同批补)
+    const segs = enemySpawnChain(e, (game.world.seedFlags?.getGoodWorld ? 100 : 80) + 1);
     for (const s of segs) addEnemy(game, s);
   }
   const st = game.world.store;
@@ -1183,19 +1184,19 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     }
   }
 
-  // 白天/玩家死:下坠离场;过岩石层整链消散(:50337-50356)
+  // 白天/玩家死(:50337-50356):vy+1,地表下再+1 且空中钳提到 32(num18);过岩石层
+  // 整链消散——★原版不 return:flag2 置 false 强制空中分支照常跑(钳速+向玩家横漂),
+  // 曾提前 return 丢 num18=32 钳与横漂,vy 无界坠穿
   const dayFlee = game.world.clock.isDay || !player || player.dead;
+  let airClamp = 16;   // num18(空中分支钳)
   if (dayFlee) {
+    buried = false;               // flag2 = false → 强制空中分支
     e.vy += 1;
-    if (e.y > game.world.groundLevel * TILE) e.vy += 1;
-    e.spin = Math.atan2(e.vy, e.vx) + Math.PI / 2;
-    e.x += e.vx; e.y += e.vy;
-    driveChain(e, 44);
+    if (e.y > game.world.groundLevel * TILE) { e.vy += 1; airClamp = 32; }
     if (e.y > game.world.rockLevel * TILE) {
       e.bossFled = true; // 黎明钻地撤离=非击杀(Game 不播击败/不记账)
       for (let s: Enemy | null = e; s; s = s.wormNext) s.dead = true;
     }
-    return;
   }
 
   // num19=0.1 / num20=0.15 地下双档步进(:50357-50358);FTW ×1.2(:50359-50363)
@@ -1203,15 +1204,16 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   let acc = 0.1, acc2 = 0.15;
   if (game.world.seedFlags?.getGoodWorld) { acc *= 1.2; acc2 *= 1.2; }
   if (!buried) {
-    // 空中(:50416-50458):下坠 0.15 钳 16;慢速时横漂,满速下坠时向玩家 X 修正
+    // 空中(:50416-50458):下坠 0.15 钳 num18(常 16;白天地表下 32);慢速时横漂,
+    // 满速下坠时向玩家 X 修正(player 空=无目标,以自身位置为锚≈零漂)
     e.vy += 0.15;
-    if (e.vy > spd) e.vy = spd;
-    const px = Math.floor(player.cx / TILE) * TILE, py = Math.floor(player.cy / TILE) * TILE;
+    if (e.vy > airClamp) e.vy = airClamp;
+    const px = Math.floor((player?.cx ?? e.cx) / TILE) * TILE, py = Math.floor((player?.cy ?? e.cy) / TILE) * TILE;
     const sx = Math.floor(e.cx / TILE) * TILE, sy = Math.floor(e.cy / TILE) * TILE;
     const dx = px - sx, dy = py - sy;
-    if (Math.abs(e.vx) + Math.abs(e.vy) < spd * 0.4) {
+    if (Math.abs(e.vx) + Math.abs(e.vy) < airClamp * 0.4) {
       e.vx += (e.vx < 0 ? -acc * 1.1 : acc * 1.1);
-    } else if (e.vy === spd) {
+    } else if (e.vy === airClamp) {
       if (e.vx < dx) e.vx += acc;
       else if (e.vx > dx) e.vx -= acc;
     } else if (e.vy > 4) {
@@ -1220,9 +1222,9 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
     void dy;
   } else {
     // 地下(:50459-50585):目标速度 = 方向*16,分档加速(同向双轴 0.15→同向单轴 0.10+
-    // 反轴轻推→主轴 0.11 次轴补速;含防卡死角交叉助推)
-    const dx = Math.floor(player.cx / TILE) * TILE - Math.floor(e.cx / TILE) * TILE;
-    const dy = Math.floor(player.cy / TILE) * TILE - Math.floor(e.cy / TILE) * TILE;
+    // 反轴轻推→主轴 0.11 次轴补速;含防卡死角交叉助推)(player 空=零目标向量,原地)
+    const dx = Math.floor((player?.cx ?? e.cx) / TILE) * TILE - Math.floor(e.cx / TILE) * TILE;
+    const dy = Math.floor((player?.cy ?? e.cy) / TILE) * TILE - Math.floor(e.cy / TILE) * TILE;
     const d = Math.hypot(dx, dy) || 1;
     const tvx = (dx / d) * spd, tvy = (dy / d) * spd;
     const sameX = (e.vx > 0 && tvx > 0) || (e.vx < 0 && tvx < 0);
@@ -1254,7 +1256,9 @@ export function destroyerAI(e: Enemy, game: GameHooks, player: Player | null) {
   // 段链跟随(linkDist 44 = 44*scale;原版 num24) + 毁灭者激光(NPC.cs:50204-50241)
   driveChain(e, 44);
   for (let s = e.wormNext; s; s = s.wormNext) {
-    if (s.vanillaId !== 135 || s.dead) continue;
+    // player 空（全场无存活者）时无瞄准目标，原版 Main.player[target] 恒存在、
+    // 本仓以空玩家等价跳过本段
+    if (s.vanillaId !== 135 || s.dead || !player) continue;
     // :50206-50208 真实概率公式：localAI[0] += Next(4)（0..3 均匀，均值 1.5/t），
     // 阈值【每 tick 重掷】Next(1400, 26000)（1400..25999 均匀）——计数器须先爬过
     // 1400 才有非零命中率，命中概率随计数线性升高后清零。无"每 tick 2/6850"这类

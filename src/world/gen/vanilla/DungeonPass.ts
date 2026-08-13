@@ -6,7 +6,8 @@ import { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
-import { ITEM_BY_KEY } from '../../../data/items';
+import { ITEM_BY_KEY, ITEM_DEFS, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
+import { rollChestLoot } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
 import { solidTile as solidTileHB } from './HalfBrickPass';
 import { placeDoorClosed } from '../../Door';
@@ -928,7 +929,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
     for (let tries = 0; tries < 5000; tries++) {
       const x = rng.int(bx0, bx1);
       const y = rng.int(Math.floor(gs.worldSurface), by1);
-      if (airDW(x, y) && addChest(st, chests, x, y, spec.tile, spec.style, ITEM_BY_KEY[spec.item], true)) break;
+      if (airDW(x, y) && addChest(st, rng, gs, chests, x, y, spec.tile, spec.style, ITEM_BY_KEY[spec.item], true)) break;
     }
   }
 
@@ -1019,7 +1020,7 @@ function placeFurnishing(st: TileStore, rng: RNG, gs: GenState, dc: DungeonCtx, 
         if (lootStyle >= 8) lootStyle = 0; // :35847 回卷在取件前
         let loot = lootSeq[lootStyle];
         if (y < gs.worldSurface + 50) loot = { item: 'vi_327_golden_key', style: 0 };
-        if (addChest(st, chests, x, y, CHEST, loot.style, ITEM_BY_KEY[loot.item], false)) {
+        if (addChest(st, rng, gs, chests, x, y, CHEST, loot.style, ITEM_BY_KEY[loot.item], false)) {
           lootStyle++; // 成功才递增（DungeonUtils.cs:399）
           break;
         }
@@ -1649,7 +1650,16 @@ function canHit(st: TileStore, x1: number, y1: number, x2: number, y2: number): 
 /** AddBuriedChest（1456 cs:35920）下落段 1:1：自 y 向下扫至 h-10，
  *  首个 SolidTile（半砖/坡面不算）落定；±2 邻域有 Boulders/26/237 → 失败。
  *  样式/主件由调用方显式给定（地牢战利品序），2×2 箱落其上后推入 chests */
-function addChest(st: TileStore, chests: ChestSink, x: number, y: number, tile: number, style: number, itemId: number | undefined, locked: boolean): boolean {
+/** 内部物品 id → 原版 id（ITEM_DEFS 反查 vid 字段；非 vi_ 返回 0） */
+function vidOfInternal(internalId: number): number {
+  const d = ITEM_DEFS[internalId];
+  if (!d) return 0;
+  if (d.vid != null) return d.vid;
+  const m = /^vi_(\d+)_/.exec(d.key);
+  return m ? parseInt(m[1], 10) : 0;
+}
+
+function addChest(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, x: number, y: number, tile: number, style: number, itemId: number | undefined, locked: boolean): boolean {
   const def = TILE_DEFS[tile];
   if (!def) return false;
   for (let dx = -2; dx <= 2; dx++) {
@@ -1681,9 +1691,26 @@ function addChest(st: TileStore, chests: ChestSink, x: number, y: number, tile: 
       st.setTileSilent(x + dx, topY + dy, tile, style * fw * 18 + dx * 18, dy * 18);
     }
   }
-  chests.push({
-    x, y: topY, locked,
-    items: itemId !== undefined ? [{ id: itemId, stack: 1 }, ...Array(9).fill(null)] : Array(10).fill(null),
-  });
+  // 战利品通道（审计三.3 修复）：主件 + rollChestLoot 杂物表 + flag9/10 门——
+  // 原版地牢箱全部经 AddBuriedChest（IsDungeon 位置门 cs:36211 → flag9），
+  // 上锁生物群系箱另置 flag10（cs:36219：钥匙不给、尾段 5234 1/2）
+  // itemId 是内部 id → 反查 vi_ 键与原版 id（loot 主件与 key 置首逻辑用）
+  let mainKey: string | null = null;
+  let mainVid = 0;
+  if (itemId !== undefined) {
+    for (const k of Object.keys(VANILLA_ITEM_KEY_BY_ID)) {
+      if (VANILLA_ITEM_KEY_BY_ID[Number(k)] === undefined) continue;
+    }
+    mainVid = vidOfInternal(itemId);
+    mainKey = mainVid > 0 ? VANILLA_ITEM_KEY_BY_ID[mainVid] : null;
+  }
+  const loot = rollChestLoot({
+    rng, gs, gy, worldH: st.h, mainKey,
+    flags: { dungeon: true, lockedBiome: locked && style >= 23 && style <= 27 },
+  }, mainVid);
+  if (itemId !== undefined && !loot.some((it) => it && it.id === itemId)) {
+    loot.unshift({ id: itemId, stack: 1 });
+  }
+  chests.push({ x, y: topY, locked, items: loot });
   return true;
 }

@@ -11,6 +11,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { placeTight } from './ShimmerPass';
 
 const CLOUDS = idsByVanillaSheet(189, 196, 460, 717, 718, 719);
 
@@ -683,7 +684,6 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
   const T485 = TILE_BY_KEY['v_485_antlion_larva']!;
   const T751 = TILE_BY_KEY['v_751_sleeping_digtoise']!;
   const T484 = TILE_BY_KEY['v_484_rolling_cactus']!;
-  const T165 = TILE_BY_KEY['v_165_cave_decos']!;
   const T187 = TILE_BY_KEY['v_187_decos_3x2_group_2']!;
   /** 底行锚、向上 fh 行的物件放置（forced 语义：flag 已保证锚区净空，直接落格） */
   const placeDeco = (x: number, yBottom: number, tile: number, fw: number, fh: number, bx: number) => {
@@ -717,9 +717,13 @@ export function runDesertEntrancesAndHive(st: TileStore, rng: RNG, gs: GenState,
         else placeDeco(px, py - 1, T485, 2, 2, style * 36);
       } else if (flag && rng.int(0, 4) === 0) {          // 484
         placeDeco(px, py - 1, T484, 2, 2, 0);
-      } else if ((flag !== flag2) && rng.int(0, 4) === 0) {  // 165：flag 地面/!flag 倒挂
-        if (flag) placeDeco(px, py - 1, T165, 1, 2, 0);
-        else placeDeco(px, py + 2, T165, 1, 2, 0);       // 底行=py+2 → 顶行贴 396 下缘
+      } else if ((flag !== flag2) && rng.int(0, 4) === 0) {
+        // 165 冰凌（DesertHive.cs:491 → WorldGen.PlaceTile(165) → PlaceTight）：
+        // 改走 placeTight（ShimmerPass 1:1 完整移植）——按邻接材质分派（396/397 →
+        // 沙岩列 378+var*18）并输出正确帧序（倒挂 0/18、地面 36/54、单格 72/90）。
+        // ★旧实现误用 placeDeco（底锚上行帧分配）：倒挂形帧行颠倒（尖上座下+4px 缝）
+        // 且冰列 fx=0 画进地下沙漠（沙岩区出蓝冰锥）。锚点 = py+(flag?-1:+1)（:491）
+        placeTight(st, rng, px, py + (flag ? -1 : 1));
       } else if (flag && rng.int(0, 4) === 0) {          // 187：style 29+Next(6)（此前漏掷）
         placeDeco(px, py - 1, T187, 3, 2, (29 + rng.int(0, 5)) * 54);
       }

@@ -597,11 +597,11 @@ function placeSupportBeams(st: TileStore, rooms: Rect[], def: ThemeDef): void {
 function placeChests(st: TileStore, rng: RNG, gs: GenState, chests: ChestSink, rooms: Rect[], def: ThemeDef, theme: Theme): void {
   const tryAt = (x: number, y: number): boolean => {
     const underground = y > gs.worldSurface;
-    const iceRoll = [670, 724, 950, 1319, 987, 1579][rng.int(0, 5)];
+    // 冰屋：显式 style 11 直入冰箱门（cs:36107 第一析取）→ 主件池 + 1/20 提炼机 +
+    // 1/50 鱼覆盖块自动生效（旧实现显式 loot 绕过覆盖——审计三.4 修复）
     return placeBuriedChest(st, rng, gs, chests, x, y, {
       style: underground ? def.chestStyle : 0,
       tile: underground && def.chestTile2 ? CHEST2 : undefined,
-      loot: theme === 'ice' ? iceRoll : undefined,
       flags: theme === 'ice' ? { ice: true } : (!underground ? { wooden: true } : {}),
     });
   };

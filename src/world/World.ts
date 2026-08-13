@@ -93,6 +93,8 @@ export class World {
    *  每帧 UpdateTime）。缺省 86400 = delayStart（新世界 ResetTempsToDayTime WF:1018 /
    *  v108 前旧档 WF:2188 同值）。recheck 为运行时静态位不落盘（RuntimeEvents.ts） */
   cultistDelay = 86400;
+  /** 旗帜击杀计数（BannerSystem.killCount:bannerId→数;随会话,存档登记未接） */
+  bannerKills: Record<number, number> = {};
   /** 旅程模式时间倍率（CreativePowers.ModifyTimeRate.TargetTimeRate，CreativePowers.cs:866-884：
    *  整数 1-24×，IPersistentPerWorldContent 随世界存档；非旅程世界恒 1） */
   journeyTimeRate = 1;

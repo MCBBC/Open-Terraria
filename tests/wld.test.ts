@@ -86,13 +86,13 @@ function buildFixtureV279(): Uint8Array {
   w.bool(false);                         // slime king (118)
   for (let i = 0; i < 7; i++) w.bool(false);  // saved flags
   w.bool(false); w.bool(false);          // orb smashed / meteor
-  w.u8(0); w.i32(0); w.bool(false);      // orbCount altarCount hardMode
+  w.u8(1); w.i32(3); w.bool(false);      // orbCount altarCount hardMode
   w.bool(false);                         // partyOfDoom (257)
   w.i32(0); w.i32(0); w.i32(0); w.f64(0);    // invasion
   w.f64(0);                              // slimeRain (118)
   w.u8(0);                               // sundial (113)
   w.bool(false); w.i32(0); w.f32(0);     // rain
-  w.i32(0); w.i32(0); w.i32(0);          // ore tiers
+  w.i32(107); w.i32(222); w.i32(-1);     // ore tiers（钴/山铜锁定,精金未砸）
   for (let i = 0; i < 8; i++) w.u8(0);   // bg
   w.i32(0); w.i16(0); w.f32(0);          // clouds/wind
   w.i32(0);                              // angler count
@@ -206,6 +206,10 @@ describe('.wld 解析器（v279 固件）', () => {
     expect(wld.spawnX).toBe(2);
     expect(wld.groundLevel).toBeCloseTo(20.5);
     expect(wld.dayTime).toBe(true);
+    // WF:1302-1303/1315-1317 三组字段导入（曾读了就扔）
+    expect(wld.shadowOrbCount).toBe(1);
+    expect(wld.altarCount).toBe(3);
+    expect(wld.savedOreTiers).toEqual({ cobalt: 107, mythril: 222, adamantite: -1 });
   });
 
   it('解码 tiles：RLE / 墙 / 液体 / framed', () => {
@@ -245,7 +249,14 @@ describe('.wld 解析器（v279 固件）', () => {
     const { save } = parseWldToSave(buf);
     expect(save.header.width).toBe(4);
     expect(save.header.wldVersion).toBe(279);
+    // 三字段经 SaveData 顶层入 world（WldImport → loadSaveData 全链）
+    expect(save.altarCount).toBe(3);
+    expect(save.shadowOrbCount).toBe(1);
+    expect(save.savedOreTiers).toEqual({ cobalt: 107, mythril: 222, adamantite: -1 });
     const { world } = loadSave(JSON.stringify(save));
+    expect(world.altarCount).toBe(3);
+    expect(world.shadowOrbCount).toBe(1);
+    expect(world.savedOreTiers).toEqual({ cobalt: 107, mythril: 222, adamantite: -1 });
     expect(world.store.get(0, 0)).toBeGreaterThan(0); // dirt
     expect(world.chests).toHaveLength(1);
     expect(world.store.get(3, 2)).toBeGreaterThan(0); // chest

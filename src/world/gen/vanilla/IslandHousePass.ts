@@ -6,6 +6,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_BY_KEY } from '../../../data/tiles';
 import { ITEM_BY_KEY } from '../../../data/items';
+import { rollChestLoot } from './BuriedChestsPass';
 import { placeDoorClosed } from '../../Door';
 import { placeFurn, flipFurn } from './DungeonPass';
 
@@ -22,13 +23,13 @@ export function runIslandHousePass(
   let houseCount = 0;
   for (const isl of gs.floatingIslands) {
     if (isl.isLake) continue;
-    islandHouse(st, rng, isl.x, isl.y, chests, houseCount);
+    islandHouse(st, rng, gs, isl.x, isl.y, chests, houseCount);
     houseCount++;
   }
 }
 
 function islandHouse(
-  st: TileStore, rng: RNG, i: number, j: number,
+  st: TileStore, rng: RNG, gs: GenState, i: number, j: number,
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null> }>,
   houseIdx: number,
 ): void {
@@ -82,10 +83,11 @@ function islandHouse(
     const idx = st.idx(pillarX, y);
     st.type[idx] = SUNPLATE; st.flags[idx] = 1; st.wall[idx] = 0;
   }
-  // 天空宝箱(cs L48274-48293):style13 Skyware(战利品序 0=气球/1=星怒/2=马蹄铁,第 3 间起随机)
+  // 天空宝箱主件（cs:79983-79996）：序 0-3 = 159 气球/65 星怒/158 马蹄铁/2219 星磁铁；
+  // 第 4 间起 Next(4) 全四随机——★旧实现只有三件且 >2 时 Next(3)，2219 永不出现
   let loot = houseIdx;
-  if (loot > 2) loot = rng.int(0, 2);
-  const lootKeys = ['vi_159_shiny_red_balloon', 'vi_65_starfury', 'vi_158_lucky_horseshoe'];
+  if (loot > 3) loot = rng.int(0, 3);
+  const lootKeys = ['vi_159_shiny_red_balloon', 'vi_65_starfury', 'vi_158_lucky_horseshoe', 'vi_2219_celestial_magnet'];
   const lootId = ITEM_BY_KEY[lootKeys[loot]] ?? ITEM_BY_KEY[lootKeys[0]];
   const bx = i, by = floorY - 1;
   // PlaceChestDirect 语义:frameX = 36*style + dx*18,顶行 frameY=0
@@ -93,7 +95,16 @@ function islandHouse(
   st.setTileSilent(bx + 1, by, CHEST, 13 * 36 + 18, 0);
   st.setTileSilent(bx, by + 1, CHEST, 13 * 36, 18);
   st.setTileSilent(bx + 1, by + 1, CHEST, 13 * 36 + 18, 18);
-  chests.push({ x: bx, y: by, items: [{ id: lootId, stack: 1 }, ...Array(9).fill(null)] });
+  // 战利品走 rollChestLoot（原版经 AddBuriedChest：岛高 < rockLevel → 金箱分支杂物表 +
+  // flag12 尾段【主件 159/65/158/2219 触发：4978 幼翼 1/40、天空磨坊 1/3、装饰画、
+  // 751 云】——旧实现只有裸主件，审计三.10 修复）
+  const lootVid = [159, 65, 158, 2219][loot];
+  const items = rollChestLoot({
+    rng, gs, gy: by, worldH: st.h, mainKey: lootKeys[loot],
+    flags: { skyTheme: true },
+  }, lootVid);
+  if (!items.some((it) => it && it.id === lootId)) items.unshift({ id: lootId, stack: 1 });
+  chests.push({ x: bx, y: by, items });
   // 窗(Glass Wall 21,cs L48312-48327):halfW>10 → ±2 宽,否则 ±1;
   // 中心 x = i∓halfW/2±1,y = (j1+j2)/2 - 1 ± 1
   const winHalf = halfW > 10 ? 2 : 1;

@@ -274,6 +274,7 @@ export class Player extends Entity {
     minionDmg: number;     // minionDamage += X（加算乘区，散件+套装合计）
     minionKB: number;      // minionKB += N
     sentrySlots: number;   // maxTurrets += N
+    fishingSkill: number;  // fishingSkill 合计（钓具+渔夫甲+软糖虫）
     whipRange: number;     // whipRangeMultiplier += X
     whipSpd: number;       // 鞭 useTime 倍率（黑曜套 1/1.15）
     summonSet: SummonSetFx | null;
@@ -296,6 +297,7 @@ export class Player extends Entity {
     let dmgMelee = 0, dmgRanged = 0, dmgMagic = 0;
     let critMelee = 0, critRanged = 0, critMagic = 0;
     let move = 0, meleeSpeed = 0, runSpeed = 0;
+    let fish = 0;             // fishingSkill（钓具配饰+渔夫甲）
     // 魔力回复直值（ApplyEquipFunctional if-chain :14379-14383——魔力斗篷 982 专属）
     let manaRegenBonus = 0, manaRegenDelayBonus = 0;
     let extraFall = 0, lavaMax = 0, armorPen = 0, rocketBoots = 0;
@@ -347,6 +349,7 @@ export class Player extends Entity {
         if (fx.mana) mana += fx.mana;
         if (fx.life) life += fx.life;
         if (fx.move) move += fx.move;
+        if (fx.fish) fish += fx.fish;   // 钓具族+渔夫甲 fishingSkill（:12549-12556/:14115-14140/:13022-13027）
         if (fx.meleeSpd) meleeSpeed += fx.meleeSpd;
         if (fx.runSpeed) runSpeed = Math.max(runSpeed, fx.runSpeed);
         if (fx.dmgMelee) dmgMelee += fx.dmgMelee;
@@ -535,6 +538,7 @@ export class Player extends Entity {
       tileSpeed, wallSpeed, tileRange, pStone, counterWeight,
       manaMagnet, magicCuffs, manaFlower,
       manaRegenBonus, manaRegenDelayBonus,
+      fishingSkill: fish + (this.usedGummyWorm ? 3 : 0),   // +软糖虫(:12451)
       setBonus: sb, manaCostMul,
       minionSlots, minionDmg, minionKB, sentrySlots, whipRange,
       whipSpd: summonSet?.whipSpd ?? 1,
@@ -567,7 +571,19 @@ export class Player extends Entity {
     return 1 + this.equipStats.sentrySlots + (this.buffs.has(BuffType.WarTable) ? 1 : 0);
   }
   get thornsActive(): boolean {
-    return this.buffs.hasThorns;
+    return this.buffs.hasThorns || this.turtleSet;
+  }
+  /** 海龟套装（1316-1318 h99|b65|l54,Player.cs:15930-15934 turtleThorns → 反伤 ×2） */
+  get turtleSet(): boolean {
+    const a = this.inv.armor;
+    const s0 = statOfInternal(a[0]?.id ?? -1), s1 = statOfInternal(a[1]?.id ?? -1), s2 = statOfInternal(a[2]?.id ?? -1);
+    return s0?.hs === 99 && s1?.bs === 65 && s2?.ls === 54;
+  }
+  /** 仙人掌套装（894-896 h70|b46|l42,Player.cs:30948-30958 cactusThorns → 独立定值反伤） */
+  get cactusSet(): boolean {
+    const a = this.inv.armor;
+    const s0 = statOfInternal(a[0]?.id ?? -1), s1 = statOfInternal(a[1]?.id ?? -1), s2 = statOfInternal(a[2]?.id ?? -1);
+    return s0?.hs === 70 && s1?.bs === 46 && s2?.ls === 42;
   }
   /** 近战攻速倍率（CapAttackSpeeds + TurnAttackSpeedToUseTimeMultiplier，Player.cs
    *  :28555-28574 1:1）：meleeSpeed 加法总和（装备 0.12 档 + 词缀 77-80 + 套装 + buff）

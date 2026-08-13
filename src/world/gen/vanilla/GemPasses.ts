@@ -97,8 +97,11 @@ function validAnchor(st: TileStore, x: number, y: number, dir: 0 | 1 | 2 | 3): b
 }
 
 /** CheckAndAdjustMultiDirectionalTile（:60338）：下>左>右>上优先，锚类型须 tileSolid&&!tileSolidTop。
- *  返回的 newFrameDirection 对 178 不消费帧（frameY 另掷），此处只需布尔门。 */
-function checkMultiDirAnchor(st: TileStore, i: number, j: number): boolean {
+ *  返回 newFrameDirection（0=下 1=上 2=左 3=右）——PlaceTile 178 分支本身丢弃它，
+ *  但紧随的 SquareTileFrame → TileFrame case 178（:85844-85882）按它重写
+ *  frameY = 方向基带 + 变体（基带 下0/上54/左108/右162）★此前漏移植 TileFrame 178
+ *  → 全部 178 永远落地帧（0/18/36），侧锚/顶锚宝石渲染成悬空晶簇 */
+function checkMultiDirAnchor(st: TileStore, i: number, j: number): number {
   const belowOk = validAnchor(st, i, j + 1, 1);
   const leftOk = validAnchor(st, i - 1, j, 2);
   const rightOk = validAnchor(st, i + 1, j, 3);
@@ -109,17 +112,22 @@ function checkMultiDirAnchor(st: TileStore, i: number, j: number): boolean {
     const d = TILE_DEFS[st.type[k]];
     return !!d && d.solid && !d.platform;
   };
-  if (belowOk && solidNonTop(i, j + 1)) return true;
-  if (leftOk && solidNonTop(i - 1, j)) return true;
-  if (rightOk && solidNonTop(i + 1, j)) return true;
-  if (aboveOk && solidNonTop(i, j - 1)) return true;
-  return false;
+  if (belowOk && solidNonTop(i, j + 1)) return 0;
+  if (leftOk && solidNonTop(i - 1, j)) return 2;
+  if (rightOk && solidNonTop(i + 1, j)) return 3;
+  if (aboveOk && solidNonTop(i, j - 1)) return 1;
+  return -1;
 }
 
-/** 放 1 格暴露晶簇（= PlaceTile 178 分支：锚定门 + style 帧 + 成功才掷 frameY） */
+/** 方向基带（TileFrame case 178 :85844-85882 的 num22 switch） */
+const GEM_DIR_BASE: Record<number, number> = { 0: 0, 1: 54, 2: 108, 3: 162 };
+
+/** 放 1 格暴露晶簇（= PlaceTile 178 分支 + SquareTileFrame case 178 合并）：
+ *  frameY = 方向基带 + 变体（Next(3)*18）——晶簇朝向锚点方向，悬空感消除 */
 function placeExposed(st: TileStore, rng: RNG, x: number, y: number, style: number): void {
-  if (!checkMultiDirAnchor(st, x, y)) return;
-  st.setTile(x, y, EXPOSED, style * 18, rng.nextInt(3) * 18);
+  const dir = checkMultiDirAnchor(st, x, y);
+  if (dir < 0) return;
+  st.setTile(x, y, EXPOSED, style * 18, GEM_DIR_BASE[dir] + rng.nextInt(3) * 18);
 }
 
 // ============ GemCaves 宝石洞（:17528-17572 + gemCave + Spread.Gem 1:1） ============

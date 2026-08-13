@@ -259,19 +259,37 @@ function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSma
     st.type[i] = STALACTITE; st.flags[i] = 1; st.slope[i] = 0;
     st.frameX[i] = fx; st.frameY[i] = fy;
   };
-  const ICEY = new Set([147, 161, 163, 164, 200]);
-  const STONY = new Set([1, 117, 25, 203]);
-  const mossSheet = (s: number) => MOSS_SHEETS.has(s);
+  // 锚定材质 → 专属列基带（GetDesiredStalagtiteStyle :38746-38844 + style→fx
+  //  switch :38690-38724 合并——PlaceUncheckedStalactite :38346 放完即调
+  //  CheckStalactite→UpdateStalagtiteStyle 重定型，最终态=材质专属列）：
+  //  1/苔→54｜117→216｜**25 黑檀→270 腐化款**｜**203 猩红→324 猩红款**｜
+  //  396/397→378｜368 大理石→432｜367 花岗岩→486｜147/161→0｜163→594｜
+  //  164→540｜200→648｜225→162（仅单格形）
+  const BASE = (a: number): number => {
+    if (a === 1 || mossSheet0(a)) return 54;
+    if (a === 117) return 216;
+    if (a === 25) return 270;    // 腐化专属
+    if (a === 203) return 324;   // 猩红专属
+    if (a === 396 || a === 397) return 378;
+    if (a === 368) return 432;
+    if (a === 367) return 486;
+    if (a === 147 || a === 161) return 0;
+    if (a === 163) return 594;
+    if (a === 164) return 540;
+    if (a === 200) return 648;
+    return -1;
+  };
+  const mossSheet0 = (v: number) => MOSS_SHEETS.has(v);
+  const hangable = (a: number): boolean => BASE(a) >= 0 && a !== 225;
+  const groundable = (a: number): boolean => BASE(a) >= 0 && a !== 225;
   if (solidTile(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
-    // 垂挂钟乳石
+    // 垂挂钟乳石（石质锚挂藤墙 62 → 108 列，:38791-38796）
     const above = sheetOf(x, y - 1);
-    if (ICEY.has(above)) {
-      if (preferSmall) put(x, y, variation * 18, 72);
-      else { put(x, y, variation * 18, 0); put(x, y + 1, variation * 18, 18); }
-    }
-    if (STONY.has(above) || mossSheet(above)) {
-      if (preferSmall) put(x, y, 54 + variation * 18, 72);
-      else { put(x, y, 54 + variation * 18, 0); put(x, y + 1, 54 + variation * 18, 18); }
+    if (hangable(above)) {
+      const wall = st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;
+      const base = (above === 1 || mossSheet0(above)) && wall === 62 ? 108 : BASE(above);
+      if (preferSmall) put(x, y, base + variation * 18, 72);
+      else { put(x, y, base + variation * 18, 0); put(x, y + 1, base + variation * 18, 18); }
     }
     if (above === 225) put(x, y, 162 + variation * 18, 72);
     if (above === 396 || above === 397) {
@@ -291,21 +309,9 @@ function placeUncheckedStalactite(st: TileStore, x: number, y: number, preferSma
   // 地面石笋：下方实心 + 本格/上格净空
   if (!solidTile(st, x, y + 1) || st.flags[st.idx(x, y)] || st.flags[st.idx(x, y - 1)]) return;
   const below = sheetOf(x, y + 1);
-  if (STONY.has(below) || mossSheet(below)) {
-    if (preferSmall) put(x, y, 54 + variation * 18, 90);
-    else { put(x, y - 1, 54 + variation * 18, 36); put(x, y, 54 + variation * 18, 54); }
+  if (groundable(below)) {
+    if (preferSmall) put(x, y, BASE(below) + variation * 18, 90);
+    else { put(x, y - 1, BASE(below) + variation * 18, 36); put(x, y, BASE(below) + variation * 18, 54); }
   }
   if (below === 225) put(x, y, 162 + variation * 18, 90);
-  if (below === 396 || below === 397) {
-    if (preferSmall) put(x, y, 378 + variation * 18, 90);
-    else { put(x, y - 1, 378 + variation * 18, 36); put(x, y, 378 + variation * 18, 54); }
-  }
-  if (below === 368) {
-    if (preferSmall) put(x, y, 432 + variation * 18, 90);
-    else { put(x, y - 1, 432 + variation * 18, 36); put(x, y, 432 + variation * 18, 54); }
-  }
-  if (below === 367) {
-    if (preferSmall) put(x, y, 486 + variation * 18, 90);
-    else { put(x, y - 1, 486 + variation * 18, 36); put(x, y, 486 + variation * 18, 54); }
-  }
 }

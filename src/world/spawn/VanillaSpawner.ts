@@ -17,7 +17,7 @@ import { debugPoolOverride } from '../../data/vanillaNpcs';
 import { MOON_KIND_FROST, MOON_KIND_PUMPKIN } from '../MoonEvent';
 import { TileStore } from '../TileStore';
 import { mainExpertMode } from '../../stats/ScaleStats';
-import { rollBadLuckExtreme, rollOnlyBadLuckExtreme } from '../../stats/Luck';
+import { rollBadLuckExtreme, rollOnlyBadLuckExtreme, rollLuck } from '../../stats/Luck';
 
 /** 星璇塔刷怪上下文（Game 每帧随 setPlayerFlags 传入；null=事件未开启/不在任何塔区） */
 export interface LunarSpawnCtx {
@@ -171,8 +171,6 @@ const TILE_MOSS = new Set([T.MOSS_GREEN, T.MOSS_YELLOW, T.MOSS_RED, T.MOSS_BLUE,
 /** Main.unlockedSlimePurpleSpawn（NPC.cs:1325 绑缚紫史莱姆门）：玩家解锁紫城镇史莱姆后
  *  置位。本仓无城镇史莱姆解锁链 → 恒 false（门恒开，与未解锁世界一致）。
  *  登记 docs/spawn-parity-gaps.md（解锁链依赖 TownNPC 686 管线） */
-const UNLOCKED_SLIME_PURPLE_SPAWN = false;
-
 // ---- 洞穴主池 cavernMonsterType 表（NPC.cs:6498 + 世界生成时 18058-18064 填充） ----
 export let cavernMonsterType: number[][] = [[49, 49, 49], [49, 49, 49]];
 export function rollCavernMonsterType(rng: RNG): void {
@@ -1342,9 +1340,9 @@ export class VanillaSpawner {
       // L1316：飞龙 87——hard && 场上无 87 && !noWorms（房屋内不出蠕虫门，此前缺失）&& 1/10
       if (hardMode && !any(87) && !this.noWorms && N(10)) return D(87);
       // L1325：绑缚紫史莱姆 686——!unlockedSlimePurpleSpawn && RollLuck(25) && 场上无 686。
-      //  unlockedSlimePurpleSpawn（Main 静态，碰过 687/686 解锁链置位）本仓未跟踪 → 恒 false；
-      //  686 无 vanilla-npcs.json 条目 → fromVanilla null 静默丢弃（同 473-476 先例，登记台账）
-      if (!UNLOCKED_SLIME_PURPLE_SPAWN && N(25) && !any(686)) return D(686);
+      //  unlockedSlimePurpleSpawn 本仓挂 world.flags（freeBoundNpc 置位，随存档持久化）；
+      //  686 json 条目已手补（extract-npcs 正则漏块），Game 侧转 bound TownNPC
+      if (!this.world.flags.unlockedSlimePurpleSpawn && N(25) && !any(686)) return D(686);
       return D(48);
     }
     // ---- 入侵分支（L1333-1401：else if (invaders)，与普通链互斥）----
@@ -1415,11 +1413,17 @@ export class VanillaSpawner {
       }
     }
 
-    // ---- 蜘蛛巢（L1569-1587）：落点墙 62 或 spawnSpider 旗标 ----
+    // ---- 蜘蛛巢（L1568-1587）：(墙 62 || spawnSpider) && CheckToSpawnSpider ----
     const wall = st.wall[st.idx(this.spawnTileX, this.spawnTileY)];
     if (wall === 62 || this.spawnSpider) {
-      // 造型师 354（1/8,岩石层深处+场内无 354）：解绑城镇 NPC 救援链路,注释保留
-      if (this.hardMode && !N(10)) return D(163);  // hardMode 9/10 黑寡妇(L1577)
+      // flag7（L1574-1578）= deeperThanRockLayer && y<h-210（dontStarve 变体不适用）
+      const flag7 = this.deeperThanRockLayer && this.spawnTileY < st.h - 210;
+      // 造型师 354（L1579-1581）：墙 62 专属门 + 1/8 + !water + flag7 +
+      // !savedStylist + 场内唯一——曾因生成期 placeBoundRescueNpcs 近似而"注释保留"
+      // 跳过；2026-08-13 移除生成期放置后按原版补齐（D 真条目，Game 侧转 bound TownNPC）
+      if (wall === 62 && N(8) && !this.waterTile && flag7
+        && !this.world.flags['savedStylist'] && !any(354)) return D(354);
+      if (this.hardMode && !N(10)) return D(163);  // hardMode 9/10 黑寡妇(L1583)
       return D(164);                               // 爬墙者
     }
     // ---- 地下沙漠（L1589-1672 1:1）----
@@ -1432,9 +1436,12 @@ export class VanillaSpawner {
       let num11 = 1.3;
       if (this.spawnTileY > (this.world.rockLevel * 2 + st.h) / 3) num11 *= 0.5;
       else if (this.spawnTileY > this.world.rockLevel) num11 *= 0.85;
-      // L1600：高尔夫球手 589（1/20，非水域；savedGolfer 未跟踪恒 false；json 缺
-      //  589 条目 → fromVanilla null 静默丢弃，登记 docs/spawn-parity-gaps.md）
-      if (N(20) && !this.waterTile && !any(589)) return D(589);
+      // L1600：高尔夫球手 589（1/20，非水域，!savedGolfer，场内唯一）——
+      //  json 缺 589 条目 → spawnBound 占位体（同三人组），Game 侧转 bound TownNPC。
+      //  savedGolfer 由 freeBoundNpc 解救时写（"未跟踪恒 false"注释已过时）
+      if (N(20) && !this.waterTile && !this.world.flags['savedGolfer'] && !any(589)) {
+        return this.spawnBound(589);
+      }
       // L1605：沙虫 510（hard，1/(50·num11)，非蠕虫禁置，落脚深于 worldSurface+100）
       if (hardMode && N(Math.floor(50 * num11)) && !this.noWorms
         && this.spawnTileY > this.world.groundLevel + 100) return D(510);
@@ -1760,9 +1767,10 @@ export class VanillaSpawner {
         if (N(7)) variant = rng.int(0, 3);
         // 未杀骷髅王（flag12）→ 地牢守卫 68（9999 伤，1:1 原版劝退机制）
         if (!this.downedBoss3) return D(68);
-        // L2562 机械师(123)：1/5，未救出+场内唯一+深层门（(ws*4+rl)/5）
+        // L2562 机械师(123)：1/5，未救出(!savedMech)+场内唯一+深层门（(ws*4+rl)/5）
         const hardDungeon = this.hardMode && !!this.world.flags['downed_262']; // downedPlantBoss（世花 262，Game 击杀通用置位链 downed_{id}）
-        if (this.downedBoss3 && N(5) && !this.waterTile && !any(123)
+        if (this.downedBoss3 && N(5) && !this.waterTile
+          && !this.world.flags['savedMech'] && !any(123)
           && this.spawnTileY > (this.world.groundLevel * 4 + this.world.rockLevel) / 5) {
           return D(123);
         }
@@ -2485,13 +2493,18 @@ export class VanillaSpawner {
     return this.activeIds.has(id) ? 1 : 0;
   }
 
-  /** SpawnFrog（NPC.cs:5521-5535 1:1）：!unlockedSlimeYellowSpawn && RollLuck(30) →
-   *  绑缚黄史莱姆 687；RollLuck(goldCritterChance=400) → 金蛙 445；else 蛙 361。
-   *  unlockedSlimeYellowSpawn 本仓未跟踪 → 恒 false；687 无 json 条目 → null（登记台账） */
+  /** SpawnFrog（NPC.cs:5521-5535 1:1）：!unlockedSlimeYellowSpawn && RollLuck(30) 且
+   *  场上无 687 → 神秘青蛙 687（交付 pendingCritterKey 由 Game 转 Critter——687 无
+   *  Enemy 数据条目）；RollLuck(400) → 金蛙 445；else 蛙 361。 */
+  pendingCritterKey: string | null = null;
   private spawnFrog(rng: RNG): Enemy | null {
     const x = this.spawnTileX * TILE + 8;
     const y = this.spawnTileY * TILE;
-    if (rng.next() < 1 / 30) return this.spawnNPC(x, y, 687, rng);
+    if (!this.world.flags.unlockedSlimeYellowSpawn && rollLuck(this.playerLuck, 30, rng.next) === 0
+      && !this.activeIds.has(687)) {
+      this.pendingCritterKey = 'mystic_frog';
+      return null;
+    }
     if (rng.next() < 1 / 400) return this.spawnNPC(x, y, 445, rng);
     return this.spawnNPC(x, y, 361, rng);
   }

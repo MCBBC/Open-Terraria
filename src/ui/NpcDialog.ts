@@ -4,7 +4,29 @@
 // 台词与商店内容在 Game 侧生成(NPC.GetChat / Chest.SetupShop 1:1),本文件纯渲染。
 import { Lang } from '../i18n/Lang';
 import { UISfx } from '../vui/UISfx';
-export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'close';
+export type NpcButtonId = 'shop' | 'heal' | 'curse' | 'collect' | 'reforge' | 'quest' | 'happiness' | 'close';
+
+/** 心情报告条目（Game 侧已做 l10n 渲染的成品文案 + 价格乘子） */
+export interface HappinessInfo {
+  name: string;
+  /** 逐条心情文案（TownNPCMood_<NPC>.<键> 渲染后） */
+  lines: string[];
+  /** 价格乘子（LimitAndRoundMultiplier 后 [0.75,1.5]） */
+  priceMul: number;
+}
+
+/** 快乐度表情档位（Main.cs:41235-41237 NPCHappiness 贴图 4 帧：≤0.82 / ≤1 / ≤1.1 / 其余） */
+export function happinessFace(priceMul: number): { face: string; cls: string } {
+  if (priceMul <= 0.82) return { face: '😄', cls: 'best' };
+  if (priceMul <= 1) return { face: '🙂', cls: 'good' };
+  if (priceMul <= 1.1) return { face: '😐', cls: 'ok' };
+  return { face: '😡', cls: 'bad' };
+}
+
+/** 价格百分比文案（Main.cs:41240 priceAdjustment.ToString("P0")） */
+export function happinessPct(priceMul: number): string {
+  return `${Math.round(priceMul * 100)}%`;
+}
 
 export interface ShopEntry {
   /** 本仓库 item key(vi_ 系) */
@@ -67,6 +89,34 @@ const CSS = `
 .sw-shop-item .nm { flex: 1; }
 .sw-shop-item .pr { color: #ffd76e; }
 .sw-shop-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
+.sw-shop-happy { display: flex; align-items: center; gap: 6px; margin-left: 10px;
+  font-size: 13px; color: #e8e8f4; }
+.sw-shop-happy.best { color: #7dff8a; }
+.sw-shop-happy.good { color: #d7ffe0; }
+.sw-shop-happy.ok { color: #ffe8a0; }
+.sw-shop-happy.bad { color: #ff8a7d; }
+.sw-happy-panel {
+  position: fixed; left: 50%; bottom: 200px; transform: translateX(-50%);
+  width: 520px; max-width: 94vw; z-index: 23; cursor: auto;
+  pointer-events: auto; /* 同 sw-npc-dialog：sw-root 穿透关闭，子面板须显式开启 */
+  background: linear-gradient(160deg, #2b3664, #1c2444);
+  border: 2px solid #7d92d6; border-radius: 6px; padding: 12px 14px; color: #e8e8f4;
+  font-family: "Fusion Pixel 12px", "Microsoft YaHei", sans-serif;
+  box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+.sw-happy-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.sw-happy-title { color: #ffe8a0; font-size: 15px; flex: 1;
+  text-shadow: 1px 1px 0 #000, -1px -1px 0 #000; }
+.sw-happy-price { font-size: 15px; }
+.sw-happy-price.best { color: #7dff8a; }
+.sw-happy-price.good { color: #d7ffe0; }
+.sw-happy-price.ok { color: #ffe8a0; }
+.sw-happy-price.bad { color: #ff8a7d; }
+.sw-happy-list { display: flex; flex-direction: column; gap: 6px; max-height: 40vh; overflow-y: auto;
+  background: #1a2140; border: 1px solid #3a4680; border-radius: 4px; padding: 8px 10px; }
+.sw-happy-line { font-size: 13px; line-height: 1.6; }
+.sw-happy-line::before { content: "• "; color: #7d92d6; }
+.sw-happy-foot { display: flex; justify-content: flex-end; margin-top: 10px; }
 `;
 
 /** 铜币计价格式化(原版 tooltip:金/银/铜) */
@@ -136,7 +186,7 @@ export class NpcShop {
 
   constructor(private parent: HTMLElement, private onBuy: (vanillaId: number) => void, private onClose: () => void) {}
 
-  open(title: string, items: ShopEntry[], copper: number) {
+  open(title: string, items: ShopEntry[], copper: number, happinessPct?: number | null) {
     this.close();
     const panel = document.createElement('div');
     panel.className = 'sw-npc-shop';
@@ -145,8 +195,13 @@ export class NpcShop {
         ${it.iconUrl ? `<img src="${it.iconUrl}">` : '<span style="width:26px;height:26px;display:inline-block"></span>'}
         <span class="nm">${it.name}</span><span class="pr">${formatCopper(it.price)}</span>
       </div>`).join('');
+    // 快乐度表情 + 价格百分比（Main.cs:41231-41243 商店标题旁 NPCHappiness 贴图 +
+    //  priceAdjustment.ToString("P0")；DOM 版用表情档位代替贴图帧）
+    const happy = happinessPct != null
+      ? `<span class="sw-shop-happy ${happinessFace(happinessPct).cls}">${happinessFace(happinessPct).face} ${happinessPct}</span>`
+      : '';
     panel.innerHTML = `
-      <div class="sw-shop-title">${title}</div>
+      <div class="sw-shop-title">${title}${happy}</div>
       <div class="sw-shop-coins">${formatCopper(copper)}</div>
       <div class="sw-shop-list">${rows}</div>
       <div class="sw-shop-foot"><button class="sw-set-back" style="background:#3a4680;color:#e8e8f4;border:1px solid #7d92d6;border-radius:4px;padding:5px 16px;cursor:pointer;font-family:inherit;">${Lang.inter(52)}</button></div>`;

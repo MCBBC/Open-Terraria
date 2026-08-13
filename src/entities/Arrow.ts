@@ -429,17 +429,9 @@ export class Arrow extends Entity {
         e.hurt(dmg, Math.sign(this.vx) * this.knockback, 0, game, this.armorPen, crit, this.pierceInit);
         game.addDamageNumber(this.x, this.y, Math.round(dmg), crit, crit ? '#FF8040' : '#FFD060');
         this.hitSet.add(e.id);
-        // 502 喵刀弹命中喵叫（Damage_EVP :16794-16806）：ai[0] 1..5 递增，
-        // PlaySound(37=Meowmere, style 5+ai0)——LegacySoundPlayer :567/:1329：
-        // Item_57/58 随机，音量 ×0.5×style×0.05（style 6-10 → 0.15-0.25），
-        // 音高扰动 ±0.4 由双素材随机近似；第 5 命中后消亡
-        if (this.projId === 502) {
-          this.meowCount = Math.min(5, this.meowCount + 1);
-          const style = 5 + this.meowCount;
-          game.playSfxFiles([Math.random() < 0.5 ? 'Item_57' : 'Item_58'],
-            0.5 * style * 0.05, this.cx, this.cy);
-          if (this.meowCount >= 5) { this.killNow(game); return; }
-        }
+        // 502 喵刀弹命中：无特效音/无计数消亡（全库唯一 PlaySound(37) 在撞块
+        // HandleMovement :16797——2026-08-13 实测复核修正：曾误接在命中链）。
+        // 命中只消费 penetrate（5 NPC 上限）+ localNPCHitCooldown 同敌冷却
         // ---- 吸血链（Projectile.cs:12877-12892 on-hit 段）----
         // 吸血鬼飞刀 304 → vampireHeal（:12879-12882，!moonLeech 门）；
         // 魔法弹 + 幽灵套 ghostHeal → ghostHeal（:12883-12888，canGhostHeal 全 true
@@ -504,17 +496,21 @@ export class Arrow extends Entity {
     return bounced;
   }
 
-  /** 喵刀弹 502 弹跳档（Projectile.cs:18165-18206）：tink（SoundID.Item10）+
-   *  ai[0]++ ≥5 消亡；全速翻面（vx/vx 直接取负，无 ×0.9 衰减）。
-   *  返回 true = 已弹开/已消亡（调用方 return）。 */
+  /** 喵刀弹 502 撞块档（HandleMovement :16794-16812——type 502 专支，先于
+   *  通用 aiStyle-8 tink 链（:18165）命中，故弹跳只喵叫不 tink）：
+   *  ai[0]=Clamp(+1,1,5) + PlaySound(37=Meowmere, style 5+ai0)（Item_57/58
+   *  随机、音量 ×0.5×style×0.05（style 6-10 → 0.15-0.25）、音高扰动 ±0.4
+   *  由双素材近似）；≥5 消亡；全速翻面（与 lastVelocity 逐轴对比后取负）。 */
   private meowBounceOff(game: GameHooks): boolean {
     const st = game.world.store;
     const solidAt = (px: number, py: number) => {
       const t0 = Math.floor(px / TILE), t1 = Math.floor(py / TILE);
       return st.inBounds(t0, t1) && st.isSolid(t0, t1);
     };
-    this.meowCount++;
-    game.playSfxFiles(['Item_10'], 1, this.cx, this.cy);   // SoundID.Item10 tink
+    this.meowCount = Math.max(1, Math.min(5, this.meowCount + 1));   // Clamp(:16796)
+    const style = 5 + this.meowCount;
+    game.playSfxFiles([Math.random() < 0.5 ? 'Item_57' : 'Item_58'],
+      0.5 * style * 0.05, this.cx, this.cy);
     if (this.meowCount >= 5) { this.killNow(game); return true; }
     if (!solidAt(this.x + this.w / 2 - this.vx, this.y + this.h / 2)) {
       this.x -= this.vx;

@@ -12,12 +12,13 @@
 //    lifeMax≤5 && damage==0 && type∉{594,686}）解锁=遇数；其余敌怪解锁=杀数；
 //  - 完全解锁所需杀数 = ItemID.Sets.KillsToBanner[BannerToItem(NPCtoBanner(npc))]（默认 50，
 //    BESTIARY_KILLS_TO_FULL 仅存非默认项）；
-//  - quickUnlock（Boss / ShouldBeCountedAsBossForBestiary{517,422,507,493,13,664} 及
-//    ModifyEntriesThatNeedIt 手工 {565,577,551,491} + 击杀归并族）：杀 1 只即满档；
+//  - quickUnlock（npc.boss ∨ ShouldBeCountedAsBossForBestiary{517,422,507,493,13,664} 及
+//    ModifyEntriesThatNeedIt 手工 {565,577,551,491} + 击杀归并族 + 68/35 显式旗）：杀 1 只即满档；
 //  - Multi/HighestOf 条目（68/35/37 三联、534、蝾螈族 494-506、金小动物 13 条、小动物对 4 组）：
 //    任一来源解锁即解锁（GetEntryUICollectionInfo 取 max）。
+// 排序/稀有度/出没环境三张静态表见文件尾部（vanilla-bestiary.json /
+// vanilla-bestiary-spawn.json，tools/extract-bestiary*.mjs 生成）。
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
-import { VANILLA_NPCS } from './vanillaNpcs';
 import {
   BESTIARY_HIDE_IDS,
   BESTIARY_CREDIT_REDIRECT,
@@ -44,10 +45,12 @@ const KILL_CREDIT_FROM: Record<number, number> = {
   5: 4, 267: 266, 115: 113, 116: 113, 117: 113, 139: 134, 372: 370,
   658: 657, 659: 657, 660: 657, 454: 439, 521: 439,
 };
-/** HighestOfMultipleUICollectionInfoProvider 复合条目（Populator :565/:588-590） */
-const MULTI_SOURCES: Record<number, Array<'kill' | 'chat' | [number, 'kill' | 'chat']>> = {
-  // 每项 = [npcId, 来源类型]；'kill'/'chat' 表示本条目自身
-  68: [[68, 'kill'], [35, 'kill'], [54, 'chat']],
+/** HighestOfMultipleUICollectionInfoProvider 复合条目（Populator :565/:588-590）。
+ *  元组可带第三位显式 quick 旗（68 地牢守卫：npc.boss=false 但 populator :588
+ *  显式 quickUnlock:true） */
+const MULTI_SOURCES: Record<number, Array<'kill' | 'chat' | [number, 'kill' | 'chat', boolean?]>> = {
+  // 每项 = [npcId, 来源类型(, quick?)]；'kill'/'chat' 表示本条目自身
+  68: [[68, 'kill', true], [35, 'kill'], [54, 'chat']],
   35: [[35, 'kill'], [54, 'chat']],
   37: [[37, 'chat'], [54, 'chat'], [35, 'kill']],
   534: ['kill', [441, 'chat']],
@@ -71,11 +74,13 @@ export function bestiaryCreditId(netId: number): string {
   return NPC_NAME_BY_ID[REDIRECT[netId] ?? netId] ?? String(netId);
 }
 
-/** NPC.CountsAsACritter（NPC.cs:6803-6812）——遇数扫描/小动物条目判定 */
+/** NPC.CountsAsACritter（NPC.cs:6803-6812）——遇数扫描/小动物条目判定。
+ *  lifeMax/damage 取 npcStats（1456 SetDefaults 全量含旧 json 缺失的 33 条，
+ *  如 614 爆炸兔 hp5/dmg0 → 小动物） */
 export function countsAsACritter(npcId: number): boolean {
-  const v = VANILLA_NPCS[String(npcId)];
-  if (!v) return false;
-  return v.lifeMax <= 5 && v.damage === 0 && npcId !== 594 && npcId !== 686;
+  if (npcId === 594 || npcId === 686) return false;
+  const [, , damage, , lifeMax] = npcStats(npcId);
+  return lifeMax <= 5 && damage === 0;
 }
 
 /** BestiaryEntryUnlockState（0 未知 1 仅头像 2 +属性 3 +掉落 4 +掉落率） */
@@ -111,11 +116,14 @@ function killSource(npcId: number, quick: boolean): Source {
 const sightSource = (npcId: number): Source => ({ t: 'sight', credit: bestiaryCreditId(npcId) });
 const chatSource = (npcId: number): Source => ({ t: 'chat', credit: bestiaryCreditId(npcId) });
 
-/** 全量 NPC 的 boss 旗（Enemy.ts VANILLA_BOSS_IDS 同表；BestiaryEntry.Enemy :37 quickUnlock 判定） */
-const VANILLA_BOSS_IDS = new Set([
-  4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398, 439, 636, 657,
-  325, 327, 345, 346,
-]);
+/** BestiaryEntry.Enemy :37 的 boss 判定（npc.boss ∨ NPCID.Sets.ShouldBeCountedAsBossForBestiary）：
+ *  npc.boss 取 npcStats 表（1456 SetDefaults boss=true 的 22 条：EoC/骷髅王/世吞头/蜂后/
+ *  肉山/机械三王/世纪之花/石巨人/双月/邪教徒/史莱姆皇后/光女/火星飞碟核心/火把神/鹿角怪），
+ *  Sets 补充 {517,422,507,493,13,664}（四柱/世吞头/火把神）。BossBestiaryInfoElement
+ *  挂载（Filters.ByBoss）与 quickUnlock 同源 */
+export function isBossForBestiary(npcId: number): boolean {
+  return npcStats(npcId)[1] === 1 || COUNTED_AS_BOSS.has(npcId);
+}
 
 let entryCache: BestiaryEntryDef[] | null = null;
 
@@ -143,7 +151,9 @@ export function bestiaryEntries(): BestiaryEntryDef[] {
       sources = MULTI_SOURCES[id].map((s) =>
         s === 'kill' ? killSource(id, isQuick(id))
           : s === 'chat' ? chatSource(id)
-            : s[1] === 'kill' ? killSource(s[0], isQuick(s[0])) : chatSource(s[0]));
+            : s[1] === 'kill'
+              ? killSource(s[0], s[2] ?? isQuick(s[0]))
+              : chatSource(s[0]));
     } else if (id in KILL_CREDIT_FROM) {
       // 击杀记账归并族（Populator :600-616）：读母体杀数，quickUnlock=true
       sources = [killSource(KILL_CREDIT_FROM[id], true)];
@@ -161,7 +171,7 @@ export function bestiaryEntries(): BestiaryEntryDef[] {
 }
 
 function isQuick(id: number): boolean {
-  return VANILLA_BOSS_IDS.has(id) || COUNTED_AS_BOSS.has(id) || QUICK_UNLOCK_IDS.has(id);
+  return isBossForBestiary(id) || QUICK_UNLOCK_IDS.has(id);
 }
 
 /** CommonEnemyUICollectionInfoProvider.GetUnlockStateByKillCount（:60-85） */
@@ -289,15 +299,30 @@ export function isNpcValidForBestiaryKillCredit(vanillaId: number, isBoss: boole
 // 数据来源 tools/extract-bestiary.mjs → vanilla-bestiary.json：
 //   TownNPCBestiaryPriority :4427 / NormalGoldCritterBestiaryPriority :4407 /
 //   BossBestiaryPriority :4416（GetSortedBestiaryEntriesList orderby 三键）+
-//   NPC.cs SetDefaults if 链 rarity 赋值 + ContentSamples.FillNpcRarities 显式覆盖(:1084-1220)
+//   npcStats（1456 SetDefaults type 链逐 id 求值的 rarity/boss/damage/defense/lifeMax/aiStyle
+//   六元组——FillNpcRarities :1072-1083 的公式入参，负 id 全在 Hide 表不进图鉴故未提取）+
+//   ContentSamples.FillNpcRarities 显式覆盖(:1084-1220)
+// 数据来源 tools/extract-bestiary-spawn.mjs → vanilla-bestiary-spawn.json：
+//   byNpc + commonFilters（BestiaryHelper.GetLowestBiomeGroupIndex 的组序表）
 import bestiaryJson from './vanilla-bestiary.json';
+import spawnJson from './vanilla-bestiary-spawn.json';
 
 type BestiaryJson = typeof bestiaryJson;
+type SpawnJson = typeof spawnJson;
 const TOWN_PRIORITY: number[] = (bestiaryJson as BestiaryJson).townNpcBestiaryPriority;
 const GOLD_CRITTER_PRIORITY: number[] = (bestiaryJson as BestiaryJson).normalGoldCritterBestiaryPriority;
 const BOSS_PRIORITY: number[] = (bestiaryJson as BestiaryJson).bossBestiaryPriority;
-const NPC_RARITY: Record<string, number> = (bestiaryJson as BestiaryJson).npcRarity;
 const STAR_OVERRIDES: Record<string, number> = (bestiaryJson as BestiaryJson).rarityStarOverrides;
+/** npcStats 元组序（extract-bestiary.mjs）：[rarity, boss, damage, defense, lifeMax, aiStyle] */
+type NpcStatsTuple = [number, number, number, number, number, number];
+const NPC_STATS = (bestiaryJson as BestiaryJson).npcStats as unknown as Record<string, NpcStatsTuple>;
+const COMMON_FILTERS: string[] = (spawnJson as unknown as SpawnJson).commonFilters;
+const SPAWN_BY_NPC: Record<string, string[]> = (spawnJson as unknown as SpawnJson).byNpc;
+
+/** 逐 NPC 投影（ContentSamples.NpcsByNetId 的 rarity/boss/战力/aiStyle 读数） */
+function npcStats(npcId: number): NpcStatsTuple {
+  return NPC_STATS[String(npcId)] ?? [0, 0, 0, 0, 0, 0];
+}
 
 /** NPC.isLikeATownNPC（NPC.cs:6772-6781）：453 恒真，其余走 townNPC 旗 */
 export function isLikeATownNpc(npcId: number): boolean {
@@ -307,15 +332,13 @@ export function isLikeATownNpc(npcId: number): boolean {
 /** ContentSamples.GetNPCBestiaryRarityStarsCount（:1223-1285）1:1：
  *  1 + rarity（1→+1 / 2→+1.5 / 3→+2 / 4→+2.5 / 5→+3 / >5→+3.5）+ boss 0.5 +
  *  战力阈（>50→+1 / >150→+1.5 / >500→+2 / >1000→+2.5 / >5000→+3 / >10000→+3.5），
- *  钳 5 取整。FillNpcRarities 先全量算公式再显式覆盖（城镇 1-3 / Boss 4-5 段），
- *  覆盖优先。stats 缺表（1405 json 缺 id）按 0 计——与原版 SetDefaults 后的
- *  实际值可能偏差，登记待办 */
+ *  钳 5 取整（C# (int) 截断）。FillNpcRarities 先全量算公式再显式覆盖
+ *  （城镇 1-3 / Boss 4-5 段），覆盖优先。入参全部取 npcStats 表（1456 SetDefaults
+ *  求值）——Classic 难度 ScaleStats 乘数恒 1，链上原值即公式读数 */
 export function bestiaryRarityStars(npcId: number): number {
   const o = STAR_OVERRIDES[npcId];
   if (o !== undefined) return o;
-  const v = VANILLA_NPCS[String(npcId)];
-  const rarity = NPC_RARITY[npcId] ?? 0;
-  const boss = VANILLA_BOSS_IDS.has(npcId);
+  const [rarity, boss, damage, defense, lifeMax] = npcStats(npcId);
   let n = 1 + rarity;
   if (rarity === 1) n += 1;
   else if (rarity === 2) n += 1.5;
@@ -324,7 +347,7 @@ export function bestiaryRarityStars(npcId: number): number {
   else if (rarity === 5) n += 3;
   else if (rarity > 0) n += 3.5;
   if (boss) n += 0.5;
-  const power = (v?.damage ?? 0) + (v?.defense ?? 0) + Math.floor((v?.lifeMax ?? 0) / 4);
+  const power = damage + defense + Math.floor(lifeMax / 4);   // npc.lifeMax / 4 整除
   if (power > 10000) n += 3.5;
   else if (power > 5000) n += 3;
   else if (power > 1000) n += 2.5;
@@ -334,15 +357,27 @@ export function bestiaryRarityStars(npcId: number): number {
   return Math.trunc(Math.min(n, 5));
 }
 
+/** BestiaryHelper.GetLowestBiomeGroupIndex（ContentSamples.cs:755-766）：
+ *  commonElements（GetCommonInfoElementsForFilters :239-301，57 条）自尾向头
+ *  找第一个出现在条目 Info 中的元素 → 返回该组号（即命中的最大组号）；
+ *  一个公共元素都不含 = int.MaxValue */
+export function lowestBiomeGroupIndex(npcId: number): number {
+  const have = SPAWN_BY_NPC[String(npcId)];
+  if (!have) return Number.MAX_SAFE_INTEGER;
+  for (let i = COMMON_FILTERS.length - 1; i >= 0; i--) {
+    if (have.includes(COMMON_FILTERS[i])) return i;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
 let sortingIdCache: Map<number, number> | null = null;
 
 /** ContentSamples.CreateBestiarySortingIds（:1063-1073）——GetSortedBestiaryEntriesList
  *  （BestiaryHelper，ContentSamples.cs:745-753）九键 orderby 链的稳定全序 → 1..N 序号：
  *  城镇优先位 → !isLikeATownNPC → 金小动物优先位 → !CountsAsACritter → Boss 优先位 →
- *  群系组序 → aiStyle → 战力 → 星数（全升序；IndexOf 缺席 = MAX，Boss 缺席 = -1）。
- *  ⚠️ 第 6 键 GetLowestBiomeGroupIndex（:762-772）未提取——需 BestiaryDatabase 逐 NPC
- *  的 SpawnCondition 过滤元素表（BestiaryDatabaseNPCsPopulator 逐条注册，无静态源），
- *  此处以常量 0 代入：同档普通敌怪的组内相对序与原版有偏差，登记待办 */
+ *  群系组序（GetLowestBiomeGroupIndex）→ aiStyle → 战力 → 星数（全升序；
+ *  IndexOf 缺席 = MAX，Boss 缺席 = -1）。原版 NpcsByNetId 全集（-65..696，含 Hide）
+ *  参与 orderby、排序后才 RemoveAll(Hide)——序号只发给非 Hide 条目，故编号跳过 Hide。 */
 export function bestiarySortingId(npcId: number): number {
   if (!sortingIdCache) {
     sortingIdCache = new Map();
@@ -351,16 +386,16 @@ export function bestiarySortingId(npcId: number): number {
     const bossIdx = new Map(BOSS_PRIORITY.map((id, i) => [id, i]));
     const MAX = Number.MAX_SAFE_INTEGER;
     const sortKey = (id: number): number[] => {
-      const v = VANILLA_NPCS[String(id)];
+      const [, , damage, defense, lifeMax, aiStyle] = npcStats(id);
       return [
         townIdx.get(id) ?? MAX,                 // GetBestiaryTownPriority
         isLikeATownNpc(id) ? 0 : 1,             // !isLikeATownNPC
         goldIdx.get(id) ?? MAX,                 // GetBestiaryNormalGoldCritterPriority
         countsAsACritter(id) ? 0 : 1,           // !CountsAsACritter
         bossIdx.get(id) ?? -1,                  // GetBestiaryBossPriority
-        0,                                      // GetLowestBiomeGroupIndex（未提取，登记）
-        v?.aiStyle ?? 0,
-        ((v?.damage ?? 0) + (v?.defense ?? 0) + Math.floor((v?.lifeMax ?? 0) / 4)) * 4, // 战力 ×4 保整
+        lowestBiomeGroupIndex(id),              // GetLowestBiomeGroupIndex（公共过滤元素组号）
+        aiStyle,
+        damage + defense + Math.floor(lifeMax / 4), // GetBestiaryPowerLevel（整除）
         bestiaryRarityStars(id),
       ];
     };
@@ -375,7 +410,11 @@ export function bestiarySortingId(npcId: number): number {
       }
       return a - b;   // 全键平手：稳定序（原版 List 稳定排序保持注册序）
     });
-    ids.forEach((id, i) => sortingIdCache!.set(id, i + 1));
+    let rank = 0;   // 序号只发给非 Hide 条目（CreateBestiarySortingIds 遍历 RemoveAll 后的表）
+    for (const id of ids) {
+      if (HIDE.has(id)) continue;
+      sortingIdCache.set(id, ++rank);
+    }
   }
   return sortingIdCache.get(npcId) ?? Number.MAX_SAFE_INTEGER;
 }

@@ -8,7 +8,7 @@ import { languageManager } from './LanguageManager';
 import { ITEM_KEY_TO_ID, ITEM_NAME_BY_ID, NPC_NAME_BY_ID, BUFF_NAME_BY_ID, PROJECTILE_NAME_BY_ID, TILE_NAME_BY_ID, TILE_NAME_ITEM_BY_SHEET, TILE_NAME_ZH_BY_ID, TILE_NAME_EN_BY_ID, ITEM_NAME_ZH_BY_ID, ITEM_NAME_EN_BY_ID, WALL_NAME_ITEM_BY_WALL, WALL_NAME_ZH_BY_ID, WALL_NAME_EN_BY_ID } from './idNames.generated';
 import { ITEM_BY_KEY, ITEM_DEFS } from '../data/items';
 import { TILE_BY_KEY, TILE_DEFS } from '../data/tiles';
-import { worldgenProgressKey } from './worldgenKeys';
+import { worldgenProgressKey, worldgenProgressStringKey } from './worldgenKeys';
 
 export const Lang = {
   get loaded(): boolean { return languageManager.loaded; },
@@ -67,8 +67,11 @@ export const Lang = {
   /** misc[l] → LegacyMisc.l */
   misc(l: number): string { return languageManager.getTextValue(`LegacyMisc.${l}`); },
 
-  /** 世界生成进度文案:pass 名 → LegacyWorldGen 条目(worldgenKeys 映射) */
+  /** 世界生成进度文案:pass 名 → 原版条目(worldgenKeys 映射;数字=LegacyWorldGen.N,
+   *  字符串=完整 l10n 键如 WorldGeneration.Oasis;无映射回退 pass 名原文) */
   worldgenText(passKey: string): string {
+    const strKey = worldgenProgressStringKey[passKey];
+    if (strKey) return Lang.text(strKey);
     const legacyKey = worldgenProgressKey[passKey];
     return legacyKey != null ? Lang.text(`LegacyWorldGen.${legacyKey}`) : passKey;
   },

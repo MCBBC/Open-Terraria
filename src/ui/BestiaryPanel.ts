@@ -11,13 +11,15 @@
 //     掉落表 = vanilla-npcdrops.json 规则树展平（ItemDropBestiaryInfoElement 近似）
 // 打开入口：背包面板图鉴按钮（原版 BestiaryMenuButton Main.cs:41905）+ 暂停菜单。
 // 键位：Esc / E 关闭（DOM 面板惯例；capture 阶段拦截防 main.ts 暂停键二次消费）。
-// 登记缺口（数据层暂无，待后续批次）：
-//   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 稀有度 / 群系 / 事件标签
-//     （AddNPCBiomeRelationships 系）——Bestiary.ts 条目无 rarity/biome 字段
-//   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId）/ Sort_Rarity
-//     （NpcBestiaryRarityStars）——两表未提取
-//   - 头像背景（IBestiaryBackgroundImagePathAndColorProvider：SpawnCondition 的
-//     MapBG 贴图 + Visuals.* 装饰叠层 Rain/Blizzard/Moon/Meteor，可由条件推导）
+// 已闭合登记（数据层 → UI 消费）：
+//   - 排序：Sort_BestiaryID（ContentSamples.NpcBestiarySortingId 九键链全键提取，
+//     含 GetLowestBiomeGroupIndex）/ Sort_Rarity（NpcBestiaryRarityStars，npcStats 投影）
+//   - 头像背景：IBestiaryBackgroundImagePathAndColorProvider（MapBG1-42 按出没环境
+//     推导，偏好 AddTags/世界恶双路/月总特例；网格=首个带图条件，详情=末个+bgColor 着色）
+// 登记缺口（后续批次）：
+//   - Visuals.* 装饰叠层（MapBGOverlay1-9：Rain/Blizzard/Sun/Moon/Meteor 等）——
+//     提取数据已含 derivations 推导规则，DOM 头像暂只铺底图不叠装饰层
+//   - 筛选：稀有生物（RareSpawnBestiaryInfoElement）/ 群系 / 事件标签
 import { Lang } from '../i18n/Lang';
 import { NPC_NAME_BY_ID } from '../i18n/idNames.generated';
 import { BESTIARY_CREDIT_REDIRECT } from '../data/bestiaryStatics.generated';
@@ -29,7 +31,7 @@ import { UISfx } from '../vui/UISfx';
 import type { SpriteAtlas } from '../assets/SpriteAtlas';
 import {
   bestiaryEntries, bestiaryCreditId, UnlockState,
-  bestiaryRarityStars, bestiarySortingId,
+  bestiaryRarityStars, bestiarySortingId, isBossForBestiary,
   type BestiaryEntryDef, type BestiaryTracker,
 } from '../data/Bestiary';
 
@@ -137,12 +139,14 @@ export function bestiaryRepNpcId(creditId: string): number {
   return repIdCache.get(creditId) ?? (Number.isFinite(fallback) ? fallback : 0);
 }
 
-/** BestiaryEntry.Enemy（Populator）+ NPCID.Sets.ShouldBeCountedAsBossForBestiary
- *  的 creditId 集（Boss 筛选用；Enemy.ts VANILLA_BOSS_IDS 同表） */
-const BOSS_CREDITS = new Set([
-  4, 13, 35, 50, 68, 113, 125, 126, 127, 134, 222, 245, 262, 266, 370, 395, 398,
-  439, 636, 657, 325, 327, 345, 346, 517, 422, 507, 493, 664,
-].map(bestiaryCreditId));
+/** BossBestiaryInfoElement 挂载集（BestiaryEntry.Enemy :37：npc.boss ∨
+ *  ShouldBeCountedAsBossForBestiary → Filters.ByBoss）的 creditId 化 */
+const BOSS_CREDITS = new Set(
+  Object.keys(NPC_NAME_BY_ID)
+    .map(Number)
+    .filter((id) => Number.isInteger(id) && id !== 0 && isBossForBestiary(id))
+    .map(bestiaryCreditId),
+);
 
 export function isBossCredit(creditId: string): boolean {
   return BOSS_CREDITS.has(creditId);
@@ -338,13 +342,33 @@ function dropCondText(cond: string): string {
   return t; // 原版空串条件（NotExpert 等）不显示
 }
 
-// ============ 出没环境 + 风味文本（BestiaryDatabaseNPCsPopulator + BestiaryEntry） ============
+// ============ 出没环境 + 风味文本 + 头像背景（BestiaryDatabaseNPCsPopulator + BestiaryEntry） ============
 
 type SpawnJson = typeof spawnData;
-/** SpawnCondition 静态声明（populator :14-302）：路径 → langKey + DisplayTextPriority */
-const SPAWN_CONDITIONS = (spawnData as SpawnJson).conditions as Record<string, { key: string; priority: number }>;
+/** SpawnCondition 静态声明（populator :14-302）。priority = filterIconFrame（标签图标帧，
+ *  FilterProviderInfoElement :24-29）；text = DisplayTextPriority（风味回退权重）；
+ *  bg/bgColor = 条目头像背景 MapBG 与着色（IBestiaryBackgroundImagePathAndColorProvider） */
+interface SpawnConditionDef {
+  key?: string;
+  priority: number;
+  text?: number;
+  bg?: string;
+  bgColor?: number[];
+  overlay?: string;
+  overlayColor?: number[];
+  hideInPortrait?: boolean;
+}
+const SPAWN_CONDITIONS = (spawnData as unknown as SpawnJson).conditions as unknown as Record<string, SpawnConditionDef>;
 /** FindEntryByNPCID(id).Info.AddRange 注册序（populator :802/:1661，×732） */
-export const SPAWN_BY_NPC = (spawnData as SpawnJson).byNpc as Record<string, string[]>;
+export const SPAWN_BY_NPC = (spawnData as unknown as SpawnJson).byNpc as Record<string, string[]>;
+/** AddTags 头像背景偏好（populator :515-548）：单条件路径或腐化/猩红双路 */
+const BG_PREFERENCE = (spawnData as unknown as SpawnJson).bgPreference as Record<
+  string, Array<string | { corrupt: string; crimson: string }>
+>;
+/** MoonLordPortraitBackgroundProviderBestiaryInfoElement（populator :550-551） */
+const MOONLORD_BG_NPC = new Set<number>(
+  ((spawnData as unknown as SpawnJson).moonLordBg as number[] | undefined) ?? [],
+);
 
 export interface SpawnConditionLine { key: string; label: string; priority: number }
 
@@ -355,26 +379,93 @@ export function bestiarySpawnConditions(npcId: number): SpawnConditionLine[] {
   if (!paths) return [];
   return paths.map((p) => {
     const c = SPAWN_CONDITIONS[p];
-    return { key: c.key, label: Lang.has(c.key) ? Lang.text(c.key) : c.key, priority: c.priority };
+    const key = c.key ?? '';
+    return { key, label: key && Lang.has(key) ? Lang.text(key) : key, priority: c.priority };
   });
+}
+
+/** 条目背景偏好路径（BestiaryPortraitBackgroundBasedOnWorldEvil 按 WorldGen.crimson 二选一） */
+export function bestiaryBgPreferencePaths(npcId: number, crimson = false): string[] {
+  const prefs = BG_PREFERENCE[String(npcId)];
+  if (!prefs) return [];
+  return prefs.map((p) => (typeof p === 'string' ? p : (crimson ? p.crimson : p.corrupt)));
 }
 
 /** 风味文本（BestiaryEntry.cs:42-47 Enemy/TownNPC/Critter 三工厂同构）：
  *  `Bestiary_FlavorText.npc_<NPCName 内部名>`（Language.Exists 门，564 键）；
- *  缺失回退 TryGivingEntryFlavorTextIfItIsMissing（populator:685-714）——取
- *  DisplayTextPriority 最高的出没环境（并列取注册序后者），映射
- *  `Bestiary_BiomeText.biome_<键名去类别>`（Bestiary_Biomes.Surface → biome_Surface）。
- *  两路都无 → null（条目无风味块） */
-export function bestiaryFlavorText(npcId: number): string | null {
+ *  缺失回退 TryGivingEntryFlavorTextIfItIsMissing（populator:685-714）——头像背景
+ *  偏好条件绝对优先（Info 序首个），其余取 DisplayTextPriority 最高者（并列取注册序
+ *  后者），映射 `Bestiary_BiomeText.biome_<键名去类别>`。两路都无 → null */
+export function bestiaryFlavorText(npcId: number, crimson = false): string | null {
   const internal = NPC_NAME_BY_ID[npcId > 0 ? npcId : -npcId];
   const key = internal ? `Bestiary_FlavorText.npc_${internal}` : '';
   if (key && Lang.has(key)) return Lang.text(key);
-  const conds = bestiarySpawnConditions(npcId);
-  if (conds.length === 0) return null;
-  let best = conds[0];
-  for (const c of conds) if (c.priority >= best.priority) best = c; // >=：并列取后者（原版 :698）
-  const fb = `Bestiary_BiomeText.biome_${best.key.slice(best.key.indexOf('.') + 1)}`;
+  const paths = SPAWN_BY_NPC[String(npcId)] ?? [];
+  if (paths.length === 0) return null;
+  const pref = bestiaryBgPreferencePaths(npcId, crimson);
+  let bestPath: string | null = null;
+  if (pref.length) {
+    bestPath = paths.find((p) => pref.includes(p)) ?? null;   // Info 序首个命中即 break
+  }
+  if (!bestPath) {
+    let bestPri = -Infinity;
+    for (const p of paths) {
+      const pri = SPAWN_CONDITIONS[p]?.text ?? 0;   // DisplayTextPriority 默认 0
+      if (pri >= bestPri) { bestPri = pri; bestPath = p; }
+    }
+  }
+  const cond = bestPath ? SPAWN_CONDITIONS[bestPath] : null;
+  if (!cond?.key) return null;
+  const fb = `Bestiary_BiomeText.biome_${cond.key.slice(cond.key.indexOf('.') + 1)}`;
   return Lang.has(fb) ? Lang.text(fb) : null;
+}
+
+// ============ 头像背景（MapBG 按出没环境推导） ============
+
+export interface BestiaryPortraitBg {
+  /** MapBG 贴图名（public/sprites/vanilla/<name>.png；无出没环境时 null） */
+  image: string | null;
+  /** 着色 rgba（NPCPortraitInfoElement：有图条件中最后一个带色者胜出） */
+  color: [number, number, number, number];
+}
+
+/** 条目 Info 中带背景图的提供者（注册序；月总元素由 populator :551 追加在末位） */
+interface BgProvider { path: string | null; bg: string; bgColor?: number[] }
+function bgProviders(npcId: number): BgProvider[] {
+  const out: BgProvider[] = [];
+  for (const p of SPAWN_BY_NPC[String(npcId)] ?? []) {
+    const c = SPAWN_CONDITIONS[p];
+    if (c?.bg) out.push({ path: p, bg: c.bg, bgColor: c.bgColor });
+  }
+  if (MOONLORD_BG_NPC.has(npcId)) out.push({ path: null, bg: 'MapBG1', bgColor: [0, 0, 0, 255] });
+  return out;
+}
+
+/** 详情页大头像背景（NPCPortraitInfoElement.cs:38-81）：偏好条件（AddTags，
+ *  世界恶双路按 crimson 取一）命中则锁定其贴图；否则每轮覆写 → 注册序**最后一个**
+ *  带图条件。着色 = 有图提供者中最后一个声明 bgColor 者（偏好命中后仍生效） */
+export function bestiaryPortraitBackground(npcId: number, crimson = false): BestiaryPortraitBg {
+  const providers = bgProviders(npcId);
+  let image: string | null = null;
+  let color: [number, number, number, number] = [255, 255, 255, 255];
+  const pref = bestiaryBgPreferencePaths(npcId, crimson);
+  const prefHit = pref.length ? providers.find((p) => p.path !== null && pref.includes(p.path)) : undefined;
+  if (prefHit) image = prefHit.bg;                       // flag2：偏好锁定
+  for (const p of providers) {
+    if (!prefHit) image = p.bg;                          // 无偏好：末个胜出
+    if (p.bgColor) color = [p.bgColor[0], p.bgColor[1], p.bgColor[2], p.bgColor[3] ?? 255];
+  }
+  return { image, color };
+}
+
+/** 网格条目底图（UIBestiaryEntryButton.TryGettingBackgroundImageProvider :105-127）：
+ *  偏好条件优先，否则注册序**首个**带图条件（与大头像的"最后一个"不同）；无着色 */
+export function bestiaryGridBackground(npcId: number, crimson = false): string | null {
+  const providers = bgProviders(npcId);
+  if (!providers.length) return null;
+  const pref = bestiaryBgPreferencePaths(npcId, crimson);
+  const hit = pref.length ? providers.find((p) => p.path !== null && pref.includes(p.path)) : undefined;
+  return (hit ?? providers[0]).bg;
 }
 
 // ============ DOM 面板 ============
@@ -442,6 +533,8 @@ const CSS = `
 export interface BestiaryPanelFlow {
   getTracker(): BestiaryTracker;
   atlas?: SpriteAtlas | null;
+  /** 世界恶取向（BestiaryPortraitBackgroundBasedOnWorldEvil：crimson=true 取猩红路） */
+  isCrimson?(): boolean;
   onBack(): void;
 }
 
@@ -618,16 +711,25 @@ export class BestiaryPanel {
         cell.appendChild(kills);
       }
       cell.addEventListener('click', () => { this.selected = r; this.refresh(); });
-      this.drawPortrait(canvas, r.npcId);
+      this.drawPortrait(canvas, r.npcId, 'grid', r.state > UnlockState.NotKnown);
       this.gridEl.appendChild(cell);
     }
   }
 
   /** 头像 = NPC 表首帧（UnlockableNPCEntryIcon 用整表绘制；DOM 取 frame0 缩放）。
    *  负 netID 变体（史莱姆配色 -1..-10 / 世吞段 -11..-13）无独立贴图文件，
-   *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。 */
-  private drawPortrait(canvas: HTMLCanvasElement, npcId: number) {
+   *  原版共用母体表 → 分别回落 NPC_1 / NPC_14。
+   *  已解锁条目先铺 MapBG 出没环境底图（UIBestiaryEntryButton 网格 / NPCPortraitInfoElement
+   *  详情各取一套推导），着色按原版 bgColor 乘算（multiply）。 */
+  private drawPortrait(canvas: HTMLCanvasElement, npcId: number, bgMode: 'grid' | 'portrait', unlocked: boolean) {
     const sheetId = npcId > 0 ? npcId : (npcId >= -10 ? 1 : 14);
+    const crimson = this.flow.isCrimson?.() ?? false;
+    const bg = unlocked
+      ? (bgMode === 'grid'
+        ? { image: bestiaryGridBackground(npcId, crimson), color: [255, 255, 255, 255] as number[] }
+        : bestiaryPortraitBackground(npcId, crimson))
+      : { image: null as string | null, color: [255, 255, 255, 255] };
+    const size = canvas.width;
     const paint = (img: HTMLImageElement) => {
       const frames = VANILLA_NPCS[String(npcId)]?.frames ?? 1;
       const fh = Math.max(1, Math.floor(img.height / frames));
@@ -635,11 +737,49 @@ export class BestiaryPanel {
       if (!cx) return;
       cx.imageSmoothingEnabled = false;
       cx.clearRect(0, 0, canvas.width, canvas.height);
-      const s = Math.min(64 / img.width, 64 / fh);
+      const s = Math.min(size / img.width, size / fh);
       const w = img.width * s, h = fh * s;
-      cx.drawImage(img, 0, 0, img.width, fh, (64 - w) / 2, (64 - h) / 2, w, h);
+      cx.drawImage(img, 0, 0, img.width, fh, (size - w) / 2, (size - h) / 2, w, h);
     };
     const atlas = this.flow.atlas ?? null;
+    const loadBg = (name: string, cb: (bgi: HTMLImageElement) => void) => {
+      const cached = atlas ? atlas.vimages.get(`vanilla/${name}.png`) ?? null : null;
+      if (cached) { cb(cached); return; }
+      const bgi = new Image();
+      bgi.onload = () => cb(bgi);
+      bgi.src = `sprites/vanilla/${name}.png`;
+    };
+    const paintWithBg = (bgImg: HTMLImageElement | null) => {
+      const cx = canvas.getContext('2d');
+      if (!cx) return;
+      cx.imageSmoothingEnabled = false;
+      cx.clearRect(0, 0, canvas.width, canvas.height);
+      if (bgImg) {
+        const bs = Math.max(size / bgImg.width, size / bgImg.height);
+        const bw = bgImg.width * bs, bh = bgImg.height * bs;
+        cx.drawImage(bgImg, (size - bw) / 2, (size - bh) / 2, bw, bh);
+        const [r, g, b, a] = bg.color;
+        if (r !== 255 || g !== 255 || b !== 255) {
+          cx.globalCompositeOperation = 'multiply';
+          cx.fillStyle = `rgb(${r},${g},${b})`;
+          cx.fillRect(0, 0, size, size);
+          cx.globalCompositeOperation = 'source-over';
+          void a;
+        }
+      }
+    };
+    if (bg.image) {
+      loadBg(bg.image, (bgImg) => {
+        paintWithBg(bgImg);
+        // NPC 表到位后叠画（贴图晚到时重绘底图再叠）
+        const cached = atlas ? atlas.vimages.get(`vanilla/NPC_${sheetId}.png`) ?? null : null;
+        if (cached) { paint(cached); return; }
+        const img = new Image();
+        img.onload = () => { paintWithBg(bgImg); paint(img); };
+        img.src = `sprites/vanilla/NPC_${sheetId}.png`;
+      });
+      return;
+    }
     const cached = atlas ? atlas.vimages.get(`vanilla/NPC_${sheetId}.png`) ?? null : null;
     if (cached) { paint(cached); return; }
     const img = new Image();
@@ -727,7 +867,7 @@ export class BestiaryPanel {
     canvas.style.cssText = 'width:96px;height:96px;image-rendering:pixelated;display:block;margin:0 auto 6px;';
     if (st === UnlockState.NotKnown) canvas.style.filter = 'brightness(0) opacity(0.55)';
     this.infoEl.appendChild(canvas);
-    this.drawPortrait(canvas, r.npcId);
+    this.drawPortrait(canvas, r.npcId, 'portrait', st > UnlockState.NotKnown);
     // 击杀数（NPCKillCounterInfoElement）
     if (r.kills > 0 && st >= UnlockState.PortraitOnly) {
       const row = this.infoRow(Lang.text('BestiaryInfo.Slain'), String(r.kills));
@@ -736,7 +876,7 @@ export class BestiaryPanel {
     // 风味文本（FlavorTextBestiaryInfoElement：解锁 ≥ Stats 才呈现，:21-24）：
     // `Bestiary_FlavorText.npc_<名>` 直取，缺失回退最高优先出没环境的 biome 文本
     if (st >= UnlockState.Stats) {
-      const flavor = bestiaryFlavorText(r.npcId);
+      const flavor = bestiaryFlavorText(r.npcId, this.flow.isCrimson?.() ?? false);
       if (flavor) {
         const p = document.createElement('p');
         p.style.cssText = 'margin:6px 0 2px;font-size:11px;line-height:1.5;color:#cfd6f2;'

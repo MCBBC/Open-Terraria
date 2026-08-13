@@ -598,7 +598,8 @@ export class UI {
     this.closeTexPicker();
   }
 
-  showProgress(label: string, p: number) {
+  showProgress(label: string, rawP: number) {
+    const p = Number.isFinite(rawP) ? rawP : 0;   // NaN 防御(width "NaN%" 根治
     let prog = this.root.querySelector('.sw-progress') as HTMLElement | null;
     if (!prog) {
       prog = el('div', 'sw-progress');

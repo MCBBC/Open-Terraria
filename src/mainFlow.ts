@@ -177,7 +177,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   async function newWorld(seed: string, w: number, h: number) {
     const g = makeGame();
     ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.GeneratingWorld'), 0.05);
-    await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(label, p));
+    await g.newWorld(seed || String(Date.now()), w, h, (label, p) => ui.showProgress(Lang.worldgenText(label), p));
   }
 
   /** 把选中角色的外观应用到玩家（进游戏后调用）。联机时补发 SyncPlayer——
@@ -258,7 +258,8 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
   /** 原版 loadWorld 进度文案(WorldFile.cs):tiles=gen[51] "正在加载世界数据: X%"
    *  按列(:2514-2518);settle=gen[27] "正在安置液体 X%" 收敛比例 50-100%(:762);
    *  其余阶段保持自定义 LoadingSave */
-  function loadProgressLabel(phase: string, p: number): string {
+  function loadProgressLabel(phase: string, rawP: number): string {
+    const p = Number.isFinite(rawP) ? rawP : 0;   // NaN 防御(worker 瞬断/旧缓存事件)
     if (phase === 'tiles') {
       return Lang.text('LegacyWorldGen.51') + ' ' + Math.min(100, Math.floor(p * 100) + 1) + '%';
     }
@@ -283,12 +284,15 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const client = new WorldGenClient();
       if (await client.probe()) {
         try {
+          // ★与创建世界同款 VUI 加载页(原版风 UIWorldLoadState;用户报"读档 UI 还是旧的")
+          const loadState = new UIWorldLoadState();
+          VUI.setState(loadState);
           const { world, player, save } = await client.loadSave({ key }, {
-            onProgress: (phase, p) => ui.showProgress(loadProgressLabel(phase, p), p),
+            onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -303,6 +307,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     } catch (e) {
       console.error(e);
       ui.hideProgress();
+      VUI.setState(null);   // 加载页退场(失败回菜单)
       alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     }
   }
@@ -314,12 +319,14 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const client = new WorldGenClient();
       if (await client.probe()) {
         try {
+          const loadState = new UIWorldLoadState();
+          VUI.setState(loadState);
           const { world, player, save } = await client.loadSave({ json: text }, {
-            onProgress: (phase, p) => ui.showProgress(loadProgressLabel(phase, p), p),
+            onProgress: (phase, p) => loadState.setProgress(loadProgressLabel(phase, p), p),
           });
           const g = makeGame();
           applyDifficultyFallback(world, save as { header?: { difficulty?: number } } | undefined);
-          await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.8 + p * 0.2), { settled: true });
+          await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.8 + p * 0.2), { settled: true });
           applyPlayer(g, player as ReturnType<typeof loadSaveData>['player']);
           g.eventsApplySave((save as { events?: never } | undefined)?.events as never);
           return;
@@ -331,13 +338,16 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
       const { world, player, data } = loadSave(text);
       applyDifficultyFallback(world, data);
       const g = makeGame();
-      ui.showProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
-      await g.loadWorld(world, (label, p) => ui.showProgress(label, 0.3 + p * 0.6));
+      const loadState = new UIWorldLoadState();
+      VUI.setState(loadState);
+      loadState.setProgress(Lang.text('Mods.SandboxWorld.Progress.LoadingSave'), 0.3);
+      await g.loadWorld(world, (label, p) => loadState.setProgress(label, 0.3 + p * 0.6));
       applyPlayer(g, player);
       g.eventsApplySave(data.events);
     } catch (e) {
       console.error(e);
       ui.hideProgress();
+      VUI.setState(null);   // 加载页退场(失败回菜单)
       alert(Lang.text('Mods.SandboxWorld.Toast.SaveLoadFailed', (e as Error).message));
     }
   }
@@ -612,6 +622,7 @@ export function createFlow(root: HTMLElement, atlas: SpriteAtlas | null, ui: UI,
     new BestiaryPanel(root, {
       getTracker: () => g.world.bestiary,
       atlas,
+      isCrimson: () => g.world.crimson,
       onBack: () => {
         if (!wasPaused) g.paused = false;
         if (!wasBlocking) g.input.uiBlocking = false;

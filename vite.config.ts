@@ -143,7 +143,7 @@ function atlasLintAuto(): Plugin {
         throw new Error(`[atlas-lint] ${r.errors.length} 处 error(素材自洽)——先修再构建:\n` +
           r.errors.map((e) => `  ${e.rule} sheet=${e.sheet ?? '-'} ${e.key ?? ''} ${e.msg}`).join('\n'));
       }
-      console.log(`[atlas-lint] 753 表全自洽 ✓ (${r.warns} warn)`);
+      console.log(`[atlas-lint] ${r.sheets} 表全自洽 ✓ (${r.warns.length} warn)`);
     },
   };
 }

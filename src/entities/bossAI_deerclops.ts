@@ -43,19 +43,15 @@ function solidCollisionPx(game: GameHooks, x: number, y: number, w: number, h: n
   return false;
 }
 
-/** ShouldRunAway（NPC.cs:44716-44738）：死/出雪原（或离家 480px 外）且非追击态/
- *  离玩家 2400px → 撤。isChasing=false 时"非雪原"即撤（回家态） */
-function shouldRunAway(e: Enemy, p: Player | null, isChasing: boolean, homeX: number, homeY: number): boolean {
+/** ShouldRunAway（NPC.cs:44716-44738）：死/出雪原（或离家 480px 内视为雪原）且非追击态/
+ *  离玩家 2400px → 撤。isChasing=false 时"非雪原"即撤（回家态）。
+ *  zoneSnow 读 game.scene（SceneMetrics 每 15t 刷新）——★勿读 player 字段(不存在) */
+function shouldRunAway(e: Enemy, game: GameHooks, p: Player | null, isChasing: boolean, homeX: number, homeY: number): boolean {
   if (!p || p.dead) return true;
-  const zoneSnow = !!game_sceneSnow(e, p) || Math.hypot(p.cx - homeX * TILE, p.cy - homeY * TILE) <= 480;
+  const zoneSnow = !!game.scene?.zoneSnow
+    || Math.hypot(p.cx - homeX * TILE, p.cy - homeY * TILE) <= 480;
   if (!isChasing && !zoneSnow) return true;
   return Math.hypot(p.cx - e.cx, p.cy - e.cy) >= 2400;
-}
-
-/** SceneMetrics.zoneSnow 由 Game 经 enemy.zoneSnow 缓存（无则 false） */
-function game_sceneSnow(e: Enemy, p: Player): boolean {
-  void e;
-  return !!(p as unknown as { zoneSnow?: boolean }).zoneSnow;
 }
 
 /** AI_123 主状态机（NPC.cs:44338-44752） */
@@ -100,24 +96,24 @@ export function deerclopsAI(e: Enemy, game: GameHooks, p: Player | null): void {
   switch (e.ai0) {
     case -1: e.lai3 = -10; break;                    // :44386-44387
     case 6: {                                        // 回家态 :44389-44439
-      if (p && !p.dead && !shouldRunAway(e, p, false, homeX, homeY)) {
+      if (p && !p.dead && !shouldRunAway(e, game, p, false, homeX, homeY)) {
         e.ai0 = 0; e.ai1 = 0; e.lai1 = 0; break;
       }
       if (e.despawnTimer <= 0) { e.ai0 = 8; e.ai1 = 0; e.lai1 = 0; break; }
       goHome = true;
       e.ai1 += 1;
       const homePx = { x: homeX * TILE, y: homeY * TILE };
-      const deepBelow = e.y < homePx.y + 1600;       // base.Top.Y > other.Y+1600（Top 更小=更高 → 取反）
+      const aboveLine = e.y < homePx.y + 1600;       // 原版 Top.Y > other.Y+1600 = 深于家 1600px
       const nearHome = Math.hypot(homePx.x - e.cx, homePx.y - e.cy) < 1020;
       if (nearHome && e.ai1 % 600 < 420) halt = true;
-      if ((deepBelow === false && e.ai1 >= 300) || (!nearHome && e.ai1 >= 1500)) {
+      if ((!aboveLine && e.ai1 >= 300) || (!nearHome && e.ai1 >= 1500)) {
         // 深于家 1600px 且 >300t,或远离超 1500t → 落地传送段
         e.ai0 = 7; e.ai1 = 0; e.lai1 = 0;
       }
       break;
     }
     case 0: {                                        // 追击选招 :44441-44526
-      if (!p || p.dead || shouldRunAway(e, p, true, homeX, homeY)) {
+      if (!p || p.dead || shouldRunAway(e, game, p, true, homeX, homeY)) {
         e.ai0 = 6; e.ai1 = 0; e.lai1 = 0; break;
       }
       e.ai1 += 1;

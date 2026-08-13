@@ -51,7 +51,7 @@ function parseDecl(i) {
     if (args !== null) break;
     text += '\n' + lines[j + 1];
   }
-  const m = args.match(/\(([\s\S]*)\)$/);
+  const m = args.replace(/;\s*$/, '').match(/\(([\s\S]*)\)$/);
   const raw = m ? m[1] : '';
   // 顶层逗号拆分
   const parts = [];

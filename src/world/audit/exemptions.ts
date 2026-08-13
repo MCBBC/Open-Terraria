@@ -31,7 +31,7 @@ export const MULTITILE_EXEMPT: ReadonlySet<string> = new Set([
   'v_529_sea_oats',
   // 掘地龟/啮龙蛋 751/752:【单格存储】(frameX 状态机:非锚点帧整格跳过绘制,
   // VanillaTiler:817 特判 :1034-1048)。移除条件:多格化改造。
-  'v_751_sleeping_digging_turtle', 'v_752_chillet_egg',
+  'v_751_sleeping_digtoise', 'v_752_chillet_egg',
 ]);
 // ★存【残片/形态差】不进本表(规则层),由 tests/world-invariants.test.ts 集成组的
 //  FRAGMENTS 白名单+计数基线管理(新类型/同类暴增必红):

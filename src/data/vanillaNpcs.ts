@@ -135,6 +135,12 @@ export const TOWN_NPC_IDS: Record<string, { id: number; extra: number }> = {
   angler: { id: 369, extra: 9 },      // 渔夫（海滩 376 睡渔夫解救后城镇化；ExtraFramesCount 9）
   tavernkeep: { id: 550, extra: 9 },  // 酒保（击败一次旧日军团后入驻；ExtraFramesCount 9）
   town_slime_red: { id: 682, extra: 0 }, // 红色城镇史莱姆（血月钓鱼一次性获得，Player.cs:51591；无对话/商店/入住表）
+  town_slime_yellow: { id: 683, extra: 0 }, // 神秘史莱姆（净化粉命中神秘青蛙 687 → Transform :13677-13684；无对话/商店/入住表）
+  // 城镇史莱姆家族其余四只（SetDefaults :17529-17543 同族块 townNPC/aiStyle7/housingCategory 1）
+  town_slime_cool: { id: 678, extra: 0 },    // 酷酷史莱姆（绿）
+  town_slime_clumsy: { id: 680, extra: 0 },  // 笨笨史莱姆（紫；绑缚 686 气球态触碰解救）
+  town_slime_diva: { id: 681, extra: 0 },    // 巨星史莱姆（彩虹）
+  town_slime_squire: { id: 684, extra: 0 },  // 侍从史莱姆（铜）
   town_slime_old: { id: 679, extra: 0 }, // 老城镇史莱姆（绑缚态 685 BoundTownSlimeOld 经 SpawnAnNPC
                                         //  三人组链刷出，NPC.cs:2002；解救 = TransformElderSlime
                                         //  :19077-19091 → 679 + unlockedSlimeOldSpawn 置位 WF:1410）

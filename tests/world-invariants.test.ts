@@ -125,8 +125,9 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       // (后续 pass 半拆多格物体,原版 KillTile 整块清语义未接通)在此白名单+计数
       // 基线——新类型出现或同类暴增必红(扫描器核心价值保留)。
       const FRAGMENTS: Record<string, number> = {
-        'pot': 10, 'v_26_altars': 5, 'v_186_decos_3x2': 50, 'v_529_sea_oats': 60,
-        'v_105_statue': 25, 'v_411_detonator': 10, 'v_103_bowls': 6, 'crystal_heart': 4,
+        'pot': 10, 'v_26_altars': 5, 'v_186_decos_3x2': 50, 'v_187_decos_3x2_group_2': 60,
+        'v_529_sea_oats': 60, 'v_105_statue': 25, 'v_411_detonator': 10,
+        'v_103_bowls': 6, 'crystal_heart': 4,
       };
       const byType = new Map<string, number>();
       for (const v of errs) byType.set(v.typeKey, (byType.get(v.typeKey) ?? 0) + 1);
@@ -153,6 +154,20 @@ describe('不变量扫描器·集成(真实生成世界)', () => {
       for (let i = 0; i < world.store.type.length; i++) if (world.store.type[i] === boulder.type) boulders++;
       expect(boulders % 4, `巨石格数 ${boulders} 应为 4 的倍数(2×2 完整)`).toBe(0);
       expect(boulders).toBeGreaterThan(0);
+      // ---- 注入式负向自检:抠掉一个巨石格(模拟放置端回归)→ R1 必报
+      // (2026-08-13 实证:种子 9293480 的陷阱巨石路径不可达,回退 pass 测不出;
+      //  注入确定性保证扫描器对 bug#1 形态的捕获力)
+      let bx = -1, by = -1;
+      for (let y = 0; y < world.store.h && bx < 0; y++) {
+        for (let x = 0; x < world.store.w; x++) {
+          if (world.store.type[world.store.idx(x, y)] === boulder.type) { bx = x; by = y; break; }
+        }
+      }
+      expect(bx).toBeGreaterThanOrEqual(0);
+      world.store.setTileSilent(bx, by, 0);
+      const rep2 = auditWorld(world.store);
+      expect(rep2.violations.some((v) => v.typeKey === 'v_138_boulder'),
+        '注入缺角后 R1 必报巨石(白名单外类型)').toBe(true);
     }, 300_000);
   }
 });

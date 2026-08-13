@@ -1775,7 +1775,8 @@ export class Renderer {
 
   /** Main.wofDrawAreaTop/Bottom 权威值（bossAI_wof.wofDrawArea() 导出,AI 每 tick
    *  维护;2026-08-13 前靠"双眼间距"反解属近似,已消）。-1(墙未初始化/已消散)
-   *  时回退头位 ±80 最小跨度(:25940-25946) */
+   *  时回退头位 ±80 最小跨度——【本仓防御性自创回退】(原版无此路径,仅覆盖 debug
+   *  生成头在首 tick 前的渲染窗;原版 160px 保底在 :25918-25925) */
   private wofDrawAreaOf(head: Enemy): { top: number; bottom: number } {
     const area = wofDrawArea();
     if (area.top >= 0 && area.bottom >= 0) return area;
@@ -3824,27 +3825,9 @@ export class Renderer {
     const ctx = this.ctx;
     // 血条统一走实体循环的 drawHealthBar(原版 HealthBar1/2 贴图版,Main.cs:21721+;
     // 此前这里另画早期程序化矩形条 = 双血条,已移除)
-    // ---- 表情气泡（EmoteBubble.Draw :201-224：Extra[48] 8 列网格 34px/格；
-    //      边框帧 = (!pop) ? (1,0) : (0,0)——稳定期用满框 (1,0),首尾 6t 弹出/收起
-    //      用尾帧 (0,0)(原版 `(!flag)?1:0`,终审曾反着写);图标 (emote*2%8+anim, 1+emote/4)。
-    //      头顶底锚（GetPosition 的头顶锚近似）----
-    if (n.emote >= 0 && n.emoteLife > 0 && this.atlas) {
-      const sheet = this.atlas.ensureVImage('vanilla/Extra_48.png');
-      if (sheet) {
-        const F = 34;
-        const pop = n.emoteLife < 6 || n.emoteTotal - n.emoteLife < 6;
-        ctx.save();
-        ctx.translate(n.cx, n.y - 2);
-        ctx.imageSmoothingEnabled = false;
-        ctx.drawImage(sheet, (pop ? 0 : 1) * F, 0, F, F, -F / 2, -F, F, F);
-        if (!pop) {
-          const anim = Math.floor((n.emoteTotal - n.emoteLife) / 12) % 2;
-          ctx.drawImage(sheet, (n.emote * 2 % 8 + anim) * F, (1 + Math.floor(n.emote / 4)) * F,
-            F, F, -F / 2, -F, F, F);
-        }
-        ctx.restore();
-      }
-    }
+    // 表情气泡统一走实体层的 EmoteBubble 模块(drawEmotes :1112,并行会话 1:1 版:
+    // GetPosition 头顶锚/开合帧/8tick 图标帧)——本函数的内联气泡版已退役(双画,
+    // 与双血条同病;review 2026-08-13)
     // ---- 原版贴图条（Images/NPC_{id}，40×56 帧、默认朝左）：帧语义见 TownNPC.fixedUpdate ----
     // 注意：不再回退 Maples 角色/NPC_1.png——那是原版绿史莱姆贴图（Maples 沿用原版命名），
     // 曾导致全部城镇 NPC 显示为史莱姆

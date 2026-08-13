@@ -15,9 +15,11 @@
 //      WorldGen.cs:3303 OnWorldLoad StartWorld / :49866 KillTile FallenLogDestroyed。
 // 近似项（原版依赖系统缺失，逐一注明）：
 //   - PlayerLOS（CultistRitual.TrySpawning / MysticLogFairies 的落点隐藏性）→
-//     玩家 50 格内视为可见（WorldEvolution.playerLOS 同款近似）
-//   - Main.rand / WorldGen.genRand 两条 RNG 流 → 单一 Math.random 流（掷骰顺序
-//     与原版一致，流不可分）
+//     玩家 50 格内视为可见（WorldEvolution.playerLOS 同款近似；原版 WorldGen.cs:
+//     69500-69515 实为"点矩形 ∩ 屏幕×1.2 矩形"，非视线判定）
+//   - RNG 流勘误（2026-08-13 复核）：1.4.5.6 里 WorldGen.genRand 与 Main.rand
+//     是**同一条流**（WorldGen.cs:4391 赋值一次），并非两条流——本文件单
+//     Math.random 流按原版掷序消费统计等价，仅损失种子可复现性
 //   - remixWorld（地牢 Y 基准翻转 / 仙女时间窗豁免 / 倒木扫描带翻转）本仓无该
 //     种子体系 → 恒 false
 import type { World } from '../World';

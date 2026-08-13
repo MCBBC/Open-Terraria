@@ -41,6 +41,9 @@ export const CRITTER_DEFS: CritterDef[] = [
   // 海滩生态（原版 Crab 67 / Seagull 602：海边沙地专属）
   { key: 'crab', name: '螃蟹', npc: 67, kind: 'walk', w: 20, h: 14, speed: 0.6, fleeRange: 80, weight: 9, avoidWater: true, oceanOnly: true, biomes: ['sand'] },
   { key: 'seagull', name: '海鸥', npc: 602, kind: 'fly', w: 22, h: 16, speed: 1.8, fleeRange: 144, weight: 8, dayOnly: true, perch: true, avoidWater: true, oceanOnly: true, biomes: ['sand'] },
+  // 神秘青蛙（NPC.cs:17575-17587：w18 h20 aiStyle7 lifeMax5 自发光 :55975；仅经 SpawnFrog
+  // 1/30 未解锁门出现，网捕必传送逃走、净化粉变 683 神秘史莱姆——weight 0 不入常规池）
+  { key: 'mystic_frog', name: '神秘青蛙', npc: 687, kind: 'hop', w: 18, h: 20, speed: 1.6, fleeRange: 96, weight: 0, glow: true, biomes: ['water', 'forest'] },
   // 金色变种（稀有，生态同本体）
   { key: 'gold_bird', name: '金鸟', npc: 442, kind: 'fly', w: 18, h: 12, speed: 1.8, fleeRange: 144, weight: 1, dayOnly: true, gold: true, perch: true, avoidWater: true, biomes: ['forest', 'snow', 'sand'] },
   { key: 'gold_bunny', name: '金兔', npc: 443, kind: 'hop', w: 18, h: 16, speed: 1.6, fleeRange: 112, weight: 1, dayOnly: true, gold: true, biomes: ['forest'] },

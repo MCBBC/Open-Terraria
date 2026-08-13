@@ -8,6 +8,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { TILE_DEFS } from '../src/data/tiles';
 import vanillaJson from '../public/sprites/vanilla.json';
+// @ts-expect-error mjs 无类型声明(豁免表同源锁:与 tools/atlas-lint.mjs 保持一致)
 import { ATL06_EXEMPT } from '../tools/atlas-lint.mjs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -35,7 +36,7 @@ describe('atlas-lint', () => {
   });
 
   it('强校验(ATL-06):非豁免 def 尺寸 ≡ frameSize(TS 原生,防行级正则失明)', () => {
-    const tiles = (vanillaJson as { tiles: Record<string, { frameSize?: Array<[number, number]> }> }).tiles;
+    const tiles = (vanillaJson as unknown as { tiles: Record<string, { frameSize?: Array<[number, number]> }> }).tiles;
     const bad: string[] = [];
     for (const d of TILE_DEFS) {
       if (!d?.vanilla || d.vanilla.frame !== 'style' || ATL06_EXEMPT.has(d.key)) continue;
@@ -58,7 +59,7 @@ describe('atlas-lint', () => {
       try { fs.readSync(fd, b, 0, 24, 0); } finally { fs.closeSync(fd); }
       return { w: b.readUInt32BE(16), h: b.readUInt32BE(20) };
     };
-    const tiles = (vanillaJson as { tiles: Record<string, { sheet: string; cols: number; rows: number; stride: [number, number]; grid: [number, number] }> }).tiles;
+    const tiles = (vanillaJson as unknown as { tiles: Record<string, { sheet: string; cols: number; rows: number; stride: [number, number]; grid: [number, number] }> }).tiles;
     const bad: string[] = [];
     for (const [sid, m] of Object.entries(tiles)) {
       const file = join(ROOT, 'public/sprites', m.sheet);
