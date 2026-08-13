@@ -42,6 +42,7 @@ export function saveGame(world: World, player: Player, playTimeMs: number, townN
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
+    paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
   };
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,
@@ -119,6 +120,7 @@ export function saveWorldOnly(world: World): string {
     type: st.type, flags: st.flags, frameX: st.frameX, frameY: st.frameY,
     wall: st.wall, liquid: st.liquid, liquidType: st.liquidType, wire: st.wire,
     half: st.half, slope: st.slope,
+    paint: st.paint, paintWall: st.paintWall,   // 油漆双通道（WF:1474-1491）
   };
   const meta: SaveMeta = {
     name: world.name, seed: world.seed, w: st.w, h: st.h,

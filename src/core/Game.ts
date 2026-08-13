@@ -98,7 +98,6 @@ import { ENEMY_DEFS } from '../data/enemies';
 import { availableRecipes, consumeMaterials, vanillaItemKey as recipeItemKey, type VanillaRecipeLike } from '../data/vanillaRecipes';
 import { invIndexOfVanilla } from '../data/vanillaRecipes';
 import { openBossBag, BOSS_BAG_IDS } from '../data/vanillaBossBags';
-import { cultistRitualUpdate, cultistTabletDestroyed as ritualTabletDestroyed } from '../world/CultistRitual';
 import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixes';
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
@@ -1707,7 +1706,7 @@ export class Game implements GameHooks {
       store: w.store,
       worldSurface: w.groundLevel,
       rockLevel: w.rockLevel,
-      dungeonX: w.dungeonX,
+      dungeonX: w.dungeonX, difficulty: w.difficulty ?? 0,
       flags: w.flags,
       crimson: w.crimson,
       get isDay() { return w.clock.isDay; },
@@ -2190,8 +2189,6 @@ export class Game implements GameHooks {
     // FullyFallenAsleep（PlayerSleepingHelper.cs:33-37：isSleeping && timeSleeping>=120）
     w.allSleeping = this.player.sleeping && this.player.timeSleeping >= 120;
     w.clock.tick(dt * 1000 * w.dayRate());
-    // Main.cs:64427 CultistRitual.UpdateTime()——石巨人后地牢口仪式驱动(2026-08-13 接通)
-    cultistRitualUpdate(this, w.dayRate());
     // ---- 天气系统推进（原版 UpdateWeather/UpdateTime 每帧；60Hz tick 语义） ----
     this.updateWeather();
     // 昼夜切换：公告走原版消息列（Main.NewText→LegacyChatMonitor；ChatColors.World 50,255,130）
@@ -10325,8 +10322,14 @@ export class Game implements GameHooks {
             if (id === undefined) return;
             const n = p.inv.countOf(id);
             if (n > 0) {
-              lost += (n - Math.floor(n * keep)) * face[ci];
-              p.inv.remove(id, n - Math.floor(n * keep));
+              const dropN = n - Math.floor(n * keep);
+              lost += dropN * face[ci];
+              p.inv.remove(id, dropN);
+              // ★ 掉出的钱要落地（DropCoins→TryDroppingSingleItem :53386 掉的是
+              //   coin 物品实体，死亡点可拾回——此前只 remove 没生成=钱凭空蒸发）
+              if (dropN > 0) {
+                this.spawnDrop(p.cx, p.cy, ck, dropN, (Math.random() - 0.5) * 8, -2 - Math.random() * 2);
+              }
             }
           });
           this.lostCoins = lost; // DrawInterface_35 "掉了{0}"（重生于 respawnPlayer 清零）
@@ -12330,9 +12333,6 @@ export class Game implements GameHooks {
   playerName(): string {
     return this.player.appearance?.name?.trim() || Lang.text('Mods.SandboxWorld.DefaultPlayerName');
   }
-
-  /** 石碑召出 439 后的仪式重置(NPC.cs:38881 TabletDestroyed)——bossAI_lunar_misc 反向调用 */
-  cultistTabletDestroyed(): void { ritualTabletDestroyed(this); }
 
   respawnPlayer() {
     const p = this.player;

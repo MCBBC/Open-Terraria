@@ -442,9 +442,8 @@ export function cultistTabletAI(e: Enemy, game: GameHooks, _player: Player | nul
         if (j === 11) ty = y;
       }
       const cultist = spawnPart(game, e, 439);
-      // NPC.cs:38881 石碑召出 439 → CultistRitual.TabletDestroyed()(delay=43200 重置,
-      // 打完一轮 24 游戏时后才再出现)
-      if (cultist) (game as unknown as { cultistTabletDestroyed?: () => void }).cultistTabletDestroyed?.();
+      // TabletDestroyed(delay=43200 重置)由 Game 侧 ai0==-1 边沿捕获记账
+      // （_cultistTabletDone WeakSet 去重）——勿在此再调,避免双路径
       if (cultist) {
         cultist.x = tx * TILE + 10 - cultist.w / 2;
         cultist.y = ty * TILE - cultist.h;              // 原版顶锚 y=tileY*16-2,本仓落底对齐

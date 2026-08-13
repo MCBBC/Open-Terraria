@@ -224,7 +224,7 @@ describe('保底灯泡爆发（WorldGen.cs:74180-74329）', () => {
     const w = makeWorld(true);
     const evo = new WorldEvolution({
       store: w.store, worldSurface: 50, rockLevel: 120,
-      dungeonX: 150,                       // >0.5W → 丛林在左侧 [0.15W,0.35W)=[30,70)
+      dungeonX: 150, difficulty: 0,                       // >0.5W → 丛林在左侧 [0.15W,0.35W)=[30,70)
       flags: { hardMode: true }, crimson: false, isDay: true, raining: false,
       maxRaining: 0, windSpeedCurrent: 0, playerTile: () => null,
     });
@@ -240,7 +240,7 @@ describe('保底灯泡爆发（WorldGen.cs:74180-74329）', () => {
   it('无丛林草 → false 不放置', () => {
     const w = makeWorld(false);
     const evo = new WorldEvolution({
-      store: w.store, worldSurface: 50, rockLevel: 120, dungeonX: 150,
+      store: w.store, worldSurface: 50, rockLevel: 120, dungeonX: 150, difficulty: 0,
       flags: {}, crimson: false, isDay: true, raining: false,
       maxRaining: 0, windSpeedCurrent: 0, playerTile: () => null,
     });

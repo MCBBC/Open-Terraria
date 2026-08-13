@@ -109,6 +109,11 @@ export interface SaveData {
   liquidType: string;  // base64 RLE（0无 1水 2岩浆 3蜂蜜 4微光）
   wire?: string;       // base64 RLE 电路位（bit0-3 四色线 bit4 致动器 bit5 已致动；旧档缺此字段=全 0）
   blocks?: string;     // base64 RLE 半砖/坡面（0=整砖 1=半砖 2-5=slope1-4;旧档缺=全整砖）
+  /** 方块油漆（0-31，原版 Tile.cs:609-617 sTileHeader&0x1F；WF:1474-1479 存档位）。
+   *  base64 RLE 独立通道（同 wire/blocks 模式——旧档缺字段=全 0 无漆） */
+  paint?: string;
+  /** 背景墙油漆（原版 Tile.cs:365-373 bTileHeader&0x1F；WF:1486-1491 存档位） */
+  paintWall?: string;
   chests: Array<{ x: number; y: number; items: Array<{ id: number; stack: number } | null>; locked?: boolean }>;
   player: {
     hp: number; x: number; y: number;
@@ -183,6 +188,8 @@ export interface SaveStoreView {
   frameX: Uint16Array; frameY: Uint16Array;
   wall: Uint16Array; liquid: Uint8Array; liquidType: Uint8Array; wire: Uint8Array;
   half: Uint8Array; slope: Uint8Array;
+  /** 油漆双通道（0-31；原版 Tile.color()/wallColor() 5bit 域） */
+  paint: Uint8Array; paintWall: Uint8Array;
 }
 /** 序列化所需的世界元数据(全部可结构化克隆) */
 export interface SaveMeta {
@@ -328,6 +335,9 @@ export function serializeSave(
     liquidType: bytesToB64(rlePairs(st.liquidType)),
     wire: bytesToB64(rlePairs(st.wire)),
     blocks: bytesToB64(rlePairs(combineBlocks(st.half, st.slope))),
+    // 油漆双通道（原版 WF:1474-1491 独立字节位；本仓独立 RLE 通道，旧档缺=全 0）
+    paint: bytesToB64(rlePairs(st.paint)),
+    paintWall: bytesToB64(rlePairs(st.paintWall)),
     chests: meta.chests.map((c) => ({ x: c.x, y: c.y, locked: c.locked || undefined, items: c.items.map(mapItem) })),
     // v4:armor/dye/trash/miscEquips/miscDyes/loadouts 逐槽稳定 id(v3 是裸内部下标)
     player: {

@@ -13,6 +13,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(here, '..');
 const SRC = join(ROOT, '..', 'Terarria1456', 'Terraria', 'Projectile.cs');
 const OUT = join(ROOT, 'src', 'data', 'vanilla-projstatus.json');
+const AUDIT = process.argv.includes('--audit'); // 自审计:不写文件,stdout 出 {types,entries,skipped}
 
 const lines = readFileSync(SRC, 'utf8').split(/\r?\n/);
 // ---- 定位 StatusNPC 方法体 ----
@@ -139,5 +140,11 @@ console.log(`提取: ${types} 型号 / ${entries} 条`);
 console.log(`跳过 ${skipped.length} 块(人工核对):`);
 for (const [c, why] of skipped) console.log(`  SKIP ${c.slice(0, 80)}  ← ${why}`);
 
+if (AUDIT) {
+  process.stdout.write(JSON.stringify({ types: Object.keys(table).length,
+    entries: Object.values(table).reduce((n, v) => n + v.length, 0),
+    skipped: skipped.length, skippedKinds: skipped.map((x) => x[1]).slice(0, 20) }));
+  process.exit(skipped.length > 25 ? 1 : 0); // 跳过数基数护栏(语义修正后基线 ~16)
+}
 writeFileSync(OUT, JSON.stringify(table, null, 1) + '\n');
 console.log(`写入 ${OUT}`);

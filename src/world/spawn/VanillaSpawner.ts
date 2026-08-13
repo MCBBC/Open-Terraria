@@ -882,6 +882,9 @@ export class VanillaSpawner {
     return Math.random();
   }
 
+  /** 狙击镜扩圈系数（0=关；1.25/1.5/2.0——Game 每帧求值写入） */
+  scopeNum3 = 0;
+
   /** FindSpawnTile（L879-927）+ GetSpawnArea（L841-877）1:1：
    *  spawnArea = 玩家 ±(0.7×全屏格)（均匀取点，不是环带外扩！），
    *  safeArea = 玩家 ±(0.52×全屏格)——生成点必须落在画面外（!safeArea.Contains）。
@@ -889,10 +892,14 @@ export class VanillaSpawner {
   private findSpawnTile(rng: RNG, viewHalfW: number, viewHalfH: number): boolean {
     const st = this.world.store;
     const px = this.pX, py = this.pY;
-    const rangeX = Math.max(1, Math.floor(viewHalfW * 1.4));
-    const rangeY = Math.max(1, Math.floor(viewHalfH * 1.4));
-    const safeX = Math.max(1, Math.floor(viewHalfW * 1.04));
-    const safeY = Math.max(1, Math.floor(viewHalfH * 1.04));
+    // 狙击镜扩圈（GetSpawnArea :846-862）：手持 1254 狙击枪/1299 步枪镜 或装备 scope
+    //  → 生成区与 safe 区各加 viewHalf/num3（num3=1.25 双持/1.5 单件/2.0 纯装备）
+    const sc = this.scopeNum3 > 0 ? Math.floor(viewHalfW / this.scopeNum3) : 0;
+    const scY = this.scopeNum3 > 0 ? Math.floor(viewHalfH / this.scopeNum3) : 0;
+    const rangeX = Math.max(1, Math.floor(viewHalfW * 1.4)) + sc;
+    const rangeY = Math.max(1, Math.floor(viewHalfH * 1.4)) + scY;
+    const safeX = Math.max(1, Math.floor(viewHalfW * 1.04)) + sc;
+    const safeY = Math.max(1, Math.floor(viewHalfH * 1.04)) + scY;
     // WorldUtils.ClampToWorld
     const areaL = Math.max(2, px - rangeX), areaR = Math.min(st.w - 3, px + rangeX);
     const areaT = Math.max(2, py - rangeY), areaB = Math.min(st.h - 3, py + rangeY);
@@ -2612,7 +2619,7 @@ export class VanillaSpawner {
     // （invasionType<=0 用 invaders 近前线代理——高尔夫球场+入侵的交集极罕见）
     if ((groundType === T.MOWED_GRASS || groundType === T.HALLOW_MOWED_GRASS)
       && !this.world.clock.bloodMoon && !this.world.clock.eclipse && !this.invaders
-      && this.moonEvent.kind === 0 && !this.world.weather.slimeRain
+      && (!this.moonEvent || this.moonEvent.kind === 0) && !this.world.weather.slimeRain
       && Math.random() * 100 < 10) return null;
     this.setFlagsForChosenTile(this.spawnTileX, this.spawnTileY, groundType, rng);
     this.currentSpawnX = this.spawnTileX;

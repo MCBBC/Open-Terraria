@@ -94,6 +94,8 @@ export interface EvolutionHost {
   rockLevel: number;
   /** Main.dungeonX（保底灯泡搜索框用，GeneratePlanteraBulbOnAllMechsDefeated cs:74182） */
   dungeonX: number;
+  /** 世界难度 0/1/2（生命果密度门 cs:74514-74528） */
+  difficulty: number;
   flags: Record<string, boolean>;
   crimson: boolean;
   isDay: boolean;
@@ -629,6 +631,30 @@ export class WorldEvolution {
           this.place1(i, minJ, plant, 0, plant === 61 ? 8 : 1);
         }
       }
+      // 丛林草花苞专段（cs:74480-74558 地下第二个 switch 的 case 60;两个【独立 if】
+      // ——238 检查无论成败继续 236 检查,非 else-if 串行）
+      if (sheet === 60 && !this.active(i, minJ) && Math.random() < 1 / 25
+        && this.liquidAt(i, minJ) === 0) {
+        if (this.hardMode && this.mechAll() && Math.random() < 1 / 60) {
+          // 世花球茎 238（cs:74486-74512:mechBoss1∧2∧3 全灭 + 1/60 + 150 格内无 238）
+          let has = false;
+          for (let x = i - 150; x < i + 150 && !has; x += 2) for (let y = j - 150; y < j + 150; y += 2) {
+            if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 238) { has = true; break; }
+          }
+          if (!has) this.placeBlock(i, minJ - 1, 238, 2, 2);
+        }
+        const expert = (this.host.difficulty ?? 0) >= 1;
+        const lifeDoor = expert ? 30 : 40;   // expert 1/30 / 其余 1/40（cs:74514）
+        const lifeRange = expert ? 50 : 60;  // expert 60-10（cs:74524-74528）
+        if (this.hardMode && this.mechAny() && Math.random() < 1 / lifeDoor) {
+          // 生命果 236（cs:74514-74538:mechAny + 距离内无 236）
+          let has = false;
+          for (let x = i - lifeRange; x < i + lifeRange && !has; x += 2) for (let y = j - lifeRange; y < j + lifeRange; y += 2) {
+            if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 236) { has = true; break; }
+          }
+          if (!has) this.placeBlock(i, minJ - 1, 236, 2, 2);
+        }
+      }
       if (toDirt !== -1) {
         for (let k = minI; k < maxI; k++) {
           for (let l = minJ; l < maxJ; l++) {
@@ -716,24 +742,10 @@ export class WorldEvolution {
           || [61, 74, 69].includes(sheetOf(this.typeAt(i, minJ))))) {
           void 0; // 蘑菇树再生（TryGrowingTreeByType(5)）——树系统运行时接口未接
         } else if (Math.random() < 1 / 25 && this.liquidAt(i, minJ) === 0) {
-          if (this.hardMode && this.mechAll() && Math.random() < 1 / 60) {
-            // 世花球茎（cs:74490-74512）：150 格内无 238
-            let has = false;
-            for (let x = i - 150; x < i + 150 && !has; x += 2) for (let y = j - 150; y < j + 150; y += 2) {
-              if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 238) { has = true; break; }
-            }
-            if (!has) this.placeBlock(i, minJ - 1, 238, 2, 2); // 2×2 向上悬（底行贴草顶）
-          } else if (this.hardMode && this.mechAny() && Math.random() < 1 / (30)) {
-            // 生命果植物 236（cs:74514-74538；专家 1/30 大师 1/40——本仓库无难度档取 1/30）
-            let has = false;
-            for (let x = i - 60; x < i + 60 && !has; x += 2) for (let y = j - 60; y < j + 60; y += 2) {
-              if (this.active(x, y) && sheetOf(this.typeAt(x, y)) === 236) { has = true; break; }
-            }
-            if (!has) this.placeBlock(i, minJ - 1, 236, 2, 2);
-          } else {
-            // 丛林植物 233（cs:74540-74558）
-            this.place1(i, minJ, 233, Math.floor(Math.random() * 8), 1);
-          }
+          // 丛林植物 233（cs:74837-74856 地表段 style rand(8)——花苞 238/生命果 236
+          // 属【地下半区】case 60（cs:74480-74558,flag 作用域 :74429 证实）,2026-08-13
+          // 自地表误植段移除——此前地下丛林永不长花苞,世花链只靠首杀保底单株）
+          this.place1(i, minJ, 233, Math.floor(Math.random() * 8), 1);
         }
         for (let k = minI; k < maxI; k++) for (let l = minJ; l < maxJ; l++) {
           if ((i === k && j === l) || !this.active(k, l)) continue;

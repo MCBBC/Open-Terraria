@@ -100,37 +100,68 @@ export function coatingColor(coating: number): readonly [number, number, number,
   }
 }
 
-// ===================== 渲染消费（Canvas 2D 近似原版 shader） =====================
+// ===================== 渲染消费（Canvas 2D 消费原版 paintColor 表） =====================
 
 /**
  * 油漆乘色：把 tile 原色 (r,g,b) 按 paint id 调制，返回新的 [r,g,b]。
  *
- * 原版在 GPU shader（TilePaintSystemV2）里做；Canvas 2D 无 shader，此处用
- * 等价逐像素公式。原版 shader 语义（Terraria.GameContent/TilePaintSystemV2.cs，
- * shader "TileShader" 的 PaintColorData）：
- *   - 普通漆(1-12)：逐通道 c' = c * p / 255（乘色）
- *   - 深层漆(13-24)：与普通同 RGB，但替换为“覆盖式”混合 c' = c*0.5 + p*0.5
- *     （深层漆覆盖更强、能压住原色，官方美术语义“Deep paint 遮盖力更强”）
- *   - 黑漆 25 / 暗影 29：向黑收敛 c' = c * p / 255（黑漆 p=75/255、暗影 p=25/255）
- *   - 白漆 26：不调制（恒 White，乘法等于原色）
- *   - 负相 30：负片 c' = 255 - c（alpha 150 不参与 tile 乘色）
+ * 原版 tile 绘制走 GPU shader（TilePaintSystemV2.cs:69-82 PrepareShader →
+ * Main.tileShader 按 ConvertPaintIdToTileShaderIndex（Main.cs:58064-58083）选 pass）。
+ * pass 内混合系数在编译 effect（游戏资源 TileShader.cso，DXBC）里，反编译 C# 不可见；
+ * Canvas 2D 无 shader，此处按通行的乘色模型逐通道调制：
+ *   - 普通漆 1-12 / 黑 25 / 灰 27 / 棕 28 / 暗影 29：c' = c * p / 255（逐通道乘色）
+ *   - 白漆 26：不调制（乘 255 ≡ 原色）
+ *   - 负相 30：负片 c' = 255 - c（半透明 alpha 只参与尘/地图，不参与 tile 乘色）
  *
- * ★ 等价边界（登记）：原版深层漆真实公式在 shader 常量表（PaintData）里，
- *   本仓按上述覆盖混合实现；普通漆/黑漆/白漆/负相为精确等价。
+ * ★ 等价边界（登记）：深层漆 13-24 与浅层 1-12 在 WorldGen.paintColor（:43948-44061）
+ *   同 RGB——原版差异只在 shader pass 序号（Main.cs:58064-58077 直接映射 1-27）。
+ *   pass 内系数不可得 → 本仓深层漆渲染等价于浅层（数据 1:1，渲染强度未差异化）。
+ *   涂层（paintCoating 1/2 → fullbright/invisible 位）系统未建，另行登记。
  */
 export function applyPaintTint(
   r: number, g: number, b: number, paint: number,
 ): readonly [number, number, number] {
   if (paint <= 0) return [r, g, b];
-  if (paint === 26) return [r, g, b];                 // 白漆：乘 255 = 原色
+  if (paint === 26) return [r, g, b];                   // 白漆：乘 255 ≡ 原色
   if (paint === 30) return [255 - r, 255 - g, 255 - b]; // 负相：反转
   const [pr, pg, pb] = paintColor(paint);
-  if (paint >= 13 && paint <= 24) {
-    // 深层漆：覆盖式混合（见上）
-    return [(r * 128 + pr * 128) >> 8, (g * 128 + pg * 128) >> 8, (b * 128 + pb * 128) >> 8];
-  }
-  // 普通漆 1-12 / 黑 25 / 灰 27 / 棕 28 / 暗影 29：逐通道乘色
+  // 逐通道乘色（除 26/30 外全部走此式：1-24 浅/深层 + 25/27/28/29 黑灰棕暗影）
   return [(r * pr) >> 8, (g * pg) >> 8, (b * pb) >> 8];
+}
+
+/**
+ * 小地图油漆换色（Terraria.Map/MapHelper.cs:1812-1863 MapColor 逐行 1:1）。
+ * isWall = 该 map 条目是墙（原版以 type ∈ [wallRangeStart, wallRangeEnd] 判定，:1841）。
+ * 注意 num3 经两次交换后是【中间通道】而非最小（:1818-1829 交换序）。
+ */
+export function mapPaintColor(
+  isWall: boolean, rgb: readonly [number, number, number], colorType: number,
+): readonly [number, number, number] {
+  const color = paintColor(colorType); // :1814
+  let num = rgb[0] / 255, num2 = rgb[1] / 255, num3 = rgb[2] / 255; // :1815-1817
+  if (num2 > num) { const t = num; num = num2; num2 = t; } // :1818-1823
+  if (num3 > num) { const t = num; num = num3; num3 = t; } // :1824-1829
+  let or_ = rgb[0], og = rgb[1], ob = rgb[2];
+  switch (colorType) {
+    case 29: { // ShadowPaint :1832-1839
+      const num7 = num3 * 0.3;
+      or_ = (color[0] * num7) | 0; og = (color[1] * num7) | 0; ob = (color[2] * num7) | 0;
+      break;
+    }
+    case 30: // NegativePaint :1840-1853
+      if (isWall) {
+        or_ = ((255 - rgb[0]) * 0.5) | 0; og = ((255 - rgb[1]) * 0.5) | 0; ob = ((255 - rgb[2]) * 0.5) | 0;
+      } else {
+        or_ = 255 - rgb[0]; og = 255 - rgb[1]; ob = 255 - rgb[2];
+      }
+      break;
+    default: { // 普通漆/深层/黑白灰棕 :1854-1861——按最大通道缩放油漆色
+      const num6 = num;
+      or_ = (color[0] * num6) | 0; og = (color[1] * num6) | 0; ob = (color[2] * num6) | 0;
+      break;
+    }
+  }
+  return [or_, og, ob];
 }
 
 /** paint id → css 颜色（小地图 LUT / 调试用） */

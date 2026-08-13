@@ -1,8 +1,11 @@
 // 从 Terarria1456 Item.cs 提取物品战斗数据（SetDefaults 主 switch + SetDefaults1/2/3 分段 switch）。
 // case 块内深度 1 赋值；SetDefaultsN(M) 委托块继承 M 记录后覆盖。输出 src/data/vanilla-itemcombat.json
 import { readFileSync, writeFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ROOT = '/Users/vinlic/Project/GLM/SandboxWorld';
+const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
+const AUDIT = process.argv.includes('--audit'); // 自审计模式:不写文件,stdout 出 JSON 摘要
 const src = readFileSync(`${ROOT}/Terarria1456/Terraria/Item.cs`, 'utf8');
 
 // ---- 方法体切片（配平花括号） ----
@@ -256,8 +259,33 @@ for (let round = 0; round < 4; round++) {
   }
 }
 
+// ---- 自审计(--audit):与提取同源,防"提取器坏了但没人发现"(2026-08-13 targetId
+//      错基底=铜剑丢出去,曾静默 44/2612 件错数据) ----
+
+// 委托异常检测:X-01 自委托 / X-02 target 无字面记录 / X-03 链深>2 /
+// X-04 委托数基数护栏(解析器结构漂移后委托静默归零=bug#2 发生机制)
+const audit = [];
+for (const d of delegates) {
+  if (d.id === d.targetId) audit.push({ kind: 'self-delegate', id: d.id, target: d.targetId });
+  if (!literal.has(d.targetId)) audit.push({ kind: 'unresolved-target', id: d.id, target: d.targetId });
+}
+if (delegates.length < 20) audit.push({ kind: 'delegate-count-below-floor', delegates: delegates.length });
+
 const obj = {};
 for (const [k, v] of data) obj[k] = v;
+if (AUDIT) {
+  const summary = {
+    items: data.size,
+    delegates: delegates.length,
+    edges: delegates.slice(0, 30).map((d) => ({ id: d.id, target: d.targetId })),
+    anomalies: audit,
+    // 钉死 id 的收敛记录(bug#2 回归锁数据面:3507 铜短剑须带 shoot 938/noMelee/
+    // autoReuse false;错取 targetId=1 铁镐时 autoReuse:true 且无 shoot,必翻)
+    pinned: Object.fromEntries(['3507', '3509', '1', '99', '40'].map((k) => [k, obj[k] ?? null])),
+  };
+  process.stdout.write(JSON.stringify(summary));
+  process.exit(audit.length ? 1 : 0);
+}
 writeFileSync(`${ROOT}/game/src/data/vanilla-itemcombat.json`, JSON.stringify(obj));
 const bows = [...data.values()].filter((v) => v.useAmmo === 40);
 const arrows = [...data.values()].filter((v) => v.ammo === 40);
