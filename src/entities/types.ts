@@ -64,6 +64,8 @@ export interface GameHooks {
   vanillaDust?: import('../fx/VanillaDust').VanillaDust;
   /** 世界坐标光源（翅膀 28 的 Bottom 微光等实体侧 AddLight） */
   addLightAt?(x: number, y: number, r: number, g: number, b: number): void;
+  /** 读侧光照采样（0-255 RGB；翅膀 49 Heroicis 光照门消费）——区域外 [0,0,0] */
+  lightAt?(x: number, y: number): [number, number, number] | null;
   /** 位置衰减音效（实体侧 SoundEngine.PlaySound）——name 走 SfxName */
   playSfxAt?(name: import('../core/Sfx').SfxName, x: number, y: number): void;
   /** 弹幕消亡钩子（Projectile.Kill 按弹型分发；x/y/w/h = 弹体命中盒） */

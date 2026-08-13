@@ -8,17 +8,18 @@ import { filterSummonEntries, SUMMON_ENTRIES } from '../src/core/DebugSummonPane
 describe('F2 无敌 + 无限魔力', () => {
   const mk = (): Player => new Player(20 * 16, 27 * 16, new Inventory());
 
-  it('damage()：godmode 早退——不扣血/返回 false；关闭后正常结算', () => {
+  it('damage()：godmode 早退——不扣血/返回 0；关闭后正常结算', () => {
     const p = mk();
     expect(p.hp).toBe(p.maxHp);
-    expect(p.damage(50, p.cx - 40, p.y)).toBe(true);
+    // damage() 返回实际结算伤害（2026-08-13 重构 false→0/reduction；旧 .toBe(true) 陈旧）
+    expect(p.damage(50, p.cx - 40, p.y)).toBeGreaterThan(0);
     expect(p.hp).toBe(p.maxHp - 50);
     p.iframes = 0;                     // 清受击无敌帧（damage 内设置）
     p.debugGod = true;
-    expect(p.damage(9999, p.cx - 40, p.y)).toBe(false);
+    expect(p.damage(9999, p.cx - 40, p.y)).toBe(0);
     expect(p.hp).toBe(p.maxHp - 50);   // 未变
     p.debugGod = false;
-    expect(p.damage(10, p.cx - 40, p.y)).toBe(true);
+    expect(p.damage(10, p.cx - 40, p.y)).toBeGreaterThan(0);
     expect(p.hp).toBe(p.maxHp - 60);
   });
 
@@ -30,7 +31,7 @@ describe('F2 无敌 + 无限魔力', () => {
     p.buffs.apply(7 as never, 60);     // OnFire DoT（-4 HP/s）
     // fixedUpdate 需要 GameHooks——此处只验回满逻辑在 tick 头生效:
     // 用与实现相同的守卫语义直接断言（damage 拦截 + 回满是两条独立防线）
-    expect(p.damage(100, p.cx - 40, p.y)).toBe(false);
+    expect(p.damage(100, p.cx - 40, p.y)).toBe(0);
     expect(p.hp).toBe(1);              // damage 不再扣；回满由 fixedUpdate 头执行
     void 0;
   });

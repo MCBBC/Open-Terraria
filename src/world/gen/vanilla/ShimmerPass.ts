@@ -17,6 +17,7 @@ import type { GenState } from './GenState';
 import { addProtectedStructure } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { genSolidType } from './GenSolid';
 import { solidTile } from './HalfBrickPass';
 import { growGemTree } from './TreePass';
 
@@ -180,13 +181,16 @@ function shimmerMakeBiome(st: TileStore, rng: RNG, gs: GenState, X: number, Y: n
   // cs:35054-35055:两侧隧道开口
   shimmerOpening(st, rng, -1, X - n5, Y, n8);
   shimmerOpening(st, rng, 1, X + n5, Y, n8);
-  // cs:35057-35083:aether 宝石树——500 次 X±70/Y±2 采样,两侧 SolidTile 才种
+  // cs:35057-35083:aether 宝石树——500 次 X±70/Y±2 采样,两侧 SolidTile 才种。
+  // ★tileSolid 走 GenSolid：659 以太石块自 Reset（cs:11500）起生成期恒非实心——
+  //   原版 cs:35091 `SolidTile(num22±1, num23)` 读可变数组,**不会**把树种在以太
+  //   石块上;静态 TILE_DEFS.solid 会（v_659 数据仍 solid:true）,已校正
   const solidTile = (x: number, y: number): boolean => {
     if (!st.inBounds(x, y)) return false;
     const i = st.idx(x, y);
     if (!st.flags[i]) return false;
     const d = TILE_DEFS[st.type[i]];
-    return !!d && d.solid && !d.platform && !st.half[i] && st.slope[i] === 0;
+    return genSolidType(st.type[i]) && !!d && !d.platform && !st.half[i] && st.slope[i] === 0;
   };
   for (let n = 0; n < 500; n++) {
     const tx = rng.int(X - 70, X + 69);              // Next(X-70, X+70)
@@ -203,8 +207,11 @@ function shimmerOpening(st: TileStore, rng: RNG, dir: number, X: number, Y: numb
   let num = X;
   let y = Y;
   size--;
+  // 原版此处是 WorldGen.SolidTile（cs:35102/35112,读可变 tileSolid）——659 以太石块
+  // 生成期非实心（cs:11500）,隧道开口可穿以太石本体。旧近似只查 active（flags）,
+  // 已校正为 GenSolid 口径（active && 生成期 tileSolid）
   const solidAt = (x: number, yy: number) =>
-    st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0;
+    st.inBounds(x, yy) && st.flags[st.idx(x, yy)] !== 0 && genSolidType(st.type[st.idx(x, yy)]);
   for (;;) {
     num += dir;
     let open = true;
@@ -286,7 +293,11 @@ export function placeUncheckedStalactite(st: TileStore, x: number, y: number, pr
   };
   const mossSheet0 = (v: number) => MOSS_SHEETS.has(v);
   const hangable = (a: number): boolean => BASE(a) >= 0 && a !== 225;
-  const groundable = (a: number): boolean => BASE(a) >= 0 && a !== 225;
+  // 地面形族（cs:38540-38700 else 分支）：石/苔/117/25/203 + 396/397 + 368 + 367 +
+  // 225（仅单格）——**无冰雪族**（147/161/163/164/200 只在垂挂分支 :38385-38467）。
+  // 曾 groundable 与 hangable 同表 → 冰面上长出地面冰锥（原版该处不落格）。
+  const ICE_FAM = new Set([147, 161, 163, 164, 200]);
+  const groundable = (a: number): boolean => BASE(a) >= 0 && a !== 225 && !ICE_FAM.has(a);
   if (solidTile(st, x, y - 1) && !st.flags[st.idx(x, y)] && !st.flags[st.idx(x, y + 1)]) {
     // 垂挂钟乳石（石质锚挂藤墙 62 → 108 列，:38791-38796）
     const above = sheetOf(x, y - 1);

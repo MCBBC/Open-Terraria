@@ -15,8 +15,10 @@ const ctx = (over: Partial<VanillaCraftCtx> = {}): VanillaCraftCtx => ({
 });
 
 describe('原版配方提取', () => {
-  it('3173 条（去重终态：模板+雕像+反向全含）+组 31+继承 9', () => {
-    expect(VANILLA_RECIPES.length).toBe(3173); // 线性+生成器+模板22件套+小动物雕像+反向平台/墙，源码重复注册已去重
+  it('3309 条（去重终态：模板+雕像+反向+循环段137条全含）+组 31+继承 9', () => {
+    // 3173（线性+生成器+模板22件套+小动物雕像+反向平台/墙）+ 137（for 循环段，tests/loop-recipes.test.ts
+    // 对账）- 1（5547@114[3306x1] 循环残影，--append-loops 剔除）
+    expect(VANILLA_RECIPES.length).toBe(3309);
     expect(Object.keys(RECIPE_GROUPS).length).toBe(31);
     expect(Object.keys(RECIPE_GROUP_ITEMS).length).toBe(31);
   });
@@ -126,7 +128,7 @@ describe('附近箱子合成联动（NearbyChests.cs:10-31 / CraftingRequests.cs
       return m.get(29);
     })();
     const W = 100, H = 100;
-    const type = new Array<number>(W * H).fill(0);
+    const type = new Uint16Array(W * H); // TileStore.type 现为 Uint16Array（对象化 world 改制）
     if (piggyInternal !== undefined) type[5 * W + 5] = piggyInternal; // 中心格旁放 piggy
     const store = {
       w: W, h: H,

@@ -8,7 +8,7 @@ import type { GenState } from './GenState';
 import { T, TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
 import { spreadGrassOnce, grassSpreadState, setWorldSurfaceRef } from './MushroomPass';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const EBONSTONE = TILE_BY_KEY['v_25_ebonstone_block']!;
 const CORRUPT_GRASS = TILE_BY_KEY['v_23_corrupt_grass_block']!;
@@ -319,7 +319,8 @@ function place3x2(st: TileStore, x: number, y: number, type: number, style: numb
   for (let dx = -1; dx <= 1; dx++) {
     const bi = st.idx(x + dx, y + 1);
     if (!st.flags[bi]) return;                                  // SolidTile2 = active+tileSolid
-    if (!TILE_DEFS[st.type[bi]]?.solid) return;
+    // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）
+    if (!genSolidType(st.type[bi])) return;
     if (BOULDERS.has(st.type[bi])) return;  // TileID.Sets.Boulders（TileID.cs:195：138/484/664/665/711-716）
   }
   for (let dx = -1; dx <= 1; dx++) {

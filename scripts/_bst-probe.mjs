@@ -43,20 +43,32 @@ const out = await page.evaluate(async () => {
   wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: 120, bubbles: true, cancelable: true }));
   await new Promise((r) => setTimeout(r, 250));
   const rangeAfter = document.querySelector('.sw-bst-range')?.textContent;
-  // boss 过滤
-  const bossChip = [...document.querySelectorAll('.sw-bst-chip')].find((c) => c.textContent.includes('Boss'));
-  let boss = { found: !!bossChip };
-  if (bossChip) {
-    // 先滚回第一页（滚轮向上直到 range 起点为 1）
-    for (let i = 0; i < 8; i++) wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
-    await new Promise((r) => setTimeout(r, 250));
-    bossChip.click();
-    await new Promise((r) => setTimeout(r, 300));
-    boss = { found: true, cells: document.querySelectorAll('.sw-bst-cell').length, range: document.querySelector('.sw-bst-range')?.textContent };
-    bossChip.click();
-  }
+  // ---- chip 组合语义：小动物 × 敌方Boss 矛盾不可达 ----
+  const chip = (txt) => [...document.querySelectorAll('.sw-bst-chip')].find((c) => c.textContent.trim() === txt || c.textContent.includes(txt));
+  const snap = () => ({
+    cells: document.querySelectorAll('.sw-bst-cell').length,
+    range: document.querySelector('.sw-bst-range')?.textContent,
+    active: [...document.querySelectorAll('.sw-bst-chip.active')].map((c) => c.textContent.trim()),
+  });
+  // 滚回第一页
+  for (let i = 0; i < 8; i++) wrap.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true, cancelable: true }));
+  await new Promise((r) => setTimeout(r, 250));
+  // 序列 A：小动物 → 敌方Boss（kind 应自动归一敌怪）
+  chip('小动物').click(); await new Promise((r) => setTimeout(r, 150));
+  const critterState = snap();
+  chip('Boss').click(); await new Promise((r) => setTimeout(r, 200));
+  const critterThenBoss = snap();
+  chip('Boss').click(); await new Promise((r) => setTimeout(r, 150)); // 关 boss 回到小动物态
+  // 序列 B：敌方Boss → 小动物（boss 应自动清）
+  chip('全部').click(); await new Promise((r) => setTimeout(r, 150));
+  chip('Boss').click(); await new Promise((r) => setTimeout(r, 200));
+  const bossState = snap();
+  chip('小动物').click(); await new Promise((r) => setTimeout(r, 200));
+  const bossThenCritter = snap();
+  chip('全部').click();
   panel.close();
-  return { cells, locked, pct, lockedInfo, rangeBefore, rangeAfter, wheelPaged: rangeBefore !== rangeAfter, boss };
+  return { cells, locked, pct, lockedInfo, rangeBefore, rangeAfter, wheelPaged: rangeBefore !== rangeAfter,
+    combo: { critterState, critterThenBoss, bossState, bossThenCritter } };
 });
 console.log(JSON.stringify(out, null, 1));
 await browser.close();

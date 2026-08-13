@@ -190,6 +190,58 @@ const out = await page.evaluate(async () => {
     }
     ok('⑨ 叠画像素可见（47 主翼+Glow 叠画差 > 400）', diff47 > 400, `diff=${diff47} queue=${qLen}`);
   }
+
+  // ⑩ 44 彩虹重上色（vi_4823）：Extra_171 灰度掩膜 × Extra_156 彩虹 → 彩色像素占比
+  //    （无重上色时掩膜全灰——直画灰翅膀是曾登记偏差）
+  const key44 = Object.keys(window.__swItems).find(k => k.startsWith('vi_4823_'));
+  ok('⑩ 彩虹翼条目存在', !!key44, key44);
+  if (key44) {
+    p.inv.armor[3] = { id: window.__swItems[key44], stack: 1 };
+    await waitUntil(() => p.onGround && p.wingFrame === 0);
+    await new Promise(r => setTimeout(r, 400));
+    const shot44 = g.renderer.canvas.toDataURL();
+    const load3 = (url) => new Promise((resolve) => { const im = new Image(); im.onload = () => resolve(im); im.src = url; });
+    const i44 = await load3(shot44);
+    const c44 = document.createElement('canvas'); c44.width = i44.width; c44.height = i44.height;
+    c44.getContext('2d').drawImage(i44, 0, 0);
+    const d44 = c44.getContext('2d').getImageData(0, 0, c44.width, c44.height).data;
+    let colored = 0, opaque = 0;
+    for (let i = 0; i < d44.length; i += 4) {
+      if (d44[i + 3] < 40) continue;
+      opaque++;
+      const mx = Math.max(d44[i], d44[i + 1], d44[i + 2]), mn = Math.min(d44[i], d44[i + 1], d44[i + 2]);
+      if (mx - mn > 40) colored++;
+    }
+    const ratio = opaque ? colored / opaque : 0;
+    ok('⑩ 44 彩虹重上色（彩色占比 > 0.03）', ratio > 0.03, `colored=${colored}/${opaque} ratio=${ratio.toFixed(4)}`);
+  }
+
+  // ⑪ cWings 染料：装回 vi_492 + 红染料 vi_1007 进 dye[3] → 翅膀区域红色主导像素
+  //    （卸染料同位对比）
+  const keyDye = Object.keys(window.__swItems).find(k => k.startsWith('vi_1007_'));
+  ok('⑪ 红染料条目存在', !!keyDye, keyDye);
+  if (keyDye) {
+    p.inv.armor[3] = { id: wingId, stack: 1 };
+    p.inv.dye[3] = { id: window.__swItems[keyDye], stack: 1 };
+    const countRed = () => {
+      const c = document.createElement('canvas');
+      c.width = g.renderer.canvas.width; c.height = g.renderer.canvas.height;
+      c.getContext('2d').drawImage(g.renderer.canvas, 0, 0);
+      const d = c.getContext('2d').getImageData(0, 0, c.width, c.height).data;
+      let red = 0;
+      for (let i = 0; i < d.length; i += 4) {
+        if (d[i + 3] < 40) continue;
+        if (d[i] - Math.max(d[i + 1], d[i + 2]) > 30) red++;
+      }
+      return red;
+    };
+    await new Promise(r => setTimeout(r, 400));
+    const redDyed = countRed();
+    p.inv.dye[3] = null;
+    await new Promise(r => setTimeout(r, 400));
+    const redPlain = countRed();
+    ok('⑪ 染料生效（红主导像素增量 > 200）', redDyed - redPlain > 200, `dyed=${redDyed} plain=${redPlain}`);
+  }
   p.inv.armor[3] = { id: wingId, stack: 1 };
   return res;
 });

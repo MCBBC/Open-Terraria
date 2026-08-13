@@ -8,7 +8,8 @@ import type { Player } from './Player';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { openDoor, closeDoor as closeDoorTile, shiftTallGate } from '../world/Door';
-import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES } from '../data/tiles';
+import { TILE_BY_KEY as TILE_BY_KEY_DOOR_TILES, TILE_DEFS } from '../data/tiles';
+import type { TileStore } from '../world/TileStore';
 import { TOWN_NPC_IDS, VANILLA_NPCS } from '../data/vanillaNpcs';
 import { isNpcTownShimmerable } from '../stats/Shimmer';
 import { townNpcAltTexture, townNpcProfileSheet } from '../data/townNpcProfiles';
@@ -23,6 +24,133 @@ import { TownShot } from './TownShot';
 import { visEffectFrames, mouseTextColorApprox } from './Enemy';
 
 export interface NpcHome { x: number; y: number; }
+
+// ===================== 坐姿（AI_007 ai[0]==5）纯函数 =====================
+// 可坐格族 = TileID.Sets.CanBeSatOnForNPCs（TileID.cs:211）恰好 {15 椅, 497 马桶}
+// ——王座(102)/长凳(89) 只在 CanBeSatOnFor*Players* 集，城镇 NPC 不坐；
+// 按 sheet 反查内部 tile id（LiquidSim bySheet 同款 reduce）
+const sheetTileIds = (sheets: ReadonlySet<number>): ReadonlySet<number> => new Set(
+  TILE_DEFS.reduce<number[]>((acc, d, id) => {
+    if (d.vanilla && sheets.has(d.vanilla.sheet)) acc.push(id);
+    return acc;
+  }, []),
+);
+const CHAIR_TILE_IDS = sheetTileIds(new Set([15]));
+const TOILET_TILE_IDS = sheetTileIds(new Set([497]));
+/** 不坐椅的城镇实体（FindGoodRestingSpot :53214：type 638 狗 / 656 兔宠物 +
+ *  IsTownSlime 族 NPCID.cs:4446 = 670/678-684——它们只在地面休息位趴窝） */
+const NO_SIT_NPC_IDS = new Set([638, 656, 670, 678, 679, 680, 681, 682, 683, 684]);
+
+/** FindGoodRestingSpot 扫描期成员判定（:53223 CanBeSatOnForNPCs，无 style 门——
+ *  style 门在 TryForcingSitting，见 canSitAt） */
+export function isSitTile(tileId: number): boolean {
+  return CHAIR_TILE_IDS.has(tileId) || TOILET_TILE_IDS.has(tileId);
+}
+
+/** AI_007_TryForcingSitting 坐下门（NPC.cs:53269-53275）：椅/马桶格 + 椅子
+ *  style 27 排除（type 15 且 frameY∈[1080,1098]——上格 1080 / 下格 1098 两帧
+ *  恰好夹住该样式行带；马桶无此门） */
+export function canSitAt(tileId: number, frameY: number): boolean {
+  if (TOILET_TILE_IDS.has(tileId)) return true;
+  if (!CHAIR_TILE_IDS.has(tileId)) return false;
+  return frameY < 1080 || frameY > 1098;
+}
+
+export interface SitSpot { x: number; y: number; }
+
+/** AI_007_FindGoodRestingSpot 夜椅扫描（NPC.cs:53195-53262）：
+ *  - 自 home 向下找地面（SolidOrSlopedTileOrPlatform = 实心非 top 或平台，:53186）
+ *  - ±7 列 × 行 {+2,0,-2,-4,-6}（num2/num4/num3/num6）扫可坐格；上格(frameY%40==0)
+ *    仅当 row+1<=floorY+2 收（:53224），下格恒收
+ *  - 取 |dx|+|dy| 最小（严格 <，先到先得，:53226-53233）
+ *  - 归一（:53247-53252）：下格(frameY%40!=0)先 -1 再 +2、上格直接 +2 → 返回
+ *    {x, y}=落座地面行（椅上格 +2 = 地面行）。无椅 → null（白天原版直接返回
+ *    home 地面（:53209-53212），由调用方不调本扫描） */
+export function findChairSpot(st: TileStore, homeX: number, homeY: number): SitSpot | null {
+  let fx = homeX, fy = homeY;
+  if (fx < 0 || fy < 0) return null;                       // :53200-53203 home 无效
+  while (fy < st.h - 20 && !(st.isSolid(fx, fy) || st.isPlatform(fx, fy))) fy++;
+  let best: { x: number; y: number; d: number; frameY: number } | null = null;
+  for (let i = fx - 7; i <= fx + 7; i++) {
+    for (let r = fy + 2; r >= fy - 6; r -= 2) {
+      if (!st.inBounds(i, r)) continue;
+      const ti = st.idx(i, r);
+      if (!isSitTile(st.type[ti])) continue;               // tile.active() 同义（type!=0）
+      const topFrame = st.frameY[ti] % 40 === 0;
+      if (topFrame && !(r + 1 <= fy + 2)) continue;        // :53224
+      const d = Math.abs(i - fx) + Math.abs(r - fy);       // :53226
+      if (!best || d < best.d) best = { x: i, y: r, d, frameY: st.frameY[ti] };
+    }
+  }
+  if (!best) return null;                                  // :53255-53257
+  let ry = best.y;
+  if (best.frameY % 40 !== 0) ry--;                        // :53249-53251 下格 → 上移一行
+  ry += 2;                                                 // :53252 → 地面行
+  return { x: best.x, y: ry };
+}
+
+/** 坐姿朝向（:53284 / PlayerSittingHelper.cs:231 同式）：frameX!=0（椅 flip 档
+ *  +18）→ 1 朝右，否则 -1 朝左 */
+export function chairFacing(frameX: number): number {
+  return frameX !== 0 ? 1 : -1;
+}
+
+/** 坐姿锚（:53285-53286）：Bottom = (x*16 + 8 + 2*dir, y*16)——脚底贴地面行顶，
+ *  比玩家坐姿（PlayerSittingHelper 座面上 16px）更低，即原版城镇 NPC"陷坐"观感 */
+export function sittingAnchor(x: number, y: number, dir: number): { x: number; y: number } {
+  return { x: x * TILE + 8 + 2 * dir, y: y * TILE };
+}
+
+/** 入座时长（:53283）：ai[1] = 900 + rand(10800) */
+export const SIT_TIME_BASE = 900;
+export const SIT_TIME_RAND = 10800;
+/** 时限起身后的转向冷却（:54707 localAI[3] = 30 + rand(60)；本仓由 wanderT 承接） */
+export const SIT_STAND_WANDER_BASE = 30;
+export const SIT_STAND_WANDER_RAND = 60;
+
+/** 坐姿帽 Y 修正链 num6（Main.cs:26965-26987：ai[0]==5 时默认 −4，例外表如下；
+ *  550/588 原版显式列 −4 = 默认值，不重复入表） */
+export const SITTING_HAT_OFFSET_Y_DEFAULT = -4;
+export const SITTING_HAT_OFFSET_Y: Record<number, number> = {
+  38: -8, 124: -2, 108: -6, 178: -6, 637: -12, 663: -8,
+};
+/** 坐姿帽 Y 修正取值（Renderer.drawPartyHat 消费） */
+export function sittingHatY(id: number): number {
+  return SITTING_HAT_OFFSET_Y[id] ?? SITTING_HAT_OFFSET_Y_DEFAULT;
+}
+
+// ===================== shimmerTransparency（NPC.cs:6112，0..1）=====================
+export const SHIMMER_ST_RAMP = 0.01;      // 浸微光 +0.01/t（:92469）
+export const SHIMMER_ST_TRANSFORM = 0.9;  // >0.9 触发 GetShimmered（:92471）
+export const SHIMMER_ST_RISE = 0.89;      // 城镇转化置 0.89（:92568）
+export const SHIMMER_ST_DECAY_RISE = 1 / 60;  // ai[0]=25 上升态 −1/60/t（:53625）
+export const SHIMMER_ST_DECAY_HIT = 0.1;      // justHit −0.1/t（:92484）
+export const SHIMMER_ST_DECAY_IDLE = 0.001;   // 常规 −0.001/t（:92492）
+
+/** shimmerTransparency 每 tick 推进（赋值时序 NPC.cs:92468-92497 + :53625）：
+ *  浸微光 +0.01 cap 1（rise 态抑制——GetShimmered 已摘除 buff 353（:92570-92573），
+ *  上升态内 shimmering 恒 false，st 走 −1/60 衰减）；非浸按 justHit/rise/常规
+ *  三档衰减，下限 0。>0.9 的转化触发由调用方判（见 fixedUpdate 微光块） */
+export function shimmerTransparencyNext(
+  st: number, shimmering: boolean, justHit: boolean, rise: boolean,
+): number {
+  if (shimmering && !rise) return Math.min(1, st + SHIMMER_ST_RAMP);
+  const rate = justHit ? SHIMMER_ST_DECAY_HIT : rise ? SHIMMER_ST_DECAY_RISE : SHIMMER_ST_DECAY_IDLE;
+  return Math.max(0, st - rate);
+}
+
+/** 消费①：本体渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent
+ *  → 四通道 ×(1−shimmerTransparency)；Renderer 本体 alpha 用） */
+export function shimmerBodyAlpha(shimmerTransparency: number): number {
+  return 1 - shimmerTransparency;
+}
+
+/** 消费②：160 松露人微光态 Glow RGB 衰减（Main.cs:25770-25776：case 160 专属，
+ *  209 无此档）——'lighter' 加性混合下 tint RGB ×(1−st) ≡ alpha ×(1−st) */
+export function shimmerGlowAlpha(baseAlpha: number, shimmerTransparency: number): number {
+  return shimmerTransparency > 0 ? baseAlpha * (1 - shimmerTransparency) : baseAlpha;
+}
+
 
 export class TownNPC extends Entity {
   w = 20; h = 42;
@@ -60,6 +188,25 @@ export class TownNPC extends Entity {
   /** 当前 altTexture（UpdateAltTexture NPC.cs:91254-91273：1=派对 2=狼人；
    *  fixedUpdate 每 tick 由 townNpcAltTexture 刷新——月相/血月/派对随时翻态） */
   altTexture = 0;
+  // ---- 坐姿（AI_007 ai[0]==5，NPC.cs:53264-53287 入座 / :54682-54710 态推进）----
+  /** 正坐在椅/马桶上（ai[0]==5）。仅夜/雨"该回家"窗口（flag，:53383-53402）入座：
+   *  FindGoodRestingSpot 扫 home 附近可坐格 → 走到/传送落到落座格 → TryForcingSitting。
+   *  渲染消费：drawPartyHat 坐姿帽 Y 链（sittingHatY）+ hatStateOffsetX 的 550 档 */
+  sitting = false;
+  /** ai[1] 坐姿倒计时（入座 = 900+rand(10800)，:53283） */
+  private sitTimer = 0;
+  /** 本 tick 的夜椅 rest spot（FindGoodRestingSpot 缓存；白天/无 home = null） */
+  private restSpot: SitSpot | null = null;
+  /** 本 tick 刚走"回家传送"（TeleportToHome :56063-56090 落位后即
+   *  TryForcingSitting :56081——免"站定+同格"门，:54074 门只管走到场的情形） */
+  private teleportedHome = false;
+  /** 微光转化透明度（NPC.cs:6112，0..1；赋值时序 :92468-92497/:92568/:53625）。
+   *  消费：Renderer 本体 alpha=1−st（GetAlpha :94874）+ 160 Glow ×(1−st)
+   *  （Main.cs:25771-25776）——微光转化渐显/渐隐的唯一驱动字段 */
+  shimmerTransparency = 0;
+  /** 微光上升态旗标（原版 ai[0]==25，:53616-53666：转化后 −1/60/t 衰减段；
+   *  本仓无上升演出，仅承接衰减速率档） */
+  private shimmerRise = false;
 
   /** 生命（原版城镇 NPC 可被陷阱弹幕误伤：vanilla-npcs.json lifeMax 250 / defense 15） */
   hp: number;
@@ -70,7 +217,8 @@ export class TownNPC extends Entity {
   private atkState = 0;
   /** ai[0] 攻击态只读（AI_007 :54747 起的 10/12/14/15；原版同值）——渲染侧消费：
    *  drawPartyHat 海盗帽位修正（Main.cs:27001-27008 的 229 ai[0]==12 门）。
-   *  坐姿 ai[0]==5 未建模，恒不出（见 Renderer.drawPartyHat 的 num6 GAP 注） */
+   *  坐姿 ai[0]==5 由 sitting 布尔建模（渲染侧 n.sitting?5:attackState 还原 ai0）；
+   *  二者互斥：坐姿不满足攻击触发门 flag31 的 ai[0]<2（:55621），攻击态中不入座 */
   get attackState(): number { return this.atkState; }
   /** ai[1]:态倒计时(AttackTime) */
   private atkTimer = 0;
@@ -210,7 +358,11 @@ export class TownNPC extends Entity {
 
   fixedUpdate(dt: number, game: GameHooks) {
     this.animT++;
+    // justHit 近似（原版逐 tick 旗标）：hurt() 置 iframes=8 且只在无无敌帧时生效
+    // → 递减前 ==8 恰好标记"自上 tick 起受过击"（微光衰减 −0.1 档 NPC.cs:92484）
+    const justHit = this.iframes === 8;
     if (this.iframes > 0) this.iframes--;
+    this.teleportedHome = false;
     const world = game.world;
     // 战斗书增益一次性套用（后入驻的 NPC 在首 tick 补；使用书时对在场者即时叠）
     if (!this.cbApplied) {
@@ -219,22 +371,35 @@ export class TownNPC extends Entity {
       for (let k = 0; k < books0; k++) this.applyCombatBook();
     }
 
-    // 微光化城镇变体（NPC.GetShimmered :92560-92573：ShimmerTownTransform → ai[0]=25
-    // 微光传送离场，回归后为微光变体 IsShimmerVariant）。本仓净效果：入微光即标记
-    // 微光化并传送回家（原版 AI_007_TownEntities_Shimmer_TeleportToLandingSpot 的
-    // "离场→稍后回归"由入驻轮天然承担）。变体贴图走 townSheet getter（已接），
-    // 对话差分未接（GAP）
-    if (!this.shimmered && isNpcTownShimmerable(this.vanillaId)) {
-      const si = world.store.idx(Math.floor(this.cx / TILE), Math.floor(this.cy / TILE));
-      if (world.store.liquid[si] > 30 && world.store.liquidType[si] === 4) {
-        this.shimmered = true;
-        game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
-        game.playSfx('shimmerSplash', 1, this.cx, this.cy);
-        if (this.home) {
-          this.x = this.home.x * TILE + 8 - this.w / 2;
-          this.y = this.home.y * TILE - this.h;
-          this.vx = 0; this.vy = 0;
-        }
+    // ---- 微光化城镇变体 + shimmerTransparency（赋值时序 NPC.cs:92468-92497 +
+    //      :92560-92573 + :53625）。原版链：浸微光 st +0.01/t（:92469），>0.9 触发
+    //      GetShimmered（:92471——约 91t 渐隐，非即刻）；城镇 GetShimmered 置
+    //      st=0.89 并进 ai[0]=25 上升态（:92568），态内 −1/60/t 衰减（:53625），
+    //      st 归零后切换微光变体（townNpcVariationIndex 翻转 :53656-53669）。
+    //      本仓近似：转化即刻标记微光化 + 传送回家（"离场→稍后回归"由入驻轮承担），
+    //      shimmerRise 承接上升态衰减档；上升演出（velocity=-4×st/:53631）未接。
+    //      变体贴图走 townSheet getter（已接），对话差分未接（GAP）----
+    const st0 = world.store;
+    const si = st0.idx(
+      Math.max(0, Math.min(st0.w - 1, Math.floor(this.cx / TILE))),
+      Math.max(0, Math.min(st0.h - 1, Math.floor(this.cy / TILE))),
+    );
+    const inShimmer = st0.liquid[si] > 30 && st0.liquidType[si] === 4;
+    this.shimmerTransparency = shimmerTransparencyNext(
+      this.shimmerTransparency, inShimmer, justHit, this.shimmerRise,
+    );
+    if (this.shimmerRise && this.shimmerTransparency <= 0) this.shimmerRise = false;
+    if (!this.shimmered && isNpcTownShimmerable(this.vanillaId)
+      && inShimmer && this.shimmerTransparency > SHIMMER_ST_TRANSFORM) {
+      this.shimmered = true;
+      this.shimmerTransparency = SHIMMER_ST_RISE;   // :92568
+      this.shimmerRise = true;                      // ai[0]=25 上升态
+      game.spawnParticles(this.cx, this.cy, '#BFE8FF', 14, 1.4, { life: 30, grav: -0.04 });
+      game.playSfx('shimmerSplash', 1, this.cx, this.cy);
+      if (this.home) {
+        this.x = this.home.x * TILE + 8 - this.w / 2;
+        this.y = this.home.y * TILE - this.h;
+        this.vx = 0; this.vy = 0;
       }
     }
 
@@ -259,15 +424,31 @@ export class TownNPC extends Entity {
       return;
     }
 
+    // ---- 夜椅 rest spot（AI_007_FindGoodRestingSpot NPC.cs:53195-53262，原版
+    //      每 tick 开头算一次 :53708）：夜/雨"该回家"窗口（flag :53383-53402，与
+    //      回家传送同式）+ **夜间**才扫椅（:53209 dayTime 早退——白天雨天也只回
+    //      home 地面不坐）；以 home 为锚扫 ±7 列可坐格；城镇宠物/史莱姆不坐
+    //      （:53214 type 638/656 + IsTownSlime 族 NPCID.cs:4446）→ 本仓 null ----
+    const sitFlag = world.weather.raining || !world.clock.isDay
+      || !!world.clock.eclipse || !!world.weather.slimeRain;
+    this.restSpot = (sitFlag && !world.clock.isDay && this.home
+      && !NO_SIT_NPC_IDS.has(this.vanillaId))
+      ? findChairSpot(world.store, this.home.x, this.home.y) : null;
+
     let wantDir = 0;
     // 对话中站定并面向玩家（原版 AI_007 NPC.cs:53721-53742：talkNPC==本体 →
     // ai[0]=0 停走、ai[1]=300、direction 指向玩家——杜绝"聊着聊着走开丢对话"）
     if (this.talking) {
       const p = (game as unknown as { player: Player }).player;
       if (p) this.facing = p.cx < this.cx ? -1 : 1;
+      // 对话打断坐姿（:53738：非攻击态被 talkNPC 命中 → ai[0]=5 归 0——玩家
+      // 靠近说话即起身；ai[1]=300/localAI[3]=100 两计时由既有 wanderT 链近似）
+      if (this.sitting) { this.sitting = false; this.sitTimer = 0; }
       this.vx *= 0.6;
       this.wanderT = 0;
-    } else if (!this.stationary && world.clock.isDay) {
+    } else if (!this.stationary && world.clock.isDay && !this.sitting) {
+      // 坐姿中不参与白天游走的随机转向（原版 ai[0]==5 不走 :54119+ 的
+      // idle 翻向链——坐姿朝向由椅子 frameX 锁定）
       // 白天家门口附近游走;leashHome 者离 home 超过 ~10 格时折返(守卫老人不离地牢)
       if (this.leashHome && this.home
         && Math.abs(this.cx - (this.home.x * TILE + 8)) > 10 * TILE) {
@@ -282,19 +463,28 @@ export class TownNPC extends Entity {
         wantDir = this.facing;
       }
     } else if (this.home) {
-      // 夜间回家
-      const dx = this.home.x * TILE + 8 - this.cx;
-      if (Math.abs(dx) > TILE) wantDir = Math.sign(dx);
+      // 夜间回家（AI_007 :54060-54106：落位目标 = FindGoodRestingSpot 的 rest
+      // spot——夜里即椅/马桶的落座地面格，走到即坐；无椅回退 home 列。有椅时
+      // 收紧停走阈到 4px（原版按 num6==floorX 逐格对齐，:54074），保证落进同格
+      // 触发坐姿站定门）
+      const tx = this.restSpot ? this.restSpot.x : this.home.x;
+      const dx = tx * TILE + 8 - this.cx;
+      if (Math.abs(dx) > (this.restSpot ? 4 : TILE)) wantDir = Math.sign(dx);
     }
     // ---- 回家传送（AI_007_TownEntities_TeleportToHome :56063-56086 + 触发 :53828-53856）：
     //  flag = 雨天||夜间||日食||史莱姆雨（= 该回家的状态）；且当前不在家休息位；
     //  双矩形视野门（玩家屏±safeRange 不与 NPC 位置/home 位置相交）→ 静默传回家
     //  （无 dust 无音效，纯 position 改写）。本仓"好休息位"近似=家 ±4 格内 ----
     if (this.home) {
-      const flag = world.weather.raining || !world.clock.isDay
-        || !!world.clock.eclipse || !!world.weather.slimeRain;
-      const nearHome = Math.abs(this.cx - (this.home.x * TILE + 8)) < 4 * TILE
-        && Math.abs(this.cy - (this.home.y * TILE)) < 4 * TILE;
+      const flag = sitFlag;
+      // IsInAGoodRestingSpot（NPC.cs:53165-53177）：夜间坐姿放宽 ±7 格（:53168-
+      // 53176——防"坐在椅上被回家传送拽起"）；常态沿用 home ±4 格既有近似。
+      // 本仓 home.y 是站格（地面行 −1），±7 容差吸收该 1 行口径差
+      const nearHome = this.sitting
+        ? Math.abs(Math.floor(this.cx / TILE) - this.home.x) <= 7
+          && Math.abs(Math.floor((this.y + this.h) / TILE) - this.home.y) <= 7
+        : Math.abs(this.cx - (this.home.x * TILE + 8)) < 4 * TILE
+          && Math.abs(this.cy - (this.home.y * TILE)) < 4 * TILE;
       if (flag && !nearHome) {
         const pl = (game as unknown as { player: { x: number; y: number; w: number; h: number; dead: boolean } | null }).player;
         const screenR = 42 * TILE;   // 屏幕半宽+safeRange 近似（1360/16/2×1.52≈64? 取保守值 42 格=见不到）
@@ -305,6 +495,7 @@ export class TownNPC extends Entity {
           || Math.hypot(pl.x + pl.w / 2 - homePx.x, pl.y + pl.h / 2 - homePx.y) > screenR;
         if (farFromNpc && farFromHome) {
           // 三列落位（:56066-56085：home-1/home/home+1，头顶净空即收；全堵=放弃）
+          let moved = false;
           for (const off of [0, -1, 1]) {
             const hx = this.home.x + off, hy = this.home.y;
             let clear = true;
@@ -317,11 +508,17 @@ export class TownNPC extends Entity {
             this.x = hx * TILE + 8 - this.w / 2;
             this.y = hy * TILE - this.h - 0.1;
             this.vx = 0; this.vy = 0;
+            moved = true;
             break;
           }
+          // 落位即试坐（TeleportToHome → TryForcingSitting :56081）
+          if (moved) this.teleportedHome = true;
         }
       }
     }
+
+    // ---- 坐姿（ai[0]==5 族，见 sittingUpdate 注）----
+    if (this.sittingUpdate(world, game)) wantDir = 0;
 
     // ---- 自卫攻击（AI_007 攻击态 ：54747-55538;攻击中站定替代游走）----
     if (this.attackUpdate(world, game)) wantDir = 0;
@@ -448,7 +645,8 @@ export class TownNPC extends Entity {
     this.hardModeFlag = !!(world.flags as Record<string, boolean>).hardMode;
     if (this.atkState === 0) {
       // 触发门:站地 + 冷却尽 + 探测范围内有 LOS 敌(:55621 flag31 + :55864 族掷骰)
-      if (!this.onGround || this.atkCd > 0 || this.talking) return false;
+      // 坐姿 ai[0]==5 不满足 flag31 的 ai[0]<2 门(:55621)——坐着不打,起身再打
+      if (!this.onGround || this.atkCd > 0 || this.talking || this.sitting) return false;
       const range = TOWN_DANGER_RANGE[this.vanillaId] ?? 200;
       const target = this.pickSideTarget(world, game, range);
       if (!target) return false;
@@ -673,6 +871,71 @@ export class TownNPC extends Entity {
         return;
       }
     }
+  }
+
+  /** 坐姿状态机（AI_007 ai[0]==5 族，NPC.cs:53264-53287 入座 / :54682-54710 态推进）。
+   *  返回 true = 坐姿中（调用方停走）。语义对照：
+   *  - 入座门：夜/雨 flag（restSpot 非空）+ 非对话 + 非攻击态（坐姿与攻击互斥：
+   *    flag31 的 ai[0]<2 门 :55621 不含 5）+ 站定在 rest spot 同格（:54074
+   *    num6==floorX && num7==floorY）——刚走回家传送者免站定门
+   *    （TeleportToHome 落位即 TryForcingSitting :56081）
+   *  - 入座（forceSit）：ai[1]=900+rand(10800)、direction=frameX!=0?1:-1、
+   *    Bottom=(x*16+8+2*dir, y*16)、velocity=0（:53283-53287）
+   *  - 态内：vx×0.8、ai[1]--；椅格（Bottom−2px）非椅/马桶 → ai[1]=0 立即起身
+   *    （:54691-54697）；对话打断在 talking 块（:53738）
+   *  - 时限起身：ai[1]<=0 → ai[0]=0 / localAI[3]=30+rand(60)（:54703-54709；
+   *    本仓 wanderT 承接转向冷却）。原版 Main.sittingManager.AddNPC（:54701，
+   *    同椅叠坐错位）无对应渲染载体，略——占位互斥由 forceSit 的占位门承担 */
+  private sittingUpdate(world: import('../world/World').World, _game: GameHooks): boolean {
+    if (this.sitting) {
+      this.vx *= 0.8;                                   // :54684
+      this.sitTimer--;                                  // :54685
+      const st = world.store;
+      const tx = Math.floor(this.cx / TILE);
+      const ty = Math.floor((this.y + this.h - 2) / TILE);   // Bottom−2px 格（:54692）
+      if (!st.inBounds(tx, ty) || !canSitAt(st.type[st.idx(tx, ty)], st.frameY[st.idx(tx, ty)])) {
+        this.sitTimer = 0;                              // 椅子没了 → 起身（:54695）
+      }
+      if (this.sitTimer <= 0) {
+        this.sitting = false;
+        this.wanderT = SIT_STAND_WANDER_BASE + Math.floor(Math.random() * SIT_STAND_WANDER_RAND);
+      }
+      return this.sitting;
+    }
+    if (!this.restSpot || this.talking || this.atkState !== 0 || !this.home) return false;
+    if (!this.teleportedHome) {
+      if (!this.onGround || Math.abs(this.vx) > 0.05) return false;
+      // 站定同格门（:54074）：myTile == rest spot
+      const myX = Math.floor(this.cx / TILE), myY = Math.floor((this.y + this.h) / TILE);
+      if (myX !== this.restSpot.x || myY !== this.restSpot.y) return false;
+    }
+    return this.forceSit(world, _game, this.restSpot);
+  }
+
+  /** AI_007_TryForcingSitting（NPC.cs:53264-53287）：落座地面格上一行须为可坐格
+   *  （canSitAt 含椅 style 27 排除门）+ 无其他坐姿城镇 NPC 占位 → 坐下 */
+  private forceSit(world: import('../world/World').World, game: GameHooks, spot: SitSpot): boolean {
+    const st = world.store;
+    const cx = spot.x, cy = spot.y - 1;            // 椅格 = 落座地面格上一行（:53270）
+    if (!st.inBounds(cx, cy)) return false;
+    const ci = st.idx(cx, cy);
+    if (st.type[ci] === 0 || !canSitAt(st.type[ci], st.frameY[ci])) return false;
+    // 占位门（:53278-53286）：任一坐姿城镇 NPC 的 Bottom−2px 格 == 本椅格 → 放弃
+    for (const o of game.npcs?.() ?? []) {
+      const n = o as { sitting?: boolean; cx?: number; y?: number; h?: number; dead?: boolean };
+      if (o === this || n.dead || !n.sitting) continue;
+      const ox = Math.floor((n.cx ?? 0) / TILE);
+      const oy = Math.floor(((n.y ?? 0) + (n.h ?? 0) - 2) / TILE);
+      if (ox === cx && oy === cy) return false;
+    }
+    this.sitting = true;
+    this.sitTimer = SIT_TIME_BASE + Math.floor(Math.random() * SIT_TIME_RAND);   // :53283
+    this.facing = chairFacing(st.frameX[ci]);                                    // :53284
+    const anchor = sittingAnchor(spot.x, spot.y, this.facing);                   // :53285-53286
+    this.x = anchor.x - this.w / 2;
+    this.y = anchor.y - this.h;
+    this.vx = 0; this.vy = 0;
+    return true;
   }
 
   /** 当前应使用的贴图 sheet（= DrawNPCCheckAlt Main.cs:22304-22309 →

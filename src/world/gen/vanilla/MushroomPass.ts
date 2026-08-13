@@ -7,6 +7,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { tileRunner } from './TileRunner';
+import { genSolidType } from './GenSolid';
 
 const MUD = TILE_BY_KEY['mud']!;
 const MUSH_GRASS = TILE_BY_KEY['v_70_mushroom_grass_block']!;
@@ -49,7 +50,8 @@ export function spreadGrassOnce(
   for (let k = Math.max(0, i - 1); k < Math.min(st.w, i + 2); k++) {
     for (let l = Math.max(0, j - 1); l < Math.min(st.h, j + 2); l++) {
       const ni = st.idx(k, l);
-      if (!st.flags[ni] || !TILE_DEFS[st.type[ni]]?.solid) enclosed = false;
+      // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）
+      if (!st.flags[ni] || !genSolidType(st.type[ni])) enclosed = false;
       if (st.liquidType[ni] === 2 && st.liquid[ni] > 0) { enclosed = true; break; }  // lava
     }
   }

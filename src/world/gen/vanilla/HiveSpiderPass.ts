@@ -11,7 +11,7 @@ import { placeBuriedChest, type ChestSink } from './BuriedChestsPass';
 import { tileRunner } from './TileRunner';
 import { solidTile as solidTileHB, poundTile as poundTileHB } from './HalfBrickPass';
 import { addProtectedStructure, canPlaceStructure } from './GenState';
-import { flipGenSolid } from './GenSolid';
+import { flipGenSolid, genSolidType } from './GenSolid';
 
 const HIVE = TILE_BY_KEY['v_225_hive_block']!;
 const LARVA = TILE_BY_KEY['v_231_larva']!;
@@ -138,7 +138,7 @@ function placeHoneyPatch(
   circleRows(15, 15, (dx, dy) => {
     if (!st.inBounds(rx + dx, ry + dy)) return;
     const i = st.idx(rx + dx, ry + dy);
-    if (!st.flags[i] || !TILE_DEFS[st.type[i]]?.solid) return;
+    if (!st.flags[i] || !genSolidType(st.type[i])) return;
     solid++;
     const sheet = TILE_DEFS[st.type[i]]?.vanilla?.sheet ?? -1;
     if (sheet === 60 || sheet === 59) mudOrGrass++;
@@ -369,13 +369,14 @@ const MAX_TILE_COUNT = 3500; // 原版 maxTileCount（countTiles 硬顶）
  *  墙 1/2——此处按原版时序语义视作"无墙"（可穿行、可覆写为 62） */
 const treatAsNoWall = (wl: number) => wl === 0 || wl === 1 || wl === 2;
 
-/** 原版 SolidTile 语义：active(flags) + tileSolid。生成期幽灵 tile（有 type 无 flags）不算实心 */
+/** 原版 SolidTile 语义：active(flags) + tileSolid。生成期幽灵 tile（有 type 无 flags）不算实心。
+ *  tileSolid 走 GenSolid：蜂巢/蜂蜜斑时点 484 滚动仙人掌（cs:12537）与 659 以太石块
+ *  （cs:11500）已翻非实心,原版 Modifiers.IsSolid 读可变 tileSolid 同样不认 */
 function solidTile(st: TileStore, x: number, y: number): boolean {
   if (!st.inBounds(x, y)) return false;
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
-  const d = TILE_DEFS[st.type[i]];
-  return !!d && d.solid;
+  return genSolidType(st.type[i]);
 }
 
 /** countTiles（L9493）1:1：洪泛计数非实心格，硬顶 3500；

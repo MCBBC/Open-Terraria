@@ -45,7 +45,8 @@ describe('ThinIceBiome(cs:21825-21854 + ThinIceBiome.cs)', () => {
       for (let y = 41; y < 70; y++) st.setTileSilent(x, y, SNOW);
     }
     const rng = new RNG(20260812);
-    const ok = placeThinIcePatch(st, rng, [], 60, 39);
+    const gs = newGenState(st.w, st.h);
+    const ok = placeThinIcePatch(st, rng, gs, 60, 39);
     expect(ok).toBe(true);
     let ice = 0, icedWater = 0;
     for (let i = 0; i < st.w * st.h; i++) {
@@ -62,7 +63,7 @@ describe('ThinIceBiome(cs:21825-21854 + ThinIceBiome.cs)', () => {
     const st = dirtWorld(120, 90);
     for (let x = 30; x < 60; x++) for (let y = 30; y < 60; y++) st.setTileSilent(x, y, SNOW);
     const before = st.type.slice();
-    const ok = placeThinIcePatch(st, new RNG(7), [], 60, 40);
+    const ok = placeThinIcePatch(st, new RNG(7), newGenState(st.w, st.h), 60, 40);
     expect(ok).toBe(false);
     expect(st.type).toEqual(before);   // 拒绝时零写入、零掷骰消费差异不敏感
   });

@@ -1921,7 +1921,14 @@ export function ai107ImprovedWalkers(e: Enemy, game: GameHooks, player: Player |
         x[1] = 1;
         game.playSfxFiles(soundTrackFiles('dd2_wither_beast_aura_pulse'), 0.5, e.cx, e.cy);
       }
-      // 400px 内玩家削甲 debuff（buff 195,3t——本仓 BuffType 未建模,登记缺口）
+      // 400px 内玩家削甲 debuff（buff 195 WitheredArmor 3t，Player.cs:11436 施加链；
+      //   本仓 BuffType.WitheredArmor=101 已建模，defense 终值减半）—— aura 期间每 tick 续期
+      {
+        const pl = (game as unknown as { player: { buffs: { apply: (t: number, secs: number) => void } | null; cx: number; cy: number } }).player;
+        if (pl?.buffs && Math.abs(pl.cx - e.cx) <= 400 && Math.abs(pl.cy - e.cy) <= 400) {
+          pl.buffs.apply(101 /* BuffType.WitheredArmor */, 0.06);   // 3t ≈ 0.05s
+        }
+      }
       // 60t 自疗 lifeMax/20（:63912-63934）
       if (e.ai1 > 0) e.ai1 -= 1;
       if (e.ai1 <= 0) {

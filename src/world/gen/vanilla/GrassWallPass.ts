@@ -12,6 +12,7 @@ import type { TileStore } from '../../TileStore';
 import { TILE_DEFS, T } from '../../../data/tiles';
 import type { GenState } from './GenState';
 import { spreadGrass } from './Spread';
+import { genSolidType } from './GenSolid';
 
 const WALL_DIRT = 2;        // WallID.Dirt
 const WALL_DIRT_UNSAFE = 15; // WallID.DirtUnsafe
@@ -25,7 +26,9 @@ const MAX_WALL_OUT = 5000;  // maxWallOut2（cs:4196）
 const MAX_TILE_COUNT = 3500;
 
 const isSolidTile = (st: TileStore, x: number, y: number): boolean =>
-  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && !!TILE_DEFS[st.type[st.idx(x, y)]]?.solid;
+  // tileSolid 走 GenSolid：本 pass 时点 484(cs:12537)/659(cs:11500) 非实心,
+  //  190/225/192 等已由各自翻转点归位——与原版 cs:19734 时点态一致
+  st.inBounds(x, y) && !!st.flags[st.idx(x, y)] && genSolidType(st.type[st.idx(x, y)]);
 
 /** countDirtTiles/nextDirtCount（cs:9618-9653）1:1：无实心且墙为泥土墙(2)/洞穴墙
  *  (59) 的连通腔计数；遇冰块(147/161)或 {244,83,3,187,216} 墙直接封顶 */

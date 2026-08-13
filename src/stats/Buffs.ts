@@ -15,6 +15,7 @@
 //      本仓库沿用 Game 每 20tick 扫描写入的持续小时长 buff 表达
 // 名称/描述走原版 l10n：BuffName.<Internal> + 自有 Mods.SandboxWorld.Buff.* 描述
 import { Lang } from '../i18n/Lang';
+import { scaleStatsWorld, GDL } from './ScaleStats';
 
 export enum BuffType {
   Agility = 0,    // 敏捷：移速 +25% → Swiftness(3)
@@ -183,11 +184,21 @@ export enum BuffType {
                       //   （:27854-27857，竖向正弦漂浮）。授予 = 星旋酸弹 581（专家
                       //   Next(300,540)/经典 50% Next(360,720)，:11504-11514）。
                       //   玩家物理段无载体，登记
+  WitheredArmor = 101,  // 枯萎护甲(195)：defense 终值减半（Player.cs:25708-25710，破甲同式）
+  Wet = 102,            // 潮湿(103)：纯视觉登记——dripping（坐骑猪鲨崽增益消费，
+                       //   Player.MountFishronSpecial :3886）+ buffImmune[24/323/67]
+                       //   火系免疫（:11342-11346）；lavaWet 时即刻移除（:11335-11338）。
+                       //   授予链 = 爆裂泡泡 371 接触（StatusFromNPC :22239-22242，
+                       //   AddBuff(103, 60×Next(3,8)) = 3-7s）；103 不在时长随难度
+                       //   延展表（BuffID.cs:28）也不入存档（Main.cs buffNoSave[103]）
   WitheredWeapon = 100, // 枯萎武器(196)：witheredWeapon=true（:11442-11445）→
                       //   melee/ranged/magic/minion/rangedMult 伤害全 ×0.5
                       //   （:25712-25719）。授予 = DD2 萤火虫电击 682 直中 300t
                       //   （:11546-11548）。伤害链消费点在 Player.damageMult，登记
 }
+
+/** BuffID.Sets.BuffTimeIsExtendedWithGameDifficulty（BuffID.cs:28——专家×2/大师×2.5 时长） */
+const BUFF_TIME_EXTENDED_BY_DIFFICULTY = new Set([20, 22, 23, 24, 323, 30, 31, 32, 33, 35, 36, 39, 44, 324, 46, 47, 69, 70, 80]);
 
 export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string; fallbackName: string }> = {
   [BuffType.Campfire]: { vanillaBuff: 87, descKey: 'Mods.SandboxWorld.Buff.Campfire.Desc', fallbackName: '篝火' },
@@ -300,7 +311,10 @@ export const BUFF_DEFS: Record<BuffType, { vanillaBuff: number; descKey: string;
   [BuffType.Blackout]: { vanillaBuff: 80, descKey: 'BuffDescription.Blackout', fallbackName: '熄灯' },
   [BuffType.Webbed]: { vanillaBuff: 149, descKey: 'BuffDescription.Webbed', fallbackName: '结网' },
   [BuffType.VortexDebuff]: { vanillaBuff: 164, descKey: 'BuffDescription.VortexDebuff', fallbackName: '星旋减益' },
+  [BuffType.WitheredArmor]: { vanillaBuff: 195, descKey: 'BuffDescription.WitheredArmor', fallbackName: '枯萎护甲' },
   [BuffType.WitheredWeapon]: { vanillaBuff: 196, descKey: 'BuffDescription.WitheredWeapon', fallbackName: '枯萎武器' },
+  // 潮湿：描述走原版 BuffDescription.Wet（"你在滴水"，12 语言现成，同 Chilled 先例）
+  [BuffType.Wet]: { vanillaBuff: 103, descKey: 'BuffDescription.Wet', fallbackName: '潮湿' },
 };
 
 /** Main.buffNoSave 全名单（Main.cs:8896-8990：不写入玩家存档的 buff;
@@ -398,6 +412,8 @@ export class BuffState {
     // 80=:8827、149=:8841、164=:8846、196=:8850；均不在护士排除表）
     BuffType.Darkness, BuffType.Cursed, BuffType.Blackout, BuffType.Webbed,
     BuffType.VortexDebuff, BuffType.WitheredWeapon,
+    BuffType.Wet,      // Main.debuff[103]=true（Main.cs:8833）——潮湿可被护士计价清除；
+                       // 103 不在 NurseCannotRemoveDebuff 排除表（BuffID.cs:30）
   ]);
   /** 活跃 debuff 计数（Main.GetNurseHealCost :39466-39472 的 +100/个 段：
    *  buffTime>60 且 Main.debuff；NurseCannotRemoveDebuff 排除表未实装，登记） */
@@ -434,6 +450,14 @@ export class BuffState {
     // buffImmune 门（AddBuff :5052——免疫则直接 return，不掉已有同类 buff）
     const vb = BUFF_DEFS[type]?.vanillaBuff;
     if (vb !== undefined && this.immuneVanilla.has(vb)) return;
+    // D2 专家/大师 debuff 时长缩放（Player.cs:5211-5215+GameDifficultyData.cs:71:
+    // BuffTimeIsExtendedWithGameDifficulty {20,22,23,24,323,30,31,32,33,35,36,39,44,324,46,47,69,70,80}
+    // → Expert ×2 / Master ×2.5——仅时长,DoT 伤害不缩。2026-08-13）
+    if (vb !== undefined && BUFF_TIME_EXTENDED_BY_DIFFICULTY.has(vb) && durationSec > 0) {
+      const diff = scaleStatsWorld().difficulty;
+      if (diff >= GDL.MASTER) durationSec *= 2.5;
+      else if (diff >= GDL.EXPERT) durationSec *= 2;
+    }
     const cur = this.active.get(type);
     if (cur === undefined || cur < durationSec) this.active.set(type, durationSec);
   }

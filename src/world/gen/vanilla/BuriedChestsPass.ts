@@ -15,6 +15,7 @@ import { TILE_BY_KEY, TILE_DEFS } from '../../../data/tiles';
 import { ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID } from '../../../data/items';
 import { idsByVanillaSheet } from './TileRunner';
 import { solidTile as solidTileHB } from './HalfBrickPass';
+import { genSolidType } from './GenSolid';
 
 const CHEST = TILE_BY_KEY['chest']!;
 const CHEST2 = TILE_BY_KEY['v_467_chests_group_2']!;
@@ -499,8 +500,11 @@ export function placeBuriedChest(
   if (style === 32) flags.mushroom = true;
   if (style === 16) flags.temple = true;
   if (style === 13) flags.skyTheme = true;
+  // 右腿落地判定：solid 走 GenSolid（本 pass 时点 484 滚动仙人掌/659 以太石块等
+  // 已被翻非实心,WorldGen.cs:12537/11500——原版 PlaceChest 读可变 tileSolid 同样
+  // 不认它们为可落脚地面）。左腿与锚定判定走 solidTileHB（HalfBrickPass,已 gen-aware）
   if (!st.inBounds(i + 1, gy) || !st.flags[st.idx(i + 1, gy)]
-    || !TILE_DEFS[st.type[st.idx(i + 1, gy)]]?.solid) { restoreSlopes(); return false; }
+    || !genSolidType(st.type[st.idx(i + 1, gy)])) { restoreSlopes(); return false; }
   const fw = TILE_DEFS[tile].vanilla?.fw ?? 2;
   for (let dx = 0; dx < 2; dx++) {
     for (let dy = 0; dy < 2; dy++) {

@@ -17,10 +17,14 @@ import {
   DRILL_PICK_POWER, DRILL_PICK_TIME, DRILL_MAX_LENGTH,
   drillBlockTarget, drillWallTarget, clampToDeadZone, scutlixFindTarget,
   inAPlaceWithWind,
-  type DrillStore, type DrillBeam,
+  canKillTileAt, canPlayerSmashWallAt, smoothSlopeAt, bodyRotationFor, mountLights,
+  MountShot,
+  type DrillStore, type DrillBeam, type SlopeStore,
 } from '../src/entities/Mounts';
+import { TILE_DEFS } from '../src/data/tiles';
 import { TILE } from '../src/core/constants';
 import { BuffType } from '../src/stats/Buffs';
+import { playerMountRotation } from '../src/render/Renderer';
 
 // ---- 测试世界/玩家（breath.test.ts 同款 harness） ----
 const fakeHooks = (w: World, p?: Player) => ({
@@ -46,19 +50,48 @@ const view = (over: Partial<MountedPlayerView> = {}): MountedPlayerView => ({
   inputX: 0, inputJump: false, inputUp: false, inputDown: false,
   prevInputJump: false, gravDir: 1, store: null, ...over,
 });
-/** 钻头光束判定用世界桩：solid 集填内部 id 1（泥土，pick 0 可挖），walls 为 "x,y"→墙 id */
+/** 钻头光束判定用世界桩：solid 集填内部 id 1（泥土，pick 0 可挖），walls 为 "x,y"→墙 id。
+ *  frames 为 "x,y"→[frameX,frameY]（树干分支/承载帧豁免判定用） */
 const fakeDrillStore = (solid: Array<[number, number]> = [],
-  walls: Record<string, number> = {}, w = 40, h = 40): DrillStore => {
+  walls: Record<string, number> = {}, w = 40, h = 40,
+  frames: Record<string, [number, number]> = {},
+  types: Record<string, number> = {}): DrillStore => {
   const type = new Uint16Array(w * h);
   const wall = new Uint16Array(w * h);
+  const frameX = new Uint16Array(w * h);
+  const frameY = new Uint16Array(w * h);
   const idx = (x: number, y: number) => y * w + x;
   const inBounds = (x: number, y: number) => x >= 0 && y >= 0 && x < w && y < h;
   for (const [x, y] of solid) if (inBounds(x, y)) type[idx(x, y)] = 1;
+  for (const [k, v] of Object.entries(types)) {
+    const [x, y] = k.split(',').map(Number);
+    if (inBounds(x, y)) type[idx(x, y)] = v;
+  }
   for (const [k, v] of Object.entries(walls)) {
     const [x, y] = k.split(',').map(Number);
     if (inBounds(x, y)) wall[idx(x, y)] = v;
   }
-  return { w, h, type, wall, idx, inBounds, isActive: (x, y) => inBounds(x, y) && type[idx(x, y)] !== 0 };
+  for (const [k, [fx, fy]] of Object.entries(frames)) {
+    const [x, y] = k.split(',').map(Number);
+    if (inBounds(x, y)) { frameX[idx(x, y)] = fx; frameY[idx(x, y)] = fy; }
+  }
+  return {
+    w, h, type, wall, frameX, frameY, idx, inBounds,
+    isActive: (x, y) => inBounds(x, y) && type[idx(x, y)] !== 0,
+  };
+};
+/** 坡面平滑用世界桩（solid 集 = 内部 id 1 泥土；types 覆盖指定格的类型） */
+const fakeSlopeStore = (solid: Array<[number, number]> = [], w = 12, h = 12,
+  frames: Record<string, [number, number]> = {}, types: Record<string, number> = {}): SlopeStore => {
+  const base = fakeDrillStore(solid, {}, w, h, frames, types);
+  const half = new Uint8Array(w * h);
+  const slope = new Uint8Array(w * h);
+  const idx = (x: number, y: number) => y * w + x;
+  return {
+    ...base, half, slope,
+    setHalfBrick: (x, y, on) => { if (base.inBounds(x, y)) half[idx(x, y)] = on ? 1 : 0; },
+    setSlope: (x, y, s) => { if (base.inBounds(x, y)) { slope[idx(x, y)] = s; half[idx(x, y)] = 0; } },
+  };
 };
 const idleBeams = (): DrillBeam[] => [{ tx: -1, ty: -1, cooldown: 0, purpose: 0 },
   { tx: -1, ty: -1, cooldown: 0, purpose: 0 }];
@@ -813,5 +846,383 @@ describe('史后坐骑 50 + constantJump 表核对', () => {
     expect(cj).toEqual([3, 43, 50]);
     // 兔兔 1 非 autoJump：常规跳跃链已覆盖其免松键连跳语义
     expect(MOUNT_DATA['1'].constantJump).toBeUndefined();
+  });
+});
+
+// ============================================================================
+// 坐骑批（Q）边缘 1:1：钻头 CanKillTile/拆墙子集 + 坡面平滑 + 机身倾斜 + 点光 + 606 实体化
+// ============================================================================
+
+const TREE_ID = TILE_DEFS.findIndex((d) => d.vanilla?.sheet === 5);   // 树干（IsATreeTrunk）
+
+describe('钻头边缘①：CanKillTile/CanPlayerSmashWall 子集（WorldGen.cs:62249 / Player.cs:45303）', () => {
+  it('canKillTileAt：不查镐力（树干同为合法目标——原版挖掘实效走 PickTile 主链）', () => {
+    const st = fakeDrillStore([], {}, 40, 40, {}, { '13,20': TREE_ID });
+    expect(canKillTileAt(st, 13, 20)).toBe(true);   // 树干无 pick 力，仍可锁定（:3169）
+  });
+
+  it('canKillTileAt：上方异种树干 → false（承载保护 :62274-62281）；分支/树顶帧豁免', () => {
+    // 目标泥土 (13,20)，正上方 (13,19) 树干（frameY 0 <198）→ 不可杀
+    const st = fakeDrillStore([[13, 20]], {}, 40, 40, {}, { '13,19': TREE_ID });
+    expect(canKillTileAt(st, 13, 20)).toBe(false);
+    // 同种（上方同为泥土）→ 不拦（:62277 tile.type != type 门）
+    const same = fakeDrillStore([[13, 20], [13, 19]]);
+    expect(canKillTileAt(same, 13, 20)).toBe(true);
+    // 树顶帧（frameY ≥198）豁免
+    const top = fakeDrillStore([[13, 20]], {}, 40, 40, { '13,19': [0, 200] }, { '13,19': TREE_ID });
+    expect(canKillTileAt(top, 13, 20)).toBe(true);
+  });
+
+  it('canKillTileAt：自身墙 350 / 越界 / 未激活 → false（:62252-62269）', () => {
+    const st = fakeDrillStore([[13, 20]], { '13,20': 350 });
+    expect(canKillTileAt(st, 13, 20)).toBe(false);
+    expect(canKillTileAt(st, -1, 20)).toBe(false);
+    expect(canKillTileAt(fakeDrillStore(), 13, 20)).toBe(false);
+  });
+
+  it('drillBlockTarget：承载保护使光束不锁定树干下格——束停在树干本体（:3169-3173）', () => {
+    // (13,19) 树干 / (13,20) 泥土：下格受承载保护不可锁定，树干本身可锁定 →
+    // 光束停在树干（原版同款：钻头光束会被树挡住，挖掘实效再由 PickTile 主链
+    // 判 tileAxe → 0 伤害）
+    const st = fakeDrillStore([[13, 20]], {}, 40, 40, {}, { '13,19': TREE_ID });
+    expect(drillBlockTarget(st, DRILL_CX, DRILL_CY, DRILL_CX + 400, DRILL_CY, idleBeams()))
+      .toEqual({ x: 13, y: 19 });
+  });
+
+  it('canPlayerSmashWallAt：房墙直接可拆；天然墙需 3×3 曝露；wall 350 恒不可（:45303）', () => {
+    // wall 1（木墙，wallHouse）→ 直接可拆
+    expect(canPlayerSmashWallAt(fakeDrillStore([], { '13,20': 1 }), 13, 20)).toBe(true);
+    // 天然墙 7 被 3×3 同墙包裹 → 不可拆
+    const sealed: Record<string, number> = {};
+    for (let i = 12; i <= 14; i++) for (let j = 19; j <= 21; j++) sealed[`${i},${j}`] = 7;
+    expect(canPlayerSmashWallAt(fakeDrillStore([], sealed), 13, 20)).toBe(false);
+    // 曝露一格（邻墙 0）→ 可拆
+    const exposed = { ...sealed };
+    delete exposed['14,20'];
+    expect(canPlayerSmashWallAt(fakeDrillStore([], exposed), 13, 20)).toBe(true);
+    expect(canPlayerSmashWallAt(fakeDrillStore([], { '13,20': 350 }), 13, 20)).toBe(false);
+  });
+
+  it('drillWallTarget：3×3 规则下天然墙仅曝露缘可锁（钻头侧已接 CanPlayerSmashWall）', () => {
+    // 3×3 天然墙 7 块：外缘格（外侧邻墙 0）可拆、内芯未曝露不可拆 → 光束锁定
+    // 扫带内的首个曝露缘格（12,19）
+    const sealed: Record<string, number> = {};
+    for (let i = 12; i <= 14; i++) for (let j = 19; j <= 21; j++) sealed[`${i},${j}`] = 7;
+    const st = fakeDrillStore([], sealed);
+    expect(drillWallTarget(st, DRILL_CX, DRILL_CY, DRILL_CX + 400, DRILL_CY, idleBeams()))
+      .toEqual({ x: 12, y: 19 });
+    // 内芯 (13,20) 直接判定：3×3 全同墙 → 不可拆
+    expect(canPlayerSmashWallAt(st, 13, 20)).toBe(false);
+  });
+});
+
+describe('钻头边缘②：Tile.SmoothSlope 命中钩（Tile.cs:822-895）', () => {
+  it('四邻实心位形推导：下+左 → slope1 / 仅下 → 半砖（num 位序 :841）', () => {
+    // (5,5) 左 (4,5) 与下 (5,6) 实心 → num=6 → slope 1
+    const st = fakeSlopeStore([[5, 5], [4, 5], [5, 6]]);
+    smoothSlopeAt(st, 5, 5);
+    expect(st.slope[st.idx(5, 5)]).toBe(1);
+    expect(st.half[st.idx(5, 5)]).toBe(0);
+    // 仅下方实心 → num=4 → 半砖
+    const st2 = fakeSlopeStore([[5, 5], [5, 6]]);
+    smoothSlopeAt(st2, 5, 5);
+    expect(st2.half[st2.idx(5, 5)]).toBe(1);
+  });
+
+  it('applyToNeighbors=true：四邻（右/左/下/上 序）与自身均被平滑（:824-830）', () => {
+    // 竖列 (5,4)→(5,6)：对 (5,4) 平滑 → 自身（上空下实 num=4）半砖；邻格 (5,5)
+    // 上下皆实（num=12 → default）维持整砖——原版位形语义
+    const st = fakeSlopeStore([[5, 4], [5, 5], [5, 6]]);
+    smoothSlopeAt(st, 5, 4);
+    expect(st.half[st.idx(5, 4)]).toBe(1);   // 自身（下有 (5,5)）
+    expect(st.half[st.idx(5, 5)]).toBe(0);   // 邻格上下皆实 → 整砖
+    expect(st.slope[st.idx(5, 5)]).toBe(0);
+  });
+
+  it('CanPoundTile 门：黑名单/巨石/上格禁坡物 → 不动（:81448-81480）', () => {
+    // 门（sheet 10）在黑名单 → 平滑无效
+    const doorId = TILE_DEFS.findIndex((d) => d.vanilla?.sheet === 10);
+    const st = fakeSlopeStore([[5, 5]], 12, 12, {}, { '5,5': doorId });
+    smoothSlopeAt(st, 5, 5);
+    expect(st.slope[st.idx(5, 5)]).toBe(0);
+    expect(st.half[st.idx(5, 5)]).toBe(0);
+    // 上格为宝箱（sheet 21，ForbidsSloping）→ 不可砸
+    const chestId = TILE_DEFS.findIndex((d) => d.vanilla?.sheet === 21);
+    const st2 = fakeSlopeStore([[5, 5], [5, 6]], 12, 12, {}, { '5,4': chestId });
+    smoothSlopeAt(st2, 5, 5);
+    expect(st2.half[st2.idx(5, 5)]).toBe(0);
+  });
+});
+
+describe('渲染装饰：机身倾斜 fullRotation（Mount.cs Hover 尾段 :3468-3521）', () => {
+  it('UFO 7 / 钻头 8：π/4 × clamp(vx/dash, ±0.95) / 2', () => {
+    expect(bodyRotationFor(7, 8, 0, 1, 8)).toBeCloseTo(Math.PI / 4 * 0.95 / 2);   // 满速钳 0.95
+    expect(bodyRotationFor(7, 4, 0, 1, 8)).toBeCloseTo(Math.PI / 4 * 0.5 / 2);    // 半速
+    expect(bodyRotationFor(8, -4, 0, -1, 4)).toBeCloseTo(-Math.PI / 4 * 0.95 / 2); // 钻头满速反向
+    expect(bodyRotationFor(5, 8, 0, 1, 2)).toBe(0);                               // 其余坐骑不倾
+  });
+
+  it('巫婆扫帚 23：-π/16×clamp(-vy/dash)×dir + π/16×clamp(vx/dash)', () => {
+    // 满速爬升（vy=-9）面右 → -π/16；满速右移 → +π/16；合成 0
+    expect(bodyRotationFor(23, 0, -9, 1, 9)).toBeCloseTo(-Math.PI / 16);
+    expect(bodyRotationFor(23, 9, 0, 1, 9)).toBeCloseTo(Math.PI / 16);
+    expect(bodyRotationFor(23, 9, -9, 1, 9)).toBeCloseTo(0);
+  });
+
+  it('MountInstance.updateBodyRotation：fullRotation 写入 + 钻头外环随 vx/80 累积（:3499）', () => {
+    const m = new MountInstance();
+    m.setMount(8, view());
+    const v = view({ vx: 4, vy: 0 });
+    m.updateBodyRotation(v);
+    expect(m.fullRotation).toBeCloseTo(Math.PI / 4 * 0.95 / 2);   // 4/4=1 → 钳 0.95
+    expect(m.outerRingRotation).toBeCloseTo(4 / 80);
+    m.updateBodyRotation(v);
+    expect(m.outerRingRotation).toBeCloseTo(8 / 80);              // 累积（曾恒 0 的死字段）
+    // UFO 满速
+    const ufo = new MountInstance();
+    ufo.setMount(7, view());
+    ufo.updateBodyRotation(view({ vx: 8, vy: 0 }));
+    expect(ufo.fullRotation).toBeCloseTo(Math.PI / 4 * 0.95 / 2);
+  });
+
+  it('玩家本体旋转变换：UFO 7/钻头 8 绕 mounted 盒心、扫帚 23 绕底心（TransformDrawData）', () => {
+    // LegacyPlayerRenderer.cs:481 把 fullRotation/fullRotationOrigin 整组传入 PlayerDrawSet，
+    // TransformDrawData（PlayerDrawLayers.cs:4199-4230）绕 Position+origin 旋转全部层。
+    // 玩家盒 (100,200,20,42)：7/8 heightBoost=16 → mounted 盒高 58 底锚
+    //   → 盒心 = (110, 200+42-29=213)；23 heightBoost=0 → 底心 = (110, 242)
+    const box = { x: 100, y: 200, w: 20, h: 42 };
+    const r78 = playerMountRotation(7, 0.3, box, 16)!;
+    expect(r78.pivotX).toBe(110);
+    expect(r78.pivotY).toBe(213);
+    expect(r78.angle).toBe(0.3);
+    expect(playerMountRotation(8, -0.2, box, 16)!.pivotY).toBe(213);
+    const r23 = playerMountRotation(23, 0.1, box, 0)!;
+    expect(r23.pivotX).toBe(110);
+    expect(r23.pivotY).toBe(242);
+    expect(r23.angle).toBe(0.1);
+  });
+
+  it('玩家本体旋转变换：零角/非倾斜族 → null（矿车族走 cart.rotation 独立链）', () => {
+    const box = { x: 100, y: 200, w: 20, h: 42 };
+    expect(playerMountRotation(7, 0, box, 16)).toBeNull();     // 静止悬停不转
+    expect(playerMountRotation(5, 0.5, box, 0)).toBeNull();    // 非倾斜族
+    expect(playerMountRotation(8, 0, box, 16)).toBeNull();
+    expect(playerMountRotation(23, 0, box, 0)).toBeNull();
+  });
+
+  it('玩家本体旋转变换：端到端角度 = bodyRotationFor 产出直通', () => {
+    // 满速 UFO：π/4×0.95/2；角度由 Mounts.fullRotation 透传（渲染侧不重算）
+    const box = { x: 0, y: 0, w: 20, h: 42 };
+    const m = new MountInstance();
+    m.setMount(7, view());
+    m.updateBodyRotation(view({ vx: 8, vy: 0 }));
+    const r = playerMountRotation(m.type, m.fullRotation, box, m.heightBoost)!;
+    expect(r.angle).toBeCloseTo(Math.PI / 4 * 0.95 / 2);
+    expect(r.pivotY).toBeCloseTo(42 - 29);   // 42+16=58 → 盒心 y=42-29
+  });
+});
+
+describe('渲染装饰：坐骑点光（Mount.cs AddLight 汇总）——mock 注入器', () => {
+  const collect = (m: MountInstance, v: MountedPlayerView,
+    over: Partial<Parameters<typeof mountLights>[2]> = {}) => {
+    const sink: Array<[number, number, number, number, number]> = [];
+    for (const l of mountLights(m, v, {
+      liquidColor: [9, 61, 191], worldSurface: 72, miscCounter: 0, ...over,
+    })) sink.push([l.tx, l.ty, l.r, l.g, l.b]);
+    return sink;
+  };
+
+  it('emitsLight 族（8/45/49）：lightColor 于中心格（:3614-3617）', () => {
+    const m = new MountInstance();
+    m.setMount(8, view());
+    expect(collect(m, view())).toEqual([[6, 7, 0.3, 0.3, 0.4]]);
+    const l45 = new MountInstance();
+    l45.setMount(45, view());
+    expect(collect(l45, view())).toEqual([[6, 7, 0.6, 0.4, 0.35]]);
+  });
+
+  it('UFO 7：帧脉冲橙光 g = 0.2×|2-帧/2|/2（:3481）', () => {
+    const m = new MountInstance();
+    m.setMount(7, view());
+    m.frame = 0;
+    expect(collect(m, view())[0]).toEqual([6, 7, 0.4, 0.2, 0]);
+    m.frame = 4;
+    expect(collect(m, view())[0]).toEqual([6, 7, 0.4, 0, 0]);
+  });
+
+  it('Scutlix 9：瞄准+充能 → 眼部红光 ×充能比（:5411）；Santank 46 炮口 (0.7,0.4,0.4)×2（:5456）', () => {
+    const m = new MountInstance();
+    m.setMount(9, view());
+    m.aiming = true;
+    m.abilityCharge = 20;                 // max 40 → 0.5
+    m.frameExtra = 8;                     // → 眼对 (8-6)*2=4/5
+    const lights = collect(m, view());
+    expect(lights).toHaveLength(2);
+    for (const l of lights) {
+      expect(l[2]).toBeCloseTo(0.5);      // r = 1 × charge
+      expect(l[3]).toBe(0);
+      expect(l[4]).toBe(0);
+    }
+    // 未瞄准 → 无光
+    m.aiming = false;
+    expect(collect(m, view())).toHaveLength(0);
+    const tank = new MountInstance();
+    tank.setMount(46, view());
+    tank.aiming = true;
+    tank.abilityCharge = 40;
+    // 炮口 = 底心 + (width×dir, -12) = (100+10+20, 100+42-12) → 格 (8,8)，双点累加
+    expect(collect(tank, view())).toEqual([[8, 8, 0.7, 0.4, 0.4], [8, 8, 0.7, 0.4, 0.4]]);
+  });
+
+  it('猪鲨崽 12：增益态 → 环境液色×0.4 于身前点；落点实心退回身侧（:4981-4991）', () => {
+    const m = new MountInstance();
+    m.setMount(12, view({ x: 100, y: 100, vx: 0, vy: 0 }));
+    m.fishronBoost = true;
+    const approx = (l: Array<[number, number, number, number, number]>) =>
+      l.map(([tx, ty, r, g, b]) => [tx, ty, +r.toFixed(6), +g.toFixed(6), +b.toFixed(6)]);
+    // 空中全速右移：身前点 = 中心 + dir×20 + v×10 = (130+160, 121) → 格 (18,7)
+    expect(approx(collect(m, view({ x: 100, y: 100, vx: 16, vy: 0 })))).toEqual(
+      [[18, 7, +((9 / 255 * 0.4)).toFixed(6), +((61 / 255 * 0.4)).toFixed(6), +((191 / 255 * 0.4)).toFixed(6)]]);
+    // 身前点实心 → 退回身侧 (130,121) → 格 (8,7)
+    const base = fakeDrillStore([[18, 7]]);
+    const flags = new Uint8Array(40 * 40);
+    flags[base.idx(18, 7)] = 1;
+    const solidView = {
+      inBounds: base.inBounds, idx: base.idx, flags,
+      isSolid: (x: number, y: number) => base.isActive(x, y),
+    } as never;
+    const withStore = view({ x: 100, y: 100, vx: 16, vy: 0, store: solidView });
+    expect(approx(collect(m, withStore))[0].slice(0, 2)).toEqual([8, 7]);
+    // 非增益态无光
+    m.fishronBoost = false;
+    expect(collect(m, view({ x: 100, y: 100 }))).toHaveLength(0);
+  });
+
+  it('蜥蜴 14：worldSurface 以下红光 (0.5,0.1,0.1)（:4079）', () => {
+    const m = new MountInstance();
+    m.setMount(14, view());
+    // 中心 y = 5000+21 = 5021 → 格 313
+    expect(collect(m, view({ x: 100, y: 5000 }))).toEqual([[6, 313, 0.5, 0.1, 0.1]]);
+    expect(collect(m, view({ x: 100, y: 100 }))).toHaveLength(0);
+  });
+});
+
+describe('Scutlix 眼激光 606 实体化（MountShot：直线/子步/命中消散）', () => {
+  const shotHooks = (solid: Array<[number, number]> = [], enemies: unknown[] = []) => {
+    const base = fakeDrillStore(solid);
+    const st = { ...base, isSolid: (x: number, y: number) => base.isActive(x, y) };
+    const dmg: number[] = [];
+    return {
+      hooks: {
+        world: { store: st },
+        enemies: () => enemies,
+        addDamageNumber: (_x: number, _y: number, n: number) => dmg.push(n),
+        playSfxFiles: () => {},
+        playSfx: () => {},
+      } as never,
+      dmg, st,
+    };
+  };
+
+  it('extraUpdates 2 → 每 tick 3 子步（42px/tick），直线无重力（606：aiStyle 1 直飞弹）', () => {
+    const { hooks } = shotHooks();
+    const s = new MountShot(0, 0, 14, 0, 150, 0, 606);
+    expect(s.w).toBe(5);                       // proj 表 width 5
+    s.fixedUpdate(1 / 60, hooks);
+    expect(s.x).toBeCloseTo(42);               // 14 × 3 子步
+    expect(s.vy).toBe(0);                      // noGravity
+    expect(s.dead).toBe(false);
+  });
+
+  it('命中实心格即消散；命中敌怪结算伤害并消散（penetrate 1 近似）', () => {
+    // 格 2 实心（32-48px）：第 1 tick 第 3 子步 x=42 → 中心 44.5/16 → 格 2 即撞
+    const { hooks } = shotHooks([[2, 0]]);
+    const s = new MountShot(0, 0, 14, 0, 150, 0, 606);
+    s.fixedUpdate(1 / 60, hooks);
+    expect(s.dead).toBe(true);
+    // 敌怪
+    const hit: number[] = [];
+    const enemy = {
+      x: 44, y: -4, w: 20, h: 20, dead: false,
+      hurt: (d: number) => { hit.push(d); return true; },
+    };
+    const { hooks: hooks2 } = shotHooks([], [enemy]);
+    const s2 = new MountShot(0, 0, 14, 0, 150, 0, 606);
+    s2.fixedUpdate(1 / 60, hooks2);
+    expect(s2.dead).toBe(true);
+    expect(hit).toEqual([150]);
+  });
+
+  it('Santank 炮击 930 重力抛物线（noGravity: false → vy 累加 0.3/tick，1 子步）', () => {
+    const { hooks } = shotHooks();
+    const s = new MountShot(0, 0, 0, -4, 120, 0, 930, { noGravity: false });
+    s.fixedUpdate(1 / 60, hooks);
+    expect(s.vy).toBeCloseTo(-4 + 0.3);   // 930 无 extraUpdates → 单子步
+  });
+});
+
+describe('Santank 46：专属炮击节拍（UpdateEffects :4919-4921 cooldown%10）', () => {
+  it('SetMount 预热 40 + 冷却 %10==0 开火：40 拍开、31-39 充能、30 再开', () => {
+    const m = new MountInstance();
+    m.setMount(46, view());
+    expect(m.abilityCooldown).toBe(40);
+    const target = { x: 300, y: 100, w: 20, h: 40 };
+    const fired: string[] = [];
+    const fire = (_k: 'cannon' | 'bullet') => fired.push(_k);
+    const v = view({ x: 100, y: 100 });
+    // 冷却 40：40%10==0 → 开火（且非 0 拍不重置冷却）
+    expect(m.updateScutlix(v, target, () => {}, fire)).toBe(true);
+    expect(m.abilityCooldown).toBe(40);
+    m.abilityCooldown = 39;
+    expect(m.updateScutlix(v, target, () => {}, fire)).toBe(false);
+    expect(m.abilityCharging).toBe(true);
+    m.abilityCooldown = 30;
+    expect(m.updateScutlix(v, target, () => {}, fire)).toBe(true);
+    // 归零拍：先停充（冷却重置 40）再开火
+    m.abilityCooldown = 0;
+    expect(m.updateScutlix(v, target, () => {}, fire)).toBe(true);
+    expect(m.abilityCooldown).toBe(40);
+    expect(m.abilityCharging).toBe(false);
+  });
+
+  it('fireSantank：冷却 ≤10 伴生炮击 + 恒发子弹（UseAbility case 46 :3256-3280）', () => {
+    const m = new MountInstance();
+    m.setMount(46, view());
+    const shots: Array<{ kind: string; vy: number; vyNeg: boolean }> = [];
+    const v = view({ x: 100, y: 100 });
+    m.abilityCooldown = 5;      // ≤10 → 双弹
+    m.fireSantank(v, 300, 100, (kind, _x, _y, _vx, vy) => shots.push({ kind, vy, vyNeg: vy < 0 }));
+    expect(shots.map((s) => s.kind).sort()).toEqual(['bullet', 'cannon']);
+    expect(shots.find((s) => s.kind === 'cannon')!.vyNeg).toBe(true);   // (0,-4) 上抛
+    shots.length = 0;
+    m.abilityCooldown = 20;     // >10 → 仅子弹
+    m.fireSantank(v, 300, 100, (kind) => shots.push({ kind, vy: 0, vyNeg: false }));
+    expect(shots.map((s) => s.kind)).toEqual(['bullet']);
+  });
+
+  it('AllowDirectionChange：Scutlix 冷却过半才许改向 / Santank 恒许（:604-614）', () => {
+    const m = new MountInstance();
+    m.setMount(9, view());
+    m.abilityCooldown = 15;
+    expect(m.allowDirectionChange).toBe(false);   // 15 ≥ 20/2
+    m.abilityCooldown = 9;
+    expect(m.allowDirectionChange).toBe(true);    // <10
+    const tank = new MountInstance();
+    tank.setMount(46, view());
+    tank.aiming = true;
+    expect(tank.allowDirectionChange).toBe(true);
+  });
+
+  it('aimScutlix 不写 Santank frameExtra（case 46 无眼帧分档 :5420-5464——腿部帧自驱）', () => {
+    const tank = new MountInstance();
+    tank.setMount(46, view({ x: 0, y: 0 }));
+    tank.frameExtra = 25;                         // 瞄准中腿部帧 24-26
+    tank.aimScutlix(view({ x: 0, y: 0, w: 20, h: 42 }), 300, 21);
+    expect(tank.frameExtra).toBe(25);             // 不被眼帧 6-10 覆写
+    expect(tank.aiming).toBe(true);
+    const scut = new MountInstance();
+    scut.setMount(9, view());
+    scut.aimScutlix(view({ x: 0, y: 0, w: 20, h: 42 }), 300, 21);
+    expect(scut.frameExtra).toBe(8);              // Scutlix 仍按角度分档
   });
 });

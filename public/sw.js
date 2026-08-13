@@ -35,7 +35,29 @@ self.addEventListener('activate', (e) => {
 
 self.addEventListener('fetch', (e) => {
   const req = e.request;
-  if (req.method !== 'GET' || !currentVersion || !ASSET_RE.test(new URL(req.url).pathname)) return;
+  if (req.method !== 'GET' || !currentVersion) return;
+  const path = new URL(req.url).pathname;
+  // ② 应用壳(vite 内容寻址 JS/CSS + 文档):网络优先+离线回退——真断网也能进游戏
+  //    (JS 带 hash,旧缓存仅在离线时兜底,在线永远走网络=更新不卡壳)
+  const isShellJs = /^\/assets\/.+\.(js|css|woff2?)$/.test(path);
+  const isDoc = req.destination === 'document' || path === '/' || path.endsWith('.html');
+  if (isShellJs || isDoc) {
+    e.respondWith((async () => {
+      const cache = await getCache();
+      try {
+        const res = await fetch(req);
+        if (res && res.ok) cache.put(req, res.clone());
+        return res;
+      } catch (err) {
+        const hit = await cache.match(req);
+        if (hit) return hit;
+        throw err;
+      }
+    })());
+    return;
+  }
+  // ① 资产前缀:cache-first,未命中网络回填
+  if (!ASSET_RE.test(path)) return;
   e.respondWith((async () => {
     const cache = await getCache();
     const hit = await cache.match(req);
@@ -50,20 +72,29 @@ self.addEventListener('fetch', (e) => {
   })());
 });
 
-async function warm(tag, urls) {
+async function warm(tag, urls, base) {
+  if (lastWarm.running) return;  // 重入守卫:看门狗补发时旧 warm 未死不叠跑
   warmAbort = false;
+  const done0 = base || 0;
+  lastWarm = { done: done0, total: done0 + urls.length, failed: 0, running: true };
   const cache = await getCache();
   // pathname 归一(去前导 /):cache 条目是绝对 URL 的 pathname,清单是相对路径
   const have = new Set((await cache.keys()).map((r) => new URL(r.url).pathname.replace(/^\//, '')));
   const missing = urls.filter((u) => !have.has(u.replace(/^\//, '')));
-  const total = urls.length;
+  const total = done0 + urls.length;
   let done = total - missing.length;
   let failed = 0;
-  const CONC = 6;
+  // 背压:降并发 + 每 400 文件 250ms 喘息(Cache API 磁盘落盘缓冲排空窗口)
+  const CONC = 3;
+  const BREATH_EVERY = 400;
+  const BREATH_MS = 250;
   let cursor = 0;
+  let sinceBreath = 0;
+  const breath = () => new Promise((r) => setTimeout(r, BREATH_MS));
   const workers = Array.from({ length: Math.min(CONC, missing.length) }, async () => {
     for (;;) {
       if (warmAbort) return;
+      if (sinceBreath >= BREATH_EVERY) { sinceBreath = 0; await breath(); }
       const i = cursor++;
       if (i >= missing.length) return;
       const u = missing[i];
@@ -75,19 +106,23 @@ async function warm(tag, urls) {
         failed++;
       }
       done++;
+      sinceBreath++;
+      lastWarm.done = done; lastWarm.failed = failed;
       if ((done & 7) === 0 || done === total) postProgress(tag, done, total, failed);
     }
   });
   await Promise.all(workers);
+  lastWarm = { done, total, failed, running: false };
   postProgress(tag, done, total, failed);
   postMessageToPages({ type: 'warm-done', tag, done, total, failed, aborted: warmAbort });
 }
 
-/** 缓存现状查询(页面初始完成判定/清理检测) */
+/** 缓存现状查询(页面初始完成判定/清理检测;附最近一轮 warm 统计) */
+let lastWarm = { done: 0, total: 0, failed: 0, running: false };
 async function reportStatus() {
   const cache = await getCache();
   const cached = (await cache.keys()).length;
-  postMessageToPages({ type: 'status', version: currentVersion, cached });
+  postMessageToPages({ type: 'status', version: currentVersion, cached, warm: lastWarm });
 }
 
 function postProgress(tag, done, total, failed) {
@@ -101,17 +136,25 @@ function postMessageToPages(msg) {
 
 self.addEventListener('message', (e) => {
   const d = e.data || {};
+  // ★version 无状态化(2026-08-13 实测):SW 会被浏览器在 ~3min 处击杀,重启后
+  // 内存里的 currentVersion 丢失——warm/status 消息必须自带 version 才能选对缓存
+  const msgVersion = typeof d.version === 'string' && d.version ? d.version : null;
+  if (msgVersion && msgVersion !== currentVersion) {
+    currentVersion = msgVersion;
+    cacheReady = null;
+  }
   if (d.type === 'init') {
-    currentVersion = String(d.version || '0');
-    cacheReady = null; // 版本切换后重开
     getCache();
   } else if (d.type === 'warm') {
-    warm(d.tag || '', d.urls || []).catch(() => {});
+    if (!currentVersion) return; // 无版本(未 init 且消息未带)拒绝,防写错缓存
+    // ★必须 waitUntil:否则 message 事件结束后 Chrome 随时终止 SW
+    e.waitUntil(warm(d.tag || '', d.urls || [], d.base || 0).catch(() => {}));
   } else if (d.type === 'warm-cancel') {
     warmAbort = true;
   } else if (d.type === 'ping') {
     postMessageToPages({ type: 'pong', version: currentVersion });
   } else if (d.type === 'status') {
+    if (!currentVersion) return;
     reportStatus();
   }
 });

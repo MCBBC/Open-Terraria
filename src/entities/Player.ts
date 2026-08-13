@@ -33,7 +33,7 @@ import { canHitLine } from '../physics/LineOfSight';
 import { TownShot } from './TownShot';
 import { hslToRgb } from '../player/Appearance';
 import {
-  MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind,
+  MountInstance, SCUTLIX_PROJ_ID, SCUTLIX_SHOT_DAMAGE, inAPlaceWithWind, MountShot,
 } from './Mounts';
 
 // 摔伤参数已对齐 Player.cs:25005-25091（25 格起伤+超格×10 线性，结算在落地段）——原 Maples 三次方曲线已废
@@ -396,14 +396,31 @@ export class Player extends Entity {
     for (const id of this.inv.equippedArmor()) {
       if (id != null) d += ITEM_DEFS[id]?.armor?.defense ?? statOfInternal(id)?.def ?? 0;
     }
-    // 破甲(36)：终值减半（Player.cs:25704 statDefense /= 2——在全部来源加总之后）
+    // 破甲(36)/枯萎护甲(195)：终值各减半（Player.cs:25704/:25708——全部来源加总之后）
     if (this.buffs.has(BuffType.BrokenArmor)) d = Math.floor(d / 2);
+    if (this.buffs.has(BuffType.WitheredArmor)) d = Math.floor(d / 2);
     return d;
   }
 
   /** 装备数值聚合（GrantArmorBenefits/ApplyEquipFunctional/GrantPrefixBenefits 可移植切片）。
    *  覆盖：配饰防御/魔力/回复/移速/近战速度/全系伤害/暴击 + 词缀 62-80 效益；
    *  行为型效果（火箭靴飞行/熔岩护身等）不在内。每帧重算式聚合，幂等 */
+  /** 翅膀染料 vid（Player.cs:9306-9312 UpdateItemDye 链 + :9417 cWings）：
+   *  armor[0..19] 中最后一个 wingSlot>0 槽位 → dye[i%10]（vanity 10-19 后扫
+   *  自然胜出 = 原版同序）；无染料/无翅 → -1 */
+  wingDyeVid(): number {
+    let slot = -1;
+    for (let i = 0; i < 20; i++) {
+      const it = this.inv.armor[i];
+      if (!it) continue;
+      if ((statOfInternal(it.id)?.wing ?? 0) > 0) slot = i % 10;
+    }
+    if (slot < 0) return -1;
+    const dye = this.inv.dye[slot];
+    if (!dye) return -1;
+    return viIdFromKey(ITEM_DEFS[dye.id]?.key ?? '') ?? -1;
+  }
+
   get equipStats(): {
     def: number; mana: number; hpPerSec: number;
     dmgMelee: number; dmgRanged: number; dmgMagic: number;
@@ -957,13 +974,14 @@ export class Player extends Entity {
     return 0;
   }
 
-  /** 坐骑能力维护上下文（Mount.updateMountEffects 用）：Scutlix 索敌候选（CanBeChasedBy
-   *  口径过滤）+ 视线门 + 眼激光发射桶 + 猪鲨崽天气视图（Player.cs:25373 UpdateEffects
-   *  :4884-4930/:4996-5003 对应数据源）。索敌候选惰性组装——仅 Scutlix（9）消费 */
+  /** 坐骑能力维护上下文（Mount.updateMountEffects 用）：Scutlix/Santank 索敌候选
+   *  （CanBeChasedBy 口径过滤）+ 视线门 + 发射桶（606 眼激光 / 930 炮击 / 14 子弹）+
+   *  冲刺尘/山羊火焰 + 猪鲨崽天气视图（Player.cs:25373 UpdateEffects
+   *  :4884-4930/:4996-5003 对应数据源）。索敌候选惰性组装——仅眼炮族（9/46）消费 */
   private mountEffectsCtx(game: GameHooks): import('./Mounts').MountEffectsCtx {
     const st = this.lastStore;
     const raining = !!game.world.weather?.raining;
-    const needTargets = this.mount.type === 9;
+    const needTargets = this.mount.type === 9 || this.mount.type === 46;
     const targets: import('./Mounts').ScutlixTarget[] = [];
     if (needTargets) {
       for (const e of game.enemies()) {
@@ -978,12 +996,49 @@ export class Player extends Entity {
     return {
       scutlixTargets: targets,
       los: (cx, cy, t) => !!st && canHitLine(st, cx, cy, 0, 0, t.x, t.y, t.w, t.h),
+      // 眼激光 606（UseAbility case 9）：MountShot 实体化（extraUpdates 2 → 42px/tick）
       fireScutlixShot: game.spawnTownShot
         ? (x, y, vx, vy) => {
-          game.spawnTownShot?.(new TownShot(x, y, vx, vy, SCUTLIX_SHOT_DAMAGE, 0,
-            SCUTLIX_PROJ_ID, { noGravity: true }));
+          game.spawnTownShot?.(new MountShot(x, y, vx, vy, SCUTLIX_SHOT_DAMAGE, 0, SCUTLIX_PROJ_ID));
         }
         : undefined,
+      // Santank 双炮（UseAbility case 46）：930 炮击（伤 120，重力抛物线 + Item_89）/
+      // 14 子弹（伤 100，直线 + Item_11；自带 light 0.5 走 Game 弹幕点光通道）
+      fireSantankShot: game.spawnTownShot
+        ? (kind, x, y, vx, vy) => {
+          if (kind === 'cannon') {
+            game.spawnTownShot?.(new MountShot(x, y, vx, vy, 120, 0, 930, { noGravity: false }));
+            game.playSfxFile?.('Item_89', 0.2, x, y);
+          } else {
+            game.spawnTownShot?.(new MountShot(x, y, vx, vy, 100, 0, 14));
+            game.playSfxFile?.('Item_11', 0.2, x, y);
+          }
+        }
+        : undefined,
+      // 冲刺尘（UpdateFrame case 10/47/14）：原版 dust 池优先（176/177/179/6 型号语义
+      // + noGravity/scale/fadeIn），缺省回退程序粒子环向爆发
+      dashDust: (x, y, n, spread, type) => {
+        const pool = game.vanillaDust;
+        if (pool) {
+          const sign = Math.sign(this.vx);
+          for (let i = 0; i < n; i++) {
+            const ang = (Math.PI * 2 * i) / n + Math.random() * Math.PI * 2;
+            const dirX = -Math.sin(ang), dirY = Math.cos(ang);   // UnitY 旋转族
+            const k = 0.2 * spread;
+            const d = pool.spawn(x + dirX * k * 40, y + dirY * k * 30, 0, 0, type,
+              dirX * 4 + this.mount.runSpeed() - sign * spread * 2, dirY * 4);
+            if (d) { d.noGravity = true; d.scale = 1 + Math.random() * 0.8; d.fadeIn = Math.random() * 2; }
+          }
+          return;
+        }
+        game.spawnBurst?.(x, y, type === 6 ? '#8C6A4A' : '#D8D0E0', n, 3, 0, Math.PI * 2,
+          { life: 30, grav: 0 });
+      },
+      // 山羊火焰（ParticleOrchestrator WallOfFleshGoatMountFlames :3892-3895——
+      // 编排器未实装，火焰色粒子近似，登记）
+      goatFlames: (x, y) => {
+        game.spawnBurst?.(x, y, '#FF7020', 6, 2.2, -Math.PI / 2, Math.PI / 3, { life: 24, grav: -0.02 });
+      },
       fishron: {
         hp: this.hp, maxHp: this.maxHp,
         inWater: this.inWater, inLava: this.inLava, inHoney: this.inHoney,
@@ -1598,10 +1653,11 @@ export class Player extends Entity {
     } else if (this.buffs.has(BuffType.Webbed)) {
       // 结网(149)（Player.cs:11459-11476）：本帧 velocity 清零（下落中留 1e-6 缓降）、
       // gravity=0、jumpHeight=0、moveSpeed=0（已走 moveSpeedMult）、dash 归零、
-      // 免击退；摘钩链 RemoveAllGrapplingHooks 由 Game 钩爪清理段按帧处理
+      // 免击退；摘钩 RemoveAllGrapplingHooks（:11476——幂等，多帧重复调用无害）
       this.vx = 0;
       this.vy = this.vy !== 0 ? 0.000001 : 0;
       this.fallStartY = null;
+      this.removeAllGrapplingHooks();
     } else if (this.buffs.has(BuffType.VortexDebuff)) {
       // 星旋减益(164)：gravity=0（:24162-24164）+ vy 摆动（:27854-27857：
       // vy×0.8 + cos(cx%120/120×2π)×5×0.2——按世界 X 相位正弦悬浮）
@@ -2907,11 +2963,18 @@ export class Player extends Entity {
           }
         }
       }
-      if (wings === 49) {   // HeroicisWingDust :30143-30204（光照门 z 恒 1 近似：
-        //                 读侧光照 API 未暴露——亮环境等价，暗环境少尘，登记）
+      if (wings === 49) {   // HeroicisWingDust :30143-30204（光照门 z=Remap(亮度,0.2,0.4,0,1)
+        //                 :30166-30168——rgbToHsl(Lighting.GetColor).Z，亮度=(max+min)/2/255）
         const col = { r: 255, g: 255, b: 255, a: 200 };
+        // z 门（:30166-30173）：暗处抑制尘爆/环境尘（z >= NextFloat 才放行）
+        const lc = game.lightAt?.(cx, this.cy);
+        const lightZ = lc
+          ? (Math.max(lc[0], lc[1], lc[2]) + Math.min(lc[0], lc[1], lc[2])) / 2 / 255
+          : 0;
+        const z = Math.min(1, Math.max(0, (lightZ - 0.2) / 0.2));   // Utils.Remap
         if (justSwitched && this.wingFrame === 6 && this.inputJump) {
           for (let i = 0; i < 8; i++) {
+            if (z < Math.random()) continue;            // :30175 !(z < NextFloat())
             const vx0 = (i < 4 ? -20 : -10) * dir, vy0 = 15;
             const d = mk(cx - 2.5 + vx0, this.cy - 2.5 + vy0, 5, 5, 264, 0, 0.6 * (1 + 0.45 * dirF()), col);
             if (d) {
@@ -2923,7 +2986,7 @@ export class Player extends Entity {
             }
           }
         }
-        if (Next(0, 6) === 0) {
+        if (Next(0, 6) === 0 && z >= Math.random()) {   // :30192 z >= NextFloat()
           const d = mk(cx - 15 - 30 * dir, this.cy - 20, 30, 40, 264, 0, 0.6 * (1 + 0.45 * dirF()), col);
           if (d) {
             d.noGravity = true; d.noLight = true; d.noLightEmittance = wingsLogic !== wings;

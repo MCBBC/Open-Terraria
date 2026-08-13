@@ -11,6 +11,15 @@ import type { Player } from './Player';
 import { ENEMY_DEFS, EnemyDef } from '../data/enemies';
 import { vanillaNpc, vanillaSoundFiles, type VanillaNpc } from '../data/vanillaNpcs';
 import { GRAVITY, MAX_FALL_SPEED, TILE } from '../core/constants';
+
+/** 镇静药水(物品 3090)的 npcTypeNoAggro 置位表（Player.cs:14144-14168：
+ *  `if (currentItem.type == 3090)` 下逐项 npcTypeNoAggro[N]=true，共 23 类；
+ *  字段声明 Player.cs:2858。本仓等效语义：Calming buff（vanillaBuff 106）生效
+ *  期间视为置位，消费点 effectiveTargetDist(+1000 罚)与 seekDirX(不面向门)。 */
+export const CALMING_NO_AGGRO_TYPES: ReadonlySet<number> = new Set([
+  1, 16, 59, 71, 81, 138, 121, 122, 141, 147, 183, 184, 204, 225, 244,
+  302, 333, 335, 334, 336, 537, 676, 667,
+]);
 import { canHit } from '../physics/LineOfSight';
 import { moveAndCollide } from '../physics/TileCollision';
 import { Dart } from './Dart';
@@ -786,6 +795,14 @@ export class Enemy extends Entity {
     //  itemAnimation==0 窗代理 = itemAnimTicks<=0 && useTime<=0（Player.ts:1353/:2264
     //  同口径；原版 itemAnimation 为挥舞动画窗，非挥砍武器由 useTime 代）
     const itemAnimZero = player.itemAnimTicks <= 0 && player.useTime <= 0;
+    // 镇静不面向门（NPC.cs:78543-78546 SetTargetTrackingValues）：
+    //   if (player.npcTypeNoAggro[type] && direction != 0) faceTarget = false;
+    // faceTarget=false 时整段朝向更新跳过（direction 保留旧值）——与潜行门同落点，
+    // 原版里它在 :78547 `if (faceTarget)` 外层判定，故先于潜行门生效。
+    if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
+      && !!player.buffs?.has(BuffType.Calming)) {
+      return this.facing;
+    }
     if (itemAnimZero && player.aggro < 0 && this.hadTarget && !this.def.boss) {
       return this.facing;
     }
@@ -804,7 +821,15 @@ export class Enemy extends Entity {
    *  落点是各 AI 族近似索敌门（canTargetPlayerAt）——原版索敌本身无距离概念 */
   effectiveTargetDist(player: Player): number {
     const num = Math.abs(player.cx - this.cx) + Math.abs(player.cy - this.cy);
-    return num - player.aggro;
+    let dist = num - player.aggro;                       // :78491 num -= player.aggro
+    // 镇静罚项（NPC.cs:78492-78495）：player.npcTypeNoAggro[type] && direction != 0
+    // → num += 1000f。npcTypeNoAggro[type] 即镇静 buff 生效位（CALMING_NO_AGGRO_TYPES，
+    // Player.cs:14144-14168 物品 3090 逐项置位 23 类）。★单人语义：NPC.direction
+    // 恒 ±1（本仓 facing 同构，:324 `vx>0?1:-1` / :675 缺省 1，无 0 值）→
+    // 罚项对表内怪恒生效 = 索敌半径 +1000 曼哈顿（canTargetPlayerAt 门等效收窄）。
+    if (CALMING_NO_AGGRO_TYPES.has(this.vanillaId ?? -1) && this.facing !== 0
+      && !!player.buffs?.has(BuffType.Calming)) dist += 1000;
+    return dist;
   }
   /** 各 AI 族索敌门统一入口：有效距离（已按原版减 aggro）< range。
    *  接线现状：flyAI 恶魔眼式 18 格门（原版无此门，为仓内近似；见 flyAI 注） */

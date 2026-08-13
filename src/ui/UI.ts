@@ -865,6 +865,15 @@ export class UI {
         if (moved > 0 || !inv.slots[i]) this.refreshAll();
         return;
       }
+      // NPC 商店开着 → 卖出（GetAlternateClickAction :589-626 → GetSellOrTrash
+      //  ItemSlot.cs:185-196：npcShop>0 时 Sell 优先于垃圾桶；钱币 71-74 返回 null
+      //  = 不动作——与箱子的优先级同原版：chest != -1 分支在 npcShop 之前判定）
+      if (this.game.npcShopOpen) {
+        if (coinIndexOf(cur.id) >= 0) return;   // :191-194 钱币豁免（不卖也不扔）
+        this.game.npcShopSell(i);
+        this.refreshAll();
+        return;
+      }
       // 无箱→垃圾桶（覆盖旧内容，OverrideLeftClick cursorOverride 6 :689-706）
       inv.trash = cur;
       inv.slots[i] = null;
@@ -2491,7 +2500,7 @@ export class UI {
     }
     this.craftListEl.innerHTML = '';
     // 自制 RECIPES 表已随本地物品退役整体移除——合成列表只留原版配方段
-    // （3173 条，Recipe.UpdateRecipeList 主干：环境+材料双门）
+    // （3309 条，Recipe.UpdateRecipeList 主干：环境+材料双门）
     this.refreshVanillaCrafting();
   }
 
@@ -2890,7 +2899,13 @@ export class UI {
     if (!this.npcShop) {
       this.npcShop = new NpcShop(this.root,
         (vid) => this.game?.npcShopBuy(vid),
-        () => { this.npcShop?.close(); this.npcShop = null; });
+        () => {
+          this.npcShop?.close();
+          this.npcShop = null;
+          // Main.npcShop=-1 + 回购记清（Main.UpdateOldNPCShop Main.cs:18056-18064）：
+          // 卖出/回购价依赖开店会话状态，关店必须通知 Game 侧失效
+          this.game?.npcShopClose();
+        });
     }
     // 图标由 UI 侧按原版 id 补(atlas 管线)
     const entries: ShopEntry[] = items.map((it) => ({

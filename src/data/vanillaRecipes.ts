@@ -1,4 +1,5 @@
-// 原版配方数据运行时（tools/extract-recipes.mjs 从 Terarria1456 Recipe.cs 提取，2688 条）。
+// 原版配方数据运行时（tools/extract-recipes.mjs 从 Terarria1456 Recipe.cs 提取，3309 条：
+// 含 for 循环生成段 137 条——蝴蝶罐/蜻蜓罐/武器架/字母雕像/伪装宝箱/串平衡锤）。
 // 可用性 = Recipe.UpdateRecipeList（Recipe.cs:229-258）：环境条件（站点/液体/群系）× 材料计数。
 // 组匹配 = RecipeGroup（id 假偏移 1000000，Recipe.cs:20）——组计数 = 组内所有物品持有数之和。
 import recipesJson from './vanilla-recipes.json';
@@ -41,7 +42,7 @@ export const TILE_COUNTS_AS = DOC.tileCountsAs;
 // ================= decraft 索引表（Recipe.UpdateWhichItemsAreCrafted :15110-15127 1:1） =================
 // 注册序遍历后写 = last-wins（原版同款）; notDecraftable 跳过 IsCrafted;
 // crimson/corruption 配方写各自专属表（GetDecraftingRecipeIndex 按世界 evil 取用）。
-// 惰性构建一次（模块加载即建,3173 条线性扫）。
+// 惰性构建一次（模块加载即建,3309 条线性扫）。
 const IS_CRAFTED = new Map<number, number>();
 const IS_CRAFTED_CRIMSON = new Map<number, number>();
 const IS_CRAFTED_CORRUPTION = new Map<number, number>();

@@ -3,6 +3,9 @@
 // (:528/:561 运行时取值 → "Clock is not defined" 每帧崩渲染循环)
 import { Clock } from '../world/World';
 import { Clock as ClockVal } from '../world/World';
+
+/** 天空实体染色缓存（GetColor RGB × 贴图 multiply 预染；键含 1/16 量化色档） */
+const AMB_TINT_CACHE = new Map<string, HTMLCanvasElement>();
 import { shade, mix } from '../assets/Palette';
 import { LanternNight } from '../world/LanternNight';
 import { UnifiedRandom } from '../core/rng';
@@ -1741,6 +1744,23 @@ export class SkyRenderer {
         const b = e.brightness;
         cr = sr + (255 - sr) * b; cg = sg + (255 - sg) * b; cb = sb + (255 - sb) * b;
       }
+      // GetColor 染色落贴图 RGB（XNA SourceBlend.One 预乘语义：out = texel.RGB × color.RGB）：
+      //  multiply 预染缓存（量化 1/16 限幅防缓存打爆——同火把 Disco 16 档先例）
+      const key8 = `${e.texKey}:${e.frame}:${cr >> 4},${cg >> 4},${cb >> 4}`;
+      let tinted = AMB_TINT_CACHE.get(key8);
+      if (!tinted) {
+        tinted = document.createElement('canvas');
+        tinted.width = fw; tinted.height = fh;
+        const tc = tinted.getContext('2d')!;
+        tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
+        tc.globalCompositeOperation = 'multiply';
+        tc.fillStyle = `rgb(${cr | 0},${cg | 0},${cb | 0})`;
+        tc.fillRect(0, 0, fw, fh);
+        tc.globalCompositeOperation = 'destination-in';
+        tc.drawImage(tex, 0, e.frame * fh, fw, fh, 0, 0, fw, fh);
+        if (AMB_TINT_CACHE.size > 96) AMB_TINT_CACHE.clear();   // 简易容量闸
+        AMB_TINT_CACHE.set(key8, tinted);
+      }
       // 群系前景背景层 alpha 乘子（各族 GetColor 覆盖 ×Main.bgAlphaFrontLayer[i]，索引语义
       //  = Main.cs:58951-59030 的 bgStyle 槽：0/10-12 森林系 1 腐化 2 沙漠 3 丛林 4 海洋
       //  5/13/14 善恶沙漠 6 神圣 7 雪原 8 猩红 9 蘑菇——与 BiomeBackground.bgStyle 同表）
@@ -1752,7 +1772,7 @@ export class SkyRenderer {
       ctx.translate(sx, sy);
       ctx.rotate(e.rotation);
       if (e.dir < 0) ctx.scale(-1, 1);   // SpriteEffects.FlipHorizontally
-      ctx.drawImage(tex, 0, e.frame * fh, fw, fh, -fw * scale / 2, -fh * scale / 2, fw * scale, fh * scale);
+      ctx.drawImage(tinted, -fw * scale / 2, -fh * scale / 2, fw * scale, fh * scale);
       ctx.restore();
     }
     ctx.restore();

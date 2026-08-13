@@ -167,7 +167,8 @@ export function assetsComplete(): boolean {
 
 function postToSw(msg: Record<string, unknown>): void {
   const sw = typeof navigator !== 'undefined' ? navigator.serviceWorker?.controller : undefined;
-  sw?.postMessage(msg);
+  // version 随消息走:SW 被浏览器击杀重启后内存版本丢失,靠消息里的 version 选对缓存
+  sw?.postMessage({ version: state.version, ...msg });
 }
 
 /** 注册 SW 并启动(仅生产构建;?sw=1 强制开、?nosw 关)。幂等。 */
@@ -185,9 +186,18 @@ export async function initAssetCache(): Promise<void> {
     const sw = navigator.serviceWorker.controller ?? reg.active ?? null;
     if (!sw) return;
     state.enabled = true;
+    (globalThis as unknown as { __swAssetCache?: unknown }).__swAssetCache = {
+      state: assetCacheState, warm: warmAllAssets, complete: assetsComplete,
+    }; // 调试/探针句柄
     sw.postMessage({ type: 'init', version: state.version });
-    sw.postMessage({ type: 'status' });
+    postToSw({ type: 'status' });
     navigator.serviceWorker.addEventListener('message', onSwMessage);
+    // SW 被击杀重启后 controller 会换新实例——重新对齐版本并触发看门狗续传
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      postToSw({ type: 'status' });
+      state.warming = false;
+    });
+    startWatchdog();
   } catch { /* 注册失败(老浏览器/隐私模式)→ 降级现状,零影响 */ }
 }
 
@@ -197,24 +207,66 @@ function onSwMessage(e: MessageEvent): void {
     // 初始判定:以 SW 实测缓存数对齐进度(被系统清理→cached 变小→重新补下)
     if (typeof d.cached === 'number' && d.version === state.version) {
       state.done = Math.min(d.cached, state.total);
+      lastProgressAt = Date.now();
       emit();
     }
-  } else if (d.type === 'warm-progress' || d.type === 'warm-done') {
+  } else if (d.type === 'warm-progress') {
+    // done 为绝对值(SW 侧 base 偏移);failed 为当前块计数,跨块累计
     state.done = Math.min(d.done ?? 0, state.total);
-    state.failed = d.failed ?? 0;
-    state.warming = d.type === 'warm-progress';
+    state.failed = chunkFailedAcc + (d.failed ?? 0);
+    state.warming = true;
     state.phase = state.done >= state.total ? 'done' : phaseAt(state.done);
+    lastProgressAt = Date.now();
     emit();
+  } else if (d.type === 'warm-done') {
+    chunkFailedAcc += d.failed ?? 0;
+    state.failed = chunkFailedAcc;
+    if ((d.done ?? 0) > chunkCursor) chunkCursor = d.done;  // 块完成→接力下一块
+    sendChunk();
   }
 }
 
-/** 全量后台下载(进菜单即调;SW 侧 keys() 过滤→已下载跳过/清理只补缺) */
+let lastProgressAt = 0;
+let watchdogTimer: ReturnType<typeof setInterval> | 0 = 0;
+/** 分块接力(2026-08-13 实测 SW 会被浏览器 ~3min 击杀,单发全量 11k 无法跑完):
+ *  页面按 CHUNK 个文件一批发给 SW,块完成(done 消息)自动发下一块;看门狗对
+ *  当前块停滞 >15s 补发(SW keys() 过滤=断点续传)。块粒度 500 → 单块 ~15-30s,
+ *  远低于 SW 死亡窗口;即使整块死亡也只损失当前块,接力自愈 */
+const CHUNK = 500;
+let chunkCursor = 0;      // 下一块在 plan.urls 的起始下标
+let chunkFailedAcc = 0;   // 跨块累计失败
+
+function sendChunk(): void {
+  const slice = plan.urls.slice(chunkCursor, chunkCursor + CHUNK);
+  if (!slice.length) {
+    state.warming = false;
+    state.phase = 'done';
+    state.done = plan.urls.length;
+    emit();
+    return;
+  }
+  state.warming = true;
+  state.phase = phaseAt(state.done);
+  lastProgressAt = Date.now();
+  postToSw({ type: 'warm', tag: 'chunk', urls: slice, base: chunkCursor });
+}
+
+function startWatchdog(): void {
+  if (watchdogTimer || typeof setInterval === 'undefined') return;
+  watchdogTimer = setInterval(() => {
+    if (!state.enabled || state.phase === 'done') return;
+    // 停滞补发(SW 死亡/切后台 throttling):重发当前块,keys() 过滤只补缺
+    if (!state.warming || Date.now() - lastProgressAt > 15_000) sendChunk();
+  }, 5_000) as unknown as ReturnType<typeof setInterval>;
+}
+
+/** 全量后台下载(进菜单即调;分块接力+断点续传,已下载跳过/被清理只补缺) */
 export function warmAllAssets(): void {
   if (!state.enabled) return;
   if (state.warming) return;
-  state.warming = true;
-  state.phase = phaseAt(state.done);
-  postToSw({ type: 'warm', tag: 'all', urls: plan.urls });
+  if (state.done >= state.total && chunkCursor >= plan.urls.length) return; // 已完成(幂等)
+  chunkFailedAcc = 0;
+  sendChunk();
 }
 
 /** DebugReport/探针用:刷新计划(测试注入) */

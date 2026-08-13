@@ -31,7 +31,7 @@
 //   ② Main.squirrelCageFrameOrange（Main.cs:13692-13825）有独立状态机但
 //      TileDrawing 全部 10 张松鼠笼（276/413/414/606-612）只读 squirrelCageFrame
 //      （TileDrawing.cs:5793-5803）——Orange 机无消费方，不实装。
-//   ③ tile 724 CritterAnchor（1.4.4+ 捕获小动物锚桩）放置链已接、拴绳本体未实装：
+//   ③ tile 724 CritterAnchor（1.4.4+ 捕获小动物锚桩）：放置链 + 拴绳本体均已实装——
 //      原版 = DefaultToCapturedCritter（Item.cs:47613-47626，93 件 createTile=724 +
 //      makeNPC）右键放置（ItemID.Sets.PlaceTileOnAltUse ItemID.cs:155；左键 = 放生
 //      ItemCheck_ReleaseCritter Player.cs:43377）→ TECritterAnchor（TileEntity）存
@@ -40,9 +40,9 @@
 //      AI 类，anchorStyle 0-4 = 放置帧档）。本仓等价：93 件物品 → tile 724 +
 //      placeStyle=anchorStyle（items.ts CRITTER_ANCHOR_* 表）；TE 存储以
 //      world/FurnitureItems.ts 'critter_anchor' 单槽记录近似（随世界存档持久化），
-//      放置/破坏链见 Game.ts tryPlace/breakTile 专用分支；【未实装】= 拴绳小动物
-//      实体（游走 AI + 绳索绘制）——全量需 LeashedEntity.Registry + 逐族 AI，
-//      另立项。
+//      放置/破坏链见 Game.ts tryPlace/breakTile 专用分支；拴绳小动物本体（19 原型
+//      注册表 + walker/flyer/jumper 三引擎 + 拈绳风筝族）= entities/LeashedCritter.ts。
+//      残余 GAP（KiteLogic/DrawKite 近似、DrawBubble、逐型 FindFrame）登记在该文件尾。
 import { tileAnim } from './TileAnim';
 
 /** Main.cageFrames（Main.cs:1499）：每族 25 个独立槽位帧态 */

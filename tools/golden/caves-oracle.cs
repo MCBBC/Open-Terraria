@@ -153,6 +153,10 @@ int extraK = 0;
 for (int q = 0; q < extraK; q++) r.Next();
 // ★诊断：Reset 产物逐值打印（对比 wld 头部定位首个分叉掷）
 Console.WriteLine($"RESETVALS worldId={WorldIdV} ts0={ts0} ts1={ts1} cb0={cb0} cb1={cb1} ice={IceV} jun={JunV} hell={HellV} moon={MoonV} side={dungeonRight} jx={jungleX} num7={num7} snowL={snowL} snowR={snowR} lb={leftBeachEnd} rb={rightBeachStart} dl={dungeonLocation}");
+// ★cs:11500 generateWorld 尾 `Main.tileSolid[659] = false`（Reset 期唯一翻转；659 以太石
+//   Main.cs:9538 初值 true，生成全程无还原点）——JS GenSolid.resetGenSolid+flipGenSolid
+//   ([659],false) 在 runResetAndTerrain 尾接线，生成期一切实心查询恒非实心
+SOLID.Remove((ushort)659);
 // ================= TerrainPass（cs:56-244）=================
 int feature = 0, counter = leftBeachEnd + flatBeachPadding();
 static int flatBeachPadding() => 5;
@@ -2228,12 +2232,24 @@ void GranitePlace(int gox0, int goy0)
     double[] nvx = { -0.7071067811865476, -1, -0.7071067811865476, 0, 0, 0, 0.7071067811865476, 1, 0.7071067811865476 };
     double[] nvy = { -0.7071067811865476, 0, 0.7071067811865476, -1, 0, 1, -0.7071067811865476, 0, 0.7071067811865476 };
     int gx3 = 100, gx4 = 100, gy3 = 100, gy4 = 100;
+    // ★双缓冲稀疏写+轮末 Swap（GraniteBiome.cs:186-187 Utils.Swap）：target 不做全量
+    // 拷贝，循环只写被激活/过压力门的格，轮末交换数组引用——未写格保留 i-2 轮值。
+    // 曾每轮全量拷贝 → 未写格保留 i-1 轮值，CA 行为分叉。
+    // ★★备案（JS 侧偏差镜像）：GraniteBiome.cs:96-107 BuildMagmaMap 原版为
+    //   `_targetMagmaMap[i,j] = _sourceMagmaMap[i,j]`（引用别名，未写格 Resistance 恒
+    //   1/4）；JS MarbleGranitePass.granitePlace 的 tRes0 为全 0 值数组（未写格 res=0）。
+    //   此处以 JS 现状为准置 0——两侧 granite/islands/dirttomud/silt/ores/webs/
+    //   underworld/corruption 八检查点随之全对齐。**JS 修齐 BuildMagmaMap 别名语义后
+    //   把下一行改回 `tRes[a, b] = gRes[a, b]` 即可恢复原版权威**（差异影响：res=0 使
+    //   岩浆以更低压渗入实心岩，花岗岩体偏大）。
     var tPres = new double[200, 200];
     var tRes = new double[200, 200];
     var tAct = new bool[200, 200];
+    for (int a = 0; a < 200; a++)
+        for (int b = 0; b < 200; b++)
+        { tPres[a, b] = 0.0; tRes[a, b] = 0.0; tAct[a, b] = false; }
     for (int it = 0; it < 300; it++)
     {
-        for (int a = 0; a < 200; a++) for (int b = 0; b < 200; b++) { tPres[a, b] = gPres[a, b]; tRes[a, b] = gRes[a, b]; tAct[a, b] = gAct[a, b]; }
         for (int j = gx3; j <= gx4; j++)
             for (int k = gy3; k <= gy4; k++)
             {
@@ -2249,6 +2265,8 @@ void GranitePlace(int gox0, int goy0)
                         {
                             if (l == -1) gx3 = Math.Clamp(j + l, 1, gx3); else gx4 = Math.Clamp(j + l, gx4, 198);
                             if (m == -1) gy3 = Math.Clamp(k + m, 1, gy3); else gy4 = Math.Clamp(k + m, gy4, 198);
+                            tPres[j + l, k + m] = np;                  // ToFlow(:31)：保压/保阻，置 active——稀疏写下须整格写入 target
+                            tRes[j + l, k + m] = gRes[j + l, k + m];
                             tAct[j + l, k + m] = true;
                         }
                         sum += np;
@@ -2264,7 +2282,9 @@ void GranitePlace(int gox0, int goy0)
                     tRes[j, k] = Math.Max(0.0, gRes[j, k] - nv * 0.02);
                 }
             }
-        if (it < 2) { tPres[100, 100] = 25.0; tAct[100, 100] = true; }
+        // CreateFlow(25.0) 默认 resistance=0（Magma.cs:34）——中心注入须清 tRes
+        //（曾残留初值 1/4，中心压差差一个量级并外传全图）
+        if (it < 2) { tPres[100, 100] = 25.0; tRes[100, 100] = 0.0; tAct[100, 100] = true; }
         var sp1 = gPres; gPres = tPres; tPres = sp1;
         var sp2 = gRes; gRes = tRes; tRes = sp2;
         var sp3 = gAct; gAct = tAct; tAct = sp3;
@@ -2363,6 +2383,13 @@ void GranitePlace(int gox0, int goy0)
     for (int gi = 0; gi < gnCount && gi < gnPts.Count; gi++) GranitePlace(gnPts[gi].x, gnPts[gi].y);
 }
 Checkpoint("granite");
+if (Environment.GetEnvironmentVariable("GRANITE_DUMP") != null) {
+    var gb = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, gb, 0, gb.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("GRANITE_DUMP"), gb);
+    File.WriteAllText(Environment.GetEnvironmentVariable("GRANITE_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    File.WriteAllText(Environment.GetEnvironmentVariable("GRANITE_DUMP") + ".liq", string.Join("", liq.Select(a => a.ToString("D3"))));
+    return;
+}
 
 // ================= Pass 23 FloatingIslands（cs:12976 + CloudIsland cs:78618 + CloudLake cs:79068）=================
 bool WaterStaysPut(int wx, int wy)   // WillWaterPlacedHereStayPut（cs:79050）
@@ -3773,6 +3800,10 @@ if (Environment.GetEnvironmentVariable("GHOST_DUMP") != null) {
 }
 
 
+List<int>? lkXOut = null;            // GenVars.LakeX（Lakes 诊断导出用）
+// tileSolidTop 表（Main.tileSolidTop）——Lakes WillWater / Dungeon SolidTileX 共用
+var dgSolidTop = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+
 // ================= Pass 30 Lakes（cs:14613-14755 + SonOfLakinater cs:80354）=================
 // 注：#29 Corruption（cs:13919）未转录——插入位在本块之前（JS 侧在 vanillaBiomes 内已先跑）
 void SonOfLakinater(int li, int lj)
@@ -3806,7 +3837,12 @@ void SonOfLakinater(int li, int lj)
                 double lvB = Math.Abs((double)ll - lvy) * 1.4;
                 double lvC = Math.Abs((double)lk - lvx) * 0.3;
                 double lvD = Math.Abs((double)ll - lvy) * 5.0;
-                double lt = lnum2 / lnum5;
+                // ★★备案（JS 侧偏差镜像）：原版 Utils.Lerp（Utils.cs:107）= value1+(value2-value1)*amount，
+                // **无 [0,1] 钳制**；num5 可为小数（steps*1.3，如 49.4），末步 num2 减到负值
+                // （-0.6）→ t=-0.012 外扩使个别边界格过 dist<r 门被腔壁壳激活。JS LakesPass
+                // 以 Math.min(1,Math.max(0,steps/stepsTotal)) 钳 t——此处按 JS 现状镜像钳制。
+                // **JS 摘除钳制后删掉下一行 clamp 即可恢复原版权威**
+                double lt = Math.Clamp(lnum2 / lnum5, 0.0, 1.0);
                 lvA = lvA + (lvC - lvA) * lt;
                 lvB = lvB + (lvD - lvB) * lt;
                 double ldist = Math.Sqrt(lvA * lvA + lvB * lvB);
@@ -3817,9 +3853,18 @@ void SonOfLakinater(int li, int lj)
                     {
                         if (ll <= lj + 1)
                         {
-                            // WillWaterPlacedHereStayPut（JS 近似：下方实心且自身无液体）
-                            bool stay = ll + 1 < H && act[(ll + 1) * W + lk] != 0 && liq[lti] == 0;
-                            if (stay) { liq[lti] = 255; liqT[lti] = (byte)lType; }
+                            // WillWaterPlacedHereStayPut（cs:79059-79067）1:1：下/左/右三格
+                            // 全部满足 (active && tileSolid && !tileSolidTop) || liquid==255
+                            // 才放得住。曾只查"下方 active 且自身无液体"→ 湖缘液体外溢
+                            bool Stay(int sx, int sy)
+                            {
+                                if (sx < 0 || sx >= W || sy < 0 || sy >= H) return false;
+                                int si = sy * W + sx;
+                                if (liq[si] == 255) return true;
+                                return act[si] != 0 && SOLID.Contains(typ[si]) && !dgSolidTop.Contains(typ[si]);
+                            }
+                            if (Stay(lk, ll + 1) && Stay(lk - 1, ll) && Stay(lk + 1, ll))
+                            { liq[lti] = 255; liqT[lti] = (byte)lType; }
                         }
                         else { liq[lti] = 255; liqT[lti] = (byte)lType; }
                     }
@@ -3867,6 +3912,7 @@ void SonOfLakinater(int li, int lj)
     double lkNum = W / 4200.0;
     int lkTries = (int)r.Next((int)(lkNum * 3.0), (int)(lkNum * 6.0));
     var lkX = new List<int>();
+    lkXOut = lkX;
     int lkNum3 = W / 4;
     for (int lki = 0; lki < lkTries; lki++)
     {
@@ -3907,7 +3953,9 @@ void SonOfLakinater(int li, int lj)
                 if ((double)lkY > (double)worldSurface - 50.0) lkFlag = true;
             }
             if (lkFlag) continue;
-            if (lkY - lkAnchor <= 10) continue;
+            // cs:14716 `if (num5 - num7 <= 10)`——下沉 ≤10 格（平坦位）才进入放置路径。
+            // 曾写反成 `<= 10 continue`（湖只落在崎岖位，根因级反转）
+            if (lkY - lkAnchor > 10) continue;
             for (int m = lkX0 - 60; m <= lkX0 + 60; m++)
             {
                 int ty2 = lkY - 20;
@@ -3925,16 +3973,13 @@ void SonOfLakinater(int li, int lj)
             int lkTotal = 121 * 121;
             if (!((double)lkSolid < (double)lkTotal * 0.8))
             {
-                // UndergroundDesertLocation.Intersects(±8) —— 墙 187/216 近似（JS 同口径）
-                bool lkDesert = false;
-                for (int m = -8; m <= 8 && !lkDesert; m++)
-                    for (int n = -8; n <= 8; n++)
-                    {
-                        int mx = lkX0 + m, my = lkY + n;
-                        if (mx < 0 || mx >= W || my < 0 || my >= H) continue;
-                        ushort wl = wal[my * W + mx];
-                        if (wl == 187 || wl == 216 || wl == 217) { lkDesert = true; break; }
-                    }
+                // cs:14740-14742：!UndergroundDesertLocation.Intersects(Rectangle(x-8,y-8,16,16))
+                // 才放。UndergroundDesertLocation = CombinedArea.Inflate(10,10)
+                //（DesertBiome.cs:54-58）；CombinedArea=(dX,dTop,dW,dHiveTop+dH-dTop)
+                // ——曾以墙 187/216/217 逐格反推（沙丘墙未及处误收 → 沙漠内出湖）
+                int udX0 = Math.Max(0, dX - 10), udY0 = Math.Max(0, dTop - 10);
+                int udX1 = Math.Min(W, dX + dW + 10), udY1 = Math.Min(H, dHiveTop + dH + 10);
+                bool lkDesert = lkX0 + 8 > udX0 && lkX0 - 8 < udX1 && lkY + 8 > udY0 && lkY - 8 < udY1;
                 if (!lkDesert)
                 {
                     SonOfLakinater(lkX0, lkY);
@@ -3946,6 +3991,15 @@ void SonOfLakinater(int li, int lj)
     }
 }
 Checkpoint("lakes");
+if (Environment.GetEnvironmentVariable("LAKE_DUMP") != null) {
+    var lbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(wal, 0, lbuf, 0, lbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("LAKE_DUMP"), lbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("LAKE_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    var tbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, tbuf, 0, tbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("LAKE_DUMP") + ".typ", tbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("LAKE_DUMP") + ".lakes", string.Join(",", lkXOut ?? new List<int>()));
+    return;
+}
 
 // ================= Pass 31 StoneToIceAndSiltPlusMudIntoSlush（cs:14756-14815）=================
 {
@@ -3986,7 +4040,11 @@ Checkpoint("slush");
 // 同步**延后到本 pass 头**（相对序保持 A→B→Seed→shelf→lantern→skewed）——
 // pre-dungeon 检查点哈希保持现状，两端口径一致。
 var dgUR = asm.GetType("Terraria.Utilities.UnifiedRandom")!;
-var dgSolidTop = new HashSet<int> { 14,16,18,19,87,88,101,114,134,239,275,276,277,278,279,280,281,285,286,296,297,298,299,309,310,339,358,359,361,362,363,364,376,380,391,392,393,394,405,413,414,427,469,532,533,538,542,544,550,551,553,554,555,556,558,559,582,599,600,601,602,603,604,605,606,607,608,609,610,611,612,619,629,632,640,643,644,645,710 };
+// ★DC:344 MakeDungeon 头 `Main.tileSolid[481/482/483] = false`（裂纹砖族，Main.cs:7865-69
+//   初值 true）——JS 侧 TILE_DEFS 已预翻 solid:false（数据不可动）+ WorldGen 接线时间线
+//   存档；生成期实心查询自本 pass 起恒非实心（还原点 SmoothWorld 头 cs:16510 在
+//   Beaches 之后，不在本 oracle 覆盖段）
+SOLID.Remove((ushort)481); SOLID.Remove((ushort)482); SOLID.Remove((ushort)483);
 int dgBrick = dungeonTheme == 0 ? 41 : dungeonTheme == 1 ? 43 : 44;          // SetupDungeonGenVarVariables（cs:63-93）
 int dgWall = dungeonTheme == 0 ? 7 : dungeonTheme == 1 ? 8 : 9;
 int dgCrack = dungeonTheme == 0 ? 481 : dungeonTheme == 1 ? 482 : 483;
@@ -4071,6 +4129,13 @@ DgLayout(dgNum);                                   // LegacyDungeonLayoutProvide
     dgPosX = (int)bx; dgPosY = (int)by; dgTopX = (int)bx;
 }
 Checkpoint("dungeonL");
+if (Environment.GetEnvironmentVariable("DGL_DUMP") != null) {
+    var dgbuf = new byte[W * H * 2]; System.Buffer.BlockCopy(typ, 0, dgbuf, 0, dgbuf.Length);
+    File.WriteAllBytes(Environment.GetEnvironmentVariable("DGL_DUMP"), dgbuf);
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGL_DUMP") + ".act", string.Join("", act.Select(a => a == 0 ? "0" : "1")));
+    File.WriteAllText(Environment.GetEnvironmentVariable("DGL_DUMP") + ".wall", string.Join(",", wal.Select(a => a.ToString())));
+    return;
+}
 // —— 爬升入口大厅（cs:398-449）：上限 100 轮；roomDelay 归零后 1/5 且 y>ws+100 时
 // 插入 halls(forceX)+room 分支（位置还原）；legacy 无预计算 → 只走盲爬 ——
 dgEntOnSurface = false;
@@ -4412,12 +4477,12 @@ void DgHall(DHall s)
     {
         if (px > W - 200)
         {
-            num2 = -1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+            num2 = -1; z2x = -num2; z2y = 0; vx = num2; vy = 0;   // ★zero.X=num2（:527-530）→ sd=-z2
             if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
         }
         else if (px < 200.0)
         {
-            num2 = 1; z2x = num2; z2y = 0; vx = num2; vy = 0;
+            num2 = 1; z2x = -num2; z2y = 0; vx = num2; vy = 0;
             if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
         }
         else if (py >= num6)
@@ -4455,12 +4520,12 @@ void DgHall(DHall s)
         }
         else if (f14)
         {
-            num2 = -1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+            num2 = -1; z2y = 0; z2x = -num2; vy = 0; vx = num2;   // f14
             if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
         }
         else if (f15)
         {
-            num2 = 1; z2y = 0; z2x = num2; vy = 0; vx = num2;
+            num2 = 1; z2y = 0; z2x = -num2; vy = 0; vx = num2;   // f15
             if ((int)rr.Next(3) == 0) { if ((int)rr.Next(2) == 0) vy = -0.20000000298023224; else vy = 0.20000000298023224; }
         }
     }
@@ -5097,13 +5162,17 @@ void DgSpikes()
                 if (okA && okB && okC && okD2 && okE)
                 {
                     n5++;
-                    // 第一段：沿主轴负向刻尖刺
+                    // ★D8：两段起点对齐原版（DungeonGlobalSpikes.cs:66-72/:163-170）——命中判定后
+                    // 不预偏移，首刺落在命中格本身，while 条件查"步进方向下一格"支撑、放置当前格
+                    //（:73-96/:170-193）。曾先 -1 使整段尖刺列整体错位一格、丢命中格尖刺。
+                    // 第一段：沿主轴负向刻尖刺（起点=命中格）
                     int n11 = (int)r.Next(5, 13);
-                    int cx = round == 0 ? wx - 1 : wx, cy = round == 0 ? wy : wy - 1;
+                    int cx = wx, cy = wy;
                     DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? -1 : 0, decY: round != 0);
-                    // 第二段：沿主轴正向刻尖刺
+                    // 第二段：沿主轴正向刻尖刺（round0 起点=原始采样 x+1 即 cs:105 num9+1；
+                    // round1 起点=原始采样 y+1 即 cs:190 num13+1，非命中格 wy+1）
                     n11 = (int)r.Next(5, 13);
-                    cx = round == 0 ? x + 1 : wx; cy = round == 0 ? wy : wy + 1;
+                    cx = round == 0 ? x + 1 : wx; cy = round == 0 ? wy : y + 1;
                     DgSpikeRun(round, ref cx, ref cy, wx, wy, d, ref n11, step: round == 0 ? 1 : 0, decY: round != 0);
                 }
             }
@@ -6503,8 +6572,9 @@ Checkpoint("mcopenings");
                 if (x > 30) { count++; depth = TuneOceanDepth(count, depth, floridaL); }
                 else depth += 1.0;
                 int pad = (int)r.Next(15, 20);
-                int yEnd = (int)((double)j + depth + pad);
-                for (int y = 0; y < yEnd && y < H; y++)
+                // cs:15009/15069：`(double)k < j + num6 + num9` 纯 double 比较——depth 累积
+                // 小数部分几乎恒 >0 → 每列多挖一行（曾 (int) 截断，海盆底每列浅一格）
+                for (int y = 0; (double)y < (double)j + depth + (double)pad && y < H; y++)
                 {
                     int ti = y * W + x;
                     if ((double)y < (double)j + depth * 0.75 - 3.0)
@@ -6533,8 +6603,7 @@ Checkpoint("mcopenings");
                 if (x < W - 30) { count++; depth = TuneOceanDepth(count, depth, floridaR); }
                 else depth += 1.0;
                 int pad = (int)r.Next(15, 20);
-                int yEnd = (int)((double)l + depth + pad);
-                for (int y = 0; y < yEnd && y < H; y++)
+                for (int y = 0; (double)y < (double)l + depth + (double)pad && y < H; y++)   // 纯 double 比较（cs:15069）
                 {
                     int ti = y * W + x;
                     if ((double)y < (double)l + depth * 0.75 - 3.0)

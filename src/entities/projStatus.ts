@@ -3,6 +3,7 @@
 // Terarria1456 源码提取:{"<projType>": [{buff, chance, durMin, durMax}]}(tick)。
 // 复杂块(ai[1] 定向/套装门 setHuntressT2/配件门 frostBurn·magmaStone/区间门)未入表,
 // 见提取脚本 SKIP 清单——后续按需人工补。
+import { npcImmuneTo } from '../data/vanillaNpcImmunity';
 import tableJson from '../data/vanilla-projstatus.json';
 import { BuffType } from '../stats/Buffs';
 
@@ -77,6 +78,10 @@ export function applyProjStatus(projId: number | undefined, enemy: StatusEnemy):
       hit = Math.random() < en.chance;
     }
     if (!hit) continue;
+    // NPC buffImmune 门（NPC.cs:90968 AddBuff 免疫即 return + NPCID.Sets
+    // .DebuffImmunitySets 派生——2026-08-13 D5）
+    const vId = (enemy as { vanillaId?: number }).vanillaId;
+    if (vId !== undefined && vId > 0 && npcImmuneTo(vId, en.buff)) continue;
     const field = SUPPORTED[en.buff];
     if (!field) continue; // 未实装 buff,登记见上
     const ticks = en.durMin + Math.floor(Math.random() * (en.durMax - en.durMin + 1));

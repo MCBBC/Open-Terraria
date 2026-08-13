@@ -6,6 +6,7 @@ import type { TileStore } from '../../TileStore';
 import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T } from '../../../data/tiles';
+import { genSolidType } from './GenSolid';
 
 /** Ocean Sand:海滩铺沙 + 金字塔候选(L4962-5042) */
 export function runOceanSandPass(st: TileStore, rng: RNG, gs: GenState): void {
@@ -207,7 +208,8 @@ function solidTile(st: TileStore, x: number, y: number): boolean {
   const i = st.idx(x, y);
   if (!st.flags[i]) return false;
   const d = TILE_DEFS[st.type[i]];
-  return !!d && d.solid;
+  // tileSolid 走 GenSolid（本 pass 时点 484 滚动仙人掌 cs:12537 已翻非实心）
+  return genSolidType(st.type[i]);
 }
 
 /** 原版只写 type/active/halfBrick/slope（cs:10350-10403），不动 frame（后续整帧 pass 刷） */

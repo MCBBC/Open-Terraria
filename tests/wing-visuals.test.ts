@@ -5,10 +5,12 @@
 import { describe, it, expect } from 'vitest';
 import {
   wingDrawOf, stepWingFrame, wingDrawFrame, wingAnchorForRow, HEADGEAR_ZERO_ROWS,
+  stealthFactors,
   FLAP_HOVER_SET, VISUAL_HOVER_SET,
   type WingFrameState, type WingFrameInput,
 } from '../src/data/vanillaWingVisuals';
 import { VanillaDust } from '../src/fx/VanillaDust';
+import { dyeEmulationOf, effectDyeIds, applyDyeEmulation } from '../src/data/vanillaDyes';
 
 function st(frame = 0, counter = 0): WingFrameState { return { frame, counter }; }
 
@@ -420,5 +422,99 @@ describe('VanillaDust：UpdateDust 生命周期（:423-2450）', () => {
     const lit = [...vd.each(false)].map((d) => d.type).sort((a, b) => a - b);
     expect(fb).toEqual([6, 62]);
     expect(lit).toEqual([55, 261]);
+  });
+});
+
+// ===================== stealth 视觉因子（PlayerDrawSet :1523-1660） =====================
+describe('stealthFactors 三分支', () => {
+  it('无潜行态全 1（settled/clamp/skinMul=1，无 vortexTint）', () => {
+    const f = stealthFactors(0, false, false, false);
+    expect(f).toEqual({ settled: 1, clamp: 1, vortexTint: null, skinMul: 1 });
+  });
+  it('3106/蘑菇矿：settled=(1+s·10)/11、skinMul=s²（s 下限 0.03）', () => {
+    const f = stealthFactors(0.5, true, false, false);
+    expect(f.settled).toBeCloseTo((1 + 0.5 * 10) / 11, 6);
+    expect(f.clamp).toBe(0.5);
+    expect(f.skinMul).toBe(0.25);
+    expect(f.vortexTint).toBeNull();
+    const lo = stealthFactors(0, false, true, false);
+    expect(lo.clamp).toBe(0.03);            // :1527-1529 下限
+    expect(lo.settled).toBeCloseTo((1 + 0.3) / 11, 6);
+  });
+  it('星璇：settled=s′、secondColor tint=Lerp(White→(0,0.12,0.16),1−s′)', () => {
+    const f = stealthFactors(0.4, false, false, true);
+    expect(f.settled).toBe(0.4);
+    const k = 0.6;
+    expect(f.vortexTint).toEqual([1 - k, 1 - 0.88 * k, 1 - 0.84 * k]);
+    expect(f.skinMul).toBeCloseTo(0.16, 6);
+  });
+});
+
+// ===================== cWings 染料（DyeInitializer.cs 116 条） =====================
+describe('vanillaDyes 表与仿真', () => {
+  it('基础族展开（:26-29）：1007 红 → base/黑+12/亮+31(色×0.5+0.5)/银+44', () => {
+    const base = dyeEmulationOf(1007)!;
+    expect(base.kind).toBe('solid');
+    expect(base.color).toEqual([1, 0, 0]);
+    expect(base.saturation).toBe(1.2);
+    const black = dyeEmulationOf(1019)!;    // 1007+12
+    expect(black.color).toEqual([1, 0, 0]);
+    const bright = dyeEmulationOf(1038)!;   // 1007+31
+    expect(bright.color).toEqual([1, 0.5, 0.5]);
+    const silver = dyeEmulationOf(1051)!;   // 1007+44
+    expect(silver.color).toEqual([1, 0, 0]);
+  });
+  it('渐变族/亮度族分类 + effect 缺口跳过', () => {
+    expect(dyeEmulationOf(1031)!.kind).toBe('gradient');          // 红黄渐变
+    expect(dyeEmulationOf(1031)!.secondary).toEqual([1, 1, 0]);
+    expect(dyeEmulationOf(3558)!.kind).toBe('bright');            // 1.5 提亮
+    expect(dyeEmulationOf(1066)).toBeNull();                      // 彩虹 = effect
+    expect(dyeEmulationOf(4778)).toBeNull();                      // HallowBoss
+    expect(dyeEmulationOf(3026)).toBeNull();                      // 反射
+    expect(effectDyeIds().length).toBeGreaterThan(30);
+  });
+  it('仿真公式：solid=灰度×色+sat 回混；bright=×色；透明像素不动', () => {
+    // 中灰 (128,128,128) 红染 solid：lum=0.502 → baseR=128/baseG=0；sat=1.2 回混
+    const d = new Uint8ClampedArray([128, 128, 128, 255, 0, 0, 0, 0]);
+    applyDyeEmulation(d, { kind: 'solid', color: [1, 0, 0], saturation: 1.2 });
+    expect(d[0]).toBeCloseTo(128, 1);              // R 不变（lum×1=same）
+    expect(d[1]).toBeCloseTo(128 * 1.2, 0);        // 0 + 128×1.2
+    expect(d[2]).toBe(d[1]);
+    // 第二像素透明不动
+    expect(d[4]).toBe(0);
+    // bright 0.6
+    const b = new Uint8ClampedArray([100, 100, 100, 255]);
+    applyDyeEmulation(b, { kind: 'bright', color: [0.6, 0.6, 0.6], saturation: 1 });
+    expect(b[0]).toBeCloseTo(60, 0);
+  });
+});
+
+// ===================== wingDyeVid（Player.cs:9306-9312 cWings 链） =====================
+describe('Player.wingDyeVid 染料槽派生', () => {
+  it('armor 0..19 最后 wingSlot>0 槽 → dye[i%10]（vanity 胜出）', { timeout: 30000 }, async () => {
+    const { Player } = await import('../src/entities/Player');
+    const { Inventory } = await import('../src/items/Inventory');
+    const p = new Player(0, 0, new Inventory());
+    // vi_492 恶魔之翼（wing=1）进功能槽 3；vi_1007 红染料进 dye[3]
+    const key = Object.keys((globalThis as { __swItems?: Record<string, number> }).__swItems ?? {});
+    void key;
+    const { ITEM_DEFS } = await import('../src/data/items');
+    const { viIdFromKey } = await import('../src/data/vanillaItemCombat');
+    const find = (vid: number) => {
+      for (const [id, d] of Object.entries(ITEM_DEFS)) {
+        if (d && viIdFromKey(d.key) === vid) return +id;
+      }
+      return -1;
+    };
+    const wingId = find(492), redDye = find(1007), blueDye = find(1015);
+    expect(wingId).toBeGreaterThan(0);
+    p.inv.armor[3] = { id: wingId, stack: 1 } as never;
+    expect(p.wingDyeVid()).toBe(-1);                    // 无染料
+    p.inv.dye[3] = { id: redDye, stack: 1 } as never;
+    expect(p.wingDyeVid()).toBe(1007);
+    // vanity 槽 13（10+3）放同款翅膀 + 蓝 → vanity 胜出
+    p.inv.armor[13] = { id: wingId, stack: 1 } as never;
+    p.inv.dye[3] = { id: blueDye, stack: 1 } as never;
+    expect(p.wingDyeVid()).toBe(1015);
   });
 });

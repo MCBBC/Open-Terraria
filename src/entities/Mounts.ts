@@ -17,6 +17,52 @@
 //             RunSpeed→swimSpeed、跳跃 +5 高 /+2.5 速（Mount.JumpHeight/JumpSpeed）。
 import mountJson from '../data/vanilla-mounts.json';
 import { TILE_DEFS } from '../data/tiles';
+import { WALL_HOUSE } from '../world/Housing';
+import { TownShot } from './TownShot';
+import { TILE } from '../core/constants';
+import { projOverlap, playEnemyHitSound } from './projTargets';
+import { projectileData } from '../data/vanillaProjectiles';
+import type { GameHooks } from './types';
+
+// ---- 原版 tile id（sheet）集 → 本仓内部 id 集（CanKillTile/CanPoundTile 子集用） ----
+//  内部 id 与 sheet 非一一对应（同 sheet 变体共享判定）——按 TILE_DEFS.vanilla.sheet
+//  全表扫描展开，与 Wiring.ts canKillTile 同源口径
+const idsWithSheets = (...sheets: number[]): Set<number> => {
+  const want = new Set(sheets);
+  const out = new Set<number>();
+  for (let i = 0; i < TILE_DEFS.length; i++) {
+    if (want.has(TILE_DEFS[i].vanilla?.sheet ?? -1)) out.add(i);   // 数组下标 = 内部 id
+  }
+  return out;
+};
+/** TileID.Sets.IsATreeTrunk（TileID.cs:161）——CanKillTile 上方树干承载检查 */
+const TREE_TRUNK_IDS = idsWithSheets(5, 72, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634);
+/** CanKillTile 上方承载族（WorldGen.cs:62289-62310：宝箱/祭坛/熔炉/倒木等）+ 棕榈 323 */
+const SUPPORT_ABOVE_IDS = idsWithSheets(21, 26, 72, 77, 88, 467, 488);
+const PALM_ABOVE_IDS = idsWithSheets(323);
+const DRESSER_ABOVE_IDS = idsWithSheets(80);
+/** WorldGen.ForbidsSloping（:81484-81505）——CanPoundTile 上格禁坡表 */
+const FORBIDS_SLOPING_IDS = idsWithSheets(21, 26, 77, 88, 235, 237, 441, 467, 468, 470, 475, 488, 597);
+/** CanPoundTile 类型黑名单（:81448-81459） */
+const POUND_BLACKLIST_IDS = idsWithSheets(10, 48, 137, 232, 380, 387, 388, 476, 484);
+/** TileID.Sets.Boulders（TileID.cs:195） */
+const BOULDER_IDS = idsWithSheets(138, 484, 664, 665, 711, 712, 713, 714, 715, 716);
+/** TileID.Sets.PreventsTileRemovalIfOnTopOfIt（TileID.cs:169）——CheckTileBreakability
+ *  子项（WorldGen.cs:62496-62499） */
+const PREVENTS_REMOVAL_ABOVE_IDS = idsWithSheets(5, 323, 72, 488, 26, 583, 584, 585, 586, 587, 588, 589, 596, 616, 470, 475, 634);
+/** WorldGen.IsAContainer（WorldGen.cs:48832-48837：BasicDresser 88 ∪ {470 模特,475 帽架}
+ *  ∪ BasicChest {21,467} ∪ BasicChestFake {441,468}） */
+const CONTAINER_IDS = idsWithSheets(88, 470, 475, 21, 467, 441, 468);
+/** TileID.Sets.BasicChest（TileID.cs:315）——CanKillTile case 21/467 锚点归一（%2） */
+const BASIC_CHEST_IDS = idsWithSheets(21, 467);
+/** 梳妆台 88（TileID.cs:319 BasicDresser）——CanKillTile case 88 锚点归一（%3） */
+const DRESSER_CHEST_IDS = idsWithSheets(88);
+/** 传送器 235（TileID.cs:903）——CanKillTile case 235 上方 3 格扫描 */
+const TELEPORTER_IDS = idsWithSheets(235);
+/** 关门表 10（TileID.cs ClosedDoor——内部 id 17；开门 11/内部 18 不参与锁判定） */
+const DOOR_CLOSED_IDS = idsWithSheets(10);
+/** 祭坛 77——CheckTileBreakability 的非困难模式保护（WorldGen.cs:62494-62495） */
+const ALTAR_IDS = idsWithSheets(77);
 
 // ---- 数据表类型（vanilla-mounts.json 提取产物） ----
 export interface MountData {
@@ -177,12 +223,20 @@ export const FISHRON_COUNTER_WET = 420;
 
 /** updateMountEffects 的每 tick 上下文（Player 侧组装：敌怪盒/视线/天气/发射桶） */
 export interface MountEffectsCtx {
-  /** Scutlix 索敌候选（已按 NPC.CanBeChasedBy 口径过滤的敌怪命中盒） */
+  /** Scutlix/Santank 索敌候选（已按 NPC.CanBeChasedBy 口径过滤的敌怪命中盒） */
   scutlixTargets: ScutlixTarget[];
   /** Collision.CanHitLine（Mount.cs :4922 视线门） */
   los(cx: number, cy: number, t: ScutlixTarget): boolean;
   /** 眼激光发射（UseAbility case 9：弹型 606/伤 150/速 14） */
   fireScutlixShot?(x: number, y: number, vx: number, vy: number): void;
+  /** Santank 开火（UseAbility case 46：'cannon' = 弹 930 伤 120 上抛 / 'bullet' = 弹 14 伤 100） */
+  fireSantankShot?(kind: 'cannon' | 'bullet', x: number, y: number, vx: number, vy: number): void;
+  /** 冲刺尘（UpdateFrame case 10/47 :3855-3873：14 粒环向尘——原版为 176/177/179（独角兽）
+   *  或 6（山羊）dust + shader 着色；本仓以原版 dust 池/程序粒子近似） */
+  dashDust?(x: number, y: number, n: number, spreadPx: number, type: 6 | 176 | 177 | 179): void;
+  /** 山羊火焰粒子（:3888-3896 ParticleOrchestrator WallOfFleshGoatMountFlames——
+   *  地面冲刺且落脚格实心无液时；本仓以火焰色粒子近似） */
+  goatFlames?(x: number, y: number): void;
   fishron: FishronView;
 }
 
@@ -191,6 +245,10 @@ export interface FishronView {
   hp: number; maxHp: number;
   /** Player.wet（水）——岩浆/蜂蜜湿另有标记，湿水才触发 */
   inWater: boolean; inLava: boolean; inHoney: boolean;
+  /** Player.dripping（buff 103 Wet 激活——UpdateBuffs :11342 置位）。与 wet 是两个
+   *  量：湿身在 MountFishronSpecial 与 420t 计数器两处都生效，dripping 只进
+   *  增益判定（:3886）不设计数器（Mount.cs :4996-5003 计数器仅 wet|雨天） */
+  dripping: boolean;
   /** Main.raining */
   raining: boolean;
   /** WorldGen.InAPlaceWithWind（露天迎风：地表以上、无液体、无挡风墙） */
@@ -267,6 +325,9 @@ export interface DrillStore {
   w: number; h: number;
   type: ArrayLike<number>;
   wall: ArrayLike<number>;
+  /** framed 帧位（树干分支/棕榈承载豁免判定用；缺省按 0 处理） */
+  frameX?: ArrayLike<number>;
+  frameY?: ArrayLike<number>;
   inBounds(x: number, y: number): boolean;
   idx(x: number, y: number): number;
   isActive(x: number, y: number): boolean;
@@ -291,27 +352,219 @@ export interface DrillHooks {
   pickTile?(tx: number, ty: number): void;
   /** Player.PickWall（:45328：墙 HitTile type-2 积累 ≥100 即毁） */
   pickWall?(tx: number, ty: number): void;
-  /** 命中尘（:3084-3092：dust 230 两粒垂直向） */
-  dust?(x: number, y: number, n: number): void;
-  /** Tile.SmoothSlope（:3094：命中后平滑邻接坡面） */
+  /** 命中尘（:3072-3080/:3131-3137）：dust 230，两粒，方向 = 目标→玩家中心的
+   *  朝向角 ±90°（垂直喷溅），速度 2-4，noGravity。rot = 该基础朝向角 */
+  dust?(x: number, y: number, n: number, rot: number): void;
+  /** Tile.SmoothSlope（:3083：命中后 applyToNeighbors 平滑，见 smoothSlopeAt） */
   smoothSlope?(tx: number, ty: number): void;
+  /** CanKillTile 追加子项上下文（锁门/巨石承载/传送器 235/容器内容）——
+   *  缺省 = 最宽近似（无锁门与宝箱表保护） */
+  killTileCtx?: KillTileCtx;
+}
+
+/** 运行期坡面平滑的世界视图（TileStore 结构子集：可写 half/slope） */
+export interface SlopeStore extends DrillStore {
+  half: ArrayLike<number>;
+  slope: ArrayLike<number>;
+  setHalfBrick(x: number, y: number, on: boolean): void;
+  setSlope(x: number, y: number, s: number): void;
+}
+
+/** 运行期 WorldGen.CanPoundTile（WorldGen.cs:81434-81482）子集：类型黑名单 +
+ *  Boulders + 上格 ForbidsSloping + CanKillTile（:81480）。生成期专属的 190/30
+ *  追加（isGeneratingOrLoadingWorld 门）运行期不适用；solid/solidTop 门由
+ *  smoothSlopeAt 的 SolidOrSlopedTile 承担（原版 SmoothSlope :832 同序） */
+function canPoundTileAt(st: SlopeStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const t = st.type[st.idx(x, y)];
+  if (POUND_BLACKLIST_IDS.has(t) || BOULDER_IDS.has(t)) return false;
+  if (st.inBounds(x, y - 1)) {
+    const up = st.idx(x, y - 1);
+    if (st.isActive(x, y - 1) && FORBIDS_SLOPING_IDS.has(st.type[up])) return false;
+  }
+  return canKillTileAt(st, x, y);
+}
+
+/** 运行期 WorldGen.SolidOrSlopedTile（:70046）：active && tileSolid && !tileSolidTop
+ *  ——tileSolid 走运行期 TILE_DEFS.solid 表（区别于生成期 GenSolid 翻转表） */
+function solidOrSlopedTileAt(st: SlopeStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
+  const d = TILE_DEFS[st.type[st.idx(x, y)]];
+  return !!d && d.solid && !d.platform;
+}
+
+/** Tile.SmoothSlope（Tile.cs:822-895）1:1（applyToNeighbors=true，sync 段联机略）：
+ *  先对四邻（右/左/下/上 序）做单格平滑，再平滑自身；按四邻实心位形推导
+ *  整砖/半砖/坡面 1-4（num 位序：上<<3 下<<2 左<<1 右） */
+export function smoothSlopeAt(st: SlopeStore, x: number, y: number): void {
+  smoothSlopeOne(st, x + 1, y);
+  smoothSlopeOne(st, x - 1, y);
+  smoothSlopeOne(st, x, y + 1);
+  smoothSlopeOne(st, x, y - 1);
+  smoothSlopeOne(st, x, y);
+}
+
+function smoothSlopeOne(st: SlopeStore, x: number, y: number): void {
+  if (!st.inBounds(x, y)) return;
+  if (!canPoundTileAt(st, x, y) || !solidOrSlopedTileAt(st, x, y)) return;
+  const flag = st.inBounds(x, y - 1) && st.isActive(x, y - 1);               // 上方有物（!TileEmpty）
+  const flag2 = !solidOrSlopedTileAt(st, x, y - 1) && flag;                  // 上方非实心
+  const flag3 = solidOrSlopedTileAt(st, x, y + 1);                           // 下方实心
+  const flag4 = solidOrSlopedTileAt(st, x - 1, y);                           // 左实心
+  const flag5 = solidOrSlopedTileAt(st, x + 1, y);                           // 右实心
+  const num = ((flag ? 1 : 0) << 3) | ((flag3 ? 1 : 0) << 2) | ((flag4 ? 1 : 0) << 1) | (flag5 ? 1 : 0);
+  switch (num) {
+    case 10: if (!flag2) { st.setHalfBrick(x, y, false); st.setSlope(x, y, 3); } break;
+    case 9:  if (!flag2) { st.setHalfBrick(x, y, false); st.setSlope(x, y, 4); } break;
+    case 6:  st.setHalfBrick(x, y, false); st.setSlope(x, y, 1); break;
+    case 5:  st.setHalfBrick(x, y, false); st.setSlope(x, y, 2); break;
+    case 4:  st.setSlope(x, y, 0); st.setHalfBrick(x, y, true); break;
+    default: st.setHalfBrick(x, y, false); st.setSlope(x, y, 0); break;
+  }
 }
 
 export const drillBeamIdle = (): DrillBeam => ({ tx: -1, ty: -1, cooldown: 0, purpose: 0 });
 
-/** WorldGen.CanKillTile 子集（同 SmartCursor 口径：只看"镐可破坏"，不查承载结构；
- *  越界/未激活按 CanKillTile 的 null/inactive → false 处理） */
-function drillCanKillTile(st: DrillStore, x: number, y: number): boolean {
+/** CanKillTile 追加子项（WorldGen.cs:62316-62358）的运行期上下文。
+ *  由钻头智能光标链（Game.updateDrillMountUse → useDrill → drillBlockTarget）注入；
+ *  缺省 undefined 时按最宽近似：无宝箱表（容器恒可毁）+ 非困难模式。
+ *  ★坡面平滑链（canPoundTileAt → canKillTileAt）不传 ctx——四处子项全部要求
+ *  目标本体是非实心件（锁门 10/容器 21·467·88/传送器 235）或巨石，而前两者在
+ *  CanPoundTile 内已被 POUND_BLACKLIST/BOULDER_IDS 拦截、后者过不了
+ *  solidOrSlopedTile 的 solid 门——子项在砸坡路径上不可达，等价 */
+export interface KillTileCtx {
+  /** Main.hardMode——祭坛 77 的 CheckTileBreakability 门（WorldGen.cs:62494） */
+  hardMode: boolean;
+  /** Chest.CanDestroyChest（Chest.cs:590-606）：锚格有宝箱且含非空物品 → false */
+  chestDestroyable(x: number, y: number): boolean;
+}
+
+/** WorldGen.IsLockedDoor（WorldGen.cs:69248-69255）：关门表 10 且 frameY∈[594,646]
+ *  （神庙锁门段）且 frameX<54（关闭态）。与 world/Door.ts isLockedDoor 同源 1:1
+ *  （此处保持自包含，避免共享文件耦合；两处锚同一行号） */
+function isLockedDoorAt(st: DrillStore, x: number, y: number): boolean {
+  const i = st.idx(x, y);
+  return DOOR_CLOSED_IDS.has(st.type[i])
+    && (st.frameY?.[i] ?? 0) >= 594 && (st.frameY?.[i] ?? 0) <= 646
+    && (st.frameX?.[i] ?? 0) < 54;
+}
+
+/** CheckTileBreakability_HasReasonToReturnEarly（WorldGen.cs:62491-62507）1:1：
+ *  异种时祭坛 77 非困难模式 / PreventsTileRemovalIfOnTopOfIt → 早退；锁门恒拦；
+ *  scanForContainer 时容器族恒拦。未激活格 type=0 不命中任何集合（原版同语义） */
+function hasReasonToReturnEarly(st: DrillStore, ignoreType: number, tx: number, ty: number,
+  scanForContainer: boolean, ctx?: KillTileCtx): boolean {
+  if (!st.inBounds(tx, ty)) return false;
+  const t = st.type[st.idx(tx, ty)];
+  if (t !== ignoreType) {
+    if (ALTAR_IDS.has(t) && !ctx?.hardMode) return true;          // :62494-62495
+    if (PREVENTS_REMOVAL_ABOVE_IDS.has(t)) return true;           // :62496-62499
+  }
+  if (isLockedDoorAt(st, tx, ty)) return true;                    // :62500-62503
+  if (scanForContainer && CONTAINER_IDS.has(t)) return true;      // :62504-62506
+  return false;
+}
+
+/** WorldGen.CanKillTile 全量（WorldGen.cs:62249-62358；钻头智能光标/坡面平滑共用）。
+ *  1:1 覆盖：越界/未激活/自身墙 350 → false；上方异种树干（分支/树顶帧豁免 + frameY<198）、
+ *  棕榈 323 枝帧、宝箱/祭坛族承载位（21/26/72/77/88/467/488）、梳妆台 80 两侧帧 → false；
+ *  追加四子项（:62316-62356）：巨石上方容器保护、上锁门、传送器 235 上方 3 格扫描、
+ *  容器内容非空（CanDestroyChest）。
+ *  ★不查 pick 力——原版该判定与镐力无关（光束会锁树/装饰，挖掘实效仍走 PickTile 主链）。
+ *  ★原版另带 out blockDamaged（巨石/锁门/235 三分支置 true）——本 API 无该出参且
+ *  全部消费方只读返回值，四子项均以 false 收敛，出参差异不可观测 */
+export function canKillTileAt(st: DrillStore, x: number, y: number, ctx?: KillTileCtx): boolean {
   if (!st.inBounds(x, y) || !st.isActive(x, y)) return false;
-  return (TILE_DEFS[st.type[st.idx(x, y)]]?.pick ?? -1) >= 0;
+  const i = st.idx(x, y);
+  if (st.wall[i] === 350) return false;
+  const mine = st.type[i];
+  if (y >= 1 && st.inBounds(x, y - 1)) {
+    const a = st.idx(x, y - 1);
+    if (st.isActive(x, y - 1)) {
+      const above = st.type[a];
+      if (above !== mine) {
+        // IsATreeTrunk：分支（frameX 66 行 0-44 / 88 行 66-110）与树顶（frameY≥198）豁免
+        if (TREE_TRUNK_IDS.has(above)) {
+          const fx = st.frameX?.[a] ?? 0, fy = st.frameY?.[a] ?? 0;
+          const exempt = (fx === 66 && fy >= 0 && fy <= 44) || (fx === 88 && fy >= 66 && fy <= 110);
+          if (!exempt && fy < 198) return false;
+        }
+        // 棕榈 323：左右枝帧不可杀（:62284-62288）
+        if (PALM_ABOVE_IDS.has(above)) {
+          const fx = st.frameX?.[a] ?? 0;
+          if (fx === 66 || fx === 220) return false;
+        }
+        // 宝箱/祭坛/熔炉/倒木承载位（:62289-62300）
+        if (SUPPORT_ABOVE_IDS.has(above)) return false;
+        // 梳妆台 80：两侧 2 格宽段不可杀（:62301-62310）
+        if (DRESSER_ABOVE_IDS.has(above)) {
+          const col = (st.frameX?.[a] ?? 0) / 18;
+          if (col <= 1 || (col >= 4 && col <= 5)) return false;
+        }
+      }
+    }
+  }
+  // ---- 巨石-承载保护（:62316-62321 Boulders + CheckBoulderChest :48810-48831）：
+  //      锚点归一到巨石左上格（frameX/18 取负、<-1 补 2；frameY 循环减 36），
+  //      查其正上方两格是否有"不可移除"物 ----
+  if (BOULDER_IDS.has(mine)) {
+    let left = -Math.trunc((st.frameX?.[i] ?? 0) / 18);
+    if (left < -1) left += 2;
+    left += x;
+    let fy = st.frameY?.[i] ?? 0;
+    while (fy >= 36) fy -= 36;
+    const top = y - Math.trunc(fy / 18);
+    if (hasReasonToReturnEarly(st, mine, left, top - 1, true, ctx)
+      || hasReasonToReturnEarly(st, mine, left + 1, top - 1, true, ctx)) return false;
+  }
+  // ---- 上锁门（:62323-62330 case 10）----
+  if (isLockedDoorAt(st, x, y)) return false;
+  // ---- 传送器 235（:62331-62344）：锚点列起上方 3 格扫描 ----
+  if (TELEPORTER_IDS.has(mine)) {
+    const baseX = x - Math.trunc(((st.frameX?.[i] ?? 0) % 54) / 18);
+    for (let k = 0; k < 3; k++) {
+      const bx = baseX + k;
+      if (st.inBounds(bx, y - 1) && st.isActive(bx, y - 1)
+        && hasReasonToReturnEarly(st, mine, bx, y - 1, true, ctx)) return false;
+    }
+  }
+  // ---- 容器内容门（:62345-62356 case 21/467/88）：CanDestroyChest——
+  //      锚点 = i-(frameX/18)%2（88 为 %3）、j-frameY/18；有非空内容不可杀。
+  //      ctx 缺省（坡面平滑链）按可毁近似 ----
+  if (BASIC_CHEST_IDS.has(mine) || DRESSER_CHEST_IDS.has(mine)) {
+    const mod = DRESSER_CHEST_IDS.has(mine) ? 3 : 2;
+    const ax = x - (Math.trunc((st.frameX?.[i] ?? 0) / 18) % mod);
+    const ay = y - Math.trunc((st.frameY?.[i] ?? 0) / 18);
+    if (ctx && !ctx.chestDestroyable(ax, ay)) return false;
+  }
+  return true;
+}
+
+/** Player.CanPlayerSmashWall（Player.cs:45303-45326）1:1：wall 350 不可拆；
+ *  房墙（Main.wallHouse 表）直接可拆，天然墙需 3×3 内曝露一格（空/房墙）才可拆 */
+export function canPlayerSmashWallAt(st: DrillStore, x: number, y: number): boolean {
+  if (!st.inBounds(x, y)) return false;
+  const wall = st.wall[st.idx(x, y)];
+  if (wall === 350) return false;
+  if (WALL_HOUSE.has(wall)) return true;
+  for (let i = x - 1; i <= x + 1; i++) {
+    for (let j = y - 1; j <= y + 1; j++) {
+      if (!st.inBounds(i, j)) continue;
+      const w = st.wall[st.idx(i, j)];
+      if (w === 0 || WALL_HOUSE.has(w)) return true;
+    }
+  }
+  return false;
 }
 
 /** DrillSmartCursor_Blocks（Mount.cs :3145-3179）1:1：
- *  从玩家中心朝鼠标方向扫带（65.6px 宽），途中第一块"可破坏实体格"即目标；
- *  已被其他束以挖块目的锁定的格跳过（两束分工）。无目标返回 null。 */
+ *  从玩家中心朝鼠标方向扫带（65.6px 宽），途中第一块 CanKillTile 可杀格即目标
+ *  （:3169-3173——不查镐力，挖掘实效走 PickTile 主链）；已被其他束以挖块目的
+ *  锁定的格跳过（两束分工）。无目标返回 null。
+ *  killCtx = CanKillTile 追加子项的运行期上下文（锁门/巨石/传送器/容器内容） */
 export function drillBlockTarget(
   st: DrillStore, centerX: number, centerY: number,
-  aimX: number, aimY: number, beams: readonly DrillBeam[],
+  aimX: number, aimY: number, beams: readonly DrillBeam[], killCtx?: KillTileCtx,
 ): { x: number; y: number } | null {
   const rawX = aimX - centerX, rawY = aimY - centerY;
   const dist = Math.hypot(rawX, rawY);
@@ -325,7 +578,7 @@ export function drillBlockTarget(
     for (const b of beams) {
       if (b.tx === x && b.ty === y && b.purpose === 0) return true;   // 已锁定 → 跳过
     }
-    if (!drillCanKillTile(st, x, y)) return true;                     // 不可破坏 → 跳过
+    if (!canKillTileAt(st, x, y, killCtx)) return true;               // CanKillTile 不可杀 → 跳过
     return false;                                                     // 命中目标
   });
   return hit ? target : null;
@@ -333,8 +586,8 @@ export function drillBlockTarget(
 
 /** DrillSmartCursor_Walls（Mount.cs :3181-3218）1:1：
  *  同向扫带（97.6px 宽 + 16px 延伸），第一格"有可拆背景墙"即目标。
- *  CanPlayerSmashWall（Player.cs:45303）取子集：wall 350 不可拆；wallHouse 3×3 曝露
- *  规则未实装（本仓锤墙路径同样不查——登记偏差）。 */
+ *  CanPlayerSmashWall（Player.cs:45303-45326）全量 1:1：wall 350 不可拆；
+ *  房墙直接可拆、天然墙需 3×3 曝露（本仓手持锤墙路径不查此规则——登记偏差，钻头侧已对齐）。 */
 export function drillWallTarget(
   st: DrillStore, centerX: number, centerY: number,
   aimX: number, aimY: number, beams: readonly DrillBeam[],
@@ -353,7 +606,7 @@ export function drillWallTarget(
     }
     if (!st.inBounds(x, y)) return false;            // 原版 tile==null → return false（即目标）
     const wall = st.wall[st.idx(x, y)];
-    return !(wall > 0 && wall !== 350);              // 有可拆墙 → false（目标）
+    return !(wall > 0 && canPlayerSmashWallAt(st, x, y));  // 有可拆墙 → false（目标）
   });
   return hit ? target : null;
 }
@@ -371,6 +624,26 @@ export function clampToDeadZone(
     if (Number.isFinite(s)) { dx *= s; dy *= s; }
   }
   return { x: dx + centerX, y: dy + centerY };
+}
+
+/** Mount.cs Hover 尾段（:3468-3521）机身倾斜角 1:1（player.fullRotation）：
+ *  - UFO 7 / 钻头 8：π/4 × clamp(vx/dashSpeed, ±0.95) / 2（随水平速度倾斜）
+ *  - 巫婆扫帚 23：-π/16 × clamp(-vy/dash) × dir + π/16 × clamp(vx/dash)
+ *    （origin = 玩家底心 :3520——渲染层绕底部锚点旋转）
+ *  其余坐骑 0（55 爬墙族走 UpdateAfterEquips :2967-2997，未实装登记） */
+export function bodyRotationFor(type: number, vx: number, vy: number, facing: number, dashSpeed: number): number {
+  if (type !== 7 && type !== 8 && type !== 23) return 0;
+  const d = dashSpeed > 0 ? dashSpeed : 1;
+  if (type === 7 || type === 8) {
+    let n = vx / d;
+    if (n > 0.95) n = 0.95;
+    else if (n < -0.95) n = -0.95;
+    return Math.PI / 4 * n / 2;
+  }
+  // 23：双轴
+  const v = Math.max(-1, Math.min(1, -vy / d));
+  const v2 = Math.max(-1, Math.min(1, vx / d));
+  return -Math.PI / 16 * v * facing + Math.PI / 16 * v2;
 }
 
 /** Scutlix 索敌目标的实体视图（NPC.CanBeChasedBy 过滤后的候选，Player 侧组装） */
@@ -449,8 +722,17 @@ export class MountInstance {
   /** 二极管当前角（AimAbility 目标角的 0.85/0.15 lerp，UpdateDrill :3011） */
   diodeRotation = 0;
   diodeRotationTarget = 0;
-  /** 外环旋转（Hover case 8 :3474-3488：随 vx/80 累积，供背层贴图旋转） */
+  /** 外环旋转（Hover case 8 :3497-3508：随 vx/80 累积，供背层贴图旋转） */
   outerRingRotation = 0;
+  /** 机身倾斜角（Mount.cs Hover 尾段 :3468-3521：UFO 7/钻头 8 随 vx、巫婆扫帚 23
+   *  随 vx+vy——写 player.fullRotation；渲染层消费见 drawMountLayer） */
+  fullRotation = 0;
+  /** 蜥蜴 14 冲刺蓄能（UpdateFrame case 14 :4075：每 tick +1/180，钳 0-1） */
+  basiliskCharge = 0;
+  /** 本 tick 冲刺帧组切入（flag7 :3838：frameExtra<6 时的首拍——冲刺尘触发沿） */
+  dashBurst = false;
+  /** 本 tick 处于冲刺速度门内（flag6 :3831——独角兽尘/山羊火焰的速度门） */
+  dashing = false;
   /** 光标世界位（crosshairPosition :48——本地玩家=鼠标世界坐标） */
   crosshairX = 0;
   crosshairY = 0;
@@ -538,20 +820,33 @@ export class MountInstance {
     return Math.abs(vx) > this.dashSpeedRaw - this.runSpeed() / 2;
   }
 
-  /** Mount.AllowDirectionChange（:604-615）：Scutlix/Santank 瞄准中锁朝向
-   *  （Player.cs:19549 HorizontalMovement 改向门） */
+  /** Mount.AllowDirectionChange（:604-614）1:1：Scutlix 冷却过半（<10）才许改向；
+   *  Santank 恒许（旧实现按"瞄准中"锁两族——Scutlix 侧偏差已对齐） */
   get allowDirectionChange(): boolean {
-    if (this.type !== 9 && this.type !== 46) return true;
-    return !this.aiming;
+    if (this.type !== 9) return true;
+    return this.abilityCooldown < (this.data?.abilityCooldown ?? 20) / 2;
+  }
+
+  /** Hover 尾段机身倾斜维护（:3468-3521，每 tick）：7/8 随 vx、23 随 vx+vy；
+   *  钻头外环角同步累积（:3497-3508 += vx/80，±π 卷绕） */
+  updateBodyRotation(p: MountedPlayerView): void {
+    this.fullRotation = bodyRotationFor(this.type, p.vx, p.vy, p.facing, this.dashSpeedRaw || this.dashSpeed);
+    if (this.type === 8) {
+      let ring = this.outerRingRotation + p.vx / 80;
+      if (ring > Math.PI) ring -= Math.PI * 2;
+      else if (ring < -Math.PI) ring += Math.PI * 2;
+      this.outerRingRotation = ring;
+    }
   }
 
   /** 猪鲨崽增益判定（Player.cs:3882-3896 MountFishronSpecial 1:1）：
    *  半血以下 / 水湿（岩浆蜂蜜不算）/ 滴水 buff 103 / 计数器 > 0 / 雨中露天
    *  任一成立即全额（hover ×1、移速不减半、四系伤害 +15%）。
-   *  dripping（buff 103）本仓未实装，按 false 计——计数器已覆盖出水后的 420t 余效 */
+   *  dripping = buff 103 Wet 激活（:3886 `!dripping`——仅增益判定消费，
+   *  不写入计数器：Mount.cs :4996-5003 的 420t 只由 wet|雨中露天驱动） */
   fishronSpecial(p: FishronView): boolean {
     const half = Math.floor(p.maxHp / 2);   // C# int 除法
-    if (p.hp >= half && (!p.inWater || p.inLava || p.inHoney)
+    if (p.hp >= half && (!p.inWater || p.inLava || p.inHoney) && !p.dripping
       && !(this.fishronCounter > 0)) {
       if (p.raining) return p.windExposed;
       return false;
@@ -691,11 +986,11 @@ export class MountInstance {
         if (this.drillBeamCooldown !== 0) break;
         for (const beam of this.drillBeams) {
           if (beam.cooldown !== 0) continue;
-          const t = drillBlockTarget(st, cx, cy, this.crosshairX, this.crosshairY, this.drillBeams);
+          const t = drillBlockTarget(st, cx, cy, this.crosshairX, this.crosshairY, this.drillBeams, h.killTileCtx);
           if (!t) continue;
           beam.tx = t.x; beam.ty = t.y;
           h.pickTile?.(t.x, t.y);
-          h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2);
+          h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2, Math.atan2(t.y * 16 + 8 - cy, t.x * 16 + 8 - cx));
           h.smoothSlope?.(t.x, t.y);
           beam.cooldown = DRILL_PICK_TIME;
           beam.purpose = 0;
@@ -712,7 +1007,7 @@ export class MountInstance {
         if (!t) continue;
         beam.tx = t.x; beam.ty = t.y;
         h.pickWall?.(t.x, t.y);
-        h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2);
+        h.dust?.(t.x * 16 + 8, t.y * 16 + 8, 2, Math.atan2(t.y * 16 + 8 - cy, t.x * 16 + 8 - cx));
         beam.cooldown = DRILL_PICK_TIME;
         beam.purpose = 1;
         break;
@@ -734,9 +1029,10 @@ export class MountInstance {
     }
   }
 
-  /** AimAbility case 9（:5338-5418）1:1：目标点死区外推 → 朝向翻转（±90° 外换向）+
-   *  眼部瞄准帧分档（6..10 对应 ±112.5°/±67.5°/±22.5° 带）+ 背向移动倒放标记。
-   *  返回 frameExtra 或朝向是否变化（原版返回值仅用于联网同步） */
+  /** AimAbility case 9/46（:5338-5418/:5420-5464）1:1：目标点死区外推 → 朝向翻转
+   *  （±90° 外换向）+ 背向移动倒放标记。眼部瞄准帧分档（6..10）仅 case 9——
+   *  ★case 46 不写 frameExtra（Santank 的 frameExtra 是腿部帧 24-26，由 UpdateFrame
+   *  case 46 自驱，此处覆写会破坏瞄准跑姿）。返回帧/朝向是否变化（原版仅联网同步用） */
   aimScutlix(p: MountedPlayerView, aimX: number, aimY: number): boolean {
     this.aiming = true;
     const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
@@ -748,16 +1044,18 @@ export class MountInstance {
     else if (deg < -90) { p.facing = -1; deg = -180 - deg; }
     else { p.facing = 1; }
     this.flipDraw = (p.facing > 0 && p.vx < 0) || (p.facing < 0 && p.vx > 0);
-    if (deg >= 0) {
-      if (deg < 22.5) this.frameExtra = 8;
-      else if (deg < 67.5) this.frameExtra = 9;
-      else if (deg < 112.5) this.frameExtra = 10;
-    } else if (deg > -22.5) {
-      this.frameExtra = 8;
-    } else if (deg > -67.5) {
-      this.frameExtra = 7;
-    } else if (deg > -112.5) {
-      this.frameExtra = 6;
+    if (this.type === 9) {
+      if (deg >= 0) {
+        if (deg < 22.5) this.frameExtra = 8;
+        else if (deg < 67.5) this.frameExtra = 9;
+        else if (deg < 112.5) this.frameExtra = 10;
+      } else if (deg > -22.5) {
+        this.frameExtra = 8;
+      } else if (deg > -67.5) {
+        this.frameExtra = 7;
+      } else if (deg > -112.5) {
+        this.frameExtra = 6;
+      }
     }
     return this.frameExtra !== beforeFrame || p.facing !== beforeDir;
   }
@@ -786,27 +1084,56 @@ export class MountInstance {
     }
   }
 
-  /** UpdateEffects case 9/46 索敌-充能-开火主循环（:4875-4954，type 9 分支）：
-   *  有目标且冷却归零 → 瞄准+停充+开火（冷却重置 20）；有目标冷却中 → 瞄准+持续充能；
-   *  无目标 → 停充+头部复位。返回本 tick 是否开火 */
+  /** UpdateEffects case 9/46 索敌-充能-开火主循环（:4875-4954）：
+   *  type 9：冷却归零 → 瞄准+停充+双激光（冷却重置 20）；
+   *  type 46：冷却 %10==0 节拍开火（:4919-4921）——归零拍先停充（冷却重置 40），
+   *           每拍双弹（冷却 ≤10 伴生 930 炮击 + 恒发 14 子弹，见 fireSantank）。
+   *  有目标冷却中 → 瞄准+持续充能；无目标 → 停充+头部复位。返回本 tick 是否开火 */
   updateScutlix(p: MountedPlayerView, target: ScutlixTarget | null,
-    fire: (x: number, y: number, vx: number, vy: number) => void): boolean {
-    if (this.type !== 9) return false;
-    if (target) {
-      const tx = target.x + target.w / 2, ty = target.y + target.h / 2;
-      if (this.abilityCooldown === 0) {
-        this.aimScutlix(p, tx, ty);
-        this.stopAbilityCharge();
-        this.fireScutlix(p, tx, ty, fire);
-        return true;
-      }
-      this.aimScutlix(p, tx, ty);
-      this.abilityCharging = true;
+    fire: (x: number, y: number, vx: number, vy: number) => void,
+    fireSantank?: (kind: 'cannon' | 'bullet', x: number, y: number, vx: number, vy: number) => void): boolean {
+    if (this.type !== 9 && this.type !== 46) return false;
+    if (!target) {
+      this.abilityCharging = false;
+      this.resetHeadPosition();
       return false;
     }
-    this.abilityCharging = false;
-    this.resetHeadPosition();
+    const tx = target.x + target.w / 2, ty = target.y + target.h / 2;
+    const fireTick = this.type === 46 ? this.abilityCooldown % 10 === 0 : this.abilityCooldown === 0;
+    if (fireTick) {
+      this.aimScutlix(p, tx, ty);
+      if (this.abilityCooldown === 0) this.stopAbilityCharge();
+      if (this.type === 9) this.fireScutlix(p, tx, ty, fire);
+      else this.fireSantank(p, tx, ty, fireSantank);
+      return true;
+    }
+    this.aimScutlix(p, tx, ty);
+    this.abilityCharging = true;
     return false;
+  }
+
+  /** UseAbility case 46（:3256-3280）1:1：圣诞坦克双炮。
+   *  炮击 930（伤 120）：冷却 ≤10 时从身后上方以 (0,-4)±0.1rad 上抛（音 Item_89）；
+   *  子弹 14（伤 100）：炮口 = 底心 + (width×dir, -12)，朝死区外推目标 ×12 再 ±0.2rad
+   *  扩散（音 Item_11）。音效由 Player 侧 fireSantankShot 接线 */
+  fireSantank(p: MountedPlayerView, aimX: number, aimY: number,
+    fire?: (kind: 'cannon' | 'bullet', x: number, y: number, vx: number, vy: number) => void): void {
+    if (!fire) return;
+    if (this.abilityCooldown <= 10) {
+      const cx = p.x + p.w / 2 + p.w * -p.facing, cy = p.y + p.h / 2 + 26;
+      const ang = -Math.PI / 2 + (Math.random() * 0.2 - 0.1);   // (0,-4) ±0.1 rad
+      const spd = 4;
+      fire('cannon', cx, cy, Math.cos(ang) * spd, Math.sin(ang) * spd);
+    }
+    const c = clampToDeadZone(p.x + p.w / 2, p.y + p.h / 2, aimX, aimY,
+      SCUTLIX_TEXTURE_SIZE.x, SCUTLIX_TEXTURE_SIZE.y);
+    const mx = p.x + p.w / 2 + p.w * p.facing, my = p.y + p.h - 12;
+    let dx = c.x - mx, dy = c.y - my;
+    const len = Math.hypot(dx, dy);
+    if (len > 0) { dx = dx / len * 12; dy = dy / len * 12; }
+    const ang2 = Math.atan2(dy, dx) + (Math.random() * 0.4 - 0.2);   // ±0.2 rad 扩散
+    const spd2 = Math.hypot(dx, dy);
+    fire('bullet', mx, my, Math.cos(ang2) * spd2, Math.sin(ang2) * spd2);
   }
 
   /** StopAbilityCharge（:2886-2895）：9/46 停充并重置冷却/持续时长 */
@@ -819,7 +1146,8 @@ export class MountInstance {
   }
 
   /** 每 tick 能力维护（Player.fixedUpdate 挂点，对应 Player.cs:25373 UpdateEffects
-   *  的能力相关子集）：猪鲨崽计数器/增益旗 + Scutlix 索敌-充能-开火。
+   *  的能力相关子集）：猪鲨崽计数器/增益旗 + Scutlix/Santank 索敌-充能-开火 +
+   *  冲刺族尘/火焰（updateFrame 写入的 dashBurst/dashing 在本 tick 内新鲜）。
    *  在 mount.upkeep 之后调用——hover() 消费的 fishronBoost 在本 tick 内即新鲜 */
   updateMountEffects(p: MountedPlayerView, ctx: MountEffectsCtx): void {
     if (!this.active || this.isCart) return;
@@ -828,9 +1156,31 @@ export class MountInstance {
     } else {
       this.fishronBoost = false;
     }
-    if (this.type === 9) {
+    if (this.type === 9 || this.type === 46) {
       const target = scutlixFindTarget(p, ctx.scutlixTargets, ctx.los);
-      this.updateScutlix(p, target, ctx.fireScutlixShot ?? (() => { /* 无投射物桶：静默 */ }));
+      this.updateScutlix(p, target, ctx.fireScutlixShot ?? (() => { /* 无投射物桶：静默 */ }),
+        ctx.fireSantankShot);
+    }
+    // 冲刺尘（UpdateFrame case 10/47 flag7 :3848-3873 / case 14 :4081-4091）：
+    // 独角兽 = 176/177/179 任选，山羊/蜥蜴 = 6；山羊地面冲刺另发火焰粒子
+    if (this.dashBurst && ctx.dashDust) {
+      if (this.type === 10 || this.type === 47) {
+        const t: 6 | 176 | 177 | 179 = this.type === 10
+          ? ([176, 177, 179] as const)[Math.floor(Math.random() * 3)] : 6;
+        ctx.dashDust(p.x + p.w / 2 + p.w * p.facing, p.y + p.h / 2, 14, this.frameExtra, t);
+        if (this.type === 10) ctx.dashDust(p.x + p.w / 2, p.y + p.h / 2, 1, 0, t);
+      } else if (this.type === 14) {
+        ctx.dashDust(p.x, p.y + p.h - 6, 2, 0, 6);
+      }
+    }
+    if (this.type === 47 && this.dashing && p.vy === 0 && ctx.goatFlames && p.store) {
+      // :3885-3896：落脚格实心且无液才发（WorldGen.SolidTileAllowBottomSlope 近似 = solid）
+      const tx = Math.floor((p.x + p.w / 2) / TILE), ty = Math.floor((p.y + p.h - 1) / TILE) + 1;
+      const st = p.store;
+      if (st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty)
+        && !(st as unknown as { liquid?: ArrayLike<number> }).liquid?.[st.idx(tx, ty)]) {
+        ctx.goatFlames(tx * TILE + 8, ty * TILE);
+      }
     }
   }
 
@@ -1023,17 +1373,30 @@ export class MountInstance {
       case 41:
       case 42:
       case 47: {
-        // 冲刺帧门（:3827-3838）：跑动中 |vx| > DashSpeed-RunSpeed/2 → 切冲刺帧组；
-        // frameExtra 为冲刺尘节奏计数（每 6 拍一簇——尘效未接，登记）
+        // 冲刺帧门（:3831-3847）：跑动中 |vx| > DashSpeed-RunSpeed/2 → 切冲刺帧组；
+        // flag7 = 切入拍且 frameExtra<6（冲刺尘触发沿，尘效经 updateMountEffects 消费）
         const flag6 = this.isDashingSpeed(vx);
+        this.dashing = flag6;
+        this.dashBurst = false;               // flag7 每拍重算（:3834 局部量）
         if (state === FRAME_RUNNING) {
           if (flag6) {
             state = FRAME_DASHING;
-            this.frameExtra++;      // 原版无上限自增（:3836），离开冲刺态即归零
+            this.dashBurst = this.frameExtra < 6;
+            this.frameExtra++;      // 原版无上限自增（:3842），离开冲刺态即归零
           } else {
             this.frameExtra = 0;
           }
         }
+        break;
+      }
+      case 14: {
+        // 蜥蜴冲刺蓄能 + 尘（:4063-4117）：|vx| > RunSpeed/2 每拍 +1/180（钳 0-1），
+        // 否则清零；地面冲刺 → 底部尘 31×2；面朝方向 → 蓄能比例的尘 6（经 ctx 消费）
+        const fast = Math.abs(vx) > (d.runSpeed ?? 0) / 2;
+        if (!fast) this.basiliskCharge = 0;
+        else this.basiliskCharge = Math.min(1, this.basiliskCharge + 1 / 180);
+        this.dashing = fast;
+        this.dashBurst = fast && vy === 0;
         break;
       }
       default:
@@ -1292,6 +1655,10 @@ export class MountInstance {
     this.crosshairX = 0;
     this.crosshairY = 0;
     this.walkingGraceTime = 0;
+    this.fullRotation = 0;
+    this.basiliskCharge = 0;
+    this.dashBurst = false;
+    this.dashing = false;
   }
 
   /** 每 tick 维护（Player.fixedUpdate 挂点）：能量恢复 + 地面飞行时量回充 + 帧态机 */
@@ -1304,6 +1671,7 @@ export class MountInstance {
     }
     this.tryStartHover(p);
     this.updateFrameDispatch(p);
+    this.updateBodyRotation(p);
   }
 
   // ---- 渲染信息 ----
@@ -1324,6 +1692,128 @@ export class MountInstance {
   }
 }
 
+// ============================================================================
+// 坐骑点光（Mount.cs 各 AddLight 段汇总）——纯函数，渲染层每帧收集后注入光照引擎
+// ============================================================================
+
+export interface MountLight {
+  /** 目标格（AddLight(int,int,..) 口径） */
+  tx: number; ty: number;
+  /** RGB（0-1，AddLight 语义） */
+  r: number; g: number; b: number;
+}
+
+export interface MountLightCtx {
+  /** Colors.CurrentLiquidColor 近似（0-255 RGB；猪鲨崽光/背层渐染用）。玩家当前
+   *  浸入液体取其色，未浸入取当前群系水色——原版 liquidAlpha 渐变未建模（登记） */
+  liquidColor: [number, number, number];
+  /** worldSurface 格线（蜥蜴地下红光门 :4077 position.Y > worldSurface*16+160） */
+  worldSurface: number;
+  /** miscCounter（扫帚挂件摆动相位 :3553；缺省 0） */
+  miscCounter?: number;
+  /** WindForVisuals（扫帚挂件风摆项 :3553；缺省 0 = 无风近似，登记） */
+  wind?: number;
+}
+
+/** 坐骑点光清单（UpdateFrame :3614/:4079 + Hover :3481 + UpdateEffects
+ *  :4811/:4981-4991 + AimAbility :5411/:5456 汇总）：
+ *  - emitsLight 族（8/45/49）：lightColor 于中心格（:3614-3617）
+ *  - UFO 7：(0.4, 0.2×|2-帧/2|/2, 0) 帧脉冲（:3468-3483）
+ *  - 巫婆扫帚 23：挂件火光 (1,0.75,0.5)×0.85（:4811-4814，挂件位随速度/风摆动）
+ *  - Scutlix 9：瞄准+充能中 → 眼部红光 ×充能比（:5392-5412）
+ *  - Santank 46：瞄准+充能中 → 炮口 (0.7,0.4,0.4)×2（:5447-5457 双点累加）
+ *  - 猪鲨崽 12：增益态 → 环境液色×0.4 于身前点（落点实心则退回身侧 :4981-4991）
+ *  - 蜥蜴 14：worldSurface 以下 → 身中心红光 (0.5,0.1,0.1)（:4077-4080）
+ *  未建模登记：mount 61 仙灵武库色光（:3624，纯装饰） */
+export function mountLights(m: MountInstance, p: MountedPlayerView, ctx: MountLightCtx): MountLight[] {
+  const out: MountLight[] = [];
+  const d = m.data;
+  if (!m.active || !d) return out;
+  const cx = p.x + p.w / 2, cy = p.y + p.h / 2;
+  const ctxTile = Math.trunc(cx / 16), ctyTile = Math.trunc(cy / 16);
+  const lc = ctx.liquidColor;
+  if (d.emitsLight && d.lightColor) {
+    out.push({ tx: ctxTile, ty: ctyTile, r: d.lightColor[0], g: d.lightColor[1], b: d.lightColor[2] });
+  }
+  switch (m.type) {
+    case 7: {
+      // UFO 帧脉冲橙光（:3481）
+      const num9 = Math.abs(2 - m.frame / 2) / 2;
+      out.push({ tx: Math.trunc((p.x + p.w / 2) / 16), ty: Math.trunc((p.y + p.h / 2) / 16),
+        r: 0.4, g: 0.2 * num9, b: 0 });
+      break;
+    }
+    case 23: {
+      // 扫帚挂件火光（:4811-4814）：挂件位 = 中心 + (29×dir,-4) + (摆角+π/2)×11
+      const num = Math.max(-1, Math.min(1, p.vx / 10));
+      const wind = ctx.wind ?? 0;
+      const mc = ctx.miscCounter ?? 0;
+      let num2 = Math.sin(mc / 300 * Math.PI * 6) * (Math.PI / 4) * Math.abs(wind) * 0.5
+        + Math.PI / 4 * -wind * 0.5;
+      num2 *= 0.5;   // InAPlaceWithWind 未建模：恒取非露天 0.5 档（登记）
+      const rot = num * Math.sin(mc / 150 * Math.PI * 6) * (Math.PI / 4) * 0.5
+        + num * (Math.PI / 4) * 0.5 + num2;
+      const px = cx + 29 * p.facing + Math.cos(rot + Math.PI / 2) * 11;
+      const py = cy - 4 + Math.sin(rot + Math.PI / 2) * 11;
+      out.push({ tx: Math.trunc(px / 16), ty: Math.trunc(py / 16),
+        r: 1 * 0.85, g: 0.75 * 0.85, b: 0.5 * 0.85 });
+      break;
+    }
+    case 9: {
+      // 眼部红光 ×充能比（:5392-5412）——瞄准中且充能 >0
+      const chargeMax = d.abilityChargeMax ?? 0;
+      const charge = chargeMax > 0 ? m.abilityCharge / chargeMax : 0;
+      if (m.aiming && charge > 0) {
+        const base = (m.frameExtra - SCUTLIX_EYE_FRAME_MIN) * 2;
+        const xOff = d.xOffset ?? 0, yOff = d.yOffset ?? 0;
+        for (let i = 0; i < 2; i++) {
+          const eye = SCUTLIX_EYE_OFFSETS[base + i];
+          if (!eye) continue;
+          const ex = p.facing === -1 ? p.x + p.w / 2 - eye[0] - xOff : p.x + p.w / 2 + eye[0] + xOff;
+          const ey = p.y + p.h + eye[1] + yOff;
+          out.push({ tx: Math.trunc(ex / 16), ty: Math.trunc(ey / 16), r: 1 * charge, g: 0, b: 0 });
+        }
+      }
+      break;
+    }
+    case 46: {
+      // 炮口暖光 ×2 双点累加（:5447-5457）
+      const chargeMax = d.abilityChargeMax ?? 0;
+      const charge = chargeMax > 0 ? m.abilityCharge / chargeMax : 0;
+      if (m.aiming && charge > 0) {
+        const px = p.x + p.w / 2 + p.w * p.facing, py = p.y + p.h - 12;
+        out.push({ tx: Math.trunc(px / 16), ty: Math.trunc(py / 16), r: 0.7, g: 0.4, b: 0.4 });
+        out.push({ tx: Math.trunc(px / 16), ty: Math.trunc(py / 16), r: 0.7, g: 0.4, b: 0.4 });
+      }
+      break;
+    }
+    case 12: {
+      // 增益态液色光（:4981-4991）：身前点（速度外推 10 帧），实心则退回身侧
+      if (m.fishronBoost) {
+        const [lr, lg, lb] = [lc[0] / 255 * 0.4, lc[1] / 255 * 0.4, lc[2] / 255 * 0.4];
+        const fx = cx + p.facing * 20 + p.vx * 10, fy = cy + p.vy * 10;
+        const tx = Math.trunc(fx / 16), ty = Math.trunc(fy / 16);
+        const st = p.store;
+        const solid = !!st && st.inBounds(tx, ty) && st.flags[st.idx(tx, ty)] && st.isSolid(tx, ty);
+        if (!solid) out.push({ tx, ty, r: lr, g: lg, b: lb });
+        else out.push({ tx: Math.trunc((cx + p.facing * 20) / 16), ty: Math.trunc(cy / 16),
+          r: lr, g: lg, b: lb });
+      }
+      break;
+    }
+    case 14: {
+      // 地下红光（:4077-4080）
+      if (p.y > ctx.worldSurface * 16 + 160) {
+        out.push({ tx: ctxTile, ty: ctyTile, r: 0.5, g: 0.1, b: 0.1 });
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  return out;
+}
+
 /** 物品 id（vanilla）→ 坐骑 id；非召唤物返回 -1 */
 export function mountOfItem(vanillaItemId: number): number {
   const m = ITEM_TO_MOUNT[String(vanillaItemId)];
@@ -1334,4 +1824,57 @@ export function mountOfItem(vanillaItemId: number): number {
 export function mountOfBuff(buffId: number): number {
   const m = BUFF_TO_MOUNT[String(buffId)];
   return m === undefined ? -1 : m;
+}
+
+// ============================================================================
+// 坐骑开火弹实体（Scutlix 眼激光 606 / Santank 炮击 930 / 子弹 14）
+// ============================================================================
+
+/** MountShot——坐骑能力弹（Projectile.NewProjectile 最小实体化，替代 TownShot 载体）：
+ *  - extraUpdates 1:1（Projectile.extraUpdates+1 个子步/tick：606=3 子步 ×14 速 =
+ *    42px/tick 与原版一致——TownShot 单步/tick 会使激光慢三倍）；
+ *  - timeLeft 每tick 递减 1（子步不额外扣——原版 AI 多跑但 timeLeft 单调）；
+ *  - 直线（noGravity）/ 抛物线（重力 0.3，Santank 炮击）两型；
+ *  - 命中敌怪或实心 tile 即消散（penetrate 1 近似；930 穿透 -1 的弹跳/引信未实装——
+ *    登记为命中消散近似） */
+export class MountShot extends TownShot {
+  /** 每 tick 子步数（extraUpdates + 1） */
+  private substeps = 1;
+  /** 重力加速度/tick（0 = 直线；TownShot 的 GRAV 常量不适用于 extraUpdates 子步） */
+  gravity = 0.3;
+  /** 落格标记（诊断用） */
+  bounced = false;
+
+  constructor(x: number, y: number, vx: number, vy: number, damage: number, knockback: number,
+    projId: number, opts?: { noGravity?: boolean; gravity?: number; life?: number; extraUpdates?: number }) {
+    super(x, y, vx, vy, damage, knockback, projId, { noGravity: true, life: opts?.life });
+    const def = projectileData(projId);
+    this.substeps = Math.max(1, (opts?.extraUpdates ?? def?.extraUpdates ?? 0) + 1);
+    this.gravity = opts?.gravity ?? (opts?.noGravity === false ? 0.3 : 0);
+    if (opts?.life !== undefined) this.life = opts.life;
+  }
+
+  fixedUpdate(_dt: number, game: GameHooks): void {
+    if (--this.life <= 0) { this.dead = true; return; }
+    for (let s = 0; s < this.substeps; s++) {
+      this.vy += this.gravity;
+      this.x += this.vx;
+      this.y += this.vy;
+      const tx = Math.floor((this.x + this.w / 2) / TILE);
+      const ty = Math.floor((this.y + this.h / 2) / TILE);
+      if (game.world.store.isSolid(tx, ty)) { this.dead = true; this.bounced = true; return; }
+      for (const ent of game.enemies()) {
+        const e = ent as unknown as { x: number; y: number; w: number; h: number; dead: boolean;
+          hurt: (d: number, kx: number, ky: number, g: GameHooks, pen?: number, crit?: boolean,
+            pierce?: number, fromPlayer?: boolean) => boolean; def?: { hitSound?: string[] } };
+        if (e.dead || !projOverlap(this.x, this.y, this.w, this.h, e)) continue;
+        if (e.hurt(this.damage, Math.sign(this.vx) * this.knockback, 0, game, 0, false, 0, true)) {
+          playEnemyHitSound(game, e);
+          game.addDamageNumber(this.x, this.y, this.damage, false, '#FFD060');
+        }
+        this.dead = true;   // penetrate 1 近似
+        return;
+      }
+    }
+  }
 }

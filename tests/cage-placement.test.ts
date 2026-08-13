@@ -214,8 +214,11 @@ describe('捕获小动物 → 锚桩 724（TECritterAnchor 等价）', () => {
     for (const [vid, style] of Object.entries(ANCHOR_STYLE)) {
       expect(defOfVid(+vid)!.placeStyle, `vid ${vid} anchorStyle`).toBe(style);
     }
-    // 桌类未覆写 anchorStyle 的原型 = 0（缺省），抽查
-    for (const vid of [2019, 1994, 2121, 4359]) {
+    // 未覆写 anchorStyle 的原型 = 0（缺省），抽查（2026-08-13 拴绳系统落位后：
+    // 蝶族 1994 的 placeStyle = 物种变体 1-8（Item.cs:21303，放置帧档由
+    // Game.tryPlace 按 anchorStyle 覆写）；水禽 4359 = Waterfowl : Bird = 2——
+    // 两处均非缺省，从缺省抽查表移除，见 tests/leashed-critters.test.ts 全量对账）
+    for (const vid of [2019, 2121, 2673, 4418]) {
       expect(defOfVid(vid)!.placeStyle ?? 0, `vid ${vid} 应为缺省 0`).toBe(0);
     }
   });

@@ -113,6 +113,36 @@ export function wingAnchorForRow(d: WingDraw, row: number): [number, number] {
   return [d.anchor[0], (HEADGEAR_ZERO_ROWS.has(row) ? 0 : 2) - 22];
 }
 
+// ===================== stealth 视觉因子（PlayerDrawSet :1523-1660） =====================
+export interface StealthFactors {
+  /** drawinfo.stealth（叠画消费值） */
+  settled: number;
+  /** s' 档（armor 主纹理 alpha 乘子） */
+  clamp: number;
+  /** 星璇 secondColor RGB（Lerp(White→(0,0.12,0.16),1−s')；非星璇 null） */
+  vortexTint: [number, number, number] | null;
+  /** 皮肤/衣物乘子 = s'²（doll 烘焙单层整体取值） */
+  skinMul: number;
+}
+
+/** stealth 潜行视觉三分支（:1523-1660）：3106 变态刀/蘑菇矿套 settled=(1+s'·10)/11、
+ *  星璇 settled=s'；s' = max(stealth, 0.03)；无潜行态全 1 */
+export function stealthFactors(stealth: number, heldPsychoKnife: boolean,
+  shroomiteSet: boolean, vortexSet: boolean): StealthFactors {
+  let settled = 1, clamp = 1;
+  let vortexTint: [number, number, number] | null = null;
+  if (heldPsychoKnife || shroomiteSet) {
+    clamp = Math.max(stealth, 0.03);
+    settled = (1 + clamp * 10) / 11;              // :1533/:1576
+  } else if (vortexSet) {
+    clamp = Math.max(stealth, 0.03);
+    settled = clamp;                              // :1622
+    const k = 1 - clamp;
+    vortexTint = [1 - k, 1 - 0.88 * k, 1 - 0.84 * k];   // :1624-1627 Lerp(One,(0,0.12,0.16,0),1−s')
+  }
+  return { settled, clamp, vortexTint, skinMul: clamp * clamp };
+}
+
 // ===================== 帧状态机（Player.cs WingFrame :29002-30045） =====================
 /** 可变帧状态（Player.wingFrame / wingFrameCounter） */
 export interface WingFrameState {

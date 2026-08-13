@@ -56,7 +56,9 @@ function step(p: Arrow, game: GameHooks & { tick: number }, n: number): void {
 /** 1e9 血靶（召唤物探针先例）——走真实 hurt 链验证 fromPlayer 语义。
  *  fromVanilla(id,x,y) 以 (x,y) 为中心落位（Enemy 构造器 x−w/2） */
 function dummy(id: number, x: number, y: number): Enemy {
-  const e = Enemy.fromVanilla(81, x, y)!;   // 僵尸 81
+  // ★靶子须非不死族：僵尸 81 免疫 20（毒）→ D5 派生 +30/+375（原版"不死不流血"
+  // NPC.AddBuff 门）会合法拦下 Hemorrhage 断言——换 4（仅免 31 困惑的活体怪）
+  const e = Enemy.fromVanilla(4, x, y)!;
   e.id = id;
   e.hp = e.maxHp = 1e9;
   e.kbResistOverride = 0;                   // 屏蔽击退扰动（位移断言用）

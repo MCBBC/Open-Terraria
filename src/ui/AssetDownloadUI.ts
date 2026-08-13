@@ -51,6 +51,7 @@ function ensureStyle(): void {
 let badgeEl: HTMLElement | null = null;
 let badgeUnsub: (() => void) | null = null;
 let badgeFading = false;
+let badgePending = false;
 
 function fmtPct(s: AssetCacheState): string {
   return s.total > 0 ? `${Math.floor((s.done / s.total) * 100)}%` : '…';
@@ -61,11 +62,22 @@ function phaseText(s: AssetCacheState): string {
   return PHASE_LABEL[s.phase as keyof typeof PHASE_LABEL] ?? '';
 }
 
-/** 挂载右下角进度徽标(幂等;完成自动淡出) */
+/** 挂载右下角进度徽标(幂等;完成自动淡出)。
+ *  initAssetCache 是异步的——showTitle 调用时可能还没 enabled:
+ *  订阅一次性等 enabled 翻真再挂 */
 export function mountAssetBadge(): void {
-  if (badgeEl || typeof document === 'undefined') return;
+  if (badgeEl || badgePending || typeof document === 'undefined') return;
   const s = assetCacheState();
-  if (!s.enabled || s.phase === 'done') return; // 未启用/已完成不挂
+  if (!s.enabled) {
+    if (s.phase !== 'done') {
+      badgePending = true;
+      const off = onAssetProgress((st) => {
+        if (st.enabled && !badgeEl) { badgePending = false; off(); mountAssetBadge(); }
+      });
+    }
+    return;
+  }
+  if (s.phase === 'done') return; // 已完成不挂
   ensureStyle();
   badgeEl = document.createElement('div');
   badgeEl.className = 'sw-asset-badge';

@@ -132,3 +132,40 @@ export function townNpcAltTexture(
   if (id === 633 && shouldBestiaryGirlBeLycantrope(moonPhase, bloodMoon, isDay)) alt = 2; // :91269
   return alt;
 }
+
+// ==================== 月相轮换商店表（Chest.SetupShop / ShopHelper 1:1） ====================
+
+/** 树妖(20)月相轮换货 4430-4441（Chest.cs:1650-1697）：
+ *  ★归属核对——NPCInteractions.cs:491 `Shop(20, 3)` → 槽位 3 即树妖(20)，
+ *   本表是【树妖】专柜，动物学家(633)无此轮换（其月相段仅 Chest.cs:3358-3379
+ *   兽耳尾套装四相位对）。
+ *    switch (Main.moonPhase / 2)（:1652 hardMode / :1678 非 hardMode 两段）：
+ *      case 0（相0/1）: 4430,4431[,4432]    case 1（相2/3）: 4433,4434[,4435]
+ *      case 2（相4/5）: 4436,4437[,4438]    default（相6/7）: 4439,4440[,4441]
+ *  hardMode 各组 3 件（:1654-1673），非 hardMode 各组前 2 件（:1680-1695）；
+ *  尾接主商品链（num++ 连续上架），无数量覆盖（stack=1）。 */
+export function dryadMoonPhaseStock(moonPhase: number, hardMode: boolean): number[] {
+  const base = Math.floor(moonPhase / 2) * 3;   // switch (Main.moonPhase / 2)（:1652/:1678）
+  return [4430, 4431, 4432, 4433, 4434, 4435, 4436, 4437, 4438, 4439, 4440, 4441]
+    .slice(base, base + (hardMode ? 3 : 2));
+}
+
+/** 骷髅商(453)月相定价系数（ShopHelper.cs:64-88 GetSkeletonMerchantPrices，逐分支抄）：
+ *    num = 1f;                          （:66 相0=满月基价 1.0，最便宜）
+ *    moonPhase==1 || 7 → num = 1.1f     （:67-70）
+ *    moonPhase==2 || 6 → num = 1.2f     （:71-74）
+ *    moonPhase==3 || 5 → num = 1.3f     （:75-78）
+ *    moonPhase==4       → num = 1.4f     （:79-82 相4=新月，最贵）
+ *    if (dayTime) num += 0.1f           （:83-86）
+ *  ★1456 考古：该方法在 1.4.5.6 全源【零调用点】——ProcessMood（:107）对
+ *   npc.type==453 提前 return，PriceAdjustment 恒 1f（仅 :103-106 loveStruck ×0.9）；
+ *   本函数保留原表（消费点 Game.openNpcShop），如需回退 1456 死码语义删该行即可。 */
+export function skeletonMerchantMoonPriceMul(moonPhase: number, isDay: boolean): number {
+  let num = 1;
+  if (moonPhase === 1 || moonPhase === 7) num = 1.1;
+  if (moonPhase === 2 || moonPhase === 6) num = 1.2;
+  if (moonPhase === 3 || moonPhase === 5) num = 1.3;
+  if (moonPhase === 4) num = 1.4;
+  if (isDay) num += 0.1;
+  return num;
+}

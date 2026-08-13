@@ -4,7 +4,7 @@ import { describe, it, expect } from 'vitest';
 import { TileStore } from '../src/world/TileStore';
 import { Player } from '../src/entities/Player';
 import { Inventory } from '../src/items/Inventory';
-import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike } from '../src/entities/WeaponProj';
+import { Boomerang, SpearProj, YoyoProj, GrenadeProj, FlailProj, FlaironSpike, spearDrawAngle, YOYO_RANGE, YOYO_LIFE } from '../src/entities/WeaponProj';
 import type { GameHooks } from '../src/entities/types';
 
 const W = 200, H = 120;
@@ -250,6 +250,87 @@ describe('AI_003 回收门三处独立（2026-08-13 1:1 补齐）', () => {
   });
 });
 
+describe('长矛绘制角（DrawProj_Spear Main.cs:34659-34668,2026-08-13 终审）', () => {
+  /** 贴图尖端原始方向角 β=5π/4（矛头朝左下斜置,由原版公式反推）;mirror 时
+   *  尖端角 = (π-β)+ang,否则 = β+ang——两向都应指向运动方向 φ。 */
+  const TIP = 5 * Math.PI / 4;
+  const tipOf = (d: { ang: number; mirror: boolean }) =>
+    ((d.mirror ? Math.PI - TIP : TIP) + d.ang) % (2 * Math.PI);
+
+  it('AI_019:右刺 θ=φ+π/4+镜像;左刺 θ=φ+3π/4 无镜像——矛头均指运动方向', () => {
+    // 右刺（:34664-34668 theOwner.direction>0 → FlipHorizontally 且 num-=π/2）
+    // θ = 0+2.355-π/2 = 0.784（原版字面量 2.355f,比 π/4 小 0.0012）
+    const right = spearDrawAngle(1, 0, false);
+    expect(right.ang).toBeCloseTo(2.355 - Math.PI / 2, 5);
+    expect(right.mirror).toBe(true);
+    // 左刺
+    const left = spearDrawAngle(-1, 0, false);
+    expect(left.ang).toBeCloseTo(Math.PI + 2.355, 5);
+    expect(left.mirror).toBe(false);
+    // 尖端指向:右刺→0(正右)/左刺→π(正左)。修复前左刺尖端=π/2(正下,偏 90°)。
+    // 精度 2 位 = 原版 2.355f 字面量自带 0.0012rad 近似差,非实现误差
+    expect(tipOf(right)).toBeCloseTo(0, 2);
+    expect(tipOf(left)).toBeCloseTo(Math.PI, 2);
+  });
+
+  it('AI_019 斜刺四向尖端均指运动方向（翻转陷阱回归网）', () => {
+    // 原版 :34659 用字面量 2.355f 而非 3π/4=2.35619（原版自带 0.0012rad≈0.068°
+    // 近似差,实现按源码保留字面量）——尖端指向断言容差须 ≥ 该差
+    for (const [dx, dy, phi] of [[0, 1, Math.PI / 2], [0, -1, -Math.PI / 2], [1, 1, Math.PI / 4], [-1, -1, -3 * Math.PI / 4]] as const) {
+      const d = spearDrawAngle(dx, dy, false);
+      const tip = tipOf(d);
+      const norm = ((tip % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      const want = ((phi % (2 * Math.PI)) + 2 * Math.PI) % (2 * Math.PI);
+      expect(Math.min(Math.abs(norm - want), 2 * Math.PI - Math.abs(norm - want))).toBeLessThan(0.0015);
+    }
+  });
+
+  it('AI_161 细剑:右刺 θ=π/2-π/4 无镜像;左刺 θ=φ+π/2+π/4 镜像（:44990/:32444/:29827）', () => {
+    expect(spearDrawAngle(1, 0, true)).toEqual({ ang: Math.PI / 4, mirror: false });
+    expect(spearDrawAngle(-1, 0, true).ang).toBeCloseTo(Math.PI + 3 * Math.PI / 4, 5);
+    expect(spearDrawAngle(-1, 0, true).mirror).toBe(true);
+  });
+});
+
+describe('长矛伸缩包络数值（GetSpearOffsetRelativeToPlayer :43417-43540）', () => {
+  it('46 型号峰值 offset=num6+num7×(max-num3)=3+1.4×15 → 位移 24×spd', () => {
+    const { hooks, player } = makeHooks();
+    const s = new SpearProj(1, 0, 6, 22, 30, 5, 46);
+    let peak = 0;
+    for (let i = 0; i < 22 && !s.dead; i++) {
+      s.fixedUpdate(1 / 60, hooks);
+      peak = Math.max(peak, s.cx - player.cx);
+    }
+    expect(s.dead).toBe(true);
+    // 峰值 = 24 × spd 6 = 144px（itemAnim=7=num3 时 num9=15、num10=0）
+    expect(peak).toBeCloseTo(144, 0);
+    expect(peak).toBeGreaterThan(140);
+  });
+
+  it('49 型号（木矛 vi_280,spd 3.7/prm[4,0.85,1.1]/dur 31）刺满 ≈80.8px——探针断言同值', () => {
+    const { hooks, player } = makeHooks();
+    const s = new SpearProj(1, 0, 3.7, 31, 8, 6.5, 49);
+    expect(s.w).toBe(18);            // SetDefaults 18×18（Projectile.cs:1051-1054 型号 47 同款）
+    let peak = 0;
+    for (let i = 0; i < 31 && !s.dead; i++) {
+      s.fixedUpdate(1 / 60, hooks);
+      peak = Math.max(peak, s.cx - player.cx);
+    }
+    expect(s.dead).toBe(true);
+    // 峰值 offset=4+0.85×(31-10)=21.85 → ×3.7 = 80.85px
+    expect(peak).toBeCloseTo(80.85, 0);
+    expect(Math.abs(peak - 80)).toBeLessThan(3);
+  });
+
+  it('命中盒型号表（SetDefaults 逐 type）:46=20/130=22/342=22×2 薄刃/877-879=25,缺省 18', () => {
+    const { hooks } = makeHooks();
+    for (const [id, w, h] of [[46, 20, 20], [130, 22, 22], [342, 22, 2], [877, 25, 25], [879, 25, 25], [49, 18, 18], [105, 18, 18]] as const) {
+      const s = new SpearProj(1, 0, 6, 22, 30, 5, id);
+      expect([s.projId, s.w, s.h]).toEqual([id, w, h]);
+    }
+  });
+});
+
 describe('细剑族（aiStyle 161）', () => {
   it('线性外伸,16t 消失', () => {
     const { hooks, player } = makeHooks();
@@ -311,6 +392,57 @@ describe('悠悠球（aiStyle 99）', () => {
     ch = false; // 松手
     run(y, hooks, 300);
     expect(y.dead).toBe(true); // 回收
+  });
+
+  it('寿命表:无限寿命型号（Sets 缺省 -1）无 tick 上限;有限型号 7200 防泄漏', () => {
+    const { hooks, player } = makeHooks();
+    const inf = new YoyoProj(player.cx, player.cy, 20, 4, 547, 0, () => true, () => ({ x: player.cx, y: player.cy }));
+    expect(YOYO_LIFE[547]).toBeUndefined(); // 547 不在寿命表 → 缺省 -1（ProjectileID.cs:185）
+    expect(inf.life).toBe(Number.POSITIVE_INFINITY); // 原版 timeLeft=6 每帧刷新（:64942）,无限滞留
+    const fin = new YoyoProj(player.cx, player.cy, 20, 4, 534, 0, () => true, () => ({ x: player.cx, y: player.cy }));
+    expect(YOYO_LIFE[534]).toBe(9);
+    expect(fin.life).toBe(7200);
+  });
+
+  it('击退方向=球相对玩家 X（ChangeDir 段 :64925-64935,±2 死区;非 sign(vx)）', () => {
+    const { hooks, player } = makeHooks();
+    let target = { x: player.cx + 300, y: player.cy };
+    const y = new YoyoProj(player.cx, player.cy - 4, 20, 4, 547, 0,
+      () => true, () => target);
+    run(y, hooks, 90);
+    expect(y.cx).toBeGreaterThan(player.cx + 2); // 球已飞到右侧
+    expect((y as unknown as { dir: number }).dir).toBe(1);
+    target = { x: player.cx - 300, y: player.cy };
+    run(y, hooks, 200);
+    expect(y.cx).toBeLessThan(player.cx - 2);    // 拉回左侧
+    expect((y as unknown as { dir: number }).dir).toBe(-1);
+  });
+
+  it('目标点双重钳制:光标超射程 → 钳 range,目标变化再钳 range-1（:65002-65050）', () => {
+    const { hooks, player } = makeHooks();
+    // 547 射程 280（ProjectileID.cs:187）;光标放到 1000px 外
+    const y = new YoyoProj(player.cx, player.cy, 20, 4, 547, 0,
+      () => true, () => ({ x: player.cx + 1000, y: player.cy }));
+    y.fixedUpdate(1 / 60, hooks);
+    const ai = y as unknown as { ai0: number; ai1: number };
+    const d = Math.hypot(ai.ai0 - player.cx, ai.ai1 - player.cy);
+    expect(YOYO_RANGE[547]).toBe(280);
+    expect(d).toBeLessThanOrEqual(279.5); // 第二重 range-1=279 生效
+    expect(d).toBeGreaterThan(278);       // 且没有被钳得更短
+  });
+
+  it('1.3× 超程强制回收（flag4 :65059-65063）→ 回收态消失', () => {
+    const { hooks, player } = makeHooks();
+    const y = new YoyoProj(player.cx, player.cy, 20, 4, 547, 0,
+      () => true, () => ({ x: player.cx, y: player.cy }));
+    run(y, hooks, 5);
+    // 手工挪出 280×1.3=364px 之外（模拟被地形/速度甩出射程）
+    y.x = player.cx + 500;
+    y.y = player.cy - 8;
+    run(y, hooks, 10);
+    expect((y as unknown as { recalled: boolean }).recalled).toBe(true);
+    run(y, hooks, 300);
+    expect(y.dead).toBe(true);
   });
 });
 

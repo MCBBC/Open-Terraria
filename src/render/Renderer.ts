@@ -116,22 +116,26 @@ import { pylonItemTypeFromStyle } from '../world/TeleportPylons';
 import { ITEM_DEFS } from '../data/items';
 import { townExtraFrames, TOWN_NPC_HEAD_INDEX, BOSS_HEAD_INDEX, bossHeadRotation, VANILLA_NPCS } from '../data/vanillaNpcs';
 import type { Player } from '../entities/Player';
-import { mountFallbackColor } from '../entities/Mounts';
+import { mountFallbackColor, mountLights } from '../entities/Mounts';
 import { BuffType } from '../stats/Buffs';
 import { expertRenderScale } from '../stats/ScaleStats';
 import { localAIOf } from '../entities/bossAI_moon_events';
 import { vanillaTileMapColor, vanillaWallMapColor, vanillaLiquidColor, vanillaSkyColor, VANILLA_DIRT_BG, VANILLA_ROCK_BG } from '../data/vanillaMapColors';
 import { mapPaintColor, PAINT_RGB } from '../world/Paint';
 import { Enemy } from '../entities/Enemy';
+import { visEffectFrames } from '../entities/Enemy';
+import { projFrameCount, projFrameImg } from '../entities/Arrow';
 import { TOWER_KEY, TOWER_SHIELD_COLOR, isTowerId, shieldMax } from '../world/LunarEvent';
 import { ItemDrop } from '../entities/ItemDrop';
-import { TownNPC } from '../entities/TownNPC';
+import { TownNPC, sittingHatY, shimmerBodyAlpha, shimmerGlowAlpha } from '../entities/TownNPC';
 import { Tombstone, getTombstoneCanvas } from '../entities/Tombstone';
 import { liveGorePieces, type GorePiece } from '../entities/GorePiece';
 import { Critter } from '../entities/Critter';
 import { wofDrawArea } from '../entities/bossAI_wof';
 import { dutchmanAnim, witherBeastLocal } from '../entities/bossAI_dd2';
-import { wingDrawOf, wingDrawFrame, wingAnchorForRow } from '../data/vanillaWingVisuals';
+import { wingDrawOf, wingDrawFrame, wingAnchorForRow, stealthFactors } from '../data/vanillaWingVisuals';
+import { dyeEmulationOf, applyDyeEmulation } from '../data/vanillaDyes';
+import type { DyeEmulation } from '../data/vanillaDyes';
 import { VanillaDust } from '../fx/VanillaDust';
 import type { Entity } from '../entities/Entity';
 
@@ -152,6 +156,41 @@ const _lightTap = new Uint8Array(12);
 export function townSheetFrameCount(npcId: number): number {
   return VANILLA_NPCS[String(npcId)]?.frames ?? 1;
 }
+
+/** 玩家本体随坐骑机身倾斜的绘制变换（LegacyPlayerRenderer → PlayerDrawLayers 1:1）：
+ *  原版 DrawPlayerFull 把 player.fullRotation/fullRotationOrigin 整组传入
+ *  PlayerDrawSet（LegacyPlayerRenderer.cs:481/:307/:312），DrawPlayer_TransformDrawData
+ *  （PlayerDrawLayers.cs:4199-4230）对 DrawDataCache【全部层】绕
+ *  drawinfo.Position+rotationOrigin 旋转并把 fullRotation 加进每层自转——即手持物/
+ *  翅膀/纸娃娃各层与机身贴图作为刚体同转（例外 ignorePlayerRotation：钻头激光
+ *  Mount.cs:6061；Safeman 日环 PlayerDrawLayers.cs:4179）。
+ *  锚点（fullRotationOrigin 来源，均为 mounted 盒坐标系——盒高 42+heightBoost 底锚）：
+ *   - UFO 7 / 钻头 8：Mount.SetMount（Mount.cs:6268-6271）= (width/2, height/2)
+ *     → pivotY = 玩家盒底 − (42+boost)/2
+ *   - 巫婆扫帚 23：Hover 每帧（Mount.cs:3520）= (width/2, height) → 玩家盒底心
+ *  矿车族不适用（fullRotation 走 cart.rotation 的 TrackRotation 独立链，已另行消费）。
+ *  返回 null = 不旋转（角度 0 / 非倾斜族）。 */
+export interface PlayerMountRotation { angle: number; pivotX: number; pivotY: number }
+export function playerMountRotation(
+  type: number, fullRotation: number,
+  box: { x: number; y: number; w: number; h: number }, heightBoost: number,
+): PlayerMountRotation | null {
+  if (fullRotation === 0 || (type !== 7 && type !== 8 && type !== 23)) return null;
+  const mh = 42 + (heightBoost || 0);   // mounted 盒高（本仓玩家盒恒 42，底锚换算）
+  return {
+    angle: fullRotation,
+    pivotX: box.x + box.w / 2,
+    pivotY: type === 23 ? box.y + box.h : box.y + box.h - mh / 2,
+  };
+}
+
+/** 上变换的 canvas 施加（TransformDrawData 位旋矩阵的等价写法，与矿车旋转同式） */
+function applyPlayerMountRotation(ctx: CanvasRenderingContext2D, r: PlayerMountRotation): void {
+  ctx.translate(r.pivotX, r.pivotY);
+  ctx.rotate(r.angle);
+  ctx.translate(-r.pivotX, -r.pivotY);
+}
+
 // 僵尸族 case 3（L77026）：腾空/逆向→帧2；站定→帧0；行走 counter+=|vx| 按 8/16/24/32 → 0,1,2,1 往复
 const ZOMBIE_FRAME_TYPES = new Set([3, 52, 53, 132, 161, 186, 187, 188, 189, 200, 223, 251, 254, 255, 319, 320, 321, 331, 332, 342, 536, 590, 691]);
 // 蝙蝠族 case 49（L75523→148 块 L75585）：每 6 tick 推进；49/51/60/634 循环到倒数第 2 帧（末帧=挂机姿势）
@@ -923,6 +962,7 @@ export class Renderer {
     flicker: FlickerClock | null = null,
     remotePlayers: Player[] = [],
     invasion: { name: string; pct: number; label?: string } | null = null,
+    leashed: import('../entities/LeashedCritter').LeashedEntityManager | null = null,
   ) {
     this.animTick++;
     this.wingGlowQueue.length = 0;   // 全亮翅膀队列逐帧重建（drawPlayer 收集）
@@ -1155,6 +1195,11 @@ export class Renderer {
     //     :62709 在墙/方块之后、NPC 缓存之前调用 → 墙身垫在嘴(113)/眼(114)/饥饿者(115)
     //     精灵之下，本仓在实体层之前画等价；墙死透时的全屏血尘崩落近似也在此触发）
     this.drawWoF(player, entities, world, camRY, viewW, viewH, z);
+
+    // 3.8 拴绳实体（LeashedEntity.DrawEntities，Main.cs:22163——DrawNPCs 起手调用；
+    //     各实体以 behindTiles:true 入 NPC 层 = 方块后实体前，与 2b'/实体段之间同档）。
+    //     锚桩本体（tile 723/724 的木桩贴图）由 VanillaTiler 画，此处只画游走本体
+    if (leashed) this.drawLeashedEntities(leashed, world);
 
     // 4. 实体（按 y 排序；behindTiles 族已在 2b' 画过，此处只补血条——
     //    原版 DrawNPCHealthBars 独立 pass 恒在最上层，钻地中血条仍可见）
@@ -1904,6 +1949,75 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /**
+   * 拴绳实体绘制（LeashedEntity.DrawEntities Main.cs:22163 消费；本体绘制 =
+   * LeashedCritter.Draw :190-206 的 DrawNPCDirect 近似）：
+   *  - 小动物：NPC 表逐帧切片，sprite 中心 = Center + (0, 8 - h/2)（CopyToDummy
+   *    :171 的 position 换算），叠加 GetDrawOffset（halfBrick 贴地/悬停 bobbing/
+   *    水黾贴液面）、Recall/帝皇蝶渐隐 Opacity、飞行族 rotation、Fly 族随机 scale
+   *  - 风筝：Projectile 表 + 锚桩→风筝绳（原版 DrawKite Main.cs:36614 的逐型
+   *    Extra_103+ 绳索贴图为备案近似——见 LeashedCritter.ts GAP ①）
+   */
+  private drawLeashedEntities(
+    leashed: import('../entities/LeashedCritter').LeashedEntityManager,
+    world: World,
+  ) {
+    const ctx = this.ctx;
+    const env = {
+      timeForVisualEffects: visEffectFrames(),
+      dayTime: world.clock.isDay,
+      worldSurface: world.groundLevel,
+      windForVisuals: world.weather?.windSpeedCurrent ?? 0,
+      cloudAlpha: world.weather?.cloudAlpha ?? 0,
+      playerCx: this.mainPlayer?.cx ?? 0,
+      playerCy: this.mainPlayer?.cy ?? 0,
+      addLight: () => { /* 绘制期不点光（update 期已推 LightingEngine） */ },
+    };
+    for (const e of leashed.kites) this.drawLeashedKite(ctx, e);
+    for (const e of leashed.critters) {
+      const fr = this.atlas?.vnpc(e.drawNpcType, e.frame);
+      if (!fr) continue;
+      const off = e.getDrawOffset(env);
+      const w = fr.sw * e.scale;
+      const h = fr.sh * e.scale;
+      // 精灵中心 = Center + (0, 8 - h/2)（LeashedCritter.CopyToDummy :171）
+      const cx = e.cx + off.dx;
+      const cy = e.cy + 8 - e.h / 2 + off.dy;
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, Math.min(1, e.opacity));
+      ctx.translate(cx, cy);
+      if (e.rotation !== 0) ctx.rotate(e.rotation);
+      ctx.scale(e.spriteDirection === 1 ? -1 : 1, 1); // NPC 贴图默认朝左（spriteDirection==1 翻转）
+      ctx.drawImage(fr.img, fr.sx, fr.sy, fr.sw, fr.sh, -w / 2, -h / 2, w, h);
+      ctx.restore();
+    }
+  }
+
+  /** LeashedKite.Draw（LeashedKite.cs:82-87 → Main.DrawKite :36614）近似 */
+  private drawLeashedKite(ctx: CanvasRenderingContext2D, k: import('../entities/LeashedCritter').LeashedKiteEntity) {
+    const frames = projFrameCount(k.projType);
+    const frame = k.frameCount(frames);
+    const img = projFrameImg(k.projType, frame);
+    // 绳：锚桩中心 → 风筝（原版逐型绳索贴图 Extra_103/104/132/147…，GAP ① 近似直线）
+    ctx.save();
+    ctx.strokeStyle = 'rgba(60,52,40,0.55)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(k.ax * 16 + 8, k.ay * 16 + 8);
+    const midX = (k.ax * 16 + 8 + k.cx) / 2;
+    const midY = (k.ay * 16 + 8 + k.cy) / 2 + 6; // 中点微垂（绳的悬垂感）
+    ctx.quadraticCurveTo(midX, midY, k.cx, k.cy);
+    ctx.stroke();
+    ctx.restore();
+    if (!img) return;
+    ctx.save();
+    ctx.translate(k.cx, k.cy);
+    if (k.rotation !== 0) ctx.rotate(k.rotation);
+    ctx.scale(k.spriteDirection === 1 ? -1 : 1, 1);
+    ctx.drawImage(img, -img.width / 2, -img.height / 2);
+    ctx.restore();
+  }
+
   private drawCritter(c: Critter) {
     if (!this.atlas) return;
     const meta = this.atlas.vnpcMeta(c.def.npc);
@@ -2192,16 +2306,9 @@ export class Renderer {
             damp: 0.985, grav: 0.09,
           });
         }
-        if (Math.random() < 0.5) {                     // gore 140-142 → 半数碎肉粒
-          const life = Math.round(90 + Math.random() * 60);
-          list.push({
-            x: x + Math.random() * 32, y: y + Math.random() * 32,
-            vx: (Math.floor(Math.random() * 161) - 80) * 0.1,
-            vy: (Math.floor(Math.random() * 81) - 60) * 0.1,
-            life, maxLife: life, color: '#5E0F0F', size: 3 + Math.random() * 3,
-            damp: 0.988, grav: 0.12,
-          });
-        }
+        // gore 140-142 代位已撤：真实 GorePiece（vanilla-gore npc 113 尘幕条目+屏幕网格
+        // 展开，SkyRenderer 尾批落地）已接管碎块层，此处只留原版 Dust 5 血尘近似
+        if (false) {}
       }
     }
   }
@@ -2955,7 +3062,7 @@ export class Renderer {
    *  - 209 电子人：常态 Glow_167；微光态按 altTexture 选 Glow_350（≠1）/Glow_351（==1）
    *  返回 null = 该 id 无变体链。已接通：drawTownNPC 本体后按本档 'lighter' 叠画
    *  （Color(128−α/2,×3,0)，α=城镇 NPC 静态 0）；160 的 shimmerTransparency
-   *  RGB 衰减（:25771-25776）TownNPC 未承载该字段，登记。 */
+   *  RGB 衰减（:25771-25776）经 shimmerGlowAlpha 落 alpha（已接）。 */
   static npcGlowVariantTex(id: number, shimmered: boolean, altTexture: number): string | null {
     if (id === 160) return shimmered ? 'vanilla/Glow_352.png' : 'vanilla/Glow_166.png';
     if (id === 209) return shimmered ? (altTexture !== 1 ? 'vanilla/Glow_350.png' : 'vanilla/Glow_351.png') : 'vanilla/Glow_167.png';
@@ -4883,7 +4990,7 @@ export class Renderer {
   /** 攻击/坐姿态 X 修正（Main.cs:27001-27008）：海盗 229 攻击态 ai[0]==12 → −4×dir；
    *  酒保 550 坐姿 ai[0]==5 → +7×dir。仓内映射：229 = TownNPC.attackState 12
    *  （TOWN_ATTACK_TYPE[229]=1 弓 → atkState 12，AI_007 :55902 同 ai[0] 值）；
-   *  550 坐姿未建模（ai0 恒 0）→ 分支值 1:1 备案待接 */
+   *  550 = TownNPC.sitting（调用方传 ai0=5，drawPartyHat 还原） */
   static hatStateOffsetX(id: number, ai0: number): number {
     if (id === 229 && ai0 === 12) return -4;
     if (id === 550 && ai0 === 5) return 7;
@@ -4919,18 +5026,19 @@ export class Renderer {
     let num5 = n.facing; // spriteDirection（facing>0=朝右=镜像同体块）
     // 城镇史莱姆帽位随胖体翻转（Main.cs:26903 num5*=−1）
     if (Renderer.HAT_TOWN_SLIME.has(n.vanillaId)) num5 = -num5;
-    // 攻击/坐姿 X 修正（Main.cs:27001-27008）：229 弓态 −4×dir / 550 坐姿 +7×dir
-    const stateX = Renderer.hatStateOffsetX(n.vanillaId, n.attackState);
+    // 攻击/坐姿 X 修正（Main.cs:27001-27008）：229 弓态 ai[0]==12 −4×dir / 550
+    // 坐姿 ai[0]==5 +7×dir——ai0 还原：坐姿 = 5（TownNPC.sitting），否则 attackState
+    const ai0 = n.sitting ? 5 : n.attackState;
+    const stateX = Renderer.hatStateOffsetX(n.vanillaId, ai0);
     const cell = Renderer.partyHatCell(n.givenName, n.id, world.clock.moonPhase ?? 0, world.clock.isDay);
     const W = 38, H = 34; // Extra_72 格 40×36 −2 边缘（:26840-26841）
     // vector 装配（:26961-27065）：-(0,h)+(-2*num5,0) → +num3*num5 → +array[num] → +HatOffsetY
-    //   → +态修正×num5 → +num7*num5 → +4*num5（态修正在 num7 之前，:27001-27008 段）
+    //   → +num6（坐姿 Y 链） → +态修正×num5 → +num7*num5 → +4*num5
     const vx = -2 * num5 + hatNum3 * num5
       + stateX * num5 + Renderer.hatXOffset(n.vanillaId) * num5 + 4 * num5;
-    const vy = -(n.h) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0);
-    // 【登记 GAP】num6 坐姿 Y 修正（:26963-26987：ai[0]==5 时 −4，637 猫 −12 / 663
-    // −8 / 38 −8 / 124 −2 / 108·178 −6）——TownNPC 未建模坐椅子态（ai0 无 5 值），
-    // 分支暂不接；坐姿接入时按此表补
+    const vy = -(n.h) + (group[num] ?? group[0]) + num4 + (Renderer.HAT_OFFSET_Y[n.vanillaId] ?? 0)
+      + (n.sitting ? sittingHatY(n.vanillaId) : 0);   // num6 链（:26965-26987：默认 −4，
+    // 637 猫 −12 / 663 公主 −8 / 38 −8 / 124 −2 / 108·178 −6；550/588 原版显式 −4=默认）
     // origin = (W/2, H-12)（:27009）→ drawImage 左上 = (vx − W/2, vy − (H−12))
     ctx.drawImage(sheet, cell * 40, 0, 40, 36, vx - W / 2, vy - (H - 12), W, H);
   }
@@ -4983,13 +5091,19 @@ export class Renderer {
         const pad = this.spriteBottomPad(r, `npc${n.bound ? 'bound' : n.vanillaId}:f${n.frame}`);
         ctx.translate(n.cx, n.y + n.h); // 脚底中心
         if (n.facing > 0) ctx.scale(-1, 1); // 原版贴图默认朝左，向右镜像
+        // 微光转化渐显/渐隐（GetAlpha NPC.cs:94874-94878：CurrentlyShimmerTransparent
+        // → 全通道 ×(1−shimmerTransparency)）——st 由 TownNPC 微光链驱动（浸微光
+        // +0.01/t、转化置 0.89、上升态 −1/60/t）。派对帽同 save 块内继承该 alpha，
+        // 恰好等价原版帽档 num8 = 1−st（Main.cs:27073-27075）
+        ctx.globalAlpha = shimmerBodyAlpha(n.shimmerTransparency);
         if (n.iframes > 0 && n.iframes % 4 < 2) ctx.filter = 'brightness(2.5)'; // 受击闪白
         ctx.drawImage(r.img, r.sx, r.sy, r.sw, r.sh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
         // ---- 160/209 Glow 变体档（Main.cs:25769-25799，S 备案 npcGlowVariantTex 接通）----
         //      城镇 NPC 不经 drawNpcGlow → 本体后挂同档 Glow：Color(128−α/2,×3,0)
         //      A=0 → 'lighter' 加性（'128a2' 同款表达式）；160 松露人微光态 Glow_352、
         //      209 电子人微光态按 altTexture 选 Glow_350(≠1)/Glow_351(==1)。α=城镇 NPC
-        //      静态 0 → 128/255；shimmerTransparency RGB 衰减（:25771-25776）未承载（登记）。
+        //      静态 0 → 128/255；160 档的 shimmerTransparency RGB 衰减（:25771-25776）
+        //      经 shimmerGlowAlpha 落在 alpha 上（加性混合下 ×(1−st) 等价），209 无此档。
         //      表布局与 NPC 表同构 → 帧 = 当前 townSheet 行（微光档案表帧高可异于本体，
         //      故按 Glow 表自身高/帧数切片，行号取 n.frame）
         const glowTex = n.bound ? null : Renderer.npcGlowVariantTex(n.vanillaId, n.shimmered, n.altTexture);
@@ -5002,7 +5116,8 @@ export class Renderer {
             const op = ctx.globalCompositeOperation;
             const ga = ctx.globalAlpha;
             ctx.globalCompositeOperation = 'lighter';
-            ctx.globalAlpha = 128 / 255;   // (128 − α/2)/255，α=0
+            ctx.globalAlpha = shimmerGlowAlpha(128 / 255, n.vanillaId === 160 ? n.shimmerTransparency : 0);
+            // (128 − α/2)/255 × (1−st)（α=0；st 衰减仅 160，:25771-25776）
             ctx.drawImage(gi, 0, gIdx * gfh, gi.width, gfh, -r.sw / 2, -r.sh + pad, r.sw, r.sh);
             ctx.globalCompositeOperation = op;
             ctx.globalAlpha = ga;
@@ -5046,11 +5161,19 @@ export class Renderer {
   private wingGlowQueue: Array<{
     p: Player; slot: number; fr: number; anchor: [number, number];
     wx: number; wy: number;
+    /** drawinfo.stealth（叠画消费值）与 s' 档（lit 主纹理用，flush 内 34/51 等取 settled） */
+    settled: number; clamp: number;
+    vortexTint: [number, number, number] | null;
+    /** cWings 染料仿真（null = 无染料/effect 缺口） */
+    dye: DyeEmulation | null;
   }> = [];
   /** 均一色调 scratch（叠画 tint 精确化：RGB×tint/255 + A×alpha/255） */
   private wingTintScratch: HTMLCanvasElement | null = null;
 
-  /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z) */
+  /** 队列消费（合成后调用）：局部变换 = worldToScreen(wx,wy) + scale(facing·z, z)。
+   *  stealth 逐层公式（drawinfo.stealth = settled）：34/40×s、51 luna×s、44×s、
+   *  28/45 White 无 s；叠画 23/27/30×s、43×s²、50×s²、38×s、47 A180 iff s==1、
+   *  22 火焰逐次平方（:681 累乘）、extra38=Lerp(colorArmorBody,White,0.5) 光采样 */
   private flushWingGlow(cam: Camera, z: number): void {
     if (!this.wingGlowQueue.length) return;
     const atlas = this.atlas;
@@ -5071,34 +5194,98 @@ export class Renderer {
       if (d.mainGlow && mainTex && mainTex.naturalWidth > 0) {
         const fh = Math.floor(mainTex.naturalHeight / d.frames);
         let a = 1, tint = 1;
-        if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = 100 / 255; }
+        if (d.mainGlow === 'c250a100') { tint = 250 / 255; a = (100 / 255) * e.settled; }  // :858 ×stealth
         else if (d.mainGlow === 'luna') {
           // GetLunaGlowColor :185-190：(255³,100)×Remap(WrappedLerp(miscCounter%100/100))×免疫
           const lerp = (e.p.miscCounter % 100) / 100;
           const wrap = lerp < 0.5 ? lerp * 2 : (1 - lerp) * 2;   // WrappedLerp(0,1,t)
           const pulse = 0.85 + 0.15 * Math.min(1, Math.max(0, wrap));
-          tint = 1; a = (100 / 255) * pulse;
+          tint = 1; a = (100 / 255) * pulse * e.settled;          // :783 ×stealth
           if (e.p.iframes > 0 && e.p.iframes % 6 < 2) a *= 0.45;
+        } else if (d.rainbowLayer) {
+          a = e.settled;                                            // :1032 White×stealth
         }
-        if (tint >= 0.999) {
-          ctx.globalAlpha = a;
-          ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
-            -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
-        } else {
-          const sc = this.tintSlice(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh, tint, 1);
+        // 44 彩虹重上色（HallowBoss 着色器仿真：Extra_171=灰度掩膜实证全灰、
+        // Extra_156=横向彩虹渐变调色板；uTime=GlobalTimeWrappedHourly MiscShaderData:91。
+        // 采样映射与滚动率是 effect 二进制内语义 → 取"横向铺满+0.25 周/秒"近似并登记；
+        // cWings 染料在 RT 输出后再套（:1033 item.shader 同款链））
+        if (d.rainbowLayer) {
+          const sc = this.rainbowSlice(mainTex, e.fr * fh, mainTex.naturalWidth, fh, e.dye);
           if (sc) {
             ctx.globalAlpha = a;
             ctx.drawImage(sc, -mainTex.naturalWidth / 2, -fh / 2);
+            ctx.globalAlpha = 1;
+          }
+        } else if (!e.dye && tint >= 0.999) {
+          ctx.globalAlpha = a;
+          ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
+            -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
+          ctx.globalAlpha = 1;
+        } else {
+          const tintArr: [number, number, number] | null = tint < 0.999
+            ? [tint, tint, tint] : null;
+          const sc = this.wingTexSource(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
+            e.dye, tintArr);
+          if (sc) {
+            ctx.globalAlpha = a;
+            ctx.drawImage(sc, -mainTex.naturalWidth / 2, -fh / 2);
+            ctx.globalAlpha = 1;
+          } else {
+            ctx.globalAlpha = a;
+            ctx.drawImage(mainTex, 0, e.fr * fh, mainTex.naturalWidth, fh,
+              -mainTex.naturalWidth / 2, -fh / 2, mainTex.naturalWidth, fh);
+            ctx.globalAlpha = 1;
           }
         }
-        ctx.globalAlpha = 1;
       }
       // ---- 叠画 ----
-      const ov = d.overlay;
-      if (ov) this.drawWingOverlay(e.p, e.slot, d, e.fr, cam);
+      if (d.overlay) this.drawWingOverlay(e.p, e.slot, d, e.fr, cam, e.settled, e.clamp, e.vortexTint, e.dye);
     }
     ctx.restore();
     this.wingGlowQueue.length = 0;
+  }
+
+  /** 44 彩虹重上色 scratch：掩膜灰度 × Extra_156 彩虹行（时间滚动）；dye 再套 */
+  private rainbowSlice(img: HTMLImageElement, sy: number, sw: number, sh: number,
+    dye: DyeEmulation | null): HTMLCanvasElement | null {
+    const ramp = this.rainbowRamp(img);   // 调色板行（惰性缓存，复用 Extra_156）
+    if (!ramp) return null;
+    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+    sctx.clearRect(0, 0, sw, sh);
+    sctx.drawImage(img, 0, sy, sw, sh, 0, 0, sw, sh);
+    const id = sctx.getImageData(0, 0, sw, sh);
+    const t = performance.now() / 1000;    // GlobalTimeWrappedHourly 近似（Game.ts:11858 同源）
+    for (let y = 0; y < sh; y++) {
+      for (let x = 0; x < sw; x++) {
+        const i = (y * sw + x) * 4;
+        if (!id.data[i + 3]) continue;
+        const rx = (((x / sw) + t * 0.25) % 1 + 1) % 1;
+        const ri = Math.min(ramp.length - 4, (rx * ramp.length) & ~3);
+        id.data[i] = ramp[ri] * id.data[i] / 255;
+        id.data[i + 1] = ramp[ri + 1] * id.data[i + 1] / 255;
+        id.data[i + 2] = ramp[ri + 2] * id.data[i + 2] / 255;
+      }
+    }
+    if (dye) this.applyDyeToImageData(id.data, dye);
+    sctx.putImageData(id, 0, 0);
+    return sc;
+  }
+
+  private rainbowRampData: Uint8ClampedArray | null = null;
+  private rainbowRamp(mask: HTMLImageElement): Uint8ClampedArray | null {
+    if (this.rainbowRampData) return this.rainbowRampData;
+    const atlas = this.atlas;
+    if (!atlas) return null;
+    const ramp = atlas.ensureVImage('vanilla/Extra_156.png');
+    if (!ramp || ramp.naturalWidth === 0) return null;
+    const c = document.createElement('canvas');
+    c.width = ramp.naturalWidth; c.height = 1;
+    const cc = c.getContext('2d', { willReadFrequently: true })!;
+    cc.drawImage(ramp, 0, (ramp.naturalHeight / 2) | 0, ramp.naturalWidth, 1, 0, 0, ramp.naturalWidth, 1);
+    this.rainbowRampData = cc.getImageData(0, 0, ramp.naturalWidth, 1).data;
+    return this.rainbowRampData;
   }
 
   /** 均一色调 scratch：绘制 (img, sx, sy, sw, sh) → tint×RGB / 返回临时画布 */
@@ -5114,6 +5301,53 @@ export class Renderer {
       for (let i = 0; i < id.data.length; i += 4) {
         id.data[i] *= tint; id.data[i + 1] *= tint; id.data[i + 2] *= tint;
         id.data[i + 3] *= alphaMul;
+      }
+      sctx.putImageData(id, 0, 0);
+    }
+    return sc;
+  }
+
+  /** 逐通道 RGB scratch（星璇 secondColor tint / extra38 光采样 tint 用） */
+  private tintSliceRGB(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    rgb: [number, number, number], alphaMul: number): HTMLCanvasElement | null {
+    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+    sctx.clearRect(0, 0, sw, sh);
+    sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (rgb[0] < 0.999 || rgb[1] < 0.999 || rgb[2] < 0.999 || alphaMul < 0.999) {
+      const id = sctx.getImageData(0, 0, sw, sh);
+      for (let i = 0; i < id.data.length; i += 4) {
+        id.data[i] *= rgb[0]; id.data[i + 1] *= rgb[1]; id.data[i + 2] *= rgb[2];
+        id.data[i + 3] *= alphaMul;
+      }
+      sctx.putImageData(id, 0, 0);
+    }
+    return sc;
+  }
+
+  /** cWings 染料仿真应用（公式在 vanillaDyes.ts 纯函数，单测覆盖） */
+  private applyDyeToImageData(data: Uint8ClampedArray, emu: DyeEmulation): void {
+    applyDyeEmulation(data, emu);
+  }
+
+  /** 翅膀纹理可绘源：染料仿真 → tint 链（无处理时返回原图）。返回 canvas 时
+   *  调用方按整幅居中绘制（sw/sh 尺寸） */
+  private wingTexSource(img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+    dye: DyeEmulation | null, tint: [number, number, number] | null): HTMLCanvasElement | null {
+    if (!dye && !tint) return null;
+    const sc = (this.wingTintScratch ??= (() => { const c = document.createElement('canvas'); c.width = 8; c.height = 8; return c; })());
+    if (sc.width !== sw || sc.height !== sh) { sc.width = sw; sc.height = sh; }
+    const sctx = sc.getContext('2d', { willReadFrequently: true })!;
+    sctx.clearRect(0, 0, sw, sh);
+    sctx.drawImage(img, sx, sy, sw, sh, 0, 0, sw, sh);
+    if (dye || tint) {
+      const id = sctx.getImageData(0, 0, sw, sh);
+      if (dye) this.applyDyeToImageData(id.data, dye);
+      if (tint) {
+        for (let i = 0; i < id.data.length; i += 4) {
+          id.data[i] *= tint[0]; id.data[i + 1] *= tint[1]; id.data[i + 2] *= tint[2];
+        }
       }
       sctx.putImageData(id, 0, 0);
     }
@@ -5176,8 +5410,8 @@ export class Renderer {
 
   /** Wings 40 Betsy 程序化摆动（:854-896）：空气帧 k=0..7（cycle 4）/地面帧 k=8..13
    *  （cycle 3），每片偏移 = 轨道摆动(miscCounterNormalized)+速度反拖(×−1.5)+
-   *  朝向外推(×3)，帧格 W−2/H−2 中心锚，色 (250³,100)。flush 内（局部空间） */
-  private drawBetsyWings(p: Player, slot: number, _fr: number): void {
+   *  朝向外推(×3)，帧格 W−2/H−2 中心锚，色 (250³,100)×stealth。flush 内 */
+  private drawBetsyWings(p: Player, slot: number, _fr: number, settled: number, dye: DyeEmulation | null = null): void {
     const atlas = this.atlas;
     if (!atlas) return;
     const img = atlas.ensureVImage(`vanilla/Wings_${slot}.png`);
@@ -5197,16 +5431,23 @@ export class Renderer {
       const wy = Math.cos(ang) * 0.5 * (num10 + 1);
       const px = wx + p.vx * -1.5 * (num10 / cyc) + 3;   // zero.X = direction×3 → 局部 3
       const py = wy + p.vy * -1.5 * (num10 / cyc);
-      ctx.globalAlpha = 100 / 255;
+      ctx.globalAlpha = (100 / 255) * settled;
+      if (dye) {
+        const bs = this.wingTexSource(img, 0, k * fh14, fw - 2, fh14 - 2, dye, null);
+        if (bs) { ctx.drawImage(bs, px - (fw - 2) / 2, py - (fh14 - 2) / 2); continue; }
+      }
       ctx.drawImage(img, 0, k * fh14, fw - 2, fh14 - 2,
         px - (fw - 2) / 2, py - (fh14 - 2) / 2, fw - 2, fh14 - 2);
     }
     ctx.restore();
   }
 
-  /** 翅膀叠画（flush 内调用，局部空间已镜像+锚点平移） */
+  /** 翅膀叠画（flush 内调用，局部空间已镜像+锚点平移）。settled=drawinfo.stealth、
+   *  clamp=s'、vortexTint=星璇 secondColor、dye=cWings 仿真——逐款 stealth 公式见
+   *  各 case 行号注；染料对全部叠画 DrawData 生效（原版 item.shader 同绑） */
   private drawWingOverlay(p: Player, slot: number, d: import('../data/vanillaWingVisuals').WingDraw,
-    fr: number, cam: Camera): void {
+    fr: number, cam: Camera, settled: number, clamp: number,
+    vortexTint: [number, number, number] | null, dye: DyeEmulation | null): void {
     const atlas = this.atlas;
     if (!atlas || !d.overlay) return;
     const ctx = this.ctx;
@@ -5218,12 +5459,27 @@ export class Renderer {
       const fh = Math.floor(img.naturalHeight / d.frames);
       return { img, fh, sy: fr * fh, sw: img.naturalWidth, sh: fh };
     };
+    /** tintSlice + 染料折叠（cWings 对全部叠画 DrawData 生效，:699/:722 等同绑） */
+    const dyeScratch = (img: HTMLImageElement, sx: number, sy: number, sw: number, sh: number,
+      tint: number): HTMLCanvasElement | null => {
+      const sc = this.tintSlice(img, sx, sy, sw, sh, tint, 1);
+      if (sc && dye) {
+        const c = sc.getContext('2d', { willReadFrequently: true })!;
+        const id = c.getImageData(0, 0, sw, sh);
+        this.applyDyeToImageData(id.data, dye);
+        c.putImageData(id, 0, 0);
+      }
+      return sc;
+    };
     switch (ov.kind) {
-      case 'plain': {   // 23/27/30/47：单帧同切片（硬编码 tint/alpha）
+      case 'plain': {   // 23/27/30/47：单帧同切片（硬编码 tint/alpha ×stealth）
         const s = slice(ov.file ?? '');
         if (!s) return;
-        const tint = (ov.tint ?? 255) / 255, a = (ov.alpha ?? 255) / 255;
-        const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh, tint, 1);
+        const tint = (ov.tint ?? 255) / 255;
+        let a = (ov.alpha ?? 255) / 255;
+        if (slot === 47) a = settled >= 1 ? 180 / 255 : (p.iframes > 0 && p.iframes % 6 < 2 ? 0.45 : 1);
+        else a *= settled;                          // 23/27/30 ×stealth（:1020/:1031/:1039）
+        const sc = dyeScratch(s.img, 0, s.sy, s.sw, s.sh, tint);
         if (sc) {
           ctx.save();
           ctx.globalAlpha = a;
@@ -5232,15 +5488,19 @@ export class Renderer {
         }
         break;
       }
-      case 'flames7': { // 22：ItemFlame_1866×7（:676-699，色 (250−10i)³ alpha (150−10i)）
+      case 'flames7': { // 22：ItemFlame_1866×7（:676-699，逐 i 色 (250−10i)³/(150−10i)，
+        //   stealth 逐次平方累乘 :681-682）
         if (!notGrappling) return;
         const s = slice('ItemFlame_1866.png');
         if (!s) return;
+        let runStealth = settled;
         for (let i = 0; i < 7; i++) {
+          runStealth *= runStealth;                 // :681 drawinfo.stealth *= stealth
           // vector4 = (itemFlamePos.X, −itemFlamePos.Y) × 0.5（:684-687）
           const jx = p.itemFlamePos[i].x * 0.5, jy = -p.itemFlamePos[i].y * 0.5;
-          const tint = (250 - i * 10) / 255, a = (150 - i * 10) / 255;
-          const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh - 2, tint, 1);
+          const tint = (250 - i * 10) / 255;
+          const a = ((150 - i * 10) / 255) * runStealth * (1 - 0);   // ×(1−shadow)
+          const sc = dyeScratch(s.img, 0, s.sy, s.sw, s.sh - 2, tint);
           if (sc) {
             ctx.save();
             ctx.translate(jx, jy);
@@ -5255,22 +5515,36 @@ export class Renderer {
         const s = slice('Extra_38.png');
         if (!s) return;
         const mcFr = Math.floor(p.miscCounter / 5) % 4;   // Frame(1,4,0,miscCounter/5%4)
-        const sc = this.tintSlice(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, 1, 1);
+        // colorArmorBody = 免疫白 × 光 × armor-stealth（3106/蘑菇矿 RGB×s'；星璇
+        // ×secondColor）→ 光经 renderer.lighting 读侧采样（原版单点 GetColor 语义）
+        const lc = this.lighting?.lightAt(Math.floor(p.cx / 16), Math.floor(p.cy / 16)) ?? [255, 255, 255];
+        const imA = p.iframes > 0 && p.iframes % 6 < 2 ? 0.45 : 1;
+        const armor = vortexTint ?? [clamp, clamp, clamp];
+        const tint: [number, number, number] = [
+          0.5 * ((lc[0] / 255) * armor[0]) + 0.5,
+          0.5 * ((lc[1] / 255) * armor[1]) + 0.5,
+          0.5 * ((lc[2] / 255) * armor[2]) + 0.5,
+        ];
+        const sc = this.tintSliceRGB(s.img, 0, mcFr * s.sh, s.sw - 2, s.sh - 2, tint, 1);
         if (sc) {
+          if (dye) {
+            const c38 = sc.getContext('2d', { willReadFrequently: true })!;
+            const id38 = c38.getImageData(0, 0, s.sw - 2, s.sh - 2);
+            this.applyDyeToImageData(id38.data, dye);
+            c38.putImageData(id38, 0, 0);
+          }
           ctx.save();
-          // Lerp(colorArmorBody, White, 0.5)（:721）= tint 0.5×光+0.5——读侧光照采样
-          // API 未暴露 → 取满档（亮环境 1:1 等价；暗环境叠画比原版偏亮，登记）
-          ctx.globalAlpha = 1;
+          ctx.globalAlpha = imA;
           ctx.drawImage(sc, -(s.sw - 2) / 2, -(s.sh - 2) / 2);
           ctx.restore();
         }
         break;
       }
-      case 'jitter2': { // 43：×2 随机 ±1.25（:1004-1015，(230³,60)）
+      case 'jitter2': { // 43：×2 随机 ±1.25（:1004-1015，(230³,60)×stealth²）
         const s = slice(ov.file ?? '');
         if (!s) return;
-        const tint = (ov.tint ?? 255) / 255, a = (ov.alpha ?? 255) / 255;
-        const sc = this.tintSlice(s.img, 0, s.sy, s.sw, s.sh, tint, 1);
+        const tint = (ov.tint ?? 255) / 255, a = (ov.alpha ?? 255) / 255 * settled * settled;
+        const sc = dyeScratch(s.img, 0, s.sy, s.sw, s.sh, tint);
         if (sc) {
           ctx.save();
           ctx.globalAlpha = a;
@@ -5282,25 +5556,29 @@ export class Renderer {
         }
         break;
       }
-      case 'immune': {  // 50：免疫色双画（:930-940，GetImmuneAlphaPure(White)）
+      case 'immune': {  // 50：免疫色双画（:930-940，GetImmuneAlphaPure(White)×stealth²）
         const s = slice(`Wings_${slot}.png`);
         if (!s) return;
-        const a = p.iframes > 0 && p.iframes % 6 < 2 ? 0.45 : 1;
+        const a = (p.iframes > 0 && p.iframes % 6 < 2 ? 0.45 : 1) * settled * settled;
+        const src50 = dye
+          ? this.wingTexSource(s.img, 0, s.sy, s.sw, s.sh, dye, null)
+          : null;
         ctx.save();
         ctx.globalAlpha = a;
-        ctx.drawImage(s.img, 0, s.sy, s.sw, s.sh, -s.sw / 2, -s.sh / 2, s.sw, s.sh);
+        if (src50) ctx.drawImage(src50, -s.sw / 2, -s.sh / 2);
+        else ctx.drawImage(s.img, 0, s.sy, s.sw, s.sh, -s.sw / 2, -s.sh / 2, s.sw, s.sh);
         ctx.restore();
         break;
       }
       case 'betsy': {   // 40：8 片程序化摆动（:854-896）
-        this.drawBetsyWings(p, slot, fr);
+        this.drawBetsyWings(p, slot, fr, settled, dye);
         break;
       }
       case 'trail45': { // 45：拖尾（:2901；4 向轨道残影 (70,70,70,0)·f 的 A=0 死画
         this.drawStarboardTrail(p, cam);   //  原样跳过 :741-746）
         break;
       }
-      case 'arkhalis': { // 38：GlowMask[251]×underShirtColor（:1044-1048；影子环 A=0 跳过）
+      case 'arkhalis': { // 38：GlowMask[251]×underShirtColor×stealth（:1045-1047）
         const s = slice(ov.file ?? '');
         if (!s) return;
         const c = p.appearance?.undershirtColor ?? { r: 160, g: 90, b: 0 };
@@ -5315,7 +5593,9 @@ export class Renderer {
           id.data[i] = id.data[i] * c.r / 255;
           id.data[i + 1] = id.data[i + 1] * c.g / 255;
           id.data[i + 2] = id.data[i + 2] * c.b / 255;
+          id.data[i + 3] *= settled;
         }
+        if (dye) this.applyDyeToImageData(id.data, dye);
         sctx.putImageData(id, 0, 0);
         ctx.save();
         ctx.drawImage(sc, -s.sw / 2, -s.sh / 2);
@@ -5330,6 +5610,21 @@ export class Renderer {
   private drawPlayer(p: Player, world: World, swing: { t: number; dur: number; item: number; useStyle?: number; aim?: number; noGraphic?: boolean } | null, flicker: FlickerClock | null = null) {
     const ctx = this.ctx;
     if (p.dead) return;
+    // ---- 玩家本体随坐骑机身倾斜（UFO 7/钻头 8/扫帚 23）----
+    // 原版 DrawPlayerFull 把 fullRotation/fullRotationOrigin 整组传进 PlayerDrawSet
+    // （LegacyPlayerRenderer.cs:481），TransformDrawData（PlayerDrawLayers.cs:4199-4230）
+    // 对绘制缓存全部层绕 Position+rotationOrigin 刚体旋转——手持物/翅膀/纸娃娃都跟转
+    // （ignorePlayerRotation 例外：钻头激光 Mount.cs:6061）。
+    // 本仓坐骑机身贴图已由 drawMountLayer 自转（勿在此包住它→双转），故分三段施加：
+    //  A 手持层（静持+挥舞弧，DrawPlayer_27_HeldItem）/ B 本体层（翅膀+纸娃娃）/
+    //  C 身前使用物层。pivot 取玩家盒（原版 drawinfo.Position 另含 netOffset/gfxOffY——
+    //  gfxOffY 仅矿车（本族恒 0）、netOffset 仅远端（本仓手持层亦不追踪 netOffset，
+    //  远端亚像素差，登记））。
+    const mrot = p.ridingMount
+      ? playerMountRotation(p.mount.type, p.mount.fullRotation,
+        { x: p.x, y: p.y, w: p.w, h: p.h }, p.mount.heightBoost)
+      : null;
+    if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
     // ---- 手持物（PlayerDrawLayers.cs:3857 门槛）：itemAnimation>0 || (holdStyle!=0) ----
     // 武器/工具 holdStyle=0 → 仅使用中渲染（下方挥舞动画）；火把/荧光棒族 holdStyle=1、
     // 雨伞族 holdStyle=2 等静持时也渲染（ItemCheck_ApplyHoldStyle :49496 逐值持位）；
@@ -5398,6 +5693,7 @@ export class Renderer {
     if (swing && swing.item >= 0 && ITEM_DEFS[swing.item]?.tool) {
       this.drawUseItem(ctx, p, swing, flicker);
     }
+    if (mrot) ctx.restore();   // 段 A 收口（手持层随机身旋转；TransformDrawData 同转）
 
     // 无敌帧闪烁：半透明而非消失（主角本体永不全隐）
     ctx.save();
@@ -5411,6 +5707,17 @@ export class Renderer {
     if (p.shimmerTransparency > 0) {
       bodyAlpha *= p.shimmerTransparency >= 0.8 ? 0 : (1 - p.shimmerTransparency) ** 3;
     }
+    // ---- stealth 潜行视觉管线（PlayerDrawSet :1523-1660 三分支）----
+    // 3106 变态刀/蘑菇矿套：settled=(1+s'·10)/11、armor RGBA×s'、皮肤衣物×s'²；
+    // 星璇套：settled=s'、armor×secondColor=Lerp(White→(0,0.12,0.16,0),1−s')（A=s'）、
+    // 皮肤衣物×s'²。s' = max(stealth, 0.03)。doll 为皮肤+衣物烘焙单层 → 整体取 s'²
+    // （armor 段 ×s' 与皮肤段 ×s'² 的分层区别在烘焙架构下不可分，登记）。
+    const stEq = p.equipStats;
+    const stF = stealthFactors(p.stealth, p.heldPsychoKnife, stEq.shroomiteSet, stEq.vortexSet);
+    const stealthSettled = stF.settled;         // drawinfo.stealth（叠画消费值）
+    const stealthClamp = stF.clamp;             // s'（armor 主纹理 alpha 档）
+    const vortexTint = stF.vortexTint;
+    if (stealthClamp < 1) bodyAlpha *= stF.skinMul;   // 皮肤衣物 ×s'²
     if (bodyAlpha < 1) ctx.globalAlpha = bodyAlpha;
     // 矿车骑乘：整体绕脚底中心旋转（Player.fullRotation/fullRotationOrigin=(w/2,h)，
     // Player.cs:27805-27806 TrackRotation 产出）+ gfxOffY 纵向贴轨补偿
@@ -5423,7 +5730,10 @@ export class Renderer {
     }
     // ---- 坐骑身后层（Mount.Draw backTexture :5500：先于玩家本体绘制）----
     const mnt = p.ridingMount ? p.mount : null;
-    if (mnt) this.drawMountLayer(ctx, p, mnt, 'back');
+    if (mnt) this.drawMountLayer(ctx, p, mnt, 'back', world.groundLevel);
+    // 段 B：本体层（翅膀+纸娃娃/legacy 帧）随转——变换挂在 body save 内，由其
+    // ctx.restore() 收口；坐骑背层在上面已自转，勿包住（双转）
+    if (mrot) applyPlayerMountRotation(ctx, mrot);
     // 跨台阶时用渲染补偿高度（从旧高度缓升），消除物理瞬移的顿挫感；
     // 联机远端叠加 netOffset（原版 Player.netOffset 平滑收敛，本地玩家恒 0）
     // 坐骑骑姿抬升（PlayerDrawSet :425-426 mountOffSet=HeightOffsetVisual →
@@ -5447,6 +5757,7 @@ export class Renderer {
       const wingSlot = p.equipStats.wing && !mnt ? p.equipStats.wing.logic : 0;
       if (wingSlot > 0 && this.atlas) {
         const d = wingDrawOf(wingSlot);
+        const dyeEmu = dyeEmulationOf(p.wingDyeVid());
         // ShouldDrawWingsThatAreAlwaysAnimated 门（:30271）：vy≠0 && 未锚定钩爪 &&
         // 非水中漂浮（mount.CanUseWings 已由上方坐骑清零门覆盖）
         const alwaysOk = !d.alwaysAir
@@ -5459,25 +5770,32 @@ export class Renderer {
             ? wingAnchorForRow(d, this.playerBodyRow(p, swing, staticHoldStyle, mnt))
             : d.anchor;
           // lit 主纹理（合成前）：generic/22/23/27/30/38/39/43/47/48/49/50 + rainbowLayer
+          // stealth：armor 主纹理 RGBA×s'（3106/蘑菇矿 :1539-1541/星璇 secondColor
+          // A=s'）→ alpha ×s'；星璇另带 RGB 暗青 tint（secondColor）；
+          // cWings 染料（Player.cs:9417 → dyeEmulationOf 仿真族，effect 族缺口跳过）
           if (!d.mainGlow && d.overlay?.kind !== 'betsy') {
             const tex = d.rainbowLayer
               ? this.atlas.ensureVImage('vanilla/Extra_171.png')
               : this.atlas.ensureVImage(`vanilla/Wings_${wingSlot}.png`);
             if (tex && tex.naturalWidth > 0) {
               const fh = Math.floor(tex.naturalHeight / d.frames);
+              const sc = this.wingTexSource(tex, 0, fr * fh, tex.naturalWidth, fh, dyeEmu, vortexTint);
               ctx.save();
               ctx.translate(anchor[0], anchor[1]);
-              ctx.drawImage(tex, 0, fr * fh, tex.naturalWidth, fh,
+              if (stealthClamp < 1) ctx.globalAlpha = stealthClamp;
+              if (sc) ctx.drawImage(sc, -tex.naturalWidth / 2, -fh / 2);
+              else ctx.drawImage(tex, 0, fr * fh, tex.naturalWidth, fh,
                 -tex.naturalWidth / 2, -fh / 2, tex.naturalWidth, fh);
               ctx.restore();
             }
           }
-          // 全亮主纹理 + 叠画 → 合成后队列
+          // 全亮主纹理 + 叠画 → 合成后队列（带 stealth 因子供 flush 逐层公式消费）
           if (d.mainGlow || d.overlay) {
             this.wingGlowQueue.push({
               p, slot: wingSlot, fr, anchor,
               wx: p.cx - p.facing * 2.5 + p.netOffX,
               wy: p.y + p.h + p.stepRenderY + gfxOff + p.netOffY - mOff,
+              settled: stealthSettled, clamp: stealthClamp, vortexTint, dye: dyeEmu,
             });
           }
         }
@@ -5584,7 +5902,7 @@ export class Renderer {
 
     ctx.restore();
     // ---- 坐骑身前层（Mount.Draw frontTexture：玩家本体之后绘制）----
-    if (mnt) this.drawMountLayer(ctx, p, mnt, 'front');
+    if (mnt) this.drawMountLayer(ctx, p, mnt, 'front', world.groundLevel);
     // ---- 矿车车身（Mount.Draw frontTexture :5500/5826-5835 1:1）----
     // 锚点 = 玩家位 + (w/2 + XOffset*dir, h/2 + YOffset(13) + PlayerOffset(8))，
     // 源矩形 = (0, 帧高*frame, 50, 帧高)、origin = (25, 帧高/2)；轮组 3 帧×12t。
@@ -5611,11 +5929,27 @@ export class Renderer {
     }
     // 使用类物品（托举：药水/方块等非工具）：身体前方图层，避免被身体挡住。
     // noGraphic 族(短剑 noUseGraphic=true)不画物品贴图——投射物即本体,双画=两个贴图
+    // 段 C：DrawPlayer_27_HeldItem 在原版绘制缓存内 → 与本体同转（TransformDrawData）
     if (swing && swing.item >= 0 && !ITEM_DEFS[swing.item]?.tool && !swing.noGraphic) {
+      if (mrot) { ctx.save(); applyPlayerMountRotation(ctx, mrot); }
       this.drawUseItem(ctx, p, swing, flicker);
+      if (mrot) ctx.restore();
     }
 
     void world;
+  }
+
+  /** 猪鲨崽背层液色渐染的整层乘色画布（Mount.Draw case 12 :5780-5787；懒建复用） */
+  private mountTintCanvas: HTMLCanvasElement | null = null;
+  private mountTintCtx: CanvasRenderingContext2D | null = null;
+  private mountTintScratch(): { c: HTMLCanvasElement; x: CanvasRenderingContext2D } | null {
+    if (!this.mountTintCtx) {
+      if (typeof document === 'undefined') return null;
+      this.mountTintCanvas = document.createElement('canvas');
+      this.mountTintCtx = this.mountTintCanvas.getContext('2d');
+      if (!this.mountTintCtx) return null;
+    }
+    return this.mountTintCanvas ? { c: this.mountTintCanvas, x: this.mountTintCtx! } : null;
   }
 
   /** 坐骑贴图叠画（Mount.Draw :5500-6075 主体 1:1）。
@@ -5635,7 +5969,19 @@ export class Renderer {
    *  贴图不可得坐骑（MOUNT_TEXTURE_OK=false：马匹/滚轴鞋/Chillet 等 Extra 表缺）→
    *  色块近似（胶囊体）并保留能力生效——登记于 vanilla-mounts.json textureOk */
   private drawMountLayer(ctx: CanvasRenderingContext2D, p: Player,
-    mnt: import('../entities/Mounts').MountInstance, layer: 'back' | 'front') {
+    mnt: import('../entities/Mounts').MountInstance, layer: 'back' | 'front',
+    worldSurface = 0) {
+    // ---- 坐骑点光注入（Mount.cs 各 AddLight 段；同岩浆瀑布惯例走渲染端 lighting 引用，
+    //      次帧生效）。仅背层走一遍，避免双层重复累加 ----
+    if (layer === 'back' && this.lighting) {
+      // Colors.CurrentLiquidColor 近似（Colors.cs _liquidColors 表）：按玩家浸入液体
+      // 取色，未浸入取当前群系水色档 0；liquidAlpha 渐变未建模（登记）
+      const lc: [number, number, number] = p.inLava ? [253, 32, 3]
+        : p.inHoney ? [59, 29, 131] : [9, 61, 191];
+      for (const l of mountLights(mnt, p, { liquidColor: lc, worldSurface, miscCounter: p.miscCounter })) {
+        this.lighting.addLight(l.tx, l.ty, l.r, l.g, l.b);
+      }
+    }
     const tex = mnt.textures;
     const main = layer === 'back' ? tex.back : tex.front;
     const extra = layer === 'back' ? tex.backExtra : tex.frontExtra;
@@ -5660,6 +6006,20 @@ export class Renderer {
           ? (layer === 'front' ? p.facing > 0 : false)
           : p.facing < 0;
         if (flip) ctx.scale(-1, 1);
+        // ---- 机身倾斜（Mount.cs Hover 尾段 :3468-3521 写 player.fullRotation）：
+        //      UFO 7 / 钻头 8 绕锚点（原版 origin = Size/2）；巫婆扫帚 23 绕底心
+        //      （:3520 origin = (w/2, height)）。仅机身层随转——原版会带动玩家本体
+        //      一起旋转（Player 绘制整组），本仓玩家层不转（drawMountLayer 所有权
+        //      之外的近似，登记） ----
+        if (mnt.type === 7 || mnt.type === 8 || mnt.type === 23) {
+          if (mnt.type === 23) {
+            ctx.translate(0, fh / 2);
+            ctx.rotate(mnt.fullRotation);
+            ctx.translate(0, -fh / 2);
+          } else {
+            ctx.rotate(mnt.fullRotation);
+          }
+        }
         // 层旋转（Mount.Draw :5793-5796）：钻头背层 = 外环角 / 钻头眼前层 = 二极管角
         if (mnt.type === 8) {
           ctx.rotate(layer === 'back' ? mnt.outerRingRotation : 0);
@@ -5683,10 +6043,41 @@ export class Renderer {
           ctx.restore();
           return;
         }
+        // ---- 猪鲨崽背层液色渐染（Mount.Draw case 12 :5780-5787）：背层以环境液色
+        //      整层替换绘制，alpha = 127/255 × clamp(计数器/60)（出水后 60t 渐隐）。
+        //      Canvas 等价 = 贴图行 × 液色 multiply 后 destination-in 裁回 alpha 蒙版
+        //      （ChunkCache 油漆同款两步法） ----
+        if (mnt.type === 12 && layer === 'back') {
+          const scratch = this.mountTintScratch();
+          const wash = Math.min(1, Math.max(0, mnt.fishronCounter / 60));
+          if (wash > 0 && scratch) {
+            const { c, x: tc } = scratch;
+            const lc = p.inLava ? [253, 32, 3] : p.inHoney ? [59, 29, 131] : [9, 61, 191];
+            if (c.width !== img.width || c.height !== fh) {
+              c.width = img.width;
+              c.height = fh;
+            }
+            tc.globalCompositeOperation = 'source-over';
+            tc.clearRect(0, 0, img.width, fh);
+            tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
+            tc.globalCompositeOperation = 'multiply';
+            tc.fillStyle = `rgb(${lc[0]},${lc[1]},${lc[2]})`;
+            tc.fillRect(0, 0, img.width, fh);
+            tc.globalCompositeOperation = 'destination-in';
+            tc.drawImage(img, 0, fr * fh, img.width, fh, 0, 0, img.width, fh);
+            const keep = ctx.globalAlpha;
+            ctx.globalAlpha = keep * (127 / 255) * wash;
+            ctx.drawImage(c, 0, 0, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
+            ctx.globalAlpha = keep;
+            ctx.restore();
+            return;
+          }
+        }
         ctx.drawImage(img, 0, fr * fh, img.width, fh, -img.width / 2, -fh / 2, img.width, fh);
         // 副层（蜜蜂翅膀 Mount_BeeWings / Scutlix 眼族 / 钻头二极管）：
         //  - Scutlix 眼辉：充能比渐显，charge==0 整层跳过（:5729-5735）
-        //  - 钻头二极管：diodeRotation 旋转（:5796）+ 两束激光（:6027-6063）
+        //  - 钻头二极管：diodeRotation 旋转（:5796）+ 两束激光（:6027-6063，激光
+        //    ignorePlayerRotation=true 不随机身倾斜 :6061——内层先抵消 fullRotation）
         if (extra) {
           const ex = this.atlas.ensureVImage(extra);
           if (ex) {
@@ -5704,8 +6095,11 @@ export class Renderer {
               }
             } else if (mnt.type === 8 && layer === 'front') {
               // 二极管层（frontExtra）：不随 facing 翻（上面 flip 只对 front 主层）——
-              // 此处在已翻转的坐标系里先翻回来，再按 diodeRotation 旋转
+              // 此处在已翻转的坐标系里先翻回来，再按 diodeRotation 旋转；同层先抵消
+              // 机身倾斜（fullRotation）——激光段原版 ignorePlayerRotation=true（:6061），
+              // 二极管贴图随机身倾斜的原版差异一并近似掉（登记）
               ctx.save();
+              if (mnt.fullRotation !== 0) ctx.rotate(-mnt.fullRotation);
               if (flip) ctx.scale(-1, 1);
               ctx.rotate(mnt.diodeRotation);
               ctx.drawImage(ex, 0, 0, ex.width, ex.height, -ex.width / 2, -ex.height / 2, ex.width, ex.height);
@@ -5739,8 +6133,11 @@ export class Renderer {
           }
         }
         ctx.restore();
-        // 钻头激活时的光标十字（原版 = 投射物 453 贴图随鼠标；本仓无投射物，
-        // 激活期直接叠画十字贴图于瞄准点）
+        // 钻头激活时的光标十字 = 原版投射物 453（DrillMountCrosshair：1×1、tileCollide
+        // false、ai = 鼠标偏移，纯光标视觉无物理）。本仓无通用投射物实体管线，直绘
+        // Projectile_453 贴图于 mount.crosshairX/Y（= 鼠标世界坐标，Mount.aimDrill 维护）
+        // 视觉/行为等价——投射物实体化与 UpdateEffects case 8 的"453 存活门"（:5006-
+        // 5011）均由 abilityActive 单一真源表达（松键即关），登记未实体化
         if (mnt.type === 8 && layer === 'front' && mnt.abilityActive && this.atlas) {
           const cross = this.atlas.ensureVImage('vanilla/Projectile_453.png');
           if (cross) {

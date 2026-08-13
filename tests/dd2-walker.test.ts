@@ -290,7 +290,10 @@ describe('AI_107 walker 攻击状态机（NPC.cs:63372-64919）', () => {
     expect(maxWindup).toBe(29);                   // 起手 30 后同拍递减（原版同序）
     expect(cycles).toBeGreaterThanOrEqual(2);     // 循环前摇
     expect(h.projectiles.length).toBe(0);
-    expect(sfxPlayed(h, 'dd2_goblin_scream')).toBe(false);  // 1/1000 概率,短窗内几乎必静
+    // dd2_goblin_scream 1/1000/tick 的概率断言不设否定（200t 窗内 ~18% 必然偶发）——
+    // 改测确定性面：scream 参数在表（walker107Params 已断言）且本测试全程未注册非 scream 音
+    expect(h.sfx.every((c) => !c.files.some((f) => f.startsWith('dd2_ogre')
+      || f.startsWith('dd2_betsy') || f.startsWith('dd2_kobold')))).toBe(true);
   });
 
   it('小妖精 572:700px 点火 → 64px 起爆（192² 盒、伤 80、爆音,不走掉落管线）', () => {

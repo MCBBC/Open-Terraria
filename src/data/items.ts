@@ -999,7 +999,21 @@ for (const [fnVid, fnStyle] of FOUNTAIN_ITEM_STYLE) {
 }
 void 0;
 
-// ---- 油漆物品 Item.paint / Item.paintTool（Item.cs SetDefaults 1:1）：
+// ---- 放置块 tile 回填补遗（2026-08-13 实装缺口扫描 §3）：vanilla.json
+//  .items 的 createTile 有值、extract-itemfunc 提取漏（共享 case 段算式不在
+//  单值提取面内）→ def.tile 未回填 = 放置静默无效。5 件以 TEdit 数据为权威
+//  （vanilla.json createTile 逐件核对一致），tile def 均已存在：
+//  3576 星尘碎片块(418) / 3637 白队块(434) / 3738 呆头绿气球块(448) /
+//  2755 活性超亮火块(344) / 2262 蓝王朝瓦(313) ----
+const BLOCK_TILE_BACKFILL: ReadonlyArray<readonly [number, number]> = [
+  [3576, 418], [3637, 434], [3738, 448], [2755, 344], [2262, 313],
+];
+for (const [vid, sheet] of BLOCK_TILE_BACKFILL) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  const tk = TILE_KEY_BY_SHEET.get(sheet);
+  if (d && d.tile === undefined && tk !== undefined) d.tile = tk;
+}
 //  油漆 1073-1099 → PaintID 1-27（:13374-13535，含深层 13-24），
 //  棕/暗影/负相 1966/1967/1968 → 28/29/30（:21168-21185）。
 //  工具族 paintTool（Player.cs PlaceThing 分派 :41152/:41236/:41254）：1071/1543 刷、
@@ -1638,17 +1652,42 @@ for (const [vid, sheet] of CAGE_ITEM_SHEET) {
 //  槽 0 近似 TE 存储（GAP ③ 见 render/CritterCage.ts）。放置触发 = 右键
 //  （PLACE_TILE_ON_ALT_USE），左键保留放生（ItemCheck_ReleaseCritter :43377）
 const CRITTER_ANCHOR_TILE = 'v_724_critter_anchor';
-/** placeStyle = TECritterAnchor.GetLeashedCritterPrototype(vid).anchorStyle
- *  （Player.cs:42771 previewPlaceStyle 直接取 prototype 字段 → frameX = style*18）：
- *  Crawler/RunnerLeashedCritter=1（蠕虫/鼠/龟/蛆/大鼠）、Bird=2、Fish=3、Flyer=4，
- *  其余原型未覆写 = 0 */
+/** placeStyle = 物品自身 placeStyle（放置帧档的**缺省**来源；蝴蝶族 1994-2001 =
+ *  物种变体 1-8，Item.cs:21303 `placeStyle = 1 + type - 1994`）。锚桩放置帧档在
+ *  原版由 Player.cs:42771-42773 **覆写**为 prototype.anchorStyle（与物品自身
+ *  placeStyle 解耦）——本仓由 Game.tryPlace 的 724 分支按
+ *  entities/LeashedCritter.ts anchorStyleOfItem 覆写 frameX，此处仅承载物品自身值。
+ *  非 Butterfly 族物品的 Item.placeStyle 原版恒 0，但为让通用 framedCellFrame
+ *  路径也落对帧，此处按 prototype 继承链全量写 anchorStyle（等价值）：
+ *   1 = Crawler + Runner + Snail（Crawler 子类，SnailLeashedCritter.cs:9）
+ *   2 = Bird **及 Waterfowl 子类**（BirdLeashedCritter 派生——anchorStyle 继承 2）
+ *   3 = Fish
+ *   4 = Flyer 及其全部派生（Fly 蝶/萤/地狱蝶/帝皇蝶/微光蝇 + Dragonfly +
+ *       CrawlingFly + Fairy——FlyerLeashedCritter.cs:25 anchorStyle=4 为全族基值）
+ *  其余原型（Walker/Jumper/WaterStrider）未覆写 = 0。
+ *  ★本表曾只列 19 件（Flyer 档漏 25 件、Waterfowl 档漏 4 件、Snail 档漏 3 件）——
+ *  由 tests/leashed-critters.test.ts 的 anchorStyle 交叉对账抓回（2026-08-13） */
 const CRITTER_ANCHOR_STYLE: Readonly<Record<number, number>> = {
+  // 1 = Crawler（2002/2895/3191-3194/4363/4464/4465）+ Runner（2003/2894/4375）
+  //     + Snail（2006/2007/4849）
   2002: 1, 2003: 1, 2894: 1, 2895: 1, 3191: 1, 3192: 1, 3193: 1, 3194: 1,
-  4363: 1, 4375: 1, 4464: 1, 4465: 1,
+  4363: 1, 4375: 1, 4464: 1, 4465: 1, 2006: 1, 2007: 1, 4849: 1,
+  // 2 = Bird（2015-2017/2889/4395/5212/5300/5311-5313）+ Waterfowl（2122/2123/4359/4374）
   2015: 2, 2016: 2, 2017: 2, 2889: 2, 4395: 2, 5212: 2, 5300: 2, 5311: 2, 5312: 2, 5313: 2,
+  2122: 2, 2123: 2, 4359: 2, 4374: 2,
+  // 3 = Fish
   261: 3, 4274: 3, 4373: 3, 4480: 3, 4482: 3, 5511: 3,
-  2891: 4, 4845: 4, 4961: 4,
+  // 4 = Flyer 全族：萤 1992+2004+4847 / 金蝶 2891 / 地狱蝶 4845 / 帝皇蝶 4961 /
+  //     微光蝇 5350 / 蜻蜓 4334-4340 / 爬蝇+椿象 4361+4362+5132 / 妖精 4068-4070
+  1992: 4, 2004: 4, 2891: 4, 4845: 4, 4847: 4, 4961: 4, 5350: 4,
+  4334: 4, 4335: 4, 4336: 4, 4337: 4, 4338: 4, 4339: 4, 4340: 4,
+  4361: 4, 4362: 4, 5132: 4,
+  4068: 4, 4069: 4, 4070: 4,
 };
+/** 蝶族八色物品（1994-2001）：Item.placeStyle = 物种变体 1-8（Item.cs:21303），
+ *  NormalButterflyLeashedCritter.SetDefaults 取作绘制物种窗（ai[2]，NPC.cs:73454）。
+ *  放置帧档走 anchorStyle 覆写（见上注），此处不可写 4 */
+const BUTTERFLY_VARIANT_ITEMS: ReadonlyArray<number> = [1994, 1995, 1996, 1997, 1998, 1999, 2000, 2001];
 /** createTile=724 全量 93 件（DefaultToCapturedCritter 全调用点 + 区间展开） */
 const CRITTER_ANCHOR_ITEMS: ReadonlyArray<number> = [
   261, 1338,
@@ -1670,14 +1709,39 @@ for (const vid of CRITTER_ANCHOR_ITEMS) {
   const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
   if (!d || d.tile !== undefined) continue;
   d.tile = CRITTER_ANCHOR_TILE;
+  // 蝶族：placeStyle = 物种变体（绘制窗），锚桩帧档由放置钩按 anchorStyle 覆写
+  if (BUTTERFLY_VARIANT_ITEMS.includes(vid)) {
+    if (d.placeStyle === undefined) d.placeStyle = 1 + vid - 1994;
+    continue;
+  }
   const st = CRITTER_ANCHOR_STYLE[vid];
   if (st !== undefined && st !== 0 && d.placeStyle === undefined) d.placeStyle = st;
 }
 
+// ---- 风筝族 → 通用风筝锚桩 tile 723（Item.DefaultToKite :47457-47468：
+//  DefaultToThrownWeapon(projId) + createTile=723 + consumable=false，24 件；
+//  ItemID.Sets.IsAKite = 同 24 id）。projType（= item.shoot）全表在
+//  entities/LeashedCritter.ts KITE_ITEM_PROJ（放置 → TEKiteAnchor 存物品 id →
+//  LeashedKite 拴绳风筝）。placeStyle 恒 0（DefaultToKite 不赋值 → style 0
+//  下锚档；TileObjectData.cs:4508 前段 StyleHorizontal×5 的 1-4 档为上下/侧墙锚）
+const KITE_ANCHOR_TILE = 'v_723_kite_anchor';
+const KITE_ANCHOR_ITEMS: ReadonlyArray<number> = [
+  4367, 4368, 4369, 4370, 4371, 4379,
+  4610, 4611, 4612, 4613,
+  4648, 4649, 4650, 4651,
+  4669, 4670, 4671, 4674, 4675, 4676, 4677, 4681, 4683, 4684,
+];
+for (const vid of KITE_ANCHOR_ITEMS) {
+  const k = VANILLA_ITEM_KEY_BY_ID[vid];
+  const d = k !== undefined ? ITEM_DEFS[byKey[k]] : undefined;
+  if (!d || d.tile !== undefined) continue;   // 手写链接优先
+  d.tile = KITE_ANCHOR_TILE;
+}
+
 /** ItemID.Sets.PlaceTileOnAltUse（ItemID.cs:155 原文 117 id）：右键放置、左键走
  *  使用语义（Player.cs:42842-42847 altFunctionUse==2 → doPlacementAction）。
- *  成员 = 捕获小动物 93 件（tile 724，左键=放生）+ 风筝 24 件（tile 723，左键=放飞）。
- *  风筝族 createTile=723 未接物品链，当前本集合实际生效面 = tile 724 一族 */
+ *  成员 = 捕获小动物 93 件（tile 724，左键=放生）+ 风筝 24 件（tile 723，左键=放飞），
+ *  两族 createTile 物品链均已接（上文 CRITTER_ANCHOR_ITEMS / KITE_ANCHOR_ITEMS） */
 export const PLACE_TILE_ON_ALT_USE: ReadonlySet<number> = new Set<number>([
   4367, 4368, 4369, 4370, 4371, 4379, 4610, 4611, 4612, 4613, 4648, 4649, 4650, 4651,
   4669, 4670, 4671, 4674, 4675, 4676, 4677, 4681, 4683, 4684,

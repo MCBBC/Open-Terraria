@@ -1,0 +1,430 @@
+{
+ "44": {
+  "cond": "&& Main.rand.Next(3) == 0",
+  "buffs": [
+   {
+    "buff": 22,
+    "dur": "900"
+   }
+  ]
+ },
+ "55": {
+  "cond": "|| type == 719",
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "600"
+   },
+   {
+    "buff": 20,
+    "dur": "Main.rand.Next(60, 300"
+   }
+  ]
+ },
+ "82": {
+  "cond": "&& Main.rand.Next(3) == 0",
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "420"
+   }
+  ]
+ },
+ "96": {
+  "cond": "|| type == 101",
+  "buffs": [
+   {
+    "buff": 39,
+    "dur": "180"
+   },
+   {
+    "buff": 39,
+    "dur": "180"
+   },
+   {
+    "buff": 39,
+    "dur": "120"
+   }
+  ]
+ },
+ "98": {
+  "cond": "|| type == 1073",
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "600"
+   }
+  ]
+ },
+ "119": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 324,
+    "dur": "240"
+   }
+  ]
+ },
+ "128": {
+  "cond": "&& Main.rand.Next(3) == 0",
+  "buffs": [
+   {
+    "buff": 44,
+    "dur": "360"
+   }
+  ]
+ },
+ "174": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 46,
+    "dur": "1200"
+   },
+   {
+    "buff": 47,
+    "dur": "90"
+   },
+   {
+    "buff": 47,
+    "dur": "60"
+   }
+  ]
+ },
+ "176": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "1200"
+   },
+   {
+    "buff": 20,
+    "dur": "300"
+   }
+  ]
+ },
+ "177": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 46,
+    "dur": "1500"
+   },
+   {
+    "buff": 47,
+    "dur": "Main.rand.Next(30, 120"
+   }
+  ]
+ },
+ "184": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "900"
+   }
+  ]
+ },
+ "188": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 323,
+    "dur": "1200"
+   }
+  ]
+ },
+ "253": {
+  "cond": "&& !hostile",
+  "buffs": [
+   {
+    "buff": 324,
+    "dur": "600"
+   }
+  ]
+ },
+ "257": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 46,
+    "dur": "2700"
+   },
+   {
+    "buff": 47,
+    "dur": "60"
+   }
+  ]
+ },
+ "258": {
+  "cond": "&& Main.rand.Next(2) == 0",
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "60 * Main.rand.Next(5, 8"
+   }
+  ]
+ },
+ "276": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "Main.rand.Next(120, 540"
+   },
+   {
+    "buff": 20,
+    "dur": "Main.rand.Next(180, 420"
+   }
+  ]
+ },
+ "285": {
+  "cond": "&& !hostile",
+  "buffs": [
+   {
+    "buff": 31,
+    "dur": "180"
+   },
+   {
+    "buff": 31,
+    "dur": "60"
+   }
+  ]
+ },
+ "288": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 69,
+    "dur": "900"
+   }
+  ]
+ },
+ "290": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 32,
+    "dur": "60 * Main.rand.Next(5, 16"
+   }
+  ]
+ },
+ "291": {
+  "cond": "|| type == 292",
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "60 * Main.rand.Next(8, 16"
+   }
+  ]
+ },
+ "293": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 80,
+    "dur": "60 * Main.rand.Next(2, 7"
+   }
+  ]
+ },
+ "299": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 23,
+    "dur": "240"
+   }
+  ]
+ },
+ "348": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 46,
+    "dur": "600"
+   },
+   {
+    "buff": 46,
+    "dur": "300"
+   },
+   {
+    "buff": 47,
+    "dur": "60"
+   },
+   {
+    "buff": 47,
+    "dur": "40"
+   },
+   {
+    "buff": 47,
+    "dur": "20"
+   }
+  ]
+ },
+ "349": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 46,
+    "dur": "600"
+   },
+   {
+    "buff": 46,
+    "dur": "300"
+   }
+  ]
+ },
+ "359": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 324,
+    "dur": "420"
+   }
+  ]
+ },
+ "435": {
+  "cond": "&& Main.rand.Next(3) != 0",
+  "buffs": [
+   {
+    "buff": 144,
+    "dur": "300"
+   }
+  ]
+ },
+ "436": {
+  "cond": "&& Main.rand.Next(5) >= 2",
+  "buffs": [
+   {
+    "buff": 31,
+    "dur": "300"
+   }
+  ]
+ },
+ "437": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 144,
+    "dur": "60 * Main.rand.Next(4, 9"
+   }
+  ]
+ },
+ "467": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "Main.rand.Next(30, 150"
+   }
+  ]
+ },
+ "472": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 149,
+    "dur": "Main.rand.Next(30, 150"
+   }
+  ]
+ },
+ "572": {
+  "cond": "&& Main.rand.Next(3) != 0",
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "Main.rand.Next(120, 240"
+   }
+  ]
+ },
+ "581": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 164,
+    "dur": "Main.rand.Next(300, 540"
+   },
+   {
+    "buff": 164,
+    "dur": "Main.rand.Next(360, 720"
+   }
+  ]
+ },
+ "669": {
+  "cond": "&& Main.rand.Next(20) == 0",
+  "buffs": [
+   {
+    "buff": 31,
+    "dur": "60 * Main.rand.Next(2, 6"
+   }
+  ]
+ },
+ "682": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 196,
+    "dur": "300"
+   }
+  ]
+ },
+ "687": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "60 * Main.rand.Next(7, 11"
+   }
+  ]
+ },
+ "961": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 47,
+    "dur": "20"
+   }
+  ]
+ },
+ "980": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 70,
+    "dur": "300"
+   }
+  ]
+ },
+ "1048": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 20,
+    "dur": "600"
+   },
+   {
+    "buff": 120,
+    "dur": "600"
+   }
+  ]
+ },
+ "1053": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "300"
+   }
+  ]
+ },
+ "1078": {
+  "cond": null,
+  "buffs": [
+   {
+    "buff": 24,
+    "dur": "Main.rand.Next(300, 600"
+   }
+  ]
+ }
+}

@@ -9,6 +9,7 @@ import { alignmentPcts, dryadWorldStatus } from '../world/WorldAlignment';
 import { petInfoOfVid } from '../data/vanillaPets';
 import { statOfInternal } from '../data/vanillaItemStats';
 import { vanillaIdOfItem } from '../stats/Shimmer';
+import { computeSellValue, canSellFromShopUi } from '../stats/SellChain';
 import { TILE, SPAWN_MIN_DIST, SPAWN_MAX_DIST, GRAVITY, MAX_FALL_SPEED, PLAYER_WALK_ACCEL, PLAYER_WALK_MAX, PLAYER_FRICTION, PLAYER_AIR_FRICTION, PLAYER_JUMP_SPEED, PLAYER_JUMP_TICKS } from './constants';
 import { moveAndCollide } from '../physics/TileCollision';
 import { plates428Pressed } from '../render/VanillaTiler';
@@ -29,6 +30,10 @@ import {
   INVASION_GROUP, KILL_WEIGHT, invasionActive, canStartInvasion, startInvasion,
   tickInvasion, invasionWarningMisc, shouldSpawnInvasionEnemies,
 } from '../world/Invasion';
+import {
+  TreeShakeState, TREE_SHAKEABLE_SHEETS, shakeTree,
+  type TreeShakeHost, type TreeShakeSinks, type TreeShakeNpcOpts,
+} from '../world/TreeShake';
 import {
   MOON_KIND_FROST, MOON_KIND_PUMPKIN, MOON_EVENT_GROUP, REQUIRED_POINTS,
   moonEventActive, startMoonEvent, stopMoonEvent, addMoonEventKill,
@@ -59,6 +64,7 @@ import {
 import { DD2_EVENT_HOOKS, checkArenaScore } from '../entities/bossAI_dd2';
 import { golemSpawnFromAltar, eterniaStandBottomRow } from '../world/BossSummonStations';
 import shopstockJson from '../data/vanilla-shopstock.json';
+import { dryadMoonPhaseStock, skeletonMerchantMoonPriceMul } from '../data/townNpcProfiles';
 import travelshopJson from '../data/vanilla-travelshop.json';
 import { TileStore, LIQUID_TYPE } from '../world/TileStore';
 import { paintTile, paintWall, paintDustColor, type PaintDustHook } from '../world/Paint';
@@ -87,6 +93,7 @@ import {
   FURNITURE_TILE_KIND, furnitureAnchor, furniturePlaceSingle, furniturePopSingle,
   furnitureTryBreak, furnitureTakeFirst, dollPlace, hatRackPlace, removeFurnitureAt,
   furnitureSlotCount, fitsFurniture, critterAnchorPlace, critterAnchorBreakDrop,
+  kiteAnchorPlace, kiteAnchorBreakDrop,
   type FurnitureKind,
 } from '../world/FurnitureItems';
 import { ITEM_DEFS, ITEM_BY_KEY, VANILLA_ITEM_KEY_BY_ID, PLACE_TILE_ON_ALT_USE } from '../data/items';
@@ -113,7 +120,7 @@ import { rollablePrefixes, rollPrefix, prefixStat } from '../data/vanillaPrefixe
 import vanillaValueJson from '../data/vanilla-itemvalue.json';
 const ITEM_VALUE = vanillaValueJson as Record<string, number>;
 import { Player } from '../entities/Player';
-import { Enemy } from '../entities/Enemy';
+import { Enemy, visEffectFrames } from '../entities/Enemy';
 import { ItemDrop } from '../entities/ItemDrop';
 import { TownNPC } from '../entities/TownNPC';
 import { scanScene, EMPTY_SCENE, type SceneFlags } from '../world/SceneMetrics';
@@ -134,6 +141,7 @@ import { inOpposingTeam, meleeEnchantOf, statusPvPMelee, statusPvPProjectile } f
 import { Critter } from '../entities/Critter';
 import { attemptToFindTeleportSpot } from '../entities/fighterFamilies';
 import { HealProj } from '../entities/HealProj';
+import { LeashedEntityManager, KITE_ITEM_PROJ, anchorStyleOfItem } from '../entities/LeashedCritter';
 /** 血月腐化变换表（AttemptToConvertNPCToEvil :93122-93149：[腐化, 猩红]）——
  *  兔 46/企鹅 303/海鸥 337/蚱蜢? 443/鼠 540 → 47/464；金鱼族 55/230/592/593 → 57/465；
  *  松鼠 148/149 → 168/470 */
@@ -213,7 +221,7 @@ import { FallingStar, nightStarfallBoost } from '../entities/FallingStar';
 import { dropMeteor, type MeteorHost } from '../world/MeteorFall';
 import { computeHappiness, type BiomeZones, type HappinessReportLine } from '../data/vanillaHappiness';
 import { Minecart, CART_MOUNT_TEXTURES, DEFAULT_CART_TEXTURE, WOOD_CART_MOUNT } from '../entities/Minecart';
-import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME } from '../entities/Mounts';
+import { mountOfItem, isCartMount, DRILL_PICK_POWER, DRILL_PICK_TIME, smoothSlopeAt } from '../entities/Mounts';
 import { getOnTrack, frameTrack, frameTrackArea, placeTrack, trackItemId, TRACK_SHEET } from '../world/MinecartTrack';
 import { canHit, canHitLine } from '../physics/LineOfSight';
 import { FallingBlock } from '../entities/FallingBlock';
@@ -350,7 +358,8 @@ const TILE_NO_FAIL_SHEETS = new Set([
   624, 636, 637, 638, 654, 655, 656, 666, 697, 700, 701, 705, 709,
 ]);
 // tileAxe（Main.cs:7157-7172）：树/仙人掌/棕榈/宝石树/训练假人——斧族专属
-const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 589, 596, 616, 634, 704]);
+// ★583-589 七棵宝石树全在原版表内（:7165-7171），此前漏 588 钻石树（可斧性缺失）
+const TILE_AXE_SHEETS = new Set([5, 72, 80, 323, 488, 583, 584, 585, 586, 587, 588, 589, 596, 616, 634, 704]);
 // 地牢砖族（Main.tileDungeon + 41/43/44 裂纹变体）：除数 /2 + 门槛 100
 const TILE_DUNGEON_SHEETS = new Set([41, 43, 44, 481, 482, 483]);
 // Main.wallDungeon 墙表（Main.cs:10507-10515：7/8/9/94-99）——KillWall_CheckFailure
@@ -570,6 +579,10 @@ export class Game implements GameHooks {
   /** 黑暗视野（buff 80 Blackout）：updateLightDecay ×0.85 */
   blackout = false;
   entities = new EntityManager();
+  /** 拴绳实体（LeashedEntity 等价，Main.cs:17895 UpdateEntities/:22163 DrawEntities）：
+   *  锚桩 724 拴绳小动物 + 风筝桩 723 风筝——生命周期随 furnitureItems 记录
+   *  （放置 spawn / 破坏 removeAt / 读档 respawnAll），实体本身不落盘 */
+  leashed = new LeashedEntityManager();
   input: Input;
   cb: GameCallbacks;
   sfx = new Sfx();
@@ -616,6 +629,9 @@ export class Game implements GameHooks {
   /** 原版 HitTile 伤害积累（劈砍/挖掘通用，阈值 100） */
   private hitTiles = new HitTile();
   private lastMineHitTick = -999;
+  /** 摇树状态（WorldGen.treeShakeX/Y + numTreeShakes，WorldGen.cs:4353-4359）——
+   *  每树每日一摇；黎明/换世界清空（Main.cs:64846 / WorldGen.cs:6896） */
+  private treeShakes = new TreeShakeState();
   swing: {
     t: number; dur: number; item: number; dmg?: number; kb?: number;
     /** useStyle 分族（Player.cs:49939 ApplyUseStyle switch）：1 挥砍 / 2 咀嚼 /
@@ -834,6 +850,13 @@ export class Game implements GameHooks {
       else if (p instanceof Dart) {
         kind = 2; tag = String(p.projId ?? 0);
         if (p.hostile) kind |= 0x80; // 射击怪弹（!style.friendly）——review F1：此前整族漏覆盖
+      }
+      else if (p instanceof MagicProj) {
+        // ★MagicProj 贴图化后带 projId,必须在下方 projId!==undefined 门前拦截,
+        //  否则被抢分类 kind 1 → 访客端 Boomerang 重建(贴图旋转模型全错)。
+        //  线格式与原 color 分支完全一致(kind 4 + color tag),访客零感知
+        kind = 4; tag = p.color; aux = Math.max(0, Math.min(32767, p.life ?? 600));
+        if (pvpOn) kind |= 0x40;
       }
       else if (p.projId !== undefined) {
         kind = 1; tag = String(p.projId);
@@ -2027,6 +2050,10 @@ export class Game implements GameHooks {
 
   private afterWorldLoad() {
     const w = this.world;
+    // 摇树状态复位（WorldGen.clearWorld :6896 ResetTreeShakes）+ 绑当前 store
+    // （getTreeShake 渲染查询的树底归位需要）
+    this.treeShakes.reset();
+    this.treeShakes.bind(w.store);
     // 专家/大师强度轴上下文注入（NPC.ScaleStats 的 Main 静态投影，
     // src/stats/ScaleStats.ts；newWorld worker/主线程两路与 loadWorld 都汇到此处）。
     // 存档不持久化缩放值（WorldFile.SaveNPCs :1703-1746 只存城镇 NPC 的
@@ -2037,6 +2064,15 @@ export class Game implements GameHooks {
     this.wireDD2Hooks();
     // 晶塔表首扫（wld 导入的既有晶塔即刻可点；放置/破坏时 refreshPylons 增量刷）
     this.refreshPylons();
+    // 拴绳实体重生（TELeashedEntityAnchor.OnWorldLoaded → RespawnLeashedEntity，
+    // TELeashedEntityAnchor.cs:35-40）：实体不落盘，读档从 furnitureItems 的
+    // critter_anchor/kite_anchor 单槽记录按 makeNPC/shoot 重建
+    this.leashed.attach(w);
+    this.leashed.respawnAll(
+      w.furnitureItems,
+      (id) => viIdFromKey(ITEM_DEFS[id]?.key ?? ''),
+      this.leashedEnv(),
+    );
     // 常用声效小集合预热（按需加载体系下的目标预热，异步不阻塞：
     // 战斗/挖掘/拾取等开局即用的 ~20 个小 wav；怪物专属声仍随首次受击懒加载）
     this.sfx.preloadNames(['hit', 'hurt', 'killed', 'pkilled', 'pickup', 'dig', 'place',
@@ -3277,6 +3313,12 @@ export class Game implements GameHooks {
     // ---- 实体 ----
     this.entities.update(dt, this);
 
+    // ---- 拴绳实体（LeashedEntity.UpdateEntities，Main.cs:17895）----
+    // 锚桩 724 小动物 / 风筝桩 723 风筝的 AI 推进 + 族点光（firefly/fairy/snail/
+    // hell/empress 的 Lighting.AddLight 经 env.addLight 直推 LightingEngine）。
+    // 距离门见 LeashedEntityManager.streamRadius（≈ vanilla section 流式）
+    this.leashed.update(this.world, this.leashedEnv(), this.player.cx, this.player.cy);
+
     // ---- 传送带实体输送（Collision.StepConveyorBelt, Collision.cs:4215-4351）----
     // 原版在各自碰撞段内调用（Player.cs:27920 / NPC.cs:93774 / WorldItem.cs:938），
     // 这里统一为实体更新后的后处理：每 tick 末等价，对各自 moveAndCollide 无侵入。
@@ -3582,6 +3624,9 @@ export class Game implements GameHooks {
       this._lastClockT = ct;
       const crossed = (a: number) => pt < a && ct >= a;
       if (crossed(Clock.DAWN)) {
+        // 摇树表清空（UpdateTime_StartDay 首行 Main.cs:64846 WorldGen.ResetTreeShakes）——
+        // 每树每日一摇的门
+        this.treeShakes.reset();
         // 日晷快进落点（UpdateTime_StartDay :64844-64847 头部）：清 fastForwardTimeToDawn
         // → dayRate 自动回到常规档（World.dayRate() 每 tick 重算，无需显式 UpdateTimeRate）；
         // 日晷冷却 -1（:64885-64887，使用时置 8 → 8 个黎明后归零可再用）
@@ -5953,7 +5998,10 @@ export class Game implements GameHooks {
         const mx = this.player.cx + Math.cos(ang) * 14;
         const my = this.player.cy - 4 + Math.sin(ang) * 14;
         const color = mg.proj === 'bolt' ? '#A040FF' : '#FFB040';
-        const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color);
+        // 贴图化:vi_ 物品带原版 shoot 时按弹型贴图绘制(缺省 0 = 圆点兜底,同旧观感)
+        const mpVid = viIdFromKey(heldDef.key);
+        const proj = new MagicProj(mx, my, Math.cos(ang) * mg.projSpeed, Math.sin(ang) * mg.projSpeed, mg.damage, 45, color,
+          mpVid >= 0 ? (itemCombat(mpVid)?.shoot ?? 0) : 0);
         this.entities.add(proj, 'projectiles');
         this.player.useTime = mg.speed;
         this.player.onManaItemUsed(); // 用魔动画窗（manaRegenDelay 重置期，:42131-42137）
@@ -6739,8 +6787,29 @@ export class Game implements GameHooks {
       useTile,
       pickTile: (tx, ty) => this.tryMine(tx, ty, DRILL_PICK_POWER, 'pick', DRILL_PICK_TIME, DRILL_PICK_TIME, { drill: true }),
       pickWall: (tx, ty) => this.drillPickWall(tx, ty),
-      dust: (x, y, n) => this.spawnParticles(x, y, '#9FD8FF', n, 1.4, { life: 26, grav: 0 }),
-      // Tile.SmoothSlope(point, applyToNeighbors=true)（:3094）——本仓无运行期坡面平滑器，登记
+      // 命中尘（Mount.cs :3072-3080/:3131-3137）：dust 230 ×2 粒，方向 = 目标朝向角
+      // ±90° 垂直喷溅、速度 2-4、noGravity——原版 dust 池优先，缺省回退定向粒子爆发
+      dust: (x, y, n, rot) => {
+        const pool = this.vanillaDust;
+        if (pool) {
+          for (let i = 0; i < n; i++) {
+            const ang = rot + (Math.random() < 0.5 ? -Math.PI / 2 : Math.PI / 2);
+            const spd = Math.random() * 2 + 2;
+            const d = pool.spawn(x, y, 0, 0, 230, Math.cos(ang) * spd, Math.sin(ang) * spd);
+            if (d) { d.noGravity = true; d.fadeIn = Math.random() * 0.5; }
+          }
+          return;
+        }
+        this.spawnBurst(x, y, '#9FD8FF', n, 3, rot + Math.PI / 2, Math.PI / 2, { life: 26, grav: 0 });
+      },
+      // Tile.SmoothSlope(point, applyToNeighbors=true)（Mount.cs :3083 → Tile.cs :822）：
+      // Mounts.smoothSlopeAt 1:1（四邻+自身按实心位形重整半砖/坡面），改格后标脏
+      // ChunkCache 重烘焙（VanillaTiler 坡面帧消费 st.slope——不标脏则画面不更新）
+      smoothSlope: (tx, ty) => {
+        const st = this.world.store;
+        smoothSlopeAt(st, tx, ty);
+        this.chunks.markDirtyArea(tx - 1, ty - 1, tx + 1, ty + 1);
+      },
     });
     this.mining = null;
   }
@@ -6959,7 +7028,82 @@ export class Game implements GameHooks {
       if (toolType === 'axe') this.sfx.play('chop');
       else if (/stone|ore|brick|obsidian|ash|gem_|fossil|silt/i.test(d.key)) this.sfx.play('tink');
       else this.sfx.play('dig');
+    } else if (toolType === 'axe' && TREE_SHAKEABLE_SHEETS.has(sheet)) {
+      // 未砍倒的斧击 → WorldGen.KillTile fail 分支（WorldGen.cs:63759）→ ShakeTree(:63169)。
+      // 门 = IsShakeable（TileID.cs:163，仙人掌 80/倒木 488/假人 704 在 tileAxe 但不摇）；
+      // 原版此路径要求 sItem.axe>0（Player.cs:45104），dual.type==='axe' 已含此语义
+      this.tryShakeTree(tx, ty);
     }
+  }
+
+  /** 摇树总装（WorldGen.ShakeTree :63169-63462）：宿主世界门 + 掉落/实体落点注入 */
+  private tryShakeTree(tx: number, ty: number): void {
+    const w = this.world;
+    const sf = w.seedFlags ?? {};
+    const host: TreeShakeHost = {
+      st: w.store,
+      isDay: w.clock.isDay,
+      // Main.halloween = 季节万圣 ∨ 月事件强制季（此处取并集，等价原版两旗同源）
+      halloween: w.clock.halloween || this.forceHalloweenForToday,
+      raining: !!w.weather?.raining,
+      windyForButterflies: Math.abs(w.weather?.windSpeedTarget ?? 0) >= 0.4,  // NPC.cs:6801
+      tenthAnniversary: !!sf.tenthAnniversary,
+      getGoodWorld: !!sf.getGoodWorld,
+      remixWorld: !!sf.remix,
+      notTheBees: !!sf.notTheBees,
+      drunkWorld: !!sf.drunkWorld,
+      luck: this.player.luck,
+    };
+    const sinks: TreeShakeSinks = {
+      // Item.NewItem 16×16 盒内均匀取点（原版 NewItem 语义）；速度 0 靠重力散落
+      item: (vid, px, py, stack) => {
+        const key = VI(vid);
+        if (key) this.spawnDrop(px + Math.random() * 16, py + Math.random() * 16, key, stack, 0, 0);
+      },
+      npc: (vid, px, py, o) => this.spawnTreeShakeNpc(vid, px, py, o),
+      // 弹 28 炸弹 / 75 快乐炸弹走引信弹通道（AI_016，fuse 180）：
+      //  28 = PrepareBombToBlow :44134 炸弹族伤害 100 + ExplodeTiles :75262 半径 4 + 128 盒
+      //  75 = :74934 Resize(128,128) 伤害 60 kb8——ExplodeTiles 表(:75262)无 75 → 不毁地形
+      bomb: (vid, px, py, vx) => {
+        const dmg = vid === 75 ? 60 : 100;
+        const radius = vid === 75 ? 0 : (Game.EXPLODE_RADIUS[28] ?? 0);
+        const p = new GrenadeProj(px, py, vx, 0, dmg, 180, vid,
+          (ex, ey, ed) => this.explodeAt(Math.floor(ex / TILE), Math.floor(ey / TILE), ed,
+            radius, radius > 0, 64, this.player.equipStats.armorPen, vid));
+        this.entities.add(p, 'projectiles');
+      },
+      // 弹 655 蜂巢（AI_016 蜂巢裂蜂）未实装——登记跳过（见摇树报告跳过清单）
+      beehive: () => { /* engine gap: Projectile 655 */ },
+      leaf: (px, py, gore) => natureParticles.spawnLeaf(px, py, gore),
+      ashDust: (px, py) => {
+        // TreeGrowFX_AshShake :29796-29822 尘 31×~10 + 尘 6×~16 的粒子近似
+        this.spawnParticles(px, py, '#8A6A52', 10, 1.6);
+        this.spawnParticles(px, py, '#D8845A', 16, 2.2);
+      },
+    };
+    const res = shakeTree(host, sinks, this.treeShakes,
+      new RNG((Math.random() * 1e9) | 0), new RNG((Math.random() * 1e9) | 0), tx, ty);
+    if (res && res.shook) {
+      // 渲染查询喂点（非原版机制；原版命中反馈只有叶爆+裂缝+音）。
+      // 键 = (树干列, 地面行) 与 getTreeShake 的树底归位一致；dir = 玩家朝向的反侧
+      this.treeShakes.notePulse(res.bottomX, res.groundY, this.tickCount, this.player.facing >= 0 ? -1 : 1);
+    }
+  }
+
+  /** 摇树小动物/敌怪落点：小动物桶不计怪上限；ai[1]=65（蜂群待命）与
+   *  圆周初速 3（Utils.cs:1274）按原版覆写 */
+  private spawnTreeShakeNpc(vid: number, px: number, py: number, o?: TreeShakeNpcOpts): void {
+    const e = Enemy.fromVanilla(vid, px, py);
+    if (!e) return;   // NPC 数据表缺口（见跳过清单）静默丢弃，与生成器同策略
+    if (o?.vy !== undefined) e.vy = o.vy;
+    if (o?.circularVel3) {
+      const a = Math.random() * Math.PI * 2;
+      e.vx = Math.cos(a) * 3;
+      e.vy = Math.sin(a) * 3;
+    }
+    e.id = this.entities.nextId++;
+    if (e.vanilla?.critter) this.entities.add(e, 'critters');
+    else this.entities.add(e, 'enemies');
   }
 
   private tileHardness(type: number): number {
@@ -7120,15 +7264,21 @@ export class Game implements GameHooks {
       if (fbr.result === 'blocked') return;
       // 'break'：空物 → 落入下方 object/普通清除路径，记录在清除点移除
     }
-    // 锚桩 724（KillTile_DropItems :63739-63744 DropItemForTileBreak）：存物随破
-    //  同击掉落 + 碎块（与挂物族两段式 pop 不同）；tile 本体无掉落
-    //  （GetItemDrop case 723/724 WorldGen.cs:66141-66145 break——drop:null 语义），
-    //  故此整支路拦截在 1×1 通用路径之前，防 place_v_724_critter_anchor 幽灵掉落
-    if (type === TILE_BY_KEY['v_724_critter_anchor']) {
-      const stored = critterAnchorBreakDrop(this.world.furnitureItems, x, y);
+    // 锚桩 724 / 风筝桩 723（KillTile_DropItems :63739-63744 DropItemForTileBreak，
+    //  两 TE 同基类 TELeashedEntityAnchorWithItem）：存物随破同击掉落 + 碎块（与
+    //  挂物族两段式 pop 不同）；tile 本体无掉落（GetItemDrop case 723/724
+    //  WorldGen.cs:66141-66145 break——drop:null 语义），故此整支路拦截在 1×1 通用
+    //  路径之前，防 place_v_72x 幽灵掉落。TE OnRemoved → DespawnLeashedEntity
+    //  （TELeashedEntityAnchor.cs:16-21）= 拴绳实体随之消散（leashed.removeAt）
+    if (type === TILE_BY_KEY['v_724_critter_anchor'] || type === TILE_BY_KEY['v_723_kite_anchor']) {
+      const kind = type === TILE_BY_KEY['v_724_critter_anchor'] ? 'critter_anchor' : 'kite_anchor';
+      const stored = kind === 'critter_anchor'
+        ? critterAnchorBreakDrop(this.world.furnitureItems, x, y)
+        : kiteAnchorBreakDrop(this.world.furnitureItems, x, y);
       if (stored) {
         this.spawnDrop(x * TILE + 8, y * TILE, ITEM_DEFS[stored.id].key, stored.stack, 0, -2);
       }
+      this.leashed.removeAt(x, y);
       removeFurnitureAt(this.world.furnitureItems, x, y);
       st.setTile(x, y, 0);
       this.spawnParticles(x * TILE + 8, y * TILE + 8, def.mapColor, 6, 1.5);
@@ -8046,12 +8196,38 @@ export class Game implements GameHooks {
       });
     }
     // 锚桩 724（TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook :43-58）：
-    // 放置即把手持捕获小动物写入 TE（InsertItem(itemType)）——等价记录槽 0 直接
-    // 落手持物，消耗走下方通用的 inv.removeAt（consumable 语义）。拴绳小动物本体
-    // （LeashedEntity 族）未实装 → GAP ③ render/CritterCage.ts
+    // 放置即把手持捕获小动物写入 TE（InsertItem(itemType) :60-64 → RespawnLeashedEntity
+    // :47-53）——等价记录槽 0 落手持物 + 即刻生成拴绳小动物（InsertItem 链的实体半段，
+    // entities/LeashedCritter.ts）。消耗走下方通用的 inv.removeAt（consumable 语义）。
+    // 放置帧档 = prototype.anchorStyle（Player.cs:42771-42773 覆写 previewPlaceStyle，
+    // 与物品自身 placeStyle 解耦——蝶族物品 placeStyle=物种变体 1-8 而桩档恒 4）
     if (tileId === TILE_BY_KEY['v_724_critter_anchor']) {
       const held = this.player.inv.heldItem();
-      if (held) critterAnchorPlace(this.world.furnitureItems, tx, ty, held);
+      if (held) {
+        critterAnchorPlace(this.world.furnitureItems, tx, ty, held);
+        const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
+        if (vid > 0) {
+          st.setTile(tx, ty, tileId, anchorStyleOfItem(vid) * 18, 0);
+          this.leashed.spawnCritter(tx, ty, vid, { placeStyle: itemDef.placeStyle ?? 0 });
+        }
+      }
+    }
+    // 风筝桩 723（TEKiteAnchor 同基类链 :43-65）：写入手持风筝 + 生成拴绳风筝
+    // （projType = item.shoot，CreateLeashedEntity :54-62）。风筝 consumable=false，
+    // 但钩子内 --stack（TELeashedEntityAnchorWithItem.cs:46-48）= 放置消耗 1——
+    // 与下方通用 removeAt(selected,1) 等量，无需另扣
+    if (tileId === TILE_BY_KEY['v_723_kite_anchor']) {
+      const held = this.player.inv.heldItem();
+      if (held) {
+        kiteAnchorPlace(this.world.furnitureItems, tx, ty, held);
+        const vid = viIdFromKey(ITEM_DEFS[held.id]?.key ?? '');
+        const proj = vid > 0 ? KITE_ITEM_PROJ[vid] : undefined;
+        if (proj !== undefined) {
+          // Size = _dummy.Size（LeashedKite.SetDefaults :32-35 → Projectile.SetDefaults）
+          const pd = projectileData(proj);
+          this.leashed.spawnKite(tx, ty, proj, this.leashedEnv(), pd?.width ?? 14);
+        }
+      }
     }
     // 陷阱(137)朝向 = 放置时玩家面朝方向（Player.cs:40209 PlaceThing_Tiles_PlaceIt_SpinTraps：
     // direction==1 → frameX += 18）。全样式通用（frameY=种类，frameX=方向）；放置后不可再调向
@@ -8103,6 +8279,29 @@ export class Game implements GameHooks {
     this.player.useTime = 14;
     this.sfx.play('place');
     this.cb.onInventoryChanged();
+  }
+
+  /** LeashedEnv 装配（拴绳实体每帧环境：视觉帧钟/昼夜/风/玩家位/点光通道） */
+  private leashedEnv(): import('../entities/LeashedCritter').LeashedEnv {
+    const w = this.world;
+    return {
+      timeForVisualEffects: visEffectFrames(),
+      dayTime: w.clock.isDay,
+      worldSurface: w.groundLevel,
+      // Main.WindForVisuals（视觉平滑风）≈ weather.windSpeedCurrent（renderer 的
+      // 风摆共用同一读法，见 renderEnv.wind 注）
+      windForVisuals: w.weather?.windSpeedCurrent ?? 0,
+      cloudAlpha: w.weather?.cloudAlpha ?? 0,
+      playerCx: this.player?.cx ?? 0,   // afterWorldLoad 阶段 player 尚未构造（读档/建世链）
+      playerCy: this.player?.cy ?? 0,
+      addLight: (i, j, r, g, b) => {
+        if (this.world.store.inBounds(i, j)) this.lighting.addLight(i, j, r, g, b);
+      },
+      spawnDust: (x, y, bw, bh, color) => {
+        this.spawnParticles(x, y, color, 1, 0.2, { life: 30, size: 2, grav: 0, damp: 0.9 });
+        void bw; void bh;
+      },
+    };
   }
 
   private overlapsEntity(px: number, py: number): boolean {
@@ -11788,6 +11987,7 @@ export class Game implements GameHooks {
     if (this.dialogNpc) this.dialogNpc.talking = false;
     this.dialogNpc = null;
     this.dialogHappiness = null;   // currentShoppingSettings = NotInShop（Player.cs:4189）
+    this.npcShopClose();           // 店面板随对话关闭（Main.npcShop=-1 + 回购记清）
     this.sfx.play('menuClose');
     this.cb.onNpcDialogClose?.();
   }
@@ -11834,13 +12034,14 @@ export class Game implements GameHooks {
           if (phase === 0 && !day) add([3043]); // 满月夜魔法灯笼（:2930-2934）
           break;
         }
-        case 20: { // 树妖盆栽树（:1650-1697：moonPhase/2 三件套；提取器把相位 switch
-          // 摊平成 hardMode/无门条目——先清 out 里的 4430-4441 再按相位补）
+        case 20: { // 树妖月相轮换货（Chest.cs:1650-1697；NPCInteractions.cs:491
+          // `Shop(20, 3)` 槽位 3=树妖(20)——提取器把相位 switch 摊平成 hardMode/
+          // !hardMode 条目，先清 out 里的 4430-4441 再按相位补；
+          // 逐相实表提纯到 townNpcProfiles.dryadMoonPhaseStock）
           for (let i = out.length - 1; i >= 0; i--) {
             if (out[i][0] >= 4430 && out[i][0] <= 4441) out.splice(i, 1);
           }
-          add([4430, 4431, 4432, 4433, 4434, 4435, 4436, 4437, 4438, 4439, 4440, 4441].slice(
-            Math.floor(phase / 2) * 3, Math.floor(phase / 2) * 3 + (this.world.flags.hardMode ? 3 : 2)));
+          add(dryadMoonPhaseStock(phase, !!this.world.flags.hardMode));
           break;
         }
         case 54: // 裁缝套装（:1795-1923）
@@ -12089,8 +12290,18 @@ export class Game implements GameHooks {
     if (!npc) return;
     // 快乐度价格乘子：Player.SetTalkNPC（Player.cs:4189-4193）在开对话时快照
     // currentShoppingSettings，开店/购买/心情报告共用同一份——本仓 openNpcDialog 缓存
-    const mul = this.dialogHappiness?.priceMul ?? 1;
+    let mul = this.dialogHappiness?.priceMul ?? 1;
+    // 骷髅商(453)月相定价（ShopHelper.cs:64-88 GetSkeletonMerchantPrices 逐分支抄，
+    // 系数在 townNpcProfiles.skeletonMerchantMoonPriceMul）：相0=1.0 → 1/7=1.1 →
+    // 2/6=1.2 → 3/5=1.3 → 相4=1.4（新月最贵），白天再 +0.1。
+    // ★1456 考古：该方法在 1.4.5.6 全源零调用点——ProcessMood（ShopHelper.cs:107）
+    // 对 npc.type==453 提前 return，PriceAdjustment 恒 1f；按任务要求复现该表，
+    // 回退 1456 死码语义删下面一行即可。
+    if (npc.vanillaId === 453) {
+      mul = skeletonMerchantMoonPriceMul(this.world.clock.moonPhase, this.world.clock.isDay);
+    }
     this.shopHappinessMul = mul;
+    this.npcShopOpen = true;    // Main.npcShop = npc 槽位（开店门，ItemSlot.cs:187）
     const entries = this.shopStockFor(npc).map(([vid, price]) => ({
       key: VANILLA_ITEM_KEY_BY_ID[vid] ?? '',
       vanillaId: vid,
@@ -12146,6 +12357,16 @@ export class Game implements GameHooks {
   /** 当前对话 NPC 的快乐度价格乘子（ShopHelper.GetShoppingSettings——缓存到开店时） */
   private shopHappinessMul = 1;
 
+  /** 商店面板是否打开（Main.npcShop > 0 的等价门；ItemSlot.GetSellOrTrash :187 用它
+   *  分流 Sell/垃圾桶）。开店置位、面板/对话关闭清零（见 npcShopClose） */
+  npcShopOpen = false;
+
+  /** 店内回购记（Main.shopSellbackHelper，ItemShopSellbackHelper.cs:10-64）：
+   *  key = `${vid}:${prefix}`（ItemMemo.type+prefix :10-29），value = 本次开店会话
+   *  内从该店购入数量。买时记（ItemSlot.cs:1919-1922）→ 卖时按买价原额退
+   *  （Player.cs:34739-34743）→ 换店/关店清（Main.cs:18056-18064 UpdateOldNPCShop） */
+  private shopSellbackMemo = new Map<string, number>();
+
   /** 对话 NPC 的快乐度快照（Player.currentShoppingSettings，SetTalkNPC 时计算；
    *  价格乘子 + 心情报告行，商店/购买/心情浮层共用） */
   private dialogHappiness: { priceMul: number; report: HappinessReportLine[] } | null = null;
@@ -12191,9 +12412,74 @@ export class Game implements GameHooks {
     }
     const key = VANILLA_ITEM_KEY_BY_ID[vanillaId];
     if (key && ITEM_BY_KEY[key] !== undefined) this.player.inv.add(ITEM_BY_KEY[key], 1);
+    // 店内回购记（ItemSlot.cs:1919-1922：!buyOnce && shopSpecialCurrency==-1 → Add；
+    // 本仓商店条目两者恒假/无自定义币种 → 无条件记。prefix 恒 0：购买链不带词缀）
+    const memoKey = `${vanillaId}:0`;
+    this.shopSellbackMemo.set(memoKey, (this.shopSellbackMemo.get(memoKey) ?? 0) + 1);
     this.sfx.play('coin');
     this.cb.onInventoryChanged();
     this.openNpcShop();
+  }
+
+  /** 关闭商店面板（UI 回调；原版 Main.npcShop=-1）。换店/关店清回购记
+   *  （Main.UpdateOldNPCShop Main.cs:18056-18064：npcShop != oldNPCShop → Clear） */
+  npcShopClose(): void {
+    this.npcShopOpen = false;
+    this.shopSellbackMemo.clear();
+  }
+
+  /** 商店出售（Player.SellItem Player.cs:34716-34878 + ItemSlot.OverrideLeftClick
+   *  cursorOverride==10 分支 ItemSlot.cs:780-798）：Shift+左键背包格整叠卖出。
+   *  返回是否消费了该次点击——原版该分支恒 return true（:798），卖不掉也不回落
+   *  垃圾桶；调用方（UI.shiftClick）据此短路 */
+  npcShopSell(slot: number): boolean {
+    if (!this.npcShopOpen) return false;          // GetSellOrTrash :187-190 店外走垃圾桶
+    const inv = this.player.inv;
+    const it = inv.slots[slot];
+    if (!it) return true;                          // 空格无动作（IsAir 早退 ItemSlot.cs:535）
+    if (it.favorited) return true;                 // 收藏禁 Shift 转移（ItemSlot.cs:566）
+    const vid = vanillaIdOfItem(it.id);
+    if (vid < 0) return true;
+    if (!canSellFromShopUi(vid)) return true;      // 钱币 71-74 → null 不动作（:191-194）
+    const memoKey = `${vid}:${it.prefix ?? 0}`;
+    const quote = computeSellValue(vid, it.stack, {
+      priceAdjustment: this.shopHappinessMul,       // currentShoppingSettings.PriceAdjustment
+      discountAvailable: this.player.equipStats.discount, // :34917 discountAvailable
+      sellbackAmount: this.shopSellbackMemo.get(memoKey) ?? 0, // :34739 GetAmount
+    });
+    if (!quote.sellable) {
+      // SellItem false 且 value==0 → 白送入店（ItemSlot.cs:790-795 AddItemToShop + 音效 7）
+      this.consumeSellbackMemo(memoKey, it.stack);  // Chest.AddItemToShop :653 Remove
+      inv.slots[slot] = null;                       // item.TurnToAir()（:794）
+      this.sfx.play('pickup');                      // SoundID 7 = Grab（:795）
+      this.cb.onInventoryChanged();
+      if (this.dialogNpc) this.openNpcShop();
+      return true;
+    }
+    const before = this.coinsOwned();
+    inv.slots[slot] = null;                         // 先腾格再入币（:787 TurnToAir 在结算后）
+    this.gainCopper(quote.copper);                  // :34745-34868 铂/金/银/铜换装
+    if (this.coinsOwned() - before !== quote.copper) {
+      // 装不下所有币 → 整体回滚（Player.cs:34727-34731 全仓克隆 + :34869-34876 还原；
+      // 本仓等价实现 = 撤回已入币 + 复原物品格），物品不动、回购记不动
+      const gained = this.coinsOwned() - before;
+      if (gained > 0) this.spendCopper(gained);
+      inv.slots[slot] = it;
+      return true;
+    }
+    this.consumeSellbackMemo(memoKey, it.stack);    // chest.AddItemToShop → Remove（Chest.cs:653）
+    this.sfx.play('coin');                          // SoundID 18 = Coins（:788）
+    this.cb.onInventoryChanged();
+    if (this.dialogNpc) this.openNpcShop();         // 刷新面板余额（同 npcShopBuy）
+    return true;
+  }
+
+  /** ItemShopSellbackHelper.Remove（ItemShopSellbackHelper.cs:45-63）：扣减记账，
+   *  余量 <=0 删键 */
+  private consumeSellbackMemo(memoKey: string, stack: number): void {
+    const left = (this.shopSellbackMemo.get(memoKey) ?? 0) - stack;
+    if (left <= 0) this.shopSellbackMemo.delete(memoKey);
+    else this.shopSellbackMemo.set(memoKey, left);
   }
 
   /** 骷髅商离屏计时（CheckActive timeLeft=750 语义） */
@@ -14242,6 +14528,24 @@ export class Game implements GameHooks {
     }
   }
 
+  /** GameHooks.addLightAt：世界坐标光源（翅膀 28 微光等实体侧 AddLight） */
+  addLightAt(x: number, y: number, r: number, g: number, b: number): void {
+    const tx = Math.floor(x / TILE), ty = Math.floor(y / TILE);
+    if (this.world?.store.inBounds(tx, ty)) this.lighting?.addLight(tx, ty, r, g, b);
+  }
+
+  /** GameHooks.lightAt：读侧光照采样（翅膀 49 Heroicis 门 z=Remap(亮度,0.2,0.4)，
+   *  Player.cs:30163/:30173 的 rgbToHsl(Lighting.GetColor).Z 消费——亮度=(max+min)/2） */
+  lightAt(x: number, y: number): [number, number, number] | null {
+    if (!this.lighting) return null;
+    return this.lighting.lightAt(Math.floor(x / TILE), Math.floor(y / TILE));
+  }
+
+  /** GameHooks.playSfxAt：实体侧 SoundEngine.PlaySound（距离衰减走 Sfx 内建公式） */
+  playSfxAt(name: import('./Sfx').SfxName, x: number, y: number): void {
+    this.sfx?.play(name, 1, x, y);
+  }
+
   spawnParticles(
     x: number, y: number, color: string, count: number, speed = 2,
     opts: { life?: number; damp?: number; grav?: number; size?: number } = {},
@@ -14312,7 +14616,7 @@ export class Game implements GameHooks {
 
   // (canCraft/craft 自制配方链已随 RECIPES 表退役移除——合成统一走 vanillaCraft)
 
-  // ================= 原版配方（1456 全量 2688 条） =================
+  // ================= 原版配方（1456 全量 3309 条） =================
 
   /** 附近站点集合（内部 tile id）+ 液体/群系 → VanillaCraftCtx（每帧缓存由 UI 调用侧刷新） */
   vanillaNearbyStations(): Set<number> {
@@ -15109,6 +15413,8 @@ export class Game implements GameHooks {
         }
         return null;
       })(),
+      // 拴绳实体（锚桩 724 小动物 / 风筝桩 723 风筝）——Renderer 3.8 段绘制
+      this.leashed,
     );
   }
 

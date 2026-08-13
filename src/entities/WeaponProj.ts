@@ -18,7 +18,7 @@ import { canHit } from '../physics/LineOfSight';
 
 /** 共用绘制：投射物贴图按角度旋转（贴图纵向，rotation = ang+π/2 与 AI_001 一致）。
  *  世界坐标绘制(Renderer 实体循环运行在世界变换内,勿再自算屏幕坐标) */
-function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false): void {
+function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: number; h: number }, projId: number, ang: number, fallbackColor: string, alpha = 1, drawSize = 0, mirror = false): void {
   // drawSize=绘制尺寸(0=取碰撞盒 w；-1=贴图原生尺寸——原版投射物绘制语义,
   // 爆炸族雷管 10×32 竖条等非方贴图必须走原生尺寸否则被拉方)
   // mirror=旋转坐标系内水平镜像（XNA dir=FlipHorizontally 等价，绕 origin 翻转）
@@ -30,7 +30,8 @@ function drawProj(r: Renderer, _cam: Camera, e: { x: number; y: number; w: numbe
   const img = img0;
   ctx.save();
   ctx.globalAlpha = alpha; // AI_161 细剑淡入淡出(:44993-44994)
-  ctx.translate(e.x + e.w / 2, e.y + e.w / 2);
+  // y 中心用 h（342 冰霜刃 22×2 薄刃命中盒等非方形型号,勿用 w 兜）
+  ctx.translate(e.x + e.w / 2, e.y + e.h / 2);
   ctx.rotate(ang);
   if (mirror) ctx.scale(-1, 1);
   ctx.imageSmoothingEnabled = false;
@@ -569,8 +570,36 @@ const SPEAR_PARAMS: Record<number, [number, number, number]> = {
  *  16t 消失;与 AI_019 包络完全不同的直刺模型。型号 = 161 全集合 */
 const RAPIER_PROJ = new Set([802, 842, 938, 939, 940, 941, 942, 943, 944, 945]);
 
+/** 长矛/细剑绘制角与镜像(纯函数,供 draw 与回归测试共用)。
+ *  AI_019 = DrawProj_Spear 专支(Main.cs:34153-34157 按 aiStyle==19 派发,
+ *  :34659-34668):num = atan2(vy,vx)+2.355(=3π/4);theOwner.direction>0(玩家朝右)
+ *  → dir=FlipHorizontally 且 num -= π/2、origin.X=贴图宽。AI 侧 rotation 赋值同值
+ *  (:43271-43276,:43214 spriteDirection=-direction)。
+ *  AI_161 = :44990 rotation=atan2+π/2,DrawProjDirect 938-945 再 num327 -= π/4×sd
+ *  (:32444);dir=spriteDirection==-1 → Flip(:29827)。
+ *  ★朝向陷阱(2026-08-13 终审):AI_019 的翻转条件是"玩家朝右",曾写反成 dx<0 且丢
+ *  mirror——右刺纯数值巧合仍指正右,左刺矛头指 φ-π/2(正下)偏 90°。 */
+export function spearDrawAngle(dx: number, dy: number, isRapier: boolean): { ang: number; mirror: boolean } {
+  const sd = dx >= 0 ? 1 : -1;
+  if (isRapier) {
+    return { ang: Math.atan2(dy, dx) + Math.PI / 2 - Math.PI / 4 * sd, mirror: sd === -1 };
+  }
+  let ang = Math.atan2(dy, dx) + 2.355; // :34659
+  let mirror = false;
+  if (sd > 0) { ang -= Math.PI / 2; mirror = true; } // :34664-34668 朝右翻转
+  return { ang, mirror };
+}
+
+/** 命中盒型号表（SetDefaults 逐 type width/height,Projectile.cs:1036/1924/4045 等;
+ *  其余型号均 18×18,46=20、130=22、877-879=25;342 是 22×2 薄刃——原版真值勿当
+ *  提取器错值修掉）。161 细剑族全 18×18。此前恒 20×20 → 14 型号命中盒失真(2026-08-13 终审) */
+const SPEAR_SIZE: Record<number, [number, number]> = {
+  46: [20, 20], 130: [22, 22], 342: [22, 2],
+  877: [25, 25], 878: [25, 25], 879: [25, 25],
+};
+
 export class SpearProj extends Entity {
-  w = 20; h = 20;
+  w = 18; h = 18;
   damage: number;
   knockback: number;
   projId: number;
@@ -603,26 +632,18 @@ export class SpearProj extends Entity {
     this.knockback = knockback;
     this.projId = projId;
     this.prm = SPEAR_PARAMS[projId] ?? [3, 1.9, 2.1];
+    const sz = SPEAR_SIZE[projId];
+    if (sz) { this.w = sz[0]; this.h = sz[1]; } // 342 薄刃 22×2 等按型号
   }
 
   draw(r: Renderer, cam: Camera): void {
-    // AI_019（:43271-43276）:rotation = atan2+π/2+π/4,spriteDir==-1 再 -π/2;
-    // AI_161 细剑(:44990 rotation=atan2+π/2)：DrawProjDirect 938-945 专支(:32444)
-    //   再 num327 -= π/4×spriteDirection（贴图是 RT→LB 对角线剑，补偿 45°）+
-    //   dir 规则 spriteDirection==-1 → FlipHorizontally（:29827，左刺镜像）。
-    //   验算：右刺 θ=π/2−π/4=π/4 → 剑尖(贴图 RT)转 +45° 指正右；左刺 θ−π/4
-    //   +旋转系内镜像 → 剑尖指正左（曾漏两项 → 右刺剑尖扎向右下 45°）
     const isRap = RAPIER_PROJ.has(this.projId);
-    const sd = this.dx >= 0 ? 1 : -1;   // :44997 spriteDirection = sign(dot(v, UnitX))
-    const base = isRap
-      ? Math.atan2(this.dy, this.dx) + Math.PI / 2 - Math.PI / 4 * sd
-      : Math.atan2(this.dy, this.dx) + Math.PI / 2 + Math.PI / 4;
+    const { ang, mirror } = spearDrawAngle(this.dx, this.dy, isRap);
     // Utils.GetLerpValue clamped:淡入 t/7(t≤7),淡出 (16-t)/4(t≥12)
     const aIn = Math.min(1, this.t / 7);
     const aOut = this.t <= 12 ? 1 : Math.max(0, (16 - this.t) / 4);
-    drawProj(r, cam, this, this.projId,
-      isRap ? base : (this.dx < 0 ? base - Math.PI / 2 : base),
-      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0, isRap && sd === -1);
+    drawProj(r, cam, this, this.projId, ang,
+      '#A0A0B0', isRap ? aIn * aOut : 1, isRap ? 32 : 0, mirror);
   }
 
   fixedUpdate(_dt: number, game: GameHooks) {
@@ -830,7 +851,9 @@ export class YoyoProj extends Entity {
   private channel: () => boolean;
   /** 光标世界坐标 getter */
   private target: () => { x: number; y: number };
-  /** 线长上限 px（原版 stringLength，按 shootSpeed 修正） */
+  /** ★废弃死参数（Game 侧传 0）:射程唯一源 = Sets.YoyosMaximumRange 表
+   *  （ProjectileID.cs:187,21 型号缺省 200）+ yoyoString×1.25+30（:64968-64970）+
+   *  ÷(1+meleeSpeed×3)/4（:64974）——旧"220+spd×10"自造公式已废,勿再启用 */
   private stringLen: number;
   private hitCd = new HitCooldown();
   private rot = 0;
@@ -841,6 +864,15 @@ export class YoyoProj extends Entity {
   private lifeT = 0;
   /** 回收锁（ai[0]=-1 终态:松手/超寿命/1.3×超程后不可复活,需重新使用掷出） */
   private recalled = false;
+  /** 钳制后的目标点（原版 ai[0]/ai[1] 存量,:65049-65051——目标变化才重写并触发
+   *  range-1 二次钳制;逼近段用的是这份存量而非实时光标） */
+  private ai0 = 0;
+  private ai1 = 0;
+  /** projectile.direction（AI_099 ChangeDir 段 :64925-64935：球在玩家右侧 >2px → 1、
+   *  左侧 → -1,±2 死区内保持原值）——击退方向以此为准（曾误用 sign(vx)） */
+  private dir = 1;
+  /** 存活 tick 上限:有限寿命型号 7200 防泄漏;无限寿命（YOYO_LIFE 缺省 -1）无上限——
+   *  原版 timeLeft=6 每帧刷新（:64942）,无限寿命悠悠球可永久滞留直至松手回收 */
   life = 7200;
   /** 型号顶速（YOYO_TOP 注入，缺省 10——ProjectileID.cs:189） */
   topSpeed = 10;
@@ -857,6 +889,8 @@ export class YoyoProj extends Entity {
     this.stringLen = stringLen;
     this.channel = channel;
     this.target = target;
+    // 无限寿命型号（Sets.YoyosLifeTimeMultiplier 缺省 -1,ProjectileID.cs:185）不上限
+    if ((YOYO_LIFE[projId] ?? -1) === -1) this.life = Number.POSITIVE_INFINITY;
   }
 
   draw(r: Renderer, cam: Camera): void {
@@ -870,7 +904,7 @@ export class YoyoProj extends Entity {
       c.lineTo(this.x + this.w / 2, this.y + this.h / 2);
       c.stroke();
     }
-    this.rot += 0.25;
+    this.rot += 0.45; // :65203-65209 rotation += 0.45/tick(每 AI 次;0.25 系自造,2026-08-13 终审修)
     drawProj(r, cam, this, this.projId, this.rot, '#E04040');
   }
 
@@ -881,6 +915,10 @@ export class YoyoProj extends Entity {
     const p = game.player;
     this.handX = p.cx;
     this.handY = p.cy;
+    // ChangeDir 段（:64925-64935,活跃/回收态公共段）:球相对玩家 X 定 direction,
+    // ±2px 死区内保持原值——击退方向用 this.dir（非 sign(vx)）
+    if (this.cx > p.cx + 2) this.dir = 1;
+    else if (this.cx < p.cx - 2) this.dir = -1;
     this.hitCd.tick();
     // ---- AI_099_2_Yoyos 参数链（:64945-64977）----
     const ms = p.attackSpeedMult || 1;
@@ -910,7 +948,7 @@ export class YoyoProj extends Entity {
       this.vy = (this.vy * (inertia - 1) + (dy / d) * top) / inertia;
       this.x += this.vx;
       this.y += this.vy;
-      hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx), this.armorPen);
+      hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen);
       return;
     }
     // ---- 活跃态（:64983-65148）----
@@ -925,6 +963,13 @@ export class YoyoProj extends Entity {
     let tdx = tx - p.cx, tdy = ty - p.cy;
     const td = Math.hypot(tdx, tdy);
     if (td > range) { tdx = (tdx / td) * range; tdy = (tdy / td) * range; tx = p.cx + tdx; ty = p.cy + tdy; }
+    // :65038-65050:目标点变化时（ai[0]/ai[1] 存量比对）再钳 range-1——防球贴射程边缘抖动
+    if (this.ai0 !== tx || this.ai1 !== ty) {
+      let vx2 = tx - p.cx, vy2 = ty - p.cy;
+      const vd = Math.hypot(vx2, vy2);
+      if (vd > range - 1) { vx2 = (vx2 / vd) * (range - 1); vy2 = (vy2 / vd) * (range - 1); tx = p.cx + vx2; ty = p.cy + vy2; }
+      this.ai0 = tx; this.ai1 = ty;
+    }
     if (overRange) {
       inertia /= 2; top *= 2;
       if (cx > p.cx && this.vx > 0) this.vx *= 0.5;
@@ -945,8 +990,9 @@ export class YoyoProj extends Entity {
     }
     this.x += this.vx;
     this.y += this.vy;
-    // yoyo tileCollide=false 穿墙;命中冷却 10t(SetDefaults localNPCHitCooldown)
-    hitEnemies(this, game, this.hitCd, 10, Math.sign(this.vx), this.armorPen);
+    // yoyo tileCollide=false 穿墙;命中冷却 10t(NPC immune[owner] 缺省——yoko SetDefaults
+    // 未设 usesLocalNPCImmunity/Cooldown,走全局 10t)
+    hitEnemies(this, game, this.hitCd, 10, this.dir, this.armorPen);
   }
 }
 

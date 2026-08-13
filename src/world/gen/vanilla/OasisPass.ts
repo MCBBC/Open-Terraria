@@ -20,6 +20,7 @@ import type { RNG } from '../../../core/rng';
 import type { GenState } from './GenState';
 import { T, TILE_DEFS } from '../../../data/tiles';
 import { idsByVanillaSheet } from './TileRunner';
+import { genSolidType } from './GenSolid';
 
 /** GenVars.maxOasis / oasisHeight（GenVars.cs:260/268） */
 const MAX_OASIS = 20;
@@ -29,10 +30,12 @@ const OASIS_REJECT = idsByVanillaSheet(151, 397);
 
 const activeAt = (st: TileStore, x: number, y: number): boolean =>
   st.inBounds(x, y) && st.flags[st.idx(x, y)] === 1;
+// ★tileSolid 走 GenSolid：本 pass 时点 484 滚动仙人掌（cs:12537）已翻非实心——
+//   原版 PlaceOasis 的实心判定读可变 tileSolid,绿洲可越过滚动仙人掌落位
 const solidAt = (st: TileStore, x: number, y: number): boolean => {
   if (!st.inBounds(x, y)) return false;
   const k = st.idx(x, y);
-  return st.flags[k] === 1 && !!TILE_DEFS[st.type[k]]?.solid;
+  return st.flags[k] === 1 && genSolidType(st.type[k]);
 };
 const wallAt = (st: TileStore, x: number, y: number): number =>
   st.inBounds(x, y) ? st.wall[st.idx(x, y)] : 0;
@@ -64,7 +67,7 @@ export function placeOasis(st: TileStore, rng: RNG, gs: GenState, X: number, Y: 
         const kk = inB ? st.idx(k, l) : -1;
         if (inB && st.flags[kk]) {
           const t = st.type[kk]!;
-          if (TILE_DEFS[t]?.solid) {
+          if (genSolidType(t)) {
             if (OASIS_REJECT.has(t) && Math.abs(k - X) < num2
               && Math.abs(l - i) < Math.trunc(OASIS_HEIGHT / 2)) return false;
             if (t !== T.SAND) return false;                  // 活性实心非沙 → 拒
@@ -112,7 +115,7 @@ export function placeOasis(st: TileStore, rng: RNG, gs: GenState, X: number, Y: 
           if (st.type[ti] === T.SAND) st.flags[ti] = 0;
         } else if (n >= i && num12 < num15 + Math.abs(n - i) * num16 && st.wall[ti] === 0) {
           // 塘下/侧缘硬化成沙（cs:10842-10854）
-          if (st.flags[ti] && !!TILE_DEFS[st.type[ti]]?.solid
+          if (st.flags[ti] && genSolidType(st.type[ti])
             && !TILE_DEFS[st.type[ti]]?.platform) {
             st.slope[ti] = 0;
             st.half[ti] = 0;

@@ -38,7 +38,7 @@ import { vanillaStatOfVid } from '../data/vanillaItemStats';
 import { equipKindOfVid } from '../data/vanillaEquip';
 
 /** 挂物族类别 */
-export type FurnitureKind = 'item_frame' | 'weapon_rack' | 'display_doll' | 'hat_rack' | 'food_platter' | 'display_jar' | 'critter_anchor';
+export type FurnitureKind = 'item_frame' | 'weapon_rack' | 'display_doll' | 'hat_rack' | 'food_platter' | 'display_jar' | 'critter_anchor' | 'kite_anchor';
 
 /** 槽位内物品实例（id 为内部 item id；prefix 为重铸词缀，0/缺省=无） */
 export interface FurnitureSlotItem {
@@ -87,7 +87,7 @@ export function furnitureSlotCount(kind: FurnitureKind): number {
   switch (kind) {
     case 'display_doll': return 19; // equip[9] + misc[1] + dye[9]（TEDisplayDoll.cs:156-278）
     case 'hat_rack': return 4;      // hat[2] + dye[2]（TEHatRack.cs:62-86）
-    default: return 1;              // 框/武器架/食物盘/展示罐/锚桩 单槽
+    default: return 1;              // 框/武器架/食物盘/展示罐/锚桩/风筝桩 单槽
   }
 }
 
@@ -111,8 +111,8 @@ export function furnitureAnchor(st: FurnitureStoreView, kind: FurnitureKind, x: 
     case 'display_doll': return [x - (fx % 36 !== 0 ? 1 : 0), y - Math.floor(fy / 18)];
     case 'hat_rack': return [x - Math.floor((fx % 54) / 18), y - Math.floor(fy / 18)];
     // TECritterAnchor.IsTileValidForEntity（TECritterAnchor.cs:23-31）：1×1，TE 即挂
-    // 在命中格本身，无帧归一
-    case 'critter_anchor': return [x, y];
+    // 在命中格本身，无帧归一；TEKiteAnchor（TEKiteAnchor.cs:24-32）同构
+    case 'critter_anchor': case 'kite_anchor': return [x, y];
   }
 }
 
@@ -282,9 +282,10 @@ export function fitsFurniture(kind: FurnitureKind, vid: number): boolean {
     case 'food_platter': return fitsFoodPlatter(vid);
     case 'hat_rack': return fitsHatRack(vid);
     case 'display_doll': return fitsDisplayDoll(vid);
-    // 锚桩无右键放入语义（TECritterAnchor 无 OnPlayerInteraction；FitsItem :48-51
-    // 仅 OnWorldLoaded 存档校验用，放置链由物品侧 createTile=724 结构性保证）
-    case 'critter_anchor': return false;
+    // 锚桩/风筝桩无右键放入语义（TECritterAnchor/TEKiteAnchor 无 OnPlayerInteraction；
+    // FitsItem（TECritterAnchor.cs:48-51 / TEKiteAnchor.cs:48-50）仅 OnWorldLoaded
+    // 存档校验用，放置链由物品侧 createTile=724/723 结构性保证）
+    case 'critter_anchor': case 'kite_anchor': return false;
   }
 }
 
@@ -368,10 +369,11 @@ export function furnitureTryBreak(
   switch (kind) {
     case 'display_doll': case 'hat_rack':
       return { result: 'blocked', item: null };
-    // 锚桩不走两段式：存物随破同击掉落（WorldGen.cs:63739-63744 DropItemForTileBreak），
-    // 调用方继续碎块——正常链路经 Game.breakTile 的 724 专用分支（本表无此 tile，
-    // 此 case 仅为防未来误入 furnitureTryBreak 时语义不错）
-    case 'critter_anchor': {
+    // 锚桩/风筝桩不走两段式：存物随破同击掉落（WorldGen.cs:63739-63744
+    // DropItemForTileBreak，两 TE 同基类 TELeashedEntityAnchorWithItem :26-40），
+    // 调用方继续碎块——正常链路经 Game.breakTile 的 723/724 专用分支（本表无此
+    // 两 tile，此 case 仅为防未来误入 furnitureTryBreak 时语义不错）
+    case 'critter_anchor': case 'kite_anchor': {
       const item = rec.slots[0];
       rec.slots[0] = null;
       return { result: 'break', item };
@@ -501,26 +503,27 @@ export function furnitureFromSave(entries: FurnitureSaveEntry[] | undefined, map
 }
 
 // ============================================================================
-// TECritterAnchor（tile 724 捕获小动物锚桩，1.4.4+）——TE 等价的专用存取
-//   原版链：放置捕获小动物物品（DefaultToCapturedCritter createTile=724）→
-//     TELeashedEntityAnchorWithItem.PlaceFromPlayerPlacementHook（:43-58）把手持物
-//     写入 TE（InsertItem :60-64 → RespawnLeashedEntity 生成拴绳小动物）；
+// TECritterAnchor（tile 724 捕获小动物锚桩）/ TEKiteAnchor（tile 723 风筝锚桩），
+//   1.4.4+ ——TELeashedEntityAnchorWithItem 等价的专用存取
+//   原版链：放置捕获小动物/风筝物品（DefaultToCapturedCritter createTile=724 /
+//     DefaultToKite createTile=723）→ PlaceFromPlayerPlacementHook（:43-58）把手持物
+//     写入 TE（InsertItem :60-64 → RespawnLeashedEntity 生成拴绳实体）；
 //     破坏 → KillTile_DropItems :63739-63744 DropItemForTileBreak（同击掉物+碎块，
 //     与物品框两段式 pop 不同），tile 本体无掉落（GetItemDrop case 723/724
 //     WorldGen.cs:66141-66145 break）。
-//   本仓等价：furnitureItems 里 kind='critter_anchor' 的单槽记录（持久化走
-//   serialize furniture 段对 kind 透传，无需改存档）；拴绳小动物本体
-//   （LeashedEntity 族 + Main.cs:17895/22163 消费）未实装 → GAP ③ 见 render/CritterCage.ts
+//   本仓等价：furnitureItems 里 kind='critter_anchor'/'kite_anchor' 的单槽记录
+//   （持久化走 serialize furniture 段对 kind 透传，无需改存档）；拴绳实体本体
+//   = entities/LeashedCritter.ts（LeashedEntity 族 + Main.cs:17895/22163 消费）
 // ============================================================================
 
-/** 放置：写入手持捕获物（InsertItem 1:1）。锚桩 1×1，锚点 = 放置格本身 */
-export function critterAnchorPlace(
-  records: FurnitureItemRecord[], x: number, y: number,
+/** 放置：写入手持物（InsertItem 1:1）。锚桩 1×1，锚点 = 放置格本身 */
+export function leashedAnchorPlace(
+  records: FurnitureItemRecord[], kind: 'critter_anchor' | 'kite_anchor', x: number, y: number,
   item: { id: number; stack: number; prefix?: number },
 ): FurnitureItemRecord {
   removeFurnitureAt(records, x, y);
   const rec: FurnitureItemRecord = {
-    x, y, kind: 'critter_anchor',
+    x, y, kind,
     slots: [{ id: item.id, stack: 1, prefix: item.prefix }],
   };
   records.push(rec);
@@ -528,18 +531,54 @@ export function critterAnchorPlace(
 }
 
 /** 命中格 → 锚桩记录（1×1 无归一） */
-export function critterAnchorAt(records: FurnitureItemRecord[], x: number, y: number): FurnitureItemRecord | undefined {
-  return records.find((r) => r.x === x && r.y === y && r.kind === 'critter_anchor');
+export function leashedAnchorAt(
+  records: FurnitureItemRecord[], kind: 'critter_anchor' | 'kite_anchor', x: number, y: number,
+): FurnitureItemRecord | undefined {
+  return records.find((r) => r.x === x && r.y === y && r.kind === kind);
 }
 
 /**
- * 破坏：取出并存清空存物（DropItemForTileBreak :28-40——itemType>0 才掉）。
+ * 破坏：取出并存清空存物（DropItemForTileBreak :26-40——itemType>0 才掉）。
  * @returns 被掉落的存物（null = 空桩/无记录）；调用方随后清格 + removeFurnitureAt
  */
-export function critterAnchorBreakDrop(records: FurnitureItemRecord[], x: number, y: number): FurnitureSlot {
-  const rec = critterAnchorAt(records, x, y);
+export function leashedAnchorBreakDrop(
+  records: FurnitureItemRecord[], kind: 'critter_anchor' | 'kite_anchor', x: number, y: number,
+): FurnitureSlot {
+  const rec = leashedAnchorAt(records, kind, x, y);
   if (!rec) return null;
   const item = rec.slots[0];
   rec.slots[0] = null;
   return item;
+}
+
+/** 捕获小动物锚桩（critter_anchor）便捷别名——Game 放置/破坏与 cage-placement 测试沿用 */
+export function critterAnchorPlace(
+  records: FurnitureItemRecord[], x: number, y: number,
+  item: { id: number; stack: number; prefix?: number },
+): FurnitureItemRecord {
+  return leashedAnchorPlace(records, 'critter_anchor', x, y, item);
+}
+
+export function critterAnchorAt(records: FurnitureItemRecord[], x: number, y: number): FurnitureItemRecord | undefined {
+  return leashedAnchorAt(records, 'critter_anchor', x, y);
+}
+
+export function critterAnchorBreakDrop(records: FurnitureItemRecord[], x: number, y: number): FurnitureSlot {
+  return leashedAnchorBreakDrop(records, 'critter_anchor', x, y);
+}
+
+/** 风筝锚桩（kite_anchor）便捷别名（TEKiteAnchor 等价） */
+export function kiteAnchorPlace(
+  records: FurnitureItemRecord[], x: number, y: number,
+  item: { id: number; stack: number; prefix?: number },
+): FurnitureItemRecord {
+  return leashedAnchorPlace(records, 'kite_anchor', x, y, item);
+}
+
+export function kiteAnchorAt(records: FurnitureItemRecord[], x: number, y: number): FurnitureItemRecord | undefined {
+  return leashedAnchorAt(records, 'kite_anchor', x, y);
+}
+
+export function kiteAnchorBreakDrop(records: FurnitureItemRecord[], x: number, y: number): FurnitureSlot {
+  return leashedAnchorBreakDrop(records, 'kite_anchor', x, y);
 }
